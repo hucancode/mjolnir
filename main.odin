@@ -61,13 +61,13 @@ g_current_frame: u32
 g_framebuffer_resized: bool
 
 main :: proc() {
-    must :: proc(result: vk.Result, loc := #caller_location) {
-    	if result != .SUCCESS {
-    		log.panicf("vulkan failure %v", result, location = loc)
-    	}
-    }
-    context.logger = log.create_console_logger()
-    g_ctx = context
+	must :: proc(result: vk.Result, loc := #caller_location) {
+		if result != .SUCCESS {
+			log.panicf("vulkan failure %v", result, location = loc)
+		}
+	}
+	context.logger = log.create_console_logger()
+	g_ctx = context
 	if !bool(glfw.Init()) {
 		log.panic("GLFW has failed to load.")
 	}
@@ -198,7 +198,12 @@ create_vulkan_instance :: proc() -> vk.Result {
 	ret := vk.CreateInstance(&create_info, nil, &g_instance)
 	vk.load_proc_addresses_instance(g_instance)
 	when ENABLE_VALIDATION_LAYERS {
-		vk.CreateDebugUtilsMessengerEXT(g_instance, &dbg_create_info, nil, &g_dbg_messenger) or_return
+		vk.CreateDebugUtilsMessengerEXT(
+			g_instance,
+			&dbg_create_info,
+			nil,
+			&g_dbg_messenger,
+		) or_return
 	}
 	return ret
 }
@@ -283,19 +288,19 @@ query_swapchain_support :: proc(
 
 @(require_results)
 pick_physical_device :: proc() -> vk.Result {
-    physical_device_extensions :: proc(
- 			device: vk.PhysicalDevice,
- 			allocator := context.temp_allocator,
-    ) -> (
- 			exts: []vk.ExtensionProperties,
- 			res: vk.Result,
-    ) {
- 			count: u32
- 			vk.EnumerateDeviceExtensionProperties(device, nil, &count, nil) or_return
- 			exts = make([]vk.ExtensionProperties, count, context.temp_allocator)
- 			vk.EnumerateDeviceExtensionProperties(device, nil, &count, raw_data(exts)) or_return
- 			return
-    }
+	physical_device_extensions :: proc(
+		device: vk.PhysicalDevice,
+		allocator := context.temp_allocator,
+	) -> (
+		exts: []vk.ExtensionProperties,
+		res: vk.Result,
+	) {
+		count: u32
+		vk.EnumerateDeviceExtensionProperties(device, nil, &count, nil) or_return
+		exts = make([]vk.ExtensionProperties, count, context.temp_allocator)
+		vk.EnumerateDeviceExtensionProperties(device, nil, &count, raw_data(exts)) or_return
+		return
+	}
 	score_physical_device :: proc(device: vk.PhysicalDevice) -> (score: int) {
 		props: vk.PhysicalDeviceProperties
 		vk.GetPhysicalDeviceProperties(device, &props)
@@ -313,16 +318,19 @@ pick_physical_device :: proc() -> vk.Result {
 		// }
 		// Need certain extensions supported.
 		{
- 			extensions, result := physical_device_extensions(device)
+			extensions, result := physical_device_extensions(device)
 			if result != .SUCCESS {
 				log.infof("vulkan: enumerate device extension properties failed: %v", result)
 				return 0
 			}
 			log.infof("vulkan: device supports %v extensions", len(extensions))
 			required_loop: for required in REQUIRED_EXTENSIONS {
-			     log.infof("vulkan: checking for required extension %q", required)
+				log.infof("vulkan: checking for required extension %q", required)
 				for &extension in extensions {
-					extension_name := strings.truncate_to_byte(string(extension.extensionName[:]), 0)
+					extension_name := strings.truncate_to_byte(
+						string(extension.extensionName[:]),
+						0,
+					)
 					if extension_name == string(required) {
 						continue required_loop
 					}
@@ -364,7 +372,7 @@ pick_physical_device :: proc() -> vk.Result {
 		case .VIRTUAL_GPU:
 			score += 200_000
 		case .CPU, .OTHER:
-		    score += 100_000
+			score += 100_000
 		}
 		log.infof("vulkan: scored %i based on device type %v", score, props.deviceType)
 
@@ -380,7 +388,7 @@ pick_physical_device :: proc() -> vk.Result {
 	count: u32
 	vk.EnumeratePhysicalDevices(g_instance, &count, nil) or_return
 	if count == 0 {
-	   log.panic("vulkan: no GPU found")
+		log.panic("vulkan: no GPU found")
 	}
 
 	devices := make([]vk.PhysicalDevice, count, context.temp_allocator)
@@ -401,7 +409,7 @@ pick_physical_device :: proc() -> vk.Result {
 }
 
 create_logical_device :: proc() -> vk.Result {
-    families := find_queue_families(g_physical_device)
+	families := find_queue_families(g_physical_device)
 	indices_set := make(map[u32]struct {})
 	indices_set[families.graphics.?] = {}
 	indices_set[families.present.?] = {}
@@ -425,70 +433,68 @@ create_logical_device :: proc() -> vk.Result {
 	}
 
 	when ENABLE_VALIDATION_LAYERS {
-	    layerCount := u32(1)
-		layers := [^]cstring{"VK_LAYER_KHRONOS_validation"}
+		layers := []cstring{"VK_LAYER_KHRONOS_validation"}
 	} else {
-	    layerCount := u32(0)
-		layers := [^]cstring{}
+		layers := []cstring{}
 	}
 
 	device_create_info := vk.DeviceCreateInfo {
 		sType                   = .DEVICE_CREATE_INFO,
 		pQueueCreateInfos       = raw_data(queue_create_infos),
 		queueCreateInfoCount    = u32(len(queue_create_infos)),
-		enabledLayerCount       = layerCount,
-		ppEnabledLayerNames     = layers,
+		enabledLayerCount       = u32(len(layers)),
+		ppEnabledLayerNames     = raw_data(layers),
 		ppEnabledExtensionNames = raw_data(REQUIRED_EXTENSIONS),
 		enabledExtensionCount   = u32(len(REQUIRED_EXTENSIONS)),
 	}
 
 	ret := vk.CreateDevice(g_physical_device, &device_create_info, nil, &g_device)
 	if ret != .SUCCESS {
-        return ret
-    }
+		return ret
+	}
 	vk.GetDeviceQueue(g_device, families.graphics.?, 0, &g_graphics_queue)
 	vk.GetDeviceQueue(g_device, families.present.?, 0, &g_present_queue)
 	return ret
 }
 
 create_swapchain :: proc() -> (result: vk.Result) {
-    pick_swapchain_surface_format :: proc(formats: []vk.SurfaceFormatKHR) -> vk.SurfaceFormatKHR {
-    	for format in formats {
-    		if format.format == .B8G8R8A8_SRGB && format.colorSpace == .SRGB_NONLINEAR {
-    			return format
-    		}
-    	}
-    	return formats[0]
-    }
+	pick_swapchain_surface_format :: proc(formats: []vk.SurfaceFormatKHR) -> vk.SurfaceFormatKHR {
+		for format in formats {
+			if format.format == .B8G8R8A8_SRGB && format.colorSpace == .SRGB_NONLINEAR {
+				return format
+			}
+		}
+		return formats[0]
+	}
 
-    pick_swapchain_present_mode :: proc(modes: []vk.PresentModeKHR) -> vk.PresentModeKHR {
-    	for mode in modes {
-    		if mode == .MAILBOX {
-    			return .MAILBOX
-    		}
-    	}
-    	return .FIFO
-    }
+	pick_swapchain_present_mode :: proc(modes: []vk.PresentModeKHR) -> vk.PresentModeKHR {
+		for mode in modes {
+			if mode == .MAILBOX {
+				return .MAILBOX
+			}
+		}
+		return .FIFO
+	}
 
-    pick_swapchain_extent :: proc(capabilities: vk.SurfaceCapabilitiesKHR) -> vk.Extent2D {
-    	if capabilities.currentExtent.width != max(u32) {
-    		return capabilities.currentExtent
-    	}
+	pick_swapchain_extent :: proc(capabilities: vk.SurfaceCapabilitiesKHR) -> vk.Extent2D {
+		if capabilities.currentExtent.width != max(u32) {
+			return capabilities.currentExtent
+		}
 
-    	width, height := glfw.GetFramebufferSize(g_window)
-    	return (vk.Extent2D {
-    				width = clamp(
-    					u32(width),
-    					capabilities.minImageExtent.width,
-    					capabilities.maxImageExtent.width,
-    				),
-    				height = clamp(
-    					u32(height),
-    					capabilities.minImageExtent.height,
-    					capabilities.maxImageExtent.height,
-    				),
-    			})
-    }
+		width, height := glfw.GetFramebufferSize(g_window)
+		return (vk.Extent2D {
+					width = clamp(
+						u32(width),
+						capabilities.minImageExtent.width,
+						capabilities.maxImageExtent.width,
+					),
+					height = clamp(
+						u32(height),
+						capabilities.minImageExtent.height,
+						capabilities.maxImageExtent.height,
+					),
+				})
+	}
 	families := find_queue_families(g_physical_device)
 
 	// Setup swapchain.
@@ -540,7 +546,12 @@ create_swapchain :: proc() -> (result: vk.Result) {
 
 		g_swapchain_images = make([]vk.Image, count)
 		g_swapchain_views = make([]vk.ImageView, count)
-		vk.GetSwapchainImagesKHR(g_device, g_swapchain, &count, raw_data(g_swapchain_images)) or_return
+		vk.GetSwapchainImagesKHR(
+			g_device,
+			g_swapchain,
+			&count,
+			raw_data(g_swapchain_images),
+		) or_return
 
 		for image, i in g_swapchain_images {
 			create_info := vk.ImageViewCreateInfo {
@@ -567,17 +578,17 @@ destroy_swapchain :: proc() {
 
 // 5. Create graphics pipeline
 create_shader_module :: proc(code: []u8) -> (module: vk.ShaderModule, result: vk.Result) {
-    create_info := vk.ShaderModuleCreateInfo {
-        sType = .SHADER_MODULE_CREATE_INFO,
-        codeSize = len(code),
-        pCode = raw_data(slice.reinterpret([]u32, code)),
-    }
-    vk.CreateShaderModule(g_device, &create_info, nil, &module) or_return
-    return
+	create_info := vk.ShaderModuleCreateInfo {
+		sType    = .SHADER_MODULE_CREATE_INFO,
+		codeSize = len(code),
+		pCode    = raw_data(slice.reinterpret([]u32, code)),
+	}
+	vk.CreateShaderModule(g_device, &create_info, nil, &module) or_return
+	return
 }
 
 load_shader :: proc() -> vk.Result {
-    g_vert_shader_module = create_shader_module(SHADER_VERT) or_return
+	g_vert_shader_module = create_shader_module(SHADER_VERT) or_return
 	g_shader_stages[0] = vk.PipelineShaderStageCreateInfo {
 		sType  = .PIPELINE_SHADER_STAGE_CREATE_INFO,
 		stage  = {.VERTEX},
@@ -662,7 +673,7 @@ destroy_framebuffers :: proc() {
 }
 
 create_pipeline :: proc() -> vk.Result {
-    dynamic_states := []vk.DynamicState{.VIEWPORT, .SCISSOR}
+	dynamic_states := []vk.DynamicState{.VIEWPORT, .SCISSOR}
 	dynamic_state := vk.PipelineDynamicStateCreateInfo {
 		sType             = .PIPELINE_DYNAMIC_STATE_CREATE_INFO,
 		dynamicStateCount = 2,
@@ -734,8 +745,8 @@ create_pipeline :: proc() -> vk.Result {
 
 // 7. Create command pool
 create_command_pool :: proc() -> vk.Result {
-    families := find_queue_families(g_physical_device)
-    pool_info := vk.CommandPoolCreateInfo {
+	families := find_queue_families(g_physical_device)
+	pool_info := vk.CommandPoolCreateInfo {
 		sType            = .COMMAND_POOL_CREATE_INFO,
 		flags            = {.RESET_COMMAND_BUFFER},
 		queueFamilyIndex = families.graphics.?,
@@ -751,7 +762,7 @@ create_command_pool :: proc() -> vk.Result {
 }
 
 create_semaphores :: proc() -> vk.Result {
-    sem_info := vk.SemaphoreCreateInfo {
+	sem_info := vk.SemaphoreCreateInfo {
 		sType = .SEMAPHORE_CREATE_INFO,
 	}
 	fence_info := vk.FenceCreateInfo {
@@ -767,7 +778,7 @@ create_semaphores :: proc() -> vk.Result {
 }
 
 detroy_semaphores :: proc() {
-    for sem in g_image_available_semaphores {
+	for sem in g_image_available_semaphores {
 		vk.DestroySemaphore(g_device, sem, nil)
 	}
 	for sem in g_render_finished_semaphores {
@@ -780,7 +791,7 @@ detroy_semaphores :: proc() {
 
 // 8. Render loop
 render :: proc() -> vk.Result {
-    // Wait for previous frame.
+	// Wait for previous frame.
 	vk.WaitForFences(g_device, 1, &g_in_flight_fences[g_current_frame], true, max(u64)) or_return
 
 	// Acquire an image from the swapchain.
@@ -816,7 +827,12 @@ render :: proc() -> vk.Result {
 		signalSemaphoreCount = 1,
 		pSignalSemaphores    = &g_render_finished_semaphores[g_current_frame],
 	}
-	vk.QueueSubmit(g_graphics_queue, 1, &submit_info, g_in_flight_fences[g_current_frame]) or_return
+	vk.QueueSubmit(
+		g_graphics_queue,
+		1,
+		&submit_info,
+		g_in_flight_fences[g_current_frame],
+	) or_return
 	// Present.
 	present_info := vk.PresentInfoKHR {
 		sType              = .PRESENT_INFO_KHR,
