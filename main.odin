@@ -71,18 +71,25 @@ main :: proc() {
 	if !bool(glfw.Init()) {
 		log.panic("GLFW has failed to load.")
 	}
+	defer glfw.Terminate()
 	glfw.WindowHint(glfw.CLIENT_API, glfw.NO_API)
 	g_window = glfw.CreateWindow(WIDTH, HEIGHT, TITLE, nil, nil)
-	defer glfw.Terminate()
 	defer glfw.DestroyWindow(g_window)
 	if g_window == nil {
 		log.panic("GLFW has failed to load the window.")
 	}
+	glfw.SetFramebufferSizeCallback(g_window, proc "c" (_: glfw.WindowHandle, _, _: i32) {
+		g_framebuffer_resized = true
+	})
 	vk.load_proc_addresses_global(rawptr(glfw.GetInstanceProcAddress))
 
 	must(create_vulkan_instance())
-	defer vk.DestroyInstance(g_instance, nil)
-	defer vk.DestroyDebugUtilsMessengerEXT(g_instance, g_dbg_messenger, nil)
+	defer {
+		when ENABLE_VALIDATION_LAYERS {
+			vk.DestroyDebugUtilsMessengerEXT(g_instance, g_dbg_messenger, nil)
+		}
+		vk.DestroyInstance(g_instance, nil)
+	}
 
 	must(glfw.CreateWindowSurface(g_instance, g_window, nil, &g_surface))
 	defer vk.DestroySurfaceKHR(g_instance, g_surface, nil)
@@ -96,8 +103,10 @@ main :: proc() {
 	defer destroy_swapchain()
 
 	must(load_shader())
-	defer vk.DestroyShaderModule(g_device, g_vert_shader_module, nil)
-	defer vk.DestroyShaderModule(g_device, g_frag_shader_module, nil)
+	defer {
+		vk.DestroyShaderModule(g_device, g_vert_shader_module, nil)
+		vk.DestroyShaderModule(g_device, g_frag_shader_module, nil)
+	}
 
 	must(create_render_pass())
 	defer vk.DestroyRenderPass(g_device, g_render_pass, nil)
@@ -106,44 +115,24 @@ main :: proc() {
 	defer destroy_framebuffers()
 
 	must(create_pipeline())
-	defer vk.DestroyPipelineLayout(g_device, g_pipeline_layout, nil)
-	defer vk.DestroyPipeline(g_device, g_pipeline, nil)
+	defer {
+		vk.DestroyPipelineLayout(g_device, g_pipeline_layout, nil)
+		vk.DestroyPipeline(g_device, g_pipeline, nil)
+	}
 
 	must(create_command_pool())
+
 	defer vk.DestroyCommandPool(g_device, g_command_pool, nil)
 
 	must(create_semaphores())
 	defer detroy_semaphores()
 
 	for !glfw.WindowShouldClose(g_window) {
+		free_all(g_ctx.temp_allocator)
 		glfw.PollEvents()
 		render()
 	}
-
 	vk.DeviceWaitIdle(g_device)
-}
-
-vk_messenger_callback :: proc "system" (
-	messageSeverity: vk.DebugUtilsMessageSeverityFlagsEXT,
-	messageTypes: vk.DebugUtilsMessageTypeFlagsEXT,
-	pCallbackData: ^vk.DebugUtilsMessengerCallbackDataEXT,
-	pUserData: rawptr,
-) -> b32 {
-	context = g_ctx
-
-	level: log.Level
-	if .ERROR in messageSeverity {
-		level = .Error
-	} else if .WARNING in messageSeverity {
-		level = .Warning
-	} else if .INFO in messageSeverity {
-		level = .Info
-	} else {
-		level = .Debug
-	}
-
-	log.logf(level, "vulkan[%v]: %s", messageTypes, pCallbackData.pMessage)
-	return false
 }
 
 // 1. Create a Vulkan instance
@@ -151,7 +140,7 @@ create_vulkan_instance :: proc() -> vk.Result {
 	log.info("Creating Vulkan instance...")
 	extensions := slice.clone_to_dynamic(
 		glfw.GetRequiredInstanceExtensions(),
-		context.temp_allocator,
+		g_ctx.temp_allocator,
 	)
 	create_info := vk.InstanceCreateInfo {
 		sType            = .INSTANCE_CREATE_INFO,
@@ -186,10 +175,29 @@ create_vulkan_instance :: proc() -> vk.Result {
 		}
 
 		dbg_create_info := vk.DebugUtilsMessengerCreateInfoEXT {
-			sType           = .DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
+			sType = .DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
 			messageSeverity = severity,
-			messageType     = {.GENERAL, .VALIDATION, .PERFORMANCE, .DEVICE_ADDRESS_BINDING}, // all of them.
-			pfnUserCallback = vk_messenger_callback,
+			messageType = {.GENERAL, .VALIDATION, .PERFORMANCE, .DEVICE_ADDRESS_BINDING}, // all of them.
+			pfnUserCallback = proc "system" (
+				severity: vk.DebugUtilsMessageSeverityFlagsEXT,
+				types: vk.DebugUtilsMessageTypeFlagsEXT,
+				pCallbackData: ^vk.DebugUtilsMessengerCallbackDataEXT,
+				pUserData: rawptr,
+			) -> b32 {
+				context = g_ctx
+				level: log.Level
+				if .ERROR in severity {
+					level = .Error
+				} else if .WARNING in severity {
+					level = .Warning
+				} else if .INFO in severity {
+					level = .Info
+				} else {
+					level = .Debug
+				}
+				log.logf(level, "vulkan[%v]: %s", types, pCallbackData.pMessage)
+				return false
+			},
 		}
 		create_info.pNext = &dbg_create_info
 	}
@@ -216,7 +224,7 @@ find_queue_families :: proc(device: vk.PhysicalDevice) -> (ids: QueueFamilyIndic
 	count: u32
 	vk.GetPhysicalDeviceQueueFamilyProperties(device, &count, nil)
 
-	families := make([]vk.QueueFamilyProperties, count, context.temp_allocator)
+	families := make([]vk.QueueFamilyProperties, count, g_ctx.temp_allocator)
 	vk.GetPhysicalDeviceQueueFamilyProperties(device, &count, raw_data(families))
 
 	for family, i in families {
@@ -247,7 +255,6 @@ SwapchainSupport :: struct {
 }
 query_swapchain_support :: proc(
 	device: vk.PhysicalDevice,
-	allocator := context.temp_allocator,
 ) -> (
 	support: SwapchainSupport,
 	result: vk.Result,
@@ -262,7 +269,7 @@ query_swapchain_support :: proc(
 
 		log.infof("vulkan: found %v surface formats", count)
 
-		support.formats = make([]vk.SurfaceFormatKHR, count, allocator)
+		support.formats = make([]vk.SurfaceFormatKHR, count, g_ctx.temp_allocator)
 		vk.GetPhysicalDeviceSurfaceFormatsKHR(
 			device,
 			g_surface,
@@ -275,7 +282,7 @@ query_swapchain_support :: proc(
 		count: u32
 		vk.GetPhysicalDeviceSurfacePresentModesKHR(device, g_surface, &count, nil) or_return
 
-		support.presentModes = make([]vk.PresentModeKHR, count, allocator)
+		support.presentModes = make([]vk.PresentModeKHR, count, g_ctx.temp_allocator)
 		vk.GetPhysicalDeviceSurfacePresentModesKHR(
 			device,
 			g_surface,
@@ -286,29 +293,25 @@ query_swapchain_support :: proc(
 	return
 }
 
-@(require_results)
 pick_physical_device :: proc() -> vk.Result {
-	physical_device_extensions :: proc(
+	get_available_extensions :: proc(
 		device: vk.PhysicalDevice,
-		allocator := context.temp_allocator,
 	) -> (
 		exts: []vk.ExtensionProperties,
 		res: vk.Result,
 	) {
 		count: u32
 		vk.EnumerateDeviceExtensionProperties(device, nil, &count, nil) or_return
-		exts = make([]vk.ExtensionProperties, count, context.temp_allocator)
+		exts = make([]vk.ExtensionProperties, count, g_ctx.temp_allocator)
 		vk.EnumerateDeviceExtensionProperties(device, nil, &count, raw_data(exts)) or_return
 		return
 	}
 	score_physical_device :: proc(device: vk.PhysicalDevice) -> (score: int) {
 		props: vk.PhysicalDeviceProperties
 		vk.GetPhysicalDeviceProperties(device, &props)
-
 		name := strings.truncate_to_byte(string(props.deviceName[:]), 0)
 		log.infof("vulkan: evaluating device %q", name)
 		defer log.infof("vulkan: device %q scored %v", name, score)
-
 		features: vk.PhysicalDeviceFeatures
 		vk.GetPhysicalDeviceFeatures(device, &features)
 		// App can't function without geometry shaders.
@@ -318,7 +321,7 @@ pick_physical_device :: proc() -> vk.Result {
 		}
 		// Need certain extensions supported.
 		{
-			extensions, result := physical_device_extensions(device)
+			extensions, result := get_available_extensions(device)
 			if result != .SUCCESS {
 				log.infof("vulkan: enumerate device extension properties failed: %v", result)
 				return 0
@@ -391,7 +394,7 @@ pick_physical_device :: proc() -> vk.Result {
 		log.panic("vulkan: no GPU found")
 	}
 
-	devices := make([]vk.PhysicalDevice, count, context.temp_allocator)
+	devices := make([]vk.PhysicalDevice, count, g_ctx.temp_allocator)
 	vk.EnumeratePhysicalDevices(g_instance, &count, raw_data(devices)) or_return
 
 	best_device_score := -1
@@ -418,7 +421,7 @@ create_logical_device :: proc() -> vk.Result {
 		[dynamic]vk.DeviceQueueCreateInfo,
 		0,
 		len(indices_set),
-		context.temp_allocator,
+		g_ctx.temp_allocator,
 	)
 	for _ in indices_set {
 		append(
@@ -480,7 +483,6 @@ create_swapchain :: proc() -> (result: vk.Result) {
 		if capabilities.currentExtent.width != max(u32) {
 			return capabilities.currentExtent
 		}
-
 		width, height := glfw.GetFramebufferSize(g_window)
 		return (vk.Extent2D {
 					width = clamp(
