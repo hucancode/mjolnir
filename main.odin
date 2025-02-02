@@ -126,7 +126,10 @@ run :: proc() -> vk.Result {
 	for !glfw.WindowShouldClose(g_window) {
 		free_all(g_ctx.temp_allocator)
 		glfw.PollEvents()
-		render()
+		ret := render()
+		if ret != .SUCCESS {
+			log.warnf("vulkan: render failure: %v", ret)
+		}
 	}
 	vk.DeviceWaitIdle(g_device)
 	return .SUCCESS
