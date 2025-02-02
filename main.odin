@@ -309,13 +309,13 @@ pick_physical_device :: proc() -> vk.Result {
 		log.infof("vulkan: evaluating device %q", name)
 		defer log.infof("vulkan: device %q scored %v", name, score)
 
-		// features: vk.PhysicalDeviceFeatures
-		// vk.GetPhysicalDeviceFeatures(device, &features)
-		// // App can't function without geometry shaders.
-		// if !features.geometryShader {
-		// 	log.info("vulkan: device does not support geometry shaders")
-		// 	return 0
-		// }
+		features: vk.PhysicalDeviceFeatures
+		vk.GetPhysicalDeviceFeatures(device, &features)
+		// App can't function without geometry shaders.
+		if !features.geometryShader {
+			log.info("vulkan: device does not support geometry shaders")
+			return 0
+		}
 		// Need certain extensions supported.
 		{
 			extensions, result := physical_device_extensions(device)
