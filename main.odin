@@ -81,6 +81,7 @@ run :: proc() -> vk.Result {
 	glfw.SetFramebufferSizeCallback(g_window, proc "c" (_: glfw.WindowHandle, _, _: i32) {
 		g_framebuffer_resized = true
 	})
+
 	create_vulkan_instance() or_return
 	defer {
 		vk.DestroySurfaceKHR(g_instance, g_surface, nil)
@@ -91,7 +92,6 @@ run :: proc() -> vk.Result {
 	}
 
 	pick_physical_device() or_return
-
 	create_logical_device() or_return
 	defer vk.DestroyDevice(g_device, nil)
 
@@ -117,7 +117,6 @@ run :: proc() -> vk.Result {
 	}
 
 	create_command_pool() or_return
-
 	defer vk.DestroyCommandPool(g_device, g_command_pool, nil)
 
 	create_semaphores() or_return
