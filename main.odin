@@ -16,9 +16,14 @@ HEIGHT :: 900
 TITLE :: "Vulkan"
 ENABLE_VALIDATION_LAYERS :: #config(ENABLE_VALIDATION_LAYERS, ODIN_DEBUG)
 // KHR_PORTABILITY_SUBSET_EXTENSION_NAME :: "VK_KHR_portability_subset"
-REQUIRED_EXTENSIONS := []cstring {
+REQUIRED_EXTENSIONS :: []cstring {
 	vk.KHR_SWAPCHAIN_EXTENSION_NAME,
 	// KHR_PORTABILITY_SUBSET_EXTENSION_NAME,
+}
+when ENABLE_VALIDATION_LAYERS {
+	LAYERS :: []cstring{"VK_LAYER_KHRONOS_validation"}
+} else {
+	LAYERS :: []cstring{}
 }
 SHADER_VERT :: #load("shaders/vert.spv")
 SHADER_FRAG :: #load("shaders/frag.spv")
@@ -143,8 +148,8 @@ create_vulkan_instance :: proc() -> vk.Result {
 		g_ctx.temp_allocator,
 	)
 	create_info := vk.InstanceCreateInfo {
-		sType            = .INSTANCE_CREATE_INFO,
-		pApplicationInfo = &vk.ApplicationInfo {
+		sType               = .INSTANCE_CREATE_INFO,
+		pApplicationInfo    = &vk.ApplicationInfo {
 			sType = .APPLICATION_INFO,
 			pApplicationName = "Hello VK",
 			applicationVersion = vk.MAKE_VERSION(1, 0, 0),
@@ -152,13 +157,11 @@ create_vulkan_instance :: proc() -> vk.Result {
 			engineVersion = vk.MAKE_VERSION(1, 0, 0),
 			apiVersion = vk.API_VERSION_1_4,
 		},
+		ppEnabledLayerNames = raw_data(LAYERS),
+		enabledLayerCount   = u32(len(LAYERS)),
 	}
 	when ENABLE_VALIDATION_LAYERS {
-		create_info.ppEnabledLayerNames = raw_data([]cstring{"VK_LAYER_KHRONOS_validation"})
-		create_info.enabledLayerCount = 1
-
 		append(&extensions, vk.EXT_DEBUG_UTILS_EXTENSION_NAME)
-
 		// Severity based on logger level.
 		severity: vk.DebugUtilsMessageSeverityFlagsEXT
 		if context.logger.lowest_level <= .Error {
@@ -203,7 +206,7 @@ create_vulkan_instance :: proc() -> vk.Result {
 	}
 	create_info.enabledExtensionCount = u32(len(extensions))
 	create_info.ppEnabledExtensionNames = raw_data(extensions)
-	ret := vk.CreateInstance(&create_info, nil, &g_instance)
+	vk.CreateInstance(&create_info, nil, &g_instance) or_return
 	vk.load_proc_addresses_instance(g_instance)
 	when ENABLE_VALIDATION_LAYERS {
 		vk.CreateDebugUtilsMessengerEXT(
@@ -213,7 +216,7 @@ create_vulkan_instance :: proc() -> vk.Result {
 			&g_dbg_messenger,
 		) or_return
 	}
-	return ret
+	return .SUCCESS
 }
 
 QueueFamilyIndices :: struct {
@@ -450,14 +453,10 @@ create_logical_device :: proc() -> vk.Result {
 		ppEnabledExtensionNames = raw_data(REQUIRED_EXTENSIONS),
 		enabledExtensionCount   = u32(len(REQUIRED_EXTENSIONS)),
 	}
-
-	ret := vk.CreateDevice(g_physical_device, &device_create_info, nil, &g_device)
-	if ret != .SUCCESS {
-		return ret
-	}
+	vk.CreateDevice(g_physical_device, &device_create_info, nil, &g_device) or_return
 	vk.GetDeviceQueue(g_device, families.graphics.?, 0, &g_graphics_queue)
 	vk.GetDeviceQueue(g_device, families.present.?, 0, &g_present_queue)
-	return ret
+	return .SUCCESS
 }
 
 create_swapchain :: proc() -> (result: vk.Result) {
