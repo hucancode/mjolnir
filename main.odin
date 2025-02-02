@@ -5,6 +5,7 @@ package main
 
 import "base:runtime"
 import "core:log"
+import "core:os"
 import "core:slice"
 import "core:strings"
 import "vendor:glfw"
@@ -29,11 +30,11 @@ g_ctx: runtime.Context
 g_window: glfw.WindowHandle
 g_instance: vk.Instance
 g_dbg_messenger: vk.DebugUtilsMessengerEXT
+g_surface: vk.SurfaceKHR
 
 g_physical_device: vk.PhysicalDevice
 
 g_device: vk.Device
-g_surface: vk.SurfaceKHR
 g_graphics_queue: vk.Queue
 g_present_queue: vk.Queue
 
@@ -53,7 +54,6 @@ g_pipeline: vk.Pipeline
 
 g_command_pool: vk.CommandPool
 g_command_buffers: [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer
-
 g_image_available_semaphores: [MAX_FRAMES_IN_FLIGHT]vk.Semaphore
 g_render_finished_semaphores: [MAX_FRAMES_IN_FLIGHT]vk.Semaphore
 g_in_flight_fences: [MAX_FRAMES_IN_FLIGHT]vk.Fence
@@ -62,70 +62,65 @@ g_current_frame: u32
 g_framebuffer_resized: bool
 
 main :: proc() {
-	must :: proc(result: vk.Result, loc := #caller_location) {
-		if result != .SUCCESS {
-			log.panicf("vulkan failure %v", result, location = loc)
-		}
-	}
+	os.exit(int(run()))
+}
+
+run :: proc() -> vk.Result {
 	context.logger = log.create_console_logger()
 	g_ctx = context
 	if !bool(glfw.Init()) {
-		log.panic("GLFW has failed to load.")
+		return .ERROR_INITIALIZATION_FAILED
 	}
 	defer glfw.Terminate()
 	glfw.WindowHint(glfw.CLIENT_API, glfw.NO_API)
 	g_window = glfw.CreateWindow(WIDTH, HEIGHT, TITLE, nil, nil)
-	defer glfw.DestroyWindow(g_window)
 	if g_window == nil {
-		log.panic("GLFW has failed to load the window.")
+		return .ERROR_INITIALIZATION_FAILED
 	}
+	defer glfw.DestroyWindow(g_window)
 	glfw.SetFramebufferSizeCallback(g_window, proc "c" (_: glfw.WindowHandle, _, _: i32) {
 		g_framebuffer_resized = true
 	})
-	vk.load_proc_addresses_global(rawptr(glfw.GetInstanceProcAddress))
-
-	must(create_vulkan_instance())
+	create_vulkan_instance() or_return
 	defer {
+		vk.DestroySurfaceKHR(g_instance, g_surface, nil)
 		when ENABLE_VALIDATION_LAYERS {
 			vk.DestroyDebugUtilsMessengerEXT(g_instance, g_dbg_messenger, nil)
 		}
 		vk.DestroyInstance(g_instance, nil)
 	}
 
-	must(glfw.CreateWindowSurface(g_instance, g_window, nil, &g_surface))
-	defer vk.DestroySurfaceKHR(g_instance, g_surface, nil)
+	pick_physical_device() or_return
 
-	must(pick_physical_device())
-
-	must(create_logical_device())
+	create_logical_device() or_return
 	defer vk.DestroyDevice(g_device, nil)
 
-	must(create_swapchain())
+	create_swapchain() or_return
 	defer destroy_swapchain()
 
-	must(load_shader())
+	load_shader() or_return
 	defer {
 		vk.DestroyShaderModule(g_device, g_vert_shader_module, nil)
 		vk.DestroyShaderModule(g_device, g_frag_shader_module, nil)
 	}
 
-	must(create_render_pass())
+	create_render_pass() or_return
 	defer vk.DestroyRenderPass(g_device, g_render_pass, nil)
 
-	must(create_framebuffers())
+	create_framebuffers() or_return
 	defer destroy_framebuffers()
 
-	must(create_pipeline())
+	create_pipeline() or_return
 	defer {
 		vk.DestroyPipelineLayout(g_device, g_pipeline_layout, nil)
 		vk.DestroyPipeline(g_device, g_pipeline, nil)
 	}
 
-	must(create_command_pool())
+	create_command_pool() or_return
 
 	defer vk.DestroyCommandPool(g_device, g_command_pool, nil)
 
-	must(create_semaphores())
+	create_semaphores() or_return
 	defer detroy_semaphores()
 
 	for !glfw.WindowShouldClose(g_window) {
@@ -134,11 +129,13 @@ main :: proc() {
 		render()
 	}
 	vk.DeviceWaitIdle(g_device)
+	return .SUCCESS
 }
 
 // 1. Create a Vulkan instance
 create_vulkan_instance :: proc() -> vk.Result {
 	log.info("Creating Vulkan instance...")
+	vk.load_proc_addresses_global(rawptr(glfw.GetInstanceProcAddress))
 	extensions := slice.clone_to_dynamic(
 		glfw.GetRequiredInstanceExtensions(),
 		g_ctx.temp_allocator,
@@ -212,86 +209,11 @@ create_vulkan_instance :: proc() -> vk.Result {
 			&g_dbg_messenger,
 		) or_return
 	}
+	glfw.CreateWindowSurface(g_instance, g_window, nil, &g_surface) or_return
 	return .SUCCESS
 }
 
-QueueFamilyIndices :: struct {
-	graphics: Maybe(u32),
-	present:  Maybe(u32),
-}
-find_queue_families :: proc(device: vk.PhysicalDevice) -> (ids: QueueFamilyIndices) {
-	count: u32
-	vk.GetPhysicalDeviceQueueFamilyProperties(device, &count, nil)
-
-	families := make([]vk.QueueFamilyProperties, count, g_ctx.temp_allocator)
-	vk.GetPhysicalDeviceQueueFamilyProperties(device, &count, raw_data(families))
-
-	for family, i in families {
-		if .GRAPHICS in family.queueFlags {
-			ids.graphics = u32(i)
-		}
-
-		supported: b32
-		vk.GetPhysicalDeviceSurfaceSupportKHR(device, u32(i), g_surface, &supported)
-		if supported {
-			ids.present = u32(i)
-		}
-
-		// Found all needed queues?
-		_, has_graphics := ids.graphics.?
-		_, has_present := ids.present.?
-		if has_graphics && has_present {
-			break
-		}
-	}
-	return
-}
-
-SwapchainSupport :: struct {
-	capabilities: vk.SurfaceCapabilitiesKHR,
-	formats:      []vk.SurfaceFormatKHR,
-	presentModes: []vk.PresentModeKHR,
-}
-query_swapchain_support :: proc(
-	device: vk.PhysicalDevice,
-) -> (
-	support: SwapchainSupport,
-	result: vk.Result,
-) {
-	// NOTE: looks like a wrong binding with the third arg being a multipointer.
-	log.info("vulkan: querying swapchain support for device %v", device)
-	vk.GetPhysicalDeviceSurfaceCapabilitiesKHR(device, g_surface, &support.capabilities) or_return
-	log.info("vulkan: got surface capabilities %v", support.capabilities)
-	{
-		count: u32
-		vk.GetPhysicalDeviceSurfaceFormatsKHR(device, g_surface, &count, nil) or_return
-
-		log.infof("vulkan: found %v surface formats", count)
-
-		support.formats = make([]vk.SurfaceFormatKHR, count, g_ctx.temp_allocator)
-		vk.GetPhysicalDeviceSurfaceFormatsKHR(
-			device,
-			g_surface,
-			&count,
-			raw_data(support.formats),
-		) or_return
-	}
-
-	{
-		count: u32
-		vk.GetPhysicalDeviceSurfacePresentModesKHR(device, g_surface, &count, nil) or_return
-
-		support.presentModes = make([]vk.PresentModeKHR, count, g_ctx.temp_allocator)
-		vk.GetPhysicalDeviceSurfacePresentModesKHR(
-			device,
-			g_surface,
-			&count,
-			raw_data(support.presentModes),
-		) or_return
-	}
-	return
-}
-
+// 2. Select a physical device
 pick_physical_device :: proc() -> vk.Result {
 	get_available_extensions :: proc(
 		device: vk.PhysicalDevice,
@@ -410,6 +332,86 @@ pick_physical_device :: proc() -> vk.Result {
 	return .SUCCESS
 }
 
+// Query device capabilities
+SwapchainSupport :: struct {
+	capabilities: vk.SurfaceCapabilitiesKHR,
+	formats:      []vk.SurfaceFormatKHR,
+	presentModes: []vk.PresentModeKHR,
+}
+query_swapchain_support :: proc(
+	device: vk.PhysicalDevice,
+) -> (
+	support: SwapchainSupport,
+	result: vk.Result,
+) {
+	// NOTE: looks like a wrong binding with the third arg being a multipointer.
+	log.info("vulkan: querying swapchain support for device %v", device)
+	vk.GetPhysicalDeviceSurfaceCapabilitiesKHR(device, g_surface, &support.capabilities) or_return
+	log.info("vulkan: got surface capabilities %v", support.capabilities)
+	{
+		count: u32
+		vk.GetPhysicalDeviceSurfaceFormatsKHR(device, g_surface, &count, nil) or_return
+
+		log.infof("vulkan: found %v surface formats", count)
+
+		support.formats = make([]vk.SurfaceFormatKHR, count, g_ctx.temp_allocator)
+		vk.GetPhysicalDeviceSurfaceFormatsKHR(
+			device,
+			g_surface,
+			&count,
+			raw_data(support.formats),
+		) or_return
+	}
+
+	{
+		count: u32
+		vk.GetPhysicalDeviceSurfacePresentModesKHR(device, g_surface, &count, nil) or_return
+
+		support.presentModes = make([]vk.PresentModeKHR, count, g_ctx.temp_allocator)
+		vk.GetPhysicalDeviceSurfacePresentModesKHR(
+			device,
+			g_surface,
+			&count,
+			raw_data(support.presentModes),
+		) or_return
+	}
+	return
+}
+
+// Query device capabilities
+QueueFamilyIndices :: struct {
+	graphics: Maybe(u32),
+	present:  Maybe(u32),
+}
+find_queue_families :: proc(device: vk.PhysicalDevice) -> (ids: QueueFamilyIndices) {
+	count: u32
+	vk.GetPhysicalDeviceQueueFamilyProperties(device, &count, nil)
+
+	families := make([]vk.QueueFamilyProperties, count, g_ctx.temp_allocator)
+	vk.GetPhysicalDeviceQueueFamilyProperties(device, &count, raw_data(families))
+
+	for family, i in families {
+		if .GRAPHICS in family.queueFlags {
+			ids.graphics = u32(i)
+		}
+
+		supported: b32
+		vk.GetPhysicalDeviceSurfaceSupportKHR(device, u32(i), g_surface, &supported)
+		if supported {
+			ids.present = u32(i)
+		}
+
+		// Found all needed queues?
+		_, has_graphics := ids.graphics.?
+		_, has_present := ids.present.?
+		if has_graphics && has_present {
+			break
+		}
+	}
+	return
+}
+
+// 3. Create a logical device
 create_logical_device :: proc() -> vk.Result {
 	families := find_queue_families(g_physical_device)
 	indices_set := make(map[u32]struct {})
@@ -455,6 +457,7 @@ create_logical_device :: proc() -> vk.Result {
 	return .SUCCESS
 }
 
+// 4. Create a swap chain
 create_swapchain :: proc() -> (result: vk.Result) {
 	pick_swapchain_surface_format :: proc(formats: []vk.SurfaceFormatKHR) -> vk.SurfaceFormatKHR {
 		for format in formats {
@@ -745,7 +748,7 @@ create_pipeline :: proc() -> vk.Result {
 	return vk.CreateGraphicsPipelines(g_device, 0, 1, &pipeline, nil, &g_pipeline)
 }
 
-// 7. Create command pool
+// 6. Create command pool
 create_command_pool :: proc() -> vk.Result {
 	families := find_queue_families(g_physical_device)
 	pool_info := vk.CommandPoolCreateInfo {
@@ -791,7 +794,7 @@ detroy_semaphores :: proc() {
 	}
 }
 
-// 8. Render loop
+// 7. Render loop
 render :: proc() -> vk.Result {
 	// Wait for previous frame.
 	vk.WaitForFences(g_device, 1, &g_in_flight_fences[g_current_frame], true, max(u64)) or_return
