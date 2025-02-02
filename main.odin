@@ -4,22 +4,18 @@
 package main
 
 import "base:runtime"
-import "core:fmt"
 import "core:log"
 import "core:slice"
 import "core:strings"
 import "vendor:glfw"
 import vk "vendor:vulkan"
 
-WIDTH :: 1600
-HEIGHT :: 900
-TITLE :: "Vulkan"
+WIDTH :: 1024
+HEIGHT :: 768
+TITLE :: "Hello Vulkan!"
+ENGINE_NAME :: "Soreal Engine"
 ENABLE_VALIDATION_LAYERS :: #config(ENABLE_VALIDATION_LAYERS, ODIN_DEBUG)
-// KHR_PORTABILITY_SUBSET_EXTENSION_NAME :: "VK_KHR_portability_subset"
-REQUIRED_EXTENSIONS :: []cstring {
-	vk.KHR_SWAPCHAIN_EXTENSION_NAME,
-	// KHR_PORTABILITY_SUBSET_EXTENSION_NAME,
-}
+REQUIRED_EXTENSIONS :: []cstring{vk.KHR_SWAPCHAIN_EXTENSION_NAME}
 when ENABLE_VALIDATION_LAYERS {
 	LAYERS :: []cstring{"VK_LAYER_KHRONOS_validation"}
 } else {
@@ -151,9 +147,9 @@ create_vulkan_instance :: proc() -> vk.Result {
 		sType               = .INSTANCE_CREATE_INFO,
 		pApplicationInfo    = &vk.ApplicationInfo {
 			sType = .APPLICATION_INFO,
-			pApplicationName = "Hello VK",
+			pApplicationName = TITLE,
 			applicationVersion = vk.MAKE_VERSION(1, 0, 0),
-			pEngineName = "Goldfish Engine",
+			pEngineName = ENGINE_NAME,
 			engineVersion = vk.MAKE_VERSION(1, 0, 0),
 			apiVersion = vk.API_VERSION_1_4,
 		},
@@ -508,10 +504,15 @@ create_swapchain :: proc() -> (result: vk.Result) {
 		g_swapchain_format = surface_format
 		g_swapchain_extent = extent
 
-		image_count := support.capabilities.minImageCount + 1
-		if support.capabilities.maxImageCount > 0 &&
-		   image_count > support.capabilities.maxImageCount {
-			image_count = support.capabilities.maxImageCount
+		image_count: u32
+		unlimitted := support.capabilities.maxImageCount == 0
+		if unlimitted {
+			image_count = support.capabilities.minImageCount + 1
+		} else {
+			image_count = min(
+				support.capabilities.maxImageCount,
+				support.capabilities.minImageCount + 1,
+			)
 		}
 
 		create_info := vk.SwapchainCreateInfoKHR {
@@ -864,7 +865,7 @@ record_command_buffer :: proc(command_buffer: vk.CommandBuffer, image_index: u32
 	}
 	vk.BeginCommandBuffer(command_buffer, &begin_info) or_return
 	clear_color := vk.ClearValue {
-		color = vk.ClearColorValue{float32 = {0.0, 0.0, 0.0, 1.0}},
+		color = vk.ClearColorValue{float32 = {0.0117, 0.0117, 0.0179, 1.0}},
 	}
 
 	render_pass_info := vk.RenderPassBeginInfo {
@@ -887,7 +888,7 @@ record_command_buffer :: proc(command_buffer: vk.CommandBuffer, image_index: u32
 		extent = g_swapchain_extent,
 	}
 	vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
-	vk.CmdDraw(command_buffer, 3, 1, 0, 0)
+	vk.CmdDraw(command_buffer, 6, 1, 0, 0)
 	vk.CmdEndRenderPass(command_buffer)
 	vk.EndCommandBuffer(command_buffer) or_return
 	return .SUCCESS
