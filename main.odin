@@ -61,6 +61,15 @@ g_in_flight_fences: [MAX_FRAMES_IN_FLIGHT]vk.Fence
 g_current_frame: u32
 g_framebuffer_resized: bool
 
+when ODIN_OS == .Darwin {
+	// NOTE: just a bogus import of the system library,
+	// needed so we can add a linker flag to point to /usr/local/lib (where vulkan is installed by default)
+	// when trying to load vulkan.
+	// Credit goes to : https://gist.github.com/laytan/ba57af3e5a59ab5cb2fca9e25bcfe262
+	@(require, extra_linker_flags = "-rpath /usr/local/lib")
+	foreign import __ "system:System.framework"
+}
+
 main :: proc() {
 	os.exit(int(run()))
 }
@@ -155,6 +164,11 @@ create_vulkan_instance :: proc() -> vk.Result {
 		ppEnabledLayerNames = raw_data(LAYERS),
 		enabledLayerCount   = u32(len(LAYERS)),
 	}
+	when ODIN_OS == .Darwin {
+		// Mandatory on macOS
+		create_info.flags |= {.ENUMERATE_PORTABILITY_KHR}
+		append(&extensions, vk.KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME)
+	}
 	when ENABLE_VALIDATION_LAYERS {
 		append(&extensions, vk.EXT_DEBUG_UTILS_EXTENSION_NAME)
 		// Severity based on logger level.
@@ -237,10 +251,12 @@ pick_physical_device :: proc() -> vk.Result {
 		defer log.infof("vulkan: device %q scored %v", name, score)
 		features: vk.PhysicalDeviceFeatures
 		vk.GetPhysicalDeviceFeatures(device, &features)
-		// App can't function without geometry shaders.
-		if !features.geometryShader {
-			log.info("vulkan: device does not support geometry shaders")
-			return 0
+		when ODIN_OS != .Darwin {
+			// Apple Silicon somehow doesn't have this
+			if !features.geometryShader {
+				log.info("vulkan: device does not support geometry shaders")
+				return 0
+			}
 		}
 		// Need certain extensions supported.
 		{
