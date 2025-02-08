@@ -59,7 +59,6 @@ g_render_finished_semaphores: [MAX_FRAMES_IN_FLIGHT]vk.Semaphore
 g_in_flight_fences: [MAX_FRAMES_IN_FLIGHT]vk.Fence
 
 g_current_frame: u32
-g_framebuffer_resized: bool
 
 when ODIN_OS == .Darwin {
 	// NOTE: just a bogus import of the system library,
@@ -87,10 +86,6 @@ run :: proc() -> vk.Result {
 		return .ERROR_INITIALIZATION_FAILED
 	}
 	defer glfw.DestroyWindow(g_window)
-	glfw.SetFramebufferSizeCallback(g_window, proc "c" (_: glfw.WindowHandle, _, _: i32) {
-		g_framebuffer_resized = true
-	})
-
 	create_vulkan_instance() or_return
 	defer {
 		vk.DestroySurfaceKHR(g_instance, g_surface, nil)
@@ -151,6 +146,7 @@ create_vulkan_instance :: proc() -> vk.Result {
 		glfw.GetRequiredInstanceExtensions(),
 		g_ctx.temp_allocator,
 	)
+	log.info("Required Vulkan extensions:", len(extensions))
 	create_info := vk.InstanceCreateInfo {
 		sType               = .INSTANCE_CREATE_INFO,
 		pApplicationInfo    = &vk.ApplicationInfo {
@@ -226,6 +222,7 @@ create_vulkan_instance :: proc() -> vk.Result {
 		) or_return
 	}
 	glfw.CreateWindowSurface(g_instance, g_window, nil, &g_surface) or_return
+	log.infof("surface created: %d", g_surface)
 	return .SUCCESS
 }
 
@@ -262,7 +259,7 @@ pick_physical_device :: proc() -> vk.Result {
 		{
 			extensions, result := get_available_extensions(device)
 			if result != .SUCCESS {
-				log.infof("vulkan: enumerate device extension properties failed: %v", result)
+				log.infof("vulkan: enumerate device extension properties failed:", result)
 				return 0
 			}
 			log.infof("vulkan: device supports %v extensions", len(extensions))
@@ -277,7 +274,7 @@ pick_physical_device :: proc() -> vk.Result {
 						continue required_loop
 					}
 				}
-				log.infof("vulkan: device does not support required extension %q", required)
+				log.infof("vulkan: device does not support required extension", required)
 				return 0
 			}
 			log.info("vulkan: device supports all required extensions")
@@ -285,7 +282,7 @@ pick_physical_device :: proc() -> vk.Result {
 		{
 			support, result := query_swapchain_support(device)
 			if result != .SUCCESS {
-				log.infof("vulkan: query swapchain support failure: %v", result)
+				log.infof("vulkan: query swapchain support failure:", result)
 				return 0
 			}
 			// Need at least a format and present mode.
@@ -316,7 +313,7 @@ pick_physical_device :: proc() -> vk.Result {
 		case .CPU, .OTHER:
 			score += 100_000
 		}
-		log.infof("vulkan: scored %i based on device type %v", score, props.deviceType)
+		log.infof("vulkan: scored %i based on device type", score, props.deviceType)
 
 		// Maximum texture size.
 		score += int(props.limits.maxImageDimension2D)
@@ -363,9 +360,9 @@ query_swapchain_support :: proc(
 	result: vk.Result,
 ) {
 	// NOTE: looks like a wrong binding with the third arg being a multipointer.
-	log.info("vulkan: querying swapchain support for device %v", device)
+	log.info("vulkan: querying swapchain support for device", device)
 	vk.GetPhysicalDeviceSurfaceCapabilitiesKHR(device, g_surface, &support.capabilities) or_return
-	log.info("vulkan: got surface capabilities %v", support.capabilities)
+	log.info("vulkan: got surface capabilities", support.capabilities)
 	{
 		count: u32
 		vk.GetPhysicalDeviceSurfaceFormatsKHR(device, g_surface, &count, nil) or_return
@@ -411,12 +408,14 @@ find_queue_families :: proc(device: vk.PhysicalDevice) -> (ids: QueueFamilyIndic
 	for family, i in families {
 		if .GRAPHICS in family.queueFlags {
 			ids.graphics = u32(i)
+			log.info("vulkan: found graphics queue family", i)
 		}
 
 		supported: b32
 		vk.GetPhysicalDeviceSurfaceSupportKHR(device, u32(i), g_surface, &supported)
 		if supported {
 			ids.present = u32(i)
+			log.info("vulkan: found present queue family", i)
 		}
 
 		// Found all needed queues?
@@ -867,10 +866,7 @@ render :: proc() -> vk.Result {
 	}
 	present_result := vk.QueuePresentKHR(g_present_queue, &present_info)
 	switch {
-	case present_result == .ERROR_OUT_OF_DATE_KHR ||
-	     present_result == .SUBOPTIMAL_KHR ||
-	     g_framebuffer_resized:
-		g_framebuffer_resized = false
+	case present_result == .ERROR_OUT_OF_DATE_KHR || present_result == .SUBOPTIMAL_KHR:
 		recreate_swapchain()
 	case present_result == .SUCCESS:
 	case:
@@ -916,14 +912,10 @@ record_command_buffer :: proc(command_buffer: vk.CommandBuffer, image_index: u32
 }
 
 recreate_swapchain :: proc() {
-	// Don't do anything when minimized.
-	for w, h := glfw.GetFramebufferSize(g_window);
-	    w == 0 || h == 0;
-	    w, h = glfw.GetFramebufferSize(g_window) {
+	w, h := glfw.GetFramebufferSize(g_window)
+	for w == 0 || h == 0 {
+		w, h = glfw.GetFramebufferSize(g_window)
 		glfw.WaitEvents()
-		if glfw.WindowShouldClose(g_window) {
-			break
-		}
 	}
 
 	vk.DeviceWaitIdle(g_device)
