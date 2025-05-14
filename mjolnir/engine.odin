@@ -541,6 +541,7 @@ render_shadow_node_callback :: proc(
       0,
       .UINT32,
     )
+    // vk.CmdDraw(ctx.command_buffer, 4, 1, 0, 0)
     vk.CmdDrawIndexed(ctx.command_buffer, mesh.indices_len, 1, 0, 0, 0)
     ctx.obstacles_count^ += 1
   case NodeSkeletalMeshAttachment:
@@ -691,14 +692,13 @@ render_shadow_maps :: proc(
     light := &light_uniform.lights[i]
     if light.has_shadow == 0 || i >= MAX_SHADOW_MAPS {continue}
 
-    shadow_map_texture := renderer_get_shadow_map(&engine.renderer, u16(i))
+    shadow_map_texture := renderer_get_shadow_map(&engine.renderer, i)
 
     light_pos_3d: linalg.Vector3f32 = light.position.xyz
     light_dir_3d: linalg.Vector3f32 = linalg.normalize(light.direction.xyz)
 
     switch light.kind {
     case 0:
-      // For simplicity, treating as a spot light for one direction.
       look_target := light_pos_3d + light_dir_3d // Example target
       light_view := linalg.matrix4_look_at_f32(
         light_pos_3d,
@@ -713,9 +713,6 @@ render_shadow_maps :: proc(
       )
       light.view_proj = light_proj * light_view
     case 1:
-      // Directional
-      // For directional, position can be an offset along -direction from scene center/camera
-      // For now, use the light's node position as the "look from" point.
       look_target := light_pos_3d + light_dir_3d
       light_view := linalg.matrix4_look_at_f32(
         light_pos_3d,
@@ -742,7 +739,7 @@ render_shadow_maps :: proc(
         {0, 1, 0},
       )
       light_proj := linalg.matrix4_perspective_f32(
-        light.angle * 2.0,
+        light.angle,
         1.0,
         0.1,
         light.radius,
@@ -762,14 +759,6 @@ render_shadow_maps :: proc(
     // This is unusual. A more common pattern is one command buffer for all shadow maps,
     // or one per shadow map submitted independently.
     // The Zig code resets and begins the *same* command buffer in the loop.
-    // This means each shadow map is rendered, submitted, and waited on sequentially.
-
-    // This reset and begin is problematic if `command_buffer` is the main one from `try_render`
-    // as it would invalidate prior recordings for the main pass.
-    // Let's assume `get_shadow_pass_command_buffer` exists in renderer or we use a dedicated one.
-    // For now, I will proceed with the direct translation logic, highlighting this as a potential issue.
-    // If `command_buffer` is indeed the main one, it must be submitted and waited on *after* this loop.
-    // The Zig code does `vkd.resetCommandBuffer` and `vkd.beginCommandBuffer` *inside* the loop.
     // And then `vkd.queueSubmit` and `vkd.deviceWaitIdle` *inside* the loop. This is very inefficient.
     // A better way: record all shadow passes, then main pass, then submit.
     // Or, record one shadow pass, submit, wait, record next, etc. (as Zig does).
@@ -807,7 +796,7 @@ render_shadow_maps :: proc(
       dstAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE},
     }
     vk.CmdPipelineBarrier(
-      shadow_cmd_buffer, // USE shadow_cmd_buffer
+      shadow_cmd_buffer,
       {.TOP_OF_PIPE},
       {.EARLY_FRAGMENT_TESTS},
       {},
@@ -856,20 +845,13 @@ render_shadow_maps :: proc(
     vk.CmdSetScissor(shadow_cmd_buffer, 0, 1, &scissor)
 
     vk.CmdBindPipeline(
-      shadow_cmd_buffer, // USE shadow_cmd_buffer
+      shadow_cmd_buffer,
       .GRAPHICS,
       engine.renderer.shadow_pass_material.pipeline,
     )
-
-    // Update light view_proj uniform for shadow pass
-    data_buffer_write(
-      renderer_get_light_view_proj_uniform(&engine.renderer),
-      raw_data(&light.view_proj),
-      size_of(linalg.Matrix4f32),
-    )
     shadow_ds := renderer_get_shadow_descriptor_set(&engine.renderer)
     vk.CmdBindDescriptorSets(
-      shadow_cmd_buffer, // USE shadow_cmd_buffer
+      shadow_cmd_buffer,
       .GRAPHICS,
       engine.renderer.shadow_pass_material.pipeline_layout,
       0,
@@ -877,6 +859,12 @@ render_shadow_maps :: proc(
       &shadow_ds,
       0,
       nil,
+    )
+    // Update light view_proj uniform for shadow pass
+    data_buffer_write(
+      renderer_get_light_view_proj_uniform(&engine.renderer),
+      raw_data(&light.view_proj),
+      size_of(linalg.Matrix4f32),
     )
 
     obstacles_this_light: u32 = 0
@@ -916,7 +904,7 @@ render_shadow_maps :: proc(
       dstAccessMask = {.SHADER_READ},
     }
     vk.CmdPipelineBarrier(
-      shadow_cmd_buffer, // USE shadow_cmd_buffer
+      shadow_cmd_buffer,
       {.LATE_FRAGMENT_TESTS},
       {.FRAGMENT_SHADER},
       {},
@@ -1088,34 +1076,6 @@ commit_transaction_engine :: proc(engine: ^Engine) {
   // for handle in engine.dirty_transforms { ... }
   clear(&engine.dirty_transforms)
 }
-mark_transform_dirty_engine :: proc(engine: ^Engine, node_handle: Handle) {
-  if engine.in_transaction {
-    // Avoid duplicates if necessary
-    // for h in engine.dirty_transforms { if h == node_handle { return } }
-    append(&engine.dirty_transforms, node_handle)
-  } else {
-    node := resource.get(&engine.nodes, node_handle)
-    if node != nil {
-      node.transform.is_dirty = true
-    }
-  }
-}
-
-// --- Node Parenting ---
-// These assume engine.nodes stores the actual Node structs.
-unparent_node_engine :: proc(engine: ^Engine, child_handle: Handle) {
-  unparent_node(&engine.nodes, child_handle)
-}
-parent_node_engine :: proc(
-  engine: ^Engine,
-  parent_handle: Handle,
-  child_handle: Handle,
-) {
-  parent_node(&engine.nodes, parent_handle, child_handle)
-}
-add_to_root_engine :: proc(engine: ^Engine, node_handle: Handle) {
-  parent_node_engine(engine, engine.scene.root, node_handle)
-}
 
 // --- Animation Control ---
 play_animation_engine :: proc(
@@ -1152,7 +1112,7 @@ spawn_point_light :: proc(
   engine: ^Engine,
   color: linalg.Vector4f32,
   radius: f32,
-  cast_shadow: bool,
+  cast_shadow: bool = true,
 ) -> (
   handle: Handle,
   node: ^Node,
@@ -1174,7 +1134,7 @@ spawn_point_light :: proc(
 spawn_directional_light :: proc(
   engine: ^Engine,
   color: linalg.Vector4f32,
-  cast_shadow: bool,
+  cast_shadow: bool = true,
 ) -> (
   handle: Handle,
   node: ^Node,
@@ -1197,7 +1157,7 @@ spawn_spot_light :: proc(
   color: linalg.Vector4f32,
   angle: f32,
   radius: f32,
-  cast_shadow: bool,
+  cast_shadow: bool = true,
 ) -> (
   handle: Handle,
   node: ^Node,

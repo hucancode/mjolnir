@@ -232,7 +232,6 @@ create_local_buffer :: proc(
   return
 }
 
-// Copies data from src DataBuffer to dst DataBuffer using a single-use command buffer.
 copy_buffer :: proc(
   ctx: ^VulkanContext,
   dst, src: ^DataBuffer,

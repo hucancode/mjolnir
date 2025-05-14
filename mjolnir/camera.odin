@@ -243,26 +243,16 @@ camera_calculate_view_matrix :: proc(camera: ^Camera) -> linalg.Matrix4f32 {
   }
 }
 
-camera_get_vector :: proc(camera: ^Camera, v: linalg.Vector3f32) -> linalg.Vector3f32 {
-  q := camera.rotation
-  q_vec := linalg.Vector3f32{q.x, q.y, q.z}
-  uv := linalg.cross(q_vec, linalg.VECTOR3F32_X_AXIS)
-  uuv := linalg.cross(q_vec, uv)
-  uv *= 2.0 * q.w
-  uuv *= 2.0
-  return v + uv + uuv
-}
-
 camera_forward :: proc(camera: ^Camera) -> linalg.Vector3f32 {
-  return camera_get_vector(camera, linalg.VECTOR3F32_Z_AXIS)
+  return linalg.quaternion_mul_vector3(camera.rotation, linalg.VECTOR3F32_Z_AXIS)
 }
 
 camera_right :: proc(camera: ^Camera) -> linalg.Vector3f32 {
-  return camera_get_vector(camera, linalg.VECTOR3F32_X_AXIS)
+  return linalg.quaternion_mul_vector3(camera.rotation, linalg.VECTOR3F32_X_AXIS)
 }
 
 camera_up :: proc(camera: ^Camera) -> linalg.Vector3f32 {
-  return camera_get_vector(camera, linalg.VECTOR3F32_Y_AXIS)
+  return linalg.quaternion_mul_vector3(camera.rotation, linalg.VECTOR3F32_Y_AXIS)
 }
 
 

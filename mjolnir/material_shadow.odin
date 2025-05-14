@@ -70,8 +70,6 @@ shadow_material_build :: proc(
     pDynamicStates    = raw_data(dynamic_states_values[:]),
   }
 
-  // Vertex input for simple position (e.g., from simple_vertex_buffer)
-  // Matches [4]f32 or linalg.Vector4f32
   vertex_binding_description := [?]vk.VertexInputBindingDescription {
     {
       binding   = 0,
@@ -117,7 +115,7 @@ shadow_material_build :: proc(
     depthBiasEnable         = true,
     depthBiasConstantFactor = 1.25,
     depthBiasClamp          = 0.0,
-    depthBiasSlopeFactor    = 1.75, // Example values, tune as needed
+    depthBiasSlopeFactor    = 1.75,
     lineWidth               = 1.0,
   }
 
@@ -138,8 +136,7 @@ shadow_material_build :: proc(
 
   push_constant_range := vk.PushConstantRange {
     stageFlags = {.VERTEX},
-    offset     = 0,
-    size       = size_of(linalg.Matrix4f32), // For model matrix
+    size       = size_of(linalg.Matrix4f32),
   }
 
   pipeline_layout_info := vk.PipelineLayoutCreateInfo {
@@ -167,7 +164,7 @@ shadow_material_build :: proc(
 
   rendering_info_khr := vk.PipelineRenderingCreateInfoKHR {
     sType                 = .PIPELINE_RENDERING_CREATE_INFO_KHR,
-    depthAttachmentFormat = shadow_map_depth_format,
+    depthAttachmentFormat = .D32_SFLOAT,
   }
 
   pipeline_info := vk.GraphicsPipelineCreateInfo {
@@ -206,7 +203,7 @@ create_shadow_material :: proc(renderer: ^Renderer) -> ShadowMaterial {
     &mat,
     SHADER_SHADOW_VERT,
     renderer.shadow_pass_descriptor_set_layout,
-    renderer.depth_buffer.format,
+    .D32_SFLOAT,
   )
   return mat
 }

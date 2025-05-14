@@ -109,6 +109,7 @@ frame_init :: proc(
     &self.main_pass_descriptor_set,
   ) or_return
   // Allocate Shadow Pass Descriptor Set
+  fmt.printfln("Allocating shadow pass descriptor set")
   data_buffer_init_host_visible(
     &self.light_view_proj_uniform,
     ctx,
@@ -181,7 +182,6 @@ frame_init :: proc(
   )
   light_vp_buffer_info := vk.DescriptorBufferInfo {
     buffer = self.light_view_proj_uniform.buffer,
-    offset = 0,
     range  = vk.DeviceSize(size_of(Mat4)),
   }
   write_shadow := vk.WriteDescriptorSet {
@@ -288,16 +288,16 @@ renderer_init :: proc(self: ^Renderer, ctx: ^VulkanContext) -> vk.Result {
     &self.shadow_pass_descriptor_set_layout,
   ) or_return
 
+  self.shadow_pass_material = create_shadow_material(self)
   // Initialize frames
-  for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
+  for &frame in self.frames {
     frame_init(
-      &self.frames[i],
+      &frame,
       ctx,
       &self.main_pass_descriptor_set_layout,
       &self.shadow_pass_descriptor_set_layout,
     ) or_return
   }
-  self.shadow_pass_material = create_shadow_material(self)
   return .SUCCESS
 }
 
@@ -598,8 +598,6 @@ renderer_destroy_swapchain_resources :: proc(self: ^Renderer) {
     self.views = nil
   }
 
-  // Images are owned by the swapchain and destroyed with it.
-  // We only need to free the slice memory if we allocated it.
   if self.images != nil {
     delete(self.images)
     self.images = nil
@@ -664,7 +662,7 @@ renderer_get_light_uniform :: proc(self: ^Renderer) -> ^DataBuffer {
 renderer_get_light_view_proj_uniform :: proc(self: ^Renderer) -> ^DataBuffer {
   return &self.frames[self.current_frame_index].light_view_proj_uniform
 }
-renderer_get_shadow_map :: proc(self: ^Renderer, light_idx: u16) -> ^DepthTexture {
+renderer_get_shadow_map :: proc(self: ^Renderer, light_idx: int) -> ^DepthTexture {
   return &self.frames[self.current_frame_index].shadow_maps[light_idx]
 }
 renderer_get_scene_descriptor_set :: proc(self: ^Renderer) -> vk.DescriptorSet {
@@ -755,7 +753,7 @@ renderer_begin_frame :: proc(
   depth_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
     imageView = self.depth_buffer.view,
-    imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL, // Or .DEPTH_ATTACHMENT_OPTIMAL if no stencil
+    imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
     loadOp = .CLEAR,
     storeOp = .STORE,
     clearValue = vk.ClearValue{depthStencil = {1.0, 0}},
@@ -783,7 +781,6 @@ renderer_begin_frame :: proc(
     maxDepth = 1.0,
   }
   scissor := vk.Rect2D {
-    offset = {0, 0},
     extent = self.extent,
   }
   vk.CmdSetViewport(cmd_buffer, 0, 1, &viewport)

@@ -94,7 +94,7 @@ vec3 calculateLighting(Light light, vec3 normal, vec3 position, vec3 viewDir, ve
     }
     if (light.kind == DIRECTIONAL_LIGHT) {
         vec3 surfaceToLight = -light.direction.xyz;
-        vec3 diffuse = max(dot(normal, surfaceToLight), 0.0) * albedo * diffuseStrength * 0.1;
+        vec3 diffuse = max(dot(normal, surfaceToLight), 0.0) * albedo * diffuseStrength;
         return diffuse;
     }
     if (light.kind == SPOT_LIGHT) {
@@ -118,6 +118,6 @@ void main() {
         float shadow = calculateShadow(i, position);
         result += calculateLighting(lights[i], normalize(normal), position, viewDir, albedo) * shadow;
     }
-    result += albedo * 0.1;
+    result *= albedo;
     outColor = vec4(result, 1.0);
 }

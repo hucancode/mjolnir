@@ -214,7 +214,6 @@ material_build :: proc(
   input_assembly := vk.PipelineInputAssemblyStateCreateInfo {
     sType                  = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
     topology               = .TRIANGLE_LIST,
-    primitiveRestartEnable = false,
   }
 
   viewport_state := vk.PipelineViewportStateCreateInfo {
@@ -225,19 +224,15 @@ material_build :: proc(
 
   rasterizer := vk.PipelineRasterizationStateCreateInfo {
     sType                   = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
-    depthClampEnable        = false,
-    rasterizerDiscardEnable = false,
     polygonMode             = .FILL,
     cullMode                = {.BACK},
     frontFace               = .COUNTER_CLOCKWISE,
-    depthBiasEnable         = false,
     lineWidth               = 1.0,
   }
 
   multisampling := vk.PipelineMultisampleStateCreateInfo {
     sType                = .PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
     rasterizationSamples = {._1},
-    sampleShadingEnable  = false,
     minSampleShading     = 1.0,
   }
 

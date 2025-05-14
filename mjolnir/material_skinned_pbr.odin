@@ -277,7 +277,6 @@ skinned_material_build :: proc(
   }
   push_constant_range := vk.PushConstantRange {
     stageFlags = {.VERTEX},
-    offset     = 0,
     size       = size_of(linalg.Matrix4f32),
   }
 

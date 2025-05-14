@@ -60,7 +60,6 @@ static_mesh_init :: proc(
     vk.DeviceSize(size),
     {.VERTEX_BUFFER},
   ) or_return
-  // Write positions data
 
   size = len(data.vertices) * size_of(geometry.Vertex)
   self.vertex_buffer = create_local_buffer(
