@@ -22,7 +22,7 @@ make_frustum :: proc(
 ) -> Frustum {
   m := linalg.transpose(view_projection_matrix)
   // Each plane is a Vec4: a*x + b*y + c*z + d = 0
-  planes := [?]linalg.Vector4f32 {
+  planes := [6]linalg.Vector4f32 {
     // Left
     m[3] + m[0],
     // Right
@@ -44,7 +44,7 @@ make_frustum :: proc(
     }
   }
   // fmt.printfln("Make frustum with: %v, m0 %v, m1 %v, m2 %v, m3 %v -> %v", m, m[0], m[1], m[2], m[3], planes)
-  return Frustum{planes = planes}
+  return Frustum{planes}
 }
 
 signed_distance_to_plane :: proc(

@@ -1,4 +1,5 @@
 package tests
+
 import linalg "core:math/linalg"
 import "core:fmt"
 import "core:testing"

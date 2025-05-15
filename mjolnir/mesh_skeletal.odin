@@ -55,7 +55,7 @@ skeletal_mesh_deinit :: proc(self: ^SkeletalMesh) {
 
   // Deinitialize bones
   if self.bones != nil {
-    for &bone, _ in self.bones {
+    for &bone in self.bones {
       bone_deinit(&bone)
     }
     delete(self.bones)
@@ -64,7 +64,7 @@ skeletal_mesh_deinit :: proc(self: ^SkeletalMesh) {
 
   // Deinitialize animations (Clips)
   if self.animations != nil {
-    for &anim_clip, _ in self.animations {
+    for &anim_clip in self.animations {
       // deinit_clip(&anim_clip)
     }
     delete(self.animations)
