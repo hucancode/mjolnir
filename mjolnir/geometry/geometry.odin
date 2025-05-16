@@ -321,7 +321,11 @@ make_cube :: proc(color: [4]f32 = {1.0, 1.0, 1.0, 1.0}) -> (ret: Geometry) {
 
 // Triangle
 
-make_triangle :: proc(color: [4]f32 = {1.0, 1.0, 1.0, 1.0}) -> (ret: Geometry) {
+make_triangle :: proc(
+  color: [4]f32 = {1.0, 1.0, 1.0, 1.0},
+) -> (
+  ret: Geometry,
+) {
   ret.vertices = make([]Vertex, 3)
   ret.indices = make([]u32, 3)
 

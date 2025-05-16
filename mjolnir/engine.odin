@@ -159,7 +159,13 @@ init_engine :: proc(
     }
   }
 
-  ui_init(&engine.ui, engine, engine.renderer.format.format, engine.renderer.extent.width, engine.renderer.extent.height)
+  ui_init(
+    &engine.ui,
+    engine,
+    engine.renderer.format.format,
+    engine.renderer.extent.width,
+    engine.renderer.extent.height,
+  )
 
   fmt.println("Engine initialized")
   return .SUCCESS
@@ -278,10 +284,7 @@ traverse_scene :: proc(
     current_node_handle := pop(&node_stack)
     parent_world_matrix := pop(&transform_stack)
 
-    current_node := resource.get(
-      &engine.nodes,
-      current_node_handle,
-    )
+    current_node := resource.get(&engine.nodes, current_node_handle)
     if current_node == nil {
       fmt.eprintf(
         "traverse_scene: Node with handle %v not found\n",
@@ -292,10 +295,15 @@ traverse_scene :: proc(
 
     // Ensure transform is up-to-date (local_matrix from TRS)
     if current_node.transform.is_dirty {
-      current_node.transform.local_matrix = linalg.matrix4_from_trs_f32(current_node.transform.position, current_node.transform.rotation, current_node.transform.scale)
+      current_node.transform.local_matrix = linalg.matrix4_from_trs_f32(
+        current_node.transform.position,
+        current_node.transform.rotation,
+        current_node.transform.scale,
+      )
       // current_node.transform.is_dirty = false; // World matrix update will clear it if needed
     }
-    current_node.transform.world_matrix = parent_world_matrix * current_node.transform.local_matrix
+    current_node.transform.world_matrix =
+      parent_world_matrix * current_node.transform.local_matrix
     current_node.transform.is_dirty = false
 
     if !callback(
@@ -354,8 +362,8 @@ collect_lights_callback :: proc(
       uniform.angle = light_type.angle
       uniform.position = world_matrix^ * linalg.Vector4f32{0, 0, 0, 1}
       uniform.direction = world_matrix^ * linalg.Vector4f32{0, 0, 1, 0}
-      // fmt.printfln("Spot light, transform %v matrix %v", node_ptr.transform, world_matrix^)
-      // fmt.printfln("Spot light, pos %v, dir %v", uniform.position, uniform.direction)
+    // fmt.printfln("Spot light, transform %v matrix %v", node_ptr.transform, world_matrix^)
+    // fmt.printfln("Spot light, pos %v, dir %v", uniform.position, uniform.direction)
     }
     push_light(ctx.light_uniform, uniform)
   }
@@ -377,10 +385,7 @@ render_scene_node_callback :: proc(
   case NodeSkeletalMeshAttachment:
     mesh := resource.get(&eng.skeletal_meshes, data.handle)
     if mesh == nil {return true}
-    material := resource.get(
-      &eng.skinned_materials,
-      mesh.material,
-    )
+    material := resource.get(&eng.skinned_materials, mesh.material)
     if material == nil {return true}
     world_aabb := geometry.aabb_transform(mesh.aabb, world_matrix)
     if !geometry.frustum_test_aabb(
@@ -640,10 +645,21 @@ try_render :: proc(engine: ^Engine) -> vk.Result {
   ctx := &engine.ui.ctx
   mu.begin(ctx)
   if mu.window(ctx, "Inspector", {40, 40, 300, 150}, {.NO_CLOSE}) {
-	if .ACTIVE in mu.header(ctx, "Scene Info", {.EXPANDED}) {
-		mu.label(ctx, fmt.tprintf("Objects %d", len(engine.nodes.entries) - len(engine.nodes.free_indices)))
-		mu.label(ctx, fmt.tprintf("Rendered %d", rendered_count))
-	}
+    mu.label(
+      ctx,
+      fmt.tprintf(
+        "Objects %d",
+        len(engine.nodes.entries) - len(engine.nodes.free_indices),
+      ),
+    )
+    mu.label(
+      ctx,
+      fmt.tprintf(
+        "Lights %d",
+        len(engine.lights.entries) - len(engine.lights.free_indices),
+      ),
+    )
+    mu.label(ctx, fmt.tprintf("Rendered %d", rendered_count))
   }
   mu.end(ctx)
   ui_render(&engine.ui, command_buffer_main)
@@ -996,10 +1012,7 @@ update_engine :: proc(engine: ^Engine) -> bool {
     anim_inst := &data.animation.?
     // fmt.printfln("[ANIM] Node %d anim status: %v time: %v",i, anim_inst.status, anim_inst.time)
     animation_instance_update(anim_inst, delta_time)
-    skeletal_mesh_res := resource.get(
-      &engine.skeletal_meshes,
-      data.handle,
-    )
+    skeletal_mesh_res := resource.get(&engine.skeletal_meshes, data.handle)
     if skeletal_mesh_res != nil {
       // Calculate bone transforms
       calculate_animation_transform(skeletal_mesh_res, anim_inst, &data.pose)
@@ -1077,10 +1090,7 @@ play_animation_engine :: proc(
   if !ok {
     return false
   }
-  skeletal_mesh_res := resource.get(
-    &engine.skeletal_meshes,
-    data.handle,
-  )
+  skeletal_mesh_res := resource.get(&engine.skeletal_meshes, data.handle)
   if skeletal_mesh_res == nil {
     return false
   }

@@ -17,9 +17,7 @@ Frustum :: struct {
 // Assuming Frustum struct and extract_frustum_planes are defined in frustum.odin
 // import . "frustum" // If in the same package, or specify path
 
-make_frustum :: proc(
-  view_projection_matrix: linalg.Matrix4f32
-) -> Frustum {
+make_frustum :: proc(view_projection_matrix: linalg.Matrix4f32) -> Frustum {
   m := linalg.transpose(view_projection_matrix)
   // Each plane is a Vec4: a*x + b*y + c*z + d = 0
   planes := [6]linalg.Vector4f32 {

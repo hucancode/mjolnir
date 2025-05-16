@@ -497,7 +497,12 @@ renderer_create_swapchain_and_resources :: proc(
 ) -> vk.Result {
   ctx := self.ctx
   renderer_build_swapchain_surface_format(self, formats)
-  renderer_build_swapchain_extent(self, capabilities, window_width, window_height)
+  renderer_build_swapchain_extent(
+    self,
+    capabilities,
+    window_width,
+    window_height,
+  )
 
   image_count := capabilities.minImageCount + 1
   if capabilities.maxImageCount > 0 &&
@@ -662,13 +667,20 @@ renderer_get_light_uniform :: proc(self: ^Renderer) -> ^DataBuffer {
 renderer_get_light_view_proj_uniform :: proc(self: ^Renderer) -> ^DataBuffer {
   return &self.frames[self.current_frame_index].light_view_proj_uniform
 }
-renderer_get_shadow_map :: proc(self: ^Renderer, light_idx: int) -> ^DepthTexture {
+renderer_get_shadow_map :: proc(
+  self: ^Renderer,
+  light_idx: int,
+) -> ^DepthTexture {
   return &self.frames[self.current_frame_index].shadow_maps[light_idx]
 }
-renderer_get_scene_descriptor_set :: proc(self: ^Renderer) -> vk.DescriptorSet {
+renderer_get_scene_descriptor_set :: proc(
+  self: ^Renderer,
+) -> vk.DescriptorSet {
   return self.frames[self.current_frame_index].main_pass_descriptor_set
 }
-renderer_get_shadow_descriptor_set :: proc(self: ^Renderer) -> vk.DescriptorSet {
+renderer_get_shadow_descriptor_set :: proc(
+  self: ^Renderer,
+) -> vk.DescriptorSet {
   return self.frames[self.current_frame_index].shadow_pass_descriptor_set
 }
 
@@ -686,7 +698,9 @@ renderer_begin_frame :: proc(
   vk.WaitForFences(ctx.vkd, 1, &current_fence, true, math.max(u64)) or_return
 
   // Acquire an image from the swap chain
-  current_image_available_semaphore := renderer_get_image_available_semaphore(self)
+  current_image_available_semaphore := renderer_get_image_available_semaphore(
+    self,
+  )
   vk.AcquireNextImageKHR(
     ctx.vkd,
     self.swapchain,
@@ -830,8 +844,12 @@ renderer_end_frame :: proc(self: ^Renderer, image_index: u32) -> vk.Result {
   vk.EndCommandBuffer(cmd_buffer) or_return
 
   // Submit command buffer
-  current_image_available_semaphore := renderer_get_image_available_semaphore(self)
-  current_render_finished_semaphore := renderer_get_render_finished_semaphore(self)
+  current_image_available_semaphore := renderer_get_image_available_semaphore(
+    self,
+  )
+  current_render_finished_semaphore := renderer_get_render_finished_semaphore(
+    self,
+  )
   current_fence := renderer_get_in_flight_fence(self)
 
   wait_stage_mask: vk.PipelineStageFlags = {.COLOR_ATTACHMENT_OUTPUT}
@@ -894,7 +912,12 @@ renderer_build_swapchain :: proc(
   }
 
   // Choose extent
-  renderer_build_swapchain_extent(self, capabilities, actual_width, actual_height)
+  renderer_build_swapchain_extent(
+    self,
+    capabilities,
+    actual_width,
+    actual_height,
+  )
 
   // Image count
   image_count := capabilities.minImageCount + 1

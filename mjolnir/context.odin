@@ -284,7 +284,10 @@ score_physical_device :: proc(
     raw_data(available_extensions),
   ) or_return
 
-  fmt.printfln("vulkan: device supports %v extensions", len(available_extensions))
+  fmt.printfln(
+    "vulkan: device supports %v extensions",
+    len(available_extensions),
+  )
   required_loop: for required in DEVICE_EXTENSIONS {
     fmt.printfln("vulkan: checking for required extension %q", required)
     for &extension in available_extensions {
@@ -296,7 +299,10 @@ score_physical_device :: proc(
         continue required_loop
       }
     }
-    fmt.printfln("vulkan: device does not support required extension", required)
+    fmt.printfln(
+      "vulkan: device does not support required extension",
+      required,
+    )
     return 0, .NOT_READY
   }
   fmt.printfln("vulkan: device supports all required extensions")
@@ -309,7 +315,10 @@ score_physical_device :: proc(
   defer swapchain_support_deinit(&support)
 
   if len(support.formats) == 0 || len(support.present_modes) == 0 {
-    fmt.printfln("Device %s: inadequate swapchain support.", device_name_cstring)
+    fmt.printfln(
+      "Device %s: inadequate swapchain support.",
+      device_name_cstring,
+    )
     return 0, .SUCCESS
   }
 
@@ -371,7 +380,8 @@ physical_device_init :: proc(self: ^VulkanContext) -> vk.Result {
 
   props: vk.PhysicalDeviceProperties
   vk.GetPhysicalDeviceProperties(self.physical_device, &props)
-  fmt.printfln("\nSelected physical device: %s (score %d)",
+  fmt.printfln(
+    "\nSelected physical device: %s (score %d)",
     cstring(&props.deviceName[0]),
     best_score,
   )
@@ -503,7 +513,10 @@ descriptor_pool_init :: proc(self: ^VulkanContext) -> vk.Result {
   }
   fmt.printfln("Descriptor pool allocation sizes:")
   fmt.printfln(" - Combined Image Samplers: %d", MAX_SAMPLER_COUNT)
-  fmt.printfln(" - Uniform Buffers: %d", MAX_FRAMES_IN_FLIGHT * SCENE_UNIFORM_COUNT)
+  fmt.printfln(
+    " - Uniform Buffers: %d",
+    MAX_FRAMES_IN_FLIGHT * SCENE_UNIFORM_COUNT,
+  )
   fmt.printfln(" - Storage Buffers: %d", ACTIVE_MATERIAL_COUNT)
 
   pool_info := vk.DescriptorPoolCreateInfo {

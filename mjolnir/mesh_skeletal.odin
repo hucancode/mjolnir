@@ -1,7 +1,7 @@
 package mjolnir
 
-import "core:fmt"
 import "base:runtime"
+import "core:fmt"
 import linalg "core:math/linalg"
 import "core:strings"
 import "geometry"
@@ -177,7 +177,11 @@ calculate_animation_transform :: proc(
     } else {
       local_animated_transform = current_bone.bind_transform
     }
-    local_matrix := linalg.matrix4_from_trs_f32(local_animated_transform.position, local_animated_transform.rotation, local_animated_transform.scale)
+    local_matrix := linalg.matrix4_from_trs_f32(
+      local_animated_transform.position,
+      local_animated_transform.rotation,
+      local_animated_transform.scale,
+    )
     current_world_transform := parent_world_transform * local_matrix
     // fmt.printfln("calculate_animation_transform, local matrix", local_matrix)
     target_pose.bone_matrices[current_bone_index] =

@@ -60,17 +60,19 @@ material_init_descriptor_set :: proc(mat: ^Material) -> vk.Result {
       descriptorType  = .COMBINED_IMAGE_SAMPLER,
       descriptorCount = 1,
       stageFlags      = {.FRAGMENT},
-    }, {   // Metallic
+    },
+    {   // Metallic
       binding         = 1,
       descriptorType  = .COMBINED_IMAGE_SAMPLER,
       descriptorCount = 1,
       stageFlags      = {.FRAGMENT},
-    }, {   // Roughness
+    },
+    {   // Roughness
       binding         = 2,
       descriptorType  = .COMBINED_IMAGE_SAMPLER,
       descriptorCount = 1,
       stageFlags      = {.FRAGMENT},
-    }
+    },
   }
 
   layout_info := vk.DescriptorSetLayoutCreateInfo {
@@ -112,15 +114,17 @@ material_update_textures :: proc(
       sampler     = albedo.sampler,
       imageView   = albedo.buffer.view, // Assumes Texture.buffer is ImageBuffer with a view
       imageLayout = .SHADER_READ_ONLY_OPTIMAL,
-    }, {   // Metallic
+    },
+    {   // Metallic
       sampler     = metallic.sampler,
       imageView   = metallic.buffer.view,
       imageLayout = .SHADER_READ_ONLY_OPTIMAL,
-    }, {   // Roughness
+    },
+    {   // Roughness
       sampler     = roughness.sampler,
       imageView   = roughness.buffer.view,
       imageLayout = .SHADER_READ_ONLY_OPTIMAL,
-    }
+    },
   }
 
   writes := [?]vk.WriteDescriptorSet {
@@ -131,24 +135,30 @@ material_update_textures :: proc(
       descriptorType  = .COMBINED_IMAGE_SAMPLER,
       descriptorCount = 1,
       pImageInfo      = &image_infos[0],
-    }, {   // Metallic
+    },
+    {   // Metallic
       sType           = .WRITE_DESCRIPTOR_SET,
       dstSet          = mat.descriptor_set,
       dstBinding      = 1,
       descriptorType  = .COMBINED_IMAGE_SAMPLER,
       descriptorCount = 1,
       pImageInfo      = &image_infos[1],
-    }, {   // Roughness
+    },
+    {   // Roughness
       sType           = .WRITE_DESCRIPTOR_SET,
       dstSet          = mat.descriptor_set,
       dstBinding      = 2,
       descriptorType  = .COMBINED_IMAGE_SAMPLER,
       descriptorCount = 1,
       pImageInfo      = &image_infos[2],
-    }
+    },
   }
 
-  fmt.printfln("Updating material descriptor set: %d, with texture", mat.descriptor_set, image_infos)
+  fmt.printfln(
+    "Updating material descriptor set: %d, with texture",
+    mat.descriptor_set,
+    image_infos,
+  )
   vk.UpdateDescriptorSets(vkd, len(writes), raw_data(writes[:]), 0, nil)
 }
 
@@ -212,8 +222,8 @@ material_build :: proc(
   }
 
   input_assembly := vk.PipelineInputAssemblyStateCreateInfo {
-    sType                  = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
-    topology               = .TRIANGLE_LIST,
+    sType    = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+    topology = .TRIANGLE_LIST,
   }
 
   viewport_state := vk.PipelineViewportStateCreateInfo {
@@ -223,11 +233,11 @@ material_build :: proc(
   }
 
   rasterizer := vk.PipelineRasterizationStateCreateInfo {
-    sType                   = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
-    polygonMode             = .FILL,
-    cullMode                = {.BACK},
-    frontFace               = .COUNTER_CLOCKWISE,
-    lineWidth               = 1.0,
+    sType       = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+    polygonMode = .FILL,
+    cullMode    = {.BACK},
+    frontFace   = .COUNTER_CLOCKWISE,
+    lineWidth   = 1.0,
   }
 
   multisampling := vk.PipelineMultisampleStateCreateInfo {
@@ -262,7 +272,6 @@ material_build :: proc(
 
   push_constant_range := vk.PushConstantRange {
     stageFlags = {.VERTEX},
-
     size       = size_of(linalg.Matrix4f32), // For model matrix
   }
 
@@ -334,7 +343,11 @@ create_material :: proc(
   albedo: resource.Handle,
   metallic: resource.Handle,
   roughness: resource.Handle,
-) -> (handle: resource.Handle, mat: ^Material, ret: vk.Result) {
+) -> (
+  handle: resource.Handle,
+  mat: ^Material,
+  ret: vk.Result,
+) {
   fmt.printfln("Creating PBR material")
   handle, mat = resource.alloc(&engine.materials)
   material_init(mat, &engine.vk_ctx)

@@ -1,7 +1,7 @@
 package mjolnir
 
-import "core:math"
 import "core:fmt"
+import "core:math"
 import linalg "core:math/linalg"
 import "geometry"
 
@@ -144,19 +144,23 @@ camera_switch_to_free :: proc(camera: ^Camera) {
 
 // Orbit Mode Methods
 camera_orbit_rotate :: proc(self: ^Camera, yaw_delta: f32, pitch_delta: f32) {
-    #partial switch &movement in &self.movement_data {
-    case CameraOrbitMovement:
-        movement.yaw += yaw_delta
-        movement.pitch += pitch_delta
-        PI_HALF :: math.PI / 2.0
-        epsilon :: 0.001
-        movement.pitch = math.clamp(movement.pitch, -PI_HALF + epsilon, PI_HALF - epsilon)
-        camera_update_orbit_position(self)
-        // fmt.printfln("Orbit camera rotated: yaw %f, pitch %f", movement.yaw, movement.pitch)
-    case:
-        //log.warnf("rotate_orbit_camera called on non-orbit camera or uninitialized orbit data")
-        return
-    }
+  #partial switch &movement in &self.movement_data {
+  case CameraOrbitMovement:
+    movement.yaw += yaw_delta
+    movement.pitch += pitch_delta
+    PI_HALF :: math.PI / 2.0
+    epsilon :: 0.001
+    movement.pitch = math.clamp(
+      movement.pitch,
+      -PI_HALF + epsilon,
+      PI_HALF - epsilon,
+    )
+    camera_update_orbit_position(self)
+  // fmt.printfln("Orbit camera rotated: yaw %f, pitch %f", movement.yaw, movement.pitch)
+  case:
+    //log.warnf("rotate_orbit_camera called on non-orbit camera or uninitialized orbit data")
+    return
+  }
 }
 
 camera_orbit_zoom :: proc(camera: ^Camera, delta_distance: f32) {
@@ -205,7 +209,9 @@ camera_update_orbit_position :: proc(camera: ^Camera) {
 }
 
 // Matrix Calculations
-camera_calculate_projection_matrix :: proc(camera: ^Camera) -> linalg.Matrix4f32 {
+camera_calculate_projection_matrix :: proc(
+  camera: ^Camera,
+) -> linalg.Matrix4f32 {
   switch proj in camera.projection {
   case PerspectiveProjection:
     return linalg.matrix4_perspective_f32(
@@ -231,7 +237,11 @@ camera_calculate_projection_matrix :: proc(camera: ^Camera) -> linalg.Matrix4f32
 camera_calculate_view_matrix :: proc(camera: ^Camera) -> linalg.Matrix4f32 {
   switch movement_data in camera.movement_data {
   case CameraOrbitMovement:
-    return linalg.matrix4_look_at_f32(camera.position, movement_data.target, camera.up)
+    return linalg.matrix4_look_at_f32(
+      camera.position,
+      movement_data.target,
+      camera.up,
+    )
   case CameraFreeMovement:
     forward_vec := camera_forward(camera)
     up_vec := camera_up(camera)
@@ -243,22 +253,29 @@ camera_calculate_view_matrix :: proc(camera: ^Camera) -> linalg.Matrix4f32 {
 }
 
 camera_forward :: proc(camera: ^Camera) -> linalg.Vector3f32 {
-  return linalg.quaternion_mul_vector3(camera.rotation, linalg.VECTOR3F32_Z_AXIS)
+  return linalg.quaternion_mul_vector3(
+    camera.rotation,
+    linalg.VECTOR3F32_Z_AXIS,
+  )
 }
 
 camera_right :: proc(camera: ^Camera) -> linalg.Vector3f32 {
-  return linalg.quaternion_mul_vector3(camera.rotation, linalg.VECTOR3F32_X_AXIS)
+  return linalg.quaternion_mul_vector3(
+    camera.rotation,
+    linalg.VECTOR3F32_X_AXIS,
+  )
 }
 
 camera_up :: proc(camera: ^Camera) -> linalg.Vector3f32 {
-  return linalg.quaternion_mul_vector3(camera.rotation, linalg.VECTOR3F32_Y_AXIS)
+  return linalg.quaternion_mul_vector3(
+    camera.rotation,
+    linalg.VECTOR3F32_Y_AXIS,
+  )
 }
 
 
 // Frustum
-camera_make_frustum :: proc(
-  camera: ^Camera,
-) -> geometry.Frustum {
+camera_make_frustum :: proc(camera: ^Camera) -> geometry.Frustum {
   view_matrix := camera_calculate_view_matrix(camera)
   proj_matrix := camera_calculate_projection_matrix(camera)
   return geometry.make_frustum(proj_matrix * view_matrix)

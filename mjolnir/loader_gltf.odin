@@ -93,9 +93,7 @@ gltf_loader_submit :: proc(
   for len(stack) > 0 {
     entry := pop(&stack)
     g_node := &gltf_data.nodes[entry.idx]
-    node_handle, node := resource.alloc(
-      &loader.engine_ptr.nodes,
-    )
+    node_handle, node := resource.alloc(&loader.engine_ptr.nodes)
     if node == nil {
       continue
     }
@@ -121,7 +119,8 @@ gltf_loader_submit :: proc(
       if g_node.has_scale {
         node.transform.scale = g_node.scale
       }
-      fmt.printfln("Node %s: translation %v, rotation %v, scale %v",
+      fmt.printfln(
+        "Node %s: translation %v, rotation %v, scale %v",
         string(g_node.name),
         g_node.translation,
         g_node.rotation,
@@ -134,9 +133,7 @@ gltf_loader_submit :: proc(
     if g_node.mesh != nil {
       if g_node.skin != nil {
         fmt.printfln("Loading skinned mesh %s", string(g_node.name))
-        mesh_handle, mesh := resource.alloc(
-          &loader.engine_ptr.skeletal_meshes,
-        )
+        mesh_handle, mesh := resource.alloc(&loader.engine_ptr.skeletal_meshes)
         data, bones, material, root_bone_idx, bone_map, ok :=
           process_gltf_skinned_primitive(
             loader,
@@ -156,9 +153,9 @@ gltf_loader_submit :: proc(
 
           // Create the attachment with initialized pose
           node.attachment = NodeSkeletalMeshAttachment {
-            handle = mesh_handle,
-            pose = pose,
-          }
+              handle = mesh_handle,
+              pose   = pose,
+            }
 
           // Process animations for this mesh
           process_animations_for_skeletal_mesh(
@@ -174,7 +171,7 @@ gltf_loader_submit :: proc(
 
           // Set initial pose to bind pose
           for bone_idx := 0; bone_idx < len(bones); bone_idx += 1 {
-              pose.bone_matrices[bone_idx] = linalg.MATRIX4F32_IDENTITY
+            pose.bone_matrices[bone_idx] = linalg.MATRIX4F32_IDENTITY
           }
           pose_flush(&pose)
         }
@@ -191,15 +188,25 @@ gltf_loader_submit :: proc(
           continue
         }
 
-        fmt.printfln("Initializing static mesh with %d vertices, %d indices",
-          len(mesh_data.vertices), len(mesh_data.indices))
+        fmt.printfln(
+          "Initializing static mesh with %d vertices, %d indices",
+          len(mesh_data.vertices),
+          len(mesh_data.indices),
+        )
 
-        mesh_handle := create_static_mesh(loader.engine_ptr, &mesh_data, mat_handle)
+        mesh_handle := create_static_mesh(
+          loader.engine_ptr,
+          &mesh_data,
+          mat_handle,
+        )
 
         node.attachment = NodeStaticMeshAttachment {
           handle = mesh_handle,
         }
-        fmt.printfln("Static mesh loaded successfully with material %v", mat_handle)
+        fmt.printfln(
+          "Static mesh loaded successfully with material %v",
+          mat_handle,
+        )
       }
     }
     // Parent this node to its parent
@@ -306,7 +313,7 @@ process_gltf_primitive :: proc(
       base_color_tex_handle,
     )
   } else {
-    tex_handle : Handle
+    tex_handle: Handle
     material_handle, _, _ = create_material(
       loader.engine_ptr,
       tex_handle,
@@ -321,7 +328,12 @@ process_gltf_primitive :: proc(
   for &attribute in g_primitive.attributes {
     accessor := attribute.data
     if accessor.count != vertices_num {
-      fmt.eprintf("Warning: Attribute '%v' count (%d) does not match position count (%d)\n", attribute.type, accessor.count, vertices_num)
+      fmt.eprintf(
+        "Warning: Attribute '%v' count (%d) does not match position count (%d)\n",
+        attribute.type,
+        accessor.count,
+        vertices_num,
+      )
     }
     floats_data := unpack_accessor_floats_flat(accessor)
     #partial switch attribute.type {
@@ -349,7 +361,7 @@ process_gltf_primitive :: proc(
       }
     }
   }
-  indices : []u32
+  indices: []u32
   if g_primitive.indices != nil {
     indices = make([]u32, g_primitive.indices.count)
     read := cgltf.accessor_unpack_indices(
@@ -359,7 +371,11 @@ process_gltf_primitive :: proc(
       g_primitive.indices.count,
     )
     if read != g_primitive.indices.count {
-      fmt.eprintf("Failed to read indices from GLTF primitive. read %d, need %d\n", read, g_primitive.indices.count)
+      fmt.eprintf(
+        "Failed to read indices from GLTF primitive. read %d, need %d\n",
+        read,
+        g_primitive.indices.count,
+      )
       ret = .ERROR_UNKNOWN
       return
     }
@@ -381,7 +397,7 @@ process_gltf_skinned_primitive :: proc(
 ) -> (
   skinned_geom_data: geometry.SkinnedGeometry,
   engine_bones: []Bone,
-  mat_handle : resource.Handle,
+  mat_handle: resource.Handle,
   root_bone_idx: u32,
   node_ptr_to_bone_idx_map: map[^cgltf.node]u32,
   ok: bool,
@@ -407,9 +423,13 @@ process_gltf_skinned_primitive :: proc(
       base_color_tex_handle,
       base_color_tex_handle,
     )
-    fmt.printfln("Creating skinned material with texture %v -> %v", base_color_tex_handle, mat_handle)
+    fmt.printfln(
+      "Creating skinned material with texture %v -> %v",
+      base_color_tex_handle,
+      mat_handle,
+    )
   } else {
-    tex_handle : Handle
+    tex_handle: Handle
     mat_handle, _, _ = create_skinned_material(
       loader.engine_ptr,
       tex_handle,
@@ -426,7 +446,12 @@ process_gltf_skinned_primitive :: proc(
     attribute := &attributes[attr_idx]
     accessor := attribute.data
     if accessor.count != num_vertices {
-      fmt.eprintf("Warning: Skinned attribute '%v' count (%d) does not match position count (%d)\n", attribute.type, accessor.count, num_vertices)
+      fmt.eprintf(
+        "Warning: Skinned attribute '%v' count (%d) does not match position count (%d)\n",
+        attribute.type,
+        accessor.count,
+        num_vertices,
+      )
     }
     data := unpack_accessor_floats_flat(accessor)
     #partial switch attribute.type {
@@ -455,29 +480,34 @@ process_gltf_skinned_primitive :: proc(
     case .joints:
       // fmt.printfln("Loading joints with accessor %v", accessor)
       // if attribute.index == 0 {
-        n := accessor.count
-        for i in 0 ..< min(int(n), len(vertices)) {
-          read := cgltf.accessor_read_uint(accessor, uint(i), raw_data(vertices[i].joints[:]), len(vertices[i].joints))
-          if !read {
-            fmt.eprintf("Failed to read joints from GLTF primitive.\n")
-          }
+      n := accessor.count
+      for i in 0 ..< min(int(n), len(vertices)) {
+        read := cgltf.accessor_read_uint(
+          accessor,
+          uint(i),
+          raw_data(vertices[i].joints[:]),
+          len(vertices[i].joints),
+        )
+        if !read {
+          fmt.eprintf("Failed to read joints from GLTF primitive.\n")
         }
-      // }
+      }
+    // }
     case .weights:
       // if attribute.index == 0 {
-        for i in 0 ..< min(int(accessor.count), len(vertices)) {
-          vertices[i].weights = {
-            data[i * 4 + 0],
-            data[i * 4 + 1],
-            data[i * 4 + 2],
-            data[i * 4 + 3],
-          }
+      for i in 0 ..< min(int(accessor.count), len(vertices)) {
+        vertices[i].weights = {
+          data[i * 4 + 0],
+          data[i * 4 + 1],
+          data[i * 4 + 2],
+          data[i * 4 + 3],
         }
-      // }
+      }
+    // }
     }
   }
   // fmt.printfln("Joints %v", vertices[len(vertices)-20:])
-  indices : []u32
+  indices: []u32
   if g_primitive.indices != nil {
     indices = make([]u32, g_primitive.indices.count)
     read := cgltf.accessor_unpack_indices(
@@ -487,7 +517,11 @@ process_gltf_skinned_primitive :: proc(
       g_primitive.indices.count,
     )
     if read != g_primitive.indices.count {
-      fmt.eprintf("Failed to read indices from GLTF primitive. read %d, need %d\n", read, g_primitive.indices.count)
+      fmt.eprintf(
+        "Failed to read indices from GLTF primitive. read %d, need %d\n",
+        read,
+        g_primitive.indices.count,
+      )
       ok = false
       return
     }
@@ -600,7 +634,10 @@ process_animations_for_skeletal_mesh :: proc(
     }
 
     // Channels per bone
-    fmt.printfln("\nAllocating animation channels for %d bones", len(skeletal_mesh.bones))
+    fmt.printfln(
+      "\nAllocating animation channels for %d bones",
+      len(skeletal_mesh.bones),
+    )
     clip.channels = make([]Animation_Channel, len(skeletal_mesh.bones))
 
     max_time: f32 = 0.0

@@ -1,7 +1,7 @@
 package mjolnir
 
-import "core:fmt"
 import "base:runtime"
+import "core:fmt"
 import linalg "core:math/linalg"
 import "geometry"
 import "resource"

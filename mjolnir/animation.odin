@@ -45,7 +45,7 @@ keyframe_sample :: proc($T: typeid, frames: []Keyframe(T), t: f32) -> T {
   a := frames[i - 1]
   b := frames[i]
   if b.time - a.time < EPSILON {
-      return a.value
+    return a.value
   }
   alpha := (t - a.time) / (b.time - a.time)
   // fmt.printfln("sample_keyframe: (%v %v) %v", a, b, alpha)
@@ -173,11 +173,17 @@ animation_instance_update :: proc(
   switch instance.mode {
   case .Loop:
     instance.time += effective_delta_time
-    instance.time = math.mod_f32(instance.time + instance.duration, instance.duration)
-    // fmt.printfln("animation_instance_update: time +%f = %f", effective_delta_time, instance.time)
+    instance.time = math.mod_f32(
+      instance.time + instance.duration,
+      instance.duration,
+    )
+  // fmt.printfln("animation_instance_update: time +%f = %f", effective_delta_time, instance.time)
   case .Once:
     instance.time += effective_delta_time
-    instance.time = math.mod_f32(instance.time + instance.duration, instance.duration)
+    instance.time = math.mod_f32(
+      instance.time + instance.duration,
+      instance.duration,
+    )
     if instance.time >= instance.duration {
       instance.time = instance.duration
       instance.status = .Stopped

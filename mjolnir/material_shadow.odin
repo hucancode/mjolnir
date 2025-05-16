@@ -71,18 +71,14 @@ shadow_material_build :: proc(
   }
 
   vertex_binding_description := [?]vk.VertexInputBindingDescription {
-    {
-      binding   = 0,
-      stride    = size_of(linalg.Vector4f32),
-      inputRate = .VERTEX,
-    },
+    {binding = 0, stride = size_of(linalg.Vector4f32), inputRate = .VERTEX},
   }
   vertex_attribute_descriptions := [?]vk.VertexInputAttributeDescription {
-    { // Position
-      binding = 0,
+    {   // Position
+      binding  = 0,
       location = 0,
-      format = .R32G32B32A32_SFLOAT,
-      offset = 0,
+      format   = .R32G32B32A32_SFLOAT,
+      offset   = 0,
     },
   }
   vertex_input_info := vk.PipelineVertexInputStateCreateInfo {
@@ -90,7 +86,9 @@ shadow_material_build :: proc(
     vertexBindingDescriptionCount   = len(vertex_binding_description),
     pVertexBindingDescriptions      = raw_data(vertex_binding_description[:]),
     vertexAttributeDescriptionCount = len(vertex_attribute_descriptions),
-    pVertexAttributeDescriptions    = raw_data(vertex_attribute_descriptions[:]),
+    pVertexAttributeDescriptions    = raw_data(
+      vertex_attribute_descriptions[:],
+    ),
   }
 
   input_assembly := vk.PipelineInputAssemblyStateCreateInfo {

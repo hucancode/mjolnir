@@ -50,7 +50,12 @@ create_texture_from_data :: proc(
   texute_init(texture, &engine.vk_ctx) or_return
   delete(texture.image_data.pixels)
   texture.image_data.pixels = nil
-  fmt.printfln("created texture %d x %d -> id %d", texture.image_data.width, texture.image_data.height, texture.buffer.image)
+  fmt.printfln(
+    "created texture %d x %d -> id %d",
+    texture.image_data.width,
+    texture.image_data.height,
+    texture.buffer.image,
+  )
   ret = .SUCCESS
   return
 }
@@ -75,7 +80,12 @@ create_texture_from_pixels :: proc(
   texture.image_data.actual_channels = channel
   texute_init(texture, &engine.vk_ctx, format) or_return
   texture.image_data.pixels = nil
-  fmt.printfln("created texture %d x %d -> id %d", texture.image_data.width, texture.image_data.height, texture.buffer.image)
+  fmt.printfln(
+    "created texture %d x %d -> id %d",
+    texture.image_data.width,
+    texture.image_data.height,
+    texture.buffer.image,
+  )
   ret = .SUCCESS
   return
 }

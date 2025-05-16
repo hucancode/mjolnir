@@ -94,7 +94,9 @@ data_buffer_init_host_visible :: proc(
     {.HOST_VISIBLE, .HOST_COHERENT},
   )
   if !found {
-    fmt.printfln("init_host_visible_buffer: Failed to find suitable memory type.")
+    fmt.printfln(
+      "init_host_visible_buffer: Failed to find suitable memory type.",
+    )
     return .ERROR_UNKNOWN
   }
 
@@ -126,11 +128,11 @@ data_buffer_init_host_visible :: proc(
 // --- ImageBuffer ---
 
 ImageBuffer :: struct {
-  image:  vk.Image,
-  memory: vk.DeviceMemory,
+  image:         vk.Image,
+  memory:        vk.DeviceMemory,
   width, height: u32,
-  format: vk.Format,
-  view:   vk.ImageView,
+  format:        vk.Format,
+  view:          vk.ImageView,
 }
 
 // Deinitializes an ImageBuffer.
@@ -199,13 +201,7 @@ create_host_visible_buffer :: proc(
   buffer: DataBuffer,
   ret: vk.Result,
 ) {
-  data_buffer_init_host_visible(
-    &buffer,
-    ctx,
-    size,
-    usage,
-    data,
-  ) or_return
+  data_buffer_init_host_visible(&buffer, ctx, size, usage, data) or_return
   ret = .SUCCESS
   return
 }
@@ -220,22 +216,20 @@ create_local_buffer :: proc(
   buffer: DataBuffer,
   ret: vk.Result,
 ) {
-  staging := create_host_visible_buffer(ctx, size, {.TRANSFER_SRC}, data) or_return
-  defer data_buffer_deinit(&staging, ctx)
-  buffer = malloc_local_buffer(
+  staging := create_host_visible_buffer(
     ctx,
     size,
-    usage | {.TRANSFER_DST},
+    {.TRANSFER_SRC},
+    data,
   ) or_return
+  defer data_buffer_deinit(&staging, ctx)
+  buffer = malloc_local_buffer(ctx, size, usage | {.TRANSFER_DST}) or_return
   copy_buffer(ctx, &buffer, &staging) or_return
   ret = .SUCCESS
   return
 }
 
-copy_buffer :: proc(
-  ctx: ^VulkanContext,
-  dst, src: ^DataBuffer,
-) -> vk.Result {
+copy_buffer :: proc(ctx: ^VulkanContext, dst, src: ^DataBuffer) -> vk.Result {
   cmd_buffer := begin_single_time_command(ctx) or_return
   region := vk.BufferCopy {
     srcOffset = 0,
@@ -243,7 +237,12 @@ copy_buffer :: proc(
     size      = src.size,
   }
   vk.CmdCopyBuffer(cmd_buffer, src.buffer, dst.buffer, 1, &region)
-  fmt.printfln("Copying buffer %x mapped %x to %x", src.buffer, src.mapped, dst.buffer)
+  fmt.printfln(
+    "Copying buffer %x mapped %x to %x",
+    src.buffer,
+    src.mapped,
+    dst.buffer,
+  )
   return end_single_time_command(ctx, &cmd_buffer)
 }
 
@@ -266,7 +265,8 @@ transition_image_layout :: proc(
     dst_access_mask = {.TRANSFER_WRITE}
     src_stage = {.TOP_OF_PIPE}
     dst_stage = {.TRANSFER}
-  } else if old_layout == .TRANSFER_DST_OPTIMAL && new_layout == .SHADER_READ_ONLY_OPTIMAL {
+  } else if old_layout == .TRANSFER_DST_OPTIMAL &&
+     new_layout == .SHADER_READ_ONLY_OPTIMAL {
     src_access_mask = {.TRANSFER_WRITE}
     dst_access_mask = {.SHADER_READ}
     src_stage = {.TRANSFER}
@@ -364,7 +364,12 @@ create_image_buffer :: proc(
   img: ImageBuffer,
   ret: vk.Result,
 ) {
-  staging := create_host_visible_buffer(ctx, size, {.TRANSFER_SRC}, data) or_return
+  staging := create_host_visible_buffer(
+    ctx,
+    size,
+    {.TRANSFER_SRC},
+    data,
+  ) or_return
   defer data_buffer_deinit(&staging, ctx)
   img = malloc_image_buffer(
     ctx,

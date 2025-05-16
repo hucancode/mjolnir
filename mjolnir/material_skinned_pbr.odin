@@ -58,22 +58,25 @@ skinned_material_init_descriptor_set :: proc(
       descriptorType  = .COMBINED_IMAGE_SAMPLER,
       descriptorCount = 1,
       stageFlags      = {.FRAGMENT},
-    }, {   // Metallic
+    },
+    {   // Metallic
       binding         = 1,
       descriptorType  = .COMBINED_IMAGE_SAMPLER,
       descriptorCount = 1,
       stageFlags      = {.FRAGMENT},
-    }, {   // Roughness
+    },
+    {   // Roughness
       binding         = 2,
       descriptorType  = .COMBINED_IMAGE_SAMPLER,
       descriptorCount = 1,
       stageFlags      = {.FRAGMENT},
-    }, {   // Bones
+    },
+    {   // Bones
       binding         = 3,
       descriptorType  = .STORAGE_BUFFER,
       descriptorCount = 1,
       stageFlags      = {.VERTEX},
-    }
+    },
   }
 
   layout_info := vk.DescriptorSetLayoutCreateInfo {
@@ -341,7 +344,11 @@ create_skinned_material :: proc(
   albedo: resource.Handle,
   metallic: resource.Handle,
   roughness: resource.Handle,
-) -> (handle: resource.Handle, mat: ^SkinnedMaterial, ret: vk.Result) {
+) -> (
+  handle: resource.Handle,
+  mat: ^SkinnedMaterial,
+  ret: vk.Result,
+) {
   handle, mat = resource.alloc(&engine.skinned_materials)
   skinned_material_init(mat, &engine.vk_ctx)
   skinned_material_init_descriptor_set(mat) or_return
