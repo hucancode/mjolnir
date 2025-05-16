@@ -639,22 +639,15 @@ try_render :: proc(engine: ^Engine) -> vk.Result {
 
   ctx := &engine.ui.ctx
   mu.begin(ctx)
-  @static opts := mu.Options{.NO_CLOSE}
-  if mu.window(ctx, "Demo Window", {40, 40, 300, 450}, opts) {
-	if .ACTIVE in mu.header(ctx, "Window Info") {
-		win := mu.get_current_container(ctx)
-		mu.layout_row(ctx, {54, -1}, 0)
-		mu.label(ctx, "Position:")
-		mu.label(ctx, fmt.tprintf("%d, %d", win.rect.x, win.rect.y))
-		mu.label(ctx, "Size:")
-		mu.label(ctx, fmt.tprintf("%d, %d", win.rect.w, win.rect.h))
+  if mu.window(ctx, "Inspector", {40, 40, 300, 150}, {.NO_CLOSE}) {
+	if .ACTIVE in mu.header(ctx, "Scene Info", {.EXPANDED}) {
+		mu.label(ctx, fmt.tprintf("Objects %d", len(engine.nodes.entries) - len(engine.nodes.free_indices)))
+		mu.label(ctx, fmt.tprintf("Rendered %d", rendered_count))
 	}
   }
   mu.end(ctx)
   ui_render(&engine.ui, command_buffer_main)
-  // End Main Render Pass
   renderer_end_frame(&engine.renderer, image_idx) or_return
-  // fmt.printfln("Rendered %d objects", rendered_count)
   return .SUCCESS
 }
 

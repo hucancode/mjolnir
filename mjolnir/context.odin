@@ -10,7 +10,7 @@ import vk "vendor:vulkan"
 
 // --- Constants ---
 ENGINE_NAME :: "Mjolnir"
-TITLE :: "Vulkan Odin"
+TITLE :: "Mjolnir"
 
 // For init_physical_device scoring and init_logical_device enabling
 DEVICE_EXTENSIONS :: []cstring {
