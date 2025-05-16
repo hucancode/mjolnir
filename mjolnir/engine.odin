@@ -11,7 +11,7 @@ import "core:time"
 
 import linalg "core:math/linalg"
 import glfw "vendor:glfw"
-import gui "vendor:microui"
+import mu "vendor:microui"
 import stbi "vendor:stb/image"
 import vk "vendor:vulkan"
 
@@ -54,7 +54,7 @@ Engine :: struct {
   vk_ctx:                VulkanContext,
   renderer:              Renderer,
   scene:                 Scene,
-  imgui_instance:        gui.Context,
+  ui:                    UIRenderer,
   last_frame_timestamp:  time.Time,
   last_update_timestamp: time.Time,
   start_timestamp:       time.Time,
@@ -159,14 +159,7 @@ init_engine :: proc(
     }
   }
 
-  // Init ImGui
-  // engine.imgui_instance = gui.CreateContext()
-  // gui.StyleColorsDark(nil)
-  // gui.InitPlatformInterface(engine.window, true) // Or similar ImGui backend init
-  // gui.InitVulkan(&engine.vk_ctx, engine.renderer.render_pass_gui) // Or however ImGui Vulkan backend is initialized
-
-  // Init STBI
-  // stbi.set_flip_vertically_on_load(true) // If needed
+  ui_init(&engine.ui, engine, engine.renderer.format.format, engine.renderer.extent.width, engine.renderer.extent.height)
 
   fmt.println("Engine initialized")
   return .SUCCESS
@@ -644,22 +637,21 @@ try_render :: proc(engine: ^Engine) -> vk.Result {
     size_of(SceneLightUniform),
   )
 
-  // ImGui Rendering
-  // gui.NewFrameVulkan() // Or backend new frame
-  // gui.NewFramePlatform()
-  // gui.NewFrame()
-  // {
-  // 	// Example ImGui window
-  // 	show_demo := true
-  // 	gui.ShowDemoWindow(&show_demo)
-  // 	if gui.Begin("Scene Info", nil, 0) {
-  // 		gui.Text("Rendered %d objects", rendered_count)
-  // 		gui.End()
-  // 	}
-  // }
-  // gui.Render()
-  // gui.RenderDrawDataVulkan(gui.GetDrawData(), command_buffer_main) // Or backend render
-
+  ctx := &engine.ui.ctx
+  mu.begin(ctx)
+  @static opts := mu.Options{.NO_CLOSE}
+  if mu.window(ctx, "Demo Window", {40, 40, 300, 450}, opts) {
+	if .ACTIVE in mu.header(ctx, "Window Info") {
+		win := mu.get_current_container(ctx)
+		mu.layout_row(ctx, {54, -1}, 0)
+		mu.label(ctx, "Position:")
+		mu.label(ctx, fmt.tprintf("%d, %d", win.rect.x, win.rect.y))
+		mu.label(ctx, "Size:")
+		mu.label(ctx, fmt.tprintf("%d, %d", win.rect.w, win.rect.h))
+	}
+  }
+  mu.end(ctx)
+  ui_render(&engine.ui, command_buffer_main)
   // End Main Render Pass
   renderer_end_frame(&engine.renderer, image_idx) or_return
   // fmt.printfln("Rendered %d objects", rendered_count)

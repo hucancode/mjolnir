@@ -255,6 +255,28 @@ transition_image_layout :: proc(
   old_layout, new_layout: vk.ImageLayout,
 ) -> vk.Result {
   cmd_buffer := begin_single_time_command(ctx) or_return
+
+  src_access_mask: vk.AccessFlags = {}
+  dst_access_mask: vk.AccessFlags = {}
+  src_stage: vk.PipelineStageFlags = {}
+  dst_stage: vk.PipelineStageFlags = {}
+
+  if old_layout == .UNDEFINED && new_layout == .TRANSFER_DST_OPTIMAL {
+    src_access_mask = {}
+    dst_access_mask = {.TRANSFER_WRITE}
+    src_stage = {.TOP_OF_PIPE}
+    dst_stage = {.TRANSFER}
+  } else if old_layout == .TRANSFER_DST_OPTIMAL && new_layout == .SHADER_READ_ONLY_OPTIMAL {
+    src_access_mask = {.TRANSFER_WRITE}
+    dst_access_mask = {.SHADER_READ}
+    src_stage = {.TRANSFER}
+    dst_stage = {.FRAGMENT_SHADER}
+  } else {
+    // Fallback: generic, but not optimal
+    src_stage = {.TOP_OF_PIPE}
+    dst_stage = {.TOP_OF_PIPE}
+  }
+
   barrier := vk.ImageMemoryBarrier {
     oldLayout = old_layout,
     newLayout = new_layout,
@@ -268,11 +290,13 @@ transition_image_layout :: proc(
       baseArrayLayer = 0,
       layerCount = 1,
     },
+    srcAccessMask = src_access_mask,
+    dstAccessMask = dst_access_mask,
   }
   vk.CmdPipelineBarrier(
     cmd_buffer,
-    {.TOP_OF_PIPE},
-    {.TRANSFER},
+    src_stage,
+    dst_stage,
     {},
     0,
     nil,
@@ -283,7 +307,6 @@ transition_image_layout :: proc(
   )
   return end_single_time_command(ctx, &cmd_buffer)
 }
-
 // Copies data from a DataBuffer to an ImageBuffer (buffer to image copy).
 copy_image :: proc(
   ctx: ^VulkanContext,

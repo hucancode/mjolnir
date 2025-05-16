@@ -62,7 +62,7 @@ shadow_material_build :: proc(
     },
   }
 
-  dynamic_states_values := [?]vk.DynamicState{.VIEWPORT, .SCISSOR, .DEPTH_BIAS}
+  dynamic_states_values := [?]vk.DynamicState{.VIEWPORT, .SCISSOR}
 
   dynamic_state_info := vk.PipelineDynamicStateCreateInfo {
     sType             = .PIPELINE_DYNAMIC_STATE_CREATE_INFO,
@@ -125,7 +125,6 @@ shadow_material_build :: proc(
     sampleShadingEnable  = false,
   }
 
-  // No color attachments for shadow pass
   blending := vk.PipelineColorBlendStateCreateInfo {
     sType           = .PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
     logicOpEnable   = false,

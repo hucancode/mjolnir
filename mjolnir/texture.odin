@@ -55,6 +55,31 @@ create_texture_from_data :: proc(
   return
 }
 
+create_texture_from_pixels :: proc(
+  engine: ^Engine,
+  pixels: []u8,
+  width: int,
+  height: int,
+  channel: int,
+  format: vk.Format = .R8G8B8A8_SRGB,
+) -> (
+  handle: resource.Handle,
+  texture: ^Texture,
+  ret: vk.Result,
+) {
+  handle, texture = resource.alloc(&engine.textures)
+  texture.image_data.pixels = pixels
+  texture.image_data.width = width
+  texture.image_data.height = height
+  texture.image_data.channels_in_file = channel
+  texture.image_data.actual_channels = channel
+  texute_init(texture, &engine.vk_ctx, format) or_return
+  texture.image_data.pixels = nil
+  fmt.printfln("created texture %d x %d -> id %d", texture.image_data.width, texture.image_data.height, texture.buffer.image)
+  ret = .SUCCESS
+  return
+}
+
 texture_init_from_data :: proc(self: ^Texture, data: []u8) -> vk.Result {
   w, h, c_in_file: c.int
   actual_channels: c.int = 4
@@ -131,6 +156,7 @@ texture_init_from_path :: proc(self: ^Texture, path: string) -> vk.Result {
 texute_init :: proc(
   self: ^Texture,
   vk_ctx: ^VulkanContext,
+  format: vk.Format = .R8G8B8A8_SRGB,
 ) -> vk.Result {
   self.vk_ctx_ref = vk_ctx
   if self.image_data.pixels == nil || vk_ctx == nil {
@@ -140,7 +166,7 @@ texute_init :: proc(
     vk_ctx,
     raw_data(self.image_data.pixels),
     size_of(u8) * vk.DeviceSize(len(self.image_data.pixels)),
-    .R8G8B8A8_SRGB,
+    format,
     u32(self.image_data.width),
     u32(self.image_data.height),
   ) or_return
