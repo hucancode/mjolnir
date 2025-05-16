@@ -1,6 +1,6 @@
 # Mjolnir Engine
 
-Mjolnir is a rendering engine based on Vulkan API.
+Mjolnir is a minimalistic rendering engine. The goal is to create a simple set of tools to help people quickly create fast graphical applications
 
 ![](./readme/cesium-man.gif)
 
