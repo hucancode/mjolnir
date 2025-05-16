@@ -39,7 +39,7 @@ SkeletalMesh :: struct {
 // deinit_skeletal_mesh releases Vulkan buffers and other owned memory.
 skeletal_mesh_deinit :: proc(self: ^SkeletalMesh) {
   if self.ctx_ref == nil {
-    return // Not initialized or already deinitialized
+    return
   }
   vkd := self.ctx_ref.vkd
 
@@ -111,7 +111,6 @@ skeletal_mesh_init :: proc(
   return .SUCCESS
 }
 
-// play_animation finds an animation by name and returns an Instance.
 play_animation :: proc(
   self: ^SkeletalMesh,
   animation_name: string,
@@ -139,7 +138,6 @@ play_animation :: proc(
   return
 }
 
-// calculate_animation_transform computes the bone matrices for the given animation instance and pose.
 calculate_animation_transform :: proc(
   self: ^SkeletalMesh,
   anim_instance: ^Animation_Instance,

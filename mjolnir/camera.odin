@@ -5,7 +5,6 @@ import "core:fmt"
 import linalg "core:math/linalg"
 import "geometry"
 
-
 CameraOrbitMovement :: struct {
   target:       linalg.Vector3f32,
   distance:     f32,
