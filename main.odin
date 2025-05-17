@@ -26,6 +26,7 @@ main :: proc() {
   engine.setup_proc = setup
   engine.update_proc = update
   engine.render2d_proc = render2d
+  engine.key_press_proc = on_key_pressed
   g_context = context
   defer deinit_engine(&engine)
   if init_engine(&engine, WIDTH, HEIGHT, TITLE) != .SUCCESS {
@@ -197,4 +198,8 @@ render2d :: proc(engine: ^mjolnir.Engine, ctx: ^mu.Context) {
     if mu.window(ctx, "User data", {40, 240, 300, 100}, {.NO_CLOSE}) {
         mu.label(ctx, fmt.tprintf("Spot lights %d", LIGHT_COUNT))
     }
+}
+
+on_key_pressed :: proc(engine: ^mjolnir.Engine, key, action, mods: int) {
+    fmt.printfln("key pressed key %d action %d mods %x", key, action, mods)
 }

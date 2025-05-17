@@ -31,15 +31,11 @@ SetupProc :: #type proc(engine: ^Engine)
 UpdateProc :: #type proc(engine: ^Engine, delta_time: f32)
 Render2DProc :: #type proc(engine: ^Engine, ctx: ^mu.Context)
 Render3DProc :: #type proc(engine: ^Engine)
-KeyPressProc :: #type proc(engine: ^Engine, key: u32)
-MousePressProc :: #type proc(engine: ^Engine, key: u32)
-MouseDragProc :: #type proc(
-  engine: ^Engine,
-  delta: linalg.Vector2f32,
-  offset: linalg.Vector2f32,
-)
-MouseScrollProc :: #type proc(engine: ^Engine, offset: linalg.Vector2f32)
-MouseMoveProc :: #type proc(engine: ^Engine, pos: linalg.Vector2f32)
+KeyInputProc :: #type proc(engine: ^Engine, key, action, mods: int)
+MousePressProc :: #type proc(engine: ^Engine, key, action, mods: int)
+MouseDragProc :: #type proc(engine: ^Engine, delta, offset: linalg.Vector2f64)
+MouseScrollProc :: #type proc(engine: ^Engine, offset: linalg.Vector2f64)
+MouseMoveProc :: #type proc(engine: ^Engine, pos, delta: linalg.Vector2f64)
 
 // --- Helper Context Structs for Scene Traversal ---
 CollectLightsContext :: struct {
@@ -95,7 +91,7 @@ Engine :: struct {
   update_proc:           UpdateProc,
   render2d_proc:         Render2DProc,
   render3d_proc:         Render3DProc,
-  key_press_proc:        KeyPressProc,
+  key_press_proc:        KeyInputProc,
   mouse_press_proc:      MousePressProc,
   mouse_drag_proc:       MouseDragProc,
   mouse_move_proc:       MouseMoveProc,
@@ -212,6 +208,30 @@ init_engine :: proc(
         &engine.scene.camera,
         -f32(yoffset) * SCROLL_SENSITIVITY,
       )
+      if engine.mouse_scroll_proc != nil {
+        engine.mouse_scroll_proc(engine, {xoffset, yoffset})
+      }
+    },
+  )
+  glfw.SetKeyCallback(
+    engine.window,
+    proc "c" (window: glfw.WindowHandle, key, scancode, action, mods: c.int) {
+      context = g_context
+      engine := cast(^Engine)context.user_ptr
+      if engine.key_press_proc != nil {
+          engine.key_press_proc(engine, int(key), int(action), int(mods))
+      }
+    },
+  )
+
+  glfw.SetMouseButtonCallback(
+    engine.window,
+    proc "c" (window: glfw.WindowHandle, button, action, mods: c.int) {
+      context = g_context
+      engine := cast(^Engine)context.user_ptr
+      if engine.mouse_press_proc != nil {
+          engine.mouse_press_proc(engine, int(button), int(action), int(mods))
+      }
     },
   )
 
@@ -1093,6 +1113,10 @@ engine_update :: proc(engine: ^Engine) -> bool {
       f32(delta.x * MOUSE_SENSITIVITY_X),
       f32(delta.y * MOUSE_SENSITIVITY_Y),
     )
+  }
+
+  if engine.mouse_move_proc != nil {
+    engine.mouse_move_proc(engine, engine.input.mouse_pos, delta)
   }
 
   if engine.update_proc != nil {
