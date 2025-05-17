@@ -200,9 +200,9 @@ camera_update_orbit_position :: proc(camera: ^Camera) {
     return
   }
   sin_pitch := math.sin_f32(movement.pitch)
-  cos_pitch := math.cos_f32(movement.pitch)
+  cos_pitch := math.cos(movement.pitch)
   sin_yaw := math.sin_f32(movement.yaw)
-  cos_yaw := math.cos_f32(movement.yaw)
+  cos_yaw := math.cos(movement.yaw)
 
   offset_direction := linalg.Vector3f32 {
     cos_pitch * cos_yaw,

@@ -51,8 +51,10 @@ setup :: proc(engine: ^mjolnir.Engine) {
       tex_handle,
     )
     // Create mesh
-    cube_geom := geometry.make_cube({1.0, 1.0, 1.0, 1.0})
-    mesh_handle := create_static_mesh(engine, &cube_geom, mat_handle)
+    cube_geom := geometry.make_cube()
+    cube_mesh_handle := create_static_mesh(engine, &cube_geom, mat_handle)
+    sphere_geom := geometry.make_sphere()
+    sphere_mesh_handle := create_static_mesh(engine, &sphere_geom, mat_handle)
 
     // Create ground plane
     ground_mat_handle, _, _ := create_material(
@@ -61,7 +63,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
       tex_handle,
       tex_handle,
     )
-    quad_geom := geometry.make_quad({1.0, 1.0, 1.0, 1.0})
+    quad_geom := geometry.make_quad()
     ground_mesh_handle := create_static_mesh(
       engine,
       &quad_geom,
@@ -78,7 +80,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
             }
             node_handle, node := spawn_node(engine)
             parent_node(&engine.nodes, engine.scene.root, node_handle)
-            node.attachment = NodeStaticMeshAttachment{mesh_handle}
+            node.attachment = NodeStaticMeshAttachment{sphere_mesh_handle}
             node.transform.position = {
               (f32(x) - f32(nx) / 2.0) * 3.0,
               (f32(y) - f32(ny) / 2.0) * 3.0,
@@ -154,7 +156,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
       light_cube_handle, light_cube_node := spawn_node(engine)
       light_cube_handles[i] = light_cube_handle
       parent_node(&engine.nodes, light_handles[i], light_cube_handles[i])
-      light_cube_node.attachment = NodeStaticMeshAttachment{mesh_handle}
+      light_cube_node.attachment = NodeStaticMeshAttachment{cube_mesh_handle}
       light_cube_node.transform.scale = {0.1, 0.1, 0.1}
       light_cube_node.transform.position = {0.0, 0.1, 0.0}
     }
@@ -171,9 +173,9 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
     // fmt.printfln("getting light %d %v", i, light_handles[i])
     light_ptr := resource.get(&engine.nodes, light_handles[i])
     if light_ptr == nil {continue}
-    rx := math.sin_f32(t)
-    ry := (math.sin_f32(t * 0.2) + 1.0) * 0.5 + 2.0
-    rz := math.cos_f32(t)
+    rx := math.sin(t)
+    ry := (math.sin(t * 0.2) + 1.0) * 0.5 + 2.0
+    rz := math.cos(t)
     v := linalg.vector_normalize(linalg.Vector3f32{rx, ry, rz})
     radius: f32 = 8.0
     light_ptr.transform.position =
