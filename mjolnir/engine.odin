@@ -3,16 +3,13 @@ package mjolnir
 import "base:runtime"
 import "core:c"
 import "core:fmt"
-import "core:log"
 import "core:math"
-import "core:mem"
 import "core:strings"
 import "core:time"
 
 import linalg "core:math/linalg"
 import glfw "vendor:glfw"
 import mu "vendor:microui"
-import stbi "vendor:stb/image"
 import vk "vendor:vulkan"
 
 import "geometry"
@@ -448,7 +445,6 @@ render_scene_node_callback :: proc(
   cb_context: rawptr,
 ) -> bool {
   ctx := (^RenderMeshesContext)(cb_context)
-  vkd := eng.vk_ctx.vkd
   // fmt.printfln("rendering node", node_h,"matrix", world_matrix^)
 
   #partial switch data in node_ptr.attachment {
@@ -576,7 +572,6 @@ render_shadow_node_callback :: proc(
   cb_context: rawptr,
 ) -> bool {
   ctx := (^ShadowRenderContext)(cb_context)
-  vkd := eng.vk_ctx.vkd
   shadow_pass_material := &eng.renderer.shadow_pass_material
 
   #partial switch data in node_ptr.attachment {
@@ -753,7 +748,6 @@ render_shadow_maps :: proc(
   engine: ^Engine,
   light_uniform: ^SceneLightUniform,
 ) -> vk.Result {
-  vkd := engine.vk_ctx.vkd
   total_obstacles: u32 = 0
 
   for i := 0; i < int(light_uniform.light_count); i += 1 {
@@ -996,8 +990,6 @@ engine_recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
     engine.vk_ctx.physical_device,
     engine.vk_ctx.surface,
   ) or_return
-  w := f32(engine.renderer.extent.width)
-  h := f32(engine.renderer.extent.height)
   renderer_build_swapchain(
     &engine.renderer,
     support.capabilities,
@@ -1030,7 +1022,6 @@ engine_get_delta_time :: proc(engine: ^Engine) -> f32 {
 }
 
 engine_get_time :: proc(engine: ^Engine) -> f32 {
-  now := time.now()
   return f32(time.duration_seconds(time.since(engine.start_timestamp)))
 }
 
@@ -1044,7 +1035,7 @@ engine_update :: proc(engine: ^Engine) -> bool {
   if delta_time < UPDATE_FRAME_TIME {
     return false
   }
-  for &entry, i in engine.nodes.entries {
+  for &entry in engine.nodes.entries {
     if !entry.active {
       continue
     }

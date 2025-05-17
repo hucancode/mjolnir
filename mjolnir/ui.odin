@@ -3,7 +3,6 @@ package mjolnir
 import intr "base:intrinsics"
 import "core:fmt"
 import linalg "core:math/linalg"
-import "core:mem"
 import mu "vendor:microui"
 import vk "vendor:vulkan"
 

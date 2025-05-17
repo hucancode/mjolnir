@@ -1,9 +1,5 @@
 package mjolnir
 
-import "base:runtime"
-import linalg "core:math/linalg"
-import "geometry"
-import "resource"
 import vk "vendor:vulkan"
 
 SHADER_MICROUI_VERT :: #load("shader/microui/vert.spv")

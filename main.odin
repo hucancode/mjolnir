@@ -1,11 +1,8 @@
 package main
 
-import "base:runtime"
 import "core:fmt"
 import "core:math"
 import linalg "core:math/linalg"
-import "core:strings"
-import glfw "vendor:glfw"
 import mu "vendor:microui"
 
 import "mjolnir"
@@ -39,7 +36,7 @@ main :: proc() {
 setup :: proc(engine: ^mjolnir.Engine) {
     using mjolnir
     // Load texture and create material
-    tex_handle, texture, res := create_texture_from_path(
+    tex_handle, texture, _ := create_texture_from_path(
       engine,
       "assets/statue-1275469_1280.jpg",
     )

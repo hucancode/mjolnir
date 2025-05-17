@@ -51,7 +51,6 @@ material_init_descriptor_set :: proc(mat: ^Material) -> vk.Result {
   }
   ctx := mat.ctx_ref
   vkd := ctx.vkd
-  res: vk.Result
 
   // Create descriptor set layout with bindings for textures
   bindings := [?]vk.DescriptorSetLayoutBinding {

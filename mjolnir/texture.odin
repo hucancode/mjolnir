@@ -3,7 +3,6 @@ package mjolnir
 import "core:c"
 import "core:fmt"
 import "core:mem"
-import "core:os"
 import "core:strings"
 
 import stbi "vendor:stb/image"

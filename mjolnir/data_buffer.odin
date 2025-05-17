@@ -1,7 +1,6 @@
 package mjolnir
 
 import "core:fmt"
-import "core:log"
 import "core:mem"
 import vk "vendor:vulkan"
 

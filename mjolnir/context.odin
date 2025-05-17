@@ -331,7 +331,7 @@ score_physical_device :: proc(
     return 0, .SUCCESS
   }
 
-  _indices, qf_res := find_queue_families(device, self.surface)
+  _, qf_res := find_queue_families(device, self.surface)
   if qf_res != .SUCCESS {
     fmt.printfln("Device %s: no suitable queue families.", device_name_cstring)
     return 0, .SUCCESS // Not finding families is 0 score, not necessarily an error for scoring

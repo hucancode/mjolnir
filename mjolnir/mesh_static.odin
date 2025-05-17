@@ -1,6 +1,5 @@
 package mjolnir
 
-import "base:runtime"
 import "core:fmt"
 import linalg "core:math/linalg"
 import "geometry"
@@ -23,7 +22,6 @@ static_mesh_deinit :: proc(self: ^StaticMesh) {
   if self.ctx_ref == nil {
     return // Not initialized or already deinitialized
   }
-  vkd := self.ctx_ref.vkd
 
   if self.vertex_buffer.buffer != 0 {
     data_buffer_deinit(&self.vertex_buffer, self.ctx_ref)

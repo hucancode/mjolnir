@@ -1,11 +1,8 @@
 package mjolnir
 
 import "core:fmt"
-import "core:log"
 import "core:math"
 import linalg "core:math/linalg"
-import "core:mem"
-import "core:slice"
 import vk "vendor:vulkan"
 
 MAX_FRAMES_IN_FLIGHT :: 2

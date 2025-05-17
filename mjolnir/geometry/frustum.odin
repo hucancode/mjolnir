@@ -1,7 +1,6 @@
 package geometry
 
 import "core:fmt"
-import "core:math"
 import linalg "core:math/linalg"
 
 // Plane is represented as a linalg.Vector4f32 {A, B, C, D}
@@ -60,7 +59,7 @@ frustum_test_aabb :: proc(
   aabb_min: linalg.Vector3f32,
   aabb_max: linalg.Vector3f32,
 ) -> bool {
-  for plane_vec, i in frustum.planes {
+  for plane_vec in frustum.planes {
     p_vertex: linalg.Vector3f32
     p_vertex.x = plane_vec.x > 0.0 ? aabb_max.x : aabb_min.x
     p_vertex.y = plane_vec.y > 0.0 ? aabb_max.y : aabb_min.y

@@ -1,8 +1,5 @@
 package mjolnir
 
-import "base:runtime"
-import "core:math"
-import linalg "core:math/linalg"
 import "geometry"
 import "resource"
 

@@ -1,6 +1,5 @@
 package mjolnir
 
-import "base:runtime"
 import linalg "core:math/linalg"
 import "geometry"
 import "resource"
@@ -50,7 +49,6 @@ skinned_material_init_descriptor_set :: proc(
   }
   ctx := mat.ctx_ref
   vkd := ctx.vkd
-  res: vk.Result
 
   bindings := [?]vk.DescriptorSetLayoutBinding {
     {   // Albedo

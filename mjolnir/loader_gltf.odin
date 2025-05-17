@@ -1,8 +1,6 @@
 package mjolnir
 
-import "base:runtime"
 import "core:fmt"
-import "core:math"
 import "core:mem"
 import "core:os"
 import path "core:path/filepath"
@@ -74,7 +72,7 @@ gltf_loader_submit :: proc(
     node_ptr_to_idx_map[&node] = u32(i)
   }
   defer delete(node_ptr_to_idx_map)
-  for &node, i in gltf_data.nodes {
+  for &node in gltf_data.nodes {
     for child_ptr in node.children {
       child_idx := node_ptr_to_idx_map[child_ptr]
       is_gltf_child_node += {int(child_idx)}
@@ -299,7 +297,7 @@ process_gltf_primitive :: proc(
   }
   g_primitive := &primitives[0]
   // Material
-  base_color_tex_handle, base_color_tex, base_tex_result :=
+  base_color_tex_handle, _, base_tex_result :=
     load_gltf_texture_for_primitive_material(
       loader,
       gltf_data,
@@ -410,7 +408,7 @@ process_gltf_skinned_primitive :: proc(
   g_primitive := &primitives[0]
   fmt.printfln("Creating texture for skinned material...")
   // Material
-  base_color_tex_handle, base_color_tex, tex_ok :=
+  base_color_tex_handle, _, tex_ok :=
     load_gltf_texture_for_primitive_material(
       loader,
       gltf_data,
@@ -545,9 +543,11 @@ process_gltf_skinned_primitive :: proc(
         raw_data(ibm_floats[:]),
         16,
       )
-      engine_bones[i].inverse_bind_matrix = geometry.matrix_from_slice(
-        ibm_floats,
-      )
+      if read {
+        engine_bones[i].inverse_bind_matrix = geometry.matrix_from_slice(
+            ibm_floats,
+        )
+      }
     } else {
       engine_bones[i].inverse_bind_matrix = linalg.MATRIX4F32_IDENTITY
     }
@@ -607,7 +607,7 @@ unpack_accessor_floats_flat :: proc(accessor: ^cgltf.accessor) -> []f32 {
   if accessor == nil {return nil}
   n := accessor.count * cgltf.num_components(accessor.type)
   ret := make([]f32, n)
-  read := cgltf.accessor_unpack_floats(accessor, raw_data(ret), n)
+  _ = cgltf.accessor_unpack_floats(accessor, raw_data(ret), n)
   return ret
 }
 

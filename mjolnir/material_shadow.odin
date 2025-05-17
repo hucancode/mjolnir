@@ -1,9 +1,6 @@
 package mjolnir
 
-import "base:runtime"
 import linalg "core:math/linalg"
-import "geometry"
-import "resource"
 import vk "vendor:vulkan"
 
 SHADER_SHADOW_VERT :: #load("shader/shadow/vert.spv")

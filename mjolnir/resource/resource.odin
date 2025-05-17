@@ -1,9 +1,5 @@
 package resource
 
-import "base:runtime"
-import "core:log"
-import "core:slice"
-
 Handle :: struct {
   index:      u32,
   generation: u32,

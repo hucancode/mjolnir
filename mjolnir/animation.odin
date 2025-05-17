@@ -3,9 +3,7 @@ package mjolnir
 import "core:fmt"
 import "core:math"
 import linalg "core:math/linalg"
-import "core:mem"
 import "core:slice"
-import "core:sort"
 import "geometry"
 import vk "vendor:vulkan"
 
@@ -32,7 +30,7 @@ keyframe_sample :: proc($T: typeid, frames: []Keyframe(T), t: f32) -> T {
     return frames[len(frames) - 1].value
   }
 
-  i, found := slice.binary_search_by(
+  i, _ := slice.binary_search_by(
     frames,
     t,
     proc(item: Keyframe(T), t: f32) -> slice.Ordering {

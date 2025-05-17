@@ -1,11 +1,8 @@
 package mjolnir
 
-import "base:runtime"
 import "core:fmt"
 import linalg "core:math/linalg"
-import "core:strings"
 import "geometry"
-import "resource"
 import vk "vendor:vulkan"
 
 Bone :: struct {
@@ -41,7 +38,6 @@ skeletal_mesh_deinit :: proc(self: ^SkeletalMesh) {
   if self.ctx_ref == nil {
     return
   }
-  vkd := self.ctx_ref.vkd
 
   if self.vertex_buffer.buffer != 0 {
     data_buffer_deinit(&self.vertex_buffer, self.ctx_ref)

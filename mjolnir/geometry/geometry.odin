@@ -1,6 +1,5 @@
 package geometry
 
-import "base:runtime"
 import "core:math"
 import linalg "core:math/linalg"
 import vk "vendor:vulkan"

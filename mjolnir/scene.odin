@@ -1,8 +1,6 @@
 package mjolnir
 
 import "core:math"
-import linalg "core:math/linalg"
-import "geometry"
 
 Scene :: struct {
   camera: Camera,

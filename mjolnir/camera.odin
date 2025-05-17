@@ -1,6 +1,5 @@
 package mjolnir
 
-import "core:fmt"
 import "core:math"
 import linalg "core:math/linalg"
 import "geometry"
