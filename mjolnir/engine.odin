@@ -27,6 +27,11 @@ UPDATE_FRAME_TIME_MILIS :: UPDATE_FRAME_TIME * 1_000.0
 
 Handle :: resource.Handle
 
+SetupProc :: #type proc(engine: ^Engine)
+UpdateProc :: #type proc(engine: ^Engine, delta_time: f32)
+Render2DProc :: #type proc(engine: ^Engine, ctx: ^mu.Context)
+Render3DProc :: #type proc(engine: ^Engine)
+
 // --- Helper Context Structs for Scene Traversal ---
 CollectLightsContext :: struct {
   engine:        ^Engine,
@@ -67,6 +72,10 @@ Engine :: struct {
   nodes:                 resource.ResourcePool(Node),
   in_transaction:        bool,
   dirty_transforms:      [dynamic]Handle,
+  setup_proc:            SetupProc,
+  update_proc:           UpdateProc,
+  render2d_proc:         Render2DProc,
+  render3d_proc:         Render3DProc,
 }
 
 // --- Scene Traversal ---
@@ -166,6 +175,10 @@ init_engine :: proc(
     engine.renderer.extent.width,
     engine.renderer.extent.height,
   )
+
+  if engine.setup_proc != nil {
+      engine.setup_proc(engine)
+  }
 
   fmt.println("Engine initialized")
   return .SUCCESS
@@ -642,6 +655,9 @@ try_render :: proc(engine: ^Engine) -> vk.Result {
     size_of(SceneLightUniform),
   )
 
+  if engine.render3d_proc != nil {
+      engine.render3d_proc(engine)
+  }
   ctx := &engine.ui.ctx
   mu.begin(ctx)
   if mu.window(ctx, "Inspector", {40, 40, 300, 150}, {.NO_CLOSE}) {
@@ -660,6 +676,9 @@ try_render :: proc(engine: ^Engine) -> vk.Result {
       ),
     )
     mu.label(ctx, fmt.tprintf("Rendered %d", rendered_count))
+  }
+  if engine.render2d_proc != nil {
+      engine.render2d_proc(engine, ctx)
   }
   mu.end(ctx)
   ui_render(&engine.ui, command_buffer_main)
@@ -990,7 +1009,7 @@ should_close_engine :: proc(engine: ^Engine) -> bool {
   return bool(glfw.WindowShouldClose(engine.window))
 }
 
-update_engine :: proc(engine: ^Engine) -> bool {
+engine_update :: proc(engine: ^Engine) -> bool {
   glfw.PollEvents()
   delta_time := get_delta_time_engine(engine)
   if delta_time < UPDATE_FRAME_TIME {
@@ -1030,7 +1049,9 @@ update_engine :: proc(engine: ^Engine) -> bool {
   // For now, clearing dirty_transforms as traverse_scene handles it.
   clear(&engine.dirty_transforms)
 
-
+  if engine.update_proc != nil {
+    engine.update_proc(engine, delta_time)
+  }
   engine.last_update_timestamp = time.now()
   return true
 }
@@ -1180,4 +1201,21 @@ spawn_node :: proc(engine: ^Engine) -> (handle: Handle, node: ^Node) {
     parent_node(&engine.nodes, engine.scene.root, handle)
   }
   return
+}
+
+set_update_callback :: proc(engine: ^Engine, cb: UpdateProc) {
+    engine.update_proc = cb;
+}
+set_render3d_callback :: proc(engine: ^Engine, cb: Render3DProc) {
+    engine.render3d_proc = cb;
+}
+set_render2d_callback :: proc(engine: ^Engine, cb: Render2DProc) {
+    engine.render2d_proc = cb;
+}
+
+engine_run :: proc(engine: ^Engine) {
+    for !should_close_engine(engine) {
+      engine_update(engine)
+      render_engine(engine)
+    }
 }

@@ -6,10 +6,10 @@ FRAG_SHADERS := $(shell find $(SHADER_DIR) -name "shader.frag")
 SPV_SHADERS := $(patsubst $(SHADER_DIR)/%/shader.vert,$(SHADER_DIR)/%/vert.spv,$(VERT_SHADERS)) \
                $(patsubst $(SHADER_DIR)/%/shader.frag,$(SHADER_DIR)/%/frag.spv,$(FRAG_SHADERS))
 
-release: main.odin $(SPV_SHADERS)
+release: $(SPV_SHADERS)
 	odin run . -out:bin/main
 
-debug: main.odin $(SPV_SHADERS)
+debug: $(SPV_SHADERS)
 	odin run . -out:bin/main -debug
 
 $(SHADER_DIR)/%/vert.spv: $(SHADER_DIR)/%/shader.vert

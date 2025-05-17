@@ -8,6 +8,15 @@ import "core:strings"
 import "vendor:glfw"
 import vk "vendor:vulkan"
 
+when ODIN_OS == .Darwin {
+  // NOTE: just a bogus import of the system library,
+  // needed so we can add a linker flag to point to /usr/local/lib (where vulkan is installed by default)
+  // when trying to load vulkan.
+  // Credit goes to : https://gist.github.com/laytan/ba57af3e5a59ab5cb2fca9e25bcfe262
+  @(require, extra_linker_flags = "-rpath /usr/local/lib")
+  foreign import __ "system:System.framework"
+}
+
 // --- Constants ---
 ENGINE_NAME :: "Mjolnir"
 TITLE :: "Mjolnir"
