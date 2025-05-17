@@ -1,19 +1,23 @@
 SHADER_DIR := mjolnir/shader
 
-release: main.odin shaders
+# Find all shader files
+VERT_SHADERS := $(shell find $(SHADER_DIR) -name "shader.vert")
+FRAG_SHADERS := $(shell find $(SHADER_DIR) -name "shader.frag")
+SPV_SHADERS := $(patsubst $(SHADER_DIR)/%/shader.vert,$(SHADER_DIR)/%/vert.spv,$(VERT_SHADERS)) \
+               $(patsubst $(SHADER_DIR)/%/shader.frag,$(SHADER_DIR)/%/frag.spv,$(FRAG_SHADERS))
+
+release: main.odin $(SPV_SHADERS)
 	odin run . -out:bin/main
 
-debug: main.odin shaders
+debug: main.odin $(SPV_SHADERS)
 	odin run . -out:bin/main -debug
 
-shaders:
-	@for dir in $(shell find $(SHADER_DIR) -type d); do \
-		if [ -f "$$dir/shader.vert" ]; then \
-			echo "Compiling vertex shader in $$dir..."; \
-			glslc "$$dir/shader.vert" -o "$$dir/vert.spv"; \
-		fi; \
-		if [ -f "$$dir/shader.frag" ]; then \
-			echo "Compiling fragment shader in $$dir..."; \
-			glslc "$$dir/shader.frag" -o "$$dir/frag.spv"; \
-		fi; \
-	done
+$(SHADER_DIR)/%/vert.spv: $(SHADER_DIR)/%/shader.vert
+	@echo "Compiling vertex shader $<..."
+	@glslc "$<" -o "$@"
+
+$(SHADER_DIR)/%/frag.spv: $(SHADER_DIR)/%/shader.frag
+	@echo "Compiling fragment shader $<..."
+	@glslc "$<" -o "$@"
+
+.PHONY: release debug
