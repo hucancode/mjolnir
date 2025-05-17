@@ -68,7 +68,7 @@ test_frustum_aabb_perspective_projection :: proc(t: ^testing.T) {
   aspect: f32 = 1.0
   near: f32 = 1.0
   far: f32 = 10.0
-  proj := linalg.matrix4_perspective_f32(fov, aspect, near, far)
+  proj := linalg.matrix4_perspective(fov, aspect, near, far)
   frustum := geometry.make_frustum(proj)
   // AABB fully inside the frustum (centered at origin, small size)
   aabb_min := linalg.Vector3f32{-0.5, -0.5, -2.0}

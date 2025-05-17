@@ -110,8 +110,7 @@ frame_init :: proc(
   ) or_return
   // Allocate Shadow Pass Descriptor Set
   fmt.printfln("Allocating shadow pass descriptor set")
-  data_buffer_init_host_visible(
-    &self.light_view_proj_uniform,
+  self.light_view_proj_uniform = create_host_visible_buffer(
     ctx,
     size_of(Mat4),
     {.UNIFORM_BUFFER},

@@ -104,7 +104,7 @@ g_context: runtime.Context
 // Generic scene traversal. Callback returns true to continue, false to stop or on error.
 // User context is passed as rawptr and cast within the callback.
 // --- Engine Methods ---
-init_engine :: proc(
+engine_init :: proc(
   engine: ^Engine,
   width: u32,
   height: u32,
@@ -178,9 +178,8 @@ init_engine :: proc(
 
   fmt.println("All resource pools initialized successfully")
 
-  // Build Scene and Renderer
-  build_scene_engine(engine)
-  build_renderer_engine(engine) or_return
+  engine_build_scene(engine)
+  engine_build_renderer(engine) or_return
 
   // Update camera aspect ratio
   if engine.renderer.extent.width > 0 && engine.renderer.extent.height > 0 {
@@ -201,7 +200,7 @@ init_engine :: proc(
   )
   glfw.SetScrollCallback(
     engine.window,
-    proc "c" (window: glfw.WindowHandle, xoffset: f64, yoffset: f64) {
+    proc "c" (window: glfw.WindowHandle, xoffset, yoffset: f64) {
       context = g_context
       engine := cast(^Engine)context.user_ptr
       camera_orbit_zoom(
@@ -243,7 +242,7 @@ init_engine :: proc(
   return .SUCCESS
 }
 
-build_scene_engine :: proc(engine: ^Engine) {
+engine_build_scene :: proc(engine: ^Engine) {
   init_scene(&engine.scene)
   root_handle, root := resource.alloc(&engine.nodes)
   init_node(root, "root")
@@ -293,7 +292,7 @@ query_swapchain_support :: proc(
   return
 }
 
-build_renderer_engine :: proc(engine: ^Engine) -> vk.Result {
+engine_build_renderer :: proc(engine: ^Engine) -> vk.Result {
   renderer_init(&engine.renderer, &engine.vk_ctx) or_return
 
   indices := find_queue_families(
@@ -317,8 +316,8 @@ build_renderer_engine :: proc(engine: ^Engine) -> vk.Result {
     support.present_modes,
     indices.graphics_family,
     indices.present_family,
-    u32(fb_width), // Pass actual width
-    u32(fb_height), // Pass actual height
+    u32(fb_width),
+    u32(fb_height),
   ) or_return
   renderer_build_command_buffers(&engine.renderer) or_return
   renderer_build_synchronizers(&engine.renderer) or_return
@@ -333,8 +332,6 @@ build_renderer_engine :: proc(engine: ^Engine) -> vk.Result {
 
 traverse_scene :: proc(
   engine: ^Engine,
-  root: Handle,
-  initial_parent_matrix: linalg.Matrix4f32,
   user_context: rawptr,
   callback: proc(
     eng: ^Engine,
@@ -349,8 +346,8 @@ traverse_scene :: proc(
   transform_stack := make([dynamic]linalg.Matrix4f32, 0)
   defer delete(transform_stack)
 
-  append(&node_stack, root)
-  append(&transform_stack, initial_parent_matrix)
+  append(&node_stack, engine.scene.root)
+  append(&transform_stack, linalg.MATRIX4F32_IDENTITY)
 
   for len(node_stack) > 0 {
     current_node_handle := pop(&node_stack)
@@ -365,9 +362,10 @@ traverse_scene :: proc(
       continue
     }
 
+    // TODO: instead of DFS and update transform matrix on render, we should transform on object request
     // Ensure transform is up-to-date (local_matrix from TRS)
     if current_node.transform.is_dirty {
-      current_node.transform.local_matrix = linalg.matrix4_from_trs_f32(
+      current_node.transform.local_matrix = linalg.matrix4_from_trs(
         current_node.transform.position,
         current_node.transform.rotation,
         current_node.transform.scale,
@@ -581,9 +579,6 @@ render_shadow_node_callback :: proc(
   vkd := eng.vk_ctx.vkd
   shadow_pass_material := &eng.renderer.shadow_pass_material
 
-  // Frustum culling for shadows (optional, depends on light type and culling strategy)
-  // For simplicity, not shown here, but could use light_view_proj to build a frustum.
-
   #partial switch data in node_ptr.attachment {
   case NodeStaticMeshAttachment:
     mesh_handle := data.handle
@@ -611,7 +606,6 @@ render_shadow_node_callback :: proc(
       0,
       .UINT32,
     )
-    // vk.CmdDraw(ctx.command_buffer, 4, 1, 0, 0)
     vk.CmdDrawIndexed(ctx.command_buffer, mesh.indices_len, 1, 0, 0, 0)
     ctx.obstacles_count^ += 1
   case NodeSkeletalMeshAttachment:
@@ -649,8 +643,8 @@ try_render :: proc(engine: ^Engine) -> vk.Result {
   elapsed_seconds := time.duration_seconds(time.since(engine.start_timestamp))
 
   scene_uniform := SceneUniform {
-    view       = get_view_matrix(&engine.scene),
-    projection = get_projection_matrix(&engine.scene),
+    view       = camera_calculate_view_matrix(&engine.scene.camera),
+    projection = camera_calculate_projection_matrix(&engine.scene.camera),
     time       = f32(elapsed_seconds),
   }
   // fmt.printfln("Scene uniform: %v", scene_uniform)
@@ -667,13 +661,11 @@ try_render :: proc(engine: ^Engine) -> vk.Result {
   }
   if !traverse_scene(
     engine,
-    engine.scene.root,
-    linalg.MATRIX4F32_IDENTITY,
     &collect_ctx,
     collect_lights_callback,
   ) {
     fmt.eprintln("Error during light collection")
-    // return false // Decide if this is fatal for the frame
+    // return false
   }
 
   render_shadow_maps(engine, &light_uniform) or_return
@@ -693,8 +685,6 @@ try_render :: proc(engine: ^Engine) -> vk.Result {
   }
   if !traverse_scene(
     engine,
-    engine.scene.root,
-    linalg.MATRIX4F32_IDENTITY,
     &render_meshes_ctx,
     render_scene_node_callback,
   ) {
@@ -745,14 +735,14 @@ try_render :: proc(engine: ^Engine) -> vk.Result {
   return .SUCCESS
 }
 
-render_engine :: proc(engine: ^Engine) {
+engine_render :: proc(engine: ^Engine) {
   if time.duration_milliseconds(time.since(engine.last_frame_timestamp)) <
      FRAME_TIME_MILIS {
     return
   }
   res := try_render(engine)
   if res == .ERROR_OUT_OF_DATE_KHR || res == .SUBOPTIMAL_KHR {
-    recreate_swapchain_engine(engine)
+    engine_recreate_swapchain(engine)
   } else if res != .SUCCESS {
     fmt.eprintln("Error during rendering")
   }
@@ -762,7 +752,6 @@ render_engine :: proc(engine: ^Engine) {
 render_shadow_maps :: proc(
   engine: ^Engine,
   light_uniform: ^SceneLightUniform,
-  // command_buffer: vk.CommandBuffer,
 ) -> vk.Result {
   vkd := engine.vk_ctx.vkd
   total_obstacles: u32 = 0
@@ -773,18 +762,18 @@ render_shadow_maps :: proc(
 
     shadow_map_texture := renderer_get_shadow_map(&engine.renderer, i)
 
-    light_pos_3d: linalg.Vector3f32 = light.position.xyz
-    light_dir_3d: linalg.Vector3f32 = linalg.normalize(light.direction.xyz)
+    light_pos_3d := light.position.xyz
+    light_dir_3d := linalg.normalize(light.direction.xyz)
 
     switch light.kind {
     case 0:
       look_target := light_pos_3d + light_dir_3d // Example target
-      light_view := linalg.matrix4_look_at_f32(
+      light_view := linalg.matrix4_look_at(
         light_pos_3d,
         look_target,
-        {0, 1, 0},
+        linalg.VECTOR3F32_Y_AXIS,
       )
-      light_proj := linalg.matrix4_perspective_f32(
+      light_proj := linalg.matrix4_perspective(
         math.PI * 2,
         1.0,
         0.1,
@@ -793,14 +782,14 @@ render_shadow_maps :: proc(
       light.view_proj = light_proj * light_view
     case 1:
       look_target := light_pos_3d + light_dir_3d
-      light_view := linalg.matrix4_look_at_f32(
+      light_view := linalg.matrix4_look_at(
         light_pos_3d,
         look_target,
-        {0, 1, 0},
+        linalg.VECTOR3F32_Y_AXIS,
       )
       // Ortho size needs to encompass the visible scene from light's POV
       ortho_size: f32 = 20.0 // Example, should be dynamic
-      light_proj := linalg.matrix_ortho3d_f32(
+      light_proj := linalg.matrix_ortho3d(
         -ortho_size,
         ortho_size,
         -ortho_size,
@@ -812,12 +801,12 @@ render_shadow_maps :: proc(
     case 2:
       // Spot
       look_target := light_pos_3d + light_dir_3d
-      light_view := linalg.matrix4_look_at_f32(
+      light_view := linalg.matrix4_look_at(
         light_pos_3d,
         look_target,
-        {0, 1, 0},
+        linalg.VECTOR3F32_Y_AXIS,
       )
-      light_proj := linalg.matrix4_perspective_f32(
+      light_proj := linalg.matrix4_perspective(
         light.angle,
         1.0,
         0.1,
@@ -828,25 +817,8 @@ render_shadow_maps :: proc(
     }
     // fmt.printfln("Light view_proj matrix for shadow pass: %v", light_vp)
 
+    // TODO: shadow rendering could benefit from parallel rendering, recheck synchronization in this part
 
-    // --- Begin Shadow Pass Rendering ---
-    // This part assumes dynamic rendering for the shadow pass.
-    // The command buffer passed in is the main one, which might be an issue if not handled carefully.
-    // Ideally, shadow passes might use their own command buffers or be subpasses.
-    // For this translation, I'll follow the Zig structure of re-using and re-recording.
-    // This implies the main command buffer is reset and begun for each shadow map.
-    // This is unusual. A more common pattern is one command buffer for all shadow maps,
-    // or one per shadow map submitted independently.
-    // The Zig code resets and begins the *same* command buffer in the loop.
-    // And then `vkd.queueSubmit` and `vkd.deviceWaitIdle` *inside* the loop. This is very inefficient.
-    // A better way: record all shadow passes, then main pass, then submit.
-    // Or, record one shadow pass, submit, wait, record next, etc. (as Zig does).
-
-    // Let's assume the renderer provides a way to manage this, or we simplify.
-    // For now, let's use the passed command_buffer and follow Zig's sequential record-submit-wait.
-    // This is highly inefficient but matches the Zig structure.
-
-    // NEW: Use single time command buffer for each shadow map
     shadow_cmd_buffer := renderer_get_command_buffer(&engine.renderer)
     vk.ResetCommandBuffer(shadow_cmd_buffer, {}) or_return
     vk.BeginCommandBuffer(
@@ -955,8 +927,6 @@ render_shadow_maps :: proc(
     }
     traverse_scene(
       engine,
-      engine.scene.root,
-      linalg.MATRIX4F32_IDENTITY,
       &shadow_render_ctx,
       render_shadow_node_callback,
     )
@@ -1015,7 +985,7 @@ render_shadow_maps :: proc(
 }
 
 
-recreate_swapchain_engine :: proc(engine: ^Engine) -> vk.Result {
+engine_recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
   vkd := engine.vk_ctx.vkd
   vk.DeviceWaitIdle(vkd)
   indices := find_queue_families(
@@ -1055,22 +1025,22 @@ recreate_swapchain_engine :: proc(engine: ^Engine) -> vk.Result {
   return .SUCCESS
 }
 
-get_delta_time_engine :: proc(engine: ^Engine) -> f32 {
+engine_get_delta_time :: proc(engine: ^Engine) -> f32 {
   return f32(time.duration_seconds(time.since(engine.last_update_timestamp)))
 }
 
-get_time_engine :: proc(engine: ^Engine) -> f32 {
+engine_get_time :: proc(engine: ^Engine) -> f32 {
   now := time.now()
   return f32(time.duration_seconds(time.since(engine.start_timestamp)))
 }
 
-should_close_engine :: proc(engine: ^Engine) -> bool {
+engine_should_close :: proc(engine: ^Engine) -> bool {
   return bool(glfw.WindowShouldClose(engine.window))
 }
 
 engine_update :: proc(engine: ^Engine) -> bool {
   glfw.PollEvents()
-  delta_time := get_delta_time_engine(engine)
+  delta_time := engine_get_delta_time(engine)
   if delta_time < UPDATE_FRAME_TIME {
     return false
   }
@@ -1126,7 +1096,7 @@ engine_update :: proc(engine: ^Engine) -> bool {
   return true
 }
 
-deinit_engine :: proc(engine: ^Engine) {
+engine_deinit :: proc(engine: ^Engine) {
   vkd := engine.vk_ctx.vkd
   vk.DeviceWaitIdle(vkd)
 
@@ -1151,10 +1121,10 @@ deinit_engine :: proc(engine: ^Engine) {
 }
 
 // --- Transaction System (Simplified) ---
-begin_transaction_engine :: proc(engine: ^Engine) {
+engine_begin_transaction :: proc(engine: ^Engine) {
   engine.in_transaction = true
 }
-commit_transaction_engine :: proc(engine: ^Engine) {
+engine_commit_transaction :: proc(engine: ^Engine) {
   engine.in_transaction = false
   // Process dirty transforms if not handled by traversal
   // for handle in engine.dirty_transforms { ... }
@@ -1162,7 +1132,7 @@ commit_transaction_engine :: proc(engine: ^Engine) {
 }
 
 // --- Animation Control ---
-play_animation_engine :: proc(
+engine_play_animation :: proc(
   engine: ^Engine,
   node_handle: Handle,
   name: string,
@@ -1268,19 +1238,9 @@ spawn_node :: proc(engine: ^Engine) -> (handle: Handle, node: ^Node) {
   return
 }
 
-set_update_callback :: proc(engine: ^Engine, cb: UpdateProc) {
-  engine.update_proc = cb
-}
-set_render3d_callback :: proc(engine: ^Engine, cb: Render3DProc) {
-  engine.render3d_proc = cb
-}
-set_render2d_callback :: proc(engine: ^Engine, cb: Render2DProc) {
-  engine.render2d_proc = cb
-}
-
 engine_run :: proc(engine: ^Engine) {
-  for !should_close_engine(engine) {
+  for !engine_should_close(engine) {
     engine_update(engine)
-    render_engine(engine)
+    engine_render(engine)
   }
 }

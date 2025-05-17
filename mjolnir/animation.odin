@@ -82,8 +82,7 @@ pose_init :: proc(
     m = linalg.MATRIX4F32_IDENTITY
   }
   buffer_size := size_of(linalg.Matrix4f32) * vk.DeviceSize(joints_count)
-  data_buffer_init_host_visible(
-    &pose.bone_buffer,
+  pose.bone_buffer = create_host_visible_buffer(
     vk_ctx,
     buffer_size,
     {.STORAGE_BUFFER},

@@ -219,14 +219,14 @@ camera_calculate_projection_matrix :: proc(
 ) -> linalg.Matrix4f32 {
   switch proj in camera.projection {
   case PerspectiveProjection:
-    return linalg.matrix4_perspective_f32(
+    return linalg.matrix4_perspective(
       proj.fov,
       proj.aspect_ratio,
       proj.near,
       proj.far,
     )
   case OrthographicProjection:
-    return linalg.matrix_ortho3d_f32(
+    return linalg.matrix_ortho3d(
       -proj.width / 2,
       proj.width / 2,
       -proj.height / 2,
@@ -242,7 +242,7 @@ camera_calculate_projection_matrix :: proc(
 camera_calculate_view_matrix :: proc(camera: ^Camera) -> linalg.Matrix4f32 {
   switch movement_data in camera.movement_data {
   case CameraOrbitMovement:
-    return linalg.matrix4_look_at_f32(
+    return linalg.matrix4_look_at(
       camera.position,
       movement_data.target,
       camera.up,
@@ -251,7 +251,7 @@ camera_calculate_view_matrix :: proc(camera: ^Camera) -> linalg.Matrix4f32 {
     forward_vec := camera_forward(camera)
     up_vec := camera_up(camera)
     target_point := camera.position + forward_vec
-    return linalg.matrix4_look_at_f32(camera.position, target_point, up_vec)
+    return linalg.matrix4_look_at(camera.position, target_point, up_vec)
   case:
     return linalg.MATRIX4F32_IDENTITY
   }

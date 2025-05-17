@@ -21,14 +21,6 @@ init_scene :: proc(s: ^Scene) {
 deinit_scene :: proc(s: ^Scene) {
 }
 
-// Camera related methods, forwarding to the Camera struct
-get_view_matrix :: proc(s: ^Scene) -> linalg.Matrix4f32 {
-  return camera_calculate_view_matrix(&s.camera)
-}
-
-get_projection_matrix :: proc(s: ^Scene) -> linalg.Matrix4f32 {
-  return camera_calculate_projection_matrix(&s.camera)
-}
 
 rotate_orbit_camera_scene :: proc(
   s: ^Scene,

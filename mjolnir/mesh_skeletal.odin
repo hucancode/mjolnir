@@ -88,23 +88,23 @@ skeletal_mesh_init :: proc(
   size := len(positions_slice) * size_of(linalg.Vector4f32)
   self.simple_vertex_buffer = create_local_buffer(
     ctx,
-    raw_data(positions_slice),
     vk.DeviceSize(size),
     {.VERTEX_BUFFER},
+    raw_data(positions_slice),
   ) or_return
   size = len(geometry_data.vertices) * size_of(geometry.SkinnedVertex)
   self.vertex_buffer = create_local_buffer(
     ctx,
-    raw_data(geometry_data.vertices),
     vk.DeviceSize(size),
     {.VERTEX_BUFFER},
+    raw_data(geometry_data.vertices),
   ) or_return
   size = len(geometry_data.indices) * size_of(u32)
   self.index_buffer = create_local_buffer(
     ctx,
-    raw_data(geometry_data.indices),
     vk.DeviceSize(size),
     {.INDEX_BUFFER},
+    raw_data(geometry_data.indices),
   ) or_return
   self.bones = make([]Bone, 0)
   self.animations = make([]Animation_Clip, 0)
@@ -177,7 +177,7 @@ calculate_animation_transform :: proc(
     } else {
       local_animated_transform = current_bone.bind_transform
     }
-    local_matrix := linalg.matrix4_from_trs_f32(
+    local_matrix := linalg.matrix4_from_trs(
       local_animated_transform.position,
       local_animated_transform.rotation,
       local_animated_transform.scale,

@@ -14,8 +14,6 @@ DataBuffer :: struct {
   size:   vk.DeviceSize,
 }
 
-// writeAt equivalent: writes data to the buffer at a specific offset.
-// Returns true on success, false on failure (e.g., not mapped, out of bounds).
 data_buffer_write_at :: proc(
   self: ^DataBuffer,
   data: rawptr,
@@ -33,8 +31,6 @@ data_buffer_write_at :: proc(
   return .SUCCESS
 }
 
-// write equivalent: writes data to the buffer starting from offset 0.
-// Returns true on success, false on failure.
 data_buffer_write :: proc(
   self: ^DataBuffer,
   data: rawptr,
@@ -43,9 +39,6 @@ data_buffer_write :: proc(
   return data_buffer_write_at(self, data, 0, len)
 }
 
-// Deinitializes a DataBuffer.
-// Requires the Vulkan device (vkd) for destruction calls.
-// Takes ^VulkanContext to access vkd and physical_device for find_memory_type_index.
 data_buffer_deinit :: proc(buffer: ^DataBuffer, ctx: ^VulkanContext) {
   if buffer == nil || ctx == nil {
     return
@@ -66,65 +59,6 @@ data_buffer_deinit :: proc(buffer: ^DataBuffer, ctx: ^VulkanContext) {
   buffer.size = 0
 }
 
-// Initializes a host-visible buffer, allocates memory, binds it, maps it, and optionally copies data.
-// Takes ^VulkanContext to access vkd and physical_device for find_memory_type_index.
-data_buffer_init_host_visible :: proc(
-  buffer: ^DataBuffer,
-  ctx: ^VulkanContext,
-  size: vk.DeviceSize,
-  usage: vk.BufferUsageFlags,
-  data_to_push: rawptr = nil, // Optional initial data
-) -> vk.Result {
-  vkd := ctx.vkd
-  buffer.size = size
-  create_info := vk.BufferCreateInfo {
-    sType       = .BUFFER_CREATE_INFO,
-    size        = size,
-    usage       = usage,
-    sharingMode = .EXCLUSIVE,
-  }
-  vk.CreateBuffer(vkd, &create_info, nil, &buffer.buffer) or_return
-  mem_requirements: vk.MemoryRequirements
-  vk.GetBufferMemoryRequirements(vkd, buffer.buffer, &mem_requirements)
-  // find_memory_type_index is expected to be in the same package or imported.
-  // Assuming it's in the 'device' package (e.g. from context.odin)
-  mem_type_idx, found := find_memory_type_index(
-    ctx.physical_device,
-    mem_requirements.memoryTypeBits,
-    {.HOST_VISIBLE, .HOST_COHERENT},
-  )
-  if !found {
-    fmt.printfln(
-      "init_host_visible_buffer: Failed to find suitable memory type.",
-    )
-    return .ERROR_UNKNOWN
-  }
-
-  alloc_info := vk.MemoryAllocateInfo {
-    sType           = .MEMORY_ALLOCATE_INFO,
-    allocationSize  = mem_requirements.size,
-    memoryTypeIndex = mem_type_idx,
-  }
-  vk.AllocateMemory(vkd, &alloc_info, nil, &buffer.memory) or_return
-  vk.BindBufferMemory(vkd, buffer.buffer, buffer.memory, 0) or_return
-  vk.MapMemory(
-    vkd,
-    buffer.memory,
-    0,
-    buffer.size,
-    {},
-    &buffer.mapped,
-  ) or_return
-  fmt.printfln("Init host visible buffer, buffer mapped at %x", buffer.mapped)
-
-  // If data_to_push is provided, copy it to the mapped buffer
-  if data_to_push != nil {
-    mem.copy(buffer.mapped, data_to_push, int(size))
-  }
-  return .SUCCESS
-}
-
-
 // --- ImageBuffer ---
 
 ImageBuffer :: struct {
@@ -136,7 +70,6 @@ ImageBuffer :: struct {
 }
 
 // Deinitializes an ImageBuffer.
-// Requires the Vulkan device (vkd) for destruction calls.
 image_buffer_init :: proc(vkd: vk.Device, self: ^ImageBuffer) {
   if self.view != 0 {
     vk.DestroyImageView(vkd, self.view, nil)
@@ -158,7 +91,6 @@ image_buffer_init :: proc(vkd: vk.Device, self: ^ImageBuffer) {
 // --- ImageView Creation ---
 
 // Creates an ImageView.
-// Requires the Vulkan device (vkd).
 create_image_view :: proc(
   vkd: vk.Device,
   image: vk.Image,
@@ -201,7 +133,21 @@ create_host_visible_buffer :: proc(
   buffer: DataBuffer,
   ret: vk.Result,
 ) {
-  data_buffer_init_host_visible(&buffer, ctx, size, usage, data) or_return
+  vkd := ctx.vkd
+  buffer.size = size
+  buffer = malloc_host_visible_buffer(ctx, size, usage) or_return
+  vk.MapMemory(
+    vkd,
+    buffer.memory,
+    0,
+    buffer.size,
+    {},
+    &buffer.mapped,
+  ) or_return
+  fmt.printfln("Init host visible buffer, buffer mapped at %x", buffer.mapped)
+  if data != nil {
+    mem.copy(buffer.mapped, data, int(size))
+  }
   ret = .SUCCESS
   return
 }
@@ -209,22 +155,24 @@ create_host_visible_buffer :: proc(
 // Creates a device-local buffer and uploads data using a staging buffer.
 create_local_buffer :: proc(
   ctx: ^VulkanContext,
-  data: rawptr,
   size: vk.DeviceSize,
   usage: vk.BufferUsageFlags,
+  data: rawptr = nil,
 ) -> (
   buffer: DataBuffer,
   ret: vk.Result,
 ) {
-  staging := create_host_visible_buffer(
-    ctx,
-    size,
-    {.TRANSFER_SRC},
-    data,
-  ) or_return
-  defer data_buffer_deinit(&staging, ctx)
   buffer = malloc_local_buffer(ctx, size, usage | {.TRANSFER_DST}) or_return
-  copy_buffer(ctx, &buffer, &staging) or_return
+  if data != nil {
+    staging := create_host_visible_buffer(
+      ctx,
+      size,
+      {.TRANSFER_SRC},
+      data,
+    ) or_return
+    defer data_buffer_deinit(&staging, ctx)
+    copy_buffer(ctx, &buffer, &staging) or_return
+  }
   ret = .SUCCESS
   return
 }

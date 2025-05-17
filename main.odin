@@ -28,8 +28,8 @@ main :: proc() {
   engine.render2d_proc = render2d
   engine.key_press_proc = on_key_pressed
   g_context = context
-  defer deinit_engine(&engine)
-  if init_engine(&engine, WIDTH, HEIGHT, TITLE) != .SUCCESS {
+  defer engine_deinit(&engine)
+  if engine_init(&engine, WIDTH, HEIGHT, TITLE) != .SUCCESS {
     fmt.eprintf("Failed to initialize engine\n")
     return
   }
@@ -115,7 +115,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
         }
         fmt.printfln("found skeleton:", skeleton_ptr)
         // skeleton_ptr.transform.position = {2.0, 0.0, 0.0}
-        play_animation_engine(engine, skeleton, "Anim_0", .Loop)
+        engine_play_animation(engine, skeleton, "Anim_0", .Loop)
         attachment, ok := skeleton_ptr.attachment.(NodeSkeletalMeshAttachment)
         if ok {
           pose := attachment.pose
@@ -146,7 +146,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
       } else {
         light_handles[i], light = spawn_point_light(engine, color, 15.0)
       }
-      light.transform.rotation = linalg.quaternion_angle_axis_f32(
+      light.transform.rotation = linalg.quaternion_angle_axis(
         math.PI * 0.3,
         linalg.VECTOR3F32_X_AXIS,
       )
@@ -167,7 +167,7 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
   // Animate lights
   for i in 0 ..< LIGHT_COUNT {
     offset := f32(i) / f32(LIGHT_COUNT) * math.PI * 2.0
-    t := get_time_engine(engine) + offset
+    t := engine_get_time(engine) + offset
     // fmt.printfln("getting light %d %v", i, light_handles[i])
     light_ptr := resource.get(&engine.nodes, light_handles[i])
     if light_ptr == nil {continue}
@@ -185,8 +185,8 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
     if light_cube_ptr == nil {
       continue
     }
-    light_cube_ptr.transform.rotation = linalg.quaternion_angle_axis_f32(
-      math.PI * get_time_engine(engine) * 0.5,
+    light_cube_ptr.transform.rotation = linalg.quaternion_angle_axis(
+      math.PI * engine_get_time(engine) * 0.5,
       linalg.VECTOR3F32_Y_AXIS,
     )
     light_cube_ptr.transform.is_dirty = true

@@ -41,7 +41,7 @@ decompose_matrix :: proc(t: ^Transform, m: linalg.Matrix4f32) {
   if sz !=
      0 {rot_mat[0, 2] = m[0, 2] / sz;rot_mat[1, 2] = m[1, 2] / sz;rot_mat[2, 2] = m[2, 2] / sz}
 
-  t.rotation = linalg.quaternion_from_matrix3_f32(rot_mat)
+  t.rotation = linalg.quaternion_from_matrix3(rot_mat)
 }
 
 matrix_from_slice :: proc(slice: [16]f32) -> linalg.Matrix4f32 {

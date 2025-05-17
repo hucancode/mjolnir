@@ -59,15 +59,13 @@ ui_init :: proc(
   ) or_return
   ui.atlas = texture^
   fmt.printfln("init UI vertex buffer...")
-  data_buffer_init_host_visible(
-    &ui.vertex_buffer,
+  ui.vertex_buffer = create_host_visible_buffer(
     &engine.vk_ctx,
     size_of(Vertex2D) * vk.DeviceSize(UI_MAX_VERTICES),
     {.VERTEX_BUFFER},
   ) or_return
   fmt.printfln("init UI indices buffer...")
-  data_buffer_init_host_visible(
-    &ui.index_buffer,
+  ui.index_buffer = create_host_visible_buffer(
     &engine.vk_ctx,
     size_of(u32) * vk.DeviceSize(UI_MAX_INDICES),
     {.INDEX_BUFFER},
@@ -81,8 +79,7 @@ ui_init :: proc(
   }
   ortho := linalg.matrix_ortho3d(0, f32(width), f32(height), 0, -1, 1)
   fmt.printfln("init UI proj buffer...")
-  data_buffer_init_host_visible(
-    &ui.proj_buffer,
+  ui.proj_buffer = create_host_visible_buffer(
     &engine.vk_ctx,
     size_of(linalg.Matrix4f32),
     {.UNIFORM_BUFFER},

@@ -56,25 +56,25 @@ static_mesh_init :: proc(
   size := len(positions_slice) * size_of(linalg.Vector4f32)
   self.simple_vertex_buffer = create_local_buffer(
     ctx,
-    raw_data(positions_slice),
     vk.DeviceSize(size),
     {.VERTEX_BUFFER},
+    raw_data(positions_slice),
   ) or_return
 
   size = len(data.vertices) * size_of(geometry.Vertex)
   self.vertex_buffer = create_local_buffer(
     ctx,
-    raw_data(data.vertices),
     vk.DeviceSize(size),
     {.VERTEX_BUFFER},
+    raw_data(data.vertices),
   ) or_return
 
   size = len(data.indices) * size_of(u32)
   self.index_buffer = create_local_buffer(
     ctx,
-    raw_data(data.indices),
     vk.DeviceSize(size),
     {.INDEX_BUFFER},
+    raw_data(data.indices),
   ) or_return
 
   return .SUCCESS
