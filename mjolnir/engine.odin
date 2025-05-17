@@ -31,6 +31,15 @@ SetupProc :: #type proc(engine: ^Engine)
 UpdateProc :: #type proc(engine: ^Engine, delta_time: f32)
 Render2DProc :: #type proc(engine: ^Engine, ctx: ^mu.Context)
 Render3DProc :: #type proc(engine: ^Engine)
+KeyPressProc :: #type proc(engine: ^Engine, key: u32)
+MousePressProc :: #type proc(engine: ^Engine, key: u32)
+MouseDragProc :: #type proc(
+  engine: ^Engine,
+  delta: linalg.Vector2f32,
+  offset: linalg.Vector2f32,
+)
+MouseScrollProc :: #type proc(engine: ^Engine, offset: linalg.Vector2f32)
+MouseMoveProc :: #type proc(engine: ^Engine, pos: linalg.Vector2f32)
 
 // --- Helper Context Structs for Scene Traversal ---
 CollectLightsContext :: struct {
@@ -53,6 +62,15 @@ ShadowRenderContext :: struct {
   light_view_proj: linalg.Matrix4f32, // Added to pass light's VP matrix
 }
 
+InputState :: struct {
+  mouse_pos:         linalg.Vector2f64,
+  mouse_drag_origin: linalg.Vector2f32,
+  mouse_buttons:     [8]bool,
+  mouse_holding:     [8]bool,
+  key_holding:       [512]bool,
+  keys:              [512]bool,
+}
+
 // --- Engine Struct ---
 Engine :: struct {
   window:                glfw.WindowHandle,
@@ -72,11 +90,19 @@ Engine :: struct {
   nodes:                 resource.ResourcePool(Node),
   in_transaction:        bool,
   dirty_transforms:      [dynamic]Handle,
+  input:                 InputState,
   setup_proc:            SetupProc,
   update_proc:           UpdateProc,
   render2d_proc:         Render2DProc,
   render3d_proc:         Render3DProc,
+  key_press_proc:        KeyPressProc,
+  mouse_press_proc:      MousePressProc,
+  mouse_drag_proc:       MouseDragProc,
+  mouse_move_proc:       MouseMoveProc,
+  mouse_scroll_proc:     MouseScrollProc,
 }
+
+g_context: runtime.Context
 
 // --- Scene Traversal ---
 // Generic scene traversal. Callback returns true to continue, false to stop or on error.
@@ -88,6 +114,8 @@ init_engine :: proc(
   height: u32,
   title: string,
 ) -> vk.Result {
+  context.user_ptr = engine
+  g_context = context
   engine.dirty_transforms = make([dynamic]Handle, 0)
 
   // Init GLFW
@@ -175,9 +203,20 @@ init_engine :: proc(
     engine.renderer.extent.width,
     engine.renderer.extent.height,
   )
+  glfw.SetScrollCallback(
+    engine.window,
+    proc "c" (window: glfw.WindowHandle, xoffset: f64, yoffset: f64) {
+      context = g_context
+      engine := cast(^Engine)context.user_ptr
+      camera_orbit_zoom(
+        &engine.scene.camera,
+        -f32(yoffset) * SCROLL_SENSITIVITY,
+      )
+    },
+  )
 
   if engine.setup_proc != nil {
-      engine.setup_proc(engine)
+    engine.setup_proc(engine)
   }
 
   fmt.println("Engine initialized")
@@ -656,7 +695,7 @@ try_render :: proc(engine: ^Engine) -> vk.Result {
   )
 
   if engine.render3d_proc != nil {
-      engine.render3d_proc(engine)
+    engine.render3d_proc(engine)
   }
   ctx := &engine.ui.ctx
   mu.begin(ctx)
@@ -678,7 +717,7 @@ try_render :: proc(engine: ^Engine) -> vk.Result {
     mu.label(ctx, fmt.tprintf("Rendered %d", rendered_count))
   }
   if engine.render2d_proc != nil {
-      engine.render2d_proc(engine, ctx)
+    engine.render2d_proc(engine, ctx)
   }
   mu.end(ctx)
   ui_render(&engine.ui, command_buffer_main)
@@ -1015,39 +1054,46 @@ engine_update :: proc(engine: ^Engine) -> bool {
   if delta_time < UPDATE_FRAME_TIME {
     return false
   }
-
-  // Update animations and poses
   for &entry, i in engine.nodes.entries {
     if !entry.active {
       continue
     }
-    data, ok := &entry.item.attachment.(NodeSkeletalMeshAttachment)
-    if !ok {
-      continue
-    }
-    if data.animation == nil {
+    data, is_skeletal_mesh := &entry.item.attachment.(NodeSkeletalMeshAttachment)
+    if !is_skeletal_mesh || data.animation == nil {
       continue
     }
     anim_inst := &data.animation.?
-    // fmt.printfln("[ANIM] Node %d anim status: %v time: %v",i, anim_inst.status, anim_inst.time)
     animation_instance_update(anim_inst, delta_time)
-    skeletal_mesh_res := resource.get(&engine.skeletal_meshes, data.handle)
-    if skeletal_mesh_res != nil {
-      // Calculate bone transforms
-      calculate_animation_transform(skeletal_mesh_res, anim_inst, &data.pose)
-      // Debug: print first 2 bone matrices after animation update
-      for j in 0 ..< min(5, len(data.pose.bone_matrices)) {
-        // fmt.printfln("[ANIM] Node %d bone %d matrix: %v", i, j, data.pose.bone_matrices[j])
-      }
+    skeletal_mesh := resource.get(&engine.skeletal_meshes, data.handle)
+    if skeletal_mesh != nil {
+      calculate_animation_transform(skeletal_mesh, anim_inst, &data.pose)
     }
   }
-
-  // Process dirty transforms (simplified, full recursive update might be needed)
-  // This is where you'd typically iterate dirty nodes, recalculate their world matrices,
-  // and propagate dirtiness to children. The current traverse_scene does this on-the-fly.
-  // The transaction system in Zig was for batching these updates.
-  // For now, clearing dirty_transforms as traverse_scene handles it.
   clear(&engine.dirty_transforms)
+
+  last_mouse_pos := engine.input.mouse_pos
+  engine.input.mouse_pos.x, engine.input.mouse_pos.y = glfw.GetCursorPos(
+    engine.window,
+  )
+  delta := engine.input.mouse_pos - last_mouse_pos
+
+  for i in 0 ..< len(engine.input.mouse_buttons) {
+    is_pressed := glfw.GetMouseButton(engine.window, c.int(i)) == glfw.PRESS
+    engine.input.mouse_holding[i] = is_pressed && engine.input.mouse_buttons[i]
+    engine.input.mouse_buttons[i] = is_pressed
+  }
+  for k in 0 ..< len(engine.input.keys) {
+    is_pressed := glfw.GetKey(engine.window, c.int(k)) == glfw.PRESS
+    engine.input.key_holding[k] = is_pressed && engine.input.keys[k]
+    engine.input.keys[k] = is_pressed
+  }
+  if engine.input.mouse_holding[glfw.MOUSE_BUTTON_1] {
+    camera_orbit_rotate(
+      &engine.scene.camera,
+      f32(delta.x * MOUSE_SENSITIVITY_X),
+      f32(delta.y * MOUSE_SENSITIVITY_Y),
+    )
+  }
 
   if engine.update_proc != nil {
     engine.update_proc(engine, delta_time)
@@ -1059,11 +1105,6 @@ engine_update :: proc(engine: ^Engine) -> bool {
 deinit_engine :: proc(engine: ^Engine) {
   vkd := engine.vk_ctx.vkd
   vk.DeviceWaitIdle(vkd)
-
-  // Deinit ImGui
-  // gui.ShutdownPlatformInterface()
-  // gui.ShutdownVulkan()
-  // gui.DestroyContext(engine.imgui_instance)
 
   // Deinit resources
   resource.pool_deinit(&engine.nodes)
@@ -1204,18 +1245,18 @@ spawn_node :: proc(engine: ^Engine) -> (handle: Handle, node: ^Node) {
 }
 
 set_update_callback :: proc(engine: ^Engine, cb: UpdateProc) {
-    engine.update_proc = cb;
+  engine.update_proc = cb
 }
 set_render3d_callback :: proc(engine: ^Engine, cb: Render3DProc) {
-    engine.render3d_proc = cb;
+  engine.render3d_proc = cb
 }
 set_render2d_callback :: proc(engine: ^Engine, cb: Render2DProc) {
-    engine.render2d_proc = cb;
+  engine.render2d_proc = cb
 }
 
 engine_run :: proc(engine: ^Engine) {
-    for !should_close_engine(engine) {
-      engine_update(engine)
-      render_engine(engine)
-    }
+  for !should_close_engine(engine) {
+    engine_update(engine)
+    render_engine(engine)
+  }
 }

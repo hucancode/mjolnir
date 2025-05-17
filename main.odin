@@ -19,7 +19,6 @@ LIGHT_COUNT :: 5
 light_handles: [LIGHT_COUNT]mjolnir.Handle
 light_cube_handles: [LIGHT_COUNT]mjolnir.Handle
 
-g_context: runtime.Context
 engine: mjolnir.Engine
 
 main :: proc() {
@@ -35,10 +34,6 @@ main :: proc() {
   }
   engine_run(&engine)
 }
-
-_dragging: bool = false
-_last_mouse_x: f64 = 0
-_last_mouse_y: f64 = 0
 
 setup :: proc(engine: ^mjolnir.Engine) {
     using mjolnir
@@ -162,52 +157,12 @@ setup :: proc(engine: ^mjolnir.Engine) {
       light_cube_node.transform.scale = {0.1, 0.1, 0.1}
       light_cube_node.transform.position = {0.0, 0.1, 0.0}
     }
-
     // Directional light
     _, _ = spawn_directional_light(engine, {0.3, 0.3, 0.3, 0.0})
-
-    // Mouse scroll callback for camera zoom
-    glfw.SetScrollCallback(
-      engine.window,
-      proc "c" (window: glfw.WindowHandle, xoffset: f64, yoffset: f64) {
-        context = g_context
-        SCROLL_SENSITIVITY :: 0.5
-        camera_orbit_zoom(
-          &engine.scene.camera,
-          -f32(yoffset) * SCROLL_SENSITIVITY,
-        )
-      },
-    )
 }
 
 update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
   using mjolnir
-  // Camera orbit controls (mouse drag)
-  movement, is_orbit := engine.scene.camera.movement_data.(CameraOrbitMovement)
-  if is_orbit {
-    mouse_x, mouse_y := glfw.GetCursorPos(engine.window)
-    mouse_button := glfw.GetMouseButton(engine.window, glfw.MOUSE_BUTTON_1)
-    MOUSE_SENSITIVITY_X :: 0.005
-    MOUSE_SENSITIVITY_Y :: 0.005
-    if mouse_button == glfw.PRESS {
-      if !_dragging {
-        _last_mouse_x = mouse_x
-        _last_mouse_y = mouse_y
-        _dragging = true
-      }
-      delta_x := f32(mouse_x - _last_mouse_x)
-      delta_y := f32(mouse_y - _last_mouse_y)
-      camera_orbit_rotate(
-        &engine.scene.camera,
-        delta_x * MOUSE_SENSITIVITY_X,
-        delta_y * MOUSE_SENSITIVITY_Y,
-      )
-      _last_mouse_x = mouse_x
-      _last_mouse_y = mouse_y
-    } else {
-      _dragging = false
-    }
-  }
   // Animate lights
   for i in 0 ..< LIGHT_COUNT {
     offset := f32(i) / f32(LIGHT_COUNT) * math.PI * 2.0

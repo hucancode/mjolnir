@@ -26,6 +26,11 @@ DEFAULT_ORBIT_DATA := CameraOrbitMovement {
   min_pitch    = -0.2 * math.PI,
   max_pitch    = 0.45 * math.PI,
 }
+
+MOUSE_SENSITIVITY_X :: 0.005
+MOUSE_SENSITIVITY_Y :: 0.005
+SCROLL_SENSITIVITY :: 0.5
+
 CameraFreeMovement :: struct {
 }
 PerspectiveProjection :: struct {
