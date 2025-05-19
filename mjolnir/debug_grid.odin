@@ -18,10 +18,10 @@ init_debug_grid :: proc(engine: ^Engine, extent: i32 = 100) -> vk.Result {
     vertex_count := (extent*2+1) * 4  // 2 lines per coordinate (X and Z), 2 vertices per line
     verts := make([dynamic]geometry.Vertex, 0, vertex_count)
     minor_color := [4]f32{0.5, 0.5, 0.5, 1.0}
-    major_color := [4]f32{0.2, 0.2, 0.2, 1.0}
-    origin_color := [4]f32{1.0, 0.0, 0.0, 1.0}
+    major_color := [4]f32{1, 1, 1, 1.0}
+    origin_color := [4]f32{1, 0, 0, 1.0}
 
-    y :f32 = 9.0
+    y :f32 = 0.0
     // X lines (parallel to Z)
     for i in 0..=extent*2+1 {
         x := i - extent
@@ -29,13 +29,13 @@ init_debug_grid :: proc(engine: ^Engine, extent: i32 = 100) -> vk.Result {
         // Each line needs 2 vertices
         append(&verts, geometry.Vertex{
             position = {f32(x), y, -f32(extent)},
-            normal = {0, 1, 0},  // Up vector
+            normal = {0, 1, 0},
             color = color,
             uv = {0, 0},
         })
         append(&verts, geometry.Vertex{
             position = {f32(x), y, f32(extent)},
-            normal = {0, 1, 0},  // Up vector
+
             color = color,
             uv = {1, 0},
         })
@@ -46,14 +46,14 @@ init_debug_grid :: proc(engine: ^Engine, extent: i32 = 100) -> vk.Result {
         z := i - extent
         color := origin_color if z == 0 else (major_color if z % 10 == 0 else minor_color)
         append(&verts, geometry.Vertex{
-            position = {-f32(extent), y, f32(z)},
-            normal = {0, 1, 0},  // Up vector
+            position = {-f32(extent), y+0.1, f32(z)},
+            normal = {0, 1, 0},
             color = color,
             uv = {0, 0},
         })
         append(&verts, geometry.Vertex{
-            position = {f32(extent), y, f32(z)},
-            normal = {0, 1, 0},  // Up vector
+            position = {f32(extent), y+0.1, f32(z)},
+            normal = {0, 1, 0},
             color = color,
             uv = {1, 0},
         })
