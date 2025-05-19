@@ -216,9 +216,10 @@ depth_texture_init :: proc(
   vk_ctx: ^VulkanContext,
   width: u32,
   height: u32,
+  usage: vk.ImageUsageFlags = {.DEPTH_STENCIL_ATTACHMENT},
 ) -> vk.Result {
   self.vk_ctx_ref = vk_ctx
-  self.buffer = create_depth_image(vk_ctx, width, height) or_return
+  self.buffer = create_depth_image(vk_ctx, width, height, usage) or_return
   sampler_info := vk.SamplerCreateInfo {
     sType         = .SAMPLER_CREATE_INFO,
     magFilter     = .LINEAR,
@@ -248,11 +249,12 @@ create_depth_image :: proc(
   vk_ctx: ^VulkanContext,
   width: u32,
   height: u32,
+  usage: vk.ImageUsageFlags = {.DEPTH_STENCIL_ATTACHMENT},
 ) -> (
   img: ImageBuffer,
   ret: vk.Result,
 ) {
-  depth_image_init(&img, vk_ctx, width, height) or_return
+  depth_image_init(&img, vk_ctx, width, height, usage) or_return
   ret = .SUCCESS
   return
 }
@@ -263,6 +265,7 @@ depth_image_init :: proc(
   ctx: ^VulkanContext,
   width: u32,
   height: u32,
+  usage: vk.ImageUsageFlags = {.DEPTH_STENCIL_ATTACHMENT},
 ) -> vk.Result {
   img_buffer.width = width
   img_buffer.height = height
@@ -279,7 +282,7 @@ depth_image_init :: proc(
     format        = img_buffer.format,
     tiling        = .OPTIMAL,
     initialLayout = .UNDEFINED,
-    usage         = {.DEPTH_STENCIL_ATTACHMENT},
+    usage         = usage,
     sharingMode   = .EXCLUSIVE,
     samples       = {._1},
   }

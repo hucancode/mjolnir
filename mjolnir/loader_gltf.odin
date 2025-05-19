@@ -304,19 +304,17 @@ process_gltf_primitive :: proc(
       g_primitive.material,
     )
   if base_tex_result == .SUCCESS {
-    material_handle, _, _ = create_material(
+    material_handle, _, _ = create_material_textured(
       loader.engine_ptr,
+      SHADER_FEATURE_LIT | SHADER_FEATURE_RECEIVE_SHADOW,
       base_color_tex_handle,
       base_color_tex_handle,
       base_color_tex_handle,
     )
   } else {
-    tex_handle: Handle
-    material_handle, _, _ = create_material(
+    material_handle, _, _ = create_material_untextured(
       loader.engine_ptr,
-      tex_handle,
-      tex_handle,
-      tex_handle,
+      SHADER_FEATURE_LIT | SHADER_FEATURE_RECEIVE_SHADOW,
     )
   }
   // Geometry
@@ -415,8 +413,9 @@ process_gltf_skinned_primitive :: proc(
       g_primitive.material,
     )
   if tex_ok == .SUCCESS {
-    mat_handle, _, _ = create_skinned_material(
+    mat_handle, _, _ = create_material_textured(
       loader.engine_ptr,
+      SHADER_FEATURE_LIT | SHADER_FEATURE_SKINNING | SHADER_FEATURE_RECEIVE_SHADOW,
       base_color_tex_handle,
       base_color_tex_handle,
       base_color_tex_handle,
@@ -427,18 +426,16 @@ process_gltf_skinned_primitive :: proc(
       mat_handle,
     )
   } else {
-    tex_handle: Handle
-    mat_handle, _, _ = create_skinned_material(
+    mat_handle, _, _ = create_material_untextured(
       loader.engine_ptr,
-      tex_handle,
-      tex_handle,
-      tex_handle,
+      SHADER_FEATURE_LIT | SHADER_FEATURE_SKINNING | SHADER_FEATURE_RECEIVE_SHADOW,
     )
     fmt.printfln("Creating skinned material without texture -> %v", mat_handle)
   }
   // Geometry
   num_vertices := g_primitive.attributes[0].data.count
-  vertices := make([]geometry.SkinnedVertex, num_vertices)
+  vertices := make([]geometry.Vertex, num_vertices)
+  skinnings := make([]geometry.SkinningData, num_vertices)
   attributes := g_primitive.attributes
   for attr_idx in 0 ..< len(attributes) {
     attribute := &attributes[attr_idx]
@@ -483,8 +480,8 @@ process_gltf_skinned_primitive :: proc(
         read := cgltf.accessor_read_uint(
           accessor,
           uint(i),
-          raw_data(vertices[i].joints[:]),
-          len(vertices[i].joints),
+          raw_data(skinnings[i].joints[:]),
+          len(skinnings[i].joints),
         )
         if !read {
           fmt.eprintf("Failed to read joints from GLTF primitive.\n")
@@ -494,7 +491,7 @@ process_gltf_skinned_primitive :: proc(
     case .weights:
       // if attribute.index == 0 {
       for i in 0 ..< min(int(accessor.count), len(vertices)) {
-        vertices[i].weights = {
+        skinnings[i].weights = {
           data[i * 4 + 0],
           data[i * 4 + 1],
           data[i * 4 + 2],
@@ -526,8 +523,9 @@ process_gltf_skinned_primitive :: proc(
   }
   skinned_geom_data = {
     vertices = vertices,
+    skinnings = skinnings,
     indices  = indices,
-    aabb     = geometry.aabb_from_skinned_vertices(vertices),
+    aabb     = geometry.aabb_from_vertices(vertices),
   }
   // Bones
   engine_bones = make([]Bone, len(g_skin.joints))

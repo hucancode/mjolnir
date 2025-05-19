@@ -41,31 +41,35 @@ setup :: proc(engine: ^mjolnir.Engine) {
       "assets/statue-1275469_1280.jpg",
     )
     fmt.printfln("Loaded texture: %v", texture)
-    mat_handle, _, _ := create_material(
+    mat_handle, _, _ := create_material_untextured(
       engine,
-      tex_handle,
-      tex_handle,
-      tex_handle,
+      SHADER_FEATURE_LIT | SHADER_FEATURE_RECEIVE_SHADOW,
     )
+    fmt.printfln("[DEBUG] Created lit textured material, handle: %v", mat_handle)
     // Create mesh
     cube_geom := geometry.make_cube()
     cube_mesh_handle := create_static_mesh(engine, &cube_geom, mat_handle)
+    fmt.printfln("[DEBUG] Created cube mesh, handle: %v", cube_mesh_handle)
     sphere_geom := geometry.make_sphere()
     sphere_mesh_handle := create_static_mesh(engine, &sphere_geom, mat_handle)
+    fmt.printfln("[DEBUG] Created sphere mesh, handle: %v", sphere_mesh_handle)
 
     // Create ground plane
-    ground_mat_handle, _, _ := create_material(
+    ground_mat_handle, _, _ := create_material_textured(
       engine,
+      SHADER_FEATURE_LIT | SHADER_FEATURE_RECEIVE_SHADOW,
       tex_handle,
       tex_handle,
       tex_handle,
     )
+    fmt.printfln("[DEBUG] Created ground material, handle: %v", ground_mat_handle)
     quad_geom := geometry.make_quad()
     ground_mesh_handle := create_static_mesh(
       engine,
       &quad_geom,
       ground_mat_handle,
     )
+    fmt.printfln("[DEBUG] Created ground mesh, handle: %v", ground_mesh_handle)
     if true {
       // Spawn cubes in a grid
       nx, ny, nz := 10, 10, 10

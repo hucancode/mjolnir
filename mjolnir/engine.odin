@@ -45,7 +45,7 @@ RenderMeshesContext :: struct {
   command_buffer:       vk.CommandBuffer,
   camera_frustum:       geometry.Frustum,
   rendered_count:       ^u32,
-  scene_descriptor_set: vk.DescriptorSet,
+  camera_descriptor_set: vk.DescriptorSet,
 }
 
 ShadowRenderContext :: struct {
@@ -53,6 +53,7 @@ ShadowRenderContext :: struct {
   command_buffer:  vk.CommandBuffer,
   obstacles_count: ^u32,
   light_view_proj: linalg.Matrix4f32, // Added to pass light's VP matrix
+  descriptor_set: vk.DescriptorSet,
 }
 
 InputState :: struct {
@@ -77,7 +78,6 @@ Engine :: struct {
   meshes:                resource.ResourcePool(StaticMesh),
   skeletal_meshes:       resource.ResourcePool(SkeletalMesh),
   materials:             resource.ResourcePool(Material),
-  skinned_materials:     resource.ResourcePool(SkinnedMaterial),
   textures:              resource.ResourcePool(Texture),
   lights:                resource.ResourcePool(Light),
   nodes:                 resource.ResourcePool(Node),
@@ -157,10 +157,6 @@ engine_init :: proc(
   resource.pool_init(&engine.materials)
   fmt.println("done")
 
-  fmt.print("Initializing skinned materials pool... ")
-  resource.pool_init(&engine.skinned_materials)
-  fmt.println("done")
-
   fmt.print("Initializing textures pool... ")
   resource.pool_init(&engine.textures)
   fmt.println("done")
@@ -175,6 +171,15 @@ engine_init :: proc(
 
   fmt.println("All resource pools initialized successfully")
 
+  build_3d_pipelines(
+    &engine.vk_ctx,
+    .B8G8R8A8_SRGB,
+    .D32_SFLOAT,
+  ) or_return
+  build_shadow_pipelines(
+    &engine.vk_ctx,
+    .D32_SFLOAT,
+  ) or_return
   engine_build_scene(engine)
   engine_build_renderer(engine) or_return
 
@@ -215,7 +220,7 @@ engine_init :: proc(
       context = g_context
       engine := cast(^Engine)context.user_ptr
       if engine.key_press_proc != nil {
-          engine.key_press_proc(engine, int(key), int(action), int(mods))
+        engine.key_press_proc(engine, int(key), int(action), int(mods))
       }
     },
   )
@@ -226,7 +231,7 @@ engine_init :: proc(
       context = g_context
       engine := cast(^Engine)context.user_ptr
       if engine.mouse_press_proc != nil {
-          engine.mouse_press_proc(engine, int(button), int(action), int(mods))
+        engine.mouse_press_proc(engine, int(button), int(action), int(mods))
       }
     },
   )
@@ -451,7 +456,7 @@ render_scene_node_callback :: proc(
   case NodeSkeletalMeshAttachment:
     mesh := resource.get(&eng.skeletal_meshes, data.handle)
     if mesh == nil {return true}
-    material := resource.get(&eng.skinned_materials, mesh.material)
+    material := resource.get(&eng.materials, mesh.material)
     if material == nil {return true}
     world_aabb := geometry.aabb_transform(mesh.aabb, world_matrix)
     if !geometry.frustum_test_aabb(
@@ -461,21 +466,24 @@ render_scene_node_callback :: proc(
     ) {
       return true
     }
-    // fmt.printfln("rendering skinned mesh %v, with material %v, pipeline %d, descriptor set %d", data.handle, mesh.material, material.pipeline, material.descriptor_set)
-    skinned_material_update_bone_buffer(
+    material_update_bone_buffer(
       material,
       data.pose.bone_buffer.buffer,
       data.pose.bone_buffer.size,
     )
+    pipeline := pipelines[material.features]
+    pipeline_layout := pipeline_layouts[material.features]
     descriptor_sets := [?]vk.DescriptorSet {
-      ctx.scene_descriptor_set,
-      material.descriptor_set,
+      ctx.camera_descriptor_set,
+      material.texture_descriptor_set,
+      material.skinning_descriptor_set,
     }
-    vk.CmdBindPipeline(ctx.command_buffer, .GRAPHICS, material.pipeline)
+    // fmt.printfln("rendering skeletal mesh with material %v", material)
+    vk.CmdBindPipeline(ctx.command_buffer, .GRAPHICS, pipeline)
     vk.CmdBindDescriptorSets(
       ctx.command_buffer,
       .GRAPHICS,
-      material.pipeline_layout,
+      pipeline_layout,
       0,
       u32(len(descriptor_sets)),
       raw_data(descriptor_sets[:]),
@@ -484,7 +492,7 @@ render_scene_node_callback :: proc(
     )
     vk.CmdPushConstants(
       ctx.command_buffer,
-      material.pipeline_layout,
+      pipeline_layout,
       {.VERTEX},
       0,
       size_of(linalg.Matrix4f32),
@@ -496,6 +504,13 @@ render_scene_node_callback :: proc(
       0,
       1,
       &mesh.vertex_buffer.buffer,
+      &offset,
+    )
+    vk.CmdBindVertexBuffers(
+      ctx.command_buffer,
+      1,
+      1,
+      &mesh.skin_buffer.buffer,
       &offset,
     )
     vk.CmdBindIndexBuffer(
@@ -507,8 +522,7 @@ render_scene_node_callback :: proc(
     vk.CmdDrawIndexed(ctx.command_buffer, mesh.indices_len, 1, 0, 0, 0)
     ctx.rendered_count^ += 1
   case NodeStaticMeshAttachment:
-    mesh_handle := data.handle
-    mesh := resource.get(&eng.meshes, mesh_handle)
+    mesh := resource.get(&eng.meshes, data.handle)
     if mesh == nil {return true}
     material := resource.get(&eng.materials, mesh.material)
     if material == nil {return true}
@@ -520,15 +534,17 @@ render_scene_node_callback :: proc(
     ) {
       return true
     }
+    pipeline := pipelines[material.features]
+    pipeline_layout := pipeline_layouts[material.features]
     descriptor_sets := [?]vk.DescriptorSet {
-      ctx.scene_descriptor_set,
-      material.descriptor_set,
+      ctx.camera_descriptor_set,
+      material.texture_descriptor_set,
     }
-    vk.CmdBindPipeline(ctx.command_buffer, .GRAPHICS, material.pipeline)
+    vk.CmdBindPipeline(ctx.command_buffer, .GRAPHICS, pipeline)
     vk.CmdBindDescriptorSets(
       ctx.command_buffer,
       .GRAPHICS,
-      material.pipeline_layout,
+      pipeline_layout,
       0,
       u32(len(descriptor_sets)),
       raw_data(descriptor_sets[:]),
@@ -537,7 +553,7 @@ render_scene_node_callback :: proc(
     )
     vk.CmdPushConstants(
       ctx.command_buffer,
-      material.pipeline_layout,
+      pipeline_layout,
       {.VERTEX},
       0,
       size_of(linalg.Matrix4f32),
@@ -558,7 +574,6 @@ render_scene_node_callback :: proc(
       .UINT32,
     )
     vk.CmdDrawIndexed(ctx.command_buffer, mesh.indices_len, 1, 0, 0, 0)
-    // fmt.printfln("rendered static mesh %v indices %d", mesh_handle, mesh.indices_len)
     ctx.rendered_count^ += 1
   }
   return true
@@ -572,16 +587,34 @@ render_shadow_node_callback :: proc(
   cb_context: rawptr,
 ) -> bool {
   ctx := (^ShadowRenderContext)(cb_context)
-  shadow_pass_material := &eng.renderer.shadow_pass_material
 
   #partial switch data in node_ptr.attachment {
   case NodeStaticMeshAttachment:
     mesh_handle := data.handle
     mesh := resource.get(&eng.meshes, mesh_handle)
     if mesh == nil {return true}
+    material := resource.get(&eng.materials, mesh.material)
+    if material == nil {return true}
+    features: u32 = 0
+    pipeline := shadow_pipelines[features]
+    layout := shadow_pipeline_layouts[features]
+    descriptor_sets := [?]vk.DescriptorSet {
+      ctx.descriptor_set, // set 0
+    }
+    vk.CmdBindPipeline(ctx.command_buffer, .GRAPHICS, pipeline)
+    vk.CmdBindDescriptorSets(
+      ctx.command_buffer,
+      .GRAPHICS,
+      layout,
+      0,
+      u32(len(descriptor_sets)),
+      raw_data(descriptor_sets[:]),
+      0,
+      nil,
+    )
     vk.CmdPushConstants(
       ctx.command_buffer,
-      shadow_pass_material.pipeline_layout,
+      layout,
       {.VERTEX},
       0,
       size_of(linalg.Matrix4f32),
@@ -592,7 +625,7 @@ render_shadow_node_callback :: proc(
       ctx.command_buffer,
       0,
       1,
-      &mesh.simple_vertex_buffer.buffer,
+      &mesh.vertex_buffer.buffer,
       &offset,
     )
     vk.CmdBindIndexBuffer(
@@ -606,9 +639,29 @@ render_shadow_node_callback :: proc(
   case NodeSkeletalMeshAttachment:
     mesh := resource.get(&eng.skeletal_meshes, data.handle)
     if mesh == nil {return true}
+    material := resource.get(&eng.materials, mesh.material)
+    if material == nil {return true}
+    features: u32 = SHADER_FEATURE_SKINNING
+    pipeline := shadow_pipelines[features]
+    layout := shadow_pipeline_layouts[features]
+    descriptor_sets := [?]vk.DescriptorSet {
+      ctx.descriptor_set, // set 0
+      material.skinning_descriptor_set, // set 1
+    }
+    vk.CmdBindPipeline(ctx.command_buffer, .GRAPHICS, pipeline)
+    vk.CmdBindDescriptorSets(
+      ctx.command_buffer,
+      .GRAPHICS,
+      layout,
+      0,
+      u32(len(descriptor_sets)),
+      raw_data(descriptor_sets[:]),
+      0,
+      nil,
+    )
     vk.CmdPushConstants(
       ctx.command_buffer,
-      shadow_pass_material.pipeline_layout,
+      layout,
       {.VERTEX},
       0,
       size_of(linalg.Matrix4f32),
@@ -619,7 +672,14 @@ render_shadow_node_callback :: proc(
       ctx.command_buffer,
       0,
       1,
-      &mesh.simple_vertex_buffer.buffer,
+      &mesh.vertex_buffer.buffer,
+      &offset,
+    )
+    vk.CmdBindVertexBuffers(
+      ctx.command_buffer,
+      1,
+      1,
+      &mesh.skin_buffer.buffer,
       &offset,
     )
     vk.CmdBindIndexBuffer(
@@ -642,6 +702,7 @@ try_render :: proc(engine: ^Engine) -> vk.Result {
     projection = camera_calculate_projection_matrix(&engine.scene.camera),
     time       = f32(elapsed_seconds),
   }
+  // fmt.printfln("[RENDER] Starting try_render")
   // fmt.printfln("Scene uniform: %v", scene_uniform)
 
   light_uniform: SceneLightUniform
@@ -654,16 +715,14 @@ try_render :: proc(engine: ^Engine) -> vk.Result {
     engine        = engine,
     light_uniform = &light_uniform,
   }
-  if !traverse_scene(
-    engine,
-    &collect_ctx,
-    collect_lights_callback,
-  ) {
-    fmt.eprintln("Error during light collection")
+  if !traverse_scene(engine, &collect_ctx, collect_lights_callback) {
+    fmt.eprintln("[RENDER] Error during light collection")
     // return false
   }
+  // fmt.printfln("[RENDER] Collected %d lights", light_uniform.light_count)
 
   render_shadow_maps(engine, &light_uniform) or_return
+  // fmt.printfln("[RENDER] Finished shadow map rendering")
 
   // Begin Main Render Pass
   image_idx := renderer_begin_frame(&engine.renderer) or_return
@@ -676,16 +735,13 @@ try_render :: proc(engine: ^Engine) -> vk.Result {
     command_buffer       = command_buffer_main,
     camera_frustum       = camera_frustum,
     rendered_count       = &rendered_count,
-    scene_descriptor_set = renderer_get_scene_descriptor_set(&engine.renderer),
+    camera_descriptor_set = renderer_get_camera_descriptor_set(&engine.renderer),
   }
-  if !traverse_scene(
-    engine,
-    &render_meshes_ctx,
-    render_scene_node_callback,
-  ) {
-    fmt.eprintln("Error during scene mesh rendering")
+  if !traverse_scene(engine, &render_meshes_ctx, render_scene_node_callback) {
+    fmt.eprintln("[RENDER] Error during scene mesh rendering")
     // return false
   }
+  // fmt.printfln("[RENDER] Rendered %d meshes", rendered_count)
 
   // Update Uniforms
   data_buffer_write(
@@ -700,6 +756,7 @@ try_render :: proc(engine: ^Engine) -> vk.Result {
   )
 
   if engine.render3d_proc != nil {
+    // fmt.printfln("[RENDER] Calling render3d_proc")
     engine.render3d_proc(engine)
   }
   ctx := &engine.ui.ctx
@@ -727,6 +784,7 @@ try_render :: proc(engine: ^Engine) -> vk.Result {
   mu.end(ctx)
   ui_render(&engine.ui, command_buffer_main)
   renderer_end_frame(&engine.renderer, image_idx) or_return
+  // fmt.printfln("[RENDER] End of try_render")
   return .SUCCESS
 }
 
@@ -872,6 +930,16 @@ render_shadow_maps :: proc(
       layerCount = 1,
       pDepthAttachment = &depth_attachment,
     }
+    // Update scene uniform with light's view/proj for shadow pass, TODO: it's confusing that view is both view_proj and proj is identity
+    shadow_scene_uniform := SceneUniform {
+      view       = light.view_proj,
+      projection = linalg.MATRIX4F32_IDENTITY,
+    }
+    data_buffer_write(
+      renderer_get_scene_uniform(&engine.renderer),
+      &shadow_scene_uniform,
+      size_of(SceneUniform),
+    )
     vk.CmdBeginRenderingKHR(shadow_cmd_buffer, &render_info_khr)
 
     viewport := vk.Viewport {
@@ -889,41 +957,15 @@ render_shadow_maps :: proc(
     vk.CmdSetViewport(shadow_cmd_buffer, 0, 1, &viewport)
     vk.CmdSetScissor(shadow_cmd_buffer, 0, 1, &scissor)
 
-    vk.CmdBindPipeline(
-      shadow_cmd_buffer,
-      .GRAPHICS,
-      engine.renderer.shadow_pass_material.pipeline,
-    )
-    shadow_ds := renderer_get_shadow_descriptor_set(&engine.renderer)
-    vk.CmdBindDescriptorSets(
-      shadow_cmd_buffer,
-      .GRAPHICS,
-      engine.renderer.shadow_pass_material.pipeline_layout,
-      0,
-      1,
-      &shadow_ds,
-      0,
-      nil,
-    )
-    // Update light view_proj uniform for shadow pass
-    data_buffer_write(
-      renderer_get_light_view_proj_uniform(&engine.renderer),
-      raw_data(&light.view_proj),
-      size_of(linalg.Matrix4f32),
-    )
-
     obstacles_this_light: u32 = 0
     shadow_render_ctx := ShadowRenderContext {
       engine          = engine,
       command_buffer  = shadow_cmd_buffer,
       obstacles_count = &obstacles_this_light,
       light_view_proj = light.view_proj,
+      descriptor_set = renderer_get_camera_descriptor_set(&engine.renderer),
     }
-    traverse_scene(
-      engine,
-      &shadow_render_ctx,
-      render_shadow_node_callback,
-    )
+    traverse_scene(engine, &shadow_render_ctx, render_shadow_node_callback)
     total_obstacles += obstacles_this_light
 
     vk.CmdEndRenderingKHR(shadow_cmd_buffer)
@@ -1097,7 +1139,6 @@ engine_deinit :: proc(engine: ^Engine) {
   resource.pool_deinit(&engine.meshes)
   resource.pool_deinit(&engine.skeletal_meshes)
   resource.pool_deinit(&engine.materials)
-  resource.pool_deinit(&engine.skinned_materials)
   resource.pool_deinit(&engine.lights)
 
   deinit_scene(&engine.scene)
@@ -1233,5 +1274,6 @@ engine_run :: proc(engine: ^Engine) {
   for !engine_should_close(engine) {
     engine_update(engine)
     engine_render(engine)
+    // break
   }
 }

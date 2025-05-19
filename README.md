@@ -4,6 +4,6 @@ Mjolnir is a minimalistic rendering engine. The goal is to create a simple set o
 
 ![](./readme/cesium-man.gif)
 
-# Work in progress
+# Disclaimer
 
-This is a work in progress. Functions are supposed to break frequently.
+This is a project under active development. It is not yet stable, may contain bugs, incomplete features

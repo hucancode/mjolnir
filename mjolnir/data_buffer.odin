@@ -225,6 +225,7 @@ transition_image_layout :: proc(
   }
 
   barrier := vk.ImageMemoryBarrier {
+    sType = .IMAGE_MEMORY_BARRIER,
     oldLayout = old_layout,
     newLayout = new_layout,
     srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
