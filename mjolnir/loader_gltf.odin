@@ -304,17 +304,17 @@ process_gltf_primitive :: proc(
       g_primitive.material,
     )
   if base_tex_result == .SUCCESS {
-    material_handle, _, _ = create_uber_material_textured(
+    material_handle, _, _ = create_material_textured(
       loader.engine_ptr,
-      UBER_LIT | UBER_RECEIVE_SHADOW,
+      SHADER_FEATURE_LIT | SHADER_FEATURE_RECEIVE_SHADOW,
       base_color_tex_handle,
       base_color_tex_handle,
       base_color_tex_handle,
     )
   } else {
-    material_handle, _, _ = create_uber_material_untextured(
+    material_handle, _, _ = create_material_untextured(
       loader.engine_ptr,
-      UBER_LIT | UBER_RECEIVE_SHADOW,
+      SHADER_FEATURE_LIT | SHADER_FEATURE_RECEIVE_SHADOW,
     )
   }
   // Geometry
@@ -413,9 +413,9 @@ process_gltf_skinned_primitive :: proc(
       g_primitive.material,
     )
   if tex_ok == .SUCCESS {
-    mat_handle, _, _ = create_uber_material_textured(
+    mat_handle, _, _ = create_material_textured(
       loader.engine_ptr,
-      UBER_LIT | UBER_SKINNED | UBER_RECEIVE_SHADOW,
+      SHADER_FEATURE_LIT | SHADER_FEATURE_SKINNING | SHADER_FEATURE_RECEIVE_SHADOW,
       base_color_tex_handle,
       base_color_tex_handle,
       base_color_tex_handle,
@@ -426,9 +426,9 @@ process_gltf_skinned_primitive :: proc(
       mat_handle,
     )
   } else {
-    mat_handle, _, _ = create_uber_material_untextured(
+    mat_handle, _, _ = create_material_untextured(
       loader.engine_ptr,
-      UBER_LIT | UBER_SKINNED | UBER_RECEIVE_SHADOW,
+      SHADER_FEATURE_LIT | SHADER_FEATURE_SKINNING | SHADER_FEATURE_RECEIVE_SHADOW,
     )
     fmt.printfln("Creating skinned material without texture -> %v", mat_handle)
   }

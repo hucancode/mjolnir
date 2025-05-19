@@ -41,9 +41,9 @@ setup :: proc(engine: ^mjolnir.Engine) {
       "assets/statue-1275469_1280.jpg",
     )
     fmt.printfln("Loaded texture: %v", texture)
-    mat_handle, _, _ := create_uber_material_untextured(
+    mat_handle, _, _ := create_material_untextured(
       engine,
-      UBER_LIT | UBER_RECEIVE_SHADOW,
+      SHADER_FEATURE_LIT | SHADER_FEATURE_RECEIVE_SHADOW,
     )
     fmt.printfln("[DEBUG] Created lit textured material, handle: %v", mat_handle)
     // Create mesh
@@ -55,9 +55,9 @@ setup :: proc(engine: ^mjolnir.Engine) {
     fmt.printfln("[DEBUG] Created sphere mesh, handle: %v", sphere_mesh_handle)
 
     // Create ground plane
-    ground_mat_handle, _, _ := create_uber_material_textured(
+    ground_mat_handle, _, _ := create_material_textured(
       engine,
-      UBER_LIT | UBER_RECEIVE_SHADOW,
+      SHADER_FEATURE_LIT | SHADER_FEATURE_RECEIVE_SHADOW,
       tex_handle,
       tex_handle,
       tex_handle,

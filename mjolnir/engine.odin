@@ -77,7 +77,7 @@ Engine :: struct {
   start_timestamp:       time.Time,
   meshes:                resource.ResourcePool(StaticMesh),
   skeletal_meshes:       resource.ResourcePool(SkeletalMesh),
-  materials:             resource.ResourcePool(UberMaterial),
+  materials:             resource.ResourcePool(Material),
   textures:              resource.ResourcePool(Texture),
   lights:                resource.ResourcePool(Light),
   nodes:                 resource.ResourcePool(Node),
@@ -171,12 +171,12 @@ engine_init :: proc(
 
   fmt.println("All resource pools initialized successfully")
 
-  create_all_uber_pipelines(
+  build_3d_pipelines(
     &engine.vk_ctx,
     .B8G8R8A8_SRGB,
     .D32_SFLOAT,
   ) or_return
-  create_shadow_pipelines(
+  build_shadow_pipelines(
     &engine.vk_ctx,
     .D32_SFLOAT,
   ) or_return
@@ -466,13 +466,13 @@ render_scene_node_callback :: proc(
     ) {
       return true
     }
-    material_uber_update_bone_buffer(
+    material_update_bone_buffer(
       material,
       data.pose.bone_buffer.buffer,
       data.pose.bone_buffer.size,
     )
-    pipeline := uber_pipelines[material.features]
-    pipeline_layout := uber_pipeline_layouts[material.features]
+    pipeline := pipelines[material.features]
+    pipeline_layout := pipeline_layouts[material.features]
     descriptor_sets := [?]vk.DescriptorSet {
       ctx.camera_descriptor_set,
       material.texture_descriptor_set,
@@ -534,8 +534,8 @@ render_scene_node_callback :: proc(
     ) {
       return true
     }
-    pipeline := uber_pipelines[material.features]
-    pipeline_layout := uber_pipeline_layouts[material.features]
+    pipeline := pipelines[material.features]
+    pipeline_layout := pipeline_layouts[material.features]
     descriptor_sets := [?]vk.DescriptorSet {
       ctx.camera_descriptor_set,
       material.texture_descriptor_set,
@@ -641,7 +641,7 @@ render_shadow_node_callback :: proc(
     if mesh == nil {return true}
     material := resource.get(&eng.materials, mesh.material)
     if material == nil {return true}
-    features: u32 = SHADOW_SKINNED
+    features: u32 = SHADER_FEATURE_SKINNING
     pipeline := shadow_pipelines[features]
     layout := shadow_pipeline_layouts[features]
     descriptor_sets := [?]vk.DescriptorSet {

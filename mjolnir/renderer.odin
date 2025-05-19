@@ -95,7 +95,7 @@ frame_init :: proc(
     sType              = .DESCRIPTOR_SET_ALLOCATE_INFO,
     descriptorPool     = ctx.descriptor_pool,
     descriptorSetCount = 1,
-    pSetLayouts        = &uber_camera_descriptor_set_layout,
+    pSetLayouts        = &camera_descriptor_set_layout,
   }
   vk.AllocateDescriptorSets(
     ctx.vkd,
@@ -211,7 +211,7 @@ renderer_deinit :: proc(self: ^Renderer) {
   for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
     frame_deinit(&self.frames[i])
   }
-  vk.DestroyDescriptorSetLayout(vkd, uber_camera_descriptor_set_layout, nil)
+  vk.DestroyDescriptorSetLayout(vkd, camera_descriptor_set_layout, nil)
   self.ctx = nil
 }
 

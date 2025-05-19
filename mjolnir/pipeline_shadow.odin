@@ -4,7 +4,7 @@ import linalg "core:math/linalg"
 import vk "vendor:vulkan"
 import "geometry"
 
-SHADOW_SKINNED :: 1 << 0
+SHADOW_FEATURE_SKINNING :: 1 << 0
 SHADOW_SHADER_OPTION_COUNT :: 1
 SHADOW_SHADER_VARIANT_COUNT :: 1 << SHADOW_SHADER_OPTION_COUNT
 
@@ -16,13 +16,13 @@ shadow_pipelines: [SHADOW_SHADER_VARIANT_COUNT]vk.Pipeline
 
 SHADER_SHADOW_VERT :: #load("shader/shadow/vert.spv")
 
-create_shadow_pipelines :: proc(
+build_shadow_pipelines :: proc(
     ctx: ^VulkanContext,
     depth_format: vk.Format,
 ) -> vk.Result {
     set_layouts := [?]vk.DescriptorSetLayout {
-       uber_camera_descriptor_set_layout,
-       uber_skinning_descriptor_set_layout
+       camera_descriptor_set_layout,
+       skinning_descriptor_set_layout
     }
     push_constant_range := vk.PushConstantRange {
         stageFlags = {.VERTEX},
@@ -91,7 +91,7 @@ create_shadow_pipelines :: proc(
     }
     for features in 0..<SHADOW_SHADER_VARIANT_COUNT {
         config := ShadowShaderConfig {
-            is_skinned = (features & SHADOW_SKINNED) != 0,
+            is_skinned = (features & SHADOW_FEATURE_SKINNING) != 0,
         }
         entries := [1]vk.SpecializationMapEntry {
             { constantID = 0, offset = u32(offset_of(ShadowShaderConfig, is_skinned)), size = size_of(b32) },
