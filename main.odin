@@ -23,6 +23,7 @@ main :: proc() {
   engine.setup_proc = setup
   engine.update_proc = update
   engine.render2d_proc = render2d
+  engine.render3d_proc = render3d
   engine.key_press_proc = on_key_pressed
   g_context = context
   defer engine_deinit(&engine)
@@ -72,7 +73,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     fmt.printfln("[DEBUG] Created ground mesh, handle: %v", ground_mesh_handle)
     if true {
       // Spawn cubes in a grid
-      nx, ny, nz := 10, 10, 10
+      nx, ny, nz := 2, 2, 2
       for x in 0 ..< nx {
         for y in 0 ..< ny {
           for z in 0 ..< nz {
@@ -205,4 +206,10 @@ render2d :: proc(engine: ^mjolnir.Engine, ctx: ^mu.Context) {
 
 on_key_pressed :: proc(engine: ^mjolnir.Engine, key, action, mods: int) {
     fmt.printfln("key pressed key %d action %d mods %x", key, action, mods)
+}
+
+render3d :: proc(engine: ^mjolnir.Engine) {
+    using mjolnir
+    cmd := renderer_get_command_buffer(&engine.renderer)
+    draw_debug_grid(engine)
 }
