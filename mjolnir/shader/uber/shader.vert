@@ -18,7 +18,7 @@ layout(set = 0, binding = 0) uniform Uniforms {
     float time;
 };
 
-layout(set = 1, binding = 3) readonly buffer BoneMatrices {
+layout(set = 2, binding = 0) readonly buffer BoneMatrices {
     mat4 bones[];
 };
 

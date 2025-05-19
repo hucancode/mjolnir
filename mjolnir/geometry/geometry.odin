@@ -71,6 +71,31 @@ VERTEX_ATTRIBUTE_DESCRIPTIONS :=
     },
   }
 
+SIMPLE_VERTEX_ATTRIBUTE_DESCRIPTIONS :=
+  [?]vk.VertexInputAttributeDescription {
+    // Position
+    {
+      binding = 0,
+      location = 0,
+      format = .R32G32B32_SFLOAT,
+      offset = u32(offset_of(Vertex, position)),
+    },
+    // Joints
+    {
+      binding = 1,
+      location = 4,
+      format = .R32G32B32A32_UINT,
+      offset = u32(offset_of(SkinningData, joints)),
+    },
+    // Weights
+    {
+      binding = 1,
+      location = 5,
+      format = .R32G32B32A32_SFLOAT,
+      offset = u32(offset_of(SkinningData, weights)),
+    },
+  }
+
 // --- Constant Vectors ---
 VEC_FORWARD :: [3]f32{0.0, 0.0, 1.0}
 VEC_BACKWARD :: [3]f32{0.0, 0.0, -1.0}
@@ -119,14 +144,6 @@ Geometry :: struct {
   aabb:     Aabb,
 }
 
-extract_positions_geometry :: proc(geom: ^Geometry) -> []linalg.Vector4f32 {
-  positions := make([]linalg.Vector4f32, len(geom.vertices))
-  for &v, i in geom.vertices {
-    positions[i] = {v.position[0], v.position[1], v.position[2], 1.0}
-  }
-  return positions
-}
-
 make_geometry :: proc(vertices: []Vertex, indices: []u32) -> Geometry {
   return {
     vertices = vertices,
@@ -140,16 +157,6 @@ SkinnedGeometry :: struct {
   skinnings: []SkinningData, // Slice, lifetime managed by caller
   indices:  []u32, // Slice, lifetime managed by caller
   aabb:     Aabb,
-}
-
-extract_positions_skinned_geometry :: proc(
-  geom: ^SkinnedGeometry,
-) -> []linalg.Vector4f32 {
-  positions := make([]linalg.Vector4f32, len(geom.vertices))
-  for &v, i in geom.vertices {
-    positions[i] = {v.position[0], v.position[1], v.position[2], 1.0}
-  }
-  return positions
 }
 
 make_skinned_geometry :: proc(

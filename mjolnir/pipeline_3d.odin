@@ -24,13 +24,15 @@ ShaderConfig :: struct {
 
 // UberMaterial descriptor set layout: [albedo, metallic, roughness, bones (optional)]
 UberMaterial :: struct {
-  descriptor_set: vk.DescriptorSet,
+  texture_descriptor_set: vk.DescriptorSet,
+  skinning_descriptor_set: vk.DescriptorSet,
   features:       u32,
   ctx_ref:        ^VulkanContext,
 }
-uber_main_pass_descriptor_set_layout: vk.DescriptorSetLayout
-// Maps for layouts and pipelines
-uber_material_descriptor_set_layouts: [SHADER_VARIANT_COUNT]vk.DescriptorSetLayout
+uber_camera_descriptor_set_layout: vk.DescriptorSetLayout
+// material set layouts only account for textures and bones features
+uber_texture_descriptor_set_layout: vk.DescriptorSetLayout
+uber_skinning_descriptor_set_layout: vk.DescriptorSetLayout
 uber_pipeline_layouts: [SHADER_VARIANT_COUNT]vk.PipelineLayout
 uber_pipelines: [SHADER_VARIANT_COUNT]vk.Pipeline
 
@@ -38,38 +40,33 @@ uber_pipelines: [SHADER_VARIANT_COUNT]vk.Pipeline
 SHADER_UBER_VERT :: #load("shader/uber/vert.spv")
 SHADER_UBER_FRAG :: #load("shader/uber/frag.spv")
 
-// Helper to get or create descriptor set layout for a feature set
-get_material_descriptor_set_layout :: proc(
-  ctx: ^VulkanContext,
-  features: u32,
-) -> vk.DescriptorSetLayout {
-  return uber_material_descriptor_set_layouts[features]
-}
-
-// Helper to get or create pipeline layout for a feature set
-get_pipeline_layout :: proc(
-  ctx: ^VulkanContext,
-  features: u32,
-) -> vk.PipelineLayout {
-  return uber_pipeline_layouts[features]
-}
-
 // Descriptor set layout creation (superset: textures + bones)
 material_init_descriptor_set_layout :: proc(
   mat: ^UberMaterial,
   ctx: ^VulkanContext,
 ) -> vk.Result {
-  layout := get_material_descriptor_set_layout(ctx, mat.features)
-  alloc_info := vk.DescriptorSetAllocateInfo {
+  features := mat.features & (UBER_SKINNED | UBER_TEXTURED)
+  alloc_info_texture := vk.DescriptorSetAllocateInfo {
     sType              = .DESCRIPTOR_SET_ALLOCATE_INFO,
     descriptorPool     = ctx.descriptor_pool,
     descriptorSetCount = 1,
-    pSetLayouts        = &layout,
+    pSetLayouts        = &uber_texture_descriptor_set_layout,
   }
   vk.AllocateDescriptorSets(
     ctx.vkd,
-    &alloc_info,
-    &mat.descriptor_set,
+    &alloc_info_texture,
+    &mat.texture_descriptor_set,
+  ) or_return
+  alloc_info_skinning := vk.DescriptorSetAllocateInfo {
+    sType              = .DESCRIPTOR_SET_ALLOCATE_INFO,
+    descriptorPool     = ctx.descriptor_pool,
+    descriptorSetCount = 1,
+    pSetLayouts        = &uber_skinning_descriptor_set_layout,
+  }
+  vk.AllocateDescriptorSets(
+    ctx.vkd,
+    &alloc_info_skinning,
+    &mat.skinning_descriptor_set,
   ) or_return
   return .SUCCESS
 }
@@ -81,11 +78,10 @@ material_uber_update_textures :: proc(
   metallic: ^Texture,
   roughness: ^Texture,
 ) {
-  if mat.ctx_ref == nil || mat.descriptor_set == 0 {
+  if mat.ctx_ref == nil || mat.texture_descriptor_set == 0 {
     return
   }
   vkd := mat.ctx_ref.vkd
-
   image_infos := [?]vk.DescriptorImageInfo {
     {
       sampler = albedo.sampler,
@@ -107,7 +103,7 @@ material_uber_update_textures :: proc(
   writes := [?]vk.WriteDescriptorSet {
     {
       sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = mat.descriptor_set,
+      dstSet = mat.texture_descriptor_set,
       dstBinding = 0,
       descriptorType = .COMBINED_IMAGE_SAMPLER,
       descriptorCount = 1,
@@ -115,7 +111,7 @@ material_uber_update_textures :: proc(
     },
     {
       sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = mat.descriptor_set,
+      dstSet = mat.texture_descriptor_set,
       dstBinding = 1,
       descriptorType = .COMBINED_IMAGE_SAMPLER,
       descriptorCount = 1,
@@ -123,7 +119,7 @@ material_uber_update_textures :: proc(
     },
     {
       sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = mat.descriptor_set,
+      dstSet = mat.texture_descriptor_set,
       dstBinding = 2,
       descriptorType = .COMBINED_IMAGE_SAMPLER,
       descriptorCount = 1,
@@ -140,7 +136,7 @@ material_uber_update_bone_buffer :: proc(
   buffer: vk.Buffer,
   size: vk.DeviceSize,
 ) {
-  if mat.ctx_ref == nil || mat.descriptor_set == 0 {
+  if mat.ctx_ref == nil || mat.texture_descriptor_set == 0 {
     return
   }
   vkd := mat.ctx_ref.vkd
@@ -152,8 +148,8 @@ material_uber_update_bone_buffer :: proc(
   }
   write := vk.WriteDescriptorSet {
     sType           = .WRITE_DESCRIPTOR_SET,
-    dstSet          = mat.descriptor_set,
-    dstBinding      = 3, // Bone buffer binding
+    dstSet          = mat.skinning_descriptor_set,
+    dstBinding      = 0,
     descriptorType  = .STORAGE_BUFFER,
     descriptorCount = 1,
     pBufferInfo     = &buffer_info,
@@ -195,7 +191,7 @@ create_all_uber_pipelines :: proc(
     ctx.vkd,
     &layout_info_main,
     nil,
-    &uber_main_pass_descriptor_set_layout,
+    &uber_camera_descriptor_set_layout,
   ) or_return
 
   pipeline_infos: [SHADER_VARIANT_COUNT]vk.GraphicsPipelineCreateInfo
@@ -256,6 +252,67 @@ create_all_uber_pipelines :: proc(
     pColorAttachmentFormats = raw_data(color_formats[:]),
     depthAttachmentFormat   = .D32_SFLOAT,
   }
+    vertex_input_info := vk.PipelineVertexInputStateCreateInfo{
+      sType = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+      vertexBindingDescriptionCount = len(geometry.VERTEX_BINDING_DESCRIPTION),
+      pVertexBindingDescriptions = raw_data(geometry.VERTEX_BINDING_DESCRIPTION[:]),
+      vertexAttributeDescriptionCount = len(geometry.VERTEX_ATTRIBUTE_DESCRIPTIONS),
+      pVertexAttributeDescriptions = raw_data(geometry.VERTEX_ATTRIBUTE_DESCRIPTIONS[:])
+    }
+    texture_bindings := []vk.DescriptorSetLayoutBinding{
+      {
+        binding = 0,
+        descriptorType = .COMBINED_IMAGE_SAMPLER,
+        descriptorCount = 1,
+        stageFlags = {.FRAGMENT}
+      }, {
+        binding = 1,
+        descriptorType = .COMBINED_IMAGE_SAMPLER,
+        descriptorCount = 1,
+        stageFlags = {.FRAGMENT}
+      }, {
+        binding = 2,
+        descriptorType = .COMBINED_IMAGE_SAMPLER,
+        descriptorCount = 1,
+        stageFlags = {.FRAGMENT}
+      }, {
+        binding = 3,
+        descriptorType =
+        .STORAGE_BUFFER,
+        descriptorCount = 1,
+        stageFlags = {.VERTEX}
+      },
+    }
+    vk.CreateDescriptorSetLayout(
+      ctx.vkd,
+      &vk.DescriptorSetLayoutCreateInfo {
+        sType        = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+        bindingCount = u32(len(texture_bindings)),
+        pBindings    = raw_data(texture_bindings),
+      },
+      nil,
+      &uber_texture_descriptor_set_layout,
+    ) or_return
+    skinning_bindings := []vk.DescriptorSetLayoutBinding{
+      {
+        binding = 0,
+        descriptorType =
+        .STORAGE_BUFFER,
+        descriptorCount = 1,
+        stageFlags = {.VERTEX}
+      },
+    }
+    vk.CreateDescriptorSetLayout(
+      ctx.vkd,
+      &vk.DescriptorSetLayoutCreateInfo {
+        sType        = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+        bindingCount = u32(len(skinning_bindings)),
+        pBindings    = raw_data(skinning_bindings),
+      },
+      nil,
+      &uber_skinning_descriptor_set_layout,
+    ) or_return
+
   for features in 0 ..< SHADER_VARIANT_COUNT {
     configs[features] = ShaderConfig {
       is_skinned         = (features & UBER_SKINNED) != 0,
@@ -290,57 +347,16 @@ create_all_uber_pipelines :: proc(
         pSpecializationInfo = &spec_infos[features],
       },
     }
-    vertex_input_info := vk.PipelineVertexInputStateCreateInfo{
-      sType = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-      vertexBindingDescriptionCount = len(geometry.VERTEX_BINDING_DESCRIPTION),
-      pVertexBindingDescriptions = raw_data(geometry.VERTEX_BINDING_DESCRIPTION[:]),
-      vertexAttributeDescriptionCount = len(geometry.VERTEX_ATTRIBUTE_DESCRIPTIONS),
-      pVertexAttributeDescriptions = raw_data(geometry.VERTEX_ATTRIBUTE_DESCRIPTIONS[:])
-    }
     fmt.printfln(
       "Creating pipeline for features: %04b with config %v with vertex input %v",
       features,
       configs[features],
       vertex_input_info,
     )
-    bindings := []vk.DescriptorSetLayoutBinding{
-      {
-        binding = 0,
-        descriptorType = .COMBINED_IMAGE_SAMPLER,
-        descriptorCount = 1,
-        stageFlags = {.FRAGMENT}
-      }, {
-        binding = 1,
-        descriptorType = .COMBINED_IMAGE_SAMPLER,
-        descriptorCount = 1,
-        stageFlags = {.FRAGMENT}
-      }, {
-        binding = 2,
-        descriptorType = .COMBINED_IMAGE_SAMPLER,
-        descriptorCount = 1,
-        stageFlags = {.FRAGMENT}
-      }, {
-        binding = 3,
-        descriptorType =
-        .STORAGE_BUFFER,
-        descriptorCount = 1,
-        stageFlags = {.VERTEX}
-      },
-    }
-    layout_info := vk.DescriptorSetLayoutCreateInfo {
-      sType        = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-      bindingCount = u32(len(bindings)),
-      pBindings    = raw_data(bindings),
-    }
-    vk.CreateDescriptorSetLayout(
-      ctx.vkd,
-      &layout_info,
-      nil,
-      &uber_material_descriptor_set_layouts[features],
-    ) or_continue
     set_layouts := [?]vk.DescriptorSetLayout {
-      uber_main_pass_descriptor_set_layout,
-      uber_material_descriptor_set_layouts[features],
+      uber_camera_descriptor_set_layout,
+      uber_texture_descriptor_set_layout,
+      uber_skinning_descriptor_set_layout,
     }
     push_constant_range := vk.PushConstantRange {
       stageFlags = {.VERTEX},
@@ -359,7 +375,6 @@ create_all_uber_pipelines :: proc(
       nil,
       &uber_pipeline_layouts[features],
     ) or_continue
-    pipeline_layout := get_pipeline_layout(ctx, u32(features))
     pipeline_infos[features] = vk.GraphicsPipelineCreateInfo {
       sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
       pNext               = &rendering_info_khr,
@@ -373,7 +388,7 @@ create_all_uber_pipelines :: proc(
       pColorBlendState    = &blending,
       pDynamicState       = &dynamic_state_info,
       pDepthStencilState  = &depth_stencil_state,
-      layout              = pipeline_layout,
+      layout              = uber_pipeline_layouts[features],
     }
   }
   vk.CreateGraphicsPipelines(

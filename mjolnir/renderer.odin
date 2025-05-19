@@ -59,7 +59,7 @@ Frame :: struct {
   scene_uniform:              DataBuffer,
   light_uniform:              DataBuffer,
   shadow_maps:                [MAX_SHADOW_MAPS]DepthTexture,
-  main_pass_descriptor_set:   vk.DescriptorSet,
+  camera_descriptor_set:      vk.DescriptorSet,
 }
 
 frame_init :: proc(
@@ -95,15 +95,13 @@ frame_init :: proc(
     sType              = .DESCRIPTOR_SET_ALLOCATE_INFO,
     descriptorPool     = ctx.descriptor_pool,
     descriptorSetCount = 1,
-    pSetLayouts        = &uber_main_pass_descriptor_set_layout,
+    pSetLayouts        = &uber_camera_descriptor_set_layout,
   }
   vk.AllocateDescriptorSets(
     ctx.vkd,
     &alloc_info_main,
-    &self.main_pass_descriptor_set,
+    &self.camera_descriptor_set,
   ) or_return
-  // Allocate Shadow Pass Descriptor Set
-  fmt.printfln("Allocating shadow pass descriptor set")
   // Update Main Pass Descriptor Set
   scene_buffer_info := vk.DescriptorBufferInfo {
     buffer = self.scene_uniform.buffer,
@@ -126,7 +124,7 @@ frame_init :: proc(
   writes_main := [?]vk.WriteDescriptorSet {
     {
       sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = self.main_pass_descriptor_set,
+      dstSet = self.camera_descriptor_set,
       dstBinding = 0,
       descriptorType = .UNIFORM_BUFFER,
       descriptorCount = 1,
@@ -134,7 +132,7 @@ frame_init :: proc(
     },
     {
       sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = self.main_pass_descriptor_set,
+      dstSet = self.camera_descriptor_set,
       dstBinding = 1,
       descriptorType = .UNIFORM_BUFFER,
       descriptorCount = 1,
@@ -142,7 +140,7 @@ frame_init :: proc(
     },
     {
       sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = self.main_pass_descriptor_set,
+      dstSet = self.camera_descriptor_set,
       dstBinding = 2,
       descriptorType = .COMBINED_IMAGE_SAMPLER,
       descriptorCount = MAX_SHADOW_MAPS,
@@ -213,7 +211,7 @@ renderer_deinit :: proc(self: ^Renderer) {
   for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
     frame_deinit(&self.frames[i])
   }
-  vk.DestroyDescriptorSetLayout(vkd, uber_main_pass_descriptor_set_layout, nil)
+  vk.DestroyDescriptorSetLayout(vkd, uber_camera_descriptor_set_layout, nil)
   self.ctx = nil
 }
 
@@ -566,10 +564,10 @@ renderer_get_shadow_map :: proc(
 ) -> ^DepthTexture {
   return &self.frames[self.current_frame_index].shadow_maps[light_idx]
 }
-renderer_get_scene_descriptor_set :: proc(
+renderer_get_camera_descriptor_set :: proc(
   self: ^Renderer,
 ) -> vk.DescriptorSet {
-  return self.frames[self.current_frame_index].main_pass_descriptor_set
+  return self.frames[self.current_frame_index].camera_descriptor_set
 }
 
 // --- Render Loop Methods ---

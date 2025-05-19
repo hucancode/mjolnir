@@ -10,7 +10,6 @@ StaticMesh :: struct {
   material:             Handle, // Handle to a Material resource
   vertices_len:         u32,
   indices_len:          u32,
-  simple_vertex_buffer: DataBuffer, // For shadow passes (positions only)
   vertex_buffer:        DataBuffer, // Full vertex data
   index_buffer:         DataBuffer,
   aabb:                 geometry.Aabb,
@@ -25,9 +24,6 @@ static_mesh_deinit :: proc(self: ^StaticMesh) {
 
   if self.vertex_buffer.buffer != 0 {
     data_buffer_deinit(&self.vertex_buffer, self.ctx_ref)
-  }
-  if self.simple_vertex_buffer.buffer != 0 {
-    data_buffer_deinit(&self.simple_vertex_buffer, self.ctx_ref)
   }
   if self.index_buffer.buffer != 0 {
     data_buffer_deinit(&self.index_buffer, self.ctx_ref)
@@ -49,17 +45,7 @@ static_mesh_init :: proc(
   self.vertices_len = u32(len(data.vertices))
   self.indices_len = u32(len(data.indices))
   self.aabb = data.aabb
-
-  positions_slice := geometry.extract_positions_geometry(data)
-  size := len(positions_slice) * size_of(linalg.Vector4f32)
-  self.simple_vertex_buffer = create_local_buffer(
-    ctx,
-    vk.DeviceSize(size),
-    {.VERTEX_BUFFER},
-    raw_data(positions_slice),
-  ) or_return
-
-  size = len(data.vertices) * size_of(geometry.Vertex)
+  size := len(data.vertices) * size_of(geometry.Vertex)
   self.vertex_buffer = create_local_buffer(
     ctx,
     vk.DeviceSize(size),
