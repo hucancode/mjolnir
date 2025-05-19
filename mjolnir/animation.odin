@@ -64,6 +64,7 @@ Animation_Play_Mode :: enum {
 
 Pose :: struct {
   bone_matrices: []linalg.Matrix4f32, // for CPU, we update this to define the pose of the mesh
+  // TODO: need 1 bone buffer per frame in flight
   bone_buffer:   DataBuffer, // for GPU, we upload data to the GPU so the shader can actually animate the mesh
   vk_ctx_ref:    ^VulkanContext,
 }
