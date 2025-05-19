@@ -1,4 +1,10 @@
 #version 450
+
+layout(constant_id = 0) const bool SKINNED = false;
+layout(constant_id = 1) const bool HAS_TEXTURE = false;
+layout(constant_id = 2) const bool IS_LIT = false;
+layout(constant_id = 3) const bool CAN_RECEIVE_SHADOW = false;
+
 const uint MAX_LIGHTS = 10;
 const uint POINT_LIGHT = 0;
 const uint DIRECTIONAL_LIGHT = 1;
@@ -31,11 +37,10 @@ layout(set = 1, binding = 0) uniform sampler2D albedoSampler;
 layout(set = 1, binding = 1) uniform sampler2D metalicSampler;
 layout(set = 1, binding = 2) uniform sampler2D roughnessSampler;
 
-
-layout(location = 0) in vec3 normal;
+layout(location = 0) in vec3 position;
 layout(location = 1) in vec4 color;
-layout(location = 2) in vec2 uv;
-layout(location = 3) in vec3 position;
+layout(location = 2) in vec3 normal;
+layout(location = 3) in vec2 uv;
 layout(location = 0) out vec4 outColor;
 
 const vec3 ambientColor = vec3(0.0, 0.5, 1.0);
@@ -51,7 +56,6 @@ float textureProj(uint lightIdx, vec3 shadowCoord) {
     }
     return 1.0;
 }
-// PCF (Percentage Closer Filtering) with 3x3 kernel
 float filterPCF(uint lightIdx, vec3 projCoords) {
     float shadow = 0.0;
     vec2 texelSize = 1.0 / textureSize(shadowMaps[lightIdx], 0);
@@ -64,8 +68,6 @@ float filterPCF(uint lightIdx, vec3 projCoords) {
     shadow /= 9.0;
     return shadow;
 }
-
-// Shadow calculation
 float calculateShadow(uint lightIdx, vec3 worldPos) {
     if (lights[lightIdx].hasShadow == 0) {
         return 1.0;
@@ -73,16 +75,13 @@ float calculateShadow(uint lightIdx, vec3 worldPos) {
     vec4 lightSpacePos = lights[lightIdx].viewProj * vec4(worldPos, 1.0);
     vec3 shadowCoord = lightSpacePos.xyz / lightSpacePos.w;
     shadowCoord = shadowCoord * 0.5 + 0.5;
-    // Check if projected coordinates are outside the shadow map
     if (shadowCoord.x < 0.0 || shadowCoord.x > 1.0 ||
             shadowCoord.y < 0.0 || shadowCoord.y > 1.0 ||
             shadowCoord.z < 0.0 || shadowCoord.z > 1.0) {
         return 1.0;
     }
     return filterPCF(lightIdx, shadowCoord);
-    // return textureProj(lightIdx, shadowCoord);
 }
-
 vec3 calculateLighting(Light light, vec3 normal, vec3 position, vec3 viewDir, vec3 albedo) {
     if (light.kind == POINT_LIGHT) {
         vec3 surfaceToLight = normalize(light.position.xyz - position);
@@ -108,15 +107,16 @@ vec3 calculateLighting(Light light, vec3 normal, vec3 position, vec3 viewDir, ve
     }
     return vec3(0.0);
 }
-
 void main() {
     vec3 cameraPosition = -inverse(view)[3].xyz;
-    vec3 albedo = texture(albedoSampler, uv).rgb;
+    vec3 albedo = HAS_TEXTURE ? texture(albedoSampler, uv).rgb : color.rgb;
     vec3 viewDir = normalize(cameraPosition.xyz - position);
     vec3 result = ambientColor * ambientStrength;
-    for (int i = 0; i < min(lightCount, MAX_LIGHTS); i++) {
-        float shadow = calculateShadow(i, position);
-        result += calculateLighting(lights[i], normalize(normal), position, viewDir, albedo) * shadow;
+    if (IS_LIT) {
+        for (int i = 0; i < min(lightCount, MAX_LIGHTS); i++) {
+            float shadow = calculateShadow(i, position);
+            result += calculateLighting(lights[i], normalize(normal), position, viewDir, albedo) * shadow;
+        }
     }
     result *= albedo;
     outColor = vec4(result, 1.0);

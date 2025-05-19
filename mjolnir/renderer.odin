@@ -60,15 +60,11 @@ Frame :: struct {
   light_uniform:              DataBuffer,
   shadow_maps:                [MAX_SHADOW_MAPS]DepthTexture,
   main_pass_descriptor_set:   vk.DescriptorSet,
-  light_view_proj_uniform:    DataBuffer, // For shadow pass
-  shadow_pass_descriptor_set: vk.DescriptorSet,
 }
 
 frame_init :: proc(
   self: ^Frame,
   ctx: ^VulkanContext,
-  main_pass_ds_layout: ^vk.DescriptorSetLayout,
-  shadow_pass_ds_layout: ^vk.DescriptorSetLayout,
 ) -> (
   res: vk.Result,
 ) {
@@ -90,6 +86,7 @@ frame_init :: proc(
       ctx,
       SHADOW_MAP_SIZE,
       SHADOW_MAP_SIZE,
+      {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
     ) or_return
   }
 
@@ -98,7 +95,7 @@ frame_init :: proc(
     sType              = .DESCRIPTOR_SET_ALLOCATE_INFO,
     descriptorPool     = ctx.descriptor_pool,
     descriptorSetCount = 1,
-    pSetLayouts        = main_pass_ds_layout,
+    pSetLayouts        = &uber_main_pass_descriptor_set_layout,
   }
   vk.AllocateDescriptorSets(
     ctx.vkd,
@@ -107,23 +104,6 @@ frame_init :: proc(
   ) or_return
   // Allocate Shadow Pass Descriptor Set
   fmt.printfln("Allocating shadow pass descriptor set")
-  self.light_view_proj_uniform = create_host_visible_buffer(
-    ctx,
-    size_of(Mat4),
-    {.UNIFORM_BUFFER},
-  ) or_return
-
-  alloc_info_shadow := vk.DescriptorSetAllocateInfo {
-    sType              = .DESCRIPTOR_SET_ALLOCATE_INFO,
-    descriptorPool     = ctx.descriptor_pool,
-    descriptorSetCount = 1,
-    pSetLayouts        = shadow_pass_ds_layout,
-  }
-  vk.AllocateDescriptorSets(
-    ctx.vkd,
-    &alloc_info_shadow,
-    &self.shadow_pass_descriptor_set,
-  ) or_return
   // Update Main Pass Descriptor Set
   scene_buffer_info := vk.DescriptorBufferInfo {
     buffer = self.scene_uniform.buffer,
@@ -176,19 +156,6 @@ frame_init :: proc(
     0,
     nil,
   )
-  light_vp_buffer_info := vk.DescriptorBufferInfo {
-    buffer = self.light_view_proj_uniform.buffer,
-    range  = vk.DeviceSize(size_of(Mat4)),
-  }
-  write_shadow := vk.WriteDescriptorSet {
-    sType           = .WRITE_DESCRIPTOR_SET,
-    dstSet          = self.shadow_pass_descriptor_set,
-    dstBinding      = 0,
-    descriptorType  = .UNIFORM_BUFFER,
-    descriptorCount = 1,
-    pBufferInfo     = &light_vp_buffer_info,
-  }
-  vk.UpdateDescriptorSets(ctx.vkd, 1, &write_shadow, 0, nil)
   return .SUCCESS
 }
 
@@ -205,7 +172,6 @@ frame_deinit :: proc(self: ^Frame) {
 
   data_buffer_deinit(&self.scene_uniform, self.ctx)
   data_buffer_deinit(&self.light_uniform, self.ctx)
-  data_buffer_deinit(&self.light_view_proj_uniform, self.ctx)
   for i in 0 ..< MAX_SHADOW_MAPS {
     depth_texture_deinit(&self.shadow_maps[i])
   }
@@ -221,77 +187,19 @@ Renderer :: struct {
   images:                            []vk.Image, // Owned by swapchain, slice managed by renderer
   views:                             []vk.ImageView, // Owned by renderer, one per image
   frames:                            [MAX_FRAMES_IN_FLIGHT]Frame,
-  main_pass_descriptor_set_layout:   vk.DescriptorSetLayout,
-  shadow_pass_descriptor_set_layout: vk.DescriptorSetLayout,
   depth_buffer:                      ImageBuffer,
   current_frame_index:               u32,
-  shadow_pass_material:              ShadowMaterial,
 }
 
 renderer_init :: proc(self: ^Renderer, ctx: ^VulkanContext) -> vk.Result {
   self.ctx = ctx
   self.current_frame_index = 0
 
-  // Create Main Pass Descriptor Set Layout
-  bindings_main := [?]vk.DescriptorSetLayoutBinding {
-    {   // Scene Uniform (VP, time)
-      binding         = 0,
-      descriptorType  = .UNIFORM_BUFFER,
-      descriptorCount = 1,
-      stageFlags      = {.VERTEX, .FRAGMENT},
-    },
-    {   // Light Uniform
-      binding         = 1,
-      descriptorType  = .UNIFORM_BUFFER,
-      descriptorCount = 1,
-      stageFlags      = {.FRAGMENT},
-    },
-    {   // Shadow Samplers
-      binding         = 2,
-      descriptorType  = .COMBINED_IMAGE_SAMPLER,
-      descriptorCount = MAX_SHADOW_MAPS,
-      stageFlags      = {.FRAGMENT},
-    },
-  }
-  layout_info_main := vk.DescriptorSetLayoutCreateInfo {
-    sType        = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-    bindingCount = len(bindings_main),
-    pBindings    = raw_data(bindings_main[:]),
-  }
-  vk.CreateDescriptorSetLayout(
-    ctx.vkd,
-    &layout_info_main,
-    nil,
-    &self.main_pass_descriptor_set_layout,
-  ) or_return
-
-  // Create Shadow Pass Descriptor Set Layout
-  binding_shadow := vk.DescriptorSetLayoutBinding {   // Light View Projection Matrix
-    binding         = 0,
-    descriptorType  = .UNIFORM_BUFFER,
-    descriptorCount = 1,
-    stageFlags      = {.VERTEX},
-  }
-  layout_info_shadow := vk.DescriptorSetLayoutCreateInfo {
-    sType        = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-    bindingCount = 1,
-    pBindings    = &binding_shadow,
-  }
-  vk.CreateDescriptorSetLayout(
-    ctx.vkd,
-    &layout_info_shadow,
-    nil,
-    &self.shadow_pass_descriptor_set_layout,
-  ) or_return
-
-  self.shadow_pass_material = create_shadow_material(self)
   // Initialize frames
   for &frame in self.frames {
     frame_init(
       &frame,
       ctx,
-      &self.main_pass_descriptor_set_layout,
-      &self.shadow_pass_descriptor_set_layout,
     ) or_return
   }
   return .SUCCESS
@@ -302,17 +210,10 @@ renderer_deinit :: proc(self: ^Renderer) {
   vkd := self.ctx.vkd
   vk.DeviceWaitIdle(vkd)
   renderer_destroy_swapchain_resources(self)
-  shadow_material_deinit(&self.shadow_pass_material)
   for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
     frame_deinit(&self.frames[i])
   }
-  vk.DestroyDescriptorSetLayout(vkd, self.main_pass_descriptor_set_layout, nil)
-  vk.DestroyDescriptorSetLayout(
-    vkd,
-    self.shadow_pass_descriptor_set_layout,
-    nil,
-  )
-
+  vk.DestroyDescriptorSetLayout(vkd, uber_main_pass_descriptor_set_layout, nil)
   self.ctx = nil
 }
 
@@ -378,9 +279,9 @@ renderer_build_swapchain_surface_format :: proc(
   formats: []vk.SurfaceFormatKHR,
 ) {
   for fmt in formats {
-    if fmt.format == .B8G8R8A8_SRGB && fmt.colorSpace == .SRGB_NONLINEAR {
-      self.format = fmt
-      return
+    if fmt.format == .B8G8R8A8_SRGB {
+        self.format = fmt
+        return
     }
   }
   // Fallback to the first available format if preferred not found
@@ -391,7 +292,7 @@ renderer_build_swapchain_surface_format :: proc(
     fmt.printfln("No surface formats available for swapchain.")
     // Set a default, though this state is problematic
     self.format = vk.SurfaceFormatKHR {
-      format     = .B8G8R8A8_UNORM,
+      format     = .B8G8R8A8_SRGB,
       colorSpace = .SRGB_NONLINEAR,
     }
   }
@@ -559,14 +460,13 @@ renderer_create_swapchain_and_resources :: proc(
     ) or_return
   }
   depth_format := vk.Format.D32_SFLOAT
-  depth_usage: vk.ImageUsageFlags = {.DEPTH_STENCIL_ATTACHMENT}
   self.depth_buffer = malloc_image_buffer(
     ctx,
     self.extent.width,
     self.extent.height,
     depth_format,
     .OPTIMAL,
-    depth_usage,
+    { .DEPTH_STENCIL_ATTACHMENT, .SAMPLED },
     {.DEVICE_LOCAL},
   ) or_return
 
@@ -660,9 +560,6 @@ renderer_get_scene_uniform :: proc(self: ^Renderer) -> ^DataBuffer {
 renderer_get_light_uniform :: proc(self: ^Renderer) -> ^DataBuffer {
   return &self.frames[self.current_frame_index].light_uniform
 }
-renderer_get_light_view_proj_uniform :: proc(self: ^Renderer) -> ^DataBuffer {
-  return &self.frames[self.current_frame_index].light_view_proj_uniform
-}
 renderer_get_shadow_map :: proc(
   self: ^Renderer,
   light_idx: int,
@@ -673,11 +570,6 @@ renderer_get_scene_descriptor_set :: proc(
   self: ^Renderer,
 ) -> vk.DescriptorSet {
   return self.frames[self.current_frame_index].main_pass_descriptor_set
-}
-renderer_get_shadow_descriptor_set :: proc(
-  self: ^Renderer,
-) -> vk.DescriptorSet {
-  return self.frames[self.current_frame_index].shadow_pass_descriptor_set
 }
 
 // --- Render Loop Methods ---
@@ -775,7 +667,6 @@ renderer_begin_frame :: proc(
     colorAttachmentCount = 1,
     pColorAttachments = &color_attachment,
     pDepthAttachment = &depth_attachment,
-    // pStencilAttachment = nil, // If using stencil
   }
   vk.CmdBeginRenderingKHR(cmd_buffer, &render_info)
 

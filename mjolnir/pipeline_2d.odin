@@ -5,7 +5,7 @@ import vk "vendor:vulkan"
 SHADER_MICROUI_VERT :: #load("shader/microui/vert.spv")
 SHADER_MICROUI_FRAG :: #load("shader/microui/frag.spv")
 
-MicroUIMaterial :: struct {
+Pipeline2D :: struct {
   projection_layout:         vk.DescriptorSetLayout,
   projection_descriptor_set: vk.DescriptorSet,
   texture_layout:            vk.DescriptorSetLayout,
@@ -15,9 +15,8 @@ MicroUIMaterial :: struct {
   ctx_ref:                   ^VulkanContext,
 }
 
-// 1. Create MicroUI material (pipeline, layout, shaders)
-microui_material_init :: proc(
-  mat: ^MicroUIMaterial,
+pipeline2d_init :: proc(
+  mat: ^Pipeline2D,
   ctx: ^VulkanContext,
   color_format: vk.Format,
 ) -> vk.Result {
@@ -209,6 +208,10 @@ microui_material_init :: proc(
     sType                   = .PIPELINE_RENDERING_CREATE_INFO_KHR,
     colorAttachmentCount    = len(color_formats),
     pColorAttachmentFormats = raw_data(color_formats[:]),
+    depthAttachmentFormat   = .D32_SFLOAT,
+  }
+  depth_stencil_state := vk.PipelineDepthStencilStateCreateInfo {
+    sType            = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
   }
   pipeline_info := vk.GraphicsPipelineCreateInfo {
     sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
@@ -222,6 +225,7 @@ microui_material_init :: proc(
     pMultisampleState   = &multisampling,
     pColorBlendState    = &color_blending,
     pDynamicState       = &dynamic_state_info,
+    pDepthStencilState  = &depth_stencil_state,
     layout              = mat.pipeline_layout,
   }
   vk.CreateGraphicsPipelines(

@@ -12,7 +12,7 @@ UI_MAX_INDICES :: UI_MAX_QUAD * 6
 // --- UI State ---
 UIRenderer :: struct {
   ctx:           mu.Context,
-  material:      MicroUIMaterial,
+  pipeline:      Pipeline2D,
   atlas:         Texture,
   proj_buffer:   DataBuffer,
   vertex_buffer: DataBuffer,
@@ -45,8 +45,8 @@ ui_init :: proc(
   ui.ctx.text_height = mu.default_atlas_text_height
   ui.frame_width = width
   ui.frame_height = height
-  fmt.printfln("init UI material...")
-  microui_material_init(&ui.material, &engine.vk_ctx, color_format) or_return
+  fmt.printfln("init UI pipeline...")
+  pipeline2d_init(&ui.pipeline, &engine.vk_ctx, color_format) or_return
   fmt.printfln("init UI texture...")
   _, texture := create_texture_from_pixels(
     engine,
@@ -95,7 +95,7 @@ ui_init :: proc(
   writes := [?]vk.WriteDescriptorSet {
     {
       sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = ui.material.projection_descriptor_set,
+      dstSet = ui.pipeline.projection_descriptor_set,
       dstBinding = 0,
       dstArrayElement = 0,
       descriptorCount = 1,
@@ -104,7 +104,7 @@ ui_init :: proc(
     },
     {
       sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = ui.material.texture_descriptor_set,
+      dstSet = ui.pipeline.texture_descriptor_set,
       dstBinding = 0,
       dstArrayElement = 0,
       descriptorCount = 1,
@@ -162,15 +162,15 @@ ui_flush :: proc(ui: ^UIRenderer, cmd_buf: vk.CommandBuffer) -> vk.Result {
     raw_data(ui.indices[:]),
     vk.DeviceSize(size_of(u32) * ui.index_count),
   ) or_return
-  vk.CmdBindPipeline(cmd_buf, .GRAPHICS, ui.material.pipeline)
+  vk.CmdBindPipeline(cmd_buf, .GRAPHICS, ui.pipeline.pipeline)
   descriptor_sets := [?]vk.DescriptorSet {
-    ui.material.projection_descriptor_set,
-    ui.material.texture_descriptor_set,
+    ui.pipeline.projection_descriptor_set,
+    ui.pipeline.texture_descriptor_set,
   }
   vk.CmdBindDescriptorSets(
     cmd_buf,
     .GRAPHICS,
-    ui.material.pipeline_layout,
+    ui.pipeline.pipeline_layout,
     0,
     2,
     raw_data(descriptor_sets[:]),
@@ -186,22 +186,6 @@ ui_flush :: proc(ui: ^UIRenderer, cmd_buf: vk.CommandBuffer) -> vk.Result {
     maxDepth = 1,
   }
   vk.CmdSetViewport(cmd_buf, 0, 1, &viewport)
-  ortho := linalg.matrix_ortho3d(
-    0,
-    f32(ui.frame_width),
-    f32(ui.frame_height),
-    0,
-    -1,
-    1,
-  )
-  vk.CmdPushConstants(
-    cmd_buf,
-    ui.material.pipeline_layout,
-    {.VERTEX},
-    0,
-    size_of(linalg.Matrix4f32),
-    &ortho,
-  )
   offsets := [?]vk.DeviceSize{0}
   vk.CmdBindVertexBuffers(
     cmd_buf,

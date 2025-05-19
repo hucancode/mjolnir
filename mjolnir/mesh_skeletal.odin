@@ -26,9 +26,10 @@ SkeletalMesh :: struct {
   vertices_len:         u32,
   indices_len:          u32,
   vertex_buffer:        DataBuffer,
+  skin_buffer:          DataBuffer,
   simple_vertex_buffer: DataBuffer, // For shadow passes (positions only)
   index_buffer:         DataBuffer,
-  material:             Handle, // Handle to a SkinnedMaterial resource
+  material:             Handle,
   aabb:                 geometry.Aabb,
   ctx_ref:              ^VulkanContext, // For deinitializing buffers
 }
@@ -88,12 +89,19 @@ skeletal_mesh_init :: proc(
     {.VERTEX_BUFFER},
     raw_data(positions_slice),
   ) or_return
-  size = len(geometry_data.vertices) * size_of(geometry.SkinnedVertex)
+  size = len(geometry_data.vertices) * size_of(geometry.Vertex)
   self.vertex_buffer = create_local_buffer(
     ctx,
     vk.DeviceSize(size),
     {.VERTEX_BUFFER},
     raw_data(geometry_data.vertices),
+  ) or_return
+  size = len(geometry_data.skinnings) * size_of(geometry.SkinningData)
+  self.skin_buffer = create_local_buffer(
+    ctx,
+    vk.DeviceSize(size),
+    {.VERTEX_BUFFER},
+    raw_data(geometry_data.skinnings),
   ) or_return
   size = len(geometry_data.indices) * size_of(u32)
   self.index_buffer = create_local_buffer(

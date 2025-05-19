@@ -13,101 +13,61 @@ Vertex :: struct {
   uv:       [2]f32,
 }
 
-// Vertex input binding description for static vertices
-VERTEX_BINDING_DESCRIPTION := [?]vk.VertexInputBindingDescription {
-  {binding = 0, stride = size_of(Vertex), inputRate = .VERTEX},
-}
-
-// Vertex attribute description for static vertices
-VERTEX_ATTRIBUTE_DESCRIPTIONS := [?]vk.VertexInputAttributeDescription {
-  // Position
-  {
-    binding = 0,
-    location = 0,
-    format = .R32G32B32_SFLOAT,
-    offset = u32(offset_of(Vertex, position)),
-  },
-  // Normal
-  {
-    binding = 0,
-    location = 1,
-    format = .R32G32B32_SFLOAT,
-    offset = u32(offset_of(Vertex, normal)),
-  },
-  // Color
-  {
-    binding = 0,
-    location = 2,
-    format = .R32G32B32A32_SFLOAT,
-    offset = u32(offset_of(Vertex, color)),
-  },
-  // UV
-  {
-    binding = 0,
-    location = 3,
-    format = .R32G32_SFLOAT,
-    offset = u32(offset_of(Vertex, uv)),
-  },
-}
-
-SkinnedVertex :: struct {
-  position: [3]f32,
-  normal:   [3]f32,
-  color:    [4]f32,
-  uv:       [2]f32,
+SkinningData :: struct {
   joints:   [4]u32,
   weights:  [4]f32,
 }
 
 // Vertex input binding description for skinned vertices
-SKINNED_VERTEX_BINDING_DESCRIPTION := [?]vk.VertexInputBindingDescription {
-  {binding = 0, stride = size_of(SkinnedVertex), inputRate = .VERTEX},
+VERTEX_BINDING_DESCRIPTION := [?]vk.VertexInputBindingDescription {
+  {binding = 0, stride = size_of(Vertex), inputRate = .VERTEX},
+  {binding = 1, stride = size_of(SkinningData), inputRate = .VERTEX},
 }
 
 // Vertex attribute descriptions for skinned vertices
-SKINNED_VERTEX_ATTRIBUTE_DESCRIPTIONS :=
+VERTEX_ATTRIBUTE_DESCRIPTIONS :=
   [?]vk.VertexInputAttributeDescription {
     // Position
     {
       binding = 0,
       location = 0,
       format = .R32G32B32_SFLOAT,
-      offset = u32(offset_of(SkinnedVertex, position)),
+      offset = u32(offset_of(Vertex, position)),
     },
     // Normal
     {
       binding = 0,
       location = 1,
       format = .R32G32B32_SFLOAT,
-      offset = u32(offset_of(SkinnedVertex, normal)),
+      offset = u32(offset_of(Vertex, normal)),
     },
     // Color
     {
       binding = 0,
       location = 2,
       format = .R32G32B32A32_SFLOAT,
-      offset = u32(offset_of(SkinnedVertex, color)),
+      offset = u32(offset_of(Vertex, color)),
     },
     // UV
     {
       binding = 0,
       location = 3,
       format = .R32G32_SFLOAT,
-      offset = u32(offset_of(SkinnedVertex, uv)),
+      offset = u32(offset_of(Vertex, uv)),
     },
     // Joints
     {
-      binding = 0,
+      binding = 1,
       location = 4,
       format = .R32G32B32A32_UINT,
-      offset = u32(offset_of(SkinnedVertex, joints)),
+      offset = u32(offset_of(SkinningData, joints)),
     },
     // Weights
     {
-      binding = 0,
+      binding = 1,
       location = 5,
       format = .R32G32B32A32_SFLOAT,
-      offset = u32(offset_of(SkinnedVertex, weights)),
+      offset = u32(offset_of(SkinningData, weights)),
     },
   }
 
@@ -151,29 +111,6 @@ aabb_from_vertices :: proc(vertices: []Vertex) -> Aabb {
   return bounds
 }
 
-aabb_from_skinned_vertices :: proc(vertices: []SkinnedVertex) -> Aabb {
-  bounds := Aabb {
-    min = {F32_MAX, F32_MAX, F32_MAX, F32_MAX},
-    max = {F32_MIN, F32_MIN, F32_MIN, F32_MIN},
-  }
-  if len(vertices) == 0 {
-    bounds.min = {0, 0, 0, 1}
-    bounds.max = {0, 0, 0, 1}
-    return bounds
-  }
-
-  for vertex in vertices {
-    v_pos4 := linalg.Vector4f32 {
-      vertex.position[0],
-      vertex.position[1],
-      vertex.position[2],
-      1.0,
-    }
-    bounds.min = linalg.min(bounds.min, v_pos4)
-    bounds.max = linalg.max(bounds.max, v_pos4)
-  }
-  return bounds
-}
 
 // --- Geometry Structs ---
 Geometry :: struct {
@@ -199,7 +136,8 @@ make_geometry :: proc(vertices: []Vertex, indices: []u32) -> Geometry {
 }
 
 SkinnedGeometry :: struct {
-  vertices: []SkinnedVertex, // Slice, lifetime managed by caller
+  vertices: []Vertex, // Slice, lifetime managed by caller
+  skinnings: []SkinningData, // Slice, lifetime managed by caller
   indices:  []u32, // Slice, lifetime managed by caller
   aabb:     Aabb,
 }
@@ -215,13 +153,15 @@ extract_positions_skinned_geometry :: proc(
 }
 
 make_skinned_geometry :: proc(
-  vertices: []SkinnedVertex,
+  vertices: []Vertex,
+  skinnings: []SkinningData,
   indices: []u32,
 ) -> SkinnedGeometry {
   return SkinnedGeometry {
     vertices = vertices,
+    skinnings = skinnings,
     indices = indices,
-    aabb = aabb_from_skinned_vertices(vertices),
+    aabb = aabb_from_vertices(vertices),
   }
 }
 
