@@ -68,7 +68,7 @@ InputState :: struct {
 // --- Engine Struct ---
 Engine :: struct {
   window:                glfw.WindowHandle,
-  vk_ctx:                VulkanContext,
+  ctx:                VulkanContext,
   renderer:              Renderer,
   scene:                 Scene,
   ui:                    UIRenderer,
@@ -136,7 +136,7 @@ engine_init :: proc(
   fmt.printf("Window created %v\n", engine.window)
 
   // Init Vulkan Context
-  vulkan_context_init(&engine.vk_ctx, engine.window) or_return
+  vulkan_context_init(&engine.ctx, engine.window) or_return
 
   engine.start_timestamp = time.now()
   engine.last_frame_timestamp = engine.start_timestamp
@@ -172,12 +172,12 @@ engine_init :: proc(
   fmt.println("All resource pools initialized successfully")
 
   build_3d_pipelines(
-    &engine.vk_ctx,
+    &engine.ctx,
     .B8G8R8A8_SRGB,
     .D32_SFLOAT,
   ) or_return
   build_shadow_pipelines(
-    &engine.vk_ctx,
+    &engine.ctx,
     .D32_SFLOAT,
   ) or_return
   engine_build_scene(engine)
@@ -295,16 +295,16 @@ query_swapchain_support :: proc(
 }
 
 engine_build_renderer :: proc(engine: ^Engine) -> vk.Result {
-  renderer_init(&engine.renderer, &engine.vk_ctx) or_return
+  renderer_init(&engine.renderer, &engine.ctx) or_return
 
   indices := find_queue_families(
-    engine.vk_ctx.physical_device,
-    engine.vk_ctx.surface,
+    engine.ctx.physical_device,
+    engine.ctx.surface,
   ) or_return
 
   support := query_swapchain_support(
-    engine.vk_ctx.physical_device,
-    engine.vk_ctx.surface,
+    engine.ctx.physical_device,
+    engine.ctx.surface,
   ) or_return
   defer swapchain_support_deinit(&support)
 
@@ -325,7 +325,7 @@ engine_build_renderer :: proc(engine: ^Engine) -> vk.Result {
   renderer_build_synchronizers(&engine.renderer) or_return
 
   engine.renderer.depth_buffer = create_depth_image(
-    &engine.vk_ctx,
+    &engine.ctx,
     engine.renderer.extent.width,
     engine.renderer.extent.height,
   ) or_return
@@ -1004,7 +1004,7 @@ render_shadow_maps :: proc(
     vk.EndCommandBuffer(shadow_cmd_buffer) or_return
     wait_stage := vk.PipelineStageFlags{.TOP_OF_PIPE}
     vk.QueueSubmit(
-      engine.vk_ctx.graphics_queue,
+      engine.ctx.graphics_queue,
       1,
       &vk.SubmitInfo {
         sType = .SUBMIT_INFO,
@@ -1014,7 +1014,7 @@ render_shadow_maps :: proc(
       },
       vk.Fence(0),
     ) or_return
-    vk.DeviceWaitIdle(engine.vk_ctx.vkd) or_return
+    vk.DeviceWaitIdle(engine.ctx.vkd) or_return
   }
   // fmt.printfln("Rendered shadow maps, total obstacles in shadow maps: %d", total_obstacles)
   return .SUCCESS
@@ -1022,15 +1022,15 @@ render_shadow_maps :: proc(
 
 
 engine_recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
-  vkd := engine.vk_ctx.vkd
+  vkd := engine.ctx.vkd
   vk.DeviceWaitIdle(vkd)
   indices := find_queue_families(
-    engine.vk_ctx.physical_device,
-    engine.vk_ctx.surface,
+    engine.ctx.physical_device,
+    engine.ctx.surface,
   ) or_return
   support := query_swapchain_support(
-    engine.vk_ctx.physical_device,
-    engine.vk_ctx.surface,
+    engine.ctx.physical_device,
+    engine.ctx.surface,
   ) or_return
   renderer_build_swapchain(
     &engine.renderer,
@@ -1043,7 +1043,7 @@ engine_recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
     engine.renderer.extent.height,
   ) or_return
   engine.renderer.depth_buffer = create_depth_image(
-    &engine.vk_ctx,
+    &engine.ctx,
     engine.renderer.extent.width,
     engine.renderer.extent.height,
   ) or_return
@@ -1126,7 +1126,7 @@ engine_update :: proc(engine: ^Engine) -> bool {
 }
 
 engine_deinit :: proc(engine: ^Engine) {
-  vkd := engine.vk_ctx.vkd
+  vkd := engine.ctx.vkd
   vk.DeviceWaitIdle(vkd)
 
   // Deinit resources
@@ -1139,7 +1139,7 @@ engine_deinit :: proc(engine: ^Engine) {
 
   deinit_scene(&engine.scene)
   renderer_deinit(&engine.renderer)
-  vulkan_context_deinit(&engine.vk_ctx)
+  vulkan_context_deinit(&engine.ctx)
 
   glfw.DestroyWindow(engine.window)
   glfw.Terminate()

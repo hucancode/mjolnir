@@ -30,20 +30,20 @@ SkeletalMesh :: struct {
   index_buffer:         DataBuffer,
   material:             Handle,
   aabb:                 geometry.Aabb,
-  ctx_ref:              ^VulkanContext, // For deinitializing buffers
+  ctx:              ^VulkanContext, // For deinitializing buffers
 }
 
 // deinit_skeletal_mesh releases Vulkan buffers and other owned memory.
 skeletal_mesh_deinit :: proc(self: ^SkeletalMesh) {
-  if self.ctx_ref == nil {
+  if self.ctx == nil {
     return
   }
 
   if self.vertex_buffer.buffer != 0 {
-    data_buffer_deinit(&self.vertex_buffer, self.ctx_ref)
+    data_buffer_deinit(&self.vertex_buffer, self.ctx)
   }
   if self.index_buffer.buffer != 0 {
-    data_buffer_deinit(&self.index_buffer, self.ctx_ref)
+    data_buffer_deinit(&self.index_buffer, self.ctx)
   }
 
   // Deinitialize bones
@@ -64,7 +64,7 @@ skeletal_mesh_deinit :: proc(self: ^SkeletalMesh) {
     self.animations = nil
   }
 
-  self.ctx_ref = nil
+  self.ctx = nil
 }
 
 // init_skeletal_mesh initializes the mesh, creates Vulkan buffers.
@@ -73,7 +73,7 @@ skeletal_mesh_init :: proc(
   geometry_data: ^geometry.SkinnedGeometry,
   ctx: ^VulkanContext,
 ) -> vk.Result {
-  self.ctx_ref = ctx
+  self.ctx = ctx
   self.vertices_len = u32(len(geometry_data.vertices))
   self.indices_len = u32(len(geometry_data.indices))
   self.aabb = geometry_data.aabb

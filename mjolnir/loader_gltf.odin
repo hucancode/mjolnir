@@ -116,14 +116,14 @@ load_gltf :: proc(engine: ^Engine, path: string) -> (
             g_node.skin,
           )
         if ok {
-          skeletal_mesh_init(mesh, &data, &engine.vk_ctx)
+          skeletal_mesh_init(mesh, &data, &engine.ctx)
           mesh.material = material
           mesh.bones = bones
           mesh.root_bone_index = root_bone_idx
 
           // Initialize pose for the mesh
           pose: Pose
-          pose_init(&pose, len(bones), &engine.vk_ctx)
+          pose_init(&pose, len(bones), &engine.ctx)
 
           // Create the attachment with initialized pose
           node.attachment = NodeSkeletalMeshAttachment {

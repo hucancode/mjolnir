@@ -13,7 +13,7 @@ DebugGrid :: struct {
 debug_grid: DebugGrid
 
 init_debug_grid :: proc(engine: ^Engine, extent: i32 = 100) -> vk.Result {
-    ctx := &engine.vk_ctx
+    ctx := &engine.ctx
     // Use regular Vertex struct since that's what our pipeline expects
     vertex_count := (extent*2+1) * 4  // 2 lines per coordinate (X and Z), 2 vertices per line
     verts := make([dynamic]geometry.Vertex, 0, vertex_count)
@@ -77,7 +77,7 @@ draw_debug_grid :: proc(engine: ^Engine, extent: i32 = 100) -> vk.Result {
     if debug_grid.extent != extent {
         init_debug_grid(engine, extent) or_return
     }
-    ctx := &engine.vk_ctx
+    ctx := &engine.ctx
     cmd := renderer_get_command_buffer(&engine.renderer)
     vk.CmdBindPipeline(cmd, .GRAPHICS, pipelines[0])
     // Bind descriptor sets for scene uniforms (needed for view/projection)

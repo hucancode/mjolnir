@@ -26,7 +26,7 @@ Material :: struct {
   texture_descriptor_set: vk.DescriptorSet,
   skinning_descriptor_set: vk.DescriptorSet,
   features:       u32,
-  ctx_ref:        ^VulkanContext,
+  ctx:        ^VulkanContext,
 }
 camera_descriptor_set_layout: vk.DescriptorSetLayout
 // material set layouts only account for textures and bones features
@@ -77,10 +77,10 @@ material_update_textures :: proc(
   metallic: ^Texture,
   roughness: ^Texture,
 ) {
-  if mat.ctx_ref == nil || mat.texture_descriptor_set == 0 {
+  if mat.ctx == nil || mat.texture_descriptor_set == 0 {
     return
   }
-  vkd := mat.ctx_ref.vkd
+  vkd := mat.ctx.vkd
   image_infos := [?]vk.DescriptorImageInfo {
     {
       sampler = albedo.sampler,
@@ -135,10 +135,10 @@ material_update_bone_buffer :: proc(
   buffer: vk.Buffer,
   size: vk.DeviceSize,
 ) {
-  if mat.ctx_ref == nil || mat.texture_descriptor_set == 0 {
+  if mat.ctx == nil || mat.texture_descriptor_set == 0 {
     return
   }
-  vkd := mat.ctx_ref.vkd
+  vkd := mat.ctx.vkd
 
   buffer_info := vk.DescriptorBufferInfo {
     buffer = buffer,
@@ -411,9 +411,9 @@ create_material_untextured :: proc(
   res: vk.Result,
 ) {
   ret, mat = resource.alloc(&engine.materials)
-  mat.ctx_ref = &engine.vk_ctx
+  mat.ctx = &engine.ctx
   mat.features = features
-  material_init_descriptor_set_layout(mat, &engine.vk_ctx) or_return
+  material_init_descriptor_set_layout(mat, &engine.ctx) or_return
   return
 }
 
@@ -429,9 +429,9 @@ create_material_textured :: proc(
   res: vk.Result,
 ) {
   ret, mat = resource.alloc(&engine.materials)
-  mat.ctx_ref = &engine.vk_ctx
+  mat.ctx = &engine.ctx
   mat.features = features | SHADER_FEATURE_TEXTURING
-  material_init_descriptor_set_layout(mat, &engine.vk_ctx) or_return
+  material_init_descriptor_set_layout(mat, &engine.ctx) or_return
   albedo := resource.get(&engine.textures, albedo_handle)
   metallic := resource.get(&engine.textures, metallic_handle)
   roughness := resource.get(&engine.textures, roughness_handle)
