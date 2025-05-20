@@ -156,18 +156,14 @@ animation_instance_stop :: proc(instance: ^Animation_Instance) {
 }
 
 // Update animation instance time. Needs clip_duration.
-animation_instance_update :: proc(
+animation_instance_tick :: proc(
   instance: ^Animation_Instance,
   delta_time: f32,
 ) {
   if instance.status != .Playing || instance.duration <= 0 {
-    // return
+    return
   }
-
-  instance.mode = .Loop
-
   effective_delta_time := delta_time * instance.speed
-
   switch instance.mode {
   case .Loop:
     instance.time += effective_delta_time
@@ -175,7 +171,7 @@ animation_instance_update :: proc(
       instance.time + instance.duration,
       instance.duration,
     )
-  // fmt.printfln("animation_instance_update: time +%f = %f", effective_delta_time, instance.time)
+  // fmt.printfln("animation_instance_tick: time +%f = %f", effective_delta_time, instance.time)
   case .Once:
     instance.time += effective_delta_time
     instance.time = math.mod_f32(

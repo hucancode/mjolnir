@@ -1059,21 +1059,17 @@ engine_recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
   return .SUCCESS
 }
 
-engine_get_delta_time :: proc(engine: ^Engine) -> f32 {
+delta_time :: proc(engine: ^Engine) -> f32 {
   return f32(time.duration_seconds(time.since(engine.last_update_timestamp)))
 }
 
-engine_get_time :: proc(engine: ^Engine) -> f32 {
+time_since_start :: proc(engine: ^Engine) -> f32 {
   return f32(time.duration_seconds(time.since(engine.start_timestamp)))
-}
-
-engine_should_close :: proc(engine: ^Engine) -> bool {
-  return bool(glfw.WindowShouldClose(engine.window))
 }
 
 engine_update :: proc(engine: ^Engine) -> bool {
   glfw.PollEvents()
-  delta_time := engine_get_delta_time(engine)
+  delta_time := delta_time(engine)
   if delta_time < UPDATE_FRAME_TIME {
     return false
   }
@@ -1086,7 +1082,7 @@ engine_update :: proc(engine: ^Engine) -> bool {
       continue
     }
     anim_inst := &data.animation.?
-    animation_instance_update(anim_inst, delta_time)
+    animation_instance_tick(anim_inst, delta_time)
     skeletal_mesh := resource.get(&engine.skeletal_meshes, data.handle)
     if skeletal_mesh != nil {
       calculate_animation_transform(skeletal_mesh, anim_inst, &data.pose)
@@ -1164,7 +1160,7 @@ engine_commit_transaction :: proc(engine: ^Engine) {
 }
 
 // --- Animation Control ---
-engine_play_animation :: proc(
+play_animation :: proc(
   engine: ^Engine,
   node_handle: Handle,
   name: string,
@@ -1182,7 +1178,7 @@ engine_play_animation :: proc(
   if skeletal_mesh_res == nil {
     return false
   }
-  anim_inst, found := play_animation(skeletal_mesh_res, name, mode)
+  anim_inst, found := make_animation(skeletal_mesh_res, name, mode)
   if !found {
     return false
   }
@@ -1200,7 +1196,7 @@ spawn_point_light :: proc(
   handle: Handle,
   node: ^Node,
 ) {
-  handle, node = spawn_node(engine)
+  handle, node = spawn(engine)
   if node != nil {
     light_handle, light := resource.alloc(&engine.lights)
     light^ = PointLight {
@@ -1222,7 +1218,7 @@ spawn_directional_light :: proc(
   handle: Handle,
   node: ^Node,
 ) {
-  handle, node = spawn_node(engine)
+  handle, node = spawn(engine)
   if node != nil {
     light_handle, light := resource.alloc(&engine.lights)
     light^ = DirectionalLight {
@@ -1245,7 +1241,7 @@ spawn_spot_light :: proc(
   handle: Handle,
   node: ^Node,
 ) {
-  handle, node = spawn_node(engine)
+  handle, node = spawn(engine)
   if node != nil {
     light_handle, light := resource.alloc(&engine.lights)
     light^ = SpotLight {
@@ -1260,18 +1256,18 @@ spawn_spot_light :: proc(
 }
 
 // Spawns a generic node and returns its handle and pointer
-spawn_node :: proc(engine: ^Engine) -> (handle: Handle, node: ^Node) {
+spawn :: proc(engine: ^Engine) -> (handle: Handle, node: ^Node) {
   handle, node = resource.alloc(&engine.nodes)
   if node != nil {
     node.transform = geometry.transform_identity()
     node.children = make([dynamic]Handle, 0)
-    parent_node(&engine.nodes, engine.scene.root, handle)
+    attach(&engine.nodes, engine.scene.root, handle)
   }
   return
 }
 
-engine_run :: proc(engine: ^Engine) {
-  for !engine_should_close(engine) {
+run :: proc(engine: ^Engine) {
+  for !glfw.WindowShouldClose(engine.window) {
     engine_update(engine)
     engine_render(engine)
     // break

@@ -177,7 +177,7 @@ make_skinned_geometry :: proc(
 // The procedures then return Geometry structs that slice these constants.
 
 // make_cube creates a cube geometry. If color is nil, uses default white.
-make_cube :: proc(color: [4]f32 = {1.0, 1.0, 1.0, 1.0}) -> (ret: Geometry) {
+cube :: proc(color: [4]f32 = {1.0, 1.0, 1.0, 1.0}) -> (ret: Geometry) {
   ret.vertices = make([]Vertex, 24)
   ret.indices = make([]u32, 36)
   vertices := [?]Vertex {
@@ -290,7 +290,7 @@ make_triangle :: proc(
 }
 
 // Quad (on XZ plane, facing Y up)
-make_quad :: proc(color: [4]f32 = {1.0, 1.0, 1.0, 1.0}) -> (ret: Geometry) {
+quad :: proc(color: [4]f32 = {1.0, 1.0, 1.0, 1.0}) -> (ret: Geometry) {
   ret.vertices = make([]Vertex, 4)
   ret.indices = make([]u32, 6)
 
@@ -313,7 +313,7 @@ make_quad :: proc(color: [4]f32 = {1.0, 1.0, 1.0, 1.0}) -> (ret: Geometry) {
 }
 
 // --- Sphere ---
-make_sphere :: proc(
+sphere :: proc(
   segments: u32 = 16,
   rings: u32 = 16,
   radius: f32 = 1.0,

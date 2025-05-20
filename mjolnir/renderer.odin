@@ -207,7 +207,7 @@ renderer_deinit :: proc(self: ^Renderer) {
   if self.ctx == nil {return}
   vkd := self.ctx.vkd
   vk.DeviceWaitIdle(vkd)
-  renderer_destroy_swapchain_resources(self)
+  renderer_destroy_swapchain(self)
   for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
     frame_deinit(&self.frames[i])
   }
@@ -326,7 +326,7 @@ renderer_recreate_swapchain :: proc(
 ) -> vk.Result {
   vk.DeviceWaitIdle(self.ctx.vkd)
 
-  renderer_destroy_swapchain_resources(self) // Destroy old swapchain and related resources
+  renderer_destroy_swapchain(self) // Destroy old swapchain and related resources
 
   // Re-query surface capabilities as they might have changed (e.g. window resize)
   capabilities: vk.SurfaceCapabilitiesKHR
@@ -463,7 +463,6 @@ renderer_create_swapchain_and_resources :: proc(
     self.extent.width,
     self.extent.height,
     depth_format,
-    .OPTIMAL,
     { .DEPTH_STENCIL_ATTACHMENT, .SAMPLED },
     {.DEVICE_LOCAL},
   ) or_return
@@ -479,7 +478,7 @@ renderer_create_swapchain_and_resources :: proc(
 }
 
 // Helper to destroy swapchain and its resources
-renderer_destroy_swapchain_resources :: proc(self: ^Renderer) {
+renderer_destroy_swapchain :: proc(self: ^Renderer) {
   if self.ctx == nil {return}
   vkd := self.ctx.vkd
 

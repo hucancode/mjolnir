@@ -291,7 +291,7 @@ depth_image_init :: proc(
   mem_requirements: vk.MemoryRequirements
   vk.GetImageMemoryRequirements(vk_device, img_buffer.image, &mem_requirements)
 
-  memory_type_index, found := find_memory_type_index(
+  memory_type_index, found := find_gpu_memory(
     ctx.physical_device,
     mem_requirements.memoryTypeBits,
     {.DEVICE_LOCAL},

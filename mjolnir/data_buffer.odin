@@ -324,7 +324,6 @@ create_image_buffer :: proc(
     width,
     height,
     format,
-    .OPTIMAL,
     {.TRANSFER_DST, .SAMPLED},
     {.DEVICE_LOCAL},
   ) or_return

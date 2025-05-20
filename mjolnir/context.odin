@@ -620,7 +620,7 @@ end_single_time_command :: proc(
   return .SUCCESS
 }
 
-find_memory_type_index :: proc(
+find_gpu_memory :: proc(
   pdevice: vk.PhysicalDevice,
   type_filter: u32,
   properties: vk.MemoryPropertyFlags,
@@ -642,7 +642,7 @@ find_memory_type_index :: proc(
   return 0, false
 }
 
-allocate_vulkan_memory :: proc(
+allocate_gpu_memory :: proc(
   self: ^VulkanContext,
   mem_requirements: vk.MemoryRequirements,
   properties: vk.MemoryPropertyFlags,
@@ -650,7 +650,7 @@ allocate_vulkan_memory :: proc(
   memory: vk.DeviceMemory,
   ret: vk.Result,
 ) {
-  memory_type_idx, found := find_memory_type_index(
+  memory_type_idx, found := find_gpu_memory(
     self.physical_device,
     mem_requirements.memoryTypeBits,
     properties,
@@ -675,7 +675,6 @@ malloc_image_buffer :: proc(
   width: u32,
   height: u32,
   format: vk.Format,
-  tiling: vk.ImageTiling,
   usage: vk.ImageUsageFlags,
   mem_properties: vk.MemoryPropertyFlags,
 ) -> (
@@ -689,7 +688,7 @@ malloc_image_buffer :: proc(
     mipLevels     = 1,
     arrayLayers   = 1,
     format        = format,
-    tiling        = tiling,
+    tiling        = .OPTIMAL,
     initialLayout = .UNDEFINED,
     usage         = usage,
     sharingMode   = .EXCLUSIVE,
@@ -698,7 +697,7 @@ malloc_image_buffer :: proc(
   vk.CreateImage(self.vkd, &create_info, nil, &img_buffer.image) or_return
   mem_reqs: vk.MemoryRequirements
   vk.GetImageMemoryRequirements(self.vkd, img_buffer.image, &mem_reqs)
-  img_buffer.memory = allocate_vulkan_memory(
+  img_buffer.memory = allocate_gpu_memory(
     self,
     mem_reqs,
     mem_properties,
@@ -715,8 +714,7 @@ malloc_image_buffer :: proc(
   return img_buffer, .SUCCESS
 }
 
-// Specific version from Zig context.zig
-malloc_image_buffer_device_local :: proc(
+malloc_image_buffer_local :: proc(
   self: ^VulkanContext,
   format: vk.Format,
   width: u32,
@@ -730,7 +728,6 @@ malloc_image_buffer_device_local :: proc(
     width,
     height,
     format,
-    .OPTIMAL,
     {.TRANSFER_DST, .SAMPLED},
     {.DEVICE_LOCAL},
   )
@@ -757,7 +754,7 @@ malloc_data_buffer :: proc(
   mem_reqs: vk.MemoryRequirements
   vk.GetBufferMemoryRequirements(self.vkd, data_buf.buffer, &mem_reqs)
 
-  data_buf.memory = allocate_vulkan_memory(
+  data_buf.memory = allocate_gpu_memory(
     self,
     mem_reqs,
     mem_properties,

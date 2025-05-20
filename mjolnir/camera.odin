@@ -61,7 +61,7 @@ Camera :: struct {
 }
 
 // Initialization
-camera_init_perspective :: proc(
+make_perspective_camera :: proc(
   fov: f32,
   aspect_ratio: f32,
   near: f32,
@@ -81,7 +81,7 @@ camera_init_perspective :: proc(
   }
 }
 
-camera_init_ortho :: proc(
+make_ortho_camera :: proc(
   width: f32,
   height: f32,
   near: f32,
@@ -101,7 +101,7 @@ camera_init_ortho :: proc(
   }
 }
 
-camera_init_orbit :: proc(
+make_orbit_perspective_camera :: proc(
   fov: f32,
   aspect_ratio: f32,
   near: f32,
@@ -135,7 +135,6 @@ camera_switch_to_orbit :: proc(
   if d, ok := distance.?; ok {
     orbit_data.distance = d
   }
-  // Reset yaw and pitch or carry them over if desired. Zig version resets.
   orbit_data.yaw = 0.0
   orbit_data.pitch = 0.0
   camera.movement_data = orbit_data

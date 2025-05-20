@@ -31,7 +31,7 @@ main :: proc() {
     fmt.eprintf("Failed to initialize engine\n")
     return
   }
-  engine_run(&engine)
+  run(&engine)
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {
@@ -48,10 +48,10 @@ setup :: proc(engine: ^mjolnir.Engine) {
     )
     fmt.printfln("[DEBUG] Created lit textured material, handle: %v", mat_handle)
     // Create mesh
-    cube_geom := geometry.make_cube()
+    cube_geom := geometry.cube()
     cube_mesh_handle := create_static_mesh(engine, &cube_geom, mat_handle)
     fmt.printfln("[DEBUG] Created cube mesh, handle: %v", cube_mesh_handle)
-    sphere_geom := geometry.make_sphere()
+    sphere_geom := geometry.sphere()
     sphere_mesh_handle := create_static_mesh(engine, &sphere_geom, mat_handle)
     fmt.printfln("[DEBUG] Created sphere mesh, handle: %v", sphere_mesh_handle)
 
@@ -64,7 +64,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
       tex_handle,
     )
     fmt.printfln("[DEBUG] Created ground material, handle: %v", ground_mat_handle)
-    quad_geom := geometry.make_quad()
+    quad_geom := geometry.quad()
     ground_mesh_handle := create_static_mesh(
       engine,
       &quad_geom,
@@ -80,8 +80,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
             if x == nx / 2 && y == ny / 2 && z == nz / 2 {
               continue
             }
-            node_handle, node := spawn_node(engine)
-            parent_node(&engine.nodes, engine.scene.root, node_handle)
+            node_handle, node := spawn(engine)
+            attach(&engine.nodes, engine.scene.root, node_handle)
             node.attachment = NodeStaticMeshAttachment{sphere_mesh_handle}
             node.transform.position = {
               (f32(x) - f32(nx) / 2.0) * 3.0,
@@ -95,17 +95,15 @@ setup :: proc(engine: ^mjolnir.Engine) {
     }
     if true {
       // Ground node
-      ground_handle, ground_node := spawn_node(engine)
-      parent_node(&engine.nodes, engine.scene.root, ground_handle)
+      ground_handle, ground_node := spawn(engine)
+      attach(&engine.nodes, engine.scene.root, ground_handle)
       ground_node.attachment = NodeStaticMeshAttachment{ground_mesh_handle}
       ground_node.transform.position = {-3.0, 0.0, -3.0}
       ground_node.transform.scale = {6.0, 1.0, 6.0}
     }
     if true {
       // Load GLTF and play animation
-      gltf_nodes, _ := gltf_loader_submit(
-        &GLTFLoader{engine_ptr = engine, gltf_path = "assets/CesiumMan.glb"},
-      )
+      gltf_nodes, _ := load_gltf(engine, "assets/CesiumMan.glb")
       fmt.printfln("Loaded GLTF nodes: %v", gltf_nodes)
       for armature in gltf_nodes {
         armature_ptr := resource.get(&engine.nodes, armature)
@@ -119,7 +117,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
         }
         fmt.printfln("found skeleton:", skeleton_ptr)
         // skeleton_ptr.transform.position = {2.0, 0.0, 0.0}
-        engine_play_animation(engine, skeleton, "Anim_0", .Loop)
+        play_animation(engine, skeleton, "Anim_0", .Loop)
         attachment, ok := skeleton_ptr.attachment.(NodeSkeletalMeshAttachment)
         if ok {
           pose := attachment.pose
@@ -155,9 +153,9 @@ setup :: proc(engine: ^mjolnir.Engine) {
         linalg.VECTOR3F32_X_AXIS,
       )
       light.transform.position = {0.0, 3.0, 0.0}
-      light_cube_handle, light_cube_node := spawn_node(engine)
+      light_cube_handle, light_cube_node := spawn(engine)
       light_cube_handles[i] = light_cube_handle
-      parent_node(&engine.nodes, light_handles[i], light_cube_handles[i])
+      attach(&engine.nodes, light_handles[i], light_cube_handles[i])
       light_cube_node.attachment = NodeStaticMeshAttachment{cube_mesh_handle}
       light_cube_node.transform.scale = {0.1, 0.1, 0.1}
       light_cube_node.transform.position = {0.0, 0.1, 0.0}
@@ -171,7 +169,7 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
   // Animate lights
   for i in 0 ..< LIGHT_COUNT {
     offset := f32(i) / f32(LIGHT_COUNT) * math.PI * 2.0
-    t := engine_get_time(engine) + offset
+    t := time_since_start(engine) + offset
     // fmt.printfln("getting light %d %v", i, light_handles[i])
     light_ptr := resource.get(&engine.nodes, light_handles[i])
     if light_ptr == nil {continue}
@@ -190,7 +188,7 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
       continue
     }
     light_cube_ptr.transform.rotation = linalg.quaternion_angle_axis(
-      math.PI * engine_get_time(engine) * 0.5,
+      math.PI * time_since_start(engine) * 0.5,
       linalg.VECTOR3F32_Y_AXIS,
     )
     light_cube_ptr.transform.is_dirty = true

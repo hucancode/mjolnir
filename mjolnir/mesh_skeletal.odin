@@ -103,7 +103,7 @@ skeletal_mesh_init :: proc(
   return .SUCCESS
 }
 
-play_animation :: proc(
+make_animation :: proc(
   self: ^SkeletalMesh,
   animation_name: string,
   mode: Animation_Play_Mode,
