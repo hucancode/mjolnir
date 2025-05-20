@@ -118,7 +118,7 @@ make_orbit_perspective_camera :: proc(
       far = far,
     },
   }
-  camera_update_orbit_position(&cam) // Set initial position and rotation
+  camera_update_orbit_position(&cam)
   return cam
 }
 

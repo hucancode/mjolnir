@@ -24,7 +24,6 @@ main :: proc() {
   engine.update_proc = update
   engine.render2d_proc = render2d
   engine.render3d_proc = render3d
-  engine.key_press_proc = on_key_pressed
   g_context = context
   defer engine_deinit(&engine)
   if engine_init(&engine, WIDTH, HEIGHT, TITLE) != .SUCCESS {
@@ -41,19 +40,15 @@ setup :: proc(engine: ^mjolnir.Engine) {
       engine,
       "assets/statue-1275469_1280.jpg",
     )
-    fmt.printfln("Loaded texture: %v", texture)
     mat_handle, _, _ := create_material_untextured(
       engine,
       SHADER_FEATURE_LIT | SHADER_FEATURE_RECEIVE_SHADOW,
     )
-    fmt.printfln("[DEBUG] Created lit textured material, handle: %v", mat_handle)
     // Create mesh
     cube_geom := geometry.cube()
     cube_mesh_handle := create_static_mesh(engine, &cube_geom, mat_handle)
-    fmt.printfln("[DEBUG] Created cube mesh, handle: %v", cube_mesh_handle)
     sphere_geom := geometry.sphere()
     sphere_mesh_handle := create_static_mesh(engine, &sphere_geom, mat_handle)
-    fmt.printfln("[DEBUG] Created sphere mesh, handle: %v", sphere_mesh_handle)
 
     // Create ground plane
     ground_mat_handle, _, _ := create_material_textured(
@@ -63,17 +58,15 @@ setup :: proc(engine: ^mjolnir.Engine) {
       tex_handle,
       tex_handle,
     )
-    fmt.printfln("[DEBUG] Created ground material, handle: %v", ground_mat_handle)
     quad_geom := geometry.quad()
     ground_mesh_handle := create_static_mesh(
       engine,
       &quad_geom,
       ground_mat_handle,
     )
-    fmt.printfln("[DEBUG] Created ground mesh, handle: %v", ground_mesh_handle)
     if true {
       // Spawn cubes in a grid
-      nx, ny, nz := 2, 2, 2
+      nx, ny, nz := 4, 4, 4
       for x in 0 ..< nx {
         for y in 0 ..< ny {
           for z in 0 ..< nz {
@@ -119,12 +112,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
         // skeleton_ptr.transform.position = {2.0, 0.0, 0.0}
         play_animation(engine, skeleton, "Anim_0", .Loop)
         attachment, ok := skeleton_ptr.attachment.(NodeSkeletalMeshAttachment)
-        if ok {
-          pose := attachment.pose
-          for i in 0 ..< min(4, len(pose.bone_matrices)) {
-            fmt.printfln("Bone %d matrix: %v", i, pose.bone_matrices[i])
-          }
-        }
       }
     }
 
@@ -161,7 +148,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
       light_cube_node.transform.position = {0.0, 0.1, 0.0}
     }
     // Directional light
-    _, _ = spawn_directional_light(engine, {0.3, 0.3, 0.3, 0.0})
+    spawn_directional_light(engine, {0.3, 0.3, 0.3, 0.0})
 }
 
 update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
@@ -202,12 +189,6 @@ render2d :: proc(engine: ^mjolnir.Engine, ctx: ^mu.Context) {
     }
 }
 
-on_key_pressed :: proc(engine: ^mjolnir.Engine, key, action, mods: int) {
-    fmt.printfln("key pressed key %d action %d mods %x", key, action, mods)
-}
-
 render3d :: proc(engine: ^mjolnir.Engine) {
-    using mjolnir
-    cmd := renderer_get_command_buffer(&engine.renderer)
-    draw_debug_grid(engine)
+    mjolnir.draw_debug_grid(engine)
 }

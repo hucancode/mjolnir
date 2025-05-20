@@ -138,7 +138,6 @@ create_texture_from_path :: proc(
 
 texture_init_from_path :: proc(self: ^Texture, path: string) -> vk.Result {
   path_cstr := strings.clone_to_cstring(path)
-  // defer free(path_cstr)
   w, h, c_in_file: c.int
   actual_channels: c.int = 4
   pixels_ptr := stbi.load(path_cstr, &w, &h, &c_in_file, actual_channels)
