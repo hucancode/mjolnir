@@ -419,13 +419,13 @@ collect_lights_callback :: proc(
       uniform.color = light_type.color
       uniform.radius = light_type.radius
       uniform.has_shadow = light_type.cast_shadow ? 1 : 0
-      uniform.position = linalg.Vector4f32{0, 0, 0, 1} * world_matrix^
+      uniform.position = world_matrix^ * linalg.Vector4f32{0, 0, 0, 1}
     case DirectionalLight:
       uniform.kind = 1
       uniform.color = light_type.color
       uniform.has_shadow = light_type.cast_shadow ? 1 : 0
-      uniform.position = linalg.Vector4f32{0, 0, 0, 1} * world_matrix^
-      uniform.direction = linalg.Vector4f32{0, 0, 1, 0} * world_matrix^ // Assuming +Z is forward
+      uniform.position = world_matrix^ * linalg.Vector4f32{0, 0, 0, 1}
+      uniform.direction = world_matrix^ * linalg.Vector4f32{0, 0, 1, 0}  // Assuming +Z is forward
     case SpotLight:
       uniform.kind = 2
       uniform.color = light_type.color
