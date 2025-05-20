@@ -14,10 +14,10 @@ Transform :: struct {
 
 transform_identity :: proc() -> Transform {
   return Transform {
-    position     = {0, 0, 0},
-    rotation     = linalg.QUATERNIONF32_IDENTITY,
-    scale        = {1, 1, 1},
-    is_dirty     = true,
+    position = {0, 0, 0},
+    rotation = linalg.QUATERNIONF32_IDENTITY,
+    scale = {1, 1, 1},
+    is_dirty = true,
     local_matrix = linalg.MATRIX4F32_IDENTITY,
     world_matrix = linalg.MATRIX4F32_IDENTITY,
   }

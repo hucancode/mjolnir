@@ -51,23 +51,18 @@ clear_lights :: proc(self: ^SceneLightUniform) {
 
 // --- Frame Struct ---
 Frame :: struct {
-  ctx:                        ^VulkanContext,
-  image_available_semaphore:  vk.Semaphore,
-  render_finished_semaphore:  vk.Semaphore,
-  fence:                      vk.Fence,
-  command_buffer:             vk.CommandBuffer,
-  scene_uniform:              DataBuffer,
-  light_uniform:              DataBuffer,
-  shadow_maps:                [MAX_SHADOW_MAPS]DepthTexture,
-  camera_descriptor_set:      vk.DescriptorSet,
+  ctx:                       ^VulkanContext,
+  image_available_semaphore: vk.Semaphore,
+  render_finished_semaphore: vk.Semaphore,
+  fence:                     vk.Fence,
+  command_buffer:            vk.CommandBuffer,
+  scene_uniform:             DataBuffer,
+  light_uniform:             DataBuffer,
+  shadow_maps:               [MAX_SHADOW_MAPS]DepthTexture,
+  camera_descriptor_set:     vk.DescriptorSet,
 }
 
-frame_init :: proc(
-  self: ^Frame,
-  ctx: ^VulkanContext,
-) -> (
-  res: vk.Result,
-) {
+frame_init :: proc(self: ^Frame, ctx: ^VulkanContext) -> (res: vk.Result) {
   self.ctx = ctx
   self.scene_uniform = create_host_visible_buffer(
     ctx,
@@ -178,15 +173,15 @@ frame_deinit :: proc(self: ^Frame) {
 
 // --- Renderer Struct ---
 Renderer :: struct {
-  ctx:                               ^VulkanContext,
-  swapchain:                         vk.SwapchainKHR,
-  format:                            vk.SurfaceFormatKHR,
-  extent:                            vk.Extent2D,
-  images:                            []vk.Image, // Owned by swapchain, slice managed by renderer
-  views:                             []vk.ImageView, // Owned by renderer, one per image
-  frames:                            [MAX_FRAMES_IN_FLIGHT]Frame,
-  depth_buffer:                      ImageBuffer,
-  current_frame_index:               u32,
+  ctx:                 ^VulkanContext,
+  swapchain:           vk.SwapchainKHR,
+  format:              vk.SurfaceFormatKHR,
+  extent:              vk.Extent2D,
+  images:              []vk.Image, // Owned by swapchain, slice managed by renderer
+  views:               []vk.ImageView, // Owned by renderer, one per image
+  frames:              [MAX_FRAMES_IN_FLIGHT]Frame,
+  depth_buffer:        ImageBuffer,
+  current_frame_index: u32,
 }
 
 renderer_init :: proc(self: ^Renderer, ctx: ^VulkanContext) -> vk.Result {
@@ -195,10 +190,7 @@ renderer_init :: proc(self: ^Renderer, ctx: ^VulkanContext) -> vk.Result {
 
   // Initialize frames
   for &frame in self.frames {
-    frame_init(
-      &frame,
-      ctx,
-    ) or_return
+    frame_init(&frame, ctx) or_return
   }
   return .SUCCESS
 }
@@ -278,8 +270,8 @@ renderer_build_swapchain_surface_format :: proc(
 ) {
   for fmt in formats {
     if fmt.format == .B8G8R8A8_SRGB {
-        self.format = fmt
-        return
+      self.format = fmt
+      return
     }
   }
   // Fallback to the first available format if preferred not found
@@ -463,7 +455,7 @@ renderer_create_swapchain_and_resources :: proc(
     self.extent.width,
     self.extent.height,
     depth_format,
-    { .DEPTH_STENCIL_ATTACHMENT, .SAMPLED },
+    {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
     {.DEVICE_LOCAL},
   ) or_return
 

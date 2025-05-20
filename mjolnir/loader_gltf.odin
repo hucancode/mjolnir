@@ -15,7 +15,10 @@ import "geometry"
 import "resource"
 
 // Returns a slice of handles to the root nodes created from the GLTF scene and a success boolean.
-load_gltf :: proc(engine: ^Engine, path: string) -> (
+load_gltf :: proc(
+  engine: ^Engine,
+  path: string,
+) -> (
   root_node_handles: []Handle,
   ret: cgltf.result,
 ) {
@@ -56,10 +59,7 @@ load_gltf :: proc(engine: ^Engine, path: string) -> (
   for i in 0 ..< len(gltf_data.nodes) {
     if i not_in is_child_node {
       fmt.printfln("Queuing node #%d %s", i, gltf_data.nodes[i].name)
-      append(
-        &stack,
-        TraverseEntry{idx = u32(i), parent = engine.scene.root},
-      )
+      append(&stack, TraverseEntry{idx = u32(i), parent = engine.scene.root})
     }
   }
 
@@ -169,11 +169,7 @@ load_gltf :: proc(engine: ^Engine, path: string) -> (
           len(mesh_data.indices),
         )
 
-        mesh_handle := create_static_mesh(
-          engine,
-          &mesh_data,
-          mat_handle,
-        )
+        mesh_handle := create_static_mesh(engine, &mesh_data, mat_handle)
 
         node.attachment = NodeStaticMeshAttachment {
           handle = mesh_handle,
@@ -249,10 +245,7 @@ load_gltf_texture_for_primitive_material :: proc(
     return
   }
   fmt.printfln("Creating texture from %d bytes", len(pixel_data))
-  tex_handle, texture = create_texture_from_data(
-    engine,
-    pixel_data,
-  ) or_return
+  tex_handle, texture = create_texture_from_data(engine, pixel_data) or_return
   delete(pixel_data)
   ret = .SUCCESS
   return
@@ -386,17 +379,18 @@ process_gltf_skinned_primitive :: proc(
   g_primitive := &primitives[0]
   fmt.printfln("Creating texture for skinned material...")
   // Material
-  base_color_tex_handle, _, tex_ok :=
-    load_gltf_texture_for_primitive_material(
-      engine,
-      root,
-      gltf_data,
-      g_primitive.material,
-    )
+  base_color_tex_handle, _, tex_ok := load_gltf_texture_for_primitive_material(
+    engine,
+    root,
+    gltf_data,
+    g_primitive.material,
+  )
   if tex_ok == .SUCCESS {
     mat_handle, _, _ = create_material_textured(
       engine,
-      SHADER_FEATURE_LIT | SHADER_FEATURE_SKINNING | SHADER_FEATURE_RECEIVE_SHADOW,
+      SHADER_FEATURE_LIT |
+      SHADER_FEATURE_SKINNING |
+      SHADER_FEATURE_RECEIVE_SHADOW,
       base_color_tex_handle,
       base_color_tex_handle,
       base_color_tex_handle,
@@ -409,7 +403,9 @@ process_gltf_skinned_primitive :: proc(
   } else {
     mat_handle, _, _ = create_material_untextured(
       engine,
-      SHADER_FEATURE_LIT | SHADER_FEATURE_SKINNING | SHADER_FEATURE_RECEIVE_SHADOW,
+      SHADER_FEATURE_LIT |
+      SHADER_FEATURE_SKINNING |
+      SHADER_FEATURE_RECEIVE_SHADOW,
     )
     fmt.printfln("Creating skinned material without texture -> %v", mat_handle)
   }
@@ -503,10 +499,10 @@ process_gltf_skinned_primitive :: proc(
     }
   }
   skinned_geom_data = {
-    vertices = vertices,
+    vertices  = vertices,
     skinnings = skinnings,
-    indices  = indices,
-    aabb     = geometry.aabb_from_vertices(vertices),
+    indices   = indices,
+    aabb      = geometry.aabb_from_vertices(vertices),
   }
   // Bones
   engine_bones = make([]Bone, len(g_skin.joints))
@@ -524,7 +520,7 @@ process_gltf_skinned_primitive :: proc(
       )
       if read {
         engine_bones[i].inverse_bind_matrix = geometry.matrix_from_slice(
-            ibm_floats,
+          ibm_floats,
         )
       }
     } else {
@@ -597,10 +593,7 @@ process_animations_for_skeletal_mesh :: proc(
   engine_mesh_handle: resource.Handle,
   node_ptr_to_bone_idx_map: map[^cgltf.node]u32,
 ) -> bool {
-  skeletal_mesh := resource.get(
-    &engine.skeletal_meshes,
-    engine_mesh_handle,
-  )
+  skeletal_mesh := resource.get(&engine.skeletal_meshes, engine_mesh_handle)
 
   skeletal_mesh.animations = make([]Animation_Clip, len(gltf_data.animations))
 

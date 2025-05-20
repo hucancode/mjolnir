@@ -20,17 +20,17 @@ bone_deinit :: proc(bone: ^Bone) {
 }
 
 SkeletalMesh :: struct {
-  root_bone_index:      u32, // Index of the root bone in the 'bones' array
-  bones:                []Bone,
-  animations:           []Animation_Clip, // Animation clips
-  vertices_len:         u32,
-  indices_len:          u32,
-  vertex_buffer:        DataBuffer,
-  skin_buffer:          DataBuffer,
-  index_buffer:         DataBuffer,
-  material:             Handle,
-  aabb:                 geometry.Aabb,
-  ctx:              ^VulkanContext, // For deinitializing buffers
+  root_bone_index: u32, // Index of the root bone in the 'bones' array
+  bones:           []Bone,
+  animations:      []Animation_Clip, // Animation clips
+  vertices_len:    u32,
+  indices_len:     u32,
+  vertex_buffer:   DataBuffer,
+  skin_buffer:     DataBuffer,
+  index_buffer:    DataBuffer,
+  material:        Handle,
+  aabb:            geometry.Aabb,
+  ctx:             ^VulkanContext, // For deinitializing buffers
 }
 
 // deinit_skeletal_mesh releases Vulkan buffers and other owned memory.

@@ -7,13 +7,13 @@ import "resource"
 import vk "vendor:vulkan"
 
 StaticMesh :: struct {
-  material:             Handle, // Handle to a Material resource
-  vertices_len:         u32,
-  indices_len:          u32,
-  vertex_buffer:        DataBuffer, // Full vertex data
-  index_buffer:         DataBuffer,
-  aabb:                 geometry.Aabb,
-  ctx:              ^VulkanContext,
+  material:      Handle, // Handle to a Material resource
+  vertices_len:  u32,
+  indices_len:   u32,
+  vertex_buffer: DataBuffer, // Full vertex data
+  index_buffer:  DataBuffer,
+  aabb:          geometry.Aabb,
+  ctx:           ^VulkanContext,
 }
 
 // deinit_static_mesh releases the Vulkan buffers.

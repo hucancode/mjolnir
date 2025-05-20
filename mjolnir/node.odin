@@ -39,10 +39,7 @@ deinit_node :: proc(node: ^Node) {
   delete(node.children)
 }
 
-detach :: proc(
-  nodes: ^resource.ResourcePool(Node),
-  child_handle: Handle,
-) {
+detach :: proc(nodes: ^resource.ResourcePool(Node), child_handle: Handle) {
   child_node := resource.get(nodes, child_handle)
   if child_node == nil {
     return

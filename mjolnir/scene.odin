@@ -9,10 +9,10 @@ Scene :: struct {
 
 init_scene :: proc(scene: ^Scene) {
   scene.camera = make_orbit_perspective_camera(
-    math.PI * 0.5, // fov
-    16.0 / 9.0, // aspect_ratio
-    0.01, // near
-    100.0, // far
+    fov = math.PI * 0.5,
+    aspect_ratio = 16.0 / 9.0,
+    near = 0.01,
+    far = 100.0,
   )
 }
 

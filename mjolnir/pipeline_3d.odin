@@ -23,10 +23,10 @@ ShaderConfig :: struct {
 
 // Material descriptor set layout: [albedo, metallic, roughness, bones (optional)]
 Material :: struct {
-  texture_descriptor_set: vk.DescriptorSet,
+  texture_descriptor_set:  vk.DescriptorSet,
   skinning_descriptor_set: vk.DescriptorSet,
-  features:       u32,
-  ctx:        ^VulkanContext,
+  features:                u32,
+  ctx:                     ^VulkanContext,
 }
 camera_descriptor_set_layout: vk.DescriptorSetLayout
 // material set layouts only account for textures and bones features
@@ -44,7 +44,8 @@ material_init_descriptor_set_layout :: proc(
   mat: ^Material,
   ctx: ^VulkanContext,
 ) -> vk.Result {
-  features := mat.features & (SHADER_FEATURE_SKINNING | SHADER_FEATURE_TEXTURING)
+  features :=
+    mat.features & (SHADER_FEATURE_SKINNING | SHADER_FEATURE_TEXTURING)
   alloc_info_texture := vk.DescriptorSetAllocateInfo {
     sType              = .DESCRIPTOR_SET_ALLOCATE_INFO,
     descriptorPool     = ctx.descriptor_pool,
@@ -251,66 +252,73 @@ build_3d_pipelines :: proc(
     pColorAttachmentFormats = raw_data(color_formats[:]),
     depthAttachmentFormat   = .D32_SFLOAT,
   }
-    vertex_input_info := vk.PipelineVertexInputStateCreateInfo{
-      sType = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-      vertexBindingDescriptionCount = len(geometry.VERTEX_BINDING_DESCRIPTION),
-      pVertexBindingDescriptions = raw_data(geometry.VERTEX_BINDING_DESCRIPTION[:]),
-      vertexAttributeDescriptionCount = len(geometry.VERTEX_ATTRIBUTE_DESCRIPTIONS),
-      pVertexAttributeDescriptions = raw_data(geometry.VERTEX_ATTRIBUTE_DESCRIPTIONS[:])
-    }
-    texture_bindings := []vk.DescriptorSetLayoutBinding{
-      {
-        binding = 0,
-        descriptorType = .COMBINED_IMAGE_SAMPLER,
-        descriptorCount = 1,
-        stageFlags = {.FRAGMENT}
-      }, {
-        binding = 1,
-        descriptorType = .COMBINED_IMAGE_SAMPLER,
-        descriptorCount = 1,
-        stageFlags = {.FRAGMENT}
-      }, {
-        binding = 2,
-        descriptorType = .COMBINED_IMAGE_SAMPLER,
-        descriptorCount = 1,
-        stageFlags = {.FRAGMENT}
-      }, {
-        binding = 3,
-        descriptorType =
-        .STORAGE_BUFFER,
-        descriptorCount = 1,
-        stageFlags = {.VERTEX}
-      },
-    }
-    vk.CreateDescriptorSetLayout(
-      ctx.vkd,
-      &vk.DescriptorSetLayoutCreateInfo {
-        sType        = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-        bindingCount = u32(len(texture_bindings)),
-        pBindings    = raw_data(texture_bindings),
-      },
-      nil,
-      &texture_descriptor_set_layout,
-    ) or_return
-    skinning_bindings := []vk.DescriptorSetLayoutBinding{
-      {
-        binding = 0,
-        descriptorType =
-        .STORAGE_BUFFER,
-        descriptorCount = 1,
-        stageFlags = {.VERTEX}
-      },
-    }
-    vk.CreateDescriptorSetLayout(
-      ctx.vkd,
-      &vk.DescriptorSetLayoutCreateInfo {
-        sType        = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-        bindingCount = u32(len(skinning_bindings)),
-        pBindings    = raw_data(skinning_bindings),
-      },
-      nil,
-      &skinning_descriptor_set_layout,
-    ) or_return
+  vertex_input_info := vk.PipelineVertexInputStateCreateInfo {
+    sType                           = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+    vertexBindingDescriptionCount   = len(geometry.VERTEX_BINDING_DESCRIPTION),
+    pVertexBindingDescriptions      = raw_data(
+      geometry.VERTEX_BINDING_DESCRIPTION[:],
+    ),
+    vertexAttributeDescriptionCount = len(
+      geometry.VERTEX_ATTRIBUTE_DESCRIPTIONS,
+    ),
+    pVertexAttributeDescriptions    = raw_data(
+      geometry.VERTEX_ATTRIBUTE_DESCRIPTIONS[:],
+    ),
+  }
+  texture_bindings := []vk.DescriptorSetLayoutBinding {
+    {
+      binding = 0,
+      descriptorType = .COMBINED_IMAGE_SAMPLER,
+      descriptorCount = 1,
+      stageFlags = {.FRAGMENT},
+    },
+    {
+      binding = 1,
+      descriptorType = .COMBINED_IMAGE_SAMPLER,
+      descriptorCount = 1,
+      stageFlags = {.FRAGMENT},
+    },
+    {
+      binding = 2,
+      descriptorType = .COMBINED_IMAGE_SAMPLER,
+      descriptorCount = 1,
+      stageFlags = {.FRAGMENT},
+    },
+    {
+      binding = 3,
+      descriptorType = .STORAGE_BUFFER,
+      descriptorCount = 1,
+      stageFlags = {.VERTEX},
+    },
+  }
+  vk.CreateDescriptorSetLayout(
+    ctx.vkd,
+    &vk.DescriptorSetLayoutCreateInfo {
+      sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+      bindingCount = u32(len(texture_bindings)),
+      pBindings = raw_data(texture_bindings),
+    },
+    nil,
+    &texture_descriptor_set_layout,
+  ) or_return
+  skinning_bindings := []vk.DescriptorSetLayoutBinding {
+    {
+      binding = 0,
+      descriptorType = .STORAGE_BUFFER,
+      descriptorCount = 1,
+      stageFlags = {.VERTEX},
+    },
+  }
+  vk.CreateDescriptorSetLayout(
+    ctx.vkd,
+    &vk.DescriptorSetLayoutCreateInfo {
+      sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+      bindingCount = u32(len(skinning_bindings)),
+      pBindings = raw_data(skinning_bindings),
+    },
+    nil,
+    &skinning_descriptor_set_layout,
+  ) or_return
 
   for features in 0 ..< SHADER_VARIANT_COUNT {
     configs[features] = ShaderConfig {
@@ -320,10 +328,26 @@ build_3d_pipelines :: proc(
       can_receive_shadow = (features & SHADER_FEATURE_RECEIVE_SHADOW) != 0,
     }
     entries[features] = [SHADER_OPTION_COUNT]vk.SpecializationMapEntry {
-      { constantID = 0, offset = u32(offset_of(ShaderConfig, is_skinned)), size = size_of(b32) },
-      { constantID = 1, offset = u32(offset_of(ShaderConfig, has_texture)), size = size_of(b32) },
-      { constantID = 2, offset = u32(offset_of(ShaderConfig, is_lit)), size = size_of(b32) },
-      { constantID = 3, offset = u32(offset_of(ShaderConfig, can_receive_shadow)), size = size_of(b32) },
+      {
+        constantID = 0,
+        offset = u32(offset_of(ShaderConfig, is_skinned)),
+        size = size_of(b32),
+      },
+      {
+        constantID = 1,
+        offset = u32(offset_of(ShaderConfig, has_texture)),
+        size = size_of(b32),
+      },
+      {
+        constantID = 2,
+        offset = u32(offset_of(ShaderConfig, is_lit)),
+        size = size_of(b32),
+      },
+      {
+        constantID = 3,
+        offset = u32(offset_of(ShaderConfig, can_receive_shadow)),
+        size = size_of(b32),
+      },
     }
     spec_infos[features] = vk.SpecializationInfo {
       mapEntryCount = len(entries[features]),
@@ -333,16 +357,17 @@ build_3d_pipelines :: proc(
     }
     shader_stages_arr[features] = [?]vk.PipelineShaderStageCreateInfo {
       {
-        sType  = .PIPELINE_SHADER_STAGE_CREATE_INFO,
-        stage  = {.VERTEX},
+        sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
+        stage = {.VERTEX},
         module = vert_module,
-        pName  = "main",
+        pName = "main",
         pSpecializationInfo = &spec_infos[features],
-      }, {
-        sType  = .PIPELINE_SHADER_STAGE_CREATE_INFO,
-        stage  = {.FRAGMENT},
+      },
+      {
+        sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
+        stage = {.FRAGMENT},
         module = frag_module,
-        pName  = "main",
+        pName = "main",
         pSpecializationInfo = &spec_infos[features],
       },
     }

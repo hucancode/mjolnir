@@ -33,7 +33,7 @@ Texture :: struct {
   image_data: ImageData,
   buffer:     ImageBuffer,
   sampler:    vk.Sampler,
-  ctx: ^VulkanContext,
+  ctx:        ^VulkanContext,
 }
 
 create_texture_from_data :: proc(
@@ -205,9 +205,9 @@ texture_deinit :: proc(self: ^Texture) {
 }
 
 DepthTexture :: struct {
-  buffer:     ImageBuffer,
-  sampler:    vk.Sampler,
-  ctx: ^VulkanContext,
+  buffer:  ImageBuffer,
+  sampler: vk.Sampler,
+  ctx:     ^VulkanContext,
 }
 
 depth_texture_init :: proc(

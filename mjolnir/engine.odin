@@ -41,10 +41,10 @@ CollectLightsContext :: struct {
 }
 
 RenderMeshesContext :: struct {
-  engine:               ^Engine,
-  command_buffer:       vk.CommandBuffer,
-  camera_frustum:       geometry.Frustum,
-  rendered_count:       ^u32,
+  engine:                ^Engine,
+  command_buffer:        vk.CommandBuffer,
+  camera_frustum:        geometry.Frustum,
+  rendered_count:        ^u32,
   camera_descriptor_set: vk.DescriptorSet,
 }
 
@@ -53,7 +53,7 @@ ShadowRenderContext :: struct {
   command_buffer:  vk.CommandBuffer,
   obstacles_count: ^u32,
   light_view_proj: linalg.Matrix4f32, // Added to pass light's VP matrix
-  descriptor_set: vk.DescriptorSet,
+  descriptor_set:  vk.DescriptorSet,
 }
 
 InputState :: struct {
@@ -68,7 +68,7 @@ InputState :: struct {
 // --- Engine Struct ---
 Engine :: struct {
   window:                glfw.WindowHandle,
-  ctx:                VulkanContext,
+  ctx:                   VulkanContext,
   renderer:              Renderer,
   scene:                 Scene,
   ui:                    UIRenderer,
@@ -171,15 +171,8 @@ engine_init :: proc(
 
   fmt.println("All resource pools initialized successfully")
 
-  build_3d_pipelines(
-    &engine.ctx,
-    .B8G8R8A8_SRGB,
-    .D32_SFLOAT,
-  ) or_return
-  build_shadow_pipelines(
-    &engine.ctx,
-    .D32_SFLOAT,
-  ) or_return
+  build_3d_pipelines(&engine.ctx, .B8G8R8A8_SRGB, .D32_SFLOAT) or_return
+  build_shadow_pipelines(&engine.ctx, .D32_SFLOAT) or_return
   engine_build_scene(engine)
   engine_build_renderer(engine) or_return
 
@@ -731,11 +724,13 @@ try_render :: proc(engine: ^Engine) -> vk.Result {
   // Render Scene Meshes
   rendered_count: u32 = 0
   render_meshes_ctx := RenderMeshesContext {
-    engine               = engine,
-    command_buffer       = command_buffer_main,
-    camera_frustum       = camera_frustum,
-    rendered_count       = &rendered_count,
-    camera_descriptor_set = renderer_get_camera_descriptor_set(&engine.renderer),
+    engine                = engine,
+    command_buffer        = command_buffer_main,
+    camera_frustum        = camera_frustum,
+    rendered_count        = &rendered_count,
+    camera_descriptor_set = renderer_get_camera_descriptor_set(
+      &engine.renderer,
+    ),
   }
   if !traverse_scene(engine, &render_meshes_ctx, render_scene_node_callback) {
     fmt.eprintln("[RENDER] Error during scene mesh rendering")
@@ -963,7 +958,7 @@ render_shadow_maps :: proc(
       command_buffer  = shadow_cmd_buffer,
       obstacles_count = &obstacles_this_light,
       light_view_proj = light.view_proj,
-      descriptor_set = renderer_get_camera_descriptor_set(&engine.renderer),
+      descriptor_set  = renderer_get_camera_descriptor_set(&engine.renderer),
     }
     traverse_scene(engine, &shadow_render_ctx, render_shadow_node_callback)
     total_obstacles += obstacles_this_light
