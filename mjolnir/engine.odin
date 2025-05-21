@@ -54,6 +54,7 @@ ShadowRenderContext :: struct {
   obstacles_count: ^u32,
   light_view_proj: linalg.Matrix4f32, // Added to pass light's VP matrix
   descriptor_set: vk.DescriptorSet,
+  shadow_idx:     u32,
 }
 
 InputState :: struct {
@@ -68,7 +69,7 @@ InputState :: struct {
 // --- Engine Struct ---
 Engine :: struct {
   window:                glfw.WindowHandle,
-  vk_ctx:                VulkanContext,
+  ctx:                VulkanContext,
   renderer:              Renderer,
   scene:                 Scene,
   ui:                    UIRenderer,
@@ -136,7 +137,7 @@ engine_init :: proc(
   fmt.printf("Window created %v\n", engine.window)
 
   // Init Vulkan Context
-  vulkan_context_init(&engine.vk_ctx, engine.window) or_return
+  vulkan_context_init(&engine.ctx, engine.window) or_return
 
   engine.start_timestamp = time.now()
   engine.last_frame_timestamp = engine.start_timestamp
@@ -172,12 +173,12 @@ engine_init :: proc(
   fmt.println("All resource pools initialized successfully")
 
   build_3d_pipelines(
-    &engine.vk_ctx,
+    &engine.ctx,
     .B8G8R8A8_SRGB,
     .D32_SFLOAT,
   ) or_return
   build_shadow_pipelines(
-    &engine.vk_ctx,
+    &engine.ctx,
     .D32_SFLOAT,
   ) or_return
   engine_build_scene(engine)
@@ -295,16 +296,15 @@ query_swapchain_support :: proc(
 }
 
 engine_build_renderer :: proc(engine: ^Engine) -> vk.Result {
-  renderer_init(&engine.renderer, &engine.vk_ctx) or_return
-
+  renderer_init(&engine.renderer, &engine.ctx) or_return
   indices := find_queue_families(
-    engine.vk_ctx.physical_device,
-    engine.vk_ctx.surface,
+    engine.ctx.physical_device,
+    engine.ctx.surface,
   ) or_return
 
   support := query_swapchain_support(
-    engine.vk_ctx.physical_device,
-    engine.vk_ctx.surface,
+    engine.ctx.physical_device,
+    engine.ctx.surface,
   ) or_return
   defer swapchain_support_deinit(&support)
 
@@ -325,7 +325,7 @@ engine_build_renderer :: proc(engine: ^Engine) -> vk.Result {
   renderer_build_synchronizers(&engine.renderer) or_return
 
   engine.renderer.depth_buffer = create_depth_image(
-    &engine.vk_ctx,
+    &engine.ctx,
     engine.renderer.extent.width,
     engine.renderer.extent.height,
   ) or_return
@@ -540,6 +540,9 @@ render_scene_node_callback :: proc(
       ctx.camera_descriptor_set,
       material.texture_descriptor_set,
     }
+    offsets := [1]u32{
+      0,
+    }
     vk.CmdBindPipeline(ctx.command_buffer, .GRAPHICS, pipeline)
     vk.CmdBindDescriptorSets(
       ctx.command_buffer,
@@ -548,8 +551,8 @@ render_scene_node_callback :: proc(
       0,
       u32(len(descriptor_sets)),
       raw_data(descriptor_sets[:]),
-      0,
-      nil,
+      len(offsets),
+      raw_data(offsets[:]),
     )
     vk.CmdPushConstants(
       ctx.command_buffer,
@@ -587,7 +590,7 @@ render_shadow_node_callback :: proc(
   cb_context: rawptr,
 ) -> bool {
   ctx := (^ShadowRenderContext)(cb_context)
-
+  shadow_idx := ctx.shadow_idx
   #partial switch data in node_ptr.attachment {
   case NodeStaticMeshAttachment:
     mesh_handle := data.handle
@@ -602,15 +605,21 @@ render_shadow_node_callback :: proc(
       ctx.descriptor_set, // set 0
     }
     vk.CmdBindPipeline(ctx.command_buffer, .GRAPHICS, pipeline)
+    min_alignment := eng.ctx.physical_device_properties.limits.minUniformBufferOffsetAlignment
+    aligned_scene_uniform_size := align_up(size_of(SceneUniform), min_alignment)
+    offset_shadow := (1 + shadow_idx) * u32(aligned_scene_uniform_size)
+    offsets := [1]u32{
+      offset_shadow
+    }
     vk.CmdBindDescriptorSets(
       ctx.command_buffer,
       .GRAPHICS,
       layout,
       0,
-      u32(len(descriptor_sets)),
+      len(descriptor_sets),
       raw_data(descriptor_sets[:]),
-      0,
-      nil,
+      len(offsets),
+      raw_data(offsets[:]),
     )
     vk.CmdPushConstants(
       ctx.command_buffer,
@@ -649,15 +658,21 @@ render_shadow_node_callback :: proc(
       material.skinning_descriptor_set, // set 1
     }
     vk.CmdBindPipeline(ctx.command_buffer, .GRAPHICS, pipeline)
+    min_alignment := eng.ctx.physical_device_properties.limits.minUniformBufferOffsetAlignment
+    aligned_scene_uniform_size := align_up(size_of(SceneUniform), min_alignment)
+    offset_shadow := (1 + shadow_idx) * u32(aligned_scene_uniform_size)
+    offsets := [1]u32{
+      offset_shadow
+    }
     vk.CmdBindDescriptorSets(
       ctx.command_buffer,
       .GRAPHICS,
       layout,
       0,
-      u32(len(descriptor_sets)),
+      len(descriptor_sets),
       raw_data(descriptor_sets[:]),
-      0,
-      nil,
+      len(offsets),
+      raw_data(offsets[:]),
     )
     vk.CmdPushConstants(
       ctx.command_buffer,
@@ -739,7 +754,8 @@ try_render :: proc(engine: ^Engine) -> vk.Result {
     fmt.eprintln("[RENDER] Error during light collection")
   }
   // --- Shadow Pass (all lights, in this command buffer) ---
-  render_shadow_maps_single_cb(engine, &light_uniform, command_buffer) or_return
+  num_shadow_passes := light_uniform.light_count
+  render_shadow_maps_single_cb(engine, &light_uniform, command_buffer, num_shadow_passes) or_return
   // --- Main Pass ---
   // Transition swapchain image to color attachment
   barrier := vk.ImageMemoryBarrier {
@@ -820,9 +836,12 @@ try_render :: proc(engine: ^Engine) -> vk.Result {
     fmt.eprintln("[RENDER] Error during scene mesh rendering")
   }
   // Update Uniforms
-  data_buffer_write(
-    renderer_get_scene_uniform(&engine.renderer),
+  main_offset: vk.DeviceSize = 0
+  scene_uniform_buffer := renderer_get_scene_uniform(&engine.renderer)
+  data_buffer_write_at(
+    scene_uniform_buffer,
     &scene_uniform,
+    main_offset,
     size_of(SceneUniform),
   )
   data_buffer_write(
@@ -906,6 +925,7 @@ render_shadow_maps_single_cb :: proc(
   engine: ^Engine,
   light_uniform: ^SceneLightUniform,
   command_buffer: vk.CommandBuffer,
+  num_shadow_passes: u32,
 ) -> vk.Result {
   total_obstacles: u32 = 0
   for i := 0; i < int(light_uniform.light_count); i += 1 {
@@ -1004,11 +1024,17 @@ render_shadow_maps_single_cb :: proc(
       view       = light.view_proj,
       projection = linalg.MATRIX4F32_IDENTITY,
     }
-    data_buffer_write(
-      renderer_get_scene_uniform(&engine.renderer),
-      &shadow_scene_uniform,
-      size_of(SceneUniform),
-    )
+    min_alignment := engine.ctx.physical_device_properties.limits.minUniformBufferOffsetAlignment
+    aligned_scene_uniform_size := align_up(size_of(SceneUniform), min_alignment)
+    // Example for shadow pass:
+      offset_shadow := vk.DeviceSize(i + 1) * aligned_scene_uniform_size
+      fmt.printfln("shadow pass %d, offset %d", i, offset_shadow)
+      data_buffer_write_at(
+        renderer_get_scene_uniform(&engine.renderer),
+        &shadow_scene_uniform,
+        offset_shadow,
+        size_of(SceneUniform),
+      )
     vk.CmdBeginRenderingKHR(command_buffer, &render_info_khr)
     viewport := vk.Viewport {
       width    = f32(shadow_map_texture.buffer.width),
@@ -1031,6 +1057,7 @@ render_shadow_maps_single_cb :: proc(
       obstacles_count = &obstacles_this_light,
       light_view_proj = light.view_proj,
       descriptor_set = renderer_get_camera_descriptor_set(&engine.renderer),
+      shadow_idx = u32(i),
     }
     traverse_scene(engine, &shadow_render_ctx, render_shadow_node_callback)
     total_obstacles += obstacles_this_light
@@ -1079,15 +1106,15 @@ engine_render :: proc(engine: ^Engine) {
 }
 
 engine_recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
-  vkd := engine.vk_ctx.vkd
+  vkd := engine.ctx.vkd
   vk.DeviceWaitIdle(vkd)
   indices := find_queue_families(
-    engine.vk_ctx.physical_device,
-    engine.vk_ctx.surface,
+    engine.ctx.physical_device,
+    engine.ctx.surface,
   ) or_return
   support := query_swapchain_support(
-    engine.vk_ctx.physical_device,
-    engine.vk_ctx.surface,
+    engine.ctx.physical_device,
+    engine.ctx.surface,
   ) or_return
   renderer_build_swapchain(
     &engine.renderer,
@@ -1100,7 +1127,7 @@ engine_recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
     engine.renderer.extent.height,
   ) or_return
   engine.renderer.depth_buffer = create_depth_image(
-    &engine.vk_ctx,
+    &engine.ctx,
     engine.renderer.extent.width,
     engine.renderer.extent.height,
   ) or_return
@@ -1187,7 +1214,7 @@ engine_update :: proc(engine: ^Engine) -> bool {
 }
 
 engine_deinit :: proc(engine: ^Engine) {
-  vkd := engine.vk_ctx.vkd
+  vkd := engine.ctx.vkd
   vk.DeviceWaitIdle(vkd)
 
   // Deinit resources
@@ -1200,7 +1227,7 @@ engine_deinit :: proc(engine: ^Engine) {
 
   deinit_scene(&engine.scene)
   renderer_deinit(&engine.renderer)
-  vulkan_context_deinit(&engine.vk_ctx)
+  vulkan_context_deinit(&engine.ctx)
 
   glfw.DestroyWindow(engine.window)
   glfw.Terminate()

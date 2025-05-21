@@ -33,7 +33,7 @@ Texture :: struct {
   image_data: ImageData,
   buffer:     ImageBuffer,
   sampler:    vk.Sampler,
-  vk_ctx_ref: ^VulkanContext,
+  ctx: ^VulkanContext,
 }
 
 create_texture_from_data :: proc(
@@ -46,7 +46,7 @@ create_texture_from_data :: proc(
 ) {
   handle, texture = resource.alloc(&engine.textures)
   texture_init_from_data(texture, data) or_return
-  texute_init(texture, &engine.vk_ctx) or_return
+  texute_init(texture, &engine.ctx) or_return
   delete(texture.image_data.pixels)
   texture.image_data.pixels = nil
   fmt.printfln(
@@ -77,7 +77,7 @@ create_texture_from_pixels :: proc(
   texture.image_data.height = height
   texture.image_data.channels_in_file = channel
   texture.image_data.actual_channels = channel
-  texute_init(texture, &engine.vk_ctx, format) or_return
+  texute_init(texture, &engine.ctx, format) or_return
   texture.image_data.pixels = nil
   fmt.printfln(
     "created texture %d x %d -> id %d",
@@ -129,7 +129,7 @@ create_texture_from_path :: proc(
 ) {
   handle, texture = resource.alloc(&engine.textures)
   texture_init_from_path(texture, path) or_return
-  texute_init(texture, &engine.vk_ctx) or_return
+  texute_init(texture, &engine.ctx) or_return
   delete(texture.image_data.pixels)
   texture.image_data.pixels = nil
   ret = .SUCCESS
@@ -164,15 +164,15 @@ texture_init_from_path :: proc(self: ^Texture, path: string) -> vk.Result {
 
 texute_init :: proc(
   self: ^Texture,
-  vk_ctx: ^VulkanContext,
+  ctx: ^VulkanContext,
   format: vk.Format = .R8G8B8A8_SRGB,
 ) -> vk.Result {
-  self.vk_ctx_ref = vk_ctx
-  if self.image_data.pixels == nil || vk_ctx == nil {
+  self.ctx = ctx
+  if self.image_data.pixels == nil || ctx == nil {
     return .ERROR_INITIALIZATION_FAILED
   }
   self.buffer = create_image_buffer(
-    vk_ctx,
+    ctx,
     raw_data(self.image_data.pixels),
     size_of(u8) * vk.DeviceSize(len(self.image_data.pixels)),
     format,
@@ -191,35 +191,35 @@ texute_init :: proc(
     compareOp     = .ALWAYS,
     mipmapMode    = .LINEAR,
   }
-  vk.CreateSampler(vk_ctx.vkd, &sampler_info, nil, &self.sampler) or_return
+  vk.CreateSampler(ctx.vkd, &sampler_info, nil, &self.sampler) or_return
   return .SUCCESS
 }
 
 texture_deinit :: proc(self: ^Texture) {
   if self == nil {return}
-  if self.vk_ctx_ref != nil && self.sampler != 0 {
-    vk.DestroySampler(self.vk_ctx_ref.vkd, self.sampler, nil)
+  if self.ctx != nil && self.sampler != 0 {
+    vk.DestroySampler(self.ctx.vkd, self.sampler, nil)
     self.sampler = 0
   }
-  image_buffer_init(self.vk_ctx_ref.vkd, &self.buffer)
+  image_buffer_init(self.ctx.vkd, &self.buffer)
   image_data_deinit(&self.image_data)
 }
 
 DepthTexture :: struct {
   buffer:     ImageBuffer,
   sampler:    vk.Sampler,
-  vk_ctx_ref: ^VulkanContext,
+  ctx: ^VulkanContext,
 }
 
 depth_texture_init :: proc(
   self: ^DepthTexture,
-  vk_ctx: ^VulkanContext,
+  ctx: ^VulkanContext,
   width: u32,
   height: u32,
   usage: vk.ImageUsageFlags = {.DEPTH_STENCIL_ATTACHMENT},
 ) -> vk.Result {
-  self.vk_ctx_ref = vk_ctx
-  self.buffer = create_depth_image(vk_ctx, width, height, usage) or_return
+  self.ctx = ctx
+  self.buffer = create_depth_image(ctx, width, height, usage) or_return
   sampler_info := vk.SamplerCreateInfo {
     sType         = .SAMPLER_CREATE_INFO,
     magFilter     = .LINEAR,
@@ -232,21 +232,21 @@ depth_texture_init :: proc(
     compareOp     = .ALWAYS,
     mipmapMode    = .LINEAR,
   }
-  vk.CreateSampler(vk_ctx.vkd, &sampler_info, nil, &self.sampler) or_return
+  vk.CreateSampler(ctx.vkd, &sampler_info, nil, &self.sampler) or_return
   return .SUCCESS
 }
 
 depth_texture_deinit :: proc(self: ^DepthTexture) {
   if self == nil {return}
-  if self.vk_ctx_ref != nil && self.sampler != 0 {
-    vk.DestroySampler(self.vk_ctx_ref.vkd, self.sampler, nil)
+  if self.ctx != nil && self.sampler != 0 {
+    vk.DestroySampler(self.ctx.vkd, self.sampler, nil)
     self.sampler = 0
   }
-  image_buffer_init(self.vk_ctx_ref.vkd, &self.buffer)
+  image_buffer_init(self.ctx.vkd, &self.buffer)
 }
 
 create_depth_image :: proc(
-  vk_ctx: ^VulkanContext,
+  ctx: ^VulkanContext,
   width: u32,
   height: u32,
   usage: vk.ImageUsageFlags = {.DEPTH_STENCIL_ATTACHMENT},
@@ -254,7 +254,7 @@ create_depth_image :: proc(
   img: ImageBuffer,
   ret: vk.Result,
 ) {
-  depth_image_init(&img, vk_ctx, width, height, usage) or_return
+  depth_image_init(&img, ctx, width, height, usage) or_return
   ret = .SUCCESS
   return
 }

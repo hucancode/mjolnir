@@ -76,6 +76,7 @@ VulkanContext :: struct {
   present_queue:        vk.Queue,
   descriptor_pool:      vk.DescriptorPool,
   command_pool:         vk.CommandPool,
+  physical_device_properties: vk.PhysicalDeviceProperties, // Added for device limits
 }
 
 // --- VulkanContext Methods ---
@@ -387,11 +388,10 @@ physical_device_init :: proc(self: ^VulkanContext) -> vk.Result {
     return .ERROR_INITIALIZATION_FAILED
   }
 
-  props: vk.PhysicalDeviceProperties
-  vk.GetPhysicalDeviceProperties(self.physical_device, &props)
+  vk.GetPhysicalDeviceProperties(self.physical_device, &self.physical_device_properties)
   fmt.printfln(
     "\nSelected physical device: %s (score %d)",
-    cstring(&props.deviceName[0]),
+    cstring(&self.physical_device_properties.deviceName[0]),
     best_score,
   )
   return .SUCCESS
@@ -515,9 +515,10 @@ logical_device_init :: proc(self: ^VulkanContext) -> vk.Result {
 }
 
 descriptor_pool_init :: proc(self: ^VulkanContext) -> vk.Result {
-  pool_sizes := [3]vk.DescriptorPoolSize {
+  pool_sizes := [4]vk.DescriptorPoolSize {
     {.COMBINED_IMAGE_SAMPLER, MAX_SAMPLER_COUNT},
-    {.UNIFORM_BUFFER, MAX_FRAMES_IN_FLIGHT * SCENE_UNIFORM_COUNT},
+    {.UNIFORM_BUFFER, 128},
+    {.UNIFORM_BUFFER_DYNAMIC, 128}, // Abundant dynamic uniform buffer descriptors
     {.STORAGE_BUFFER, ACTIVE_MATERIAL_COUNT},
   }
   fmt.printfln("Descriptor pool allocation sizes:")
@@ -787,4 +788,11 @@ malloc_host_visible_buffer :: proc(
   vk.Result,
 ) {
   return malloc_data_buffer(self, size, usage, {.HOST_VISIBLE, .HOST_COHERENT})
+}
+
+align_up :: proc(
+  value: vk.DeviceSize,
+  alignment: vk.DeviceSize,
+) -> vk.DeviceSize {
+  return (value + alignment - 1) & ~(alignment - 1)
 }

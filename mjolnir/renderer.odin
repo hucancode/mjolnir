@@ -11,6 +11,7 @@ MAX_FRAMES_IN_FLIGHT :: 2
 MAX_LIGHTS :: 10
 SHADOW_MAP_SIZE :: 512
 MAX_SHADOW_MAPS :: MAX_LIGHTS
+MAX_SCENE_UNIFORMS :: 16
 
 Mat4 :: linalg.Matrix4f32
 Vec4 :: linalg.Vector4f32
@@ -69,9 +70,11 @@ frame_init :: proc(
   res: vk.Result,
 ) {
   self.ctx = ctx
+  min_alignment := ctx.physical_device_properties.limits.minUniformBufferOffsetAlignment
+  aligned_scene_uniform_size := align_up(size_of(SceneUniform), min_alignment)
   self.scene_uniform = create_host_visible_buffer(
     ctx,
-    size_of(SceneUniform),
+    MAX_SCENE_UNIFORMS * aligned_scene_uniform_size,
     {.UNIFORM_BUFFER},
   ) or_return
   self.light_uniform = create_host_visible_buffer(
@@ -126,7 +129,7 @@ frame_init :: proc(
       sType = .WRITE_DESCRIPTOR_SET,
       dstSet = self.camera_descriptor_set,
       dstBinding = 0,
-      descriptorType = .UNIFORM_BUFFER,
+      descriptorType = .UNIFORM_BUFFER_DYNAMIC,
       descriptorCount = 1,
       pBufferInfo = &scene_buffer_info,
     },

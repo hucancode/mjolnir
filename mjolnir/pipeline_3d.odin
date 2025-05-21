@@ -164,7 +164,7 @@ build_3d_pipelines :: proc(
   bindings_main := [?]vk.DescriptorSetLayoutBinding {
     {   // Scene Uniforms (view, proj, time)
       binding         = 0,
-      descriptorType  = .UNIFORM_BUFFER,
+      descriptorType  = .UNIFORM_BUFFER_DYNAMIC,
       descriptorCount = 1,
       stageFlags      = {.VERTEX, .FRAGMENT},
     },
@@ -411,9 +411,9 @@ create_material_untextured :: proc(
   res: vk.Result,
 ) {
   ret, mat = resource.alloc(&engine.materials)
-  mat.ctx_ref = &engine.vk_ctx
+  mat.ctx_ref = &engine.ctx
   mat.features = features
-  material_init_descriptor_set_layout(mat, &engine.vk_ctx) or_return
+  material_init_descriptor_set_layout(mat, &engine.ctx) or_return
   return
 }
 
@@ -429,9 +429,9 @@ create_material_textured :: proc(
   res: vk.Result,
 ) {
   ret, mat = resource.alloc(&engine.materials)
-  mat.ctx_ref = &engine.vk_ctx
+  mat.ctx_ref = &engine.ctx
   mat.features = features | SHADER_FEATURE_TEXTURING
-  material_init_descriptor_set_layout(mat, &engine.vk_ctx) or_return
+  material_init_descriptor_set_layout(mat, &engine.ctx) or_return
   albedo := resource.get(&engine.textures, albedo_handle)
   metallic := resource.get(&engine.textures, metallic_handle)
   roughness := resource.get(&engine.textures, roughness_handle)

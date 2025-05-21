@@ -74,7 +74,7 @@ create_static_mesh :: proc(
   handle, mesh := resource.alloc(&engine.meshes)
   if mesh != nil {
     // Initialize geometry buffers
-    if static_mesh_init(mesh, geom, &engine.vk_ctx) != .SUCCESS {
+    if static_mesh_init(mesh, geom, &engine.ctx) != .SUCCESS {
       fmt.eprintln("Failed to initialize static mesh geometry")
       return handle
     }
