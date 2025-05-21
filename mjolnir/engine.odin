@@ -480,6 +480,9 @@ render_scene_node_callback :: proc(
     }
     // fmt.printfln("rendering skeletal mesh with material %v", material)
     vk.CmdBindPipeline(ctx.command_buffer, .GRAPHICS, pipeline)
+    offsets := [1]u32{
+      0,
+    }
     vk.CmdBindDescriptorSets(
       ctx.command_buffer,
       .GRAPHICS,
@@ -487,8 +490,8 @@ render_scene_node_callback :: proc(
       0,
       u32(len(descriptor_sets)),
       raw_data(descriptor_sets[:]),
-      0,
-      nil,
+      len(offsets),
+      raw_data(offsets[:]),
     )
     vk.CmdPushConstants(
       ctx.command_buffer,
