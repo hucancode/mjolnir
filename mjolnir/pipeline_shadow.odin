@@ -11,7 +11,7 @@ SHADOW_SHADER_VARIANT_COUNT :: 1 << SHADOW_SHADER_OPTION_COUNT
 ShadowShaderConfig :: struct {
     is_skinned: b32,
 }
-shadow_pipeline_layouts: [SHADOW_SHADER_VARIANT_COUNT]vk.PipelineLayout
+shadow_pipeline_layout: vk.PipelineLayout
 shadow_pipelines: [SHADOW_SHADER_VARIANT_COUNT]vk.Pipeline
 
 SHADER_SHADOW_VERT :: #load("shader/shadow/vert.spv")
@@ -35,15 +35,12 @@ build_shadow_pipelines :: proc(
         pushConstantRangeCount = 1,
         pPushConstantRanges    = &push_constant_range,
     }
-    for features in 0..<SHADOW_SHADER_VARIANT_COUNT  {
-        vk.CreatePipelineLayout(
-            ctx.vkd,
-            &pipeline_layout_info,
-            nil,
-            &shadow_pipeline_layouts[features],
-        ) or_continue
-    }
-
+    vk.CreatePipelineLayout(
+        ctx.vkd,
+        &pipeline_layout_info,
+        nil,
+        &shadow_pipeline_layout,
+    ) or_return
     vert_module := create_shader_module(ctx, SHADER_SHADOW_VERT) or_return
     defer vk.DestroyShaderModule(ctx.vkd, vert_module, nil)
 
@@ -130,7 +127,7 @@ build_shadow_pipelines :: proc(
             pMultisampleState   = &multisampling,
             pDynamicState       = &dynamic_state_info,
             pDepthStencilState  = &depth_stencil_state,
-            layout              = shadow_pipeline_layouts[features],
+            layout              = shadow_pipeline_layout,
         }
         vk.CreateGraphicsPipelines(
             ctx.vkd,

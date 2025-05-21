@@ -52,27 +52,26 @@ clear_lights :: proc(self: ^SceneLightUniform) {
 
 // --- Frame Struct ---
 Frame :: struct {
-  ctx:                        ^VulkanContext,
-  image_available_semaphore:  vk.Semaphore,
-  render_finished_semaphore:  vk.Semaphore,
-  fence:                      vk.Fence,
-  command_buffer:             vk.CommandBuffer,
-  scene_uniform:              DataBuffer,
-  light_uniform:              DataBuffer,
-  shadow_maps:                [MAX_SHADOW_MAPS]DepthTexture,
-  camera_descriptor_set:      vk.DescriptorSet,
+  ctx:                            ^VulkanContext,
+  image_available_semaphore:      vk.Semaphore,
+  render_finished_semaphore:      vk.Semaphore,
+  fence:                          vk.Fence,
+  command_buffer:                 vk.CommandBuffer,
+  camera_uniform:                 DataBuffer,
+  light_uniform:                  DataBuffer,
+  shadow_maps:                    [MAX_SHADOW_MAPS]DepthTexture,
+  cube_shadow_maps:               [MAX_SHADOW_MAPS]CubeDepthTexture, // <-- new
+  camera_descriptor_set:          vk.DescriptorSet,
+  shadow_map_descriptor_set:      vk.DescriptorSet,
+  cube_shadow_map_descriptor_set: vk.DescriptorSet,
 }
 
-frame_init :: proc(
-  self: ^Frame,
-  ctx: ^VulkanContext,
-) -> (
-  res: vk.Result,
-) {
+frame_init :: proc(self: ^Frame, ctx: ^VulkanContext) -> (res: vk.Result) {
   self.ctx = ctx
-  min_alignment := ctx.physical_device_properties.limits.minUniformBufferOffsetAlignment
+  min_alignment :=
+    ctx.physical_device_properties.limits.minUniformBufferOffsetAlignment
   aligned_scene_uniform_size := align_up(size_of(SceneUniform), min_alignment)
-  self.scene_uniform = create_host_visible_buffer(
+  self.camera_uniform = create_host_visible_buffer(
     ctx,
     MAX_SCENE_UNIFORMS * aligned_scene_uniform_size,
     {.UNIFORM_BUFFER},
@@ -91,6 +90,12 @@ frame_init :: proc(
       SHADOW_MAP_SIZE,
       {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
     ) or_return
+    cube_depth_texture_init(
+      &self.cube_shadow_maps[i],
+      ctx,
+      SHADOW_MAP_SIZE,
+      {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
+    ) or_return
   }
 
   // Allocate Main Pass Descriptor Set
@@ -105,9 +110,10 @@ frame_init :: proc(
     &alloc_info_main,
     &self.camera_descriptor_set,
   ) or_return
-  // Update Main Pass Descriptor Set
+
+  // Update Main Pass Descriptor Set (merged shadow/cube shadow maps)
   scene_buffer_info := vk.DescriptorBufferInfo {
-    buffer = self.scene_uniform.buffer,
+    buffer = self.camera_uniform.buffer,
     offset = 0,
     range  = vk.DeviceSize(size_of(SceneUniform)),
   }
@@ -124,7 +130,15 @@ frame_init :: proc(
       imageLayout = .SHADER_READ_ONLY_OPTIMAL,
     }
   }
-  writes_main := [?]vk.WriteDescriptorSet {
+  cube_shadow_map_image_infos: [MAX_SHADOW_MAPS]vk.DescriptorImageInfo
+  for i in 0 ..< MAX_SHADOW_MAPS {
+    cube_shadow_map_image_infos[i] = vk.DescriptorImageInfo {
+      sampler     = self.cube_shadow_maps[i].sampler,
+      imageView   = self.cube_shadow_maps[i].view,
+      imageLayout = .SHADER_READ_ONLY_OPTIMAL,
+    }
+  }
+  writes := [?]vk.WriteDescriptorSet {
     {
       sType = .WRITE_DESCRIPTOR_SET,
       dstSet = self.camera_descriptor_set,
@@ -149,14 +163,16 @@ frame_init :: proc(
       descriptorCount = MAX_SHADOW_MAPS,
       pImageInfo = raw_data(shadow_map_image_infos[:]),
     },
+    {
+      sType = .WRITE_DESCRIPTOR_SET,
+      dstSet = self.camera_descriptor_set,
+      dstBinding = 3,
+      descriptorType = .COMBINED_IMAGE_SAMPLER,
+      descriptorCount = MAX_SHADOW_MAPS,
+      pImageInfo = raw_data(cube_shadow_map_image_infos[:]),
+    },
   }
-  vk.UpdateDescriptorSets(
-    ctx.vkd,
-    len(writes_main),
-    raw_data(writes_main[:]),
-    0,
-    nil,
-  )
+  vk.UpdateDescriptorSets(ctx.vkd, len(writes), raw_data(writes[:]), 0, nil)
   return .SUCCESS
 }
 
@@ -171,37 +187,33 @@ frame_deinit :: proc(self: ^Frame) {
   vk.DestroyFence(vkd, self.fence, nil)
   vk.FreeCommandBuffers(vkd, command_pool, 1, &self.command_buffer)
 
-  data_buffer_deinit(&self.scene_uniform, self.ctx)
+  data_buffer_deinit(&self.camera_uniform, self.ctx)
   data_buffer_deinit(&self.light_uniform, self.ctx)
   for i in 0 ..< MAX_SHADOW_MAPS {
     depth_texture_deinit(&self.shadow_maps[i])
+    cube_depth_texture_deinit(&self.cube_shadow_maps[i])
   }
   self.ctx = nil // Mark as deinitialized
 }
 
 // --- Renderer Struct ---
 Renderer :: struct {
-  ctx:                               ^VulkanContext,
-  swapchain:                         vk.SwapchainKHR,
-  format:                            vk.SurfaceFormatKHR,
-  extent:                            vk.Extent2D,
-  images:                            []vk.Image, // Owned by swapchain, slice managed by renderer
-  views:                             []vk.ImageView, // Owned by renderer, one per image
-  frames:                            [MAX_FRAMES_IN_FLIGHT]Frame,
-  depth_buffer:                      ImageBuffer,
-  current_frame_index:               u32,
+  ctx:                 ^VulkanContext,
+  swapchain:           vk.SwapchainKHR,
+  format:              vk.SurfaceFormatKHR,
+  extent:              vk.Extent2D,
+  images:              []vk.Image, // Owned by swapchain, slice managed by renderer
+  views:               []vk.ImageView, // Owned by renderer, one per image
+  frames:              [MAX_FRAMES_IN_FLIGHT]Frame,
+  depth_buffer:        ImageBuffer,
+  current_frame_index: u32,
 }
 
 renderer_init :: proc(self: ^Renderer, ctx: ^VulkanContext) -> vk.Result {
   self.ctx = ctx
   self.current_frame_index = 0
-
-  // Initialize frames
   for &frame in self.frames {
-    frame_init(
-      &frame,
-      ctx,
-    ) or_return
+    frame_init(&frame, ctx) or_return
   }
   return .SUCCESS
 }
@@ -281,8 +293,8 @@ renderer_build_swapchain_surface_format :: proc(
 ) {
   for fmt in formats {
     if fmt.format == .B8G8R8A8_SRGB {
-        self.format = fmt
-        return
+      self.format = fmt
+      return
     }
   }
   // Fallback to the first available format if preferred not found
@@ -467,7 +479,7 @@ renderer_create_swapchain_and_resources :: proc(
     self.extent.height,
     depth_format,
     .OPTIMAL,
-    { .DEPTH_STENCIL_ATTACHMENT, .SAMPLED },
+    {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
     {.DEVICE_LOCAL},
   ) or_return
 
@@ -555,8 +567,8 @@ renderer_get_command_buffer :: proc(self: ^Renderer) -> vk.CommandBuffer {
 }
 
 // --- Getter Methods for Current Frame ---
-renderer_get_scene_uniform :: proc(self: ^Renderer) -> ^DataBuffer {
-  return &self.frames[self.current_frame_index].scene_uniform
+renderer_get_camera_uniform :: proc(self: ^Renderer) -> ^DataBuffer {
+  return &self.frames[self.current_frame_index].camera_uniform
 }
 renderer_get_light_uniform :: proc(self: ^Renderer) -> ^DataBuffer {
   return &self.frames[self.current_frame_index].light_uniform
@@ -567,10 +579,26 @@ renderer_get_shadow_map :: proc(
 ) -> ^DepthTexture {
   return &self.frames[self.current_frame_index].shadow_maps[light_idx]
 }
+renderer_get_cube_shadow_map :: proc(
+  self: ^Renderer,
+  light_idx: int,
+) -> ^CubeDepthTexture {
+  return &self.frames[self.current_frame_index].cube_shadow_maps[light_idx]
+}
 renderer_get_camera_descriptor_set :: proc(
   self: ^Renderer,
 ) -> vk.DescriptorSet {
   return self.frames[self.current_frame_index].camera_descriptor_set
+}
+renderer_get_shadow_map_descriptor_set :: proc(
+  self: ^Renderer,
+) -> vk.DescriptorSet {
+  return self.frames[self.current_frame_index].shadow_map_descriptor_set
+}
+renderer_get_cube_shadow_map_descriptor_set :: proc(
+  self: ^Renderer,
+) -> vk.DescriptorSet {
+  return self.frames[self.current_frame_index].cube_shadow_map_descriptor_set
 }
 
 // --- Render Loop Methods ---

@@ -7,32 +7,32 @@ import "resource"
 import vk "vendor:vulkan"
 
 StaticMesh :: struct {
-  material:             Handle, // Handle to a Material resource
-  vertices_len:         u32,
-  indices_len:          u32,
-  vertex_buffer:        DataBuffer, // Full vertex data
-  index_buffer:         DataBuffer,
-  aabb:                 geometry.Aabb,
-  ctx_ref:              ^VulkanContext,
+  material:      Handle, // Handle to a Material resource
+  vertices_len:  u32,
+  indices_len:   u32,
+  vertex_buffer: DataBuffer, // Full vertex data
+  index_buffer:  DataBuffer,
+  aabb:          geometry.Aabb,
+  ctx:           ^VulkanContext,
 }
 
 // deinit_static_mesh releases the Vulkan buffers.
 static_mesh_deinit :: proc(self: ^StaticMesh) {
-  if self.ctx_ref == nil {
+  if self.ctx == nil {
     return // Not initialized or already deinitialized
   }
 
   if self.vertex_buffer.buffer != 0 {
-    data_buffer_deinit(&self.vertex_buffer, self.ctx_ref)
+    data_buffer_deinit(&self.vertex_buffer, self.ctx)
   }
   if self.index_buffer.buffer != 0 {
-    data_buffer_deinit(&self.index_buffer, self.ctx_ref)
+    data_buffer_deinit(&self.index_buffer, self.ctx)
   }
   // Reset fields
   self.vertices_len = 0
   self.indices_len = 0
   self.aabb = {}
-  self.ctx_ref = nil
+  self.ctx = nil
 }
 
 // init_static_mesh initializes the mesh and creates Vulkan buffers.
@@ -41,7 +41,7 @@ static_mesh_init :: proc(
   data: ^geometry.Geometry,
   ctx: ^VulkanContext,
 ) -> vk.Result {
-  self.ctx_ref = ctx
+  self.ctx = ctx
   self.vertices_len = u32(len(data.vertices))
   self.indices_len = u32(len(data.indices))
   self.aabb = data.aabb

@@ -531,8 +531,8 @@ descriptor_pool_init :: proc(self: ^VulkanContext) -> vk.Result {
 
   pool_info := vk.DescriptorPoolCreateInfo {
     sType         = .DESCRIPTOR_POOL_CREATE_INFO,
-    poolSizeCount = u32(len(pool_sizes)),
-    pPoolSizes    = &pool_sizes[0],
+    poolSizeCount = len(pool_sizes),
+    pPoolSizes    = raw_data(pool_sizes[:]),
     maxSets       = MAX_FRAMES_IN_FLIGHT + ACTIVE_MATERIAL_COUNT,
     // flags = {.FREE_DESCRIPTOR_SET} // If needed
   }

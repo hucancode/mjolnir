@@ -69,9 +69,26 @@ float filterPCF(uint lightIdx, vec3 projCoords) {
     shadow /= 9.0;
     return shadow;
 }
+float calculatePointShadow(uint lightIdx, vec3 fragPos) {
+    // Sample cube shadow map for point light
+    float shadow = 0.0;
+    vec3 lightToFrag = fragPos - lights[lightIdx].position.xyz;
+    float currentDepth = length(lightToFrag);
+    float bias = 0.01;
+    float shadowDepth = texture(cubeShadowMaps[lightIdx], lightToFrag).r * lights[lightIdx].radius;
+    if (currentDepth - bias > shadowDepth) {
+        shadow = 0.1;
+    } else {
+        shadow = 1.0;
+    }
+    return shadow;
+}
 float calculateShadow(uint lightIdx, vec3 worldPos) {
     if (lights[lightIdx].hasShadow == 0) {
         return 1.0;
+    }
+    if (lights[lightIdx].kind == POINT_LIGHT) {
+        return calculatePointShadow(lightIdx, worldPos);
     }
     vec4 lightSpacePos = lights[lightIdx].viewProj * vec4(worldPos, 1.0);
     vec3 shadowCoord = lightSpacePos.xyz / lightSpacePos.w;
