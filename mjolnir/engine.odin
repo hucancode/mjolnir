@@ -695,21 +695,41 @@ render_shadow_node_callback :: proc(
 }
 
 try_render :: proc(engine: ^Engine) -> vk.Result {
-  elapsed_seconds := time.duration_seconds(time.since(engine.start_timestamp))
+  // --- Optimal Frame Render Flow ---
+  ctx := engine.renderer.ctx
+  current_fence := renderer_get_in_flight_fence(&engine.renderer)
+  // 1. Wait for previous frame's completion
+  vk.WaitForFences(ctx.vkd, 1, &current_fence, true, math.max(u64)) or_return
+  // 2. Reset frame fence
+  vk.ResetFences(ctx.vkd, 1, &current_fence) or_return
+  // 3. Acquire next swapchain image
+  image_idx: u32
+  current_image_available_semaphore := renderer_get_image_available_semaphore(&engine.renderer)
+  vk.AcquireNextImageKHR(
+    ctx.vkd,
+    engine.renderer.swapchain,
+    math.max(u64),
+    current_image_available_semaphore,
+    0,
+    &image_idx,
+  ) or_return
+  // 4. Reset and begin command buffer
+  command_buffer := renderer_get_command_buffer(&engine.renderer)
+  vk.ResetCommandBuffer(command_buffer, {}) or_return
+  begin_info := vk.CommandBufferBeginInfo {
+    sType = .COMMAND_BUFFER_BEGIN_INFO,
+    flags = {.ONE_TIME_SUBMIT},
+  }
+  vk.BeginCommandBuffer(command_buffer, &begin_info) or_return
 
+  elapsed_seconds := time.duration_seconds(time.since(engine.start_timestamp))
   scene_uniform := SceneUniform {
     view       = camera_calculate_view_matrix(&engine.scene.camera),
     projection = camera_calculate_projection_matrix(&engine.scene.camera),
     time       = f32(elapsed_seconds),
   }
-  // fmt.printfln("[RENDER] Starting try_render")
-  // fmt.printfln("Scene uniform: %v", scene_uniform)
-
   light_uniform: SceneLightUniform
-
-  // fmt.printfln("Camera %v", engine.scene.camera)
   camera_frustum := camera_make_frustum(&engine.scene.camera)
-
   // Collect Lights
   collect_ctx := CollectLightsContext {
     engine        = engine,
@@ -717,32 +737,88 @@ try_render :: proc(engine: ^Engine) -> vk.Result {
   }
   if !traverse_scene(engine, &collect_ctx, collect_lights_callback) {
     fmt.eprintln("[RENDER] Error during light collection")
-    // return false
   }
-  // fmt.printfln("[RENDER] Collected %d lights", light_uniform.light_count)
-
-  render_shadow_maps(engine, &light_uniform) or_return
-  // fmt.printfln("[RENDER] Finished shadow map rendering")
-
+  // --- Shadow Pass (all lights, in this command buffer) ---
+  render_shadow_maps_single_cb(engine, &light_uniform, command_buffer) or_return
+  // --- Main Pass ---
+  // Transition swapchain image to color attachment
+  barrier := vk.ImageMemoryBarrier {
+    sType = .IMAGE_MEMORY_BARRIER,
+    oldLayout = .UNDEFINED,
+    newLayout = .COLOR_ATTACHMENT_OPTIMAL,
+    srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    image = engine.renderer.images[image_idx],
+    subresourceRange = vk.ImageSubresourceRange {
+      aspectMask = {.COLOR},
+      baseMipLevel = 0,
+      levelCount = 1,
+      baseArrayLayer = 0,
+      layerCount = 1,
+    },
+    dstAccessMask = {.COLOR_ATTACHMENT_WRITE},
+  }
+  vk.CmdPipelineBarrier(
+    command_buffer,
+    {.TOP_OF_PIPE},
+    {.COLOR_ATTACHMENT_OUTPUT},
+    {},
+    0, nil, 0, nil, 1, &barrier,
+  )
   // Begin Main Render Pass
-  image_idx := renderer_begin_frame(&engine.renderer) or_return
-  command_buffer_main := renderer_get_command_buffer(&engine.renderer)
-
+  color_attachment := vk.RenderingAttachmentInfoKHR {
+    sType = .RENDERING_ATTACHMENT_INFO_KHR,
+    imageView = engine.renderer.views[image_idx],
+    imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
+    loadOp = .CLEAR,
+    storeOp = .STORE,
+    clearValue = vk.ClearValue {
+      color = {float32 = {0.0117, 0.0117, 0.0179, 1.0}},
+    },
+  }
+  depth_attachment := vk.RenderingAttachmentInfoKHR {
+    sType = .RENDERING_ATTACHMENT_INFO_KHR,
+    imageView = engine.renderer.depth_buffer.view,
+    imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+    loadOp = .CLEAR,
+    storeOp = .STORE,
+    clearValue = vk.ClearValue{depthStencil = {1.0, 0}},
+  }
+  render_info := vk.RenderingInfoKHR {
+    sType = .RENDERING_INFO_KHR,
+    renderArea = vk.Rect2D{extent = engine.renderer.extent},
+    layerCount = 1,
+    colorAttachmentCount = 1,
+    pColorAttachments = &color_attachment,
+    pDepthAttachment = &depth_attachment,
+  }
+  vk.CmdBeginRenderingKHR(command_buffer, &render_info)
+  // Set viewport and scissor
+  viewport := vk.Viewport {
+    x        = 0.0,
+    y        = f32(engine.renderer.extent.height),
+    width    = f32(engine.renderer.extent.width),
+    height   = -f32(engine.renderer.extent.height),
+    minDepth = 0.0,
+    maxDepth = 1.0,
+  }
+  scissor := vk.Rect2D {
+    extent = engine.renderer.extent,
+  }
+  vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
+  vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
   // Render Scene Meshes
   rendered_count: u32 = 0
   render_meshes_ctx := RenderMeshesContext {
     engine               = engine,
-    command_buffer       = command_buffer_main,
+    command_buffer       = command_buffer,
     camera_frustum       = camera_frustum,
     rendered_count       = &rendered_count,
     camera_descriptor_set = renderer_get_camera_descriptor_set(&engine.renderer),
   }
   if !traverse_scene(engine, &render_meshes_ctx, render_scene_node_callback) {
     fmt.eprintln("[RENDER] Error during scene mesh rendering")
-    // return false
   }
-  // fmt.printfln("[RENDER] Rendered %d meshes", rendered_count)
-
   // Update Uniforms
   data_buffer_write(
     renderer_get_scene_uniform(&engine.renderer),
@@ -754,72 +830,93 @@ try_render :: proc(engine: ^Engine) -> vk.Result {
     &light_uniform,
     size_of(SceneLightUniform),
   )
-
   if engine.render3d_proc != nil {
-    // fmt.printfln("[RENDER] Calling render3d_proc")
     engine.render3d_proc(engine)
   }
-  ctx := &engine.ui.ctx
-  mu.begin(ctx)
-  if mu.window(ctx, "Inspector", {40, 40, 300, 150}, {.NO_CLOSE}) {
-    mu.label(
-      ctx,
-      fmt.tprintf(
-        "Objects %d",
-        len(engine.nodes.entries) - len(engine.nodes.free_indices),
-      ),
-    )
-    mu.label(
-      ctx,
-      fmt.tprintf(
-        "Lights %d",
-        len(engine.lights.entries) - len(engine.lights.free_indices),
-      ),
-    )
-    mu.label(ctx, fmt.tprintf("Rendered %d", rendered_count))
+  ctx_ui := &engine.ui.ctx
+  mu.begin(ctx_ui)
+  if mu.window(ctx_ui, "Inspector", {40, 40, 300, 150}, {.NO_CLOSE}) {
+    mu.label(ctx_ui, fmt.tprintf("Objects %d", len(engine.nodes.entries) - len(engine.nodes.free_indices)))
+    mu.label(ctx_ui, fmt.tprintf("Lights %d", len(engine.lights.entries) - len(engine.lights.free_indices)))
+    mu.label(ctx_ui, fmt.tprintf("Rendered %d", rendered_count))
   }
   if engine.render2d_proc != nil {
-    engine.render2d_proc(engine, ctx)
+    engine.render2d_proc(engine, ctx_ui)
   }
-  mu.end(ctx)
-  ui_render(&engine.ui, command_buffer_main)
-  renderer_end_frame(&engine.renderer, image_idx) or_return
-  // fmt.printfln("[RENDER] End of try_render")
+  mu.end(ctx_ui)
+  ui_render(&engine.ui, command_buffer)
+  vk.CmdEndRenderingKHR(command_buffer)
+  // Transition image to present layout
+  present_barrier := vk.ImageMemoryBarrier {
+    sType = .IMAGE_MEMORY_BARRIER,
+    oldLayout = .COLOR_ATTACHMENT_OPTIMAL,
+    newLayout = .PRESENT_SRC_KHR,
+    srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    image = engine.renderer.images[image_idx],
+    subresourceRange = vk.ImageSubresourceRange {
+      aspectMask = {.COLOR},
+      baseMipLevel = 0,
+      levelCount = 1,
+      baseArrayLayer = 0,
+      layerCount = 1,
+    },
+    srcAccessMask = {.COLOR_ATTACHMENT_WRITE},
+  }
+  vk.CmdPipelineBarrier(
+    command_buffer,
+    {.COLOR_ATTACHMENT_OUTPUT},
+    {.BOTTOM_OF_PIPE},
+    {},
+    0, nil, 0, nil, 1, &present_barrier,
+  )
+  // End and submit command buffer
+  vk.EndCommandBuffer(command_buffer) or_return
+  current_render_finished_semaphore := renderer_get_render_finished_semaphore(&engine.renderer)
+  wait_stage_mask: vk.PipelineStageFlags = {.COLOR_ATTACHMENT_OUTPUT}
+  submit_info := vk.SubmitInfo {
+    sType                = .SUBMIT_INFO,
+    waitSemaphoreCount   = 1,
+    pWaitSemaphores      = &current_image_available_semaphore,
+    pWaitDstStageMask    = &wait_stage_mask,
+    commandBufferCount   = 1,
+    pCommandBuffers      = &command_buffer,
+    signalSemaphoreCount = 1,
+    pSignalSemaphores    = &current_render_finished_semaphore,
+  }
+  vk.QueueSubmit(ctx.graphics_queue, 1, &submit_info, current_fence) or_return
+  // Present
+  image_indices := [?]u32{image_idx}
+  present_info := vk.PresentInfoKHR {
+    sType              = .PRESENT_INFO_KHR,
+    waitSemaphoreCount = 1,
+    pWaitSemaphores    = &current_render_finished_semaphore,
+    swapchainCount     = 1,
+    pSwapchains        = &engine.renderer.swapchain,
+    pImageIndices      = raw_data(image_indices[:]),
+  }
+  vk.QueuePresentKHR(ctx.present_queue, &present_info) or_return
+  // Advance to next frame
+  engine.renderer.current_frame_index = (engine.renderer.current_frame_index + 1) % MAX_FRAMES_IN_FLIGHT
   return .SUCCESS
 }
 
-engine_render :: proc(engine: ^Engine) {
-  if time.duration_milliseconds(time.since(engine.last_frame_timestamp)) <
-     FRAME_TIME_MILIS {
-    return
-  }
-  res := try_render(engine)
-  if res == .ERROR_OUT_OF_DATE_KHR || res == .SUBOPTIMAL_KHR {
-    engine_recreate_swapchain(engine)
-  } else if res != .SUCCESS {
-    fmt.eprintln("Error during rendering")
-  }
-  engine.last_frame_timestamp = time.now()
-}
-
-render_shadow_maps :: proc(
+// New: render_shadow_maps_single_cb for optimal flow
+render_shadow_maps_single_cb :: proc(
   engine: ^Engine,
   light_uniform: ^SceneLightUniform,
+  command_buffer: vk.CommandBuffer,
 ) -> vk.Result {
   total_obstacles: u32 = 0
-
   for i := 0; i < int(light_uniform.light_count); i += 1 {
     light := &light_uniform.lights[i]
     if light.has_shadow == 0 || i >= MAX_SHADOW_MAPS {continue}
-
     shadow_map_texture := renderer_get_shadow_map(&engine.renderer, i)
-
     light_pos_3d := light.position.xyz
     light_dir_3d := linalg.normalize(light.direction.xyz)
-
     switch light.kind {
     case 0:
-      look_target := light_pos_3d + light_dir_3d // Example target
+      look_target := light_pos_3d + light_dir_3d
       light_view := linalg.matrix4_look_at(
         light_pos_3d,
         look_target,
@@ -839,19 +936,12 @@ render_shadow_maps :: proc(
         look_target,
         linalg.VECTOR3F32_Y_AXIS,
       )
-      // Ortho size needs to encompass the visible scene from light's POV
-      ortho_size: f32 = 20.0 // Example, should be dynamic
+      ortho_size: f32 = 20.0
       light_proj := linalg.matrix_ortho3d(
-        -ortho_size,
-        ortho_size,
-        -ortho_size,
-        ortho_size,
-        0.1,
-        light.radius,
+        -ortho_size, ortho_size, -ortho_size, ortho_size, 0.1, light.radius,
       )
       light.view_proj = light_proj * light_view
     case 2:
-      // Spot
       look_target := light_pos_3d + light_dir_3d
       light_view := linalg.matrix4_look_at(
         light_pos_3d,
@@ -867,20 +957,6 @@ render_shadow_maps :: proc(
       light.view_proj = light_proj * light_view
     case:
     }
-    // fmt.printfln("Light view_proj matrix for shadow pass: %v", light_vp)
-
-    // TODO: shadow rendering could benefit from parallel rendering, recheck synchronization in this part
-
-    shadow_cmd_buffer := renderer_get_command_buffer(&engine.renderer)
-    vk.ResetCommandBuffer(shadow_cmd_buffer, {}) or_return
-    vk.BeginCommandBuffer(
-      shadow_cmd_buffer,
-      &vk.CommandBufferBeginInfo {
-        sType = .COMMAND_BUFFER_BEGIN_INFO,
-        flags = {.ONE_TIME_SUBMIT},
-      },
-    ) or_return
-
     // Transition shadow map to depth attachment
     initial_barrier := vk.ImageMemoryBarrier {
       sType = .IMAGE_MEMORY_BARRIER,
@@ -899,18 +975,12 @@ render_shadow_maps :: proc(
       dstAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE},
     }
     vk.CmdPipelineBarrier(
-      shadow_cmd_buffer,
+      command_buffer,
       {.TOP_OF_PIPE},
       {.EARLY_FRAGMENT_TESTS},
       {},
-      0,
-      nil,
-      0,
-      nil,
-      1,
-      &initial_barrier,
+      0, nil, 0, nil, 1, &initial_barrier,
     )
-
     depth_attachment := vk.RenderingAttachmentInfoKHR {
       sType = .RENDERING_ATTACHMENT_INFO_KHR,
       imageView = shadow_map_texture.buffer.view,
@@ -930,7 +1000,6 @@ render_shadow_maps :: proc(
       layerCount = 1,
       pDepthAttachment = &depth_attachment,
     }
-    // Update scene uniform with light's view/proj for shadow pass, TODO: it's confusing that view is both view_proj and proj is identity
     shadow_scene_uniform := SceneUniform {
       view       = light.view_proj,
       projection = linalg.MATRIX4F32_IDENTITY,
@@ -940,8 +1009,7 @@ render_shadow_maps :: proc(
       &shadow_scene_uniform,
       size_of(SceneUniform),
     )
-    vk.CmdBeginRenderingKHR(shadow_cmd_buffer, &render_info_khr)
-
+    vk.CmdBeginRenderingKHR(command_buffer, &render_info_khr)
     viewport := vk.Viewport {
       width    = f32(shadow_map_texture.buffer.width),
       height   = f32(shadow_map_texture.buffer.height),
@@ -954,22 +1022,19 @@ render_shadow_maps :: proc(
         height = shadow_map_texture.buffer.height,
       },
     }
-    vk.CmdSetViewport(shadow_cmd_buffer, 0, 1, &viewport)
-    vk.CmdSetScissor(shadow_cmd_buffer, 0, 1, &scissor)
-
+    vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
+    vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
     obstacles_this_light: u32 = 0
     shadow_render_ctx := ShadowRenderContext {
       engine          = engine,
-      command_buffer  = shadow_cmd_buffer,
+      command_buffer  = command_buffer,
       obstacles_count = &obstacles_this_light,
       light_view_proj = light.view_proj,
       descriptor_set = renderer_get_camera_descriptor_set(&engine.renderer),
     }
     traverse_scene(engine, &shadow_render_ctx, render_shadow_node_callback)
     total_obstacles += obstacles_this_light
-
-    vk.CmdEndRenderingKHR(shadow_cmd_buffer)
-
+    vk.CmdEndRenderingKHR(command_buffer)
     // Transition shadow map to shader read
     final_barrier := vk.ImageMemoryBarrier {
       sType = .IMAGE_MEMORY_BARRIER,
@@ -989,37 +1054,29 @@ render_shadow_maps :: proc(
       dstAccessMask = {.SHADER_READ},
     }
     vk.CmdPipelineBarrier(
-      shadow_cmd_buffer,
+      command_buffer,
       {.LATE_FRAGMENT_TESTS},
       {.FRAGMENT_SHADER},
       {},
-      0,
-      nil,
-      0,
-      nil,
-      1,
-      &final_barrier,
+      0, nil, 0, nil, 1, &final_barrier,
     )
-
-    vk.EndCommandBuffer(shadow_cmd_buffer) or_return
-    wait_stage := vk.PipelineStageFlags{.TOP_OF_PIPE}
-    vk.QueueSubmit(
-      engine.vk_ctx.graphics_queue,
-      1,
-      &vk.SubmitInfo {
-        sType = .SUBMIT_INFO,
-        pWaitDstStageMask = &wait_stage,
-        commandBufferCount = 1,
-        pCommandBuffers = &shadow_cmd_buffer,
-      },
-      vk.Fence(0),
-    ) or_return
-    vk.DeviceWaitIdle(engine.vk_ctx.vkd) or_return
   }
-  // fmt.printfln("Rendered shadow maps, total obstacles in shadow maps: %d", total_obstacles)
   return .SUCCESS
 }
 
+engine_render :: proc(engine: ^Engine) {
+  if time.duration_milliseconds(time.since(engine.last_frame_timestamp)) <
+     FRAME_TIME_MILIS {
+    return
+  }
+  res := try_render(engine)
+  if res == .ERROR_OUT_OF_DATE_KHR || res == .SUBOPTIMAL_KHR {
+    engine_recreate_swapchain(engine)
+  } else if res != .SUCCESS {
+    fmt.eprintln("Error during rendering")
+  }
+  engine.last_frame_timestamp = time.now()
+}
 
 engine_recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
   vkd := engine.vk_ctx.vkd
