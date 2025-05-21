@@ -53,6 +53,7 @@ ShadowRenderContext :: struct {
   obstacles_count: ^u32,
   light_view_proj: linalg.Matrix4f32, // Added to pass light's VP matrix
   shadow_idx:      u32,
+  shadow_layer: u32,
 }
 
 InputState :: struct {
@@ -582,6 +583,7 @@ render_shadow_node_callback :: proc(
 ) -> bool {
   ctx := (^ShadowRenderContext)(cb_context)
   shadow_idx := ctx.shadow_idx
+  shadow_layer := ctx.shadow_layer
   #partial switch data in node_ptr.attachment {
   case NodeStaticMeshAttachment:
     mesh_handle := data.handle
@@ -602,7 +604,7 @@ render_shadow_node_callback :: proc(
       size_of(SceneUniform),
       min_alignment,
     )
-    offset_shadow := (1 + shadow_idx) * u32(aligned_scene_uniform_size)
+    offset_shadow := (1 + shadow_idx*6 + shadow_layer) * u32(aligned_scene_uniform_size)
     offsets := [1]u32{offset_shadow}
     vk.CmdBindDescriptorSets(
       ctx.command_buffer,
@@ -657,7 +659,7 @@ render_shadow_node_callback :: proc(
       size_of(SceneUniform),
       min_alignment,
     )
-    offset_shadow := (1 + shadow_idx) * u32(aligned_scene_uniform_size)
+    offset_shadow := (1 + shadow_idx*6 + shadow_layer) * u32(aligned_scene_uniform_size)
     offsets := [1]u32{offset_shadow}
     vk.CmdBindDescriptorSets(
       ctx.command_buffer,
@@ -1094,7 +1096,7 @@ render_shadow_maps :: proc(
         face_view := linalg.matrix4_look_at(
           light_pos,
           light_pos + face_dirs[face],
-          linalg.VECTOR3F32_Y_AXIS,
+          face_ups[face],
         )
         face_light_view_proj := face_proj * face_view
 
@@ -1133,7 +1135,7 @@ render_shadow_maps :: proc(
           view       = light.view_proj,
           projection = linalg.MATRIX4F32_IDENTITY,
         }
-        offset_shadow := vk.DeviceSize(i + 1) * aligned_scene_uniform_size
+        offset_shadow := vk.DeviceSize(i*6 + face + 1) * aligned_scene_uniform_size
         fmt.printfln("shadow pass %d, offset %d", i, offset_shadow)
         data_buffer_write_at(
           renderer_get_camera_uniform(&engine.renderer),
@@ -1151,6 +1153,7 @@ render_shadow_maps :: proc(
           obstacles_count = &obstacles_this_light,
           light_view_proj = face_light_view_proj,
           shadow_idx      = u32(i),
+          shadow_layer    = u32(face),
         }
         shadow_render_ctx.light_view_proj = face_light_view_proj
         traverse_scene(engine, &shadow_render_ctx, render_shadow_node_callback)
@@ -1180,7 +1183,7 @@ render_shadow_maps :: proc(
         view       = light.view_proj,
         projection = linalg.MATRIX4F32_IDENTITY,
       }
-      offset_shadow := vk.DeviceSize(i + 1) * aligned_scene_uniform_size
+      offset_shadow := vk.DeviceSize(i*6 + 1) * aligned_scene_uniform_size
       fmt.printfln("shadow pass %d, offset %d", i, offset_shadow)
       data_buffer_write_at(
         renderer_get_camera_uniform(&engine.renderer),

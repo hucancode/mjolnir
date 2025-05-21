@@ -73,7 +73,7 @@ frame_init :: proc(self: ^Frame, ctx: ^VulkanContext) -> (res: vk.Result) {
   aligned_scene_uniform_size := align_up(size_of(SceneUniform), min_alignment)
   self.camera_uniform = create_host_visible_buffer(
     ctx,
-    MAX_SCENE_UNIFORMS * aligned_scene_uniform_size,
+    (1+ 6*MAX_SCENE_UNIFORMS) * aligned_scene_uniform_size,
     {.UNIFORM_BUFFER},
   ) or_return
   self.light_uniform = create_host_visible_buffer(

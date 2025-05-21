@@ -75,7 +75,7 @@ float calculatePointShadow(uint lightIdx, vec3 fragPos) {
     vec3 lightToFrag = fragPos - lights[lightIdx].position.xyz;
     float currentDepth = length(lightToFrag);
     float bias = 0.01;
-    float shadowDepth = texture(cubeShadowMaps[lightIdx], lightToFrag).r * lights[lightIdx].radius;
+    float shadowDepth = texture(cubeShadowMaps[lightIdx], normalize(lightToFrag)).r * lights[lightIdx].radius;
     if (currentDepth - bias > shadowDepth) {
         shadow = 0.1;
     } else {
@@ -87,7 +87,7 @@ float calculateShadow(uint lightIdx, vec3 worldPos) {
     if (lights[lightIdx].hasShadow == 0) {
         return 1.0;
     }
-    if (lights[lightIdx].kind == POINT_LIGHT) {
+    if (lights[lightIdx].kind == POINT_LIGHT || true) {
         return calculatePointShadow(lightIdx, worldPos);
     }
     vec4 lightSpacePos = lights[lightIdx].viewProj * vec4(worldPos, 1.0);
@@ -125,6 +125,7 @@ vec3 calculateLighting(Light light, vec3 normal, vec3 position, vec3 viewDir, ve
     }
     return vec3(0.0);
 }
+
 void main() {
     vec3 cameraPosition = -inverse(view)[3].xyz;
     vec3 albedo = HAS_TEXTURE ? texture(albedoSampler, uv).rgb : color.rgb;

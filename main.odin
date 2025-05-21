@@ -67,10 +67,11 @@ setup :: proc(engine: ^mjolnir.Engine) {
     )
     if true {
       // Spawn cubes in a grid
-      nx, ny, nz := 10, 10, 10
-      for x in 0 ..< nx {
-        for y in 0 ..< ny {
-          for z in 0 ..< nz {
+      space :f32 = 1.8
+      nx, ny, nz := 4, 4, 4
+      for x in 1 ..< nx {
+        for y in 1 ..< ny {
+          for z in 1 ..< nz {
             if x == nx / 2 && y == ny / 2 && z == nz / 2 {
               continue
             }
@@ -78,9 +79,9 @@ setup :: proc(engine: ^mjolnir.Engine) {
             parent_node(&engine.nodes, engine.scene.root, node_handle)
             node.attachment = NodeStaticMeshAttachment{sphere_mesh_handle}
             node.transform.position = {
-              (f32(x) - f32(nx) / 2.0) * 3.0,
-              (f32(y) - f32(ny) / 2.0) * 3.0,
-              (f32(z) - f32(nz) / 2.0) * 3.0,
+              (f32(x) - f32(nx) / 2.0) * space,
+              (f32(y) - f32(ny) / 2.0) * space,
+              (f32(z) - f32(nz) / 2.0) * space,
             }
             node.transform.scale = {0.3, 0.3, 0.3}
           }
@@ -133,7 +134,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
         1.0,
       }
       light: ^Node
-      if i % 2 == 0 {
+      if i % 2 == 0 && false {
         spot_angle := math.PI / 4.0
         light_handles[i], light = spawn_spot_light(
           engine,
@@ -142,7 +143,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
           15.0,
         )
       } else {
-        light_handles[i], light = spawn_point_light(engine, color, 15.0)
+        light_handles[i], light = spawn_point_light(engine, color, 55.0)
       }
       light.transform.rotation = linalg.quaternion_angle_axis(
         math.PI * 0.3,
@@ -173,10 +174,10 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
     ry := (math.sin(t * 0.2) + 1.0) * 0.5 + 2.0
     rz := math.cos(t)
     v := linalg.vector_normalize(linalg.Vector3f32{rx, ry, rz})
-    radius: f32 = 8.0
+    radius: f32 = 2.0
     light_ptr.transform.position =
       v * radius + linalg.Vector3f32{0.0, 2.0, 0.0}
-    light_ptr.transform.position.y = 4.0
+    // light_ptr.transform.position.y = 2.0
     // fmt.printfln("Light %d position: %v", i, light_ptr.transform.position)
     light_ptr.transform.is_dirty = true
     light_cube_ptr := resource.get(&engine.nodes, light_cube_handles[i])
