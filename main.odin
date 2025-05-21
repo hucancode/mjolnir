@@ -12,7 +12,7 @@ import "mjolnir/resource"
 WIDTH :: 1280
 HEIGHT :: 720
 TITLE :: "Mjolnir Odin"
-LIGHT_COUNT :: 5
+LIGHT_COUNT :: 4
 light_handles: [LIGHT_COUNT]mjolnir.Handle
 light_cube_handles: [LIGHT_COUNT]mjolnir.Handle
 

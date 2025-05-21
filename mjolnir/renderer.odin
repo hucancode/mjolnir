@@ -8,7 +8,7 @@ import vk "vendor:vulkan"
 MAX_FRAMES_IN_FLIGHT :: 2
 
 // Renderer specific constants
-MAX_LIGHTS :: 10
+MAX_LIGHTS :: 5
 SHADOW_MAP_SIZE :: 512
 MAX_SHADOW_MAPS :: MAX_LIGHTS
 MAX_SCENE_UNIFORMS :: 16

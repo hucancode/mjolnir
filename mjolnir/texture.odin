@@ -352,3 +352,137 @@ depth_image_init :: proc(
   ) or_return
   return .SUCCESS
 }
+
+CubeDepthTexture :: struct {
+  buffer:     ImageBuffer,
+  views:      [6]vk.ImageView, // One view per face for rendering
+  view:       vk.ImageView,    // Single cube view for sampling
+  sampler:    vk.Sampler,
+  ctx:        ^VulkanContext,
+  size:       u32,
+}
+
+cube_depth_texture_init :: proc(
+  self: ^CubeDepthTexture,
+  ctx: ^VulkanContext,
+  size: u32,
+  usage: vk.ImageUsageFlags = {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
+) -> vk.Result {
+  self.ctx = ctx
+  self.size = size
+  self.buffer.width = size
+  self.buffer.height = size
+  self.buffer.format = .D32_SFLOAT
+
+  vk_device := ctx.vkd
+  create_info := vk.ImageCreateInfo {
+    sType         = .IMAGE_CREATE_INFO,
+    imageType     = .D2,
+    extent        = {size, size, 1},
+    mipLevels     = 1,
+    arrayLayers   = 6,
+    format        = .D32_SFLOAT,
+    tiling        = .OPTIMAL,
+    initialLayout = .UNDEFINED,
+    usage         = usage,
+    sharingMode   = .EXCLUSIVE,
+    samples       = {._1},
+    flags         = {.CUBE_COMPATIBLE},
+  }
+  vk.CreateImage(vk_device, &create_info, nil, &self.buffer.image) or_return
+
+  mem_requirements: vk.MemoryRequirements
+  vk.GetImageMemoryRequirements(vk_device, self.buffer.image, &mem_requirements)
+
+  memory_type_index, found := find_memory_type_index(
+    ctx.physical_device,
+    mem_requirements.memoryTypeBits,
+    {.DEVICE_LOCAL},
+  )
+  if !found {
+    return .ERROR_UNKNOWN
+  }
+
+  alloc_info := vk.MemoryAllocateInfo {
+    sType           = .MEMORY_ALLOCATE_INFO,
+    allocationSize  = mem_requirements.size,
+    memoryTypeIndex = memory_type_index,
+  }
+  vk.AllocateMemory(vk_device, &alloc_info, nil, &self.buffer.memory) or_return
+  vk.BindImageMemory(vk_device, self.buffer.image, self.buffer.memory, 0)
+
+  // Create 6 image views (one per face)
+  for i in 0..<6 {
+    view_info := vk.ImageViewCreateInfo {
+      sType = .IMAGE_VIEW_CREATE_INFO,
+      image = self.buffer.image,
+      viewType = .D2,
+      format = .D32_SFLOAT,
+      components = vk.ComponentMapping {
+        r = .IDENTITY, g = .IDENTITY, b = .IDENTITY, a = .IDENTITY,
+      },
+      subresourceRange = vk.ImageSubresourceRange {
+        aspectMask = {.DEPTH},
+        baseMipLevel = 0,
+        levelCount = 1,
+        baseArrayLayer = u32(i),
+        layerCount = 1,
+      },
+    }
+    vk.CreateImageView(vk_device, &view_info, nil, &self.views[i]) or_return
+  }
+  // Create a single cube view for sampling
+  cube_view_info := vk.ImageViewCreateInfo {
+    sType = .IMAGE_VIEW_CREATE_INFO,
+    image = self.buffer.image,
+    viewType = .CUBE,
+    format = .D32_SFLOAT,
+    components = vk.ComponentMapping {
+      r = .IDENTITY, g = .IDENTITY, b = .IDENTITY, a = .IDENTITY,
+    },
+    subresourceRange = vk.ImageSubresourceRange {
+      aspectMask = {.DEPTH},
+      baseMipLevel = 0,
+      levelCount = 1,
+      baseArrayLayer = 0,
+      layerCount = 6,
+    },
+  }
+  vk.CreateImageView(vk_device, &cube_view_info, nil, &self.view) or_return
+
+  // Create sampler
+  sampler_info := vk.SamplerCreateInfo {
+    sType         = .SAMPLER_CREATE_INFO,
+    magFilter     = .LINEAR,
+    minFilter     = .LINEAR,
+    addressModeU  = .CLAMP_TO_EDGE,
+    addressModeV  = .CLAMP_TO_EDGE,
+    addressModeW  = .CLAMP_TO_EDGE,
+    maxAnisotropy = 1.0,
+    borderColor   = .INT_OPAQUE_WHITE,
+    compareOp     = .LESS,
+    mipmapMode    = .LINEAR,
+  }
+  vk.CreateSampler(vk_device, &sampler_info, nil, &self.sampler) or_return
+  return .SUCCESS
+}
+
+cube_depth_texture_deinit :: proc(self: ^CubeDepthTexture) {
+  if self == nil {return}
+  if self.ctx != nil && self.sampler != 0 {
+    vk.DestroySampler(self.ctx.vkd, self.sampler, nil)
+    self.sampler = 0
+  }
+  vkd := self.ctx.vkd
+  for i in 0..<6 {
+    if self.views[i] != 0 {
+      vk.DestroyImageView(vkd, self.views[i], nil)
+      self.views[i] = 0
+    }
+  }
+  if self.view != 0 {
+    vk.DestroyImageView(vkd, self.view, nil)
+    self.view = 0
+  }
+  image_buffer_init(vkd, &self.buffer)
+}

@@ -5,7 +5,7 @@ layout(constant_id = 1) const bool HAS_TEXTURE = false;
 layout(constant_id = 2) const bool IS_LIT = false;
 layout(constant_id = 3) const bool CAN_RECEIVE_SHADOW = false;
 
-const uint MAX_LIGHTS = 10;
+const uint MAX_LIGHTS = 5;
 const uint POINT_LIGHT = 0;
 const uint DIRECTIONAL_LIGHT = 1;
 const uint SPOT_LIGHT = 2;
@@ -32,6 +32,7 @@ layout(set = 0, binding = 1) uniform LightUniforms {
     uint lightCount;
 };
 layout(set = 0, binding = 2) uniform sampler2D shadowMaps[MAX_LIGHTS];
+layout(set = 0, binding = 3) uniform samplerCube cubeShadowMaps[MAX_LIGHTS];
 
 layout(set = 1, binding = 0) uniform sampler2D albedoSampler;
 layout(set = 1, binding = 1) uniform sampler2D metalicSampler;
