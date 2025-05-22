@@ -16,21 +16,20 @@ MAX_SCENE_UNIFORMS :: 16
 Mat4 :: linalg.Matrix4f32
 Vec4 :: linalg.Vector4f32
 
-LightKind :: enum u32 {
-  POINT,
-  DIRECTIONAL,
-  SPOT,
-}
 // --- Uniform Structs ---
 SingleLightUniform :: struct {
   view_proj:  Mat4,
   color:      Vec4,
   position:   Vec4,
   direction:  Vec4,
-  kind:       LightKind,
+  kind:       enum u32 {
+    POINT,
+    DIRECTIONAL,
+    SPOT,
+  },
   angle:      f32, // For spotlight: cone angle
   radius:     f32, // For point/spot: attenuation radius
-  has_shadow: u32, // 0 = no shadow, 1 = has shadow
+  has_shadow: b32,
 }
 
 SceneUniform :: struct {

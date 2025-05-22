@@ -110,7 +110,7 @@ build_shadow_pipelines :: proc(
       },
     }
     spec_info := vk.SpecializationInfo {
-      mapEntryCount = 1,
+      mapEntryCount = len(entries),
       pMapEntries   = raw_data(entries[:]),
       dataSize      = size_of(ShadowShaderConfig),
       pData         = &config,

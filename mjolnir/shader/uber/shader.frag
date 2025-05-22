@@ -87,7 +87,7 @@ float calculateShadow(uint lightIdx, vec3 worldPos) {
     if (lights[lightIdx].hasShadow == 0) {
         return 1.0;
     }
-    if (lights[lightIdx].kind == POINT_LIGHT || true) {
+    if (lights[lightIdx].kind == POINT_LIGHT) {
         return calculatePointShadow(lightIdx, worldPos);
     }
     vec4 lightSpacePos = lights[lightIdx].viewProj * vec4(worldPos, 1.0);
