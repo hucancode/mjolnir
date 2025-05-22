@@ -1028,7 +1028,7 @@ render_shadow_maps :: proc(
         {0, -1, 0},
       }
       proj := linalg.matrix4_perspective(
-        light.angle,
+        math.PI * 0.5,
         1.0,
         0.1,
         light.radius,
