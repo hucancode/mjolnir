@@ -68,6 +68,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     if true {
       // Spawn cubes in a grid
       space :f32 = 1.8
+      size :f32 = 0.3
       nx, ny, nz := 4, 4, 4
       for x in 1 ..< nx {
         for y in 1 ..< ny {
@@ -79,22 +80,23 @@ setup :: proc(engine: ^mjolnir.Engine) {
             parent_node(&engine.nodes, engine.scene.root, node_handle)
             node.attachment = NodeStaticMeshAttachment{sphere_mesh_handle}
             node.transform.position = {
-              (f32(x) - f32(nx) / 2.0) * space,
-              (f32(y) - f32(ny) / 2.0) * space,
-              (f32(z) - f32(nz) / 2.0) * space,
-            }
-            node.transform.scale = {0.3, 0.3, 0.3}
+              (f32(x) - f32(nx) * 0.5),
+              (f32(y) - f32(ny) * 0.5),
+              (f32(z) - f32(nz) * 0.5),
+            } * space
+            node.transform.scale = {1, 1, 1} * size
           }
         }
       }
     }
     if true {
       // Ground node
+      size :f32 = 30.0
       ground_handle, ground_node := spawn_node(engine)
       parent_node(&engine.nodes, engine.scene.root, ground_handle)
       ground_node.attachment = NodeStaticMeshAttachment{ground_mesh_handle}
-      ground_node.transform.position = {-3.0, 0.0, -3.0}
-      ground_node.transform.scale = {6.0, 1.0, 6.0}
+      ground_node.transform.position = {-0.5, 0.0, -0.5} * size
+      ground_node.transform.scale = {1.0, 1.0, 1.0} * size
     }
     if true {
       // Load GLTF and play animation
@@ -112,7 +114,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
         if skeleton_ptr == nil {
           continue
         }
-        fmt.printfln("found skeleton:", skeleton_ptr)
         // skeleton_ptr.transform.position = {2.0, 0.0, 0.0}
         engine_play_animation(engine, skeleton, "Anim_0", .Loop)
         attachment, ok := skeleton_ptr.attachment.(NodeSkeletalMeshAttachment)
@@ -158,7 +159,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
       light_cube_node.transform.position = {0.0, 0.1, 0.0}
     }
     // Directional light
-    _, _ = spawn_directional_light(engine, {0.3, 0.3, 0.3, 0.0})
+    // spawn_directional_light(engine, {0.3, 0.3, 0.3, 0.0})
 }
 
 update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
@@ -176,7 +177,7 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
     v := linalg.vector_normalize(linalg.Vector3f32{rx, ry, rz})
     radius: f32 = 2.0
     light_ptr.transform.position =
-      v * radius + linalg.Vector3f32{0.0, 2.0, 0.0}
+      v * radius + linalg.Vector3f32{0.0, 1.0, 0.0}
     // light_ptr.transform.position.y = 2.0
     // fmt.printfln("Light %d position: %v", i, light_ptr.transform.position)
     light_ptr.transform.is_dirty = true

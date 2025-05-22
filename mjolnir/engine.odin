@@ -53,6 +53,7 @@ ShadowRenderContext :: struct {
   obstacles_count: ^u32,
   shadow_idx:      u32,
   shadow_layer: u32,
+  frustum: geometry.Frustum,
 }
 
 InputState :: struct {
@@ -594,6 +595,14 @@ render_shadow_node_callback :: proc(
     mesh_handle := data.handle
     mesh := resource.get(&eng.meshes, mesh_handle)
     if mesh == nil {return true}
+    world_aabb := geometry.aabb_transform(mesh.aabb, world_matrix)
+    if !geometry.frustum_test_aabb(
+      &ctx.frustum,
+      world_aabb.min.xyz,
+      world_aabb.max.xyz,
+    ) {
+      return true
+    }
     material := resource.get(&eng.materials, mesh.material)
     if material == nil {return true}
     features: u32 = 0
@@ -642,6 +651,14 @@ render_shadow_node_callback :: proc(
   case NodeSkeletalMeshAttachment:
     mesh := resource.get(&eng.skeletal_meshes, data.handle)
     if mesh == nil {return true}
+    world_aabb := geometry.aabb_transform(mesh.aabb, world_matrix)
+    if !geometry.frustum_test_aabb(
+      &ctx.frustum,
+      world_aabb.min.xyz,
+      world_aabb.max.xyz,
+    ) {
+      return true
+    }
     material := resource.get(&eng.materials, mesh.material)
     if material == nil {return true}
     features: u32 = SHADER_FEATURE_SKINNING
@@ -1047,7 +1064,7 @@ render_shadow_maps :: proc(
           imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
           loadOp = .CLEAR,
           storeOp = .STORE,
-          clearValue = vk.ClearValue{depthStencil = {depth = 0.2}},
+          clearValue = vk.ClearValue{depthStencil = {depth = 1.0}},
         }
         face_render_info := vk.RenderingInfoKHR {
           sType = .RENDERING_INFO_KHR,
@@ -1077,7 +1094,7 @@ render_shadow_maps :: proc(
           projection = proj,
         }
         offset_shadow := vk.DeviceSize(i*6 + face + 1) * aligned_scene_uniform_size
-        fmt.printfln("shadow pass %d, offset %d", i, offset_shadow)
+        // fmt.printfln("shadow pass %d, offset %d", i, offset_shadow)
         data_buffer_write_at(
           renderer_get_camera_uniform(&engine.renderer),
           &shadow_scene_uniform,
@@ -1094,9 +1111,11 @@ render_shadow_maps :: proc(
           obstacles_count = &obstacles_this_light,
           shadow_idx      = u32(i),
           shadow_layer    = u32(face),
+          frustum         = geometry.make_frustum( proj * view),
         }
         traverse_scene(engine, &shadow_render_ctx, render_shadow_node_callback)
         vk.CmdEndRenderingKHR(command_buffer)
+        fmt.printfln("cube shadow pass %d, face %d, rendered %d objects with view %v proj %v", i, face, obstacles_this_light, view, proj)
       }
     } else {   // 2D shadow map for other lights
       view : linalg.Matrix4f32
