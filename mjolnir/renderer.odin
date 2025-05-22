@@ -499,7 +499,7 @@ renderer_destroy_swapchain_resources :: proc(self: ^Renderer) {
   vkd := self.ctx.vkd
 
   // Destroy depth buffer for main pass
-  image_buffer_init(vkd, &self.depth_buffer)
+  image_buffer_deinit(vkd, &self.depth_buffer)
 
   // Destroy swapchain image views
   if self.views != nil {

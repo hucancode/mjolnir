@@ -201,7 +201,7 @@ texture_deinit :: proc(self: ^Texture) {
     vk.DestroySampler(self.ctx.vkd, self.sampler, nil)
     self.sampler = 0
   }
-  image_buffer_init(self.ctx.vkd, &self.buffer)
+  image_buffer_deinit(self.ctx.vkd, &self.buffer)
   image_data_deinit(&self.image_data)
 }
 
@@ -242,7 +242,7 @@ depth_texture_deinit :: proc(self: ^DepthTexture) {
     vk.DestroySampler(self.ctx.vkd, self.sampler, nil)
     self.sampler = 0
   }
-  image_buffer_init(self.ctx.vkd, &self.buffer)
+  image_buffer_deinit(self.ctx.vkd, &self.buffer)
 }
 
 create_depth_image :: proc(
@@ -484,5 +484,5 @@ cube_depth_texture_deinit :: proc(self: ^CubeDepthTexture) {
     vk.DestroyImageView(vkd, self.view, nil)
     self.view = 0
   }
-  image_buffer_init(vkd, &self.buffer)
+  image_buffer_deinit(vkd, &self.buffer)
 }
