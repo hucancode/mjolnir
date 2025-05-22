@@ -407,19 +407,19 @@ collect_lights_callback :: proc(
     uniform: SingleLightUniform
     #partial switch light_type in light_obj {
     case PointLight:
-      uniform.kind = 0
+      uniform.kind = .POINT
       uniform.color = light_type.color
       uniform.radius = light_type.radius
       uniform.has_shadow = light_type.cast_shadow ? 1 : 0
       uniform.position = world_matrix^ * linalg.Vector4f32{0, 0, 0, 1}
     case DirectionalLight:
-      uniform.kind = 1
+      uniform.kind = .DIRECTIONAL
       uniform.color = light_type.color
       uniform.has_shadow = light_type.cast_shadow ? 1 : 0
       uniform.position = world_matrix^ * linalg.Vector4f32{0, 0, 0, 1}
       uniform.direction = world_matrix^ * linalg.Vector4f32{0, 0, 1, 0} // Assuming +Z is forward
     case SpotLight:
-      uniform.kind = 2
+      uniform.kind = .SPOT
       uniform.color = light_type.color
       uniform.radius = light_type.radius
       uniform.has_shadow = light_type.cast_shadow ? 1 : 0
@@ -1025,7 +1025,7 @@ render_shadow_maps :: proc(
       size_of(SceneUniform),
       min_alignment,
     )
-    if light.kind == 0 {   // Point light (cube shadow map)
+    if light.kind == .POINT {   // Point light (cube shadow map)
       light_pos := light.position.xyz
       // Cube face directions and up vectors
       face_dirs := [6][3]f32 {
@@ -1120,7 +1120,7 @@ render_shadow_maps :: proc(
     } else {   // 2D shadow map for other lights
       view : linalg.Matrix4f32
       proj : linalg.Matrix4f32
-      if light.kind == 1 {
+      if light.kind == .DIRECTIONAL {
         view = linalg.matrix4_look_at(
           light.position.xyz,
           light.position.xyz + light.direction.xyz,
