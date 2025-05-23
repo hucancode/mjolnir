@@ -62,7 +62,7 @@ build_shadow_pipelines :: proc(
   rasterizer := vk.PipelineRasterizationStateCreateInfo {
     sType                   = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
     polygonMode             = .FILL,
-    // cullMode    = {.BACK},
+    cullMode                = {.BACK},
     frontFace               = .COUNTER_CLOCKWISE,
     lineWidth               = 1.0,
     depthBiasEnable         = true,

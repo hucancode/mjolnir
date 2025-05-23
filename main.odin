@@ -8,11 +8,12 @@ import mu "vendor:microui"
 import "mjolnir"
 import "mjolnir/geometry"
 import "mjolnir/resource"
+import glfw "vendor:glfw"
 
 WIDTH :: 1280
 HEIGHT :: 720
 TITLE :: "Mjolnir Odin"
-LIGHT_COUNT :: 4
+LIGHT_COUNT :: 2
 light_handles: [LIGHT_COUNT]mjolnir.Handle
 light_cube_handles: [LIGHT_COUNT]mjolnir.Handle
 
@@ -67,9 +68,9 @@ setup :: proc(engine: ^mjolnir.Engine) {
     )
     if true {
       // Spawn cubes in a grid
-      space :f32 = 1.8
+      space :f32 = 1.0
       size :f32 = 0.3
-      nx, ny, nz := 4, 4, 4
+      nx, ny, nz := 5, 2, 5
       for x in 1 ..< nx {
         for y in 1 ..< ny {
           for z in 1 ..< nz {
@@ -78,12 +79,13 @@ setup :: proc(engine: ^mjolnir.Engine) {
             }
             node_handle, node := spawn_node(engine)
             parent_node(&engine.nodes, engine.scene.root, node_handle)
-            node.attachment = NodeStaticMeshAttachment{sphere_mesh_handle}
+            node.attachment = NodeStaticMeshAttachment{sphere_mesh_handle, true}
             node.transform.position = {
               (f32(x) - f32(nx) * 0.5),
               (f32(y) - f32(ny) * 0.5),
               (f32(z) - f32(nz) * 0.5),
             } * space
+            node.transform.position.y += 0.5
             node.transform.scale = {1, 1, 1} * size
           }
         }
@@ -91,10 +93,10 @@ setup :: proc(engine: ^mjolnir.Engine) {
     }
     if true {
       // Ground node
-      size :f32 = 30.0
+      size :f32 = 40.0
       ground_handle, ground_node := spawn_node(engine)
       parent_node(&engine.nodes, engine.scene.root, ground_handle)
-      ground_node.attachment = NodeStaticMeshAttachment{ground_mesh_handle}
+      ground_node.attachment = NodeStaticMeshAttachment{ground_mesh_handle, false}
       ground_node.transform.position = {-0.5, 0.0, -0.5} * size
       ground_node.transform.scale = {1.0, 1.0, 1.0} * size
     }
@@ -118,6 +120,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
         engine_play_animation(engine, skeleton, "Anim_0", .Loop)
         attachment, ok := skeleton_ptr.attachment.(NodeSkeletalMeshAttachment)
         if ok {
+          attachment.cast_shadow = true
           pose := attachment.pose
           for i in 0 ..< min(4, len(pose.bone_matrices)) {
             fmt.printfln("Bone %d matrix: %v", i, pose.bone_matrices[i])
@@ -135,28 +138,30 @@ setup :: proc(engine: ^mjolnir.Engine) {
         1.0,
       }
       light: ^Node
-      if i % 2 == 0 && false {
-        spot_angle := math.PI / 4.0
+      should_make_spot_light := false
+      should_make_spot_light = i%2 == 0
+      // should_make_spot_light = true
+      if should_make_spot_light {
+        spot_angle := math.PI / 1.2
         light_handles[i], light = spawn_spot_light(
           engine,
           color,
           f32(spot_angle),
-          15.0,
+          4.0,
         )
       } else {
-        light_handles[i], light = spawn_point_light(engine, color, 55.0)
+        light_handles[i], light = spawn_point_light(engine, color, 20.0)
       }
+      light.transform.position = {0, 2, -2}
       light.transform.rotation = linalg.quaternion_angle_axis(
-        math.PI * 0.3,
+        math.PI * 0.45,
         linalg.VECTOR3F32_X_AXIS,
       )
-      light.transform.position = {0.0, 3.0, 0.0}
       light_cube_handle, light_cube_node := spawn_node(engine)
       light_cube_handles[i] = light_cube_handle
       parent_node(&engine.nodes, light_handles[i], light_cube_handles[i])
-      light_cube_node.attachment = NodeStaticMeshAttachment{cube_mesh_handle}
+      light_cube_node.attachment = NodeStaticMeshAttachment{cube_mesh_handle, false}
       light_cube_node.transform.scale = {0.1, 0.1, 0.1}
-      light_cube_node.transform.position = {0.0, 0.1, 0.0}
     }
     // Directional light
     // spawn_directional_light(engine, {0.3, 0.3, 0.3, 0.0})
@@ -164,21 +169,24 @@ setup :: proc(engine: ^mjolnir.Engine) {
 
 update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
   using mjolnir
+
   // Animate lights
-  for i in 0 ..< LIGHT_COUNT {
+  for handle, i in light_handles {
+    if i == 0 {
+      // manual control light #0
+      continue
+    }
     offset := f32(i) / f32(LIGHT_COUNT) * math.PI * 2.0
     t := engine_get_time(engine) + offset
     // fmt.printfln("getting light %d %v", i, light_handles[i])
-    light_ptr := resource.get(&engine.nodes, light_handles[i])
+    light_ptr := resource.get(&engine.nodes, handle)
     if light_ptr == nil {continue}
     rx := math.sin(t)
-    ry := (math.sin(t * 0.2) + 1.0) * 0.5 + 2.0
+    ry := (math.sin(t) + 1.0) * 0.5*1.5 + 1.0
     rz := math.cos(t)
     v := linalg.vector_normalize(linalg.Vector3f32{rx, ry, rz})
-    radius: f32 = 2.0
-    light_ptr.transform.position =
-      v * radius + linalg.Vector3f32{0.0, 1.0, 0.0}
-    // light_ptr.transform.position.y = 2.0
+    radius: f32 = 4
+    light_ptr.transform.position = v * radius + linalg.VECTOR3F32_Y_AXIS * -1.0
     // fmt.printfln("Light %d position: %v", i, light_ptr.transform.position)
     light_ptr.transform.is_dirty = true
     light_cube_ptr := resource.get(&engine.nodes, light_cube_handles[i])
@@ -202,4 +210,29 @@ render2d :: proc(engine: ^mjolnir.Engine, ctx: ^mu.Context) {
 
 on_key_pressed :: proc(engine: ^mjolnir.Engine, key, action, mods: int) {
     fmt.printfln("key pressed key %d action %d mods %x", key, action, mods)
+    if key == glfw.KEY_LEFT && action == glfw.PRESS {
+      light := resource.get(&engine.nodes, light_handles[0])
+      light.transform.position.x += 0.1
+      light.transform.is_dirty = true
+    } else if key == glfw.KEY_RIGHT && action == glfw.PRESS {
+      light := resource.get(&engine.nodes, light_handles[0])
+      light.transform.position.x -= 0.1
+      light.transform.is_dirty = true
+    } else if key == glfw.KEY_UP && action == glfw.PRESS {
+      light := resource.get(&engine.nodes, light_handles[0])
+      light.transform.position.z += 0.1
+      light.transform.is_dirty = true
+    } else if key == glfw.KEY_DOWN && action == glfw.PRESS {
+      light := resource.get(&engine.nodes, light_handles[0])
+      light.transform.position.z -= 0.1
+      light.transform.is_dirty = true
+    } else if key == glfw.KEY_Z && action == glfw.PRESS {
+      light := resource.get(&engine.nodes, light_handles[0])
+      light.transform.position.y += 0.1
+      light.transform.is_dirty = true
+    } else if key == glfw.KEY_X && action == glfw.PRESS {
+      light := resource.get(&engine.nodes, light_handles[0])
+      light.transform.position.y -= 0.1
+      light.transform.is_dirty = true
+    }
 }

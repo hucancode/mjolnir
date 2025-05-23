@@ -7,9 +7,11 @@ NodeSkeletalMeshAttachment :: struct {
   handle:    Handle,
   pose:      Pose,
   animation: Maybe(Animation_Instance),
+  cast_shadow: bool,
 }
 NodeStaticMeshAttachment :: struct {
   handle: Handle,
+  cast_shadow: bool,
 }
 NodeLightAttachment :: struct {
   handle: Handle,

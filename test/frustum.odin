@@ -66,7 +66,7 @@ test_frustum_aabb_perspective_projection :: proc(t: ^testing.T) {
   // Create a perspective projection matrix (fov = 90deg, aspect = 1, near = 1, far = 10)
   fov: f32 = math.PI / 2.0
   aspect: f32 = 1.0
-  near: f32 = 1.0
+  near: f32 = 0.01
   far: f32 = 10.0
   proj := linalg.matrix4_perspective(fov, aspect, near, far)
   frustum := geometry.make_frustum(proj)

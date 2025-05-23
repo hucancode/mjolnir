@@ -589,6 +589,9 @@ render_shadow_node_callback :: proc(
   aligned_scene_uniform_size := align_up(size_of(SceneUniform), min_alignment)
   #partial switch data in node_ptr.attachment {
   case NodeStaticMeshAttachment:
+    if !data.cast_shadow {
+      return true
+    }
     mesh_handle := data.handle
     mesh := resource.get(&eng.meshes, mesh_handle)
     if mesh == nil {return true}
@@ -647,6 +650,9 @@ render_shadow_node_callback :: proc(
     vk.CmdDrawIndexed(ctx.command_buffer, mesh.indices_len, 1, 0, 0, 0)
     ctx.obstacles_count^ += 1
   case NodeSkeletalMeshAttachment:
+    if !data.cast_shadow {
+      // return true
+    }
     mesh := resource.get(&eng.skeletal_meshes, data.handle)
     if mesh == nil {return true}
     world_aabb := geometry.aabb_transform(mesh.aabb, world_matrix)
@@ -659,21 +665,22 @@ render_shadow_node_callback :: proc(
     }
     material := resource.get(&eng.materials, mesh.material)
     if material == nil {return true}
-    features: u32 = SHADER_FEATURE_SKINNING
-    pipeline := shadow_pipelines[features]
-    layout := shadow_pipeline_layout
     descriptor_sets := [?]vk.DescriptorSet {
       renderer_get_camera_descriptor_set(&eng.renderer), // set 0
       material.skinning_descriptor_set, // set 1
     }
-    vk.CmdBindPipeline(ctx.command_buffer, .GRAPHICS, pipeline)
+    vk.CmdBindPipeline(
+      ctx.command_buffer,
+      .GRAPHICS,
+      shadow_pipelines[SHADER_FEATURE_SKINNING],
+    )
     offset_shadow :=
       (1 + shadow_idx * 6 + shadow_layer) * u32(aligned_scene_uniform_size)
     offsets := [1]u32{offset_shadow}
     vk.CmdBindDescriptorSets(
       ctx.command_buffer,
       .GRAPHICS,
-      layout,
+      shadow_pipeline_layout,
       0,
       len(descriptor_sets),
       raw_data(descriptor_sets[:]),
@@ -682,7 +689,7 @@ render_shadow_node_callback :: proc(
     )
     vk.CmdPushConstants(
       ctx.command_buffer,
-      layout,
+      shadow_pipeline_layout,
       {.VERTEX},
       0,
       size_of(linalg.Matrix4f32),
@@ -1143,10 +1150,13 @@ render_shadow_maps :: proc(
           light.radius,
         )
       } else {
+        // light.position = linalg.Vector4f32{0, 4, 0, 1}
+        // light.direction = linalg.Vector4f32{0, -4, 0, 0}
+        fmt.printfln("light at %v, dir %v", light.position, light.direction)
         view = linalg.matrix4_look_at(
           light.position.xyz,
           light.position.xyz + light.direction.xyz,
-          linalg.VECTOR3F32_Y_AXIS,
+          linalg.VECTOR3F32_X_AXIS,
         )
         proj = linalg.matrix4_perspective(light.angle, 1.0, 0.1, light.radius)
       }
@@ -1175,14 +1185,6 @@ render_shadow_maps :: proc(
         projection = proj,
       }
       offset_shadow := vk.DeviceSize(i * 6 + 1) * aligned_scene_uniform_size
-      fmt.printfln(
-        "Debug Shadow UBO Write (2D Light %d, Kind %v):",
-        i,
-        light.kind,
-      )
-      fmt.printfln("  Offset: %v bytes", offset_shadow)
-      fmt.printfln("  View: %v", view)
-      fmt.printfln("  Proj: %v", proj)
       data_buffer_write_at(
         renderer_get_camera_uniform(&engine.renderer),
         &shadow_scene_uniform,
@@ -1213,6 +1215,15 @@ render_shadow_maps :: proc(
         frustum         = geometry.make_frustum(proj * view),
       }
       traverse_scene(engine, &shadow_render_ctx, render_shadow_node_callback)
+      fmt.printfln(
+        "Debug Shadow UBO Write (2D Light %d, Kind %v):",
+        i,
+        light.kind,
+      )
+      fmt.printfln("  Offset: %v bytes", offset_shadow)
+      fmt.printfln("  View: %v", view)
+      fmt.printfln("  Proj: %v", proj)
+      fmt.printfln("  Hit: %v", obstacles_this_light)
       vk.CmdEndRenderingKHR(command_buffer)
     }
   }

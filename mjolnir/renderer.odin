@@ -23,9 +23,9 @@ SingleLightUniform :: struct {
   position:   Vec4,
   direction:  Vec4,
   kind:       enum u32 {
-    POINT,
-    DIRECTIONAL,
-    SPOT,
+    POINT       = 0,
+    DIRECTIONAL = 1,
+    SPOT        = 2,
   },
   angle:      f32, // For spotlight: cone angle
   radius:     f32, // For point/spot: attenuation radius
@@ -77,7 +77,7 @@ frame_init :: proc(self: ^Frame, ctx: ^VulkanContext) -> (res: vk.Result) {
   aligned_scene_uniform_size := align_up(size_of(SceneUniform), min_alignment)
   self.camera_uniform = create_host_visible_buffer(
     ctx,
-    (1+ 6*MAX_SCENE_UNIFORMS) * aligned_scene_uniform_size,
+    (1 + 6 * MAX_SCENE_UNIFORMS) * aligned_scene_uniform_size,
     {.UNIFORM_BUFFER},
   ) or_return
   self.light_uniform = create_host_visible_buffer(

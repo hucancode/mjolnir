@@ -61,21 +61,21 @@ FoundQueueFamilyIndices :: struct {
 
 // --- VulkanContext Definition ---
 VulkanContext :: struct {
-  window:               glfw.WindowHandle,
-  vki:                  vk.Instance,
-  vkd:                  vk.Device,
-  surface:              vk.SurfaceKHR,
-  surface_capabilities: vk.SurfaceCapabilitiesKHR,
-  surface_formats:      []vk.SurfaceFormatKHR, // Owned by VulkanContext
-  present_modes:        []vk.PresentModeKHR, // Owned by VulkanContext
-  debug_messenger:      vk.DebugUtilsMessengerEXT,
-  physical_device:      vk.PhysicalDevice,
-  graphics_family:      u32,
-  graphics_queue:       vk.Queue,
-  present_family:       u32,
-  present_queue:        vk.Queue,
-  descriptor_pool:      vk.DescriptorPool,
-  command_pool:         vk.CommandPool,
+  window:                     glfw.WindowHandle,
+  vki:                        vk.Instance,
+  vkd:                        vk.Device,
+  surface:                    vk.SurfaceKHR,
+  surface_capabilities:       vk.SurfaceCapabilitiesKHR,
+  surface_formats:            []vk.SurfaceFormatKHR, // Owned by VulkanContext
+  present_modes:              []vk.PresentModeKHR, // Owned by VulkanContext
+  debug_messenger:            vk.DebugUtilsMessengerEXT,
+  physical_device:            vk.PhysicalDevice,
+  graphics_family:            u32,
+  graphics_queue:             vk.Queue,
+  present_family:             u32,
+  present_queue:              vk.Queue,
+  descriptor_pool:            vk.DescriptorPool,
+  command_pool:               vk.CommandPool,
   physical_device_properties: vk.PhysicalDeviceProperties, // Added for device limits
 }
 
@@ -388,7 +388,10 @@ physical_device_init :: proc(self: ^VulkanContext) -> vk.Result {
     return .ERROR_INITIALIZATION_FAILED
   }
 
-  vk.GetPhysicalDeviceProperties(self.physical_device, &self.physical_device_properties)
+  vk.GetPhysicalDeviceProperties(
+    self.physical_device,
+    &self.physical_device_properties,
+  )
   fmt.printfln(
     "\nSelected physical device: %s (score %d)",
     cstring(&self.physical_device_properties.deviceName[0]),
