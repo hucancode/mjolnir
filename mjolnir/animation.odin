@@ -66,23 +66,23 @@ Pose :: struct {
   bone_matrices: []linalg.Matrix4f32, // for CPU, we update this to define the pose of the mesh
   // TODO: need 1 bone buffer per frame in flight
   bone_buffer:   DataBuffer, // for GPU, we upload data to the GPU so the shader can actually animate the mesh
-  vk_ctx_ref:    ^VulkanContext,
+  ctx:    ^VulkanContext,
 }
 
 pose_init :: proc(
   pose: ^Pose,
   joints_count: int,
-  vk_ctx: ^VulkanContext,
+  ctx: ^VulkanContext,
 ) -> vk.Result {
   fmt.printfln("init_pose: joints_count %d", joints_count)
-  pose.vk_ctx_ref = vk_ctx
+  pose.ctx = ctx
   pose.bone_matrices = make([]linalg.Matrix4f32, joints_count)
   for &m in pose.bone_matrices {
     m = linalg.MATRIX4F32_IDENTITY
   }
   buffer_size := size_of(linalg.Matrix4f32) * vk.DeviceSize(joints_count)
   pose.bone_buffer = create_host_visible_buffer(
-    vk_ctx,
+    ctx,
     buffer_size,
     {.STORAGE_BUFFER},
   ) or_return
@@ -91,7 +91,7 @@ pose_init :: proc(
 }
 
 pose_deinit :: proc(pose: ^Pose) {
-  data_buffer_deinit(&pose.bone_buffer, pose.vk_ctx_ref)
+  data_buffer_deinit(&pose.bone_buffer, pose.ctx)
   if pose.bone_matrices != nil {
     delete(pose.bone_matrices)
     pose.bone_matrices = nil

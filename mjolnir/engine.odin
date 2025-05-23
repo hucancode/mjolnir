@@ -41,19 +41,19 @@ CollectLightsContext :: struct {
 }
 
 RenderMeshesContext :: struct {
-  engine:               ^Engine,
-  command_buffer:       vk.CommandBuffer,
-  camera_frustum:       geometry.Frustum,
-  rendered_count:       ^u32,
-  camera_descriptor_set: vk.DescriptorSet,
+  engine:         ^Engine,
+  command_buffer: vk.CommandBuffer,
+  camera_frustum: geometry.Frustum,
+  rendered_count: ^u32,
 }
 
 ShadowRenderContext :: struct {
   engine:          ^Engine,
   command_buffer:  vk.CommandBuffer,
   obstacles_count: ^u32,
-  light_view_proj: linalg.Matrix4f32, // Added to pass light's VP matrix
-  descriptor_set: vk.DescriptorSet,
+  shadow_idx:      u32,
+  shadow_layer:    u32,
+  frustum:         geometry.Frustum,
 }
 
 InputState :: struct {
@@ -68,7 +68,7 @@ InputState :: struct {
 // --- Engine Struct ---
 Engine :: struct {
   window:                glfw.WindowHandle,
-  vk_ctx:                VulkanContext,
+  ctx:                   VulkanContext,
   renderer:              Renderer,
   scene:                 Scene,
   ui:                    UIRenderer,
@@ -136,7 +136,7 @@ engine_init :: proc(
   fmt.printf("Window created %v\n", engine.window)
 
   // Init Vulkan Context
-  vulkan_context_init(&engine.vk_ctx, engine.window) or_return
+  vulkan_context_init(&engine.ctx, engine.window) or_return
 
   engine.start_timestamp = time.now()
   engine.last_frame_timestamp = engine.start_timestamp
@@ -171,15 +171,8 @@ engine_init :: proc(
 
   fmt.println("All resource pools initialized successfully")
 
-  build_3d_pipelines(
-    &engine.vk_ctx,
-    .B8G8R8A8_SRGB,
-    .D32_SFLOAT,
-  ) or_return
-  build_shadow_pipelines(
-    &engine.vk_ctx,
-    .D32_SFLOAT,
-  ) or_return
+  build_3d_pipelines(&engine.ctx, .B8G8R8A8_SRGB, .D32_SFLOAT) or_return
+  build_shadow_pipelines(&engine.ctx, .D32_SFLOAT) or_return
   engine_build_scene(engine)
   engine_build_renderer(engine) or_return
 
@@ -295,16 +288,15 @@ query_swapchain_support :: proc(
 }
 
 engine_build_renderer :: proc(engine: ^Engine) -> vk.Result {
-  renderer_init(&engine.renderer, &engine.vk_ctx) or_return
-
+  renderer_init(&engine.renderer, &engine.ctx) or_return
   indices := find_queue_families(
-    engine.vk_ctx.physical_device,
-    engine.vk_ctx.surface,
+    engine.ctx.physical_device,
+    engine.ctx.surface,
   ) or_return
 
   support := query_swapchain_support(
-    engine.vk_ctx.physical_device,
-    engine.vk_ctx.surface,
+    engine.ctx.physical_device,
+    engine.ctx.surface,
   ) or_return
   defer swapchain_support_deinit(&support)
 
@@ -325,7 +317,7 @@ engine_build_renderer :: proc(engine: ^Engine) -> vk.Result {
   renderer_build_synchronizers(&engine.renderer) or_return
 
   engine.renderer.depth_buffer = create_depth_image(
-    &engine.vk_ctx,
+    &engine.ctx,
     engine.renderer.extent.width,
     engine.renderer.extent.height,
   ) or_return
@@ -415,22 +407,22 @@ collect_lights_callback :: proc(
     uniform: SingleLightUniform
     #partial switch light_type in light_obj {
     case PointLight:
-      uniform.kind = 0
+      uniform.kind = .POINT
       uniform.color = light_type.color
       uniform.radius = light_type.radius
-      uniform.has_shadow = light_type.cast_shadow ? 1 : 0
+      uniform.has_shadow = b32(light_type.cast_shadow)
       uniform.position = world_matrix^ * linalg.Vector4f32{0, 0, 0, 1}
     case DirectionalLight:
-      uniform.kind = 1
+      uniform.kind = .DIRECTIONAL
       uniform.color = light_type.color
-      uniform.has_shadow = light_type.cast_shadow ? 1 : 0
+      uniform.has_shadow = b32(light_type.cast_shadow)
       uniform.position = world_matrix^ * linalg.Vector4f32{0, 0, 0, 1}
-      uniform.direction = world_matrix^ * linalg.Vector4f32{0, 0, 1, 0}  // Assuming +Z is forward
+      uniform.direction = world_matrix^ * linalg.Vector4f32{0, 0, 1, 0} // Assuming +Z is forward
     case SpotLight:
-      uniform.kind = 2
+      uniform.kind = .SPOT
       uniform.color = light_type.color
       uniform.radius = light_type.radius
-      uniform.has_shadow = light_type.cast_shadow ? 1 : 0
+      uniform.has_shadow = b32(light_type.cast_shadow)
       uniform.angle = light_type.angle
       uniform.position = world_matrix^ * linalg.Vector4f32{0, 0, 0, 1}
       uniform.direction = world_matrix^ * linalg.Vector4f32{0, 0, 1, 0}
@@ -472,14 +464,15 @@ render_scene_node_callback :: proc(
       data.pose.bone_buffer.size,
     )
     pipeline := pipelines[material.features]
-    pipeline_layout := pipeline_layouts[material.features]
-    descriptor_sets := [?]vk.DescriptorSet {
-      ctx.camera_descriptor_set,
-      material.texture_descriptor_set,
-      material.skinning_descriptor_set,
-    }
     // fmt.printfln("rendering skeletal mesh with material %v", material)
     vk.CmdBindPipeline(ctx.command_buffer, .GRAPHICS, pipeline)
+    // Bind all required descriptor sets (set 0: camera+shadow+cube shadow, set 1: material, set 2: skinning)
+    descriptor_sets := [?]vk.DescriptorSet {
+      renderer_get_camera_descriptor_set(&eng.renderer), // set 0 (merged)
+      material.texture_descriptor_set, // set 1
+      material.skinning_descriptor_set, // set 2
+    }
+    offsets := [1]u32{0}
     vk.CmdBindDescriptorSets(
       ctx.command_buffer,
       .GRAPHICS,
@@ -487,8 +480,8 @@ render_scene_node_callback :: proc(
       0,
       u32(len(descriptor_sets)),
       raw_data(descriptor_sets[:]),
-      0,
-      nil,
+      len(offsets),
+      raw_data(offsets[:]),
     )
     vk.CmdPushConstants(
       ctx.command_buffer,
@@ -535,11 +528,13 @@ render_scene_node_callback :: proc(
       return true
     }
     pipeline := pipelines[material.features]
-    pipeline_layout := pipeline_layouts[material.features]
+    // Bind all required descriptor sets (set 0: camera+shadow+cube shadow, set 1: material, set 2: skinning)
     descriptor_sets := [?]vk.DescriptorSet {
-      ctx.camera_descriptor_set,
-      material.texture_descriptor_set,
+      renderer_get_camera_descriptor_set(&eng.renderer), // set 0 (merged)
+      material.texture_descriptor_set, // set 1
+      material.skinning_descriptor_set, // set 2
     }
+    offsets := [1]u32{0}
     vk.CmdBindPipeline(ctx.command_buffer, .GRAPHICS, pipeline)
     vk.CmdBindDescriptorSets(
       ctx.command_buffer,
@@ -548,8 +543,8 @@ render_scene_node_callback :: proc(
       0,
       u32(len(descriptor_sets)),
       raw_data(descriptor_sets[:]),
-      0,
-      nil,
+      len(offsets),
+      raw_data(offsets[:]),
     )
     vk.CmdPushConstants(
       ctx.command_buffer,
@@ -587,30 +582,48 @@ render_shadow_node_callback :: proc(
   cb_context: rawptr,
 ) -> bool {
   ctx := (^ShadowRenderContext)(cb_context)
-
+  shadow_idx := ctx.shadow_idx
+  shadow_layer := ctx.shadow_layer
+  min_alignment :=
+    eng.ctx.physical_device_properties.limits.minUniformBufferOffsetAlignment
+  aligned_scene_uniform_size := align_up(size_of(SceneUniform), min_alignment)
   #partial switch data in node_ptr.attachment {
   case NodeStaticMeshAttachment:
+    if !data.cast_shadow {
+      return true
+    }
     mesh_handle := data.handle
     mesh := resource.get(&eng.meshes, mesh_handle)
     if mesh == nil {return true}
+    world_aabb := geometry.aabb_transform(mesh.aabb, world_matrix)
+    if !geometry.frustum_test_aabb(
+      &ctx.frustum,
+      world_aabb.min.xyz,
+      world_aabb.max.xyz,
+    ) {
+      return true
+    }
     material := resource.get(&eng.materials, mesh.material)
     if material == nil {return true}
     features: u32 = 0
     pipeline := shadow_pipelines[features]
-    layout := shadow_pipeline_layouts[features]
+    layout := shadow_pipeline_layout
     descriptor_sets := [?]vk.DescriptorSet {
-      ctx.descriptor_set, // set 0
+      renderer_get_camera_descriptor_set(&eng.renderer), // set 0
     }
     vk.CmdBindPipeline(ctx.command_buffer, .GRAPHICS, pipeline)
+    offset_shadow :=
+      (1 + shadow_idx * 6 + shadow_layer) * u32(aligned_scene_uniform_size)
+    offsets := [1]u32{offset_shadow}
     vk.CmdBindDescriptorSets(
       ctx.command_buffer,
       .GRAPHICS,
       layout,
       0,
-      u32(len(descriptor_sets)),
+      len(descriptor_sets),
       raw_data(descriptor_sets[:]),
-      0,
-      nil,
+      len(offsets),
+      raw_data(offsets[:]),
     )
     vk.CmdPushConstants(
       ctx.command_buffer,
@@ -637,31 +650,46 @@ render_shadow_node_callback :: proc(
     vk.CmdDrawIndexed(ctx.command_buffer, mesh.indices_len, 1, 0, 0, 0)
     ctx.obstacles_count^ += 1
   case NodeSkeletalMeshAttachment:
+    if !data.cast_shadow {
+      // return true
+    }
     mesh := resource.get(&eng.skeletal_meshes, data.handle)
     if mesh == nil {return true}
+    world_aabb := geometry.aabb_transform(mesh.aabb, world_matrix)
+    if !geometry.frustum_test_aabb(
+      &ctx.frustum,
+      world_aabb.min.xyz,
+      world_aabb.max.xyz,
+    ) {
+      return true
+    }
     material := resource.get(&eng.materials, mesh.material)
     if material == nil {return true}
-    features: u32 = SHADER_FEATURE_SKINNING
-    pipeline := shadow_pipelines[features]
-    layout := shadow_pipeline_layouts[features]
     descriptor_sets := [?]vk.DescriptorSet {
-      ctx.descriptor_set, // set 0
+      renderer_get_camera_descriptor_set(&eng.renderer), // set 0
       material.skinning_descriptor_set, // set 1
     }
-    vk.CmdBindPipeline(ctx.command_buffer, .GRAPHICS, pipeline)
+    vk.CmdBindPipeline(
+      ctx.command_buffer,
+      .GRAPHICS,
+      shadow_pipelines[SHADER_FEATURE_SKINNING],
+    )
+    offset_shadow :=
+      (1 + shadow_idx * 6 + shadow_layer) * u32(aligned_scene_uniform_size)
+    offsets := [1]u32{offset_shadow}
     vk.CmdBindDescriptorSets(
       ctx.command_buffer,
       .GRAPHICS,
-      layout,
+      shadow_pipeline_layout,
       0,
-      u32(len(descriptor_sets)),
+      len(descriptor_sets),
       raw_data(descriptor_sets[:]),
-      0,
-      nil,
+      len(offsets),
+      raw_data(offsets[:]),
     )
     vk.CmdPushConstants(
       ctx.command_buffer,
-      layout,
+      shadow_pipeline_layout,
       {.VERTEX},
       0,
       size_of(linalg.Matrix4f32),
@@ -695,21 +723,43 @@ render_shadow_node_callback :: proc(
 }
 
 try_render :: proc(engine: ^Engine) -> vk.Result {
-  elapsed_seconds := time.duration_seconds(time.since(engine.start_timestamp))
+  // --- Optimal Frame Render Flow ---
+  ctx := engine.renderer.ctx
+  current_fence := renderer_get_in_flight_fence(&engine.renderer)
+  // 1. Wait for previous frame's completion
+  vk.WaitForFences(ctx.vkd, 1, &current_fence, true, math.max(u64)) or_return
+  // 2. Reset frame fence
+  vk.ResetFences(ctx.vkd, 1, &current_fence) or_return
+  // 3. Acquire next swapchain image
+  image_idx: u32
+  current_image_available_semaphore := renderer_get_image_available_semaphore(
+    &engine.renderer,
+  )
+  vk.AcquireNextImageKHR(
+    ctx.vkd,
+    engine.renderer.swapchain,
+    math.max(u64),
+    current_image_available_semaphore,
+    0,
+    &image_idx,
+  ) or_return
+  // 4. Reset and begin command buffer
+  command_buffer := renderer_get_command_buffer(&engine.renderer)
+  vk.ResetCommandBuffer(command_buffer, {}) or_return
+  begin_info := vk.CommandBufferBeginInfo {
+    sType = .COMMAND_BUFFER_BEGIN_INFO,
+    flags = {.ONE_TIME_SUBMIT},
+  }
+  vk.BeginCommandBuffer(command_buffer, &begin_info) or_return
 
+  elapsed_seconds := time.duration_seconds(time.since(engine.start_timestamp))
   scene_uniform := SceneUniform {
     view       = camera_calculate_view_matrix(&engine.scene.camera),
     projection = camera_calculate_projection_matrix(&engine.scene.camera),
     time       = f32(elapsed_seconds),
   }
-  // fmt.printfln("[RENDER] Starting try_render")
-  // fmt.printfln("Scene uniform: %v", scene_uniform)
-
   light_uniform: SceneLightUniform
-
-  // fmt.printfln("Camera %v", engine.scene.camera)
   camera_frustum := camera_make_frustum(&engine.scene.camera)
-
   // Collect Lights
   collect_ctx := CollectLightsContext {
     engine        = engine,
@@ -717,35 +767,102 @@ try_render :: proc(engine: ^Engine) -> vk.Result {
   }
   if !traverse_scene(engine, &collect_ctx, collect_lights_callback) {
     fmt.eprintln("[RENDER] Error during light collection")
-    // return false
   }
-  // fmt.printfln("[RENDER] Collected %d lights", light_uniform.light_count)
-
-  render_shadow_maps(engine, &light_uniform) or_return
-  // fmt.printfln("[RENDER] Finished shadow map rendering")
-
+  // --- Shadow Pass (all lights, in this command buffer) ---
+  num_shadow_passes := light_uniform.light_count
+  render_shadow_maps(
+    engine,
+    &light_uniform,
+    command_buffer,
+    num_shadow_passes,
+  ) or_return
+  // --- Main Pass ---
+  fmt.printfln("============ rendering main pass =============")
+  // Transition swapchain image to color attachment
+  barrier := vk.ImageMemoryBarrier {
+    sType = .IMAGE_MEMORY_BARRIER,
+    oldLayout = .UNDEFINED,
+    newLayout = .COLOR_ATTACHMENT_OPTIMAL,
+    srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    image = engine.renderer.images[image_idx],
+    subresourceRange = vk.ImageSubresourceRange {
+      aspectMask = {.COLOR},
+      baseMipLevel = 0,
+      levelCount = 1,
+      baseArrayLayer = 0,
+      layerCount = 1,
+    },
+    dstAccessMask = {.COLOR_ATTACHMENT_WRITE},
+  }
+  vk.CmdPipelineBarrier(
+    command_buffer,
+    {.TOP_OF_PIPE},
+    {.COLOR_ATTACHMENT_OUTPUT},
+    {},
+    0,
+    nil,
+    0,
+    nil,
+    1,
+    &barrier,
+  )
   // Begin Main Render Pass
-  image_idx := renderer_begin_frame(&engine.renderer) or_return
-  command_buffer_main := renderer_get_command_buffer(&engine.renderer)
-
+  color_attachment := vk.RenderingAttachmentInfoKHR {
+    sType = .RENDERING_ATTACHMENT_INFO_KHR,
+    imageView = engine.renderer.views[image_idx],
+    imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
+    loadOp = .CLEAR,
+    storeOp = .STORE,
+    clearValue = vk.ClearValue {
+      color = {float32 = {0.0117, 0.0117, 0.0179, 1.0}},
+    },
+  }
+  depth_attachment := vk.RenderingAttachmentInfoKHR {
+    sType = .RENDERING_ATTACHMENT_INFO_KHR,
+    imageView = engine.renderer.depth_buffer.view,
+    imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+    loadOp = .CLEAR,
+    storeOp = .STORE,
+    clearValue = vk.ClearValue{depthStencil = {1.0, 0}},
+  }
+  render_info := vk.RenderingInfoKHR {
+    sType = .RENDERING_INFO_KHR,
+    renderArea = vk.Rect2D{extent = engine.renderer.extent},
+    layerCount = 1,
+    colorAttachmentCount = 1,
+    pColorAttachments = &color_attachment,
+    pDepthAttachment = &depth_attachment,
+  }
+  vk.CmdBeginRenderingKHR(command_buffer, &render_info)
+  // Set viewport and scissor
+  viewport := vk.Viewport {
+    x        = 0.0,
+    y        = f32(engine.renderer.extent.height),
+    width    = f32(engine.renderer.extent.width),
+    height   = -f32(engine.renderer.extent.height),
+    minDepth = 0.0,
+    maxDepth = 1.0,
+  }
+  scissor := vk.Rect2D {
+    extent = engine.renderer.extent,
+  }
+  vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
+  vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
   // Render Scene Meshes
   rendered_count: u32 = 0
   render_meshes_ctx := RenderMeshesContext {
-    engine               = engine,
-    command_buffer       = command_buffer_main,
-    camera_frustum       = camera_frustum,
-    rendered_count       = &rendered_count,
-    camera_descriptor_set = renderer_get_camera_descriptor_set(&engine.renderer),
+    engine         = engine,
+    command_buffer = command_buffer,
+    camera_frustum = camera_frustum,
+    rendered_count = &rendered_count,
   }
   if !traverse_scene(engine, &render_meshes_ctx, render_scene_node_callback) {
     fmt.eprintln("[RENDER] Error during scene mesh rendering")
-    // return false
   }
-  // fmt.printfln("[RENDER] Rendered %d meshes", rendered_count)
-
   // Update Uniforms
   data_buffer_write(
-    renderer_get_scene_uniform(&engine.renderer),
+    renderer_get_camera_uniform(&engine.renderer),
     &scene_uniform,
     size_of(SceneUniform),
   )
@@ -754,152 +871,143 @@ try_render :: proc(engine: ^Engine) -> vk.Result {
     &light_uniform,
     size_of(SceneLightUniform),
   )
-
   if engine.render3d_proc != nil {
-    // fmt.printfln("[RENDER] Calling render3d_proc")
     engine.render3d_proc(engine)
   }
-  ctx := &engine.ui.ctx
-  mu.begin(ctx)
-  if mu.window(ctx, "Inspector", {40, 40, 300, 150}, {.NO_CLOSE}) {
+  ctx_ui := &engine.ui.ctx
+  mu.begin(ctx_ui)
+  if mu.window(ctx_ui, "Inspector", {40, 40, 300, 150}, {.NO_CLOSE}) {
     mu.label(
-      ctx,
+      ctx_ui,
       fmt.tprintf(
         "Objects %d",
         len(engine.nodes.entries) - len(engine.nodes.free_indices),
       ),
     )
     mu.label(
-      ctx,
+      ctx_ui,
       fmt.tprintf(
         "Lights %d",
         len(engine.lights.entries) - len(engine.lights.free_indices),
       ),
     )
-    mu.label(ctx, fmt.tprintf("Rendered %d", rendered_count))
+    mu.label(ctx_ui, fmt.tprintf("Rendered %d", rendered_count))
   }
   if engine.render2d_proc != nil {
-    engine.render2d_proc(engine, ctx)
+    engine.render2d_proc(engine, ctx_ui)
   }
-  mu.end(ctx)
-  ui_render(&engine.ui, command_buffer_main)
-  renderer_end_frame(&engine.renderer, image_idx) or_return
-  // fmt.printfln("[RENDER] End of try_render")
+  mu.end(ctx_ui)
+  ui_render(&engine.ui, command_buffer)
+  vk.CmdEndRenderingKHR(command_buffer)
+  // Transition image to present layout
+  present_barrier := vk.ImageMemoryBarrier {
+    sType = .IMAGE_MEMORY_BARRIER,
+    oldLayout = .COLOR_ATTACHMENT_OPTIMAL,
+    newLayout = .PRESENT_SRC_KHR,
+    srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    image = engine.renderer.images[image_idx],
+    subresourceRange = vk.ImageSubresourceRange {
+      aspectMask = {.COLOR},
+      baseMipLevel = 0,
+      levelCount = 1,
+      baseArrayLayer = 0,
+      layerCount = 1,
+    },
+    srcAccessMask = {.COLOR_ATTACHMENT_WRITE},
+  }
+  vk.CmdPipelineBarrier(
+    command_buffer,
+    {.COLOR_ATTACHMENT_OUTPUT},
+    {.BOTTOM_OF_PIPE},
+    {},
+    0,
+    nil,
+    0,
+    nil,
+    1,
+    &present_barrier,
+  )
+  // End and submit command buffer
+  vk.EndCommandBuffer(command_buffer) or_return
+  current_render_finished_semaphore := renderer_get_render_finished_semaphore(
+    &engine.renderer,
+  )
+  wait_stage_mask: vk.PipelineStageFlags = {.COLOR_ATTACHMENT_OUTPUT}
+  submit_info := vk.SubmitInfo {
+    sType                = .SUBMIT_INFO,
+    waitSemaphoreCount   = 1,
+    pWaitSemaphores      = &current_image_available_semaphore,
+    pWaitDstStageMask    = &wait_stage_mask,
+    commandBufferCount   = 1,
+    pCommandBuffers      = &command_buffer,
+    signalSemaphoreCount = 1,
+    pSignalSemaphores    = &current_render_finished_semaphore,
+  }
+  vk.QueueSubmit(ctx.graphics_queue, 1, &submit_info, current_fence) or_return
+  // Present
+  image_indices := [?]u32{image_idx}
+  present_info := vk.PresentInfoKHR {
+    sType              = .PRESENT_INFO_KHR,
+    waitSemaphoreCount = 1,
+    pWaitSemaphores    = &current_render_finished_semaphore,
+    swapchainCount     = 1,
+    pSwapchains        = &engine.renderer.swapchain,
+    pImageIndices      = raw_data(image_indices[:]),
+  }
+  vk.QueuePresentKHR(ctx.present_queue, &present_info) or_return
+  // Advance to next frame
+  engine.renderer.current_frame_index =
+    (engine.renderer.current_frame_index + 1) % MAX_FRAMES_IN_FLIGHT
   return .SUCCESS
-}
-
-engine_render :: proc(engine: ^Engine) {
-  if time.duration_milliseconds(time.since(engine.last_frame_timestamp)) <
-     FRAME_TIME_MILIS {
-    return
-  }
-  res := try_render(engine)
-  if res == .ERROR_OUT_OF_DATE_KHR || res == .SUBOPTIMAL_KHR {
-    engine_recreate_swapchain(engine)
-  } else if res != .SUCCESS {
-    fmt.eprintln("Error during rendering")
-  }
-  engine.last_frame_timestamp = time.now()
 }
 
 render_shadow_maps :: proc(
   engine: ^Engine,
   light_uniform: ^SceneLightUniform,
+  command_buffer: vk.CommandBuffer,
+  num_shadow_passes: u32,
 ) -> vk.Result {
-  total_obstacles: u32 = 0
-
   for i := 0; i < int(light_uniform.light_count); i += 1 {
-    light := &light_uniform.lights[i]
-    if light.has_shadow == 0 || i >= MAX_SHADOW_MAPS {continue}
-
+    cube_shadow := renderer_get_cube_shadow_map(&engine.renderer, i)
     shadow_map_texture := renderer_get_shadow_map(&engine.renderer, i)
-
-    light_pos_3d := light.position.xyz
-    light_dir_3d := linalg.normalize(light.direction.xyz)
-
-    switch light.kind {
-    case 0:
-      look_target := light_pos_3d + light_dir_3d // Example target
-      light_view := linalg.matrix4_look_at(
-        light_pos_3d,
-        look_target,
-        linalg.VECTOR3F32_Y_AXIS,
-      )
-      light_proj := linalg.matrix4_perspective(
-        math.PI * 2,
-        1.0,
-        0.1,
-        light.radius,
-      )
-      light.view_proj = light_proj * light_view
-    case 1:
-      look_target := light_pos_3d + light_dir_3d
-      light_view := linalg.matrix4_look_at(
-        light_pos_3d,
-        look_target,
-        linalg.VECTOR3F32_Y_AXIS,
-      )
-      // Ortho size needs to encompass the visible scene from light's POV
-      ortho_size: f32 = 20.0 // Example, should be dynamic
-      light_proj := linalg.matrix_ortho3d(
-        -ortho_size,
-        ortho_size,
-        -ortho_size,
-        ortho_size,
-        0.1,
-        light.radius,
-      )
-      light.view_proj = light_proj * light_view
-    case 2:
-      // Spot
-      look_target := light_pos_3d + light_dir_3d
-      light_view := linalg.matrix4_look_at(
-        light_pos_3d,
-        look_target,
-        linalg.VECTOR3F32_Y_AXIS,
-      )
-      light_proj := linalg.matrix4_perspective(
-        light.angle,
-        1.0,
-        0.1,
-        light.radius,
-      )
-      light.view_proj = light_proj * light_view
-    case:
-    }
-    // fmt.printfln("Light view_proj matrix for shadow pass: %v", light_vp)
-
-    // TODO: shadow rendering could benefit from parallel rendering, recheck synchronization in this part
-
-    shadow_cmd_buffer := renderer_get_command_buffer(&engine.renderer)
-    vk.ResetCommandBuffer(shadow_cmd_buffer, {}) or_return
-    vk.BeginCommandBuffer(
-      shadow_cmd_buffer,
-      &vk.CommandBufferBeginInfo {
-        sType = .COMMAND_BUFFER_BEGIN_INFO,
-        flags = {.ONE_TIME_SUBMIT},
-      },
-    ) or_return
-
     // Transition shadow map to depth attachment
-    initial_barrier := vk.ImageMemoryBarrier {
-      sType = .IMAGE_MEMORY_BARRIER,
-      oldLayout = .UNDEFINED,
-      newLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-      srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-      dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-      image = shadow_map_texture.buffer.image,
-      subresourceRange = vk.ImageSubresourceRange {
-        aspectMask = {.DEPTH},
-        baseMipLevel = 0,
-        levelCount = 1,
-        baseArrayLayer = 0,
-        layerCount = 1,
+    initial_barriers := [2]vk.ImageMemoryBarrier {
+      {
+        sType = .IMAGE_MEMORY_BARRIER,
+        oldLayout = .UNDEFINED,
+        newLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+        srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+        dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+        image = cube_shadow.buffer.image,
+        subresourceRange = vk.ImageSubresourceRange {
+          aspectMask = {.DEPTH},
+          baseMipLevel = 0,
+          levelCount = 1,
+          baseArrayLayer = 0,
+          layerCount = 6,
+        },
+        dstAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE},
       },
-      dstAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE},
+      {
+        sType = .IMAGE_MEMORY_BARRIER,
+        oldLayout = .UNDEFINED,
+        newLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+        srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+        dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+        image = shadow_map_texture.buffer.image,
+        subresourceRange = vk.ImageSubresourceRange {
+          aspectMask = {.DEPTH},
+          baseMipLevel = 0,
+          levelCount = 1,
+          baseArrayLayer = 0,
+          layerCount = 1,
+        },
+        dstAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE},
+      },
     }
     vk.CmdPipelineBarrier(
-      shadow_cmd_buffer,
+      command_buffer,
       {.TOP_OF_PIPE},
       {.EARLY_FRAGMENT_TESTS},
       {},
@@ -907,89 +1015,259 @@ render_shadow_maps :: proc(
       nil,
       0,
       nil,
-      1,
-      &initial_barrier,
+      len(initial_barriers),
+      raw_data(initial_barriers[:]),
     )
-
-    depth_attachment := vk.RenderingAttachmentInfoKHR {
-      sType = .RENDERING_ATTACHMENT_INFO_KHR,
-      imageView = shadow_map_texture.buffer.view,
-      imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-      loadOp = .CLEAR,
-      storeOp = .STORE,
-      clearValue = vk.ClearValue{depthStencil = {depth = 1.0}},
+  }
+  aligned_scene_uniform_size := align_up(
+    size_of(SceneUniform),
+    engine.ctx.physical_device_properties.limits.minUniformBufferOffsetAlignment,
+  )
+  for i := 0; i < int(light_uniform.light_count); i += 1 {
+    light := &light_uniform.lights[i]
+    if !light.has_shadow || i >= MAX_SHADOW_MAPS {
+      continue
     }
-    render_info_khr := vk.RenderingInfoKHR {
-      sType = .RENDERING_INFO_KHR,
-      renderArea = {
+    if light.kind == .POINT {   // Point light (cube shadow map)
+      cube_shadow := renderer_get_cube_shadow_map(&engine.renderer, i)
+      light_pos := light.position.xyz
+      // Cube face directions and up vectors
+      face_dirs := [6][3]f32 {
+        {1, 0, 0},
+        {-1, 0, 0},
+        {0, 1, 0},
+        {0, -1, 0},
+        {0, 0, 1},
+        {0, 0, -1},
+      }
+      face_ups := [6][3]f32 {
+        {0, -1, 0},
+        {0, -1, 0},
+        {0, 0, 1},
+        {0, 0, -1},
+        {0, -1, 0},
+        {0, -1, 0},
+      }
+      proj := linalg.matrix4_perspective(math.PI * 0.5, 1.0, 0.1, light.radius)
+      for face in 0 ..< 6 {
+        // Per-face rendering and layout transition
+        view := linalg.matrix4_look_at(
+          light_pos,
+          light_pos + face_dirs[face],
+          face_ups[face],
+        )
+        face_depth_attachment := vk.RenderingAttachmentInfoKHR {
+          sType = .RENDERING_ATTACHMENT_INFO_KHR,
+          imageView = cube_shadow.views[face],
+          imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+          loadOp = .CLEAR,
+          storeOp = .STORE,
+          clearValue = vk.ClearValue{depthStencil = {depth = 1.0}},
+        }
+        face_render_info := vk.RenderingInfoKHR {
+          sType = .RENDERING_INFO_KHR,
+          renderArea = {
+            extent = {
+              width = cube_shadow.buffer.width,
+              height = cube_shadow.buffer.height,
+            },
+          },
+          layerCount = 1,
+          pDepthAttachment = &face_depth_attachment,
+        }
+        viewport := vk.Viewport {
+          width    = f32(cube_shadow.buffer.width),
+          height   = f32(cube_shadow.buffer.height),
+          minDepth = 0.0,
+          maxDepth = 1.0,
+        }
+        scissor := vk.Rect2D {
+          extent = {
+            width = cube_shadow.buffer.width,
+            height = cube_shadow.buffer.height,
+          },
+        }
+        shadow_scene_uniform := SceneUniform {
+          view       = view,
+          projection = proj,
+        }
+        offset_shadow :=
+          vk.DeviceSize(i * 6 + face + 1) * aligned_scene_uniform_size
+        fmt.printfln(
+          "Debug Shadow UBO Write (Point Light %d, Face %d):",
+          i,
+          face,
+        )
+        fmt.printfln("  Offset: %v bytes", offset_shadow)
+        fmt.printfln("  View: %v", view)
+        fmt.printfln("  Proj: %v", proj)
+        data_buffer_write_at(
+          renderer_get_camera_uniform(&engine.renderer),
+          &shadow_scene_uniform,
+          offset_shadow,
+          size_of(SceneUniform),
+        )
+        vk.CmdBeginRenderingKHR(command_buffer, &face_render_info)
+        vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
+        vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
+        obstacles_this_light: u32 = 0
+        shadow_render_ctx := ShadowRenderContext {
+          engine          = engine,
+          command_buffer  = command_buffer,
+          obstacles_count = &obstacles_this_light,
+          shadow_idx      = u32(i),
+          shadow_layer    = u32(face),
+          frustum         = geometry.make_frustum(proj * view),
+        }
+        traverse_scene(engine, &shadow_render_ctx, render_shadow_node_callback)
+        vk.CmdEndRenderingKHR(command_buffer)
+        fmt.printfln(
+          "cube shadow pass %d, face %d, rendered %d objects with view %v proj %v",
+          i,
+          face,
+          obstacles_this_light,
+          view,
+          proj,
+        )
+      }
+    } else {   // 2D shadow map for other lights
+      shadow_map_texture := renderer_get_shadow_map(&engine.renderer, i)
+      view: linalg.Matrix4f32
+      proj: linalg.Matrix4f32
+      if light.kind == .DIRECTIONAL {
+        view = linalg.matrix4_look_at(
+          light.position.xyz,
+          light.position.xyz + light.direction.xyz,
+          linalg.VECTOR3F32_Y_AXIS,
+        )
+        ortho_size: f32 = 20.0
+        proj = linalg.matrix_ortho3d(
+          -ortho_size,
+          ortho_size,
+          -ortho_size,
+          ortho_size,
+          0.1,
+          light.radius,
+        )
+      } else {
+        // light.position = linalg.Vector4f32{0, 4, 0, 1}
+        // light.direction = linalg.Vector4f32{0, -4, 0, 0}
+        fmt.printfln("light at %v, dir %v", light.position, light.direction)
+        view = linalg.matrix4_look_at(
+          light.position.xyz,
+          light.position.xyz + light.direction.xyz,
+          linalg.VECTOR3F32_X_AXIS,
+        )
+        proj = linalg.matrix4_perspective(light.angle, 1.0, 0.1, light.radius)
+      }
+      light.view_proj = proj * view
+      depth_attachment := vk.RenderingAttachmentInfoKHR {
+        sType = .RENDERING_ATTACHMENT_INFO_KHR,
+        imageView = shadow_map_texture.buffer.view,
+        imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+        loadOp = .CLEAR,
+        storeOp = .STORE,
+        clearValue = vk.ClearValue{depthStencil = {depth = 1.0}},
+      }
+      render_info_khr := vk.RenderingInfoKHR {
+        sType = .RENDERING_INFO_KHR,
+        renderArea = {
+          extent = {
+            width = shadow_map_texture.buffer.width,
+            height = shadow_map_texture.buffer.height,
+          },
+        },
+        layerCount = 1,
+        pDepthAttachment = &depth_attachment,
+      }
+      shadow_scene_uniform := SceneUniform {
+        view       = view,
+        projection = proj,
+      }
+      offset_shadow := vk.DeviceSize(i * 6 + 1) * aligned_scene_uniform_size
+      data_buffer_write_at(
+        renderer_get_camera_uniform(&engine.renderer),
+        &shadow_scene_uniform,
+        offset_shadow,
+        size_of(SceneUniform),
+      )
+      vk.CmdBeginRenderingKHR(command_buffer, &render_info_khr)
+      viewport := vk.Viewport {
+        width    = f32(shadow_map_texture.buffer.width),
+        height   = f32(shadow_map_texture.buffer.height),
+        minDepth = 0.0,
+        maxDepth = 1.0,
+      }
+      scissor := vk.Rect2D {
         extent = {
           width = shadow_map_texture.buffer.width,
           height = shadow_map_texture.buffer.height,
         },
+      }
+      vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
+      vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
+      obstacles_this_light: u32 = 0
+      shadow_render_ctx := ShadowRenderContext {
+        engine          = engine,
+        command_buffer  = command_buffer,
+        obstacles_count = &obstacles_this_light,
+        shadow_idx      = u32(i),
+        frustum         = geometry.make_frustum(proj * view),
+      }
+      traverse_scene(engine, &shadow_render_ctx, render_shadow_node_callback)
+      fmt.printfln(
+        "Debug Shadow UBO Write (2D Light %d, Kind %v):",
+        i,
+        light.kind,
+      )
+      fmt.printfln("  Offset: %v bytes", offset_shadow)
+      fmt.printfln("  View: %v", view)
+      fmt.printfln("  Proj: %v", proj)
+      fmt.printfln("  Hit: %v", obstacles_this_light)
+      vk.CmdEndRenderingKHR(command_buffer)
+    }
+  }
+  for i := 0; i < int(light_uniform.light_count); i += 1 {
+    cube_shadow := renderer_get_cube_shadow_map(&engine.renderer, i)
+    shadow_map_texture := renderer_get_shadow_map(&engine.renderer, i)
+    final_barriers := [2]vk.ImageMemoryBarrier {
+      {
+        sType = .IMAGE_MEMORY_BARRIER,
+        oldLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+        newLayout = .SHADER_READ_ONLY_OPTIMAL,
+        srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+        dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+        image = cube_shadow.buffer.image,
+        subresourceRange = vk.ImageSubresourceRange {
+          aspectMask = {.DEPTH},
+          baseMipLevel = 0,
+          levelCount = 1,
+          baseArrayLayer = 0,
+          layerCount = 6,
+        },
+        srcAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE},
+        dstAccessMask = {.SHADER_READ},
       },
-      layerCount = 1,
-      pDepthAttachment = &depth_attachment,
-    }
-    // Update scene uniform with light's view/proj for shadow pass, TODO: it's confusing that view is both view_proj and proj is identity
-    shadow_scene_uniform := SceneUniform {
-      view       = light.view_proj,
-      projection = linalg.MATRIX4F32_IDENTITY,
-    }
-    data_buffer_write(
-      renderer_get_scene_uniform(&engine.renderer),
-      &shadow_scene_uniform,
-      size_of(SceneUniform),
-    )
-    vk.CmdBeginRenderingKHR(shadow_cmd_buffer, &render_info_khr)
-
-    viewport := vk.Viewport {
-      width    = f32(shadow_map_texture.buffer.width),
-      height   = f32(shadow_map_texture.buffer.height),
-      minDepth = 0.0,
-      maxDepth = 1.0,
-    }
-    scissor := vk.Rect2D {
-      extent = {
-        width = shadow_map_texture.buffer.width,
-        height = shadow_map_texture.buffer.height,
+      {
+        sType = .IMAGE_MEMORY_BARRIER,
+        oldLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+        newLayout = .SHADER_READ_ONLY_OPTIMAL,
+        srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+        dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+        image = shadow_map_texture.buffer.image,
+        subresourceRange = vk.ImageSubresourceRange {
+          aspectMask = {.DEPTH},
+          baseMipLevel = 0,
+          levelCount = 1,
+          baseArrayLayer = 0,
+          layerCount = 1,
+        },
+        srcAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE},
+        dstAccessMask = {.SHADER_READ},
       },
-    }
-    vk.CmdSetViewport(shadow_cmd_buffer, 0, 1, &viewport)
-    vk.CmdSetScissor(shadow_cmd_buffer, 0, 1, &scissor)
-
-    obstacles_this_light: u32 = 0
-    shadow_render_ctx := ShadowRenderContext {
-      engine          = engine,
-      command_buffer  = shadow_cmd_buffer,
-      obstacles_count = &obstacles_this_light,
-      light_view_proj = light.view_proj,
-      descriptor_set = renderer_get_camera_descriptor_set(&engine.renderer),
-    }
-    traverse_scene(engine, &shadow_render_ctx, render_shadow_node_callback)
-    total_obstacles += obstacles_this_light
-
-    vk.CmdEndRenderingKHR(shadow_cmd_buffer)
-
-    // Transition shadow map to shader read
-    final_barrier := vk.ImageMemoryBarrier {
-      sType = .IMAGE_MEMORY_BARRIER,
-      oldLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-      newLayout = .SHADER_READ_ONLY_OPTIMAL,
-      srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-      dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-      image = shadow_map_texture.buffer.image,
-      subresourceRange = vk.ImageSubresourceRange {
-        aspectMask = {.DEPTH},
-        baseMipLevel = 0,
-        levelCount = 1,
-        baseArrayLayer = 0,
-        layerCount = 1,
-      },
-      srcAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE},
-      dstAccessMask = {.SHADER_READ},
     }
     vk.CmdPipelineBarrier(
-      shadow_cmd_buffer,
+      command_buffer,
       {.LATE_FRAGMENT_TESTS},
       {.FRAGMENT_SHADER},
       {},
@@ -997,40 +1275,23 @@ render_shadow_maps :: proc(
       nil,
       0,
       nil,
-      1,
-      &final_barrier,
+      len(final_barriers),
+      raw_data(final_barriers[:]),
     )
-
-    vk.EndCommandBuffer(shadow_cmd_buffer) or_return
-    wait_stage := vk.PipelineStageFlags{.TOP_OF_PIPE}
-    vk.QueueSubmit(
-      engine.vk_ctx.graphics_queue,
-      1,
-      &vk.SubmitInfo {
-        sType = .SUBMIT_INFO,
-        pWaitDstStageMask = &wait_stage,
-        commandBufferCount = 1,
-        pCommandBuffers = &shadow_cmd_buffer,
-      },
-      vk.Fence(0),
-    ) or_return
-    vk.DeviceWaitIdle(engine.vk_ctx.vkd) or_return
   }
-  // fmt.printfln("Rendered shadow maps, total obstacles in shadow maps: %d", total_obstacles)
   return .SUCCESS
 }
 
-
 engine_recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
-  vkd := engine.vk_ctx.vkd
+  vkd := engine.ctx.vkd
   vk.DeviceWaitIdle(vkd)
   indices := find_queue_families(
-    engine.vk_ctx.physical_device,
-    engine.vk_ctx.surface,
+    engine.ctx.physical_device,
+    engine.ctx.surface,
   ) or_return
   support := query_swapchain_support(
-    engine.vk_ctx.physical_device,
-    engine.vk_ctx.surface,
+    engine.ctx.physical_device,
+    engine.ctx.surface,
   ) or_return
   renderer_build_swapchain(
     &engine.renderer,
@@ -1043,7 +1304,7 @@ engine_recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
     engine.renderer.extent.height,
   ) or_return
   engine.renderer.depth_buffer = create_depth_image(
-    &engine.vk_ctx,
+    &engine.ctx,
     engine.renderer.extent.width,
     engine.renderer.extent.height,
   ) or_return
@@ -1130,7 +1391,7 @@ engine_update :: proc(engine: ^Engine) -> bool {
 }
 
 engine_deinit :: proc(engine: ^Engine) {
-  vkd := engine.vk_ctx.vkd
+  vkd := engine.ctx.vkd
   vk.DeviceWaitIdle(vkd)
 
   // Deinit resources
@@ -1143,7 +1404,7 @@ engine_deinit :: proc(engine: ^Engine) {
 
   deinit_scene(&engine.scene)
   renderer_deinit(&engine.renderer)
-  vulkan_context_deinit(&engine.vk_ctx)
+  vulkan_context_deinit(&engine.ctx)
 
   glfw.DestroyWindow(engine.window)
   glfw.Terminate()
@@ -1273,7 +1534,17 @@ spawn_node :: proc(engine: ^Engine) -> (handle: Handle, node: ^Node) {
 engine_run :: proc(engine: ^Engine) {
   for !engine_should_close(engine) {
     engine_update(engine)
-    engine_render(engine)
+    if time.duration_milliseconds(time.since(engine.last_frame_timestamp)) <
+       FRAME_TIME_MILIS {
+      continue
+    }
+    res := try_render(engine)
+    if res == .ERROR_OUT_OF_DATE_KHR || res == .SUBOPTIMAL_KHR {
+      engine_recreate_swapchain(engine)
+    } else if res != .SUCCESS {
+      fmt.eprintln("Error during rendering")
+    }
+    engine.last_frame_timestamp = time.now()
     // break
   }
 }

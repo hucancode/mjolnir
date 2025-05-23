@@ -69,7 +69,7 @@ ImageBuffer :: struct {
 }
 
 // Deinitializes an ImageBuffer.
-image_buffer_init :: proc(vkd: vk.Device, self: ^ImageBuffer) {
+image_buffer_deinit :: proc(vkd: vk.Device, self: ^ImageBuffer) {
   if self.view != 0 {
     vk.DestroyImageView(vkd, self.view, nil)
     self.view = 0

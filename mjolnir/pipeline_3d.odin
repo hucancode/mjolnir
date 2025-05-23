@@ -23,16 +23,17 @@ ShaderConfig :: struct {
 
 // Material descriptor set layout: [albedo, metallic, roughness, bones (optional)]
 Material :: struct {
-  texture_descriptor_set: vk.DescriptorSet,
+  texture_descriptor_set:  vk.DescriptorSet,
   skinning_descriptor_set: vk.DescriptorSet,
-  features:       u32,
-  ctx_ref:        ^VulkanContext,
+  features:                u32,
+  ctx:                     ^VulkanContext,
 }
 camera_descriptor_set_layout: vk.DescriptorSetLayout
+
 // material set layouts only account for textures and bones features
 texture_descriptor_set_layout: vk.DescriptorSetLayout
 skinning_descriptor_set_layout: vk.DescriptorSetLayout
-pipeline_layouts: [SHADER_VARIANT_COUNT]vk.PipelineLayout
+pipeline_layout: vk.PipelineLayout
 pipelines: [SHADER_VARIANT_COUNT]vk.Pipeline
 
 // Shader binaries (should point to your uber shader)
@@ -44,7 +45,6 @@ material_init_descriptor_set_layout :: proc(
   mat: ^Material,
   ctx: ^VulkanContext,
 ) -> vk.Result {
-  features := mat.features & (SHADER_FEATURE_SKINNING | SHADER_FEATURE_TEXTURING)
   alloc_info_texture := vk.DescriptorSetAllocateInfo {
     sType              = .DESCRIPTOR_SET_ALLOCATE_INFO,
     descriptorPool     = ctx.descriptor_pool,
@@ -56,6 +56,7 @@ material_init_descriptor_set_layout :: proc(
     &alloc_info_texture,
     &mat.texture_descriptor_set,
   ) or_return
+  // if mat.features & SHADER_FEATURE_SKINNING != 0 {
   alloc_info_skinning := vk.DescriptorSetAllocateInfo {
     sType              = .DESCRIPTOR_SET_ALLOCATE_INFO,
     descriptorPool     = ctx.descriptor_pool,
@@ -67,6 +68,7 @@ material_init_descriptor_set_layout :: proc(
     &alloc_info_skinning,
     &mat.skinning_descriptor_set,
   ) or_return
+  // }
   return .SUCCESS
 }
 
@@ -77,10 +79,10 @@ material_update_textures :: proc(
   metallic: ^Texture,
   roughness: ^Texture,
 ) {
-  if mat.ctx_ref == nil || mat.texture_descriptor_set == 0 {
+  if mat.ctx == nil || mat.texture_descriptor_set == 0 {
     return
   }
-  vkd := mat.ctx_ref.vkd
+  vkd := mat.ctx.vkd
   image_infos := [?]vk.DescriptorImageInfo {
     {
       sampler = albedo.sampler,
@@ -135,10 +137,10 @@ material_update_bone_buffer :: proc(
   buffer: vk.Buffer,
   size: vk.DeviceSize,
 ) {
-  if mat.ctx_ref == nil || mat.texture_descriptor_set == 0 {
+  if mat.ctx == nil || mat.texture_descriptor_set == 0 {
     return
   }
-  vkd := mat.ctx_ref.vkd
+  vkd := mat.ctx.vkd
 
   buffer_info := vk.DescriptorBufferInfo {
     buffer = buffer,
@@ -155,7 +157,6 @@ material_update_bone_buffer :: proc(
   }
   vk.UpdateDescriptorSets(vkd, 1, &write, 0, nil)
 }
-
 build_3d_pipelines :: proc(
   ctx: ^VulkanContext,
   target_color_format: vk.Format,
@@ -164,7 +165,7 @@ build_3d_pipelines :: proc(
   bindings_main := [?]vk.DescriptorSetLayoutBinding {
     {   // Scene Uniforms (view, proj, time)
       binding         = 0,
-      descriptorType  = .UNIFORM_BUFFER,
+      descriptorType  = .UNIFORM_BUFFER_DYNAMIC,
       descriptorCount = 1,
       stageFlags      = {.VERTEX, .FRAGMENT},
     },
@@ -174,10 +175,16 @@ build_3d_pipelines :: proc(
       descriptorCount = 1,
       stageFlags      = {.FRAGMENT},
     },
-    {   // Shadow Samplers
+    {   // Shadow Maps (merged)
       binding         = 2,
       descriptorType  = .COMBINED_IMAGE_SAMPLER,
-      descriptorCount = MAX_LIGHTS,
+      descriptorCount = MAX_SHADOW_MAPS,
+      stageFlags      = {.FRAGMENT},
+    },
+    {   // Cube Shadow Maps (merged)
+      binding         = 3,
+      descriptorType  = .COMBINED_IMAGE_SAMPLER,
+      descriptorCount = MAX_SHADOW_MAPS,
       stageFlags      = {.FRAGMENT},
     },
   }
@@ -192,7 +199,6 @@ build_3d_pipelines :: proc(
     nil,
     &camera_descriptor_set_layout,
   ) or_return
-
   pipeline_infos: [SHADER_VARIANT_COUNT]vk.GraphicsPipelineCreateInfo
   spec_infos: [SHADER_VARIANT_COUNT]vk.SpecializationInfo
   configs: [SHADER_VARIANT_COUNT]ShaderConfig
@@ -251,67 +257,96 @@ build_3d_pipelines :: proc(
     pColorAttachmentFormats = raw_data(color_formats[:]),
     depthAttachmentFormat   = .D32_SFLOAT,
   }
-    vertex_input_info := vk.PipelineVertexInputStateCreateInfo{
-      sType = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-      vertexBindingDescriptionCount = len(geometry.VERTEX_BINDING_DESCRIPTION),
-      pVertexBindingDescriptions = raw_data(geometry.VERTEX_BINDING_DESCRIPTION[:]),
-      vertexAttributeDescriptionCount = len(geometry.VERTEX_ATTRIBUTE_DESCRIPTIONS),
-      pVertexAttributeDescriptions = raw_data(geometry.VERTEX_ATTRIBUTE_DESCRIPTIONS[:])
-    }
-    texture_bindings := []vk.DescriptorSetLayoutBinding{
-      {
-        binding = 0,
-        descriptorType = .COMBINED_IMAGE_SAMPLER,
-        descriptorCount = 1,
-        stageFlags = {.FRAGMENT}
-      }, {
-        binding = 1,
-        descriptorType = .COMBINED_IMAGE_SAMPLER,
-        descriptorCount = 1,
-        stageFlags = {.FRAGMENT}
-      }, {
-        binding = 2,
-        descriptorType = .COMBINED_IMAGE_SAMPLER,
-        descriptorCount = 1,
-        stageFlags = {.FRAGMENT}
-      }, {
-        binding = 3,
-        descriptorType =
-        .STORAGE_BUFFER,
-        descriptorCount = 1,
-        stageFlags = {.VERTEX}
-      },
-    }
-    vk.CreateDescriptorSetLayout(
-      ctx.vkd,
-      &vk.DescriptorSetLayoutCreateInfo {
-        sType        = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-        bindingCount = u32(len(texture_bindings)),
-        pBindings    = raw_data(texture_bindings),
-      },
-      nil,
-      &texture_descriptor_set_layout,
-    ) or_return
-    skinning_bindings := []vk.DescriptorSetLayoutBinding{
-      {
-        binding = 0,
-        descriptorType =
-        .STORAGE_BUFFER,
-        descriptorCount = 1,
-        stageFlags = {.VERTEX}
-      },
-    }
-    vk.CreateDescriptorSetLayout(
-      ctx.vkd,
-      &vk.DescriptorSetLayoutCreateInfo {
-        sType        = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-        bindingCount = u32(len(skinning_bindings)),
-        pBindings    = raw_data(skinning_bindings),
-      },
-      nil,
-      &skinning_descriptor_set_layout,
-    ) or_return
+  vertex_input_info := vk.PipelineVertexInputStateCreateInfo {
+    sType                           = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+    vertexBindingDescriptionCount   = len(geometry.VERTEX_BINDING_DESCRIPTION),
+    pVertexBindingDescriptions      = raw_data(
+      geometry.VERTEX_BINDING_DESCRIPTION[:],
+    ),
+    vertexAttributeDescriptionCount = len(
+      geometry.VERTEX_ATTRIBUTE_DESCRIPTIONS,
+    ),
+    pVertexAttributeDescriptions    = raw_data(
+      geometry.VERTEX_ATTRIBUTE_DESCRIPTIONS[:],
+    ),
+  }
+  texture_bindings := []vk.DescriptorSetLayoutBinding {
+    {
+      binding = 0,
+      descriptorType = .COMBINED_IMAGE_SAMPLER,
+      descriptorCount = 1,
+      stageFlags = {.FRAGMENT},
+    },
+    {
+      binding = 1,
+      descriptorType = .COMBINED_IMAGE_SAMPLER,
+      descriptorCount = 1,
+      stageFlags = {.FRAGMENT},
+    },
+    {
+      binding = 2,
+      descriptorType = .COMBINED_IMAGE_SAMPLER,
+      descriptorCount = 1,
+      stageFlags = {.FRAGMENT},
+    },
+    {
+      binding = 3,
+      descriptorType = .STORAGE_BUFFER,
+      descriptorCount = 1,
+      stageFlags = {.VERTEX},
+    },
+  }
+  vk.CreateDescriptorSetLayout(
+    ctx.vkd,
+    &vk.DescriptorSetLayoutCreateInfo {
+      sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+      bindingCount = u32(len(texture_bindings)),
+      pBindings = raw_data(texture_bindings),
+    },
+    nil,
+    &texture_descriptor_set_layout,
+  ) or_return
+  skinning_bindings := []vk.DescriptorSetLayoutBinding {
+    {
+      binding = 0,
+      descriptorType = .STORAGE_BUFFER,
+      descriptorCount = 1,
+      stageFlags = {.VERTEX},
+    },
+  }
+  vk.CreateDescriptorSetLayout(
+    ctx.vkd,
+    &vk.DescriptorSetLayoutCreateInfo {
+      sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+      bindingCount = u32(len(skinning_bindings)),
+      pBindings = raw_data(skinning_bindings),
+    },
+    nil,
+    &skinning_descriptor_set_layout,
+  ) or_return
 
+  set_layouts := [?]vk.DescriptorSetLayout {
+    camera_descriptor_set_layout, // set = 0
+    texture_descriptor_set_layout, // set = 1
+    skinning_descriptor_set_layout, // set = 2
+  }
+  push_constant_range := vk.PushConstantRange {
+    stageFlags = {.VERTEX},
+    size       = size_of(linalg.Matrix4f32),
+  }
+  pipeline_layout_info := vk.PipelineLayoutCreateInfo {
+    sType                  = .PIPELINE_LAYOUT_CREATE_INFO,
+    setLayoutCount         = len(set_layouts),
+    pSetLayouts            = raw_data(set_layouts[:]),
+    pushConstantRangeCount = 1,
+    pPushConstantRanges    = &push_constant_range,
+  }
+  vk.CreatePipelineLayout(
+    ctx.vkd,
+    &pipeline_layout_info,
+    nil,
+    &pipeline_layout,
+  ) or_return
   for features in 0 ..< SHADER_VARIANT_COUNT {
     configs[features] = ShaderConfig {
       is_skinned         = (features & SHADER_FEATURE_SKINNING) != 0,
@@ -320,10 +355,26 @@ build_3d_pipelines :: proc(
       can_receive_shadow = (features & SHADER_FEATURE_RECEIVE_SHADOW) != 0,
     }
     entries[features] = [SHADER_OPTION_COUNT]vk.SpecializationMapEntry {
-      { constantID = 0, offset = u32(offset_of(ShaderConfig, is_skinned)), size = size_of(b32) },
-      { constantID = 1, offset = u32(offset_of(ShaderConfig, has_texture)), size = size_of(b32) },
-      { constantID = 2, offset = u32(offset_of(ShaderConfig, is_lit)), size = size_of(b32) },
-      { constantID = 3, offset = u32(offset_of(ShaderConfig, can_receive_shadow)), size = size_of(b32) },
+      {
+        constantID = 0,
+        offset = u32(offset_of(ShaderConfig, is_skinned)),
+        size = size_of(b32),
+      },
+      {
+        constantID = 1,
+        offset = u32(offset_of(ShaderConfig, has_texture)),
+        size = size_of(b32),
+      },
+      {
+        constantID = 2,
+        offset = u32(offset_of(ShaderConfig, is_lit)),
+        size = size_of(b32),
+      },
+      {
+        constantID = 3,
+        offset = u32(offset_of(ShaderConfig, can_receive_shadow)),
+        size = size_of(b32),
+      },
     }
     spec_infos[features] = vk.SpecializationInfo {
       mapEntryCount = len(entries[features]),
@@ -333,16 +384,17 @@ build_3d_pipelines :: proc(
     }
     shader_stages_arr[features] = [?]vk.PipelineShaderStageCreateInfo {
       {
-        sType  = .PIPELINE_SHADER_STAGE_CREATE_INFO,
-        stage  = {.VERTEX},
+        sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
+        stage = {.VERTEX},
         module = vert_module,
-        pName  = "main",
+        pName = "main",
         pSpecializationInfo = &spec_infos[features],
-      }, {
-        sType  = .PIPELINE_SHADER_STAGE_CREATE_INFO,
-        stage  = {.FRAGMENT},
+      },
+      {
+        sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
+        stage = {.FRAGMENT},
         module = frag_module,
-        pName  = "main",
+        pName = "main",
         pSpecializationInfo = &spec_infos[features],
       },
     }
@@ -352,28 +404,6 @@ build_3d_pipelines :: proc(
       configs[features],
       vertex_input_info,
     )
-    set_layouts := [?]vk.DescriptorSetLayout {
-      camera_descriptor_set_layout,
-      texture_descriptor_set_layout,
-      skinning_descriptor_set_layout,
-    }
-    push_constant_range := vk.PushConstantRange {
-      stageFlags = {.VERTEX},
-      size       = size_of(linalg.Matrix4f32),
-    }
-    pipeline_layout_info := vk.PipelineLayoutCreateInfo {
-      sType                  = .PIPELINE_LAYOUT_CREATE_INFO,
-      setLayoutCount         = len(set_layouts),
-      pSetLayouts            = raw_data(set_layouts[:]),
-      pushConstantRangeCount = 1,
-      pPushConstantRanges    = &push_constant_range,
-    }
-    vk.CreatePipelineLayout(
-      ctx.vkd,
-      &pipeline_layout_info,
-      nil,
-      &pipeline_layouts[features],
-    ) or_continue
     pipeline_infos[features] = vk.GraphicsPipelineCreateInfo {
       sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
       pNext               = &rendering_info_khr,
@@ -387,7 +417,7 @@ build_3d_pipelines :: proc(
       pColorBlendState    = &blending,
       pDynamicState       = &dynamic_state_info,
       pDepthStencilState  = &depth_stencil_state,
-      layout              = pipeline_layouts[features],
+      layout              = pipeline_layout,
     }
   }
   vk.CreateGraphicsPipelines(
@@ -411,9 +441,9 @@ create_material_untextured :: proc(
   res: vk.Result,
 ) {
   ret, mat = resource.alloc(&engine.materials)
-  mat.ctx_ref = &engine.vk_ctx
+  mat.ctx = &engine.ctx
   mat.features = features
-  material_init_descriptor_set_layout(mat, &engine.vk_ctx) or_return
+  material_init_descriptor_set_layout(mat, &engine.ctx) or_return
   return
 }
 
@@ -429,9 +459,9 @@ create_material_textured :: proc(
   res: vk.Result,
 ) {
   ret, mat = resource.alloc(&engine.materials)
-  mat.ctx_ref = &engine.vk_ctx
+  mat.ctx = &engine.ctx
   mat.features = features | SHADER_FEATURE_TEXTURING
-  material_init_descriptor_set_layout(mat, &engine.vk_ctx) or_return
+  material_init_descriptor_set_layout(mat, &engine.ctx) or_return
   albedo := resource.get(&engine.textures, albedo_handle)
   metallic := resource.get(&engine.textures, metallic_handle)
   roughness := resource.get(&engine.textures, roughness_handle)

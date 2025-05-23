@@ -12,7 +12,7 @@ Pipeline2D :: struct {
   texture_descriptor_set:    vk.DescriptorSet,
   pipeline_layout:           vk.PipelineLayout,
   pipeline:                  vk.Pipeline,
-  ctx_ref:                   ^VulkanContext,
+  ctx:                       ^VulkanContext,
 }
 
 pipeline2d_init :: proc(
@@ -20,7 +20,7 @@ pipeline2d_init :: proc(
   ctx: ^VulkanContext,
   color_format: vk.Format,
 ) -> vk.Result {
-  mat.ctx_ref = ctx
+  mat.ctx = ctx
   vkd := ctx.vkd
 
   vert_shader_module := create_shader_module(
@@ -211,7 +211,7 @@ pipeline2d_init :: proc(
     depthAttachmentFormat   = .D32_SFLOAT,
   }
   depth_stencil_state := vk.PipelineDepthStencilStateCreateInfo {
-    sType            = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+    sType = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
   }
   pipeline_info := vk.GraphicsPipelineCreateInfo {
     sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
