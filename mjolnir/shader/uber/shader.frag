@@ -79,8 +79,8 @@ float calculatePointShadow(uint lightIdx) {
     float far = lights[lightIdx].radius;
     float z_n = 2.0 * shadowDepth - 1.0;
     float shadowDepthLinear = (2.0 * near * far) / (far + near - z_n * (far - near));
-    float bias = max(0.1 * (1.0 - dot(normal, normalize(surfaceToLight))), 0.05);
-    bool inShadow = currentDepth > shadowDepthLinear + 1;
+    float bias = max(0.5 * (1.0 - dot(normal, normalize(surfaceToLight))), 0.05);
+    bool inShadow = currentDepth > shadowDepthLinear + bias;
     return inShadow ? 0.1 : 1.0;
 }
 
