@@ -98,37 +98,42 @@ build_shadow_pipelines :: proc(
     ),
   }
   pipeline_infos: [SHADOW_SHADER_VARIANT_COUNT]vk.GraphicsPipelineCreateInfo
+  configs: [SHADOW_SHADER_VARIANT_COUNT]ShadowShaderConfig
+  entries: [SHADOW_SHADER_VARIANT_COUNT][SHADOW_SHADER_OPTION_COUNT ]vk.SpecializationMapEntry
+  spec_infos: [SHADOW_SHADER_VARIANT_COUNT]vk.SpecializationInfo
+  shader_stages: [SHADOW_SHADER_VARIANT_COUNT][1]vk.PipelineShaderStageCreateInfo
+
   for features in 0 ..< SHADOW_SHADER_VARIANT_COUNT {
-    config := ShadowShaderConfig {
+    configs[features] = ShadowShaderConfig {
       is_skinned = (features & SHADOW_FEATURE_SKINNING) != 0,
     }
-    entries := [1]vk.SpecializationMapEntry {
+    entries[features] = [SHADOW_SHADER_OPTION_COUNT]vk.SpecializationMapEntry {
       {
         constantID = 0,
         offset = u32(offset_of(ShadowShaderConfig, is_skinned)),
         size = size_of(b32),
       },
     }
-    spec_info := vk.SpecializationInfo {
-      mapEntryCount = len(entries),
-      pMapEntries   = raw_data(entries[:]),
+    spec_infos[features] = vk.SpecializationInfo {
+      mapEntryCount = len(entries[features]),
+      pMapEntries   = raw_data(entries[features][:]),
       dataSize      = size_of(ShadowShaderConfig),
-      pData         = &config,
+      pData         = &configs[features],
     }
-    shader_stages := [?]vk.PipelineShaderStageCreateInfo {
+    shader_stages[features] = [1]vk.PipelineShaderStageCreateInfo {
       {
         sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
         stage = {.VERTEX},
         module = vert_module,
         pName = "main",
-        pSpecializationInfo = &spec_info,
+        pSpecializationInfo = &spec_infos[features],
       },
     }
     pipeline_infos[features] = vk.GraphicsPipelineCreateInfo {
       sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
       pNext               = &rendering_info_khr,
-      stageCount          = len(shader_stages),
-      pStages             = raw_data(shader_stages[:]),
+      stageCount          = len(shader_stages[features]),
+      pStages             = raw_data(shader_stages[features][:]),
       pVertexInputState   = &vertex_input_info,
       pInputAssemblyState = &input_assembly,
       pViewportState      = &viewport_state,

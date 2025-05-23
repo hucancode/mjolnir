@@ -22,7 +22,7 @@ layout(push_constant) uniform Constants {
 
 void main() {
     vec4 modelPosition;
-    if (SKINNED && false) {
+    if (SKINNED) {
         mat4 skinMatrix =
             inWeights.x * bones[inJoints.x] +
             inWeights.y * bones[inJoints.y] +
