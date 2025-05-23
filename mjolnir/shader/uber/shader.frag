@@ -50,14 +50,36 @@ const float specularStrength = 0.5;
 const float shininess = 8.0;
 const float diffuseStrength = 0.5;
 
-float textureProj(uint lightIdx, vec3 shadowCoord) {
-    vec3 surfaceToLight = lights[lightIdx].position.xyz - position;
-    float currentDepth = shadowCoord.z;
-    float shadowDepth = texture(shadowMaps[lightIdx], shadowCoord.xy).r;
-    float bias = max(0.1 * (1.0 - dot(normalize(normal), normalize(surfaceToLight))), 0.05);
-    bool inShadow = currentDepth > shadowDepth + bias;
-    return inShadow ? 0.1 : 1.0;
+float linearizeDepth(float depth, float near, float far) {
+    // Converts depth from [0,1] (texture) to linear view space depth
+    float z = depth * 2.0 - 1.0; // back to NDC
+    return (2.0 * near * far) / (far + near - z * (far - near));
 }
+
+float textureProj(uint lightIdx, vec3 shadowCoord) {
+    Light light = lights[lightIdx];
+    vec3 surfaceToLight = light.position.xyz - position;
+
+    float shadowDepth = texture(shadowMaps[lightIdx], shadowCoord.xy).r;
+    float currentDepth = shadowCoord.z;
+
+
+    float near = 0.01;
+    float far = light.radius;
+
+    // Only apply linearization for spotlights (perspective projection)
+    if (light.kind == SPOT_LIGHT) {
+        float bias = max(0.4 * (1.0 - dot(normalize(normal), normalize(-surfaceToLight))), 0.05);
+        float shadowDepthLinear = linearizeDepth(shadowDepth, near, far);
+        float currentDepthLinear = linearizeDepth(currentDepth, near, far);
+        return (currentDepthLinear > shadowDepthLinear + bias) ? 0.1 : 1.0;
+    } else {
+        float bias = max(0.1 * (1.0 - dot(normalize(normal), normalize(-surfaceToLight))), 0.05);
+        // Directional lights use orthographic projection (linear)
+        return (currentDepth > shadowDepth + bias) ? 0.1 : 1.0;
+    }
+}
+
 float filterPCF(uint lightIdx, vec3 projCoords) {
     float shadow = 0.0;
     vec2 texelSize = 1.0 / textureSize(shadowMaps[lightIdx], 0);
@@ -70,16 +92,20 @@ float filterPCF(uint lightIdx, vec3 projCoords) {
     shadow /= 9.0;
     return shadow;
 }
+
 float calculatePointShadow(uint lightIdx) {
     vec3 surfaceToLight = lights[lightIdx].position.xyz - position;
     float currentDepth = length(surfaceToLight);
     float shadowDepth = texture(cubeShadowMaps[lightIdx], normalize(-surfaceToLight)).r;
     // Reconstruct linear depth from perspective depth
-    float near = 0.1;
+    float near = 0.01;
     float far = lights[lightIdx].radius;
-    float z_n = 2.0 * shadowDepth - 1.0;
-    float shadowDepthLinear = (2.0 * near * far) / (far + near - z_n * (far - near));
-    float bias = max(0.5 * (1.0 - dot(normal, normalize(surfaceToLight))), 0.05);
+    float shadowDepthLinear = linearizeDepth(shadowDepth, near, far);
+    float ndotl = dot(normalize(normal), normalize(surfaceToLight));
+    if (ndotl < 0.0) {
+        return 0.0;
+    }
+    float bias = 0.2 * (1.0 - ndotl) + 1.0;
     bool inShadow = currentDepth > shadowDepthLinear + bias;
     return inShadow ? 0.1 : 1.0;
 }

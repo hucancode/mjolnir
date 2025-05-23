@@ -1048,7 +1048,7 @@ render_shadow_maps :: proc(
         {0, -1, 0},
         {0, -1, 0},
       }
-      proj := linalg.matrix4_perspective(math.PI * 0.5, 1.0, 0.1, light.radius)
+      proj := linalg.matrix4_perspective(math.PI * 0.5, 1.0, 0.01, light.radius)
       for face in 0 ..< 6 {
         // Per-face rendering and layout transition
         view := linalg.matrix4_look_at(
@@ -1158,7 +1158,7 @@ render_shadow_maps :: proc(
           light.position.xyz + light.direction.xyz,
           linalg.VECTOR3F32_X_AXIS,
         )
-        proj = linalg.matrix4_perspective(light.angle, 1.0, 0.1, light.radius)
+        proj = linalg.matrix4_perspective(light.angle, 1.0, 0.01, light.radius)
       }
       light.view_proj = proj * view
       depth_attachment := vk.RenderingAttachmentInfoKHR {
