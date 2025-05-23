@@ -13,7 +13,7 @@ import glfw "vendor:glfw"
 WIDTH :: 1280
 HEIGHT :: 720
 TITLE :: "Mjolnir Odin"
-LIGHT_COUNT :: 2
+LIGHT_COUNT :: 3
 light_handles: [LIGHT_COUNT]mjolnir.Handle
 light_cube_handles: [LIGHT_COUNT]mjolnir.Handle
 
