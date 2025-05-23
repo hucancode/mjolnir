@@ -14,36 +14,14 @@ import vk "vendor:vulkan"
 import "geometry"
 import "resource"
 
-GLTFLoader :: struct {
-  engine_ptr: ^Engine,
-  gltf_path:  string, // Full path to the GLTF file
-}
-
-// Corresponds to TraverseEntry in Zig
-GLTF_Node_Traverse_Entry :: struct {
-  gltf_node_idx: int,
-  parent_handle: Handle,
-}
-
-// Initialization
-init_gltf_loader :: proc(
-  loader: ^GLTFLoader,
-  engine_ptr: ^Engine,
-  gltf_file_path: string,
-) {
-  loader.engine_ptr = engine_ptr
-  loader.gltf_path = gltf_file_path
-}
-
-// Corresponds to submit in Zig
-// Returns a slice of handles to the root nodes created from the GLTF scene and a success boolean.
-gltf_loader_submit :: proc(
-  loader: ^GLTFLoader,
+load_gltf :: proc(
+  engine: ^Engine,
+  path: string,
 ) -> (
   root_node_handles: []Handle,
   ret: cgltf.result,
 ) {
-  gltf_path_cstr := strings.clone_to_cstring(loader.gltf_path)
+  gltf_path_cstr := strings.clone_to_cstring(path)
   defer delete(gltf_path_cstr)
 
   options := cgltf.options{}
@@ -83,7 +61,7 @@ gltf_loader_submit :: proc(
       fmt.printfln("Queuing node #%d %s", i, gltf_data.nodes[i].name)
       append(
         &stack,
-        TraverseEntry{idx = u32(i), parent = loader.engine_ptr.scene.root},
+        TraverseEntry{idx = u32(i), parent = engine.scene.root},
       )
     }
   }
@@ -91,7 +69,7 @@ gltf_loader_submit :: proc(
   for len(stack) > 0 {
     entry := pop(&stack)
     g_node := &gltf_data.nodes[entry.idx]
-    node_handle, node := resource.alloc(&loader.engine_ptr.nodes)
+    node_handle, node := resource.alloc(&engine.nodes)
     if node == nil {
       continue
     }
@@ -131,23 +109,24 @@ gltf_loader_submit :: proc(
     if g_node.mesh != nil {
       if g_node.skin != nil {
         fmt.printfln("Loading skinned mesh %s", string(g_node.name))
-        mesh_handle, mesh := resource.alloc(&loader.engine_ptr.skeletal_meshes)
+        mesh_handle, mesh := resource.alloc(&engine.skeletal_meshes)
         data, bones, material, root_bone_idx, bone_map, ok :=
-          process_gltf_skinned_primitive(
-            loader,
+          load_gltf_skinned_primitive(
+            engine,
+            path,
             gltf_data,
             g_node.mesh,
             g_node.skin,
           )
         if ok {
-          skeletal_mesh_init(mesh, &data, &loader.engine_ptr.ctx)
+          skeletal_mesh_init(mesh, &data, &engine.ctx)
           mesh.material = material
           mesh.bones = bones
           mesh.root_bone_index = root_bone_idx
 
           // Initialize pose for the mesh
           pose: Pose
-          pose_init(&pose, len(bones), &loader.engine_ptr.ctx)
+          pose_init(&pose, len(bones), &engine.ctx)
 
           // Create the attachment with initialized pose
           node.attachment = NodeSkeletalMeshAttachment {
@@ -156,8 +135,8 @@ gltf_loader_submit :: proc(
             }
 
           // Process animations for this mesh
-          process_animations_for_skeletal_mesh(
-            loader,
+          load_gltf_animations(
+            engine,
             gltf_data,
             g_node.skin,
             mesh_handle,
@@ -176,8 +155,9 @@ gltf_loader_submit :: proc(
       } else {
         fmt.printfln("Loading static mesh %s", string(g_node.name))
         fmt.printfln("Processing static mesh data...")
-        mesh_data, mat_handle, res := process_gltf_primitive(
-          loader,
+        mesh_data, mat_handle, res := load_gltf_primitive(
+          engine,
+          path,
           gltf_data,
           g_node.mesh,
         )
@@ -193,7 +173,7 @@ gltf_loader_submit :: proc(
         )
 
         mesh_handle := create_static_mesh(
-          loader.engine_ptr,
+          engine,
           &mesh_data,
           mat_handle,
         )
@@ -208,8 +188,8 @@ gltf_loader_submit :: proc(
       }
     }
     // Parent this node to its parent
-    parent_node(&loader.engine_ptr.nodes, entry.parent, node_handle)
-    if entry.parent == loader.engine_ptr.scene.root {
+    attach(&engine.nodes, entry.parent, node_handle)
+    if entry.parent == engine.scene.root {
       // If this is a root node, add it to the created handles
       append(&created_root_handles, node_handle)
     }
@@ -225,8 +205,9 @@ gltf_loader_submit :: proc(
 
 
 // Helper: Load a GLTF texture and create an engine texture handle using the procedural API
-load_gltf_texture_for_primitive_material :: proc(
-  loader: ^GLTFLoader,
+load_gltf_texture :: proc(
+  engine: ^Engine,
+  gltf_path: string,
   gltf_data: ^cgltf.data,
   g_material: ^cgltf.material,
 ) -> (
@@ -251,8 +232,7 @@ load_gltf_texture_for_primitive_material :: proc(
   g_image := g_texture.image_
   pixel_data: []u8
   if g_image.uri != nil {
-    gltf_dir := path.dir(loader.gltf_path)
-    texture_path_str := path.join({gltf_dir, string(g_image.uri)})
+    texture_path_str := path.join({path.dir(gltf_path), string(g_image.uri)})
     // defer free(texture_path_str)
     ok: bool
     pixel_data, ok = os.read_entire_file(texture_path_str)
@@ -273,7 +253,7 @@ load_gltf_texture_for_primitive_material :: proc(
   }
   fmt.printfln("Creating texture from %d bytes", len(pixel_data))
   tex_handle, texture = create_texture_from_data(
-    loader.engine_ptr,
+    engine,
     pixel_data,
   ) or_return
   delete(pixel_data)
@@ -281,8 +261,9 @@ load_gltf_texture_for_primitive_material :: proc(
   return
 }
 
-process_gltf_primitive :: proc(
-  loader: ^GLTFLoader,
+load_gltf_primitive :: proc(
+  engine: ^Engine,
+  path: string,
   gltf_data: ^cgltf.data,
   g_mesh: ^cgltf.mesh,
 ) -> (
@@ -298,14 +279,15 @@ process_gltf_primitive :: proc(
   g_primitive := &primitives[0]
   // Material
   base_color_tex_handle, _, base_tex_result :=
-    load_gltf_texture_for_primitive_material(
-      loader,
+    load_gltf_texture(
+      engine,
+      path,
       gltf_data,
       g_primitive.material,
     )
   if base_tex_result == .SUCCESS {
     material_handle, _, _ = create_material_textured(
-      loader.engine_ptr,
+      engine,
       SHADER_FEATURE_LIT | SHADER_FEATURE_RECEIVE_SHADOW,
       base_color_tex_handle,
       base_color_tex_handle,
@@ -313,7 +295,7 @@ process_gltf_primitive :: proc(
     )
   } else {
     material_handle, _, _ = create_material_untextured(
-      loader.engine_ptr,
+      engine,
       SHADER_FEATURE_LIT | SHADER_FEATURE_RECEIVE_SHADOW,
     )
   }
@@ -385,8 +367,9 @@ process_gltf_primitive :: proc(
 }
 
 // Helper: Prepare NodeAttachment for a skinned mesh
-process_gltf_skinned_primitive :: proc(
-  loader: ^GLTFLoader,
+load_gltf_skinned_primitive :: proc(
+  engine: ^Engine,
+  path: string,
   gltf_data: ^cgltf.data,
   g_mesh: ^cgltf.mesh,
   g_skin: ^cgltf.skin,
@@ -407,14 +390,15 @@ process_gltf_skinned_primitive :: proc(
   fmt.printfln("Creating texture for skinned material...")
   // Material
   base_color_tex_handle, _, tex_ok :=
-    load_gltf_texture_for_primitive_material(
-      loader,
+    load_gltf_texture(
+      engine,
+      path,
       gltf_data,
       g_primitive.material,
     )
   if tex_ok == .SUCCESS {
     mat_handle, _, _ = create_material_textured(
-      loader.engine_ptr,
+      engine,
       SHADER_FEATURE_LIT | SHADER_FEATURE_SKINNING | SHADER_FEATURE_RECEIVE_SHADOW,
       base_color_tex_handle,
       base_color_tex_handle,
@@ -427,7 +411,7 @@ process_gltf_skinned_primitive :: proc(
     )
   } else {
     mat_handle, _, _ = create_material_untextured(
-      loader.engine_ptr,
+      engine,
       SHADER_FEATURE_LIT | SHADER_FEATURE_SKINNING | SHADER_FEATURE_RECEIVE_SHADOW,
     )
     fmt.printfln("Creating skinned material without texture -> %v", mat_handle)
@@ -609,15 +593,15 @@ unpack_accessor_floats_flat :: proc(accessor: ^cgltf.accessor) -> []f32 {
   return ret
 }
 
-process_animations_for_skeletal_mesh :: proc(
-  loader: ^GLTFLoader,
+load_gltf_animations :: proc(
+  engine: ^Engine,
   gltf_data: ^cgltf.data,
   g_skin: ^cgltf.skin,
   engine_mesh_handle: resource.Handle,
   node_ptr_to_bone_idx_map: map[^cgltf.node]u32,
 ) -> bool {
   skeletal_mesh := resource.get(
-    &loader.engine_ptr.skeletal_meshes,
+    &engine.skeletal_meshes,
     engine_mesh_handle,
   )
 

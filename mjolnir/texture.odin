@@ -319,7 +319,7 @@ depth_image_init :: proc(
     dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
     image = img_buffer.image,
     subresourceRange = {
-      aspectMask     = {.DEPTH}, // Corrected enum value
+      aspectMask     = {.DEPTH},
       baseMipLevel   = 0,
       levelCount     = 1,
       baseArrayLayer = 0,
@@ -329,13 +329,13 @@ depth_image_init :: proc(
     dstAccessMask = {
       .DEPTH_STENCIL_ATTACHMENT_READ,
       .DEPTH_STENCIL_ATTACHMENT_WRITE,
-    }, // Corrected enum values
+    },
   }
   vk.CmdPipelineBarrier(
     cmd_buffer,
-    {.TOP_OF_PIPE}, // Corrected enum value
+    {.TOP_OF_PIPE},
     {.EARLY_FRAGMENT_TESTS}, // Corrected enum value (or LATE_FRAGMENT_TESTS depending on usage)
-    {}, // No dependency flags
+    {},
     0,
     nil,
     0,

@@ -101,7 +101,7 @@ g_context: runtime.Context
 // Generic scene traversal. Callback returns true to continue, false to stop or on error.
 // User context is passed as rawptr and cast within the callback.
 // --- Engine Methods ---
-engine_init :: proc(
+init :: proc(
   engine: ^Engine,
   width: u32,
   height: u32,
@@ -328,7 +328,7 @@ traverse_scene :: proc(
   engine: ^Engine,
   user_context: rawptr,
   callback: proc(
-    eng: ^Engine,
+    engine: ^Engine,
     node_h: Handle,
     node_ptr: ^Node,
     world_matrix: ^linalg.Matrix4f32,
@@ -390,8 +390,8 @@ traverse_scene :: proc(
 }
 
 // --- Traversal Callbacks ---
-collect_lights_callback :: proc(
-  eng: ^Engine,
+prepare_light :: proc(
+  engine: ^Engine,
   node_h: Handle,
   node_ptr: ^Node,
   world_matrix: ^linalg.Matrix4f32,
@@ -402,7 +402,7 @@ collect_lights_callback :: proc(
   #partial switch data in node_ptr.attachment {
   case NodeLightAttachment:
     light_handle := data.handle
-    light_obj := resource.get(&eng.lights, light_handle)
+    light_obj := resource.get(&engine.lights, light_handle)
     if light_obj == nil {return true}
     uniform: SingleLightUniform
     #partial switch light_type in light_obj {
@@ -434,8 +434,8 @@ collect_lights_callback :: proc(
   return true
 }
 
-render_scene_node_callback :: proc(
-  eng: ^Engine,
+render_single_node :: proc(
+  engine: ^Engine,
   node_h: Handle,
   node_ptr: ^Node,
   world_matrix: ^linalg.Matrix4f32,
@@ -446,9 +446,9 @@ render_scene_node_callback :: proc(
 
   #partial switch data in node_ptr.attachment {
   case NodeSkeletalMeshAttachment:
-    mesh := resource.get(&eng.skeletal_meshes, data.handle)
+    mesh := resource.get(&engine.skeletal_meshes, data.handle)
     if mesh == nil {return true}
-    material := resource.get(&eng.materials, mesh.material)
+    material := resource.get(&engine.materials, mesh.material)
     if material == nil {return true}
     world_aabb := geometry.aabb_transform(mesh.aabb, world_matrix)
     if !geometry.frustum_test_aabb(
@@ -468,7 +468,7 @@ render_scene_node_callback :: proc(
     vk.CmdBindPipeline(ctx.command_buffer, .GRAPHICS, pipeline)
     // Bind all required descriptor sets (set 0: camera+shadow+cube shadow, set 1: material, set 2: skinning)
     descriptor_sets := [?]vk.DescriptorSet {
-      renderer_get_camera_descriptor_set(&eng.renderer), // set 0 (merged)
+      renderer_get_camera_descriptor_set(&engine.renderer), // set 0
       material.texture_descriptor_set, // set 1
       material.skinning_descriptor_set, // set 2
     }
@@ -515,9 +515,9 @@ render_scene_node_callback :: proc(
     vk.CmdDrawIndexed(ctx.command_buffer, mesh.indices_len, 1, 0, 0, 0)
     ctx.rendered_count^ += 1
   case NodeStaticMeshAttachment:
-    mesh := resource.get(&eng.meshes, data.handle)
+    mesh := resource.get(&engine.meshes, data.handle)
     if mesh == nil {return true}
-    material := resource.get(&eng.materials, mesh.material)
+    material := resource.get(&engine.materials, mesh.material)
     if material == nil {return true}
     world_aabb := geometry.aabb_transform(mesh.aabb, world_matrix)
     if !geometry.frustum_test_aabb(
@@ -530,7 +530,7 @@ render_scene_node_callback :: proc(
     pipeline := pipelines[material.features]
     // Bind all required descriptor sets (set 0: camera+shadow+cube shadow, set 1: material, set 2: skinning)
     descriptor_sets := [?]vk.DescriptorSet {
-      renderer_get_camera_descriptor_set(&eng.renderer), // set 0 (merged)
+      renderer_get_camera_descriptor_set(&engine.renderer), // set 0
       material.texture_descriptor_set, // set 1
       material.skinning_descriptor_set, // set 2
     }
@@ -574,8 +574,8 @@ render_scene_node_callback :: proc(
   return true
 }
 
-render_shadow_node_callback :: proc(
-  eng: ^Engine,
+render_single_shadow :: proc(
+  engine: ^Engine,
   node_h: Handle,
   node_ptr: ^Node,
   world_matrix: ^linalg.Matrix4f32,
@@ -585,7 +585,7 @@ render_shadow_node_callback :: proc(
   shadow_idx := ctx.shadow_idx
   shadow_layer := ctx.shadow_layer
   min_alignment :=
-    eng.ctx.physical_device_properties.limits.minUniformBufferOffsetAlignment
+    engine.ctx.physical_device_properties.limits.minUniformBufferOffsetAlignment
   aligned_scene_uniform_size := align_up(size_of(SceneUniform), min_alignment)
   #partial switch data in node_ptr.attachment {
   case NodeStaticMeshAttachment:
@@ -593,7 +593,7 @@ render_shadow_node_callback :: proc(
       return true
     }
     mesh_handle := data.handle
-    mesh := resource.get(&eng.meshes, mesh_handle)
+    mesh := resource.get(&engine.meshes, mesh_handle)
     if mesh == nil {return true}
     world_aabb := geometry.aabb_transform(mesh.aabb, world_matrix)
     if !geometry.frustum_test_aabb(
@@ -603,13 +603,13 @@ render_shadow_node_callback :: proc(
     ) {
       return true
     }
-    material := resource.get(&eng.materials, mesh.material)
+    material := resource.get(&engine.materials, mesh.material)
     if material == nil {return true}
     features: u32 = 0
     pipeline := shadow_pipelines[features]
     layout := shadow_pipeline_layout
     descriptor_sets := [?]vk.DescriptorSet {
-      renderer_get_camera_descriptor_set(&eng.renderer), // set 0
+      renderer_get_camera_descriptor_set(&engine.renderer), // set 0
     }
     vk.CmdBindPipeline(ctx.command_buffer, .GRAPHICS, pipeline)
     offset_shadow :=
@@ -653,7 +653,7 @@ render_shadow_node_callback :: proc(
     if !data.cast_shadow {
       // return true
     }
-    mesh := resource.get(&eng.skeletal_meshes, data.handle)
+    mesh := resource.get(&engine.skeletal_meshes, data.handle)
     if mesh == nil {return true}
     world_aabb := geometry.aabb_transform(mesh.aabb, world_matrix)
     if !geometry.frustum_test_aabb(
@@ -663,10 +663,10 @@ render_shadow_node_callback :: proc(
     ) {
       return true
     }
-    material := resource.get(&eng.materials, mesh.material)
+    material := resource.get(&engine.materials, mesh.material)
     if material == nil {return true}
     descriptor_sets := [?]vk.DescriptorSet {
-      renderer_get_camera_descriptor_set(&eng.renderer), // set 0
+      renderer_get_camera_descriptor_set(&engine.renderer), // set 0
       material.skinning_descriptor_set, // set 1
     }
     vk.CmdBindPipeline(
@@ -722,7 +722,7 @@ render_shadow_node_callback :: proc(
   return true
 }
 
-try_render :: proc(engine: ^Engine) -> vk.Result {
+render :: proc(engine: ^Engine) -> vk.Result {
   // --- Optimal Frame Render Flow ---
   ctx := engine.renderer.ctx
   current_fence := renderer_get_in_flight_fence(&engine.renderer)
@@ -765,7 +765,7 @@ try_render :: proc(engine: ^Engine) -> vk.Result {
     engine        = engine,
     light_uniform = &light_uniform,
   }
-  if !traverse_scene(engine, &collect_ctx, collect_lights_callback) {
+  if !traverse_scene(engine, &collect_ctx, prepare_light) {
     fmt.eprintln("[RENDER] Error during light collection")
   }
   // --- Shadow Pass (all lights, in this command buffer) ---
@@ -776,7 +776,6 @@ try_render :: proc(engine: ^Engine) -> vk.Result {
     command_buffer,
     num_shadow_passes,
   ) or_return
-  // --- Main Pass ---
   fmt.printfln("============ rendering main pass =============")
   // Transition swapchain image to color attachment
   barrier := vk.ImageMemoryBarrier {
@@ -857,7 +856,7 @@ try_render :: proc(engine: ^Engine) -> vk.Result {
     camera_frustum = camera_frustum,
     rendered_count = &rendered_count,
   }
-  if !traverse_scene(engine, &render_meshes_ctx, render_scene_node_callback) {
+  if !traverse_scene(engine, &render_meshes_ctx, render_single_node) {
     fmt.eprintln("[RENDER] Error during scene mesh rendering")
   }
   // Update Uniforms
@@ -968,6 +967,7 @@ render_shadow_maps :: proc(
   command_buffer: vk.CommandBuffer,
   num_shadow_passes: u32,
 ) -> vk.Result {
+  fmt.printfln("============ rendering shadow pass =============")
   for i := 0; i < int(light_uniform.light_count); i += 1 {
     cube_shadow := renderer_get_cube_shadow_map(&engine.renderer, i)
     shadow_map_texture := renderer_get_shadow_map(&engine.renderer, i)
@@ -1028,7 +1028,7 @@ render_shadow_maps :: proc(
     if !light.has_shadow || i >= MAX_SHADOW_MAPS {
       continue
     }
-    if light.kind == .POINT {   // Point light (cube shadow map)
+    if light.kind == .POINT {
       cube_shadow := renderer_get_cube_shadow_map(&engine.renderer, i)
       light_pos := light.position.xyz
       // Cube face directions and up vectors
@@ -1050,7 +1050,6 @@ render_shadow_maps :: proc(
       }
       proj := linalg.matrix4_perspective(math.PI * 0.5, 1.0, 0.01, light.radius)
       for face in 0 ..< 6 {
-        // Per-face rendering and layout transition
         view := linalg.matrix4_look_at(
           light_pos,
           light_pos + face_dirs[face],
@@ -1093,14 +1092,6 @@ render_shadow_maps :: proc(
         }
         offset_shadow :=
           vk.DeviceSize(i * 6 + face + 1) * aligned_scene_uniform_size
-        fmt.printfln(
-          "Debug Shadow UBO Write (Point Light %d, Face %d):",
-          i,
-          face,
-        )
-        fmt.printfln("  Offset: %v bytes", offset_shadow)
-        fmt.printfln("  View: %v", view)
-        fmt.printfln("  Proj: %v", proj)
         data_buffer_write_at(
           renderer_get_camera_uniform(&engine.renderer),
           &shadow_scene_uniform,
@@ -1119,18 +1110,10 @@ render_shadow_maps :: proc(
           shadow_layer    = u32(face),
           frustum         = geometry.make_frustum(proj * view),
         }
-        traverse_scene(engine, &shadow_render_ctx, render_shadow_node_callback)
+        traverse_scene(engine, &shadow_render_ctx, render_single_shadow)
         vk.CmdEndRenderingKHR(command_buffer)
-        fmt.printfln(
-          "cube shadow pass %d, face %d, rendered %d objects with view %v proj %v",
-          i,
-          face,
-          obstacles_this_light,
-          view,
-          proj,
-        )
       }
-    } else {   // 2D shadow map for other lights
+    } else {
       shadow_map_texture := renderer_get_shadow_map(&engine.renderer, i)
       view: linalg.Matrix4f32
       proj: linalg.Matrix4f32
@@ -1150,13 +1133,10 @@ render_shadow_maps :: proc(
           light.radius,
         )
       } else {
-        // light.position = linalg.Vector4f32{0, 4, 0, 1}
-        // light.direction = linalg.Vector4f32{0, -4, 0, 0}
-        fmt.printfln("light at %v, dir %v", light.position, light.direction)
         view = linalg.matrix4_look_at(
           light.position.xyz,
           light.position.xyz + light.direction.xyz,
-          linalg.VECTOR3F32_X_AXIS,
+          linalg.VECTOR3F32_X_AXIS, // TODO: hardcoding up vector will not work if the light is perfectly aligned with said vector
         )
         proj = linalg.matrix4_perspective(light.angle, 1.0, 0.01, light.radius)
       }
@@ -1214,16 +1194,7 @@ render_shadow_maps :: proc(
         shadow_idx      = u32(i),
         frustum         = geometry.make_frustum(proj * view),
       }
-      traverse_scene(engine, &shadow_render_ctx, render_shadow_node_callback)
-      fmt.printfln(
-        "Debug Shadow UBO Write (2D Light %d, Kind %v):",
-        i,
-        light.kind,
-      )
-      fmt.printfln("  Offset: %v bytes", offset_shadow)
-      fmt.printfln("  View: %v", view)
-      fmt.printfln("  Proj: %v", proj)
-      fmt.printfln("  Hit: %v", obstacles_this_light)
+      traverse_scene(engine, &shadow_render_ctx, render_single_shadow)
       vk.CmdEndRenderingKHR(command_buffer)
     }
   }
@@ -1320,21 +1291,17 @@ engine_recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
   return .SUCCESS
 }
 
-engine_get_delta_time :: proc(engine: ^Engine) -> f32 {
+get_delta_time :: proc(engine: ^Engine) -> f32 {
   return f32(time.duration_seconds(time.since(engine.last_update_timestamp)))
 }
 
-engine_get_time :: proc(engine: ^Engine) -> f32 {
+time_since_app_start :: proc(engine: ^Engine) -> f32 {
   return f32(time.duration_seconds(time.since(engine.start_timestamp)))
 }
 
-engine_should_close :: proc(engine: ^Engine) -> bool {
-  return bool(glfw.WindowShouldClose(engine.window))
-}
-
-engine_update :: proc(engine: ^Engine) -> bool {
+update :: proc(engine: ^Engine) -> bool {
   glfw.PollEvents()
-  delta_time := engine_get_delta_time(engine)
+  delta_time := get_delta_time(engine)
   if delta_time < UPDATE_FRAME_TIME {
     return false
   }
@@ -1390,7 +1357,7 @@ engine_update :: proc(engine: ^Engine) -> bool {
   return true
 }
 
-engine_deinit :: proc(engine: ^Engine) {
+deinit :: proc(engine: ^Engine) {
   vkd := engine.ctx.vkd
   vk.DeviceWaitIdle(vkd)
 
@@ -1425,7 +1392,7 @@ engine_commit_transaction :: proc(engine: ^Engine) {
 }
 
 // --- Animation Control ---
-engine_play_animation :: proc(
+play_animation :: proc(
   engine: ^Engine,
   node_handle: Handle,
   name: string,
@@ -1443,7 +1410,7 @@ engine_play_animation :: proc(
   if skeletal_mesh_res == nil {
     return false
   }
-  anim_inst, found := play_animation(skeletal_mesh_res, name, mode)
+  anim_inst, found := make_animation_instance(skeletal_mesh_res, name, mode)
   if !found {
     return false
   }
@@ -1526,19 +1493,19 @@ spawn_node :: proc(engine: ^Engine) -> (handle: Handle, node: ^Node) {
   if node != nil {
     node.transform = geometry.transform_identity()
     node.children = make([dynamic]Handle, 0)
-    parent_node(&engine.nodes, engine.scene.root, handle)
+    attach(&engine.nodes, engine.scene.root, handle)
   }
   return
 }
 
-engine_run :: proc(engine: ^Engine) {
-  for !engine_should_close(engine) {
-    engine_update(engine)
+run :: proc(engine: ^Engine) {
+  for !glfw.WindowShouldClose(engine.window) {
+    update(engine)
     if time.duration_milliseconds(time.since(engine.last_frame_timestamp)) <
        FRAME_TIME_MILIS {
       continue
     }
-    res := try_render(engine)
+    res := render(engine)
     if res == .ERROR_OUT_OF_DATE_KHR || res == .SUBOPTIMAL_KHR {
       engine_recreate_swapchain(engine)
     } else if res != .SUCCESS {

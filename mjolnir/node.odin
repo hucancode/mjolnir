@@ -41,7 +41,7 @@ deinit_node :: proc(node: ^Node) {
   delete(node.children)
 }
 
-unparent_node :: proc(
+detach :: proc(
   nodes: ^resource.ResourcePool(Node),
   child_handle: Handle,
 ) {
@@ -73,7 +73,7 @@ unparent_node :: proc(
   child_node.parent = Handle{}
 }
 
-parent_node :: proc(
+attach :: proc(
   nodes: ^resource.ResourcePool(Node),
   parent_handle: Handle,
   child_handle: Handle,
@@ -87,7 +87,7 @@ parent_node :: proc(
     return
   }
 
-  unparent_node(nodes, child_handle)
+  detach(nodes, child_handle)
 
   child_node.parent = parent_handle
   append(&parent_node.children, child_handle)

@@ -20,18 +20,15 @@ light_cube_handles: [LIGHT_COUNT]mjolnir.Handle
 engine: mjolnir.Engine
 
 main :: proc() {
-  using mjolnir
   engine.setup_proc = setup
   engine.update_proc = update
-  engine.render2d_proc = render2d
   engine.key_press_proc = on_key_pressed
-  g_context = context
-  defer engine_deinit(&engine)
-  if engine_init(&engine, WIDTH, HEIGHT, TITLE) != .SUCCESS {
+  defer mjolnir.deinit(&engine)
+  if mjolnir.init(&engine, WIDTH, HEIGHT, TITLE) != .SUCCESS {
     fmt.eprintf("Failed to initialize engine\n")
     return
   }
-  engine_run(&engine)
+  mjolnir.run(&engine)
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {
@@ -78,7 +75,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
               continue
             }
             node_handle, node := spawn_node(engine)
-            parent_node(&engine.nodes, engine.scene.root, node_handle)
+            attach(&engine.nodes, engine.scene.root, node_handle)
             node.attachment = NodeStaticMeshAttachment{sphere_mesh_handle, true}
             node.transform.position = {
               (f32(x) - f32(nx) * 0.5),
@@ -95,16 +92,14 @@ setup :: proc(engine: ^mjolnir.Engine) {
       // Ground node
       size :f32 = 40.0
       ground_handle, ground_node := spawn_node(engine)
-      parent_node(&engine.nodes, engine.scene.root, ground_handle)
+      attach(&engine.nodes, engine.scene.root, ground_handle)
       ground_node.attachment = NodeStaticMeshAttachment{ground_mesh_handle, false}
       ground_node.transform.position = {-0.5, 0.0, -0.5} * size
       ground_node.transform.scale = {1.0, 1.0, 1.0} * size
     }
     if true {
       // Load GLTF and play animation
-      gltf_nodes, _ := gltf_loader_submit(
-        &GLTFLoader{engine_ptr = engine, gltf_path = "assets/CesiumMan.glb"},
-      )
+      gltf_nodes, _ := load_gltf(engine, "assets/CesiumMan.glb")
       fmt.printfln("Loaded GLTF nodes: %v", gltf_nodes)
       for armature in gltf_nodes {
         armature_ptr := resource.get(&engine.nodes, armature)
@@ -117,7 +112,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
           continue
         }
         // skeleton_ptr.transform.position = {2.0, 0.0, 0.0}
-        engine_play_animation(engine, skeleton, "Anim_0", .Loop)
+        play_animation(engine, skeleton, "Anim_0", .Loop)
         attachment, ok := skeleton_ptr.attachment.(NodeSkeletalMeshAttachment)
         if ok {
           attachment.cast_shadow = true
@@ -159,12 +154,12 @@ setup :: proc(engine: ^mjolnir.Engine) {
       )
       light_cube_handle, light_cube_node := spawn_node(engine)
       light_cube_handles[i] = light_cube_handle
-      parent_node(&engine.nodes, light_handles[i], light_cube_handles[i])
+      attach(&engine.nodes, light_handles[i], light_cube_handles[i])
       light_cube_node.attachment = NodeStaticMeshAttachment{cube_mesh_handle, false}
       light_cube_node.transform.scale = {0.1, 0.1, 0.1}
     }
     // Directional light
-    // spawn_directional_light(engine, {0.3, 0.3, 0.3, 0.0})
+    spawn_directional_light(engine, {0.3, 0.3, 0.3, 0.0})
 }
 
 update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
@@ -177,7 +172,7 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
       continue
     }
     offset := f32(i) / f32(LIGHT_COUNT) * math.PI * 2.0
-    t := engine_get_time(engine) + offset
+    t := time_since_app_start(engine) + offset
     // fmt.printfln("getting light %d %v", i, light_handles[i])
     light_ptr := resource.get(&engine.nodes, handle)
     if light_ptr == nil {continue}
@@ -194,18 +189,12 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
       continue
     }
     light_cube_ptr.transform.rotation = linalg.quaternion_angle_axis(
-      math.PI * engine_get_time(engine) * 0.5,
+      math.PI * time_since_app_start(engine) * 0.5,
       linalg.VECTOR3F32_Y_AXIS,
     )
     light_cube_ptr.transform.is_dirty = true
     // fmt.printfln( "Light cube %d rotation: %v", i, light_cube_ptr.transform.rotation,)
   }
-}
-
-render2d :: proc(engine: ^mjolnir.Engine, ctx: ^mu.Context) {
-    if mu.window(ctx, "User data", {40, 240, 300, 100}, {.NO_CLOSE}) {
-        mu.label(ctx, fmt.tprintf("Spot lights %d", LIGHT_COUNT))
-    }
 }
 
 on_key_pressed :: proc(engine: ^mjolnir.Engine, key, action, mods: int) {

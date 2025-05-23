@@ -20,9 +20,9 @@ bone_deinit :: proc(bone: ^Bone) {
 }
 
 SkeletalMesh :: struct {
-  root_bone_index: u32, // Index of the root bone in the 'bones' array
+  root_bone_index: u32,
   bones:           []Bone,
-  animations:      []Animation_Clip, // Animation clips
+  animations:      []Animation_Clip,
   vertices_len:    u32,
   indices_len:     u32,
   vertex_buffer:   DataBuffer,
@@ -103,7 +103,7 @@ skeletal_mesh_init :: proc(
   return .SUCCESS
 }
 
-play_animation :: proc(
+make_animation_instance :: proc(
   self: ^SkeletalMesh,
   animation_name: string,
   mode: Animation_Play_Mode,
