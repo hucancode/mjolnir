@@ -134,7 +134,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
       }
       light: ^Node
       should_make_spot_light := false
-      should_make_spot_light = i%2 == 0
+      should_make_spot_light = i%2 != 0
       // should_make_spot_light = true
       if should_make_spot_light {
         spot_angle := math.PI / 1.2

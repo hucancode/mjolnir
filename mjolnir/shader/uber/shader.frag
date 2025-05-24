@@ -52,8 +52,8 @@ const float diffuseStrength = 0.5;
 
 float linearizeDepth(float depth, float near, float far) {
     // Converts depth from [0,1] (texture) to linear view space depth
-    float z = depth * 2.0 - 1.0; // back to NDC
-    return (2.0 * near * far) / (far + near - z * (far - near));
+    float z = depth * 2.0 - 1.0; // [0,1] to [-1,1]
+    return (2.0 * near * far) / (far + near - z * (far - near)); // [-1,1] to [near,far]
 }
 
 float textureProj(uint lightIdx, vec3 shadowCoord) {
@@ -94,20 +94,18 @@ float filterPCF(uint lightIdx, vec3 projCoords) {
 }
 
 float calculatePointShadow(uint lightIdx) {
-    vec3 surfaceToLight = lights[lightIdx].position.xyz - position;
-    float currentDepth = length(surfaceToLight);
-    float shadowDepth = texture(cubeShadowMaps[lightIdx], normalize(-surfaceToLight)).r;
+    vec3 lightToSurface = position - lights[lightIdx].position.xyz;
+    float shadowDepth = texture(cubeShadowMaps[lightIdx], normalize(lightToSurface)).r;
     // Reconstruct linear depth from perspective depth
     float near = 0.01;
     float far = lights[lightIdx].radius;
-    float shadowDepthLinear = linearizeDepth(shadowDepth, near, far);
-    float ndotl = dot(normalize(normal), normalize(surfaceToLight));
-    if (ndotl < 0.0) {
-        return 0.0;
-    }
-    float bias = 0.2 * (1.0 - ndotl) + 1.0;
-    bool inShadow = currentDepth > shadowDepthLinear + bias;
-    return inShadow ? 0.1 : 1.0;
+    shadowDepth = linearizeDepth(shadowDepth, near, far);
+    float currentDepth = max(abs(lightToSurface.x), max(abs(lightToSurface.y), abs(lightToSurface.z)));
+    // return fract(shadowDepth/currentDepth);
+    float bias_max = pow(lights[lightIdx].radius, 0.3)*0.5;
+    float bias_min = bias_max*0.1;
+    float bias = max(bias_max * (1.0 - dot(normalize(normal), normalize(lightToSurface))), bias_min);
+    return smoothstep(currentDepth - bias, currentDepth, shadowDepth);
 }
 
 float calculateShadow(uint lightIdx) {
