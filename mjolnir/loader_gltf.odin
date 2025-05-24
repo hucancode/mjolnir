@@ -261,6 +261,64 @@ load_gltf_texture :: proc(
   return
 }
 
+// Helper: Load a GLTF texture and create an engine texture handle using the procedural API
+load_gltf_pbr_textures :: proc(
+  engine: ^Engine,
+  gltf_path: string,
+  gltf_data: ^cgltf.data,
+  g_material: ^cgltf.material,
+) -> (
+  albedo_handle: Handle,
+  metallic_handle: Handle,
+  roughness_handle: Handle,
+  ret: vk.Result,
+) {
+  if g_material == nil || !g_material.has_pbr_metallic_roughness {
+    ret = .ERROR_UNKNOWN
+    return
+  }
+  pbr_info := g_material.pbr_metallic_roughness
+
+  // Load base color texture
+  albedo_handle, _, _ = load_gltf_texture(engine, gltf_path, gltf_data, g_material)
+
+  // Load metallic-roughness texture (GLTF packs both in one texture, B=metallic, G=roughness)
+  metallic_handle = albedo_handle // fallback
+  roughness_handle = albedo_handle // fallback
+  if pbr_info.metallic_roughness_texture.texture != nil {
+    g_texture := pbr_info.metallic_roughness_texture.texture
+    if g_texture.image_ != nil {
+      g_image := g_texture.image_
+      pixel_data: []u8
+      if g_image.uri != nil {
+        texture_path_str := path.join({path.dir(gltf_path), string(g_image.uri)})
+        ok: bool
+        pixel_data, ok = os.read_entire_file(texture_path_str)
+        if !ok {
+          fmt.eprintf("Failed to read metallic-roughness texture file '%s'\n", texture_path_str)
+          ret = .ERROR_UNKNOWN
+          return
+        }
+      } else if g_image.buffer_view != nil {
+        view := g_image.buffer_view
+        buffer := view.buffer
+        src_data_ptr := mem.ptr_offset(cast(^u8)buffer.data, view.offset)
+        pixel_data = slice.from_ptr((^u8)(src_data_ptr), int(view.size))
+        pixel_data = slice.clone(pixel_data)
+      } else {
+        ret = .ERROR_UNKNOWN
+        return
+      }
+      // For now, use the same texture for both metallic and roughness
+      metallic_handle, _ = create_texture_from_data(engine, pixel_data) or_return
+      roughness_handle = metallic_handle
+      delete(pixel_data)
+    }
+  }
+  ret = .SUCCESS
+  return
+}
+
 load_gltf_primitive :: proc(
   engine: ^Engine,
   path: string,
@@ -278,20 +336,15 @@ load_gltf_primitive :: proc(
   }
   g_primitive := &primitives[0]
   // Material
-  base_color_tex_handle, _, base_tex_result :=
-    load_gltf_texture(
-      engine,
-      path,
-      gltf_data,
-      g_primitive.material,
-    )
-  if base_tex_result == .SUCCESS {
+  albedo_handle, metallic_handle, roughness_handle, pbr_result :=
+    load_gltf_pbr_textures(engine, path, gltf_data, g_primitive.material)
+  if pbr_result == .SUCCESS {
     material_handle, _, _ = create_material_textured(
       engine,
       SHADER_FEATURE_LIT | SHADER_FEATURE_RECEIVE_SHADOW,
-      base_color_tex_handle,
-      base_color_tex_handle,
-      base_color_tex_handle,
+      albedo_handle,
+      metallic_handle,
+      roughness_handle,
     )
   } else {
     material_handle, _, _ = create_material_untextured(
@@ -389,24 +442,21 @@ load_gltf_skinned_primitive :: proc(
   g_primitive := &primitives[0]
   fmt.printfln("Creating texture for skinned material...")
   // Material
-  base_color_tex_handle, _, tex_ok :=
-    load_gltf_texture(
-      engine,
-      path,
-      gltf_data,
-      g_primitive.material,
-    )
-  if tex_ok == .SUCCESS {
+  albedo_handle, metallic_handle, roughness_handle, pbr_result :=
+    load_gltf_pbr_textures(engine, path, gltf_data, g_primitive.material)
+  if pbr_result == .SUCCESS {
     mat_handle, _, _ = create_material_textured(
       engine,
       SHADER_FEATURE_LIT | SHADER_FEATURE_SKINNING | SHADER_FEATURE_RECEIVE_SHADOW,
-      base_color_tex_handle,
-      base_color_tex_handle,
-      base_color_tex_handle,
+      albedo_handle,
+      metallic_handle,
+      roughness_handle,
     )
     fmt.printfln(
-      "Creating skinned material with texture %v -> %v",
-      base_color_tex_handle,
+      "Creating skinned material with PBR textures %v/%v/%v -> %v",
+      albedo_handle,
+      metallic_handle,
+      roughness_handle,
       mat_handle,
     )
   } else {
