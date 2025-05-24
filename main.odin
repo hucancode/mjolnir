@@ -34,9 +34,13 @@ main :: proc() {
 setup :: proc(engine: ^mjolnir.Engine) {
     using mjolnir
     // Load texture and create material
-    tex_handle, texture, _ := create_texture_from_path(
+    ground_albedo_handle, _, _ := create_texture_from_path(
       engine,
-      "assets/statue-1275469_1280.jpg",
+      "assets/t_brick_floor_002_diffuse_1k.jpg",
+    )
+    ground_roughness_handle, _, _ := create_texture_from_path(
+      engine,
+      "assets/t_brick_floor_002_rough_1k.jpg",
     )
     mat_handle, _, _ := create_material_untextured(
       engine,
@@ -52,9 +56,9 @@ setup :: proc(engine: ^mjolnir.Engine) {
     ground_mat_handle, _, _ := create_material_textured(
       engine,
       SHADER_FEATURE_LIT | SHADER_FEATURE_RECEIVE_SHADOW,
-      tex_handle,
-      tex_handle,
-      tex_handle,
+      ground_albedo_handle,
+      ground_roughness_handle,
+      ground_roughness_handle,
     )
     quad_geom := geometry.make_quad()
     ground_mesh_handle := create_static_mesh(
@@ -86,7 +90,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     }
     if true {
       // Ground node
-      size :f32 = 40.0
+      size :f32 = 10.0
       ground_handle, ground_node := spawn_node(engine)
       attach(&engine.nodes, engine.scene.root, ground_handle)
       ground_node.attachment = NodeStaticMeshAttachment{ground_mesh_handle, false}
