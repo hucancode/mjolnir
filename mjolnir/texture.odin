@@ -486,3 +486,49 @@ cube_depth_texture_deinit :: proc(self: ^CubeDepthTexture) {
   }
   image_buffer_deinit(vkd, &self.buffer)
 }
+
+// Load a floating-point HDR image from path (for environment maps)
+create_hdr_texture_from_path :: proc(
+  engine: ^Engine,
+  path: string,
+) -> (
+  handle: resource.Handle,
+  texture: ^Texture,
+  ret: vk.Result,
+) {
+  handle, texture = resource.alloc(&engine.textures)
+  path_cstr := strings.clone_to_cstring(path)
+  w, h, c_in_file: c.int
+  float_pixels_ptr := stbi.loadf(path_cstr, &w, &h, &c_in_file, 3) // force RGB
+  if float_pixels_ptr == nil {
+    fmt.eprintf(
+      "Failed to load HDR texture from path '%s': %s\n",
+      path,
+      stbi.failure_reason(),
+    )
+    ret = .ERROR_UNKNOWN
+    return
+  }
+  num_floats := int(w * h * 3)
+  float_pixels := make([]f32, num_floats)
+  mem.copy(raw_data(float_pixels), float_pixels_ptr, num_floats * size_of(f32))
+  stbi.image_free(float_pixels_ptr)
+  // Vulkan expects 4 channels, so expand to RGBA
+  rgba_pixels := make([]f32, w * h * 4)
+  for i in 0..<w*h {
+    rgba_pixels[i*4+0] = float_pixels[i*3+0]
+    rgba_pixels[i*4+1] = float_pixels[i*3+1]
+    rgba_pixels[i*4+2] = float_pixels[i*3+2]
+    rgba_pixels[i*4+3] = 1.0
+  }
+  texture.image_data.pixels = transmute([]u8)rgba_pixels
+  texture.image_data.width = int(w)
+  texture.image_data.height = int(h)
+  texture.image_data.channels_in_file = 3
+  texture.image_data.actual_channels = 4
+  texute_init(texture, &engine.ctx, .R32G32B32A32_SFLOAT) or_return
+  texture.image_data.pixels = nil
+  fmt.printfln("created HDR texture %d x %d -> id %d", w, h, texture.buffer.image)
+  ret = .SUCCESS
+  return
+}
