@@ -38,6 +38,8 @@ layout(set = 1, binding = 0) uniform sampler2D albedoSampler;
 layout(set = 1, binding = 1) uniform sampler2D metalicSampler;
 layout(set = 1, binding = 2) uniform sampler2D roughnessSampler;
 
+layout(set = 3, binding = 0) uniform sampler2D environmentMap;
+
 layout(location = 0) in vec3 position;
 layout(location = 1) in vec4 color;
 layout(location = 2) in vec3 normal;
@@ -199,7 +201,16 @@ void main() {
     roughness = clamp(roughness, 0.04, 1.0);
     vec3 N = normalize(normal);
     vec3 V = normalize(cameraPosition - position);
+    // Sample environment map using equirectangular mapping
+    vec3 refl = reflect(-V, N);
+    float u = atan(refl.z, refl.x) / (2.0 * PI) + 0.5;
+    float v = acos(clamp(refl.y, -1.0, 1.0)) / PI;
+    vec3 envColor = texture(environmentMap, vec2(u, v)).rgb;
     vec3 ambient = ambientColor * ambientStrength * albedo;
     vec3 colorOut = ambient + brdf(N, V, albedo, roughness, metallic);
+    // Blend environment color for simple reflection effect
+    // TODO: use a more sophisticated reflection model
+    float envStrength = metallic * 0.02;
+    colorOut = mix(colorOut, envColor, envStrength);
     outColor = vec4(colorOut, 1.0);
 }

@@ -29,6 +29,7 @@ Material :: struct {
   ctx:                     ^VulkanContext,
 }
 camera_descriptor_set_layout: vk.DescriptorSetLayout
+environment_descriptor_set_layout: vk.DescriptorSetLayout
 
 // material set layouts only account for textures and bones features
 texture_descriptor_set_layout: vk.DescriptorSetLayout
@@ -325,10 +326,31 @@ build_3d_pipelines :: proc(
     &skinning_descriptor_set_layout,
   ) or_return
 
+  // Environment map descriptor set layout
+  environment_bindings := []vk.DescriptorSetLayoutBinding {
+    {
+      binding = 0,
+      descriptorType = .COMBINED_IMAGE_SAMPLER,
+      descriptorCount = 1,
+      stageFlags = {.FRAGMENT},
+    },
+  }
+  vk.CreateDescriptorSetLayout(
+    ctx.vkd,
+    &vk.DescriptorSetLayoutCreateInfo {
+      sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+      bindingCount = u32(len(environment_bindings)),
+      pBindings = raw_data(environment_bindings),
+    },
+    nil,
+    &environment_descriptor_set_layout,
+  ) or_return
+
   set_layouts := [?]vk.DescriptorSetLayout {
     camera_descriptor_set_layout, // set = 0
     texture_descriptor_set_layout, // set = 1
     skinning_descriptor_set_layout, // set = 2
+    environment_descriptor_set_layout, // set = 3
   }
   push_constant_range := vk.PushConstantRange {
     stageFlags = {.VERTEX},

@@ -175,7 +175,6 @@ init :: proc(
   build_shadow_pipelines(&engine.ctx, .D32_SFLOAT) or_return
   engine_build_scene(engine)
   engine_build_renderer(engine) or_return
-
   // Update camera aspect ratio
   if engine.renderer.extent.width > 0 && engine.renderer.extent.height > 0 {
     w := f32(engine.renderer.extent.width)
@@ -321,6 +320,41 @@ engine_build_renderer :: proc(engine: ^Engine) -> vk.Result {
     engine.renderer.extent.width,
     engine.renderer.extent.height,
   ) or_return
+  // Load environment map (HDR)
+  engine.renderer.environment_map_handle, engine.renderer.environment_map =
+    create_hdr_texture_from_path(
+      engine,
+      "assets/teutonic_castle_moat_4k.hdr",
+    ) or_return
+
+  // Allocate environment map descriptor set
+  alloc_info_env := vk.DescriptorSetAllocateInfo {
+      sType              = .DESCRIPTOR_SET_ALLOCATE_INFO,
+      descriptorPool     = engine.ctx.descriptor_pool,
+      descriptorSetCount = 1,
+      pSetLayouts        = &environment_descriptor_set_layout,
+    }
+  vk.AllocateDescriptorSets(
+    engine.ctx.vkd,
+    &alloc_info_env,
+    &engine.renderer.environment_descriptor_set,
+  ) or_return
+
+  env_image_info := vk.DescriptorImageInfo {
+      sampler     = engine.renderer.environment_map.sampler,
+      imageView   = engine.renderer.environment_map.buffer.view,
+      imageLayout = .SHADER_READ_ONLY_OPTIMAL,
+    }
+  env_write := vk.WriteDescriptorSet {
+      sType           = .WRITE_DESCRIPTOR_SET,
+      dstSet          = engine.renderer.environment_descriptor_set,
+      dstBinding      = 0,
+      descriptorType  = .COMBINED_IMAGE_SAMPLER,
+      descriptorCount = 1,
+      pImageInfo      = &env_image_info,
+    }
+  vk.UpdateDescriptorSets(engine.ctx.vkd, 1, &env_write, 0, nil)
+
   return .SUCCESS
 }
 
@@ -399,10 +433,11 @@ render_single_node :: proc(
     vk.CmdBindPipeline(ctx.command_buffer, .GRAPHICS, pipeline)
     // Bind all required descriptor sets (set 0: camera+shadow+cube shadow, set 1: material, set 2: skinning)
     descriptor_sets := [?]vk.DescriptorSet {
-      renderer_get_camera_descriptor_set(&ctx.engine.renderer), // set 0
-      material.texture_descriptor_set, // set 1
-      material.skinning_descriptor_set, // set 2
-    }
+        renderer_get_camera_descriptor_set(&ctx.engine.renderer), // set 0
+        material.texture_descriptor_set, // set 1
+        material.skinning_descriptor_set, // set 2
+        ctx.engine.renderer.environment_descriptor_set, // set 3
+      }
     offsets := [1]u32{0}
     vk.CmdBindDescriptorSets(
       ctx.command_buffer,
@@ -461,10 +496,11 @@ render_single_node :: proc(
     pipeline := pipelines[material.features]
     // Bind all required descriptor sets (set 0: camera+shadow+cube shadow, set 1: material, set 2: skinning)
     descriptor_sets := [?]vk.DescriptorSet {
-      renderer_get_camera_descriptor_set(&ctx.engine.renderer), // set 0
-      material.texture_descriptor_set, // set 1
-      material.skinning_descriptor_set, // set 2
-    }
+        renderer_get_camera_descriptor_set(&ctx.engine.renderer), // set 0
+        material.texture_descriptor_set, // set 1
+        material.skinning_descriptor_set, // set 2
+        ctx.engine.renderer.environment_descriptor_set, // set 3
+      }
     offsets := [1]u32{0}
     vk.CmdBindPipeline(ctx.command_buffer, .GRAPHICS, pipeline)
     vk.CmdBindDescriptorSets(
@@ -538,8 +574,8 @@ render_single_shadow :: proc(
     pipeline := shadow_pipelines[features]
     layout := shadow_pipeline_layout
     descriptor_sets := [?]vk.DescriptorSet {
-      renderer_get_camera_descriptor_set(&ctx.engine.renderer), // set 0
-    }
+        renderer_get_camera_descriptor_set(&ctx.engine.renderer), // set 0
+      }
     vk.CmdBindPipeline(ctx.command_buffer, .GRAPHICS, pipeline)
     offset_shadow :=
       (1 + shadow_idx * 6 + shadow_layer) * u32(aligned_scene_uniform_size)
@@ -595,9 +631,9 @@ render_single_shadow :: proc(
     material := resource.get(&ctx.engine.materials, mesh.material)
     if material == nil {return true}
     descriptor_sets := [?]vk.DescriptorSet {
-      renderer_get_camera_descriptor_set(&ctx.engine.renderer), // set 0
-      material.skinning_descriptor_set, // set 1
-    }
+        renderer_get_camera_descriptor_set(&ctx.engine.renderer), // set 0
+        material.skinning_descriptor_set, // set 1
+      }
     vk.CmdBindPipeline(
       ctx.command_buffer,
       .GRAPHICS,
@@ -695,21 +731,17 @@ render :: proc(engine: ^Engine) -> vk.Result {
     engine        = engine,
     light_uniform = &light_uniform,
   }
-  if !traverse_scene(&engine.scene, &engine.nodes, &collect_ctx, prepare_light) {
+  if !traverse_scene(
+    &engine.scene,
+    &engine.nodes,
+    &collect_ctx,
+    prepare_light,
+  ) {
     fmt.eprintln("[RENDER] Error during light collection")
   }
-  render_shadow_pass(
-    engine,
-    &light_uniform,
-    command_buffer,
-  ) or_return
+  render_shadow_pass(engine, &light_uniform, command_buffer) or_return
   fmt.printfln("============ rendering main pass =============")
-  render_main_pass(
-    engine,
-    command_buffer,
-    image_idx,
-    camera_frustum,
-  ) or_return
+  render_main_pass(engine, command_buffer, image_idx, camera_frustum) or_return
   // Update Uniforms
   data_buffer_write(
     renderer_get_camera_uniform(&engine.renderer),
@@ -879,7 +911,12 @@ render_shadow_pass :: proc(
         {0, -1, 0},
         {0, -1, 0},
       }
-      proj := linalg.matrix4_perspective(math.PI * 0.5, 1.0, 0.01, light.radius)
+      proj := linalg.matrix4_perspective(
+        math.PI * 0.5,
+        1.0,
+        0.01,
+        light.radius,
+      )
       for face in 0 ..< 6 {
         view := linalg.matrix4_look_at(
           light_pos,
@@ -941,7 +978,12 @@ render_shadow_pass :: proc(
           shadow_layer    = u32(face),
           frustum         = geometry.make_frustum(proj * view),
         }
-        traverse_scene(&engine.scene, &engine.nodes, &shadow_render_ctx, render_single_shadow)
+        traverse_scene(
+          &engine.scene,
+          &engine.nodes,
+          &shadow_render_ctx,
+          render_single_shadow,
+        )
         vk.CmdEndRenderingKHR(command_buffer)
       }
     } else {
@@ -1025,7 +1067,12 @@ render_shadow_pass :: proc(
         shadow_idx      = u32(i),
         frustum         = geometry.make_frustum(proj * view),
       }
-      traverse_scene(&engine.scene, &engine.nodes, &shadow_render_ctx, render_single_shadow)
+      traverse_scene(
+        &engine.scene,
+        &engine.nodes,
+        &shadow_render_ctx,
+        render_single_shadow,
+      )
       vk.CmdEndRenderingKHR(command_buffer)
     }
   }
@@ -1084,7 +1131,12 @@ render_shadow_pass :: proc(
   return .SUCCESS
 }
 
-render_main_pass :: proc(engine: ^Engine, command_buffer: vk.CommandBuffer, image_idx: u32, camera_frustum: geometry.Frustum) -> vk.Result {
+render_main_pass :: proc(
+  engine: ^Engine,
+  command_buffer: vk.CommandBuffer,
+  image_idx: u32,
+  camera_frustum: geometry.Frustum,
+) -> vk.Result {
   // Transition swapchain image to color attachment
   barrier := vk.ImageMemoryBarrier {
     sType = .IMAGE_MEMORY_BARRIER,
@@ -1164,7 +1216,12 @@ render_main_pass :: proc(engine: ^Engine, command_buffer: vk.CommandBuffer, imag
     camera_frustum = camera_frustum,
     rendered_count = &rendered_count,
   }
-  if !traverse_scene(&engine.scene, &engine.nodes, &render_meshes_ctx, render_single_node) {
+  if !traverse_scene(
+    &engine.scene,
+    &engine.nodes,
+    &render_meshes_ctx,
+    render_single_node,
+  ) {
     fmt.eprintln("[RENDER] Error during scene mesh rendering")
   }
   if mu.window(&engine.ui.ctx, "Inspector", {40, 40, 300, 150}, {.NO_CLOSE}) {

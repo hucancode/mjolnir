@@ -99,7 +99,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     }
     if true {
       // Load GLTF and play animation
-      gltf_nodes, _ := load_gltf(engine, "assets/CesiumMan.glb")
+      gltf_nodes, _ := load_gltf(engine, "assets/DamagedHelmet.glb")
       fmt.printfln("Loaded GLTF nodes: %v", gltf_nodes)
       for armature in gltf_nodes {
         armature_ptr := resource.get(&engine.nodes, armature)
@@ -160,6 +160,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     }
     // Directional light
     spawn_directional_light(engine, {0.3, 0.3, 0.3, 0.0})
+
 }
 
 update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
