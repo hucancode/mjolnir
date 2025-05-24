@@ -38,7 +38,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
       engine,
       "assets/statue-1275469_1280.jpg",
     )
-    fmt.printfln("Loaded texture: %v", texture)
     mat_handle, _, _ := create_material_untextured(
       engine,
       SHADER_FEATURE_LIT | SHADER_FEATURE_RECEIVE_SHADOW,
@@ -108,7 +107,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
         if skeleton_ptr == nil {
           continue
         }
-        // skeleton_ptr.transform.position = {2.0, 0.0, 0.0}
+        // skeleton_ptr.transform.scale = {0.5, 0.5, 0.5}
         play_animation(engine, skeleton, "Anim_0", .Loop)
         attachment, ok := skeleton_ptr.attachment.(NodeSkeletalMeshAttachment)
         if ok {
