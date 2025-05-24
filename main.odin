@@ -71,9 +71,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
       for x in 1 ..< nx {
         for y in 1 ..< ny {
           for z in 1 ..< nz {
-            if x == nx / 2 && y == ny / 2 && z == nz / 2 {
-              continue
-            }
             node_handle, node := spawn_node(engine)
             attach(&engine.nodes, engine.scene.root, node_handle)
             node.attachment = NodeStaticMeshAttachment{sphere_mesh_handle, true}
