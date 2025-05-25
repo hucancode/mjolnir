@@ -70,10 +70,10 @@ setup :: proc(engine: ^mjolnir.Engine) {
       // Spawn cubes in a grid
       space :f32 = 1.0
       size :f32 = 0.3
-      nx, ny, nz := 5, 2, 5
-      for x in 1 ..< nx {
-        for y in 1 ..< ny {
-          for z in 1 ..< nz {
+      nx, ny, nz := 4, 1, 4
+      for x in 1 ..= nx {
+        for y in 1 ..= ny {
+          for z in 1 ..= nz {
             node_handle, node := spawn_node(engine)
             attach(&engine.nodes, engine.scene.root, node_handle)
             node.attachment = NodeStaticMeshAttachment{sphere_mesh_handle, true}
@@ -99,7 +99,33 @@ setup :: proc(engine: ^mjolnir.Engine) {
     }
     if true {
       // Load GLTF and play animation
-      gltf_nodes, _ := load_gltf(engine, "assets/DamagedHelmet.glb")
+      gltf_nodes := load_gltf(engine, "assets/Duck.glb") or_else {}
+      fmt.printfln("Loaded GLTF nodes: %v", gltf_nodes)
+      for handle in gltf_nodes {
+        duck := resource.get(&engine.nodes, handle)
+        if duck == nil {
+          continue
+        }
+        duck.transform.position = { 0, 0, -2 };
+        duck.transform.scale = {0.2, 0.2, 0.2}
+      }
+    }
+    if true {
+      // Load GLTF and play animation
+      gltf_nodes := load_gltf(engine, "assets/DamagedHelmet.glb") or_else {}
+      fmt.printfln("Loaded GLTF nodes: %v", gltf_nodes)
+      for handle in gltf_nodes {
+        helm := resource.get(&engine.nodes, handle)
+        if helm == nil {
+          continue
+        }
+        helm.transform.position = { 0, 1, 2 };
+        helm.transform.scale = {0.5, 0.5, 0.5}
+      }
+    }
+    if true {
+      // Load GLTF and play animation
+      gltf_nodes := load_gltf(engine, "assets/CesiumMan.glb") or_else {}
       fmt.printfln("Loaded GLTF nodes: %v", gltf_nodes)
       for armature in gltf_nodes {
         armature_ptr := resource.get(&engine.nodes, armature)
@@ -113,14 +139,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
         }
         // skeleton_ptr.transform.scale = {0.5, 0.5, 0.5}
         play_animation(engine, skeleton, "Anim_0", .Loop)
-        attachment, ok := skeleton_ptr.attachment.(NodeSkeletalMeshAttachment)
-        if ok {
-          attachment.cast_shadow = true
-          pose := attachment.pose
-          for i in 0 ..< min(4, len(pose.bone_matrices)) {
-            fmt.printfln("Bone %d matrix: %v", i, pose.bone_matrices[i])
-          }
-        }
       }
     }
 
