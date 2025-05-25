@@ -224,8 +224,7 @@ void main() {
     roughness = clamp(roughness, 0.0, 1.0);
     // --- Normal Mapping ---
     vec3 N = normalize(normal);
-    if (HAS_NORMAL_TEXTURE) {
-        // Sample normal map in tangent space, remap from [0,1] to [-1,1]
+    if (HAS_NORMAL_TEXTURE && false) {
         vec3 tangentNormal = texture(normalSampler, uv).xyz * 2.0 - 1.0;
         // TODO: For correct normal mapping, you should transform tangentNormal by TBN matrix.
         // Here we assume tangent == world for simplicity.
