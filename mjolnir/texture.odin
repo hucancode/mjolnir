@@ -4,6 +4,7 @@ import "core:c"
 import "core:fmt"
 import "core:mem"
 import "core:strings"
+import "core:slice"
 
 import stbi "vendor:stb/image"
 import vk "vendor:vulkan"
@@ -46,7 +47,7 @@ create_texture_from_data :: proc(
 ) {
   handle, texture = resource.alloc(&engine.textures)
   texture_init_from_data(texture, data) or_return
-  texute_init(texture, &engine.ctx) or_return
+  texture_init(texture, &engine.ctx) or_return
   delete(texture.image_data.pixels)
   texture.image_data.pixels = nil
   fmt.printfln(
@@ -77,7 +78,7 @@ create_texture_from_pixels :: proc(
   texture.image_data.height = height
   texture.image_data.channels_in_file = channel
   texture.image_data.actual_channels = channel
-  texute_init(texture, &engine.ctx, format) or_return
+  texture_init(texture, &engine.ctx, format) or_return
   texture.image_data.pixels = nil
   fmt.printfln(
     "created texture %d x %d -> id %d",
@@ -129,7 +130,7 @@ create_texture_from_path :: proc(
 ) {
   handle, texture = resource.alloc(&engine.textures)
   texture_init_from_path(texture, path) or_return
-  texute_init(texture, &engine.ctx) or_return
+  texture_init(texture, &engine.ctx) or_return
   delete(texture.image_data.pixels)
   texture.image_data.pixels = nil
   ret = .SUCCESS
@@ -162,7 +163,7 @@ texture_init_from_path :: proc(self: ^Texture, path: string) -> vk.Result {
   return .SUCCESS
 }
 
-texute_init :: proc(
+texture_init :: proc(
   self: ^Texture,
   ctx: ^VulkanContext,
   format: vk.Format = .R8G8B8A8_SRGB,
@@ -183,9 +184,9 @@ texute_init :: proc(
     sType         = .SAMPLER_CREATE_INFO,
     magFilter     = .LINEAR,
     minFilter     = .LINEAR,
-    addressModeU  = .CLAMP_TO_EDGE,
-    addressModeV  = .CLAMP_TO_EDGE,
-    addressModeW  = .CLAMP_TO_EDGE,
+    addressModeU  = .REPEAT,
+    addressModeV  = .REPEAT,
+    addressModeW  = .REPEAT,
     maxAnisotropy = 1.0,
     borderColor   = .INT_OPAQUE_WHITE,
     compareOp     = .ALWAYS,
@@ -485,4 +486,42 @@ cube_depth_texture_deinit :: proc(self: ^CubeDepthTexture) {
     self.view = 0
   }
   image_buffer_deinit(vkd, &self.buffer)
+}
+
+// Load a floating-point HDR image from path (for environment maps)
+create_hdr_texture_from_path :: proc(
+  engine: ^Engine,
+  path: string,
+) -> (
+  handle: resource.Handle,
+  texture: ^Texture,
+  ret: vk.Result,
+) {
+  handle, texture = resource.alloc(&engine.textures)
+  path_cstr := strings.clone_to_cstring(path)
+  w, h, c_in_file: c.int
+  float_pixels_ptr := stbi.loadf(path_cstr, &w, &h, &c_in_file, 4) // force RGBA
+  if float_pixels_ptr == nil {
+    fmt.eprintf(
+      "Failed to load HDR texture from path '%s': %s\n",
+      path,
+      stbi.failure_reason(),
+    )
+    ret = .ERROR_UNKNOWN
+    return
+  }
+  num_floats := int(w * h * 4)
+  float_pixels := make([]f32, num_floats)
+  mem.copy(raw_data(float_pixels), float_pixels_ptr, num_floats * size_of(f32))
+  stbi.image_free(float_pixels_ptr)
+  texture.image_data.pixels = slice.to_bytes(float_pixels)
+  texture.image_data.width = int(w)
+  texture.image_data.height = int(h)
+  texture.image_data.channels_in_file = 3
+  texture.image_data.actual_channels = 4
+  texture_init(texture, &engine.ctx, .R32G32B32A32_SFLOAT) or_return
+  texture.image_data.pixels = nil
+  fmt.printfln("created HDR texture %d x %d -> id %d", w, h, texture.buffer.image)
+  ret = .SUCCESS
+  return
 }

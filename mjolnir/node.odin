@@ -1,5 +1,6 @@
 package mjolnir
 
+import linalg "core:math/linalg"
 import "geometry"
 import "resource"
 
@@ -91,4 +92,111 @@ attach :: proc(
 
   child_node.parent = parent_handle
   append(&parent_node.children, child_handle)
+}
+
+// --- Animation Control ---
+play_animation :: proc(
+  engine: ^Engine,
+  node_handle: Handle,
+  name: string,
+  mode: Animation_Play_Mode,
+) -> bool {
+  node := resource.get(&engine.nodes, node_handle)
+  if node == nil {
+    return false
+  }
+  data, ok := &node.attachment.(NodeSkeletalMeshAttachment)
+  if !ok {
+    return false
+  }
+  skeletal_mesh_res := resource.get(&engine.skeletal_meshes, data.handle)
+  if skeletal_mesh_res == nil {
+    return false
+  }
+  anim_inst, found := make_animation_instance(skeletal_mesh_res, name, mode)
+  if !found {
+    return false
+  }
+  data.animation = anim_inst
+  return true
+}
+
+// Spawns a node with a point light attached
+spawn_point_light :: proc(
+  engine: ^Engine,
+  color: linalg.Vector4f32,
+  radius: f32,
+  cast_shadow: bool = true,
+) -> (
+  handle: Handle,
+  node: ^Node,
+) {
+  handle, node = spawn_node(engine)
+  if node != nil {
+    light_handle, light := resource.alloc(&engine.lights)
+    light^ = PointLight {
+      color       = color,
+      radius      = radius,
+      cast_shadow = cast_shadow,
+    }
+    node.attachment = NodeLightAttachment{light_handle}
+  }
+  return
+}
+
+// Spawns a node with a directional light attached
+spawn_directional_light :: proc(
+  engine: ^Engine,
+  color: linalg.Vector4f32,
+  cast_shadow: bool = true,
+) -> (
+  handle: Handle,
+  node: ^Node,
+) {
+  handle, node = spawn_node(engine)
+  if node != nil {
+    light_handle, light := resource.alloc(&engine.lights)
+    light^ = DirectionalLight {
+      color       = color,
+      cast_shadow = cast_shadow,
+    }
+    node.attachment = NodeLightAttachment{light_handle}
+  }
+  return
+}
+
+// Spawns a node with a spot light attached
+spawn_spot_light :: proc(
+  engine: ^Engine,
+  color: linalg.Vector4f32,
+  angle: f32,
+  radius: f32,
+  cast_shadow: bool = true,
+) -> (
+  handle: Handle,
+  node: ^Node,
+) {
+  handle, node = spawn_node(engine)
+  if node != nil {
+    light_handle, light := resource.alloc(&engine.lights)
+    light^ = SpotLight {
+      color       = color,
+      angle       = angle,
+      radius      = radius,
+      cast_shadow = cast_shadow,
+    }
+    node.attachment = NodeLightAttachment{light_handle}
+  }
+  return
+}
+
+// Spawns a generic node and returns its handle and pointer
+spawn_node :: proc(engine: ^Engine) -> (handle: Handle, node: ^Node) {
+  handle, node = resource.alloc(&engine.nodes)
+  if node != nil {
+    node.transform = geometry.transform_identity()
+    node.children = make([dynamic]Handle, 0)
+    attach(&engine.nodes, engine.scene.root, handle)
+  }
+  return
 }

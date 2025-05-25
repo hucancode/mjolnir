@@ -8,7 +8,7 @@ import vk "vendor:vulkan"
 MAX_FRAMES_IN_FLIGHT :: 2
 
 // Renderer specific constants
-MAX_LIGHTS :: 5
+MAX_LIGHTS :: 10
 SHADOW_MAP_SIZE :: 512
 MAX_SHADOW_MAPS :: MAX_LIGHTS
 MAX_SCENE_UNIFORMS :: 16
@@ -64,7 +64,7 @@ Frame :: struct {
   camera_uniform:                 DataBuffer,
   light_uniform:                  DataBuffer,
   shadow_maps:                    [MAX_SHADOW_MAPS]DepthTexture,
-  cube_shadow_maps:               [MAX_SHADOW_MAPS]CubeDepthTexture, // <-- new
+  cube_shadow_maps:               [MAX_SHADOW_MAPS]CubeDepthTexture,
   camera_descriptor_set:          vk.DescriptorSet,
   shadow_map_descriptor_set:      vk.DescriptorSet,
   cube_shadow_map_descriptor_set: vk.DescriptorSet,
@@ -177,6 +177,7 @@ frame_init :: proc(self: ^Frame, ctx: ^VulkanContext) -> (res: vk.Result) {
     },
   }
   vk.UpdateDescriptorSets(ctx.vkd, len(writes), raw_data(writes[:]), 0, nil)
+
   return .SUCCESS
 }
 
@@ -202,15 +203,18 @@ frame_deinit :: proc(self: ^Frame) {
 
 // --- Renderer Struct ---
 Renderer :: struct {
-  ctx:                 ^VulkanContext,
-  swapchain:           vk.SwapchainKHR,
-  format:              vk.SurfaceFormatKHR,
-  extent:              vk.Extent2D,
-  images:              []vk.Image, // Owned by swapchain, slice managed by renderer
-  views:               []vk.ImageView, // Owned by renderer, one per image
-  frames:              [MAX_FRAMES_IN_FLIGHT]Frame,
-  depth_buffer:        ImageBuffer,
-  current_frame_index: u32,
+  ctx:                        ^VulkanContext,
+  swapchain:                  vk.SwapchainKHR,
+  format:                     vk.SurfaceFormatKHR,
+  extent:                     vk.Extent2D,
+  images:                     []vk.Image, // Owned by swapchain, slice managed by renderer
+  views:                      []vk.ImageView, // Owned by renderer, one per image
+  frames:                     [MAX_FRAMES_IN_FLIGHT]Frame,
+  depth_buffer:               ImageBuffer,
+  environment_map:            ^Texture,
+  environment_map_handle:     Handle,
+  environment_descriptor_set: vk.DescriptorSet,
+  current_frame_index:        u32,
 }
 
 renderer_init :: proc(self: ^Renderer, ctx: ^VulkanContext) -> vk.Result {
@@ -233,7 +237,6 @@ renderer_deinit :: proc(self: ^Renderer) {
   vk.DestroyDescriptorSetLayout(vkd, camera_descriptor_set_layout, nil)
   self.ctx = nil
 }
-
 
 renderer_build_command_buffers :: proc(self: ^Renderer) -> vk.Result {
   alloc_info := vk.CommandBufferAllocateInfo {

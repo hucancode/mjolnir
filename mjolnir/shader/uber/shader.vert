@@ -1,9 +1,11 @@
 #version 450
 
 layout(constant_id = 0) const bool SKINNED = false;
-layout(constant_id = 1) const bool HAS_TEXTURE = false;
-layout(constant_id = 2) const bool IS_LIT = false;
-layout(constant_id = 3) const bool CAN_RECEIVE_SHADOW = false;
+layout(constant_id = 1) const bool HAS_ALBEDO_TEXTURE = false;
+layout(constant_id = 2) const bool HAS_METALLIC_ROUGHNESS_TEXTURE = false;
+layout(constant_id = 3) const bool HAS_NORMAL_TEXTURE = false;
+layout(constant_id = 4) const bool HAS_DISPLACEMENT_TEXTURE = false;
+layout(constant_id = 5) const bool HAS_EMISSIVE_TEXTURE = false;
 
 layout(location = 0) in vec3 inPosition;
 layout(location = 1) in vec3 inNormal;
@@ -41,20 +43,18 @@ void main() {
             inWeights.z * bones[inJoints.z] +
             inWeights.w * bones[inJoints.w];
         modelPosition = skinMatrix * vec4(inPosition, 1.0);
-        if (IS_LIT) {
-            modelNormal = mat3(skinMatrix) * inNormal;
-        }
+        modelNormal = mat3(skinMatrix) * inNormal;
     } else {
         modelPosition = vec4(inPosition, 1.0);
-        if (IS_LIT) {
-            modelNormal = inNormal;
-        }
+        modelNormal = inNormal;
     }
     vec4 worldPosition = world * modelPosition;
-    if (IS_LIT) {
-        outNormal = normalize(mat3(world) * modelNormal);
-    }
-    if (HAS_TEXTURE) {
+    outNormal = normalize(mat3(world) * modelNormal);
+    if (HAS_ALBEDO_TEXTURE ||
+    HAS_METALLIC_ROUGHNESS_TEXTURE ||
+    HAS_NORMAL_TEXTURE ||
+    HAS_DISPLACEMENT_TEXTURE ||
+    HAS_EMISSIVE_TEXTURE) {
         outUV = inUV;
     }
     outColor = inColor;

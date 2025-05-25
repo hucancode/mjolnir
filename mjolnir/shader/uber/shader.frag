@@ -1,11 +1,13 @@
 #version 450
 
 layout(constant_id = 0) const bool SKINNED = false;
-layout(constant_id = 1) const bool HAS_TEXTURE = false;
-layout(constant_id = 2) const bool IS_LIT = false;
-layout(constant_id = 3) const bool CAN_RECEIVE_SHADOW = false;
+layout(constant_id = 1) const bool HAS_ALBEDO_TEXTURE = false;
+layout(constant_id = 2) const bool HAS_METALLIC_ROUGHNESS_TEXTURE = false;
+layout(constant_id = 3) const bool HAS_NORMAL_TEXTURE = false;
+layout(constant_id = 4) const bool HAS_DISPLACEMENT_TEXTURE = false;
+layout(constant_id = 5) const bool HAS_EMISSIVE_TEXTURE = false;
 
-const uint MAX_LIGHTS = 5;
+const uint MAX_LIGHTS = 10;
 const uint POINT_LIGHT = 0;
 const uint DIRECTIONAL_LIGHT = 1;
 const uint SPOT_LIGHT = 2;
@@ -35,8 +37,19 @@ layout(set = 0, binding = 2) uniform sampler2D shadowMaps[MAX_LIGHTS];
 layout(set = 0, binding = 3) uniform samplerCube cubeShadowMaps[MAX_LIGHTS];
 
 layout(set = 1, binding = 0) uniform sampler2D albedoSampler;
-layout(set = 1, binding = 1) uniform sampler2D metalicSampler;
-layout(set = 1, binding = 2) uniform sampler2D roughnessSampler;
+layout(set = 1, binding = 1) uniform sampler2D metallicRoughnessSampler;
+layout(set = 1, binding = 2) uniform sampler2D normalSampler;
+layout(set = 1, binding = 3) uniform sampler2D displacementSampler;
+layout(set = 1, binding = 4) uniform sampler2D emissiveSampler;
+
+layout(set = 1, binding = 5) uniform MaterialFallbacks {
+    vec4 albedoValue;
+    vec4 emissiveValue;
+    float roughnessValue;
+    float metallicValue;
+};
+
+layout(set = 3, binding = 0) uniform sampler2D environmentMap;
 
 layout(location = 0) in vec3 position;
 layout(location = 1) in vec4 color;
@@ -45,10 +58,10 @@ layout(location = 3) in vec2 uv;
 layout(location = 0) out vec4 outColor;
 
 const vec3 ambientColor = vec3(0.0, 0.5, 1.0);
-const float ambientStrength = 0.05;
-const float specularStrength = 0.5;
-const float shininess = 8.0;
-const float diffuseStrength = 0.5;
+const float ambientStrength = 0.2;
+const float specularStrength = 0.8;
+const float shininess = 20.0;
+const float diffuseStrength = 1.0;
 
 float linearizeDepth(float depth, float near, float far) {
     // Converts depth from [0,1] (texture) to linear view space depth
@@ -135,8 +148,14 @@ vec3 calculateLighting(Light light, vec3 viewDir, vec3 albedo) {
             specular = pow(max(dot(reflect(-surfaceToLight, normal), viewDir), 0.0), shininess) * specularStrength * light.color.rgb;
         }
         float distance = length(position - light.position.xyz);
-        float attenuation = max(0.0, 1.0 - distance / max(0.001, light.radius));
-        return (diffuse + specular) * pow(attenuation, 2.0);
+        // Standard quadratic attenuation
+        float constant = 1.0;
+        float linear = 0.09;
+        float quadratic = 0.032;
+        float attenuation = 1.0 / (constant + linear * distance + quadratic * (distance * distance));
+        // Hard cutoff at light.radius
+        if (distance > light.radius) attenuation = 0.0;
+        return (diffuse + specular) * attenuation;
     }
     if (light.kind == DIRECTIONAL_LIGHT) {
         vec3 surfaceToLight = -light.direction.xyz;
@@ -162,17 +181,82 @@ vec3 calculateLighting(Light light, vec3 viewDir, vec3 albedo) {
     return vec3(0.0);
 }
 
+vec3 brdf(vec3 N, vec3 V, vec3 albedo, float roughness, float metallic) {
+    // Cook-Torrance BRDF
+    vec3 F0 = mix(vec3(0.04), albedo, metallic);
+    vec3 Lo = vec3(0.0);
+    for (int i = 0; i < min(lightCount, MAX_LIGHTS); i++) {
+        Light light = lights[i];
+        vec3 L = light.kind == DIRECTIONAL_LIGHT ? normalize(-light.direction.xyz) : normalize(light.position.xyz - position);
+        vec3 H = normalize(V + L);
+        float distance = light.kind == DIRECTIONAL_LIGHT ? 1.0 : length(light.position.xyz - position);
+        float attenuation = 2.0;
+        if (light.kind != DIRECTIONAL_LIGHT) {
+            float norm_dist = distance / max(0.01, light.radius);
+            attenuation *= 1.0 - clamp(norm_dist * norm_dist, 0.0, 1.0);
+        }
+        float NdotL = max(dot(N, L), 0.0);
+        // Cook-Torrance BRDF
+        float NDF = pow(roughness, 4.0) / (PI * pow((dot(N, H) * dot(N, H)) * (pow(roughness, 4.0) - 1.0) + 1.0, 2.0));
+        float k = pow(roughness + 1.0, 2.0) / 8.0;
+        float G = NdotL / (NdotL * (1.0 - k) + k);
+        G *= max(dot(N, V), 0.0) / (max(dot(N, V), 0.0) * (1.0 - k) + k);
+        vec3 F = F0 + (1.0 - F0) * pow(1.0 - max(dot(H, V), 0.0), 5.0);
+        vec3 spec = (NDF * G * F) / (4.0 * max(dot(N, V), 0.0) * NdotL + 0.001);
+        vec3 kS = F;
+        vec3 kD = (vec3(1.0) - kS) * (1.0 - metallic);
+        float shadow = calculateShadow(i);
+        Lo += (kD * albedo / PI + spec) * light.color.rgb * NdotL * attenuation * shadow;
+    }
+    return Lo;
+}
+
 void main() {
     vec3 cameraPosition = -inverse(view)[3].xyz;
-    vec3 albedo = HAS_TEXTURE ? texture(albedoSampler, uv).rgb : color.rgb;
-    vec3 viewDir = normalize(cameraPosition.xyz - position);
-    vec3 result = ambientColor * ambientStrength;
-    if (IS_LIT) {
-        for (int i = 0; i < min(lightCount, MAX_LIGHTS); i++) {
-            float shadow = calculateShadow(i);
-            result += shadow * calculateLighting(lights[i], viewDir, albedo);
-        }
+    // --- PBR Texture Sampling and Fallbacks ---
+    vec3 albedo = HAS_ALBEDO_TEXTURE ? texture(albedoSampler, uv).rgb : albedoValue.rgb;
+    float metallic = HAS_METALLIC_ROUGHNESS_TEXTURE ? texture(metallicRoughnessSampler, uv).r : metallicValue;
+    float roughness = HAS_METALLIC_ROUGHNESS_TEXTURE ? texture(metallicRoughnessSampler, uv).g : roughnessValue;
+    vec3 emissive = HAS_EMISSIVE_TEXTURE ? texture(emissiveSampler, uv).rgb : emissiveValue.rgb;
+
+    metallic = clamp(metallic, 0.0, 1.0);
+    roughness = clamp(roughness, 0.04, 1.0);
+    // --- Normal Mapping ---
+    vec3 N = normalize(normal);
+    if (HAS_NORMAL_TEXTURE) {
+        // Sample normal map in tangent space, remap from [0,1] to [-1,1]
+        vec3 tangentNormal = texture(normalSampler, uv).xyz * 2.0 - 1.0;
+        // TODO: For correct normal mapping, you should transform tangentNormal by TBN matrix.
+        // Here we assume tangent == world for simplicity.
+        N = normalize(tangentNormal);
     }
-    result *= albedo;
-    outColor = vec4(result, 1.0);
+
+    // --- Displacement Mapping ---
+    vec3 displacedPosition = position;
+    if (HAS_DISPLACEMENT_TEXTURE) {
+        float disp = texture(displacementSampler, uv).r;
+        // Displace along the normal direction
+        displacedPosition += N * disp;
+    }
+
+    // --- View Direction ---
+    vec3 V = normalize(cameraPosition - displacedPosition);
+
+    // --- Environment Reflection ---
+    vec3 refl = reflect(-V, N);
+    float u = atan(refl.z, refl.x) / (2.0 * PI) + 0.5;
+    float v = acos(clamp(refl.y, -1.0, 1.0)) / PI;
+    vec3 envColor = texture(environmentMap, vec2(u, v)).rgb;
+
+    // --- Ambient + Emissive ---
+    vec3 ambient = ambientColor * ambientStrength * albedo + emissive;
+
+    // --- PBR Lighting ---
+    vec3 colorOut = ambient + brdf(N, V, albedo, roughness, metallic);
+
+    // --- Simple Environment Reflection (metallic surfaces) ---
+    float envStrength = metallic * 0.02;
+    colorOut = mix(colorOut, envColor, envStrength);
+
+    outColor = vec4(colorOut, 1.0);
 }
