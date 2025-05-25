@@ -159,7 +159,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
       light_cube_node.transform.scale = {0.1, 0.1, 0.1}
     }
     // Directional light
-    spawn_directional_light(engine, {0.3, 0.3, 0.3, 0.0})
+    spawn_directional_light(engine, {0.3, 0.3, 0.3, 1.0})
 
 }
 

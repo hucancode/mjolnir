@@ -47,10 +47,10 @@ layout(location = 3) in vec2 uv;
 layout(location = 0) out vec4 outColor;
 
 const vec3 ambientColor = vec3(0.0, 0.5, 1.0);
-const float ambientStrength = 0.05;
-const float specularStrength = 0.5;
-const float shininess = 8.0;
-const float diffuseStrength = 0.5;
+const float ambientStrength = 0.2;
+const float specularStrength = 0.8;
+const float shininess = 20.0;
+const float diffuseStrength = 1.0;
 
 float linearizeDepth(float depth, float near, float far) {
     // Converts depth from [0,1] (texture) to linear view space depth
