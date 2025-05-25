@@ -218,7 +218,6 @@ vec3 brdf(vec3 N, vec3 V, vec3 albedo, float roughness, float metallic) {
 
 void main() {
     vec3 cameraPosition = -inverse(view)[3].xyz;
-
     // --- PBR Texture Sampling and Fallbacks ---
     vec3 albedo = HAS_ALBEDO_TEXTURE ? texture(albedoSampler, uv).rgb : albedoValue.rgb;
     float roughness = HAS_ROUGHNESS_TEXTURE ? texture(roughnessSampler, uv).r : roughnessValue;
