@@ -7,27 +7,25 @@ import "resource"
 import vk "vendor:vulkan"
 
 SHADER_FEATURE_SKINNING :: 1 << 0
-SHADER_FEATURE_ALBEDO_TEXTURE :: 1 << 1
-SHADER_FEATURE_METALLIC_TEXTURE :: 1 << 2
-SHADER_FEATURE_ROUGHNESS_TEXTURE :: 1 << 3
-SHADER_FEATURE_NORMAL_TEXTURE :: 1 << 4
-SHADER_FEATURE_DISPLACEMENT_TEXTURE :: 1 << 5
-SHADER_FEATURE_EMISSIVE_TEXTURE :: 1 << 6
-SHADER_FEATURE_LIT :: 1 << 7
+SHADER_FEATURE_ALBEDO_TEXTURE       :: 1 << 1
+SHADER_FEATURE_METALLIC_ROUGHNESS_TEXTURE :: 1 << 2
+SHADER_FEATURE_NORMAL_TEXTURE       :: 1 << 3
+SHADER_FEATURE_DISPLACEMENT_TEXTURE :: 1 << 4
+SHADER_FEATURE_EMISSIVE_TEXTURE     :: 1 << 5
+SHADER_FEATURE_LIT                  :: 1 << 6
 
-SHADER_OPTION_COUNT :: 8
+SHADER_OPTION_COUNT :: 7
 SHADER_VARIANT_COUNT :: 1 << SHADER_OPTION_COUNT
 
 // Specialization constant struct (must match shader)
 ShaderConfig :: struct {
-  is_skinned:               b32,
-  has_albedo_texture:       b32,
-  has_metallic_texture:     b32,
-  has_roughness_texture:    b32,
-  has_normal_texture:       b32,
-  has_displacement_texture: b32,
-  has_emissive_texture:     b32,
-  is_lit:                   b32,
+    is_skinned:             b32,
+    has_albedo_texture:     b32,
+    has_metallic_roughness_texture: b32,
+    has_normal_texture:     b32,
+    has_displacement_texture:b32,
+    has_emissive_texture:   b32,
+    is_lit:                 b32,
 }
 
 // Material descriptor set layout: [albedo, metallic, roughness, bones (optional)]
@@ -46,8 +44,7 @@ Material :: struct {
 
   // Texture handles for each supported type
   albedo_handle:           Handle,
-  metallic_handle:         Handle,
-  roughness_handle:        Handle,
+  metallic_roughness_handle:         Handle,
   normal_handle:           Handle,
   displacement_handle:     Handle,
   emissive_handle:         Handle,
@@ -110,8 +107,7 @@ material_init_descriptor_set_layout :: proc(
 material_update_textures :: proc(
   mat: ^Material,
   albedo: ^Texture,
-  metallic: ^Texture,
-  roughness: ^Texture,
+  metallic_roughness: ^Texture,
   normal: ^Texture,
   displacement: ^Texture,
   emissive: ^Texture,
@@ -129,13 +125,8 @@ material_update_textures :: proc(
       imageLayout = .SHADER_READ_ONLY_OPTIMAL,
     },
     {
-      sampler = metallic.sampler if metallic != nil else 0,
-      imageView = metallic.buffer.view if metallic != nil else 0,
-      imageLayout = .SHADER_READ_ONLY_OPTIMAL,
-    },
-    {
-      sampler = roughness.sampler if roughness != nil else 0,
-      imageView = roughness.buffer.view if roughness != nil else 0,
+      sampler = metallic_roughness.sampler if metallic_roughness != nil else 0,
+      imageView = metallic_roughness.buffer.view if metallic_roughness != nil else 0,
       imageLayout = .SHADER_READ_ONLY_OPTIMAL,
     },
     {
@@ -214,14 +205,6 @@ material_update_textures :: proc(
       sType = .WRITE_DESCRIPTOR_SET,
       dstSet = mat.texture_descriptor_set,
       dstBinding = 5,
-      descriptorType = .COMBINED_IMAGE_SAMPLER,
-      descriptorCount = 1,
-      pImageInfo = &image_infos[5],
-    },
-    {
-      sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = mat.texture_descriptor_set,
-      dstBinding = 6,
       descriptorType = .UNIFORM_BUFFER,
       descriptorCount = 1,
       pBufferInfo = &vk.DescriptorBufferInfo {
@@ -414,12 +397,6 @@ build_3d_pipelines :: proc(
     },
     {
       binding = 5,
-      descriptorType = .COMBINED_IMAGE_SAMPLER,
-      descriptorCount = 1,
-      stageFlags = {.FRAGMENT},
-    },
-    {
-      binding = 6,
       descriptorType = .UNIFORM_BUFFER,
       descriptorCount = 1,
       stageFlags = {.FRAGMENT},
@@ -498,64 +475,52 @@ build_3d_pipelines :: proc(
     &pipeline_layout,
   ) or_return
   for features in 0 ..< SHADER_VARIANT_COUNT {
-    configs[features] = ShaderConfig {
-      is_skinned               = (features & SHADER_FEATURE_SKINNING) != 0,
-      has_albedo_texture       = (features &
-        SHADER_FEATURE_ALBEDO_TEXTURE) != 0,
-      has_metallic_texture     = (features &
-        SHADER_FEATURE_METALLIC_TEXTURE) != 0,
-      has_roughness_texture    = (features &
-        SHADER_FEATURE_ROUGHNESS_TEXTURE) != 0,
-      has_normal_texture       = (features &
-        SHADER_FEATURE_NORMAL_TEXTURE) != 0,
-      has_displacement_texture = (features &
-        SHADER_FEATURE_DISPLACEMENT_TEXTURE) != 0,
-      has_emissive_texture     = (features &
-        SHADER_FEATURE_EMISSIVE_TEXTURE) != 0,
-      is_lit                   = (features & SHADER_FEATURE_LIT) != 0,
-    }
-    entries[features] = [SHADER_OPTION_COUNT]vk.SpecializationMapEntry {
-      {
-        constantID = 0,
-        offset = u32(offset_of(ShaderConfig, is_skinned)),
-        size = size_of(b32),
-      },
-      {
-        constantID = 1,
-        offset = u32(offset_of(ShaderConfig, has_albedo_texture)),
-        size = size_of(b32),
-      },
-      {
-        constantID = 2,
-        offset = u32(offset_of(ShaderConfig, has_metallic_texture)),
-        size = size_of(b32),
-      },
-      {
-        constantID = 3,
-        offset = u32(offset_of(ShaderConfig, has_roughness_texture)),
-        size = size_of(b32),
-      },
-      {
-        constantID = 4,
-        offset = u32(offset_of(ShaderConfig, has_normal_texture)),
-        size = size_of(b32),
-      },
-      {
-        constantID = 5,
-        offset = u32(offset_of(ShaderConfig, has_displacement_texture)),
-        size = size_of(b32),
-      },
-      {
-        constantID = 6,
-        offset = u32(offset_of(ShaderConfig, has_emissive_texture)),
-        size = size_of(b32),
-      },
-      {
-        constantID = 7,
-        offset = u32(offset_of(ShaderConfig, is_lit)),
-        size = size_of(b32),
-      },
-    }
+      configs[features] = ShaderConfig {
+        is_skinned              = (features & SHADER_FEATURE_SKINNING) != 0,
+        has_albedo_texture      = (features & SHADER_FEATURE_ALBEDO_TEXTURE) != 0,
+        has_metallic_roughness_texture = (features & SHADER_FEATURE_METALLIC_ROUGHNESS_TEXTURE) != 0,
+        has_normal_texture      = (features & SHADER_FEATURE_NORMAL_TEXTURE) != 0,
+        has_displacement_texture= (features & SHADER_FEATURE_DISPLACEMENT_TEXTURE) != 0,
+        has_emissive_texture    = (features & SHADER_FEATURE_EMISSIVE_TEXTURE) != 0,
+        is_lit                  = (features & SHADER_FEATURE_LIT) != 0,
+      }
+      entries[features] = [SHADER_OPTION_COUNT]vk.SpecializationMapEntry {
+        {
+          constantID = 0,
+          offset = u32(offset_of(ShaderConfig, is_skinned)),
+          size = size_of(b32),
+        },
+        {
+          constantID = 1,
+          offset = u32(offset_of(ShaderConfig, has_albedo_texture)),
+          size = size_of(b32),
+        },
+        {
+          constantID = 2,
+          offset = u32(offset_of(ShaderConfig, has_metallic_roughness_texture)),
+          size = size_of(b32),
+        },
+        {
+          constantID = 3,
+          offset = u32(offset_of(ShaderConfig, has_normal_texture)),
+          size = size_of(b32),
+        },
+        {
+          constantID = 4,
+          offset = u32(offset_of(ShaderConfig, has_displacement_texture)),
+          size = size_of(b32),
+        },
+        {
+          constantID = 5,
+          offset = u32(offset_of(ShaderConfig, has_emissive_texture)),
+          size = size_of(b32),
+        },
+        {
+          constantID = 6,
+          offset = u32(offset_of(ShaderConfig, is_lit)),
+          size = size_of(b32),
+        },
+      }
     spec_infos[features] = vk.SpecializationInfo {
       mapEntryCount = len(entries[features]),
       pMapEntries   = raw_data(entries[features][:]),
@@ -616,8 +581,7 @@ create_material :: proc(
   engine: ^Engine,
   features: u32 = 0,
   albedo_handle: Handle = {},
-  metallic_handle: Handle = {},
-  roughness_handle: Handle = {},
+  metallic_roughness_handle: Handle = {},
   normal_handle: Handle = {},
   displacement_handle: Handle = {},
   emissive_handle: Handle = {},
@@ -635,8 +599,7 @@ create_material :: proc(
   mat.features = features
 
   mat.albedo_handle = albedo_handle
-  mat.metallic_handle = metallic_handle
-  mat.roughness_handle = roughness_handle
+  mat.metallic_roughness_handle = metallic_roughness_handle
   mat.normal_handle = normal_handle
   mat.displacement_handle = displacement_handle
   mat.emissive_handle = emissive_handle
@@ -650,16 +613,14 @@ create_material :: proc(
 
   // Bind textures if handles are valid, otherwise fallback to flat values in shader
   albedo := resource.get(&engine.textures, albedo_handle)
-  metallic := resource.get(&engine.textures, metallic_handle)
-  roughness := resource.get(&engine.textures, roughness_handle)
+  metallic_roughness := resource.get(&engine.textures, metallic_roughness_handle)
   normal := resource.get(&engine.textures, normal_handle)
   displacement := resource.get(&engine.textures, displacement_handle)
   emissive := resource.get(&engine.textures, emissive_handle)
   material_update_textures(
     mat,
     albedo,
-    metallic,
-    roughness,
+    metallic_roughness,
     normal,
     displacement,
     emissive,

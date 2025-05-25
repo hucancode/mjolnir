@@ -248,18 +248,17 @@ load_gltf_pbr_textures :: proc(
   g_material: ^cgltf.material,
 ) -> (
   albedo_handle: Handle,
-  metallic_handle: Handle,
-  roughness_handle: Handle,
+  metallic_roughness_handle: Handle,
   normal_handle: Handle,
   displacement_handle: Handle,
   emissive_handle: Handle,
   features: u32,
   ret: vk.Result,
 ) {
-    if g_material == nil {
-        ret = .ERROR_UNKNOWN
-        return
-    }
+  if g_material == nil {
+    ret = .ERROR_UNKNOWN
+    return
+  }
   features = SHADER_FEATURE_LIT
   albedo_handle, _ = load_gltf_texture(
     engine,
@@ -302,13 +301,11 @@ load_gltf_pbr_textures :: proc(
           return
         }
         // For now, use the same texture for both metallic and roughness
-        metallic_handle, _ = create_texture_from_data(
+        metallic_roughness_handle, _ = create_texture_from_data(
           engine,
           pixel_data,
         ) or_return
-        roughness_handle = metallic_handle
-        features |= SHADER_FEATURE_METALLIC_TEXTURE
-        features |= SHADER_FEATURE_ROUGHNESS_TEXTURE
+        features |= SHADER_FEATURE_METALLIC_ROUGHNESS_TEXTURE
         delete(pixel_data)
       }
     }
@@ -358,7 +355,7 @@ load_gltf_primitive :: proc(
   }
   g_primitive := &primitives[0]
   // Material
-  albedo_handle, metallic_handle, roughness_handle, normal_handle, displacement_handle, emissive_handle, features :=
+  albedo_handle, metallic_roughness_handle, normal_handle, displacement_handle, emissive_handle, features :=
     load_gltf_pbr_textures(
       engine,
       path,
@@ -369,8 +366,7 @@ load_gltf_primitive :: proc(
     engine,
     features | SHADER_FEATURE_LIT,
     albedo_handle,
-    metallic_handle,
-    roughness_handle,
+    metallic_roughness_handle,
     normal_handle,
     displacement_handle,
     emissive_handle,
@@ -465,7 +461,7 @@ load_gltf_skinned_primitive :: proc(
   g_primitive := &primitives[0]
   fmt.printfln("Creating texture for skinned material...")
   // Material
-  albedo_handle, metallic_handle, roughness_handle, normal_handle, displacement_handle, emissive_handle, features :=
+  albedo_handle, metallic_roughness_handle, normal_handle, displacement_handle, emissive_handle, features :=
     load_gltf_pbr_textures(
       engine,
       path,
@@ -476,21 +472,19 @@ load_gltf_skinned_primitive :: proc(
     engine,
     features | SHADER_FEATURE_SKINNING | SHADER_FEATURE_LIT,
     albedo_handle,
-    metallic_handle,
-    roughness_handle,
+    metallic_roughness_handle,
     normal_handle,
     displacement_handle,
     emissive_handle,
   ) or_return
   fmt.printfln(
-    "Creating skinned material %v with PBR textures %v/%v/%v/%v/%v/%v",
-    mat_handle,
+    "Creating skinned material with PBR textures %v/%v/%v/%v/%v -> %v",
     albedo_handle,
-    metallic_handle,
-    roughness_handle,
+    metallic_roughness_handle,
     normal_handle,
     displacement_handle,
     emissive_handle,
+    mat_handle,
   )
   // Geometry
   num_vertices := g_primitive.attributes[0].data.count

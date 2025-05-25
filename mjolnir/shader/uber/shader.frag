@@ -2,12 +2,11 @@
 
 layout(constant_id = 0) const bool SKINNED = false;
 layout(constant_id = 1) const bool HAS_ALBEDO_TEXTURE = false;
-layout(constant_id = 2) const bool HAS_METALLIC_TEXTURE = false;
-layout(constant_id = 3) const bool HAS_ROUGHNESS_TEXTURE = false;
-layout(constant_id = 4) const bool HAS_NORMAL_TEXTURE = false;
-layout(constant_id = 5) const bool HAS_DISPLACEMENT_TEXTURE = false;
-layout(constant_id = 6) const bool HAS_EMISSIVE_TEXTURE = false;
-layout(constant_id = 7) const bool IS_LIT = false;
+layout(constant_id = 2) const bool HAS_METALLIC_ROUGHNESS_TEXTURE = false;
+layout(constant_id = 3) const bool HAS_NORMAL_TEXTURE = false;
+layout(constant_id = 4) const bool HAS_DISPLACEMENT_TEXTURE = false;
+layout(constant_id = 5) const bool HAS_EMISSIVE_TEXTURE = false;
+layout(constant_id = 6) const bool IS_LIT = false;
 
 const uint MAX_LIGHTS = 5;
 const uint POINT_LIGHT = 0;
@@ -39,13 +38,12 @@ layout(set = 0, binding = 2) uniform sampler2D shadowMaps[MAX_LIGHTS];
 layout(set = 0, binding = 3) uniform samplerCube cubeShadowMaps[MAX_LIGHTS];
 
 layout(set = 1, binding = 0) uniform sampler2D albedoSampler;
-layout(set = 1, binding = 1) uniform sampler2D metallicSampler;
-layout(set = 1, binding = 2) uniform sampler2D roughnessSampler;
-layout(set = 1, binding = 3) uniform sampler2D normalSampler;
-layout(set = 1, binding = 4) uniform sampler2D displacementSampler;
-layout(set = 1, binding = 5) uniform sampler2D emissiveSampler;
+layout(set = 1, binding = 1) uniform sampler2D metallicRoughnessSampler;
+layout(set = 1, binding = 2) uniform sampler2D normalSampler;
+layout(set = 1, binding = 3) uniform sampler2D displacementSampler;
+layout(set = 1, binding = 4) uniform sampler2D emissiveSampler;
 
-layout(set = 1, binding = 6) uniform MaterialFallbacks {
+layout(set = 1, binding = 5) uniform MaterialFallbacks {
     vec4 albedoValue;
     vec4 emissiveValue;
     float roughnessValue;
@@ -220,8 +218,8 @@ void main() {
     vec3 cameraPosition = -inverse(view)[3].xyz;
     // --- PBR Texture Sampling and Fallbacks ---
     vec3 albedo = HAS_ALBEDO_TEXTURE ? texture(albedoSampler, uv).rgb : albedoValue.rgb;
-    float roughness = HAS_ROUGHNESS_TEXTURE ? texture(roughnessSampler, uv).r : roughnessValue;
-    float metallic = HAS_METALLIC_TEXTURE ? texture(metallicSampler, uv).r : metallicValue;
+    float metallic = HAS_METALLIC_ROUGHNESS_TEXTURE ? texture(metallicRoughnessSampler, uv).r : metallicValue;
+    float roughness = HAS_METALLIC_ROUGHNESS_TEXTURE ? texture(metallicRoughnessSampler, uv).g : roughnessValue;
     vec3 emissive = HAS_EMISSIVE_TEXTURE ? texture(emissiveSampler, uv).rgb : emissiveValue.rgb;
 
     metallic = clamp(metallic, 0.0, 1.0);

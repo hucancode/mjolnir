@@ -2,12 +2,11 @@
 
 layout(constant_id = 0) const bool SKINNED = false;
 layout(constant_id = 1) const bool HAS_ALBEDO_TEXTURE = false;
-layout(constant_id = 2) const bool HAS_METALLIC_TEXTURE = false;
-layout(constant_id = 3) const bool HAS_ROUGHNESS_TEXTURE = false;
-layout(constant_id = 4) const bool HAS_NORMAL_TEXTURE = false;
-layout(constant_id = 5) const bool HAS_DISPLACEMENT_TEXTURE = false;
-layout(constant_id = 6) const bool HAS_EMISSIVE_TEXTURE = false;
-layout(constant_id = 7) const bool IS_LIT = false;
+layout(constant_id = 2) const bool HAS_METALLIC_ROUGHNESS_TEXTURE = false;
+layout(constant_id = 3) const bool HAS_NORMAL_TEXTURE = false;
+layout(constant_id = 4) const bool HAS_DISPLACEMENT_TEXTURE = false;
+layout(constant_id = 5) const bool HAS_EMISSIVE_TEXTURE = false;
+layout(constant_id = 6) const bool IS_LIT = false;
 
 layout(location = 0) in vec3 inPosition;
 layout(location = 1) in vec3 inNormal;
@@ -59,8 +58,7 @@ void main() {
         outNormal = normalize(mat3(world) * modelNormal);
     }
     if (HAS_ALBEDO_TEXTURE ||
-    HAS_METALLIC_TEXTURE ||
-    HAS_ROUGHNESS_TEXTURE ||
+    HAS_METALLIC_ROUGHNESS_TEXTURE ||
     HAS_NORMAL_TEXTURE ||
     HAS_DISPLACEMENT_TEXTURE ||
     HAS_EMISSIVE_TEXTURE) {
