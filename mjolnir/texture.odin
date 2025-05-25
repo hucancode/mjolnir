@@ -47,7 +47,7 @@ create_texture_from_data :: proc(
 ) {
   handle, texture = resource.alloc(&engine.textures)
   texture_init_from_data(texture, data) or_return
-  texute_init(texture, &engine.ctx) or_return
+  texture_init(texture, &engine.ctx) or_return
   delete(texture.image_data.pixels)
   texture.image_data.pixels = nil
   fmt.printfln(
@@ -78,7 +78,7 @@ create_texture_from_pixels :: proc(
   texture.image_data.height = height
   texture.image_data.channels_in_file = channel
   texture.image_data.actual_channels = channel
-  texute_init(texture, &engine.ctx, format) or_return
+  texture_init(texture, &engine.ctx, format) or_return
   texture.image_data.pixels = nil
   fmt.printfln(
     "created texture %d x %d -> id %d",
@@ -130,7 +130,7 @@ create_texture_from_path :: proc(
 ) {
   handle, texture = resource.alloc(&engine.textures)
   texture_init_from_path(texture, path) or_return
-  texute_init(texture, &engine.ctx) or_return
+  texture_init(texture, &engine.ctx) or_return
   delete(texture.image_data.pixels)
   texture.image_data.pixels = nil
   ret = .SUCCESS
@@ -163,7 +163,7 @@ texture_init_from_path :: proc(self: ^Texture, path: string) -> vk.Result {
   return .SUCCESS
 }
 
-texute_init :: proc(
+texture_init :: proc(
   self: ^Texture,
   ctx: ^VulkanContext,
   format: vk.Format = .R8G8B8A8_SRGB,
@@ -519,7 +519,7 @@ create_hdr_texture_from_path :: proc(
   texture.image_data.height = int(h)
   texture.image_data.channels_in_file = 3
   texture.image_data.actual_channels = 4
-  texute_init(texture, &engine.ctx, .R32G32B32A32_SFLOAT) or_return
+  texture_init(texture, &engine.ctx, .R32G32B32A32_SFLOAT) or_return
   texture.image_data.pixels = nil
   fmt.printfln("created HDR texture %d x %d -> id %d", w, h, texture.buffer.image)
   ret = .SUCCESS
