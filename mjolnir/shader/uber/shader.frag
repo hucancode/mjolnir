@@ -7,7 +7,7 @@ layout(constant_id = 3) const bool HAS_NORMAL_TEXTURE = false;
 layout(constant_id = 4) const bool HAS_DISPLACEMENT_TEXTURE = false;
 layout(constant_id = 5) const bool HAS_EMISSIVE_TEXTURE = false;
 
-const uint MAX_LIGHTS = 5;
+const uint MAX_LIGHTS = 10;
 const uint POINT_LIGHT = 0;
 const uint DIRECTIONAL_LIGHT = 1;
 const uint SPOT_LIGHT = 2;
