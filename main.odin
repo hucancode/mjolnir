@@ -33,18 +33,9 @@ main :: proc() {
 
 setup :: proc(engine: ^mjolnir.Engine) {
     using mjolnir
-    // Load texture and create material
-    ground_albedo_handle, _, _ := create_texture_from_path(
+    mat_handle, _, _ := create_material(
       engine,
-      "assets/t_brick_floor_002_diffuse_1k.jpg",
-    )
-    ground_roughness_handle, _, _ := create_texture_from_path(
-      engine,
-      "assets/t_brick_floor_002_rough_1k.jpg",
-    )
-    mat_handle, _, _ := create_material_untextured(
-      engine,
-      SHADER_FEATURE_LIT | SHADER_FEATURE_RECEIVE_SHADOW,
+      SHADER_FEATURE_LIT,
     )
     // Create mesh
     cube_geom := geometry.make_cube()
@@ -53,11 +44,18 @@ setup :: proc(engine: ^mjolnir.Engine) {
     sphere_mesh_handle := create_static_mesh(engine, &sphere_geom, mat_handle)
 
     // Create ground plane
-    ground_mat_handle, _, _ := create_material_textured(
+    ground_albedo_handle, _, _ := create_texture_from_path(
       engine,
-      SHADER_FEATURE_LIT | SHADER_FEATURE_RECEIVE_SHADOW,
+      "assets/t_brick_floor_002_diffuse_1k.jpg",
+    )
+    ground_roughness_handle, _, _ := create_texture_from_path(
+      engine,
+      "assets/t_brick_floor_002_rough_1k.jpg",
+    )
+    ground_mat_handle, _, _ := create_material(
+      engine,
+      SHADER_FEATURE_LIT | SHADER_FEATURE_ALBEDO_TEXTURE | SHADER_FEATURE_ROUGHNESS_TEXTURE,
       ground_albedo_handle,
-      ground_roughness_handle,
       ground_roughness_handle,
     )
     quad_geom := geometry.make_quad()

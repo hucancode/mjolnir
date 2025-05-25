@@ -1,9 +1,13 @@
 #version 450
 
 layout(constant_id = 0) const bool SKINNED = false;
-layout(constant_id = 1) const bool HAS_TEXTURE = false;
-layout(constant_id = 2) const bool IS_LIT = false;
-layout(constant_id = 3) const bool CAN_RECEIVE_SHADOW = false;
+layout(constant_id = 1) const bool HAS_ALBEDO_TEXTURE = false;
+layout(constant_id = 2) const bool HAS_METALLIC_TEXTURE = false;
+layout(constant_id = 3) const bool HAS_ROUGHNESS_TEXTURE = false;
+layout(constant_id = 4) const bool HAS_NORMAL_TEXTURE = false;
+layout(constant_id = 5) const bool HAS_DISPLACEMENT_TEXTURE = false;
+layout(constant_id = 6) const bool HAS_EMISSIVE_TEXTURE = false;
+layout(constant_id = 7) const bool IS_LIT = false;
 
 const uint MAX_LIGHTS = 5;
 const uint POINT_LIGHT = 0;
@@ -35,8 +39,18 @@ layout(set = 0, binding = 2) uniform sampler2D shadowMaps[MAX_LIGHTS];
 layout(set = 0, binding = 3) uniform samplerCube cubeShadowMaps[MAX_LIGHTS];
 
 layout(set = 1, binding = 0) uniform sampler2D albedoSampler;
-layout(set = 1, binding = 1) uniform sampler2D metalicSampler;
+layout(set = 1, binding = 1) uniform sampler2D metallicSampler;
 layout(set = 1, binding = 2) uniform sampler2D roughnessSampler;
+layout(set = 1, binding = 3) uniform sampler2D normalSampler;
+layout(set = 1, binding = 4) uniform sampler2D displacementSampler;
+layout(set = 1, binding = 5) uniform sampler2D emissiveSampler;
+
+layout(set = 1, binding = 6) uniform MaterialFallbacks {
+    vec4 albedoValue;
+    vec4 emissiveValue;
+    float roughnessValue;
+    float metallicValue;
+};
 
 layout(set = 3, binding = 0) uniform sampler2D environmentMap;
 
@@ -204,23 +218,51 @@ vec3 brdf(vec3 N, vec3 V, vec3 albedo, float roughness, float metallic) {
 
 void main() {
     vec3 cameraPosition = -inverse(view)[3].xyz;
-    vec3 albedo = HAS_TEXTURE ? texture(albedoSampler, uv).rgb : color.rgb;
-    float metallic = HAS_TEXTURE ? texture(metalicSampler, uv).b : 0.0;
-    float roughness = HAS_TEXTURE ? texture(roughnessSampler, uv).g : 1.0;
+
+    // --- PBR Texture Sampling and Fallbacks ---
+    vec3 albedo = HAS_ALBEDO_TEXTURE ? texture(albedoSampler, uv).rgb : albedoValue.rgb;
+    float roughness = HAS_ROUGHNESS_TEXTURE ? texture(roughnessSampler, uv).r : roughnessValue;
+    float metallic = HAS_METALLIC_TEXTURE ? texture(metallicSampler, uv).r : metallicValue;
+    vec3 emissive = HAS_EMISSIVE_TEXTURE ? texture(emissiveSampler, uv).rgb : emissiveValue.rgb;
+
     metallic = clamp(metallic, 0.0, 1.0);
     roughness = clamp(roughness, 0.04, 1.0);
+    // --- Normal Mapping ---
     vec3 N = normalize(normal);
-    vec3 V = normalize(cameraPosition - position);
-    // Sample environment map using equirectangular mapping
+    if (HAS_NORMAL_TEXTURE) {
+        // Sample normal map in tangent space, remap from [0,1] to [-1,1]
+        vec3 tangentNormal = texture(normalSampler, uv).xyz * 2.0 - 1.0;
+        // TODO: For correct normal mapping, you should transform tangentNormal by TBN matrix.
+        // Here we assume tangent == world for simplicity.
+        N = normalize(tangentNormal);
+    }
+
+    // --- Displacement Mapping ---
+    vec3 displacedPosition = position;
+    if (HAS_DISPLACEMENT_TEXTURE) {
+        float disp = texture(displacementSampler, uv).r;
+        // Displace along the normal direction
+        displacedPosition += N * disp;
+    }
+
+    // --- View Direction ---
+    vec3 V = normalize(cameraPosition - displacedPosition);
+
+    // --- Environment Reflection ---
     vec3 refl = reflect(-V, N);
     float u = atan(refl.z, refl.x) / (2.0 * PI) + 0.5;
     float v = acos(clamp(refl.y, -1.0, 1.0)) / PI;
     vec3 envColor = texture(environmentMap, vec2(u, v)).rgb;
-    vec3 ambient = ambientColor * ambientStrength * albedo;
+
+    // --- Ambient + Emissive ---
+    vec3 ambient = ambientColor * ambientStrength * albedo + emissive;
+
+    // --- PBR Lighting ---
     vec3 colorOut = ambient + brdf(N, V, albedo, roughness, metallic);
-    // Blend environment color for simple reflection effect
-    // TODO: use a more sophisticated reflection model
+
+    // --- Simple Environment Reflection (metallic surfaces) ---
     float envStrength = metallic * 0.02;
     colorOut = mix(colorOut, envColor, envStrength);
+
     outColor = vec4(colorOut, 1.0);
 }

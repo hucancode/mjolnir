@@ -339,17 +339,20 @@ load_gltf_primitive :: proc(
   albedo_handle, metallic_handle, roughness_handle, pbr_result :=
     load_gltf_pbr_textures(engine, path, gltf_data, g_primitive.material)
   if pbr_result == .SUCCESS {
-    material_handle, _, _ = create_material_textured(
+    material_handle, _, _ = create_material(
       engine,
-      SHADER_FEATURE_LIT | SHADER_FEATURE_RECEIVE_SHADOW,
+      SHADER_FEATURE_LIT |
+      SHADER_FEATURE_ALBEDO_TEXTURE |
+      SHADER_FEATURE_METALLIC_TEXTURE |
+      SHADER_FEATURE_ROUGHNESS_TEXTURE,
       albedo_handle,
       metallic_handle,
       roughness_handle,
     )
   } else {
-    material_handle, _, _ = create_material_untextured(
+    material_handle, _, _ = create_material(
       engine,
-      SHADER_FEATURE_LIT | SHADER_FEATURE_RECEIVE_SHADOW,
+      SHADER_FEATURE_LIT,
     )
   }
   // Geometry
@@ -445,9 +448,12 @@ load_gltf_skinned_primitive :: proc(
   albedo_handle, metallic_handle, roughness_handle, pbr_result :=
     load_gltf_pbr_textures(engine, path, gltf_data, g_primitive.material)
   if pbr_result == .SUCCESS {
-    mat_handle, _, _ = create_material_textured(
+    mat_handle, _, _ = create_material(
       engine,
-      SHADER_FEATURE_LIT | SHADER_FEATURE_SKINNING | SHADER_FEATURE_RECEIVE_SHADOW,
+      SHADER_FEATURE_LIT | SHADER_FEATURE_SKINNING |
+      SHADER_FEATURE_ALBEDO_TEXTURE |
+      SHADER_FEATURE_METALLIC_TEXTURE |
+      SHADER_FEATURE_ROUGHNESS_TEXTURE,
       albedo_handle,
       metallic_handle,
       roughness_handle,
@@ -460,9 +466,9 @@ load_gltf_skinned_primitive :: proc(
       mat_handle,
     )
   } else {
-    mat_handle, _, _ = create_material_untextured(
+    mat_handle, _, _ = create_material(
       engine,
-      SHADER_FEATURE_LIT | SHADER_FEATURE_SKINNING | SHADER_FEATURE_RECEIVE_SHADOW,
+      SHADER_FEATURE_LIT | SHADER_FEATURE_SKINNING,
     )
     fmt.printfln("Creating skinned material without texture -> %v", mat_handle)
   }

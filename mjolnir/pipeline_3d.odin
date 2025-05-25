@@ -7,26 +7,59 @@ import "resource"
 import vk "vendor:vulkan"
 
 SHADER_FEATURE_SKINNING :: 1 << 0
-SHADER_FEATURE_TEXTURING :: 1 << 1
-SHADER_FEATURE_LIT :: 1 << 2
-SHADER_FEATURE_RECEIVE_SHADOW :: 1 << 3
-SHADER_OPTION_COUNT :: 4
+SHADER_FEATURE_ALBEDO_TEXTURE :: 1 << 1
+SHADER_FEATURE_METALLIC_TEXTURE :: 1 << 2
+SHADER_FEATURE_ROUGHNESS_TEXTURE :: 1 << 3
+SHADER_FEATURE_NORMAL_TEXTURE :: 1 << 4
+SHADER_FEATURE_DISPLACEMENT_TEXTURE :: 1 << 5
+SHADER_FEATURE_EMISSIVE_TEXTURE :: 1 << 6
+SHADER_FEATURE_LIT :: 1 << 7
+
+SHADER_OPTION_COUNT :: 8
 SHADER_VARIANT_COUNT :: 1 << SHADER_OPTION_COUNT
 
 // Specialization constant struct (must match shader)
 ShaderConfig :: struct {
-  is_skinned:         b32,
-  has_texture:        b32,
-  is_lit:             b32,
-  can_receive_shadow: b32,
+  is_skinned:               b32,
+  has_albedo_texture:       b32,
+  has_metallic_texture:     b32,
+  has_roughness_texture:    b32,
+  has_normal_texture:       b32,
+  has_displacement_texture: b32,
+  has_emissive_texture:     b32,
+  is_lit:                   b32,
 }
 
 // Material descriptor set layout: [albedo, metallic, roughness, bones (optional)]
+MaterialFallbacks :: struct {
+  albedo:    linalg.Vector4f32,
+  emissive:  linalg.Vector4f32,
+  roughness: f32,
+  metallic:  f32,
+}
+
 Material :: struct {
   texture_descriptor_set:  vk.DescriptorSet,
   skinning_descriptor_set: vk.DescriptorSet,
   features:                u32,
   ctx:                     ^VulkanContext,
+
+  // Texture handles for each supported type
+  albedo_handle:           Handle,
+  metallic_handle:         Handle,
+  roughness_handle:        Handle,
+  normal_handle:           Handle,
+  displacement_handle:     Handle,
+  emissive_handle:         Handle,
+
+  // Fallback values for each property
+  albedo_value:            linalg.Vector4f32,
+  metallic_value:          f32,
+  roughness_value:         f32,
+  emissive_value:          linalg.Vector4f32,
+
+  // Uniform buffer for fallback values (using DataBuffer)
+  fallback_buffer:         DataBuffer,
 }
 camera_descriptor_set_layout: vk.DescriptorSetLayout
 environment_descriptor_set_layout: vk.DescriptorSetLayout
@@ -79,28 +112,62 @@ material_update_textures :: proc(
   albedo: ^Texture,
   metallic: ^Texture,
   roughness: ^Texture,
-) {
+  normal: ^Texture,
+  displacement: ^Texture,
+  emissive: ^Texture,
+) -> vk.Result {
   if mat.ctx == nil || mat.texture_descriptor_set == 0 {
-    return
+    return .ERROR_INITIALIZATION_FAILED
   }
   vkd := mat.ctx.vkd
+  material_init_descriptor_set_layout(mat, mat.ctx) or_return
+
   image_infos := [?]vk.DescriptorImageInfo {
     {
-      sampler = albedo.sampler,
-      imageView = albedo.buffer.view,
+      sampler = albedo.sampler if albedo != nil else 0,
+      imageView = albedo.buffer.view if albedo != nil else 0,
       imageLayout = .SHADER_READ_ONLY_OPTIMAL,
     },
     {
-      sampler = metallic.sampler,
-      imageView = metallic.buffer.view,
+      sampler = metallic.sampler if metallic != nil else 0,
+      imageView = metallic.buffer.view if metallic != nil else 0,
       imageLayout = .SHADER_READ_ONLY_OPTIMAL,
     },
     {
-      sampler = roughness.sampler,
-      imageView = roughness.buffer.view,
+      sampler = roughness.sampler if roughness != nil else 0,
+      imageView = roughness.buffer.view if roughness != nil else 0,
+      imageLayout = .SHADER_READ_ONLY_OPTIMAL,
+    },
+    {
+      sampler = normal.sampler if normal != nil else 0,
+      imageView = normal.buffer.view if normal != nil else 0,
+      imageLayout = .SHADER_READ_ONLY_OPTIMAL,
+    },
+    {
+      sampler = displacement.sampler if displacement != nil else 0,
+      imageView = displacement.buffer.view if displacement != nil else 0,
+      imageLayout = .SHADER_READ_ONLY_OPTIMAL,
+    },
+    {
+      sampler = emissive.sampler if emissive != nil else 0,
+      imageView = emissive.buffer.view if emissive != nil else 0,
       imageLayout = .SHADER_READ_ONLY_OPTIMAL,
     },
   }
+
+  // --- Upload fallback values to a uniform buffer and bind at binding 6 ---
+  fallbacks := MaterialFallbacks {
+    albedo    = mat.albedo_value,
+    emissive  = mat.emissive_value,
+    roughness = mat.roughness_value,
+    metallic  = mat.metallic_value,
+  }
+  mat.fallback_buffer = create_host_visible_buffer(
+    mat.ctx,
+    size_of(MaterialFallbacks),
+    {.UNIFORM_BUFFER},
+    &fallbacks,
+  ) or_return
 
   writes := [?]vk.WriteDescriptorSet {
     {
@@ -127,9 +194,52 @@ material_update_textures :: proc(
       descriptorCount = 1,
       pImageInfo = &image_infos[2],
     },
+    {
+      sType = .WRITE_DESCRIPTOR_SET,
+      dstSet = mat.texture_descriptor_set,
+      dstBinding = 3,
+      descriptorType = .COMBINED_IMAGE_SAMPLER,
+      descriptorCount = 1,
+      pImageInfo = &image_infos[3],
+    },
+    {
+      sType = .WRITE_DESCRIPTOR_SET,
+      dstSet = mat.texture_descriptor_set,
+      dstBinding = 4,
+      descriptorType = .COMBINED_IMAGE_SAMPLER,
+      descriptorCount = 1,
+      pImageInfo = &image_infos[4],
+    },
+    {
+      sType = .WRITE_DESCRIPTOR_SET,
+      dstSet = mat.texture_descriptor_set,
+      dstBinding = 5,
+      descriptorType = .COMBINED_IMAGE_SAMPLER,
+      descriptorCount = 1,
+      pImageInfo = &image_infos[5],
+    },
+    {
+      sType = .WRITE_DESCRIPTOR_SET,
+      dstSet = mat.texture_descriptor_set,
+      dstBinding = 6,
+      descriptorType = .UNIFORM_BUFFER,
+      descriptorCount = 1,
+      pBufferInfo = &vk.DescriptorBufferInfo {
+        buffer = mat.fallback_buffer.buffer,
+        offset = 0,
+        range = size_of(MaterialFallbacks),
+      },
+    },
   }
 
-  vk.UpdateDescriptorSets(vkd, len(writes), raw_data(writes[:]), 0, nil)
+  vk.UpdateDescriptorSets(
+    mat.ctx.vkd,
+    len(writes),
+    raw_data(writes[:]),
+    0,
+    nil,
+  )
+  return .SUCCESS
 }
 
 // Update bone buffer (for skinned meshes)
@@ -176,13 +286,13 @@ build_3d_pipelines :: proc(
       descriptorCount = 1,
       stageFlags      = {.FRAGMENT},
     },
-    {   // Shadow Maps (merged)
+    {   // Shadow Maps
       binding         = 2,
       descriptorType  = .COMBINED_IMAGE_SAMPLER,
       descriptorCount = MAX_SHADOW_MAPS,
       stageFlags      = {.FRAGMENT},
     },
-    {   // Cube Shadow Maps (merged)
+    {   // Cube Shadow Maps
       binding         = 3,
       descriptorType  = .COMBINED_IMAGE_SAMPLER,
       descriptorCount = MAX_SHADOW_MAPS,
@@ -292,9 +402,27 @@ build_3d_pipelines :: proc(
     },
     {
       binding = 3,
-      descriptorType = .STORAGE_BUFFER,
+      descriptorType = .COMBINED_IMAGE_SAMPLER,
       descriptorCount = 1,
-      stageFlags = {.VERTEX},
+      stageFlags = {.FRAGMENT},
+    },
+    {
+      binding = 4,
+      descriptorType = .COMBINED_IMAGE_SAMPLER,
+      descriptorCount = 1,
+      stageFlags = {.FRAGMENT},
+    },
+    {
+      binding = 5,
+      descriptorType = .COMBINED_IMAGE_SAMPLER,
+      descriptorCount = 1,
+      stageFlags = {.FRAGMENT},
+    },
+    {
+      binding = 6,
+      descriptorType = .UNIFORM_BUFFER,
+      descriptorCount = 1,
+      stageFlags = {.FRAGMENT},
     },
   }
   vk.CreateDescriptorSetLayout(
@@ -371,10 +499,20 @@ build_3d_pipelines :: proc(
   ) or_return
   for features in 0 ..< SHADER_VARIANT_COUNT {
     configs[features] = ShaderConfig {
-      is_skinned         = (features & SHADER_FEATURE_SKINNING) != 0,
-      has_texture        = (features & SHADER_FEATURE_TEXTURING) != 0,
-      is_lit             = (features & SHADER_FEATURE_LIT) != 0,
-      can_receive_shadow = (features & SHADER_FEATURE_RECEIVE_SHADOW) != 0,
+      is_skinned               = (features & SHADER_FEATURE_SKINNING) != 0,
+      has_albedo_texture       = (features &
+        SHADER_FEATURE_ALBEDO_TEXTURE) != 0,
+      has_metallic_texture     = (features &
+        SHADER_FEATURE_METALLIC_TEXTURE) != 0,
+      has_roughness_texture    = (features &
+        SHADER_FEATURE_ROUGHNESS_TEXTURE) != 0,
+      has_normal_texture       = (features &
+        SHADER_FEATURE_NORMAL_TEXTURE) != 0,
+      has_displacement_texture = (features &
+        SHADER_FEATURE_DISPLACEMENT_TEXTURE) != 0,
+      has_emissive_texture     = (features &
+        SHADER_FEATURE_EMISSIVE_TEXTURE) != 0,
+      is_lit                   = (features & SHADER_FEATURE_LIT) != 0,
     }
     entries[features] = [SHADER_OPTION_COUNT]vk.SpecializationMapEntry {
       {
@@ -384,17 +522,37 @@ build_3d_pipelines :: proc(
       },
       {
         constantID = 1,
-        offset = u32(offset_of(ShaderConfig, has_texture)),
+        offset = u32(offset_of(ShaderConfig, has_albedo_texture)),
         size = size_of(b32),
       },
       {
         constantID = 2,
-        offset = u32(offset_of(ShaderConfig, is_lit)),
+        offset = u32(offset_of(ShaderConfig, has_metallic_texture)),
         size = size_of(b32),
       },
       {
         constantID = 3,
-        offset = u32(offset_of(ShaderConfig, can_receive_shadow)),
+        offset = u32(offset_of(ShaderConfig, has_roughness_texture)),
+        size = size_of(b32),
+      },
+      {
+        constantID = 4,
+        offset = u32(offset_of(ShaderConfig, has_normal_texture)),
+        size = size_of(b32),
+      },
+      {
+        constantID = 5,
+        offset = u32(offset_of(ShaderConfig, has_displacement_texture)),
+        size = size_of(b32),
+      },
+      {
+        constantID = 6,
+        offset = u32(offset_of(ShaderConfig, has_emissive_texture)),
+        size = size_of(b32),
+      },
+      {
+        constantID = 7,
+        offset = u32(offset_of(ShaderConfig, is_lit)),
         size = size_of(b32),
       },
     }
@@ -421,7 +579,7 @@ build_3d_pipelines :: proc(
       },
     }
     fmt.printfln(
-      "Creating pipeline for features: %04b with config %v with vertex input %v",
+      "Creating pipeline for features: %08b with config %v with vertex input %v",
       features,
       configs[features],
       vertex_input_info,
@@ -454,9 +612,19 @@ build_3d_pipelines :: proc(
 }
 
 
-create_material_untextured :: proc(
+create_material :: proc(
   engine: ^Engine,
-  features: u32,
+  features: u32 = 0,
+  albedo_handle: Handle = {},
+  metallic_handle: Handle = {},
+  roughness_handle: Handle = {},
+  normal_handle: Handle = {},
+  displacement_handle: Handle = {},
+  emissive_handle: Handle = {},
+  albedo_value: linalg.Vector4f32 = {1, 1, 1, 1},
+  metallic_value: f32 = 0.0,
+  roughness_value: f32 = 1.0,
+  emissive_value: linalg.Vector4f32 = {},
 ) -> (
   ret: Handle,
   mat: ^Material,
@@ -465,28 +633,37 @@ create_material_untextured :: proc(
   ret, mat = resource.alloc(&engine.materials)
   mat.ctx = &engine.ctx
   mat.features = features
-  material_init_descriptor_set_layout(mat, &engine.ctx) or_return
-  return
-}
 
-create_material_textured :: proc(
-  engine: ^Engine,
-  features: u32,
-  albedo_handle: Handle,
-  metallic_handle: Handle,
-  roughness_handle: Handle,
-) -> (
-  ret: Handle,
-  mat: ^Material,
-  res: vk.Result,
-) {
-  ret, mat = resource.alloc(&engine.materials)
-  mat.ctx = &engine.ctx
-  mat.features = features | SHADER_FEATURE_TEXTURING
+  mat.albedo_handle = albedo_handle
+  mat.metallic_handle = metallic_handle
+  mat.roughness_handle = roughness_handle
+  mat.normal_handle = normal_handle
+  mat.displacement_handle = displacement_handle
+  mat.emissive_handle = emissive_handle
+
+  mat.albedo_value = albedo_value
+  mat.metallic_value = metallic_value
+  mat.roughness_value = roughness_value
+  mat.emissive_value = emissive_value
+
   material_init_descriptor_set_layout(mat, &engine.ctx) or_return
+
+  // Bind textures if handles are valid, otherwise fallback to flat values in shader
   albedo := resource.get(&engine.textures, albedo_handle)
   metallic := resource.get(&engine.textures, metallic_handle)
   roughness := resource.get(&engine.textures, roughness_handle)
-  material_update_textures(mat, albedo, metallic, roughness)
+  normal := resource.get(&engine.textures, normal_handle)
+  displacement := resource.get(&engine.textures, displacement_handle)
+  emissive := resource.get(&engine.textures, emissive_handle)
+  material_update_textures(
+    mat,
+    albedo,
+    metallic,
+    roughness,
+    normal,
+    displacement,
+    emissive,
+  ) or_return
+  res = .SUCCESS
   return
 }
