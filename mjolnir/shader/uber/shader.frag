@@ -137,8 +137,14 @@ vec3 calculateLighting(Light light, vec3 viewDir, vec3 albedo) {
             specular = pow(max(dot(reflect(-surfaceToLight, normal), viewDir), 0.0), shininess) * specularStrength * light.color.rgb;
         }
         float distance = length(position - light.position.xyz);
-        float attenuation = max(0.0, 1.0 - distance / max(0.001, light.radius));
-        return (diffuse + specular) * pow(attenuation, 2.0);
+        // Standard quadratic attenuation
+        float constant = 1.0;
+        float linear = 0.09;
+        float quadratic = 0.032;
+        float attenuation = 1.0 / (constant + linear * distance + quadratic * (distance * distance));
+        // Hard cutoff at light.radius
+        if (distance > light.radius) attenuation = 0.0;
+        return (diffuse + specular) * attenuation;
     }
     if (light.kind == DIRECTIONAL_LIGHT) {
         vec3 surfaceToLight = -light.direction.xyz;
@@ -174,7 +180,11 @@ vec3 brdf(vec3 N, vec3 V, vec3 albedo, float roughness, float metallic) {
             vec3 L = light.kind == DIRECTIONAL_LIGHT ? normalize(-light.direction.xyz) : normalize(light.position.xyz - position);
             vec3 H = normalize(V + L);
             float distance = light.kind == DIRECTIONAL_LIGHT ? 1.0 : length(light.position.xyz - position);
-            float attenuation = light.kind == DIRECTIONAL_LIGHT ? 1.0 : 1.0 / (distance * distance);
+            float attenuation = 2.0;
+            if (light.kind != DIRECTIONAL_LIGHT) {
+                float norm_dist = distance / max(0.01, light.radius);
+                attenuation *= 1.0 - clamp(norm_dist * norm_dist, 0.0, 1.0);
+            }
             float NdotL = max(dot(N, L), 0.0);
             // Cook-Torrance BRDF
             float NDF = pow(roughness, 4.0) / (PI * pow((dot(N, H) * dot(N, H)) * (pow(roughness, 4.0) - 1.0) + 1.0, 2.0));
