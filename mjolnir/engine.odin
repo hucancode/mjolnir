@@ -740,7 +740,7 @@ render :: proc(engine: ^Engine) -> vk.Result {
     fmt.eprintln("[RENDER] Error during light collection")
   }
   render_shadow_pass(engine, &light_uniform, command_buffer) or_return
-  fmt.printfln("============ rendering main pass =============")
+  // fmt.printfln("============ rendering main pass =============")
   render_main_pass(engine, command_buffer, image_idx, camera_frustum) or_return
   // Update Uniforms
   data_buffer_write(
@@ -830,7 +830,7 @@ render_shadow_pass :: proc(
   light_uniform: ^SceneLightUniform,
   command_buffer: vk.CommandBuffer,
 ) -> vk.Result {
-  fmt.printfln("============ rendering shadow pass =============")
+  // fmt.printfln("============ rendering shadow pass =============")
   for i := 0; i < int(light_uniform.light_count); i += 1 {
     cube_shadow := renderer_get_cube_shadow_map(&engine.renderer, i)
     shadow_map_texture := renderer_get_shadow_map(&engine.renderer, i)
