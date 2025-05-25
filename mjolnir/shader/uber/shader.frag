@@ -215,12 +215,13 @@ void main() {
     vec3 cameraPosition = -inverse(view)[3].xyz;
     // --- PBR Texture Sampling and Fallbacks ---
     vec3 albedo = HAS_ALBEDO_TEXTURE ? texture(albedoSampler, uv).rgb : albedoValue.rgb;
-    float metallic = HAS_METALLIC_ROUGHNESS_TEXTURE ? texture(metallicRoughnessSampler, uv).r : metallicValue;
+    float occlusion = HAS_METALLIC_ROUGHNESS_TEXTURE ? texture(metallicRoughnessSampler, uv).r : 1.0;
     float roughness = HAS_METALLIC_ROUGHNESS_TEXTURE ? texture(metallicRoughnessSampler, uv).g : roughnessValue;
+    float metallic = HAS_METALLIC_ROUGHNESS_TEXTURE ? texture(metallicRoughnessSampler, uv).b : metallicValue;
     vec3 emissive = HAS_EMISSIVE_TEXTURE ? texture(emissiveSampler, uv).rgb : emissiveValue.rgb;
 
     metallic = clamp(metallic, 0.0, 1.0);
-    roughness = clamp(roughness, 0.04, 1.0);
+    roughness = clamp(roughness, 0.0, 1.0);
     // --- Normal Mapping ---
     vec3 N = normalize(normal);
     if (HAS_NORMAL_TEXTURE) {
