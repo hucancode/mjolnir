@@ -245,7 +245,7 @@ void main() {
     // --- Environment Reflection ---
     vec3 refl = reflect(-V, N);
     float u = atan(refl.z, refl.x) / (2.0 * PI) + 0.5;
-    float v = acos(clamp(refl.y, -1.0, 1.0)) / PI;
+    float v = acos(clamp(-refl.y, -1.0, 1.0)) / PI;
     vec3 envColor = texture(environmentMap, vec2(u, v)).rgb;
 
     // --- Ambient + Emissive ---
