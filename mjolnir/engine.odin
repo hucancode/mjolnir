@@ -172,6 +172,7 @@ init :: proc(
   fmt.println("All resource pools initialized successfully")
 
   build_3d_pipelines(&engine.ctx, .B8G8R8A8_SRGB, .D32_SFLOAT) or_return
+  build_3d_unlit_pipelines(&engine.ctx, .B8G8R8A8_SRGB, .D32_SFLOAT) or_return
   build_shadow_pipelines(&engine.ctx, .D32_SFLOAT) or_return
   engine_build_scene(engine)
   engine_build_renderer(engine) or_return
@@ -428,7 +429,8 @@ render_single_node :: proc(
       data.pose.bone_buffer.buffer,
       data.pose.bone_buffer.size,
     )
-    pipeline := pipelines[material.features]
+    pipeline := pipelines[material.features] if material.is_lit else unlit_pipelines[material.features]
+    layout := pipeline_layout
     // fmt.printfln("rendering skeletal mesh with material %v", material)
     vk.CmdBindPipeline(ctx.command_buffer, .GRAPHICS, pipeline)
     // Bind all required descriptor sets (set 0: camera+shadow+cube shadow, set 1: material, set 2: skinning)
@@ -442,7 +444,7 @@ render_single_node :: proc(
     vk.CmdBindDescriptorSets(
       ctx.command_buffer,
       .GRAPHICS,
-      pipeline_layout,
+      layout,
       0,
       u32(len(descriptor_sets)),
       raw_data(descriptor_sets[:]),
@@ -451,7 +453,7 @@ render_single_node :: proc(
     )
     vk.CmdPushConstants(
       ctx.command_buffer,
-      pipeline_layout,
+      layout,
       {.VERTEX},
       0,
       size_of(linalg.Matrix4f32),
@@ -493,7 +495,8 @@ render_single_node :: proc(
     ) {
       return true
     }
-    pipeline := pipelines[material.features]
+    pipeline := pipelines[material.features] if material.is_lit else unlit_pipelines[material.features]
+    layout := pipeline_layout
     // Bind all required descriptor sets (set 0: camera+shadow+cube shadow, set 1: material, set 2: skinning)
     descriptor_sets := [?]vk.DescriptorSet {
         renderer_get_camera_descriptor_set(&ctx.engine.renderer), // set 0
@@ -506,7 +509,7 @@ render_single_node :: proc(
     vk.CmdBindDescriptorSets(
       ctx.command_buffer,
       .GRAPHICS,
-      pipeline_layout,
+      layout,
       0,
       u32(len(descriptor_sets)),
       raw_data(descriptor_sets[:]),
@@ -515,7 +518,7 @@ render_single_node :: proc(
     )
     vk.CmdPushConstants(
       ctx.command_buffer,
-      pipeline_layout,
+      layout,
       {.VERTEX},
       0,
       size_of(linalg.Matrix4f32),

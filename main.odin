@@ -35,7 +35,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
     using mjolnir
     mat_handle, _, _ := create_material(
       engine,
-      SHADER_FEATURE_LIT,
     )
     // Create mesh
     cube_geom := geometry.make_cube()
@@ -54,7 +53,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     )
     ground_mat_handle, _, _ := create_material(
       engine,
-      SHADER_FEATURE_LIT | SHADER_FEATURE_ALBEDO_TEXTURE | SHADER_FEATURE_METALLIC_ROUGHNESS_TEXTURE,
+      SHADER_FEATURE_ALBEDO_TEXTURE | SHADER_FEATURE_METALLIC_ROUGHNESS_TEXTURE,
       ground_albedo_handle,
       ground_metallic_roughness_handle,
     )

@@ -259,7 +259,6 @@ load_gltf_pbr_textures :: proc(
     ret = .ERROR_UNKNOWN
     return
   }
-  features = SHADER_FEATURE_LIT
   albedo_handle, _ = load_gltf_texture(
     engine,
     gltf_path,
@@ -364,7 +363,7 @@ load_gltf_primitive :: proc(
     ) or_return
   material_handle, _, _ = create_material(
     engine,
-    features | SHADER_FEATURE_LIT,
+    features,
     albedo_handle,
     metallic_roughness_handle,
     normal_handle,
@@ -470,7 +469,7 @@ load_gltf_skinned_primitive :: proc(
     ) or_return
   mat_handle, _ = create_material(
     engine,
-    features | SHADER_FEATURE_SKINNING | SHADER_FEATURE_LIT,
+    features | SHADER_FEATURE_SKINNING,
     albedo_handle,
     metallic_roughness_handle,
     normal_handle,

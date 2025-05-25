@@ -6,7 +6,6 @@ layout(constant_id = 2) const bool HAS_METALLIC_ROUGHNESS_TEXTURE = false;
 layout(constant_id = 3) const bool HAS_NORMAL_TEXTURE = false;
 layout(constant_id = 4) const bool HAS_DISPLACEMENT_TEXTURE = false;
 layout(constant_id = 5) const bool HAS_EMISSIVE_TEXTURE = false;
-layout(constant_id = 6) const bool IS_LIT = false;
 
 const uint MAX_LIGHTS = 5;
 const uint POINT_LIGHT = 0;
@@ -186,30 +185,28 @@ vec3 brdf(vec3 N, vec3 V, vec3 albedo, float roughness, float metallic) {
     // Cook-Torrance BRDF
     vec3 F0 = mix(vec3(0.04), albedo, metallic);
     vec3 Lo = vec3(0.0);
-    if (IS_LIT) {
-        for (int i = 0; i < min(lightCount, MAX_LIGHTS); i++) {
-            Light light = lights[i];
-            vec3 L = light.kind == DIRECTIONAL_LIGHT ? normalize(-light.direction.xyz) : normalize(light.position.xyz - position);
-            vec3 H = normalize(V + L);
-            float distance = light.kind == DIRECTIONAL_LIGHT ? 1.0 : length(light.position.xyz - position);
-            float attenuation = 2.0;
-            if (light.kind != DIRECTIONAL_LIGHT) {
-                float norm_dist = distance / max(0.01, light.radius);
-                attenuation *= 1.0 - clamp(norm_dist * norm_dist, 0.0, 1.0);
-            }
-            float NdotL = max(dot(N, L), 0.0);
-            // Cook-Torrance BRDF
-            float NDF = pow(roughness, 4.0) / (PI * pow((dot(N, H) * dot(N, H)) * (pow(roughness, 4.0) - 1.0) + 1.0, 2.0));
-            float k = pow(roughness + 1.0, 2.0) / 8.0;
-            float G = NdotL / (NdotL * (1.0 - k) + k);
-            G *= max(dot(N, V), 0.0) / (max(dot(N, V), 0.0) * (1.0 - k) + k);
-            vec3 F = F0 + (1.0 - F0) * pow(1.0 - max(dot(H, V), 0.0), 5.0);
-            vec3 spec = (NDF * G * F) / (4.0 * max(dot(N, V), 0.0) * NdotL + 0.001);
-            vec3 kS = F;
-            vec3 kD = (vec3(1.0) - kS) * (1.0 - metallic);
-            float shadow = calculateShadow(i);
-            Lo += (kD * albedo / PI + spec) * light.color.rgb * NdotL * attenuation * shadow;
+    for (int i = 0; i < min(lightCount, MAX_LIGHTS); i++) {
+        Light light = lights[i];
+        vec3 L = light.kind == DIRECTIONAL_LIGHT ? normalize(-light.direction.xyz) : normalize(light.position.xyz - position);
+        vec3 H = normalize(V + L);
+        float distance = light.kind == DIRECTIONAL_LIGHT ? 1.0 : length(light.position.xyz - position);
+        float attenuation = 2.0;
+        if (light.kind != DIRECTIONAL_LIGHT) {
+            float norm_dist = distance / max(0.01, light.radius);
+            attenuation *= 1.0 - clamp(norm_dist * norm_dist, 0.0, 1.0);
         }
+        float NdotL = max(dot(N, L), 0.0);
+        // Cook-Torrance BRDF
+        float NDF = pow(roughness, 4.0) / (PI * pow((dot(N, H) * dot(N, H)) * (pow(roughness, 4.0) - 1.0) + 1.0, 2.0));
+        float k = pow(roughness + 1.0, 2.0) / 8.0;
+        float G = NdotL / (NdotL * (1.0 - k) + k);
+        G *= max(dot(N, V), 0.0) / (max(dot(N, V), 0.0) * (1.0 - k) + k);
+        vec3 F = F0 + (1.0 - F0) * pow(1.0 - max(dot(H, V), 0.0), 5.0);
+        vec3 spec = (NDF * G * F) / (4.0 * max(dot(N, V), 0.0) * NdotL + 0.001);
+        vec3 kS = F;
+        vec3 kD = (vec3(1.0) - kS) * (1.0 - metallic);
+        float shadow = calculateShadow(i);
+        Lo += (kD * albedo / PI + spec) * light.color.rgb * NdotL * attenuation * shadow;
     }
     return Lo;
 }
