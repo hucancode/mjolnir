@@ -53,9 +53,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
     )
     ground_mat_handle, _, _ := create_material(
       engine,
-      SHADER_FEATURE_ALBEDO_TEXTURE | SHADER_FEATURE_METALLIC_ROUGHNESS_TEXTURE,
+      SHADER_FEATURE_ALBEDO_TEXTURE,
       ground_albedo_handle,
-      ground_metallic_roughness_handle,
     )
     quad_geom := geometry.make_quad()
     ground_mesh_handle := create_static_mesh(
