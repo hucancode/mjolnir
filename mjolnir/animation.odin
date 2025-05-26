@@ -49,13 +49,13 @@ keyframe_sample :: proc($T: typeid, frames: []Keyframe(T), t: f32) -> T {
   return linalg.lerp(a.value, b.value, alpha)
 }
 
-Animation_Status :: enum {
+AnimationStatus :: enum {
   PLAYING,
   PAUSED,
   STOPPED,
 }
 
-Animation_Play_Mode :: enum {
+AnimationPlayMode :: enum {
   LOOP,
   ONCE,
   PING_PONG,
@@ -111,16 +111,16 @@ pose_flush :: proc(pose: ^Pose) -> vk.Result {
   return .SUCCESS
 }
 
-Animation_Instance :: struct {
+AnimationInstance :: struct {
   clip_handle: u32,
-  mode:        Animation_Play_Mode,
-  status:      Animation_Status,
+  mode:        AnimationPlayMode,
+  status:      AnimationStatus,
   time:        f32,
   duration:    f32,
   speed:       f32,
 }
 
-animation_instance_init :: proc(instance: ^Animation_Instance, clip: u32) {
+animation_instance_init :: proc(instance: ^AnimationInstance, clip: u32) {
   instance.clip_handle = clip
   instance.mode = .LOOP
   instance.status = .STOPPED
@@ -128,15 +128,15 @@ animation_instance_init :: proc(instance: ^Animation_Instance, clip: u32) {
   instance.speed = 1.0
 }
 
-animation_instance_pause :: proc(instance: ^Animation_Instance) {
+animation_instance_pause :: proc(instance: ^AnimationInstance) {
   instance.status = .PAUSED
 }
 
-animation_instance_play :: proc(instance: ^Animation_Instance) {
+animation_instance_play :: proc(instance: ^AnimationInstance) {
   instance.status = .PLAYING
 }
 
-animation_instance_toggle :: proc(instance: ^Animation_Instance) {
+animation_instance_toggle :: proc(instance: ^AnimationInstance) {
   switch instance.status {
   case .PLAYING:
     animation_instance_pause(instance)
@@ -148,13 +148,13 @@ animation_instance_toggle :: proc(instance: ^Animation_Instance) {
   }
 }
 
-animation_instance_stop :: proc(instance: ^Animation_Instance) {
+animation_instance_stop :: proc(instance: ^AnimationInstance) {
   instance.status = .STOPPED
   instance.time = 0
 }
 
 animation_instance_update :: proc(
-  instance: ^Animation_Instance,
+  instance: ^AnimationInstance,
   delta_time: f32,
 ) {
   if instance.status != .PLAYING || instance.duration <= 0 {
@@ -191,14 +191,13 @@ animation_instance_update :: proc(
   }
 }
 
-
-Animation_Channel :: struct {
+AnimationChannel :: struct {
   position_keyframes: []Keyframe(Vec3),
   rotation_keyframes: []Keyframe(Quat),
   scale_keyframes:    []Keyframe(Vec3),
 }
 
-animation_channel_deinit :: proc(channel: ^Animation_Channel) {
+animation_channel_deinit :: proc(channel: ^AnimationChannel) {
   if channel.position_keyframes != nil {
     delete(channel.position_keyframes)
     channel.position_keyframes = nil
@@ -214,7 +213,7 @@ animation_channel_deinit :: proc(channel: ^Animation_Channel) {
 }
 
 animation_channel_calculate :: proc(
-  channel: ^Animation_Channel,
+  channel: ^AnimationChannel,
   t: f32,
   output_transform: ^geometry.Transform,
 ) {
@@ -240,13 +239,13 @@ animation_channel_calculate :: proc(
 }
 
 
-Animation_Clip :: struct {
+AnimationClip :: struct {
   name:     string,
   duration: f32,
-  channels: []Animation_Channel,
+  channels: []AnimationChannel,
 }
 
-animation_clip_deinit :: proc(clip: ^Animation_Clip) {
+animation_clip_deinit :: proc(clip: ^AnimationClip) {
   if clip.channels != nil {
     for &channel in clip.channels {
       animation_channel_deinit(&channel)

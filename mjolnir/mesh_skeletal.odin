@@ -22,7 +22,7 @@ bone_deinit :: proc(bone: ^Bone) {
 SkeletalMesh :: struct {
   root_bone_index: u32,
   bones:           []Bone,
-  animations:      []Animation_Clip,
+  animations:      []AnimationClip,
   vertices_len:    u32,
   indices_len:     u32,
   vertex_buffer:   DataBuffer,
@@ -93,17 +93,17 @@ skeletal_mesh_init :: proc(
     raw_data(geometry_data.indices),
   ) or_return
   self.bones = make([]Bone, 0)
-  self.animations = make([]Animation_Clip, 0)
+  self.animations = make([]AnimationClip, 0)
   return .SUCCESS
 }
 
 make_animation_instance :: proc(
   self: ^SkeletalMesh,
   animation_name: string,
-  mode: Animation_Play_Mode,
+  mode: AnimationPlayMode,
   speed: f32 = 1.0,
 ) -> (
-  instance: Animation_Instance,
+  instance: AnimationInstance,
   found: bool,
 ) {
   for clip, i in self.animations {
@@ -126,7 +126,7 @@ make_animation_instance :: proc(
 
 calculate_animation_transform :: proc(
   self: ^SkeletalMesh,
-  anim_instance: ^Animation_Instance,
+  anim_instance: ^AnimationInstance,
   target_pose: ^Pose,
 ) {
   if anim_instance.status == .STOPPED ||

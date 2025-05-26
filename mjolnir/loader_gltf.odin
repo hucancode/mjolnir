@@ -645,7 +645,7 @@ load_gltf_animations :: proc(
   node_ptr_to_bone_idx_map: map[^cgltf.node]u32,
 ) -> bool {
   skeletal_mesh := resource.get(&engine.skeletal_meshes, engine_mesh_handle)
-  skeletal_mesh.animations = make([]Animation_Clip, len(gltf_data.animations))
+  skeletal_mesh.animations = make([]AnimationClip, len(gltf_data.animations))
 
   for &gltf_anim, i in gltf_data.animations {
     clip := &skeletal_mesh.animations[i]
@@ -658,7 +658,7 @@ load_gltf_animations :: proc(
       "\nAllocating animation channels for %d bones",
       len(skeletal_mesh.bones),
     )
-    clip.channels = make([]Animation_Channel, len(skeletal_mesh.bones))
+    clip.channels = make([]AnimationChannel, len(skeletal_mesh.bones))
 
     max_time: f32 = 0.0
 

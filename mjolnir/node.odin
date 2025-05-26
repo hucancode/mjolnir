@@ -7,7 +7,7 @@ import "resource"
 NodeSkeletalMeshAttachment :: struct {
   handle:      Handle,
   pose:        Pose,
-  animation:   Maybe(Animation_Instance),
+  animation:   Maybe(AnimationInstance),
   cast_shadow: bool,
 }
 NodeStaticMeshAttachment :: struct {
@@ -95,7 +95,7 @@ play_animation :: proc(
   engine: ^Engine,
   node_handle: Handle,
   name: string,
-  mode: Animation_Play_Mode = .LOOP,
+  mode: AnimationPlayMode = .LOOP,
 ) -> bool {
   node := resource.get(&engine.nodes, node_handle)
   if node == nil {
