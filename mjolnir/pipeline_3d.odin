@@ -15,7 +15,7 @@ ShaderFeatures :: enum {
   EMISSIVE_TEXTURE           = 5,
 }
 ShaderFeatureSet :: bit_set[ShaderFeatures;u32]
-SHADER_OPTION_COUNT : u32 : len(ShaderFeatures)
+SHADER_OPTION_COUNT: u32 : len(ShaderFeatures)
 SHADER_VARIANT_COUNT: u32 : 1 << SHADER_OPTION_COUNT
 
 ShaderConfig :: struct {
@@ -385,7 +385,7 @@ build_3d_pipelines :: proc(
 }
 
 UNLIT_SHADER_OPTION_COUNT :: 2
-UNLIT_SHADER_VARIANT_COUNT :u32: 1 << UNLIT_SHADER_OPTION_COUNT
+UNLIT_SHADER_VARIANT_COUNT: u32 : 1 << UNLIT_SHADER_OPTION_COUNT
 
 unlit_pipelines: [UNLIT_SHADER_VARIANT_COUNT]vk.Pipeline
 
@@ -469,7 +469,7 @@ build_3d_unlit_pipelines :: proc(
     ),
   }
   for mask in 0 ..< UNLIT_SHADER_VARIANT_COUNT {
-      features := transmute(ShaderFeatureSet)mask
+    features := transmute(ShaderFeatureSet)mask
     configs[mask] = ShaderConfig {
       is_skinned         = ShaderFeatures.SKINNING in features,
       has_albedo_texture = ShaderFeatures.ALBEDO_TEXTURE in features,

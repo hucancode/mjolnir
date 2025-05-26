@@ -50,15 +50,15 @@ keyframe_sample :: proc($T: typeid, frames: []Keyframe(T), t: f32) -> T {
 }
 
 Animation_Status :: enum {
-  Playing,
-  Paused,
-  Stopped,
+  PLAYING,
+  PAUSED,
+  STOPPED,
 }
 
 Animation_Play_Mode :: enum {
-  Loop,
-  Once,
-  Ping_Pong,
+  LOOP,
+  ONCE,
+  PING_PONG,
 }
 
 Pose :: struct {
@@ -122,34 +122,34 @@ Animation_Instance :: struct {
 
 animation_instance_init :: proc(instance: ^Animation_Instance, clip: u32) {
   instance.clip_handle = clip
-  instance.mode = .Loop
-  instance.status = .Stopped
+  instance.mode = .LOOP
+  instance.status = .STOPPED
   instance.time = 0.0
   instance.speed = 1.0
 }
 
 animation_instance_pause :: proc(instance: ^Animation_Instance) {
-  instance.status = .Paused
+  instance.status = .PAUSED
 }
 
 animation_instance_play :: proc(instance: ^Animation_Instance) {
-  instance.status = .Playing
+  instance.status = .PLAYING
 }
 
 animation_instance_toggle :: proc(instance: ^Animation_Instance) {
   switch instance.status {
-  case .Playing:
+  case .PLAYING:
     animation_instance_pause(instance)
-  case .Paused:
+  case .PAUSED:
     animation_instance_play(instance)
-  case .Stopped:
+  case .STOPPED:
     instance.time = 0
     animation_instance_play(instance)
   }
 }
 
 animation_instance_stop :: proc(instance: ^Animation_Instance) {
-  instance.status = .Stopped
+  instance.status = .STOPPED
   instance.time = 0
 }
 
@@ -157,23 +157,23 @@ animation_instance_update :: proc(
   instance: ^Animation_Instance,
   delta_time: f32,
 ) {
-  if instance.status != .Playing || instance.duration <= 0 {
+  if instance.status != .PLAYING || instance.duration <= 0 {
     // return
   }
 
-  instance.mode = .Loop
+  instance.mode = .LOOP
 
   effective_delta_time := delta_time * instance.speed
 
   switch instance.mode {
-  case .Loop:
+  case .LOOP:
     instance.time += effective_delta_time
     instance.time = math.mod_f32(
       instance.time + instance.duration,
       instance.duration,
     )
   // fmt.printfln("animation_instance_update: time +%f = %f", effective_delta_time, instance.time)
-  case .Once:
+  case .ONCE:
     instance.time += effective_delta_time
     instance.time = math.mod_f32(
       instance.time + instance.duration,
@@ -181,9 +181,9 @@ animation_instance_update :: proc(
     )
     if instance.time >= instance.duration {
       instance.time = instance.duration
-      instance.status = .Stopped
+      instance.status = .STOPPED
     }
-  case .Ping_Pong:
+  case .PING_PONG:
     instance.time += effective_delta_time
     if instance.time >= instance.duration || instance.time < 0 {
       instance.speed *= -1

@@ -27,9 +27,17 @@ setup :: proc(engine: ^mjolnir.Engine) {
   using mjolnir, geometry
   plain_material_handle, _, _ := create_material(engine)
   cube_geom := make_cube()
-  cube_mesh_handle, _, _ := create_static_mesh(engine, &cube_geom, plain_material_handle)
+  cube_mesh_handle, _, _ := create_static_mesh(
+    engine,
+    &cube_geom,
+    plain_material_handle,
+  )
   sphere_geom := make_sphere()
-  sphere_mesh_handle, _, _ := create_static_mesh(engine, &sphere_geom, plain_material_handle)
+  sphere_mesh_handle, _, _ := create_static_mesh(
+    engine,
+    &sphere_geom,
+    plain_material_handle,
+  )
   // Create ground plane
   ground_albedo_handle, _, _ := create_texture_from_path(
     engine,

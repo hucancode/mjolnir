@@ -112,7 +112,7 @@ make_animation_instance :: proc(
       instance = {
         clip_handle = u32(i),
         mode        = mode,
-        status      = .Playing,
+        status      = .PLAYING,
         time        = 0.0,
         duration    = clip.duration,
         speed       = speed,
@@ -129,7 +129,7 @@ calculate_animation_transform :: proc(
   anim_instance: ^Animation_Instance,
   target_pose: ^Pose,
 ) {
-  if anim_instance.status == .Stopped ||
+  if anim_instance.status == .STOPPED ||
      anim_instance.clip_handle >= u32(len(self.animations)) {
     return
   }
