@@ -86,88 +86,97 @@ material_update_textures :: proc(
     return .ERROR_INITIALIZATION_FAILED
   }
 
-  image_infos := [?]vk.DescriptorImageInfo {
-    {
-      sampler = albedo.sampler if albedo != nil else 0,
-      imageView = albedo.buffer.view if albedo != nil else 0,
-      imageLayout = .SHADER_READ_ONLY_OPTIMAL,
-    },
-    {
-      sampler = metallic_roughness.sampler if metallic_roughness != nil else 0,
-      imageView = metallic_roughness.buffer.view if metallic_roughness != nil else 0,
-      imageLayout = .SHADER_READ_ONLY_OPTIMAL,
-    },
-    {
-      sampler = normal.sampler if normal != nil else 0,
-      imageView = normal.buffer.view if normal != nil else 0,
-      imageLayout = .SHADER_READ_ONLY_OPTIMAL,
-    },
-    {
-      sampler = displacement.sampler if displacement != nil else 0,
-      imageView = displacement.buffer.view if displacement != nil else 0,
-      imageLayout = .SHADER_READ_ONLY_OPTIMAL,
-    },
-    {
-      sampler = emissive.sampler if emissive != nil else 0,
-      imageView = emissive.buffer.view if emissive != nil else 0,
-      imageLayout = .SHADER_READ_ONLY_OPTIMAL,
-    },
-  }
-  fallbacks := MaterialFallbacks {
-    albedo    = mat.albedo_value,
-    emissive  = mat.emissive_value,
-    roughness = mat.roughness_value,
-    metallic  = mat.metallic_value,
-  }
-  mat.fallback_buffer = create_host_visible_buffer(
-    mat.ctx,
-    size_of(MaterialFallbacks),
-    {.UNIFORM_BUFFER},
-    &fallbacks,
-  ) or_return
+  writes: [dynamic]vk.WriteDescriptorSet
 
-  writes := [?]vk.WriteDescriptorSet {
-    {
-      sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = mat.texture_descriptor_set,
-      dstBinding = 0,
-      descriptorType = .COMBINED_IMAGE_SAMPLER,
-      descriptorCount = 1,
-      pImageInfo = &image_infos[0],
-    },
-    {
-      sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = mat.texture_descriptor_set,
-      dstBinding = 1,
-      descriptorType = .COMBINED_IMAGE_SAMPLER,
-      descriptorCount = 1,
-      pImageInfo = &image_infos[1],
-    },
-    {
-      sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = mat.texture_descriptor_set,
-      dstBinding = 2,
-      descriptorType = .COMBINED_IMAGE_SAMPLER,
-      descriptorCount = 1,
-      pImageInfo = &image_infos[2],
-    },
-    {
-      sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = mat.texture_descriptor_set,
-      dstBinding = 3,
-      descriptorType = .COMBINED_IMAGE_SAMPLER,
-      descriptorCount = 1,
-      pImageInfo = &image_infos[3],
-    },
-    {
-      sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = mat.texture_descriptor_set,
-      dstBinding = 4,
-      descriptorType = .COMBINED_IMAGE_SAMPLER,
-      descriptorCount = 1,
-      pImageInfo = &image_infos[4],
-    },
-    {
+  if albedo != nil {
+    append(
+      &writes,
+      vk.WriteDescriptorSet {
+        sType = .WRITE_DESCRIPTOR_SET,
+        dstSet = mat.texture_descriptor_set,
+        dstBinding = 0,
+        descriptorType = .COMBINED_IMAGE_SAMPLER,
+        descriptorCount = 1,
+        pImageInfo = &vk.DescriptorImageInfo {
+          sampler = albedo.sampler,
+          imageView = albedo.buffer.view,
+          imageLayout = .SHADER_READ_ONLY_OPTIMAL,
+        },
+      },
+    )
+  }
+  if metallic_roughness != nil {
+    append(
+      &writes,
+      vk.WriteDescriptorSet {
+        sType = .WRITE_DESCRIPTOR_SET,
+        dstSet = mat.texture_descriptor_set,
+        dstBinding = 1,
+        descriptorType = .COMBINED_IMAGE_SAMPLER,
+        descriptorCount = 1,
+        pImageInfo = &vk.DescriptorImageInfo {
+          sampler = metallic_roughness.sampler,
+          imageView = metallic_roughness.buffer.view,
+          imageLayout = .SHADER_READ_ONLY_OPTIMAL,
+        },
+      },
+    )
+  }
+  if normal != nil {
+    append(
+      &writes,
+      vk.WriteDescriptorSet {
+        sType = .WRITE_DESCRIPTOR_SET,
+        dstSet = mat.texture_descriptor_set,
+        dstBinding = 2,
+        descriptorType = .COMBINED_IMAGE_SAMPLER,
+        descriptorCount = 1,
+        pImageInfo = &vk.DescriptorImageInfo {
+          sampler = normal.sampler,
+          imageView = normal.buffer.view,
+          imageLayout = .SHADER_READ_ONLY_OPTIMAL,
+        },
+      },
+    )
+  }
+  if displacement != nil {
+    append(
+      &writes,
+      vk.WriteDescriptorSet {
+        sType = .WRITE_DESCRIPTOR_SET,
+        dstSet = mat.texture_descriptor_set,
+        dstBinding = 3,
+        descriptorType = .COMBINED_IMAGE_SAMPLER,
+        descriptorCount = 1,
+        pImageInfo = &vk.DescriptorImageInfo {
+          sampler = displacement.sampler,
+          imageView = displacement.buffer.view,
+          imageLayout = .SHADER_READ_ONLY_OPTIMAL,
+        },
+      },
+    )
+  }
+  if emissive != nil {
+    append(
+      &writes,
+      vk.WriteDescriptorSet {
+        sType = .WRITE_DESCRIPTOR_SET,
+        dstSet = mat.texture_descriptor_set,
+        dstBinding = 4,
+        descriptorType = .COMBINED_IMAGE_SAMPLER,
+        descriptorCount = 1,
+        pImageInfo = &vk.DescriptorImageInfo {
+          sampler = emissive.sampler,
+          imageView = emissive.buffer.view,
+          imageLayout = .SHADER_READ_ONLY_OPTIMAL,
+        },
+      },
+    )
+  }
+
+  append(
+    &writes,
+    vk.WriteDescriptorSet {
       sType = .WRITE_DESCRIPTOR_SET,
       dstSet = mat.texture_descriptor_set,
       dstBinding = 5,
@@ -179,18 +188,17 @@ material_update_textures :: proc(
         range = size_of(MaterialFallbacks),
       },
     },
-  }
+  )
 
   vk.UpdateDescriptorSets(
     mat.ctx.vkd,
-    len(writes),
-    raw_data(writes[:]),
+    u32(len(writes)),
+    raw_data(writes),
     0,
     nil,
   )
   return .SUCCESS
 }
-
 material_update_bone_buffer :: proc(
   mat: ^Material,
   buffer: vk.Buffer,
@@ -251,6 +259,20 @@ create_material :: proc(
   mat.emissive_value = emissive_value
 
   material_init_descriptor_set_layout(mat, &engine.ctx) or_return
+  fallbacks := MaterialFallbacks {
+    albedo    = mat.albedo_value,
+    emissive  = mat.emissive_value,
+    roughness = mat.roughness_value,
+    metallic  = mat.metallic_value,
+  }
+
+  mat.fallback_buffer = create_host_visible_buffer(
+    mat.ctx,
+    size_of(MaterialFallbacks),
+    {.UNIFORM_BUFFER},
+    &fallbacks,
+  ) or_return
+
   albedo := resource.get(&engine.textures, albedo_handle)
   metallic_roughness := resource.get(
     &engine.textures,
@@ -289,6 +311,15 @@ create_unlit_material :: proc(
   mat.albedo_value = albedo_value
   material_init_descriptor_set_layout(mat, &engine.ctx) or_return
   albedo := resource.get(&engine.textures, albedo_handle)
+  fallbacks := MaterialFallbacks {
+    albedo = mat.albedo_value,
+  }
+  mat.fallback_buffer = create_host_visible_buffer(
+    mat.ctx,
+    size_of(MaterialFallbacks),
+    {.UNIFORM_BUFFER},
+    &fallbacks,
+  ) or_return
   material_update_textures(mat, albedo) or_return
   res = .SUCCESS
   return
