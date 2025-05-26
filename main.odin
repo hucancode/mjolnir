@@ -41,7 +41,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   )
   ground_mat_handle, _, _ := create_material(
     engine,
-    SHADER_FEATURE_ALBEDO_TEXTURE,
+    {.ALBEDO_TEXTURE},
     ground_albedo_handle,
   )
   quad_geom := make_quad()

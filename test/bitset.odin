@@ -15,4 +15,5 @@ test_bitset_int_conversion :: proc(t: ^testing.T) {
   // u32 to bit_set
   mask : u32 = 0b11
   testing.expect_value(t, transmute(FeatureSet)mask, FeatureSet {.SHADOWS, .SKINNING})
+  testing.expect_value(t, len(Features), 3)
 }

@@ -415,7 +415,7 @@ render_single_node :: proc(
       data.pose.bone_buffer.size,
     )
     pipeline :=
-      pipelines[material.features] if material.is_lit else unlit_pipelines[material.features]
+      pipelines[transmute(u32)material.features] if material.is_lit else unlit_pipelines[transmute(u32)material.features]
     layout := pipeline_layout
     // fmt.printfln("rendering skeletal mesh with material %v", material)
     vk.CmdBindPipeline(ctx.command_buffer, .GRAPHICS, pipeline)
@@ -482,7 +482,7 @@ render_single_node :: proc(
       return true
     }
     pipeline :=
-      pipelines[material.features] if material.is_lit else unlit_pipelines[material.features]
+      pipelines[transmute(u32)material.features] if material.is_lit else unlit_pipelines[transmute(u32)material.features]
     layout := pipeline_layout
     // Bind all required descriptor sets (set 0: camera+shadow+cube shadow, set 1: material, set 2: skinning)
     descriptor_sets := [?]vk.DescriptorSet {
@@ -560,8 +560,8 @@ render_single_shadow :: proc(
     }
     material := resource.get(&ctx.engine.materials, mesh.material)
     if material == nil {return true}
-    features: u32 = 0
-    pipeline := shadow_pipelines[features]
+    features: ShaderFeatureSet
+    pipeline := shadow_pipelines[transmute(u32)features]
     layout := shadow_pipeline_layout
     descriptor_sets := [?]vk.DescriptorSet {
         renderer_get_camera_descriptor_set(&ctx.engine.renderer), // set 0
@@ -627,7 +627,7 @@ render_single_shadow :: proc(
     vk.CmdBindPipeline(
       ctx.command_buffer,
       .GRAPHICS,
-      shadow_pipelines[SHADER_FEATURE_SKINNING],
+      shadow_pipelines[transmute(u32)ShaderFeatureSet{.SKINNING}],
     )
     offset_shadow :=
       (1 + shadow_idx * 6 + shadow_layer) * u32(aligned_scene_uniform_size)

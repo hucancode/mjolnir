@@ -6,15 +6,17 @@ import "geometry"
 import "resource"
 import vk "vendor:vulkan"
 
-SHADER_FEATURE_SKINNING :: 1 << 0
-SHADER_FEATURE_ALBEDO_TEXTURE :: 1 << 1
-SHADER_FEATURE_METALLIC_ROUGHNESS_TEXTURE :: 1 << 2
-SHADER_FEATURE_NORMAL_TEXTURE :: 1 << 3
-SHADER_FEATURE_DISPLACEMENT_TEXTURE :: 1 << 4
-SHADER_FEATURE_EMISSIVE_TEXTURE :: 1 << 5
-
-SHADER_OPTION_COUNT :: 6
-SHADER_VARIANT_COUNT :: 1 << SHADER_OPTION_COUNT
+ShaderFeatures :: enum {
+  SKINNING                   = 0,
+  ALBEDO_TEXTURE             = 1,
+  METALLIC_ROUGHNESS_TEXTURE = 2,
+  NORMAL_TEXTURE             = 3,
+  DISPLACEMENT_TEXTURE       = 4,
+  EMISSIVE_TEXTURE           = 5,
+}
+ShaderFeatureSet :: bit_set[ShaderFeatures;u32]
+SHADER_OPTION_COUNT : u32 : len(ShaderFeatures)
+SHADER_VARIANT_COUNT: u32 : 1 << SHADER_OPTION_COUNT
 
 ShaderConfig :: struct {
   is_skinned:                     b32,
@@ -36,7 +38,7 @@ SHADER_UBER_FRAG :: #load("shader/uber/frag.spv")
 
 pipeline3d_deinit :: proc(ctx: ^VulkanContext) {
   vkd := ctx.vkd
-  for i in 0..<len(pipelines) {
+  for i in 0 ..< len(pipelines) {
     if pipelines[i] != 0 {
       vk.DestroyPipeline(vkd, pipelines[i], nil)
       pipelines[i] = 0
@@ -285,22 +287,17 @@ build_3d_pipelines :: proc(
     nil,
     &pipeline_layout,
   ) or_return
-  for features in 0 ..< SHADER_VARIANT_COUNT {
-    configs[features] = ShaderConfig {
-      is_skinned                     = (features &
-        SHADER_FEATURE_SKINNING) != 0,
-      has_albedo_texture             = (features &
-        SHADER_FEATURE_ALBEDO_TEXTURE) != 0,
-      has_metallic_roughness_texture = (features &
-        SHADER_FEATURE_METALLIC_ROUGHNESS_TEXTURE) != 0,
-      has_normal_texture             = (features &
-        SHADER_FEATURE_NORMAL_TEXTURE) != 0,
-      has_displacement_texture       = (features &
-        SHADER_FEATURE_DISPLACEMENT_TEXTURE) != 0,
-      has_emissive_texture           = (features &
-        SHADER_FEATURE_EMISSIVE_TEXTURE) != 0,
+  for mask in 0 ..< SHADER_VARIANT_COUNT {
+    features := transmute(ShaderFeatureSet)mask
+    configs[mask] = ShaderConfig {
+      is_skinned                     = ShaderFeatures.SKINNING in features,
+      has_albedo_texture             = ShaderFeatures.ALBEDO_TEXTURE in features,
+      has_metallic_roughness_texture = ShaderFeatures.METALLIC_ROUGHNESS_TEXTURE in features,
+      has_normal_texture             = ShaderFeatures.NORMAL_TEXTURE in features,
+      has_displacement_texture       = ShaderFeatures.DISPLACEMENT_TEXTURE in features,
+      has_emissive_texture           = ShaderFeatures.EMISSIVE_TEXTURE in features,
     }
-    entries[features] = [SHADER_OPTION_COUNT]vk.SpecializationMapEntry {
+    entries[mask] = [SHADER_OPTION_COUNT]vk.SpecializationMapEntry {
       {
         constantID = 0,
         offset = u32(offset_of(ShaderConfig, is_skinned)),
@@ -332,39 +329,39 @@ build_3d_pipelines :: proc(
         size = size_of(b32),
       },
     }
-    spec_infos[features] = vk.SpecializationInfo {
-      mapEntryCount = len(entries[features]),
-      pMapEntries   = raw_data(entries[features][:]),
+    spec_infos[mask] = vk.SpecializationInfo {
+      mapEntryCount = len(entries[mask]),
+      pMapEntries   = raw_data(entries[mask][:]),
       dataSize      = size_of(ShaderConfig),
-      pData         = &configs[features],
+      pData         = &configs[mask],
     }
-    shader_stages_arr[features] = [?]vk.PipelineShaderStageCreateInfo {
+    shader_stages_arr[mask] = [?]vk.PipelineShaderStageCreateInfo {
       {
         sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
         stage = {.VERTEX},
         module = vert_module,
         pName = "main",
-        pSpecializationInfo = &spec_infos[features],
+        pSpecializationInfo = &spec_infos[mask],
       },
       {
         sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
         stage = {.FRAGMENT},
         module = frag_module,
         pName = "main",
-        pSpecializationInfo = &spec_infos[features],
+        pSpecializationInfo = &spec_infos[mask],
       },
     }
     fmt.printfln(
-      "Creating pipeline for features: %08b with config %v with vertex input %v",
+      "Creating pipeline for features: %v with config %v with vertex input %v",
       features,
-      configs[features],
+      configs[mask],
       vertex_input_info,
     )
-    pipeline_infos[features] = vk.GraphicsPipelineCreateInfo {
+    pipeline_infos[mask] = vk.GraphicsPipelineCreateInfo {
       sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
       pNext               = &rendering_info_khr,
-      stageCount          = len(shader_stages_arr[features]),
-      pStages             = raw_data(shader_stages_arr[features][:]),
+      stageCount          = len(shader_stages_arr[mask]),
+      pStages             = raw_data(shader_stages_arr[mask][:]),
       pVertexInputState   = &vertex_input_info,
       pInputAssemblyState = &input_assembly,
       pViewportState      = &viewport_state,
@@ -388,9 +385,9 @@ build_3d_pipelines :: proc(
 }
 
 UNLIT_SHADER_OPTION_COUNT :: 2
-UNLIT_SHADER_VARIANT_COUNT :: 1 << UNLIT_SHADER_OPTION_COUNT
+UNLIT_SHADER_VARIANT_COUNT :u32: 1 << UNLIT_SHADER_OPTION_COUNT
 
-unlit_pipelines: [SHADER_VARIANT_COUNT]vk.Pipeline
+unlit_pipelines: [UNLIT_SHADER_VARIANT_COUNT]vk.Pipeline
 
 SHADER_UNLIT_VERT :: #load("shader/unlit/vert.spv")
 SHADER_UNLIT_FRAG :: #load("shader/unlit/frag.spv")
@@ -471,12 +468,13 @@ build_3d_unlit_pipelines :: proc(
       geometry.VERTEX_ATTRIBUTE_DESCRIPTIONS[:],
     ),
   }
-  for features in 0 ..< UNLIT_SHADER_VARIANT_COUNT {
-    configs[features] = ShaderConfig {
-      is_skinned         = (features & SHADER_FEATURE_SKINNING) != 0,
-      has_albedo_texture = (features & SHADER_FEATURE_ALBEDO_TEXTURE) != 0,
+  for mask in 0 ..< UNLIT_SHADER_VARIANT_COUNT {
+      features := transmute(ShaderFeatureSet)mask
+    configs[mask] = ShaderConfig {
+      is_skinned         = ShaderFeatures.SKINNING in features,
+      has_albedo_texture = ShaderFeatures.ALBEDO_TEXTURE in features,
     }
-    entries[features] = [UNLIT_SHADER_OPTION_COUNT]vk.SpecializationMapEntry {
+    entries[mask] = [UNLIT_SHADER_OPTION_COUNT]vk.SpecializationMapEntry {
       {
         constantID = 0,
         offset = u32(offset_of(ShaderConfig, is_skinned)),
@@ -488,39 +486,39 @@ build_3d_unlit_pipelines :: proc(
         size = size_of(b32),
       },
     }
-    spec_infos[features] = vk.SpecializationInfo {
-      mapEntryCount = len(entries[features]),
-      pMapEntries   = raw_data(entries[features][:]),
+    spec_infos[mask] = vk.SpecializationInfo {
+      mapEntryCount = len(entries[mask]),
+      pMapEntries   = raw_data(entries[mask][:]),
       dataSize      = size_of(ShaderConfig),
-      pData         = &configs[features],
+      pData         = &configs[mask],
     }
-    shader_stages_arr[features] = [?]vk.PipelineShaderStageCreateInfo {
+    shader_stages_arr[mask] = [2]vk.PipelineShaderStageCreateInfo {
       {
         sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
         stage = {.VERTEX},
         module = vert_module,
         pName = "main",
-        pSpecializationInfo = &spec_infos[features],
+        pSpecializationInfo = &spec_infos[mask],
       },
       {
         sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
         stage = {.FRAGMENT},
         module = frag_module,
         pName = "main",
-        pSpecializationInfo = &spec_infos[features],
+        pSpecializationInfo = &spec_infos[mask],
       },
     }
     fmt.printfln(
-      "Creating unlit pipeline for features: %08b with config %v with vertex input %v",
+      "Creating unlit pipeline for features: %v with config %v with vertex input %v",
       features,
-      configs[features],
+      configs[mask],
       vertex_input_info,
     )
-    pipeline_infos[features] = vk.GraphicsPipelineCreateInfo {
+    pipeline_infos[mask] = vk.GraphicsPipelineCreateInfo {
       sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
       pNext               = &rendering_info_khr,
-      stageCount          = len(shader_stages_arr[features]),
-      pStages             = raw_data(shader_stages_arr[features][:]),
+      stageCount          = len(shader_stages_arr[mask]),
+      pStages             = raw_data(shader_stages_arr[mask][:]),
       pVertexInputState   = &vertex_input_info,
       pInputAssemblyState = &input_assembly,
       pViewportState      = &viewport_state,

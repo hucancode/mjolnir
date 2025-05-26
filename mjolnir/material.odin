@@ -15,7 +15,7 @@ MaterialFallbacks :: struct {
 Material :: struct {
   texture_descriptor_set:    vk.DescriptorSet,
   skinning_descriptor_set:   vk.DescriptorSet,
-  features:                  u32,
+  features:                  ShaderFeatureSet,
   is_lit:                    bool,
   ctx:                       ^VulkanContext,
   albedo_handle:             Handle,
@@ -219,7 +219,7 @@ material_update_bone_buffer :: proc(
 
 create_material :: proc(
   engine: ^Engine,
-  features: u32 = 0,
+  features: ShaderFeatureSet = {},
   albedo_handle: Handle = {},
   metallic_roughness_handle: Handle = {},
   normal_handle: Handle = {},
@@ -273,7 +273,7 @@ create_material :: proc(
 
 create_unlit_material :: proc(
   engine: ^Engine,
-  features: u32 = 0,
+  features: ShaderFeatureSet = {},
   albedo_handle: Handle = {},
   albedo_value: linalg.Vector4f32 = {1, 1, 1, 1},
 ) -> (

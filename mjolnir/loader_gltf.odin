@@ -240,7 +240,7 @@ load_gltf_pbr_textures :: proc(
   normal_handle: Handle,
   displacement_handle: Handle,
   emissive_handle: Handle,
-  features: u32,
+  features: ShaderFeatureSet,
   ret: vk.Result,
 ) {
   if g_material == nil {
@@ -253,7 +253,7 @@ load_gltf_pbr_textures :: proc(
     gltf_data,
     g_material.pbr_metallic_roughness.base_color_texture.texture,
   ) or_return
-  features |= SHADER_FEATURE_ALBEDO_TEXTURE
+  features |= {.ALBEDO_TEXTURE}
 
   if g_material.has_pbr_metallic_roughness {
     pbr_info := g_material.pbr_metallic_roughness
@@ -290,7 +290,7 @@ load_gltf_pbr_textures :: proc(
           engine,
           pixel_data,
         ) or_return
-        features |= SHADER_FEATURE_METALLIC_ROUGHNESS_TEXTURE
+        features |= {.METALLIC_ROUGHNESS_TEXTURE}
         delete(pixel_data)
       }
     }
@@ -302,7 +302,7 @@ load_gltf_pbr_textures :: proc(
       gltf_data,
       g_material.normal_texture.texture,
     ) or_return
-    features |= SHADER_FEATURE_NORMAL_TEXTURE
+    features |= {.NORMAL_TEXTURE}
   }
 
   // TODO: Displacement map (GLTF extension, not implemented here)
@@ -313,7 +313,7 @@ load_gltf_pbr_textures :: proc(
       gltf_data,
       g_material.emissive_texture.texture,
     ) or_return
-    features |= SHADER_FEATURE_EMISSIVE_TEXTURE
+    features |= {.EMISSIVE_TEXTURE}
   }
 
   ret = .SUCCESS
@@ -447,7 +447,7 @@ load_gltf_skinned_primitive :: proc(
     ) or_return
   mat_handle, _ = create_material(
     engine,
-    features | SHADER_FEATURE_SKINNING,
+    features | {.SKINNING},
     albedo_handle,
     metallic_roughness_handle,
     normal_handle,
