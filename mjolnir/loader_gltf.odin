@@ -159,8 +159,11 @@ load_gltf :: proc(
           len(mesh_data.indices),
         )
 
-        mesh_handle := create_static_mesh(engine, &mesh_data, mat_handle)
-
+        mesh_handle, _, ret := create_static_mesh(engine, &mesh_data, mat_handle)
+        if ret != .SUCCESS {
+          fmt.eprintln("Failed to create static mesh:", ret)
+          continue
+        }
         node.attachment = NodeStaticMeshAttachment {
           handle = mesh_handle,
         }

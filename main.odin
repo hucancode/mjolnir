@@ -10,9 +10,6 @@ import "mjolnir/geometry"
 import "mjolnir/resource"
 import glfw "vendor:glfw"
 
-WIDTH :: 1280
-HEIGHT :: 720
-TITLE :: "Mjolnir Odin"
 LIGHT_COUNT :: 3
 light_handles: [LIGHT_COUNT]mjolnir.Handle
 light_cube_handles: [LIGHT_COUNT]mjolnir.Handle
@@ -23,22 +20,16 @@ main :: proc() {
   engine.setup_proc = setup
   engine.update_proc = update
   engine.key_press_proc = on_key_pressed
-  defer mjolnir.deinit(&engine)
-  if mjolnir.init(&engine, WIDTH, HEIGHT, TITLE) != .SUCCESS {
-    fmt.eprintf("Failed to initialize engine\n")
-    return
-  }
-  mjolnir.run(&engine)
+  mjolnir.run(&engine, 1280, 720, "Mjolnir Odin")
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {
-  using mjolnir
-  mat_handle, _, _ := create_material(engine)
-  cube_geom := geometry.make_cube()
-  cube_mesh_handle := create_static_mesh(engine, &cube_geom, mat_handle)
-  sphere_geom := geometry.make_sphere()
-  sphere_mesh_handle := create_static_mesh(engine, &sphere_geom, mat_handle)
-
+  using mjolnir, geometry
+  plain_material_handle, _, _ := create_material(engine)
+  cube_geom := make_cube()
+  cube_mesh_handle, _, _ := create_static_mesh(engine, &cube_geom, plain_material_handle)
+  sphere_geom := make_sphere()
+  sphere_mesh_handle, _, _ := create_static_mesh(engine, &sphere_geom, plain_material_handle)
   // Create ground plane
   ground_albedo_handle, _, _ := create_texture_from_path(
     engine,
@@ -53,8 +44,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
     SHADER_FEATURE_ALBEDO_TEXTURE,
     ground_albedo_handle,
   )
-  quad_geom := geometry.make_quad()
-  ground_mesh_handle := create_static_mesh(
+  quad_geom := make_quad()
+  ground_mesh_handle, _, _ := create_static_mesh(
     engine,
     &quad_geom,
     ground_mat_handle,

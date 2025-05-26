@@ -1359,7 +1359,11 @@ engine_commit_transaction :: proc(engine: ^Engine) {
   clear(&engine.dirty_transforms)
 }
 
-run :: proc(engine: ^Engine) {
+run :: proc(engine: ^Engine, width: u32, height: u32, title: string) {
+  if init(engine, width, height, title) != .SUCCESS {
+    return
+  }
+  defer deinit(engine)
   for !glfw.WindowShouldClose(engine.window) {
     update(engine)
     if time.duration_milliseconds(time.since(engine.last_frame_timestamp)) <

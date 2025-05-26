@@ -64,15 +64,18 @@ create_static_mesh :: proc(
   engine: ^Engine,
   geom: ^geometry.Geometry,
   material: Handle,
-) -> Handle {
-  handle, mesh := resource.alloc(&engine.meshes)
-  if mesh != nil {
-    if static_mesh_init(mesh, geom, &engine.ctx) != .SUCCESS {
-      fmt.eprintln("Failed to initialize static mesh geometry")
-      return handle
-    }
-    mesh.material = material
-    fmt.printfln("Created static mesh with material handle %v", material)
+) -> (
+  handle: Handle,
+  mesh: ^StaticMesh,
+  ret: vk.Result,
+) {
+  handle, mesh = resource.alloc(&engine.meshes)
+  if mesh == nil {
+    ret = .ERROR_UNKNOWN
+    return
   }
-  return handle
+  static_mesh_init(mesh, geom, &engine.ctx) or_return
+  mesh.material = material
+  ret = .SUCCESS
+  return
 }
