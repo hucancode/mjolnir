@@ -58,7 +58,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     for x in 1 ..< nx {
       for y in 1 ..< ny {
         for z in 1 ..< nz {
-          node_handle, node := spawn_node(engine)
+          node_handle, node := spawn(engine)
           attach(&engine.nodes, engine.scene.root, node_handle)
           node.attachment = NodeStaticMeshAttachment{sphere_mesh_handle, true}
           node.transform.position =
@@ -77,7 +77,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   if true {
     // Ground node
     size: f32 = 10.0
-    ground_handle, ground_node := spawn_node(engine)
+    ground_handle, ground_node := spawn(engine)
     attach(&engine.nodes, engine.scene.root, ground_handle)
     ground_node.attachment = NodeStaticMeshAttachment {
       ground_mesh_handle,
@@ -124,7 +124,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
         continue
       }
       // skeleton_ptr.transform.scale = {0.5, 0.5, 0.5}
-      play_animation(engine, skeleton, "idle", .Loop)
+      play_animation(engine, skeleton, "idle")
     }
   }
 
@@ -156,7 +156,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
       math.PI * 0.45,
       linalg.VECTOR3F32_X_AXIS,
     )
-    light_cube_handle, light_cube_node := spawn_node(engine)
+    light_cube_handle, light_cube_node := spawn(engine)
     light_cube_handles[i] = light_cube_handle
     attach(&engine.nodes, light_handles[i], light_cube_handles[i])
     light_cube_node.attachment = NodeStaticMeshAttachment {

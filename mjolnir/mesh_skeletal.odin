@@ -152,7 +152,7 @@ calculate_animation_transform :: proc(
     current_bone_index := pop(&bone_stack)
     parent_world_transform := pop(&transform_stack)
     current_bone := &self.bones[current_bone_index]
-    local_animated_transform := geometry.transform_identity()
+    local_animated_transform := geometry.TRANSFORM_IDENTITY
     if current_bone_index < u32(len(active_clip.channels)) {
       channel := &active_clip.channels[current_bone_index]
       animation_channel_calculate(

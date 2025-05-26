@@ -71,7 +71,7 @@ load_gltf :: proc(
       continue
     }
     node.name = string(g_node.name)
-    node.transform = geometry.transform_identity()
+    node.transform = geometry.TRANSFORM_IDENTITY
     if g_node.has_matrix {
       geometry.decompose_matrix(
         &node.transform,
@@ -579,7 +579,7 @@ load_gltf_skinned_primitive :: proc(
     } else {
       engine_bones[i].inverse_bind_matrix = linalg.MATRIX4F32_IDENTITY
     }
-    bt := geometry.transform_identity()
+    bt := geometry.TRANSFORM_IDENTITY
     if joint_node.has_translation {
       bt.position = joint_node.translation
     }

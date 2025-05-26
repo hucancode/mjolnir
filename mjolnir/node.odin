@@ -32,7 +32,7 @@ Node :: struct {
 
 init_node :: proc(node: ^Node, name_str: string) {
   node.children = make([dynamic]Handle, 0)
-  node.transform = geometry.transform_identity()
+  node.transform = geometry.TRANSFORM_IDENTITY
   node.name = name_str
   node.attachment = nil
   node.parent = Handle{}
@@ -95,7 +95,7 @@ play_animation :: proc(
   engine: ^Engine,
   node_handle: Handle,
   name: string,
-  mode: Animation_Play_Mode,
+  mode: Animation_Play_Mode = .Loop,
 ) -> bool {
   node := resource.get(&engine.nodes, node_handle)
   if node == nil {
@@ -126,7 +126,7 @@ spawn_point_light :: proc(
   handle: Handle,
   node: ^Node,
 ) {
-  handle, node = spawn_node(engine)
+  handle, node = spawn(engine)
   if node != nil {
     light_handle, light := resource.alloc(&engine.lights)
     light^ = PointLight {
@@ -147,7 +147,7 @@ spawn_directional_light :: proc(
   handle: Handle,
   node: ^Node,
 ) {
-  handle, node = spawn_node(engine)
+  handle, node = spawn(engine)
   if node != nil {
     light_handle, light := resource.alloc(&engine.lights)
     light^ = DirectionalLight {
@@ -169,7 +169,7 @@ spawn_spot_light :: proc(
   handle: Handle,
   node: ^Node,
 ) {
-  handle, node = spawn_node(engine)
+  handle, node = spawn(engine)
   if node != nil {
     light_handle, light := resource.alloc(&engine.lights)
     light^ = SpotLight {
@@ -183,10 +183,10 @@ spawn_spot_light :: proc(
   return
 }
 
-spawn_node :: proc(engine: ^Engine) -> (handle: Handle, node: ^Node) {
+spawn :: proc(engine: ^Engine) -> (handle: Handle, node: ^Node) {
   handle, node = resource.alloc(&engine.nodes)
   if node != nil {
-    node.transform = geometry.transform_identity()
+    node.transform = geometry.TRANSFORM_IDENTITY
     node.children = make([dynamic]Handle, 0)
     attach(&engine.nodes, engine.scene.root, handle)
   }

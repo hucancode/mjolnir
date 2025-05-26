@@ -12,15 +12,13 @@ Transform :: struct {
   world_matrix: linalg.Matrix4f32,
 }
 
-transform_identity :: proc() -> Transform {
-  return Transform {
-    position     = {0, 0, 0},
-    rotation     = linalg.QUATERNIONF32_IDENTITY,
-    scale        = {1, 1, 1},
-    is_dirty     = true, // Mark dirty to force initial matrix calculation
-    local_matrix = linalg.MATRIX4F32_IDENTITY,
-    world_matrix = linalg.MATRIX4F32_IDENTITY,
-  }
+TRANSFORM_IDENTITY :: Transform {
+  position     = {0, 0, 0},
+  rotation     = linalg.QUATERNIONF32_IDENTITY,
+  scale        = {1, 1, 1},
+  is_dirty     = true, // Mark dirty to force initial matrix calculation
+  local_matrix = linalg.MATRIX4F32_IDENTITY,
+  world_matrix = linalg.MATRIX4F32_IDENTITY,
 }
 
 decompose_matrix :: proc(t: ^Transform, m: linalg.Matrix4f32) {
