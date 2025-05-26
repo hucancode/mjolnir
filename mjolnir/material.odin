@@ -2,8 +2,8 @@ package mjolnir
 
 import "core:fmt"
 import linalg "core:math/linalg"
-import vk "vendor:vulkan"
 import "resource"
+import vk "vendor:vulkan"
 
 MaterialFallbacks :: struct {
   albedo:    linalg.Vector4f32,
@@ -13,27 +13,27 @@ MaterialFallbacks :: struct {
 }
 
 Material :: struct {
-  texture_descriptor_set:  vk.DescriptorSet,
-  skinning_descriptor_set: vk.DescriptorSet,
-  features:                u32,
-  is_lit:                  bool,
-  ctx:                     ^VulkanContext,
+  texture_descriptor_set:    vk.DescriptorSet,
+  skinning_descriptor_set:   vk.DescriptorSet,
+  features:                  u32,
+  is_lit:                    bool,
+  ctx:                       ^VulkanContext,
 
   // Texture handles for each supported type
-  albedo_handle:           Handle,
-  metallic_roughness_handle:         Handle,
-  normal_handle:           Handle,
-  displacement_handle:     Handle,
-  emissive_handle:         Handle,
+  albedo_handle:             Handle,
+  metallic_roughness_handle: Handle,
+  normal_handle:             Handle,
+  displacement_handle:       Handle,
+  emissive_handle:           Handle,
 
   // Fallback values for each property
-  albedo_value:            linalg.Vector4f32,
-  metallic_value:          f32,
-  roughness_value:         f32,
-  emissive_value:          linalg.Vector4f32,
+  albedo_value:              linalg.Vector4f32,
+  metallic_value:            f32,
+  roughness_value:           f32,
+  emissive_value:            linalg.Vector4f32,
 
   // Uniform buffer for fallback values (using DataBuffer)
-  fallback_buffer:         DataBuffer,
+  fallback_buffer:           DataBuffer,
 }
 
 // Descriptor set layout creation (superset: textures + bones)
@@ -252,7 +252,10 @@ create_material :: proc(
 
   // Bind textures if handles are valid, otherwise fallback to flat values in shader
   albedo := resource.get(&engine.textures, albedo_handle)
-  metallic_roughness := resource.get(&engine.textures, metallic_roughness_handle)
+  metallic_roughness := resource.get(
+    &engine.textures,
+    metallic_roughness_handle,
+  )
   normal := resource.get(&engine.textures, normal_handle)
   displacement := resource.get(&engine.textures, displacement_handle)
   emissive := resource.get(&engine.textures, emissive_handle)
@@ -286,10 +289,7 @@ create_unlit_material :: proc(
   mat.albedo_value = albedo_value
   material_init_descriptor_set_layout(mat, &engine.ctx) or_return
   albedo := resource.get(&engine.textures, albedo_handle)
-  material_update_textures(
-    mat,
-    albedo,
-  ) or_return
+  material_update_textures(mat, albedo) or_return
   res = .SUCCESS
   return
 }

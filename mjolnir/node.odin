@@ -5,13 +5,13 @@ import "geometry"
 import "resource"
 
 NodeSkeletalMeshAttachment :: struct {
-  handle:    Handle,
-  pose:      Pose,
-  animation: Maybe(Animation_Instance),
+  handle:      Handle,
+  pose:        Pose,
+  animation:   Maybe(Animation_Instance),
   cast_shadow: bool,
 }
 NodeStaticMeshAttachment :: struct {
-  handle: Handle,
+  handle:      Handle,
   cast_shadow: bool,
 }
 NodeLightAttachment :: struct {
@@ -42,10 +42,7 @@ deinit_node :: proc(node: ^Node) {
   delete(node.children)
 }
 
-detach :: proc(
-  nodes: ^resource.ResourcePool(Node),
-  child_handle: Handle,
-) {
+detach :: proc(nodes: ^resource.ResourcePool(Node), child_handle: Handle) {
   child_node := resource.get(nodes, child_handle)
   if child_node == nil {
     return

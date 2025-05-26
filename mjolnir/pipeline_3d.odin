@@ -7,23 +7,23 @@ import "resource"
 import vk "vendor:vulkan"
 
 SHADER_FEATURE_SKINNING :: 1 << 0
-SHADER_FEATURE_ALBEDO_TEXTURE       :: 1 << 1
+SHADER_FEATURE_ALBEDO_TEXTURE :: 1 << 1
 SHADER_FEATURE_METALLIC_ROUGHNESS_TEXTURE :: 1 << 2
-SHADER_FEATURE_NORMAL_TEXTURE       :: 1 << 3
+SHADER_FEATURE_NORMAL_TEXTURE :: 1 << 3
 SHADER_FEATURE_DISPLACEMENT_TEXTURE :: 1 << 4
-SHADER_FEATURE_EMISSIVE_TEXTURE     :: 1 << 5
+SHADER_FEATURE_EMISSIVE_TEXTURE :: 1 << 5
 
 SHADER_OPTION_COUNT :: 6
 SHADER_VARIANT_COUNT :: 1 << SHADER_OPTION_COUNT
 
 // Specialization constant struct (must match shader)
 ShaderConfig :: struct {
-    is_skinned:             b32,
-    has_albedo_texture:     b32,
-    has_metallic_roughness_texture: b32,
-    has_normal_texture:     b32,
-    has_displacement_texture:b32,
-    has_emissive_texture:   b32,
+  is_skinned:                     b32,
+  has_albedo_texture:             b32,
+  has_metallic_roughness_texture: b32,
+  has_normal_texture:             b32,
+  has_displacement_texture:       b32,
+  has_emissive_texture:           b32,
 }
 
 camera_descriptor_set_layout: vk.DescriptorSetLayout
@@ -263,46 +263,52 @@ build_3d_pipelines :: proc(
     &pipeline_layout,
   ) or_return
   for features in 0 ..< SHADER_VARIANT_COUNT {
-      configs[features] = ShaderConfig {
-        is_skinned              = (features & SHADER_FEATURE_SKINNING) != 0,
-        has_albedo_texture      = (features & SHADER_FEATURE_ALBEDO_TEXTURE) != 0,
-        has_metallic_roughness_texture = (features & SHADER_FEATURE_METALLIC_ROUGHNESS_TEXTURE) != 0,
-        has_normal_texture      = (features & SHADER_FEATURE_NORMAL_TEXTURE) != 0,
-        has_displacement_texture= (features & SHADER_FEATURE_DISPLACEMENT_TEXTURE) != 0,
-        has_emissive_texture    = (features & SHADER_FEATURE_EMISSIVE_TEXTURE) != 0,
-      }
-      entries[features] = [SHADER_OPTION_COUNT]vk.SpecializationMapEntry {
-        {
-          constantID = 0,
-          offset = u32(offset_of(ShaderConfig, is_skinned)),
-          size = size_of(b32),
-        },
-        {
-          constantID = 1,
-          offset = u32(offset_of(ShaderConfig, has_albedo_texture)),
-          size = size_of(b32),
-        },
-        {
-          constantID = 2,
-          offset = u32(offset_of(ShaderConfig, has_metallic_roughness_texture)),
-          size = size_of(b32),
-        },
-        {
-          constantID = 3,
-          offset = u32(offset_of(ShaderConfig, has_normal_texture)),
-          size = size_of(b32),
-        },
-        {
-          constantID = 4,
-          offset = u32(offset_of(ShaderConfig, has_displacement_texture)),
-          size = size_of(b32),
-        },
-        {
-          constantID = 5,
-          offset = u32(offset_of(ShaderConfig, has_emissive_texture)),
-          size = size_of(b32),
-        },
-      }
+    configs[features] = ShaderConfig {
+      is_skinned                     = (features &
+        SHADER_FEATURE_SKINNING) != 0,
+      has_albedo_texture             = (features &
+        SHADER_FEATURE_ALBEDO_TEXTURE) != 0,
+      has_metallic_roughness_texture = (features &
+        SHADER_FEATURE_METALLIC_ROUGHNESS_TEXTURE) != 0,
+      has_normal_texture             = (features &
+        SHADER_FEATURE_NORMAL_TEXTURE) != 0,
+      has_displacement_texture       = (features &
+        SHADER_FEATURE_DISPLACEMENT_TEXTURE) != 0,
+      has_emissive_texture           = (features &
+        SHADER_FEATURE_EMISSIVE_TEXTURE) != 0,
+    }
+    entries[features] = [SHADER_OPTION_COUNT]vk.SpecializationMapEntry {
+      {
+        constantID = 0,
+        offset = u32(offset_of(ShaderConfig, is_skinned)),
+        size = size_of(b32),
+      },
+      {
+        constantID = 1,
+        offset = u32(offset_of(ShaderConfig, has_albedo_texture)),
+        size = size_of(b32),
+      },
+      {
+        constantID = 2,
+        offset = u32(offset_of(ShaderConfig, has_metallic_roughness_texture)),
+        size = size_of(b32),
+      },
+      {
+        constantID = 3,
+        offset = u32(offset_of(ShaderConfig, has_normal_texture)),
+        size = size_of(b32),
+      },
+      {
+        constantID = 4,
+        offset = u32(offset_of(ShaderConfig, has_displacement_texture)),
+        size = size_of(b32),
+      },
+      {
+        constantID = 5,
+        offset = u32(offset_of(ShaderConfig, has_emissive_texture)),
+        size = size_of(b32),
+      },
+    }
     spec_infos[features] = vk.SpecializationInfo {
       mapEntryCount = len(entries[features]),
       pMapEntries   = raw_data(entries[features][:]),
@@ -443,22 +449,22 @@ build_3d_unlit_pipelines :: proc(
     ),
   }
   for features in 0 ..< UNLIT_SHADER_VARIANT_COUNT {
-      configs[features] = ShaderConfig {
-        is_skinned              = (features & SHADER_FEATURE_SKINNING) != 0,
-        has_albedo_texture      = (features & SHADER_FEATURE_ALBEDO_TEXTURE) != 0,
-      }
-      entries[features] = [UNLIT_SHADER_OPTION_COUNT]vk.SpecializationMapEntry {
-        {
-          constantID = 0,
-          offset = u32(offset_of(ShaderConfig, is_skinned)),
-          size = size_of(b32),
-        },
-        {
-          constantID = 1,
-          offset = u32(offset_of(ShaderConfig, has_albedo_texture)),
-          size = size_of(b32),
-        },
-      }
+    configs[features] = ShaderConfig {
+      is_skinned         = (features & SHADER_FEATURE_SKINNING) != 0,
+      has_albedo_texture = (features & SHADER_FEATURE_ALBEDO_TEXTURE) != 0,
+    }
+    entries[features] = [UNLIT_SHADER_OPTION_COUNT]vk.SpecializationMapEntry {
+      {
+        constantID = 0,
+        offset = u32(offset_of(ShaderConfig, is_skinned)),
+        size = size_of(b32),
+      },
+      {
+        constantID = 1,
+        offset = u32(offset_of(ShaderConfig, has_albedo_texture)),
+        size = size_of(b32),
+      },
+    }
     spec_infos[features] = vk.SpecializationInfo {
       mapEntryCount = len(entries[features]),
       pMapEntries   = raw_data(entries[features][:]),

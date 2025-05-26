@@ -429,7 +429,8 @@ render_single_node :: proc(
       data.pose.bone_buffer.buffer,
       data.pose.bone_buffer.size,
     )
-    pipeline := pipelines[material.features] if material.is_lit else unlit_pipelines[material.features]
+    pipeline :=
+      pipelines[material.features] if material.is_lit else unlit_pipelines[material.features]
     layout := pipeline_layout
     // fmt.printfln("rendering skeletal mesh with material %v", material)
     vk.CmdBindPipeline(ctx.command_buffer, .GRAPHICS, pipeline)
@@ -495,7 +496,8 @@ render_single_node :: proc(
     ) {
       return true
     }
-    pipeline := pipelines[material.features] if material.is_lit else unlit_pipelines[material.features]
+    pipeline :=
+      pipelines[material.features] if material.is_lit else unlit_pipelines[material.features]
     layout := pipeline_layout
     // Bind all required descriptor sets (set 0: camera+shadow+cube shadow, set 1: material, set 2: skinning)
     descriptor_sets := [?]vk.DescriptorSet {
