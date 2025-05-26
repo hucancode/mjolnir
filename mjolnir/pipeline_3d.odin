@@ -34,6 +34,36 @@ pipelines: [SHADER_VARIANT_COUNT]vk.Pipeline
 SHADER_UBER_VERT :: #load("shader/uber/vert.spv")
 SHADER_UBER_FRAG :: #load("shader/uber/frag.spv")
 
+pipeline3d_deinit :: proc(ctx: ^VulkanContext) {
+  vkd := ctx.vkd
+  for i in 0..<len(pipelines) {
+    if pipelines[i] != 0 {
+      vk.DestroyPipeline(vkd, pipelines[i], nil)
+      pipelines[i] = 0
+    }
+  }
+  if pipeline_layout != 0 {
+    vk.DestroyPipelineLayout(vkd, pipeline_layout, nil)
+    pipeline_layout = 0
+  }
+  if camera_descriptor_set_layout != 0 {
+    vk.DestroyDescriptorSetLayout(vkd, camera_descriptor_set_layout, nil)
+    camera_descriptor_set_layout = 0
+  }
+  if environment_descriptor_set_layout != 0 {
+    vk.DestroyDescriptorSetLayout(vkd, environment_descriptor_set_layout, nil)
+    environment_descriptor_set_layout = 0
+  }
+  if texture_descriptor_set_layout != 0 {
+    vk.DestroyDescriptorSetLayout(vkd, texture_descriptor_set_layout, nil)
+    texture_descriptor_set_layout = 0
+  }
+  if skinning_descriptor_set_layout != 0 {
+    vk.DestroyDescriptorSetLayout(vkd, skinning_descriptor_set_layout, nil)
+    skinning_descriptor_set_layout = 0
+  }
+}
+
 build_3d_pipelines :: proc(
   ctx: ^VulkanContext,
   target_color_format: vk.Format,

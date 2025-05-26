@@ -1332,6 +1332,11 @@ deinit :: proc(engine: ^Engine) {
   resource.pool_deinit(&engine.skeletal_meshes, skeletal_mesh_deinit)
   resource.pool_deinit(&engine.materials, material_deinit)
   resource.pool_deinit(&engine.lights, proc(_: ^Light) {})
+  // Deinit pipelines before renderer/context shutdown
+  pipeline2d_deinit(&engine.ui.pipeline)
+  pipeline3d_deinit(&engine.ctx)
+  pipeline_shadow_deinit(&engine.ctx)
+
   deinit_scene(&engine.scene)
   renderer_deinit(&engine.renderer)
   vulkan_context_deinit(&engine.ctx)

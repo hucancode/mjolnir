@@ -15,6 +15,27 @@ Pipeline2D :: struct {
   ctx:                       ^VulkanContext,
 }
 
+pipeline2d_deinit :: proc(mat: ^Pipeline2D) {
+  if mat == nil || mat.ctx == nil { return }
+  vkd := mat.ctx.vkd
+  if mat.pipeline != 0 {
+    vk.DestroyPipeline(vkd, mat.pipeline, nil)
+    mat.pipeline = 0
+  }
+  if mat.pipeline_layout != 0 {
+    vk.DestroyPipelineLayout(vkd, mat.pipeline_layout, nil)
+    mat.pipeline_layout = 0
+  }
+  if mat.projection_layout != 0 {
+    vk.DestroyDescriptorSetLayout(vkd, mat.projection_layout, nil)
+    mat.projection_layout = 0
+  }
+  if mat.texture_layout != 0 {
+    vk.DestroyDescriptorSetLayout(vkd, mat.texture_layout, nil)
+    mat.texture_layout = 0
+  }
+}
+
 pipeline2d_init :: proc(
   mat: ^Pipeline2D,
   ctx: ^VulkanContext,

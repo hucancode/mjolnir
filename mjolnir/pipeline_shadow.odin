@@ -14,6 +14,20 @@ ShadowShaderConfig :: struct {
 shadow_pipeline_layout: vk.PipelineLayout
 shadow_pipelines: [SHADOW_SHADER_VARIANT_COUNT]vk.Pipeline
 
+pipeline_shadow_deinit :: proc(ctx: ^VulkanContext) {
+  vkd := ctx.vkd
+  for i in 0..<len(shadow_pipelines) {
+    if shadow_pipelines[i] != 0 {
+      vk.DestroyPipeline(vkd, shadow_pipelines[i], nil)
+      shadow_pipelines[i] = 0
+    }
+  }
+  if shadow_pipeline_layout != 0 {
+    vk.DestroyPipelineLayout(vkd, shadow_pipeline_layout, nil)
+    shadow_pipeline_layout = 0
+  }
+}
+
 SHADER_SHADOW_VERT :: #load("shader/shadow/vert.spv")
 
 build_shadow_pipelines :: proc(
@@ -99,7 +113,7 @@ build_shadow_pipelines :: proc(
   }
   pipeline_infos: [SHADOW_SHADER_VARIANT_COUNT]vk.GraphicsPipelineCreateInfo
   configs: [SHADOW_SHADER_VARIANT_COUNT]ShadowShaderConfig
-  entries: [SHADOW_SHADER_VARIANT_COUNT][SHADOW_SHADER_OPTION_COUNT ]vk.SpecializationMapEntry
+  entries: [SHADOW_SHADER_VARIANT_COUNT][SHADOW_SHADER_OPTION_COUNT]vk.SpecializationMapEntry
   spec_infos: [SHADOW_SHADER_VARIANT_COUNT]vk.SpecializationInfo
   shader_stages: [SHADOW_SHADER_VARIANT_COUNT][1]vk.PipelineShaderStageCreateInfo
 
