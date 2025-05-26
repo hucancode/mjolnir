@@ -75,7 +75,7 @@ load_gltf :: proc(
     if g_node.has_matrix {
       geometry.decompose_matrix(
         &node.transform,
-        geometry.matrix_from_slice(g_node.matrix_),
+        geometry.matrix_from_arr(g_node.matrix_),
       )
     } else {
       if g_node.has_translation {
@@ -572,7 +572,7 @@ load_gltf_skinned_primitive :: proc(
         16,
       )
       if read {
-        engine_bones[i].inverse_bind_matrix = geometry.matrix_from_slice(
+        engine_bones[i].inverse_bind_matrix = geometry.matrix_from_arr(
           ibm_floats,
         )
       }
