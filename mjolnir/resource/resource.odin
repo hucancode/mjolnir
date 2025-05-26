@@ -21,7 +21,12 @@ pool_init :: proc(pool: ^ResourcePool($T)) {
   pool.free_indices = make([dynamic]u32, 0, 0)
 }
 
-pool_deinit :: proc(pool: ^ResourcePool($T)) {
+pool_deinit :: proc(pool: ^ResourcePool($T), deinit_proc: proc(_: ^T)) {
+  for &entry in pool.entries {
+    if entry.active {
+      deinit_proc(&entry.item)
+    }
+  }
   delete(pool.entries)
   delete(pool.free_indices)
 }

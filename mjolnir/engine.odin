@@ -1326,13 +1326,12 @@ update :: proc(engine: ^Engine) -> bool {
 deinit :: proc(engine: ^Engine) {
   vkd := engine.ctx.vkd
   vk.DeviceWaitIdle(vkd)
-  resource.pool_deinit(&engine.nodes)
-  resource.pool_deinit(&engine.textures)
-  resource.pool_deinit(&engine.meshes)
-  resource.pool_deinit(&engine.skeletal_meshes)
-  resource.pool_deinit(&engine.materials)
-  resource.pool_deinit(&engine.lights)
-
+  resource.pool_deinit(&engine.nodes, deinit_node)
+  resource.pool_deinit(&engine.textures, texture_deinit)
+  resource.pool_deinit(&engine.meshes, static_mesh_deinit)
+  resource.pool_deinit(&engine.skeletal_meshes, skeletal_mesh_deinit)
+  resource.pool_deinit(&engine.materials, material_deinit)
+  resource.pool_deinit(&engine.lights, proc(_: ^Light) {})
   deinit_scene(&engine.scene)
   renderer_deinit(&engine.renderer)
   vulkan_context_deinit(&engine.ctx)

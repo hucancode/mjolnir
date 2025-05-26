@@ -30,6 +30,21 @@ Material :: struct {
   fallback_buffer:           DataBuffer,
 }
 
+material_deinit :: proc(self: ^Material) {
+  if self == nil || self.ctx == nil {
+    return
+  }
+  vkd := self.ctx.vkd
+  if self.texture_descriptor_set != 0 {
+    // Descriptor sets are freed with the pool, so do not explicitly destroy
+    self.texture_descriptor_set = 0
+  }
+  if self.skinning_descriptor_set != 0 {
+    self.skinning_descriptor_set = 0
+  }
+  data_buffer_deinit(&self.fallback_buffer, self.ctx)
+}
+
 material_init_descriptor_set_layout :: proc(
   mat: ^Material,
   ctx: ^VulkanContext,
