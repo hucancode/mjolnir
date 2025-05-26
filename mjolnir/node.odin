@@ -91,7 +91,6 @@ attach :: proc(
   append(&parent_node.children, child_handle)
 }
 
-// --- Animation Control ---
 play_animation :: proc(
   engine: ^Engine,
   node_handle: Handle,
@@ -118,7 +117,6 @@ play_animation :: proc(
   return true
 }
 
-// Spawns a node with a point light attached
 spawn_point_light :: proc(
   engine: ^Engine,
   color: linalg.Vector4f32,
@@ -141,7 +139,6 @@ spawn_point_light :: proc(
   return
 }
 
-// Spawns a node with a directional light attached
 spawn_directional_light :: proc(
   engine: ^Engine,
   color: linalg.Vector4f32,
@@ -162,7 +159,6 @@ spawn_directional_light :: proc(
   return
 }
 
-// Spawns a node with a spot light attached
 spawn_spot_light :: proc(
   engine: ^Engine,
   color: linalg.Vector4f32,
@@ -187,7 +183,6 @@ spawn_spot_light :: proc(
   return
 }
 
-// Spawns a generic node and returns its handle and pointer
 spawn_node :: proc(engine: ^Engine) -> (handle: Handle, node: ^Node) {
   handle, node = resource.alloc(&engine.nodes)
   if node != nil {

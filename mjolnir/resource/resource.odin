@@ -21,8 +21,6 @@ pool_init :: proc(pool: ^ResourcePool($T)) {
   pool.free_indices = make([dynamic]u32, 0, 0)
 }
 
-// deinit_resource_pool deinitializes a resource pool.
-// Important: This does NOT deinitialize individual items T if they manage their own memory.
 pool_deinit :: proc(pool: ^ResourcePool($T)) {
   delete(pool.entries)
   delete(pool.free_indices)
@@ -50,8 +48,6 @@ alloc :: proc(pool: ^ResourcePool($T)) -> (Handle, ^T) {
   }
 }
 
-// free_resource_handle marks a resource associated with the given handle as inactive.
-// and adds its index to the free list for future reuse.
 free :: proc(pool: ^ResourcePool($T), handle: Handle) {
   if handle.index >= u32(len(pool.entries)) {
     return
@@ -68,8 +64,6 @@ free :: proc(pool: ^ResourcePool($T), handle: Handle) {
   append(&pool.free_indices, handle.index)
 }
 
-// get_resource_item_ptr is a convenience wrapper for get_resource_item.
-// It returns a pointer to the item T or nil if the handle is invalid or inactive.
 get :: proc(pool: ^ResourcePool($T), handle: Handle) -> ^T {
   if handle.index >= u32(len(pool.entries)) {
     // log.debugf("ResourcePool.get: index (%v) out of bounds (%v)", handle.index, len(pool.entries))

@@ -34,7 +34,6 @@ MouseDragProc :: #type proc(engine: ^Engine, delta, offset: linalg.Vector2f64)
 MouseScrollProc :: #type proc(engine: ^Engine, offset: linalg.Vector2f64)
 MouseMoveProc :: #type proc(engine: ^Engine, pos, delta: linalg.Vector2f64)
 
-// --- Helper Context Structs for Scene Traversal ---
 CollectLightsContext :: struct {
   engine:        ^Engine,
   light_uniform: ^SceneLightUniform,
@@ -65,7 +64,6 @@ InputState :: struct {
   keys:              [512]bool,
 }
 
-// --- Engine Struct ---
 Engine :: struct {
   window:                glfw.WindowHandle,
   ctx:                   VulkanContext,
@@ -97,10 +95,6 @@ Engine :: struct {
 
 g_context: runtime.Context
 
-// --- Scene Traversal ---
-// Generic scene traversal. Callback returns true to continue, false to stop or on error.
-// User context is passed as rawptr and cast within the callback.
-// --- Engine Methods ---
 init :: proc(
   engine: ^Engine,
   width: u32,
@@ -111,7 +105,6 @@ init :: proc(
   g_context = context
   engine.dirty_transforms = make([dynamic]Handle, 0)
 
-  // Init GLFW
   // glfw.SetErrorCallback(glfw_error_callback) // Define this callback
   if !glfw.Init() {
     fmt.eprintln("Failed to initialize GLFW")
@@ -135,14 +128,12 @@ init :: proc(
   }
   fmt.printf("Window created %v\n", engine.window)
 
-  // Init Vulkan Context
   vulkan_context_init(&engine.ctx, engine.window) or_return
 
   engine.start_timestamp = time.now()
   engine.last_frame_timestamp = engine.start_timestamp
   engine.last_update_timestamp = engine.start_timestamp
 
-  // Init Resource Pools
   fmt.println("\nInitializing Resource Pools...")
 
   fmt.print("Initializing static mesh pool... ")
@@ -176,7 +167,6 @@ init :: proc(
   build_shadow_pipelines(&engine.ctx, .D32_SFLOAT) or_return
   engine_build_scene(engine)
   engine_build_renderer(engine) or_return
-  // Update camera aspect ratio
   if engine.renderer.extent.width > 0 && engine.renderer.extent.height > 0 {
     w := f32(engine.renderer.extent.width)
     h := f32(engine.renderer.extent.height)
@@ -252,7 +242,6 @@ query_swapchain_support :: proc(
   support: SwapchainSupport,
   result: vk.Result,
 ) {
-  // NOTE: looks like a wrong binding with the third arg being a multipointer.
   fmt.printfln("vulkan: querying swapchain support for device", device)
   vk.GetPhysicalDeviceSurfaceCapabilitiesKHR(
     device,
@@ -300,7 +289,6 @@ engine_build_renderer :: proc(engine: ^Engine) -> vk.Result {
   ) or_return
   defer swapchain_support_deinit(&support)
 
-  // Get current window framebuffer size to correctly initialize swapchain extent
   fb_width, fb_height := glfw.GetFramebufferSize(engine.window)
 
   renderer_build_swapchain(
@@ -321,14 +309,12 @@ engine_build_renderer :: proc(engine: ^Engine) -> vk.Result {
     engine.renderer.extent.width,
     engine.renderer.extent.height,
   ) or_return
-  // Load environment map (HDR)
   engine.renderer.environment_map_handle, engine.renderer.environment_map =
     create_hdr_texture_from_path(
       engine,
       "assets/teutonic_castle_moat_4k.hdr",
     ) or_return
 
-  // Allocate environment map descriptor set
   alloc_info_env := vk.DescriptorSetAllocateInfo {
       sType              = .DESCRIPTOR_SET_ALLOCATE_INFO,
       descriptorPool     = engine.ctx.descriptor_pool,
@@ -359,7 +345,6 @@ engine_build_renderer :: proc(engine: ^Engine) -> vk.Result {
   return .SUCCESS
 }
 
-// --- Traversal Callbacks ---
 prepare_light :: proc(
   node: ^Node,
   world_matrix: ^linalg.Matrix4f32,
@@ -693,14 +678,10 @@ render_single_shadow :: proc(
 }
 
 render :: proc(engine: ^Engine) -> vk.Result {
-  // --- Optimal Frame Render Flow ---
   ctx := engine.renderer.ctx
   current_fence := renderer_get_in_flight_fence(&engine.renderer)
-  // 1. Wait for previous frame's completion
   vk.WaitForFences(ctx.vkd, 1, &current_fence, true, math.max(u64)) or_return
-  // 2. Reset frame fence
   vk.ResetFences(ctx.vkd, 1, &current_fence) or_return
-  // 3. Acquire next swapchain image
   image_idx: u32
   current_image_available_semaphore := renderer_get_image_available_semaphore(
     &engine.renderer,
@@ -714,7 +695,6 @@ render :: proc(engine: ^Engine) -> vk.Result {
     &image_idx,
   ) or_return
   mu.begin(&engine.ui.ctx)
-  // 4. Reset and begin command buffer
   command_buffer := renderer_get_command_buffer(&engine.renderer)
   vk.ResetCommandBuffer(command_buffer, {}) or_return
   begin_info := vk.CommandBufferBeginInfo {
@@ -731,7 +711,6 @@ render :: proc(engine: ^Engine) -> vk.Result {
   }
   light_uniform: SceneLightUniform
   camera_frustum := camera_make_frustum(&engine.scene.camera)
-  // Collect Lights
   collect_ctx := CollectLightsContext {
     engine        = engine,
     light_uniform = &light_uniform,
@@ -747,7 +726,6 @@ render :: proc(engine: ^Engine) -> vk.Result {
   render_shadow_pass(engine, &light_uniform, command_buffer) or_return
   // fmt.printfln("============ rendering main pass =============")
   render_main_pass(engine, command_buffer, image_idx, camera_frustum) or_return
-  // Update Uniforms
   data_buffer_write(
     renderer_get_camera_uniform(&engine.renderer),
     &scene_uniform,
@@ -767,7 +745,6 @@ render :: proc(engine: ^Engine) -> vk.Result {
   mu.end(&engine.ui.ctx)
   ui_render(&engine.ui, command_buffer)
   vk.CmdEndRenderingKHR(command_buffer)
-  // Transition image to present layout
   present_barrier := vk.ImageMemoryBarrier {
     sType = .IMAGE_MEMORY_BARRIER,
     oldLayout = .COLOR_ATTACHMENT_OPTIMAL,
@@ -796,7 +773,6 @@ render :: proc(engine: ^Engine) -> vk.Result {
     1,
     &present_barrier,
   )
-  // End and submit command buffer
   vk.EndCommandBuffer(command_buffer) or_return
   current_render_finished_semaphore := renderer_get_render_finished_semaphore(
     &engine.renderer,
@@ -813,7 +789,6 @@ render :: proc(engine: ^Engine) -> vk.Result {
     pSignalSemaphores    = &current_render_finished_semaphore,
   }
   vk.QueueSubmit(ctx.graphics_queue, 1, &submit_info, current_fence) or_return
-  // Present
   image_indices := [?]u32{image_idx}
   present_info := vk.PresentInfoKHR {
     sType              = .PRESENT_INFO_KHR,
@@ -824,7 +799,6 @@ render :: proc(engine: ^Engine) -> vk.Result {
     pImageIndices      = raw_data(image_indices[:]),
   }
   vk.QueuePresentKHR(ctx.present_queue, &present_info) or_return
-  // Advance to next frame
   engine.renderer.current_frame_index =
     (engine.renderer.current_frame_index + 1) % MAX_FRAMES_IN_FLIGHT
   return .SUCCESS
@@ -1142,7 +1116,6 @@ render_main_pass :: proc(
   image_idx: u32,
   camera_frustum: geometry.Frustum,
 ) -> vk.Result {
-  // Transition swapchain image to color attachment
   barrier := vk.ImageMemoryBarrier {
     sType = .IMAGE_MEMORY_BARRIER,
     oldLayout = .UNDEFINED,
@@ -1171,7 +1144,6 @@ render_main_pass :: proc(
     1,
     &barrier,
   )
-  // Begin Main Render Pass
   color_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
     imageView = engine.renderer.views[image_idx],
@@ -1199,7 +1171,6 @@ render_main_pass :: proc(
     pDepthAttachment = &depth_attachment,
   }
   vk.CmdBeginRenderingKHR(command_buffer, &render_info)
-  // Set viewport and scissor
   viewport := vk.Viewport {
     x        = 0.0,
     y        = f32(engine.renderer.extent.height),
@@ -1213,7 +1184,6 @@ render_main_pass :: proc(
   }
   vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
   vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
-  // Render Scene Meshes
   rendered_count: u32 = 0
   render_meshes_ctx := RenderMeshesContext {
     engine         = engine,
@@ -1356,8 +1326,6 @@ update :: proc(engine: ^Engine) -> bool {
 deinit :: proc(engine: ^Engine) {
   vkd := engine.ctx.vkd
   vk.DeviceWaitIdle(vkd)
-
-  // Deinit resources
   resource.pool_deinit(&engine.nodes)
   resource.pool_deinit(&engine.textures)
   resource.pool_deinit(&engine.meshes)
@@ -1376,7 +1344,7 @@ deinit :: proc(engine: ^Engine) {
   fmt.println("Engine deinitialized")
 }
 
-// --- Transaction System (Simplified) ---
+// TODO: Transaction System
 engine_begin_transaction :: proc(engine: ^Engine) {
   engine.in_transaction = true
 }

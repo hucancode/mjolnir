@@ -60,7 +60,6 @@ Camera :: struct {
   },
 }
 
-// Initialization
 camera_init_perspective :: proc(
   fov: f32,
   aspect_ratio: f32,
@@ -122,7 +121,6 @@ camera_init_orbit :: proc(
   return cam
 }
 
-// Mode Switching
 camera_switch_to_orbit :: proc(
   camera: ^Camera,
   target: Maybe(linalg.Vector3f32),
@@ -135,7 +133,7 @@ camera_switch_to_orbit :: proc(
   if d, ok := distance.?; ok {
     orbit_data.distance = d
   }
-  // Reset yaw and pitch or carry them over if desired. Zig version resets.
+  // Reset yaw and pitch or carry them over if desired
   orbit_data.yaw = 0.0
   orbit_data.pitch = 0.0
   camera.movement_data = orbit_data
@@ -146,7 +144,6 @@ camera_switch_to_free :: proc(camera: ^Camera) {
   camera.movement_data = CameraFreeMovement{}
 }
 
-// Orbit Mode Methods
 camera_orbit_rotate :: proc(self: ^Camera, yaw_delta: f32, pitch_delta: f32) {
   #partial switch &movement in &self.movement_data {
   case CameraOrbitMovement:
@@ -212,7 +209,6 @@ camera_update_orbit_position :: proc(camera: ^Camera) {
   camera.position = movement.target + offset_direction * movement.distance
 }
 
-// Matrix Calculations
 camera_calculate_projection_matrix :: proc(
   camera: ^Camera,
 ) -> linalg.Matrix4f32 {
@@ -278,7 +274,6 @@ camera_up :: proc(camera: ^Camera) -> linalg.Vector3f32 {
 }
 
 
-// Frustum
 camera_make_frustum :: proc(camera: ^Camera) -> geometry.Frustum {
   view_matrix := camera_calculate_view_matrix(camera)
   proj_matrix := camera_calculate_projection_matrix(camera)

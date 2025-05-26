@@ -9,7 +9,7 @@ Bone :: struct {
   bind_transform:      geometry.Transform,
   children:            []u32,
   inverse_bind_matrix: linalg.Matrix4f32,
-  name:                string, // Optional: for debugging or lookup
+  name:                string, // Optional: for debugging
 }
 
 bone_deinit :: proc(bone: ^Bone) {
@@ -30,10 +30,9 @@ SkeletalMesh :: struct {
   index_buffer:    DataBuffer,
   material:        Handle,
   aabb:            geometry.Aabb,
-  ctx:             ^VulkanContext, // For deinitializing buffers
+  ctx:             ^VulkanContext,
 }
 
-// deinit_skeletal_mesh releases Vulkan buffers and other owned memory.
 skeletal_mesh_deinit :: proc(self: ^SkeletalMesh) {
   if self.ctx == nil {
     return
@@ -45,8 +44,6 @@ skeletal_mesh_deinit :: proc(self: ^SkeletalMesh) {
   if self.index_buffer.buffer != 0 {
     data_buffer_deinit(&self.index_buffer, self.ctx)
   }
-
-  // Deinitialize bones
   if self.bones != nil {
     for &bone in self.bones {
       bone_deinit(&bone)
@@ -54,8 +51,6 @@ skeletal_mesh_deinit :: proc(self: ^SkeletalMesh) {
     delete(self.bones)
     self.bones = nil
   }
-
-  // Deinitialize animations (Clips)
   if self.animations != nil {
     for &anim_clip in self.animations {
       // deinit_clip(&anim_clip)
@@ -67,7 +62,6 @@ skeletal_mesh_deinit :: proc(self: ^SkeletalMesh) {
   self.ctx = nil
 }
 
-// init_skeletal_mesh initializes the mesh, creates Vulkan buffers.
 skeletal_mesh_init :: proc(
   self: ^SkeletalMesh,
   geometry_data: ^geometry.SkinnedGeometry,

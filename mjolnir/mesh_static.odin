@@ -16,26 +16,22 @@ StaticMesh :: struct {
   ctx:           ^VulkanContext,
 }
 
-// deinit_static_mesh releases the Vulkan buffers.
 static_mesh_deinit :: proc(self: ^StaticMesh) {
   if self.ctx == nil {
     return
   }
-
   if self.vertex_buffer.buffer != 0 {
     data_buffer_deinit(&self.vertex_buffer, self.ctx)
   }
   if self.index_buffer.buffer != 0 {
     data_buffer_deinit(&self.index_buffer, self.ctx)
   }
-  // Reset fields
   self.vertices_len = 0
   self.indices_len = 0
   self.aabb = {}
   self.ctx = nil
 }
 
-// init_static_mesh initializes the mesh and creates Vulkan buffers.
 static_mesh_init :: proc(
   self: ^StaticMesh,
   data: ^geometry.Geometry,
@@ -64,8 +60,6 @@ static_mesh_init :: proc(
   return .SUCCESS
 }
 
-
-// Creates a static mesh and returns its handle
 create_static_mesh :: proc(
   engine: ^Engine,
   geom: ^geometry.Geometry,
@@ -73,12 +67,10 @@ create_static_mesh :: proc(
 ) -> Handle {
   handle, mesh := resource.alloc(&engine.meshes)
   if mesh != nil {
-    // Initialize geometry buffers
     if static_mesh_init(mesh, geom, &engine.ctx) != .SUCCESS {
       fmt.eprintln("Failed to initialize static mesh geometry")
       return handle
     }
-    // Set material
     mesh.material = material
     fmt.printfln("Created static mesh with material handle %v", material)
   }

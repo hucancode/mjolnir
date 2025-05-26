@@ -31,7 +31,6 @@ Vertex2D :: struct {
   color: [4]u8,
 }
 
-// --- Setup ---
 ui_init :: proc(
   ui: ^UIRenderer,
   engine: ^Engine,
@@ -39,7 +38,6 @@ ui_init :: proc(
   width: u32,
   height: u32,
 ) -> vk.Result {
-  // 1. Init MicroUI context
   mu.init(&ui.ctx)
   ui.ctx.text_width = mu.default_atlas_text_width
   ui.ctx.text_height = mu.default_atlas_text_height
@@ -69,7 +67,6 @@ ui_init :: proc(
     size_of(u32) * vk.DeviceSize(UI_MAX_INDICES),
     {.INDEX_BUFFER},
   ) or_return
-
   // Write atlas texture and sampler to texture_descriptor_set
   image_info := vk.DescriptorImageInfo {
     sampler     = ui.atlas.sampler,

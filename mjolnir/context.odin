@@ -17,11 +17,9 @@ when ODIN_OS == .Darwin {
   foreign import __ "system:System.framework"
 }
 
-// --- Constants ---
 ENGINE_NAME :: "Mjolnir"
 TITLE :: "Mjolnir"
 
-// For init_physical_device scoring and init_logical_device enabling
 DEVICE_EXTENSIONS :: []cstring {
   vk.KHR_SWAPCHAIN_EXTENSION_NAME,
   vk.KHR_DYNAMIC_RENDERING_EXTENSION_NAME,
@@ -40,7 +38,6 @@ MAX_SAMPLER_PER_MATERIAL :: 3
 MAX_SAMPLER_COUNT :: ACTIVE_MATERIAL_COUNT * MAX_SAMPLER_PER_MATERIAL
 SCENE_UNIFORM_COUNT :: 3
 
-// --- Helper Structs ---
 SwapchainSupport :: struct {
   capabilities:  vk.SurfaceCapabilitiesKHR,
   formats:       []vk.SurfaceFormatKHR, // Owned by this struct if allocated by it
@@ -59,7 +56,6 @@ FoundQueueFamilyIndices :: struct {
   present_family:  u32,
 }
 
-// --- VulkanContext Definition ---
 VulkanContext :: struct {
   window:                     glfw.WindowHandle,
   vki:                        vk.Instance,
@@ -79,7 +75,6 @@ VulkanContext :: struct {
   physical_device_properties: vk.PhysicalDeviceProperties, // Added for device limits
 }
 
-// --- VulkanContext Methods ---
 vulkan_context_init :: proc(
   self: ^VulkanContext,
   window: glfw.WindowHandle,
@@ -129,7 +124,7 @@ debug_callback :: proc "system" (
   case .INFO in message_severity:
     fmt.printfln("Validation: %s", message)
   case .VERBOSE in message_severity:
-    log.debugf("Validation: %s", message) // Assuming VERBOSE maps to debug
+    log.debugf("Validation: %s", message)
   case:
     fmt.printfln("Validation (unknown severity): %s", message)
   }
@@ -193,7 +188,7 @@ vulkan_instance_init :: proc(self: ^VulkanContext) -> vk.Result {
   create_info.ppEnabledExtensionNames = raw_data(extensions)
 
   vk.CreateInstance(&create_info, nil, &self.vki) or_return
-  vk.load_proc_addresses_instance(self.vki) // Uses globally loaded GetInstanceProcAddr
+  vk.load_proc_addresses_instance(self.vki)
 
   when ENABLE_VALIDATION_LAYERS {
     vk.CreateDebugUtilsMessengerEXT(
@@ -335,7 +330,7 @@ score_physical_device :: proc(
   _, qf_res := find_queue_families(device, self.surface)
   if qf_res != .SUCCESS {
     fmt.printfln("Device %s: no suitable queue families.", device_name_cstring)
-    return 0, .SUCCESS // Not finding families is 0 score, not necessarily an error for scoring
+    return 0, .SUCCESS
   }
 
   current_score: u32 = 0
@@ -469,7 +464,7 @@ logical_device_init :: proc(self: ^VulkanContext) -> vk.Result {
   defer delete(queue_create_infos_list)
   unique_queue_families := make(map[u32]struct {
     }, 2)
-  defer delete(unique_queue_families) // For map's internal buffer
+  defer delete(unique_queue_families)
 
   unique_queue_families[self.graphics_family] = {}
   unique_queue_families[self.present_family] = {}
@@ -518,10 +513,11 @@ logical_device_init :: proc(self: ^VulkanContext) -> vk.Result {
 }
 
 descriptor_pool_init :: proc(self: ^VulkanContext) -> vk.Result {
+  // expand those limits as needed
   pool_sizes := [4]vk.DescriptorPoolSize {
     {.COMBINED_IMAGE_SAMPLER, MAX_SAMPLER_COUNT},
     {.UNIFORM_BUFFER, 128},
-    {.UNIFORM_BUFFER_DYNAMIC, 128}, // Abundant dynamic uniform buffer descriptors
+    {.UNIFORM_BUFFER_DYNAMIC, 128},
     {.STORAGE_BUFFER, ACTIVE_MATERIAL_COUNT},
   }
   fmt.printfln("Descriptor pool allocation sizes:")
@@ -673,7 +669,6 @@ allocate_vulkan_memory :: proc(
   return
 }
 
-// Generic image buffer creation
 malloc_image_buffer :: proc(
   self: ^VulkanContext,
   width: u32,
@@ -719,7 +714,6 @@ malloc_image_buffer :: proc(
   return img_buffer, .SUCCESS
 }
 
-// Specific version from Zig context.zig
 malloc_image_buffer_device_local :: proc(
   self: ^VulkanContext,
   format: vk.Format,
@@ -740,7 +734,6 @@ malloc_image_buffer_device_local :: proc(
   )
 }
 
-// Generic data buffer creation
 malloc_data_buffer :: proc(
   self: ^VulkanContext,
   size: vk.DeviceSize,

@@ -16,7 +16,6 @@ SHADER_FEATURE_EMISSIVE_TEXTURE :: 1 << 5
 SHADER_OPTION_COUNT :: 6
 SHADER_VARIANT_COUNT :: 1 << SHADER_OPTION_COUNT
 
-// Specialization constant struct (must match shader)
 ShaderConfig :: struct {
   is_skinned:                     b32,
   has_albedo_texture:             b32,
@@ -28,14 +27,10 @@ ShaderConfig :: struct {
 
 camera_descriptor_set_layout: vk.DescriptorSetLayout
 environment_descriptor_set_layout: vk.DescriptorSetLayout
-
-// material set layouts only account for textures and bones features
 texture_descriptor_set_layout: vk.DescriptorSetLayout
 skinning_descriptor_set_layout: vk.DescriptorSetLayout
 pipeline_layout: vk.PipelineLayout
 pipelines: [SHADER_VARIANT_COUNT]vk.Pipeline
-
-// Shader binaries (should point to your uber shader)
 SHADER_UBER_VERT :: #load("shader/uber/vert.spv")
 SHADER_UBER_FRAG :: #load("shader/uber/frag.spv")
 
@@ -218,8 +213,6 @@ build_3d_pipelines :: proc(
     nil,
     &skinning_descriptor_set_layout,
   ) or_return
-
-  // Environment map descriptor set layout
   environment_bindings := []vk.DescriptorSetLayoutBinding {
     {
       binding = 0,

@@ -4,8 +4,6 @@ import "core:fmt"
 import "core:mem"
 import vk "vendor:vulkan"
 
-// --- DataBuffer ---
-
 DataBuffer :: struct {
   buffer: vk.Buffer,
   memory: vk.DeviceMemory,
@@ -58,8 +56,6 @@ data_buffer_deinit :: proc(buffer: ^DataBuffer, ctx: ^VulkanContext) {
   buffer.size = 0
 }
 
-// --- ImageBuffer ---
-
 ImageBuffer :: struct {
   image:         vk.Image,
   memory:        vk.DeviceMemory,
@@ -68,7 +64,6 @@ ImageBuffer :: struct {
   view:          vk.ImageView,
 }
 
-// Deinitializes an ImageBuffer.
 image_buffer_deinit :: proc(vkd: vk.Device, self: ^ImageBuffer) {
   if self.view != 0 {
     vk.DestroyImageView(vkd, self.view, nil)
@@ -87,9 +82,6 @@ image_buffer_deinit :: proc(vkd: vk.Device, self: ^ImageBuffer) {
   self.format = .UNDEFINED
 }
 
-// --- ImageView Creation ---
-
-// Creates an ImageView.
 create_image_view :: proc(
   vkd: vk.Device,
   image: vk.Image,
@@ -122,7 +114,6 @@ create_image_view :: proc(
   return
 }
 
-// Creates a host-visible buffer and writes initial data if provided.
 create_host_visible_buffer :: proc(
   ctx: ^VulkanContext,
   size: vk.DeviceSize,
@@ -151,7 +142,6 @@ create_host_visible_buffer :: proc(
   return
 }
 
-// Creates a device-local buffer and uploads data using a staging buffer.
 create_local_buffer :: proc(
   ctx: ^VulkanContext,
   size: vk.DeviceSize,
@@ -193,7 +183,6 @@ copy_buffer :: proc(ctx: ^VulkanContext, dst, src: ^DataBuffer) -> vk.Result {
   return end_single_time_command(ctx, &cmd_buffer)
 }
 
-// Transitions an image layout using a pipeline barrier.
 transition_image_layout :: proc(
   ctx: ^VulkanContext,
   image: vk.Image,
@@ -255,7 +244,6 @@ transition_image_layout :: proc(
   )
   return end_single_time_command(ctx, &cmd_buffer)
 }
-// Copies data from a DataBuffer to an ImageBuffer (buffer to image copy).
 copy_image :: proc(
   ctx: ^VulkanContext,
   dst: ^ImageBuffer,
@@ -301,7 +289,6 @@ copy_image :: proc(
   return .SUCCESS
 }
 
-// Creates an image buffer and uploads data using a staging buffer.
 create_image_buffer :: proc(
   ctx: ^VulkanContext,
   data: rawptr,

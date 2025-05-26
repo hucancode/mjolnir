@@ -260,7 +260,6 @@ create_depth_image :: proc(
   return
 }
 
-// Internal helper to create depth image and view
 depth_image_init :: proc(
   img_buffer: ^ImageBuffer,
   ctx: ^VulkanContext,
@@ -411,7 +410,6 @@ cube_depth_texture_init :: proc(
   }
   vk.AllocateMemory(vk_device, &alloc_info, nil, &self.buffer.memory) or_return
   vk.BindImageMemory(vk_device, self.buffer.image, self.buffer.memory, 0)
-
   // Create 6 image views (one per face)
   for i in 0..<6 {
     view_info := vk.ImageViewCreateInfo {
@@ -432,7 +430,6 @@ cube_depth_texture_init :: proc(
     }
     vk.CreateImageView(vk_device, &view_info, nil, &self.views[i]) or_return
   }
-  // Create a single cube view for sampling
   cube_view_info := vk.ImageViewCreateInfo {
     sType = .IMAGE_VIEW_CREATE_INFO,
     image = self.buffer.image,
@@ -450,8 +447,6 @@ cube_depth_texture_init :: proc(
     },
   }
   vk.CreateImageView(vk_device, &cube_view_info, nil, &self.view) or_return
-
-  // Create sampler
   sampler_info := vk.SamplerCreateInfo {
     sType         = .SAMPLER_CREATE_INFO,
     magFilter     = .LINEAR,
@@ -488,7 +483,6 @@ cube_depth_texture_deinit :: proc(self: ^CubeDepthTexture) {
   image_buffer_deinit(vkd, &self.buffer)
 }
 
-// Load a floating-point HDR image from path (for environment maps)
 create_hdr_texture_from_path :: proc(
   engine: ^Engine,
   path: string,

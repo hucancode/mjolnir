@@ -16,7 +16,6 @@ Keyframe :: struct($T: typeid) {
   value: T,
 }
 
-// Sample a value from Keyframe_Quat at a specific time
 keyframe_sample :: proc($T: typeid, frames: []Keyframe(T), t: f32) -> T {
   if len(frames) == 0 {
     return T{}
@@ -121,7 +120,6 @@ Animation_Instance :: struct {
   speed:       f32,
 }
 
-// Initialize an animation instance
 animation_instance_init :: proc(instance: ^Animation_Instance, clip: u32) {
   instance.clip_handle = clip
   instance.mode = .Loop
@@ -155,7 +153,6 @@ animation_instance_stop :: proc(instance: ^Animation_Instance) {
   instance.time = 0
 }
 
-// Update animation instance time. Needs clip_duration.
 animation_instance_update :: proc(
   instance: ^Animation_Instance,
   delta_time: f32,

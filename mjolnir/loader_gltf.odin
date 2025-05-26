@@ -120,18 +120,12 @@ load_gltf :: proc(
           mesh.material = material
           mesh.bones = bones
           mesh.root_bone_index = root_bone_idx
-
-          // Initialize pose for the mesh
           pose: Pose
           pose_init(&pose, len(bones), &engine.ctx)
-
-          // Create the attachment with initialized pose
           node.attachment = NodeSkeletalMeshAttachment {
               handle = mesh_handle,
               pose   = pose,
             }
-
-          // Process animations for this mesh
           load_gltf_animations(
             engine,
             gltf_data,
@@ -139,11 +133,7 @@ load_gltf :: proc(
             mesh_handle,
             bone_map,
           )
-
           // fmt.printfln("Skinned mesh loaded successfully with %d animation %v", len(mesh.animations), mesh.animations)
-
-
-          // Set initial pose to bind pose
           for bone_idx := 0; bone_idx < len(bones); bone_idx += 1 {
             pose.bone_matrices[bone_idx] = linalg.MATRIX4F32_IDENTITY
           }
@@ -180,13 +170,10 @@ load_gltf :: proc(
         )
       }
     }
-    // Parent this node to its parent
     attach(&engine.nodes, entry.parent, node_handle)
     if entry.parent == engine.scene.root {
-      // If this is a root node, add it to the created handles
       append(&created_root_handles, node_handle)
     }
-    // Push children to stack
     for child_ptr in g_node.children {
       if child_idx, found := node_ptr_to_idx_map[child_ptr]; found {
         append(&stack, TraverseEntry{idx = child_idx, parent = node_handle})
@@ -197,7 +184,6 @@ load_gltf :: proc(
 }
 
 
-// Helper: Load a GLTF texture and create an engine texture handle using the procedural API
 load_gltf_texture :: proc(
   engine: ^Engine,
   gltf_path: string,
@@ -240,7 +226,6 @@ load_gltf_texture :: proc(
   return
 }
 
-// Helper: Load a GLTF texture and create an engine texture handle using the procedural API
 load_gltf_pbr_textures :: proc(
   engine: ^Engine,
   gltf_path: string,
@@ -269,7 +254,6 @@ load_gltf_pbr_textures :: proc(
 
   if g_material.has_pbr_metallic_roughness {
     pbr_info := g_material.pbr_metallic_roughness
-    // Load metallic-roughness texture (GLTF packs both in one texture, B=metallic, G=roughness)
     if pbr_info.metallic_roughness_texture.texture != nil {
       g_texture := pbr_info.metallic_roughness_texture.texture
       if g_texture.image_ != nil {
@@ -299,7 +283,6 @@ load_gltf_pbr_textures :: proc(
           ret = .ERROR_UNKNOWN
           return
         }
-        // For now, use the same texture for both metallic and roughness
         metallic_roughness_handle, _ = create_texture_from_data(
           engine,
           pixel_data,
@@ -309,8 +292,6 @@ load_gltf_pbr_textures :: proc(
       }
     }
   }
-
-  // Normal map
   if g_material.normal_texture.texture != nil {
     normal_handle, _ = load_gltf_texture(
       engine,
@@ -322,7 +303,6 @@ load_gltf_pbr_textures :: proc(
   }
 
   // TODO: Displacement map (GLTF extension, not implemented here)
-  // Emissive map
   if g_material.emissive_texture.texture != nil {
     emissive_handle, _ = load_gltf_texture(
       engine,
@@ -353,7 +333,6 @@ load_gltf_primitive :: proc(
     return
   }
   g_primitive := &primitives[0]
-  // Material
   albedo_handle, metallic_roughness_handle, normal_handle, displacement_handle, emissive_handle, features :=
     load_gltf_pbr_textures(
       engine,
@@ -370,10 +349,8 @@ load_gltf_primitive :: proc(
     displacement_handle,
     emissive_handle,
   )
-  // Geometry
   vertices_num := g_primitive.attributes[0].data.count
   vertices := make([]geometry.Vertex, vertices_num)
-  // Check for attribute count mismatches
   for &attribute in g_primitive.attributes {
     accessor := attribute.data
     if accessor.count != vertices_num {
@@ -437,7 +414,6 @@ load_gltf_primitive :: proc(
   return mesh_data, material_handle, .SUCCESS
 }
 
-// Helper: Prepare NodeAttachment for a skinned mesh
 load_gltf_skinned_primitive :: proc(
   engine: ^Engine,
   path: string,
@@ -459,7 +435,6 @@ load_gltf_skinned_primitive :: proc(
   }
   g_primitive := &primitives[0]
   fmt.printfln("Creating texture for skinned material...")
-  // Material
   albedo_handle, metallic_roughness_handle, normal_handle, displacement_handle, emissive_handle, features :=
     load_gltf_pbr_textures(
       engine,
@@ -485,7 +460,6 @@ load_gltf_skinned_primitive :: proc(
     emissive_handle,
     mat_handle,
   )
-  // Geometry
   num_vertices := g_primitive.attributes[0].data.count
   vertices := make([]geometry.Vertex, num_vertices)
   skinnings := make([]geometry.SkinningData, num_vertices)
@@ -619,7 +593,6 @@ load_gltf_skinned_primitive :: proc(
     }
     engine_bones[i].bind_transform = bt
   }
-  // Children indices
   for joint_node, i in g_skin.joints {
     engine_bones[i].children = make([]u32, len(joint_node.children))
     for child, j in joint_node.children {
@@ -628,7 +601,6 @@ load_gltf_skinned_primitive :: proc(
       }
     }
   }
-  // Root bone
   is_child_bone: bit_set[0 ..< 128]
   for bone in engine_bones {
     for child_idx in bone.children {
@@ -679,8 +651,6 @@ load_gltf_animations :: proc(
     } else {
       clip.name = strings.clone(fmt.tprintf("animation_%d", i))
     }
-
-    // Channels per bone
     fmt.printfln(
       "\nAllocating animation channels for %d bones",
       len(skeletal_mesh.bones),

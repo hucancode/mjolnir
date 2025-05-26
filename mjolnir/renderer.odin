@@ -7,7 +7,6 @@ import vk "vendor:vulkan"
 
 MAX_FRAMES_IN_FLIGHT :: 2
 
-// Renderer specific constants
 MAX_LIGHTS :: 10
 SHADOW_MAP_SIZE :: 512
 MAX_SHADOW_MAPS :: MAX_LIGHTS
@@ -16,7 +15,6 @@ MAX_SCENE_UNIFORMS :: 16
 Mat4 :: linalg.Matrix4f32
 Vec4 :: linalg.Vector4f32
 
-// --- Uniform Structs ---
 SingleLightUniform :: struct {
   view_proj:  Mat4,
   color:      Vec4,
@@ -54,7 +52,6 @@ clear_lights :: proc(self: ^SceneLightUniform) {
   self.light_count = 0
 }
 
-// --- Frame Struct ---
 Frame :: struct {
   ctx:                            ^VulkanContext,
   image_available_semaphore:      vk.Semaphore,
@@ -102,7 +99,6 @@ frame_init :: proc(self: ^Frame, ctx: ^VulkanContext) -> (res: vk.Result) {
     ) or_return
   }
 
-  // Allocate Main Pass Descriptor Set
   alloc_info_main := vk.DescriptorSetAllocateInfo {
     sType              = .DESCRIPTOR_SET_ALLOCATE_INFO,
     descriptorPool     = ctx.descriptor_pool,
@@ -115,7 +111,6 @@ frame_init :: proc(self: ^Frame, ctx: ^VulkanContext) -> (res: vk.Result) {
     &self.camera_descriptor_set,
   ) or_return
 
-  // Update Main Pass Descriptor Set (merged shadow/cube shadow maps)
   scene_buffer_info := vk.DescriptorBufferInfo {
     buffer = self.camera_uniform.buffer,
     offset = 0,
@@ -198,10 +193,9 @@ frame_deinit :: proc(self: ^Frame) {
     depth_texture_deinit(&self.shadow_maps[i])
     cube_depth_texture_deinit(&self.cube_shadow_maps[i])
   }
-  self.ctx = nil // Mark as deinitialized
+  self.ctx = nil
 }
 
-// --- Renderer Struct ---
 Renderer :: struct {
   ctx:                        ^VulkanContext,
   swapchain:                  vk.SwapchainKHR,
@@ -291,7 +285,7 @@ renderer_pick_swap_present_mode :: proc(
       return .MAILBOX
     }
   }
-  return .FIFO // Guaranteed to be available
+  return .FIFO
 }
 
 renderer_build_swapchain_surface_format :: proc(
@@ -340,16 +334,13 @@ renderer_build_swapchain_extent :: proc(
 }
 
 
-// Recreate swapchain and dependent resources
 renderer_recreate_swapchain :: proc(
   self: ^Renderer,
   width: u32,
   height: u32,
 ) -> vk.Result {
   vk.DeviceWaitIdle(self.ctx.vkd)
-
   renderer_destroy_swapchain_resources(self) // Destroy old swapchain and related resources
-
   // Re-query surface capabilities as they might have changed (e.g. window resize)
   capabilities: vk.SurfaceCapabilitiesKHR
   vk.GetPhysicalDeviceSurfaceCapabilitiesKHR(
@@ -357,7 +348,6 @@ renderer_recreate_swapchain :: proc(
     self.ctx.surface,
     &capabilities,
   ) or_return
-
   // Re-query surface formats (usually don't change, but good practice)
   format_count: u32
   vk.GetPhysicalDeviceSurfaceFormatsKHR(
@@ -374,7 +364,6 @@ renderer_recreate_swapchain :: proc(
     &format_count,
     raw_data(available_formats),
   )
-
   // Re-query present modes
   present_mode_count: u32
   vk.GetPhysicalDeviceSurfacePresentModesKHR(
@@ -402,8 +391,6 @@ renderer_recreate_swapchain :: proc(
   )
 }
 
-
-// Helper to create swapchain and its resources (images, views, depth buffer)
 renderer_create_swapchain_and_resources :: proc(
   self: ^Renderer,
   capabilities: vk.SurfaceCapabilitiesKHR,
@@ -452,8 +439,6 @@ renderer_create_swapchain_and_resources :: proc(
   }
 
   vk.CreateSwapchainKHR(ctx.vkd, &create_info, nil, &self.swapchain) or_return
-
-  // Get swapchain images
   swapchain_image_count: u32
   vk.GetSwapchainImagesKHR(
     ctx.vkd,
@@ -468,8 +453,6 @@ renderer_create_swapchain_and_resources :: proc(
     &swapchain_image_count,
     raw_data(self.images),
   )
-
-  // Create image views
   self.views = make([]vk.ImageView, swapchain_image_count)
   for i in 0 ..< swapchain_image_count {
     self.views[i] = create_image_view(
@@ -500,15 +483,10 @@ renderer_create_swapchain_and_resources :: proc(
   return .SUCCESS
 }
 
-// Helper to destroy swapchain and its resources
 renderer_destroy_swapchain_resources :: proc(self: ^Renderer) {
   if self.ctx == nil {return}
   vkd := self.ctx.vkd
-
-  // Destroy depth buffer for main pass
   image_buffer_deinit(vkd, &self.depth_buffer)
-
-  // Destroy swapchain image views
   if self.views != nil {
     for view in self.views {
       if view != 0 {
@@ -523,15 +501,12 @@ renderer_destroy_swapchain_resources :: proc(self: ^Renderer) {
     delete(self.images)
     self.images = nil
   }
-
-  // Destroy swapchain
   if self.swapchain != 0 {
     vk.DestroySwapchainKHR(vkd, self.swapchain, nil)
     self.swapchain = 0
   }
 }
 
-// --- Getter Methods ---
 renderer_get_in_flight_fence :: proc(self: ^Renderer) -> vk.Fence {
   return self.frames[self.current_frame_index].fence
 }
@@ -573,7 +548,6 @@ renderer_get_command_buffer :: proc(self: ^Renderer) -> vk.CommandBuffer {
   return cmd_buffer
 }
 
-// --- Getter Methods for Current Frame ---
 renderer_get_camera_uniform :: proc(self: ^Renderer) -> ^DataBuffer {
   return &self.frames[self.current_frame_index].camera_uniform
 }
@@ -608,203 +582,6 @@ renderer_get_cube_shadow_map_descriptor_set :: proc(
   return self.frames[self.current_frame_index].cube_shadow_map_descriptor_set
 }
 
-// --- Render Loop Methods ---
-renderer_begin_frame :: proc(
-  self: ^Renderer,
-) -> (
-  image_index: u32,
-  res: vk.Result,
-) {
-  ctx := self.ctx
-  current_fence := renderer_get_in_flight_fence(self)
-
-  // Wait for the previous frame to finish using this frame's resources
-  vk.WaitForFences(ctx.vkd, 1, &current_fence, true, math.max(u64)) or_return
-
-  // Acquire an image from the swap chain
-  current_image_available_semaphore := renderer_get_image_available_semaphore(
-    self,
-  )
-  vk.AcquireNextImageKHR(
-    ctx.vkd,
-    self.swapchain,
-    math.max(u64),
-    current_image_available_semaphore,
-    0,
-    &image_index,
-  ) or_return
-
-  // Reset the fence to unsignaled state as we are starting to use its frame resources
-  vk.ResetFences(ctx.vkd, 1, &current_fence) or_return
-
-  // Reset and begin command buffer
-  cmd_buffer := renderer_get_command_buffer(self)
-  vk.ResetCommandBuffer(cmd_buffer, {}) or_return
-
-  begin_info := vk.CommandBufferBeginInfo {
-    sType = .COMMAND_BUFFER_BEGIN_INFO,
-    flags = {.ONE_TIME_SUBMIT},
-  }
-  vk.BeginCommandBuffer(cmd_buffer, &begin_info) or_return
-
-  // --- Main Pass: Transition image layout for color attachment ---
-  barrier := vk.ImageMemoryBarrier {
-    sType = .IMAGE_MEMORY_BARRIER,
-    oldLayout = .UNDEFINED,
-    newLayout = .COLOR_ATTACHMENT_OPTIMAL,
-    srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-    dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-    image = self.images[image_index],
-    subresourceRange = vk.ImageSubresourceRange {
-      aspectMask = {.COLOR},
-      baseMipLevel = 0,
-      levelCount = 1,
-      baseArrayLayer = 0,
-      layerCount = 1,
-    },
-    dstAccessMask = {.COLOR_ATTACHMENT_WRITE},
-  }
-  vk.CmdPipelineBarrier(
-    cmd_buffer,
-    {.TOP_OF_PIPE},
-    {.COLOR_ATTACHMENT_OUTPUT},
-    {}, // No dependency flags
-    0,
-    nil,
-    0,
-    nil, // Memory barriers, buffer memory barriers
-    1,
-    &barrier, // Image memory barriers
-  )
-
-  // --- Begin Rendering (Main Pass) ---
-  color_attachment := vk.RenderingAttachmentInfoKHR {
-    sType = .RENDERING_ATTACHMENT_INFO_KHR,
-    imageView = self.views[image_index],
-    imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
-    loadOp = .CLEAR,
-    storeOp = .STORE,
-    clearValue = vk.ClearValue {
-      color = {float32 = {0.0117, 0.0117, 0.0179, 1.0}},
-    },
-  }
-  depth_attachment := vk.RenderingAttachmentInfoKHR {
-    sType = .RENDERING_ATTACHMENT_INFO_KHR,
-    imageView = self.depth_buffer.view,
-    imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-    loadOp = .CLEAR,
-    storeOp = .STORE,
-    clearValue = vk.ClearValue{depthStencil = {1.0, 0}},
-  }
-  render_info := vk.RenderingInfoKHR {
-    sType = .RENDERING_INFO_KHR,
-    renderArea = vk.Rect2D{extent = self.extent},
-    layerCount = 1,
-    colorAttachmentCount = 1,
-    pColorAttachments = &color_attachment,
-    pDepthAttachment = &depth_attachment,
-  }
-  vk.CmdBeginRenderingKHR(cmd_buffer, &render_info)
-
-  // Set viewport and scissor
-  // Vulkan's default Y is down. To flip Y to be up (common in many graphics APIs):
-  // Set viewport height to negative and offset Y by viewport height.
-  viewport := vk.Viewport {
-    x        = 0.0,
-    y        = f32(self.extent.height),
-    width    = f32(self.extent.width),
-    height   = -f32(self.extent.height),
-    minDepth = 0.0,
-    maxDepth = 1.0,
-  }
-  scissor := vk.Rect2D {
-    extent = self.extent,
-  }
-  vk.CmdSetViewport(cmd_buffer, 0, 1, &viewport)
-  vk.CmdSetScissor(cmd_buffer, 0, 1, &scissor)
-
-  return image_index, .SUCCESS
-}
-
-renderer_end_frame :: proc(self: ^Renderer, image_index: u32) -> vk.Result {
-  ctx := self.ctx
-  cmd_buffer := renderer_get_command_buffer(self)
-
-  // End Rendering (Main Pass)
-  vk.CmdEndRenderingKHR(cmd_buffer)
-
-  // Transition image to present layout
-  barrier := vk.ImageMemoryBarrier {
-    sType = .IMAGE_MEMORY_BARRIER,
-    oldLayout = .COLOR_ATTACHMENT_OPTIMAL,
-    newLayout = .PRESENT_SRC_KHR,
-    srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-    dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-    image = self.images[image_index],
-    subresourceRange = vk.ImageSubresourceRange {
-      aspectMask = {.COLOR},
-      baseMipLevel = 0,
-      levelCount = 1,
-      baseArrayLayer = 0,
-      layerCount = 1,
-    },
-    srcAccessMask = {.COLOR_ATTACHMENT_WRITE},
-  }
-  vk.CmdPipelineBarrier(
-    cmd_buffer,
-    {.COLOR_ATTACHMENT_OUTPUT},
-    {.BOTTOM_OF_PIPE},
-    {},
-    0,
-    nil,
-    0,
-    nil,
-    1,
-    &barrier,
-  )
-
-  // End command buffer
-  vk.EndCommandBuffer(cmd_buffer) or_return
-
-  // Submit command buffer
-  current_image_available_semaphore := renderer_get_image_available_semaphore(
-    self,
-  )
-  current_render_finished_semaphore := renderer_get_render_finished_semaphore(
-    self,
-  )
-  current_fence := renderer_get_in_flight_fence(self)
-
-  wait_stage_mask: vk.PipelineStageFlags = {.COLOR_ATTACHMENT_OUTPUT}
-  submit_info := vk.SubmitInfo {
-    sType                = .SUBMIT_INFO,
-    waitSemaphoreCount   = 1,
-    pWaitSemaphores      = &current_image_available_semaphore,
-    pWaitDstStageMask    = &wait_stage_mask,
-    commandBufferCount   = 1,
-    pCommandBuffers      = &cmd_buffer,
-    signalSemaphoreCount = 1,
-    pSignalSemaphores    = &current_render_finished_semaphore,
-  }
-  vk.QueueSubmit(ctx.graphics_queue, 1, &submit_info, current_fence) or_return
-
-  // Present
-  image_indices := [?]u32{image_index}
-  present_info := vk.PresentInfoKHR {
-    sType              = .PRESENT_INFO_KHR,
-    waitSemaphoreCount = 1,
-    pWaitSemaphores    = &current_render_finished_semaphore,
-    swapchainCount     = 1,
-    pSwapchains        = &self.swapchain,
-    pImageIndices      = raw_data(image_indices[:]),
-  }
-  vk.QueuePresentKHR(ctx.present_queue, &present_info) or_return
-  // Advance to next frame
-  self.current_frame_index =
-    (self.current_frame_index + 1) % MAX_FRAMES_IN_FLIGHT
-  return .SUCCESS // Or the result from QueuePresentKHR if it was .SUBOPTIMAL_KHR
-}
-
 renderer_build_swapchain :: proc(
   self: ^Renderer,
   capabilities: vk.SurfaceCapabilitiesKHR,
@@ -815,7 +592,6 @@ renderer_build_swapchain :: proc(
   actual_width: u32,
   actual_height: u32,
 ) -> vk.Result {
-  // Choose surface format
   chosen_format := formats[0]
   for fmt in formats {
     if fmt.format == .B8G8R8A8_SRGB && fmt.colorSpace == .SRGB_NONLINEAR {
@@ -824,8 +600,6 @@ renderer_build_swapchain :: proc(
     }
   }
   self.format = chosen_format
-
-  // Choose present mode
   chosen_present_mode: vk.PresentModeKHR = .FIFO
   for mode in present_modes {
     if mode == .MAILBOX {
@@ -833,23 +607,17 @@ renderer_build_swapchain :: proc(
       break
     }
   }
-
-  // Choose extent
   renderer_build_swapchain_extent(
     self,
     capabilities,
     actual_width,
     actual_height,
   )
-
-  // Image count
   image_count := capabilities.minImageCount + 1
   if capabilities.maxImageCount > 0 &&
      image_count > capabilities.maxImageCount {
     image_count = capabilities.maxImageCount
   }
-
-  // Create swapchain
   create_info := vk.SwapchainCreateInfoKHR {
     sType            = .SWAPCHAIN_CREATE_INFO_KHR,
     surface          = self.ctx.surface,
@@ -879,8 +647,6 @@ renderer_build_swapchain :: proc(
     nil,
     &self.swapchain,
   ) or_return
-
-  // Get swapchain images
   swapchain_image_count: u32
   vk.GetSwapchainImagesKHR(
     self.ctx.vkd,
@@ -895,8 +661,6 @@ renderer_build_swapchain :: proc(
     &swapchain_image_count,
     raw_data(self.images),
   )
-
-  // Create image views
   self.views = make([]vk.ImageView, swapchain_image_count)
   for i in 0 ..< swapchain_image_count {
     self.views[i], _ = create_image_view(

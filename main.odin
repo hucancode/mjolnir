@@ -34,7 +34,6 @@ main :: proc() {
 setup :: proc(engine: ^mjolnir.Engine) {
   using mjolnir
   mat_handle, _, _ := create_material(engine)
-  // Create mesh
   cube_geom := geometry.make_cube()
   cube_mesh_handle := create_static_mesh(engine, &cube_geom, mat_handle)
   sphere_geom := geometry.make_sphere()
@@ -97,7 +96,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
     ground_node.transform.scale = {1.0, 1.0, 1.0} * size
   }
   if true {
-    // Load GLTF and play animation
     gltf_nodes := load_gltf(engine, "assets/Suzanne.glb") or_else {}
     fmt.printfln("Loaded GLTF nodes: %v", gltf_nodes)
     for handle in gltf_nodes {
@@ -110,7 +108,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
     }
   }
   if true {
-    // Load GLTF and play animation
     gltf_nodes := load_gltf(engine, "assets/DamagedHelmet.glb") or_else {}
     fmt.printfln("Loaded GLTF nodes: %v", gltf_nodes)
     for handle in gltf_nodes {
@@ -123,7 +120,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
     }
   }
   if true {
-    // Load GLTF and play animation
     gltf_nodes := load_gltf(engine, "assets/Warrior.glb") or_else {}
     fmt.printfln("Loaded GLTF nodes: %v", gltf_nodes)
     for armature in gltf_nodes {
@@ -178,7 +174,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
     }
     light_cube_node.transform.scale = {0.1, 0.1, 0.1}
   }
-  // Directional light
   spawn_directional_light(engine, {0.3, 0.3, 0.3, 1.0})
 
 }

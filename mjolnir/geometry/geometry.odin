@@ -4,8 +4,6 @@ import "core:math"
 import linalg "core:math/linalg"
 import vk "vendor:vulkan"
 
-// --- Vertex Structs and Descriptions ---
-
 Vertex :: struct {
   position: [3]f32,
   normal:   [3]f32,
@@ -18,51 +16,43 @@ SkinningData :: struct {
   weights:  [4]f32,
 }
 
-// Vertex input binding description for skinned vertices
 VERTEX_BINDING_DESCRIPTION := [?]vk.VertexInputBindingDescription {
   {binding = 0, stride = size_of(Vertex), inputRate = .VERTEX},
   {binding = 1, stride = size_of(SkinningData), inputRate = .VERTEX},
 }
 
-// Vertex attribute descriptions for skinned vertices
 VERTEX_ATTRIBUTE_DESCRIPTIONS :=
   [?]vk.VertexInputAttributeDescription {
-    // Position
     {
       binding = 0,
       location = 0,
       format = .R32G32B32_SFLOAT,
       offset = u32(offset_of(Vertex, position)),
     },
-    // Normal
     {
       binding = 0,
       location = 1,
       format = .R32G32B32_SFLOAT,
       offset = u32(offset_of(Vertex, normal)),
     },
-    // Color
     {
       binding = 0,
       location = 2,
       format = .R32G32B32A32_SFLOAT,
       offset = u32(offset_of(Vertex, color)),
     },
-    // UV
     {
       binding = 0,
       location = 3,
       format = .R32G32_SFLOAT,
       offset = u32(offset_of(Vertex, uv)),
     },
-    // Joints
     {
       binding = 1,
       location = 4,
       format = .R32G32B32A32_UINT,
       offset = u32(offset_of(SkinningData, joints)),
     },
-    // Weights
     {
       binding = 1,
       location = 5,
@@ -73,21 +63,18 @@ VERTEX_ATTRIBUTE_DESCRIPTIONS :=
 
 SIMPLE_VERTEX_ATTRIBUTE_DESCRIPTIONS :=
   [?]vk.VertexInputAttributeDescription {
-    // Position
     {
       binding = 0,
       location = 0,
       format = .R32G32B32_SFLOAT,
       offset = u32(offset_of(Vertex, position)),
     },
-    // Joints
     {
       binding = 1,
       location = 4,
       format = .R32G32B32A32_UINT,
       offset = u32(offset_of(SkinningData, joints)),
     },
-    // Weights
     {
       binding = 1,
       location = 5,
@@ -96,7 +83,6 @@ SIMPLE_VERTEX_ATTRIBUTE_DESCRIPTIONS :=
     },
   }
 
-// --- Constant Vectors ---
 VEC_FORWARD :: [3]f32{0.0, 0.0, 1.0}
 VEC_BACKWARD :: [3]f32{0.0, 0.0, -1.0}
 VEC_UP :: [3]f32{0.0, 1.0, 0.0}
@@ -106,7 +92,6 @@ VEC_RIGHT :: [3]f32{1.0, 0.0, 0.0}
 F32_MIN :: -3.40282347E+38
 F32_MAX :: 3.40282347E+38
 
-// --- AABB (Axis-Aligned Bounding Box) ---
 Aabb :: struct {
   min: linalg.Vector4f32,
   max: linalg.Vector4f32,
@@ -137,7 +122,6 @@ aabb_from_vertices :: proc(vertices: []Vertex) -> Aabb {
 }
 
 
-// --- Geometry Structs ---
 Geometry :: struct {
   vertices: []Vertex,
   indices:  []u32,
@@ -172,11 +156,7 @@ make_skinned_geometry :: proc(
   }
 }
 
-// --- Primitive Geometries ---
-// For primitives, vertices and indices are defined as global constants.
-// The procedures then return Geometry structs that slice these constants.
-
-// make_cube creates a cube geometry. If color is nil, uses default white.
+// make_cube creates a cube geometry. If color is not specified, uses default white.
 make_cube :: proc(color: [4]f32 = {1.0, 1.0, 1.0, 1.0}) -> (ret: Geometry) {
   ret.vertices = make([]Vertex, 24)
   ret.indices = make([]u32, 36)
@@ -265,8 +245,6 @@ make_cube :: proc(color: [4]f32 = {1.0, 1.0, 1.0, 1.0}) -> (ret: Geometry) {
   return
 }
 
-// Triangle
-
 make_triangle :: proc(
   color: [4]f32 = {1.0, 1.0, 1.0, 1.0},
 ) -> (
@@ -312,7 +290,6 @@ make_quad :: proc(color: [4]f32 = {1.0, 1.0, 1.0, 1.0}) -> (ret: Geometry) {
   return
 }
 
-// --- Sphere ---
 make_sphere :: proc(
   segments: u32 = 16,
   rings: u32 = 16,
@@ -359,7 +336,6 @@ make_sphere :: proc(
   return
 }
 
-// --- Cone ---
 make_cone :: proc(
   segments: u32 = 32,
   height: f32 = 2.0,
@@ -419,7 +395,7 @@ make_cone :: proc(
   ret.aabb = aabb_from_vertices(ret.vertices)
   return
 }
-// --- Capsule ---
+
 make_capsule :: proc(
   segments: u32 = 16,
   rings: u32 = 8,
@@ -568,7 +544,7 @@ make_capsule :: proc(
   ret.aabb = aabb_from_vertices(ret.vertices)
   return
 }
-// --- Torus ---
+
 make_torus :: proc(
   segments: u32 = 32,
   sides: u32 = 16,

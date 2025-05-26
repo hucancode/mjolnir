@@ -18,25 +18,18 @@ Material :: struct {
   features:                  u32,
   is_lit:                    bool,
   ctx:                       ^VulkanContext,
-
-  // Texture handles for each supported type
   albedo_handle:             Handle,
   metallic_roughness_handle: Handle,
   normal_handle:             Handle,
   displacement_handle:       Handle,
   emissive_handle:           Handle,
-
-  // Fallback values for each property
   albedo_value:              linalg.Vector4f32,
   metallic_value:            f32,
   roughness_value:           f32,
   emissive_value:            linalg.Vector4f32,
-
-  // Uniform buffer for fallback values (using DataBuffer)
   fallback_buffer:           DataBuffer,
 }
 
-// Descriptor set layout creation (superset: textures + bones)
 material_init_descriptor_set_layout :: proc(
   mat: ^Material,
   ctx: ^VulkanContext,
@@ -52,7 +45,6 @@ material_init_descriptor_set_layout :: proc(
     &alloc_info_texture,
     &mat.texture_descriptor_set,
   ) or_return
-  // if mat.features & SHADER_FEATURE_SKINNING != 0 {
   alloc_info_skinning := vk.DescriptorSetAllocateInfo {
     sType              = .DESCRIPTOR_SET_ALLOCATE_INFO,
     descriptorPool     = ctx.descriptor_pool,
@@ -64,11 +56,9 @@ material_init_descriptor_set_layout :: proc(
     &alloc_info_skinning,
     &mat.skinning_descriptor_set,
   ) or_return
-  // }
   return .SUCCESS
 }
 
-// Update textures (albedo, metallic, roughness)
 material_update_textures :: proc(
   mat: ^Material,
   albedo: ^Texture = nil,
@@ -108,8 +98,6 @@ material_update_textures :: proc(
       imageLayout = .SHADER_READ_ONLY_OPTIMAL,
     },
   }
-
-  // --- Upload fallback values to a uniform buffer and bind at binding 6 ---
   fallbacks := MaterialFallbacks {
     albedo    = mat.albedo_value,
     emissive  = mat.emissive_value,
@@ -188,7 +176,6 @@ material_update_textures :: proc(
   return .SUCCESS
 }
 
-// Update bone buffer (for skinned meshes)
 material_update_bone_buffer :: proc(
   mat: ^Material,
   buffer: vk.Buffer,
@@ -249,8 +236,6 @@ create_material :: proc(
   mat.emissive_value = emissive_value
 
   material_init_descriptor_set_layout(mat, &engine.ctx) or_return
-
-  // Bind textures if handles are valid, otherwise fallback to flat values in shader
   albedo := resource.get(&engine.textures, albedo_handle)
   metallic_roughness := resource.get(
     &engine.textures,

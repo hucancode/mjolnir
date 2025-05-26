@@ -182,7 +182,6 @@ vec3 calculateLighting(Light light, vec3 viewDir, vec3 albedo) {
 }
 
 vec3 brdf(vec3 N, vec3 V, vec3 albedo, float roughness, float metallic) {
-    // Cook-Torrance BRDF
     vec3 F0 = mix(vec3(0.04), albedo, metallic);
     vec3 Lo = vec3(0.0);
     for (int i = 0; i < min(lightCount, MAX_LIGHTS); i++) {
