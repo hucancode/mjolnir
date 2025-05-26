@@ -7,6 +7,7 @@ import "core:slice"
 get_pixel_data :: proc(t: ^testing.T) {
   n := 100
   float_pixels := make([]f32, n)
+  defer delete(float_pixels)
   ptr := cast([^]u8)raw_data(float_pixels)
   data := ptr[:n * size_of(f32)]
   testing.expect(
