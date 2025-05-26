@@ -2,54 +2,73 @@ package tests
 
 import "../mjolnir/geometry"
 import "core:fmt"
+import "core:log"
 import linalg "core:math/linalg"
+import "core:slice"
 import "core:testing"
+import "core:time"
 
 @(test)
 matrix_multiply_vector :: proc(t: ^testing.T) {
   v := [4]f32{0, 0, 0, 1}
   m := linalg.matrix4_translate_f32({1, 2, 3})
-  testing.expect(t, m * v == linalg.Vector4f32{1, 2, 3, 1})
+  testing.expect_value(t, m * v, linalg.Vector4f32{1, 2, 3, 1})
 }
 
 @(test)
 matrix_extract_decompose :: proc(t: ^testing.T) {
   translation := [4]f32{1, 2, 3, 1}
   m := linalg.matrix4_translate_f32({1, 2, 3})
-  testing.expect(t, m[3] == translation)
+  testing.expect_value(t, m[3], translation)
   m = linalg.matrix4_scale_f32({2, 3, 4})
   sx := linalg.length(m[0])
   sy := linalg.length(m[1])
   sz := linalg.length(m[2])
-  testing.expect(t, sx == 2 && sy == 3 && sz == 4)
+  testing.expect_value(t, sx, 2)
+  testing.expect_value(t, sy, 3)
+  testing.expect_value(t, sz, 4)
 }
 
 @(test)
 matrix_from_array :: proc(t: ^testing.T) {
   a := [16]f32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
   m := geometry.matrix_from_arr(a)
-  testing.expect(
-    t,
-    m[0] == {1, 2, 3, 4} &&
-    m[1] == {5, 6, 7, 8} &&
-    m[2] == {9, 10, 11, 12} &&
-    m[3] == {13, 14, 15, 16},
-  )
+  testing.expect_value(t, m[0], [4]f32{1, 2, 3, 4})
+  testing.expect_value(t, m[1], [4]f32{5, 6, 7, 8})
+  testing.expect_value(t, m[2], [4]f32{9, 10, 11, 12})
+  testing.expect_value(t, m[3], [4]f32{13, 14, 15, 16})
 }
 
 @(test)
 matrix_from_array_benchmark :: proc(t: ^testing.T) {
-  n := 100_000_000
-  a := [16]f32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
-  m: linalg.Matrix4f32
-  for i in 0 ..< n {
-    m = geometry.matrix_from_arr(a)
+  n := 1e7
+  options := &time.Benchmark_Options {
+    rounds = n,
+    bytes = size_of(f32) * 16 * n,
+    setup = proc(
+      options: ^time.Benchmark_Options,
+      allocator := context.allocator,
+    ) -> time.Benchmark_Error {
+      a := [16]f32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
+      options.input = slice.to_bytes(a[:])
+      return nil
+    },
+    bench = proc(
+      options: ^time.Benchmark_Options,
+      allocator := context.allocator,
+    ) -> time.Benchmark_Error {
+      a := slice.to_type(options.input, [16]f32)
+      for i in 0 ..< options.rounds {
+        _ = geometry.matrix_from_arr(a)
+        options.processed += size_of([16]f32)
+      }
+      return nil
+    },
   }
-  testing.expect(
-    t,
-    m[0] == {1, 2, 3, 4} &&
-    m[1] == {5, 6, 7, 8} &&
-    m[2] == {9, 10, 11, 12} &&
-    m[3] == {13, 14, 15, 16},
+  err := time.benchmark(options)
+  log.infof(
+    "Benchmark finished in %v, speed: %0.2f MB/s",
+    options.duration,
+    options.megabytes_per_second,
   )
 }

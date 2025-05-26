@@ -10,13 +10,7 @@ get_pixel_data :: proc(t: ^testing.T) {
   defer delete(float_pixels)
   ptr := cast([^]u8)raw_data(float_pixels)
   data := ptr[:n * size_of(f32)]
-  testing.expect(
-    t,
-    len(data) == len(float_pixels) * size_of(f32),
-  )
+  testing.expect_value(t, len(data), len(float_pixels) * size_of(f32))
   data = slice.to_bytes(float_pixels)
-  testing.expect(
-    t,
-    len(data) == len(float_pixels) * size_of(f32),
-  )
+  testing.expect_value(t, len(data), len(float_pixels) * size_of(f32))
 }

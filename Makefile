@@ -12,6 +12,12 @@ release: $(SPV_SHADERS)
 debug: $(SPV_SHADERS)
 	odin run . -out:bin/main -debug
 
+test:
+	odin test test -out:bin/test
+
+clean:
+	rm -rf bin
+
 $(SHADER_DIR)/%/vert.spv: $(SHADER_DIR)/%/shader.vert
 	@echo "Compiling vertex shader $<..."
 	@glslc "$<" -o "$@"
@@ -20,4 +26,4 @@ $(SHADER_DIR)/%/frag.spv: $(SHADER_DIR)/%/shader.frag
 	@echo "Compiling fragment shader $<..."
 	@glslc "$<" -o "$@"
 
-.PHONY: release debug
+.PHONY: release debug test clean
