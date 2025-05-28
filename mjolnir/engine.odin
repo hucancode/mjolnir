@@ -27,7 +27,6 @@ Handle :: resource.Handle
 SetupProc :: #type proc(engine: ^Engine)
 UpdateProc :: #type proc(engine: ^Engine, delta_time: f32)
 Render2DProc :: #type proc(engine: ^Engine, ctx: ^mu.Context)
-Render3DProc :: #type proc(engine: ^Engine)
 KeyInputProc :: #type proc(engine: ^Engine, key, action, mods: int)
 MousePressProc :: #type proc(engine: ^Engine, key, action, mods: int)
 MouseDragProc :: #type proc(engine: ^Engine, delta, offset: linalg.Vector2f64)
@@ -73,19 +72,18 @@ Engine :: struct {
   last_frame_timestamp:  time.Time,
   last_update_timestamp: time.Time,
   start_timestamp:       time.Time,
-  meshes:                resource.ResourcePool(StaticMesh),
-  skeletal_meshes:       resource.ResourcePool(SkeletalMesh),
-  materials:             resource.ResourcePool(Material),
-  textures:              resource.ResourcePool(Texture),
-  lights:                resource.ResourcePool(Light),
-  nodes:                 resource.ResourcePool(Node),
+  meshes:                resource.Pool(StaticMesh),
+  skeletal_meshes:       resource.Pool(SkeletalMesh),
+  materials:             resource.Pool(Material),
+  textures:              resource.Pool(Texture),
+  lights:                resource.Pool(Light),
+  nodes:                 resource.Pool(Node),
   in_transaction:        bool,
   dirty_transforms:      [dynamic]Handle,
   input:                 InputState,
   setup_proc:            SetupProc,
   update_proc:           UpdateProc,
   render2d_proc:         Render2DProc,
-  render3d_proc:         Render3DProc,
   key_press_proc:        KeyInputProc,
   mouse_press_proc:      MousePressProc,
   mouse_drag_proc:       MouseDragProc,
@@ -736,9 +734,6 @@ render :: proc(engine: ^Engine) -> vk.Result {
     &light_uniform,
     size_of(SceneLightUniform),
   )
-  if engine.render3d_proc != nil {
-    engine.render3d_proc(engine)
-  }
   if engine.render2d_proc != nil {
     engine.render2d_proc(engine, &engine.ui.ctx)
   }
@@ -1332,18 +1327,14 @@ deinit :: proc(engine: ^Engine) {
   resource.pool_deinit(&engine.skeletal_meshes, skeletal_mesh_deinit)
   resource.pool_deinit(&engine.materials, material_deinit)
   resource.pool_deinit(&engine.lights, proc(_: ^Light) {})
-  // Deinit pipelines before renderer/context shutdown
   pipeline2d_deinit(&engine.ui.pipeline)
   pipeline3d_deinit(&engine.ctx)
   pipeline_shadow_deinit(&engine.ctx)
-
   deinit_scene(&engine.scene)
   renderer_deinit(&engine.renderer)
   vulkan_context_deinit(&engine.ctx)
-
   glfw.DestroyWindow(engine.window)
   glfw.Terminate()
-
   delete(engine.dirty_transforms)
   fmt.println("Engine deinitialized")
 }

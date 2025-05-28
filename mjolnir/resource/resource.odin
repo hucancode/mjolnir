@@ -11,17 +11,17 @@ Entry :: struct($T: typeid) {
   item:       T,
 }
 
-ResourcePool :: struct($T: typeid) {
+Pool :: struct($T: typeid) {
   entries:      [dynamic]Entry(T),
   free_indices: [dynamic]u32,
 }
 
-pool_init :: proc(pool: ^ResourcePool($T)) {
+pool_init :: proc(pool: ^Pool($T)) {
   pool.entries = make([dynamic]Entry(T), 0, 0)
   pool.free_indices = make([dynamic]u32, 0, 0)
 }
 
-pool_deinit :: proc(pool: ^ResourcePool($T), deinit_proc: proc(_: ^T)) {
+pool_deinit :: proc(pool: ^Pool($T), deinit_proc: proc(_: ^T)) {
   for &entry in pool.entries {
     if entry.active {
       deinit_proc(&entry.item)
@@ -31,7 +31,7 @@ pool_deinit :: proc(pool: ^ResourcePool($T), deinit_proc: proc(_: ^T)) {
   delete(pool.free_indices)
 }
 
-alloc :: proc(pool: ^ResourcePool($T)) -> (Handle, ^T) {
+alloc :: proc(pool: ^Pool($T)) -> (Handle, ^T) {
   if len(pool.free_indices) > 0 {
     index := pop(&pool.free_indices)
     entry := &pool.entries[index]
@@ -53,7 +53,7 @@ alloc :: proc(pool: ^ResourcePool($T)) -> (Handle, ^T) {
   }
 }
 
-free :: proc(pool: ^ResourcePool($T), handle: Handle) {
+free :: proc(pool: ^Pool($T), handle: Handle) {
   if handle.index >= u32(len(pool.entries)) {
     return
   }
@@ -69,7 +69,7 @@ free :: proc(pool: ^ResourcePool($T), handle: Handle) {
   append(&pool.free_indices, handle.index)
 }
 
-get :: proc(pool: ^ResourcePool($T), handle: Handle) -> ^T {
+get :: proc(pool: ^Pool($T), handle: Handle) -> ^T {
   if handle.index >= u32(len(pool.entries)) {
     // log.debugf("ResourcePool.get: index (%v) out of bounds (%v)", handle.index, len(pool.entries))
     return nil

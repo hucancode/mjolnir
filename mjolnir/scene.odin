@@ -42,7 +42,7 @@ switch_camera_mode_scene :: proc(s: ^Scene) {
 
 traverse_scene :: proc(
   scene: ^Scene,
-  nodes: ^resource.ResourcePool(Node),
+  nodes: ^resource.Pool(Node),
   cb_context: rawptr,
   callback: proc(
     node: ^Node,
