@@ -411,8 +411,7 @@ physical_device_init :: proc() -> vk.Result {
       best_score = score_val
     }
   }
-
-  if g_physical_device == nil {
+  if best_score == 0 {
     fmt.printfln("Error: No suitable physical device found!")
     return .ERROR_INITIALIZATION_FAILED
   }

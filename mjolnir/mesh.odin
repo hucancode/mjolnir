@@ -16,7 +16,7 @@ Bone :: struct {
 
 bone_deinit :: proc(bone: ^Bone) {
   if bone.children != nil {
-    // delete(bone.children)
+    delete(bone.children)
     bone.children = nil
   }
 }
@@ -156,10 +156,10 @@ calculate_animation_transform :: proc(
   anim_instance: ^animation.Instance,
   target_pose: ^animation.Pose,
 ) {
-  if self.skinning == nil {
-    return
+  skin, has_skin := &self.skinning.?
+  if !has_skin {
+      return
   }
-  skin := &self.skinning.?
   if anim_instance.status == .STOPPED ||
      anim_instance.clip_handle >= u32(len(skin.animations)) {
     return
