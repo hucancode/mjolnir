@@ -78,6 +78,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
             space
           node.transform.position.y += 0.5
           node.transform.scale = {1, 1, 1} * size
+          node.transform.is_dirty = true
         }
       }
     }
@@ -93,6 +94,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     }
     ground_node.transform.position = {-0.5, 0.0, -0.5} * size
     ground_node.transform.scale = {1.0, 1.0, 1.0} * size
+    ground_node.transform.is_dirty = true
   }
   if true {
     gltf_nodes := load_gltf(engine, "assets/Suzanne.glb") or_else {}
@@ -164,6 +166,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
       math.PI * 0.45,
       linalg.VECTOR3F32_X_AXIS,
     )
+    light.transform.is_dirty = true
     light_cube_handle, light_cube_node := spawn(engine)
     light_cube_handles[i] = light_cube_handle
     attach(&engine.nodes, light_handles[i], light_cube_handles[i])
@@ -172,9 +175,9 @@ setup :: proc(engine: ^mjolnir.Engine) {
       false,
     }
     light_cube_node.transform.scale = {0.1, 0.1, 0.1}
+    light_cube_node.transform.is_dirty = true
   }
   spawn_directional_light(engine, {0.3, 0.3, 0.3, 1.0})
-
 }
 
 update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {

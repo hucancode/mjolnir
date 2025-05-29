@@ -237,14 +237,17 @@ traverse_scene :: proc(
   defer delete(node_stack)
   transform_stack := make([dynamic]linalg.Matrix4f32, 0)
   defer delete(transform_stack)
+  dirty_stack := make([dynamic]bool, 0)
+  defer delete(dirty_stack)
 
   append(&node_stack, scene.root)
   append(&transform_stack, linalg.MATRIX4F32_IDENTITY)
+  append(&dirty_stack, false)
 
   for len(node_stack) > 0 {
     current_node_handle := pop(&node_stack)
     parent_world_matrix := pop(&transform_stack)
-
+    parent_is_dirty := pop(&dirty_stack)
     current_node := resource.get(nodes, current_node_handle)
     if current_node == nil {
       fmt.eprintf(
@@ -253,6 +256,7 @@ traverse_scene :: proc(
       )
       continue
     }
+    is_dirty := current_node.transform.is_dirty
 
     // TODO: instead of DFS and update transform matrix on render, we should transform on object request
     // Ensure transform is up-to-date (local_matrix from TRS)
@@ -264,8 +268,11 @@ traverse_scene :: proc(
       )
       // current_node.transform.is_dirty = false; // World matrix update will clear it if needed
     }
-    current_node.transform.world_matrix =
-      parent_world_matrix * current_node.transform.local_matrix
+    if is_dirty || parent_is_dirty {
+      current_node.transform.world_matrix =
+        parent_world_matrix * current_node.transform.local_matrix
+    }
+
     current_node.transform.is_dirty = false
 
     if !callback(
@@ -279,6 +286,7 @@ traverse_scene :: proc(
     for child_handle in current_node.children {
       append(&node_stack, child_handle)
       append(&transform_stack, current_node.transform.world_matrix)
+      append(&dirty_stack, is_dirty || parent_is_dirty)
     }
   }
   return true

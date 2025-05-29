@@ -100,10 +100,7 @@ aabb_transform :: proc(
   corners[6] = {min_p.x, max_p.y, max_p.z, 1.0}
   corners[7] = {max_p.x, max_p.y, max_p.z, 1.0}
 
-  F32_MIN :: -3.40282347E+38
-  F32_MAX :: 3.40282347E+38
-  ret.min = linalg.Vector3f32{F32_MAX, F32_MAX, F32_MAX}
-  ret.max = linalg.Vector3f32{F32_MIN, F32_MIN, F32_MIN}
+  ret = AABB_UNDEFINED
 
   for corner in corners {
     transformed_corner := transform_matrix^ * corner

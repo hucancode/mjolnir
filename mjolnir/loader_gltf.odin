@@ -93,6 +93,7 @@ load_gltf :: proc(
       if g_node.has_scale {
         node.transform.scale = g_node.scale
       }
+      node.transform.is_dirty = true
       fmt.printfln(
         "Node %s: translation %v, rotation %v, scale %v",
         string(g_node.name),

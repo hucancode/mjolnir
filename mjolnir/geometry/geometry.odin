@@ -97,22 +97,21 @@ Aabb :: struct {
   max: linalg.Vector3f32,
 }
 
-aabb_from_vertices :: proc(vertices: []Vertex) -> Aabb {
-  bounds := Aabb {
-      min = {F32_MAX, F32_MAX, F32_MAX},
-      max = {F32_MIN, F32_MIN, F32_MIN},
-    }
-  if len(vertices) == 0 {
-    bounds.min = {0, 0, 0}
-    bounds.max = {0, 0, 0}
-    return bounds
-  }
+AABB_UNDEFINED := Aabb {
+  min = {F32_MAX, F32_MAX, F32_MAX},
+  max = {F32_MIN, F32_MIN, F32_MIN},
+}
 
+aabb_from_vertices :: proc(vertices: []Vertex) -> (ret: Aabb) {
+  ret = AABB_UNDEFINED
   for vertex in vertices {
-    bounds.min = linalg.min(bounds.min, vertex.position)
-    bounds.max = linalg.max(bounds.max, vertex.position)
+    ret.min = linalg.min(ret.min, vertex.position)
+    ret.max = linalg.max(ret.max, vertex.position)
   }
-  return bounds
+  if len(vertices) == 0 {
+    ret.min, ret.max = {0, 0, 0}, {0, 0, 0}
+  }
+  return ret
 }
 
 

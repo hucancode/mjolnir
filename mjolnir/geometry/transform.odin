@@ -16,7 +16,7 @@ TRANSFORM_IDENTITY :: Transform {
   position     = {0, 0, 0},
   rotation     = linalg.QUATERNIONF32_IDENTITY,
   scale        = {1, 1, 1},
-  is_dirty     = true, // Mark dirty to force initial matrix calculation
+  is_dirty     = false,
   local_matrix = linalg.MATRIX4F32_IDENTITY,
   world_matrix = linalg.MATRIX4F32_IDENTITY,
 }
