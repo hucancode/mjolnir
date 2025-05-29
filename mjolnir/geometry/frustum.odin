@@ -16,7 +16,7 @@ Frustum :: struct {
 make_frustum :: proc(view_projection_matrix: linalg.Matrix4f32) -> Frustum {
   m := linalg.transpose(view_projection_matrix)
   // Each plane is a Vec4: a*x + b*y + c*z + d = 0
-  planes := [6]linalg.Vector4f32 {
+  planes := [6]Plane {
     // Left
     m[3] + m[0],
     // Right
@@ -53,14 +53,13 @@ signed_distance_to_plane :: proc(
 // Returns true if the AABB is (at least partially) inside the frustum, false if completely outside.
 frustum_test_aabb :: proc(
   frustum: ^Frustum,
-  aabb_min: linalg.Vector3f32,
-  aabb_max: linalg.Vector3f32,
+  aabb: Aabb,
 ) -> bool {
   for plane_vec in frustum.planes {
     p_vertex: linalg.Vector3f32
-    p_vertex.x = plane_vec.x > 0.0 ? aabb_max.x : aabb_min.x
-    p_vertex.y = plane_vec.y > 0.0 ? aabb_max.y : aabb_min.y
-    p_vertex.z = plane_vec.z > 0.0 ? aabb_max.z : aabb_min.z
+    p_vertex.x = plane_vec.x > 0.0 ? aabb.max.x : aabb.min.x
+    p_vertex.y = plane_vec.y > 0.0 ? aabb.max.y : aabb.min.y
+    p_vertex.z = plane_vec.z > 0.0 ? aabb.max.z : aabb.min.z
 
     if signed_distance_to_plane(plane_vec, p_vertex) < 0.0 {
       return false
@@ -87,7 +86,7 @@ frustum_test_sphere :: proc(
 aabb_transform :: proc(
   aabb: Aabb,
   transform_matrix: ^linalg.Matrix4f32,
-) -> Aabb {
+) -> (ret: Aabb) {
   min_p := aabb.min
   max_p := aabb.max
 
@@ -103,14 +102,13 @@ aabb_transform :: proc(
 
   F32_MIN :: -3.40282347E+38
   F32_MAX :: 3.40282347E+38
-  new_aabb_min := linalg.Vector3f32{F32_MAX, F32_MAX, F32_MAX}
-  new_aabb_max := linalg.Vector3f32{F32_MIN, F32_MIN, F32_MIN}
+  ret.min = linalg.Vector3f32{F32_MAX, F32_MAX, F32_MAX}
+  ret.max = linalg.Vector3f32{F32_MIN, F32_MIN, F32_MIN}
 
   for corner in corners {
     transformed_corner := transform_matrix^ * corner
-    transformed_vec3 := linalg.Vector3f32{transformed_corner.x, transformed_corner.y, transformed_corner.z}
-    new_aabb_min = linalg.min(new_aabb_min, transformed_vec3)
-    new_aabb_max = linalg.max(new_aabb_max, transformed_vec3)
+    ret.min = linalg.min(ret.min, transformed_corner.xyz)
+    ret.max = linalg.max(ret.max, transformed_corner.xyz)
   }
-  return Aabb{min = new_aabb_min, max = new_aabb_max}
+  return
 }

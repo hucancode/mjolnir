@@ -7,10 +7,12 @@ PointLight :: struct {
   radius:      f32,
   cast_shadow: bool,
 }
+
 DirectionalLight :: struct {
   color:       linalg.Vector4f32,
   cast_shadow: bool,
 }
+
 SpotLight :: struct {
   color:       linalg.Vector4f32,
   radius:      f32,

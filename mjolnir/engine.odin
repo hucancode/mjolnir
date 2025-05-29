@@ -406,8 +406,7 @@ render_single_node :: proc(
     world_aabb := geometry.aabb_transform(mesh.aabb, world_matrix)
     if !geometry.frustum_test_aabb(
       &ctx.camera_frustum,
-      world_aabb.min.xyz,
-      world_aabb.max.xyz,
+      world_aabb,
     ) {
       return true
     }
@@ -478,8 +477,7 @@ render_single_node :: proc(
     world_aabb := geometry.aabb_transform(mesh.aabb, world_matrix)
     if !geometry.frustum_test_aabb(
       &ctx.camera_frustum,
-      world_aabb.min.xyz,
-      world_aabb.max.xyz,
+      world_aabb,
     ) {
       return true
     }
@@ -555,8 +553,7 @@ render_single_shadow :: proc(
     world_aabb := geometry.aabb_transform(mesh.aabb, world_matrix)
     if !geometry.frustum_test_aabb(
       &ctx.frustum,
-      world_aabb.min.xyz,
-      world_aabb.max.xyz,
+      world_aabb,
     ) {
       return true
     }
@@ -615,8 +612,7 @@ render_single_shadow :: proc(
     world_aabb := geometry.aabb_transform(mesh.aabb, world_matrix)
     if !geometry.frustum_test_aabb(
       &ctx.frustum,
-      world_aabb.min.xyz,
-      world_aabb.max.xyz,
+      world_aabb,
     ) {
       return true
     }
@@ -1348,6 +1344,7 @@ deinit :: proc(engine: ^Engine) {
 engine_begin_transaction :: proc(engine: ^Engine) {
   engine.in_transaction = true
 }
+
 engine_commit_transaction :: proc(engine: ^Engine) {
   engine.in_transaction = false
   // Process dirty transforms if not handled by traversal
