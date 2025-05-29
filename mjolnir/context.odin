@@ -116,8 +116,8 @@ g_descriptor_pool: vk.DescriptorPool
 g_command_pool: vk.CommandPool
 g_device_properties: vk.PhysicalDeviceProperties
 
-vulkan_context_init :: proc(glfw_window: glfw.WindowHandle) -> vk.Result {
-  g_window = glfw_window
+vulkan_context_init :: proc(window: glfw.WindowHandle) -> vk.Result {
+  g_window = window
   vk.load_proc_addresses_global(rawptr(glfw.GetInstanceProcAddress))
   vulkan_instance_init() or_return
   surface_init() or_return

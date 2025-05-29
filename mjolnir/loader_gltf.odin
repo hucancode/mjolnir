@@ -66,55 +66,55 @@ load_gltf :: proc(
 
   for len(stack) > 0 {
     entry := pop(&stack)
-    g_node := &gltf_data.nodes[entry.idx]
+    gltf_node := &gltf_data.nodes[entry.idx]
     node_handle, node := resource.alloc(&engine.scene.nodes)
     if node == nil {
       continue
     }
-    node.name = string(g_node.name)
+    node.name = string(gltf_node.name)
     node.transform = geometry.TRANSFORM_IDENTITY
-    if g_node.has_matrix {
+    if gltf_node.has_matrix {
       node.transform = geometry.decompose_matrix(
-        geometry.matrix_from_arr(g_node.matrix_),
+        geometry.matrix_from_arr(gltf_node.matrix_),
       )
     } else {
-      if g_node.has_translation {
-        node.transform.position = g_node.translation
+      if gltf_node.has_translation {
+        node.transform.position = gltf_node.translation
       }
-      if g_node.has_rotation {
+      if gltf_node.has_rotation {
         node.transform.rotation = quaternion(
-          x = g_node.rotation[0],
-          y = g_node.rotation[1],
-          z = g_node.rotation[2],
-          w = g_node.rotation[3],
+          x = gltf_node.rotation[0],
+          y = gltf_node.rotation[1],
+          z = gltf_node.rotation[2],
+          w = gltf_node.rotation[3],
         )
       }
-      if g_node.has_scale {
-        node.transform.scale = g_node.scale
+      if gltf_node.has_scale {
+        node.transform.scale = gltf_node.scale
       }
       node.transform.is_dirty = true
       fmt.printfln(
         "Node %s: translation %v, rotation %v, scale %v",
-        string(g_node.name),
-        g_node.translation,
-        g_node.rotation,
-        g_node.scale,
+        string(gltf_node.name),
+        gltf_node.translation,
+        gltf_node.rotation,
+        gltf_node.scale,
       )
     }
     node.parent = entry.parent
     node.children = make([dynamic]Handle, 0)
     // Attach mesh if present
-    if g_node.mesh != nil {
-      if g_node.skin != nil {
-        fmt.printfln("Loading skinned mesh %s", string(g_node.name))
+    if gltf_node.mesh != nil {
+      if gltf_node.skin != nil {
+        fmt.printfln("Loading skinned mesh %s", string(gltf_node.name))
         mesh_handle, mesh := resource.alloc(&engine.skeletal_meshes)
         data, bones, material, root_bone_idx, bone_map, res :=
           load_gltf_skinned_primitive(
             engine,
             path,
             gltf_data,
-            g_node.mesh,
-            g_node.skin,
+            gltf_node.mesh,
+            gltf_node.skin,
           )
         if res == .SUCCESS {
           skeletal_mesh_init(mesh, &data)
@@ -137,7 +137,7 @@ load_gltf :: proc(
           load_gltf_animations(
             engine,
             gltf_data,
-            g_node.skin,
+            gltf_node.skin,
             mesh_handle,
             bone_map,
           )
@@ -148,13 +148,13 @@ load_gltf :: proc(
           animation.pose_flush(&pose, bone_buffer.mapped)
         }
       } else {
-        fmt.printfln("Loading static mesh %s", string(g_node.name))
+        fmt.printfln("Loading static mesh %s", string(gltf_node.name))
         fmt.printfln("Processing static mesh data...")
         mesh_data, mat_handle, res := load_gltf_primitive(
           engine,
           path,
           gltf_data,
-          g_node.mesh,
+          gltf_node.mesh,
         )
         if res != .SUCCESS {
           fmt.eprintln("Failed to process GLTF primitive:", res)
@@ -189,7 +189,7 @@ load_gltf :: proc(
     if entry.parent == engine.scene.root {
       append(&created_root_handles, node_handle)
     }
-    for child_ptr in g_node.children {
+    for child_ptr in gltf_node.children {
       if child_idx, found := node_ptr_to_idx_map[child_ptr]; found {
         append(&stack, TraverseEntry{idx = child_idx, parent = node_handle})
       }
@@ -203,20 +203,22 @@ load_gltf_texture :: proc(
   engine: ^Engine,
   gltf_path: string,
   gltf_data: ^cgltf.data,
-  g_texture: ^cgltf.texture,
+  glft_texture: ^cgltf.texture,
 ) -> (
   tex_handle: Handle,
   texture: ^Texture,
   ret: vk.Result,
 ) {
-  if g_texture == nil || g_texture.image_ == nil {
+  if glft_texture == nil || glft_texture.image_ == nil {
     ret = .ERROR_UNKNOWN
     return
   }
-  g_image := g_texture.image_
+  gltf_image := glft_texture.image_
   pixel_data: []u8
-  if g_image.uri != nil {
-    texture_path_str := path.join({path.dir(gltf_path), string(g_image.uri)})
+  if gltf_image.uri != nil {
+    texture_path_str := path.join(
+      {path.dir(gltf_path), string(gltf_image.uri)},
+    )
     ok: bool
     pixel_data, ok = os.read_entire_file(texture_path_str)
     if !ok {
@@ -224,8 +226,8 @@ load_gltf_texture :: proc(
       ret = .ERROR_UNKNOWN
       return
     }
-  } else if g_image.buffer_view != nil {
-    view := g_image.buffer_view
+  } else if gltf_image.buffer_view != nil {
+    view := gltf_image.buffer_view
     buffer := view.buffer
     src_data_ptr := mem.ptr_offset(cast(^u8)buffer.data, view.offset)
     pixel_data = slice.from_ptr((^u8)(src_data_ptr), int(view.size))
@@ -245,7 +247,7 @@ load_gltf_pbr_textures :: proc(
   engine: ^Engine,
   gltf_path: string,
   gltf_data: ^cgltf.data,
-  g_material: ^cgltf.material,
+  gltf_material: ^cgltf.material,
 ) -> (
   albedo_handle: Handle,
   metallic_roughness_handle: Handle,
@@ -255,7 +257,7 @@ load_gltf_pbr_textures :: proc(
   features: ShaderFeatureSet,
   ret: vk.Result,
 ) {
-  if g_material == nil {
+  if gltf_material == nil {
     ret = .ERROR_UNKNOWN
     return
   }
@@ -263,20 +265,20 @@ load_gltf_pbr_textures :: proc(
     engine,
     gltf_path,
     gltf_data,
-    g_material.pbr_metallic_roughness.base_color_texture.texture,
+    gltf_material.pbr_metallic_roughness.base_color_texture.texture,
   ) or_return
   features |= {.ALBEDO_TEXTURE}
 
-  if g_material.has_pbr_metallic_roughness {
-    pbr_info := g_material.pbr_metallic_roughness
+  if gltf_material.has_pbr_metallic_roughness {
+    pbr_info := gltf_material.pbr_metallic_roughness
     if pbr_info.metallic_roughness_texture.texture != nil {
-      g_texture := pbr_info.metallic_roughness_texture.texture
-      if g_texture.image_ != nil {
-        g_image := g_texture.image_
+      gltf_texture := pbr_info.metallic_roughness_texture.texture
+      if gltf_texture.image_ != nil {
+        gltf_image := gltf_texture.image_
         pixel_data: []u8
-        if g_image.uri != nil {
+        if gltf_image.uri != nil {
           texture_path_str := path.join(
-            {path.dir(gltf_path), string(g_image.uri)},
+            {path.dir(gltf_path), string(gltf_image.uri)},
           )
           ok: bool
           pixel_data, ok = os.read_entire_file(texture_path_str)
@@ -288,8 +290,8 @@ load_gltf_pbr_textures :: proc(
             ret = .ERROR_UNKNOWN
             return
           }
-        } else if g_image.buffer_view != nil {
-          view := g_image.buffer_view
+        } else if gltf_image.buffer_view != nil {
+          view := gltf_image.buffer_view
           buffer := view.buffer
           src_data_ptr := mem.ptr_offset(cast(^u8)buffer.data, view.offset)
           pixel_data = slice.from_ptr((^u8)(src_data_ptr), int(view.size))
@@ -307,23 +309,23 @@ load_gltf_pbr_textures :: proc(
       }
     }
   }
-  if g_material.normal_texture.texture != nil {
+  if gltf_material.normal_texture.texture != nil {
     normal_handle, _ = load_gltf_texture(
       engine,
       gltf_path,
       gltf_data,
-      g_material.normal_texture.texture,
+      gltf_material.normal_texture.texture,
     ) or_return
     features |= {.NORMAL_TEXTURE}
   }
 
   // TODO: Displacement map (GLTF extension, not implemented here)
-  if g_material.emissive_texture.texture != nil {
+  if gltf_material.emissive_texture.texture != nil {
     emissive_handle, _ = load_gltf_texture(
       engine,
       gltf_path,
       gltf_data,
-      g_material.emissive_texture.texture,
+      gltf_material.emissive_texture.texture,
     ) or_return
     features |= {.EMISSIVE_TEXTURE}
   }
@@ -336,24 +338,24 @@ load_gltf_primitive :: proc(
   engine: ^Engine,
   path: string,
   gltf_data: ^cgltf.data,
-  g_mesh: ^cgltf.mesh,
+  gltf_mesh: ^cgltf.mesh,
 ) -> (
   mesh_data: geometry.Geometry,
   material_handle: resource.Handle,
   ret: vk.Result,
 ) {
-  primitives := g_mesh.primitives
+  primitives := gltf_mesh.primitives
   if len(primitives) == 0 {
     ret = .ERROR_UNKNOWN
     return
   }
-  g_primitive := &primitives[0]
+  primitive := &primitives[0]
   albedo_handle, metallic_roughness_handle, normal_handle, displacement_handle, emissive_handle, features :=
     load_gltf_pbr_textures(
       engine,
       path,
       gltf_data,
-      g_primitive.material,
+      primitive.material,
     ) or_return
   material_handle, _, _ = create_material(
     engine,
@@ -364,9 +366,9 @@ load_gltf_primitive :: proc(
     displacement_handle,
     emissive_handle,
   )
-  vertices_num := g_primitive.attributes[0].data.count
+  vertices_num := primitive.attributes[0].data.count
   vertices := make([]geometry.Vertex, vertices_num)
-  for &attribute in g_primitive.attributes {
+  for &attribute in primitive.attributes {
     accessor := attribute.data
     if accessor.count != vertices_num {
       fmt.eprintf(
@@ -403,19 +405,19 @@ load_gltf_primitive :: proc(
     }
   }
   indices: []u32
-  if g_primitive.indices != nil {
-    indices = make([]u32, g_primitive.indices.count)
+  if primitive.indices != nil {
+    indices = make([]u32, primitive.indices.count)
     read := cgltf.accessor_unpack_indices(
-      g_primitive.indices,
+      primitive.indices,
       raw_data(indices),
       size_of(u32),
-      g_primitive.indices.count,
+      primitive.indices.count,
     )
-    if read != g_primitive.indices.count {
+    if read != primitive.indices.count {
       fmt.eprintf(
         "Failed to read indices from GLTF primitive. read %d, need %d\n",
         read,
-        g_primitive.indices.count,
+        primitive.indices.count,
       )
       ret = .ERROR_UNKNOWN
       return
@@ -433,8 +435,8 @@ load_gltf_skinned_primitive :: proc(
   engine: ^Engine,
   path: string,
   gltf_data: ^cgltf.data,
-  g_mesh: ^cgltf.mesh,
-  g_skin: ^cgltf.skin,
+  gltf_mesh: ^cgltf.mesh,
+  gltf_skin: ^cgltf.skin,
 ) -> (
   skinned_geom_data: geometry.SkinnedGeometry,
   engine_bones: []Bone,
@@ -443,19 +445,19 @@ load_gltf_skinned_primitive :: proc(
   node_ptr_to_bone_idx_map: map[^cgltf.node]u32,
   ret: vk.Result,
 ) {
-  primitives := g_mesh.primitives
+  primitives := gltf_mesh.primitives
   if len(primitives) == 0 {
     ret = .ERROR_UNKNOWN
     return
   }
-  g_primitive := &primitives[0]
+  primitive := &primitives[0]
   fmt.printfln("Creating texture for skinned material...")
   albedo_handle, metallic_roughness_handle, normal_handle, displacement_handle, emissive_handle, features :=
     load_gltf_pbr_textures(
       engine,
       path,
       gltf_data,
-      g_primitive.material,
+      primitive.material,
     ) or_return
   mat_handle, _ = create_material(
     engine,
@@ -475,10 +477,10 @@ load_gltf_skinned_primitive :: proc(
     emissive_handle,
     mat_handle,
   )
-  num_vertices := g_primitive.attributes[0].data.count
+  num_vertices := primitive.attributes[0].data.count
   vertices := make([]geometry.Vertex, num_vertices)
   skinnings := make([]geometry.SkinningData, num_vertices)
-  attributes := g_primitive.attributes
+  attributes := primitive.attributes
   for attr_idx in 0 ..< len(attributes) {
     attribute := &attributes[attr_idx]
     accessor := attribute.data
@@ -545,19 +547,19 @@ load_gltf_skinned_primitive :: proc(
   }
   // fmt.printfln("Joints %v", vertices[len(vertices)-20:])
   indices: []u32
-  if g_primitive.indices != nil {
-    indices = make([]u32, g_primitive.indices.count)
+  if primitive.indices != nil {
+    indices = make([]u32, primitive.indices.count)
     read := cgltf.accessor_unpack_indices(
-      g_primitive.indices,
+      primitive.indices,
       raw_data(indices),
       size_of(u32),
-      g_primitive.indices.count,
+      primitive.indices.count,
     )
-    if read != g_primitive.indices.count {
+    if read != primitive.indices.count {
       fmt.eprintf(
         "Failed to read indices from GLTF primitive. read %d, need %d\n",
         read,
-        g_primitive.indices.count,
+        primitive.indices.count,
       )
       ret = .ERROR_UNKNOWN
       return
@@ -570,15 +572,15 @@ load_gltf_skinned_primitive :: proc(
     aabb      = geometry.aabb_from_vertices(vertices),
   }
   // Bones
-  engine_bones = make([]Bone, len(g_skin.joints))
+  engine_bones = make([]Bone, len(gltf_skin.joints))
   node_ptr_to_bone_idx_map = make(map[^cgltf.node]u32)
-  for joint_node, i in g_skin.joints {
+  for joint_node, i in gltf_skin.joints {
     node_ptr_to_bone_idx_map[joint_node] = u32(i)
     engine_bones[i].name = string(joint_node.name)
-    if g_skin.inverse_bind_matrices != nil {
+    if gltf_skin.inverse_bind_matrices != nil {
       ibm_floats: [16]f32
       read := cgltf.accessor_read_float(
-        g_skin.inverse_bind_matrices,
+        gltf_skin.inverse_bind_matrices,
         uint(i),
         raw_data(ibm_floats[:]),
         16,
@@ -608,7 +610,7 @@ load_gltf_skinned_primitive :: proc(
     }
     engine_bones[i].bind_transform = bt
   }
-  for joint_node, i in g_skin.joints {
+  for joint_node, i in gltf_skin.joints {
     engine_bones[i].children = make([]u32, len(joint_node.children))
     for child, j in joint_node.children {
       if idx, found := node_ptr_to_bone_idx_map[child]; found {
@@ -651,7 +653,7 @@ unpack_accessor_floats_flat :: proc(accessor: ^cgltf.accessor) -> []f32 {
 load_gltf_animations :: proc(
   engine: ^Engine,
   gltf_data: ^cgltf.data,
-  g_skin: ^cgltf.skin,
+  gltf_skin: ^cgltf.skin,
   engine_mesh_handle: resource.Handle,
   node_ptr_to_bone_idx_map: map[^cgltf.node]u32,
 ) -> bool {
