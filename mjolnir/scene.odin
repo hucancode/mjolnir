@@ -246,11 +246,13 @@ switch_camera_mode_scene :: proc(s: ^Scene) {
   }
 }
 
+// TODO: make a new traverse procedure that does flat traversal and don't update transform matrix
 traverse_scene :: proc(
   scene: ^Scene,
   cb_context: rawptr,
   callback: SceneTraversalCallback = nil,
 ) -> bool {
+  using geometry
   node_stack := make([dynamic]Handle, 0)
   defer delete(node_stack)
   transform_stack := make([dynamic]linalg.Matrix4f32, 0)
@@ -274,25 +276,10 @@ traverse_scene :: proc(
       )
       continue
     }
-    is_dirty := current_node.transform.is_dirty
-
-    // TODO: instead of DFS and update transform matrix on render, we should transform on object request
-    // Ensure transform is up-to-date (local_matrix from TRS)
-    if current_node.transform.is_dirty {
-      current_node.transform.local_matrix = linalg.matrix4_from_trs(
-        current_node.transform.position,
-        current_node.transform.rotation,
-        current_node.transform.scale,
-      )
-      // current_node.transform.is_dirty = false; // World matrix update will clear it if needed
+    is_dirty := transform_update_local(&current_node.transform)
+    if parent_is_dirty || is_dirty {
+        transform_update_world(&current_node.transform, parent_world_matrix)
     }
-    if is_dirty || parent_is_dirty {
-      current_node.transform.world_matrix =
-        parent_world_matrix * current_node.transform.local_matrix
-    }
-
-    current_node.transform.is_dirty = false
-
     if callback != nil {
       if !callback(
         current_node,
@@ -301,7 +288,6 @@ traverse_scene :: proc(
         continue
       }
     }
-
     for child_handle in current_node.children {
       append(&node_stack, child_handle)
       append(&transform_stack, current_node.transform.world_matrix)

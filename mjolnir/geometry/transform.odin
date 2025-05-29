@@ -47,3 +47,72 @@ matrix_from_arr :: proc(a: [16]f32) -> (m: linalg.Matrix4f32) {
   */
   return
 }
+
+translate_by :: proc(t: ^Transform, x: f32 = 0, y: f32 = 0, z: f32 = 0) {
+  t.position += {x, y, z}
+  t.is_dirty = true
+}
+
+translate :: proc(t: ^Transform, x: f32 = 0, y: f32 = 0, z: f32 = 0) {
+  t.position = {x, y, z}
+  t.is_dirty = true
+}
+
+rotate_by :: proc(t: ^Transform, q: linalg.Quaternionf32) {
+  t.rotation *= q
+  t.is_dirty = true
+}
+
+rotate_by_angle :: proc(t: ^Transform, angle: f32, axis: linalg.Vector3f32 = linalg.VECTOR3F32_Y_AXIS) {
+  t.rotation *= linalg.quaternion_angle_axis(angle, axis)
+  t.is_dirty = true
+}
+
+rotate :: proc(t: ^Transform, q: linalg.Quaternionf32) {
+  t.rotation = q
+  t.is_dirty = true
+}
+
+rotate_angle :: proc(t: ^Transform, angle: f32, axis: linalg.Vector3f32 = linalg.VECTOR3F32_Y_AXIS) {
+  t.rotation = linalg.quaternion_angle_axis(angle, axis)
+  t.is_dirty = true
+}
+
+scale_xyz_by :: proc(t: ^Transform, x: f32 = 1, y: f32 = 1, z: f32 = 1) {
+  t.scale *= {x, y, z}
+  t.is_dirty = true
+}
+
+scale_by :: proc(t: ^Transform, s: f32) {
+  t.scale *= {s, s, s}
+  t.is_dirty = true
+}
+
+scale_xyz :: proc(t: ^Transform, x: f32 = 1, y: f32 = 1, z: f32 = 1) {
+  t.scale = {x, y, z}
+  t.is_dirty = true
+}
+
+scale :: proc(t: ^Transform, s: f32) {
+  t.scale = {s, s, s}
+  t.is_dirty = true
+}
+
+transform_update_local :: proc(t: ^Transform) -> bool {
+    if !t.is_dirty {
+        return false
+    }
+    t.local_matrix = linalg.matrix4_from_trs(
+      t.position,
+      t.rotation,
+      t.scale,
+    )
+    t.is_dirty = false
+    return true
+}
+
+transform_update_world :: proc(t: ^Transform, parent: linalg.Matrix4f32) -> bool {
+    t.world_matrix = parent * t.local_matrix
+    t.is_dirty = false
+    return true
+}

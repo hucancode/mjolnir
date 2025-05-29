@@ -69,16 +69,12 @@ setup :: proc(engine: ^mjolnir.Engine) {
           node_handle, node := spawn(&engine.scene)
           attach(engine.scene.nodes, engine.scene.root, node_handle)
           node.attachment = StaticMeshAttachment{sphere_mesh_handle, true}
-          node.transform.position =
-            {
-              (f32(x) - f32(nx) * 0.5),
-              (f32(y) - f32(ny) * 0.5),
-              (f32(z) - f32(nz) * 0.5),
-            } *
-            space
-          node.transform.position.y += 0.5
-          node.transform.scale = {1, 1, 1} * size
-          node.transform.is_dirty = true
+          translate(&node.transform,
+            (f32(x) - f32(nx) * 0.5) * space,
+            (f32(y) - f32(ny) * 0.5) * space + 0.5,
+            (f32(z) - f32(nz) * 0.5) * space,
+          )
+          scale(&node.transform, size)
         }
       }
     }
@@ -89,9 +85,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
     ground_handle, ground_node := spawn(&engine.scene)
     attach(engine.scene.nodes, engine.scene.root, ground_handle)
     ground_node.attachment = StaticMeshAttachment{ground_mesh_handle, false}
-    ground_node.transform.position = {-0.5, 0.0, -0.5} * size
-    ground_node.transform.scale = {1.0, 1.0, 1.0} * size
-    ground_node.transform.is_dirty = true
+    translate(&ground_node.transform, x = -0.5 * size, z = -0.5 * size)
+    scale(&ground_node.transform, size)
   }
   if true {
     gltf_nodes := load_gltf(engine, "assets/Suzanne.glb") or_else {}
@@ -101,8 +96,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
       if duck == nil {
         continue
       }
-      duck.transform.position = {0, 2, -2}
-      // duck.transform.scale = {0.2, 0.2, 0.2}
+      translate(&duck.transform, 0, 2, -2)
     }
   }
   if true {
@@ -113,8 +107,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
       if helm == nil {
         continue
       }
-      helm.transform.position = {0, 1, 2}
-      helm.transform.scale = {0.5, 0.5, 0.5}
+      translate(&helm.transform, 0, 1, 2)
+      scale(&helm.transform, 0.5)
     }
   }
   if true {
@@ -158,24 +152,19 @@ setup :: proc(engine: ^mjolnir.Engine) {
     } else {
       light_handles[i], light = spawn_point_light(&engine.scene, color, 20.0)
     }
-    light.transform.position = {0, 2, -2}
-    light.transform.rotation = linalg.quaternion_angle_axis(
-      math.PI * 0.45,
-      linalg.VECTOR3F32_X_AXIS,
-    )
-    light.transform.is_dirty = true
+    translate(&light.transform, 0, 2, -2)
+    rotate_angle(&light.transform, math.PI * 0.45, linalg.VECTOR3F32_X_AXIS)
     light_cube_handle, light_cube_node := spawn(&engine.scene)
     light_cube_handles[i] = light_cube_handle
     attach(engine.scene.nodes, light_handles[i], light_cube_handles[i])
     light_cube_node.attachment = StaticMeshAttachment{cube_mesh_handle, false}
-    light_cube_node.transform.scale = {0.1, 0.1, 0.1}
-    light_cube_node.transform.is_dirty = true
+    scale(&light_cube_node.transform, 0.1)
   }
   spawn_directional_light(&engine.scene, {0.3, 0.3, 0.3, 1.0})
 }
 
 update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
-  using mjolnir
+  using mjolnir, geometry
 
   // Animate lights
   for handle, i in light_handles {
@@ -193,47 +182,38 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
     rz := math.cos(t)
     v := linalg.vector_normalize(linalg.Vector3f32{rx, ry, rz})
     radius: f32 = 4
-    light_ptr.transform.position = v * radius + linalg.VECTOR3F32_Y_AXIS * -1.0
+    v = v * radius + linalg.VECTOR3F32_Y_AXIS * -1.0
+    translate(&light_ptr.transform, v.x, v.y, v.z)
     // fmt.printfln("Light %d position: %v", i, light_ptr.transform.position)
-    light_ptr.transform.is_dirty = true
     light_cube_ptr := resource.get(engine.scene.nodes, light_cube_handles[i])
     if light_cube_ptr == nil {
       continue
     }
-    light_cube_ptr.transform.rotation = linalg.quaternion_angle_axis(
-      math.PI * time_since_app_start(engine) * 0.5,
-      linalg.VECTOR3F32_Y_AXIS,
-    )
-    light_cube_ptr.transform.is_dirty = true
+    rotate_angle(&light_cube_ptr.transform, math.PI * time_since_app_start(engine) * 0.5)
     // fmt.printfln( "Light cube %d rotation: %v", i, light_cube_ptr.transform.rotation,)
   }
 }
 
 on_key_pressed :: proc(engine: ^mjolnir.Engine, key, action, mods: int) {
+  using mjolnir, geometry
   fmt.printfln("key pressed key %d action %d mods %x", key, action, mods)
   if key == glfw.KEY_LEFT && action == glfw.PRESS {
     light := resource.get(engine.scene.nodes, light_handles[0])
-    light.transform.position.x += 0.1
-    light.transform.is_dirty = true
+    translate_by(&light.transform, x = 0.1)
   } else if key == glfw.KEY_RIGHT && action == glfw.PRESS {
     light := resource.get(engine.scene.nodes, light_handles[0])
-    light.transform.position.x -= 0.1
-    light.transform.is_dirty = true
+    translate_by(&light.transform, x = -0.1)
   } else if key == glfw.KEY_UP && action == glfw.PRESS {
     light := resource.get(engine.scene.nodes, light_handles[0])
-    light.transform.position.z += 0.1
-    light.transform.is_dirty = true
+    translate_by(&light.transform, z = 0.1)
   } else if key == glfw.KEY_DOWN && action == glfw.PRESS {
     light := resource.get(engine.scene.nodes, light_handles[0])
-    light.transform.position.z -= 0.1
-    light.transform.is_dirty = true
+    translate_by(&light.transform, z = -0.1)
   } else if key == glfw.KEY_Z && action == glfw.PRESS {
     light := resource.get(engine.scene.nodes, light_handles[0])
-    light.transform.position.y += 0.1
-    light.transform.is_dirty = true
+    translate_by(&light.transform, y = 0.1)
   } else if key == glfw.KEY_X && action == glfw.PRESS {
     light := resource.get(engine.scene.nodes, light_handles[0])
-    light.transform.position.y -= 0.1
-    light.transform.is_dirty = true
+    translate_by(&light.transform, y = -0.1)
   }
 }
