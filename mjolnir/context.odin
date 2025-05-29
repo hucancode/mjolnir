@@ -45,55 +45,6 @@ SwapchainSupport :: struct {
   present_modes: []vk.PresentModeKHR, // Owned by this struct if allocated by it
 }
 
-swapchain_support_deinit :: proc(self: ^SwapchainSupport) {
-  delete(self.formats)
-  delete(self.present_modes)
-  self.formats = nil
-  self.present_modes = nil
-}
-
-query_swapchain_support :: proc(
-  device: vk.PhysicalDevice,
-  surface: vk.SurfaceKHR,
-) -> (
-  support: SwapchainSupport,
-  result: vk.Result,
-) {
-  fmt.printfln("vulkan: querying swapchain support for device", device)
-  vk.GetPhysicalDeviceSurfaceCapabilitiesKHR(
-    device,
-    surface,
-    &support.capabilities,
-  ) or_return
-  fmt.printfln("vulkan: got surface capabilities", support.capabilities)
-  count: u32
-  vk.GetPhysicalDeviceSurfaceFormatsKHR(device, surface, &count, nil) or_return
-  fmt.printfln("vulkan: found %v surface formats", count)
-  support.formats = make([]vk.SurfaceFormatKHR, count)
-  vk.GetPhysicalDeviceSurfaceFormatsKHR(
-    device,
-    surface,
-    &count,
-    raw_data(support.formats),
-  ) or_return
-  vk.GetPhysicalDeviceSurfacePresentModesKHR(
-    device,
-    surface,
-    &count,
-    nil,
-  ) or_return
-  support.present_modes = make([]vk.PresentModeKHR, count)
-  vk.GetPhysicalDeviceSurfacePresentModesKHR(
-    device,
-    surface,
-    &count,
-    raw_data(support.present_modes),
-  ) or_return
-  result = .SUCCESS
-  return
-}
-
-
 FoundQueueFamilyIndices :: struct {
   graphics_family: u32,
   present_family:  u32,
@@ -246,7 +197,7 @@ surface_init :: proc() -> vk.Result {
   return .SUCCESS
 }
 
-query_physical_device_swapchain_support :: proc(
+query_swapchain_support :: proc(
   physical_device: vk.PhysicalDevice,
   surface: vk.SurfaceKHR,
 ) -> (
@@ -292,6 +243,13 @@ query_physical_device_swapchain_support :: proc(
     ) or_return
   }
   return support, .SUCCESS
+}
+
+swapchain_support_deinit :: proc(self: ^SwapchainSupport) {
+  delete(self.formats)
+  delete(self.present_modes)
+  self.formats = nil
+  self.present_modes = nil
 }
 
 score_physical_device :: proc(
@@ -349,8 +307,7 @@ score_physical_device :: proc(
   }
   fmt.printfln("vulkan: device supports all required extensions")
 
-  support, s_res := query_physical_device_swapchain_support(device, g_surface)
-  if s_res != .SUCCESS {return 0, s_res}
+  support := query_swapchain_support(device, g_surface) or_return
   defer swapchain_support_deinit(&support)
 
   if len(support.formats) == 0 || len(support.present_modes) == 0 {
@@ -478,24 +435,18 @@ logical_device_init :: proc() -> vk.Result {
   indices := find_queue_families(g_physical_device, g_surface) or_return
   g_graphics_family = indices.graphics_family
   g_present_family = indices.present_family
-  support_details := query_physical_device_swapchain_support(
+  support_details := query_swapchain_support(
     g_physical_device,
     g_surface,
   ) or_return
   g_surface_capabilities = support_details.capabilities
   g_surface_formats = support_details.formats
   g_present_modes = support_details.present_modes
-  support_details.formats = nil
-  support_details.present_modes = nil
-  swapchain_support_deinit(&support_details)
-
-
   queue_create_infos_list := make([dynamic]vk.DeviceQueueCreateInfo, 0, 2)
   defer delete(queue_create_infos_list)
   unique_queue_families := make(map[u32]struct {
     }, 2)
   defer delete(unique_queue_families)
-
   unique_queue_families[g_graphics_family] = {}
   unique_queue_families[g_present_family] = {}
   queue_priority: f32 = 1.0
@@ -510,12 +461,10 @@ logical_device_init :: proc() -> vk.Result {
       },
     )
   }
-
   dynamic_rendering_feature := vk.PhysicalDeviceDynamicRenderingFeaturesKHR {
     sType            = .PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES_KHR,
     dynamicRendering = true,
   }
-
   device_create_info := vk.DeviceCreateInfo {
     sType                   = .DEVICE_CREATE_INFO,
     queueCreateInfoCount    = u32(len(queue_create_infos_list)),
@@ -525,12 +474,10 @@ logical_device_init :: proc() -> vk.Result {
     pNext                   = &dynamic_rendering_feature,
     // pEnabledFeatures = &vk.PhysicalDeviceFeatures{}, // Set if specific base features needed
   }
-
   when ENABLE_VALIDATION_LAYERS {
     device_create_info.enabledLayerCount = u32(len(VALIDATION_LAYERS))
     device_create_info.ppEnabledLayerNames = raw_data(VALIDATION_LAYERS)
   }
-
   vk.CreateDevice(
     g_physical_device,
     &device_create_info,
