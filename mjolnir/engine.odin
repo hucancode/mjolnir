@@ -252,7 +252,7 @@ engine_build_renderer :: proc(engine: ^Engine) -> vk.Result {
       sType              = .DESCRIPTOR_SET_ALLOCATE_INFO,
       descriptorPool     = g_descriptor_pool,
       descriptorSetCount = 1,
-      pSetLayouts        = &environment_descriptor_set_layout,
+      pSetLayouts        = &g_environment_descriptor_set_layout,
     }
   vk.AllocateDescriptorSets(
     g_device,

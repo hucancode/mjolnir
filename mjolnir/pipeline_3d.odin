@@ -27,49 +27,57 @@ ShaderConfig :: struct {
   has_emissive_texture:           b32,
 }
 
-camera_descriptor_set_layout: vk.DescriptorSetLayout
-environment_descriptor_set_layout: vk.DescriptorSetLayout
-texture_descriptor_set_layout: vk.DescriptorSetLayout
-skinning_descriptor_set_layout: vk.DescriptorSetLayout
-pipeline_layout: vk.PipelineLayout
-pipelines: [SHADER_VARIANT_COUNT]vk.Pipeline
+g_camera_descriptor_set_layout: vk.DescriptorSetLayout
+g_environment_descriptor_set_layout: vk.DescriptorSetLayout
+g_texture_descriptor_set_layout: vk.DescriptorSetLayout
+g_skinning_descriptor_set_layout: vk.DescriptorSetLayout
+g_pipeline_layout: vk.PipelineLayout
+g_pipelines: [SHADER_VARIANT_COUNT]vk.Pipeline
 SHADER_UBER_VERT :: #load("shader/uber/vert.spv")
 SHADER_UBER_FRAG :: #load("shader/uber/frag.spv")
 
 pipeline3d_deinit :: proc() {
-  for i in 0 ..< len(pipelines) {
-    if pipelines[i] != 0 {
-      vk.DestroyPipeline(g_device, pipelines[i], nil)
-      pipelines[i] = 0
+  for i in 0 ..< len(g_pipelines) {
+    if g_pipelines[i] != 0 {
+      vk.DestroyPipeline(g_device, g_pipelines[i], nil)
+      g_pipelines[i] = 0
     }
   }
-  if pipeline_layout != 0 {
-    vk.DestroyPipelineLayout(g_device, pipeline_layout, nil)
-    pipeline_layout = 0
+  if g_pipeline_layout != 0 {
+    vk.DestroyPipelineLayout(g_device, g_pipeline_layout, nil)
+    g_pipeline_layout = 0
   }
-  if camera_descriptor_set_layout != 0 {
-    vk.DestroyDescriptorSetLayout(g_device, camera_descriptor_set_layout, nil)
-    camera_descriptor_set_layout = 0
-  }
-  if environment_descriptor_set_layout != 0 {
+  if g_camera_descriptor_set_layout != 0 {
     vk.DestroyDescriptorSetLayout(
       g_device,
-      environment_descriptor_set_layout,
+      g_camera_descriptor_set_layout,
       nil,
     )
-    environment_descriptor_set_layout = 0
+    g_camera_descriptor_set_layout = 0
   }
-  if texture_descriptor_set_layout != 0 {
-    vk.DestroyDescriptorSetLayout(g_device, texture_descriptor_set_layout, nil)
-    texture_descriptor_set_layout = 0
-  }
-  if skinning_descriptor_set_layout != 0 {
+  if g_environment_descriptor_set_layout != 0 {
     vk.DestroyDescriptorSetLayout(
       g_device,
-      skinning_descriptor_set_layout,
+      g_environment_descriptor_set_layout,
       nil,
     )
-    skinning_descriptor_set_layout = 0
+    g_environment_descriptor_set_layout = 0
+  }
+  if g_texture_descriptor_set_layout != 0 {
+    vk.DestroyDescriptorSetLayout(
+      g_device,
+      g_texture_descriptor_set_layout,
+      nil,
+    )
+    g_texture_descriptor_set_layout = 0
+  }
+  if g_skinning_descriptor_set_layout != 0 {
+    vk.DestroyDescriptorSetLayout(
+      g_device,
+      g_skinning_descriptor_set_layout,
+      nil,
+    )
+    g_skinning_descriptor_set_layout = 0
   }
 }
 
@@ -112,7 +120,7 @@ build_3d_pipelines :: proc(
     g_device,
     &layout_info_main,
     nil,
-    &camera_descriptor_set_layout,
+    &g_camera_descriptor_set_layout,
   ) or_return
   pipeline_infos: [SHADER_VARIANT_COUNT]vk.GraphicsPipelineCreateInfo
   spec_infos: [SHADER_VARIANT_COUNT]vk.SpecializationInfo
@@ -231,7 +239,7 @@ build_3d_pipelines :: proc(
       pBindings = raw_data(texture_bindings),
     },
     nil,
-    &texture_descriptor_set_layout,
+    &g_texture_descriptor_set_layout,
   ) or_return
   skinning_bindings := []vk.DescriptorSetLayoutBinding {
     {
@@ -249,7 +257,7 @@ build_3d_pipelines :: proc(
       pBindings = raw_data(skinning_bindings),
     },
     nil,
-    &skinning_descriptor_set_layout,
+    &g_skinning_descriptor_set_layout,
   ) or_return
   environment_bindings := []vk.DescriptorSetLayoutBinding {
     {
@@ -267,14 +275,14 @@ build_3d_pipelines :: proc(
       pBindings = raw_data(environment_bindings),
     },
     nil,
-    &environment_descriptor_set_layout,
+    &g_environment_descriptor_set_layout,
   ) or_return
 
   set_layouts := [?]vk.DescriptorSetLayout {
-    camera_descriptor_set_layout, // set = 0
-    texture_descriptor_set_layout, // set = 1
-    skinning_descriptor_set_layout, // set = 2
-    environment_descriptor_set_layout, // set = 3
+    g_camera_descriptor_set_layout, // set = 0
+    g_texture_descriptor_set_layout, // set = 1
+    g_skinning_descriptor_set_layout, // set = 2
+    g_environment_descriptor_set_layout, // set = 3
   }
   push_constant_range := vk.PushConstantRange {
     stageFlags = {.VERTEX},
@@ -291,7 +299,7 @@ build_3d_pipelines :: proc(
     g_device,
     &pipeline_layout_info,
     nil,
-    &pipeline_layout,
+    &g_pipeline_layout,
   ) or_return
   for mask in 0 ..< SHADER_VARIANT_COUNT {
     features := transmute(ShaderFeatureSet)mask
@@ -376,7 +384,7 @@ build_3d_pipelines :: proc(
       pColorBlendState    = &blending,
       pDynamicState       = &dynamic_state_info,
       pDepthStencilState  = &depth_stencil_state,
-      layout              = pipeline_layout,
+      layout              = g_pipeline_layout,
     }
   }
   vk.CreateGraphicsPipelines(
@@ -385,7 +393,7 @@ build_3d_pipelines :: proc(
     len(pipeline_infos),
     raw_data(pipeline_infos[:]),
     nil,
-    raw_data(pipelines[:]),
+    raw_data(g_pipelines[:]),
   ) or_return
   return .SUCCESS
 }
@@ -393,7 +401,7 @@ build_3d_pipelines :: proc(
 UNLIT_SHADER_OPTION_COUNT :: 2
 UNLIT_SHADER_VARIANT_COUNT: u32 : 1 << UNLIT_SHADER_OPTION_COUNT
 
-unlit_pipelines: [UNLIT_SHADER_VARIANT_COUNT]vk.Pipeline
+g_unlit_pipelines: [UNLIT_SHADER_VARIANT_COUNT]vk.Pipeline
 
 SHADER_UNLIT_VERT :: #load("shader/unlit/vert.spv")
 SHADER_UNLIT_FRAG :: #load("shader/unlit/frag.spv")
@@ -532,7 +540,7 @@ build_3d_unlit_pipelines :: proc(
       pColorBlendState    = &blending,
       pDynamicState       = &dynamic_state_info,
       pDepthStencilState  = &depth_stencil_state,
-      layout              = pipeline_layout,
+      layout              = g_pipeline_layout,
     }
   }
   vk.CreateGraphicsPipelines(
@@ -541,7 +549,7 @@ build_3d_unlit_pipelines :: proc(
     len(pipeline_infos),
     raw_data(pipeline_infos[:]),
     nil,
-    raw_data(unlit_pipelines[:]),
+    raw_data(g_unlit_pipelines[:]),
   ) or_return
   return .SUCCESS
 }

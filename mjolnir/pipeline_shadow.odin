@@ -11,19 +11,19 @@ SHADOW_SHADER_VARIANT_COUNT :: 1 << SHADOW_SHADER_OPTION_COUNT
 ShadowShaderConfig :: struct {
   is_skinned: b32,
 }
-shadow_pipeline_layout: vk.PipelineLayout
-shadow_pipelines: [SHADOW_SHADER_VARIANT_COUNT]vk.Pipeline
+g_shadow_pipeline_layout: vk.PipelineLayout
+g_shadow_pipelines: [SHADOW_SHADER_VARIANT_COUNT]vk.Pipeline
 
 pipeline_shadow_deinit :: proc() {
-  for i in 0 ..< len(shadow_pipelines) {
-    if shadow_pipelines[i] != 0 {
-      vk.DestroyPipeline(g_device, shadow_pipelines[i], nil)
-      shadow_pipelines[i] = 0
+  for i in 0 ..< len(g_shadow_pipelines) {
+    if g_shadow_pipelines[i] != 0 {
+      vk.DestroyPipeline(g_device, g_shadow_pipelines[i], nil)
+      g_shadow_pipelines[i] = 0
     }
   }
-  if shadow_pipeline_layout != 0 {
-    vk.DestroyPipelineLayout(g_device, shadow_pipeline_layout, nil)
-    shadow_pipeline_layout = 0
+  if g_shadow_pipeline_layout != 0 {
+    vk.DestroyPipelineLayout(g_device, g_shadow_pipeline_layout, nil)
+    g_shadow_pipeline_layout = 0
   }
 }
 
@@ -31,8 +31,8 @@ SHADER_SHADOW_VERT :: #load("shader/shadow/vert.spv")
 
 build_shadow_pipelines :: proc(depth_format: vk.Format) -> vk.Result {
   set_layouts := [?]vk.DescriptorSetLayout {
-    camera_descriptor_set_layout,
-    skinning_descriptor_set_layout,
+    g_camera_descriptor_set_layout,
+    g_skinning_descriptor_set_layout,
   }
   push_constant_range := vk.PushConstantRange {
     stageFlags = {.VERTEX},
@@ -49,7 +49,7 @@ build_shadow_pipelines :: proc(depth_format: vk.Format) -> vk.Result {
     g_device,
     &pipeline_layout_info,
     nil,
-    &shadow_pipeline_layout,
+    &g_shadow_pipeline_layout,
   ) or_return
   vert_module := create_shader_module(SHADER_SHADOW_VERT) or_return
   defer vk.DestroyShaderModule(g_device, vert_module, nil)
@@ -151,7 +151,7 @@ build_shadow_pipelines :: proc(depth_format: vk.Format) -> vk.Result {
       pMultisampleState   = &multisampling,
       pDynamicState       = &dynamic_state_info,
       pDepthStencilState  = &depth_stencil_state,
-      layout              = shadow_pipeline_layout,
+      layout              = g_shadow_pipeline_layout,
     }
   }
   vk.CreateGraphicsPipelines(
@@ -160,7 +160,7 @@ build_shadow_pipelines :: proc(depth_format: vk.Format) -> vk.Result {
     len(pipeline_infos),
     raw_data(pipeline_infos[:]),
     nil,
-    raw_data(shadow_pipelines[:]),
+    raw_data(g_shadow_pipelines[:]),
   ) or_return
   return .SUCCESS
 }

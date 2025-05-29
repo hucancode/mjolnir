@@ -55,10 +55,7 @@ Node :: struct {
   attachment: NodeAttachment,
 }
 
-SceneTraversalCallback :: #type proc(
-  node: ^Node,
-  cb_context: rawptr,
-) -> bool
+SceneTraversalCallback :: #type proc(node: ^Node, ctx: rawptr) -> bool
 
 init_node :: proc(node: ^Node, name_str: string = "") {
   node.children = make([dynamic]Handle, 0)
@@ -142,7 +139,14 @@ play_animation :: proc(
   return true
 }
 
-spawn_at :: proc(scene: ^Scene, position: linalg.Vector3f32, attachment: NodeAttachment = nil) -> (handle: Handle, node: ^Node) {
+spawn_at :: proc(
+  scene: ^Scene,
+  position: linalg.Vector3f32,
+  attachment: NodeAttachment = nil,
+) -> (
+  handle: Handle,
+  node: ^Node,
+) {
   handle, node = resource.alloc(&scene.nodes)
   if node != nil {
     init_node(node)
@@ -153,7 +157,13 @@ spawn_at :: proc(scene: ^Scene, position: linalg.Vector3f32, attachment: NodeAtt
   return
 }
 
-spawn :: proc(scene: ^Scene, attachment: NodeAttachment = nil) -> (handle: Handle, node: ^Node) {
+spawn :: proc(
+  scene: ^Scene,
+  attachment: NodeAttachment = nil,
+) -> (
+  handle: Handle,
+  node: ^Node,
+) {
   handle, node = resource.alloc(&scene.nodes)
   if node != nil {
     init_node(node)
@@ -163,7 +173,14 @@ spawn :: proc(scene: ^Scene, attachment: NodeAttachment = nil) -> (handle: Handl
   return
 }
 
-spawn_child :: proc(scene: ^Scene, parent: Handle, attachment: NodeAttachment = nil) -> (handle: Handle, node: ^Node) {
+spawn_child :: proc(
+  scene: ^Scene,
+  parent: Handle,
+  attachment: NodeAttachment = nil,
+) -> (
+  handle: Handle,
+  node: ^Node,
+) {
   handle, node = resource.alloc(&scene.nodes)
   if node != nil {
     init_node(node)
@@ -240,13 +257,10 @@ traverse_scene :: proc(
     }
     is_dirty := transform_update_local(&current_node.transform)
     if parent_is_dirty || is_dirty {
-        transform_update_world(&current_node.transform, parent_world_matrix)
+      transform_update_world(&current_node.transform, parent_world_matrix)
     }
     if callback != nil {
-      if !callback(
-        current_node,
-        cb_context,
-      ) {
+      if !callback(current_node, cb_context) {
         continue
       }
     }

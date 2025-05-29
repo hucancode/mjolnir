@@ -97,7 +97,7 @@ frame_init :: proc(self: ^Frame) -> (res: vk.Result) {
     sType              = .DESCRIPTOR_SET_ALLOCATE_INFO,
     descriptorPool     = g_descriptor_pool,
     descriptorSetCount = 1,
-    pSetLayouts        = &camera_descriptor_set_layout,
+    pSetLayouts        = &g_camera_descriptor_set_layout,
   }
   vk.AllocateDescriptorSets(
     g_device,
@@ -212,7 +212,7 @@ renderer_deinit :: proc(self: ^Renderer) {
   for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
     frame_deinit(&self.frames[i])
   }
-  vk.DestroyDescriptorSetLayout(g_device, camera_descriptor_set_layout, nil)
+  vk.DestroyDescriptorSetLayout(g_device, g_camera_descriptor_set_layout, nil)
 }
 
 renderer_build_command_buffers :: proc(self: ^Renderer) -> vk.Result {
@@ -703,8 +703,8 @@ render_single_node :: proc(node: ^Node, cb_context: rawptr) -> bool {
       data.bone_buffer.size,
     )
     pipeline :=
-      pipelines[transmute(u32)material.features] if material.is_lit else unlit_pipelines[transmute(u32)material.features]
-    layout := pipeline_layout
+      g_pipelines[transmute(u32)material.features] if material.is_lit else g_unlit_pipelines[transmute(u32)material.features]
+    layout := g_pipeline_layout
     // fmt.printfln("rendering skeletal mesh with material %v", material)
     vk.CmdBindPipeline(ctx.command_buffer, .GRAPHICS, pipeline)
     // Bind all required descriptor sets (set 0: camera+shadow+cube shadow, set 1: material, set 2: skinning)
@@ -769,8 +769,8 @@ render_single_node :: proc(node: ^Node, cb_context: rawptr) -> bool {
       return true
     }
     pipeline :=
-      pipelines[transmute(u32)material.features] if material.is_lit else unlit_pipelines[transmute(u32)material.features]
-    layout := pipeline_layout
+      g_pipelines[transmute(u32)material.features] if material.is_lit else g_unlit_pipelines[transmute(u32)material.features]
+    layout := g_pipeline_layout
     // Bind all required descriptor sets (set 0: camera+shadow+cube shadow, set 1: material, set 2: skinning)
     descriptor_sets := [?]vk.DescriptorSet {
       renderer_get_camera_descriptor_set(&ctx.engine.renderer), // set 0
@@ -842,8 +842,8 @@ render_single_shadow :: proc(node: ^Node, cb_context: rawptr) -> bool {
     material := resource.get(ctx.engine.materials, mesh.material)
     if material == nil {return true}
     features: ShaderFeatureSet
-    pipeline := shadow_pipelines[transmute(u32)features]
-    layout := shadow_pipeline_layout
+    pipeline := g_shadow_pipelines[transmute(u32)features]
+    layout := g_shadow_pipeline_layout
     descriptor_sets := [?]vk.DescriptorSet {
       renderer_get_camera_descriptor_set(&ctx.engine.renderer), // set 0
     }
@@ -907,7 +907,7 @@ render_single_shadow :: proc(node: ^Node, cb_context: rawptr) -> bool {
     vk.CmdBindPipeline(
       ctx.command_buffer,
       .GRAPHICS,
-      shadow_pipelines[transmute(u32)ShaderFeatureSet{.SKINNING}],
+      g_shadow_pipelines[transmute(u32)ShaderFeatureSet{.SKINNING}],
     )
     offset_shadow :=
       (1 + shadow_idx * 6 + shadow_layer) * u32(aligned_scene_uniform_size)
@@ -915,7 +915,7 @@ render_single_shadow :: proc(node: ^Node, cb_context: rawptr) -> bool {
     vk.CmdBindDescriptorSets(
       ctx.command_buffer,
       .GRAPHICS,
-      shadow_pipeline_layout,
+      g_shadow_pipeline_layout,
       0,
       len(descriptor_sets),
       raw_data(descriptor_sets[:]),
@@ -924,7 +924,7 @@ render_single_shadow :: proc(node: ^Node, cb_context: rawptr) -> bool {
     )
     vk.CmdPushConstants(
       ctx.command_buffer,
-      shadow_pipeline_layout,
+      g_shadow_pipeline_layout,
       {.VERTEX},
       0,
       size_of(linalg.Matrix4f32),

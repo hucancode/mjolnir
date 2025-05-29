@@ -48,7 +48,7 @@ material_init_descriptor_set_layout :: proc(mat: ^Material) -> vk.Result {
     sType              = .DESCRIPTOR_SET_ALLOCATE_INFO,
     descriptorPool     = g_descriptor_pool,
     descriptorSetCount = 1,
-    pSetLayouts        = &texture_descriptor_set_layout,
+    pSetLayouts        = &g_texture_descriptor_set_layout,
   }
   vk.AllocateDescriptorSets(
     g_device,
@@ -59,7 +59,7 @@ material_init_descriptor_set_layout :: proc(mat: ^Material) -> vk.Result {
     sType              = .DESCRIPTOR_SET_ALLOCATE_INFO,
     descriptorPool     = g_descriptor_pool,
     descriptorSetCount = 1,
-    pSetLayouts        = &skinning_descriptor_set_layout,
+    pSetLayouts        = &g_skinning_descriptor_set_layout,
   }
   vk.AllocateDescriptorSets(
     g_device,

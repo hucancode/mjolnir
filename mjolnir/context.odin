@@ -247,21 +247,21 @@ surface_init :: proc() -> vk.Result {
 }
 
 query_physical_device_swapchain_support :: proc(
-  pdevice: vk.PhysicalDevice,
+  physical_device: vk.PhysicalDevice,
   surface: vk.SurfaceKHR,
 ) -> (
   support: SwapchainSupport,
   res: vk.Result,
 ) {
   vk.GetPhysicalDeviceSurfaceCapabilitiesKHR(
-    pdevice,
+    physical_device,
     surface,
     &support.capabilities,
   ) or_return
 
   count: u32
   vk.GetPhysicalDeviceSurfaceFormatsKHR(
-    pdevice,
+    physical_device,
     surface,
     &count,
     nil,
@@ -269,7 +269,7 @@ query_physical_device_swapchain_support :: proc(
   if count > 0 {
     support.formats = make([]vk.SurfaceFormatKHR, count)
     vk.GetPhysicalDeviceSurfaceFormatsKHR(
-      pdevice,
+      physical_device,
       surface,
       &count,
       raw_data(support.formats),
@@ -277,7 +277,7 @@ query_physical_device_swapchain_support :: proc(
   }
 
   vk.GetPhysicalDeviceSurfacePresentModesKHR(
-    pdevice,
+    physical_device,
     surface,
     &count,
     nil,
@@ -285,7 +285,7 @@ query_physical_device_swapchain_support :: proc(
   if count > 0 {
     support.present_modes = make([]vk.PresentModeKHR, count)
     vk.GetPhysicalDeviceSurfacePresentModesKHR(
-      pdevice,
+      physical_device,
       surface,
       &count,
       raw_data(support.present_modes),
