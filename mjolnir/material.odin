@@ -17,7 +17,6 @@ Material :: struct {
   skinning_descriptor_set:   vk.DescriptorSet,
   features:                  ShaderFeatureSet,
   is_lit:                    bool,
-  ctx:                       ^VulkanContext,
   albedo_handle:             Handle,
   metallic_roughness_handle: Handle,
   normal_handle:             Handle,
@@ -31,10 +30,9 @@ Material :: struct {
 }
 
 material_deinit :: proc(self: ^Material) {
-  if self == nil || self.ctx == nil {
+  if self == nil {
     return
   }
-  vkd := self.ctx.vkd
   if self.texture_descriptor_set != 0 {
     // Descriptor sets are freed with the pool, so do not explicitly destroy
     self.texture_descriptor_set = 0
@@ -42,32 +40,29 @@ material_deinit :: proc(self: ^Material) {
   if self.skinning_descriptor_set != 0 {
     self.skinning_descriptor_set = 0
   }
-  data_buffer_deinit(&self.fallback_buffer, self.ctx)
+  data_buffer_deinit(&self.fallback_buffer)
 }
 
-material_init_descriptor_set_layout :: proc(
-  mat: ^Material,
-  ctx: ^VulkanContext,
-) -> vk.Result {
+material_init_descriptor_set_layout :: proc(mat: ^Material) -> vk.Result {
   alloc_info_texture := vk.DescriptorSetAllocateInfo {
     sType              = .DESCRIPTOR_SET_ALLOCATE_INFO,
-    descriptorPool     = ctx.descriptor_pool,
+    descriptorPool     = g_descriptor_pool,
     descriptorSetCount = 1,
     pSetLayouts        = &texture_descriptor_set_layout,
   }
   vk.AllocateDescriptorSets(
-    ctx.vkd,
+    g_device,
     &alloc_info_texture,
     &mat.texture_descriptor_set,
   ) or_return
   alloc_info_skinning := vk.DescriptorSetAllocateInfo {
     sType              = .DESCRIPTOR_SET_ALLOCATE_INFO,
-    descriptorPool     = ctx.descriptor_pool,
+    descriptorPool     = g_descriptor_pool,
     descriptorSetCount = 1,
     pSetLayouts        = &skinning_descriptor_set_layout,
   }
   vk.AllocateDescriptorSets(
-    ctx.vkd,
+    g_device,
     &alloc_info_skinning,
     &mat.skinning_descriptor_set,
   ) or_return
@@ -82,7 +77,7 @@ material_update_textures :: proc(
   displacement: ^Texture = nil,
   emissive: ^Texture = nil,
 ) -> vk.Result {
-  if mat.ctx == nil || mat.texture_descriptor_set == 0 {
+  if mat.texture_descriptor_set == 0 {
     return .ERROR_INITIALIZATION_FAILED
   }
 
@@ -190,13 +185,7 @@ material_update_textures :: proc(
     },
   )
 
-  vk.UpdateDescriptorSets(
-    mat.ctx.vkd,
-    u32(len(writes)),
-    raw_data(writes),
-    0,
-    nil,
-  )
+  vk.UpdateDescriptorSets(g_device, u32(len(writes)), raw_data(writes), 0, nil)
   return .SUCCESS
 }
 material_update_bone_buffer :: proc(
@@ -204,11 +193,9 @@ material_update_bone_buffer :: proc(
   buffer: vk.Buffer,
   size: vk.DeviceSize,
 ) {
-  if mat.ctx == nil || mat.texture_descriptor_set == 0 {
+  if mat.texture_descriptor_set == 0 {
     return
   }
-  vkd := mat.ctx.vkd
-
   buffer_info := vk.DescriptorBufferInfo {
     buffer = buffer,
     offset = 0,
@@ -222,7 +209,7 @@ material_update_bone_buffer :: proc(
     descriptorCount = 1,
     pBufferInfo     = &buffer_info,
   }
-  vk.UpdateDescriptorSets(vkd, 1, &write, 0, nil)
+  vk.UpdateDescriptorSets(g_device, 1, &write, 0, nil)
 }
 
 create_material :: proc(
@@ -243,7 +230,6 @@ create_material :: proc(
   res: vk.Result,
 ) {
   ret, mat = resource.alloc(&engine.materials)
-  mat.ctx = &engine.ctx
   mat.is_lit = true
   mat.features = features
 
@@ -258,7 +244,7 @@ create_material :: proc(
   mat.roughness_value = roughness_value
   mat.emissive_value = emissive_value
 
-  material_init_descriptor_set_layout(mat, &engine.ctx) or_return
+  material_init_descriptor_set_layout(mat) or_return
   fallbacks := MaterialFallbacks {
     albedo    = mat.albedo_value,
     emissive  = mat.emissive_value,
@@ -267,7 +253,6 @@ create_material :: proc(
   }
 
   mat.fallback_buffer = create_host_visible_buffer(
-    mat.ctx,
     size_of(MaterialFallbacks),
     {.UNIFORM_BUFFER},
     &fallbacks,
@@ -304,18 +289,16 @@ create_unlit_material :: proc(
   res: vk.Result,
 ) {
   ret, mat = resource.alloc(&engine.materials)
-  mat.ctx = &engine.ctx
   mat.is_lit = false
   mat.features = features
   mat.albedo_handle = albedo_handle
   mat.albedo_value = albedo_value
-  material_init_descriptor_set_layout(mat, &engine.ctx) or_return
+  material_init_descriptor_set_layout(mat) or_return
   albedo := resource.get(engine.textures, albedo_handle)
   fallbacks := MaterialFallbacks {
     albedo = mat.albedo_value,
   }
   mat.fallback_buffer = create_host_visible_buffer(
-    mat.ctx,
     size_of(MaterialFallbacks),
     {.UNIFORM_BUFFER},
     &fallbacks,

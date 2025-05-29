@@ -12,48 +12,36 @@ Pipeline2D :: struct {
   texture_descriptor_set:    vk.DescriptorSet,
   pipeline_layout:           vk.PipelineLayout,
   pipeline:                  vk.Pipeline,
-  ctx:                       ^VulkanContext,
 }
 
 pipeline2d_deinit :: proc(mat: ^Pipeline2D) {
-  if mat == nil || mat.ctx == nil { return }
-  vkd := mat.ctx.vkd
+  if mat == nil {return}
   if mat.pipeline != 0 {
-    vk.DestroyPipeline(vkd, mat.pipeline, nil)
+    vk.DestroyPipeline(g_device, mat.pipeline, nil)
     mat.pipeline = 0
   }
   if mat.pipeline_layout != 0 {
-    vk.DestroyPipelineLayout(vkd, mat.pipeline_layout, nil)
+    vk.DestroyPipelineLayout(g_device, mat.pipeline_layout, nil)
     mat.pipeline_layout = 0
   }
   if mat.projection_layout != 0 {
-    vk.DestroyDescriptorSetLayout(vkd, mat.projection_layout, nil)
+    vk.DestroyDescriptorSetLayout(g_device, mat.projection_layout, nil)
     mat.projection_layout = 0
   }
   if mat.texture_layout != 0 {
-    vk.DestroyDescriptorSetLayout(vkd, mat.texture_layout, nil)
+    vk.DestroyDescriptorSetLayout(g_device, mat.texture_layout, nil)
     mat.texture_layout = 0
   }
 }
 
 pipeline2d_init :: proc(
   mat: ^Pipeline2D,
-  ctx: ^VulkanContext,
   color_format: vk.Format,
 ) -> vk.Result {
-  mat.ctx = ctx
-  vkd := ctx.vkd
-
-  vert_shader_module := create_shader_module(
-    ctx,
-    SHADER_MICROUI_VERT,
-  ) or_return
-  defer vk.DestroyShaderModule(vkd, vert_shader_module, nil)
-  frag_shader_module := create_shader_module(
-    ctx,
-    SHADER_MICROUI_FRAG,
-  ) or_return
-  defer vk.DestroyShaderModule(vkd, frag_shader_module, nil)
+  vert_shader_module := create_shader_module(SHADER_MICROUI_VERT) or_return
+  defer vk.DestroyShaderModule(g_device, vert_shader_module, nil)
+  frag_shader_module := create_shader_module(SHADER_MICROUI_FRAG) or_return
+  defer vk.DestroyShaderModule(g_device, frag_shader_module, nil)
 
   shader_stages := [?]vk.PipelineShaderStageCreateInfo {
     {
@@ -115,15 +103,15 @@ pipeline2d_init :: proc(
     topology = .TRIANGLE_LIST,
   }
   viewport := vk.Viewport {
-    width    = f32(ctx.surface_capabilities.currentExtent.width),
-    height   = f32(ctx.surface_capabilities.currentExtent.height),
+    width    = f32(g_surface_capabilities.currentExtent.width),
+    height   = f32(g_surface_capabilities.currentExtent.height),
     minDepth = 0,
     maxDepth = 1,
   }
   scissor := vk.Rect2D {
     extent = {
-      width = ctx.surface_capabilities.currentExtent.width,
-      height = ctx.surface_capabilities.currentExtent.height,
+      width = g_surface_capabilities.currentExtent.width,
+      height = g_surface_capabilities.currentExtent.height,
     },
   }
   viewport_state := vk.PipelineViewportStateCreateInfo {
@@ -168,24 +156,24 @@ pipeline2d_init :: proc(
     },
   }
   vk.CreateDescriptorSetLayout(
-    vkd,
+    g_device,
     &projection_layout_info,
     nil,
     &mat.projection_layout,
   ) or_return
   projection_alloc_info := vk.DescriptorSetAllocateInfo {
     sType              = .DESCRIPTOR_SET_ALLOCATE_INFO,
-    descriptorPool     = ctx.descriptor_pool,
+    descriptorPool     = g_descriptor_pool,
     descriptorSetCount = 1,
     pSetLayouts        = &mat.projection_layout,
   }
   vk.AllocateDescriptorSets(
-    vkd,
+    g_device,
     &projection_alloc_info,
     &mat.projection_descriptor_set,
   ) or_return
   vk.CreateDescriptorSetLayout(
-    vkd,
+    g_device,
     &vk.DescriptorSetLayoutCreateInfo {
       sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
       bindingCount = 1,
@@ -200,10 +188,10 @@ pipeline2d_init :: proc(
     &mat.texture_layout,
   ) or_return
   vk.AllocateDescriptorSets(
-    vkd,
+    g_device,
     &vk.DescriptorSetAllocateInfo {
       sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
-      descriptorPool = ctx.descriptor_pool,
+      descriptorPool = g_descriptor_pool,
       descriptorSetCount = 1,
       pSetLayouts = &mat.texture_layout,
     },
@@ -219,7 +207,7 @@ pipeline2d_init :: proc(
     pSetLayouts    = raw_data(set_layouts[:]),
   }
   vk.CreatePipelineLayout(
-    vkd,
+    g_device,
     &pipeline_layout_info,
     nil,
     &mat.pipeline_layout,
@@ -250,7 +238,7 @@ pipeline2d_init :: proc(
     layout              = mat.pipeline_layout,
   }
   vk.CreateGraphicsPipelines(
-    vkd,
+    g_device,
     0,
     1,
     &pipeline_info,

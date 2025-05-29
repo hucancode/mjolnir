@@ -3,11 +3,11 @@ package mjolnir
 import "core:fmt"
 import "core:math"
 import linalg "core:math/linalg"
-import mu "vendor:microui"
-import vk "vendor:vulkan"
+import "core:time"
 import "geometry"
 import "resource"
-import "core:time"
+import mu "vendor:microui"
+import vk "vendor:vulkan"
 
 MAX_FRAMES_IN_FLIGHT :: 2
 
@@ -54,7 +54,6 @@ clear_lights :: proc(self: ^SceneLightUniform) {
 }
 
 Frame :: struct {
-  ctx:                            ^VulkanContext,
   image_available_semaphore:      vk.Semaphore,
   render_finished_semaphore:      vk.Semaphore,
   fence:                          vk.Fence,
@@ -68,18 +67,14 @@ Frame :: struct {
   cube_shadow_map_descriptor_set: vk.DescriptorSet,
 }
 
-frame_init :: proc(self: ^Frame, ctx: ^VulkanContext) -> (res: vk.Result) {
-  self.ctx = ctx
-  min_alignment :=
-    ctx.physical_device_properties.limits.minUniformBufferOffsetAlignment
+frame_init :: proc(self: ^Frame) -> (res: vk.Result) {
+  min_alignment := g_device_properties.limits.minUniformBufferOffsetAlignment
   aligned_scene_uniform_size := align_up(size_of(SceneUniform), min_alignment)
   self.camera_uniform = create_host_visible_buffer(
-    ctx,
     (1 + 6 * MAX_SCENE_UNIFORMS) * aligned_scene_uniform_size,
     {.UNIFORM_BUFFER},
   ) or_return
   self.light_uniform = create_host_visible_buffer(
-    ctx,
     size_of(SceneLightUniform),
     {.UNIFORM_BUFFER},
   ) or_return
@@ -87,14 +82,12 @@ frame_init :: proc(self: ^Frame, ctx: ^VulkanContext) -> (res: vk.Result) {
   for i in 0 ..< MAX_SHADOW_MAPS {
     depth_texture_init(
       &self.shadow_maps[i],
-      ctx,
       SHADOW_MAP_SIZE,
       SHADOW_MAP_SIZE,
       {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
     ) or_return
     cube_depth_texture_init(
       &self.cube_shadow_maps[i],
-      ctx,
       SHADOW_MAP_SIZE,
       {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
     ) or_return
@@ -102,12 +95,12 @@ frame_init :: proc(self: ^Frame, ctx: ^VulkanContext) -> (res: vk.Result) {
 
   alloc_info_main := vk.DescriptorSetAllocateInfo {
     sType              = .DESCRIPTOR_SET_ALLOCATE_INFO,
-    descriptorPool     = ctx.descriptor_pool,
+    descriptorPool     = g_descriptor_pool,
     descriptorSetCount = 1,
     pSetLayouts        = &camera_descriptor_set_layout,
   }
   vk.AllocateDescriptorSets(
-    ctx.vkd,
+    g_device,
     &alloc_info_main,
     &self.camera_descriptor_set,
   ) or_return
@@ -172,33 +165,26 @@ frame_init :: proc(self: ^Frame, ctx: ^VulkanContext) -> (res: vk.Result) {
       pImageInfo = raw_data(cube_shadow_map_image_infos[:]),
     },
   }
-  vk.UpdateDescriptorSets(ctx.vkd, len(writes), raw_data(writes[:]), 0, nil)
+  vk.UpdateDescriptorSets(g_device, len(writes), raw_data(writes[:]), 0, nil)
 
   return .SUCCESS
 }
 
 frame_deinit :: proc(self: ^Frame) {
-  if self.ctx == nil {return}
+  vk.DestroySemaphore(g_device, self.image_available_semaphore, nil)
+  vk.DestroySemaphore(g_device, self.render_finished_semaphore, nil)
+  vk.DestroyFence(g_device, self.fence, nil)
+  vk.FreeCommandBuffers(g_device, g_command_pool, 1, &self.command_buffer)
 
-  vkd := self.ctx.vkd
-  command_pool := self.ctx.command_pool
-
-  vk.DestroySemaphore(vkd, self.image_available_semaphore, nil)
-  vk.DestroySemaphore(vkd, self.render_finished_semaphore, nil)
-  vk.DestroyFence(vkd, self.fence, nil)
-  vk.FreeCommandBuffers(vkd, command_pool, 1, &self.command_buffer)
-
-  data_buffer_deinit(&self.camera_uniform, self.ctx)
-  data_buffer_deinit(&self.light_uniform, self.ctx)
+  data_buffer_deinit(&self.camera_uniform)
+  data_buffer_deinit(&self.light_uniform)
   for i in 0 ..< MAX_SHADOW_MAPS {
     depth_texture_deinit(&self.shadow_maps[i])
     cube_depth_texture_deinit(&self.cube_shadow_maps[i])
   }
-  self.ctx = nil
 }
 
 Renderer :: struct {
-  ctx:                        ^VulkanContext,
   swapchain:                  vk.SwapchainKHR,
   format:                     vk.SurfaceFormatKHR,
   extent:                     vk.Extent2D,
@@ -212,37 +198,33 @@ Renderer :: struct {
   current_frame_index:        u32,
 }
 
-renderer_init :: proc(self: ^Renderer, ctx: ^VulkanContext) -> vk.Result {
-  self.ctx = ctx
+renderer_init :: proc(self: ^Renderer) -> vk.Result {
   self.current_frame_index = 0
   for &frame in self.frames {
-    frame_init(&frame, ctx) or_return
+    frame_init(&frame) or_return
   }
   return .SUCCESS
 }
 
 renderer_deinit :: proc(self: ^Renderer) {
-  if self.ctx == nil {return}
-  vkd := self.ctx.vkd
-  vk.DeviceWaitIdle(vkd)
+  vk.DeviceWaitIdle(g_device)
   renderer_destroy_swapchain_resources(self)
   for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
     frame_deinit(&self.frames[i])
   }
-  vk.DestroyDescriptorSetLayout(vkd, camera_descriptor_set_layout, nil)
-  self.ctx = nil
+  vk.DestroyDescriptorSetLayout(g_device, camera_descriptor_set_layout, nil)
 }
 
 renderer_build_command_buffers :: proc(self: ^Renderer) -> vk.Result {
   alloc_info := vk.CommandBufferAllocateInfo {
     sType              = .COMMAND_BUFFER_ALLOCATE_INFO,
-    commandPool        = self.ctx.command_pool,
+    commandPool        = g_command_pool,
     level              = .PRIMARY,
     commandBufferCount = 1,
   }
   for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
     vk.AllocateCommandBuffers(
-      self.ctx.vkd,
+      g_device,
       &alloc_info,
       &self.frames[i].command_buffer,
     ) or_return
@@ -262,18 +244,18 @@ renderer_build_synchronizers :: proc(self: ^Renderer) -> vk.Result {
   for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
     frame := &self.frames[i]
     vk.CreateSemaphore(
-      self.ctx.vkd,
+      g_device,
       &semaphore_info,
       nil,
       &frame.image_available_semaphore,
     ) or_return
     vk.CreateSemaphore(
-      self.ctx.vkd,
+      g_device,
       &semaphore_info,
       nil,
       &frame.render_finished_semaphore,
     ) or_return
-    vk.CreateFence(self.ctx.vkd, &fence_info, nil, &frame.fence) or_return
+    vk.CreateFence(g_device, &fence_info, nil, &frame.fence) or_return
   }
   return .SUCCESS
 }
@@ -339,44 +321,44 @@ renderer_recreate_swapchain :: proc(
   width: u32,
   height: u32,
 ) -> vk.Result {
-  vk.DeviceWaitIdle(self.ctx.vkd)
+  vk.DeviceWaitIdle(g_device)
   renderer_destroy_swapchain_resources(self) // Destroy old swapchain and related resources
   // Re-query surface capabilities as they might have changed (e.g. window resize)
   capabilities: vk.SurfaceCapabilitiesKHR
   vk.GetPhysicalDeviceSurfaceCapabilitiesKHR(
-    self.ctx.physical_device,
-    self.ctx.surface,
+    g_physical_device,
+    g_surface,
     &capabilities,
   ) or_return
   // Re-query surface formats (usually don't change, but good practice)
   format_count: u32
   vk.GetPhysicalDeviceSurfaceFormatsKHR(
-    self.ctx.physical_device,
-    self.ctx.surface,
+    g_physical_device,
+    g_surface,
     &format_count,
     nil,
   )
   available_formats := make([]vk.SurfaceFormatKHR, format_count)
   defer delete(available_formats)
   vk.GetPhysicalDeviceSurfaceFormatsKHR(
-    self.ctx.physical_device,
-    self.ctx.surface,
+    g_physical_device,
+    g_surface,
     &format_count,
     raw_data(available_formats),
   )
   // Re-query present modes
   present_mode_count: u32
   vk.GetPhysicalDeviceSurfacePresentModesKHR(
-    self.ctx.physical_device,
-    self.ctx.surface,
+    g_physical_device,
+    g_surface,
     &present_mode_count,
     nil,
   )
   available_present_modes := make([]vk.PresentModeKHR, present_mode_count)
   defer delete(available_present_modes)
   vk.GetPhysicalDeviceSurfacePresentModesKHR(
-    self.ctx.physical_device,
-    self.ctx.surface,
+    g_physical_device,
+    g_surface,
     &present_mode_count,
     raw_data(available_present_modes),
   )
@@ -399,7 +381,6 @@ renderer_create_swapchain_and_resources :: proc(
   window_width: u32,
   window_height: u32,
 ) -> vk.Result {
-  ctx := self.ctx
   renderer_build_swapchain_surface_format(self, formats)
   renderer_build_swapchain_extent(
     self,
@@ -416,7 +397,7 @@ renderer_create_swapchain_and_resources :: proc(
 
   create_info := vk.SwapchainCreateInfoKHR {
     sType            = .SWAPCHAIN_CREATE_INFO_KHR,
-    surface          = ctx.surface,
+    surface          = g_surface,
     minImageCount    = image_count,
     imageFormat      = self.format.format,
     imageColorSpace  = self.format.colorSpace,
@@ -429,8 +410,8 @@ renderer_create_swapchain_and_resources :: proc(
     clipped          = true,
   }
 
-  queue_family_indices := [2]u32{ctx.graphics_family, ctx.present_family}
-  if ctx.graphics_family != ctx.present_family {
+  queue_family_indices := [2]u32{g_graphics_family, g_present_family}
+  if g_graphics_family != g_present_family {
     create_info.imageSharingMode = .CONCURRENT
     create_info.queueFamilyIndexCount = 2
     create_info.pQueueFamilyIndices = raw_data(queue_family_indices[:])
@@ -438,17 +419,17 @@ renderer_create_swapchain_and_resources :: proc(
     create_info.imageSharingMode = .EXCLUSIVE
   }
 
-  vk.CreateSwapchainKHR(ctx.vkd, &create_info, nil, &self.swapchain) or_return
+  vk.CreateSwapchainKHR(g_device, &create_info, nil, &self.swapchain) or_return
   swapchain_image_count: u32
   vk.GetSwapchainImagesKHR(
-    ctx.vkd,
+    g_device,
     self.swapchain,
     &swapchain_image_count,
     nil,
   )
   self.images = make([]vk.Image, swapchain_image_count)
   vk.GetSwapchainImagesKHR(
-    ctx.vkd,
+    g_device,
     self.swapchain,
     &swapchain_image_count,
     raw_data(self.images),
@@ -456,7 +437,6 @@ renderer_create_swapchain_and_resources :: proc(
   self.views = make([]vk.ImageView, swapchain_image_count)
   for i in 0 ..< swapchain_image_count {
     self.views[i] = create_image_view(
-      ctx.vkd,
       self.images[i],
       self.format.format,
       {.COLOR},
@@ -464,7 +444,6 @@ renderer_create_swapchain_and_resources :: proc(
   }
   depth_format := vk.Format.D32_SFLOAT
   self.depth_buffer = malloc_image_buffer(
-    ctx,
     self.extent.width,
     self.extent.height,
     depth_format,
@@ -474,7 +453,6 @@ renderer_create_swapchain_and_resources :: proc(
   ) or_return
 
   self.depth_buffer.view = create_image_view(
-    ctx.vkd,
     self.depth_buffer.image,
     self.depth_buffer.format,
     {.DEPTH},
@@ -484,13 +462,11 @@ renderer_create_swapchain_and_resources :: proc(
 }
 
 renderer_destroy_swapchain_resources :: proc(self: ^Renderer) {
-  if self.ctx == nil {return}
-  vkd := self.ctx.vkd
-  image_buffer_deinit(vkd, &self.depth_buffer)
+  image_buffer_deinit(&self.depth_buffer)
   if self.views != nil {
     for view in self.views {
       if view != 0 {
-        vk.DestroyImageView(vkd, view, nil)
+        vk.DestroyImageView(g_device, view, nil)
       }
     }
     delete(self.views)
@@ -502,7 +478,7 @@ renderer_destroy_swapchain_resources :: proc(self: ^Renderer) {
     self.images = nil
   }
   if self.swapchain != 0 {
-    vk.DestroySwapchainKHR(vkd, self.swapchain, nil)
+    vk.DestroySwapchainKHR(g_device, self.swapchain, nil)
     self.swapchain = 0
   }
 }
@@ -620,7 +596,7 @@ renderer_build_swapchain :: proc(
   }
   create_info := vk.SwapchainCreateInfoKHR {
     sType            = .SWAPCHAIN_CREATE_INFO_KHR,
-    surface          = self.ctx.surface,
+    surface          = g_surface,
     minImageCount    = image_count,
     imageFormat      = self.format.format,
     imageColorSpace  = self.format.colorSpace,
@@ -641,22 +617,17 @@ renderer_build_swapchain :: proc(
   } else {
     create_info.imageSharingMode = .EXCLUSIVE
   }
-  vk.CreateSwapchainKHR(
-    self.ctx.vkd,
-    &create_info,
-    nil,
-    &self.swapchain,
-  ) or_return
+  vk.CreateSwapchainKHR(g_device, &create_info, nil, &self.swapchain) or_return
   swapchain_image_count: u32
   vk.GetSwapchainImagesKHR(
-    self.ctx.vkd,
+    g_device,
     self.swapchain,
     &swapchain_image_count,
     nil,
   )
   self.images = make([]vk.Image, swapchain_image_count)
   vk.GetSwapchainImagesKHR(
-    self.ctx.vkd,
+    g_device,
     self.swapchain,
     &swapchain_image_count,
     raw_data(self.images),
@@ -664,7 +635,6 @@ renderer_build_swapchain :: proc(
   self.views = make([]vk.ImageView, swapchain_image_count)
   for i in 0 ..< swapchain_image_count {
     self.views[i], _ = create_image_view(
-      self.ctx.vkd,
       self.images[i],
       self.format.format,
       {.COLOR},
@@ -674,10 +644,7 @@ renderer_build_swapchain :: proc(
   return .SUCCESS
 }
 
-prepare_light :: proc(
-  node: ^Node,
-  cb_context: rawptr,
-) -> bool {
+prepare_light :: proc(node: ^Node, cb_context: rawptr) -> bool {
   ctx := (^CollectLightsContext)(cb_context)
   uniform: SingleLightUniform
   #partial switch data in node.attachment {
@@ -686,14 +653,17 @@ prepare_light :: proc(
     uniform.color = data.color
     uniform.radius = data.radius
     uniform.has_shadow = b32(data.cast_shadow)
-    uniform.position = node.transform.world_matrix * linalg.Vector4f32{0, 0, 0, 1}
+    uniform.position =
+      node.transform.world_matrix * linalg.Vector4f32{0, 0, 0, 1}
     push_light(ctx.light_uniform, uniform)
   case DirectionalLightAttachment:
     uniform.kind = .DIRECTIONAL
     uniform.color = data.color
     uniform.has_shadow = b32(data.cast_shadow)
-    uniform.position = node.transform.world_matrix * linalg.Vector4f32{0, 0, 0, 1}
-    uniform.direction = node.transform.world_matrix * linalg.Vector4f32{0, 0, 1, 0} // Assuming +Z is forward
+    uniform.position =
+      node.transform.world_matrix * linalg.Vector4f32{0, 0, 0, 1}
+    uniform.direction =
+      node.transform.world_matrix * linalg.Vector4f32{0, 0, 1, 0} // Assuming +Z is forward
     push_light(ctx.light_uniform, uniform)
   case SpotLightAttachment:
     uniform.kind = .SPOT
@@ -701,17 +671,16 @@ prepare_light :: proc(
     uniform.radius = data.radius
     uniform.has_shadow = b32(data.cast_shadow)
     uniform.angle = data.angle
-    uniform.position = node.transform.world_matrix * linalg.Vector4f32{0, 0, 0, 1}
-    uniform.direction = node.transform.world_matrix * linalg.Vector4f32{0, 0, 1, 0}
+    uniform.position =
+      node.transform.world_matrix * linalg.Vector4f32{0, 0, 0, 1}
+    uniform.direction =
+      node.transform.world_matrix * linalg.Vector4f32{0, 0, 1, 0}
     push_light(ctx.light_uniform, uniform)
   }
   return true
 }
 
-render_single_node :: proc(
-  node: ^Node,
-  cb_context: rawptr,
-) -> bool {
+render_single_node :: proc(node: ^Node, cb_context: rawptr) -> bool {
   ctx := (^RenderMeshesContext)(cb_context)
   // fmt.printfln("rendering node", node_h,"matrix", world_matrix^)
 
@@ -721,7 +690,10 @@ render_single_node :: proc(
     if mesh == nil {return true}
     material := resource.get(ctx.engine.materials, mesh.material)
     if material == nil {return true}
-    world_aabb := geometry.aabb_transform(mesh.aabb, node.transform.world_matrix)
+    world_aabb := geometry.aabb_transform(
+      mesh.aabb,
+      node.transform.world_matrix,
+    )
     if !geometry.frustum_test_aabb(&ctx.camera_frustum, world_aabb) {
       return true
     }
@@ -737,11 +709,11 @@ render_single_node :: proc(
     vk.CmdBindPipeline(ctx.command_buffer, .GRAPHICS, pipeline)
     // Bind all required descriptor sets (set 0: camera+shadow+cube shadow, set 1: material, set 2: skinning)
     descriptor_sets := [?]vk.DescriptorSet {
-        renderer_get_camera_descriptor_set(&ctx.engine.renderer), // set 0
-        material.texture_descriptor_set, // set 1
-        material.skinning_descriptor_set, // set 2
-        ctx.engine.renderer.environment_descriptor_set, // set 3
-      }
+      renderer_get_camera_descriptor_set(&ctx.engine.renderer), // set 0
+      material.texture_descriptor_set, // set 1
+      material.skinning_descriptor_set, // set 2
+      ctx.engine.renderer.environment_descriptor_set, // set 3
+    }
     offsets := [1]u32{0}
     vk.CmdBindDescriptorSets(
       ctx.command_buffer,
@@ -789,7 +761,10 @@ render_single_node :: proc(
     if mesh == nil {return true}
     material := resource.get(ctx.engine.materials, mesh.material)
     if material == nil {return true}
-    world_aabb := geometry.aabb_transform(mesh.aabb, node.transform.world_matrix)
+    world_aabb := geometry.aabb_transform(
+      mesh.aabb,
+      node.transform.world_matrix,
+    )
     if !geometry.frustum_test_aabb(&ctx.camera_frustum, world_aabb) {
       return true
     }
@@ -798,11 +773,11 @@ render_single_node :: proc(
     layout := pipeline_layout
     // Bind all required descriptor sets (set 0: camera+shadow+cube shadow, set 1: material, set 2: skinning)
     descriptor_sets := [?]vk.DescriptorSet {
-        renderer_get_camera_descriptor_set(&ctx.engine.renderer), // set 0
-        material.texture_descriptor_set, // set 1
-        material.skinning_descriptor_set, // set 2
-        ctx.engine.renderer.environment_descriptor_set, // set 3
-      }
+      renderer_get_camera_descriptor_set(&ctx.engine.renderer), // set 0
+      material.texture_descriptor_set, // set 1
+      material.skinning_descriptor_set, // set 2
+      ctx.engine.renderer.environment_descriptor_set, // set 3
+    }
     offsets := [1]u32{0}
     vk.CmdBindPipeline(ctx.command_buffer, .GRAPHICS, pipeline)
     vk.CmdBindDescriptorSets(
@@ -843,15 +818,11 @@ render_single_node :: proc(
   return true
 }
 
-render_single_shadow :: proc(
-  node: ^Node,
-  cb_context: rawptr,
-) -> bool {
+render_single_shadow :: proc(node: ^Node, cb_context: rawptr) -> bool {
   ctx := (^ShadowRenderContext)(cb_context)
   shadow_idx := ctx.shadow_idx
   shadow_layer := ctx.shadow_layer
-  min_alignment :=
-    ctx.engine.ctx.physical_device_properties.limits.minUniformBufferOffsetAlignment
+  min_alignment := g_device_properties.limits.minUniformBufferOffsetAlignment
   aligned_scene_uniform_size := align_up(size_of(SceneUniform), min_alignment)
   #partial switch data in node.attachment {
   case StaticMeshAttachment:
@@ -861,7 +832,10 @@ render_single_shadow :: proc(
     mesh_handle := data.handle
     mesh := resource.get(ctx.engine.meshes, mesh_handle)
     if mesh == nil {return true}
-    world_aabb := geometry.aabb_transform(mesh.aabb, node.transform.world_matrix)
+    world_aabb := geometry.aabb_transform(
+      mesh.aabb,
+      node.transform.world_matrix,
+    )
     if !geometry.frustum_test_aabb(&ctx.frustum, world_aabb) {
       return true
     }
@@ -871,8 +845,8 @@ render_single_shadow :: proc(
     pipeline := shadow_pipelines[transmute(u32)features]
     layout := shadow_pipeline_layout
     descriptor_sets := [?]vk.DescriptorSet {
-        renderer_get_camera_descriptor_set(&ctx.engine.renderer), // set 0
-      }
+      renderer_get_camera_descriptor_set(&ctx.engine.renderer), // set 0
+    }
     vk.CmdBindPipeline(ctx.command_buffer, .GRAPHICS, pipeline)
     offset_shadow :=
       (1 + shadow_idx * 6 + shadow_layer) * u32(aligned_scene_uniform_size)
@@ -917,16 +891,19 @@ render_single_shadow :: proc(
     }
     mesh := resource.get(ctx.engine.skeletal_meshes, data.handle)
     if mesh == nil {return true}
-    world_aabb := geometry.aabb_transform(mesh.aabb, node.transform.world_matrix)
+    world_aabb := geometry.aabb_transform(
+      mesh.aabb,
+      node.transform.world_matrix,
+    )
     if !geometry.frustum_test_aabb(&ctx.frustum, world_aabb) {
       return true
     }
     material := resource.get(ctx.engine.materials, mesh.material)
     if material == nil {return true}
     descriptor_sets := [?]vk.DescriptorSet {
-        renderer_get_camera_descriptor_set(&ctx.engine.renderer), // set 0
-        material.skinning_descriptor_set, // set 1
-      }
+      renderer_get_camera_descriptor_set(&ctx.engine.renderer), // set 0
+      material.skinning_descriptor_set, // set 1
+    }
     vk.CmdBindPipeline(
       ctx.command_buffer,
       .GRAPHICS,
@@ -982,16 +959,15 @@ render_single_shadow :: proc(
 
 
 render :: proc(engine: ^Engine) -> vk.Result {
-  ctx := engine.renderer.ctx
   current_fence := renderer_get_in_flight_fence(&engine.renderer)
-  vk.WaitForFences(ctx.vkd, 1, &current_fence, true, math.max(u64)) or_return
-  vk.ResetFences(ctx.vkd, 1, &current_fence) or_return
+  vk.WaitForFences(g_device, 1, &current_fence, true, math.max(u64)) or_return
+  vk.ResetFences(g_device, 1, &current_fence) or_return
   image_idx: u32
   current_image_available_semaphore := renderer_get_image_available_semaphore(
     &engine.renderer,
   )
   vk.AcquireNextImageKHR(
-    ctx.vkd,
+    g_device,
     engine.renderer.swapchain,
     math.max(u64),
     current_image_available_semaphore,
@@ -1010,9 +986,7 @@ render :: proc(engine: ^Engine) -> vk.Result {
   elapsed_seconds := time.duration_seconds(time.since(engine.start_timestamp))
   scene_uniform := SceneUniform {
     view       = geometry.calculate_view_matrix(&engine.scene.camera),
-    projection = geometry.calculate_projection_matrix(
-      &engine.scene.camera,
-    ),
+    projection = geometry.calculate_projection_matrix(&engine.scene.camera),
     time       = f32(elapsed_seconds),
   }
   light_uniform: SceneLightUniform
@@ -1086,7 +1060,7 @@ render :: proc(engine: ^Engine) -> vk.Result {
     signalSemaphoreCount = 1,
     pSignalSemaphores    = &current_render_finished_semaphore,
   }
-  vk.QueueSubmit(ctx.graphics_queue, 1, &submit_info, current_fence) or_return
+  vk.QueueSubmit(g_graphics_queue, 1, &submit_info, current_fence) or_return
   image_indices := [?]u32{image_idx}
   present_info := vk.PresentInfoKHR {
     sType              = .PRESENT_INFO_KHR,
@@ -1096,7 +1070,7 @@ render :: proc(engine: ^Engine) -> vk.Result {
     pSwapchains        = &engine.renderer.swapchain,
     pImageIndices      = raw_data(image_indices[:]),
   }
-  vk.QueuePresentKHR(ctx.present_queue, &present_info) or_return
+  vk.QueuePresentKHR(g_present_queue, &present_info) or_return
   engine.renderer.current_frame_index =
     (engine.renderer.current_frame_index + 1) % MAX_FRAMES_IN_FLIGHT
   return .SUCCESS
@@ -1161,7 +1135,7 @@ render_shadow_pass :: proc(
   }
   aligned_scene_uniform_size := align_up(
     size_of(SceneUniform),
-    engine.ctx.physical_device_properties.limits.minUniformBufferOffsetAlignment,
+    g_device_properties.limits.minUniformBufferOffsetAlignment,
   )
   for i := 0; i < int(light_uniform.light_count); i += 1 {
     light := &light_uniform.lights[i]
@@ -1496,16 +1470,9 @@ render_main_pass :: proc(
 }
 
 engine_recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
-  vkd := engine.ctx.vkd
-  vk.DeviceWaitIdle(vkd)
-  indices := find_queue_families(
-    engine.ctx.physical_device,
-    engine.ctx.surface,
-  ) or_return
-  support := query_swapchain_support(
-    engine.ctx.physical_device,
-    engine.ctx.surface,
-  ) or_return
+  vk.DeviceWaitIdle(g_device)
+  indices := find_queue_families(g_physical_device, g_surface) or_return
+  support := query_swapchain_support(g_physical_device, g_surface) or_return
   renderer_build_swapchain(
     &engine.renderer,
     support.capabilities,
@@ -1517,7 +1484,6 @@ engine_recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
     engine.renderer.extent.height,
   ) or_return
   engine.renderer.depth_buffer = create_depth_image(
-    &engine.ctx,
     engine.renderer.extent.width,
     engine.renderer.extent.height,
   ) or_return

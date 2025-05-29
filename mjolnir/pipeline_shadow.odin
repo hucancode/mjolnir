@@ -14,26 +14,22 @@ ShadowShaderConfig :: struct {
 shadow_pipeline_layout: vk.PipelineLayout
 shadow_pipelines: [SHADOW_SHADER_VARIANT_COUNT]vk.Pipeline
 
-pipeline_shadow_deinit :: proc(ctx: ^VulkanContext) {
-  vkd := ctx.vkd
-  for i in 0..<len(shadow_pipelines) {
+pipeline_shadow_deinit :: proc() {
+  for i in 0 ..< len(shadow_pipelines) {
     if shadow_pipelines[i] != 0 {
-      vk.DestroyPipeline(vkd, shadow_pipelines[i], nil)
+      vk.DestroyPipeline(g_device, shadow_pipelines[i], nil)
       shadow_pipelines[i] = 0
     }
   }
   if shadow_pipeline_layout != 0 {
-    vk.DestroyPipelineLayout(vkd, shadow_pipeline_layout, nil)
+    vk.DestroyPipelineLayout(g_device, shadow_pipeline_layout, nil)
     shadow_pipeline_layout = 0
   }
 }
 
 SHADER_SHADOW_VERT :: #load("shader/shadow/vert.spv")
 
-build_shadow_pipelines :: proc(
-  ctx: ^VulkanContext,
-  depth_format: vk.Format,
-) -> vk.Result {
+build_shadow_pipelines :: proc(depth_format: vk.Format) -> vk.Result {
   set_layouts := [?]vk.DescriptorSetLayout {
     camera_descriptor_set_layout,
     skinning_descriptor_set_layout,
@@ -50,13 +46,13 @@ build_shadow_pipelines :: proc(
     pPushConstantRanges    = &push_constant_range,
   }
   vk.CreatePipelineLayout(
-    ctx.vkd,
+    g_device,
     &pipeline_layout_info,
     nil,
     &shadow_pipeline_layout,
   ) or_return
-  vert_module := create_shader_module(ctx, SHADER_SHADOW_VERT) or_return
-  defer vk.DestroyShaderModule(ctx.vkd, vert_module, nil)
+  vert_module := create_shader_module(SHADER_SHADOW_VERT) or_return
+  defer vk.DestroyShaderModule(g_device, vert_module, nil)
 
   input_assembly := vk.PipelineInputAssemblyStateCreateInfo {
     sType    = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
@@ -159,7 +155,7 @@ build_shadow_pipelines :: proc(
     }
   }
   vk.CreateGraphicsPipelines(
-    ctx.vkd,
+    g_device,
     0,
     len(pipeline_infos),
     raw_data(pipeline_infos[:]),

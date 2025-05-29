@@ -69,7 +69,6 @@ InputState :: struct {
 
 Engine :: struct {
   window:                glfw.WindowHandle,
-  ctx:                   VulkanContext,
   renderer:              Renderer,
   scene:                 Scene,
   ui:                    UIRenderer,
@@ -126,7 +125,7 @@ init :: proc(
   }
   fmt.printf("Window created %v\n", engine.window)
 
-  vulkan_context_init(&engine.ctx, engine.window) or_return
+  vulkan_context_init(engine.window) or_return
 
   engine.start_timestamp = time.now()
   engine.last_frame_timestamp = engine.start_timestamp
@@ -152,9 +151,9 @@ init :: proc(
 
   fmt.println("All resource pools initialized successfully")
 
-  build_3d_pipelines(&engine.ctx, .B8G8R8A8_SRGB, .D32_SFLOAT) or_return
-  build_3d_unlit_pipelines(&engine.ctx, .B8G8R8A8_SRGB, .D32_SFLOAT) or_return
-  build_shadow_pipelines(&engine.ctx, .D32_SFLOAT) or_return
+  build_3d_pipelines(.B8G8R8A8_SRGB, .D32_SFLOAT) or_return
+  build_3d_unlit_pipelines(.B8G8R8A8_SRGB, .D32_SFLOAT) or_return
+  build_shadow_pipelines(.D32_SFLOAT) or_return
   init_scene(&engine.scene)
   engine_build_renderer(engine) or_return
   if engine.renderer.extent.width > 0 && engine.renderer.extent.height > 0 {
@@ -218,16 +217,10 @@ init :: proc(
 }
 
 engine_build_renderer :: proc(engine: ^Engine) -> vk.Result {
-  renderer_init(&engine.renderer, &engine.ctx) or_return
-  indices := find_queue_families(
-    engine.ctx.physical_device,
-    engine.ctx.surface,
-  ) or_return
+  renderer_init(&engine.renderer) or_return
+  indices := find_queue_families(g_physical_device, g_surface) or_return
 
-  support := query_swapchain_support(
-    engine.ctx.physical_device,
-    engine.ctx.surface,
-  ) or_return
+  support := query_swapchain_support(g_physical_device, g_surface) or_return
   defer swapchain_support_deinit(&support)
 
   fb_width, fb_height := glfw.GetFramebufferSize(engine.window)
@@ -246,7 +239,6 @@ engine_build_renderer :: proc(engine: ^Engine) -> vk.Result {
   renderer_build_synchronizers(&engine.renderer) or_return
 
   engine.renderer.depth_buffer = create_depth_image(
-    &engine.ctx,
     engine.renderer.extent.width,
     engine.renderer.extent.height,
   ) or_return
@@ -258,12 +250,12 @@ engine_build_renderer :: proc(engine: ^Engine) -> vk.Result {
 
   alloc_info_env := vk.DescriptorSetAllocateInfo {
       sType              = .DESCRIPTOR_SET_ALLOCATE_INFO,
-      descriptorPool     = engine.ctx.descriptor_pool,
+      descriptorPool     = g_descriptor_pool,
       descriptorSetCount = 1,
       pSetLayouts        = &environment_descriptor_set_layout,
     }
   vk.AllocateDescriptorSets(
-    engine.ctx.vkd,
+    g_device,
     &alloc_info_env,
     &engine.renderer.environment_descriptor_set,
   ) or_return
@@ -281,7 +273,7 @@ engine_build_renderer :: proc(engine: ^Engine) -> vk.Result {
       descriptorCount = 1,
       pImageInfo      = &env_image_info,
     }
-  vk.UpdateDescriptorSets(engine.ctx.vkd, 1, &env_write, 0, nil)
+  vk.UpdateDescriptorSets(g_device, 1, &env_write, 0, nil)
 
   return .SUCCESS
 }
@@ -353,18 +345,17 @@ update :: proc(engine: ^Engine) -> bool {
 }
 
 deinit :: proc(engine: ^Engine) {
-  vkd := engine.ctx.vkd
-  vk.DeviceWaitIdle(vkd)
+  vk.DeviceWaitIdle(g_device)
   resource.pool_deinit(engine.textures, texture_deinit)
   resource.pool_deinit(engine.meshes, static_mesh_deinit)
   resource.pool_deinit(engine.skeletal_meshes, skeletal_mesh_deinit)
   resource.pool_deinit(engine.materials, material_deinit)
   pipeline2d_deinit(&engine.ui.pipeline)
-  pipeline3d_deinit(&engine.ctx)
-  pipeline_shadow_deinit(&engine.ctx)
+  pipeline3d_deinit()
+  pipeline_shadow_deinit()
   deinit_scene(&engine.scene)
   renderer_deinit(&engine.renderer)
-  vulkan_context_deinit(&engine.ctx)
+  vulkan_context_deinit()
   glfw.DestroyWindow(engine.window)
   glfw.Terminate()
   fmt.println("Engine deinitialized")

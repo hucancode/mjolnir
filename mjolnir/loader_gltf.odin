@@ -117,7 +117,7 @@ load_gltf :: proc(
             g_node.skin,
           )
         if res == .SUCCESS {
-          skeletal_mesh_init(mesh, &data, &engine.ctx)
+          skeletal_mesh_init(mesh, &data)
           mesh.material = material
           mesh.bones = bones
           mesh.root_bone_index = root_bone_idx
@@ -126,7 +126,6 @@ load_gltf :: proc(
           animation.pose_init(&pose, len(bones))
           buffer_size := size_of(linalg.Matrix4f32) * vk.DeviceSize(len(bones))
           bone_buffer, _ = create_host_visible_buffer(
-            &engine.ctx,
             buffer_size,
             {.STORAGE_BUFFER},
           )

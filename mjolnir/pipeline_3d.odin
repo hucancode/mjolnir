@@ -36,38 +36,44 @@ pipelines: [SHADER_VARIANT_COUNT]vk.Pipeline
 SHADER_UBER_VERT :: #load("shader/uber/vert.spv")
 SHADER_UBER_FRAG :: #load("shader/uber/frag.spv")
 
-pipeline3d_deinit :: proc(ctx: ^VulkanContext) {
-  vkd := ctx.vkd
+pipeline3d_deinit :: proc() {
   for i in 0 ..< len(pipelines) {
     if pipelines[i] != 0 {
-      vk.DestroyPipeline(vkd, pipelines[i], nil)
+      vk.DestroyPipeline(g_device, pipelines[i], nil)
       pipelines[i] = 0
     }
   }
   if pipeline_layout != 0 {
-    vk.DestroyPipelineLayout(vkd, pipeline_layout, nil)
+    vk.DestroyPipelineLayout(g_device, pipeline_layout, nil)
     pipeline_layout = 0
   }
   if camera_descriptor_set_layout != 0 {
-    vk.DestroyDescriptorSetLayout(vkd, camera_descriptor_set_layout, nil)
+    vk.DestroyDescriptorSetLayout(g_device, camera_descriptor_set_layout, nil)
     camera_descriptor_set_layout = 0
   }
   if environment_descriptor_set_layout != 0 {
-    vk.DestroyDescriptorSetLayout(vkd, environment_descriptor_set_layout, nil)
+    vk.DestroyDescriptorSetLayout(
+      g_device,
+      environment_descriptor_set_layout,
+      nil,
+    )
     environment_descriptor_set_layout = 0
   }
   if texture_descriptor_set_layout != 0 {
-    vk.DestroyDescriptorSetLayout(vkd, texture_descriptor_set_layout, nil)
+    vk.DestroyDescriptorSetLayout(g_device, texture_descriptor_set_layout, nil)
     texture_descriptor_set_layout = 0
   }
   if skinning_descriptor_set_layout != 0 {
-    vk.DestroyDescriptorSetLayout(vkd, skinning_descriptor_set_layout, nil)
+    vk.DestroyDescriptorSetLayout(
+      g_device,
+      skinning_descriptor_set_layout,
+      nil,
+    )
     skinning_descriptor_set_layout = 0
   }
 }
 
 build_3d_pipelines :: proc(
-  ctx: ^VulkanContext,
   target_color_format: vk.Format,
   target_depth_format: vk.Format,
 ) -> vk.Result {
@@ -103,7 +109,7 @@ build_3d_pipelines :: proc(
     pBindings    = raw_data(bindings_main[:]),
   }
   vk.CreateDescriptorSetLayout(
-    ctx.vkd,
+    g_device,
     &layout_info_main,
     nil,
     &camera_descriptor_set_layout,
@@ -114,10 +120,10 @@ build_3d_pipelines :: proc(
   entries: [SHADER_VARIANT_COUNT][SHADER_OPTION_COUNT]vk.SpecializationMapEntry
   shader_stages_arr: [SHADER_VARIANT_COUNT][2]vk.PipelineShaderStageCreateInfo
 
-  vert_module := create_shader_module(ctx, SHADER_UBER_VERT) or_return
-  defer vk.DestroyShaderModule(ctx.vkd, vert_module, nil)
-  frag_module := create_shader_module(ctx, SHADER_UBER_FRAG) or_return
-  defer vk.DestroyShaderModule(ctx.vkd, frag_module, nil)
+  vert_module := create_shader_module(SHADER_UBER_VERT) or_return
+  defer vk.DestroyShaderModule(g_device, vert_module, nil)
+  frag_module := create_shader_module(SHADER_UBER_FRAG) or_return
+  defer vk.DestroyShaderModule(g_device, frag_module, nil)
 
   dynamic_states_values := [?]vk.DynamicState{.VIEWPORT, .SCISSOR}
   dynamic_state_info := vk.PipelineDynamicStateCreateInfo {
@@ -218,7 +224,7 @@ build_3d_pipelines :: proc(
     },
   }
   vk.CreateDescriptorSetLayout(
-    ctx.vkd,
+    g_device,
     &vk.DescriptorSetLayoutCreateInfo {
       sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
       bindingCount = u32(len(texture_bindings)),
@@ -236,7 +242,7 @@ build_3d_pipelines :: proc(
     },
   }
   vk.CreateDescriptorSetLayout(
-    ctx.vkd,
+    g_device,
     &vk.DescriptorSetLayoutCreateInfo {
       sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
       bindingCount = u32(len(skinning_bindings)),
@@ -254,7 +260,7 @@ build_3d_pipelines :: proc(
     },
   }
   vk.CreateDescriptorSetLayout(
-    ctx.vkd,
+    g_device,
     &vk.DescriptorSetLayoutCreateInfo {
       sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
       bindingCount = u32(len(environment_bindings)),
@@ -282,7 +288,7 @@ build_3d_pipelines :: proc(
     pPushConstantRanges    = &push_constant_range,
   }
   vk.CreatePipelineLayout(
-    ctx.vkd,
+    g_device,
     &pipeline_layout_info,
     nil,
     &pipeline_layout,
@@ -374,7 +380,7 @@ build_3d_pipelines :: proc(
     }
   }
   vk.CreateGraphicsPipelines(
-    ctx.vkd,
+    g_device,
     0,
     len(pipeline_infos),
     raw_data(pipeline_infos[:]),
@@ -393,7 +399,6 @@ SHADER_UNLIT_VERT :: #load("shader/unlit/vert.spv")
 SHADER_UNLIT_FRAG :: #load("shader/unlit/frag.spv")
 
 build_3d_unlit_pipelines :: proc(
-  ctx: ^VulkanContext,
   target_color_format: vk.Format,
   target_depth_format: vk.Format,
 ) -> vk.Result {
@@ -403,10 +408,10 @@ build_3d_unlit_pipelines :: proc(
   entries: [UNLIT_SHADER_VARIANT_COUNT][UNLIT_SHADER_OPTION_COUNT]vk.SpecializationMapEntry
   shader_stages_arr: [UNLIT_SHADER_VARIANT_COUNT][2]vk.PipelineShaderStageCreateInfo
 
-  vert_module := create_shader_module(ctx, SHADER_UNLIT_VERT) or_return
-  defer vk.DestroyShaderModule(ctx.vkd, vert_module, nil)
-  frag_module := create_shader_module(ctx, SHADER_UNLIT_FRAG) or_return
-  defer vk.DestroyShaderModule(ctx.vkd, frag_module, nil)
+  vert_module := create_shader_module(SHADER_UNLIT_VERT) or_return
+  defer vk.DestroyShaderModule(g_device, vert_module, nil)
+  frag_module := create_shader_module(SHADER_UNLIT_FRAG) or_return
+  defer vk.DestroyShaderModule(g_device, frag_module, nil)
 
   dynamic_states_values := [?]vk.DynamicState{.VIEWPORT, .SCISSOR}
   dynamic_state_info := vk.PipelineDynamicStateCreateInfo {
@@ -531,7 +536,7 @@ build_3d_unlit_pipelines :: proc(
     }
   }
   vk.CreateGraphicsPipelines(
-    ctx.vkd,
+    g_device,
     0,
     len(pipeline_infos),
     raw_data(pipeline_infos[:]),

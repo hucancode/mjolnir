@@ -32,19 +32,16 @@ SkeletalMesh :: struct {
   index_buffer:    DataBuffer,
   material:        Handle,
   aabb:            geometry.Aabb,
-  ctx:             ^VulkanContext,
 }
 
 skeletal_mesh_deinit :: proc(self: ^SkeletalMesh) {
-  if self.ctx == nil {
-    return
-  }
+
 
   if self.vertex_buffer.buffer != 0 {
-    data_buffer_deinit(&self.vertex_buffer, self.ctx)
+    data_buffer_deinit(&self.vertex_buffer)
   }
   if self.index_buffer.buffer != 0 {
-    data_buffer_deinit(&self.index_buffer, self.ctx)
+    data_buffer_deinit(&self.index_buffer)
   }
   if self.bones != nil {
     for &bone in self.bones {
@@ -60,36 +57,29 @@ skeletal_mesh_deinit :: proc(self: ^SkeletalMesh) {
     delete(self.animations)
     self.animations = nil
   }
-
-  self.ctx = nil
 }
 
 skeletal_mesh_init :: proc(
   self: ^SkeletalMesh,
   geometry_data: ^geometry.SkinnedGeometry,
-  ctx: ^VulkanContext,
 ) -> vk.Result {
-  self.ctx = ctx
   self.vertices_len = u32(len(geometry_data.vertices))
   self.indices_len = u32(len(geometry_data.indices))
   self.aabb = geometry_data.aabb
   size := len(geometry_data.vertices) * size_of(geometry.Vertex)
   self.vertex_buffer = create_local_buffer(
-    ctx,
     vk.DeviceSize(size),
     {.VERTEX_BUFFER},
     raw_data(geometry_data.vertices),
   ) or_return
   size = len(geometry_data.skinnings) * size_of(geometry.SkinningData)
   self.skin_buffer = create_local_buffer(
-    ctx,
     vk.DeviceSize(size),
     {.VERTEX_BUFFER},
     raw_data(geometry_data.skinnings),
   ) or_return
   size = len(geometry_data.indices) * size_of(u32)
   self.index_buffer = create_local_buffer(
-    ctx,
     vk.DeviceSize(size),
     {.INDEX_BUFFER},
     raw_data(geometry_data.indices),
@@ -154,7 +144,10 @@ calculate_animation_transform :: proc(
     local_transform: geometry.Transform
     if current_bone_index < u32(len(active_clip.channels)) {
       local_transform.position, local_transform.rotation, local_transform.scale =
-        animation.channel_sample(active_clip.channels[current_bone_index], anim_instance.time)
+        animation.channel_sample(
+          active_clip.channels[current_bone_index],
+          anim_instance.time,
+        )
     } else {
       local_transform = current_bone.bind_transform
     }
@@ -181,23 +174,18 @@ StaticMesh :: struct {
   vertex_buffer: DataBuffer,
   index_buffer:  DataBuffer,
   aabb:          geometry.Aabb,
-  ctx:           ^VulkanContext,
 }
 
 static_mesh_deinit :: proc(self: ^StaticMesh) {
-  if self.ctx == nil {
-    return
-  }
   if self.vertex_buffer.buffer != 0 {
-    data_buffer_deinit(&self.vertex_buffer, self.ctx)
+    data_buffer_deinit(&self.vertex_buffer)
   }
   if self.index_buffer.buffer != 0 {
-    data_buffer_deinit(&self.index_buffer, self.ctx)
+    data_buffer_deinit(&self.index_buffer)
   }
   self.vertices_len = 0
   self.indices_len = 0
   self.aabb = {}
-  self.ctx = nil
 }
 
 create_static_mesh :: proc(
@@ -214,20 +202,17 @@ create_static_mesh :: proc(
     ret = .ERROR_UNKNOWN
     return
   }
-  mesh.ctx = &engine.ctx
   mesh.vertices_len = u32(len(data.vertices))
   mesh.indices_len = u32(len(data.indices))
   mesh.aabb = data.aabb
   size := len(data.vertices) * size_of(geometry.Vertex)
   mesh.vertex_buffer = create_local_buffer(
-    &engine.ctx,
     vk.DeviceSize(size),
     {.VERTEX_BUFFER},
     raw_data(data.vertices),
   ) or_return
   size = len(data.indices) * size_of(u32)
   mesh.index_buffer = create_local_buffer(
-    &engine.ctx,
     vk.DeviceSize(size),
     {.INDEX_BUFFER},
     raw_data(data.indices),

@@ -44,7 +44,7 @@ ui_init :: proc(
   ui.frame_width = width
   ui.frame_height = height
   fmt.printfln("init UI pipeline...")
-  pipeline2d_init(&ui.pipeline, &engine.ctx, color_format) or_return
+  pipeline2d_init(&ui.pipeline, color_format) or_return
   fmt.printfln("init UI texture...")
   _, texture := create_texture_from_pixels(
     engine,
@@ -57,13 +57,11 @@ ui_init :: proc(
   ui.atlas = texture^
   fmt.printfln("init UI vertex buffer...")
   ui.vertex_buffer = create_host_visible_buffer(
-    &engine.ctx,
     size_of(Vertex2D) * vk.DeviceSize(UI_MAX_VERTICES),
     {.VERTEX_BUFFER},
   ) or_return
   fmt.printfln("init UI indices buffer...")
   ui.index_buffer = create_host_visible_buffer(
-    &engine.ctx,
     size_of(u32) * vk.DeviceSize(UI_MAX_INDICES),
     {.INDEX_BUFFER},
   ) or_return
@@ -76,7 +74,6 @@ ui_init :: proc(
   ortho := linalg.matrix_ortho3d(0, f32(width), f32(height), 0, -1, 1)
   fmt.printfln("init UI proj buffer...")
   ui.proj_buffer = create_host_visible_buffer(
-    &engine.ctx,
     size_of(linalg.Matrix4f32),
     {.UNIFORM_BUFFER},
   ) or_return
@@ -109,14 +106,8 @@ ui_init :: proc(
       pImageInfo = &image_info,
     },
   }
-  vk.UpdateDescriptorSets(
-    engine.ctx.vkd,
-    len(writes),
-    raw_data(writes[:]),
-    0,
-    nil,
-  )
-  fmt.printfln("done init UI...")
+  vk.UpdateDescriptorSets(g_device, len(writes), raw_data(writes[:]), 0, nil)
+  fmt.printfln("done init UI")
   return .SUCCESS
 }
 

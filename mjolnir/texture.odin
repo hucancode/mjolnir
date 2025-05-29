@@ -3,8 +3,8 @@ package mjolnir
 import "core:c"
 import "core:fmt"
 import "core:mem"
-import "core:strings"
 import "core:slice"
+import "core:strings"
 
 import stbi "vendor:stb/image"
 import vk "vendor:vulkan"
@@ -35,7 +35,6 @@ Texture :: struct {
   image_data: ImageData,
   buffer:     ImageBuffer,
   sampler:    vk.Sampler,
-  ctx: ^VulkanContext,
 }
 
 create_texture_from_data :: proc(
@@ -48,7 +47,7 @@ create_texture_from_data :: proc(
 ) {
   handle, texture = resource.alloc(&engine.textures)
   read_texture_data(texture, data) or_return
-  texture_init(texture, &engine.ctx) or_return
+  texture_init(texture) or_return
   fmt.printfln(
     "created texture %d x %d -> id %d",
     texture.image_data.width,
@@ -77,7 +76,7 @@ create_texture_from_pixels :: proc(
   texture.image_data.height = height
   texture.image_data.channels_in_file = channel
   texture.image_data.actual_channels = channel
-  texture_init(texture, &engine.ctx, format) or_return
+  texture_init(texture, format) or_return
   fmt.printfln(
     "created texture %d x %d -> id %d",
     texture.image_data.width,
@@ -127,7 +126,7 @@ create_texture_from_path :: proc(
 ) {
   handle, texture = resource.alloc(&engine.textures)
   read_texture(texture, path) or_return
-  texture_init(texture, &engine.ctx) or_return
+  texture_init(texture) or_return
   ret = .SUCCESS
   return
 }
@@ -159,15 +158,12 @@ read_texture :: proc(self: ^Texture, path: string) -> vk.Result {
 
 texture_init :: proc(
   self: ^Texture,
-  ctx: ^VulkanContext,
   format: vk.Format = .R8G8B8A8_SRGB,
 ) -> vk.Result {
-  self.ctx = ctx
-  if self.image_data.pixels == nil || ctx == nil {
+  if self.image_data.pixels == nil {
     return .ERROR_INITIALIZATION_FAILED
   }
   self.buffer = create_image_buffer(
-    ctx,
     raw_data(self.image_data.pixels),
     size_of(u8) * vk.DeviceSize(len(self.image_data.pixels)),
     format,
@@ -190,35 +186,32 @@ texture_init :: proc(
     compareOp     = .ALWAYS,
     mipmapMode    = .LINEAR,
   }
-  vk.CreateSampler(ctx.vkd, &sampler_info, nil, &self.sampler) or_return
+  vk.CreateSampler(g_device, &sampler_info, nil, &self.sampler) or_return
   return .SUCCESS
 }
 
 texture_deinit :: proc(self: ^Texture) {
   if self == nil {return}
-  if self.ctx != nil && self.sampler != 0 {
-    vk.DestroySampler(self.ctx.vkd, self.sampler, nil)
+  if self.sampler != 0 {
+    vk.DestroySampler(g_device, self.sampler, nil)
     self.sampler = 0
   }
-  image_buffer_deinit(self.ctx.vkd, &self.buffer)
+  image_buffer_deinit(&self.buffer)
   image_data_deinit(&self.image_data)
 }
 
 DepthTexture :: struct {
-  buffer:     ImageBuffer,
-  sampler:    vk.Sampler,
-  ctx: ^VulkanContext,
+  buffer:  ImageBuffer,
+  sampler: vk.Sampler,
 }
 
 depth_texture_init :: proc(
   self: ^DepthTexture,
-  ctx: ^VulkanContext,
   width: u32,
   height: u32,
   usage: vk.ImageUsageFlags = {.DEPTH_STENCIL_ATTACHMENT},
 ) -> vk.Result {
-  self.ctx = ctx
-  self.buffer = create_depth_image(ctx, width, height, usage) or_return
+  self.buffer = create_depth_image(width, height, usage) or_return
   sampler_info := vk.SamplerCreateInfo {
     sType         = .SAMPLER_CREATE_INFO,
     magFilter     = .LINEAR,
@@ -231,46 +224,39 @@ depth_texture_init :: proc(
     compareOp     = .ALWAYS,
     mipmapMode    = .LINEAR,
   }
-  vk.CreateSampler(ctx.vkd, &sampler_info, nil, &self.sampler) or_return
+  vk.CreateSampler(g_device, &sampler_info, nil, &self.sampler) or_return
   return .SUCCESS
 }
 
 depth_texture_deinit :: proc(self: ^DepthTexture) {
   if self == nil {return}
-  if self.ctx != nil && self.sampler != 0 {
-    vk.DestroySampler(self.ctx.vkd, self.sampler, nil)
+  if self.sampler != 0 {
+    vk.DestroySampler(g_device, self.sampler, nil)
     self.sampler = 0
   }
-  image_buffer_deinit(self.ctx.vkd, &self.buffer)
+  image_buffer_deinit(&self.buffer)
 }
 
 create_depth_image :: proc(
-  ctx: ^VulkanContext,
-  width: u32,
-  height: u32,
+  width, height: u32,
   usage: vk.ImageUsageFlags = {.DEPTH_STENCIL_ATTACHMENT},
 ) -> (
   img: ImageBuffer,
   ret: vk.Result,
 ) {
-  depth_image_init(&img, ctx, width, height, usage) or_return
+  depth_image_init(&img, width, height, usage) or_return
   ret = .SUCCESS
   return
 }
 
 depth_image_init :: proc(
   img_buffer: ^ImageBuffer,
-  ctx: ^VulkanContext,
-  width: u32,
-  height: u32,
+  width, height: u32,
   usage: vk.ImageUsageFlags = {.DEPTH_STENCIL_ATTACHMENT},
 ) -> vk.Result {
   img_buffer.width = width
   img_buffer.height = height
   img_buffer.format = .D32_SFLOAT
-
-  vk_device := ctx.vkd
-
   create_info := vk.ImageCreateInfo {
     sType         = .IMAGE_CREATE_INFO,
     imageType     = .D2,
@@ -284,13 +270,10 @@ depth_image_init :: proc(
     sharingMode   = .EXCLUSIVE,
     samples       = {._1},
   }
-  vk.CreateImage(vk_device, &create_info, nil, &img_buffer.image) or_return
-
+  vk.CreateImage(g_device, &create_info, nil, &img_buffer.image) or_return
   mem_requirements: vk.MemoryRequirements
-  vk.GetImageMemoryRequirements(vk_device, img_buffer.image, &mem_requirements)
-
+  vk.GetImageMemoryRequirements(g_device, img_buffer.image, &mem_requirements)
   memory_type_index, found := find_memory_type_index(
-    ctx.physical_device,
     mem_requirements.memoryTypeBits,
     {.DEVICE_LOCAL},
   )
@@ -303,12 +286,9 @@ depth_image_init :: proc(
     allocationSize  = mem_requirements.size,
     memoryTypeIndex = memory_type_index,
   }
-  vk.AllocateMemory(vk_device, &alloc_info, nil, &img_buffer.memory) or_return
-
-  vk.BindImageMemory(vk_device, img_buffer.image, img_buffer.memory, 0)
-
-  cmd_buffer := begin_single_time_command(ctx) or_return
-
+  vk.AllocateMemory(g_device, &alloc_info, nil, &img_buffer.memory) or_return
+  vk.BindImageMemory(g_device, img_buffer.image, img_buffer.memory, 0)
+  cmd_buffer := begin_single_time_command() or_return
   barrier := vk.ImageMemoryBarrier {
     sType = .IMAGE_MEMORY_BARRIER,
     oldLayout = .UNDEFINED,
@@ -317,11 +297,11 @@ depth_image_init :: proc(
     dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
     image = img_buffer.image,
     subresourceRange = {
-      aspectMask     = {.DEPTH},
-      baseMipLevel   = 0,
-      levelCount     = 1,
+      aspectMask = {.DEPTH},
+      baseMipLevel = 0,
+      levelCount = 1,
       baseArrayLayer = 0,
-      layerCount     = 1,
+      layerCount = 1,
     },
     srcAccessMask = {}, // No source access needed for UNDEFINED -> WRITE
     dstAccessMask = {
@@ -341,9 +321,8 @@ depth_image_init :: proc(
     1,
     &barrier,
   )
-  end_single_time_command(ctx, &cmd_buffer) or_return
+  end_single_time_command(&cmd_buffer) or_return
   img_buffer.view = create_image_view(
-    ctx.vkd,
     img_buffer.image,
     img_buffer.format,
     {.DEPTH},
@@ -352,27 +331,23 @@ depth_image_init :: proc(
 }
 
 CubeDepthTexture :: struct {
-  buffer:     ImageBuffer,
-  views:      [6]vk.ImageView, // One view per face for rendering
-  view:       vk.ImageView,    // Single cube view for sampling
-  sampler:    vk.Sampler,
-  ctx:        ^VulkanContext,
-  size:       u32,
+  buffer:  ImageBuffer,
+  views:   [6]vk.ImageView, // One view per face for rendering
+  view:    vk.ImageView, // Single cube view for sampling
+  sampler: vk.Sampler,
+  size:    u32,
 }
 
 cube_depth_texture_init :: proc(
   self: ^CubeDepthTexture,
-  ctx: ^VulkanContext,
   size: u32,
   usage: vk.ImageUsageFlags = {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
 ) -> vk.Result {
-  self.ctx = ctx
   self.size = size
   self.buffer.width = size
   self.buffer.height = size
   self.buffer.format = .D32_SFLOAT
 
-  vk_device := ctx.vkd
   create_info := vk.ImageCreateInfo {
     sType         = .IMAGE_CREATE_INFO,
     imageType     = .D2,
@@ -387,13 +362,12 @@ cube_depth_texture_init :: proc(
     samples       = {._1},
     flags         = {.CUBE_COMPATIBLE},
   }
-  vk.CreateImage(vk_device, &create_info, nil, &self.buffer.image) or_return
+  vk.CreateImage(g_device, &create_info, nil, &self.buffer.image) or_return
 
   mem_requirements: vk.MemoryRequirements
-  vk.GetImageMemoryRequirements(vk_device, self.buffer.image, &mem_requirements)
+  vk.GetImageMemoryRequirements(g_device, self.buffer.image, &mem_requirements)
 
   memory_type_index, found := find_memory_type_index(
-    ctx.physical_device,
     mem_requirements.memoryTypeBits,
     {.DEVICE_LOCAL},
   )
@@ -406,17 +380,20 @@ cube_depth_texture_init :: proc(
     allocationSize  = mem_requirements.size,
     memoryTypeIndex = memory_type_index,
   }
-  vk.AllocateMemory(vk_device, &alloc_info, nil, &self.buffer.memory) or_return
-  vk.BindImageMemory(vk_device, self.buffer.image, self.buffer.memory, 0)
+  vk.AllocateMemory(g_device, &alloc_info, nil, &self.buffer.memory) or_return
+  vk.BindImageMemory(g_device, self.buffer.image, self.buffer.memory, 0)
   // Create 6 image views (one per face)
-  for i in 0..<6 {
+  for i in 0 ..< 6 {
     view_info := vk.ImageViewCreateInfo {
       sType = .IMAGE_VIEW_CREATE_INFO,
       image = self.buffer.image,
       viewType = .D2,
       format = .D32_SFLOAT,
       components = vk.ComponentMapping {
-        r = .IDENTITY, g = .IDENTITY, b = .IDENTITY, a = .IDENTITY,
+        r = .IDENTITY,
+        g = .IDENTITY,
+        b = .IDENTITY,
+        a = .IDENTITY,
       },
       subresourceRange = vk.ImageSubresourceRange {
         aspectMask = {.DEPTH},
@@ -426,7 +403,7 @@ cube_depth_texture_init :: proc(
         layerCount = 1,
       },
     }
-    vk.CreateImageView(vk_device, &view_info, nil, &self.views[i]) or_return
+    vk.CreateImageView(g_device, &view_info, nil, &self.views[i]) or_return
   }
   cube_view_info := vk.ImageViewCreateInfo {
     sType = .IMAGE_VIEW_CREATE_INFO,
@@ -434,7 +411,10 @@ cube_depth_texture_init :: proc(
     viewType = .CUBE,
     format = .D32_SFLOAT,
     components = vk.ComponentMapping {
-      r = .IDENTITY, g = .IDENTITY, b = .IDENTITY, a = .IDENTITY,
+      r = .IDENTITY,
+      g = .IDENTITY,
+      b = .IDENTITY,
+      a = .IDENTITY,
     },
     subresourceRange = vk.ImageSubresourceRange {
       aspectMask = {.DEPTH},
@@ -444,7 +424,7 @@ cube_depth_texture_init :: proc(
       layerCount = 6,
     },
   }
-  vk.CreateImageView(vk_device, &cube_view_info, nil, &self.view) or_return
+  vk.CreateImageView(g_device, &cube_view_info, nil, &self.view) or_return
   sampler_info := vk.SamplerCreateInfo {
     sType         = .SAMPLER_CREATE_INFO,
     magFilter     = .LINEAR,
@@ -457,28 +437,27 @@ cube_depth_texture_init :: proc(
     compareOp     = .LESS,
     mipmapMode    = .LINEAR,
   }
-  vk.CreateSampler(vk_device, &sampler_info, nil, &self.sampler) or_return
+  vk.CreateSampler(g_device, &sampler_info, nil, &self.sampler) or_return
   return .SUCCESS
 }
 
 cube_depth_texture_deinit :: proc(self: ^CubeDepthTexture) {
   if self == nil {return}
-  if self.ctx != nil && self.sampler != 0 {
-    vk.DestroySampler(self.ctx.vkd, self.sampler, nil)
+  if self.sampler != 0 {
+    vk.DestroySampler(g_device, self.sampler, nil)
     self.sampler = 0
   }
-  vkd := self.ctx.vkd
-  for i in 0..<6 {
+  for i in 0 ..< 6 {
     if self.views[i] != 0 {
-      vk.DestroyImageView(vkd, self.views[i], nil)
+      vk.DestroyImageView(g_device, self.views[i], nil)
       self.views[i] = 0
     }
   }
   if self.view != 0 {
-    vk.DestroyImageView(vkd, self.view, nil)
+    vk.DestroyImageView(g_device, self.view, nil)
     self.view = 0
   }
-  image_buffer_deinit(vkd, &self.buffer)
+  image_buffer_deinit(&self.buffer)
 }
 
 create_hdr_texture_from_path :: proc(
@@ -508,8 +487,13 @@ create_hdr_texture_from_path :: proc(
   texture.image_data.height = int(h)
   texture.image_data.channels_in_file = 3
   texture.image_data.actual_channels = 4
-  texture_init(texture, &engine.ctx, .R32G32B32A32_SFLOAT) or_return
-  fmt.printfln("created HDR texture %d x %d -> id %d", w, h, texture.buffer.image)
+  texture_init(texture, .R32G32B32A32_SFLOAT) or_return
+  fmt.printfln(
+    "created HDR texture %d x %d -> id %d",
+    w,
+    h,
+    texture.buffer.image,
+  )
   ret = .SUCCESS
   return
 }

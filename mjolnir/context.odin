@@ -99,56 +99,51 @@ FoundQueueFamilyIndices :: struct {
   present_family:  u32,
 }
 
-VulkanContext :: struct {
-  window:                     glfw.WindowHandle,
-  vki:                        vk.Instance,
-  vkd:                        vk.Device,
-  surface:                    vk.SurfaceKHR,
-  surface_capabilities:       vk.SurfaceCapabilitiesKHR,
-  surface_formats:            []vk.SurfaceFormatKHR, // Owned by VulkanContext
-  present_modes:              []vk.PresentModeKHR, // Owned by VulkanContext
-  debug_messenger:            vk.DebugUtilsMessengerEXT,
-  physical_device:            vk.PhysicalDevice,
-  graphics_family:            u32,
-  graphics_queue:             vk.Queue,
-  present_family:             u32,
-  present_queue:              vk.Queue,
-  descriptor_pool:            vk.DescriptorPool,
-  command_pool:               vk.CommandPool,
-  physical_device_properties: vk.PhysicalDeviceProperties, // Added for device limits
-}
+g_window: glfw.WindowHandle
+g_instance: vk.Instance
+g_device: vk.Device
+g_surface: vk.SurfaceKHR
+g_surface_capabilities: vk.SurfaceCapabilitiesKHR
+g_surface_formats: []vk.SurfaceFormatKHR
+g_present_modes: []vk.PresentModeKHR
+g_debug_messenger: vk.DebugUtilsMessengerEXT
+g_physical_device: vk.PhysicalDevice
+g_graphics_family: u32
+g_graphics_queue: vk.Queue
+g_present_family: u32
+g_present_queue: vk.Queue
+g_descriptor_pool: vk.DescriptorPool
+g_command_pool: vk.CommandPool
+g_device_properties: vk.PhysicalDeviceProperties
 
-vulkan_context_init :: proc(
-  self: ^VulkanContext,
-  window: glfw.WindowHandle,
-) -> vk.Result {
-  self.window = window
+vulkan_context_init :: proc(glfw_window: glfw.WindowHandle) -> vk.Result {
+  g_window = glfw_window
   vk.load_proc_addresses_global(rawptr(glfw.GetInstanceProcAddress))
-  vulkan_instance_init(self) or_return
-  surface_init(self) or_return
-  physical_device_init(self) or_return
-  logical_device_init(self) or_return
-  command_pool_init(self) or_return
-  descriptor_pool_init(self) or_return
+  vulkan_instance_init() or_return
+  surface_init() or_return
+  physical_device_init() or_return
+  logical_device_init() or_return
+  command_pool_init() or_return
+  descriptor_pool_init() or_return
   return .SUCCESS
 }
 
-vulkan_context_deinit :: proc(self: ^VulkanContext) {
-  vk.DeviceWaitIdle(self.vkd)
-  vk.DestroyDescriptorPool(self.vkd, self.descriptor_pool, nil)
-  vk.DestroyCommandPool(self.vkd, self.command_pool, nil)
-  vk.DestroyDevice(self.vkd, nil)
-  vk.DestroySurfaceKHR(self.vki, self.surface, nil)
+vulkan_context_deinit :: proc() {
+  vk.DeviceWaitIdle(g_device)
+  vk.DestroyDescriptorPool(g_device, g_descriptor_pool, nil)
+  vk.DestroyCommandPool(g_device, g_command_pool, nil)
+  vk.DestroyDevice(g_device, nil)
+  vk.DestroySurfaceKHR(g_instance, g_surface, nil)
   when ENABLE_VALIDATION_LAYERS {
-    if self.debug_messenger != 0 {
-      vk.DestroyDebugUtilsMessengerEXT(self.vki, self.debug_messenger, nil)
+    if g_debug_messenger != 0 {
+      vk.DestroyDebugUtilsMessengerEXT(g_instance, g_debug_messenger, nil)
     }
   }
-  vk.DestroyInstance(self.vki, nil)
-  delete(self.surface_formats)
-  delete(self.present_modes)
-  self.surface_formats = nil
-  self.present_modes = nil
+  vk.DestroyInstance(g_instance, nil)
+  delete(g_surface_formats)
+  delete(g_present_modes)
+  g_surface_formats = nil
+  g_present_modes = nil
 }
 
 debug_callback :: proc "system" (
@@ -174,7 +169,7 @@ debug_callback :: proc "system" (
   return false
 }
 
-vulkan_instance_init :: proc(self: ^VulkanContext) -> vk.Result {
+vulkan_instance_init :: proc() -> vk.Result {
   glfw_exts_cstrings := glfw.GetRequiredInstanceExtensions()
   extensions := make([dynamic]cstring, 0, len(glfw_exts_cstrings) + 2)
   defer delete(extensions)
@@ -230,23 +225,23 @@ vulkan_instance_init :: proc(self: ^VulkanContext) -> vk.Result {
   create_info.enabledExtensionCount = u32(len(extensions))
   create_info.ppEnabledExtensionNames = raw_data(extensions)
 
-  vk.CreateInstance(&create_info, nil, &self.vki) or_return
-  vk.load_proc_addresses_instance(self.vki)
+  vk.CreateInstance(&create_info, nil, &g_instance) or_return
+  vk.load_proc_addresses_instance(g_instance)
 
   when ENABLE_VALIDATION_LAYERS {
     vk.CreateDebugUtilsMessengerEXT(
-      self.vki,
+      g_instance,
       &dbg_create_info,
       nil,
-      &self.debug_messenger,
+      &g_debug_messenger,
     ) or_return
   }
   fmt.printfln("Vulkan instance created: %s", app_info.pApplicationName)
   return .SUCCESS
 }
 
-surface_init :: proc(self: ^VulkanContext) -> vk.Result {
-  glfw.CreateWindowSurface(self.vki, self.window, nil, &self.surface) or_return
+surface_init :: proc() -> vk.Result {
+  glfw.CreateWindowSurface(g_instance, g_window, nil, &g_surface) or_return
   fmt.printfln("Vulkan surface created")
   return .SUCCESS
 }
@@ -300,7 +295,6 @@ query_physical_device_swapchain_support :: proc(
 }
 
 score_physical_device :: proc(
-  self: ^VulkanContext,
   device: vk.PhysicalDevice,
 ) -> (
   score: u32,
@@ -355,10 +349,7 @@ score_physical_device :: proc(
   }
   fmt.printfln("vulkan: device supports all required extensions")
 
-  support, s_res := query_physical_device_swapchain_support(
-    device,
-    self.surface,
-  )
+  support, s_res := query_physical_device_swapchain_support(device, g_surface)
   if s_res != .SUCCESS {return 0, s_res}
   defer swapchain_support_deinit(&support)
 
@@ -370,7 +361,7 @@ score_physical_device :: proc(
     return 0, .SUCCESS
   }
 
-  _, qf_res := find_queue_families(device, self.surface)
+  _, qf_res := find_queue_families(device, g_surface)
   if qf_res != .SUCCESS {
     fmt.printfln("Device %s: no suitable queue families.", device_name_cstring)
     return 0, .SUCCESS
@@ -393,9 +384,9 @@ score_physical_device :: proc(
   return current_score, .SUCCESS
 }
 
-physical_device_init :: proc(self: ^VulkanContext) -> vk.Result {
+physical_device_init :: proc() -> vk.Result {
   count: u32
-  vk.EnumeratePhysicalDevices(self.vki, &count, nil) or_return
+  vk.EnumeratePhysicalDevices(g_instance, &count, nil) or_return
   if count == 0 {
     fmt.printfln("Error: No physical devices found!")
     return .ERROR_INITIALIZATION_FAILED
@@ -405,34 +396,31 @@ physical_device_init :: proc(self: ^VulkanContext) -> vk.Result {
   devices_slice := make([]vk.PhysicalDevice, count)
   defer delete(devices_slice)
   vk.EnumeratePhysicalDevices(
-    self.vki,
+    g_instance,
     &count,
     raw_data(devices_slice),
   ) or_return
 
   best_score: u32 = 0
   for device_handle in devices_slice {
-    score_val := score_physical_device(self, device_handle) or_return
+    score_val := score_physical_device(device_handle) or_return
     fmt.printfln(" - Device Score: %d", score_val)
 
     if score_val > best_score {
-      self.physical_device = device_handle
+      g_physical_device = device_handle
       best_score = score_val
     }
   }
 
-  if self.physical_device == nil {
+  if g_physical_device == nil {
     fmt.printfln("Error: No suitable physical device found!")
     return .ERROR_INITIALIZATION_FAILED
   }
 
-  vk.GetPhysicalDeviceProperties(
-    self.physical_device,
-    &self.physical_device_properties,
-  )
+  vk.GetPhysicalDeviceProperties(g_physical_device, &g_device_properties)
   fmt.printfln(
     "\nSelected physical device: %s (score %d)",
-    cstring(&self.physical_device_properties.deviceName[0]),
+    cstring(&g_device_properties.deviceName[0]),
     best_score,
   )
   return .SUCCESS
@@ -487,17 +475,17 @@ find_queue_families :: proc(
   return
 }
 
-logical_device_init :: proc(self: ^VulkanContext) -> vk.Result {
-  indices := find_queue_families(self.physical_device, self.surface) or_return
-  self.graphics_family = indices.graphics_family
-  self.present_family = indices.present_family
+logical_device_init :: proc() -> vk.Result {
+  indices := find_queue_families(g_physical_device, g_surface) or_return
+  g_graphics_family = indices.graphics_family
+  g_present_family = indices.present_family
   support_details := query_physical_device_swapchain_support(
-    self.physical_device,
-    self.surface,
+    g_physical_device,
+    g_surface,
   ) or_return
-  self.surface_capabilities = support_details.capabilities
-  self.surface_formats = support_details.formats
-  self.present_modes = support_details.present_modes
+  g_surface_capabilities = support_details.capabilities
+  g_surface_formats = support_details.formats
+  g_present_modes = support_details.present_modes
   support_details.formats = nil
   support_details.present_modes = nil
   swapchain_support_deinit(&support_details)
@@ -509,8 +497,8 @@ logical_device_init :: proc(self: ^VulkanContext) -> vk.Result {
     }, 2)
   defer delete(unique_queue_families)
 
-  unique_queue_families[self.graphics_family] = {}
-  unique_queue_families[self.present_family] = {}
+  unique_queue_families[g_graphics_family] = {}
+  unique_queue_families[g_present_family] = {}
   queue_priority: f32 = 1.0
   for family_index in unique_queue_families {
     append(
@@ -545,17 +533,17 @@ logical_device_init :: proc(self: ^VulkanContext) -> vk.Result {
   }
 
   vk.CreateDevice(
-    self.physical_device,
+    g_physical_device,
     &device_create_info,
     nil,
-    &self.vkd,
+    &g_device,
   ) or_return
-  vk.GetDeviceQueue(self.vkd, self.graphics_family, 0, &self.graphics_queue)
-  vk.GetDeviceQueue(self.vkd, self.present_family, 0, &self.present_queue)
+  vk.GetDeviceQueue(g_device, g_graphics_family, 0, &g_graphics_queue)
+  vk.GetDeviceQueue(g_device, g_present_family, 0, &g_present_queue)
   return .SUCCESS
 }
 
-descriptor_pool_init :: proc(self: ^VulkanContext) -> vk.Result {
+descriptor_pool_init :: proc() -> vk.Result {
   // expand those limits as needed
   pool_sizes := [4]vk.DescriptorPoolSize {
     {.COMBINED_IMAGE_SAMPLER, MAX_SAMPLER_COUNT},
@@ -581,10 +569,10 @@ descriptor_pool_init :: proc(self: ^VulkanContext) -> vk.Result {
   fmt.printfln("Creating descriptor pool with maxSets: %d", pool_info.maxSets)
 
   result := vk.CreateDescriptorPool(
-    self.vkd,
+    g_device,
     &pool_info,
     nil,
-    &self.descriptor_pool,
+    &g_descriptor_pool,
   )
   if result != .SUCCESS {
     fmt.printfln("Failed to create descriptor pool with error: %v", result)
@@ -594,19 +582,18 @@ descriptor_pool_init :: proc(self: ^VulkanContext) -> vk.Result {
   return .SUCCESS
 }
 
-command_pool_init :: proc(self: ^VulkanContext) -> vk.Result {
+command_pool_init :: proc() -> vk.Result {
   pool_info := vk.CommandPoolCreateInfo {
     sType            = .COMMAND_POOL_CREATE_INFO,
     flags            = {.RESET_COMMAND_BUFFER},
-    queueFamilyIndex = self.graphics_family,
+    queueFamilyIndex = g_graphics_family,
   }
-  vk.CreateCommandPool(self.vkd, &pool_info, nil, &self.command_pool) or_return
+  vk.CreateCommandPool(g_device, &pool_info, nil, &g_command_pool) or_return
   fmt.printfln("Vulkan command pool created")
   return .SUCCESS
 }
 
 create_shader_module :: proc(
-  self: ^VulkanContext,
   code: []u8,
 ) -> (
   module: vk.ShaderModule,
@@ -621,13 +608,12 @@ create_shader_module :: proc(
     codeSize = len(code),
     pCode    = raw_data(slice.reinterpret([]u32, code)),
   }
-  vk.CreateShaderModule(self.vkd, &create_info, nil, &module) or_return
+  vk.CreateShaderModule(g_device, &create_info, nil, &module) or_return
   res = .SUCCESS
   return
 }
 
 begin_single_time_command :: proc(
-  self: ^VulkanContext,
 ) -> (
   cmd_buffer: vk.CommandBuffer,
   res: vk.Result,
@@ -635,10 +621,10 @@ begin_single_time_command :: proc(
   alloc_info := vk.CommandBufferAllocateInfo {
     sType              = .COMMAND_BUFFER_ALLOCATE_INFO,
     level              = .PRIMARY,
-    commandPool        = self.command_pool,
+    commandPool        = g_command_pool,
     commandBufferCount = 1,
   }
-  vk.AllocateCommandBuffers(self.vkd, &alloc_info, &cmd_buffer) or_return
+  vk.AllocateCommandBuffers(g_device, &alloc_info, &cmd_buffer) or_return
   begin_info := vk.CommandBufferBeginInfo {
     sType = .COMMAND_BUFFER_BEGIN_INFO,
     flags = {.ONE_TIME_SUBMIT},
@@ -647,24 +633,20 @@ begin_single_time_command :: proc(
   return cmd_buffer, .SUCCESS
 }
 
-end_single_time_command :: proc(
-  self: ^VulkanContext,
-  cmd_buffer: ^vk.CommandBuffer,
-) -> vk.Result {
+end_single_time_command :: proc(cmd_buffer: ^vk.CommandBuffer) -> vk.Result {
   vk.EndCommandBuffer(cmd_buffer^) or_return
   submit_info := vk.SubmitInfo {
     sType              = .SUBMIT_INFO,
     commandBufferCount = 1,
     pCommandBuffers    = cmd_buffer,
   }
-  vk.QueueSubmit(self.graphics_queue, 1, &submit_info, 0) or_return
-  vk.QueueWaitIdle(self.graphics_queue) or_return
-  vk.FreeCommandBuffers(self.vkd, self.command_pool, 1, cmd_buffer)
+  vk.QueueSubmit(g_graphics_queue, 1, &submit_info, 0) or_return
+  vk.QueueWaitIdle(g_graphics_queue) or_return
+  vk.FreeCommandBuffers(g_device, g_command_pool, 1, cmd_buffer)
   return .SUCCESS
 }
 
 find_memory_type_index :: proc(
-  pdevice: vk.PhysicalDevice,
   type_filter: u32,
   properties: vk.MemoryPropertyFlags,
 ) -> (
@@ -672,7 +654,7 @@ find_memory_type_index :: proc(
   bool,
 ) {
   mem_properties: vk.PhysicalDeviceMemoryProperties
-  vk.GetPhysicalDeviceMemoryProperties(pdevice, &mem_properties)
+  vk.GetPhysicalDeviceMemoryProperties(g_physical_device, &mem_properties)
   for i in 0 ..< mem_properties.memoryTypeCount {
     if type_filter & (1 << i) == 0 {
       continue
@@ -686,7 +668,6 @@ find_memory_type_index :: proc(
 }
 
 allocate_vulkan_memory :: proc(
-  self: ^VulkanContext,
   mem_requirements: vk.MemoryRequirements,
   properties: vk.MemoryPropertyFlags,
 ) -> (
@@ -694,7 +675,6 @@ allocate_vulkan_memory :: proc(
   ret: vk.Result,
 ) {
   memory_type_idx, found := find_memory_type_index(
-    self.physical_device,
     mem_requirements.memoryTypeBits,
     properties,
   )
@@ -707,13 +687,12 @@ allocate_vulkan_memory :: proc(
     allocationSize  = mem_requirements.size,
     memoryTypeIndex = memory_type_idx,
   }
-  vk.AllocateMemory(self.vkd, &alloc_info, nil, &memory) or_return
+  vk.AllocateMemory(g_device, &alloc_info, nil, &memory) or_return
   ret = .SUCCESS
   return
 }
 
 malloc_image_buffer :: proc(
-  self: ^VulkanContext,
   width: u32,
   height: u32,
   format: vk.Format,
@@ -737,16 +716,15 @@ malloc_image_buffer :: proc(
     sharingMode   = .EXCLUSIVE,
     samples       = {._1},
   }
-  vk.CreateImage(self.vkd, &create_info, nil, &img_buffer.image) or_return
+  vk.CreateImage(g_device, &create_info, nil, &img_buffer.image) or_return
   mem_reqs: vk.MemoryRequirements
-  vk.GetImageMemoryRequirements(self.vkd, img_buffer.image, &mem_reqs)
+  vk.GetImageMemoryRequirements(g_device, img_buffer.image, &mem_reqs)
   img_buffer.memory = allocate_vulkan_memory(
-    self,
     mem_reqs,
     mem_properties,
   ) or_return
   vk.BindImageMemory(
-    self.vkd,
+    g_device,
     img_buffer.image,
     img_buffer.memory,
     0,
@@ -757,28 +735,7 @@ malloc_image_buffer :: proc(
   return img_buffer, .SUCCESS
 }
 
-malloc_image_buffer_device_local :: proc(
-  self: ^VulkanContext,
-  format: vk.Format,
-  width: u32,
-  height: u32,
-) -> (
-  ImageBuffer,
-  vk.Result,
-) {
-  return malloc_image_buffer(
-    self,
-    width,
-    height,
-    format,
-    .OPTIMAL,
-    {.TRANSFER_DST, .SAMPLED},
-    {.DEVICE_LOCAL},
-  )
-}
-
 malloc_data_buffer :: proc(
-  self: ^VulkanContext,
   size: vk.DeviceSize,
   usage: vk.BufferUsageFlags,
   mem_properties: vk.MemoryPropertyFlags,
@@ -792,41 +749,35 @@ malloc_data_buffer :: proc(
     usage       = usage,
     sharingMode = .EXCLUSIVE,
   }
-  vk.CreateBuffer(self.vkd, &create_info, nil, &data_buf.buffer) or_return
+  vk.CreateBuffer(g_device, &create_info, nil, &data_buf.buffer) or_return
 
   mem_reqs: vk.MemoryRequirements
-  vk.GetBufferMemoryRequirements(self.vkd, data_buf.buffer, &mem_reqs)
+  vk.GetBufferMemoryRequirements(g_device, data_buf.buffer, &mem_reqs)
 
-  data_buf.memory = allocate_vulkan_memory(
-    self,
-    mem_reqs,
-    mem_properties,
-  ) or_return
-  vk.BindBufferMemory(self.vkd, data_buf.buffer, data_buf.memory, 0) or_return
+  data_buf.memory = allocate_vulkan_memory(mem_reqs, mem_properties) or_return
+  vk.BindBufferMemory(g_device, data_buf.buffer, data_buf.memory, 0) or_return
   data_buf.size = size
   return data_buf, .SUCCESS
 }
 
 malloc_local_buffer :: proc(
-  self: ^VulkanContext,
   size: vk.DeviceSize,
   usage: vk.BufferUsageFlags,
 ) -> (
   DataBuffer,
   vk.Result,
 ) {
-  return malloc_data_buffer(self, size, usage, {.DEVICE_LOCAL})
+  return malloc_data_buffer(size, usage, {.DEVICE_LOCAL})
 }
 
 malloc_host_visible_buffer :: proc(
-  self: ^VulkanContext,
   size: vk.DeviceSize,
   usage: vk.BufferUsageFlags,
 ) -> (
   DataBuffer,
   vk.Result,
 ) {
-  return malloc_data_buffer(self, size, usage, {.HOST_VISIBLE, .HOST_COHERENT})
+  return malloc_data_buffer(size, usage, {.HOST_VISIBLE, .HOST_COHERENT})
 }
 
 align_up :: proc(
@@ -868,21 +819,17 @@ data_buffer_write :: proc(
   return data_buffer_write_at(self, data, 0, len)
 }
 
-data_buffer_deinit :: proc(buffer: ^DataBuffer, ctx: ^VulkanContext) {
-  if buffer == nil || ctx == nil {
-    return
-  }
-  vkd := ctx.vkd
+data_buffer_deinit :: proc(buffer: ^DataBuffer) {
   if buffer.mapped != nil {
-    vk.UnmapMemory(vkd, buffer.memory)
+    vk.UnmapMemory(g_device, buffer.memory)
     buffer.mapped = nil
   }
   if buffer.buffer != 0 {
-    vk.DestroyBuffer(vkd, buffer.buffer, nil)
+    vk.DestroyBuffer(g_device, buffer.buffer, nil)
     buffer.buffer = 0
   }
   if buffer.memory != 0 {
-    vk.FreeMemory(vkd, buffer.memory, nil)
+    vk.FreeMemory(g_device, buffer.memory, nil)
     buffer.memory = 0
   }
   buffer.size = 0
@@ -896,17 +843,17 @@ ImageBuffer :: struct {
   view:          vk.ImageView,
 }
 
-image_buffer_deinit :: proc(vkd: vk.Device, self: ^ImageBuffer) {
+image_buffer_deinit :: proc(self: ^ImageBuffer) {
   if self.view != 0 {
-    vk.DestroyImageView(vkd, self.view, nil)
+    vk.DestroyImageView(g_device, self.view, nil)
     self.view = 0
   }
   if self.image != 0 {
-    vk.DestroyImage(vkd, self.image, nil)
+    vk.DestroyImage(g_device, self.image, nil)
     self.image = 0
   }
   if self.memory != 0 {
-    vk.FreeMemory(vkd, self.memory, nil)
+    vk.FreeMemory(g_device, self.memory, nil)
     self.memory = 0
   }
   self.width = 0
@@ -915,7 +862,6 @@ image_buffer_deinit :: proc(vkd: vk.Device, self: ^ImageBuffer) {
 }
 
 create_image_view :: proc(
-  vkd: vk.Device,
   image: vk.Image,
   format: vk.Format,
   aspect_mask: vk.ImageAspectFlags,
@@ -942,12 +888,11 @@ create_image_view :: proc(
       layerCount = 1,
     },
   }
-  res = vk.CreateImageView(vkd, &create_info, nil, &view)
+  res = vk.CreateImageView(g_device, &create_info, nil, &view)
   return
 }
 
 create_host_visible_buffer :: proc(
-  ctx: ^VulkanContext,
   size: vk.DeviceSize,
   usage: vk.BufferUsageFlags,
   data: rawptr = nil,
@@ -955,11 +900,10 @@ create_host_visible_buffer :: proc(
   buffer: DataBuffer,
   ret: vk.Result,
 ) {
-  vkd := ctx.vkd
   buffer.size = size
-  buffer = malloc_host_visible_buffer(ctx, size, usage) or_return
+  buffer = malloc_host_visible_buffer(size, usage) or_return
   vk.MapMemory(
-    vkd,
+    g_device,
     buffer.memory,
     0,
     buffer.size,
@@ -975,7 +919,6 @@ create_host_visible_buffer :: proc(
 }
 
 create_local_buffer :: proc(
-  ctx: ^VulkanContext,
   size: vk.DeviceSize,
   usage: vk.BufferUsageFlags,
   data: rawptr = nil,
@@ -983,23 +926,22 @@ create_local_buffer :: proc(
   buffer: DataBuffer,
   ret: vk.Result,
 ) {
-  buffer = malloc_local_buffer(ctx, size, usage | {.TRANSFER_DST}) or_return
+  buffer = malloc_local_buffer(size, usage | {.TRANSFER_DST}) or_return
   if data != nil {
     staging := create_host_visible_buffer(
-      ctx,
       size,
       {.TRANSFER_SRC},
       data,
     ) or_return
-    defer data_buffer_deinit(&staging, ctx)
-    copy_buffer(ctx, &buffer, &staging) or_return
+    defer data_buffer_deinit(&staging)
+    copy_buffer(&buffer, &staging) or_return
   }
   ret = .SUCCESS
   return
 }
 
-copy_buffer :: proc(ctx: ^VulkanContext, dst, src: ^DataBuffer) -> vk.Result {
-  cmd_buffer := begin_single_time_command(ctx) or_return
+copy_buffer :: proc(dst, src: ^DataBuffer) -> vk.Result {
+  cmd_buffer := begin_single_time_command() or_return
   region := vk.BufferCopy {
     srcOffset = 0,
     dstOffset = 0,
@@ -1012,16 +954,15 @@ copy_buffer :: proc(ctx: ^VulkanContext, dst, src: ^DataBuffer) -> vk.Result {
     src.mapped,
     dst.buffer,
   )
-  return end_single_time_command(ctx, &cmd_buffer)
+  return end_single_time_command(&cmd_buffer)
 }
 
 transition_image_layout :: proc(
-  ctx: ^VulkanContext,
   image: vk.Image,
   format: vk.Format,
   old_layout, new_layout: vk.ImageLayout,
 ) -> vk.Result {
-  cmd_buffer := begin_single_time_command(ctx) or_return
+  cmd_buffer := begin_single_time_command() or_return
 
   src_access_mask: vk.AccessFlags = {}
   dst_access_mask: vk.AccessFlags = {}
@@ -1074,21 +1015,16 @@ transition_image_layout :: proc(
     1,
     &barrier,
   )
-  return end_single_time_command(ctx, &cmd_buffer)
+  return end_single_time_command(&cmd_buffer)
 }
-copy_image :: proc(
-  ctx: ^VulkanContext,
-  dst: ^ImageBuffer,
-  src: ^DataBuffer,
-) -> vk.Result {
+copy_image :: proc(dst: ^ImageBuffer, src: ^DataBuffer) -> vk.Result {
   transition_image_layout(
-    ctx,
     dst.image,
     dst.format,
     .UNDEFINED,
     .TRANSFER_DST_OPTIMAL,
   ) or_return
-  cmd_buffer := begin_single_time_command(ctx) or_return
+  cmd_buffer := begin_single_time_command() or_return
   region := vk.BufferImageCopy {
     bufferOffset = 0,
     bufferRowLength = 0,
@@ -1110,9 +1046,8 @@ copy_image :: proc(
     1,
     &region,
   )
-  end_single_time_command(ctx, &cmd_buffer) or_return
+  end_single_time_command(&cmd_buffer) or_return
   transition_image_layout(
-    ctx,
     dst.image,
     dst.format,
     .TRANSFER_DST_OPTIMAL,
@@ -1122,7 +1057,6 @@ copy_image :: proc(
 }
 
 create_image_buffer :: proc(
-  ctx: ^VulkanContext,
   data: rawptr,
   size: vk.DeviceSize,
   format: vk.Format,
@@ -1131,15 +1065,9 @@ create_image_buffer :: proc(
   img: ImageBuffer,
   ret: vk.Result,
 ) {
-  staging := create_host_visible_buffer(
-    ctx,
-    size,
-    {.TRANSFER_SRC},
-    data,
-  ) or_return
-  defer data_buffer_deinit(&staging, ctx)
+  staging := create_host_visible_buffer(size, {.TRANSFER_SRC}, data) or_return
+  defer data_buffer_deinit(&staging)
   img = malloc_image_buffer(
-    ctx,
     width,
     height,
     format,
@@ -1147,14 +1075,9 @@ create_image_buffer :: proc(
     {.TRANSFER_DST, .SAMPLED},
     {.DEVICE_LOCAL},
   ) or_return
-  copy_image(ctx, &img, &staging) or_return
+  copy_image(&img, &staging) or_return
   aspect_mask := vk.ImageAspectFlags{.COLOR}
-  img.view = create_image_view(
-    ctx.vkd,
-    img.image,
-    format,
-    aspect_mask,
-  ) or_return
+  img.view = create_image_view(img.image, format, aspect_mask) or_return
   ret = .SUCCESS
   return
 }
