@@ -374,9 +374,9 @@ render_single_node :: proc(
 
   #partial switch data in node.attachment {
   case SkeletalMeshAttachment:
-    mesh := resource.get(&ctx.engine.skeletal_meshes, data.handle)
+    mesh := resource.get(ctx.engine.skeletal_meshes, data.handle)
     if mesh == nil {return true}
-    material := resource.get(&ctx.engine.materials, mesh.material)
+    material := resource.get(ctx.engine.materials, mesh.material)
     if material == nil {return true}
     world_aabb := geometry.aabb_transform(mesh.aabb, world_matrix)
     if !geometry.frustum_test_aabb(&ctx.camera_frustum, world_aabb) {
@@ -442,9 +442,9 @@ render_single_node :: proc(
     vk.CmdDrawIndexed(ctx.command_buffer, mesh.indices_len, 1, 0, 0, 0)
     ctx.rendered_count^ += 1
   case StaticMeshAttachment:
-    mesh := resource.get(&ctx.engine.meshes, data.handle)
+    mesh := resource.get(ctx.engine.meshes, data.handle)
     if mesh == nil {return true}
-    material := resource.get(&ctx.engine.materials, mesh.material)
+    material := resource.get(ctx.engine.materials, mesh.material)
     if material == nil {return true}
     world_aabb := geometry.aabb_transform(mesh.aabb, world_matrix)
     if !geometry.frustum_test_aabb(&ctx.camera_frustum, world_aabb) {
@@ -517,13 +517,13 @@ render_single_shadow :: proc(
       return true
     }
     mesh_handle := data.handle
-    mesh := resource.get(&ctx.engine.meshes, mesh_handle)
+    mesh := resource.get(ctx.engine.meshes, mesh_handle)
     if mesh == nil {return true}
     world_aabb := geometry.aabb_transform(mesh.aabb, world_matrix)
     if !geometry.frustum_test_aabb(&ctx.frustum, world_aabb) {
       return true
     }
-    material := resource.get(&ctx.engine.materials, mesh.material)
+    material := resource.get(ctx.engine.materials, mesh.material)
     if material == nil {return true}
     features: ShaderFeatureSet
     pipeline := shadow_pipelines[transmute(u32)features]
@@ -573,13 +573,13 @@ render_single_shadow :: proc(
     if !data.cast_shadow {
       // return true
     }
-    mesh := resource.get(&ctx.engine.skeletal_meshes, data.handle)
+    mesh := resource.get(ctx.engine.skeletal_meshes, data.handle)
     if mesh == nil {return true}
     world_aabb := geometry.aabb_transform(mesh.aabb, world_matrix)
     if !geometry.frustum_test_aabb(&ctx.frustum, world_aabb) {
       return true
     }
-    material := resource.get(&ctx.engine.materials, mesh.material)
+    material := resource.get(ctx.engine.materials, mesh.material)
     if material == nil {return true}
     descriptor_sets := [?]vk.DescriptorSet {
         renderer_get_camera_descriptor_set(&ctx.engine.renderer), // set 0
@@ -1214,7 +1214,7 @@ update :: proc(engine: ^Engine) -> bool {
     }
     anim_inst := &data.animation.?
     animation.instance_update(anim_inst, delta_time)
-    skeletal_mesh := resource.get(&engine.skeletal_meshes, data.handle)
+    skeletal_mesh := resource.get(engine.skeletal_meshes, data.handle)
     if skeletal_mesh != nil {
       calculate_animation_transform(skeletal_mesh, anim_inst, &data.pose)
       animation.pose_flush(&data.pose, data.bone_buffer.mapped)
@@ -1260,10 +1260,10 @@ update :: proc(engine: ^Engine) -> bool {
 deinit :: proc(engine: ^Engine) {
   vkd := engine.ctx.vkd
   vk.DeviceWaitIdle(vkd)
-  resource.pool_deinit(&engine.textures, texture_deinit)
-  resource.pool_deinit(&engine.meshes, static_mesh_deinit)
-  resource.pool_deinit(&engine.skeletal_meshes, skeletal_mesh_deinit)
-  resource.pool_deinit(&engine.materials, material_deinit)
+  resource.pool_deinit(engine.textures, texture_deinit)
+  resource.pool_deinit(engine.meshes, static_mesh_deinit)
+  resource.pool_deinit(engine.skeletal_meshes, skeletal_mesh_deinit)
+  resource.pool_deinit(engine.materials, material_deinit)
   pipeline2d_deinit(&engine.ui.pipeline)
   pipeline3d_deinit(&engine.ctx)
   pipeline_shadow_deinit(&engine.ctx)

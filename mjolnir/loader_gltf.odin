@@ -186,7 +186,7 @@ load_gltf :: proc(
         )
       }
     }
-    attach(&engine.scene.nodes, entry.parent, node_handle)
+    attach(engine.scene.nodes, entry.parent, node_handle)
     if entry.parent == engine.scene.root {
       append(&created_root_handles, node_handle)
     }
@@ -656,7 +656,7 @@ load_gltf_animations :: proc(
   engine_mesh_handle: resource.Handle,
   node_ptr_to_bone_idx_map: map[^cgltf.node]u32,
 ) -> bool {
-  skeletal_mesh := resource.get(&engine.skeletal_meshes, engine_mesh_handle)
+  skeletal_mesh := resource.get(engine.skeletal_meshes, engine_mesh_handle)
   skeletal_mesh.animations = make([]animation.Clip, len(gltf_data.animations))
 
   for &gltf_anim, i in gltf_data.animations {

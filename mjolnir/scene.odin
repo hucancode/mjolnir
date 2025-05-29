@@ -71,7 +71,7 @@ deinit_node :: proc(node: ^Node) {
   delete(node.children)
 }
 
-detach :: proc(nodes: ^resource.Pool(Node), child_handle: Handle) {
+detach :: proc(nodes: resource.Pool(Node), child_handle: Handle) {
   child_node := resource.get(nodes, child_handle)
   if child_node == nil {
     return
@@ -92,7 +92,7 @@ detach :: proc(nodes: ^resource.Pool(Node), child_handle: Handle) {
 }
 
 attach :: proc(
-  nodes: ^resource.Pool(Node),
+  nodes: resource.Pool(Node),
   parent_handle: Handle,
   child_handle: Handle,
 ) {
@@ -123,7 +123,7 @@ play_animation :: proc(
   name: string,
   mode: animation.PlayMode = .LOOP,
 ) -> bool {
-  node := resource.get(&engine.scene.nodes, node_handle)
+  node := resource.get(engine.scene.nodes, node_handle)
   if node == nil {
     return false
   }
@@ -131,7 +131,7 @@ play_animation :: proc(
   if !ok {
     return false
   }
-  skeletal_mesh_res := resource.get(&engine.skeletal_meshes, data.handle)
+  skeletal_mesh_res := resource.get(engine.skeletal_meshes, data.handle)
   if skeletal_mesh_res == nil {
     return false
   }
@@ -208,7 +208,7 @@ spawn :: proc(scene: ^Scene) -> (handle: Handle, node: ^Node) {
   if node != nil {
     node.transform = geometry.TRANSFORM_IDENTITY
     node.children = make([dynamic]Handle, 0)
-    attach(&scene.nodes, scene.root, handle)
+    attach(scene.nodes, scene.root, handle)
   }
   return
 }
@@ -235,7 +235,7 @@ init_scene :: proc(s: ^Scene) {
 }
 
 deinit_scene :: proc(s: ^Scene) {
-  resource.pool_deinit(&s.nodes, deinit_node)
+  resource.pool_deinit(s.nodes, deinit_node)
 }
 
 switch_camera_mode_scene :: proc(s: ^Scene) {
@@ -267,7 +267,7 @@ traverse_scene :: proc(
     current_node_handle := pop(&node_stack)
     parent_world_matrix := pop(&transform_stack)
     parent_is_dirty := pop(&dirty_stack)
-    current_node := resource.get(&scene.nodes, current_node_handle)
+    current_node := resource.get(scene.nodes, current_node_handle)
     if current_node == nil {
       fmt.eprintf(
         "traverse_scene: Node with handle %v not found\n",
