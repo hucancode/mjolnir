@@ -170,7 +170,7 @@ load_gltf :: proc(
 
         mesh_handle, _, ret := create_static_mesh(
           engine,
-          &mesh_data,
+          mesh_data,
           mat_handle,
         )
         if ret != .SUCCESS {

@@ -29,13 +29,12 @@ setup :: proc(engine: ^mjolnir.Engine) {
   cube_geom := make_cube()
   cube_mesh_handle, _, _ := create_static_mesh(
     engine,
-    &cube_geom,
+    cube_geom,
     plain_material_handle,
   )
-  sphere_geom := make_sphere()
   sphere_mesh_handle, _, _ := create_static_mesh(
     engine,
-    &sphere_geom,
+    make_sphere(),
     plain_material_handle,
   )
   // Create ground plane
@@ -52,10 +51,9 @@ setup :: proc(engine: ^mjolnir.Engine) {
     {.ALBEDO_TEXTURE},
     ground_albedo_handle,
   )
-  quad_geom := make_quad()
   ground_mesh_handle, _, _ := create_static_mesh(
     engine,
-    &quad_geom,
+    make_quad(),
     ground_mat_handle,
   )
   if true {
@@ -195,7 +193,9 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
     t := time_since_app_start(engine) + offset
     // fmt.printfln("getting light %d %v", i, light_handles[i])
     light_ptr := resource.get(engine.scene.nodes, handle)
-    if light_ptr == nil {continue}
+    if light_ptr == nil {
+        continue
+    }
     rx := math.sin(t)
     ry := (math.sin(t) + 1.0) * 0.5 * 1.5 + 1.0
     rz := math.cos(t)

@@ -1,6 +1,7 @@
 package geometry
 
 import "core:math"
+import "core:fmt"
 import linalg "core:math/linalg"
 
 CameraOrbitMovement :: struct {
@@ -56,7 +57,7 @@ Camera :: struct {
   },
 }
 
-camera_init_perspective :: proc(
+make_camera_perspective :: proc(
   fov: f32,
   aspect_ratio: f32,
   near: f32,
@@ -76,7 +77,7 @@ camera_init_perspective :: proc(
   }
 }
 
-camera_init_ortho :: proc(
+make_camera_ortho :: proc(
   width: f32,
   height: f32,
   near: f32,
@@ -96,7 +97,7 @@ camera_init_ortho :: proc(
   }
 }
 
-camera_init_orbit :: proc(
+make_camera_orbit :: proc(
   fov: f32,
   aspect_ratio: f32,
   near: f32,
@@ -113,7 +114,7 @@ camera_init_orbit :: proc(
       far = far,
     },
   }
-  camera_update_orbit_position(&cam) // Set initial position and rotation
+  update_orbit_position(&cam) // Set initial position and rotation
   return cam
 }
 
@@ -133,7 +134,7 @@ camera_switch_to_orbit :: proc(
   orbit_data.yaw = 0.0
   orbit_data.pitch = 0.0
   camera.movement_data = orbit_data
-  camera_update_orbit_position(camera)
+  update_orbit_position(camera)
 }
 
 camera_switch_to_free :: proc(camera: ^Camera) {
@@ -141,23 +142,21 @@ camera_switch_to_free :: proc(camera: ^Camera) {
 }
 
 camera_orbit_rotate :: proc(self: ^Camera, yaw_delta: f32, pitch_delta: f32) {
-  #partial switch &movement in &self.movement_data {
-  case CameraOrbitMovement:
-    movement.yaw += yaw_delta
-    movement.pitch += pitch_delta
-    PI_HALF :: math.PI / 2.0
-    epsilon :: 0.001
-    movement.pitch = math.clamp(
-      movement.pitch,
-      -PI_HALF + epsilon,
-      PI_HALF - epsilon,
-    )
-    camera_update_orbit_position(self)
-  // fmt.printfln("Orbit camera rotated: yaw %f, pitch %f", movement.yaw, movement.pitch)
-  case:
-    //log.warnf("rotate_orbit_camera called on non-orbit camera or uninitialized orbit data")
+  movement, ok := &self.movement_data.(CameraOrbitMovement)
+  if !ok {
     return
   }
+  movement.yaw += yaw_delta
+  movement.pitch += pitch_delta
+  PI_HALF :: math.PI / 2.0
+  epsilon :: 0.001
+  movement.pitch = math.clamp(
+    movement.pitch,
+    -PI_HALF + epsilon,
+    PI_HALF - epsilon,
+  )
+  update_orbit_position(self)
+  fmt.printfln("Orbit camera rotated: yaw %f, pitch %f", movement.yaw, movement.pitch)
 }
 
 camera_orbit_zoom :: proc(camera: ^Camera, delta_distance: f32) {
@@ -171,10 +170,10 @@ camera_orbit_zoom :: proc(camera: ^Camera, delta_distance: f32) {
     movement.max_distance,
   )
   // fmt.printfln("Zoomed to distance: delta %f -> %f", delta_distance, movement.distance)
-  camera_update_orbit_position(camera)
+  update_orbit_position(camera)
 }
 
-camera_set_orbit_target :: proc(
+set_orbit_target :: proc(
   camera: ^Camera,
   new_target: linalg.Vector3f32,
 ) {
@@ -183,10 +182,10 @@ camera_set_orbit_target :: proc(
     return
   }
   movement.target = new_target
-  camera_update_orbit_position(camera)
+  update_orbit_position(camera)
 }
 
-camera_update_orbit_position :: proc(camera: ^Camera) {
+update_orbit_position :: proc(camera: ^Camera) {
   movement, ok := &camera.movement_data.(CameraOrbitMovement)
   if !ok {
     return
@@ -205,7 +204,7 @@ camera_update_orbit_position :: proc(camera: ^Camera) {
   camera.position = movement.target + offset_direction * movement.distance
 }
 
-camera_calculate_projection_matrix :: proc(
+calculate_projection_matrix :: proc(
   camera: ^Camera,
 ) -> linalg.Matrix4f32 {
   switch proj in camera.projection {
@@ -230,7 +229,7 @@ camera_calculate_projection_matrix :: proc(
   }
 }
 
-camera_calculate_view_matrix :: proc(camera: ^Camera) -> linalg.Matrix4f32 {
+calculate_view_matrix :: proc(camera: ^Camera) -> linalg.Matrix4f32 {
   switch movement_data in camera.movement_data {
   case CameraOrbitMovement:
     return linalg.matrix4_look_at(
@@ -270,7 +269,7 @@ camera_up :: proc(camera: ^Camera) -> linalg.Vector3f32 {
 }
 
 camera_make_frustum :: proc(camera: ^Camera) -> Frustum {
-  view_matrix := camera_calculate_view_matrix(camera)
-  proj_matrix := camera_calculate_projection_matrix(camera)
+  view_matrix := calculate_view_matrix(camera)
+  proj_matrix := calculate_projection_matrix(camera)
   return make_frustum(proj_matrix * view_matrix)
 }

@@ -52,6 +52,48 @@ swapchain_support_deinit :: proc(self: ^SwapchainSupport) {
   self.present_modes = nil
 }
 
+query_swapchain_support :: proc(
+  device: vk.PhysicalDevice,
+  surface: vk.SurfaceKHR,
+) -> (
+  support: SwapchainSupport,
+  result: vk.Result,
+) {
+  fmt.printfln("vulkan: querying swapchain support for device", device)
+  vk.GetPhysicalDeviceSurfaceCapabilitiesKHR(
+    device,
+    surface,
+    &support.capabilities,
+  ) or_return
+  fmt.printfln("vulkan: got surface capabilities", support.capabilities)
+  count: u32
+  vk.GetPhysicalDeviceSurfaceFormatsKHR(device, surface, &count, nil) or_return
+  fmt.printfln("vulkan: found %v surface formats", count)
+  support.formats = make([]vk.SurfaceFormatKHR, count)
+  vk.GetPhysicalDeviceSurfaceFormatsKHR(
+    device,
+    surface,
+    &count,
+    raw_data(support.formats),
+  ) or_return
+  vk.GetPhysicalDeviceSurfacePresentModesKHR(
+    device,
+    surface,
+    &count,
+    nil,
+  ) or_return
+  support.present_modes = make([]vk.PresentModeKHR, count)
+  vk.GetPhysicalDeviceSurfacePresentModesKHR(
+    device,
+    surface,
+    &count,
+    raw_data(support.present_modes),
+  ) or_return
+  result = .SUCCESS
+  return
+}
+
+
 FoundQueueFamilyIndices :: struct {
   graphics_family: u32,
   present_family:  u32,

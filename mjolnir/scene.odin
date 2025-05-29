@@ -180,7 +180,7 @@ Scene :: struct {
 }
 
 init_scene :: proc(s: ^Scene) {
-  s.camera = geometry.camera_init_orbit(
+  s.camera = geometry.make_camera_orbit(
     math.PI * 0.5, // fov
     16.0 / 9.0, // aspect_ratio
     0.01, // near
