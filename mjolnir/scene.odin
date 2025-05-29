@@ -235,8 +235,8 @@ init_scene :: proc(s: ^Scene) {
 }
 
 deinit_scene :: proc(s: ^Scene) {
+  resource.pool_deinit(&s.nodes, deinit_node)
 }
-
 
 switch_camera_mode_scene :: proc(s: ^Scene) {
   _, in_orbit_mode := s.camera.movement_data.(geometry.CameraOrbitMovement)
