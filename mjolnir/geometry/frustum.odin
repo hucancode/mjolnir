@@ -103,13 +103,14 @@ aabb_transform :: proc(
 
   F32_MIN :: -3.40282347E+38
   F32_MAX :: 3.40282347E+38
-  new_aabb_min := linalg.Vector4f32{F32_MAX, F32_MAX, F32_MAX, F32_MAX}
-  new_aabb_max := linalg.Vector4f32{F32_MIN, F32_MIN, F32_MIN, F32_MIN}
+  new_aabb_min := linalg.Vector3f32{F32_MAX, F32_MAX, F32_MAX}
+  new_aabb_max := linalg.Vector3f32{F32_MIN, F32_MIN, F32_MIN}
 
   for corner in corners {
     transformed_corner := transform_matrix^ * corner
-    new_aabb_min = linalg.min(new_aabb_min, transformed_corner)
-    new_aabb_max = linalg.max(new_aabb_max, transformed_corner)
+    transformed_vec3 := linalg.Vector3f32{transformed_corner.x, transformed_corner.y, transformed_corner.z}
+    new_aabb_min = linalg.min(new_aabb_min, transformed_vec3)
+    new_aabb_max = linalg.max(new_aabb_max, transformed_vec3)
   }
   return Aabb{min = new_aabb_min, max = new_aabb_max}
 }
