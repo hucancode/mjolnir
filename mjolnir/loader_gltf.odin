@@ -74,8 +74,7 @@ load_gltf :: proc(
     node.name = string(g_node.name)
     node.transform = geometry.TRANSFORM_IDENTITY
     if g_node.has_matrix {
-      geometry.decompose_matrix(
-        &node.transform,
+      node.transform = geometry.decompose_matrix(
         geometry.matrix_from_arr(g_node.matrix_),
       )
     } else {

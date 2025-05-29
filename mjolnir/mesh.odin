@@ -153,9 +153,8 @@ calculate_animation_transform :: proc(
     current_bone := &self.bones[current_bone_index]
     local_transform: geometry.Transform
     if current_bone_index < u32(len(active_clip.channels)) {
-      channel := &active_clip.channels[current_bone_index]
       local_transform.position, local_transform.rotation, local_transform.scale =
-        animation.channel_sample(channel, anim_instance.time)
+        animation.channel_sample(active_clip.channels[current_bone_index], anim_instance.time)
     } else {
       local_transform = current_bone.bind_transform
     }

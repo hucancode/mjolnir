@@ -21,13 +21,15 @@ TRANSFORM_IDENTITY :: Transform {
   world_matrix = linalg.MATRIX4F32_IDENTITY,
 }
 
-decompose_matrix :: proc(t: ^Transform, m: linalg.Matrix4f32) {
+decompose_matrix :: proc(m: linalg.Matrix4f32) -> (ret: Transform) {
   // Extract translation (last column of the matrix)
-  t.position = m[3].xyz
+  ret.position = m[3].xyz
   // Extract scale (length of each basis vector)
-  t.scale = {linalg.length(m[0]), linalg.length(m[1]), linalg.length(m[2])}
+  ret.scale = {linalg.length(m[0]), linalg.length(m[1]), linalg.length(m[2])}
   // Extract rotation (basis vectors normalized)
-  t.rotation = linalg.quaternion_from_matrix4(m)
+  ret.rotation = linalg.quaternion_from_matrix4(m)
+  ret.is_dirty = true
+  return
 }
 
 matrix_from_arr :: proc(a: [16]f32) -> (m: linalg.Matrix4f32) {

@@ -185,7 +185,7 @@ channel_deinit :: proc(channel: ^Channel) {
 }
 
 channel_sample :: proc(
-  channel: ^Channel,
+  channel: Channel,
   t: f32,
 ) -> (
   position: linalg.Vector3f32,
