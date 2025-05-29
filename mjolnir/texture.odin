@@ -17,11 +17,12 @@ ImageData :: struct {
   height:           int,
   channels_in_file: int,
   actual_channels:  int,
+  is_data_owned:    bool,
 }
 
 image_data_deinit :: proc(img: ^ImageData) {
-  if img.pixels != nil {
-    // free(img.pixels)
+  if img.pixels != nil && img.is_data_owned {
+    stbi.image_free(raw_data(img.pixels))
     img.pixels = nil
   }
   img.width = 0
@@ -46,10 +47,8 @@ create_texture_from_data :: proc(
   ret: vk.Result,
 ) {
   handle, texture = resource.alloc(&engine.textures)
-  texture_init_from_data(texture, data) or_return
+  read_texture_data(texture, data) or_return
   texture_init(texture, &engine.ctx) or_return
-  delete(texture.image_data.pixels)
-  texture.image_data.pixels = nil
   fmt.printfln(
     "created texture %d x %d -> id %d",
     texture.image_data.width,
@@ -79,7 +78,6 @@ create_texture_from_pixels :: proc(
   texture.image_data.channels_in_file = channel
   texture.image_data.actual_channels = channel
   texture_init(texture, &engine.ctx, format) or_return
-  texture.image_data.pixels = nil
   fmt.printfln(
     "created texture %d x %d -> id %d",
     texture.image_data.width,
@@ -90,7 +88,7 @@ create_texture_from_pixels :: proc(
   return
 }
 
-texture_init_from_data :: proc(self: ^Texture, data: []u8) -> vk.Result {
+read_texture_data :: proc(self: ^Texture, data: []u8) -> vk.Result {
   w, h, c_in_file: c.int
   actual_channels: c.int = 4
   pixels_ptr := stbi.load_from_memory(
@@ -109,13 +107,12 @@ texture_init_from_data :: proc(self: ^Texture, data: []u8) -> vk.Result {
     return .ERROR_UNKNOWN
   }
   num_bytes := int(w * h * 4)
-  self.image_data.pixels = make([]u8, num_bytes)
-  mem.copy(raw_data(self.image_data.pixels), pixels_ptr, num_bytes)
-  stbi.image_free(pixels_ptr)
+  self.image_data.pixels = pixels_ptr[:num_bytes]
   self.image_data.width = int(w)
   self.image_data.height = int(h)
   self.image_data.channels_in_file = int(c_in_file)
   self.image_data.actual_channels = int(actual_channels)
+  self.image_data.is_data_owned = true
   fmt.printfln("loaded image %d x %d", w, h)
   return .SUCCESS
 }
@@ -129,15 +126,13 @@ create_texture_from_path :: proc(
   ret: vk.Result,
 ) {
   handle, texture = resource.alloc(&engine.textures)
-  texture_init_from_path(texture, path) or_return
+  read_texture(texture, path) or_return
   texture_init(texture, &engine.ctx) or_return
-  delete(texture.image_data.pixels)
-  texture.image_data.pixels = nil
   ret = .SUCCESS
   return
 }
 
-texture_init_from_path :: proc(self: ^Texture, path: string) -> vk.Result {
+read_texture :: proc(self: ^Texture, path: string) -> vk.Result {
   path_cstr := strings.clone_to_cstring(path)
   // defer free(path_cstr)
   w, h, c_in_file: c.int
@@ -152,13 +147,12 @@ texture_init_from_path :: proc(self: ^Texture, path: string) -> vk.Result {
     return .ERROR_UNKNOWN
   }
   num_bytes := int(w * h * 4)
-  self.image_data.pixels = make([]u8, num_bytes)
-  mem.copy(raw_data(self.image_data.pixels), pixels_ptr, num_bytes)
-  stbi.image_free(pixels_ptr)
+  self.image_data.pixels = pixels_ptr[:num_bytes]
   self.image_data.width = int(w)
   self.image_data.height = int(h)
   self.image_data.channels_in_file = int(c_in_file)
   self.image_data.actual_channels = int(actual_channels)
+  self.image_data.is_data_owned = true
   fmt.printfln("loaded texture %d x %d", w, h)
   return .SUCCESS
 }
@@ -180,6 +174,10 @@ texture_init :: proc(
     u32(self.image_data.width),
     u32(self.image_data.height),
   ) or_return
+  if self.image_data.is_data_owned {
+    stbi.image_free(raw_data(self.image_data.pixels))
+    self.image_data.pixels = nil
+  }
   sampler_info := vk.SamplerCreateInfo {
     sType         = .SAMPLER_CREATE_INFO,
     magFilter     = .LINEAR,
@@ -505,16 +503,12 @@ create_hdr_texture_from_path :: proc(
     return
   }
   num_floats := int(w * h * 4)
-  float_pixels := make([]f32, num_floats)
-  mem.copy(raw_data(float_pixels), float_pixels_ptr, num_floats * size_of(f32))
-  stbi.image_free(float_pixels_ptr)
-  texture.image_data.pixels = slice.to_bytes(float_pixels)
+  texture.image_data.pixels = slice.to_bytes(float_pixels_ptr[:num_floats])
   texture.image_data.width = int(w)
   texture.image_data.height = int(h)
   texture.image_data.channels_in_file = 3
   texture.image_data.actual_channels = 4
   texture_init(texture, &engine.ctx, .R32G32B32A32_SFLOAT) or_return
-  texture.image_data.pixels = nil
   fmt.printfln("created HDR texture %d x %d -> id %d", w, h, texture.buffer.image)
   ret = .SUCCESS
   return
