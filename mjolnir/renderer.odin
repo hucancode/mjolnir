@@ -2,8 +2,8 @@ package mjolnir
 
 import "core:fmt"
 import "core:math"
-import "core:slice"
 import linalg "core:math/linalg"
+import "core:slice"
 import "core:time"
 import "geometry"
 import "resource"
@@ -280,9 +280,12 @@ renderer_build_swapchain_surface_format :: proc(
       colorSpace = .SRGB_NONLINEAR,
     }
   } else {
-    i, found := slice.linear_search_proc(formats, proc(fmt: vk.SurfaceFormatKHR) -> bool {
+    i, found := slice.linear_search_proc(
+      formats,
+      proc(fmt: vk.SurfaceFormatKHR) -> bool {
         return fmt.format == .B8G8R8A8_SRGB
-    })
+      },
+    )
     self.format = formats[i if found else 0]
   }
 }
@@ -674,81 +677,9 @@ prepare_light :: proc(node: ^Node, cb_context: rawptr) -> bool {
 
 render_single_node :: proc(node: ^Node, cb_context: rawptr) -> bool {
   ctx := (^RenderMeshesContext)(cb_context)
-  // fmt.printfln("rendering node", node_h,"matrix", world_matrix^)
 
   #partial switch data in node.attachment {
-  case SkeletalMeshAttachment:
-    mesh := resource.get(ctx.engine.skeletal_meshes, data.handle)
-    if mesh == nil {return true}
-    material := resource.get(ctx.engine.materials, mesh.material)
-    if material == nil {return true}
-    world_aabb := geometry.aabb_transform(
-      mesh.aabb,
-      node.transform.world_matrix,
-    )
-    if !geometry.frustum_test_aabb(&ctx.camera_frustum, world_aabb) {
-      return true
-    }
-    material_update_bone_buffer(
-      material,
-      data.bone_buffer.buffer,
-      data.bone_buffer.size,
-    )
-    pipeline :=
-      g_pipelines[transmute(u32)material.features] if material.is_lit else g_unlit_pipelines[transmute(u32)material.features]
-    layout := g_pipeline_layout
-    // fmt.printfln("rendering skeletal mesh with material %v", material)
-    vk.CmdBindPipeline(ctx.command_buffer, .GRAPHICS, pipeline)
-    // Bind all required descriptor sets (set 0: camera+shadow+cube shadow, set 1: material, set 2: skinning)
-    descriptor_sets := [?]vk.DescriptorSet {
-      renderer_get_camera_descriptor_set(&ctx.engine.renderer), // set 0
-      material.texture_descriptor_set, // set 1
-      material.skinning_descriptor_set, // set 2
-      ctx.engine.renderer.environment_descriptor_set, // set 3
-    }
-    offsets := [1]u32{0}
-    vk.CmdBindDescriptorSets(
-      ctx.command_buffer,
-      .GRAPHICS,
-      layout,
-      0,
-      u32(len(descriptor_sets)),
-      raw_data(descriptor_sets[:]),
-      len(offsets),
-      raw_data(offsets[:]),
-    )
-    vk.CmdPushConstants(
-      ctx.command_buffer,
-      layout,
-      {.VERTEX},
-      0,
-      size_of(linalg.Matrix4f32),
-      &node.transform.world_matrix,
-    )
-    offset: vk.DeviceSize = 0
-    vk.CmdBindVertexBuffers(
-      ctx.command_buffer,
-      0,
-      1,
-      &mesh.vertex_buffer.buffer,
-      &offset,
-    )
-    vk.CmdBindVertexBuffers(
-      ctx.command_buffer,
-      1,
-      1,
-      &mesh.skin_buffer.buffer,
-      &offset,
-    )
-    vk.CmdBindIndexBuffer(
-      ctx.command_buffer,
-      mesh.index_buffer.buffer,
-      0,
-      .UINT32,
-    )
-    vk.CmdDrawIndexed(ctx.command_buffer, mesh.indices_len, 1, 0, 0, 0)
-    ctx.rendered_count^ += 1
-  case StaticMeshAttachment:
+  case MeshAttachment:
     mesh := resource.get(ctx.engine.meshes, data.handle)
     if mesh == nil {return true}
     material := resource.get(ctx.engine.materials, mesh.material)
@@ -763,7 +694,6 @@ render_single_node :: proc(node: ^Node, cb_context: rawptr) -> bool {
     pipeline :=
       g_pipelines[transmute(u32)material.features] if material.is_lit else g_unlit_pipelines[transmute(u32)material.features]
     layout := g_pipeline_layout
-    // Bind all required descriptor sets (set 0: camera+shadow+cube shadow, set 1: material, set 2: skinning)
     descriptor_sets := [?]vk.DescriptorSet {
       renderer_get_camera_descriptor_set(&ctx.engine.renderer), // set 0
       material.texture_descriptor_set, // set 1
@@ -798,6 +728,21 @@ render_single_node :: proc(node: ^Node, cb_context: rawptr) -> bool {
       &mesh.vertex_buffer.buffer,
       &offset,
     )
+    if mesh.skinning != nil {
+      skin := &mesh.skinning.?
+      material_update_bone_buffer(
+        material,
+        data.bone_buffer.?.buffer,
+        data.bone_buffer.?.size,
+      )
+      vk.CmdBindVertexBuffers(
+        ctx.command_buffer,
+        1,
+        1,
+        &skin.skin_buffer.buffer,
+        &offset,
+      )
+    }
     vk.CmdBindIndexBuffer(
       ctx.command_buffer,
       mesh.index_buffer.buffer,
@@ -817,12 +762,11 @@ render_single_shadow :: proc(node: ^Node, cb_context: rawptr) -> bool {
   min_alignment := g_device_properties.limits.minUniformBufferOffsetAlignment
   aligned_scene_uniform_size := align_up(size_of(SceneUniform), min_alignment)
   #partial switch data in node.attachment {
-  case StaticMeshAttachment:
+  case MeshAttachment:
     if !data.cast_shadow {
       return true
     }
-    mesh_handle := data.handle
-    mesh := resource.get(ctx.engine.meshes, mesh_handle)
+    mesh := resource.get(ctx.engine.meshes, data.handle)
     if mesh == nil {return true}
     world_aabb := geometry.aabb_transform(
       mesh.aabb,
@@ -836,8 +780,19 @@ render_single_shadow :: proc(node: ^Node, cb_context: rawptr) -> bool {
     features: ShaderFeatureSet
     pipeline := g_shadow_pipelines[transmute(u32)features]
     layout := g_shadow_pipeline_layout
-    descriptor_sets := [?]vk.DescriptorSet {
-      renderer_get_camera_descriptor_set(&ctx.engine.renderer), // set 0
+    descriptor_sets: []vk.DescriptorSet
+    if mesh.skinning != nil {
+      // Skinned mesh: use skinning pipeline and descriptor set
+      pipeline = g_shadow_pipelines[transmute(u32)ShaderFeatureSet{.SKINNING}]
+      descriptor_sets = {
+        renderer_get_camera_descriptor_set(&ctx.engine.renderer), // set 0
+        material.skinning_descriptor_set, // set 1
+      }
+    } else {
+      descriptor_sets = {
+        renderer_get_camera_descriptor_set(&ctx.engine.renderer), // set 0
+      }
+
     }
     vk.CmdBindPipeline(ctx.command_buffer, .GRAPHICS, pipeline)
     offset_shadow :=
@@ -848,7 +803,7 @@ render_single_shadow :: proc(node: ^Node, cb_context: rawptr) -> bool {
       .GRAPHICS,
       layout,
       0,
-      len(descriptor_sets),
+      u32(len(descriptor_sets)),
       raw_data(descriptor_sets[:]),
       len(offsets),
       raw_data(offsets[:]),
@@ -869,74 +824,16 @@ render_single_shadow :: proc(node: ^Node, cb_context: rawptr) -> bool {
       &mesh.vertex_buffer.buffer,
       &offset,
     )
-    vk.CmdBindIndexBuffer(
-      ctx.command_buffer,
-      mesh.index_buffer.buffer,
-      0,
-      .UINT32,
-    )
-    vk.CmdDrawIndexed(ctx.command_buffer, mesh.indices_len, 1, 0, 0, 0)
-    ctx.obstacles_count^ += 1
-  case SkeletalMeshAttachment:
-    if !data.cast_shadow {
-      // return true
+    if mesh.skinning != nil {
+      skin := &mesh.skinning.?
+      vk.CmdBindVertexBuffers(
+        ctx.command_buffer,
+        1,
+        1,
+        &skin.skin_buffer.buffer,
+        &offset,
+      )
     }
-    mesh := resource.get(ctx.engine.skeletal_meshes, data.handle)
-    if mesh == nil {return true}
-    world_aabb := geometry.aabb_transform(
-      mesh.aabb,
-      node.transform.world_matrix,
-    )
-    if !geometry.frustum_test_aabb(&ctx.frustum, world_aabb) {
-      return true
-    }
-    material := resource.get(ctx.engine.materials, mesh.material)
-    if material == nil {return true}
-    descriptor_sets := [?]vk.DescriptorSet {
-      renderer_get_camera_descriptor_set(&ctx.engine.renderer), // set 0
-      material.skinning_descriptor_set, // set 1
-    }
-    vk.CmdBindPipeline(
-      ctx.command_buffer,
-      .GRAPHICS,
-      g_shadow_pipelines[transmute(u32)ShaderFeatureSet{.SKINNING}],
-    )
-    offset_shadow :=
-      (1 + shadow_idx * 6 + shadow_layer) * u32(aligned_scene_uniform_size)
-    offsets := [1]u32{offset_shadow}
-    vk.CmdBindDescriptorSets(
-      ctx.command_buffer,
-      .GRAPHICS,
-      g_shadow_pipeline_layout,
-      0,
-      len(descriptor_sets),
-      raw_data(descriptor_sets[:]),
-      len(offsets),
-      raw_data(offsets[:]),
-    )
-    vk.CmdPushConstants(
-      ctx.command_buffer,
-      g_shadow_pipeline_layout,
-      {.VERTEX},
-      0,
-      size_of(linalg.Matrix4f32),
-      &node.transform.world_matrix,
-    )
-    offset: vk.DeviceSize = 0
-    vk.CmdBindVertexBuffers(
-      ctx.command_buffer,
-      0,
-      1,
-      &mesh.vertex_buffer.buffer,
-      &offset,
-    )
-    vk.CmdBindVertexBuffers(
-      ctx.command_buffer,
-      1,
-      1,
-      &mesh.skin_buffer.buffer,
-      &offset,
-    )
     vk.CmdBindIndexBuffer(
       ctx.command_buffer,
       mesh.index_buffer.buffer,

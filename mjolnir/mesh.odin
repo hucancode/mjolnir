@@ -21,76 +21,106 @@ bone_deinit :: proc(bone: ^Bone) {
   }
 }
 
-SkeletalMesh :: struct {
+Skinning :: struct {
   root_bone_index: u32,
   bones:           []Bone,
   animations:      []animation.Clip,
-  vertices_len:    u32,
-  indices_len:     u32,
-  vertex_buffer:   DataBuffer,
   skin_buffer:     DataBuffer,
-  index_buffer:    DataBuffer,
-  material:        Handle,
-  aabb:            geometry.Aabb,
 }
 
-skeletal_mesh_deinit :: proc(self: ^SkeletalMesh) {
+Mesh :: struct {
+  vertices_len:  u32,
+  indices_len:   u32,
+  vertex_buffer: DataBuffer,
+  index_buffer:  DataBuffer,
+  material:      Handle,
+  aabb:          geometry.Aabb,
+  skinning:      Maybe(Skinning),
+}
 
-
+mesh_deinit :: proc(self: ^Mesh) {
   if self.vertex_buffer.buffer != 0 {
     data_buffer_deinit(&self.vertex_buffer)
   }
   if self.index_buffer.buffer != 0 {
     data_buffer_deinit(&self.index_buffer)
   }
-  if self.bones != nil {
-    for &bone in self.bones {
-      bone_deinit(&bone)
+  if self.skinning != nil {
+    skin, ok := &self.skinning.?
+    if skin.skin_buffer.buffer != 0 {
+      data_buffer_deinit(&skin.skin_buffer)
     }
-    delete(self.bones)
-    self.bones = nil
-  }
-  if self.animations != nil {
-    for &anim_clip in self.animations {
-      // deinit_clip(&anim_clip)
+    if skin.bones != nil {
+      for &bone in skin.bones {
+        bone_deinit(&bone)
+      }
+      delete(skin.bones)
     }
-    delete(self.animations)
-    self.animations = nil
+    if skin.animations != nil {
+      for &anim_clip in skin.animations {
+        // deinit_clip(&anim_clip)
+      }
+      delete(skin.animations)
+    }
   }
 }
 
-skeletal_mesh_init :: proc(
-  self: ^SkeletalMesh,
-  geometry_data: ^geometry.SkinnedGeometry,
+mesh_init :: proc(
+  self: ^Mesh,
+  data: geometry.Geometry,
+  material: Handle,
 ) -> vk.Result {
-  self.vertices_len = u32(len(geometry_data.vertices))
-  self.indices_len = u32(len(geometry_data.indices))
-  self.aabb = geometry_data.aabb
-  size := len(geometry_data.vertices) * size_of(geometry.Vertex)
+  self.vertices_len = u32(len(data.vertices))
+  self.indices_len = u32(len(data.indices))
+  self.aabb = data.aabb
+  self.material = material
+  size := len(data.vertices) * size_of(geometry.Vertex)
   self.vertex_buffer = create_local_buffer(
     vk.DeviceSize(size),
     {.VERTEX_BUFFER},
-    raw_data(geometry_data.vertices),
+    raw_data(data.vertices),
   ) or_return
-  size = len(geometry_data.skinnings) * size_of(geometry.SkinningData)
-  self.skin_buffer = create_local_buffer(
-    vk.DeviceSize(size),
-    {.VERTEX_BUFFER},
-    raw_data(geometry_data.skinnings),
-  ) or_return
-  size = len(geometry_data.indices) * size_of(u32)
+  size = len(data.indices) * size_of(u32)
   self.index_buffer = create_local_buffer(
     vk.DeviceSize(size),
     {.INDEX_BUFFER},
-    raw_data(geometry_data.indices),
+    raw_data(data.indices),
   ) or_return
-  self.bones = make([]Bone, 0)
-  self.animations = make([]animation.Clip, 0)
+
+  skinnings, has_skin := data.skinnings.?
+  if has_skin {
+    size = len(skinnings) * size_of(geometry.SkinningData)
+    skin_buffer := create_local_buffer(
+      vk.DeviceSize(size),
+      {.VERTEX_BUFFER},
+      raw_data(skinnings),
+    ) or_return
+    self.skinning = Skinning {
+      bones       = make([]Bone, 0),
+      animations  = make([]animation.Clip, 0),
+      skin_buffer = skin_buffer,
+    }
+  }
   return .SUCCESS
 }
 
+create_mesh :: proc(
+  engine: ^Engine,
+  data: geometry.Geometry,
+  material: Handle,
+) -> (
+  handle: Handle,
+  mesh: ^Mesh,
+  ret: vk.Result,
+) {
+  handle, mesh = resource.alloc(&engine.meshes)
+  mesh_init(mesh, data, material)
+  ret = .SUCCESS
+  return
+}
+
 make_animation_instance :: proc(
-  self: ^SkeletalMesh,
+  self: ^Mesh,
   animation_name: string,
   mode: animation.PlayMode,
   speed: f32 = 1.0,
@@ -98,7 +128,12 @@ make_animation_instance :: proc(
   instance: animation.Instance,
   found: bool,
 ) {
-  for clip, i in self.animations {
+  skin, has_skin := &self.skinning.?
+  if !has_skin {
+    found = false
+    return
+  }
+  for clip, i in skin.animations {
     if clip.name == animation_name {
       found = true
       instance = {
@@ -117,30 +152,34 @@ make_animation_instance :: proc(
 }
 
 calculate_animation_transform :: proc(
-  self: ^SkeletalMesh,
+  self: ^Mesh,
   anim_instance: ^animation.Instance,
   target_pose: ^animation.Pose,
 ) {
+  if self.skinning == nil {
+    return
+  }
+  skin := &self.skinning.?
   if anim_instance.status == .STOPPED ||
-     anim_instance.clip_handle >= u32(len(self.animations)) {
+     anim_instance.clip_handle >= u32(len(skin.animations)) {
     return
   }
-  if len(target_pose.bone_matrices) < len(self.bones) {
+  if len(target_pose.bone_matrices) < len(skin.bones) {
     return
   }
-  transform_stack := make([dynamic]linalg.Matrix4f32, 0, len(self.bones))
-  bone_stack := make([dynamic]u32, 0, len(self.bones))
+  transform_stack := make([dynamic]linalg.Matrix4f32, 0, len(skin.bones))
+  bone_stack := make([dynamic]u32, 0, len(skin.bones))
   defer {
     delete(transform_stack)
     delete(bone_stack)
   }
   append(&transform_stack, linalg.MATRIX4F32_IDENTITY)
-  append(&bone_stack, u32(self.root_bone_index))
-  active_clip := &self.animations[anim_instance.clip_handle]
+  append(&bone_stack, u32(skin.root_bone_index))
+  active_clip := &skin.animations[anim_instance.clip_handle]
   for len(bone_stack) > 0 {
     current_bone_index := pop(&bone_stack)
     parent_world_transform := pop(&transform_stack)
-    current_bone := &self.bones[current_bone_index]
+    current_bone := &skin.bones[current_bone_index]
     local_transform: geometry.Transform
     if current_bone_index < u32(len(active_clip.channels)) {
       local_transform.position, local_transform.rotation, local_transform.scale =
@@ -157,7 +196,6 @@ calculate_animation_transform :: proc(
       local_transform.scale,
     )
     current_world_transform := parent_world_transform * local_matrix
-    // fmt.printfln("calculate_animation_transform, local matrix", local_matrix)
     target_pose.bone_matrices[current_bone_index] =
       current_world_transform * current_bone.inverse_bind_matrix
     for child_index in current_bone.children {
@@ -165,59 +203,4 @@ calculate_animation_transform :: proc(
       append(&bone_stack, child_index)
     }
   }
-}
-
-StaticMesh :: struct {
-  material:      Handle,
-  vertices_len:  u32,
-  indices_len:   u32,
-  vertex_buffer: DataBuffer,
-  index_buffer:  DataBuffer,
-  aabb:          geometry.Aabb,
-}
-
-static_mesh_deinit :: proc(self: ^StaticMesh) {
-  if self.vertex_buffer.buffer != 0 {
-    data_buffer_deinit(&self.vertex_buffer)
-  }
-  if self.index_buffer.buffer != 0 {
-    data_buffer_deinit(&self.index_buffer)
-  }
-  self.vertices_len = 0
-  self.indices_len = 0
-  self.aabb = {}
-}
-
-create_static_mesh :: proc(
-  engine: ^Engine,
-  data: geometry.Geometry,
-  material: Handle,
-) -> (
-  handle: Handle,
-  mesh: ^StaticMesh,
-  ret: vk.Result,
-) {
-  handle, mesh = resource.alloc(&engine.meshes)
-  if mesh == nil {
-    ret = .ERROR_UNKNOWN
-    return
-  }
-  mesh.vertices_len = u32(len(data.vertices))
-  mesh.indices_len = u32(len(data.indices))
-  mesh.aabb = data.aabb
-  size := len(data.vertices) * size_of(geometry.Vertex)
-  mesh.vertex_buffer = create_local_buffer(
-    vk.DeviceSize(size),
-    {.VERTEX_BUFFER},
-    raw_data(data.vertices),
-  ) or_return
-  size = len(data.indices) * size_of(u32)
-  mesh.index_buffer = create_local_buffer(
-    vk.DeviceSize(size),
-    {.INDEX_BUFFER},
-    raw_data(data.indices),
-  ) or_return
-  mesh.material = material
-  ret = .SUCCESS
-  return
 }

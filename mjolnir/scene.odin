@@ -26,16 +26,11 @@ SpotLightAttachment :: struct {
   cast_shadow: bool,
 }
 
-SkeletalMeshAttachment :: struct {
+MeshAttachment :: struct {
   handle:      Handle,
-  bone_buffer: DataBuffer,
-  pose:        animation.Pose,
+  bone_buffer: Maybe(DataBuffer),
+  pose:        Maybe(animation.Pose),
   animation:   Maybe(animation.Instance),
-  cast_shadow: bool,
-}
-
-StaticMeshAttachment :: struct {
-  handle:      Handle,
   cast_shadow: bool,
 }
 
@@ -43,8 +38,7 @@ NodeAttachment :: union {
   PointLightAttachment,
   DirectionalLightAttachment,
   SpotLightAttachment,
-  StaticMeshAttachment,
-  SkeletalMeshAttachment,
+  MeshAttachment,
 }
 
 Node :: struct {
@@ -123,15 +117,15 @@ play_animation :: proc(
   if node == nil {
     return false
   }
-  data, ok := &node.attachment.(SkeletalMeshAttachment)
+  data, ok := &node.attachment.(MeshAttachment)
   if !ok {
     return false
   }
-  skeletal_mesh_res := resource.get(engine.skeletal_meshes, data.handle)
-  if skeletal_mesh_res == nil {
+  mesh := resource.get(engine.meshes, data.handle)
+  if mesh == nil {
     return false
   }
-  anim_inst, found := make_animation_instance(skeletal_mesh_res, name, mode)
+  anim_inst, found := make_animation_instance(mesh, name, mode)
   if !found {
     return false
   }

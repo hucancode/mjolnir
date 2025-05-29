@@ -75,8 +75,7 @@ Engine :: struct {
   last_frame_timestamp:  time.Time,
   last_update_timestamp: time.Time,
   start_timestamp:       time.Time,
-  meshes:                resource.Pool(StaticMesh),
-  skeletal_meshes:       resource.Pool(SkeletalMesh),
+  meshes:                resource.Pool(Mesh),
   materials:             resource.Pool(Material),
   textures:              resource.Pool(Texture),
   in_transaction:        bool,
@@ -133,12 +132,8 @@ init :: proc(
 
   fmt.println("\nInitializing Resource Pools...")
 
-  fmt.print("Initializing static mesh pool... ")
+  fmt.print("Initializing mesh pool... ")
   resource.pool_init(&engine.meshes)
-  fmt.println("done")
-
-  fmt.print("Initializing skeletal mesh pool... ")
-  resource.pool_init(&engine.skeletal_meshes)
   fmt.println("done")
 
   fmt.print("Initializing materials pool... ")
@@ -296,17 +291,26 @@ update :: proc(engine: ^Engine) -> bool {
     if !entry.active {
       continue
     }
-    data, is_skeletal_mesh := &entry.item.attachment.(SkeletalMeshAttachment)
-    if !is_skeletal_mesh || data.animation == nil {
+    data, is_mesh := &entry.item.attachment.(MeshAttachment)
+    if !is_mesh {
       continue
     }
-    anim_inst := &data.animation.?
-    animation.instance_update(anim_inst, delta_time)
-    skeletal_mesh := resource.get(engine.skeletal_meshes, data.handle)
-    if skeletal_mesh != nil {
-      calculate_animation_transform(skeletal_mesh, anim_inst, &data.pose)
-      animation.pose_flush(&data.pose, data.bone_buffer.mapped)
+    anim_inst, has_animation := &data.animation.?
+    if !has_animation {
+      continue
     }
+    animation.instance_update(anim_inst, delta_time)
+    mesh := resource.get(engine.meshes, data.handle)
+    if mesh == nil {
+      continue
+    }
+    pose, has_pose := &data.pose.?
+    fmt.printfln("tick animation, has pose", has_pose)
+    if !has_pose {
+      continue
+    }
+    calculate_animation_transform(mesh, anim_inst, pose)
+    animation.pose_flush(pose, data.bone_buffer.?.mapped)
   }
 
   last_mouse_pos := engine.input.mouse_pos
@@ -347,8 +351,7 @@ update :: proc(engine: ^Engine) -> bool {
 deinit :: proc(engine: ^Engine) {
   vk.DeviceWaitIdle(g_device)
   resource.pool_deinit(engine.textures, texture_deinit)
-  resource.pool_deinit(engine.meshes, static_mesh_deinit)
-  resource.pool_deinit(engine.skeletal_meshes, skeletal_mesh_deinit)
+  resource.pool_deinit(engine.meshes, mesh_deinit)
   resource.pool_deinit(engine.materials, material_deinit)
   pipeline2d_deinit(&engine.ui.pipeline)
   pipeline3d_deinit()

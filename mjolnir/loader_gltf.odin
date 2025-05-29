@@ -99,7 +99,7 @@ load_gltf :: proc(
     if gltf_node.mesh != nil {
       if gltf_node.skin != nil {
         fmt.printfln("Loading skinned mesh %s", string(gltf_node.name))
-        mesh_handle, mesh := resource.alloc(&engine.skeletal_meshes)
+        mesh_handle, mesh := resource.alloc(&engine.meshes)
         data, bones, material, root_bone_idx, res :=
           load_gltf_skinned_primitive(
             engine,
@@ -109,10 +109,10 @@ load_gltf :: proc(
             gltf_node.skin,
           )
         if res == .SUCCESS {
-          skeletal_mesh_init(mesh, &data)
-          mesh.material = material
-          mesh.bones = bones
-          mesh.root_bone_index = root_bone_idx
+          mesh_init(mesh, data, material)
+          skinning, _ := &mesh.skinning.?
+          skinning.bones = bones
+          skinning.root_bone_index = root_bone_idx
           pose: animation.Pose
           bone_buffer: DataBuffer
           animation.pose_init(&pose, len(bones))
@@ -121,17 +121,12 @@ load_gltf :: proc(
             buffer_size,
             {.STORAGE_BUFFER},
           )
-          node.attachment = SkeletalMeshAttachment {
+          node.attachment = MeshAttachment {
             handle      = mesh_handle,
             pose        = pose,
             bone_buffer = bone_buffer,
           }
-          load_gltf_animations(
-            engine,
-            gltf_data,
-            gltf_node.skin,
-            mesh_handle,
-          )
+          load_gltf_animations(engine, gltf_data, gltf_node.skin, mesh_handle)
           // fmt.printfln("Skinned mesh loaded successfully with %d animation %v", len(mesh.animations), mesh.animations)
           for bone_idx := 0; bone_idx < len(bones); bone_idx += 1 {
             pose.bone_matrices[bone_idx] = linalg.MATRIX4F32_IDENTITY
@@ -156,17 +151,14 @@ load_gltf :: proc(
           len(mesh_data.vertices),
           len(mesh_data.indices),
         )
-        mesh_handle, _, ret := create_static_mesh(
-          engine,
-          mesh_data,
-          mat_handle,
-        )
+        mesh_handle, _, ret := create_mesh(engine, mesh_data, mat_handle)
         if ret != .SUCCESS {
           fmt.eprintln("Failed to create static mesh:", ret)
           continue
         }
-        node.attachment = StaticMeshAttachment {
-          handle = mesh_handle,
+        node.attachment = MeshAttachment {
+          handle      = mesh_handle,
+          cast_shadow = true,
         }
         fmt.printfln(
           "Static mesh loaded successfully with material %v",
@@ -427,7 +419,7 @@ load_gltf_skinned_primitive :: proc(
   gltf_mesh: ^cgltf.mesh,
   gltf_skin: ^cgltf.skin,
 ) -> (
-  geometry_data: geometry.SkinnedGeometry,
+  geometry_data: geometry.Geometry,
   engine_bones: []Bone,
   mat_handle: resource.Handle,
   root_bone_idx: u32,
@@ -642,11 +634,12 @@ load_gltf_animations :: proc(
   gltf_skin: ^cgltf.skin,
   engine_mesh_handle: resource.Handle,
 ) -> bool {
-  skeletal_mesh := resource.get(engine.skeletal_meshes, engine_mesh_handle)
-  skeletal_mesh.animations = make([]animation.Clip, len(gltf_data.animations))
+  mesh := resource.get(engine.meshes, engine_mesh_handle)
+  skinning := &mesh.skinning.?
+  skinning.animations = make([]animation.Clip, len(gltf_data.animations))
 
   for &gltf_anim, i in gltf_data.animations {
-    clip := &skeletal_mesh.animations[i]
+    clip := &skinning.animations[i]
     if gltf_anim.name != nil {
       clip.name = strings.clone_from_cstring(gltf_anim.name)
     } else {
@@ -654,9 +647,9 @@ load_gltf_animations :: proc(
     }
     fmt.printfln(
       "\nAllocating animation channels for %d bones",
-      len(skeletal_mesh.bones),
+      len(skinning.bones),
     )
-    clip.channels = make([]animation.Channel, len(skeletal_mesh.bones))
+    clip.channels = make([]animation.Channel, len(skinning.bones))
 
     max_time: f32 = 0.0
 
@@ -666,9 +659,11 @@ load_gltf_animations :: proc(
       }
       n := gltf_channel.sampler.input.count
 
-      // note: if this is getting slow, consider using a hash map
-      bone_idx, bone_found :=
-        slice.linear_search(gltf_skin.joints, gltf_channel.target_node)
+      // note: if this get slow, consider using a hash map
+      bone_idx, bone_found := slice.linear_search(
+        gltf_skin.joints,
+        gltf_channel.target_node,
+      )
       if !bone_found {
         continue
       }

@@ -27,12 +27,12 @@ setup :: proc(engine: ^mjolnir.Engine) {
   using mjolnir, geometry
   plain_material_handle, _, _ := create_material(engine)
   cube_geom := make_cube()
-  cube_mesh_handle, _, _ := create_static_mesh(
+  cube_mesh_handle, _, _ := create_mesh(
     engine,
     cube_geom,
     plain_material_handle,
   )
-  sphere_mesh_handle, _, _ := create_static_mesh(
+  sphere_mesh_handle, _, _ := create_mesh(
     engine,
     make_sphere(),
     plain_material_handle,
@@ -51,7 +51,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     {.ALBEDO_TEXTURE},
     ground_albedo_handle,
   )
-  ground_mesh_handle, _, _ := create_static_mesh(
+  ground_mesh_handle, _, _ := create_mesh(
     engine,
     make_quad(),
     ground_mat_handle,
@@ -66,10 +66,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
         for z in 1 ..< nz {
           node_handle, node := spawn(
             &engine.scene,
-            StaticMeshAttachment {
-              handle = sphere_mesh_handle,
-              cast_shadow = true,
-            },
+            MeshAttachment{handle = sphere_mesh_handle, cast_shadow = true},
           )
           translate(
             &node.transform,
@@ -87,7 +84,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     size: f32 = 10.0
     ground_handle, ground_node := spawn(
       &engine.scene,
-      StaticMeshAttachment{handle = ground_mesh_handle},
+      MeshAttachment{handle = ground_mesh_handle},
     )
     translate(&ground_node.transform, x = -0.5 * size, z = -0.5 * size)
     scale(&ground_node.transform, size)
@@ -168,7 +165,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     light_cube_handles[i], cube_node = spawn_child(
       &engine.scene,
       light_handles[i],
-      StaticMeshAttachment{handle = cube_mesh_handle},
+      MeshAttachment{handle = cube_mesh_handle},
     )
     scale(&cube_node.transform, 0.1)
   }
@@ -194,7 +191,7 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
     // fmt.printfln("getting light %d %v", i, light_handles[i])
     light_ptr := resource.get(engine.scene.nodes, handle)
     if light_ptr == nil {
-        continue
+      continue
     }
     rx := math.sin(t)
     ry := (math.sin(t) + 1.0) * 0.5 * 1.5 + 1.0

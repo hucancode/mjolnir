@@ -114,12 +114,13 @@ aabb_from_vertices :: proc(vertices: []Vertex) -> (ret: Aabb) {
   return ret
 }
 
-
 Geometry :: struct {
-  vertices: []Vertex,
-  indices:  []u32,
+  vertices: []Vertex, // Slice, lifetime managed by caller
+  skinnings: Maybe([]SkinningData), // Slice, lifetime managed by caller
+  indices:  []u32, // Slice, lifetime managed by caller
   aabb:     Aabb,
 }
+
 
 make_geometry :: proc(vertices: []Vertex, indices: []u32) -> Geometry {
   return {
@@ -129,19 +130,12 @@ make_geometry :: proc(vertices: []Vertex, indices: []u32) -> Geometry {
   }
 }
 
-SkinnedGeometry :: struct {
-  vertices: []Vertex, // Slice, lifetime managed by caller
-  skinnings: []SkinningData, // Slice, lifetime managed by caller
-  indices:  []u32, // Slice, lifetime managed by caller
-  aabb:     Aabb,
-}
-
 make_skinned_geometry :: proc(
   vertices: []Vertex,
   skinnings: []SkinningData,
   indices: []u32,
-) -> SkinnedGeometry {
-  return SkinnedGeometry {
+) -> Geometry {
+  return {
     vertices = vertices,
     skinnings = skinnings,
     indices = indices,
