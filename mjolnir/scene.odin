@@ -1,14 +1,32 @@
 package mjolnir
 
+import "animation"
 import "core:fmt"
 import "core:math"
-import "core:slice"
 import linalg "core:math/linalg"
-import "resource"
+import "core:slice"
 import "geometry"
-import "animation"
+import "resource"
 
-NodeSkeletalMeshAttachment :: struct {
+PointLightAttachment :: struct {
+  color:       linalg.Vector4f32,
+  radius:      f32,
+  cast_shadow: bool,
+}
+
+DirectionalLightAttachment :: struct {
+  color:       linalg.Vector4f32,
+  cast_shadow: bool,
+}
+
+SpotLightAttachment :: struct {
+  color:       linalg.Vector4f32,
+  radius:      f32,
+  angle:       f32,
+  cast_shadow: bool,
+}
+
+SkeletalMeshAttachment :: struct {
   handle:      Handle,
   bone_buffer: DataBuffer,
   pose:        animation.Pose,
@@ -16,13 +34,9 @@ NodeSkeletalMeshAttachment :: struct {
   cast_shadow: bool,
 }
 
-NodeStaticMeshAttachment :: struct {
+StaticMeshAttachment :: struct {
   handle:      Handle,
   cast_shadow: bool,
-}
-
-NodeLightAttachment :: struct {
-  handle: Handle,
 }
 
 Node :: struct {
@@ -31,11 +45,19 @@ Node :: struct {
   transform:  geometry.Transform,
   name:       string,
   attachment: union {
-    NodeLightAttachment,
-    NodeStaticMeshAttachment,
-    NodeSkeletalMeshAttachment,
+    PointLightAttachment,
+    DirectionalLightAttachment,
+    SpotLightAttachment,
+    StaticMeshAttachment,
+    SkeletalMeshAttachment,
   },
 }
+
+SceneTraversalCallback :: #type proc(
+  node: ^Node,
+  world_matrix: ^linalg.Matrix4f32,
+  cb_context: rawptr,
+) -> bool
 
 init_node :: proc(node: ^Node, name_str: string) {
   node.children = make([dynamic]Handle, 0)
@@ -101,11 +123,11 @@ play_animation :: proc(
   name: string,
   mode: animation.PlayMode = .LOOP,
 ) -> bool {
-  node := resource.get(&engine.nodes, node_handle)
+  node := resource.get(&engine.scene.nodes, node_handle)
   if node == nil {
     return false
   }
-  data, ok := &node.attachment.(NodeSkeletalMeshAttachment)
+  data, ok := &node.attachment.(SkeletalMeshAttachment)
   if !ok {
     return false
   }
@@ -122,7 +144,7 @@ play_animation :: proc(
 }
 
 spawn_point_light :: proc(
-  engine: ^Engine,
+  scene: ^Scene,
   color: linalg.Vector4f32,
   radius: f32,
   cast_shadow: bool = true,
@@ -130,41 +152,37 @@ spawn_point_light :: proc(
   handle: Handle,
   node: ^Node,
 ) {
-  handle, node = spawn(engine)
+  handle, node = spawn(scene)
   if node != nil {
-    light_handle, light := resource.alloc(&engine.lights)
-    light^ = PointLight {
+    node.attachment = PointLightAttachment {
       color       = color,
       radius      = radius,
       cast_shadow = cast_shadow,
     }
-    node.attachment = NodeLightAttachment{light_handle}
   }
   return
 }
 
 spawn_directional_light :: proc(
-  engine: ^Engine,
+  scene: ^Scene,
   color: linalg.Vector4f32,
   cast_shadow: bool = true,
 ) -> (
   handle: Handle,
   node: ^Node,
 ) {
-  handle, node = spawn(engine)
+  handle, node = spawn(scene)
   if node != nil {
-    light_handle, light := resource.alloc(&engine.lights)
-    light^ = DirectionalLight {
+    node.attachment = DirectionalLightAttachment {
       color       = color,
       cast_shadow = cast_shadow,
     }
-    node.attachment = NodeLightAttachment{light_handle}
   }
   return
 }
 
 spawn_spot_light :: proc(
-  engine: ^Engine,
+  scene: ^Scene,
   color: linalg.Vector4f32,
   angle: f32,
   radius: f32,
@@ -173,32 +191,31 @@ spawn_spot_light :: proc(
   handle: Handle,
   node: ^Node,
 ) {
-  handle, node = spawn(engine)
+  handle, node = spawn(scene)
   if node != nil {
-    light_handle, light := resource.alloc(&engine.lights)
-    light^ = SpotLight {
+    node.attachment = SpotLightAttachment {
       color       = color,
       angle       = angle,
       radius      = radius,
       cast_shadow = cast_shadow,
     }
-    node.attachment = NodeLightAttachment{light_handle}
   }
   return
 }
 
-spawn :: proc(engine: ^Engine) -> (handle: Handle, node: ^Node) {
-  handle, node = resource.alloc(&engine.nodes)
+spawn :: proc(scene: ^Scene) -> (handle: Handle, node: ^Node) {
+  handle, node = resource.alloc(&scene.nodes)
   if node != nil {
     node.transform = geometry.TRANSFORM_IDENTITY
     node.children = make([dynamic]Handle, 0)
-    attach(&engine.nodes, engine.scene.root, handle)
+    attach(&scene.nodes, scene.root, handle)
   }
   return
 }
 Scene :: struct {
   camera: geometry.Camera,
   root:   Handle,
+  nodes:  resource.Pool(Node),
 }
 
 init_scene :: proc(s: ^Scene) {
@@ -208,6 +225,13 @@ init_scene :: proc(s: ^Scene) {
     0.01, // near
     100.0, // far
   )
+  fmt.print("Initializing nodes pool... ")
+  resource.pool_init(&s.nodes)
+  fmt.println("done")
+  root: ^Node
+  s.root, root = resource.alloc(&s.nodes)
+  init_node(root, "root")
+  root.parent = s.root
 }
 
 deinit_scene :: proc(s: ^Scene) {
@@ -225,13 +249,8 @@ switch_camera_mode_scene :: proc(s: ^Scene) {
 
 traverse_scene :: proc(
   scene: ^Scene,
-  nodes: ^resource.Pool(Node),
   cb_context: rawptr,
-  callback: proc(
-    node: ^Node,
-    world_matrix: ^linalg.Matrix4f32,
-    cb_context: rawptr,
-  ) -> bool,
+  callback: SceneTraversalCallback = nil,
 ) -> bool {
   node_stack := make([dynamic]Handle, 0)
   defer delete(node_stack)
@@ -248,7 +267,7 @@ traverse_scene :: proc(
     current_node_handle := pop(&node_stack)
     parent_world_matrix := pop(&transform_stack)
     parent_is_dirty := pop(&dirty_stack)
-    current_node := resource.get(nodes, current_node_handle)
+    current_node := resource.get(&scene.nodes, current_node_handle)
     if current_node == nil {
       fmt.eprintf(
         "traverse_scene: Node with handle %v not found\n",
@@ -275,12 +294,14 @@ traverse_scene :: proc(
 
     current_node.transform.is_dirty = false
 
-    if !callback(
-      current_node,
-      &current_node.transform.world_matrix,
-      cb_context,
-    ) {
-      continue
+    if callback != nil {
+      if !callback(
+        current_node,
+        &current_node.transform.world_matrix,
+        cb_context,
+      ) {
+        continue
+      }
     }
 
     for child_handle in current_node.children {

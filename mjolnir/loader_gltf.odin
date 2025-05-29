@@ -67,7 +67,7 @@ load_gltf :: proc(
   for len(stack) > 0 {
     entry := pop(&stack)
     g_node := &gltf_data.nodes[entry.idx]
-    node_handle, node := resource.alloc(&engine.nodes)
+    node_handle, node := resource.alloc(&engine.scene.nodes)
     if node == nil {
       continue
     }
@@ -130,7 +130,7 @@ load_gltf :: proc(
             buffer_size,
             {.STORAGE_BUFFER},
           )
-          node.attachment = NodeSkeletalMeshAttachment {
+          node.attachment = SkeletalMeshAttachment {
             handle      = mesh_handle,
             pose        = pose,
             bone_buffer = bone_buffer,
@@ -177,7 +177,7 @@ load_gltf :: proc(
           fmt.eprintln("Failed to create static mesh:", ret)
           continue
         }
-        node.attachment = NodeStaticMeshAttachment {
+        node.attachment = StaticMeshAttachment {
           handle = mesh_handle,
         }
         fmt.printfln(
@@ -186,7 +186,7 @@ load_gltf :: proc(
         )
       }
     }
-    attach(&engine.nodes, entry.parent, node_handle)
+    attach(&engine.scene.nodes, entry.parent, node_handle)
     if entry.parent == engine.scene.root {
       append(&created_root_handles, node_handle)
     }
