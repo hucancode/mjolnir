@@ -66,10 +66,15 @@ setup :: proc(engine: ^mjolnir.Engine) {
     for x in 1 ..< nx {
       for y in 1 ..< ny {
         for z in 1 ..< nz {
-          node_handle, node := spawn(&engine.scene)
-          attach(engine.scene.nodes, engine.scene.root, node_handle)
-          node.attachment = StaticMeshAttachment{sphere_mesh_handle, true}
-          translate(&node.transform,
+          node_handle, node := spawn(
+            &engine.scene,
+            StaticMeshAttachment {
+              handle = sphere_mesh_handle,
+              cast_shadow = true,
+            },
+          )
+          translate(
+            &node.transform,
             (f32(x) - f32(nx) * 0.5) * space,
             (f32(y) - f32(ny) * 0.5) * space + 0.5,
             (f32(z) - f32(nz) * 0.5) * space,
@@ -82,9 +87,10 @@ setup :: proc(engine: ^mjolnir.Engine) {
   if true {
     // Ground node
     size: f32 = 10.0
-    ground_handle, ground_node := spawn(&engine.scene)
-    attach(engine.scene.nodes, engine.scene.root, ground_handle)
-    ground_node.attachment = StaticMeshAttachment{ground_mesh_handle, false}
+    ground_handle, ground_node := spawn(
+      &engine.scene,
+      StaticMeshAttachment{handle = ground_mesh_handle},
+    )
     translate(&ground_node.transform, x = -0.5 * size, z = -0.5 * size)
     scale(&ground_node.transform, size)
   }
@@ -143,29 +149,42 @@ setup :: proc(engine: ^mjolnir.Engine) {
     // should_make_spot_light = true
     if should_make_spot_light {
       spot_angle := math.PI / 1.2
-      light_handles[i], light = spawn_spot_light(
+      light_handles[i], light = spawn(
         &engine.scene,
-        color,
-        f32(spot_angle),
-        4.0,
+        SpotLightAttachment {
+          color = color,
+          angle = f32(spot_angle),
+          radius = 4,
+          cast_shadow = true,
+        },
       )
     } else {
-      light_handles[i], light = spawn_point_light(&engine.scene, color, 20.0)
+      light_handles[i], light = spawn(
+        &engine.scene,
+        PointLightAttachment{color = color, radius = 20, cast_shadow = true},
+      )
     }
     translate(&light.transform, 0, 2, -2)
     rotate_angle(&light.transform, math.PI * 0.45, linalg.VECTOR3F32_X_AXIS)
-    light_cube_handle, light_cube_node := spawn(&engine.scene)
-    light_cube_handles[i] = light_cube_handle
-    attach(engine.scene.nodes, light_handles[i], light_cube_handles[i])
-    light_cube_node.attachment = StaticMeshAttachment{cube_mesh_handle, false}
-    scale(&light_cube_node.transform, 0.1)
+    cube_node: ^Node
+    light_cube_handles[i], cube_node = spawn_child(
+      &engine.scene,
+      light_handles[i],
+      StaticMeshAttachment{handle = cube_mesh_handle},
+    )
+    scale(&cube_node.transform, 0.1)
   }
-  spawn_directional_light(&engine.scene, {0.3, 0.3, 0.3, 1.0})
+  spawn(
+    &engine.scene,
+    DirectionalLightAttachment {
+      color = {0.3, 0.3, 0.3, 1.0},
+      cast_shadow = true,
+    },
+  )
 }
 
 update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
   using mjolnir, geometry
-
   // Animate lights
   for handle, i in light_handles {
     if i == 0 {
@@ -189,7 +208,10 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
     if light_cube_ptr == nil {
       continue
     }
-    rotate_angle(&light_cube_ptr.transform, math.PI * time_since_app_start(engine) * 0.5)
+    rotate_angle(
+      &light_cube_ptr.transform,
+      math.PI * time_since_app_start(engine) * 0.5,
+    )
     // fmt.printfln( "Light cube %d rotation: %v", i, light_cube_ptr.transform.rotation,)
   }
 }

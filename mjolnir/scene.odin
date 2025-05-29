@@ -39,18 +39,20 @@ StaticMeshAttachment :: struct {
   cast_shadow: bool,
 }
 
+NodeAttachment :: union {
+  PointLightAttachment,
+  DirectionalLightAttachment,
+  SpotLightAttachment,
+  StaticMeshAttachment,
+  SkeletalMeshAttachment,
+}
+
 Node :: struct {
   parent:     Handle,
   children:   [dynamic]Handle,
   transform:  geometry.Transform,
   name:       string,
-  attachment: union {
-    PointLightAttachment,
-    DirectionalLightAttachment,
-    SpotLightAttachment,
-    StaticMeshAttachment,
-    SkeletalMeshAttachment,
-  },
+  attachment: NodeAttachment,
 }
 
 SceneTraversalCallback :: #type proc(
@@ -58,12 +60,10 @@ SceneTraversalCallback :: #type proc(
   cb_context: rawptr,
 ) -> bool
 
-init_node :: proc(node: ^Node, name_str: string) {
+init_node :: proc(node: ^Node, name_str: string = "") {
   node.children = make([dynamic]Handle, 0)
   node.transform = geometry.TRANSFORM_IDENTITY
   node.name = name_str
-  node.attachment = nil
-  node.parent = Handle{}
 }
 
 deinit_node :: proc(node: ^Node) {
@@ -142,75 +142,37 @@ play_animation :: proc(
   return true
 }
 
-spawn_point_light :: proc(
-  scene: ^Scene,
-  color: linalg.Vector4f32,
-  radius: f32,
-  cast_shadow: bool = true,
-) -> (
-  handle: Handle,
-  node: ^Node,
-) {
-  handle, node = spawn(scene)
-  if node != nil {
-    node.attachment = PointLightAttachment {
-      color       = color,
-      radius      = radius,
-      cast_shadow = cast_shadow,
-    }
-  }
-  return
-}
-
-spawn_directional_light :: proc(
-  scene: ^Scene,
-  color: linalg.Vector4f32,
-  cast_shadow: bool = true,
-) -> (
-  handle: Handle,
-  node: ^Node,
-) {
-  handle, node = spawn(scene)
-  if node != nil {
-    node.attachment = DirectionalLightAttachment {
-      color       = color,
-      cast_shadow = cast_shadow,
-    }
-  }
-  return
-}
-
-spawn_spot_light :: proc(
-  scene: ^Scene,
-  color: linalg.Vector4f32,
-  angle: f32,
-  radius: f32,
-  cast_shadow: bool = true,
-) -> (
-  handle: Handle,
-  node: ^Node,
-) {
-  handle, node = spawn(scene)
-  if node != nil {
-    node.attachment = SpotLightAttachment {
-      color       = color,
-      angle       = angle,
-      radius      = radius,
-      cast_shadow = cast_shadow,
-    }
-  }
-  return
-}
-
-spawn :: proc(scene: ^Scene) -> (handle: Handle, node: ^Node) {
+spawn_at :: proc(scene: ^Scene, position: linalg.Vector3f32, attachment: NodeAttachment = nil) -> (handle: Handle, node: ^Node) {
   handle, node = resource.alloc(&scene.nodes)
   if node != nil {
-    node.transform = geometry.TRANSFORM_IDENTITY
-    node.children = make([dynamic]Handle, 0)
+    init_node(node)
+    node.attachment = attachment
+    geometry.translate(&node.transform, position.x, position.y, position.z)
     attach(scene.nodes, scene.root, handle)
   }
   return
 }
+
+spawn :: proc(scene: ^Scene, attachment: NodeAttachment = nil) -> (handle: Handle, node: ^Node) {
+  handle, node = resource.alloc(&scene.nodes)
+  if node != nil {
+    init_node(node)
+    node.attachment = attachment
+    attach(scene.nodes, scene.root, handle)
+  }
+  return
+}
+
+spawn_child :: proc(scene: ^Scene, parent: Handle, attachment: NodeAttachment = nil) -> (handle: Handle, node: ^Node) {
+  handle, node = resource.alloc(&scene.nodes)
+  if node != nil {
+    init_node(node)
+    node.attachment = attachment
+    attach(scene.nodes, parent, handle)
+  }
+  return
+}
+
 Scene :: struct {
   camera: geometry.Camera,
   root:   Handle,
