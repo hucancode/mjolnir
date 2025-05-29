@@ -26,11 +26,14 @@ SpotLightAttachment :: struct {
   cast_shadow: bool,
 }
 
+NodeSkinning :: struct {
+  bone_buffer: DataBuffer,
+  pose:        animation.Pose,
+  animation:   Maybe(animation.Instance),
+}
 MeshAttachment :: struct {
   handle:      Handle,
-  bone_buffer: Maybe(DataBuffer),
-  pose:        Maybe(animation.Pose),
-  animation:   Maybe(animation.Instance),
+  skinning:    Maybe(NodeSkinning),
   cast_shadow: bool,
 }
 
@@ -122,14 +125,15 @@ play_animation :: proc(
     return false
   }
   mesh := resource.get(engine.meshes, data.handle)
-  if mesh == nil {
+  skinning, has_skin := &data.skinning.?
+  if mesh == nil || !has_skin {
     return false
   }
   anim_inst, found := make_animation_instance(mesh, name, mode)
   if !found {
     return false
   }
-  data.animation = anim_inst
+  skinning.animation = anim_inst
   return true
 }
 

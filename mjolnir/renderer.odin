@@ -728,18 +728,19 @@ render_single_node :: proc(node: ^Node, cb_context: rawptr) -> bool {
       &mesh.vertex_buffer.buffer,
       &offset,
     )
-    if mesh.skinning != nil {
-      skin := &mesh.skinning.?
+    mesh_skinning, mesh_has_skin := &mesh.skinning.?
+    node_skinning, node_has_skin := data.skinning.?
+    if mesh_has_skin && node_has_skin {
       material_update_bone_buffer(
         material,
-        data.bone_buffer.?.buffer,
-        data.bone_buffer.?.size,
+        node_skinning.bone_buffer.buffer,
+        node_skinning.bone_buffer.size,
       )
       vk.CmdBindVertexBuffers(
         ctx.command_buffer,
         1,
         1,
-        &skin.skin_buffer.buffer,
+        &mesh_skinning.skin_buffer.buffer,
         &offset,
       )
     }

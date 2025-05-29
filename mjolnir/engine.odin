@@ -295,7 +295,11 @@ update :: proc(engine: ^Engine) -> bool {
     if !is_mesh {
       continue
     }
-    anim_inst, has_animation := &data.animation.?
+    skinning, has_skin := &data.skinning.?
+    if !has_skin {
+      continue
+    }
+    anim_inst, has_animation := &skinning.animation.?
     if !has_animation {
       continue
     }
@@ -304,13 +308,8 @@ update :: proc(engine: ^Engine) -> bool {
     if mesh == nil {
       continue
     }
-    pose, has_pose := &data.pose.?
-    fmt.printfln("tick animation, has pose", has_pose)
-    if !has_pose {
-      continue
-    }
-    calculate_animation_transform(mesh, anim_inst, pose)
-    animation.pose_flush(pose, data.bone_buffer.?.mapped)
+    calculate_animation_transform(mesh, anim_inst, &skinning.pose)
+    animation.pose_flush(&skinning.pose, skinning.bone_buffer.mapped)
   }
 
   last_mouse_pos := engine.input.mouse_pos

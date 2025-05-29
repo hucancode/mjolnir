@@ -122,9 +122,8 @@ load_gltf :: proc(
             {.STORAGE_BUFFER},
           )
           node.attachment = MeshAttachment {
-            handle      = mesh_handle,
-            pose        = pose,
-            bone_buffer = bone_buffer,
+            handle = mesh_handle,
+            skinning = NodeSkinning{pose = pose, bone_buffer = bone_buffer},
           }
           load_gltf_animations(engine, gltf_data, gltf_node.skin, mesh_handle)
           // fmt.printfln("Skinned mesh loaded successfully with %d animation %v", len(mesh.animations), mesh.animations)
