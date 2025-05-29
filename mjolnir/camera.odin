@@ -273,7 +273,6 @@ camera_up :: proc(camera: ^Camera) -> linalg.Vector3f32 {
   )
 }
 
-
 camera_make_frustum :: proc(camera: ^Camera) -> geometry.Frustum {
   view_matrix := camera_calculate_view_matrix(camera)
   proj_matrix := camera_calculate_projection_matrix(camera)

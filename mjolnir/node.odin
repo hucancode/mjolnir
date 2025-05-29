@@ -1,19 +1,24 @@
 package mjolnir
 
+import "animation"
 import linalg "core:math/linalg"
+import "core:slice"
 import "geometry"
 import "resource"
 
 NodeSkeletalMeshAttachment :: struct {
   handle:      Handle,
-  pose:        Pose,
-  animation:   Maybe(AnimationInstance),
+  bone_buffer: DataBuffer,
+  pose:        animation.Pose,
+  animation:   Maybe(animation.Instance),
   cast_shadow: bool,
 }
+
 NodeStaticMeshAttachment :: struct {
   handle:      Handle,
   cast_shadow: bool,
 }
+
 NodeLightAttachment :: struct {
   handle: Handle,
 }
@@ -48,27 +53,18 @@ detach :: proc(nodes: ^resource.Pool(Node), child_handle: Handle) {
     return
   }
   parent_handle := child_node.parent
-  if parent_handle == (Handle{}) || parent_handle == child_handle {
+  if parent_handle == child_handle {
     return
   }
   parent_node := resource.get(nodes, parent_handle)
   if parent_node == nil {
     return
   }
-
-  found_idx := -1
-  for child_in_parent_list, i in parent_node.children {
-    if child_in_parent_list == child_handle {
-      found_idx = i
-      break
-    }
+  idx, found := slice.linear_search(parent_node.children[:], child_handle)
+  if found {
+    unordered_remove(&parent_node.children, idx)
   }
-
-  if found_idx != -1 {
-    ordered_remove(&parent_node.children, found_idx)
-  }
-
-  child_node.parent = Handle{}
+  child_node.parent = child_handle
 }
 
 attach :: proc(
@@ -76,26 +72,32 @@ attach :: proc(
   parent_handle: Handle,
   child_handle: Handle,
 ) {
-  if parent_handle == child_handle {return}
-
   child_node := resource.get(nodes, child_handle)
   parent_node := resource.get(nodes, parent_handle)
-
   if child_node == nil || parent_node == nil {
     return
   }
-
-  detach(nodes, child_handle)
-
+  old_parent_node := resource.get(nodes, child_node.parent)
+  if old_parent_node != nil {
+    idx, found := slice.linear_search(
+      old_parent_node.children[:],
+      child_handle,
+    )
+    if found {
+      unordered_remove(&old_parent_node.children, idx)
+    }
+  }
   child_node.parent = parent_handle
-  append(&parent_node.children, child_handle)
+  if parent_handle != child_handle {
+    append(&parent_node.children, child_handle)
+  }
 }
 
 play_animation :: proc(
   engine: ^Engine,
   node_handle: Handle,
   name: string,
-  mode: AnimationPlayMode = .LOOP,
+  mode: animation.PlayMode = .LOOP,
 ) -> bool {
   node := resource.get(&engine.nodes, node_handle)
   if node == nil {

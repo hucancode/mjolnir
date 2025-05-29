@@ -12,6 +12,7 @@ import glfw "vendor:glfw"
 import mu "vendor:microui"
 import vk "vendor:vulkan"
 
+import "animation"
 import "geometry"
 import "resource"
 
@@ -409,8 +410,8 @@ render_single_node :: proc(
     }
     material_update_bone_buffer(
       material,
-      data.pose.bone_buffer.buffer,
-      data.pose.bone_buffer.size,
+      data.bone_buffer.buffer,
+      data.bone_buffer.size,
     )
     pipeline :=
       pipelines[transmute(u32)material.features] if material.is_lit else unlit_pipelines[transmute(u32)material.features]
@@ -1275,10 +1276,11 @@ update :: proc(engine: ^Engine) -> bool {
       continue
     }
     anim_inst := &data.animation.?
-    animation_instance_update(anim_inst, delta_time)
+    animation.instance_update(anim_inst, delta_time)
     skeletal_mesh := resource.get(&engine.skeletal_meshes, data.handle)
     if skeletal_mesh != nil {
       calculate_animation_transform(skeletal_mesh, anim_inst, &data.pose)
+      animation.pose_flush(&data.pose, data.bone_buffer.mapped)
     }
   }
   clear(&engine.dirty_transforms)
