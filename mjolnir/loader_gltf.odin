@@ -640,7 +640,6 @@ load_gltf_skinned_primitive :: proc(
   return
 }
 
-
 // Helper to unpack accessor data into a flat []f32. Caller must free the returned slice.
 unpack_accessor_floats_flat :: proc(accessor: ^cgltf.accessor) -> []f32 {
   if accessor == nil {return nil}

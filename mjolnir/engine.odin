@@ -22,6 +22,9 @@ FRAME_TIME_MILIS :: FRAME_TIME * 1_000.0
 UPDATE_FPS :: 60.0
 UPDATE_FRAME_TIME :: 1.0 / UPDATE_FPS
 UPDATE_FRAME_TIME_MILIS :: UPDATE_FRAME_TIME * 1_000.0
+MOUSE_SENSITIVITY_X :: 0.005
+MOUSE_SENSITIVITY_Y :: 0.005
+SCROLL_SENSITIVITY :: 0.5
 
 Handle :: resource.Handle
 
@@ -170,7 +173,7 @@ init :: proc(
     w := f32(engine.renderer.extent.width)
     h := f32(engine.renderer.extent.height)
     #partial switch &proj in engine.scene.camera.projection {
-    case PerspectiveProjection:
+    case geometry.PerspectiveProjection:
       proj.aspect_ratio = w / h
     }
   }
@@ -187,7 +190,7 @@ init :: proc(
     proc "c" (window: glfw.WindowHandle, xoffset, yoffset: f64) {
       context = g_context
       engine := cast(^Engine)context.user_ptr
-      camera_orbit_zoom(
+      geometry.camera_orbit_zoom(
         &engine.scene.camera,
         -f32(yoffset) * SCROLL_SENSITIVITY,
       )
@@ -357,7 +360,7 @@ prepare_light :: proc(
     light_obj := resource.get(&ctx.engine.lights, light_handle)
     if light_obj == nil {return true}
     uniform: SingleLightUniform
-    #partial switch light_type in light_obj {
+    switch light_type in light_obj {
     case PointLight:
       uniform.kind = .POINT
       uniform.color = light_type.color
@@ -704,12 +707,12 @@ render :: proc(engine: ^Engine) -> vk.Result {
 
   elapsed_seconds := time.duration_seconds(time.since(engine.start_timestamp))
   scene_uniform := SceneUniform {
-    view       = camera_calculate_view_matrix(&engine.scene.camera),
-    projection = camera_calculate_projection_matrix(&engine.scene.camera),
+    view       = geometry.camera_calculate_view_matrix(&engine.scene.camera),
+    projection = geometry.camera_calculate_projection_matrix(&engine.scene.camera),
     time       = f32(elapsed_seconds),
   }
   light_uniform: SceneLightUniform
-  camera_frustum := camera_make_frustum(&engine.scene.camera)
+  camera_frustum := geometry.camera_make_frustum(&engine.scene.camera)
   collect_ctx := CollectLightsContext {
     engine        = engine,
     light_uniform = &light_uniform,
@@ -1245,7 +1248,7 @@ engine_recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
     w := f32(engine.renderer.extent.width)
     h := f32(engine.renderer.extent.height)
     #partial switch &proj in engine.scene.camera.projection {
-    case PerspectiveProjection:
+    case geometry.PerspectiveProjection:
       proj.aspect_ratio = w / h
     }
   }
@@ -1302,7 +1305,7 @@ update :: proc(engine: ^Engine) -> bool {
     engine.input.keys[k] = is_pressed
   }
   if engine.input.mouse_holding[glfw.MOUSE_BUTTON_1] {
-    camera_orbit_rotate(
+    geometry.camera_orbit_rotate(
       &engine.scene.camera,
       f32(delta.x * MOUSE_SENSITIVITY_X),
       f32(delta.y * MOUSE_SENSITIVITY_Y),

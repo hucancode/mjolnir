@@ -1,6 +1,5 @@
 package animation
 
-import "../geometry"
 import "core:fmt"
 import "core:math"
 import linalg "core:math/linalg"
@@ -15,9 +14,14 @@ Keyframe :: struct($T: typeid) {
   value: T,
 }
 
-keyframe_sample :: proc($T: typeid, frames: []Keyframe(T), t: f32) -> T {
+keyframe_sample :: proc(
+  $T: typeid,
+  frames: []Keyframe(T),
+  t: f32,
+  fallback: T,
+) -> T {
   if len(frames) == 0 {
-    return T{}
+    return fallback
   }
   if t - frames[0].time < EPSILON {
     // fmt.printfln("sample_keyframe take first: %v", frames[0])
@@ -180,34 +184,34 @@ channel_deinit :: proc(channel: ^Channel) {
   }
 }
 
-channel_calculate :: proc(
+channel_sample :: proc(
   channel: ^Channel,
   t: f32,
-  output_transform: ^geometry.Transform,
+) -> (
+  position: linalg.Vector3f32,
+  rotation: linalg.Quaternionf32,
+  scale: linalg.Vector3f32,
 ) {
-  if len(channel.position_keyframes) > 0 {
-    output_transform.position = keyframe_sample(
-      linalg.Vector3f32,
-      channel.position_keyframes,
-      t,
-    )
-  }
-  if len(channel.rotation_keyframes) > 0 {
-    output_transform.rotation = keyframe_sample(
-      linalg.Quaternionf32,
-      channel.rotation_keyframes,
-      t,
-    )
-    // fmt.printfln("sample_keyframe rotation: time %f rotation quat %v", t, output_transform.rotation)
-  }
-  if len(channel.scale_keyframes) > 0 {
-    output_transform.scale = keyframe_sample(
-      linalg.Vector3f32,
-      channel.scale_keyframes,
-      t,
-    )
-  }
-  output_transform.is_dirty = true
+  position = keyframe_sample(
+    linalg.Vector3f32,
+    channel.position_keyframes,
+    t,
+    linalg.Vector3f32{0, 0, 0},
+  )
+  rotation = keyframe_sample(
+    linalg.Quaternionf32,
+    channel.rotation_keyframes,
+    t,
+    linalg.QUATERNIONF32_IDENTITY,
+  )
+  // fmt.printfln("sample_keyframe rotation: time %f rotation quat %v", t, output_transform.rotation)
+  scale = keyframe_sample(
+    linalg.Vector3f32,
+    channel.scale_keyframes,
+    t,
+    linalg.Vector3f32{1, 1, 1},
+  )
+  return
 }
 
 Clip :: struct {

@@ -1,8 +1,7 @@
-package mjolnir
+package geometry
 
 import "core:math"
 import linalg "core:math/linalg"
-import "geometry"
 
 CameraOrbitMovement :: struct {
   target:       linalg.Vector3f32,
@@ -26,9 +25,6 @@ DEFAULT_ORBIT_DATA := CameraOrbitMovement {
   max_pitch    = 0.45 * math.PI,
 }
 
-MOUSE_SENSITIVITY_X :: 0.005
-MOUSE_SENSITIVITY_Y :: 0.005
-SCROLL_SENSITIVITY :: 0.5
 
 CameraFreeMovement :: struct {
 }
@@ -273,8 +269,8 @@ camera_up :: proc(camera: ^Camera) -> linalg.Vector3f32 {
   )
 }
 
-camera_make_frustum :: proc(camera: ^Camera) -> geometry.Frustum {
+camera_make_frustum :: proc(camera: ^Camera) -> Frustum {
   view_matrix := camera_calculate_view_matrix(camera)
   proj_matrix := camera_calculate_projection_matrix(camera)
-  return geometry.make_frustum(proj_matrix * view_matrix)
+  return make_frustum(proj_matrix * view_matrix)
 }
