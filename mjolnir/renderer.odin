@@ -2,6 +2,7 @@ package mjolnir
 
 import "core:fmt"
 import "core:math"
+import "core:slice"
 import linalg "core:math/linalg"
 import "core:time"
 import "geometry"
@@ -263,35 +264,26 @@ renderer_build_synchronizers :: proc(self: ^Renderer) -> vk.Result {
 renderer_pick_swap_present_mode :: proc(
   present_modes: []vk.PresentModeKHR,
 ) -> vk.PresentModeKHR {
-  for mode in present_modes {
-    if mode == .MAILBOX {
-      return .MAILBOX
-    }
-  }
-  return .FIFO
+  _, found := slice.linear_search(present_modes, vk.PresentModeKHR.MAILBOX)
+  return .MAILBOX if found else .FIFO
 }
 
 renderer_build_swapchain_surface_format :: proc(
   self: ^Renderer,
   formats: []vk.SurfaceFormatKHR,
 ) {
-  for fmt in formats {
-    if fmt.format == .B8G8R8A8_SRGB {
-      self.format = fmt
-      return
-    }
-  }
-  // Fallback to the first available format if preferred not found
-  if len(formats) > 0 {
-    self.format = formats[0]
-  } else {
+  if len(formats) == 0 {
     // This should not happen if the physical device supports the surface
     fmt.printfln("No surface formats available for swapchain.")
-    // Set a default, though this state is problematic
-    self.format = vk.SurfaceFormatKHR {
+    self.format = {
       format     = .B8G8R8A8_SRGB,
       colorSpace = .SRGB_NONLINEAR,
     }
+  } else {
+    i, found := slice.linear_search_proc(formats, proc(fmt: vk.SurfaceFormatKHR) -> bool {
+        return fmt.format == .B8G8R8A8_SRGB
+    })
+    self.format = formats[i if found else 0]
   }
 }
 

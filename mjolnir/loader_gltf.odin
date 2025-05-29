@@ -59,7 +59,6 @@ load_gltf :: proc(
   }
   for i in 0 ..< len(gltf_data.nodes) {
     if i not_in is_gltf_child_node {
-      fmt.printfln("Queuing node #%d %s", i, gltf_data.nodes[i].name)
       append(&stack, TraverseEntry{idx = u32(i), parent = engine.scene.root})
     }
   }
@@ -93,13 +92,6 @@ load_gltf :: proc(
         node.transform.scale = gltf_node.scale
       }
       node.transform.is_dirty = true
-      fmt.printfln(
-        "Node %s: translation %v, rotation %v, scale %v",
-        string(gltf_node.name),
-        gltf_node.translation,
-        gltf_node.rotation,
-        gltf_node.scale,
-      )
     }
     node.parent = entry.parent
     node.children = make([dynamic]Handle, 0)
@@ -108,7 +100,7 @@ load_gltf :: proc(
       if gltf_node.skin != nil {
         fmt.printfln("Loading skinned mesh %s", string(gltf_node.name))
         mesh_handle, mesh := resource.alloc(&engine.skeletal_meshes)
-        data, bones, material, root_bone_idx, bone_map, res :=
+        data, bones, material, root_bone_idx, res :=
           load_gltf_skinned_primitive(
             engine,
             path,
@@ -139,7 +131,6 @@ load_gltf :: proc(
             gltf_data,
             gltf_node.skin,
             mesh_handle,
-            bone_map,
           )
           // fmt.printfln("Skinned mesh loaded successfully with %d animation %v", len(mesh.animations), mesh.animations)
           for bone_idx := 0; bone_idx < len(bones); bone_idx += 1 {
@@ -160,13 +151,11 @@ load_gltf :: proc(
           fmt.eprintln("Failed to process GLTF primitive:", res)
           continue
         }
-
         fmt.printfln(
           "Initializing static mesh with %d vertices, %d indices",
           len(mesh_data.vertices),
           len(mesh_data.indices),
         )
-
         mesh_handle, _, ret := create_static_mesh(
           engine,
           mesh_data,
@@ -438,11 +427,10 @@ load_gltf_skinned_primitive :: proc(
   gltf_mesh: ^cgltf.mesh,
   gltf_skin: ^cgltf.skin,
 ) -> (
-  skinned_geom_data: geometry.SkinnedGeometry,
+  geometry_data: geometry.SkinnedGeometry,
   engine_bones: []Bone,
   mat_handle: resource.Handle,
   root_bone_idx: u32,
-  node_ptr_to_bone_idx_map: map[^cgltf.node]u32,
   ret: vk.Result,
 ) {
   primitives := gltf_mesh.primitives
@@ -565,7 +553,7 @@ load_gltf_skinned_primitive :: proc(
       return
     }
   }
-  skinned_geom_data = {
+  geometry_data = {
     vertices  = vertices,
     skinnings = skinnings,
     indices   = indices,
@@ -573,9 +561,7 @@ load_gltf_skinned_primitive :: proc(
   }
   // Bones
   engine_bones = make([]Bone, len(gltf_skin.joints))
-  node_ptr_to_bone_idx_map = make(map[^cgltf.node]u32)
   for joint_node, i in gltf_skin.joints {
-    node_ptr_to_bone_idx_map[joint_node] = u32(i)
     engine_bones[i].name = string(joint_node.name)
     if gltf_skin.inverse_bind_matrices != nil {
       ibm_floats: [16]f32
@@ -613,8 +599,8 @@ load_gltf_skinned_primitive :: proc(
   for joint_node, i in gltf_skin.joints {
     engine_bones[i].children = make([]u32, len(joint_node.children))
     for child, j in joint_node.children {
-      if idx, found := node_ptr_to_bone_idx_map[child]; found {
-        engine_bones[i].children[j] = idx
+      if idx, found := slice.linear_search(gltf_skin.joints, child); found {
+        engine_bones[i].children[j] = u32(idx)
       }
     }
   }
@@ -655,7 +641,6 @@ load_gltf_animations :: proc(
   gltf_data: ^cgltf.data,
   gltf_skin: ^cgltf.skin,
   engine_mesh_handle: resource.Handle,
-  node_ptr_to_bone_idx_map: map[^cgltf.node]u32,
 ) -> bool {
   skeletal_mesh := resource.get(engine.skeletal_meshes, engine_mesh_handle)
   skeletal_mesh.animations = make([]animation.Clip, len(gltf_data.animations))
@@ -680,8 +665,10 @@ load_gltf_animations :: proc(
         continue
       }
       n := gltf_channel.sampler.input.count
+
+      // note: if this is getting slow, consider using a hash map
       bone_idx, bone_found :=
-        node_ptr_to_bone_idx_map[gltf_channel.target_node]
+        slice.linear_search(gltf_skin.joints, gltf_channel.target_node)
       if !bone_found {
         continue
       }
