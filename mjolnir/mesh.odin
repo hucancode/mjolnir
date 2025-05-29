@@ -1,15 +1,17 @@
 package mjolnir
 
+import "animation"
 import "core:fmt"
 import linalg "core:math/linalg"
 import "geometry"
+import "resource"
 import vk "vendor:vulkan"
 
 Bone :: struct {
   bind_transform:      geometry.Transform,
   children:            []u32,
   inverse_bind_matrix: linalg.Matrix4f32,
-  name:                string, // Optional: for debugging
+  name:                string,
 }
 
 bone_deinit :: proc(bone: ^Bone) {
@@ -22,7 +24,7 @@ bone_deinit :: proc(bone: ^Bone) {
 SkeletalMesh :: struct {
   root_bone_index: u32,
   bones:           []Bone,
-  animations:      []AnimationClip,
+  animations:      []animation.Clip,
   vertices_len:    u32,
   indices_len:     u32,
   vertex_buffer:   DataBuffer,
@@ -93,17 +95,17 @@ skeletal_mesh_init :: proc(
     raw_data(geometry_data.indices),
   ) or_return
   self.bones = make([]Bone, 0)
-  self.animations = make([]AnimationClip, 0)
+  self.animations = make([]animation.Clip, 0)
   return .SUCCESS
 }
 
 make_animation_instance :: proc(
   self: ^SkeletalMesh,
   animation_name: string,
-  mode: AnimationPlayMode,
+  mode: animation.PlayMode,
   speed: f32 = 1.0,
 ) -> (
-  instance: AnimationInstance,
+  instance: animation.Instance,
   found: bool,
 ) {
   for clip, i in self.animations {
@@ -126,8 +128,8 @@ make_animation_instance :: proc(
 
 calculate_animation_transform :: proc(
   self: ^SkeletalMesh,
-  anim_instance: ^AnimationInstance,
-  target_pose: ^Pose,
+  anim_instance: ^animation.Instance,
+  target_pose: ^animation.Pose,
 ) {
   if anim_instance.status == .STOPPED ||
      anim_instance.clip_handle >= u32(len(self.animations)) {
@@ -142,31 +144,24 @@ calculate_animation_transform :: proc(
     delete(transform_stack)
     delete(bone_stack)
   }
-
   append(&transform_stack, linalg.MATRIX4F32_IDENTITY)
   append(&bone_stack, u32(self.root_bone_index))
-
   active_clip := &self.animations[anim_instance.clip_handle]
-
   for len(bone_stack) > 0 {
     current_bone_index := pop(&bone_stack)
     parent_world_transform := pop(&transform_stack)
     current_bone := &self.bones[current_bone_index]
-    local_animated_transform := geometry.TRANSFORM_IDENTITY
+    local_transform: geometry.Transform
     if current_bone_index < u32(len(active_clip.channels)) {
-      channel := &active_clip.channels[current_bone_index]
-      animation_channel_calculate(
-        channel,
-        anim_instance.time,
-        &local_animated_transform,
-      )
+      local_transform.position, local_transform.rotation, local_transform.scale =
+        animation.channel_sample(active_clip.channels[current_bone_index], anim_instance.time)
     } else {
-      local_animated_transform = current_bone.bind_transform
+      local_transform = current_bone.bind_transform
     }
     local_matrix := linalg.matrix4_from_trs(
-      local_animated_transform.position,
-      local_animated_transform.rotation,
-      local_animated_transform.scale,
+      local_transform.position,
+      local_transform.rotation,
+      local_transform.scale,
     )
     current_world_transform := parent_world_transform * local_matrix
     // fmt.printfln("calculate_animation_transform, local matrix", local_matrix)
@@ -177,5 +172,78 @@ calculate_animation_transform :: proc(
       append(&bone_stack, child_index)
     }
   }
-  pose_flush(target_pose)
+}
+
+StaticMesh :: struct {
+  material:      Handle,
+  vertices_len:  u32,
+  indices_len:   u32,
+  vertex_buffer: DataBuffer,
+  index_buffer:  DataBuffer,
+  aabb:          geometry.Aabb,
+  ctx:           ^VulkanContext,
+}
+
+static_mesh_deinit :: proc(self: ^StaticMesh) {
+  if self.ctx == nil {
+    return
+  }
+  if self.vertex_buffer.buffer != 0 {
+    data_buffer_deinit(&self.vertex_buffer, self.ctx)
+  }
+  if self.index_buffer.buffer != 0 {
+    data_buffer_deinit(&self.index_buffer, self.ctx)
+  }
+  self.vertices_len = 0
+  self.indices_len = 0
+  self.aabb = {}
+  self.ctx = nil
+}
+
+static_mesh_init :: proc(
+  self: ^StaticMesh,
+  data: ^geometry.Geometry,
+  ctx: ^VulkanContext,
+) -> vk.Result {
+  self.ctx = ctx
+  self.vertices_len = u32(len(data.vertices))
+  self.indices_len = u32(len(data.indices))
+  self.aabb = data.aabb
+  size := len(data.vertices) * size_of(geometry.Vertex)
+  self.vertex_buffer = create_local_buffer(
+    ctx,
+    vk.DeviceSize(size),
+    {.VERTEX_BUFFER},
+    raw_data(data.vertices),
+  ) or_return
+
+  size = len(data.indices) * size_of(u32)
+  self.index_buffer = create_local_buffer(
+    ctx,
+    vk.DeviceSize(size),
+    {.INDEX_BUFFER},
+    raw_data(data.indices),
+  ) or_return
+
+  return .SUCCESS
+}
+
+create_static_mesh :: proc(
+  engine: ^Engine,
+  geom: ^geometry.Geometry,
+  material: Handle,
+) -> (
+  handle: Handle,
+  mesh: ^StaticMesh,
+  ret: vk.Result,
+) {
+  handle, mesh = resource.alloc(&engine.meshes)
+  if mesh == nil {
+    ret = .ERROR_UNKNOWN
+    return
+  }
+  static_mesh_init(mesh, geom, &engine.ctx) or_return
+  mesh.material = material
+  ret = .SUCCESS
+  return
 }

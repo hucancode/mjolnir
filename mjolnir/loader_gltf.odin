@@ -11,6 +11,7 @@ import linalg "core:math/linalg"
 import cgltf "vendor:cgltf"
 import vk "vendor:vulkan"
 
+import "animation"
 import "geometry"
 import "resource"
 
@@ -66,15 +67,14 @@ load_gltf :: proc(
   for len(stack) > 0 {
     entry := pop(&stack)
     g_node := &gltf_data.nodes[entry.idx]
-    node_handle, node := resource.alloc(&engine.nodes)
+    node_handle, node := resource.alloc(&engine.scene.nodes)
     if node == nil {
       continue
     }
     node.name = string(g_node.name)
     node.transform = geometry.TRANSFORM_IDENTITY
     if g_node.has_matrix {
-      geometry.decompose_matrix(
-        &node.transform,
+      node.transform = geometry.decompose_matrix(
         geometry.matrix_from_arr(g_node.matrix_),
       )
     } else {
@@ -92,6 +92,7 @@ load_gltf :: proc(
       if g_node.has_scale {
         node.transform.scale = g_node.scale
       }
+      node.transform.is_dirty = true
       fmt.printfln(
         "Node %s: translation %v, rotation %v, scale %v",
         string(g_node.name),
@@ -120,12 +121,20 @@ load_gltf :: proc(
           mesh.material = material
           mesh.bones = bones
           mesh.root_bone_index = root_bone_idx
-          pose: Pose
-          pose_init(&pose, len(bones), &engine.ctx)
-          node.attachment = NodeSkeletalMeshAttachment {
-              handle = mesh_handle,
-              pose   = pose,
-            }
+          pose: animation.Pose
+          bone_buffer: DataBuffer
+          animation.pose_init(&pose, len(bones))
+          buffer_size := size_of(linalg.Matrix4f32) * vk.DeviceSize(len(bones))
+          bone_buffer, _ = create_host_visible_buffer(
+            &engine.ctx,
+            buffer_size,
+            {.STORAGE_BUFFER},
+          )
+          node.attachment = SkeletalMeshAttachment {
+            handle      = mesh_handle,
+            pose        = pose,
+            bone_buffer = bone_buffer,
+          }
           load_gltf_animations(
             engine,
             gltf_data,
@@ -137,7 +146,7 @@ load_gltf :: proc(
           for bone_idx := 0; bone_idx < len(bones); bone_idx += 1 {
             pose.bone_matrices[bone_idx] = linalg.MATRIX4F32_IDENTITY
           }
-          pose_flush(&pose)
+          animation.pose_flush(&pose, bone_buffer.mapped)
         }
       } else {
         fmt.printfln("Loading static mesh %s", string(g_node.name))
@@ -159,12 +168,16 @@ load_gltf :: proc(
           len(mesh_data.indices),
         )
 
-        mesh_handle, _, ret := create_static_mesh(engine, &mesh_data, mat_handle)
+        mesh_handle, _, ret := create_static_mesh(
+          engine,
+          &mesh_data,
+          mat_handle,
+        )
         if ret != .SUCCESS {
           fmt.eprintln("Failed to create static mesh:", ret)
           continue
         }
-        node.attachment = NodeStaticMeshAttachment {
+        node.attachment = StaticMeshAttachment {
           handle = mesh_handle,
         }
         fmt.printfln(
@@ -173,7 +186,7 @@ load_gltf :: proc(
         )
       }
     }
-    attach(&engine.nodes, entry.parent, node_handle)
+    attach(engine.scene.nodes, entry.parent, node_handle)
     if entry.parent == engine.scene.root {
       append(&created_root_handles, node_handle)
     }
@@ -627,7 +640,6 @@ load_gltf_skinned_primitive :: proc(
   return
 }
 
-
 // Helper to unpack accessor data into a flat []f32. Caller must free the returned slice.
 unpack_accessor_floats_flat :: proc(accessor: ^cgltf.accessor) -> []f32 {
   if accessor == nil {return nil}
@@ -644,8 +656,8 @@ load_gltf_animations :: proc(
   engine_mesh_handle: resource.Handle,
   node_ptr_to_bone_idx_map: map[^cgltf.node]u32,
 ) -> bool {
-  skeletal_mesh := resource.get(&engine.skeletal_meshes, engine_mesh_handle)
-  skeletal_mesh.animations = make([]AnimationClip, len(gltf_data.animations))
+  skeletal_mesh := resource.get(engine.skeletal_meshes, engine_mesh_handle)
+  skeletal_mesh.animations = make([]animation.Clip, len(gltf_data.animations))
 
   for &gltf_anim, i in gltf_data.animations {
     clip := &skeletal_mesh.animations[i]
@@ -658,7 +670,7 @@ load_gltf_animations :: proc(
       "\nAllocating animation channels for %d bones",
       len(skeletal_mesh.bones),
     )
-    clip.channels = make([]AnimationChannel, len(skeletal_mesh.bones))
+    clip.channels = make([]animation.Channel, len(skeletal_mesh.bones))
 
     max_time: f32 = 0.0
 
@@ -686,7 +698,10 @@ load_gltf_animations :: proc(
 
       switch gltf_channel.target_path {
       case .translation:
-        engine_channel.position_keyframes = make([]Keyframe(Vec3), n)
+        engine_channel.position_keyframes = make(
+          []animation.Keyframe(linalg.Vector3f32),
+          n,
+        )
         values := unpack_accessor_floats_flat(gltf_channel.sampler.output)
         // defer free(values)
         for i in 0 ..< len(time_data) {
@@ -696,7 +711,10 @@ load_gltf_animations :: proc(
           }
         }
       case .rotation:
-        engine_channel.rotation_keyframes = make([]Keyframe(Quat), n)
+        engine_channel.rotation_keyframes = make(
+          []animation.Keyframe(linalg.Quaternionf32),
+          n,
+        )
         values := unpack_accessor_floats_flat(gltf_channel.sampler.output)
         // defer free(values)
         for i in 0 ..< len(time_data) {
@@ -711,7 +729,10 @@ load_gltf_animations :: proc(
           }
         }
       case .scale:
-        engine_channel.scale_keyframes = make([]Keyframe(Vec3), n)
+        engine_channel.scale_keyframes = make(
+          []animation.Keyframe(linalg.Vector3f32),
+          n,
+        )
         values := unpack_accessor_floats_flat(gltf_channel.sampler.output)
         // defer free(values)
         for i in 0 ..< len(time_data) {

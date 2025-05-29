@@ -12,14 +12,11 @@ SHADOW_MAP_SIZE :: 512
 MAX_SHADOW_MAPS :: MAX_LIGHTS
 MAX_SCENE_UNIFORMS :: 16
 
-Mat4 :: linalg.Matrix4f32
-Vec4 :: linalg.Vector4f32
-
 SingleLightUniform :: struct {
-  view_proj:  Mat4,
-  color:      Vec4,
-  position:   Vec4,
-  direction:  Vec4,
+  view_proj:  linalg.Matrix4f32,
+  color:      linalg.Vector4f32,
+  position:   linalg.Vector4f32,
+  direction:  linalg.Vector4f32,
   kind:       enum u32 {
     POINT       = 0,
     DIRECTIONAL = 1,
@@ -31,8 +28,8 @@ SingleLightUniform :: struct {
 }
 
 SceneUniform :: struct {
-  view:       Mat4,
-  projection: Mat4,
+  view:       linalg.Matrix4f32,
+  projection: linalg.Matrix4f32,
   time:       f32,
 }
 

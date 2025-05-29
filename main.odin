@@ -66,9 +66,9 @@ setup :: proc(engine: ^mjolnir.Engine) {
     for x in 1 ..< nx {
       for y in 1 ..< ny {
         for z in 1 ..< nz {
-          node_handle, node := spawn(engine)
-          attach(&engine.nodes, engine.scene.root, node_handle)
-          node.attachment = NodeStaticMeshAttachment{sphere_mesh_handle, true}
+          node_handle, node := spawn(&engine.scene)
+          attach(engine.scene.nodes, engine.scene.root, node_handle)
+          node.attachment = StaticMeshAttachment{sphere_mesh_handle, true}
           node.transform.position =
             {
               (f32(x) - f32(nx) * 0.5),
@@ -78,6 +78,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
             space
           node.transform.position.y += 0.5
           node.transform.scale = {1, 1, 1} * size
+          node.transform.is_dirty = true
         }
       }
     }
@@ -85,20 +86,18 @@ setup :: proc(engine: ^mjolnir.Engine) {
   if true {
     // Ground node
     size: f32 = 10.0
-    ground_handle, ground_node := spawn(engine)
-    attach(&engine.nodes, engine.scene.root, ground_handle)
-    ground_node.attachment = NodeStaticMeshAttachment {
-      ground_mesh_handle,
-      false,
-    }
+    ground_handle, ground_node := spawn(&engine.scene)
+    attach(engine.scene.nodes, engine.scene.root, ground_handle)
+    ground_node.attachment = StaticMeshAttachment{ground_mesh_handle, false}
     ground_node.transform.position = {-0.5, 0.0, -0.5} * size
     ground_node.transform.scale = {1.0, 1.0, 1.0} * size
+    ground_node.transform.is_dirty = true
   }
   if true {
     gltf_nodes := load_gltf(engine, "assets/Suzanne.glb") or_else {}
     fmt.printfln("Loaded GLTF nodes: %v", gltf_nodes)
     for handle in gltf_nodes {
-      duck := resource.get(&engine.nodes, handle)
+      duck := resource.get(engine.scene.nodes, handle)
       if duck == nil {
         continue
       }
@@ -110,7 +109,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     gltf_nodes := load_gltf(engine, "assets/DamagedHelmet.glb") or_else {}
     fmt.printfln("Loaded GLTF nodes: %v", gltf_nodes)
     for handle in gltf_nodes {
-      helm := resource.get(&engine.nodes, handle)
+      helm := resource.get(engine.scene.nodes, handle)
       if helm == nil {
         continue
       }
@@ -122,12 +121,12 @@ setup :: proc(engine: ^mjolnir.Engine) {
     gltf_nodes := load_gltf(engine, "assets/Warrior.glb") or_else {}
     fmt.printfln("Loaded GLTF nodes: %v", gltf_nodes)
     for armature in gltf_nodes {
-      armature_ptr := resource.get(&engine.nodes, armature)
+      armature_ptr := resource.get(engine.scene.nodes, armature)
       if armature_ptr == nil || len(armature_ptr.children) == 0 {
         continue
       }
       skeleton := armature_ptr.children[len(armature_ptr.children) - 1]
-      skeleton_ptr := resource.get(&engine.nodes, skeleton)
+      skeleton_ptr := resource.get(engine.scene.nodes, skeleton)
       if skeleton_ptr == nil {
         continue
       }
@@ -151,30 +150,28 @@ setup :: proc(engine: ^mjolnir.Engine) {
     if should_make_spot_light {
       spot_angle := math.PI / 1.2
       light_handles[i], light = spawn_spot_light(
-        engine,
+        &engine.scene,
         color,
         f32(spot_angle),
         4.0,
       )
     } else {
-      light_handles[i], light = spawn_point_light(engine, color, 20.0)
+      light_handles[i], light = spawn_point_light(&engine.scene, color, 20.0)
     }
     light.transform.position = {0, 2, -2}
     light.transform.rotation = linalg.quaternion_angle_axis(
       math.PI * 0.45,
       linalg.VECTOR3F32_X_AXIS,
     )
-    light_cube_handle, light_cube_node := spawn(engine)
+    light.transform.is_dirty = true
+    light_cube_handle, light_cube_node := spawn(&engine.scene)
     light_cube_handles[i] = light_cube_handle
-    attach(&engine.nodes, light_handles[i], light_cube_handles[i])
-    light_cube_node.attachment = NodeStaticMeshAttachment {
-      cube_mesh_handle,
-      false,
-    }
+    attach(engine.scene.nodes, light_handles[i], light_cube_handles[i])
+    light_cube_node.attachment = StaticMeshAttachment{cube_mesh_handle, false}
     light_cube_node.transform.scale = {0.1, 0.1, 0.1}
+    light_cube_node.transform.is_dirty = true
   }
-  spawn_directional_light(engine, {0.3, 0.3, 0.3, 1.0})
-
+  spawn_directional_light(&engine.scene, {0.3, 0.3, 0.3, 1.0})
 }
 
 update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
@@ -189,7 +186,7 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
     offset := f32(i) / f32(LIGHT_COUNT) * math.PI * 2.0
     t := time_since_app_start(engine) + offset
     // fmt.printfln("getting light %d %v", i, light_handles[i])
-    light_ptr := resource.get(&engine.nodes, handle)
+    light_ptr := resource.get(engine.scene.nodes, handle)
     if light_ptr == nil {continue}
     rx := math.sin(t)
     ry := (math.sin(t) + 1.0) * 0.5 * 1.5 + 1.0
@@ -199,7 +196,7 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
     light_ptr.transform.position = v * radius + linalg.VECTOR3F32_Y_AXIS * -1.0
     // fmt.printfln("Light %d position: %v", i, light_ptr.transform.position)
     light_ptr.transform.is_dirty = true
-    light_cube_ptr := resource.get(&engine.nodes, light_cube_handles[i])
+    light_cube_ptr := resource.get(engine.scene.nodes, light_cube_handles[i])
     if light_cube_ptr == nil {
       continue
     }
@@ -215,27 +212,27 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
 on_key_pressed :: proc(engine: ^mjolnir.Engine, key, action, mods: int) {
   fmt.printfln("key pressed key %d action %d mods %x", key, action, mods)
   if key == glfw.KEY_LEFT && action == glfw.PRESS {
-    light := resource.get(&engine.nodes, light_handles[0])
+    light := resource.get(engine.scene.nodes, light_handles[0])
     light.transform.position.x += 0.1
     light.transform.is_dirty = true
   } else if key == glfw.KEY_RIGHT && action == glfw.PRESS {
-    light := resource.get(&engine.nodes, light_handles[0])
+    light := resource.get(engine.scene.nodes, light_handles[0])
     light.transform.position.x -= 0.1
     light.transform.is_dirty = true
   } else if key == glfw.KEY_UP && action == glfw.PRESS {
-    light := resource.get(&engine.nodes, light_handles[0])
+    light := resource.get(engine.scene.nodes, light_handles[0])
     light.transform.position.z += 0.1
     light.transform.is_dirty = true
   } else if key == glfw.KEY_DOWN && action == glfw.PRESS {
-    light := resource.get(&engine.nodes, light_handles[0])
+    light := resource.get(engine.scene.nodes, light_handles[0])
     light.transform.position.z -= 0.1
     light.transform.is_dirty = true
   } else if key == glfw.KEY_Z && action == glfw.PRESS {
-    light := resource.get(&engine.nodes, light_handles[0])
+    light := resource.get(engine.scene.nodes, light_handles[0])
     light.transform.position.y += 0.1
     light.transform.is_dirty = true
   } else if key == glfw.KEY_X && action == glfw.PRESS {
-    light := resource.get(&engine.nodes, light_handles[0])
+    light := resource.get(engine.scene.nodes, light_handles[0])
     light.transform.position.y -= 0.1
     light.transform.is_dirty = true
   }

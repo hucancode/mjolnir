@@ -93,32 +93,25 @@ F32_MIN :: -3.40282347E+38
 F32_MAX :: 3.40282347E+38
 
 Aabb :: struct {
-  min: linalg.Vector4f32,
-  max: linalg.Vector4f32,
+  min: linalg.Vector3f32,
+  max: linalg.Vector3f32,
 }
 
-aabb_from_vertices :: proc(vertices: []Vertex) -> Aabb {
-  bounds := Aabb {
-      min = {F32_MAX, F32_MAX, F32_MAX, F32_MAX},
-      max = {F32_MIN, F32_MIN, F32_MIN, F32_MIN},
-    }
-  if len(vertices) == 0 {
-    bounds.min = {0, 0, 0, 1}
-    bounds.max = {0, 0, 0, 1}
-    return bounds
-  }
+AABB_UNDEFINED := Aabb {
+  min = {F32_MAX, F32_MAX, F32_MAX},
+  max = {F32_MIN, F32_MIN, F32_MIN},
+}
 
+aabb_from_vertices :: proc(vertices: []Vertex) -> (ret: Aabb) {
+  ret = AABB_UNDEFINED
   for vertex in vertices {
-    v_pos4 := linalg.Vector4f32 {
-      vertex.position[0],
-      vertex.position[1],
-      vertex.position[2],
-      1.0,
-    }
-    bounds.min = linalg.min(bounds.min, v_pos4)
-    bounds.max = linalg.max(bounds.max, v_pos4)
+    ret.min = linalg.min(ret.min, vertex.position)
+    ret.max = linalg.max(ret.max, vertex.position)
   }
-  return bounds
+  if len(vertices) == 0 {
+    ret.min, ret.max = {0, 0, 0}, {0, 0, 0}
+  }
+  return ret
 }
 
 
@@ -239,8 +232,8 @@ make_cube :: proc(color: [4]f32 = {1.0, 1.0, 1.0, 1.0}) -> (ret: Geometry) {
   }
   copy_slice(ret.indices, indices[:])
   ret.aabb = {
-    min = {-1, -1, -1, 1},
-    max = {1, 1, 1, 1},
+    min = {-1, -1, -1},
+    max = {1, 1, 1},
   }
   return
 }
@@ -284,8 +277,8 @@ make_quad :: proc(color: [4]f32 = {1.0, 1.0, 1.0, 1.0}) -> (ret: Geometry) {
   copy_slice(ret.indices, local_indices[:])
 
   ret.aabb = Aabb {
-    min = {0, -0.0001, 0, 1},
-    max = {1, 0.0001, 1, 1},
+    min = {0, -0.0001, 0},
+    max = {1, 0.0001, 1},
   }
   return
 }

@@ -273,14 +273,14 @@ create_material :: proc(
     &fallbacks,
   ) or_return
 
-  albedo := resource.get(&engine.textures, albedo_handle)
+  albedo := resource.get(engine.textures, albedo_handle)
   metallic_roughness := resource.get(
-    &engine.textures,
+    engine.textures,
     metallic_roughness_handle,
   )
-  normal := resource.get(&engine.textures, normal_handle)
-  displacement := resource.get(&engine.textures, displacement_handle)
-  emissive := resource.get(&engine.textures, emissive_handle)
+  normal := resource.get(engine.textures, normal_handle)
+  displacement := resource.get(engine.textures, displacement_handle)
+  emissive := resource.get(engine.textures, emissive_handle)
   material_update_textures(
     mat,
     albedo,
@@ -310,7 +310,7 @@ create_unlit_material :: proc(
   mat.albedo_handle = albedo_handle
   mat.albedo_value = albedo_value
   material_init_descriptor_set_layout(mat, &engine.ctx) or_return
-  albedo := resource.get(&engine.textures, albedo_handle)
+  albedo := resource.get(engine.textures, albedo_handle)
   fallbacks := MaterialFallbacks {
     albedo = mat.albedo_value,
   }

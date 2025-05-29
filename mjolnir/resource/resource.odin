@@ -21,7 +21,7 @@ pool_init :: proc(pool: ^Pool($T)) {
   pool.free_indices = make([dynamic]u32, 0, 0)
 }
 
-pool_deinit :: proc(pool: ^Pool($T), deinit_proc: proc(_: ^T)) {
+pool_deinit :: proc(pool: Pool($T), deinit_proc: proc(_: ^T)) {
   for &entry in pool.entries {
     if entry.active {
       deinit_proc(&entry.item)
@@ -69,7 +69,7 @@ free :: proc(pool: ^Pool($T), handle: Handle) {
   append(&pool.free_indices, handle.index)
 }
 
-get :: proc(pool: ^Pool($T), handle: Handle) -> ^T {
+get :: proc(pool: Pool($T), handle: Handle) -> ^T {
   if handle.index >= u32(len(pool.entries)) {
     // log.debugf("ResourcePool.get: index (%v) out of bounds (%v)", handle.index, len(pool.entries))
     return nil
