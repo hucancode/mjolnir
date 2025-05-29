@@ -85,7 +85,7 @@ frustum_test_sphere :: proc(
 // transform_aabb transforms an AABB by a given matrix.
 aabb_transform :: proc(
   aabb: Aabb,
-  transform_matrix: ^linalg.Matrix4f32,
+  transform_matrix: linalg.Matrix4f32,
 ) -> (ret: Aabb) {
   min_p := aabb.min
   max_p := aabb.max
@@ -103,7 +103,7 @@ aabb_transform :: proc(
   ret = AABB_UNDEFINED
 
   for corner in corners {
-    transformed_corner := transform_matrix^ * corner
+    transformed_corner := transform_matrix * corner
     ret.min = linalg.min(ret.min, transformed_corner.xyz)
     ret.max = linalg.max(ret.max, transformed_corner.xyz)
   }

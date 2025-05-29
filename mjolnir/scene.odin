@@ -55,7 +55,6 @@ Node :: struct {
 
 SceneTraversalCallback :: #type proc(
   node: ^Node,
-  world_matrix: ^linalg.Matrix4f32,
   cb_context: rawptr,
 ) -> bool
 
@@ -297,7 +296,6 @@ traverse_scene :: proc(
     if callback != nil {
       if !callback(
         current_node,
-        &current_node.transform.world_matrix,
         cb_context,
       ) {
         continue

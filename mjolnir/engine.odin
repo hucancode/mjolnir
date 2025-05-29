@@ -331,7 +331,6 @@ engine_build_renderer :: proc(engine: ^Engine) -> vk.Result {
 
 prepare_light :: proc(
   node: ^Node,
-  world_matrix: ^linalg.Matrix4f32,
   cb_context: rawptr,
 ) -> bool {
   ctx := (^CollectLightsContext)(cb_context)
@@ -342,14 +341,14 @@ prepare_light :: proc(
     uniform.color = data.color
     uniform.radius = data.radius
     uniform.has_shadow = b32(data.cast_shadow)
-    uniform.position = world_matrix^ * linalg.Vector4f32{0, 0, 0, 1}
+    uniform.position = node.transform.world_matrix * linalg.Vector4f32{0, 0, 0, 1}
     push_light(ctx.light_uniform, uniform)
   case DirectionalLightAttachment:
     uniform.kind = .DIRECTIONAL
     uniform.color = data.color
     uniform.has_shadow = b32(data.cast_shadow)
-    uniform.position = world_matrix^ * linalg.Vector4f32{0, 0, 0, 1}
-    uniform.direction = world_matrix^ * linalg.Vector4f32{0, 0, 1, 0} // Assuming +Z is forward
+    uniform.position = node.transform.world_matrix * linalg.Vector4f32{0, 0, 0, 1}
+    uniform.direction = node.transform.world_matrix * linalg.Vector4f32{0, 0, 1, 0} // Assuming +Z is forward
     push_light(ctx.light_uniform, uniform)
   case SpotLightAttachment:
     uniform.kind = .SPOT
@@ -357,8 +356,8 @@ prepare_light :: proc(
     uniform.radius = data.radius
     uniform.has_shadow = b32(data.cast_shadow)
     uniform.angle = data.angle
-    uniform.position = world_matrix^ * linalg.Vector4f32{0, 0, 0, 1}
-    uniform.direction = world_matrix^ * linalg.Vector4f32{0, 0, 1, 0}
+    uniform.position = node.transform.world_matrix * linalg.Vector4f32{0, 0, 0, 1}
+    uniform.direction = node.transform.world_matrix * linalg.Vector4f32{0, 0, 1, 0}
     push_light(ctx.light_uniform, uniform)
   }
   return true
@@ -366,7 +365,6 @@ prepare_light :: proc(
 
 render_single_node :: proc(
   node: ^Node,
-  world_matrix: ^linalg.Matrix4f32,
   cb_context: rawptr,
 ) -> bool {
   ctx := (^RenderMeshesContext)(cb_context)
@@ -378,7 +376,7 @@ render_single_node :: proc(
     if mesh == nil {return true}
     material := resource.get(ctx.engine.materials, mesh.material)
     if material == nil {return true}
-    world_aabb := geometry.aabb_transform(mesh.aabb, world_matrix)
+    world_aabb := geometry.aabb_transform(mesh.aabb, node.transform.world_matrix)
     if !geometry.frustum_test_aabb(&ctx.camera_frustum, world_aabb) {
       return true
     }
@@ -416,7 +414,7 @@ render_single_node :: proc(
       {.VERTEX},
       0,
       size_of(linalg.Matrix4f32),
-      world_matrix,
+      &node.transform.world_matrix,
     )
     offset: vk.DeviceSize = 0
     vk.CmdBindVertexBuffers(
@@ -446,7 +444,7 @@ render_single_node :: proc(
     if mesh == nil {return true}
     material := resource.get(ctx.engine.materials, mesh.material)
     if material == nil {return true}
-    world_aabb := geometry.aabb_transform(mesh.aabb, world_matrix)
+    world_aabb := geometry.aabb_transform(mesh.aabb, node.transform.world_matrix)
     if !geometry.frustum_test_aabb(&ctx.camera_frustum, world_aabb) {
       return true
     }
@@ -478,7 +476,7 @@ render_single_node :: proc(
       {.VERTEX},
       0,
       size_of(linalg.Matrix4f32),
-      world_matrix,
+      &node.transform.world_matrix,
     )
     offset: vk.DeviceSize = 0
     vk.CmdBindVertexBuffers(
@@ -502,7 +500,6 @@ render_single_node :: proc(
 
 render_single_shadow :: proc(
   node: ^Node,
-  world_matrix: ^linalg.Matrix4f32,
   cb_context: rawptr,
 ) -> bool {
   ctx := (^ShadowRenderContext)(cb_context)
@@ -519,7 +516,7 @@ render_single_shadow :: proc(
     mesh_handle := data.handle
     mesh := resource.get(ctx.engine.meshes, mesh_handle)
     if mesh == nil {return true}
-    world_aabb := geometry.aabb_transform(mesh.aabb, world_matrix)
+    world_aabb := geometry.aabb_transform(mesh.aabb, node.transform.world_matrix)
     if !geometry.frustum_test_aabb(&ctx.frustum, world_aabb) {
       return true
     }
@@ -551,7 +548,7 @@ render_single_shadow :: proc(
       {.VERTEX},
       0,
       size_of(linalg.Matrix4f32),
-      world_matrix,
+      &node.transform.world_matrix,
     )
     offset: vk.DeviceSize = 0
     vk.CmdBindVertexBuffers(
@@ -575,7 +572,7 @@ render_single_shadow :: proc(
     }
     mesh := resource.get(ctx.engine.skeletal_meshes, data.handle)
     if mesh == nil {return true}
-    world_aabb := geometry.aabb_transform(mesh.aabb, world_matrix)
+    world_aabb := geometry.aabb_transform(mesh.aabb, node.transform.world_matrix)
     if !geometry.frustum_test_aabb(&ctx.frustum, world_aabb) {
       return true
     }
@@ -609,7 +606,7 @@ render_single_shadow :: proc(
       {.VERTEX},
       0,
       size_of(linalg.Matrix4f32),
-      world_matrix,
+      &node.transform.world_matrix,
     )
     offset: vk.DeviceSize = 0
     vk.CmdBindVertexBuffers(
