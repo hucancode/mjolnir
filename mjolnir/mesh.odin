@@ -45,24 +45,21 @@ mesh_deinit :: proc(self: ^Mesh) {
   if self.index_buffer.buffer != 0 {
     data_buffer_deinit(&self.index_buffer)
   }
-  if self.skinning != nil {
-    skin, ok := &self.skinning.?
-    if skin.skin_buffer.buffer != 0 {
-      data_buffer_deinit(&skin.skin_buffer)
-    }
-    if skin.bones != nil {
-      for &bone in skin.bones {
-        bone_deinit(&bone)
-      }
-      delete(skin.bones)
-    }
-    if skin.animations != nil {
-      for &anim_clip in skin.animations {
-        // deinit_clip(&anim_clip)
-      }
-      delete(skin.animations)
-    }
+  skin, has_skin := &self.skinning.?
+  if !has_skin {
+    return
   }
+  if skin.skin_buffer.buffer != 0 {
+    data_buffer_deinit(&skin.skin_buffer)
+  }
+  for &bone in skin.bones {
+    bone_deinit(&bone)
+  }
+  delete(skin.bones)
+  for &clip in skin.animations {
+    animation.clip_deinit(&clip)
+  }
+  delete(skin.animations)
 }
 
 mesh_init :: proc(
@@ -158,7 +155,7 @@ calculate_animation_transform :: proc(
 ) {
   skin, has_skin := &self.skinning.?
   if !has_skin {
-      return
+    return
   }
   if anim_instance.status == .STOPPED ||
      anim_instance.clip_handle >= u32(len(skin.animations)) {
