@@ -7,6 +7,7 @@ import "core:slice"
 import "core:time"
 import "geometry"
 import "resource"
+import glfw "vendor:glfw"
 import mu "vendor:microui"
 import vk "vendor:vulkan"
 
@@ -199,7 +200,33 @@ Renderer :: struct {
   current_frame_index:        u32,
 }
 
-renderer_init :: proc(self: ^Renderer) -> vk.Result {
+renderer_init :: proc(
+  self: ^Renderer,
+  window: glfw.WindowHandle,
+) -> vk.Result {
+  indices := find_queue_families(g_physical_device, g_surface) or_return
+
+  support := query_swapchain_support(g_physical_device, g_surface) or_return
+  defer swapchain_support_deinit(&support)
+
+  fb_width, fb_height := glfw.GetFramebufferSize(window)
+
+  renderer_build_swapchain(
+    self,
+    support.capabilities,
+    support.formats,
+    support.present_modes,
+    indices.graphics_family,
+    indices.present_family,
+    u32(fb_width),
+    u32(fb_height),
+  ) or_return
+  renderer_build_command_buffers(self) or_return
+  renderer_build_synchronizers(self) or_return
+  self.depth_buffer = create_depth_image(
+    self.extent.width,
+    self.extent.height,
+  ) or_return
   self.current_frame_index = 0
   for &frame in self.frames {
     frame_init(&frame) or_return
@@ -1145,7 +1172,8 @@ render_shadow_pass :: proc(
         view = linalg.matrix4_look_at(
           light.position.xyz,
           light.position.xyz + light.direction.xyz,
-          linalg.VECTOR3F32_X_AXIS, // TODO: hardcoding up vector will not work if the light is perfectly aligned with said vector
+          linalg.VECTOR3F32_X_AXIS,
+          // TODO: hardcoding up vector will not work if the light is perfectly aligned with said vector
         )
         proj = linalg.matrix4_perspective(light.angle, 1.0, 0.01, light.radius)
       }

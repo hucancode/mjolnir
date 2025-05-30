@@ -212,37 +212,12 @@ init :: proc(
 }
 
 engine_build_renderer :: proc(engine: ^Engine) -> vk.Result {
-  renderer_init(&engine.renderer) or_return
-  indices := find_queue_families(g_physical_device, g_surface) or_return
-
-  support := query_swapchain_support(g_physical_device, g_surface) or_return
-  defer swapchain_support_deinit(&support)
-
-  fb_width, fb_height := glfw.GetFramebufferSize(engine.window)
-
-  renderer_build_swapchain(
-    &engine.renderer,
-    support.capabilities,
-    support.formats,
-    support.present_modes,
-    indices.graphics_family,
-    indices.present_family,
-    u32(fb_width),
-    u32(fb_height),
-  ) or_return
-  renderer_build_command_buffers(&engine.renderer) or_return
-  renderer_build_synchronizers(&engine.renderer) or_return
-
-  engine.renderer.depth_buffer = create_depth_image(
-    engine.renderer.extent.width,
-    engine.renderer.extent.height,
-  ) or_return
+  renderer_init(&engine.renderer, engine.window) or_return
   engine.renderer.environment_map_handle, engine.renderer.environment_map =
     create_hdr_texture_from_path(
       engine,
       "assets/teutonic_castle_moat_4k.hdr",
     ) or_return
-
   alloc_info_env := vk.DescriptorSetAllocateInfo {
       sType              = .DESCRIPTOR_SET_ALLOCATE_INFO,
       descriptorPool     = g_descriptor_pool,
@@ -254,7 +229,6 @@ engine_build_renderer :: proc(engine: ^Engine) -> vk.Result {
     &alloc_info_env,
     &engine.renderer.environment_descriptor_set,
   ) or_return
-
   env_image_info := vk.DescriptorImageInfo {
       sampler     = engine.renderer.environment_map.sampler,
       imageView   = engine.renderer.environment_map.buffer.view,
@@ -269,7 +243,6 @@ engine_build_renderer :: proc(engine: ^Engine) -> vk.Result {
       pImageInfo      = &env_image_info,
     }
   vk.UpdateDescriptorSets(g_device, 1, &env_write, 0, nil)
-
   return .SUCCESS
 }
 
