@@ -204,23 +204,7 @@ renderer_init :: proc(
   self: ^Renderer,
   window: glfw.WindowHandle,
 ) -> vk.Result {
-  indices := find_queue_families(g_physical_device, g_surface) or_return
-
-  support := query_swapchain_support(g_physical_device, g_surface) or_return
-  defer swapchain_support_deinit(&support)
-
-  fb_width, fb_height := glfw.GetFramebufferSize(window)
-
-  renderer_build_swapchain(
-    self,
-    support.capabilities,
-    support.formats,
-    support.present_modes,
-    indices.graphics_family,
-    indices.present_family,
-    u32(fb_width),
-    u32(fb_height),
-  ) or_return
+  renderer_create_swapchain(self, window) or_return
   renderer_build_command_buffers(self) or_return
   renderer_build_synchronizers(self) or_return
   self.depth_buffer = create_depth_image(
@@ -236,7 +220,7 @@ renderer_init :: proc(
 
 renderer_deinit :: proc(self: ^Renderer) {
   vk.DeviceWaitIdle(g_device)
-  renderer_destroy_swapchain_resources(self)
+  renderer_destroy_swapchain(self)
   for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
     frame_deinit(&self.frames[i])
   }
@@ -268,7 +252,6 @@ renderer_build_synchronizers :: proc(self: ^Renderer) -> vk.Result {
     sType = .FENCE_CREATE_INFO,
     flags = {.SIGNALED},
   }
-
   for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
     frame := &self.frames[i]
     vk.CreateSemaphore(
@@ -288,135 +271,77 @@ renderer_build_synchronizers :: proc(self: ^Renderer) -> vk.Result {
   return .SUCCESS
 }
 
-renderer_pick_swap_present_mode :: proc(
-  present_modes: []vk.PresentModeKHR,
-) -> vk.PresentModeKHR {
-  _, found := slice.linear_search(present_modes, vk.PresentModeKHR.MAILBOX)
-  return .MAILBOX if found else .FIFO
-}
-
-renderer_build_swapchain_surface_format :: proc(
-  self: ^Renderer,
-  formats: []vk.SurfaceFormatKHR,
-) {
-  if len(formats) == 0 {
-    // This should not happen if the physical device supports the surface
-    fmt.printfln("No surface formats available for swapchain.")
-    self.format = {
-      format     = .B8G8R8A8_SRGB,
-      colorSpace = .SRGB_NONLINEAR,
-    }
-  } else {
-    i, found := slice.linear_search_proc(
-      formats,
-      proc(fmt: vk.SurfaceFormatKHR) -> bool {
-        return fmt.format == .B8G8R8A8_SRGB
-      },
-    )
-    self.format = formats[i if found else 0]
-  }
-}
-
-renderer_build_swapchain_extent :: proc(
-  self: ^Renderer,
-  capabilities: vk.SurfaceCapabilitiesKHR,
-  actual_width, actual_height: u32,
-) {
-  if capabilities.currentExtent.width != math.max(u32) {
-    self.extent = capabilities.currentExtent
-  } else {
-    self.extent.width = math.clamp(
-      actual_width,
-      capabilities.minImageExtent.width,
-      capabilities.maxImageExtent.width,
-    )
-    self.extent.height = math.clamp(
-      actual_height,
-      capabilities.minImageExtent.height,
-      capabilities.maxImageExtent.height,
-    )
-  }
-}
-
 renderer_recreate_swapchain :: proc(
   self: ^Renderer,
-  width: u32,
-  height: u32,
+  window: glfw.WindowHandle,
 ) -> vk.Result {
   vk.DeviceWaitIdle(g_device)
-  renderer_destroy_swapchain_resources(self) // Destroy old swapchain and related resources
-  // Re-query surface capabilities as they might have changed (e.g. window resize)
-  capabilities: vk.SurfaceCapabilitiesKHR
-  vk.GetPhysicalDeviceSurfaceCapabilitiesKHR(
-    g_physical_device,
-    g_surface,
-    &capabilities,
-  ) or_return
-  // Re-query surface formats (usually don't change, but good practice)
-  format_count: u32
-  vk.GetPhysicalDeviceSurfaceFormatsKHR(
-    g_physical_device,
-    g_surface,
-    &format_count,
-    nil,
-  )
-  available_formats := make([]vk.SurfaceFormatKHR, format_count)
-  defer delete(available_formats)
-  vk.GetPhysicalDeviceSurfaceFormatsKHR(
-    g_physical_device,
-    g_surface,
-    &format_count,
-    raw_data(available_formats),
-  )
-  // Re-query present modes
-  present_mode_count: u32
-  vk.GetPhysicalDeviceSurfacePresentModesKHR(
-    g_physical_device,
-    g_surface,
-    &present_mode_count,
-    nil,
-  )
-  available_present_modes := make([]vk.PresentModeKHR, present_mode_count)
-  defer delete(available_present_modes)
-  vk.GetPhysicalDeviceSurfacePresentModesKHR(
-    g_physical_device,
-    g_surface,
-    &present_mode_count,
-    raw_data(available_present_modes),
-  )
-
-  return renderer_create_swapchain_and_resources(
-    self,
-    capabilities,
-    available_formats,
-    available_present_modes,
-    width,
-    height,
-  )
+  renderer_destroy_swapchain(self)
+  renderer_create_swapchain(self, window) or_return
+  return .SUCCESS
 }
 
-renderer_create_swapchain_and_resources :: proc(
+renderer_create_swapchain :: proc(
   self: ^Renderer,
-  capabilities: vk.SurfaceCapabilitiesKHR,
-  formats: []vk.SurfaceFormatKHR,
-  present_modes: []vk.PresentModeKHR,
-  window_width: u32,
-  window_height: u32,
+  window: glfw.WindowHandle,
 ) -> vk.Result {
-  renderer_build_swapchain_surface_format(self, formats)
-  renderer_build_swapchain_extent(
-    self,
-    capabilities,
-    window_width,
-    window_height,
-  )
-
-  image_count := capabilities.minImageCount + 1
-  if capabilities.maxImageCount > 0 &&
-     image_count > capabilities.maxImageCount {
-    image_count = capabilities.maxImageCount
+  pick_swap_present_mode :: proc(
+    present_modes: []vk.PresentModeKHR,
+  ) -> vk.PresentModeKHR {
+    _, found := slice.linear_search(present_modes, vk.PresentModeKHR.MAILBOX)
+    return .MAILBOX if found else .FIFO
   }
-
+  pick_swapchain_format :: proc(
+    formats: []vk.SurfaceFormatKHR,
+  ) -> vk.SurfaceFormatKHR {
+    if len(formats) == 0 {
+      // This should not happen if the physical device supports the surface
+      fmt.printfln("No surface formats available for swapchain.")
+      return {format = .B8G8R8A8_SRGB, colorSpace = .SRGB_NONLINEAR}
+    } else {
+      i, found := slice.linear_search_proc(
+        formats,
+        proc(fmt: vk.SurfaceFormatKHR) -> bool {
+          return fmt.format == .B8G8R8A8_SRGB
+        },
+      )
+      return formats[i if found else 0]
+    }
+  }
+  pick_swapchain_extent :: proc(
+    capabilities: vk.SurfaceCapabilitiesKHR,
+    actual_width, actual_height: u32,
+  ) -> vk.Extent2D {
+    if capabilities.currentExtent.width != math.max(u32) {
+      return capabilities.currentExtent
+    }
+    return {
+      math.clamp(
+        actual_width,
+        capabilities.minImageExtent.width,
+        capabilities.maxImageExtent.width,
+      ),
+      math.clamp(
+        actual_height,
+        capabilities.minImageExtent.height,
+        capabilities.maxImageExtent.height,
+      ),
+    }
+  }
+  width, height := glfw.GetFramebufferSize(window)
+  support := query_swapchain_support(g_physical_device, g_surface) or_return
+  defer swapchain_support_deinit(&support)
+  self.format = pick_swapchain_format(support.formats)
+  self.extent = pick_swapchain_extent(
+    support.capabilities,
+    u32(width),
+    u32(height),
+  )
+  image_count := support.capabilities.minImageCount + 1
+  if support.capabilities.maxImageCount > 0 &&
+     image_count > support.capabilities.maxImageCount {
+    image_count = support.capabilities.maxImageCount
+  }
   create_info := vk.SwapchainCreateInfoKHR {
     sType            = .SWAPCHAIN_CREATE_INFO_KHR,
     surface          = g_surface,
@@ -426,12 +351,12 @@ renderer_create_swapchain_and_resources :: proc(
     imageExtent      = self.extent,
     imageArrayLayers = 1,
     imageUsage       = {.COLOR_ATTACHMENT},
-    preTransform     = capabilities.currentTransform,
+    preTransform     = support.capabilities.currentTransform,
     compositeAlpha   = {.OPAQUE},
-    presentMode      = renderer_pick_swap_present_mode(present_modes),
+    presentMode      = pick_swap_present_mode(support.present_modes),
     clipped          = true,
+    oldSwapchain     = self.swapchain,
   }
-
   queue_family_indices := [2]u32{g_graphics_family, g_present_family}
   if g_graphics_family != g_present_family {
     create_info.imageSharingMode = .CONCURRENT
@@ -440,7 +365,6 @@ renderer_create_swapchain_and_resources :: proc(
   } else {
     create_info.imageSharingMode = .EXCLUSIVE
   }
-
   vk.CreateSwapchainKHR(g_device, &create_info, nil, &self.swapchain) or_return
   swapchain_image_count: u32
   vk.GetSwapchainImagesKHR(
@@ -473,17 +397,15 @@ renderer_create_swapchain_and_resources :: proc(
     {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
     {.DEVICE_LOCAL},
   ) or_return
-
   self.depth_buffer.view = create_image_view(
     self.depth_buffer.image,
     self.depth_buffer.format,
     {.DEPTH},
   ) or_return
-
   return .SUCCESS
 }
 
-renderer_destroy_swapchain_resources :: proc(self: ^Renderer) {
+renderer_destroy_swapchain :: proc(self: ^Renderer) {
   image_buffer_deinit(&self.depth_buffer)
   if self.views != nil {
     for view in self.views {
@@ -494,7 +416,6 @@ renderer_destroy_swapchain_resources :: proc(self: ^Renderer) {
     delete(self.views)
     self.views = nil
   }
-
   if self.images != nil {
     delete(self.images)
     self.images = nil
@@ -523,7 +444,6 @@ renderer_get_command_buffer :: proc(self: ^Renderer) -> vk.CommandBuffer {
     fmt.eprintln("Error: Renderer is nil in get_command_buffer_renderer")
     return vk.CommandBuffer{}
   }
-
   if self.current_frame_index >= len(self.frames) {
     fmt.eprintln(
       "Error: Invalid frame index",
@@ -533,7 +453,6 @@ renderer_get_command_buffer :: proc(self: ^Renderer) -> vk.CommandBuffer {
     )
     return vk.CommandBuffer{}
   }
-
   cmd_buffer := self.frames[self.current_frame_index].command_buffer
   if cmd_buffer == nil {
     fmt.eprintln(
@@ -542,128 +461,47 @@ renderer_get_command_buffer :: proc(self: ^Renderer) -> vk.CommandBuffer {
     )
     return vk.CommandBuffer{}
   }
-
   return cmd_buffer
 }
 
 renderer_get_camera_uniform :: proc(self: ^Renderer) -> ^DataBuffer {
   return &self.frames[self.current_frame_index].camera_uniform
 }
+
 renderer_get_light_uniform :: proc(self: ^Renderer) -> ^DataBuffer {
   return &self.frames[self.current_frame_index].light_uniform
 }
+
 renderer_get_shadow_map :: proc(
   self: ^Renderer,
   light_idx: int,
 ) -> ^DepthTexture {
   return &self.frames[self.current_frame_index].shadow_maps[light_idx]
 }
+
 renderer_get_cube_shadow_map :: proc(
   self: ^Renderer,
   light_idx: int,
 ) -> ^CubeDepthTexture {
   return &self.frames[self.current_frame_index].cube_shadow_maps[light_idx]
 }
+
 renderer_get_camera_descriptor_set :: proc(
   self: ^Renderer,
 ) -> vk.DescriptorSet {
   return self.frames[self.current_frame_index].camera_descriptor_set
 }
+
 renderer_get_shadow_map_descriptor_set :: proc(
   self: ^Renderer,
 ) -> vk.DescriptorSet {
   return self.frames[self.current_frame_index].shadow_map_descriptor_set
 }
+
 renderer_get_cube_shadow_map_descriptor_set :: proc(
   self: ^Renderer,
 ) -> vk.DescriptorSet {
   return self.frames[self.current_frame_index].cube_shadow_map_descriptor_set
-}
-
-renderer_build_swapchain :: proc(
-  self: ^Renderer,
-  capabilities: vk.SurfaceCapabilitiesKHR,
-  formats: []vk.SurfaceFormatKHR,
-  present_modes: []vk.PresentModeKHR,
-  graphics_family: u32,
-  present_family: u32,
-  actual_width: u32,
-  actual_height: u32,
-) -> vk.Result {
-  chosen_format := formats[0]
-  for fmt in formats {
-    if fmt.format == .B8G8R8A8_SRGB && fmt.colorSpace == .SRGB_NONLINEAR {
-      chosen_format = fmt
-      break
-    }
-  }
-  self.format = chosen_format
-  chosen_present_mode: vk.PresentModeKHR = .FIFO
-  for mode in present_modes {
-    if mode == .MAILBOX {
-      chosen_present_mode = .MAILBOX
-      break
-    }
-  }
-  renderer_build_swapchain_extent(
-    self,
-    capabilities,
-    actual_width,
-    actual_height,
-  )
-  image_count := capabilities.minImageCount + 1
-  if capabilities.maxImageCount > 0 &&
-     image_count > capabilities.maxImageCount {
-    image_count = capabilities.maxImageCount
-  }
-  create_info := vk.SwapchainCreateInfoKHR {
-    sType            = .SWAPCHAIN_CREATE_INFO_KHR,
-    surface          = g_surface,
-    minImageCount    = image_count,
-    imageFormat      = self.format.format,
-    imageColorSpace  = self.format.colorSpace,
-    imageExtent      = self.extent,
-    imageArrayLayers = 1,
-    imageUsage       = {.COLOR_ATTACHMENT},
-    preTransform     = capabilities.currentTransform,
-    compositeAlpha   = {.OPAQUE},
-    presentMode      = chosen_present_mode,
-    clipped          = true,
-    oldSwapchain     = 0,
-  }
-  queue_family_indices := [?]u32{graphics_family, present_family}
-  if graphics_family != present_family {
-    create_info.imageSharingMode = .CONCURRENT
-    create_info.queueFamilyIndexCount = len(queue_family_indices)
-    create_info.pQueueFamilyIndices = raw_data(queue_family_indices[:])
-  } else {
-    create_info.imageSharingMode = .EXCLUSIVE
-  }
-  vk.CreateSwapchainKHR(g_device, &create_info, nil, &self.swapchain) or_return
-  swapchain_image_count: u32
-  vk.GetSwapchainImagesKHR(
-    g_device,
-    self.swapchain,
-    &swapchain_image_count,
-    nil,
-  )
-  self.images = make([]vk.Image, swapchain_image_count)
-  vk.GetSwapchainImagesKHR(
-    g_device,
-    self.swapchain,
-    &swapchain_image_count,
-    raw_data(self.images),
-  )
-  self.views = make([]vk.ImageView, swapchain_image_count)
-  for i in 0 ..< swapchain_image_count {
-    self.views[i], _ = create_image_view(
-      self.images[i],
-      self.format.format,
-      {.COLOR},
-    )
-  }
-  fmt.printfln("Swapchain created with format:", self.format.format)
-  return .SUCCESS
 }
 
 prepare_light :: proc(node: ^Node, cb_context: rawptr) -> bool {
@@ -1384,35 +1222,5 @@ render_main_pass :: proc(
     )
     mu.label(&engine.ui.ctx, fmt.tprintf("Rendered %d", rendered_count))
   }
-  return .SUCCESS
-}
-
-engine_recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
-  vk.DeviceWaitIdle(g_device)
-  indices := find_queue_families(g_physical_device, g_surface) or_return
-  support := query_swapchain_support(g_physical_device, g_surface) or_return
-  renderer_build_swapchain(
-    &engine.renderer,
-    support.capabilities,
-    support.formats,
-    support.present_modes,
-    indices.graphics_family,
-    indices.present_family,
-    engine.renderer.extent.width,
-    engine.renderer.extent.height,
-  ) or_return
-  engine.renderer.depth_buffer = create_depth_image(
-    engine.renderer.extent.width,
-    engine.renderer.extent.height,
-  ) or_return
-  if engine.renderer.extent.width > 0 && engine.renderer.extent.height > 0 {
-    w := f32(engine.renderer.extent.width)
-    h := f32(engine.renderer.extent.height)
-    #partial switch &proj in engine.scene.camera.projection {
-    case geometry.PerspectiveProjection:
-      proj.aspect_ratio = w / h
-    }
-  }
-  fmt.println("Swapchain recreated")
   return .SUCCESS
 }

@@ -150,7 +150,7 @@ init :: proc(
   build_3d_unlit_pipelines(.B8G8R8A8_SRGB, .D32_SFLOAT) or_return
   build_shadow_pipelines(.D32_SFLOAT) or_return
   init_scene(&engine.scene)
-  engine_build_renderer(engine) or_return
+  build_renderer(engine) or_return
   if engine.renderer.extent.width > 0 && engine.renderer.extent.height > 0 {
     w := f32(engine.renderer.extent.width)
     h := f32(engine.renderer.extent.height)
@@ -211,7 +211,7 @@ init :: proc(
   return .SUCCESS
 }
 
-engine_build_renderer :: proc(engine: ^Engine) -> vk.Result {
+build_renderer :: proc(engine: ^Engine) -> vk.Result {
   renderer_init(&engine.renderer, engine.window) or_return
   engine.renderer.environment_map_handle, engine.renderer.environment_map =
     create_hdr_texture_from_path(
@@ -229,18 +229,17 @@ engine_build_renderer :: proc(engine: ^Engine) -> vk.Result {
     &alloc_info_env,
     &engine.renderer.environment_descriptor_set,
   ) or_return
-  env_image_info := vk.DescriptorImageInfo {
-      sampler     = engine.renderer.environment_map.sampler,
-      imageView   = engine.renderer.environment_map.buffer.view,
-      imageLayout = .SHADER_READ_ONLY_OPTIMAL,
-    }
   env_write := vk.WriteDescriptorSet {
       sType           = .WRITE_DESCRIPTOR_SET,
       dstSet          = engine.renderer.environment_descriptor_set,
       dstBinding      = 0,
       descriptorType  = .COMBINED_IMAGE_SAMPLER,
       descriptorCount = 1,
-      pImageInfo      = &env_image_info,
+      pImageInfo      = &vk.DescriptorImageInfo {
+        sampler = engine.renderer.environment_map.sampler,
+        imageView = engine.renderer.environment_map.buffer.view,
+        imageLayout = .SHADER_READ_ONLY_OPTIMAL,
+      },
     }
   vk.UpdateDescriptorSets(g_device, 1, &env_write, 0, nil)
   return .SUCCESS
@@ -358,7 +357,7 @@ run :: proc(engine: ^Engine, width: u32, height: u32, title: string) {
     }
     res := render(engine)
     if res == .ERROR_OUT_OF_DATE_KHR || res == .SUBOPTIMAL_KHR {
-      engine_recreate_swapchain(engine)
+      renderer_recreate_swapchain(&engine.renderer, engine.window)
     } else if res != .SUCCESS {
       fmt.eprintln("Error during rendering")
     }
