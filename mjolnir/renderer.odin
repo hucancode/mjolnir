@@ -204,30 +204,7 @@ renderer_init :: proc(
   self: ^Renderer,
   window: glfw.WindowHandle,
 ) -> vk.Result {
-  renderer_create_swapchain(self, window) or_return
-  renderer_build_command_buffers(self) or_return
-  renderer_build_synchronizers(self) or_return
-  self.depth_buffer = create_depth_image(
-    self.extent.width,
-    self.extent.height,
-  ) or_return
-  self.current_frame_index = 0
-  for &frame in self.frames {
-    frame_init(&frame) or_return
-  }
-  return .SUCCESS
-}
-
-renderer_deinit :: proc(self: ^Renderer) {
-  vk.DeviceWaitIdle(g_device)
-  renderer_destroy_swapchain(self)
-  for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
-    frame_deinit(&self.frames[i])
-  }
-  vk.DestroyDescriptorSetLayout(g_device, g_camera_descriptor_set_layout, nil)
-}
-
-renderer_build_command_buffers :: proc(self: ^Renderer) -> vk.Result {
+  create_swapchain(self, window) or_return
   alloc_info := vk.CommandBufferAllocateInfo {
     sType              = .COMMAND_BUFFER_ALLOCATE_INFO,
     commandPool        = g_command_pool,
@@ -241,10 +218,6 @@ renderer_build_command_buffers :: proc(self: ^Renderer) -> vk.Result {
       &self.frames[i].command_buffer,
     ) or_return
   }
-  return .SUCCESS
-}
-
-renderer_build_synchronizers :: proc(self: ^Renderer) -> vk.Result {
   semaphore_info := vk.SemaphoreCreateInfo {
     sType = .SEMAPHORE_CREATE_INFO,
   }
@@ -268,20 +241,38 @@ renderer_build_synchronizers :: proc(self: ^Renderer) -> vk.Result {
     ) or_return
     vk.CreateFence(g_device, &fence_info, nil, &frame.fence) or_return
   }
+  self.depth_buffer = create_depth_image(
+    self.extent.width,
+    self.extent.height,
+  ) or_return
+  self.current_frame_index = 0
+  for &frame in self.frames {
+    frame_init(&frame) or_return
+  }
   return .SUCCESS
 }
 
-renderer_recreate_swapchain :: proc(
+renderer_deinit :: proc(self: ^Renderer) {
+  vk.DeviceWaitIdle(g_device)
+  destroy_swapchain(self)
+  for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
+    frame_deinit(&self.frames[i])
+  }
+  vk.DestroyDescriptorSetLayout(g_device, g_camera_descriptor_set_layout, nil)
+}
+
+recreate_swapchain :: proc(
   self: ^Renderer,
   window: glfw.WindowHandle,
 ) -> vk.Result {
+  fmt.printfln("recreating swapchain...")
   vk.DeviceWaitIdle(g_device)
-  renderer_destroy_swapchain(self)
-  renderer_create_swapchain(self, window) or_return
+  destroy_swapchain(self)
+  create_swapchain(self, window) or_return
   return .SUCCESS
 }
 
-renderer_create_swapchain :: proc(
+create_swapchain :: proc(
   self: ^Renderer,
   window: glfw.WindowHandle,
 ) -> vk.Result {
@@ -355,7 +346,6 @@ renderer_create_swapchain :: proc(
     compositeAlpha   = {.OPAQUE},
     presentMode      = pick_swap_present_mode(support.present_modes),
     clipped          = true,
-    oldSwapchain     = self.swapchain,
   }
   queue_family_indices := [2]u32{g_graphics_family, g_present_family}
   if g_graphics_family != g_present_family {
@@ -405,7 +395,7 @@ renderer_create_swapchain :: proc(
   return .SUCCESS
 }
 
-renderer_destroy_swapchain :: proc(self: ^Renderer) {
+destroy_swapchain :: proc(self: ^Renderer) {
   image_buffer_deinit(&self.depth_buffer)
   if self.views != nil {
     for view in self.views {
@@ -712,11 +702,9 @@ render_single_shadow :: proc(node: ^Node, cb_context: rawptr) -> bool {
   return true
 }
 
-
 render :: proc(engine: ^Engine) -> vk.Result {
   current_fence := renderer_get_in_flight_fence(&engine.renderer)
   vk.WaitForFences(g_device, 1, &current_fence, true, math.max(u64)) or_return
-  vk.ResetFences(g_device, 1, &current_fence) or_return
   image_idx: u32
   current_image_available_semaphore := renderer_get_image_available_semaphore(
     &engine.renderer,
@@ -729,6 +717,7 @@ render :: proc(engine: ^Engine) -> vk.Result {
     0,
     &image_idx,
   ) or_return
+  vk.ResetFences(g_device, 1, &current_fence) or_return
   mu.begin(&engine.ui.ctx)
   command_buffer := renderer_get_command_buffer(&engine.renderer)
   vk.ResetCommandBuffer(command_buffer, {}) or_return

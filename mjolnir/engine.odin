@@ -357,8 +357,10 @@ run :: proc(engine: ^Engine, width: u32, height: u32, title: string) {
     }
     res := render(engine)
     if res == .ERROR_OUT_OF_DATE_KHR || res == .SUBOPTIMAL_KHR {
-      renderer_recreate_swapchain(&engine.renderer, engine.window)
-    } else if res != .SUCCESS {
+      recreate_swapchain(&engine.renderer, engine.window)
+      continue
+    }
+    if res != .SUCCESS {
       fmt.eprintln("Error during rendering")
     }
     engine.last_frame_timestamp = time.now()
