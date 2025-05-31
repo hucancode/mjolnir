@@ -1,7 +1,6 @@
 package mjolnir
 
 import "base:runtime"
-import "core:fmt"
 import "core:log"
 import "core:mem"
 import "core:slice"
@@ -106,15 +105,15 @@ debug_callback :: proc "system" (
   message := string(p_callback_data.pMessage)
   switch {
   case .ERROR in message_severity:
-    fmt.printfln("Validation: %s", message)
+    log.infof("Validation: %s", message)
   case .WARNING in message_severity:
-    fmt.printfln("Validation: %s", message)
+    log.infof("Validation: %s", message)
   case .INFO in message_severity:
-    fmt.printfln("Validation: %s", message)
+    log.infof("Validation: %s", message)
   case .VERBOSE in message_severity:
     log.debugf("Validation: %s", message)
   case:
-    fmt.printfln("Validation (unknown severity): %s", message)
+    log.infof("Validation (unknown severity): %s", message)
   }
   return false
 }
@@ -185,13 +184,13 @@ vulkan_instance_init :: proc() -> vk.Result {
       &g_debug_messenger,
     ) or_return
   }
-  fmt.printfln("Vulkan instance created: %s", app_info.pApplicationName)
+  log.infof("Vulkan instance created: %s", app_info.pApplicationName)
   return .SUCCESS
 }
 
 surface_init :: proc() -> vk.Result {
   glfw.CreateWindowSurface(g_instance, g_window, nil, &g_surface) or_return
-  fmt.printfln("Vulkan surface created")
+  log.infof("Vulkan surface created")
   return .SUCCESS
 }
 
@@ -262,11 +261,11 @@ score_physical_device :: proc(
   vk.GetPhysicalDeviceFeatures(device, &features)
 
   device_name_cstring := cstring(&props.deviceName[0])
-  fmt.printfln("Scoring device %s", device_name_cstring)
+  log.infof("Scoring device %s", device_name_cstring)
 
   when ODIN_OS != .Darwin {
     if !features.geometryShader {
-      fmt.printfln("Device %s: no geometry shader.", device_name_cstring)
+      log.infof("Device %s: no geometry shader.", device_name_cstring)
       return 0, .SUCCESS
     }
   }
@@ -282,12 +281,12 @@ score_physical_device :: proc(
     raw_data(available_extensions),
   ) or_return
 
-  fmt.printfln(
+  log.infof(
     "vulkan: device supports %v extensions",
     len(available_extensions),
   )
   required_loop: for required in DEVICE_EXTENSIONS {
-    fmt.printfln("vulkan: checking for required extension %q", required)
+    log.infof("vulkan: checking for required extension %q", required)
     for &extension in available_extensions {
       extension_name := strings.truncate_to_byte(
         string(extension.extensionName[:]),
@@ -297,19 +296,19 @@ score_physical_device :: proc(
         continue required_loop
       }
     }
-    fmt.printfln(
+    log.infof(
       "vulkan: device does not support required extension",
       required,
     )
     return 0, .NOT_READY
   }
-  fmt.printfln("vulkan: device supports all required extensions")
+  log.infof("vulkan: device supports all required extensions")
 
   support := query_swapchain_support(device, g_surface) or_return
   defer swapchain_support_deinit(&support)
 
   if len(support.formats) == 0 || len(support.present_modes) == 0 {
-    fmt.printfln(
+    log.infof(
       "Device %s: inadequate swapchain support.",
       device_name_cstring,
     )
@@ -318,7 +317,7 @@ score_physical_device :: proc(
 
   _, qf_res := find_queue_families(device, g_surface)
   if qf_res != .SUCCESS {
-    fmt.printfln("Device %s: no suitable queue families.", device_name_cstring)
+    log.infof("Device %s: no suitable queue families.", device_name_cstring)
     return 0, .SUCCESS
   }
 
@@ -335,7 +334,7 @@ score_physical_device :: proc(
   }
   current_score += props.limits.maxImageDimension2D
 
-  fmt.printfln("Device %s scored %d", device_name_cstring, current_score)
+  log.infof("Device %s scored %d", device_name_cstring, current_score)
   return current_score, .SUCCESS
 }
 
@@ -343,10 +342,10 @@ physical_device_init :: proc() -> vk.Result {
   count: u32
   vk.EnumeratePhysicalDevices(g_instance, &count, nil) or_return
   if count == 0 {
-    fmt.printfln("Error: No physical devices found!")
+    log.infof("Error: No physical devices found!")
     return .ERROR_INITIALIZATION_FAILED
   }
-  fmt.printfln("Found %d physical device(s)", count)
+  log.infof("Found %d physical device(s)", count)
 
   devices_slice := make([]vk.PhysicalDevice, count)
   defer delete(devices_slice)
@@ -359,7 +358,7 @@ physical_device_init :: proc() -> vk.Result {
   best_score: u32 = 0
   for device_handle in devices_slice {
     score_val := score_physical_device(device_handle) or_return
-    fmt.printfln(" - Device Score: %d", score_val)
+    log.infof(" - Device Score: %d", score_val)
 
     if score_val > best_score {
       g_physical_device = device_handle
@@ -367,12 +366,12 @@ physical_device_init :: proc() -> vk.Result {
     }
   }
   if best_score == 0 {
-    fmt.printfln("Error: No suitable physical device found!")
+    log.infof("Error: No suitable physical device found!")
     return .ERROR_INITIALIZATION_FAILED
   }
 
   vk.GetPhysicalDeviceProperties(g_physical_device, &g_device_properties)
-  fmt.printfln(
+  log.infof(
     "\nSelected physical device: %s (score %d)",
     cstring(&g_device_properties.deviceName[0]),
     best_score,
@@ -495,13 +494,13 @@ descriptor_pool_init :: proc() -> vk.Result {
     {.UNIFORM_BUFFER_DYNAMIC, 128},
     {.STORAGE_BUFFER, ACTIVE_MATERIAL_COUNT},
   }
-  fmt.printfln("Descriptor pool allocation sizes:")
-  fmt.printfln(" - Combined Image Samplers: %d", MAX_SAMPLER_COUNT)
-  fmt.printfln(
+  log.infof("Descriptor pool allocation sizes:")
+  log.infof(" - Combined Image Samplers: %d", MAX_SAMPLER_COUNT)
+  log.infof(
     " - Uniform Buffers: %d",
     MAX_FRAMES_IN_FLIGHT * SCENE_UNIFORM_COUNT,
   )
-  fmt.printfln(" - Storage Buffers: %d", ACTIVE_MATERIAL_COUNT)
+  log.infof(" - Storage Buffers: %d", ACTIVE_MATERIAL_COUNT)
 
   pool_info := vk.DescriptorPoolCreateInfo {
     sType         = .DESCRIPTOR_POOL_CREATE_INFO,
@@ -510,7 +509,7 @@ descriptor_pool_init :: proc() -> vk.Result {
     maxSets       = MAX_FRAMES_IN_FLIGHT + ACTIVE_MATERIAL_COUNT,
     // flags = {.FREE_DESCRIPTOR_SET} // If needed
   }
-  fmt.printfln("Creating descriptor pool with maxSets: %d", pool_info.maxSets)
+  log.infof("Creating descriptor pool with maxSets: %d", pool_info.maxSets)
 
   result := vk.CreateDescriptorPool(
     g_device,
@@ -519,10 +518,10 @@ descriptor_pool_init :: proc() -> vk.Result {
     &g_descriptor_pool,
   )
   if result != .SUCCESS {
-    fmt.printfln("Failed to create descriptor pool with error: %v", result)
+    log.infof("Failed to create descriptor pool with error: %v", result)
     return result
   }
-  fmt.printfln("Vulkan descriptor pool created successfully")
+  log.infof("Vulkan descriptor pool created successfully")
   return .SUCCESS
 }
 
@@ -533,7 +532,7 @@ command_pool_init :: proc() -> vk.Result {
     queueFamilyIndex = g_graphics_family,
   }
   vk.CreateCommandPool(g_device, &pool_info, nil, &g_command_pool) or_return
-  fmt.printfln("Vulkan command pool created")
+  log.infof("Vulkan command pool created")
   return .SUCCESS
 }
 
@@ -694,10 +693,8 @@ malloc_data_buffer :: proc(
     sharingMode = .EXCLUSIVE,
   }
   vk.CreateBuffer(g_device, &create_info, nil, &data_buf.buffer) or_return
-
   mem_reqs: vk.MemoryRequirements
   vk.GetBufferMemoryRequirements(g_device, data_buf.buffer, &mem_reqs)
-
   data_buf.memory = allocate_vulkan_memory(mem_reqs, mem_properties) or_return
   vk.BindBufferMemory(g_device, data_buf.buffer, data_buf.memory, 0) or_return
   data_buf.size = size
@@ -844,7 +841,7 @@ create_host_visible_buffer :: proc(
     {},
     &buffer.mapped,
   ) or_return
-  fmt.printfln("Init host visible buffer, buffer mapped at %x", buffer.mapped)
+  log.infof("Init host visible buffer, buffer mapped at %x", buffer.mapped)
   if data != nil {
     mem.copy(buffer.mapped, data, int(size))
   }
@@ -882,7 +879,7 @@ copy_buffer :: proc(dst, src: ^DataBuffer) -> vk.Result {
     size      = src.size,
   }
   vk.CmdCopyBuffer(cmd_buffer, src.buffer, dst.buffer, 1, &region)
-  fmt.printfln(
+  log.infof(
     "Copying buffer %x mapped %x to %x",
     src.buffer,
     src.mapped,

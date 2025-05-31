@@ -1,6 +1,6 @@
 package main
 
-import "core:fmt"
+import "core:log"
 import "core:math"
 import linalg "core:math/linalg"
 import mu "vendor:microui"
@@ -92,7 +92,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   }
   if true {
     gltf_nodes := load_gltf(engine, "assets/Suzanne.glb") or_else {}
-    fmt.printfln("Loaded GLTF nodes: %v", gltf_nodes)
+    log.infof("Loaded GLTF nodes: %v", gltf_nodes)
     for handle in gltf_nodes {
       duck := resource.get(engine.scene.nodes, handle)
       if duck == nil {
@@ -103,7 +103,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   }
   if true {
     gltf_nodes := load_gltf(engine, "assets/DamagedHelmet.glb") or_else {}
-    fmt.printfln("Loaded GLTF nodes: %v", gltf_nodes)
+    log.infof("Loaded GLTF nodes: %v", gltf_nodes)
     for handle in gltf_nodes {
       helm := resource.get(engine.scene.nodes, handle)
       if helm == nil {
@@ -115,7 +115,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   }
   if true {
     gltf_nodes := load_gltf(engine, "assets/Warrior.glb") or_else {}
-    fmt.printfln("Loaded GLTF nodes: %v", gltf_nodes)
+    log.infof("Loaded GLTF nodes: %v", gltf_nodes)
     for armature in gltf_nodes {
       armature_ptr := resource.get(engine.scene.nodes, armature)
       if armature_ptr == nil || len(armature_ptr.children) == 0 {
@@ -189,7 +189,7 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
     }
     offset := f32(i) / f32(LIGHT_COUNT) * math.PI * 2.0
     t := time_since_app_start(engine) + offset
-    // fmt.printfln("getting light %d %v", i, light_handles[i])
+    // log.infof("getting light %d %v", i, light_handles[i])
     light_ptr := resource.get(engine.scene.nodes, handle)
     if light_ptr == nil {
       continue
@@ -201,7 +201,7 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
     radius: f32 = 4
     v = v * radius + linalg.VECTOR3F32_Y_AXIS * -1.0
     translate(&light_ptr.transform, v.x, v.y, v.z)
-    // fmt.printfln("Light %d position: %v", i, light_ptr.transform.position)
+    // log.infof("Light %d position: %v", i, light_ptr.transform.position)
     light_cube_ptr := resource.get(engine.scene.nodes, light_cube_handles[i])
     if light_cube_ptr == nil {
       continue
@@ -210,13 +210,13 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
       &light_cube_ptr.transform,
       math.PI * time_since_app_start(engine) * 0.5,
     )
-    // fmt.printfln( "Light cube %d rotation: %v", i, light_cube_ptr.transform.rotation,)
+    // log.infof( "Light cube %d rotation: %v", i, light_cube_ptr.transform.rotation,)
   }
 }
 
 on_key_pressed :: proc(engine: ^mjolnir.Engine, key, action, mods: int) {
   using mjolnir, geometry
-  fmt.printfln("key pressed key %d action %d mods %x", key, action, mods)
+  log.infof("key pressed key %d action %d mods %x", key, action, mods)
   if key == glfw.KEY_LEFT && action == glfw.PRESS {
     light := resource.get(engine.scene.nodes, light_handles[0])
     translate_by(&light.transform, x = 0.1)

@@ -1,6 +1,6 @@
 package mjolnir
 
-import "core:fmt"
+import "core:log"
 import linalg "core:math/linalg"
 import "geometry"
 import "resource"
@@ -351,7 +351,7 @@ build_3d_pipelines :: proc(
         pSpecializationInfo = &spec_infos[mask],
       },
     }
-    fmt.printfln(
+    log.infof(
       "Creating pipeline for features: %v with config %v with vertex input %v",
       features,
       configs[mask],
@@ -507,7 +507,7 @@ build_3d_unlit_pipelines :: proc(
         pSpecializationInfo = &spec_infos[mask],
       },
     }
-    fmt.printfln(
+    log.infof(
       "Creating unlit pipeline for features: %v with config %v with vertex input %v",
       features,
       configs[mask],

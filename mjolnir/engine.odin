@@ -2,7 +2,7 @@ package mjolnir
 
 import "base:runtime"
 import "core:c"
-import "core:fmt"
+import "core:log"
 import "core:math"
 import "core:slice"
 import "core:strings"
@@ -103,11 +103,11 @@ init :: proc(
 
   // glfw.SetErrorCallback(glfw_error_callback) // Define this callback
   if !glfw.Init() {
-    fmt.eprintln("Failed to initialize GLFW")
+    log.errorf("Failed to initialize GLFW")
     return .ERROR_INITIALIZATION_FAILED
   }
   if !glfw.VulkanSupported() {
-    fmt.eprintln("GLFW: Vulkan Not Supported")
+    log.errorf("GLFW: Vulkan Not Supported")
     return .ERROR_INITIALIZATION_FAILED
   }
   glfw.WindowHint(glfw.CLIENT_API, glfw.NO_API)
@@ -119,10 +119,10 @@ init :: proc(
     nil,
   )
   if engine.window == nil {
-    fmt.eprintln("Failed to create GLFW window")
+    log.errorf("Failed to create GLFW window")
     return .ERROR_INITIALIZATION_FAILED
   }
-  fmt.printf("Window created %v\n", engine.window)
+  log.infof("Window created %v\n", engine.window)
 
   vulkan_context_init(engine.window) or_return
 
@@ -130,21 +130,21 @@ init :: proc(
   engine.last_frame_timestamp = engine.start_timestamp
   engine.last_update_timestamp = engine.start_timestamp
 
-  fmt.println("\nInitializing Resource Pools...")
+  log.infof("\nInitializing Resource Pools...")
 
-  fmt.print("Initializing mesh pool... ")
+  log.infof("Initializing mesh pool... ")
   resource.pool_init(&engine.meshes)
-  fmt.println("done")
+  log.infof("done")
 
-  fmt.print("Initializing materials pool... ")
+  log.infof("Initializing materials pool... ")
   resource.pool_init(&engine.materials)
-  fmt.println("done")
+  log.infof("done")
 
-  fmt.print("Initializing textures pool... ")
+  log.infof("Initializing textures pool... ")
   resource.pool_init(&engine.textures)
-  fmt.println("done")
+  log.infof("done")
 
-  fmt.println("All resource pools initialized successfully")
+  log.infof("All resource pools initialized successfully")
 
   build_3d_pipelines(.B8G8R8A8_SRGB, .D32_SFLOAT) or_return
   build_3d_unlit_pipelines(.B8G8R8A8_SRGB, .D32_SFLOAT) or_return
@@ -207,7 +207,7 @@ init :: proc(
     engine.setup_proc(engine)
   }
 
-  fmt.println("Engine initialized")
+  log.infof("Engine initialized")
   return .SUCCESS
 }
 
@@ -362,7 +362,7 @@ deinit :: proc(engine: ^Engine) {
   vulkan_context_deinit()
   glfw.DestroyWindow(engine.window)
   glfw.Terminate()
-  fmt.println("Engine deinitialized")
+  log.infof("Engine deinitialized")
 }
 
 run :: proc(engine: ^Engine, width: u32, height: u32, title: string) {
@@ -382,7 +382,7 @@ run :: proc(engine: ^Engine, width: u32, height: u32, title: string) {
       continue
     }
     if res != .SUCCESS {
-      fmt.eprintln("Error during rendering")
+      log.errorf("Error during rendering")
     }
     engine.last_frame_timestamp = time.now()
     // break

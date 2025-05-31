@@ -1,6 +1,6 @@
 package animation
 
-import "core:fmt"
+import "core:log"
 import "core:math"
 import linalg "core:math/linalg"
 import "core:mem"
@@ -108,7 +108,7 @@ instance_update :: proc(instance: ^Instance, delta_time: f32) {
       instance.time + instance.duration,
       instance.duration,
     )
-  // fmt.printfln("animation_instance_update: time +%f = %f", effective_delta_time, instance.time)
+  // log.infof("animation_instance_update: time +%f = %f", effective_delta_time, instance.time)
   case .ONCE:
     instance.time += effective_delta_time
     instance.time = math.mod_f32(

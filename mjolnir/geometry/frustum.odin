@@ -1,6 +1,6 @@
 package geometry
 
-import "core:fmt"
+import "core:log"
 import linalg "core:math/linalg"
 
 // Plane is represented as a linalg.Vector4f32 {A, B, C, D}
@@ -37,7 +37,7 @@ make_frustum :: proc(view_projection_matrix: linalg.Matrix4f32) -> Frustum {
       plane /= mag
     }
   }
-  // fmt.printfln("Make frustum with: %v, m0 %v, m1 %v, m2 %v, m3 %v -> %v", m, m[0], m[1], m[2], m[3], planes)
+  // log.infof("Make frustum with: %v, m0 %v, m1 %v, m2 %v, m3 %v -> %v", m, m[0], m[1], m[2], m[3], planes)
   return Frustum{planes}
 }
 

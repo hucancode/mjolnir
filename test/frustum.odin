@@ -1,7 +1,6 @@
 package tests
 
 import "../mjolnir/geometry"
-import "core:fmt"
 import "core:math"
 import linalg "core:math/linalg"
 import "core:testing"

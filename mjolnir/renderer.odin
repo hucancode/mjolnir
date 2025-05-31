@@ -1,5 +1,6 @@
 package mjolnir
 
+import "core:log"
 import "core:fmt"
 import "core:math"
 import linalg "core:math/linalg"
@@ -286,7 +287,7 @@ create_swapchain :: proc(
   ) -> vk.SurfaceFormatKHR {
     ret := vk.SurfaceFormatKHR{.B8G8R8A8_SRGB, .SRGB_NONLINEAR}
     if len(formats) == 0 {
-      fmt.printfln("No surface formats available for swapchain.")
+      log.infof("No surface formats available for swapchain.")
       return ret
     }
     return ret if slice.contains(formats, ret) else formats[0]
@@ -414,11 +415,11 @@ renderer_get_render_finished_semaphore :: proc(
 }
 renderer_get_command_buffer :: proc(self: ^Renderer) -> vk.CommandBuffer {
   if self == nil {
-    fmt.eprintln("Error: Renderer is nil in get_command_buffer_renderer")
+    log.errorf("Error: Renderer is nil in get_command_buffer_renderer")
     return vk.CommandBuffer{}
   }
   if self.current_frame_index >= len(self.frames) {
-    fmt.eprintln(
+    log.errorf(
       "Error: Invalid frame index",
       self.current_frame_index,
       "vs",
@@ -428,7 +429,7 @@ renderer_get_command_buffer :: proc(self: ^Renderer) -> vk.CommandBuffer {
   }
   cmd_buffer := self.frames[self.current_frame_index].command_buffer
   if cmd_buffer == nil {
-    fmt.eprintln(
+    log.errorf(
       "Error: Command buffer is nil for frame",
       self.current_frame_index,
     )
@@ -723,10 +724,10 @@ render :: proc(engine: ^Engine) -> vk.Result {
     light_uniform = &light_uniform,
   }
   if !traverse_scene(&engine.scene, &collect_ctx, prepare_light) {
-    fmt.eprintln("[RENDER] Error during light collection")
+    log.errorf("[RENDER] Error during light collection")
   }
   render_shadow_pass(engine, &light_uniform, command_buffer) or_return
-  // fmt.printfln("============ rendering main pass =============")
+  // log.infof("============ rendering main pass =============")
   render_main_pass(engine, command_buffer, image_idx, camera_frustum) or_return
   data_buffer_write(
     renderer_get_camera_uniform(&engine.renderer),
@@ -808,7 +809,7 @@ render_shadow_pass :: proc(
   light_uniform: ^SceneLightUniform,
   command_buffer: vk.CommandBuffer,
 ) -> vk.Result {
-  // fmt.printfln("============ rendering shadow pass =============")
+  // log.infof("============ rendering shadow pass =============")
   for i := 0; i < int(light_uniform.light_count); i += 1 {
     cube_shadow := renderer_get_cube_shadow_map(&engine.renderer, i)
     shadow_map_texture := renderer_get_shadow_map(&engine.renderer, i)
@@ -1182,7 +1183,7 @@ render_main_pass :: proc(
     rendered_count = &rendered_count,
   }
   if !traverse_scene(&engine.scene, &render_meshes_ctx, render_single_node) {
-    fmt.eprintln("[RENDER] Error during scene mesh rendering")
+    log.errorf("[RENDER] Error during scene mesh rendering")
   }
   if mu.window(&engine.ui.ctx, "Inspector", {40, 40, 300, 150}, {.NO_CLOSE}) {
     mu.label(

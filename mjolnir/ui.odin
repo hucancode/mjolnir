@@ -1,7 +1,7 @@
 package mjolnir
 
 import intr "base:intrinsics"
-import "core:fmt"
+import "core:log"
 import linalg "core:math/linalg"
 import mu "vendor:microui"
 import vk "vendor:vulkan"
@@ -43,9 +43,9 @@ ui_init :: proc(
   ui.ctx.text_height = mu.default_atlas_text_height
   ui.frame_width = width
   ui.frame_height = height
-  fmt.printfln("init UI pipeline...")
+  log.infof("init UI pipeline...")
   pipeline2d_init(&ui.pipeline, color_format) or_return
-  fmt.printfln("init UI texture...")
+  log.infof("init UI texture...")
   _, texture := create_texture_from_pixels(
     engine,
     mu.default_atlas_alpha[:],
@@ -55,12 +55,12 @@ ui_init :: proc(
     .R8_UNORM,
   ) or_return
   ui.atlas = texture^
-  fmt.printfln("init UI vertex buffer...")
+  log.infof("init UI vertex buffer...")
   ui.vertex_buffer = create_host_visible_buffer(
     size_of(Vertex2D) * vk.DeviceSize(UI_MAX_VERTICES),
     {.VERTEX_BUFFER},
   ) or_return
-  fmt.printfln("init UI indices buffer...")
+  log.infof("init UI indices buffer...")
   ui.index_buffer = create_host_visible_buffer(
     size_of(u32) * vk.DeviceSize(UI_MAX_INDICES),
     {.INDEX_BUFFER},
@@ -72,7 +72,7 @@ ui_init :: proc(
     imageLayout = .SHADER_READ_ONLY_OPTIMAL,
   }
   ortho := linalg.matrix_ortho3d(0, f32(width), f32(height), 0, -1, 1)
-  fmt.printfln("init UI proj buffer...")
+  log.infof("init UI proj buffer...")
   ui.proj_buffer = create_host_visible_buffer(
     size_of(linalg.Matrix4f32),
     {.UNIFORM_BUFFER},
@@ -103,14 +103,14 @@ ui_init :: proc(
     },
   }
   vk.UpdateDescriptorSets(g_device, len(writes), raw_data(writes[:]), 0, nil)
-  fmt.printfln("done init UI")
+  log.infof("done init UI")
   return .SUCCESS
 }
 
 ui_render :: proc(ui: ^UIRenderer, cmd_buf: vk.CommandBuffer) {
   command_backing: ^mu.Command
   for variant in mu.next_command_iterator(&ui.ctx, &command_backing) {
-    // fmt.printfln("executing UI command", variant)
+    // log.infof("executing UI command", variant)
     switch cmd in variant {
     case ^mu.Command_Text:
       ui_draw_text(ui, cmd_buf, cmd.str, cmd.pos, cmd.color)

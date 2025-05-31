@@ -1,5 +1,6 @@
 package mjolnir
 
+import "core:log"
 import "core:fmt"
 import "core:mem"
 import "core:os"
@@ -98,7 +99,7 @@ load_gltf :: proc(
     // Attach mesh if present
     if gltf_node.mesh != nil {
       if gltf_node.skin != nil {
-        fmt.printfln("Loading skinned mesh %s", string(gltf_node.name))
+        log.infof("Loading skinned mesh %s", string(gltf_node.name))
         mesh_handle, mesh := resource.alloc(&engine.meshes)
         data, bones, material, root_bone_idx, res :=
           load_gltf_skinned_primitive(
@@ -115,27 +116,27 @@ load_gltf :: proc(
           skinning.root_bone_index = root_bone_idx
           bone_buffers: [MAX_FRAMES_IN_FLIGHT]DataBuffer
           buffer_size := size_of(linalg.Matrix4f32) * vk.DeviceSize(len(bones))
-          for &buffer in bone_buffers do buffer, _ = create_host_visible_buffer(
-            buffer_size,
-            {.STORAGE_BUFFER},
-          )
+          for &buffer in bone_buffers do buffer, _ = create_host_visible_buffer(buffer_size, {.STORAGE_BUFFER})
           node.attachment = MeshAttachment {
             handle = mesh_handle,
             material = material,
             skinning = NodeSkinning{bone_buffers = bone_buffers},
           }
           // set bind pose (otherwise zeroed out matrices will cause model to be invisible)
-          for i in 0..<len(bones) {
-              for &buffer in bone_buffers {
-                  mapped := slice.from_ptr(cast(^linalg.Matrix4f32)buffer.mapped, len(bones))
-                  mapped[i] = linalg.MATRIX4F32_IDENTITY
-              }
+          for buffer in bone_buffers {
+            slice.fill(
+              slice.from_ptr(
+                cast(^linalg.Matrix4f32)buffer.mapped,
+                len(bones),
+              ),
+              linalg.MATRIX4F32_IDENTITY,
+            )
           }
           load_gltf_animations(engine, gltf_data, gltf_node.skin, mesh_handle)
         }
       } else {
-        fmt.printfln("Loading static mesh %s", string(gltf_node.name))
-        fmt.printfln("Processing static mesh data...")
+        log.infof("Loading static mesh %s", string(gltf_node.name))
+        log.infof("Processing static mesh data...")
         mesh_data, mat_handle, res := load_gltf_primitive(
           engine,
           path,
@@ -143,25 +144,25 @@ load_gltf :: proc(
           gltf_node.mesh,
         )
         if res != .SUCCESS {
-          fmt.eprintln("Failed to process GLTF primitive:", res)
+          log.errorf("Failed to process GLTF primitive:", res)
           continue
         }
-        fmt.printfln(
+        log.infof(
           "Initializing static mesh with %d vertices, %d indices",
           len(mesh_data.vertices),
           len(mesh_data.indices),
         )
         mesh_handle, _, ret := create_mesh(engine, mesh_data)
         if ret != .SUCCESS {
-          fmt.eprintln("Failed to create static mesh:", ret)
+          log.errorf("Failed to create static mesh:", ret)
           continue
         }
         node.attachment = MeshAttachment {
           handle      = mesh_handle,
-          material = mat_handle,
+          material    = mat_handle,
           cast_shadow = true,
         }
-        fmt.printfln(
+        log.infof(
           "Static mesh loaded successfully with material %v",
           mat_handle,
         )
@@ -204,7 +205,7 @@ load_gltf_texture :: proc(
     ok: bool
     pixel_data, ok = os.read_entire_file(texture_path_str)
     if !ok {
-      fmt.eprintf("Failed to read texture file '%s'\n", texture_path_str)
+      log.errorf("Failed to read texture file '%s'\n", texture_path_str)
       ret = .ERROR_UNKNOWN
       return
     }
@@ -218,7 +219,7 @@ load_gltf_texture :: proc(
     ret = .ERROR_UNKNOWN
     return
   }
-  fmt.printfln("Creating texture from %d bytes", len(pixel_data))
+  log.infof("Creating texture from %d bytes", len(pixel_data))
   tex_handle, texture = create_texture_from_data(engine, pixel_data) or_return
   delete(pixel_data)
   ret = .SUCCESS
@@ -265,7 +266,7 @@ load_gltf_pbr_textures :: proc(
           ok: bool
           pixel_data, ok = os.read_entire_file(texture_path_str)
           if !ok {
-            fmt.eprintf(
+            log.errorf(
               "Failed to read metallic-roughness texture file '%s'\n",
               texture_path_str,
             )
@@ -350,10 +351,10 @@ load_gltf_primitive :: proc(
   )
   vertices_num := primitive.attributes[0].data.count
   vertices := make([]geometry.Vertex, vertices_num)
-  for &attribute in primitive.attributes {
+  for attribute in primitive.attributes {
     accessor := attribute.data
     if accessor.count != vertices_num {
-      fmt.eprintf(
+      log.errorf(
         "Warning: Attribute '%v' count (%d) does not match position count (%d)\n",
         attribute.type,
         accessor.count,
@@ -396,7 +397,7 @@ load_gltf_primitive :: proc(
       primitive.indices.count,
     )
     if read != primitive.indices.count {
-      fmt.eprintf(
+      log.errorf(
         "Failed to read indices from GLTF primitive. read %d, need %d\n",
         read,
         primitive.indices.count,
@@ -432,7 +433,7 @@ load_gltf_skinned_primitive :: proc(
     return
   }
   primitive := &primitives[0]
-  fmt.printfln("Creating texture for skinned material...")
+  log.infof("Creating texture for skinned material...")
   albedo_handle, metallic_roughness_handle, normal_handle, displacement_handle, emissive_handle, features :=
     load_gltf_pbr_textures(
       engine,
@@ -449,7 +450,7 @@ load_gltf_skinned_primitive :: proc(
     displacement_handle,
     emissive_handle,
   ) or_return
-  fmt.printfln(
+  log.infof(
     "Creating skinned material with PBR textures %v/%v/%v/%v/%v -> %v",
     albedo_handle,
     metallic_roughness_handle,
@@ -466,7 +467,7 @@ load_gltf_skinned_primitive :: proc(
     attribute := &attributes[attr_idx]
     accessor := attribute.data
     if accessor.count != num_vertices {
-      fmt.eprintf(
+      log.errorf(
         "Warning: Skinned attribute '%v' count (%d) does not match position count (%d)\n",
         attribute.type,
         accessor.count,
@@ -498,7 +499,7 @@ load_gltf_skinned_primitive :: proc(
         }
       }
     case .joints:
-      // fmt.printfln("Loading joints with accessor %v", accessor)
+      // log.infof("Loading joints with accessor %v", accessor)
       if attribute.index == 0 {
         n := accessor.count
         for i in 0 ..< min(int(n), len(vertices)) {
@@ -509,7 +510,7 @@ load_gltf_skinned_primitive :: proc(
             len(skinnings[i].joints),
           )
           if !read {
-            fmt.eprintf("Failed to read joints from GLTF primitive.\n")
+            log.errorf("Failed to read joints from GLTF primitive.\n")
           }
         }
       }
@@ -526,7 +527,7 @@ load_gltf_skinned_primitive :: proc(
       }
     }
   }
-  // fmt.printfln("Joints %v", vertices[len(vertices)-20:])
+  // log.infof("Joints %v", vertices[len(vertices)-20:])
   indices: []u32
   if primitive.indices != nil {
     indices = make([]u32, primitive.indices.count)
@@ -537,7 +538,7 @@ load_gltf_skinned_primitive :: proc(
       primitive.indices.count,
     )
     if read != primitive.indices.count {
-      fmt.eprintf(
+      log.errorf(
         "Failed to read indices from GLTF primitive. read %d, need %d\n",
         read,
         primitive.indices.count,
@@ -596,7 +597,7 @@ load_gltf_skinned_primitive :: proc(
     }
   }
   if !found_root && len(engine_bones) > 0 {
-    fmt.eprintf(
+    log.errorf(
       "Warning: Could not determine unique root bone for skin, using index 0.\n",
     )
   }
@@ -623,14 +624,14 @@ load_gltf_animations :: proc(
   skinning := &mesh.skinning.?
   skinning.animations = make([]animation.Clip, len(gltf_data.animations))
 
-  for &gltf_anim, i in gltf_data.animations {
+  for gltf_anim, i in gltf_data.animations {
     clip := &skinning.animations[i]
     if gltf_anim.name != nil {
       clip.name = strings.clone_from_cstring(gltf_anim.name)
     } else {
       clip.name = strings.clone(fmt.tprintf("animation_%d", i))
     }
-    fmt.printfln(
+    log.infof(
       "\nAllocating animation channels for %d bones",
       len(skinning.bones),
     )
@@ -653,7 +654,7 @@ load_gltf_animations :: proc(
       time_data := unpack_accessor_floats_flat(gltf_channel.sampler.input)
       // defer free(time_data)
       max_time = max(max_time, slice.max(time_data))
-      fmt.printfln(
+      log.infof(
         "Bone animation %s %v: keyframe count %d",
         string(gltf_channel.target_node.name),
         gltf_channel.target_path,
@@ -685,10 +686,6 @@ load_gltf_animations :: proc(
             ),
           }
         }
-        if gltf_channel.target_node.name == "Skeleton_arm_joint_L__4_" ||
-        gltf_channel.target_node.name == "Skeleton_arm_joint_R" {
-            fmt.printfln("rotation of %s is %v", gltf_channel.target_node.name, engine_channel.rotations)
-        }
       case .scale:
         engine_channel.scales = make(type_of(engine_channel.scales), n)
         values := unpack_accessor_floats_flat(gltf_channel.sampler.output)
@@ -700,13 +697,13 @@ load_gltf_animations :: proc(
           }
         }
       case .weights:
-        fmt.printfln("Weights not handled for bone animation here")
+        log.infof("Weights not handled for bone animation here")
       case .invalid:
-        fmt.printfln("Invalid animation channel type")
+        log.infof("Invalid animation channel type")
       }
     }
     clip.duration = max_time
-    // fmt.printfln("Animation %s duration: %f", clip.name, clip.duration, clip.channels)
+    // log.infof("Animation %s duration: %f", clip.name, clip.duration, clip.channels)
   }
   return true
 }

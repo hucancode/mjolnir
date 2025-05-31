@@ -1,7 +1,7 @@
 package mjolnir
 
 import "animation"
-import "core:fmt"
+import "core:log"
 import "core:math"
 import linalg "core:math/linalg"
 import "core:slice"
@@ -201,9 +201,9 @@ init_scene :: proc(s: ^Scene) {
     0.01, // near
     100.0, // far
   )
-  fmt.print("Initializing nodes pool... ")
+  log.infof("Initializing nodes pool... ")
   resource.pool_init(&s.nodes)
-  fmt.println("done")
+  log.infof("done")
   root: ^Node
   s.root, root = resource.alloc(&s.nodes)
   init_node(root, "root")
@@ -247,7 +247,7 @@ traverse_scene :: proc(
     parent_is_dirty := pop(&dirty_stack)
     current_node := resource.get(scene.nodes, current_node_handle)
     if current_node == nil {
-      fmt.eprintf(
+      log.errorf(
         "traverse_scene: Node with handle %v not found\n",
         current_node_handle,
       )

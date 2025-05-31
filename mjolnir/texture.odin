@@ -1,7 +1,7 @@
 package mjolnir
 
 import "core:c"
-import "core:fmt"
+import "core:log"
 import "core:mem"
 import "core:slice"
 import "core:strings"
@@ -48,7 +48,7 @@ create_texture_from_data :: proc(
   handle, texture = resource.alloc(&engine.textures)
   read_texture_data(texture, data) or_return
   texture_init(texture) or_return
-  fmt.printfln(
+  log.infof(
     "created texture %d x %d -> id %d",
     texture.image_data.width,
     texture.image_data.height,
@@ -77,7 +77,7 @@ create_texture_from_pixels :: proc(
   texture.image_data.channels_in_file = channel
   texture.image_data.actual_channels = channel
   texture_init(texture, format) or_return
-  fmt.printfln(
+  log.infof(
     "created texture %d x %d -> id %d",
     texture.image_data.width,
     texture.image_data.height,
@@ -99,7 +99,7 @@ read_texture_data :: proc(self: ^Texture, data: []u8) -> vk.Result {
     actual_channels,
   )
   if pixels_ptr == nil {
-    fmt.eprintf(
+    log.errorf(
       "Failed to load texture from data: %s\n",
       stbi.failure_reason(),
     )
@@ -112,7 +112,7 @@ read_texture_data :: proc(self: ^Texture, data: []u8) -> vk.Result {
   self.image_data.channels_in_file = int(c_in_file)
   self.image_data.actual_channels = int(actual_channels)
   self.image_data.is_data_owned = true
-  fmt.printfln("loaded image %d x %d", w, h)
+  log.infof("loaded image %d x %d", w, h)
   return .SUCCESS
 }
 
@@ -138,7 +138,7 @@ read_texture :: proc(self: ^Texture, path: string) -> vk.Result {
   actual_channels: c.int = 4
   pixels_ptr := stbi.load(path_cstr, &w, &h, &c_in_file, actual_channels)
   if pixels_ptr == nil {
-    fmt.eprintf(
+    log.errorf(
       "Failed to load texture from path '%s': %s\n",
       path,
       stbi.failure_reason(),
@@ -152,7 +152,7 @@ read_texture :: proc(self: ^Texture, path: string) -> vk.Result {
   self.image_data.channels_in_file = int(c_in_file)
   self.image_data.actual_channels = int(actual_channels)
   self.image_data.is_data_owned = true
-  fmt.printfln("loaded texture %d x %d", w, h)
+  log.infof("loaded texture %d x %d", w, h)
   return .SUCCESS
 }
 
@@ -463,7 +463,7 @@ create_hdr_texture_from_path :: proc(
   w, h, c_in_file: c.int
   float_pixels_ptr := stbi.loadf(path_cstr, &w, &h, &c_in_file, 4) // force RGBA
   if float_pixels_ptr == nil {
-    fmt.eprintf(
+    log.errorf(
       "Failed to load HDR texture from path '%s': %s\n",
       path,
       stbi.failure_reason(),
@@ -478,7 +478,7 @@ create_hdr_texture_from_path :: proc(
   texture.image_data.channels_in_file = 3
   texture.image_data.actual_channels = 4
   texture_init(texture, .R32G32B32A32_SFLOAT) or_return
-  fmt.printfln(
+  log.infof(
     "created HDR texture %d x %d -> id %d",
     w,
     h,
