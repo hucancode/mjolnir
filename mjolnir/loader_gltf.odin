@@ -572,22 +572,6 @@ load_gltf_skinned_primitive :: proc(
     } else {
       engine_bones[i].inverse_bind_matrix = linalg.MATRIX4F32_IDENTITY
     }
-    bt := geometry.TRANSFORM_IDENTITY
-    if joint_node.has_translation {
-      bt.position = joint_node.translation
-    }
-    if joint_node.has_rotation {
-      bt.rotation = quaternion(
-        x = joint_node.rotation[0],
-        y = joint_node.rotation[1],
-        z = joint_node.rotation[2],
-        w = joint_node.rotation[3],
-      )
-    }
-    if joint_node.has_scale {
-      bt.scale = joint_node.scale
-    }
-    engine_bones[i].bind_transform = bt
   }
   for joint_node, i in gltf_skin.joints {
     engine_bones[i].children = make([]u32, len(joint_node.children))

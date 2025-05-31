@@ -192,7 +192,7 @@ material_update_bone_buffer :: proc(
   size: vk.DeviceSize,
   frame: u32,
 ) {
-  if self.texture_descriptor_set == 0 {
+  if self.skinning_descriptor_sets[frame] == 0 {
     return
   }
   buffer_info := vk.DescriptorBufferInfo {

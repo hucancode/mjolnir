@@ -7,7 +7,6 @@ import "geometry"
 import vk "vendor:vulkan"
 
 Bone :: struct {
-  bind_transform:      geometry.Transform,
   children:            []u32,
   inverse_bind_matrix: linalg.Matrix4f32,
   name:                string,
@@ -150,8 +149,6 @@ sample_clip :: proc(
     if entry.bone < u32(len(clip.channels)) {
       local_transform.position, local_transform.rotation, local_transform.scale =
         animation.channel_sample(clip.channels[entry.bone], t)
-    } else {
-      local_transform = bone.bind_transform
     }
     local_matrix := linalg.matrix4_from_trs(
       local_transform.position,
