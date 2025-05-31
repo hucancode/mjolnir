@@ -113,9 +113,7 @@ load_gltf :: proc(
           skinning, _ := &mesh.skinning.?
           skinning.bones = bones
           skinning.root_bone_index = root_bone_idx
-          pose: animation.Pose
           bone_buffers: [MAX_FRAMES_IN_FLIGHT]DataBuffer
-          animation.pose_init(&pose, len(bones))
           buffer_size := size_of(linalg.Matrix4f32) * vk.DeviceSize(len(bones))
           for &buffer in bone_buffers do buffer, _ = create_host_visible_buffer(
             buffer_size,
@@ -124,14 +122,9 @@ load_gltf :: proc(
           node.attachment = MeshAttachment {
             handle = mesh_handle,
             material = material,
-            skinning = NodeSkinning{bone_buffers = bone_buffers, pose = pose},
+            skinning = NodeSkinning{bone_buffers = bone_buffers},
           }
           load_gltf_animations(engine, gltf_data, gltf_node.skin, mesh_handle)
-          // fmt.printfln("Skinned mesh loaded successfully with %d animation %v", len(mesh.animations), mesh.animations)
-          for bone_idx := 0; bone_idx < len(bones); bone_idx += 1 {
-            pose.bone_matrices[bone_idx] = linalg.MATRIX4F32_IDENTITY
-          }
-          for &buffer in bone_buffers do animation.pose_flush(&pose, buffer.mapped)
         }
       } else {
         fmt.printfln("Loading static mesh %s", string(gltf_node.name))

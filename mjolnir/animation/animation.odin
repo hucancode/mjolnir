@@ -50,28 +50,6 @@ PlayMode :: enum {
   PING_PONG,
 }
 
-Pose :: struct {
-  bone_matrices: []linalg.Matrix4f32,
-}
-
-pose_init :: proc(pose: ^Pose, joints_count: int) {
-  fmt.printfln("init_pose: joints_count %d", joints_count)
-  pose.bone_matrices = make(type_of(pose.bone_matrices), joints_count)
-}
-
-pose_deinit :: proc(pose: ^Pose) {
-  delete(pose.bone_matrices)
-  pose.bone_matrices = nil
-}
-
-pose_flush :: proc(pose: ^Pose, destination: rawptr) {
-  if pose.bone_matrices == nil {
-    return
-  }
-  size := size_of(linalg.Matrix4f32) * vk.DeviceSize(len(pose.bone_matrices))
-  mem.copy(destination, raw_data(pose.bone_matrices), int(size))
-}
-
 Instance :: struct {
   clip_handle: u32,
   mode:        PlayMode,

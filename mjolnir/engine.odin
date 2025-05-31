@@ -4,6 +4,7 @@ import "base:runtime"
 import "core:c"
 import "core:fmt"
 import "core:math"
+import "core:slice"
 import "core:strings"
 import "core:time"
 
@@ -279,10 +280,15 @@ update :: proc(engine: ^Engine) -> bool {
     if mesh == nil {
       continue
     }
-    sample_clip(mesh, anim_inst.clip_handle, anim_inst.time, skinning.pose.bone_matrices)
+    mesh_skin, mesh_has_skin := mesh.skinning.?
+    if !mesh_has_skin {
+        continue
+    }
     frame := engine.renderer.current_frame_index
     buffer := skinning.bone_buffers[frame]
-    animation.pose_flush(&skinning.pose, buffer.mapped)
+    bone_matrices := slice.from_ptr(cast(^linalg.Matrix4f32)buffer.mapped, len(mesh_skin.bones))
+    sample_clip(mesh, anim_inst.clip_handle, anim_inst.time, bone_matrices)
+    //animation.pose_flush(&skinning.pose, buffer.mapped)
   }
 
   last_mouse_pos := engine.input.mouse_pos
