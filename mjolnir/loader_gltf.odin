@@ -114,24 +114,24 @@ load_gltf :: proc(
           skinning.bones = bones
           skinning.root_bone_index = root_bone_idx
           pose: animation.Pose
-          bone_buffer: DataBuffer
+          bone_buffers: [MAX_FRAMES_IN_FLIGHT]DataBuffer
           animation.pose_init(&pose, len(bones))
           buffer_size := size_of(linalg.Matrix4f32) * vk.DeviceSize(len(bones))
-          bone_buffer, _ = create_host_visible_buffer(
+          for &buffer in bone_buffers do buffer, _ = create_host_visible_buffer(
             buffer_size,
             {.STORAGE_BUFFER},
           )
           node.attachment = MeshAttachment {
             handle = mesh_handle,
             material = material,
-            skinning = NodeSkinning{pose = pose, bone_buffer = bone_buffer},
+            skinning = NodeSkinning{bone_buffers = bone_buffers, pose = pose},
           }
           load_gltf_animations(engine, gltf_data, gltf_node.skin, mesh_handle)
           // fmt.printfln("Skinned mesh loaded successfully with %d animation %v", len(mesh.animations), mesh.animations)
           for bone_idx := 0; bone_idx < len(bones); bone_idx += 1 {
             pose.bone_matrices[bone_idx] = linalg.MATRIX4F32_IDENTITY
           }
-          animation.pose_flush(&pose, bone_buffer.mapped)
+          for &buffer in bone_buffers do animation.pose_flush(&pose, buffer.mapped)
         }
       } else {
         fmt.printfln("Loading static mesh %s", string(gltf_node.name))
@@ -682,27 +682,21 @@ load_gltf_animations :: proc(
 
       switch gltf_channel.target_path {
       case .translation:
-        engine_channel.position_keyframes = make(
-          []animation.Keyframe(linalg.Vector3f32),
-          n,
-        )
+        engine_channel.positions = make(type_of(engine_channel.positions), n)
         values := unpack_accessor_floats_flat(gltf_channel.sampler.output)
         // defer free(values)
         for i in 0 ..< len(time_data) {
-          engine_channel.position_keyframes[i] = {
+          engine_channel.positions[i] = {
             time  = time_data[i],
             value = {values[i * 3 + 0], values[i * 3 + 1], values[i * 3 + 2]},
           }
         }
       case .rotation:
-        engine_channel.rotation_keyframes = make(
-          []animation.Keyframe(linalg.Quaternionf32),
-          n,
-        )
+        engine_channel.rotations = make(type_of(engine_channel.rotations), n)
         values := unpack_accessor_floats_flat(gltf_channel.sampler.output)
         // defer free(values)
         for i in 0 ..< len(time_data) {
-          engine_channel.rotation_keyframes[i] = {
+          engine_channel.rotations[i] = {
             time  = time_data[i],
             value = quaternion(
               x = values[i * 4 + 0],
@@ -713,14 +707,11 @@ load_gltf_animations :: proc(
           }
         }
       case .scale:
-        engine_channel.scale_keyframes = make(
-          []animation.Keyframe(linalg.Vector3f32),
-          n,
-        )
+        engine_channel.scales = make(type_of(engine_channel.scales), n)
         values := unpack_accessor_floats_flat(gltf_channel.sampler.output)
         // defer free(values)
         for i in 0 ..< len(time_data) {
-          engine_channel.scale_keyframes[i] = {
+          engine_channel.scales[i] = {
             time  = time_data[i],
             value = {values[i * 3 + 0], values[i * 3 + 1], values[i * 3 + 2]},
           }

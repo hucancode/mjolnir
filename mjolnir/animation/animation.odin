@@ -14,39 +14,24 @@ Keyframe :: struct($T: typeid) {
   value: T,
 }
 
-keyframe_sample :: proc(
-  $T: typeid,
-  frames: []Keyframe(T),
-  t: f32,
-  fallback: T,
-) -> T {
+keyframe_sample :: proc($T: typeid, frames: []Keyframe(T), t: f32) -> T {
   if len(frames) == 0 {
-    return fallback
+      return T{}
   }
-  if t - frames[0].time < EPSILON {
-    // fmt.printfln("sample_keyframe take first: %v", frames[0])
-    return frames[0].value
-  }
-  if t >= frames[len(frames) - 1].time {
-    // fmt.printfln("sample_keyframe take last: %v", frames[len(frames) - 1])
-    return frames[len(frames) - 1].value
-  }
-
   i, _ := slice.binary_search_by(
     frames,
-    t,
+    linalg.clamp(t, frames[0].time, frames[len(frames) - 1].time),
     proc(item: Keyframe(T), t: f32) -> slice.Ordering {
       return slice.Ordering.Less if item.time < t else slice.Ordering.Greater
     },
   )
+  if i <= 0 {
+      return frames[0].value
+  }
   a := frames[i - 1]
   b := frames[i]
-  if b.time - a.time < EPSILON {
-    return a.value
-  }
   alpha := (t - a.time) / (b.time - a.time)
-  // fmt.printfln("sample_keyframe: (%v %v) %v", a, b, alpha)
-  return linalg.lerp(a.value, b.value, alpha)
+  return linalg.lerp(a.value, b.value, linalg.clamp(alpha, 0, 1))
 }
 
 Status :: enum {
@@ -67,7 +52,7 @@ Pose :: struct {
 
 pose_init :: proc(pose: ^Pose, joints_count: int) {
   fmt.printfln("init_pose: joints_count %d", joints_count)
-  pose.bone_matrices = make([]linalg.Matrix4f32, joints_count)
+  pose.bone_matrices = make(type_of(pose.bone_matrices), joints_count)
 }
 
 pose_deinit :: proc(pose: ^Pose) {
@@ -157,18 +142,18 @@ instance_update :: proc(instance: ^Instance, delta_time: f32) {
 }
 
 Channel :: struct {
-  position_keyframes: []Keyframe(linalg.Vector3f32),
-  rotation_keyframes: []Keyframe(linalg.Quaternionf32),
-  scale_keyframes:    []Keyframe(linalg.Vector3f32),
+  positions: []Keyframe(linalg.Vector3f32),
+  rotations: []Keyframe(linalg.Quaternionf32),
+  scales:    []Keyframe(linalg.Vector3f32),
 }
 
 channel_deinit :: proc(channel: ^Channel) {
-  delete(channel.position_keyframes)
-  channel.position_keyframes = nil
-  delete(channel.rotation_keyframes)
-  channel.rotation_keyframes = nil
-  delete(channel.scale_keyframes)
-  channel.scale_keyframes = nil
+  delete(channel.positions)
+  channel.positions = nil
+  delete(channel.rotations)
+  channel.rotations = nil
+  delete(channel.scales)
+  channel.scales = nil
 }
 
 channel_sample :: proc(
@@ -179,25 +164,11 @@ channel_sample :: proc(
   rotation: linalg.Quaternionf32,
   scale: linalg.Vector3f32,
 ) {
-  position = keyframe_sample(
-    linalg.Vector3f32,
-    channel.position_keyframes,
-    t,
-    linalg.Vector3f32{0, 0, 0},
-  )
-  rotation = keyframe_sample(
-    linalg.Quaternionf32,
-    channel.rotation_keyframes,
-    t,
-    linalg.QUATERNIONF32_IDENTITY,
-  )
-  // fmt.printfln("sample_keyframe rotation: time %f rotation quat %v", t, output_transform.rotation)
-  scale = keyframe_sample(
-    linalg.Vector3f32,
-    channel.scale_keyframes,
-    t,
-    linalg.Vector3f32{1, 1, 1},
-  )
+  position = keyframe_sample(type_of(position), channel.positions, t)
+  rotation =
+    keyframe_sample(type_of(rotation), channel.rotations, t) if len(channel.rotations) > 0 else linalg.QUATERNIONF32_IDENTITY
+  scale =
+    keyframe_sample(type_of(scale), channel.scales, t) if len(channel.scales) > 0 else linalg.Vector3f32{1, 1, 1}
   return
 }
 

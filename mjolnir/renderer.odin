@@ -62,6 +62,7 @@ Frame :: struct {
   command_buffer:                 vk.CommandBuffer,
   camera_uniform:                 DataBuffer,
   light_uniform:                  DataBuffer,
+
   shadow_maps:                    [MAX_SHADOW_MAPS]DepthTexture,
   cube_shadow_maps:               [MAX_SHADOW_MAPS]CubeDepthTexture,
   camera_descriptor_set:          vk.DescriptorSet,
@@ -512,7 +513,7 @@ prepare_light :: proc(node: ^Node, cb_context: rawptr) -> bool {
 
 render_single_node :: proc(node: ^Node, cb_context: rawptr) -> bool {
   ctx := (^RenderMeshesContext)(cb_context)
-
+  frame := ctx.engine.renderer.current_frame_index
   #partial switch data in node.attachment {
   case MeshAttachment:
     mesh := resource.get(ctx.engine.meshes, data.handle)
@@ -532,7 +533,7 @@ render_single_node :: proc(node: ^Node, cb_context: rawptr) -> bool {
     descriptor_sets := [?]vk.DescriptorSet {
       renderer_get_camera_descriptor_set(&ctx.engine.renderer), // set 0
       material.texture_descriptor_set, // set 1
-      material.skinning_descriptor_set, // set 2
+      material.skinning_descriptor_sets[frame], // set 2
       ctx.engine.renderer.environment_descriptor_set, // set 3
     }
     offsets := [1]u32{0}
@@ -568,8 +569,9 @@ render_single_node :: proc(node: ^Node, cb_context: rawptr) -> bool {
     if mesh_has_skin && node_has_skin {
       material_update_bone_buffer(
         material,
-        node_skinning.bone_buffer.buffer,
-        node_skinning.bone_buffer.size,
+        node_skinning.bone_buffers[frame].buffer,
+        node_skinning.bone_buffers[frame].size,
+        frame,
       )
       vk.CmdBindVertexBuffers(
         ctx.command_buffer,
@@ -593,6 +595,7 @@ render_single_node :: proc(node: ^Node, cb_context: rawptr) -> bool {
 
 render_single_shadow :: proc(node: ^Node, cb_context: rawptr) -> bool {
   ctx := (^ShadowRenderContext)(cb_context)
+  frame := ctx.engine.renderer.current_frame_index
   shadow_idx := ctx.shadow_idx
   shadow_layer := ctx.shadow_layer
   min_alignment := g_device_properties.limits.minUniformBufferOffsetAlignment
@@ -622,13 +625,12 @@ render_single_shadow :: proc(node: ^Node, cb_context: rawptr) -> bool {
       pipeline = g_shadow_pipelines[transmute(u32)ShaderFeatureSet{.SKINNING}]
       descriptor_sets = {
         renderer_get_camera_descriptor_set(&ctx.engine.renderer), // set 0
-        material.skinning_descriptor_set, // set 1
+        material.skinning_descriptor_sets[frame], // set 1
       }
     } else {
       descriptor_sets = {
         renderer_get_camera_descriptor_set(&ctx.engine.renderer), // set 0
       }
-
     }
     vk.CmdBindPipeline(ctx.command_buffer, .GRAPHICS, pipeline)
     offset_shadow :=

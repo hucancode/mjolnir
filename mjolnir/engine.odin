@@ -280,7 +280,9 @@ update :: proc(engine: ^Engine) -> bool {
       continue
     }
     sample_clip(mesh, anim_inst.clip_handle, anim_inst.time, skinning.pose.bone_matrices)
-    animation.pose_flush(&skinning.pose, skinning.bone_buffer.mapped)
+    frame := engine.renderer.current_frame_index
+    buffer := skinning.bone_buffers[frame]
+    animation.pose_flush(&skinning.pose, buffer.mapped)
   }
 
   last_mouse_pos := engine.input.mouse_pos

@@ -27,13 +27,14 @@ SpotLightAttachment :: struct {
 }
 
 NodeSkinning :: struct {
-  bone_buffer: DataBuffer,
-  pose:        animation.Pose,
-  animation:   Maybe(animation.Instance),
+  bone_buffers: [MAX_FRAMES_IN_FLIGHT]DataBuffer,
+  pose:         animation.Pose,
+  animation:    Maybe(animation.Instance),
 }
+
 MeshAttachment :: struct {
   handle:      Handle,
-  material: Handle,
+  material:    Handle,
   skinning:    Maybe(NodeSkinning),
   cast_shadow: bool,
 }

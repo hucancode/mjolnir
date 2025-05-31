@@ -114,7 +114,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     }
   }
   if true {
-    gltf_nodes := load_gltf(engine, "assets/Warrior.glb") or_else {}
+    gltf_nodes := load_gltf(engine, "assets/CesiumMan.glb") or_else {}
     fmt.printfln("Loaded GLTF nodes: %v", gltf_nodes)
     for armature in gltf_nodes {
       armature_ptr := resource.get(engine.scene.nodes, armature)
@@ -127,7 +127,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
         continue
       }
       // skeleton_ptr.transform.scale = {0.5, 0.5, 0.5}
-      play_animation(engine, skeleton, "idle")
+      play_animation(engine, skeleton, "Anim_0")
     }
   }
 

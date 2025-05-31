@@ -14,7 +14,7 @@ MaterialFallbacks :: struct {
 
 Material :: struct {
   texture_descriptor_set:    vk.DescriptorSet,
-  skinning_descriptor_set:   vk.DescriptorSet,
+  skinning_descriptor_sets:   [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
   features:                  ShaderFeatureSet,
   is_lit:                    bool,
   albedo_handle:             Handle,
@@ -33,10 +33,10 @@ material_deinit :: proc(self: ^Material) {
   if self == nil {
     return
   }
-  // Descriptor sets are freed with the pool, so do not explicitly destroy
+  // Descriptor sets are freed with the pool, we can get away ignoring the unused descriptor sets
+  // TODO: when descriptor set count get too big, consider manually deallocate
   self.texture_descriptor_set = 0
-  self.skinning_descriptor_set = 0
-
+  for &set in self.skinning_descriptor_sets do set = 0
   data_buffer_deinit(&self.fallback_buffer)
 }
 
@@ -58,10 +58,10 @@ material_init_descriptor_set_layout :: proc(mat: ^Material) -> vk.Result {
     descriptorSetCount = 1,
     pSetLayouts        = &g_skinning_descriptor_set_layout,
   }
-  vk.AllocateDescriptorSets(
+  for &set in mat.skinning_descriptor_sets do vk.AllocateDescriptorSets(
     g_device,
     &alloc_info_skinning,
-    &mat.skinning_descriptor_set,
+    &set,
   ) or_return
   return .SUCCESS
 }
@@ -187,11 +187,12 @@ material_update_textures :: proc(
 }
 
 material_update_bone_buffer :: proc(
-  mat: ^Material,
+  self: ^Material,
   buffer: vk.Buffer,
   size: vk.DeviceSize,
+  frame: u32,
 ) {
-  if mat.texture_descriptor_set == 0 {
+  if self.texture_descriptor_set == 0 {
     return
   }
   buffer_info := vk.DescriptorBufferInfo {
@@ -201,7 +202,7 @@ material_update_bone_buffer :: proc(
   }
   write := vk.WriteDescriptorSet {
     sType           = .WRITE_DESCRIPTOR_SET,
-    dstSet          = mat.skinning_descriptor_set,
+    dstSet          = self.skinning_descriptor_sets[frame],
     dstBinding      = 0,
     descriptorType  = .STORAGE_BUFFER,
     descriptorCount = 1,
