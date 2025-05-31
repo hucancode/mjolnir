@@ -50,6 +50,7 @@ layout(set = 1, binding = 5) uniform MaterialFallbacks {
 };
 
 layout(set = 3, binding = 0) uniform sampler2D environmentMap;
+layout(set = 3, binding = 1) uniform sampler2D brdfLUT;
 
 layout(location = 0) in vec3 position;
 layout(location = 1) in vec4 color;

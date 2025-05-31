@@ -198,6 +198,8 @@ Renderer :: struct {
   environment_map:            ^Texture,
   environment_map_handle:     Handle,
   environment_descriptor_set: vk.DescriptorSet,
+  brdf_lut_handle:            Handle,
+  brdf_lut:                   ^Texture,
   current_frame_index:        u32,
 }
 

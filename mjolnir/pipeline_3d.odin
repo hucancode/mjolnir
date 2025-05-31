@@ -246,6 +246,12 @@ build_3d_pipelines :: proc(
       descriptorCount = 1,
       stageFlags = {.FRAGMENT},
     },
+    {
+      binding = 1,
+      descriptorType = .COMBINED_IMAGE_SAMPLER,
+      descriptorCount = 1,
+      stageFlags = {.FRAGMENT},
+    },
   }
   vk.CreateDescriptorSetLayout(
     g_device,

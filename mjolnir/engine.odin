@@ -218,6 +218,13 @@ build_renderer :: proc(engine: ^Engine) -> vk.Result {
       engine,
       "assets/teutonic_castle_moat_4k.hdr",
     ) or_return
+
+  engine.renderer.brdf_lut_handle, engine.renderer.brdf_lut =
+    create_texture_from_path(
+      engine,
+      "assets/lut_ggx.png",
+    ) or_return
+
   alloc_info_env := vk.DescriptorSetAllocateInfo {
       sType              = .DESCRIPTOR_SET_ALLOCATE_INFO,
       descriptorPool     = g_descriptor_pool,
@@ -229,6 +236,7 @@ build_renderer :: proc(engine: ^Engine) -> vk.Result {
     &alloc_info_env,
     &engine.renderer.environment_descriptor_set,
   ) or_return
+
   env_write := vk.WriteDescriptorSet {
       sType           = .WRITE_DESCRIPTOR_SET,
       dstSet          = engine.renderer.environment_descriptor_set,
@@ -241,7 +249,22 @@ build_renderer :: proc(engine: ^Engine) -> vk.Result {
         imageLayout = .SHADER_READ_ONLY_OPTIMAL,
       },
     }
-  vk.UpdateDescriptorSets(g_device, 1, &env_write, 0, nil)
+
+  brdf_lut_write := vk.WriteDescriptorSet {
+      sType           = .WRITE_DESCRIPTOR_SET,
+      dstSet          = engine.renderer.environment_descriptor_set,
+      dstBinding      = 1,
+      descriptorType  = .COMBINED_IMAGE_SAMPLER,
+      descriptorCount = 1,
+      pImageInfo      = &vk.DescriptorImageInfo {
+        sampler = engine.renderer.brdf_lut.sampler,
+        imageView = engine.renderer.brdf_lut.buffer.view,
+        imageLayout = .SHADER_READ_ONLY_OPTIMAL,
+      },
+    }
+
+  writes := [?]vk.WriteDescriptorSet{env_write, brdf_lut_write}
+  vk.UpdateDescriptorSets(g_device, len(writes), raw_data(writes[:]), 0, nil)
   return .SUCCESS
 }
 
