@@ -78,7 +78,6 @@ Engine :: struct {
   meshes:                resource.Pool(Mesh),
   materials:             resource.Pool(Material),
   textures:              resource.Pool(Texture),
-  in_transaction:        bool,
   input:                 InputState,
   setup_proc:            SetupProc,
   update_proc:           UpdateProc,
@@ -333,15 +332,6 @@ deinit :: proc(engine: ^Engine) {
   glfw.DestroyWindow(engine.window)
   glfw.Terminate()
   fmt.println("Engine deinitialized")
-}
-
-// TODO: Transaction System
-engine_begin_transaction :: proc(engine: ^Engine) {
-  engine.in_transaction = true
-}
-
-engine_commit_transaction :: proc(engine: ^Engine) {
-  engine.in_transaction = false
 }
 
 run :: proc(engine: ^Engine, width: u32, height: u32, title: string) {
