@@ -33,13 +33,10 @@ material_deinit :: proc(self: ^Material) {
   if self == nil {
     return
   }
-  if self.texture_descriptor_set != 0 {
-    // Descriptor sets are freed with the pool, so do not explicitly destroy
-    self.texture_descriptor_set = 0
-  }
-  if self.skinning_descriptor_set != 0 {
-    self.skinning_descriptor_set = 0
-  }
+  // Descriptor sets are freed with the pool, so do not explicitly destroy
+  self.texture_descriptor_set = 0
+  self.skinning_descriptor_set = 0
+
   data_buffer_deinit(&self.fallback_buffer)
 }
 

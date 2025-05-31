@@ -16,15 +16,11 @@ g_shadow_pipelines: [SHADOW_SHADER_VARIANT_COUNT]vk.Pipeline
 
 pipeline_shadow_deinit :: proc() {
   for i in 0 ..< len(g_shadow_pipelines) {
-    if g_shadow_pipelines[i] != 0 {
-      vk.DestroyPipeline(g_device, g_shadow_pipelines[i], nil)
-      g_shadow_pipelines[i] = 0
-    }
+    vk.DestroyPipeline(g_device, g_shadow_pipelines[i], nil)
+    g_shadow_pipelines[i] = 0
   }
-  if g_shadow_pipeline_layout != 0 {
-    vk.DestroyPipelineLayout(g_device, g_shadow_pipeline_layout, nil)
-    g_shadow_pipeline_layout = 0
-  }
+  vk.DestroyPipelineLayout(g_device, g_shadow_pipeline_layout, nil)
+  g_shadow_pipeline_layout = 0
 }
 
 SHADER_SHADOW_VERT :: #load("shader/shadow/vert.spv")

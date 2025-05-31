@@ -192,10 +192,8 @@ texture_init :: proc(
 
 texture_deinit :: proc(self: ^Texture) {
   if self == nil {return}
-  if self.sampler != 0 {
-    vk.DestroySampler(g_device, self.sampler, nil)
-    self.sampler = 0
-  }
+  vk.DestroySampler(g_device, self.sampler, nil)
+  self.sampler = 0
   image_buffer_deinit(&self.buffer)
   image_data_deinit(&self.image_data)
 }
@@ -230,10 +228,8 @@ depth_texture_init :: proc(
 
 depth_texture_deinit :: proc(self: ^DepthTexture) {
   if self == nil {return}
-  if self.sampler != 0 {
-    vk.DestroySampler(g_device, self.sampler, nil)
-    self.sampler = 0
-  }
+  vk.DestroySampler(g_device, self.sampler, nil)
+  self.sampler = 0
   image_buffer_deinit(&self.buffer)
 }
 
@@ -443,20 +439,14 @@ cube_depth_texture_init :: proc(
 
 cube_depth_texture_deinit :: proc(self: ^CubeDepthTexture) {
   if self == nil {return}
-  if self.sampler != 0 {
-    vk.DestroySampler(g_device, self.sampler, nil)
-    self.sampler = 0
-  }
+  vk.DestroySampler(g_device, self.sampler, nil)
+  self.sampler = 0
   for i in 0 ..< 6 {
-    if self.views[i] != 0 {
-      vk.DestroyImageView(g_device, self.views[i], nil)
-      self.views[i] = 0
-    }
+    vk.DestroyImageView(g_device, self.views[i], nil)
+    self.views[i] = 0
   }
-  if self.view != 0 {
-    vk.DestroyImageView(g_device, self.view, nil)
-    self.view = 0
-  }
+  vk.DestroyImageView(g_device, self.view, nil)
+  self.view = 0
   image_buffer_deinit(&self.buffer)
 }
 

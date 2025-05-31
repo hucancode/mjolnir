@@ -38,47 +38,27 @@ SHADER_UBER_FRAG :: #load("shader/uber/frag.spv")
 
 pipeline3d_deinit :: proc() {
   for i in 0 ..< len(g_pipelines) {
-    if g_pipelines[i] != 0 {
-      vk.DestroyPipeline(g_device, g_pipelines[i], nil)
-      g_pipelines[i] = 0
-    }
+    vk.DestroyPipeline(g_device, g_pipelines[i], nil)
+    g_pipelines[i] = 0
   }
-  if g_pipeline_layout != 0 {
-    vk.DestroyPipelineLayout(g_device, g_pipeline_layout, nil)
-    g_pipeline_layout = 0
-  }
-  if g_camera_descriptor_set_layout != 0 {
-    vk.DestroyDescriptorSetLayout(
-      g_device,
-      g_camera_descriptor_set_layout,
-      nil,
-    )
-    g_camera_descriptor_set_layout = 0
-  }
-  if g_environment_descriptor_set_layout != 0 {
-    vk.DestroyDescriptorSetLayout(
-      g_device,
-      g_environment_descriptor_set_layout,
-      nil,
-    )
-    g_environment_descriptor_set_layout = 0
-  }
-  if g_texture_descriptor_set_layout != 0 {
-    vk.DestroyDescriptorSetLayout(
-      g_device,
-      g_texture_descriptor_set_layout,
-      nil,
-    )
-    g_texture_descriptor_set_layout = 0
-  }
-  if g_skinning_descriptor_set_layout != 0 {
-    vk.DestroyDescriptorSetLayout(
-      g_device,
-      g_skinning_descriptor_set_layout,
-      nil,
-    )
-    g_skinning_descriptor_set_layout = 0
-  }
+  vk.DestroyPipelineLayout(g_device, g_pipeline_layout, nil)
+  g_pipeline_layout = 0
+  vk.DestroyDescriptorSetLayout(g_device, g_camera_descriptor_set_layout, nil)
+  g_camera_descriptor_set_layout = 0
+  vk.DestroyDescriptorSetLayout(
+    g_device,
+    g_environment_descriptor_set_layout,
+    nil,
+  )
+  g_environment_descriptor_set_layout = 0
+  vk.DestroyDescriptorSetLayout(g_device, g_texture_descriptor_set_layout, nil)
+  g_texture_descriptor_set_layout = 0
+  vk.DestroyDescriptorSetLayout(
+    g_device,
+    g_skinning_descriptor_set_layout,
+    nil,
+  )
+  g_skinning_descriptor_set_layout = 0
 }
 
 build_3d_pipelines :: proc(

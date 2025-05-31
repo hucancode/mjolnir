@@ -16,22 +16,14 @@ Pipeline2D :: struct {
 
 pipeline2d_deinit :: proc(mat: ^Pipeline2D) {
   if mat == nil {return}
-  if mat.pipeline != 0 {
-    vk.DestroyPipeline(g_device, mat.pipeline, nil)
-    mat.pipeline = 0
-  }
-  if mat.pipeline_layout != 0 {
-    vk.DestroyPipelineLayout(g_device, mat.pipeline_layout, nil)
-    mat.pipeline_layout = 0
-  }
-  if mat.projection_layout != 0 {
-    vk.DestroyDescriptorSetLayout(g_device, mat.projection_layout, nil)
-    mat.projection_layout = 0
-  }
-  if mat.texture_layout != 0 {
-    vk.DestroyDescriptorSetLayout(g_device, mat.texture_layout, nil)
-    mat.texture_layout = 0
-  }
+  vk.DestroyPipeline(g_device, mat.pipeline, nil)
+  mat.pipeline = 0
+  vk.DestroyPipelineLayout(g_device, mat.pipeline_layout, nil)
+  mat.pipeline_layout = 0
+  vk.DestroyDescriptorSetLayout(g_device, mat.projection_layout, nil)
+  mat.projection_layout = 0
+  vk.DestroyDescriptorSetLayout(g_device, mat.texture_layout, nil)
+  mat.texture_layout = 0
 }
 
 pipeline2d_init :: proc(

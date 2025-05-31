@@ -399,9 +399,7 @@ destroy_swapchain :: proc(self: ^Renderer) {
   image_buffer_deinit(&self.depth_buffer)
   if self.views != nil {
     for view in self.views {
-      if view != 0 {
-        vk.DestroyImageView(g_device, view, nil)
-      }
+      vk.DestroyImageView(g_device, view, nil)
     }
     delete(self.views)
     self.views = nil
@@ -410,10 +408,8 @@ destroy_swapchain :: proc(self: ^Renderer) {
     delete(self.images)
     self.images = nil
   }
-  if self.swapchain != 0 {
-    vk.DestroySwapchainKHR(g_device, self.swapchain, nil)
-    self.swapchain = 0
-  }
+  vk.DestroySwapchainKHR(g_device, self.swapchain, nil)
+  self.swapchain = 0
 }
 
 renderer_get_in_flight_fence :: proc(self: ^Renderer) -> vk.Fence {

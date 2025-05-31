@@ -76,11 +76,7 @@ ui_init :: proc(
   ui.proj_buffer = create_host_visible_buffer(
     size_of(linalg.Matrix4f32),
     {.UNIFORM_BUFFER},
-  ) or_return
-  data_buffer_write(
-    &ui.proj_buffer,
     raw_data(&ortho),
-    size_of(linalg.Matrix4f32),
   ) or_return
   buffer_info := vk.DescriptorBufferInfo {
     buffer = ui.proj_buffer.buffer,

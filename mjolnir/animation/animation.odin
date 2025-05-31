@@ -36,10 +36,7 @@ keyframe_sample :: proc(
     frames,
     t,
     proc(item: Keyframe(T), t: f32) -> slice.Ordering {
-      if item.time < t {
-        return slice.Ordering.Less
-      }
-      return slice.Ordering.Greater
+      return slice.Ordering.Less if item.time < t else slice.Ordering.Greater
     },
   )
   a := frames[i - 1]
@@ -71,14 +68,11 @@ Pose :: struct {
 pose_init :: proc(pose: ^Pose, joints_count: int) {
   fmt.printfln("init_pose: joints_count %d", joints_count)
   pose.bone_matrices = make([]linalg.Matrix4f32, joints_count)
-  return
 }
 
 pose_deinit :: proc(pose: ^Pose) {
-  if pose.bone_matrices != nil {
-    delete(pose.bone_matrices)
-    pose.bone_matrices = nil
-  }
+  delete(pose.bone_matrices)
+  pose.bone_matrices = nil
 }
 
 pose_flush :: proc(pose: ^Pose, destination: rawptr) {
@@ -87,7 +81,6 @@ pose_flush :: proc(pose: ^Pose, destination: rawptr) {
   }
   size := size_of(linalg.Matrix4f32) * vk.DeviceSize(len(pose.bone_matrices))
   mem.copy(destination, raw_data(pose.bone_matrices), int(size))
-  return
 }
 
 Instance :: struct {
@@ -170,18 +163,12 @@ Channel :: struct {
 }
 
 channel_deinit :: proc(channel: ^Channel) {
-  if channel.position_keyframes != nil {
-    delete(channel.position_keyframes)
-    channel.position_keyframes = nil
-  }
-  if channel.rotation_keyframes != nil {
-    delete(channel.rotation_keyframes)
-    channel.rotation_keyframes = nil
-  }
-  if channel.scale_keyframes != nil {
-    delete(channel.scale_keyframes)
-    channel.scale_keyframes = nil
-  }
+  delete(channel.position_keyframes)
+  channel.position_keyframes = nil
+  delete(channel.rotation_keyframes)
+  channel.rotation_keyframes = nil
+  delete(channel.scale_keyframes)
+  channel.scale_keyframes = nil
 }
 
 channel_sample :: proc(
@@ -221,11 +208,9 @@ Clip :: struct {
 }
 
 clip_deinit :: proc(clip: ^Clip) {
-  if clip.channels != nil {
-    for &channel in clip.channels {
-      channel_deinit(&channel)
-    }
-    delete(clip.channels)
-    clip.channels = nil
+  for &channel in clip.channels {
+    channel_deinit(&channel)
   }
+  delete(clip.channels)
+  clip.channels = nil
 }

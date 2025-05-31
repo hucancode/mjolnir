@@ -86,9 +86,8 @@ vulkan_context_deinit :: proc() {
   vk.DestroyDevice(g_device, nil)
   vk.DestroySurfaceKHR(g_instance, g_surface, nil)
   when ENABLE_VALIDATION_LAYERS {
-    if g_debug_messenger != 0 {
-      vk.DestroyDebugUtilsMessengerEXT(g_instance, g_debug_messenger, nil)
-    }
+    vk.DestroyDebugUtilsMessengerEXT(g_instance, g_debug_messenger, nil)
+
   }
   vk.DestroyInstance(g_instance, nil)
   delete(g_surface_formats)
@@ -770,14 +769,10 @@ data_buffer_deinit :: proc(buffer: ^DataBuffer) {
     vk.UnmapMemory(g_device, buffer.memory)
     buffer.mapped = nil
   }
-  if buffer.buffer != 0 {
-    vk.DestroyBuffer(g_device, buffer.buffer, nil)
-    buffer.buffer = 0
-  }
-  if buffer.memory != 0 {
-    vk.FreeMemory(g_device, buffer.memory, nil)
-    buffer.memory = 0
-  }
+  vk.DestroyBuffer(g_device, buffer.buffer, nil)
+  buffer.buffer = 0
+  vk.FreeMemory(g_device, buffer.memory, nil)
+  buffer.memory = 0
   buffer.size = 0
 }
 
@@ -790,18 +785,12 @@ ImageBuffer :: struct {
 }
 
 image_buffer_deinit :: proc(self: ^ImageBuffer) {
-  if self.view != 0 {
-    vk.DestroyImageView(g_device, self.view, nil)
-    self.view = 0
-  }
-  if self.image != 0 {
-    vk.DestroyImage(g_device, self.image, nil)
-    self.image = 0
-  }
-  if self.memory != 0 {
-    vk.FreeMemory(g_device, self.memory, nil)
-    self.memory = 0
-  }
+  vk.DestroyImageView(g_device, self.view, nil)
+  self.view = 0
+  vk.DestroyImage(g_device, self.image, nil)
+  self.image = 0
+  vk.FreeMemory(g_device, self.memory, nil)
+  self.memory = 0
   self.width = 0
   self.height = 0
   self.format = .UNDEFINED

@@ -39,19 +39,15 @@ Mesh :: struct {
 }
 
 mesh_deinit :: proc(self: ^Mesh) {
-  if self.vertex_buffer.buffer != 0 {
     data_buffer_deinit(&self.vertex_buffer)
-  }
-  if self.index_buffer.buffer != 0 {
     data_buffer_deinit(&self.index_buffer)
-  }
+
   skin, has_skin := &self.skinning.?
   if !has_skin {
     return
   }
-  if skin.skin_buffer.buffer != 0 {
     data_buffer_deinit(&skin.skin_buffer)
-  }
+
   for &bone in skin.bones {
     bone_deinit(&bone)
   }
