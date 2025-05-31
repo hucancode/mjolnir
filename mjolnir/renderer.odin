@@ -390,17 +390,13 @@ create_swapchain :: proc(
 
 destroy_swapchain :: proc(self: ^Renderer) {
   image_buffer_deinit(&self.depth_buffer)
-  if self.views != nil {
-    for view in self.views {
-      vk.DestroyImageView(g_device, view, nil)
-    }
-    delete(self.views)
-    self.views = nil
+  for view in self.views {
+    vk.DestroyImageView(g_device, view, nil)
   }
-  if self.images != nil {
-    delete(self.images)
-    self.images = nil
-  }
+  delete(self.views)
+  self.views = nil
+  delete(self.images)
+  self.images = nil
   vk.DestroySwapchainKHR(g_device, self.swapchain, nil)
   self.swapchain = 0
 }
