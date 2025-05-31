@@ -109,7 +109,7 @@ load_gltf :: proc(
             gltf_node.skin,
           )
         if res == .SUCCESS {
-          mesh_init(mesh, data, material)
+          mesh_init(mesh, data)
           skinning, _ := &mesh.skinning.?
           skinning.bones = bones
           skinning.root_bone_index = root_bone_idx
@@ -123,6 +123,7 @@ load_gltf :: proc(
           )
           node.attachment = MeshAttachment {
             handle = mesh_handle,
+            material = material,
             skinning = NodeSkinning{pose = pose, bone_buffer = bone_buffer},
           }
           load_gltf_animations(engine, gltf_data, gltf_node.skin, mesh_handle)
@@ -150,13 +151,14 @@ load_gltf :: proc(
           len(mesh_data.vertices),
           len(mesh_data.indices),
         )
-        mesh_handle, _, ret := create_mesh(engine, mesh_data, mat_handle)
+        mesh_handle, _, ret := create_mesh(engine, mesh_data)
         if ret != .SUCCESS {
           fmt.eprintln("Failed to create static mesh:", ret)
           continue
         }
         node.attachment = MeshAttachment {
           handle      = mesh_handle,
+          material = mat_handle,
           cast_shadow = true,
         }
         fmt.printfln(

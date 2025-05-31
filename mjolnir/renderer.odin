@@ -522,7 +522,7 @@ render_single_node :: proc(node: ^Node, cb_context: rawptr) -> bool {
   case MeshAttachment:
     mesh := resource.get(ctx.engine.meshes, data.handle)
     if mesh == nil {return true}
-    material := resource.get(ctx.engine.materials, mesh.material)
+    material := resource.get(ctx.engine.materials, data.material)
     if material == nil {return true}
     world_aabb := geometry.aabb_transform(
       mesh.aabb,
@@ -616,7 +616,7 @@ render_single_shadow :: proc(node: ^Node, cb_context: rawptr) -> bool {
     if !geometry.frustum_test_aabb(&ctx.frustum, world_aabb) {
       return true
     }
-    material := resource.get(ctx.engine.materials, mesh.material)
+    material := resource.get(ctx.engine.materials, data.material)
     if material == nil {return true}
     features: ShaderFeatureSet
     pipeline := g_shadow_pipelines[transmute(u32)features]

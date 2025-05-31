@@ -135,7 +135,6 @@ ui_flush :: proc(ui: ^UIRenderer, cmd_buf: vk.CommandBuffer) -> vk.Result {
     ui.vertex_count = 0
     ui.index_count = 0
   }
-  // fmt.printfln("going to write vertex/index buffer...", ui.vertex_buffer)
   data_buffer_write(
     &ui.vertex_buffer,
     raw_data(ui.vertices[:]),

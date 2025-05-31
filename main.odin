@@ -30,12 +30,10 @@ setup :: proc(engine: ^mjolnir.Engine) {
   cube_mesh_handle, _, _ := create_mesh(
     engine,
     cube_geom,
-    plain_material_handle,
   )
   sphere_mesh_handle, _, _ := create_mesh(
     engine,
     make_sphere(),
-    plain_material_handle,
   )
   // Create ground plane
   ground_albedo_handle, _, _ := create_texture_from_path(
@@ -54,7 +52,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
   ground_mesh_handle, _, _ := create_mesh(
     engine,
     make_quad(),
-    ground_mat_handle,
   )
   if true {
     // Spawn cubes in a grid
@@ -66,7 +63,11 @@ setup :: proc(engine: ^mjolnir.Engine) {
         for z in 1 ..< nz {
           node_handle, node := spawn(
             &engine.scene,
-            MeshAttachment{handle = sphere_mesh_handle, cast_shadow = true},
+            MeshAttachment{
+                handle = sphere_mesh_handle,
+                material = plain_material_handle,
+                cast_shadow = true,
+            },
           )
           translate(
             &node.transform,
@@ -84,7 +85,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     size: f32 = 10.0
     ground_handle, ground_node := spawn(
       &engine.scene,
-      MeshAttachment{handle = ground_mesh_handle},
+      MeshAttachment{handle = ground_mesh_handle, material = ground_mat_handle},
     )
     translate(&ground_node.transform, x = -0.5 * size, z = -0.5 * size)
     scale(&ground_node.transform, size)
@@ -165,7 +166,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     light_cube_handles[i], cube_node = spawn_child(
       &engine.scene,
       light_handles[i],
-      MeshAttachment{handle = cube_mesh_handle},
+      MeshAttachment{handle = cube_mesh_handle, material = plain_material_handle},
     )
     scale(&cube_node.transform, 0.1)
   }

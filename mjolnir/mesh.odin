@@ -4,7 +4,6 @@ import "animation"
 import "core:fmt"
 import linalg "core:math/linalg"
 import "geometry"
-import "resource"
 import vk "vendor:vulkan"
 
 Bone :: struct {
@@ -33,20 +32,19 @@ Mesh :: struct {
   indices_len:   u32,
   vertex_buffer: DataBuffer,
   index_buffer:  DataBuffer,
-  material:      Handle,
   aabb:          geometry.Aabb,
   skinning:      Maybe(Skinning),
 }
 
 mesh_deinit :: proc(self: ^Mesh) {
-    data_buffer_deinit(&self.vertex_buffer)
-    data_buffer_deinit(&self.index_buffer)
+  data_buffer_deinit(&self.vertex_buffer)
+  data_buffer_deinit(&self.index_buffer)
 
   skin, has_skin := &self.skinning.?
   if !has_skin {
     return
   }
-    data_buffer_deinit(&skin.skin_buffer)
+  data_buffer_deinit(&skin.skin_buffer)
 
   for &bone in skin.bones {
     bone_deinit(&bone)
@@ -61,12 +59,10 @@ mesh_deinit :: proc(self: ^Mesh) {
 mesh_init :: proc(
   self: ^Mesh,
   data: geometry.Geometry,
-  material: Handle,
 ) -> vk.Result {
   self.vertices_len = u32(len(data.vertices))
   self.indices_len = u32(len(data.indices))
   self.aabb = data.aabb
-  self.material = material
   size := len(data.vertices) * size_of(geometry.Vertex)
   self.vertex_buffer = create_local_buffer(
     vk.DeviceSize(size),
@@ -95,21 +91,6 @@ mesh_init :: proc(
     }
   }
   return .SUCCESS
-}
-
-create_mesh :: proc(
-  engine: ^Engine,
-  data: geometry.Geometry,
-  material: Handle,
-) -> (
-  handle: Handle,
-  mesh: ^Mesh,
-  ret: vk.Result,
-) {
-  handle, mesh = resource.alloc(&engine.meshes)
-  mesh_init(mesh, data, material)
-  ret = .SUCCESS
-  return
 }
 
 make_animation_instance :: proc(
@@ -144,56 +125,50 @@ make_animation_instance :: proc(
   return
 }
 
-calculate_animation_transform :: proc(
+sample_clip :: proc(
   self: ^Mesh,
-  anim_instance: ^animation.Instance,
-  target_pose: ^animation.Pose,
+  clip_idx: u32,
+  t: f32,
+  out_bone_matrices: []linalg.Matrix4f32,
 ) {
   skin, has_skin := &self.skinning.?
   if !has_skin {
     return
   }
-  if anim_instance.status == .STOPPED ||
-     anim_instance.clip_handle >= u32(len(skin.animations)) {
+  if len(out_bone_matrices) < len(skin.bones) ||
+     clip_idx >= u32(len(skin.animations)) {
     return
   }
-  if len(target_pose.bone_matrices) < len(skin.bones) {
-    return
+  TraverseEntry :: struct {
+    transform: linalg.Matrix4f32,
+    bone:      u32,
   }
-  transform_stack := make([dynamic]linalg.Matrix4f32, 0, len(skin.bones))
-  bone_stack := make([dynamic]u32, 0, len(skin.bones))
-  defer {
-    delete(transform_stack)
-    delete(bone_stack)
-  }
-  append(&transform_stack, linalg.MATRIX4F32_IDENTITY)
-  append(&bone_stack, u32(skin.root_bone_index))
-  active_clip := &skin.animations[anim_instance.clip_handle]
-  for len(bone_stack) > 0 {
-    current_bone_index := pop(&bone_stack)
-    parent_world_transform := pop(&transform_stack)
-    current_bone := &skin.bones[current_bone_index]
+  stack := make([dynamic]TraverseEntry, 0, len(skin.bones))
+  defer delete(stack)
+  append(
+    &stack,
+    TraverseEntry{linalg.MATRIX4F32_IDENTITY, skin.root_bone_index},
+  )
+  clip := &skin.animations[clip_idx]
+  for len(stack) > 0 {
+    entry := pop(&stack)
+    bone := &skin.bones[entry.bone]
     local_transform: geometry.Transform
-    if current_bone_index < u32(len(active_clip.channels)) {
+    if entry.bone < u32(len(clip.channels)) {
       local_transform.position, local_transform.rotation, local_transform.scale =
-        animation.channel_sample(
-          active_clip.channels[current_bone_index],
-          anim_instance.time,
-        )
+        animation.channel_sample(clip.channels[entry.bone], t)
     } else {
-      local_transform = current_bone.bind_transform
+      local_transform = bone.bind_transform
     }
     local_matrix := linalg.matrix4_from_trs(
       local_transform.position,
       local_transform.rotation,
       local_transform.scale,
     )
-    current_world_transform := parent_world_transform * local_matrix
-    target_pose.bone_matrices[current_bone_index] =
-      current_world_transform * current_bone.inverse_bind_matrix
-    for child_index in current_bone.children {
-      append(&transform_stack, current_world_transform)
-      append(&bone_stack, child_index)
+    world_transform := entry.transform * local_matrix
+    out_bone_matrices[entry.bone] = world_transform * bone.inverse_bind_matrix
+    for child_index in bone.children {
+      append(&stack, TraverseEntry{world_transform, child_index})
     }
   }
 }

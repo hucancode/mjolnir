@@ -185,6 +185,7 @@ material_update_textures :: proc(
   vk.UpdateDescriptorSets(g_device, u32(len(writes)), raw_data(writes), 0, nil)
   return .SUCCESS
 }
+
 material_update_bone_buffer :: proc(
   mat: ^Material,
   buffer: vk.Buffer,

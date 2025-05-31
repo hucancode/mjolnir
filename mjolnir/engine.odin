@@ -279,7 +279,7 @@ update :: proc(engine: ^Engine) -> bool {
     if mesh == nil {
       continue
     }
-    calculate_animation_transform(mesh, anim_inst, &skinning.pose)
+    sample_clip(mesh, anim_inst.clip_handle, anim_inst.time, skinning.pose.bone_matrices)
     animation.pose_flush(&skinning.pose, skinning.bone_buffer.mapped)
   }
 
@@ -356,4 +356,18 @@ run :: proc(engine: ^Engine, width: u32, height: u32, title: string) {
     engine.last_frame_timestamp = time.now()
     // break
   }
+}
+
+create_mesh :: proc(
+  engine: ^Engine,
+  data: geometry.Geometry,
+) -> (
+  handle: Handle,
+  mesh: ^Mesh,
+  ret: vk.Result,
+) {
+  handle, mesh = resource.alloc(&engine.meshes)
+  mesh_init(mesh, data)
+  ret = .SUCCESS
+  return
 }

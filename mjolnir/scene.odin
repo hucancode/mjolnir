@@ -33,6 +33,7 @@ NodeSkinning :: struct {
 }
 MeshAttachment :: struct {
   handle:      Handle,
+  material: Handle,
   skinning:    Maybe(NodeSkinning),
   cast_shadow: bool,
 }
