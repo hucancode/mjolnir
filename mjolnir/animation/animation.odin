@@ -14,24 +14,28 @@ Keyframe :: struct($T: typeid) {
   value: T,
 }
 
-keyframe_sample :: proc($T: typeid, frames: []Keyframe(T), t: f32) -> T {
+keyframe_sample_or :: proc(frames: []Keyframe($T), t: f32, fallback: T) -> T {
+    return keyframe_sample(frames, t) if len(frames) > 0 else fallback
+}
+
+keyframe_sample :: proc(frames: []Keyframe($T), t: f32) -> T {
   if len(frames) == 0 {
       return T{}
   }
-  i, _ := slice.binary_search_by(
-    frames,
-    linalg.clamp(t, frames[0].time, frames[len(frames) - 1].time),
-    proc(item: Keyframe(T), t: f32) -> slice.Ordering {
-      return slice.Ordering.Less if item.time < t else slice.Ordering.Greater
-    },
-  )
-  if i <= 0 {
-      return frames[0].value
+  if t <= slice.first(frames).time {
+      return slice.first(frames).value
   }
+  if t >= slice.last(frames).time {
+      return slice.last(frames).value
+  }
+  cmp :: proc(item: Keyframe(T), t: f32) -> slice.Ordering {
+    return slice.Ordering.Less if item.time < t else slice.Ordering.Greater
+  }
+  i, _ := slice.binary_search_by(frames, t, cmp)
   a := frames[i - 1]
   b := frames[i]
   alpha := (t - a.time) / (b.time - a.time)
-  return linalg.lerp(a.value, b.value, linalg.clamp(alpha, 0, 1))
+  return linalg.lerp(a.value, b.value, alpha)
 }
 
 Status :: enum {
@@ -164,11 +168,11 @@ channel_sample :: proc(
   rotation: linalg.Quaternionf32,
   scale: linalg.Vector3f32,
 ) {
-  position = keyframe_sample(type_of(position), channel.positions, t)
+  position = keyframe_sample(channel.positions, t)
   rotation =
-    keyframe_sample(type_of(rotation), channel.rotations, t) if len(channel.rotations) > 0 else linalg.QUATERNIONF32_IDENTITY
+    keyframe_sample_or(channel.rotations, t, linalg.QUATERNIONF32_IDENTITY)
   scale =
-    keyframe_sample(type_of(scale), channel.scales, t) if len(channel.scales) > 0 else linalg.Vector3f32{1, 1, 1}
+    keyframe_sample_or(channel.scales, t, linalg.Vector3f32{1, 1, 1})
   return
 }
 
