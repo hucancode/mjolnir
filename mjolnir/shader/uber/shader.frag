@@ -13,6 +13,13 @@ const uint DIRECTIONAL_LIGHT = 1;
 const uint SPOT_LIGHT = 2;
 const float PI = 3.14159265359;
 
+// Convert a direction vector to equirectangular UV coordinates
+vec2 dirToEquirectUV(vec3 dir) {
+    float u = atan(dir.z, dir.x) / (2.0 * PI) + 0.5;
+    float v = acos(clamp(-dir.y, -1.0, 1.0)) / PI;
+    return vec2(u, v);
+}
+
 struct Light {
     mat4 viewProj;
     vec4 color;
@@ -242,21 +249,29 @@ void main() {
     // --- View Direction ---
     vec3 V = normalize(cameraPosition - displacedPosition);
 
-    // --- Environment Reflection ---
-    vec3 refl = reflect(-V, N);
-    float u = atan(refl.z, refl.x) / (2.0 * PI) + 0.5;
-    float v = acos(clamp(-refl.y, -1.0, 1.0)) / PI;
-    vec3 envColor = texture(environmentMap, vec2(u, v)).rgb;
+    // --- IBL using a 2D equirectangular environment map and BRDF LUT ---
+    // Diffuse: sample environment in the normal direction (approximate)
+    vec2 uvN = dirToEquirectUV(N);
+    vec3 diffuseIBL = texture(environmentMap, uvN).rgb * albedo;
 
-    // --- Ambient + Emissive ---
-    vec3 ambient = ambientColor * ambientStrength * albedo + emissive;
+    // Specular: sample environment in the reflection direction (no LOD, no roughness blur)
+    vec3 R = reflect(-V, N);
+    vec2 uvR = dirToEquirectUV(R);
+    vec3 prefilteredColor = texture(environmentMap, uvR).rgb;
+
+    vec3 F0 = mix(vec3(0.04), albedo, metallic);
+    float NdotV = max(dot(N, V), 0.0);
+    vec2 brdfSample = texture(brdfLUT, vec2(NdotV, roughness)).rg;
+    // Attenuate specular by (1.0 - roughness) to fake roughness blur
+    vec3 specularIBL = prefilteredColor * (F0 * brdfSample.x + brdfSample.y) * (1.0 - roughness)*0.1;
+
+    vec3 kS = F0 + (1.0 - F0) * pow(1.0 - NdotV, 5.0);
+    vec3 kD = (vec3(1.0) - kS) * (1.0 - metallic);
+
+    vec3 ambient = kD * diffuseIBL + specularIBL + emissive;
 
     // --- PBR Lighting ---
-    vec3 colorOut = ambient + brdf(N, V, albedo, roughness, metallic);
+    vec3 colorOut = ambient * 0.5 + brdf(N, V, albedo, roughness, metallic);
 
-    // --- Simple Environment Reflection (metallic surfaces) ---
-    float envStrength = metallic * 0.02;
-    colorOut = mix(colorOut, envColor, envStrength);
-
-    outColor = vec4(colorOut, 1.0);
+    outColor = vec4(colorOut , 1.0);
 }
