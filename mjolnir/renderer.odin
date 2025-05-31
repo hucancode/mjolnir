@@ -190,8 +190,8 @@ Renderer :: struct {
   swapchain:                  vk.SwapchainKHR,
   format:                     vk.SurfaceFormatKHR,
   extent:                     vk.Extent2D,
-  images:                     []vk.Image, // Owned by swapchain, slice managed by renderer
-  views:                      []vk.ImageView, // Owned by renderer, one per image
+  images:                     []vk.Image,
+  views:                      []vk.ImageView,
   frames:                     [MAX_FRAMES_IN_FLIGHT]Frame,
   depth_buffer:               ImageBuffer,
   environment_map:            ^Texture,
@@ -265,7 +265,6 @@ recreate_swapchain :: proc(
   self: ^Renderer,
   window: glfw.WindowHandle,
 ) -> vk.Result {
-  fmt.printfln("recreating swapchain...")
   vk.DeviceWaitIdle(g_device)
   destroy_swapchain(self)
   create_swapchain(self, window) or_return
@@ -285,19 +284,13 @@ create_swapchain :: proc(
   pick_swapchain_format :: proc(
     formats: []vk.SurfaceFormatKHR,
   ) -> vk.SurfaceFormatKHR {
+    ret := vk.SurfaceFormatKHR{.B8G8R8A8_SRGB, .SRGB_NONLINEAR}
     if len(formats) == 0 {
-      // This should not happen if the physical device supports the surface
       fmt.printfln("No surface formats available for swapchain.")
-      return {format = .B8G8R8A8_SRGB, colorSpace = .SRGB_NONLINEAR}
-    } else {
-      i, found := slice.linear_search_proc(
-        formats,
-        proc(fmt: vk.SurfaceFormatKHR) -> bool {
-          return fmt.format == .B8G8R8A8_SRGB
-        },
-      )
-      return formats[i if found else 0]
+      return ret
     }
+    _, found := slice.linear_search(formats, ret)
+    return ret if found else formats[0]
   }
   pick_swapchain_extent :: proc(
     capabilities: vk.SurfaceCapabilitiesKHR,
