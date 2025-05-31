@@ -628,15 +628,12 @@ load_gltf_animations :: proc(
       len(skinning.bones),
     )
     clip.channels = make([]animation.Channel, len(skinning.bones))
-
     max_time: f32 = 0.0
-
     for gltf_channel in gltf_anim.channels {
       if gltf_channel.target_node == nil || gltf_channel.sampler == nil {
         continue
       }
       n := gltf_channel.sampler.input.count
-
       // note: if this get slow, consider using a hash map
       bone_idx, bone_found := slice.linear_search(
         gltf_skin.joints,
@@ -646,7 +643,6 @@ load_gltf_animations :: proc(
         continue
       }
       engine_channel := &clip.channels[bone_idx]
-
       time_data := unpack_accessor_floats_flat(gltf_channel.sampler.input)
       // defer free(time_data)
       max_time = max(max_time, slice.max(time_data))
@@ -656,7 +652,6 @@ load_gltf_animations :: proc(
         gltf_channel.target_path,
         n,
       )
-
       switch gltf_channel.target_path {
       case .translation:
         engine_channel.positions = make(type_of(engine_channel.positions), n)
@@ -682,6 +677,10 @@ load_gltf_animations :: proc(
               w = values[i * 4 + 3],
             ),
           }
+        }
+        if gltf_channel.target_node.name == "Skeleton_arm_joint_L__4_" ||
+        gltf_channel.target_node.name == "Skeleton_arm_joint_R" {
+            fmt.printfln("rotation of %s is %v", gltf_channel.target_node.name, engine_channel.rotations)
         }
       case .scale:
         engine_channel.scales = make(type_of(engine_channel.scales), n)

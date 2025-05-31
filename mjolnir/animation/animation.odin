@@ -35,7 +35,11 @@ keyframe_sample :: proc(frames: []Keyframe($T), t: f32) -> T {
   a := frames[i - 1]
   b := frames[i]
   alpha := (t - a.time) / (b.time - a.time)
-  return linalg.lerp(a.value, b.value, alpha)
+  when T == linalg.Quaternionf16 || T == linalg.Quaternionf32 || T == linalg.Quaternionf64 {
+    return linalg.quaternion_slerp(a.value, b.value, alpha)
+  } else {
+    return linalg.lerp(a.value, b.value, alpha)
+  }
 }
 
 Status :: enum {
