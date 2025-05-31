@@ -46,13 +46,10 @@ mesh_deinit :: proc(self: ^Mesh) {
   }
   data_buffer_deinit(&skin.skin_buffer)
 
-  for &bone in skin.bones {
-    bone_deinit(&bone)
-  }
+  for &bone in skin.bones do bone_deinit(&bone)
   delete(skin.bones)
-  for &clip in skin.animations {
-    animation.clip_deinit(&clip)
-  }
+  for &clip in skin.animations do animation.clip_deinit(&clip)
+
   delete(skin.animations)
 }
 
@@ -163,8 +160,6 @@ sample_clip :: proc(
     )
     world_transform := entry.transform * local_matrix
     out_bone_matrices[entry.bone] = world_transform * bone.inverse_bind_matrix
-    for child_index in bone.children {
-      append(&stack, TraverseEntry{world_transform, child_index})
-    }
+    for child_index in bone.children do append(&stack, TraverseEntry{world_transform, child_index})
   }
 }

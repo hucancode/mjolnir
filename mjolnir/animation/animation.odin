@@ -208,9 +208,8 @@ Clip :: struct {
 }
 
 clip_deinit :: proc(clip: ^Clip) {
-  for &channel in clip.channels {
-    channel_deinit(&channel)
-  }
+  for &channel in clip.channels do channel_deinit(&channel)
+
   delete(clip.channels)
   clip.channels = nil
 }

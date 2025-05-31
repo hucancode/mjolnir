@@ -124,9 +124,8 @@ vulkan_instance_init :: proc() -> vk.Result {
   extensions := make([dynamic]cstring, 0, len(glfw_exts_cstrings) + 2)
   defer delete(extensions)
 
-  for ext in glfw_exts_cstrings {
-    append(&extensions, ext)
-  }
+  for ext in glfw_exts_cstrings do append(&extensions, ext)
+
 
   app_info := vk.ApplicationInfo {
     sType              = .APPLICATION_INFO,

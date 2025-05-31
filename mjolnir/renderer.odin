@@ -246,18 +246,16 @@ renderer_init :: proc(
     self.extent.height,
   ) or_return
   self.current_frame_index = 0
-  for &frame in self.frames {
-    frame_init(&frame) or_return
-  }
+  for &frame in self.frames do frame_init(&frame) or_return
+
   return .SUCCESS
 }
 
 renderer_deinit :: proc(self: ^Renderer) {
   vk.DeviceWaitIdle(g_device)
   destroy_swapchain(self)
-  for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
-    frame_deinit(&self.frames[i])
-  }
+  for i in 0 ..< MAX_FRAMES_IN_FLIGHT do frame_deinit(&self.frames[i])
+
   vk.DestroyDescriptorSetLayout(g_device, g_camera_descriptor_set_layout, nil)
 }
 
@@ -388,9 +386,8 @@ create_swapchain :: proc(
 
 destroy_swapchain :: proc(self: ^Renderer) {
   image_buffer_deinit(&self.depth_buffer)
-  for view in self.views {
-    vk.DestroyImageView(g_device, view, nil)
-  }
+  for view in self.views do vk.DestroyImageView(g_device, view, nil)
+
   delete(self.views)
   self.views = nil
   delete(self.images)

@@ -14,13 +14,9 @@ delete_unallocated_slice :: proc(t: ^testing.T) {
 @(test)
 loop_through_unallocated_slice :: proc(t: ^testing.T) {
   arr :[]u32
-  for x in arr {
-    testing.fail_now(t)
-  }
+  for x in arr do testing.fail_now(t)
   arr = nil
-  for x in arr {
-    testing.fail_now(t)
-  }
+  for x in arr do testing.fail_now(t)
 }
 
 @(test)

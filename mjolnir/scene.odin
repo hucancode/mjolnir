@@ -87,8 +87,7 @@ detach :: proc(nodes: resource.Pool(Node), child_handle: Handle) {
 
 attach :: proc(
   nodes: resource.Pool(Node),
-  parent_handle: Handle,
-  child_handle: Handle,
+  parent_handle, child_handle: Handle,
 ) {
   child_node := resource.get(nodes, child_handle)
   parent_node := resource.get(nodes, parent_handle)
