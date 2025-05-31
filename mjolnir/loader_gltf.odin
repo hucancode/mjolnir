@@ -124,6 +124,13 @@ load_gltf :: proc(
             material = material,
             skinning = NodeSkinning{bone_buffers = bone_buffers},
           }
+          // set bind pose (otherwise zeroed out matrices will cause model to be invisible)
+          for i in 0..<len(bones) {
+              for &buffer in bone_buffers {
+                  mapped := slice.from_ptr(cast(^linalg.Matrix4f32)buffer.mapped, len(bones))
+                  mapped[i] = linalg.MATRIX4F32_IDENTITY
+              }
+          }
           load_gltf_animations(engine, gltf_data, gltf_node.skin, mesh_handle)
         }
       } else {
