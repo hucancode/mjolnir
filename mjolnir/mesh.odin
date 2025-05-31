@@ -56,10 +56,7 @@ mesh_deinit :: proc(self: ^Mesh) {
   delete(skin.animations)
 }
 
-mesh_init :: proc(
-  self: ^Mesh,
-  data: geometry.Geometry,
-) -> vk.Result {
+mesh_init :: proc(self: ^Mesh, data: geometry.Geometry) -> vk.Result {
   self.vertices_len = u32(len(data.vertices))
   self.indices_len = u32(len(data.indices))
   self.aabb = data.aabb
@@ -121,7 +118,6 @@ make_animation_instance :: proc(
       return
     }
   }
-  found = false
   return
 }
 

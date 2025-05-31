@@ -278,8 +278,7 @@ create_swapchain :: proc(
   pick_swap_present_mode :: proc(
     present_modes: []vk.PresentModeKHR,
   ) -> vk.PresentModeKHR {
-    _, found := slice.linear_search(present_modes, vk.PresentModeKHR.MAILBOX)
-    return .MAILBOX if found else .FIFO
+    return .MAILBOX if slice.contains(present_modes, vk.PresentModeKHR.MAILBOX) else .FIFO
   }
   pick_swapchain_format :: proc(
     formats: []vk.SurfaceFormatKHR,
@@ -289,8 +288,7 @@ create_swapchain :: proc(
       fmt.printfln("No surface formats available for swapchain.")
       return ret
     }
-    _, found := slice.linear_search(formats, ret)
-    return ret if found else formats[0]
+    return ret if slice.contains(formats, ret) else formats[0]
   }
   pick_swapchain_extent :: proc(
     capabilities: vk.SurfaceCapabilitiesKHR,
