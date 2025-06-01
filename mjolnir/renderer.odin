@@ -615,6 +615,8 @@ render_single_shadow :: proc(node: ^Node, cb_context: rawptr) -> bool {
     if mesh == nil {
       return true
     }
+    mesh_skinning, mesh_has_skin := &mesh.skinning.?
+    node_skinning, node_has_skin := data.skinning.?
     world_aabb := geometry.aabb_transform(
       mesh.aabb,
       node.transform.world_matrix,
@@ -630,7 +632,7 @@ render_single_shadow :: proc(node: ^Node, cb_context: rawptr) -> bool {
     pipeline := g_shadow_pipelines[transmute(u32)features]
     layout := g_shadow_pipeline_layout
     descriptor_sets: []vk.DescriptorSet
-    if mesh.skinning != nil {
+    if mesh_has_skin {
       pipeline = g_shadow_pipelines[transmute(u32)ShaderFeatureSet{.SKINNING}]
       descriptor_sets = {
         renderer_get_camera_descriptor_set(&ctx.engine.renderer), // set 0
@@ -671,13 +673,18 @@ render_single_shadow :: proc(node: ^Node, cb_context: rawptr) -> bool {
       &mesh.vertex_buffer.buffer,
       &offset,
     )
-    if mesh.skinning != nil {
-      skin := &mesh.skinning.?
+    if mesh_has_skin && node_has_skin {
+      material_update_bone_buffer(
+        material,
+        node_skinning.bone_buffers[frame].buffer,
+        node_skinning.bone_buffers[frame].size,
+        frame,
+      )
       vk.CmdBindVertexBuffers(
         ctx.command_buffer,
         1,
         1,
-        &skin.skin_buffer.buffer,
+        &mesh_skinning.skin_buffer.buffer,
         &offset,
       )
     }

@@ -120,6 +120,7 @@ load_gltf :: proc(
           node.attachment = MeshAttachment {
             handle = mesh_handle,
             material = material,
+            cast_shadow = true,
             skinning = NodeSkinning{bone_buffers = bone_buffers},
           }
           // set bind pose (otherwise zeroed out matrices will cause model to be invisible)
