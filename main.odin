@@ -115,13 +115,15 @@ setup :: proc(engine: ^mjolnir.Engine) {
       if armature_ptr == nil || len(armature_ptr.children) == 0 {
         continue
       }
-      skeleton := armature_ptr.children[len(armature_ptr.children) - 1]
-      skeleton_ptr := resource.get(engine.scene.nodes, skeleton)
-      if skeleton_ptr == nil {
-        continue
+      for i in 1..<len(armature_ptr.children) {
+        skeleton := armature_ptr.children[i]
+        skeleton_ptr := resource.get(engine.scene.nodes, skeleton)
+        if skeleton_ptr == nil {
+            continue
+        }
+        // skeleton_ptr.transform.scale = {0.5, 0.5, 0.5}
+        play_animation(engine, skeleton, "idle")
       }
-      // skeleton_ptr.transform.scale = {0.5, 0.5, 0.5}
-      play_animation(engine, skeleton, "idle")
     }
   }
 
