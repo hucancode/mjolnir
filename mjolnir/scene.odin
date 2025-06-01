@@ -230,32 +230,29 @@ traverse_scene :: proc(
   callback: SceneTraversalCallback = nil,
 ) -> bool {
   using geometry
-  node_stack := make([dynamic]Handle, 0)
-  defer delete(node_stack)
-  transform_stack := make([dynamic]linalg.Matrix4f32, 0)
-  defer delete(transform_stack)
-  dirty_stack := make([dynamic]bool, 0)
-  defer delete(dirty_stack)
+  TraverseEntry :: struct {
+    handle:           Handle,
+    parent_transform: linalg.Matrix4f32,
+    parent_is_dirty:  bool,
+  }
+  n := len(scene.nodes.entries) - len(scene.nodes.free_indices)
+  stack := make([dynamic]TraverseEntry, 0, n)
+  defer delete(stack)
+  append(&stack, TraverseEntry{scene.root, linalg.MATRIX4F32_IDENTITY, false})
 
-  append(&node_stack, scene.root)
-  append(&transform_stack, linalg.MATRIX4F32_IDENTITY)
-  append(&dirty_stack, false)
-
-  for len(node_stack) > 0 {
-    current_node_handle := pop(&node_stack)
-    parent_world_matrix := pop(&transform_stack)
-    parent_is_dirty := pop(&dirty_stack)
-    current_node := resource.get(scene.nodes, current_node_handle)
-    if current_node == nil {
+  for len(stack) > 0 {
+    entry := pop(&stack)
+    current_node, found := resource.get(scene.nodes, entry.handle)
+    if !found {
       log.errorf(
         "traverse_scene: Node with handle %v not found\n",
-        current_node_handle,
+        entry.handle,
       )
       continue
     }
     is_dirty := transform_update_local(&current_node.transform)
-    if parent_is_dirty || is_dirty {
-      transform_update_world(&current_node.transform, parent_world_matrix)
+    if entry.parent_is_dirty || is_dirty {
+      transform_update_world(&current_node.transform, entry.parent_transform)
     }
     if callback != nil {
       if !callback(current_node, cb_context) {
@@ -263,9 +260,14 @@ traverse_scene :: proc(
       }
     }
     for child_handle in current_node.children {
-      append(&node_stack, child_handle)
-      append(&transform_stack, current_node.transform.world_matrix)
-      append(&dirty_stack, is_dirty || parent_is_dirty)
+      append(
+        &stack,
+        TraverseEntry {
+          child_handle,
+          current_node.transform.world_matrix,
+          is_dirty || entry.parent_is_dirty,
+        },
+      )
     }
   }
   return true

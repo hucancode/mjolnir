@@ -99,10 +99,7 @@ read_texture_data :: proc(self: ^Texture, data: []u8) -> vk.Result {
     actual_channels,
   )
   if pixels_ptr == nil {
-    log.errorf(
-      "Failed to load texture from data: %s\n",
-      stbi.failure_reason(),
-    )
+    log.errorf("Failed to load texture from data: %s\n", stbi.failure_reason())
     return .ERROR_UNKNOWN
   }
   num_bytes := int(w * h * 4)
@@ -191,7 +188,9 @@ texture_init :: proc(
 }
 
 texture_deinit :: proc(self: ^Texture) {
-  if self == nil {return}
+  if self == nil {
+    return
+  }
   vk.DestroySampler(g_device, self.sampler, nil)
   self.sampler = 0
   image_buffer_deinit(&self.buffer)
@@ -227,7 +226,9 @@ depth_texture_init :: proc(
 }
 
 depth_texture_deinit :: proc(self: ^DepthTexture) {
-  if self == nil {return}
+  if self == nil {
+    return
+  }
   vk.DestroySampler(g_device, self.sampler, nil)
   self.sampler = 0
   image_buffer_deinit(&self.buffer)
@@ -438,7 +439,9 @@ cube_depth_texture_init :: proc(
 }
 
 cube_depth_texture_deinit :: proc(self: ^CubeDepthTexture) {
-  if self == nil {return}
+  if self == nil {
+    return
+  }
   vk.DestroySampler(g_device, self.sampler, nil)
   self.sampler = 0
   for i in 0 ..< 6 {
@@ -478,12 +481,7 @@ create_hdr_texture_from_path :: proc(
   texture.image_data.channels_in_file = 3
   texture.image_data.actual_channels = 4
   texture_init(texture, .R32G32B32A32_SFLOAT) or_return
-  log.infof(
-    "created HDR texture %d x %d -> id %d",
-    w,
-    h,
-    texture.buffer.image,
-  )
+  log.infof("created HDR texture %d x %d -> id %d", w, h, texture.buffer.image)
   ret = .SUCCESS
   return
 }

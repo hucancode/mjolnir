@@ -1,7 +1,7 @@
 package mjolnir
 
-import "core:log"
 import "core:fmt"
+import "core:log"
 import "core:math"
 import linalg "core:math/linalg"
 import "core:slice"
@@ -63,7 +63,6 @@ Frame :: struct {
   command_buffer:                 vk.CommandBuffer,
   camera_uniform:                 DataBuffer,
   light_uniform:                  DataBuffer,
-
   shadow_maps:                    [MAX_SHADOW_MAPS]DepthTexture,
   cube_shadow_maps:               [MAX_SHADOW_MAPS]CubeDepthTexture,
   camera_descriptor_set:          vk.DescriptorSet,
@@ -520,9 +519,13 @@ render_single_node :: proc(node: ^Node, cb_context: rawptr) -> bool {
   #partial switch data in node.attachment {
   case MeshAttachment:
     mesh := resource.get(ctx.engine.meshes, data.handle)
-    if mesh == nil {return true}
+    if mesh == nil {
+      return true
+    }
     material := resource.get(ctx.engine.materials, data.material)
-    if material == nil {return true}
+    if material == nil {
+      return true
+    }
     world_aabb := geometry.aabb_transform(
       mesh.aabb,
       node.transform.world_matrix,
@@ -609,7 +612,9 @@ render_single_shadow :: proc(node: ^Node, cb_context: rawptr) -> bool {
       return true
     }
     mesh := resource.get(ctx.engine.meshes, data.handle)
-    if mesh == nil {return true}
+    if mesh == nil {
+      return true
+    }
     world_aabb := geometry.aabb_transform(
       mesh.aabb,
       node.transform.world_matrix,
@@ -618,7 +623,9 @@ render_single_shadow :: proc(node: ^Node, cb_context: rawptr) -> bool {
       return true
     }
     material := resource.get(ctx.engine.materials, data.material)
-    if material == nil {return true}
+    if material == nil {
+      return true
+    }
     features: ShaderFeatureSet
     pipeline := g_shadow_pipelines[transmute(u32)features]
     layout := g_shadow_pipeline_layout

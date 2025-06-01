@@ -220,10 +220,7 @@ build_renderer :: proc(engine: ^Engine) -> vk.Result {
     ) or_return
 
   engine.renderer.brdf_lut_handle, engine.renderer.brdf_lut =
-    create_texture_from_path(
-      engine,
-      "assets/lut_ggx.png",
-    ) or_return
+    create_texture_from_path(engine, "assets/lut_ggx.png") or_return
 
   alloc_info_env := vk.DescriptorSetAllocateInfo {
       sType              = .DESCRIPTOR_SET_ALLOCATE_INFO,
@@ -299,17 +296,20 @@ update :: proc(engine: ^Engine) -> bool {
       continue
     }
     animation.instance_update(anim_inst, delta_time)
-    mesh := resource.get(engine.meshes, data.handle)
-    if mesh == nil {
+    mesh, found := resource.get(engine.meshes, data.handle)
+    if !found {
       continue
     }
     mesh_skin, mesh_has_skin := mesh.skinning.?
     if !mesh_has_skin {
-        continue
+      continue
     }
     frame := engine.renderer.current_frame_index
     buffer := skinning.bone_buffers[frame]
-    bone_matrices := slice.from_ptr(cast(^linalg.Matrix4f32)buffer.mapped, len(mesh_skin.bones))
+    bone_matrices := slice.from_ptr(
+      cast(^linalg.Matrix4f32)buffer.mapped,
+      len(mesh_skin.bones),
+    )
     sample_clip(mesh, anim_inst.clip_handle, anim_inst.time, bone_matrices)
     //animation.pose_flush(&skinning.pose, buffer.mapped)
   }

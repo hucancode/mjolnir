@@ -1,7 +1,7 @@
 package mjolnir
 
-import "core:log"
 import "core:fmt"
+import "core:log"
 import "core:mem"
 import "core:os"
 import path "core:path/filepath"
@@ -607,7 +607,9 @@ load_gltf_skinned_primitive :: proc(
 
 // Helper to unpack accessor data into a flat []f32. Caller must free the returned slice.
 unpack_accessor_floats_flat :: proc(accessor: ^cgltf.accessor) -> []f32 {
-  if accessor == nil {return nil}
+  if accessor == nil {
+    return nil
+  }
   n := accessor.count * cgltf.num_components(accessor.type)
   ret := make([]f32, n)
   _ = cgltf.accessor_unpack_floats(accessor, raw_data(ret), n)

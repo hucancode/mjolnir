@@ -69,19 +69,25 @@ free :: proc(pool: ^Pool($T), handle: Handle) {
   append(&pool.free_indices, handle.index)
 }
 
-get :: proc(pool: Pool($T), handle: Handle) -> ^T {
+get :: proc(
+  pool: Pool($T),
+  handle: Handle,
+) -> (
+  ret: ^T,
+  found: bool,
+) #optional_ok {
   if handle.index >= u32(len(pool.entries)) {
     // log.debugf("ResourcePool.get: index (%v) out of bounds (%v)", handle.index, len(pool.entries))
-    return nil
+    return nil, false
   }
   entry := &pool.entries[handle.index]
   if !entry.active {
     // log.debugf("ResourcePool.get: index (%v) has been freed", handle.index) // Optional debug
-    return nil
+    return nil, false
   }
   if entry.generation != handle.generation {
     // log.debugf("ResourcePool.get: index (%v) generation mismatch, handle: %v vs entry: %v", handle.index, handle.generation, entry.generation) // Optional debug
-    return nil
+    return nil, false
   }
-  return &entry.item
+  return &entry.item, true
 }

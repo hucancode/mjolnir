@@ -27,14 +27,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
   using mjolnir, geometry
   plain_material_handle, _, _ := create_material(engine)
   cube_geom := make_cube()
-  cube_mesh_handle, _, _ := create_mesh(
-    engine,
-    cube_geom,
-  )
-  sphere_mesh_handle, _, _ := create_mesh(
-    engine,
-    make_sphere(),
-  )
+  cube_mesh_handle, _, _ := create_mesh(engine, cube_geom)
+  sphere_mesh_handle, _, _ := create_mesh(engine, make_sphere())
   // Create ground plane
   ground_albedo_handle, _, _ := create_texture_from_path(
     engine,
@@ -49,10 +43,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     {.ALBEDO_TEXTURE},
     ground_albedo_handle,
   )
-  ground_mesh_handle, _, _ := create_mesh(
-    engine,
-    make_quad(),
-  )
+  ground_mesh_handle, _, _ := create_mesh(engine, make_quad())
   if true {
     // Spawn cubes in a grid
     space: f32 = 1.0
@@ -63,10 +54,10 @@ setup :: proc(engine: ^mjolnir.Engine) {
         for z in 1 ..< nz {
           node_handle, node := spawn(
             &engine.scene,
-            MeshAttachment{
-                handle = sphere_mesh_handle,
-                material = plain_material_handle,
-                cast_shadow = true,
+            MeshAttachment {
+              handle = sphere_mesh_handle,
+              material = plain_material_handle,
+              cast_shadow = true,
             },
           )
           translate(
@@ -85,7 +76,10 @@ setup :: proc(engine: ^mjolnir.Engine) {
     size: f32 = 10.0
     ground_handle, ground_node := spawn(
       &engine.scene,
-      MeshAttachment{handle = ground_mesh_handle, material = ground_mat_handle},
+      MeshAttachment {
+        handle = ground_mesh_handle,
+        material = ground_mat_handle,
+      },
     )
     translate(&ground_node.transform, x = -0.5 * size, z = -0.5 * size)
     scale(&ground_node.transform, size)
@@ -94,8 +88,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
     gltf_nodes := load_gltf(engine, "assets/Suzanne.glb") or_else {}
     log.infof("Loaded GLTF nodes: %v", gltf_nodes)
     for handle in gltf_nodes {
-      duck := resource.get(engine.scene.nodes, handle)
-      if duck == nil {
+      duck, found := resource.get(engine.scene.nodes, handle)
+      if !found {
         continue
       }
       translate(&duck.transform, 0, 2, -2)
@@ -105,8 +99,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
     gltf_nodes := load_gltf(engine, "assets/DamagedHelmet.glb") or_else {}
     log.infof("Loaded GLTF nodes: %v", gltf_nodes)
     for handle in gltf_nodes {
-      helm := resource.get(engine.scene.nodes, handle)
-      if helm == nil {
+      helm, found := resource.get(engine.scene.nodes, handle)
+      if !found {
         continue
       }
       translate(&helm.transform, 0, 1, 2)
@@ -166,7 +160,10 @@ setup :: proc(engine: ^mjolnir.Engine) {
     light_cube_handles[i], cube_node = spawn_child(
       &engine.scene,
       light_handles[i],
-      MeshAttachment{handle = cube_mesh_handle, material = plain_material_handle},
+      MeshAttachment {
+        handle = cube_mesh_handle,
+        material = plain_material_handle,
+      },
     )
     scale(&cube_node.transform, 0.1)
   }
@@ -191,9 +188,6 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
     t := time_since_app_start(engine) + offset
     // log.infof("getting light %d %v", i, light_handles[i])
     light_ptr := resource.get(engine.scene.nodes, handle)
-    if light_ptr == nil {
-      continue
-    }
     rx := math.sin(t)
     ry := (math.sin(t) + 1.0) * 0.5 * 1.5 + 1.0
     rz := math.cos(t)
@@ -203,9 +197,6 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
     translate(&light_ptr.transform, v.x, v.y, v.z)
     // log.infof("Light %d position: %v", i, light_ptr.transform.position)
     light_cube_ptr := resource.get(engine.scene.nodes, light_cube_handles[i])
-    if light_cube_ptr == nil {
-      continue
-    }
     rotate_angle(
       &light_cube_ptr.transform,
       math.PI * time_since_app_start(engine) * 0.5,
