@@ -434,6 +434,7 @@ load_gltf_skinned_primitive :: proc(
   }
   primitive := &primitives[0]
   log.infof("Creating texture for skinned material...")
+  // TODO: reuse textures and material whenever possible (currently creating new resources everytime)
   albedo_handle, metallic_roughness_handle, normal_handle, displacement_handle, emissive_handle, features :=
     load_gltf_pbr_textures(
       engine,
