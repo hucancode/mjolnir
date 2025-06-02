@@ -116,7 +116,9 @@ load_gltf :: proc(
           skinning.root_bone_index = root_bone_idx
           bone_buffers: [MAX_FRAMES_IN_FLIGHT]DataBuffer
           buffer_size := size_of(linalg.Matrix4f32) * vk.DeviceSize(len(bones))
-          for &buffer in bone_buffers do buffer, _ = create_host_visible_buffer(buffer_size, {.STORAGE_BUFFER})
+          for &buffer in bone_buffers {
+              buffer, _ = create_host_visible_buffer(buffer_size, {.STORAGE_BUFFER})
+          }
           node.attachment = MeshAttachment {
             handle = mesh_handle,
             material = material,
@@ -181,7 +183,6 @@ load_gltf :: proc(
   }
   return created_root_handles[:], .success
 }
-
 
 load_gltf_texture :: proc(
   engine: ^Engine,

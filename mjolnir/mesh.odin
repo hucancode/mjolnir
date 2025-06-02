@@ -97,12 +97,10 @@ make_animation_instance :: proc(
 ) {
   skin, has_skin := &self.skinning.?
   if !has_skin {
-    found = false
-    return
+    return instance, false
   }
   for clip, i in skin.animations {
     if clip.name == animation_name {
-      found = true
       instance = {
         clip_handle = u32(i),
         mode        = mode,
@@ -111,10 +109,10 @@ make_animation_instance :: proc(
         duration    = clip.duration,
         speed       = speed,
       }
-      return
+      return instance, true
     }
   }
-  return
+  return instance, false
 }
 
 sample_clip :: proc(
