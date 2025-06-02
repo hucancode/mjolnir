@@ -407,11 +407,7 @@ load_gltf_primitive :: proc(
       return
     }
   }
-  mesh_data = geometry.Geometry {
-    vertices = vertices,
-    indices  = indices,
-    aabb     = geometry.aabb_from_vertices(vertices),
-  }
+  mesh_data = geometry.make_geometry(vertices, indices)
   return mesh_data, material_handle, .SUCCESS
 }
 
@@ -549,12 +545,7 @@ load_gltf_skinned_primitive :: proc(
       return
     }
   }
-  geometry_data = {
-    vertices  = vertices,
-    skinnings = skinnings,
-    indices   = indices,
-    aabb      = geometry.aabb_from_vertices(vertices),
-  }
+  geometry_data = geometry.make_geometry(vertices, indices, skinnings)
   // Bones
   engine_bones = make([]Bone, len(gltf_skin.joints))
   for joint_node, i in gltf_skin.joints {

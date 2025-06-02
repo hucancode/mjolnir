@@ -119,19 +119,10 @@ Geometry :: struct {
   aabb:      Aabb,
 }
 
-
-make_geometry :: proc(vertices: []Vertex, indices: []u32) -> Geometry {
-  return {
-    vertices = vertices,
-    indices = indices,
-    aabb = aabb_from_vertices(vertices),
-  }
-}
-
-make_skinned_geometry :: proc(
+make_geometry :: proc(
   vertices: []Vertex,
-  skinnings: []SkinningData,
   indices: []u32,
+  skinnings: []SkinningData = nil,
 ) -> Geometry {
   return {
     vertices = vertices,
@@ -141,7 +132,6 @@ make_skinned_geometry :: proc(
   }
 }
 
-// make_cube creates a cube geometry. If color is not specified, uses default white.
 make_cube :: proc(color: [4]f32 = {1.0, 1.0, 1.0, 1.0}) -> (ret: Geometry) {
   ret.vertices = make([]Vertex, 24)
   ret.indices = make([]u32, 36)
@@ -623,14 +613,12 @@ make_cylinder :: proc(
     p[0], p[1], p[2], p[3], p[4], p[5] = a, c, b, b, c, d
     i += 6
   }
-  // Top cap (corrected winding: center, next, current)
   top_rim := top_center + 1
   for seg in 0 ..< segments {
     p := ret.indices[i:]
     p[0], p[1], p[2] = top_center, top_rim + seg + 1, top_rim + seg
     i += 3
   }
-  // Bottom cap (corrected winding: center, current, next)
   bottom_rim := bottom_center + 1
   for seg in 0 ..< segments {
     p := ret.indices[i:]
