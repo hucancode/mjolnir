@@ -52,11 +52,16 @@ setup :: proc(engine: ^mjolnir.Engine) {
     for x in 1 ..< nx {
       for y in 1 ..< ny {
         for z in 1 ..< nz {
+          mat_handle, _ := create_material(
+              engine = engine,
+              metallic_value = f32(x)/f32(nx),
+              roughness_value = f32(y)/f32(ny),
+          ) or_continue
           node_handle, node := spawn(
             &engine.scene,
             MeshAttachment {
               handle = sphere_mesh_handle,
-              material = plain_material_handle,
+              material = mat_handle,
               cast_shadow = true,
             },
           )
@@ -73,7 +78,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   }
   if true {
     // Ground node
-    size: f32 = 10.0
+    size: f32 = 15.0
     ground_handle, ground_node := spawn(
       &engine.scene,
       MeshAttachment {
