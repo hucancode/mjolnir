@@ -691,6 +691,10 @@ align_up :: proc(value: int, alignment: int) -> int {
   return (value + alignment - 1) & ~(alignment - 1)
 }
 
+data_buffer_write :: proc {
+  data_buffer_write_single,
+  data_buffer_write_multi,
+}
 data_buffer_write_single :: proc(
   self: DataBuffer($T),
   data: ^T,
@@ -708,7 +712,7 @@ data_buffer_write_single :: proc(
   return .SUCCESS
 }
 
-data_buffer_write :: proc(
+data_buffer_write_multi :: proc(
   self: DataBuffer($T),
   data: []T,
   index: int = 0,
@@ -725,11 +729,8 @@ data_buffer_write :: proc(
   return .SUCCESS
 }
 
-data_buffer_offset_of :: proc(
-    self: DataBuffer($T),
-    index: u32,
-) -> u32 {
-    return index * u32(self.element_size)
+data_buffer_offset_of :: proc(self: DataBuffer($T), index: u32) -> u32 {
+  return index * u32(self.element_size)
 }
 
 data_buffer_deinit :: proc(buffer: ^DataBuffer($T)) {

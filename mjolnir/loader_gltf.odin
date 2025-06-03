@@ -116,7 +116,11 @@ load_gltf :: proc(
           skinning.root_bone_index = root_bone_idx
           bone_buffers: [MAX_FRAMES_IN_FLIGHT]DataBuffer(linalg.Matrix4f32)
           for &buffer in bone_buffers {
-              buffer, _ = create_host_visible_buffer(linalg.Matrix4f32, len(bones), {.STORAGE_BUFFER})
+            buffer = create_host_visible_buffer(
+              linalg.Matrix4f32,
+              len(bones),
+              {.STORAGE_BUFFER},
+            ) or_continue
           }
           node.attachment = MeshAttachment {
             handle = mesh_handle,
@@ -341,7 +345,7 @@ load_gltf_primitive :: proc(
       gltf_data,
       primitive.material,
     ) or_return
-  material_handle, _, _ = create_material(
+  material_handle, _ = create_material(
     engine,
     features,
     albedo_handle,
@@ -349,7 +353,7 @@ load_gltf_primitive :: proc(
     normal_handle,
     displacement_handle,
     emissive_handle,
-  )
+  ) or_return
   vertices_num := primitive.attributes[0].data.count
   vertices := make([]geometry.Vertex, vertices_num)
   for attribute in primitive.attributes {

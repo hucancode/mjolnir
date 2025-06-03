@@ -749,11 +749,11 @@ render :: proc(engine: ^Engine) -> vk.Result {
   render_shadow_pass(engine, &light_uniform, command_buffer) or_return
   // log.infof("============ rendering main pass =============")
   render_main_pass(engine, command_buffer, image_idx, camera_frustum) or_return
-  data_buffer_write_single(
+  data_buffer_write(
     renderer_get_camera_uniform(&engine.renderer)^,
     &scene_uniform,
   )
-  data_buffer_write_single(
+  data_buffer_write(
     renderer_get_light_uniform(&engine.renderer)^,
     &light_uniform,
   )
@@ -951,7 +951,7 @@ render_shadow_pass :: proc(
           view       = view,
           projection = proj,
         }
-        data_buffer_write_single(
+        data_buffer_write(
           renderer_get_camera_uniform(&engine.renderer)^,
           &shadow_scene_uniform,
           i * 6 + face + 1,
@@ -1023,7 +1023,7 @@ render_shadow_pass :: proc(
         view       = view,
         projection = proj,
       }
-      data_buffer_write_single(
+      data_buffer_write(
         renderer_get_camera_uniform(&engine.renderer)^,
         &shadow_scene_uniform,
         i * 6 + 1,
