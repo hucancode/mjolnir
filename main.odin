@@ -17,6 +17,7 @@ light_cube_handles: [LIGHT_COUNT]mjolnir.Handle
 engine: mjolnir.Engine
 
 main :: proc() {
+  context.logger = log.create_console_logger()
   engine.setup_proc = setup
   engine.update_proc = update
   engine.key_press_proc = on_key_pressed
@@ -45,7 +46,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   )
   ground_mesh_handle, _, _ := create_mesh(engine, make_quad())
   if true {
-    // Spawn cubes in a grid
+    log.info("spawning cubes in a grid")
     space: f32 = 1.0
     size: f32 = 0.3
     nx, ny, nz := 5, 2, 5
@@ -77,6 +78,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     }
   }
   if true {
+    log.info("spawning ground quad")
     // Ground node
     size: f32 = 15.0
     ground_handle, ground_node := spawn(
@@ -90,6 +92,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     scale(&ground_node.transform, size)
   }
   if true {
+    log.info("loading GLTF...")
     gltf_nodes := load_gltf(engine, "assets/Suzanne.glb") or_else {}
     log.infof("Loaded GLTF nodes: %v", gltf_nodes)
     for handle in gltf_nodes {
@@ -101,6 +104,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     }
   }
   if true {
+    log.info("loading GLTF...")
     gltf_nodes := load_gltf(engine, "assets/DamagedHelmet.glb") or_else {}
     log.infof("Loaded GLTF nodes: %v", gltf_nodes)
     for handle in gltf_nodes {
@@ -113,6 +117,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     }
   }
   if true {
+    log.info("loading GLTF...")
     gltf_nodes := load_gltf(engine, "assets/Warrior.glb") or_else {}
     log.infof("Loaded GLTF nodes: %v", gltf_nodes)
     for armature in gltf_nodes {
@@ -131,7 +136,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
       }
     }
   }
-
+  log.infof("creating %d lights", LIGHT_COUNT)
   // Create lights and light cubes
   for i in 0 ..< LIGHT_COUNT {
     color := linalg.Vector4f32 {

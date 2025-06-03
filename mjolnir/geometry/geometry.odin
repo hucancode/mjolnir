@@ -114,7 +114,7 @@ aabb_from_vertices :: proc(vertices: []Vertex) -> (ret: Aabb) {
 
 Geometry :: struct {
   vertices:  []Vertex,
-  skinnings: Maybe([]SkinningData),
+  skinnings: []SkinningData,
   indices:   []u32,
   aabb:      Aabb,
 }

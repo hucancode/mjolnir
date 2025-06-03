@@ -142,7 +142,6 @@ load_gltf :: proc(
         }
       } else {
         log.infof("Loading static mesh %s", string(gltf_node.name))
-        log.infof("Processing static mesh data...")
         mesh_data, mat_handle, res := load_gltf_primitive(
           engine,
           path,
@@ -154,13 +153,14 @@ load_gltf :: proc(
           continue
         }
         log.infof(
-          "Initializing static mesh with %d vertices, %d indices",
+          "Initializing static mesh with %d vertices, %d indices %v",
           len(mesh_data.vertices),
           len(mesh_data.indices),
+          mesh_data.skinnings,
         )
         mesh_handle, _, ret := create_mesh(engine, mesh_data)
         if ret != .SUCCESS {
-          log.errorf("Failed to create static mesh:", ret)
+          log.error("Failed to create static mesh ", ret)
           continue
         }
         node.attachment = MeshAttachment {
@@ -249,6 +249,7 @@ load_gltf_pbr_textures :: proc(
     ret = .ERROR_UNKNOWN
     return
   }
+  log.info("loading pbr textures")
   albedo_handle, _ = load_gltf_texture(
     engine,
     gltf_path,
