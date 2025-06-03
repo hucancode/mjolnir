@@ -80,11 +80,8 @@ float linearizeDepth(float depth, float near, float far) {
 float textureProj(uint lightIdx, vec3 shadowCoord) {
     Light light = lights[lightIdx];
     vec3 surfaceToLight = light.position.xyz - position;
-
     float shadowDepth = texture(shadowMaps[lightIdx], shadowCoord.xy).r;
     float currentDepth = shadowCoord.z;
-
-
     float near = 0.01;
     float far = light.radius;
 
@@ -114,79 +111,30 @@ float filterPCF(uint lightIdx, vec3 projCoords) {
     return shadow;
 }
 
-float calculatePointShadow(uint lightIdx) {
-    vec3 lightToSurface = position - lights[lightIdx].position.xyz;
-    float shadowDepth = texture(cubeShadowMaps[lightIdx], normalize(lightToSurface)).r;
-    // Reconstruct linear depth from perspective depth
-    float near = 0.01;
-    float far = lights[lightIdx].radius;
-    shadowDepth = linearizeDepth(shadowDepth, near, far);
-    float currentDepth = max(abs(lightToSurface.x), max(abs(lightToSurface.y), abs(lightToSurface.z)));
-    // return fract(shadowDepth/currentDepth);
-    float bias_max = pow(lights[lightIdx].radius, 0.3)*0.5;
-    float bias_min = bias_max*0.1;
-    float bias = max(bias_max * (1.0 - dot(normalize(normal), normalize(lightToSurface))), bias_min);
-    return smoothstep(currentDepth - bias, currentDepth, shadowDepth);
-}
-
 float calculateShadow(uint lightIdx) {
-    if (lights[lightIdx].hasShadow == 0) {
-        return 1.0;
-    }
+    if (lights[lightIdx].hasShadow == 0) return 1;
     if (lights[lightIdx].kind == POINT_LIGHT) {
-        return calculatePointShadow(lightIdx);
+        vec3 lightToSurface = position - lights[lightIdx].position.xyz;
+        float shadowDepth = texture(cubeShadowMaps[lightIdx], normalize(lightToSurface)).r;
+        // Reconstruct linear depth from perspective depth
+        float near = 0.01;
+        float far = lights[lightIdx].radius;
+        shadowDepth = linearizeDepth(shadowDepth, near, far);
+        float currentDepth = max(abs(lightToSurface.x), max(abs(lightToSurface.y), abs(lightToSurface.z)));
+        // return fract(shadowDepth/currentDepth);
+        float bias_max = pow(lights[lightIdx].radius, 0.3)*0.5;
+        float bias_min = bias_max*0.1;
+        float bias = max(bias_max * (1.0 - dot(normalize(normal), normalize(lightToSurface))), bias_min);
+        return smoothstep(currentDepth - bias, currentDepth, shadowDepth);
     }
     vec4 lightSpacePos = lights[lightIdx].viewProj * vec4(position, 1.0);
     vec3 shadowCoord = lightSpacePos.xyz / lightSpacePos.w;
     shadowCoord = shadowCoord * 0.5 + 0.5;
-    if (shadowCoord.x < 0.0 || shadowCoord.x > 1.0 ||
-            shadowCoord.y < 0.0 || shadowCoord.y > 1.0 ||
-            shadowCoord.z < 0.0 || shadowCoord.z > 1.0) {
-        return 1.0;
-    }
+    bool outOfSight = shadowCoord.x < 0.0 || shadowCoord.x > 1.0 ||
+                shadowCoord.y < 0.0 || shadowCoord.y > 1.0 ||
+                shadowCoord.z < 0.0 || shadowCoord.z > 1.0;
+    if (outOfSight) return 1.0;
     return filterPCF(lightIdx, shadowCoord);
-}
-vec3 calculateLighting(Light light, vec3 viewDir, vec3 albedo) {
-    if (light.kind == POINT_LIGHT) {
-        vec3 surfaceToLight = normalize(light.position.xyz - position);
-        float diff = max(dot(normal, surfaceToLight), 0.0);
-        vec3 diffuse = diff * diffuseStrength * light.color.rgb * albedo;
-        vec3 specular = vec3(0.0);
-        if (diff > 0.0) {
-            specular = pow(max(dot(reflect(-surfaceToLight, normal), viewDir), 0.0), shininess) * specularStrength * light.color.rgb;
-        }
-        float distance = length(position - light.position.xyz);
-        // Standard quadratic attenuation
-        float constant = 1.0;
-        float linear = 0.09;
-        float quadratic = 0.032;
-        float attenuation = 1.0 / (constant + linear * distance + quadratic * (distance * distance));
-        // Hard cutoff at light.radius
-        if (distance > light.radius) attenuation = 0.0;
-        return (diffuse + specular) * attenuation;
-    }
-    if (light.kind == DIRECTIONAL_LIGHT) {
-        vec3 surfaceToLight = -light.direction.xyz;
-        vec3 diffuse = max(dot(normal, surfaceToLight), 0.0) * albedo * diffuseStrength;
-        return diffuse;
-    }
-    if (light.kind == SPOT_LIGHT) {
-        vec3 surfaceToLight = normalize(light.position.xyz - position);
-        float diff = max(dot(normal, surfaceToLight), 0.0);
-        float distance = length(light.position.xyz - position);
-        float attenuation = max(0.0, 1.0 - distance / max(0.001, light.radius));
-        // Spotlight cone attenuation
-        float theta = dot(surfaceToLight, normalize(-light.direction.xyz));
-        float epsilon = 0.05; // Soft edge
-        float coneAtten = smoothstep(cos(light.angle), cos(light.angle - epsilon), theta);
-        vec3 diffuse = diff * albedo * light.color.rgb * diffuseStrength;
-        vec3 specular = vec3(0.0);
-        if (diff > 0.0) {
-            specular = pow(max(dot(reflect(-surfaceToLight, normal), viewDir), 0.0), shininess) * specularStrength * light.color.rgb;
-        }
-        return (diffuse + specular) * attenuation * coneAtten;
-    }
-    return vec3(0.0);
 }
 
 vec3 brdf(vec3 N, vec3 V, vec3 albedo, float roughness, float metallic) {
@@ -220,16 +168,13 @@ vec3 brdf(vec3 N, vec3 V, vec3 albedo, float roughness, float metallic) {
 
 void main() {
     vec3 cameraPosition = -inverse(view)[3].xyz;
-    // --- PBR Texture Sampling and Fallbacks ---
     vec3 albedo = HAS_ALBEDO_TEXTURE ? texture(albedoSampler, uv).rgb : albedoValue.rgb;
     float occlusion = HAS_METALLIC_ROUGHNESS_TEXTURE ? texture(metallicRoughnessSampler, uv).r : 1.0;
     float roughness = HAS_METALLIC_ROUGHNESS_TEXTURE ? texture(metallicRoughnessSampler, uv).g : roughnessValue;
     float metallic = HAS_METALLIC_ROUGHNESS_TEXTURE ? texture(metallicRoughnessSampler, uv).b : metallicValue;
     vec3 emissive = HAS_EMISSIVE_TEXTURE ? texture(emissiveSampler, uv).rgb : emissiveValue.rgb;
-
     metallic = clamp(metallic, 0.0, 1.0);
     roughness = clamp(roughness, 0.0, 1.0);
-    // --- Normal Mapping ---
     vec3 N = normalize(normal);
     if (HAS_NORMAL_TEXTURE && false) {
         vec3 tangentNormal = texture(normalSampler, uv).xyz * 2.0 - 1.0;
@@ -237,41 +182,28 @@ void main() {
         // Here we assume tangent == world for simplicity.
         N = normalize(tangentNormal);
     }
-
-    // --- Displacement Mapping ---
     vec3 displacedPosition = position;
     if (HAS_DISPLACEMENT_TEXTURE) {
         float disp = texture(displacementSampler, uv).r;
         // Displace along the normal direction
         displacedPosition += N * disp;
     }
-
-    // --- View Direction ---
     vec3 V = normalize(cameraPosition - displacedPosition);
-
-    // --- IBL using a 2D equirectangular environment map and BRDF LUT ---
+    vec3 R = reflect(-V, N);
+    vec3 F0 = mix(vec3(0.04), albedo, metallic);
     // Diffuse: sample environment in the normal direction (approximate)
     vec2 uvN = dirToEquirectUV(N);
     vec3 diffuseIBL = texture(environmentMap, uvN).rgb * albedo;
-
     // Specular: sample environment in the reflection direction (no LOD, no roughness blur)
-    vec3 R = reflect(-V, N);
     vec2 uvR = dirToEquirectUV(R);
     vec3 prefilteredColor = texture(environmentMap, uvR).rgb;
-
-    vec3 F0 = mix(vec3(0.04), albedo, metallic);
     float NdotV = max(dot(N, V), 0.0);
     vec2 brdfSample = texture(brdfLUT, vec2(NdotV, roughness)).rg;
     // Attenuate specular by (1.0 - roughness) to fake roughness blur
     vec3 specularIBL = prefilteredColor * (F0 * brdfSample.x + brdfSample.y) * (1.0 - roughness)*0.1;
-
     vec3 kS = F0 + (1.0 - F0) * pow(1.0 - NdotV, 5.0);
     vec3 kD = (vec3(1.0) - kS) * (1.0 - metallic);
-
     vec3 ambient = kD * diffuseIBL + specularIBL + emissive;
-
-    // --- PBR Lighting ---
     vec3 colorOut = ambient * 0.5 + brdf(N, V, albedo, roughness, metallic);
-
     outColor = vec4(colorOut , 1.0);
 }
