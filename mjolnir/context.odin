@@ -12,6 +12,7 @@ when ODIN_OS == .Darwin {
   // NOTE: just a bogus import of the system library,
   // needed so we can add a linker flag to point to /usr/local/lib (where vulkan is installed by default)
   // when trying to load vulkan.
+  // Otherwise we will have to `export LD_LIBRARY_PATH=/usr/local/lib/` everytime we run the app
   // Credit goes to : https://gist.github.com/laytan/ba57af3e5a59ab5cb2fca9e25bcfe262
   @(require, extra_linker_flags = "-rpath /usr/local/lib")
   foreign import __ "system:System.framework"
@@ -25,7 +26,7 @@ DEVICE_EXTENSIONS :: []cstring {
   vk.KHR_DYNAMIC_RENDERING_EXTENSION_NAME,
 }
 
-ENABLE_VALIDATION_LAYERS :: #config(ENABLE_VALIDATION_LAYERS, ODIN_DEBUG) // Default to true in debug builds
+ENABLE_VALIDATION_LAYERS :: #config(ENABLE_VALIDATION_LAYERS, ODIN_DEBUG)
 
 when ENABLE_VALIDATION_LAYERS {
   VALIDATION_LAYERS :: []cstring{"VK_LAYER_KHRONOS_validation"}
