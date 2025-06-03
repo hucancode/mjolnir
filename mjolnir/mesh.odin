@@ -23,14 +23,14 @@ Skinning :: struct {
   root_bone_index: u32,
   bones:           []Bone,
   animations:      []animation.Clip,
-  skin_buffer:     DataBuffer,
+  skin_buffer:     DataBuffer(geometry.SkinningData),
 }
 
 Mesh :: struct {
   vertices_len:  u32,
   indices_len:   u32,
-  vertex_buffer: DataBuffer,
-  index_buffer:  DataBuffer,
+  vertex_buffer: DataBuffer(geometry.Vertex),
+  index_buffer:  DataBuffer(u32),
   aabb:          geometry.Aabb,
   skinning:      Maybe(Skinning),
 }
@@ -56,24 +56,24 @@ mesh_init :: proc(self: ^Mesh, data: geometry.Geometry) -> vk.Result {
   self.vertices_len = u32(len(data.vertices))
   self.indices_len = u32(len(data.indices))
   self.aabb = data.aabb
-  size := len(data.vertices) * size_of(geometry.Vertex)
   self.vertex_buffer = create_local_buffer(
-    vk.DeviceSize(size),
+    geometry.Vertex,
+    len(data.vertices),
     {.VERTEX_BUFFER},
     raw_data(data.vertices),
   ) or_return
-  size = len(data.indices) * size_of(u32)
   self.index_buffer = create_local_buffer(
-    vk.DeviceSize(size),
+    u32,
+    len(data.indices),
     {.INDEX_BUFFER},
     raw_data(data.indices),
   ) or_return
 
   skinnings, has_skin := data.skinnings.?
   if has_skin {
-    size = len(skinnings) * size_of(geometry.SkinningData)
     skin_buffer := create_local_buffer(
-      vk.DeviceSize(size),
+      geometry.SkinningData,
+      len(skinnings),
       {.VERTEX_BUFFER},
       raw_data(skinnings),
     ) or_return

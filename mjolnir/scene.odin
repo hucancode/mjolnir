@@ -27,7 +27,7 @@ SpotLightAttachment :: struct {
 }
 
 NodeSkinning :: struct {
-  bone_buffers: [MAX_FRAMES_IN_FLIGHT]DataBuffer,
+  bone_buffers: [MAX_FRAMES_IN_FLIGHT]DataBuffer(linalg.Matrix4f32),
   animation:    Maybe(animation.Instance),
 }
 

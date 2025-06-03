@@ -114,10 +114,9 @@ load_gltf :: proc(
           skinning, _ := &mesh.skinning.?
           skinning.bones = bones
           skinning.root_bone_index = root_bone_idx
-          bone_buffers: [MAX_FRAMES_IN_FLIGHT]DataBuffer
-          buffer_size := size_of(linalg.Matrix4f32) * vk.DeviceSize(len(bones))
+          bone_buffers: [MAX_FRAMES_IN_FLIGHT]DataBuffer(linalg.Matrix4f32)
           for &buffer in bone_buffers {
-              buffer, _ = create_host_visible_buffer(buffer_size, {.STORAGE_BUFFER})
+              buffer, _ = create_host_visible_buffer(linalg.Matrix4f32, len(bones), {.STORAGE_BUFFER})
           }
           node.attachment = MeshAttachment {
             handle = mesh_handle,

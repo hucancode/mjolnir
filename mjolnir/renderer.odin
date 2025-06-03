@@ -61,8 +61,8 @@ Frame :: struct {
   render_finished_semaphore:      vk.Semaphore,
   fence:                          vk.Fence,
   command_buffer:                 vk.CommandBuffer,
-  camera_uniform:                 DataBuffer,
-  light_uniform:                  DataBuffer,
+  camera_uniform:                 DataBuffer(SceneUniform),
+  light_uniform:                  DataBuffer(SceneLightUniform),
   shadow_maps:                    [MAX_SHADOW_MAPS]DepthTexture,
   cube_shadow_maps:               [MAX_SHADOW_MAPS]CubeDepthTexture,
   camera_descriptor_set:          vk.DescriptorSet,
@@ -71,14 +71,14 @@ Frame :: struct {
 }
 
 frame_init :: proc(self: ^Frame) -> (res: vk.Result) {
-  min_alignment := g_device_properties.limits.minUniformBufferOffsetAlignment
-  aligned_scene_uniform_size := align_up(size_of(SceneUniform), min_alignment)
   self.camera_uniform = create_host_visible_buffer(
-    (1 + 6 * MAX_SCENE_UNIFORMS) * aligned_scene_uniform_size,
+    SceneUniform,
+    (1 + 6 * MAX_SCENE_UNIFORMS),
     {.UNIFORM_BUFFER},
   ) or_return
   self.light_uniform = create_host_visible_buffer(
-    size_of(SceneLightUniform),
+    SceneLightUniform,
+    1,
     {.UNIFORM_BUFFER},
   ) or_return
 
@@ -279,7 +279,9 @@ create_swapchain :: proc(
   pick_swap_present_mode :: proc(
     present_modes: []vk.PresentModeKHR,
   ) -> vk.PresentModeKHR {
-    return .MAILBOX if slice.contains(present_modes, vk.PresentModeKHR.MAILBOX) else .FIFO
+    return(
+      .MAILBOX if slice.contains(present_modes, vk.PresentModeKHR.MAILBOX) else .FIFO \
+    )
   }
   pick_swapchain_format :: proc(
     formats: []vk.SurfaceFormatKHR,
@@ -437,11 +439,15 @@ renderer_get_command_buffer :: proc(self: ^Renderer) -> vk.CommandBuffer {
   return cmd_buffer
 }
 
-renderer_get_camera_uniform :: proc(self: ^Renderer) -> ^DataBuffer {
+renderer_get_camera_uniform :: proc(
+  self: ^Renderer,
+) -> ^DataBuffer(SceneUniform) {
   return &self.frames[self.current_frame_index].camera_uniform
 }
 
-renderer_get_light_uniform :: proc(self: ^Renderer) -> ^DataBuffer {
+renderer_get_light_uniform :: proc(
+  self: ^Renderer,
+) -> ^DataBuffer(SceneLightUniform) {
   return &self.frames[self.current_frame_index].light_uniform
 }
 
@@ -576,7 +582,7 @@ render_single_node :: proc(node: ^Node, cb_context: rawptr) -> bool {
       material_update_bone_buffer(
         material,
         node_skinning.bone_buffers[frame].buffer,
-        node_skinning.bone_buffers[frame].size,
+        vk.DeviceSize(node_skinning.bone_buffers[frame].bytes_count),
         frame,
       )
       vk.CmdBindVertexBuffers(
@@ -604,8 +610,6 @@ render_single_shadow :: proc(node: ^Node, cb_context: rawptr) -> bool {
   frame := ctx.engine.renderer.current_frame_index
   shadow_idx := ctx.shadow_idx
   shadow_layer := ctx.shadow_layer
-  min_alignment := g_device_properties.limits.minUniformBufferOffsetAlignment
-  aligned_scene_uniform_size := align_up(size_of(SceneUniform), min_alignment)
   #partial switch data in node.attachment {
   case MeshAttachment:
     if !data.cast_shadow {
@@ -644,8 +648,10 @@ render_single_shadow :: proc(node: ^Node, cb_context: rawptr) -> bool {
       }
     }
     vk.CmdBindPipeline(ctx.command_buffer, .GRAPHICS, pipeline)
-    offset_shadow :=
-      (1 + shadow_idx * 6 + shadow_layer) * u32(aligned_scene_uniform_size)
+    offset_shadow := data_buffer_offset_of(
+      renderer_get_camera_uniform(&ctx.engine.renderer)^,
+      1 + shadow_idx * 6 + shadow_layer,
+    )
     offsets := [1]u32{offset_shadow}
     vk.CmdBindDescriptorSets(
       ctx.command_buffer,
@@ -677,7 +683,7 @@ render_single_shadow :: proc(node: ^Node, cb_context: rawptr) -> bool {
       material_update_bone_buffer(
         material,
         node_skinning.bone_buffers[frame].buffer,
-        node_skinning.bone_buffers[frame].size,
+        vk.DeviceSize(node_skinning.bone_buffers[frame].bytes_count),
         frame,
       )
       vk.CmdBindVertexBuffers(
@@ -743,15 +749,13 @@ render :: proc(engine: ^Engine) -> vk.Result {
   render_shadow_pass(engine, &light_uniform, command_buffer) or_return
   // log.infof("============ rendering main pass =============")
   render_main_pass(engine, command_buffer, image_idx, camera_frustum) or_return
-  data_buffer_write(
-    renderer_get_camera_uniform(&engine.renderer),
+  data_buffer_write_single(
+    renderer_get_camera_uniform(&engine.renderer)^,
     &scene_uniform,
-    size_of(SceneUniform),
   )
-  data_buffer_write(
-    renderer_get_light_uniform(&engine.renderer),
+  data_buffer_write_single(
+    renderer_get_light_uniform(&engine.renderer)^,
     &light_uniform,
-    size_of(SceneLightUniform),
   )
   if engine.render2d_proc != nil {
     engine.render2d_proc(engine, &engine.ui.ctx)
@@ -875,10 +879,6 @@ render_shadow_pass :: proc(
       raw_data(initial_barriers[:]),
     )
   }
-  aligned_scene_uniform_size := align_up(
-    size_of(SceneUniform),
-    g_device_properties.limits.minUniformBufferOffsetAlignment,
-  )
   for i := 0; i < int(light_uniform.light_count); i += 1 {
     light := &light_uniform.lights[i]
     if !light.has_shadow || i >= MAX_SHADOW_MAPS {
@@ -951,13 +951,10 @@ render_shadow_pass :: proc(
           view       = view,
           projection = proj,
         }
-        offset_shadow :=
-          vk.DeviceSize(i * 6 + face + 1) * aligned_scene_uniform_size
-        data_buffer_write_at(
-          renderer_get_camera_uniform(&engine.renderer),
+        data_buffer_write_single(
+          renderer_get_camera_uniform(&engine.renderer)^,
           &shadow_scene_uniform,
-          offset_shadow,
-          size_of(SceneUniform),
+          i * 6 + face + 1,
         )
         vk.CmdBeginRenderingKHR(command_buffer, &face_render_info)
         vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
@@ -1026,12 +1023,10 @@ render_shadow_pass :: proc(
         view       = view,
         projection = proj,
       }
-      offset_shadow := vk.DeviceSize(i * 6 + 1) * aligned_scene_uniform_size
-      data_buffer_write_at(
-        renderer_get_camera_uniform(&engine.renderer),
+      data_buffer_write_single(
+        renderer_get_camera_uniform(&engine.renderer)^,
         &shadow_scene_uniform,
-        offset_shadow,
-        size_of(SceneUniform),
+        i * 6 + 1,
       )
       vk.CmdBeginRenderingKHR(command_buffer, &render_info_khr)
       viewport := vk.Viewport {

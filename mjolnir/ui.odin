@@ -14,9 +14,9 @@ UIRenderer :: struct {
   ctx:           mu.Context,
   pipeline:      Pipeline2D,
   atlas:         Texture,
-  proj_buffer:   DataBuffer,
-  vertex_buffer: DataBuffer,
-  index_buffer:  DataBuffer,
+  proj_buffer:   DataBuffer(linalg.Matrix4f32),
+  vertex_buffer: DataBuffer(Vertex2D),
+  index_buffer:  DataBuffer(u32),
   vertex_count:  u32,
   index_count:   u32,
   vertices:      [UI_MAX_VERTICES]Vertex2D,
@@ -57,12 +57,14 @@ ui_init :: proc(
   ui.atlas = texture^
   log.infof("init UI vertex buffer...")
   ui.vertex_buffer = create_host_visible_buffer(
-    size_of(Vertex2D) * vk.DeviceSize(UI_MAX_VERTICES),
+    Vertex2D,
+    UI_MAX_VERTICES,
     {.VERTEX_BUFFER},
   ) or_return
   log.infof("init UI indices buffer...")
   ui.index_buffer = create_host_visible_buffer(
-    size_of(u32) * vk.DeviceSize(UI_MAX_INDICES),
+    u32,
+    UI_MAX_INDICES,
     {.INDEX_BUFFER},
   ) or_return
   // Write atlas texture and sampler to texture_descriptor_set
@@ -74,7 +76,8 @@ ui_init :: proc(
   ortho := linalg.matrix_ortho3d(0, f32(width), f32(height), 0, -1, 1)
   log.infof("init UI proj buffer...")
   ui.proj_buffer = create_host_visible_buffer(
-    size_of(linalg.Matrix4f32),
+    linalg.Matrix4f32,
+    1,
     {.UNIFORM_BUFFER},
     raw_data(&ortho),
   ) or_return
@@ -136,14 +139,12 @@ ui_flush :: proc(ui: ^UIRenderer, cmd_buf: vk.CommandBuffer) -> vk.Result {
     ui.index_count = 0
   }
   data_buffer_write(
-    &ui.vertex_buffer,
-    raw_data(ui.vertices[:]),
-    vk.DeviceSize(size_of(Vertex2D) * ui.vertex_count),
+    ui.vertex_buffer,
+    ui.vertices[:],
   ) or_return
   data_buffer_write(
-    &ui.index_buffer,
-    raw_data(ui.indices[:]),
-    vk.DeviceSize(size_of(u32) * ui.index_count),
+    ui.index_buffer,
+    ui.indices[:],
   ) or_return
   vk.CmdBindPipeline(cmd_buf, .GRAPHICS, ui.pipeline.pipeline)
   descriptor_sets := [?]vk.DescriptorSet {

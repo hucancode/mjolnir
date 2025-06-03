@@ -125,7 +125,6 @@ vulkan_instance_init :: proc() -> vk.Result {
 
   for ext in glfw_exts_cstrings do append(&extensions, ext)
 
-
   app_info := vk.ApplicationInfo {
     sType              = .APPLICATION_INFO,
     pApplicationName   = TITLE,
@@ -281,10 +280,7 @@ score_physical_device :: proc(
     raw_data(available_extensions),
   ) or_return
 
-  log.infof(
-    "vulkan: device supports %v extensions",
-    len(available_extensions),
-  )
+  log.infof("vulkan: device supports %v extensions", len(available_extensions))
   required_loop: for required in DEVICE_EXTENSIONS {
     log.infof("vulkan: checking for required extension %q", required)
     for &extension in available_extensions {
@@ -296,10 +292,7 @@ score_physical_device :: proc(
         continue required_loop
       }
     }
-    log.infof(
-      "vulkan: device does not support required extension",
-      required,
-    )
+    log.infof("vulkan: device does not support required extension", required)
     return 0, .NOT_READY
   }
   log.infof("vulkan: device supports all required extensions")
@@ -308,10 +301,7 @@ score_physical_device :: proc(
   defer swapchain_support_deinit(&support)
 
   if len(support.formats) == 0 || len(support.present_modes) == 0 {
-    log.infof(
-      "Device %s: inadequate swapchain support.",
-      device_name_cstring,
-    )
+    log.infof("Device %s: inadequate swapchain support.", device_name_cstring)
     return 0, .SUCCESS
   }
 
@@ -635,6 +625,193 @@ allocate_vulkan_memory :: proc(
   return
 }
 
+DataBuffer :: struct($T: typeid) {
+  buffer:       vk.Buffer,
+  memory:       vk.DeviceMemory,
+  mapped:       [^]T,
+  element_size: int,
+  bytes_count:  int,
+}
+
+malloc_data_buffer :: proc(
+  $T: typeid,
+  count: int,
+  usage: vk.BufferUsageFlags,
+  mem_properties: vk.MemoryPropertyFlags,
+) -> (
+  data_buf: DataBuffer(T),
+  ret: vk.Result,
+) {
+  if .UNIFORM_BUFFER in usage && count > 1 {
+    data_buf.element_size = align_up(
+      size_of(T),
+      int(g_device_properties.limits.minUniformBufferOffsetAlignment),
+    )
+  } else {
+    data_buf.element_size = size_of(T)
+  }
+  data_buf.bytes_count = data_buf.element_size * count
+  create_info := vk.BufferCreateInfo {
+    sType       = .BUFFER_CREATE_INFO,
+    size        = vk.DeviceSize(data_buf.bytes_count),
+    usage       = usage,
+    sharingMode = .EXCLUSIVE,
+  }
+  vk.CreateBuffer(g_device, &create_info, nil, &data_buf.buffer) or_return
+  mem_reqs: vk.MemoryRequirements
+  vk.GetBufferMemoryRequirements(g_device, data_buf.buffer, &mem_reqs)
+  data_buf.memory = allocate_vulkan_memory(mem_reqs, mem_properties) or_return
+  vk.BindBufferMemory(g_device, data_buf.buffer, data_buf.memory, 0) or_return
+  return data_buf, .SUCCESS
+}
+
+malloc_local_buffer :: proc(
+  $T: typeid,
+  count: int,
+  usage: vk.BufferUsageFlags,
+) -> (
+  DataBuffer(T),
+  vk.Result,
+) {
+  return malloc_data_buffer(T, count, usage, {.DEVICE_LOCAL})
+}
+
+malloc_host_visible_buffer :: proc(
+  $T: typeid,
+  count: int,
+  usage: vk.BufferUsageFlags,
+) -> (
+  DataBuffer(T),
+  vk.Result,
+) {
+  return malloc_data_buffer(T, count, usage, {.HOST_VISIBLE, .HOST_COHERENT})
+}
+
+align_up :: proc(value: int, alignment: int) -> int {
+  return (value + alignment - 1) & ~(alignment - 1)
+}
+
+data_buffer_write_single :: proc(
+  self: DataBuffer($T),
+  data: ^T,
+  index: int = 0,
+) -> vk.Result {
+  if self.mapped == nil {
+    return .ERROR_UNKNOWN
+  }
+  offset := index * self.element_size
+  if offset + self.element_size > self.bytes_count {
+    return .ERROR_UNKNOWN
+  }
+  destination := mem.ptr_offset(cast([^]u8)self.mapped, offset)
+  mem.copy(destination, data, size_of(T))
+  return .SUCCESS
+}
+
+data_buffer_write :: proc(
+  self: DataBuffer($T),
+  data: []T,
+  index: int = 0,
+) -> vk.Result {
+  if self.mapped == nil {
+    return .ERROR_UNKNOWN
+  }
+  offset := index * self.element_size
+  if offset + (self.element_size) * len(data) > self.bytes_count {
+    return .ERROR_UNKNOWN
+  }
+  destination := mem.ptr_offset(cast([^]u8)self.mapped, offset)
+  mem.copy(destination, raw_data(data), slice.size(data))
+  return .SUCCESS
+}
+
+data_buffer_offset_of :: proc(
+    self: DataBuffer($T),
+    index: u32,
+) -> u32 {
+    return index * u32(self.element_size)
+}
+
+data_buffer_deinit :: proc(buffer: ^DataBuffer($T)) {
+  if buffer.mapped != nil {
+    vk.UnmapMemory(g_device, buffer.memory)
+    buffer.mapped = nil
+  }
+  vk.DestroyBuffer(g_device, buffer.buffer, nil)
+  buffer.buffer = 0
+  vk.FreeMemory(g_device, buffer.memory, nil)
+  buffer.memory = 0
+  buffer.bytes_count = 0
+  buffer.element_size = 0
+}
+
+create_host_visible_buffer :: proc(
+  $T: typeid,
+  count: int,
+  usage: vk.BufferUsageFlags,
+  data: rawptr = nil,
+) -> (
+  buffer: DataBuffer(T),
+  ret: vk.Result,
+) {
+  buffer = malloc_host_visible_buffer(T, count, usage) or_return
+  vk.MapMemory(
+    g_device,
+    buffer.memory,
+    0,
+    vk.DeviceSize(buffer.bytes_count),
+    {},
+    cast(^rawptr)&buffer.mapped,
+  ) or_return
+  log.infof("Init host visible buffer, buffer mapped at %x", buffer.mapped)
+  if data != nil {
+    mem.copy(buffer.mapped, data, buffer.bytes_count)
+  }
+  ret = .SUCCESS
+  return
+}
+
+create_local_buffer :: proc(
+  $T: typeid,
+  count: int,
+  usage: vk.BufferUsageFlags,
+  data: rawptr = nil,
+) -> (
+  buffer: DataBuffer(T),
+  ret: vk.Result,
+) {
+  buffer = malloc_local_buffer(T, count, usage | {.TRANSFER_DST}) or_return
+  if data == nil {
+    ret = .SUCCESS
+    return
+  }
+  staging := create_host_visible_buffer(
+    T,
+    count,
+    {.TRANSFER_SRC},
+    data,
+  ) or_return
+  defer data_buffer_deinit(&staging)
+  copy_buffer(buffer, staging) or_return
+  ret = .SUCCESS
+  return
+}
+
+copy_buffer :: proc(dst, src: DataBuffer($T)) -> vk.Result {
+  cmd_buffer := begin_single_time_command() or_return
+  region := vk.BufferCopy {
+    size = vk.DeviceSize(src.bytes_count),
+  }
+  vk.CmdCopyBuffer(cmd_buffer, src.buffer, dst.buffer, 1, &region)
+  log.infof(
+    "Copying buffer %x mapped %x to %x",
+    src.buffer,
+    src.mapped,
+    dst.buffer,
+  )
+  return end_single_time_command(&cmd_buffer)
+}
+
 malloc_image_buffer :: proc(
   width: u32,
   height: u32,
@@ -676,100 +853,6 @@ malloc_image_buffer :: proc(
   img_buffer.height = height
   img_buffer.format = format
   return img_buffer, .SUCCESS
-}
-
-malloc_data_buffer :: proc(
-  size: vk.DeviceSize,
-  usage: vk.BufferUsageFlags,
-  mem_properties: vk.MemoryPropertyFlags,
-) -> (
-  data_buf: DataBuffer,
-  ret: vk.Result,
-) {
-  create_info := vk.BufferCreateInfo {
-    sType       = .BUFFER_CREATE_INFO,
-    size        = size,
-    usage       = usage,
-    sharingMode = .EXCLUSIVE,
-  }
-  vk.CreateBuffer(g_device, &create_info, nil, &data_buf.buffer) or_return
-  mem_reqs: vk.MemoryRequirements
-  vk.GetBufferMemoryRequirements(g_device, data_buf.buffer, &mem_reqs)
-  data_buf.memory = allocate_vulkan_memory(mem_reqs, mem_properties) or_return
-  vk.BindBufferMemory(g_device, data_buf.buffer, data_buf.memory, 0) or_return
-  data_buf.size = size
-  return data_buf, .SUCCESS
-}
-
-malloc_local_buffer :: proc(
-  size: vk.DeviceSize,
-  usage: vk.BufferUsageFlags,
-) -> (
-  DataBuffer,
-  vk.Result,
-) {
-  return malloc_data_buffer(size, usage, {.DEVICE_LOCAL})
-}
-
-malloc_host_visible_buffer :: proc(
-  size: vk.DeviceSize,
-  usage: vk.BufferUsageFlags,
-) -> (
-  DataBuffer,
-  vk.Result,
-) {
-  return malloc_data_buffer(size, usage, {.HOST_VISIBLE, .HOST_COHERENT})
-}
-
-align_up :: proc(
-  value: vk.DeviceSize,
-  alignment: vk.DeviceSize,
-) -> vk.DeviceSize {
-  return (value + alignment - 1) & ~(alignment - 1)
-}
-
-DataBuffer :: struct {
-  buffer: vk.Buffer,
-  memory: vk.DeviceMemory,
-  mapped: rawptr,
-  size:   vk.DeviceSize,
-}
-
-data_buffer_write_at :: proc(
-  self: ^DataBuffer,
-  data: rawptr,
-  offset: vk.DeviceSize,
-  len: vk.DeviceSize,
-) -> vk.Result {
-  if self.mapped == nil {
-    return .ERROR_UNKNOWN
-  }
-  if offset + len > self.size {
-    return .ERROR_UNKNOWN
-  }
-  destination_ptr := mem.ptr_offset(cast([^]u8)self.mapped, offset)
-  mem.copy(destination_ptr, data, int(len))
-  return .SUCCESS
-}
-
-data_buffer_write :: proc(
-  self: ^DataBuffer,
-  data: rawptr,
-  len: vk.DeviceSize,
-) -> vk.Result {
-  return data_buffer_write_at(self, data, 0, len)
-}
-
-data_buffer_deinit :: proc(buffer: ^DataBuffer) {
-  if buffer.mapped != nil {
-    vk.UnmapMemory(g_device, buffer.memory)
-    buffer.mapped = nil
-  }
-  vk.DestroyBuffer(g_device, buffer.buffer, nil)
-  buffer.buffer = 0
-  vk.FreeMemory(g_device, buffer.memory, nil)
-  buffer.memory = 0
-  buffer.size = 0
 }
 
 ImageBuffer :: struct {
@@ -821,71 +904,6 @@ create_image_view :: proc(
   }
   res = vk.CreateImageView(g_device, &create_info, nil, &view)
   return
-}
-
-create_host_visible_buffer :: proc(
-  size: vk.DeviceSize,
-  usage: vk.BufferUsageFlags,
-  data: rawptr = nil,
-) -> (
-  buffer: DataBuffer,
-  ret: vk.Result,
-) {
-  buffer.size = size
-  buffer = malloc_host_visible_buffer(size, usage) or_return
-  vk.MapMemory(
-    g_device,
-    buffer.memory,
-    0,
-    buffer.size,
-    {},
-    &buffer.mapped,
-  ) or_return
-  log.infof("Init host visible buffer, buffer mapped at %x", buffer.mapped)
-  if data != nil {
-    mem.copy(buffer.mapped, data, int(size))
-  }
-  ret = .SUCCESS
-  return
-}
-
-create_local_buffer :: proc(
-  size: vk.DeviceSize,
-  usage: vk.BufferUsageFlags,
-  data: rawptr = nil,
-) -> (
-  buffer: DataBuffer,
-  ret: vk.Result,
-) {
-  buffer = malloc_local_buffer(size, usage | {.TRANSFER_DST}) or_return
-  if data != nil {
-    staging := create_host_visible_buffer(
-      size,
-      {.TRANSFER_SRC},
-      data,
-    ) or_return
-    defer data_buffer_deinit(&staging)
-    copy_buffer(&buffer, &staging) or_return
-  }
-  ret = .SUCCESS
-  return
-}
-
-copy_buffer :: proc(dst, src: ^DataBuffer) -> vk.Result {
-  cmd_buffer := begin_single_time_command() or_return
-  region := vk.BufferCopy {
-    srcOffset = 0,
-    dstOffset = 0,
-    size      = src.size,
-  }
-  vk.CmdCopyBuffer(cmd_buffer, src.buffer, dst.buffer, 1, &region)
-  log.infof(
-    "Copying buffer %x mapped %x to %x",
-    src.buffer,
-    src.mapped,
-    dst.buffer,
-  )
-  return end_single_time_command(&cmd_buffer)
 }
 
 transition_image_layout :: proc(
@@ -948,7 +966,8 @@ transition_image_layout :: proc(
   )
   return end_single_time_command(&cmd_buffer)
 }
-copy_image :: proc(dst: ^ImageBuffer, src: ^DataBuffer) -> vk.Result {
+
+copy_image :: proc(dst: ImageBuffer, src: DataBuffer(u8)) -> vk.Result {
   transition_image_layout(
     dst.image,
     dst.format,
@@ -996,7 +1015,12 @@ create_image_buffer :: proc(
   img: ImageBuffer,
   ret: vk.Result,
 ) {
-  staging := create_host_visible_buffer(size, {.TRANSFER_SRC}, data) or_return
+  staging := create_host_visible_buffer(
+    u8,
+    int(size),
+    {.TRANSFER_SRC},
+    data,
+  ) or_return
   defer data_buffer_deinit(&staging)
   img = malloc_image_buffer(
     width,
@@ -1006,7 +1030,7 @@ create_image_buffer :: proc(
     {.TRANSFER_DST, .SAMPLED},
     {.DEVICE_LOCAL},
   ) or_return
-  copy_image(&img, &staging) or_return
+  copy_image(img, staging) or_return
   aspect_mask := vk.ImageAspectFlags{.COLOR}
   img.view = create_image_view(img.image, format, aspect_mask) or_return
   ret = .SUCCESS

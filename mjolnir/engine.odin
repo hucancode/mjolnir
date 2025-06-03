@@ -306,10 +306,7 @@ update :: proc(engine: ^Engine) -> bool {
     }
     frame := engine.renderer.current_frame_index
     buffer := skinning.bone_buffers[frame]
-    bone_matrices := slice.from_ptr(
-      cast(^linalg.Matrix4f32)buffer.mapped,
-      len(mesh_skin.bones),
-    )
+    bone_matrices := slice.from_ptr(buffer.mapped, len(mesh_skin.bones))
     sample_clip(mesh, anim_inst.clip_handle, anim_inst.time, bone_matrices)
     //animation.pose_flush(&skinning.pose, buffer.mapped)
   }

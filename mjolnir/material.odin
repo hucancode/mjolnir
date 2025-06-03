@@ -26,7 +26,7 @@ Material :: struct {
   metallic_value:            f32,
   roughness_value:           f32,
   emissive_value:            linalg.Vector4f32,
-  fallback_buffer:           DataBuffer,
+  fallback_buffer:           DataBuffer(MaterialFallbacks),
 }
 
 material_deinit :: proc(self: ^Material) {
@@ -77,9 +77,7 @@ material_update_textures :: proc(
   if mat.texture_descriptor_set == 0 {
     return .ERROR_INITIALIZATION_FAILED
   }
-
   writes: [dynamic]vk.WriteDescriptorSet
-
   if albedo != nil {
     append(
       &writes,
@@ -165,7 +163,6 @@ material_update_textures :: proc(
       },
     )
   }
-
   append(
     &writes,
     vk.WriteDescriptorSet {
@@ -181,7 +178,6 @@ material_update_textures :: proc(
       },
     },
   )
-
   vk.UpdateDescriptorSets(g_device, u32(len(writes)), raw_data(writes), 0, nil)
   return .SUCCESS
 }
@@ -252,7 +248,8 @@ create_material :: proc(
   }
 
   mat.fallback_buffer = create_host_visible_buffer(
-    size_of(MaterialFallbacks),
+    MaterialFallbacks,
+    1,
     {.UNIFORM_BUFFER},
     &fallbacks,
   ) or_return
@@ -298,7 +295,8 @@ create_unlit_material :: proc(
     albedo = mat.albedo_value,
   }
   mat.fallback_buffer = create_host_visible_buffer(
-    size_of(MaterialFallbacks),
+    MaterialFallbacks,
+    1,
     {.UNIFORM_BUFFER},
     &fallbacks,
   ) or_return
