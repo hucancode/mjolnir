@@ -763,9 +763,9 @@ create_host_visible_buffer :: proc(
     0,
     vk.DeviceSize(buffer.bytes_count),
     {},
-    cast(^rawptr)&buffer.mapped,
+    auto_cast &buffer.mapped,
   ) or_return
-  log.infof("Init host visible buffer, buffer mapped at %x", buffer.mapped)
+  log.info("Init host visible buffer, buffer mapped at", buffer.mapped)
   if data != nil {
     mem.copy(buffer.mapped, data, buffer.bytes_count)
   }
@@ -783,10 +783,12 @@ create_local_buffer :: proc(
   ret: vk.Result,
 ) {
   buffer = malloc_local_buffer(T, count, usage | {.TRANSFER_DST}) or_return
+  defer log.info("done creating buffer")
   if data == nil {
     ret = .SUCCESS
     return
   }
+  log.info("creating staging buffer with data ", data)
   staging := create_host_visible_buffer(
     T,
     count,

@@ -14,7 +14,7 @@ MaterialFallbacks :: struct {
 
 Material :: struct {
   texture_descriptor_set:    vk.DescriptorSet,
-  skinning_descriptor_sets:   [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
+  skinning_descriptor_sets:  [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
   features:                  ShaderFeatureSet,
   is_lit:                    bool,
   albedo_handle:             Handle,
@@ -58,11 +58,9 @@ material_init_descriptor_set_layout :: proc(mat: ^Material) -> vk.Result {
     descriptorSetCount = 1,
     pSetLayouts        = &g_skinning_descriptor_set_layout,
   }
-  for &set in mat.skinning_descriptor_sets do vk.AllocateDescriptorSets(
-    g_device,
-    &alloc_info_skinning,
-    &set,
-  ) or_return
+  for &set in mat.skinning_descriptor_sets {
+      vk.AllocateDescriptorSets(g_device, &alloc_info_skinning, &set) or_return
+  }
   return .SUCCESS
 }
 
@@ -224,6 +222,7 @@ create_material :: proc(
   mat: ^Material,
   res: vk.Result,
 ) {
+  log.info("creating material")
   ret, mat = resource.alloc(&engine.materials)
   mat.is_lit = true
   mat.features = features

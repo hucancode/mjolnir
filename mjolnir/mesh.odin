@@ -69,13 +69,13 @@ mesh_init :: proc(self: ^Mesh, data: geometry.Geometry) -> vk.Result {
     raw_data(data.indices),
   ) or_return
 
-  skinnings, has_skin := data.skinnings.?
-  if has_skin {
+  if len(data.skinnings) > 0 {
+    log.info("creating skin buffer", len(data.skinnings))
     skin_buffer := create_local_buffer(
       geometry.SkinningData,
-      len(skinnings),
+      len(data.skinnings),
       {.VERTEX_BUFFER},
-      raw_data(skinnings),
+      raw_data(data.skinnings),
     ) or_return
     self.skinning = Skinning {
       bones       = make([]Bone, 0),
