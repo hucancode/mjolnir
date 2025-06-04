@@ -3,12 +3,53 @@ package mjolnir
 import "core:log"
 import vk "vendor:vulkan"
 
-PostprocessPipelineType :: enum {
-  BLOOM,
-  BLUR,
+PostProcessEffectType :: enum {
   GRAYSCALE,
+  TONEMAP,
+  BLUR,
+  BLOOM,
   OUTLINE,
 }
+
+GrayscaleEffect :: struct {
+  strength: f32,
+}
+
+ToneMapEffect :: struct {
+  exposure: f32,
+  gamma:    f32,
+}
+
+BlurEffect :: struct {
+  radius: f32,
+}
+
+BloomEffect :: struct {
+  threshold:   f32,
+  intensity:   f32,
+  blur_radius: f32,
+}
+
+OutlineEffect :: struct {
+  line_width: f32,
+  color:      f32,
+}
+
+PostprocessEffect :: struct {
+  effect_type:    PostProcessEffectType,
+  effect:         union {
+    GrayscaleEffect,
+    ToneMapEffect,
+    BlurEffect,
+    BloomEffect,
+    OutlineEffect,
+  },
+  pipeline:       vk.Pipeline,
+  layout:         vk.PipelineLayout,
+  descriptor_set: vk.DescriptorSet,
+}
+
+PostprocessStack :: [dynamic]PostprocessEffect
 
 PostprocessPipeline :: struct {
   layout:                vk.PipelineLayout,
@@ -20,14 +61,14 @@ SHADER_POSTPROCESS_VERT :: #load("shader/postprocess/vert.spv")
 SHADER_BLOOM_FRAG :: #load("shader/bloom/frag.spv")
 SHADER_BLUR_FRAG :: #load("shader/blur/frag.spv")
 SHADER_GRAYSCALE_FRAG :: #load("shader/grayscale/frag.spv")
+SHADER_TONEMAP_FRAG :: #load("shader/tonemap/frag.spv")
 SHADER_OUTLINE_FRAG :: #load("shader/outline/frag.spv")
 
-g_postprocess_pipelines: [len(PostprocessPipelineType)]PostprocessPipeline
+g_postprocess_pipelines: [len(PostProcessEffectType)]PostprocessPipeline
 
 postprocess_pipeline_init_all :: proc(color_format: vk.Format) -> vk.Result {
   base_handle: vk.Pipeline = 0
-  for i in 0 ..< len(PostprocessPipelineType) {
-    effect_type := PostprocessPipelineType(i)
+  for effect_type, i in PostProcessEffectType {
     pipeline := &g_postprocess_pipelines[i]
     vert_module := create_shader_module(SHADER_POSTPROCESS_VERT) or_return
     defer vk.DestroyShaderModule(g_device, vert_module, nil)
@@ -39,6 +80,8 @@ postprocess_pipeline_init_all :: proc(color_format: vk.Format) -> vk.Result {
       frag_module = create_shader_module(SHADER_BLUR_FRAG) or_return
     case .GRAYSCALE:
       frag_module = create_shader_module(SHADER_GRAYSCALE_FRAG) or_return
+    case .TONEMAP:
+      frag_module = create_shader_module(SHADER_TONEMAP_FRAG) or_return
     case .OUTLINE:
       frag_module = create_shader_module(SHADER_OUTLINE_FRAG) or_return
     }
