@@ -166,13 +166,8 @@ postprocess_pipeline_init_all :: proc(color_format: vk.Format) -> vk.Result {
       pColorAttachmentFormats = raw_data(color_formats[:]),
     }
 
-    flags: vk.PipelineCreateFlags
-    if i == 0 {
-      flags = {.ALLOW_DERIVATIVES}
-    } else {
-      flags = {.DERIVATIVE}
-      base_handle = g_postprocess_pipelines[0].pipeline
-    }
+    flags: vk.PipelineCreateFlags =
+      {.ALLOW_DERIVATIVES} if i == 0 else {.DERIVATIVE}
 
     shader_stages := [?]vk.PipelineShaderStageCreateInfo {
       {
@@ -203,8 +198,9 @@ postprocess_pipeline_init_all :: proc(color_format: vk.Format) -> vk.Result {
       pDepthStencilState  = &depth_stencil_state,
       layout              = pipeline.layout,
       flags               = flags,
-      basePipelineHandle  = base_handle,
-      basePipelineIndex   = 0, // based on pipline 0
+      // based on pipline 0
+      basePipelineHandle  = g_postprocess_pipelines[0].pipeline,
+      basePipelineIndex   = 0,
     }
     vk.CreateGraphicsPipelines(
       g_device,
