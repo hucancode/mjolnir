@@ -34,6 +34,7 @@ PostProcessEffectType :: enum (int) {
   BLUR,
   BLOOM,
   OUTLINE,
+  COPY,
 }
 
 PostprocessEffect :: union {
@@ -61,7 +62,7 @@ type_of_postprocess_effect :: proc(effect: PostprocessEffect) -> PostProcessEffe
         return .OUTLINE
     }
     // effect = nil
-    return .GRAYSCALE
+    return .COPY
 }
 
 // Add an effect to the stack
@@ -114,6 +115,7 @@ update_postprocess_input :: proc(
 }
 
 SHADER_POSTPROCESS_VERT :: #load("shader/postprocess/vert.spv")
+SHADER_POSTPROCESS_FRAG :: #load("shader/postprocess/frag.spv")
 SHADER_BLOOM_FRAG :: #load("shader/bloom/frag.spv")
 SHADER_BLUR_FRAG :: #load("shader/blur/frag.spv")
 SHADER_GRAYSCALE_FRAG :: #load("shader/grayscale/frag.spv")
@@ -227,6 +229,8 @@ build_postprocess_pipelines :: proc(color_format: vk.Format) -> vk.Result {
       frag_modules[i] = create_shader_module(SHADER_TONEMAP_FRAG) or_return
     case .OUTLINE:
       frag_modules[i] = create_shader_module(SHADER_OUTLINE_FRAG) or_return
+    case .COPY:
+      frag_modules[i] = create_shader_module(SHADER_POSTPROCESS_FRAG) or_return
     }
 
     // Descriptor set layout (shared for all)

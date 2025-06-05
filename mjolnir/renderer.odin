@@ -1207,7 +1207,6 @@ render_main_pass :: proc(
   return .SUCCESS
 }
 
-
 // - input_view: the initial image view (scene color output)
 // - input_sampler: the initial sampler
 // - pingpong_views: two image views for ping-ponging
@@ -1228,6 +1227,10 @@ render_postprocess_pass :: proc(
   dst_idx: int = 1
   current_view := input_view
   current_sampler := input_sampler
+
+  if len(g_postprocess_stack) == 0 {
+    append(&g_postprocess_stack, nil)
+  }
 
   for &effect, i in g_postprocess_stack {
     is_last := i == len(g_postprocess_stack) - 1
@@ -1281,7 +1284,6 @@ render_postprocess_pass :: proc(
         0,
         nil,
     )
-
     #partial switch &e in effect {
     case BlurEffect:
         vk.CmdPushConstants(
@@ -1293,7 +1295,6 @@ render_postprocess_pass :: proc(
           &e,
         )
     }
-
     // Draw fullscreen triangle (vertex shader generates the quad)
     vk.CmdDraw(command_buffer, 3, 1, 0, 0)
     vk.CmdEndRenderingKHR(command_buffer)
