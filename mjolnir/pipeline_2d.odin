@@ -155,15 +155,14 @@ pipeline2d_init :: proc(
     nil,
     &mat.projection_layout,
   ) or_return
-  projection_alloc_info := vk.DescriptorSetAllocateInfo {
-    sType              = .DESCRIPTOR_SET_ALLOCATE_INFO,
-    descriptorPool     = g_descriptor_pool,
-    descriptorSetCount = 1,
-    pSetLayouts        = &mat.projection_layout,
-  }
   vk.AllocateDescriptorSets(
     g_device,
-    &projection_alloc_info,
+    &vk.DescriptorSetAllocateInfo {
+      sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
+      descriptorPool = g_descriptor_pool,
+      descriptorSetCount = 1,
+      pSetLayouts = &mat.projection_layout,
+    },
     &mat.projection_descriptor_set,
   ) or_return
   vk.CreateDescriptorSetLayout(
@@ -195,14 +194,13 @@ pipeline2d_init :: proc(
     mat.projection_layout,
     mat.texture_layout,
   }
-  pipeline_layout_info := vk.PipelineLayoutCreateInfo {
-    sType          = .PIPELINE_LAYOUT_CREATE_INFO,
-    setLayoutCount = len(set_layouts),
-    pSetLayouts    = raw_data(set_layouts[:]),
-  }
   vk.CreatePipelineLayout(
     g_device,
-    &pipeline_layout_info,
+    &vk.PipelineLayoutCreateInfo {
+      sType = .PIPELINE_LAYOUT_CREATE_INFO,
+      setLayoutCount = len(set_layouts),
+      pSetLayouts = raw_data(set_layouts[:]),
+    },
     nil,
     &mat.pipeline_layout,
   ) or_return

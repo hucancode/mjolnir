@@ -41,25 +41,27 @@ material_deinit :: proc(self: ^Material) {
 }
 
 material_init_descriptor_set_layout :: proc(mat: ^Material) -> vk.Result {
-  alloc_info_texture := vk.DescriptorSetAllocateInfo {
-    sType              = .DESCRIPTOR_SET_ALLOCATE_INFO,
-    descriptorPool     = g_descriptor_pool,
-    descriptorSetCount = 1,
-    pSetLayouts        = &g_texture_descriptor_set_layout,
-  }
   vk.AllocateDescriptorSets(
     g_device,
-    &alloc_info_texture,
+    &vk.DescriptorSetAllocateInfo {
+      sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
+      descriptorPool = g_descriptor_pool,
+      descriptorSetCount = 1,
+      pSetLayouts = &g_texture_descriptor_set_layout,
+    },
     &mat.texture_descriptor_set,
   ) or_return
-  alloc_info_skinning := vk.DescriptorSetAllocateInfo {
-    sType              = .DESCRIPTOR_SET_ALLOCATE_INFO,
-    descriptorPool     = g_descriptor_pool,
-    descriptorSetCount = 1,
-    pSetLayouts        = &g_skinning_descriptor_set_layout,
-  }
   for &set in mat.skinning_descriptor_sets {
-      vk.AllocateDescriptorSets(g_device, &alloc_info_skinning, &set) or_return
+    vk.AllocateDescriptorSets(
+      g_device,
+      &vk.DescriptorSetAllocateInfo {
+        sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
+        descriptorPool = g_descriptor_pool,
+        descriptorSetCount = 1,
+        pSetLayouts = &g_skinning_descriptor_set_layout,
+      },
+      &set,
+    ) or_return
   }
   return .SUCCESS
 }
