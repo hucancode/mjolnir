@@ -1212,10 +1212,11 @@ render_main_pass :: proc(
 prepare_image_for_render :: proc(
   command_buffer: vk.CommandBuffer,
   image: vk.Image,
+  old_layout: vk.ImageLayout = .UNDEFINED,
 ) {
   barrier := vk.ImageMemoryBarrier {
     sType = .IMAGE_MEMORY_BARRIER,
-    oldLayout = .UNDEFINED,
+    oldLayout = old_layout,
     newLayout = .COLOR_ATTACHMENT_OPTIMAL,
     srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
     dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
@@ -1246,10 +1247,11 @@ prepare_image_for_render :: proc(
 prepare_image_for_shader_read :: proc(
   command_buffer: vk.CommandBuffer,
   image: vk.Image,
+  old_layout: vk.ImageLayout = .COLOR_ATTACHMENT_OPTIMAL,
 ) {
   barrier := vk.ImageMemoryBarrier {
     sType = .IMAGE_MEMORY_BARRIER,
-    oldLayout = .COLOR_ATTACHMENT_OPTIMAL,
+    oldLayout = old_layout,
     newLayout = .SHADER_READ_ONLY_OPTIMAL,
     srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
     dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
@@ -1336,8 +1338,11 @@ render_postprocess_pass :: proc(
   }
 
   for effect, i in g_postprocess_stack {
-    log.info("rendering post process", effect)
+    is_first := i <= 1
     is_last := i == len(g_postprocess_stack) - 1
+    if !is_first {
+        prepare_image_for_render(command_buffer, g_postprocess_images[dst_idx].image, .SHADER_READ_ONLY_OPTIMAL)
+    }
     color_attachment := vk.RenderingAttachmentInfoKHR {
       sType = .RENDERING_ATTACHMENT_INFO_KHR,
       imageView = output_view if is_last else g_postprocess_images[dst_idx].view,
@@ -1435,7 +1440,10 @@ render_postprocess_pass :: proc(
 
     vk.CmdDraw(command_buffer, 3, 1, 0, 0)
     vk.CmdEndRenderingKHR(command_buffer)
-    src_idx, dst_idx = dst_idx, src_idx
-    current_view = g_postprocess_images[src_idx].view
+    if !is_last {
+        src_idx, dst_idx = dst_idx, src_idx
+        prepare_image_for_shader_read(command_buffer, g_postprocess_images[src_idx].image)
+        current_view = g_postprocess_images[src_idx].view
+    }
   }
 }

@@ -126,6 +126,8 @@ clear_postprocess_effects :: proc() {
   resize(&g_postprocess_stack, 0)
 }
 
+// TODO: use 1 dedicated descriptor set for each effect
+// otherwise we can not stack multiple post process effect
 update_postprocess_input :: proc(
   input_view: vk.ImageView,
 ) -> vk.Result {
