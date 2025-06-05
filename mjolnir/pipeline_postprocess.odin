@@ -21,11 +21,12 @@ BloomEffect :: struct {
   threshold:   f32,
   intensity:   f32,
   blur_radius: f32,
+  padding: f32,
 }
 
 OutlineEffect :: struct {
   color:      [3]f32,
-  line_width: f32,
+  thickness: f32,
 }
 
 PostProcessEffectType :: enum (int) {
@@ -71,7 +72,7 @@ type_of_postprocess_effect :: proc(
 
 // Add an effect to the stack
 postprocess_push_grayscale :: proc(
-  strength: f32,
+  strength: f32 = 1.0,
   weights: [3]f32 = {0.299, 0.587, 0.114},
 ) {
   pipeline := &g_postprocess_pipelines[PostProcessEffectType.GRAYSCALE]
@@ -85,6 +86,34 @@ postprocess_push_grayscale :: proc(
 postprocess_push_blur :: proc(radius: f32) {
   pipeline := &g_postprocess_pipelines[PostProcessEffectType.GRAYSCALE]
   effect := BlurEffect{radius}
+  append(&g_postprocess_stack, effect)
+}
+
+postprocess_push_bloom :: proc(threshold: f32 = 0.2, intensity: f32 = 1.0, radius: f32 = 4.0) {
+  pipeline := &g_postprocess_pipelines[PostProcessEffectType.BLOOM]
+  effect := BloomEffect{
+    threshold = threshold,
+    intensity = intensity,
+    blur_radius = radius,
+  }
+  append(&g_postprocess_stack, effect)
+}
+
+postprocess_push_tonemap :: proc(exposure: f32 = 1.0, gamma: f32 = 2.2) {
+  pipeline := &g_postprocess_pipelines[PostProcessEffectType.TONEMAP]
+  effect := ToneMapEffect{
+    exposure = exposure,
+    gamma    = gamma,
+  }
+  append(&g_postprocess_stack, effect)
+}
+
+postprocess_push_outline :: proc(thickness: f32, color: [3]f32) {
+  pipeline := &g_postprocess_pipelines[PostProcessEffectType.OUTLINE]
+  effect := OutlineEffect{
+    thickness = thickness,
+    color     = color,
+  }
   append(&g_postprocess_stack, effect)
 }
 
