@@ -1216,7 +1216,6 @@ render_main_pass :: proc(
 // - command_buffer: Vulkan command buffer
 // - extent: the size of the render area
 render_postprocess_pass :: proc(
-  stack: ^PostprocessStack,
   command_buffer: vk.CommandBuffer,
   input_view: vk.ImageView,
   input_sampler: vk.Sampler,
@@ -1230,8 +1229,8 @@ render_postprocess_pass :: proc(
   current_view := input_view
   current_sampler := input_sampler
 
-  for effect, i in stack {
-    is_last := i == len(stack) - 1
+  for &effect, i in g_postprocess_stack {
+    is_last := i == len(g_postprocess_stack) - 1
     output_view := swapchain_view if is_last else pingpong_views[dst_idx]
 
     // Begin dynamic rendering to output_view
@@ -1268,23 +1267,36 @@ render_postprocess_pass :: proc(
     vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
 
     // Bind pipeline and descriptor set
-    vk.CmdBindPipeline(command_buffer, .GRAPHICS, effect.pipeline)
-    // vk.CmdBindDescriptorSets(
-    //     command_buffer,
-    //     .GRAPHICS,
-    //     effect.layout,
-    //     0,
-    //     1,
-    //     &effect.descriptor_set,
-    //     0,
-    //     nil,
-    // )
+    effect_type := type_of_postprocess_effect(effect)
+    vk.CmdBindPipeline(command_buffer, .GRAPHICS, g_postprocess_pipelines[effect_type])
+    // Update descriptor set for this effect with the current input view/sampler
+    update_postprocess_input(current_view, current_sampler) or_continue
+    vk.CmdBindDescriptorSets(
+        command_buffer,
+        .GRAPHICS,
+        g_postprocess_pipeline_layouts[effect_type],
+        0,
+        len(g_postprocess_descriptor_sets),
+        raw_data(g_postprocess_descriptor_sets[:]),
+        0,
+        nil,
+    )
+
+    #partial switch &e in effect {
+    case BlurEffect:
+        vk.CmdPushConstants(
+          command_buffer,
+          g_postprocess_pipeline_layouts[effect_type],
+          {.FRAGMENT},
+          0,
+          size_of(BlurEffect),
+          &e,
+        )
+    }
 
     // Draw fullscreen triangle (vertex shader generates the quad)
     vk.CmdDraw(command_buffer, 3, 1, 0, 0)
-
     vk.CmdEndRenderingKHR(command_buffer)
-
     // Swap for next effect if not last
     if !is_last {
       src_idx, dst_idx = dst_idx, src_idx
