@@ -159,6 +159,11 @@ init :: proc(
       proj.aspect_ratio = w / h
     }
   }
+  build_postprocess_pipelines(
+    engine.renderer.format.format,
+    engine.renderer.extent.width,
+    engine.renderer.extent.height,
+  )
 
   ui_init(
     &engine.ui,
@@ -222,15 +227,14 @@ build_renderer :: proc(engine: ^Engine) -> vk.Result {
   engine.renderer.brdf_lut_handle, engine.renderer.brdf_lut =
     create_texture_from_path(engine, "assets/lut_ggx.png") or_return
 
-  alloc_info_env := vk.DescriptorSetAllocateInfo {
-      sType              = .DESCRIPTOR_SET_ALLOCATE_INFO,
-      descriptorPool     = g_descriptor_pool,
-      descriptorSetCount = 1,
-      pSetLayouts        = &g_environment_descriptor_set_layout,
-    }
   vk.AllocateDescriptorSets(
     g_device,
-    &alloc_info_env,
+    &vk.DescriptorSetAllocateInfo {
+      sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
+      descriptorPool = g_descriptor_pool,
+      descriptorSetCount = 1,
+      pSetLayouts = &g_environment_descriptor_set_layout,
+    },
     &engine.renderer.environment_descriptor_set,
   ) or_return
 

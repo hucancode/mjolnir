@@ -54,9 +54,9 @@ setup :: proc(engine: ^mjolnir.Engine) {
       for y in 1 ..< ny {
         for z in 1 ..< nz {
           mat_handle, _ := create_material(
-              engine = engine,
-              metallic_value = f32(x)/f32(nx),
-              roughness_value = f32(y)/f32(ny),
+            engine = engine,
+            metallic_value = f32(x) / f32(nx),
+            roughness_value = f32(y) / f32(ny),
           ) or_continue
           node_handle, node := spawn(
             &engine.scene,
@@ -125,11 +125,11 @@ setup :: proc(engine: ^mjolnir.Engine) {
       if armature_ptr == nil || len(armature_ptr.children) == 0 {
         continue
       }
-      for i in 1..<len(armature_ptr.children) {
+      for i in 1 ..< len(armature_ptr.children) {
         skeleton := armature_ptr.children[i]
         skeleton_ptr := resource.get(engine.scene.nodes, skeleton)
         if skeleton_ptr == nil {
-            continue
+          continue
         }
         // skeleton_ptr.transform.scale = {0.5, 0.5, 0.5}
         play_animation(engine, skeleton, "idle")
@@ -186,6 +186,10 @@ setup :: proc(engine: ^mjolnir.Engine) {
       cast_shadow = true,
     },
   )
+  postprocess_push_tonemap(1.5, 2.2)
+  postprocess_push_grayscale(0.5)
+  postprocess_push_blur(4.5)
+  postprocess_push_grayscale(0.5)
 }
 
 update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {

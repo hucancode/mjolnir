@@ -68,9 +68,18 @@ Frame :: struct {
   camera_descriptor_set:          vk.DescriptorSet,
   shadow_map_descriptor_set:      vk.DescriptorSet,
   cube_shadow_map_descriptor_set: vk.DescriptorSet,
+  main_pass_image:                ImageBuffer,
+  postprocess_images:             [2]ImageBuffer,
 }
 
-frame_init :: proc(self: ^Frame) -> (res: vk.Result) {
+frame_init :: proc(
+  self: ^Frame,
+  color_format: vk.Format,
+  width: u32,
+  height: u32,
+) -> (
+  res: vk.Result,
+) {
   self.camera_uniform = create_host_visible_buffer(
     SceneUniform,
     (1 + 6 * MAX_SCENE_UNIFORMS),
@@ -96,15 +105,14 @@ frame_init :: proc(self: ^Frame) -> (res: vk.Result) {
     ) or_return
   }
 
-  alloc_info_main := vk.DescriptorSetAllocateInfo {
-    sType              = .DESCRIPTOR_SET_ALLOCATE_INFO,
-    descriptorPool     = g_descriptor_pool,
-    descriptorSetCount = 1,
-    pSetLayouts        = &g_camera_descriptor_set_layout,
-  }
   vk.AllocateDescriptorSets(
     g_device,
-    &alloc_info_main,
+    &vk.DescriptorSetAllocateInfo {
+      sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
+      descriptorPool = g_descriptor_pool,
+      descriptorSetCount = 1,
+      pSetLayouts = &g_camera_descriptor_set_layout,
+    },
     &self.camera_descriptor_set,
   ) or_return
 
@@ -170,6 +178,35 @@ frame_init :: proc(self: ^Frame) -> (res: vk.Result) {
   }
   vk.UpdateDescriptorSets(g_device, len(writes), raw_data(writes[:]), 0, nil)
 
+  self.main_pass_image = malloc_image_buffer(
+    width,
+    height,
+    color_format,
+    .OPTIMAL,
+    {.COLOR_ATTACHMENT, .SAMPLED, .TRANSFER_SRC, .TRANSFER_DST},
+    {.DEVICE_LOCAL},
+  ) or_return
+  self.main_pass_image.view = create_image_view(
+    self.main_pass_image.image,
+    color_format,
+    {.COLOR},
+  ) or_return
+  for &image in self.postprocess_images {
+    image = malloc_image_buffer(
+      width,
+      height,
+      color_format,
+      .OPTIMAL,
+      {.COLOR_ATTACHMENT, .SAMPLED, .TRANSFER_SRC, .TRANSFER_DST},
+      {.DEVICE_LOCAL},
+    ) or_return
+
+    image.view = create_image_view(
+      image.image,
+      color_format,
+      {.COLOR},
+    ) or_return
+  }
   return .SUCCESS
 }
 
@@ -191,8 +228,8 @@ Renderer :: struct {
   swapchain:                  vk.SwapchainKHR,
   format:                     vk.SurfaceFormatKHR,
   extent:                     vk.Extent2D,
-  images:                     []vk.Image,
-  views:                      []vk.ImageView,
+  swapchain_images:           []vk.Image,
+  swapchain_views:            []vk.ImageView,
   frames:                     [MAX_FRAMES_IN_FLIGHT]Frame,
   depth_buffer:               ImageBuffer,
   environment_map:            ^Texture,
@@ -249,8 +286,14 @@ renderer_init :: proc(
     self.extent.height,
   ) or_return
   self.current_frame_index = 0
-  for &frame in self.frames do frame_init(&frame) or_return
-
+  for &frame in self.frames {
+    frame_init(
+      &frame,
+      self.format.format,
+      self.extent.width,
+      self.extent.height,
+    ) or_return
+  }
   return .SUCCESS
 }
 
@@ -357,17 +400,17 @@ create_swapchain :: proc(
     &swapchain_image_count,
     nil,
   )
-  self.images = make([]vk.Image, swapchain_image_count)
+  self.swapchain_images = make([]vk.Image, swapchain_image_count)
   vk.GetSwapchainImagesKHR(
     g_device,
     self.swapchain,
     &swapchain_image_count,
-    raw_data(self.images),
+    raw_data(self.swapchain_images),
   )
-  self.views = make([]vk.ImageView, swapchain_image_count)
+  self.swapchain_views = make([]vk.ImageView, swapchain_image_count)
   for i in 0 ..< swapchain_image_count {
-    self.views[i] = create_image_view(
-      self.images[i],
+    self.swapchain_views[i] = create_image_view(
+      self.swapchain_images[i],
       self.format.format,
       {.COLOR},
     ) or_return
@@ -391,12 +434,11 @@ create_swapchain :: proc(
 
 destroy_swapchain :: proc(self: ^Renderer) {
   image_buffer_deinit(&self.depth_buffer)
-  for view in self.views do vk.DestroyImageView(g_device, view, nil)
-
-  delete(self.views)
-  self.views = nil
-  delete(self.images)
-  self.images = nil
+  for view in self.swapchain_views do vk.DestroyImageView(g_device, view, nil)
+  delete(self.swapchain_views)
+  self.swapchain_views = nil
+  delete(self.swapchain_images)
+  self.swapchain_images = nil
   vk.DestroySwapchainKHR(g_device, self.swapchain, nil)
   self.swapchain = 0
 }
@@ -404,16 +446,19 @@ destroy_swapchain :: proc(self: ^Renderer) {
 renderer_get_in_flight_fence :: proc(self: ^Renderer) -> vk.Fence {
   return self.frames[self.current_frame_index].fence
 }
+
 renderer_get_image_available_semaphore :: proc(
   self: ^Renderer,
 ) -> vk.Semaphore {
   return self.frames[self.current_frame_index].image_available_semaphore
 }
+
 renderer_get_render_finished_semaphore :: proc(
   self: ^Renderer,
 ) -> vk.Semaphore {
   return self.frames[self.current_frame_index].render_finished_semaphore
 }
+
 renderer_get_command_buffer :: proc(self: ^Renderer) -> vk.CommandBuffer {
   if self == nil {
     log.errorf("Error: Renderer is nil in get_command_buffer_renderer")
@@ -437,6 +482,28 @@ renderer_get_command_buffer :: proc(self: ^Renderer) -> vk.CommandBuffer {
     return vk.CommandBuffer{}
   }
   return cmd_buffer
+}
+
+renderer_get_main_pass_image :: proc(self: ^Renderer) -> vk.Image {
+  return self.frames[self.current_frame_index].main_pass_image.image
+}
+
+renderer_get_main_pass_view :: proc(self: ^Renderer) -> vk.ImageView {
+  return self.frames[self.current_frame_index].main_pass_image.view
+}
+
+renderer_get_postprocess_pass_image :: proc(
+  self: ^Renderer,
+  i: int,
+) -> vk.Image {
+  return self.frames[self.current_frame_index].postprocess_images[i].image
+}
+
+renderer_get_postprocess_pass_view :: proc(
+  self: ^Renderer,
+  i: int,
+) -> vk.ImageView {
+  return self.frames[self.current_frame_index].postprocess_images[i].view
 }
 
 renderer_get_camera_uniform :: proc(
@@ -748,7 +815,11 @@ render :: proc(engine: ^Engine) -> vk.Result {
   }
   render_shadow_pass(engine, &light_uniform, command_buffer) or_return
   // log.infof("============ rendering main pass =============")
-  render_main_pass(engine, command_buffer, image_idx, camera_frustum) or_return
+  prepare_image_for_render(
+    command_buffer,
+    renderer_get_main_pass_image(&engine.renderer),
+  )
+  render_main_pass(engine, command_buffer, camera_frustum) or_return
   data_buffer_write(
     renderer_get_camera_uniform(&engine.renderer)^,
     &scene_uniform,
@@ -763,34 +834,26 @@ render :: proc(engine: ^Engine) -> vk.Result {
   mu.end(&engine.ui.ctx)
   ui_render(&engine.ui, command_buffer)
   vk.CmdEndRenderingKHR(command_buffer)
-  present_barrier := vk.ImageMemoryBarrier {
-    sType = .IMAGE_MEMORY_BARRIER,
-    oldLayout = .COLOR_ATTACHMENT_OPTIMAL,
-    newLayout = .PRESENT_SRC_KHR,
-    srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-    dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-    image = engine.renderer.images[image_idx],
-    subresourceRange = vk.ImageSubresourceRange {
-      aspectMask = {.COLOR},
-      baseMipLevel = 0,
-      levelCount = 1,
-      baseArrayLayer = 0,
-      layerCount = 1,
-    },
-    srcAccessMask = {.COLOR_ATTACHMENT_WRITE},
-  }
-  vk.CmdPipelineBarrier(
+  prepare_image_for_shader_read(
     command_buffer,
-    {.COLOR_ATTACHMENT_OUTPUT},
-    {.BOTTOM_OF_PIPE},
-    {},
-    0,
-    nil,
-    0,
-    nil,
-    1,
-    &present_barrier,
+    renderer_get_main_pass_image(&engine.renderer),
   )
+  prepare_image_for_render(
+    command_buffer,
+    engine.renderer.swapchain_images[image_idx],
+  )
+  render_postprocess_stack(
+    &engine.renderer,
+    command_buffer,
+    renderer_get_main_pass_view(&engine.renderer), // postprocess input
+    engine.renderer.swapchain_views[image_idx], // final output view
+    engine.renderer.extent,
+  )
+  prepare_image_for_present(
+    command_buffer,
+    engine.renderer.swapchain_images[image_idx],
+  )
+
   vk.EndCommandBuffer(command_buffer) or_return
   current_render_finished_semaphore := renderer_get_render_finished_semaphore(
     &engine.renderer,
@@ -1113,40 +1176,11 @@ render_shadow_pass :: proc(
 render_main_pass :: proc(
   engine: ^Engine,
   command_buffer: vk.CommandBuffer,
-  image_idx: u32,
   camera_frustum: geometry.Frustum,
 ) -> vk.Result {
-  barrier := vk.ImageMemoryBarrier {
-    sType = .IMAGE_MEMORY_BARRIER,
-    oldLayout = .UNDEFINED,
-    newLayout = .COLOR_ATTACHMENT_OPTIMAL,
-    srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-    dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-    image = engine.renderer.images[image_idx],
-    subresourceRange = vk.ImageSubresourceRange {
-      aspectMask = {.COLOR},
-      baseMipLevel = 0,
-      levelCount = 1,
-      baseArrayLayer = 0,
-      layerCount = 1,
-    },
-    dstAccessMask = {.COLOR_ATTACHMENT_WRITE},
-  }
-  vk.CmdPipelineBarrier(
-    command_buffer,
-    {.TOP_OF_PIPE},
-    {.COLOR_ATTACHMENT_OUTPUT},
-    {},
-    0,
-    nil,
-    0,
-    nil,
-    1,
-    &barrier,
-  )
   color_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
-    imageView = engine.renderer.views[image_idx],
+    imageView = renderer_get_main_pass_view(&engine.renderer),
     imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
     loadOp = .CLEAR,
     storeOp = .STORE,
@@ -1205,4 +1239,249 @@ render_main_pass :: proc(
     mu.label(&engine.ui.ctx, fmt.tprintf("Rendered %d", rendered_count))
   }
   return .SUCCESS
+}
+
+prepare_image_for_render :: proc(
+  command_buffer: vk.CommandBuffer,
+  image: vk.Image,
+  old_layout: vk.ImageLayout = .UNDEFINED,
+) {
+  barrier := vk.ImageMemoryBarrier {
+    sType = .IMAGE_MEMORY_BARRIER,
+    oldLayout = old_layout,
+    newLayout = .COLOR_ATTACHMENT_OPTIMAL,
+    srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    image = image,
+    subresourceRange = vk.ImageSubresourceRange {
+      aspectMask = {.COLOR},
+      baseMipLevel = 0,
+      levelCount = 1,
+      baseArrayLayer = 0,
+      layerCount = 1,
+    },
+    dstAccessMask = {.COLOR_ATTACHMENT_WRITE},
+  }
+  vk.CmdPipelineBarrier(
+    command_buffer,
+    {.TOP_OF_PIPE},
+    {.COLOR_ATTACHMENT_OUTPUT},
+    {},
+    0,
+    nil,
+    0,
+    nil,
+    1,
+    &barrier,
+  )
+}
+
+prepare_image_for_shader_read :: proc(
+  command_buffer: vk.CommandBuffer,
+  image: vk.Image,
+  old_layout: vk.ImageLayout = .COLOR_ATTACHMENT_OPTIMAL,
+) {
+  barrier := vk.ImageMemoryBarrier {
+    sType = .IMAGE_MEMORY_BARRIER,
+    oldLayout = old_layout,
+    newLayout = .SHADER_READ_ONLY_OPTIMAL,
+    srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    image = image,
+    subresourceRange = vk.ImageSubresourceRange {
+      aspectMask = {.COLOR},
+      baseMipLevel = 0,
+      levelCount = 1,
+      baseArrayLayer = 0,
+      layerCount = 1,
+    },
+    srcAccessMask = {.COLOR_ATTACHMENT_WRITE},
+    dstAccessMask = {.SHADER_READ},
+  }
+  vk.CmdPipelineBarrier(
+    command_buffer,
+    {.COLOR_ATTACHMENT_OUTPUT},
+    {.FRAGMENT_SHADER},
+    {},
+    0,
+    nil,
+    0,
+    nil,
+    1,
+    &barrier,
+  )
+}
+
+prepare_image_for_present :: proc(
+  command_buffer: vk.CommandBuffer,
+  image: vk.Image,
+) {
+  barrier := vk.ImageMemoryBarrier {
+    sType = .IMAGE_MEMORY_BARRIER,
+    oldLayout = .COLOR_ATTACHMENT_OPTIMAL,
+    newLayout = .PRESENT_SRC_KHR,
+    srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    image = image,
+    subresourceRange = vk.ImageSubresourceRange {
+      aspectMask = {.COLOR},
+      baseMipLevel = 0,
+      levelCount = 1,
+      baseArrayLayer = 0,
+      layerCount = 1,
+    },
+    srcAccessMask = {.COLOR_ATTACHMENT_WRITE},
+  }
+  vk.CmdPipelineBarrier(
+    command_buffer,
+    {.COLOR_ATTACHMENT_OUTPUT},
+    {.BOTTOM_OF_PIPE},
+    {},
+    0,
+    nil,
+    0,
+    nil,
+    1,
+    &barrier,
+  )
+}
+
+render_postprocess_stack :: proc(
+  renderer: ^Renderer,
+  command_buffer: vk.CommandBuffer,
+  input_view: vk.ImageView,
+  output_view: vk.ImageView,
+  extent: vk.Extent2D,
+) {
+  if len(g_postprocess_stack) == 0 {
+    // if no postprocess effect, just copy the input to output
+    append(&g_postprocess_stack, nil)
+  }
+  // effect i:  0, 1, 2, 3, 4, 5, 6
+  // read from: m0, p0, p1, p0, p1, p0 input  = (i+1)%2+1  (i != 0)
+  // write to:  p0, p1, p0, p1 ...  m1 output = (i%2)+1    (i !=n-1)
+  update_postprocess_input(0, input_view)
+  update_postprocess_input(1, renderer_get_postprocess_pass_view(renderer, 0))
+  update_postprocess_input(2, renderer_get_postprocess_pass_view(renderer, 1))
+  for effect, i in g_postprocess_stack {
+    is_first := i == 0
+    is_last := i == len(g_postprocess_stack) - 1
+    src_idx := 0 if is_first else (i - 1) % 2 + 1
+    dst_image_idx := i % 2
+    src_image_idx := (i - 1) % 2
+    log.infof(
+      "render effect %v, using descriptor %d, input image %d, output image %d",
+      effect,
+      src_idx,
+      src_image_idx,
+      dst_image_idx,
+    )
+    prepare_image_for_render(
+      command_buffer,
+      renderer_get_postprocess_pass_image(renderer, dst_image_idx),
+      .SHADER_READ_ONLY_OPTIMAL,
+    )
+    // first image is main pass output, it is already ready for shader
+    if !is_first {
+      prepare_image_for_shader_read(
+        command_buffer,
+        renderer_get_postprocess_pass_image(renderer, src_image_idx),
+      )
+    }
+    color_attachment := vk.RenderingAttachmentInfoKHR {
+      sType = .RENDERING_ATTACHMENT_INFO_KHR,
+      imageView = output_view if is_last else renderer_get_postprocess_pass_view(renderer, dst_image_idx),
+      imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
+      loadOp = .CLEAR,
+      storeOp = .STORE,
+      clearValue = vk.ClearValue{color = {float32 = {0.03, 0.01, 0.05, 1}}},
+    }
+    render_info := vk.RenderingInfoKHR {
+      sType = .RENDERING_INFO_KHR,
+      renderArea = vk.Rect2D{extent = extent},
+      layerCount = 1,
+      colorAttachmentCount = 1,
+      pColorAttachments = &color_attachment,
+    }
+    vk.CmdBeginRenderingKHR(command_buffer, &render_info)
+
+    viewport := vk.Viewport {
+      width    = f32(extent.width),
+      height   = f32(extent.height),
+      minDepth = 0.0,
+      maxDepth = 1.0,
+    }
+    scissor := vk.Rect2D {
+      extent = extent,
+    }
+    vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
+    vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
+
+    effect_type := type_of_postprocess_effect(effect)
+    vk.CmdBindPipeline(
+      command_buffer,
+      .GRAPHICS,
+      g_postprocess_pipelines[effect_type],
+    )
+    vk.CmdBindDescriptorSets(
+      command_buffer,
+      .GRAPHICS,
+      g_postprocess_pipeline_layouts[effect_type],
+      0,
+      1,
+      &g_postprocess_descriptor_sets[src_idx],
+      0,
+      nil,
+    )
+
+    switch &e in effect {
+    case BlurEffect:
+      vk.CmdPushConstants(
+        command_buffer,
+        g_postprocess_pipeline_layouts[effect_type],
+        {.FRAGMENT},
+        0,
+        size_of(BlurEffect),
+        &e,
+      )
+    case GrayscaleEffect:
+      vk.CmdPushConstants(
+        command_buffer,
+        g_postprocess_pipeline_layouts[effect_type],
+        {.FRAGMENT},
+        0,
+        size_of(GrayscaleEffect),
+        &e,
+      )
+    case ToneMapEffect:
+      vk.CmdPushConstants(
+        command_buffer,
+        g_postprocess_pipeline_layouts[effect_type],
+        {.FRAGMENT},
+        0,
+        size_of(ToneMapEffect),
+        &e,
+      )
+    case BloomEffect:
+      vk.CmdPushConstants(
+        command_buffer,
+        g_postprocess_pipeline_layouts[effect_type],
+        {.FRAGMENT},
+        0,
+        size_of(BloomEffect),
+        &e,
+      )
+    case OutlineEffect:
+      vk.CmdPushConstants(
+        command_buffer,
+        g_postprocess_pipeline_layouts[effect_type],
+        {.FRAGMENT},
+        0,
+        size_of(OutlineEffect),
+        &e,
+      )
+    }
+    vk.CmdDraw(command_buffer, 3, 1, 0, 0)
+    vk.CmdEndRenderingKHR(command_buffer)
+  }
 }

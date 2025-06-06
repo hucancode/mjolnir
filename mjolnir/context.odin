@@ -102,7 +102,7 @@ debug_callback :: proc "system" (
   p_callback_data: ^vk.DebugUtilsMessengerCallbackDataEXT,
   p_user_data: rawptr,
 ) -> b32 {
-  context = runtime.default_context()
+  context = g_context
   message := string(p_callback_data.pMessage)
   switch {
   case .ERROR in message_severity:
