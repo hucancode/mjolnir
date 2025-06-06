@@ -166,8 +166,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
         PointLightAttachment{color = color, radius = 20, cast_shadow = true},
       )
     }
-    translate(&light.transform, 0, 2, -2)
-    rotate_angle(&light.transform, math.PI * 0.45, linalg.VECTOR3F32_X_AXIS)
+    translate(&light.transform, 0, 3, -1)
+    rotate(&light.transform, math.PI * 0.45, linalg.VECTOR3F32_X_AXIS)
     cube_node: ^Node
     light_cube_handles[i], cube_node = spawn_child(
       &engine.scene,
@@ -186,8 +186,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
       cast_shadow = true,
     },
   )
-  postprocess_push_tonemap(1.0, 1.6)
-  postprocess_push_grayscale(0.2)
+  postprocess_push_tonemap(1.5, 1.3)
+  postprocess_push_grayscale(0.3)
 }
 
 update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
@@ -206,12 +206,12 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
     ry := (math.sin(t) + 1.0) * 0.5 * 1.5 + 1.0
     rz := math.cos(t)
     v := linalg.vector_normalize(linalg.Vector3f32{rx, ry, rz})
-    radius: f32 = 4
+    radius: f32 = 6
     v = v * radius + linalg.VECTOR3F32_Y_AXIS * -1.0
     translate(&light_ptr.transform, v.x, v.y, v.z)
     // log.infof("Light %d position: %v", i, light_ptr.transform.position)
     light_cube_ptr := resource.get(engine.scene.nodes, light_cube_handles[i])
-    rotate_angle(
+    rotate(
       &light_cube_ptr.transform,
       math.PI * time_since_app_start(engine) * 0.5,
     )
