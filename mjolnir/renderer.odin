@@ -69,7 +69,7 @@ Frame :: struct {
   shadow_map_descriptor_set:      vk.DescriptorSet,
   cube_shadow_map_descriptor_set: vk.DescriptorSet,
   main_pass_image:                ImageBuffer,
-  postprocess_images: [2]ImageBuffer,
+  postprocess_images:             [2]ImageBuffer,
 }
 
 frame_init :: proc(
@@ -492,11 +492,17 @@ renderer_get_main_pass_view :: proc(self: ^Renderer) -> vk.ImageView {
   return self.frames[self.current_frame_index].main_pass_image.view
 }
 
-renderer_get_postprocess_pass_image :: proc(self: ^Renderer, i: int) -> vk.Image {
+renderer_get_postprocess_pass_image :: proc(
+  self: ^Renderer,
+  i: int,
+) -> vk.Image {
   return self.frames[self.current_frame_index].postprocess_images[i].image
 }
 
-renderer_get_postprocess_pass_view :: proc(self: ^Renderer, i: int) -> vk.ImageView {
+renderer_get_postprocess_pass_view :: proc(
+  self: ^Renderer,
+  i: int,
+) -> vk.ImageView {
   return self.frames[self.current_frame_index].postprocess_images[i].view
 }
 
@@ -1360,14 +1366,16 @@ render_postprocess_stack :: proc(
   for effect, i in g_postprocess_stack {
     is_first := i == 0
     is_last := i == len(g_postprocess_stack) - 1
-    src_idx := 0 if is_first else (i-1)%2+1
-    dst_image_idx := i%2
-    src_image_idx := (i-1)%2
-    log.infof("render effect %v, using descriptor %d, input image %d, output image %d",
-        effect,
-        src_idx,
-        src_image_idx,
-        dst_image_idx)
+    src_idx := 0 if is_first else (i - 1) % 2 + 1
+    dst_image_idx := i % 2
+    src_image_idx := (i - 1) % 2
+    log.infof(
+      "render effect %v, using descriptor %d, input image %d, output image %d",
+      effect,
+      src_idx,
+      src_image_idx,
+      dst_image_idx,
+    )
     prepare_image_for_render(
       command_buffer,
       renderer_get_postprocess_pass_image(renderer, dst_image_idx),
