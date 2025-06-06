@@ -1,0 +1,31 @@
+#version 450
+layout(local_size_x = 256) in;
+
+struct Particle {
+    vec3 position;
+    float size;
+    vec3 velocity;
+    float lifeTime;
+    vec4 color_start;
+    vec4 color_end;
+};
+
+layout(std430, binding = 0) buffer Particles {
+    Particle particles[];
+};
+
+uniform float deltaTime;
+
+void main() {
+    uint idx = gl_GlobalInvocationID.x;
+    // Example: simple Euler integration
+    particles[idx].position.xyz += particles[idx].velocity.xyz * deltaTime;
+    // Decrease lifetime (if using w as lifetime)
+    particles[idx].position.w -= deltaTime;
+    // Reset dead particles (simple respawn)
+    if (particles[idx].position.w < 0.0) {
+        particles[idx].position.xyz = vec3(0,0,0);
+        particles[idx].velocity.xyz = vec3(0,1,0); // respawn upwards
+        particles[idx].position.w = 5.0; // 5 seconds lifetime
+    }
+}
