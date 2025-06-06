@@ -186,7 +186,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
       cast_shadow = true,
     },
   )
-  postprocess_push_tonemap(1.5, 2.2)
+  postprocess_push_tonemap(1.0, 1.6)
   postprocess_push_grayscale(0.2)
 }
 

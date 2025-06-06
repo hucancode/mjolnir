@@ -2,7 +2,14 @@
 
 Mjolnir is a minimalistic rendering engine. The goal is to create a simple set of tools to help people quickly create fast graphical applications
 
-![](./readme/lights.gif)
+![](./readme/pbr.gif)
+
+# Work in Progress
+
+- Scene Manager
+- GLTF asset loader
+- PBR Material
+- Post-process Effect
 
 # Disclaimer
 
