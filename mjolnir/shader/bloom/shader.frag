@@ -10,11 +10,11 @@ layout(push_constant) uniform BloomParams {
     float intensity;
     float radius;
     float padding;
-} params;
+};
 
 const int MAX_RADIUS = 8;
 
-vec4 blur_bright(sampler2D img, vec2 uv, float radius, float threshold) {
+vec4 blur_bright(sampler2D img, vec2 uv) {
     vec2 texel = 1.0 / vec2(textureSize(img, 0));
     vec4 color = vec4(0.0);
     float total = 0.0;
@@ -34,6 +34,6 @@ vec4 blur_bright(sampler2D img, vec2 uv, float radius, float threshold) {
 
 void main() {
     vec4 orig = texture(u_input_image, v_uv);
-    vec4 bloom = blur_bright(u_input_image, v_uv, params.radius, params.threshold) * params.intensity;
+    vec4 bloom = blur_bright(u_input_image, v_uv) * intensity;
     out_color = clamp(orig + bloom, 0.0, 1.0);
 }

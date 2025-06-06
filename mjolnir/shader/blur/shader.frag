@@ -7,22 +7,22 @@ layout(set = 0, binding = 0) uniform sampler2D u_input_image;
 
 layout(push_constant) uniform BlurParams {
     float radius;
-} params;
+    float padding[3];
+};
 
-const int MAX_RADIUS = 16;
+const float MAX_RADIUS = 16.0;
 
 void main() {
     vec2 texel_size = 1.0 / vec2(textureSize(u_input_image, 0));
     vec4 color = vec4(0.0);
     float total = 0.0;
 
-    int radius = int(params.radius);
-    radius = clamp(radius, 1, MAX_RADIUS);
+    float radius = clamp(radius, 1.0, MAX_RADIUS);
 
-    for (int i = -MAX_RADIUS; i <= MAX_RADIUS; ++i) {
+    for (float i = -MAX_RADIUS; i <= MAX_RADIUS; i+=1.0) {
         if (abs(i) > radius) continue;
-        float weight = exp(-0.5 * (float(i) * float(i)) / (params.radius * params.radius));
-        vec2 offset = vec2(float(i), 0.0) * texel_size; // horizontal blur
+        float weight = exp(-0.5 * (i * i) / (radius * radius));
+        vec2 offset = vec2(i, 0.0) * texel_size; // horizontal blur
         color += texture(u_input_image, v_uv + offset) * weight;
         total += weight;
     }

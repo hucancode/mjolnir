@@ -11,10 +11,12 @@ GrayscaleEffect :: struct {
 ToneMapEffect :: struct {
   exposure: f32,
   gamma:    f32,
+  padding:  [2]f32,
 }
 
 BlurEffect :: struct {
-  radius: f32,
+  radius:  f32,
+  padding: [3]f32,
 }
 
 BloomEffect :: struct {
@@ -84,7 +86,7 @@ postprocess_push_grayscale :: proc(
 
 postprocess_push_blur :: proc(radius: f32) {
   pipeline := &g_postprocess_pipelines[PostProcessEffectType.GRAYSCALE]
-  effect := BlurEffect{radius}
+  effect := BlurEffect{radius = radius}
   append(&g_postprocess_stack, effect)
 }
 
