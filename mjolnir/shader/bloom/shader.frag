@@ -12,7 +12,7 @@ layout(push_constant) uniform BloomParams {
     float padding;
 } params;
 
-const int MAX_RADIUS = 16;
+const int MAX_RADIUS = 8;
 
 vec4 blur_bright(sampler2D img, vec2 uv, float radius, float threshold) {
     vec2 texel = 1.0 / vec2(textureSize(img, 0));

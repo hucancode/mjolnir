@@ -69,6 +69,7 @@ Frame :: struct {
   shadow_map_descriptor_set:      vk.DescriptorSet,
   cube_shadow_map_descriptor_set: vk.DescriptorSet,
   main_pass_image:                ImageBuffer,
+  postprocess_images: [2]ImageBuffer,
 }
 
 frame_init :: proc(
@@ -190,6 +191,22 @@ frame_init :: proc(
     color_format,
     {.COLOR},
   ) or_return
+  for &image in self.postprocess_images {
+    image = malloc_image_buffer(
+      width,
+      height,
+      color_format,
+      .OPTIMAL,
+      {.COLOR_ATTACHMENT, .SAMPLED, .TRANSFER_SRC, .TRANSFER_DST},
+      {.DEVICE_LOCAL},
+    ) or_return
+
+    image.view = create_image_view(
+      image.image,
+      color_format,
+      {.COLOR},
+    ) or_return
+  }
   return .SUCCESS
 }
 
@@ -473,6 +490,14 @@ renderer_get_main_pass_image :: proc(self: ^Renderer) -> vk.Image {
 
 renderer_get_main_pass_view :: proc(self: ^Renderer) -> vk.ImageView {
   return self.frames[self.current_frame_index].main_pass_image.view
+}
+
+renderer_get_postprocess_pass_image :: proc(self: ^Renderer, i: int) -> vk.Image {
+  return self.frames[self.current_frame_index].postprocess_images[i].image
+}
+
+renderer_get_postprocess_pass_view :: proc(self: ^Renderer, i: int) -> vk.ImageView {
+  return self.frames[self.current_frame_index].postprocess_images[i].view
 }
 
 renderer_get_camera_uniform :: proc(
@@ -811,7 +836,8 @@ render :: proc(engine: ^Engine) -> vk.Result {
     command_buffer,
     engine.renderer.swapchain_images[image_idx],
   )
-  render_postprocess_pass(
+  render_postprocess_stack(
+    &engine.renderer,
     command_buffer,
     renderer_get_main_pass_view(&engine.renderer), // postprocess input
     engine.renderer.swapchain_views[image_idx], // final output view
@@ -1314,38 +1340,49 @@ prepare_image_for_present :: proc(
   )
 }
 
-// - input_view: the initial image view (scene color output)
-// - input_sampler: the initial sampler
-// - pingpong_views: two image views for ping-ponging
-// - pingpong_samplers: two samplers for ping-ponging
-// - swapchain_view: the final swapchain image view
-// - command_buffer: Vulkan command buffer
-// - extent: the size of the render area
-render_postprocess_pass :: proc(
+render_postprocess_stack :: proc(
+  renderer: ^Renderer,
   command_buffer: vk.CommandBuffer,
   input_view: vk.ImageView,
   output_view: vk.ImageView,
   extent: vk.Extent2D,
 ) {
-  // Postprocess stack logic with ping-pong and effect handling
-  src_idx: int = 0
-  dst_idx: int = 1
-  current_view := input_view
-
   if len(g_postprocess_stack) == 0 {
     // if no postprocess effect, just copy the input to output
     append(&g_postprocess_stack, nil)
   }
-
+  // effect i:  0, 1, 2, 3, 4, 5, 6
+  // read from: m0, p0, p1, p0, p1, p0 input  = (i+1)%2+1  (i != 0)
+  // write to:  p0, p1, p0, p1 ...  m1 output = (i%2)+1    (i !=n-1)
+  update_postprocess_input(0, input_view)
+  update_postprocess_input(1, renderer_get_postprocess_pass_view(renderer, 0))
+  update_postprocess_input(2, renderer_get_postprocess_pass_view(renderer, 1))
   for effect, i in g_postprocess_stack {
-    is_first := i <= 1
+    is_first := i == 0
     is_last := i == len(g_postprocess_stack) - 1
+    src_idx := 0 if is_first else (i-1)%2+1
+    dst_image_idx := i%2
+    src_image_idx := (i-1)%2
+    log.infof("render effect %v, using descriptor %d, input image %d, output image %d",
+        effect,
+        src_idx,
+        src_image_idx,
+        dst_image_idx)
+    prepare_image_for_render(
+      command_buffer,
+      renderer_get_postprocess_pass_image(renderer, dst_image_idx),
+      .SHADER_READ_ONLY_OPTIMAL,
+    )
+    // first image is main pass output, it is already ready for shader
     if !is_first {
-        prepare_image_for_render(command_buffer, g_postprocess_images[dst_idx].image, .SHADER_READ_ONLY_OPTIMAL)
+      prepare_image_for_shader_read(
+        command_buffer,
+        renderer_get_postprocess_pass_image(renderer, src_image_idx),
+      )
     }
     color_attachment := vk.RenderingAttachmentInfoKHR {
       sType = .RENDERING_ATTACHMENT_INFO_KHR,
-      imageView = output_view if is_last else g_postprocess_images[dst_idx].view,
+      imageView = output_view if is_last else renderer_get_postprocess_pass_view(renderer, dst_image_idx),
       imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
       loadOp = .CLEAR,
       storeOp = .STORE,
@@ -1378,14 +1415,13 @@ render_postprocess_pass :: proc(
       .GRAPHICS,
       g_postprocess_pipelines[effect_type],
     )
-    update_postprocess_input(current_view)
     vk.CmdBindDescriptorSets(
       command_buffer,
       .GRAPHICS,
       g_postprocess_pipeline_layouts[effect_type],
       0,
-      len(g_postprocess_descriptor_sets),
-      raw_data(g_postprocess_descriptor_sets[:]),
+      1,
+      &g_postprocess_descriptor_sets[src_idx],
       0,
       nil,
     )
@@ -1437,13 +1473,7 @@ render_postprocess_pass :: proc(
         &e,
       )
     }
-
     vk.CmdDraw(command_buffer, 3, 1, 0, 0)
     vk.CmdEndRenderingKHR(command_buffer)
-    if !is_last {
-        src_idx, dst_idx = dst_idx, src_idx
-        prepare_image_for_shader_read(command_buffer, g_postprocess_images[src_idx].image)
-        current_view = g_postprocess_images[src_idx].view
-    }
   }
 }

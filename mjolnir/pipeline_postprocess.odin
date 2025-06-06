@@ -21,11 +21,11 @@ BloomEffect :: struct {
   threshold:   f32,
   intensity:   f32,
   blur_radius: f32,
-  padding: f32,
+  padding:     f32,
 }
 
 OutlineEffect :: struct {
-  color:      [3]f32,
+  color:     [3]f32,
   thickness: f32,
 }
 
@@ -48,7 +48,6 @@ PostprocessEffect :: union {
 
 // Global postprocess stack
 g_postprocess_stack: [dynamic]PostprocessEffect
-g_postprocess_images: [2]ImageBuffer
 g_postprocess_simple_sampler: vk.Sampler
 
 type_of_postprocess_effect :: proc(
@@ -89,11 +88,15 @@ postprocess_push_blur :: proc(radius: f32) {
   append(&g_postprocess_stack, effect)
 }
 
-postprocess_push_bloom :: proc(threshold: f32 = 0.2, intensity: f32 = 1.0, radius: f32 = 4.0) {
+postprocess_push_bloom :: proc(
+  threshold: f32 = 0.2,
+  intensity: f32 = 1.0,
+  radius: f32 = 4.0,
+) {
   pipeline := &g_postprocess_pipelines[PostProcessEffectType.BLOOM]
-  effect := BloomEffect{
-    threshold = threshold,
-    intensity = intensity,
+  effect := BloomEffect {
+    threshold   = threshold,
+    intensity   = intensity,
     blur_radius = radius,
   }
   append(&g_postprocess_stack, effect)
@@ -101,7 +104,7 @@ postprocess_push_bloom :: proc(threshold: f32 = 0.2, intensity: f32 = 1.0, radiu
 
 postprocess_push_tonemap :: proc(exposure: f32 = 1.0, gamma: f32 = 2.2) {
   pipeline := &g_postprocess_pipelines[PostProcessEffectType.TONEMAP]
-  effect := ToneMapEffect{
+  effect := ToneMapEffect {
     exposure = exposure,
     gamma    = gamma,
   }
@@ -110,7 +113,7 @@ postprocess_push_tonemap :: proc(exposure: f32 = 1.0, gamma: f32 = 2.2) {
 
 postprocess_push_outline :: proc(thickness: f32, color: [3]f32) {
   pipeline := &g_postprocess_pipelines[PostProcessEffectType.OUTLINE]
-  effect := OutlineEffect{
+  effect := OutlineEffect {
     thickness = thickness,
     color     = color,
   }
@@ -129,6 +132,7 @@ clear_postprocess_effects :: proc() {
 // TODO: use 1 dedicated descriptor set for each effect
 // otherwise we can not stack multiple post process effect
 update_postprocess_input :: proc(
+  set_idx: int,
   input_view: vk.ImageView,
 ) -> vk.Result {
   image_info := vk.DescriptorImageInfo {
@@ -138,7 +142,7 @@ update_postprocess_input :: proc(
   }
   write := vk.WriteDescriptorSet {
     sType           = .WRITE_DESCRIPTOR_SET,
-    dstSet          = g_postprocess_descriptor_sets[0],
+    dstSet          = g_postprocess_descriptor_sets[set_idx],
     dstBinding      = 0,
     descriptorType  = .COMBINED_IMAGE_SAMPLER,
     descriptorCount = 1,
@@ -147,7 +151,7 @@ update_postprocess_input :: proc(
   vk.UpdateDescriptorSets(g_device, 1, &write, 0, nil)
   log.infof(
     "update descriptor set %v, use image view %v",
-    g_postprocess_descriptor_sets[0],
+    g_postprocess_descriptor_sets[set_idx],
     input_view,
   )
   return .SUCCESS
@@ -163,10 +167,14 @@ SHADER_OUTLINE_FRAG :: #load("shader/outline/frag.spv")
 
 g_postprocess_pipelines: [len(PostProcessEffectType)]vk.Pipeline
 g_postprocess_pipeline_layouts: [len(PostProcessEffectType)]vk.PipelineLayout
-g_postprocess_descriptor_sets: [1]vk.DescriptorSet
+g_postprocess_descriptor_sets: [3]vk.DescriptorSet
 g_postprocess_descriptor_set_layouts: [1]vk.DescriptorSetLayout
 
-build_postprocess_pipelines :: proc(color_format: vk.Format, width: u32, height: u32) -> vk.Result {
+build_postprocess_pipelines :: proc(
+  color_format: vk.Format,
+  width: u32,
+  height: u32,
+) -> vk.Result {
   log.info("building post processing pipelines...")
   count :: len(PostProcessEffectType)
   vert_module := create_shader_module(SHADER_POSTPROCESS_VERT) or_return
@@ -188,13 +196,16 @@ build_postprocess_pipelines :: proc(color_format: vk.Format, width: u32, height:
   }
   // Enable dynamic state for viewport and scissor
   dynamic_states := [?]vk.DynamicState{.VIEWPORT, .SCISSOR}
-  dynamic_state := vk.PipelineDynamicStateCreateInfo{
-    sType = .PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+  dynamic_state := vk.PipelineDynamicStateCreateInfo {
+    sType             = .PIPELINE_DYNAMIC_STATE_CREATE_INFO,
     dynamicStateCount = len(dynamic_states),
-    pDynamicStates = raw_data(dynamic_states[:]),
+    pDynamicStates    = raw_data(dynamic_states[:]),
   }
   color_formats := [?]vk.Format{color_format}
-  log.infof("PipelineRenderingCreateInfoKHR: colorAttachmentFormats[0]=%d", color_formats[0]);
+  log.infof(
+    "PipelineRenderingCreateInfoKHR: colorAttachmentFormats[0]=%d",
+    color_formats[0],
+  )
   rendering_info := vk.PipelineRenderingCreateInfoKHR {
     sType                   = .PIPELINE_RENDERING_CREATE_INFO_KHR,
     colorAttachmentCount    = len(color_formats),
@@ -248,16 +259,27 @@ build_postprocess_pipelines :: proc(color_format: vk.Format, width: u32, height:
       &set_layout,
     ) or_return
   }
-  vk.AllocateDescriptorSets(
-    g_device,
-    &vk.DescriptorSetAllocateInfo {
-      sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
-      descriptorPool = g_descriptor_pool,
-      descriptorSetCount = len(g_postprocess_descriptor_set_layouts),
-      pSetLayouts = raw_data(g_postprocess_descriptor_set_layouts[:]),
-    },
-    raw_data(g_postprocess_descriptor_sets[:]),
-  ) or_return
+  n := len(g_postprocess_descriptor_set_layouts)
+  // postprocess pass 0: read from main pass, write to postprocess pass 1
+  // postprocess pass 1: read from 0, write to 2
+  // ...
+  // post process pass n-1: read from n-2, write to swapchain
+  // descriptor set 0: bind main pass texture as input
+  // descriptor set 1: bind postprocess pass 2,4,6,8... as input
+  // descriptor set 2: bind postprocess pass 1,3,5,7,... as input
+  // -> we need maximum of 3 descriptor sets
+  for i in 0 ..< 3 {
+    vk.AllocateDescriptorSets(
+      g_device,
+      &vk.DescriptorSetAllocateInfo {
+        sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
+        descriptorPool = g_descriptor_pool,
+        descriptorSetCount = len(g_postprocess_descriptor_set_layouts),
+        pSetLayouts = raw_data(g_postprocess_descriptor_set_layouts[:]),
+      },
+      raw_data(g_postprocess_descriptor_sets[n * i:]),
+    ) or_return
+  }
 
   for effect_type, i in PostProcessEffectType {
     switch effect_type {
@@ -369,35 +391,24 @@ build_postprocess_pipelines :: proc(color_format: vk.Format, width: u32, height:
     raw_data(g_postprocess_pipelines[:]),
   ) or_return
 
-  sampler_info := vk.SamplerCreateInfo{
-      sType = .SAMPLER_CREATE_INFO,
-      magFilter = .LINEAR,
-      minFilter = .LINEAR,
-      addressModeU = .CLAMP_TO_EDGE,
-      addressModeV = .CLAMP_TO_EDGE,
-      addressModeW = .CLAMP_TO_EDGE,
-      mipmapMode = .LINEAR,
-      minLod = 0.0,
-      maxLod = 0.0,
-      borderColor = .FLOAT_OPAQUE_WHITE,
+  sampler_info := vk.SamplerCreateInfo {
+    sType        = .SAMPLER_CREATE_INFO,
+    magFilter    = .LINEAR,
+    minFilter    = .LINEAR,
+    addressModeU = .CLAMP_TO_EDGE,
+    addressModeV = .CLAMP_TO_EDGE,
+    addressModeW = .CLAMP_TO_EDGE,
+    mipmapMode   = .LINEAR,
+    minLod       = 0.0,
+    maxLod       = 0.0,
+    borderColor  = .FLOAT_OPAQUE_WHITE,
   }
-  vk.CreateSampler(g_device, &sampler_info, nil, &g_postprocess_simple_sampler) or_return
-  for &image, i in g_postprocess_images {
-      image = malloc_image_buffer(
-          width, // swapchain or main pass width
-          height, // swapchain or main pass height
-          color_format, // swapchain format, e.g. VK_FORMAT_B8G8R8A8_SRGB
-          .OPTIMAL,
-          {.COLOR_ATTACHMENT, .SAMPLED, .TRANSFER_SRC, .TRANSFER_DST},
-          {.DEVICE_LOCAL},
-      ) or_return
-
-      image.view = create_image_view(
-          image.image,
-          color_format,
-          {.COLOR},
-      ) or_return
-  }
+  vk.CreateSampler(
+    g_device,
+    &sampler_info,
+    nil,
+    &g_postprocess_simple_sampler,
+  ) or_return
   return .SUCCESS
 }
 
