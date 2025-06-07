@@ -88,6 +88,8 @@ Engine :: struct {
   mouse_drag_proc:       MouseDragProc,
   mouse_move_proc:       MouseMoveProc,
   mouse_scroll_proc:     MouseScrollProc,
+  particle_compute:      ParticleComputePipeline,
+  max_particles:         int,
 }
 
 g_context: runtime.Context
@@ -130,6 +132,8 @@ init :: proc(
   engine.last_frame_timestamp = engine.start_timestamp
   engine.last_update_timestamp = engine.start_timestamp
 
+  engine.max_particles = 65536
+  engine.particle_compute = setup_particle_compute_pipeline(engine.max_particles) or_return
   log.infof("\nInitializing Resource Pools...")
 
   log.infof("Initializing mesh pool... ")
@@ -342,6 +346,31 @@ update :: proc(engine: ^Engine) -> bool {
   if engine.mouse_move_proc != nil {
     engine.mouse_move_proc(engine, engine.input.mouse_pos, delta)
   }
+
+  // 1. Write deltaTime to params_buffer
+  data_buffer_write(engine.particle_compute.params_buffer, &delta_time)
+  // 2. Record/submit compute dispatch (assuming you have access to a compute command buffer)
+  // This is a simplified example; in a real engine, you would record this in your frame's command buffer:
+  cmd_buf := renderer_get_command_buffer(&engine.renderer)
+  vk.CmdBindPipeline(cmd_buf, .COMPUTE, engine.particle_compute.pipeline)
+  vk.CmdBindDescriptorSets(cmd_buf, .COMPUTE, engine.particle_compute.pipeline_layout, 0, 1, &engine.particle_compute.descriptor_set, 0, nil)
+  vk.CmdDispatch(cmd_buf, u32(engine.max_particles + 255) / 256, 1, 1)
+  // 3. Insert buffer memory barrier before graphics
+  barrier := vk.BufferMemoryBarrier {
+      srcAccessMask = {.SHADER_WRITE},
+    dstAccessMask = {.VERTEX_ATTRIBUTE_READ},
+    buffer = engine.particle_compute.particle_buffer.buffer,
+    size = vk.DeviceSize(vk.WHOLE_SIZE),
+  }
+  vk.CmdPipelineBarrier(
+    cmd_buf,
+    {.COMPUTE_SHADER},
+    {.VERTEX_INPUT},
+    {},
+    0, nil,
+    1, &barrier,
+    0, nil,
+  )
 
   if engine.update_proc != nil {
     engine.update_proc(engine, delta_time)
