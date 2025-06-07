@@ -1229,17 +1229,9 @@ render_main_pass :: proc(
 ) -> vk.Result {
   // Log particle[0] before compute
   particles := engine.particle_compute.particle_buffer.mapped
-  log.debugf("[ParticleSystem] BEFORE compute: particle[0] %v",
-    particles[0]
-  )
 
   // Run particle compute pass before starting rendering
   compute_particles(engine, command_buffer)
-
-  // Log particle[0] after compute
-  log.debugf("[ParticleSystem] AFTER compute: particle[0] %v",
-    particles[0]
-  )
 
   // Barrier to ensure compute shader writes are visible to the vertex shader
   particle_buffer_barrier := vk.BufferMemoryBarrier {

@@ -309,40 +309,11 @@ update_emitters :: proc(pipeline: ^ParticleComputePipeline, delta_time: f32) {
       particles[idx].color = emitter.color_start
       particles[idx].size = emitter.size_start
       emitter.time_accumulator -= emission_interval
-      log.info("emit particle", particles[idx])
     }
   }
   params.particle_count = u32(
     MAX_PARTICLES - len(pipeline.free_particle_indices),
   )
-  if params.emitter_count > 0 {
-    log.debugf(
-      "[Particle System] Emitters: %d, Particles: %d, Delta: %.3f",
-      params.emitter_count,
-      params.particle_count,
-      delta_time,
-    )
-    // Log first 5 alive particles after emission (before compute)
-    alive_logged: int = 0
-    for i in 0 ..< MAX_PARTICLES {
-      if particles[i].life > 0 {
-        log.debugf(
-          "  [Emit] idx=%d pos=(%.2f,%.2f,%.2f) life=%.2f vel=(%.2f,%.2f,%.2f) size=%.2f",
-          i,
-          particles[i].position.x,
-          particles[i].position.y,
-          particles[i].position.z,
-          particles[i].life,
-          particles[i].velocity.x,
-          particles[i].velocity.y,
-          particles[i].velocity.z,
-          particles[i].size,
-        )
-        alive_logged += 1
-        if alive_logged >= 5 do break
-      }
-    }
-  }
 }
 
 get_emitter :: proc(

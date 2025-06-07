@@ -103,7 +103,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
       translate(&duck.transform, 0, 2, -2)
     }
   }
-  if false {
+  if true {
     log.info("loading GLTF...")
     gltf_nodes := load_gltf(engine, "assets/DamagedHelmet.glb") or_else {}
     log.infof("Loaded GLTF nodes: %v", gltf_nodes)
@@ -116,7 +116,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
       scale(&helm.transform, 0.5)
     }
   }
-  if false {
+  if true {
     log.info("loading GLTF...")
     gltf_nodes := load_gltf(engine, "assets/Warrior.glb") or_else {}
     log.infof("Loaded GLTF nodes: %v", gltf_nodes)
@@ -186,17 +186,17 @@ setup :: proc(engine: ^mjolnir.Engine) {
       cast_shadow = true,
     },
   )
-  // postprocess_push_tonemap(1.5, 1.3)
-  // postprocess_push_grayscale(0.3)
+  postprocess_push_tonemap(1.5, 1.3)
+  postprocess_push_grayscale(0.3)
   emitter := mjolnir.Emitter{
       transform = geometry.Transform{
-          position = {0, 2, 0},
+          position = {0, 3, 3},
           rotation = linalg.QUATERNIONF32_IDENTITY,
           scale = {1, 1, 1},
       },
-      emission_rate = 5,
-      particle_lifetime = 1.0,
-      initial_velocity = {0, -0.1, 0, 1},
+      emission_rate = 10,
+      particle_lifetime = 5.0,
+      initial_velocity = {0, -0.1, 0, 0},
       velocity_spread = 0.5,
       color_start = {1, 0, 0, 1},
       color_end = {0, 0, 1, 0},
