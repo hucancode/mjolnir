@@ -133,7 +133,7 @@ init :: proc(
   engine.last_update_timestamp = engine.start_timestamp
 
   engine.max_particles = 65536
-  engine.particle_compute = setup_particle_compute_pipeline(engine.max_particles) or_return
+  engine.particle_compute = setup_particle_compute_pipeline() or_return
   log.infof("\nInitializing Resource Pools...")
 
   log.infof("Initializing mesh pool... ")
@@ -348,7 +348,7 @@ update :: proc(engine: ^Engine) -> bool {
   }
 
   // 1. Write deltaTime to params_buffer
-  data_buffer_write(engine.particle_compute.params_buffer, &delta_time)
+  update_emitters(&engine.particle_compute, delta_time)
   // 2. Record/submit compute dispatch (assuming you have access to a compute command buffer)
   // This is a simplified example; in a real engine, you would record this in your frame's command buffer:
   cmd_buf := renderer_get_command_buffer(&engine.renderer)
