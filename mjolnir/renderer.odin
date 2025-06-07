@@ -238,6 +238,7 @@ Renderer :: struct {
   brdf_lut_handle:            Handle,
   brdf_lut:                   ^Texture,
   current_frame_index:        u32,
+  particle_render:            ParticleRenderPipeline,
 }
 
 renderer_init :: proc(
@@ -294,11 +295,14 @@ renderer_init :: proc(
       self.extent.height,
     ) or_return
   }
+  // Initialize particle render pipeline
+  self.particle_render = setup_particle_render_pipeline() or_return
   return .SUCCESS
 }
 
 renderer_deinit :: proc(self: ^Renderer) {
   vk.DeviceWaitIdle(g_device)
+  destroy_particle_render_pipeline(&self.particle_render)
   destroy_swapchain(self)
   for i in 0 ..< MAX_FRAMES_IN_FLIGHT do frame_deinit(&self.frames[i])
 
@@ -775,11 +779,13 @@ render_single_shadow :: proc(node: ^Node, cb_context: rawptr) -> bool {
 
 render :: proc(engine: ^Engine) -> vk.Result {
   current_fence := renderer_get_in_flight_fence(&engine.renderer)
+  log.debug("waiting for fence...")
   vk.WaitForFences(g_device, 1, &current_fence, true, math.max(u64)) or_return
   image_idx: u32
   current_image_available_semaphore := renderer_get_image_available_semaphore(
     &engine.renderer,
   )
+  log.debug("aquiring next image...")
   vk.AcquireNextImageKHR(
     g_device,
     engine.renderer.swapchain,
@@ -788,6 +794,7 @@ render :: proc(engine: ^Engine) -> vk.Result {
     0,
     &image_idx,
   ) or_return
+  log.debug("reseting fence...")
   vk.ResetFences(g_device, 1, &current_fence) or_return
   mu.begin(&engine.ui.ctx)
   command_buffer := renderer_get_command_buffer(&engine.renderer)
@@ -796,6 +803,7 @@ render :: proc(engine: ^Engine) -> vk.Result {
     sType = .COMMAND_BUFFER_BEGIN_INFO,
     flags = {.ONE_TIME_SUBMIT},
   }
+  log.debug("begining command...")
   vk.BeginCommandBuffer(command_buffer, &begin_info) or_return
 
   elapsed_seconds := time.duration_seconds(time.since(engine.start_timestamp))
@@ -813,8 +821,9 @@ render :: proc(engine: ^Engine) -> vk.Result {
   if !traverse_scene(&engine.scene, &collect_ctx, prepare_light) {
     log.errorf("[RENDER] Error during light collection")
   }
+  log.debug("============ rendering shadow pass...============ ")
   render_shadow_pass(engine, &light_uniform, command_buffer) or_return
-  // log.infof("============ rendering main pass =============")
+  log.debug("============ rendering main pass... =============")
   prepare_image_for_render(
     command_buffer,
     renderer_get_main_pass_image(&engine.renderer),
@@ -842,6 +851,7 @@ render :: proc(engine: ^Engine) -> vk.Result {
     command_buffer,
     engine.renderer.swapchain_images[image_idx],
   )
+  log.debug("============ rendering post processes... =============")
   render_postprocess_stack(
     &engine.renderer,
     command_buffer,
@@ -869,6 +879,7 @@ render :: proc(engine: ^Engine) -> vk.Result {
     signalSemaphoreCount = 1,
     pSignalSemaphores    = &current_render_finished_semaphore,
   }
+  log.debug("============ submitting queue... =============")
   vk.QueueSubmit(g_graphics_queue, 1, &submit_info, current_fence) or_return
   image_indices := [?]u32{image_idx}
   present_info := vk.PresentInfoKHR {
@@ -879,6 +890,7 @@ render :: proc(engine: ^Engine) -> vk.Result {
     pSwapchains        = &engine.renderer.swapchain,
     pImageIndices      = raw_data(image_indices[:]),
   }
+  log.debug("============ presenting image... =============")
   vk.QueuePresentKHR(g_present_queue, &present_info) or_return
   engine.renderer.current_frame_index =
     (engine.renderer.current_frame_index + 1) % MAX_FRAMES_IN_FLIGHT
@@ -890,7 +902,6 @@ render_shadow_pass :: proc(
   light_uniform: ^SceneLightUniform,
   command_buffer: vk.CommandBuffer,
 ) -> vk.Result {
-  // log.infof("============ rendering shadow pass =============")
   for i := 0; i < int(light_uniform.light_count); i += 1 {
     cube_shadow := renderer_get_cube_shadow_map(&engine.renderer, i)
     shadow_map_texture := renderer_get_shadow_map(&engine.renderer, i)
@@ -1173,11 +1184,76 @@ render_shadow_pass :: proc(
   return .SUCCESS
 }
 
+compute_particles :: proc(engine: ^Engine, command_buffer: vk.CommandBuffer) {
+  log.info("binding compute pipeline", engine.particle_compute.pipeline)
+  vk.CmdBindPipeline(
+    command_buffer,
+    .COMPUTE,
+    engine.particle_compute.pipeline,
+  )
+  vk.CmdBindDescriptorSets(
+    command_buffer,
+    .COMPUTE,
+    engine.particle_compute.pipeline_layout,
+    0,
+    1,
+    &engine.particle_compute.descriptor_set,
+    0,
+    nil,
+  )
+  vk.CmdDispatch(command_buffer, u32(MAX_PARTICLES + COMPUTE_PARTICLE_BATCH - 1) / COMPUTE_PARTICLE_BATCH, 1, 1)
+  // Insert memory barrier to ensure compute results are visible
+  barrier := vk.MemoryBarrier{
+    sType = .MEMORY_BARRIER,
+    srcAccessMask = {.SHADER_WRITE},
+    dstAccessMask = {.VERTEX_ATTRIBUTE_READ},
+  }
+  vk.CmdPipelineBarrier(
+    command_buffer,
+    {.COMPUTE_SHADER},
+    {.VERTEX_INPUT},
+    {},
+    1,
+    &barrier,
+    0,
+    nil,
+    0,
+    nil,
+  )
+}
+
 render_main_pass :: proc(
   engine: ^Engine,
   command_buffer: vk.CommandBuffer,
   camera_frustum: geometry.Frustum,
 ) -> vk.Result {
+  // Log particle[0] before compute
+  particles := engine.particle_compute.particle_buffer.mapped
+
+  // Run particle compute pass before starting rendering
+  compute_particles(engine, command_buffer)
+
+  // Barrier to ensure compute shader writes are visible to the vertex shader
+  particle_buffer_barrier := vk.BufferMemoryBarrier {
+    sType               = .BUFFER_MEMORY_BARRIER,
+    srcAccessMask       = {.SHADER_WRITE},
+    dstAccessMask       = {.VERTEX_ATTRIBUTE_READ},
+    srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    buffer              = engine.particle_compute.particle_buffer.buffer,
+    offset              = 0,
+    size                = vk.DeviceSize(vk.WHOLE_SIZE), // Or engine.particle_compute.particle_buffer.bytes_count
+  }
+  vk.CmdPipelineBarrier(
+    command_buffer,
+    {.COMPUTE_SHADER},      // srcStageMask
+    {.VERTEX_INPUT},        // dstStageMask
+    {},                     // dependencyFlags
+    0, nil,                 // memoryBarrierCount, pMemoryBarriers
+    1, &particle_buffer_barrier, // bufferMemoryBarrierCount, pBufferMemoryBarriers
+    0, nil,                 // imageMemoryBarrierCount, pImageMemoryBarriers
+  )
+
   color_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
     imageView = renderer_get_main_pass_view(&engine.renderer),
@@ -1228,6 +1304,7 @@ render_main_pass :: proc(
   if !traverse_scene(&engine.scene, &render_meshes_ctx, render_single_node) {
     log.errorf("[RENDER] Error during scene mesh rendering")
   }
+  render_particles(engine, command_buffer)
   if mu.window(&engine.ui.ctx, "Inspector", {40, 40, 300, 150}, {.NO_CLOSE}) {
     mu.label(
       &engine.ui.ctx,
@@ -1239,6 +1316,65 @@ render_main_pass :: proc(
     mu.label(&engine.ui.ctx, fmt.tprintf("Rendered %d", rendered_count))
   }
   return .SUCCESS
+}
+
+render_particles :: proc(engine: ^Engine, command_buffer: vk.CommandBuffer) {
+  log.info(
+    "binding particle render pipeline",
+    engine.renderer.particle_render.pipeline,
+  )
+  vk.CmdBindPipeline(
+    command_buffer,
+    .GRAPHICS,
+    engine.renderer.particle_render.pipeline,
+  )
+  vk.CmdBindDescriptorSets(
+    command_buffer,
+    .GRAPHICS,
+    engine.renderer.particle_render.pipeline_layout,
+    0,
+    1,
+    &engine.renderer.particle_render.descriptor_set,
+    0,
+    nil,
+  )
+
+  // Push view projection matrix for particles
+  uniform := SceneUniform {
+      view = geometry.calculate_view_matrix(&engine.scene.camera),
+      projection = geometry.calculate_projection_matrix(&engine.scene.camera),
+  }
+  vk.CmdPushConstants(
+    command_buffer,
+    engine.renderer.particle_render.pipeline_layout,
+    {.VERTEX},
+    0,
+    size_of(SceneUniform),
+    &uniform,
+  )
+
+  // Bind particle vertex buffer and draw
+  offset: vk.DeviceSize = 0
+  vk.CmdBindVertexBuffers(
+    command_buffer,
+    0,
+    1,
+    &engine.particle_compute.particle_buffer.buffer,
+    &offset,
+  )
+
+  params := data_buffer_get(engine.particle_compute.params_buffer)
+
+  // Debug: Print first 10 particles' position, size, life, and is_dead before rendering
+  for i in 0..<min(10, params.particle_count) {
+    p := engine.particle_compute.particle_buffer.mapped[i];
+    log.debugf("[ParticleRender] idx=%d pos=%v size=%.2f life=%.2f is_dead=%v",
+      i, p.position, p.size, p.life, p.is_dead);
+  }
+
+  if params.particle_count > 0 {
+    vk.CmdDraw(command_buffer, u32(params.particle_count), 1, 0, 0)
+  }
 }
 
 prepare_image_for_render :: proc(

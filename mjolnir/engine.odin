@@ -88,6 +88,7 @@ Engine :: struct {
   mouse_drag_proc:       MouseDragProc,
   mouse_move_proc:       MouseMoveProc,
   mouse_scroll_proc:     MouseScrollProc,
+  particle_compute:      ParticleComputePipeline,
 }
 
 g_context: runtime.Context
@@ -130,7 +131,8 @@ init :: proc(
   engine.last_frame_timestamp = engine.start_timestamp
   engine.last_update_timestamp = engine.start_timestamp
 
-  log.infof("\nInitializing Resource Pools...")
+  engine.particle_compute = setup_particle_compute_pipeline() or_return
+  log.infof("Initializing Resource Pools...")
 
   log.infof("Initializing mesh pool... ")
   resource.pool_init(&engine.meshes)
@@ -314,7 +316,7 @@ update :: proc(engine: ^Engine) -> bool {
     sample_clip(mesh, anim_inst.clip_handle, anim_inst.time, bone_matrices)
     //animation.pose_flush(&skinning.pose, buffer.mapped)
   }
-
+  update_emitters(&engine.particle_compute, delta_time)
   last_mouse_pos := engine.input.mouse_pos
   engine.input.mouse_pos.x, engine.input.mouse_pos.y = glfw.GetCursorPos(
     engine.window,
@@ -338,11 +340,9 @@ update :: proc(engine: ^Engine) -> bool {
       f32(delta.y * MOUSE_SENSITIVITY_Y),
     )
   }
-
   if engine.mouse_move_proc != nil {
     engine.mouse_move_proc(engine, engine.input.mouse_pos, delta)
   }
-
   if engine.update_proc != nil {
     engine.update_proc(engine, delta_time)
   }
@@ -383,7 +383,7 @@ run :: proc(engine: ^Engine, width: u32, height: u32, title: string) {
       continue
     }
     if res != .SUCCESS {
-      log.errorf("Error during rendering")
+      log.errorf("Error during rendering", res)
     }
     engine.last_frame_timestamp = time.now()
     // break

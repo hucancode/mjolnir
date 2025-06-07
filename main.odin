@@ -91,7 +91,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     translate(&ground_node.transform, x = -0.5 * size, z = -0.5 * size)
     scale(&ground_node.transform, size)
   }
-  if true {
+  if false {
     log.info("loading GLTF...")
     gltf_nodes := load_gltf(engine, "assets/Suzanne.glb") or_else {}
     log.infof("Loaded GLTF nodes: %v", gltf_nodes)
@@ -188,6 +188,23 @@ setup :: proc(engine: ^mjolnir.Engine) {
   )
   postprocess_push_tonemap(1.5, 1.3)
   postprocess_push_grayscale(0.3)
+  emitter := mjolnir.Emitter{
+      transform = geometry.Transform{
+          position = {0, 3, 3},
+          rotation = linalg.QUATERNIONF32_IDENTITY,
+          scale = {1, 1, 1},
+      },
+      emission_rate = 10,
+      particle_lifetime = 5.0,
+      initial_velocity = {0, -0.1, 0, 0},
+      velocity_spread = 0.5,
+      color_start = {1, 0, 0, 1},
+      color_end = {0, 0, 1, 0},
+      size_start = 300.0,
+      size_end = 100.0,
+      enabled = true,
+  }
+  add_emitter(&engine.particle_compute, emitter)
 }
 
 update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
