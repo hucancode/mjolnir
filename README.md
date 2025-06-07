@@ -10,6 +10,7 @@ Mjolnir is a minimalistic rendering engine. The goal is to create a simple set o
 - GLTF asset loader
 - PBR Material
 - Post-process Effect
+- Particle System
 
 # Disclaimer
 
