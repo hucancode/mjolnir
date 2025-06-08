@@ -51,7 +51,7 @@ render_postprocess_stack :: proc(
       imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
       loadOp = .CLEAR,
       storeOp = .STORE,
-      clearValue = vk.ClearValue{color = {float32 = {0.03, 0.01, 0.05, 1}}},
+      clearValue = vk.ClearValue{color = {float32 = BG_BLUE_GRAY}},
     }
     render_info := vk.RenderingInfoKHR {
       sType = .RENDERING_INFO_KHR,

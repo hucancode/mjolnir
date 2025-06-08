@@ -14,6 +14,10 @@ import vk "vendor:vulkan"
 
 MAX_FRAMES_IN_FLIGHT :: 2
 
+BG_BLUE_GRAY :: [4]f32{0.0117, 0.0117, 0.0179, 1.0}
+BG_DARK_GRAY :: [4]f32{0.0117, 0.0117, 0.0117, 1.0}
+BG_ORANGE_GRAY :: [4]f32{0.0179, 0.0179, 0.0117, 1.0}
+
 SingleLightUniform :: struct {
   view_proj:  linalg.Matrix4f32,
   color:      linalg.Vector4f32,

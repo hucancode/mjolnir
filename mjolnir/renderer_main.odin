@@ -47,9 +47,7 @@ render_main_pass :: proc(
     imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
     loadOp = .CLEAR,
     storeOp = .STORE,
-    clearValue = vk.ClearValue {
-      color = {float32 = {0.0117, 0.0117, 0.0179, 1.0}},
-    },
+    clearValue = vk.ClearValue{color = {float32 = BG_BLUE_GRAY}},
   }
   depth_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
@@ -222,9 +220,7 @@ render_to_texture :: proc(
     imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
     loadOp = .CLEAR,
     storeOp = .STORE,
-    clearValue = vk.ClearValue {
-      color = {float32 = {0.0117, 0.0117, 0.0179, 1.0}},
-    },
+    clearValue = vk.ClearValue{color = {float32 = BG_BLUE_GRAY}},
   }
 
   depth_attachment := vk.RenderingAttachmentInfoKHR {
