@@ -9,9 +9,7 @@ import "core:time"
 
 dot_product_scalar :: proc(a, b: []f32) -> f32 {
   sum: f32 = 0
-  for i in 0 ..< len(a) {
-    sum += a[i] * b[i]
-  }
+  for i in 0 ..< len(a) do sum += a[i] * b[i]
   return sum
 }
 
@@ -32,9 +30,7 @@ dot_product_simd :: proc(a, b: []f32) -> f32 {
     b = b[WIDTH:]
   }
   sum := simd.reduce_add_ordered(sum_v)
-  for i in 0 ..< len(a) {
-    sum += a[i] * b[i]
-  }
+  for i in 0 ..< len(a) do sum += a[i] * b[i]
   return sum
 }
 
@@ -42,21 +38,29 @@ dot_product_simd :: proc(a, b: []f32) -> f32 {
 dot_product_benchmark :: proc(t: ^testing.T) {
   N :: 10_000_000
   ROUNDS :: 10
+  setup :: proc(
+    options: ^time.Benchmark_Options,
+    allocator := context.allocator,
+  ) -> time.Benchmark_Error {
+    data := make([]f32, N * 2)
+    for i in 0 ..< N {
+      data[i] = f32(i)
+      data[i + N] = f32(N - i)
+    }
+    options.input = slice.to_bytes(data)
+    return nil
+  }
+  teardown :: proc(
+    options: ^time.Benchmark_Options,
+    allocator := context.allocator,
+  ) -> time.Benchmark_Error {
+    delete(options.input)
+    return nil
+  }
   scalar_opts := &time.Benchmark_Options {
     rounds = ROUNDS,
     bytes = size_of(f32) * N * ROUNDS,
-    setup = proc(
-      options: ^time.Benchmark_Options,
-      allocator := context.allocator,
-    ) -> time.Benchmark_Error {
-      data := make([]f32, N * 2)
-      for i in 0 ..< N {
-        data[i] = f32(i)
-        data[i + N] = f32(N - i)
-      }
-      options.input = slice.to_bytes(data)
-      return nil
-    },
+    setup = setup,
     bench = proc(
       options: ^time.Benchmark_Options,
       allocator := context.allocator,
@@ -66,17 +70,11 @@ dot_product_benchmark :: proc(t: ^testing.T) {
       b := input_f32[N:]
       for _ in 0 ..< options.rounds {
         _ = dot_product_scalar(a, b)
-        options.processed += size_of(f32) * len(a)
+        options.processed += slice.size(a)
       }
       return nil
     },
-    teardown = proc(
-      options: ^time.Benchmark_Options,
-      allocator := context.allocator,
-    ) -> time.Benchmark_Error {
-      delete(options.input)
-      return nil
-    },
+    teardown = teardown,
   }
   _ = time.benchmark(scalar_opts)
   log.infof(
@@ -87,18 +85,7 @@ dot_product_benchmark :: proc(t: ^testing.T) {
   simd_opts := &time.Benchmark_Options {
     rounds = ROUNDS,
     bytes = size_of(f32) * N * ROUNDS,
-    setup = proc(
-      options: ^time.Benchmark_Options,
-      allocator := context.allocator,
-    ) -> time.Benchmark_Error {
-      data := make([]f32, N * 2)
-      for i in 0 ..< N {
-        data[i] = f32(i)
-        data[i + N] = f32(N - i)
-      }
-      options.input = slice.to_bytes(data)
-      return nil
-    },
+    setup = setup,
     bench = proc(
       options: ^time.Benchmark_Options,
       allocator := context.allocator,
@@ -108,17 +95,11 @@ dot_product_benchmark :: proc(t: ^testing.T) {
       b := input_f32[N:]
       for _ in 0 ..< options.rounds {
         _ = dot_product_simd(a, b)
-        options.processed += size_of(f32) * len(a)
+        options.processed += slice.size(a)
       }
       return nil
     },
-    teardown = proc(
-      options: ^time.Benchmark_Options,
-      allocator := context.allocator,
-    ) -> time.Benchmark_Error {
-      delete(options.input)
-      return nil
-    },
+    teardown = teardown,
   }
   _ = time.benchmark(simd_opts)
   log.infof(
