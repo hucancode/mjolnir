@@ -1219,7 +1219,10 @@ render_shadow_pass :: proc(
   return .SUCCESS
 }
 
-compute_particles :: proc(renderer: ^Renderer, command_buffer: vk.CommandBuffer) {
+compute_particles :: proc(
+  renderer: ^Renderer,
+  command_buffer: vk.CommandBuffer,
+) {
   log.info("binding compute pipeline", renderer.particle_compute.pipeline)
   vk.CmdBindPipeline(
     command_buffer,
@@ -1236,10 +1239,15 @@ compute_particles :: proc(renderer: ^Renderer, command_buffer: vk.CommandBuffer)
     0,
     nil,
   )
-  vk.CmdDispatch(command_buffer, u32(MAX_PARTICLES + COMPUTE_PARTICLE_BATCH - 1) / COMPUTE_PARTICLE_BATCH, 1, 1)
+  vk.CmdDispatch(
+    command_buffer,
+    u32(MAX_PARTICLES + COMPUTE_PARTICLE_BATCH - 1) / COMPUTE_PARTICLE_BATCH,
+    1,
+    1,
+  )
   // Insert memory barrier to ensure compute results are visible
-  barrier := vk.MemoryBarrier{
-    sType = .MEMORY_BARRIER,
+  barrier := vk.MemoryBarrier {
+    sType         = .MEMORY_BARRIER,
     srcAccessMask = {.SHADER_WRITE},
     dstAccessMask = {.VERTEX_ATTRIBUTE_READ},
   }
@@ -1277,12 +1285,15 @@ render_main_pass :: proc(
   }
   vk.CmdPipelineBarrier(
     command_buffer,
-    {.COMPUTE_SHADER},      // srcStageMask
-    {.VERTEX_INPUT},        // dstStageMask
-    {},                     // dependencyFlags
-    0, nil,                 // memoryBarrierCount, pMemoryBarriers
-    1, &particle_buffer_barrier, // bufferMemoryBarrierCount, pBufferMemoryBarriers
-    0, nil,                 // imageMemoryBarrierCount, pImageMemoryBarriers
+    {.COMPUTE_SHADER}, // srcStageMask
+    {.VERTEX_INPUT}, // dstStageMask
+    {}, // dependencyFlags
+    0,
+    nil, // memoryBarrierCount, pMemoryBarriers
+    1,
+    &particle_buffer_barrier, // bufferMemoryBarrierCount, pBufferMemoryBarriers
+    0, // imageMemoryBarrierCount, pImageMemoryBarriers
+    nil,
   )
 
   color_attachment := vk.RenderingAttachmentInfoKHR {
@@ -1372,8 +1383,8 @@ render_particles :: proc(engine: ^Engine, command_buffer: vk.CommandBuffer) {
 
   // Push view projection matrix for particles
   uniform := SceneUniform {
-      view = geometry.calculate_view_matrix(&engine.scene.camera),
-      projection = geometry.calculate_projection_matrix(&engine.scene.camera),
+    view       = geometry.calculate_view_matrix(&engine.scene.camera),
+    projection = geometry.calculate_projection_matrix(&engine.scene.camera),
   }
   vk.CmdPushConstants(
     command_buffer,

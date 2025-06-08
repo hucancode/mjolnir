@@ -116,18 +116,19 @@ load_gltf :: proc(
           skinning.root_bone_index = root_bone_idx
           bone_buffers: [MAX_FRAMES_IN_FLIGHT]DataBuffer(linalg.Matrix4f32)
           for &buffer in bone_buffers {
-            buffer = create_host_visible_buffer(
+            buffer =
+            create_host_visible_buffer(
               linalg.Matrix4f32,
               len(bones),
               {.STORAGE_BUFFER},
             ) or_continue
           }
           node.attachment = MeshAttachment {
-            handle = mesh_handle,
-            material = material,
-            cast_shadow = true,
-            skinning = NodeSkinning{bone_buffers = bone_buffers},
-          }
+              handle = mesh_handle,
+              material = material,
+              cast_shadow = true,
+              skinning = NodeSkinning{bone_buffers = bone_buffers},
+            }
           // set bind pose (otherwise zeroed out matrices will cause model to be invisible)
           for buffer in bone_buffers {
             slice.fill(
