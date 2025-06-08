@@ -222,6 +222,53 @@ frame_deinit :: proc(self: ^Frame) {
     depth_texture_deinit(&self.shadow_maps[i])
     cube_depth_texture_deinit(&self.cube_shadow_maps[i])
   }
+  frame_deinit_images(self)
+}
+
+frame_deinit_images :: proc(self: ^Frame) {
+  image_buffer_deinit(&self.main_pass_image)
+  for &image in self.postprocess_images {
+    image_buffer_deinit(&image)
+  }
+}
+
+frame_recreate_images :: proc(
+  self: ^Frame,
+  color_format: vk.Format,
+  width: u32,
+  height: u32,
+) -> vk.Result {
+  self.main_pass_image = malloc_image_buffer(
+    width,
+    height,
+    color_format,
+    .OPTIMAL,
+    {.COLOR_ATTACHMENT, .SAMPLED, .TRANSFER_SRC, .TRANSFER_DST},
+    {.DEVICE_LOCAL},
+  ) or_return
+  self.main_pass_image.view = create_image_view(
+    self.main_pass_image.image,
+    color_format,
+    {.COLOR},
+  ) or_return
+
+  for &image in self.postprocess_images {
+    image = malloc_image_buffer(
+      width,
+      height,
+      color_format,
+      .OPTIMAL,
+      {.COLOR_ATTACHMENT, .SAMPLED, .TRANSFER_SRC, .TRANSFER_DST},
+      {.DEVICE_LOCAL},
+    ) or_return
+    image.view = create_image_view(
+      image.image,
+      color_format,
+      {.COLOR},
+    ) or_return
+  }
+
+  return .SUCCESS
 }
 
 Renderer :: struct {
@@ -344,7 +391,25 @@ recreate_swapchain :: proc(
   self: ^Renderer,
   window: glfw.WindowHandle,
 ) -> vk.Result {
-  return swapchain_recreate(&self.swapchain, window)
+  vk.DeviceWaitIdle(g_device)
+  image_buffer_deinit(&self.depth_buffer)
+  for &frame in self.frames {
+    frame_deinit_images(&frame)
+  }
+  swapchain_recreate(&self.swapchain, window) or_return
+  self.depth_buffer = create_depth_image(
+    self.swapchain.extent.width,
+    self.swapchain.extent.height,
+  ) or_return
+  for &frame in self.frames {
+    frame_recreate_images(
+      &frame,
+      self.swapchain.format.format,
+      self.swapchain.extent.width,
+      self.swapchain.extent.height,
+    ) or_return
+  }
+  return .SUCCESS
 }
 
 renderer_get_in_flight_fence :: proc(self: ^Renderer) -> vk.Fence {
