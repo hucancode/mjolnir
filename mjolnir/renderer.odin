@@ -52,7 +52,6 @@ clear_lights :: proc(self: ^SceneLightUniform) {
 }
 
 Renderer :: struct {
-  swapchain:                  Swapchain,
   frames:                     [MAX_FRAMES_IN_FLIGHT]Frame,
   depth_buffer:               ImageBuffer,
   environment_map:            ^Texture,
@@ -62,7 +61,6 @@ Renderer :: struct {
   brdf_lut:                   ^Texture,
   current_frame_index:        u32,
   particle_render:            ParticleRenderPipeline,
-  // Resource pools moved from Engine
   meshes:                     resource.Pool(Mesh),
   materials:                  resource.Pool(Material),
   textures:                   resource.Pool(Texture),
@@ -71,7 +69,8 @@ Renderer :: struct {
 
 renderer_init :: proc(
   self: ^Renderer,
-  window: glfw.WindowHandle,
+  swapchain_format: vk.Format,
+  swapchain_extent: vk.Extent2D,
 ) -> vk.Result {
   // Initialize resource pools
   log.infof("Initializing Resource Pools...")
@@ -93,7 +92,7 @@ renderer_init :: proc(
   // Initialize particle compute pipeline
   self.particle_compute = setup_particle_compute_pipeline() or_return
 
-  swapchain_init(&self.swapchain, window) or_return
+  // Remove swapchain initialization - it's now done by Engine
 
   alloc_info := vk.CommandBufferAllocateInfo {
     sType              = .COMMAND_BUFFER_ALLOCATE_INFO,
@@ -132,16 +131,16 @@ renderer_init :: proc(
     vk.CreateFence(g_device, &fence_info, nil, &frame.fence) or_return
   }
   self.depth_buffer = create_depth_image(
-    self.swapchain.extent.width,
-    self.swapchain.extent.height,
+    swapchain_extent.width,
+    swapchain_extent.height,
   ) or_return
   self.current_frame_index = 0
   for &frame in self.frames {
     frame_init(
       &frame,
-      self.swapchain.format.format,
-      self.swapchain.extent.width,
-      self.swapchain.extent.height,
+      swapchain_format,
+      swapchain_extent.width,
+      swapchain_extent.height,
     ) or_return
   }
   // Initialize particle render pipeline
@@ -161,34 +160,33 @@ renderer_deinit :: proc(self: ^Renderer) {
   // destroy_particle_compute_pipeline(&self.particle_compute)
   destroy_particle_render_pipeline(&self.particle_render)
 
-  swapchain_deinit(&self.swapchain)
+  // Remove swapchain cleanup - it's now handled by Engine
   for i in 0 ..< MAX_FRAMES_IN_FLIGHT do frame_deinit(&self.frames[i])
 
   vk.DestroyDescriptorSetLayout(g_device, g_camera_descriptor_set_layout, nil)
 }
 
-recreate_swapchain :: proc(
+renderer_recreate_size_dependent_resources :: proc(
   self: ^Renderer,
-  window: glfw.WindowHandle,
+  new_format: vk.Format,
+  new_extent: vk.Extent2D,
 ) -> vk.Result {
   vk.DeviceWaitIdle(g_device)
+
+  // Clean up old size-dependent resources
   image_buffer_deinit(&self.depth_buffer)
   for &frame in self.frames {
     frame_deinit_images(&frame)
   }
-  swapchain_recreate(&self.swapchain, window) or_return
-  self.depth_buffer = create_depth_image(
-    self.swapchain.extent.width,
-    self.swapchain.extent.height,
-  ) or_return
+
+  // Recreate depth buffer with new size
+  self.depth_buffer = create_depth_image(new_extent.width, new_extent.height) or_return
+
+  // Recreate frame images with new size
   for &frame in self.frames {
-    frame_recreate_images(
-      &frame,
-      self.swapchain.format.format,
-      self.swapchain.extent.width,
-      self.swapchain.extent.height,
-    ) or_return
+    frame_recreate_images(&frame, new_format, new_extent.width, new_extent.height) or_return
   }
+
   return .SUCCESS
 }
 
@@ -531,7 +529,7 @@ render :: proc(engine: ^Engine) -> vk.Result {
     &engine.renderer,
   )
   image_idx, acquire_result := swapchain_acquire_next_image(
-    &engine.renderer.swapchain,
+    &engine.swapchain,  // Use engine's swapchain
     current_image_available_semaphore,
   )
   if acquire_result == .ERROR_OUT_OF_DATE_KHR {
@@ -575,7 +573,7 @@ render :: proc(engine: ^Engine) -> vk.Result {
     command_buffer,
     renderer_get_main_pass_image(&engine.renderer),
   )
-  render_main_pass(engine, command_buffer, camera_frustum) or_return
+  render_main_pass(engine, command_buffer, camera_frustum, engine.swapchain.extent) or_return  // Pass swapchain extent
   data_buffer_write(
     renderer_get_camera_uniform(&engine.renderer),
     &scene_uniform,
@@ -596,19 +594,19 @@ render :: proc(engine: ^Engine) -> vk.Result {
   )
   prepare_image_for_render(
     command_buffer,
-    engine.renderer.swapchain.images[image_idx],
+    engine.swapchain.images[image_idx],  // Use engine's swapchain
   )
   log.debug("============ rendering post processes... =============")
   render_postprocess_stack(
     &engine.renderer,
     command_buffer,
     renderer_get_main_pass_view(&engine.renderer), // postprocess input
-    engine.renderer.swapchain.views[image_idx], // final output view
-    engine.renderer.swapchain.extent,
+    engine.swapchain.views[image_idx], // Use engine's swapchain
+    engine.swapchain.extent,  // Use engine's swapchain
   )
   prepare_image_for_present(
     command_buffer,
-    engine.renderer.swapchain.images[image_idx],
+    engine.swapchain.images[image_idx],  // Use engine's swapchain
   )
 
   vk.EndCommandBuffer(command_buffer) or_return
@@ -630,7 +628,7 @@ render :: proc(engine: ^Engine) -> vk.Result {
   vk.QueueSubmit(g_graphics_queue, 1, &submit_info, current_fence) or_return
 
   present_result := swapchain_present(
-    &engine.renderer.swapchain,
+    &engine.swapchain,  // Use engine's swapchain
     &current_render_finished_semaphore,
     image_idx,
   )
@@ -981,6 +979,7 @@ render_main_pass :: proc(
   engine: ^Engine,
   command_buffer: vk.CommandBuffer,
   camera_frustum: geometry.Frustum,
+  swapchain_extent: vk.Extent2D,  // New parameter for swapchain extent
 ) -> vk.Result {
   particles := engine.renderer.particle_compute.particle_buffer.mapped
   // Run particle compute pass before starting rendering
@@ -1028,7 +1027,7 @@ render_main_pass :: proc(
   }
   render_info := vk.RenderingInfoKHR {
     sType = .RENDERING_INFO_KHR,
-    renderArea = vk.Rect2D{extent = engine.renderer.swapchain.extent},
+    renderArea = vk.Rect2D{extent = swapchain_extent},
     layerCount = 1,
     colorAttachmentCount = 1,
     pColorAttachments = &color_attachment,
@@ -1037,14 +1036,14 @@ render_main_pass :: proc(
   vk.CmdBeginRenderingKHR(command_buffer, &render_info)
   viewport := vk.Viewport {
     x        = 0.0,
-    y        = f32(engine.renderer.swapchain.extent.height),
-    width    = f32(engine.renderer.swapchain.extent.width),
-    height   = -f32(engine.renderer.swapchain.extent.height),
+    y        = f32(swapchain_extent.height),  // Use parameter
+    width    = f32(swapchain_extent.width),   // Use parameter
+    height   = -f32(swapchain_extent.height), // Use parameter
     minDepth = 0.0,
     maxDepth = 1.0,
   }
   scissor := vk.Rect2D {
-    extent = engine.renderer.swapchain.extent,
+    extent = swapchain_extent,  // Use parameter
   }
   vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
   vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
@@ -1260,4 +1259,86 @@ render_postprocess_stack :: proc(
     vk.CmdDraw(command_buffer, 3, 1, 0, 0)
     vk.CmdEndRenderingKHR(command_buffer)
   }
+}
+
+render_to_texture :: proc(
+  engine: ^Engine,
+  color_view: vk.ImageView,
+  depth_view: vk.ImageView,
+  extent: vk.Extent2D,
+  camera: ^geometry.Camera = nil,
+) -> vk.Result {
+  command_buffer := renderer_get_command_buffer(&engine.renderer)
+
+  // Use provided camera or scene camera
+  render_camera := camera if camera != nil else &engine.scene.camera
+
+  // Calculate view/projection matrices
+  scene_uniform := SceneUniform{
+    view = geometry.calculate_view_matrix(render_camera),
+    projection = geometry.calculate_projection_matrix(render_camera),
+    time = f32(time.duration_seconds(time.since(engine.start_timestamp))),
+  }
+
+  camera_frustum := geometry.camera_make_frustum(render_camera)
+
+  // Render to the provided texture views
+  color_attachment := vk.RenderingAttachmentInfoKHR{
+    sType = .RENDERING_ATTACHMENT_INFO_KHR,
+    imageView = color_view,
+    imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
+    loadOp = .CLEAR,
+    storeOp = .STORE,
+    clearValue = vk.ClearValue{color = {float32 = {0.0117, 0.0117, 0.0179, 1.0}}},
+  }
+
+  depth_attachment := vk.RenderingAttachmentInfoKHR{
+    sType = .RENDERING_ATTACHMENT_INFO_KHR,
+    imageView = depth_view,
+    imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+    loadOp = .CLEAR,
+    storeOp = .STORE,
+    clearValue = vk.ClearValue{depthStencil = {1.0, 0}},
+  }
+
+  render_info := vk.RenderingInfoKHR{
+    sType = .RENDERING_INFO_KHR,
+    renderArea = vk.Rect2D{extent = extent},
+    layerCount = 1,
+    colorAttachmentCount = 1,
+    pColorAttachments = &color_attachment,
+    pDepthAttachment = &depth_attachment,
+  }
+
+  vk.CmdBeginRenderingKHR(command_buffer, &render_info)
+
+  viewport := vk.Viewport{
+    x = 0.0,
+    y = f32(extent.height),
+    width = f32(extent.width),
+    height = -f32(extent.height),
+    minDepth = 0.0,
+    maxDepth = 1.0,
+  }
+  scissor := vk.Rect2D{extent = extent}
+
+  vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
+  vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
+
+  // Update uniforms with custom camera
+  data_buffer_write(renderer_get_camera_uniform(&engine.renderer), &scene_uniform)
+
+  // Render scene with custom camera
+  rendered_count: u32 = 0
+  render_meshes_ctx := RenderMeshesContext{
+    engine = engine,
+    command_buffer = command_buffer,
+    camera_frustum = camera_frustum,
+    rendered_count = &rendered_count,
+  }
+
+  traverse_scene(&engine.scene, &render_meshes_ctx, render_single_node)
+
+  vk.CmdEndRenderingKHR(command_buffer)
+  return .SUCCESS
 }

@@ -70,6 +70,7 @@ InputState :: struct {
 
 Engine :: struct {
   window:                glfw.WindowHandle,
+  swapchain:             Swapchain,
   renderer:              Renderer,
   scene:                 Scene,
   ui:                    UIRenderer,
@@ -132,27 +133,27 @@ init :: proc(
   build_shadow_pipelines(.D32_SFLOAT) or_return
   init_scene(&engine.scene)
   build_renderer(engine) or_return
-  if engine.renderer.swapchain.extent.width > 0 &&
-     engine.renderer.swapchain.extent.height > 0 {
-    w := f32(engine.renderer.swapchain.extent.width)
-    h := f32(engine.renderer.swapchain.extent.height)
+  if engine.swapchain.extent.width > 0 &&
+     engine.swapchain.extent.height > 0 {
+    w := f32(engine.swapchain.extent.width)
+    h := f32(engine.swapchain.extent.height)
     #partial switch &proj in engine.scene.camera.projection {
     case geometry.PerspectiveProjection:
       proj.aspect_ratio = w / h
     }
   }
   build_postprocess_pipelines(
-    engine.renderer.swapchain.format.format,
-    engine.renderer.swapchain.extent.width,
-    engine.renderer.swapchain.extent.height,
+    engine.swapchain.format.format,
+    engine.swapchain.extent.width,
+    engine.swapchain.extent.height,
   )
 
   ui_init(
     &engine.ui,
     engine,
-    engine.renderer.swapchain.format.format,
-    engine.renderer.swapchain.extent.width,
-    engine.renderer.swapchain.extent.height,
+    engine.swapchain.format.format,
+    engine.swapchain.extent.width,
+    engine.swapchain.extent.height,
   )
   glfw.SetScrollCallback(
     engine.window,
@@ -199,7 +200,16 @@ init :: proc(
 }
 
 build_renderer :: proc(engine: ^Engine) -> vk.Result {
-  renderer_init(&engine.renderer, engine.window) or_return
+  // Initialize swapchain first - now owned by Engine
+  swapchain_init(&engine.swapchain, engine.window) or_return
+
+  // Initialize renderer with swapchain info
+  renderer_init(
+    &engine.renderer,
+    engine.swapchain.format.format,
+    engine.swapchain.extent,
+  ) or_return
+
   engine.renderer.environment_map_handle, engine.renderer.environment_map =
     create_hdr_texture_from_path(
       engine,
@@ -337,10 +347,25 @@ deinit :: proc(engine: ^Engine) {
   pipeline_shadow_deinit()
   deinit_scene(&engine.scene)
   renderer_deinit(&engine.renderer)
+  swapchain_deinit(&engine.swapchain)  // Clean up engine's swapchain
   vulkan_context_deinit()
   glfw.DestroyWindow(engine.window)
   glfw.Terminate()
   log.infof("Engine deinitialized")
+}
+
+recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
+  // Recreate swapchain first
+  swapchain_recreate(&engine.swapchain, engine.window) or_return
+
+  // Then recreate renderer's size-dependent resources
+  renderer_recreate_size_dependent_resources(
+    &engine.renderer,
+    engine.swapchain.format.format,
+    engine.swapchain.extent,
+  ) or_return
+
+  return .SUCCESS
 }
 
 run :: proc(engine: ^Engine, width: u32, height: u32, title: string) {
@@ -356,8 +381,7 @@ run :: proc(engine: ^Engine, width: u32, height: u32, title: string) {
     }
     res := render(engine)
     if res == .ERROR_OUT_OF_DATE_KHR || res == .SUBOPTIMAL_KHR {
-      recreate_swapchain(&engine.renderer, engine.window)
-      continue
+      recreate_swapchain(engine) or_continue  // Use new engine function
     }
     if res != .SUCCESS {
       log.errorf("Error during rendering", res)
