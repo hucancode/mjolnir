@@ -936,9 +936,10 @@ render_shadow_pass :: proc(
   light_uniform: ^SceneLightUniform,
   command_buffer: vk.CommandBuffer,
 ) -> vk.Result {
+  renderer := &engine.renderer
   for i := 0; i < int(light_uniform.light_count); i += 1 {
-    cube_shadow := renderer_get_cube_shadow_map(&engine.renderer, i)
-    shadow_map_texture := renderer_get_shadow_map(&engine.renderer, i)
+    cube_shadow := renderer_get_cube_shadow_map(renderer, i)
+    shadow_map_texture := renderer_get_shadow_map(renderer, i)
     // Transition shadow map to depth attachment
     initial_barriers := [2]vk.ImageMemoryBarrier {
       {
@@ -993,7 +994,7 @@ render_shadow_pass :: proc(
       continue
     }
     if light.kind == .POINT {
-      cube_shadow := renderer_get_cube_shadow_map(&engine.renderer, i)
+      cube_shadow := renderer_get_cube_shadow_map(renderer, i)
       light_pos := light.position.xyz
       // Cube face directions and up vectors
       face_dirs := [6][3]f32 {
@@ -1060,7 +1061,7 @@ render_shadow_pass :: proc(
           projection = proj,
         }
         data_buffer_write(
-          renderer_get_camera_uniform(&engine.renderer),
+          renderer_get_camera_uniform(renderer),
           &shadow_scene_uniform,
           i * 6 + face + 1,
         )
@@ -1080,7 +1081,7 @@ render_shadow_pass :: proc(
         vk.CmdEndRenderingKHR(command_buffer)
       }
     } else {
-      shadow_map_texture := renderer_get_shadow_map(&engine.renderer, i)
+      shadow_map_texture := renderer_get_shadow_map(renderer, i)
       view: linalg.Matrix4f32
       proj: linalg.Matrix4f32
       if light.kind == .DIRECTIONAL {
@@ -1132,7 +1133,7 @@ render_shadow_pass :: proc(
         projection = proj,
       }
       data_buffer_write(
-        renderer_get_camera_uniform(&engine.renderer),
+        renderer_get_camera_uniform(renderer),
         &shadow_scene_uniform,
         i * 6 + 1,
       )
@@ -1164,8 +1165,8 @@ render_shadow_pass :: proc(
     }
   }
   for i := 0; i < int(light_uniform.light_count); i += 1 {
-    cube_shadow := renderer_get_cube_shadow_map(&engine.renderer, i)
-    shadow_map_texture := renderer_get_shadow_map(&engine.renderer, i)
+    cube_shadow := renderer_get_cube_shadow_map(renderer, i)
+    shadow_map_texture := renderer_get_shadow_map(renderer, i)
     final_barriers := [2]vk.ImageMemoryBarrier {
       {
         sType = .IMAGE_MEMORY_BARRIER,
@@ -1218,20 +1219,20 @@ render_shadow_pass :: proc(
   return .SUCCESS
 }
 
-compute_particles :: proc(engine: ^Engine, command_buffer: vk.CommandBuffer) {
-  log.info("binding compute pipeline", engine.renderer.particle_compute.pipeline)
+compute_particles :: proc(renderer: ^Renderer, command_buffer: vk.CommandBuffer) {
+  log.info("binding compute pipeline", renderer.particle_compute.pipeline)
   vk.CmdBindPipeline(
     command_buffer,
     .COMPUTE,
-    engine.renderer.particle_compute.pipeline,
+    renderer.particle_compute.pipeline,
   )
   vk.CmdBindDescriptorSets(
     command_buffer,
     .COMPUTE,
-    engine.renderer.particle_compute.pipeline_layout,
+    renderer.particle_compute.pipeline_layout,
     0,
     1,
-    &engine.renderer.particle_compute.descriptor_set,
+    &renderer.particle_compute.descriptor_set,
     0,
     nil,
   )
@@ -1263,7 +1264,7 @@ render_main_pass :: proc(
 ) -> vk.Result {
   particles := engine.renderer.particle_compute.particle_buffer.mapped
   // Run particle compute pass before starting rendering
-  compute_particles(engine, command_buffer)
+  compute_particles(&engine.renderer, command_buffer)
   // Barrier to ensure compute shader writes are visible to the vertex shader
   particle_buffer_barrier := vk.BufferMemoryBarrier {
     sType               = .BUFFER_MEMORY_BARRIER,
@@ -1515,7 +1516,7 @@ render_postprocess_stack :: proc(
     append(&g_postprocess_stack, nil)
   }
   // effect i:  0, 1, 2, 3, 4, 5, 6
-  // read from: m0, p0, p1, p0, p1, p0 input  = (i+1)%2+1  (i != 0)
+  // read from: m0, p0, p1, 0, 1, 0, input  = (i+1)%2+1  (i != 0)
   // write to:  p0, p1, p0, p1 ...  m1 output = (i%2)+1    (i !=n-1)
   update_postprocess_input(0, input_view)
   update_postprocess_input(1, renderer_get_postprocess_pass_view(renderer, 0))
