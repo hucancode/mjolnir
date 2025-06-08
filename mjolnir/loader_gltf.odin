@@ -100,7 +100,7 @@ load_gltf :: proc(
     if gltf_node.mesh != nil {
       if gltf_node.skin != nil {
         log.infof("Loading skinned mesh %s", string(gltf_node.name))
-        mesh_handle, mesh := resource.alloc(&engine.meshes)
+        mesh_handle, mesh := resource.alloc(&engine.renderer.meshes)
         data, bones, material, root_bone_idx, res :=
           load_gltf_skinned_primitive(
             engine,
@@ -620,7 +620,7 @@ load_gltf_animations :: proc(
   gltf_skin: ^cgltf.skin,
   engine_mesh_handle: resource.Handle,
 ) -> bool {
-  mesh := resource.get(engine.meshes, engine_mesh_handle)
+  mesh := resource.get(engine.renderer.meshes, engine_mesh_handle)
   skinning := &mesh.skinning.?
   skinning.animations = make([]animation.Clip, len(gltf_data.animations))
 
@@ -629,7 +629,7 @@ load_gltf_animations :: proc(
     if gltf_anim.name != nil {
       clip.name = strings.clone_from_cstring(gltf_anim.name)
     } else {
-      clip.name = strings.clone(fmt.tprintf("animation_%d", i))
+      clip.name = fmt.tprintf("animation_%d", i)
     }
     log.infof(
       "\nAllocating animation channels for %d bones",

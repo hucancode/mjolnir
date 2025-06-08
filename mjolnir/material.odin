@@ -225,7 +225,7 @@ create_material :: proc(
   res: vk.Result,
 ) {
   log.info("creating material")
-  ret, mat = resource.alloc(&engine.materials)
+  ret, mat = resource.alloc(&engine.renderer.materials)
   mat.is_lit = true
   mat.features = features
 
@@ -255,14 +255,14 @@ create_material :: proc(
     &fallbacks,
   ) or_return
 
-  albedo := resource.get(engine.textures, albedo_handle)
+  albedo := resource.get(engine.renderer.textures, albedo_handle)
   metallic_roughness := resource.get(
-    engine.textures,
+    engine.renderer.textures,
     metallic_roughness_handle,
   )
-  normal := resource.get(engine.textures, normal_handle)
-  displacement := resource.get(engine.textures, displacement_handle)
-  emissive := resource.get(engine.textures, emissive_handle)
+  normal := resource.get(engine.renderer.textures, normal_handle)
+  displacement := resource.get(engine.renderer.textures, displacement_handle)
+  emissive := resource.get(engine.renderer.textures, emissive_handle)
   material_update_textures(
     mat,
     albedo,
@@ -285,13 +285,13 @@ create_unlit_material :: proc(
   mat: ^Material,
   res: vk.Result,
 ) {
-  ret, mat = resource.alloc(&engine.materials)
+  ret, mat = resource.alloc(&engine.renderer.materials)
   mat.is_lit = false
   mat.features = features
   mat.albedo_handle = albedo_handle
   mat.albedo_value = albedo_value
   material_init_descriptor_set_layout(mat) or_return
-  albedo := resource.get(engine.textures, albedo_handle)
+  albedo := resource.get(engine.renderer.textures, albedo_handle)
   fallbacks := MaterialFallbacks {
     albedo = mat.albedo_value,
   }

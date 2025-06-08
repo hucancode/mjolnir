@@ -76,9 +76,6 @@ Engine :: struct {
   last_frame_timestamp:  time.Time,
   last_update_timestamp: time.Time,
   start_timestamp:       time.Time,
-  meshes:                resource.Pool(Mesh),
-  materials:             resource.Pool(Material),
-  textures:              resource.Pool(Texture),
   input:                 InputState,
   setup_proc:            SetupProc,
   update_proc:           UpdateProc,
@@ -88,7 +85,6 @@ Engine :: struct {
   mouse_drag_proc:       MouseDragProc,
   mouse_move_proc:       MouseMoveProc,
   mouse_scroll_proc:     MouseScrollProc,
-  particle_compute:      ParticleComputePipeline,
 }
 
 g_context: runtime.Context
@@ -130,23 +126,6 @@ init :: proc(
   engine.start_timestamp = time.now()
   engine.last_frame_timestamp = engine.start_timestamp
   engine.last_update_timestamp = engine.start_timestamp
-
-  engine.particle_compute = setup_particle_compute_pipeline() or_return
-  log.infof("Initializing Resource Pools...")
-
-  log.infof("Initializing mesh pool... ")
-  resource.pool_init(&engine.meshes)
-  log.infof("done")
-
-  log.infof("Initializing materials pool... ")
-  resource.pool_init(&engine.materials)
-  log.infof("done")
-
-  log.infof("Initializing textures pool... ")
-  resource.pool_init(&engine.textures)
-  log.infof("done")
-
-  log.infof("All resource pools initialized successfully")
 
   build_3d_pipelines(.B8G8R8A8_SRGB, .D32_SFLOAT) or_return
   build_3d_unlit_pipelines(.B8G8R8A8_SRGB, .D32_SFLOAT) or_return
@@ -302,7 +281,7 @@ update :: proc(engine: ^Engine) -> bool {
       continue
     }
     animation.instance_update(anim_inst, delta_time)
-    mesh, found := resource.get(engine.meshes, data.handle)
+    mesh, found := resource.get(engine.renderer.meshes, data.handle)
     if !found {
       continue
     }
@@ -316,7 +295,7 @@ update :: proc(engine: ^Engine) -> bool {
     sample_clip(mesh, anim_inst.clip_handle, anim_inst.time, bone_matrices)
     //animation.pose_flush(&skinning.pose, buffer.mapped)
   }
-  update_emitters(&engine.particle_compute, delta_time)
+  update_emitters(&engine.renderer.particle_compute, delta_time)
   last_mouse_pos := engine.input.mouse_pos
   engine.input.mouse_pos.x, engine.input.mouse_pos.y = glfw.GetCursorPos(
     engine.window,
@@ -352,9 +331,6 @@ update :: proc(engine: ^Engine) -> bool {
 
 deinit :: proc(engine: ^Engine) {
   vk.DeviceWaitIdle(g_device)
-  resource.pool_deinit(engine.textures, texture_deinit)
-  resource.pool_deinit(engine.meshes, mesh_deinit)
-  resource.pool_deinit(engine.materials, material_deinit)
   pipeline2d_deinit(&engine.ui.pipeline)
   pipeline3d_deinit()
   pipeline_shadow_deinit()
@@ -398,7 +374,7 @@ create_mesh :: proc(
   mesh: ^Mesh,
   ret: vk.Result,
 ) {
-  handle, mesh = resource.alloc(&engine.meshes)
+  handle, mesh = resource.alloc(&engine.renderer.meshes)
   mesh_init(mesh, data)
   ret = .SUCCESS
   return

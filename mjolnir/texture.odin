@@ -45,7 +45,7 @@ create_texture_from_data :: proc(
   texture: ^Texture,
   ret: vk.Result,
 ) {
-  handle, texture = resource.alloc(&engine.textures)
+  handle, texture = resource.alloc(&engine.renderer.textures)
   read_texture_data(texture, data) or_return
   texture_init(texture) or_return
   log.infof(
@@ -70,7 +70,7 @@ create_texture_from_pixels :: proc(
   texture: ^Texture,
   ret: vk.Result,
 ) {
-  handle, texture = resource.alloc(&engine.textures)
+  handle, texture = resource.alloc(&engine.renderer.textures)
   texture.image_data.pixels = pixels
   texture.image_data.width = width
   texture.image_data.height = height
@@ -121,7 +121,7 @@ create_texture_from_path :: proc(
   texture: ^Texture,
   ret: vk.Result,
 ) {
-  handle, texture = resource.alloc(&engine.textures)
+  handle, texture = resource.alloc(&engine.renderer.textures)
   read_texture(texture, path) or_return
   texture_init(texture) or_return
   ret = .SUCCESS
@@ -461,7 +461,7 @@ create_hdr_texture_from_path :: proc(
   texture: ^Texture,
   ret: vk.Result,
 ) {
-  handle, texture = resource.alloc(&engine.textures)
+  handle, texture = resource.alloc(&engine.renderer.textures)
   path_cstr := strings.clone_to_cstring(path)
   w, h, c_in_file: c.int
   float_pixels_ptr := stbi.loadf(path_cstr, &w, &h, &c_in_file, 4) // force RGBA

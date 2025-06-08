@@ -204,7 +204,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
       size_end = 100.0,
       enabled = true,
   }
-  add_emitter(&engine.particle_compute, emitter)
+  add_emitter(&engine.renderer.particle_compute, emitter)
 }
 
 update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {

@@ -239,12 +239,37 @@ Renderer :: struct {
   brdf_lut:                   ^Texture,
   current_frame_index:        u32,
   particle_render:            ParticleRenderPipeline,
+  // Resource pools moved from Engine
+  meshes:                     resource.Pool(Mesh),
+  materials:                  resource.Pool(Material),
+  textures:                   resource.Pool(Texture),
+  particle_compute:           ParticleComputePipeline,
 }
 
 renderer_init :: proc(
   self: ^Renderer,
   window: glfw.WindowHandle,
 ) -> vk.Result {
+  // Initialize resource pools
+  log.infof("Initializing Resource Pools...")
+
+  log.infof("Initializing mesh pool... ")
+  resource.pool_init(&self.meshes)
+  log.infof("done")
+
+  log.infof("Initializing materials pool... ")
+  resource.pool_init(&self.materials)
+  log.infof("done")
+
+  log.infof("Initializing textures pool... ")
+  resource.pool_init(&self.textures)
+  log.infof("done")
+
+  log.infof("All resource pools initialized successfully")
+
+  // Initialize particle compute pipeline
+  self.particle_compute = setup_particle_compute_pipeline() or_return
+
   create_swapchain(self, window) or_return
   alloc_info := vk.CommandBufferAllocateInfo {
     sType              = .COMMAND_BUFFER_ALLOCATE_INFO,
@@ -302,7 +327,16 @@ renderer_init :: proc(
 
 renderer_deinit :: proc(self: ^Renderer) {
   vk.DeviceWaitIdle(g_device)
+
+  // Clean up resource pools
+  resource.pool_deinit(self.textures, texture_deinit)
+  resource.pool_deinit(self.meshes, mesh_deinit)
+  resource.pool_deinit(self.materials, material_deinit)
+
+  // Clean up particle systems
+  // destroy_particle_compute_pipeline(&self.particle_compute)
   destroy_particle_render_pipeline(&self.particle_render)
+
   destroy_swapchain(self)
   for i in 0 ..< MAX_FRAMES_IN_FLIGHT do frame_deinit(&self.frames[i])
 
@@ -595,11 +629,11 @@ render_single_node :: proc(node: ^Node, cb_context: rawptr) -> bool {
   frame := ctx.engine.renderer.current_frame_index
   #partial switch data in node.attachment {
   case MeshAttachment:
-    mesh := resource.get(ctx.engine.meshes, data.handle)
+    mesh := resource.get(ctx.engine.renderer.meshes, data.handle)
     if mesh == nil {
       return true
     }
-    material := resource.get(ctx.engine.materials, data.material)
+    material := resource.get(ctx.engine.renderer.materials, data.material)
     if material == nil {
       return true
     }
@@ -686,7 +720,7 @@ render_single_shadow :: proc(node: ^Node, cb_context: rawptr) -> bool {
     if !data.cast_shadow {
       return true
     }
-    mesh := resource.get(ctx.engine.meshes, data.handle)
+    mesh := resource.get(ctx.engine.renderer.meshes, data.handle)
     if mesh == nil {
       return true
     }
@@ -699,7 +733,7 @@ render_single_shadow :: proc(node: ^Node, cb_context: rawptr) -> bool {
     if !geometry.frustum_test_aabb(&ctx.frustum, world_aabb) {
       return true
     }
-    material := resource.get(ctx.engine.materials, data.material)
+    material := resource.get(ctx.engine.renderer.materials, data.material)
     if material == nil {
       return true
     }
@@ -1080,7 +1114,7 @@ render_shadow_pass :: proc(
         imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
         loadOp = .CLEAR,
         storeOp = .STORE,
-        clearValue = vk.ClearValue{depthStencil = {depth = 1.0}},
+        clearValue = vk.ClearValue{depthStencil = {1.0, 0}},
       }
       render_info_khr := vk.RenderingInfoKHR {
         sType = .RENDERING_INFO_KHR,
@@ -1185,19 +1219,19 @@ render_shadow_pass :: proc(
 }
 
 compute_particles :: proc(engine: ^Engine, command_buffer: vk.CommandBuffer) {
-  log.info("binding compute pipeline", engine.particle_compute.pipeline)
+  log.info("binding compute pipeline", engine.renderer.particle_compute.pipeline)
   vk.CmdBindPipeline(
     command_buffer,
     .COMPUTE,
-    engine.particle_compute.pipeline,
+    engine.renderer.particle_compute.pipeline,
   )
   vk.CmdBindDescriptorSets(
     command_buffer,
     .COMPUTE,
-    engine.particle_compute.pipeline_layout,
+    engine.renderer.particle_compute.pipeline_layout,
     0,
     1,
-    &engine.particle_compute.descriptor_set,
+    &engine.renderer.particle_compute.descriptor_set,
     0,
     nil,
   )
@@ -1227,7 +1261,7 @@ render_main_pass :: proc(
   command_buffer: vk.CommandBuffer,
   camera_frustum: geometry.Frustum,
 ) -> vk.Result {
-  particles := engine.particle_compute.particle_buffer.mapped
+  particles := engine.renderer.particle_compute.particle_buffer.mapped
   // Run particle compute pass before starting rendering
   compute_particles(engine, command_buffer)
   // Barrier to ensure compute shader writes are visible to the vertex shader
@@ -1237,9 +1271,8 @@ render_main_pass :: proc(
     dstAccessMask       = {.VERTEX_ATTRIBUTE_READ},
     srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
     dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-    buffer              = engine.particle_compute.particle_buffer.buffer,
-    offset              = 0,
-    size                = vk.DeviceSize(vk.WHOLE_SIZE), // Or engine.particle_compute.particle_buffer.bytes_count
+    buffer              = engine.renderer.particle_compute.particle_buffer.buffer,
+    size                = vk.DeviceSize(vk.WHOLE_SIZE),
   }
   vk.CmdPipelineBarrier(
     command_buffer,
@@ -1356,10 +1389,10 @@ render_particles :: proc(engine: ^Engine, command_buffer: vk.CommandBuffer) {
     command_buffer,
     0,
     1,
-    &engine.particle_compute.particle_buffer.buffer,
+    &engine.renderer.particle_compute.particle_buffer.buffer,
     &offset,
   )
-  params := data_buffer_get(engine.particle_compute.params_buffer)
+  params := data_buffer_get(engine.renderer.particle_compute.params_buffer)
   if params.particle_count > 0 {
     vk.CmdDraw(command_buffer, u32(params.particle_count), 1, 0, 0)
   }
