@@ -37,9 +37,9 @@ SHADER_UBER_VERT :: #load("shader/uber/vert.spv")
 SHADER_UBER_FRAG :: #load("shader/uber/frag.spv")
 
 pipeline3d_deinit :: proc() {
-  for i in 0 ..< len(g_pipelines) {
-    vk.DestroyPipeline(g_device, g_pipelines[i], nil)
-    g_pipelines[i] = 0
+  for &pipeline in g_pipelines {
+    vk.DestroyPipeline(g_device, pipeline, nil)
+    pipeline = 0
   }
   vk.DestroyPipelineLayout(g_device, g_pipeline_layout, nil)
   g_pipeline_layout = 0

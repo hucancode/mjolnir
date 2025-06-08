@@ -61,7 +61,6 @@ Renderer :: struct {
   brdf_lut:                   ^Texture,
   current_frame_index:        u32,
   particle_render:            ParticleRenderPipeline,
-  // Resource pools moved from Engine
   meshes:                     resource.Pool(Mesh),
   materials:                  resource.Pool(Material),
   textures:                   resource.Pool(Texture),
@@ -73,39 +72,25 @@ renderer_init :: proc(
   swapchain_format: vk.Format,
   swapchain_extent: vk.Extent2D,
 ) -> vk.Result {
-  // Initialize resource pools
-  log.infof("Initializing Resource Pools...")
-
   log.infof("Initializing mesh pool... ")
   resource.pool_init(&self.meshes)
-  log.infof("done")
-
   log.infof("Initializing materials pool... ")
   resource.pool_init(&self.materials)
-  log.infof("done")
-
   log.infof("Initializing textures pool... ")
   resource.pool_init(&self.textures)
-  log.infof("done")
-
   log.infof("All resource pools initialized successfully")
-
-  // Initialize particle compute pipeline
   self.particle_compute = setup_particle_compute_pipeline() or_return
-
-  // Remove swapchain initialization - it's now done by Engine
-
   alloc_info := vk.CommandBufferAllocateInfo {
     sType              = .COMMAND_BUFFER_ALLOCATE_INFO,
     commandPool        = g_command_pool,
     level              = .PRIMARY,
     commandBufferCount = 1,
   }
-  for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
+  for &frame in self.frames {
     vk.AllocateCommandBuffers(
       g_device,
       &alloc_info,
-      &self.frames[i].command_buffer,
+      &frame.command_buffer,
     ) or_return
   }
   semaphore_info := vk.SemaphoreCreateInfo {
@@ -115,8 +100,7 @@ renderer_init :: proc(
     sType = .FENCE_CREATE_INFO,
     flags = {.SIGNALED},
   }
-  for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
-    frame := &self.frames[i]
+  for &frame in self.frames {
     vk.CreateSemaphore(
       g_device,
       &semaphore_info,
@@ -151,36 +135,24 @@ renderer_init :: proc(
 
 renderer_deinit :: proc(self: ^Renderer) {
   vk.DeviceWaitIdle(g_device)
-
-  // Clean up resource pools
   resource.pool_deinit(self.textures, texture_deinit)
   resource.pool_deinit(self.meshes, mesh_deinit)
   resource.pool_deinit(self.materials, material_deinit)
-
-  // Clean up particle systems
-  // destroy_particle_compute_pipeline(&self.particle_compute)
   destroy_particle_render_pipeline(&self.particle_render)
-
-  // Remove swapchain cleanup - it's now handled by Engine
-  for i in 0 ..< MAX_FRAMES_IN_FLIGHT do frame_deinit(&self.frames[i])
-
+  for &frame in self.frames do frame_deinit(&frame)
   vk.DestroyDescriptorSetLayout(g_device, g_camera_descriptor_set_layout, nil)
 }
 
-renderer_recreate_size_dependent_resources :: proc(
+renderer_recreate_images :: proc(
   self: ^Renderer,
   new_format: vk.Format,
   new_extent: vk.Extent2D,
 ) -> vk.Result {
   vk.DeviceWaitIdle(g_device)
-
-  // Clean up old size-dependent resources
   image_buffer_deinit(&self.depth_buffer)
   for &frame in self.frames {
     frame_deinit_images(&frame)
   }
-
-  // Recreate depth buffer with new size
   self.depth_buffer = create_depth_image(
     new_extent.width,
     new_extent.height,
@@ -195,7 +167,6 @@ renderer_recreate_size_dependent_resources :: proc(
       new_extent.height,
     ) or_return
   }
-
   return .SUCCESS
 }
 

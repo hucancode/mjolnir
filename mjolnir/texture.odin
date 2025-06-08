@@ -444,9 +444,9 @@ cube_depth_texture_deinit :: proc(self: ^CubeDepthTexture) {
   }
   vk.DestroySampler(g_device, self.sampler, nil)
   self.sampler = 0
-  for i in 0 ..< 6 {
-    vk.DestroyImageView(g_device, self.views[i], nil)
-    self.views[i] = 0
+  for &v in self.views {
+    vk.DestroyImageView(g_device, v, nil)
+    v = 0
   }
   vk.DestroyImageView(g_device, self.view, nil)
   self.view = 0

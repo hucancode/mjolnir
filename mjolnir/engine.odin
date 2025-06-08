@@ -363,7 +363,7 @@ recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
   geometry.camera_update_aspect_ratio(&engine.scene.camera, new_aspect_ratio)
 
   // Then recreate renderer's size-dependent resources
-  renderer_recreate_size_dependent_resources(
+  renderer_recreate_images(
     &engine.renderer,
     engine.swapchain.format.format,
     engine.swapchain.extent,

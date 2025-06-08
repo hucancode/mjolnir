@@ -467,8 +467,7 @@ load_gltf_skinned_primitive :: proc(
   vertices := make([]geometry.Vertex, num_vertices)
   skinnings := make([]geometry.SkinningData, num_vertices)
   attributes := primitive.attributes
-  for attr_idx in 0 ..< len(attributes) {
-    attribute := &attributes[attr_idx]
+  for attribute in attributes {
     accessor := attribute.data
     if accessor.count != num_vertices {
       log.errorf(
