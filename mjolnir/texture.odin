@@ -485,3 +485,108 @@ create_hdr_texture_from_path :: proc(
   ret = .SUCCESS
   return
 }
+
+prepare_image_for_render :: proc(
+  command_buffer: vk.CommandBuffer,
+  image: vk.Image,
+  old_layout: vk.ImageLayout = .UNDEFINED,
+) {
+  barrier := vk.ImageMemoryBarrier {
+    sType = .IMAGE_MEMORY_BARRIER,
+    oldLayout = old_layout,
+    newLayout = .COLOR_ATTACHMENT_OPTIMAL,
+    srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    image = image,
+    subresourceRange = vk.ImageSubresourceRange {
+      aspectMask = {.COLOR},
+      baseMipLevel = 0,
+      levelCount = 1,
+      baseArrayLayer = 0,
+      layerCount = 1,
+    },
+    dstAccessMask = {.COLOR_ATTACHMENT_WRITE},
+  }
+  vk.CmdPipelineBarrier(
+    command_buffer,
+    {.TOP_OF_PIPE},
+    {.COLOR_ATTACHMENT_OUTPUT},
+    {},
+    0,
+    nil,
+    0,
+    nil,
+    1,
+    &barrier,
+  )
+}
+
+prepare_image_for_shader_read :: proc(
+  command_buffer: vk.CommandBuffer,
+  image: vk.Image,
+  old_layout: vk.ImageLayout = .COLOR_ATTACHMENT_OPTIMAL,
+) {
+  barrier := vk.ImageMemoryBarrier {
+    sType = .IMAGE_MEMORY_BARRIER,
+    oldLayout = old_layout,
+    newLayout = .SHADER_READ_ONLY_OPTIMAL,
+    srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    image = image,
+    subresourceRange = vk.ImageSubresourceRange {
+      aspectMask = {.COLOR},
+      baseMipLevel = 0,
+      levelCount = 1,
+      baseArrayLayer = 0,
+      layerCount = 1,
+    },
+    srcAccessMask = {.COLOR_ATTACHMENT_WRITE},
+    dstAccessMask = {.SHADER_READ},
+  }
+  vk.CmdPipelineBarrier(
+    command_buffer,
+    {.COLOR_ATTACHMENT_OUTPUT},
+    {.FRAGMENT_SHADER},
+    {},
+    0,
+    nil,
+    0,
+    nil,
+    1,
+    &barrier,
+  )
+}
+
+prepare_image_for_present :: proc(
+  command_buffer: vk.CommandBuffer,
+  image: vk.Image,
+) {
+  barrier := vk.ImageMemoryBarrier {
+    sType = .IMAGE_MEMORY_BARRIER,
+    oldLayout = .COLOR_ATTACHMENT_OPTIMAL,
+    newLayout = .PRESENT_SRC_KHR,
+    srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    image = image,
+    subresourceRange = vk.ImageSubresourceRange {
+      aspectMask = {.COLOR},
+      baseMipLevel = 0,
+      levelCount = 1,
+      baseArrayLayer = 0,
+      layerCount = 1,
+    },
+    srcAccessMask = {.COLOR_ATTACHMENT_WRITE},
+  }
+  vk.CmdPipelineBarrier(
+    command_buffer,
+    {.COLOR_ATTACHMENT_OUTPUT},
+    {.BOTTOM_OF_PIPE},
+    {},
+    0,
+    nil,
+    0,
+    nil,
+    1,
+    &barrier,
+  )
+}
