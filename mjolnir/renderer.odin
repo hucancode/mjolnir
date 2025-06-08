@@ -225,11 +225,7 @@ frame_deinit :: proc(self: ^Frame) {
 }
 
 Renderer :: struct {
-  swapchain:                  vk.SwapchainKHR,
-  format:                     vk.SurfaceFormatKHR,
-  extent:                     vk.Extent2D,
-  swapchain_images:           []vk.Image,
-  swapchain_views:            []vk.ImageView,
+  swapchain:                  Swapchain,
   frames:                     [MAX_FRAMES_IN_FLIGHT]Frame,
   depth_buffer:               ImageBuffer,
   environment_map:            ^Texture,
@@ -270,7 +266,8 @@ renderer_init :: proc(
   // Initialize particle compute pipeline
   self.particle_compute = setup_particle_compute_pipeline() or_return
 
-  create_swapchain(self, window) or_return
+  swapchain_init(&self.swapchain, window) or_return
+
   alloc_info := vk.CommandBufferAllocateInfo {
     sType              = .COMMAND_BUFFER_ALLOCATE_INFO,
     commandPool        = g_command_pool,
@@ -308,16 +305,16 @@ renderer_init :: proc(
     vk.CreateFence(g_device, &fence_info, nil, &frame.fence) or_return
   }
   self.depth_buffer = create_depth_image(
-    self.extent.width,
-    self.extent.height,
+    self.swapchain.extent.width,
+    self.swapchain.extent.height,
   ) or_return
   self.current_frame_index = 0
   for &frame in self.frames {
     frame_init(
       &frame,
-      self.format.format,
-      self.extent.width,
-      self.extent.height,
+      self.swapchain.format.format,
+      self.swapchain.extent.width,
+      self.swapchain.extent.height,
     ) or_return
   }
   // Initialize particle render pipeline
@@ -337,7 +334,7 @@ renderer_deinit :: proc(self: ^Renderer) {
   // destroy_particle_compute_pipeline(&self.particle_compute)
   destroy_particle_render_pipeline(&self.particle_render)
 
-  destroy_swapchain(self)
+  swapchain_deinit(&self.swapchain)
   for i in 0 ..< MAX_FRAMES_IN_FLIGHT do frame_deinit(&self.frames[i])
 
   vk.DestroyDescriptorSetLayout(g_device, g_camera_descriptor_set_layout, nil)
@@ -347,138 +344,7 @@ recreate_swapchain :: proc(
   self: ^Renderer,
   window: glfw.WindowHandle,
 ) -> vk.Result {
-  vk.DeviceWaitIdle(g_device)
-  destroy_swapchain(self)
-  create_swapchain(self, window) or_return
-  return .SUCCESS
-}
-
-create_swapchain :: proc(
-  self: ^Renderer,
-  window: glfw.WindowHandle,
-) -> vk.Result {
-  pick_swap_present_mode :: proc(
-    present_modes: []vk.PresentModeKHR,
-  ) -> vk.PresentModeKHR {
-    return(
-      .MAILBOX if slice.contains(present_modes, vk.PresentModeKHR.MAILBOX) else .FIFO \
-    )
-  }
-  pick_swapchain_format :: proc(
-    formats: []vk.SurfaceFormatKHR,
-  ) -> vk.SurfaceFormatKHR {
-    ret := vk.SurfaceFormatKHR{.B8G8R8A8_SRGB, .SRGB_NONLINEAR}
-    if len(formats) == 0 {
-      log.infof("No surface formats available for swapchain.")
-      return ret
-    }
-    return ret if slice.contains(formats, ret) else formats[0]
-  }
-  pick_swapchain_extent :: proc(
-    capabilities: vk.SurfaceCapabilitiesKHR,
-    actual_width, actual_height: u32,
-  ) -> vk.Extent2D {
-    if capabilities.currentExtent.width != math.max(u32) {
-      return capabilities.currentExtent
-    }
-    return {
-      math.clamp(
-        actual_width,
-        capabilities.minImageExtent.width,
-        capabilities.maxImageExtent.width,
-      ),
-      math.clamp(
-        actual_height,
-        capabilities.minImageExtent.height,
-        capabilities.maxImageExtent.height,
-      ),
-    }
-  }
-  width, height := glfw.GetFramebufferSize(window)
-  support := query_swapchain_support(g_physical_device, g_surface) or_return
-  defer swapchain_support_deinit(&support)
-  self.format = pick_swapchain_format(support.formats)
-  self.extent = pick_swapchain_extent(
-    support.capabilities,
-    u32(width),
-    u32(height),
-  )
-  image_count := support.capabilities.minImageCount + 1
-  if support.capabilities.maxImageCount > 0 &&
-     image_count > support.capabilities.maxImageCount {
-    image_count = support.capabilities.maxImageCount
-  }
-  create_info := vk.SwapchainCreateInfoKHR {
-    sType            = .SWAPCHAIN_CREATE_INFO_KHR,
-    surface          = g_surface,
-    minImageCount    = image_count,
-    imageFormat      = self.format.format,
-    imageColorSpace  = self.format.colorSpace,
-    imageExtent      = self.extent,
-    imageArrayLayers = 1,
-    imageUsage       = {.COLOR_ATTACHMENT},
-    preTransform     = support.capabilities.currentTransform,
-    compositeAlpha   = {.OPAQUE},
-    presentMode      = pick_swap_present_mode(support.present_modes),
-    clipped          = true,
-  }
-  queue_family_indices := [2]u32{g_graphics_family, g_present_family}
-  if g_graphics_family != g_present_family {
-    create_info.imageSharingMode = .CONCURRENT
-    create_info.queueFamilyIndexCount = 2
-    create_info.pQueueFamilyIndices = raw_data(queue_family_indices[:])
-  } else {
-    create_info.imageSharingMode = .EXCLUSIVE
-  }
-  vk.CreateSwapchainKHR(g_device, &create_info, nil, &self.swapchain) or_return
-  swapchain_image_count: u32
-  vk.GetSwapchainImagesKHR(
-    g_device,
-    self.swapchain,
-    &swapchain_image_count,
-    nil,
-  )
-  self.swapchain_images = make([]vk.Image, swapchain_image_count)
-  vk.GetSwapchainImagesKHR(
-    g_device,
-    self.swapchain,
-    &swapchain_image_count,
-    raw_data(self.swapchain_images),
-  )
-  self.swapchain_views = make([]vk.ImageView, swapchain_image_count)
-  for i in 0 ..< swapchain_image_count {
-    self.swapchain_views[i] = create_image_view(
-      self.swapchain_images[i],
-      self.format.format,
-      {.COLOR},
-    ) or_return
-  }
-  depth_format := vk.Format.D32_SFLOAT
-  self.depth_buffer = malloc_image_buffer(
-    self.extent.width,
-    self.extent.height,
-    depth_format,
-    .OPTIMAL,
-    {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
-    {.DEVICE_LOCAL},
-  ) or_return
-  self.depth_buffer.view = create_image_view(
-    self.depth_buffer.image,
-    self.depth_buffer.format,
-    {.DEPTH},
-  ) or_return
-  return .SUCCESS
-}
-
-destroy_swapchain :: proc(self: ^Renderer) {
-  image_buffer_deinit(&self.depth_buffer)
-  for view in self.swapchain_views do vk.DestroyImageView(g_device, view, nil)
-  delete(self.swapchain_views)
-  self.swapchain_views = nil
-  delete(self.swapchain_images)
-  self.swapchain_images = nil
-  vk.DestroySwapchainKHR(g_device, self.swapchain, nil)
-  self.swapchain = 0
+  return swapchain_recreate(&self.swapchain, window)
 }
 
 renderer_get_in_flight_fence :: proc(self: ^Renderer) -> vk.Fence {
@@ -815,19 +681,21 @@ render :: proc(engine: ^Engine) -> vk.Result {
   current_fence := renderer_get_in_flight_fence(&engine.renderer)
   log.debug("waiting for fence...")
   vk.WaitForFences(g_device, 1, &current_fence, true, math.max(u64)) or_return
-  image_idx: u32
+
   current_image_available_semaphore := renderer_get_image_available_semaphore(
     &engine.renderer,
   )
-  log.debug("aquiring next image...")
-  vk.AcquireNextImageKHR(
-    g_device,
-    engine.renderer.swapchain,
-    math.max(u64),
+  image_idx, acquire_result := swapchain_acquire_next_image(
+    &engine.renderer.swapchain,
     current_image_available_semaphore,
-    0,
-    &image_idx,
-  ) or_return
+  )
+  if acquire_result == .ERROR_OUT_OF_DATE_KHR {
+    return acquire_result
+  }
+  if acquire_result != .SUCCESS {
+    return acquire_result
+  }
+
   log.debug("reseting fence...")
   vk.ResetFences(g_device, 1, &current_fence) or_return
   mu.begin(&engine.ui.ctx)
@@ -883,19 +751,19 @@ render :: proc(engine: ^Engine) -> vk.Result {
   )
   prepare_image_for_render(
     command_buffer,
-    engine.renderer.swapchain_images[image_idx],
+    engine.renderer.swapchain.images[image_idx],
   )
   log.debug("============ rendering post processes... =============")
   render_postprocess_stack(
     &engine.renderer,
     command_buffer,
     renderer_get_main_pass_view(&engine.renderer), // postprocess input
-    engine.renderer.swapchain_views[image_idx], // final output view
-    engine.renderer.extent,
+    engine.renderer.swapchain.views[image_idx], // final output view
+    engine.renderer.swapchain.extent,
   )
   prepare_image_for_present(
     command_buffer,
-    engine.renderer.swapchain_images[image_idx],
+    engine.renderer.swapchain.images[image_idx],
   )
 
   vk.EndCommandBuffer(command_buffer) or_return
@@ -915,17 +783,16 @@ render :: proc(engine: ^Engine) -> vk.Result {
   }
   log.debug("============ submitting queue... =============")
   vk.QueueSubmit(g_graphics_queue, 1, &submit_info, current_fence) or_return
-  image_indices := [?]u32{image_idx}
-  present_info := vk.PresentInfoKHR {
-    sType              = .PRESENT_INFO_KHR,
-    waitSemaphoreCount = 1,
-    pWaitSemaphores    = &current_render_finished_semaphore,
-    swapchainCount     = 1,
-    pSwapchains        = &engine.renderer.swapchain,
-    pImageIndices      = raw_data(image_indices[:]),
+
+  present_result := swapchain_present(
+    &engine.renderer.swapchain,
+    &current_render_finished_semaphore,
+    image_idx,
+  )
+  if present_result != .SUCCESS {
+    return present_result
   }
-  log.debug("============ presenting image... =============")
-  vk.QueuePresentKHR(g_present_queue, &present_info) or_return
+
   engine.renderer.current_frame_index =
     (engine.renderer.current_frame_index + 1) % MAX_FRAMES_IN_FLIGHT
   return .SUCCESS
@@ -1316,7 +1183,7 @@ render_main_pass :: proc(
   }
   render_info := vk.RenderingInfoKHR {
     sType = .RENDERING_INFO_KHR,
-    renderArea = vk.Rect2D{extent = engine.renderer.extent},
+    renderArea = vk.Rect2D{extent = engine.renderer.swapchain.extent},
     layerCount = 1,
     colorAttachmentCount = 1,
     pColorAttachments = &color_attachment,
@@ -1325,14 +1192,14 @@ render_main_pass :: proc(
   vk.CmdBeginRenderingKHR(command_buffer, &render_info)
   viewport := vk.Viewport {
     x        = 0.0,
-    y        = f32(engine.renderer.extent.height),
-    width    = f32(engine.renderer.extent.width),
-    height   = -f32(engine.renderer.extent.height),
+    y        = f32(engine.renderer.swapchain.extent.height),
+    width    = f32(engine.renderer.swapchain.extent.width),
+    height   = -f32(engine.renderer.swapchain.extent.height),
     minDepth = 0.0,
     maxDepth = 1.0,
   }
   scissor := vk.Rect2D {
-    extent = engine.renderer.extent,
+    extent = engine.renderer.swapchain.extent,
   }
   vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
   vk.CmdSetScissor(command_buffer, 0, 1, &scissor)

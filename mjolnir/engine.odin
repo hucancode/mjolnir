@@ -132,26 +132,27 @@ init :: proc(
   build_shadow_pipelines(.D32_SFLOAT) or_return
   init_scene(&engine.scene)
   build_renderer(engine) or_return
-  if engine.renderer.extent.width > 0 && engine.renderer.extent.height > 0 {
-    w := f32(engine.renderer.extent.width)
-    h := f32(engine.renderer.extent.height)
+  if engine.renderer.swapchain.extent.width > 0 &&
+     engine.renderer.swapchain.extent.height > 0 {
+    w := f32(engine.renderer.swapchain.extent.width)
+    h := f32(engine.renderer.swapchain.extent.height)
     #partial switch &proj in engine.scene.camera.projection {
     case geometry.PerspectiveProjection:
       proj.aspect_ratio = w / h
     }
   }
   build_postprocess_pipelines(
-    engine.renderer.format.format,
-    engine.renderer.extent.width,
-    engine.renderer.extent.height,
+    engine.renderer.swapchain.format.format,
+    engine.renderer.swapchain.extent.width,
+    engine.renderer.swapchain.extent.height,
   )
 
   ui_init(
     &engine.ui,
     engine,
-    engine.renderer.format.format,
-    engine.renderer.extent.width,
-    engine.renderer.extent.height,
+    engine.renderer.swapchain.format.format,
+    engine.renderer.swapchain.extent.width,
+    engine.renderer.swapchain.extent.height,
   )
   glfw.SetScrollCallback(
     engine.window,
