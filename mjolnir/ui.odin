@@ -138,8 +138,8 @@ ui_flush :: proc(ui: ^UIRenderer, cmd_buf: vk.CommandBuffer) -> vk.Result {
     ui.vertex_count = 0
     ui.index_count = 0
   }
-  data_buffer_write(ui.vertex_buffer, ui.vertices[:]) or_return
-  data_buffer_write(ui.index_buffer, ui.indices[:]) or_return
+  data_buffer_write(&ui.vertex_buffer, ui.vertices[:]) or_return
+  data_buffer_write(&ui.index_buffer, ui.indices[:]) or_return
   vk.CmdBindPipeline(cmd_buf, .GRAPHICS, ui.pipeline.pipeline)
   descriptor_sets := [?]vk.DescriptorSet {
     ui.pipeline.projection_descriptor_set,

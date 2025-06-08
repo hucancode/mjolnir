@@ -151,11 +151,6 @@ update_postprocess_input :: proc(
     pImageInfo      = &image_info,
   }
   vk.UpdateDescriptorSets(g_device, 1, &write, 0, nil)
-  log.infof(
-    "update descriptor set %v, use image view %v",
-    g_postprocess_descriptor_sets[set_idx],
-    input_view,
-  )
   return .SUCCESS
 }
 

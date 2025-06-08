@@ -697,7 +697,7 @@ data_buffer_write :: proc {
   data_buffer_write_multi,
 }
 data_buffer_write_single :: proc(
-  self: DataBuffer($T),
+  self: ^DataBuffer($T),
   data: ^T,
   index: int = 0,
 ) -> vk.Result {
@@ -714,7 +714,7 @@ data_buffer_write_single :: proc(
 }
 
 data_buffer_write_multi :: proc(
-  self: DataBuffer($T),
+  self: ^DataBuffer($T),
   data: []T,
   index: int = 0,
 ) -> vk.Result {

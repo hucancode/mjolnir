@@ -830,11 +830,11 @@ render :: proc(engine: ^Engine) -> vk.Result {
   )
   render_main_pass(engine, command_buffer, camera_frustum) or_return
   data_buffer_write(
-    renderer_get_camera_uniform(&engine.renderer)^,
+    renderer_get_camera_uniform(&engine.renderer),
     &scene_uniform,
   )
   data_buffer_write(
-    renderer_get_light_uniform(&engine.renderer)^,
+    renderer_get_light_uniform(&engine.renderer),
     &light_uniform,
   )
   if engine.render2d_proc != nil {
@@ -1026,7 +1026,7 @@ render_shadow_pass :: proc(
           projection = proj,
         }
         data_buffer_write(
-          renderer_get_camera_uniform(&engine.renderer)^,
+          renderer_get_camera_uniform(&engine.renderer),
           &shadow_scene_uniform,
           i * 6 + face + 1,
         )
@@ -1098,7 +1098,7 @@ render_shadow_pass :: proc(
         projection = proj,
       }
       data_buffer_write(
-        renderer_get_camera_uniform(&engine.renderer)^,
+        renderer_get_camera_uniform(&engine.renderer),
         &shadow_scene_uniform,
         i * 6 + 1,
       )
@@ -1227,12 +1227,9 @@ render_main_pass :: proc(
   command_buffer: vk.CommandBuffer,
   camera_frustum: geometry.Frustum,
 ) -> vk.Result {
-  // Log particle[0] before compute
   particles := engine.particle_compute.particle_buffer.mapped
-
   // Run particle compute pass before starting rendering
   compute_particles(engine, command_buffer)
-
   // Barrier to ensure compute shader writes are visible to the vertex shader
   particle_buffer_barrier := vk.BufferMemoryBarrier {
     sType               = .BUFFER_MEMORY_BARRIER,
@@ -1362,16 +1359,7 @@ render_particles :: proc(engine: ^Engine, command_buffer: vk.CommandBuffer) {
     &engine.particle_compute.particle_buffer.buffer,
     &offset,
   )
-
   params := data_buffer_get(engine.particle_compute.params_buffer)
-
-  // Debug: Print first 10 particles' position, size, life, and is_dead before rendering
-  for i in 0..<min(10, params.particle_count) {
-    p := engine.particle_compute.particle_buffer.mapped[i];
-    log.debugf("[ParticleRender] idx=%d pos=%v size=%.2f life=%.2f is_dead=%v",
-      i, p.position, p.size, p.life, p.is_dead);
-  }
-
   if params.particle_count > 0 {
     vk.CmdDraw(command_buffer, u32(params.particle_count), 1, 0, 0)
   }
