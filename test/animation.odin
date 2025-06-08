@@ -2,8 +2,8 @@ package tests
 
 import "../mjolnir/animation"
 import "core:log"
-import linalg "core:math/linalg"
 import "core:math"
+import linalg "core:math/linalg"
 import "core:slice"
 import "core:testing"
 import "core:time"
@@ -66,53 +66,95 @@ test_sample_out_of_range :: proc(t: ^testing.T) {
 
 @(test)
 test_position_sampling :: proc(t: ^testing.T) {
-    frames := []animation.Keyframe(linalg.Vector3f32){
-        {time=0.0, value={0, 0, 0}},
-        {time=1.0, value={1, 2, 3}},
-        {time=2.0, value={2, 4, 6}},
-    };
-    // value range is small, don't need almost_equal, we can use exact comparison
-    // exact matches
-    testing.expect_value(t, animation.keyframe_sample(frames, 0.0), linalg.Vector3f32{0, 0, 0});
-    testing.expect_value(t, animation.keyframe_sample(frames, 1.0), linalg.Vector3f32{1, 2, 3});
-    testing.expect_value(t, animation.keyframe_sample(frames, 2.0), linalg.Vector3f32{2, 4, 6});
-    // interpolation
-    testing.expect_value(t, animation.keyframe_sample(frames, 0.5), linalg.Vector3f32{0.5, 1, 1.5});
-    testing.expect_value(t, animation.keyframe_sample(frames, 1.5), linalg.Vector3f32{1.5, 3, 4.5});
-    // out of range
-    testing.expect_value(t, animation.keyframe_sample(frames, -1.0), linalg.Vector3f32{0, 0, 0});
-    testing.expect_value(t, animation.keyframe_sample(frames, 3.0), linalg.Vector3f32{2, 4, 6});
+  frames := []animation.Keyframe(linalg.Vector3f32) {
+    {time = 0.0, value = {0, 0, 0}},
+    {time = 1.0, value = {1, 2, 3}},
+    {time = 2.0, value = {2, 4, 6}},
+  }
+  // value range is small, don't need almost_equal, we can use exact comparison
+  // exact matches
+  testing.expect_value(
+    t,
+    animation.keyframe_sample(frames, 0.0),
+    linalg.Vector3f32{0, 0, 0},
+  )
+  testing.expect_value(
+    t,
+    animation.keyframe_sample(frames, 1.0),
+    linalg.Vector3f32{1, 2, 3},
+  )
+  testing.expect_value(
+    t,
+    animation.keyframe_sample(frames, 2.0),
+    linalg.Vector3f32{2, 4, 6},
+  )
+  // interpolation
+  testing.expect_value(
+    t,
+    animation.keyframe_sample(frames, 0.5),
+    linalg.Vector3f32{0.5, 1, 1.5},
+  )
+  testing.expect_value(
+    t,
+    animation.keyframe_sample(frames, 1.5),
+    linalg.Vector3f32{1.5, 3, 4.5},
+  )
+  // out of range
+  testing.expect_value(
+    t,
+    animation.keyframe_sample(frames, -1.0),
+    linalg.Vector3f32{0, 0, 0},
+  )
+  testing.expect_value(
+    t,
+    animation.keyframe_sample(frames, 3.0),
+    linalg.Vector3f32{2, 4, 6},
+  )
 }
 
 almost_equal_quaternion :: proc(a, b: linalg.Quaternionf32) -> bool {
-    return a.x - b.x <= linalg.F32_EPSILON &&
-        a.y - b.y <= linalg.F32_EPSILON &&
-        a.z - b.z <= linalg.F32_EPSILON &&
-        a.w - b.w <= linalg.F32_EPSILON
+  return(
+    a.x - b.x <= linalg.F32_EPSILON &&
+    a.y - b.y <= linalg.F32_EPSILON &&
+    a.z - b.z <= linalg.F32_EPSILON &&
+    a.w - b.w <= linalg.F32_EPSILON \
+  )
 }
 
 @(test)
 test_quaternion_sampling :: proc(t: ^testing.T) {
-    q1 := linalg.quaternion_angle_axis_f32(0, {0, 0, 1}); // Identity
-    q2 := linalg.quaternion_angle_axis_f32(math.PI, {0, 0, 1}); // 180 around Z
-    q3 := linalg.quaternion_angle_axis_f32(math.PI, {0, 1, 0}); // 180 around Y
-    q4 := linalg.quaternion_angle_axis_f32(math.PI, {1, 0, 0}); // 180 around X
+  q1 := linalg.quaternion_angle_axis_f32(0, {0, 0, 1}) // Identity
+  q2 := linalg.quaternion_angle_axis_f32(math.PI, {0, 0, 1}) // 180 around Z
+  q3 := linalg.quaternion_angle_axis_f32(math.PI, {0, 1, 0}) // 180 around Y
+  q4 := linalg.quaternion_angle_axis_f32(math.PI, {1, 0, 0}) // 180 around X
 
-    frames := []animation.Keyframe(linalg.Quaternionf32){
-        {time=0.0, value=q1},
-        {time=1.0, value=q2},
-        {time=2.0, value=q3},
-        {time=3.0, value=q4},
-    };
-    // exact matches
-    testing.expect(t, almost_equal_quaternion(animation.keyframe_sample(frames, 0.0), q1));
-    testing.expect(t, almost_equal_quaternion(animation.keyframe_sample(frames, 1.0), q2));
-    testing.expect(t, almost_equal_quaternion(animation.keyframe_sample(frames, 2.0), q3));
-    testing.expect(t, almost_equal_quaternion(animation.keyframe_sample(frames, 3.0), q4));
-    // interpolation
-    half_rot := animation.keyframe_sample(frames, 0.5);
-    expected_half := linalg.quaternion_angle_axis_f32(math.PI/2, {0, 0, 1});
-    testing.expect(t, almost_equal_quaternion(half_rot, expected_half));
+  frames := []animation.Keyframe(linalg.Quaternionf32) {
+    {time = 0.0, value = q1},
+    {time = 1.0, value = q2},
+    {time = 2.0, value = q3},
+    {time = 3.0, value = q4},
+  }
+  // exact matches
+  testing.expect(
+    t,
+    almost_equal_quaternion(animation.keyframe_sample(frames, 0.0), q1),
+  )
+  testing.expect(
+    t,
+    almost_equal_quaternion(animation.keyframe_sample(frames, 1.0), q2),
+  )
+  testing.expect(
+    t,
+    almost_equal_quaternion(animation.keyframe_sample(frames, 2.0), q3),
+  )
+  testing.expect(
+    t,
+    almost_equal_quaternion(animation.keyframe_sample(frames, 3.0), q4),
+  )
+  // interpolation
+  half_rot := animation.keyframe_sample(frames, 0.5)
+  expected_half := linalg.quaternion_angle_axis_f32(math.PI / 2, {0, 0, 1})
+  testing.expect(t, almost_equal_quaternion(half_rot, expected_half))
 }
 
 @(test)

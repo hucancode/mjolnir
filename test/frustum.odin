@@ -12,9 +12,9 @@ test_frustum_aabb_inside :: proc(t: ^testing.T) {
   m := linalg.MATRIX4F32_IDENTITY
   frustum := geometry.make_frustum(m)
   // AABB fully inside the frustum
-  aabb := geometry.Aabb{
-      linalg.Vector3f32{-0.5, -0.5, -0.5},
-      linalg.Vector3f32{0.5, 0.5, 0.5},
+  aabb := geometry.Aabb {
+    linalg.Vector3f32{-0.5, -0.5, -0.5},
+    linalg.Vector3f32{0.5, 0.5, 0.5},
   }
   inside := geometry.frustum_test_aabb(&frustum, aabb)
   testing.expect(t, inside, "AABB should be inside the frustum")
@@ -25,9 +25,9 @@ test_frustum_aabb_outside :: proc(t: ^testing.T) {
   m := linalg.MATRIX4F32_IDENTITY
   frustum := geometry.make_frustum(m)
   // AABB completely outside the frustum (on +X side)
-  aabb := geometry.Aabb{
-      linalg.Vector3f32{2, -0.5, -0.5},
-      linalg.Vector3f32{3, 0.5, 0.5},
+  aabb := geometry.Aabb {
+    linalg.Vector3f32{2, -0.5, -0.5},
+    linalg.Vector3f32{3, 0.5, 0.5},
   }
   inside := geometry.frustum_test_aabb(&frustum, aabb)
   testing.expect(t, !inside, "AABB should be outside the frustum")
@@ -38,9 +38,9 @@ test_frustum_aabb_intersect :: proc(t: ^testing.T) {
   m := linalg.MATRIX4F32_IDENTITY
   frustum := geometry.make_frustum(m)
   // AABB partially inside the frustum
-  aabb := geometry.Aabb{
-      linalg.Vector3f32{0.5, -0.5, -0.5},
-      linalg.Vector3f32{1.5, 0.5, 0.5},
+  aabb := geometry.Aabb {
+    linalg.Vector3f32{0.5, -0.5, -0.5},
+    linalg.Vector3f32{1.5, 0.5, 0.5},
   }
   inside := geometry.frustum_test_aabb(&frustum, aabb)
   testing.expect(t, inside, "AABB should intersect the frustum")
@@ -76,16 +76,16 @@ test_frustum_aabb_perspective_projection :: proc(t: ^testing.T) {
   proj := linalg.matrix4_perspective(fov, aspect, near, far)
   frustum := geometry.make_frustum(proj)
   // AABB fully inside the frustum (centered at origin, small size)
-  aabb := geometry.Aabb{
-      linalg.Vector3f32{-0.5, -0.5, -2.0},
-      linalg.Vector3f32{0.5, 0.5, -1.5},
+  aabb := geometry.Aabb {
+    linalg.Vector3f32{-0.5, -0.5, -2.0},
+    linalg.Vector3f32{0.5, 0.5, -1.5},
   }
   inside := geometry.frustum_test_aabb(&frustum, aabb)
   testing.expect(t, inside, "AABB should be inside the perspective frustum")
   // AABB outside the frustum (behind the camera)
-  aabb2 := geometry.Aabb{
-      linalg.Vector3f32{-0.5, -0.5, 1.0},
-      linalg.Vector3f32{0.5, 0.5, 2.0},
+  aabb2 := geometry.Aabb {
+    linalg.Vector3f32{-0.5, -0.5, 1.0},
+    linalg.Vector3f32{0.5, 0.5, 2.0},
   }
   inside2 := geometry.frustum_test_aabb(&frustum, aabb2)
   testing.expect(
