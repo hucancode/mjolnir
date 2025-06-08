@@ -18,7 +18,8 @@ dot_product_scalar :: proc(a, b: []f32) -> f32 {
 dot_product_simd :: proc(a, b: []f32) -> f32 {
   a := a
   b := b
-  WIDTH :: 16
+  // some CPU don't support this high, adjust the WIDTH accordingly
+  WIDTH :: 64
   count := len(a) / WIDTH
   sum_v: #simd[WIDTH]f32
   for i in 0 ..< count {
