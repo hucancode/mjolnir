@@ -273,3 +273,14 @@ camera_make_frustum :: proc(camera: ^Camera) -> Frustum {
   proj_matrix := calculate_projection_matrix(camera)
   return make_frustum(proj_matrix * view_matrix)
 }
+
+camera_update_aspect_ratio :: proc(camera: ^Camera, new_aspect_ratio: f32) {
+  switch &proj in camera.projection {
+  case PerspectiveProjection:
+    proj.aspect_ratio = new_aspect_ratio
+  case OrthographicProjection:
+    // For orthographic projection, we might want to adjust width/height
+    // based on the aspect ratio, but this depends on the desired behavior
+    // For now, we'll leave it unchanged
+  }
+}

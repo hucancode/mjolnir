@@ -358,6 +358,10 @@ recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
   // Recreate swapchain first
   swapchain_recreate(&engine.swapchain, engine.window) or_return
 
+  // Update camera aspect ratio to match new window dimensions
+  new_aspect_ratio := f32(engine.swapchain.extent.width) / f32(engine.swapchain.extent.height)
+  geometry.camera_update_aspect_ratio(&engine.scene.camera, new_aspect_ratio)
+
   // Then recreate renderer's size-dependent resources
   renderer_recreate_size_dependent_resources(
     &engine.renderer,
