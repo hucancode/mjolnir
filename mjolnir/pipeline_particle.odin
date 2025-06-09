@@ -45,7 +45,7 @@ ParticleSystemParams :: struct {
 }
 
 // --- Vulkan Compute Pipeline Setup for Particles ---
-ParticleComputePipeline :: struct {
+PipelineParticleCompute :: struct {
   params_buffer:         DataBuffer(ParticleSystemParams),
   particle_buffer:       DataBuffer(Particle),
   emitter_buffer:        DataBuffer(Emitter),
@@ -56,7 +56,7 @@ ParticleComputePipeline :: struct {
   free_particle_indices: [dynamic]int,
 }
 
-ParticleRenderPipeline :: struct {
+PipelineParticle :: struct {
   descriptor_set_layout: vk.DescriptorSetLayout,
   descriptor_set:        vk.DescriptorSet,
   pipeline_layout:       vk.PipelineLayout,
@@ -67,8 +67,8 @@ ParticleRenderPipeline :: struct {
 }
 
 setup_particle_compute_pipeline :: proc(
+  pipeline: ^PipelineParticleCompute,
 ) -> (
-  pipeline: ParticleComputePipeline,
   ret: vk.Result,
 ) {
   // 1. Create params buffer (uniform buffer)
@@ -218,7 +218,7 @@ setup_particle_compute_pipeline :: proc(
 }
 
 add_emitter :: proc(
-  pipeline: ^ParticleComputePipeline,
+  pipeline: ^PipelineParticleCompute,
   emitter: Emitter,
 ) -> vk.Result {
   params := data_buffer_get(pipeline.params_buffer)
@@ -237,7 +237,7 @@ add_emitter :: proc(
   return .SUCCESS
 }
 
-destroy_particle_render_pipeline :: proc(pipeline: ^ParticleRenderPipeline) {
+particle_render_pipeline_deinit :: proc(pipeline: ^PipelineParticle) {
   if pipeline == nil do return
 
   vk.DestroyPipeline(g_device, pipeline.pipeline, nil)
@@ -252,7 +252,7 @@ destroy_particle_render_pipeline :: proc(pipeline: ^ParticleRenderPipeline) {
 
 
 remove_emitter :: proc(
-  pipeline: ^ParticleComputePipeline,
+  pipeline: ^PipelineParticleCompute,
   index: u32,
 ) -> vk.Result {
   params := data_buffer_get(pipeline.params_buffer)
@@ -267,7 +267,7 @@ remove_emitter :: proc(
   return .SUCCESS
 }
 
-update_emitters :: proc(pipeline: ^ParticleComputePipeline, delta_time: f32) {
+update_emitters :: proc(pipeline: ^PipelineParticleCompute, delta_time: f32) {
   params := data_buffer_get(pipeline.params_buffer)
   params.delta_time = delta_time
 
@@ -317,14 +317,14 @@ update_emitters :: proc(pipeline: ^ParticleComputePipeline, delta_time: f32) {
 }
 
 get_emitter :: proc(
-  pipeline: ^ParticleComputePipeline,
+  pipeline: ^PipelineParticleCompute,
   index: u32,
 ) -> ^Emitter {
   return data_buffer_get(pipeline.emitter_buffer, index)
 }
 
 set_emitter_enabled :: proc(
-  pipeline: ^ParticleComputePipeline,
+  pipeline: ^PipelineParticleCompute,
   index: u32,
   enabled: b32 = true,
 ) -> bool {
@@ -337,7 +337,7 @@ set_emitter_enabled :: proc(
 }
 
 set_emitter_transform :: proc(
-  pipeline: ^ParticleComputePipeline,
+  pipeline: ^PipelineParticleCompute,
   index: u32,
   transform: geometry.Transform,
 ) -> bool {
@@ -350,7 +350,7 @@ set_emitter_transform :: proc(
 }
 
 set_emitter_properties :: proc(
-  pipeline: ^ParticleComputePipeline,
+  pipeline: ^PipelineParticleCompute,
   index: u32,
   emission_rate: f32 = 0,
   particle_lifetime: f32 = 0,
@@ -377,8 +377,8 @@ set_emitter_properties :: proc(
 }
 
 setup_particle_render_pipeline :: proc(
+  pipeline: ^PipelineParticle,
 ) -> (
-  pipeline: ParticleRenderPipeline,
   ret: vk.Result,
 ) {
   // Create descriptor set layout for particle texture
@@ -619,14 +619,12 @@ setup_particle_render_pipeline :: proc(
     &pipeline.pipeline,
   ) or_return
   // Create and setup particle texture
-  create_particle_texture(&pipeline) or_return
+  create_particle_texture(pipeline) or_return
   ret = .SUCCESS
   return
 }
 
-create_particle_texture :: proc(
-  pipeline: ^ParticleRenderPipeline,
-) -> vk.Result {
+create_particle_texture :: proc(pipeline: ^PipelineParticle) -> vk.Result {
   // Load particle texture from file
   texture: Texture
   read_texture(&texture, "assets/black-circle.png") or_return

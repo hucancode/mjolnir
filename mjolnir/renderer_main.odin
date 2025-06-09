@@ -15,7 +15,7 @@ render_main_pass :: proc(
   camera_frustum: geometry.Frustum,
   swapchain_extent: vk.Extent2D, // New parameter for swapchain extent
 ) -> vk.Result {
-  particles := engine.renderer.particle_compute.particle_buffer.mapped
+  particles := engine.renderer.pipeline_particle_comp.particle_buffer.mapped
   // Run particle compute pass before starting rendering
   compute_particles(&engine.renderer, command_buffer)
   // Barrier to ensure compute shader writes are visible to the vertex shader
@@ -25,7 +25,7 @@ render_main_pass :: proc(
     dstAccessMask       = {.VERTEX_ATTRIBUTE_READ},
     srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
     dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-    buffer              = engine.renderer.particle_compute.particle_buffer.buffer,
+    buffer              = engine.renderer.pipeline_particle_comp.particle_buffer.buffer,
     size                = vk.DeviceSize(vk.WHOLE_SIZE),
   }
   vk.CmdPipelineBarrier(
@@ -105,7 +105,7 @@ render_main_pass :: proc(
 
 render_single_node :: proc(node: ^Node, cb_context: rawptr) -> bool {
   ctx := (^RenderMeshesContext)(cb_context)
-  frame := ctx.engine.renderer.current_frame_index
+  frame := ctx.engine.renderer.frame_index
   #partial switch data in node.attachment {
   case MeshAttachment:
     mesh := resource.get(ctx.engine.renderer.meshes, data.handle)

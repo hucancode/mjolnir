@@ -10,19 +10,19 @@ compute_particles :: proc(
   renderer: ^Renderer,
   command_buffer: vk.CommandBuffer,
 ) {
-  log.info("binding compute pipeline", renderer.particle_compute.pipeline)
+  log.info("binding compute pipeline", renderer.pipeline_particle_comp.pipeline)
   vk.CmdBindPipeline(
     command_buffer,
     .COMPUTE,
-    renderer.particle_compute.pipeline,
+    renderer.pipeline_particle_comp.pipeline,
   )
   vk.CmdBindDescriptorSets(
     command_buffer,
     .COMPUTE,
-    renderer.particle_compute.pipeline_layout,
+    renderer.pipeline_particle_comp.pipeline_layout,
     0,
     1,
-    &renderer.particle_compute.descriptor_set,
+    &renderer.pipeline_particle_comp.descriptor_set,
     0,
     nil,
   )
@@ -55,20 +55,20 @@ compute_particles :: proc(
 render_particles :: proc(engine: ^Engine, command_buffer: vk.CommandBuffer) {
   log.info(
     "binding particle render pipeline",
-    engine.renderer.particle_render.pipeline,
+    engine.renderer.pipeline_particle.pipeline,
   )
   vk.CmdBindPipeline(
     command_buffer,
     .GRAPHICS,
-    engine.renderer.particle_render.pipeline,
+    engine.renderer.pipeline_particle.pipeline,
   )
   vk.CmdBindDescriptorSets(
     command_buffer,
     .GRAPHICS,
-    engine.renderer.particle_render.pipeline_layout,
+    engine.renderer.pipeline_particle.pipeline_layout,
     0,
     1,
-    &engine.renderer.particle_render.descriptor_set,
+    &engine.renderer.pipeline_particle.descriptor_set,
     0,
     nil,
   )
@@ -80,7 +80,7 @@ render_particles :: proc(engine: ^Engine, command_buffer: vk.CommandBuffer) {
   }
   vk.CmdPushConstants(
     command_buffer,
-    engine.renderer.particle_render.pipeline_layout,
+    engine.renderer.pipeline_particle.pipeline_layout,
     {.VERTEX},
     0,
     size_of(SceneUniform),
@@ -93,10 +93,10 @@ render_particles :: proc(engine: ^Engine, command_buffer: vk.CommandBuffer) {
     command_buffer,
     0,
     1,
-    &engine.renderer.particle_compute.particle_buffer.buffer,
+    &engine.renderer.pipeline_particle_comp.particle_buffer.buffer,
     &offset,
   )
-  params := data_buffer_get(engine.renderer.particle_compute.params_buffer)
+  params := data_buffer_get(engine.renderer.pipeline_particle_comp.params_buffer)
   if params.particle_count > 0 {
     vk.CmdDraw(command_buffer, u32(params.particle_count), 1, 0, 0)
   }

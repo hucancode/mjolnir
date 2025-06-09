@@ -287,13 +287,13 @@ update :: proc(engine: ^Engine) -> bool {
     if !mesh_has_skin {
       continue
     }
-    frame := engine.renderer.current_frame_index
+    frame := engine.renderer.frame_index
     buffer := skinning.bone_buffers[frame]
     bone_matrices := slice.from_ptr(buffer.mapped, len(mesh_skin.bones))
     sample_clip(mesh, anim_inst.clip_handle, anim_inst.time, bone_matrices)
     //animation.pose_flush(&skinning.pose, buffer.mapped)
   }
-  update_emitters(&engine.renderer.particle_compute, delta_time)
+  update_emitters(&engine.renderer.pipeline_particle_comp, delta_time)
   last_mouse_pos := engine.input.mouse_pos
   engine.input.mouse_pos.x, engine.input.mouse_pos.y = glfw.GetCursorPos(
     engine.window,

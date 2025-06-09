@@ -297,7 +297,7 @@ render_shadow_pass :: proc(
 
 render_single_shadow :: proc(node: ^Node, cb_context: rawptr) -> bool {
   ctx := (^ShadowRenderContext)(cb_context)
-  frame := ctx.engine.renderer.current_frame_index
+  frame := ctx.engine.renderer.frame_index
   shadow_idx := ctx.shadow_idx
   shadow_layer := ctx.shadow_layer
   #partial switch data in node.attachment {

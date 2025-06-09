@@ -186,8 +186,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
       cast_shadow = true,
     },
   )
-  renderer_postprocess_add_tonemap(&engine.renderer, 1.5, 1.3)
-  renderer_postprocess_add_grayscale(&engine.renderer, 0.3)
+  renderer_tonemap(&engine.renderer, 1.5, 1.3)
+  renderer_grayscale(&engine.renderer, 0.3)
   emitter := mjolnir.Emitter{
       transform = geometry.Transform{
           position = {0, 3, 3},
@@ -204,7 +204,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
       size_end = 100.0,
       enabled = true,
   }
-  add_emitter(&engine.renderer.particle_compute, emitter)
+  add_emitter(&engine.renderer.pipeline_particle_comp, emitter)
 }
 
 update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {

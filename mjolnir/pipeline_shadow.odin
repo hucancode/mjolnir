@@ -33,9 +33,9 @@ SHADER_SHADOW_VERT :: #load("shader/shadow/vert.spv")
 
 pipeline_shadow_init :: proc(
   pipeline: ^PipelineShadow,
-  depth_format: vk.Format,
   camera_descriptor_set_layout: vk.DescriptorSetLayout,
   skinning_descriptor_set_layout: vk.DescriptorSetLayout,
+  depth_format: vk.Format = .D32_SFLOAT,
 ) -> vk.Result {
   set_layouts := [?]vk.DescriptorSetLayout {
     camera_descriptor_set_layout,
@@ -173,24 +173,6 @@ pipeline_shadow_init :: proc(
   return .SUCCESS
 }
 
-// Helper functions for initialization and cleanup
-setup_pipeline_shadow :: proc(
-  camera_descriptor_set_layout: vk.DescriptorSetLayout,
-  skinning_descriptor_set_layout: vk.DescriptorSetLayout,
-) -> (pipeline: PipelineShadow, ret: vk.Result) {
-  pipeline_shadow_init(
-    &pipeline,
-    .D32_SFLOAT,
-    camera_descriptor_set_layout,
-    skinning_descriptor_set_layout,
-  ) or_return
-  ret = .SUCCESS
-  return
-}
-
-destroy_pipeline_shadow :: proc(pipeline: ^PipelineShadow) {
-  pipeline_shadow_deinit(pipeline)
-}
 
 // Getter functions for accessing pipeline components
 pipeline_shadow_get_pipeline :: proc(pipeline: ^PipelineShadow, features: ShaderFeatureSet) -> vk.Pipeline {

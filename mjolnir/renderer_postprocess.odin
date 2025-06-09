@@ -10,7 +10,7 @@ render_postprocess_stack :: proc(
   output_view: vk.ImageView,
   extent: vk.Extent2D,
 ) {
-  pipeline := &renderer.postprocess_pipeline
+  pipeline := &renderer.pipeline_postprocess
 
   if len(pipeline.effect_stack) == 0 {
     // if no postprocess effect, just copy the input to output
@@ -21,8 +21,16 @@ render_postprocess_stack :: proc(
   // read from: m0, p0, p1, 0, 1, 0, input  = (i+1)%2+1  (i != 0)
   // write to:  p0, p1, p0, p1 ...  m1 output = (i%2)+1    (i !=n-1)
   postprocess_update_input(pipeline, 0, input_view)
-  postprocess_update_input(pipeline, 1, renderer_get_postprocess_pass_view(renderer, 0))
-  postprocess_update_input(pipeline, 2, renderer_get_postprocess_pass_view(renderer, 1))
+  postprocess_update_input(
+    pipeline,
+    1,
+    renderer_get_postprocess_pass_view(renderer, 0),
+  )
+  postprocess_update_input(
+    pipeline,
+    2,
+    renderer_get_postprocess_pass_view(renderer, 1),
+  )
 
   for effect, i in pipeline.effect_stack {
     is_first := i == 0
@@ -53,7 +61,7 @@ render_postprocess_stack :: proc(
       )
     }
 
-    color_attachment := vk.RenderingAttachmentInfoKHR{
+    color_attachment := vk.RenderingAttachmentInfoKHR {
       sType = .RENDERING_ATTACHMENT_INFO_KHR,
       imageView = output_view if is_last else renderer_get_postprocess_pass_view(renderer, dst_image_idx),
       imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
@@ -62,7 +70,7 @@ render_postprocess_stack :: proc(
       clearValue = vk.ClearValue{color = {float32 = BG_BLUE_GRAY}},
     }
 
-    render_info := vk.RenderingInfoKHR{
+    render_info := vk.RenderingInfoKHR {
       sType = .RENDERING_INFO_KHR,
       renderArea = vk.Rect2D{extent = extent},
       layerCount = 1,
@@ -72,13 +80,13 @@ render_postprocess_stack :: proc(
 
     vk.CmdBeginRenderingKHR(command_buffer, &render_info)
 
-    viewport := vk.Viewport{
+    viewport := vk.Viewport {
       width    = f32(extent.width),
       height   = f32(extent.height),
       minDepth = 0.0,
       maxDepth = 1.0,
     }
-    scissor := vk.Rect2D{
+    scissor := vk.Rect2D {
       extent = extent,
     }
     vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
@@ -102,7 +110,12 @@ render_postprocess_stack :: proc(
     )
 
     // Push constants for effects that need them
-    postprocess_push_effect_constants(command_buffer, pipeline, effect_type, effect)
+    postprocess_push_effect_constants(
+      command_buffer,
+      pipeline,
+      effect_type,
+      effect,
+    )
 
     vk.CmdDraw(command_buffer, 3, 1, 0, 0)
     vk.CmdEndRenderingKHR(command_buffer)
@@ -112,7 +125,7 @@ render_postprocess_stack :: proc(
 // Helper function to push effect constants
 postprocess_push_effect_constants :: proc(
   command_buffer: vk.CommandBuffer,
-  pipeline: ^PostprocessPipeline,
+  pipeline: ^PipelinePostProcess,
   effect_type: PostProcessEffectType,
   effect: PostprocessEffect,
 ) {
