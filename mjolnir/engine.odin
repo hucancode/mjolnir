@@ -26,6 +26,7 @@ UPDATE_FRAME_TIME_MILIS :: UPDATE_FRAME_TIME * 1_000.0
 MOUSE_SENSITIVITY_X :: 0.005
 MOUSE_SENSITIVITY_Y :: 0.005
 SCROLL_SENSITIVITY :: 0.5
+MAX_CONSECUTIVE_RENDER_ERROR_COUNT_ALLOWED :: 20
 
 Handle :: resource.Handle
 
@@ -86,6 +87,7 @@ Engine :: struct {
   mouse_drag_proc:       MouseDragProc,
   mouse_move_proc:       MouseMoveProc,
   mouse_scroll_proc:     MouseScrollProc,
+  render_error_count:          u32,
 }
 
 g_context: runtime.Context
@@ -352,6 +354,11 @@ run :: proc(engine: ^Engine, width: u32, height: u32, title: string) {
     }
     if res != .SUCCESS {
       log.errorf("Error during rendering", res)
+      engine.render_error_count += 1
+      if engine.render_error_count >= MAX_CONSECUTIVE_RENDER_ERROR_COUNT_ALLOWED {
+        log.errorf("Too many render errors, exiting...")
+        break
+      }
     }
     engine.last_frame_timestamp = time.now()
     // break
