@@ -261,8 +261,6 @@ setup_particle_render_pipeline :: proc(
     nil,
     &particle.render_descriptor_set_layout,
   ) or_return
-
-  // Pipeline layout (with push constant for SceneUniform)
   push_constant_range := vk.PushConstantRange {
     stageFlags = {.VERTEX},
     offset     = 0,
@@ -280,15 +278,12 @@ setup_particle_render_pipeline :: proc(
     nil,
     &particle.render_pipeline_layout,
   ) or_return
-
-  // Create particle texture, view, and sampler
   texture: Texture
   read_texture(&texture, "assets/black-circle.png") or_return
   texture_init(&texture) or_return
   particle.particle_texture = texture.buffer.image
   particle.particle_view = texture.buffer.view
   particle.particle_sampler = texture.sampler
-
   vk.AllocateDescriptorSets(
     g_device,
     &{
@@ -616,6 +611,5 @@ setup_particle_compute_pipeline :: proc(
     &particle.compute_pipeline,
   ) or_return
   vk.DestroyShaderModule(g_device, shader_module, nil)
-
   return .SUCCESS
 }

@@ -204,8 +204,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
       size_end = 100.0,
       enabled = true,
   }
-  log.info("creating particle emitter")
-  // add_emitter(&engine.renderer.particle.pipeline_comp, emitter)
   add_emitter(&engine.renderer.particle, emitter)
   log.info("setup complete")
 }

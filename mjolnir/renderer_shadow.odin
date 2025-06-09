@@ -48,10 +48,8 @@ renderer_shadow_init :: proc(
     nil,
     &shadow.pipeline_layout,
   ) or_return
-
   vert_module := create_shader_module(SHADER_SHADOW_VERT) or_return
   defer vk.DestroyShaderModule(g_device, vert_module, nil)
-
   input_assembly := vk.PipelineInputAssemblyStateCreateInfo {
     sType    = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
     topology = .TRIANGLE_LIST,
@@ -110,7 +108,6 @@ renderer_shadow_init :: proc(
   entries: [SHADOW_SHADER_VARIANT_COUNT][SHADOW_SHADER_OPTION_COUNT]vk.SpecializationMapEntry
   spec_infos: [SHADOW_SHADER_VARIANT_COUNT]vk.SpecializationInfo
   shader_stages: [SHADOW_SHADER_VARIANT_COUNT][1]vk.PipelineShaderStageCreateInfo
-
   for features in 0 ..< SHADOW_SHADER_VARIANT_COUNT {
     configs[features] = ShadowShaderConfig {
       is_skinned = (features & SHADOW_FEATURE_SKINNING) != 0,

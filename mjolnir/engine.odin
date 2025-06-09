@@ -192,16 +192,13 @@ build_renderer :: proc(engine: ^Engine) -> vk.Result {
     ) or_return
   engine.renderer.main.brdf_lut_handle, engine.renderer.main.brdf_lut =
     create_texture_from_path(engine, "assets/lut_ggx.png") or_return
-  env_layout := pipeline3d_get_environment_descriptor_set_layout(
-    &engine.renderer.main,
-  )
   vk.AllocateDescriptorSets(
     g_device,
     &{
       sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
       descriptorPool = g_descriptor_pool,
       descriptorSetCount = 1,
-      pSetLayouts = &env_layout,
+      pSetLayouts = &engine.renderer.main.environment_descriptor_set_layout,
     },
     &engine.renderer.main.environment_descriptor_set,
   ) or_return

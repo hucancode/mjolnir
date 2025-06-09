@@ -101,12 +101,10 @@ renderer_main_build_pbr_pipeline :: proc(
   configs: [SHADER_VARIANT_COUNT]ShaderConfig
   entries: [SHADER_VARIANT_COUNT][SHADER_OPTION_COUNT]vk.SpecializationMapEntry
   shader_stages_arr: [SHADER_VARIANT_COUNT][2]vk.PipelineShaderStageCreateInfo
-
   vert_module := create_shader_module(SHADER_UBER_VERT) or_return
   defer vk.DestroyShaderModule(g_device, vert_module, nil)
   frag_module := create_shader_module(SHADER_UBER_FRAG) or_return
   defer vk.DestroyShaderModule(g_device, frag_module, nil)
-
   dynamic_states_values := [?]vk.DynamicState{.VIEWPORT, .SCISSOR}
   dynamic_state_info := vk.PipelineDynamicStateCreateInfo {
     sType             = .PIPELINE_DYNAMIC_STATE_CREATE_INFO,
@@ -386,12 +384,10 @@ renderer_main_build_unlit_pipeline :: proc(
   configs: [UNLIT_SHADER_VARIANT_COUNT]ShaderConfig
   entries: [UNLIT_SHADER_VARIANT_COUNT][UNLIT_SHADER_OPTION_COUNT]vk.SpecializationMapEntry
   shader_stages_arr: [UNLIT_SHADER_VARIANT_COUNT][2]vk.PipelineShaderStageCreateInfo
-
   vert_module := create_shader_module(SHADER_UNLIT_VERT) or_return
   defer vk.DestroyShaderModule(g_device, vert_module, nil)
   frag_module := create_shader_module(SHADER_UNLIT_FRAG) or_return
   defer vk.DestroyShaderModule(g_device, frag_module, nil)
-
   dynamic_states_values := [?]vk.DynamicState{.VIEWPORT, .SCISSOR}
   dynamic_state_info := vk.PipelineDynamicStateCreateInfo {
     sType             = .PIPELINE_DYNAMIC_STATE_CREATE_INFO,
@@ -525,7 +521,7 @@ renderer_main_build_unlit_pipeline :: proc(
   return .SUCCESS
 }
 
-pipeline3d_get_pipeline :: proc(
+renderer_main_get_pipeline :: proc(
   main: ^RendererMain,
   material: ^Material,
 ) -> vk.Pipeline {
@@ -533,34 +529,6 @@ pipeline3d_get_pipeline :: proc(
     return main.pipelines[transmute(u32)material.features]
   }
   return main.unlit_pipelines[transmute(u32)material.features]
-}
-
-pipeline3d_get_layout :: proc(main: ^RendererMain) -> vk.PipelineLayout {
-  return main.pipeline_layout
-}
-
-pipeline3d_get_camera_descriptor_set_layout :: proc(
-  main: ^RendererMain,
-) -> vk.DescriptorSetLayout {
-  return main.camera_descriptor_set_layout
-}
-
-pipeline3d_get_environment_descriptor_set_layout :: proc(
-  main: ^RendererMain,
-) -> vk.DescriptorSetLayout {
-  return main.environment_descriptor_set_layout
-}
-
-pipeline3d_get_skinning_descriptor_set_layout :: proc(
-  main: ^RendererMain,
-) -> vk.DescriptorSetLayout {
-  return main.skinning_descriptor_set_layout
-}
-
-pipeline3d_get_texture_descriptor_set_layout :: proc(
-  main: ^RendererMain,
-) -> vk.DescriptorSetLayout {
-  return main.texture_descriptor_set_layout
 }
 
 render_main_pass :: proc(
@@ -680,8 +648,8 @@ render_single_node :: proc(node: ^Node, cb_context: rawptr) -> bool {
     if !geometry.frustum_test_aabb(&ctx.camera_frustum, world_aabb) {
       return true
     }
-    pipeline := pipeline3d_get_pipeline(&ctx.engine.renderer.main, material)
-    layout := pipeline3d_get_layout(&ctx.engine.renderer.main)
+    pipeline := renderer_main_get_pipeline(&ctx.engine.renderer.main, material)
+    layout := ctx.engine.renderer.main.pipeline_layout
     descriptor_sets := [?]vk.DescriptorSet {
       renderer_get_camera_descriptor_set(&ctx.engine.renderer), // set 0
       material.texture_descriptor_set, // set 1
@@ -817,7 +785,7 @@ render_to_texture :: proc(
   return .SUCCESS
 }
 
-pipeline3d_init :: proc(
+renderer_main_init :: proc(
   main: ^RendererMain,
   target_color_format: vk.Format = .B8G8R8A8_SRGB,
   target_depth_format: vk.Format = .D32_SFLOAT,
