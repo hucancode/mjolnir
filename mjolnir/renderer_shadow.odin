@@ -323,11 +323,11 @@ render_single_shadow :: proc(node: ^Node, cb_context: rawptr) -> bool {
       return true
     }
     features: ShaderFeatureSet
-    pipeline := g_shadow_pipelines[transmute(u32)features]
-    layout := g_shadow_pipeline_layout
+    pipeline := pipeline_shadow_get_pipeline(&ctx.engine.renderer.pipeline_shadow, features)
+    layout := pipeline_shadow_get_layout(&ctx.engine.renderer.pipeline_shadow)
     descriptor_sets: []vk.DescriptorSet
     if mesh_has_skin {
-      pipeline = g_shadow_pipelines[transmute(u32)ShaderFeatureSet{.SKINNING}]
+      pipeline = pipeline_shadow_get_pipeline(&ctx.engine.renderer.pipeline_shadow, {.SKINNING})
       descriptor_sets = {
         renderer_get_camera_descriptor_set(&ctx.engine.renderer), // set 0
         material.skinning_descriptor_sets[frame], // set 1

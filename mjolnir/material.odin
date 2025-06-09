@@ -48,7 +48,7 @@ material_init_descriptor_set_layout :: proc(
   // Create local variables to take address of
   texture_layout := texture_descriptor_set_layout
   skinning_layout := skinning_descriptor_set_layout
-  
+
   vk.AllocateDescriptorSets(
     g_device,
     &vk.DescriptorSetAllocateInfo {

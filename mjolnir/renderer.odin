@@ -64,7 +64,8 @@ Renderer :: struct {
   brdf_lut_handle:            Handle,
   brdf_lut:                   ^Texture,
   current_frame_index:        u32,
-  pipeline_3d:                Pipeline3D,  // Add 3D pipeline struct
+  pipeline_3d:                Pipeline3D,
+  pipeline_shadow:            PipelineShadow,  // Add shadow pipeline struct
   particle_render:            ParticleRenderPipeline,
   meshes:                     resource.Pool(Mesh),
   materials:                  resource.Pool(Material),
@@ -124,17 +125,30 @@ renderer_init :: proc(
     ) or_return
     vk.CreateFence(g_device, &fence_info, nil, &frame.fence) or_return
   }
-  
+
   // Initialize depth buffer
   self.depth_buffer = create_depth_image(
     swapchain_extent.width,
     swapchain_extent.height,
   ) or_return
-  
+
   // Initialize pipelines first so we have the descriptor set layouts
   self.pipeline_3d = setup_pipeline_3d() or_return // Initialize 3D pipeline
   self.particle_render = setup_particle_render_pipeline() or_return // Initialize particle render pipeline
   
+  // Initialize shadow pipeline with descriptor set layouts from 3D pipeline
+  self.pipeline_shadow = setup_pipeline_shadow(
+    pipeline3d_get_camera_descriptor_set_layout(&self.pipeline_3d),
+    pipeline3d_get_skinning_descriptor_set_layout(&self.pipeline_3d),
+  ) or_return
+
+  // Initialize postprocessing pipelines
+  build_postprocess_pipelines(
+    swapchain_format,
+    swapchain_extent.width,
+    swapchain_extent.height,
+  ) or_return
+
   // Now initialize frames with the camera descriptor set layout from 3D pipeline
   self.current_frame_index = 0
   for &frame in self.frames {
@@ -146,7 +160,7 @@ renderer_init :: proc(
       pipeline3d_get_camera_descriptor_set_layout(&self.pipeline_3d),
     ) or_return
   }
-  
+
   return .SUCCESS
 }
 
@@ -157,6 +171,8 @@ renderer_deinit :: proc(self: ^Renderer) {
   resource.pool_deinit(self.materials, material_deinit)
   destroy_particle_render_pipeline(&self.particle_render)
   destroy_pipeline_3d(&self.pipeline_3d) // Destroy 3D pipeline
+  destroy_pipeline_shadow(&self.pipeline_shadow) // Destroy shadow pipeline
+  postprocess_pipeline_deinit() // Cleanup postprocessing pipelines
   for &frame in self.frames do frame_deinit(&frame)
   // g_camera_descriptor_set_layout is now managed by pipeline_3d
 }

@@ -11,21 +11,28 @@ SHADOW_SHADER_VARIANT_COUNT :: 1 << SHADOW_SHADER_OPTION_COUNT
 ShadowShaderConfig :: struct {
   is_skinned: b32,
 }
-g_shadow_pipeline_layout: vk.PipelineLayout
-g_shadow_pipelines: [SHADOW_SHADER_VARIANT_COUNT]vk.Pipeline
 
-pipeline_shadow_deinit :: proc() {
-  for &pipeline in g_shadow_pipelines {
-    vk.DestroyPipeline(g_device, pipeline, nil)
-    pipeline = 0
+// Encapsulated shadow pipeline structure
+PipelineShadow :: struct {
+  pipeline_layout: vk.PipelineLayout,
+  pipelines:       [SHADOW_SHADER_VARIANT_COUNT]vk.Pipeline,
+}
+
+pipeline_shadow_deinit :: proc(pipeline: ^PipelineShadow) {
+  if pipeline == nil do return
+
+  for &p in pipeline.pipelines {
+    vk.DestroyPipeline(g_device, p, nil)
+    p = 0
   }
-  vk.DestroyPipelineLayout(g_device, g_shadow_pipeline_layout, nil)
-  g_shadow_pipeline_layout = 0
+  vk.DestroyPipelineLayout(g_device, pipeline.pipeline_layout, nil)
+  pipeline.pipeline_layout = 0
 }
 
 SHADER_SHADOW_VERT :: #load("shader/shadow/vert.spv")
 
-build_shadow_pipelines :: proc(
+pipeline_shadow_init :: proc(
+  pipeline: ^PipelineShadow,
   depth_format: vk.Format,
   camera_descriptor_set_layout: vk.DescriptorSetLayout,
   skinning_descriptor_set_layout: vk.DescriptorSetLayout,
@@ -49,8 +56,9 @@ build_shadow_pipelines :: proc(
     g_device,
     &pipeline_layout_info,
     nil,
-    &g_shadow_pipeline_layout,
+    &pipeline.pipeline_layout,
   ) or_return
+
   vert_module := create_shader_module(SHADER_SHADOW_VERT) or_return
   defer vk.DestroyShaderModule(g_device, vert_module, nil)
 
@@ -151,7 +159,7 @@ build_shadow_pipelines :: proc(
       pMultisampleState   = &multisampling,
       pDynamicState       = &dynamic_state_info,
       pDepthStencilState  = &depth_stencil_state,
-      layout              = g_shadow_pipeline_layout,
+      layout              = pipeline.pipeline_layout,
     }
   }
   vk.CreateGraphicsPipelines(
@@ -160,7 +168,35 @@ build_shadow_pipelines :: proc(
     len(pipeline_infos),
     raw_data(pipeline_infos[:]),
     nil,
-    raw_data(g_shadow_pipelines[:]),
+    raw_data(pipeline.pipelines[:]),
   ) or_return
   return .SUCCESS
+}
+
+// Helper functions for initialization and cleanup
+setup_pipeline_shadow :: proc(
+  camera_descriptor_set_layout: vk.DescriptorSetLayout,
+  skinning_descriptor_set_layout: vk.DescriptorSetLayout,
+) -> (pipeline: PipelineShadow, ret: vk.Result) {
+  pipeline_shadow_init(
+    &pipeline,
+    .D32_SFLOAT,
+    camera_descriptor_set_layout,
+    skinning_descriptor_set_layout,
+  ) or_return
+  ret = .SUCCESS
+  return
+}
+
+destroy_pipeline_shadow :: proc(pipeline: ^PipelineShadow) {
+  pipeline_shadow_deinit(pipeline)
+}
+
+// Getter functions for accessing pipeline components
+pipeline_shadow_get_pipeline :: proc(pipeline: ^PipelineShadow, features: ShaderFeatureSet) -> vk.Pipeline {
+  return pipeline.pipelines[transmute(u32)features]
+}
+
+pipeline_shadow_get_layout :: proc(pipeline: ^PipelineShadow) -> vk.PipelineLayout {
+  return pipeline.pipeline_layout
 }

@@ -131,27 +131,6 @@ init :: proc(
   // Remove old global pipeline calls - now handled in renderer_init
   init_scene(&engine.scene)
   build_renderer(engine) or_return
-  
-  // Initialize shadow pipelines after renderer is set up so we have descriptor set layouts
-  build_shadow_pipelines(
-    .D32_SFLOAT,
-    pipeline3d_get_camera_descriptor_set_layout(&engine.renderer.pipeline_3d),
-    pipeline3d_get_skinning_descriptor_set_layout(&engine.renderer.pipeline_3d),
-  ) or_return
-  if engine.swapchain.extent.width > 0 &&
-     engine.swapchain.extent.height > 0 {
-    w := f32(engine.swapchain.extent.width)
-    h := f32(engine.swapchain.extent.height)
-    #partial switch &proj in engine.scene.camera.projection {
-    case geometry.PerspectiveProjection:
-      proj.aspect_ratio = w / h
-    }
-  }
-  build_postprocess_pipelines(
-    engine.swapchain.format.format,
-    engine.swapchain.extent.width,
-    engine.swapchain.extent.height,
-  )
 
   ui_init(
     &engine.ui,
@@ -350,7 +329,6 @@ update :: proc(engine: ^Engine) -> bool {
 deinit :: proc(engine: ^Engine) {
   vk.DeviceWaitIdle(g_device)
   pipeline2d_deinit(&engine.ui.pipeline)
-  pipeline_shadow_deinit()
   deinit_scene(&engine.scene)
   renderer_deinit(&engine.renderer)
   swapchain_deinit(&engine.swapchain)  // Clean up engine's swapchain
