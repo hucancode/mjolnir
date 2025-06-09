@@ -7,6 +7,10 @@ import "geometry"
 import "resource"
 import vk "vendor:vulkan"
 
+RendererShadow :: struct {
+  pipeline: PipelineShadow,
+}
+
 render_shadow_pass :: proc(
   engine: ^Engine,
   light_uniform: ^SceneLightUniform,
@@ -324,14 +328,14 @@ render_single_shadow :: proc(node: ^Node, cb_context: rawptr) -> bool {
     }
     features: ShaderFeatureSet
     pipeline := pipeline_shadow_get_pipeline(
-      &ctx.engine.renderer.pipeline_shadow,
+      &ctx.engine.renderer.shadow.pipeline,
       features,
     )
-    layout := pipeline_shadow_get_layout(&ctx.engine.renderer.pipeline_shadow)
+    layout := pipeline_shadow_get_layout(&ctx.engine.renderer.shadow.pipeline)
     descriptor_sets: []vk.DescriptorSet
     if mesh_has_skin {
       pipeline = pipeline_shadow_get_pipeline(
-        &ctx.engine.renderer.pipeline_shadow,
+        &ctx.engine.renderer.shadow.pipeline,
         {.SKINNING},
       )
       descriptor_sets = {

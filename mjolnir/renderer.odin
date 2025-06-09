@@ -65,7 +65,7 @@ Renderer :: struct {
   brdf_lut:                   ^Texture,
   frame_index:                u32,
   pipeline_3d:                Pipeline3D,
-  pipeline_shadow:            PipelineShadow,
+  shadow:                     RendererShadow,
   particle:                   RendererParticle,
   postprocess:                RendererPostProcess,
   meshes:                     resource.Pool(Mesh),
@@ -129,7 +129,7 @@ renderer_init :: proc(
   // Initialize shadow pipeline with descriptor set layouts from 3D pipeline
   // TODO: Eliminate this dependency if possible
   pipeline_shadow_init(
-    &renderer.pipeline_shadow,
+    &renderer.shadow.pipeline,
     pipeline3d_get_camera_descriptor_set_layout(&renderer.pipeline_3d),
     pipeline3d_get_skinning_descriptor_set_layout(&renderer.pipeline_3d),
   ) or_return
@@ -160,7 +160,7 @@ renderer_deinit :: proc(renderer: ^Renderer) {
   resource.pool_deinit(renderer.materials, material_deinit)
   particle_render_pipeline_deinit(&renderer.particle.pipeline)
   pipeline3d_deinit(&renderer.pipeline_3d)
-  pipeline_shadow_deinit(&renderer.pipeline_shadow)
+  pipeline_shadow_deinit(&renderer.shadow.pipeline)
   pipeline_postprocess_deinit(&renderer.postprocess.pipeline)
   for &frame in renderer.frames do frame_deinit(&frame)
 }
