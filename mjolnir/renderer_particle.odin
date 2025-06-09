@@ -239,10 +239,142 @@ renderer_particle_deinit :: proc(particle: ^RendererParticle) {
   // (Assume data_buffer_deinit or similar is called elsewhere if needed)
 }
 
-setup_particle_render_pipeline :: proc(
-  particle: ^RendererParticle,
-) -> vk.Result {
-  bindings := [?]vk.DescriptorSetLayoutBinding {
+renderer_particle_init :: proc(particle: ^RendererParticle) -> vk.Result {
+  // Compute pipeline setup
+  particle.params_buffer = create_host_visible_buffer(
+    ParticleSystemParams,
+    1,
+    {.UNIFORM_BUFFER},
+  ) or_return
+  params := data_buffer_get(particle.params_buffer)
+  params.particle_count = 0
+  params.emitter_count = 0
+  params.delta_time = 0
+  params.padding = 0
+  particle.particle_buffer = create_host_visible_buffer(
+    Particle,
+    MAX_PARTICLES,
+    {.STORAGE_BUFFER, .VERTEX_BUFFER},
+  ) or_return
+  particle.emitter_buffer = create_host_visible_buffer(
+    Emitter,
+    MAX_EMITTERS,
+    {.STORAGE_BUFFER},
+  ) or_return
+  particle.free_particle_indices = make([dynamic]int, 0)
+  compute_bindings := [?]vk.DescriptorSetLayoutBinding {
+    {
+      binding = 0,
+      descriptorType = .UNIFORM_BUFFER,
+      descriptorCount = 1,
+      stageFlags = {.COMPUTE},
+    },
+    {
+      binding = 1,
+      descriptorType = .STORAGE_BUFFER,
+      descriptorCount = 1,
+      stageFlags = {.COMPUTE},
+    },
+    {
+      binding = 2,
+      descriptorType = .STORAGE_BUFFER,
+      descriptorCount = 1,
+      stageFlags = {.COMPUTE},
+    },
+  }
+  vk.CreateDescriptorSetLayout(
+    g_device,
+    &{
+      sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+      bindingCount = len(compute_bindings),
+      pBindings = raw_data(compute_bindings[:]),
+    },
+    nil,
+    &particle.compute_descriptor_set_layout,
+  ) or_return
+  vk.AllocateDescriptorSets(
+    g_device,
+    &{
+      sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
+      descriptorPool = g_descriptor_pool,
+      descriptorSetCount = 1,
+      pSetLayouts = &particle.compute_descriptor_set_layout,
+    },
+    &particle.compute_descriptor_set,
+  ) or_return
+  params_buffer_info := vk.DescriptorBufferInfo {
+    buffer = particle.params_buffer.buffer,
+    range  = vk.DeviceSize(particle.params_buffer.bytes_count),
+  }
+  particle_buffer_info := vk.DescriptorBufferInfo {
+    buffer = particle.particle_buffer.buffer,
+    range  = vk.DeviceSize(particle.particle_buffer.bytes_count),
+  }
+  emitter_buffer_info := vk.DescriptorBufferInfo {
+    buffer = particle.emitter_buffer.buffer,
+    range  = vk.DeviceSize(particle.emitter_buffer.bytes_count),
+  }
+  writes := [?]vk.WriteDescriptorSet {
+    {
+      sType = .WRITE_DESCRIPTOR_SET,
+      dstSet = particle.compute_descriptor_set,
+      dstBinding = 0,
+      descriptorType = .UNIFORM_BUFFER,
+      descriptorCount = 1,
+      pBufferInfo = &params_buffer_info,
+    },
+    {
+      sType = .WRITE_DESCRIPTOR_SET,
+      dstSet = particle.compute_descriptor_set,
+      dstBinding = 1,
+      descriptorType = .STORAGE_BUFFER,
+      descriptorCount = 1,
+      pBufferInfo = &particle_buffer_info,
+    },
+    {
+      sType = .WRITE_DESCRIPTOR_SET,
+      dstSet = particle.compute_descriptor_set,
+      dstBinding = 2,
+      descriptorType = .STORAGE_BUFFER,
+      descriptorCount = 1,
+      pBufferInfo = &emitter_buffer_info,
+    },
+  }
+  vk.UpdateDescriptorSets(g_device, len(writes), raw_data(writes[:]), 0, nil)
+  vk.CreatePipelineLayout(
+    g_device,
+    &{
+      sType = .PIPELINE_LAYOUT_CREATE_INFO,
+      setLayoutCount = 1,
+      pSetLayouts = &particle.compute_descriptor_set_layout,
+    },
+    nil,
+    &particle.compute_pipeline_layout,
+  ) or_return
+  shader_module := create_shader_module(
+    #load("shader/particle/compute.spv"),
+  ) or_return
+  defer vk.DestroyShaderModule(g_device, shader_module, nil)
+  compute_pipeline_info := vk.ComputePipelineCreateInfo {
+    sType = .COMPUTE_PIPELINE_CREATE_INFO,
+    stage = {
+      sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
+      stage = {.COMPUTE},
+      module = shader_module,
+      pName = "main",
+    },
+    layout = particle.compute_pipeline_layout,
+  }
+  vk.CreateComputePipelines(
+    g_device,
+    0,
+    1,
+    &compute_pipeline_info,
+    nil,
+    &particle.compute_pipeline,
+  ) or_return
+  // Render pipeline setup
+  render_bindings := [?]vk.DescriptorSetLayoutBinding {
     {
       binding = 0,
       descriptorType = .COMBINED_IMAGE_SAMPLER,
@@ -250,14 +382,13 @@ setup_particle_render_pipeline :: proc(
       stageFlags = {.FRAGMENT},
     },
   }
-  layout_info := vk.DescriptorSetLayoutCreateInfo {
-    sType        = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-    bindingCount = len(bindings),
-    pBindings    = raw_data(bindings[:]),
-  }
   vk.CreateDescriptorSetLayout(
     g_device,
-    &layout_info,
+    &{
+      sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+      bindingCount = len(render_bindings),
+      pBindings = raw_data(render_bindings[:]),
+    },
     nil,
     &particle.render_descriptor_set_layout,
   ) or_return
@@ -457,7 +588,7 @@ setup_particle_render_pipeline :: proc(
     pDynamicState       = &dynamic_state,
     layout              = particle.render_pipeline_layout,
     pNext               = &rendering_info,
-    pDepthStencilState  = &vk.PipelineDepthStencilStateCreateInfo {
+    pDepthStencilState  = &{
       sType = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
       depthTestEnable = true,
       depthWriteEnable = false,
@@ -478,138 +609,5 @@ setup_particle_render_pipeline :: proc(
 setup_particle_compute_pipeline :: proc(
   particle: ^RendererParticle,
 ) -> vk.Result {
-  particle.params_buffer = create_host_visible_buffer(
-    ParticleSystemParams,
-    1,
-    {.UNIFORM_BUFFER},
-  ) or_return
-  params := data_buffer_get(particle.params_buffer)
-  params.particle_count = 0
-  params.emitter_count = 0
-  params.delta_time = 0
-  params.padding = 0
-  particle.particle_buffer = create_host_visible_buffer(
-    Particle,
-    MAX_PARTICLES,
-    {.STORAGE_BUFFER, .VERTEX_BUFFER},
-  ) or_return
-  particle.emitter_buffer = create_host_visible_buffer(
-    Emitter,
-    MAX_EMITTERS,
-    {.STORAGE_BUFFER},
-  ) or_return
-  particle.free_particle_indices = make([dynamic]int, 0)
-  bindings := [?]vk.DescriptorSetLayoutBinding {
-    {
-      binding = 0,
-      descriptorType = .UNIFORM_BUFFER,
-      descriptorCount = 1,
-      stageFlags = {.COMPUTE},
-    },
-    {
-      binding = 1,
-      descriptorType = .STORAGE_BUFFER,
-      descriptorCount = 1,
-      stageFlags = {.COMPUTE},
-    },
-    {
-      binding = 2,
-      descriptorType = .STORAGE_BUFFER,
-      descriptorCount = 1,
-      stageFlags = {.COMPUTE},
-    },
-  }
-  layout_info := vk.DescriptorSetLayoutCreateInfo {
-    sType        = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-    bindingCount = len(bindings),
-    pBindings    = raw_data(bindings[:]),
-  }
-  vk.CreateDescriptorSetLayout(
-    g_device,
-    &layout_info,
-    nil,
-    &particle.compute_descriptor_set_layout,
-  ) or_return
-  vk.AllocateDescriptorSets(
-    g_device,
-    &{
-      sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
-      descriptorPool = g_descriptor_pool,
-      descriptorSetCount = 1,
-      pSetLayouts = &particle.compute_descriptor_set_layout,
-    },
-    &particle.compute_descriptor_set,
-  ) or_return
-  params_buffer_info := vk.DescriptorBufferInfo {
-    buffer = particle.params_buffer.buffer,
-    range  = vk.DeviceSize(particle.params_buffer.bytes_count),
-  }
-  particle_buffer_info := vk.DescriptorBufferInfo {
-    buffer = particle.particle_buffer.buffer,
-    range  = vk.DeviceSize(particle.particle_buffer.bytes_count),
-  }
-  emitter_buffer_info := vk.DescriptorBufferInfo {
-    buffer = particle.emitter_buffer.buffer,
-    range  = vk.DeviceSize(particle.emitter_buffer.bytes_count),
-  }
-  writes := [?]vk.WriteDescriptorSet {
-    {
-      sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = particle.compute_descriptor_set,
-      dstBinding = 0,
-      descriptorType = .UNIFORM_BUFFER,
-      descriptorCount = 1,
-      pBufferInfo = &params_buffer_info,
-    },
-    {
-      sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = particle.compute_descriptor_set,
-      dstBinding = 1,
-      descriptorType = .STORAGE_BUFFER,
-      descriptorCount = 1,
-      pBufferInfo = &particle_buffer_info,
-    },
-    {
-      sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = particle.compute_descriptor_set,
-      dstBinding = 2,
-      descriptorType = .STORAGE_BUFFER,
-      descriptorCount = 1,
-      pBufferInfo = &emitter_buffer_info,
-    },
-  }
-  vk.UpdateDescriptorSets(g_device, len(writes), raw_data(writes[:]), 0, nil)
-  vk.CreatePipelineLayout(
-    g_device,
-    &{
-      sType = .PIPELINE_LAYOUT_CREATE_INFO,
-      setLayoutCount = 1,
-      pSetLayouts = &particle.compute_descriptor_set_layout,
-    },
-    nil,
-    &particle.compute_pipeline_layout,
-  ) or_return
-  shader_module := create_shader_module(
-    #load("shader/particle/compute.spv"),
-  ) or_return
-  pipeline_info := vk.ComputePipelineCreateInfo {
-    sType = .COMPUTE_PIPELINE_CREATE_INFO,
-    stage = {
-      sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
-      stage = {.COMPUTE},
-      module = shader_module,
-      pName = "main",
-    },
-    layout = particle.compute_pipeline_layout,
-  }
-  vk.CreateComputePipelines(
-    g_device,
-    0,
-    1,
-    &pipeline_info,
-    nil,
-    &particle.compute_pipeline,
-  ) or_return
-  vk.DestroyShaderModule(g_device, shader_module, nil)
   return .SUCCESS
 }

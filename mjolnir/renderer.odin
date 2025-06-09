@@ -83,7 +83,7 @@ renderer_init :: proc(
   log.infof("All resource pools initialized successfully")
   renderer.main.depth_buffer = create_depth_image(width, height) or_return
   renderer_main_init(&renderer.main, color_format, depth_format) or_return
-  setup_particle_render_pipeline(&renderer.particle) or_return
+  renderer_particle_init(&renderer.particle) or_return
   setup_particle_compute_pipeline(&renderer.particle) or_return
   renderer_shadow_init(
     &renderer.shadow,
