@@ -6,8 +6,13 @@ import "core:time"
 import "geometry"
 import vk "vendor:vulkan"
 
+RendererParticle :: struct {
+  pipeline:     PipelineParticle,
+  pipeline_comp: PipelineParticleCompute,
+}
+
 compute_particles :: proc(
-  renderer: ^Renderer,
+  renderer: ^RendererParticle,
   command_buffer: vk.CommandBuffer,
 ) {
   // log.info(
@@ -17,15 +22,15 @@ compute_particles :: proc(
   vk.CmdBindPipeline(
     command_buffer,
     .COMPUTE,
-    renderer.pipeline_particle_comp.pipeline,
+    renderer.pipeline_comp.pipeline,
   )
   vk.CmdBindDescriptorSets(
     command_buffer,
     .COMPUTE,
-    renderer.pipeline_particle_comp.pipeline_layout,
+    renderer.pipeline_comp.pipeline_layout,
     0,
     1,
-    &renderer.pipeline_particle_comp.descriptor_set,
+    &renderer.pipeline_comp.descriptor_set,
     0,
     nil,
   )
@@ -55,7 +60,7 @@ compute_particles :: proc(
   )
 }
 
-render_particles :: proc(engine: ^Engine, command_buffer: vk.CommandBuffer) {
+render_particles :: proc(renderer: ^RendererParticle, camera: geometry.Camera, command_buffer: vk.CommandBuffer) {
   // log.info(
   //   "binding particle render pipeline",
   //   engine.renderer.pipeline_particle.pipeline,
@@ -63,25 +68,25 @@ render_particles :: proc(engine: ^Engine, command_buffer: vk.CommandBuffer) {
   vk.CmdBindPipeline(
     command_buffer,
     .GRAPHICS,
-    engine.renderer.pipeline_particle.pipeline,
+    renderer.pipeline.pipeline,
   )
   vk.CmdBindDescriptorSets(
     command_buffer,
     .GRAPHICS,
-    engine.renderer.pipeline_particle.pipeline_layout,
+    renderer.pipeline.pipeline_layout,
     0,
     1,
-    &engine.renderer.pipeline_particle.descriptor_set,
+    &renderer.pipeline.descriptor_set,
     0,
     nil,
   )
   uniform := SceneUniform {
-    view       = geometry.calculate_view_matrix(&engine.scene.camera),
-    projection = geometry.calculate_projection_matrix(&engine.scene.camera),
+    view       = geometry.calculate_view_matrix(camera),
+    projection = geometry.calculate_projection_matrix(camera),
   }
   vk.CmdPushConstants(
     command_buffer,
-    engine.renderer.pipeline_particle.pipeline_layout,
+    renderer.pipeline.pipeline_layout,
     {.VERTEX},
     0,
     size_of(SceneUniform),
@@ -92,11 +97,11 @@ render_particles :: proc(engine: ^Engine, command_buffer: vk.CommandBuffer) {
     command_buffer,
     0,
     1,
-    &engine.renderer.pipeline_particle_comp.particle_buffer.buffer,
+    &renderer.pipeline_comp.particle_buffer.buffer,
     &offset,
   )
   params := data_buffer_get(
-    engine.renderer.pipeline_particle_comp.params_buffer,
+    renderer.pipeline_comp.params_buffer,
   )
   vk.CmdDraw(command_buffer, u32(params.particle_count), 1, 0, 0)
 }

@@ -15,9 +15,9 @@ render_main_pass :: proc(
   camera_frustum: geometry.Frustum,
   swapchain_extent: vk.Extent2D, // New parameter for swapchain extent
 ) -> vk.Result {
-  particles := engine.renderer.pipeline_particle_comp.particle_buffer.mapped
+  particles := engine.renderer.particle.pipeline_comp.particle_buffer.mapped
   // Run particle compute pass before starting rendering
-  compute_particles(&engine.renderer, command_buffer)
+  compute_particles(&engine.renderer.particle, command_buffer)
   // Barrier to ensure compute shader writes are visible to the vertex shader
   particle_buffer_barrier := vk.BufferMemoryBarrier {
     sType               = .BUFFER_MEMORY_BARRIER,
@@ -25,7 +25,7 @@ render_main_pass :: proc(
     dstAccessMask       = {.VERTEX_ATTRIBUTE_READ},
     srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
     dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-    buffer              = engine.renderer.pipeline_particle_comp.particle_buffer.buffer,
+    buffer              = engine.renderer.particle.pipeline_comp.particle_buffer.buffer,
     size                = vk.DeviceSize(vk.WHOLE_SIZE),
   }
   vk.CmdPipelineBarrier(
@@ -88,7 +88,7 @@ render_main_pass :: proc(
   if !traverse_scene(&engine.scene, &render_meshes_ctx, render_single_node) {
     log.errorf("[RENDER] Error during scene mesh rendering")
   }
-  render_particles(engine, command_buffer)
+  render_particles(&engine.renderer.particle, engine.scene.camera, command_buffer)
   if mu.window(&engine.ui.ctx, "Inspector", {40, 40, 300, 150}, {.NO_CLOSE}) {
     mu.label(
       &engine.ui.ctx,
@@ -196,10 +196,10 @@ render_to_texture :: proc(
   color_view: vk.ImageView,
   depth_view: vk.ImageView,
   extent: vk.Extent2D,
-  camera: ^geometry.Camera = nil,
+  camera: Maybe(geometry.Camera) = nil,
 ) -> vk.Result {
   command_buffer := renderer_get_command_buffer(&engine.renderer)
-  render_camera := camera if camera != nil else &engine.scene.camera
+  render_camera := camera.? or_else engine.scene.camera
   scene_uniform := SceneUniform {
     view       = geometry.calculate_view_matrix(render_camera),
     projection = geometry.calculate_projection_matrix(render_camera),

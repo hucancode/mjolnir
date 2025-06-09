@@ -66,12 +66,11 @@ Renderer :: struct {
   frame_index:                u32,
   pipeline_3d:                Pipeline3D,
   pipeline_shadow:            PipelineShadow,
-  pipeline_particle:          PipelineParticle,
+  particle:                   RendererParticle,
   postprocess:                RendererPostProcess,
   meshes:                     resource.Pool(Mesh),
   materials:                  resource.Pool(Material),
   textures:                   resource.Pool(Texture),
-  pipeline_particle_comp:     PipelineParticleCompute,
 }
 
 renderer_init :: proc(
@@ -125,7 +124,8 @@ renderer_init :: proc(
   }
   renderer.depth_buffer = create_depth_image(width, height) or_return
   pipeline3d_init(&renderer.pipeline_3d) or_return
-  setup_particle_render_pipeline(&renderer.pipeline_particle) or_return
+  setup_particle_render_pipeline(&renderer.particle.pipeline) or_return
+  setup_particle_compute_pipeline(&renderer.particle.pipeline_comp) or_return
   // Initialize shadow pipeline with descriptor set layouts from 3D pipeline
   // TODO: Eliminate this dependency if possible
   pipeline_shadow_init(
@@ -133,7 +133,6 @@ renderer_init :: proc(
     pipeline3d_get_camera_descriptor_set_layout(&renderer.pipeline_3d),
     pipeline3d_get_skinning_descriptor_set_layout(&renderer.pipeline_3d),
   ) or_return
-  setup_particle_compute_pipeline(&renderer.pipeline_particle_comp) or_return
   // Initialize postprocess
   renderer_postprocess_init(
     &renderer.postprocess,
@@ -159,7 +158,7 @@ renderer_deinit :: proc(renderer: ^Renderer) {
   resource.pool_deinit(renderer.textures, texture_deinit)
   resource.pool_deinit(renderer.meshes, mesh_deinit)
   resource.pool_deinit(renderer.materials, material_deinit)
-  particle_render_pipeline_deinit(&renderer.pipeline_particle)
+  particle_render_pipeline_deinit(&renderer.particle.pipeline)
   pipeline3d_deinit(&renderer.pipeline_3d)
   pipeline_shadow_deinit(&renderer.pipeline_shadow)
   pipeline_postprocess_deinit(&renderer.postprocess.pipeline)
@@ -409,12 +408,12 @@ render :: proc(engine: ^Engine) -> vk.Result {
   vk.BeginCommandBuffer(command_buffer, &begin_info) or_return
   elapsed_seconds := time.duration_seconds(time.since(engine.start_timestamp))
   scene_uniform := SceneUniform {
-    view       = geometry.calculate_view_matrix(&engine.scene.camera),
-    projection = geometry.calculate_projection_matrix(&engine.scene.camera),
+    view       = geometry.calculate_view_matrix(engine.scene.camera),
+    projection = geometry.calculate_projection_matrix(engine.scene.camera),
     time       = f32(elapsed_seconds),
   }
   light_uniform: SceneLightUniform
-  camera_frustum := geometry.camera_make_frustum(&engine.scene.camera)
+  camera_frustum := geometry.camera_make_frustum(engine.scene.camera)
   collect_ctx := CollectLightsContext {
     engine        = engine,
     light_uniform = &light_uniform,

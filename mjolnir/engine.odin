@@ -277,7 +277,7 @@ update :: proc(engine: ^Engine) -> bool {
     sample_clip(mesh, anim_inst.clip_handle, anim_inst.time, bone_matrices)
     //animation.pose_flush(&skinning.pose, buffer.mapped)
   }
-  update_emitters(&engine.renderer.pipeline_particle_comp, delta_time)
+  update_emitters(&engine.renderer.particle.pipeline_comp, delta_time)
   last_mouse_pos := engine.input.mouse_pos
   engine.input.mouse_pos.x, engine.input.mouse_pos.y = glfw.GetCursorPos(
     engine.window,
@@ -325,7 +325,7 @@ deinit :: proc(engine: ^Engine) {
 recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
   swapchain_recreate(&engine.swapchain, engine.window) or_return
   new_aspect_ratio := f32(engine.swapchain.extent.width) / f32(engine.swapchain.extent.height)
-  geometry.camera_update_aspect_ratio(&engine.scene.camera, new_aspect_ratio)
+  geometry.camera_update_aspect_ratio(engine.scene.camera, new_aspect_ratio)
   renderer_recreate_images(
     &engine.renderer,
     engine.swapchain.format.format,

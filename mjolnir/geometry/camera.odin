@@ -205,7 +205,7 @@ update_orbit_position :: proc(camera: ^Camera) {
 }
 
 calculate_projection_matrix :: proc(
-  camera: ^Camera,
+  camera: Camera,
 ) -> linalg.Matrix4f32 {
   switch proj in camera.projection {
   case PerspectiveProjection:
@@ -229,7 +229,7 @@ calculate_projection_matrix :: proc(
   }
 }
 
-calculate_view_matrix :: proc(camera: ^Camera) -> linalg.Matrix4f32 {
+calculate_view_matrix :: proc(camera: Camera) -> linalg.Matrix4f32 {
   switch movement_data in camera.movement_data {
   case CameraOrbitMovement:
     return linalg.matrix4_look_at(
@@ -247,34 +247,34 @@ calculate_view_matrix :: proc(camera: ^Camera) -> linalg.Matrix4f32 {
   }
 }
 
-camera_forward :: proc(camera: ^Camera) -> linalg.Vector3f32 {
+camera_forward :: proc(camera: Camera) -> linalg.Vector3f32 {
   return linalg.quaternion_mul_vector3(
     camera.rotation,
     linalg.VECTOR3F32_Z_AXIS,
   )
 }
 
-camera_right :: proc(camera: ^Camera) -> linalg.Vector3f32 {
+camera_right :: proc(camera: Camera) -> linalg.Vector3f32 {
   return linalg.quaternion_mul_vector3(
     camera.rotation,
     linalg.VECTOR3F32_X_AXIS,
   )
 }
 
-camera_up :: proc(camera: ^Camera) -> linalg.Vector3f32 {
+camera_up :: proc(camera: Camera) -> linalg.Vector3f32 {
   return linalg.quaternion_mul_vector3(
     camera.rotation,
     linalg.VECTOR3F32_Y_AXIS,
   )
 }
 
-camera_make_frustum :: proc(camera: ^Camera) -> Frustum {
+camera_make_frustum :: proc(camera: Camera) -> Frustum {
   view_matrix := calculate_view_matrix(camera)
   proj_matrix := calculate_projection_matrix(camera)
   return make_frustum(proj_matrix * view_matrix)
 }
 
-camera_update_aspect_ratio :: proc(camera: ^Camera, new_aspect_ratio: f32) {
+camera_update_aspect_ratio :: proc(camera: Camera, new_aspect_ratio: f32) {
   switch &proj in camera.projection {
   case PerspectiveProjection:
     proj.aspect_ratio = new_aspect_ratio
