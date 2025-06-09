@@ -55,7 +55,7 @@ RendererMain :: struct {
 }
 
 renderer_main_build_pbr_pipeline :: proc(
-  main: ^RendererMain,
+  self: ^RendererMain,
   target_color_format: vk.Format,
   target_depth_format: vk.Format,
 ) -> vk.Result {
@@ -94,7 +94,7 @@ renderer_main_build_pbr_pipeline :: proc(
     g_device,
     &layout_info_main,
     nil,
-    &main.camera_descriptor_set_layout,
+    &self.camera_descriptor_set_layout,
   ) or_return
   pipeline_infos: [SHADER_VARIANT_COUNT]vk.GraphicsPipelineCreateInfo
   spec_infos: [SHADER_VARIANT_COUNT]vk.SpecializationInfo
@@ -211,7 +211,7 @@ renderer_main_build_pbr_pipeline :: proc(
       pBindings = raw_data(texture_bindings),
     },
     nil,
-    &main.texture_descriptor_set_layout,
+    &self.texture_descriptor_set_layout,
   ) or_return
   skinning_bindings := []vk.DescriptorSetLayoutBinding {
     {
@@ -229,7 +229,7 @@ renderer_main_build_pbr_pipeline :: proc(
       pBindings = raw_data(skinning_bindings),
     },
     nil,
-    &main.skinning_descriptor_set_layout,
+    &self.skinning_descriptor_set_layout,
   ) or_return
   environment_bindings := []vk.DescriptorSetLayoutBinding {
     {
@@ -253,13 +253,13 @@ renderer_main_build_pbr_pipeline :: proc(
       pBindings = raw_data(environment_bindings),
     },
     nil,
-    &main.environment_descriptor_set_layout,
+    &self.environment_descriptor_set_layout,
   ) or_return
   set_layouts := [?]vk.DescriptorSetLayout {
-    main.camera_descriptor_set_layout, // set = 0
-    main.texture_descriptor_set_layout, // set = 1
-    main.skinning_descriptor_set_layout, // set = 2
-    main.environment_descriptor_set_layout, // set = 3
+    self.camera_descriptor_set_layout, // set = 0
+    self.texture_descriptor_set_layout, // set = 1
+    self.skinning_descriptor_set_layout, // set = 2
+    self.environment_descriptor_set_layout, // set = 3
   }
   push_constant_range := vk.PushConstantRange {
     stageFlags = {.VERTEX},
@@ -275,7 +275,7 @@ renderer_main_build_pbr_pipeline :: proc(
       pPushConstantRanges = &push_constant_range,
     },
     nil,
-    &main.pipeline_layout,
+    &self.pipeline_layout,
   ) or_return
   for mask in 0 ..< SHADER_VARIANT_COUNT {
     features := transmute(ShaderFeatureSet)mask
@@ -360,7 +360,7 @@ renderer_main_build_pbr_pipeline :: proc(
       pColorBlendState    = &blending,
       pDynamicState       = &dynamic_state_info,
       pDepthStencilState  = &depth_stencil_state,
-      layout              = main.pipeline_layout,
+      layout              = self.pipeline_layout,
     }
   }
   vk.CreateGraphicsPipelines(
@@ -369,13 +369,13 @@ renderer_main_build_pbr_pipeline :: proc(
     len(pipeline_infos),
     raw_data(pipeline_infos[:]),
     nil,
-    raw_data(main.pipelines[:]),
+    raw_data(self.pipelines[:]),
   ) or_return
   return .SUCCESS
 }
 
 renderer_main_build_unlit_pipeline :: proc(
-  main: ^RendererMain,
+  self: ^RendererMain,
   target_color_format: vk.Format,
   target_depth_format: vk.Format,
 ) -> vk.Result {
@@ -507,7 +507,7 @@ renderer_main_build_unlit_pipeline :: proc(
       pColorBlendState    = &blending,
       pDynamicState       = &dynamic_state_info,
       pDepthStencilState  = &depth_stencil_state,
-      layout              = main.pipeline_layout,
+      layout              = self.pipeline_layout,
     }
   }
   vk.CreateGraphicsPipelines(
@@ -516,19 +516,19 @@ renderer_main_build_unlit_pipeline :: proc(
     len(pipeline_infos),
     raw_data(pipeline_infos[:]),
     nil,
-    raw_data(main.unlit_pipelines[:]),
+    raw_data(self.unlit_pipelines[:]),
   ) or_return
   return .SUCCESS
 }
 
 renderer_main_get_pipeline :: proc(
-  main: ^RendererMain,
+  self: ^RendererMain,
   material: ^Material,
 ) -> vk.Pipeline {
   if material.is_lit {
-    return main.pipelines[transmute(u32)material.features]
+    return self.pipelines[transmute(u32)material.features]
   }
-  return main.unlit_pipelines[transmute(u32)material.features]
+  return self.unlit_pipelines[transmute(u32)material.features]
 }
 
 render_main_pass :: proc(
@@ -786,49 +786,45 @@ render_to_texture :: proc(
 }
 
 renderer_main_init :: proc(
-  main: ^RendererMain,
+  self: ^RendererMain,
   target_color_format: vk.Format = .B8G8R8A8_SRGB,
   target_depth_format: vk.Format = .D32_SFLOAT,
 ) -> vk.Result {
   renderer_main_build_pbr_pipeline(
-    main,
+    self,
     target_color_format,
     target_depth_format,
   ) or_return
   renderer_main_build_unlit_pipeline(
-    main,
+    self,
     target_color_format,
     target_depth_format,
   ) or_return
   return .SUCCESS
 }
 
-renderer_main_deinit :: proc(main: ^RendererMain) {
-  vk.DestroyPipelineLayout(g_device, main.pipeline_layout, nil)
+renderer_main_deinit :: proc(self: ^RendererMain) {
+  vk.DestroyPipelineLayout(g_device, self.pipeline_layout, nil)
   vk.DestroyDescriptorSetLayout(
     g_device,
-    main.camera_descriptor_set_layout,
+    self.camera_descriptor_set_layout,
     nil,
   )
   vk.DestroyDescriptorSetLayout(
     g_device,
-    main.environment_descriptor_set_layout,
+    self.environment_descriptor_set_layout,
     nil,
   )
   vk.DestroyDescriptorSetLayout(
     g_device,
-    main.texture_descriptor_set_layout,
+    self.texture_descriptor_set_layout,
     nil,
   )
   vk.DestroyDescriptorSetLayout(
     g_device,
-    main.skinning_descriptor_set_layout,
+    self.skinning_descriptor_set_layout,
     nil,
   )
-  for pipeline in main.pipelines {
-    vk.DestroyPipeline(g_device, pipeline, nil)
-  }
-  for pipeline in main.unlit_pipelines {
-    vk.DestroyPipeline(g_device, pipeline, nil)
-  }
+  for p in self.pipelines do vk.DestroyPipeline(g_device, p, nil)
+  for p in self.unlit_pipelines do vk.DestroyPipeline(g_device, p, nil)
 }

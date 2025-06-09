@@ -68,76 +68,75 @@ Renderer :: struct {
 }
 
 renderer_init :: proc(
-  renderer: ^Renderer,
+  self: ^Renderer,
   width: u32,
   height: u32,
   color_format: vk.Format,
   depth_format: vk.Format,
 ) -> vk.Result {
   log.infof("Initializing mesh pool... ")
-  resource.pool_init(&renderer.meshes)
+  resource.pool_init(&self.meshes)
   log.infof("Initializing materials pool... ")
-  resource.pool_init(&renderer.materials)
+  resource.pool_init(&self.materials)
   log.infof("Initializing textures pool... ")
-  resource.pool_init(&renderer.textures)
+  resource.pool_init(&self.textures)
   log.infof("All resource pools initialized successfully")
-  renderer.main.depth_buffer = create_depth_image(width, height) or_return
-  renderer_main_init(&renderer.main, color_format, depth_format) or_return
-  renderer_particle_init(&renderer.particle) or_return
-  setup_particle_compute_pipeline(&renderer.particle) or_return
+  self.main.depth_buffer = create_depth_image(width, height) or_return
+  renderer_main_init(&self.main, color_format, depth_format) or_return
+  renderer_particle_init(&self.particle) or_return
   renderer_shadow_init(
-    &renderer.shadow,
-    renderer.main.camera_descriptor_set_layout,
-    renderer.main.skinning_descriptor_set_layout,
+    &self.shadow,
+    self.main.camera_descriptor_set_layout,
+    self.main.skinning_descriptor_set_layout,
     depth_format,
   ) or_return
   renderer_postprocess_init(
-    &renderer.postprocess,
+    &self.postprocess,
     color_format,
     width,
     height,
   ) or_return
-  renderer.frame_index = 0
-  for &frame in renderer.frames {
+  self.frame_index = 0
+  for &frame in self.frames {
     frame_init(
       &frame,
       color_format,
       width,
       height,
       // TODO: Eliminate this dependency if possible
-      renderer.main.camera_descriptor_set_layout,
+      self.main.camera_descriptor_set_layout,
     ) or_return
   }
   return .SUCCESS
 }
 
-renderer_deinit :: proc(renderer: ^Renderer) {
+renderer_deinit :: proc(self: ^Renderer) {
   vk.DeviceWaitIdle(g_device)
-  resource.pool_deinit(renderer.textures, texture_deinit)
-  resource.pool_deinit(renderer.meshes, mesh_deinit)
-  resource.pool_deinit(renderer.materials, material_deinit)
-  renderer_main_deinit(&renderer.main)
-  renderer_shadow_deinit(&renderer.shadow)
-  renderer_postprocess_deinit(&renderer.postprocess)
-  for &frame in renderer.frames do frame_deinit(&frame)
-  renderer_particle_deinit(&renderer.particle)
+  resource.pool_deinit(self.textures, texture_deinit)
+  resource.pool_deinit(self.meshes, mesh_deinit)
+  resource.pool_deinit(self.materials, material_deinit)
+  renderer_main_deinit(&self.main)
+  renderer_shadow_deinit(&self.shadow)
+  renderer_postprocess_deinit(&self.postprocess)
+  renderer_particle_deinit(&self.particle)
+  for &frame in self.frames do frame_deinit(&frame)
 }
 
 renderer_recreate_images :: proc(
-  renderer: ^Renderer,
+  self: ^Renderer,
   new_format: vk.Format,
   new_extent: vk.Extent2D,
 ) -> vk.Result {
   vk.DeviceWaitIdle(g_device)
-  image_buffer_deinit(&renderer.main.depth_buffer)
-  for &frame in renderer.frames {
+  image_buffer_deinit(&self.main.depth_buffer)
+  for &frame in self.frames {
     frame_deinit_images(&frame)
   }
-  renderer.main.depth_buffer = create_depth_image(
+  self.main.depth_buffer = create_depth_image(
     new_extent.width,
     new_extent.height,
   ) or_return
-  for &frame in renderer.frames {
+  for &frame in self.frames {
     frame_recreate_images(
       &frame,
       new_format,
@@ -148,153 +147,152 @@ renderer_recreate_images :: proc(
   return .SUCCESS
 }
 
-renderer_get_in_flight_fence :: proc(renderer: ^Renderer) -> vk.Fence {
-  return renderer.frames[renderer.frame_index].fence
+renderer_get_in_flight_fence :: proc(self: ^Renderer) -> vk.Fence {
+  return self.frames[self.frame_index].fence
 }
 
 renderer_get_image_available_semaphore :: proc(
-  renderer: ^Renderer,
+  self: ^Renderer,
 ) -> vk.Semaphore {
-  return renderer.frames[renderer.frame_index].image_available_semaphore
+  return self.frames[self.frame_index].image_available_semaphore
 }
 
 renderer_get_render_finished_semaphore :: proc(
-  renderer: ^Renderer,
+  self: ^Renderer,
 ) -> vk.Semaphore {
-  return renderer.frames[renderer.frame_index].render_finished_semaphore
+  return self.frames[self.frame_index].render_finished_semaphore
 }
 
-renderer_get_command_buffer :: proc(renderer: ^Renderer) -> vk.CommandBuffer {
-  if renderer == nil {
-    log.errorf("Error: Renderer is nil in get_command_buffer_renderer")
+renderer_get_command_buffer :: proc(self: ^Renderer) -> vk.CommandBuffer {
+  if self == nil {
     return vk.CommandBuffer{}
   }
-  if renderer.frame_index >= len(renderer.frames) {
+  if self.frame_index >= len(self.frames) {
     log.errorf(
       "Error: Invalid frame index",
-      renderer.frame_index,
+      self.frame_index,
       "vs",
-      len(renderer.frames),
+      len(self.frames),
     )
     return vk.CommandBuffer{}
   }
-  cmd_buffer := renderer.frames[renderer.frame_index].command_buffer
+  cmd_buffer := self.frames[self.frame_index].command_buffer
   if cmd_buffer == nil {
-    log.errorf("Error: Command buffer is nil for frame", renderer.frame_index)
+    log.errorf("Error: Command buffer is nil for frame", self.frame_index)
     return vk.CommandBuffer{}
   }
   return cmd_buffer
 }
 
-renderer_get_main_pass_image :: proc(renderer: ^Renderer) -> vk.Image {
-  return renderer.frames[renderer.frame_index].main_pass_image.image
+renderer_get_main_pass_image :: proc(self: ^Renderer) -> vk.Image {
+  return self.frames[self.frame_index].main_pass_image.image
 }
 
-renderer_get_main_pass_view :: proc(renderer: ^Renderer) -> vk.ImageView {
-  return renderer.frames[renderer.frame_index].main_pass_image.view
+renderer_get_main_pass_view :: proc(self: ^Renderer) -> vk.ImageView {
+  return self.frames[self.frame_index].main_pass_image.view
 }
 
 renderer_get_postprocess_pass_image :: proc(
-  renderer: ^Renderer,
+  self: ^Renderer,
   i: int,
 ) -> vk.Image {
-  return renderer.frames[renderer.frame_index].postprocess_images[i].image
+  return self.frames[self.frame_index].postprocess_images[i].image
 }
 
 renderer_get_postprocess_pass_view :: proc(
-  renderer: ^Renderer,
+  self: ^Renderer,
   i: int,
 ) -> vk.ImageView {
-  return renderer.frames[renderer.frame_index].postprocess_images[i].view
+  return self.frames[self.frame_index].postprocess_images[i].view
 }
 
 renderer_get_camera_uniform :: proc(
-  renderer: ^Renderer,
+  self: ^Renderer,
 ) -> ^DataBuffer(SceneUniform) {
-  return &renderer.frames[renderer.frame_index].camera_uniform
+  return &self.frames[self.frame_index].camera_uniform
 }
 
 renderer_get_light_uniform :: proc(
-  renderer: ^Renderer,
+  self: ^Renderer,
 ) -> ^DataBuffer(SceneLightUniform) {
-  return &renderer.frames[renderer.frame_index].light_uniform
+  return &self.frames[self.frame_index].light_uniform
 }
 
 renderer_get_shadow_map :: proc(
-  renderer: ^Renderer,
+  self: ^Renderer,
   light_idx: int,
 ) -> ^DepthTexture {
-  return &renderer.frames[renderer.frame_index].shadow_maps[light_idx]
+  return &self.frames[self.frame_index].shadow_maps[light_idx]
 }
 
 renderer_get_cube_shadow_map :: proc(
-  renderer: ^Renderer,
+  self: ^Renderer,
   light_idx: int,
 ) -> ^CubeDepthTexture {
-  return &renderer.frames[renderer.frame_index].cube_shadow_maps[light_idx]
+  return &self.frames[self.frame_index].cube_shadow_maps[light_idx]
 }
 
 renderer_get_camera_descriptor_set :: proc(
-  renderer: ^Renderer,
+  self: ^Renderer,
 ) -> vk.DescriptorSet {
-  return renderer.frames[renderer.frame_index].camera_descriptor_set
+  return self.frames[self.frame_index].camera_descriptor_set
 }
 
 renderer_get_shadow_map_descriptor_set :: proc(
-  renderer: ^Renderer,
+  self: ^Renderer,
 ) -> vk.DescriptorSet {
-  return renderer.frames[renderer.frame_index].shadow_map_descriptor_set
+  return self.frames[self.frame_index].shadow_map_descriptor_set
 }
 
 renderer_get_cube_shadow_map_descriptor_set :: proc(
-  renderer: ^Renderer,
+  self: ^Renderer,
 ) -> vk.DescriptorSet {
-  return renderer.frames[renderer.frame_index].cube_shadow_map_descriptor_set
+  return self.frames[self.frame_index].cube_shadow_map_descriptor_set
 }
 
 renderer_grayscale :: proc(
-  renderer: ^Renderer,
+  self: ^Renderer,
   strength: f32 = 1.0,
   weights: [3]f32 = {0.299, 0.587, 0.114},
 ) {
-  effect_add_grayscale(&renderer.postprocess, strength, weights)
+  effect_add_grayscale(&self.postprocess, strength, weights)
 }
 
-renderer_blur :: proc(renderer: ^Renderer, radius: f32) {
-  effect_add_blur(&renderer.postprocess, radius)
+renderer_blur :: proc(self: ^Renderer, radius: f32) {
+  effect_add_blur(&self.postprocess, radius)
 }
 
 renderer_bloom :: proc(
-  renderer: ^Renderer,
+  self: ^Renderer,
   threshold: f32 = 0.2,
   intensity: f32 = 1.0,
   blur_radius: f32 = 4.0,
 ) {
-  effect_add_bloom(&renderer.postprocess, threshold, intensity, blur_radius)
+  effect_add_bloom(&self.postprocess, threshold, intensity, blur_radius)
 }
 
 renderer_tonemap :: proc(
-  renderer: ^Renderer,
+  self: ^Renderer,
   exposure: f32 = 1.0,
   gamma: f32 = 2.2,
 ) {
-  effect_add_tonemap(&renderer.postprocess, exposure, gamma)
+  effect_add_tonemap(&self.postprocess, exposure, gamma)
 }
 
-renderer_outline :: proc(renderer: ^Renderer, thickness: f32, color: [3]f32) {
-  effect_add_outline(&renderer.postprocess, thickness, color)
+renderer_outline :: proc(self: ^Renderer, thickness: f32, color: [3]f32) {
+  effect_add_outline(&self.postprocess, thickness, color)
 }
 
-renderer_postprocess_clear_effects :: proc(renderer: ^Renderer) {
-  effect_clear(&renderer.postprocess)
+renderer_clear_effects :: proc(self: ^Renderer) {
+  effect_clear(&self.postprocess)
 }
 
 renderer_postprocess_update_input :: proc(
-  renderer: ^Renderer,
+  self: ^Renderer,
   set_idx: int,
   input_view: vk.ImageView,
 ) -> vk.Result {
-  return postprocess_update_input(&renderer.postprocess, set_idx, input_view)
+  return postprocess_update_input(&self.postprocess, set_idx, input_view)
 }
 
 prepare_light :: proc(node: ^Node, cb_context: rawptr) -> bool {

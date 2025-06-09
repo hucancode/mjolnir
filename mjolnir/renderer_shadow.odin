@@ -23,7 +23,7 @@ RendererShadow :: struct {
 }
 
 renderer_shadow_init :: proc(
-  shadow: ^RendererShadow,
+  self: ^RendererShadow,
   camera_descriptor_set_layout: vk.DescriptorSetLayout,
   skinning_descriptor_set_layout: vk.DescriptorSetLayout,
   depth_format: vk.Format = .D32_SFLOAT,
@@ -46,7 +46,7 @@ renderer_shadow_init :: proc(
       pPushConstantRanges = &push_constant_range,
     },
     nil,
-    &shadow.pipeline_layout,
+    &self.pipeline_layout,
   ) or_return
   vert_module := create_shader_module(SHADER_SHADOW_VERT) or_return
   defer vk.DestroyShaderModule(g_device, vert_module, nil)
@@ -146,7 +146,7 @@ renderer_shadow_init :: proc(
       pMultisampleState   = &multisampling,
       pDynamicState       = &dynamic_state_info,
       pDepthStencilState  = &depth_stencil_state,
-      layout              = shadow.pipeline_layout,
+      layout              = self.pipeline_layout,
     }
   }
   vk.CreateGraphicsPipelines(
@@ -155,18 +155,18 @@ renderer_shadow_init :: proc(
     len(pipeline_infos),
     raw_data(pipeline_infos[:]),
     nil,
-    raw_data(shadow.pipelines[:]),
+    raw_data(self.pipelines[:]),
   ) or_return
   return .SUCCESS
 }
 
-renderer_shadow_deinit :: proc(shadow: ^RendererShadow) {
-  for &p in shadow.pipelines {
+renderer_shadow_deinit :: proc(self: ^RendererShadow) {
+  for &p in self.pipelines {
     vk.DestroyPipeline(g_device, p, nil)
     p = 0
   }
-  vk.DestroyPipelineLayout(g_device, shadow.pipeline_layout, nil)
-  shadow.pipeline_layout = 0
+  vk.DestroyPipelineLayout(g_device, self.pipeline_layout, nil)
+  self.pipeline_layout = 0
 }
 
 render_shadow_pass :: proc(
@@ -489,7 +489,7 @@ render_single_shadow :: proc(node: ^Node, cb_context: rawptr) -> bool {
       &ctx.engine.renderer.shadow,
       features,
     )
-    layout := pipeline_shadow_get_layout(&ctx.engine.renderer.shadow)
+    layout := ctx.engine.renderer.shadow.pipeline_layout
     descriptor_sets: []vk.DescriptorSet
     if mesh_has_skin {
       pipeline = pipeline_shadow_get_pipeline(
@@ -565,14 +565,8 @@ render_single_shadow :: proc(node: ^Node, cb_context: rawptr) -> bool {
 }
 
 pipeline_shadow_get_pipeline :: proc(
-  shadow: ^RendererShadow,
+  self: ^RendererShadow,
   features: ShaderFeatureSet,
 ) -> vk.Pipeline {
-  return shadow.pipelines[transmute(u32)features]
-}
-
-pipeline_shadow_get_layout :: proc(
-  shadow: ^RendererShadow,
-) -> vk.PipelineLayout {
-  return shadow.pipeline_layout
+  return self.pipelines[transmute(u32)features]
 }

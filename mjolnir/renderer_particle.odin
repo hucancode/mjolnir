@@ -65,21 +65,21 @@ RendererParticle :: struct {
 }
 
 compute_particles :: proc(
-  renderer: ^RendererParticle,
+  self: ^RendererParticle,
   command_buffer: vk.CommandBuffer,
 ) {
   // log.info(
   //   "binding compute pipeline",
   //   renderer.pipeline_particle_comp.pipeline,
   // )
-  vk.CmdBindPipeline(command_buffer, .COMPUTE, renderer.compute_pipeline)
+  vk.CmdBindPipeline(command_buffer, .COMPUTE, self.compute_pipeline)
   vk.CmdBindDescriptorSets(
     command_buffer,
     .COMPUTE,
-    renderer.compute_pipeline_layout,
+    self.compute_pipeline_layout,
     0,
     1,
-    &renderer.compute_descriptor_set,
+    &self.compute_descriptor_set,
     0,
     nil,
   )
@@ -110,7 +110,7 @@ compute_particles :: proc(
 }
 
 render_particles :: proc(
-  renderer: ^RendererParticle,
+  self: ^RendererParticle,
   camera: geometry.Camera,
   command_buffer: vk.CommandBuffer,
 ) {
@@ -118,14 +118,14 @@ render_particles :: proc(
   //   "binding particle render pipeline",
   //   engine.renderer.pipeline_particle.pipeline,
   // )
-  vk.CmdBindPipeline(command_buffer, .GRAPHICS, renderer.render_pipeline)
+  vk.CmdBindPipeline(command_buffer, .GRAPHICS, self.render_pipeline)
   vk.CmdBindDescriptorSets(
     command_buffer,
     .GRAPHICS,
-    renderer.render_pipeline_layout,
+    self.render_pipeline_layout,
     0,
     1,
-    &renderer.render_descriptor_set,
+    &self.render_descriptor_set,
     0,
     nil,
   )
@@ -135,7 +135,7 @@ render_particles :: proc(
   }
   vk.CmdPushConstants(
     command_buffer,
-    renderer.render_pipeline_layout,
+    self.render_pipeline_layout,
     {.VERTEX},
     0,
     size_of(SceneUniform),
@@ -146,22 +146,22 @@ render_particles :: proc(
     command_buffer,
     0,
     1,
-    &renderer.particle_buffer.buffer,
+    &self.particle_buffer.buffer,
     &offset,
   )
-  params := data_buffer_get(renderer.params_buffer)
+  params := data_buffer_get(self.params_buffer)
   vk.CmdDraw(command_buffer, u32(params.particle_count), 1, 0, 0)
 }
 
 add_emitter :: proc(
-  particle: ^RendererParticle,
+  self: ^RendererParticle,
   emitter: Emitter,
 ) -> vk.Result {
-  params := data_buffer_get(particle.params_buffer)
+  params := data_buffer_get(self.params_buffer)
   if params.emitter_count >= MAX_EMITTERS {
     return .ERROR_UNKNOWN
   }
-  ptr := data_buffer_get(particle.emitter_buffer, params.emitter_count)
+  ptr := data_buffer_get(self.emitter_buffer, params.emitter_count)
   ptr^ = emitter
   params.emitter_count += 1
   log.debugf(
@@ -173,14 +173,14 @@ add_emitter :: proc(
   return .SUCCESS
 }
 
-update_emitters :: proc(particle: ^RendererParticle, delta_time: f32) {
-  params := data_buffer_get(particle.params_buffer)
+update_emitters :: proc(self: ^RendererParticle, delta_time: f32) {
+  params := data_buffer_get(self.params_buffer)
   params.delta_time = delta_time
-  emitters := particle.emitter_buffer.mapped
-  particles := particle.particle_buffer.mapped
+  emitters := self.emitter_buffer.mapped
+  particles := self.particle_buffer.mapped
   for i in 0 ..< MAX_PARTICLES {
     if particles[i].life <= 0 && !particles[i].is_dead {
-      append(&particle.free_particle_indices, i)
+      append(&self.free_particle_indices, i)
       particles[i].is_dead = true
     }
   }
@@ -191,7 +191,7 @@ update_emitters :: proc(particle: ^RendererParticle, delta_time: f32) {
     emitter.time_accumulator += delta_time
     emission_interval := 1.0 / emitter.emission_rate
     for emitter.time_accumulator >= emission_interval {
-      idx, ok := pop_front_safe(&particle.free_particle_indices)
+      idx, ok := pop_front_safe(&self.free_particle_indices)
       if !ok {
         break
       }
@@ -213,55 +213,55 @@ update_emitters :: proc(particle: ^RendererParticle, delta_time: f32) {
     }
   }
   params.particle_count = u32(
-    MAX_PARTICLES - len(particle.free_particle_indices),
+    MAX_PARTICLES - len(self.free_particle_indices),
   )
 }
 
-renderer_particle_deinit :: proc(particle: ^RendererParticle) {
-  vk.DestroyPipeline(g_device, particle.compute_pipeline, nil)
-  vk.DestroyPipelineLayout(g_device, particle.compute_pipeline_layout, nil)
+renderer_particle_deinit :: proc(self: ^RendererParticle) {
+  vk.DestroyPipeline(g_device, self.compute_pipeline, nil)
+  vk.DestroyPipelineLayout(g_device, self.compute_pipeline_layout, nil)
   vk.DestroyDescriptorSetLayout(
     g_device,
-    particle.compute_descriptor_set_layout,
+    self.compute_descriptor_set_layout,
     nil,
   )
-  vk.DestroyPipeline(g_device, particle.render_pipeline, nil)
-  vk.DestroyPipelineLayout(g_device, particle.render_pipeline_layout, nil)
+  vk.DestroyPipeline(g_device, self.render_pipeline, nil)
+  vk.DestroyPipelineLayout(g_device, self.render_pipeline_layout, nil)
   vk.DestroyDescriptorSetLayout(
     g_device,
-    particle.render_descriptor_set_layout,
+    self.render_descriptor_set_layout,
     nil,
   )
-  vk.DestroyImageView(g_device, particle.particle_view, nil)
-  vk.DestroyImage(g_device, particle.particle_texture, nil)
-  vk.DestroySampler(g_device, particle.particle_sampler, nil)
+  vk.DestroyImageView(g_device, self.particle_view, nil)
+  vk.DestroyImage(g_device, self.particle_texture, nil)
+  vk.DestroySampler(g_device, self.particle_sampler, nil)
   // Free buffers
   // (Assume data_buffer_deinit or similar is called elsewhere if needed)
 }
 
-renderer_particle_init :: proc(particle: ^RendererParticle) -> vk.Result {
+renderer_particle_init :: proc(self: ^RendererParticle) -> vk.Result {
   // Compute pipeline setup
-  particle.params_buffer = create_host_visible_buffer(
+  self.params_buffer = create_host_visible_buffer(
     ParticleSystemParams,
     1,
     {.UNIFORM_BUFFER},
   ) or_return
-  params := data_buffer_get(particle.params_buffer)
+  params := data_buffer_get(self.params_buffer)
   params.particle_count = 0
   params.emitter_count = 0
   params.delta_time = 0
   params.padding = 0
-  particle.particle_buffer = create_host_visible_buffer(
+  self.particle_buffer = create_host_visible_buffer(
     Particle,
     MAX_PARTICLES,
     {.STORAGE_BUFFER, .VERTEX_BUFFER},
   ) or_return
-  particle.emitter_buffer = create_host_visible_buffer(
+  self.emitter_buffer = create_host_visible_buffer(
     Emitter,
     MAX_EMITTERS,
     {.STORAGE_BUFFER},
   ) or_return
-  particle.free_particle_indices = make([dynamic]int, 0)
+  self.free_particle_indices = make([dynamic]int, 0)
   compute_bindings := [?]vk.DescriptorSetLayoutBinding {
     {
       binding = 0,
@@ -290,7 +290,7 @@ renderer_particle_init :: proc(particle: ^RendererParticle) -> vk.Result {
       pBindings = raw_data(compute_bindings[:]),
     },
     nil,
-    &particle.compute_descriptor_set_layout,
+    &self.compute_descriptor_set_layout,
   ) or_return
   vk.AllocateDescriptorSets(
     g_device,
@@ -298,26 +298,26 @@ renderer_particle_init :: proc(particle: ^RendererParticle) -> vk.Result {
       sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
       descriptorPool = g_descriptor_pool,
       descriptorSetCount = 1,
-      pSetLayouts = &particle.compute_descriptor_set_layout,
+      pSetLayouts = &self.compute_descriptor_set_layout,
     },
-    &particle.compute_descriptor_set,
+    &self.compute_descriptor_set,
   ) or_return
   params_buffer_info := vk.DescriptorBufferInfo {
-    buffer = particle.params_buffer.buffer,
-    range  = vk.DeviceSize(particle.params_buffer.bytes_count),
+    buffer = self.params_buffer.buffer,
+    range  = vk.DeviceSize(self.params_buffer.bytes_count),
   }
   particle_buffer_info := vk.DescriptorBufferInfo {
-    buffer = particle.particle_buffer.buffer,
-    range  = vk.DeviceSize(particle.particle_buffer.bytes_count),
+    buffer = self.particle_buffer.buffer,
+    range  = vk.DeviceSize(self.particle_buffer.bytes_count),
   }
   emitter_buffer_info := vk.DescriptorBufferInfo {
-    buffer = particle.emitter_buffer.buffer,
-    range  = vk.DeviceSize(particle.emitter_buffer.bytes_count),
+    buffer = self.emitter_buffer.buffer,
+    range  = vk.DeviceSize(self.emitter_buffer.bytes_count),
   }
   writes := [?]vk.WriteDescriptorSet {
     {
       sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = particle.compute_descriptor_set,
+      dstSet = self.compute_descriptor_set,
       dstBinding = 0,
       descriptorType = .UNIFORM_BUFFER,
       descriptorCount = 1,
@@ -325,7 +325,7 @@ renderer_particle_init :: proc(particle: ^RendererParticle) -> vk.Result {
     },
     {
       sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = particle.compute_descriptor_set,
+      dstSet = self.compute_descriptor_set,
       dstBinding = 1,
       descriptorType = .STORAGE_BUFFER,
       descriptorCount = 1,
@@ -333,7 +333,7 @@ renderer_particle_init :: proc(particle: ^RendererParticle) -> vk.Result {
     },
     {
       sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = particle.compute_descriptor_set,
+      dstSet = self.compute_descriptor_set,
       dstBinding = 2,
       descriptorType = .STORAGE_BUFFER,
       descriptorCount = 1,
@@ -346,10 +346,10 @@ renderer_particle_init :: proc(particle: ^RendererParticle) -> vk.Result {
     &{
       sType = .PIPELINE_LAYOUT_CREATE_INFO,
       setLayoutCount = 1,
-      pSetLayouts = &particle.compute_descriptor_set_layout,
+      pSetLayouts = &self.compute_descriptor_set_layout,
     },
     nil,
-    &particle.compute_pipeline_layout,
+    &self.compute_pipeline_layout,
   ) or_return
   shader_module := create_shader_module(
     #load("shader/particle/compute.spv"),
@@ -363,7 +363,7 @@ renderer_particle_init :: proc(particle: ^RendererParticle) -> vk.Result {
       module = shader_module,
       pName = "main",
     },
-    layout = particle.compute_pipeline_layout,
+    layout = self.compute_pipeline_layout,
   }
   vk.CreateComputePipelines(
     g_device,
@@ -371,7 +371,7 @@ renderer_particle_init :: proc(particle: ^RendererParticle) -> vk.Result {
     1,
     &compute_pipeline_info,
     nil,
-    &particle.compute_pipeline,
+    &self.compute_pipeline,
   ) or_return
   // Render pipeline setup
   render_bindings := [?]vk.DescriptorSetLayoutBinding {
@@ -390,7 +390,7 @@ renderer_particle_init :: proc(particle: ^RendererParticle) -> vk.Result {
       pBindings = raw_data(render_bindings[:]),
     },
     nil,
-    &particle.render_descriptor_set_layout,
+    &self.render_descriptor_set_layout,
   ) or_return
   push_constant_range := vk.PushConstantRange {
     stageFlags = {.VERTEX},
@@ -402,38 +402,38 @@ renderer_particle_init :: proc(particle: ^RendererParticle) -> vk.Result {
     &{
       sType = .PIPELINE_LAYOUT_CREATE_INFO,
       setLayoutCount = 1,
-      pSetLayouts = &particle.render_descriptor_set_layout,
+      pSetLayouts = &self.render_descriptor_set_layout,
       pushConstantRangeCount = 1,
       pPushConstantRanges = &push_constant_range,
     },
     nil,
-    &particle.render_pipeline_layout,
+    &self.render_pipeline_layout,
   ) or_return
   texture: Texture
   read_texture(&texture, "assets/black-circle.png") or_return
   texture_init(&texture) or_return
-  particle.particle_texture = texture.buffer.image
-  particle.particle_view = texture.buffer.view
-  particle.particle_sampler = texture.sampler
+  self.particle_texture = texture.buffer.image
+  self.particle_view = texture.buffer.view
+  self.particle_sampler = texture.sampler
   vk.AllocateDescriptorSets(
     g_device,
     &{
       sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
       descriptorPool = g_descriptor_pool,
       descriptorSetCount = 1,
-      pSetLayouts = &particle.render_descriptor_set_layout,
+      pSetLayouts = &self.render_descriptor_set_layout,
     },
-    &particle.render_descriptor_set,
+    &self.render_descriptor_set,
   ) or_return
   write := vk.WriteDescriptorSet {
     sType           = .WRITE_DESCRIPTOR_SET,
-    dstSet          = particle.render_descriptor_set,
+    dstSet          = self.render_descriptor_set,
     dstBinding      = 0,
     descriptorType  = .COMBINED_IMAGE_SAMPLER,
     descriptorCount = 1,
     pImageInfo      = &{
-      sampler = particle.particle_sampler,
-      imageView = particle.particle_view,
+      sampler = self.particle_sampler,
+      imageView = self.particle_view,
       imageLayout = .SHADER_READ_ONLY_OPTIMAL,
     },
   }
@@ -586,7 +586,7 @@ renderer_particle_init :: proc(particle: ^RendererParticle) -> vk.Result {
     pMultisampleState   = &multisample,
     pColorBlendState    = &blend_state,
     pDynamicState       = &dynamic_state,
-    layout              = particle.render_pipeline_layout,
+    layout              = self.render_pipeline_layout,
     pNext               = &rendering_info,
     pDepthStencilState  = &{
       sType = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
@@ -601,13 +601,7 @@ renderer_particle_init :: proc(particle: ^RendererParticle) -> vk.Result {
     1,
     &pipeline_info,
     nil,
-    &particle.render_pipeline,
+    &self.render_pipeline,
   ) or_return
-  return .SUCCESS
-}
-
-setup_particle_compute_pipeline :: proc(
-  particle: ^RendererParticle,
-) -> vk.Result {
   return .SUCCESS
 }
