@@ -67,7 +67,7 @@ Renderer :: struct {
   pipeline_3d:                Pipeline3D,
   pipeline_shadow:            PipelineShadow,
   pipeline_particle:          PipelineParticle,
-  pipeline_postprocess:       PipelinePostProcess,
+  postprocess:                RendererPostProcess,
   meshes:                     resource.Pool(Mesh),
   materials:                  resource.Pool(Material),
   textures:                   resource.Pool(Texture),
@@ -134,8 +134,9 @@ renderer_init :: proc(
     pipeline3d_get_skinning_descriptor_set_layout(&renderer.pipeline_3d),
   ) or_return
   setup_particle_compute_pipeline(&renderer.pipeline_particle_comp) or_return
-  pipeline_postprocess_init(
-    &renderer.pipeline_postprocess,
+  // Initialize postprocess
+  renderer_postprocess_init(
+    &renderer.postprocess,
     color_format,
     width,
     height,
@@ -161,7 +162,7 @@ renderer_deinit :: proc(renderer: ^Renderer) {
   particle_render_pipeline_deinit(&renderer.pipeline_particle)
   pipeline3d_deinit(&renderer.pipeline_3d)
   pipeline_shadow_deinit(&renderer.pipeline_shadow)
-  pipeline_postprocess_deinit(&renderer.pipeline_postprocess)
+  pipeline_postprocess_deinit(&renderer.postprocess.pipeline)
   for &frame in renderer.frames do frame_deinit(&frame)
 }
 
@@ -299,11 +300,11 @@ renderer_grayscale :: proc(
   strength: f32 = 1.0,
   weights: [3]f32 = {0.299, 0.587, 0.114},
 ) {
-  effect_add_grayscale(&renderer.pipeline_postprocess, strength, weights)
+  effect_add_grayscale(&renderer.postprocess.pipeline, strength, weights)
 }
 
 renderer_blur :: proc(renderer: ^Renderer, radius: f32) {
-  effect_add_blur(&renderer.pipeline_postprocess, radius)
+  effect_add_blur(&renderer.postprocess.pipeline, radius)
 }
 
 renderer_bloom :: proc(
@@ -313,7 +314,7 @@ renderer_bloom :: proc(
   blur_radius: f32 = 4.0,
 ) {
   effect_add_bloom(
-    &renderer.pipeline_postprocess,
+    &renderer.postprocess.pipeline,
     threshold,
     intensity,
     blur_radius,
@@ -325,15 +326,15 @@ renderer_tonemap :: proc(
   exposure: f32 = 1.0,
   gamma: f32 = 2.2,
 ) {
-  effect_add_tonemap(&renderer.pipeline_postprocess, exposure, gamma)
+  effect_add_tonemap(&renderer.postprocess.pipeline, exposure, gamma)
 }
 
 renderer_outline :: proc(renderer: ^Renderer, thickness: f32, color: [3]f32) {
-  effect_add_outline(&renderer.pipeline_postprocess, thickness, color)
+  effect_add_outline(&renderer.postprocess.pipeline, thickness, color)
 }
 
 renderer_postprocess_clear_effects :: proc(renderer: ^Renderer) {
-  effect_clear(&renderer.pipeline_postprocess)
+  effect_clear(&renderer.postprocess.pipeline)
 }
 
 renderer_postprocess_update_input :: proc(
@@ -342,7 +343,7 @@ renderer_postprocess_update_input :: proc(
   input_view: vk.ImageView,
 ) -> vk.Result {
   return postprocess_update_input(
-    &renderer.pipeline_postprocess,
+    &renderer.postprocess.pipeline,
     set_idx,
     input_view,
   )
@@ -455,7 +456,7 @@ render :: proc(engine: ^Engine) -> vk.Result {
   prepare_image_for_render(command_buffer, engine.swapchain.images[image_idx])
   log.debug("============ rendering post processes... =============")
   render_postprocess_stack(
-    &engine.renderer,
+    &engine.renderer.postprocess,
     command_buffer,
     renderer_get_main_pass_view(&engine.renderer),
     engine.swapchain.views[image_idx],

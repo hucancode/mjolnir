@@ -3,60 +3,82 @@ package mjolnir
 import "core:log"
 import vk "vendor:vulkan"
 
+RendererPostProcess :: struct {
+  pipeline: PipelinePostProcess,
+  images:   [2]ImageBuffer,
+}
+
+renderer_postprocess_init :: proc(
+  self: ^RendererPostProcess,
+  color_format: vk.Format,
+  width: u32,
+  height: u32,
+) -> vk.Result {
+  pipeline_postprocess_init(
+    &self.pipeline,
+    color_format,
+    width,
+    height,
+  ) or_return
+  for &image in self.images {
+    image = malloc_image_buffer(
+      width,
+      height,
+      color_format,
+      .OPTIMAL,
+      {.COLOR_ATTACHMENT, .SAMPLED, .TRANSFER_SRC, .TRANSFER_DST},
+      {.DEVICE_LOCAL},
+    ) or_return
+    image.view = create_image_view(
+      image.image,
+      color_format,
+      {.COLOR},
+    ) or_return
+  }
+  return .SUCCESS
+}
+
+renderer_postprocess_deinit :: proc(self: ^RendererPostProcess) {
+  pipeline_postprocess_deinit(&self.pipeline)
+  for &image in self.images do image_buffer_deinit(&image)
+}
+
 render_postprocess_stack :: proc(
-  renderer: ^Renderer,
+  self: ^RendererPostProcess,
   command_buffer: vk.CommandBuffer,
   input_view: vk.ImageView,
   output_view: vk.ImageView,
   extent: vk.Extent2D,
 ) {
-  pipeline := &renderer.pipeline_postprocess
+  pipeline := &self.pipeline
   if len(pipeline.effect_stack) == 0 {
     // if no postprocess effect, just copy the input to output
     append(&pipeline.effect_stack, nil)
   }
-  // effect i:  0, 1, 2, 3, 4, 5, 6
-  // read from: m0, p0, p1, 0, 1, 0, input  = (i+1)%2+1  (i != 0)
-  // write to:  p0, p1, p0, p1 ...  m1 output = (i%2)+1    (i !=n-1)
   postprocess_update_input(pipeline, 0, input_view)
-  postprocess_update_input(
-    pipeline,
-    1,
-    renderer_get_postprocess_pass_view(renderer, 0),
-  )
-  postprocess_update_input(
-    pipeline,
-    2,
-    renderer_get_postprocess_pass_view(renderer, 1),
-  )
+  postprocess_update_input(pipeline, 1, self.images[0].view)
+  postprocess_update_input(pipeline, 2, self.images[1].view)
   for effect, i in pipeline.effect_stack {
     is_first := i == 0
     is_last := i == len(pipeline.effect_stack) - 1
     src_idx := 0 if is_first else (i - 1) % 2 + 1
     dst_image_idx := i % 2
     src_image_idx := (i - 1) % 2
-    // log.infof(
-    //   "render effect %v, using descriptor %d, input image %d, output image %d",
-    //   effect,
-    //   src_idx,
-    //   src_image_idx,
-    //   dst_image_idx,
-    // )
     prepare_image_for_render(
       command_buffer,
-      renderer_get_postprocess_pass_image(renderer, dst_image_idx),
+      self.images[dst_image_idx].image,
       .SHADER_READ_ONLY_OPTIMAL,
     )
     // first image is main pass output, it is already ready for shader
     if !is_first {
       prepare_image_for_shader_read(
         command_buffer,
-        renderer_get_postprocess_pass_image(renderer, src_image_idx),
+        self.images[src_image_idx].image,
       )
     }
     color_attachment := vk.RenderingAttachmentInfoKHR {
       sType = .RENDERING_ATTACHMENT_INFO_KHR,
-      imageView = output_view if is_last else renderer_get_postprocess_pass_view(renderer, dst_image_idx),
+      imageView = output_view if is_last else self.images[dst_image_idx].view,
       imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
       loadOp = .CLEAR,
       storeOp = .STORE,
