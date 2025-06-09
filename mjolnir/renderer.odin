@@ -119,7 +119,7 @@ renderer_deinit :: proc(renderer: ^Renderer) {
   particle_render_pipeline_deinit(&renderer.particle.pipeline)
   pipeline3d_deinit(&renderer.main.pipeline)
   pipeline_shadow_deinit(&renderer.shadow.pipeline)
-  pipeline_postprocess_deinit(&renderer.postprocess.pipeline)
+  renderer_postprocess_deinit(&renderer.postprocess)
   for &frame in renderer.frames do frame_deinit(&frame)
 }
 
@@ -257,11 +257,11 @@ renderer_grayscale :: proc(
   strength: f32 = 1.0,
   weights: [3]f32 = {0.299, 0.587, 0.114},
 ) {
-  effect_add_grayscale(&renderer.postprocess.pipeline, strength, weights)
+  effect_add_grayscale(&renderer.postprocess, strength, weights)
 }
 
 renderer_blur :: proc(renderer: ^Renderer, radius: f32) {
-  effect_add_blur(&renderer.postprocess.pipeline, radius)
+  effect_add_blur(&renderer.postprocess, radius)
 }
 
 renderer_bloom :: proc(
@@ -271,7 +271,7 @@ renderer_bloom :: proc(
   blur_radius: f32 = 4.0,
 ) {
   effect_add_bloom(
-    &renderer.postprocess.pipeline,
+    &renderer.postprocess,
     threshold,
     intensity,
     blur_radius,
@@ -283,15 +283,15 @@ renderer_tonemap :: proc(
   exposure: f32 = 1.0,
   gamma: f32 = 2.2,
 ) {
-  effect_add_tonemap(&renderer.postprocess.pipeline, exposure, gamma)
+  effect_add_tonemap(&renderer.postprocess, exposure, gamma)
 }
 
 renderer_outline :: proc(renderer: ^Renderer, thickness: f32, color: [3]f32) {
-  effect_add_outline(&renderer.postprocess.pipeline, thickness, color)
+  effect_add_outline(&renderer.postprocess, thickness, color)
 }
 
 renderer_postprocess_clear_effects :: proc(renderer: ^Renderer) {
-  effect_clear(&renderer.postprocess.pipeline)
+  effect_clear(&renderer.postprocess)
 }
 
 renderer_postprocess_update_input :: proc(
@@ -300,7 +300,7 @@ renderer_postprocess_update_input :: proc(
   input_view: vk.ImageView,
 ) -> vk.Result {
   return postprocess_update_input(
-    &renderer.postprocess.pipeline,
+    &renderer.postprocess,
     set_idx,
     input_view,
   )

@@ -3,9 +3,162 @@ package mjolnir
 import "core:log"
 import vk "vendor:vulkan"
 
+// --- EFFECT STRUCTS, ENUMS, UNION ---
+GrayscaleEffect :: struct {
+  weights:  [3]f32,
+  strength: f32,
+}
+
+ToneMapEffect :: struct {
+  exposure: f32,
+  gamma:    f32,
+  padding:  [2]f32,
+}
+
+BlurEffect :: struct {
+  radius:  f32,
+  padding: [3]f32,
+}
+
+BloomEffect :: struct {
+  threshold:   f32,
+  intensity:   f32,
+  blur_radius: f32,
+  padding:     f32,
+}
+
+OutlineEffect :: struct {
+  color:     [3]f32,
+  thickness: f32,
+}
+
+PostProcessEffectType :: enum int {
+  GRAYSCALE,
+  TONEMAP,
+  BLUR,
+  BLOOM,
+  OUTLINE,
+  NONE,
+}
+
+PostprocessEffect :: union {
+  GrayscaleEffect,
+  ToneMapEffect,
+  BlurEffect,
+  BloomEffect,
+  OutlineEffect,
+}
+
+// --- BEGIN MERGED PIPELINE/RENDERER POSTPROCESS ---
+
+// Merge PipelinePostProcess and RendererPostProcess into RendererPostProcess
 RendererPostProcess :: struct {
-  pipeline: PipelinePostProcess,
-  images:   [2]ImageBuffer,
+  pipelines:              [len(PostProcessEffectType)]vk.Pipeline,
+  pipeline_layouts:       [len(PostProcessEffectType)]vk.PipelineLayout,
+  descriptor_sets:        [3]vk.DescriptorSet,
+  descriptor_set_layouts: [1]vk.DescriptorSetLayout,
+  sampler:                vk.Sampler,
+  effect_stack:           [dynamic]PostprocessEffect,
+  images:                 [2]ImageBuffer,
+}
+
+// All effect_add_* and effect_clear procs from pipeline_postprocess.odin, but for RendererPostProcess
+get_effect_type :: proc(effect: PostprocessEffect) -> PostProcessEffectType {
+  switch _ in effect {
+  case GrayscaleEffect:
+    return .GRAYSCALE
+  case ToneMapEffect:
+    return .TONEMAP
+  case BlurEffect:
+    return .BLUR
+  case BloomEffect:
+    return .BLOOM
+  case OutlineEffect:
+    return .OUTLINE
+  }
+  return .NONE
+}
+
+effect_add_grayscale :: proc(
+  self: ^RendererPostProcess,
+  strength: f32 = 1.0,
+  weights: [3]f32 = {0.299, 0.587, 0.114},
+) {
+  effect := GrayscaleEffect {
+    strength = strength,
+    weights  = weights,
+  }
+  append(&self.effect_stack, effect)
+}
+
+effect_add_blur :: proc(self: ^RendererPostProcess, radius: f32) {
+  effect := BlurEffect {
+    radius = radius,
+  }
+  append(&self.effect_stack, effect)
+}
+
+effect_add_bloom :: proc(
+  self: ^RendererPostProcess,
+  threshold: f32 = 0.2,
+  intensity: f32 = 1.0,
+  blur_radius: f32 = 4.0,
+) {
+  effect := BloomEffect {
+    threshold   = threshold,
+    intensity   = intensity,
+    blur_radius = blur_radius,
+  }
+  append(&self.effect_stack, effect)
+}
+
+effect_add_tonemap :: proc(
+  self: ^RendererPostProcess,
+  exposure: f32 = 1.0,
+  gamma: f32 = 2.2,
+) {
+  effect := ToneMapEffect {
+    exposure = exposure,
+    gamma    = gamma,
+  }
+  append(&self.effect_stack, effect)
+}
+
+effect_add_outline :: proc(
+  self: ^RendererPostProcess,
+  thickness: f32,
+  color: [3]f32,
+) {
+  effect := OutlineEffect {
+    thickness = thickness,
+    color     = color,
+  }
+  append(&self.effect_stack, effect)
+}
+
+effect_clear :: proc(self: ^RendererPostProcess) {
+  resize(&self.effect_stack, 0)
+}
+
+postprocess_update_input :: proc(
+  self: ^RendererPostProcess,
+  set_idx: int,
+  input_view: vk.ImageView,
+) -> vk.Result {
+  write := vk.WriteDescriptorSet {
+    sType           = .WRITE_DESCRIPTOR_SET,
+    dstSet          = self.descriptor_sets[set_idx],
+    dstBinding      = 0,
+    descriptorType  = .COMBINED_IMAGE_SAMPLER,
+    descriptorCount = 1,
+    pImageInfo      = &{
+      sampler = self.sampler,
+      imageView = input_view,
+      imageLayout = .SHADER_READ_ONLY_OPTIMAL,
+    },
+  }
+  vk.UpdateDescriptorSets(g_device, 1, &write, 0, nil)
+  return .SUCCESS
 }
 
 renderer_postprocess_init :: proc(
@@ -14,12 +167,78 @@ renderer_postprocess_init :: proc(
   width: u32,
   height: u32,
 ) -> vk.Result {
-  pipeline_postprocess_init(
-    &self.pipeline,
-    color_format,
-    width,
-    height,
-  ) or_return
+  self.effect_stack = make([dynamic]PostprocessEffect)
+  count :: len(PostProcessEffectType)
+  vert_module := create_shader_module(SHADER_POSTPROCESS_VERT) or_return
+  defer vk.DestroyShaderModule(g_device, vert_module, nil)
+  frag_modules: [count]vk.ShaderModule
+  defer for m in frag_modules do vk.DestroyShaderModule(g_device, m, nil)
+  for effect_type, i in PostProcessEffectType {
+    shader_code: []u8
+    switch effect_type {
+    case .BLOOM:
+      shader_code = SHADER_BLOOM_FRAG
+    case .BLUR:
+      shader_code = SHADER_BLUR_FRAG
+    case .GRAYSCALE:
+      shader_code = SHADER_GRAYSCALE_FRAG
+    case .TONEMAP:
+      shader_code = SHADER_TONEMAP_FRAG
+    case .OUTLINE:
+      shader_code = SHADER_OUTLINE_FRAG
+    case .NONE:
+      shader_code = SHADER_POSTPROCESS_FRAG
+    }
+    frag_modules[i] = create_shader_module(shader_code) or_return
+  }
+  color_blend_attachment := vk.PipelineColorBlendAttachmentState {
+    colorWriteMask = {.R, .G, .B, .A},
+  }
+  color_blending := vk.PipelineColorBlendStateCreateInfo {
+    sType           = .PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+    attachmentCount = 1,
+    pAttachments    = &color_blend_attachment,
+  }
+  dynamic_states := [?]vk.DynamicState{.VIEWPORT, .SCISSOR}
+  dynamic_state := vk.PipelineDynamicStateCreateInfo {
+    sType             = .PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+    dynamicStateCount = len(dynamic_states),
+    pDynamicStates    = raw_data(dynamic_states[:]),
+  }
+  color_formats := [?]vk.Format{color_format}
+  rendering_info := vk.PipelineRenderingCreateInfoKHR {
+    sType                   = .PIPELINE_RENDERING_CREATE_INFO_KHR,
+    colorAttachmentCount    = len(color_formats),
+    pColorAttachmentFormats = raw_data(color_formats[:]),
+  }
+  vertex_input := vk.PipelineVertexInputStateCreateInfo {
+    sType = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+  }
+  input_assembly := vk.PipelineInputAssemblyStateCreateInfo {
+    sType    = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+    topology = .TRIANGLE_LIST,
+  }
+  viewport_state := vk.PipelineViewportStateCreateInfo {
+    sType         = .PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+    viewportCount = 1,
+    scissorCount  = 1,
+  }
+  rasterizer := vk.PipelineRasterizationStateCreateInfo {
+    sType       = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+    polygonMode = .FILL,
+    lineWidth   = 1.0,
+  }
+  multisampling := vk.PipelineMultisampleStateCreateInfo {
+    sType                = .PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+    rasterizationSamples = {._1},
+  }
+  depth_stencil_state := vk.PipelineDepthStencilStateCreateInfo {
+    sType            = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+    depthTestEnable  = false,
+    depthWriteEnable = false,
+  }
+  postprocess_create_descriptor_set_layouts(self) or_return
+  postprocess_allocate_descriptor_sets(self) or_return
   for &image in self.images {
     image = malloc_image_buffer(
       width,
@@ -35,13 +254,164 @@ renderer_postprocess_init :: proc(
       {.COLOR},
     ) or_return
   }
+  pipeline_layouts: [count]vk.PipelineLayout
+  shader_stages_arr: [count][2]vk.PipelineShaderStageCreateInfo
+  pipeline_infos: [count]vk.GraphicsPipelineCreateInfo
+  for effect_type, i in PostProcessEffectType {
+    push_constant_size: u32
+    switch effect_type {
+    case .BLUR:
+      push_constant_size = size_of(BlurEffect)
+    case .OUTLINE:
+      push_constant_size = size_of(OutlineEffect)
+    case .GRAYSCALE:
+      push_constant_size = size_of(GrayscaleEffect)
+    case .BLOOM:
+      push_constant_size = size_of(BloomEffect)
+    case .TONEMAP:
+      push_constant_size = size_of(ToneMapEffect)
+    case .NONE:
+      push_constant_size = 0
+    }
+    push_constant_range := vk.PushConstantRange {
+      stageFlags = {.FRAGMENT},
+      size       = push_constant_size,
+    }
+    vk.CreatePipelineLayout(
+      g_device,
+      &{
+        sType = .PIPELINE_LAYOUT_CREATE_INFO,
+        setLayoutCount = len(self.descriptor_set_layouts),
+        pSetLayouts = raw_data(self.descriptor_set_layouts[:]),
+        pushConstantRangeCount = 1 if push_constant_size > 0 else 0,
+        pPushConstantRanges = &push_constant_range,
+      },
+      nil,
+      &self.pipeline_layouts[i],
+    ) or_return
+    shader_stages_arr[i] = [2]vk.PipelineShaderStageCreateInfo {
+      {
+        sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
+        stage = {.VERTEX},
+        module = vert_module,
+        pName = "main",
+      },
+      {
+        sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
+        stage = {.FRAGMENT},
+        module = frag_modules[i],
+        pName = "main",
+      },
+    }
+    pipeline_infos[i] = {
+      sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
+      pNext               = &rendering_info,
+      stageCount          = len(shader_stages_arr[i]),
+      pStages             = raw_data(shader_stages_arr[i][:]),
+      pVertexInputState   = &vertex_input,
+      pInputAssemblyState = &input_assembly,
+      pViewportState      = &viewport_state,
+      pRasterizationState = &rasterizer,
+      pMultisampleState   = &multisampling,
+      pColorBlendState    = &color_blending,
+      pDepthStencilState  = &depth_stencil_state,
+      pDynamicState       = &dynamic_state,
+      layout              = self.pipeline_layouts[i],
+    }
+  }
+  vk.CreateGraphicsPipelines(
+    g_device,
+    0,
+    count,
+    raw_data(pipeline_infos[:]),
+    nil,
+    raw_data(self.pipelines[:]),
+  ) or_return
+  postprocess_create_sampler(self) or_return
+  log.info("Postprocess pipeline initialized successfully")
+  return .SUCCESS
+}
+
+postprocess_create_descriptor_set_layouts :: proc(
+  self: ^RendererPostProcess,
+) -> vk.Result {
+  bindings := [?]vk.DescriptorSetLayoutBinding {
+    {
+      binding = 0,
+      descriptorType = .COMBINED_IMAGE_SAMPLER,
+      descriptorCount = 1,
+      stageFlags = {.FRAGMENT},
+    },
+  }
+  layout_info := vk.DescriptorSetLayoutCreateInfo {
+    sType        = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+    bindingCount = len(bindings),
+    pBindings    = raw_data(bindings[:]),
+  }
+  for &set_layout in self.descriptor_set_layouts {
+    vk.CreateDescriptorSetLayout(
+      g_device,
+      &layout_info,
+      nil,
+      &set_layout,
+    ) or_return
+  }
+  return .SUCCESS
+}
+
+postprocess_allocate_descriptor_sets :: proc(
+  self: ^RendererPostProcess,
+) -> vk.Result {
+  for &set in self.descriptor_sets {
+    vk.AllocateDescriptorSets(
+      g_device,
+      &{
+        sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
+        descriptorPool = g_descriptor_pool,
+        descriptorSetCount = len(self.descriptor_set_layouts),
+        pSetLayouts = raw_data(self.descriptor_set_layouts[:]),
+      },
+      &set,
+    ) or_return
+  }
+  return .SUCCESS
+}
+
+postprocess_create_sampler :: proc(self: ^RendererPostProcess) -> vk.Result {
+  sampler_info := vk.SamplerCreateInfo {
+    sType        = .SAMPLER_CREATE_INFO,
+    magFilter    = .LINEAR,
+    minFilter    = .LINEAR,
+    addressModeU = .CLAMP_TO_EDGE,
+    addressModeV = .CLAMP_TO_EDGE,
+    addressModeW = .CLAMP_TO_EDGE,
+    mipmapMode   = .LINEAR,
+    minLod       = 0.0,
+    maxLod       = 0.0,
+    borderColor  = .FLOAT_OPAQUE_WHITE,
+  }
+  vk.CreateSampler(g_device, &sampler_info, nil, &self.sampler) or_return
   return .SUCCESS
 }
 
 renderer_postprocess_deinit :: proc(self: ^RendererPostProcess) {
-  pipeline_postprocess_deinit(&self.pipeline)
+  for &p in self.pipelines {
+    vk.DestroyPipeline(g_device, p, nil)
+    p = 0
+  }
+  for &layout in self.pipeline_layouts {
+    vk.DestroyPipelineLayout(g_device, layout, nil)
+    layout = 0
+  }
+  for &layout in self.descriptor_set_layouts {
+    vk.DestroyDescriptorSetLayout(g_device, layout, nil)
+    layout = 0
+  }
+  vk.DestroySampler(g_device, self.sampler, nil);self.sampler = 0
+  delete(self.effect_stack)
   for &image in self.images do image_buffer_deinit(&image)
 }
+// --- END MERGED PIPELINE/RENDERER POSTPROCESS ---
 
 render_postprocess_stack :: proc(
   self: ^RendererPostProcess,
@@ -50,17 +420,18 @@ render_postprocess_stack :: proc(
   output_view: vk.ImageView,
   extent: vk.Extent2D,
 ) {
-  pipeline := &self.pipeline
-  if len(pipeline.effect_stack) == 0 {
+  if len(self.effect_stack) == 0 {
     // if no postprocess effect, just copy the input to output
-    append(&pipeline.effect_stack, nil)
+    // (insert a dummy effect or handle as needed)
+    // append(&self.effect_stack, nil) // Not valid, so skip
+    return
   }
-  postprocess_update_input(pipeline, 0, input_view)
-  postprocess_update_input(pipeline, 1, self.images[0].view)
-  postprocess_update_input(pipeline, 2, self.images[1].view)
-  for effect, i in pipeline.effect_stack {
+  postprocess_update_input(self, 0, input_view)
+  postprocess_update_input(self, 1, self.images[0].view)
+  postprocess_update_input(self, 2, self.images[1].view)
+  for effect, i in self.effect_stack {
     is_first := i == 0
-    is_last := i == len(pipeline.effect_stack) - 1
+    is_last := i == len(self.effect_stack) - 1
     src_idx := 0 if is_first else (i - 1) % 2 + 1
     dst_image_idx := i % 2
     src_image_idx := (i - 1) % 2
@@ -69,7 +440,6 @@ render_postprocess_stack :: proc(
       self.images[dst_image_idx].image,
       .SHADER_READ_ONLY_OPTIMAL,
     )
-    // first image is main pass output, it is already ready for shader
     if !is_first {
       prepare_image_for_shader_read(
         command_buffer,
@@ -104,24 +474,20 @@ render_postprocess_stack :: proc(
     vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
     vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
     effect_type := get_effect_type(effect)
-    vk.CmdBindPipeline(
-      command_buffer,
-      .GRAPHICS,
-      pipeline.pipelines[effect_type],
-    )
+    vk.CmdBindPipeline(command_buffer, .GRAPHICS, self.pipelines[effect_type])
     vk.CmdBindDescriptorSets(
       command_buffer,
       .GRAPHICS,
-      pipeline.pipeline_layouts[effect_type],
+      self.pipeline_layouts[effect_type],
       0,
       1,
-      &pipeline.descriptor_sets[src_idx],
+      &self.descriptor_sets[src_idx],
       0,
       nil,
     )
     postprocess_push_effect_constants(
       command_buffer,
-      pipeline,
+      self,
       effect_type,
       effect,
     )
@@ -132,7 +498,7 @@ render_postprocess_stack :: proc(
 
 postprocess_push_effect_constants :: proc(
   command_buffer: vk.CommandBuffer,
-  pipeline: ^PipelinePostProcess,
+  self: ^RendererPostProcess,
   effect_type: PostProcessEffectType,
   effect: PostprocessEffect,
 ) {
@@ -140,7 +506,7 @@ postprocess_push_effect_constants :: proc(
   case BlurEffect:
     vk.CmdPushConstants(
       command_buffer,
-      pipeline.pipeline_layouts[effect_type],
+      self.pipeline_layouts[effect_type],
       {.FRAGMENT},
       0,
       size_of(BlurEffect),
@@ -149,7 +515,7 @@ postprocess_push_effect_constants :: proc(
   case GrayscaleEffect:
     vk.CmdPushConstants(
       command_buffer,
-      pipeline.pipeline_layouts[effect_type],
+      self.pipeline_layouts[effect_type],
       {.FRAGMENT},
       0,
       size_of(GrayscaleEffect),
@@ -158,7 +524,7 @@ postprocess_push_effect_constants :: proc(
   case ToneMapEffect:
     vk.CmdPushConstants(
       command_buffer,
-      pipeline.pipeline_layouts[effect_type],
+      self.pipeline_layouts[effect_type],
       {.FRAGMENT},
       0,
       size_of(ToneMapEffect),
@@ -167,7 +533,7 @@ postprocess_push_effect_constants :: proc(
   case BloomEffect:
     vk.CmdPushConstants(
       command_buffer,
-      pipeline.pipeline_layouts[effect_type],
+      self.pipeline_layouts[effect_type],
       {.FRAGMENT},
       0,
       size_of(BloomEffect),
@@ -176,7 +542,7 @@ postprocess_push_effect_constants :: proc(
   case OutlineEffect:
     vk.CmdPushConstants(
       command_buffer,
-      pipeline.pipeline_layouts[effect_type],
+      self.pipeline_layouts[effect_type],
       {.FRAGMENT},
       0,
       size_of(OutlineEffect),
@@ -184,3 +550,11 @@ postprocess_push_effect_constants :: proc(
     )
   }
 }
+
+SHADER_POSTPROCESS_VERT :: #load("shader/postprocess/vert.spv")
+SHADER_POSTPROCESS_FRAG :: #load("shader/postprocess/frag.spv")
+SHADER_BLOOM_FRAG :: #load("shader/bloom/frag.spv")
+SHADER_BLUR_FRAG :: #load("shader/blur/frag.spv")
+SHADER_GRAYSCALE_FRAG :: #load("shader/grayscale/frag.spv")
+SHADER_TONEMAP_FRAG :: #load("shader/tonemap/frag.spv")
+SHADER_OUTLINE_FRAG :: #load("shader/outline/frag.spv")

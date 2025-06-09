@@ -43,16 +43,15 @@ pipeline_shadow_init :: proc(
     stageFlags = {.VERTEX},
     size       = size_of(linalg.Matrix4f32),
   }
-  pipeline_layout_info := vk.PipelineLayoutCreateInfo {
-    sType                  = .PIPELINE_LAYOUT_CREATE_INFO,
-    setLayoutCount         = len(set_layouts),
-    pSetLayouts            = raw_data(set_layouts[:]),
-    pushConstantRangeCount = 1,
-    pPushConstantRanges    = &push_constant_range,
-  }
   vk.CreatePipelineLayout(
     g_device,
-    &pipeline_layout_info,
+    &{
+      sType = .PIPELINE_LAYOUT_CREATE_INFO,
+      setLayoutCount = len(set_layouts),
+      pSetLayouts = raw_data(set_layouts[:]),
+      pushConstantRangeCount = 1,
+      pPushConstantRanges = &push_constant_range,
+    },
     nil,
     &pipeline.pipeline_layout,
   ) or_return

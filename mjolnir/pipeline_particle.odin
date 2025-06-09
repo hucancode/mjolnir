@@ -395,16 +395,15 @@ setup_particle_render_pipeline :: proc(
     offset     = 0,
     size       = size_of(SceneUniform),
   }
-  pipeline_layout_info := vk.PipelineLayoutCreateInfo {
-    sType                  = .PIPELINE_LAYOUT_CREATE_INFO,
-    setLayoutCount         = 1,
-    pSetLayouts            = &pipeline.descriptor_set_layout,
-    pushConstantRangeCount = 1,
-    pPushConstantRanges    = &push_constant_range,
-  }
   vk.CreatePipelineLayout(
     g_device,
-    &pipeline_layout_info,
+    &{
+      sType = .PIPELINE_LAYOUT_CREATE_INFO,
+      setLayoutCount = 1,
+      pSetLayouts = &pipeline.descriptor_set_layout,
+      pushConstantRangeCount = 1,
+      pPushConstantRanges = &push_constant_range,
+    },
     nil,
     &pipeline.pipeline_layout,
   ) or_return
