@@ -67,6 +67,7 @@ Renderer :: struct {
   pipeline_3d:                Pipeline3D,
   pipeline_shadow:            PipelineShadow,  // Add shadow pipeline struct
   particle_render:            ParticleRenderPipeline,
+  postprocess_pipeline:       PostprocessPipeline,  // Add postprocess pipeline as dependency
   meshes:                     resource.Pool(Mesh),
   materials:                  resource.Pool(Material),
   textures:                   resource.Pool(Texture),
@@ -74,20 +75,19 @@ Renderer :: struct {
 }
 
 renderer_init :: proc(
-  self: ^Renderer,
-  swapchain_format: vk.Format,
-  swapchain_extent: vk.Extent2D,
+  renderer: ^Renderer,
+  width: u32,
+  height: u32,
+  color_format: vk.Format,
+  depth_format: vk.Format,
 ) -> vk.Result {
   log.infof("Initializing mesh pool... ")
-  resource.pool_init(&self.meshes)
+  resource.pool_init(&renderer.meshes)
   log.infof("Initializing materials pool... ")
-  resource.pool_init(&self.materials)
+  resource.pool_init(&renderer.materials)
   log.infof("Initializing textures pool... ")
-  resource.pool_init(&self.textures)
+  resource.pool_init(&renderer.textures)
   log.infof("All resource pools initialized successfully")
-
-  // Initialize particle compute pipeline
-  self.particle_compute = setup_particle_compute_pipeline() or_return
 
   // Initialize command buffers and synchronization objects first
   alloc_info := vk.CommandBufferAllocateInfo {
@@ -96,7 +96,7 @@ renderer_init :: proc(
     level              = .PRIMARY,
     commandBufferCount = 1,
   }
-  for &frame in self.frames {
+  for &frame in renderer.frames {
     vk.AllocateCommandBuffers(
       g_device,
       &alloc_info,
@@ -110,7 +110,7 @@ renderer_init :: proc(
     sType = .FENCE_CREATE_INFO,
     flags = {.SIGNALED},
   }
-  for &frame in self.frames {
+  for &frame in renderer.frames {
     vk.CreateSemaphore(
       g_device,
       &semaphore_info,
@@ -127,73 +127,70 @@ renderer_init :: proc(
   }
 
   // Initialize depth buffer
-  self.depth_buffer = create_depth_image(
-    swapchain_extent.width,
-    swapchain_extent.height,
+  renderer.depth_buffer = create_depth_image(
+    width,
+    height,
   ) or_return
 
   // Initialize pipelines first so we have the descriptor set layouts
-  self.pipeline_3d = setup_pipeline_3d() or_return // Initialize 3D pipeline
-  self.particle_render = setup_particle_render_pipeline() or_return // Initialize particle render pipeline
-  
+  renderer.pipeline_3d = setup_pipeline_3d() or_return // Initialize 3D pipeline
+  renderer.particle_render = setup_particle_render_pipeline() or_return // Initialize particle render pipeline
+
   // Initialize shadow pipeline with descriptor set layouts from 3D pipeline
-  self.pipeline_shadow = setup_pipeline_shadow(
-    pipeline3d_get_camera_descriptor_set_layout(&self.pipeline_3d),
-    pipeline3d_get_skinning_descriptor_set_layout(&self.pipeline_3d),
+  renderer.pipeline_shadow = setup_pipeline_shadow(
+    pipeline3d_get_camera_descriptor_set_layout(&renderer.pipeline_3d),
+    pipeline3d_get_skinning_descriptor_set_layout(&renderer.pipeline_3d),
   ) or_return
 
-  // Initialize postprocessing pipelines
-  build_postprocess_pipelines(
-    swapchain_format,
-    swapchain_extent.width,
-    swapchain_extent.height,
-  ) or_return
+  renderer.particle_compute = setup_particle_compute_pipeline() or_return
+  // Initialize postprocess pipeline
+  postprocess_pipeline_init(&renderer.postprocess_pipeline, color_format, width, height) or_return
 
   // Now initialize frames with the camera descriptor set layout from 3D pipeline
-  self.current_frame_index = 0
-  for &frame in self.frames {
+  renderer.current_frame_index = 0
+  for &frame in renderer.frames {
     frame_init(
       &frame,
-      swapchain_format,
-      swapchain_extent.width,
-      swapchain_extent.height,
-      pipeline3d_get_camera_descriptor_set_layout(&self.pipeline_3d),
+      color_format,
+      width,
+      height,
+      pipeline3d_get_camera_descriptor_set_layout(&renderer.pipeline_3d),
     ) or_return
   }
 
   return .SUCCESS
 }
 
-renderer_deinit :: proc(self: ^Renderer) {
+renderer_deinit :: proc(renderer: ^Renderer) {
   vk.DeviceWaitIdle(g_device)
-  resource.pool_deinit(self.textures, texture_deinit)
-  resource.pool_deinit(self.meshes, mesh_deinit)
-  resource.pool_deinit(self.materials, material_deinit)
-  destroy_particle_render_pipeline(&self.particle_render)
-  destroy_pipeline_3d(&self.pipeline_3d) // Destroy 3D pipeline
-  destroy_pipeline_shadow(&self.pipeline_shadow) // Destroy shadow pipeline
-  postprocess_pipeline_deinit() // Cleanup postprocessing pipelines
-  for &frame in self.frames do frame_deinit(&frame)
+  resource.pool_deinit(renderer.textures, texture_deinit)
+  resource.pool_deinit(renderer.meshes, mesh_deinit)
+  resource.pool_deinit(renderer.materials, material_deinit)
+  destroy_particle_render_pipeline(&renderer.particle_render)
+  destroy_pipeline_3d(&renderer.pipeline_3d) // Destroy 3D pipeline
+  destroy_pipeline_shadow(&renderer.pipeline_shadow) // Destroy shadow pipeline
+  postprocess_pipeline_deinit(&renderer.postprocess_pipeline) // Cleanup postprocessing pipelines
+  for &frame in renderer.frames do frame_deinit(&frame)
   // g_camera_descriptor_set_layout is now managed by pipeline_3d
 }
 
 renderer_recreate_images :: proc(
-  self: ^Renderer,
+  renderer: ^Renderer,
   new_format: vk.Format,
   new_extent: vk.Extent2D,
 ) -> vk.Result {
   vk.DeviceWaitIdle(g_device)
-  image_buffer_deinit(&self.depth_buffer)
-  for &frame in self.frames {
+  image_buffer_deinit(&renderer.depth_buffer)
+  for &frame in renderer.frames {
     frame_deinit_images(&frame)
   }
-  self.depth_buffer = create_depth_image(
+  renderer.depth_buffer = create_depth_image(
     new_extent.width,
     new_extent.height,
   ) or_return
 
   // Recreate frame images with new size
-  for &frame in self.frames {
+  for &frame in renderer.frames {
     frame_recreate_images(
       &frame,
       new_format,
@@ -204,111 +201,166 @@ renderer_recreate_images :: proc(
   return .SUCCESS
 }
 
-renderer_get_in_flight_fence :: proc(self: ^Renderer) -> vk.Fence {
-  return self.frames[self.current_frame_index].fence
+renderer_get_in_flight_fence :: proc(renderer: ^Renderer) -> vk.Fence {
+  return renderer.frames[renderer.current_frame_index].fence
 }
 
 renderer_get_image_available_semaphore :: proc(
-  self: ^Renderer,
+  renderer: ^Renderer,
 ) -> vk.Semaphore {
-  return self.frames[self.current_frame_index].image_available_semaphore
+  return renderer.frames[renderer.current_frame_index].image_available_semaphore
 }
 
 renderer_get_render_finished_semaphore :: proc(
-  self: ^Renderer,
+  renderer: ^Renderer,
 ) -> vk.Semaphore {
-  return self.frames[self.current_frame_index].render_finished_semaphore
+  return renderer.frames[renderer.current_frame_index].render_finished_semaphore
 }
 
-renderer_get_command_buffer :: proc(self: ^Renderer) -> vk.CommandBuffer {
-  if self == nil {
+renderer_get_command_buffer :: proc(renderer: ^Renderer) -> vk.CommandBuffer {
+  if renderer == nil {
     log.errorf("Error: Renderer is nil in get_command_buffer_renderer")
     return vk.CommandBuffer{}
   }
-  if self.current_frame_index >= len(self.frames) {
+  if renderer.current_frame_index >= len(renderer.frames) {
     log.errorf(
       "Error: Invalid frame index",
-      self.current_frame_index,
+      renderer.current_frame_index,
       "vs",
-      len(self.frames),
+      len(renderer.frames),
     )
     return vk.CommandBuffer{}
   }
-  cmd_buffer := self.frames[self.current_frame_index].command_buffer
+  cmd_buffer := renderer.frames[renderer.current_frame_index].command_buffer
   if cmd_buffer == nil {
     log.errorf(
       "Error: Command buffer is nil for frame",
-      self.current_frame_index,
+      renderer.current_frame_index,
     )
     return vk.CommandBuffer{}
   }
   return cmd_buffer
 }
 
-renderer_get_main_pass_image :: proc(self: ^Renderer) -> vk.Image {
-  return self.frames[self.current_frame_index].main_pass_image.image
+renderer_get_main_pass_image :: proc(renderer: ^Renderer) -> vk.Image {
+  return renderer.frames[renderer.current_frame_index].main_pass_image.image
 }
 
-renderer_get_main_pass_view :: proc(self: ^Renderer) -> vk.ImageView {
-  return self.frames[self.current_frame_index].main_pass_image.view
+renderer_get_main_pass_view :: proc(renderer: ^Renderer) -> vk.ImageView {
+  return renderer.frames[renderer.current_frame_index].main_pass_image.view
 }
 
 renderer_get_postprocess_pass_image :: proc(
-  self: ^Renderer,
+  renderer: ^Renderer,
   i: int,
 ) -> vk.Image {
-  return self.frames[self.current_frame_index].postprocess_images[i].image
+  return renderer.frames[renderer.current_frame_index].postprocess_images[i].image
 }
 
 renderer_get_postprocess_pass_view :: proc(
-  self: ^Renderer,
+  renderer: ^Renderer,
   i: int,
 ) -> vk.ImageView {
-  return self.frames[self.current_frame_index].postprocess_images[i].view
+  return renderer.frames[renderer.current_frame_index].postprocess_images[i].view
 }
 
 renderer_get_camera_uniform :: proc(
-  self: ^Renderer,
+  renderer: ^Renderer,
 ) -> ^DataBuffer(SceneUniform) {
-  return &self.frames[self.current_frame_index].camera_uniform
+  return &renderer.frames[renderer.current_frame_index].camera_uniform
 }
 
 renderer_get_light_uniform :: proc(
-  self: ^Renderer,
+  renderer: ^Renderer,
 ) -> ^DataBuffer(SceneLightUniform) {
-  return &self.frames[self.current_frame_index].light_uniform
+  return &renderer.frames[renderer.current_frame_index].light_uniform
 }
 
 renderer_get_shadow_map :: proc(
-  self: ^Renderer,
+  renderer: ^Renderer,
   light_idx: int,
 ) -> ^DepthTexture {
-  return &self.frames[self.current_frame_index].shadow_maps[light_idx]
+  return &renderer.frames[renderer.current_frame_index].shadow_maps[light_idx]
 }
 
 renderer_get_cube_shadow_map :: proc(
-  self: ^Renderer,
+  renderer: ^Renderer,
   light_idx: int,
 ) -> ^CubeDepthTexture {
-  return &self.frames[self.current_frame_index].cube_shadow_maps[light_idx]
+  return &renderer.frames[renderer.current_frame_index].cube_shadow_maps[light_idx]
 }
 
 renderer_get_camera_descriptor_set :: proc(
-  self: ^Renderer,
+  renderer: ^Renderer,
 ) -> vk.DescriptorSet {
-  return self.frames[self.current_frame_index].camera_descriptor_set
+  return renderer.frames[renderer.current_frame_index].camera_descriptor_set
 }
 
 renderer_get_shadow_map_descriptor_set :: proc(
-  self: ^Renderer,
+  renderer: ^Renderer,
 ) -> vk.DescriptorSet {
-  return self.frames[self.current_frame_index].shadow_map_descriptor_set
+  return renderer.frames[renderer.current_frame_index].shadow_map_descriptor_set
 }
 
 renderer_get_cube_shadow_map_descriptor_set :: proc(
-  self: ^Renderer,
+  renderer: ^Renderer,
 ) -> vk.DescriptorSet {
-  return self.frames[self.current_frame_index].cube_shadow_map_descriptor_set
+  return renderer.frames[renderer.current_frame_index].cube_shadow_map_descriptor_set
+}
+
+// Postprocess pipeline accessors
+renderer_get_postprocess_pipeline :: proc(renderer: ^Renderer) -> ^PostprocessPipeline {
+  return &renderer.postprocess_pipeline
+}
+
+// Convenience functions for postprocess effects
+renderer_postprocess_add_grayscale :: proc(
+  renderer: ^Renderer,
+  strength: f32 = 1.0,
+  weights: [3]f32 = {0.299, 0.587, 0.114},
+) {
+  postprocess_add_grayscale(&renderer.postprocess_pipeline, strength, weights)
+}
+
+renderer_postprocess_add_blur :: proc(renderer: ^Renderer, radius: f32) {
+  postprocess_add_blur(&renderer.postprocess_pipeline, radius)
+}
+
+renderer_postprocess_add_bloom :: proc(
+  renderer: ^Renderer,
+  threshold: f32 = 0.2,
+  intensity: f32 = 1.0,
+  blur_radius: f32 = 4.0,
+) {
+  postprocess_add_bloom(&renderer.postprocess_pipeline, threshold, intensity, blur_radius)
+}
+
+renderer_postprocess_add_tonemap :: proc(
+  renderer: ^Renderer,
+  exposure: f32 = 1.0,
+  gamma: f32 = 2.2,
+) {
+  postprocess_add_tonemap(&renderer.postprocess_pipeline, exposure, gamma)
+}
+
+renderer_postprocess_add_outline :: proc(
+  renderer: ^Renderer,
+  thickness: f32,
+  color: [3]f32,
+) {
+  postprocess_add_outline(&renderer.postprocess_pipeline, thickness, color)
+}
+
+renderer_postprocess_clear_effects :: proc(renderer: ^Renderer) {
+  postprocess_clear_effects(&renderer.postprocess_pipeline)
+}
+
+renderer_postprocess_update_input :: proc(
+  renderer: ^Renderer,
+  set_idx: int,
+  input_view: vk.ImageView,
+) -> vk.Result {
+  return postprocess_update_input(&renderer.postprocess_pipeline, set_idx, input_view)
 }
 
 prepare_light :: proc(node: ^Node, cb_context: rawptr) -> bool {

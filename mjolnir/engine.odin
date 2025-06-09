@@ -128,7 +128,6 @@ init :: proc(
   engine.last_frame_timestamp = engine.start_timestamp
   engine.last_update_timestamp = engine.start_timestamp
 
-  // Remove old global pipeline calls - now handled in renderer_init
   init_scene(&engine.scene)
   build_renderer(engine) or_return
 
@@ -190,8 +189,10 @@ build_renderer :: proc(engine: ^Engine) -> vk.Result {
   // Initialize renderer with swapchain info
   renderer_init(
     &engine.renderer,
+    engine.swapchain.extent.width,
+    engine.swapchain.extent.height,
     engine.swapchain.format.format,
-    engine.swapchain.extent,
+    .D32_SFLOAT,
   ) or_return
 
   engine.renderer.environment_map_handle, engine.renderer.environment_map =

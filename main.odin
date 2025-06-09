@@ -186,8 +186,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
       cast_shadow = true,
     },
   )
-  postprocess_push_tonemap(1.5, 1.3)
-  postprocess_push_grayscale(0.3)
+  renderer_postprocess_add_tonemap(&engine.renderer, 1.5, 1.3)
+  renderer_postprocess_add_grayscale(&engine.renderer, 0.3)
   emitter := mjolnir.Emitter{
       transform = geometry.Transform{
           position = {0, 3, 3},
