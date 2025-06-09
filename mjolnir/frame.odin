@@ -42,6 +42,36 @@ frame_init :: proc(
 ) -> (
   res: vk.Result,
 ) {
+  vk.AllocateCommandBuffers(
+    g_device,
+    &{
+    sType              = .COMMAND_BUFFER_ALLOCATE_INFO,
+    commandPool        = g_command_pool,
+    level              = .PRIMARY,
+    commandBufferCount = 1,
+  },
+    &self.command_buffer,
+  ) or_return
+  vk.CreateSemaphore(
+    g_device,
+    &{
+    sType = .SEMAPHORE_CREATE_INFO,
+  },
+    nil,
+    &self.image_available_semaphore,
+  ) or_return
+  vk.CreateSemaphore(
+    g_device,
+    &{
+    sType = .SEMAPHORE_CREATE_INFO,
+  },
+    nil,
+    &self.render_finished_semaphore,
+  ) or_return
+  vk.CreateFence(g_device, &{
+    sType = .FENCE_CREATE_INFO,
+    flags = {.SIGNALED},
+  }, nil, &self.fence) or_return
   self.camera_uniform = create_host_visible_buffer(
     SceneUniform,
     (1 + 6 * MAX_SCENE_UNIFORMS),

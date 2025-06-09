@@ -56,15 +56,15 @@ clear_lights :: proc(self: ^SceneLightUniform) {
 }
 
 Renderer :: struct {
-  frames:                     [MAX_FRAMES_IN_FLIGHT]Frame,
-  frame_index:                u32,
-  main:                       RendererMain,
-  shadow:                     RendererShadow,
-  particle:                   RendererParticle,
-  postprocess:                RendererPostProcess,
-  meshes:                     resource.Pool(Mesh),
-  materials:                  resource.Pool(Material),
-  textures:                   resource.Pool(Texture),
+  frames:      [MAX_FRAMES_IN_FLIGHT]Frame,
+  frame_index: u32,
+  main:        RendererMain,
+  shadow:      RendererShadow,
+  particle:    RendererParticle,
+  postprocess: RendererPostProcess,
+  meshes:      resource.Pool(Mesh),
+  materials:   resource.Pool(Material),
+  textures:    resource.Pool(Texture),
 }
 
 renderer_init :: proc(
@@ -81,53 +81,16 @@ renderer_init :: proc(
   log.infof("Initializing textures pool... ")
   resource.pool_init(&renderer.textures)
   log.infof("All resource pools initialized successfully")
-  alloc_info := vk.CommandBufferAllocateInfo {
-    sType              = .COMMAND_BUFFER_ALLOCATE_INFO,
-    commandPool        = g_command_pool,
-    level              = .PRIMARY,
-    commandBufferCount = 1,
-  }
-  for &frame in renderer.frames {
-    vk.AllocateCommandBuffers(
-      g_device,
-      &alloc_info,
-      &frame.command_buffer,
-    ) or_return
-  }
-  semaphore_info := vk.SemaphoreCreateInfo {
-    sType = .SEMAPHORE_CREATE_INFO,
-  }
-  fence_info := vk.FenceCreateInfo {
-    sType = .FENCE_CREATE_INFO,
-    flags = {.SIGNALED},
-  }
-  for &frame in renderer.frames {
-    vk.CreateSemaphore(
-      g_device,
-      &semaphore_info,
-      nil,
-      &frame.image_available_semaphore,
-    ) or_return
-    vk.CreateSemaphore(
-      g_device,
-      &semaphore_info,
-      nil,
-      &frame.render_finished_semaphore,
-    ) or_return
-    vk.CreateFence(g_device, &fence_info, nil, &frame.fence) or_return
-  }
   renderer.main.depth_buffer = create_depth_image(width, height) or_return
   pipeline3d_init(&renderer.main.pipeline) or_return
   setup_particle_render_pipeline(&renderer.particle.pipeline) or_return
   setup_particle_compute_pipeline(&renderer.particle.pipeline_comp) or_return
-  // Initialize shadow pipeline with descriptor set layouts from 3D pipeline
-  // TODO: Eliminate this dependency if possible
   pipeline_shadow_init(
     &renderer.shadow.pipeline,
-    pipeline3d_get_camera_descriptor_set_layout(&renderer.main.pipeline),
-    pipeline3d_get_skinning_descriptor_set_layout(&renderer.main.pipeline),
+    // TODO: Eliminate this dependency if possible
+    renderer.main.pipeline.camera_descriptor_set_layout,
+    renderer.main.pipeline.skinning_descriptor_set_layout,
   ) or_return
-  // Initialize postprocess
   renderer_postprocess_init(
     &renderer.postprocess,
     color_format,
@@ -141,7 +104,8 @@ renderer_init :: proc(
       color_format,
       width,
       height,
-      pipeline3d_get_camera_descriptor_set_layout(&renderer.main.pipeline),
+      // TODO: Eliminate this dependency if possible
+      renderer.main.pipeline.camera_descriptor_set_layout,
     ) or_return
   }
   return .SUCCESS
