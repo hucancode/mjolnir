@@ -185,14 +185,14 @@ build_renderer :: proc(engine: ^Engine) -> vk.Result {
     engine.swapchain.format.format,
     .D32_SFLOAT,
   ) or_return
-  engine.renderer.environment_map_handle, engine.renderer.environment_map =
+  engine.renderer.main.environment_map_handle, engine.renderer.main.environment_map =
     create_hdr_texture_from_path(
       engine,
       "assets/teutonic_castle_moat_4k.hdr",
     ) or_return
-  engine.renderer.brdf_lut_handle, engine.renderer.brdf_lut =
+  engine.renderer.main.brdf_lut_handle, engine.renderer.main.brdf_lut =
     create_texture_from_path(engine, "assets/lut_ggx.png") or_return
-  env_layout := pipeline3d_get_environment_descriptor_set_layout(&engine.renderer.pipeline_3d)
+  env_layout := pipeline3d_get_environment_descriptor_set_layout(&engine.renderer.main.pipeline)
   vk.AllocateDescriptorSets(
     g_device,
     &{
@@ -201,29 +201,29 @@ build_renderer :: proc(engine: ^Engine) -> vk.Result {
       descriptorSetCount = 1,
       pSetLayouts = &env_layout,
     },
-    &engine.renderer.environment_descriptor_set,
+    &engine.renderer.main.environment_descriptor_set,
   ) or_return
   env_write := vk.WriteDescriptorSet {
       sType           = .WRITE_DESCRIPTOR_SET,
-      dstSet          = engine.renderer.environment_descriptor_set,
+      dstSet          = engine.renderer.main.environment_descriptor_set,
       dstBinding      = 0,
       descriptorType  = .COMBINED_IMAGE_SAMPLER,
       descriptorCount = 1,
       pImageInfo      = &{
-        sampler = engine.renderer.environment_map.sampler,
-        imageView = engine.renderer.environment_map.buffer.view,
+        sampler = engine.renderer.main.environment_map.sampler,
+        imageView = engine.renderer.main.environment_map.buffer.view,
         imageLayout = .SHADER_READ_ONLY_OPTIMAL,
       },
     }
   brdf_lut_write := vk.WriteDescriptorSet {
       sType           = .WRITE_DESCRIPTOR_SET,
-      dstSet          = engine.renderer.environment_descriptor_set,
+      dstSet          = engine.renderer.main.environment_descriptor_set,
       dstBinding      = 1,
       descriptorType  = .COMBINED_IMAGE_SAMPLER,
       descriptorCount = 1,
       pImageInfo      = &{
-        sampler = engine.renderer.brdf_lut.sampler,
-        imageView = engine.renderer.brdf_lut.buffer.view,
+        sampler = engine.renderer.main.brdf_lut.sampler,
+        imageView = engine.renderer.main.brdf_lut.buffer.view,
         imageLayout = .SHADER_READ_ONLY_OPTIMAL,
       },
     }

@@ -9,6 +9,16 @@ import "resource"
 import mu "vendor:microui"
 import vk "vendor:vulkan"
 
+RendererMain :: struct {
+  pipeline: Pipeline3D,
+  depth_buffer:               ImageBuffer,
+  environment_map:            ^Texture,
+  environment_map_handle:     Handle,
+  environment_descriptor_set: vk.DescriptorSet,
+  brdf_lut_handle:            Handle,
+  brdf_lut:                   ^Texture,
+}
+
 render_main_pass :: proc(
   engine: ^Engine,
   command_buffer: vk.CommandBuffer,
@@ -50,7 +60,7 @@ render_main_pass :: proc(
   }
   depth_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
-    imageView = engine.renderer.depth_buffer.view,
+    imageView = engine.renderer.main.depth_buffer.view,
     imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
     loadOp = .CLEAR,
     storeOp = .STORE,
@@ -123,15 +133,15 @@ render_single_node :: proc(node: ^Node, cb_context: rawptr) -> bool {
       return true
     }
     pipeline := pipeline3d_get_pipeline(
-      &ctx.engine.renderer.pipeline_3d,
+      &ctx.engine.renderer.main.pipeline,
       material,
     )
-    layout := pipeline3d_get_layout(&ctx.engine.renderer.pipeline_3d)
+    layout := pipeline3d_get_layout(&ctx.engine.renderer.main.pipeline)
     descriptor_sets := [?]vk.DescriptorSet {
       renderer_get_camera_descriptor_set(&ctx.engine.renderer), // set 0
       material.texture_descriptor_set, // set 1
       material.skinning_descriptor_sets[frame], // set 2
-      ctx.engine.renderer.environment_descriptor_set, // set 3
+      ctx.engine.renderer.main.environment_descriptor_set, // set 3
     }
     offsets := [1]u32{0}
     vk.CmdBindPipeline(ctx.command_buffer, .GRAPHICS, pipeline)

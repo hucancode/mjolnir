@@ -246,8 +246,8 @@ create_material :: proc(
   mat.emissive_value = emissive_value
   material_init_descriptor_set_layout(
     mat,
-    pipeline3d_get_texture_descriptor_set_layout(&engine.renderer.pipeline_3d),
-    pipeline3d_get_skinning_descriptor_set_layout(&engine.renderer.pipeline_3d),
+    pipeline3d_get_texture_descriptor_set_layout(&engine.renderer.main.pipeline),
+    pipeline3d_get_skinning_descriptor_set_layout(&engine.renderer.main.pipeline),
   ) or_return
   fallbacks := MaterialFallbacks {
     albedo    = mat.albedo_value,
@@ -298,8 +298,8 @@ create_unlit_material :: proc(
   mat.albedo_value = albedo_value
   material_init_descriptor_set_layout(
     mat,
-    pipeline3d_get_texture_descriptor_set_layout(&engine.renderer.pipeline_3d),
-    pipeline3d_get_skinning_descriptor_set_layout(&engine.renderer.pipeline_3d),
+    pipeline3d_get_texture_descriptor_set_layout(&engine.renderer.main.pipeline),
+    pipeline3d_get_skinning_descriptor_set_layout(&engine.renderer.main.pipeline),
   ) or_return
   albedo := resource.get(engine.renderer.textures, albedo_handle)
   fallbacks := MaterialFallbacks {

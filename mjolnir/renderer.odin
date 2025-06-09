@@ -57,14 +57,8 @@ clear_lights :: proc(self: ^SceneLightUniform) {
 
 Renderer :: struct {
   frames:                     [MAX_FRAMES_IN_FLIGHT]Frame,
-  depth_buffer:               ImageBuffer,
-  environment_map:            ^Texture,
-  environment_map_handle:     Handle,
-  environment_descriptor_set: vk.DescriptorSet,
-  brdf_lut_handle:            Handle,
-  brdf_lut:                   ^Texture,
   frame_index:                u32,
-  pipeline_3d:                Pipeline3D,
+  main:                       RendererMain,
   shadow:                     RendererShadow,
   particle:                   RendererParticle,
   postprocess:                RendererPostProcess,
@@ -122,16 +116,16 @@ renderer_init :: proc(
     ) or_return
     vk.CreateFence(g_device, &fence_info, nil, &frame.fence) or_return
   }
-  renderer.depth_buffer = create_depth_image(width, height) or_return
-  pipeline3d_init(&renderer.pipeline_3d) or_return
+  renderer.main.depth_buffer = create_depth_image(width, height) or_return
+  pipeline3d_init(&renderer.main.pipeline) or_return
   setup_particle_render_pipeline(&renderer.particle.pipeline) or_return
   setup_particle_compute_pipeline(&renderer.particle.pipeline_comp) or_return
   // Initialize shadow pipeline with descriptor set layouts from 3D pipeline
   // TODO: Eliminate this dependency if possible
   pipeline_shadow_init(
     &renderer.shadow.pipeline,
-    pipeline3d_get_camera_descriptor_set_layout(&renderer.pipeline_3d),
-    pipeline3d_get_skinning_descriptor_set_layout(&renderer.pipeline_3d),
+    pipeline3d_get_camera_descriptor_set_layout(&renderer.main.pipeline),
+    pipeline3d_get_skinning_descriptor_set_layout(&renderer.main.pipeline),
   ) or_return
   // Initialize postprocess
   renderer_postprocess_init(
@@ -147,7 +141,7 @@ renderer_init :: proc(
       color_format,
       width,
       height,
-      pipeline3d_get_camera_descriptor_set_layout(&renderer.pipeline_3d),
+      pipeline3d_get_camera_descriptor_set_layout(&renderer.main.pipeline),
     ) or_return
   }
   return .SUCCESS
@@ -159,7 +153,7 @@ renderer_deinit :: proc(renderer: ^Renderer) {
   resource.pool_deinit(renderer.meshes, mesh_deinit)
   resource.pool_deinit(renderer.materials, material_deinit)
   particle_render_pipeline_deinit(&renderer.particle.pipeline)
-  pipeline3d_deinit(&renderer.pipeline_3d)
+  pipeline3d_deinit(&renderer.main.pipeline)
   pipeline_shadow_deinit(&renderer.shadow.pipeline)
   pipeline_postprocess_deinit(&renderer.postprocess.pipeline)
   for &frame in renderer.frames do frame_deinit(&frame)
@@ -171,11 +165,11 @@ renderer_recreate_images :: proc(
   new_extent: vk.Extent2D,
 ) -> vk.Result {
   vk.DeviceWaitIdle(g_device)
-  image_buffer_deinit(&renderer.depth_buffer)
+  image_buffer_deinit(&renderer.main.depth_buffer)
   for &frame in renderer.frames {
     frame_deinit_images(&frame)
   }
-  renderer.depth_buffer = create_depth_image(
+  renderer.main.depth_buffer = create_depth_image(
     new_extent.width,
     new_extent.height,
   ) or_return
