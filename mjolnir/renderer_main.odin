@@ -9,23 +9,567 @@ import "resource"
 import mu "vendor:microui"
 import vk "vendor:vulkan"
 
+ShaderFeatures :: enum {
+  SKINNING                   = 0,
+  ALBEDO_TEXTURE             = 1,
+  METALLIC_ROUGHNESS_TEXTURE = 2,
+  NORMAL_TEXTURE             = 3,
+  DISPLACEMENT_TEXTURE       = 4,
+  EMISSIVE_TEXTURE           = 5,
+}
+ShaderFeatureSet :: bit_set[ShaderFeatures;u32]
+SHADER_OPTION_COUNT: u32 : len(ShaderFeatures)
+SHADER_VARIANT_COUNT: u32 : 1 << SHADER_OPTION_COUNT
+
+ShaderConfig :: struct {
+  is_skinned:                     b32,
+  has_albedo_texture:             b32,
+  has_metallic_roughness_texture: b32,
+  has_normal_texture:             b32,
+  has_displacement_texture:       b32,
+  has_emissive_texture:           b32,
+}
+
+UNLIT_SHADER_OPTION_COUNT :: 2
+UNLIT_SHADER_VARIANT_COUNT: u32 : 1 << UNLIT_SHADER_OPTION_COUNT
+
+SHADER_UBER_VERT :: #load("shader/uber/vert.spv")
+SHADER_UBER_FRAG :: #load("shader/uber/frag.spv")
+SHADER_UNLIT_VERT :: #load("shader/unlit/vert.spv")
+SHADER_UNLIT_FRAG :: #load("shader/unlit/frag.spv")
+
 RendererMain :: struct {
-  pipeline: Pipeline3D,
-  depth_buffer:               ImageBuffer,
-  environment_map:            ^Texture,
-  environment_map_handle:     Handle,
-  environment_descriptor_set: vk.DescriptorSet,
-  brdf_lut_handle:            Handle,
-  brdf_lut:                   ^Texture,
+  camera_descriptor_set_layout:      vk.DescriptorSetLayout,
+  environment_descriptor_set_layout: vk.DescriptorSetLayout,
+  texture_descriptor_set_layout:     vk.DescriptorSetLayout,
+  skinning_descriptor_set_layout:    vk.DescriptorSetLayout,
+  pipeline_layout:                   vk.PipelineLayout,
+  pipelines:                         [SHADER_VARIANT_COUNT]vk.Pipeline,
+  unlit_pipelines:                   [UNLIT_SHADER_VARIANT_COUNT]vk.Pipeline,
+  depth_buffer:                      ImageBuffer,
+  environment_map:                   ^Texture,
+  environment_map_handle:            Handle,
+  environment_descriptor_set:        vk.DescriptorSet,
+  brdf_lut_handle:                   Handle,
+  brdf_lut:                          ^Texture,
+}
+
+renderer_main_build_pbr_pipeline :: proc(
+  main: ^RendererMain,
+  target_color_format: vk.Format,
+  target_depth_format: vk.Format,
+) -> vk.Result {
+  bindings_main := [?]vk.DescriptorSetLayoutBinding {
+    {   // Scene Uniforms (view, proj, time)
+      binding         = 0,
+      descriptorType  = .UNIFORM_BUFFER_DYNAMIC,
+      descriptorCount = 1,
+      stageFlags      = {.VERTEX, .FRAGMENT},
+    },
+    {   // Light Uniforms
+      binding         = 1,
+      descriptorType  = .UNIFORM_BUFFER,
+      descriptorCount = 1,
+      stageFlags      = {.FRAGMENT},
+    },
+    {   // Shadow Maps
+      binding         = 2,
+      descriptorType  = .COMBINED_IMAGE_SAMPLER,
+      descriptorCount = MAX_SHADOW_MAPS,
+      stageFlags      = {.FRAGMENT},
+    },
+    {   // Cube Shadow Maps
+      binding         = 3,
+      descriptorType  = .COMBINED_IMAGE_SAMPLER,
+      descriptorCount = MAX_SHADOW_MAPS,
+      stageFlags      = {.FRAGMENT},
+    },
+  }
+  layout_info_main := vk.DescriptorSetLayoutCreateInfo {
+    sType        = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+    bindingCount = len(bindings_main),
+    pBindings    = raw_data(bindings_main[:]),
+  }
+  vk.CreateDescriptorSetLayout(
+    g_device,
+    &layout_info_main,
+    nil,
+    &main.camera_descriptor_set_layout,
+  ) or_return
+  pipeline_infos: [SHADER_VARIANT_COUNT]vk.GraphicsPipelineCreateInfo
+  spec_infos: [SHADER_VARIANT_COUNT]vk.SpecializationInfo
+  configs: [SHADER_VARIANT_COUNT]ShaderConfig
+  entries: [SHADER_VARIANT_COUNT][SHADER_OPTION_COUNT]vk.SpecializationMapEntry
+  shader_stages_arr: [SHADER_VARIANT_COUNT][2]vk.PipelineShaderStageCreateInfo
+
+  vert_module := create_shader_module(SHADER_UBER_VERT) or_return
+  defer vk.DestroyShaderModule(g_device, vert_module, nil)
+  frag_module := create_shader_module(SHADER_UBER_FRAG) or_return
+  defer vk.DestroyShaderModule(g_device, frag_module, nil)
+
+  dynamic_states_values := [?]vk.DynamicState{.VIEWPORT, .SCISSOR}
+  dynamic_state_info := vk.PipelineDynamicStateCreateInfo {
+    sType             = .PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+    dynamicStateCount = u32(len(dynamic_states_values)),
+    pDynamicStates    = raw_data(dynamic_states_values[:]),
+  }
+  input_assembly := vk.PipelineInputAssemblyStateCreateInfo {
+    sType    = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+    topology = .TRIANGLE_LIST,
+  }
+  viewport_state := vk.PipelineViewportStateCreateInfo {
+    sType         = .PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+    viewportCount = 1,
+    scissorCount  = 1,
+  }
+  rasterizer := vk.PipelineRasterizationStateCreateInfo {
+    sType       = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+    polygonMode = .FILL,
+    cullMode    = {.BACK},
+    frontFace   = .COUNTER_CLOCKWISE,
+    lineWidth   = 1.0,
+  }
+  multisampling := vk.PipelineMultisampleStateCreateInfo {
+    sType                = .PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+    rasterizationSamples = {._1},
+  }
+  color_blend_attachment := vk.PipelineColorBlendAttachmentState {
+    colorWriteMask = {.R, .G, .B, .A},
+  }
+  blending := vk.PipelineColorBlendStateCreateInfo {
+    sType           = .PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+    attachmentCount = 1,
+    pAttachments    = &color_blend_attachment,
+  }
+  depth_stencil_state := vk.PipelineDepthStencilStateCreateInfo {
+    sType            = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+    depthTestEnable  = true,
+    depthWriteEnable = true,
+    depthCompareOp   = .LESS,
+  }
+  color_formats := [?]vk.Format{target_color_format}
+  rendering_info_khr := vk.PipelineRenderingCreateInfoKHR {
+    sType                   = .PIPELINE_RENDERING_CREATE_INFO_KHR,
+    colorAttachmentCount    = len(color_formats),
+    pColorAttachmentFormats = raw_data(color_formats[:]),
+    depthAttachmentFormat   = target_depth_format,
+  }
+  vertex_input_info := vk.PipelineVertexInputStateCreateInfo {
+    sType                           = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+    vertexBindingDescriptionCount   = len(geometry.VERTEX_BINDING_DESCRIPTION),
+    pVertexBindingDescriptions      = raw_data(
+      geometry.VERTEX_BINDING_DESCRIPTION[:],
+    ),
+    vertexAttributeDescriptionCount = len(
+      geometry.VERTEX_ATTRIBUTE_DESCRIPTIONS,
+    ),
+    pVertexAttributeDescriptions    = raw_data(
+      geometry.VERTEX_ATTRIBUTE_DESCRIPTIONS[:],
+    ),
+  }
+  texture_bindings := []vk.DescriptorSetLayoutBinding {
+    {
+      binding = 0,
+      descriptorType = .COMBINED_IMAGE_SAMPLER,
+      descriptorCount = 1,
+      stageFlags = {.FRAGMENT},
+    },
+    {
+      binding = 1,
+      descriptorType = .COMBINED_IMAGE_SAMPLER,
+      descriptorCount = 1,
+      stageFlags = {.FRAGMENT},
+    },
+    {
+      binding = 2,
+      descriptorType = .COMBINED_IMAGE_SAMPLER,
+      descriptorCount = 1,
+      stageFlags = {.FRAGMENT},
+    },
+    {
+      binding = 3,
+      descriptorType = .COMBINED_IMAGE_SAMPLER,
+      descriptorCount = 1,
+      stageFlags = {.FRAGMENT},
+    },
+    {
+      binding = 4,
+      descriptorType = .COMBINED_IMAGE_SAMPLER,
+      descriptorCount = 1,
+      stageFlags = {.FRAGMENT},
+    },
+    {
+      binding = 5,
+      descriptorType = .UNIFORM_BUFFER,
+      descriptorCount = 1,
+      stageFlags = {.FRAGMENT},
+    },
+  }
+  vk.CreateDescriptorSetLayout(
+    g_device,
+    &vk.DescriptorSetLayoutCreateInfo {
+      sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+      bindingCount = u32(len(texture_bindings)),
+      pBindings = raw_data(texture_bindings),
+    },
+    nil,
+    &main.texture_descriptor_set_layout,
+  ) or_return
+  skinning_bindings := []vk.DescriptorSetLayoutBinding {
+    {
+      binding = 0,
+      descriptorType = .STORAGE_BUFFER,
+      descriptorCount = 1,
+      stageFlags = {.VERTEX},
+    },
+  }
+  vk.CreateDescriptorSetLayout(
+    g_device,
+    &vk.DescriptorSetLayoutCreateInfo {
+      sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+      bindingCount = u32(len(skinning_bindings)),
+      pBindings = raw_data(skinning_bindings),
+    },
+    nil,
+    &main.skinning_descriptor_set_layout,
+  ) or_return
+  environment_bindings := []vk.DescriptorSetLayoutBinding {
+    {
+      binding = 0,
+      descriptorType = .COMBINED_IMAGE_SAMPLER,
+      descriptorCount = 1,
+      stageFlags = {.FRAGMENT},
+    },
+    {
+      binding = 1,
+      descriptorType = .COMBINED_IMAGE_SAMPLER,
+      descriptorCount = 1,
+      stageFlags = {.FRAGMENT},
+    },
+  }
+  vk.CreateDescriptorSetLayout(
+    g_device,
+    &{
+      sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+      bindingCount = u32(len(environment_bindings)),
+      pBindings = raw_data(environment_bindings),
+    },
+    nil,
+    &main.environment_descriptor_set_layout,
+  ) or_return
+  set_layouts := [?]vk.DescriptorSetLayout {
+    main.camera_descriptor_set_layout, // set = 0
+    main.texture_descriptor_set_layout, // set = 1
+    main.skinning_descriptor_set_layout, // set = 2
+    main.environment_descriptor_set_layout, // set = 3
+  }
+  push_constant_range := vk.PushConstantRange {
+    stageFlags = {.VERTEX},
+    size       = size_of(linalg.Matrix4f32),
+  }
+  vk.CreatePipelineLayout(
+    g_device,
+    &{
+      sType = .PIPELINE_LAYOUT_CREATE_INFO,
+      setLayoutCount = len(set_layouts),
+      pSetLayouts = raw_data(set_layouts[:]),
+      pushConstantRangeCount = 1,
+      pPushConstantRanges = &push_constant_range,
+    },
+    nil,
+    &main.pipeline_layout,
+  ) or_return
+  for mask in 0 ..< SHADER_VARIANT_COUNT {
+    features := transmute(ShaderFeatureSet)mask
+    configs[mask] = ShaderConfig {
+      is_skinned                     = .SKINNING in features,
+      has_albedo_texture             = .ALBEDO_TEXTURE in features,
+      has_metallic_roughness_texture = .METALLIC_ROUGHNESS_TEXTURE in features,
+      has_normal_texture             = .NORMAL_TEXTURE in features,
+      has_displacement_texture       = .DISPLACEMENT_TEXTURE in features,
+      has_emissive_texture           = .EMISSIVE_TEXTURE in features,
+    }
+    entries[mask] = [SHADER_OPTION_COUNT]vk.SpecializationMapEntry {
+      {
+        constantID = 0,
+        offset = u32(offset_of(ShaderConfig, is_skinned)),
+        size = size_of(b32),
+      },
+      {
+        constantID = 1,
+        offset = u32(offset_of(ShaderConfig, has_albedo_texture)),
+        size = size_of(b32),
+      },
+      {
+        constantID = 2,
+        offset = u32(offset_of(ShaderConfig, has_metallic_roughness_texture)),
+        size = size_of(b32),
+      },
+      {
+        constantID = 3,
+        offset = u32(offset_of(ShaderConfig, has_normal_texture)),
+        size = size_of(b32),
+      },
+      {
+        constantID = 4,
+        offset = u32(offset_of(ShaderConfig, has_displacement_texture)),
+        size = size_of(b32),
+      },
+      {
+        constantID = 5,
+        offset = u32(offset_of(ShaderConfig, has_emissive_texture)),
+        size = size_of(b32),
+      },
+    }
+    spec_infos[mask] = {
+      mapEntryCount = len(entries[mask]),
+      pMapEntries   = raw_data(entries[mask][:]),
+      dataSize      = size_of(ShaderConfig),
+      pData         = &configs[mask],
+    }
+    shader_stages_arr[mask] = [?]vk.PipelineShaderStageCreateInfo {
+      {
+        sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
+        stage = {.VERTEX},
+        module = vert_module,
+        pName = "main",
+        pSpecializationInfo = &spec_infos[mask],
+      },
+      {
+        sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
+        stage = {.FRAGMENT},
+        module = frag_module,
+        pName = "main",
+        pSpecializationInfo = &spec_infos[mask],
+      },
+    }
+    log.infof(
+      "Creating pipeline for features: %v with config %v with vertex input %v",
+      features,
+      configs[mask],
+      vertex_input_info,
+    )
+    pipeline_infos[mask] = {
+      sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
+      pNext               = &rendering_info_khr,
+      stageCount          = len(shader_stages_arr[mask]),
+      pStages             = raw_data(shader_stages_arr[mask][:]),
+      pVertexInputState   = &vertex_input_info,
+      pInputAssemblyState = &input_assembly,
+      pViewportState      = &viewport_state,
+      pRasterizationState = &rasterizer,
+      pMultisampleState   = &multisampling,
+      pColorBlendState    = &blending,
+      pDynamicState       = &dynamic_state_info,
+      pDepthStencilState  = &depth_stencil_state,
+      layout              = main.pipeline_layout,
+    }
+  }
+  vk.CreateGraphicsPipelines(
+    g_device,
+    0,
+    len(pipeline_infos),
+    raw_data(pipeline_infos[:]),
+    nil,
+    raw_data(main.pipelines[:]),
+  ) or_return
+  return .SUCCESS
+}
+
+renderer_main_build_unlit_pipeline :: proc(
+  main: ^RendererMain,
+  target_color_format: vk.Format,
+  target_depth_format: vk.Format,
+) -> vk.Result {
+  pipeline_infos: [UNLIT_SHADER_VARIANT_COUNT]vk.GraphicsPipelineCreateInfo
+  spec_infos: [UNLIT_SHADER_VARIANT_COUNT]vk.SpecializationInfo
+  configs: [UNLIT_SHADER_VARIANT_COUNT]ShaderConfig
+  entries: [UNLIT_SHADER_VARIANT_COUNT][UNLIT_SHADER_OPTION_COUNT]vk.SpecializationMapEntry
+  shader_stages_arr: [UNLIT_SHADER_VARIANT_COUNT][2]vk.PipelineShaderStageCreateInfo
+
+  vert_module := create_shader_module(SHADER_UNLIT_VERT) or_return
+  defer vk.DestroyShaderModule(g_device, vert_module, nil)
+  frag_module := create_shader_module(SHADER_UNLIT_FRAG) or_return
+  defer vk.DestroyShaderModule(g_device, frag_module, nil)
+
+  dynamic_states_values := [?]vk.DynamicState{.VIEWPORT, .SCISSOR}
+  dynamic_state_info := vk.PipelineDynamicStateCreateInfo {
+    sType             = .PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+    dynamicStateCount = u32(len(dynamic_states_values)),
+    pDynamicStates    = raw_data(dynamic_states_values[:]),
+  }
+  input_assembly := vk.PipelineInputAssemblyStateCreateInfo {
+    sType    = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+    topology = .TRIANGLE_LIST,
+  }
+  viewport_state := vk.PipelineViewportStateCreateInfo {
+    sType         = .PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+    viewportCount = 1,
+    scissorCount  = 1,
+  }
+  rasterizer := vk.PipelineRasterizationStateCreateInfo {
+    sType       = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+    polygonMode = .FILL,
+    cullMode    = {.BACK},
+    frontFace   = .COUNTER_CLOCKWISE,
+    lineWidth   = 1.0,
+  }
+  multisampling := vk.PipelineMultisampleStateCreateInfo {
+    sType                = .PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+    rasterizationSamples = {._1},
+  }
+  color_blend_attachment := vk.PipelineColorBlendAttachmentState {
+    colorWriteMask = {.R, .G, .B, .A},
+  }
+  blending := vk.PipelineColorBlendStateCreateInfo {
+    sType           = .PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+    attachmentCount = 1,
+    pAttachments    = &color_blend_attachment,
+  }
+  depth_stencil_state := vk.PipelineDepthStencilStateCreateInfo {
+    sType            = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+    depthTestEnable  = true,
+    depthWriteEnable = true,
+    depthCompareOp   = .LESS,
+  }
+  color_formats := [?]vk.Format{target_color_format}
+  rendering_info_khr := vk.PipelineRenderingCreateInfoKHR {
+    sType                   = .PIPELINE_RENDERING_CREATE_INFO_KHR,
+    colorAttachmentCount    = len(color_formats),
+    pColorAttachmentFormats = raw_data(color_formats[:]),
+    depthAttachmentFormat   = target_depth_format,
+  }
+  vertex_input_info := vk.PipelineVertexInputStateCreateInfo {
+    sType                           = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+    vertexBindingDescriptionCount   = len(geometry.VERTEX_BINDING_DESCRIPTION),
+    pVertexBindingDescriptions      = raw_data(
+      geometry.VERTEX_BINDING_DESCRIPTION[:],
+    ),
+    vertexAttributeDescriptionCount = len(
+      geometry.VERTEX_ATTRIBUTE_DESCRIPTIONS,
+    ),
+    pVertexAttributeDescriptions    = raw_data(
+      geometry.VERTEX_ATTRIBUTE_DESCRIPTIONS[:],
+    ),
+  }
+  for mask in 0 ..< UNLIT_SHADER_VARIANT_COUNT {
+    features := transmute(ShaderFeatureSet)mask
+    configs[mask] = ShaderConfig {
+      is_skinned         = .SKINNING in features,
+      has_albedo_texture = .ALBEDO_TEXTURE in features,
+    }
+    entries[mask] = [UNLIT_SHADER_OPTION_COUNT]vk.SpecializationMapEntry {
+      {
+        constantID = 0,
+        offset = u32(offset_of(ShaderConfig, is_skinned)),
+        size = size_of(b32),
+      },
+      {
+        constantID = 1,
+        offset = u32(offset_of(ShaderConfig, has_albedo_texture)),
+        size = size_of(b32),
+      },
+    }
+    spec_infos[mask] = {
+      mapEntryCount = len(entries[mask]),
+      pMapEntries   = raw_data(entries[mask][:]),
+      dataSize      = size_of(ShaderConfig),
+      pData         = &configs[mask],
+    }
+    shader_stages_arr[mask] = [2]vk.PipelineShaderStageCreateInfo {
+      {
+        sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
+        stage = {.VERTEX},
+        module = vert_module,
+        pName = "main",
+        pSpecializationInfo = &spec_infos[mask],
+      },
+      {
+        sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
+        stage = {.FRAGMENT},
+        module = frag_module,
+        pName = "main",
+        pSpecializationInfo = &spec_infos[mask],
+      },
+    }
+    log.infof(
+      "Creating unlit pipeline for features: %v with config %v with vertex input %v",
+      features,
+      configs[mask],
+      vertex_input_info,
+    )
+    pipeline_infos[mask] = {
+      sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
+      pNext               = &rendering_info_khr,
+      stageCount          = len(shader_stages_arr[mask]),
+      pStages             = raw_data(shader_stages_arr[mask][:]),
+      pVertexInputState   = &vertex_input_info,
+      pInputAssemblyState = &input_assembly,
+      pViewportState      = &viewport_state,
+      pRasterizationState = &rasterizer,
+      pMultisampleState   = &multisampling,
+      pColorBlendState    = &blending,
+      pDynamicState       = &dynamic_state_info,
+      pDepthStencilState  = &depth_stencil_state,
+      layout              = main.pipeline_layout,
+    }
+  }
+  vk.CreateGraphicsPipelines(
+    g_device,
+    0,
+    len(pipeline_infos),
+    raw_data(pipeline_infos[:]),
+    nil,
+    raw_data(main.unlit_pipelines[:]),
+  ) or_return
+  return .SUCCESS
+}
+
+pipeline3d_get_pipeline :: proc(
+  main: ^RendererMain,
+  material: ^Material,
+) -> vk.Pipeline {
+  if material.is_lit {
+    return main.pipelines[transmute(u32)material.features]
+  }
+  return main.unlit_pipelines[transmute(u32)material.features]
+}
+
+pipeline3d_get_layout :: proc(main: ^RendererMain) -> vk.PipelineLayout {
+  return main.pipeline_layout
+}
+
+pipeline3d_get_camera_descriptor_set_layout :: proc(
+  main: ^RendererMain,
+) -> vk.DescriptorSetLayout {
+  return main.camera_descriptor_set_layout
+}
+
+pipeline3d_get_environment_descriptor_set_layout :: proc(
+  main: ^RendererMain,
+) -> vk.DescriptorSetLayout {
+  return main.environment_descriptor_set_layout
+}
+
+pipeline3d_get_skinning_descriptor_set_layout :: proc(
+  main: ^RendererMain,
+) -> vk.DescriptorSetLayout {
+  return main.skinning_descriptor_set_layout
+}
+
+pipeline3d_get_texture_descriptor_set_layout :: proc(
+  main: ^RendererMain,
+) -> vk.DescriptorSetLayout {
+  return main.texture_descriptor_set_layout
 }
 
 render_main_pass :: proc(
   engine: ^Engine,
   command_buffer: vk.CommandBuffer,
   camera_frustum: geometry.Frustum,
-  swapchain_extent: vk.Extent2D, // New parameter for swapchain extent
+  swapchain_extent: vk.Extent2D,
 ) -> vk.Result {
-  particles := engine.renderer.particle.pipeline_comp.particle_buffer.mapped
+  particles := engine.renderer.particle.particle_buffer.mapped
   // Run particle compute pass before starting rendering
   compute_particles(&engine.renderer.particle, command_buffer)
   // Barrier to ensure compute shader writes are visible to the vertex shader
@@ -35,7 +579,7 @@ render_main_pass :: proc(
     dstAccessMask       = {.VERTEX_ATTRIBUTE_READ},
     srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
     dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-    buffer              = engine.renderer.particle.pipeline_comp.particle_buffer.buffer,
+    buffer              = engine.renderer.particle.particle_buffer.buffer,
     size                = vk.DeviceSize(vk.WHOLE_SIZE),
   }
   vk.CmdPipelineBarrier(
@@ -98,7 +642,11 @@ render_main_pass :: proc(
   if !traverse_scene(&engine.scene, &render_meshes_ctx, render_single_node) {
     log.errorf("[RENDER] Error during scene mesh rendering")
   }
-  render_particles(&engine.renderer.particle, engine.scene.camera, command_buffer)
+  render_particles(
+    &engine.renderer.particle,
+    engine.scene.camera,
+    command_buffer,
+  )
   if mu.window(&engine.ui.ctx, "Inspector", {40, 40, 300, 150}, {.NO_CLOSE}) {
     mu.label(
       &engine.ui.ctx,
@@ -132,11 +680,8 @@ render_single_node :: proc(node: ^Node, cb_context: rawptr) -> bool {
     if !geometry.frustum_test_aabb(&ctx.camera_frustum, world_aabb) {
       return true
     }
-    pipeline := pipeline3d_get_pipeline(
-      &ctx.engine.renderer.main.pipeline,
-      material,
-    )
-    layout := pipeline3d_get_layout(&ctx.engine.renderer.main.pipeline)
+    pipeline := pipeline3d_get_pipeline(&ctx.engine.renderer.main, material)
+    layout := pipeline3d_get_layout(&ctx.engine.renderer.main)
     descriptor_sets := [?]vk.DescriptorSet {
       renderer_get_camera_descriptor_set(&ctx.engine.renderer), // set 0
       material.texture_descriptor_set, // set 1
@@ -270,4 +815,52 @@ render_to_texture :: proc(
   traverse_scene(&engine.scene, &render_meshes_ctx, render_single_node)
   vk.CmdEndRenderingKHR(command_buffer)
   return .SUCCESS
+}
+
+pipeline3d_init :: proc(
+  main: ^RendererMain,
+  target_color_format: vk.Format = .B8G8R8A8_SRGB,
+  target_depth_format: vk.Format = .D32_SFLOAT,
+) -> vk.Result {
+  renderer_main_build_pbr_pipeline(
+    main,
+    target_color_format,
+    target_depth_format,
+  ) or_return
+  renderer_main_build_unlit_pipeline(
+    main,
+    target_color_format,
+    target_depth_format,
+  ) or_return
+  return .SUCCESS
+}
+
+renderer_main_deinit :: proc(main: ^RendererMain) {
+  vk.DestroyPipelineLayout(g_device, main.pipeline_layout, nil)
+  vk.DestroyDescriptorSetLayout(
+    g_device,
+    main.camera_descriptor_set_layout,
+    nil,
+  )
+  vk.DestroyDescriptorSetLayout(
+    g_device,
+    main.environment_descriptor_set_layout,
+    nil,
+  )
+  vk.DestroyDescriptorSetLayout(
+    g_device,
+    main.texture_descriptor_set_layout,
+    nil,
+  )
+  vk.DestroyDescriptorSetLayout(
+    g_device,
+    main.skinning_descriptor_set_layout,
+    nil,
+  )
+  for pipeline in main.pipelines {
+    vk.DestroyPipeline(g_device, pipeline, nil)
+  }
+  for pipeline in main.unlit_pipelines {
+    vk.DestroyPipeline(g_device, pipeline, nil)
+  }
 }

@@ -82,14 +82,23 @@ renderer_init :: proc(
   resource.pool_init(&renderer.textures)
   log.infof("All resource pools initialized successfully")
   renderer.main.depth_buffer = create_depth_image(width, height) or_return
-  pipeline3d_init(&renderer.main.pipeline) or_return
-  setup_particle_render_pipeline(&renderer.particle.pipeline) or_return
-  setup_particle_compute_pipeline(&renderer.particle.pipeline_comp) or_return
-  pipeline_shadow_init(
-    &renderer.shadow.pipeline,
-    // TODO: Eliminate this dependency if possible
-    renderer.main.pipeline.camera_descriptor_set_layout,
-    renderer.main.pipeline.skinning_descriptor_set_layout,
+  renderer_main_build_pbr_pipeline(
+    &renderer.main,
+    color_format,
+    depth_format,
+  ) or_return
+  renderer_main_build_unlit_pipeline(
+    &renderer.main,
+    color_format,
+    depth_format,
+  ) or_return
+  setup_particle_render_pipeline(&renderer.particle) or_return
+  setup_particle_compute_pipeline(&renderer.particle) or_return
+  renderer_shadow_init(
+    &renderer.shadow,
+    renderer.main.camera_descriptor_set_layout,
+    renderer.main.skinning_descriptor_set_layout,
+    depth_format,
   ) or_return
   renderer_postprocess_init(
     &renderer.postprocess,
@@ -105,7 +114,7 @@ renderer_init :: proc(
       width,
       height,
       // TODO: Eliminate this dependency if possible
-      renderer.main.pipeline.camera_descriptor_set_layout,
+      renderer.main.camera_descriptor_set_layout,
     ) or_return
   }
   return .SUCCESS
@@ -116,11 +125,11 @@ renderer_deinit :: proc(renderer: ^Renderer) {
   resource.pool_deinit(renderer.textures, texture_deinit)
   resource.pool_deinit(renderer.meshes, mesh_deinit)
   resource.pool_deinit(renderer.materials, material_deinit)
-  particle_render_pipeline_deinit(&renderer.particle.pipeline)
-  pipeline3d_deinit(&renderer.main.pipeline)
-  pipeline_shadow_deinit(&renderer.shadow.pipeline)
+  renderer_main_deinit(&renderer.main)
+  renderer_shadow_deinit(&renderer.shadow)
   renderer_postprocess_deinit(&renderer.postprocess)
   for &frame in renderer.frames do frame_deinit(&frame)
+  renderer_particle_deinit(&renderer.particle)
 }
 
 renderer_recreate_images :: proc(
@@ -270,12 +279,7 @@ renderer_bloom :: proc(
   intensity: f32 = 1.0,
   blur_radius: f32 = 4.0,
 ) {
-  effect_add_bloom(
-    &renderer.postprocess,
-    threshold,
-    intensity,
-    blur_radius,
-  )
+  effect_add_bloom(&renderer.postprocess, threshold, intensity, blur_radius)
 }
 
 renderer_tonemap :: proc(
@@ -299,11 +303,7 @@ renderer_postprocess_update_input :: proc(
   set_idx: int,
   input_view: vk.ImageView,
 ) -> vk.Result {
-  return postprocess_update_input(
-    &renderer.postprocess,
-    set_idx,
-    input_view,
-  )
+  return postprocess_update_input(&renderer.postprocess, set_idx, input_view)
 }
 
 prepare_light :: proc(node: ^Node, cb_context: rawptr) -> bool {

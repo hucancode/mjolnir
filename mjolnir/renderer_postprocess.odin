@@ -3,7 +3,14 @@ package mjolnir
 import "core:log"
 import vk "vendor:vulkan"
 
-// --- EFFECT STRUCTS, ENUMS, UNION ---
+SHADER_POSTPROCESS_VERT :: #load("shader/postprocess/vert.spv")
+SHADER_POSTPROCESS_FRAG :: #load("shader/postprocess/frag.spv")
+SHADER_BLOOM_FRAG :: #load("shader/bloom/frag.spv")
+SHADER_BLUR_FRAG :: #load("shader/blur/frag.spv")
+SHADER_GRAYSCALE_FRAG :: #load("shader/grayscale/frag.spv")
+SHADER_TONEMAP_FRAG :: #load("shader/tonemap/frag.spv")
+SHADER_OUTLINE_FRAG :: #load("shader/outline/frag.spv")
+
 GrayscaleEffect :: struct {
   weights:  [3]f32,
   strength: f32,
@@ -49,9 +56,6 @@ PostprocessEffect :: union {
   OutlineEffect,
 }
 
-// --- BEGIN MERGED PIPELINE/RENDERER POSTPROCESS ---
-
-// Merge PipelinePostProcess and RendererPostProcess into RendererPostProcess
 RendererPostProcess :: struct {
   pipelines:              [len(PostProcessEffectType)]vk.Pipeline,
   pipeline_layouts:       [len(PostProcessEffectType)]vk.PipelineLayout,
@@ -62,7 +66,6 @@ RendererPostProcess :: struct {
   images:                 [2]ImageBuffer,
 }
 
-// All effect_add_* and effect_clear procs from pipeline_postprocess.odin, but for RendererPostProcess
 get_effect_type :: proc(effect: PostprocessEffect) -> PostProcessEffectType {
   switch _ in effect {
   case GrayscaleEffect:
@@ -411,7 +414,6 @@ renderer_postprocess_deinit :: proc(self: ^RendererPostProcess) {
   delete(self.effect_stack)
   for &image in self.images do image_buffer_deinit(&image)
 }
-// --- END MERGED PIPELINE/RENDERER POSTPROCESS ---
 
 render_postprocess_stack :: proc(
   self: ^RendererPostProcess,
@@ -422,8 +424,7 @@ render_postprocess_stack :: proc(
 ) {
   if len(self.effect_stack) == 0 {
     // if no postprocess effect, just copy the input to output
-    // (insert a dummy effect or handle as needed)
-    // append(&self.effect_stack, nil) // Not valid, so skip
+    append(&self.effect_stack, nil)
     return
   }
   postprocess_update_input(self, 0, input_view)
@@ -550,11 +551,3 @@ postprocess_push_effect_constants :: proc(
     )
   }
 }
-
-SHADER_POSTPROCESS_VERT :: #load("shader/postprocess/vert.spv")
-SHADER_POSTPROCESS_FRAG :: #load("shader/postprocess/frag.spv")
-SHADER_BLOOM_FRAG :: #load("shader/bloom/frag.spv")
-SHADER_BLUR_FRAG :: #load("shader/blur/frag.spv")
-SHADER_GRAYSCALE_FRAG :: #load("shader/grayscale/frag.spv")
-SHADER_TONEMAP_FRAG :: #load("shader/tonemap/frag.spv")
-SHADER_OUTLINE_FRAG :: #load("shader/outline/frag.spv")

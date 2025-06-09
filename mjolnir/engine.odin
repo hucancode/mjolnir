@@ -192,7 +192,9 @@ build_renderer :: proc(engine: ^Engine) -> vk.Result {
     ) or_return
   engine.renderer.main.brdf_lut_handle, engine.renderer.main.brdf_lut =
     create_texture_from_path(engine, "assets/lut_ggx.png") or_return
-  env_layout := pipeline3d_get_environment_descriptor_set_layout(&engine.renderer.main.pipeline)
+  env_layout := pipeline3d_get_environment_descriptor_set_layout(
+    &engine.renderer.main,
+  )
   vk.AllocateDescriptorSets(
     g_device,
     &{
@@ -204,29 +206,29 @@ build_renderer :: proc(engine: ^Engine) -> vk.Result {
     &engine.renderer.main.environment_descriptor_set,
   ) or_return
   env_write := vk.WriteDescriptorSet {
-      sType           = .WRITE_DESCRIPTOR_SET,
-      dstSet          = engine.renderer.main.environment_descriptor_set,
-      dstBinding      = 0,
-      descriptorType  = .COMBINED_IMAGE_SAMPLER,
-      descriptorCount = 1,
-      pImageInfo      = &{
-        sampler = engine.renderer.main.environment_map.sampler,
-        imageView = engine.renderer.main.environment_map.buffer.view,
-        imageLayout = .SHADER_READ_ONLY_OPTIMAL,
-      },
-    }
+    sType           = .WRITE_DESCRIPTOR_SET,
+    dstSet          = engine.renderer.main.environment_descriptor_set,
+    dstBinding      = 0,
+    descriptorType  = .COMBINED_IMAGE_SAMPLER,
+    descriptorCount = 1,
+    pImageInfo      = &{
+      sampler = engine.renderer.main.environment_map.sampler,
+      imageView = engine.renderer.main.environment_map.buffer.view,
+      imageLayout = .SHADER_READ_ONLY_OPTIMAL,
+    },
+  }
   brdf_lut_write := vk.WriteDescriptorSet {
-      sType           = .WRITE_DESCRIPTOR_SET,
-      dstSet          = engine.renderer.main.environment_descriptor_set,
-      dstBinding      = 1,
-      descriptorType  = .COMBINED_IMAGE_SAMPLER,
-      descriptorCount = 1,
-      pImageInfo      = &{
-        sampler = engine.renderer.main.brdf_lut.sampler,
-        imageView = engine.renderer.main.brdf_lut.buffer.view,
-        imageLayout = .SHADER_READ_ONLY_OPTIMAL,
-      },
-    }
+    sType           = .WRITE_DESCRIPTOR_SET,
+    dstSet          = engine.renderer.main.environment_descriptor_set,
+    dstBinding      = 1,
+    descriptorType  = .COMBINED_IMAGE_SAMPLER,
+    descriptorCount = 1,
+    pImageInfo      = &{
+      sampler = engine.renderer.main.brdf_lut.sampler,
+      imageView = engine.renderer.main.brdf_lut.buffer.view,
+      imageLayout = .SHADER_READ_ONLY_OPTIMAL,
+    },
+  }
   writes := [?]vk.WriteDescriptorSet{env_write, brdf_lut_write}
   vk.UpdateDescriptorSets(g_device, len(writes), raw_data(writes[:]), 0, nil)
   return .SUCCESS
@@ -277,7 +279,8 @@ update :: proc(engine: ^Engine) -> bool {
     sample_clip(mesh, anim_inst.clip_handle, anim_inst.time, bone_matrices)
     //animation.pose_flush(&skinning.pose, buffer.mapped)
   }
-  update_emitters(&engine.renderer.particle.pipeline_comp, delta_time)
+  // update_emitters(&engine.renderer.particle.pipeline_comp, delta_time)
+  update_emitters(&engine.renderer.particle, delta_time)
   last_mouse_pos := engine.input.mouse_pos
   engine.input.mouse_pos.x, engine.input.mouse_pos.y = glfw.GetCursorPos(
     engine.window,
@@ -312,10 +315,10 @@ update :: proc(engine: ^Engine) -> bool {
 
 deinit :: proc(engine: ^Engine) {
   vk.DeviceWaitIdle(g_device)
-  pipeline2d_deinit(&engine.ui.pipeline)
+  ui_pipeline_deinit(&engine.ui)
   deinit_scene(&engine.scene)
   renderer_deinit(&engine.renderer)
-  swapchain_deinit(&engine.swapchain)  // Clean up engine's swapchain
+  swapchain_deinit(&engine.swapchain)
   vulkan_context_deinit()
   glfw.DestroyWindow(engine.window)
   glfw.Terminate()
@@ -324,7 +327,8 @@ deinit :: proc(engine: ^Engine) {
 
 recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
   swapchain_recreate(&engine.swapchain, engine.window) or_return
-  new_aspect_ratio := f32(engine.swapchain.extent.width) / f32(engine.swapchain.extent.height)
+  new_aspect_ratio :=
+    f32(engine.swapchain.extent.width) / f32(engine.swapchain.extent.height)
   geometry.camera_update_aspect_ratio(engine.scene.camera, new_aspect_ratio)
   renderer_recreate_images(
     &engine.renderer,
