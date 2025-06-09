@@ -38,6 +38,7 @@ frame_init :: proc(
   color_format: vk.Format,
   width: u32,
   height: u32,
+  camera_descriptor_set_layout: vk.DescriptorSetLayout,
 ) -> (
   res: vk.Result,
 ) {
@@ -66,13 +67,15 @@ frame_init :: proc(
     ) or_return
   }
 
+  // Create local variable to take address of
+  layout := camera_descriptor_set_layout
   vk.AllocateDescriptorSets(
     g_device,
     &vk.DescriptorSetAllocateInfo {
       sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
       descriptorPool = g_descriptor_pool,
       descriptorSetCount = 1,
-      pSetLayouts = &g_camera_descriptor_set_layout,
+      pSetLayouts = &layout,
     },
     &self.camera_descriptor_set,
   ) or_return

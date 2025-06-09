@@ -27,41 +27,59 @@ ShaderConfig :: struct {
   has_emissive_texture:           b32,
 }
 
-g_camera_descriptor_set_layout: vk.DescriptorSetLayout
-g_environment_descriptor_set_layout: vk.DescriptorSetLayout
-g_texture_descriptor_set_layout: vk.DescriptorSetLayout
-g_skinning_descriptor_set_layout: vk.DescriptorSetLayout
-g_pipeline_layout: vk.PipelineLayout
-g_pipelines: [SHADER_VARIANT_COUNT]vk.Pipeline
+UNLIT_SHADER_OPTION_COUNT :: 2
+UNLIT_SHADER_VARIANT_COUNT: u32 : 1 << UNLIT_SHADER_OPTION_COUNT
+
+Pipeline3D :: struct {
+  camera_descriptor_set_layout:      vk.DescriptorSetLayout,
+  environment_descriptor_set_layout: vk.DescriptorSetLayout,
+  texture_descriptor_set_layout:     vk.DescriptorSetLayout,
+  skinning_descriptor_set_layout:    vk.DescriptorSetLayout,
+  pipeline_layout:                   vk.PipelineLayout,
+  pipelines:                         [SHADER_VARIANT_COUNT]vk.Pipeline,
+  unlit_pipelines:                   [UNLIT_SHADER_VARIANT_COUNT]vk.Pipeline,
+}
+
 SHADER_UBER_VERT :: #load("shader/uber/vert.spv")
 SHADER_UBER_FRAG :: #load("shader/uber/frag.spv")
+SHADER_UNLIT_VERT :: #load("shader/unlit/vert.spv")
+SHADER_UNLIT_FRAG :: #load("shader/unlit/frag.spv")
 
-pipeline3d_deinit :: proc() {
-  for &pipeline in g_pipelines {
-    vk.DestroyPipeline(g_device, pipeline, nil)
-    pipeline = 0
+pipeline3d_deinit :: proc(pipeline: ^Pipeline3D) {
+  if pipeline == nil do return
+
+  for &p in pipeline.pipelines {
+    vk.DestroyPipeline(g_device, p, nil)
+    p = 0
   }
-  vk.DestroyPipelineLayout(g_device, g_pipeline_layout, nil)
-  g_pipeline_layout = 0
-  vk.DestroyDescriptorSetLayout(g_device, g_camera_descriptor_set_layout, nil)
-  g_camera_descriptor_set_layout = 0
-  vk.DestroyDescriptorSetLayout(
-    g_device,
-    g_environment_descriptor_set_layout,
-    nil,
-  )
-  g_environment_descriptor_set_layout = 0
-  vk.DestroyDescriptorSetLayout(g_device, g_texture_descriptor_set_layout, nil)
-  g_texture_descriptor_set_layout = 0
-  vk.DestroyDescriptorSetLayout(
-    g_device,
-    g_skinning_descriptor_set_layout,
-    nil,
-  )
-  g_skinning_descriptor_set_layout = 0
+  for &p in pipeline.unlit_pipelines {
+    vk.DestroyPipeline(g_device, p, nil)
+    p = 0
+  }
+  vk.DestroyPipelineLayout(g_device, pipeline.pipeline_layout, nil)
+  pipeline.pipeline_layout = 0
+  vk.DestroyDescriptorSetLayout(g_device, pipeline.camera_descriptor_set_layout, nil)
+  pipeline.camera_descriptor_set_layout = 0
+  vk.DestroyDescriptorSetLayout(g_device, pipeline.environment_descriptor_set_layout, nil)
+  pipeline.environment_descriptor_set_layout = 0
+  vk.DestroyDescriptorSetLayout(g_device, pipeline.texture_descriptor_set_layout, nil)
+  pipeline.texture_descriptor_set_layout = 0
+  vk.DestroyDescriptorSetLayout(g_device, pipeline.skinning_descriptor_set_layout, nil)
+  pipeline.skinning_descriptor_set_layout = 0
+}
+
+pipeline3d_init :: proc(
+  pipeline: ^Pipeline3D,
+  target_color_format: vk.Format,
+  target_depth_format: vk.Format,
+) -> vk.Result {
+  build_3d_pipelines(pipeline, target_color_format, target_depth_format) or_return
+  build_3d_unlit_pipelines(pipeline, target_color_format, target_depth_format) or_return
+  return .SUCCESS
 }
 
 build_3d_pipelines :: proc(
+  pipeline: ^Pipeline3D,
   target_color_format: vk.Format,
   target_depth_format: vk.Format,
 ) -> vk.Result {
@@ -100,7 +118,7 @@ build_3d_pipelines :: proc(
     g_device,
     &layout_info_main,
     nil,
-    &g_camera_descriptor_set_layout,
+    &pipeline.camera_descriptor_set_layout,
   ) or_return
   pipeline_infos: [SHADER_VARIANT_COUNT]vk.GraphicsPipelineCreateInfo
   spec_infos: [SHADER_VARIANT_COUNT]vk.SpecializationInfo
@@ -219,7 +237,7 @@ build_3d_pipelines :: proc(
       pBindings = raw_data(texture_bindings),
     },
     nil,
-    &g_texture_descriptor_set_layout,
+    &pipeline.texture_descriptor_set_layout,
   ) or_return
   skinning_bindings := []vk.DescriptorSetLayoutBinding {
     {
@@ -237,7 +255,7 @@ build_3d_pipelines :: proc(
       pBindings = raw_data(skinning_bindings),
     },
     nil,
-    &g_skinning_descriptor_set_layout,
+    &pipeline.skinning_descriptor_set_layout,
   ) or_return
   environment_bindings := []vk.DescriptorSetLayoutBinding {
     {
@@ -261,14 +279,14 @@ build_3d_pipelines :: proc(
       pBindings = raw_data(environment_bindings),
     },
     nil,
-    &g_environment_descriptor_set_layout,
+    &pipeline.environment_descriptor_set_layout,
   ) or_return
 
   set_layouts := [?]vk.DescriptorSetLayout {
-    g_camera_descriptor_set_layout, // set = 0
-    g_texture_descriptor_set_layout, // set = 1
-    g_skinning_descriptor_set_layout, // set = 2
-    g_environment_descriptor_set_layout, // set = 3
+    pipeline.camera_descriptor_set_layout, // set = 0
+    pipeline.texture_descriptor_set_layout, // set = 1
+    pipeline.skinning_descriptor_set_layout, // set = 2
+    pipeline.environment_descriptor_set_layout, // set = 3
   }
   push_constant_range := vk.PushConstantRange {
     stageFlags = {.VERTEX},
@@ -285,7 +303,7 @@ build_3d_pipelines :: proc(
     g_device,
     &pipeline_layout_info,
     nil,
-    &g_pipeline_layout,
+    &pipeline.pipeline_layout,
   ) or_return
   for mask in 0 ..< SHADER_VARIANT_COUNT {
     features := transmute(ShaderFeatureSet)mask
@@ -370,7 +388,7 @@ build_3d_pipelines :: proc(
       pColorBlendState    = &blending,
       pDynamicState       = &dynamic_state_info,
       pDepthStencilState  = &depth_stencil_state,
-      layout              = g_pipeline_layout,
+      layout              = pipeline.pipeline_layout,
     }
   }
   vk.CreateGraphicsPipelines(
@@ -379,20 +397,13 @@ build_3d_pipelines :: proc(
     len(pipeline_infos),
     raw_data(pipeline_infos[:]),
     nil,
-    raw_data(g_pipelines[:]),
+    raw_data(pipeline.pipelines[:]),
   ) or_return
   return .SUCCESS
 }
 
-UNLIT_SHADER_OPTION_COUNT :: 2
-UNLIT_SHADER_VARIANT_COUNT: u32 : 1 << UNLIT_SHADER_OPTION_COUNT
-
-g_unlit_pipelines: [UNLIT_SHADER_VARIANT_COUNT]vk.Pipeline
-
-SHADER_UNLIT_VERT :: #load("shader/unlit/vert.spv")
-SHADER_UNLIT_FRAG :: #load("shader/unlit/frag.spv")
-
 build_3d_unlit_pipelines :: proc(
+  pipeline: ^Pipeline3D,
   target_color_format: vk.Format,
   target_depth_format: vk.Format,
 ) -> vk.Result {
@@ -526,7 +537,7 @@ build_3d_unlit_pipelines :: proc(
       pColorBlendState    = &blending,
       pDynamicState       = &dynamic_state_info,
       pDepthStencilState  = &depth_stencil_state,
-      layout              = g_pipeline_layout,
+      layout              = pipeline.pipeline_layout,
     }
   }
   vk.CreateGraphicsPipelines(
@@ -535,7 +546,47 @@ build_3d_unlit_pipelines :: proc(
     len(pipeline_infos),
     raw_data(pipeline_infos[:]),
     nil,
-    raw_data(g_unlit_pipelines[:]),
+    raw_data(pipeline.unlit_pipelines[:]),
   ) or_return
   return .SUCCESS
+}
+
+// Helper functions for initialization and cleanup
+setup_pipeline_3d :: proc() -> (pipeline: Pipeline3D, ret: vk.Result) {
+  pipeline3d_init(&pipeline, .B8G8R8A8_SRGB, .D32_SFLOAT) or_return
+  ret = .SUCCESS
+  return
+}
+
+destroy_pipeline_3d :: proc(pipeline: ^Pipeline3D) {
+  pipeline3d_deinit(pipeline)
+}
+
+// Getter functions for accessing pipeline components
+pipeline3d_get_pipeline :: proc(pipeline: ^Pipeline3D, features: ShaderFeatureSet) -> vk.Pipeline {
+  return pipeline.pipelines[transmute(u32)features]
+}
+
+pipeline3d_get_unlit_pipeline :: proc(pipeline: ^Pipeline3D, features: ShaderFeatureSet) -> vk.Pipeline {
+  return pipeline.unlit_pipelines[transmute(u32)features]
+}
+
+pipeline3d_get_layout :: proc(pipeline: ^Pipeline3D) -> vk.PipelineLayout {
+  return pipeline.pipeline_layout
+}
+
+pipeline3d_get_camera_descriptor_set_layout :: proc(pipeline: ^Pipeline3D) -> vk.DescriptorSetLayout {
+  return pipeline.camera_descriptor_set_layout
+}
+
+pipeline3d_get_environment_descriptor_set_layout :: proc(pipeline: ^Pipeline3D) -> vk.DescriptorSetLayout {
+  return pipeline.environment_descriptor_set_layout
+}
+
+pipeline3d_get_skinning_descriptor_set_layout :: proc(pipeline: ^Pipeline3D) -> vk.DescriptorSetLayout {
+  return pipeline.skinning_descriptor_set_layout
+}
+
+pipeline3d_get_texture_descriptor_set_layout :: proc(pipeline: ^Pipeline3D) -> vk.DescriptorSetLayout {
+  return pipeline.texture_descriptor_set_layout
 }

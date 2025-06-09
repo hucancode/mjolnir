@@ -40,14 +40,22 @@ material_deinit :: proc(self: ^Material) {
   data_buffer_deinit(&self.fallback_buffer)
 }
 
-material_init_descriptor_set_layout :: proc(mat: ^Material) -> vk.Result {
+material_init_descriptor_set_layout :: proc(
+  mat: ^Material,
+  texture_descriptor_set_layout: vk.DescriptorSetLayout,
+  skinning_descriptor_set_layout: vk.DescriptorSetLayout,
+) -> vk.Result {
+  // Create local variables to take address of
+  texture_layout := texture_descriptor_set_layout
+  skinning_layout := skinning_descriptor_set_layout
+  
   vk.AllocateDescriptorSets(
     g_device,
     &vk.DescriptorSetAllocateInfo {
       sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
       descriptorPool = g_descriptor_pool,
       descriptorSetCount = 1,
-      pSetLayouts = &g_texture_descriptor_set_layout,
+      pSetLayouts = &texture_layout,
     },
     &mat.texture_descriptor_set,
   ) or_return
@@ -58,7 +66,7 @@ material_init_descriptor_set_layout :: proc(mat: ^Material) -> vk.Result {
         sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
         descriptorPool = g_descriptor_pool,
         descriptorSetCount = 1,
-        pSetLayouts = &g_skinning_descriptor_set_layout,
+        pSetLayouts = &skinning_layout,
       },
       &set,
     ) or_return
@@ -240,7 +248,11 @@ create_material :: proc(
   mat.roughness_value = roughness_value
   mat.emissive_value = emissive_value
 
-  material_init_descriptor_set_layout(mat) or_return
+  material_init_descriptor_set_layout(
+    mat,
+    pipeline3d_get_texture_descriptor_set_layout(&engine.renderer.pipeline_3d),
+    pipeline3d_get_skinning_descriptor_set_layout(&engine.renderer.pipeline_3d),
+  ) or_return
   fallbacks := MaterialFallbacks {
     albedo    = mat.albedo_value,
     emissive  = mat.emissive_value,
@@ -290,7 +302,11 @@ create_unlit_material :: proc(
   mat.features = features
   mat.albedo_handle = albedo_handle
   mat.albedo_value = albedo_value
-  material_init_descriptor_set_layout(mat) or_return
+  material_init_descriptor_set_layout(
+    mat,
+    pipeline3d_get_texture_descriptor_set_layout(&engine.renderer.pipeline_3d),
+    pipeline3d_get_skinning_descriptor_set_layout(&engine.renderer.pipeline_3d),
+  ) or_return
   albedo := resource.get(engine.renderer.textures, albedo_handle)
   fallbacks := MaterialFallbacks {
     albedo = mat.albedo_value,

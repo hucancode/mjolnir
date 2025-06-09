@@ -25,10 +25,14 @@ pipeline_shadow_deinit :: proc() {
 
 SHADER_SHADOW_VERT :: #load("shader/shadow/vert.spv")
 
-build_shadow_pipelines :: proc(depth_format: vk.Format) -> vk.Result {
+build_shadow_pipelines :: proc(
+  depth_format: vk.Format,
+  camera_descriptor_set_layout: vk.DescriptorSetLayout,
+  skinning_descriptor_set_layout: vk.DescriptorSetLayout,
+) -> vk.Result {
   set_layouts := [?]vk.DescriptorSetLayout {
-    g_camera_descriptor_set_layout,
-    g_skinning_descriptor_set_layout,
+    camera_descriptor_set_layout,
+    skinning_descriptor_set_layout,
   }
   push_constant_range := vk.PushConstantRange {
     stageFlags = {.VERTEX},

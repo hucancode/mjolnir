@@ -64,6 +64,7 @@ Renderer :: struct {
   brdf_lut_handle:            Handle,
   brdf_lut:                   ^Texture,
   current_frame_index:        u32,
+  pipeline_3d:                Pipeline3D,  // Add 3D pipeline struct
   particle_render:            ParticleRenderPipeline,
   meshes:                     resource.Pool(Mesh),
   materials:                  resource.Pool(Material),
@@ -83,7 +84,11 @@ renderer_init :: proc(
   log.infof("Initializing textures pool... ")
   resource.pool_init(&self.textures)
   log.infof("All resource pools initialized successfully")
+
+  // Initialize particle compute pipeline
   self.particle_compute = setup_particle_compute_pipeline() or_return
+
+  // Initialize command buffers and synchronization objects first
   alloc_info := vk.CommandBufferAllocateInfo {
     sType              = .COMMAND_BUFFER_ALLOCATE_INFO,
     commandPool        = g_command_pool,
@@ -119,10 +124,18 @@ renderer_init :: proc(
     ) or_return
     vk.CreateFence(g_device, &fence_info, nil, &frame.fence) or_return
   }
+  
+  // Initialize depth buffer
   self.depth_buffer = create_depth_image(
     swapchain_extent.width,
     swapchain_extent.height,
   ) or_return
+  
+  // Initialize pipelines first so we have the descriptor set layouts
+  self.pipeline_3d = setup_pipeline_3d() or_return // Initialize 3D pipeline
+  self.particle_render = setup_particle_render_pipeline() or_return // Initialize particle render pipeline
+  
+  // Now initialize frames with the camera descriptor set layout from 3D pipeline
   self.current_frame_index = 0
   for &frame in self.frames {
     frame_init(
@@ -130,10 +143,10 @@ renderer_init :: proc(
       swapchain_format,
       swapchain_extent.width,
       swapchain_extent.height,
+      pipeline3d_get_camera_descriptor_set_layout(&self.pipeline_3d),
     ) or_return
   }
-  // Initialize particle render pipeline
-  self.particle_render = setup_particle_render_pipeline() or_return
+  
   return .SUCCESS
 }
 
@@ -143,8 +156,9 @@ renderer_deinit :: proc(self: ^Renderer) {
   resource.pool_deinit(self.meshes, mesh_deinit)
   resource.pool_deinit(self.materials, material_deinit)
   destroy_particle_render_pipeline(&self.particle_render)
+  destroy_pipeline_3d(&self.pipeline_3d) // Destroy 3D pipeline
   for &frame in self.frames do frame_deinit(&frame)
-  vk.DestroyDescriptorSetLayout(g_device, g_camera_descriptor_set_layout, nil)
+  // g_camera_descriptor_set_layout is now managed by pipeline_3d
 }
 
 renderer_recreate_images :: proc(

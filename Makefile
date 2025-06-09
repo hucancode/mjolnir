@@ -14,6 +14,9 @@ release: $(SPV_SHADERS) $(SPV_COMPUTE_SHADERS)
 debug: $(SPV_SHADERS) $(SPV_COMPUTE_SHADERS)
 	odin run . -out:bin/main -debug
 
+check:
+	odin check .
+
 test:
 	odin test test -out:bin/test
 
@@ -32,4 +35,4 @@ $(SHADER_DIR)/%/frag.spv: $(SHADER_DIR)/%/shader.frag
 	@echo "Compiling fragment shader $<..."
 	@glslc "$<" -o "$@"
 
-.PHONY: release debug test clean
+.PHONY: release debug test check clean

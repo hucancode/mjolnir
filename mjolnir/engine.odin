@@ -128,11 +128,16 @@ init :: proc(
   engine.last_frame_timestamp = engine.start_timestamp
   engine.last_update_timestamp = engine.start_timestamp
 
-  build_3d_pipelines(.B8G8R8A8_SRGB, .D32_SFLOAT) or_return
-  build_3d_unlit_pipelines(.B8G8R8A8_SRGB, .D32_SFLOAT) or_return
-  build_shadow_pipelines(.D32_SFLOAT) or_return
+  // Remove old global pipeline calls - now handled in renderer_init
   init_scene(&engine.scene)
   build_renderer(engine) or_return
+  
+  // Initialize shadow pipelines after renderer is set up so we have descriptor set layouts
+  build_shadow_pipelines(
+    .D32_SFLOAT,
+    pipeline3d_get_camera_descriptor_set_layout(&engine.renderer.pipeline_3d),
+    pipeline3d_get_skinning_descriptor_set_layout(&engine.renderer.pipeline_3d),
+  ) or_return
   if engine.swapchain.extent.width > 0 &&
      engine.swapchain.extent.height > 0 {
     w := f32(engine.swapchain.extent.width)
@@ -219,13 +224,15 @@ build_renderer :: proc(engine: ^Engine) -> vk.Result {
   engine.renderer.brdf_lut_handle, engine.renderer.brdf_lut =
     create_texture_from_path(engine, "assets/lut_ggx.png") or_return
 
+  // Create local variable to take address of
+  env_layout := pipeline3d_get_environment_descriptor_set_layout(&engine.renderer.pipeline_3d)
   vk.AllocateDescriptorSets(
     g_device,
     &vk.DescriptorSetAllocateInfo {
       sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
       descriptorPool = g_descriptor_pool,
       descriptorSetCount = 1,
-      pSetLayouts = &g_environment_descriptor_set_layout,
+      pSetLayouts = &env_layout,
     },
     &engine.renderer.environment_descriptor_set,
   ) or_return
@@ -343,7 +350,6 @@ update :: proc(engine: ^Engine) -> bool {
 deinit :: proc(engine: ^Engine) {
   vk.DeviceWaitIdle(g_device)
   pipeline2d_deinit(&engine.ui.pipeline)
-  pipeline3d_deinit()
   pipeline_shadow_deinit()
   deinit_scene(&engine.scene)
   renderer_deinit(&engine.renderer)

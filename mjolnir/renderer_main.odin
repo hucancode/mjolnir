@@ -124,8 +124,8 @@ render_single_node :: proc(node: ^Node, cb_context: rawptr) -> bool {
       return true
     }
     pipeline :=
-      g_pipelines[transmute(u32)material.features] if material.is_lit else g_unlit_pipelines[transmute(u32)material.features]
-    layout := g_pipeline_layout
+      pipeline3d_get_pipeline(&ctx.engine.renderer.pipeline_3d, material.features) if material.is_lit else pipeline3d_get_unlit_pipeline(&ctx.engine.renderer.pipeline_3d, material.features)
+    layout := pipeline3d_get_layout(&ctx.engine.renderer.pipeline_3d)
     descriptor_sets := [?]vk.DescriptorSet {
       renderer_get_camera_descriptor_set(&ctx.engine.renderer), // set 0
       material.texture_descriptor_set, // set 1
