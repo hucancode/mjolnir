@@ -48,10 +48,9 @@ material_init_descriptor_set_layout :: proc(
   // Create local variables to take address of
   texture_layout := texture_descriptor_set_layout
   skinning_layout := skinning_descriptor_set_layout
-
   vk.AllocateDescriptorSets(
     g_device,
-    &vk.DescriptorSetAllocateInfo {
+    &{
       sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
       descriptorPool = g_descriptor_pool,
       descriptorSetCount = 1,
@@ -62,7 +61,7 @@ material_init_descriptor_set_layout :: proc(
   for &set in mat.skinning_descriptor_sets {
     vk.AllocateDescriptorSets(
       g_device,
-      &vk.DescriptorSetAllocateInfo {
+      &{
         sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
         descriptorPool = g_descriptor_pool,
         descriptorSetCount = 1,
@@ -95,7 +94,7 @@ material_update_textures :: proc(
         dstBinding = 0,
         descriptorType = .COMBINED_IMAGE_SAMPLER,
         descriptorCount = 1,
-        pImageInfo = &vk.DescriptorImageInfo {
+        pImageInfo = &{
           sampler = albedo.sampler,
           imageView = albedo.buffer.view,
           imageLayout = .SHADER_READ_ONLY_OPTIMAL,
@@ -112,7 +111,7 @@ material_update_textures :: proc(
         dstBinding = 1,
         descriptorType = .COMBINED_IMAGE_SAMPLER,
         descriptorCount = 1,
-        pImageInfo = &vk.DescriptorImageInfo {
+        pImageInfo = &{
           sampler = metallic_roughness.sampler,
           imageView = metallic_roughness.buffer.view,
           imageLayout = .SHADER_READ_ONLY_OPTIMAL,
@@ -129,7 +128,7 @@ material_update_textures :: proc(
         dstBinding = 2,
         descriptorType = .COMBINED_IMAGE_SAMPLER,
         descriptorCount = 1,
-        pImageInfo = &vk.DescriptorImageInfo {
+        pImageInfo = &{
           sampler = normal.sampler,
           imageView = normal.buffer.view,
           imageLayout = .SHADER_READ_ONLY_OPTIMAL,
@@ -146,7 +145,7 @@ material_update_textures :: proc(
         dstBinding = 3,
         descriptorType = .COMBINED_IMAGE_SAMPLER,
         descriptorCount = 1,
-        pImageInfo = &vk.DescriptorImageInfo {
+        pImageInfo = &{
           sampler = displacement.sampler,
           imageView = displacement.buffer.view,
           imageLayout = .SHADER_READ_ONLY_OPTIMAL,
@@ -163,7 +162,7 @@ material_update_textures :: proc(
         dstBinding = 4,
         descriptorType = .COMBINED_IMAGE_SAMPLER,
         descriptorCount = 1,
-        pImageInfo = &vk.DescriptorImageInfo {
+        pImageInfo = &{
           sampler = emissive.sampler,
           imageView = emissive.buffer.view,
           imageLayout = .SHADER_READ_ONLY_OPTIMAL,
@@ -236,18 +235,15 @@ create_material :: proc(
   ret, mat = resource.alloc(&engine.renderer.materials)
   mat.is_lit = true
   mat.features = features
-
   mat.albedo_handle = albedo_handle
   mat.metallic_roughness_handle = metallic_roughness_handle
   mat.normal_handle = normal_handle
   mat.displacement_handle = displacement_handle
   mat.emissive_handle = emissive_handle
-
   mat.albedo_value = albedo_value
   mat.metallic_value = metallic_value
   mat.roughness_value = roughness_value
   mat.emissive_value = emissive_value
-
   material_init_descriptor_set_layout(
     mat,
     pipeline3d_get_texture_descriptor_set_layout(&engine.renderer.pipeline_3d),
@@ -259,14 +255,12 @@ create_material :: proc(
     roughness = mat.roughness_value,
     metallic  = mat.metallic_value,
   }
-
   mat.fallback_buffer = create_host_visible_buffer(
     MaterialFallbacks,
     1,
     {.UNIFORM_BUFFER},
     &fallbacks,
   ) or_return
-
   albedo := resource.get(engine.renderer.textures, albedo_handle)
   metallic_roughness := resource.get(
     engine.renderer.textures,

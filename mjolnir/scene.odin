@@ -55,10 +55,10 @@ Node :: struct {
 
 SceneTraversalCallback :: #type proc(node: ^Node, ctx: rawptr) -> bool
 
-init_node :: proc(node: ^Node, name_str: string = "") {
+init_node :: proc(node: ^Node, name: string = "") {
   node.children = make([dynamic]Handle, 0)
   node.transform = geometry.TRANSFORM_IDENTITY
-  node.name = name_str
+  node.name = name
 }
 
 deinit_node :: proc(node: ^Node) {
@@ -146,12 +146,13 @@ spawn_at :: proc(
   node: ^Node,
 ) {
   handle, node = resource.alloc(&scene.nodes)
-  if node != nil {
-    init_node(node)
-    node.attachment = attachment
-    geometry.translate(&node.transform, position.x, position.y, position.z)
-    attach(scene.nodes, scene.root, handle)
+  if node == nil {
+    return
   }
+  init_node(node)
+  node.attachment = attachment
+  geometry.translate(&node.transform, position.x, position.y, position.z)
+  attach(scene.nodes, scene.root, handle)
   return
 }
 
@@ -163,11 +164,12 @@ spawn :: proc(
   node: ^Node,
 ) {
   handle, node = resource.alloc(&scene.nodes)
-  if node != nil {
-    init_node(node)
-    node.attachment = attachment
-    attach(scene.nodes, scene.root, handle)
+  if node == nil {
+    return
   }
+  init_node(node)
+  node.attachment = attachment
+  attach(scene.nodes, scene.root, handle)
   return
 }
 
@@ -180,11 +182,12 @@ spawn_child :: proc(
   node: ^Node,
 ) {
   handle, node = resource.alloc(&scene.nodes)
-  if node != nil {
-    init_node(node)
-    node.attachment = attachment
-    attach(scene.nodes, parent, handle)
+  if node == nil {
+    return
   }
+  init_node(node)
+  node.attachment = attachment
+  attach(scene.nodes, parent, handle)
   return
 }
 
@@ -239,7 +242,6 @@ traverse_scene :: proc(
   stack := make([dynamic]TraverseEntry, 0, n)
   defer delete(stack)
   append(&stack, TraverseEntry{scene.root, linalg.MATRIX4F32_IDENTITY, false})
-
   for len(stack) > 0 {
     entry := pop(&stack)
     current_node, found := resource.get(scene.nodes, entry.handle)

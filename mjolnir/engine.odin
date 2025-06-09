@@ -73,7 +73,7 @@ Engine :: struct {
   swapchain:             Swapchain,
   renderer:              Renderer,
   scene:                 Scene,
-  ui:                    UIRenderer,
+  ui:                    RendererUI,
   last_frame_timestamp:  time.Time,
   last_update_timestamp: time.Time,
   start_timestamp:       time.Time,
@@ -99,7 +99,7 @@ init :: proc(
   context.user_ptr = engine
   g_context = context
 
-  // glfw.SetErrorCallback(glfw_error_callback) // Define this callback
+  // glfw.SetErrorCallback(glfw_error_callback)
   if !glfw.Init() {
     log.errorf("Failed to initialize GLFW")
     return .ERROR_INITIALIZATION_FAILED
@@ -121,16 +121,12 @@ init :: proc(
     return .ERROR_INITIALIZATION_FAILED
   }
   log.infof("Window created %v\n", engine.window)
-
   vulkan_context_init(engine.window) or_return
-
   engine.start_timestamp = time.now()
   engine.last_frame_timestamp = engine.start_timestamp
   engine.last_update_timestamp = engine.start_timestamp
-
   init_scene(&engine.scene)
   build_renderer(engine) or_return
-
   ui_init(
     &engine.ui,
     engine,
@@ -173,20 +169,15 @@ init :: proc(
       }
     },
   )
-
   if engine.setup_proc != nil {
     engine.setup_proc(engine)
   }
-
   log.infof("Engine initialized")
   return .SUCCESS
 }
 
 build_renderer :: proc(engine: ^Engine) -> vk.Result {
-  // Initialize swapchain first - now owned by Engine
   swapchain_init(&engine.swapchain, engine.window) or_return
-
-  // Initialize renderer with swapchain info
   renderer_init(
     &engine.renderer,
     engine.swapchain.extent.width,
@@ -194,21 +185,17 @@ build_renderer :: proc(engine: ^Engine) -> vk.Result {
     engine.swapchain.format.format,
     .D32_SFLOAT,
   ) or_return
-
   engine.renderer.environment_map_handle, engine.renderer.environment_map =
     create_hdr_texture_from_path(
       engine,
       "assets/teutonic_castle_moat_4k.hdr",
     ) or_return
-
   engine.renderer.brdf_lut_handle, engine.renderer.brdf_lut =
     create_texture_from_path(engine, "assets/lut_ggx.png") or_return
-
-  // Create local variable to take address of
   env_layout := pipeline3d_get_environment_descriptor_set_layout(&engine.renderer.pipeline_3d)
   vk.AllocateDescriptorSets(
     g_device,
-    &vk.DescriptorSetAllocateInfo {
+    &{
       sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
       descriptorPool = g_descriptor_pool,
       descriptorSetCount = 1,
@@ -216,33 +203,30 @@ build_renderer :: proc(engine: ^Engine) -> vk.Result {
     },
     &engine.renderer.environment_descriptor_set,
   ) or_return
-
   env_write := vk.WriteDescriptorSet {
       sType           = .WRITE_DESCRIPTOR_SET,
       dstSet          = engine.renderer.environment_descriptor_set,
       dstBinding      = 0,
       descriptorType  = .COMBINED_IMAGE_SAMPLER,
       descriptorCount = 1,
-      pImageInfo      = &vk.DescriptorImageInfo {
+      pImageInfo      = &{
         sampler = engine.renderer.environment_map.sampler,
         imageView = engine.renderer.environment_map.buffer.view,
         imageLayout = .SHADER_READ_ONLY_OPTIMAL,
       },
     }
-
   brdf_lut_write := vk.WriteDescriptorSet {
       sType           = .WRITE_DESCRIPTOR_SET,
       dstSet          = engine.renderer.environment_descriptor_set,
       dstBinding      = 1,
       descriptorType  = .COMBINED_IMAGE_SAMPLER,
       descriptorCount = 1,
-      pImageInfo      = &vk.DescriptorImageInfo {
+      pImageInfo      = &{
         sampler = engine.renderer.brdf_lut.sampler,
         imageView = engine.renderer.brdf_lut.buffer.view,
         imageLayout = .SHADER_READ_ONLY_OPTIMAL,
       },
     }
-
   writes := [?]vk.WriteDescriptorSet{env_write, brdf_lut_write}
   vk.UpdateDescriptorSets(g_device, len(writes), raw_data(writes[:]), 0, nil)
   return .SUCCESS
@@ -299,7 +283,6 @@ update :: proc(engine: ^Engine) -> bool {
     engine.window,
   )
   delta := engine.input.mouse_pos - last_mouse_pos
-
   for i in 0 ..< len(engine.input.mouse_buttons) {
     is_pressed := glfw.GetMouseButton(engine.window, c.int(i)) == glfw.PRESS
     engine.input.mouse_holding[i] = is_pressed && engine.input.mouse_buttons[i]
@@ -340,20 +323,14 @@ deinit :: proc(engine: ^Engine) {
 }
 
 recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
-  // Recreate swapchain first
   swapchain_recreate(&engine.swapchain, engine.window) or_return
-
-  // Update camera aspect ratio to match new window dimensions
   new_aspect_ratio := f32(engine.swapchain.extent.width) / f32(engine.swapchain.extent.height)
   geometry.camera_update_aspect_ratio(&engine.scene.camera, new_aspect_ratio)
-
-  // Then recreate renderer's size-dependent resources
   renderer_recreate_images(
     &engine.renderer,
     engine.swapchain.format.format,
     engine.swapchain.extent,
   ) or_return
-
   return .SUCCESS
 }
 
@@ -370,7 +347,7 @@ run :: proc(engine: ^Engine, width: u32, height: u32, title: string) {
     }
     res := render(engine)
     if res == .ERROR_OUT_OF_DATE_KHR || res == .SUBOPTIMAL_KHR {
-      recreate_swapchain(engine) or_continue  // Use new engine function
+      recreate_swapchain(engine) or_continue
     }
     if res != .SUCCESS {
       log.errorf("Error during rendering", res)

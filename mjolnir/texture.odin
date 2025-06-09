@@ -386,13 +386,13 @@ cube_depth_texture_init :: proc(
       image = self.buffer.image,
       viewType = .D2,
       format = .D32_SFLOAT,
-      components = vk.ComponentMapping {
+      components = {
         r = .IDENTITY,
         g = .IDENTITY,
         b = .IDENTITY,
         a = .IDENTITY,
       },
-      subresourceRange = vk.ImageSubresourceRange {
+      subresourceRange = {
         aspectMask = {.DEPTH},
         baseMipLevel = 0,
         levelCount = 1,
@@ -407,13 +407,8 @@ cube_depth_texture_init :: proc(
     image = self.buffer.image,
     viewType = .CUBE,
     format = .D32_SFLOAT,
-    components = vk.ComponentMapping {
-      r = .IDENTITY,
-      g = .IDENTITY,
-      b = .IDENTITY,
-      a = .IDENTITY,
-    },
-    subresourceRange = vk.ImageSubresourceRange {
+    components = {r = .IDENTITY, g = .IDENTITY, b = .IDENTITY, a = .IDENTITY},
+    subresourceRange = {
       aspectMask = {.DEPTH},
       baseMipLevel = 0,
       levelCount = 1,
@@ -498,7 +493,7 @@ prepare_image_for_render :: proc(
     srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
     dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
     image = image,
-    subresourceRange = vk.ImageSubresourceRange {
+    subresourceRange = {
       aspectMask = {.COLOR},
       baseMipLevel = 0,
       levelCount = 1,
@@ -533,7 +528,7 @@ prepare_image_for_shader_read :: proc(
     srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
     dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
     image = image,
-    subresourceRange = vk.ImageSubresourceRange {
+    subresourceRange = {
       aspectMask = {.COLOR},
       baseMipLevel = 0,
       levelCount = 1,
@@ -568,7 +563,7 @@ prepare_image_for_present :: proc(
     srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
     dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
     image = image,
-    subresourceRange = vk.ImageSubresourceRange {
+    subresourceRange = {
       aspectMask = {.COLOR},
       baseMipLevel = 0,
       levelCount = 1,

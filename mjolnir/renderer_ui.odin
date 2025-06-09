@@ -10,7 +10,7 @@ UI_MAX_QUAD :: 1000
 UI_MAX_VERTICES :: UI_MAX_QUAD * 4
 UI_MAX_INDICES :: UI_MAX_QUAD * 6
 // --- UI State ---
-UIRenderer :: struct {
+RendererUI :: struct {
   ctx:           mu.Context,
   pipeline:      Pipeline2D,
   atlas:         Texture,
@@ -32,7 +32,7 @@ Vertex2D :: struct {
 }
 
 ui_init :: proc(
-  ui: ^UIRenderer,
+  ui: ^RendererUI,
   engine: ^Engine,
   color_format: vk.Format,
   width: u32,
@@ -68,11 +68,6 @@ ui_init :: proc(
     {.INDEX_BUFFER},
   ) or_return
   // Write atlas texture and sampler to texture_descriptor_set
-  image_info := vk.DescriptorImageInfo {
-    sampler     = ui.atlas.sampler,
-    imageView   = ui.atlas.buffer.view,
-    imageLayout = .SHADER_READ_ONLY_OPTIMAL,
-  }
   ortho := linalg.matrix_ortho3d(0, f32(width), f32(height), 0, -1, 1)
   log.infof("init UI proj buffer...")
   ui.proj_buffer = create_host_visible_buffer(
@@ -102,7 +97,11 @@ ui_init :: proc(
       dstArrayElement = 0,
       descriptorCount = 1,
       descriptorType = .COMBINED_IMAGE_SAMPLER,
-      pImageInfo = &image_info,
+      pImageInfo = &{
+        sampler = ui.atlas.sampler,
+        imageView = ui.atlas.buffer.view,
+        imageLayout = .SHADER_READ_ONLY_OPTIMAL,
+      },
     },
   }
   vk.UpdateDescriptorSets(g_device, len(writes), raw_data(writes[:]), 0, nil)
@@ -110,7 +109,7 @@ ui_init :: proc(
   return .SUCCESS
 }
 
-ui_render :: proc(ui: ^UIRenderer, cmd_buf: vk.CommandBuffer) {
+ui_render :: proc(ui: ^RendererUI, cmd_buf: vk.CommandBuffer) {
   command_backing: ^mu.Command
   for variant in mu.next_command_iterator(&ui.ctx, &command_backing) {
     // log.infof("executing UI command", variant)
@@ -130,7 +129,7 @@ ui_render :: proc(ui: ^UIRenderer, cmd_buf: vk.CommandBuffer) {
   ui_flush(ui, cmd_buf)
 }
 
-ui_flush :: proc(ui: ^UIRenderer, cmd_buf: vk.CommandBuffer) -> vk.Result {
+ui_flush :: proc(ui: ^RendererUI, cmd_buf: vk.CommandBuffer) -> vk.Result {
   if ui.vertex_count == 0 && ui.index_count == 0 {
     return .SUCCESS
   }
@@ -178,7 +177,7 @@ ui_flush :: proc(ui: ^UIRenderer, cmd_buf: vk.CommandBuffer) -> vk.Result {
 }
 
 ui_push_quad :: proc(
-  ui: ^UIRenderer,
+  ui: ^RendererUI,
   cmd_buf: vk.CommandBuffer,
   dst, src: mu.Rect,
   color: mu.Color,
@@ -227,7 +226,7 @@ ui_push_quad :: proc(
 }
 
 ui_draw_rect :: proc(
-  ui: ^UIRenderer,
+  ui: ^RendererUI,
   cmd_buf: vk.CommandBuffer,
   rect: mu.Rect,
   color: mu.Color,
@@ -242,7 +241,7 @@ ui_draw_rect :: proc(
 }
 
 ui_draw_text :: proc(
-  ui: ^UIRenderer,
+  ui: ^RendererUI,
   cmd_buf: vk.CommandBuffer,
   text: string,
   pos: mu.Vec2,
@@ -262,7 +261,7 @@ ui_draw_text :: proc(
 }
 
 ui_draw_icon :: proc(
-  ui: ^UIRenderer,
+  ui: ^RendererUI,
   cmd_buf: vk.CommandBuffer,
   id: mu.Icon,
   rect: mu.Rect,
@@ -275,7 +274,7 @@ ui_draw_icon :: proc(
 }
 
 ui_set_clip_rect :: proc(
-  ui: ^UIRenderer,
+  ui: ^RendererUI,
   cmd_buf: vk.CommandBuffer,
   rect: mu.Rect,
 ) {

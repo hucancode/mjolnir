@@ -10,7 +10,10 @@ compute_particles :: proc(
   renderer: ^Renderer,
   command_buffer: vk.CommandBuffer,
 ) {
-  log.info("binding compute pipeline", renderer.pipeline_particle_comp.pipeline)
+  // log.info(
+  //   "binding compute pipeline",
+  //   renderer.pipeline_particle_comp.pipeline,
+  // )
   vk.CmdBindPipeline(
     command_buffer,
     .COMPUTE,
@@ -53,10 +56,10 @@ compute_particles :: proc(
 }
 
 render_particles :: proc(engine: ^Engine, command_buffer: vk.CommandBuffer) {
-  log.info(
-    "binding particle render pipeline",
-    engine.renderer.pipeline_particle.pipeline,
-  )
+  // log.info(
+  //   "binding particle render pipeline",
+  //   engine.renderer.pipeline_particle.pipeline,
+  // )
   vk.CmdBindPipeline(
     command_buffer,
     .GRAPHICS,
@@ -72,8 +75,6 @@ render_particles :: proc(engine: ^Engine, command_buffer: vk.CommandBuffer) {
     0,
     nil,
   )
-
-  // Push view projection matrix for particles
   uniform := SceneUniform {
     view       = geometry.calculate_view_matrix(&engine.scene.camera),
     projection = geometry.calculate_projection_matrix(&engine.scene.camera),
@@ -86,8 +87,6 @@ render_particles :: proc(engine: ^Engine, command_buffer: vk.CommandBuffer) {
     size_of(SceneUniform),
     &uniform,
   )
-
-  // Bind particle vertex buffer and draw
   offset: vk.DeviceSize = 0
   vk.CmdBindVertexBuffers(
     command_buffer,
@@ -96,8 +95,8 @@ render_particles :: proc(engine: ^Engine, command_buffer: vk.CommandBuffer) {
     &engine.renderer.pipeline_particle_comp.particle_buffer.buffer,
     &offset,
   )
-  params := data_buffer_get(engine.renderer.pipeline_particle_comp.params_buffer)
-  if params.particle_count > 0 {
-    vk.CmdDraw(command_buffer, u32(params.particle_count), 1, 0, 0)
-  }
+  params := data_buffer_get(
+    engine.renderer.pipeline_particle_comp.params_buffer,
+  )
+  vk.CmdDraw(command_buffer, u32(params.particle_count), 1, 0, 0)
 }

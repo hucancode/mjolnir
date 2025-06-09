@@ -17,7 +17,7 @@ render_shadow_pass :: proc(
     cube_shadow := renderer_get_cube_shadow_map(renderer, i)
     shadow_map_texture := renderer_get_shadow_map(renderer, i)
     // Transition shadow map to depth attachment
-    initial_barriers := [2]vk.ImageMemoryBarrier {
+    initial_barriers := [?]vk.ImageMemoryBarrier {
       {
         sType = .IMAGE_MEMORY_BARRIER,
         oldLayout = .UNDEFINED,
@@ -25,7 +25,7 @@ render_shadow_pass :: proc(
         srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
         dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
         image = cube_shadow.buffer.image,
-        subresourceRange = vk.ImageSubresourceRange {
+        subresourceRange = {
           aspectMask = {.DEPTH},
           baseMipLevel = 0,
           levelCount = 1,
@@ -41,7 +41,7 @@ render_shadow_pass :: proc(
         srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
         dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
         image = shadow_map_texture.buffer.image,
-        subresourceRange = vk.ImageSubresourceRange {
+        subresourceRange = {
           aspectMask = {.DEPTH},
           baseMipLevel = 0,
           levelCount = 1,
@@ -107,7 +107,7 @@ render_shadow_pass :: proc(
           imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
           loadOp = .CLEAR,
           storeOp = .STORE,
-          clearValue = vk.ClearValue{depthStencil = {depth = 1.0}},
+          clearValue = {depthStencil = {depth = 1.0}},
         }
         face_render_info := vk.RenderingInfoKHR {
           sType = .RENDERING_INFO_KHR,
@@ -191,7 +191,7 @@ render_shadow_pass :: proc(
         imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
         loadOp = .CLEAR,
         storeOp = .STORE,
-        clearValue = vk.ClearValue{depthStencil = {1.0, 0}},
+        clearValue = {depthStencil = {1.0, 0}},
       }
       render_info_khr := vk.RenderingInfoKHR {
         sType = .RENDERING_INFO_KHR,
@@ -243,7 +243,7 @@ render_shadow_pass :: proc(
   for i := 0; i < int(light_uniform.light_count); i += 1 {
     cube_shadow := renderer_get_cube_shadow_map(renderer, i)
     shadow_map_texture := renderer_get_shadow_map(renderer, i)
-    final_barriers := [2]vk.ImageMemoryBarrier {
+    final_barriers := [?]vk.ImageMemoryBarrier {
       {
         sType = .IMAGE_MEMORY_BARRIER,
         oldLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
@@ -251,7 +251,7 @@ render_shadow_pass :: proc(
         srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
         dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
         image = cube_shadow.buffer.image,
-        subresourceRange = vk.ImageSubresourceRange {
+        subresourceRange = {
           aspectMask = {.DEPTH},
           baseMipLevel = 0,
           levelCount = 1,
@@ -268,7 +268,7 @@ render_shadow_pass :: proc(
         srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
         dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
         image = shadow_map_texture.buffer.image,
-        subresourceRange = vk.ImageSubresourceRange {
+        subresourceRange = {
           aspectMask = {.DEPTH},
           baseMipLevel = 0,
           levelCount = 1,
@@ -323,11 +323,17 @@ render_single_shadow :: proc(node: ^Node, cb_context: rawptr) -> bool {
       return true
     }
     features: ShaderFeatureSet
-    pipeline := pipeline_shadow_get_pipeline(&ctx.engine.renderer.pipeline_shadow, features)
+    pipeline := pipeline_shadow_get_pipeline(
+      &ctx.engine.renderer.pipeline_shadow,
+      features,
+    )
     layout := pipeline_shadow_get_layout(&ctx.engine.renderer.pipeline_shadow)
     descriptor_sets: []vk.DescriptorSet
     if mesh_has_skin {
-      pipeline = pipeline_shadow_get_pipeline(&ctx.engine.renderer.pipeline_shadow, {.SKINNING})
+      pipeline = pipeline_shadow_get_pipeline(
+        &ctx.engine.renderer.pipeline_shadow,
+        {.SKINNING},
+      )
       descriptor_sets = {
         renderer_get_camera_descriptor_set(&ctx.engine.renderer), // set 0
         material.skinning_descriptor_sets[frame], // set 1

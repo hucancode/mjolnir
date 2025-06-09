@@ -38,17 +38,14 @@ Mesh :: struct {
 mesh_deinit :: proc(self: ^Mesh) {
   data_buffer_deinit(&self.vertex_buffer)
   data_buffer_deinit(&self.index_buffer)
-
   skin, has_skin := &self.skinning.?
   if !has_skin {
     return
   }
   data_buffer_deinit(&skin.skin_buffer)
-
   for &bone in skin.bones do bone_deinit(&bone)
   delete(skin.bones)
   for &clip in skin.animations do animation.clip_deinit(&clip)
-
   delete(skin.animations)
 }
 
@@ -68,20 +65,20 @@ mesh_init :: proc(self: ^Mesh, data: geometry.Geometry) -> vk.Result {
     {.INDEX_BUFFER},
     raw_data(data.indices),
   ) or_return
-
-  if len(data.skinnings) > 0 {
-    log.info("creating skin buffer", len(data.skinnings))
-    skin_buffer := create_local_buffer(
-      geometry.SkinningData,
-      len(data.skinnings),
-      {.VERTEX_BUFFER},
-      raw_data(data.skinnings),
-    ) or_return
-    self.skinning = Skinning {
-      bones       = make([]Bone, 0),
-      animations  = make([]animation.Clip, 0),
-      skin_buffer = skin_buffer,
-    }
+  if len(data.skinnings) <= 0 {
+    return .SUCCESS
+  }
+  log.info("creating skin buffer", len(data.skinnings))
+  skin_buffer := create_local_buffer(
+    geometry.SkinningData,
+    len(data.skinnings),
+    {.VERTEX_BUFFER},
+    raw_data(data.skinnings),
+  ) or_return
+  self.skinning = Skinning {
+    bones       = make([]Bone, 0),
+    animations  = make([]animation.Clip, 0),
+    skin_buffer = skin_buffer,
   }
   return .SUCCESS
 }
@@ -93,24 +90,25 @@ make_animation_instance :: proc(
   speed: f32 = 1.0,
 ) -> (
   instance: animation.Instance,
-  found: bool,
-) {
+  ok: bool,
+) #optional_ok {
   skin, has_skin := &self.skinning.?
   if !has_skin {
     return instance, false
   }
   for clip, i in skin.animations {
-    if clip.name == animation_name {
-      instance = {
-        clip_handle = u32(i),
-        mode        = mode,
-        status      = .PLAYING,
-        time        = 0.0,
-        duration    = clip.duration,
-        speed       = speed,
-      }
-      return instance, true
+    if clip.name != animation_name {
+      continue
     }
+    instance = {
+      clip_handle = u32(i),
+      mode        = mode,
+      status      = .PLAYING,
+      time        = 0.0,
+      duration    = clip.duration,
+      speed       = speed,
+    }
+    return instance, true
   }
   return instance, false
 }

@@ -115,14 +115,13 @@ setup_particle_compute_pipeline :: proc(
       stageFlags = {.COMPUTE},
     },
   }
-  layout_info := vk.DescriptorSetLayoutCreateInfo {
-    sType        = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-    bindingCount = len(bindings),
-    pBindings    = raw_data(bindings[:]),
-  }
   vk.CreateDescriptorSetLayout(
     g_device,
-    &layout_info,
+    &{
+      sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+      bindingCount = len(bindings),
+      pBindings = raw_data(bindings[:]),
+    },
     nil,
     &pipeline.descriptor_set_layout,
   ) or_return
@@ -130,7 +129,7 @@ setup_particle_compute_pipeline :: proc(
   // 5. Descriptor set allocation and update
   vk.AllocateDescriptorSets(
     g_device,
-    &vk.DescriptorSetAllocateInfo {
+    &{
       sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
       descriptorPool = g_descriptor_pool,
       descriptorSetCount = 1,
@@ -178,14 +177,13 @@ setup_particle_compute_pipeline :: proc(
   }
   vk.UpdateDescriptorSets(g_device, len(writes), raw_data(writes[:]), 0, nil)
   // 6. Pipeline layout and compute pipeline
-  pipeline_layout_info := vk.PipelineLayoutCreateInfo {
-    sType          = .PIPELINE_LAYOUT_CREATE_INFO,
-    setLayoutCount = 1,
-    pSetLayouts    = &pipeline.descriptor_set_layout,
-  }
   vk.CreatePipelineLayout(
     g_device,
-    &pipeline_layout_info,
+    &{
+      sType = .PIPELINE_LAYOUT_CREATE_INFO,
+      setLayoutCount = 1,
+      pSetLayouts = &pipeline.descriptor_set_layout,
+    },
     nil,
     &pipeline.pipeline_layout,
   ) or_return
@@ -195,7 +193,7 @@ setup_particle_compute_pipeline :: proc(
   ) or_return
   pipeline_info := vk.ComputePipelineCreateInfo {
     sType = .COMPUTE_PIPELINE_CREATE_INFO,
-    stage = vk.PipelineShaderStageCreateInfo {
+    stage = {
       sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
       stage = {.COMPUTE},
       module = shader_module,
@@ -239,12 +237,9 @@ add_emitter :: proc(
 
 particle_render_pipeline_deinit :: proc(pipeline: ^PipelineParticle) {
   if pipeline == nil do return
-
   vk.DestroyPipeline(g_device, pipeline.pipeline, nil)
   vk.DestroyPipelineLayout(g_device, pipeline.pipeline_layout, nil)
   vk.DestroyDescriptorSetLayout(g_device, pipeline.descriptor_set_layout, nil)
-
-  // Destroy texture resources
   vk.DestroyImageView(g_device, pipeline.particle_view, nil)
   vk.DestroyImage(g_device, pipeline.particle_texture, nil)
   vk.DestroySampler(g_device, pipeline.particle_sampler, nil)
@@ -270,25 +265,20 @@ remove_emitter :: proc(
 update_emitters :: proc(pipeline: ^PipelineParticleCompute, delta_time: f32) {
   params := data_buffer_get(pipeline.params_buffer)
   params.delta_time = delta_time
-
   emitters := pipeline.emitter_buffer.mapped
   particles := pipeline.particle_buffer.mapped
-
   for i in 0 ..< MAX_PARTICLES {
     if particles[i].life <= 0 && !particles[i].is_dead {
       append(&pipeline.free_particle_indices, i)
       particles[i].is_dead = true
     }
   }
-
   // For each emitter, spawn as many particles as needed
   for e in 0 ..< params.emitter_count {
     emitter := &emitters[e]
     if !emitter.enabled do continue
-
     emitter.time_accumulator += delta_time
     emission_interval := 1.0 / emitter.emission_rate
-
     for emitter.time_accumulator >= emission_interval {
       idx, ok := pop_front_safe(&pipeline.free_particle_indices)
       if !ok {
@@ -381,7 +371,6 @@ setup_particle_render_pipeline :: proc(
 ) -> (
   ret: vk.Result,
 ) {
-  // Create descriptor set layout for particle texture
   bindings := [?]vk.DescriptorSetLayoutBinding {
     {
       binding = 0,
@@ -401,8 +390,6 @@ setup_particle_render_pipeline :: proc(
     nil,
     &pipeline.descriptor_set_layout,
   ) or_return
-
-  // Create pipeline layout with view projection push constant
   push_constant_range := vk.PushConstantRange {
     stageFlags = {.VERTEX},
     offset     = 0,
@@ -421,8 +408,6 @@ setup_particle_render_pipeline :: proc(
     nil,
     &pipeline.pipeline_layout,
   ) or_return
-
-  // Create vertex input state
   vertex_binding := vk.VertexInputBindingDescription {
     binding   = 0,
     stride    = size_of(Particle),
@@ -484,7 +469,6 @@ setup_particle_render_pipeline :: proc(
       offset = u32(offset_of(Particle, is_dead)),
     },
   }
-
   vertex_input_info := vk.PipelineVertexInputStateCreateInfo {
     sType                           = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
     vertexBindingDescriptionCount   = 1,
@@ -492,29 +476,18 @@ setup_particle_render_pipeline :: proc(
     vertexAttributeDescriptionCount = len(vertex_attributes),
     pVertexAttributeDescriptions    = raw_data(vertex_attributes[:]),
   }
-
-  // Input assembly - point list
   input_assembly := vk.PipelineInputAssemblyStateCreateInfo {
     sType    = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
     topology = .POINT_LIST,
   }
-
-  // Rasterization state
   rasterization := vk.PipelineRasterizationStateCreateInfo {
     sType                   = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
     depthClampEnable        = false,
     rasterizerDiscardEnable = false,
     polygonMode             = .FILL,
-    cullMode                = {}, // No culling for particles
-    frontFace               = .COUNTER_CLOCKWISE,
     depthBiasEnable         = false,
-    depthBiasConstantFactor = 0,
-    depthBiasClamp          = 0,
-    depthBiasSlopeFactor    = 0,
     lineWidth               = 1,
   }
-
-  // Enable alpha blending
   color_blend_attachment := vk.PipelineColorBlendAttachmentState {
     blendEnable         = true,
     srcColorBlendFactor = .SRC_ALPHA,
@@ -525,44 +498,32 @@ setup_particle_render_pipeline :: proc(
     alphaBlendOp        = .ADD,
     colorWriteMask      = {.R, .G, .B, .A},
   }
-
   blend_state := vk.PipelineColorBlendStateCreateInfo {
     sType           = .PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
     attachmentCount = 1,
     pAttachments    = &color_blend_attachment,
   }
-
-  // Other states
   viewport_state := vk.PipelineViewportStateCreateInfo {
     sType         = .PIPELINE_VIEWPORT_STATE_CREATE_INFO,
     viewportCount = 1,
     scissorCount  = 1,
   }
-
   dynamic_states := [?]vk.DynamicState{.VIEWPORT, .SCISSOR}
   dynamic_state := vk.PipelineDynamicStateCreateInfo {
     sType             = .PIPELINE_DYNAMIC_STATE_CREATE_INFO,
     dynamicStateCount = len(dynamic_states),
     pDynamicStates    = raw_data(dynamic_states[:]),
   }
-
   multisample := vk.PipelineMultisampleStateCreateInfo {
-    sType                 = .PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
-    rasterizationSamples  = {._1},
-    sampleShadingEnable   = false,
-    alphaToCoverageEnable = false,
-    alphaToOneEnable      = false,
+    sType                = .PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+    rasterizationSamples = {._1},
   }
-
-  // Load shaders
   vert_shader_code := #load("shader/particle/vert.spv")
   frag_shader_code := #load("shader/particle/frag.spv")
-
   vert_module := create_shader_module(vert_shader_code) or_return
   frag_module := create_shader_module(frag_shader_code) or_return
   defer vk.DestroyShaderModule(g_device, vert_module, nil)
   defer vk.DestroyShaderModule(g_device, frag_module, nil)
-
   shader_stages := [?]vk.PipelineShaderStageCreateInfo {
     {
       sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
@@ -577,16 +538,13 @@ setup_particle_render_pipeline :: proc(
       pName = "main",
     },
   }
-
   color_formats := [?]vk.Format{.B8G8R8A8_SRGB}
-  // Create the graphics pipeline
   rendering_info := vk.PipelineRenderingCreateInfo {
     sType                   = .PIPELINE_RENDERING_CREATE_INFO,
     colorAttachmentCount    = len(color_formats),
     pColorAttachmentFormats = raw_data(color_formats[:]),
     depthAttachmentFormat   = .D32_SFLOAT,
   }
-
   pipeline_info := vk.GraphicsPipelineCreateInfo {
     sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
     stageCount          = len(shader_stages),
@@ -601,15 +559,12 @@ setup_particle_render_pipeline :: proc(
     layout              = pipeline.pipeline_layout,
     pNext               = &rendering_info,
     pDepthStencilState  = &vk.PipelineDepthStencilStateCreateInfo {
-      sType                 = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
-      depthTestEnable       = true,
-      depthWriteEnable      = false, // Don't write to depth for transparent particles
-      depthCompareOp        = .LESS_OR_EQUAL,
-      depthBoundsTestEnable = false,
-      stencilTestEnable     = false,
+      sType = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+      depthTestEnable = true,
+      depthWriteEnable = false,
+      depthCompareOp = .LESS_OR_EQUAL,
     },
   }
-
   vk.CreateGraphicsPipelines(
     g_device,
     0,
@@ -618,24 +573,21 @@ setup_particle_render_pipeline :: proc(
     nil,
     &pipeline.pipeline,
   ) or_return
-  // Create and setup particle texture
   create_particle_texture(pipeline) or_return
   ret = .SUCCESS
   return
 }
 
 create_particle_texture :: proc(pipeline: ^PipelineParticle) -> vk.Result {
-  // Load particle texture from file
   texture: Texture
   read_texture(&texture, "assets/black-circle.png") or_return
   texture_init(&texture) or_return
   pipeline.particle_texture = texture.buffer.image
   pipeline.particle_view = texture.buffer.view
   pipeline.particle_sampler = texture.sampler
-  // Allocate descriptor set
   vk.AllocateDescriptorSets(
     g_device,
-    &vk.DescriptorSetAllocateInfo {
+    &{
       sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
       descriptorPool = g_descriptor_pool,
       descriptorSetCount = 1,
@@ -643,14 +595,13 @@ create_particle_texture :: proc(pipeline: ^PipelineParticle) -> vk.Result {
     },
     &pipeline.descriptor_set,
   ) or_return
-  // Update descriptor set with particle texture
   write := vk.WriteDescriptorSet {
     sType           = .WRITE_DESCRIPTOR_SET,
     dstSet          = pipeline.descriptor_set,
     dstBinding      = 0,
     descriptorType  = .COMBINED_IMAGE_SAMPLER,
     descriptorCount = 1,
-    pImageInfo      = &vk.DescriptorImageInfo {
+    pImageInfo      = &{
       sampler = pipeline.particle_sampler,
       imageView = pipeline.particle_view,
       imageLayout = .SHADER_READ_ONLY_OPTIMAL,

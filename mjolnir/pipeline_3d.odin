@@ -47,7 +47,6 @@ SHADER_UNLIT_FRAG :: #load("shader/unlit/frag.spv")
 
 pipeline3d_deinit :: proc(pipeline: ^Pipeline3D) {
   if pipeline == nil do return
-
   for &p in pipeline.pipelines {
     vk.DestroyPipeline(g_device, p, nil)
     p = 0
@@ -297,7 +296,7 @@ build_3d_pipelines :: proc(
   }
   vk.CreateDescriptorSetLayout(
     g_device,
-    &vk.DescriptorSetLayoutCreateInfo {
+    &{
       sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
       bindingCount = u32(len(environment_bindings)),
       pBindings = raw_data(environment_bindings),
@@ -305,7 +304,6 @@ build_3d_pipelines :: proc(
     nil,
     &pipeline.environment_descriptor_set_layout,
   ) or_return
-
   set_layouts := [?]vk.DescriptorSetLayout {
     pipeline.camera_descriptor_set_layout, // set = 0
     pipeline.texture_descriptor_set_layout, // set = 1
@@ -316,28 +314,27 @@ build_3d_pipelines :: proc(
     stageFlags = {.VERTEX},
     size       = size_of(linalg.Matrix4f32),
   }
-  pipeline_layout_info := vk.PipelineLayoutCreateInfo {
-    sType                  = .PIPELINE_LAYOUT_CREATE_INFO,
-    setLayoutCount         = len(set_layouts),
-    pSetLayouts            = raw_data(set_layouts[:]),
-    pushConstantRangeCount = 1,
-    pPushConstantRanges    = &push_constant_range,
-  }
   vk.CreatePipelineLayout(
     g_device,
-    &pipeline_layout_info,
+    &{
+      sType = .PIPELINE_LAYOUT_CREATE_INFO,
+      setLayoutCount = len(set_layouts),
+      pSetLayouts = raw_data(set_layouts[:]),
+      pushConstantRangeCount = 1,
+      pPushConstantRanges = &push_constant_range,
+    },
     nil,
     &pipeline.pipeline_layout,
   ) or_return
   for mask in 0 ..< SHADER_VARIANT_COUNT {
     features := transmute(ShaderFeatureSet)mask
     configs[mask] = ShaderConfig {
-      is_skinned                     = ShaderFeatures.SKINNING in features,
-      has_albedo_texture             = ShaderFeatures.ALBEDO_TEXTURE in features,
-      has_metallic_roughness_texture = ShaderFeatures.METALLIC_ROUGHNESS_TEXTURE in features,
-      has_normal_texture             = ShaderFeatures.NORMAL_TEXTURE in features,
-      has_displacement_texture       = ShaderFeatures.DISPLACEMENT_TEXTURE in features,
-      has_emissive_texture           = ShaderFeatures.EMISSIVE_TEXTURE in features,
+      is_skinned                     = .SKINNING in features,
+      has_albedo_texture             = .ALBEDO_TEXTURE in features,
+      has_metallic_roughness_texture = .METALLIC_ROUGHNESS_TEXTURE in features,
+      has_normal_texture             = .NORMAL_TEXTURE in features,
+      has_displacement_texture       = .DISPLACEMENT_TEXTURE in features,
+      has_emissive_texture           = .EMISSIVE_TEXTURE in features,
     }
     entries[mask] = [SHADER_OPTION_COUNT]vk.SpecializationMapEntry {
       {
@@ -371,7 +368,7 @@ build_3d_pipelines :: proc(
         size = size_of(b32),
       },
     }
-    spec_infos[mask] = vk.SpecializationInfo {
+    spec_infos[mask] = {
       mapEntryCount = len(entries[mask]),
       pMapEntries   = raw_data(entries[mask][:]),
       dataSize      = size_of(ShaderConfig),
@@ -399,7 +396,7 @@ build_3d_pipelines :: proc(
       configs[mask],
       vertex_input_info,
     )
-    pipeline_infos[mask] = vk.GraphicsPipelineCreateInfo {
+    pipeline_infos[mask] = {
       sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
       pNext               = &rendering_info_khr,
       stageCount          = len(shader_stages_arr[mask]),
@@ -505,8 +502,8 @@ build_3d_unlit_pipelines :: proc(
   for mask in 0 ..< UNLIT_SHADER_VARIANT_COUNT {
     features := transmute(ShaderFeatureSet)mask
     configs[mask] = ShaderConfig {
-      is_skinned         = ShaderFeatures.SKINNING in features,
-      has_albedo_texture = ShaderFeatures.ALBEDO_TEXTURE in features,
+      is_skinned         = .SKINNING in features,
+      has_albedo_texture = .ALBEDO_TEXTURE in features,
     }
     entries[mask] = [UNLIT_SHADER_OPTION_COUNT]vk.SpecializationMapEntry {
       {
@@ -520,7 +517,7 @@ build_3d_unlit_pipelines :: proc(
         size = size_of(b32),
       },
     }
-    spec_infos[mask] = vk.SpecializationInfo {
+    spec_infos[mask] = {
       mapEntryCount = len(entries[mask]),
       pMapEntries   = raw_data(entries[mask][:]),
       dataSize      = size_of(ShaderConfig),
@@ -548,7 +545,7 @@ build_3d_unlit_pipelines :: proc(
       configs[mask],
       vertex_input_info,
     )
-    pipeline_infos[mask] = vk.GraphicsPipelineCreateInfo {
+    pipeline_infos[mask] = {
       sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
       pNext               = &rendering_info_khr,
       stageCount          = len(shader_stages_arr[mask]),
@@ -575,20 +572,15 @@ build_3d_unlit_pipelines :: proc(
   return .SUCCESS
 }
 
-
 // Getter functions for accessing pipeline components
 pipeline3d_get_pipeline :: proc(
   pipeline: ^Pipeline3D,
-  features: ShaderFeatureSet,
+  material: ^Material,
 ) -> vk.Pipeline {
-  return pipeline.pipelines[transmute(u32)features]
-}
-
-pipeline3d_get_unlit_pipeline :: proc(
-  pipeline: ^Pipeline3D,
-  features: ShaderFeatureSet,
-) -> vk.Pipeline {
-  return pipeline.unlit_pipelines[transmute(u32)features]
+  if material.is_lit {
+    return pipeline.pipelines[transmute(u32)material.features]
+  }
+  return pipeline.unlit_pipelines[transmute(u32)material.features]
 }
 
 pipeline3d_get_layout :: proc(pipeline: ^Pipeline3D) -> vk.PipelineLayout {

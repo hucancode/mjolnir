@@ -52,7 +52,6 @@ frame_init :: proc(
     1,
     {.UNIFORM_BUFFER},
   ) or_return
-
   for i in 0 ..< MAX_SHADOW_MAPS {
     depth_texture_init(
       &self.shadow_maps[i],
@@ -66,12 +65,10 @@ frame_init :: proc(
       {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
     ) or_return
   }
-
-  // Create local variable to take address of
   layout := camera_descriptor_set_layout
   vk.AllocateDescriptorSets(
     g_device,
-    &vk.DescriptorSetAllocateInfo {
+    &{
       sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
       descriptorPool = g_descriptor_pool,
       descriptorSetCount = 1,
@@ -79,20 +76,9 @@ frame_init :: proc(
     },
     &self.camera_descriptor_set,
   ) or_return
-
-  scene_buffer_info := vk.DescriptorBufferInfo {
-    buffer = self.camera_uniform.buffer,
-    offset = 0,
-    range  = vk.DeviceSize(size_of(SceneUniform)),
-  }
-  light_buffer_info := vk.DescriptorBufferInfo {
-    buffer = self.light_uniform.buffer,
-    offset = 0,
-    range  = vk.DeviceSize(size_of(SceneLightUniform)),
-  }
   shadow_map_image_infos: [MAX_SHADOW_MAPS]vk.DescriptorImageInfo
   for i in 0 ..< MAX_SHADOW_MAPS {
-    shadow_map_image_infos[i] = vk.DescriptorImageInfo {
+    shadow_map_image_infos[i] = {
       sampler     = self.shadow_maps[i].sampler,
       imageView   = self.shadow_maps[i].buffer.view,
       imageLayout = .SHADER_READ_ONLY_OPTIMAL,
@@ -100,7 +86,7 @@ frame_init :: proc(
   }
   cube_shadow_map_image_infos: [MAX_SHADOW_MAPS]vk.DescriptorImageInfo
   for i in 0 ..< MAX_SHADOW_MAPS {
-    cube_shadow_map_image_infos[i] = vk.DescriptorImageInfo {
+    cube_shadow_map_image_infos[i] = {
       sampler     = self.cube_shadow_maps[i].sampler,
       imageView   = self.cube_shadow_maps[i].view,
       imageLayout = .SHADER_READ_ONLY_OPTIMAL,
@@ -113,7 +99,10 @@ frame_init :: proc(
       dstBinding = 0,
       descriptorType = .UNIFORM_BUFFER_DYNAMIC,
       descriptorCount = 1,
-      pBufferInfo = &scene_buffer_info,
+      pBufferInfo = &{
+        buffer = self.camera_uniform.buffer,
+        range = vk.DeviceSize(size_of(SceneUniform)),
+      },
     },
     {
       sType = .WRITE_DESCRIPTOR_SET,
@@ -121,7 +110,10 @@ frame_init :: proc(
       dstBinding = 1,
       descriptorType = .UNIFORM_BUFFER,
       descriptorCount = 1,
-      pBufferInfo = &light_buffer_info,
+      pBufferInfo = &{
+        buffer = self.light_uniform.buffer,
+        range = vk.DeviceSize(size_of(SceneLightUniform)),
+      },
     },
     {
       sType = .WRITE_DESCRIPTOR_SET,
@@ -141,7 +133,6 @@ frame_init :: proc(
     },
   }
   vk.UpdateDescriptorSets(g_device, len(writes), raw_data(writes[:]), 0, nil)
-
   self.main_pass_image = malloc_image_buffer(
     width,
     height,
@@ -164,7 +155,6 @@ frame_init :: proc(
       {.COLOR_ATTACHMENT, .SAMPLED, .TRANSFER_SRC, .TRANSFER_DST},
       {.DEVICE_LOCAL},
     ) or_return
-
     image.view = create_image_view(
       image.image,
       color_format,
@@ -179,7 +169,6 @@ frame_deinit :: proc(self: ^Frame) {
   vk.DestroySemaphore(g_device, self.render_finished_semaphore, nil)
   vk.DestroyFence(g_device, self.fence, nil)
   vk.FreeCommandBuffers(g_device, g_command_pool, 1, &self.command_buffer)
-
   data_buffer_deinit(&self.camera_uniform)
   data_buffer_deinit(&self.light_uniform)
   for i in 0 ..< MAX_SHADOW_MAPS {
@@ -215,7 +204,6 @@ frame_recreate_images :: proc(
     color_format,
     {.COLOR},
   ) or_return
-
   for &image in self.postprocess_images {
     image = malloc_image_buffer(
       width,
@@ -231,6 +219,5 @@ frame_recreate_images :: proc(
       {.COLOR},
     ) or_return
   }
-
   return .SUCCESS
 }

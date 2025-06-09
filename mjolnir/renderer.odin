@@ -123,13 +123,9 @@ renderer_init :: proc(
     ) or_return
     vk.CreateFence(g_device, &fence_info, nil, &frame.fence) or_return
   }
-
   renderer.depth_buffer = create_depth_image(width, height) or_return
-
-  // TODO: make the setup procedure take pointer to the pipeline
   pipeline3d_init(&renderer.pipeline_3d) or_return
   setup_particle_render_pipeline(&renderer.pipeline_particle) or_return
-
   // Initialize shadow pipeline with descriptor set layouts from 3D pipeline
   // TODO: Eliminate this dependency if possible
   pipeline_shadow_init(
@@ -137,9 +133,8 @@ renderer_init :: proc(
     pipeline3d_get_camera_descriptor_set_layout(&renderer.pipeline_3d),
     pipeline3d_get_skinning_descriptor_set_layout(&renderer.pipeline_3d),
   ) or_return
-
   setup_particle_compute_pipeline(&renderer.pipeline_particle_comp) or_return
-  postprocess_pipeline_init(
+  pipeline_postprocess_init(
     &renderer.pipeline_postprocess,
     color_format,
     width,
@@ -155,7 +150,6 @@ renderer_init :: proc(
       pipeline3d_get_camera_descriptor_set_layout(&renderer.pipeline_3d),
     ) or_return
   }
-
   return .SUCCESS
 }
 
@@ -167,7 +161,7 @@ renderer_deinit :: proc(renderer: ^Renderer) {
   particle_render_pipeline_deinit(&renderer.pipeline_particle)
   pipeline3d_deinit(&renderer.pipeline_3d)
   pipeline_shadow_deinit(&renderer.pipeline_shadow)
-  postprocess_pipeline_deinit(&renderer.pipeline_postprocess)
+  pipeline_postprocess_deinit(&renderer.pipeline_postprocess)
   for &frame in renderer.frames do frame_deinit(&frame)
 }
 
@@ -300,7 +294,6 @@ renderer_get_cube_shadow_map_descriptor_set :: proc(
   return renderer.frames[renderer.frame_index].cube_shadow_map_descriptor_set
 }
 
-// Convenience functions for postprocess effects
 renderer_grayscale :: proc(
   renderer: ^Renderer,
   strength: f32 = 1.0,
@@ -395,21 +388,13 @@ render :: proc(engine: ^Engine) -> vk.Result {
   current_fence := renderer_get_in_flight_fence(&engine.renderer)
   log.debug("waiting for fence...")
   vk.WaitForFences(g_device, 1, &current_fence, true, math.max(u64)) or_return
-
   current_image_available_semaphore := renderer_get_image_available_semaphore(
     &engine.renderer,
   )
-  image_idx, acquire_result := swapchain_acquire_next_image(
-    &engine.swapchain, // Use engine's swapchain
+  image_idx := swapchain_acquire_next_image(
+    &engine.swapchain,
     current_image_available_semaphore,
-  )
-  if acquire_result == .ERROR_OUT_OF_DATE_KHR {
-    return acquire_result
-  }
-  if acquire_result != .SUCCESS {
-    return acquire_result
-  }
-
+  ) or_return
   log.debug("reseting fence...")
   vk.ResetFences(g_device, 1, &current_fence) or_return
   mu.begin(&engine.ui.ctx)
@@ -421,7 +406,6 @@ render :: proc(engine: ^Engine) -> vk.Result {
   }
   log.debug("begining command...")
   vk.BeginCommandBuffer(command_buffer, &begin_info) or_return
-
   elapsed_seconds := time.duration_seconds(time.since(engine.start_timestamp))
   scene_uniform := SceneUniform {
     view       = geometry.calculate_view_matrix(&engine.scene.camera),
@@ -449,7 +433,7 @@ render :: proc(engine: ^Engine) -> vk.Result {
     command_buffer,
     camera_frustum,
     engine.swapchain.extent,
-  ) or_return // Pass swapchain extent
+  ) or_return
   data_buffer_write(
     renderer_get_camera_uniform(&engine.renderer),
     &scene_uniform,
@@ -468,23 +452,16 @@ render :: proc(engine: ^Engine) -> vk.Result {
     command_buffer,
     renderer_get_main_pass_image(&engine.renderer),
   )
-  prepare_image_for_render(
-    command_buffer,
-    engine.swapchain.images[image_idx], // Use engine's swapchain
-  )
+  prepare_image_for_render(command_buffer, engine.swapchain.images[image_idx])
   log.debug("============ rendering post processes... =============")
   render_postprocess_stack(
     &engine.renderer,
     command_buffer,
-    renderer_get_main_pass_view(&engine.renderer), // postprocess input
-    engine.swapchain.views[image_idx], // Use engine's swapchain
-    engine.swapchain.extent, // Use engine's swapchain
+    renderer_get_main_pass_view(&engine.renderer),
+    engine.swapchain.views[image_idx],
+    engine.swapchain.extent,
   )
-  prepare_image_for_present(
-    command_buffer,
-    engine.swapchain.images[image_idx], // Use engine's swapchain
-  )
-
+  prepare_image_for_present(command_buffer, engine.swapchain.images[image_idx])
   vk.EndCommandBuffer(command_buffer) or_return
   current_render_finished_semaphore := renderer_get_render_finished_semaphore(
     &engine.renderer,
@@ -502,16 +479,14 @@ render :: proc(engine: ^Engine) -> vk.Result {
   }
   log.debug("============ submitting queue... =============")
   vk.QueueSubmit(g_graphics_queue, 1, &submit_info, current_fence) or_return
-
   present_result := swapchain_present(
-    &engine.swapchain, // Use engine's swapchain
+    &engine.swapchain,
     &current_render_finished_semaphore,
     image_idx,
   )
   if present_result != .SUCCESS {
     return present_result
   }
-
   engine.renderer.frame_index =
     (engine.renderer.frame_index + 1) % MAX_FRAMES_IN_FLIGHT
   return .SUCCESS

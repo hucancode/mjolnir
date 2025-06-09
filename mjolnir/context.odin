@@ -87,7 +87,6 @@ vulkan_context_deinit :: proc() {
   vk.DestroySurfaceKHR(g_instance, g_surface, nil)
   when ENABLE_VALIDATION_LAYERS {
     vk.DestroyDebugUtilsMessengerEXT(g_instance, g_debug_messenger, nil)
-
   }
   vk.DestroyInstance(g_instance, nil)
   delete(g_surface_formats)
@@ -123,9 +122,7 @@ vulkan_instance_init :: proc() -> vk.Result {
   glfw_exts_cstrings := glfw.GetRequiredInstanceExtensions()
   extensions := make([dynamic]cstring, 0, len(glfw_exts_cstrings) + 2)
   defer delete(extensions)
-
   for ext in glfw_exts_cstrings do append(&extensions, ext)
-
   app_info := vk.ApplicationInfo {
     sType              = .APPLICATION_INFO,
     pApplicationName   = TITLE,
@@ -134,30 +131,26 @@ vulkan_instance_init :: proc() -> vk.Result {
     engineVersion      = vk.MAKE_VERSION(1, 0, 0),
     apiVersion         = vk.API_VERSION_1_2,
   }
-
   create_info := vk.InstanceCreateInfo {
     sType            = .INSTANCE_CREATE_INFO,
     pApplicationInfo = &app_info,
   }
-
   when ODIN_OS == .Darwin {
     create_info.flags |= {.ENUMERATE_PORTABILITY_KHR}
     append(&extensions, vk.KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME)
   }
-
   dbg_create_info: vk.DebugUtilsMessengerCreateInfoEXT
   when ENABLE_VALIDATION_LAYERS {
     create_info.enabledLayerCount = u32(len(VALIDATION_LAYERS))
     create_info.ppEnabledLayerNames = raw_data(VALIDATION_LAYERS)
-
     append(&extensions, vk.EXT_DEBUG_UTILS_EXTENSION_NAME)
-
     dbg_create_info = vk.DebugUtilsMessengerCreateInfoEXT {
       sType           = .DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
       messageSeverity = {
         .WARNING,
         .ERROR,
-        .INFO, /*, .VERBOSE */
+        .INFO,
+        //.VERBOSE
       },
       messageType     = {
         .GENERAL,
@@ -169,13 +162,10 @@ vulkan_instance_init :: proc() -> vk.Result {
     }
     create_info.pNext = &dbg_create_info
   }
-
   create_info.enabledExtensionCount = u32(len(extensions))
   create_info.ppEnabledExtensionNames = raw_data(extensions)
-
   vk.CreateInstance(&create_info, nil, &g_instance) or_return
   vk.load_proc_addresses_instance(g_instance)
-
   when ENABLE_VALIDATION_LAYERS {
     vk.CreateDebugUtilsMessengerEXT(
       g_instance,
@@ -206,7 +196,6 @@ query_swapchain_support :: proc(
     surface,
     &support.capabilities,
   ) or_return
-
   count: u32
   vk.GetPhysicalDeviceSurfaceFormatsKHR(
     physical_device,
@@ -223,7 +212,6 @@ query_swapchain_support :: proc(
       raw_data(support.formats),
     ) or_return
   }
-
   vk.GetPhysicalDeviceSurfacePresentModesKHR(
     physical_device,
     surface,
@@ -259,17 +247,14 @@ score_physical_device :: proc(
   features: vk.PhysicalDeviceFeatures
   vk.GetPhysicalDeviceProperties(device, &props)
   vk.GetPhysicalDeviceFeatures(device, &features)
-
   device_name_cstring := cstring(&props.deviceName[0])
   log.infof("Scoring device %s", device_name_cstring)
-
   when ODIN_OS != .Darwin {
     if !features.geometryShader {
       log.infof("Device %s: no geometry shader.", device_name_cstring)
       return 0, .SUCCESS
     }
   }
-
   ext_count: u32
   vk.EnumerateDeviceExtensionProperties(device, nil, &ext_count, nil) or_return
   available_extensions := make([]vk.ExtensionProperties, ext_count)
@@ -280,7 +265,6 @@ score_physical_device :: proc(
     &ext_count,
     raw_data(available_extensions),
   ) or_return
-
   log.infof("vulkan: device supports %v extensions", len(available_extensions))
   required_loop: for required in DEVICE_EXTENSIONS {
     log.infof("vulkan: checking for required extension %q", required)
@@ -297,21 +281,17 @@ score_physical_device :: proc(
     return 0, .NOT_READY
   }
   log.infof("vulkan: device supports all required extensions")
-
   support := query_swapchain_support(device, g_surface) or_return
   defer swapchain_support_deinit(&support)
-
   if len(support.formats) == 0 || len(support.present_modes) == 0 {
     log.infof("Device %s: inadequate swapchain support.", device_name_cstring)
     return 0, .SUCCESS
   }
-
   _, qf_res := find_queue_families(device, g_surface)
   if qf_res != .SUCCESS {
     log.infof("Device %s: no suitable queue families.", device_name_cstring)
     return 0, .SUCCESS
   }
-
   current_score: u32 = 0
   switch props.deviceType {
   case .DISCRETE_GPU:
@@ -324,7 +304,6 @@ score_physical_device :: proc(
     current_score += 100_000
   }
   current_score += props.limits.maxImageDimension2D
-
   log.infof("Device %s scored %d", device_name_cstring, current_score)
   return current_score, .SUCCESS
 }
@@ -337,7 +316,6 @@ physical_device_init :: proc() -> vk.Result {
     return .ERROR_INITIALIZATION_FAILED
   }
   log.infof("Found %d physical device(s)", count)
-
   devices_slice := make([]vk.PhysicalDevice, count)
   defer delete(devices_slice)
   vk.EnumeratePhysicalDevices(
@@ -345,12 +323,10 @@ physical_device_init :: proc() -> vk.Result {
     &count,
     raw_data(devices_slice),
   ) or_return
-
   best_score: u32 = 0
   for device_handle in devices_slice {
     score_val := score_physical_device(device_handle) or_return
     log.infof(" - Device Score: %d", score_val)
-
     if score_val > best_score {
       g_physical_device = device_handle
       best_score = score_val
@@ -360,7 +336,6 @@ physical_device_init :: proc() -> vk.Result {
     log.infof("Error: No suitable physical device found!")
     return .ERROR_INITIALIZATION_FAILED
   }
-
   vk.GetPhysicalDeviceProperties(g_physical_device, &g_device_properties)
   log.infof(
     "\nSelected physical device: %s (score %d)",
@@ -386,10 +361,8 @@ find_queue_families :: proc(
     &count,
     raw_data(queue_families_slice),
   )
-
   maybe_graphics_family: Maybe(u32)
   maybe_present_family: Maybe(u32)
-
   for family, i in queue_families_slice {
     idx := u32(i)
     if .GRAPHICS in family.queueFlags {
@@ -409,7 +382,6 @@ find_queue_families :: proc(
       break
     }
   }
-
   if g_fam, ok_g := maybe_graphics_family.?; ok_g {
     if p_fam, ok_p := maybe_present_family.?; ok_p {
       return FoundQueueFamilyIndices{g_fam, p_fam}, .SUCCESS
@@ -479,7 +451,7 @@ logical_device_init :: proc() -> vk.Result {
 
 descriptor_pool_init :: proc() -> vk.Result {
   // expand those limits as needed
-  pool_sizes := [4]vk.DescriptorPoolSize {
+  pool_sizes := [?]vk.DescriptorPoolSize {
     {.COMBINED_IMAGE_SAMPLER, MAX_SAMPLER_COUNT},
     {.UNIFORM_BUFFER, 128},
     {.UNIFORM_BUFFER_DYNAMIC, 128},
@@ -492,7 +464,6 @@ descriptor_pool_init :: proc() -> vk.Result {
     MAX_FRAMES_IN_FLIGHT * SCENE_UNIFORM_COUNT,
   )
   log.infof(" - Storage Buffers: %d", ACTIVE_MATERIAL_COUNT)
-
   pool_info := vk.DescriptorPoolCreateInfo {
     sType         = .DESCRIPTOR_POOL_CREATE_INFO,
     poolSizeCount = len(pool_sizes),
@@ -501,7 +472,6 @@ descriptor_pool_init :: proc() -> vk.Result {
     // flags = {.FREE_DESCRIPTOR_SET} // If needed
   }
   log.infof("Creating descriptor pool with maxSets: %d", pool_info.maxSets)
-
   result := vk.CreateDescriptorPool(
     g_device,
     &pool_info,
@@ -696,6 +666,7 @@ data_buffer_write :: proc {
   data_buffer_write_single,
   data_buffer_write_multi,
 }
+
 data_buffer_write_single :: proc(
   self: ^DataBuffer($T),
   data: ^T,
@@ -731,7 +702,7 @@ data_buffer_write_multi :: proc(
 }
 
 data_buffer_get :: proc(self: DataBuffer($T), index: u32 = 0) -> ^T {
-    return &self.mapped[index]
+  return &self.mapped[index]
 }
 
 data_buffer_offset_of :: proc(self: DataBuffer($T), index: u32) -> u32 {
@@ -896,13 +867,8 @@ create_image_view :: proc(
     image = image,
     viewType = .D2,
     format = format,
-    components = vk.ComponentMapping {
-      r = .IDENTITY,
-      g = .IDENTITY,
-      b = .IDENTITY,
-      a = .IDENTITY,
-    },
-    subresourceRange = vk.ImageSubresourceRange {
+    components = {r = .IDENTITY, g = .IDENTITY, b = .IDENTITY, a = .IDENTITY},
+    subresourceRange = {
       aspectMask = aspect_mask,
       baseMipLevel = 0,
       levelCount = 1,
@@ -920,14 +886,11 @@ transition_image_layout :: proc(
   old_layout, new_layout: vk.ImageLayout,
 ) -> vk.Result {
   cmd_buffer := begin_single_time_command() or_return
-
-  src_access_mask: vk.AccessFlags = {}
-  dst_access_mask: vk.AccessFlags = {}
-  src_stage: vk.PipelineStageFlags = {}
-  dst_stage: vk.PipelineStageFlags = {}
-
+  src_access_mask: vk.AccessFlags
+  dst_access_mask: vk.AccessFlags
+  src_stage: vk.PipelineStageFlags
+  dst_stage: vk.PipelineStageFlags
   if old_layout == .UNDEFINED && new_layout == .TRANSFER_DST_OPTIMAL {
-    src_access_mask = {}
     dst_access_mask = {.TRANSFER_WRITE}
     src_stage = {.TOP_OF_PIPE}
     dst_stage = {.TRANSFER}
@@ -942,7 +905,6 @@ transition_image_layout :: proc(
     src_stage = {.TOP_OF_PIPE}
     dst_stage = {.TOP_OF_PIPE}
   }
-
   barrier := vk.ImageMemoryBarrier {
     sType = .IMAGE_MEMORY_BARRIER,
     oldLayout = old_layout,
@@ -950,7 +912,7 @@ transition_image_layout :: proc(
     srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
     dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
     image = image,
-    subresourceRange = vk.ImageSubresourceRange {
+    subresourceRange = {
       aspectMask = {.COLOR},
       baseMipLevel = 0,
       levelCount = 1,
@@ -987,14 +949,14 @@ copy_image :: proc(dst: ImageBuffer, src: DataBuffer(u8)) -> vk.Result {
     bufferOffset = 0,
     bufferRowLength = 0,
     bufferImageHeight = 0,
-    imageSubresource = vk.ImageSubresourceLayers {
+    imageSubresource = {
       aspectMask = {.COLOR},
       mipLevel = 0,
       baseArrayLayer = 0,
       layerCount = 1,
     },
-    imageOffset = vk.Offset3D{0, 0, 0},
-    imageExtent = vk.Extent3D{dst.width, dst.height, 1},
+    imageOffset = {0, 0, 0},
+    imageExtent = {dst.width, dst.height, 1},
   }
   vk.CmdCopyBufferToImage(
     cmd_buffer,

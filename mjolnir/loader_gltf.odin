@@ -25,27 +25,22 @@ load_gltf :: proc(
 ) {
   gltf_path_cstr := strings.clone_to_cstring(path)
   defer delete(gltf_path_cstr)
-
-  options := cgltf.options{}
+  options : cgltf.options
   gltf_data := cgltf.parse_file(options, gltf_path_cstr) or_return
   defer cgltf.free(gltf_data)
-
   if len(gltf_data.buffers) > 0 {
     cgltf.load_buffers(options, gltf_data, gltf_path_cstr) or_return
   }
-
   created_root_handles := make([dynamic]resource.Handle, 0)
   if len(gltf_data.nodes) == 0 {
     return created_root_handles[:], .success
   }
-
   TraverseEntry :: struct {
     idx:    u32,
     parent: Handle,
   }
   stack := make([dynamic]TraverseEntry, 0)
   defer delete(stack)
-
   is_gltf_child_node: bit_set[0 ..< 128] // Assuming max 128 nodes, TODO: fix this
   node_ptr_to_idx_map := make(map[^cgltf.node]u32)
   for &node, i in gltf_data.nodes {
@@ -63,7 +58,6 @@ load_gltf :: proc(
       append(&stack, TraverseEntry{idx = u32(i), parent = engine.scene.root})
     }
   }
-
   for len(stack) > 0 {
     entry := pop(&stack)
     gltf_node := &gltf_data.nodes[entry.idx]
@@ -319,7 +313,6 @@ load_gltf_pbr_textures :: proc(
     ) or_return
     features |= {.EMISSIVE_TEXTURE}
   }
-
   ret = .SUCCESS
   return
 }
@@ -551,7 +544,6 @@ load_gltf_skinned_primitive :: proc(
     }
   }
   geometry_data = geometry.make_geometry(vertices, indices, skinnings)
-  // Bones
   engine_bones = make([]Bone, len(gltf_skin.joints))
   for joint_node, i in gltf_skin.joints {
     engine_bones[i].name = string(joint_node.name)
@@ -623,7 +615,6 @@ load_gltf_animations :: proc(
   mesh := resource.get(engine.renderer.meshes, engine_mesh_handle)
   skinning := &mesh.skinning.?
   skinning.animations = make([]animation.Clip, len(gltf_data.animations))
-
   for gltf_anim, i in gltf_data.animations {
     clip := &skinning.animations[i]
     if gltf_anim.name != nil {

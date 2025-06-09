@@ -36,7 +36,6 @@ pipeline2d_init :: proc(
   defer vk.DestroyShaderModule(g_device, vert_shader_module, nil)
   frag_shader_module := create_shader_module(SHADER_MICROUI_FRAG) or_return
   defer vk.DestroyShaderModule(g_device, frag_shader_module, nil)
-
   shader_stages := [?]vk.PipelineShaderStageCreateInfo {
     {
       sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
@@ -51,14 +50,12 @@ pipeline2d_init :: proc(
       pName = "main",
     },
   }
-
   dynamic_states := [?]vk.DynamicState{.VIEWPORT, .SCISSOR}
   dynamic_state_info := vk.PipelineDynamicStateCreateInfo {
     sType             = .PIPELINE_DYNAMIC_STATE_CREATE_INFO,
     dynamicStateCount = u32(len(dynamic_states)),
     pDynamicStates    = raw_data(dynamic_states[:]),
   }
-
   vertex_binding := vk.VertexInputBindingDescription {
     binding   = 0,
     stride    = size_of(Vertex2D),
@@ -91,7 +88,6 @@ pipeline2d_init :: proc(
     vertexAttributeDescriptionCount = len(vertex_attributes),
     pVertexAttributeDescriptions    = raw_data(vertex_attributes[:]),
   }
-
   input_assembly := vk.PipelineInputAssemblyStateCreateInfo {
     sType    = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
     topology = .TRIANGLE_LIST,
@@ -157,7 +153,7 @@ pipeline2d_init :: proc(
   ) or_return
   vk.AllocateDescriptorSets(
     g_device,
-    &vk.DescriptorSetAllocateInfo {
+    &{
       sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
       descriptorPool = g_descriptor_pool,
       descriptorSetCount = 1,
@@ -182,7 +178,7 @@ pipeline2d_init :: proc(
   ) or_return
   vk.AllocateDescriptorSets(
     g_device,
-    &vk.DescriptorSetAllocateInfo {
+    &{
       sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
       descriptorPool = g_descriptor_pool,
       descriptorSetCount = 1,
@@ -196,7 +192,7 @@ pipeline2d_init :: proc(
   }
   vk.CreatePipelineLayout(
     g_device,
-    &vk.PipelineLayoutCreateInfo {
+    &{
       sType = .PIPELINE_LAYOUT_CREATE_INFO,
       setLayoutCount = len(set_layouts),
       pSetLayouts = raw_data(set_layouts[:]),

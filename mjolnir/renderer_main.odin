@@ -40,14 +40,13 @@ render_main_pass :: proc(
     0, // imageMemoryBarrierCount, pImageMemoryBarriers
     nil,
   )
-
   color_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
     imageView = renderer_get_main_pass_view(&engine.renderer),
     imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
     loadOp = .CLEAR,
     storeOp = .STORE,
-    clearValue = vk.ClearValue{color = {float32 = BG_BLUE_GRAY}},
+    clearValue = {color = {float32 = BG_BLUE_GRAY}},
   }
   depth_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
@@ -55,11 +54,11 @@ render_main_pass :: proc(
     imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
     loadOp = .CLEAR,
     storeOp = .STORE,
-    clearValue = vk.ClearValue{depthStencil = {1.0, 0}},
+    clearValue = {depthStencil = {1.0, 0}},
   }
   render_info := vk.RenderingInfoKHR {
     sType = .RENDERING_INFO_KHR,
-    renderArea = vk.Rect2D{extent = swapchain_extent},
+    renderArea = {extent = swapchain_extent},
     layerCount = 1,
     colorAttachmentCount = 1,
     pColorAttachments = &color_attachment,
@@ -68,14 +67,14 @@ render_main_pass :: proc(
   vk.CmdBeginRenderingKHR(command_buffer, &render_info)
   viewport := vk.Viewport {
     x        = 0.0,
-    y        = f32(swapchain_extent.height), // Use parameter
-    width    = f32(swapchain_extent.width), // Use parameter
-    height   = -f32(swapchain_extent.height), // Use parameter
+    y        = f32(swapchain_extent.height),
+    width    = f32(swapchain_extent.width),
+    height   = -f32(swapchain_extent.height),
     minDepth = 0.0,
     maxDepth = 1.0,
   }
   scissor := vk.Rect2D {
-    extent = swapchain_extent, // Use parameter
+    extent = swapchain_extent,
   }
   vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
   vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
@@ -123,8 +122,10 @@ render_single_node :: proc(node: ^Node, cb_context: rawptr) -> bool {
     if !geometry.frustum_test_aabb(&ctx.camera_frustum, world_aabb) {
       return true
     }
-    pipeline :=
-      pipeline3d_get_pipeline(&ctx.engine.renderer.pipeline_3d, material.features) if material.is_lit else pipeline3d_get_unlit_pipeline(&ctx.engine.renderer.pipeline_3d, material.features)
+    pipeline := pipeline3d_get_pipeline(
+      &ctx.engine.renderer.pipeline_3d,
+      material,
+    )
     layout := pipeline3d_get_layout(&ctx.engine.renderer.pipeline_3d)
     descriptor_sets := [?]vk.DescriptorSet {
       renderer_get_camera_descriptor_set(&ctx.engine.renderer), // set 0
@@ -195,14 +196,10 @@ render_to_texture :: proc(
   color_view: vk.ImageView,
   depth_view: vk.ImageView,
   extent: vk.Extent2D,
-  camera: ^geometry.Camera = nil, // Optional custom camera
+  camera: ^geometry.Camera = nil,
 ) -> vk.Result {
   command_buffer := renderer_get_command_buffer(&engine.renderer)
-
-  // Use provided camera or scene camera
   render_camera := camera if camera != nil else &engine.scene.camera
-
-  // Calculate view/projection matrices
   scene_uniform := SceneUniform {
     view       = geometry.calculate_view_matrix(render_camera),
     projection = geometry.calculate_projection_matrix(render_camera),
@@ -210,39 +207,32 @@ render_to_texture :: proc(
       time.duration_seconds(time.since(engine.start_timestamp)),
     ),
   }
-
   camera_frustum := geometry.camera_make_frustum(render_camera)
-
-  // Render to the provided texture views
   color_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
     imageView = color_view,
     imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
     loadOp = .CLEAR,
     storeOp = .STORE,
-    clearValue = vk.ClearValue{color = {float32 = BG_BLUE_GRAY}},
+    clearValue = {color = {float32 = BG_BLUE_GRAY}},
   }
-
   depth_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
     imageView = depth_view,
     imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
     loadOp = .CLEAR,
     storeOp = .STORE,
-    clearValue = vk.ClearValue{depthStencil = {1.0, 0}},
+    clearValue = {depthStencil = {1.0, 0}},
   }
-
   render_info := vk.RenderingInfoKHR {
     sType = .RENDERING_INFO_KHR,
-    renderArea = vk.Rect2D{extent = extent},
+    renderArea = {extent = extent},
     layerCount = 1,
     colorAttachmentCount = 1,
     pColorAttachments = &color_attachment,
     pDepthAttachment = &depth_attachment,
   }
-
   vk.CmdBeginRenderingKHR(command_buffer, &render_info)
-
   viewport := vk.Viewport {
     x        = 0.0,
     y        = f32(extent.height),
@@ -254,17 +244,12 @@ render_to_texture :: proc(
   scissor := vk.Rect2D {
     extent = extent,
   }
-
   vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
   vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
-
-  // Update uniforms with custom camera
   data_buffer_write(
     renderer_get_camera_uniform(&engine.renderer),
     &scene_uniform,
   )
-
-  // Render scene with custom camera
   rendered_count: u32 = 0
   render_meshes_ctx := RenderMeshesContext {
     engine         = engine,
@@ -272,9 +257,7 @@ render_to_texture :: proc(
     camera_frustum = camera_frustum,
     rendered_count = &rendered_count,
   }
-
   traverse_scene(&engine.scene, &render_meshes_ctx, render_single_node)
-
   vk.CmdEndRenderingKHR(command_buffer)
   return .SUCCESS
 }

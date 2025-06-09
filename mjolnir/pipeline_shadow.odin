@@ -12,7 +12,6 @@ ShadowShaderConfig :: struct {
   is_skinned: b32,
 }
 
-// Encapsulated shadow pipeline structure
 PipelineShadow :: struct {
   pipeline_layout: vk.PipelineLayout,
   pipelines:       [SHADOW_SHADER_VARIANT_COUNT]vk.Pipeline,
@@ -20,7 +19,6 @@ PipelineShadow :: struct {
 
 pipeline_shadow_deinit :: proc(pipeline: ^PipelineShadow) {
   if pipeline == nil do return
-
   for &p in pipeline.pipelines {
     vk.DestroyPipeline(g_device, p, nil)
     p = 0
@@ -132,7 +130,7 @@ pipeline_shadow_init :: proc(
         size = size_of(b32),
       },
     }
-    spec_infos[features] = vk.SpecializationInfo {
+    spec_infos[features] = {
       mapEntryCount = len(entries[features]),
       pMapEntries   = raw_data(entries[features][:]),
       dataSize      = size_of(ShadowShaderConfig),
@@ -147,7 +145,7 @@ pipeline_shadow_init :: proc(
         pSpecializationInfo = &spec_infos[features],
       },
     }
-    pipeline_infos[features] = vk.GraphicsPipelineCreateInfo {
+    pipeline_infos[features] = {
       sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
       pNext               = &rendering_info_khr,
       stageCount          = len(shader_stages[features]),
@@ -174,11 +172,15 @@ pipeline_shadow_init :: proc(
 }
 
 
-// Getter functions for accessing pipeline components
-pipeline_shadow_get_pipeline :: proc(pipeline: ^PipelineShadow, features: ShaderFeatureSet) -> vk.Pipeline {
+pipeline_shadow_get_pipeline :: proc(
+  pipeline: ^PipelineShadow,
+  features: ShaderFeatureSet,
+) -> vk.Pipeline {
   return pipeline.pipelines[transmute(u32)features]
 }
 
-pipeline_shadow_get_layout :: proc(pipeline: ^PipelineShadow) -> vk.PipelineLayout {
+pipeline_shadow_get_layout :: proc(
+  pipeline: ^PipelineShadow,
+) -> vk.PipelineLayout {
   return pipeline.pipeline_layout
 }
