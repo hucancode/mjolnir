@@ -191,10 +191,17 @@ spawn_child :: proc(
   return
 }
 
+SceneTraverseEntry :: struct {
+  handle:           Handle,
+  parent_transform: linalg.Matrix4f32,
+  parent_is_dirty:  bool,
+}
+
 Scene :: struct {
   camera: geometry.Camera,
   root:   Handle,
   nodes:  resource.Pool(Node),
+  traversal_stack: [dynamic]SceneTraverseEntry,
 }
 
 scene_init :: proc(self: ^Scene) {
@@ -211,10 +218,12 @@ scene_init :: proc(self: ^Scene) {
   self.root, root = resource.alloc(&self.nodes)
   init_node(root, "root")
   root.parent = self.root
+  self.traversal_stack = make([dynamic]SceneTraverseEntry, 0)
 }
 
 scene_deinit :: proc(self: ^Scene) {
   resource.pool_deinit(self.nodes, deinit_node)
+  delete(self.traversal_stack)
 }
 
 switch_camera_mode_scene :: proc(self: ^Scene) {
@@ -232,17 +241,10 @@ scene_traverse :: proc(
   callback: SceneTraversalCallback = nil,
 ) -> bool {
   using geometry
-  TraverseEntry :: struct {
-    handle:           Handle,
-    parent_transform: linalg.Matrix4f32,
-    parent_is_dirty:  bool,
-  }
   n := len(self.nodes.entries) - len(self.nodes.free_indices)
-  stack := make([dynamic]TraverseEntry, 0, n)
-  defer delete(stack)
-  append(&stack, TraverseEntry{self.root, linalg.MATRIX4F32_IDENTITY, false})
-  for len(stack) > 0 {
-    entry := pop(&stack)
+  append(&self.traversal_stack, SceneTraverseEntry{self.root, linalg.MATRIX4F32_IDENTITY, false})
+  for len(self.traversal_stack) > 0 {
+    entry := pop(&self.traversal_stack)
     current_node, found := resource.get(self.nodes, entry.handle)
     if !found {
       log.errorf(
@@ -262,8 +264,8 @@ scene_traverse :: proc(
     }
     for child_handle in current_node.children {
       append(
-        &stack,
-        TraverseEntry {
+        &self.traversal_stack,
+        SceneTraverseEntry {
           child_handle,
           current_node.transform.world_matrix,
           is_dirty || entry.parent_is_dirty,
