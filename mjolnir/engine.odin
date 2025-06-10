@@ -284,7 +284,7 @@ recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
   swapchain_recreate(&engine.swapchain, engine.window) or_return
   new_aspect_ratio :=
     f32(engine.swapchain.extent.width) / f32(engine.swapchain.extent.height)
-  geometry.camera_update_aspect_ratio(engine.scene.camera, new_aspect_ratio)
+  geometry.camera_update_aspect_ratio(&engine.scene.camera, new_aspect_ratio)
   renderer_recreate_images(
     &engine.renderer,
     engine.swapchain.format.format,

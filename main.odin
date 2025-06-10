@@ -24,9 +24,11 @@ main :: proc() {
 
 setup :: proc(engine: ^mjolnir.Engine) {
   using mjolnir, geometry
+  texture_set_layout := engine.renderer.main.texture_descriptor_set_layout
+  skinning_set_layout := engine.renderer.main.skinning_descriptor_set_layout
   plain_material_handle, _, _ := create_material(
-    engine.renderer.main.texture_descriptor_set_layout,
-    engine.renderer.main.skinning_descriptor_set_layout,
+    texture_set_layout,
+    skinning_set_layout,
   )
   cube_geom := make_cube()
   cube_mesh_handle, _, _ := create_mesh(cube_geom)
@@ -36,8 +38,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
     "assets/t_brick_floor_002_diffuse_1k.jpg",
   )
   ground_mat_handle, _, _ := create_material(
-    engine.renderer.main.texture_descriptor_set_layout,
-    engine.renderer.main.skinning_descriptor_set_layout,
+    texture_set_layout,
+    skinning_set_layout,
     {.ALBEDO_TEXTURE},
     ground_albedo_handle,
   )
@@ -51,8 +53,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
       for y in 1 ..< ny {
         for z in 1 ..< nz {
           mat_handle, _ := create_material(
-            engine.renderer.main.texture_descriptor_set_layout,
-            engine.renderer.main.skinning_descriptor_set_layout,
+            texture_set_layout,
+            skinning_set_layout,
             metallic_value = f32(x) / f32(nx),
             roughness_value = f32(y) / f32(ny),
           ) or_continue
@@ -119,14 +121,14 @@ setup :: proc(engine: ^mjolnir.Engine) {
     gltf_nodes := load_gltf(engine, "assets/Warrior.glb") or_else {}
     log.infof("Loaded GLTF nodes: %v", gltf_nodes)
     for armature in gltf_nodes {
-      armature_ptr := resource.get(engine.scene.nodes, armature)
-      if armature_ptr == nil || len(armature_ptr.children) == 0 {
+      armature_ptr, found := resource.get(engine.scene.nodes, armature)
+      if !found || len(armature_ptr.children) == 0 {
         continue
       }
       for i in 1 ..< len(armature_ptr.children) {
         skeleton := armature_ptr.children[i]
-        skeleton_ptr := resource.get(engine.scene.nodes, skeleton)
-        if skeleton_ptr == nil {
+        skeleton_ptr, found := resource.get(engine.scene.nodes, skeleton)
+        if !found {
           continue
         }
         // skeleton_ptr.transform.scale = {0.5, 0.5, 0.5}
