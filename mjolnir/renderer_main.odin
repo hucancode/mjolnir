@@ -792,7 +792,6 @@ renderer_main_init :: proc(
   target_color_format: vk.Format = .B8G8R8A8_SRGB,
   target_depth_format: vk.Format = .D32_SFLOAT,
 ) -> vk.Result {
-  self.depth_buffer = create_depth_image(width, height) or_return
   renderer_main_build_pbr_pipeline(
     self,
     target_color_format,
@@ -803,6 +802,7 @@ renderer_main_init :: proc(
     target_color_format,
     target_depth_format,
   ) or_return
+  self.depth_buffer = create_depth_image(width, height) or_return
   self.environment_map_handle, self.environment_map =
     create_hdr_texture_from_path(
       "assets/teutonic_castle_moat_4k.hdr",
@@ -820,31 +820,32 @@ renderer_main_init :: proc(
     },
     &self.environment_descriptor_set,
   ) or_return
-  env_write := vk.WriteDescriptorSet {
-    sType           = .WRITE_DESCRIPTOR_SET,
-    dstSet          = self.environment_descriptor_set,
-    dstBinding      = 0,
-    descriptorType  = .COMBINED_IMAGE_SAMPLER,
-    descriptorCount = 1,
-    pImageInfo      = &{
-      sampler = self.environment_map.sampler,
-      imageView = self.environment_map.buffer.view,
-      imageLayout = .SHADER_READ_ONLY_OPTIMAL,
+  writes := [?]vk.WriteDescriptorSet {
+    {
+      sType = .WRITE_DESCRIPTOR_SET,
+      dstSet = self.environment_descriptor_set,
+      dstBinding = 0,
+      descriptorType = .COMBINED_IMAGE_SAMPLER,
+      descriptorCount = 1,
+      pImageInfo = &{
+        sampler = self.environment_map.sampler,
+        imageView = self.environment_map.buffer.view,
+        imageLayout = .SHADER_READ_ONLY_OPTIMAL,
+      },
+    },
+    {
+      sType = .WRITE_DESCRIPTOR_SET,
+      dstSet = self.environment_descriptor_set,
+      dstBinding = 1,
+      descriptorType = .COMBINED_IMAGE_SAMPLER,
+      descriptorCount = 1,
+      pImageInfo = &{
+        sampler = self.brdf_lut.sampler,
+        imageView = self.brdf_lut.buffer.view,
+        imageLayout = .SHADER_READ_ONLY_OPTIMAL,
+      },
     },
   }
-  brdf_lut_write := vk.WriteDescriptorSet {
-    sType           = .WRITE_DESCRIPTOR_SET,
-    dstSet          = self.environment_descriptor_set,
-    dstBinding      = 1,
-    descriptorType  = .COMBINED_IMAGE_SAMPLER,
-    descriptorCount = 1,
-    pImageInfo      = &{
-      sampler = self.brdf_lut.sampler,
-      imageView = self.brdf_lut.buffer.view,
-      imageLayout = .SHADER_READ_ONLY_OPTIMAL,
-    },
-  }
-  writes := [?]vk.WriteDescriptorSet{env_write, brdf_lut_write}
   vk.UpdateDescriptorSets(g_device, len(writes), raw_data(writes[:]), 0, nil)
   return .SUCCESS
 }
