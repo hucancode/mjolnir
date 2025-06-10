@@ -267,7 +267,7 @@ traverse_scene_benchmark :: proc(
   return nil
 }
 
-scene_cleanup :: proc(
+teardown_scene :: proc(
   options: ^time.Benchmark_Options,
   allocator := context.allocator,
 ) -> time.Benchmark_Error {
@@ -295,7 +295,7 @@ benchmark_deep_scene_traversal :: proc(t: ^testing.T) {
       return nil
     },
     bench = traverse_scene_benchmark,
-    teardown = scene_cleanup,
+    teardown = teardown_scene,
   }
   err := time.benchmark(options)
   log.infof(
@@ -325,7 +325,7 @@ benchmark_flat_scene_traversal :: proc(t: ^testing.T) {
       return nil
     },
     bench = traverse_scene_benchmark,
-    teardown = scene_cleanup,
+    teardown = teardown_scene,
   }
   err := time.benchmark(options)
   log.infof(
@@ -355,7 +355,7 @@ benchmark_balanced_scene_traversal :: proc(t: ^testing.T) {
       return nil
     },
     bench = traverse_scene_benchmark,
-    teardown = scene_cleanup,
+    teardown = teardown_scene,
   }
   err := time.benchmark(options)
   log.infof(
@@ -365,4 +365,48 @@ benchmark_balanced_scene_traversal :: proc(t: ^testing.T) {
     options.duration,
     options.megabytes_per_second,
   )
+}
+
+@(test)
+test_scene_memory_cleanup :: proc(t: ^testing.T) {
+    scene: mjolnir.Scene
+    mjolnir.scene_init(&scene)
+    defer mjolnir.scene_deinit(&scene)
+    for i in 0..<1000 {
+        mjolnir.spawn(&scene)
+    }
+}
+
+@(test)
+test_scene_with_multiple_attachments :: proc(t: ^testing.T) {
+    scene: mjolnir.Scene
+    mjolnir.scene_init(&scene)
+    defer mjolnir.scene_deinit(&scene)
+    mjolnir.spawn(&scene, mjolnir.PointLightAttachment{
+        // In reality we would need valid light
+    })
+    mjolnir.spawn(&scene, mjolnir.MeshAttachment{
+        // In reality we would need valid mesh handle
+    })
+    Context :: struct {
+        light_count: int,
+        mesh_count: int
+    }
+    callback :: proc(node: ^mjolnir.Node, ctx: rawptr) -> bool {
+        counter := (^Context)(ctx)
+        #partial switch attachment in node.attachment {
+        case mjolnir.PointLightAttachment:
+            counter.light_count += 1
+        case mjolnir.MeshAttachment:
+            counter.mesh_count += 1
+        }
+        return true
+    }
+    ctx := Context{
+        light_count = 0,
+        mesh_count = 0,
+    }
+    mjolnir.scene_traverse(&scene, &ctx, callback)
+    testing.expect_value(t, ctx.light_count, 1)
+    testing.expect_value(t, ctx.mesh_count, 1)
 }
