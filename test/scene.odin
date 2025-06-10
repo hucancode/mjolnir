@@ -226,7 +226,7 @@ create_scene :: proc(scene: ^mjolnir.Scene, max_node: int, max_depth: int) {
         f32(n) * 0.01,
         linalg.VECTOR3F32_Y_AXIS,
       )
-      append(&queue, QueueEntry{child_handle, current.depth + 1})
+      append(&queue, QueueEntry{child_handle, 1})
     }
     n += 1
   }
