@@ -132,6 +132,12 @@ make_geometry :: proc(
   }
 }
 
+delete_geometry :: proc(geometry: Geometry) {
+  delete(geometry.vertices)
+  delete(geometry.skinnings)
+  delete(geometry.indices)
+}
+
 make_cube :: proc(color: [4]f32 = {1.0, 1.0, 1.0, 1.0}) -> (ret: Geometry) {
   ret.vertices = make([]Vertex, 24)
   ret.indices = make([]u32, 36)

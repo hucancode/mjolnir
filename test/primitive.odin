@@ -8,6 +8,7 @@ import linalg "core:math/linalg"
 @(test)
 test_cube_generation :: proc(t: ^testing.T) {
     cube := geometry.make_cube()
+    defer geometry.delete_geometry(cube)
     testing.expect_value(t, len(cube.vertices), 24) // 6 faces * 4 vertices
     testing.expect_value(t, len(cube.indices), 36)  // 6 faces * 2 triangles * 3 indices
     // Check AABB
@@ -18,6 +19,7 @@ test_cube_generation :: proc(t: ^testing.T) {
 @(test)
 test_sphere_generation :: proc(t: ^testing.T) {
     sphere := geometry.make_sphere(16, 16, 1.0)
+    defer geometry.delete_geometry(sphere)
     expected_vertices := (16 + 1) * (16 + 1)
     expected_indices := 16 * 16 * 6
     testing.expect_value(t, len(sphere.vertices), expected_vertices)
@@ -34,6 +36,7 @@ test_sphere_generation :: proc(t: ^testing.T) {
 @(test)
 test_triangle_winding_order :: proc(t: ^testing.T) {
     triangle := geometry.make_triangle()
+    defer geometry.delete_geometry(triangle)
     testing.expect_value(t, len(triangle.indices), 3)
     // Verify counter-clockwise winding
     v0 := triangle.vertices[triangle.indices[0]].position

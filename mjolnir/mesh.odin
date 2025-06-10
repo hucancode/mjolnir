@@ -50,6 +50,7 @@ mesh_deinit :: proc(self: ^Mesh) {
 }
 
 mesh_init :: proc(self: ^Mesh, data: geometry.Geometry) -> vk.Result {
+  defer geometry.delete_geometry(data)
   self.vertices_len = u32(len(data.vertices))
   self.indices_len = u32(len(data.indices))
   self.aabb = data.aabb
