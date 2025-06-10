@@ -350,7 +350,7 @@ render :: proc(engine: ^Engine) -> vk.Result {
     engine        = engine,
     light_uniform = &light_uniform,
   }
-  if !traverse_scene(&engine.scene, &collect_ctx, prepare_light) {
+  if !scene_traverse_linear(&engine.scene, &collect_ctx, prepare_light) {
     log.errorf("[RENDER] Error during light collection")
   }
   log.debug("============ rendering shadow pass...============ ")

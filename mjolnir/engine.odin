@@ -205,6 +205,7 @@ update :: proc(engine: ^Engine) -> bool {
   if delta_time < UPDATE_FRAME_TIME {
     return false
   }
+  scene_traverse(&engine.scene)
   for &entry in engine.scene.nodes.entries {
     if !entry.active {
       continue

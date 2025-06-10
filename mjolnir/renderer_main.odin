@@ -607,7 +607,11 @@ render_main_pass :: proc(
     camera_frustum = camera_frustum,
     rendered_count = &rendered_count,
   }
-  if !traverse_scene(&engine.scene, &render_meshes_ctx, render_single_node) {
+  if !scene_traverse_linear(
+    &engine.scene,
+    &render_meshes_ctx,
+    render_single_node,
+  ) {
     log.errorf("[RENDER] Error during scene mesh rendering")
   }
   render_particles(
@@ -780,7 +784,7 @@ render_to_texture :: proc(
     camera_frustum = camera_frustum,
     rendered_count = &rendered_count,
   }
-  traverse_scene(&engine.scene, &render_meshes_ctx, render_single_node)
+  scene_traverse_linear(&engine.scene, &render_meshes_ctx, render_single_node)
   vk.CmdEndRenderingKHR(command_buffer)
   return .SUCCESS
 }

@@ -320,7 +320,11 @@ render_shadow_pass :: proc(
           shadow_layer    = u32(face),
           frustum         = geometry.make_frustum(proj * view),
         }
-        traverse_scene(&engine.scene, &shadow_render_ctx, render_single_shadow)
+        scene_traverse_linear(
+          &engine.scene,
+          &shadow_render_ctx,
+          render_single_shadow,
+        )
         vk.CmdEndRenderingKHR(command_buffer)
       }
     } else {
@@ -403,7 +407,11 @@ render_shadow_pass :: proc(
         shadow_idx      = u32(i),
         frustum         = geometry.make_frustum(proj * view),
       }
-      traverse_scene(&engine.scene, &shadow_render_ctx, render_single_shadow)
+      scene_traverse_linear(
+        &engine.scene,
+        &shadow_render_ctx,
+        render_single_shadow,
+      )
       vk.CmdEndRenderingKHR(command_buffer)
     }
   }
@@ -502,9 +510,7 @@ render_single_shadow :: proc(node: ^Node, cb_context: rawptr) -> bool {
         material.skinning_descriptor_sets[frame], // set 1
       }
     } else {
-      pipeline = renderer_shadow_get_pipeline(
-        &ctx.engine.renderer.shadow,
-      )
+      pipeline = renderer_shadow_get_pipeline(&ctx.engine.renderer.shadow)
       descriptor_sets = {
         renderer_get_camera_descriptor_set(&ctx.engine.renderer), // set 0
       }

@@ -226,10 +226,9 @@ switch_camera_mode_scene :: proc(self: ^Scene) {
   }
 }
 
-// TODO: make a new traverse procedure that does flat traversal and don't update transform matrix
-traverse_scene :: proc(
+scene_traverse :: proc(
   self: ^Scene,
-  cb_context: rawptr,
+  cb_context: rawptr = nil,
   callback: SceneTraversalCallback = nil,
 ) -> bool {
   using geometry
@@ -271,6 +270,17 @@ traverse_scene :: proc(
         },
       )
     }
+  }
+  return true
+}
+
+scene_traverse_linear :: proc(
+  self: ^Scene,
+  cb_context: rawptr,
+  callback: SceneTraversalCallback,
+) -> bool {
+  for &entry in self.nodes.entries do if entry.active {
+    callback(&entry.item, cb_context)
   }
   return true
 }
