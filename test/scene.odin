@@ -1,8 +1,8 @@
 package tests
 
 import mjolnir "../mjolnir"
-import resource "../mjolnir/resource"
 import geometry "../mjolnir/geometry"
+import resource "../mjolnir/resource"
 import "core:fmt"
 import "core:log"
 import "core:math"
@@ -16,16 +16,29 @@ test_node_translate :: proc(t: ^testing.T) {
   using mjolnir
   scene: Scene
   scene_init(&scene)
+  defer scene_deinit(&scene)
   parent_handle, _ := spawn_at(&scene, {1, 2, 3})
   _, child := spawn_child(&scene, parent_handle)
   geometry.translate(&child.transform, 4, 5, 6)
   scene_traverse(&scene)
   actual := child.transform.world_matrix
-  expected := linalg.Matrix4f32{
-    1.0, 0.0, 0.0, 5.0,
-    0.0, 1.0, 0.0, 7.0,
-    0.0, 0.0, 1.0, 9.0,
-    0.0, 0.0, 0.0, 1.0,
+  expected := linalg.Matrix4f32 {
+    1.0,
+    0.0,
+    0.0,
+    5.0,
+    0.0,
+    1.0,
+    0.0,
+    7.0,
+    0.0,
+    0.0,
+    1.0,
+    9.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
   }
   matrix4_almost_equal(t, actual, expected)
 }
@@ -35,16 +48,33 @@ test_node_rotate :: proc(t: ^testing.T) {
   using mjolnir
   scene: Scene
   scene_init(&scene)
+  defer scene_deinit(&scene)
   _, child := spawn(&scene)
-  geometry.rotate_angle(&child.transform, math.PI / 2, linalg.VECTOR3F32_Y_AXIS)
+  geometry.rotate_angle(
+    &child.transform,
+    math.PI / 2,
+    linalg.VECTOR3F32_Y_AXIS,
+  )
   geometry.translate(&child.transform, 1, 0, 0)
   scene_traverse(&scene)
   actual := child.transform.world_matrix
-  expected := linalg.Matrix4f32{
-    0.0, 0.0, 1.0, 1.0,
-    0.0, 1.0, 0.0, 0.0,
-    -1.0, 0.0, 0.0, 0.0,
-    0.0, 0.0, 0.0, 1.0,
+  expected := linalg.Matrix4f32 {
+    0.0,
+    0.0,
+    1.0,
+    1.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    -1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
   }
   matrix4_almost_equal(t, actual, expected)
 }
@@ -54,17 +84,30 @@ test_node_scale :: proc(t: ^testing.T) {
   using mjolnir
   scene: Scene
   scene_init(&scene)
+  defer scene_deinit(&scene)
   parent_handle, _ := spawn_at(&scene, {1, 2, 3})
   _, child := spawn_child(&scene, parent_handle)
   geometry.translate(&child.transform, 1, 1, 1)
   geometry.scale_xyz(&child.transform, 2, 3, 4)
   scene_traverse(&scene)
   actual := child.transform.world_matrix
-  expected := linalg.Matrix4f32{
-    2.0, 0.0, 0.0, 2.0,
-    0.0, 3.0, 0.0, 3.0,
-    0.0, 0.0, 4.0, 4.0,
-    0.0, 0.0, 0.0, 1.0,
+  expected := linalg.Matrix4f32 {
+    2.0,
+    0.0,
+    0.0,
+    2.0,
+    0.0,
+    3.0,
+    0.0,
+    3.0,
+    0.0,
+    0.0,
+    4.0,
+    4.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
   }
   matrix4_almost_equal(t, actual, expected)
 }
@@ -74,6 +117,7 @@ test_node_combined_transform :: proc(t: ^testing.T) {
   using mjolnir
   scene: Scene
   scene_init(&scene)
+  defer scene_deinit(&scene)
   _, node := spawn(&scene)
   geometry.scale(&node.transform, 2)
   geometry.rotate(&node.transform, math.PI / 2, linalg.VECTOR3F32_Y_AXIS)
@@ -82,11 +126,23 @@ test_node_combined_transform :: proc(t: ^testing.T) {
   actual := node.transform.world_matrix
   // Expected matrix after applying scale, rotation, and translation
   // Scale by 2, then rotate 90 degree around Y, then translate by (3,4,5)
-  expected := linalg.Matrix4f32{
-    0.0, 0.0, 2.0, 3.0,
-    0.0, 2.0, 0.0, 4.0,
-    -2.0, 0.0, 0.0, 5.0,
-    0.0, 0.0, 0.0, 1.0,
+  expected := linalg.Matrix4f32 {
+    0.0,
+    0.0,
+    2.0,
+    3.0,
+    0.0,
+    2.0,
+    0.0,
+    4.0,
+    -2.0,
+    0.0,
+    0.0,
+    5.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
   }
   matrix4_almost_equal(t, actual, expected)
 }
@@ -96,12 +152,17 @@ test_node_chain_transform :: proc(t: ^testing.T) {
   using mjolnir
   scene: Scene
   scene_init(&scene)
+  defer scene_deinit(&scene)
   // Create a 4-node chain
   node1_handle, node1 := spawn(&scene)
   node2_handle, node2 := spawn_child(&scene, node1_handle)
   node3_handle, node3 := spawn_child(&scene, node2_handle)
   geometry.translate(&node1.transform, x = 1)
-  geometry.rotate_angle(&node2.transform, math.PI / 2, linalg.VECTOR3F32_Y_AXIS)
+  geometry.rotate_angle(
+    &node2.transform,
+    math.PI / 2,
+    linalg.VECTOR3F32_Y_AXIS,
+  )
   geometry.scale(&node3.transform, 2)
   scene_traverse(&scene)
   // The transforms should cascade:
@@ -114,11 +175,165 @@ test_node_chain_transform :: proc(t: ^testing.T) {
   // 2. Translate by (1,0,0)
   // 3. Rotate 90° around Y axis (makes Z become X, and X become -Z)
   // 4. Scale by 2 in all dimensions
-  expected := linalg.Matrix4f32{
-    0.0, 0.0, 2.0, 1.0,
-    0.0, 2.0, 0.0, 0.0,
-    -2.0, 0.0, 0.0, 0.0,
-    0.0, 0.0, 0.0, 1.0,
+  expected := linalg.Matrix4f32 {
+    0.0,
+    0.0,
+    2.0,
+    1.0,
+    0.0,
+    2.0,
+    0.0,
+    0.0,
+    -2.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
   }
   matrix4_almost_equal(t, actual, expected)
+}
+
+create_scene :: proc(
+  scene: ^mjolnir.Scene,
+  max_node: int,
+  max_depth: int,
+) {
+  if max_depth <= 0 || max_node <= 0 do return
+  QueueEntry :: struct {
+    handle: resource.Handle,
+    depth:  int,
+  }
+  queue: [dynamic]QueueEntry
+  defer delete(queue)
+  entry := QueueEntry{scene.root, 0}
+  append(&queue, entry)
+  n := 0
+  for len(queue) > 0 && n < max_node {
+    current := pop_front(&queue)
+    if current.depth < max_depth {
+      child_handle, child := mjolnir.spawn_child(scene, current.handle)
+      geometry.translate(&child.transform, f32(n % 10) * 0.1, 0, 0)
+      geometry.rotate_angle(
+        &child.transform,
+        f32(n) * 0.01,
+        linalg.VECTOR3F32_Y_AXIS,
+      )
+      append(&queue, QueueEntry{child_handle, current.depth + 1})
+    }
+  }
+}
+
+traverse_scene_benchmark :: proc(
+  options: ^time.Benchmark_Options,
+  allocator := context.allocator,
+) -> time.Benchmark_Error {
+  scene := cast(^mjolnir.Scene)(raw_data(options.input))
+  for _ in 0 ..< options.rounds {
+    mjolnir.scene_traverse(scene)
+    options.processed += size_of(mjolnir.Node) * len(scene.nodes.entries)
+  }
+  return nil
+}
+
+scene_cleanup :: proc(
+  options: ^time.Benchmark_Options,
+  allocator := context.allocator,
+) -> time.Benchmark_Error {
+  scene := cast(^mjolnir.Scene)(raw_data(options.input))
+  mjolnir.scene_deinit(scene)
+  free(scene, allocator)
+  return nil
+}
+
+@(test)
+benchmark_deep_hierarchy :: proc(t: ^testing.T) {
+  N :: 100_000
+  ROUND :: 5
+  options := &time.Benchmark_Options {
+    rounds = ROUND,
+    bytes = size_of(mjolnir.Node) * N * ROUND,
+    setup = proc(
+      options: ^time.Benchmark_Options,
+      allocator := context.allocator,
+    ) -> time.Benchmark_Error {
+      scene := new(mjolnir.Scene, allocator)
+      mjolnir.scene_init(scene)
+      create_scene(scene, N, N)
+      options.input = slice.bytes_from_ptr(scene, size_of(^mjolnir.Scene))
+      return nil
+    },
+    bench = traverse_scene_benchmark,
+    teardown = scene_cleanup,
+  }
+  err := time.benchmark(options)
+  log.infof(
+    "Deep hierarchy benchmark (%d nodes, max depth %d): %v (%.2f MB/s)",
+    N,
+    N,
+    options.duration,
+    options.megabytes_per_second,
+  )
+}
+
+@(test)
+benchmark_flat_hierarchy :: proc(t: ^testing.T) {
+  N :: 100_000
+  ROUND :: 5
+  options := &time.Benchmark_Options {
+    rounds = ROUND,
+    bytes = size_of(mjolnir.Node) * N * ROUND,
+    setup = proc(
+      options: ^time.Benchmark_Options,
+      allocator := context.allocator,
+    ) -> time.Benchmark_Error {
+      scene := new(mjolnir.Scene, allocator)
+      mjolnir.scene_init(scene)
+      create_scene(scene, N, 1)
+      options.input = slice.bytes_from_ptr(scene, size_of(^mjolnir.Scene))
+      return nil
+    },
+    bench = traverse_scene_benchmark,
+    teardown = scene_cleanup,
+  }
+  err := time.benchmark(options)
+  log.infof(
+    "Flat hierarchy benchmark (%d nodes, depth 1): %v (%.2f MB/s)",
+    N,
+    options.duration,
+    options.megabytes_per_second,
+  )
+}
+
+@(test)
+benchmark_wide_hierarchy :: proc(t: ^testing.T) {
+  N :: 100_000
+  MAX_DEPTH :: 50
+  ROUND :: 5
+  options := &time.Benchmark_Options {
+    rounds = ROUND,
+    bytes = size_of(mjolnir.Node) * N * ROUND,
+    setup = proc(
+      options: ^time.Benchmark_Options,
+      allocator := context.allocator,
+    ) -> time.Benchmark_Error {
+      scene := new(mjolnir.Scene, allocator)
+      mjolnir.scene_init(scene)
+      create_scene(scene, N, MAX_DEPTH)
+      options.input = slice.bytes_from_ptr(scene, size_of(^mjolnir.Scene))
+      return nil
+    },
+    bench = traverse_scene_benchmark,
+    teardown = scene_cleanup,
+  }
+  err := time.benchmark(options)
+  log.infof(
+    "Wide hierarchy benchmark (%d nodes, max depth %d): %v (%.2f MB/s)",
+    N,
+    MAX_DEPTH,
+    options.duration,
+    options.megabytes_per_second,
+  )
 }
