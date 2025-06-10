@@ -87,7 +87,7 @@ Engine :: struct {
   mouse_drag_proc:       MouseDragProc,
   mouse_move_proc:       MouseMoveProc,
   mouse_scroll_proc:     MouseScrollProc,
-  render_error_count:          u32,
+  render_error_count:    u32,
 }
 
 g_context: runtime.Context
@@ -124,10 +124,11 @@ init :: proc(
   }
   log.infof("Window created %v\n", engine.window)
   vulkan_context_init(engine.window) or_return
+  factory_init()
   engine.start_timestamp = time.now()
   engine.last_frame_timestamp = engine.start_timestamp
   engine.last_update_timestamp = engine.start_timestamp
-  init_scene(&engine.scene)
+  scene_init(&engine.scene)
   build_renderer(engine) or_return
   ui_init(
     &engine.ui,
@@ -187,49 +188,6 @@ build_renderer :: proc(engine: ^Engine) -> vk.Result {
     engine.swapchain.format.format,
     .D32_SFLOAT,
   ) or_return
-  engine.renderer.main.environment_map_handle, engine.renderer.main.environment_map =
-    create_hdr_texture_from_path(
-      engine,
-      "assets/teutonic_castle_moat_4k.hdr",
-    ) or_return
-  engine.renderer.main.brdf_lut_handle, engine.renderer.main.brdf_lut =
-    create_texture_from_path(engine, "assets/lut_ggx.png") or_return
-  vk.AllocateDescriptorSets(
-    g_device,
-    &{
-      sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
-      descriptorPool = g_descriptor_pool,
-      descriptorSetCount = 1,
-      pSetLayouts = &engine.renderer.main.environment_descriptor_set_layout,
-    },
-    &engine.renderer.main.environment_descriptor_set,
-  ) or_return
-  env_write := vk.WriteDescriptorSet {
-    sType           = .WRITE_DESCRIPTOR_SET,
-    dstSet          = engine.renderer.main.environment_descriptor_set,
-    dstBinding      = 0,
-    descriptorType  = .COMBINED_IMAGE_SAMPLER,
-    descriptorCount = 1,
-    pImageInfo      = &{
-      sampler = engine.renderer.main.environment_map.sampler,
-      imageView = engine.renderer.main.environment_map.buffer.view,
-      imageLayout = .SHADER_READ_ONLY_OPTIMAL,
-    },
-  }
-  brdf_lut_write := vk.WriteDescriptorSet {
-    sType           = .WRITE_DESCRIPTOR_SET,
-    dstSet          = engine.renderer.main.environment_descriptor_set,
-    dstBinding      = 1,
-    descriptorType  = .COMBINED_IMAGE_SAMPLER,
-    descriptorCount = 1,
-    pImageInfo      = &{
-      sampler = engine.renderer.main.brdf_lut.sampler,
-      imageView = engine.renderer.main.brdf_lut.buffer.view,
-      imageLayout = .SHADER_READ_ONLY_OPTIMAL,
-    },
-  }
-  writes := [?]vk.WriteDescriptorSet{env_write, brdf_lut_write}
-  vk.UpdateDescriptorSets(g_device, len(writes), raw_data(writes[:]), 0, nil)
   return .SUCCESS
 }
 
@@ -264,7 +222,7 @@ update :: proc(engine: ^Engine) -> bool {
       continue
     }
     animation.instance_update(anim_inst, delta_time)
-    mesh, found := resource.get(engine.renderer.meshes, data.handle)
+    mesh, found := resource.get(g_meshes, data.handle)
     if !found {
       continue
     }
@@ -314,8 +272,8 @@ update :: proc(engine: ^Engine) -> bool {
 
 deinit :: proc(engine: ^Engine) {
   vk.DeviceWaitIdle(g_device)
-  ui_pipeline_deinit(&engine.ui)
-  deinit_scene(&engine.scene)
+  renderer_ui_deinit(&engine.ui)
+  scene_deinit(&engine.scene)
   renderer_deinit(&engine.renderer)
   swapchain_deinit(&engine.swapchain)
   vulkan_context_deinit()
@@ -355,26 +313,15 @@ run :: proc(engine: ^Engine, width: u32, height: u32, title: string) {
     if res != .SUCCESS {
       log.errorf("Error during rendering", res)
       engine.render_error_count += 1
-      if engine.render_error_count >= MAX_CONSECUTIVE_RENDER_ERROR_COUNT_ALLOWED {
+      if engine.render_error_count >=
+         MAX_CONSECUTIVE_RENDER_ERROR_COUNT_ALLOWED {
         log.errorf("Too many render errors, exiting...")
         break
       }
+    } else {
+      engine.render_error_count = 0
     }
     engine.last_frame_timestamp = time.now()
     // break
   }
-}
-
-create_mesh :: proc(
-  engine: ^Engine,
-  data: geometry.Geometry,
-) -> (
-  handle: Handle,
-  mesh: ^Mesh,
-  ret: vk.Result,
-) {
-  handle, mesh = resource.alloc(&engine.renderer.meshes)
-  mesh_init(mesh, data)
-  ret = .SUCCESS
-  return
 }

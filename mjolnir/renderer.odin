@@ -62,9 +62,6 @@ Renderer :: struct {
   shadow:      RendererShadow,
   particle:    RendererParticle,
   postprocess: RendererPostProcess,
-  meshes:      resource.Pool(Mesh),
-  materials:   resource.Pool(Material),
-  textures:    resource.Pool(Texture),
 }
 
 renderer_init :: proc(
@@ -74,15 +71,13 @@ renderer_init :: proc(
   color_format: vk.Format,
   depth_format: vk.Format,
 ) -> vk.Result {
-  log.infof("Initializing mesh pool... ")
-  resource.pool_init(&self.meshes)
-  log.infof("Initializing materials pool... ")
-  resource.pool_init(&self.materials)
-  log.infof("Initializing textures pool... ")
-  resource.pool_init(&self.textures)
-  log.infof("All resource pools initialized successfully")
-  self.main.depth_buffer = create_depth_image(width, height) or_return
-  renderer_main_init(&self.main, color_format, depth_format) or_return
+  renderer_main_init(
+    &self.main,
+    width,
+    height,
+    color_format,
+    depth_format,
+  ) or_return
   renderer_particle_init(&self.particle) or_return
   renderer_shadow_init(
     &self.shadow,
@@ -112,9 +107,6 @@ renderer_init :: proc(
 
 renderer_deinit :: proc(self: ^Renderer) {
   vk.DeviceWaitIdle(g_device)
-  resource.pool_deinit(self.textures, texture_deinit)
-  resource.pool_deinit(self.meshes, mesh_deinit)
-  resource.pool_deinit(self.materials, material_deinit)
   renderer_main_deinit(&self.main)
   renderer_shadow_deinit(&self.shadow)
   renderer_postprocess_deinit(&self.postprocess)
@@ -129,20 +121,13 @@ renderer_recreate_images :: proc(
 ) -> vk.Result {
   vk.DeviceWaitIdle(g_device)
   image_buffer_deinit(&self.main.depth_buffer)
-  for &frame in self.frames {
-    frame_deinit_images(&frame)
-  }
   self.main.depth_buffer = create_depth_image(
     new_extent.width,
     new_extent.height,
   ) or_return
   for &frame in self.frames {
-    frame_recreate_images(
-      &frame,
-      new_format,
-      new_extent.width,
-      new_extent.height,
-    ) or_return
+    frame_deinit_images(&frame)
+    frame_init_images(&frame, new_extent.width, new_extent.height, new_format)
   }
   return .SUCCESS
 }

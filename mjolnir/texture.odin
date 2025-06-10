@@ -37,56 +37,6 @@ Texture :: struct {
   sampler:    vk.Sampler,
 }
 
-create_texture_from_data :: proc(
-  engine: ^Engine,
-  data: []u8,
-) -> (
-  handle: resource.Handle,
-  texture: ^Texture,
-  ret: vk.Result,
-) {
-  handle, texture = resource.alloc(&engine.renderer.textures)
-  read_texture_data(texture, data) or_return
-  texture_init(texture) or_return
-  log.infof(
-    "created texture %d x %d -> id %d",
-    texture.image_data.width,
-    texture.image_data.height,
-    texture.buffer.image,
-  )
-  ret = .SUCCESS
-  return
-}
-
-create_texture_from_pixels :: proc(
-  engine: ^Engine,
-  pixels: []u8,
-  width: int,
-  height: int,
-  channel: int,
-  format: vk.Format = .R8G8B8A8_SRGB,
-) -> (
-  handle: resource.Handle,
-  texture: ^Texture,
-  ret: vk.Result,
-) {
-  handle, texture = resource.alloc(&engine.renderer.textures)
-  texture.image_data.pixels = pixels
-  texture.image_data.width = width
-  texture.image_data.height = height
-  texture.image_data.channels_in_file = channel
-  texture.image_data.actual_channels = channel
-  texture_init(texture, format) or_return
-  log.infof(
-    "created texture %d x %d -> id %d",
-    texture.image_data.width,
-    texture.image_data.height,
-    texture.buffer.image,
-  )
-  ret = .SUCCESS
-  return
-}
-
 read_texture_data :: proc(self: ^Texture, data: []u8) -> vk.Result {
   w, h, c_in_file: c.int
   actual_channels: c.int = 4
@@ -111,21 +61,6 @@ read_texture_data :: proc(self: ^Texture, data: []u8) -> vk.Result {
   self.image_data.is_data_owned = true
   log.infof("loaded image %d x %d", w, h)
   return .SUCCESS
-}
-
-create_texture_from_path :: proc(
-  engine: ^Engine,
-  path: string,
-) -> (
-  handle: resource.Handle,
-  texture: ^Texture,
-  ret: vk.Result,
-) {
-  handle, texture = resource.alloc(&engine.renderer.textures)
-  read_texture(texture, path) or_return
-  texture_init(texture) or_return
-  ret = .SUCCESS
-  return
 }
 
 read_texture :: proc(self: ^Texture, path: string) -> vk.Result {
@@ -446,39 +381,6 @@ cube_depth_texture_deinit :: proc(self: ^CubeDepthTexture) {
   vk.DestroyImageView(g_device, self.view, nil)
   self.view = 0
   image_buffer_deinit(&self.buffer)
-}
-
-create_hdr_texture_from_path :: proc(
-  engine: ^Engine,
-  path: string,
-) -> (
-  handle: resource.Handle,
-  texture: ^Texture,
-  ret: vk.Result,
-) {
-  handle, texture = resource.alloc(&engine.renderer.textures)
-  path_cstr := strings.clone_to_cstring(path)
-  w, h, c_in_file: c.int
-  float_pixels_ptr := stbi.loadf(path_cstr, &w, &h, &c_in_file, 4) // force RGBA
-  if float_pixels_ptr == nil {
-    log.errorf(
-      "Failed to load HDR texture from path '%s': %s\n",
-      path,
-      stbi.failure_reason(),
-    )
-    ret = .ERROR_UNKNOWN
-    return
-  }
-  num_floats := int(w * h * 4)
-  texture.image_data.pixels = slice.to_bytes(float_pixels_ptr[:num_floats])
-  texture.image_data.width = int(w)
-  texture.image_data.height = int(h)
-  texture.image_data.channels_in_file = 3
-  texture.image_data.actual_channels = 4
-  texture_init(texture, .R32G32B32A32_SFLOAT) or_return
-  log.infof("created HDR texture %d x %d -> id %d", w, h, texture.buffer.image)
-  ret = .SUCCESS
-  return
 }
 
 prepare_image_for_render :: proc(

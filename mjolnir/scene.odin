@@ -124,7 +124,7 @@ play_animation :: proc(
   if !ok {
     return false
   }
-  mesh := resource.get(engine.renderer.meshes, data.handle)
+  mesh := resource.get(g_meshes, data.handle)
   skinning, has_skin := &data.skinning.?
   if mesh == nil || !has_skin {
     return false
@@ -197,7 +197,7 @@ Scene :: struct {
   nodes:  resource.Pool(Node),
 }
 
-init_scene :: proc(s: ^Scene) {
+scene_init :: proc(s: ^Scene) {
   s.camera = geometry.make_camera_orbit(
     math.PI * 0.5, // fov
     16.0 / 9.0, // aspect_ratio
@@ -213,7 +213,7 @@ init_scene :: proc(s: ^Scene) {
   root.parent = s.root
 }
 
-deinit_scene :: proc(s: ^Scene) {
+scene_deinit :: proc(s: ^Scene) {
   resource.pool_deinit(s.nodes, deinit_node)
 }
 

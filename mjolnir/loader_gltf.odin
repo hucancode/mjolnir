@@ -25,7 +25,7 @@ load_gltf :: proc(
 ) {
   gltf_path_cstr := strings.clone_to_cstring(path)
   defer delete(gltf_path_cstr)
-  options : cgltf.options
+  options: cgltf.options
   gltf_data := cgltf.parse_file(options, gltf_path_cstr) or_return
   defer cgltf.free(gltf_data)
   if len(gltf_data.buffers) > 0 {
@@ -94,7 +94,7 @@ load_gltf :: proc(
     if gltf_node.mesh != nil {
       if gltf_node.skin != nil {
         log.infof("Loading skinned mesh %s", string(gltf_node.name))
-        mesh_handle, mesh := resource.alloc(&engine.renderer.meshes)
+        mesh_handle, mesh := resource.alloc(&g_meshes)
         data, bones, material, root_bone_idx, res :=
           load_gltf_skinned_primitive(
             engine,
@@ -153,7 +153,7 @@ load_gltf :: proc(
           len(mesh_data.indices),
           mesh_data.skinnings,
         )
-        mesh_handle, _, ret := create_mesh(engine, mesh_data)
+        mesh_handle, _, ret := create_mesh(mesh_data)
         if ret != .SUCCESS {
           log.error("Failed to create static mesh ", ret)
           continue
@@ -220,7 +220,7 @@ load_gltf_texture :: proc(
     return
   }
   log.infof("Creating texture from %d bytes", len(pixel_data))
-  tex_handle, texture = create_texture_from_data(engine, pixel_data) or_return
+  tex_handle, texture = create_texture_from_data(pixel_data) or_return
   delete(pixel_data)
   ret = .SUCCESS
   return
@@ -285,7 +285,6 @@ load_gltf_pbr_textures :: proc(
           return
         }
         metallic_roughness_handle, _ = create_texture_from_data(
-          engine,
           pixel_data,
         ) or_return
         features |= {.METALLIC_ROUGHNESS_TEXTURE}
@@ -341,7 +340,8 @@ load_gltf_primitive :: proc(
       primitive.material,
     ) or_return
   material_handle, _ = create_material(
-    engine,
+    engine.renderer.main.texture_descriptor_set_layout,
+    engine.renderer.main.skinning_descriptor_set_layout,
     features,
     albedo_handle,
     metallic_roughness_handle,
@@ -439,7 +439,8 @@ load_gltf_skinned_primitive :: proc(
       primitive.material,
     ) or_return
   mat_handle, _ = create_material(
-    engine,
+    engine.renderer.main.texture_descriptor_set_layout,
+    engine.renderer.main.skinning_descriptor_set_layout,
     features | {.SKINNING},
     albedo_handle,
     metallic_roughness_handle,
@@ -612,7 +613,7 @@ load_gltf_animations :: proc(
   gltf_skin: ^cgltf.skin,
   engine_mesh_handle: resource.Handle,
 ) -> bool {
-  mesh := resource.get(engine.renderer.meshes, engine_mesh_handle)
+  mesh := resource.get(g_meshes, engine_mesh_handle)
   skinning := &mesh.skinning.?
   skinning.animations = make([]animation.Clip, len(gltf_data.animations))
   for gltf_anim, i in gltf_data.animations {

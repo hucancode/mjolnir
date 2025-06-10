@@ -52,10 +52,9 @@ ui_init :: proc(
   self.frame_width = width
   self.frame_height = height
   log.infof("init UI pipeline...")
-  ui_pipeline_init(self, color_format) or_return
+  renderer_ui_init(self, color_format) or_return
   log.infof("init UI texture...")
   _, texture := create_texture_from_pixels(
-    engine,
     mu.default_atlas_alpha[:],
     mu.DEFAULT_ATLAS_WIDTH,
     mu.DEFAULT_ATLAS_HEIGHT,
@@ -299,7 +298,7 @@ ui_set_clip_rect :: proc(
   vk.CmdSetScissor(cmd_buf, 0, 1, &scissor)
 }
 
-ui_pipeline_init :: proc(
+renderer_ui_init :: proc(
   self: ^RendererUI,
   color_format: vk.Format,
 ) -> vk.Result {
@@ -507,7 +506,7 @@ ui_pipeline_init :: proc(
   return .SUCCESS
 }
 
-ui_pipeline_deinit :: proc(self: ^RendererUI) {
+renderer_ui_deinit :: proc(self: ^RendererUI) {
   if self == nil {
     return
   }

@@ -467,7 +467,7 @@ render_single_shadow :: proc(node: ^Node, cb_context: rawptr) -> bool {
     if !data.cast_shadow {
       return true
     }
-    mesh := resource.get(ctx.engine.renderer.meshes, data.handle)
+    mesh := resource.get(g_meshes, data.handle)
     if mesh == nil {
       return true
     }
@@ -480,19 +480,19 @@ render_single_shadow :: proc(node: ^Node, cb_context: rawptr) -> bool {
     if !geometry.frustum_test_aabb(&ctx.frustum, world_aabb) {
       return true
     }
-    material := resource.get(ctx.engine.renderer.materials, data.material)
+    material := resource.get(g_materials, data.material)
     if material == nil {
       return true
     }
     features: ShaderFeatureSet
-    pipeline := pipeline_shadow_get_pipeline(
+    pipeline := renderer_shadow_get_pipeline(
       &ctx.engine.renderer.shadow,
       features,
     )
     layout := ctx.engine.renderer.shadow.pipeline_layout
     descriptor_sets: []vk.DescriptorSet
     if mesh_has_skin {
-      pipeline = pipeline_shadow_get_pipeline(
+      pipeline = renderer_shadow_get_pipeline(
         &ctx.engine.renderer.shadow,
         {.SKINNING},
       )
@@ -564,7 +564,7 @@ render_single_shadow :: proc(node: ^Node, cb_context: rawptr) -> bool {
   return true
 }
 
-pipeline_shadow_get_pipeline :: proc(
+renderer_shadow_get_pipeline :: proc(
   self: ^RendererShadow,
   features: ShaderFeatureSet,
 ) -> vk.Pipeline {

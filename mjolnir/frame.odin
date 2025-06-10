@@ -45,33 +45,31 @@ frame_init :: proc(
   vk.AllocateCommandBuffers(
     g_device,
     &{
-    sType              = .COMMAND_BUFFER_ALLOCATE_INFO,
-    commandPool        = g_command_pool,
-    level              = .PRIMARY,
-    commandBufferCount = 1,
-  },
+      sType = .COMMAND_BUFFER_ALLOCATE_INFO,
+      commandPool = g_command_pool,
+      level = .PRIMARY,
+      commandBufferCount = 1,
+    },
     &self.command_buffer,
   ) or_return
   vk.CreateSemaphore(
     g_device,
-    &{
-    sType = .SEMAPHORE_CREATE_INFO,
-  },
+    &{sType = .SEMAPHORE_CREATE_INFO},
     nil,
     &self.image_available_semaphore,
   ) or_return
   vk.CreateSemaphore(
     g_device,
-    &{
-    sType = .SEMAPHORE_CREATE_INFO,
-  },
+    &{sType = .SEMAPHORE_CREATE_INFO},
     nil,
     &self.render_finished_semaphore,
   ) or_return
-  vk.CreateFence(g_device, &{
-    sType = .FENCE_CREATE_INFO,
-    flags = {.SIGNALED},
-  }, nil, &self.fence) or_return
+  vk.CreateFence(
+    g_device,
+    &{sType = .FENCE_CREATE_INFO, flags = {.SIGNALED}},
+    nil,
+    &self.fence,
+  ) or_return
   self.camera_uniform = create_host_visible_buffer(
     SceneUniform,
     (1 + 6 * MAX_SCENE_UNIFORMS),
@@ -163,6 +161,16 @@ frame_init :: proc(
     },
   }
   vk.UpdateDescriptorSets(g_device, len(writes), raw_data(writes[:]), 0, nil)
+  frame_init_images(self, width, height, color_format)
+  return .SUCCESS
+}
+
+frame_init_images :: proc(
+  self: ^Frame,
+  width: u32,
+  height: u32,
+  color_format: vk.Format,
+) -> vk.Result {
   self.main_pass_image = malloc_image_buffer(
     width,
     height,
@@ -213,41 +221,4 @@ frame_deinit_images :: proc(self: ^Frame) {
   for &image in self.postprocess_images {
     image_buffer_deinit(&image)
   }
-}
-
-frame_recreate_images :: proc(
-  self: ^Frame,
-  color_format: vk.Format,
-  width: u32,
-  height: u32,
-) -> vk.Result {
-  self.main_pass_image = malloc_image_buffer(
-    width,
-    height,
-    color_format,
-    .OPTIMAL,
-    {.COLOR_ATTACHMENT, .SAMPLED, .TRANSFER_SRC, .TRANSFER_DST},
-    {.DEVICE_LOCAL},
-  ) or_return
-  self.main_pass_image.view = create_image_view(
-    self.main_pass_image.image,
-    color_format,
-    {.COLOR},
-  ) or_return
-  for &image in self.postprocess_images {
-    image = malloc_image_buffer(
-      width,
-      height,
-      color_format,
-      .OPTIMAL,
-      {.COLOR_ATTACHMENT, .SAMPLED, .TRANSFER_SRC, .TRANSFER_DST},
-      {.DEVICE_LOCAL},
-    ) or_return
-    image.view = create_image_view(
-      image.image,
-      color_format,
-      {.COLOR},
-    ) or_return
-  }
-  return .SUCCESS
 }

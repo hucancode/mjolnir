@@ -26,25 +26,27 @@ main :: proc() {
 
 setup :: proc(engine: ^mjolnir.Engine) {
   using mjolnir, geometry
-  plain_material_handle, _, _ := create_material(engine)
+  plain_material_handle, _, _ := create_material(
+      engine.renderer.main.texture_descriptor_set_layout,
+      engine.renderer.main.skinning_descriptor_set_layout,
+  )
   cube_geom := make_cube()
-  cube_mesh_handle, _, _ := create_mesh(engine, cube_geom)
-  sphere_mesh_handle, _, _ := create_mesh(engine, make_sphere())
+  cube_mesh_handle, _, _ := create_mesh(cube_geom)
+  sphere_mesh_handle, _, _ := create_mesh(make_sphere())
   // Create ground plane
   ground_albedo_handle, _, _ := create_texture_from_path(
-    engine,
     "assets/t_brick_floor_002_diffuse_1k.jpg",
   )
   ground_metallic_roughness_handle, _, _ := create_texture_from_path(
-    engine,
     "assets/t_brick_floor_002_rough_1k.jpg",
   )
   ground_mat_handle, _, _ := create_material(
-    engine,
+      engine.renderer.main.texture_descriptor_set_layout,
+      engine.renderer.main.skinning_descriptor_set_layout,
     {.ALBEDO_TEXTURE},
     ground_albedo_handle,
   )
-  ground_mesh_handle, _, _ := create_mesh(engine, make_quad())
+  ground_mesh_handle, _, _ := create_mesh(make_quad())
   if true {
     log.info("spawning cubes in a grid")
     space: f32 = 1.0
@@ -54,7 +56,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
       for y in 1 ..< ny {
         for z in 1 ..< nz {
           mat_handle, _ := create_material(
-            engine = engine,
+              engine.renderer.main.texture_descriptor_set_layout,
+              engine.renderer.main.skinning_descriptor_set_layout,
             metallic_value = f32(x) / f32(nx),
             roughness_value = f32(y) / f32(ny),
           ) or_continue

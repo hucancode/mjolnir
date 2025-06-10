@@ -633,11 +633,11 @@ render_single_node :: proc(node: ^Node, cb_context: rawptr) -> bool {
   frame := ctx.engine.renderer.frame_index
   #partial switch data in node.attachment {
   case MeshAttachment:
-    mesh := resource.get(ctx.engine.renderer.meshes, data.handle)
+    mesh := resource.get(g_meshes, data.handle)
     if mesh == nil {
       return true
     }
-    material := resource.get(ctx.engine.renderer.materials, data.material)
+    material := resource.get(g_materials, data.material)
     if material == nil {
       return true
     }
@@ -787,9 +787,12 @@ render_to_texture :: proc(
 
 renderer_main_init :: proc(
   self: ^RendererMain,
+  width: u32,
+  height: u32,
   target_color_format: vk.Format = .B8G8R8A8_SRGB,
   target_depth_format: vk.Format = .D32_SFLOAT,
 ) -> vk.Result {
+  self.depth_buffer = create_depth_image(width, height) or_return
   renderer_main_build_pbr_pipeline(
     self,
     target_color_format,
@@ -800,6 +803,49 @@ renderer_main_init :: proc(
     target_color_format,
     target_depth_format,
   ) or_return
+  self.environment_map_handle, self.environment_map =
+    create_hdr_texture_from_path(
+      "assets/teutonic_castle_moat_4k.hdr",
+    ) or_return
+  self.brdf_lut_handle, self.brdf_lut = create_texture_from_path(
+    "assets/lut_ggx.png",
+  ) or_return
+  vk.AllocateDescriptorSets(
+    g_device,
+    &{
+      sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
+      descriptorPool = g_descriptor_pool,
+      descriptorSetCount = 1,
+      pSetLayouts = &self.environment_descriptor_set_layout,
+    },
+    &self.environment_descriptor_set,
+  ) or_return
+  env_write := vk.WriteDescriptorSet {
+    sType           = .WRITE_DESCRIPTOR_SET,
+    dstSet          = self.environment_descriptor_set,
+    dstBinding      = 0,
+    descriptorType  = .COMBINED_IMAGE_SAMPLER,
+    descriptorCount = 1,
+    pImageInfo      = &{
+      sampler = self.environment_map.sampler,
+      imageView = self.environment_map.buffer.view,
+      imageLayout = .SHADER_READ_ONLY_OPTIMAL,
+    },
+  }
+  brdf_lut_write := vk.WriteDescriptorSet {
+    sType           = .WRITE_DESCRIPTOR_SET,
+    dstSet          = self.environment_descriptor_set,
+    dstBinding      = 1,
+    descriptorType  = .COMBINED_IMAGE_SAMPLER,
+    descriptorCount = 1,
+    pImageInfo      = &{
+      sampler = self.brdf_lut.sampler,
+      imageView = self.brdf_lut.buffer.view,
+      imageLayout = .SHADER_READ_ONLY_OPTIMAL,
+    },
+  }
+  writes := [?]vk.WriteDescriptorSet{env_write, brdf_lut_write}
+  vk.UpdateDescriptorSets(g_device, len(writes), raw_data(writes[:]), 0, nil)
   return .SUCCESS
 }
 
