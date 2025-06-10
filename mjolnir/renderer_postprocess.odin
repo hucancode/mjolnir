@@ -257,7 +257,6 @@ renderer_postprocess_init :: proc(
       {.COLOR},
     ) or_return
   }
-  pipeline_layouts: [count]vk.PipelineLayout
   shader_stages_arr: [count][2]vk.PipelineShaderStageCreateInfo
   pipeline_infos: [count]vk.GraphicsPipelineCreateInfo
   for effect_type, i in PostProcessEffectType {

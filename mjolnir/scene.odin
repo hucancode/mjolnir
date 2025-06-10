@@ -241,7 +241,6 @@ scene_traverse :: proc(
   callback: SceneTraversalCallback = nil,
 ) -> bool {
   using geometry
-  n := len(self.nodes.entries) - len(self.nodes.free_indices)
   append(&self.traversal_stack, SceneTraverseEntry{self.root, linalg.MATRIX4F32_IDENTITY, false})
   for len(self.traversal_stack) > 0 {
     entry := pop(&self.traversal_stack)

@@ -3,8 +3,6 @@ package main
 import "core:log"
 import "core:math"
 import linalg "core:math/linalg"
-import mu "vendor:microui"
-
 import "mjolnir"
 import "mjolnir/geometry"
 import "mjolnir/resource"
@@ -37,9 +35,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
   ground_albedo_handle, _, _ := create_texture_from_path(
     "assets/t_brick_floor_002_diffuse_1k.jpg",
   )
-  ground_metallic_roughness_handle, _, _ := create_texture_from_path(
-    "assets/t_brick_floor_002_rough_1k.jpg",
-  )
   ground_mat_handle, _, _ := create_material(
     engine.renderer.main.texture_descriptor_set_layout,
     engine.renderer.main.skinning_descriptor_set_layout,
@@ -61,7 +56,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
             metallic_value = f32(x) / f32(nx),
             roughness_value = f32(y) / f32(ny),
           ) or_continue
-          node_handle, node := spawn(
+          _, node := spawn(
             &engine.scene,
             MeshAttachment {
               handle = sphere_mesh_handle,
@@ -84,7 +79,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     log.info("spawning ground quad")
     // Ground node
     size: f32 = 15.0
-    ground_handle, ground_node := spawn(
+    _, ground_node := spawn(
       &engine.scene,
       MeshAttachment {
         handle = ground_mesh_handle,

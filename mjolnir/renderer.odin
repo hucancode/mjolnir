@@ -1,14 +1,10 @@
 package mjolnir
 
-import "core:fmt"
 import "core:log"
 import "core:math"
 import linalg "core:math/linalg"
-import "core:slice"
 import "core:time"
 import "geometry"
-import "resource"
-import glfw "vendor:glfw"
 import mu "vendor:microui"
 import vk "vendor:vulkan"
 

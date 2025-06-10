@@ -2,7 +2,6 @@ package mjolnir
 
 import "core:log"
 import linalg "core:math/linalg"
-import "core:time"
 import "geometry"
 import vk "vendor:vulkan"
 

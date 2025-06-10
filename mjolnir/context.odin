@@ -1,6 +1,5 @@
 package mjolnir
 
-import "base:runtime"
 import "core:log"
 import "core:mem"
 import "core:slice"
@@ -139,8 +138,8 @@ vulkan_instance_init :: proc() -> vk.Result {
     create_info.flags |= {.ENUMERATE_PORTABILITY_KHR}
     append(&extensions, vk.KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME)
   }
-  dbg_create_info: vk.DebugUtilsMessengerCreateInfoEXT
   when ENABLE_VALIDATION_LAYERS {
+    dbg_create_info: vk.DebugUtilsMessengerCreateInfoEXT
     create_info.enabledLayerCount = u32(len(VALIDATION_LAYERS))
     create_info.ppEnabledLayerNames = raw_data(VALIDATION_LAYERS)
     append(&extensions, vk.EXT_DEBUG_UTILS_EXTENSION_NAME)

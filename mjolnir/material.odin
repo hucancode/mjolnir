@@ -2,7 +2,6 @@ package mjolnir
 
 import "core:log"
 import linalg "core:math/linalg"
-import "resource"
 import vk "vendor:vulkan"
 
 MaterialFallbacks :: struct {

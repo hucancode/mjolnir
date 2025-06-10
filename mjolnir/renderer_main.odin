@@ -537,7 +537,6 @@ render_main_pass :: proc(
   camera_frustum: geometry.Frustum,
   swapchain_extent: vk.Extent2D,
 ) -> vk.Result {
-  particles := engine.renderer.particle.particle_buffer.mapped
   // Run particle compute pass before starting rendering
   compute_particles(&engine.renderer.particle, command_buffer)
   // Barrier to ensure compute shader writes are visible to the vertex shader

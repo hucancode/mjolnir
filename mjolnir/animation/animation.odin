@@ -3,11 +3,7 @@ package animation
 import "core:log"
 import "core:math"
 import linalg "core:math/linalg"
-import "core:mem"
 import "core:slice"
-import vk "vendor:vulkan"
-
-EPSILON :: 1e-6
 
 Keyframe :: struct($T: typeid) {
   time:  f32,

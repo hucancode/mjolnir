@@ -2,14 +2,10 @@ package mjolnir
 
 import "core:c"
 import "core:log"
-import "core:mem"
-import "core:slice"
 import "core:strings"
 
 import stbi "vendor:stb/image"
 import vk "vendor:vulkan"
-
-import "resource"
 
 ImageData :: struct {
   pixels:           []u8,
