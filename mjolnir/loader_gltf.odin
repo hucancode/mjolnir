@@ -417,6 +417,7 @@ load_gltf_skinned_primitive :: proc(
   gltf_mesh: ^cgltf.mesh,
   gltf_skin: ^cgltf.skin,
 ) -> (
+  // TODO: too many return values, consider refactor this
   geometry_data: geometry.Geometry,
   engine_bones: []Bone,
   mat_handle: resource.Handle,
