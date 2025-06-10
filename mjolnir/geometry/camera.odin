@@ -156,7 +156,7 @@ camera_orbit_rotate :: proc(self: ^Camera, yaw_delta: f32, pitch_delta: f32) {
     PI_HALF - epsilon,
   )
   update_orbit_position(self)
-  log.infof("Orbit camera rotated: yaw %f, pitch %f", movement.yaw, movement.pitch)
+  //log.infof("Orbit camera rotated: yaw %f, pitch %f", movement.yaw, movement.pitch)
 }
 
 camera_orbit_zoom :: proc(camera: ^Camera, delta_distance: f32) {

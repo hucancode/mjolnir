@@ -1,11 +1,23 @@
 package tests
 
 import "../mjolnir/geometry"
+import "core:fmt"
 import "core:log"
 import linalg "core:math/linalg"
+import "core:math"
 import "core:slice"
 import "core:testing"
 import "core:time"
+
+matrix4_almost_equal :: proc(t: ^testing.T, actual, expected: linalg.Matrix4f32) {
+  for i in 0..<4 {
+    for j in 0..<4 {
+      delta := math.abs(actual[i,j] - expected[i,j])
+      // Use a more lenient epsilon for floating point comparisons
+      testing.expect(t, delta < 0.01, fmt.tprintf("Matrix difference at [%d,%d]: %f", i, j, delta))
+    }
+  }
+}
 
 @(test)
 matrix_multiply_vector :: proc(t: ^testing.T) {
