@@ -1,0 +1,44 @@
+name: Run Tests
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Odin
+      uses: laytan/setup-odin@v2
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: Compile Odin vendor library
+      run: |
+        make -C /home/runner/odin/vendor/stb/src
+        make -C /home/runner/odin/vendor/cgltf/src
+
+    - name: Setup Vulkan SDK
+      uses: humbletim/install-vulkan-sdk@v1.2
+      with:
+        version: 1.4.309.0
+        cache: true
+
+    - name: Verify installations
+      run: |
+        odin version
+        glslc --version
+        make -v
+
+    - name: Check Odin code
+      run: make check
+
+    - name: Run tests
+      run: make test

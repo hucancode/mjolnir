@@ -14,7 +14,7 @@ release: $(SPV_SHADERS) $(SPV_COMPUTE_SHADERS)
 debug: $(SPV_SHADERS) $(SPV_COMPUTE_SHADERS)
 	odin run . -out:bin/main-debug -debug
 
-check:
+check: $(SPV_SHADERS) $(SPV_COMPUTE_SHADERS)
 	odin check .
 
 test:
