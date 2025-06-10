@@ -12,7 +12,7 @@ release: $(SPV_SHADERS) $(SPV_COMPUTE_SHADERS)
 	odin run . -out:bin/main
 
 debug: $(SPV_SHADERS) $(SPV_COMPUTE_SHADERS)
-	odin run . -out:bin/main -debug
+	odin run . -out:bin/main-debug -debug
 
 check:
 	odin check .

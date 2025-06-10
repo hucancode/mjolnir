@@ -504,7 +504,6 @@ render_single_shadow :: proc(node: ^Node, cb_context: rawptr) -> bool {
     } else {
       pipeline = renderer_shadow_get_pipeline(
         &ctx.engine.renderer.shadow,
-        {},
       )
       descriptor_sets = {
         renderer_get_camera_descriptor_set(&ctx.engine.renderer), // set 0
@@ -571,7 +570,7 @@ render_single_shadow :: proc(node: ^Node, cb_context: rawptr) -> bool {
 
 renderer_shadow_get_pipeline :: proc(
   self: ^RendererShadow,
-  features: ShadowShaderFeatureSet,
+  features: ShadowShaderFeatureSet = {},
 ) -> vk.Pipeline {
   return self.pipelines[transmute(u32)features]
 }
