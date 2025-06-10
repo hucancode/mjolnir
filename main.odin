@@ -27,8 +27,8 @@ main :: proc() {
 setup :: proc(engine: ^mjolnir.Engine) {
   using mjolnir, geometry
   plain_material_handle, _, _ := create_material(
-      engine.renderer.main.texture_descriptor_set_layout,
-      engine.renderer.main.skinning_descriptor_set_layout,
+    engine.renderer.main.texture_descriptor_set_layout,
+    engine.renderer.main.skinning_descriptor_set_layout,
   )
   cube_geom := make_cube()
   cube_mesh_handle, _, _ := create_mesh(cube_geom)
@@ -41,8 +41,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
     "assets/t_brick_floor_002_rough_1k.jpg",
   )
   ground_mat_handle, _, _ := create_material(
-      engine.renderer.main.texture_descriptor_set_layout,
-      engine.renderer.main.skinning_descriptor_set_layout,
+    engine.renderer.main.texture_descriptor_set_layout,
+    engine.renderer.main.skinning_descriptor_set_layout,
     {.ALBEDO_TEXTURE},
     ground_albedo_handle,
   )
@@ -56,8 +56,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
       for y in 1 ..< ny {
         for z in 1 ..< nz {
           mat_handle, _ := create_material(
-              engine.renderer.main.texture_descriptor_set_layout,
-              engine.renderer.main.skinning_descriptor_set_layout,
+            engine.renderer.main.texture_descriptor_set_layout,
+            engine.renderer.main.skinning_descriptor_set_layout,
             metallic_value = f32(x) / f32(nx),
             roughness_value = f32(y) / f32(ny),
           ) or_continue
@@ -191,21 +191,21 @@ setup :: proc(engine: ^mjolnir.Engine) {
   )
   renderer_tonemap(&engine.renderer, 1.5, 1.3)
   renderer_grayscale(&engine.renderer, 0.3)
-  emitter := mjolnir.Emitter{
-      transform = geometry.Transform{
-          position = {0, 3, 3},
-          rotation = linalg.QUATERNIONF32_IDENTITY,
-          scale = {1, 1, 1},
-      },
-      emission_rate = 10,
-      particle_lifetime = 5.0,
-      initial_velocity = {0, -0.1, 0, 0},
-      velocity_spread = 0.5,
-      color_start = {1, 0, 0, 1},
-      color_end = {0, 0, 1, 0},
-      size_start = 300.0,
-      size_end = 100.0,
-      enabled = true,
+  emitter := mjolnir.Emitter {
+    transform = geometry.Transform {
+      position = {0, 3, 3},
+      rotation = linalg.QUATERNIONF32_IDENTITY,
+      scale = {1, 1, 1},
+    },
+    emission_rate = 10,
+    particle_lifetime = 5.0,
+    initial_velocity = {0, -0.1, 0, 0},
+    velocity_spread = 0.5,
+    color_start = {1, 0, 0, 1},
+    color_end = {0, 0, 1, 0},
+    size_start = 300.0,
+    size_end = 100.0,
+    enabled = true,
   }
   add_emitter(&engine.renderer.particle, emitter)
   log.info("setup complete")

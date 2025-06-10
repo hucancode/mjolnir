@@ -55,14 +55,14 @@ Node :: struct {
 
 SceneTraversalCallback :: #type proc(node: ^Node, ctx: rawptr) -> bool
 
-init_node :: proc(node: ^Node, name: string = "") {
-  node.children = make([dynamic]Handle, 0)
-  node.transform = geometry.TRANSFORM_IDENTITY
-  node.name = name
+init_node :: proc(self: ^Node, name: string = "") {
+  self.children = make([dynamic]Handle, 0)
+  self.transform = geometry.TRANSFORM_IDENTITY
+  self.name = name
 }
 
-deinit_node :: proc(node: ^Node) {
-  delete(node.children)
+deinit_node :: proc(self: ^Node) {
+  delete(self.children)
 }
 
 detach :: proc(nodes: resource.Pool(Node), child_handle: Handle) {
@@ -138,56 +138,56 @@ play_animation :: proc(
 }
 
 spawn_at :: proc(
-  scene: ^Scene,
+  self: ^Scene,
   position: linalg.Vector3f32,
   attachment: NodeAttachment = nil,
 ) -> (
   handle: Handle,
   node: ^Node,
 ) {
-  handle, node = resource.alloc(&scene.nodes)
+  handle, node = resource.alloc(&self.nodes)
   if node == nil {
     return
   }
   init_node(node)
   node.attachment = attachment
   geometry.translate(&node.transform, position.x, position.y, position.z)
-  attach(scene.nodes, scene.root, handle)
+  attach(self.nodes, self.root, handle)
   return
 }
 
 spawn :: proc(
-  scene: ^Scene,
+  self: ^Scene,
   attachment: NodeAttachment = nil,
 ) -> (
   handle: Handle,
   node: ^Node,
 ) {
-  handle, node = resource.alloc(&scene.nodes)
+  handle, node = resource.alloc(&self.nodes)
   if node == nil {
     return
   }
   init_node(node)
   node.attachment = attachment
-  attach(scene.nodes, scene.root, handle)
+  attach(self.nodes, self.root, handle)
   return
 }
 
 spawn_child :: proc(
-  scene: ^Scene,
+  self: ^Scene,
   parent: Handle,
   attachment: NodeAttachment = nil,
 ) -> (
   handle: Handle,
   node: ^Node,
 ) {
-  handle, node = resource.alloc(&scene.nodes)
+  handle, node = resource.alloc(&self.nodes)
   if node == nil {
     return
   }
   init_node(node)
   node.attachment = attachment
-  attach(scene.nodes, parent, handle)
+  attach(self.nodes, parent, handle)
   return
 }
 
@@ -197,38 +197,38 @@ Scene :: struct {
   nodes:  resource.Pool(Node),
 }
 
-scene_init :: proc(s: ^Scene) {
-  s.camera = geometry.make_camera_orbit(
+scene_init :: proc(self: ^Scene) {
+  self.camera = geometry.make_camera_orbit(
     math.PI * 0.5, // fov
     16.0 / 9.0, // aspect_ratio
     0.01, // near
     100.0, // far
   )
   log.infof("Initializing nodes pool... ")
-  resource.pool_init(&s.nodes)
+  resource.pool_init(&self.nodes)
   log.infof("done")
   root: ^Node
-  s.root, root = resource.alloc(&s.nodes)
+  self.root, root = resource.alloc(&self.nodes)
   init_node(root, "root")
-  root.parent = s.root
+  root.parent = self.root
 }
 
-scene_deinit :: proc(s: ^Scene) {
-  resource.pool_deinit(s.nodes, deinit_node)
+scene_deinit :: proc(self: ^Scene) {
+  resource.pool_deinit(self.nodes, deinit_node)
 }
 
-switch_camera_mode_scene :: proc(s: ^Scene) {
-  _, in_orbit_mode := s.camera.movement_data.(geometry.CameraOrbitMovement)
+switch_camera_mode_scene :: proc(self: ^Scene) {
+  _, in_orbit_mode := self.camera.movement_data.(geometry.CameraOrbitMovement)
   if in_orbit_mode {
-    geometry.camera_switch_to_free(&s.camera)
+    geometry.camera_switch_to_free(&self.camera)
   } else {
-    geometry.camera_switch_to_orbit(&s.camera, nil, nil)
+    geometry.camera_switch_to_orbit(&self.camera, nil, nil)
   }
 }
 
 // TODO: make a new traverse procedure that does flat traversal and don't update transform matrix
 traverse_scene :: proc(
-  scene: ^Scene,
+  self: ^Scene,
   cb_context: rawptr,
   callback: SceneTraversalCallback = nil,
 ) -> bool {
@@ -238,13 +238,13 @@ traverse_scene :: proc(
     parent_transform: linalg.Matrix4f32,
     parent_is_dirty:  bool,
   }
-  n := len(scene.nodes.entries) - len(scene.nodes.free_indices)
+  n := len(self.nodes.entries) - len(self.nodes.free_indices)
   stack := make([dynamic]TraverseEntry, 0, n)
   defer delete(stack)
-  append(&stack, TraverseEntry{scene.root, linalg.MATRIX4F32_IDENTITY, false})
+  append(&stack, TraverseEntry{self.root, linalg.MATRIX4F32_IDENTITY, false})
   for len(stack) > 0 {
     entry := pop(&stack)
-    current_node, found := resource.get(scene.nodes, entry.handle)
+    current_node, found := resource.get(self.nodes, entry.handle)
     if !found {
       log.errorf(
         "traverse_scene: Node with handle %v not found\n",
