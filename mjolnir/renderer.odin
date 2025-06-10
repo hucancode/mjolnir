@@ -33,11 +33,13 @@ SceneUniform :: struct {
   view:       linalg.Matrix4f32,
   projection: linalg.Matrix4f32,
   time:       f32,
+  padding:    [3]f32,
 }
 
 SceneLightUniform :: struct {
   lights:      [MAX_LIGHTS]SingleLightUniform,
   light_count: u32,
+  padding:     [3]u32,
 }
 
 push_light :: proc(self: ^SceneLightUniform, light: SingleLightUniform) {

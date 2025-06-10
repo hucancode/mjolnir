@@ -9,6 +9,7 @@ MaterialFallbacks :: struct {
   emissive:  linalg.Vector4f32,
   roughness: f32,
   metallic:  f32,
+  padding:   [2]f32, // Padding to align to 16 bytes
 }
 
 Material :: struct {
