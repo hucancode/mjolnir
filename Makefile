@@ -8,14 +8,17 @@ SPV_SHADERS := $(patsubst $(SHADER_DIR)/%/shader.vert,$(SHADER_DIR)/%/vert.spv,$
 COMP_SHADERS := $(shell find $(SHADER_DIR) -name "compute.comp")
 SPV_COMPUTE_SHADERS := $(patsubst $(SHADER_DIR)/%/compute.comp,$(SHADER_DIR)/%/compute.spv,$(COMP_SHADERS))
 
-release: $(SPV_SHADERS) $(SPV_COMPUTE_SHADERS)
+release: shader
 	odin run . -out:bin/main
 
-debug: $(SPV_SHADERS) $(SPV_COMPUTE_SHADERS)
+debug: shader
 	odin run . -out:bin/main-debug -debug
 
-check: $(SPV_SHADERS) $(SPV_COMPUTE_SHADERS)
+check: shader
 	odin check .
+
+shader: $(SPV_SHADERS) $(SPV_COMPUTE_SHADERS)
+	@echo "Shader compilation complete."
 
 test:
 	odin test test -out:bin/test
@@ -35,4 +38,4 @@ $(SHADER_DIR)/%/frag.spv: $(SHADER_DIR)/%/shader.frag
 	@echo "Compiling fragment shader $<..."
 	@glslc "$<" -o "$@"
 
-.PHONY: release debug test check clean
+.PHONY: release debug shader test check clean
