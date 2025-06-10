@@ -196,11 +196,7 @@ test_node_chain_transform :: proc(t: ^testing.T) {
   matrix4_almost_equal(t, actual, expected)
 }
 
-create_scene :: proc(
-  scene: ^mjolnir.Scene,
-  max_node: int,
-  max_depth: int,
-) {
+create_scene :: proc(scene: ^mjolnir.Scene, max_node: int, max_depth: int) {
   if max_depth <= 0 || max_node <= 0 do return
   QueueEntry :: struct {
     handle: resource.Handle,
@@ -211,7 +207,7 @@ create_scene :: proc(
   entry := QueueEntry{scene.root, 0}
   append(&queue, entry)
   n := 0
-  for len(queue) > 0 && n < max_node {
+  for len(queue) > 0 && len(scene.nodes.entries) < max_node {
     current := pop_front(&queue)
     if current.depth < max_depth {
       child_handle, child := mjolnir.spawn_child(scene, current.handle)
@@ -222,8 +218,23 @@ create_scene :: proc(
         linalg.VECTOR3F32_Y_AXIS,
       )
       append(&queue, QueueEntry{child_handle, current.depth + 1})
+    } else {
+      child_handle, child := mjolnir.spawn(scene)
+      geometry.translate(&child.transform, f32(n % 10) * 0.1, 0, 0)
+      geometry.rotate_angle(
+        &child.transform,
+        f32(n) * 0.01,
+        linalg.VECTOR3F32_Y_AXIS,
+      )
+      append(&queue, QueueEntry{child_handle, current.depth + 1})
     }
+    n += 1
   }
+  log.infof(
+    "Generated a scene with %d nodes and max depth %d",
+    len(scene.nodes.entries),
+    max_depth,
+  )
 }
 
 traverse_scene_benchmark :: proc(
@@ -231,8 +242,26 @@ traverse_scene_benchmark :: proc(
   allocator := context.allocator,
 ) -> time.Benchmark_Error {
   scene := cast(^mjolnir.Scene)(raw_data(options.input))
+  // simulate an use case that traverse the scene and count the number of lights and meshes
+  Context :: struct {
+    light_count: u32,
+    mesh_count:  u32,
+  }
+  callback :: proc(node: ^mjolnir.Node, cb_context: rawptr) -> bool {
+    ctx := (^Context)(cb_context)
+    switch inner in node.attachment {
+    case mjolnir.MeshAttachment:
+      ctx.mesh_count += 1
+    case mjolnir.DirectionalLightAttachment,
+         mjolnir.PointLightAttachment,
+         mjolnir.SpotLightAttachment:
+      ctx.light_count += 1
+    }
+    return true
+  }
   for _ in 0 ..< options.rounds {
-    mjolnir.scene_traverse(scene)
+    ctx: Context
+    mjolnir.scene_traverse(scene, &ctx, callback)
     options.processed += size_of(mjolnir.Node) * len(scene.nodes.entries)
   }
   return nil
@@ -249,8 +278,8 @@ scene_cleanup :: proc(
 }
 
 @(test)
-benchmark_deep_hierarchy :: proc(t: ^testing.T) {
-  N :: 100_000
+benchmark_deep_scene_traversal :: proc(t: ^testing.T) {
+  N :: 1000_000
   ROUND :: 5
   options := &time.Benchmark_Options {
     rounds = ROUND,
@@ -259,7 +288,7 @@ benchmark_deep_hierarchy :: proc(t: ^testing.T) {
       options: ^time.Benchmark_Options,
       allocator := context.allocator,
     ) -> time.Benchmark_Error {
-      scene := new(mjolnir.Scene, allocator)
+      scene := new(mjolnir.Scene)
       mjolnir.scene_init(scene)
       create_scene(scene, N, N)
       options.input = slice.bytes_from_ptr(scene, size_of(^mjolnir.Scene))
@@ -270,7 +299,7 @@ benchmark_deep_hierarchy :: proc(t: ^testing.T) {
   }
   err := time.benchmark(options)
   log.infof(
-    "Deep hierarchy benchmark (%d nodes, max depth %d): %v (%.2f MB/s)",
+    "Traversed scene (%d nodes, max depth %d): %v (%.2f MB/s)",
     N,
     N,
     options.duration,
@@ -279,8 +308,8 @@ benchmark_deep_hierarchy :: proc(t: ^testing.T) {
 }
 
 @(test)
-benchmark_flat_hierarchy :: proc(t: ^testing.T) {
-  N :: 100_000
+benchmark_flat_scene_traversal :: proc(t: ^testing.T) {
+  N :: 1000_000
   ROUND :: 5
   options := &time.Benchmark_Options {
     rounds = ROUND,
@@ -289,7 +318,7 @@ benchmark_flat_hierarchy :: proc(t: ^testing.T) {
       options: ^time.Benchmark_Options,
       allocator := context.allocator,
     ) -> time.Benchmark_Error {
-      scene := new(mjolnir.Scene, allocator)
+      scene := new(mjolnir.Scene)
       mjolnir.scene_init(scene)
       create_scene(scene, N, 1)
       options.input = slice.bytes_from_ptr(scene, size_of(^mjolnir.Scene))
@@ -300,7 +329,7 @@ benchmark_flat_hierarchy :: proc(t: ^testing.T) {
   }
   err := time.benchmark(options)
   log.infof(
-    "Flat hierarchy benchmark (%d nodes, depth 1): %v (%.2f MB/s)",
+    "Traversed scene (%d nodes, depth 1): %v (%.2f MB/s)",
     N,
     options.duration,
     options.megabytes_per_second,
@@ -308,9 +337,9 @@ benchmark_flat_hierarchy :: proc(t: ^testing.T) {
 }
 
 @(test)
-benchmark_wide_hierarchy :: proc(t: ^testing.T) {
-  N :: 100_000
-  MAX_DEPTH :: 50
+benchmark_balanced_scene_traversal :: proc(t: ^testing.T) {
+  N :: 1000_000
+  MAX_DEPTH :: 1000
   ROUND :: 5
   options := &time.Benchmark_Options {
     rounds = ROUND,
@@ -319,7 +348,7 @@ benchmark_wide_hierarchy :: proc(t: ^testing.T) {
       options: ^time.Benchmark_Options,
       allocator := context.allocator,
     ) -> time.Benchmark_Error {
-      scene := new(mjolnir.Scene, allocator)
+      scene := new(mjolnir.Scene)
       mjolnir.scene_init(scene)
       create_scene(scene, N, MAX_DEPTH)
       options.input = slice.bytes_from_ptr(scene, size_of(^mjolnir.Scene))
@@ -330,7 +359,7 @@ benchmark_wide_hierarchy :: proc(t: ^testing.T) {
   }
   err := time.benchmark(options)
   log.infof(
-    "Wide hierarchy benchmark (%d nodes, max depth %d): %v (%.2f MB/s)",
+    "Traversed scene (%d nodes, max depth %d): %v (%.2f MB/s)",
     N,
     MAX_DEPTH,
     options.duration,
