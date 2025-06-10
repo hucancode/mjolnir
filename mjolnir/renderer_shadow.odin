@@ -9,9 +9,13 @@ import vk "vendor:vulkan"
 
 SHADER_SHADOW_VERT :: #load("shader/shadow/vert.spv")
 
-SHADOW_FEATURE_SKINNING :: 1 << 0
-SHADOW_SHADER_OPTION_COUNT :: 1
-SHADOW_SHADER_VARIANT_COUNT :: 1 << SHADOW_SHADER_OPTION_COUNT
+ShadowShaderFeatures :: enum {
+  SKINNING = 0,
+}
+ShadowShaderFeatureSet :: bit_set[ShadowShaderFeatures;u32]
+
+SHADOW_SHADER_OPTION_COUNT: u32 : len(ShadowShaderFeatures)
+SHADOW_SHADER_VARIANT_COUNT: u32 : 1 << SHADOW_SHADER_OPTION_COUNT
 
 ShadowShaderConfig :: struct {
   is_skinned: b32,
@@ -108,37 +112,38 @@ renderer_shadow_init :: proc(
   entries: [SHADOW_SHADER_VARIANT_COUNT][SHADOW_SHADER_OPTION_COUNT]vk.SpecializationMapEntry
   spec_infos: [SHADOW_SHADER_VARIANT_COUNT]vk.SpecializationInfo
   shader_stages: [SHADOW_SHADER_VARIANT_COUNT][1]vk.PipelineShaderStageCreateInfo
-  for features in 0 ..< SHADOW_SHADER_VARIANT_COUNT {
-    configs[features] = ShadowShaderConfig {
-      is_skinned = (features & SHADOW_FEATURE_SKINNING) != 0,
+  for mask in 0 ..< SHADOW_SHADER_VARIANT_COUNT {
+    features := transmute(ShadowShaderFeatureSet)mask
+    configs[mask] = ShadowShaderConfig {
+      is_skinned = .SKINNING in features,
     }
-    entries[features] = [SHADOW_SHADER_OPTION_COUNT]vk.SpecializationMapEntry {
+    entries[mask] = [SHADOW_SHADER_OPTION_COUNT]vk.SpecializationMapEntry {
       {
         constantID = 0,
         offset = u32(offset_of(ShadowShaderConfig, is_skinned)),
         size = size_of(b32),
       },
     }
-    spec_infos[features] = {
-      mapEntryCount = len(entries[features]),
-      pMapEntries   = raw_data(entries[features][:]),
+    spec_infos[mask] = {
+      mapEntryCount = len(entries[mask]),
+      pMapEntries   = raw_data(entries[mask][:]),
       dataSize      = size_of(ShadowShaderConfig),
-      pData         = &configs[features],
+      pData         = &configs[mask],
     }
-    shader_stages[features] = [1]vk.PipelineShaderStageCreateInfo {
+    shader_stages[mask] = [1]vk.PipelineShaderStageCreateInfo {
       {
         sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
         stage = {.VERTEX},
         module = vert_module,
         pName = "main",
-        pSpecializationInfo = &spec_infos[features],
+        pSpecializationInfo = &spec_infos[mask],
       },
     }
-    pipeline_infos[features] = {
+    pipeline_infos[mask] = {
       sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
       pNext               = &rendering_info_khr,
-      stageCount          = len(shader_stages[features]),
-      pStages             = raw_data(shader_stages[features][:]),
+      stageCount          = len(shader_stages[mask]),
+      pStages             = raw_data(shader_stages[mask][:]),
       pVertexInputState   = &vertex_input_info,
       pInputAssemblyState = &input_assembly,
       pViewportState      = &viewport_state,
@@ -484,11 +489,7 @@ render_single_shadow :: proc(node: ^Node, cb_context: rawptr) -> bool {
     if material == nil {
       return true
     }
-    features: ShaderFeatureSet
-    pipeline := renderer_shadow_get_pipeline(
-      &ctx.engine.renderer.shadow,
-      features,
-    )
+    pipeline: vk.Pipeline
     layout := ctx.engine.renderer.shadow.pipeline_layout
     descriptor_sets: []vk.DescriptorSet
     if mesh_has_skin {
@@ -501,6 +502,10 @@ render_single_shadow :: proc(node: ^Node, cb_context: rawptr) -> bool {
         material.skinning_descriptor_sets[frame], // set 1
       }
     } else {
+      pipeline = renderer_shadow_get_pipeline(
+        &ctx.engine.renderer.shadow,
+        {},
+      )
       descriptor_sets = {
         renderer_get_camera_descriptor_set(&ctx.engine.renderer), // set 0
       }
@@ -566,7 +571,7 @@ render_single_shadow :: proc(node: ^Node, cb_context: rawptr) -> bool {
 
 renderer_shadow_get_pipeline :: proc(
   self: ^RendererShadow,
-  features: ShaderFeatureSet,
+  features: ShadowShaderFeatureSet,
 ) -> vk.Pipeline {
   return self.pipelines[transmute(u32)features]
 }
