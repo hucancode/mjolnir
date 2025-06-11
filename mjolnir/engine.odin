@@ -96,12 +96,12 @@ Engine :: struct {
 g_context: runtime.Context
 
 init :: proc(
-  engine: ^Engine,
+  self: ^Engine,
   width: u32,
   height: u32,
   title: string,
 ) -> vk.Result {
-  context.user_ptr = engine
+  context.user_ptr = self
   g_context = context
 
   // glfw.SetErrorCallback(glfw_error_callback)
@@ -114,34 +114,49 @@ init :: proc(
     return .ERROR_INITIALIZATION_FAILED
   }
   glfw.WindowHint(glfw.CLIENT_API, glfw.NO_API)
-  engine.window = glfw.CreateWindow(
+  self.window = glfw.CreateWindow(
     c.int(width),
     c.int(height),
     strings.clone_to_cstring(title),
     nil,
     nil,
   )
-  if engine.window == nil {
+  if self.window == nil {
     log.errorf("Failed to create GLFW window")
     return .ERROR_INITIALIZATION_FAILED
   }
-  log.infof("Window created %v\n", engine.window)
-  vulkan_context_init(engine.window) or_return
+  log.infof("Window created %v\n", self.window)
+  vulkan_context_init(self.window) or_return
   factory_init()
-  engine.start_timestamp = time.now()
-  engine.last_frame_timestamp = engine.start_timestamp
-  engine.last_update_timestamp = engine.start_timestamp
-  scene_init(&engine.scene)
-  build_renderer(engine) or_return
+  self.start_timestamp = time.now()
+  self.last_frame_timestamp = self.start_timestamp
+  self.last_update_timestamp = self.start_timestamp
+  scene_init(&self.scene)
+  swapchain_init(&self.swapchain, self.window) or_return
+  renderer_main_init(
+    &self.main,
+    self.swapchain.extent.width,
+    self.swapchain.extent.height,
+    self.swapchain.format.format,
+    .D32_SFLOAT,
+  ) or_return
+  renderer_particle_init(&self.particle) or_return
+  renderer_shadow_init(&self.shadow, .D32_SFLOAT) or_return
+  renderer_postprocess_init(
+    &self.postprocess,
+    self.swapchain.format.format,
+    self.swapchain.extent.width,
+    self.swapchain.extent.height,
+  ) or_return
   ui_init(
-    &engine.ui,
-    engine,
-    engine.swapchain.format.format,
-    engine.swapchain.extent.width,
-    engine.swapchain.extent.height,
+    &self.ui,
+    self,
+    self.swapchain.format.format,
+    self.swapchain.extent.width,
+    self.swapchain.extent.height,
   )
   glfw.SetScrollCallback(
-    engine.window,
+    self.window,
     proc "c" (window: glfw.WindowHandle, xoffset, yoffset: f64) {
       context = g_context
       engine := cast(^Engine)context.user_ptr
@@ -155,7 +170,7 @@ init :: proc(
     },
   )
   glfw.SetKeyCallback(
-    engine.window,
+    self.window,
     proc "c" (window: glfw.WindowHandle, key, scancode, action, mods: c.int) {
       context = g_context
       engine := cast(^Engine)context.user_ptr
@@ -164,9 +179,8 @@ init :: proc(
       }
     },
   )
-
   glfw.SetMouseButtonCallback(
-    engine.window,
+    self.window,
     proc "c" (window: glfw.WindowHandle, button, action, mods: c.int) {
       context = g_context
       engine := cast(^Engine)context.user_ptr
@@ -175,70 +189,29 @@ init :: proc(
       }
     },
   )
-  if engine.setup_proc != nil {
-    engine.setup_proc(engine)
+  if self.setup_proc != nil {
+    self.setup_proc(self)
   }
   log.infof("Engine initialized")
   return .SUCCESS
 }
 
-build_renderer :: proc(engine: ^Engine) -> vk.Result {
-  swapchain_init(&engine.swapchain, engine.window) or_return
-  renderer_main_init(
-    &engine.main,
-    engine.swapchain.extent.width,
-    engine.swapchain.extent.height,
-    engine.swapchain.format.format,
-    .D32_SFLOAT,
-  ) or_return
-  renderer_particle_init(&engine.particle) or_return
-  renderer_shadow_init(&engine.shadow, .D32_SFLOAT) or_return
-  renderer_postprocess_init(
-    &engine.postprocess,
-    engine.swapchain.format.format,
-    engine.swapchain.extent.width,
-    engine.swapchain.extent.height,
-  ) or_return
-  return .SUCCESS
+get_delta_time :: proc(self: ^Engine) -> f32 {
+  return f32(time.duration_seconds(time.since(self.last_update_timestamp)))
 }
 
-renderer_get_command_buffer :: proc(self: ^Engine) -> vk.CommandBuffer {
-  if self == nil {
-    return vk.CommandBuffer{}
-  }
-  if self.main.frame_index >= len(self.main.frames) {
-    log.errorf(
-      "Error: Invalid frame index",
-      self.main.frame_index,
-      "vs",
-      len(self.main.frames),
-    )
-    return vk.CommandBuffer{}
-  }
-  cmd_buffer := self.main.frames[self.main.frame_index].command_buffer
-  if cmd_buffer == nil {
-    log.errorf("Error: Command buffer is nil for frame", self.main.frame_index)
-    return vk.CommandBuffer{}
-  }
-  return cmd_buffer
+time_since_app_start :: proc(self: ^Engine) -> f32 {
+  return f32(time.duration_seconds(time.since(self.start_timestamp)))
 }
 
-get_delta_time :: proc(engine: ^Engine) -> f32 {
-  return f32(time.duration_seconds(time.since(engine.last_update_timestamp)))
-}
-
-time_since_app_start :: proc(engine: ^Engine) -> f32 {
-  return f32(time.duration_seconds(time.since(engine.start_timestamp)))
-}
-
-update :: proc(engine: ^Engine) -> bool {
+update :: proc(self: ^Engine) -> bool {
   glfw.PollEvents()
-  delta_time := get_delta_time(engine)
+  delta_time := get_delta_time(self)
   if delta_time < UPDATE_FRAME_TIME {
     return false
   }
-  scene_traverse(&engine.scene)
-  for &entry in engine.scene.nodes.entries {
+  scene_traverse(&self.scene)
+  for &entry in self.scene.nodes.entries {
     if !entry.active {
       continue
     }
@@ -263,56 +236,56 @@ update :: proc(engine: ^Engine) -> bool {
     if !mesh_has_skin {
       continue
     }
-    frame := engine.main.frame_index
+    frame := self.main.frame_index
     buffer := skinning.bone_buffers[frame]
     bone_matrices := slice.from_ptr(buffer.mapped, len(mesh_skin.bones))
     sample_clip(mesh, anim_inst.clip_handle, anim_inst.time, bone_matrices)
     //animation.pose_flush(&skinning.pose, buffer.mapped)
   }
-  update_emitters(&engine.particle, delta_time)
-  last_mouse_pos := engine.input.mouse_pos
-  engine.input.mouse_pos.x, engine.input.mouse_pos.y = glfw.GetCursorPos(
-    engine.window,
+  update_emitters(&self.particle, delta_time)
+  last_mouse_pos := self.input.mouse_pos
+  self.input.mouse_pos.x, self.input.mouse_pos.y = glfw.GetCursorPos(
+    self.window,
   )
-  delta := engine.input.mouse_pos - last_mouse_pos
-  for i in 0 ..< len(engine.input.mouse_buttons) {
-    is_pressed := glfw.GetMouseButton(engine.window, c.int(i)) == glfw.PRESS
-    engine.input.mouse_holding[i] = is_pressed && engine.input.mouse_buttons[i]
-    engine.input.mouse_buttons[i] = is_pressed
+  delta := self.input.mouse_pos - last_mouse_pos
+  for i in 0 ..< len(self.input.mouse_buttons) {
+    is_pressed := glfw.GetMouseButton(self.window, c.int(i)) == glfw.PRESS
+    self.input.mouse_holding[i] = is_pressed && self.input.mouse_buttons[i]
+    self.input.mouse_buttons[i] = is_pressed
   }
-  for k in 0 ..< len(engine.input.keys) {
-    is_pressed := glfw.GetKey(engine.window, c.int(k)) == glfw.PRESS
-    engine.input.key_holding[k] = is_pressed && engine.input.keys[k]
-    engine.input.keys[k] = is_pressed
+  for k in 0 ..< len(self.input.keys) {
+    is_pressed := glfw.GetKey(self.window, c.int(k)) == glfw.PRESS
+    self.input.key_holding[k] = is_pressed && self.input.keys[k]
+    self.input.keys[k] = is_pressed
   }
-  if engine.input.mouse_holding[glfw.MOUSE_BUTTON_1] {
+  if self.input.mouse_holding[glfw.MOUSE_BUTTON_1] {
     geometry.camera_orbit_rotate(
-      &engine.scene.camera,
+      &self.scene.camera,
       f32(delta.x * MOUSE_SENSITIVITY_X),
       f32(delta.y * MOUSE_SENSITIVITY_Y),
     )
   }
-  if engine.mouse_move_proc != nil {
-    engine.mouse_move_proc(engine, engine.input.mouse_pos, delta)
+  if self.mouse_move_proc != nil {
+    self.mouse_move_proc(self, self.input.mouse_pos, delta)
   }
-  if engine.update_proc != nil {
-    engine.update_proc(engine, delta_time)
+  if self.update_proc != nil {
+    self.update_proc(self, delta_time)
   }
-  engine.last_update_timestamp = time.now()
+  self.last_update_timestamp = time.now()
   return true
 }
 
-deinit :: proc(engine: ^Engine) {
+deinit :: proc(self: ^Engine) {
   vk.DeviceWaitIdle(g_device)
-  renderer_ui_deinit(&engine.ui)
-  scene_deinit(&engine.scene)
-  renderer_main_deinit(&engine.main)
-  renderer_shadow_deinit(&engine.shadow)
-  renderer_postprocess_deinit(&engine.postprocess)
-  renderer_particle_deinit(&engine.particle)
-  swapchain_deinit(&engine.swapchain)
+  renderer_ui_deinit(&self.ui)
+  scene_deinit(&self.scene)
+  renderer_main_deinit(&self.main)
+  renderer_shadow_deinit(&self.shadow)
+  renderer_postprocess_deinit(&self.postprocess)
+  renderer_particle_deinit(&self.particle)
+  swapchain_deinit(&self.swapchain)
   vulkan_context_deinit()
-  glfw.DestroyWindow(engine.window)
+  glfw.DestroyWindow(self.window)
   glfw.Terminate()
   log.infof("Engine deinitialized")
 }
@@ -366,21 +339,21 @@ prepare_light :: proc(node: ^Node, cb_context: rawptr) -> bool {
   return true
 }
 
-render :: proc(engine: ^Engine) -> vk.Result {
-  current_fence := renderer_get_in_flight_fence(&engine.main)
+render :: proc(self: ^Engine) -> vk.Result {
+  current_fence := renderer_get_in_flight_fence(&self.main)
   log.debug("waiting for fence...")
   vk.WaitForFences(g_device, 1, &current_fence, true, math.max(u64)) or_return
   current_image_available_semaphore := renderer_get_image_available_semaphore(
-    &engine.main,
+    &self.main,
   )
   image_idx := swapchain_acquire_next_image(
-    &engine.swapchain,
+    &self.swapchain,
     current_image_available_semaphore,
   ) or_return
   log.debug("reseting fence...")
   vk.ResetFences(g_device, 1, &current_fence) or_return
-  mu.begin(&engine.ui.ctx)
-  command_buffer := renderer_get_command_buffer(engine)
+  mu.begin(&self.ui.ctx)
+  command_buffer := renderer_get_command_buffer(&self.main)
   vk.ResetCommandBuffer(command_buffer, {}) or_return
   begin_info := vk.CommandBufferBeginInfo {
     sType = .COMMAND_BUFFER_BEGIN_INFO,
@@ -388,69 +361,85 @@ render :: proc(engine: ^Engine) -> vk.Result {
   }
   log.debug("begining command...")
   vk.BeginCommandBuffer(command_buffer, &begin_info) or_return
-  elapsed_seconds := time.duration_seconds(time.since(engine.start_timestamp))
+  // Run particle compute pass before starting rendering
+  compute_particles(&self.particle, command_buffer)
+  elapsed_seconds := time.duration_seconds(time.since(self.start_timestamp))
   scene_uniform := SceneUniform {
-    view       = geometry.calculate_view_matrix(engine.scene.camera),
-    projection = geometry.calculate_projection_matrix(engine.scene.camera),
+    view       = geometry.calculate_view_matrix(self.scene.camera),
+    projection = geometry.calculate_projection_matrix(self.scene.camera),
     time       = f32(elapsed_seconds),
   }
   light_uniform: SceneLightUniform
-  camera_frustum := geometry.camera_make_frustum(engine.scene.camera)
+  camera_frustum := geometry.camera_make_frustum(self.scene.camera)
   collect_ctx := CollectLightsContext {
-    engine        = engine,
+    engine        = self,
     light_uniform = &light_uniform,
   }
-  if !scene_traverse_linear(&engine.scene, &collect_ctx, prepare_light) {
+  if !scene_traverse_linear(&self.scene, &collect_ctx, prepare_light) {
     log.errorf("[RENDER] Error during light collection")
   }
   log.debug("============ rendering shadow pass...============ ")
-  render_shadow_pass(engine, &light_uniform, command_buffer) or_return
+  render_shadow_pass(self, &light_uniform, command_buffer) or_return
   log.debug("============ rendering main pass... =============")
   prepare_image_for_render(
     command_buffer,
-    renderer_get_main_pass_image(&engine.main),
+    renderer_get_main_pass_image(&self.main),
   )
   render_main_pass(
-    engine,
+    &self.main,
     command_buffer,
     camera_frustum,
-    engine.swapchain.extent,
+    self.swapchain.extent,
   ) or_return
-  data_buffer_write(renderer_get_camera_uniform(&engine.main), &scene_uniform)
-  data_buffer_write(renderer_get_light_uniform(&engine.main), &light_uniform)
-  render_particles(&engine.particle, engine.scene.camera, command_buffer)
-  if mu.window(&engine.ui.ctx, "Inspector", {40, 40, 300, 150}, {.NO_CLOSE}) {
+  rendered_count: u32 = 0
+  render_meshes_ctx := RenderMeshesContext {
+    engine         = self,
+    command_buffer = command_buffer,
+    camera_frustum = camera_frustum,
+    rendered_count = &rendered_count,
+  }
+  if !scene_traverse_linear(
+    &self.scene,
+    &render_meshes_ctx,
+    render_single_node,
+  ) {
+    log.errorf("[RENDER] Error during scene mesh rendering")
+  }
+  data_buffer_write(renderer_get_camera_uniform(&self.main), &scene_uniform)
+  data_buffer_write(renderer_get_light_uniform(&self.main), &light_uniform)
+  render_particles(&self.particle, self.scene.camera, command_buffer)
+  if mu.window(&self.ui.ctx, "Inspector", {40, 40, 300, 150}, {.NO_CLOSE}) {
     mu.label(
-      &engine.ui.ctx,
+      &self.ui.ctx,
       fmt.tprintf(
         "Objects %d",
-        len(engine.scene.nodes.entries) - len(engine.scene.nodes.free_indices),
+        len(self.scene.nodes.entries) - len(self.scene.nodes.free_indices),
       ),
     )
   }
-  if engine.render2d_proc != nil {
-    engine.render2d_proc(engine, &engine.ui.ctx)
+  if self.render2d_proc != nil {
+    self.render2d_proc(self, &self.ui.ctx)
   }
-  mu.end(&engine.ui.ctx)
-  ui_render(&engine.ui, command_buffer)
+  mu.end(&self.ui.ctx)
+  ui_render(&self.ui, command_buffer)
   vk.CmdEndRenderingKHR(command_buffer)
   prepare_image_for_shader_read(
     command_buffer,
-    renderer_get_main_pass_image(&engine.main),
+    renderer_get_main_pass_image(&self.main),
   )
-  prepare_image_for_render(command_buffer, engine.swapchain.images[image_idx])
+  prepare_image_for_render(command_buffer, self.swapchain.images[image_idx])
   log.debug("============ rendering post processes... =============")
   render_postprocess_stack(
-    &engine.postprocess,
+    &self.postprocess,
     command_buffer,
-    renderer_get_main_pass_view(&engine.main),
-    engine.swapchain.views[image_idx],
-    engine.swapchain.extent,
+    renderer_get_main_pass_view(&self.main),
+    self.swapchain.views[image_idx],
+    self.swapchain.extent,
   )
-  prepare_image_for_present(command_buffer, engine.swapchain.images[image_idx])
+  prepare_image_for_present(command_buffer, self.swapchain.images[image_idx])
   vk.EndCommandBuffer(command_buffer) or_return
   current_render_finished_semaphore := renderer_get_render_finished_semaphore(
-    &engine.main,
+    &self.main,
   )
   wait_stage_mask: vk.PipelineStageFlags = {.COLOR_ATTACHMENT_OUTPUT}
   submit_info := vk.SubmitInfo {
@@ -466,43 +455,45 @@ render :: proc(engine: ^Engine) -> vk.Result {
   log.debug("============ submitting queue... =============")
   vk.QueueSubmit(g_graphics_queue, 1, &submit_info, current_fence) or_return
   present_result := swapchain_present(
-    &engine.swapchain,
+    &self.swapchain,
     &current_render_finished_semaphore,
     image_idx,
   )
   if present_result != .SUCCESS {
     return present_result
   }
+  self.main.frame_index =
+    (self.main.frame_index + 1) % MAX_FRAMES_IN_FLIGHT
   return .SUCCESS
 }
 
-run :: proc(engine: ^Engine, width: u32, height: u32, title: string) {
-  if init(engine, width, height, title) != .SUCCESS {
+run :: proc(self: ^Engine, width: u32, height: u32, title: string) {
+  if init(self, width, height, title) != .SUCCESS {
     return
   }
-  defer deinit(engine)
-  for !glfw.WindowShouldClose(engine.window) {
-    update(engine)
-    if time.duration_milliseconds(time.since(engine.last_frame_timestamp)) <
+  defer deinit(self)
+  for !glfw.WindowShouldClose(self.window) {
+    update(self)
+    if time.duration_milliseconds(time.since(self.last_frame_timestamp)) <
        FRAME_TIME_MILIS {
       continue
     }
-    res := render(engine)
+    res := render(self)
     if res == .ERROR_OUT_OF_DATE_KHR || res == .SUBOPTIMAL_KHR {
-      recreate_swapchain(engine) or_continue
+      recreate_swapchain(self) or_continue
     }
     if res != .SUCCESS {
       log.errorf("Error during rendering", res)
-      engine.render_error_count += 1
-      if engine.render_error_count >=
+      self.render_error_count += 1
+      if self.render_error_count >=
          MAX_CONSECUTIVE_RENDER_ERROR_COUNT_ALLOWED {
         log.errorf("Too many render errors, exiting...")
         break
       }
     } else {
-      engine.render_error_count = 0
+      self.render_error_count = 0
     }
-    engine.last_frame_timestamp = time.now()
+    self.last_frame_timestamp = time.now()
     // break
   }
 }

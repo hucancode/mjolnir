@@ -593,38 +593,14 @@ renderer_main_get_pipeline :: proc(
 }
 
 render_main_pass :: proc(
-  engine: ^Engine,
+  self: ^RendererMain,
   command_buffer: vk.CommandBuffer,
   camera_frustum: geometry.Frustum,
   swapchain_extent: vk.Extent2D,
 ) -> vk.Result {
-  // Run particle compute pass before starting rendering
-  compute_particles(&engine.particle, command_buffer)
-  // Barrier to ensure compute shader writes are visible to the vertex shader
-  particle_buffer_barrier := vk.BufferMemoryBarrier {
-    sType               = .BUFFER_MEMORY_BARRIER,
-    srcAccessMask       = {.SHADER_WRITE},
-    dstAccessMask       = {.VERTEX_ATTRIBUTE_READ},
-    srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-    dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-    buffer              = engine.particle.particle_buffer.buffer,
-    size                = vk.DeviceSize(vk.WHOLE_SIZE),
-  }
-  vk.CmdPipelineBarrier(
-    command_buffer,
-    {.COMPUTE_SHADER}, // srcStageMask
-    {.VERTEX_INPUT}, // dstStageMask
-    {}, // dependencyFlags
-    0,
-    nil, // memoryBarrierCount, pMemoryBarriers
-    1,
-    &particle_buffer_barrier, // bufferMemoryBarrierCount, pBufferMemoryBarriers
-    0, // imageMemoryBarrierCount, pImageMemoryBarriers
-    nil,
-  )
   color_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
-    imageView = renderer_get_main_pass_view(&engine.main),
+    imageView = renderer_get_main_pass_view(self),
     imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
     loadOp = .CLEAR,
     storeOp = .STORE,
@@ -632,7 +608,7 @@ render_main_pass :: proc(
   }
   depth_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
-    imageView = engine.main.depth_buffer.view,
+    imageView = self.depth_buffer.view,
     imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
     loadOp = .CLEAR,
     storeOp = .STORE,
@@ -660,22 +636,6 @@ render_main_pass :: proc(
   }
   vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
   vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
-  rendered_count: u32 = 0
-  render_meshes_ctx := RenderMeshesContext {
-    engine         = engine,
-    command_buffer = command_buffer,
-    camera_frustum = camera_frustum,
-    rendered_count = &rendered_count,
-  }
-  if !scene_traverse_linear(
-    &engine.scene,
-    &render_meshes_ctx,
-    render_single_node,
-  ) {
-    log.errorf("[RENDER] Error during scene mesh rendering")
-  }
-  engine.main.frame_index =
-    (engine.main.frame_index + 1) % MAX_FRAMES_IN_FLIGHT
   return .SUCCESS
 }
 
@@ -772,7 +732,7 @@ render_to_texture :: proc(
   extent: vk.Extent2D,
   camera: Maybe(geometry.Camera) = nil,
 ) -> vk.Result {
-  command_buffer := renderer_get_command_buffer(engine)
+  command_buffer := renderer_get_command_buffer(&engine.main)
   render_camera := camera.? or_else engine.scene.camera
   scene_uniform := SceneUniform {
     view       = geometry.calculate_view_matrix(render_camera),
@@ -1200,4 +1160,25 @@ renderer_get_render_finished_semaphore :: proc(
   self: ^RendererMain,
 ) -> vk.Semaphore {
   return self.frames[self.frame_index].render_finished_semaphore
+}
+
+renderer_get_command_buffer :: proc(self: ^RendererMain) -> vk.CommandBuffer {
+  if self == nil {
+    return vk.CommandBuffer{}
+  }
+  if self.frame_index >= len(self.frames) {
+    log.errorf(
+      "Error: Invalid frame index",
+      self.frame_index,
+      "vs",
+      len(self.frames),
+    )
+    return vk.CommandBuffer{}
+  }
+  cmd_buffer := self.frames[self.frame_index].command_buffer
+  if cmd_buffer == nil {
+    log.errorf("Error: Command buffer is nil for frame", self.frame_index)
+    return vk.CommandBuffer{}
+  }
+  return cmd_buffer
 }

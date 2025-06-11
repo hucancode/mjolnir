@@ -115,6 +115,27 @@ render_particles :: proc(
   //   "binding particle render pipeline",
   //   engine.particle.pipeline,
   // )
+  barrier := vk.BufferMemoryBarrier {
+    sType               = .BUFFER_MEMORY_BARRIER,
+    srcAccessMask       = {.SHADER_WRITE},
+    dstAccessMask       = {.VERTEX_ATTRIBUTE_READ},
+    srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    buffer              = self.particle_buffer.buffer,
+    size                = vk.DeviceSize(vk.WHOLE_SIZE),
+  }
+  vk.CmdPipelineBarrier(
+    command_buffer,
+    {.COMPUTE_SHADER}, // srcStageMask
+    {.VERTEX_INPUT}, // dstStageMask
+    {}, // dependencyFlags
+    0,
+    nil, // memoryBarrierCount, pMemoryBarriers
+    1,
+    &barrier, // bufferMemoryBarrierCount, pBufferMemoryBarriers
+    0, // imageMemoryBarrierCount, pImageMemoryBarriers
+    nil,
+  )
   vk.CmdBindPipeline(command_buffer, .GRAPHICS, self.render_pipeline)
   vk.CmdBindDescriptorSets(
     command_buffer,
