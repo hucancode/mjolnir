@@ -76,6 +76,7 @@ frame_init :: proc(
       &self.shadow_maps[i],
       SHADOW_MAP_SIZE,
       SHADOW_MAP_SIZE,
+      .D32_SFLOAT,
       {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
     ) or_return
     cube_depth_texture_init(
@@ -99,7 +100,7 @@ frame_init :: proc(
   for i in 0 ..< MAX_SHADOW_MAPS {
     shadow_map_image_infos[i] = {
       sampler     = self.shadow_maps[i].sampler,
-      imageView   = self.shadow_maps[i].buffer.view,
+      imageView   = self.shadow_maps[i].view,
       imageLayout = .SHADER_READ_ONLY_OPTIMAL,
     }
   }

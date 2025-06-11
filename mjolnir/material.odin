@@ -96,7 +96,7 @@ material_update_textures :: proc(
         descriptorCount = 1,
         pImageInfo = &{
           sampler = albedo.sampler,
-          imageView = albedo.buffer.view,
+          imageView = albedo.view,
           imageLayout = .SHADER_READ_ONLY_OPTIMAL,
         },
       },
@@ -113,7 +113,7 @@ material_update_textures :: proc(
         descriptorCount = 1,
         pImageInfo = &{
           sampler = metallic_roughness.sampler,
-          imageView = metallic_roughness.buffer.view,
+          imageView = metallic_roughness.view,
           imageLayout = .SHADER_READ_ONLY_OPTIMAL,
         },
       },
@@ -130,7 +130,7 @@ material_update_textures :: proc(
         descriptorCount = 1,
         pImageInfo = &{
           sampler = normal.sampler,
-          imageView = normal.buffer.view,
+          imageView = normal.view,
           imageLayout = .SHADER_READ_ONLY_OPTIMAL,
         },
       },
@@ -147,7 +147,7 @@ material_update_textures :: proc(
         descriptorCount = 1,
         pImageInfo = &{
           sampler = displacement.sampler,
-          imageView = displacement.buffer.view,
+          imageView = displacement.view,
           imageLayout = .SHADER_READ_ONLY_OPTIMAL,
         },
       },
@@ -164,7 +164,7 @@ material_update_textures :: proc(
         descriptorCount = 1,
         pImageInfo = &{
           sampler = emissive.sampler,
-          imageView = emissive.buffer.view,
+          imageView = emissive.view,
           imageLayout = .SHADER_READ_ONLY_OPTIMAL,
         },
       },

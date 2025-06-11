@@ -388,8 +388,6 @@ postprocess_create_sampler :: proc(self: ^RendererPostProcess) -> vk.Result {
     addressModeV = .CLAMP_TO_EDGE,
     addressModeW = .CLAMP_TO_EDGE,
     mipmapMode   = .LINEAR,
-    minLod       = 0.0,
-    maxLod       = 0.0,
     borderColor  = .FLOAT_OPAQUE_WHITE,
   }
   vk.CreateSampler(g_device, &sampler_info, nil, &self.sampler) or_return

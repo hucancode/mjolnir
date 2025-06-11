@@ -803,7 +803,7 @@ renderer_main_init :: proc(
     target_color_format,
     target_depth_format,
   ) or_return
-  self.depth_buffer = create_depth_image(width, height) or_return
+  depth_image_init(&self.depth_buffer, width, height, target_depth_format) or_return
   self.environment_map = new(Texture)
   read_texture(
     self.environment_map,
@@ -832,7 +832,7 @@ renderer_main_init :: proc(
       descriptorCount = 1,
       pImageInfo = &{
         sampler = self.environment_map.sampler,
-        imageView = self.environment_map.buffer.view,
+        imageView = self.environment_map.view,
         imageLayout = .SHADER_READ_ONLY_OPTIMAL,
       },
     },
@@ -844,7 +844,7 @@ renderer_main_init :: proc(
       descriptorCount = 1,
       pImageInfo = &{
         sampler = self.brdf_lut.sampler,
-        imageView = self.brdf_lut.buffer.view,
+        imageView = self.brdf_lut.view,
         imageLayout = .SHADER_READ_ONLY_OPTIMAL,
       },
     },

@@ -191,7 +191,7 @@ render_shadow_pass :: proc(
         newLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
         srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
         dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-        image = cube_shadow.buffer.image,
+        image = cube_shadow.image,
         subresourceRange = {
           aspectMask = {.DEPTH},
           baseMipLevel = 0,
@@ -207,7 +207,7 @@ render_shadow_pass :: proc(
         newLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
         srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
         dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-        image = shadow_map_texture.buffer.image,
+        image = shadow_map_texture.image,
         subresourceRange = {
           aspectMask = {.DEPTH},
           baseMipLevel = 0,
@@ -270,7 +270,7 @@ render_shadow_pass :: proc(
         )
         face_depth_attachment := vk.RenderingAttachmentInfoKHR {
           sType = .RENDERING_ATTACHMENT_INFO_KHR,
-          imageView = cube_shadow.views[face],
+          imageView = cube_shadow.face_views[face],
           imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
           loadOp = .CLEAR,
           storeOp = .STORE,
@@ -280,23 +280,23 @@ render_shadow_pass :: proc(
           sType = .RENDERING_INFO_KHR,
           renderArea = {
             extent = {
-              width = cube_shadow.buffer.width,
-              height = cube_shadow.buffer.height,
+              width = cube_shadow.width,
+              height = cube_shadow.height,
             },
           },
           layerCount = 1,
           pDepthAttachment = &face_depth_attachment,
         }
         viewport := vk.Viewport {
-          width    = f32(cube_shadow.buffer.width),
-          height   = f32(cube_shadow.buffer.height),
+          width    = f32(cube_shadow.width),
+          height   = f32(cube_shadow.height),
           minDepth = 0.0,
           maxDepth = 1.0,
         }
         scissor := vk.Rect2D {
           extent = {
-            width = cube_shadow.buffer.width,
-            height = cube_shadow.buffer.height,
+            width = cube_shadow.width,
+            height = cube_shadow.height,
           },
         }
         shadow_scene_uniform := SceneUniform {
@@ -358,7 +358,7 @@ render_shadow_pass :: proc(
       light.view_proj = proj * view
       depth_attachment := vk.RenderingAttachmentInfoKHR {
         sType = .RENDERING_ATTACHMENT_INFO_KHR,
-        imageView = shadow_map_texture.buffer.view,
+        imageView = shadow_map_texture.view,
         imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
         loadOp = .CLEAR,
         storeOp = .STORE,
@@ -368,8 +368,8 @@ render_shadow_pass :: proc(
         sType = .RENDERING_INFO_KHR,
         renderArea = {
           extent = {
-            width = shadow_map_texture.buffer.width,
-            height = shadow_map_texture.buffer.height,
+            width = shadow_map_texture.width,
+            height = shadow_map_texture.height,
           },
         },
         layerCount = 1,
@@ -386,15 +386,15 @@ render_shadow_pass :: proc(
       )
       vk.CmdBeginRenderingKHR(command_buffer, &render_info_khr)
       viewport := vk.Viewport {
-        width    = f32(shadow_map_texture.buffer.width),
-        height   = f32(shadow_map_texture.buffer.height),
+        width    = f32(shadow_map_texture.width),
+        height   = f32(shadow_map_texture.height),
         minDepth = 0.0,
         maxDepth = 1.0,
       }
       scissor := vk.Rect2D {
         extent = {
-          width = shadow_map_texture.buffer.width,
-          height = shadow_map_texture.buffer.height,
+          width = shadow_map_texture.width,
+          height = shadow_map_texture.height,
         },
       }
       vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
@@ -425,7 +425,7 @@ render_shadow_pass :: proc(
         newLayout = .SHADER_READ_ONLY_OPTIMAL,
         srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
         dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-        image = cube_shadow.buffer.image,
+        image = cube_shadow.image,
         subresourceRange = {
           aspectMask = {.DEPTH},
           baseMipLevel = 0,
@@ -442,7 +442,7 @@ render_shadow_pass :: proc(
         newLayout = .SHADER_READ_ONLY_OPTIMAL,
         srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
         dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-        image = shadow_map_texture.buffer.image,
+        image = shadow_map_texture.image,
         subresourceRange = {
           aspectMask = {.DEPTH},
           baseMipLevel = 0,

@@ -106,7 +106,7 @@ ui_init :: proc(
       descriptorType = .COMBINED_IMAGE_SAMPLER,
       pImageInfo = &{
         sampler = self.atlas.sampler,
-        imageView = self.atlas.buffer.view,
+        imageView = self.atlas.view,
         imageLayout = .SHADER_READ_ONLY_OPTIMAL,
       },
     },

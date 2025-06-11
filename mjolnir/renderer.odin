@@ -119,7 +119,7 @@ renderer_recreate_images :: proc(
 ) -> vk.Result {
   vk.DeviceWaitIdle(g_device)
   image_buffer_deinit(&self.main.depth_buffer)
-  self.main.depth_buffer = create_depth_image(
+  depth_image_init(&self.main.depth_buffer,
     new_extent.width,
     new_extent.height,
   ) or_return

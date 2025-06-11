@@ -28,34 +28,34 @@ image_data_deinit :: proc(img: ^ImageData) {
 }
 
 Texture :: struct {
-  image_data: ImageData,
-  buffer:     ImageBuffer,
-  sampler:    vk.Sampler,
+  using buffer: ImageBuffer,
+  image_data:   ImageData,
+  sampler:      vk.Sampler,
 }
 
 read_texture_data :: proc(self: ^Texture, data: []u8) -> vk.Result {
-  w, h, c_in_file: c.int
+  width, height, channel_in_file: c.int
   actual_channels: c.int = 4
   pixels_ptr := stbi.load_from_memory(
     raw_data(data),
     c.int(len(data)),
-    &w,
-    &h,
-    &c_in_file,
+    &width,
+    &height,
+    &channel_in_file,
     actual_channels,
   )
   if pixels_ptr == nil {
     log.errorf("Failed to load texture from data: %s\n", stbi.failure_reason())
     return .ERROR_UNKNOWN
   }
-  num_bytes := int(w * h * 4)
+  num_bytes := int(width * height * 4)
   self.image_data.pixels = pixels_ptr[:num_bytes]
-  self.image_data.width = int(w)
-  self.image_data.height = int(h)
-  self.image_data.channels_in_file = int(c_in_file)
+  self.image_data.width = int(width)
+  self.image_data.height = int(height)
+  self.image_data.channels_in_file = int(channel_in_file)
   self.image_data.actual_channels = int(actual_channels)
   self.image_data.is_data_owned = true
-  log.infof("loaded image %d x %d", w, h)
+  log.infof("loaded image %d x %d", width, height)
   return .SUCCESS
 }
 
@@ -129,17 +129,17 @@ texture_deinit :: proc(self: ^Texture) {
 }
 
 DepthTexture :: struct {
-  buffer:  ImageBuffer,
-  sampler: vk.Sampler,
+  using buffer: ImageBuffer,
+  sampler:      vk.Sampler,
 }
 
 depth_texture_init :: proc(
   self: ^DepthTexture,
-  width: u32,
-  height: u32,
+  width, height: u32,
+  format: vk.Format = .D32_SFLOAT,
   usage: vk.ImageUsageFlags = {.DEPTH_STENCIL_ATTACHMENT},
 ) -> vk.Result {
-  self.buffer = create_depth_image(width, height, usage) or_return
+  depth_image_init(self, width, height, format, usage) or_return
   sampler_info := vk.SamplerCreateInfo {
     sType         = .SAMPLER_CREATE_INFO,
     magFilter     = .LINEAR,
@@ -165,26 +165,15 @@ depth_texture_deinit :: proc(self: ^DepthTexture) {
   image_buffer_deinit(&self.buffer)
 }
 
-create_depth_image :: proc(
-  width, height: u32,
-  usage: vk.ImageUsageFlags = {.DEPTH_STENCIL_ATTACHMENT},
-) -> (
-  img: ImageBuffer,
-  ret: vk.Result,
-) {
-  depth_image_init(&img, width, height, usage) or_return
-  ret = .SUCCESS
-  return
-}
-
 depth_image_init :: proc(
   img_buffer: ^ImageBuffer,
   width, height: u32,
+  format: vk.Format = .D32_SFLOAT,
   usage: vk.ImageUsageFlags = {.DEPTH_STENCIL_ATTACHMENT},
 ) -> vk.Result {
   img_buffer.width = width
   img_buffer.height = height
-  img_buffer.format = .D32_SFLOAT
+  img_buffer.format = format
   create_info := vk.ImageCreateInfo {
     sType         = .IMAGE_CREATE_INFO,
     imageType     = .D2,
@@ -208,7 +197,6 @@ depth_image_init :: proc(
   if !found {
     return .ERROR_UNKNOWN
   }
-
   alloc_info := vk.MemoryAllocateInfo {
     sType           = .MEMORY_ALLOCATE_INFO,
     allocationSize  = mem_requirements.size,
@@ -259,11 +247,9 @@ depth_image_init :: proc(
 }
 
 CubeDepthTexture :: struct {
-  buffer:  ImageBuffer,
-  views:   [6]vk.ImageView, // One view per face for rendering
-  view:    vk.ImageView, // Single cube view for sampling
-  sampler: vk.Sampler,
-  size:    u32,
+  using buffer: ImageBuffer,
+  face_views:   [6]vk.ImageView, // One view per face for rendering
+  sampler:      vk.Sampler,
 }
 
 cube_depth_texture_init :: proc(
@@ -271,11 +257,9 @@ cube_depth_texture_init :: proc(
   size: u32,
   usage: vk.ImageUsageFlags = {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
 ) -> vk.Result {
-  self.size = size
-  self.buffer.width = size
-  self.buffer.height = size
-  self.buffer.format = .D32_SFLOAT
-
+  self.width = size
+  self.height = size
+  self.format = .D32_SFLOAT
   create_info := vk.ImageCreateInfo {
     sType         = .IMAGE_CREATE_INFO,
     imageType     = .D2,
@@ -290,11 +274,9 @@ cube_depth_texture_init :: proc(
     samples       = {._1},
     flags         = {.CUBE_COMPATIBLE},
   }
-  vk.CreateImage(g_device, &create_info, nil, &self.buffer.image) or_return
-
+  vk.CreateImage(g_device, &create_info, nil, &self.image) or_return
   mem_requirements: vk.MemoryRequirements
-  vk.GetImageMemoryRequirements(g_device, self.buffer.image, &mem_requirements)
-
+  vk.GetImageMemoryRequirements(g_device, self.image, &mem_requirements)
   memory_type_index, found := find_memory_type_index(
     mem_requirements.memoryTypeBits,
     {.DEVICE_LOCAL},
@@ -302,19 +284,18 @@ cube_depth_texture_init :: proc(
   if !found {
     return .ERROR_UNKNOWN
   }
-
   alloc_info := vk.MemoryAllocateInfo {
     sType           = .MEMORY_ALLOCATE_INFO,
     allocationSize  = mem_requirements.size,
     memoryTypeIndex = memory_type_index,
   }
-  vk.AllocateMemory(g_device, &alloc_info, nil, &self.buffer.memory) or_return
-  vk.BindImageMemory(g_device, self.buffer.image, self.buffer.memory, 0)
+  vk.AllocateMemory(g_device, &alloc_info, nil, &self.memory) or_return
+  vk.BindImageMemory(g_device, self.image, self.memory, 0)
   // Create 6 image views (one per face)
   for i in 0 ..< 6 {
     view_info := vk.ImageViewCreateInfo {
       sType = .IMAGE_VIEW_CREATE_INFO,
-      image = self.buffer.image,
+      image = self.image,
       viewType = .D2,
       format = .D32_SFLOAT,
       components = {
@@ -331,11 +312,16 @@ cube_depth_texture_init :: proc(
         layerCount = 1,
       },
     }
-    vk.CreateImageView(g_device, &view_info, nil, &self.views[i]) or_return
+    vk.CreateImageView(
+      g_device,
+      &view_info,
+      nil,
+      &self.face_views[i],
+    ) or_return
   }
   cube_view_info := vk.ImageViewCreateInfo {
     sType = .IMAGE_VIEW_CREATE_INFO,
-    image = self.buffer.image,
+    image = self.image,
     viewType = .CUBE,
     format = .D32_SFLOAT,
     components = {r = .IDENTITY, g = .IDENTITY, b = .IDENTITY, a = .IDENTITY},
@@ -370,7 +356,7 @@ cube_depth_texture_deinit :: proc(self: ^CubeDepthTexture) {
   }
   vk.DestroySampler(g_device, self.sampler, nil)
   self.sampler = 0
-  for &v in self.views {
+  for &v in self.face_views {
     vk.DestroyImageView(g_device, v, nil)
     v = 0
   }

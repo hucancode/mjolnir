@@ -185,7 +185,7 @@ create_hdr_texture_from_path :: proc(
   texture.image_data.channels_in_file = 3
   texture.image_data.actual_channels = 4
   texture_init(texture, .R32G32B32A32_SFLOAT) or_return
-  log.infof("created HDR texture %d x %d -> id %d", w, h, texture.buffer.image)
+  log.infof("created HDR texture %d x %d -> id %d", w, h, texture.image)
   ret = .SUCCESS
   return
 }
@@ -212,7 +212,7 @@ create_texture_from_pixels :: proc(
     "created texture %d x %d -> id %d",
     texture.image_data.width,
     texture.image_data.height,
-    texture.buffer.image,
+    texture.image,
   )
   ret = .SUCCESS
   return
@@ -232,7 +232,7 @@ create_texture_from_data :: proc(
     "created texture %d x %d -> id %d",
     texture.image_data.width,
     texture.image_data.height,
-    texture.buffer.image,
+    texture.image,
   )
   ret = .SUCCESS
   return

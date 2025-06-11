@@ -411,8 +411,8 @@ renderer_particle_init :: proc(self: ^RendererParticle) -> vk.Result {
   texture: Texture
   read_texture(&texture, "assets/black-circle.png") or_return
   texture_init(&texture) or_return
-  self.particle_texture = texture.buffer.image
-  self.particle_view = texture.buffer.view
+  self.particle_texture = texture.image
+  self.particle_view = texture.view
   self.particle_sampler = texture.sampler
   vk.AllocateDescriptorSets(
     g_device,
