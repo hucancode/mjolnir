@@ -22,6 +22,7 @@ ShadowShaderConfig :: struct {
 }
 
 FrameShadow :: struct {
+  camera_uniform: DataBuffer(SceneUniform),
   shadow_camera_descriptor_set: vk.DescriptorSet,
   // Add more shadow-pass specific fields as needed
 }
@@ -240,6 +241,7 @@ render_shadow_pass :: proc(
   command_buffer: vk.CommandBuffer,
 ) -> vk.Result {
   renderer := &engine.renderer
+  frame := engine.renderer.frame_index
   for i := 0; i < int(light_uniform.light_count); i += 1 {
     cube_shadow := renderer_get_cube_shadow_map(renderer, i)
     shadow_map_texture := renderer_get_shadow_map(renderer, i)
@@ -358,9 +360,9 @@ render_shadow_pass :: proc(
           projection = proj,
         }
         data_buffer_write(
-          renderer_get_camera_uniform(renderer),
+          &engine.renderer.shadow.frames[frame].camera_uniform,
           &shadow_scene_uniform,
-          i * 6 + face + 1,
+          i * 6 + face,
         )
         vk.CmdBeginRenderingKHR(command_buffer, &face_render_info)
         vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
@@ -434,9 +436,9 @@ render_shadow_pass :: proc(
         projection = proj,
       }
       data_buffer_write(
-        renderer_get_camera_uniform(renderer),
+        &engine.renderer.shadow.frames[frame].camera_uniform,
         &shadow_scene_uniform,
-        i * 6 + 1,
+        i * 6,
       )
       vk.CmdBeginRenderingKHR(command_buffer, &render_info_khr)
       viewport := vk.Viewport {
@@ -572,8 +574,8 @@ render_single_shadow :: proc(node: ^Node, cb_context: rawptr) -> bool {
     }
     vk.CmdBindPipeline(ctx.command_buffer, .GRAPHICS, pipeline)
     offset_shadow := data_buffer_offset_of(
-      renderer_get_camera_uniform(&ctx.engine.renderer)^,
-      1 + shadow_idx * 6 + shadow_layer,
+      ctx.engine.renderer.shadow.frames[frame].camera_uniform,
+      shadow_idx * 6 + shadow_layer,
     )
     offsets := [1]u32{offset_shadow}
     vk.CmdBindDescriptorSets(
@@ -642,6 +644,11 @@ frame_shadow_init :: proc(
 ) -> (
   res: vk.Result,
 ) {
+  self.camera_uniform = create_host_visible_buffer(
+    SceneUniform,
+    (6 * MAX_LIGHTS),
+    {.UNIFORM_BUFFER},
+  ) or_return
   shadow_layout := shadow_camera_descriptor_set_layout
   vk.AllocateDescriptorSets(
     g_device,
@@ -653,8 +660,21 @@ frame_shadow_init :: proc(
     },
     &self.shadow_camera_descriptor_set,
   ) or_return
-  // Bind camera uniform buffer in shadow pass as needed by shadow renderer
-  // (Assume this will be handled by renderer_shadow or passed in)
+
+  writes := [?]vk.WriteDescriptorSet {
+    {
+      sType = .WRITE_DESCRIPTOR_SET,
+      dstSet = self.shadow_camera_descriptor_set,
+      dstBinding = 0,
+      descriptorType = .UNIFORM_BUFFER_DYNAMIC,
+      descriptorCount = 1,
+      pBufferInfo = &{
+        buffer = self.camera_uniform.buffer,
+        range = vk.DeviceSize(size_of(SceneUniform)),
+      },
+    },
+  }
+  vk.UpdateDescriptorSets(g_device, len(writes), raw_data(writes[:]), 0, nil)
   return .SUCCESS
 }
 

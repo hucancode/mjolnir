@@ -912,8 +912,6 @@ renderer_main_init :: proc(
       width,
       height,
       self.camera_descriptor_set_layout,
-      // If needed, pass shadow layout or nil
-      0,
     ) or_return
   }
   return .SUCCESS
@@ -952,7 +950,6 @@ frame_main_init :: proc(
   width: u32,
   height: u32,
   camera_descriptor_set_layout: vk.DescriptorSetLayout, // main pass
-  shadow_camera_descriptor_set_layout: vk.DescriptorSetLayout, // shadow pass (not used here)
 ) -> (
   res: vk.Result,
 ) {
@@ -986,7 +983,7 @@ frame_main_init :: proc(
   ) or_return
   self.camera_uniform = create_host_visible_buffer(
     SceneUniform,
-    (1 + 6 * MAX_SCENE_UNIFORMS),
+    (MAX_SCENE_UNIFORMS),
     {.UNIFORM_BUFFER},
   ) or_return
   self.light_uniform = create_host_visible_buffer(
