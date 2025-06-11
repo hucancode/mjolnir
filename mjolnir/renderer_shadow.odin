@@ -21,12 +21,17 @@ ShadowShaderConfig :: struct {
   is_skinned: b32,
 }
 
+FrameShadow :: struct {
+  shadow_camera_descriptor_set: vk.DescriptorSet,
+  // Add more shadow-pass specific fields as needed
+}
+
 RendererShadow :: struct {
-  pipeline_layout: vk.PipelineLayout,
-  pipelines:       [SHADOW_SHADER_VARIANT_COUNT]vk.Pipeline,
-  camera_descriptor_set_layout: vk.DescriptorSetLayout,
+  pipeline_layout:                vk.PipelineLayout,
+  pipelines:                      [SHADOW_SHADER_VARIANT_COUNT]vk.Pipeline,
+  camera_descriptor_set_layout:   vk.DescriptorSetLayout,
   skinning_descriptor_set_layout: vk.DescriptorSetLayout,
-  frames: [MAX_FRAMES_IN_FLIGHT]FrameShadow, // Now owns its own frames
+  frames:                         [MAX_FRAMES_IN_FLIGHT]FrameShadow, // Now owns its own frames
 }
 
 renderer_shadow_init :: proc(
@@ -202,10 +207,7 @@ renderer_shadow_init :: proc(
     raw_data(self.pipelines[:]),
   ) or_return
   for &frame in self.frames {
-    frame_shadow_init(
-      &frame,
-      self.camera_descriptor_set_layout,
-    ) or_return
+    frame_shadow_init(&frame, self.camera_descriptor_set_layout) or_return
   }
   return .SUCCESS
 }
@@ -218,9 +220,17 @@ renderer_shadow_deinit :: proc(self: ^RendererShadow) {
   }
   vk.DestroyPipelineLayout(g_device, self.pipeline_layout, nil)
   self.pipeline_layout = 0
-  vk.DestroyDescriptorSetLayout(g_device, self.camera_descriptor_set_layout, nil)
+  vk.DestroyDescriptorSetLayout(
+    g_device,
+    self.camera_descriptor_set_layout,
+    nil,
+  )
   self.camera_descriptor_set_layout = 0
-  vk.DestroyDescriptorSetLayout(g_device, self.skinning_descriptor_set_layout, nil)
+  vk.DestroyDescriptorSetLayout(
+    g_device,
+    self.skinning_descriptor_set_layout,
+    nil,
+  )
   self.skinning_descriptor_set_layout = 0
 }
 
@@ -329,10 +339,7 @@ render_shadow_pass :: proc(
         face_render_info := vk.RenderingInfoKHR {
           sType = .RENDERING_INFO_KHR,
           renderArea = {
-            extent = {
-              width = cube_shadow.width,
-              height = cube_shadow.height,
-            },
+            extent = {width = cube_shadow.width, height = cube_shadow.height},
           },
           layerCount = 1,
           pDepthAttachment = &face_depth_attachment,
@@ -344,10 +351,7 @@ render_shadow_pass :: proc(
           maxDepth = 1.0,
         }
         scissor := vk.Rect2D {
-          extent = {
-            width = cube_shadow.width,
-            height = cube_shadow.height,
-          },
+          extent = {width = cube_shadow.width, height = cube_shadow.height},
         }
         shadow_scene_uniform := SceneUniform {
           view       = view,
@@ -630,4 +634,32 @@ renderer_shadow_get_pipeline :: proc(
   features: ShadowShaderFeatureSet = {},
 ) -> vk.Pipeline {
   return self.pipelines[transmute(u32)features]
+}
+
+frame_shadow_init :: proc(
+  self: ^FrameShadow,
+  shadow_camera_descriptor_set_layout: vk.DescriptorSetLayout,
+) -> (
+  res: vk.Result,
+) {
+  shadow_layout := shadow_camera_descriptor_set_layout
+  vk.AllocateDescriptorSets(
+    g_device,
+    &{
+      sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
+      descriptorPool = g_descriptor_pool,
+      descriptorSetCount = 1,
+      pSetLayouts = &shadow_layout,
+    },
+    &self.shadow_camera_descriptor_set,
+  ) or_return
+  // Bind camera uniform buffer in shadow pass as needed by shadow renderer
+  // (Assume this will be handled by renderer_shadow or passed in)
+  return .SUCCESS
+}
+
+frame_shadow_deinit :: proc(self: ^FrameShadow) {
+  // Only need to free descriptor set if using a custom pool, otherwise Vulkan will clean up
+  // If you add more resources to FrameShadow, deinit them here
+  self.shadow_camera_descriptor_set = 0
 }

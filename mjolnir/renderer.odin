@@ -10,55 +10,12 @@ import vk "vendor:vulkan"
 
 MAX_FRAMES_IN_FLIGHT :: 2
 
-BG_BLUE_GRAY :: [4]f32{0.0117, 0.0117, 0.0179, 1.0}
-BG_DARK_GRAY :: [4]f32{0.0117, 0.0117, 0.0117, 1.0}
-BG_ORANGE_GRAY :: [4]f32{0.0179, 0.0179, 0.0117, 1.0}
-
-SingleLightUniform :: struct {
-  view_proj:  linalg.Matrix4f32,
-  color:      linalg.Vector4f32,
-  position:   linalg.Vector4f32,
-  direction:  linalg.Vector4f32,
-  kind:       enum u32 {
-    POINT       = 0,
-    DIRECTIONAL = 1,
-    SPOT        = 2,
-  },
-  angle:      f32, // For spotlight: cone angle
-  radius:     f32, // For point/spot: attenuation radius
-  has_shadow: b32,
-}
-
-SceneUniform :: struct {
-  view:       linalg.Matrix4f32,
-  projection: linalg.Matrix4f32,
-  time:       f32,
-  padding:    [3]f32,
-}
-
-SceneLightUniform :: struct {
-  lights:      [MAX_LIGHTS]SingleLightUniform,
-  light_count: u32,
-  padding:     [3]u32,
-}
-
-push_light :: proc(self: ^SceneLightUniform, light: SingleLightUniform) {
-  if self.light_count < MAX_LIGHTS {
-    self.lights[self.light_count] = light
-    self.light_count += 1
-  }
-}
-
-clear_lights :: proc(self: ^SceneLightUniform) {
-  self.light_count = 0
-}
-
 Renderer :: struct {
-  frame_index:    u32,
-  main:           RendererMain,
-  shadow:         RendererShadow,
-  particle:       RendererParticle,
-  postprocess:    RendererPostProcess,
+  frame_index: u32,
+  main:        RendererMain,
+  shadow:      RendererShadow,
+  particle:    RendererParticle,
+  postprocess: RendererPostProcess,
 }
 
 renderer_init :: proc(
@@ -76,10 +33,7 @@ renderer_init :: proc(
     depth_format,
   ) or_return
   renderer_particle_init(&self.particle) or_return
-  renderer_shadow_init(
-    &self.shadow,
-    depth_format,
-  ) or_return
+  renderer_shadow_init(&self.shadow, depth_format) or_return
   renderer_postprocess_init(
     &self.postprocess,
     color_format,
