@@ -46,11 +46,9 @@ RendererMain :: struct {
   pipeline_layout:                   vk.PipelineLayout,
   pipelines:                         [SHADER_VARIANT_COUNT]vk.Pipeline,
   unlit_pipelines:                   [UNLIT_SHADER_VARIANT_COUNT]vk.Pipeline,
+  environment_descriptor_set:        vk.DescriptorSet,
   depth_buffer:                      ImageBuffer,
   environment_map:                   ^Texture,
-  environment_map_handle:            Handle,
-  environment_descriptor_set:        vk.DescriptorSet,
-  brdf_lut_handle:                   Handle,
   brdf_lut:                          ^Texture,
 }
 
@@ -806,13 +804,15 @@ renderer_main_init :: proc(
     target_depth_format,
   ) or_return
   self.depth_buffer = create_depth_image(width, height) or_return
-  self.environment_map_handle, self.environment_map =
-    create_hdr_texture_from_path(
-      "assets/teutonic_castle_moat_4k.hdr",
-    ) or_return
-  self.brdf_lut_handle, self.brdf_lut = create_texture_from_path(
-    "assets/lut_ggx.png",
+  self.environment_map = new(Texture)
+  read_texture(
+    self.environment_map,
+    "assets/teutonic_castle_moat_4k.hdr",
   ) or_return
+  texture_init(self.environment_map)
+  self.brdf_lut = new(Texture)
+  read_texture(self.brdf_lut, "assets/lut_ggx.png") or_return
+  texture_init(self.brdf_lut) or_return
   vk.AllocateDescriptorSets(
     g_device,
     &{
@@ -875,6 +875,10 @@ renderer_main_deinit :: proc(self: ^RendererMain) {
     self.skinning_descriptor_set_layout,
     nil,
   )
+  texture_deinit(self.environment_map)
+  free(self.environment_map)
+  texture_deinit(self.brdf_lut)
+  free(self.brdf_lut)
   for p in self.pipelines do vk.DestroyPipeline(g_device, p, nil)
   for p in self.unlit_pipelines do vk.DestroyPipeline(g_device, p, nil)
 }

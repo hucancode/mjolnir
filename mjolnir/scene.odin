@@ -94,8 +94,7 @@ attach :: proc(
   if child_node == nil || parent_node == nil {
     return
   }
-  old_parent_node := resource.get(nodes, child_node.parent)
-  if old_parent_node != nil {
+  if old_parent_node, ok := resource.get(nodes, child_node.parent); ok {
     idx, found := slice.linear_search(
       old_parent_node.children[:],
       child_handle,
