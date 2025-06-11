@@ -104,7 +104,7 @@ ui_init :: proc(
       descriptorCount = 1,
       descriptorType = .COMBINED_IMAGE_SAMPLER,
       pImageInfo = &{
-        sampler = g_linear_clamp_sampler,
+        sampler = g_nearest_clamp_sampler,
         imageView = self.atlas.view,
         imageLayout = .SHADER_READ_ONLY_OPTIMAL,
       },
