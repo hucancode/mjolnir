@@ -11,7 +11,7 @@ import glfw "vendor:glfw"
 LIGHT_COUNT :: 3
 light_handles: [LIGHT_COUNT]mjolnir.Handle
 light_cube_handles: [LIGHT_COUNT]mjolnir.Handle
-
+ground_mat_handle: mjolnir.Handle
 engine: mjolnir.Engine
 
 main :: proc() {
@@ -37,7 +37,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   ground_albedo_handle, _, _ := create_texture_from_path(
     "assets/t_brick_floor_002_diffuse_1k.jpg",
   )
-  ground_mat_handle, _, _ := create_material(
+  ground_mat_handle, _, _ = create_material(
     texture_set_layout,
     skinning_set_layout,
     {.ALBEDO_TEXTURE},
@@ -234,6 +234,17 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
       math.PI * time_since_app_start(engine) * 0.5,
     )
     // log.infof( "Light cube %d rotation: %v", i, light_cube_ptr.transform.rotation,)
+  }
+  if false {
+    // test render to texture, use previous frame's main pass image as ground's texture
+    ground_mat := resource.get(g_materials, ground_mat_handle)
+    prev_frame :=
+      (engine.renderer.frame_index + MAX_FRAMES_IN_FLIGHT - 1) %
+      MAX_FRAMES_IN_FLIGHT
+    material_update_textures(
+      ground_mat,
+      &engine.renderer.frames[prev_frame].main_pass_image,
+    )
   }
 }
 
