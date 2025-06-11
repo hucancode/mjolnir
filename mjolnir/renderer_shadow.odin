@@ -22,9 +22,8 @@ ShadowShaderConfig :: struct {
 }
 
 FrameShadow :: struct {
-  camera_uniform: DataBuffer(SceneUniform),
+  camera_uniform:               DataBuffer(SceneUniform),
   shadow_camera_descriptor_set: vk.DescriptorSet,
-  // Add more shadow-pass specific fields as needed
 }
 
 RendererShadow :: struct {
@@ -32,14 +31,13 @@ RendererShadow :: struct {
   pipelines:                      [SHADOW_SHADER_VARIANT_COUNT]vk.Pipeline,
   camera_descriptor_set_layout:   vk.DescriptorSetLayout,
   skinning_descriptor_set_layout: vk.DescriptorSetLayout,
-  frames:                         [MAX_FRAMES_IN_FLIGHT]FrameShadow, // Now owns its own frames
+  frames:                         [MAX_FRAMES_IN_FLIGHT]FrameShadow,
 }
 
 renderer_shadow_init :: proc(
   self: ^RendererShadow,
   depth_format: vk.Format = .D32_SFLOAT,
 ) -> vk.Result {
-  // Create dedicated camera descriptor set layout for shadow
   camera_bindings := [?]vk.DescriptorSetLayoutBinding {
     {
       binding = 0,

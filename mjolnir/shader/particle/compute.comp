@@ -29,7 +29,6 @@ struct Emitter {
     uint enabled;
     float padding;
 };
-// Bindings
 layout(binding = 0) uniform ParamsBuffer {
     uint particle_count;
     uint emitter_count;
@@ -71,13 +70,9 @@ vec3 random_direction(vec3 base_dir, float spread, vec2 seed) {
 void main() {
     uint i = gl_GlobalInvocationID.x;
     if (i >= min(particle_count, MAX_PARTICLES)) return;
-    // Update existing particles
     if (particles[i].life > 0.0) {
-        // Update position
         particles[i].position += particles[i].velocity * deltaTime;
-        // Update lifetime
         particles[i].life -= deltaTime;
-        // Update color and size interpolation
         float life_ratio = particles[i].life / particles[i].max_life;
         particles[i].color = mix(particles[i].color_end, particles[i].color_start, life_ratio);
     }

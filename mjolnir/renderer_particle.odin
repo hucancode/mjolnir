@@ -225,7 +225,6 @@ renderer_particle_deinit :: proc(self: ^RendererParticle) {
     nil,
   )
   // Free buffers
-  // (Assume data_buffer_deinit or similar is called elsewhere if needed)
 }
 
 renderer_particle_init :: proc(self: ^RendererParticle) -> vk.Result {
