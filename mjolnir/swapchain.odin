@@ -12,6 +12,9 @@ Swapchain :: struct {
   extent: vk.Extent2D,
   images: []vk.Image,
   views:  []vk.ImageView,
+
+  image_available_semaphores: [MAX_FRAMES_IN_FLIGHT]vk.Semaphore,
+  render_finished_semaphores: [MAX_FRAMES_IN_FLIGHT]vk.Semaphore,
 }
 
 swapchain_init :: proc(
@@ -110,6 +113,13 @@ swapchain_init :: proc(
       {.COLOR},
     ) or_return
   }
+  for i in 0..<MAX_FRAMES_IN_FLIGHT {
+    semaphore_info := vk.SemaphoreCreateInfo{
+      sType = .SEMAPHORE_CREATE_INFO,
+    }
+    vk.CreateSemaphore(g_device, &semaphore_info, nil, &self.image_available_semaphores[i]) or_return
+    vk.CreateSemaphore(g_device, &semaphore_info, nil, &self.render_finished_semaphores[i]) or_return
+  }
   return .SUCCESS
 }
 
@@ -119,6 +129,10 @@ swapchain_deinit :: proc(self: ^Swapchain) {
   self.views = nil
   delete(self.images)
   self.images = nil
+  for i in 0..<MAX_FRAMES_IN_FLIGHT {
+    vk.DestroySemaphore(g_device, self.image_available_semaphores[i], nil)
+    vk.DestroySemaphore(g_device, self.render_finished_semaphores[i], nil)
+  }
   vk.DestroySwapchainKHR(g_device, self.handle, nil)
   self.handle = 0
 }

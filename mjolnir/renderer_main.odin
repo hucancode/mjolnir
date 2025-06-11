@@ -85,9 +85,6 @@ SHADER_UNLIT_VERT :: #load("shader/unlit/vert.spv")
 SHADER_UNLIT_FRAG :: #load("shader/unlit/frag.spv")
 
 FrameMain :: struct {
-  image_available_semaphore: vk.Semaphore,
-  render_finished_semaphore: vk.Semaphore,
-  fence:                     vk.Fence,
   command_buffer:            vk.CommandBuffer,
   camera_uniform:            DataBuffer(SceneUniform),
   light_uniform:             DataBuffer(SceneLightUniform),
@@ -907,24 +904,6 @@ frame_main_init :: proc(
     },
     &self.command_buffer,
   ) or_return
-  vk.CreateSemaphore(
-    g_device,
-    &{sType = .SEMAPHORE_CREATE_INFO},
-    nil,
-    &self.image_available_semaphore,
-  ) or_return
-  vk.CreateSemaphore(
-    g_device,
-    &{sType = .SEMAPHORE_CREATE_INFO},
-    nil,
-    &self.render_finished_semaphore,
-  ) or_return
-  vk.CreateFence(
-    g_device,
-    &{sType = .FENCE_CREATE_INFO, flags = {.SIGNALED}},
-    nil,
-    &self.fence,
-  ) or_return
   self.camera_uniform = create_host_visible_buffer(
     SceneUniform,
     (MAX_SCENE_UNIFORMS),
@@ -1076,9 +1055,6 @@ renderer_recreate_images :: proc(
 
 
 frame_deinit :: proc(self: ^FrameMain) {
-  vk.DestroySemaphore(g_device, self.image_available_semaphore, nil)
-  vk.DestroySemaphore(g_device, self.render_finished_semaphore, nil)
-  vk.DestroyFence(g_device, self.fence, nil)
   vk.FreeCommandBuffers(g_device, g_command_pool, 1, &self.command_buffer)
   data_buffer_deinit(&self.camera_uniform)
   data_buffer_deinit(&self.light_uniform)
@@ -1144,22 +1120,6 @@ renderer_get_camera_descriptor_set :: proc(
   self: ^RendererMain,
 ) -> vk.DescriptorSet {
   return self.frames[self.frame_index].camera_descriptor_set
-}
-
-renderer_get_in_flight_fence :: proc(self: ^RendererMain) -> vk.Fence {
-  return self.frames[self.frame_index].fence
-}
-
-renderer_get_image_available_semaphore :: proc(
-  self: ^RendererMain,
-) -> vk.Semaphore {
-  return self.frames[self.frame_index].image_available_semaphore
-}
-
-renderer_get_render_finished_semaphore :: proc(
-  self: ^RendererMain,
-) -> vk.Semaphore {
-  return self.frames[self.frame_index].render_finished_semaphore
 }
 
 renderer_get_command_buffer :: proc(self: ^RendererMain) -> vk.CommandBuffer {
