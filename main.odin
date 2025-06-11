@@ -24,8 +24,8 @@ main :: proc() {
 
 setup :: proc(engine: ^mjolnir.Engine) {
   using mjolnir, geometry
-  texture_set_layout := engine.renderer.main.texture_descriptor_set_layout
-  skinning_set_layout := engine.renderer.main.skinning_descriptor_set_layout
+  texture_set_layout := engine.main.texture_descriptor_set_layout
+  skinning_set_layout := engine.main.skinning_descriptor_set_layout
   plain_material_handle, _, _ := create_material(
     texture_set_layout,
     skinning_set_layout,
@@ -186,8 +186,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
       cast_shadow = true,
     },
   )
-  renderer_tonemap(&engine.renderer, 1.5, 1.3)
-  renderer_grayscale(&engine.renderer, 0.3)
+  effect_add_tonemap(&engine.postprocess, 1.5, 1.3)
+  effect_add_grayscale(&engine.postprocess, 0.3)
   emitter := mjolnir.Emitter {
     transform = geometry.Transform {
       position = {0, 3, 3},
@@ -204,7 +204,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     size_end = 100.0,
     enabled = true,
   }
-  add_emitter(&engine.renderer.particle, emitter)
+  add_emitter(&engine.particle, emitter)
   log.info("setup complete")
 }
 
@@ -239,11 +239,11 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
     // test render to texture, use previous frame's main pass image as ground's texture
     ground_mat := resource.get(g_materials, ground_mat_handle)
     prev_frame :=
-      (engine.renderer.frame_index + MAX_FRAMES_IN_FLIGHT - 1) %
+      (engine.main.frame_index + MAX_FRAMES_IN_FLIGHT - 1) %
       MAX_FRAMES_IN_FLIGHT
     material_update_textures(
       ground_mat,
-      &engine.renderer.main.frames[prev_frame].main_pass_image, // updated for new frame ownership
+      &engine.main.frames[prev_frame].main_pass_image,
     )
   }
 }

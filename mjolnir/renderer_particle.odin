@@ -113,7 +113,7 @@ render_particles :: proc(
 ) {
   // log.info(
   //   "binding particle render pipeline",
-  //   engine.renderer.pipeline_particle.pipeline,
+  //   engine.particle.pipeline,
   // )
   vk.CmdBindPipeline(command_buffer, .GRAPHICS, self.render_pipeline)
   vk.CmdBindDescriptorSets(

@@ -101,6 +101,8 @@ FrameMain :: struct {
 }
 
 RendererMain :: struct {
+  frames:                            [MAX_FRAMES_IN_FLIGHT]FrameMain,
+  frame_index:                       u32,
   camera_descriptor_set_layout:      vk.DescriptorSetLayout,
   environment_descriptor_set_layout: vk.DescriptorSetLayout,
   texture_descriptor_set_layout:     vk.DescriptorSetLayout,
@@ -113,7 +115,6 @@ RendererMain :: struct {
   // managed by pool, so we don't need to deinit
   environment_map:                   ^ImageBuffer,
   brdf_lut:                          ^ImageBuffer,
-  frames:                            [MAX_FRAMES_IN_FLIGHT]FrameMain, // Now owns its own frames
 }
 
 renderer_main_build_pbr_pipeline :: proc(
@@ -600,7 +601,7 @@ render_main_pass :: proc(
   swapchain_extent: vk.Extent2D,
 ) -> vk.Result {
   // Run particle compute pass before starting rendering
-  compute_particles(&engine.renderer.particle, command_buffer)
+  compute_particles(&engine.particle, command_buffer)
   // Barrier to ensure compute shader writes are visible to the vertex shader
   particle_buffer_barrier := vk.BufferMemoryBarrier {
     sType               = .BUFFER_MEMORY_BARRIER,
@@ -608,7 +609,7 @@ render_main_pass :: proc(
     dstAccessMask       = {.VERTEX_ATTRIBUTE_READ},
     srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
     dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-    buffer              = engine.renderer.particle.particle_buffer.buffer,
+    buffer              = engine.particle.particle_buffer.buffer,
     size                = vk.DeviceSize(vk.WHOLE_SIZE),
   }
   vk.CmdPipelineBarrier(
@@ -625,7 +626,7 @@ render_main_pass :: proc(
   )
   color_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
-    imageView = renderer_get_main_pass_view(&engine.renderer),
+    imageView = renderer_get_main_pass_view(&engine.main),
     imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
     loadOp = .CLEAR,
     storeOp = .STORE,
@@ -633,7 +634,7 @@ render_main_pass :: proc(
   }
   depth_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
-    imageView = engine.renderer.main.depth_buffer.view,
+    imageView = engine.main.depth_buffer.view,
     imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
     loadOp = .CLEAR,
     storeOp = .STORE,
@@ -675,27 +676,14 @@ render_main_pass :: proc(
   ) {
     log.errorf("[RENDER] Error during scene mesh rendering")
   }
-  render_particles(
-    &engine.renderer.particle,
-    engine.scene.camera,
-    command_buffer,
-  )
-  if mu.window(&engine.ui.ctx, "Inspector", {40, 40, 300, 150}, {.NO_CLOSE}) {
-    mu.label(
-      &engine.ui.ctx,
-      fmt.tprintf(
-        "Objects %d",
-        len(engine.scene.nodes.entries) - len(engine.scene.nodes.free_indices),
-      ),
-    )
-    mu.label(&engine.ui.ctx, fmt.tprintf("Rendered %d", rendered_count))
-  }
+  engine.main.frame_index =
+    (engine.main.frame_index + 1) % MAX_FRAMES_IN_FLIGHT
   return .SUCCESS
 }
 
 render_single_node :: proc(node: ^Node, cb_context: rawptr) -> bool {
   ctx := (^RenderMeshesContext)(cb_context)
-  frame := ctx.engine.renderer.frame_index
+  frame := ctx.engine.main.frame_index
   #partial switch data in node.attachment {
   case MeshAttachment:
     mesh := resource.get(g_meshes, data.handle)
@@ -713,13 +701,13 @@ render_single_node :: proc(node: ^Node, cb_context: rawptr) -> bool {
     if !geometry.frustum_test_aabb(&ctx.camera_frustum, world_aabb) {
       return true
     }
-    pipeline := renderer_main_get_pipeline(&ctx.engine.renderer.main, material)
-    layout := ctx.engine.renderer.main.pipeline_layout
+    pipeline := renderer_main_get_pipeline(&ctx.engine.main, material)
+    layout := ctx.engine.main.pipeline_layout
     descriptor_sets := [?]vk.DescriptorSet {
-      renderer_get_camera_descriptor_set(&ctx.engine.renderer), // set 0
+      renderer_get_camera_descriptor_set(&ctx.engine.main), // set 0
       material.texture_descriptor_set, // set 1
       material.skinning_descriptor_sets[frame], // set 2
-      ctx.engine.renderer.main.environment_descriptor_set, // set 3
+      ctx.engine.main.environment_descriptor_set, // set 3
     }
     offsets := [1]u32{0}
     vk.CmdBindPipeline(ctx.command_buffer, .GRAPHICS, pipeline)
@@ -786,7 +774,7 @@ render_to_texture :: proc(
   extent: vk.Extent2D,
   camera: Maybe(geometry.Camera) = nil,
 ) -> vk.Result {
-  command_buffer := renderer_get_command_buffer(&engine.renderer)
+  command_buffer := renderer_get_command_buffer(engine)
   render_camera := camera.? or_else engine.scene.camera
   scene_uniform := SceneUniform {
     view       = geometry.calculate_view_matrix(render_camera),
@@ -834,10 +822,7 @@ render_to_texture :: proc(
   }
   vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
   vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
-  data_buffer_write(
-    renderer_get_camera_uniform(&engine.renderer),
-    &scene_uniform,
-  )
+  data_buffer_write(renderer_get_camera_uniform(&engine.main), &scene_uniform)
   rendered_count: u32 = 0
   render_meshes_ctx := RenderMeshesContext {
     engine         = engine,
@@ -914,6 +899,7 @@ renderer_main_init :: proc(
       self.camera_descriptor_set_layout,
     ) or_return
   }
+  self.frame_index = 0
   return .SUCCESS
 }
 
@@ -1115,6 +1101,22 @@ frame_init_images :: proc(
   return .SUCCESS
 }
 
+renderer_recreate_images :: proc(
+  self: ^RendererMain,
+  new_format: vk.Format,
+  new_extent: vk.Extent2D,
+) -> vk.Result {
+  vk.DeviceWaitIdle(g_device)
+  image_buffer_deinit(&self.depth_buffer)
+  depth_image_init(
+    &self.depth_buffer,
+    new_extent.width,
+    new_extent.height,
+  ) or_return
+  return .SUCCESS
+}
+
+
 frame_deinit :: proc(self: ^FrameMain) {
   vk.DestroySemaphore(g_device, self.image_available_semaphore, nil)
   vk.DestroySemaphore(g_device, self.render_finished_semaphore, nil)
@@ -1130,4 +1132,74 @@ frame_deinit_images :: proc(self: ^FrameMain) {
   for &image in self.postprocess_images {
     image_buffer_deinit(&image)
   }
+}
+
+renderer_get_main_pass_image :: proc(self: ^RendererMain) -> vk.Image {
+  return self.frames[self.frame_index].main_pass_image.image
+}
+
+renderer_get_main_pass_view :: proc(self: ^RendererMain) -> vk.ImageView {
+  return self.frames[self.frame_index].main_pass_image.view
+}
+
+renderer_get_postprocess_pass_image :: proc(
+  self: ^RendererMain,
+  i: int,
+) -> vk.Image {
+  return self.frames[self.frame_index].postprocess_images[i].image
+}
+
+renderer_get_postprocess_pass_view :: proc(
+  self: ^RendererMain,
+  i: int,
+) -> vk.ImageView {
+  return self.frames[self.frame_index].postprocess_images[i].view
+}
+
+renderer_get_camera_uniform :: proc(
+  self: ^RendererMain,
+) -> ^DataBuffer(SceneUniform) {
+  return &self.frames[self.frame_index].camera_uniform
+}
+
+renderer_get_light_uniform :: proc(
+  self: ^RendererMain,
+) -> ^DataBuffer(SceneLightUniform) {
+  return &self.frames[self.frame_index].light_uniform
+}
+
+renderer_get_shadow_map :: proc(
+  self: ^RendererMain,
+  light_idx: int,
+) -> ^ImageBuffer {
+  return &self.frames[self.frame_index].shadow_maps[light_idx]
+}
+
+renderer_get_cube_shadow_map :: proc(
+  self: ^RendererMain,
+  light_idx: int,
+) -> ^CubeImageBuffer {
+  return &self.frames[self.frame_index].cube_shadow_maps[light_idx]
+}
+
+renderer_get_camera_descriptor_set :: proc(
+  self: ^RendererMain,
+) -> vk.DescriptorSet {
+  return self.frames[self.frame_index].camera_descriptor_set
+}
+
+renderer_get_in_flight_fence :: proc(self: ^RendererMain) -> vk.Fence {
+  return self.frames[self.frame_index].fence
+}
+
+renderer_get_image_available_semaphore :: proc(
+  self: ^RendererMain,
+) -> vk.Semaphore {
+  return self.frames[self.frame_index].image_available_semaphore
+}
+
+renderer_get_render_finished_semaphore :: proc(
+  self: ^RendererMain,
+) -> vk.Semaphore {
+  return self.frames[self.frame_index].render_finished_semaphore
 }

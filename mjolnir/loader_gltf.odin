@@ -340,8 +340,8 @@ load_gltf_primitive :: proc(
       primitive.material,
     ) or_return
   material_handle, _ = create_material(
-    engine.renderer.main.texture_descriptor_set_layout,
-    engine.renderer.main.skinning_descriptor_set_layout,
+    engine.main.texture_descriptor_set_layout,
+    engine.main.skinning_descriptor_set_layout,
     features,
     albedo_handle,
     metallic_roughness_handle,
@@ -417,8 +417,7 @@ load_gltf_skinned_primitive :: proc(
   gltf_mesh: ^cgltf.mesh,
   gltf_skin: ^cgltf.skin,
 ) -> (
-  // TODO: too many return values, consider refactor this
-  geometry_data: geometry.Geometry,
+  geometry_data: geometry.Geometry,// TODO: too many return values, consider refactor this
   engine_bones: []Bone,
   mat_handle: resource.Handle,
   root_bone_idx: u32,
@@ -440,8 +439,8 @@ load_gltf_skinned_primitive :: proc(
       primitive.material,
     ) or_return
   mat_handle, _ = create_material(
-    engine.renderer.main.texture_descriptor_set_layout,
-    engine.renderer.main.skinning_descriptor_set_layout,
+    engine.main.texture_descriptor_set_layout,
+    engine.main.skinning_descriptor_set_layout,
     features | {.SKINNING},
     albedo_handle,
     metallic_roughness_handle,

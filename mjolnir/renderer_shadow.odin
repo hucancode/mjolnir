@@ -238,11 +238,10 @@ render_shadow_pass :: proc(
   light_uniform: ^SceneLightUniform,
   command_buffer: vk.CommandBuffer,
 ) -> vk.Result {
-  renderer := &engine.renderer
-  frame := engine.renderer.frame_index
+  frame := engine.main.frame_index
   for i := 0; i < int(light_uniform.light_count); i += 1 {
-    cube_shadow := renderer_get_cube_shadow_map(renderer, i)
-    shadow_map_texture := renderer_get_shadow_map(renderer, i)
+    cube_shadow := renderer_get_cube_shadow_map(&engine.main, i)
+    shadow_map_texture := renderer_get_shadow_map(&engine.main, i)
     // Transition shadow map to depth attachment
     initial_barriers := [?]vk.ImageMemoryBarrier {
       {
@@ -297,7 +296,7 @@ render_shadow_pass :: proc(
       continue
     }
     if light.kind == .POINT {
-      cube_shadow := renderer_get_cube_shadow_map(renderer, i)
+      cube_shadow := renderer_get_cube_shadow_map(&engine.main, i)
       light_pos := light.position.xyz
       // Cube face directions and up vectors
       face_dirs := [6][3]f32 {
@@ -358,7 +357,7 @@ render_shadow_pass :: proc(
           projection = proj,
         }
         data_buffer_write(
-          &engine.renderer.shadow.frames[frame].camera_uniform,
+          &engine.shadow.frames[frame].camera_uniform,
           &shadow_scene_uniform,
           i * 6 + face,
         )
@@ -382,7 +381,7 @@ render_shadow_pass :: proc(
         vk.CmdEndRenderingKHR(command_buffer)
       }
     } else {
-      shadow_map_texture := renderer_get_shadow_map(renderer, i)
+      shadow_map_texture := renderer_get_shadow_map(&engine.main, i)
       view: linalg.Matrix4f32
       proj: linalg.Matrix4f32
       if light.kind == .DIRECTIONAL {
@@ -434,7 +433,7 @@ render_shadow_pass :: proc(
         projection = proj,
       }
       data_buffer_write(
-        &engine.renderer.shadow.frames[frame].camera_uniform,
+        &engine.shadow.frames[frame].camera_uniform,
         &shadow_scene_uniform,
         i * 6,
       )
@@ -470,8 +469,8 @@ render_shadow_pass :: proc(
     }
   }
   for i := 0; i < int(light_uniform.light_count); i += 1 {
-    cube_shadow := renderer_get_cube_shadow_map(renderer, i)
-    shadow_map_texture := renderer_get_shadow_map(renderer, i)
+    cube_shadow := renderer_get_cube_shadow_map(&engine.main, i)
+    shadow_map_texture := renderer_get_shadow_map(&engine.main, i)
     final_barriers := [?]vk.ImageMemoryBarrier {
       {
         sType = .IMAGE_MEMORY_BARRIER,
@@ -526,7 +525,7 @@ render_shadow_pass :: proc(
 
 render_single_shadow :: proc(node: ^Node, cb_context: rawptr) -> bool {
   ctx := (^ShadowRenderContext)(cb_context)
-  frame := ctx.engine.renderer.frame_index
+  frame := ctx.engine.main.frame_index
   shadow_idx := ctx.shadow_idx
   shadow_layer := ctx.shadow_layer
   #partial switch data in node.attachment {
@@ -552,27 +551,24 @@ render_single_shadow :: proc(node: ^Node, cb_context: rawptr) -> bool {
       return true
     }
     pipeline: vk.Pipeline
-    layout := ctx.engine.renderer.shadow.pipeline_layout
+    layout := ctx.engine.shadow.pipeline_layout
     descriptor_sets: []vk.DescriptorSet
-    shadow_frame := &ctx.engine.renderer.shadow.frames[frame]
+    shadow_frame := &ctx.engine.shadow.frames[frame]
     if mesh_has_skin {
-      pipeline = renderer_shadow_get_pipeline(
-        &ctx.engine.renderer.shadow,
-        {.SKINNING},
-      )
+      pipeline = renderer_shadow_get_pipeline(&ctx.engine.shadow, {.SKINNING})
       descriptor_sets = {
         shadow_frame.shadow_camera_descriptor_set, // set 0 (shadow pass)
         material.skinning_descriptor_sets[frame], // set 1
       }
     } else {
-      pipeline = renderer_shadow_get_pipeline(&ctx.engine.renderer.shadow)
+      pipeline = renderer_shadow_get_pipeline(&ctx.engine.shadow)
       descriptor_sets = {
         shadow_frame.shadow_camera_descriptor_set, // set 0 (shadow pass)
       }
     }
     vk.CmdBindPipeline(ctx.command_buffer, .GRAPHICS, pipeline)
     offset_shadow := data_buffer_offset_of(
-      ctx.engine.renderer.shadow.frames[frame].camera_uniform,
+      ctx.engine.shadow.frames[frame].camera_uniform,
       shadow_idx * 6 + shadow_layer,
     )
     offsets := [1]u32{offset_shadow}
