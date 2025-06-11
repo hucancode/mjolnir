@@ -213,7 +213,6 @@ scene_init :: proc(self: ^Scene) {
   )
   log.infof("Initializing nodes pool... ")
   resource.pool_init(&self.nodes)
-  log.infof("done")
   root: ^Node
   self.root, root = resource.alloc(&self.nodes)
   init_node(root, "root")
