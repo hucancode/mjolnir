@@ -17,7 +17,8 @@ Frame :: struct {
   light_uniform:                  DataBuffer(SceneLightUniform),
   shadow_maps:                    [MAX_SHADOW_MAPS]ImageBuffer,
   cube_shadow_maps:               [MAX_SHADOW_MAPS]CubeImageBuffer,
-  camera_descriptor_set:          vk.DescriptorSet,
+  camera_descriptor_set:          vk.DescriptorSet, // main pass
+  shadow_camera_descriptor_set:   vk.DescriptorSet, // shadow pass
   shadow_map_descriptor_set:      vk.DescriptorSet,
   cube_shadow_map_descriptor_set: vk.DescriptorSet,
   main_pass_image:                ImageBuffer,
@@ -29,7 +30,8 @@ frame_init :: proc(
   color_format: vk.Format,
   width: u32,
   height: u32,
-  camera_descriptor_set_layout: vk.DescriptorSetLayout,
+  camera_descriptor_set_layout: vk.DescriptorSetLayout, // main pass
+  shadow_camera_descriptor_set_layout: vk.DescriptorSetLayout, // shadow pass
 ) -> (
   res: vk.Result,
 ) {
@@ -97,6 +99,18 @@ frame_init :: proc(
     },
     &self.camera_descriptor_set,
   ) or_return
+  // Allocate shadow camera descriptor set
+  shadow_layout := shadow_camera_descriptor_set_layout
+  vk.AllocateDescriptorSets(
+    g_device,
+    &{
+      sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
+      descriptorPool = g_descriptor_pool,
+      descriptorSetCount = 1,
+      pSetLayouts = &shadow_layout,
+    },
+    &self.shadow_camera_descriptor_set,
+  ) or_return
   shadow_map_image_infos: [MAX_SHADOW_MAPS]vk.DescriptorImageInfo
   for i in 0 ..< MAX_SHADOW_MAPS {
     shadow_map_image_infos[i] = {
@@ -151,6 +165,17 @@ frame_init :: proc(
       descriptorType = .COMBINED_IMAGE_SAMPLER,
       descriptorCount = MAX_SHADOW_MAPS,
       pImageInfo = raw_data(cube_shadow_map_image_infos[:]),
+    },
+    {
+      sType = .WRITE_DESCRIPTOR_SET,
+      dstSet = self.shadow_camera_descriptor_set,
+      dstBinding = 0,
+      descriptorType = .UNIFORM_BUFFER_DYNAMIC,
+      descriptorCount = 1,
+      pBufferInfo = &{
+        buffer = self.camera_uniform.buffer,
+        range = vk.DeviceSize(size_of(SceneUniform)),
+      },
     },
   }
   vk.UpdateDescriptorSets(g_device, len(writes), raw_data(writes[:]), 0, nil)

@@ -24,17 +24,55 @@ ShadowShaderConfig :: struct {
 RendererShadow :: struct {
   pipeline_layout: vk.PipelineLayout,
   pipelines:       [SHADOW_SHADER_VARIANT_COUNT]vk.Pipeline,
+  camera_descriptor_set_layout: vk.DescriptorSetLayout,
+  skinning_descriptor_set_layout: vk.DescriptorSetLayout,
 }
 
 renderer_shadow_init :: proc(
   self: ^RendererShadow,
-  camera_descriptor_set_layout: vk.DescriptorSetLayout,
-  skinning_descriptor_set_layout: vk.DescriptorSetLayout,
   depth_format: vk.Format = .D32_SFLOAT,
 ) -> vk.Result {
+  // Create dedicated camera descriptor set layout for shadow
+  camera_bindings := [?]vk.DescriptorSetLayoutBinding {
+    {
+      binding = 0,
+      descriptorType = .UNIFORM_BUFFER_DYNAMIC,
+      descriptorCount = 1,
+      stageFlags = {.VERTEX},
+    },
+  }
+  vk.CreateDescriptorSetLayout(
+    g_device,
+    &vk.DescriptorSetLayoutCreateInfo {
+      sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+      bindingCount = 1,
+      pBindings = raw_data(camera_bindings[:]),
+    },
+    nil,
+    &self.camera_descriptor_set_layout,
+  ) or_return
+  // Create dedicated skinning descriptor set layout for shadow
+  skinning_bindings := [1]vk.DescriptorSetLayoutBinding {
+    {
+      binding = 0,
+      descriptorType = .STORAGE_BUFFER,
+      descriptorCount = 1,
+      stageFlags = {.VERTEX},
+    },
+  }
+  vk.CreateDescriptorSetLayout(
+    g_device,
+    &vk.DescriptorSetLayoutCreateInfo {
+      sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+      bindingCount = 1,
+      pBindings = raw_data(skinning_bindings[:]),
+    },
+    nil,
+    &self.skinning_descriptor_set_layout,
+  ) or_return
   set_layouts := [?]vk.DescriptorSetLayout {
-    camera_descriptor_set_layout,
-    skinning_descriptor_set_layout,
+    self.camera_descriptor_set_layout,
+    self.skinning_descriptor_set_layout,
   }
   push_constant_range := vk.PushConstantRange {
     stageFlags = {.VERTEX},
@@ -172,6 +210,10 @@ renderer_shadow_deinit :: proc(self: ^RendererShadow) {
   }
   vk.DestroyPipelineLayout(g_device, self.pipeline_layout, nil)
   self.pipeline_layout = 0
+  vk.DestroyDescriptorSetLayout(g_device, self.camera_descriptor_set_layout, nil)
+  self.camera_descriptor_set_layout = 0
+  vk.DestroyDescriptorSetLayout(g_device, self.skinning_descriptor_set_layout, nil)
+  self.skinning_descriptor_set_layout = 0
 }
 
 render_shadow_pass :: proc(
@@ -500,19 +542,20 @@ render_single_shadow :: proc(node: ^Node, cb_context: rawptr) -> bool {
     pipeline: vk.Pipeline
     layout := ctx.engine.renderer.shadow.pipeline_layout
     descriptor_sets: []vk.DescriptorSet
+    shadow_frame := &ctx.engine.renderer.frames[frame]
     if mesh_has_skin {
       pipeline = renderer_shadow_get_pipeline(
         &ctx.engine.renderer.shadow,
         {.SKINNING},
       )
       descriptor_sets = {
-        renderer_get_camera_descriptor_set(&ctx.engine.renderer), // set 0
+        shadow_frame.shadow_camera_descriptor_set, // set 0 (shadow pass)
         material.skinning_descriptor_sets[frame], // set 1
       }
     } else {
       pipeline = renderer_shadow_get_pipeline(&ctx.engine.renderer.shadow)
       descriptor_sets = {
-        renderer_get_camera_descriptor_set(&ctx.engine.renderer), // set 0
+        shadow_frame.shadow_camera_descriptor_set, // set 0 (shadow pass)
       }
     }
     vk.CmdBindPipeline(ctx.command_buffer, .GRAPHICS, pipeline)

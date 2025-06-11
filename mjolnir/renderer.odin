@@ -79,8 +79,6 @@ renderer_init :: proc(
   renderer_particle_init(&self.particle) or_return
   renderer_shadow_init(
     &self.shadow,
-    self.main.camera_descriptor_set_layout,
-    self.main.skinning_descriptor_set_layout,
     depth_format,
   ) or_return
   renderer_postprocess_init(
@@ -96,8 +94,8 @@ renderer_init :: proc(
       color_format,
       width,
       height,
-      // TODO: Eliminate this dependency if possible
       self.main.camera_descriptor_set_layout,
+      self.shadow.camera_descriptor_set_layout,
     ) or_return
   }
   return .SUCCESS
