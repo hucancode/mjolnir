@@ -75,11 +75,11 @@ material_init_descriptor_set_layout :: proc(
 
 material_update_textures :: proc(
   mat: ^Material,
-  albedo: ^Texture = nil,
-  metallic_roughness: ^Texture = nil,
-  normal: ^Texture = nil,
-  displacement: ^Texture = nil,
-  emissive: ^Texture = nil,
+  albedo: ^ImageBuffer = nil,
+  metallic_roughness: ^ImageBuffer = nil,
+  normal: ^ImageBuffer = nil,
+  displacement: ^ImageBuffer = nil,
+  emissive: ^ImageBuffer = nil,
 ) -> vk.Result {
   if mat.texture_descriptor_set == 0 {
     return .ERROR_INITIALIZATION_FAILED
@@ -95,7 +95,7 @@ material_update_textures :: proc(
         descriptorType = .COMBINED_IMAGE_SAMPLER,
         descriptorCount = 1,
         pImageInfo = &{
-          sampler = albedo.sampler,
+          sampler = g_linear_repeat_sampler,
           imageView = albedo.view,
           imageLayout = .SHADER_READ_ONLY_OPTIMAL,
         },
@@ -112,7 +112,7 @@ material_update_textures :: proc(
         descriptorType = .COMBINED_IMAGE_SAMPLER,
         descriptorCount = 1,
         pImageInfo = &{
-          sampler = metallic_roughness.sampler,
+          sampler = g_linear_repeat_sampler,
           imageView = metallic_roughness.view,
           imageLayout = .SHADER_READ_ONLY_OPTIMAL,
         },
@@ -129,7 +129,7 @@ material_update_textures :: proc(
         descriptorType = .COMBINED_IMAGE_SAMPLER,
         descriptorCount = 1,
         pImageInfo = &{
-          sampler = normal.sampler,
+          sampler = g_linear_repeat_sampler,
           imageView = normal.view,
           imageLayout = .SHADER_READ_ONLY_OPTIMAL,
         },
@@ -146,7 +146,7 @@ material_update_textures :: proc(
         descriptorType = .COMBINED_IMAGE_SAMPLER,
         descriptorCount = 1,
         pImageInfo = &{
-          sampler = displacement.sampler,
+          sampler = g_linear_repeat_sampler,
           imageView = displacement.view,
           imageLayout = .SHADER_READ_ONLY_OPTIMAL,
         },
@@ -163,7 +163,7 @@ material_update_textures :: proc(
         descriptorType = .COMBINED_IMAGE_SAMPLER,
         descriptorCount = 1,
         pImageInfo = &{
-          sampler = emissive.sampler,
+          sampler = g_linear_repeat_sampler,
           imageView = emissive.view,
           imageLayout = .SHADER_READ_ONLY_OPTIMAL,
         },

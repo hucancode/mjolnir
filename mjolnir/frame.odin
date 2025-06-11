@@ -15,8 +15,8 @@ Frame :: struct {
   command_buffer:                 vk.CommandBuffer,
   camera_uniform:                 DataBuffer(SceneUniform),
   light_uniform:                  DataBuffer(SceneLightUniform),
-  shadow_maps:                    [MAX_SHADOW_MAPS]DepthTexture,
-  cube_shadow_maps:               [MAX_SHADOW_MAPS]CubeDepthTexture,
+  shadow_maps:                    [MAX_SHADOW_MAPS]ImageBuffer,
+  cube_shadow_maps:               [MAX_SHADOW_MAPS]CubeImageBuffer,
   camera_descriptor_set:          vk.DescriptorSet,
   shadow_map_descriptor_set:      vk.DescriptorSet,
   cube_shadow_map_descriptor_set: vk.DescriptorSet,
@@ -72,7 +72,7 @@ frame_init :: proc(
     {.UNIFORM_BUFFER},
   ) or_return
   for i in 0 ..< MAX_SHADOW_MAPS {
-    depth_texture_init(
+    depth_image_init(
       &self.shadow_maps[i],
       SHADOW_MAP_SIZE,
       SHADOW_MAP_SIZE,
@@ -82,6 +82,7 @@ frame_init :: proc(
     cube_depth_texture_init(
       &self.cube_shadow_maps[i],
       SHADOW_MAP_SIZE,
+      .D32_SFLOAT,
       {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
     ) or_return
   }
@@ -99,7 +100,7 @@ frame_init :: proc(
   shadow_map_image_infos: [MAX_SHADOW_MAPS]vk.DescriptorImageInfo
   for i in 0 ..< MAX_SHADOW_MAPS {
     shadow_map_image_infos[i] = {
-      sampler     = self.shadow_maps[i].sampler,
+      sampler     = g_linear_clamp_sampler,
       imageView   = self.shadow_maps[i].view,
       imageLayout = .SHADER_READ_ONLY_OPTIMAL,
     }
@@ -107,7 +108,7 @@ frame_init :: proc(
   cube_shadow_map_image_infos: [MAX_SHADOW_MAPS]vk.DescriptorImageInfo
   for i in 0 ..< MAX_SHADOW_MAPS {
     cube_shadow_map_image_infos[i] = {
-      sampler     = self.cube_shadow_maps[i].sampler,
+      sampler     = g_linear_clamp_sampler,
       imageView   = self.cube_shadow_maps[i].view,
       imageLayout = .SHADER_READ_ONLY_OPTIMAL,
     }
@@ -202,7 +203,7 @@ frame_deinit :: proc(self: ^Frame) {
   data_buffer_deinit(&self.camera_uniform)
   data_buffer_deinit(&self.light_uniform)
   for i in 0 ..< MAX_SHADOW_MAPS {
-    depth_texture_deinit(&self.shadow_maps[i])
+    image_buffer_deinit(&self.shadow_maps[i])
     cube_depth_texture_deinit(&self.cube_shadow_maps[i])
   }
   frame_deinit_images(self)

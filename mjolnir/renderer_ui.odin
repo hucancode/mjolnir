@@ -21,7 +21,7 @@ RendererUI :: struct {
   texture_descriptor_set:    vk.DescriptorSet,
   pipeline_layout:           vk.PipelineLayout,
   pipeline:                  vk.Pipeline,
-  atlas:                     Texture,
+  atlas:                     ^ImageBuffer,
   proj_buffer:               DataBuffer(linalg.Matrix4f32),
   vertex_buffer:             DataBuffer(Vertex2D),
   index_buffer:              DataBuffer(u32),
@@ -54,14 +54,13 @@ ui_init :: proc(
   log.infof("init UI pipeline...")
   renderer_ui_init(self, color_format) or_return
   log.infof("init UI texture...")
-  _, texture := create_texture_from_pixels(
+  _, self.atlas = create_texture_from_pixels(
     mu.default_atlas_alpha[:],
     mu.DEFAULT_ATLAS_WIDTH,
     mu.DEFAULT_ATLAS_HEIGHT,
     1,
     .R8_UNORM,
   ) or_return
-  self.atlas = texture^
   log.infof("init UI vertex buffer...")
   self.vertex_buffer = create_host_visible_buffer(
     Vertex2D,
@@ -105,7 +104,7 @@ ui_init :: proc(
       descriptorCount = 1,
       descriptorType = .COMBINED_IMAGE_SAMPLER,
       pImageInfo = &{
-        sampler = self.atlas.sampler,
+        sampler = g_linear_clamp_sampler,
         imageView = self.atlas.view,
         imageLayout = .SHADER_READ_ONLY_OPTIMAL,
       },

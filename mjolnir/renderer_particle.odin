@@ -58,9 +58,7 @@ RendererParticle :: struct {
   render_descriptor_set:         vk.DescriptorSet,
   render_pipeline_layout:        vk.PipelineLayout,
   render_pipeline:               vk.Pipeline,
-  particle_texture:              vk.Image,
-  particle_sampler:              vk.Sampler,
-  particle_view:                 vk.ImageView,
+  particle_texture:              ^ImageBuffer,
 }
 
 compute_particles :: proc(
@@ -152,10 +150,7 @@ render_particles :: proc(
   vk.CmdDraw(command_buffer, u32(params.particle_count), 1, 0, 0)
 }
 
-add_emitter :: proc(
-  self: ^RendererParticle,
-  emitter: Emitter,
-) -> vk.Result {
+add_emitter :: proc(self: ^RendererParticle, emitter: Emitter) -> vk.Result {
   params := data_buffer_get(self.params_buffer)
   if params.emitter_count >= MAX_EMITTERS {
     return .ERROR_UNKNOWN
@@ -211,9 +206,7 @@ update_emitters :: proc(self: ^RendererParticle, delta_time: f32) {
       emitter.time_accumulator -= emission_interval
     }
   }
-  params.particle_count = u32(
-    MAX_PARTICLES - len(self.free_particle_indices),
-  )
+  params.particle_count = u32(MAX_PARTICLES - len(self.free_particle_indices))
 }
 
 renderer_particle_deinit :: proc(self: ^RendererParticle) {
@@ -231,9 +224,6 @@ renderer_particle_deinit :: proc(self: ^RendererParticle) {
     self.render_descriptor_set_layout,
     nil,
   )
-  vk.DestroyImageView(g_device, self.particle_view, nil)
-  vk.DestroyImage(g_device, self.particle_texture, nil)
-  vk.DestroySampler(g_device, self.particle_sampler, nil)
   // Free buffers
   // (Assume data_buffer_deinit or similar is called elsewhere if needed)
 }
@@ -408,12 +398,9 @@ renderer_particle_init :: proc(self: ^RendererParticle) -> vk.Result {
     nil,
     &self.render_pipeline_layout,
   ) or_return
-  texture: Texture
-  read_texture(&texture, "assets/black-circle.png") or_return
-  texture_init(&texture) or_return
-  self.particle_texture = texture.image
-  self.particle_view = texture.view
-  self.particle_sampler = texture.sampler
+  _, self.particle_texture = create_texture_from_path(
+    "assets/black-circle.png",
+  ) or_return
   vk.AllocateDescriptorSets(
     g_device,
     &{
@@ -431,8 +418,8 @@ renderer_particle_init :: proc(self: ^RendererParticle) -> vk.Result {
     descriptorType  = .COMBINED_IMAGE_SAMPLER,
     descriptorCount = 1,
     pImageInfo      = &{
-      sampler = self.particle_sampler,
-      imageView = self.particle_view,
+      sampler = g_linear_repeat_sampler,
+      imageView = self.particle_texture.view,
       imageLayout = .SHADER_READ_ONLY_OPTIMAL,
     },
   }

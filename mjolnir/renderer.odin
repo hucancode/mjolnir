@@ -119,7 +119,8 @@ renderer_recreate_images :: proc(
 ) -> vk.Result {
   vk.DeviceWaitIdle(g_device)
   image_buffer_deinit(&self.main.depth_buffer)
-  depth_image_init(&self.main.depth_buffer,
+  depth_image_init(
+    &self.main.depth_buffer,
     new_extent.width,
     new_extent.height,
   ) or_return
@@ -204,14 +205,14 @@ renderer_get_light_uniform :: proc(
 renderer_get_shadow_map :: proc(
   self: ^Renderer,
   light_idx: int,
-) -> ^DepthTexture {
+) -> ^ImageBuffer {
   return &self.frames[self.frame_index].shadow_maps[light_idx]
 }
 
 renderer_get_cube_shadow_map :: proc(
   self: ^Renderer,
   light_idx: int,
-) -> ^CubeDepthTexture {
+) -> ^CubeImageBuffer {
   return &self.frames[self.frame_index].cube_shadow_maps[light_idx]
 }
 

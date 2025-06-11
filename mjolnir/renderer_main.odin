@@ -48,8 +48,9 @@ RendererMain :: struct {
   unlit_pipelines:                   [UNLIT_SHADER_VARIANT_COUNT]vk.Pipeline,
   environment_descriptor_set:        vk.DescriptorSet,
   depth_buffer:                      ImageBuffer,
-  environment_map:                   ^Texture,
-  brdf_lut:                          ^Texture,
+  // managed by pool, so we don't need to deinit
+  environment_map:                   ^ImageBuffer,
+  brdf_lut:                          ^ImageBuffer,
 }
 
 renderer_main_build_pbr_pipeline :: proc(
@@ -803,16 +804,16 @@ renderer_main_init :: proc(
     target_color_format,
     target_depth_format,
   ) or_return
-  depth_image_init(&self.depth_buffer, width, height, target_depth_format) or_return
-  self.environment_map = new(Texture)
-  read_texture(
-    self.environment_map,
+  depth_image_init(
+    &self.depth_buffer,
+    width,
+    height,
+    target_depth_format,
+  ) or_return
+  _, self.environment_map = create_hdr_texture_from_path(
     "assets/teutonic_castle_moat_4k.hdr",
   ) or_return
-  texture_init(self.environment_map)
-  self.brdf_lut = new(Texture)
-  read_texture(self.brdf_lut, "assets/lut_ggx.png") or_return
-  texture_init(self.brdf_lut) or_return
+  _, self.brdf_lut = create_texture_from_path("assets/lut_ggx.png") or_return
   vk.AllocateDescriptorSets(
     g_device,
     &{
@@ -831,7 +832,7 @@ renderer_main_init :: proc(
       descriptorType = .COMBINED_IMAGE_SAMPLER,
       descriptorCount = 1,
       pImageInfo = &{
-        sampler = self.environment_map.sampler,
+        sampler = g_linear_repeat_sampler,
         imageView = self.environment_map.view,
         imageLayout = .SHADER_READ_ONLY_OPTIMAL,
       },
@@ -843,7 +844,7 @@ renderer_main_init :: proc(
       descriptorType = .COMBINED_IMAGE_SAMPLER,
       descriptorCount = 1,
       pImageInfo = &{
-        sampler = self.brdf_lut.sampler,
+        sampler = g_linear_repeat_sampler,
         imageView = self.brdf_lut.view,
         imageLayout = .SHADER_READ_ONLY_OPTIMAL,
       },
@@ -875,10 +876,6 @@ renderer_main_deinit :: proc(self: ^RendererMain) {
     self.skinning_descriptor_set_layout,
     nil,
   )
-  texture_deinit(self.environment_map)
-  free(self.environment_map)
-  texture_deinit(self.brdf_lut)
-  free(self.brdf_lut)
   for p in self.pipelines do vk.DestroyPipeline(g_device, p, nil)
   for p in self.unlit_pipelines do vk.DestroyPipeline(g_device, p, nil)
 }

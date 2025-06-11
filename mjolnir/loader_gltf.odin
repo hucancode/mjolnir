@@ -189,7 +189,7 @@ load_gltf_texture :: proc(
   glft_texture: ^cgltf.texture,
 ) -> (
   tex_handle: Handle,
-  texture: ^Texture,
+  texture: ^ImageBuffer,
   ret: vk.Result,
 ) {
   if glft_texture == nil || glft_texture.image_ == nil {
