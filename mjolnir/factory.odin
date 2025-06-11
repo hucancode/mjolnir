@@ -26,12 +26,14 @@ factory_init :: proc() {
   log.infof("Initializing image buffer pool... ")
   resource.pool_init(&g_image_buffers)
   log.infof("All resource pools initialized successfully")
+  init_global_samplers()
 }
 
 factory_deinit :: proc() {
   resource.pool_deinit(g_image_buffers, image_buffer_deinit)
   resource.pool_deinit(g_meshes, mesh_deinit)
   resource.pool_deinit(g_materials, material_deinit)
+  deinit_global_samplers()
 }
 
 init_global_samplers :: proc() -> vk.Result {
