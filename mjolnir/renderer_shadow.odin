@@ -26,6 +26,7 @@ RendererShadow :: struct {
   pipelines:       [SHADOW_SHADER_VARIANT_COUNT]vk.Pipeline,
   camera_descriptor_set_layout: vk.DescriptorSetLayout,
   skinning_descriptor_set_layout: vk.DescriptorSetLayout,
+  frames: [MAX_FRAMES_IN_FLIGHT]FrameShadow, // Now owns its own frames
 }
 
 renderer_shadow_init :: proc(
@@ -200,10 +201,17 @@ renderer_shadow_init :: proc(
     nil,
     raw_data(self.pipelines[:]),
   ) or_return
+  for &frame in self.frames {
+    frame_shadow_init(
+      &frame,
+      self.camera_descriptor_set_layout,
+    ) or_return
+  }
   return .SUCCESS
 }
 
 renderer_shadow_deinit :: proc(self: ^RendererShadow) {
+  for &frame in self.frames do frame_shadow_deinit(&frame)
   for &p in self.pipelines {
     vk.DestroyPipeline(g_device, p, nil)
     p = 0
@@ -542,7 +550,7 @@ render_single_shadow :: proc(node: ^Node, cb_context: rawptr) -> bool {
     pipeline: vk.Pipeline
     layout := ctx.engine.renderer.shadow.pipeline_layout
     descriptor_sets: []vk.DescriptorSet
-    shadow_frame := &ctx.engine.renderer.frames[frame]
+    shadow_frame := &ctx.engine.renderer.shadow.frames[frame]
     if mesh_has_skin {
       pipeline = renderer_shadow_get_pipeline(
         &ctx.engine.renderer.shadow,

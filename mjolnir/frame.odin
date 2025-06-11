@@ -8,33 +8,46 @@ SHADOW_MAP_SIZE :: 512
 MAX_SHADOW_MAPS :: MAX_LIGHTS
 MAX_SCENE_UNIFORMS :: 16
 
-Frame :: struct {
-  image_available_semaphore:      vk.Semaphore,
-  render_finished_semaphore:      vk.Semaphore,
-  fence:                          vk.Fence,
-  command_buffer:                 vk.CommandBuffer,
-  camera_uniform:                 DataBuffer(SceneUniform),
-  light_uniform:                  DataBuffer(SceneLightUniform),
-  shadow_maps:                    [MAX_SHADOW_MAPS]ImageBuffer,
-  cube_shadow_maps:               [MAX_SHADOW_MAPS]CubeImageBuffer,
-  camera_descriptor_set:          vk.DescriptorSet, // main pass
-  shadow_camera_descriptor_set:   vk.DescriptorSet, // shadow pass
-  shadow_map_descriptor_set:      vk.DescriptorSet,
-  cube_shadow_map_descriptor_set: vk.DescriptorSet,
-  main_pass_image:                ImageBuffer,
-  postprocess_images:             [2]ImageBuffer,
+// Frame for main renderer
+FrameMain :: struct {
+  image_available_semaphore: vk.Semaphore,
+  render_finished_semaphore: vk.Semaphore,
+  fence: vk.Fence,
+  command_buffer: vk.CommandBuffer,
+  camera_uniform: DataBuffer(SceneUniform),
+  light_uniform: DataBuffer(SceneLightUniform),
+  camera_descriptor_set: vk.DescriptorSet,
+  main_pass_image: ImageBuffer,
+  postprocess_images: [2]ImageBuffer,
+  shadow_maps: [MAX_SHADOW_MAPS]ImageBuffer,
+  cube_shadow_maps: [MAX_SHADOW_MAPS]CubeImageBuffer,
 }
 
-frame_init :: proc(
-  self: ^Frame,
+// Frame for shadow renderer
+FrameShadow :: struct {
+  shadow_camera_descriptor_set: vk.DescriptorSet,
+  // Add more shadow-pass specific fields as needed
+}
+
+// Frame for postprocess renderer
+FramePostProcess :: struct {
+  image_available_semaphore: vk.Semaphore,
+  render_finished_semaphore: vk.Semaphore,
+  fence: vk.Fence,
+  command_buffer: vk.CommandBuffer,
+  // Add postprocess-specific resources as needed
+  descriptor_set: vk.DescriptorSet,
+  postprocess_images: [2]ImageBuffer,
+}
+
+frame_main_init :: proc(
+  self: ^FrameMain,
   color_format: vk.Format,
   width: u32,
   height: u32,
   camera_descriptor_set_layout: vk.DescriptorSetLayout, // main pass
-  shadow_camera_descriptor_set_layout: vk.DescriptorSetLayout, // shadow pass
-) -> (
-  res: vk.Result,
-) {
+  shadow_camera_descriptor_set_layout: vk.DescriptorSetLayout, // shadow pass (not used here)
+) -> (res: vk.Result,) {
   vk.AllocateCommandBuffers(
     g_device,
     &{
@@ -99,18 +112,6 @@ frame_init :: proc(
     },
     &self.camera_descriptor_set,
   ) or_return
-  // Allocate shadow camera descriptor set
-  shadow_layout := shadow_camera_descriptor_set_layout
-  vk.AllocateDescriptorSets(
-    g_device,
-    &{
-      sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
-      descriptorPool = g_descriptor_pool,
-      descriptorSetCount = 1,
-      pSetLayouts = &shadow_layout,
-    },
-    &self.shadow_camera_descriptor_set,
-  ) or_return
   shadow_map_image_infos: [MAX_SHADOW_MAPS]vk.DescriptorImageInfo
   for i in 0 ..< MAX_SHADOW_MAPS {
     shadow_map_image_infos[i] = {
@@ -166,17 +167,6 @@ frame_init :: proc(
       descriptorCount = MAX_SHADOW_MAPS,
       pImageInfo = raw_data(cube_shadow_map_image_infos[:]),
     },
-    {
-      sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = self.shadow_camera_descriptor_set,
-      dstBinding = 0,
-      descriptorType = .UNIFORM_BUFFER_DYNAMIC,
-      descriptorCount = 1,
-      pBufferInfo = &{
-        buffer = self.camera_uniform.buffer,
-        range = vk.DeviceSize(size_of(SceneUniform)),
-      },
-    },
   }
   vk.UpdateDescriptorSets(g_device, len(writes), raw_data(writes[:]), 0, nil)
   frame_init_images(self, width, height, color_format)
@@ -184,7 +174,7 @@ frame_init :: proc(
 }
 
 frame_init_images :: proc(
-  self: ^Frame,
+  self: ^FrameMain,
   width: u32,
   height: u32,
   color_format: vk.Format,
@@ -220,23 +210,121 @@ frame_init_images :: proc(
   return .SUCCESS
 }
 
-frame_deinit :: proc(self: ^Frame) {
+frame_deinit :: proc(self: ^FrameMain) {
   vk.DestroySemaphore(g_device, self.image_available_semaphore, nil)
   vk.DestroySemaphore(g_device, self.render_finished_semaphore, nil)
   vk.DestroyFence(g_device, self.fence, nil)
   vk.FreeCommandBuffers(g_device, g_command_pool, 1, &self.command_buffer)
   data_buffer_deinit(&self.camera_uniform)
   data_buffer_deinit(&self.light_uniform)
-  for i in 0 ..< MAX_SHADOW_MAPS {
-    image_buffer_deinit(&self.shadow_maps[i])
-    cube_depth_texture_deinit(&self.cube_shadow_maps[i])
-  }
   frame_deinit_images(self)
 }
 
-frame_deinit_images :: proc(self: ^Frame) {
+frame_deinit_images :: proc(self: ^FrameMain) {
   image_buffer_deinit(&self.main_pass_image)
   for &image in self.postprocess_images {
     image_buffer_deinit(&image)
   }
+}
+
+// Shadow frame initialization
+frame_shadow_init :: proc(
+  self: ^FrameShadow,
+  shadow_camera_descriptor_set_layout: vk.DescriptorSetLayout,
+) -> (res: vk.Result,) {
+  shadow_layout := shadow_camera_descriptor_set_layout
+  vk.AllocateDescriptorSets(
+    g_device,
+    &{
+      sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
+      descriptorPool = g_descriptor_pool,
+      descriptorSetCount = 1,
+      pSetLayouts = &shadow_layout,
+    },
+    &self.shadow_camera_descriptor_set,
+  ) or_return
+  // Bind camera uniform buffer in shadow pass as needed by shadow renderer
+  // (Assume this will be handled by renderer_shadow or passed in)
+  return .SUCCESS
+}
+
+frame_shadow_deinit :: proc(self: ^FrameShadow) {
+  // Only need to free descriptor set if using a custom pool, otherwise Vulkan will clean up
+  // If you add more resources to FrameShadow, deinit them here
+  self.shadow_camera_descriptor_set = 0;
+}
+
+frame_postprocess_init :: proc(
+  self: ^FramePostProcess,
+  color_format: vk.Format,
+  width: u32,
+  height: u32,
+  descriptor_set_layout: vk.DescriptorSetLayout,
+) -> (res: vk.Result,) {
+  vk.AllocateCommandBuffers(
+    g_device,
+    &{
+      sType = .COMMAND_BUFFER_ALLOCATE_INFO,
+      commandPool = g_command_pool,
+      level = .PRIMARY,
+      commandBufferCount = 1,
+    },
+    &self.command_buffer,
+  ) or_return
+  vk.CreateSemaphore(
+    g_device,
+    &{sType = .SEMAPHORE_CREATE_INFO},
+    nil,
+    &self.image_available_semaphore,
+  ) or_return
+  vk.CreateSemaphore(
+    g_device,
+    &{sType = .SEMAPHORE_CREATE_INFO},
+    nil,
+    &self.render_finished_semaphore,
+  ) or_return
+  vk.CreateFence(
+    g_device,
+    &{sType = .FENCE_CREATE_INFO, flags = {.SIGNALED}},
+    nil,
+    &self.fence,
+  ) or_return
+  layout := descriptor_set_layout
+  vk.AllocateDescriptorSets(
+    g_device,
+    &{
+      sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
+      descriptorPool = g_descriptor_pool,
+      descriptorSetCount = 1,
+      pSetLayouts = &layout,
+    },
+    &self.descriptor_set,
+  ) or_return
+  for &image in self.postprocess_images {
+    image = malloc_image_buffer(
+      width,
+      height,
+      color_format,
+      .OPTIMAL,
+      {.COLOR_ATTACHMENT, .SAMPLED, .TRANSFER_SRC, .TRANSFER_DST},
+      {.DEVICE_LOCAL},
+    ) or_return
+    image.view = create_image_view(
+      image.image,
+      color_format,
+      {.COLOR},
+    ) or_return
+  }
+  return .SUCCESS
+}
+
+frame_postprocess_deinit :: proc(self: ^FramePostProcess) {
+  vk.DestroySemaphore(g_device, self.image_available_semaphore, nil)
+  vk.DestroySemaphore(g_device, self.render_finished_semaphore, nil)
+  vk.DestroyFence(g_device, self.fence, nil)
+  vk.FreeCommandBuffers(g_device, g_command_pool, 1, &self.command_buffer)
+  for &image in self.postprocess_images {
+    image_buffer_deinit(&image)
+  }
+  self.descriptor_set = 0
 }

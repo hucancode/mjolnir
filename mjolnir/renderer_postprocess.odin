@@ -64,6 +64,7 @@ RendererPostProcess :: struct {
   sampler:                vk.Sampler,
   effect_stack:           [dynamic]PostprocessEffect,
   images:                 [2]ImageBuffer,
+  frames: [MAX_FRAMES_IN_FLIGHT]FramePostProcess, // Now owns its own frames
 }
 
 get_effect_type :: proc(effect: PostprocessEffect) -> PostProcessEffectType {
@@ -331,6 +332,15 @@ renderer_postprocess_init :: proc(
   ) or_return
   postprocess_create_sampler(self) or_return
   log.info("Postprocess pipeline initialized successfully")
+  for &frame in self.frames {
+    frame_postprocess_init(
+      &frame,
+      color_format,
+      width,
+      height,
+      self.descriptor_set_layouts[0],
+    ) or_return
+  }
   return .SUCCESS
 }
 
@@ -395,6 +405,7 @@ postprocess_create_sampler :: proc(self: ^RendererPostProcess) -> vk.Result {
 }
 
 renderer_postprocess_deinit :: proc(self: ^RendererPostProcess) {
+  for &frame in self.frames do frame_postprocess_deinit(&frame)
   for &p in self.pipelines {
     vk.DestroyPipeline(g_device, p, nil)
     p = 0

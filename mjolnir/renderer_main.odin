@@ -51,6 +51,7 @@ RendererMain :: struct {
   // managed by pool, so we don't need to deinit
   environment_map:                   ^ImageBuffer,
   brdf_lut:                          ^ImageBuffer,
+  frames: [MAX_FRAMES_IN_FLIGHT]FrameMain, // Now owns its own frames
 }
 
 renderer_main_build_pbr_pipeline :: proc(
@@ -791,24 +792,24 @@ renderer_main_init :: proc(
   self: ^RendererMain,
   width: u32,
   height: u32,
-  target_color_format: vk.Format = .B8G8R8A8_SRGB,
-  target_depth_format: vk.Format = .D32_SFLOAT,
+  color_format: vk.Format = .B8G8R8A8_SRGB,
+  depth_format: vk.Format = .D32_SFLOAT,
 ) -> vk.Result {
   renderer_main_build_pbr_pipeline(
     self,
-    target_color_format,
-    target_depth_format,
+    color_format,
+    depth_format,
   ) or_return
   renderer_main_build_unlit_pipeline(
     self,
-    target_color_format,
-    target_depth_format,
+    color_format,
+    depth_format,
   ) or_return
   depth_image_init(
     &self.depth_buffer,
     width,
     height,
-    target_depth_format,
+    depth_format,
   ) or_return
   _, self.environment_map = create_hdr_texture_from_path(
     "assets/teutonic_castle_moat_4k.hdr",
@@ -851,10 +852,22 @@ renderer_main_init :: proc(
     },
   }
   vk.UpdateDescriptorSets(g_device, len(writes), raw_data(writes[:]), 0, nil)
+  for &frame in self.frames {
+    frame_main_init(
+      &frame,
+      color_format,
+      width,
+      height,
+      self.camera_descriptor_set_layout,
+      // If needed, pass shadow layout or nil
+      0,
+    ) or_return
+  }
   return .SUCCESS
 }
 
 renderer_main_deinit :: proc(self: ^RendererMain) {
+  for &frame in self.frames do frame_deinit(&frame)
   vk.DestroyPipelineLayout(g_device, self.pipeline_layout, nil)
   vk.DestroyDescriptorSetLayout(
     g_device,

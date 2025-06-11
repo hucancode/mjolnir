@@ -243,7 +243,7 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
       MAX_FRAMES_IN_FLIGHT
     material_update_textures(
       ground_mat,
-      &engine.renderer.frames[prev_frame].main_pass_image,
+      &engine.renderer.main.frames[prev_frame].main_pass_image, // updated for new frame ownership
     )
   }
 }

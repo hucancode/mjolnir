@@ -54,12 +54,11 @@ clear_lights :: proc(self: ^SceneLightUniform) {
 }
 
 Renderer :: struct {
-  frames:      [MAX_FRAMES_IN_FLIGHT]Frame,
-  frame_index: u32,
-  main:        RendererMain,
-  shadow:      RendererShadow,
-  particle:    RendererParticle,
-  postprocess: RendererPostProcess,
+  frame_index:    u32,
+  main:           RendererMain,
+  shadow:         RendererShadow,
+  particle:       RendererParticle,
+  postprocess:    RendererPostProcess,
 }
 
 renderer_init :: proc(
@@ -88,16 +87,6 @@ renderer_init :: proc(
     height,
   ) or_return
   self.frame_index = 0
-  for &frame in self.frames {
-    frame_init(
-      &frame,
-      color_format,
-      width,
-      height,
-      self.main.camera_descriptor_set_layout,
-      self.shadow.camera_descriptor_set_layout,
-    ) or_return
-  }
   return .SUCCESS
 }
 
@@ -107,7 +96,6 @@ renderer_deinit :: proc(self: ^Renderer) {
   renderer_shadow_deinit(&self.shadow)
   renderer_postprocess_deinit(&self.postprocess)
   renderer_particle_deinit(&self.particle)
-  for &frame in self.frames do frame_deinit(&frame)
 }
 
 renderer_recreate_images :: proc(
@@ -122,43 +110,39 @@ renderer_recreate_images :: proc(
     new_extent.width,
     new_extent.height,
   ) or_return
-  for &frame in self.frames {
-    frame_deinit_images(&frame)
-    frame_init_images(&frame, new_extent.width, new_extent.height, new_format)
-  }
   return .SUCCESS
 }
 
 renderer_get_in_flight_fence :: proc(self: ^Renderer) -> vk.Fence {
-  return self.frames[self.frame_index].fence
+  return self.main.frames[self.frame_index].fence
 }
 
 renderer_get_image_available_semaphore :: proc(
   self: ^Renderer,
 ) -> vk.Semaphore {
-  return self.frames[self.frame_index].image_available_semaphore
+  return self.main.frames[self.frame_index].image_available_semaphore
 }
 
 renderer_get_render_finished_semaphore :: proc(
   self: ^Renderer,
 ) -> vk.Semaphore {
-  return self.frames[self.frame_index].render_finished_semaphore
+  return self.main.frames[self.frame_index].render_finished_semaphore
 }
 
 renderer_get_command_buffer :: proc(self: ^Renderer) -> vk.CommandBuffer {
   if self == nil {
     return vk.CommandBuffer{}
   }
-  if self.frame_index >= len(self.frames) {
+  if self.frame_index >= len(self.main.frames) {
     log.errorf(
       "Error: Invalid frame index",
       self.frame_index,
       "vs",
-      len(self.frames),
+      len(self.main.frames),
     )
     return vk.CommandBuffer{}
   }
-  cmd_buffer := self.frames[self.frame_index].command_buffer
+  cmd_buffer := self.main.frames[self.frame_index].command_buffer
   if cmd_buffer == nil {
     log.errorf("Error: Command buffer is nil for frame", self.frame_index)
     return vk.CommandBuffer{}
@@ -167,69 +151,57 @@ renderer_get_command_buffer :: proc(self: ^Renderer) -> vk.CommandBuffer {
 }
 
 renderer_get_main_pass_image :: proc(self: ^Renderer) -> vk.Image {
-  return self.frames[self.frame_index].main_pass_image.image
+  return self.main.frames[self.frame_index].main_pass_image.image
 }
 
 renderer_get_main_pass_view :: proc(self: ^Renderer) -> vk.ImageView {
-  return self.frames[self.frame_index].main_pass_image.view
+  return self.main.frames[self.frame_index].main_pass_image.view
 }
 
 renderer_get_postprocess_pass_image :: proc(
   self: ^Renderer,
   i: int,
 ) -> vk.Image {
-  return self.frames[self.frame_index].postprocess_images[i].image
+  return self.main.frames[self.frame_index].postprocess_images[i].image
 }
 
 renderer_get_postprocess_pass_view :: proc(
   self: ^Renderer,
   i: int,
 ) -> vk.ImageView {
-  return self.frames[self.frame_index].postprocess_images[i].view
+  return self.main.frames[self.frame_index].postprocess_images[i].view
 }
 
 renderer_get_camera_uniform :: proc(
   self: ^Renderer,
 ) -> ^DataBuffer(SceneUniform) {
-  return &self.frames[self.frame_index].camera_uniform
+  return &self.main.frames[self.frame_index].camera_uniform
 }
 
 renderer_get_light_uniform :: proc(
   self: ^Renderer,
 ) -> ^DataBuffer(SceneLightUniform) {
-  return &self.frames[self.frame_index].light_uniform
+  return &self.main.frames[self.frame_index].light_uniform
 }
 
 renderer_get_shadow_map :: proc(
   self: ^Renderer,
   light_idx: int,
 ) -> ^ImageBuffer {
-  return &self.frames[self.frame_index].shadow_maps[light_idx]
+  return &self.main.frames[self.frame_index].shadow_maps[light_idx]
 }
 
 renderer_get_cube_shadow_map :: proc(
   self: ^Renderer,
   light_idx: int,
 ) -> ^CubeImageBuffer {
-  return &self.frames[self.frame_index].cube_shadow_maps[light_idx]
+  return &self.main.frames[self.frame_index].cube_shadow_maps[light_idx]
 }
 
 renderer_get_camera_descriptor_set :: proc(
   self: ^Renderer,
 ) -> vk.DescriptorSet {
-  return self.frames[self.frame_index].camera_descriptor_set
-}
-
-renderer_get_shadow_map_descriptor_set :: proc(
-  self: ^Renderer,
-) -> vk.DescriptorSet {
-  return self.frames[self.frame_index].shadow_map_descriptor_set
-}
-
-renderer_get_cube_shadow_map_descriptor_set :: proc(
-  self: ^Renderer,
-) -> vk.DescriptorSet {
-  return self.frames[self.frame_index].cube_shadow_map_descriptor_set
+  return self.main.frames[self.frame_index].camera_descriptor_set
 }
 
 renderer_grayscale :: proc(
