@@ -3,7 +3,6 @@ package mjolnir
 import "core:log"
 import "core:mem"
 import "core:slice"
-import "core:strings"
 import vk "vendor:vulkan"
 
 DataBuffer :: struct($T: typeid) {

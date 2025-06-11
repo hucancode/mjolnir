@@ -1,12 +1,10 @@
 package mjolnir
 
-import "core:fmt"
 import "core:log"
 import linalg "core:math/linalg"
 import "core:time"
 import "geometry"
 import "resource"
-import mu "vendor:microui"
 import vk "vendor:vulkan"
 
 MAX_LIGHTS :: 10
