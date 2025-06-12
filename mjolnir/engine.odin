@@ -452,6 +452,7 @@ render :: proc(self: ^Engine) -> vk.Result {
   vk.EndCommandBuffer(command_buffer) or_return
   submit_queue_and_present(&self.swapchain, &command_buffer) or_return
   g_frame_index = (g_frame_index + 1) % MAX_FRAMES_IN_FLIGHT
+  self.main.frame_index = g_frame_index
   return .SUCCESS
 }
 

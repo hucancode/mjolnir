@@ -90,7 +90,6 @@ RendererMain :: struct {
     light_uniform:         DataBuffer(SceneLightUniform),
     camera_descriptor_set: vk.DescriptorSet,
     main_pass_image:       ImageBuffer,
-    postprocess_images:    [2]ImageBuffer,
     shadow_maps:           [MAX_SHADOW_MAPS]ImageBuffer,
     cube_shadow_maps:      [MAX_SHADOW_MAPS]CubeImageBuffer,
   },
@@ -992,21 +991,6 @@ renderer_main_init_images :: proc(
       color_format,
       {.COLOR},
     ) or_return
-    for &image in frame.postprocess_images {
-      image = malloc_image_buffer(
-        width,
-        height,
-        color_format,
-        .OPTIMAL,
-        {.COLOR_ATTACHMENT, .SAMPLED, .TRANSFER_SRC, .TRANSFER_DST},
-        {.DEVICE_LOCAL},
-      ) or_return
-      image.view = create_image_view(
-        image.image,
-        color_format,
-        {.COLOR},
-      ) or_return
-    }
   }
   return .SUCCESS
 }
@@ -1014,9 +998,6 @@ renderer_main_init_images :: proc(
 renderer_main_deinit_images :: proc(self: ^RendererMain) {
   for &frame in self.frames {
     image_buffer_deinit(&frame.main_pass_image)
-    for &image in frame.postprocess_images {
-      image_buffer_deinit(&image)
-    }
   }
 }
 
@@ -1042,20 +1023,6 @@ renderer_get_main_pass_image :: proc(self: ^RendererMain) -> vk.Image {
 
 renderer_get_main_pass_view :: proc(self: ^RendererMain) -> vk.ImageView {
   return self.frames[self.frame_index].main_pass_image.view
-}
-
-renderer_get_postprocess_pass_image :: proc(
-  self: ^RendererMain,
-  i: int,
-) -> vk.Image {
-  return self.frames[self.frame_index].postprocess_images[i].image
-}
-
-renderer_get_postprocess_pass_view :: proc(
-  self: ^RendererMain,
-  i: int,
-) -> vk.ImageView {
-  return self.frames[self.frame_index].postprocess_images[i].view
 }
 
 renderer_get_camera_uniform :: proc(
