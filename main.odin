@@ -239,7 +239,7 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
     // test render to texture, use previous frame's main pass image as ground's texture
     ground_mat := resource.get(g_materials, ground_mat_handle)
     prev_frame :=
-      (engine.main.frame_index + MAX_FRAMES_IN_FLIGHT - 1) %
+      (mjolnir.g_frame_index + MAX_FRAMES_IN_FLIGHT - 1) %
       MAX_FRAMES_IN_FLIGHT
     material_update_textures(
       ground_mat,

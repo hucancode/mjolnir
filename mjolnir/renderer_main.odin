@@ -85,14 +85,14 @@ SHADER_UNLIT_VERT :: #load("shader/unlit/vert.spv")
 SHADER_UNLIT_FRAG :: #load("shader/unlit/frag.spv")
 
 FrameMain :: struct {
-  command_buffer:            vk.CommandBuffer,
-  camera_uniform:            DataBuffer(SceneUniform),
-  light_uniform:             DataBuffer(SceneLightUniform),
-  camera_descriptor_set:     vk.DescriptorSet,
-  main_pass_image:           ImageBuffer,
-  postprocess_images:        [2]ImageBuffer,
-  shadow_maps:               [MAX_SHADOW_MAPS]ImageBuffer,
-  cube_shadow_maps:          [MAX_SHADOW_MAPS]CubeImageBuffer,
+  command_buffer:        vk.CommandBuffer,
+  camera_uniform:        DataBuffer(SceneUniform),
+  light_uniform:         DataBuffer(SceneLightUniform),
+  camera_descriptor_set: vk.DescriptorSet,
+  main_pass_image:       ImageBuffer,
+  postprocess_images:    [2]ImageBuffer,
+  shadow_maps:           [MAX_SHADOW_MAPS]ImageBuffer,
+  cube_shadow_maps:      [MAX_SHADOW_MAPS]CubeImageBuffer,
 }
 
 RendererMain :: struct {
@@ -638,7 +638,6 @@ render_main_pass :: proc(
 
 render_single_node :: proc(node: ^Node, cb_context: rawptr) -> bool {
   ctx := (^RenderMeshesContext)(cb_context)
-  frame := ctx.engine.main.frame_index
   #partial switch data in node.attachment {
   case MeshAttachment:
     mesh := resource.get(g_meshes, data.handle)
@@ -661,7 +660,7 @@ render_single_node :: proc(node: ^Node, cb_context: rawptr) -> bool {
     descriptor_sets := [?]vk.DescriptorSet {
       renderer_get_camera_descriptor_set(&ctx.engine.main), // set 0
       material.texture_descriptor_set, // set 1
-      material.skinning_descriptor_sets[frame], // set 2
+      material.skinning_descriptor_sets[g_frame_index], // set 2
       ctx.engine.main.environment_descriptor_set, // set 3
     }
     offsets := [1]u32{0}
@@ -697,9 +696,9 @@ render_single_node :: proc(node: ^Node, cb_context: rawptr) -> bool {
     if mesh_has_skin && node_has_skin {
       material_update_bone_buffer(
         material,
-        node_skinning.bone_buffers[frame].buffer,
-        vk.DeviceSize(node_skinning.bone_buffers[frame].bytes_count),
-        frame,
+        node_skinning.bone_buffers[g_frame_index].buffer,
+        vk.DeviceSize(node_skinning.bone_buffers[g_frame_index].bytes_count),
+        g_frame_index,
       )
       vk.CmdBindVertexBuffers(
         ctx.command_buffer,
