@@ -22,8 +22,8 @@ ShadowShaderConfig :: struct {
 }
 
 FrameShadow :: struct {
-  camera_uniform:               DataBuffer(SceneUniform),
-  shadow_camera_descriptor_set: vk.DescriptorSet,
+  camera_uniform:        DataBuffer(SceneUniform),
+  camera_descriptor_set: vk.DescriptorSet,
 }
 
 RendererShadow :: struct {
@@ -233,6 +233,7 @@ renderer_shadow_deinit :: proc(self: ^RendererShadow) {
   self.skinning_descriptor_set_layout = 0
 }
 
+// TODO: refactor this, make it more generic and flexible
 render_shadow_pass :: proc(
   engine: ^Engine,
   light_uniform: ^SceneLightUniform,
@@ -551,22 +552,22 @@ render_single_shadow :: proc(node: ^Node, cb_context: rawptr) -> bool {
     pipeline: vk.Pipeline
     layout := ctx.engine.shadow.pipeline_layout
     descriptor_sets: []vk.DescriptorSet
-    shadow_frame := &ctx.engine.shadow.frames[g_frame_index]
+    frame := &ctx.engine.shadow.frames[g_frame_index]
     if mesh_has_skin {
       pipeline = renderer_shadow_get_pipeline(&ctx.engine.shadow, {.SKINNING})
       descriptor_sets = {
-        shadow_frame.shadow_camera_descriptor_set, // set 0 (shadow pass)
+        frame.camera_descriptor_set, // set 0 (shadow pass)
         material.skinning_descriptor_sets[g_frame_index], // set 1
       }
     } else {
       pipeline = renderer_shadow_get_pipeline(&ctx.engine.shadow)
       descriptor_sets = {
-        shadow_frame.shadow_camera_descriptor_set, // set 0 (shadow pass)
+        frame.camera_descriptor_set, // set 0 (shadow pass)
       }
     }
     vk.CmdBindPipeline(ctx.command_buffer, .GRAPHICS, pipeline)
     offset_shadow := data_buffer_offset_of(
-      ctx.engine.shadow.frames[g_frame_index].camera_uniform,
+      frame.camera_uniform,
       shadow_idx * 6 + shadow_layer,
     )
     offsets := [1]u32{offset_shadow}
@@ -632,7 +633,7 @@ renderer_shadow_get_pipeline :: proc(
 
 frame_shadow_init :: proc(
   self: ^FrameShadow,
-  shadow_camera_descriptor_set_layout: vk.DescriptorSetLayout,
+  camera_descriptor_set_layout: vk.DescriptorSetLayout,
 ) -> (
   res: vk.Result,
 ) {
@@ -641,7 +642,7 @@ frame_shadow_init :: proc(
     (6 * MAX_LIGHTS),
     {.UNIFORM_BUFFER},
   ) or_return
-  shadow_layout := shadow_camera_descriptor_set_layout
+  shadow_layout := camera_descriptor_set_layout
   vk.AllocateDescriptorSets(
     g_device,
     &{
@@ -650,13 +651,13 @@ frame_shadow_init :: proc(
       descriptorSetCount = 1,
       pSetLayouts = &shadow_layout,
     },
-    &self.shadow_camera_descriptor_set,
+    &self.camera_descriptor_set,
   ) or_return
 
   writes := [?]vk.WriteDescriptorSet {
     {
       sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = self.shadow_camera_descriptor_set,
+      dstSet = self.camera_descriptor_set,
       dstBinding = 0,
       descriptorType = .UNIFORM_BUFFER_DYNAMIC,
       descriptorCount = 1,
@@ -673,5 +674,5 @@ frame_shadow_init :: proc(
 frame_shadow_deinit :: proc(self: ^FrameShadow) {
   // Only need to free descriptor set if using a custom pool, otherwise Vulkan will clean up
   // If you add more resources to FrameShadow, deinit them here
-  self.shadow_camera_descriptor_set = 0
+  self.camera_descriptor_set = 0
 }

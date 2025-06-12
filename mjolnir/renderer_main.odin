@@ -114,8 +114,8 @@ RendererMain :: struct {
 
 renderer_main_build_pbr_pipeline :: proc(
   self: ^RendererMain,
-  target_color_format: vk.Format,
-  target_depth_format: vk.Format,
+  color_format: vk.Format,
+  depth_format: vk.Format,
 ) -> vk.Result {
   bindings_main := [?]vk.DescriptorSetLayoutBinding {
     {   // Scene Uniforms (view, proj, time)
@@ -203,12 +203,12 @@ renderer_main_build_pbr_pipeline :: proc(
     depthWriteEnable = true,
     depthCompareOp   = .LESS,
   }
-  color_formats := [?]vk.Format{target_color_format}
+  color_formats := [?]vk.Format{color_format}
   rendering_info_khr := vk.PipelineRenderingCreateInfoKHR {
     sType                   = .PIPELINE_RENDERING_CREATE_INFO_KHR,
     colorAttachmentCount    = len(color_formats),
     pColorAttachmentFormats = raw_data(color_formats[:]),
-    depthAttachmentFormat   = target_depth_format,
+    depthAttachmentFormat   = depth_format,
   }
   vertex_input_info := vk.PipelineVertexInputStateCreateInfo {
     sType                           = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
@@ -728,7 +728,7 @@ render_to_texture :: proc(
   extent: vk.Extent2D,
   camera: Maybe(geometry.Camera) = nil,
 ) -> vk.Result {
-  command_buffer := renderer_get_command_buffer(&engine.main)
+  command_buffer := engine.command_buffers[g_frame_index]
   render_camera := camera.? or_else engine.scene.camera
   scene_uniform := SceneUniform {
     view       = geometry.calculate_view_matrix(render_camera),
@@ -1119,25 +1119,4 @@ renderer_get_camera_descriptor_set :: proc(
   self: ^RendererMain,
 ) -> vk.DescriptorSet {
   return self.frames[self.frame_index].camera_descriptor_set
-}
-
-renderer_get_command_buffer :: proc(self: ^RendererMain) -> vk.CommandBuffer {
-  if self == nil {
-    return vk.CommandBuffer{}
-  }
-  if self.frame_index >= len(self.frames) {
-    log.errorf(
-      "Error: Invalid frame index",
-      self.frame_index,
-      "vs",
-      len(self.frames),
-    )
-    return vk.CommandBuffer{}
-  }
-  cmd_buffer := self.frames[self.frame_index].command_buffer
-  if cmd_buffer == nil {
-    log.errorf("Error: Command buffer is nil for frame", self.frame_index)
-    return vk.CommandBuffer{}
-  }
-  return cmd_buffer
 }
