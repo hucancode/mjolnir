@@ -168,7 +168,7 @@ swapchain_recreate :: proc(
   return .SUCCESS
 }
 
-swapchain_acquire_next_image :: proc(
+acquire_next_image :: proc(
   self: ^Swapchain,
 ) -> (
   image_index: u32,
@@ -195,7 +195,7 @@ swapchain_acquire_next_image :: proc(
   return
 }
 
-swapchain_submit_queue_and_present :: proc(
+submit_queue_and_present :: proc(
   self: ^Swapchain,
   command_buffer: ^vk.CommandBuffer,
   image_index: u32,

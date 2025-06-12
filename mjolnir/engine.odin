@@ -350,7 +350,7 @@ prepare_light :: proc(node: ^Node, cb_context: rawptr) -> bool {
 }
 
 render :: proc(self: ^Engine) -> vk.Result {
-  image_idx := swapchain_acquire_next_image(&self.swapchain) or_return
+  image_idx := acquire_next_image(&self.swapchain) or_return
   mu.begin(&self.ui.ctx)
   // Use per-frame command buffer from Engine
   command_buffer := self.command_buffers[g_frame_index]
@@ -438,7 +438,7 @@ render :: proc(self: ^Engine) -> vk.Result {
   )
   prepare_image_for_present(command_buffer, self.swapchain.images[image_idx])
   vk.EndCommandBuffer(command_buffer) or_return
-  present_result := swapchain_submit_queue_and_present(
+  present_result := submit_queue_and_present(
     &self.swapchain,
     &command_buffer,
     image_idx,
