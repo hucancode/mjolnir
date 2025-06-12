@@ -84,19 +84,16 @@ SHADER_UBER_FRAG :: #load("shader/uber/frag.spv")
 SHADER_UNLIT_VERT :: #load("shader/unlit/vert.spv")
 SHADER_UNLIT_FRAG :: #load("shader/unlit/frag.spv")
 
-FrameMain :: struct {
-  command_buffer:        vk.CommandBuffer,
-  camera_uniform:        DataBuffer(SceneUniform),
-  light_uniform:         DataBuffer(SceneLightUniform),
-  camera_descriptor_set: vk.DescriptorSet,
-  main_pass_image:       ImageBuffer,
-  postprocess_images:    [2]ImageBuffer,
-  shadow_maps:           [MAX_SHADOW_MAPS]ImageBuffer,
-  cube_shadow_maps:      [MAX_SHADOW_MAPS]CubeImageBuffer,
-}
-
 RendererMain :: struct {
-  frames:                            [MAX_FRAMES_IN_FLIGHT]FrameMain,
+  frames:                            [MAX_FRAMES_IN_FLIGHT]struct {
+    camera_uniform:        DataBuffer(SceneUniform),
+    light_uniform:         DataBuffer(SceneLightUniform),
+    camera_descriptor_set: vk.DescriptorSet,
+    main_pass_image:       ImageBuffer,
+    postprocess_images:    [2]ImageBuffer,
+    shadow_maps:           [MAX_SHADOW_MAPS]ImageBuffer,
+    cube_shadow_maps:      [MAX_SHADOW_MAPS]CubeImageBuffer,
+  },
   frame_index:                       u32,
   camera_descriptor_set_layout:      vk.DescriptorSetLayout,
   environment_descriptor_set_layout: vk.DescriptorSetLayout,
@@ -845,20 +842,105 @@ renderer_main_init :: proc(
   }
   vk.UpdateDescriptorSets(g_device, len(writes), raw_data(writes[:]), 0, nil)
   for &frame in self.frames {
-    frame_main_init(
-      &frame,
-      color_format,
-      width,
-      height,
-      self.camera_descriptor_set_layout,
+    frame.camera_uniform = create_host_visible_buffer(
+      SceneUniform,
+      (MAX_SCENE_UNIFORMS),
+      {.UNIFORM_BUFFER},
     ) or_return
+    frame.light_uniform = create_host_visible_buffer(
+      SceneLightUniform,
+      1,
+      {.UNIFORM_BUFFER},
+    ) or_return
+    for i in 0 ..< MAX_SHADOW_MAPS {
+      depth_image_init(
+        &frame.shadow_maps[i],
+        SHADOW_MAP_SIZE,
+        SHADOW_MAP_SIZE,
+        .D32_SFLOAT,
+        {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
+      ) or_return
+      cube_depth_texture_init(
+        &frame.cube_shadow_maps[i],
+        SHADOW_MAP_SIZE,
+        .D32_SFLOAT,
+        {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
+      ) or_return
+    }
+    vk.AllocateDescriptorSets(
+      g_device,
+      &{
+        sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
+        descriptorPool = g_descriptor_pool,
+        descriptorSetCount = 1,
+        pSetLayouts = &self.camera_descriptor_set_layout,
+      },
+      &frame.camera_descriptor_set,
+    ) or_return
+    shadow_map_image_infos: [MAX_SHADOW_MAPS]vk.DescriptorImageInfo
+    for i in 0 ..< MAX_SHADOW_MAPS {
+      shadow_map_image_infos[i] = {
+        sampler     = g_linear_clamp_sampler,
+        imageView   = frame.shadow_maps[i].view,
+        imageLayout = .SHADER_READ_ONLY_OPTIMAL,
+      }
+    }
+    cube_shadow_map_image_infos: [MAX_SHADOW_MAPS]vk.DescriptorImageInfo
+    for i in 0 ..< MAX_SHADOW_MAPS {
+      cube_shadow_map_image_infos[i] = {
+        sampler     = g_linear_clamp_sampler,
+        imageView   = frame.cube_shadow_maps[i].view,
+        imageLayout = .SHADER_READ_ONLY_OPTIMAL,
+      }
+    }
+    writes := [?]vk.WriteDescriptorSet {
+      {
+        sType = .WRITE_DESCRIPTOR_SET,
+        dstSet = frame.camera_descriptor_set,
+        dstBinding = 0,
+        descriptorType = .UNIFORM_BUFFER_DYNAMIC,
+        descriptorCount = 1,
+        pBufferInfo = &{
+          buffer = frame.camera_uniform.buffer,
+          range = vk.DeviceSize(size_of(SceneUniform)),
+        },
+      },
+      {
+        sType = .WRITE_DESCRIPTOR_SET,
+        dstSet = frame.camera_descriptor_set,
+        dstBinding = 1,
+        descriptorType = .UNIFORM_BUFFER,
+        descriptorCount = 1,
+        pBufferInfo = &{
+          buffer = frame.light_uniform.buffer,
+          range = vk.DeviceSize(size_of(SceneLightUniform)),
+        },
+      },
+      {
+        sType = .WRITE_DESCRIPTOR_SET,
+        dstSet = frame.camera_descriptor_set,
+        dstBinding = 2,
+        descriptorType = .COMBINED_IMAGE_SAMPLER,
+        descriptorCount = MAX_SHADOW_MAPS,
+        pImageInfo = raw_data(shadow_map_image_infos[:]),
+      },
+      {
+        sType = .WRITE_DESCRIPTOR_SET,
+        dstSet = frame.camera_descriptor_set,
+        dstBinding = 3,
+        descriptorType = .COMBINED_IMAGE_SAMPLER,
+        descriptorCount = MAX_SHADOW_MAPS,
+        pImageInfo = raw_data(cube_shadow_map_image_infos[:]),
+      },
+    }
+    vk.UpdateDescriptorSets(g_device, len(writes), raw_data(writes[:]), 0, nil)
   }
+  renderer_main_init_images(self, width, height, color_format)
   self.frame_index = 0
   return .SUCCESS
 }
 
 renderer_main_deinit :: proc(self: ^RendererMain) {
-  for &frame in self.frames do frame_deinit(&frame)
   vk.DestroyPipelineLayout(g_device, self.pipeline_layout, nil)
   vk.DestroyDescriptorSetLayout(
     g_device,
@@ -880,147 +962,24 @@ renderer_main_deinit :: proc(self: ^RendererMain) {
     self.skinning_descriptor_set_layout,
     nil,
   )
+  for &frame in self.frames {
+    data_buffer_deinit(&frame.camera_uniform)
+    data_buffer_deinit(&frame.light_uniform)
+  }
   for p in self.pipelines do vk.DestroyPipeline(g_device, p, nil)
   for p in self.unlit_pipelines do vk.DestroyPipeline(g_device, p, nil)
+  renderer_main_deinit_images(self)
 }
 
-frame_main_init :: proc(
-  self: ^FrameMain,
-  color_format: vk.Format,
-  width: u32,
-  height: u32,
-  camera_descriptor_set_layout: vk.DescriptorSetLayout, // main pass
-) -> (
-  res: vk.Result,
-) {
-  vk.AllocateCommandBuffers(
-    g_device,
-    &{
-      sType = .COMMAND_BUFFER_ALLOCATE_INFO,
-      commandPool = g_command_pool,
-      level = .PRIMARY,
-      commandBufferCount = 1,
-    },
-    &self.command_buffer,
-  ) or_return
-  self.camera_uniform = create_host_visible_buffer(
-    SceneUniform,
-    (MAX_SCENE_UNIFORMS),
-    {.UNIFORM_BUFFER},
-  ) or_return
-  self.light_uniform = create_host_visible_buffer(
-    SceneLightUniform,
-    1,
-    {.UNIFORM_BUFFER},
-  ) or_return
-  for i in 0 ..< MAX_SHADOW_MAPS {
-    depth_image_init(
-      &self.shadow_maps[i],
-      SHADOW_MAP_SIZE,
-      SHADOW_MAP_SIZE,
-      .D32_SFLOAT,
-      {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
-    ) or_return
-    cube_depth_texture_init(
-      &self.cube_shadow_maps[i],
-      SHADOW_MAP_SIZE,
-      .D32_SFLOAT,
-      {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
-    ) or_return
-  }
-  layout := camera_descriptor_set_layout
-  vk.AllocateDescriptorSets(
-    g_device,
-    &{
-      sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
-      descriptorPool = g_descriptor_pool,
-      descriptorSetCount = 1,
-      pSetLayouts = &layout,
-    },
-    &self.camera_descriptor_set,
-  ) or_return
-  shadow_map_image_infos: [MAX_SHADOW_MAPS]vk.DescriptorImageInfo
-  for i in 0 ..< MAX_SHADOW_MAPS {
-    shadow_map_image_infos[i] = {
-      sampler     = g_linear_clamp_sampler,
-      imageView   = self.shadow_maps[i].view,
-      imageLayout = .SHADER_READ_ONLY_OPTIMAL,
-    }
-  }
-  cube_shadow_map_image_infos: [MAX_SHADOW_MAPS]vk.DescriptorImageInfo
-  for i in 0 ..< MAX_SHADOW_MAPS {
-    cube_shadow_map_image_infos[i] = {
-      sampler     = g_linear_clamp_sampler,
-      imageView   = self.cube_shadow_maps[i].view,
-      imageLayout = .SHADER_READ_ONLY_OPTIMAL,
-    }
-  }
-  writes := [?]vk.WriteDescriptorSet {
-    {
-      sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = self.camera_descriptor_set,
-      dstBinding = 0,
-      descriptorType = .UNIFORM_BUFFER_DYNAMIC,
-      descriptorCount = 1,
-      pBufferInfo = &{
-        buffer = self.camera_uniform.buffer,
-        range = vk.DeviceSize(size_of(SceneUniform)),
-      },
-    },
-    {
-      sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = self.camera_descriptor_set,
-      dstBinding = 1,
-      descriptorType = .UNIFORM_BUFFER,
-      descriptorCount = 1,
-      pBufferInfo = &{
-        buffer = self.light_uniform.buffer,
-        range = vk.DeviceSize(size_of(SceneLightUniform)),
-      },
-    },
-    {
-      sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = self.camera_descriptor_set,
-      dstBinding = 2,
-      descriptorType = .COMBINED_IMAGE_SAMPLER,
-      descriptorCount = MAX_SHADOW_MAPS,
-      pImageInfo = raw_data(shadow_map_image_infos[:]),
-    },
-    {
-      sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = self.camera_descriptor_set,
-      dstBinding = 3,
-      descriptorType = .COMBINED_IMAGE_SAMPLER,
-      descriptorCount = MAX_SHADOW_MAPS,
-      pImageInfo = raw_data(cube_shadow_map_image_infos[:]),
-    },
-  }
-  vk.UpdateDescriptorSets(g_device, len(writes), raw_data(writes[:]), 0, nil)
-  frame_init_images(self, width, height, color_format)
-  return .SUCCESS
-}
-
-frame_init_images :: proc(
-  self: ^FrameMain,
+renderer_main_init_images :: proc(
+  self: ^RendererMain,
   width: u32,
   height: u32,
   color_format: vk.Format,
 ) -> vk.Result {
-  self.main_pass_image = malloc_image_buffer(
-    width,
-    height,
-    color_format,
-    .OPTIMAL,
-    {.COLOR_ATTACHMENT, .SAMPLED, .TRANSFER_SRC, .TRANSFER_DST},
-    {.DEVICE_LOCAL},
-  ) or_return
-  self.main_pass_image.view = create_image_view(
-    self.main_pass_image.image,
-    color_format,
-    {.COLOR},
-  ) or_return
-  for &image in self.postprocess_images {
-    image = malloc_image_buffer(
+  depth_image_init(&self.depth_buffer, width, height) or_return
+  for &frame in self.frames {
+    frame.main_pass_image = malloc_image_buffer(
       width,
       height,
       color_format,
@@ -1028,13 +987,37 @@ frame_init_images :: proc(
       {.COLOR_ATTACHMENT, .SAMPLED, .TRANSFER_SRC, .TRANSFER_DST},
       {.DEVICE_LOCAL},
     ) or_return
-    image.view = create_image_view(
-      image.image,
+    frame.main_pass_image.view = create_image_view(
+      frame.main_pass_image.image,
       color_format,
       {.COLOR},
     ) or_return
+    for &image in frame.postprocess_images {
+      image = malloc_image_buffer(
+        width,
+        height,
+        color_format,
+        .OPTIMAL,
+        {.COLOR_ATTACHMENT, .SAMPLED, .TRANSFER_SRC, .TRANSFER_DST},
+        {.DEVICE_LOCAL},
+      ) or_return
+      image.view = create_image_view(
+        image.image,
+        color_format,
+        {.COLOR},
+      ) or_return
+    }
   }
   return .SUCCESS
+}
+
+renderer_main_deinit_images :: proc(self: ^RendererMain) {
+  for &frame in self.frames {
+    image_buffer_deinit(&frame.main_pass_image)
+    for &image in frame.postprocess_images {
+      image_buffer_deinit(&image)
+    }
+  }
 }
 
 renderer_recreate_images :: proc(
@@ -1043,28 +1026,14 @@ renderer_recreate_images :: proc(
   new_extent: vk.Extent2D,
 ) -> vk.Result {
   vk.DeviceWaitIdle(g_device)
-  image_buffer_deinit(&self.depth_buffer)
-  depth_image_init(
-    &self.depth_buffer,
+  renderer_main_deinit_images(self)
+  renderer_main_init_images(
+    self,
     new_extent.width,
     new_extent.height,
+    new_format,
   ) or_return
   return .SUCCESS
-}
-
-
-frame_deinit :: proc(self: ^FrameMain) {
-  vk.FreeCommandBuffers(g_device, g_command_pool, 1, &self.command_buffer)
-  data_buffer_deinit(&self.camera_uniform)
-  data_buffer_deinit(&self.light_uniform)
-  frame_deinit_images(self)
-}
-
-frame_deinit_images :: proc(self: ^FrameMain) {
-  image_buffer_deinit(&self.main_pass_image)
-  for &image in self.postprocess_images {
-    image_buffer_deinit(&image)
-  }
 }
 
 renderer_get_main_pass_image :: proc(self: ^RendererMain) -> vk.Image {

@@ -56,15 +56,6 @@ PostprocessEffect :: union {
   OutlineEffect,
 }
 
-FramePostProcess :: struct {
-  image_available_semaphore: vk.Semaphore,
-  render_finished_semaphore: vk.Semaphore,
-  fence:                     vk.Fence,
-  command_buffer:            vk.CommandBuffer,
-  descriptor_set:            vk.DescriptorSet,
-  postprocess_images:        [2]ImageBuffer,
-}
-
 RendererPostProcess :: struct {
   pipelines:              [len(PostProcessEffectType)]vk.Pipeline,
   pipeline_layouts:       [len(PostProcessEffectType)]vk.PipelineLayout,
@@ -73,7 +64,14 @@ RendererPostProcess :: struct {
   sampler:                vk.Sampler,
   effect_stack:           [dynamic]PostprocessEffect,
   images:                 [2]ImageBuffer,
-  frames:                 [MAX_FRAMES_IN_FLIGHT]FramePostProcess,
+  frames:                 [MAX_FRAMES_IN_FLIGHT]struct {
+    image_available_semaphore: vk.Semaphore,
+    render_finished_semaphore: vk.Semaphore,
+    fence:                     vk.Fence,
+    command_buffer:            vk.CommandBuffer,
+    descriptor_set:            vk.DescriptorSet,
+    postprocess_images:        [2]ImageBuffer,
+  },
 }
 
 get_effect_type :: proc(effect: PostprocessEffect) -> PostProcessEffectType {
@@ -342,13 +340,49 @@ renderer_postprocess_init :: proc(
   postprocess_create_sampler(self) or_return
   log.info("Postprocess pipeline initialized successfully")
   for &frame in self.frames {
-    frame_postprocess_init(
-      &frame,
-      color_format,
-      width,
-      height,
-      self.descriptor_set_layouts[0],
+    vk.CreateSemaphore(
+      g_device,
+      &{sType = .SEMAPHORE_CREATE_INFO},
+      nil,
+      &frame.image_available_semaphore,
     ) or_return
+    vk.CreateSemaphore(
+      g_device,
+      &{sType = .SEMAPHORE_CREATE_INFO},
+      nil,
+      &frame.render_finished_semaphore,
+    ) or_return
+    vk.CreateFence(
+      g_device,
+      &{sType = .FENCE_CREATE_INFO, flags = {.SIGNALED}},
+      nil,
+      &frame.fence,
+    ) or_return
+    vk.AllocateDescriptorSets(
+      g_device,
+      &{
+        sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
+        descriptorPool = g_descriptor_pool,
+        descriptorSetCount = 1,
+        pSetLayouts = &self.descriptor_set_layouts[0],
+      },
+      &frame.descriptor_set,
+    ) or_return
+    for &image in frame.postprocess_images {
+      image = malloc_image_buffer(
+        width,
+        height,
+        color_format,
+        .OPTIMAL,
+        {.COLOR_ATTACHMENT, .SAMPLED, .TRANSFER_SRC, .TRANSFER_DST},
+        {.DEVICE_LOCAL},
+      ) or_return
+      image.view = create_image_view(
+        image.image,
+        color_format,
+        {.COLOR},
+      ) or_return
+    }
   }
   return .SUCCESS
 }
@@ -414,7 +448,16 @@ postprocess_create_sampler :: proc(self: ^RendererPostProcess) -> vk.Result {
 }
 
 renderer_postprocess_deinit :: proc(self: ^RendererPostProcess) {
-  for &frame in self.frames do frame_postprocess_deinit(&frame)
+  for &frame in self.frames {
+    vk.DestroySemaphore(g_device, frame.image_available_semaphore, nil)
+    vk.DestroySemaphore(g_device, frame.render_finished_semaphore, nil)
+    vk.DestroyFence(g_device, frame.fence, nil)
+    vk.FreeCommandBuffers(g_device, g_command_pool, 1, &frame.command_buffer)
+    for &image in frame.postprocess_images {
+      image_buffer_deinit(&image)
+    }
+    frame.descriptor_set = 0
+  }
   for &p in self.pipelines {
     vk.DestroyPipeline(g_device, p, nil)
     p = 0
@@ -567,81 +610,4 @@ postprocess_push_effect_constants :: proc(
       &e,
     )
   }
-}
-
-frame_postprocess_init :: proc(
-  self: ^FramePostProcess,
-  color_format: vk.Format,
-  width: u32,
-  height: u32,
-  descriptor_set_layout: vk.DescriptorSetLayout,
-) -> (
-  res: vk.Result,
-) {
-  vk.AllocateCommandBuffers(
-    g_device,
-    &{
-      sType = .COMMAND_BUFFER_ALLOCATE_INFO,
-      commandPool = g_command_pool,
-      level = .PRIMARY,
-      commandBufferCount = 1,
-    },
-    &self.command_buffer,
-  ) or_return
-  vk.CreateSemaphore(
-    g_device,
-    &{sType = .SEMAPHORE_CREATE_INFO},
-    nil,
-    &self.image_available_semaphore,
-  ) or_return
-  vk.CreateSemaphore(
-    g_device,
-    &{sType = .SEMAPHORE_CREATE_INFO},
-    nil,
-    &self.render_finished_semaphore,
-  ) or_return
-  vk.CreateFence(
-    g_device,
-    &{sType = .FENCE_CREATE_INFO, flags = {.SIGNALED}},
-    nil,
-    &self.fence,
-  ) or_return
-  layout := descriptor_set_layout
-  vk.AllocateDescriptorSets(
-    g_device,
-    &{
-      sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
-      descriptorPool = g_descriptor_pool,
-      descriptorSetCount = 1,
-      pSetLayouts = &layout,
-    },
-    &self.descriptor_set,
-  ) or_return
-  for &image in self.postprocess_images {
-    image = malloc_image_buffer(
-      width,
-      height,
-      color_format,
-      .OPTIMAL,
-      {.COLOR_ATTACHMENT, .SAMPLED, .TRANSFER_SRC, .TRANSFER_DST},
-      {.DEVICE_LOCAL},
-    ) or_return
-    image.view = create_image_view(
-      image.image,
-      color_format,
-      {.COLOR},
-    ) or_return
-  }
-  return .SUCCESS
-}
-
-frame_postprocess_deinit :: proc(self: ^FramePostProcess) {
-  vk.DestroySemaphore(g_device, self.image_available_semaphore, nil)
-  vk.DestroySemaphore(g_device, self.render_finished_semaphore, nil)
-  vk.DestroyFence(g_device, self.fence, nil)
-  vk.FreeCommandBuffers(g_device, g_command_pool, 1, &self.command_buffer)
-  for &image in self.postprocess_images {
-    image_buffer_deinit(&image)
-  }
-  self.descriptor_set = 0
 }

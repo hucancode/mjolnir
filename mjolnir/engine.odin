@@ -287,6 +287,12 @@ update :: proc(self: ^Engine) -> bool {
 
 deinit :: proc(self: ^Engine) {
   vk.DeviceWaitIdle(g_device)
+  vk.FreeCommandBuffers(
+    g_device,
+    g_command_pool,
+    len(self.command_buffers),
+    raw_data(self.command_buffers[:]),
+  )
   renderer_ui_deinit(&self.ui)
   scene_deinit(&self.scene)
   renderer_main_deinit(&self.main)

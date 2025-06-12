@@ -21,17 +21,15 @@ ShadowShaderConfig :: struct {
   is_skinned: b32,
 }
 
-FrameShadow :: struct {
-  camera_uniform:        DataBuffer(SceneUniform),
-  camera_descriptor_set: vk.DescriptorSet,
-}
-
 RendererShadow :: struct {
   pipeline_layout:                vk.PipelineLayout,
   pipelines:                      [SHADOW_SHADER_VARIANT_COUNT]vk.Pipeline,
   camera_descriptor_set_layout:   vk.DescriptorSetLayout,
   skinning_descriptor_set_layout: vk.DescriptorSetLayout,
-  frames:                         [MAX_FRAMES_IN_FLIGHT]FrameShadow,
+  frames:                         [MAX_FRAMES_IN_FLIGHT]struct {
+    camera_uniform:        DataBuffer(SceneUniform),
+    camera_descriptor_set: vk.DescriptorSet,
+  },
 }
 
 renderer_shadow_init :: proc(
@@ -206,13 +204,45 @@ renderer_shadow_init :: proc(
     raw_data(self.pipelines[:]),
   ) or_return
   for &frame in self.frames {
-    frame_shadow_init(&frame, self.camera_descriptor_set_layout) or_return
+    frame.camera_uniform = create_host_visible_buffer(
+      SceneUniform,
+      (6 * MAX_LIGHTS),
+      {.UNIFORM_BUFFER},
+    ) or_return
+    vk.AllocateDescriptorSets(
+      g_device,
+      &{
+        sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
+        descriptorPool = g_descriptor_pool,
+        descriptorSetCount = 1,
+        pSetLayouts = &self.camera_descriptor_set_layout,
+      },
+      &frame.camera_descriptor_set,
+    ) or_return
+
+    writes := [?]vk.WriteDescriptorSet {
+      {
+        sType = .WRITE_DESCRIPTOR_SET,
+        dstSet = frame.camera_descriptor_set,
+        dstBinding = 0,
+        descriptorType = .UNIFORM_BUFFER_DYNAMIC,
+        descriptorCount = 1,
+        pBufferInfo = &{
+          buffer = frame.camera_uniform.buffer,
+          range = vk.DeviceSize(size_of(SceneUniform)),
+        },
+      },
+    }
+    vk.UpdateDescriptorSets(g_device, len(writes), raw_data(writes[:]), 0, nil)
   }
   return .SUCCESS
 }
 
 renderer_shadow_deinit :: proc(self: ^RendererShadow) {
-  for &frame in self.frames do frame_shadow_deinit(&frame)
+  for &frame in self.frames {
+    // descriptor set will eventually be freed by the pool
+    frame.camera_descriptor_set = 0
+  }
   for &p in self.pipelines {
     vk.DestroyPipeline(g_device, p, nil)
     p = 0
@@ -629,50 +659,4 @@ renderer_shadow_get_pipeline :: proc(
   features: ShadowShaderFeatureSet = {},
 ) -> vk.Pipeline {
   return self.pipelines[transmute(u32)features]
-}
-
-frame_shadow_init :: proc(
-  self: ^FrameShadow,
-  camera_descriptor_set_layout: vk.DescriptorSetLayout,
-) -> (
-  res: vk.Result,
-) {
-  self.camera_uniform = create_host_visible_buffer(
-    SceneUniform,
-    (6 * MAX_LIGHTS),
-    {.UNIFORM_BUFFER},
-  ) or_return
-  shadow_layout := camera_descriptor_set_layout
-  vk.AllocateDescriptorSets(
-    g_device,
-    &{
-      sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
-      descriptorPool = g_descriptor_pool,
-      descriptorSetCount = 1,
-      pSetLayouts = &shadow_layout,
-    },
-    &self.camera_descriptor_set,
-  ) or_return
-
-  writes := [?]vk.WriteDescriptorSet {
-    {
-      sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = self.camera_descriptor_set,
-      dstBinding = 0,
-      descriptorType = .UNIFORM_BUFFER_DYNAMIC,
-      descriptorCount = 1,
-      pBufferInfo = &{
-        buffer = self.camera_uniform.buffer,
-        range = vk.DeviceSize(size_of(SceneUniform)),
-      },
-    },
-  }
-  vk.UpdateDescriptorSets(g_device, len(writes), raw_data(writes[:]), 0, nil)
-  return .SUCCESS
-}
-
-frame_shadow_deinit :: proc(self: ^FrameShadow) {
-  // Only need to free descriptor set if using a custom pool, otherwise Vulkan will clean up
-  // If you add more resources to FrameShadow, deinit them here
-  self.camera_descriptor_set = 0
 }
