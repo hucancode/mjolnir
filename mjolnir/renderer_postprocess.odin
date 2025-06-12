@@ -163,7 +163,7 @@ postprocess_update_input :: proc(
     descriptorType  = .COMBINED_IMAGE_SAMPLER,
     descriptorCount = 1,
     pImageInfo      = &{
-      sampler = self.sampler,
+      sampler = g_nearest_repeat_sampler,
       imageView = input_view,
       imageLayout = .SHADER_READ_ONLY_OPTIMAL,
     },
@@ -248,8 +248,39 @@ renderer_postprocess_init :: proc(
     depthTestEnable  = false,
     depthWriteEnable = false,
   }
-  postprocess_create_descriptor_set_layouts(self) or_return
-  postprocess_allocate_descriptor_sets(self) or_return
+  bindings := [?]vk.DescriptorSetLayoutBinding {
+    {
+      binding = 0,
+      descriptorType = .COMBINED_IMAGE_SAMPLER,
+      descriptorCount = 1,
+      stageFlags = {.FRAGMENT},
+    },
+  }
+  layout_info := vk.DescriptorSetLayoutCreateInfo {
+    sType        = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+    bindingCount = len(bindings),
+    pBindings    = raw_data(bindings[:]),
+  }
+  for &set_layout in self.descriptor_set_layouts {
+    vk.CreateDescriptorSetLayout(
+      g_device,
+      &layout_info,
+      nil,
+      &set_layout,
+    ) or_return
+  }
+  for &set in self.descriptor_sets {
+    vk.AllocateDescriptorSets(
+      g_device,
+      &{
+        sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
+        descriptorPool = g_descriptor_pool,
+        descriptorSetCount = len(self.descriptor_set_layouts),
+        pSetLayouts = raw_data(self.descriptor_set_layouts[:]),
+      },
+      &set,
+    ) or_return
+  }
   for &image in self.images {
     image = malloc_image_buffer(
       width,
@@ -337,7 +368,6 @@ renderer_postprocess_init :: proc(
     nil,
     raw_data(self.pipelines[:]),
   ) or_return
-  postprocess_create_sampler(self) or_return
   log.info("Postprocess pipeline initialized successfully")
   for &frame in self.frames {
     vk.CreateSemaphore(
@@ -384,66 +414,8 @@ renderer_postprocess_init :: proc(
       ) or_return
     }
   }
-  return .SUCCESS
-}
-
-postprocess_create_descriptor_set_layouts :: proc(
-  self: ^RendererPostProcess,
-) -> vk.Result {
-  bindings := [?]vk.DescriptorSetLayoutBinding {
-    {
-      binding = 0,
-      descriptorType = .COMBINED_IMAGE_SAMPLER,
-      descriptorCount = 1,
-      stageFlags = {.FRAGMENT},
-    },
-  }
-  layout_info := vk.DescriptorSetLayoutCreateInfo {
-    sType        = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-    bindingCount = len(bindings),
-    pBindings    = raw_data(bindings[:]),
-  }
-  for &set_layout in self.descriptor_set_layouts {
-    vk.CreateDescriptorSetLayout(
-      g_device,
-      &layout_info,
-      nil,
-      &set_layout,
-    ) or_return
-  }
-  return .SUCCESS
-}
-
-postprocess_allocate_descriptor_sets :: proc(
-  self: ^RendererPostProcess,
-) -> vk.Result {
-  for &set in self.descriptor_sets {
-    vk.AllocateDescriptorSets(
-      g_device,
-      &{
-        sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
-        descriptorPool = g_descriptor_pool,
-        descriptorSetCount = len(self.descriptor_set_layouts),
-        pSetLayouts = raw_data(self.descriptor_set_layouts[:]),
-      },
-      &set,
-    ) or_return
-  }
-  return .SUCCESS
-}
-
-postprocess_create_sampler :: proc(self: ^RendererPostProcess) -> vk.Result {
-  sampler_info := vk.SamplerCreateInfo {
-    sType        = .SAMPLER_CREATE_INFO,
-    magFilter    = .LINEAR,
-    minFilter    = .LINEAR,
-    addressModeU = .CLAMP_TO_EDGE,
-    addressModeV = .CLAMP_TO_EDGE,
-    addressModeW = .CLAMP_TO_EDGE,
-    mipmapMode   = .LINEAR,
-    borderColor  = .FLOAT_OPAQUE_WHITE,
-  }
-  vk.CreateSampler(g_device, &sampler_info, nil, &self.sampler) or_return
+  postprocess_update_input(self, 1, self.images[0].view)
+  postprocess_update_input(self, 2, self.images[1].view)
   return .SUCCESS
 }
 
@@ -470,7 +442,6 @@ renderer_postprocess_deinit :: proc(self: ^RendererPostProcess) {
     vk.DestroyDescriptorSetLayout(g_device, layout, nil)
     layout = 0
   }
-  vk.DestroySampler(g_device, self.sampler, nil);self.sampler = 0
   delete(self.effect_stack)
   for &image in self.images do image_buffer_deinit(&image)
 }
@@ -488,8 +459,6 @@ render_postprocess_stack :: proc(
     return
   }
   postprocess_update_input(self, 0, input_view)
-  postprocess_update_input(self, 1, self.images[0].view)
-  postprocess_update_input(self, 2, self.images[1].view)
   for effect, i in self.effect_stack {
     is_first := i == 0
     is_last := i == len(self.effect_stack) - 1
@@ -546,68 +515,54 @@ render_postprocess_stack :: proc(
       0,
       nil,
     )
-    postprocess_push_effect_constants(
-      command_buffer,
-      self,
-      effect_type,
-      effect,
-    )
+    switch &e in effect {
+    case BlurEffect:
+      vk.CmdPushConstants(
+        command_buffer,
+        self.pipeline_layouts[effect_type],
+        {.FRAGMENT},
+        0,
+        size_of(BlurEffect),
+        &e,
+      )
+    case GrayscaleEffect:
+      vk.CmdPushConstants(
+        command_buffer,
+        self.pipeline_layouts[effect_type],
+        {.FRAGMENT},
+        0,
+        size_of(GrayscaleEffect),
+        &e,
+      )
+    case ToneMapEffect:
+      vk.CmdPushConstants(
+        command_buffer,
+        self.pipeline_layouts[effect_type],
+        {.FRAGMENT},
+        0,
+        size_of(ToneMapEffect),
+        &e,
+      )
+    case BloomEffect:
+      vk.CmdPushConstants(
+        command_buffer,
+        self.pipeline_layouts[effect_type],
+        {.FRAGMENT},
+        0,
+        size_of(BloomEffect),
+        &e,
+      )
+    case OutlineEffect:
+      vk.CmdPushConstants(
+        command_buffer,
+        self.pipeline_layouts[effect_type],
+        {.FRAGMENT},
+        0,
+        size_of(OutlineEffect),
+        &e,
+      )
+    }
     vk.CmdDraw(command_buffer, 3, 1, 0, 0)
     vk.CmdEndRenderingKHR(command_buffer)
-  }
-}
-
-postprocess_push_effect_constants :: proc(
-  command_buffer: vk.CommandBuffer,
-  self: ^RendererPostProcess,
-  effect_type: PostProcessEffectType,
-  effect: PostprocessEffect,
-) {
-  switch &e in effect {
-  case BlurEffect:
-    vk.CmdPushConstants(
-      command_buffer,
-      self.pipeline_layouts[effect_type],
-      {.FRAGMENT},
-      0,
-      size_of(BlurEffect),
-      &e,
-    )
-  case GrayscaleEffect:
-    vk.CmdPushConstants(
-      command_buffer,
-      self.pipeline_layouts[effect_type],
-      {.FRAGMENT},
-      0,
-      size_of(GrayscaleEffect),
-      &e,
-    )
-  case ToneMapEffect:
-    vk.CmdPushConstants(
-      command_buffer,
-      self.pipeline_layouts[effect_type],
-      {.FRAGMENT},
-      0,
-      size_of(ToneMapEffect),
-      &e,
-    )
-  case BloomEffect:
-    vk.CmdPushConstants(
-      command_buffer,
-      self.pipeline_layouts[effect_type],
-      {.FRAGMENT},
-      0,
-      size_of(BloomEffect),
-      &e,
-    )
-  case OutlineEffect:
-    vk.CmdPushConstants(
-      command_buffer,
-      self.pipeline_layouts[effect_type],
-      {.FRAGMENT},
-      0,
-      size_of(OutlineEffect),
-      &e,
-    )
   }
 }
