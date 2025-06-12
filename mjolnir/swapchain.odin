@@ -12,6 +12,7 @@ Swapchain :: struct {
   extent:                     vk.Extent2D,
   images:                     []vk.Image,
   views:                      []vk.ImageView,
+  image_index:                u32,
   in_flight_fences:           [MAX_FRAMES_IN_FLIGHT]vk.Fence,
   image_available_semaphores: [MAX_FRAMES_IN_FLIGHT]vk.Semaphore,
   render_finished_semaphores: [MAX_FRAMES_IN_FLIGHT]vk.Semaphore,
@@ -171,7 +172,6 @@ swapchain_recreate :: proc(
 acquire_next_image :: proc(
   self: ^Swapchain,
 ) -> (
-  image_index: u32,
   result: vk.Result,
 ) {
   log.debug("waiting for fence...")
@@ -188,7 +188,7 @@ acquire_next_image :: proc(
     math.max(u64),
     self.image_available_semaphores[g_frame_index],
     0,
-    &image_index,
+    &self.image_index,
   ) or_return
   vk.ResetFences(g_device, 1, &self.in_flight_fences[g_frame_index]) or_return
   result = .SUCCESS
@@ -198,7 +198,6 @@ acquire_next_image :: proc(
 submit_queue_and_present :: proc(
   self: ^Swapchain,
   command_buffer: ^vk.CommandBuffer,
-  image_index: u32,
 ) -> vk.Result {
   log.debug("============ submitting queue... =============")
   wait_stage_mask: vk.PipelineStageFlags = {.COLOR_ATTACHMENT_OUTPUT}
@@ -218,7 +217,7 @@ submit_queue_and_present :: proc(
     &submit_info,
     self.in_flight_fences[g_frame_index],
   ) or_return
-  image_indices := [?]u32{image_index}
+  image_indices := [?]u32{self.image_index}
   present_info := vk.PresentInfoKHR {
     sType              = .PRESENT_INFO_KHR,
     waitSemaphoreCount = 1,

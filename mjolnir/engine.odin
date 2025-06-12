@@ -356,7 +356,7 @@ prepare_light :: proc(node: ^Node, cb_context: rawptr) -> bool {
 }
 
 render :: proc(self: ^Engine) -> vk.Result {
-  image_idx := acquire_next_image(&self.swapchain) or_return
+  acquire_next_image(&self.swapchain) or_return
   mu.begin(&self.ui.ctx)
   // Use per-frame command buffer from Engine
   command_buffer := self.command_buffers[g_frame_index]
@@ -433,22 +433,24 @@ render :: proc(self: ^Engine) -> vk.Result {
     command_buffer,
     renderer_get_main_pass_image(&self.main),
   )
-  prepare_image_for_render(command_buffer, self.swapchain.images[image_idx])
+  prepare_image_for_render(
+    command_buffer,
+    self.swapchain.images[self.swapchain.image_index],
+  )
   log.debug("============ rendering post processes... =============")
   render_postprocess_stack(
     &self.postprocess,
     command_buffer,
     renderer_get_main_pass_view(&self.main),
-    self.swapchain.views[image_idx],
+    self.swapchain.views[self.swapchain.image_index],
     self.swapchain.extent,
   )
-  prepare_image_for_present(command_buffer, self.swapchain.images[image_idx])
+  prepare_image_for_present(
+    command_buffer,
+    self.swapchain.images[self.swapchain.image_index],
+  )
   vk.EndCommandBuffer(command_buffer) or_return
-  submit_queue_and_present(
-    &self.swapchain,
-    &command_buffer,
-    image_idx,
-  ) or_return
+  submit_queue_and_present(&self.swapchain, &command_buffer) or_return
   g_frame_index = (g_frame_index + 1) % MAX_FRAMES_IN_FLIGHT
   return .SUCCESS
 }
