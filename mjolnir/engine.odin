@@ -444,14 +444,11 @@ render :: proc(self: ^Engine) -> vk.Result {
   )
   prepare_image_for_present(command_buffer, self.swapchain.images[image_idx])
   vk.EndCommandBuffer(command_buffer) or_return
-  present_result := submit_queue_and_present(
+  submit_queue_and_present(
     &self.swapchain,
     &command_buffer,
     image_idx,
-  )
-  if present_result != .SUCCESS {
-    return present_result
-  }
+  ) or_return
   g_frame_index = (g_frame_index + 1) % MAX_FRAMES_IN_FLIGHT
   return .SUCCESS
 }
