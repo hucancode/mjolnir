@@ -159,7 +159,7 @@ init :: proc(
     self.swapchain.extent.width,
     self.swapchain.extent.height,
   ) or_return
-  ui_init(
+  renderer_ui_init(
     &self.ui,
     self,
     self.swapchain.format.format,
@@ -358,16 +358,13 @@ prepare_light :: proc(node: ^Node, cb_context: rawptr) -> bool {
 render :: proc(self: ^Engine) -> vk.Result {
   acquire_next_image(&self.swapchain) or_return
   mu.begin(&self.ui.ctx)
-  // Use per-frame command buffer from Engine
   command_buffer := self.command_buffers[g_frame_index]
   vk.ResetCommandBuffer(command_buffer, {}) or_return
-  begin_info := vk.CommandBufferBeginInfo {
+  vk.BeginCommandBuffer(command_buffer, &{
     sType = .COMMAND_BUFFER_BEGIN_INFO,
     flags = {.ONE_TIME_SUBMIT},
-  }
-  log.debug("begining command...")
-  vk.BeginCommandBuffer(command_buffer, &begin_info) or_return
-  // Run particle compute pass before starting rendering
+  }) or_return
+  // dispatch computation early and doing other work while GPU is busy
   compute_particles(&self.particle, command_buffer)
   elapsed_seconds := time.duration_seconds(time.since(self.start_timestamp))
   scene_uniform := SceneUniform {
@@ -385,35 +382,45 @@ render :: proc(self: ^Engine) -> vk.Result {
     log.errorf("[RENDER] Error during light collection")
   }
   log.debug("============ rendering shadow pass...============ ")
-  render_shadow_pass(self, &light_uniform, command_buffer) or_return
-  log.debug("============ rendering main pass... =============")
+  renderer_shadow_begin(self, &light_uniform, command_buffer)
+  renderer_shadow_render(self, &light_uniform, command_buffer)
+  renderer_shadow_end(self, &light_uniform, command_buffer)
   prepare_image_for_render(
     command_buffer,
     renderer_get_main_pass_image(&self.main),
   )
-  render_main_pass(
-    &self.main,
-    command_buffer,
-    camera_frustum,
-    self.swapchain.extent,
-  ) or_return
-  rendered_count: u32 = 0
-  render_meshes_ctx := RenderMeshesContext {
-    engine         = self,
-    command_buffer = command_buffer,
-    camera_frustum = camera_frustum,
-    rendered_count = &rendered_count,
-  }
-  if !scene_traverse_linear(
-    &self.scene,
-    &render_meshes_ctx,
-    render_single_node,
-  ) {
-    log.errorf("[RENDER] Error during scene mesh rendering")
-  }
+  log.debug("============ rendering main pass... =============")
+  renderer_main_begin(self, &scene_uniform, &light_uniform, command_buffer)
+  renderer_main_render(self, &scene_uniform, &light_uniform, command_buffer)
   data_buffer_write(renderer_get_camera_uniform(&self.main), &scene_uniform)
   data_buffer_write(renderer_get_light_uniform(&self.main), &light_uniform)
-  render_particles(&self.particle, self.scene.camera, command_buffer)
+  renderer_main_end(self, &scene_uniform, &light_uniform, command_buffer)
+  log.debug("============ rendering particles... =============")
+  renderer_particle_begin(self, command_buffer)
+  renderer_particle_render(self, command_buffer)
+  renderer_particle_end(self, command_buffer)
+  prepare_image_for_shader_read(
+    command_buffer,
+    renderer_get_main_pass_image(&self.main),
+  )
+  log.debug("============ rendering post processes... =============")
+  renderer_postprocess_begin(
+    &self.postprocess,
+    command_buffer,
+    renderer_get_main_pass_view(&self.main),
+    self.swapchain.extent,
+  )
+  prepare_image_for_render(
+    command_buffer,
+    self.swapchain.images[self.swapchain.image_index],
+  )
+  renderer_postprocess_render(
+    &self.postprocess,
+    command_buffer,
+    self.swapchain.extent,
+    self.swapchain.views[self.swapchain.image_index],
+  )
+  renderer_postprocess_end(&self.postprocess, command_buffer)
   if mu.window(&self.ui.ctx, "Inspector", {40, 40, 300, 150}, {.NO_CLOSE}) {
     mu.label(
       &self.ui.ctx,
@@ -427,24 +434,14 @@ render :: proc(self: ^Engine) -> vk.Result {
     self.render2d_proc(self, &self.ui.ctx)
   }
   mu.end(&self.ui.ctx)
-  ui_render(&self.ui, command_buffer)
-  vk.CmdEndRenderingKHR(command_buffer)
-  prepare_image_for_shader_read(
+  renderer_ui_begin(
+    &self.ui,
     command_buffer,
-    renderer_get_main_pass_image(&self.main),
-  )
-  prepare_image_for_render(
-    command_buffer,
-    self.swapchain.images[self.swapchain.image_index],
-  )
-  log.debug("============ rendering post processes... =============")
-  render_postprocess_stack(
-    &self.postprocess,
-    command_buffer,
-    renderer_get_main_pass_view(&self.main),
     self.swapchain.views[self.swapchain.image_index],
     self.swapchain.extent,
   )
+  renderer_ui_render(&self.ui, command_buffer)
+  renderer_ui_end(&self.ui, command_buffer)
   prepare_image_for_present(
     command_buffer,
     self.swapchain.images[self.swapchain.image_index],

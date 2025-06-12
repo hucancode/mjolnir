@@ -585,15 +585,16 @@ renderer_main_get_pipeline :: proc(
   return self.unlit_pipelines[transmute(u32)material.features]
 }
 
-render_main_pass :: proc(
-  self: ^RendererMain,
+// Modular main pass API
+renderer_main_begin :: proc(
+  engine: ^Engine,
+  scene_uniform: ^SceneUniform,
+  light_uniform: ^SceneLightUniform,
   command_buffer: vk.CommandBuffer,
-  camera_frustum: geometry.Frustum,
-  swapchain_extent: vk.Extent2D,
-) -> vk.Result {
+) {
   color_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
-    imageView = renderer_get_main_pass_view(self),
+    imageView = renderer_get_main_pass_view(&engine.main),
     imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
     loadOp = .CLEAR,
     storeOp = .STORE,
@@ -601,7 +602,7 @@ render_main_pass :: proc(
   }
   depth_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
-    imageView = self.depth_buffer.view,
+    imageView = engine.main.depth_buffer.view,
     imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
     loadOp = .CLEAR,
     storeOp = .STORE,
@@ -609,7 +610,7 @@ render_main_pass :: proc(
   }
   render_info := vk.RenderingInfoKHR {
     sType = .RENDERING_INFO_KHR,
-    renderArea = {extent = swapchain_extent},
+    renderArea = {extent = engine.swapchain.extent},
     layerCount = 1,
     colorAttachmentCount = 1,
     pColorAttachments = &color_attachment,
@@ -618,102 +619,48 @@ render_main_pass :: proc(
   vk.CmdBeginRenderingKHR(command_buffer, &render_info)
   viewport := vk.Viewport {
     x        = 0.0,
-    y        = f32(swapchain_extent.height),
-    width    = f32(swapchain_extent.width),
-    height   = -f32(swapchain_extent.height),
+    y        = f32(engine.swapchain.extent.height),
+    width    = f32(engine.swapchain.extent.width),
+    height   = -f32(engine.swapchain.extent.height),
     minDepth = 0.0,
     maxDepth = 1.0,
   }
   scissor := vk.Rect2D {
-    extent = swapchain_extent,
+    extent = engine.swapchain.extent,
   }
   vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
   vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
-  return .SUCCESS
+  data_buffer_write(renderer_get_camera_uniform(&engine.main), scene_uniform)
+  data_buffer_write(renderer_get_light_uniform(&engine.main), light_uniform)
 }
 
-render_single_node :: proc(node: ^Node, cb_context: rawptr) -> bool {
-  ctx := (^RenderMeshesContext)(cb_context)
-  #partial switch data in node.attachment {
-  case MeshAttachment:
-    mesh := resource.get(g_meshes, data.handle)
-    if mesh == nil {
-      return true
-    }
-    material := resource.get(g_materials, data.material)
-    if material == nil {
-      return true
-    }
-    world_aabb := geometry.aabb_transform(
-      mesh.aabb,
-      node.transform.world_matrix,
-    )
-    if !geometry.frustum_test_aabb(&ctx.camera_frustum, world_aabb) {
-      return true
-    }
-    pipeline := renderer_main_get_pipeline(&ctx.engine.main, material)
-    layout := ctx.engine.main.pipeline_layout
-    descriptor_sets := [?]vk.DescriptorSet {
-      renderer_get_camera_descriptor_set(&ctx.engine.main), // set 0
-      material.texture_descriptor_set, // set 1
-      material.skinning_descriptor_sets[g_frame_index], // set 2
-      ctx.engine.main.environment_descriptor_set, // set 3
-    }
-    vk.CmdBindPipeline(ctx.command_buffer, .GRAPHICS, pipeline)
-    vk.CmdBindDescriptorSets(
-      ctx.command_buffer,
-      .GRAPHICS,
-      layout,
-      0,
-      u32(len(descriptor_sets)),
-      raw_data(descriptor_sets[:]),
-      0,
-      nil,
-    )
-    vk.CmdPushConstants(
-      ctx.command_buffer,
-      layout,
-      {.VERTEX},
-      0,
-      size_of(linalg.Matrix4f32),
-      &node.transform.world_matrix,
-    )
-    offset: vk.DeviceSize = 0
-    vk.CmdBindVertexBuffers(
-      ctx.command_buffer,
-      0,
-      1,
-      &mesh.vertex_buffer.buffer,
-      &offset,
-    )
-    mesh_skinning, mesh_has_skin := &mesh.skinning.?
-    node_skinning, node_has_skin := data.skinning.?
-    if mesh_has_skin && node_has_skin {
-      material_update_bone_buffer(
-        material,
-        node_skinning.bone_buffers[g_frame_index].buffer,
-        vk.DeviceSize(node_skinning.bone_buffers[g_frame_index].bytes_count),
-        g_frame_index,
-      )
-      vk.CmdBindVertexBuffers(
-        ctx.command_buffer,
-        1,
-        1,
-        &mesh_skinning.skin_buffer.buffer,
-        &offset,
-      )
-    }
-    vk.CmdBindIndexBuffer(
-      ctx.command_buffer,
-      mesh.index_buffer.buffer,
-      0,
-      .UINT32,
-    )
-    vk.CmdDrawIndexed(ctx.command_buffer, mesh.indices_len, 1, 0, 0, 0)
-    ctx.rendered_count^ += 1
+renderer_main_render :: proc(
+  engine: ^Engine,
+  scene_uniform: ^SceneUniform, // not used, for API symmetry
+  light_uniform: ^SceneLightUniform, // not used, for API symmetry
+  command_buffer: vk.CommandBuffer,
+) {
+  rendered_count: u32 = 0
+  camera_frustum := geometry.camera_make_frustum(engine.scene.camera)
+  render_meshes_ctx := RenderMeshesContext {
+    engine         = engine,
+    command_buffer = command_buffer,
+    camera_frustum = camera_frustum,
+    rendered_count = &rendered_count,
   }
-  return true
+  scene_traverse_linear(&engine.scene, &render_meshes_ctx, render_single_node)
 }
+
+renderer_main_end :: proc(
+  engine: ^Engine,
+  scene_uniform: ^SceneUniform, // not used, for API symmetry
+  light_uniform: ^SceneLightUniform, // not used, for API symmetry
+  command_buffer: vk.CommandBuffer,
+) {
+  vk.CmdEndRenderingKHR(command_buffer)
+}
+
+// Remove or deprecate render_main_pass in favor of modular API
 
 // Add render-to-texture capability
 render_to_texture :: proc(
@@ -1054,4 +1001,88 @@ renderer_get_camera_descriptor_set :: proc(
   self: ^RendererMain,
 ) -> vk.DescriptorSet {
   return self.frames[self.frame_index].camera_descriptor_set
+}
+
+// Render a single node for the main pass
+render_single_node :: proc(node: ^Node, cb_context: rawptr) -> bool {
+  ctx := (^RenderMeshesContext)(cb_context)
+  #partial switch data in node.attachment {
+  case MeshAttachment:
+    mesh := resource.get(g_meshes, data.handle)
+    if mesh == nil {
+      return true
+    }
+    material := resource.get(g_materials, data.material)
+    if material == nil {
+      return true
+    }
+    world_aabb := geometry.aabb_transform(
+      mesh.aabb,
+      node.transform.world_matrix,
+    )
+    if !geometry.frustum_test_aabb(&ctx.camera_frustum, world_aabb) {
+      return true
+    }
+    pipeline := renderer_main_get_pipeline(&ctx.engine.main, material)
+    layout := ctx.engine.main.pipeline_layout
+    descriptor_sets := [?]vk.DescriptorSet {
+      renderer_get_camera_descriptor_set(&ctx.engine.main), // set 0
+      material.texture_descriptor_set, // set 1
+      material.skinning_descriptor_sets[g_frame_index], // set 2
+      ctx.engine.main.environment_descriptor_set, // set 3
+    }
+    vk.CmdBindPipeline(ctx.command_buffer, .GRAPHICS, pipeline)
+    vk.CmdBindDescriptorSets(
+      ctx.command_buffer,
+      .GRAPHICS,
+      layout,
+      0,
+      u32(len(descriptor_sets)),
+      raw_data(descriptor_sets[:]),
+      0,
+      nil,
+    )
+    vk.CmdPushConstants(
+      ctx.command_buffer,
+      layout,
+      {.VERTEX},
+      0,
+      size_of(linalg.Matrix4f32),
+      &node.transform.world_matrix,
+    )
+    offset: vk.DeviceSize = 0
+    vk.CmdBindVertexBuffers(
+      ctx.command_buffer,
+      0,
+      1,
+      &mesh.vertex_buffer.buffer,
+      &offset,
+    )
+    mesh_skinning, mesh_has_skin := &mesh.skinning.?
+    node_skinning, node_has_skin := data.skinning.?
+    if mesh_has_skin && node_has_skin {
+      material_update_bone_buffer(
+        material,
+        node_skinning.bone_buffers[g_frame_index].buffer,
+        vk.DeviceSize(node_skinning.bone_buffers[g_frame_index].bytes_count),
+        g_frame_index,
+      )
+      vk.CmdBindVertexBuffers(
+        ctx.command_buffer,
+        1,
+        1,
+        &mesh_skinning.skin_buffer.buffer,
+        &offset,
+      )
+    }
+    vk.CmdBindIndexBuffer(
+      ctx.command_buffer,
+      mesh.index_buffer.buffer,
+      0,
+      .UINT32,
+    )
+    vk.CmdDrawIndexed(ctx.command_buffer, mesh.indices_len, 1, 0, 0, 0)
+    ctx.rendered_count^ += 1
+  }
+  return true
 }

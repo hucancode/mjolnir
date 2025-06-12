@@ -446,30 +446,57 @@ renderer_postprocess_deinit :: proc(self: ^RendererPostProcess) {
   for &image in self.images do image_buffer_deinit(&image)
 }
 
-render_postprocess_stack :: proc(
+// Modular postprocess API
+renderer_postprocess_begin :: proc(
   self: ^RendererPostProcess,
   command_buffer: vk.CommandBuffer,
   input_view: vk.ImageView,
-  output_view: vk.ImageView,
   extent: vk.Extent2D,
 ) {
   if len(self.effect_stack) == 0 {
     // if no postprocess effect, just copy the input to output
     append(&self.effect_stack, nil)
-    return
   }
   postprocess_update_input(self, 0, input_view)
+  viewport := vk.Viewport {
+    width    = f32(extent.width),
+    height   = f32(extent.height),
+    minDepth = 0.0,
+    maxDepth = 1.0,
+  }
+  scissor := vk.Rect2D {
+    extent = extent,
+  }
+  vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
+  vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
+}
+
+renderer_postprocess_render :: proc(
+  self: ^RendererPostProcess,
+  command_buffer: vk.CommandBuffer,
+  extent: vk.Extent2D,
+  output_view: vk.ImageView,
+) {
   for effect, i in self.effect_stack {
     is_first := i == 0
     is_last := i == len(self.effect_stack) - 1
     src_idx := 0 if is_first else (i - 1) % 2 + 1
     dst_image_idx := i % 2
     src_image_idx := (i - 1) % 2
-    prepare_image_for_render(
-      command_buffer,
-      self.images[dst_image_idx].image,
-      .SHADER_READ_ONLY_OPTIMAL,
-    )
+    // For the last pass, always sample from the last offscreen image
+    if is_last && !is_first {
+      postprocess_update_input(self, src_idx, self.images[src_image_idx].view)
+    }
+    // Prepare destination image for rendering
+    if !is_last {
+      prepare_image_for_render(
+        command_buffer,
+        self.images[dst_image_idx].image,
+        .COLOR_ATTACHMENT_OPTIMAL,
+      )
+    } else {
+      // For the last effect, output is the swapchain image, which should already be transitioned
+    }
     if !is_first {
       prepare_image_for_shader_read(
         command_buffer,
@@ -478,7 +505,7 @@ render_postprocess_stack :: proc(
     }
     color_attachment := vk.RenderingAttachmentInfoKHR {
       sType = .RENDERING_ATTACHMENT_INFO_KHR,
-      imageView = output_view if is_last else self.images[dst_image_idx].view,
+      imageView = self.images[dst_image_idx].view if !is_last else output_view,
       imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
       loadOp = .CLEAR,
       storeOp = .STORE,
@@ -492,17 +519,6 @@ render_postprocess_stack :: proc(
       pColorAttachments = &color_attachment,
     }
     vk.CmdBeginRenderingKHR(command_buffer, &render_info)
-    viewport := vk.Viewport {
-      width    = f32(extent.width),
-      height   = f32(extent.height),
-      minDepth = 0.0,
-      maxDepth = 1.0,
-    }
-    scissor := vk.Rect2D {
-      extent = extent,
-    }
-    vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
-    vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
     effect_type := get_effect_type(effect)
     vk.CmdBindPipeline(command_buffer, .GRAPHICS, self.pipelines[effect_type])
     vk.CmdBindDescriptorSets(
@@ -565,4 +581,11 @@ render_postprocess_stack :: proc(
     vk.CmdDraw(command_buffer, 3, 1, 0, 0)
     vk.CmdEndRenderingKHR(command_buffer)
   }
+}
+
+renderer_postprocess_end :: proc(
+  self: ^RendererPostProcess,
+  command_buffer: vk.CommandBuffer,
+) {
+
 }

@@ -263,16 +263,16 @@ renderer_shadow_deinit :: proc(self: ^RendererShadow) {
   self.skinning_descriptor_set_layout = 0
 }
 
-// TODO: refactor this, make it more generic and flexible
-render_shadow_pass :: proc(
+// Refactored shadow pass API
+renderer_shadow_begin :: proc(
   engine: ^Engine,
   light_uniform: ^SceneLightUniform,
   command_buffer: vk.CommandBuffer,
-) -> vk.Result {
+) {
+  // Transition all shadow maps to depth attachment optimal
   for i := 0; i < int(light_uniform.light_count); i += 1 {
     cube_shadow := renderer_get_cube_shadow_map(&engine.main, i)
     shadow_map_texture := renderer_get_shadow_map(&engine.main, i)
-    // Transition shadow map to depth attachment
     initial_barriers := [?]vk.ImageMemoryBarrier {
       {
         sType = .IMAGE_MEMORY_BARRIER,
@@ -320,6 +320,13 @@ render_shadow_pass :: proc(
       raw_data(initial_barriers[:]),
     )
   }
+}
+
+renderer_shadow_render :: proc(
+  engine: ^Engine,
+  light_uniform: ^SceneLightUniform,
+  command_buffer: vk.CommandBuffer,
+) {
   for i := 0; i < int(light_uniform.light_count); i += 1 {
     light := &light_uniform.lights[i]
     if !light.has_shadow || i >= MAX_SHADOW_MAPS {
@@ -328,7 +335,6 @@ render_shadow_pass :: proc(
     if light.kind == .POINT {
       cube_shadow := renderer_get_cube_shadow_map(&engine.main, i)
       light_pos := light.position.xyz
-      // Cube face directions and up vectors
       face_dirs := [6][3]f32 {
         {1, 0, 0},
         {-1, 0, 0},
@@ -434,7 +440,6 @@ render_shadow_pass :: proc(
           light.position.xyz,
           light.position.xyz + light.direction.xyz,
           linalg.VECTOR3F32_X_AXIS,
-          // TODO: hardcoding up vector will not work if the light is perfectly aligned with said vector
         )
         proj = linalg.matrix4_perspective(light.angle, 1.0, 0.01, light.radius)
       }
@@ -498,6 +503,14 @@ render_shadow_pass :: proc(
       vk.CmdEndRenderingKHR(command_buffer)
     }
   }
+}
+
+renderer_shadow_end :: proc(
+  engine: ^Engine,
+  light_uniform: ^SceneLightUniform,
+  command_buffer: vk.CommandBuffer,
+) {
+  // Transition all shadow maps to shader read optimal
   for i := 0; i < int(light_uniform.light_count); i += 1 {
     cube_shadow := renderer_get_cube_shadow_map(&engine.main, i)
     shadow_map_texture := renderer_get_shadow_map(&engine.main, i)
@@ -550,9 +563,16 @@ render_shadow_pass :: proc(
       raw_data(final_barriers[:]),
     )
   }
-  return .SUCCESS
 }
 
+renderer_shadow_get_pipeline :: proc(
+  self: ^RendererShadow,
+  features: ShadowShaderFeatureSet = {},
+) -> vk.Pipeline {
+  return self.pipelines[transmute(u32)features]
+}
+
+// Ensure this proc is present for shadow rendering
 render_single_shadow :: proc(node: ^Node, cb_context: rawptr) -> bool {
   ctx := (^ShadowRenderContext)(cb_context)
   shadow_idx := ctx.shadow_idx
@@ -652,11 +672,4 @@ render_single_shadow :: proc(node: ^Node, cb_context: rawptr) -> bool {
     ctx.obstacles_count^ += 1
   }
   return true
-}
-
-renderer_shadow_get_pipeline :: proc(
-  self: ^RendererShadow,
-  features: ShadowShaderFeatureSet = {},
-) -> vk.Pipeline {
-  return self.pipelines[transmute(u32)features]
 }

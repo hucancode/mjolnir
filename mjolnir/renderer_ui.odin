@@ -39,7 +39,7 @@ Vertex2D :: struct {
   color: [4]u8,
 }
 
-ui_init :: proc(
+renderer_ui_init :: proc(
   self: ^RendererUI,
   engine: ^Engine,
   color_format: vk.Format,
@@ -52,255 +52,6 @@ ui_init :: proc(
   self.frame_width = width
   self.frame_height = height
   log.infof("init UI pipeline...")
-  renderer_ui_init(self, color_format) or_return
-  log.infof("init UI texture...")
-  _, self.atlas = create_texture_from_pixels(
-    mu.default_atlas_alpha[:],
-    mu.DEFAULT_ATLAS_WIDTH,
-    mu.DEFAULT_ATLAS_HEIGHT,
-    1,
-    .R8_UNORM,
-  ) or_return
-  log.infof("init UI vertex buffer...")
-  self.vertex_buffer = create_host_visible_buffer(
-    Vertex2D,
-    UI_MAX_VERTICES,
-    {.VERTEX_BUFFER},
-  ) or_return
-  log.infof("init UI indices buffer...")
-  self.index_buffer = create_host_visible_buffer(
-    u32,
-    UI_MAX_INDICES,
-    {.INDEX_BUFFER},
-  ) or_return
-  // Write atlas texture and sampler to texture_descriptor_set
-  ortho := linalg.matrix_ortho3d(0, f32(width), f32(height), 0, -1, 1)
-  log.infof("init UI proj buffer...")
-  self.proj_buffer = create_host_visible_buffer(
-    linalg.Matrix4f32,
-    1,
-    {.UNIFORM_BUFFER},
-    raw_data(&ortho),
-  ) or_return
-  buffer_info := vk.DescriptorBufferInfo {
-    buffer = self.proj_buffer.buffer,
-    range  = size_of(linalg.Matrix4f32),
-  }
-  writes := [?]vk.WriteDescriptorSet {
-    {
-      sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = self.projection_descriptor_set,
-      dstBinding = 0,
-      dstArrayElement = 0,
-      descriptorCount = 1,
-      descriptorType = .UNIFORM_BUFFER,
-      pBufferInfo = &buffer_info,
-    },
-    {
-      sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = self.texture_descriptor_set,
-      dstBinding = 0,
-      dstArrayElement = 0,
-      descriptorCount = 1,
-      descriptorType = .COMBINED_IMAGE_SAMPLER,
-      pImageInfo = &{
-        sampler = g_nearest_clamp_sampler,
-        imageView = self.atlas.view,
-        imageLayout = .SHADER_READ_ONLY_OPTIMAL,
-      },
-    },
-  }
-  vk.UpdateDescriptorSets(g_device, len(writes), raw_data(writes[:]), 0, nil)
-  log.infof("done init UI")
-  return .SUCCESS
-}
-
-ui_render :: proc(self: ^RendererUI, cmd_buf: vk.CommandBuffer) {
-  command_backing: ^mu.Command
-  for variant in mu.next_command_iterator(&self.ctx, &command_backing) {
-    // log.infof("executing UI command", variant)
-    switch cmd in variant {
-    case ^mu.Command_Text:
-      ui_draw_text(self, cmd_buf, cmd.str, cmd.pos, cmd.color)
-    case ^mu.Command_Rect:
-      ui_draw_rect(self, cmd_buf, cmd.rect, cmd.color)
-    case ^mu.Command_Icon:
-      ui_draw_icon(self, cmd_buf, cmd.id, cmd.rect, cmd.color)
-    case ^mu.Command_Clip:
-      ui_set_clip_rect(self, cmd_buf, cmd.rect)
-    case ^mu.Command_Jump:
-      unreachable()
-    }
-  }
-  ui_flush(self, cmd_buf)
-}
-
-ui_flush :: proc(self: ^RendererUI, cmd_buf: vk.CommandBuffer) -> vk.Result {
-  if self.vertex_count == 0 && self.index_count == 0 {
-    return .SUCCESS
-  }
-  defer {
-    self.vertex_count = 0
-    self.index_count = 0
-  }
-  data_buffer_write(&self.vertex_buffer, self.vertices[:]) or_return
-  data_buffer_write(&self.index_buffer, self.indices[:]) or_return
-  vk.CmdBindPipeline(cmd_buf, .GRAPHICS, self.pipeline)
-  descriptor_sets := [?]vk.DescriptorSet {
-    self.projection_descriptor_set,
-    self.texture_descriptor_set,
-  }
-  vk.CmdBindDescriptorSets(
-    cmd_buf,
-    .GRAPHICS,
-    self.pipeline_layout,
-    0,
-    2,
-    raw_data(descriptor_sets[:]),
-    0,
-    nil,
-  )
-  viewport := vk.Viewport {
-    x        = 0,
-    y        = f32(self.frame_height),
-    width    = f32(self.frame_width),
-    height   = -f32(self.frame_height),
-    minDepth = 0,
-    maxDepth = 1,
-  }
-  vk.CmdSetViewport(cmd_buf, 0, 1, &viewport)
-  offsets := [?]vk.DeviceSize{0}
-  vk.CmdBindVertexBuffers(
-    cmd_buf,
-    0,
-    1,
-    &self.vertex_buffer.buffer,
-    raw_data(offsets[:]),
-  )
-  vk.CmdBindIndexBuffer(cmd_buf, self.index_buffer.buffer, 0, .UINT32)
-  vk.CmdDrawIndexed(cmd_buf, self.index_count, 1, 0, 0, 0)
-  return .SUCCESS
-}
-
-ui_push_quad :: proc(
-  self: ^RendererUI,
-  cmd_buf: vk.CommandBuffer,
-  dst, src: mu.Rect,
-  color: mu.Color,
-) {
-  if (self.vertex_count >= UI_MAX_VERTICES ||
-       self.index_count >= UI_MAX_INDICES) {
-    ui_flush(self, cmd_buf)
-  }
-  x, y, w, h :=
-    f32(src.x) /
-    mu.DEFAULT_ATLAS_WIDTH,
-    f32(src.y) /
-    mu.DEFAULT_ATLAS_HEIGHT,
-    f32(src.w) /
-    mu.DEFAULT_ATLAS_WIDTH,
-    f32(src.h) /
-    mu.DEFAULT_ATLAS_HEIGHT
-  dx, dy, dw, dh := f32(dst.x), f32(dst.y), f32(dst.w), f32(dst.h)
-  self.vertices[self.vertex_count + 0] = {
-    pos   = [2]f32{dx, dy},
-    uv    = [2]f32{x, y},
-    color = [4]u8{color.r, color.g, color.b, color.a},
-  }
-  self.vertices[self.vertex_count + 1] = {
-    pos   = [2]f32{dx + dw, dy},
-    uv    = [2]f32{x + w, y},
-    color = [4]u8{color.r, color.g, color.b, color.a},
-  }
-  self.vertices[self.vertex_count + 2] = {
-    pos   = [2]f32{dx + dw, dy + dh},
-    uv    = [2]f32{x + w, y + h},
-    color = [4]u8{color.r, color.g, color.b, color.a},
-  }
-  self.vertices[self.vertex_count + 3] = {
-    pos   = [2]f32{dx, dy + dh},
-    uv    = [2]f32{x, y + h},
-    color = [4]u8{color.r, color.g, color.b, color.a},
-  }
-  self.indices[self.index_count + 0] = self.vertex_count + 0
-  self.indices[self.index_count + 1] = self.vertex_count + 1
-  self.indices[self.index_count + 2] = self.vertex_count + 2
-  self.indices[self.index_count + 3] = self.vertex_count + 2
-  self.indices[self.index_count + 4] = self.vertex_count + 3
-  self.indices[self.index_count + 5] = self.vertex_count + 0
-  self.index_count += 6
-  self.vertex_count += 4
-}
-
-ui_draw_rect :: proc(
-  self: ^RendererUI,
-  cmd_buf: vk.CommandBuffer,
-  rect: mu.Rect,
-  color: mu.Color,
-) {
-  ui_push_quad(
-    self,
-    cmd_buf,
-    rect,
-    mu.default_atlas[mu.DEFAULT_ATLAS_WHITE],
-    color,
-  )
-}
-
-ui_draw_text :: proc(
-  self: ^RendererUI,
-  cmd_buf: vk.CommandBuffer,
-  text: string,
-  pos: mu.Vec2,
-  color: mu.Color,
-) {
-  dst := mu.Rect{pos.x, pos.y, 0, 0}
-  for ch in text {
-    if ch & 0xc0 != 0x80 {
-      r := min(int(ch), 127)
-      src := mu.default_atlas[mu.DEFAULT_ATLAS_FONT + r]
-      dst.w = src.w
-      dst.h = src.h
-      ui_push_quad(self, cmd_buf, dst, src, color)
-      dst.x += dst.w
-    }
-  }
-}
-
-ui_draw_icon :: proc(
-  self: ^RendererUI,
-  cmd_buf: vk.CommandBuffer,
-  id: mu.Icon,
-  rect: mu.Rect,
-  color: mu.Color,
-) {
-  src := mu.default_atlas[id]
-  x := rect.x + (rect.w - src.w) / 2
-  y := rect.y + (rect.h - src.h) / 2
-  ui_push_quad(self, cmd_buf, {x, y, src.w, src.h}, src, color)
-}
-
-ui_set_clip_rect :: proc(
-  self: ^RendererUI,
-  cmd_buf: vk.CommandBuffer,
-  rect: mu.Rect,
-) {
-  ui_flush(self, cmd_buf)
-  x := min(rect.x, i32(self.frame_width))
-  y := min(rect.y, i32(self.frame_height))
-  w := u32(min(rect.w, i32(self.frame_width) - x))
-  h := u32(min(rect.h, i32(self.frame_height) - y))
-  scissor := vk.Rect2D {
-    offset = {x, y},
-    extent = {w, h},
-  }
-  vk.CmdSetScissor(cmd_buf, 0, 1, &scissor)
-}
-
-renderer_ui_init :: proc(
-  self: ^RendererUI,
-  color_format: vk.Format,
-) -> vk.Result {
   vert_shader_module := create_shader_module(SHADER_MICROUI_VERT) or_return
   defer vk.DestroyShaderModule(g_device, vert_shader_module, nil)
   frag_shader_module := create_shader_module(SHADER_MICROUI_FRAG) or_return
@@ -502,7 +253,228 @@ renderer_ui_init :: proc(
     nil,
     &self.pipeline,
   ) or_return
+  log.infof("init UI texture...")
+  _, self.atlas = create_texture_from_pixels(
+    mu.default_atlas_alpha[:],
+    mu.DEFAULT_ATLAS_WIDTH,
+    mu.DEFAULT_ATLAS_HEIGHT,
+    1,
+    .R8_UNORM,
+  ) or_return
+  log.infof("init UI vertex buffer...")
+  self.vertex_buffer = create_host_visible_buffer(
+    Vertex2D,
+    UI_MAX_VERTICES,
+    {.VERTEX_BUFFER},
+  ) or_return
+  log.infof("init UI indices buffer...")
+  self.index_buffer = create_host_visible_buffer(
+    u32,
+    UI_MAX_INDICES,
+    {.INDEX_BUFFER},
+  ) or_return
+  // Write atlas texture and sampler to texture_descriptor_set
+  ortho := linalg.matrix_ortho3d(0, f32(width), f32(height), 0, -1, 1)
+  log.infof("init UI proj buffer...")
+  self.proj_buffer = create_host_visible_buffer(
+    linalg.Matrix4f32,
+    1,
+    {.UNIFORM_BUFFER},
+    raw_data(&ortho),
+  ) or_return
+  buffer_info := vk.DescriptorBufferInfo {
+    buffer = self.proj_buffer.buffer,
+    range  = size_of(linalg.Matrix4f32),
+  }
+  writes := [?]vk.WriteDescriptorSet {
+    {
+      sType = .WRITE_DESCRIPTOR_SET,
+      dstSet = self.projection_descriptor_set,
+      dstBinding = 0,
+      dstArrayElement = 0,
+      descriptorCount = 1,
+      descriptorType = .UNIFORM_BUFFER,
+      pBufferInfo = &buffer_info,
+    },
+    {
+      sType = .WRITE_DESCRIPTOR_SET,
+      dstSet = self.texture_descriptor_set,
+      dstBinding = 0,
+      dstArrayElement = 0,
+      descriptorCount = 1,
+      descriptorType = .COMBINED_IMAGE_SAMPLER,
+      pImageInfo = &{
+        sampler = g_nearest_clamp_sampler,
+        imageView = self.atlas.view,
+        imageLayout = .SHADER_READ_ONLY_OPTIMAL,
+      },
+    },
+  }
+  vk.UpdateDescriptorSets(g_device, len(writes), raw_data(writes[:]), 0, nil)
+  log.infof("done init UI")
   return .SUCCESS
+}
+
+ui_flush :: proc(self: ^RendererUI, cmd_buf: vk.CommandBuffer) -> vk.Result {
+  if self.vertex_count == 0 && self.index_count == 0 {
+    return .SUCCESS
+  }
+  defer {
+    self.vertex_count = 0
+    self.index_count = 0
+  }
+  data_buffer_write(&self.vertex_buffer, self.vertices[:]) or_return
+  data_buffer_write(&self.index_buffer, self.indices[:]) or_return
+  vk.CmdBindPipeline(cmd_buf, .GRAPHICS, self.pipeline)
+  descriptor_sets := [?]vk.DescriptorSet {
+    self.projection_descriptor_set,
+    self.texture_descriptor_set,
+  }
+  vk.CmdBindDescriptorSets(
+    cmd_buf,
+    .GRAPHICS,
+    self.pipeline_layout,
+    0,
+    2,
+    raw_data(descriptor_sets[:]),
+    0,
+    nil,
+  )
+  viewport := vk.Viewport {
+    x        = 0,
+    y        = f32(self.frame_height),
+    width    = f32(self.frame_width),
+    height   = -f32(self.frame_height),
+    minDepth = 0,
+    maxDepth = 1,
+  }
+  vk.CmdSetViewport(cmd_buf, 0, 1, &viewport)
+  offsets := [?]vk.DeviceSize{0}
+  vk.CmdBindVertexBuffers(
+    cmd_buf,
+    0,
+    1,
+    &self.vertex_buffer.buffer,
+    raw_data(offsets[:]),
+  )
+  vk.CmdBindIndexBuffer(cmd_buf, self.index_buffer.buffer, 0, .UINT32)
+  vk.CmdDrawIndexed(cmd_buf, self.index_count, 1, 0, 0, 0)
+  return .SUCCESS
+}
+
+ui_push_quad :: proc(
+  self: ^RendererUI,
+  cmd_buf: vk.CommandBuffer,
+  dst, src: mu.Rect,
+  color: mu.Color,
+) {
+  if (self.vertex_count >= UI_MAX_VERTICES ||
+       self.index_count >= UI_MAX_INDICES) {
+    ui_flush(self, cmd_buf)
+  }
+  x, y, w, h :=
+    f32(src.x) /
+    mu.DEFAULT_ATLAS_WIDTH,
+    f32(src.y) /
+    mu.DEFAULT_ATLAS_HEIGHT,
+    f32(src.w) /
+    mu.DEFAULT_ATLAS_WIDTH,
+    f32(src.h) /
+    mu.DEFAULT_ATLAS_HEIGHT
+  dx, dy, dw, dh := f32(dst.x), f32(dst.y), f32(dst.w), f32(dst.h)
+  self.vertices[self.vertex_count + 0] = {
+    pos   = [2]f32{dx, dy},
+    uv    = [2]f32{x, y},
+    color = [4]u8{color.r, color.g, color.b, color.a},
+  }
+  self.vertices[self.vertex_count + 1] = {
+    pos   = [2]f32{dx + dw, dy},
+    uv    = [2]f32{x + w, y},
+    color = [4]u8{color.r, color.g, color.b, color.a},
+  }
+  self.vertices[self.vertex_count + 2] = {
+    pos   = [2]f32{dx + dw, dy + dh},
+    uv    = [2]f32{x + w, y + h},
+    color = [4]u8{color.r, color.g, color.b, color.a},
+  }
+  self.vertices[self.vertex_count + 3] = {
+    pos   = [2]f32{dx, dy + dh},
+    uv    = [2]f32{x, y + h},
+    color = [4]u8{color.r, color.g, color.b, color.a},
+  }
+  self.indices[self.index_count + 0] = self.vertex_count + 0
+  self.indices[self.index_count + 1] = self.vertex_count + 1
+  self.indices[self.index_count + 2] = self.vertex_count + 2
+  self.indices[self.index_count + 3] = self.vertex_count + 2
+  self.indices[self.index_count + 4] = self.vertex_count + 3
+  self.indices[self.index_count + 5] = self.vertex_count + 0
+  self.index_count += 6
+  self.vertex_count += 4
+}
+
+ui_draw_rect :: proc(
+  self: ^RendererUI,
+  cmd_buf: vk.CommandBuffer,
+  rect: mu.Rect,
+  color: mu.Color,
+) {
+  ui_push_quad(
+    self,
+    cmd_buf,
+    rect,
+    mu.default_atlas[mu.DEFAULT_ATLAS_WHITE],
+    color,
+  )
+}
+
+ui_draw_text :: proc(
+  self: ^RendererUI,
+  cmd_buf: vk.CommandBuffer,
+  text: string,
+  pos: mu.Vec2,
+  color: mu.Color,
+) {
+  dst := mu.Rect{pos.x, pos.y, 0, 0}
+  for ch in text {
+    if ch & 0xc0 != 0x80 {
+      r := min(int(ch), 127)
+      src := mu.default_atlas[mu.DEFAULT_ATLAS_FONT + r]
+      dst.w = src.w
+      dst.h = src.h
+      ui_push_quad(self, cmd_buf, dst, src, color)
+      dst.x += dst.w
+    }
+  }
+}
+
+ui_draw_icon :: proc(
+  self: ^RendererUI,
+  cmd_buf: vk.CommandBuffer,
+  id: mu.Icon,
+  rect: mu.Rect,
+  color: mu.Color,
+) {
+  src := mu.default_atlas[id]
+  x := rect.x + (rect.w - src.w) / 2
+  y := rect.y + (rect.h - src.h) / 2
+  ui_push_quad(self, cmd_buf, {x, y, src.w, src.h}, src, color)
+}
+
+ui_set_clip_rect :: proc(
+  self: ^RendererUI,
+  cmd_buf: vk.CommandBuffer,
+  rect: mu.Rect,
+) {
+  ui_flush(self, cmd_buf)
+  x := min(rect.x, i32(self.frame_width))
+  y := min(rect.y, i32(self.frame_height))
+  w := u32(min(rect.w, i32(self.frame_width) - x))
+  h := u32(min(rect.h, i32(self.frame_height) - y))
+  scissor := vk.Rect2D {
+    offset = {x, y},
+    extent = {w, h},
+  }
+  vk.CmdSetScissor(cmd_buf, 0, 1, &scissor)
 }
 
 renderer_ui_deinit :: proc(self: ^RendererUI) {
@@ -517,4 +489,69 @@ renderer_ui_deinit :: proc(self: ^RendererUI) {
   self.projection_layout = 0
   vk.DestroyDescriptorSetLayout(g_device, self.texture_layout, nil)
   self.texture_layout = 0
+}
+
+// Modular UI renderer API
+renderer_ui_begin :: proc(
+  self: ^RendererUI,
+  command_buffer: vk.CommandBuffer,
+  color_view: vk.ImageView,
+  extent: vk.Extent2D,
+) {
+  color_attachment := vk.RenderingAttachmentInfoKHR {
+    sType = .RENDERING_ATTACHMENT_INFO_KHR,
+    imageView = color_view,
+    imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
+    loadOp = .LOAD, // preserve previous contents
+    storeOp = .STORE,
+    clearValue = {color = {float32 = {0, 0, 0, 0}}},
+  }
+  render_info := vk.RenderingInfoKHR {
+    sType = .RENDERING_INFO_KHR,
+    renderArea = {extent = extent},
+    layerCount = 1,
+    colorAttachmentCount = 1,
+    pColorAttachments = &color_attachment,
+  }
+  vk.CmdBeginRenderingKHR(command_buffer, &render_info)
+  viewport := vk.Viewport {
+    x        = 0.0,
+    y        = f32(extent.height),
+    width    = f32(extent.width),
+    height   = -f32(extent.height),
+    minDepth = 0.0,
+    maxDepth = 1.0,
+  }
+  scissor := vk.Rect2D {
+    extent = extent,
+  }
+  vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
+  vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
+}
+
+renderer_ui_render :: proc(
+  self: ^RendererUI,
+  command_buffer: vk.CommandBuffer,
+) {
+  command_backing: ^mu.Command
+  for variant in mu.next_command_iterator(&self.ctx, &command_backing) {
+    // log.infof("executing UI command", variant)
+    switch cmd in variant {
+    case ^mu.Command_Text:
+      ui_draw_text(self, command_buffer, cmd.str, cmd.pos, cmd.color)
+    case ^mu.Command_Rect:
+      ui_draw_rect(self, command_buffer, cmd.rect, cmd.color)
+    case ^mu.Command_Icon:
+      ui_draw_icon(self, command_buffer, cmd.id, cmd.rect, cmd.color)
+    case ^mu.Command_Clip:
+      ui_set_clip_rect(self, command_buffer, cmd.rect)
+    case ^mu.Command_Jump:
+      unreachable()
+    }
+  }
+  ui_flush(self, command_buffer)
+}
+
+renderer_ui_end :: proc(self: ^RendererUI, command_buffer: vk.CommandBuffer) {
+  vk.CmdEndRenderingKHR(command_buffer)
 }

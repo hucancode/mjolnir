@@ -611,3 +611,63 @@ renderer_particle_init :: proc(self: ^RendererParticle) -> vk.Result {
   ) or_return
   return .SUCCESS
 }
+
+// Modular particle renderer API
+renderer_particle_begin :: proc(
+    engine: ^Engine,
+    command_buffer: vk.CommandBuffer,
+) {
+    // Set up color and depth attachments for the particle pass
+    color_attachment := vk.RenderingAttachmentInfoKHR {
+        sType = .RENDERING_ATTACHMENT_INFO_KHR,
+        imageView = renderer_get_main_pass_view(&engine.main),
+        imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
+        loadOp = .LOAD, // preserve main pass contents
+        storeOp = .STORE,
+        clearValue = {color = {float32 = {0,0,0,0}}},
+    }
+    depth_attachment := vk.RenderingAttachmentInfoKHR {
+        sType = .RENDERING_ATTACHMENT_INFO_KHR,
+        imageView = engine.main.depth_buffer.view,
+        imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+        loadOp = .LOAD,
+        storeOp = .STORE,
+        clearValue = {depthStencil = {1.0, 0}},
+    }
+    render_info := vk.RenderingInfoKHR {
+        sType = .RENDERING_INFO_KHR,
+        renderArea = {extent = engine.swapchain.extent},
+        layerCount = 1,
+        colorAttachmentCount = 1,
+        pColorAttachments = &color_attachment,
+        pDepthAttachment = &depth_attachment,
+    }
+    vk.CmdBeginRenderingKHR(command_buffer, &render_info)
+    viewport := vk.Viewport {
+        x        = 0.0,
+        y        = f32(engine.swapchain.extent.height),
+        width    = f32(engine.swapchain.extent.width),
+        height   = -f32(engine.swapchain.extent.height),
+        minDepth = 0.0,
+        maxDepth = 1.0,
+    }
+    scissor := vk.Rect2D {
+        extent = engine.swapchain.extent,
+    }
+    vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
+    vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
+}
+
+renderer_particle_render :: proc(
+    engine: ^Engine,
+    command_buffer: vk.CommandBuffer,
+) {
+    render_particles(&engine.particle, engine.scene.camera, command_buffer)
+}
+
+renderer_particle_end :: proc(
+    engine: ^Engine,
+    command_buffer: vk.CommandBuffer,
+) {
+    vk.CmdEndRenderingKHR(command_buffer)
+}
