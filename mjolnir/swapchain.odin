@@ -7,12 +7,12 @@ import glfw "vendor:glfw"
 import vk "vendor:vulkan"
 
 Swapchain :: struct {
-  handle: vk.SwapchainKHR,
-  format: vk.SurfaceFormatKHR,
-  extent: vk.Extent2D,
-  images: []vk.Image,
-  views:  []vk.ImageView,
-
+  handle:                     vk.SwapchainKHR,
+  format:                     vk.SurfaceFormatKHR,
+  extent:                     vk.Extent2D,
+  images:                     []vk.Image,
+  views:                      []vk.ImageView,
+  in_flight_fences:           [MAX_FRAMES_IN_FLIGHT]vk.Fence,
   image_available_semaphores: [MAX_FRAMES_IN_FLIGHT]vk.Semaphore,
   render_finished_semaphores: [MAX_FRAMES_IN_FLIGHT]vk.Semaphore,
 }
@@ -113,12 +113,32 @@ swapchain_init :: proc(
       {.COLOR},
     ) or_return
   }
-  for i in 0..<MAX_FRAMES_IN_FLIGHT {
-    semaphore_info := vk.SemaphoreCreateInfo{
+  for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
+    semaphore_info := vk.SemaphoreCreateInfo {
       sType = .SEMAPHORE_CREATE_INFO,
     }
-    vk.CreateSemaphore(g_device, &semaphore_info, nil, &self.image_available_semaphores[i]) or_return
-    vk.CreateSemaphore(g_device, &semaphore_info, nil, &self.render_finished_semaphores[i]) or_return
+    vk.CreateSemaphore(
+      g_device,
+      &semaphore_info,
+      nil,
+      &self.image_available_semaphores[i],
+    ) or_return
+    vk.CreateSemaphore(
+      g_device,
+      &semaphore_info,
+      nil,
+      &self.render_finished_semaphores[i],
+    ) or_return
+    fence_info := vk.FenceCreateInfo {
+      sType = .FENCE_CREATE_INFO,
+      flags = {.SIGNALED},
+    }
+    vk.CreateFence(
+      g_device,
+      &fence_info,
+      nil,
+      &self.in_flight_fences[i],
+    ) or_return
   }
   return .SUCCESS
 }
@@ -129,9 +149,10 @@ swapchain_deinit :: proc(self: ^Swapchain) {
   self.views = nil
   delete(self.images)
   self.images = nil
-  for i in 0..<MAX_FRAMES_IN_FLIGHT {
+  for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
     vk.DestroySemaphore(g_device, self.image_available_semaphores[i], nil)
     vk.DestroySemaphore(g_device, self.render_finished_semaphores[i], nil)
+    vk.DestroyFence(g_device, self.in_flight_fences[i], nil)
   }
   vk.DestroySwapchainKHR(g_device, self.handle, nil)
   self.handle = 0
@@ -149,32 +170,59 @@ swapchain_recreate :: proc(
 
 swapchain_acquire_next_image :: proc(
   self: ^Swapchain,
-  semaphore: vk.Semaphore,
 ) -> (
   image_index: u32,
   result: vk.Result,
 ) {
-  result = vk.AcquireNextImageKHR(
+  log.debug("waiting for fence...")
+  vk.WaitForFences(
+    g_device,
+    1,
+    &self.in_flight_fences[g_frame_index],
+    true,
+    math.max(u64),
+  ) or_return
+  vk.AcquireNextImageKHR(
     g_device,
     self.handle,
     math.max(u64),
-    semaphore,
+    self.image_available_semaphores[g_frame_index],
     0,
     &image_index,
-  )
+  ) or_return
+  vk.ResetFences(g_device, 1, &self.in_flight_fences[g_frame_index]) or_return
+  result = .SUCCESS
   return
 }
 
-swapchain_present :: proc(
+swapchain_submit_queue_and_present :: proc(
   self: ^Swapchain,
-  semaphores: [^]vk.Semaphore,
+  command_buffer: ^vk.CommandBuffer,
   image_index: u32,
 ) -> vk.Result {
+  log.debug("============ submitting queue... =============")
+  wait_stage_mask: vk.PipelineStageFlags = {.COLOR_ATTACHMENT_OUTPUT}
+  submit_info := vk.SubmitInfo {
+    sType                = .SUBMIT_INFO,
+    waitSemaphoreCount   = 1,
+    pWaitSemaphores      = &self.image_available_semaphores[g_frame_index],
+    pWaitDstStageMask    = &wait_stage_mask,
+    commandBufferCount   = 1,
+    pCommandBuffers      = command_buffer,
+    signalSemaphoreCount = 1,
+    pSignalSemaphores    = &self.render_finished_semaphores[g_frame_index],
+  }
+  vk.QueueSubmit(
+    g_graphics_queue,
+    1,
+    &submit_info,
+    self.in_flight_fences[g_frame_index],
+  ) or_return
   image_indices := [?]u32{image_index}
   present_info := vk.PresentInfoKHR {
     sType              = .PRESENT_INFO_KHR,
     waitSemaphoreCount = 1,
-    pWaitSemaphores    = semaphores,
+    pWaitSemaphores    = &self.render_finished_semaphores[g_frame_index],
     swapchainCount     = 1,
     pSwapchains        = &self.handle,
     pImageIndices      = raw_data(image_indices[:]),

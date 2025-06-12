@@ -91,7 +91,6 @@ Engine :: struct {
   shadow:                RendererShadow,
   particle:              RendererParticle,
   postprocess:           RendererPostProcess,
-  in_flight_fences:      [MAX_FRAMES_IN_FLIGHT]vk.Fence,
   command_buffers:       [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
 }
 
@@ -135,19 +134,6 @@ init :: proc(
   self.last_update_timestamp = self.start_timestamp
   scene_init(&self.scene)
   swapchain_init(&self.swapchain, self.window) or_return
-  // Initialize in-flight fences
-  for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
-    fence_info := vk.FenceCreateInfo {
-      sType = .FENCE_CREATE_INFO,
-      flags = {.SIGNALED},
-    }
-    vk.CreateFence(
-      g_device,
-      &fence_info,
-      nil,
-      &self.in_flight_fences[i],
-    ) or_return
-  }
   vk.AllocateCommandBuffers(
     g_device,
     &{
@@ -301,10 +287,6 @@ update :: proc(self: ^Engine) -> bool {
 
 deinit :: proc(self: ^Engine) {
   vk.DeviceWaitIdle(g_device)
-  // Destroy in-flight fences
-  for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
-    vk.DestroyFence(g_device, self.in_flight_fences[i], nil)
-  }
   renderer_ui_deinit(&self.ui)
   scene_deinit(&self.scene)
   renderer_main_deinit(&self.main)
@@ -368,17 +350,7 @@ prepare_light :: proc(node: ^Node, cb_context: rawptr) -> bool {
 }
 
 render :: proc(self: ^Engine) -> vk.Result {
-  current_fence := self.in_flight_fences[g_frame_index]
-  log.debug("waiting for fence...")
-  vk.WaitForFences(g_device, 1, &current_fence, true, math.max(u64)) or_return
-  current_image_available_semaphore :=
-    self.swapchain.image_available_semaphores[g_frame_index]
-  image_idx := swapchain_acquire_next_image(
-    &self.swapchain,
-    current_image_available_semaphore,
-  ) or_return
-  log.debug("reseting fence...")
-  vk.ResetFences(g_device, 1, &current_fence) or_return
+  image_idx := swapchain_acquire_next_image(&self.swapchain) or_return
   mu.begin(&self.ui.ctx)
   // Use per-frame command buffer from Engine
   command_buffer := self.command_buffers[g_frame_index]
@@ -466,24 +438,9 @@ render :: proc(self: ^Engine) -> vk.Result {
   )
   prepare_image_for_present(command_buffer, self.swapchain.images[image_idx])
   vk.EndCommandBuffer(command_buffer) or_return
-  current_render_finished_semaphore :=
-    self.swapchain.render_finished_semaphores[g_frame_index]
-  wait_stage_mask: vk.PipelineStageFlags = {.COLOR_ATTACHMENT_OUTPUT}
-  submit_info := vk.SubmitInfo {
-    sType                = .SUBMIT_INFO,
-    waitSemaphoreCount   = 1,
-    pWaitSemaphores      = &current_image_available_semaphore,
-    pWaitDstStageMask    = &wait_stage_mask,
-    commandBufferCount   = 1,
-    pCommandBuffers      = &command_buffer,
-    signalSemaphoreCount = 1,
-    pSignalSemaphores    = &current_render_finished_semaphore,
-  }
-  log.debug("============ submitting queue... =============")
-  vk.QueueSubmit(g_graphics_queue, 1, &submit_info, current_fence) or_return
-  present_result := swapchain_present(
+  present_result := swapchain_submit_queue_and_present(
     &self.swapchain,
-    &current_render_finished_semaphore,
+    &command_buffer,
     image_idx,
   )
   if present_result != .SUCCESS {
