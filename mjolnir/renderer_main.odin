@@ -116,7 +116,7 @@ renderer_main_build_pbr_pipeline :: proc(
   bindings_main := [?]vk.DescriptorSetLayoutBinding {
     {   // Scene Uniforms (view, proj, time)
       binding         = 0,
-      descriptorType  = .UNIFORM_BUFFER_DYNAMIC,
+      descriptorType  = .UNIFORM_BUFFER,
       descriptorCount = 1,
       stageFlags      = {.VERTEX, .FRAGMENT},
     },
@@ -659,7 +659,6 @@ render_single_node :: proc(node: ^Node, cb_context: rawptr) -> bool {
       material.skinning_descriptor_sets[g_frame_index], // set 2
       ctx.engine.main.environment_descriptor_set, // set 3
     }
-    offsets := [1]u32{0}
     vk.CmdBindPipeline(ctx.command_buffer, .GRAPHICS, pipeline)
     vk.CmdBindDescriptorSets(
       ctx.command_buffer,
@@ -668,8 +667,8 @@ render_single_node :: proc(node: ^Node, cb_context: rawptr) -> bool {
       0,
       u32(len(descriptor_sets)),
       raw_data(descriptor_sets[:]),
-      len(offsets),
-      raw_data(offsets[:]),
+      0,
+      nil,
     )
     vk.CmdPushConstants(
       ctx.command_buffer,
@@ -897,7 +896,7 @@ renderer_main_init :: proc(
         sType = .WRITE_DESCRIPTOR_SET,
         dstSet = frame.camera_descriptor_set,
         dstBinding = 0,
-        descriptorType = .UNIFORM_BUFFER_DYNAMIC,
+        descriptorType = .UNIFORM_BUFFER,
         descriptorCount = 1,
         pBufferInfo = &{
           buffer = frame.camera_uniform.buffer,
