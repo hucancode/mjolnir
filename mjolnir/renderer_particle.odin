@@ -616,11 +616,13 @@ renderer_particle_init :: proc(self: ^RendererParticle) -> vk.Result {
 renderer_particle_begin :: proc(
   engine: ^Engine,
   command_buffer: vk.CommandBuffer,
+  color_view: vk.ImageView,
+  depth_view: vk.ImageView,
 ) {
   // Set up color and depth attachments for the particle pass
   color_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
-    imageView = renderer_get_main_pass_view(&engine.main),
+    imageView = color_view,
     imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
     loadOp = .LOAD, // preserve main pass contents
     storeOp = .STORE,
@@ -628,7 +630,7 @@ renderer_particle_begin :: proc(
   }
   depth_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
-    imageView = engine.main.depth_buffer.view,
+    imageView = depth_view,
     imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
     loadOp = .LOAD,
     storeOp = .STORE,

@@ -445,7 +445,12 @@ render :: proc(self: ^Engine) -> vk.Result {
   renderer_main_render(self, command_buffer)
   renderer_main_end(self, command_buffer)
   log.debug("============ rendering particles... =============")
-  renderer_particle_begin(self, command_buffer)
+  renderer_particle_begin(
+    self,
+    command_buffer,
+    self.main.frames[g_frame_index].main_pass_image.view,
+    self.main.depth_buffer.view,
+  )
   renderer_particle_render(self, command_buffer)
   renderer_particle_end(self, command_buffer)
   prepare_image_for_shader_read(
