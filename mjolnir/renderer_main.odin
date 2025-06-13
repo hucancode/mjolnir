@@ -21,11 +21,7 @@ SingleLightUniform :: struct {
   color:      linalg.Vector4f32,
   position:   linalg.Vector4f32,
   direction:  linalg.Vector4f32,
-  kind:       enum u32 {
-    POINT       = 0,
-    DIRECTIONAL = 1,
-    SPOT        = 2,
-  },
+  kind:       LightKind,
   angle:      f32, // For spotlight: cone angle
   radius:     f32, // For point/spot: attenuation radius
   has_shadow: b32,
@@ -42,17 +38,6 @@ SceneLightUniform :: struct {
   lights:      [MAX_LIGHTS]SingleLightUniform,
   light_count: u32,
   padding:     [3]u32,
-}
-
-push_light :: proc(self: ^SceneLightUniform, light: SingleLightUniform) {
-  if self.light_count < MAX_LIGHTS {
-    self.lights[self.light_count] = light
-    self.light_count += 1
-  }
-}
-
-clear_lights :: proc(self: ^SceneLightUniform) {
-  self.light_count = 0
 }
 
 ShaderFeatures :: enum {
@@ -585,11 +570,8 @@ renderer_main_get_pipeline :: proc(
   return self.unlit_pipelines[transmute(u32)material.features]
 }
 
-// Modular main pass API
 renderer_main_begin :: proc(
   engine: ^Engine,
-  scene_uniform: ^SceneUniform,
-  light_uniform: ^SceneLightUniform,
   command_buffer: vk.CommandBuffer,
 ) {
   color_attachment := vk.RenderingAttachmentInfoKHR {
@@ -630,14 +612,37 @@ renderer_main_begin :: proc(
   }
   vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
   vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
-  data_buffer_write(renderer_get_camera_uniform(&engine.main), scene_uniform)
-  data_buffer_write(renderer_get_light_uniform(&engine.main), light_uniform)
+  scene_uniform := data_buffer_get(renderer_get_camera_uniform(&engine.main))
+  scene_uniform.view = geometry.calculate_view_matrix(engine.scene.camera)
+  scene_uniform.projection = geometry.calculate_projection_matrix(
+    engine.scene.camera,
+  )
+  scene_uniform.time = f32(
+    time.duration_seconds(time.since(engine.start_timestamp)),
+  )
+  // Update visible lights for this frame
+  // Fill light_uniform from visible_lights
+  light_uniform := data_buffer_get(renderer_get_light_uniform(&engine.main))
+  light_uniform.light_count = u32(len(engine.visible_lights[g_frame_index]))
+  for light, i in engine.visible_lights[g_frame_index] {
+    light_uniform.lights[i].kind = light.kind
+    light_uniform.lights[i].color = linalg.Vector4f32 {
+      light.color.x,
+      light.color.y,
+      light.color.z,
+      1.0,
+    }
+    light_uniform.lights[i].radius = light.radius
+    light_uniform.lights[i].angle = light.angle
+    light_uniform.lights[i].has_shadow = b32(light.has_shadow)
+    light_uniform.lights[i].position = light.position
+    light_uniform.lights[i].direction = light.direction
+    light_uniform.lights[i].view_proj = light.view * light.projection
+  }
 }
 
 renderer_main_render :: proc(
   engine: ^Engine,
-  scene_uniform: ^SceneUniform, // not used, for API symmetry
-  light_uniform: ^SceneLightUniform, // not used, for API symmetry
   command_buffer: vk.CommandBuffer,
 ) {
   rendered_count: u32 = 0
@@ -651,16 +656,9 @@ renderer_main_render :: proc(
   scene_traverse_linear(&engine.scene, &render_meshes_ctx, render_single_node)
 }
 
-renderer_main_end :: proc(
-  engine: ^Engine,
-  scene_uniform: ^SceneUniform, // not used, for API symmetry
-  light_uniform: ^SceneLightUniform, // not used, for API symmetry
-  command_buffer: vk.CommandBuffer,
-) {
+renderer_main_end :: proc(engine: ^Engine, command_buffer: vk.CommandBuffer) {
   vk.CmdEndRenderingKHR(command_buffer)
 }
-
-// Remove or deprecate render_main_pass in favor of modular API
 
 // Add render-to-texture capability
 render_to_texture :: proc(

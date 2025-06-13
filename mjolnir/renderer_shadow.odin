@@ -266,13 +266,13 @@ renderer_shadow_deinit :: proc(self: ^RendererShadow) {
 // Refactored shadow pass API
 renderer_shadow_begin :: proc(
   engine: ^Engine,
-  light_uniform: ^SceneLightUniform,
   command_buffer: vk.CommandBuffer,
 ) {
   // Transition all shadow maps to depth attachment optimal
-  for i := 0; i < int(light_uniform.light_count); i += 1 {
-    cube_shadow := renderer_get_cube_shadow_map(&engine.main, i)
-    shadow_map_texture := renderer_get_shadow_map(&engine.main, i)
+  for light in engine.visible_lights[g_frame_index] {
+    if !light.has_shadow {
+      continue
+    }
     initial_barriers := [?]vk.ImageMemoryBarrier {
       {
         sType = .IMAGE_MEMORY_BARRIER,
@@ -280,7 +280,7 @@ renderer_shadow_begin :: proc(
         newLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
         srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
         dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-        image = cube_shadow.image,
+        image = light.cube_shadow_map.image,
         subresourceRange = {
           aspectMask = {.DEPTH},
           baseMipLevel = 0,
@@ -296,7 +296,7 @@ renderer_shadow_begin :: proc(
         newLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
         srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
         dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-        image = shadow_map_texture.image,
+        image = light.shadow_map.image,
         subresourceRange = {
           aspectMask = {.DEPTH},
           baseMipLevel = 0,
@@ -324,16 +324,15 @@ renderer_shadow_begin :: proc(
 
 renderer_shadow_render :: proc(
   engine: ^Engine,
-  light_uniform: ^SceneLightUniform,
   command_buffer: vk.CommandBuffer,
 ) {
-  for i := 0; i < int(light_uniform.light_count); i += 1 {
-    light := &light_uniform.lights[i]
-    if !light.has_shadow || i >= MAX_SHADOW_MAPS {
+  lights := &engine.visible_lights[g_frame_index]
+  for light, i in lights {
+    if !light.has_shadow {
       continue
     }
     if light.kind == .POINT {
-      cube_shadow := renderer_get_cube_shadow_map(&engine.main, i)
+      cube_shadow := light.cube_shadow_map
       light_pos := light.position.xyz
       face_dirs := [6][3]f32 {
         {1, 0, 0},
@@ -351,12 +350,6 @@ renderer_shadow_render :: proc(
         {0, -1, 0},
         {0, -1, 0},
       }
-      proj := linalg.matrix4_perspective(
-        math.PI * 0.5,
-        1.0,
-        0.01,
-        light.radius,
-      )
       for face in 0 ..< 6 {
         view := linalg.matrix4_look_at(
           light_pos,
@@ -388,15 +381,12 @@ renderer_shadow_render :: proc(
         scissor := vk.Rect2D {
           extent = {width = cube_shadow.width, height = cube_shadow.height},
         }
-        shadow_scene_uniform := SceneUniform {
-          view       = view,
-          projection = proj,
-        }
-        data_buffer_write(
+        shadow_scene_uniform := data_buffer_get(
           &engine.shadow.frames[g_frame_index].camera_uniform,
-          &shadow_scene_uniform,
-          i * 6 + face,
+          u32(i) * 6 + u32(face),
         )
+        shadow_scene_uniform.view = view
+        shadow_scene_uniform.projection = light.projection
         vk.CmdBeginRenderingKHR(command_buffer, &face_render_info)
         vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
         vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
@@ -407,7 +397,7 @@ renderer_shadow_render :: proc(
           obstacles_count = &obstacles_this_light,
           shadow_idx      = u32(i),
           shadow_layer    = u32(face),
-          frustum         = geometry.make_frustum(proj * view),
+          frustum         = geometry.make_frustum(light.projection * view),
         }
         scene_traverse_linear(
           &engine.scene,
@@ -417,33 +407,7 @@ renderer_shadow_render :: proc(
         vk.CmdEndRenderingKHR(command_buffer)
       }
     } else {
-      shadow_map_texture := renderer_get_shadow_map(&engine.main, i)
-      view: linalg.Matrix4f32
-      proj: linalg.Matrix4f32
-      if light.kind == .DIRECTIONAL {
-        view = linalg.matrix4_look_at(
-          light.position.xyz,
-          light.position.xyz + light.direction.xyz,
-          linalg.VECTOR3F32_Y_AXIS,
-        )
-        ortho_size: f32 = 20.0
-        proj = linalg.matrix_ortho3d(
-          -ortho_size,
-          ortho_size,
-          -ortho_size,
-          ortho_size,
-          0.1,
-          light.radius,
-        )
-      } else {
-        view = linalg.matrix4_look_at(
-          light.position.xyz,
-          light.position.xyz + light.direction.xyz,
-          linalg.VECTOR3F32_X_AXIS,
-        )
-        proj = linalg.matrix4_perspective(light.angle, 1.0, 0.01, light.radius)
-      }
-      light.view_proj = proj * view
+      shadow_map_texture := light.shadow_map
       depth_attachment := vk.RenderingAttachmentInfoKHR {
         sType = .RENDERING_ATTACHMENT_INFO_KHR,
         imageView = shadow_map_texture.view,
@@ -463,15 +427,12 @@ renderer_shadow_render :: proc(
         layerCount = 1,
         pDepthAttachment = &depth_attachment,
       }
-      shadow_scene_uniform := SceneUniform {
-        view       = view,
-        projection = proj,
-      }
-      data_buffer_write(
+      shadow_scene_uniform := data_buffer_get(
         &engine.shadow.frames[g_frame_index].camera_uniform,
-        &shadow_scene_uniform,
-        i * 6,
+        u32(i) * 6,
       )
+      shadow_scene_uniform.view = light.view
+      shadow_scene_uniform.projection = light.projection
       vk.CmdBeginRenderingKHR(command_buffer, &render_info_khr)
       viewport := vk.Viewport {
         width    = f32(shadow_map_texture.width),
@@ -493,7 +454,7 @@ renderer_shadow_render :: proc(
         command_buffer  = command_buffer,
         obstacles_count = &obstacles_this_light,
         shadow_idx      = u32(i),
-        frustum         = geometry.make_frustum(proj * view),
+        frustum         = geometry.make_frustum(light.projection * light.view),
       }
       scene_traverse_linear(
         &engine.scene,
@@ -507,13 +468,13 @@ renderer_shadow_render :: proc(
 
 renderer_shadow_end :: proc(
   engine: ^Engine,
-  light_uniform: ^SceneLightUniform,
   command_buffer: vk.CommandBuffer,
 ) {
   // Transition all shadow maps to shader read optimal
-  for i := 0; i < int(light_uniform.light_count); i += 1 {
-    cube_shadow := renderer_get_cube_shadow_map(&engine.main, i)
-    shadow_map_texture := renderer_get_shadow_map(&engine.main, i)
+  for light, i in &engine.visible_lights[g_frame_index] {
+    if !light.has_shadow {
+      continue
+    }
     final_barriers := [?]vk.ImageMemoryBarrier {
       {
         sType = .IMAGE_MEMORY_BARRIER,
@@ -521,7 +482,7 @@ renderer_shadow_end :: proc(
         newLayout = .SHADER_READ_ONLY_OPTIMAL,
         srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
         dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-        image = cube_shadow.image,
+        image = light.cube_shadow_map.image,
         subresourceRange = {
           aspectMask = {.DEPTH},
           baseMipLevel = 0,
@@ -538,7 +499,7 @@ renderer_shadow_end :: proc(
         newLayout = .SHADER_READ_ONLY_OPTIMAL,
         srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
         dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-        image = shadow_map_texture.image,
+        image = light.shadow_map.image,
         subresourceRange = {
           aspectMask = {.DEPTH},
           baseMipLevel = 0,
@@ -617,7 +578,7 @@ render_single_shadow :: proc(node: ^Node, cb_context: rawptr) -> bool {
     }
     vk.CmdBindPipeline(ctx.command_buffer, .GRAPHICS, pipeline)
     offset_shadow := data_buffer_offset_of(
-      frame.camera_uniform,
+      &frame.camera_uniform,
       shadow_idx * 6 + shadow_layer,
     )
     offsets := [1]u32{offset_shadow}

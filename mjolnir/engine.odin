@@ -30,6 +30,9 @@ MAX_CONSECUTIVE_RENDER_ERROR_COUNT_ALLOWED :: 20
 
 Handle :: resource.Handle
 
+g_context: runtime.Context
+g_frame_index: u32 = 0
+
 SetupProc :: #type proc(engine: ^Engine)
 UpdateProc :: #type proc(engine: ^Engine, delta_time: f32)
 Render2DProc :: #type proc(engine: ^Engine, ctx: ^mu.Context)
@@ -69,6 +72,27 @@ InputState :: struct {
   keys:              [512]bool,
 }
 
+LightKind :: enum u32 {
+  POINT       = 0,
+  DIRECTIONAL = 1,
+  SPOT        = 2,
+}
+
+VisibleLightInfo :: struct {
+  index_in_scene:  int,
+  kind:            LightKind,
+  color:           linalg.Vector3f32,
+  radius:          f32,
+  angle:           f32,
+  has_shadow:      bool,
+  position:        linalg.Vector4f32,
+  direction:       linalg.Vector4f32,
+  view:            linalg.Matrix4f32,
+  projection:      linalg.Matrix4f32,
+  shadow_map:      ^ImageBuffer,
+  cube_shadow_map: ^CubeImageBuffer,
+}
+
 Engine :: struct {
   window:                glfw.WindowHandle,
   swapchain:             Swapchain,
@@ -92,10 +116,9 @@ Engine :: struct {
   particle:              RendererParticle,
   postprocess:           RendererPostProcess,
   command_buffers:       [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
+  visible_lights:        [MAX_FRAMES_IN_FLIGHT][dynamic]VisibleLightInfo,
+  node_idx_to_light_idx: [MAX_FRAMES_IN_FLIGHT]map[int]int,
 }
-
-g_context: runtime.Context
-g_frame_index: u32 = 0
 
 init :: proc(
   self: ^Engine,
@@ -319,40 +342,81 @@ recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
   return .SUCCESS
 }
 
-prepare_light :: proc(node: ^Node, cb_context: rawptr) -> bool {
-  ctx := (^CollectLightsContext)(cb_context)
-  uniform: SingleLightUniform
-  #partial switch data in node.attachment {
-  case PointLightAttachment:
-    uniform.kind = .POINT
-    uniform.color = data.color
-    uniform.radius = data.radius
-    uniform.has_shadow = b32(data.cast_shadow)
-    uniform.position =
-      node.transform.world_matrix * linalg.Vector4f32{0, 0, 0, 1}
-    push_light(ctx.light_uniform, uniform)
-  case DirectionalLightAttachment:
-    uniform.kind = .DIRECTIONAL
-    uniform.color = data.color
-    uniform.has_shadow = b32(data.cast_shadow)
-    uniform.position =
-      node.transform.world_matrix * linalg.Vector4f32{0, 0, 0, 1}
-    uniform.direction =
-      node.transform.world_matrix * linalg.Vector4f32{0, 0, 1, 0} // Assuming +Z is forward
-    push_light(ctx.light_uniform, uniform)
-  case SpotLightAttachment:
-    uniform.kind = .SPOT
-    uniform.color = data.color
-    uniform.radius = data.radius
-    uniform.has_shadow = b32(data.cast_shadow)
-    uniform.angle = data.angle
-    uniform.position =
-      node.transform.world_matrix * linalg.Vector4f32{0, 0, 0, 1}
-    uniform.direction =
-      node.transform.world_matrix * linalg.Vector4f32{0, 0, 1, 0}
-    push_light(ctx.light_uniform, uniform)
+update_visible_lights :: proc(self: ^Engine) {
+  visible_lights := &self.visible_lights[g_frame_index]
+  node_idx_to_light_idx := &self.node_idx_to_light_idx[g_frame_index]
+  seen: [MAX_LIGHTS]bool
+  // Traverse scene and update/add visible lights
+  for entry, i in self.scene.nodes.entries do if entry.active {
+    node := entry.item
+    light_info: VisibleLightInfo
+    #partial switch light in node.attachment {
+    case PointLightAttachment:
+      position := node.transform.world_matrix * linalg.Vector4f32{0, 0, 0, 1}
+      light_info = {
+        index_in_scene = i,
+        kind           = .POINT,
+        color          = light.color.xyz,
+        radius         = light.radius,
+        has_shadow     = light.cast_shadow,
+        position       = position,
+        projection     = linalg.matrix4_perspective(math.PI * 0.5, 1.0, 0.01, light.radius),
+        // point light needs 6 view matrices, it will not be calculated here
+      }
+    case DirectionalLightAttachment:
+      ortho_size: f32 = 20.0
+      position := node.transform.world_matrix * linalg.Vector4f32{0, 0, 0, 1}
+      direction := node.transform.world_matrix * linalg.Vector4f32{0, 0, 1, 0}
+      light_info = {
+        index_in_scene = i,
+        kind           = .DIRECTIONAL,
+        color          = light.color.xyz,
+        has_shadow     = light.cast_shadow,
+        position       = position,
+        direction      = direction,
+        projection     = linalg.matrix_ortho3d(-ortho_size, ortho_size, -ortho_size, ortho_size, 0.1, 999999.0),
+        view           = linalg.matrix4_look_at(position.xyz, position.xyz + direction.xyz, linalg.VECTOR3F32_Y_AXIS),
+      }
+    case SpotLightAttachment:
+      position := node.transform.world_matrix * linalg.Vector4f32{0, 0, 0, 1}
+      direction := node.transform.world_matrix * linalg.Vector4f32{0, 0, 1, 0}
+      light_info = {
+        index_in_scene = i,
+        kind           = .SPOT,
+        color          = light.color.xyz,
+        radius         = light.radius,
+        angle          = light.angle,
+        has_shadow     = light.cast_shadow,
+        position       = position,
+        direction      = direction,
+        projection     = linalg.matrix4_perspective(light.angle, 1.0, 0.01, light.radius),
+        view           = linalg.matrix4_look_at(position.xyz, position.xyz + direction.xyz, linalg.VECTOR3F32_Y_AXIS),
+      }
+    case:
+      continue
+    }
+    j, found := node_idx_to_light_idx[i]
+    if found {
+      visible_lights[j] = light_info
+    } else if len(visible_lights) < MAX_LIGHTS {
+      j = len(visible_lights)
+      append(visible_lights, light_info)
+      node_idx_to_light_idx[i] = j
+    }
+    visible_lights[j].shadow_map = &self.main.frames[g_frame_index].shadow_maps[j]
+    visible_lights[j].cube_shadow_map = &self.main.frames[g_frame_index].cube_shadow_maps[j]
+    seen[j] = true
   }
-  return true
+  // Remove lights that are no longer present
+  for j := 0; j < len(visible_lights); {
+    if seen[j] {
+      j += 1
+      continue
+    }
+    delete_key(node_idx_to_light_idx, visible_lights[j].index_in_scene)
+    unordered_remove(visible_lights, j)
+    node_idx_to_light_idx[visible_lights[j].index_in_scene] = j
+  }
 }
 
 render :: proc(self: ^Engine) -> vk.Result {
@@ -360,41 +424,26 @@ render :: proc(self: ^Engine) -> vk.Result {
   mu.begin(&self.ui.ctx)
   command_buffer := self.command_buffers[g_frame_index]
   vk.ResetCommandBuffer(command_buffer, {}) or_return
-  vk.BeginCommandBuffer(command_buffer, &{
-    sType = .COMMAND_BUFFER_BEGIN_INFO,
-    flags = {.ONE_TIME_SUBMIT},
-  }) or_return
+  vk.BeginCommandBuffer(
+    command_buffer,
+    &{sType = .COMMAND_BUFFER_BEGIN_INFO, flags = {.ONE_TIME_SUBMIT}},
+  ) or_return
   // dispatch computation early and doing other work while GPU is busy
   compute_particles(&self.particle, command_buffer)
-  elapsed_seconds := time.duration_seconds(time.since(self.start_timestamp))
-  scene_uniform := SceneUniform {
-    view       = geometry.calculate_view_matrix(self.scene.camera),
-    projection = geometry.calculate_projection_matrix(self.scene.camera),
-    time       = f32(elapsed_seconds),
-  }
-  light_uniform: SceneLightUniform
+  update_visible_lights(self)
   camera_frustum := geometry.camera_make_frustum(self.scene.camera)
-  collect_ctx := CollectLightsContext {
-    engine        = self,
-    light_uniform = &light_uniform,
-  }
-  if !scene_traverse_linear(&self.scene, &collect_ctx, prepare_light) {
-    log.errorf("[RENDER] Error during light collection")
-  }
   log.debug("============ rendering shadow pass...============ ")
-  renderer_shadow_begin(self, &light_uniform, command_buffer)
-  renderer_shadow_render(self, &light_uniform, command_buffer)
-  renderer_shadow_end(self, &light_uniform, command_buffer)
+  renderer_shadow_begin(self, command_buffer)
+  renderer_shadow_render(self, command_buffer)
+  renderer_shadow_end(self, command_buffer)
   prepare_image_for_render(
     command_buffer,
     renderer_get_main_pass_image(&self.main),
   )
   log.debug("============ rendering main pass... =============")
-  renderer_main_begin(self, &scene_uniform, &light_uniform, command_buffer)
-  renderer_main_render(self, &scene_uniform, &light_uniform, command_buffer)
-  data_buffer_write(renderer_get_camera_uniform(&self.main), &scene_uniform)
-  data_buffer_write(renderer_get_light_uniform(&self.main), &light_uniform)
-  renderer_main_end(self, &scene_uniform, &light_uniform, command_buffer)
+  renderer_main_begin(self, command_buffer)
+  renderer_main_render(self, command_buffer)
+  renderer_main_end(self, command_buffer)
   log.debug("============ rendering particles... =============")
   renderer_particle_begin(self, command_buffer)
   renderer_particle_render(self, command_buffer)
@@ -458,6 +507,8 @@ run :: proc(self: ^Engine, width: u32, height: u32, title: string) {
     return
   }
   defer deinit(self)
+  frame := 0
+  // for !glfw.WindowShouldClose(self.window) && frame < 3 {
   for !glfw.WindowShouldClose(self.window) {
     update(self)
     if time.duration_milliseconds(time.since(self.last_frame_timestamp)) <
@@ -480,6 +531,6 @@ run :: proc(self: ^Engine, width: u32, height: u32, title: string) {
       self.render_error_count = 0
     }
     self.last_frame_timestamp = time.now()
-    // break
+    frame += 1
   }
 }

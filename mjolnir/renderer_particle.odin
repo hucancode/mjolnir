@@ -167,16 +167,16 @@ render_particles :: proc(
     &self.particle_buffer.buffer,
     &offset,
   )
-  params := data_buffer_get(self.params_buffer)
+  params := data_buffer_get(&self.params_buffer)
   vk.CmdDraw(command_buffer, u32(params.particle_count), 1, 0, 0)
 }
 
 add_emitter :: proc(self: ^RendererParticle, emitter: Emitter) -> vk.Result {
-  params := data_buffer_get(self.params_buffer)
+  params := data_buffer_get(&self.params_buffer)
   if params.emitter_count >= MAX_EMITTERS {
     return .ERROR_UNKNOWN
   }
-  ptr := data_buffer_get(self.emitter_buffer, params.emitter_count)
+  ptr := data_buffer_get(&self.emitter_buffer, params.emitter_count)
   ptr^ = emitter
   params.emitter_count += 1
   log.debugf(
@@ -189,7 +189,7 @@ add_emitter :: proc(self: ^RendererParticle, emitter: Emitter) -> vk.Result {
 }
 
 update_emitters :: proc(self: ^RendererParticle, delta_time: f32) {
-  params := data_buffer_get(self.params_buffer)
+  params := data_buffer_get(&self.params_buffer)
   params.delta_time = delta_time
   emitters := self.emitter_buffer.mapped
   particles := self.particle_buffer.mapped
@@ -255,7 +255,7 @@ renderer_particle_init :: proc(self: ^RendererParticle) -> vk.Result {
     1,
     {.UNIFORM_BUFFER},
   ) or_return
-  params := data_buffer_get(self.params_buffer)
+  params := data_buffer_get(&self.params_buffer)
   params.particle_count = 0
   params.emitter_count = 0
   params.delta_time = 0
@@ -614,60 +614,60 @@ renderer_particle_init :: proc(self: ^RendererParticle) -> vk.Result {
 
 // Modular particle renderer API
 renderer_particle_begin :: proc(
-    engine: ^Engine,
-    command_buffer: vk.CommandBuffer,
+  engine: ^Engine,
+  command_buffer: vk.CommandBuffer,
 ) {
-    // Set up color and depth attachments for the particle pass
-    color_attachment := vk.RenderingAttachmentInfoKHR {
-        sType = .RENDERING_ATTACHMENT_INFO_KHR,
-        imageView = renderer_get_main_pass_view(&engine.main),
-        imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
-        loadOp = .LOAD, // preserve main pass contents
-        storeOp = .STORE,
-        clearValue = {color = {float32 = {0,0,0,0}}},
-    }
-    depth_attachment := vk.RenderingAttachmentInfoKHR {
-        sType = .RENDERING_ATTACHMENT_INFO_KHR,
-        imageView = engine.main.depth_buffer.view,
-        imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-        loadOp = .LOAD,
-        storeOp = .STORE,
-        clearValue = {depthStencil = {1.0, 0}},
-    }
-    render_info := vk.RenderingInfoKHR {
-        sType = .RENDERING_INFO_KHR,
-        renderArea = {extent = engine.swapchain.extent},
-        layerCount = 1,
-        colorAttachmentCount = 1,
-        pColorAttachments = &color_attachment,
-        pDepthAttachment = &depth_attachment,
-    }
-    vk.CmdBeginRenderingKHR(command_buffer, &render_info)
-    viewport := vk.Viewport {
-        x        = 0.0,
-        y        = f32(engine.swapchain.extent.height),
-        width    = f32(engine.swapchain.extent.width),
-        height   = -f32(engine.swapchain.extent.height),
-        minDepth = 0.0,
-        maxDepth = 1.0,
-    }
-    scissor := vk.Rect2D {
-        extent = engine.swapchain.extent,
-    }
-    vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
-    vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
+  // Set up color and depth attachments for the particle pass
+  color_attachment := vk.RenderingAttachmentInfoKHR {
+    sType = .RENDERING_ATTACHMENT_INFO_KHR,
+    imageView = renderer_get_main_pass_view(&engine.main),
+    imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
+    loadOp = .LOAD, // preserve main pass contents
+    storeOp = .STORE,
+    clearValue = {color = {float32 = {0, 0, 0, 0}}},
+  }
+  depth_attachment := vk.RenderingAttachmentInfoKHR {
+    sType = .RENDERING_ATTACHMENT_INFO_KHR,
+    imageView = engine.main.depth_buffer.view,
+    imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+    loadOp = .LOAD,
+    storeOp = .STORE,
+    clearValue = {depthStencil = {1.0, 0}},
+  }
+  render_info := vk.RenderingInfoKHR {
+    sType = .RENDERING_INFO_KHR,
+    renderArea = {extent = engine.swapchain.extent},
+    layerCount = 1,
+    colorAttachmentCount = 1,
+    pColorAttachments = &color_attachment,
+    pDepthAttachment = &depth_attachment,
+  }
+  vk.CmdBeginRenderingKHR(command_buffer, &render_info)
+  viewport := vk.Viewport {
+    x        = 0.0,
+    y        = f32(engine.swapchain.extent.height),
+    width    = f32(engine.swapchain.extent.width),
+    height   = -f32(engine.swapchain.extent.height),
+    minDepth = 0.0,
+    maxDepth = 1.0,
+  }
+  scissor := vk.Rect2D {
+    extent = engine.swapchain.extent,
+  }
+  vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
+  vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
 }
 
 renderer_particle_render :: proc(
-    engine: ^Engine,
-    command_buffer: vk.CommandBuffer,
+  engine: ^Engine,
+  command_buffer: vk.CommandBuffer,
 ) {
-    render_particles(&engine.particle, engine.scene.camera, command_buffer)
+  render_particles(&engine.particle, engine.scene.camera, command_buffer)
 }
 
 renderer_particle_end :: proc(
-    engine: ^Engine,
-    command_buffer: vk.CommandBuffer,
+  engine: ^Engine,
+  command_buffer: vk.CommandBuffer,
 ) {
-    vk.CmdEndRenderingKHR(command_buffer)
+  vk.CmdEndRenderingKHR(command_buffer)
 }
