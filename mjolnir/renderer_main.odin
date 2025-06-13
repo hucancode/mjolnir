@@ -6,8 +6,8 @@ import linalg "core:math/linalg"
 import "core:time"
 import "geometry"
 import "resource"
-import vk "vendor:vulkan"
 import mu "vendor:microui"
+import vk "vendor:vulkan"
 
 MAX_LIGHTS :: 10
 SHADOW_MAP_SIZE :: 512
@@ -80,7 +80,6 @@ RendererMain :: struct {
     shadow_maps:           [MAX_SHADOW_MAPS]ImageBuffer,
     cube_shadow_maps:      [MAX_SHADOW_MAPS]CubeImageBuffer,
   },
-  frame_index:                       u32,
   camera_descriptor_set_layout:      vk.DescriptorSetLayout,
   environment_descriptor_set_layout: vk.DescriptorSetLayout,
   texture_descriptor_set_layout:     vk.DescriptorSetLayout,
@@ -578,7 +577,7 @@ renderer_main_begin :: proc(
 ) {
   color_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
-    imageView = renderer_get_main_pass_view(&engine.main),
+    imageView = engine.main.frames[g_frame_index].main_pass_image.view,
     imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
     loadOp = .CLEAR,
     storeOp = .STORE,
@@ -614,7 +613,9 @@ renderer_main_begin :: proc(
   }
   vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
   vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
-  scene_uniform := data_buffer_get(renderer_get_camera_uniform(&engine.main))
+  scene_uniform := data_buffer_get(
+    &engine.main.frames[g_frame_index].camera_uniform,
+  )
   scene_uniform.view = geometry.calculate_view_matrix(engine.scene.camera)
   scene_uniform.projection = geometry.calculate_projection_matrix(
     engine.scene.camera,
@@ -622,9 +623,10 @@ renderer_main_begin :: proc(
   scene_uniform.time = f32(
     time.duration_seconds(time.since(engine.start_timestamp)),
   )
-  // Update visible lights for this frame
   // Fill light_uniform from visible_lights
-  light_uniform := data_buffer_get(renderer_get_light_uniform(&engine.main))
+  light_uniform := data_buffer_get(
+    &engine.main.frames[g_frame_index].light_uniform,
+  )
   light_uniform.light_count = u32(len(engine.visible_lights[g_frame_index]))
   for light, i in engine.visible_lights[g_frame_index] {
     light_uniform.lights[i].kind = light.kind
@@ -656,14 +658,13 @@ renderer_main_render :: proc(
     rendered_count = &rendered_count,
   }
   scene_traverse_linear(&engine.scene, &render_meshes_ctx, render_single_node)
-  if mu.window(&engine.ui.ctx, "Main pass renderer", {40, 200, 300, 150}, {.NO_CLOSE}) {
-    mu.label(
-      &engine.ui.ctx,
-      fmt.tprintf(
-        "Rendered %d",
-        rendered_count,
-      ),
-    )
+  if mu.window(
+    &engine.ui.ctx,
+    "Main pass renderer",
+    {40, 200, 300, 150},
+    {.NO_CLOSE},
+  ) {
+    mu.label(&engine.ui.ctx, fmt.tprintf("Rendered %d", rendered_count))
   }
 }
 
@@ -681,13 +682,16 @@ render_to_texture :: proc(
 ) -> vk.Result {
   command_buffer := engine.command_buffers[g_frame_index]
   render_camera := camera.? or_else engine.scene.camera
-  scene_uniform := SceneUniform {
-    view       = geometry.calculate_view_matrix(render_camera),
-    projection = geometry.calculate_projection_matrix(render_camera),
-    time       = f32(
-      time.duration_seconds(time.since(engine.start_timestamp)),
-    ),
-  }
+  scene_uniform := data_buffer_get(
+    &engine.main.frames[g_frame_index].camera_uniform,
+  )
+  scene_uniform.view = geometry.calculate_view_matrix(render_camera)
+  scene_uniform.projection = geometry.calculate_projection_matrix(
+    render_camera,
+  )
+  scene_uniform.time = f32(
+    time.duration_seconds(time.since(engine.start_timestamp)),
+  )
   camera_frustum := geometry.camera_make_frustum(render_camera)
   color_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
@@ -727,7 +731,6 @@ render_to_texture :: proc(
   }
   vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
   vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
-  data_buffer_write(renderer_get_camera_uniform(&engine.main), &scene_uniform)
   rendered_count: u32 = 0
   render_meshes_ctx := RenderMeshesContext {
     engine         = engine,
@@ -890,7 +893,6 @@ renderer_main_init :: proc(
     vk.UpdateDescriptorSets(g_device, len(writes), raw_data(writes[:]), 0, nil)
   }
   renderer_main_init_images(self, width, height, color_format)
-  self.frame_index = 0
   return .SUCCESS
 }
 
@@ -972,46 +974,6 @@ renderer_recreate_images :: proc(
   return .SUCCESS
 }
 
-renderer_get_main_pass_image :: proc(self: ^RendererMain) -> vk.Image {
-  return self.frames[self.frame_index].main_pass_image.image
-}
-
-renderer_get_main_pass_view :: proc(self: ^RendererMain) -> vk.ImageView {
-  return self.frames[self.frame_index].main_pass_image.view
-}
-
-renderer_get_camera_uniform :: proc(
-  self: ^RendererMain,
-) -> ^DataBuffer(SceneUniform) {
-  return &self.frames[self.frame_index].camera_uniform
-}
-
-renderer_get_light_uniform :: proc(
-  self: ^RendererMain,
-) -> ^DataBuffer(SceneLightUniform) {
-  return &self.frames[self.frame_index].light_uniform
-}
-
-renderer_get_shadow_map :: proc(
-  self: ^RendererMain,
-  light_idx: int,
-) -> ^ImageBuffer {
-  return &self.frames[self.frame_index].shadow_maps[light_idx]
-}
-
-renderer_get_cube_shadow_map :: proc(
-  self: ^RendererMain,
-  light_idx: int,
-) -> ^CubeImageBuffer {
-  return &self.frames[self.frame_index].cube_shadow_maps[light_idx]
-}
-
-renderer_get_camera_descriptor_set :: proc(
-  self: ^RendererMain,
-) -> vk.DescriptorSet {
-  return self.frames[self.frame_index].camera_descriptor_set
-}
-
 // Render a single node for the main pass
 render_single_node :: proc(node: ^Node, cb_context: rawptr) -> bool {
   ctx := (^RenderMeshesContext)(cb_context)
@@ -1035,7 +997,7 @@ render_single_node :: proc(node: ^Node, cb_context: rawptr) -> bool {
     pipeline := renderer_main_get_pipeline(&ctx.engine.main, material)
     layout := ctx.engine.main.pipeline_layout
     descriptor_sets := [?]vk.DescriptorSet {
-      renderer_get_camera_descriptor_set(&ctx.engine.main), // set 0
+      ctx.engine.main.frames[g_frame_index].camera_descriptor_set, // set 0
       material.texture_descriptor_set, // set 1
       material.skinning_descriptor_sets[g_frame_index], // set 2
       ctx.engine.main.environment_descriptor_set, // set 3

@@ -1,7 +1,6 @@
 package mjolnir
 
 import "core:log"
-import "core:math"
 import linalg "core:math/linalg"
 import "geometry"
 import "resource"
@@ -471,7 +470,7 @@ renderer_shadow_end :: proc(
   command_buffer: vk.CommandBuffer,
 ) {
   // Transition all shadow maps to shader read optimal
-  for light, i in &engine.visible_lights[g_frame_index] {
+  for light in &engine.visible_lights[g_frame_index] {
     if !light.has_shadow {
       continue
     }

@@ -612,19 +612,17 @@ renderer_particle_init :: proc(self: ^RendererParticle) -> vk.Result {
   return .SUCCESS
 }
 
-// Modular particle renderer API
 renderer_particle_begin :: proc(
   engine: ^Engine,
   command_buffer: vk.CommandBuffer,
   color_view: vk.ImageView,
   depth_view: vk.ImageView,
 ) {
-  // Set up color and depth attachments for the particle pass
   color_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
     imageView = color_view,
     imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
-    loadOp = .LOAD, // preserve main pass contents
+    loadOp = .LOAD, // preserve previous contents
     storeOp = .STORE,
     clearValue = {color = {float32 = {0, 0, 0, 0}}},
   }

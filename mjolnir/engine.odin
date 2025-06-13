@@ -431,14 +431,13 @@ render :: proc(self: ^Engine) -> vk.Result {
   // dispatch computation early and doing other work while GPU is busy
   compute_particles(&self.particle, command_buffer)
   update_visible_lights(self)
-  camera_frustum := geometry.camera_make_frustum(self.scene.camera)
   log.debug("============ rendering shadow pass...============ ")
   renderer_shadow_begin(self, command_buffer)
   renderer_shadow_render(self, command_buffer)
   renderer_shadow_end(self, command_buffer)
   prepare_image_for_render(
     command_buffer,
-    renderer_get_main_pass_image(&self.main),
+    self.main.frames[g_frame_index].main_pass_image.image,
   )
   log.debug("============ rendering main pass... =============")
   renderer_main_begin(self, command_buffer)
@@ -455,13 +454,13 @@ render :: proc(self: ^Engine) -> vk.Result {
   renderer_particle_end(self, command_buffer)
   prepare_image_for_shader_read(
     command_buffer,
-    renderer_get_main_pass_image(&self.main),
+    self.main.frames[g_frame_index].main_pass_image.image,
   )
   log.debug("============ rendering post processes... =============")
   renderer_postprocess_begin(
     &self.postprocess,
     command_buffer,
-    renderer_get_main_pass_view(&self.main),
+    self.main.frames[g_frame_index].main_pass_image.view,
     self.swapchain.extent,
   )
   prepare_image_for_render(
@@ -524,7 +523,6 @@ render :: proc(self: ^Engine) -> vk.Result {
   vk.EndCommandBuffer(command_buffer) or_return
   submit_queue_and_present(&self.swapchain, &command_buffer) or_return
   g_frame_index = (g_frame_index + 1) % MAX_FRAMES_IN_FLIGHT
-  self.main.frame_index = g_frame_index
   return .SUCCESS
 }
 
