@@ -53,7 +53,6 @@ renderer_shadow_init :: proc(
     nil,
     &self.camera_descriptor_set_layout,
   ) or_return
-  // Create dedicated skinning descriptor set layout for shadow
   skinning_bindings := [1]vk.DescriptorSetLayoutBinding {
     {
       binding = 0,
@@ -262,7 +261,6 @@ renderer_shadow_deinit :: proc(self: ^RendererShadow) {
   self.skinning_descriptor_set_layout = 0
 }
 
-// Refactored shadow pass API
 renderer_shadow_begin :: proc(
   engine: ^Engine,
   command_buffer: vk.CommandBuffer,
@@ -532,7 +530,6 @@ renderer_shadow_get_pipeline :: proc(
   return self.pipelines[transmute(u32)features]
 }
 
-// Ensure this proc is present for shadow rendering
 render_single_shadow :: proc(node: ^Node, cb_context: rawptr) -> bool {
   ctx := (^ShadowRenderContext)(cb_context)
   shadow_idx := ctx.shadow_idx
