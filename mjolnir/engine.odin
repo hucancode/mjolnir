@@ -470,12 +470,33 @@ render :: proc(self: ^Engine) -> vk.Result {
     self.swapchain.views[self.swapchain.image_index],
   )
   renderer_postprocess_end(&self.postprocess, command_buffer)
-  if mu.window(&self.ui.ctx, "Inspector", {40, 40, 300, 150}, {.NO_CLOSE}) {
+  if mu.window(&self.ui.ctx, "Engine", {40, 40, 300, 150}, {.NO_CLOSE}) {
     mu.label(
       &self.ui.ctx,
       fmt.tprintf(
         "Objects %d",
         len(self.scene.nodes.entries) - len(self.scene.nodes.free_indices),
+      ),
+    )
+    mu.label(
+      &self.ui.ctx,
+      fmt.tprintf(
+        "Textures %d",
+        len(g_image_buffers.entries) - len(g_image_buffers.free_indices),
+      ),
+    )
+    mu.label(
+      &self.ui.ctx,
+      fmt.tprintf(
+        "Materials %d",
+        len(g_materials.entries) - len(g_materials.free_indices),
+      ),
+    )
+    mu.label(
+      &self.ui.ctx,
+      fmt.tprintf(
+        "Meshes %d",
+        len(g_meshes.entries) - len(g_meshes.free_indices),
       ),
     )
   }

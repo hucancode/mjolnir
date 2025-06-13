@@ -1,11 +1,13 @@
 package mjolnir
 
+import "core:fmt"
 import "core:log"
 import linalg "core:math/linalg"
 import "core:time"
 import "geometry"
 import "resource"
 import vk "vendor:vulkan"
+import mu "vendor:microui"
 
 MAX_LIGHTS :: 10
 SHADOW_MAP_SIZE :: 512
@@ -654,6 +656,15 @@ renderer_main_render :: proc(
     rendered_count = &rendered_count,
   }
   scene_traverse_linear(&engine.scene, &render_meshes_ctx, render_single_node)
+  if mu.window(&engine.ui.ctx, "Main pass renderer", {40, 200, 300, 150}, {.NO_CLOSE}) {
+    mu.label(
+      &engine.ui.ctx,
+      fmt.tprintf(
+        "Rendered %d",
+        rendered_count,
+      ),
+    )
+  }
 }
 
 renderer_main_end :: proc(engine: ^Engine, command_buffer: vk.CommandBuffer) {
