@@ -182,7 +182,7 @@ benchmark_resource_pool :: proc(t: ^testing.T) {
     pointer_array_opts.megabytes_per_second,
   )
   log.infof(
-    "Resource pool pernalty: -%.2f%%",
+    "Resource pool slowed down: %.2f%%",
     (1.0 -
       resource_pool_opts.megabytes_per_second /
         pointer_array_opts.megabytes_per_second) *
