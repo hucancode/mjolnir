@@ -22,6 +22,7 @@ TITLE :: "Mjolnir"
 DEVICE_EXTENSIONS :: []cstring {
   vk.KHR_SWAPCHAIN_EXTENSION_NAME,
   vk.KHR_DYNAMIC_RENDERING_EXTENSION_NAME,
+  vk.EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME,
 }
 
 ENABLE_VALIDATION_LAYERS :: #config(ENABLE_VALIDATION_LAYERS, ODIN_DEBUG)
@@ -419,19 +420,29 @@ logical_device_init :: proc() -> vk.Result {
       },
     )
   }
+  // Enable descriptor indexing features
+  descriptor_indexing_features :=
+    vk.PhysicalDeviceDescriptorIndexingFeaturesEXT {
+      sType                                     = .PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES_EXT,
+      shaderSampledImageArrayNonUniformIndexing = true,
+      runtimeDescriptorArray                    = true,
+      descriptorBindingPartiallyBound           = true,
+      descriptorBindingVariableDescriptorCount  = true,
+    }
   dynamic_rendering_feature := vk.PhysicalDeviceDynamicRenderingFeaturesKHR {
-    sType            = .PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES_KHR,
-    dynamicRendering = true,
-  }
+      sType            = .PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES_KHR,
+      dynamicRendering = true,
+      pNext            = &descriptor_indexing_features,
+    }
   device_create_info := vk.DeviceCreateInfo {
-    sType                   = .DEVICE_CREATE_INFO,
-    queueCreateInfoCount    = u32(len(queue_create_infos_list)),
-    pQueueCreateInfos       = raw_data(queue_create_infos_list),
-    ppEnabledExtensionNames = raw_data(DEVICE_EXTENSIONS),
-    enabledExtensionCount   = u32(len(DEVICE_EXTENSIONS)),
-    pNext                   = &dynamic_rendering_feature,
-    // pEnabledFeatures = &vk.PhysicalDeviceFeatures{}, // Set if specific base features needed
-  }
+      sType                   = .DEVICE_CREATE_INFO,
+      queueCreateInfoCount    = u32(len(queue_create_infos_list)),
+      pQueueCreateInfos       = raw_data(queue_create_infos_list),
+      ppEnabledExtensionNames = raw_data(DEVICE_EXTENSIONS),
+      enabledExtensionCount   = u32(len(DEVICE_EXTENSIONS)),
+      pNext                   = &dynamic_rendering_feature,
+      // pEnabledFeatures = &vk.PhysicalDeviceFeatures{}, // Set if specific base features needed
+    }
   when ENABLE_VALIDATION_LAYERS {
     device_create_info.enabledLayerCount = u32(len(VALIDATION_LAYERS))
     device_create_info.ppEnabledLayerNames = raw_data(VALIDATION_LAYERS)

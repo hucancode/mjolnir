@@ -13,6 +13,7 @@ MAX_LIGHTS :: 10
 SHADOW_MAP_SIZE :: 512
 MAX_SHADOW_MAPS :: MAX_LIGHTS
 MAX_SCENE_UNIFORMS :: 16
+MAX_BINDLESS_TEXTURES :: 1024
 
 BG_BLUE_GRAY :: [4]f32{0.0117, 0.0117, 0.0179, 1.0}
 BG_DARK_GRAY :: [4]f32{0.0117, 0.0117, 0.0117, 1.0}
@@ -72,7 +73,7 @@ SHADER_UNLIT_VERT :: #load("shader/unlit/vert.spv")
 SHADER_UNLIT_FRAG :: #load("shader/unlit/frag.spv")
 
 RendererMain :: struct {
-  frames:                            [MAX_FRAMES_IN_FLIGHT]struct {
+  frames:                                 [MAX_FRAMES_IN_FLIGHT]struct {
     camera_uniform:        DataBuffer(SceneUniform),
     light_uniform:         DataBuffer(SceneLightUniform),
     camera_descriptor_set: vk.DescriptorSet,
@@ -80,18 +81,20 @@ RendererMain :: struct {
     shadow_maps:           [MAX_SHADOW_MAPS]ImageBuffer,
     cube_shadow_maps:      [MAX_SHADOW_MAPS]CubeImageBuffer,
   },
-  camera_descriptor_set_layout:      vk.DescriptorSetLayout,
-  environment_descriptor_set_layout: vk.DescriptorSetLayout,
-  texture_descriptor_set_layout:     vk.DescriptorSetLayout,
-  skinning_descriptor_set_layout:    vk.DescriptorSetLayout,
-  pipeline_layout:                   vk.PipelineLayout,
-  pipelines:                         [SHADER_VARIANT_COUNT]vk.Pipeline,
-  unlit_pipelines:                   [UNLIT_SHADER_VARIANT_COUNT]vk.Pipeline,
-  environment_descriptor_set:        vk.DescriptorSet,
-  depth_buffer:                      ImageBuffer,
+  camera_descriptor_set_layout:           vk.DescriptorSetLayout,
+  environment_descriptor_set_layout:      vk.DescriptorSetLayout,
+  texture_descriptor_set_layout:          vk.DescriptorSetLayout,
+  skinning_descriptor_set_layout:         vk.DescriptorSetLayout,
+  pipeline_layout:                        vk.PipelineLayout,
+  pipelines:                              [SHADER_VARIANT_COUNT]vk.Pipeline,
+  unlit_pipelines:                        [UNLIT_SHADER_VARIANT_COUNT]vk.Pipeline,
+  environment_descriptor_set:             vk.DescriptorSet,
+  depth_buffer:                           ImageBuffer,
   // managed by pool, so we don't need to deinit
-  environment_map:                   ^ImageBuffer,
-  brdf_lut:                          ^ImageBuffer,
+  environment_map:                        ^ImageBuffer,
+  brdf_lut:                               ^ImageBuffer,
+  bindless_texture_descriptor_set_layout: vk.DescriptorSetLayout,
+  bindless_texture_descriptor_set:        vk.DescriptorSet,
 }
 
 renderer_main_build_pbr_pipeline :: proc(
@@ -894,6 +897,81 @@ renderer_main_init :: proc(
   }
   renderer_main_init_images(self, width, height, color_format)
   return .SUCCESS
+}
+
+renderer_main_init_bindless_textures :: proc(
+  self: ^RendererMain,
+) -> vk.Result {
+  binding_flags: vk.DescriptorBindingFlags = {
+    .PARTIALLY_BOUND,
+    .VARIABLE_DESCRIPTOR_COUNT,
+  }
+  binding_flags_create_info := vk.DescriptorSetLayoutBindingFlagsCreateInfo {
+    sType         = .DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO,
+    bindingCount  = 1,
+    pBindingFlags = &binding_flags,
+  }
+  texture_binding := vk.DescriptorSetLayoutBinding {
+    binding         = 0,
+    descriptorType  = .COMBINED_IMAGE_SAMPLER,
+    descriptorCount = MAX_BINDLESS_TEXTURES,
+    stageFlags      = {.FRAGMENT, .VERTEX},
+  }
+  layout_info := vk.DescriptorSetLayoutCreateInfo {
+    sType        = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+    bindingCount = 1,
+    pBindings    = &texture_binding,
+    pNext        = &binding_flags_create_info,
+  }
+  vk.CreateDescriptorSetLayout(
+    g_device,
+    &layout_info,
+    nil,
+    &self.bindless_texture_descriptor_set_layout,
+  ) or_return
+  variable_descriptor_count: u32 = MAX_BINDLESS_TEXTURES
+  variable_descriptor_count_info :=
+    vk.DescriptorSetVariableDescriptorCountAllocateInfo {
+      sType              = .DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO,
+      descriptorSetCount = 1,
+      pDescriptorCounts  = &variable_descriptor_count,
+    }
+  alloc_info := vk.DescriptorSetAllocateInfo {
+      sType              = .DESCRIPTOR_SET_ALLOCATE_INFO,
+      descriptorPool     = g_descriptor_pool,
+      descriptorSetCount = 1,
+      pSetLayouts        = &self.bindless_texture_descriptor_set_layout,
+      pNext              = &variable_descriptor_count_info,
+    }
+  vk.AllocateDescriptorSets(
+    g_device,
+    &alloc_info,
+    &self.bindless_texture_descriptor_set,
+  ) or_return
+  return .SUCCESS
+}
+
+update_bindless_texture_descriptor :: proc(
+  self: ^RendererMain,
+  texture_index: u32,
+  image_view: vk.ImageView,
+  sampler: vk.Sampler,
+) {
+  image_info := vk.DescriptorImageInfo {
+      sampler     = sampler,
+      imageView   = image_view,
+      imageLayout = .SHADER_READ_ONLY_OPTIMAL,
+    }
+  write := vk.WriteDescriptorSet {
+      sType           = .WRITE_DESCRIPTOR_SET,
+      dstSet          = self.bindless_texture_descriptor_set,
+      dstBinding      = 0,
+      dstArrayElement = texture_index,
+      descriptorType  = .COMBINED_IMAGE_SAMPLER,
+      descriptorCount = 1,
+      pImageInfo      = &image_info,
+    }
+  vk.UpdateDescriptorSets(g_device, 1, &write, 0, nil)
 }
 
 renderer_main_deinit :: proc(self: ^RendererMain) {
