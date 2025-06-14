@@ -68,7 +68,7 @@ test_invalid_resource_handles :: proc(t: ^testing.T) {
 }
 
 @(test)
-benchmark_resource_pool :: proc(t: ^testing.T) {
+benchmark_resource_pool_read :: proc(t: ^testing.T) {
   COUNT :: 100_000
   READ_COUNT :: 100_000
   ResourcePoolTest :: struct {
@@ -186,6 +186,133 @@ benchmark_resource_pool :: proc(t: ^testing.T) {
     (1.0 -
       resource_pool_opts.megabytes_per_second /
         pointer_array_opts.megabytes_per_second) *
+    100,
+  )
+}
+
+@(test)
+benchmark_resource_pool_write :: proc(t: ^testing.T) {
+  OP_COUNT :: 100_000
+  ResourcePoolTest :: struct {
+    pool:       resource.Pool(TestData),
+    operations: []bool,
+  }
+  resource_pool_opts := &time.Benchmark_Options {
+    rounds = 1,
+    bytes = int(size_of(TestData)) * OP_COUNT,
+    setup = proc(
+      options: ^time.Benchmark_Options,
+      allocator := context.allocator,
+    ) -> time.Benchmark_Error {
+      data := new(ResourcePoolTest)
+      data.operations = make([]bool, OP_COUNT)
+      resource.pool_init(&data.pool)
+      for &op in data.operations {
+        op = rand.float32() < 0.5
+      }
+      options.input = slice.bytes_from_ptr(data, size_of(^ResourcePoolTest))
+      return nil
+    },
+    bench = proc(
+      options: ^time.Benchmark_Options,
+      allocator := context.allocator,
+    ) -> time.Benchmark_Error {
+      data := cast(^ResourcePoolTest)(raw_data(options.input))
+      allocated := make([dynamic]resource.Handle, 0, len(data.operations))
+      defer delete(allocated)
+      for should_alloc in data.operations {
+        if should_alloc {
+          handle, d := resource.alloc(&data.pool)
+          d.value = rand.int31()
+          append(&allocated, handle)
+        } else {
+          handle, ok := pop_safe(&allocated)
+          if ok {
+            resource.free(&data.pool, handle)
+          }
+        }
+        options.processed += size_of(TestData)
+      }
+      return nil
+    },
+    teardown = proc(
+      options: ^time.Benchmark_Options,
+      allocator := context.allocator,
+    ) -> time.Benchmark_Error {
+      data := cast(^ResourcePoolTest)(raw_data(options.input))
+      resource.pool_deinit(data.pool, proc(data: ^TestData) {})
+      delete(data.operations)
+      free(data)
+      return nil
+    },
+  }
+  SliceTest :: struct {
+    operations: []bool,
+  }
+  pointer_array_opts := &time.Benchmark_Options {
+    rounds = 1,
+    bytes = int(size_of(TestData)) * OP_COUNT,
+    setup = proc(
+      options: ^time.Benchmark_Options,
+      allocator := context.allocator,
+    ) -> time.Benchmark_Error {
+      data := new(SliceTest)
+      data.operations = make([]bool, OP_COUNT)
+      for &op in data.operations {
+        op = rand.float32() < 0.5
+      }
+      options.input = slice.bytes_from_ptr(data, size_of(^SliceTest))
+      return nil
+    },
+    bench = proc(
+      options: ^time.Benchmark_Options,
+      allocator := context.allocator,
+    ) -> time.Benchmark_Error {
+      data := cast(^SliceTest)(raw_data(options.input))
+      allocated := make([dynamic]^TestData, 0, len(data.operations))
+      defer delete(allocated)
+      for should_alloc in data.operations {
+        if should_alloc {
+          d := new(TestData)
+          d.value = rand.int31()
+          append(&allocated, d)
+        } else {
+          d, ok := pop_safe(&allocated)
+          if ok {
+            free(d)
+          }
+        }
+        options.processed += size_of(TestData)
+      }
+      for d in allocated do free(d)
+      return nil
+    },
+    teardown = proc(
+      options: ^time.Benchmark_Options,
+      allocator := context.allocator,
+    ) -> time.Benchmark_Error {
+      data := cast(^SliceTest)(raw_data(options.input))
+      delete(data.operations)
+      free(data)
+      return nil
+    },
+  }
+  _ = time.benchmark(resource_pool_opts)
+  log.infof(
+    "[RESOURCE POOL] Time: %v  Speed: %.2f MB/s",
+    resource_pool_opts.duration,
+    resource_pool_opts.megabytes_per_second,
+  )
+  _ = time.benchmark(pointer_array_opts)
+  log.infof(
+    "[NORMAL POINTER] Time: %v  Speed: %.2f MB/s",
+    pointer_array_opts.duration,
+    pointer_array_opts.megabytes_per_second,
+  )
+  log.infof(
+    "Resource pool speed up: %.2f%%",
+    (resource_pool_opts.megabytes_per_second /
+      pointer_array_opts.megabytes_per_second) *
     100,
   )
 }
