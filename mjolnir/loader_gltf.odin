@@ -339,9 +339,9 @@ load_gltf_primitive :: proc(
       gltf_data,
       primitive.material,
     ) or_return
+  skinning_set_layout := engine.main.skinning_descriptor_set_layout
   material_handle, _ = create_material(
-    engine.main.texture_descriptor_set_layout,
-    engine.main.skinning_descriptor_set_layout,
+    skinning_set_layout,
     features,
     albedo_handle,
     metallic_roughness_handle,
@@ -417,8 +417,8 @@ load_gltf_skinned_primitive :: proc(
   gltf_mesh: ^cgltf.mesh,
   gltf_skin: ^cgltf.skin,
 ) -> (
-  geometry_data: geometry.Geometry,// TODO: too many return values, consider refactor this
-  engine_bones: []Bone,
+  geometry_data: geometry.Geometry,
+  engine_bones: []Bone,// TODO: too many return values, consider refactor this
   mat_handle: resource.Handle,
   root_bone_idx: u32,
   ret: vk.Result,
@@ -438,9 +438,9 @@ load_gltf_skinned_primitive :: proc(
       gltf_data,
       primitive.material,
     ) or_return
+  skinning_set_layout := engine.main.skinning_descriptor_set_layout
   mat_handle, _ = create_material(
-    engine.main.texture_descriptor_set_layout,
-    engine.main.skinning_descriptor_set_layout,
+    skinning_set_layout,
     features | {.SKINNING},
     albedo_handle,
     metallic_roughness_handle,
@@ -646,12 +646,12 @@ load_gltf_animations :: proc(
       time_data := unpack_accessor_floats_flat(gltf_channel.sampler.input)
       // defer free(time_data)
       max_time = max(max_time, slice.max(time_data))
-      log.infof(
-        "Bone animation %s %v: keyframe count %d",
-        string(gltf_channel.target_node.name),
-        gltf_channel.target_path,
-        n,
-      )
+      // log.infof(
+      //   "Bone animation %s %v: keyframe count %d",
+      //   string(gltf_channel.target_node.name),
+      //   gltf_channel.target_path,
+      //   n,
+      // )
       switch gltf_channel.target_path {
       case .translation:
         engine_channel.positions = make(type_of(engine_channel.positions), n)
