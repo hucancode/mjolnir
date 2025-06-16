@@ -1,4 +1,5 @@
 #version 450
+#extension GL_EXT_nonuniform_qualifier : require
 
 layout(constant_id = 0) const bool SKINNED = false;
 layout(constant_id = 1) const bool HAS_ALBEDO_TEXTURE = false;
@@ -7,6 +8,12 @@ layout(constant_id = 3) const bool HAS_NORMAL_TEXTURE = false;
 layout(constant_id = 4) const bool HAS_DISPLACEMENT_TEXTURE = false;
 layout(constant_id = 5) const bool HAS_EMISSIVE_TEXTURE = false;
 
+const uint MAX_TEXTURES = 50;
+const uint MAX_SAMPLERS = 4;
+const uint SAMPLER_NEAREST_CLAMP = 0;
+const uint SAMPLER_LINEAR_CLAMP = 1;
+const uint SAMPLER_NEAREST_REPEAT = 2;
+const uint SAMPLER_LINEAR_REPEAT = 3;
 const uint MAX_LIGHTS = 10;
 const uint POINT_LIGHT = 0;
 const uint DIRECTIONAL_LIGHT = 1;
@@ -42,22 +49,26 @@ layout(set = 0, binding = 1) uniform LightUniforms {
 };
 layout(set = 0, binding = 2) uniform sampler2D shadowMaps[MAX_LIGHTS];
 layout(set = 0, binding = 3) uniform samplerCube cubeShadowMaps[MAX_LIGHTS];
+layout(set = 1, binding = 0) uniform texture2D textures[MAX_TEXTURES];
+layout(set = 2, binding = 0) uniform sampler samplers[MAX_SAMPLERS];
+// layout(set = 4, binding = 0) uniform MaterialFallbacks {
+//     vec4 albedoValue;
+//     vec4 emissiveValue;
+//     float roughnessValue;
+//     float metallicValue;
+// };
 
-layout(set = 1, binding = 0) uniform sampler2D albedoSampler;
-layout(set = 1, binding = 1) uniform sampler2D metallicRoughnessSampler;
-layout(set = 1, binding = 2) uniform sampler2D normalSampler;
-layout(set = 1, binding = 3) uniform sampler2D displacementSampler;
-layout(set = 1, binding = 4) uniform sampler2D emissiveSampler;
-
-layout(set = 1, binding = 5) uniform MaterialFallbacks {
-    vec4 albedoValue;
-    vec4 emissiveValue;
-    float roughnessValue;
-    float metallicValue;
-};
-
-layout(set = 3, binding = 0) uniform sampler2D environmentMap;
-layout(set = 3, binding = 1) uniform sampler2D brdfLUT;
+layout(push_constant) uniform PushConstants {
+    mat4 world;
+    uint albedo_index;
+    uint metallic_roughness_index;
+    uint normal_index;
+    uint displacement_index;
+    uint emissive_index;
+    uint environment_index;
+    uint brdf_lut_index;
+    uint padding;
+} pc;
 
 layout(location = 0) in vec3 position;
 layout(location = 1) in vec4 color;
@@ -168,24 +179,21 @@ vec3 brdf(vec3 N, vec3 V, vec3 albedo, float roughness, float metallic) {
 
 void main() {
     vec3 cameraPosition = -inverse(view)[3].xyz;
-    vec3 albedo = HAS_ALBEDO_TEXTURE ? texture(albedoSampler, uv).rgb : albedoValue.rgb;
-    float occlusion = HAS_METALLIC_ROUGHNESS_TEXTURE ? texture(metallicRoughnessSampler, uv).r : 1.0;
-    float roughness = HAS_METALLIC_ROUGHNESS_TEXTURE ? texture(metallicRoughnessSampler, uv).g : roughnessValue;
-    float metallic = HAS_METALLIC_ROUGHNESS_TEXTURE ? texture(metallicRoughnessSampler, uv).b : metallicValue;
-    vec3 emissive = HAS_EMISSIVE_TEXTURE ? texture(emissiveSampler, uv).rgb : emissiveValue.rgb;
+    vec3 albedo = HAS_ALBEDO_TEXTURE ? texture(sampler2D(textures[pc.albedo_index], samplers[SAMPLER_LINEAR_REPEAT]), uv).rgb : vec3(1.0);
+    float occlusion = HAS_METALLIC_ROUGHNESS_TEXTURE ? texture(sampler2D(textures[pc.metallic_roughness_index], samplers[SAMPLER_LINEAR_REPEAT]), uv).r : 1.0;
+    float roughness = HAS_METALLIC_ROUGHNESS_TEXTURE ? texture(sampler2D(textures[pc.metallic_roughness_index], samplers[SAMPLER_LINEAR_REPEAT]), uv).g : 0.5;
+    float metallic = HAS_METALLIC_ROUGHNESS_TEXTURE ? texture(sampler2D(textures[pc.metallic_roughness_index], samplers[SAMPLER_LINEAR_REPEAT]), uv).b : 0.0;
+    vec3 emissive = HAS_EMISSIVE_TEXTURE ? texture(sampler2D(textures[pc.emissive_index], samplers[SAMPLER_LINEAR_REPEAT]), uv).rgb : vec3(0.0);
     metallic = clamp(metallic, 0.0, 1.0);
     roughness = clamp(roughness, 0.0, 1.0);
     vec3 N = normalize(normal);
     if (HAS_NORMAL_TEXTURE && false) {
-        vec3 tangentNormal = texture(normalSampler, uv).xyz * 2.0 - 1.0;
-        // TODO: For correct normal mapping, you should transform tangentNormal by TBN matrix.
-        // Here we assume tangent == world for simplicity.
+        vec3 tangentNormal = texture(sampler2D(textures[pc.normal_index], samplers[SAMPLER_LINEAR_REPEAT]), uv).xyz * 2.0 - 1.0;
         N = normalize(tangentNormal);
     }
     vec3 displacedPosition = position;
     if (HAS_DISPLACEMENT_TEXTURE) {
-        float disp = texture(displacementSampler, uv).r;
-        // Displace along the normal direction
+        float disp = texture(sampler2D(textures[pc.displacement_index], samplers[SAMPLER_LINEAR_REPEAT]), uv).r;
         displacedPosition += N * disp;
     }
     vec3 V = normalize(cameraPosition - displacedPosition);
@@ -193,12 +201,12 @@ void main() {
     vec3 F0 = mix(vec3(0.04), albedo, metallic);
     // Diffuse: sample environment in the normal direction (approximate)
     vec2 uvN = dirToEquirectUV(N);
-    vec3 diffuseIBL = texture(environmentMap, uvN).rgb * albedo;
+    vec3 diffuseIBL = texture(sampler2D(textures[pc.environment_index], samplers[SAMPLER_LINEAR_REPEAT]), uvN).rgb * albedo;
     // Specular: sample environment in the reflection direction (no LOD, no roughness blur)
     vec2 uvR = dirToEquirectUV(R);
-    vec3 prefilteredColor = texture(environmentMap, uvR).rgb;
+    vec3 prefilteredColor = texture(sampler2D(textures[pc.environment_index], samplers[SAMPLER_LINEAR_REPEAT]), uvR).rgb;
     float NdotV = max(dot(N, V), 0.0);
-    vec2 brdfSample = texture(brdfLUT, vec2(NdotV, roughness)).rg;
+    vec2 brdfSample = texture(sampler2D(textures[pc.brdf_lut_index], samplers[SAMPLER_LINEAR_REPEAT]), vec2(NdotV, roughness)).rg;
     // Attenuate specular by (1.0 - roughness) to fake roughness blur
     vec3 specularIBL = prefilteredColor * (F0 * brdfSample.x + brdfSample.y) * (1.0 - roughness)*0.1;
     vec3 kS = F0 + (1.0 - F0) * pow(1.0 - NdotV, 5.0);

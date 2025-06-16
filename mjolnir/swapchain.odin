@@ -174,7 +174,7 @@ acquire_next_image :: proc(
 ) -> (
   result: vk.Result,
 ) {
-  log.debug("waiting for fence...")
+  // log.debug("waiting for fence...")
   vk.WaitForFences(
     g_device,
     1,
@@ -199,7 +199,7 @@ submit_queue_and_present :: proc(
   self: ^Swapchain,
   command_buffer: ^vk.CommandBuffer,
 ) -> vk.Result {
-  log.debug("============ submitting queue... =============")
+  // log.debug("============ submitting queue... =============")
   wait_stage_mask: vk.PipelineStageFlags = {.COLOR_ATTACHMENT_OUTPUT}
   submit_info := vk.SubmitInfo {
     sType                = .SUBMIT_INFO,

@@ -62,6 +62,51 @@ init_global_samplers :: proc() -> vk.Result {
   info.addressModeV = .CLAMP_TO_EDGE
   info.addressModeW = .CLAMP_TO_EDGE
   vk.CreateSampler(g_device, &info, nil, &g_nearest_clamp_sampler) or_return
+  write_samplers := [?]vk.WriteDescriptorSet {
+    {
+      sType = .WRITE_DESCRIPTOR_SET,
+      dstSet = g_bindless_samplers,
+      dstBinding = 0,
+      dstArrayElement = 0,
+      descriptorType = .SAMPLER,
+      descriptorCount = 1,
+      pImageInfo = &{sampler = g_nearest_clamp_sampler},
+    },
+    {
+      sType = .WRITE_DESCRIPTOR_SET,
+      dstSet = g_bindless_samplers,
+      dstBinding = 0,
+      dstArrayElement = 1,
+      descriptorType = .SAMPLER,
+      descriptorCount = 1,
+      pImageInfo = &{sampler = g_linear_clamp_sampler},
+    },
+    {
+      sType = .WRITE_DESCRIPTOR_SET,
+      dstSet = g_bindless_samplers,
+      dstBinding = 0,
+      dstArrayElement = 2,
+      descriptorType = .SAMPLER,
+      descriptorCount = 1,
+      pImageInfo = &{sampler = g_nearest_repeat_sampler},
+    },
+    {
+      sType = .WRITE_DESCRIPTOR_SET,
+      dstSet = g_bindless_samplers,
+      dstBinding = 0,
+      dstArrayElement = 3,
+      descriptorType = .SAMPLER,
+      descriptorCount = 1,
+      pImageInfo = &{sampler = g_linear_repeat_sampler},
+    },
+  }
+  vk.UpdateDescriptorSets(
+    g_device,
+    len(write_samplers),
+    raw_data(write_samplers[:]),
+    0,
+    nil,
+  )
   return .SUCCESS
 }
 
@@ -102,7 +147,6 @@ create_mesh :: proc(
 }
 
 create_material :: proc(
-  texture_descriptor_set_layout: vk.DescriptorSetLayout,
   skinning_descriptor_set_layout: vk.DescriptorSetLayout,
   features: ShaderFeatureSet = {},
   albedo_handle: Handle = {},
@@ -123,18 +167,17 @@ create_material :: proc(
   ret, mat = resource.alloc(&g_materials)
   mat.is_lit = true
   mat.features = features
-  mat.albedo_handle = albedo_handle
-  mat.metallic_roughness_handle = metallic_roughness_handle
-  mat.normal_handle = normal_handle
-  mat.displacement_handle = displacement_handle
-  mat.emissive_handle = emissive_handle
+  mat.albedo = albedo_handle
+  mat.metallic_roughness = metallic_roughness_handle
+  mat.normal = normal_handle
+  mat.displacement = displacement_handle
+  mat.emissive = emissive_handle
   mat.albedo_value = albedo_value
   mat.metallic_value = metallic_value
   mat.roughness_value = roughness_value
   mat.emissive_value = emissive_value
   material_init_descriptor_set_layout(
     mat,
-    texture_descriptor_set_layout,
     skinning_descriptor_set_layout,
   ) or_return
   fallbacks := MaterialFallbacks {
@@ -149,29 +192,19 @@ create_material :: proc(
     {.UNIFORM_BUFFER},
     &fallbacks,
   ) or_return
-  albedo := resource.get(g_image_buffers, albedo_handle)
-  metallic_roughness := resource.get(
-    g_image_buffers,
-    metallic_roughness_handle,
+  log.infof(
+    "Material created: albedo=%d metallic_roughness=%d normal=%d displacement=%d emissive=%d",
+    mat.albedo.index,
+    mat.metallic_roughness.index,
+    mat.normal.index,
+    mat.displacement.index,
+    mat.emissive.index,
   )
-  normal := resource.get(g_image_buffers, normal_handle)
-  displacement := resource.get(g_image_buffers, displacement_handle)
-  emissive := resource.get(g_image_buffers, emissive_handle)
-  material_update_textures(
-    mat,
-    albedo,
-    metallic_roughness,
-    normal,
-    displacement,
-    emissive,
-  ) or_return
   res = .SUCCESS
   return
 }
 
 create_unlit_material :: proc(
-  texture_descriptor_set_layout: vk.DescriptorSetLayout,
-  skinning_descriptor_set_layout: vk.DescriptorSetLayout,
   features: ShaderFeatureSet = {},
   albedo_handle: Handle = {},
   albedo_value: linalg.Vector4f32 = {1, 1, 1, 1},
@@ -183,13 +216,8 @@ create_unlit_material :: proc(
   ret, mat = resource.alloc(&g_materials)
   mat.is_lit = false
   mat.features = features
-  mat.albedo_handle = albedo_handle
+  mat.albedo = albedo_handle
   mat.albedo_value = albedo_value
-  material_init_descriptor_set_layout(
-    mat,
-    texture_descriptor_set_layout,
-    skinning_descriptor_set_layout,
-  ) or_return
   albedo := resource.get(g_image_buffers, albedo_handle)
   fallbacks := MaterialFallbacks {
     albedo = mat.albedo_value,
@@ -200,7 +228,6 @@ create_unlit_material :: proc(
     {.UNIFORM_BUFFER},
     &fallbacks,
   ) or_return
-  material_update_textures(mat, albedo) or_return
   res = .SUCCESS
   return
 }
@@ -223,7 +250,7 @@ create_texture_from_path :: proc(
       stbi.failure_reason(),
     )
     ret = .ERROR_UNKNOWN
-    return
+    return handle, texture, ret
   }
   defer stbi.image_free(pixels)
   num_pixels := int(width * height * 4)
@@ -234,8 +261,9 @@ create_texture_from_path :: proc(
     u32(width),
     u32(height),
   ) or_return
+  set_texture_descriptor(handle.index, texture.view)
   ret = .SUCCESS
-  return
+  return handle, texture, ret
 }
 
 create_hdr_texture_from_path :: proc(
@@ -263,7 +291,7 @@ create_hdr_texture_from_path :: proc(
       stbi.failure_reason(),
     )
     ret = .ERROR_UNKNOWN
-    return
+    return handle, texture, ret
   }
   defer stbi.image_free(float_pixels)
   num_floats := int(width * height * actual_channels)
@@ -274,14 +302,9 @@ create_hdr_texture_from_path :: proc(
     u32(width),
     u32(height),
   ) or_return
-  log.infof(
-    "created HDR texture %d x %d -> id %d",
-    width,
-    height,
-    texture.image,
-  )
+  set_texture_descriptor(handle.index, texture.view)
   ret = .SUCCESS
-  return
+  return handle, texture, ret
 }
 
 create_texture_from_pixels :: proc(
@@ -309,6 +332,7 @@ create_texture_from_pixels :: proc(
     texture.height,
     texture.image,
   )
+  set_texture_descriptor(handle.index, texture.view)
   ret = .SUCCESS
   return
 }
@@ -359,6 +383,7 @@ create_texture_from_data :: proc(
     texture.height,
     texture.image,
   )
+  set_texture_descriptor(handle.index, texture.view)
   ret = .SUCCESS
   return
 }

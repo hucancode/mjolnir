@@ -20,18 +20,30 @@ layout(set = 0, binding = 0) uniform Uniforms {
     float time;
 };
 
-layout(set = 2, binding = 0) readonly buffer BoneMatrices {
+layout(set = 3, binding = 0) readonly buffer BoneMatrices {
     mat4 bones[];
 };
 
 layout(push_constant) uniform Constants {
     mat4 world;
+    uint albedo_index;
+    uint metallic_roughness_index;
+    uint normal_index;
+    uint displacement_index;
+    uint emissive_index;
+    uint environment_index;
+    uint brdf_lut_index;
+    uint padding;
 };
 
 layout(location = 0) out vec3 outPosition;
 layout(location = 1) out vec4 outColor;
 layout(location = 2) out vec3 outNormal;
 layout(location = 3) out vec2 outUV;
+
+// If you ever use samplers or textures in this vertex shader, use:
+// layout(set = 1, binding = 0) uniform texture2D textures[MAX_TEXTURES];
+// layout(set = 2, binding = 0) uniform sampler samplers[MAX_SAMPLERS];
 
 void main() {
     vec4 modelPosition;
