@@ -9,6 +9,8 @@ import "resource"
 import stbi "vendor:stb/image"
 import vk "vendor:vulkan"
 
+MAX_BONE_MATRICES :: 65536 // or as needed
+
 g_linear_repeat_sampler: vk.Sampler
 g_linear_clamp_sampler: vk.Sampler
 g_nearest_repeat_sampler: vk.Sampler
@@ -17,6 +19,8 @@ g_nearest_clamp_sampler: vk.Sampler
 g_meshes: resource.Pool(Mesh)
 g_materials: resource.Pool(Material)
 g_image_buffers: resource.Pool(ImageBuffer)
+
+g_bindless_bone_buffer: DataBuffer(linalg.Matrix4f32)
 
 factory_init :: proc() {
   log.infof("Initializing mesh pool... ")
@@ -27,9 +31,17 @@ factory_init :: proc() {
   resource.pool_init(&g_image_buffers)
   log.infof("All resource pools initialized successfully")
   init_global_samplers()
+
+  g_bindless_bone_buffer, _ = create_host_visible_buffer(
+    linalg.Matrix4f32,
+    MAX_BONE_MATRICES,
+    {.STORAGE_BUFFER},
+    nil,
+  )
 }
 
 factory_deinit :: proc() {
+  data_buffer_deinit(&g_bindless_bone_buffer)
   resource.pool_deinit(g_image_buffers, image_buffer_deinit)
   resource.pool_deinit(g_meshes, mesh_deinit)
   resource.pool_deinit(g_materials, material_deinit)
