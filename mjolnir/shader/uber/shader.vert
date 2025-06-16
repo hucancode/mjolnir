@@ -33,7 +33,7 @@ layout(push_constant) uniform Constants {
     uint emissive_index;
     uint environment_index;
     uint brdf_lut_index;
-    uint padding;
+    uint bone_matrix_offset;
 };
 
 layout(location = 0) out vec3 outPosition;
@@ -49,11 +49,12 @@ void main() {
     vec4 modelPosition;
     vec3 modelNormal;
     if (SKINNED) {
+        uvec4 indices = inJoints + uvec4(bone_matrix_offset);
         mat4 skinMatrix =
-            inWeights.x * bones[inJoints.x] +
-            inWeights.y * bones[inJoints.y] +
-            inWeights.z * bones[inJoints.z] +
-            inWeights.w * bones[inJoints.w];
+            inWeights.x * bones[indices.x] +
+            inWeights.y * bones[indices.y] +
+            inWeights.z * bones[indices.z] +
+            inWeights.w * bones[indices.w];
         modelPosition = skinMatrix * vec4(inPosition, 1.0);
         modelNormal = mat3(skinMatrix) * inNormal;
     } else {

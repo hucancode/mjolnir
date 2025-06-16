@@ -11,6 +11,7 @@ MaterialFallbacks :: struct {
   metallic:  f32,
   padding:   [2]f32, // Padding to align to 16 bytes
 }
+
 MaterialTextures :: struct {
   albedo_index:             u32,
   metallic_roughness_index: u32,
@@ -19,7 +20,7 @@ MaterialTextures :: struct {
   emissive_index:           u32,
   environment_index:        u32,
   brdf_lut_index:           u32,
-  padding:                  u32,
+  bone_matrix_offset:       u32,
 }
 
 Material :: struct {

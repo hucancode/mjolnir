@@ -229,10 +229,14 @@ renderer_main_build_pbr_pipeline :: proc(
   }
   push_constant_range := [?]vk.PushConstantRange {
     // World matrix for vertex shader
-    {stageFlags = {.VERTEX}, offset = 0, size = size_of(linalg.Matrix4f32)},
+    {
+      stageFlags = {.VERTEX, .FRAGMENT},
+      offset = 0,
+      size = size_of(linalg.Matrix4f32),
+    },
     // Texture indices for fragment shader
     {
-      stageFlags = {.FRAGMENT},
+      stageFlags = {.VERTEX, .FRAGMENT},
       offset = size_of(linalg.Matrix4f32),
       size = size_of(MaterialTextures),
     },
@@ -904,18 +908,12 @@ render_single_node :: proc(node: ^Node, cb_context: rawptr) -> bool {
     )
     // Push constants for texture indices
     texture_indices: MaterialTextures = {
-      albedo_index             = min(
-        MAX_TEXTURES - 1,
-        material.albedo.index,
-      ),
+      albedo_index             = min(MAX_TEXTURES - 1, material.albedo.index),
       metallic_roughness_index = min(
         MAX_TEXTURES - 1,
         material.metallic_roughness.index,
       ),
-      normal_index             = min(
-        MAX_TEXTURES - 1,
-        material.normal.index,
-      ),
+      normal_index             = min(MAX_TEXTURES - 1, material.normal.index),
       displacement_index       = min(
         MAX_TEXTURES - 1,
         material.displacement.index,
@@ -932,11 +930,12 @@ render_single_node :: proc(node: ^Node, cb_context: rawptr) -> bool {
         MAX_TEXTURES - 1,
         ctx.engine.main.brdf_lut.index,
       ),
+      bone_matrix_offset       = 0,
     }
     vk.CmdPushConstants(
       ctx.command_buffer,
       layout,
-      {.VERTEX},
+      {.VERTEX, .FRAGMENT},
       0,
       size_of(linalg.Matrix4f32),
       &node.transform.world_matrix,
@@ -944,7 +943,7 @@ render_single_node :: proc(node: ^Node, cb_context: rawptr) -> bool {
     vk.CmdPushConstants(
       ctx.command_buffer,
       layout,
-      {.FRAGMENT},
+      {.VERTEX, .FRAGMENT},
       size_of(linalg.Matrix4f32),
       size_of(MaterialTextures),
       &texture_indices,

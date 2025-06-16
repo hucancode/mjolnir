@@ -67,7 +67,7 @@ layout(push_constant) uniform PushConstants {
     uint emissive_index;
     uint environment_index;
     uint brdf_lut_index;
-    uint padding;
+    uint bone_matrix_offset;
 } pc;
 
 layout(location = 0) in vec3 position;
