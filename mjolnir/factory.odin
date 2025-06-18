@@ -18,10 +18,12 @@ g_meshes: resource.Pool(Mesh)
 g_materials: resource.Pool(Material)
 g_image_buffers: resource.Pool(ImageBuffer)
 
+g_bindless_bone_buffer_set_layout: vk.DescriptorSetLayout
+g_bindless_bone_buffer_descriptor_set: vk.DescriptorSet
 g_bindless_bone_buffer: DataBuffer(linalg.Matrix4f32)
 g_bone_matrix_slab: resource.SlabAllocator
 
-factory_init :: proc() {
+factory_init :: proc() -> vk.Result {
   log.infof("Initializing mesh pool... ")
   resource.pool_init(&g_meshes)
   log.infof("Initializing materials pool... ")
@@ -30,29 +32,74 @@ factory_init :: proc() {
   resource.pool_init(&g_image_buffers)
   log.infof("All resource pools initialized successfully")
   init_global_samplers()
-
   resource.slab_allocator_init(
     &g_bone_matrix_slab,
     {
-      {32, 64},    // 64 bytes * 32   bones * 64   blocks = 128K bytes
-      {64, 128},   // 64 bytes * 64   bones * 128  blocks = 512K bytes
+      {32, 64}, // 64 bytes * 32   bones * 64   blocks = 128K bytes
+      {64, 128}, // 64 bytes * 64   bones * 128  blocks = 512K bytes
       {128, 8192}, // 64 bytes * 128  bones * 8192 blocks = 64M bytes
       {256, 4096}, // 64 bytes * 256  bones * 4096 blocks = 64M bytes
-      {512, 256},  // 64 bytes * 512  bones * 256  blocks = 8M bytes
+      {512, 256}, // 64 bytes * 512  bones * 256  blocks = 8M bytes
       {1024, 128}, // 64 bytes * 1024 bones * 256  blocks = 8M bytes
-      {2048, 32},  // 64 bytes * 2048 bones * 32   blocks = 4M bytes
-      {4096, 16},  // 64 bytes * 4096 bones * 16   blocks = 4M bytes
+      {2048, 32}, // 64 bytes * 2048 bones * 32   blocks = 4M bytes
+      {4096, 16}, // 64 bytes * 4096 bones * 16   blocks = 4M bytes
       // Total size: ~153M bytes for bone matrices
       // This could roughly fit 12000 animated characters with 128 bones each
     },
   )
-  log.infof("Creating bone matrices array with capacity %d matrices...", g_bone_matrix_slab.capacity)
+  log.infof(
+    "Creating bone matrices array with capacity %d matrices...",
+    g_bone_matrix_slab.capacity,
+  )
   g_bindless_bone_buffer, _ = create_host_visible_buffer(
     linalg.Matrix4f32,
     int(g_bone_matrix_slab.capacity),
     {.STORAGE_BUFFER},
     nil,
   )
+  skinning_bindings := [?]vk.DescriptorSetLayoutBinding {
+    {
+      binding = 0,
+      descriptorType = .STORAGE_BUFFER,
+      descriptorCount = 1,
+      stageFlags = {.VERTEX},
+    },
+  }
+  vk.CreateDescriptorSetLayout(
+    g_device,
+    &vk.DescriptorSetLayoutCreateInfo {
+      sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+      bindingCount = len(skinning_bindings),
+      pBindings = raw_data(skinning_bindings[:]),
+    },
+    nil,
+    &g_bindless_bone_buffer_set_layout,
+  ) or_return
+  vk.AllocateDescriptorSets(
+    g_device,
+    &{
+      sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
+      descriptorPool = g_descriptor_pool,
+      descriptorSetCount = 1,
+      pSetLayouts = &g_bindless_bone_buffer_set_layout,
+    },
+    &g_bindless_bone_buffer_descriptor_set,
+  ) or_return
+  buffer_info := vk.DescriptorBufferInfo {
+    buffer = g_bindless_bone_buffer.buffer,
+    offset = 0,
+    range  = vk.DeviceSize(vk.WHOLE_SIZE),
+  }
+  write := vk.WriteDescriptorSet {
+    sType           = .WRITE_DESCRIPTOR_SET,
+    dstSet          = g_bindless_bone_buffer_descriptor_set,
+    dstBinding      = 0,
+    descriptorType  = .STORAGE_BUFFER,
+    descriptorCount = 1,
+    pBufferInfo     = &buffer_info,
+  }
+  vk.UpdateDescriptorSets(g_device, 1, &write, 0, nil)
+  return .SUCCESS
 }
 
 factory_deinit :: proc() {
@@ -174,7 +221,6 @@ create_mesh :: proc(
 }
 
 create_material :: proc(
-  skinning_descriptor_set_layout: vk.DescriptorSetLayout,
   features: ShaderFeatureSet = {},
   albedo_handle: Handle = {},
   metallic_roughness_handle: Handle = {},
@@ -203,10 +249,6 @@ create_material :: proc(
   mat.metallic_value = metallic_value
   mat.roughness_value = roughness_value
   mat.emissive_value = emissive_value
-  material_init_descriptor_set_layout(
-    mat,
-    skinning_descriptor_set_layout,
-  ) or_return
   fallbacks := MaterialFallbacks {
     albedo    = mat.albedo_value,
     emissive  = mat.emissive_value,

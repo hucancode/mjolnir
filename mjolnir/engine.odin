@@ -270,10 +270,8 @@ update :: proc(self: ^Engine) -> bool {
     if !mesh_has_skin {
       continue
     }
-    buffer := skinning.bone_buffers[g_frame_index]
-    bone_matrices := slice.from_ptr(buffer.mapped, len(mesh_skin.bones))
+    bone_matrices := g_bindless_bone_buffer.mapped[skinning.bone_matrix_offset:len(mesh_skin.bones)]
     sample_clip(mesh, anim_inst.clip_handle, anim_inst.time, bone_matrices)
-    //animation.pose_flush(&skinning.pose, buffer.mapped)
   }
   update_emitters(&self.particle, delta_time)
   last_mouse_pos := self.input.mouse_pos

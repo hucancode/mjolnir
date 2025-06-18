@@ -27,8 +27,8 @@ SpotLightAttachment :: struct {
 }
 
 NodeSkinning :: struct {
-  bone_buffers: [MAX_FRAMES_IN_FLIGHT]DataBuffer(linalg.Matrix4f32),
   animation:    Maybe(animation.Instance),
+  bone_matrix_offset: u32,
 }
 
 MeshAttachment :: struct {
@@ -62,6 +62,14 @@ init_node :: proc(self: ^Node, name: string = "") {
 }
 
 deinit_node :: proc(self: ^Node) {
+  data, ok := &self.attachment.(MeshAttachment)
+  if ok {
+    skinning, has_skin := &data.skinning.?
+    if has_skin && skinning.bone_matrix_offset != 0xFFFFFFFF {
+      resource.slab_free(&g_bone_matrix_slab, skinning.bone_matrix_offset)
+      skinning.bone_matrix_offset = 0xFFFFFFFF
+    }
+  }
   delete(self.children)
 }
 

@@ -82,7 +82,6 @@ RendererMain :: struct {
     cube_shadow_maps:      [MAX_SHADOW_MAPS]CubeImageBuffer,
   },
   camera_descriptor_set_layout:   vk.DescriptorSetLayout,
-  skinning_descriptor_set_layout: vk.DescriptorSetLayout,
   pipeline_layout:                vk.PipelineLayout,
   pipelines:                      [SHADER_VARIANT_COUNT]vk.Pipeline,
   unlit_pipelines:                [UNLIT_SHADER_VARIANT_COUNT]vk.Pipeline,
@@ -202,30 +201,12 @@ renderer_main_build_pbr_pipeline :: proc(
       geometry.VERTEX_ATTRIBUTE_DESCRIPTIONS[:],
     ),
   }
-  skinning_bindings := [?]vk.DescriptorSetLayoutBinding {
-    {
-      binding = 0,
-      descriptorType = .STORAGE_BUFFER,
-      descriptorCount = 1,
-      stageFlags = {.VERTEX},
-    },
-  }
-  vk.CreateDescriptorSetLayout(
-    g_device,
-    &vk.DescriptorSetLayoutCreateInfo {
-      sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-      bindingCount = len(skinning_bindings),
-      pBindings = raw_data(skinning_bindings[:]),
-    },
-    nil,
-    &self.skinning_descriptor_set_layout,
-  ) or_return
   // Only keep camera, bindless textures, bindless samplers, and skinning layouts
   set_layouts := [?]vk.DescriptorSetLayout {
     self.camera_descriptor_set_layout, // set = 0
     g_bindless_textures_layout, // set = 1
     g_bindless_samplers_layout, // set = 2
-    self.skinning_descriptor_set_layout, // set = 3
+    g_bindless_bone_buffer_set_layout, // set = 3
   }
   push_constant_range := [?]vk.PushConstantRange {
     // World matrix for vertex shader
@@ -806,11 +787,6 @@ renderer_main_deinit :: proc(self: ^RendererMain) {
     self.camera_descriptor_set_layout,
     nil,
   )
-  vk.DestroyDescriptorSetLayout(
-    g_device,
-    self.skinning_descriptor_set_layout,
-    nil,
-  )
   for &frame in self.frames {
     data_buffer_deinit(&frame.camera_uniform)
     data_buffer_deinit(&frame.light_uniform)
@@ -893,7 +869,7 @@ render_single_node :: proc(node: ^Node, cb_context: rawptr) -> bool {
       ctx.engine.main.frames[g_frame_index].camera_descriptor_set, // set 0
       g_bindless_textures, // set 1 (bindless)
       g_bindless_samplers, // set 2 (bindless samplers)
-      material.skinning_descriptor_sets[g_frame_index], // set 3
+      g_bindless_bone_buffer_descriptor_set, // set 3
     }
     vk.CmdBindPipeline(ctx.command_buffer, .GRAPHICS, pipeline)
     vk.CmdBindDescriptorSets(
@@ -932,6 +908,10 @@ render_single_node :: proc(node: ^Node, cb_context: rawptr) -> bool {
       ),
       bone_matrix_offset       = 0,
     }
+    node_skinning, node_has_skin := data.skinning.?
+    if node_has_skin {
+      texture_indices.bone_matrix_offset = node_skinning.bone_matrix_offset;
+    }
     vk.CmdPushConstants(
       ctx.command_buffer,
       layout,
@@ -957,14 +937,7 @@ render_single_node :: proc(node: ^Node, cb_context: rawptr) -> bool {
       &offset,
     )
     mesh_skinning, mesh_has_skin := &mesh.skinning.?
-    node_skinning, node_has_skin := data.skinning.?
     if mesh_has_skin && node_has_skin {
-      material_update_bone_buffer(
-        material,
-        node_skinning.bone_buffers[g_frame_index].buffer,
-        vk.DeviceSize(node_skinning.bone_buffers[g_frame_index].bytes_count),
-        g_frame_index,
-      )
       vk.CmdBindVertexBuffers(
         ctx.command_buffer,
         1,

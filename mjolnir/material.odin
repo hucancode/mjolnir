@@ -24,7 +24,6 @@ MaterialTextures :: struct {
 }
 
 Material :: struct {
-  skinning_descriptor_sets: [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
   features:                 ShaderFeatureSet,
   is_lit:                   bool,
   albedo:                   Handle,
@@ -43,51 +42,5 @@ material_deinit :: proc(self: ^Material) {
   if self == nil {
     return
   }
-  for &set in self.skinning_descriptor_sets do set = 0
   data_buffer_deinit(&self.fallback_buffer)
-}
-
-material_init_descriptor_set_layout :: proc(
-  mat: ^Material,
-  skinning_descriptor_set_layout: vk.DescriptorSetLayout,
-) -> vk.Result {
-  skinning_layout := skinning_descriptor_set_layout
-  for &set in mat.skinning_descriptor_sets {
-    vk.AllocateDescriptorSets(
-      g_device,
-      &{
-        sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
-        descriptorPool = g_descriptor_pool,
-        descriptorSetCount = 1,
-        pSetLayouts = &skinning_layout,
-      },
-      &set,
-    ) or_return
-  }
-  return .SUCCESS
-}
-
-material_update_bone_buffer :: proc(
-  self: ^Material,
-  buffer: vk.Buffer,
-  size: vk.DeviceSize,
-  frame: u32,
-) {
-  if self.skinning_descriptor_sets[frame] == 0 {
-    return
-  }
-  buffer_info := vk.DescriptorBufferInfo {
-    buffer = buffer,
-    offset = 0,
-    range  = size,
-  }
-  write := vk.WriteDescriptorSet {
-    sType           = .WRITE_DESCRIPTOR_SET,
-    dstSet          = self.skinning_descriptor_sets[frame],
-    dstBinding      = 0,
-    descriptorType  = .STORAGE_BUFFER,
-    descriptorCount = 1,
-    pBufferInfo     = &buffer_info,
-  }
-  vk.UpdateDescriptorSets(g_device, 1, &write, 0, nil)
 }

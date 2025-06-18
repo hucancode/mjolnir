@@ -24,8 +24,7 @@ main :: proc() {
 
 setup :: proc(engine: ^mjolnir.Engine) {
   using mjolnir, geometry
-  skinning_set_layout := engine.main.skinning_descriptor_set_layout
-  plain_material_handle, _, _ := create_material(skinning_set_layout)
+  plain_material_handle, _, _ := create_material()
   cube_geom := make_cube()
   cube_mesh_handle, _, _ := create_mesh(cube_geom)
   sphere_mesh_handle, _, _ := create_mesh(make_sphere())
@@ -34,7 +33,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
     "assets/t_brick_floor_002_diffuse_1k.jpg",
   )
   ground_mat_handle, _, _ = create_material(
-    skinning_set_layout,
     {.ALBEDO_TEXTURE},
     ground_albedo_handle,
   )
@@ -48,7 +46,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
       for y in 1 ..< ny {
         for z in 1 ..< nz {
           mat_handle, _ := create_material(
-            skinning_set_layout,
             metallic_value = f32(x) / f32(nx),
             roughness_value = f32(y) / f32(ny),
           ) or_continue

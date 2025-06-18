@@ -24,7 +24,6 @@ RendererShadow :: struct {
   pipeline_layout:                vk.PipelineLayout,
   pipelines:                      [SHADOW_SHADER_VARIANT_COUNT]vk.Pipeline,
   camera_descriptor_set_layout:   vk.DescriptorSetLayout,
-  skinning_descriptor_set_layout: vk.DescriptorSetLayout,
   frames:                         [MAX_FRAMES_IN_FLIGHT]struct {
     camera_uniform:        DataBuffer(SceneUniform),
     camera_descriptor_set: vk.DescriptorSet,
@@ -53,27 +52,9 @@ renderer_shadow_init :: proc(
     nil,
     &self.camera_descriptor_set_layout,
   ) or_return
-  skinning_bindings := [1]vk.DescriptorSetLayoutBinding {
-    {
-      binding = 0,
-      descriptorType = .STORAGE_BUFFER,
-      descriptorCount = 1,
-      stageFlags = {.VERTEX},
-    },
-  }
-  vk.CreateDescriptorSetLayout(
-    g_device,
-    &vk.DescriptorSetLayoutCreateInfo {
-      sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-      bindingCount = 1,
-      pBindings = raw_data(skinning_bindings[:]),
-    },
-    nil,
-    &self.skinning_descriptor_set_layout,
-  ) or_return
   set_layouts := [?]vk.DescriptorSetLayout {
     self.camera_descriptor_set_layout,
-    self.skinning_descriptor_set_layout,
+    g_bindless_bone_buffer_set_layout,
   }
   push_constant_range := vk.PushConstantRange {
     stageFlags = {.VERTEX},
@@ -253,12 +234,6 @@ renderer_shadow_deinit :: proc(self: ^RendererShadow) {
     nil,
   )
   self.camera_descriptor_set_layout = 0
-  vk.DestroyDescriptorSetLayout(
-    g_device,
-    self.skinning_descriptor_set_layout,
-    nil,
-  )
-  self.skinning_descriptor_set_layout = 0
 }
 
 renderer_shadow_begin :: proc(
@@ -564,7 +539,7 @@ render_single_shadow :: proc(node: ^Node, cb_context: rawptr) -> bool {
       pipeline = renderer_shadow_get_pipeline(&ctx.engine.shadow, {.SKINNING})
       descriptor_sets = {
         frame.camera_descriptor_set, // set 0 (shadow pass)
-        material.skinning_descriptor_sets[g_frame_index], // set 1
+        g_bindless_bone_buffer_descriptor_set, // set 1
       }
     } else {
       pipeline = renderer_shadow_get_pipeline(&ctx.engine.shadow)
@@ -605,12 +580,6 @@ render_single_shadow :: proc(node: ^Node, cb_context: rawptr) -> bool {
       &offset,
     )
     if mesh_has_skin && node_has_skin {
-      material_update_bone_buffer(
-        material,
-        node_skinning.bone_buffers[g_frame_index].buffer,
-        vk.DeviceSize(node_skinning.bone_buffers[g_frame_index].bytes_count),
-        g_frame_index,
-      )
       vk.CmdBindVertexBuffers(
         ctx.command_buffer,
         1,
