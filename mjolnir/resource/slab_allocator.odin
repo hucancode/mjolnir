@@ -46,7 +46,7 @@ slab_alloc :: proc(
     if found {
       return idx, true
     }
-    if class.next < class.block_count {
+    if class.next < class.base + class.block_size * class.block_count {
       defer class.next += class.block_size
       return class.next, true
     }

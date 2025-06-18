@@ -270,7 +270,8 @@ update :: proc(self: ^Engine) -> bool {
     if !mesh_has_skin {
       continue
     }
-    bone_matrices := g_bindless_bone_buffer.mapped[skinning.bone_matrix_offset:len(mesh_skin.bones)]
+    l, r := skinning.bone_matrix_offset, skinning.bone_matrix_offset + u32(len(mesh_skin.bones))
+    bone_matrices := g_bindless_bone_buffer.mapped[l:r]
     sample_clip(mesh, anim_inst.clip_handle, anim_inst.time, bone_matrices)
   }
   update_emitters(&self.particle, delta_time)
