@@ -21,10 +21,10 @@ ShadowShaderConfig :: struct {
 }
 
 RendererShadow :: struct {
-  pipeline_layout:                vk.PipelineLayout,
-  pipelines:                      [SHADOW_SHADER_VARIANT_COUNT]vk.Pipeline,
-  camera_descriptor_set_layout:   vk.DescriptorSetLayout,
-  frames:                         [MAX_FRAMES_IN_FLIGHT]struct {
+  pipeline_layout:              vk.PipelineLayout,
+  pipelines:                    [SHADOW_SHADER_VARIANT_COUNT]vk.Pipeline,
+  camera_descriptor_set_layout: vk.DescriptorSetLayout,
+  frames:                       [MAX_FRAMES_IN_FLIGHT]struct {
     camera_uniform:        DataBuffer(SceneUniform),
     camera_descriptor_set: vk.DescriptorSet,
   },
@@ -56,9 +56,8 @@ renderer_shadow_init :: proc(
     self.camera_descriptor_set_layout,
     g_bindless_bone_buffer_set_layout,
   }
-  push_constant_range := vk.PushConstantRange {
-    stageFlags = {.VERTEX},
-    size       = size_of(linalg.Matrix4f32),
+  push_constant_range := [?]vk.PushConstantRange {
+    {stageFlags = {.VERTEX}, size = size_of(PushConstant)},
   }
   vk.CreatePipelineLayout(
     g_device,
@@ -66,8 +65,8 @@ renderer_shadow_init :: proc(
       sType = .PIPELINE_LAYOUT_CREATE_INFO,
       setLayoutCount = len(set_layouts),
       pSetLayouts = raw_data(set_layouts[:]),
-      pushConstantRangeCount = 1,
-      pPushConstantRanges = &push_constant_range,
+      pushConstantRangeCount = len(push_constant_range),
+      pPushConstantRanges = raw_data(push_constant_range[:]),
     },
     nil,
     &self.pipeline_layout,
@@ -535,16 +534,22 @@ render_single_shadow :: proc(node: ^Node, cb_context: rawptr) -> bool {
     layout := ctx.engine.shadow.pipeline_layout
     descriptor_sets: []vk.DescriptorSet
     frame := &ctx.engine.shadow.frames[g_frame_index]
+    push_constant := PushConstant {
+      world = node.transform.world_matrix,
+    }
     if mesh_has_skin {
       pipeline = renderer_shadow_get_pipeline(&ctx.engine.shadow, {.SKINNING})
       descriptor_sets = {
-        frame.camera_descriptor_set, // set 0 (shadow pass)
+        frame.camera_descriptor_set, // set 0
         g_bindless_bone_buffer_descriptor_set, // set 1
+      }
+      if node_has_skin {
+        push_constant.bone_matrix_offset = node_skinning.bone_matrix_offset
       }
     } else {
       pipeline = renderer_shadow_get_pipeline(&ctx.engine.shadow)
       descriptor_sets = {
-        frame.camera_descriptor_set, // set 0 (shadow pass)
+        frame.camera_descriptor_set, // set 0
       }
     }
     vk.CmdBindPipeline(ctx.command_buffer, .GRAPHICS, pipeline)
@@ -568,8 +573,8 @@ render_single_shadow :: proc(node: ^Node, cb_context: rawptr) -> bool {
       layout,
       {.VERTEX},
       0,
-      size_of(linalg.Matrix4f32),
-      &node.transform.world_matrix,
+      size_of(PushConstant),
+      &push_constant,
     )
     offset: vk.DeviceSize = 0
     vk.CmdBindVertexBuffers(

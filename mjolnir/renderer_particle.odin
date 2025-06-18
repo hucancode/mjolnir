@@ -401,10 +401,8 @@ renderer_particle_init :: proc(self: ^RendererParticle) -> vk.Result {
     nil,
     &self.render_descriptor_set_layout,
   ) or_return
-  push_constant_range := vk.PushConstantRange {
-    stageFlags = {.VERTEX},
-    offset     = 0,
-    size       = size_of(SceneUniform),
+  push_constant_range := [?]vk.PushConstantRange {
+    {stageFlags = {.VERTEX}, size = size_of(SceneUniform)},
   }
   vk.CreatePipelineLayout(
     g_device,
@@ -412,8 +410,8 @@ renderer_particle_init :: proc(self: ^RendererParticle) -> vk.Result {
       sType = .PIPELINE_LAYOUT_CREATE_INFO,
       setLayoutCount = 1,
       pSetLayouts = &self.render_descriptor_set_layout,
-      pushConstantRangeCount = 1,
-      pPushConstantRanges = &push_constant_range,
+      pushConstantRangeCount = len(push_constant_range),
+      pPushConstantRanges = raw_data(push_constant_range[:]),
     },
     nil,
     &self.render_pipeline_layout,
