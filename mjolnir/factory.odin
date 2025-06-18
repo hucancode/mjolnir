@@ -32,73 +32,7 @@ factory_init :: proc() -> vk.Result {
   resource.pool_init(&g_image_buffers)
   log.infof("All resource pools initialized successfully")
   init_global_samplers()
-  resource.slab_allocator_init(
-    &g_bone_matrix_slab,
-    {
-      {32, 64}, // 64 bytes * 32   bones * 64   blocks = 128K bytes
-      {64, 128}, // 64 bytes * 64   bones * 128  blocks = 512K bytes
-      {128, 8192}, // 64 bytes * 128  bones * 8192 blocks = 64M bytes
-      {256, 4096}, // 64 bytes * 256  bones * 4096 blocks = 64M bytes
-      {512, 256}, // 64 bytes * 512  bones * 256  blocks = 8M bytes
-      {1024, 128}, // 64 bytes * 1024 bones * 256  blocks = 8M bytes
-      {2048, 32}, // 64 bytes * 2048 bones * 32   blocks = 4M bytes
-      {4096, 16}, // 64 bytes * 4096 bones * 16   blocks = 4M bytes
-      // Total size: ~153M bytes for bone matrices
-      // This could roughly fit 12000 animated characters with 128 bones each
-    },
-  )
-  log.infof(
-    "Creating bone matrices array with capacity %d matrices...",
-    g_bone_matrix_slab.capacity,
-  )
-  g_bindless_bone_buffer, _ = create_host_visible_buffer(
-    linalg.Matrix4f32,
-    int(g_bone_matrix_slab.capacity),
-    {.STORAGE_BUFFER},
-    nil,
-  )
-  skinning_bindings := [?]vk.DescriptorSetLayoutBinding {
-    {
-      binding = 0,
-      descriptorType = .STORAGE_BUFFER,
-      descriptorCount = 1,
-      stageFlags = {.VERTEX},
-    },
-  }
-  vk.CreateDescriptorSetLayout(
-    g_device,
-    &vk.DescriptorSetLayoutCreateInfo {
-      sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-      bindingCount = len(skinning_bindings),
-      pBindings = raw_data(skinning_bindings[:]),
-    },
-    nil,
-    &g_bindless_bone_buffer_set_layout,
-  ) or_return
-  vk.AllocateDescriptorSets(
-    g_device,
-    &{
-      sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
-      descriptorPool = g_descriptor_pool,
-      descriptorSetCount = 1,
-      pSetLayouts = &g_bindless_bone_buffer_set_layout,
-    },
-    &g_bindless_bone_buffer_descriptor_set,
-  ) or_return
-  buffer_info := vk.DescriptorBufferInfo {
-    buffer = g_bindless_bone_buffer.buffer,
-    offset = 0,
-    range  = vk.DeviceSize(vk.WHOLE_SIZE),
-  }
-  write := vk.WriteDescriptorSet {
-    sType           = .WRITE_DESCRIPTOR_SET,
-    dstSet          = g_bindless_bone_buffer_descriptor_set,
-    dstBinding      = 0,
-    descriptorType  = .STORAGE_BUFFER,
-    descriptorCount = 1,
-    pBufferInfo     = &buffer_info,
-  }
-  vk.UpdateDescriptorSets(g_device, 1, &write, 0, nil)
+  init_bone_matrix_allocator() or_return
   return .SUCCESS
 }
 
@@ -108,6 +42,7 @@ factory_deinit :: proc() {
   resource.pool_deinit(g_meshes, mesh_deinit)
   resource.pool_deinit(g_materials, material_deinit)
   deinit_global_samplers()
+  deinit_bone_matrix_allocator()
 }
 
 init_global_samplers :: proc() -> vk.Result {
@@ -184,6 +119,77 @@ init_global_samplers :: proc() -> vk.Result {
   return .SUCCESS
 }
 
+init_bone_matrix_allocator :: proc() -> vk.Result{
+  resource.slab_allocator_init(
+    &g_bone_matrix_slab,
+    {
+      {32, 64}, // 64 bytes * 32   bones * 64   blocks = 128K bytes
+      {64, 128}, // 64 bytes * 64   bones * 128  blocks = 512K bytes
+      {128, 8192}, // 64 bytes * 128  bones * 8192 blocks = 64M bytes
+      {256, 4096}, // 64 bytes * 256  bones * 4096 blocks = 64M bytes
+      {512, 256}, // 64 bytes * 512  bones * 256  blocks = 8M bytes
+      {1024, 128}, // 64 bytes * 1024 bones * 256  blocks = 8M bytes
+      {2048, 32}, // 64 bytes * 2048 bones * 32   blocks = 4M bytes
+      {4096, 16}, // 64 bytes * 4096 bones * 16   blocks = 4M bytes
+      // Total size: ~153M bytes for bone matrices
+      // This could roughly fit 12000 animated characters with 128 bones each
+    },
+  )
+  log.infof(
+    "Creating bone matrices array with capacity %d matrices...",
+    g_bone_matrix_slab.capacity,
+  )
+  g_bindless_bone_buffer, _ = create_host_visible_buffer(
+    linalg.Matrix4f32,
+    int(g_bone_matrix_slab.capacity),
+    {.STORAGE_BUFFER},
+    nil,
+  )
+  skinning_bindings := [?]vk.DescriptorSetLayoutBinding {
+    {
+      binding = 0,
+      descriptorType = .STORAGE_BUFFER,
+      descriptorCount = 1,
+      stageFlags = {.VERTEX},
+    },
+  }
+  vk.CreateDescriptorSetLayout(
+    g_device,
+    &vk.DescriptorSetLayoutCreateInfo {
+      sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+      bindingCount = len(skinning_bindings),
+      pBindings = raw_data(skinning_bindings[:]),
+    },
+    nil,
+    &g_bindless_bone_buffer_set_layout,
+  ) or_return
+  vk.AllocateDescriptorSets(
+    g_device,
+    &{
+      sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
+      descriptorPool = g_descriptor_pool,
+      descriptorSetCount = 1,
+      pSetLayouts = &g_bindless_bone_buffer_set_layout,
+    },
+    &g_bindless_bone_buffer_descriptor_set,
+  ) or_return
+  buffer_info := vk.DescriptorBufferInfo {
+    buffer = g_bindless_bone_buffer.buffer,
+    offset = 0,
+    range  = vk.DeviceSize(vk.WHOLE_SIZE),
+  }
+  write := vk.WriteDescriptorSet {
+    sType           = .WRITE_DESCRIPTOR_SET,
+    dstSet          = g_bindless_bone_buffer_descriptor_set,
+    dstBinding      = 0,
+    descriptorType  = .STORAGE_BUFFER,
+    descriptorCount = 1,
+    pBufferInfo     = &buffer_info,
+  }
+  vk.UpdateDescriptorSets(g_device, 1, &write, 0, nil)
+  return .SUCCESS
+}
+
 deinit_global_samplers :: proc() {
   vk.DestroySampler(
     g_device,
@@ -205,6 +211,17 @@ deinit_global_samplers :: proc() {
     g_nearest_clamp_sampler,
     nil,
   );g_nearest_clamp_sampler = 0
+}
+
+deinit_bone_matrix_allocator :: proc() {
+  data_buffer_deinit(&g_bindless_bone_buffer)
+  vk.DestroyDescriptorSetLayout(
+    g_device,
+    g_bindless_bone_buffer_set_layout,
+    nil,
+  )
+  g_bindless_bone_buffer_set_layout = 0
+  resource.slab_allocator_deinit(&g_bone_matrix_slab)
 }
 
 create_mesh :: proc(

@@ -31,6 +31,10 @@ slab_allocator_init :: proc(self: ^SlabAllocator, config: [MAX_SLAB_CLASSES]stru
   self.capacity = base
 }
 
+slab_allocator_deinit :: proc(self: ^SlabAllocator) {
+  for &class in self.classes do delete(class.free_list)
+}
+
 slab_alloc :: proc(
   self: ^SlabAllocator,
   count: u32,
