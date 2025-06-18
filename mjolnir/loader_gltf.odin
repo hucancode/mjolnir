@@ -108,31 +108,21 @@ load_gltf :: proc(
           skinning, _ := &mesh.skinning.?
           skinning.bones = bones
           skinning.root_bone_index = root_bone_idx
-          bone_buffers: [MAX_FRAMES_IN_FLIGHT]DataBuffer(linalg.Matrix4f32)
-          for &buffer in bone_buffers {
-            buffer =
-            create_host_visible_buffer(
-              linalg.Matrix4f32,
-              len(bones),
-              {.STORAGE_BUFFER},
-            ) or_continue
-          }
+          bone_matrix_id := resource.slab_alloc(
+            &g_bone_matrix_slab,
+            u32(len(bones)),
+          )
           node.attachment = MeshAttachment {
-              handle = mesh_handle,
-              material = material,
-              cast_shadow = true,
-              skinning = NodeSkinning{bone_buffers = bone_buffers},
-            }
-          // set bind pose (otherwise zeroed out matrices will cause model to be invisible)
-          for buffer in bone_buffers {
-            slice.fill(
-              slice.from_ptr(
-                cast(^linalg.Matrix4f32)buffer.mapped,
-                len(bones),
-              ),
-              linalg.MATRIX4F32_IDENTITY,
-            )
+            handle = mesh_handle,
+            material = material,
+            cast_shadow = true,
+            skinning = NodeSkinning{bone_matrix_offset = bone_matrix_id},
           }
+          // set bind pose (otherwise zeroed out matrices will cause model to be invisible)
+          bone_matrices := g_bindless_bone_buffer.mapped[bone_matrix_id:len(
+            bones,
+          )]
+          slice.fill(bone_matrices, linalg.MATRIX4F32_IDENTITY)
           load_gltf_animations(engine, gltf_data, gltf_node.skin, mesh_handle)
         }
       } else {
@@ -340,8 +330,6 @@ load_gltf_primitive :: proc(
       primitive.material,
     ) or_return
   material_handle, _ = create_material(
-    engine.main.texture_descriptor_set_layout,
-    engine.main.skinning_descriptor_set_layout,
     features,
     albedo_handle,
     metallic_roughness_handle,
@@ -417,10 +405,10 @@ load_gltf_skinned_primitive :: proc(
   gltf_mesh: ^cgltf.mesh,
   gltf_skin: ^cgltf.skin,
 ) -> (
-  geometry_data: geometry.Geometry,// TODO: too many return values, consider refactor this
+  geometry_data: geometry.Geometry,
   engine_bones: []Bone,
   mat_handle: resource.Handle,
-  root_bone_idx: u32,
+  root_bone_idx: u32,// TODO: too many return values, consider refactor this
   ret: vk.Result,
 ) {
   primitives := gltf_mesh.primitives
@@ -439,8 +427,6 @@ load_gltf_skinned_primitive :: proc(
       primitive.material,
     ) or_return
   mat_handle, _ = create_material(
-    engine.main.texture_descriptor_set_layout,
-    engine.main.skinning_descriptor_set_layout,
     features | {.SKINNING},
     albedo_handle,
     metallic_roughness_handle,
@@ -646,12 +632,12 @@ load_gltf_animations :: proc(
       time_data := unpack_accessor_floats_flat(gltf_channel.sampler.input)
       // defer free(time_data)
       max_time = max(max_time, slice.max(time_data))
-      log.infof(
-        "Bone animation %s %v: keyframe count %d",
-        string(gltf_channel.target_node.name),
-        gltf_channel.target_path,
-        n,
-      )
+      // log.infof(
+      //   "Bone animation %s %v: keyframe count %d",
+      //   string(gltf_channel.target_node.name),
+      //   gltf_channel.target_path,
+      //   n,
+      // )
       switch gltf_channel.target_path {
       case .translation:
         engine_channel.positions = make(type_of(engine_channel.positions), n)

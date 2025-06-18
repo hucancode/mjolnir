@@ -270,10 +270,8 @@ update :: proc(self: ^Engine) -> bool {
     if !mesh_has_skin {
       continue
     }
-    buffer := skinning.bone_buffers[g_frame_index]
-    bone_matrices := slice.from_ptr(buffer.mapped, len(mesh_skin.bones))
+    bone_matrices := g_bindless_bone_buffer.mapped[skinning.bone_matrix_offset:len(mesh_skin.bones)]
     sample_clip(mesh, anim_inst.clip_handle, anim_inst.time, bone_matrices)
-    //animation.pose_flush(&skinning.pose, buffer.mapped)
   }
   update_emitters(&self.particle, delta_time)
   last_mouse_pos := self.input.mouse_pos
@@ -431,7 +429,7 @@ render :: proc(self: ^Engine) -> vk.Result {
   // dispatch computation early and doing other work while GPU is busy
   compute_particles(&self.particle, command_buffer)
   update_visible_lights(self)
-  log.debug("============ rendering shadow pass...============ ")
+  // log.debug("============ rendering shadow pass...============ ")
   renderer_shadow_begin(self, command_buffer)
   renderer_shadow_render(self, command_buffer)
   renderer_shadow_end(self, command_buffer)
@@ -439,11 +437,11 @@ render :: proc(self: ^Engine) -> vk.Result {
     command_buffer,
     self.main.frames[g_frame_index].main_pass_image.image,
   )
-  log.debug("============ rendering main pass... =============")
+  // log.debug("============ rendering main pass... =============")
   renderer_main_begin(self, command_buffer)
   renderer_main_render(self, command_buffer)
   renderer_main_end(self, command_buffer)
-  log.debug("============ rendering particles... =============")
+  // log.debug("============ rendering particles... =============")
   renderer_particle_begin(
     self,
     command_buffer,
@@ -456,7 +454,7 @@ render :: proc(self: ^Engine) -> vk.Result {
     command_buffer,
     self.main.frames[g_frame_index].main_pass_image.image,
   )
-  log.debug("============ rendering post processes... =============")
+  // log.debug("============ rendering post processes... =============")
   renderer_postprocess_begin(
     &self.postprocess,
     command_buffer,

@@ -13,20 +13,29 @@ MAX_LIGHTS :: 10
 SHADOW_MAP_SIZE :: 512
 MAX_SHADOW_MAPS :: MAX_LIGHTS
 MAX_SCENE_UNIFORMS :: 16
+MAX_TEXTURES :: 50
 
 BG_BLUE_GRAY :: [4]f32{0.0117, 0.0117, 0.0179, 1.0}
 BG_DARK_GRAY :: [4]f32{0.0117, 0.0117, 0.0117, 1.0}
 BG_ORANGE_GRAY :: [4]f32{0.0179, 0.0179, 0.0117, 1.0}
 
+PushConstant :: struct {
+    world: linalg.Matrix4f32,
+    using textures: MaterialTextures,
+    metallic_value: f32,
+    roughness_value: f32,
+    padding: [2]f32, // Padding for 16-byte alignment
+}
+
 SingleLightUniform :: struct {
-  view_proj:  linalg.Matrix4f32,
-  color:      linalg.Vector4f32,
-  position:   linalg.Vector4f32,
-  direction:  linalg.Vector4f32,
-  kind:       LightKind,
-  angle:      f32, // For spotlight: cone angle
-  radius:     f32, // For point/spot: attenuation radius
-  has_shadow: b32,
+  view_proj:  linalg.Matrix4f32, // 64 bytes
+  color:      linalg.Vector4f32, // 16 bytes
+  position:   linalg.Vector4f32, // 16 bytes
+  direction:  linalg.Vector4f32, // 16 bytes
+  kind:       LightKind, // 4 bytes
+  angle:      f32, // 4 bytes (spot light angle)
+  radius:     f32, // 4 bytes (point/spot light radius)
+  has_shadow: b32, // 4 bytes
 }
 
 SceneUniform :: struct {
@@ -72,7 +81,7 @@ SHADER_UNLIT_VERT :: #load("shader/unlit/vert.spv")
 SHADER_UNLIT_FRAG :: #load("shader/unlit/frag.spv")
 
 RendererMain :: struct {
-  frames:                            [MAX_FRAMES_IN_FLIGHT]struct {
+  frames:                       [MAX_FRAMES_IN_FLIGHT]struct {
     camera_uniform:        DataBuffer(SceneUniform),
     light_uniform:         DataBuffer(SceneLightUniform),
     camera_descriptor_set: vk.DescriptorSet,
@@ -80,18 +89,13 @@ RendererMain :: struct {
     shadow_maps:           [MAX_SHADOW_MAPS]ImageBuffer,
     cube_shadow_maps:      [MAX_SHADOW_MAPS]CubeImageBuffer,
   },
-  camera_descriptor_set_layout:      vk.DescriptorSetLayout,
-  environment_descriptor_set_layout: vk.DescriptorSetLayout,
-  texture_descriptor_set_layout:     vk.DescriptorSetLayout,
-  skinning_descriptor_set_layout:    vk.DescriptorSetLayout,
-  pipeline_layout:                   vk.PipelineLayout,
-  pipelines:                         [SHADER_VARIANT_COUNT]vk.Pipeline,
-  unlit_pipelines:                   [UNLIT_SHADER_VARIANT_COUNT]vk.Pipeline,
-  environment_descriptor_set:        vk.DescriptorSet,
-  depth_buffer:                      ImageBuffer,
-  // managed by pool, so we don't need to deinit
-  environment_map:                   ^ImageBuffer,
-  brdf_lut:                          ^ImageBuffer,
+  camera_descriptor_set_layout: vk.DescriptorSetLayout,
+  pipeline_layout:              vk.PipelineLayout,
+  pipelines:                    [SHADER_VARIANT_COUNT]vk.Pipeline,
+  unlit_pipelines:              [UNLIT_SHADER_VARIANT_COUNT]vk.Pipeline,
+  depth_buffer:                 ImageBuffer,
+  environment_map:              Handle,
+  brdf_lut:                     Handle,
 }
 
 renderer_main_build_pbr_pipeline :: proc(
@@ -205,105 +209,20 @@ renderer_main_build_pbr_pipeline :: proc(
       geometry.VERTEX_ATTRIBUTE_DESCRIPTIONS[:],
     ),
   }
-  texture_bindings := []vk.DescriptorSetLayoutBinding {
-    {
-      binding = 0,
-      descriptorType = .COMBINED_IMAGE_SAMPLER,
-      descriptorCount = 1,
-      stageFlags = {.FRAGMENT},
-    },
-    {
-      binding = 1,
-      descriptorType = .COMBINED_IMAGE_SAMPLER,
-      descriptorCount = 1,
-      stageFlags = {.FRAGMENT},
-    },
-    {
-      binding = 2,
-      descriptorType = .COMBINED_IMAGE_SAMPLER,
-      descriptorCount = 1,
-      stageFlags = {.FRAGMENT},
-    },
-    {
-      binding = 3,
-      descriptorType = .COMBINED_IMAGE_SAMPLER,
-      descriptorCount = 1,
-      stageFlags = {.FRAGMENT},
-    },
-    {
-      binding = 4,
-      descriptorType = .COMBINED_IMAGE_SAMPLER,
-      descriptorCount = 1,
-      stageFlags = {.FRAGMENT},
-    },
-    {
-      binding = 5,
-      descriptorType = .UNIFORM_BUFFER,
-      descriptorCount = 1,
-      stageFlags = {.FRAGMENT},
-    },
-  }
-  vk.CreateDescriptorSetLayout(
-    g_device,
-    &vk.DescriptorSetLayoutCreateInfo {
-      sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-      bindingCount = u32(len(texture_bindings)),
-      pBindings = raw_data(texture_bindings),
-    },
-    nil,
-    &self.texture_descriptor_set_layout,
-  ) or_return
-  skinning_bindings := []vk.DescriptorSetLayoutBinding {
-    {
-      binding = 0,
-      descriptorType = .STORAGE_BUFFER,
-      descriptorCount = 1,
-      stageFlags = {.VERTEX},
-    },
-  }
-  vk.CreateDescriptorSetLayout(
-    g_device,
-    &vk.DescriptorSetLayoutCreateInfo {
-      sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-      bindingCount = u32(len(skinning_bindings)),
-      pBindings = raw_data(skinning_bindings),
-    },
-    nil,
-    &self.skinning_descriptor_set_layout,
-  ) or_return
-  environment_bindings := []vk.DescriptorSetLayoutBinding {
-    {
-      binding = 0,
-      descriptorType = .COMBINED_IMAGE_SAMPLER,
-      descriptorCount = 1,
-      stageFlags = {.FRAGMENT},
-    },
-    {
-      binding = 1,
-      descriptorType = .COMBINED_IMAGE_SAMPLER,
-      descriptorCount = 1,
-      stageFlags = {.FRAGMENT},
-    },
-  }
-  vk.CreateDescriptorSetLayout(
-    g_device,
-    &{
-      sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-      bindingCount = u32(len(environment_bindings)),
-      pBindings = raw_data(environment_bindings),
-    },
-    nil,
-    &self.environment_descriptor_set_layout,
-  ) or_return
+  // Only keep camera, bindless textures, bindless samplers, and skinning layouts
   set_layouts := [?]vk.DescriptorSetLayout {
     self.camera_descriptor_set_layout, // set = 0
-    self.texture_descriptor_set_layout, // set = 1
-    self.skinning_descriptor_set_layout, // set = 2
-    self.environment_descriptor_set_layout, // set = 3
+    g_bindless_textures_layout, // set = 1
+    g_bindless_samplers_layout, // set = 2
+    g_bindless_bone_buffer_set_layout, // set = 3
   }
-  push_constant_range := vk.PushConstantRange {
-    stageFlags = {.VERTEX},
-    size       = size_of(linalg.Matrix4f32),
+  push_constant_range := [?]vk.PushConstantRange {
+    // World matrix for vertex shader
+    {
+      stageFlags = {.VERTEX, .FRAGMENT},
+      offset = 0,
+      size = size_of(PushConstant),
+    },
   }
   vk.CreatePipelineLayout(
     g_device,
@@ -311,8 +230,8 @@ renderer_main_build_pbr_pipeline :: proc(
       sType = .PIPELINE_LAYOUT_CREATE_INFO,
       setLayoutCount = len(set_layouts),
       pSetLayouts = raw_data(set_layouts[:]),
-      pushConstantRangeCount = 1,
-      pPushConstantRanges = &push_constant_range,
+      pushConstantRangeCount = len(push_constant_range),
+      pPushConstantRanges = raw_data(push_constant_range[:]),
     },
     nil,
     &self.pipeline_layout,
@@ -657,6 +576,23 @@ renderer_main_render :: proc(
     camera_frustum = camera_frustum,
     rendered_count = &rendered_count,
   }
+  layout := engine.main.pipeline_layout
+  descriptor_sets := [?]vk.DescriptorSet {
+    engine.main.frames[g_frame_index].camera_descriptor_set, // set 0
+    g_bindless_textures, // set 1
+    g_bindless_samplers, // set 2
+    g_bindless_bone_buffer_descriptor_set, // set 3
+  }
+  vk.CmdBindDescriptorSets(
+    command_buffer,
+    .GRAPHICS,
+    layout,
+    0,
+    u32(len(descriptor_sets)),
+    raw_data(descriptor_sets[:]),
+    0,
+    nil,
+  )
   scene_traverse_linear(&engine.scene, &render_meshes_ctx, render_single_node)
   if mu.window(
     &engine.ui.ctx,
@@ -738,6 +674,23 @@ render_to_texture :: proc(
     camera_frustum = camera_frustum,
     rendered_count = &rendered_count,
   }
+  layout := engine.main.pipeline_layout
+  descriptor_sets := [?]vk.DescriptorSet {
+    engine.main.frames[g_frame_index].camera_descriptor_set, // set 0
+    g_bindless_textures, // set 1
+    g_bindless_samplers, // set 2
+    g_bindless_bone_buffer_descriptor_set, // set 3
+  }
+  vk.CmdBindDescriptorSets(
+    command_buffer,
+    .GRAPHICS,
+    layout,
+    0,
+    u32(len(descriptor_sets)),
+    raw_data(descriptor_sets[:]),
+    0,
+    nil,
+  )
   scene_traverse_linear(&engine.scene, &render_meshes_ctx, render_single_node)
   vk.CmdEndRenderingKHR(command_buffer)
   return .SUCCESS
@@ -757,47 +710,14 @@ renderer_main_init :: proc(
     depth_format,
   ) or_return
   depth_image_init(&self.depth_buffer, width, height, depth_format) or_return
-  _, self.environment_map = create_hdr_texture_from_path(
+  environment_map: ^ImageBuffer
+  self.environment_map, environment_map = create_hdr_texture_from_path(
     "assets/teutonic_castle_moat_4k.hdr",
   ) or_return
-  _, self.brdf_lut = create_texture_from_path("assets/lut_ggx.png") or_return
-  vk.AllocateDescriptorSets(
-    g_device,
-    &{
-      sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
-      descriptorPool = g_descriptor_pool,
-      descriptorSetCount = 1,
-      pSetLayouts = &self.environment_descriptor_set_layout,
-    },
-    &self.environment_descriptor_set,
+  brdf_lut: ^ImageBuffer
+  self.brdf_lut, brdf_lut = create_texture_from_path(
+    "assets/lut_ggx.png",
   ) or_return
-  writes := [?]vk.WriteDescriptorSet {
-    {
-      sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = self.environment_descriptor_set,
-      dstBinding = 0,
-      descriptorType = .COMBINED_IMAGE_SAMPLER,
-      descriptorCount = 1,
-      pImageInfo = &{
-        sampler = g_linear_repeat_sampler,
-        imageView = self.environment_map.view,
-        imageLayout = .SHADER_READ_ONLY_OPTIMAL,
-      },
-    },
-    {
-      sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = self.environment_descriptor_set,
-      dstBinding = 1,
-      descriptorType = .COMBINED_IMAGE_SAMPLER,
-      descriptorCount = 1,
-      pImageInfo = &{
-        sampler = g_linear_repeat_sampler,
-        imageView = self.brdf_lut.view,
-        imageLayout = .SHADER_READ_ONLY_OPTIMAL,
-      },
-    },
-  }
-  vk.UpdateDescriptorSets(g_device, len(writes), raw_data(writes[:]), 0, nil)
   for &frame in self.frames {
     frame.camera_uniform = create_host_visible_buffer(
       SceneUniform,
@@ -903,21 +823,6 @@ renderer_main_deinit :: proc(self: ^RendererMain) {
     self.camera_descriptor_set_layout,
     nil,
   )
-  vk.DestroyDescriptorSetLayout(
-    g_device,
-    self.environment_descriptor_set_layout,
-    nil,
-  )
-  vk.DestroyDescriptorSetLayout(
-    g_device,
-    self.texture_descriptor_set_layout,
-    nil,
-  )
-  vk.DestroyDescriptorSetLayout(
-    g_device,
-    self.skinning_descriptor_set_layout,
-    nil,
-  )
   for &frame in self.frames {
     data_buffer_deinit(&frame.camera_uniform)
     data_buffer_deinit(&frame.light_uniform)
@@ -995,31 +900,50 @@ render_single_node :: proc(node: ^Node, cb_context: rawptr) -> bool {
       return true
     }
     pipeline := renderer_main_get_pipeline(&ctx.engine.main, material)
-    layout := ctx.engine.main.pipeline_layout
-    descriptor_sets := [?]vk.DescriptorSet {
-      ctx.engine.main.frames[g_frame_index].camera_descriptor_set, // set 0
-      material.texture_descriptor_set, // set 1
-      material.skinning_descriptor_sets[g_frame_index], // set 2
-      ctx.engine.main.environment_descriptor_set, // set 3
-    }
     vk.CmdBindPipeline(ctx.command_buffer, .GRAPHICS, pipeline)
-    vk.CmdBindDescriptorSets(
-      ctx.command_buffer,
-      .GRAPHICS,
-      layout,
-      0,
-      u32(len(descriptor_sets)),
-      raw_data(descriptor_sets[:]),
-      0,
-      nil,
-    )
+    // Push constants for texture indices
+    texture_indices: MaterialTextures = {
+      albedo_index             = min(MAX_TEXTURES - 1, material.albedo.index),
+      metallic_roughness_index = min(
+        MAX_TEXTURES - 1,
+        material.metallic_roughness.index,
+      ),
+      normal_index             = min(MAX_TEXTURES - 1, material.normal.index),
+      displacement_index       = min(
+        MAX_TEXTURES - 1,
+        material.displacement.index,
+      ),
+      emissive_index           = min(
+        MAX_TEXTURES - 1,
+        material.emissive.index,
+      ),
+      environment_index        = min(
+        MAX_TEXTURES - 1,
+        ctx.engine.main.environment_map.index,
+      ),
+      brdf_lut_index           = min(
+        MAX_TEXTURES - 1,
+        ctx.engine.main.brdf_lut.index,
+      ),
+      bone_matrix_offset       = 0,
+    }
+    node_skinning, node_has_skin := data.skinning.?
+    if node_has_skin {
+      texture_indices.bone_matrix_offset = node_skinning.bone_matrix_offset
+    }
+    push_constant := PushConstant{
+        world = node.transform.world_matrix,
+        textures = texture_indices,
+        metallic_value = material.metallic_value,
+        roughness_value = material.roughness_value,
+    }
     vk.CmdPushConstants(
       ctx.command_buffer,
-      layout,
-      {.VERTEX},
+      ctx.engine.main.pipeline_layout,
+      {.VERTEX, .FRAGMENT},
       0,
-      size_of(linalg.Matrix4f32),
-      &node.transform.world_matrix,
+      size_of(PushConstant),
+      &push_constant,
     )
     offset: vk.DeviceSize = 0
     vk.CmdBindVertexBuffers(
@@ -1030,14 +954,7 @@ render_single_node :: proc(node: ^Node, cb_context: rawptr) -> bool {
       &offset,
     )
     mesh_skinning, mesh_has_skin := &mesh.skinning.?
-    node_skinning, node_has_skin := data.skinning.?
     if mesh_has_skin && node_has_skin {
-      material_update_bone_buffer(
-        material,
-        node_skinning.bone_buffers[g_frame_index].buffer,
-        vk.DeviceSize(node_skinning.bone_buffers[g_frame_index].bytes_count),
-        g_frame_index,
-      )
       vk.CmdBindVertexBuffers(
         ctx.command_buffer,
         1,

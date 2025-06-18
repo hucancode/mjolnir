@@ -18,7 +18,12 @@ g_meshes: resource.Pool(Mesh)
 g_materials: resource.Pool(Material)
 g_image_buffers: resource.Pool(ImageBuffer)
 
-factory_init :: proc() {
+g_bindless_bone_buffer_set_layout: vk.DescriptorSetLayout
+g_bindless_bone_buffer_descriptor_set: vk.DescriptorSet
+g_bindless_bone_buffer: DataBuffer(linalg.Matrix4f32)
+g_bone_matrix_slab: resource.SlabAllocator
+
+factory_init :: proc() -> vk.Result {
   log.infof("Initializing mesh pool... ")
   resource.pool_init(&g_meshes)
   log.infof("Initializing materials pool... ")
@@ -27,9 +32,78 @@ factory_init :: proc() {
   resource.pool_init(&g_image_buffers)
   log.infof("All resource pools initialized successfully")
   init_global_samplers()
+  resource.slab_allocator_init(
+    &g_bone_matrix_slab,
+    {
+      {32, 64}, // 64 bytes * 32   bones * 64   blocks = 128K bytes
+      {64, 128}, // 64 bytes * 64   bones * 128  blocks = 512K bytes
+      {128, 8192}, // 64 bytes * 128  bones * 8192 blocks = 64M bytes
+      {256, 4096}, // 64 bytes * 256  bones * 4096 blocks = 64M bytes
+      {512, 256}, // 64 bytes * 512  bones * 256  blocks = 8M bytes
+      {1024, 128}, // 64 bytes * 1024 bones * 256  blocks = 8M bytes
+      {2048, 32}, // 64 bytes * 2048 bones * 32   blocks = 4M bytes
+      {4096, 16}, // 64 bytes * 4096 bones * 16   blocks = 4M bytes
+      // Total size: ~153M bytes for bone matrices
+      // This could roughly fit 12000 animated characters with 128 bones each
+    },
+  )
+  log.infof(
+    "Creating bone matrices array with capacity %d matrices...",
+    g_bone_matrix_slab.capacity,
+  )
+  g_bindless_bone_buffer, _ = create_host_visible_buffer(
+    linalg.Matrix4f32,
+    int(g_bone_matrix_slab.capacity),
+    {.STORAGE_BUFFER},
+    nil,
+  )
+  skinning_bindings := [?]vk.DescriptorSetLayoutBinding {
+    {
+      binding = 0,
+      descriptorType = .STORAGE_BUFFER,
+      descriptorCount = 1,
+      stageFlags = {.VERTEX},
+    },
+  }
+  vk.CreateDescriptorSetLayout(
+    g_device,
+    &vk.DescriptorSetLayoutCreateInfo {
+      sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+      bindingCount = len(skinning_bindings),
+      pBindings = raw_data(skinning_bindings[:]),
+    },
+    nil,
+    &g_bindless_bone_buffer_set_layout,
+  ) or_return
+  vk.AllocateDescriptorSets(
+    g_device,
+    &{
+      sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
+      descriptorPool = g_descriptor_pool,
+      descriptorSetCount = 1,
+      pSetLayouts = &g_bindless_bone_buffer_set_layout,
+    },
+    &g_bindless_bone_buffer_descriptor_set,
+  ) or_return
+  buffer_info := vk.DescriptorBufferInfo {
+    buffer = g_bindless_bone_buffer.buffer,
+    offset = 0,
+    range  = vk.DeviceSize(vk.WHOLE_SIZE),
+  }
+  write := vk.WriteDescriptorSet {
+    sType           = .WRITE_DESCRIPTOR_SET,
+    dstSet          = g_bindless_bone_buffer_descriptor_set,
+    dstBinding      = 0,
+    descriptorType  = .STORAGE_BUFFER,
+    descriptorCount = 1,
+    pBufferInfo     = &buffer_info,
+  }
+  vk.UpdateDescriptorSets(g_device, 1, &write, 0, nil)
+  return .SUCCESS
 }
 
 factory_deinit :: proc() {
+  data_buffer_deinit(&g_bindless_bone_buffer)
   resource.pool_deinit(g_image_buffers, image_buffer_deinit)
   resource.pool_deinit(g_meshes, mesh_deinit)
   resource.pool_deinit(g_materials, material_deinit)
@@ -62,6 +136,51 @@ init_global_samplers :: proc() -> vk.Result {
   info.addressModeV = .CLAMP_TO_EDGE
   info.addressModeW = .CLAMP_TO_EDGE
   vk.CreateSampler(g_device, &info, nil, &g_nearest_clamp_sampler) or_return
+  write_samplers := [?]vk.WriteDescriptorSet {
+    {
+      sType = .WRITE_DESCRIPTOR_SET,
+      dstSet = g_bindless_samplers,
+      dstBinding = 0,
+      dstArrayElement = 0,
+      descriptorType = .SAMPLER,
+      descriptorCount = 1,
+      pImageInfo = &{sampler = g_nearest_clamp_sampler},
+    },
+    {
+      sType = .WRITE_DESCRIPTOR_SET,
+      dstSet = g_bindless_samplers,
+      dstBinding = 0,
+      dstArrayElement = 1,
+      descriptorType = .SAMPLER,
+      descriptorCount = 1,
+      pImageInfo = &{sampler = g_linear_clamp_sampler},
+    },
+    {
+      sType = .WRITE_DESCRIPTOR_SET,
+      dstSet = g_bindless_samplers,
+      dstBinding = 0,
+      dstArrayElement = 2,
+      descriptorType = .SAMPLER,
+      descriptorCount = 1,
+      pImageInfo = &{sampler = g_nearest_repeat_sampler},
+    },
+    {
+      sType = .WRITE_DESCRIPTOR_SET,
+      dstSet = g_bindless_samplers,
+      dstBinding = 0,
+      dstArrayElement = 3,
+      descriptorType = .SAMPLER,
+      descriptorCount = 1,
+      pImageInfo = &{sampler = g_linear_repeat_sampler},
+    },
+  }
+  vk.UpdateDescriptorSets(
+    g_device,
+    len(write_samplers),
+    raw_data(write_samplers[:]),
+    0,
+    nil,
+  )
   return .SUCCESS
 }
 
@@ -102,8 +221,6 @@ create_mesh :: proc(
 }
 
 create_material :: proc(
-  texture_descriptor_set_layout: vk.DescriptorSetLayout,
-  skinning_descriptor_set_layout: vk.DescriptorSetLayout,
   features: ShaderFeatureSet = {},
   albedo_handle: Handle = {},
   metallic_roughness_handle: Handle = {},
@@ -123,20 +240,15 @@ create_material :: proc(
   ret, mat = resource.alloc(&g_materials)
   mat.is_lit = true
   mat.features = features
-  mat.albedo_handle = albedo_handle
-  mat.metallic_roughness_handle = metallic_roughness_handle
-  mat.normal_handle = normal_handle
-  mat.displacement_handle = displacement_handle
-  mat.emissive_handle = emissive_handle
+  mat.albedo = albedo_handle
+  mat.metallic_roughness = metallic_roughness_handle
+  mat.normal = normal_handle
+  mat.displacement = displacement_handle
+  mat.emissive = emissive_handle
   mat.albedo_value = albedo_value
   mat.metallic_value = metallic_value
   mat.roughness_value = roughness_value
   mat.emissive_value = emissive_value
-  material_init_descriptor_set_layout(
-    mat,
-    texture_descriptor_set_layout,
-    skinning_descriptor_set_layout,
-  ) or_return
   fallbacks := MaterialFallbacks {
     albedo    = mat.albedo_value,
     emissive  = mat.emissive_value,
@@ -149,29 +261,19 @@ create_material :: proc(
     {.UNIFORM_BUFFER},
     &fallbacks,
   ) or_return
-  albedo := resource.get(g_image_buffers, albedo_handle)
-  metallic_roughness := resource.get(
-    g_image_buffers,
-    metallic_roughness_handle,
+  log.infof(
+    "Material created: albedo=%d metallic_roughness=%d normal=%d displacement=%d emissive=%d",
+    mat.albedo.index,
+    mat.metallic_roughness.index,
+    mat.normal.index,
+    mat.displacement.index,
+    mat.emissive.index,
   )
-  normal := resource.get(g_image_buffers, normal_handle)
-  displacement := resource.get(g_image_buffers, displacement_handle)
-  emissive := resource.get(g_image_buffers, emissive_handle)
-  material_update_textures(
-    mat,
-    albedo,
-    metallic_roughness,
-    normal,
-    displacement,
-    emissive,
-  ) or_return
   res = .SUCCESS
   return
 }
 
 create_unlit_material :: proc(
-  texture_descriptor_set_layout: vk.DescriptorSetLayout,
-  skinning_descriptor_set_layout: vk.DescriptorSetLayout,
   features: ShaderFeatureSet = {},
   albedo_handle: Handle = {},
   albedo_value: linalg.Vector4f32 = {1, 1, 1, 1},
@@ -183,13 +285,8 @@ create_unlit_material :: proc(
   ret, mat = resource.alloc(&g_materials)
   mat.is_lit = false
   mat.features = features
-  mat.albedo_handle = albedo_handle
+  mat.albedo = albedo_handle
   mat.albedo_value = albedo_value
-  material_init_descriptor_set_layout(
-    mat,
-    texture_descriptor_set_layout,
-    skinning_descriptor_set_layout,
-  ) or_return
   albedo := resource.get(g_image_buffers, albedo_handle)
   fallbacks := MaterialFallbacks {
     albedo = mat.albedo_value,
@@ -200,7 +297,6 @@ create_unlit_material :: proc(
     {.UNIFORM_BUFFER},
     &fallbacks,
   ) or_return
-  material_update_textures(mat, albedo) or_return
   res = .SUCCESS
   return
 }
@@ -223,7 +319,7 @@ create_texture_from_path :: proc(
       stbi.failure_reason(),
     )
     ret = .ERROR_UNKNOWN
-    return
+    return handle, texture, ret
   }
   defer stbi.image_free(pixels)
   num_pixels := int(width * height * 4)
@@ -234,8 +330,9 @@ create_texture_from_path :: proc(
     u32(width),
     u32(height),
   ) or_return
+  set_texture_descriptor(handle.index, texture.view)
   ret = .SUCCESS
-  return
+  return handle, texture, ret
 }
 
 create_hdr_texture_from_path :: proc(
@@ -263,7 +360,7 @@ create_hdr_texture_from_path :: proc(
       stbi.failure_reason(),
     )
     ret = .ERROR_UNKNOWN
-    return
+    return handle, texture, ret
   }
   defer stbi.image_free(float_pixels)
   num_floats := int(width * height * actual_channels)
@@ -274,14 +371,9 @@ create_hdr_texture_from_path :: proc(
     u32(width),
     u32(height),
   ) or_return
-  log.infof(
-    "created HDR texture %d x %d -> id %d",
-    width,
-    height,
-    texture.image,
-  )
+  set_texture_descriptor(handle.index, texture.view)
   ret = .SUCCESS
-  return
+  return handle, texture, ret
 }
 
 create_texture_from_pixels :: proc(
@@ -309,6 +401,7 @@ create_texture_from_pixels :: proc(
     texture.height,
     texture.image,
   )
+  set_texture_descriptor(handle.index, texture.view)
   ret = .SUCCESS
   return
 }
@@ -359,6 +452,7 @@ create_texture_from_data :: proc(
     texture.height,
     texture.image,
   )
+  set_texture_descriptor(handle.index, texture.view)
   ret = .SUCCESS
   return
 }

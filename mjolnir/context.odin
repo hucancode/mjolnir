@@ -22,6 +22,7 @@ TITLE :: "Mjolnir"
 DEVICE_EXTENSIONS :: []cstring {
   vk.KHR_SWAPCHAIN_EXTENSION_NAME,
   vk.KHR_DYNAMIC_RENDERING_EXTENSION_NAME,
+  vk.EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME,
 }
 
 ENABLE_VALIDATION_LAYERS :: #config(ENABLE_VALIDATION_LAYERS, ODIN_DEBUG)
@@ -36,6 +37,12 @@ ACTIVE_MATERIAL_COUNT :: 1000
 MAX_SAMPLER_PER_MATERIAL :: 3
 MAX_SAMPLER_COUNT :: ACTIVE_MATERIAL_COUNT * MAX_SAMPLER_PER_MATERIAL
 SCENE_UNIFORM_COUNT :: 3
+
+MAX_SAMPLERS :: 4
+SAMPLER_NEAREST_CLAMP :: 0
+SAMPLER_LINEAR_CLAMP :: 1
+SAMPLER_NEAREST_REPEAT :: 2
+SAMPLER_LINEAR_REPEAT :: 3
 
 SwapchainSupport :: struct {
   capabilities:  vk.SurfaceCapabilitiesKHR,
@@ -64,6 +71,10 @@ g_present_queue: vk.Queue
 g_descriptor_pool: vk.DescriptorPool
 g_command_pool: vk.CommandPool
 g_device_properties: vk.PhysicalDeviceProperties
+g_bindless_textures_layout: vk.DescriptorSetLayout
+g_bindless_textures: vk.DescriptorSet
+g_bindless_samplers_layout: vk.DescriptorSetLayout
+g_bindless_samplers: vk.DescriptorSet
 
 vulkan_context_init :: proc(window: glfw.WindowHandle) -> vk.Result {
   g_window = window
@@ -74,6 +85,7 @@ vulkan_context_init :: proc(window: glfw.WindowHandle) -> vk.Result {
   logical_device_init() or_return
   command_pool_init() or_return
   descriptor_pool_init() or_return
+  init_texture_descriptors() or_return
   return .SUCCESS
 }
 
@@ -419,19 +431,29 @@ logical_device_init :: proc() -> vk.Result {
       },
     )
   }
+  // Enable descriptor indexing features
+  descriptor_indexing_features :=
+    vk.PhysicalDeviceDescriptorIndexingFeaturesEXT {
+      sType                                     = .PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES_EXT,
+      shaderSampledImageArrayNonUniformIndexing = true,
+      runtimeDescriptorArray                    = true,
+      descriptorBindingPartiallyBound           = true,
+      descriptorBindingVariableDescriptorCount  = true,
+    }
   dynamic_rendering_feature := vk.PhysicalDeviceDynamicRenderingFeaturesKHR {
-    sType            = .PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES_KHR,
-    dynamicRendering = true,
-  }
+      sType            = .PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES_KHR,
+      dynamicRendering = true,
+      pNext            = &descriptor_indexing_features,
+    }
   device_create_info := vk.DeviceCreateInfo {
-    sType                   = .DEVICE_CREATE_INFO,
-    queueCreateInfoCount    = u32(len(queue_create_infos_list)),
-    pQueueCreateInfos       = raw_data(queue_create_infos_list),
-    ppEnabledExtensionNames = raw_data(DEVICE_EXTENSIONS),
-    enabledExtensionCount   = u32(len(DEVICE_EXTENSIONS)),
-    pNext                   = &dynamic_rendering_feature,
-    // pEnabledFeatures = &vk.PhysicalDeviceFeatures{}, // Set if specific base features needed
-  }
+      sType                   = .DEVICE_CREATE_INFO,
+      queueCreateInfoCount    = u32(len(queue_create_infos_list)),
+      pQueueCreateInfos       = raw_data(queue_create_infos_list),
+      ppEnabledExtensionNames = raw_data(DEVICE_EXTENSIONS),
+      enabledExtensionCount   = u32(len(DEVICE_EXTENSIONS)),
+      pNext                   = &dynamic_rendering_feature,
+      // pEnabledFeatures = &vk.PhysicalDeviceFeatures{}, // Set if specific base features needed
+    }
   when ENABLE_VALIDATION_LAYERS {
     device_create_info.enabledLayerCount = u32(len(VALIDATION_LAYERS))
     device_create_info.ppEnabledLayerNames = raw_data(VALIDATION_LAYERS)
@@ -451,6 +473,8 @@ descriptor_pool_init :: proc() -> vk.Result {
   // expand those limits as needed
   pool_sizes := [?]vk.DescriptorPoolSize {
     {.COMBINED_IMAGE_SAMPLER, MAX_SAMPLER_COUNT},
+    {.SAMPLED_IMAGE, MAX_SAMPLER_COUNT},
+    {.SAMPLER, MAX_SAMPLER_COUNT},
     {.UNIFORM_BUFFER, 128},
     {.UNIFORM_BUFFER_DYNAMIC, 128},
     {.STORAGE_BUFFER, ACTIVE_MATERIAL_COUNT},
@@ -592,4 +616,86 @@ allocate_vulkan_memory :: proc(
   vk.AllocateMemory(g_device, &alloc_info, nil, &memory) or_return
   ret = .SUCCESS
   return
+}
+
+init_texture_descriptors :: proc() -> vk.Result {
+  texture_binding := vk.DescriptorSetLayoutBinding {
+    binding         = 0,
+    descriptorType  = .SAMPLED_IMAGE,
+    descriptorCount = MAX_TEXTURES,
+    stageFlags      = {.FRAGMENT},
+  }
+  texture_layout_info := vk.DescriptorSetLayoutCreateInfo {
+    sType        = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+    bindingCount = 1,
+    pBindings    = &texture_binding,
+  }
+  vk.CreateDescriptorSetLayout(
+    g_device,
+    &texture_layout_info,
+    nil,
+    &g_bindless_textures_layout,
+  ) or_return
+  log.infof("Bindless textures layout created")
+  vk.AllocateDescriptorSets(
+    g_device,
+    &{
+      sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
+      descriptorPool = g_descriptor_pool,
+      descriptorSetCount = 1,
+      pSetLayouts = &g_bindless_textures_layout,
+    },
+    &g_bindless_textures,
+  ) or_return
+  log.infof("Bindless textures descriptor set allocated")
+  sampler_binding := vk.DescriptorSetLayoutBinding {
+    binding         = 0,
+    descriptorType  = .SAMPLER,
+    descriptorCount = MAX_SAMPLERS,
+    stageFlags      = {.FRAGMENT},
+  }
+  sampler_layout_info := vk.DescriptorSetLayoutCreateInfo {
+    sType        = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+    bindingCount = 1,
+    pBindings    = &sampler_binding,
+  }
+  vk.CreateDescriptorSetLayout(
+    g_device,
+    &sampler_layout_info,
+    nil,
+    &g_bindless_samplers_layout,
+  ) or_return
+  log.infof("Bindless samplers layout created")
+  vk.AllocateDescriptorSets(
+    g_device,
+    &{
+      sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
+      descriptorPool = g_descriptor_pool,
+      descriptorSetCount = 1,
+      pSetLayouts = &g_bindless_samplers_layout,
+    },
+    &g_bindless_samplers,
+  ) or_return
+  log.infof("Bindless samplers descriptor set allocated")
+  return .SUCCESS
+}
+
+set_texture_descriptor :: proc(index: u32, image_view: vk.ImageView) {
+  if index >= MAX_TEXTURES {
+    log.infof("Error: Index %d out of bounds for bindless textures", index)
+    return
+  }
+  write := vk.WriteDescriptorSet {
+    sType           = .WRITE_DESCRIPTOR_SET,
+    dstSet          = g_bindless_textures,
+    dstBinding      = 0,
+    dstArrayElement = index,
+    descriptorType  = .SAMPLED_IMAGE,
+    descriptorCount = 1,
+    pImageInfo      = &vk.DescriptorImageInfo {
+      imageView = image_view,
+      imageLayout = .SHADER_READ_ONLY_OPTIMAL,
+    },
+  }
+  vk.UpdateDescriptorSets(g_device, 1, &write, 0, nil)
 }
