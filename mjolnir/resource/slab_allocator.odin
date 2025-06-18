@@ -11,7 +11,7 @@ SlabAllocator :: struct {
     next:        u32,
     base:        u32,
   },
-  total_capacity: u32, // Total number of items managed
+  capacity: u32,
 }
 
 make_slab_allocator :: proc(config: [MAX_SLAB_CLASSES]struct {
@@ -29,7 +29,7 @@ make_slab_allocator :: proc(config: [MAX_SLAB_CLASSES]struct {
     }
     base += c.block_size * c.block_count
   }
-  ret.total_capacity = base
+  ret.capacity = base
   return ret
 }
 
