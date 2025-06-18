@@ -55,8 +55,8 @@ test_slab_invalid_free :: proc(t: ^testing.T) {
 benchmark_slab_allocation :: proc(t: ^testing.T) {
   n :: 1e7
   SlabTest :: struct {
-    allocator:    resource.SlabAllocator,
-    ops: []u32,
+    allocator: resource.SlabAllocator,
+    ops:       []u32,
   }
   options := &time.Benchmark_Options {
     rounds = n,
@@ -68,7 +68,16 @@ benchmark_slab_allocation :: proc(t: ^testing.T) {
       my_test := new(SlabTest)
       resource.slab_allocator_init(
         &my_test.allocator,
-        {{10, 10000}, {20, 10000}, {50, 10000}, {100, 20000}, {400, 10000}, {1000, 2000}, {3000, 100}, {6000, 100}},
+        {
+          {10, 10000},
+          {20, 10000},
+          {50, 10000},
+          {100, 20000},
+          {400, 10000},
+          {1000, 2000},
+          {3000, 100},
+          {6000, 100},
+        },
       )
       my_test.ops = make([]u32, n)
       for &op in my_test.ops {
@@ -85,7 +94,7 @@ benchmark_slab_allocation :: proc(t: ^testing.T) {
       allocator := context.allocator,
     ) -> time.Benchmark_Error {
       my_test := cast(^SlabTest)(raw_data(options.input))
-      allocated := make([dynamic]u32)
+      allocated := make([dynamic]u32, 0, options.rounds)
       defer delete(allocated)
       for op in my_test.ops {
         if op > 0 {
