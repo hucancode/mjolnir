@@ -55,7 +55,7 @@ matrix_from_array_benchmark :: proc(t: ^testing.T) {
   n := 1e7
   options := &time.Benchmark_Options {
     rounds = n,
-    bytes = size_of(f32) * 16 * n,
+    bytes = size_of([16]f32) * n,
     setup = proc(
       options: ^time.Benchmark_Options,
       allocator := context.allocator,
