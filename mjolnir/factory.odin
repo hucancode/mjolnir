@@ -9,8 +9,6 @@ import "resource"
 import stbi "vendor:stb/image"
 import vk "vendor:vulkan"
 
-MAX_BONE_MATRICES :: 65536 // or as needed
-
 g_linear_repeat_sampler: vk.Sampler
 g_linear_clamp_sampler: vk.Sampler
 g_nearest_repeat_sampler: vk.Sampler
@@ -33,12 +31,6 @@ factory_init :: proc() {
   log.infof("All resource pools initialized successfully")
   init_global_samplers()
 
-  g_bindless_bone_buffer, _ = create_host_visible_buffer(
-    linalg.Matrix4f32,
-    MAX_BONE_MATRICES,
-    {.STORAGE_BUFFER},
-    nil,
-  )
   resource.slab_allocator_init(
     &g_bone_matrix_slab,
     {
@@ -53,6 +45,13 @@ factory_init :: proc() {
       // Total size: ~153M bytes for bone matrices
       // This could roughly fit 12000 animated characters with 128 bones each
     },
+  )
+  log.infof("Creating bone matrices array with capacity %d matrices...", g_bone_matrix_slab.capacity)
+  g_bindless_bone_buffer, _ = create_host_visible_buffer(
+    linalg.Matrix4f32,
+    int(g_bone_matrix_slab.capacity),
+    {.STORAGE_BUFFER},
+    nil,
   )
 }
 
