@@ -24,10 +24,10 @@ SingleLightUniform :: struct {
   color:      linalg.Vector4f32, // 16 bytes
   position:   linalg.Vector4f32, // 16 bytes
   direction:  linalg.Vector4f32, // 16 bytes
-  kind:       LightKind,         // 4 bytes
-  angle:      f32,               // 4 bytes (spot light angle)
-  radius:     f32,               // 4 bytes (point/spot light radius)
-  has_shadow: b32,               // 4 bytes
+  kind:       LightKind, // 4 bytes
+  angle:      f32, // 4 bytes (spot light angle)
+  radius:     f32, // 4 bytes (point/spot light radius)
+  has_shadow: b32, // 4 bytes
 }
 
 SceneUniform :: struct {
@@ -73,7 +73,7 @@ SHADER_UNLIT_VERT :: #load("shader/unlit/vert.spv")
 SHADER_UNLIT_FRAG :: #load("shader/unlit/frag.spv")
 
 RendererMain :: struct {
-  frames:                         [MAX_FRAMES_IN_FLIGHT]struct {
+  frames:                       [MAX_FRAMES_IN_FLIGHT]struct {
     camera_uniform:        DataBuffer(SceneUniform),
     light_uniform:         DataBuffer(SceneLightUniform),
     camera_descriptor_set: vk.DescriptorSet,
@@ -81,13 +81,13 @@ RendererMain :: struct {
     shadow_maps:           [MAX_SHADOW_MAPS]ImageBuffer,
     cube_shadow_maps:      [MAX_SHADOW_MAPS]CubeImageBuffer,
   },
-  camera_descriptor_set_layout:   vk.DescriptorSetLayout,
-  pipeline_layout:                vk.PipelineLayout,
-  pipelines:                      [SHADER_VARIANT_COUNT]vk.Pipeline,
-  unlit_pipelines:                [UNLIT_SHADER_VARIANT_COUNT]vk.Pipeline,
-  depth_buffer:                   ImageBuffer,
-  environment_map:                Handle,
-  brdf_lut:                       Handle,
+  camera_descriptor_set_layout: vk.DescriptorSetLayout,
+  pipeline_layout:              vk.PipelineLayout,
+  pipelines:                    [SHADER_VARIANT_COUNT]vk.Pipeline,
+  unlit_pipelines:              [UNLIT_SHADER_VARIANT_COUNT]vk.Pipeline,
+  depth_buffer:                 ImageBuffer,
+  environment_map:              Handle,
+  brdf_lut:                     Handle,
 }
 
 renderer_main_build_pbr_pipeline :: proc(
@@ -574,6 +574,23 @@ renderer_main_render :: proc(
     camera_frustum = camera_frustum,
     rendered_count = &rendered_count,
   }
+  layout := engine.main.pipeline_layout
+  descriptor_sets := [?]vk.DescriptorSet {
+    engine.main.frames[g_frame_index].camera_descriptor_set, // set 0
+    g_bindless_textures, // set 1
+    g_bindless_samplers, // set 2
+    g_bindless_bone_buffer_descriptor_set, // set 3
+  }
+  vk.CmdBindDescriptorSets(
+    command_buffer,
+    .GRAPHICS,
+    layout,
+    0,
+    u32(len(descriptor_sets)),
+    raw_data(descriptor_sets[:]),
+    0,
+    nil,
+  )
   scene_traverse_linear(&engine.scene, &render_meshes_ctx, render_single_node)
   if mu.window(
     &engine.ui.ctx,
@@ -655,6 +672,23 @@ render_to_texture :: proc(
     camera_frustum = camera_frustum,
     rendered_count = &rendered_count,
   }
+  layout := engine.main.pipeline_layout
+  descriptor_sets := [?]vk.DescriptorSet {
+    engine.main.frames[g_frame_index].camera_descriptor_set, // set 0
+    g_bindless_textures, // set 1
+    g_bindless_samplers, // set 2
+    g_bindless_bone_buffer_descriptor_set, // set 3
+  }
+  vk.CmdBindDescriptorSets(
+    command_buffer,
+    .GRAPHICS,
+    layout,
+    0,
+    u32(len(descriptor_sets)),
+    raw_data(descriptor_sets[:]),
+    0,
+    nil,
+  )
   scene_traverse_linear(&engine.scene, &render_meshes_ctx, render_single_node)
   vk.CmdEndRenderingKHR(command_buffer)
   return .SUCCESS
@@ -864,24 +898,7 @@ render_single_node :: proc(node: ^Node, cb_context: rawptr) -> bool {
       return true
     }
     pipeline := renderer_main_get_pipeline(&ctx.engine.main, material)
-    layout := ctx.engine.main.pipeline_layout
-    descriptor_sets := [?]vk.DescriptorSet {
-      ctx.engine.main.frames[g_frame_index].camera_descriptor_set, // set 0
-      g_bindless_textures, // set 1 (bindless)
-      g_bindless_samplers, // set 2 (bindless samplers)
-      g_bindless_bone_buffer_descriptor_set, // set 3
-    }
     vk.CmdBindPipeline(ctx.command_buffer, .GRAPHICS, pipeline)
-    vk.CmdBindDescriptorSets(
-      ctx.command_buffer,
-      .GRAPHICS,
-      layout,
-      0,
-      u32(len(descriptor_sets)),
-      raw_data(descriptor_sets[:]),
-      0,
-      nil,
-    )
     // Push constants for texture indices
     texture_indices: MaterialTextures = {
       albedo_index             = min(MAX_TEXTURES - 1, material.albedo.index),
@@ -910,11 +927,11 @@ render_single_node :: proc(node: ^Node, cb_context: rawptr) -> bool {
     }
     node_skinning, node_has_skin := data.skinning.?
     if node_has_skin {
-      texture_indices.bone_matrix_offset = node_skinning.bone_matrix_offset;
+      texture_indices.bone_matrix_offset = node_skinning.bone_matrix_offset
     }
     vk.CmdPushConstants(
       ctx.command_buffer,
-      layout,
+      ctx.engine.main.pipeline_layout,
       {.VERTEX, .FRAGMENT},
       0,
       size_of(linalg.Matrix4f32),
@@ -922,7 +939,7 @@ render_single_node :: proc(node: ^Node, cb_context: rawptr) -> bool {
     )
     vk.CmdPushConstants(
       ctx.command_buffer,
-      layout,
+      ctx.engine.main.pipeline_layout,
       {.VERTEX, .FRAGMENT},
       size_of(linalg.Matrix4f32),
       size_of(MaterialTextures),
