@@ -1,33 +1,70 @@
 package resource
-// Generic Slab Allocator for fixed-size objects
+
+MAX_SLAB_CLASSES :: 8
 
 SlabAllocator :: struct {
-    capacity: u32,
-    free_list: [dynamic]u32, // stack of free indices
-    next: u32,        // next unallocated index
+  classes:        [MAX_SLAB_CLASSES]struct {
+    block_size:  u32,
+    block_count: u32,
+    // All indices are in the global resource array space
+    free_list:   [dynamic]u32,
+    next:        u32,
+    base:        u32,
+  },
+  total_capacity: u32, // Total number of items managed
 }
 
-slab_allocator_init :: proc(capacity: u32) -> SlabAllocator {
-    return SlabAllocator{
-        capacity = capacity,
-        free_list = make([dynamic]u32, 0),
-        next = 0,
+make_slab_allocator :: proc(config: [MAX_SLAB_CLASSES]struct {
+    block_size, block_count: u32,
+  }) -> SlabAllocator {
+  ret: SlabAllocator
+  base := u32(0)
+  for c, i in config {
+    ret.classes[i] = {
+      block_size  = c.block_size,
+      block_count = c.block_count,
+      free_list   = make([dynamic]u32, 0, c.block_count),
+      next        = base,
+      base        = base,
     }
+    base += c.block_size * c.block_count
+  }
+  ret.total_capacity = base
+  return ret
 }
 
-slab_alloc :: proc(alloc: ^SlabAllocator) -> (index: u32, ok: bool) #optional_ok {
-    idx, found := pop_safe(&alloc.free_list)
+slab_alloc :: proc(
+  self: ^SlabAllocator,
+  count: u32,
+) -> (
+  index: u32,
+  ok: bool,
+) #optional_ok {
+  for &class in self.classes {
+    if class.block_size < count {
+      continue
+    }
+    idx, found := pop_safe(&class.free_list)
     if found {
-        return idx, found
+      return idx, true
     }
-    if alloc.next < alloc.capacity {
-        idx := alloc.next
-        alloc.next += 1
-        return idx, true
+    if class.next < class.block_count {
+      defer class.next += class.block_size
+      return class.next, true
     }
-    return idx, found // out of space
+  }
+  return 0, false
 }
 
-slab_free :: proc(alloc: ^SlabAllocator, index: u32) {
-    append(&alloc.free_list, index)
+slab_free :: proc(self: ^SlabAllocator, index: u32) {
+  for &class in self.classes {
+    if index < class.base {
+      continue
+    }
+    if index >= class.base + class.block_size * class.block_count {
+      break
+    }
+    append(&class.free_list, index)
+    return
+  }
 }
