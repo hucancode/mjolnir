@@ -20,14 +20,14 @@ BG_DARK_GRAY :: [4]f32{0.0117, 0.0117, 0.0117, 1.0}
 BG_ORANGE_GRAY :: [4]f32{0.0179, 0.0179, 0.0117, 1.0}
 
 SingleLightUniform :: struct {
-  view_proj:  linalg.Matrix4f32,
-  color:      linalg.Vector4f32,
-  position:   linalg.Vector4f32,
-  direction:  linalg.Vector4f32,
-  kind:       LightKind,
-  angle:      f32, // For spotlight: cone angle
-  radius:     f32, // For point/spot: attenuation radius
-  has_shadow: b32,
+  view_proj:  linalg.Matrix4f32, // 64 bytes
+  color:      linalg.Vector4f32, // 16 bytes
+  position:   linalg.Vector4f32, // 16 bytes
+  direction:  linalg.Vector4f32, // 16 bytes
+  kind:       LightKind,         // 4 bytes
+  angle:      f32,               // 4 bytes (spot light angle)
+  radius:     f32,               // 4 bytes (point/spot light radius)
+  has_shadow: b32,               // 4 bytes
 }
 
 SceneUniform :: struct {
