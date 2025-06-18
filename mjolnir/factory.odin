@@ -21,6 +21,7 @@ g_materials: resource.Pool(Material)
 g_image_buffers: resource.Pool(ImageBuffer)
 
 g_bindless_bone_buffer: DataBuffer(linalg.Matrix4f32)
+g_bone_matrix_slab: resource.SlabAllocator
 
 factory_init :: proc() {
   log.infof("Initializing mesh pool... ")
@@ -37,6 +38,21 @@ factory_init :: proc() {
     MAX_BONE_MATRICES,
     {.STORAGE_BUFFER},
     nil,
+  )
+  resource.slab_allocator_init(
+    &g_bone_matrix_slab,
+    {
+      {32, 64},    // 64 bytes * 32   bones * 64   blocks = 128K bytes
+      {64, 128},   // 64 bytes * 64   bones * 128  blocks = 512K bytes
+      {128, 8192}, // 64 bytes * 128  bones * 8192 blocks = 64M bytes
+      {256, 4096}, // 64 bytes * 256  bones * 4096 blocks = 64M bytes
+      {512, 256},  // 64 bytes * 512  bones * 256  blocks = 8M bytes
+      {1024, 128}, // 64 bytes * 1024 bones * 256  blocks = 8M bytes
+      {2048, 32},  // 64 bytes * 2048 bones * 32   blocks = 4M bytes
+      {4096, 16},  // 64 bytes * 4096 bones * 16   blocks = 4M bytes
+      // Total size: ~153M bytes for bone matrices
+      // This could roughly fit 12000 animated characters with 128 bones each
+    },
   )
 }
 

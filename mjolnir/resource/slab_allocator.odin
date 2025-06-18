@@ -14,13 +14,12 @@ SlabAllocator :: struct {
   capacity: u32,
 }
 
-make_slab_allocator :: proc(config: [MAX_SLAB_CLASSES]struct {
+slab_allocator_init :: proc(self: ^SlabAllocator, config: [MAX_SLAB_CLASSES]struct {
     block_size, block_count: u32,
-  }) -> SlabAllocator {
-  ret: SlabAllocator
+  }) {
   base := u32(0)
   for c, i in config {
-    ret.classes[i] = {
+    self.classes[i] = {
       block_size  = c.block_size,
       block_count = c.block_count,
       free_list   = make([dynamic]u32, 0, c.block_count),
@@ -29,8 +28,7 @@ make_slab_allocator :: proc(config: [MAX_SLAB_CLASSES]struct {
     }
     base += c.block_size * c.block_count
   }
-  ret.capacity = base
-  return ret
+  self.capacity = base
 }
 
 slab_alloc :: proc(
