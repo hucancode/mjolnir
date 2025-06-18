@@ -19,6 +19,14 @@ BG_BLUE_GRAY :: [4]f32{0.0117, 0.0117, 0.0179, 1.0}
 BG_DARK_GRAY :: [4]f32{0.0117, 0.0117, 0.0117, 1.0}
 BG_ORANGE_GRAY :: [4]f32{0.0179, 0.0179, 0.0117, 1.0}
 
+PushConstant :: struct {
+    world: linalg.Matrix4f32,
+    using textures: MaterialTextures,
+    metallic_value: f32,
+    roughness_value: f32,
+    padding: [2]f32, // Padding for 16-byte alignment
+}
+
 SingleLightUniform :: struct {
   view_proj:  linalg.Matrix4f32, // 64 bytes
   color:      linalg.Vector4f32, // 16 bytes
@@ -213,13 +221,7 @@ renderer_main_build_pbr_pipeline :: proc(
     {
       stageFlags = {.VERTEX, .FRAGMENT},
       offset = 0,
-      size = size_of(linalg.Matrix4f32),
-    },
-    // Texture indices for fragment shader
-    {
-      stageFlags = {.VERTEX, .FRAGMENT},
-      offset = size_of(linalg.Matrix4f32),
-      size = size_of(MaterialTextures),
+      size = size_of(PushConstant),
     },
   }
   vk.CreatePipelineLayout(
@@ -929,21 +931,19 @@ render_single_node :: proc(node: ^Node, cb_context: rawptr) -> bool {
     if node_has_skin {
       texture_indices.bone_matrix_offset = node_skinning.bone_matrix_offset
     }
+    push_constant := PushConstant{
+        world = node.transform.world_matrix,
+        textures = texture_indices,
+        metallic_value = material.metallic_value,
+        roughness_value = material.roughness_value,
+    }
     vk.CmdPushConstants(
       ctx.command_buffer,
       ctx.engine.main.pipeline_layout,
       {.VERTEX, .FRAGMENT},
       0,
-      size_of(linalg.Matrix4f32),
-      &node.transform.world_matrix,
-    )
-    vk.CmdPushConstants(
-      ctx.command_buffer,
-      ctx.engine.main.pipeline_layout,
-      {.VERTEX, .FRAGMENT},
-      size_of(linalg.Matrix4f32),
-      size_of(MaterialTextures),
-      &texture_indices,
+      size_of(PushConstant),
+      &push_constant,
     )
     offset: vk.DeviceSize = 0
     vk.CmdBindVertexBuffers(
