@@ -3,7 +3,7 @@ package resource
 MAX_SLAB_CLASSES :: 8
 
 SlabAllocator :: struct {
-  classes:        [MAX_SLAB_CLASSES]struct {
+  classes:  [MAX_SLAB_CLASSES]struct {
     block_size:  u32,
     block_count: u32,
     // All indices are in the global resource array space
@@ -14,9 +14,12 @@ SlabAllocator :: struct {
   capacity: u32,
 }
 
-slab_allocator_init :: proc(self: ^SlabAllocator, config: [MAX_SLAB_CLASSES]struct {
+slab_allocator_init :: proc(
+  self: ^SlabAllocator,
+  config: [MAX_SLAB_CLASSES]struct {
     block_size, block_count: u32,
-  }) {
+  },
+) {
   base := u32(0)
   for c, i in config {
     self.classes[i] = {
@@ -42,10 +45,7 @@ slab_alloc :: proc(
   index: u32,
   ok: bool,
 ) #optional_ok {
-  for &class in self.classes {
-    if class.block_size < count {
-      continue
-    }
+  for &class in self.classes do if class.block_size >= count {
     idx, found := pop_safe(&class.free_list)
     if found {
       return idx, true
@@ -59,14 +59,11 @@ slab_alloc :: proc(
 }
 
 slab_free :: proc(self: ^SlabAllocator, index: u32) {
-  for &class in self.classes {
-    if index < class.base {
-      continue
-    }
+  for &class in self.classes do if index >= class.base {
     if index >= class.base + class.block_size * class.block_count {
       break
     }
     append(&class.free_list, index)
-    return
+    break
   }
 }

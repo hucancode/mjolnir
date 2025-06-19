@@ -152,6 +152,7 @@ loop_through_unallocated_slice :: proc(t: ^testing.T) {
   for x in arr do testing.fail_now(t)
   arr = nil
   for x in arr do testing.fail_now(t)
+  for i in 1..<len(arr) do testing.fail_now(t)
 }
 
 // @(test)

@@ -407,8 +407,8 @@ load_gltf_skinned_primitive :: proc(
   geometry_data: geometry.Geometry,
   engine_bones: []Bone,
   mat_handle: resource.Handle,
-  root_bone_idx: u32,// TODO: too many return values, consider refactor this
-  ret: vk.Result,
+  root_bone_idx: u32,
+  ret: vk.Result,// TODO: too many return values, consider refactor this
 ) {
   primitives := gltf_mesh.primitives
   if len(primitives) == 0 {
@@ -620,13 +620,10 @@ load_gltf_animations :: proc(
       }
       n := gltf_channel.sampler.input.count
       // note: if this get slow, consider using a hash map
-      bone_idx, bone_found := slice.linear_search(
+      bone_idx := slice.linear_search(
         gltf_skin.joints,
         gltf_channel.target_node,
-      )
-      if !bone_found {
-        continue
-      }
+      ) or_continue
       engine_channel := &clip.channels[bone_idx]
       time_data := unpack_accessor_floats_flat(gltf_channel.sampler.input)
       // defer free(time_data)

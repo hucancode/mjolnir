@@ -244,10 +244,8 @@ create_material :: proc(
   normal_handle: Handle = {},
   displacement_handle: Handle = {},
   emissive_handle: Handle = {},
-  albedo_value: linalg.Vector4f32 = {1, 1, 1, 1},
   metallic_value: f32 = 0.0,
   roughness_value: f32 = 1.0,
-  emissive_value: linalg.Vector4f32 = {},
 ) -> (
   ret: Handle,
   mat: ^Material,
@@ -262,10 +260,8 @@ create_material :: proc(
   mat.normal = normal_handle
   mat.displacement = displacement_handle
   mat.emissive = emissive_handle
-  mat.albedo_value = albedo_value
   mat.metallic_value = metallic_value
   mat.roughness_value = roughness_value
-  mat.emissive_value = emissive_value
   log.infof(
     "Material created: albedo=%d metallic_roughness=%d normal=%d displacement=%d emissive=%d",
     mat.albedo.index,
@@ -281,7 +277,6 @@ create_material :: proc(
 create_unlit_material :: proc(
   features: ShaderFeatureSet = {},
   albedo_handle: Handle = {},
-  albedo_value: linalg.Vector4f32 = {1, 1, 1, 1},
 ) -> (
   ret: Handle,
   mat: ^Material,
@@ -291,7 +286,6 @@ create_unlit_material :: proc(
   mat.is_lit = false
   mat.features = features
   mat.albedo = albedo_handle
-  mat.albedo_value = albedo_value
   albedo := resource.get(g_image_buffers, albedo_handle)
   res = .SUCCESS
   return

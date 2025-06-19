@@ -240,10 +240,7 @@ renderer_shadow_begin :: proc(
   command_buffer: vk.CommandBuffer,
 ) {
   // Transition all shadow maps to depth attachment optimal
-  for light in engine.visible_lights[g_frame_index] {
-    if !light.has_shadow {
-      continue
-    }
+  for light in engine.visible_lights[g_frame_index] do if light.has_shadow {
     initial_barriers := [?]vk.ImageMemoryBarrier {
       {
         sType = .IMAGE_MEMORY_BARRIER,
@@ -298,10 +295,7 @@ renderer_shadow_render :: proc(
   command_buffer: vk.CommandBuffer,
 ) {
   lights := &engine.visible_lights[g_frame_index]
-  for light, i in lights {
-    if !light.has_shadow {
-      continue
-    }
+  for light, i in lights do if light.has_shadow {
     if light.kind == .POINT {
       cube_shadow := light.cube_shadow_map
       light_pos := light.position.xyz
@@ -442,10 +436,7 @@ renderer_shadow_end :: proc(
   command_buffer: vk.CommandBuffer,
 ) {
   // Transition all shadow maps to shader read optimal
-  for light in &engine.visible_lights[g_frame_index] {
-    if !light.has_shadow {
-      continue
-    }
+  for light in &engine.visible_lights[g_frame_index] do if light.has_shadow {
     final_barriers := [?]vk.ImageMemoryBarrier {
       {
         sType = .IMAGE_MEMORY_BARRIER,

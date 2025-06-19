@@ -24,8 +24,6 @@ Material :: struct {
   normal:                   Handle,
   displacement:             Handle,
   emissive:                 Handle,
-  albedo_value:             linalg.Vector4f32,
   metallic_value:           f32,
   roughness_value:          f32,
-  emissive_value:           linalg.Vector4f32,
 }

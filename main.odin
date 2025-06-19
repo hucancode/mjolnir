@@ -87,10 +87,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     gltf_nodes := load_gltf(engine, "assets/Suzanne.glb") or_else {}
     log.infof("Loaded GLTF nodes: %v", gltf_nodes)
     for handle in gltf_nodes {
-      duck, found := resource.get(engine.scene.nodes, handle)
-      if !found {
-        continue
-      }
+      duck := resource.get(engine.scene.nodes, handle) or_continue
       translate(&duck.transform, 0, 2, -2)
     }
   }
@@ -99,10 +96,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     gltf_nodes := load_gltf(engine, "assets/DamagedHelmet.glb") or_else {}
     log.infof("Loaded GLTF nodes: %v", gltf_nodes)
     for handle in gltf_nodes {
-      helm, found := resource.get(engine.scene.nodes, handle)
-      if !found {
-        continue
-      }
+      helm := resource.get(engine.scene.nodes, handle) or_continue
       translate(&helm.transform, 0, 1, 2)
       scale(&helm.transform, 0.5)
     }
@@ -112,16 +106,10 @@ setup :: proc(engine: ^mjolnir.Engine) {
     gltf_nodes := load_gltf(engine, "assets/Warrior.glb") or_else {}
     log.infof("Loaded GLTF nodes: %v", gltf_nodes)
     for armature in gltf_nodes {
-      armature_ptr, found := resource.get(engine.scene.nodes, armature)
-      if !found || len(armature_ptr.children) == 0 {
-        continue
-      }
+      armature_ptr := resource.get(engine.scene.nodes, armature) or_continue
       for i in 1 ..< len(armature_ptr.children) {
         skeleton := armature_ptr.children[i]
-        skeleton_ptr, found := resource.get(engine.scene.nodes, skeleton)
-        if !found {
-          continue
-        }
+        skeleton_ptr := resource.get(engine.scene.nodes, skeleton) or_continue
         // skeleton_ptr.transform.scale = {0.5, 0.5, 0.5}
         play_animation(engine, skeleton, "idle")
       }

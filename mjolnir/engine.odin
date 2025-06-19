@@ -262,10 +262,7 @@ update :: proc(self: ^Engine) -> bool {
       continue
     }
     animation.instance_update(anim_inst, delta_time)
-    mesh, found := resource.get(g_meshes, data.handle)
-    if !found {
-      continue
-    }
+    mesh := resource.get(g_meshes, data.handle) or_continue
     mesh_skin, mesh_has_skin := mesh.skinning.?
     if !mesh_has_skin {
       continue
