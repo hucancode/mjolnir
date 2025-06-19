@@ -181,6 +181,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
     color_end = {0, 0, 1, 0},
     size_start = 300.0,
     size_end = 100.0,
+    weight = 0.2,
+    weight_spread = 0.2,
     enabled = true,
   }
   add_emitter(&engine.particle, emitter)

@@ -2,6 +2,8 @@ package mjolnir
 
 import "core:log"
 import linalg "core:math/linalg"
+import "core:math/rand"
+import "core:slice"
 import "geometry"
 import vk "vendor:vulkan"
 
@@ -9,6 +11,7 @@ Emitter :: struct {
   transform:         geometry.Transform,
   emission_rate:     f32,
   particle_lifetime: f32,
+  position_spread:   f32,
   velocity_spread:   f32,
   time_accumulator:  f32,
   initial_velocity:  linalg.Vector4f32,
@@ -17,7 +20,9 @@ Emitter :: struct {
   size_start:        f32,
   size_end:          f32,
   enabled:           b32,
-  padding:           f32,
+  weight:            f32,
+  weight_spread:     f32,
+  padding:           [3]f32,
 }
 
 MAX_EMITTERS :: 64
@@ -34,6 +39,8 @@ Particle :: struct {
   life:        f32,
   max_life:    f32,
   is_dead:     b32,
+  weight:      f32,
+  padding:     [3]f32,
 }
 
 ParticleSystemParams :: struct {
@@ -191,17 +198,19 @@ add_emitter :: proc(self: ^RendererParticle, emitter: Emitter) -> vk.Result {
 update_emitters :: proc(self: ^RendererParticle, delta_time: f32) {
   params := data_buffer_get(&self.params_buffer)
   params.delta_time = delta_time
-  emitters := self.emitter_buffer.mapped
-  particles := self.particle_buffer.mapped
-  for i in 0 ..< MAX_PARTICLES {
-    if particles[i].life <= 0 && !particles[i].is_dead {
+  emitters := slice.from_ptr(
+    self.emitter_buffer.mapped,
+    int(params.emitter_count),
+  )
+  particles := slice.from_ptr(self.particle_buffer.mapped, MAX_PARTICLES)
+  for &particle, i in particles {
+    if particle.life <= 0 && !particle.is_dead {
       append(&self.free_particle_indices, i)
-      particles[i].is_dead = true
+      particle.is_dead = true
     }
   }
   // For each emitter, spawn as many particles as needed
-  for e in 0 ..< params.emitter_count {
-    emitter := &emitters[e]
+  for &emitter in emitters {
     if !emitter.enabled do continue
     emitter.time_accumulator += delta_time
     emission_interval := 1.0 / emitter.emission_rate
@@ -211,19 +220,37 @@ update_emitters :: proc(self: ^RendererParticle, delta_time: f32) {
         break
       }
       particles[idx].is_dead = false
-      particles[idx].position = {
-        emitter.transform.position.x,
-        emitter.transform.position.y,
-        emitter.transform.position.z,
-        1.0,
-      }
-      particles[idx].velocity = emitter.initial_velocity
+      particles[idx].position.xyz =
+        emitter.transform.position +
+        {
+            rand.float32() * emitter.position_spread * 2.0 -
+            emitter.position_spread,
+            rand.float32() * emitter.position_spread * 2.0 -
+            emitter.position_spread,
+            rand.float32() * emitter.position_spread * 2.0 -
+            emitter.position_spread,
+          }
+      particles[idx].position.w = 1.0
+      particles[idx].velocity =
+        emitter.initial_velocity +
+        {
+            rand.float32() * emitter.velocity_spread * 2.0 -
+            emitter.velocity_spread,
+            rand.float32() * emitter.velocity_spread * 2.0 -
+            emitter.velocity_spread,
+            rand.float32() * emitter.velocity_spread * 2.0 -
+            emitter.velocity_spread,
+            0.0,
+          }
       particles[idx].life = emitter.particle_lifetime
       particles[idx].max_life = emitter.particle_lifetime
       particles[idx].color_start = emitter.color_start
       particles[idx].color_end = emitter.color_end
       particles[idx].color = emitter.color_start
       particles[idx].size = emitter.size_start
+      particles[idx].weight =
+        emitter.weight +
+        (rand.float32() * emitter.weight_spread * 2.0 - emitter.weight_spread)
       emitter.time_accumulator -= emission_interval
     }
   }
