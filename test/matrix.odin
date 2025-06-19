@@ -20,27 +20,6 @@ matrix4_almost_equal :: proc(t: ^testing.T, actual, expected: linalg.Matrix4f32)
 }
 
 @(test)
-matrix_multiply_vector :: proc(t: ^testing.T) {
-  v := [4]f32{0, 0, 0, 1}
-  m := linalg.matrix4_translate_f32({1, 2, 3})
-  testing.expect_value(t, m * v, linalg.Vector4f32{1, 2, 3, 1})
-}
-
-@(test)
-matrix_extract_decompose :: proc(t: ^testing.T) {
-  translation := [4]f32{1, 2, 3, 1}
-  m := linalg.matrix4_translate_f32({1, 2, 3})
-  testing.expect_value(t, m[3], translation)
-  m = linalg.matrix4_scale_f32({2, 3, 4})
-  sx := linalg.length(m[0])
-  sy := linalg.length(m[1])
-  sz := linalg.length(m[2])
-  testing.expect_value(t, sx, 2)
-  testing.expect_value(t, sy, 3)
-  testing.expect_value(t, sz, 4)
-}
-
-@(test)
 matrix_from_array :: proc(t: ^testing.T) {
   a := [16]f32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
   m := geometry.matrix_from_arr(a)

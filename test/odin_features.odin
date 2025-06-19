@@ -1,0 +1,244 @@
+package tests
+import "base:intrinsics"
+import "core:log"
+import linalg "core:math/linalg"
+import "core:mem"
+import "core:simd"
+import "core:slice"
+import "core:testing"
+import "core:time"
+
+// This test file demonstrates various features of Odin
+// It does not test any functionality
+
+// @(test)
+test_bitset_int_conversion :: proc(t: ^testing.T) {
+  Features :: enum {
+    SKINNING,
+    SHADOWS,
+    REFLECTIONS,
+  }
+  FeatureSet :: bit_set[Features;u32]
+  // bit_set to u32
+  features := FeatureSet{.SHADOWS, .SKINNING}
+  testing.expect_value(t, transmute(u32)features, 0b11)
+  // u32 to bit_set
+  mask: u32 = 0b11
+  testing.expect_value(
+    t,
+    transmute(FeatureSet)mask,
+    FeatureSet{.SHADOWS, .SKINNING},
+  )
+  testing.expect_value(t, len(Features), 3)
+}
+
+// @(test)
+dot_product_benchmark :: proc(t: ^testing.T) {
+  dot_product_scalar :: proc(a, b: []f32) -> f32 {
+    sum: f32 = 0
+    for i in 0 ..< len(a) do sum += a[i] * b[i]
+    return sum
+  }
+
+  dot_product_simd :: proc(a, b: []f32) -> f32 {
+    a := a
+    b := b
+    // some CPU don't support this high, adjust the WIDTH accordingly
+    WIDTH :: 64
+    count := len(a) / WIDTH
+    sum_v: #simd[WIDTH]f32
+    for i in 0 ..< count {
+      chunk_a_ptr := cast(^#simd[WIDTH]f32)raw_data(a[WIDTH:])
+      chunk_b_ptr := cast(^#simd[WIDTH]f32)raw_data(b[WIDTH:])
+      chunk_a := intrinsics.unaligned_load(chunk_a_ptr)
+      chunk_b := intrinsics.unaligned_load(chunk_b_ptr)
+      sum_v += chunk_a * chunk_b
+      a = a[WIDTH:]
+      b = b[WIDTH:]
+    }
+    sum := simd.reduce_add_ordered(sum_v)
+    for i in 0 ..< len(a) do sum += a[i] * b[i]
+    return sum
+  }
+
+  N :: 10_000_000
+  ROUNDS :: 10
+  setup :: proc(
+    options: ^time.Benchmark_Options,
+    allocator := context.allocator,
+  ) -> time.Benchmark_Error {
+    data := make([]f32, N * 2)
+    for i in 0 ..< N {
+      data[i] = f32(i)
+      data[i + N] = f32(N - i)
+    }
+    options.input = slice.to_bytes(data)
+    return nil
+  }
+  teardown :: proc(
+    options: ^time.Benchmark_Options,
+    allocator := context.allocator,
+  ) -> time.Benchmark_Error {
+    delete(options.input)
+    return nil
+  }
+  scalar_opts := &time.Benchmark_Options {
+    rounds = ROUNDS,
+    bytes = size_of(f32) * N * ROUNDS,
+    setup = setup,
+    bench = proc(
+      options: ^time.Benchmark_Options,
+      allocator := context.allocator,
+    ) -> time.Benchmark_Error {
+      input_f32 := slice.reinterpret([]f32, options.input)
+      a := input_f32[:N]
+      b := input_f32[N:]
+      for _ in 0 ..< options.rounds {
+        _ = dot_product_scalar(a, b)
+        options.processed += slice.size(a)
+      }
+      return nil
+    },
+    teardown = teardown,
+  }
+  _ = time.benchmark(scalar_opts)
+  log.infof(
+    "[SCALAR] Time: %v  Speed: %.2f MB/s",
+    scalar_opts.duration,
+    scalar_opts.megabytes_per_second,
+  )
+  simd_opts := &time.Benchmark_Options {
+    rounds = ROUNDS,
+    bytes = size_of(f32) * N * ROUNDS,
+    setup = setup,
+    bench = proc(
+      options: ^time.Benchmark_Options,
+      allocator := context.allocator,
+    ) -> time.Benchmark_Error {
+      input_f32 := slice.reinterpret([]f32, options.input)
+      a := input_f32[:N]
+      b := input_f32[N:]
+      for _ in 0 ..< options.rounds {
+        _ = dot_product_simd(a, b)
+        options.processed += slice.size(a)
+      }
+      return nil
+    },
+    teardown = teardown,
+  }
+  _ = time.benchmark(simd_opts)
+  log.infof(
+    "[SIMD] Time: %v  Speed: %.2f MB/s",
+    simd_opts.duration,
+    simd_opts.megabytes_per_second,
+  )
+  log.infof(
+    "SIMD speed up %.2f%%",
+    simd_opts.megabytes_per_second / scalar_opts.megabytes_per_second * 100,
+  )
+}
+
+// @(test)
+delete_unallocated_slice :: proc(t: ^testing.T) {
+  arr: []u32
+  delete(arr)
+  arr = nil
+  delete(arr)
+}
+
+// @(test)
+loop_through_unallocated_slice :: proc(t: ^testing.T) {
+  arr: []u32
+  for x in arr do testing.fail_now(t)
+  arr = nil
+  for x in arr do testing.fail_now(t)
+}
+
+// @(test)
+copy_to_unallocated_slice :: proc(t: ^testing.T) {
+  src: []u32 = {1, 2, 3}
+  dst: []u32
+  mem.copy(raw_data(dst), raw_data(src), min(len(src), len(dst)))
+  testing.expect_value(t, len(dst), 0)
+}
+
+// @(test)
+copy_from_unallocated_slice :: proc(t: ^testing.T) {
+  src: []u32
+  dst: []u32 = {1, 2, 3}
+  mem.copy(raw_data(dst), raw_data(src), min(len(src), len(dst)))
+  testing.expect_value(t, dst[0], 1)
+  testing.expect_value(t, dst[1], 2)
+  testing.expect_value(t, dst[2], 3)
+}
+
+// @(test)
+get_pixel_data :: proc(t: ^testing.T) {
+  n := 100
+  float_pixels := make([]f32, n)
+  defer delete(float_pixels)
+  ptr := cast([^]u8)raw_data(float_pixels)
+  data := ptr[:n * size_of(f32)]
+  testing.expect_value(t, len(data), len(float_pixels) * size_of(f32))
+  data = slice.to_bytes(float_pixels)
+  testing.expect_value(t, len(data), len(float_pixels) * size_of(f32))
+}
+
+// @(test)
+for_loop_reference_benchmark :: proc(t: ^testing.T) {
+  n := 1e9
+  options := &time.Benchmark_Options {
+    rounds = n,
+    bytes = size_of(f32) * 16 * n,
+    setup = proc(
+      options: ^time.Benchmark_Options,
+      allocator := context.allocator,
+    ) -> time.Benchmark_Error {
+      a := [16]u32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
+      arr := [1000][16]u32{}
+      slice.fill(arr[:], a)
+      options.input = slice.to_bytes(arr[:])
+      return nil
+    },
+    bench = proc(
+      options: ^time.Benchmark_Options,
+      allocator := context.allocator,
+    ) -> time.Benchmark_Error {
+      arr := slice.to_type(options.input, [1000][16]u32)
+      k: u32
+      // same result for both case, there is no copy involved when loop by value or loop by reference
+      // for a in arr do for x in a do k += (k + x)%1000
+      // for &a in arr do for x in a do k += (k + x)%1000
+      for a in arr do for x in a do k += (k + x) % 1000
+      options.processed += size_of([16]u32) * len(arr)
+      return nil
+    },
+  }
+  err := time.benchmark(options)
+  log.infof(
+    "Benchmark finished in %v, speed: %0.2f MB/s",
+    options.duration,
+    options.megabytes_per_second,
+  )
+}
+
+// @(test)
+matrix_multiply_vector :: proc(t: ^testing.T) {
+  v := [4]f32{0, 0, 0, 1}
+  m := linalg.matrix4_translate_f32({1, 2, 3})
+  testing.expect_value(t, m * v, linalg.Vector4f32{1, 2, 3, 1})
+}
+
+// @(test)
+matrix_extract_decompose :: proc(t: ^testing.T) {
+  translation := [4]f32{1, 2, 3, 1}
+  m := linalg.matrix4_translate_f32({1, 2, 3})
+  testing.expect_value(t, m[3], translation)
+  m = linalg.matrix4_scale_f32({2, 3, 4})
+  sx := linalg.length(m[0])
+  sy := linalg.length(m[1])
+  sz := linalg.length(m[2])
+  testing.expect_value(t, sx, 2)
+  testing.expect_value(t, sy, 3)
+  testing.expect_value(t, sz, 4)
+}
