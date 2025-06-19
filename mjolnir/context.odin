@@ -115,24 +115,22 @@ debug_callback :: proc "system" (
   message := string(p_callback_data.pMessage)
   switch {
   case .ERROR in message_severity:
-    log.infof("Validation: %s", message)
+    log.errorf("Validation: %s", message)
   case .WARNING in message_severity:
-    log.infof("Validation: %s", message)
+    log.warnf("Validation: %s", message)
   case .INFO in message_severity:
     log.infof("Validation: %s", message)
   case .VERBOSE in message_severity:
     log.debugf("Validation: %s", message)
   case:
-    log.infof("Validation (unknown severity): %s", message)
+    log.infof("Validation: %s", message)
   }
   return false
 }
 
 vulkan_instance_init :: proc() -> vk.Result {
-  glfw_exts_cstrings := glfw.GetRequiredInstanceExtensions()
-  extensions := make([dynamic]cstring, 0, len(glfw_exts_cstrings) + 2)
+  extensions := slice.clone_to_dynamic(glfw.GetRequiredInstanceExtensions())
   defer delete(extensions)
-  for ext in glfw_exts_cstrings do append(&extensions, ext)
   app_info := vk.ApplicationInfo {
     sType              = .APPLICATION_INFO,
     pApplicationName   = TITLE,
