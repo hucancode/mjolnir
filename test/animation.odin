@@ -160,7 +160,7 @@ test_quaternion_sampling :: proc(t: ^testing.T) {
 @(test)
 animation_sample_benchmark :: proc(t: ^testing.T) {
   n := 1e6
-  FRAME_COUNT :: 1e7
+  FRAME_COUNT :: 1e6
   DURATION :: 10.0
   Transform :: struct {
     position: linalg.Vector4f32,

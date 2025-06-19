@@ -108,7 +108,6 @@ benchmark_resource_pool_read :: proc(t: ^testing.T) {
         sum += d.value
         options.processed += size_of(TestData)
       }
-      log.infof("Sum: %d", sum)
       return nil
     },
     teardown = proc(
@@ -155,7 +154,6 @@ benchmark_resource_pool_read :: proc(t: ^testing.T) {
         sum += data.pool[idx].value
         options.processed += size_of(TestData)
       }
-      log.infof("Sum: %d", sum)
       return nil
     },
     teardown = proc(
@@ -170,19 +168,13 @@ benchmark_resource_pool_read :: proc(t: ^testing.T) {
     },
   }
   _ = time.benchmark(resource_pool_opts)
-  log.infof(
-    "[RESOURCE POOL] Time: %v  Speed: %.2f MB/s",
-    resource_pool_opts.duration,
-    resource_pool_opts.megabytes_per_second,
-  )
   _ = time.benchmark(pointer_array_opts)
   log.infof(
-    "[NORMAL POINTER] Time: %v  Speed: %.2f MB/s",
+    "[RESOURCE POOL] Time: %v  Speed: %.2f MB/s\n[NORMAL POINTER] Time: %v  Speed: %.2f MB/s\nResource pool slowed down: %.2f%%",
+    resource_pool_opts.duration,
+    resource_pool_opts.megabytes_per_second,
     pointer_array_opts.duration,
     pointer_array_opts.megabytes_per_second,
-  )
-  log.infof(
-    "Resource pool slowed down: %.2f%%",
     (1.0 -
       resource_pool_opts.megabytes_per_second /
         pointer_array_opts.megabytes_per_second) *
@@ -298,19 +290,13 @@ benchmark_resource_pool_write :: proc(t: ^testing.T) {
     },
   }
   _ = time.benchmark(resource_pool_opts)
-  log.infof(
-    "[RESOURCE POOL] Time: %v  Speed: %.2f MB/s",
-    resource_pool_opts.duration,
-    resource_pool_opts.megabytes_per_second,
-  )
   _ = time.benchmark(pointer_array_opts)
   log.infof(
-    "[NORMAL POINTER] Time: %v  Speed: %.2f MB/s",
+    "[RESOURCE POOL] Time: %v  Speed: %.2f MB/s\n[NORMAL POINTER] Time: %v  Speed: %.2f MB/s\nResource pool speed up: %.2f%%",
+    resource_pool_opts.duration,
+    resource_pool_opts.megabytes_per_second,
     pointer_array_opts.duration,
     pointer_array_opts.megabytes_per_second,
-  )
-  log.infof(
-    "Resource pool speed up: %.2f%%",
     (resource_pool_opts.megabytes_per_second /
       pointer_array_opts.megabytes_per_second) *
     100,

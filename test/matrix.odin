@@ -31,7 +31,7 @@ matrix_from_array :: proc(t: ^testing.T) {
 
 @(test)
 matrix_from_array_benchmark :: proc(t: ^testing.T) {
-  n := 1e7
+  n := 1e6
   options := &time.Benchmark_Options {
     rounds = n,
     bytes = size_of([16]f32) * n,

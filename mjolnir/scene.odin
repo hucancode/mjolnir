@@ -220,7 +220,7 @@ scene_init :: proc(self: ^Scene) {
     0.01, // near
     100.0, // far
   )
-  log.infof("Initializing nodes pool... ")
+  // log.infof("Initializing nodes pool... ")
   resource.pool_init(&self.nodes)
   root: ^Node
   self.root, root = resource.alloc(&self.nodes)
