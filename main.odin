@@ -1,12 +1,14 @@
 package main
 
 import "core:log"
+import "core:fmt"
 import "core:math"
 import linalg "core:math/linalg"
 import "mjolnir"
 import "mjolnir/geometry"
 import "mjolnir/resource"
 import glfw "vendor:glfw"
+import mu "vendor:microui"
 
 LIGHT_COUNT :: 3
 light_handles: [LIGHT_COUNT]mjolnir.Handle
@@ -18,6 +20,7 @@ main :: proc() {
   context.logger = log.create_console_logger()
   engine.setup_proc = setup
   engine.update_proc = update
+  engine.render2d_proc = render_2d
   engine.key_press_proc = on_key_pressed
   mjolnir.run(&engine, 1280, 720, "Mjolnir Odin")
 }
@@ -169,14 +172,15 @@ setup :: proc(engine: ^mjolnir.Engine) {
   effect_add_grayscale(&engine.postprocess, 0.3)
   emitter := mjolnir.Emitter {
     transform = geometry.Transform {
-      position = {0, 3, 3},
+      position = {0, 1.9, 0.3},
       rotation = linalg.QUATERNIONF32_IDENTITY,
       scale = {1, 1, 1},
     },
     emission_rate = 10,
     particle_lifetime = 5.0,
+    position_spread = 0.05,
     initial_velocity = {0, -0.1, 0, 0},
-    velocity_spread = 0.5,
+    velocity_spread = 0.1,
     color_start = {1, 0, 0, 1},
     color_end = {0, 0, 1, 0},
     size_start = 300.0,
@@ -187,6 +191,15 @@ setup :: proc(engine: ^mjolnir.Engine) {
   }
   add_emitter(&engine.particle, emitter)
   log.info("setup complete")
+}
+
+render_2d :: proc(engine: ^mjolnir.Engine, ctx: ^mu.Context) {
+  using mjolnir
+  if mu.window(ctx, "Particle System", {40, 360, 300, 150}, {.NO_CLOSE}) {
+    active, free, total := get_particle_pool_stats(&engine.particle)
+    mu.label(ctx, fmt.tprintf("Active %d", active))
+    mu.label(ctx, fmt.tprintf("Total %d", total))
+  }
 }
 
 update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {

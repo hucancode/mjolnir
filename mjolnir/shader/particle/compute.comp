@@ -10,17 +10,19 @@ struct Particle {
     vec4 color_end;
     vec4 color;
     float size;
+    float size_end;
     float life;
     float max_life;
     uint is_dead;
     float weight;
-    float padding[3];
+    float padding[2];
 };
 
 struct Emitter {
     mat4 transform;
     float emission_rate;
     float particle_lifetime;
+    float position_spread;
     float velocity_spread;
     float time_accumulator;
     vec4 initial_velocity;
@@ -75,12 +77,28 @@ const vec3 GRAVITY = vec3(0.0, -9.8, 0.0);
 
 void main() {
     uint i = gl_GlobalInvocationID.x;
-    if (i >= min(particle_count, MAX_PARTICLES)) return;
+    if (i >= MAX_PARTICLES) return;
+
+    // Skip dead particles - they don't need processing
+    if (particles[i].is_dead != 0) return;
+
     if (particles[i].life > 0.0) {
+        // Update particle physics
         particles[i].velocity.xyz += GRAVITY * particles[i].weight * deltaTime;
         particles[i].position += particles[i].velocity * deltaTime;
         particles[i].life -= deltaTime;
+
+        // Update particle color based on life ratio
         float life_ratio = particles[i].life / particles[i].max_life;
         particles[i].color = mix(particles[i].color_end, particles[i].color_start, life_ratio);
+
+        // Update particle size based on life ratio (interpolate from size to size_end)
+        particles[i].size = mix(particles[i].size_end, particles[i].size, life_ratio);
+
+        // Mark particle as dead if life is exhausted
+        if (particles[i].life <= 0.0) {
+            particles[i].is_dead = 1;
+            particles[i].life = 0.0;
+        }
     }
 }

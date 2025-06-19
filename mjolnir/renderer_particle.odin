@@ -36,11 +36,12 @@ Particle :: struct {
   color_end:   linalg.Vector4f32,
   color:       linalg.Vector4f32,
   size:        f32,
+  size_end:    f32,
   life:        f32,
   max_life:    f32,
   is_dead:     b32,
   weight:      f32,
-  padding:     [3]f32,
+  padding:     [2]f32,
 }
 
 ParticleSystemParams :: struct {
@@ -59,13 +60,79 @@ RendererParticle :: struct {
   compute_descriptor_set:        vk.DescriptorSet,
   compute_pipeline_layout:       vk.PipelineLayout,
   compute_pipeline:              vk.Pipeline,
+  // Particle pool management
   free_particle_indices:         [dynamic]int,
+  active_particle_count:         u32,
   // Render pipeline
   render_descriptor_set_layout:  vk.DescriptorSetLayout,
   render_descriptor_set:         vk.DescriptorSet,
   render_pipeline_layout:        vk.PipelineLayout,
   render_pipeline:               vk.Pipeline,
   particle_texture:              ^ImageBuffer,
+}
+
+initialize_particle_pool :: proc(self: ^RendererParticle) {
+  particles := slice.from_ptr(self.particle_buffer.mapped, MAX_PARTICLES)
+  clear(&self.free_particle_indices)
+  reserve(&self.free_particle_indices, MAX_PARTICLES)
+  for &particle, i in particles {
+    append(&self.free_particle_indices, i)
+  }
+  self.active_particle_count = 0
+}
+
+spawn_particle :: proc(self: ^RendererParticle, emitter: ^Emitter) -> bool {
+  if len(self.free_particle_indices) == 0 {
+    return false
+  }
+  idx := pop(&self.free_particle_indices)
+  particles := slice.from_ptr(self.particle_buffer.mapped, MAX_PARTICLES)
+  particle := &particles[idx]
+  particle.is_dead = false
+  particle.position.xyz =
+    emitter.transform.position +
+    {
+        rand.float32() * emitter.position_spread * 2.0 -
+        emitter.position_spread,
+        rand.float32() * emitter.position_spread * 2.0 -
+        emitter.position_spread,
+        rand.float32() * emitter.position_spread * 2.0 -
+        emitter.position_spread,
+      }
+  particle.position.w = 1.0
+  particle.velocity =
+    emitter.initial_velocity +
+    {
+        rand.float32() * emitter.velocity_spread * 2.0 -
+        emitter.velocity_spread,
+        rand.float32() * emitter.velocity_spread * 2.0 -
+        emitter.velocity_spread,
+        rand.float32() * emitter.velocity_spread * 2.0 -
+        emitter.velocity_spread,
+        0.0,
+      }
+  particle.life = emitter.particle_lifetime
+  particle.max_life = emitter.particle_lifetime
+  particle.color_start = emitter.color_start
+  particle.color_end = emitter.color_end
+  particle.color = emitter.color_start
+  particle.size = emitter.size_start
+  particle.size_end = emitter.size_end
+  particle.weight =
+    emitter.weight +
+    (rand.float32() * emitter.weight_spread * 2.0 - emitter.weight_spread)
+  self.active_particle_count += 1
+  return true
+}
+
+recycle_dead_particles :: proc(self: ^RendererParticle) {
+  particles := slice.from_ptr(self.particle_buffer.mapped, MAX_PARTICLES)
+  for &particle, i in particles do if particle.life <= 0 && !particle.is_dead {
+    append(&self.free_particle_indices, i)
+    if self.active_particle_count > 0 {
+      self.active_particle_count -= 1
+    }
+  }
 }
 
 compute_particles :: proc(
@@ -174,8 +241,7 @@ render_particles :: proc(
     &self.particle_buffer.buffer,
     &offset,
   )
-  params := data_buffer_get(&self.params_buffer)
-  vk.CmdDraw(command_buffer, u32(params.particle_count), 1, 0, 0)
+  vk.CmdDraw(command_buffer, MAX_PARTICLES, 1, 0, 0)
 }
 
 add_emitter :: proc(self: ^RendererParticle, emitter: Emitter) -> vk.Result {
@@ -198,63 +264,24 @@ add_emitter :: proc(self: ^RendererParticle, emitter: Emitter) -> vk.Result {
 update_emitters :: proc(self: ^RendererParticle, delta_time: f32) {
   params := data_buffer_get(&self.params_buffer)
   params.delta_time = delta_time
+  recycle_dead_particles(self)
   emitters := slice.from_ptr(
     self.emitter_buffer.mapped,
     int(params.emitter_count),
   )
-  particles := slice.from_ptr(self.particle_buffer.mapped, MAX_PARTICLES)
-  for &particle, i in particles {
-    if particle.life <= 0 && !particle.is_dead {
-      append(&self.free_particle_indices, i)
-      particle.is_dead = true
-    }
-  }
-  // For each emitter, spawn as many particles as needed
-  for &emitter in emitters {
-    if !emitter.enabled do continue
+  spawned_this_frame := 0
+  for &emitter, emitter_idx in emitters do if emitter.enabled {
     emitter.time_accumulator += delta_time
     emission_interval := 1.0 / emitter.emission_rate
     for emitter.time_accumulator >= emission_interval {
-      idx, ok := pop_front_safe(&self.free_particle_indices)
-      if !ok {
+      if !spawn_particle(self, &emitter) {
         break
       }
-      particles[idx].is_dead = false
-      particles[idx].position.xyz =
-        emitter.transform.position +
-        {
-            rand.float32() * emitter.position_spread * 2.0 -
-            emitter.position_spread,
-            rand.float32() * emitter.position_spread * 2.0 -
-            emitter.position_spread,
-            rand.float32() * emitter.position_spread * 2.0 -
-            emitter.position_spread,
-          }
-      particles[idx].position.w = 1.0
-      particles[idx].velocity =
-        emitter.initial_velocity +
-        {
-            rand.float32() * emitter.velocity_spread * 2.0 -
-            emitter.velocity_spread,
-            rand.float32() * emitter.velocity_spread * 2.0 -
-            emitter.velocity_spread,
-            rand.float32() * emitter.velocity_spread * 2.0 -
-            emitter.velocity_spread,
-            0.0,
-          }
-      particles[idx].life = emitter.particle_lifetime
-      particles[idx].max_life = emitter.particle_lifetime
-      particles[idx].color_start = emitter.color_start
-      particles[idx].color_end = emitter.color_end
-      particles[idx].color = emitter.color_start
-      particles[idx].size = emitter.size_start
-      particles[idx].weight =
-        emitter.weight +
-        (rand.float32() * emitter.weight_spread * 2.0 - emitter.weight_spread)
+      spawned_this_frame += 1
       emitter.time_accumulator -= emission_interval
     }
   }
-  params.particle_count = u32(MAX_PARTICLES - len(self.free_particle_indices))
+  params.particle_count = self.active_particle_count
 }
 
 renderer_particle_deinit :: proc(self: ^RendererParticle) {
@@ -272,11 +299,11 @@ renderer_particle_deinit :: proc(self: ^RendererParticle) {
     self.render_descriptor_set_layout,
     nil,
   )
+  delete(self.free_particle_indices)
   // Free buffers
 }
 
 renderer_particle_init :: proc(self: ^RendererParticle) -> vk.Result {
-  // Compute pipeline setup
   self.params_buffer = create_host_visible_buffer(
     ParticleSystemParams,
     1,
@@ -298,6 +325,7 @@ renderer_particle_init :: proc(self: ^RendererParticle) -> vk.Result {
     {.STORAGE_BUFFER},
   ) or_return
   self.free_particle_indices = make([dynamic]int, 0)
+  initialize_particle_pool(self)
   compute_bindings := [?]vk.DescriptorSetLayoutBinding {
     {
       binding = 0,
@@ -409,7 +437,6 @@ renderer_particle_init :: proc(self: ^RendererParticle) -> vk.Result {
     nil,
     &self.compute_pipeline,
   ) or_return
-  // Render pipeline setup
   render_bindings := [?]vk.DescriptorSetLayoutBinding {
     {
       binding = 0,
@@ -515,16 +542,22 @@ renderer_particle_init :: proc(self: ^RendererParticle) -> vk.Result {
       location = 6,
       binding = 0,
       format = .R32_SFLOAT,
-      offset = u32(offset_of(Particle, life)),
+      offset = u32(offset_of(Particle, size_end)),
     },
     {
       location = 7,
       binding = 0,
       format = .R32_SFLOAT,
-      offset = u32(offset_of(Particle, max_life)),
+      offset = u32(offset_of(Particle, life)),
     },
     {
       location = 8,
+      binding = 0,
+      format = .R32_SFLOAT,
+      offset = u32(offset_of(Particle, max_life)),
+    },
+    {
+      location = 9,
       binding = 0,
       format = .R32_UINT,
       offset = u32(offset_of(Particle, is_dead)),
@@ -695,4 +728,20 @@ renderer_particle_end :: proc(
   command_buffer: vk.CommandBuffer,
 ) {
   vk.CmdEndRenderingKHR(command_buffer)
+}
+
+get_available_particle_count :: proc(self: ^RendererParticle) -> u32 {
+  return u32(len(self.free_particle_indices))
+}
+
+get_particle_pool_stats :: proc(
+  self: ^RendererParticle,
+) -> (
+  active: u32,
+  free: u32,
+  total: u32,
+) {
+  return self.active_particle_count,
+    u32(len(self.free_particle_indices)),
+    MAX_PARTICLES
 }
