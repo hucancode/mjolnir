@@ -4,13 +4,6 @@ import "core:log"
 import linalg "core:math/linalg"
 import vk "vendor:vulkan"
 
-MaterialFallbacks :: struct {
-  albedo:    linalg.Vector4f32,
-  emissive:  linalg.Vector4f32,
-  roughness: f32,
-  metallic:  f32,
-  padding:   [2]f32, // Padding to align to 16 bytes
-}
 
 MaterialTextures :: struct {
   albedo_index:             u32,
@@ -35,12 +28,4 @@ Material :: struct {
   metallic_value:           f32,
   roughness_value:          f32,
   emissive_value:           linalg.Vector4f32,
-  fallback_buffer:          DataBuffer(MaterialFallbacks),
-}
-
-material_deinit :: proc(self: ^Material) {
-  if self == nil {
-    return
-  }
-  data_buffer_deinit(&self.fallback_buffer)
 }

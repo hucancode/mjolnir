@@ -27,7 +27,7 @@ SpotLightAttachment :: struct {
 }
 
 NodeSkinning :: struct {
-  animation:    Maybe(animation.Instance),
+  animation:          Maybe(animation.Instance),
   bone_matrix_offset: u32,
   // TODO: for best quality we should use 1 matrix set per frame
   // but it requires twice as much memory
@@ -64,15 +64,17 @@ init_node :: proc(self: ^Node, name: string = "") {
 }
 
 deinit_node :: proc(self: ^Node) {
-  data, ok := &self.attachment.(MeshAttachment)
-  if ok {
-    skinning, has_skin := &data.skinning.?
-    if has_skin && skinning.bone_matrix_offset != 0xFFFFFFFF {
-      resource.slab_free(&g_bone_matrix_slab, skinning.bone_matrix_offset)
-      skinning.bone_matrix_offset = 0xFFFFFFFF
-    }
-  }
   delete(self.children)
+  data, has_mesh := &self.attachment.(MeshAttachment)
+  if !has_mesh {
+    return
+  }
+  skinning, has_skin := &data.skinning.?
+  if !has_skin || skinning.bone_matrix_offset == 0xFFFFFFFF {
+    return
+  }
+  resource.slab_free(&g_bone_matrix_slab, skinning.bone_matrix_offset)
+  skinning.bone_matrix_offset = 0xFFFFFFFF
 }
 
 detach :: proc(nodes: resource.Pool(Node), child_handle: Handle) {
@@ -207,9 +209,9 @@ SceneTraverseEntry :: struct {
 }
 
 Scene :: struct {
-  camera: geometry.Camera,
-  root:   Handle,
-  nodes:  resource.Pool(Node),
+  camera:          geometry.Camera,
+  root:            Handle,
+  nodes:           resource.Pool(Node),
   traversal_stack: [dynamic]SceneTraverseEntry,
 }
 
@@ -249,7 +251,10 @@ scene_traverse :: proc(
   callback: SceneTraversalCallback = nil,
 ) -> bool {
   using geometry
-  append(&self.traversal_stack, SceneTraverseEntry{self.root, linalg.MATRIX4F32_IDENTITY, false})
+  append(
+    &self.traversal_stack,
+    SceneTraverseEntry{self.root, linalg.MATRIX4F32_IDENTITY, false},
+  )
   for len(self.traversal_stack) > 0 {
     entry := pop(&self.traversal_stack)
     current_node, found := resource.get(self.nodes, entry.handle)

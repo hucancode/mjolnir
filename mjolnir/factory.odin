@@ -40,7 +40,7 @@ factory_deinit :: proc() {
   data_buffer_deinit(&g_bindless_bone_buffer)
   resource.pool_deinit(g_image_buffers, image_buffer_deinit)
   resource.pool_deinit(g_meshes, mesh_deinit)
-  resource.pool_deinit(g_materials, material_deinit)
+  resource.pool_deinit(g_materials, proc(^Material){})
   deinit_global_samplers()
   deinit_bone_matrix_allocator()
 }
@@ -266,18 +266,6 @@ create_material :: proc(
   mat.metallic_value = metallic_value
   mat.roughness_value = roughness_value
   mat.emissive_value = emissive_value
-  fallbacks := MaterialFallbacks {
-    albedo    = mat.albedo_value,
-    emissive  = mat.emissive_value,
-    roughness = mat.roughness_value,
-    metallic  = mat.metallic_value,
-  }
-  mat.fallback_buffer = create_host_visible_buffer(
-    MaterialFallbacks,
-    1,
-    {.UNIFORM_BUFFER},
-    &fallbacks,
-  ) or_return
   log.infof(
     "Material created: albedo=%d metallic_roughness=%d normal=%d displacement=%d emissive=%d",
     mat.albedo.index,
@@ -305,15 +293,6 @@ create_unlit_material :: proc(
   mat.albedo = albedo_handle
   mat.albedo_value = albedo_value
   albedo := resource.get(g_image_buffers, albedo_handle)
-  fallbacks := MaterialFallbacks {
-    albedo = mat.albedo_value,
-  }
-  mat.fallback_buffer = create_host_visible_buffer(
-    MaterialFallbacks,
-    1,
-    {.UNIFORM_BUFFER},
-    &fallbacks,
-  ) or_return
   res = .SUCCESS
   return
 }

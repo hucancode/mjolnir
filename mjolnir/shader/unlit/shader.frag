@@ -19,9 +19,6 @@ layout(set = 0, binding = 0) uniform SceneUniforms {
 
 layout(set = 1, binding = 0) uniform texture2D textures[MAX_TEXTURES];
 layout(set = 2, binding = 0) uniform sampler samplers[MAX_SAMPLERS];
-// layout(set = 4, binding = 0) uniform MaterialFallbacks {
-//     vec4 albedoValue;
-// };
 
 layout(push_constant) uniform PushConstants {
     mat4 world;
