@@ -3,6 +3,7 @@ package mjolnir
 import "core:fmt"
 import "core:log"
 import linalg "core:math/linalg"
+import "core:mem"
 import "core:time"
 import "geometry"
 import "resource"
@@ -563,14 +564,19 @@ renderer_main_render :: proc(
   engine: ^Engine,
   command_buffer: vk.CommandBuffer,
 ) {
-  rendered_count: u32 = 0
   camera_frustum := geometry.camera_make_frustum(engine.scene.camera)
-  render_meshes_ctx := RenderMeshesContext {
-    engine         = engine,
-    command_buffer = command_buffer,
-    camera_frustum = camera_frustum,
-    rendered_count = &rendered_count,
+  temp_arena: mem.Arena
+  temp_allocator_buffer := make([]u8, mem.Megabyte * 2) // 2MB should be enough for batching
+  defer delete(temp_allocator_buffer)
+  mem.arena_init(&temp_arena, temp_allocator_buffer)
+  temp_allocator := mem.arena_allocator(&temp_arena)
+  batching_ctx := BatchingContext {
+    engine  = engine,
+    frustum = camera_frustum,
+    lights  = make([dynamic]SingleLightUniform, allocator = temp_allocator),
+    meshes  = make(map[Handle][dynamic]^Node, allocator = temp_allocator),
   }
+  populate_render_batches(&batching_ctx)
   layout := engine.main.pipeline_layout
   descriptor_sets := [?]vk.DescriptorSet {
     engine.main.frames[g_frame_index].camera_descriptor_set, // set 0
@@ -588,14 +594,25 @@ renderer_main_render :: proc(
     0,
     nil,
   )
-  scene_traverse_linear(&engine.scene, &render_meshes_ctx, render_single_node)
+  rendered_count := render_batched_meshes(&engine.main, &batching_ctx, command_buffer)
   if mu.window(
     &engine.ui.ctx,
     "Main pass renderer",
     {40, 200, 300, 150},
     {.NO_CLOSE},
   ) {
-    mu.label(&engine.ui.ctx, fmt.tprintf("Rendered %d", rendered_count))
+    mu.label(
+      &engine.ui.ctx,
+      fmt.tprintf("Rendered %v", rendered_count),
+    )
+    mu.label(
+      &engine.ui.ctx,
+      fmt.tprintf("Batches %v", len(batching_ctx.meshes)),
+    )
+    mu.label(
+      &engine.ui.ctx,
+      fmt.tprintf("Lights %d", len(batching_ctx.lights)),
+    )
   }
 }
 
@@ -662,13 +679,19 @@ render_to_texture :: proc(
   }
   vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
   vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
-  rendered_count: u32 = 0
-  render_meshes_ctx := RenderMeshesContext {
-    engine         = engine,
-    command_buffer = command_buffer,
-    camera_frustum = camera_frustum,
-    rendered_count = &rendered_count,
+  // Create temporary batching context for render-to-texture
+  temp_arena: mem.Arena
+  temp_buffer := make([]u8, mem.Megabyte)
+  defer delete(temp_buffer)
+  mem.arena_init(&temp_arena, temp_buffer)
+  temp_allocator := mem.arena_allocator(&temp_arena)
+  batching_ctx := BatchingContext {
+    engine  = engine,
+    frustum = camera_frustum,
+    lights  = make([dynamic]SingleLightUniform, allocator = temp_allocator),
+    meshes  = make(map[Handle][dynamic]^Node, allocator = temp_allocator),
   }
+  populate_render_batches(&batching_ctx)
   layout := engine.main.pipeline_layout
   descriptor_sets := [?]vk.DescriptorSet {
     engine.main.frames[g_frame_index].camera_descriptor_set, // set 0
@@ -686,7 +709,7 @@ render_to_texture :: proc(
     0,
     nil,
   )
-  scene_traverse_linear(&engine.scene, &render_meshes_ctx, render_single_node)
+  rendered_count := render_batched_meshes(&engine.main, &batching_ctx, command_buffer)
   vk.CmdEndRenderingKHR(command_buffer)
   return .SUCCESS
 }
@@ -874,98 +897,162 @@ renderer_recreate_images :: proc(
   return .SUCCESS
 }
 
-// Render a single node for the main pass
-render_single_node :: proc(node: ^Node, cb_context: rawptr) -> bool {
-  ctx := (^RenderMeshesContext)(cb_context)
-  #partial switch data in node.attachment {
-  case MeshAttachment:
-    mesh := resource.get(g_meshes, data.handle)
-    if mesh == nil {
-      return true
+// Collect all render data into the batching context
+populate_render_batches :: proc(ctx: ^BatchingContext) {
+  // Collect visible lights
+  for light in ctx.engine.visible_lights[g_frame_index] {
+    light_uniform := SingleLightUniform {
+      kind       = light.kind,
+      color      = linalg.Vector4f32 {
+        light.color.x,
+        light.color.y,
+        light.color.z,
+        1.0,
+      },
+      radius     = light.radius,
+      angle      = light.angle,
+      has_shadow = b32(light.has_shadow),
+      position   = light.position,
+      direction  = light.direction,
+      view_proj  = light.view * light.projection,
     }
-    material := resource.get(g_materials, data.material)
-    if material == nil {
-      return true
+    append(&ctx.lights, light_uniform)
+  }
+
+  // Traverse scene and collect mesh nodes grouped by material
+  for &entry in ctx.engine.scene.nodes.entries do if entry.active {
+    node := &entry.item
+    #partial switch data in node.attachment {
+    case MeshAttachment:
+      mesh := resource.get(g_meshes, data.handle)
+      if mesh == nil do continue
+
+      material := resource.get(g_materials, data.material)
+      if material == nil do continue
+
+      // Frustum culling
+      world_aabb := geometry.aabb_transform(mesh.aabb, node.transform.world_matrix)
+      if !geometry.frustum_test_aabb(&ctx.frustum, world_aabb) do continue
+
+      // Add node to the appropriate material batch
+      material_nodes, found := &ctx.meshes[data.material]
+      if !found {
+        ctx.meshes[data.material] = make([dynamic]^Node, allocator = context.temp_allocator)
+        material_nodes = &ctx.meshes[data.material]
+      }
+      append(material_nodes, node)
     }
-    world_aabb := geometry.aabb_transform(
-      mesh.aabb,
-      node.transform.world_matrix,
-    )
-    if !geometry.frustum_test_aabb(&ctx.camera_frustum, world_aabb) {
-      return true
+  }
+}
+
+// Render all batched meshes efficiently
+render_batched_meshes :: proc(
+  self: ^RendererMain,
+  ctx: ^BatchingContext,
+  command_buffer: vk.CommandBuffer,
+) -> int {
+  rendered := 0
+  layout := self.pipeline_layout
+  current_pipeline: vk.Pipeline = 0
+
+  // Render each material batch
+  for material_handle, nodes in ctx.meshes {
+    material := resource.get(g_materials, material_handle)
+    if material == nil do continue
+
+    pipeline := renderer_main_get_pipeline(self, material)
+
+    // Only bind pipeline if it changed
+    if pipeline != current_pipeline {
+      vk.CmdBindPipeline(command_buffer, .GRAPHICS, pipeline)
+      current_pipeline = pipeline
     }
-    pipeline := renderer_main_get_pipeline(&ctx.engine.main, material)
-    vk.CmdBindPipeline(ctx.command_buffer, .GRAPHICS, pipeline)
-    // Push constants for texture indices
-    texture_indices: MaterialTextures = {
-      albedo_index             = min(MAX_TEXTURES - 1, material.albedo.index),
-      metallic_roughness_index = min(
-        MAX_TEXTURES - 1,
-        material.metallic_roughness.index,
-      ),
-      normal_index             = min(MAX_TEXTURES - 1, material.normal.index),
-      displacement_index       = min(
-        MAX_TEXTURES - 1,
-        material.displacement.index,
-      ),
-      emissive_index           = min(
-        MAX_TEXTURES - 1,
-        material.emissive.index,
-      ),
-      environment_index        = min(
-        MAX_TEXTURES - 1,
-        ctx.engine.main.environment_map.index,
-      ),
-      brdf_lut_index           = min(
-        MAX_TEXTURES - 1,
-        ctx.engine.main.brdf_lut.index,
-      ),
-      bone_matrix_offset       = 0,
-    }
-    node_skinning, node_has_skin := data.skinning.?
-    if node_has_skin {
-      texture_indices.bone_matrix_offset = node_skinning.bone_matrix_offset
-    }
-    push_constant := PushConstant {
-      world           = node.transform.world_matrix,
-      textures        = texture_indices,
-      metallic_value  = material.metallic_value,
-      roughness_value = material.roughness_value,
-    }
-    vk.CmdPushConstants(
-      ctx.command_buffer,
-      ctx.engine.main.pipeline_layout,
-      {.VERTEX, .FRAGMENT},
-      0,
-      size_of(PushConstant),
-      &push_constant,
-    )
-    offset: vk.DeviceSize = 0
-    vk.CmdBindVertexBuffers(
-      ctx.command_buffer,
-      0,
-      1,
-      &mesh.vertex_buffer.buffer,
-      &offset,
-    )
-    mesh_skinning, mesh_has_skin := &mesh.skinning.?
-    if mesh_has_skin && node_has_skin {
+    for node in nodes {
+      mesh_attachment := node.attachment.(MeshAttachment)
+      mesh, has_mesh := resource.get(g_meshes, mesh_attachment.handle)
+      if !has_mesh do continue
+      texture_indices: MaterialTextures = {
+        albedo_index             = min(
+          MAX_TEXTURES - 1,
+          material.albedo.index,
+        ),
+        metallic_roughness_index = min(
+          MAX_TEXTURES - 1,
+          material.metallic_roughness.index,
+        ),
+        normal_index             = min(
+          MAX_TEXTURES - 1,
+          material.normal.index,
+        ),
+        displacement_index       = min(
+          MAX_TEXTURES - 1,
+          material.displacement.index,
+        ),
+        emissive_index           = min(
+          MAX_TEXTURES - 1,
+          material.emissive.index,
+        ),
+        environment_index        = min(
+          MAX_TEXTURES - 1,
+          self.environment_map.index,
+        ),
+        brdf_lut_index           = min(
+          MAX_TEXTURES - 1,
+          self.brdf_lut.index,
+        ),
+        bone_matrix_offset       = 0,
+      }
+
+      node_skinning, node_has_skin := mesh_attachment.skinning.?
+      if node_has_skin {
+        texture_indices.bone_matrix_offset = node_skinning.bone_matrix_offset
+      }
+
+      push_constant := PushConstant {
+        world           = node.transform.world_matrix,
+        textures        = texture_indices,
+        metallic_value  = material.metallic_value,
+        roughness_value = material.roughness_value,
+      }
+
+      vk.CmdPushConstants(
+        command_buffer,
+        layout,
+        {.VERTEX, .FRAGMENT},
+        0,
+        size_of(PushConstant),
+        &push_constant,
+      )
+
+      offset: vk.DeviceSize = 0
       vk.CmdBindVertexBuffers(
-        ctx.command_buffer,
+        command_buffer,
+        0,
         1,
-        1,
-        &mesh_skinning.skin_buffer.buffer,
+        &mesh.vertex_buffer.buffer,
         &offset,
       )
+
+      mesh_skinning, mesh_has_skin := &mesh.skinning.?
+      if mesh_has_skin && node_has_skin {
+        vk.CmdBindVertexBuffers(
+          command_buffer,
+          1,
+          1,
+          &mesh_skinning.skin_buffer.buffer,
+          &offset,
+        )
+      }
+
+      vk.CmdBindIndexBuffer(
+        command_buffer,
+        mesh.index_buffer.buffer,
+        0,
+        .UINT32,
+      )
+      vk.CmdDrawIndexed(command_buffer, mesh.indices_len, 1, 0, 0, 0)
+      rendered += 1
     }
-    vk.CmdBindIndexBuffer(
-      ctx.command_buffer,
-      mesh.index_buffer.buffer,
-      0,
-      .UINT32,
-    )
-    vk.CmdDrawIndexed(ctx.command_buffer, mesh.indices_len, 1, 0, 0, 0)
-    ctx.rendered_count^ += 1
   }
-  return true
+  return rendered
 }

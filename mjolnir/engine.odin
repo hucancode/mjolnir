@@ -42,25 +42,18 @@ MouseDragProc :: #type proc(engine: ^Engine, delta, offset: linalg.Vector2f64)
 MouseScrollProc :: #type proc(engine: ^Engine, offset: linalg.Vector2f64)
 MouseMoveProc :: #type proc(engine: ^Engine, pos, delta: linalg.Vector2f64)
 
-CollectLightsContext :: struct {
-  engine:        ^Engine,
-  light_uniform: ^SceneLightUniform,
+BatchingContext :: struct {
+  engine: ^Engine,
+  frustum: geometry.Frustum,
+  lights: [dynamic]SingleLightUniform,
+  meshes: map[Handle][dynamic]^Node,
 }
 
-RenderMeshesContext :: struct {
-  engine:         ^Engine,
-  command_buffer: vk.CommandBuffer,
-  camera_frustum: geometry.Frustum,
-  rendered_count: ^u32,
-}
-
-ShadowRenderContext :: struct {
+ShadowBatchingContext :: struct {
   engine:          ^Engine,
-  command_buffer:  vk.CommandBuffer,
-  obstacles_count: ^u32,
-  shadow_idx:      u32,
-  shadow_layer:    u32,
   frustum:         geometry.Frustum,
+  static_meshes:   [dynamic]^Node,
+  skinned_meshes:  [dynamic]^Node,
 }
 
 InputState :: struct {
