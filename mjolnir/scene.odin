@@ -50,7 +50,7 @@ EmitterAttachment :: struct {
 }
 
 ForceFieldAttachment :: struct {
-  force_field: ^ForceField,
+  using force_field: ForceField,
 }
 
 NodeAttachment :: union {

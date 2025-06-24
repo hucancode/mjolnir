@@ -1,6 +1,7 @@
 #version 450
 
 const int MAX_PARTICLES = 65536;
+const int MAX_FORCE_FIELDS = 32;
 
 struct Particle {
     vec4 position;
@@ -17,6 +18,14 @@ struct Particle {
     float padding[2];
 };
 
+struct ForceField {
+    uint behavior; // 0: ATTRACT, 1: REPEL, 2: ORBIT
+    float strength;
+    float area_of_effect;
+    float fade;
+    mat4 transform;
+};
+
 layout(binding = 0) uniform ParamsBuffer {
     uint particle_count;
     float deltaTime;
@@ -25,6 +34,10 @@ layout(binding = 0) uniform ParamsBuffer {
 
 layout(binding = 1) buffer ParticleBuffer {
     Particle particles[];
+};
+
+layout(binding = 3) buffer ForceFieldBuffer {
+    ForceField forcefields[];
 };
 
 layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
@@ -60,6 +73,30 @@ void main() {
     if (particles[i].is_dead != 0) return;
 
     if (particles[i].life > 0.0) {
+        // Apply force fields
+        vec3 p = particles[i].position.xyz;
+        for (int f = 0; f < MAX_FORCE_FIELDS; ++f) {
+            ForceField ff = forcefields[f];
+            // Ignore unused slots (area_of_effect == 0 means unused)
+            if (ff.area_of_effect <= 0.0) continue;
+            vec3 ff_pos = (ff.transform * vec4(0,0,0,1)).xyz;
+            vec3 to_particle = p - ff_pos;
+            float dist = length(to_particle);
+            if (dist > ff.area_of_effect) continue;
+            float fade = ff.fade;
+            float effect = 1.0 - clamp(dist / ff.area_of_effect, 0.0, 1.0);
+            effect *= fade;
+            vec3 dir = normalize(ff_pos - p);
+            if (ff.behavior == 0) { // ATTRACT
+                particles[i].velocity.xyz += dir * ff.strength * effect * deltaTime;
+            } else if (ff.behavior == 1) { // REPEL
+                particles[i].velocity.xyz -= dir * ff.strength * effect * deltaTime;
+            } else if (ff.behavior == 2) { // ORBIT
+                vec3 up = vec3(0,1,0);
+                vec3 tangent = normalize(cross(up, dir));
+                particles[i].velocity.xyz += tangent * ff.strength * effect * deltaTime;
+            }
+        }
         // Update particle physics
         particles[i].velocity.xyz += GRAVITY * particles[i].weight * deltaTime;
         particles[i].position += particles[i].velocity * deltaTime;

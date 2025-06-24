@@ -32,7 +32,7 @@ Emitter :: struct {
 }
 
 // Shared ForceField struct for use in both scene and renderer_particle
-ForceFieldBehavior :: enum {
+ForceFieldBehavior :: enum (u32){
   ATTRACT,
   REPEL,
   ORBIT,
@@ -294,6 +294,28 @@ update_emitters :: proc(self: ^Engine, delta_time: f32) {
   params.particle_count = self.particle.active_particle_count
 }
 
+// Fill force field buffer each frame before compute dispatch
+update_force_fields :: proc(self: ^Engine) {
+  forcefield_nodes := collect_forcefields_for_particle_systems(&self.scene)
+  forcefields := slice.from_ptr(self.particle.force_field_buffer.mapped, MAX_FORCE_FIELDS)
+  count := 0
+  for node in forcefield_nodes {
+    if count >= MAX_FORCE_FIELDS {
+      break
+    }
+    force_att, is_ff := &node.attachment.(ForceFieldAttachment)
+    if is_ff {
+      forcefield := force_att.force_field
+      forcefield.transform = node.transform
+      forcefields[count] = forcefield
+      count += 1
+    }
+  }
+  for i in count..<MAX_FORCE_FIELDS {
+    forcefields[i] = ForceField{}
+  }
+}
+
 renderer_particle_deinit :: proc(self: ^RendererParticle) {
   vk.DestroyPipeline(g_device, self.compute_pipeline, nil)
   vk.DestroyPipelineLayout(g_device, self.compute_pipeline_layout, nil)
@@ -359,6 +381,12 @@ renderer_particle_init :: proc(self: ^RendererParticle) -> vk.Result {
       descriptorCount = 1,
       stageFlags = {.COMPUTE},
     },
+    {
+      binding = 3,
+      descriptorType = .STORAGE_BUFFER,
+      descriptorCount = 1,
+      stageFlags = {.COMPUTE},
+    },
   }
   vk.CreateDescriptorSetLayout(
     g_device,
@@ -392,6 +420,10 @@ renderer_particle_init :: proc(self: ^RendererParticle) -> vk.Result {
     buffer = self.emitter_buffer.buffer,
     range  = vk.DeviceSize(self.emitter_buffer.bytes_count),
   }
+  force_field_buffer_info := vk.DescriptorBufferInfo {
+    buffer = self.force_field_buffer.buffer,
+    range  = vk.DeviceSize(self.force_field_buffer.bytes_count),
+  }
   writes := [?]vk.WriteDescriptorSet {
     {
       sType = .WRITE_DESCRIPTOR_SET,
@@ -416,6 +448,14 @@ renderer_particle_init :: proc(self: ^RendererParticle) -> vk.Result {
       descriptorType = .STORAGE_BUFFER,
       descriptorCount = 1,
       pBufferInfo = &emitter_buffer_info,
+    },
+    {
+      sType = .WRITE_DESCRIPTOR_SET,
+      dstSet = self.compute_descriptor_set,
+      dstBinding = 3,
+      descriptorType = .STORAGE_BUFFER,
+      descriptorCount = 1,
+      pBufferInfo = &force_field_buffer_info,
     },
   }
   vk.UpdateDescriptorSets(g_device, len(writes), raw_data(writes[:]), 0, nil)
@@ -690,6 +730,9 @@ renderer_particle_begin :: proc(
   color_view: vk.ImageView,
   depth_view: vk.ImageView,
 ) {
+  // Update force fields before running compute shader
+  update_force_fields(engine)
+
   color_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
     imageView = color_view,

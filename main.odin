@@ -198,6 +198,20 @@ setup :: proc(engine: ^mjolnir.Engine) {
       enabled = true,
     },
   )
+  forcefield_handle, forcefield_node := spawn_child(
+    &engine.scene,
+    psys_handle, // parent is the same particle system
+    mjolnir.ForceFieldAttachment {
+      behavior       = .ATTRACT,
+      strength       = 20.0,
+      area_of_effect = 5.0,
+      fade           = 0.5,
+    },
+  )
+  geometry.translate(
+    &forcefield_node.transform,
+    0.0, 3.5, 0.0,
+  )
   log.info("setup complete")
 }
 
