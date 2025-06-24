@@ -1,6 +1,5 @@
 #version 450
 
-const int MAX_EMITTERS = 64;
 const int MAX_PARTICLES = 65536;
 
 struct Particle {
@@ -18,36 +17,14 @@ struct Particle {
     float padding[2];
 };
 
-struct Emitter {
-    mat4 transform;
-    float emission_rate;
-    float particle_lifetime;
-    float position_spread;
-    float velocity_spread;
-    float time_accumulator;
-    vec4 initial_velocity;
-    vec4 color_start;
-    vec4 color_end;
-    float size_start;
-    float size_end;
-    uint enabled;
-    float weight;
-    float weight_spread;
-    float padding[3];
-};
 layout(binding = 0) uniform ParamsBuffer {
     uint particle_count;
-    uint emitter_count;
     float deltaTime;
-    float padding;
+    float padding[2];
 };
 
 layout(binding = 1) buffer ParticleBuffer {
     Particle particles[];
-};
-
-layout(binding = 2) buffer EmitterBuffer {
-    Emitter emitters[];
 };
 
 layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;

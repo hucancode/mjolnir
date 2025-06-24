@@ -7,8 +7,13 @@ import "core:slice"
 import "geometry"
 import vk "vendor:vulkan"
 
+MAX_PARTICLES :: 65536
+COMPUTE_PARTICLE_BATCH :: 256
+
+MAX_EMITTERS :: 64
+
+// Shared Emitter struct for use in both scene and renderer_particle
 Emitter :: struct {
-  transform:         geometry.Transform,
   emission_rate:     f32,
   particle_lifetime: f32,
   position_spread:   f32,
@@ -25,10 +30,20 @@ Emitter :: struct {
   padding:           [3]f32,
 }
 
-MAX_EMITTERS :: 64
-MAX_PARTICLES :: 65536
-COMPUTE_PARTICLE_BATCH :: 256
+// Shared ForceField struct for use in both scene and renderer_particle
+ForceFieldBehavior :: enum {
+  ATTRACT,
+  REPEL,
+  ORBIT,
+}
 
+ForceField :: struct {
+  behavior:       ForceFieldBehavior,
+  strength:       f32,
+  area_of_effect: f32, // radius
+  fade:           f32, // 0..1, linear fade factor
+  transform:      geometry.Transform,
+}
 Particle :: struct {
   position:    linalg.Vector4f32,
   velocity:    linalg.Vector4f32,
@@ -46,9 +61,8 @@ Particle :: struct {
 
 ParticleSystemParams :: struct {
   particle_count: u32,
-  emitter_count:  u32,
   delta_time:     f32,
-  padding:        f32,
+  padding:        [2]f32,
 }
 
 RendererParticle :: struct {
@@ -81,7 +95,11 @@ initialize_particle_pool :: proc(self: ^RendererParticle) {
   self.active_particle_count = 0
 }
 
-spawn_particle :: proc(self: ^RendererParticle, emitter: ^Emitter) -> bool {
+spawn_particle :: proc(
+  self: ^RendererParticle,
+  emitter_transform: linalg.Matrix4f32,
+  emitter: ^Emitter,
+) -> bool {
   if len(self.free_particle_indices) == 0 {
     return false
   }
@@ -89,28 +107,23 @@ spawn_particle :: proc(self: ^RendererParticle, emitter: ^Emitter) -> bool {
   particles := slice.from_ptr(self.particle_buffer.mapped, MAX_PARTICLES)
   particle := &particles[idx]
   particle.is_dead = false
-  particle.position.xyz =
-    emitter.transform.position +
-    {
-        rand.float32() * emitter.position_spread * 2.0 -
-        emitter.position_spread,
-        rand.float32() * emitter.position_spread * 2.0 -
-        emitter.position_spread,
-        rand.float32() * emitter.position_spread * 2.0 -
-        emitter.position_spread,
-      }
-  particle.position.w = 1.0
-  particle.velocity =
-    emitter.initial_velocity +
-    {
-        rand.float32() * emitter.velocity_spread * 2.0 -
-        emitter.velocity_spread,
-        rand.float32() * emitter.velocity_spread * 2.0 -
-        emitter.velocity_spread,
-        rand.float32() * emitter.velocity_spread * 2.0 -
-        emitter.velocity_spread,
-        0.0,
-      }
+  // Use emitter_transform to compute world position
+  local_offset := linalg.Vector3f32 {
+    rand.float32() * emitter.position_spread * 2.0 - emitter.position_spread,
+    rand.float32() * emitter.position_spread * 2.0 - emitter.position_spread,
+    rand.float32() * emitter.position_spread * 2.0 - emitter.position_spread,
+  }
+  particle.position =
+    emitter_transform *
+    linalg.Vector4f32{local_offset.x, local_offset.y, local_offset.z, 1.0}
+  local_velocity := emitter.initial_velocity + {
+    rand.float32() * emitter.velocity_spread * 2.0 - emitter.velocity_spread,
+    rand.float32() * emitter.velocity_spread * 2.0 - emitter.velocity_spread,
+    rand.float32() * emitter.velocity_spread * 2.0 - emitter.velocity_spread,
+    0.0,
+  }
+  particle.velocity = emitter_transform * local_velocity
+  log.debugf("emitter_transform: %v, local_velocity: %v", emitter_transform, local_velocity)
   particle.life = emitter.particle_lifetime
   particle.max_life = emitter.particle_lifetime
   particle.color_start = emitter.color_start
@@ -122,6 +135,12 @@ spawn_particle :: proc(self: ^RendererParticle, emitter: ^Emitter) -> bool {
     emitter.weight +
     (rand.float32() * emitter.weight_spread * 2.0 - emitter.weight_spread)
   self.active_particle_count += 1
+  // Debug: print velocity of first 5 active particles
+  debug_count := 0
+  for &particle, i in particles do if !particle.is_dead && debug_count < 5 {
+    log.infof("[ParticleSystem] Particle %d velocity: (%.3f, %.3f, %.3f)", i, particle.velocity.x, particle.velocity.y, particle.velocity.z)
+    debug_count += 1
+  }
   return true
 }
 
@@ -244,44 +263,33 @@ render_particles :: proc(
   vk.CmdDraw(command_buffer, MAX_PARTICLES, 1, 0, 0)
 }
 
-add_emitter :: proc(self: ^RendererParticle, emitter: Emitter) -> vk.Result {
-  params := data_buffer_get(&self.params_buffer)
-  if params.emitter_count >= MAX_EMITTERS {
-    return .ERROR_UNKNOWN
-  }
-  ptr := data_buffer_get(&self.emitter_buffer, params.emitter_count)
-  ptr^ = emitter
-  params.emitter_count += 1
-  log.debugf(
-    "[Particle System] Added emitter %d: rate=%.1f, lifetime=%.1f",
-    params.emitter_count,
-    emitter.emission_rate,
-    emitter.particle_lifetime,
-  )
-  return .SUCCESS
-}
-
-update_emitters :: proc(self: ^RendererParticle, delta_time: f32) {
-  params := data_buffer_get(&self.params_buffer)
+update_emitters :: proc(self: ^Engine, delta_time: f32) {
+  params := data_buffer_get(&self.particle.params_buffer)
   params.delta_time = delta_time
-  recycle_dead_particles(self)
-  emitters := slice.from_ptr(
-    self.emitter_buffer.mapped,
-    int(params.emitter_count),
-  )
+  recycle_dead_particles(&self.particle)
+  emitters := collect_emitters_for_particle_systems(&self.scene)
   spawned_this_frame := 0
-  for &emitter, emitter_idx in emitters do if emitter.enabled {
+  for &entry in emitters {
+    emitter := &entry.attachment.(EmitterAttachment)
+    emitter_transform := entry.transform.world_matrix
+    if !emitter.enabled {
+      continue
+    }
     emitter.time_accumulator += delta_time
     emission_interval := 1.0 / emitter.emission_rate
     for emitter.time_accumulator >= emission_interval {
-      if !spawn_particle(self, &emitter) {
+      if !spawn_particle(&self.particle, emitter_transform, emitter) {
         break
       }
       spawned_this_frame += 1
       emitter.time_accumulator -= emission_interval
     }
   }
-  params.particle_count = self.active_particle_count
+  log.infof(
+    "[ParticleSystem] Spawned %d particles this frame",
+    spawned_this_frame,
+  )
+  params.particle_count = self.particle.active_particle_count
 }
 
 renderer_particle_deinit :: proc(self: ^RendererParticle) {
@@ -311,7 +319,6 @@ renderer_particle_init :: proc(self: ^RendererParticle) -> vk.Result {
   ) or_return
   params := data_buffer_get(&self.params_buffer)
   params.particle_count = 0
-  params.emitter_count = 0
   params.delta_time = 0
   params.padding = 0
   self.particle_buffer = create_host_visible_buffer(

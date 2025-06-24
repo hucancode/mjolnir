@@ -264,7 +264,7 @@ update :: proc(self: ^Engine) -> bool {
     bone_matrices := g_bindless_bone_buffer.mapped[l:r]
     sample_clip(mesh, anim_inst.clip_handle, anim_inst.time, bone_matrices)
   }
-  update_emitters(&self.particle, delta_time)
+  update_emitters(self, delta_time)
   last_mouse_pos := self.input.mouse_pos
   self.input.mouse_pos.x, self.input.mouse_pos.y = glfw.GetCursorPos(
     self.window,
