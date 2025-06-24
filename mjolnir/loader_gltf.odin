@@ -35,6 +35,18 @@ load_gltf :: proc(
   if len(gltf_data.nodes) == 0 {
     return created_root_handles[:], .success
   }
+  // Track bone matrix buffer mapping (1 skin = 1 bone matrix buffer)
+  skin_to_bone_offset := make(map[^cgltf.skin]u32)
+  defer delete(skin_to_bone_offset)
+  // Track which mesh gets animation
+  skin_to_first_mesh := make(map[^cgltf.skin]resource.Handle)
+  defer delete(skin_to_first_mesh)
+  // Track texture deduplication
+  texture_to_handle := make(map[^cgltf.texture]resource.Handle)
+  defer delete(texture_to_handle)
+  // Track material deduplication
+  material_to_handle := make(map[^cgltf.material]resource.Handle)
+  defer delete(material_to_handle)
   TraverseEntry :: struct {
     idx:    u32,
     parent: Handle,
@@ -102,27 +114,43 @@ load_gltf :: proc(
             gltf_data,
             gltf_node.mesh,
             gltf_node.skin,
+            &texture_to_handle,
+            &material_to_handle,
           )
         if res == .SUCCESS {
           mesh_init(mesh, data)
           skinning, _ := &mesh.skinning.?
           skinning.bones = bones
           skinning.root_bone_index = root_bone_idx
-          bone_matrix_id := resource.slab_alloc(
-            &g_bone_matrix_slab,
-            u32(len(bones)),
-          )
+          bone_matrix_id: u32
+          if existing_offset, found := skin_to_bone_offset[gltf_node.skin]; found {
+            bone_matrix_id = existing_offset
+            log.infof("Reusing bone matrix buffer for skin at offset %d", bone_matrix_id)
+          } else {
+            bone_matrix_id = resource.slab_alloc(
+              &g_bone_matrix_slab,
+              u32(len(bones)),
+            )
+            skin_to_bone_offset[gltf_node.skin] = bone_matrix_id
+            log.infof("Allocated new bone matrix buffer for skin at offset %d with %d bones", bone_matrix_id, len(bones))
+            // Set bind pose (otherwise zeroed out matrices will cause model to be invisible)
+            l, r := bone_matrix_id, bone_matrix_id + u32(len(bones))
+            bone_matrices := g_bindless_bone_buffer.mapped[l:r]
+            slice.fill(bone_matrices, linalg.MATRIX4F32_IDENTITY)
+          }
           node.attachment = MeshAttachment {
             handle = mesh_handle,
             material = material,
             cast_shadow = true,
             skinning = NodeSkinning{bone_matrix_offset = bone_matrix_id},
           }
-          // set bind pose (otherwise zeroed out matrices will cause model to be invisible)
-          l, r := bone_matrix_id, bone_matrix_id + u32(len(bones))
-          bone_matrices := g_bindless_bone_buffer.mapped[l:r]
-          slice.fill(bone_matrices, linalg.MATRIX4F32_IDENTITY)
-          load_gltf_animations(engine, gltf_data, gltf_node.skin, mesh_handle)
+          if _, has_first_mesh := skin_to_first_mesh[gltf_node.skin]; !has_first_mesh {
+            skin_to_first_mesh[gltf_node.skin] = mesh_handle
+            load_gltf_animations(engine, gltf_data, gltf_node.skin, mesh_handle)
+            log.infof("Loaded animations for skin on mesh %v (first mesh for this skin)", mesh_handle)
+          } else {
+            log.infof("Skipped animations for mesh %v (skin already has animations on another mesh)", mesh_handle)
+          }
         }
       } else {
         log.infof("Loading static mesh %s", string(gltf_node.name))
@@ -131,6 +159,8 @@ load_gltf :: proc(
           path,
           gltf_data,
           gltf_node.mesh,
+          &texture_to_handle,
+          &material_to_handle,
         )
         if res != .SUCCESS {
           log.errorf("Failed to process GLTF primitive:", res)
@@ -168,6 +198,11 @@ load_gltf :: proc(
       }
     }
   }
+  log.infof("GLTF loading complete:")
+  log.infof("  - Unique skins: %d", len(skin_to_bone_offset))
+  log.infof("  - Skins with animations: %d", len(skin_to_first_mesh))
+  log.infof("  - Unique textures: %d", len(texture_to_handle))
+  log.infof("  - Unique materials: %d", len(material_to_handle))
   return created_root_handles[:], .success
 }
 
@@ -175,17 +210,31 @@ load_gltf_texture :: proc(
   engine: ^Engine,
   gltf_path: string,
   gltf_data: ^cgltf.data,
-  glft_texture: ^cgltf.texture,
+  gltf_texture: ^cgltf.texture,
+  texture_cache: ^map[^cgltf.texture]resource.Handle,
 ) -> (
   tex_handle: Handle,
   texture: ^ImageBuffer,
   ret: vk.Result,
 ) {
-  if glft_texture == nil || glft_texture.image_ == nil {
+  if gltf_texture == nil {
     ret = .ERROR_UNKNOWN
     return
   }
-  gltf_image := glft_texture.image_
+
+  // Check if texture already loaded
+  if existing_handle, found := texture_cache[gltf_texture]; found {
+    tex_handle = existing_handle
+    ret = .SUCCESS
+    log.infof("Reusing texture %v", tex_handle)
+    return
+  }
+
+  if gltf_texture.image_ == nil {
+    ret = .ERROR_UNKNOWN
+    return
+  }
+  gltf_image := gltf_texture.image_
   pixel_data: []u8
   if gltf_image.uri != nil {
     texture_path_str := path.join(
@@ -202,15 +251,17 @@ load_gltf_texture :: proc(
     view := gltf_image.buffer_view
     buffer := view.buffer
     src_data_ptr := mem.ptr_offset(cast(^u8)buffer.data, view.offset)
-    pixel_data = slice.from_ptr((^u8)(src_data_ptr), int(view.size))
+    pixel_data = slice.from_ptr(src_data_ptr, int(view.size))
     pixel_data = slice.clone(pixel_data)
   } else {
     ret = .ERROR_UNKNOWN
     return
   }
-  log.infof("Creating texture from %d bytes", len(pixel_data))
+  log.infof("Creating new texture from %d bytes", len(pixel_data))
   tex_handle, texture = create_texture_from_data(pixel_data) or_return
   delete(pixel_data)
+  // Cache the texture
+  texture_cache[gltf_texture] = tex_handle
   ret = .SUCCESS
   return
 }
@@ -220,6 +271,7 @@ load_gltf_pbr_textures :: proc(
   gltf_path: string,
   gltf_data: ^cgltf.data,
   gltf_material: ^cgltf.material,
+  texture_cache: ^map[^cgltf.texture]resource.Handle,
 ) -> (
   albedo_handle: Handle,
   metallic_roughness_handle: Handle,
@@ -239,6 +291,7 @@ load_gltf_pbr_textures :: proc(
     gltf_path,
     gltf_data,
     gltf_material.pbr_metallic_roughness.base_color_texture.texture,
+    texture_cache,
   ) or_return
   features |= {.ALBEDO_TEXTURE}
 
@@ -287,6 +340,7 @@ load_gltf_pbr_textures :: proc(
       gltf_path,
       gltf_data,
       gltf_material.normal_texture.texture,
+      texture_cache,
     ) or_return
     features |= {.NORMAL_TEXTURE}
   }
@@ -298,6 +352,7 @@ load_gltf_pbr_textures :: proc(
       gltf_path,
       gltf_data,
       gltf_material.emissive_texture.texture,
+      texture_cache,
     ) or_return
     features |= {.EMISSIVE_TEXTURE}
   }
@@ -310,6 +365,8 @@ load_gltf_primitive :: proc(
   path: string,
   gltf_data: ^cgltf.data,
   gltf_mesh: ^cgltf.mesh,
+  texture_cache: ^map[^cgltf.texture]resource.Handle,
+  material_cache: ^map[^cgltf.material]resource.Handle,
 ) -> (
   mesh_data: geometry.Geometry,
   material_handle: resource.Handle,
@@ -321,21 +378,29 @@ load_gltf_primitive :: proc(
     return
   }
   primitive := &primitives[0]
-  albedo_handle, metallic_roughness_handle, normal_handle, displacement_handle, emissive_handle, features :=
-    load_gltf_pbr_textures(
-      engine,
-      path,
-      gltf_data,
-      primitive.material,
+  if existing_handle, found := material_cache[primitive.material]; found {
+    material_handle = existing_handle
+    log.infof("Reusing material %v", material_handle)
+  } else {
+    albedo_handle, metallic_roughness_handle, normal_handle, displacement_handle, emissive_handle, features :=
+      load_gltf_pbr_textures(
+        engine,
+        path,
+        gltf_data,
+        primitive.material,
+        texture_cache,
+      ) or_return
+    material_handle, _ = create_material(
+      features,
+      albedo_handle,
+      metallic_roughness_handle,
+      normal_handle,
+      displacement_handle,
+      emissive_handle,
     ) or_return
-  material_handle, _ = create_material(
-    features,
-    albedo_handle,
-    metallic_roughness_handle,
-    normal_handle,
-    displacement_handle,
-    emissive_handle,
-  ) or_return
+    material_cache[primitive.material] = material_handle
+    log.infof("Created new material %v", material_handle)
+  }
   vertices_num := primitive.attributes[0].data.count
   vertices := make([]geometry.Vertex, vertices_num)
   for attribute in primitive.attributes {
@@ -403,6 +468,8 @@ load_gltf_skinned_primitive :: proc(
   gltf_data: ^cgltf.data,
   gltf_mesh: ^cgltf.mesh,
   gltf_skin: ^cgltf.skin,
+  texture_cache: ^map[^cgltf.texture]resource.Handle,
+  material_cache: ^map[^cgltf.material]resource.Handle,
 ) -> (
   geometry_data: geometry.Geometry,
   engine_bones: []Bone,
@@ -417,31 +484,37 @@ load_gltf_skinned_primitive :: proc(
   }
   primitive := &primitives[0]
   log.infof("Creating texture for skinned material...")
-  // TODO: reuse textures and material whenever possible (currently creating new resources everytime)
-  albedo_handle, metallic_roughness_handle, normal_handle, displacement_handle, emissive_handle, features :=
-    load_gltf_pbr_textures(
-      engine,
-      path,
-      gltf_data,
-      primitive.material,
+  if existing_handle, found := material_cache[primitive.material]; found {
+    mat_handle = existing_handle
+    log.infof("Reusing skinned material %v", mat_handle)
+  } else {
+    albedo_handle, metallic_roughness_handle, normal_handle, displacement_handle, emissive_handle, features :=
+      load_gltf_pbr_textures(
+        engine,
+        path,
+        gltf_data,
+        primitive.material,
+        texture_cache,
+      ) or_return
+    mat_handle, _ = create_material(
+      features | {.SKINNING},
+      albedo_handle,
+      metallic_roughness_handle,
+      normal_handle,
+      displacement_handle,
+      emissive_handle,
     ) or_return
-  mat_handle, _ = create_material(
-    features | {.SKINNING},
-    albedo_handle,
-    metallic_roughness_handle,
-    normal_handle,
-    displacement_handle,
-    emissive_handle,
-  ) or_return
-  log.infof(
-    "Creating skinned material with PBR textures %v/%v/%v/%v/%v -> %v",
-    albedo_handle,
-    metallic_roughness_handle,
-    normal_handle,
-    displacement_handle,
-    emissive_handle,
-    mat_handle,
-  )
+    material_cache[primitive.material] = mat_handle
+    log.infof(
+      "Creating skinned material with PBR textures %v/%v/%v/%v/%v -> %v",
+      albedo_handle,
+      metallic_roughness_handle,
+      normal_handle,
+      displacement_handle,
+      emissive_handle,
+      mat_handle,
+    )
+  }
   num_vertices := primitive.attributes[0].data.count
   vertices := make([]geometry.Vertex, num_vertices)
   skinnings := make([]geometry.SkinningData, num_vertices)
