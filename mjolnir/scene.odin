@@ -337,3 +337,26 @@ collect_emitters_for_particle_systems :: proc(
   scene_traverse(self, &ctx, collect_emitters_cb)
   return ctx.emitters
 }
+
+// Context for emitter collection callback
+ForceFieldCollectContext :: struct {
+  scene:    ^Scene,
+  forcefields: [dynamic]^Node,
+}
+
+collect_forcefields_cb :: proc(node: ^Node, user_ctx: rawptr) -> bool {
+  ctx := cast(^ForceFieldCollectContext)user_ctx
+  _, is_ff := &node.attachment.(ForceFieldAttachment)
+  if is_ff {
+    append(&ctx.forcefields, node)
+  }
+  return true
+}
+
+collect_forcefields_for_particle_systems :: proc(
+  self: ^Scene,
+) -> [dynamic]^Node {
+  ctx := ForceFieldCollectContext{self, make([dynamic]^Node, 0)}
+  scene_traverse(self, &ctx, collect_forcefields_cb)
+  return ctx.forcefields
+}

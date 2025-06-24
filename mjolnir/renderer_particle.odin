@@ -11,6 +11,7 @@ MAX_PARTICLES :: 65536
 COMPUTE_PARTICLE_BATCH :: 256
 
 MAX_EMITTERS :: 64
+MAX_FORCE_FIELDS :: 32
 
 // Shared Emitter struct for use in both scene and renderer_particle
 Emitter :: struct {
@@ -70,6 +71,7 @@ RendererParticle :: struct {
   params_buffer:                 DataBuffer(ParticleSystemParams),
   particle_buffer:               DataBuffer(Particle),
   emitter_buffer:                DataBuffer(Emitter),
+  force_field_buffer:            DataBuffer(ForceField),
   compute_descriptor_set_layout: vk.DescriptorSetLayout,
   compute_descriptor_set:        vk.DescriptorSet,
   compute_pipeline_layout:       vk.PipelineLayout,
@@ -329,6 +331,11 @@ renderer_particle_init :: proc(self: ^RendererParticle) -> vk.Result {
   self.emitter_buffer = create_host_visible_buffer(
     Emitter,
     MAX_EMITTERS,
+    {.STORAGE_BUFFER},
+  ) or_return
+  self.force_field_buffer = create_host_visible_buffer(
+    ForceField,
+    MAX_FORCE_FIELDS,
     {.STORAGE_BUFFER},
   ) or_return
   self.free_particle_indices = make([dynamic]int, 0)
@@ -751,4 +758,19 @@ get_particle_pool_stats :: proc(
   return self.active_particle_count,
     u32(len(self.free_particle_indices)),
     MAX_PARTICLES
+}
+
+// Collect all force field nodes for all particle systems
+collect_force_field_nodes_for_particle_systems :: proc(scene: ^Scene) -> [dynamic]^Node {
+  ctx := ForceFieldCollectContext{scene, make([dynamic]^Node, 0)}
+  // Traverse all nodes
+  scene_traverse(scene, &ctx, proc(node: ^Node, user_ctx: rawptr) -> bool {
+    ctx := cast(^ForceFieldCollectContext)user_ctx
+    _, is_force := &node.attachment.(ForceFieldAttachment)
+    if is_force {
+      append(&ctx.forcefields, node)
+    }
+    return true
+  })
+  return ctx.forcefields
 }
