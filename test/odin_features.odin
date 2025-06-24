@@ -187,7 +187,7 @@ get_pixel_data :: proc(t: ^testing.T) {
 
 // @(test)
 for_loop_reference_benchmark :: proc(t: ^testing.T) {
-  n := 1e9
+  n := 1e3
   options := &time.Benchmark_Options {
     rounds = n,
     bytes = size_of(f32) * 16 * n,
@@ -196,7 +196,7 @@ for_loop_reference_benchmark :: proc(t: ^testing.T) {
       allocator := context.allocator,
     ) -> time.Benchmark_Error {
       a := [16]u32{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
-      arr := [1000][16]u32{}
+      arr : [1000][16]u32
       slice.fill(arr[:], a)
       options.input = slice.to_bytes(arr[:])
       return nil
@@ -208,10 +208,11 @@ for_loop_reference_benchmark :: proc(t: ^testing.T) {
       arr := slice.to_type(options.input, [1000][16]u32)
       k: u32
       // same result for both case, there is no copy involved when loop by value or loop by reference
-      // for a in arr do for x in a do k += (k + x)%1000
-      // for &a in arr do for x in a do k += (k + x)%1000
-      for a in arr do for x in a do k += (k + x) % 1000
-      options.processed += size_of([16]u32) * len(arr)
+      for i in 0 ..< options.rounds {
+        // for &a in arr do for &x in a do k += (k + x)%1000
+        for a in arr do for x in a do k += (k + x) % 1000
+        options.processed += size_of([16]u32) * len(arr)
+      }
       return nil
     },
   }
