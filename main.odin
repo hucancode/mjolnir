@@ -172,13 +172,19 @@ setup :: proc(engine: ^mjolnir.Engine) {
   )
   effect_add_tonemap(&engine.postprocess, 1.5, 1.3)
   effect_add_grayscale(&engine.postprocess, 0.3)
+  // Create a particle texture
+  particle_texture_handle, _, _ := mjolnir.create_texture_from_path(
+    "assets/gold-star.png",
+  )
+
   // Create a particle system node
   psys_handle, psys_node := spawn_at(
     &engine.scene,
     {0.0, 1.9, 0.3},
-    ParticleSystemAttachment {
+    mjolnir.ParticleSystemAttachment {
       bounding_box_min = {-1, -1, -1},
       bounding_box_max = {1, 1, 1},
+      texture_handle = particle_texture_handle,
     },
   )
   // Create an emitter node as a child
