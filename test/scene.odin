@@ -246,7 +246,6 @@ traverse_scene_benchmark :: proc(
   Context :: struct {
     light_count: u32,
     mesh_count:  u32,
-
   }
   callback :: proc(node: ^mjolnir.Node, cb_context: rawptr) -> bool {
     ctx := (^Context)(cb_context)

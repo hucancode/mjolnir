@@ -5,6 +5,7 @@ import linalg "core:math/linalg"
 import "core:math/rand"
 import "core:slice"
 import "geometry"
+import "resource"
 import vk "vendor:vulkan"
 
 MAX_PARTICLES :: 65536
@@ -264,6 +265,10 @@ update_emitters :: proc(self: ^Engine, delta_time: f32) {
   params := data_buffer_get(&self.particle.params_buffer)
   params.delta_time = delta_time
   recycle_dead_particles(&self.particle)
+
+  // Check if we need to update particle textures from custom settings
+  update_particle_system_textures(self)
+
   emitters := collect_emitters_for_particle_systems(&self.scene)
   params.emitter_count = u32(len(emitters))
   spawned_this_frame := 0
@@ -519,9 +524,10 @@ renderer_particle_init :: proc(self: ^RendererParticle) -> vk.Result {
     nil,
     &self.render_pipeline_layout,
   ) or_return
-  _, self.particle_texture = create_texture_from_path(
-    "assets/black-circle.png",
-  ) or_return
+  // Load the default particle texture
+  default_texture_handle, default_texture, _ := create_texture_from_path("assets/black-circle.png")
+  self.particle_texture = default_texture
+
   vk.AllocateDescriptorSets(
     g_device,
     &{
@@ -813,4 +819,75 @@ collect_force_field_nodes_for_particle_systems :: proc(
     return true
   })
   return ctx.forcefields
+}
+
+// Update particle system textures based on the texture_handle field in ParticleSystemAttachment
+update_particle_system_textures :: proc(engine: ^Engine) {
+  // Find all particle system nodes
+  particle_systems := collect_particle_systems(&engine.scene)
+
+  for &node in particle_systems {
+    if psys, ok := &node.attachment.(ParticleSystemAttachment); ok {
+      if psys.texture_handle.index > 0 {
+        // Set the custom texture for the particle system
+        if set_particle_texture(&engine.particle, psys.texture_handle) {
+          log.infof("Set particle texture with handle: %v", psys.texture_handle)
+        }
+        // Once we've set the texture for one particle system, we're done
+        // (since there's only one global particle renderer)
+        break
+      }
+    }
+  }
+}
+
+// Collect all particle system nodes from the scene
+collect_particle_systems :: proc(scene: ^Scene) -> [dynamic]^Node {
+  result := make([dynamic]^Node, 0)
+
+  // Traverse all nodes
+  scene_traverse(scene, &result, proc(node: ^Node, user_ctx: rawptr) -> bool {
+    result := cast(^[dynamic]^Node)user_ctx
+    _, is_ps := &node.attachment.(ParticleSystemAttachment)
+    if is_ps {
+      append(result, node)
+    }
+    return true
+  })
+
+  return result
+}
+
+// Update particle texture for a specific particle system using a texture handle
+set_particle_texture :: proc(self: ^RendererParticle, texture_handle: resource.Handle) -> bool {
+  if texture_handle.index <= 0 {
+    return false
+  }
+
+  // Get the texture from the handle
+  texture, ok := resource.get(g_image_buffers, texture_handle)
+  if !ok {
+    log.errorf("Could not find texture with handle %v", texture_handle)
+    return false
+  }
+
+  // Store the new texture
+  self.particle_texture = texture
+
+  // Update descriptor set to use the new texture
+  write := vk.WriteDescriptorSet {
+    sType           = .WRITE_DESCRIPTOR_SET,
+    dstSet          = self.render_descriptor_set,
+    dstBinding      = 0,
+    descriptorType  = .COMBINED_IMAGE_SAMPLER,
+    descriptorCount = 1,
+    pImageInfo      = &{
+      sampler = g_linear_repeat_sampler,
+      imageView = self.particle_texture.view,
+      imageLayout = .SHADER_READ_ONLY_OPTIMAL,
+    },
+  }
+  vk.UpdateDescriptorSets(g_device, 1, &write, 0, nil)
+
+  return true
 }
