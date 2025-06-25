@@ -40,11 +40,27 @@ MeshAttachment :: struct {
   cast_shadow: bool,
 }
 
+ParticleSystemAttachment :: struct {
+  bounding_box_min: linalg.Vector3f32,
+  bounding_box_max: linalg.Vector3f32,
+}
+
+EmitterAttachment :: struct {
+  using emitter: Emitter,
+}
+
+ForceFieldAttachment :: struct {
+  using force_field: ForceField,
+}
+
 NodeAttachment :: union {
   PointLightAttachment,
   DirectionalLightAttachment,
   SpotLightAttachment,
   MeshAttachment,
+  ParticleSystemAttachment,
+  EmitterAttachment,
+  ForceFieldAttachment,
 }
 
 Node :: struct {
@@ -297,4 +313,50 @@ scene_traverse_linear :: proc(
     callback(&entry.item, cb_context)
   }
   return true
+}
+
+// Context for emitter collection callback
+EmitterCollectContext :: struct {
+  scene:    ^Scene,
+  emitters: [dynamic]^Node,
+}
+
+collect_emitters_cb :: proc(node: ^Node, user_ctx: rawptr) -> bool {
+  ctx := cast(^EmitterCollectContext)user_ctx
+  _, is_emitter := &node.attachment.(EmitterAttachment)
+  if is_emitter {
+    append(&ctx.emitters, node)
+  }
+  return true
+}
+
+collect_emitters_for_particle_systems :: proc(
+  self: ^Scene,
+) -> [dynamic]^Node {
+  ctx := EmitterCollectContext{self, make([dynamic]^Node, 0)}
+  scene_traverse(self, &ctx, collect_emitters_cb)
+  return ctx.emitters
+}
+
+// Context for emitter collection callback
+ForceFieldCollectContext :: struct {
+  scene:    ^Scene,
+  forcefields: [dynamic]^Node,
+}
+
+collect_forcefields_cb :: proc(node: ^Node, user_ctx: rawptr) -> bool {
+  ctx := cast(^ForceFieldCollectContext)user_ctx
+  _, is_ff := &node.attachment.(ForceFieldAttachment)
+  if is_ff {
+    append(&ctx.forcefields, node)
+  }
+  return true
+}
+
+collect_forcefields_for_particle_systems :: proc(
+  self: ^Scene,
+) -> [dynamic]^Node {
+  ctx := ForceFieldCollectContext{self, make([dynamic]^Node, 0)}
+  scene_traverse(self, &ctx, collect_forcefields_cb)
+  return ctx.forcefields
 }

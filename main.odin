@@ -1,7 +1,7 @@
 package main
 
-import "core:log"
 import "core:fmt"
+import "core:log"
 import "core:math"
 import linalg "core:math/linalg"
 import "mjolnir"
@@ -15,6 +15,8 @@ light_handles: [LIGHT_COUNT]mjolnir.Handle
 light_cube_handles: [LIGHT_COUNT]mjolnir.Handle
 ground_mat_handle: mjolnir.Handle
 engine: mjolnir.Engine
+forcefield_handle: mjolnir.Handle
+forcefield_node: ^mjolnir.Node
 
 main :: proc() {
   context.logger = log.create_console_logger()
@@ -170,26 +172,54 @@ setup :: proc(engine: ^mjolnir.Engine) {
   )
   effect_add_tonemap(&engine.postprocess, 1.5, 1.3)
   effect_add_grayscale(&engine.postprocess, 0.3)
-  emitter := mjolnir.Emitter {
-    transform = geometry.Transform {
-      position = {0, 1.9, 0.3},
-      rotation = linalg.QUATERNIONF32_IDENTITY,
-      scale = {1, 1, 1},
+  // Create a particle system node
+  psys_handle, psys_node := spawn_at(
+    &engine.scene,
+    {0.0, 1.9, 0.3},
+    ParticleSystemAttachment {
+      bounding_box_min = {-1, -1, -1},
+      bounding_box_max = {1, 1, 1},
     },
-    emission_rate = 10,
-    particle_lifetime = 5.0,
-    position_spread = 0.05,
-    initial_velocity = {0, -0.1, 0, 0},
-    velocity_spread = 0.1,
-    color_start = {1, 0, 0, 1},
-    color_end = {0, 0, 1, 0},
-    size_start = 300.0,
-    size_end = 100.0,
-    weight = 0.2,
-    weight_spread = 0.2,
-    enabled = true,
-  }
-  add_emitter(&engine.particle, emitter)
+  )
+  // Create an emitter node as a child
+  _, emitter_node := spawn_child(
+    &engine.scene,
+    psys_handle,
+    EmitterAttachment {
+      emission_rate = 10,
+      particle_lifetime = 5.0,
+      position_spread = 0.05,
+      initial_velocity = {0, -0.1, 0, 0},
+      velocity_spread = 0.1,
+      color_start = {1, 0, 0, 1},
+      color_end = {0, 0, 1, 0},
+      size_start = 300.0,
+      size_end = 100.0,
+      weight = 0.3,
+      weight_spread = 0.05,
+      enabled = true,
+    },
+  )
+  forcefield_handle, forcefield_node = spawn_child(
+    &engine.scene,
+    psys_handle,
+    mjolnir.ForceFieldAttachment {
+      behavior = .ATTRACT,
+      strength = 20.0,
+      area_of_effect = 5.0,
+    },
+  )
+  geometry.translate(&forcefield_node.transform, x = 5.0, y = 4.0, z = 0.0)
+  _, forcefield_visual := spawn_child(
+    &engine.scene,
+    forcefield_handle,
+    MeshAttachment {
+      handle = sphere_mesh_handle,
+      material = plain_material_handle,
+      cast_shadow = false,
+    },
+  )
+  geometry.scale(&forcefield_visual.transform, 0.2)
   log.info("setup complete")
 }
 
@@ -204,6 +234,8 @@ render_2d :: proc(engine: ^mjolnir.Engine, ctx: ^mu.Context) {
 
 update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
   using mjolnir, geometry
+  t := time_since_app_start(engine) * 0.5
+  geometry.translate(&forcefield_node.transform, math.cos(t) * 2.0, 2.0, math.sin(t) * 2.0)
   // Animate lights
   for handle, i in light_handles {
     if i == 0 {

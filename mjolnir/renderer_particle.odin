@@ -7,8 +7,15 @@ import "core:slice"
 import "geometry"
 import vk "vendor:vulkan"
 
+MAX_PARTICLES :: 65536
+COMPUTE_PARTICLE_BATCH :: 256
+
+MAX_EMITTERS :: 64
+MAX_FORCE_FIELDS :: 32
+
+// Shared Emitter struct for use in both scene and renderer_particle
 Emitter :: struct {
-  transform:         geometry.Transform,
+  transform:         linalg.Matrix4f32,
   emission_rate:     f32,
   particle_lifetime: f32,
   position_spread:   f32,
@@ -25,9 +32,20 @@ Emitter :: struct {
   padding:           [3]f32,
 }
 
-MAX_EMITTERS :: 64
-MAX_PARTICLES :: 65536
-COMPUTE_PARTICLE_BATCH :: 256
+// Shared ForceField struct for use in both scene and renderer_particle
+ForceFieldBehavior :: enum (u32) {
+  ATTRACT,
+  REPEL,
+  ORBIT,
+}
+
+ForceField :: struct {
+  behavior:       ForceFieldBehavior,
+  strength:       f32,
+  area_of_effect: f32, // radius
+  fade:           f32, // 0..1, linear fade factor
+  position:       linalg.Vector4f32, // world position
+}
 
 Particle :: struct {
   position:    linalg.Vector4f32,
@@ -47,8 +65,8 @@ Particle :: struct {
 ParticleSystemParams :: struct {
   particle_count: u32,
   emitter_count:  u32,
+  forcefield_count:  u32,
   delta_time:     f32,
-  padding:        f32,
 }
 
 RendererParticle :: struct {
@@ -56,6 +74,7 @@ RendererParticle :: struct {
   params_buffer:                 DataBuffer(ParticleSystemParams),
   particle_buffer:               DataBuffer(Particle),
   emitter_buffer:                DataBuffer(Emitter),
+  force_field_buffer:            DataBuffer(ForceField),
   compute_descriptor_set_layout: vk.DescriptorSetLayout,
   compute_descriptor_set:        vk.DescriptorSet,
   compute_pipeline_layout:       vk.PipelineLayout,
@@ -81,7 +100,11 @@ initialize_particle_pool :: proc(self: ^RendererParticle) {
   self.active_particle_count = 0
 }
 
-spawn_particle :: proc(self: ^RendererParticle, emitter: ^Emitter) -> bool {
+spawn_particle :: proc(
+  self: ^RendererParticle,
+  emitter_transform: linalg.Matrix4f32,
+  emitter: ^Emitter,
+) -> bool {
   if len(self.free_particle_indices) == 0 {
     return false
   }
@@ -89,28 +112,21 @@ spawn_particle :: proc(self: ^RendererParticle, emitter: ^Emitter) -> bool {
   particles := slice.from_ptr(self.particle_buffer.mapped, MAX_PARTICLES)
   particle := &particles[idx]
   particle.is_dead = false
-  particle.position.xyz =
-    emitter.transform.position +
-    {
-        rand.float32() * emitter.position_spread * 2.0 -
-        emitter.position_spread,
-        rand.float32() * emitter.position_spread * 2.0 -
-        emitter.position_spread,
-        rand.float32() * emitter.position_spread * 2.0 -
-        emitter.position_spread,
-      }
-  particle.position.w = 1.0
-  particle.velocity =
-    emitter.initial_velocity +
-    {
-        rand.float32() * emitter.velocity_spread * 2.0 -
-        emitter.velocity_spread,
-        rand.float32() * emitter.velocity_spread * 2.0 -
-        emitter.velocity_spread,
-        rand.float32() * emitter.velocity_spread * 2.0 -
-        emitter.velocity_spread,
-        0.0,
-      }
+  local_offset := linalg.Vector4f32 {
+    rand.float32() * emitter.position_spread * 2.0 - emitter.position_spread,
+    rand.float32() * emitter.position_spread * 2.0 - emitter.position_spread,
+    rand.float32() * emitter.position_spread * 2.0 - emitter.position_spread,
+    1.0,
+  }
+  particle.position = emitter_transform * local_offset
+  velocity_variation := linalg.Vector4f32 {
+    rand.float32() * emitter.velocity_spread * 2.0 - emitter.velocity_spread,
+    rand.float32() * emitter.velocity_spread * 2.0 - emitter.velocity_spread,
+    rand.float32() * emitter.velocity_spread * 2.0 - emitter.velocity_spread,
+    0.0,
+  }
+  local_velocity := emitter.initial_velocity + velocity_variation
+  particle.velocity = emitter_transform * local_velocity
   particle.life = emitter.particle_lifetime
   particle.max_life = emitter.particle_lifetime
   particle.color_start = emitter.color_start
@@ -118,9 +134,9 @@ spawn_particle :: proc(self: ^RendererParticle, emitter: ^Emitter) -> bool {
   particle.color = emitter.color_start
   particle.size = emitter.size_start
   particle.size_end = emitter.size_end
-  particle.weight =
-    emitter.weight +
-    (rand.float32() * emitter.weight_spread * 2.0 - emitter.weight_spread)
+  weight_variation :=
+    rand.float32() * emitter.weight_spread * 2.0 - emitter.weight_spread
+  particle.weight = emitter.weight + weight_variation
   self.active_particle_count += 1
   return true
 }
@@ -244,44 +260,59 @@ render_particles :: proc(
   vk.CmdDraw(command_buffer, MAX_PARTICLES, 1, 0, 0)
 }
 
-add_emitter :: proc(self: ^RendererParticle, emitter: Emitter) -> vk.Result {
-  params := data_buffer_get(&self.params_buffer)
-  if params.emitter_count >= MAX_EMITTERS {
-    return .ERROR_UNKNOWN
-  }
-  ptr := data_buffer_get(&self.emitter_buffer, params.emitter_count)
-  ptr^ = emitter
-  params.emitter_count += 1
-  log.debugf(
-    "[Particle System] Added emitter %d: rate=%.1f, lifetime=%.1f",
-    params.emitter_count,
-    emitter.emission_rate,
-    emitter.particle_lifetime,
-  )
-  return .SUCCESS
-}
-
-update_emitters :: proc(self: ^RendererParticle, delta_time: f32) {
-  params := data_buffer_get(&self.params_buffer)
+update_emitters :: proc(self: ^Engine, delta_time: f32) {
+  params := data_buffer_get(&self.particle.params_buffer)
   params.delta_time = delta_time
-  recycle_dead_particles(self)
-  emitters := slice.from_ptr(
-    self.emitter_buffer.mapped,
-    int(params.emitter_count),
-  )
+  recycle_dead_particles(&self.particle)
+  emitters := collect_emitters_for_particle_systems(&self.scene)
+  params.emitter_count = u32(len(emitters))
   spawned_this_frame := 0
-  for &emitter, emitter_idx in emitters do if emitter.enabled {
+  for &entry in emitters {
+    emitter := &entry.attachment.(EmitterAttachment)
+    emitter_transform := entry.transform.world_matrix
+    if !emitter.enabled {
+      continue
+    }
     emitter.time_accumulator += delta_time
     emission_interval := 1.0 / emitter.emission_rate
     for emitter.time_accumulator >= emission_interval {
-      if !spawn_particle(self, &emitter) {
+      if !spawn_particle(&self.particle, emitter_transform, emitter) {
         break
       }
       spawned_this_frame += 1
       emitter.time_accumulator -= emission_interval
     }
   }
-  params.particle_count = self.active_particle_count
+  params.particle_count = self.particle.active_particle_count
+}
+
+// Fill force field buffer each frame before compute dispatch
+update_force_fields :: proc(self: ^Engine) {
+  forcefield_nodes := collect_forcefields_for_particle_systems(&self.scene)
+  forcefields := slice.from_ptr(
+    self.particle.force_field_buffer.mapped,
+    MAX_FORCE_FIELDS,
+  )
+  params := data_buffer_get(&self.particle.params_buffer)
+  count := 0
+  for &node in forcefield_nodes {
+    if count >= MAX_FORCE_FIELDS {
+      break
+    }
+    force_att, is_ff := &node.attachment.(ForceFieldAttachment)
+    if !is_ff {
+      continue
+    }
+    forcefield := force_att.force_field
+    forcefield.position =
+      node.transform.world_matrix * linalg.Vector4f32{0, 0, 0, 1}
+    forcefields[count] = forcefield
+    count += 1
+  }
+  params.forcefield_count = u32(count)
+  for i in count ..< MAX_FORCE_FIELDS {
+    forcefields[i] = ForceField{}
+  }
 }
 
 renderer_particle_deinit :: proc(self: ^RendererParticle) {
@@ -309,11 +340,6 @@ renderer_particle_init :: proc(self: ^RendererParticle) -> vk.Result {
     1,
     {.UNIFORM_BUFFER},
   ) or_return
-  params := data_buffer_get(&self.params_buffer)
-  params.particle_count = 0
-  params.emitter_count = 0
-  params.delta_time = 0
-  params.padding = 0
   self.particle_buffer = create_host_visible_buffer(
     Particle,
     MAX_PARTICLES,
@@ -322,6 +348,11 @@ renderer_particle_init :: proc(self: ^RendererParticle) -> vk.Result {
   self.emitter_buffer = create_host_visible_buffer(
     Emitter,
     MAX_EMITTERS,
+    {.STORAGE_BUFFER},
+  ) or_return
+  self.force_field_buffer = create_host_visible_buffer(
+    ForceField,
+    MAX_FORCE_FIELDS,
     {.STORAGE_BUFFER},
   ) or_return
   self.free_particle_indices = make([dynamic]int, 0)
@@ -341,6 +372,12 @@ renderer_particle_init :: proc(self: ^RendererParticle) -> vk.Result {
     },
     {
       binding = 2,
+      descriptorType = .STORAGE_BUFFER,
+      descriptorCount = 1,
+      stageFlags = {.COMPUTE},
+    },
+    {
+      binding = 3,
       descriptorType = .STORAGE_BUFFER,
       descriptorCount = 1,
       stageFlags = {.COMPUTE},
@@ -378,6 +415,10 @@ renderer_particle_init :: proc(self: ^RendererParticle) -> vk.Result {
     buffer = self.emitter_buffer.buffer,
     range  = vk.DeviceSize(self.emitter_buffer.bytes_count),
   }
+  force_field_buffer_info := vk.DescriptorBufferInfo {
+    buffer = self.force_field_buffer.buffer,
+    range  = vk.DeviceSize(self.force_field_buffer.bytes_count),
+  }
   writes := [?]vk.WriteDescriptorSet {
     {
       sType = .WRITE_DESCRIPTOR_SET,
@@ -402,6 +443,14 @@ renderer_particle_init :: proc(self: ^RendererParticle) -> vk.Result {
       descriptorType = .STORAGE_BUFFER,
       descriptorCount = 1,
       pBufferInfo = &emitter_buffer_info,
+    },
+    {
+      sType = .WRITE_DESCRIPTOR_SET,
+      dstSet = self.compute_descriptor_set,
+      dstBinding = 3,
+      descriptorType = .STORAGE_BUFFER,
+      descriptorCount = 1,
+      pBufferInfo = &force_field_buffer_info,
     },
   }
   vk.UpdateDescriptorSets(g_device, len(writes), raw_data(writes[:]), 0, nil)
@@ -676,6 +725,9 @@ renderer_particle_begin :: proc(
   color_view: vk.ImageView,
   depth_view: vk.ImageView,
 ) {
+  // Update force fields before running compute shader
+  update_force_fields(engine)
+
   color_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
     imageView = color_view,
@@ -744,4 +796,21 @@ get_particle_pool_stats :: proc(
   return self.active_particle_count,
     u32(len(self.free_particle_indices)),
     MAX_PARTICLES
+}
+
+// Collect all force field nodes for all particle systems
+collect_force_field_nodes_for_particle_systems :: proc(
+  scene: ^Scene,
+) -> [dynamic]^Node {
+  ctx := ForceFieldCollectContext{scene, make([dynamic]^Node, 0)}
+  // Traverse all nodes
+  scene_traverse(scene, &ctx, proc(node: ^Node, user_ctx: rawptr) -> bool {
+    ctx := cast(^ForceFieldCollectContext)user_ctx
+    _, is_force := &node.attachment.(ForceFieldAttachment)
+    if is_force {
+      append(&ctx.forcefields, node)
+    }
+    return true
+  })
+  return ctx.forcefields
 }

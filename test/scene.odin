@@ -246,10 +246,11 @@ traverse_scene_benchmark :: proc(
   Context :: struct {
     light_count: u32,
     mesh_count:  u32,
+
   }
   callback :: proc(node: ^mjolnir.Node, cb_context: rawptr) -> bool {
     ctx := (^Context)(cb_context)
-    switch inner in node.attachment {
+    #partial switch inner in node.attachment {
     case mjolnir.MeshAttachment:
       ctx.mesh_count += 1
     case mjolnir.DirectionalLightAttachment,
