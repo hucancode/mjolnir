@@ -41,8 +41,7 @@ MeshAttachment :: struct {
 }
 
 ParticleSystemAttachment :: struct {
-  bounding_box_min: linalg.Vector3f32,
-  bounding_box_max: linalg.Vector3f32,
+  bounding_box:   geometry.Aabb,
   texture_handle: resource.Handle, // Handle to particle texture, zero for default
 }
 

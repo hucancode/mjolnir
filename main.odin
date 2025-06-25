@@ -172,43 +172,85 @@ setup :: proc(engine: ^mjolnir.Engine) {
   )
   effect_add_tonemap(&engine.postprocess, 1.5, 1.3)
   effect_add_grayscale(&engine.postprocess, 0.3)
-  // Create a particle texture
-  particle_texture_handle, _, _ := mjolnir.create_texture_from_path(
+
+  // Create particle system 1 with gold star texture
+  particle_texture1_handle, _, _ := mjolnir.create_texture_from_path(
     "assets/gold-star.png",
   )
 
-  // Create a particle system node
-  psys_handle, psys_node := spawn_at(
+  psys_handle1, psys_node1 := spawn_at(
     &engine.scene,
-    {0.0, 1.9, 0.3},
+    {-2.0, 1.9, 0.3},
     mjolnir.ParticleSystemAttachment {
-      bounding_box_min = {-1, -1, -1},
-      bounding_box_max = {1, 1, 1},
-      texture_handle = particle_texture_handle,
+      bounding_box = geometry.Aabb {
+        min = {-1, -1, -1},
+        max = {1, 1, 1},
+      },
+      texture_handle = particle_texture1_handle,
     },
   )
-  // Create an emitter node as a child
-  _, emitter_node := spawn_child(
+
+  // Create an emitter for the first particle system
+  _, emitter_node1 := spawn_child(
     &engine.scene,
-    psys_handle,
+    psys_handle1,
     EmitterAttachment {
       emission_rate = 10,
       particle_lifetime = 5.0,
       position_spread = 0.05,
       initial_velocity = {0, -0.1, 0, 0},
       velocity_spread = 0.1,
-      color_start = {1, 0, 0, 1},
-      color_end = {0, 0, 1, 0},
-      size_start = 300.0,
-      size_end = 100.0,
+      color_start = {1, 1, 0, 1}, // Yellow particles
+      color_end = {1, 0.5, 0, 0},
+      size_start = 200.0,
+      size_end = 50.0,
       weight = 0.3,
       weight_spread = 0.05,
       enabled = true,
     },
   )
+
+  // Create particle system 2 with black circle texture
+  particle_texture2_handle, _, _ := mjolnir.create_texture_from_path(
+    "assets/black-circle.png",
+  )
+
+  psys_handle2, psys_node2 := spawn_at(
+    &engine.scene,
+    {2.0, 1.9, 0.3},
+    mjolnir.ParticleSystemAttachment {
+      bounding_box = geometry.Aabb {
+        min = {-1, -1, -1},
+        max = {1, 1, 1},
+      },
+      texture_handle = particle_texture2_handle,
+    },
+  )
+
+  // Create an emitter for the second particle system
+  _, emitter_node2 := spawn_child(
+    &engine.scene,
+    psys_handle2,
+    EmitterAttachment {
+      emission_rate = 15,
+      particle_lifetime = 3.0,
+      position_spread = 0.1,
+      initial_velocity = {0, 0.2, 0, 0},
+      velocity_spread = 0.15,
+      color_start = {0, 0, 1, 1}, // Blue particles
+      color_end = {0, 1, 1, 0},
+      size_start = 150.0,
+      size_end = 75.0,
+      weight = 0.2,
+      weight_spread = 0.05,
+      enabled = true,
+    },
+  )
+
+  // Create a force field that affects both particle systems
   forcefield_handle, forcefield_node = spawn_child(
     &engine.scene,
-    psys_handle,
+    psys_handle1, // Attach to first particle system
     mjolnir.ForceFieldAttachment {
       behavior = .ATTRACT,
       strength = 20.0,

@@ -70,6 +70,14 @@ ParticleSystemParams :: struct {
   delta_time:     f32,
 }
 
+// Push constants for particle rendering
+ParticlePushConstants :: struct {
+  view:          linalg.Matrix4f32,
+  projection:    linalg.Matrix4f32,
+  time:          f32,
+  texture_index: u32,
+}
+
 RendererParticle :: struct {
   // Compute pipeline
   params_buffer:                 DataBuffer(ParticleSystemParams),
@@ -84,11 +92,9 @@ RendererParticle :: struct {
   free_particle_indices:         [dynamic]int,
   active_particle_count:         u32,
   // Render pipeline
-  render_descriptor_set_layout:  vk.DescriptorSetLayout,
-  render_descriptor_set:         vk.DescriptorSet,
   render_pipeline_layout:        vk.PipelineLayout,
   render_pipeline:               vk.Pipeline,
-  particle_texture:              ^ImageBuffer,
+  default_texture_index:         u32,
 }
 
 initialize_particle_pool :: proc(self: ^RendererParticle) {
@@ -199,57 +205,28 @@ compute_particles :: proc(
 
 render_particles :: proc(
   self: ^RendererParticle,
+  scene: ^Scene,
   camera: geometry.Camera,
   command_buffer: vk.CommandBuffer,
 ) {
-  // log.info(
-  //   "binding particle render pipeline",
-  //   engine.particle.pipeline,
-  // )
-  barrier := vk.BufferMemoryBarrier {
-    sType               = .BUFFER_MEMORY_BARRIER,
-    srcAccessMask       = {.SHADER_WRITE},
-    dstAccessMask       = {.VERTEX_ATTRIBUTE_READ},
-    srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-    dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-    buffer              = self.particle_buffer.buffer,
-    size                = vk.DeviceSize(vk.WHOLE_SIZE),
-  }
-  vk.CmdPipelineBarrier(
-    command_buffer,
-    {.COMPUTE_SHADER}, // srcStageMask
-    {.VERTEX_INPUT}, // dstStageMask
-    {}, // dependencyFlags
-    0,
-    nil, // memoryBarrierCount, pMemoryBarriers
-    1,
-    &barrier, // bufferMemoryBarrierCount, pBufferMemoryBarriers
-    0, // imageMemoryBarrierCount, pImageMemoryBarriers
-    nil,
-  )
   vk.CmdBindPipeline(command_buffer, .GRAPHICS, self.render_pipeline)
+
+  // Bind the bindless texture and sampler descriptor sets
+  descriptor_sets := [?]vk.DescriptorSet {
+    g_bindless_textures, // set 0
+    g_bindless_samplers, // set 1
+  }
   vk.CmdBindDescriptorSets(
     command_buffer,
     .GRAPHICS,
     self.render_pipeline_layout,
-    0,
-    1,
-    &self.render_descriptor_set,
+    0, // First set index (set 0)
+    len(descriptor_sets),
+    raw_data(descriptor_sets[:]),
     0,
     nil,
   )
-  uniform := SceneUniform {
-    view       = geometry.calculate_view_matrix(camera),
-    projection = geometry.calculate_projection_matrix(camera),
-  }
-  vk.CmdPushConstants(
-    command_buffer,
-    self.render_pipeline_layout,
-    {.VERTEX},
-    0,
-    size_of(SceneUniform),
-    &uniform,
-  )
+
   offset: vk.DeviceSize = 0
   vk.CmdBindVertexBuffers(
     command_buffer,
@@ -258,16 +235,50 @@ render_particles :: proc(
     &self.particle_buffer.buffer,
     &offset,
   )
-  vk.CmdDraw(command_buffer, MAX_PARTICLES, 1, 0, 0)
+
+  // Iterate through all particle system nodes in the scene
+  particle_system_nodes := collect_particle_systems(scene)
+  defer delete(particle_system_nodes)
+
+  if len(particle_system_nodes) > 0 {
+    for node in particle_system_nodes {
+      if ps_attachment, ok := &node.attachment.(ParticleSystemAttachment); ok {
+        // Determine texture index to use
+        texture_index := self.default_texture_index
+        if ps_attachment.texture_handle.index > 0 {
+          texture_index = ps_attachment.texture_handle.index
+        }
+
+        // Set up push constants with the texture index
+        push_constants := ParticlePushConstants {
+          view          = geometry.calculate_view_matrix(camera),
+          projection    = geometry.calculate_projection_matrix(camera),
+          time          = 0.0, // Could add time tracking if needed
+          texture_index = texture_index,
+        }
+
+        vk.CmdPushConstants(
+          command_buffer,
+          self.render_pipeline_layout,
+          {.VERTEX, .FRAGMENT},
+          0,
+          size_of(ParticlePushConstants),
+          &push_constants,
+        )
+
+        // Draw all particles for this system
+        vk.CmdDraw(command_buffer, MAX_PARTICLES, 1, 0, 0)
+      }
+    }
+  } else {
+    log.warn("No particle systems found, skipping particle rendering")
+  }
 }
 
 update_emitters :: proc(self: ^Engine, delta_time: f32) {
   params := data_buffer_get(&self.particle.params_buffer)
   params.delta_time = delta_time
   recycle_dead_particles(&self.particle)
-
-  // Check if we need to update particle textures from custom settings
-  update_particle_system_textures(self)
 
   emitters := collect_emitters_for_particle_systems(&self.scene)
   params.emitter_count = u32(len(emitters))
@@ -330,11 +341,6 @@ renderer_particle_deinit :: proc(self: ^RendererParticle) {
   )
   vk.DestroyPipeline(g_device, self.render_pipeline, nil)
   vk.DestroyPipelineLayout(g_device, self.render_pipeline_layout, nil)
-  vk.DestroyDescriptorSetLayout(
-    g_device,
-    self.render_descriptor_set_layout,
-    nil,
-  )
   delete(self.free_particle_indices)
   // Free buffers
 }
@@ -491,66 +497,30 @@ renderer_particle_init :: proc(self: ^RendererParticle) -> vk.Result {
     nil,
     &self.compute_pipeline,
   ) or_return
-  render_bindings := [?]vk.DescriptorSetLayoutBinding {
-    {
-      binding = 0,
-      descriptorType = .COMBINED_IMAGE_SAMPLER,
-      descriptorCount = 1,
-      stageFlags = {.FRAGMENT},
-    },
-  }
-  vk.CreateDescriptorSetLayout(
-    g_device,
-    &{
-      sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-      bindingCount = len(render_bindings),
-      pBindings = raw_data(render_bindings[:]),
-    },
-    nil,
-    &self.render_descriptor_set_layout,
-  ) or_return
   push_constant_range := [?]vk.PushConstantRange {
-    {stageFlags = {.VERTEX}, size = size_of(SceneUniform)},
+    {stageFlags = {.VERTEX, .FRAGMENT}, size = size_of(ParticlePushConstants)},
+  }
+  // Create descriptor set layouts: set 0 for textures, set 1 for samplers
+  descriptor_set_layouts := [?]vk.DescriptorSetLayout {
+    g_bindless_textures_layout,  // set = 0 for textures
+    g_bindless_samplers_layout,  // set = 1 for samplers
   }
   vk.CreatePipelineLayout(
     g_device,
     &{
       sType = .PIPELINE_LAYOUT_CREATE_INFO,
-      setLayoutCount = 1,
-      pSetLayouts = &self.render_descriptor_set_layout,
+      setLayoutCount = len(descriptor_set_layouts),
+      pSetLayouts = raw_data(descriptor_set_layouts[:]),
       pushConstantRangeCount = len(push_constant_range),
       pPushConstantRanges = raw_data(push_constant_range[:]),
     },
     nil,
-    &self.render_pipeline_layout,
-  ) or_return
-  // Load the default particle texture
-  default_texture_handle, default_texture, _ := create_texture_from_path("assets/black-circle.png")
-  self.particle_texture = default_texture
+    &self.render_pipeline_layout,  ) or_return
+  // Load the default particle texture and store its index
+  default_texture_handle, _, _ := create_texture_from_path("assets/black-circle.png")
+  self.default_texture_index = default_texture_handle.index
 
-  vk.AllocateDescriptorSets(
-    g_device,
-    &{
-      sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
-      descriptorPool = g_descriptor_pool,
-      descriptorSetCount = 1,
-      pSetLayouts = &self.render_descriptor_set_layout,
-    },
-    &self.render_descriptor_set,
-  ) or_return
-  write := vk.WriteDescriptorSet {
-    sType           = .WRITE_DESCRIPTOR_SET,
-    dstSet          = self.render_descriptor_set,
-    dstBinding      = 0,
-    descriptorType  = .COMBINED_IMAGE_SAMPLER,
-    descriptorCount = 1,
-    pImageInfo      = &{
-      sampler = g_linear_repeat_sampler,
-      imageView = self.particle_texture.view,
-      imageLayout = .SHADER_READ_ONLY_OPTIMAL,
-    },
-  }
-  vk.UpdateDescriptorSets(g_device, 1, &write, 0, nil)
+  // Vertex input configuration
   vertex_binding := vk.VertexInputBindingDescription {
     binding   = 0,
     stride    = size_of(Particle),
@@ -734,6 +704,29 @@ renderer_particle_begin :: proc(
   // Update force fields before running compute shader
   update_force_fields(engine)
 
+  // Memory barrier to ensure compute results are visible before rendering
+  barrier := vk.BufferMemoryBarrier {
+    sType               = .BUFFER_MEMORY_BARRIER,
+    srcAccessMask       = {.SHADER_WRITE},
+    dstAccessMask       = {.VERTEX_ATTRIBUTE_READ},
+    srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    buffer              = engine.particle.particle_buffer.buffer,
+    size                = vk.DeviceSize(vk.WHOLE_SIZE),
+  }
+  vk.CmdPipelineBarrier(
+    command_buffer,
+    {.COMPUTE_SHADER}, // srcStageMask
+    {.VERTEX_INPUT}, // dstStageMask
+    {}, // dependencyFlags
+    0,
+    nil, // memoryBarrierCount, pMemoryBarriers
+    1,
+    &barrier, // bufferMemoryBarrierCount, pBufferMemoryBarriers
+    0, // imageMemoryBarrierCount, pImageMemoryBarriers
+    nil,
+  )
+
   color_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
     imageView = color_view,
@@ -778,7 +771,7 @@ renderer_particle_render :: proc(
   engine: ^Engine,
   command_buffer: vk.CommandBuffer,
 ) {
-  render_particles(&engine.particle, engine.scene.camera, command_buffer)
+  render_particles(&engine.particle, &engine.scene, engine.scene.camera, command_buffer)
 }
 
 renderer_particle_end :: proc(
@@ -821,26 +814,6 @@ collect_force_field_nodes_for_particle_systems :: proc(
   return ctx.forcefields
 }
 
-// Update particle system textures based on the texture_handle field in ParticleSystemAttachment
-update_particle_system_textures :: proc(engine: ^Engine) {
-  // Find all particle system nodes
-  particle_systems := collect_particle_systems(&engine.scene)
-
-  for &node in particle_systems {
-    if psys, ok := &node.attachment.(ParticleSystemAttachment); ok {
-      if psys.texture_handle.index > 0 {
-        // Set the custom texture for the particle system
-        if set_particle_texture(&engine.particle, psys.texture_handle) {
-          log.infof("Set particle texture with handle: %v", psys.texture_handle)
-        }
-        // Once we've set the texture for one particle system, we're done
-        // (since there's only one global particle renderer)
-        break
-      }
-    }
-  }
-}
-
 // Collect all particle system nodes from the scene
 collect_particle_systems :: proc(scene: ^Scene) -> [dynamic]^Node {
   result := make([dynamic]^Node, 0)
@@ -854,40 +827,5 @@ collect_particle_systems :: proc(scene: ^Scene) -> [dynamic]^Node {
     }
     return true
   })
-
   return result
-}
-
-// Update particle texture for a specific particle system using a texture handle
-set_particle_texture :: proc(self: ^RendererParticle, texture_handle: resource.Handle) -> bool {
-  if texture_handle.index <= 0 {
-    return false
-  }
-
-  // Get the texture from the handle
-  texture, ok := resource.get(g_image_buffers, texture_handle)
-  if !ok {
-    log.errorf("Could not find texture with handle %v", texture_handle)
-    return false
-  }
-
-  // Store the new texture
-  self.particle_texture = texture
-
-  // Update descriptor set to use the new texture
-  write := vk.WriteDescriptorSet {
-    sType           = .WRITE_DESCRIPTOR_SET,
-    dstSet          = self.render_descriptor_set,
-    dstBinding      = 0,
-    descriptorType  = .COMBINED_IMAGE_SAMPLER,
-    descriptorCount = 1,
-    pImageInfo      = &{
-      sampler = g_linear_repeat_sampler,
-      imageView = self.particle_texture.view,
-      imageLayout = .SHADER_READ_ONLY_OPTIMAL,
-    },
-  }
-  vk.UpdateDescriptorSets(g_device, 1, &write, 0, nil)
-
-  return true
 }
