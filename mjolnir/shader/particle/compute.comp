@@ -18,6 +18,24 @@ struct Particle {
     float padding[2];
 };
 
+struct Emitter {
+    mat4 transform;
+    float emission_rate;
+    float particle_lifetime;
+    float position_spread;
+    float velocity_spread;
+    float time_accumulator;
+    vec4 initial_velocity;
+    vec4 color_start;
+    vec4 color_end;
+    float size_start;
+    float size_end;
+    uint enabled;
+    float weight;
+    float weight_spread;
+    float padding[3];
+};
+
 struct ForceField {
     uint behavior; // 0: ATTRACT, 1: REPEL, 2: ORBIT
     float strength;
@@ -28,12 +46,17 @@ struct ForceField {
 
 layout(binding = 0) uniform ParamsBuffer {
     uint particle_count;
+    uint emitter_count;
+    uint forcefield_count;
     float deltaTime;
-    float padding[2];
 };
 
 layout(binding = 1) buffer ParticleBuffer {
     Particle particles[];
+};
+
+layout(binding = 2) buffer EmitterBuffer {
+    Emitter emitters[];
 };
 
 layout(binding = 3) buffer ForceFieldBuffer {
@@ -70,10 +93,9 @@ void main() {
     if (i >= MAX_PARTICLES) return;
     if (particles[i].is_dead != 0) return;
     if (particles[i].life <= 0.0) return;
-    // Apply force fields
     vec3 p = particles[i].position.xyz;
-    // Process actual force fields
-    for (int f = 0; f < MAX_FORCE_FIELDS; ++f) {
+    // Process actual force fields, using the dynamic forcefield_count
+    for (int f = 0; f < min(forcefield_count, MAX_FORCE_FIELDS); ++f) {
         ForceField ff = forcefields[f];
         // Ignore unused slots (area_of_effect == 0 means unused)
         if (ff.area_of_effect <= 0.0) continue;

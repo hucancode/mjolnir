@@ -15,6 +15,7 @@ MAX_FORCE_FIELDS :: 32
 
 // Shared Emitter struct for use in both scene and renderer_particle
 Emitter :: struct {
+  transform:         linalg.Matrix4f32,
   emission_rate:     f32,
   particle_lifetime: f32,
   position_spread:   f32,
@@ -63,8 +64,9 @@ Particle :: struct {
 
 ParticleSystemParams :: struct {
   particle_count: u32,
+  emitter_count:  u32,
+  forcefield_count:  u32,
   delta_time:     f32,
-  padding:        [2]f32,
 }
 
 RendererParticle :: struct {
@@ -263,6 +265,7 @@ update_emitters :: proc(self: ^Engine, delta_time: f32) {
   params.delta_time = delta_time
   recycle_dead_particles(&self.particle)
   emitters := collect_emitters_for_particle_systems(&self.scene)
+  params.emitter_count = u32(len(emitters))
   spawned_this_frame := 0
   for &entry in emitters {
     emitter := &entry.attachment.(EmitterAttachment)
@@ -290,6 +293,7 @@ update_force_fields :: proc(self: ^Engine) {
     self.particle.force_field_buffer.mapped,
     MAX_FORCE_FIELDS,
   )
+  params := data_buffer_get(&self.particle.params_buffer)
   count := 0
   for &node in forcefield_nodes {
     if count >= MAX_FORCE_FIELDS {
@@ -305,6 +309,7 @@ update_force_fields :: proc(self: ^Engine) {
     forcefields[count] = forcefield
     count += 1
   }
+  params.forcefield_count = u32(count)
   for i in count ..< MAX_FORCE_FIELDS {
     forcefields[i] = ForceField{}
   }
@@ -335,10 +340,6 @@ renderer_particle_init :: proc(self: ^RendererParticle) -> vk.Result {
     1,
     {.UNIFORM_BUFFER},
   ) or_return
-  params := data_buffer_get(&self.params_buffer)
-  params.particle_count = 0
-  params.delta_time = 0
-  params.padding = 0
   self.particle_buffer = create_host_visible_buffer(
     Particle,
     MAX_PARTICLES,
