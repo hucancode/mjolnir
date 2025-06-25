@@ -32,7 +32,7 @@ Emitter :: struct {
 }
 
 // Shared ForceField struct for use in both scene and renderer_particle
-ForceFieldBehavior :: enum (u32){
+ForceFieldBehavior :: enum (u32) {
   ATTRACT,
   REPEL,
   ORBIT,
@@ -43,8 +43,9 @@ ForceField :: struct {
   strength:       f32,
   area_of_effect: f32, // radius
   fade:           f32, // 0..1, linear fade factor
-  transform:      geometry.Transform,
+  position:       linalg.Vector4f32, // world position
 }
+
 Particle :: struct {
   position:    linalg.Vector4f32,
   velocity:    linalg.Vector4f32,
@@ -118,14 +119,23 @@ spawn_particle :: proc(
   particle.position =
     emitter_transform *
     linalg.Vector4f32{local_offset.x, local_offset.y, local_offset.z, 1.0}
-  local_velocity := emitter.initial_velocity + {
-    rand.float32() * emitter.velocity_spread * 2.0 - emitter.velocity_spread,
-    rand.float32() * emitter.velocity_spread * 2.0 - emitter.velocity_spread,
-    rand.float32() * emitter.velocity_spread * 2.0 - emitter.velocity_spread,
-    0.0,
-  }
+  local_velocity :=
+    emitter.initial_velocity +
+    {
+        rand.float32() * emitter.velocity_spread * 2.0 -
+        emitter.velocity_spread,
+        rand.float32() * emitter.velocity_spread * 2.0 -
+        emitter.velocity_spread,
+        rand.float32() * emitter.velocity_spread * 2.0 -
+        emitter.velocity_spread,
+        0.0,
+      }
   particle.velocity = emitter_transform * local_velocity
-  log.debugf("emitter_transform: %v, local_velocity: %v", emitter_transform, local_velocity)
+  log.debugf(
+    "emitter_transform: %v, local_velocity: %v",
+    emitter_transform,
+    local_velocity,
+  )
   particle.life = emitter.particle_lifetime
   particle.max_life = emitter.particle_lifetime
   particle.color_start = emitter.color_start
@@ -137,12 +147,6 @@ spawn_particle :: proc(
     emitter.weight +
     (rand.float32() * emitter.weight_spread * 2.0 - emitter.weight_spread)
   self.active_particle_count += 1
-  // Debug: print velocity of first 5 active particles
-  debug_count := 0
-  for &particle, i in particles do if !particle.is_dead && debug_count < 5 {
-    log.infof("[ParticleSystem] Particle %d velocity: (%.3f, %.3f, %.3f)", i, particle.velocity.x, particle.velocity.y, particle.velocity.z)
-    debug_count += 1
-  }
   return true
 }
 
@@ -287,31 +291,32 @@ update_emitters :: proc(self: ^Engine, delta_time: f32) {
       emitter.time_accumulator -= emission_interval
     }
   }
-  log.infof(
-    "[ParticleSystem] Spawned %d particles this frame",
-    spawned_this_frame,
-  )
   params.particle_count = self.particle.active_particle_count
 }
 
 // Fill force field buffer each frame before compute dispatch
 update_force_fields :: proc(self: ^Engine) {
   forcefield_nodes := collect_forcefields_for_particle_systems(&self.scene)
-  forcefields := slice.from_ptr(self.particle.force_field_buffer.mapped, MAX_FORCE_FIELDS)
+  forcefields := slice.from_ptr(
+    self.particle.force_field_buffer.mapped,
+    MAX_FORCE_FIELDS,
+  )
   count := 0
-  for node in forcefield_nodes {
+  for &node in forcefield_nodes {
     if count >= MAX_FORCE_FIELDS {
       break
     }
     force_att, is_ff := &node.attachment.(ForceFieldAttachment)
-    if is_ff {
-      forcefield := force_att.force_field
-      forcefield.transform = node.transform
-      forcefields[count] = forcefield
-      count += 1
+    if !is_ff {
+      continue
     }
+    forcefield := force_att.force_field
+    forcefield.position =
+      node.transform.world_matrix * linalg.Vector4f32{0, 0, 0, 1}
+    forcefields[count] = forcefield
+    count += 1
   }
-  for i in count..<MAX_FORCE_FIELDS {
+  for i in count ..< MAX_FORCE_FIELDS {
     forcefields[i] = ForceField{}
   }
 }
@@ -804,7 +809,9 @@ get_particle_pool_stats :: proc(
 }
 
 // Collect all force field nodes for all particle systems
-collect_force_field_nodes_for_particle_systems :: proc(scene: ^Scene) -> [dynamic]^Node {
+collect_force_field_nodes_for_particle_systems :: proc(
+  scene: ^Scene,
+) -> [dynamic]^Node {
   ctx := ForceFieldCollectContext{scene, make([dynamic]^Node, 0)}
   // Traverse all nodes
   scene_traverse(scene, &ctx, proc(node: ^Node, user_ctx: rawptr) -> bool {

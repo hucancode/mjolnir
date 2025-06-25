@@ -15,6 +15,8 @@ light_handles: [LIGHT_COUNT]mjolnir.Handle
 light_cube_handles: [LIGHT_COUNT]mjolnir.Handle
 ground_mat_handle: mjolnir.Handle
 engine: mjolnir.Engine
+forcefield_handle : mjolnir.Handle
+forcefield_node : ^mjolnir.Node
 
 main :: proc() {
   context.logger = log.create_console_logger()
@@ -193,25 +195,31 @@ setup :: proc(engine: ^mjolnir.Engine) {
       color_end = {0, 0, 1, 0},
       size_start = 300.0,
       size_end = 100.0,
-      weight = 0.2,
-      weight_spread = 0.2,
+      weight = 0.3,
+      weight_spread = 0.05,
       enabled = true,
     },
   )
-  forcefield_handle, forcefield_node := spawn_child(
+  forcefield_handle, forcefield_node = spawn_child(
     &engine.scene,
-    psys_handle, // parent is the same particle system
+    psys_handle,
     mjolnir.ForceFieldAttachment {
-      behavior       = .ATTRACT,
-      strength       = 20.0,
+      behavior = .ATTRACT,
+      strength = 20.0,
       area_of_effect = 5.0,
-      fade           = 0.5,
     },
   )
-  geometry.translate(
-    &forcefield_node.transform,
-    0.0, 3.5, 0.0,
+  geometry.translate(&forcefield_node.transform, x = 5.0, y = 4.0, z = 0.0)
+  _, forcefield_visual := spawn_child(
+    &engine.scene,
+    forcefield_handle,
+    MeshAttachment {
+      handle = sphere_mesh_handle,
+      material = plain_material_handle,
+      cast_shadow = false,
+    },
   )
+  geometry.scale(&forcefield_visual.transform, 0.2)
   log.info("setup complete")
 }
 
@@ -226,6 +234,17 @@ render_2d :: proc(engine: ^mjolnir.Engine, ctx: ^mu.Context) {
 
 update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
   using mjolnir, geometry
+  if forcefield_handle.index > 0 {
+    // Animate the forcefield in a circle
+    forcefield_node := resource.get(engine.scene.nodes, forcefield_handle) or_else nil
+    if forcefield_node != nil {
+      t := time_since_app_start(engine) * 0.5
+      x := math.cos(t) * 2.0
+      z := math.sin(t) * 2.0
+      forcefield_node.transform.position = {x, 2.0, z}
+      forcefield_node.transform.is_dirty = true
+    }
+  }
   // Animate lights
   for handle, i in light_handles {
     if i == 0 {
