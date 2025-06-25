@@ -15,7 +15,8 @@ struct Particle {
     float max_life;
     uint is_dead;
     float weight;
-    float padding[2];
+    uint texture_index;
+    uint padding;
 };
 
 struct Emitter {
@@ -24,16 +25,17 @@ struct Emitter {
     float particle_lifetime;
     float position_spread;
     float velocity_spread;
-    float time_accumulator;
     vec4 initial_velocity;
     vec4 color_start;
     vec4 color_end;
+    float time_accumulator;
     float size_start;
     float size_end;
     uint enabled;
     float weight;
     float weight_spread;
-    float padding[3];
+    uint texture_handle_index;
+    uint texture_handle_generation;
 };
 
 struct ForceField {

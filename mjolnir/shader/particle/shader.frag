@@ -12,11 +12,12 @@ layout(push_constant) uniform PushConstants {
 };
 
 layout (location = 0) in vec4 inColor;
+layout (location = 1) in flat uint inTextureIndex;
 layout (location = 0) out vec4 outFragColor;
 
 void main() {
     // Sample the particle texture using point coordinates
-    vec4 texColor = texture(sampler2D(textures[nonuniformEXT(texture_index)], samplers[3]), gl_PointCoord);
+    vec4 texColor = texture(sampler2D(textures[nonuniformEXT(inTextureIndex)], samplers[3]), gl_PointCoord);
     // Combine texture color with the interpolated particle color and fade by life ratio
     outFragColor = vec4(inColor.rgb, texColor.a*inColor.a);
 }

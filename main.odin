@@ -177,6 +177,10 @@ setup :: proc(engine: ^mjolnir.Engine) {
   particle_texture1_handle, _, _ := mjolnir.create_texture_from_path(
     "assets/gold-star.png",
   )
+  // Create particle system 2 with black circle texture
+  particle_texture2_handle, _, _ := mjolnir.create_texture_from_path(
+    "assets/black-circle.png",
+  )
 
   psys_handle1, psys_node1 := spawn_at(
     &engine.scene,
@@ -206,13 +210,9 @@ setup :: proc(engine: ^mjolnir.Engine) {
       size_end = 50.0,
       weight = 0.3,
       weight_spread = 0.05,
+      texture_handle = particle_texture1_handle,
       enabled = true,
     },
-  )
-
-  // Create particle system 2 with black circle texture
-  particle_texture2_handle, _, _ := mjolnir.create_texture_from_path(
-    "assets/black-circle.png",
   )
 
   psys_handle2, psys_node2 := spawn_at(
@@ -243,6 +243,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
       size_end = 75.0,
       weight = 0.2,
       weight_spread = 0.05,
+      texture_handle = particle_texture2_handle,
       enabled = true,
     },
   )

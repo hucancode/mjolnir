@@ -21,19 +21,18 @@ Emitter :: struct {
   particle_lifetime: f32,
   position_spread:   f32,
   velocity_spread:   f32,
-  time_accumulator:  f32,
   initial_velocity:  linalg.Vector4f32,
   color_start:       linalg.Vector4f32,
   color_end:         linalg.Vector4f32,
+  time_accumulator:  f32,
   size_start:        f32,
   size_end:          f32,
   enabled:           b32,
   weight:            f32,
   weight_spread:     f32,
-  padding:           [3]f32,
+  texture_handle:    resource.Handle,
 }
 
-// Shared ForceField struct for use in both scene and renderer_particle
 ForceFieldBehavior :: enum (u32) {
   ATTRACT,
   REPEL,
@@ -49,25 +48,26 @@ ForceField :: struct {
 }
 
 Particle :: struct {
-  position:    linalg.Vector4f32,
-  velocity:    linalg.Vector4f32,
-  color_start: linalg.Vector4f32,
-  color_end:   linalg.Vector4f32,
-  color:       linalg.Vector4f32,
-  size:        f32,
-  size_end:    f32,
-  life:        f32,
-  max_life:    f32,
-  is_dead:     b32,
-  weight:      f32,
-  padding:     [2]f32,
+  position:     linalg.Vector4f32,
+  velocity:     linalg.Vector4f32,
+  color_start:  linalg.Vector4f32,
+  color_end:    linalg.Vector4f32,
+  color:        linalg.Vector4f32,
+  size:         f32,
+  size_end:     f32,
+  life:         f32,
+  max_life:     f32,
+  is_dead:      b32,
+  weight:       f32,
+  texture_index: u32,
+  padding:      u32, // Align to 16-byte boundary (112 bytes total)
 }
 
 ParticleSystemParams :: struct {
-  particle_count: u32,
-  emitter_count:  u32,
-  forcefield_count:  u32,
-  delta_time:     f32,
+  particle_count:   u32,
+  emitter_count:    u32,
+  forcefield_count: u32,
+  delta_time:       f32,
 }
 
 // Push constants for particle rendering
@@ -118,6 +118,7 @@ spawn_particle :: proc(
   idx := pop(&self.free_particle_indices)
   particles := slice.from_ptr(self.particle_buffer.mapped, MAX_PARTICLES)
   particle := &particles[idx]
+
   particle.is_dead = false
   local_offset := linalg.Vector4f32 {
     rand.float32() * emitter.position_spread * 2.0 - emitter.position_spread,
@@ -144,13 +145,19 @@ spawn_particle :: proc(
   weight_variation :=
     rand.float32() * emitter.weight_spread * 2.0 - emitter.weight_spread
   particle.weight = emitter.weight + weight_variation
+  particle.texture_index = emitter.texture_handle.index
   self.active_particle_count += 1
+
+  log.info("Spawned particle at index", idx, "life:", particle.life, "texture_index:", particle.texture_index, "active_count:", self.active_particle_count)
   return true
 }
 
 recycle_dead_particles :: proc(self: ^RendererParticle) {
   particles := slice.from_ptr(self.particle_buffer.mapped, MAX_PARTICLES)
-  for &particle, i in particles do if particle.life <= 0 && !particle.is_dead {
+  for &particle, i in particles do if particle.is_dead {
+    // Reset the particle and add to free list
+    particle.is_dead = false
+    particle.life = 0
     append(&self.free_particle_indices, i)
     if self.active_particle_count > 0 {
       self.active_particle_count -= 1
@@ -236,43 +243,23 @@ render_particles :: proc(
     &offset,
   )
 
-  // Iterate through all particle system nodes in the scene
-  particle_system_nodes := collect_particle_systems(scene)
-  defer delete(particle_system_nodes)
-
-  if len(particle_system_nodes) > 0 {
-    for node in particle_system_nodes {
-      if ps_attachment, ok := &node.attachment.(ParticleSystemAttachment); ok {
-        // Determine texture index to use
-        texture_index := self.default_texture_index
-        if ps_attachment.texture_handle.index > 0 {
-          texture_index = ps_attachment.texture_handle.index
-        }
-
-        // Set up push constants with the texture index
-        push_constants := ParticlePushConstants {
-          view          = geometry.calculate_view_matrix(camera),
-          projection    = geometry.calculate_projection_matrix(camera),
-          time          = 0.0, // Could add time tracking if needed
-          texture_index = texture_index,
-        }
-
-        vk.CmdPushConstants(
-          command_buffer,
-          self.render_pipeline_layout,
-          {.VERTEX, .FRAGMENT},
-          0,
-          size_of(ParticlePushConstants),
-          &push_constants,
-        )
-
-        // Draw all particles for this system
-        vk.CmdDraw(command_buffer, MAX_PARTICLES, 1, 0, 0)
-      }
-    }
-  } else {
-    log.warn("No particle systems found, skipping particle rendering")
+  // Set up push constants (no texture_index needed since it's per-particle now)
+  push_constants := ParticlePushConstants {
+    view          = geometry.calculate_view_matrix(camera),
+    projection    = geometry.calculate_projection_matrix(camera),
+    time          = 0.0, // Could add time tracking if needed
+    texture_index = 0,   // Not used anymore, but keeping for compatibility
   }
+
+  vk.CmdPushConstants(
+    command_buffer,
+    self.render_pipeline_layout,
+    {.VERTEX, .FRAGMENT},
+    0,
+    size_of(ParticlePushConstants),
+    &push_constants,
+  )
+  vk.CmdDraw(command_buffer, MAX_PARTICLES, 1, 0, 0)
 }
 
 update_emitters :: proc(self: ^Engine, delta_time: f32) {
@@ -299,6 +286,11 @@ update_emitters :: proc(self: ^Engine, delta_time: f32) {
       emitter.time_accumulator -= emission_interval
     }
   }
+
+  if spawned_this_frame > 0 {
+    log.info("Spawned", spawned_this_frame, "particles this frame")
+  }
+
   params.particle_count = self.particle.active_particle_count
 }
 
@@ -502,8 +494,8 @@ renderer_particle_init :: proc(self: ^RendererParticle) -> vk.Result {
   }
   // Create descriptor set layouts: set 0 for textures, set 1 for samplers
   descriptor_set_layouts := [?]vk.DescriptorSetLayout {
-    g_bindless_textures_layout,  // set = 0 for textures
-    g_bindless_samplers_layout,  // set = 1 for samplers
+    g_bindless_textures_layout, // set = 0 for textures
+    g_bindless_samplers_layout, // set = 1 for samplers
   }
   vk.CreatePipelineLayout(
     g_device,
@@ -515,9 +507,12 @@ renderer_particle_init :: proc(self: ^RendererParticle) -> vk.Result {
       pPushConstantRanges = raw_data(push_constant_range[:]),
     },
     nil,
-    &self.render_pipeline_layout,  ) or_return
+    &self.render_pipeline_layout,
+  ) or_return
   // Load the default particle texture and store its index
-  default_texture_handle, _, _ := create_texture_from_path("assets/black-circle.png")
+  default_texture_handle, _, _ := create_texture_from_path(
+    "assets/black-circle.png",
+  )
   self.default_texture_index = default_texture_handle.index
 
   // Vertex input configuration
@@ -586,6 +581,12 @@ renderer_particle_init :: proc(self: ^RendererParticle) -> vk.Result {
       binding = 0,
       format = .R32_UINT,
       offset = u32(offset_of(Particle, is_dead)),
+    },
+    {
+      location = 10,
+      binding = 0,
+      format = .R32_UINT,
+      offset = u32(offset_of(Particle, texture_index)),
     },
   }
   vertex_input_info := vk.PipelineVertexInputStateCreateInfo {
@@ -771,7 +772,12 @@ renderer_particle_render :: proc(
   engine: ^Engine,
   command_buffer: vk.CommandBuffer,
 ) {
-  render_particles(&engine.particle, &engine.scene, engine.scene.camera, command_buffer)
+  render_particles(
+    &engine.particle,
+    &engine.scene,
+    engine.scene.camera,
+    command_buffer,
+  )
 }
 
 renderer_particle_end :: proc(
