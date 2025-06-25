@@ -15,8 +15,8 @@ light_handles: [LIGHT_COUNT]mjolnir.Handle
 light_cube_handles: [LIGHT_COUNT]mjolnir.Handle
 ground_mat_handle: mjolnir.Handle
 engine: mjolnir.Engine
-forcefield_handle : mjolnir.Handle
-forcefield_node : ^mjolnir.Node
+forcefield_handle: mjolnir.Handle
+forcefield_node: ^mjolnir.Node
 
 main :: proc() {
   context.logger = log.create_console_logger()
@@ -234,17 +234,8 @@ render_2d :: proc(engine: ^mjolnir.Engine, ctx: ^mu.Context) {
 
 update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
   using mjolnir, geometry
-  if forcefield_handle.index > 0 {
-    // Animate the forcefield in a circle
-    forcefield_node := resource.get(engine.scene.nodes, forcefield_handle) or_else nil
-    if forcefield_node != nil {
-      t := time_since_app_start(engine) * 0.5
-      x := math.cos(t) * 2.0
-      z := math.sin(t) * 2.0
-      forcefield_node.transform.position = {x, 2.0, z}
-      forcefield_node.transform.is_dirty = true
-    }
-  }
+  t := time_since_app_start(engine) * 0.5
+  geometry.translate(&forcefield_node.transform, math.cos(t) * 2.0, 2.0, math.sin(t) * 2.0)
   // Animate lights
   for handle, i in light_handles {
     if i == 0 {

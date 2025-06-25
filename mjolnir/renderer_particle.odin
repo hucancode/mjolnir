@@ -110,32 +110,21 @@ spawn_particle :: proc(
   particles := slice.from_ptr(self.particle_buffer.mapped, MAX_PARTICLES)
   particle := &particles[idx]
   particle.is_dead = false
-  // Use emitter_transform to compute world position
-  local_offset := linalg.Vector3f32 {
+  local_offset := linalg.Vector4f32 {
     rand.float32() * emitter.position_spread * 2.0 - emitter.position_spread,
     rand.float32() * emitter.position_spread * 2.0 - emitter.position_spread,
     rand.float32() * emitter.position_spread * 2.0 - emitter.position_spread,
+    1.0,
   }
-  particle.position =
-    emitter_transform *
-    linalg.Vector4f32{local_offset.x, local_offset.y, local_offset.z, 1.0}
-  local_velocity :=
-    emitter.initial_velocity +
-    {
-        rand.float32() * emitter.velocity_spread * 2.0 -
-        emitter.velocity_spread,
-        rand.float32() * emitter.velocity_spread * 2.0 -
-        emitter.velocity_spread,
-        rand.float32() * emitter.velocity_spread * 2.0 -
-        emitter.velocity_spread,
-        0.0,
-      }
+  particle.position = emitter_transform * local_offset
+  velocity_variation := linalg.Vector4f32 {
+    rand.float32() * emitter.velocity_spread * 2.0 - emitter.velocity_spread,
+    rand.float32() * emitter.velocity_spread * 2.0 - emitter.velocity_spread,
+    rand.float32() * emitter.velocity_spread * 2.0 - emitter.velocity_spread,
+    0.0,
+  }
+  local_velocity := emitter.initial_velocity + velocity_variation
   particle.velocity = emitter_transform * local_velocity
-  log.debugf(
-    "emitter_transform: %v, local_velocity: %v",
-    emitter_transform,
-    local_velocity,
-  )
   particle.life = emitter.particle_lifetime
   particle.max_life = emitter.particle_lifetime
   particle.color_start = emitter.color_start
@@ -143,9 +132,9 @@ spawn_particle :: proc(
   particle.color = emitter.color_start
   particle.size = emitter.size_start
   particle.size_end = emitter.size_end
-  particle.weight =
-    emitter.weight +
-    (rand.float32() * emitter.weight_spread * 2.0 - emitter.weight_spread)
+  weight_variation :=
+    rand.float32() * emitter.weight_spread * 2.0 - emitter.weight_spread
+  particle.weight = emitter.weight + weight_variation
   self.active_particle_count += 1
   return true
 }
