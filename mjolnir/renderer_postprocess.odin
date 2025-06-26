@@ -12,6 +12,7 @@ SHADER_TONEMAP_FRAG :: #load("shader/tonemap/frag.spv")
 SHADER_OUTLINE_FRAG :: #load("shader/outline/frag.spv")
 SHADER_FOG_FRAG :: #load("shader/fog/frag.spv")
 SHADER_CROSSHATCH_FRAG :: #load("shader/crosshatch/frag.spv")
+SHADER_DOF_FRAG :: #load("shader/dof/frag.spv")
 
 GrayscaleEffect :: struct {
   weights:  [3]f32,
@@ -61,6 +62,13 @@ CrossHatchEffect :: struct {
   padding:           f32, // For alignment
 }
 
+DoFEffect :: struct {
+  focus_distance:   f32, // Distance to the focus plane
+  focus_range:      f32, // Range where objects are in focus
+  blur_strength:    f32, // Maximum blur radius
+  bokeh_intensity:  f32, // Bokeh effect intensity
+}
+
 PostProcessEffectType :: enum int {
   GRAYSCALE,
   TONEMAP,
@@ -69,6 +77,7 @@ PostProcessEffectType :: enum int {
   OUTLINE,
   FOG,
   CROSSHATCH,
+  DOF,
   NONE,
 }
 
@@ -80,6 +89,7 @@ PostprocessEffect :: union {
   OutlineEffect,
   FogEffect,
   CrossHatchEffect,
+  DoFEffect,
 }
 
 RendererPostProcess :: struct {
@@ -118,6 +128,8 @@ get_effect_type :: proc(effect: PostprocessEffect) -> PostProcessEffectType {
     return .FOG
   case CrossHatchEffect:
     return .CROSSHATCH
+  case DoFEffect:
+    return .DOF
   }
   return .NONE
 }
@@ -249,6 +261,22 @@ effect_add_crosshatch :: proc(
   append(&self.effect_stack, effect)
 }
 
+effect_add_dof :: proc(
+  self: ^RendererPostProcess,
+  focus_distance: f32 = 10.0,
+  focus_range: f32 = 2.0,
+  blur_strength: f32 = 8.0,
+  bokeh_intensity: f32 = 0.5,
+) {
+  effect := DoFEffect {
+    focus_distance  = focus_distance,
+    focus_range     = focus_range,
+    blur_strength   = blur_strength,
+    bokeh_intensity = bokeh_intensity,
+  }
+  append(&self.effect_stack, effect)
+}
+
 effect_clear :: proc(self: ^RendererPostProcess) {
   resize(&self.effect_stack, 0)
 }
@@ -345,6 +373,8 @@ renderer_postprocess_init :: proc(
       shader_code = SHADER_FOG_FRAG
     case .CROSSHATCH:
       shader_code = SHADER_CROSSHATCH_FRAG
+    case .DOF:
+      shader_code = SHADER_DOF_FRAG
     case .NONE:
       shader_code = SHADER_POSTPROCESS_FRAG
     }
@@ -475,6 +505,8 @@ renderer_postprocess_init :: proc(
       push_constant_size = size_of(FogEffect)
     case .CROSSHATCH:
       push_constant_size = size_of(CrossHatchEffect)
+    case .DOF:
+      push_constant_size = size_of(DoFEffect)
     case .NONE:
       push_constant_size = 0
     }
@@ -770,6 +802,15 @@ renderer_postprocess_render :: proc(
         {.FRAGMENT},
         0,
         size_of(CrossHatchEffect),
+        &e,
+      )
+    case DoFEffect:
+      vk.CmdPushConstants(
+        command_buffer,
+        self.pipeline_layouts[effect_type],
+        {.FRAGMENT},
+        0,
+        size_of(DoFEffect),
         &e,
       )
     }
