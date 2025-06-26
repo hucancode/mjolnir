@@ -594,17 +594,18 @@ renderer_main_render :: proc(
     0,
     nil,
   )
-  rendered_count := render_batched_meshes(&engine.main, &batching_ctx, command_buffer)
+  rendered_count := render_batched_meshes(
+    &engine.main,
+    &batching_ctx,
+    command_buffer,
+  )
   if mu.window(
     &engine.ui.ctx,
     "Main pass renderer",
     {40, 200, 300, 150},
     {.NO_CLOSE},
   ) {
-    mu.label(
-      &engine.ui.ctx,
-      fmt.tprintf("Rendered %v", rendered_count),
-    )
+    mu.label(&engine.ui.ctx, fmt.tprintf("Rendered %v", rendered_count))
     mu.label(
       &engine.ui.ctx,
       fmt.tprintf("Batches %v", len(batching_ctx.meshes)),
@@ -709,7 +710,7 @@ render_to_texture :: proc(
     0,
     nil,
   )
-  rendered_count := render_batched_meshes(&engine.main, &batching_ctx, command_buffer)
+  render_batched_meshes(&engine.main, &batching_ctx, command_buffer)
   vk.CmdEndRenderingKHR(command_buffer)
   return .SUCCESS
 }
@@ -996,10 +997,7 @@ render_batched_meshes :: proc(
           MAX_TEXTURES - 1,
           self.environment_map.index,
         ),
-        brdf_lut_index           = min(
-          MAX_TEXTURES - 1,
-          self.brdf_lut.index,
-        ),
+        brdf_lut_index           = min(MAX_TEXTURES - 1, self.brdf_lut.index),
         bone_matrix_offset       = 0,
       }
 

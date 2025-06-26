@@ -7,7 +7,6 @@ import "core:fmt"
 import "core:log"
 import "core:math"
 import linalg "core:math/linalg"
-import "core:slice"
 import "core:strings"
 import "core:time"
 import "geometry"
@@ -43,17 +42,17 @@ MouseScrollProc :: #type proc(engine: ^Engine, offset: linalg.Vector2f64)
 MouseMoveProc :: #type proc(engine: ^Engine, pos, delta: linalg.Vector2f64)
 
 BatchingContext :: struct {
-  engine: ^Engine,
+  engine:  ^Engine,
   frustum: geometry.Frustum,
-  lights: [dynamic]SingleLightUniform,
-  meshes: map[Handle][dynamic]^Node,
+  lights:  [dynamic]SingleLightUniform,
+  meshes:  map[Handle][dynamic]^Node,
 }
 
 ShadowBatchingContext :: struct {
-  engine:          ^Engine,
-  frustum:         geometry.Frustum,
-  static_meshes:   [dynamic]^Node,
-  skinned_meshes:  [dynamic]^Node,
+  engine:         ^Engine,
+  frustum:        geometry.Frustum,
+  static_meshes:  [dynamic]^Node,
+  skinned_meshes: [dynamic]^Node,
 }
 
 InputState :: struct {
@@ -260,7 +259,10 @@ update :: proc(self: ^Engine) -> bool {
     if !mesh_has_skin {
       continue
     }
-    l, r := skinning.bone_matrix_offset, skinning.bone_matrix_offset + u32(len(mesh_skin.bones))
+    l, r :=
+      skinning.bone_matrix_offset,
+      skinning.bone_matrix_offset +
+      u32(len(mesh_skin.bones))
     bone_matrices := g_bindless_bone_buffer.mapped[l:r]
     sample_clip(mesh, anim_inst.clip_handle, anim_inst.time, bone_matrices)
   }

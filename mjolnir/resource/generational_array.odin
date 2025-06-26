@@ -1,7 +1,5 @@
 package resource
 
-import "core:slice"
-
 Handle :: struct {
   index:      u32,
   generation: u32,

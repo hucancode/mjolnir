@@ -1,9 +1,6 @@
 package mjolnir
 
 import "core:log"
-import linalg "core:math/linalg"
-import vk "vendor:vulkan"
-
 
 MaterialTextures :: struct {
   albedo_index:             u32,
@@ -17,13 +14,13 @@ MaterialTextures :: struct {
 }
 
 Material :: struct {
-  features:                 ShaderFeatureSet,
-  is_lit:                   bool,
-  albedo:                   Handle,
-  metallic_roughness:       Handle,
-  normal:                   Handle,
-  displacement:             Handle,
-  emissive:                 Handle,
-  metallic_value:           f32,
-  roughness_value:          f32,
+  features:           ShaderFeatureSet,
+  is_lit:             bool,
+  albedo:             Handle,
+  metallic_roughness: Handle,
+  normal:             Handle,
+  displacement:       Handle,
+  emissive:           Handle,
+  metallic_value:     f32,
+  roughness_value:    f32,
 }

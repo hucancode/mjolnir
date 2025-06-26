@@ -8,11 +8,14 @@ SPV_SHADERS := $(patsubst $(SHADER_DIR)/%/shader.vert,$(SHADER_DIR)/%/vert.spv,$
 COMP_SHADERS := $(shell find $(SHADER_DIR) -name "compute.comp")
 SPV_COMPUTE_SHADERS := $(patsubst $(SHADER_DIR)/%/compute.comp,$(SHADER_DIR)/%/compute.spv,$(COMP_SHADERS))
 
-release: shader
+run: shader
 	odin run . -out:bin/main
 
 debug: shader
 	odin run . -out:bin/main-debug -debug
+
+build: shader
+	odin build . -out:bin/main
 
 check: shader
 	odin check .

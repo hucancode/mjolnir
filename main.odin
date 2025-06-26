@@ -114,7 +114,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
       armature_ptr := resource.get(engine.scene.nodes, armature) or_continue
       for i in 1 ..< len(armature_ptr.children) {
         skeleton := armature_ptr.children[i]
-        skeleton_ptr := resource.get(engine.scene.nodes, skeleton) or_continue
+        // skeleton_ptr := resource.get(engine.scene.nodes, skeleton) or_continue
         // skeleton_ptr.transform.scale = {0.5, 0.5, 0.5}
         play_animation(engine, skeleton, "idle")
       }
@@ -182,69 +182,61 @@ setup :: proc(engine: ^mjolnir.Engine) {
     "assets/black-circle.png",
   )
 
-  psys_handle1, psys_node1 := spawn_at(
+  psys_handle1, _ := spawn_at(
     &engine.scene,
     {-2.0, 1.9, 0.3},
     mjolnir.ParticleSystemAttachment {
-      bounding_box = geometry.Aabb {
-        min = {-1, -1, -1},
-        max = {1, 1, 1},
-      },
+      bounding_box = geometry.Aabb{min = {-1, -1, -1}, max = {1, 1, 1}},
       texture_handle = particle_texture1_handle,
     },
   )
-
-  // Create an emitter for the first particle system
-  _, emitter_node1 := spawn_child(
+  spawn_child(
     &engine.scene,
     psys_handle1,
     EmitterAttachment {
-      emission_rate = 10,
+      emission_rate     = 10,
       particle_lifetime = 5.0,
-      position_spread = 0.05,
-      initial_velocity = {0, -0.1, 0, 0},
-      velocity_spread = 0.1,
-      color_start = {1, 1, 0, 1}, // Yellow particles
-      color_end = {1, 0.5, 0, 0},
-      size_start = 200.0,
-      size_end = 50.0,
-      weight = 0.3,
-      weight_spread = 0.05,
-      texture_handle = particle_texture1_handle,
-      enabled = true,
+      position_spread   = 0.05,
+      initial_velocity  = {0, -0.1, 0, 0},
+      velocity_spread   = 0.1,
+      color_start       = {1, 1, 0, 1}, // Yellow particles
+      color_end         = {1, 0.5, 0, 0},
+      size_start        = 200.0,
+      size_end          = 50.0,
+      weight            = 0.3,
+      weight_spread     = 0.05,
+      texture_handle    = particle_texture1_handle,
+      enabled           = true,
     },
   )
 
-  psys_handle2, psys_node2 := spawn_at(
+  psys_handle2, _ := spawn_at(
     &engine.scene,
     {2.0, 1.9, 0.3},
     mjolnir.ParticleSystemAttachment {
-      bounding_box = geometry.Aabb {
-        min = {-1, -1, -1},
-        max = {1, 1, 1},
-      },
+      bounding_box = geometry.Aabb{min = {-1, -1, -1}, max = {1, 1, 1}},
       texture_handle = particle_texture2_handle,
     },
   )
 
   // Create an emitter for the second particle system
-  _, emitter_node2 := spawn_child(
+  spawn_child(
     &engine.scene,
     psys_handle2,
     EmitterAttachment {
-      emission_rate = 15,
+      emission_rate     = 15,
       particle_lifetime = 3.0,
-      position_spread = 0.1,
-      initial_velocity = {0, 0.2, 0, 0},
-      velocity_spread = 0.15,
-      color_start = {0, 0, 1, 1}, // Blue particles
-      color_end = {0, 1, 1, 0},
-      size_start = 150.0,
-      size_end = 75.0,
-      weight = 0.2,
-      weight_spread = 0.05,
-      texture_handle = particle_texture2_handle,
-      enabled = true,
+      position_spread   = 0.1,
+      initial_velocity  = {0, 0.2, 0, 0},
+      velocity_spread   = 0.15,
+      color_start       = {0, 0, 1, 1}, // Blue particles
+      color_end         = {0, 1, 1, 0},
+      size_start        = 150.0,
+      size_end          = 75.0,
+      weight            = 0.2,
+      weight_spread     = 0.05,
+      texture_handle    = particle_texture2_handle,
+      enabled           = true,
     },
   )
 
@@ -275,7 +267,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
 render_2d :: proc(engine: ^mjolnir.Engine, ctx: ^mu.Context) {
   using mjolnir
   if mu.window(ctx, "Particle System", {40, 360, 300, 150}, {.NO_CLOSE}) {
-    active, free, total := get_particle_pool_stats(&engine.particle)
+    active, _, total := get_particle_pool_stats(&engine.particle)
     mu.label(ctx, fmt.tprintf("Active %d", active))
     mu.label(ctx, fmt.tprintf("Total %d", total))
   }
@@ -284,7 +276,12 @@ render_2d :: proc(engine: ^mjolnir.Engine, ctx: ^mu.Context) {
 update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
   using mjolnir, geometry
   t := time_since_app_start(engine) * 0.5
-  geometry.translate(&forcefield_node.transform, math.cos(t) * 2.0, 2.0, math.sin(t) * 2.0)
+  geometry.translate(
+    &forcefield_node.transform,
+    math.cos(t) * 2.0,
+    2.0,
+    math.sin(t) * 2.0,
+  )
   // Animate lights
   for handle, i in light_handles {
     if i == 0 {

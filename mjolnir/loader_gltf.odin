@@ -123,16 +123,24 @@ load_gltf :: proc(
           skinning.bones = bones
           skinning.root_bone_index = root_bone_idx
           bone_matrix_id: u32
-          if existing_offset, found := skin_to_bone_offset[gltf_node.skin]; found {
+          if existing_offset, found := skin_to_bone_offset[gltf_node.skin];
+             found {
             bone_matrix_id = existing_offset
-            log.infof("Reusing bone matrix buffer for skin at offset %d", bone_matrix_id)
+            log.infof(
+              "Reusing bone matrix buffer for skin at offset %d",
+              bone_matrix_id,
+            )
           } else {
             bone_matrix_id = resource.slab_alloc(
               &g_bone_matrix_slab,
               u32(len(bones)),
             )
             skin_to_bone_offset[gltf_node.skin] = bone_matrix_id
-            log.infof("Allocated new bone matrix buffer for skin at offset %d with %d bones", bone_matrix_id, len(bones))
+            log.infof(
+              "Allocated new bone matrix buffer for skin at offset %d with %d bones",
+              bone_matrix_id,
+              len(bones),
+            )
             // Set bind pose (otherwise zeroed out matrices will cause model to be invisible)
             l, r := bone_matrix_id, bone_matrix_id + u32(len(bones))
             bone_matrices := g_bindless_bone_buffer.mapped[l:r]
@@ -144,12 +152,24 @@ load_gltf :: proc(
             cast_shadow = true,
             skinning = NodeSkinning{bone_matrix_offset = bone_matrix_id},
           }
-          if _, has_first_mesh := skin_to_first_mesh[gltf_node.skin]; !has_first_mesh {
+          if _, has_first_mesh := skin_to_first_mesh[gltf_node.skin];
+             !has_first_mesh {
             skin_to_first_mesh[gltf_node.skin] = mesh_handle
-            load_gltf_animations(engine, gltf_data, gltf_node.skin, mesh_handle)
-            log.infof("Loaded animations for skin on mesh %v (first mesh for this skin)", mesh_handle)
+            load_gltf_animations(
+              engine,
+              gltf_data,
+              gltf_node.skin,
+              mesh_handle,
+            )
+            log.infof(
+              "Loaded animations for skin on mesh %v (first mesh for this skin)",
+              mesh_handle,
+            )
           } else {
-            log.infof("Skipped animations for mesh %v (skin already has animations on another mesh)", mesh_handle)
+            log.infof(
+              "Skipped animations for mesh %v (skin already has animations on another mesh)",
+              mesh_handle,
+            )
           }
         }
       } else {
@@ -475,7 +495,7 @@ load_gltf_skinned_primitive :: proc(
   engine_bones: []Bone,
   mat_handle: resource.Handle,
   root_bone_idx: u32,
-  ret: vk.Result,// TODO: too many return values, consider refactor this
+  ret: vk.Result, // TODO: too many return values, consider refactor this
 ) {
   primitives := gltf_mesh.primitives
   if len(primitives) == 0 {

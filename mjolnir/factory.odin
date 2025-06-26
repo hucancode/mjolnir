@@ -40,7 +40,7 @@ factory_deinit :: proc() {
   data_buffer_deinit(&g_bindless_bone_buffer)
   resource.pool_deinit(g_image_buffers, image_buffer_deinit)
   resource.pool_deinit(g_meshes, mesh_deinit)
-  resource.pool_deinit(g_materials, proc(^Material){})
+  resource.pool_deinit(g_materials, proc(_: ^Material) {})
   deinit_global_samplers()
   deinit_bone_matrix_allocator()
 }
@@ -119,7 +119,7 @@ init_global_samplers :: proc() -> vk.Result {
   return .SUCCESS
 }
 
-init_bone_matrix_allocator :: proc() -> vk.Result{
+init_bone_matrix_allocator :: proc() -> vk.Result {
   resource.slab_allocator_init(
     &g_bone_matrix_slab,
     {
@@ -286,7 +286,6 @@ create_unlit_material :: proc(
   mat.is_lit = false
   mat.features = features
   mat.albedo = albedo_handle
-  albedo := resource.get(g_image_buffers, albedo_handle)
   res = .SUCCESS
   return
 }

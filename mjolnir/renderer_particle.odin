@@ -14,7 +14,6 @@ COMPUTE_PARTICLE_BATCH :: 256
 MAX_EMITTERS :: 64
 MAX_FORCE_FIELDS :: 32
 
-// Shared Emitter struct for use in both scene and renderer_particle
 Emitter :: struct {
   transform:         linalg.Matrix4f32,
   emission_rate:     f32,
@@ -48,19 +47,19 @@ ForceField :: struct {
 }
 
 Particle :: struct {
-  position:     linalg.Vector4f32,
-  velocity:     linalg.Vector4f32,
-  color_start:  linalg.Vector4f32,
-  color_end:    linalg.Vector4f32,
-  color:        linalg.Vector4f32,
-  size:         f32,
-  size_end:     f32,
-  life:         f32,
-  max_life:     f32,
-  is_dead:      b32,
-  weight:       f32,
+  position:      linalg.Vector4f32,
+  velocity:      linalg.Vector4f32,
+  color_start:   linalg.Vector4f32,
+  color_end:     linalg.Vector4f32,
+  color:         linalg.Vector4f32,
+  size:          f32,
+  size_end:      f32,
+  life:          f32,
+  max_life:      f32,
+  is_dead:       b32,
+  weight:        f32,
   texture_index: u32,
-  padding:      u32, // Align to 16-byte boundary (112 bytes total)
+  padding:       u32,
 }
 
 ParticleSystemParams :: struct {
@@ -72,10 +71,8 @@ ParticleSystemParams :: struct {
 
 // Push constants for particle rendering
 ParticlePushConstants :: struct {
-  view:          linalg.Matrix4f32,
-  projection:    linalg.Matrix4f32,
-  time:          f32,
-  texture_index: u32,
+  view:       linalg.Matrix4f32,
+  projection: linalg.Matrix4f32,
 }
 
 RendererParticle :: struct {
@@ -101,9 +98,7 @@ initialize_particle_pool :: proc(self: ^RendererParticle) {
   particles := slice.from_ptr(self.particle_buffer.mapped, MAX_PARTICLES)
   clear(&self.free_particle_indices)
   reserve(&self.free_particle_indices, MAX_PARTICLES)
-  for &particle, i in particles {
-    append(&self.free_particle_indices, i)
-  }
+  for i in 0 ..< len(particles) do append(&self.free_particle_indices, i)
   self.active_particle_count = 0
 }
 
@@ -147,8 +142,6 @@ spawn_particle :: proc(
   particle.weight = emitter.weight + weight_variation
   particle.texture_index = emitter.texture_handle.index
   self.active_particle_count += 1
-
-  log.info("Spawned particle at index", idx, "life:", particle.life, "texture_index:", particle.texture_index, "active_count:", self.active_particle_count)
   return true
 }
 
@@ -217,7 +210,6 @@ render_particles :: proc(
   command_buffer: vk.CommandBuffer,
 ) {
   vk.CmdBindPipeline(command_buffer, .GRAPHICS, self.render_pipeline)
-
   // Bind the bindless texture and sampler descriptor sets
   descriptor_sets := [?]vk.DescriptorSet {
     g_bindless_textures, // set 0
@@ -227,7 +219,7 @@ render_particles :: proc(
     command_buffer,
     .GRAPHICS,
     self.render_pipeline_layout,
-    0, // First set index (set 0)
+    0,
     len(descriptor_sets),
     raw_data(descriptor_sets[:]),
     0,
@@ -242,15 +234,10 @@ render_particles :: proc(
     &self.particle_buffer.buffer,
     &offset,
   )
-
-  // Set up push constants (no texture_index needed since it's per-particle now)
   push_constants := ParticlePushConstants {
-    view          = geometry.calculate_view_matrix(camera),
-    projection    = geometry.calculate_projection_matrix(camera),
-    time          = 0.0, // Could add time tracking if needed
-    texture_index = 0,   // Not used anymore, but keeping for compatibility
+    view       = geometry.calculate_view_matrix(camera),
+    projection = geometry.calculate_projection_matrix(camera),
   }
-
   vk.CmdPushConstants(
     command_buffer,
     self.render_pipeline_layout,
@@ -266,7 +253,6 @@ update_emitters :: proc(self: ^Engine, delta_time: f32) {
   params := data_buffer_get(&self.particle.params_buffer)
   params.delta_time = delta_time
   recycle_dead_particles(&self.particle)
-
   emitters := collect_emitters_for_particle_systems(&self.scene)
   params.emitter_count = u32(len(emitters))
   spawned_this_frame := 0
@@ -286,11 +272,6 @@ update_emitters :: proc(self: ^Engine, delta_time: f32) {
       emitter.time_accumulator -= emission_interval
     }
   }
-
-  if spawned_this_frame > 0 {
-    log.info("Spawned", spawned_this_frame, "particles this frame")
-  }
-
   params.particle_count = self.particle.active_particle_count
 }
 
@@ -492,7 +473,6 @@ renderer_particle_init :: proc(self: ^RendererParticle) -> vk.Result {
   push_constant_range := [?]vk.PushConstantRange {
     {stageFlags = {.VERTEX, .FRAGMENT}, size = size_of(ParticlePushConstants)},
   }
-  // Create descriptor set layouts: set 0 for textures, set 1 for samplers
   descriptor_set_layouts := [?]vk.DescriptorSetLayout {
     g_bindless_textures_layout, // set = 0 for textures
     g_bindless_samplers_layout, // set = 1 for samplers
@@ -509,13 +489,10 @@ renderer_particle_init :: proc(self: ^RendererParticle) -> vk.Result {
     nil,
     &self.render_pipeline_layout,
   ) or_return
-  // Load the default particle texture and store its index
-  default_texture_handle, _, _ := create_texture_from_path(
-    "assets/black-circle.png",
-  )
+  default_texture_handle, _ := create_texture_from_data(
+    #load("assets/black-circle.png"),
+  ) or_return
   self.default_texture_index = default_texture_handle.index
-
-  // Vertex input configuration
   vertex_binding := vk.VertexInputBindingDescription {
     binding   = 0,
     stride    = size_of(Particle),
@@ -702,9 +679,7 @@ renderer_particle_begin :: proc(
   color_view: vk.ImageView,
   depth_view: vk.ImageView,
 ) {
-  // Update force fields before running compute shader
   update_force_fields(engine)
-
   // Memory barrier to ensure compute results are visible before rendering
   barrier := vk.BufferMemoryBarrier {
     sType               = .BUFFER_MEMORY_BARRIER,
@@ -787,10 +762,6 @@ renderer_particle_end :: proc(
   vk.CmdEndRenderingKHR(command_buffer)
 }
 
-get_available_particle_count :: proc(self: ^RendererParticle) -> u32 {
-  return u32(len(self.free_particle_indices))
-}
-
 get_particle_pool_stats :: proc(
   self: ^RendererParticle,
 ) -> (
@@ -801,37 +772,4 @@ get_particle_pool_stats :: proc(
   return self.active_particle_count,
     u32(len(self.free_particle_indices)),
     MAX_PARTICLES
-}
-
-// Collect all force field nodes for all particle systems
-collect_force_field_nodes_for_particle_systems :: proc(
-  scene: ^Scene,
-) -> [dynamic]^Node {
-  ctx := ForceFieldCollectContext{scene, make([dynamic]^Node, 0)}
-  // Traverse all nodes
-  scene_traverse(scene, &ctx, proc(node: ^Node, user_ctx: rawptr) -> bool {
-    ctx := cast(^ForceFieldCollectContext)user_ctx
-    _, is_force := &node.attachment.(ForceFieldAttachment)
-    if is_force {
-      append(&ctx.forcefields, node)
-    }
-    return true
-  })
-  return ctx.forcefields
-}
-
-// Collect all particle system nodes from the scene
-collect_particle_systems :: proc(scene: ^Scene) -> [dynamic]^Node {
-  result := make([dynamic]^Node, 0)
-
-  // Traverse all nodes
-  scene_traverse(scene, &result, proc(node: ^Node, user_ctx: rawptr) -> bool {
-    result := cast(^[dynamic]^Node)user_ctx
-    _, is_ps := &node.attachment.(ParticleSystemAttachment)
-    if is_ps {
-      append(result, node)
-    }
-    return true
-  })
-  return result
 }
