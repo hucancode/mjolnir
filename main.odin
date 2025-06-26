@@ -172,7 +172,23 @@ setup :: proc(engine: ^mjolnir.Engine) {
   )
   effect_add_tonemap(&engine.postprocess, 1.5, 1.3)
   effect_add_fog(&engine.postprocess, {0.2, 0.5, 0.9}, 0.02, 50.0, 200.0)
+  // effect_add_bloom(&engine.postprocess, 0.8, 0.5, 16.0)
   // effect_add_blur(&engine.postprocess, 8.0)
+
+  // Create a bright white ball to test bloom effect
+  bright_material_handle, _, _ := create_material(
+    emissive_value = 30.0,
+  )
+  _, bright_ball_node := spawn(
+    &engine.scene,
+    MeshAttachment {
+      handle = sphere_mesh_handle,
+      material = bright_material_handle,
+      cast_shadow = false, // Emissive objects don't need shadows
+    },
+  )
+  translate(&bright_ball_node.transform, x = 1.0) // Position it above the ground
+  scale(&bright_ball_node.transform, 0.2) // Make it a reasonable size
 
   // Create particle system 1 with gold star texture
   particle_texture1_handle, _, _ := mjolnir.create_texture_from_path(

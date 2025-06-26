@@ -6,34 +6,46 @@ layout(location = 0) out vec4 out_color;
 layout(set = 0, binding = 0) uniform sampler2D u_input_image;
 
 layout(push_constant) uniform BloomParams {
-    float threshold;
-    float intensity;
-    float radius;
-    float padding;
+    float threshold;      // Brightness threshold for bloom
+    float intensity;      // Bloom intensity
+    float blur_radius;    // Blur radius
+    float direction;      // 0.0 = horizontal, 1.0 = vertical
 };
 
-const int MAX_RADIUS = 8;
+const float MAX_RADIUS = 32.0;
 
-vec4 blur_bright(sampler2D img, vec2 uv) {
-    vec2 texel = 1.0 / vec2(textureSize(img, 0));
-    vec4 color = vec4(0.0);
-    float total = 0.0;
-    int r = int(radius);
-    for (int i = -MAX_RADIUS; i <= MAX_RADIUS; ++i) {
-        if (abs(i) > r) continue;
-        float weight = exp(-0.5 * i * i / radius / radius);
-        vec4 sample_pixel = texture(img, uv + vec2(i, 0.0) * texel);
-        float brightness = max(max(sample_pixel.r, sample_pixel.g), sample_pixel.b);
-        if (brightness > threshold)
-            color += sample_pixel * weight;
-        total += weight;
-    }
-    color /= total;
-    return color;
+float luminance(vec3 color) {
+    return dot(color, vec3(0.2126, 0.7152, 0.0722));
+}
+
+// Optimized Gaussian weight calculation (same as blur shader)
+float gaussian_weight(float distance, float sigma) {
+    return exp(-0.5 * distance * distance / (sigma * sigma));
 }
 
 void main() {
-    vec4 orig = texture(u_input_image, v_uv);
-    vec4 bloom = blur_bright(u_input_image, v_uv) * intensity;
-    out_color = clamp(orig + bloom, 0.0, 1.0);
+    vec2 texel_size = 1.0 / vec2(textureSize(u_input_image, 0));
+    vec4 original_color = texture(u_input_image, v_uv);
+
+    // Normal blur with luminance weighting
+    vec4 blur_sum = vec4(0.0);
+    float total_weight = 0.0;
+
+    float effective_radius = clamp(blur_radius, 1.0, MAX_RADIUS);
+    float sigma = effective_radius * 0.3;
+    vec2 blur_direction = mix(vec2(1.0, 0.0), vec2(0.0, 1.0), direction);
+    for (float i = -effective_radius; i <= effective_radius; i += 0.5) {
+        vec2 offset = blur_direction * i * texel_size;
+        vec4 sample_color = texture(u_input_image, v_uv + offset);
+        float sample_lum = luminance(sample_color.rgb);
+        float gaussian_weight_val = gaussian_weight(abs(i), sigma);
+        sample_lum = smoothstep(0.0, threshold, sample_lum);
+        float final_weight = gaussian_weight_val * sample_lum;
+        blur_sum += sample_color * final_weight;
+        total_weight += final_weight;
+    }
+    vec3 bloom_result = blur_sum.rgb * total_weight / effective_radius / 2.0;
+    vec3 final_color = original_color.rgb + bloom_result * intensity;
+
+    out_color = vec4(final_color, original_color.a);
 }

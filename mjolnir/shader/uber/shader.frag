@@ -64,7 +64,8 @@ layout(push_constant) uniform PushConstants {
     uint bone_matrix_offset;
     float metallic_value;
     float roughness_value;
-    uint padding[2];
+    float emissive_value;
+    uint padding[1];
 } pc;
 
 layout(location = 0) in vec3 position;
@@ -180,7 +181,7 @@ void main() {
     float occlusion = HAS_METALLIC_ROUGHNESS_TEXTURE ? texture(sampler2D(textures[pc.metallic_roughness_index], samplers[SAMPLER_LINEAR_REPEAT]), uv).r : 1.0;
     float roughness = HAS_METALLIC_ROUGHNESS_TEXTURE ? texture(sampler2D(textures[pc.metallic_roughness_index], samplers[SAMPLER_LINEAR_REPEAT]), uv).g : pc.roughness_value;
     float metallic = HAS_METALLIC_ROUGHNESS_TEXTURE ? texture(sampler2D(textures[pc.metallic_roughness_index], samplers[SAMPLER_LINEAR_REPEAT]), uv).b : pc.metallic_value;
-    vec3 emissive = HAS_EMISSIVE_TEXTURE ? texture(sampler2D(textures[pc.emissive_index], samplers[SAMPLER_LINEAR_REPEAT]), uv).rgb : vec3(0.0);
+    vec3 emissive = HAS_EMISSIVE_TEXTURE ? texture(sampler2D(textures[pc.emissive_index], samplers[SAMPLER_LINEAR_REPEAT]), uv).rgb : (vec3(1.0) * pc.emissive_value);
     metallic = clamp(metallic, 0.0, 1.0);
     roughness = clamp(roughness, 0.0, 1.0);
     vec3 N = normalize(normal);

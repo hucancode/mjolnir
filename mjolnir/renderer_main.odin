@@ -25,7 +25,8 @@ PushConstant :: struct {
   using textures:  MaterialTextures,
   metallic_value:  f32,
   roughness_value: f32,
-  padding:         [2]f32, // Padding for 16-byte alignment
+  emissive_value:  f32,
+  padding:         f32,
 }
 
 SingleLightUniform :: struct {
@@ -1011,6 +1012,7 @@ render_batched_meshes :: proc(
         textures        = texture_indices,
         metallic_value  = material.metallic_value,
         roughness_value = material.roughness_value,
+        emissive_value  = material.emissive_value,
       }
 
       vk.CmdPushConstants(

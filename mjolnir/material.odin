@@ -23,4 +23,5 @@ Material :: struct {
   emissive:           Handle,
   metallic_value:     f32,
   roughness_value:    f32,
+  emissive_value:     f32,
 }

@@ -34,7 +34,7 @@ BloomEffect :: struct {
   threshold:   f32,
   intensity:   f32,
   blur_radius: f32,
-  padding:     f32,
+  direction:   f32, // 0.0 = horizontal, 1.0 = vertical
 }
 
 OutlineEffect :: struct {
@@ -161,6 +161,14 @@ effect_add_bloom :: proc(
     threshold   = threshold,
     intensity   = intensity,
     blur_radius = blur_radius,
+    direction   = 0.0, // horizontal
+  }
+  append(&self.effect_stack, effect)
+  effect = BloomEffect {
+    threshold   = threshold,
+    intensity   = intensity,
+    blur_radius = blur_radius,
+    direction   = 1.0, // vertical
   }
   append(&self.effect_stack, effect)
 }

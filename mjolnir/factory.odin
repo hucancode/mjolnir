@@ -246,6 +246,7 @@ create_material :: proc(
   emissive_handle: Handle = {},
   metallic_value: f32 = 0.0,
   roughness_value: f32 = 1.0,
+  emissive_value: f32 = 0.0,
 ) -> (
   ret: Handle,
   mat: ^Material,
@@ -262,6 +263,7 @@ create_material :: proc(
   mat.emissive = emissive_handle
   mat.metallic_value = metallic_value
   mat.roughness_value = roughness_value
+  mat.emissive_value = emissive_value
   log.infof(
     "Material created: albedo=%d metallic_roughness=%d normal=%d displacement=%d emissive=%d",
     mat.albedo.index,
@@ -277,6 +279,7 @@ create_material :: proc(
 create_unlit_material :: proc(
   features: ShaderFeatureSet = {},
   albedo_handle: Handle = {},
+  emissive_value: f32 = 0.0,
 ) -> (
   ret: Handle,
   mat: ^Material,
@@ -286,6 +289,7 @@ create_unlit_material :: proc(
   mat.is_lit = false
   mat.features = features
   mat.albedo = albedo_handle
+  mat.emissive_value = emissive_value
   res = .SUCCESS
   return
 }
