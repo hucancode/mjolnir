@@ -7,24 +7,37 @@ layout(set = 0, binding = 0) uniform sampler2D u_input_image;
 
 layout(push_constant) uniform BlurParams {
     float radius;
-    float padding[3];
+    float direction; // 0.0 = horizontal, 1.0 = vertical
+    float weight_falloff; // Controls Gaussian vs box blur
+    float padding;
 };
 
 const float MAX_RADIUS = 16.0;
 
+// Optimized Gaussian weight calculation
+float gaussian_weight(float distance, float sigma) {
+    return exp(-0.5 * distance * distance / (sigma * sigma));
+}
+
 void main() {
     vec2 texel_size = 1.0 / vec2(textureSize(u_input_image, 0));
     vec4 color = vec4(0.0);
-    float total = 0.0;
-
-    float radius = clamp(radius, 1.0, MAX_RADIUS);
-
-    for (float i = -MAX_RADIUS; i <= MAX_RADIUS; i+=1.0) {
-        if (abs(i) > radius) continue;
-        float weight = exp(-0.5 * (i * i) / (radius * radius));
-        vec2 offset = vec2(i, 0.0) * texel_size; // horizontal blur
+    float total_weight = 0.0;
+    float blur_radius = clamp(radius, 1.0, MAX_RADIUS);
+    float sigma = blur_radius * 0.3; // Gaussian sigma
+    vec2 blur_direction = mix(vec2(1.0, 0.0), vec2(0.0, 1.0), direction);
+    // Use fewer samples for efficiency - step by 0.5 for smoother results
+    for (float i = -blur_radius; i <= blur_radius; i += 0.5) {
+        vec2 offset = blur_direction * i * texel_size;
+        // Choose between Gaussian and box blur based on weight_falloff
+        float weight;
+        if (weight_falloff > 0.0) {
+            weight = gaussian_weight(i, sigma);
+        } else {
+            weight = 1.0;
+        }
         color += texture(u_input_image, v_uv + offset) * weight;
-        total += weight;
+        total_weight += weight;
     }
-    out_color = color / total;
+    out_color = color / total_weight;
 }

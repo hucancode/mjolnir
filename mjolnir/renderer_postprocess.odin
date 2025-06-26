@@ -24,8 +24,10 @@ ToneMapEffect :: struct {
 }
 
 BlurEffect :: struct {
-  radius:  f32,
-  padding: [3]f32,
+  radius:        f32,
+  direction:     f32, // 0.0 = horizontal, 1.0 = vertical
+  weight_falloff: f32, // 0.0 = box blur, 1.0 = gaussian blur
+  padding:       f32,
 }
 
 BloomEffect :: struct {
@@ -116,9 +118,35 @@ effect_add_grayscale :: proc(
   append(&self.effect_stack, effect)
 }
 
-effect_add_blur :: proc(self: ^RendererPostProcess, radius: f32) {
+effect_add_blur :: proc(
+  self: ^RendererPostProcess,
+  radius: f32,
+  gaussian: bool = true,
+) {
+  horizontal_effect := BlurEffect {
+    radius = radius,
+    direction = 0.0, // horizontal
+    weight_falloff = 1.0 if gaussian else 0.0,
+  }
+  append(&self.effect_stack, horizontal_effect)
+  vertical_effect := BlurEffect {
+    radius = radius,
+    direction = 1.0, // vertical
+    weight_falloff = 1.0 if gaussian else 0.0,
+  }
+  append(&self.effect_stack, vertical_effect)
+}
+
+effect_add_directional_blur :: proc(
+  self: ^RendererPostProcess,
+  radius: f32,
+  direction: f32 = 0.0, // 0.0 = horizontal, 1.0 = vertical
+  gaussian: bool = true,
+) {
   effect := BlurEffect {
     radius = radius,
+    direction = direction,
+    weight_falloff = 1.0 if gaussian else 0.0,
   }
   append(&self.effect_stack, effect)
 }
