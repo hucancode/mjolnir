@@ -149,7 +149,7 @@ create_host_visible_buffer :: proc(
     {},
     auto_cast &buffer.mapped,
   ) or_return
-  log.info("Init host visible buffer, buffer mapped at", buffer.mapped)
+  log.infof("Init host visible buffer, buffer mapped at %x", buffer.mapped[0])
   if data != nil {
     mem.copy(buffer.mapped, data, buffer.bytes_count)
   }

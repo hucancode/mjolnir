@@ -172,6 +172,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
   )
   effect_add_tonemap(&engine.postprocess, 1.5, 1.3)
   effect_add_fog(&engine.postprocess, {0.2, 0.5, 0.9}, 0.02, 50.0, 200.0)
+  // effect_add_crosshatch(&engine.postprocess, {1280, 720}) // Add cross-hatch effect
+  // effect_add_outline(&engine.postprocess, 2.0, {0.0, 1.0, 0.0}) // Green outline with thickness 2.0
   // effect_add_bloom(&engine.postprocess, 0.8, 0.5, 16.0)
   // effect_add_blur(&engine.postprocess, 8.0)
 

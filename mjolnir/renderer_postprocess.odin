@@ -11,6 +11,7 @@ SHADER_GRAYSCALE_FRAG :: #load("shader/grayscale/frag.spv")
 SHADER_TONEMAP_FRAG :: #load("shader/tonemap/frag.spv")
 SHADER_OUTLINE_FRAG :: #load("shader/outline/frag.spv")
 SHADER_FOG_FRAG :: #load("shader/fog/frag.spv")
+SHADER_CROSSHATCH_FRAG :: #load("shader/crosshatch/frag.spv")
 
 GrayscaleEffect :: struct {
   weights:  [3]f32,
@@ -50,6 +51,16 @@ FogEffect :: struct {
   padding:   [2]f32,
 }
 
+CrossHatchEffect :: struct {
+  resolution:        [2]f32,
+  hatch_offset_y:    f32,
+  lum_threshold_01:  f32,
+  lum_threshold_02:  f32,
+  lum_threshold_03:  f32,
+  lum_threshold_04:  f32,
+  padding:           f32, // For alignment
+}
+
 PostProcessEffectType :: enum int {
   GRAYSCALE,
   TONEMAP,
@@ -57,6 +68,7 @@ PostProcessEffectType :: enum int {
   BLOOM,
   OUTLINE,
   FOG,
+  CROSSHATCH,
   NONE,
 }
 
@@ -67,6 +79,7 @@ PostprocessEffect :: union {
   BloomEffect,
   OutlineEffect,
   FogEffect,
+  CrossHatchEffect,
 }
 
 RendererPostProcess :: struct {
@@ -78,6 +91,7 @@ RendererPostProcess :: struct {
   effect_stack:           [dynamic]PostprocessEffect,
   images:                 [2]ImageBuffer,
   depth_view:             vk.ImageView, // Store depth view for binding to all descriptor sets
+  normal_view:            vk.ImageView, // Store normal view for binding to all descriptor sets
   frames:                 [MAX_FRAMES_IN_FLIGHT]struct {
     image_available_semaphore: vk.Semaphore,
     render_finished_semaphore: vk.Semaphore,
@@ -102,6 +116,8 @@ get_effect_type :: proc(effect: PostprocessEffect) -> PostProcessEffectType {
     return .OUTLINE
   case FogEffect:
     return .FOG
+  case CrossHatchEffect:
+    return .CROSSHATCH
   }
   return .NONE
 }
@@ -213,6 +229,26 @@ effect_add_fog :: proc(
   append(&self.effect_stack, effect)
 }
 
+effect_add_crosshatch :: proc(
+  self: ^RendererPostProcess,
+  resolution: [2]f32,
+  hatch_offset_y: f32 = 5.0,
+  lum_threshold_01: f32 = 0.6,
+  lum_threshold_02: f32 = 0.3,
+  lum_threshold_03: f32 = 0.15,
+  lum_threshold_04: f32 = 0.07,
+) {
+  effect := CrossHatchEffect {
+    resolution       = resolution,
+    hatch_offset_y   = hatch_offset_y,
+    lum_threshold_01 = lum_threshold_01,
+    lum_threshold_02 = lum_threshold_02,
+    lum_threshold_03 = lum_threshold_03,
+    lum_threshold_04 = lum_threshold_04,
+  }
+  append(&self.effect_stack, effect)
+}
+
 effect_clear :: proc(self: ^RendererPostProcess) {
   resize(&self.effect_stack, 0)
 }
@@ -246,13 +282,34 @@ postprocess_update_depth_input :: proc(
   write := vk.WriteDescriptorSet {
     sType           = .WRITE_DESCRIPTOR_SET,
     dstSet          = self.descriptor_sets[set_idx],
-    dstBinding      = 1,
+    dstBinding      = 2,
     descriptorType  = .COMBINED_IMAGE_SAMPLER,
     descriptorCount = 1,
     pImageInfo      = &{
       sampler = g_nearest_repeat_sampler,
       imageView = depth_view,
       imageLayout = .DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+    },
+  }
+  vk.UpdateDescriptorSets(g_device, 1, &write, 0, nil)
+  return .SUCCESS
+}
+
+postprocess_update_normal_input :: proc(
+  self: ^RendererPostProcess,
+  set_idx: int,
+  normal_view: vk.ImageView,
+) -> vk.Result {
+  write := vk.WriteDescriptorSet {
+    sType           = .WRITE_DESCRIPTOR_SET,
+    dstSet          = self.descriptor_sets[set_idx],
+    dstBinding      = 1, // Normal texture binding
+    descriptorType  = .COMBINED_IMAGE_SAMPLER,
+    descriptorCount = 1,
+    pImageInfo      = &{
+      sampler = g_nearest_repeat_sampler,
+      imageView = normal_view,
+      imageLayout = .SHADER_READ_ONLY_OPTIMAL,
     },
   }
   vk.UpdateDescriptorSets(g_device, 1, &write, 0, nil)
@@ -286,6 +343,8 @@ renderer_postprocess_init :: proc(
       shader_code = SHADER_OUTLINE_FRAG
     case .FOG:
       shader_code = SHADER_FOG_FRAG
+    case .CROSSHATCH:
+      shader_code = SHADER_CROSSHATCH_FRAG
     case .NONE:
       shader_code = SHADER_POSTPROCESS_FRAG
     }
@@ -339,13 +398,19 @@ renderer_postprocess_init :: proc(
   }
   bindings := [?]vk.DescriptorSetLayoutBinding {
     {
-      binding = 0,
+      binding = 0, // input image
       descriptorType = .COMBINED_IMAGE_SAMPLER,
       descriptorCount = 1,
       stageFlags = {.FRAGMENT},
     },
     {
-      binding = 1,
+      binding = 1, // normal image
+      descriptorType = .COMBINED_IMAGE_SAMPLER,
+      descriptorCount = 1,
+      stageFlags = {.FRAGMENT},
+    },
+    {
+      binding = 2, // depth image
       descriptorType = .COMBINED_IMAGE_SAMPLER,
       descriptorCount = 1,
       stageFlags = {.FRAGMENT},
@@ -408,6 +473,8 @@ renderer_postprocess_init :: proc(
       push_constant_size = size_of(ToneMapEffect)
     case .FOG:
       push_constant_size = size_of(FogEffect)
+    case .CROSSHATCH:
+      push_constant_size = size_of(CrossHatchEffect)
     case .NONE:
       push_constant_size = 0
     }
@@ -549,6 +616,7 @@ renderer_postprocess_begin :: proc(
   command_buffer: vk.CommandBuffer,
   input_view: vk.ImageView,
   depth_view: vk.ImageView,
+  normal_view: vk.ImageView,
   extent: vk.Extent2D,
 ) {
   if len(self.effect_stack) == 0 {
@@ -556,10 +624,14 @@ renderer_postprocess_begin :: proc(
     append(&self.effect_stack, nil)
   }
   self.depth_view = depth_view
+  self.normal_view = normal_view
   postprocess_update_input(self, 0, input_view)
-  postprocess_update_depth_input(self, 0, depth_view)
-  postprocess_update_depth_input(self, 1, depth_view)
-  postprocess_update_depth_input(self, 2, depth_view)
+
+  // Update normal buffer for ALL descriptor sets (since crosshatch might not be first effect)
+  for i in 0..<len(self.descriptor_sets) {
+    postprocess_update_normal_input(self, i, normal_view)
+    postprocess_update_depth_input(self, i, depth_view)
+  }
   viewport := vk.Viewport {
     width    = f32(extent.width),
     height   = f32(extent.height),
@@ -589,6 +661,8 @@ renderer_postprocess_render :: proc(
     if is_last && !is_first {
       postprocess_update_input(self, src_idx, self.images[src_image_idx].view)
       postprocess_update_depth_input(self, src_idx, self.depth_view)
+      // Make sure normal buffer is still bound for effects like crosshatch
+      postprocess_update_normal_input(self, src_idx, self.normal_view)
     }
     // Prepare destination image for rendering
     if !is_last {
@@ -687,6 +761,15 @@ renderer_postprocess_render :: proc(
         {.FRAGMENT},
         0,
         size_of(FogEffect),
+        &e,
+      )
+    case CrossHatchEffect:
+      vk.CmdPushConstants(
+        command_buffer,
+        self.pipeline_layouts[effect_type],
+        {.FRAGMENT},
+        0,
+        size_of(CrossHatchEffect),
         &e,
       )
     }

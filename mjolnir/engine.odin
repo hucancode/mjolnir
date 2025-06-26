@@ -107,6 +107,7 @@ Engine :: struct {
   shadow:                RendererShadow,
   particle:              RendererParticle,
   postprocess:           RendererPostProcess,
+  gbuffer:               RendererGBuffer,
   command_buffers:       [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
   visible_lights:        [MAX_FRAMES_IN_FLIGHT][dynamic]VisibleLightInfo,
   node_idx_to_light_idx: [MAX_FRAMES_IN_FLIGHT]map[int]int,
@@ -165,6 +166,11 @@ init :: proc(
     self.swapchain.extent.height,
     self.swapchain.format.format,
     .D32_SFLOAT,
+  ) or_return
+  renderer_gbuffer_init(
+    &self.gbuffer,
+    self.swapchain.extent.width,
+    self.swapchain.extent.height,
   ) or_return
   renderer_particle_init(&self.particle) or_return
   renderer_shadow_init(&self.shadow, .D32_SFLOAT) or_return
@@ -310,6 +316,7 @@ deinit :: proc(self: ^Engine) {
   renderer_ui_deinit(&self.ui)
   scene_deinit(&self.scene)
   renderer_main_deinit(&self.main)
+  renderer_gbuffer_deinit(&self.gbuffer)
   renderer_shadow_deinit(&self.shadow)
   renderer_postprocess_deinit(&self.postprocess)
   renderer_particle_deinit(&self.particle)
@@ -430,6 +437,11 @@ render :: proc(self: ^Engine) -> vk.Result {
     command_buffer,
     self.main.frames[g_frame_index].main_pass_image.image,
   )
+  // TODO: Temporarily disable G-buffer rendering
+  // log.debug("============ rendering G-buffer pass... =============")
+  renderer_gbuffer_begin(&self.gbuffer, command_buffer, self.swapchain.extent)
+  renderer_gbuffer_render(self, command_buffer)
+  renderer_gbuffer_end(&self.gbuffer, command_buffer)
   // log.debug("============ rendering main pass... =============")
   renderer_main_begin(self, command_buffer)
   renderer_main_render(self, command_buffer)
@@ -453,6 +465,7 @@ render :: proc(self: ^Engine) -> vk.Result {
     command_buffer,
     self.main.frames[g_frame_index].main_pass_image.view,
     self.main.depth_buffer.view,
+    self.gbuffer.normal_buffer.view, // Use G-buffer normal buffer for post-process effects
     self.swapchain.extent,
   )
   prepare_image_for_render(
