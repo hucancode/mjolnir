@@ -658,7 +658,7 @@ renderer_particle_init :: proc(self: ^RendererParticle) -> vk.Result {
     pDepthStencilState  = &{
       sType = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
       depthTestEnable = true,
-      depthWriteEnable = false,
+      depthWriteEnable = true,
       depthCompareOp = .LESS_OR_EQUAL,
     },
   }
