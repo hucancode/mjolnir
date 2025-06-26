@@ -452,6 +452,7 @@ render :: proc(self: ^Engine) -> vk.Result {
     &self.postprocess,
     command_buffer,
     self.main.frames[g_frame_index].main_pass_image.view,
+    self.main.depth_buffer.view,
     self.swapchain.extent,
   )
   prepare_image_for_render(

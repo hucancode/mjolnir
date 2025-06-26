@@ -171,7 +171,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     },
   )
   effect_add_tonemap(&engine.postprocess, 1.5, 1.3)
-  effect_add_grayscale(&engine.postprocess, 0.3)
+  effect_add_fog(&engine.postprocess, {0.7, 0.8, 0.9}, 0.02, 50.0, 200.0)
 
   // Create particle system 1 with gold star texture
   particle_texture1_handle, _, _ := mjolnir.create_texture_from_path(

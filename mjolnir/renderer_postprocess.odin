@@ -10,6 +10,7 @@ SHADER_BLUR_FRAG :: #load("shader/blur/frag.spv")
 SHADER_GRAYSCALE_FRAG :: #load("shader/grayscale/frag.spv")
 SHADER_TONEMAP_FRAG :: #load("shader/tonemap/frag.spv")
 SHADER_OUTLINE_FRAG :: #load("shader/outline/frag.spv")
+SHADER_FOG_FRAG :: #load("shader/fog/frag.spv")
 
 GrayscaleEffect :: struct {
   weights:  [3]f32,
@@ -39,12 +40,21 @@ OutlineEffect :: struct {
   thickness: f32,
 }
 
+FogEffect :: struct {
+  color:     [3]f32,
+  density:   f32,
+  start:     f32,
+  end:       f32,
+  padding:   [2]f32,
+}
+
 PostProcessEffectType :: enum int {
   GRAYSCALE,
   TONEMAP,
   BLUR,
   BLOOM,
   OUTLINE,
+  FOG,
   NONE,
 }
 
@@ -54,6 +64,7 @@ PostprocessEffect :: union {
   BlurEffect,
   BloomEffect,
   OutlineEffect,
+  FogEffect,
 }
 
 RendererPostProcess :: struct {
@@ -64,6 +75,7 @@ RendererPostProcess :: struct {
   sampler:                vk.Sampler,
   effect_stack:           [dynamic]PostprocessEffect,
   images:                 [2]ImageBuffer,
+  depth_view:             vk.ImageView, // Store depth view for binding to all descriptor sets
   frames:                 [MAX_FRAMES_IN_FLIGHT]struct {
     image_available_semaphore: vk.Semaphore,
     render_finished_semaphore: vk.Semaphore,
@@ -86,6 +98,8 @@ get_effect_type :: proc(effect: PostprocessEffect) -> PostProcessEffectType {
     return .BLOOM
   case OutlineEffect:
     return .OUTLINE
+  case FogEffect:
+    return .FOG
   }
   return .NONE
 }
@@ -147,6 +161,22 @@ effect_add_outline :: proc(
   append(&self.effect_stack, effect)
 }
 
+effect_add_fog :: proc(
+  self: ^RendererPostProcess,
+  color: [3]f32 = {0.7, 0.7, 0.8},
+  density: f32 = 0.02,
+  start: f32 = 10.0,
+  end: f32 = 100.0,
+) {
+  effect := FogEffect {
+    color   = color,
+    density = density,
+    start   = start,
+    end     = end,
+  }
+  append(&self.effect_stack, effect)
+}
+
 effect_clear :: proc(self: ^RendererPostProcess) {
   resize(&self.effect_stack, 0)
 }
@@ -166,6 +196,27 @@ postprocess_update_input :: proc(
       sampler = g_nearest_repeat_sampler,
       imageView = input_view,
       imageLayout = .SHADER_READ_ONLY_OPTIMAL,
+    },
+  }
+  vk.UpdateDescriptorSets(g_device, 1, &write, 0, nil)
+  return .SUCCESS
+}
+
+postprocess_update_depth_input :: proc(
+  self: ^RendererPostProcess,
+  set_idx: int,
+  depth_view: vk.ImageView,
+) -> vk.Result {
+  write := vk.WriteDescriptorSet {
+    sType           = .WRITE_DESCRIPTOR_SET,
+    dstSet          = self.descriptor_sets[set_idx],
+    dstBinding      = 1,
+    descriptorType  = .COMBINED_IMAGE_SAMPLER,
+    descriptorCount = 1,
+    pImageInfo      = &{
+      sampler = g_nearest_repeat_sampler,
+      imageView = depth_view,
+      imageLayout = .DEPTH_STENCIL_READ_ONLY_OPTIMAL,
     },
   }
   vk.UpdateDescriptorSets(g_device, 1, &write, 0, nil)
@@ -197,6 +248,8 @@ renderer_postprocess_init :: proc(
       shader_code = SHADER_TONEMAP_FRAG
     case .OUTLINE:
       shader_code = SHADER_OUTLINE_FRAG
+    case .FOG:
+      shader_code = SHADER_FOG_FRAG
     case .NONE:
       shader_code = SHADER_POSTPROCESS_FRAG
     }
@@ -251,6 +304,12 @@ renderer_postprocess_init :: proc(
   bindings := [?]vk.DescriptorSetLayoutBinding {
     {
       binding = 0,
+      descriptorType = .COMBINED_IMAGE_SAMPLER,
+      descriptorCount = 1,
+      stageFlags = {.FRAGMENT},
+    },
+    {
+      binding = 1,
       descriptorType = .COMBINED_IMAGE_SAMPLER,
       descriptorCount = 1,
       stageFlags = {.FRAGMENT},
@@ -311,6 +370,8 @@ renderer_postprocess_init :: proc(
       push_constant_size = size_of(BloomEffect)
     case .TONEMAP:
       push_constant_size = size_of(ToneMapEffect)
+    case .FOG:
+      push_constant_size = size_of(FogEffect)
     case .NONE:
       push_constant_size = 0
     }
@@ -451,13 +512,18 @@ renderer_postprocess_begin :: proc(
   self: ^RendererPostProcess,
   command_buffer: vk.CommandBuffer,
   input_view: vk.ImageView,
+  depth_view: vk.ImageView,
   extent: vk.Extent2D,
 ) {
   if len(self.effect_stack) == 0 {
     // if no postprocess effect, just copy the input to output
     append(&self.effect_stack, nil)
   }
+  self.depth_view = depth_view
   postprocess_update_input(self, 0, input_view)
+  postprocess_update_depth_input(self, 0, depth_view)
+  postprocess_update_depth_input(self, 1, depth_view)
+  postprocess_update_depth_input(self, 2, depth_view)
   viewport := vk.Viewport {
     width    = f32(extent.width),
     height   = f32(extent.height),
@@ -486,6 +552,7 @@ renderer_postprocess_render :: proc(
     // For the last pass, always sample from the last offscreen image
     if is_last && !is_first {
       postprocess_update_input(self, src_idx, self.images[src_image_idx].view)
+      postprocess_update_depth_input(self, src_idx, self.depth_view)
     }
     // Prepare destination image for rendering
     if !is_last {
@@ -575,6 +642,15 @@ renderer_postprocess_render :: proc(
         {.FRAGMENT},
         0,
         size_of(OutlineEffect),
+        &e,
+      )
+    case FogEffect:
+      vk.CmdPushConstants(
+        command_buffer,
+        self.pipeline_layouts[effect_type],
+        {.FRAGMENT},
+        0,
+        size_of(FogEffect),
         &e,
       )
     }

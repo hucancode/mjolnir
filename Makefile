@@ -27,7 +27,7 @@ test:
 	odin test test -out:bin/test
 
 clean:
-	rm -rf bin
+	rm -rf bin/*
 
 $(SHADER_DIR)/%/compute.spv: $(SHADER_DIR)/%/compute.comp
 	@echo "Compiling compute shader $<..."
