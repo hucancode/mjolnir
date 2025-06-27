@@ -95,6 +95,7 @@ RendererMain :: struct {
   pipeline_layout:              vk.PipelineLayout,
   pipelines:                    [SHADER_VARIANT_COUNT]vk.Pipeline,
   unlit_pipelines:              [UNLIT_SHADER_VARIANT_COUNT]vk.Pipeline,
+  wireframe_unlit_pipelines:    [UNLIT_SHADER_VARIANT_COUNT]vk.Pipeline,
   depth_buffer:                 ImageBuffer,
   environment_map:              Handle,
   brdf_lut:                     Handle,
@@ -477,14 +478,167 @@ renderer_main_build_unlit_pipeline :: proc(
   return .SUCCESS
 }
 
+renderer_main_build_wireframe_unlit_pipeline :: proc(
+  self: ^RendererMain,
+  target_color_format: vk.Format,
+  target_depth_format: vk.Format,
+) -> vk.Result {
+  pipeline_infos: [UNLIT_SHADER_VARIANT_COUNT]vk.GraphicsPipelineCreateInfo
+  spec_infos: [UNLIT_SHADER_VARIANT_COUNT]vk.SpecializationInfo
+  configs: [UNLIT_SHADER_VARIANT_COUNT]ShaderConfig
+  entries: [UNLIT_SHADER_VARIANT_COUNT][UNLIT_SHADER_OPTION_COUNT]vk.SpecializationMapEntry
+  shader_stages_arr: [UNLIT_SHADER_VARIANT_COUNT][2]vk.PipelineShaderStageCreateInfo
+
+  vert_module := create_shader_module(SHADER_UNLIT_VERT) or_return
+  defer vk.DestroyShaderModule(g_device, vert_module, nil)
+  frag_module := create_shader_module(SHADER_UNLIT_FRAG) or_return
+  defer vk.DestroyShaderModule(g_device, frag_module, nil)
+
+  dynamic_states_values := [?]vk.DynamicState{.VIEWPORT, .SCISSOR}
+  dynamic_state_info := vk.PipelineDynamicStateCreateInfo {
+    sType             = .PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+    dynamicStateCount = u32(len(dynamic_states_values)),
+    pDynamicStates    = raw_data(dynamic_states_values[:]),
+  }
+
+  input_assembly := vk.PipelineInputAssemblyStateCreateInfo {
+    sType    = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+    topology = .TRIANGLE_LIST,
+  }
+
+  viewport_state := vk.PipelineViewportStateCreateInfo {
+    sType         = .PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+    viewportCount = 1,
+    scissorCount  = 1,
+  }
+
+  // Wireframe rasterizer settings
+  rasterizer := vk.PipelineRasterizationStateCreateInfo {
+    sType       = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+    polygonMode = .LINE,  // Key difference - wireframe mode
+    cullMode    = {},     // Disable culling for wireframe
+    frontFace   = .COUNTER_CLOCKWISE,
+    lineWidth   = 1.0,
+  }
+
+  multisampling := vk.PipelineMultisampleStateCreateInfo {
+    sType                = .PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+    rasterizationSamples = {._1},
+  }
+
+  color_blend_attachment := vk.PipelineColorBlendAttachmentState {
+    colorWriteMask = {.R, .G, .B, .A},
+  }
+
+  blending := vk.PipelineColorBlendStateCreateInfo {
+    sType           = .PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+    attachmentCount = 1,
+    pAttachments    = &color_blend_attachment,
+  }
+
+  depth_stencil_state := vk.PipelineDepthStencilStateCreateInfo {
+    sType            = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+    depthTestEnable  = true,
+    depthWriteEnable = true,
+    depthCompareOp   = .LESS,
+  }
+
+  color_formats := [?]vk.Format{target_color_format}
+  rendering_info_khr := vk.PipelineRenderingCreateInfoKHR {
+    sType                   = .PIPELINE_RENDERING_CREATE_INFO_KHR,
+    colorAttachmentCount    = len(color_formats),
+    pColorAttachmentFormats = raw_data(color_formats[:]),
+    depthAttachmentFormat   = target_depth_format,
+  }
+
+  vertex_input_info := vk.PipelineVertexInputStateCreateInfo {
+    sType                           = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+    vertexBindingDescriptionCount   = len(geometry.VERTEX_BINDING_DESCRIPTION),
+    pVertexBindingDescriptions      = raw_data(geometry.VERTEX_BINDING_DESCRIPTION[:]),
+    vertexAttributeDescriptionCount = len(geometry.VERTEX_ATTRIBUTE_DESCRIPTIONS),
+    pVertexAttributeDescriptions    = raw_data(geometry.VERTEX_ATTRIBUTE_DESCRIPTIONS[:]),
+  }
+
+  for mask in 0 ..< UNLIT_SHADER_VARIANT_COUNT {
+    features := transmute(ShaderFeatureSet)mask
+    configs[mask] = ShaderConfig {
+      is_skinned         = .SKINNING in features,
+      has_albedo_texture = .ALBEDO_TEXTURE in features,
+    }
+
+    entries[mask] = [UNLIT_SHADER_OPTION_COUNT]vk.SpecializationMapEntry {
+      {constantID = 0, offset = u32(offset_of(ShaderConfig, is_skinned)), size = size_of(b32)},
+      {constantID = 1, offset = u32(offset_of(ShaderConfig, has_albedo_texture)), size = size_of(b32)},
+    }
+
+    spec_infos[mask] = {
+      mapEntryCount = len(entries[mask]),
+      pMapEntries   = raw_data(entries[mask][:]),
+      dataSize      = size_of(ShaderConfig),
+      pData         = &configs[mask],
+    }
+
+    shader_stages_arr[mask] = [2]vk.PipelineShaderStageCreateInfo {
+      {
+        sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
+        stage = {.VERTEX},
+        module = vert_module,
+        pName = "main",
+        pSpecializationInfo = &spec_infos[mask],
+      },
+      {
+        sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
+        stage = {.FRAGMENT},
+        module = frag_module,
+        pName = "main",
+        pSpecializationInfo = &spec_infos[mask],
+      },
+    }
+
+    pipeline_infos[mask] = {
+      sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
+      pNext               = &rendering_info_khr,
+      stageCount          = len(shader_stages_arr[mask]),
+      pStages             = raw_data(shader_stages_arr[mask][:]),
+      pVertexInputState   = &vertex_input_info,
+      pInputAssemblyState = &input_assembly,
+      pViewportState      = &viewport_state,
+      pRasterizationState = &rasterizer,
+      pMultisampleState   = &multisampling,
+      pColorBlendState    = &blending,
+      pDynamicState       = &dynamic_state_info,
+      pDepthStencilState  = &depth_stencil_state,
+      layout              = self.pipeline_layout,
+    }
+  }
+
+  vk.CreateGraphicsPipelines(
+    g_device,
+    0,
+    len(pipeline_infos),
+    raw_data(pipeline_infos[:]),
+    nil,
+    raw_data(self.wireframe_unlit_pipelines[:]),
+  ) or_return
+
+  return .SUCCESS
+}
+
 renderer_main_get_pipeline :: proc(
   self: ^RendererMain,
   material: ^Material,
 ) -> vk.Pipeline {
-  if material.is_lit {
+  switch material.type {
+  case .PBR:
     return self.pipelines[transmute(u32)material.features]
+  case .UNLIT:
+    return self.unlit_pipelines[transmute(u32)material.features]
+  case .WIREFRAME:
+    // Wireframe materials always use unlit wireframe pipelines
+    return self.wireframe_unlit_pipelines[transmute(u32)material.features]
   }
-  return self.unlit_pipelines[transmute(u32)material.features]
+  // Fallback
+  return self.pipelines[0]
 }
 
 renderer_main_begin :: proc(
@@ -729,6 +883,7 @@ renderer_main_init :: proc(
     color_format,
     depth_format,
   ) or_return
+  renderer_main_build_wireframe_unlit_pipeline(self, color_format, depth_format) or_return
   depth_image_init(&self.depth_buffer, width, height, depth_format) or_return
   environment_map: ^ImageBuffer
   self.environment_map, environment_map = create_hdr_texture_from_path(
@@ -849,6 +1004,7 @@ renderer_main_deinit :: proc(self: ^RendererMain) {
   }
   for p in self.pipelines do vk.DestroyPipeline(g_device, p, nil)
   for p in self.unlit_pipelines do vk.DestroyPipeline(g_device, p, nil)
+  for p in self.wireframe_unlit_pipelines do vk.DestroyPipeline(g_device, p, nil)
   renderer_main_deinit_images(self)
 }
 

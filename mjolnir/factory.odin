@@ -254,7 +254,7 @@ create_material :: proc(
 ) {
   log.info("creating material")
   ret, mat = resource.alloc(&g_materials)
-  mat.is_lit = true
+  mat.type = .PBR
   mat.features = features
   mat.albedo = albedo_handle
   mat.metallic_roughness = metallic_roughness_handle
@@ -286,10 +286,24 @@ create_unlit_material :: proc(
   res: vk.Result,
 ) {
   ret, mat = resource.alloc(&g_materials)
-  mat.is_lit = false
+  mat.type = .UNLIT
   mat.features = features
   mat.albedo = albedo_handle
   mat.emissive_value = emissive_value
+  res = .SUCCESS
+  return
+}
+
+create_wireframe_material :: proc(
+  features: ShaderFeatureSet = {},
+) -> (
+  ret: Handle,
+  mat: ^Material,
+  res: vk.Result,
+) {
+  ret, mat = resource.alloc(&g_materials)
+  mat.type = .WIREFRAME
+  mat.features = features
   res = .SUCCESS
   return
 }

@@ -2,6 +2,12 @@ package mjolnir
 
 import "core:log"
 
+MaterialType :: enum {
+  PBR,
+  UNLIT,
+  WIREFRAME,
+}
+
 MaterialTextures :: struct {
   albedo_index:             u32,
   metallic_roughness_index: u32,
@@ -14,6 +20,7 @@ MaterialTextures :: struct {
 }
 
 Material :: struct {
+  type:               MaterialType,
   features:           ShaderFeatureSet,
   is_lit:             bool,
   albedo:             Handle,

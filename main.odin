@@ -30,6 +30,7 @@ main :: proc() {
 setup :: proc(engine: ^mjolnir.Engine) {
   using mjolnir, geometry
   plain_material_handle, _, _ := create_material()
+  wireframe_material_handle, _, _ := create_wireframe_material()
   cube_geom := make_cube()
   cube_mesh_handle, _, _ := create_mesh(cube_geom)
   sphere_mesh_handle, _, _ := create_mesh(make_sphere())
@@ -172,8 +173,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
   )
   effect_add_tonemap(&engine.postprocess, 1.5, 1.3)
   effect_add_fog(&engine.postprocess, {0.2, 0.5, 0.9}, 0.02, 50.0, 200.0)
-  effect_add_crosshatch(&engine.postprocess, {1280, 720}) // Add cross-hatch effect
-  effect_add_dof(&engine.postprocess, 8.0, 4.0, 6.0, 0.8) // Focus at 8 units, 4 unit range, 6 blur strength, 0.8 bokeh
+  // effect_add_crosshatch(&engine.postprocess, {1280, 720}) // Add cross-hatch effect
+  // effect_add_dof(&engine.postprocess, 8.0, 4.0, 6.0, 0.8) // Focus at 8 units, 4 unit range, 6 blur strength, 0.8 bokeh
   // effect_add_outline(&engine.postprocess, 2.0, {0.0, 1.0, 0.0}) // Green outline with thickness 2.0
   // effect_add_bloom(&engine.postprocess, 0.8, 0.5, 16.0)
   // effect_add_blur(&engine.postprocess, 8.0)
@@ -259,7 +260,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
       enabled           = true,
     },
   )
-
   // Create a force field that affects both particle systems
   forcefield_handle, forcefield_node = spawn_child(
     &engine.scene,
@@ -276,7 +276,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     forcefield_handle,
     MeshAttachment {
       handle = sphere_mesh_handle,
-      material = plain_material_handle,
+      material = wireframe_material_handle,
       cast_shadow = false,
     },
   )
