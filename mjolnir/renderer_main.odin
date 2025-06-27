@@ -563,8 +563,8 @@ renderer_main_build_wireframe_unlit_pipeline :: proc(
   depth_stencil_state := vk.PipelineDepthStencilStateCreateInfo {
     sType            = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
     depthTestEnable  = true,
-    depthWriteEnable = false, // Don't write depth in main pass after depth pre-pass
-    depthCompareOp   = .LESS_OR_EQUAL, // Use LESS_OR_EQUAL to handle floating point precision
+    depthWriteEnable = true, // Wireframe objects write their own depth (skip depth pre-pass)
+    depthCompareOp   = .LESS, // Use LESS since wireframe objects don't use depth pre-pass
   }
 
   color_formats := [?]vk.Format{target_color_format}
@@ -1557,7 +1557,8 @@ populate_depth_prepass_batches :: proc(ctx: ^BatchingContext) {
       material := resource.get(g_materials, data.material)
       if material == nil do continue
 
-      // Skip transparent materials in depth pre-pass
+      // Skip transparent and wireframe materials in depth pre-pass
+      // Wireframe materials need to write their own depth with bias
       if material.type == .WIREFRAME {
         continue
       }

@@ -601,7 +601,7 @@ renderer_gbuffer_render :: proc(
       if node_skinning, has_skinning := data.skinning.?; has_skinning {
         is_skinned = true
         // Add frame-specific offset to bone matrix offset
-        texture_indices.bone_matrix_offset = node_skinning.bone_matrix_offset + 
+        texture_indices.bone_matrix_offset = node_skinning.bone_matrix_offset +
                                              g_frame_index * g_bone_matrix_slab.capacity
       }
 
