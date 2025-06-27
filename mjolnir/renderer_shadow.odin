@@ -128,7 +128,7 @@ renderer_shadow_init :: proc(
   spec_infos: [SHADOW_SHADER_VARIANT_COUNT]vk.SpecializationInfo
   shader_stages: [SHADOW_SHADER_VARIANT_COUNT][1]vk.PipelineShaderStageCreateInfo
   for mask in 0 ..< SHADOW_SHADER_VARIANT_COUNT {
-    features := transmute(ShaderFeatureSet)mask & ShaderFeatureSet {.SKINNING}
+    features := transmute(ShaderFeatureSet)mask & ShaderFeatureSet{.SKINNING}
     configs[mask] = ShadowShaderConfig {
       is_skinned = .SKINNING in features,
     }

@@ -43,14 +43,14 @@ MouseMoveProc :: #type proc(engine: ^Engine, pos, delta: linalg.Vector2f64)
 
 // Batch key for grouping objects by material features
 BatchKey :: struct {
-  features: ShaderFeatureSet,
+  features:      ShaderFeatureSet,
   material_type: MaterialType,
 }
 
 // Batch data containing material and nodes
 BatchData :: struct {
   material_handle: Handle,
-  nodes: [dynamic]^Node,
+  nodes:           [dynamic]^Node,
 }
 
 BatchingContext :: struct {
@@ -114,6 +114,7 @@ Engine :: struct {
   particle:              RendererParticle,
   postprocess:           RendererPostProcess,
   gbuffer:               RendererGBuffer,
+  depth_prepass:         RendererDepthPrepass,
   command_buffers:       [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
   visible_lights:        [MAX_FRAMES_IN_FLIGHT][dynamic]VisibleLightInfo,
   node_idx_to_light_idx: [MAX_FRAMES_IN_FLIGHT]map[int]int,
@@ -177,6 +178,10 @@ init :: proc(
     &self.gbuffer,
     self.swapchain.extent.width,
     self.swapchain.extent.height,
+  ) or_return
+  renderer_depth_prepass_init(
+    &self.depth_prepass,
+    self.swapchain.extent,
   ) or_return
   renderer_particle_init(&self.particle) or_return
   renderer_shadow_init(&self.shadow, .D32_SFLOAT) or_return
@@ -272,8 +277,10 @@ update :: proc(self: ^Engine) -> bool {
       continue
     }
     l, r :=
-      skinning.bone_matrix_offset + g_frame_index * g_bone_matrix_slab.capacity,
-      skinning.bone_matrix_offset + g_frame_index * g_bone_matrix_slab.capacity +
+      skinning.bone_matrix_offset +
+      g_frame_index * g_bone_matrix_slab.capacity,
+      skinning.bone_matrix_offset +
+      g_frame_index * g_bone_matrix_slab.capacity +
       u32(len(mesh_skin.bones))
     bone_matrices := g_bindless_bone_buffer.mapped[l:r]
     sample_clip(mesh, anim_inst.clip_handle, anim_inst.time, bone_matrices)
@@ -326,6 +333,7 @@ deinit :: proc(self: ^Engine) {
   renderer_shadow_deinit(&self.shadow)
   renderer_postprocess_deinit(&self.postprocess)
   renderer_particle_deinit(&self.particle)
+  renderer_depth_prepass_deinit(&self.depth_prepass)
   swapchain_deinit(&self.swapchain)
   vulkan_context_deinit()
   glfw.DestroyWindow(self.window)
@@ -341,6 +349,10 @@ recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
   renderer_recreate_images(
     &engine.main,
     engine.swapchain.format.format,
+    engine.swapchain.extent,
+  ) or_return
+  renderer_depth_prepass_recreate_images(
+    &engine.depth_prepass,
     engine.swapchain.extent,
   ) or_return
   return .SUCCESS
@@ -443,40 +455,41 @@ render :: proc(self: ^Engine) -> vk.Result {
     command_buffer,
     self.main.frames[g_frame_index].main_pass_image.image,
   )
-  // log.debug("============ rendering G-buffer pass... =============")
-  renderer_gbuffer_begin(&self.gbuffer, command_buffer, self.swapchain.extent)
-  renderer_gbuffer_render(self, command_buffer)
-  renderer_gbuffer_end(&self.gbuffer, command_buffer)
-
   // log.debug("============ rendering depth pre-pass... =============")
-  renderer_main_depth_prepass_begin(self, command_buffer)
-  renderer_main_depth_prepass_render(self, command_buffer)
-  renderer_main_depth_prepass_end(self, command_buffer)
+  renderer_depth_prepass_begin(self, command_buffer)
+  renderer_depth_prepass_render(self, command_buffer)
+  renderer_depth_prepass_end(self, command_buffer)
+  if true {
+    // log.debug("============ rendering G-buffer pass... =============")
+    renderer_gbuffer_begin(self, command_buffer, self.swapchain.extent)
+    renderer_gbuffer_render(self, command_buffer)
+    renderer_gbuffer_end(self, command_buffer)
 
-  // log.debug("============ rendering main pass... =============")
-  renderer_main_begin(self, command_buffer)
-  renderer_main_render(self, command_buffer)
-  renderer_main_end(self, command_buffer)
-  // log.debug("============ rendering particles... =============")
-  renderer_particle_begin(
-    self,
-    command_buffer,
-    self.main.frames[g_frame_index].main_pass_image.view,
-    self.main.depth_buffer.view,
-  )
-  renderer_particle_render(self, command_buffer)
-  renderer_particle_end(self, command_buffer)
+    // log.debug("============ rendering main pass... =============")
+    renderer_main_begin(self, command_buffer)
+    renderer_main_render(self, command_buffer)
+    renderer_main_end(self, command_buffer)
+    // log.debug("============ rendering particles... =============")
+    renderer_particle_begin(
+      self,
+      command_buffer,
+      self.main.frames[g_frame_index].main_pass_image.view,
+      self.depth_prepass.depth_buffer.view,
+    )
+    renderer_particle_render(self, command_buffer)
+    renderer_particle_end(self, command_buffer)
+  }
+  // log.debug("============ rendering post processes... =============")
   prepare_image_for_shader_read(
     command_buffer,
     self.main.frames[g_frame_index].main_pass_image.image,
   )
-  // log.debug("============ rendering post processes... =============")
   renderer_postprocess_begin(
     &self.postprocess,
     command_buffer,
     self.main.frames[g_frame_index].main_pass_image.view,
-    self.main.depth_buffer.view,
-    self.gbuffer.normal_buffer.view, // Use G-buffer normal buffer for post-process effects
+    self.depth_prepass.depth_buffer.view,
+    self.gbuffer.normal_buffer.view,
     self.swapchain.extent,
   )
   prepare_image_for_render(

@@ -1,4 +1,5 @@
 #version 450
+layout(constant_id = 0) const bool SKINNED = false;
 
 // Vertex input attributes - same as uber shader
 layout(location = 0) in vec3 inPosition;
@@ -16,7 +17,7 @@ layout(set = 0, binding = 0) uniform SceneUniform {
     float padding[3];
 } scene;
 
-layout(set = 3, binding = 0) readonly buffer BoneBuffer {
+layout(set = 1, binding = 0) readonly buffer BoneBuffer {
     mat4 bone_matrices[];
 };
 
@@ -38,27 +39,19 @@ layout(push_constant) uniform PushConstant {
     float padding;
 } push;
 
-// Specialization constants for features
-layout(constant_id = 0) const bool IS_SKINNED = false;
-
 void main() {
     vec4 modelPos;
-
-    if (IS_SKINNED) {
-        // Apply skinning transformation with bone matrix offset (same method as uber shader)
+    if (SKINNED) {
         uvec4 indices = inJoints + uvec4(push.bone_matrix_offset);
         mat4 skinMatrix =
             inWeights.x * bone_matrices[indices.x] +
             inWeights.y * bone_matrices[indices.y] +
             inWeights.z * bone_matrices[indices.z] +
             inWeights.w * bone_matrices[indices.w];
-
         modelPos = skinMatrix * vec4(inPosition, 1.0);
     } else {
         modelPos = vec4(inPosition, 1.0);
     }
-
-    // Apply world transform, then view-projection (same order as main shader)
     vec4 worldPos = push.world * modelPos;
     gl_Position = scene.projection * scene.view * worldPos;
 }

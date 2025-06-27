@@ -20,7 +20,6 @@ RendererGBuffer :: struct {
   pipeline_layout:       vk.PipelineLayout,
   descriptor_set_layout: vk.DescriptorSetLayout,
   normal_buffer:         ImageBuffer,
-  depth_buffer:          ImageBuffer,
   descriptor_sets:       [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
   scene_uniform_buffers: [MAX_FRAMES_IN_FLIGHT]DataBuffer(SceneUniform),
   light_uniform_buffers: [MAX_FRAMES_IN_FLIGHT]DataBuffer(SceneLightUniform),
@@ -45,20 +44,6 @@ renderer_gbuffer_init :: proc(
     {.COLOR},
   ) or_return
   depth_format: vk.Format = .D32_SFLOAT
-  self.depth_buffer = malloc_image_buffer(
-    width,
-    height,
-    depth_format,
-    .OPTIMAL,
-    {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
-    {.DEVICE_LOCAL},
-  ) or_return
-  self.depth_buffer.view = create_image_view(
-    self.depth_buffer.image,
-    depth_format,
-    {.DEPTH},
-  ) or_return
-
   // Create uniform buffers
   for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
     self.scene_uniform_buffers[i] = create_host_visible_buffer(
@@ -157,15 +142,6 @@ renderer_gbuffer_init :: proc(
       buffer = self.light_uniform_buffers[i].buffer,
       range  = vk.DeviceSize(self.light_uniform_buffers[i].bytes_count),
     }
-    // Create dummy shadow map descriptor infos for compatibility
-    dummy_shadow_map_infos: [MAX_SHADOW_MAPS]vk.DescriptorImageInfo
-    for j in 0 ..< MAX_SHADOW_MAPS {
-      dummy_shadow_map_infos[j] = {
-        sampler     = g_nearest_clamp_sampler,
-        imageView   = self.depth_buffer.view, // Use G-buffer depth as dummy
-        imageLayout = .SHADER_READ_ONLY_OPTIMAL,
-      }
-    }
     writes := [?]vk.WriteDescriptorSet {
       // Scene uniform (binding 0)
       {
@@ -184,24 +160,6 @@ renderer_gbuffer_init :: proc(
         descriptorType = .UNIFORM_BUFFER,
         descriptorCount = 1,
         pBufferInfo = &light_buffer_info,
-      },
-      // Shadow maps (binding 2) - dummy for compatibility
-      {
-        sType = .WRITE_DESCRIPTOR_SET,
-        dstSet = self.descriptor_sets[i],
-        dstBinding = 2,
-        descriptorType = .COMBINED_IMAGE_SAMPLER,
-        descriptorCount = MAX_SHADOW_MAPS,
-        pImageInfo = raw_data(dummy_shadow_map_infos[:]),
-      },
-      // Cube shadow maps (binding 3) - dummy for compatibility
-      {
-        sType = .WRITE_DESCRIPTOR_SET,
-        dstSet = self.descriptor_sets[i],
-        dstBinding = 3,
-        descriptorType = .COMBINED_IMAGE_SAMPLER,
-        descriptorCount = MAX_SHADOW_MAPS,
-        pImageInfo = raw_data(dummy_shadow_map_infos[:]),
       },
     }
     vk.UpdateDescriptorSets(g_device, len(writes), raw_data(writes[:]), 0, nil)
@@ -287,11 +245,15 @@ renderer_gbuffer_build_pipelines :: proc(
     scissorCount  = 1,
   }
   rasterizer := vk.PipelineRasterizationStateCreateInfo {
-    sType       = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
-    polygonMode = .FILL,
-    lineWidth   = 1.0,
-    cullMode    = {.BACK},
-    frontFace   = .COUNTER_CLOCKWISE,
+    sType                   = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+    polygonMode             = .FILL,
+    lineWidth               = 1.0,
+    cullMode                = {.BACK},
+    frontFace               = .COUNTER_CLOCKWISE,
+    depthBiasEnable         = true,
+    // TODO: I don't know why these values are negative, but they work
+    depthBiasConstantFactor = -0.1,
+    depthBiasSlopeFactor    = -0.2,
   }
   multisampling := vk.PipelineMultisampleStateCreateInfo {
     sType                = .PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
@@ -391,35 +353,29 @@ renderer_gbuffer_build_pipelines :: proc(
 }
 
 renderer_gbuffer_begin :: proc(
-  self: ^RendererGBuffer,
+  engine: ^Engine,
   command_buffer: vk.CommandBuffer,
   extent: vk.Extent2D,
 ) {
   prepare_image_for_render(
     command_buffer,
-    self.normal_buffer.image,
+    engine.gbuffer.normal_buffer.image,
     .COLOR_ATTACHMENT_OPTIMAL,
-  )
-  prepare_image_for_render(
-    command_buffer,
-    self.depth_buffer.image,
-    .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
   )
   normal_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
-    imageView = self.normal_buffer.view,
+    imageView = engine.gbuffer.normal_buffer.view,
     imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
     loadOp = .CLEAR,
     storeOp = .STORE,
     clearValue = {color = {float32 = {0.0, 0.0, 0.0, 1.0}}}, // Red clear color for debugging
   }
   depth_attachment := vk.RenderingAttachmentInfoKHR {
-    sType = .RENDERING_ATTACHMENT_INFO_KHR,
-    imageView = self.depth_buffer.view,
+    sType       = .RENDERING_ATTACHMENT_INFO_KHR,
+    imageView   = engine.depth_prepass.depth_buffer.view,
     imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-    loadOp = .CLEAR,
-    storeOp = .STORE,
-    clearValue = {depthStencil = {1.0, 0}},
+    loadOp      = .LOAD,
+    storeOp     = .STORE,
   }
   render_info := vk.RenderingInfoKHR {
     sType = .RENDERING_INFO_KHR,
@@ -446,11 +402,14 @@ renderer_gbuffer_begin :: proc(
 }
 
 renderer_gbuffer_end :: proc(
-  self: ^RendererGBuffer,
+  engine: ^Engine,
   command_buffer: vk.CommandBuffer,
 ) {
   vk.CmdEndRenderingKHR(command_buffer)
-  prepare_image_for_shader_read(command_buffer, self.normal_buffer.image)
+  prepare_image_for_shader_read(
+    command_buffer,
+    engine.gbuffer.normal_buffer.image,
+  )
 }
 
 renderer_gbuffer_render :: proc(
@@ -551,7 +510,6 @@ renderer_gbuffer_deinit :: proc(self: ^RendererGBuffer) {
   vk.DestroyPipelineLayout(g_device, self.pipeline_layout, nil)
   vk.DestroyDescriptorSetLayout(g_device, self.descriptor_set_layout, nil)
   image_buffer_deinit(&self.normal_buffer)
-  image_buffer_deinit(&self.depth_buffer)
   for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
     data_buffer_deinit(&self.scene_uniform_buffers[i])
     data_buffer_deinit(&self.light_uniform_buffers[i])

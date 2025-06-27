@@ -4,6 +4,7 @@ layout(location = 0) in vec2 v_uv;
 layout(location = 0) out vec4 out_color;
 
 layout(set = 0, binding = 0) uniform sampler2D u_input_image;
+layout(set = 0, binding = 1) uniform sampler2D u_normal_texture;
 layout(set = 0, binding = 2) uniform sampler2D u_depth_texture;
 
 layout(push_constant) uniform FogData {
@@ -30,31 +31,21 @@ float compute_fog_factor(float distance) {
     if (distance <= fog.fog_start) {
         return 0.0;
     }
-
     // Linear fog
     float factor = (distance - fog.fog_start) / (fog.fog_end - fog.fog_start);
-
     // Exponential fog (alternative)
     // float factor = 1.0 - exp(-fog.fog_density * distance);
-
     // Exponential squared fog (alternative)
     // float factor = 1.0 - exp(-fog.fog_density * fog.fog_density * distance * distance);
-
     return clamp(factor, 0.0, 1.0);
 }
 
 void main() {
     vec4 color = texture(u_input_image, v_uv);
+    vec4 normal = texture(u_normal_texture, v_uv);
     float depth = texture(u_depth_texture, v_uv).r;
-
-    // Convert depth to linear distance
     float linear_depth = linearize_depth(depth);
-
-    // Calculate fog factor
     float fog_factor = compute_fog_factor(linear_depth);
-
-    // Apply fog
     vec3 final_color = mix(color.rgb, fog.fog_color, fog_factor);
-
-    out_color = vec4(final_color, color.a);
+    out_color = vec4(color.rgb, color.a);
 }
