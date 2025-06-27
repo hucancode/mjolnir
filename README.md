@@ -9,13 +9,12 @@ Mjolnir is a minimalistic rendering engine. The goal is to create a simple set o
 # Work in Progress
 
 - PBR Material
-- Post-process Effect
-- Particle System
+- Batching, culling, optimization
 
 ## To do
 
 - Multi thread rendering
-- Batching, instancing, culling
+- Defered Rendering
 
 # Disclaimer
 

@@ -84,11 +84,6 @@ SHADER_DEPTH_PREPASS_VERT :: #load("shader/depth_prepass/vert.spv")
 DEPTH_PREPASS_OPTION_COUNT :: 1
 DEPTH_PREPASS_VARIANT_COUNT: u32 : 1 << DEPTH_PREPASS_OPTION_COUNT
 
-DepthPrepassFeatures :: enum {
-  SKINNING = 0,
-}
-DepthPrepassFeatureSet :: bit_set[DepthPrepassFeatures;u32]
-
 SHADER_UBER_VERT :: #load("shader/uber/vert.spv")
 SHADER_UBER_FRAG :: #load("shader/uber/frag.spv")
 SHADER_UNLIT_VERT :: #load("shader/unlit/vert.spv")
@@ -108,7 +103,6 @@ RendererMain :: struct {
   pipelines:                     [SHADER_VARIANT_COUNT]vk.Pipeline,
   unlit_pipelines:               [UNLIT_SHADER_VARIANT_COUNT]vk.Pipeline,
   wireframe_unlit_pipelines:     [UNLIT_SHADER_VARIANT_COUNT]vk.Pipeline,
-  // Depth pre-pass pipelines
   depth_prepass_pipeline_layout: vk.PipelineLayout,
   depth_prepass_pipelines:       [DEPTH_PREPASS_VARIANT_COUNT]vk.Pipeline,
   depth_buffer:                  ImageBuffer,
@@ -509,31 +503,25 @@ renderer_main_build_wireframe_unlit_pipeline :: proc(
   configs: [UNLIT_SHADER_VARIANT_COUNT]ShaderConfig
   entries: [UNLIT_SHADER_VARIANT_COUNT][UNLIT_SHADER_OPTION_COUNT]vk.SpecializationMapEntry
   shader_stages_arr: [UNLIT_SHADER_VARIANT_COUNT][2]vk.PipelineShaderStageCreateInfo
-
   vert_module := create_shader_module(SHADER_UNLIT_VERT) or_return
   defer vk.DestroyShaderModule(g_device, vert_module, nil)
   frag_module := create_shader_module(SHADER_UNLIT_FRAG) or_return
   defer vk.DestroyShaderModule(g_device, frag_module, nil)
-
   dynamic_states_values := [?]vk.DynamicState{.VIEWPORT, .SCISSOR}
   dynamic_state_info := vk.PipelineDynamicStateCreateInfo {
     sType             = .PIPELINE_DYNAMIC_STATE_CREATE_INFO,
     dynamicStateCount = u32(len(dynamic_states_values)),
     pDynamicStates    = raw_data(dynamic_states_values[:]),
   }
-
   input_assembly := vk.PipelineInputAssemblyStateCreateInfo {
     sType    = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
     topology = .TRIANGLE_LIST,
   }
-
   viewport_state := vk.PipelineViewportStateCreateInfo {
     sType         = .PIPELINE_VIEWPORT_STATE_CREATE_INFO,
     viewportCount = 1,
     scissorCount  = 1,
   }
-
-  // Wireframe rasterizer settings
   rasterizer := vk.PipelineRasterizationStateCreateInfo {
     sType                   = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
     polygonMode             = .LINE, // Key difference - wireframe mode
@@ -544,22 +532,18 @@ renderer_main_build_wireframe_unlit_pipeline :: proc(
     depthBiasConstantFactor = 0.1,
     depthBiasSlopeFactor    = 0.1,
   }
-
   multisampling := vk.PipelineMultisampleStateCreateInfo {
     sType                = .PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
     rasterizationSamples = {._1},
   }
-
   color_blend_attachment := vk.PipelineColorBlendAttachmentState {
     colorWriteMask = {.R, .G, .B, .A},
   }
-
   blending := vk.PipelineColorBlendStateCreateInfo {
     sType           = .PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
     attachmentCount = 1,
     pAttachments    = &color_blend_attachment,
   }
-
   depth_stencil_state := vk.PipelineDepthStencilStateCreateInfo {
     sType            = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
     depthTestEnable  = true,
@@ -669,11 +653,8 @@ renderer_main_build_depth_prepass_pipeline :: proc(
   configs: [DEPTH_PREPASS_VARIANT_COUNT]ShaderConfig
   entries: [DEPTH_PREPASS_VARIANT_COUNT][DEPTH_PREPASS_OPTION_COUNT]vk.SpecializationMapEntry
   shader_stages_arr: [DEPTH_PREPASS_VARIANT_COUNT][1]vk.PipelineShaderStageCreateInfo // Only vertex shader
-
   vert_module := create_shader_module(SHADER_DEPTH_PREPASS_VERT) or_return
   defer vk.DestroyShaderModule(g_device, vert_module, nil)
-  // No fragment shader needed for depth pre-pass
-
   dynamic_states_values := [?]vk.DynamicState{.VIEWPORT, .SCISSOR}
   dynamic_state_info := vk.PipelineDynamicStateCreateInfo {
     sType             = .PIPELINE_DYNAMIC_STATE_CREATE_INFO,
@@ -704,30 +685,19 @@ renderer_main_build_depth_prepass_pipeline :: proc(
     sType                = .PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
     rasterizationSamples = {._1},
   }
-
-  // No color output for depth pre-pass
   blending := vk.PipelineColorBlendStateCreateInfo {
-    sType           = .PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
-    attachmentCount = 0, // No color attachments
-    pAttachments    = nil,
+    sType = .PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
   }
-
-  // Depth pre-pass: write depth, test less
   depth_stencil_state := vk.PipelineDepthStencilStateCreateInfo {
     sType            = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
     depthTestEnable  = true,
     depthWriteEnable = true,
     depthCompareOp   = .LESS,
   }
-
-  // Only depth attachment, no color
   rendering_info_khr := vk.PipelineRenderingCreateInfoKHR {
-    sType                   = .PIPELINE_RENDERING_CREATE_INFO_KHR,
-    colorAttachmentCount    = 0,
-    pColorAttachmentFormats = nil,
-    depthAttachmentFormat   = depth_format,
+    sType                 = .PIPELINE_RENDERING_CREATE_INFO_KHR,
+    depthAttachmentFormat = depth_format,
   }
-
   vertex_input_info := vk.PipelineVertexInputStateCreateInfo {
     sType                           = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
     vertexBindingDescriptionCount   = len(geometry.VERTEX_BINDING_DESCRIPTION),
@@ -741,19 +711,15 @@ renderer_main_build_depth_prepass_pipeline :: proc(
       geometry.VERTEX_ATTRIBUTE_DESCRIPTIONS[:],
     ),
   }
-
-  // Create pipeline layout for depth pre-pass (minimal requirements)
   set_layouts := [?]vk.DescriptorSetLayout {
     self.camera_descriptor_set_layout, // set = 0 (camera uniforms)
     g_bindless_textures_layout, // set = 1 (for displacement textures)
     g_bindless_samplers_layout, // set = 2 (for displacement sampling)
     g_bindless_bone_buffer_set_layout, // set = 3 (for skinning)
   }
-
   push_constant_range := [?]vk.PushConstantRange {
-    {stageFlags = {.VERTEX}, size = size_of(PushConstant)}, // Only vertex shader for depth pre-pass
+    {stageFlags = {.VERTEX}, size = size_of(PushConstant)},
   }
-
   vk.CreatePipelineLayout(
     g_device,
     &{
@@ -766,13 +732,11 @@ renderer_main_build_depth_prepass_pipeline :: proc(
     nil,
     &self.depth_prepass_pipeline_layout,
   ) or_return
-
   for mask in 0 ..< DEPTH_PREPASS_VARIANT_COUNT {
-    features := transmute(DepthPrepassFeatureSet)mask
+    features := transmute(ShaderFeatureSet)mask & ShaderFeatureSet{.SKINNING}
     configs[mask] = ShaderConfig {
       is_skinned = .SKINNING in features,
     }
-
     entries[mask] = [DEPTH_PREPASS_OPTION_COUNT]vk.SpecializationMapEntry {
       {
         constantID = 0,
@@ -780,7 +744,6 @@ renderer_main_build_depth_prepass_pipeline :: proc(
         size = size_of(b32),
       },
     }
-
     spec_infos[mask] = {
       mapEntryCount = len(entries[mask]),
       pMapEntries   = raw_data(entries[mask][:]),
@@ -797,13 +760,11 @@ renderer_main_build_depth_prepass_pipeline :: proc(
         pSpecializationInfo = &spec_infos[mask],
       },
     }
-
     log.infof(
       "Creating depth pre-pass pipeline for features: %v with config %v",
       features,
       configs[mask],
     )
-
     pipeline_infos[mask] = {
       sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
       pNext               = &rendering_info_khr,
@@ -820,7 +781,6 @@ renderer_main_build_depth_prepass_pipeline :: proc(
       layout              = self.depth_prepass_pipeline_layout,
     }
   }
-
   vk.CreateGraphicsPipelines(
     g_device,
     0,
@@ -829,7 +789,6 @@ renderer_main_build_depth_prepass_pipeline :: proc(
     nil,
     raw_data(self.depth_prepass_pipelines[:]),
   ) or_return
-
   return .SUCCESS
 }
 
@@ -856,7 +815,7 @@ renderer_main_get_depth_prepass_pipeline :: proc(
   mesh: ^Mesh,
   mesh_attachment: MeshAttachment,
 ) -> vk.Pipeline {
-  features: DepthPrepassFeatureSet
+  features: ShaderFeatureSet
 
   // Check if mesh is skinned by looking at both mesh and node attachment
   mesh_skinning, mesh_has_skin := &mesh.skinning.?
@@ -1700,8 +1659,8 @@ render_depth_prepass_batches :: proc(
         #partial switch data in node.attachment {
         case MeshAttachment:
           mesh := resource.get(g_meshes, data.handle) or_continue
-
-          // Get appropriate depth pre-pass pipeline
+          mesh_skinning, mesh_has_skin := &mesh.skinning.?
+          node_skinning, node_has_skin := data.skinning.?
           pipeline := renderer_main_get_depth_prepass_pipeline(
             self,
             material,
@@ -1712,29 +1671,12 @@ render_depth_prepass_batches :: proc(
             vk.CmdBindPipeline(command_buffer, .GRAPHICS, pipeline)
             current_pipeline = pipeline
           }
-
-          // Setup push constants for depth pre-pass (need bone matrix offset for skinned meshes)
-          texture_indices: MaterialTextures = {
-            albedo_index             = 0, // Set default values for depth pre-pass
-            metallic_roughness_index = 0,
-            normal_index             = 0,
-            displacement_index       = 0,
-            emissive_index           = 0,
-            environment_index        = 0,
-            brdf_lut_index           = 0,
-            bone_matrix_offset       = 0,
+          texture_indices: MaterialTextures
+          if node_has_skin {
+            texture_indices.bone_matrix_offset =
+              node_skinning.bone_matrix_offset +
+              g_frame_index * g_bone_matrix_slab.capacity
           }
-
-          // Check if mesh is skinned and set bone matrix offset
-          if mesh_skinning, mesh_has_skin := &mesh.skinning.?; mesh_has_skin {
-            if node_skinning, node_has_skin := data.skinning.?; node_has_skin {
-              // Add frame-specific offset to bone matrix offset
-              texture_indices.bone_matrix_offset =
-                node_skinning.bone_matrix_offset +
-                g_frame_index * g_bone_matrix_slab.capacity
-            }
-          }
-
           push_constant := PushConstant {
             world           = node.transform.world_matrix,
             textures        = texture_indices,
@@ -1742,17 +1684,14 @@ render_depth_prepass_batches :: proc(
             roughness_value = material.roughness_value,
             emissive_value  = material.emissive_value,
           }
-
           vk.CmdPushConstants(
             command_buffer,
             self.depth_prepass_pipeline_layout,
-            {.VERTEX}, // Only vertex shader for depth pre-pass
+            {.VERTEX},
             0,
             size_of(PushConstant),
             &push_constant,
           )
-
-          // Bind vertex buffer
           offset: vk.DeviceSize = 0
           vk.CmdBindVertexBuffers(
             command_buffer,
@@ -1761,35 +1700,26 @@ render_depth_prepass_batches :: proc(
             &mesh.vertex_buffer.buffer,
             &offset,
           )
-
-          // Bind skinning vertex buffer if mesh is skinned
-          if mesh_skinning, mesh_has_skin := &mesh.skinning.?; mesh_has_skin {
-            if node_skinning, node_has_skin := data.skinning.?; node_has_skin {
-              vk.CmdBindVertexBuffers(
-                command_buffer,
-                1,
-                1,
-                &mesh_skinning.skin_buffer.buffer,
-                &offset,
-              )
-            }
+          if mesh_has_skin {
+            vk.CmdBindVertexBuffers(
+              command_buffer,
+              1,
+              1,
+              &mesh_skinning.skin_buffer.buffer,
+              &offset,
+            )
           }
-
           vk.CmdBindIndexBuffer(
             command_buffer,
             mesh.index_buffer.buffer,
             0,
             .UINT32,
           )
-
-          // Draw indexed
           vk.CmdDrawIndexed(command_buffer, mesh.indices_len, 1, 0, 0, 0)
-
           rendered += 1
         }
       }
     }
   }
-
   return rendered
 }
