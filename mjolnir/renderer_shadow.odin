@@ -89,7 +89,6 @@ renderer_shadow_init :: proc(
     polygonMode             = .FILL,
     cullMode                = {.BACK},
     frontFace               = .COUNTER_CLOCKWISE,
-    lineWidth               = 1.0,
     depthBiasEnable         = true,
     depthBiasConstantFactor = 1.25,
     depthBiasClamp          = 0.0,

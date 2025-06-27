@@ -245,15 +245,10 @@ renderer_gbuffer_build_pipelines :: proc(
     scissorCount  = 1,
   }
   rasterizer := vk.PipelineRasterizationStateCreateInfo {
-    sType                   = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
-    polygonMode             = .FILL,
-    lineWidth               = 1.0,
-    cullMode                = {.BACK},
-    frontFace               = .COUNTER_CLOCKWISE,
-    depthBiasEnable         = true,
-    // TODO: I don't know why these values are negative, but they work
-    depthBiasConstantFactor = -0.1,
-    depthBiasSlopeFactor    = -0.2,
+    sType       = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+    polygonMode = .FILL,
+    cullMode    = {.BACK},
+    frontFace   = .COUNTER_CLOCKWISE,
   }
   multisampling := vk.PipelineMultisampleStateCreateInfo {
     sType                = .PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,

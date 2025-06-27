@@ -167,15 +167,10 @@ renderer_main_build_pbr_pipeline :: proc(
     scissorCount  = 1,
   }
   rasterizer := vk.PipelineRasterizationStateCreateInfo {
-    sType                   = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
-    polygonMode             = .FILL,
-    cullMode                = {.BACK},
-    frontFace               = .COUNTER_CLOCKWISE,
-    lineWidth               = 1.0,
-    depthBiasEnable         = true,
-    // TODO: I don't know why these values are negative, but they work
-    depthBiasConstantFactor = -0.1,
-    depthBiasSlopeFactor    = -0.2,
+    sType       = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+    polygonMode = .FILL,
+    cullMode    = {.BACK},
+    frontFace   = .COUNTER_CLOCKWISE,
   }
   multisampling := vk.PipelineMultisampleStateCreateInfo {
     sType                = .PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
@@ -364,15 +359,10 @@ renderer_main_build_unlit_pipeline :: proc(
     scissorCount  = 1,
   }
   rasterizer := vk.PipelineRasterizationStateCreateInfo {
-    sType                   = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
-    polygonMode             = .FILL,
-    cullMode                = {.BACK},
-    frontFace               = .COUNTER_CLOCKWISE,
-    lineWidth               = 1.0,
-    depthBiasEnable         = true,
-    // TODO: I don't know why these values are negative, but they work
-    depthBiasConstantFactor = -0.1,
-    depthBiasSlopeFactor    = -0.2,
+    sType       = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+    polygonMode = .FILL,
+    cullMode    = {.BACK},
+    frontFace   = .COUNTER_CLOCKWISE,
   }
   multisampling := vk.PipelineMultisampleStateCreateInfo {
     sType                = .PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
@@ -515,15 +505,11 @@ renderer_main_build_wireframe_unlit_pipeline :: proc(
     scissorCount  = 1,
   }
   rasterizer := vk.PipelineRasterizationStateCreateInfo {
-    sType                   = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
-    polygonMode             = .LINE, // Key difference - wireframe mode
-    cullMode                = {}, // Disable culling for wireframe
-    frontFace               = .COUNTER_CLOCKWISE,
-    lineWidth               = 1.0,
-    depthBiasEnable         = true,
-    // TODO: I don't know why these values are negative, but they work
-    depthBiasConstantFactor = -0.1,
-    depthBiasSlopeFactor    = -0.2,
+    sType       = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+    polygonMode = .LINE,
+    lineWidth   = 1.0,
+    cullMode    = {}, // Disable culling for wireframe
+    frontFace   = .COUNTER_CLOCKWISE,
   }
   multisampling := vk.PipelineMultisampleStateCreateInfo {
     sType                = .PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,

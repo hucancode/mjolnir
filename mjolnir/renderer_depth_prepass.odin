@@ -534,11 +534,13 @@ renderer_depth_prepass_build_pipeline :: proc(
     pScissors     = &scissor,
   }
   rasterizer := vk.PipelineRasterizationStateCreateInfo {
-    sType       = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
-    polygonMode = .FILL,
-    lineWidth   = 1.0,
-    cullMode    = {.BACK},
-    frontFace   = .COUNTER_CLOCKWISE,
+    sType                   = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+    polygonMode             = .FILL,
+    cullMode                = {.BACK},
+    frontFace               = .COUNTER_CLOCKWISE,
+    depthBiasEnable         = true,
+    depthBiasConstantFactor = 0.1,
+    depthBiasSlopeFactor    = 0.2,
   }
   multisampling := vk.PipelineMultisampleStateCreateInfo {
     sType                = .PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,

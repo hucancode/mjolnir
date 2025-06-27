@@ -582,11 +582,6 @@ renderer_particle_init :: proc(self: ^RendererParticle) -> vk.Result {
     depthClampEnable        = false,
     rasterizerDiscardEnable = false,
     polygonMode             = .FILL,
-    lineWidth               = 1,
-    depthBiasEnable         = true,
-    // TODO: I don't know why these values are negative, but they work
-    depthBiasConstantFactor = -0.1,
-    depthBiasSlopeFactor    = -0.2,
   }
   color_blend_attachment := vk.PipelineColorBlendAttachmentState {
     blendEnable         = true,
