@@ -1,19 +1,14 @@
 package mjolnir
 
 import "core:log"
+import linalg "core:math/linalg"
 import "core:mem"
 import "core:time"
-import linalg "core:math/linalg"
-import vk "vendor:vulkan"
 import "geometry"
 import "resource"
+import vk "vendor:vulkan"
 
-GBufferShaderFeatures :: enum {
-  SKINNING = 0,
-}
-GBufferShaderFeatureSet :: bit_set[GBufferShaderFeatures;u32]
-
-GBUFFER_SHADER_OPTION_COUNT: u32 : len(GBufferShaderFeatures)
+GBUFFER_SHADER_OPTION_COUNT: u32 : 1
 GBUFFER_SHADER_VARIANT_COUNT: u32 : 1 << GBUFFER_SHADER_OPTION_COUNT
 
 GBufferShaderConfig :: struct {
@@ -22,14 +17,14 @@ GBufferShaderConfig :: struct {
 
 // G-buffer renderer for generating normal and depth textures
 RendererGBuffer :: struct {
-  pipelines:              [GBUFFER_SHADER_VARIANT_COUNT]vk.Pipeline,
-  pipeline_layout:        vk.PipelineLayout,
-  descriptor_set_layout:  vk.DescriptorSetLayout,
-  normal_buffer:          ImageBuffer,
-  depth_buffer:           ImageBuffer,
-  descriptor_sets:        [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
-  scene_uniform_buffers:  [MAX_FRAMES_IN_FLIGHT]DataBuffer(SceneUniform),
-  light_uniform_buffers:  [MAX_FRAMES_IN_FLIGHT]DataBuffer(SceneLightUniform),
+  pipelines:             [GBUFFER_SHADER_VARIANT_COUNT]vk.Pipeline,
+  pipeline_layout:       vk.PipelineLayout,
+  descriptor_set_layout: vk.DescriptorSetLayout,
+  normal_buffer:         ImageBuffer,
+  depth_buffer:          ImageBuffer,
+  descriptor_sets:       [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
+  scene_uniform_buffers: [MAX_FRAMES_IN_FLIGHT]DataBuffer(SceneUniform),
+  light_uniform_buffers: [MAX_FRAMES_IN_FLIGHT]DataBuffer(SceneLightUniform),
   // Note: bone_matrices_buffer removed - using global g_bindless_bone_buffer_descriptor_set
 }
 
@@ -54,8 +49,11 @@ renderer_gbuffer_init :: proc(
     {.COLOR},
   ) or_return
 
-  log.infof("G-buffer normal_buffer.image = %v, normal_buffer.view = %v",
-           self.normal_buffer.image, self.normal_buffer.view)
+  log.infof(
+    "G-buffer normal_buffer.image = %v, normal_buffer.view = %v",
+    self.normal_buffer.image,
+    self.normal_buffer.view,
+  )
 
   // Create depth buffer - use same format as main renderer
   depth_format: vk.Format = .D32_SFLOAT
@@ -75,7 +73,7 @@ renderer_gbuffer_init :: proc(
   ) or_return
 
   // Create uniform buffers
-  for i in 0..<MAX_FRAMES_IN_FLIGHT {
+  for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
     self.scene_uniform_buffers[i] = create_host_visible_buffer(
       SceneUniform,
       1,
@@ -136,14 +134,14 @@ renderer_gbuffer_init :: proc(
 
   // Create pipeline layout - match main renderer with global descriptor sets
   set_layouts := [?]vk.DescriptorSetLayout {
-    self.descriptor_set_layout,     // set = 0 (camera/scene uniforms)
-    g_bindless_textures_layout,     // set = 1 (textures)
-    g_bindless_samplers_layout,     // set = 2 (samplers)
+    self.descriptor_set_layout, // set = 0 (camera/scene uniforms)
+    g_bindless_textures_layout, // set = 1 (textures)
+    g_bindless_samplers_layout, // set = 2 (samplers)
     g_bindless_bone_buffer_set_layout, // set = 3 (bone matrices)
   }
   push_constant_range := vk.PushConstantRange {
     stageFlags = {.VERTEX, .FRAGMENT},
-    size = size_of(PushConstant),
+    size       = size_of(PushConstant),
   }
 
   vk.CreatePipelineLayout(
@@ -161,7 +159,7 @@ renderer_gbuffer_init :: proc(
 
   // Create descriptor sets (only for set 0 - camera/scene uniforms)
   // Other sets (textures, samplers, bone matrices) use global descriptor sets
-  for i in 0..<MAX_FRAMES_IN_FLIGHT {
+  for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
     vk.AllocateDescriptorSets(
       g_device,
       &{
@@ -176,20 +174,20 @@ renderer_gbuffer_init :: proc(
     // Update descriptor sets - camera/scene uniforms and dummy shadow maps for compatibility
     scene_buffer_info := vk.DescriptorBufferInfo {
       buffer = self.scene_uniform_buffers[i].buffer,
-      range = vk.DeviceSize(self.scene_uniform_buffers[i].bytes_count),
+      range  = vk.DeviceSize(self.scene_uniform_buffers[i].bytes_count),
     }
 
     light_buffer_info := vk.DescriptorBufferInfo {
       buffer = self.light_uniform_buffers[i].buffer,
-      range = vk.DeviceSize(self.light_uniform_buffers[i].bytes_count),
+      range  = vk.DeviceSize(self.light_uniform_buffers[i].bytes_count),
     }
 
     // Create dummy shadow map descriptor infos for compatibility
     dummy_shadow_map_infos: [MAX_SHADOW_MAPS]vk.DescriptorImageInfo
-    for j in 0..<MAX_SHADOW_MAPS {
+    for j in 0 ..< MAX_SHADOW_MAPS {
       dummy_shadow_map_infos[j] = {
-        sampler = g_nearest_clamp_sampler,
-        imageView = self.depth_buffer.view, // Use G-buffer depth as dummy
+        sampler     = g_nearest_clamp_sampler,
+        imageView   = self.depth_buffer.view, // Use G-buffer depth as dummy
         imageLayout = .SHADER_READ_ONLY_OPTIMAL,
       }
     }
@@ -269,55 +267,89 @@ renderer_gbuffer_build_pipelines :: proc(
   // Common pipeline state - use static arrays to avoid scope issues
   vertex_bindings := [?]vk.VertexInputBindingDescription {
     {binding = 0, stride = size_of(geometry.Vertex), inputRate = .VERTEX},
-    {binding = 1, stride = size_of(geometry.SkinningData), inputRate = .VERTEX},
+    {
+      binding = 1,
+      stride = size_of(geometry.SkinningData),
+      inputRate = .VERTEX,
+    },
   }
 
   vertex_attributes := [?]vk.VertexInputAttributeDescription {
-    {location = 0, binding = 0, format = .R32G32B32_SFLOAT, offset = u32(offset_of(geometry.Vertex, position))},
-    {location = 1, binding = 0, format = .R32G32B32_SFLOAT, offset = u32(offset_of(geometry.Vertex, normal))},
-    {location = 2, binding = 0, format = .R32G32B32A32_SFLOAT, offset = u32(offset_of(geometry.Vertex, color))},
-    {location = 3, binding = 0, format = .R32G32_SFLOAT, offset = u32(offset_of(geometry.Vertex, uv))},
-    {location = 4, binding = 1, format = .R32G32B32A32_UINT, offset = u32(offset_of(geometry.SkinningData, joints))},
-    {location = 5, binding = 1, format = .R32G32B32A32_SFLOAT, offset = u32(offset_of(geometry.SkinningData, weights))},
+    {
+      location = 0,
+      binding = 0,
+      format = .R32G32B32_SFLOAT,
+      offset = u32(offset_of(geometry.Vertex, position)),
+    },
+    {
+      location = 1,
+      binding = 0,
+      format = .R32G32B32_SFLOAT,
+      offset = u32(offset_of(geometry.Vertex, normal)),
+    },
+    {
+      location = 2,
+      binding = 0,
+      format = .R32G32B32A32_SFLOAT,
+      offset = u32(offset_of(geometry.Vertex, color)),
+    },
+    {
+      location = 3,
+      binding = 0,
+      format = .R32G32_SFLOAT,
+      offset = u32(offset_of(geometry.Vertex, uv)),
+    },
+    {
+      location = 4,
+      binding = 1,
+      format = .R32G32B32A32_UINT,
+      offset = u32(offset_of(geometry.SkinningData, joints)),
+    },
+    {
+      location = 5,
+      binding = 1,
+      format = .R32G32B32A32_SFLOAT,
+      offset = u32(offset_of(geometry.SkinningData, weights)),
+    },
   }
 
   vertex_input_info := vk.PipelineVertexInputStateCreateInfo {
-    sType = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-    vertexBindingDescriptionCount = len(vertex_bindings),
-    pVertexBindingDescriptions = raw_data(vertex_bindings[:]),
+    sType                           = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+    vertexBindingDescriptionCount   = len(vertex_bindings),
+    pVertexBindingDescriptions      = raw_data(vertex_bindings[:]),
     vertexAttributeDescriptionCount = len(vertex_attributes),
-    pVertexAttributeDescriptions = raw_data(vertex_attributes[:]),
+    pVertexAttributeDescriptions    = raw_data(vertex_attributes[:]),
   }
 
   input_assembly := vk.PipelineInputAssemblyStateCreateInfo {
-    sType = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+    sType    = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
     topology = .TRIANGLE_LIST,
   }
 
   viewport_state := vk.PipelineViewportStateCreateInfo {
-    sType = .PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+    sType         = .PIPELINE_VIEWPORT_STATE_CREATE_INFO,
     viewportCount = 1,
-    scissorCount = 1,
+    scissorCount  = 1,
   }
 
   rasterizer := vk.PipelineRasterizationStateCreateInfo {
-    sType = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+    sType       = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
     polygonMode = .FILL,
-    lineWidth = 1.0,
-    cullMode = {.BACK},
-    frontFace = .COUNTER_CLOCKWISE,
+    lineWidth   = 1.0,
+    cullMode    = {.BACK},
+    frontFace   = .COUNTER_CLOCKWISE,
   }
 
   multisampling := vk.PipelineMultisampleStateCreateInfo {
-    sType = .PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+    sType                = .PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
     rasterizationSamples = {._1},
   }
 
   depth_stencil := vk.PipelineDepthStencilStateCreateInfo {
-    sType = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
-    depthTestEnable = true,
+    sType            = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+    depthTestEnable  = true,
     depthWriteEnable = true,
-    depthCompareOp = .LESS,
+    depthCompareOp   = .LESS,
   }
 
   color_blend_attachment := vk.PipelineColorBlendAttachmentState {
@@ -325,24 +357,24 @@ renderer_gbuffer_build_pipelines :: proc(
   }
 
   color_blending := vk.PipelineColorBlendStateCreateInfo {
-    sType = .PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+    sType           = .PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
     attachmentCount = 1,
-    pAttachments = &color_blend_attachment,
+    pAttachments    = &color_blend_attachment,
   }
 
   dynamic_states := [?]vk.DynamicState{.VIEWPORT, .SCISSOR}
   dynamic_state := vk.PipelineDynamicStateCreateInfo {
-    sType = .PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+    sType             = .PIPELINE_DYNAMIC_STATE_CREATE_INFO,
     dynamicStateCount = len(dynamic_states),
-    pDynamicStates = raw_data(dynamic_states[:]),
+    pDynamicStates    = raw_data(dynamic_states[:]),
   }
 
   color_formats := [?]vk.Format{.R8G8B8A8_UNORM} // Normal buffer format
   rendering_info := vk.PipelineRenderingCreateInfo {
-    sType = .PIPELINE_RENDERING_CREATE_INFO,
-    colorAttachmentCount = len(color_formats),
+    sType                   = .PIPELINE_RENDERING_CREATE_INFO,
+    colorAttachmentCount    = len(color_formats),
     pColorAttachmentFormats = raw_data(color_formats[:]),
-    depthAttachmentFormat = depth_format,
+    depthAttachmentFormat   = depth_format,
   }
 
   // Build pipelines with specialization constants like shadow renderer
@@ -353,7 +385,7 @@ renderer_gbuffer_build_pipelines :: proc(
   shader_stages: [GBUFFER_SHADER_VARIANT_COUNT][2]vk.PipelineShaderStageCreateInfo
 
   for mask in 0 ..< GBUFFER_SHADER_VARIANT_COUNT {
-    features := transmute(GBufferShaderFeatureSet)mask
+    features := transmute(ShaderFeatureSet)mask
     configs[mask] = GBufferShaderConfig {
       is_skinned = .SKINNING in features,
     }
@@ -387,19 +419,19 @@ renderer_gbuffer_build_pipelines :: proc(
       },
     }
     pipeline_infos[mask] = {
-      sType = .GRAPHICS_PIPELINE_CREATE_INFO,
-      stageCount = len(shader_stages[mask]),
-      pStages = raw_data(shader_stages[mask][:]),
-      pVertexInputState = &vertex_input_info,
+      sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
+      stageCount          = len(shader_stages[mask]),
+      pStages             = raw_data(shader_stages[mask][:]),
+      pVertexInputState   = &vertex_input_info,
       pInputAssemblyState = &input_assembly,
-      pViewportState = &viewport_state,
+      pViewportState      = &viewport_state,
       pRasterizationState = &rasterizer,
-      pMultisampleState = &multisampling,
-      pDepthStencilState = &depth_stencil,
-      pColorBlendState = &color_blending,
-      pDynamicState = &dynamic_state,
-      layout = self.pipeline_layout,
-      pNext = &rendering_info,
+      pMultisampleState   = &multisampling,
+      pDepthStencilState  = &depth_stencil,
+      pColorBlendState    = &color_blending,
+      pDynamicState       = &dynamic_state,
+      layout              = self.pipeline_layout,
+      pNext               = &rendering_info,
     }
   }
 
@@ -423,8 +455,16 @@ renderer_gbuffer_begin :: proc(
   extent: vk.Extent2D,
 ) {
   // Clear normal buffer
-  prepare_image_for_render(command_buffer, self.normal_buffer.image, .COLOR_ATTACHMENT_OPTIMAL)
-  prepare_image_for_render(command_buffer, self.depth_buffer.image, .DEPTH_STENCIL_ATTACHMENT_OPTIMAL)
+  prepare_image_for_render(
+    command_buffer,
+    self.normal_buffer.image,
+    .COLOR_ATTACHMENT_OPTIMAL,
+  )
+  prepare_image_for_render(
+    command_buffer,
+    self.depth_buffer.image,
+    .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+  )
 
   normal_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
@@ -487,22 +527,15 @@ renderer_gbuffer_render_mesh :: proc(
   frame_index: int,
   mesh: ^Mesh,
   material: ^Material,
-  push_constants: PushConstant,
-  is_skinned: bool = false,
+  push_constants: ^PushConstant,
 ) {
-  // Select pipeline based on shader features (like shadow renderer)
-  features: GBufferShaderFeatureSet = {}
-  if is_skinned {
-    features += {.SKINNING}
-  }
+  features := material.features & ShaderFeatureSet{.SKINNING}
   pipeline := renderer_gbuffer_get_pipeline(self, features)
   vk.CmdBindPipeline(command_buffer, .GRAPHICS, pipeline)
-
-  // Bind all descriptor sets like main renderer
   descriptor_sets := [?]vk.DescriptorSet {
     self.descriptor_sets[frame_index], // set = 0 (camera/scene uniforms)
-    g_bindless_textures,              // set = 1 (textures)
-    g_bindless_samplers,              // set = 2 (samplers)
+    g_bindless_textures, // set = 1 (textures)
+    g_bindless_samplers, // set = 2 (samplers)
     g_bindless_bone_buffer_descriptor_set, // set = 3 (bone matrices)
   }
   vk.CmdBindDescriptorSets(
@@ -515,27 +548,31 @@ renderer_gbuffer_render_mesh :: proc(
     0,
     nil,
   )
-
-  push_const_copy := push_constants
   vk.CmdPushConstants(
     command_buffer,
     self.pipeline_layout,
     {.VERTEX, .FRAGMENT},
     0,
     size_of(PushConstant),
-    &push_const_copy,
+    push_constants,
   )
-
   offset: vk.DeviceSize = 0
-  vk.CmdBindVertexBuffers(command_buffer, 0, 1, &mesh.vertex_buffer.buffer, &offset)
-
-  // Bind skinning buffer if needed
-  if is_skinned {
-    if skinning, has_skinning := &mesh.skinning.?; has_skinning {
-      vk.CmdBindVertexBuffers(command_buffer, 1, 1, &skinning.skin_buffer.buffer, &offset)
-    }
+  vk.CmdBindVertexBuffers(
+    command_buffer,
+    0,
+    1,
+    &mesh.vertex_buffer.buffer,
+    &offset,
+  )
+  if skinning, has_skinning := &mesh.skinning.?; has_skinning {
+    vk.CmdBindVertexBuffers(
+      command_buffer,
+      1,
+      1,
+      &skinning.skin_buffer.buffer,
+      &offset,
+    )
   }
-
   vk.CmdBindIndexBuffer(command_buffer, mesh.index_buffer.buffer, 0, .UINT32)
   vk.CmdDrawIndexed(command_buffer, mesh.indices_len, 1, 0, 0, 0)
 }
@@ -547,10 +584,16 @@ renderer_gbuffer_render :: proc(
   log.info("G-buffer render starting...")
 
   // Update uniforms
-  scene_uniform := data_buffer_get(&engine.gbuffer.scene_uniform_buffers[g_frame_index])
+  scene_uniform := data_buffer_get(
+    &engine.gbuffer.scene_uniform_buffers[g_frame_index],
+  )
   scene_uniform.view = geometry.calculate_view_matrix(engine.scene.camera)
-  scene_uniform.projection = geometry.calculate_projection_matrix(engine.scene.camera)
-  scene_uniform.time = f32(time.duration_seconds(time.since(engine.start_timestamp)))
+  scene_uniform.projection = geometry.calculate_projection_matrix(
+    engine.scene.camera,
+  )
+  scene_uniform.time = f32(
+    time.duration_seconds(time.since(engine.start_timestamp)),
+  )
 
   // Simple frustum culling
   camera_frustum := geometry.camera_make_frustum(engine.scene.camera)
@@ -595,35 +638,18 @@ renderer_gbuffer_render :: proc(
         brdf_lut_index           = 0, // Not needed for G-buffer
         bone_matrix_offset       = 0,
       }
-
-      // Check if mesh is skinned and set bone matrix offset
-      is_skinned := false
-      if node_skinning, has_skinning := data.skinning.?; has_skinning {
-        is_skinned = true
-        // Add frame-specific offset to bone matrix offset
-        texture_indices.bone_matrix_offset = node_skinning.bone_matrix_offset +
-                                             g_frame_index * g_bone_matrix_slab.capacity
+      node_skinning, has_skinning := data.skinning.?
+      if has_skinning {
+        texture_indices.bone_matrix_offset = node_skinning.bone_matrix_offset + g_frame_index * g_bone_matrix_slab.capacity
       }
-
-      // Create push constants
       push_constants := PushConstant {
-        world = node.transform.world_matrix,
-        textures = texture_indices,
-        metallic_value = material.metallic_value,
+        world           = node.transform.world_matrix,
+        textures        = texture_indices,
+        metallic_value  = material.metallic_value,
         roughness_value = material.roughness_value,
-        emissive_value = material.emissive_value,
+        emissive_value  = material.emissive_value,
       }
-
-      // Render the mesh
-      renderer_gbuffer_render_mesh(
-        &engine.gbuffer,
-        command_buffer,
-        int(g_frame_index),
-        mesh,
-        material,
-        push_constants,
-        is_skinned,
-      )
+      renderer_gbuffer_render_mesh(&engine.gbuffer, command_buffer, int(g_frame_index), mesh, material, &push_constants)
     }
   }
 
@@ -632,7 +658,7 @@ renderer_gbuffer_render :: proc(
 
 renderer_gbuffer_get_pipeline :: proc(
   self: ^RendererGBuffer,
-  features: GBufferShaderFeatureSet = {},
+  features: ShaderFeatureSet = {},
 ) -> vk.Pipeline {
   return self.pipelines[transmute(u32)features]
 }
@@ -650,7 +676,7 @@ renderer_gbuffer_deinit :: proc(self: ^RendererGBuffer) {
   image_buffer_deinit(&self.normal_buffer)
   image_buffer_deinit(&self.depth_buffer)
 
-  for i in 0..<MAX_FRAMES_IN_FLIGHT {
+  for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
     data_buffer_deinit(&self.scene_uniform_buffers[i])
     data_buffer_deinit(&self.light_uniform_buffers[i])
   }

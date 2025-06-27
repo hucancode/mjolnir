@@ -9,12 +9,7 @@ import vk "vendor:vulkan"
 
 SHADER_SHADOW_VERT :: #load("shader/shadow/vert.spv")
 
-ShadowShaderFeatures :: enum {
-  SKINNING = 0,
-}
-ShadowShaderFeatureSet :: bit_set[ShadowShaderFeatures;u32]
-
-SHADOW_SHADER_OPTION_COUNT: u32 : len(ShadowShaderFeatures)
+SHADOW_SHADER_OPTION_COUNT: u32 : 1 // Only SKINNING
 SHADOW_SHADER_VARIANT_COUNT: u32 : 1 << SHADOW_SHADER_OPTION_COUNT
 
 ShadowShaderConfig :: struct {
@@ -133,7 +128,7 @@ renderer_shadow_init :: proc(
   spec_infos: [SHADOW_SHADER_VARIANT_COUNT]vk.SpecializationInfo
   shader_stages: [SHADOW_SHADER_VARIANT_COUNT][1]vk.PipelineShaderStageCreateInfo
   for mask in 0 ..< SHADOW_SHADER_VARIANT_COUNT {
-    features := transmute(ShadowShaderFeatureSet)mask
+    features := transmute(ShaderFeatureSet)mask & ShaderFeatureSet {.SKINNING}
     configs[mask] = ShadowShaderConfig {
       is_skinned = .SKINNING in features,
     }
@@ -242,47 +237,8 @@ renderer_shadow_begin :: proc(
 ) {
   // Transition all shadow maps to depth attachment optimal
   for light in engine.visible_lights[g_frame_index] do if light.has_shadow {
-    initial_barriers := [?]vk.ImageMemoryBarrier{
-        {
-            sType = .IMAGE_MEMORY_BARRIER,
-            oldLayout = .UNDEFINED,
-            newLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-            srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-            dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-            image = light.cube_shadow_map.image,
-            subresourceRange = {
-                aspectMask = {.DEPTH},
-                baseMipLevel = 0,
-                levelCount = 1,
-                baseArrayLayer = 0,
-                layerCount = 6,
-            },
-            dstAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE},
-        }, {
-            sType = .IMAGE_MEMORY_BARRIER,
-            oldLayout = .UNDEFINED,
-            newLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-            srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-            dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-            image = light.shadow_map.image,
-            subresourceRange = {
-                aspectMask = {.DEPTH},
-                baseMipLevel = 0,
-                levelCount = 1,
-                baseArrayLayer = 0,
-                layerCount = 1,
-            },
-            dstAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE},
-        },
-    }
-    vk.CmdPipelineBarrier(command_buffer,
-        {.TOP_OF_PIPE},
-        {.EARLY_FRAGMENT_TESTS},
-        {},
-        0, nil, 0, nil,
-        len(initial_barriers),
-        raw_data(initial_barriers[:]),
-    )
+    initial_barriers := [?]vk.ImageMemoryBarrier{{sType = .IMAGE_MEMORY_BARRIER, oldLayout = .UNDEFINED, newLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL, srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED, dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED, image = light.cube_shadow_map.image, subresourceRange = {aspectMask = {.DEPTH}, baseMipLevel = 0, levelCount = 1, baseArrayLayer = 0, layerCount = 6}, dstAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE}}, {sType = .IMAGE_MEMORY_BARRIER, oldLayout = .UNDEFINED, newLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL, srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED, dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED, image = light.shadow_map.image, subresourceRange = {aspectMask = {.DEPTH}, baseMipLevel = 0, levelCount = 1, baseArrayLayer = 0, layerCount = 1}, dstAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE}}}
+    vk.CmdPipelineBarrier(command_buffer, {.TOP_OF_PIPE}, {.EARLY_FRAGMENT_TESTS}, {}, 0, nil, 0, nil, len(initial_barriers), raw_data(initial_barriers[:]))
   }
 }
 
@@ -329,8 +285,7 @@ renderer_shadow_render :: proc(
         scissor := vk.Rect2D {
           extent = {width = cube_shadow.width, height = cube_shadow.height},
         }
-        shadow_scene_uniform := data_buffer_get(
-            &engine.shadow.frames[g_frame_index].camera_uniform, u32(i) * 6 + u32(face))
+        shadow_scene_uniform := data_buffer_get(&engine.shadow.frames[g_frame_index].camera_uniform, u32(i) * 6 + u32(face))
         shadow_scene_uniform.view = view
         shadow_scene_uniform.projection = light.projection
         vk.CmdBeginRenderingKHR(command_buffer, &face_render_info)
@@ -361,8 +316,7 @@ renderer_shadow_render :: proc(
         layerCount = 1,
         pDepthAttachment = &depth_attachment,
       }
-      shadow_scene_uniform := data_buffer_get(
-          &engine.shadow.frames[g_frame_index].camera_uniform, u32(i) * 6)
+      shadow_scene_uniform := data_buffer_get(&engine.shadow.frames[g_frame_index].camera_uniform, u32(i) * 6)
       shadow_scene_uniform.view = light.view
       shadow_scene_uniform.projection = light.projection
       vk.CmdBeginRenderingKHR(command_buffer, &render_info_khr)
@@ -396,129 +350,21 @@ renderer_shadow_end :: proc(
 ) {
   // Transition all shadow maps to depth attachment optimal
   for light in engine.visible_lights[g_frame_index] do if light.has_shadow {
-    initial_barriers := [?]vk.ImageMemoryBarrier{
-        {
-            sType = .IMAGE_MEMORY_BARRIER,
-            oldLayout = .UNDEFINED,
-            newLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-            srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-            dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-            image = light.cube_shadow_map.image,
-            subresourceRange = {
-                aspectMask = {.DEPTH},
-                baseMipLevel = 0,
-                levelCount = 1,
-                baseArrayLayer = 0,
-                layerCount = 6,
-            }, dstAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE},
-        },
-        {
-            sType = .IMAGE_MEMORY_BARRIER,
-            oldLayout = .UNDEFINED,
-            newLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-            srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-            dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-            image = light.shadow_map.image,
-            subresourceRange = {
-                aspectMask = {.DEPTH},
-                baseMipLevel = 0,
-                levelCount = 1,
-                baseArrayLayer = 0,
-                layerCount = 1,
-            }, dstAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE},
-        },
-        {
-            sType = .IMAGE_MEMORY_BARRIER,
-            oldLayout = .UNDEFINED,
-            newLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-            srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-            dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-            image = light.shadow_map.image,
-            subresourceRange = {
-                aspectMask = {.DEPTH},
-                baseMipLevel = 0,
-                levelCount = 1,
-                baseArrayLayer = 1,
-                layerCount = 1,
-            }, dstAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE},
-        },
-        {
-            sType = .IMAGE_MEMORY_BARRIER,
-            oldLayout = .UNDEFINED,
-            newLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-            srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-            dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-            image = light.shadow_map.image,
-            subresourceRange = {
-                aspectMask = {.DEPTH},
-                baseMipLevel = 0,
-                levelCount = 1,
-                baseArrayLayer = 2,
-                layerCount = 1,
-            }, dstAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE},
-        },
-        {
-            sType = .IMAGE_MEMORY_BARRIER,
-            oldLayout = .UNDEFINED,
-            newLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-            srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-            dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-            image = light.shadow_map.image,
-            subresourceRange = {
-                aspectMask = {.DEPTH},
-                baseMipLevel = 0,
-                levelCount = 1,
-                baseArrayLayer = 3,
-                layerCount = 1,
-            }, dstAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE},
-        },
-        {
-            sType = .IMAGE_MEMORY_BARRIER,
-            oldLayout = .UNDEFINED,
-            newLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-            srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-            dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-            image = light.shadow_map.image,
-            subresourceRange = {
-                aspectMask = {.DEPTH},
-                baseMipLevel = 0,
-                levelCount = 1,
-                baseArrayLayer = 4,
-                layerCount = 1,
-            }, dstAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE},
-        },
-        {
-            sType = .IMAGE_MEMORY_BARRIER,
-            oldLayout = .UNDEFINED,
-            newLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-            srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-            dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-            image = light.shadow_map.image,
-            subresourceRange = {
-                aspectMask = {.DEPTH},
-                baseMipLevel = 0,
-                levelCount = 1,
-                baseArrayLayer = 5,
-                layerCount = 1,
-            }, dstAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE},
-        }
-    }
-    vk.CmdPipelineBarrier(command_buffer,
-        {.TOP_OF_PIPE},
-        {.EARLY_FRAGMENT_TESTS},
-        {},
-        0, nil, 0, nil,
-        len(initial_barriers),
-        raw_data(initial_barriers[:]),
-    )
+    initial_barriers := [?]vk.ImageMemoryBarrier{{sType = .IMAGE_MEMORY_BARRIER, oldLayout = .UNDEFINED, newLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL, srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED, dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED, image = light.cube_shadow_map.image, subresourceRange = {aspectMask = {.DEPTH}, baseMipLevel = 0, levelCount = 1, baseArrayLayer = 0, layerCount = 6}, dstAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE}}, {sType = .IMAGE_MEMORY_BARRIER, oldLayout = .UNDEFINED, newLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL, srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED, dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED, image = light.shadow_map.image, subresourceRange = {aspectMask = {.DEPTH}, baseMipLevel = 0, levelCount = 1, baseArrayLayer = 0, layerCount = 1}, dstAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE}}, {sType = .IMAGE_MEMORY_BARRIER, oldLayout = .UNDEFINED, newLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL, srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED, dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED, image = light.shadow_map.image, subresourceRange = {aspectMask = {.DEPTH}, baseMipLevel = 0, levelCount = 1, baseArrayLayer = 1, layerCount = 1}, dstAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE}}, {sType = .IMAGE_MEMORY_BARRIER, oldLayout = .UNDEFINED, newLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL, srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED, dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED, image = light.shadow_map.image, subresourceRange = {aspectMask = {.DEPTH}, baseMipLevel = 0, levelCount = 1, baseArrayLayer = 2, layerCount = 1}, dstAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE}}, {sType = .IMAGE_MEMORY_BARRIER, oldLayout = .UNDEFINED, newLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL, srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED, dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED, image = light.shadow_map.image, subresourceRange = {aspectMask = {.DEPTH}, baseMipLevel = 0, levelCount = 1, baseArrayLayer = 3, layerCount = 1}, dstAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE}}, {sType = .IMAGE_MEMORY_BARRIER, oldLayout = .UNDEFINED, newLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL, srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED, dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED, image = light.shadow_map.image, subresourceRange = {aspectMask = {.DEPTH}, baseMipLevel = 0, levelCount = 1, baseArrayLayer = 4, layerCount = 1}, dstAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE}}, {sType = .IMAGE_MEMORY_BARRIER, oldLayout = .UNDEFINED, newLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL, srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED, dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED, image = light.shadow_map.image, subresourceRange = {aspectMask = {.DEPTH}, baseMipLevel = 0, levelCount = 1, baseArrayLayer = 5, layerCount = 1}, dstAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE}}}
+    vk.CmdPipelineBarrier(command_buffer, {.TOP_OF_PIPE}, {.EARLY_FRAGMENT_TESTS}, {}, 0, nil, 0, nil, len(initial_barriers), raw_data(initial_barriers[:]))
   }
 }
 
 renderer_shadow_get_pipeline :: proc(
   self: ^RendererShadow,
-  features: ShadowShaderFeatureSet = {},
+  features: ShaderFeatureSet = {},
 ) -> vk.Pipeline {
-  return self.pipelines[transmute(u32)features]
+  // Extract only the SKINNING bit from features
+  mask: u32 = 0
+  if .SKINNING in features {
+    mask = 1
+  }
+  return self.pipelines[mask]
 }
 
 // Collect all shadow-casting mesh nodes and group them by features using unified batching
@@ -543,12 +389,13 @@ collect_shadow_data :: proc(ctx: ^BatchingContext) {
       is_skinned := mesh_has_skin && node_has_skin
 
       // Create batch key based on skinning only (shadows only care about this feature)
+      // Already using ShaderFeatureSet, no changes needed
       shadow_features: ShaderFeatureSet = {}
       if is_skinned {
         shadow_features += {.SKINNING}
       }
       batch_key := BatchKey {
-        features = shadow_features,
+        features      = shadow_features,
         material_type = material.type, // Keep material type for consistency
       }
       batch_group, group_found := &ctx.batches[batch_key]
@@ -582,28 +429,26 @@ render_shadow_batches :: proc(
 
   // Render each feature batch (minimizing pipeline switches)
   for batch_key, batch_group in ctx.batches {
-    // Get appropriate pipeline for this feature set
-    shadow_features: ShadowShaderFeatureSet = {}
+    // Just extract skinning from the batch key features
+    shadow_features: ShaderFeatureSet = {}
     is_skinned := .SKINNING in batch_key.features
     if is_skinned {
       shadow_features += {.SKINNING}
     }
-
-    pipeline := renderer_shadow_get_pipeline(&ctx.engine.shadow, shadow_features)
+    pipeline := renderer_shadow_get_pipeline(
+      &ctx.engine.shadow,
+      shadow_features,
+    )
     if pipeline != current_pipeline {
       vk.CmdBindPipeline(command_buffer, .GRAPHICS, pipeline)
       current_pipeline = pipeline
     }
-
-    // Bind descriptor sets based on whether meshes are skinned
     offset_shadow := data_buffer_offset_of(
       &frame.camera_uniform,
       shadow_idx * 6 + shadow_layer,
     )
     offsets := [1]u32{offset_shadow}
-
     if is_skinned {
-      // Bind descriptor sets for skinned meshes
       descriptor_sets := [2]vk.DescriptorSet {
         frame.camera_descriptor_set,
         g_bindless_bone_buffer_descriptor_set,
@@ -632,8 +477,6 @@ render_shadow_batches :: proc(
         raw_data(offsets[:]),
       )
     }
-
-    // Render all batches within this feature group
     for batch_data in batch_group {
       for node in batch_data.nodes {
         render_single_shadow_node(
@@ -649,7 +492,6 @@ render_shadow_batches :: proc(
   }
 }
 
-// Render a single shadow-casting node
 render_single_shadow_node :: proc(
   engine: ^Engine,
   command_buffer: vk.CommandBuffer,
@@ -659,20 +501,16 @@ render_single_shadow_node :: proc(
   rendered_count: ^u32,
 ) {
   mesh_attachment := node.attachment.(MeshAttachment)
-  mesh := resource.get(g_meshes, mesh_attachment.handle)
-  if mesh == nil do return
-
+  mesh, found_mesh := resource.get(g_meshes, mesh_attachment.handle)
+  if !found_mesh do return
   mesh_skinning, mesh_has_skin := &mesh.skinning.?
   node_skinning, node_has_skin := mesh_attachment.skinning.?
-
   push_constant := PushConstant {
     world = node.transform.world_matrix,
   }
-
   if is_skinned && node_has_skin {
     push_constant.bone_matrix_offset = node_skinning.bone_matrix_offset
   }
-
   vk.CmdPushConstants(
     command_buffer,
     layout,
@@ -681,7 +519,6 @@ render_single_shadow_node :: proc(
     size_of(PushConstant),
     &push_constant,
   )
-
   offset: vk.DeviceSize = 0
   vk.CmdBindVertexBuffers(
     command_buffer,
@@ -690,7 +527,6 @@ render_single_shadow_node :: proc(
     &mesh.vertex_buffer.buffer,
     &offset,
   )
-
   if is_skinned && mesh_has_skin && node_has_skin {
     vk.CmdBindVertexBuffers(
       command_buffer,
@@ -700,7 +536,6 @@ render_single_shadow_node :: proc(
       &offset,
     )
   }
-
   vk.CmdBindIndexBuffer(command_buffer, mesh.index_buffer.buffer, 0, .UINT32)
   vk.CmdDrawIndexed(command_buffer, mesh.indices_len, 1, 0, 0, 0)
   rendered_count^ += 1

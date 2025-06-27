@@ -26,10 +26,10 @@ ToneMapEffect :: struct {
 }
 
 BlurEffect :: struct {
-  radius:        f32,
-  direction:     f32, // 0.0 = horizontal, 1.0 = vertical
+  radius:         f32,
+  direction:      f32, // 0.0 = horizontal, 1.0 = vertical
   weight_falloff: f32, // 0.0 = box blur, 1.0 = gaussian blur
-  padding:       f32,
+  padding:        f32,
 }
 
 BloomEffect :: struct {
@@ -45,28 +45,28 @@ OutlineEffect :: struct {
 }
 
 FogEffect :: struct {
-  color:     [3]f32,
-  density:   f32,
-  start:     f32,
-  end:       f32,
-  padding:   [2]f32,
+  color:   [3]f32,
+  density: f32,
+  start:   f32,
+  end:     f32,
+  padding: [2]f32,
 }
 
 CrossHatchEffect :: struct {
-  resolution:        [2]f32,
-  hatch_offset_y:    f32,
-  lum_threshold_01:  f32,
-  lum_threshold_02:  f32,
-  lum_threshold_03:  f32,
-  lum_threshold_04:  f32,
-  padding:           f32, // For alignment
+  resolution:       [2]f32,
+  hatch_offset_y:   f32,
+  lum_threshold_01: f32,
+  lum_threshold_02: f32,
+  lum_threshold_03: f32,
+  lum_threshold_04: f32,
+  padding:          f32, // For alignment
 }
 
 DoFEffect :: struct {
-  focus_distance:   f32, // Distance to the focus plane
-  focus_range:      f32, // Range where objects are in focus
-  blur_strength:    f32, // Maximum blur radius
-  bokeh_intensity:  f32, // Bokeh effect intensity
+  focus_distance:  f32, // Distance to the focus plane
+  focus_range:     f32, // Range where objects are in focus
+  blur_strength:   f32, // Maximum blur radius
+  bokeh_intensity: f32, // Bokeh effect intensity
 }
 
 PostProcessEffectType :: enum int {
@@ -152,14 +152,14 @@ effect_add_blur :: proc(
   gaussian: bool = true,
 ) {
   horizontal_effect := BlurEffect {
-    radius = radius,
-    direction = 0.0, // horizontal
+    radius         = radius,
+    direction      = 0.0, // horizontal
     weight_falloff = 1.0 if gaussian else 0.0,
   }
   append(&self.effect_stack, horizontal_effect)
   vertical_effect := BlurEffect {
-    radius = radius,
-    direction = 1.0, // vertical
+    radius         = radius,
+    direction      = 1.0, // vertical
     weight_falloff = 1.0 if gaussian else 0.0,
   }
   append(&self.effect_stack, vertical_effect)
@@ -172,8 +172,8 @@ effect_add_directional_blur :: proc(
   gaussian: bool = true,
 ) {
   effect := BlurEffect {
-    radius = radius,
-    direction = direction,
+    radius         = radius,
+    direction      = direction,
     weight_falloff = 1.0 if gaussian else 0.0,
   }
   append(&self.effect_stack, effect)
@@ -428,22 +428,22 @@ renderer_postprocess_init :: proc(
   }
   bindings := [?]vk.DescriptorSetLayoutBinding {
     {
-      binding = 0, // input image
-      descriptorType = .COMBINED_IMAGE_SAMPLER,
+      binding         = 0, // input image
+      descriptorType  = .COMBINED_IMAGE_SAMPLER,
       descriptorCount = 1,
-      stageFlags = {.FRAGMENT},
+      stageFlags      = {.FRAGMENT},
     },
     {
-      binding = 1, // normal image
-      descriptorType = .COMBINED_IMAGE_SAMPLER,
+      binding         = 1, // normal image
+      descriptorType  = .COMBINED_IMAGE_SAMPLER,
       descriptorCount = 1,
-      stageFlags = {.FRAGMENT},
+      stageFlags      = {.FRAGMENT},
     },
     {
-      binding = 2, // depth image
-      descriptorType = .COMBINED_IMAGE_SAMPLER,
+      binding         = 2, // depth image
+      descriptorType  = .COMBINED_IMAGE_SAMPLER,
       descriptorCount = 1,
-      stageFlags = {.FRAGMENT},
+      stageFlags      = {.FRAGMENT},
     },
   }
   layout_info := vk.DescriptorSetLayoutCreateInfo {
@@ -660,7 +660,7 @@ renderer_postprocess_begin :: proc(
   postprocess_update_input(self, 0, input_view)
 
   // Update normal buffer for ALL descriptor sets (since crosshatch might not be first effect)
-  for i in 0..<len(self.descriptor_sets) {
+  for i in 0 ..< len(self.descriptor_sets) {
     postprocess_update_normal_input(self, i, normal_view)
     postprocess_update_depth_input(self, i, depth_view)
   }

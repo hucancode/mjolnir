@@ -95,7 +95,7 @@ SHADER_UNLIT_VERT :: #load("shader/unlit/vert.spv")
 SHADER_UNLIT_FRAG :: #load("shader/unlit/frag.spv")
 
 RendererMain :: struct {
-  frames:                       [MAX_FRAMES_IN_FLIGHT]struct {
+  frames:                        [MAX_FRAMES_IN_FLIGHT]struct {
     camera_uniform:        DataBuffer(SceneUniform),
     light_uniform:         DataBuffer(SceneLightUniform),
     camera_descriptor_set: vk.DescriptorSet,
@@ -103,17 +103,17 @@ RendererMain :: struct {
     shadow_maps:           [MAX_SHADOW_MAPS]ImageBuffer,
     cube_shadow_maps:      [MAX_SHADOW_MAPS]CubeImageBuffer,
   },
-  camera_descriptor_set_layout: vk.DescriptorSetLayout,
-  pipeline_layout:              vk.PipelineLayout,
-  pipelines:                    [SHADER_VARIANT_COUNT]vk.Pipeline,
-  unlit_pipelines:              [UNLIT_SHADER_VARIANT_COUNT]vk.Pipeline,
-  wireframe_unlit_pipelines:    [UNLIT_SHADER_VARIANT_COUNT]vk.Pipeline,
+  camera_descriptor_set_layout:  vk.DescriptorSetLayout,
+  pipeline_layout:               vk.PipelineLayout,
+  pipelines:                     [SHADER_VARIANT_COUNT]vk.Pipeline,
+  unlit_pipelines:               [UNLIT_SHADER_VARIANT_COUNT]vk.Pipeline,
+  wireframe_unlit_pipelines:     [UNLIT_SHADER_VARIANT_COUNT]vk.Pipeline,
   // Depth pre-pass pipelines
   depth_prepass_pipeline_layout: vk.PipelineLayout,
-  depth_prepass_pipelines:      [DEPTH_PREPASS_VARIANT_COUNT]vk.Pipeline,
-  depth_buffer:                 ImageBuffer,
-  environment_map:              Handle,
-  brdf_lut:                     Handle,
+  depth_prepass_pipelines:       [DEPTH_PREPASS_VARIANT_COUNT]vk.Pipeline,
+  depth_buffer:                  ImageBuffer,
+  environment_map:               Handle,
+  brdf_lut:                      Handle,
 }
 
 renderer_main_build_pbr_pipeline :: proc(
@@ -183,11 +183,11 @@ renderer_main_build_pbr_pipeline :: proc(
     scissorCount  = 1,
   }
   rasterizer := vk.PipelineRasterizationStateCreateInfo {
-    sType       = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
-    polygonMode = .FILL,
-    cullMode    = {.BACK},
-    frontFace   = .COUNTER_CLOCKWISE,
-    lineWidth   = 1.0,
+    sType                   = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+    polygonMode             = .FILL,
+    cullMode                = {.BACK},
+    frontFace               = .COUNTER_CLOCKWISE,
+    lineWidth               = 1.0,
     depthBiasEnable         = true,
     depthBiasConstantFactor = 0.1,
     depthBiasSlopeFactor    = 0.1,
@@ -379,11 +379,11 @@ renderer_main_build_unlit_pipeline :: proc(
     scissorCount  = 1,
   }
   rasterizer := vk.PipelineRasterizationStateCreateInfo {
-    sType       = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
-    polygonMode = .FILL,
-    cullMode    = {.BACK},
-    frontFace   = .COUNTER_CLOCKWISE,
-    lineWidth   = 1.0,
+    sType                   = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+    polygonMode             = .FILL,
+    cullMode                = {.BACK},
+    frontFace               = .COUNTER_CLOCKWISE,
+    lineWidth               = 1.0,
     depthBiasEnable         = true,
     depthBiasConstantFactor = 0.1,
     depthBiasSlopeFactor    = 0.1,
@@ -535,11 +535,11 @@ renderer_main_build_wireframe_unlit_pipeline :: proc(
 
   // Wireframe rasterizer settings
   rasterizer := vk.PipelineRasterizationStateCreateInfo {
-    sType       = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
-    polygonMode = .LINE,  // Key difference - wireframe mode
-    cullMode    = {},     // Disable culling for wireframe
-    frontFace   = .COUNTER_CLOCKWISE,
-    lineWidth   = 1.0,
+    sType                   = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+    polygonMode             = .LINE, // Key difference - wireframe mode
+    cullMode                = {}, // Disable culling for wireframe
+    frontFace               = .COUNTER_CLOCKWISE,
+    lineWidth               = 1.0,
     depthBiasEnable         = true,
     depthBiasConstantFactor = 0.1,
     depthBiasSlopeFactor    = 0.1,
@@ -668,7 +668,7 @@ renderer_main_build_depth_prepass_pipeline :: proc(
   spec_infos: [DEPTH_PREPASS_VARIANT_COUNT]vk.SpecializationInfo
   configs: [DEPTH_PREPASS_VARIANT_COUNT]ShaderConfig
   entries: [DEPTH_PREPASS_VARIANT_COUNT][DEPTH_PREPASS_OPTION_COUNT]vk.SpecializationMapEntry
-  shader_stages_arr: [DEPTH_PREPASS_VARIANT_COUNT][1]vk.PipelineShaderStageCreateInfo  // Only vertex shader
+  shader_stages_arr: [DEPTH_PREPASS_VARIANT_COUNT][1]vk.PipelineShaderStageCreateInfo // Only vertex shader
 
   vert_module := create_shader_module(SHADER_DEPTH_PREPASS_VERT) or_return
   defer vk.DestroyShaderModule(g_device, vert_module, nil)
@@ -731,16 +731,22 @@ renderer_main_build_depth_prepass_pipeline :: proc(
   vertex_input_info := vk.PipelineVertexInputStateCreateInfo {
     sType                           = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
     vertexBindingDescriptionCount   = len(geometry.VERTEX_BINDING_DESCRIPTION),
-    pVertexBindingDescriptions      = raw_data(geometry.VERTEX_BINDING_DESCRIPTION[:]),
-    vertexAttributeDescriptionCount = len(geometry.VERTEX_ATTRIBUTE_DESCRIPTIONS),
-    pVertexAttributeDescriptions    = raw_data(geometry.VERTEX_ATTRIBUTE_DESCRIPTIONS[:]),
+    pVertexBindingDescriptions      = raw_data(
+      geometry.VERTEX_BINDING_DESCRIPTION[:],
+    ),
+    vertexAttributeDescriptionCount = len(
+      geometry.VERTEX_ATTRIBUTE_DESCRIPTIONS,
+    ),
+    pVertexAttributeDescriptions    = raw_data(
+      geometry.VERTEX_ATTRIBUTE_DESCRIPTIONS[:],
+    ),
   }
 
   // Create pipeline layout for depth pre-pass (minimal requirements)
   set_layouts := [?]vk.DescriptorSetLayout {
     self.camera_descriptor_set_layout, // set = 0 (camera uniforms)
-    g_bindless_textures_layout,        // set = 1 (for displacement textures)
-    g_bindless_samplers_layout,        // set = 2 (for displacement sampling)
+    g_bindless_textures_layout, // set = 1 (for displacement textures)
+    g_bindless_samplers_layout, // set = 2 (for displacement sampling)
     g_bindless_bone_buffer_set_layout, // set = 3 (for skinning)
   }
 
@@ -751,11 +757,11 @@ renderer_main_build_depth_prepass_pipeline :: proc(
   vk.CreatePipelineLayout(
     g_device,
     &{
-      sType                  = .PIPELINE_LAYOUT_CREATE_INFO,
-      setLayoutCount         = len(set_layouts),
-      pSetLayouts            = raw_data(set_layouts[:]),
+      sType = .PIPELINE_LAYOUT_CREATE_INFO,
+      setLayoutCount = len(set_layouts),
+      pSetLayouts = raw_data(set_layouts[:]),
       pushConstantRangeCount = len(push_constant_range),
-      pPushConstantRanges    = raw_data(push_constant_range[:]),
+      pPushConstantRanges = raw_data(push_constant_range[:]),
     },
     nil,
     &self.depth_prepass_pipeline_layout,
@@ -768,7 +774,11 @@ renderer_main_build_depth_prepass_pipeline :: proc(
     }
 
     entries[mask] = [DEPTH_PREPASS_OPTION_COUNT]vk.SpecializationMapEntry {
-      {constantID = 0, offset = u32(offset_of(ShaderConfig, is_skinned)), size = size_of(b32)},
+      {
+        constantID = 0,
+        offset = u32(offset_of(ShaderConfig, is_skinned)),
+        size = size_of(b32),
+      },
     }
 
     spec_infos[mask] = {
@@ -947,7 +957,10 @@ renderer_main_render :: proc(
     engine  = engine,
     frustum = camera_frustum,
     lights  = make([dynamic]SingleLightUniform, allocator = temp_allocator),
-    batches = make(map[BatchKey][dynamic]BatchData, allocator = temp_allocator),
+    batches = make(
+      map[BatchKey][dynamic]BatchData,
+      allocator = temp_allocator,
+    ),
   }
   populate_render_batches(&batching_ctx)
   layout := engine.main.pipeline_layout
@@ -1063,7 +1076,10 @@ render_to_texture :: proc(
     engine  = engine,
     frustum = camera_frustum,
     lights  = make([dynamic]SingleLightUniform, allocator = temp_allocator),
-    batches = make(map[BatchKey][dynamic]BatchData, allocator = temp_allocator),
+    batches = make(
+      map[BatchKey][dynamic]BatchData,
+      allocator = temp_allocator,
+    ),
   }
   populate_render_batches(&batching_ctx)
   layout := engine.main.pipeline_layout
@@ -1101,7 +1117,11 @@ renderer_main_init :: proc(
     color_format,
     depth_format,
   ) or_return
-  renderer_main_build_wireframe_unlit_pipeline(self, color_format, depth_format) or_return
+  renderer_main_build_wireframe_unlit_pipeline(
+    self,
+    color_format,
+    depth_format,
+  ) or_return
   renderer_main_build_depth_prepass_pipeline(self, depth_format) or_return // Add depth pre-pass pipeline
 
   depth_image_init(&self.depth_buffer, width, height, depth_format) or_return
@@ -1316,7 +1336,7 @@ populate_render_batches :: proc(ctx: ^BatchingContext) {
 
       // Create batch key based on material features and type
       batch_key := BatchKey {
-        features = material.features,
+        features      = material.features,
         material_type = material.type,
       }
 
@@ -1340,7 +1360,7 @@ populate_render_batches :: proc(ctx: ^BatchingContext) {
         // Create new batch for this material
         new_batch := BatchData {
           material_handle = data.material,
-          nodes = make([dynamic]^Node, allocator = context.temp_allocator),
+          nodes           = make([dynamic]^Node, allocator = context.temp_allocator),
         }
         append(batch_group, new_batch)
         batch_data = &batch_group[len(batch_group) - 1]
@@ -1364,7 +1384,10 @@ render_batched_meshes :: proc(
   // Render each feature batch (minimizing pipeline switches)
   for batch_key, batch_group in ctx.batches {
     // Get appropriate pipeline for this feature set
-    sample_material := resource.get(g_materials, batch_group[0].material_handle) or_continue
+    sample_material := resource.get(
+      g_materials,
+      batch_group[0].material_handle,
+    ) or_continue
     pipeline := renderer_main_get_pipeline(self, sample_material)
 
     if pipeline != current_pipeline {
@@ -1374,7 +1397,10 @@ render_batched_meshes :: proc(
 
     // Render all material batches within this feature group
     for batch_data in batch_group {
-      material := resource.get(g_materials, batch_data.material_handle) or_continue
+      material := resource.get(
+        g_materials,
+        batch_data.material_handle,
+      ) or_continue
 
       // Render all nodes with this material
       for node in batch_data.nodes {
@@ -1383,29 +1409,52 @@ render_batched_meshes :: proc(
 
         // Create texture indices for material
         texture_indices: MaterialTextures = {
-          albedo_index = min(MAX_TEXTURES - 1, material.albedo.index),
-          metallic_roughness_index = min(MAX_TEXTURES - 1, material.metallic_roughness.index),
-          normal_index = min(MAX_TEXTURES - 1, material.normal.index),
-          displacement_index = min(MAX_TEXTURES - 1, material.displacement.index),
-          emissive_index = min(MAX_TEXTURES - 1, material.emissive.index),
-          environment_index = min(MAX_TEXTURES - 1, self.environment_map.index),
-          brdf_lut_index = min(MAX_TEXTURES - 1, self.brdf_lut.index),
-          bone_matrix_offset = 0,
+          albedo_index             = min(
+            MAX_TEXTURES - 1,
+            material.albedo.index,
+          ),
+          metallic_roughness_index = min(
+            MAX_TEXTURES - 1,
+            material.metallic_roughness.index,
+          ),
+          normal_index             = min(
+            MAX_TEXTURES - 1,
+            material.normal.index,
+          ),
+          displacement_index       = min(
+            MAX_TEXTURES - 1,
+            material.displacement.index,
+          ),
+          emissive_index           = min(
+            MAX_TEXTURES - 1,
+            material.emissive.index,
+          ),
+          environment_index        = min(
+            MAX_TEXTURES - 1,
+            self.environment_map.index,
+          ),
+          brdf_lut_index           = min(
+            MAX_TEXTURES - 1,
+            self.brdf_lut.index,
+          ),
+          bone_matrix_offset       = 0,
         }
 
         // Check if mesh is skinned and set bone matrix offset
-        if node_skinning, node_has_skin := mesh_attachment.skinning.?; node_has_skin {
+        if node_skinning, node_has_skin := mesh_attachment.skinning.?;
+           node_has_skin {
           // Add frame-specific offset to bone matrix offset
-          texture_indices.bone_matrix_offset = node_skinning.bone_matrix_offset +
-                                               g_frame_index * g_bone_matrix_slab.capacity
+          texture_indices.bone_matrix_offset =
+            node_skinning.bone_matrix_offset +
+            g_frame_index * g_bone_matrix_slab.capacity
         }
 
         push_constant := PushConstant {
-          world = node.transform.world_matrix,
-          textures = texture_indices,
-          metallic_value = material.metallic_value,
+          world           = node.transform.world_matrix,
+          textures        = texture_indices,
+          metallic_value  = material.metallic_value,
           roughness_value = material.roughness_value,
-          emissive_value = material.emissive_value,
+          emissive_value  = material.emissive_value,
         }
 
         vk.CmdPushConstants(
@@ -1429,7 +1478,8 @@ render_batched_meshes :: proc(
 
         // Bind skinning vertex buffer if mesh is skinned
         if mesh_skinning, mesh_has_skin := &mesh.skinning.?; mesh_has_skin {
-          if node_skinning, node_has_skin := mesh_attachment.skinning.?; node_has_skin {
+          if node_skinning, node_has_skin := mesh_attachment.skinning.?;
+             node_has_skin {
             vk.CmdBindVertexBuffers(
               command_buffer,
               1,
@@ -1448,14 +1498,7 @@ render_batched_meshes :: proc(
         )
 
         // Draw indexed
-        vk.CmdDrawIndexed(
-          command_buffer,
-          mesh.indices_len,
-          1,
-          0,
-          0,
-          0,
-        )
+        vk.CmdDrawIndexed(command_buffer, mesh.indices_len, 1, 0, 0, 0)
 
         rendered += 1
       }
@@ -1508,7 +1551,10 @@ renderer_main_depth_prepass_begin :: proc(
   )
 }
 
-renderer_main_depth_prepass_end :: proc(engine: ^Engine, command_buffer: vk.CommandBuffer) {
+renderer_main_depth_prepass_end :: proc(
+  engine: ^Engine,
+  command_buffer: vk.CommandBuffer,
+) {
   vk.CmdEndRenderingKHR(command_buffer)
 }
 
@@ -1533,9 +1579,9 @@ renderer_main_depth_prepass_render :: proc(
   layout := engine.main.depth_prepass_pipeline_layout
   descriptor_sets := [?]vk.DescriptorSet {
     engine.main.frames[g_frame_index].camera_descriptor_set, // set 0
-    g_bindless_textures,                                     // set 1
-    g_bindless_samplers,                                     // set 2
-    g_bindless_bone_buffer_descriptor_set,                   // set 3
+    g_bindless_textures, // set 1
+    g_bindless_samplers, // set 2
+    g_bindless_bone_buffer_descriptor_set, // set 3
   }
   vk.CmdBindDescriptorSets(
     command_buffer,
@@ -1559,7 +1605,10 @@ renderer_main_depth_prepass_render :: proc(
     {.NO_CLOSE},
   ) {
     mu.label(&engine.ui.ctx, fmt.tprintf("Pre-pass: %v", rendered_count))
-    mu.label(&engine.ui.ctx, fmt.tprintf("Batches: %v", len(batching_ctx.batches)))
+    mu.label(
+      &engine.ui.ctx,
+      fmt.tprintf("Batches: %v", len(batching_ctx.batches)),
+    )
   }
 }
 
@@ -1583,7 +1632,7 @@ populate_depth_prepass_batches :: proc(ctx: ^BatchingContext) {
       // Depth prepass only cares about skinning
       depth_features := material.features & ShaderFeatureSet{.SKINNING}
       batch_key := BatchKey {
-        features = depth_features,
+        features      = depth_features,
         material_type = material.type,
       }
 
@@ -1607,7 +1656,7 @@ populate_depth_prepass_batches :: proc(ctx: ^BatchingContext) {
         // Create new batch for this material
         new_batch := BatchData {
           material_handle = data.material,
-          nodes = make([dynamic]^Node, allocator = context.temp_allocator),
+          nodes           = make([dynamic]^Node, allocator = context.temp_allocator),
         }
         append(batch_group, new_batch)
         batch_data = &batch_group[len(batch_group) - 1]
@@ -1636,7 +1685,10 @@ render_depth_prepass_batches :: proc(
 
     // Render all material batches within this feature group
     for batch_data in batch_group {
-      material := resource.get(g_materials, batch_data.material_handle) or_continue
+      material := resource.get(
+        g_materials,
+        batch_data.material_handle,
+      ) or_continue
 
       // Skip transparent materials in depth pre-pass
       if material.type == .WIREFRAME {
@@ -1650,7 +1702,12 @@ render_depth_prepass_batches :: proc(
           mesh := resource.get(g_meshes, data.handle) or_continue
 
           // Get appropriate depth pre-pass pipeline
-          pipeline := renderer_main_get_depth_prepass_pipeline(self, material, mesh, data)
+          pipeline := renderer_main_get_depth_prepass_pipeline(
+            self,
+            material,
+            mesh,
+            data,
+          )
           if pipeline != current_pipeline {
             vk.CmdBindPipeline(command_buffer, .GRAPHICS, pipeline)
             current_pipeline = pipeline
@@ -1658,31 +1715,32 @@ render_depth_prepass_batches :: proc(
 
           // Setup push constants for depth pre-pass (need bone matrix offset for skinned meshes)
           texture_indices: MaterialTextures = {
-            albedo_index = 0, // Set default values for depth pre-pass
+            albedo_index             = 0, // Set default values for depth pre-pass
             metallic_roughness_index = 0,
-            normal_index = 0,
-            displacement_index = 0,
-            emissive_index = 0,
-            environment_index = 0,
-            brdf_lut_index = 0,
-            bone_matrix_offset = 0,
+            normal_index             = 0,
+            displacement_index       = 0,
+            emissive_index           = 0,
+            environment_index        = 0,
+            brdf_lut_index           = 0,
+            bone_matrix_offset       = 0,
           }
 
           // Check if mesh is skinned and set bone matrix offset
           if mesh_skinning, mesh_has_skin := &mesh.skinning.?; mesh_has_skin {
             if node_skinning, node_has_skin := data.skinning.?; node_has_skin {
               // Add frame-specific offset to bone matrix offset
-              texture_indices.bone_matrix_offset = node_skinning.bone_matrix_offset +
-                                                   g_frame_index * g_bone_matrix_slab.capacity
+              texture_indices.bone_matrix_offset =
+                node_skinning.bone_matrix_offset +
+                g_frame_index * g_bone_matrix_slab.capacity
             }
           }
 
           push_constant := PushConstant {
-            world = node.transform.world_matrix,
-            textures = texture_indices,
-            metallic_value = material.metallic_value,
+            world           = node.transform.world_matrix,
+            textures        = texture_indices,
+            metallic_value  = material.metallic_value,
             roughness_value = material.roughness_value,
-            emissive_value = material.emissive_value,
+            emissive_value  = material.emissive_value,
           }
 
           vk.CmdPushConstants(
@@ -1725,14 +1783,7 @@ render_depth_prepass_batches :: proc(
           )
 
           // Draw indexed
-          vk.CmdDrawIndexed(
-            command_buffer,
-            mesh.indices_len,
-            1,
-            0,
-            0,
-            0,
-          )
+          vk.CmdDrawIndexed(command_buffer, mesh.indices_len, 1, 0, 0, 0)
 
           rendered += 1
         }
