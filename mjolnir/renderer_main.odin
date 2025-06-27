@@ -979,10 +979,6 @@ renderer_main_render :: proc(
     {.NO_CLOSE},
   ) {
     mu.label(&engine.ui.ctx, fmt.tprintf("Rendered %v", rendered_count))
-    total_batches := 0
-    for _, batch_group in batching_ctx.batches {
-      total_batches += len(batch_group)
-    }
     mu.label(
       &engine.ui.ctx,
       fmt.tprintf("Batches %v", len(batching_ctx.batches)),
@@ -1562,12 +1558,8 @@ renderer_main_depth_prepass_render :: proc(
     {360, 200, 300, 100},
     {.NO_CLOSE},
   ) {
-    mu.label(&engine.ui.ctx, fmt.tprintf("Depth Pre-pass Objects: %v", rendered_count))
-    total_batches := 0
-    for _, batch_group in batching_ctx.batches {
-      total_batches += len(batch_group)
-    }
-    mu.label(&engine.ui.ctx, fmt.tprintf("Feature Groups: %v, Material Batches: %v", len(batching_ctx.batches), total_batches))
+    mu.label(&engine.ui.ctx, fmt.tprintf("Pre-pass: %v", rendered_count))
+    mu.label(&engine.ui.ctx, fmt.tprintf("Batches: %v", len(batching_ctx.batches)))
   }
 }
 
