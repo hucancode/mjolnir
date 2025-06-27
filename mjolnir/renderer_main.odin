@@ -947,7 +947,7 @@ renderer_main_render :: proc(
     engine  = engine,
     frustum = camera_frustum,
     lights  = make([dynamic]SingleLightUniform, allocator = temp_allocator),
-    meshes  = make(map[Handle][dynamic]^Node, allocator = temp_allocator),
+    batches = make(map[BatchKey][dynamic]BatchData, allocator = temp_allocator),
   }
   populate_render_batches(&batching_ctx)
   layout := engine.main.pipeline_layout
@@ -979,9 +979,13 @@ renderer_main_render :: proc(
     {.NO_CLOSE},
   ) {
     mu.label(&engine.ui.ctx, fmt.tprintf("Rendered %v", rendered_count))
+    total_batches := 0
+    for _, batch_group in batching_ctx.batches {
+      total_batches += len(batch_group)
+    }
     mu.label(
       &engine.ui.ctx,
-      fmt.tprintf("Batches %v", len(batching_ctx.meshes)),
+      fmt.tprintf("Batches %v", len(batching_ctx.batches)),
     )
     mu.label(
       &engine.ui.ctx,
@@ -1063,7 +1067,7 @@ render_to_texture :: proc(
     engine  = engine,
     frustum = camera_frustum,
     lights  = make([dynamic]SingleLightUniform, allocator = temp_allocator),
-    meshes  = make(map[Handle][dynamic]^Node, allocator = temp_allocator),
+    batches = make(map[BatchKey][dynamic]BatchData, allocator = temp_allocator),
   }
   populate_render_batches(&batching_ctx)
   layout := engine.main.pipeline_layout
@@ -1277,7 +1281,7 @@ renderer_recreate_images :: proc(
   return .SUCCESS
 }
 
-// Collect all render data into the batching context
+// Collect all render data into the batching context with optimized feature-based batching
 populate_render_batches :: proc(ctx: ^BatchingContext) {
   // Collect visible lights
   for light in ctx.engine.visible_lights[g_frame_index] {
@@ -1299,7 +1303,7 @@ populate_render_batches :: proc(ctx: ^BatchingContext) {
     append(&ctx.lights, light_uniform)
   }
 
-  // Traverse scene and collect mesh nodes grouped by material
+  // Traverse scene and collect mesh nodes grouped by material features
   for &entry in ctx.engine.scene.nodes.entries do if entry.active {
     node := &entry.item
     #partial switch data in node.attachment {
@@ -1314,18 +1318,44 @@ populate_render_batches :: proc(ctx: ^BatchingContext) {
       world_aabb := geometry.aabb_transform(mesh.aabb, node.transform.world_matrix)
       if !geometry.frustum_test_aabb(&ctx.frustum, world_aabb) do continue
 
-      // Add node to the appropriate material batch
-      material_nodes, found := &ctx.meshes[data.material]
-      if !found {
-        ctx.meshes[data.material] = make([dynamic]^Node, allocator = context.temp_allocator)
-        material_nodes = &ctx.meshes[data.material]
+      // Create batch key based on material features and type
+      batch_key := BatchKey {
+        features = material.features,
+        material_type = material.type,
       }
-      append(material_nodes, node)
+
+      // Find or create batch group for this feature set
+      batch_group, group_found := &ctx.batches[batch_key]
+      if !group_found {
+        ctx.batches[batch_key] = make([dynamic]BatchData, allocator = context.temp_allocator)
+        batch_group = &ctx.batches[batch_key]
+      }
+
+      // Find or create batch data for this specific material within the group
+      batch_data: ^BatchData = nil
+      for &batch in batch_group {
+        if batch.material_handle == data.material {
+          batch_data = &batch
+          break
+        }
+      }
+
+      if batch_data == nil {
+        // Create new batch for this material
+        new_batch := BatchData {
+          material_handle = data.material,
+          nodes = make([dynamic]^Node, allocator = context.temp_allocator),
+        }
+        append(batch_group, new_batch)
+        batch_data = &batch_group[len(batch_group) - 1]
+      }
+
+      append(&batch_data.nodes, node)
     }
   }
 }
 
-// Render all batched meshes efficiently
+// Render all batched meshes efficiently with optimized feature-based batching
 render_batched_meshes :: proc(
   self: ^RendererMain,
   ctx: ^BatchingContext,
@@ -1335,99 +1365,104 @@ render_batched_meshes :: proc(
   layout := self.pipeline_layout
   current_pipeline: vk.Pipeline = 0
 
-  // Render each material batch
-  for material_handle, nodes in ctx.meshes {
-    material := resource.get(g_materials, material_handle) or_continue
+  // Render each feature batch (minimizing pipeline switches)
+  for batch_key, batch_group in ctx.batches {
+    // Get appropriate pipeline for this feature set
+    sample_material := resource.get(g_materials, batch_group[0].material_handle) or_continue
+    pipeline := renderer_main_get_pipeline(self, sample_material)
 
-    // Get appropriate pipeline
-    pipeline := renderer_main_get_pipeline(self, material)
     if pipeline != current_pipeline {
       vk.CmdBindPipeline(command_buffer, .GRAPHICS, pipeline)
       current_pipeline = pipeline
     }
 
-    // Render all nodes with this material
-    for node in nodes {
-      mesh_attachment := node.attachment.(MeshAttachment)
-      mesh := resource.get(g_meshes, mesh_attachment.handle) or_continue
+    // Render all material batches within this feature group
+    for batch_data in batch_group {
+      material := resource.get(g_materials, batch_data.material_handle) or_continue
 
-      // Create texture indices for material (same as old renderer)
-      texture_indices: MaterialTextures = {
-        albedo_index = min(MAX_TEXTURES - 1, material.albedo.index),
-        metallic_roughness_index = min(MAX_TEXTURES - 1, material.metallic_roughness.index),
-        normal_index = min(MAX_TEXTURES - 1, material.normal.index),
-        displacement_index = min(MAX_TEXTURES - 1, material.displacement.index),
-        emissive_index = min(MAX_TEXTURES - 1, material.emissive.index),
-        environment_index = min(MAX_TEXTURES - 1, self.environment_map.index),
-        brdf_lut_index = min(MAX_TEXTURES - 1, self.brdf_lut.index),
-        bone_matrix_offset = 0,
-      }
+      // Render all nodes with this material
+      for node in batch_data.nodes {
+        mesh_attachment := node.attachment.(MeshAttachment)
+        mesh := resource.get(g_meshes, mesh_attachment.handle) or_continue
 
-      // Check if mesh is skinned and set bone matrix offset
-      node_skinning, node_has_skin := mesh_attachment.skinning.?
-      if node_has_skin {
-        // Add frame-specific offset to bone matrix offset
-        texture_indices.bone_matrix_offset = node_skinning.bone_matrix_offset +
-                                             g_frame_index * g_bone_matrix_slab.capacity
-      }
+        // Create texture indices for material
+        texture_indices: MaterialTextures = {
+          albedo_index = min(MAX_TEXTURES - 1, material.albedo.index),
+          metallic_roughness_index = min(MAX_TEXTURES - 1, material.metallic_roughness.index),
+          normal_index = min(MAX_TEXTURES - 1, material.normal.index),
+          displacement_index = min(MAX_TEXTURES - 1, material.displacement.index),
+          emissive_index = min(MAX_TEXTURES - 1, material.emissive.index),
+          environment_index = min(MAX_TEXTURES - 1, self.environment_map.index),
+          brdf_lut_index = min(MAX_TEXTURES - 1, self.brdf_lut.index),
+          bone_matrix_offset = 0,
+        }
 
-      push_constant := PushConstant {
-        world = node.transform.world_matrix,
-        textures = texture_indices,
-        metallic_value = material.metallic_value,
-        roughness_value = material.roughness_value,
-        emissive_value = material.emissive_value,
-      }
+        // Check if mesh is skinned and set bone matrix offset
+        if node_skinning, node_has_skin := mesh_attachment.skinning.?; node_has_skin {
+          // Add frame-specific offset to bone matrix offset
+          texture_indices.bone_matrix_offset = node_skinning.bone_matrix_offset +
+                                               g_frame_index * g_bone_matrix_slab.capacity
+        }
 
-      vk.CmdPushConstants(
-        command_buffer,
-        layout,
-        {.VERTEX, .FRAGMENT},
-        0,
-        size_of(PushConstant),
-        &push_constant,
-      )
+        push_constant := PushConstant {
+          world = node.transform.world_matrix,
+          textures = texture_indices,
+          metallic_value = material.metallic_value,
+          roughness_value = material.roughness_value,
+          emissive_value = material.emissive_value,
+        }
 
-      // Bind vertex buffer
-      offset: vk.DeviceSize = 0
-      vk.CmdBindVertexBuffers(
-        command_buffer,
-        0,
-        1,
-        &mesh.vertex_buffer.buffer,
-        &offset,
-      )
+        vk.CmdPushConstants(
+          command_buffer,
+          layout,
+          {.VERTEX, .FRAGMENT},
+          0,
+          size_of(PushConstant),
+          &push_constant,
+        )
 
-      // Bind skinning vertex buffer if mesh is skinned
-      mesh_skinning, mesh_has_skin := &mesh.skinning.?
-      if mesh_has_skin && node_has_skin {
+        // Bind vertex buffer
+        offset: vk.DeviceSize = 0
         vk.CmdBindVertexBuffers(
           command_buffer,
+          0,
           1,
-          1,
-          &mesh_skinning.skin_buffer.buffer,
+          &mesh.vertex_buffer.buffer,
           &offset,
         )
+
+        // Bind skinning vertex buffer if mesh is skinned
+        if mesh_skinning, mesh_has_skin := &mesh.skinning.?; mesh_has_skin {
+          if node_skinning, node_has_skin := mesh_attachment.skinning.?; node_has_skin {
+            vk.CmdBindVertexBuffers(
+              command_buffer,
+              1,
+              1,
+              &mesh_skinning.skin_buffer.buffer,
+              &offset,
+            )
+          }
+        }
+
+        vk.CmdBindIndexBuffer(
+          command_buffer,
+          mesh.index_buffer.buffer,
+          0,
+          .UINT32,
+        )
+
+        // Draw indexed
+        vk.CmdDrawIndexed(
+          command_buffer,
+          mesh.indices_len,
+          1,
+          0,
+          0,
+          0,
+        )
+
+        rendered += 1
       }
-
-      vk.CmdBindIndexBuffer(
-        command_buffer,
-        mesh.index_buffer.buffer,
-        0,
-        .UINT32,
-      )
-
-      // Draw indexed
-      vk.CmdDrawIndexed(
-        command_buffer,
-        mesh.indices_len,
-        1,
-        0,
-        0,
-        0,
-      )
-
-      rendered += 1
     }
   }
   return rendered
@@ -1437,7 +1472,6 @@ renderer_main_depth_prepass_begin :: proc(
   engine: ^Engine,
   command_buffer: vk.CommandBuffer,
 ) {
-  // Depth pre-pass only needs depth attachment, no color
   depth_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
     imageView = engine.main.depth_buffer.view,
@@ -1450,8 +1484,6 @@ renderer_main_depth_prepass_begin :: proc(
     sType = .RENDERING_INFO_KHR,
     renderArea = {extent = engine.swapchain.extent},
     layerCount = 1,
-    colorAttachmentCount = 0,  // No color attachments for depth pre-pass
-    pColorAttachments = nil,   // No color attachments
     pDepthAttachment = &depth_attachment,
   }
   vk.CmdBeginRenderingKHR(command_buffer, &render_info)
@@ -1488,26 +1520,20 @@ renderer_main_depth_prepass_render :: proc(
   engine: ^Engine,
   command_buffer: vk.CommandBuffer,
 ) {
+  // TODO: consider integrate frustum culling into Scene traversal to reduce overhead
   camera_frustum := geometry.camera_make_frustum(engine.scene.camera)
-
-  // Create temporary batching context for depth pre-pass
   temp_arena: mem.Arena
   temp_allocator_buffer := make([]u8, mem.Megabyte) // 1MB should be enough for depth pre-pass batching
   defer delete(temp_allocator_buffer)
   mem.arena_init(&temp_arena, temp_allocator_buffer)
   temp_allocator := mem.arena_allocator(&temp_arena)
-
   batching_ctx := BatchingContext {
     engine  = engine,
     frustum = camera_frustum,
     lights  = make([dynamic]SingleLightUniform, temp_allocator),
-    meshes  = make(map[Handle][dynamic]^Node, 100, temp_allocator),
+    batches = make(map[BatchKey][dynamic]BatchData, temp_allocator),
   }
-
-  // Collect only opaque meshes for depth pre-pass (no lights needed)
   populate_depth_prepass_batches(&batching_ctx)
-
-  // Bind descriptor sets for depth pre-pass
   layout := engine.main.depth_prepass_pipeline_layout
   descriptor_sets := [?]vk.DescriptorSet {
     engine.main.frames[g_frame_index].camera_descriptor_set, // set 0
@@ -1515,7 +1541,6 @@ renderer_main_depth_prepass_render :: proc(
     g_bindless_samplers,                                     // set 2
     g_bindless_bone_buffer_descriptor_set,                   // set 3
   }
-
   vk.CmdBindDescriptorSets(
     command_buffer,
     .GRAPHICS,
@@ -1526,13 +1551,11 @@ renderer_main_depth_prepass_render :: proc(
     0,
     nil,
   )
-
   rendered_count := render_depth_prepass_batches(
     &engine.main,
     &batching_ctx,
     command_buffer,
   )
-
   if mu.window(
     &engine.ui.ctx,
     "Depth Pre-pass",
@@ -1540,45 +1563,70 @@ renderer_main_depth_prepass_render :: proc(
     {.NO_CLOSE},
   ) {
     mu.label(&engine.ui.ctx, fmt.tprintf("Depth Pre-pass Objects: %v", rendered_count))
-    mu.label(&engine.ui.ctx, fmt.tprintf("Batches: %v", len(batching_ctx.meshes)))
+    total_batches := 0
+    for _, batch_group in batching_ctx.batches {
+      total_batches += len(batch_group)
+    }
+    mu.label(&engine.ui.ctx, fmt.tprintf("Feature Groups: %v, Material Batches: %v", len(batching_ctx.batches), total_batches))
   }
 }
 
-// Populate batches for depth pre-pass (only opaque geometry)
 populate_depth_prepass_batches :: proc(ctx: ^BatchingContext) {
-  // Only collect opaque mesh nodes, skip transparent ones and lights
   for &entry in ctx.engine.scene.nodes.entries do if entry.active {
     node := &entry.item
     #partial switch data in node.attachment {
     case MeshAttachment:
-      mesh := resource.get(g_meshes, data.handle)
-      if mesh == nil do continue
-
-      material := resource.get(g_materials, data.material)
-      if material == nil do continue
+      mesh, found_mesh := resource.get(g_meshes, data.handle)
+      if !found_mesh do continue
+      material, found_mat := resource.get(g_materials, data.material)
+      if !found_mat do continue
 
       // Skip transparent and wireframe materials in depth pre-pass
       // Wireframe materials need to write their own depth with bias
       if material.type == .WIREFRAME {
         continue
       }
-
-      // Frustum culling
       world_aabb := geometry.aabb_transform(mesh.aabb, node.transform.world_matrix)
       if !geometry.frustum_test_aabb(&ctx.frustum, world_aabb) do continue
-
-      // Group by material for batching
-      material_nodes, found := &ctx.meshes[data.material]
-      if !found {
-        ctx.meshes[data.material] = make([dynamic]^Node, allocator = context.temp_allocator)
-        material_nodes = &ctx.meshes[data.material]
+      // Depth prepass only cares about skinning
+      depth_features := material.features & ShaderFeatureSet{.SKINNING}
+      batch_key := BatchKey {
+        features = depth_features,
+        material_type = material.type,
       }
-      append(material_nodes, node)
+
+      // Find or create batch group for this feature set
+      batch_group, group_found := &ctx.batches[batch_key]
+      if !group_found {
+        ctx.batches[batch_key] = make([dynamic]BatchData, allocator = context.temp_allocator)
+        batch_group = &ctx.batches[batch_key]
+      }
+
+      // Find or create batch data for this specific material within the group
+      batch_data: ^BatchData = nil
+      for &batch in batch_group {
+        if batch.material_handle == data.material {
+          batch_data = &batch
+          break
+        }
+      }
+
+      if batch_data == nil {
+        // Create new batch for this material
+        new_batch := BatchData {
+          material_handle = data.material,
+          nodes = make([dynamic]^Node, allocator = context.temp_allocator),
+        }
+        append(batch_group, new_batch)
+        batch_data = &batch_group[len(batch_group) - 1]
+      }
+
+      append(&batch_data.nodes, node)
     }
   }
 }
 
-// Render depth pre-pass batches
+// Render depth pre-pass batches with optimized feature-based batching
 render_depth_prepass_batches :: proc(
   self: ^RendererMain,
   ctx: ^BatchingContext,
@@ -1587,105 +1635,115 @@ render_depth_prepass_batches :: proc(
   rendered := 0
   current_pipeline: vk.Pipeline = 0
 
-  // Render each material batch with depth pre-pass pipeline
-  for material_handle, nodes in ctx.meshes {
-    material := resource.get(g_materials, material_handle) or_continue
-
-    // Skip transparent materials in depth pre-pass
-    if material.type == .WIREFRAME {
+  // Render each feature batch (minimizing pipeline switches)
+  for batch_key, batch_group in ctx.batches {
+    // Skip wireframe materials in depth pre-pass
+    if batch_key.material_type == .WIREFRAME {
       continue
     }
 
-    // Render all nodes with this material
-    for node in nodes {
-      #partial switch data in node.attachment {
-      case MeshAttachment:
-        mesh := resource.get(g_meshes, data.handle) or_continue
+    // Render all material batches within this feature group
+    for batch_data in batch_group {
+      material := resource.get(g_materials, batch_data.material_handle) or_continue
 
-        // Get appropriate depth pre-pass pipeline
-        pipeline := renderer_main_get_depth_prepass_pipeline(self, material, mesh, data)
-        if pipeline != current_pipeline {
-          vk.CmdBindPipeline(command_buffer, .GRAPHICS, pipeline)
-          current_pipeline = pipeline
-        }
+      // Skip transparent materials in depth pre-pass
+      if material.type == .WIREFRAME {
+        continue
+      }
 
-        // Setup push constants for depth pre-pass (need bone matrix offset for skinned meshes)
-        texture_indices: MaterialTextures = {
-          albedo_index = 0, // Set default values for depth pre-pass
-          metallic_roughness_index = 0,
-          normal_index = 0,
-          displacement_index = 0,
-          emissive_index = 0,
-          environment_index = 0,
-          brdf_lut_index = 0,
-          bone_matrix_offset = 0,
-        }
+      // Render all nodes with this material
+      for node in batch_data.nodes {
+        #partial switch data in node.attachment {
+        case MeshAttachment:
+          mesh := resource.get(g_meshes, data.handle) or_continue
 
-        // Check if mesh is skinned and set bone matrix offset
-        mesh_skinning, mesh_has_skin := &mesh.skinning.?
-        node_skinning, node_has_skin := data.skinning.?
-        if mesh_has_skin && node_has_skin {
-          // Add frame-specific offset to bone matrix offset
-          texture_indices.bone_matrix_offset = node_skinning.bone_matrix_offset +
-                                               g_frame_index * g_bone_matrix_slab.capacity
-        }
+          // Get appropriate depth pre-pass pipeline
+          pipeline := renderer_main_get_depth_prepass_pipeline(self, material, mesh, data)
+          if pipeline != current_pipeline {
+            vk.CmdBindPipeline(command_buffer, .GRAPHICS, pipeline)
+            current_pipeline = pipeline
+          }
 
-        push_constant := PushConstant {
-          world = node.transform.world_matrix,
-          textures = texture_indices,
-          metallic_value = material.metallic_value,
-          roughness_value = material.roughness_value,
-          emissive_value = material.emissive_value,
-        }
+          // Setup push constants for depth pre-pass (need bone matrix offset for skinned meshes)
+          texture_indices: MaterialTextures = {
+            albedo_index = 0, // Set default values for depth pre-pass
+            metallic_roughness_index = 0,
+            normal_index = 0,
+            displacement_index = 0,
+            emissive_index = 0,
+            environment_index = 0,
+            brdf_lut_index = 0,
+            bone_matrix_offset = 0,
+          }
 
-        vk.CmdPushConstants(
-          command_buffer,
-          self.depth_prepass_pipeline_layout,
-          {.VERTEX}, // Only vertex shader for depth pre-pass
-          0,
-          size_of(PushConstant),
-          &push_constant,
-        )
+          // Check if mesh is skinned and set bone matrix offset
+          if mesh_skinning, mesh_has_skin := &mesh.skinning.?; mesh_has_skin {
+            if node_skinning, node_has_skin := data.skinning.?; node_has_skin {
+              // Add frame-specific offset to bone matrix offset
+              texture_indices.bone_matrix_offset = node_skinning.bone_matrix_offset +
+                                                   g_frame_index * g_bone_matrix_slab.capacity
+            }
+          }
 
-        // Bind vertex buffer
-        offset: vk.DeviceSize = 0
-        vk.CmdBindVertexBuffers(
-          command_buffer,
-          0,
-          1,
-          &mesh.vertex_buffer.buffer,
-          &offset,
-        )
+          push_constant := PushConstant {
+            world = node.transform.world_matrix,
+            textures = texture_indices,
+            metallic_value = material.metallic_value,
+            roughness_value = material.roughness_value,
+            emissive_value = material.emissive_value,
+          }
 
-        // Bind skinning vertex buffer if mesh is skinned
-        if mesh_has_skin && node_has_skin {
+          vk.CmdPushConstants(
+            command_buffer,
+            self.depth_prepass_pipeline_layout,
+            {.VERTEX}, // Only vertex shader for depth pre-pass
+            0,
+            size_of(PushConstant),
+            &push_constant,
+          )
+
+          // Bind vertex buffer
+          offset: vk.DeviceSize = 0
           vk.CmdBindVertexBuffers(
             command_buffer,
+            0,
             1,
-            1,
-            &mesh_skinning.skin_buffer.buffer,
+            &mesh.vertex_buffer.buffer,
             &offset,
           )
+
+          // Bind skinning vertex buffer if mesh is skinned
+          if mesh_skinning, mesh_has_skin := &mesh.skinning.?; mesh_has_skin {
+            if node_skinning, node_has_skin := data.skinning.?; node_has_skin {
+              vk.CmdBindVertexBuffers(
+                command_buffer,
+                1,
+                1,
+                &mesh_skinning.skin_buffer.buffer,
+                &offset,
+              )
+            }
+          }
+
+          vk.CmdBindIndexBuffer(
+            command_buffer,
+            mesh.index_buffer.buffer,
+            0,
+            .UINT32,
+          )
+
+          // Draw indexed
+          vk.CmdDrawIndexed(
+            command_buffer,
+            mesh.indices_len,
+            1,
+            0,
+            0,
+            0,
+          )
+
+          rendered += 1
         }
-
-        vk.CmdBindIndexBuffer(
-          command_buffer,
-          mesh.index_buffer.buffer,
-          0,
-          .UINT32,
-        )
-
-        // Draw indexed
-        vk.CmdDrawIndexed(
-          command_buffer,
-          mesh.indices_len,
-          1,
-          0,
-          0,
-          0,
-        )
-
-        rendered += 1
       }
     }
   }

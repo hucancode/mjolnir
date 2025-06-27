@@ -41,19 +41,25 @@ MouseDragProc :: #type proc(engine: ^Engine, delta, offset: linalg.Vector2f64)
 MouseScrollProc :: #type proc(engine: ^Engine, offset: linalg.Vector2f64)
 MouseMoveProc :: #type proc(engine: ^Engine, pos, delta: linalg.Vector2f64)
 
+// Batch key for grouping objects by material features
+BatchKey :: struct {
+  features: ShaderFeatureSet,
+  material_type: MaterialType,
+}
+
+// Batch data containing material and nodes
+BatchData :: struct {
+  material_handle: Handle,
+  nodes: [dynamic]^Node,
+}
+
 BatchingContext :: struct {
   engine:  ^Engine,
   frustum: geometry.Frustum,
   lights:  [dynamic]SingleLightUniform,
-  meshes:  map[Handle][dynamic]^Node,
+  batches: map[BatchKey][dynamic]BatchData,
 }
 
-ShadowBatchingContext :: struct {
-  engine:         ^Engine,
-  frustum:        geometry.Frustum,
-  static_meshes:  [dynamic]^Node,
-  skinned_meshes: [dynamic]^Node,
-}
 
 InputState :: struct {
   mouse_pos:         linalg.Vector2f64,

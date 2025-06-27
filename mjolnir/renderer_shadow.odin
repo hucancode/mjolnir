@@ -336,15 +336,11 @@ renderer_shadow_render :: proc(
         vk.CmdBeginRenderingKHR(command_buffer, &face_render_info)
         vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
         vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
-
-        // Create batching context and collect shadow casters
-        shadow_ctx := ShadowBatchingContext {
-          engine         = engine,
-          frustum        = geometry.make_frustum(light.projection * view),
-          static_meshes  = make([dynamic]^Node, allocator = temp_allocator),
-          skinned_meshes = make([dynamic]^Node, allocator = temp_allocator),
+        shadow_ctx := BatchingContext {
+          engine  = engine,
+          frustum = geometry.make_frustum(light.projection * view),
+          batches = make(map[BatchKey][dynamic]BatchData, allocator = temp_allocator),
         }
-
         collect_shadow_data(&shadow_ctx)
         render_shadow_batches(&shadow_ctx, command_buffer, u32(i), u32(face))
         vk.CmdEndRenderingKHR(command_buffer)
@@ -381,11 +377,11 @@ renderer_shadow_render :: proc(
       }
       vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
       vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
-      shadow_ctx := ShadowBatchingContext {
-        engine         = engine,
-        frustum        = geometry.make_frustum(light.projection * light.view),
-        static_meshes  = make([dynamic]^Node, allocator = temp_allocator),
-        skinned_meshes = make([dynamic]^Node, allocator = temp_allocator),
+      shadow_ctx := BatchingContext {
+        engine  = engine,
+        frustum = geometry.make_frustum(light.projection * light.view),
+        lights  = make([dynamic]SingleLightUniform, allocator = temp_allocator),
+        batches = make(map[BatchKey][dynamic]BatchData, allocator = temp_allocator),
       }
       collect_shadow_data(&shadow_ctx)
       render_shadow_batches(&shadow_ctx, command_buffer, u32(i), 0)
@@ -525,9 +521,9 @@ renderer_shadow_get_pipeline :: proc(
   return self.pipelines[transmute(u32)features]
 }
 
-// Collect all shadow-casting mesh nodes and group them by static/skinned
-collect_shadow_data :: proc(ctx: ^ShadowBatchingContext) {
-  // Traverse scene and collect shadow-casting mesh nodes
+// Collect all shadow-casting mesh nodes and group them by features using unified batching
+collect_shadow_data :: proc(ctx: ^BatchingContext) {
+  // Traverse scene and collect shadow-casting mesh nodes grouped by features
   for &entry in ctx.engine.scene.nodes.entries do if entry.active {
     node := &entry.item
     #partial switch data in node.attachment {
@@ -535,22 +531,46 @@ collect_shadow_data :: proc(ctx: ^ShadowBatchingContext) {
       if !data.cast_shadow do continue
       mesh := resource.get(g_meshes, data.handle)
       if mesh == nil do continue
+      material := resource.get(g_materials, data.material)
+      if material == nil do continue
+
       world_aabb := geometry.aabb_transform(mesh.aabb, node.transform.world_matrix)
       if !geometry.frustum_test_aabb(&ctx.frustum, world_aabb) do continue
+
+      // Determine if this mesh is skinned (only feature that matters for shadows)
       _, mesh_has_skin := &mesh.skinning.?
       _, node_has_skin := data.skinning.?
-      if mesh_has_skin && node_has_skin {
-        append(&ctx.skinned_meshes, node)
-      } else {
-        append(&ctx.static_meshes, node)
+      is_skinned := mesh_has_skin && node_has_skin
+
+      // Create batch key based on skinning only (shadows only care about this feature)
+      shadow_features: ShaderFeatureSet = {}
+      if is_skinned {
+        shadow_features += {.SKINNING}
       }
+      batch_key := BatchKey {
+        features = shadow_features,
+        material_type = material.type, // Keep material type for consistency
+      }
+      batch_group, group_found := &ctx.batches[batch_key]
+      if !group_found {
+        ctx.batches[batch_key] = make([dynamic]BatchData, allocator = context.temp_allocator)
+        batch_group = &ctx.batches[batch_key]
+      }
+      if len(batch_group) == 0 {
+        // rendering shadow is not material dependent, we need 1 material for all
+        new_batch := BatchData {
+          nodes = make([dynamic]^Node, allocator = context.temp_allocator),
+        }
+        append(batch_group, new_batch)
+      }
+      append(&batch_group[0].nodes, node)
     }
   }
 }
 
-// Render shadow batches efficiently by grouping static and skinned meshes
+// Render shadow batches efficiently using unified batching
 render_shadow_batches :: proc(
-  ctx: ^ShadowBatchingContext,
+  ctx: ^BatchingContext,
   command_buffer: vk.CommandBuffer,
   shadow_idx: u32,
   shadow_layer: u32,
@@ -560,82 +580,71 @@ render_shadow_batches :: proc(
   current_pipeline: vk.Pipeline = 0
   rendered_count: u32 = 0
 
-  // Render static meshes batch
-  if len(ctx.static_meshes) > 0 {
-    pipeline := renderer_shadow_get_pipeline(&ctx.engine.shadow)
+  // Render each feature batch (minimizing pipeline switches)
+  for batch_key, batch_group in ctx.batches {
+    // Get appropriate pipeline for this feature set
+    shadow_features: ShadowShaderFeatureSet = {}
+    is_skinned := .SKINNING in batch_key.features
+    if is_skinned {
+      shadow_features += {.SKINNING}
+    }
+
+    pipeline := renderer_shadow_get_pipeline(&ctx.engine.shadow, shadow_features)
     if pipeline != current_pipeline {
       vk.CmdBindPipeline(command_buffer, .GRAPHICS, pipeline)
       current_pipeline = pipeline
     }
 
-    // Bind descriptor sets for static meshes
+    // Bind descriptor sets based on whether meshes are skinned
     offset_shadow := data_buffer_offset_of(
       &frame.camera_uniform,
       shadow_idx * 6 + shadow_layer,
     )
     offsets := [1]u32{offset_shadow}
-    descriptor_sets := [1]vk.DescriptorSet{frame.camera_descriptor_set}
-    vk.CmdBindDescriptorSets(
-      command_buffer,
-      .GRAPHICS,
-      layout,
-      0,
-      1,
-      raw_data(descriptor_sets[:]),
-      len(offsets),
-      raw_data(offsets[:]),
-    )
 
-    for node in ctx.static_meshes {
-      render_single_shadow_node(
-        ctx.engine,
+    if is_skinned {
+      // Bind descriptor sets for skinned meshes
+      descriptor_sets := [2]vk.DescriptorSet {
+        frame.camera_descriptor_set,
+        g_bindless_bone_buffer_descriptor_set,
+      }
+      vk.CmdBindDescriptorSets(
         command_buffer,
+        .GRAPHICS,
         layout,
-        node,
-        false,
-        &rendered_count,
+        0,
+        2,
+        raw_data(descriptor_sets[:]),
+        len(offsets),
+        raw_data(offsets[:]),
+      )
+    } else {
+      // Bind descriptor sets for static meshes
+      descriptor_sets := [1]vk.DescriptorSet{frame.camera_descriptor_set}
+      vk.CmdBindDescriptorSets(
+        command_buffer,
+        .GRAPHICS,
+        layout,
+        0,
+        1,
+        raw_data(descriptor_sets[:]),
+        len(offsets),
+        raw_data(offsets[:]),
       )
     }
-  }
 
-  // Render skinned meshes batch
-  if len(ctx.skinned_meshes) > 0 {
-    pipeline := renderer_shadow_get_pipeline(&ctx.engine.shadow, {.SKINNING})
-    if pipeline != current_pipeline {
-      vk.CmdBindPipeline(command_buffer, .GRAPHICS, pipeline)
-      current_pipeline = pipeline
-    }
-
-    // Bind descriptor sets for skinned meshes
-    offset_shadow := data_buffer_offset_of(
-      &frame.camera_uniform,
-      shadow_idx * 6 + shadow_layer,
-    )
-    offsets := [1]u32{offset_shadow}
-    descriptor_sets := [2]vk.DescriptorSet {
-      frame.camera_descriptor_set,
-      g_bindless_bone_buffer_descriptor_set,
-    }
-    vk.CmdBindDescriptorSets(
-      command_buffer,
-      .GRAPHICS,
-      layout,
-      0,
-      2,
-      raw_data(descriptor_sets[:]),
-      len(offsets),
-      raw_data(offsets[:]),
-    )
-
-    for node in ctx.skinned_meshes {
-      render_single_shadow_node(
-        ctx.engine,
-        command_buffer,
-        layout,
-        node,
-        true,
-        &rendered_count,
-      )
+    // Render all batches within this feature group
+    for batch_data in batch_group {
+      for node in batch_data.nodes {
+        render_single_shadow_node(
+          ctx.engine,
+          command_buffer,
+          layout,
+          node,
+          is_skinned,
+          &rendered_count,
+        )
+      }
     }
   }
 }
