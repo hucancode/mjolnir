@@ -136,12 +136,14 @@ init_bone_matrix_allocator :: proc() -> vk.Result {
     },
   )
   log.infof(
-    "Creating bone matrices array with capacity %d matrices...",
+    "Creating bone matrices array with capacity %d matrices per frame, %d frames...",
     g_bone_matrix_slab.capacity,
+    MAX_FRAMES_IN_FLIGHT,
   )
+  // Create bone buffer with space for all frames in flight
   g_bindless_bone_buffer, _ = create_host_visible_buffer(
     linalg.Matrix4f32,
-    int(g_bone_matrix_slab.capacity),
+    int(g_bone_matrix_slab.capacity) * MAX_FRAMES_IN_FLIGHT,
     {.STORAGE_BUFFER},
     nil,
   )
@@ -462,4 +464,10 @@ create_texture_from_data :: proc(
   set_texture_descriptor(handle.index, texture.view)
   ret = .SUCCESS
   return
+}
+
+// Calculate frame-specific bone matrix offset
+get_frame_bone_matrix_offset :: proc(base_offset: u32, frame_index: u32) -> u32 {
+  frame_capacity := g_bone_matrix_slab.capacity
+  return base_offset + frame_index * frame_capacity
 }

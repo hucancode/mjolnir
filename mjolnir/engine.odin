@@ -266,8 +266,8 @@ update :: proc(self: ^Engine) -> bool {
       continue
     }
     l, r :=
-      skinning.bone_matrix_offset,
-      skinning.bone_matrix_offset +
+      skinning.bone_matrix_offset + g_frame_index * g_bone_matrix_slab.capacity,
+      skinning.bone_matrix_offset + g_frame_index * g_bone_matrix_slab.capacity +
       u32(len(mesh_skin.bones))
     bone_matrices := g_bindless_bone_buffer.mapped[l:r]
     sample_clip(mesh, anim_inst.clip_handle, anim_inst.time, bone_matrices)
@@ -437,11 +437,16 @@ render :: proc(self: ^Engine) -> vk.Result {
     command_buffer,
     self.main.frames[g_frame_index].main_pass_image.image,
   )
-  // TODO: Temporarily disable G-buffer rendering
   // log.debug("============ rendering G-buffer pass... =============")
   renderer_gbuffer_begin(&self.gbuffer, command_buffer, self.swapchain.extent)
   renderer_gbuffer_render(self, command_buffer)
   renderer_gbuffer_end(&self.gbuffer, command_buffer)
+
+  // log.debug("============ rendering depth pre-pass... =============")
+  renderer_main_depth_prepass_begin(self, command_buffer)
+  renderer_main_depth_prepass_render(self, command_buffer)
+  renderer_main_depth_prepass_end(self, command_buffer)
+
   // log.debug("============ rendering main pass... =============")
   renderer_main_begin(self, command_buffer)
   renderer_main_render(self, command_buffer)

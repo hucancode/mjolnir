@@ -141,10 +141,13 @@ load_gltf :: proc(
               bone_matrix_id,
               len(bones),
             )
-            // Set bind pose (otherwise zeroed out matrices will cause model to be invisible)
-            l, r := bone_matrix_id, bone_matrix_id + u32(len(bones))
-            bone_matrices := g_bindless_bone_buffer.mapped[l:r]
-            slice.fill(bone_matrices, linalg.MATRIX4F32_IDENTITY)
+            // Set bind pose for all frames (otherwise zeroed out matrices will cause model to be invisible)
+            for frame_idx in 0 ..< MAX_FRAMES_IN_FLIGHT {
+              l := bone_matrix_id + u32(frame_idx) * g_bone_matrix_slab.capacity
+              r := l + u32(len(bones))
+              bone_matrices := g_bindless_bone_buffer.mapped[l:r]
+              slice.fill(bone_matrices, linalg.MATRIX4F32_IDENTITY)
+            }
           }
           node.attachment = MeshAttachment {
             handle = mesh_handle,
