@@ -9,6 +9,7 @@ import "core:math"
 import linalg "core:math/linalg"
 import "core:strings"
 import "core:time"
+import "core:unicode/utf8"
 import "geometry"
 import "resource"
 import glfw "vendor:glfw"
@@ -118,6 +119,7 @@ Engine :: struct {
   command_buffers:       [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
   visible_lights:        [MAX_FRAMES_IN_FLIGHT][dynamic]VisibleLightInfo,
   node_idx_to_light_idx: [MAX_FRAMES_IN_FLIGHT]map[int]int,
+  cursor_pos:            [2]i32,
 }
 
 init :: proc(
@@ -198,11 +200,116 @@ init :: proc(
     self.swapchain.extent.width,
     self.swapchain.extent.height,
   )
+  glfw.SetKeyCallback(
+    self.window,
+    proc "c" (window: glfw.WindowHandle, key, scancode, action, mods: c.int) {
+      context = g_context
+      engine := cast(^Engine)context.user_ptr
+      if engine.key_press_proc != nil {
+        engine.key_press_proc(engine, int(key), int(action), int(mods))
+      }
+      mu_key: mu.Key
+      switch key {
+      case glfw.KEY_LEFT_SHIFT, glfw.KEY_RIGHT_SHIFT:
+        mu_key = .SHIFT
+      case glfw.KEY_LEFT_CONTROL, glfw.KEY_RIGHT_CONTROL:
+        mu_key = .CTRL
+      case glfw.KEY_LEFT_ALT, glfw.KEY_RIGHT_ALT:
+        mu_key = .ALT
+      case glfw.KEY_BACKSPACE:
+        mu_key = .BACKSPACE
+      case glfw.KEY_DELETE:
+        mu_key = .DELETE
+      case glfw.KEY_ENTER:
+        mu_key = .RETURN
+      case glfw.KEY_LEFT:
+        mu_key = .LEFT
+      case glfw.KEY_RIGHT:
+        mu_key = .RIGHT
+      case glfw.KEY_HOME:
+        mu_key = .HOME
+      case glfw.KEY_END:
+        mu_key = .END
+      case glfw.KEY_A:
+        mu_key = .A
+      case glfw.KEY_X:
+        mu_key = .X
+      case glfw.KEY_C:
+        mu_key = .C
+      case glfw.KEY_V:
+        mu_key = .V
+      case:
+        return
+      }
+      switch action {
+      case glfw.PRESS, glfw.REPEAT:
+        mu.input_key_down(&engine.ui.ctx, mu_key)
+      case glfw.RELEASE:
+        mu.input_key_up(&engine.ui.ctx, mu_key)
+      case:
+        return
+      }
+      if engine.key_press_proc != nil {
+        engine.key_press_proc(engine, int(key), int(action), int(mods))
+      }
+    },
+  )
+
+  glfw.SetMouseButtonCallback(
+    self.window,
+    proc "c" (window: glfw.WindowHandle, button, action, mods: c.int) {
+      context = g_context
+      engine := cast(^Engine)context.user_ptr
+      mu_btn: mu.Mouse
+      switch button {
+      case glfw.MOUSE_BUTTON_LEFT:
+        mu_btn = .LEFT
+      case glfw.MOUSE_BUTTON_RIGHT:
+        mu_btn = .RIGHT
+      case glfw.MOUSE_BUTTON_MIDDLE:
+        mu_btn = .MIDDLE
+      }
+      x := engine.cursor_pos.x
+      y := engine.cursor_pos.y
+      switch action {
+      case glfw.PRESS, glfw.REPEAT:
+        mu.input_mouse_down(&engine.ui.ctx, x, y, mu_btn)
+      case glfw.RELEASE:
+        mu.input_mouse_up(&engine.ui.ctx, x, y, mu_btn)
+      }
+      if engine.mouse_press_proc != nil {
+        engine.mouse_press_proc(engine, int(button), int(action), int(mods))
+      }
+    },
+  )
+
+  glfw.SetCursorPosCallback(
+    self.window,
+    proc "c" (window: glfw.WindowHandle, xpos, ypos: f64) {
+      context = g_context
+      engine := cast(^Engine)context.user_ptr
+      engine.cursor_pos = {i32(math.round(xpos)), i32(math.round(ypos))}
+      mu.input_mouse_move(
+        &engine.ui.ctx,
+        engine.cursor_pos.x,
+        engine.cursor_pos.y,
+      )
+      if engine.mouse_move_proc != nil {
+        engine.mouse_move_proc(engine, {xpos, ypos}, {0, 0}) // You may want to pass delta
+      }
+    },
+  )
+
   glfw.SetScrollCallback(
     self.window,
     proc "c" (window: glfw.WindowHandle, xoffset, yoffset: f64) {
       context = g_context
       engine := cast(^Engine)context.user_ptr
+      mu.input_scroll(
+        &engine.ui.ctx,
+        -i32(math.round(xoffset)),
+        -i32(math.round(yoffset)),
+      )
       geometry.camera_orbit_zoom(
         &engine.scene.camera,
         -f32(yoffset) * SCROLL_SENSITIVITY,
@@ -212,26 +319,17 @@ init :: proc(
       }
     },
   )
-  glfw.SetKeyCallback(
+
+  glfw.SetCharCallback(
     self.window,
-    proc "c" (window: glfw.WindowHandle, key, scancode, action, mods: c.int) {
+    proc "c" (window: glfw.WindowHandle, ch: rune) {
       context = g_context
       engine := cast(^Engine)context.user_ptr
-      if engine.key_press_proc != nil {
-        engine.key_press_proc(engine, int(key), int(action), int(mods))
-      }
+      bytes, size := utf8.encode_rune(ch)
+      mu.input_text(&engine.ui.ctx, string(bytes[:size]))
     },
   )
-  glfw.SetMouseButtonCallback(
-    self.window,
-    proc "c" (window: glfw.WindowHandle, button, action, mods: c.int) {
-      context = g_context
-      engine := cast(^Engine)context.user_ptr
-      if engine.mouse_press_proc != nil {
-        engine.mouse_press_proc(engine, int(button), int(action), int(mods))
-      }
-    },
-  )
+
   if self.setup_proc != nil {
     self.setup_proc(self)
   }

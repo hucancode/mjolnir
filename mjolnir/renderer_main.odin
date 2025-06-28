@@ -774,6 +774,9 @@ renderer_main_render :: proc(
       &engine.ui.ctx,
       fmt.tprintf("Lights %d", len(batching_ctx.lights)),
     )
+    if .SUBMIT in mu.button(&engine.ui.ctx, "Button 1") {
+        log.info("Pressed button 1")
+    }
   }
 }
 
