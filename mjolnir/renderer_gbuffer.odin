@@ -8,18 +8,14 @@ import "geometry"
 import "resource"
 import vk "vendor:vulkan"
 
-GBUFFER_SHADER_OPTION_COUNT: u32 : 1
-GBUFFER_SHADER_VARIANT_COUNT: u32 : 1 << GBUFFER_SHADER_OPTION_COUNT
-
-GBufferShaderConfig :: struct {
-  is_skinned: b32,
-}
-
 RendererGBuffer :: struct {
-  pipelines:             [GBUFFER_SHADER_VARIANT_COUNT]vk.Pipeline,
+  pipelines:             [SHADER_VARIANT_COUNT]vk.Pipeline,
   pipeline_layout:       vk.PipelineLayout,
   descriptor_set_layout: vk.DescriptorSetLayout,
   normal_buffer:         ImageBuffer,
+  albedo_buffer:         ImageBuffer,
+  metallic_roughness_buffer: ImageBuffer,
+  emissive_buffer:       ImageBuffer,
   descriptor_sets:       [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
   scene_uniform_buffers: [MAX_FRAMES_IN_FLIGHT]DataBuffer(SceneUniform),
   light_uniform_buffers: [MAX_FRAMES_IN_FLIGHT]DataBuffer(SceneLightUniform),
@@ -40,12 +36,54 @@ renderer_gbuffer_create_images :: proc(self: ^RendererGBuffer, width: u32, heigh
         .R8G8B8A8_UNORM,
         {.COLOR},
     ) or_return
+    self.albedo_buffer = malloc_image_buffer(
+        width,
+        height,
+        .R8G8B8A8_UNORM,
+        .OPTIMAL,
+        {.COLOR_ATTACHMENT, .SAMPLED},
+        {.DEVICE_LOCAL},
+    ) or_return
+    self.albedo_buffer.view = create_image_view(
+        self.albedo_buffer.image,
+        .R8G8B8A8_UNORM,
+        {.COLOR},
+    ) or_return
+    self.metallic_roughness_buffer = malloc_image_buffer(
+        width,
+        height,
+        .R8G8B8A8_UNORM,
+        .OPTIMAL,
+        {.COLOR_ATTACHMENT, .SAMPLED},
+        {.DEVICE_LOCAL},
+    ) or_return
+    self.metallic_roughness_buffer.view = create_image_view(
+        self.metallic_roughness_buffer.image,
+        .R8G8B8A8_UNORM,
+        {.COLOR},
+    ) or_return
+    self.emissive_buffer = malloc_image_buffer(
+        width,
+        height,
+        .R8G8B8A8_UNORM,
+        .OPTIMAL,
+        {.COLOR_ATTACHMENT, .SAMPLED},
+        {.DEVICE_LOCAL},
+    ) or_return
+    self.emissive_buffer.view = create_image_view(
+        self.emissive_buffer.image,
+        .R8G8B8A8_UNORM,
+        {.COLOR},
+    ) or_return
     return .SUCCESS
 }
 
 // Helper to deinit images for G-buffer
 renderer_gbuffer_deinit_images :: proc(self: ^RendererGBuffer) {
     image_buffer_deinit(&self.normal_buffer)
+    image_buffer_deinit(&self.albedo_buffer)
+    image_buffer_deinit(&self.metallic_roughness_buffer)
+    image_buffer_deinit(&self.emissive_buffer)
 }
 
 // Helper to recreate images for G-buffer
@@ -291,34 +329,45 @@ renderer_gbuffer_build_pipelines :: proc(
     dynamicStateCount = len(dynamic_states),
     pDynamicStates    = raw_data(dynamic_states[:]),
   }
-  color_formats := [?]vk.Format{.R8G8B8A8_UNORM} // Normal buffer format
+  color_formats := [?]vk.Format{
+    .R8G8B8A8_UNORM, // normal
+    .R8G8B8A8_UNORM, // albedo
+    .R8G8B8A8_UNORM, // metallic/roughness
+    .R8G8B8A8_UNORM, // emissive
+  }
   rendering_info := vk.PipelineRenderingCreateInfo {
     sType                   = .PIPELINE_RENDERING_CREATE_INFO,
     colorAttachmentCount    = len(color_formats),
     pColorAttachmentFormats = raw_data(color_formats[:]),
     depthAttachmentFormat   = depth_format,
   }
-  pipeline_infos: [GBUFFER_SHADER_VARIANT_COUNT]vk.GraphicsPipelineCreateInfo
-  configs: [GBUFFER_SHADER_VARIANT_COUNT]GBufferShaderConfig
-  entries: [GBUFFER_SHADER_VARIANT_COUNT][GBUFFER_SHADER_OPTION_COUNT]vk.SpecializationMapEntry
-  spec_infos: [GBUFFER_SHADER_VARIANT_COUNT]vk.SpecializationInfo
-  shader_stages: [GBUFFER_SHADER_VARIANT_COUNT][2]vk.PipelineShaderStageCreateInfo
-  for mask in 0 ..< GBUFFER_SHADER_VARIANT_COUNT {
+  pipeline_infos: [SHADER_VARIANT_COUNT]vk.GraphicsPipelineCreateInfo
+  configs: [SHADER_VARIANT_COUNT]ShaderConfig
+  entries: [SHADER_VARIANT_COUNT][SHADER_OPTION_COUNT]vk.SpecializationMapEntry
+  spec_infos: [SHADER_VARIANT_COUNT]vk.SpecializationInfo
+  shader_stages: [SHADER_VARIANT_COUNT][2]vk.PipelineShaderStageCreateInfo
+  for mask in 0 ..< SHADER_VARIANT_COUNT {
     features := transmute(ShaderFeatureSet)mask
-    configs[mask] = GBufferShaderConfig {
-      is_skinned = .SKINNING in features,
+    configs[mask] = ShaderConfig {
+      is_skinned                     = .SKINNING in features,
+      has_albedo_texture             = .ALBEDO_TEXTURE in features,
+      has_metallic_roughness_texture = .METALLIC_ROUGHNESS_TEXTURE in features,
+      has_normal_texture             = .NORMAL_TEXTURE in features,
+      has_displacement_texture       = .DISPLACEMENT_TEXTURE in features,
+      has_emissive_texture           = .EMISSIVE_TEXTURE in features,
     }
-    entries[mask] = [GBUFFER_SHADER_OPTION_COUNT]vk.SpecializationMapEntry {
-      {
-        constantID = 0,
-        offset = u32(offset_of(GBufferShaderConfig, is_skinned)),
-        size = size_of(b32),
-      },
+    entries[mask] = [SHADER_OPTION_COUNT]vk.SpecializationMapEntry {
+      { constantID = 0, offset = u32(offset_of(ShaderConfig, is_skinned)),                     size = size_of(b32) },
+      { constantID = 1, offset = u32(offset_of(ShaderConfig, has_albedo_texture)),             size = size_of(b32) },
+      { constantID = 2, offset = u32(offset_of(ShaderConfig, has_metallic_roughness_texture)), size = size_of(b32) },
+      { constantID = 3, offset = u32(offset_of(ShaderConfig, has_normal_texture)),             size = size_of(b32) },
+      { constantID = 4, offset = u32(offset_of(ShaderConfig, has_displacement_texture)),       size = size_of(b32) },
+      { constantID = 5, offset = u32(offset_of(ShaderConfig, has_emissive_texture)),           size = size_of(b32) },
     }
     spec_infos[mask] = {
       mapEntryCount = len(entries[mask]),
       pMapEntries   = raw_data(entries[mask][:]),
-      dataSize      = size_of(GBufferShaderConfig),
+      dataSize      = size_of(ShaderConfig),
       pData         = &configs[mask],
     }
     shader_stages[mask] = [2]vk.PipelineShaderStageCreateInfo {
@@ -369,18 +418,41 @@ renderer_gbuffer_begin :: proc(
   command_buffer: vk.CommandBuffer,
   extent: vk.Extent2D,
 ) {
-  prepare_image_for_render(
-    command_buffer,
-    engine.gbuffer.normal_buffer.image,
-    .COLOR_ATTACHMENT_OPTIMAL,
-  )
+  prepare_image_for_render(command_buffer, engine.gbuffer.normal_buffer.image, .COLOR_ATTACHMENT_OPTIMAL)
+  prepare_image_for_render(command_buffer, engine.gbuffer.albedo_buffer.image, .COLOR_ATTACHMENT_OPTIMAL)
+  prepare_image_for_render(command_buffer, engine.gbuffer.metallic_roughness_buffer.image, .COLOR_ATTACHMENT_OPTIMAL)
+  prepare_image_for_render(command_buffer, engine.gbuffer.emissive_buffer.image, .COLOR_ATTACHMENT_OPTIMAL)
   normal_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
     imageView = engine.gbuffer.normal_buffer.view,
     imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
     loadOp = .CLEAR,
     storeOp = .STORE,
-    clearValue = {color = {float32 = {0.0, 0.0, 0.0, 1.0}}}, // Red clear color for debugging
+    clearValue = {color = {float32 = {0.0, 0.0, 0.0, 1.0}}},
+  }
+  albedo_attachment := vk.RenderingAttachmentInfoKHR {
+    sType = .RENDERING_ATTACHMENT_INFO_KHR,
+    imageView = engine.gbuffer.albedo_buffer.view,
+    imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
+    loadOp = .CLEAR,
+    storeOp = .STORE,
+    clearValue = {color = {float32 = {0.0, 0.0, 0.0, 1.0}}},
+  }
+  metallic_roughness_attachment := vk.RenderingAttachmentInfoKHR {
+    sType = .RENDERING_ATTACHMENT_INFO_KHR,
+    imageView = engine.gbuffer.metallic_roughness_buffer.view,
+    imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
+    loadOp = .CLEAR,
+    storeOp = .STORE,
+    clearValue = {color = {float32 = {0.0, 0.0, 0.0, 1.0}}},
+  }
+  emissive_attachment := vk.RenderingAttachmentInfoKHR {
+    sType = .RENDERING_ATTACHMENT_INFO_KHR,
+    imageView = engine.gbuffer.emissive_buffer.view,
+    imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
+    loadOp = .CLEAR,
+    storeOp = .STORE,
+    clearValue = {color = {float32 = {0.0, 0.0, 0.0, 1.0}}},
   }
   depth_attachment := vk.RenderingAttachmentInfoKHR {
     sType       = .RENDERING_ATTACHMENT_INFO_KHR,
@@ -389,12 +461,18 @@ renderer_gbuffer_begin :: proc(
     loadOp      = .LOAD,
     storeOp     = .STORE,
   }
+  color_attachments := [?]vk.RenderingAttachmentInfoKHR{
+    normal_attachment,
+    albedo_attachment,
+    metallic_roughness_attachment,
+    emissive_attachment,
+  }
   render_info := vk.RenderingInfoKHR {
     sType = .RENDERING_INFO_KHR,
     renderArea = {extent = extent},
     layerCount = 1,
-    colorAttachmentCount = 1,
-    pColorAttachments = &normal_attachment,
+    colorAttachmentCount = len(color_attachments),
+    pColorAttachments = raw_data(color_attachments[:]),
     pDepthAttachment = &depth_attachment,
   }
   vk.CmdBeginRenderingKHR(command_buffer, &render_info)
@@ -418,10 +496,10 @@ renderer_gbuffer_end :: proc(
   command_buffer: vk.CommandBuffer,
 ) {
   vk.CmdEndRenderingKHR(command_buffer)
-  prepare_image_for_shader_read(
-    command_buffer,
-    engine.gbuffer.normal_buffer.image,
-  )
+  prepare_image_for_shader_read(command_buffer, engine.gbuffer.normal_buffer.image)
+  prepare_image_for_shader_read(command_buffer, engine.gbuffer.albedo_buffer.image)
+  prepare_image_for_shader_read(command_buffer, engine.gbuffer.metallic_roughness_buffer.image)
+  prepare_image_for_shader_read(command_buffer, engine.gbuffer.emissive_buffer.image)
 }
 
 renderer_gbuffer_render :: proc(
@@ -461,17 +539,12 @@ renderer_gbuffer_render :: proc(
       mesh_count += 1
       world_aabb := geometry.aabb_transform(mesh.aabb, node.transform.world_matrix)
       if !geometry.frustum_test_aabb(&camera_frustum, world_aabb) do continue
-
-      // Create texture indices for material
       texture_indices: MaterialTextures = {
         albedo_index             = min(MAX_TEXTURES - 1, material.albedo.index),
         metallic_roughness_index = min(MAX_TEXTURES - 1, material.metallic_roughness.index),
         normal_index             = min(MAX_TEXTURES - 1, material.normal.index),
         displacement_index       = min(MAX_TEXTURES - 1, material.displacement.index),
         emissive_index           = min(MAX_TEXTURES - 1, material.emissive.index),
-        environment_index        = 0, // Not needed for G-buffer
-        brdf_lut_index           = 0, // Not needed for G-buffer
-        bone_matrix_offset       = 0,
       }
       node_skinning, has_skinning := data.skinning.?
       if has_skinning {

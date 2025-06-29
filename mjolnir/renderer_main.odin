@@ -1110,7 +1110,7 @@ populate_render_batches :: proc(ctx: ^BatchingContext) {
         ctx.batches[batch_key] = make([dynamic]BatchData, allocator = context.temp_allocator)
         batch_group = &ctx.batches[batch_key]
       }
-      batch_data: ^BatchData = nil
+      batch_data: ^BatchData
       for &batch in batch_group {
         if batch.material_handle == data.material {
           batch_data = &batch
