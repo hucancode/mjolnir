@@ -763,7 +763,7 @@ renderer_main_render :: proc(
     &engine.ui.ctx,
     "Main pass renderer",
     {40, 200, 300, 150},
-    {.NO_CLOSE},
+    {.NO_CLOSE, .NO_SCROLL},
   ) {
     mu.label(&engine.ui.ctx, fmt.tprintf("Rendered %v", rendered_count))
     mu.label(
@@ -774,9 +774,9 @@ renderer_main_render :: proc(
       &engine.ui.ctx,
       fmt.tprintf("Lights %d", len(batching_ctx.lights)),
     )
-    if .SUBMIT in mu.button(&engine.ui.ctx, "Button 1") {
-        log.info("Pressed button 1")
-    }
+    // if .SUBMIT in mu.button(&engine.ui.ctx, "Button 1") {
+    //     log.info("Pressed button 1")
+    // }
   }
 }
 

@@ -88,7 +88,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     translate(&ground_node.transform, x = -0.5 * size, z = -0.5 * size)
     scale(&ground_node.transform, size)
   }
-  if false {
+  if true {
     log.info("loading GLTF...")
     gltf_nodes := load_gltf(engine, "assets/Suzanne.glb") or_else {}
     log.infof("Loaded GLTF nodes: %v", gltf_nodes)
