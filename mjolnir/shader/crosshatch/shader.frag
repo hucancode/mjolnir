@@ -16,6 +16,8 @@ layout(push_constant) uniform CrossHatchParams {
 };
 
 const float EPSILON = 1.0;
+const float HATCH_BRIGHTNESS = 0.7; // lesser means darker, more pronounced hatching
+const float EDGE_SENSITIVITY = 0.3; // lesser means less edge detected
 
 vec3 edge() {
     vec2 texel_size = 1.0 / resolution;
@@ -38,7 +40,7 @@ vec3 edge() {
     vert_edge += texture(u_normal_texture, v_uv + vec2(texel_size.x, texel_size.y)) * 1.0;
 
     vec3 edge_strength = sqrt((horiz_edge.rgb * horiz_edge.rgb) + (vert_edge.rgb * vert_edge.rgb));
-    float k = clamp(edge_strength.r + edge_strength.g + edge_strength.b, 0.0, 1.0);
+    float k = clamp((edge_strength.r + edge_strength.g + edge_strength.b) * EDGE_SENSITIVITY, 0.0, 1.0);
     return vec3(k);
 }
 
@@ -50,19 +52,19 @@ vec3 hatch() {
     vec2 screen_pos = v_uv * resolution;
 
     if (lum < lum_threshold_01) {
-        if (mod(screen_pos.x + screen_pos.y, 10.0) < EPSILON) ret = 0.0;
+        if (mod(screen_pos.x + screen_pos.y, 10.0) < EPSILON) ret = HATCH_BRIGHTNESS;
     }
 
     if (lum < lum_threshold_02) {
-        if (mod(screen_pos.x - screen_pos.y, 10.0) < EPSILON) ret = 0.0;
+        if (mod(screen_pos.x - screen_pos.y, 10.0) < EPSILON) ret = HATCH_BRIGHTNESS;
     }
 
     if (lum < lum_threshold_03) {
-        if (mod(screen_pos.x + screen_pos.y - hatch_offset_y, 10.0) < EPSILON) ret = 0.0;
+        if (mod(screen_pos.x + screen_pos.y - hatch_offset_y, 10.0) < EPSILON) ret = HATCH_BRIGHTNESS;
     }
 
     if (lum < lum_threshold_04) {
-        if (mod(screen_pos.x - screen_pos.y - hatch_offset_y, 10.0) < EPSILON) ret = 0.0;
+        if (mod(screen_pos.x - screen_pos.y - hatch_offset_y, 10.0) < EPSILON) ret = HATCH_BRIGHTNESS;
     }
 
     return vec3(ret);
