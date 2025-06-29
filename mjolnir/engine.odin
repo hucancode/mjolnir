@@ -122,6 +122,15 @@ Engine :: struct {
   cursor_pos:            [2]i32,
 }
 
+get_window_dpi :: proc(window: glfw.WindowHandle) -> f32 {
+  sw, sh := glfw.GetWindowContentScale(window)
+  // Use X scale, warn if not equal
+  if sw != sh {
+    log.warnf("DPI scale x (%v) and y (%v) not the same, using x", sw, sh)
+  }
+  return sw
+}
+
 init :: proc(
   self: ^Engine,
   width: u32,
@@ -199,6 +208,7 @@ init :: proc(
     self.swapchain.format.format,
     self.swapchain.extent.width,
     self.swapchain.extent.height,
+    get_window_dpi(self.window),
   )
   glfw.SetKeyCallback(
     self.window,

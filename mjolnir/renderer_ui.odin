@@ -31,6 +31,7 @@ RendererUI :: struct {
   indices:                   [UI_MAX_INDICES]u32,
   frame_width:               u32,
   frame_height:              u32,
+  dpi_scale:                 f32,
 }
 
 Vertex2D :: struct {
@@ -45,12 +46,14 @@ renderer_ui_init :: proc(
   color_format: vk.Format,
   width: u32,
   height: u32,
+  dpi_scale: f32 = 1.0,
 ) -> vk.Result {
   mu.init(&self.ctx)
   self.ctx.text_width = mu.default_atlas_text_width
   self.ctx.text_height = mu.default_atlas_text_height
   self.frame_width = width
   self.frame_height = height
+  self.dpi_scale = dpi_scale
   log.infof("init UI pipeline...")
   vert_shader_module := create_shader_module(SHADER_MICROUI_VERT) or_return
   defer vk.DestroyShaderModule(g_device, vert_shader_module, nil)
@@ -272,8 +275,7 @@ renderer_ui_init :: proc(
     UI_MAX_INDICES,
     {.INDEX_BUFFER},
   ) or_return
-  // Write atlas texture and sampler to texture_descriptor_set
-  ortho := linalg.matrix_ortho3d(0, f32(width), f32(height), 0, -1, 1)
+  ortho := linalg.matrix_ortho3d(0, f32(width), f32(height), 0, -1, 1) * linalg.matrix4_scale(dpi_scale)
   log.infof("init UI proj buffer...")
   self.proj_buffer = create_host_visible_buffer(
     linalg.Matrix4f32,
