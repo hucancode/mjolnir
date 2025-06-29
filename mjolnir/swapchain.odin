@@ -93,7 +93,7 @@ swapchain_init :: proc(
     presentMode      = pick_swap_present_mode(support.present_modes),
     clipped          = true,
   }
-  queue_family_indices := [2]u32{g_graphics_family, g_present_family}
+  queue_family_indices := [?]u32{g_graphics_family, g_present_family}
   if g_graphics_family != g_present_family {
     create_info.imageSharingMode = .CONCURRENT
     create_info.queueFamilyIndexCount = 2

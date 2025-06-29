@@ -234,7 +234,7 @@ renderer_main_build_pbr_pipeline :: proc(
   ) or_return
   for mask in 0 ..< SHADER_VARIANT_COUNT {
     features := transmute(ShaderFeatureSet)mask
-    configs[mask] = ShaderConfig {
+    configs[mask] = {
       is_skinned                     = .SKINNING in features,
       has_albedo_texture             = .ALBEDO_TEXTURE in features,
       has_metallic_roughness_texture = .METALLIC_ROUGHNESS_TEXTURE in features,
@@ -404,7 +404,7 @@ renderer_main_build_unlit_pipeline :: proc(
   }
   for mask in 0 ..< UNLIT_SHADER_VARIANT_COUNT {
     features := transmute(ShaderFeatureSet)mask
-    configs[mask] = ShaderConfig {
+    configs[mask] = {
       is_skinned         = .SKINNING in features,
       has_albedo_texture = .ALBEDO_TEXTURE in features,
     }
@@ -484,7 +484,7 @@ renderer_main_build_wireframe_unlit_pipeline :: proc(
   spec_infos: [UNLIT_SHADER_VARIANT_COUNT]vk.SpecializationInfo
   configs: [UNLIT_SHADER_VARIANT_COUNT]ShaderConfig
   entries: [UNLIT_SHADER_VARIANT_COUNT][UNLIT_SHADER_OPTION_COUNT]vk.SpecializationMapEntry
-  shader_stages_arr: [UNLIT_SHADER_VARIANT_COUNT][2]vk.PipelineShaderStageCreateInfo
+  shader_stages: [UNLIT_SHADER_VARIANT_COUNT][2]vk.PipelineShaderStageCreateInfo
   vert_module := create_shader_module(SHADER_UNLIT_VERT) or_return
   defer vk.DestroyShaderModule(g_device, vert_module, nil)
   frag_module := create_shader_module(SHADER_UNLIT_FRAG) or_return
@@ -552,7 +552,7 @@ renderer_main_build_wireframe_unlit_pipeline :: proc(
   }
   for mask in 0 ..< UNLIT_SHADER_VARIANT_COUNT {
     features := transmute(ShaderFeatureSet)mask
-    configs[mask] = ShaderConfig {
+    configs[mask] = {
       is_skinned         = .SKINNING in features,
       has_albedo_texture = .ALBEDO_TEXTURE in features,
     }
@@ -574,7 +574,7 @@ renderer_main_build_wireframe_unlit_pipeline :: proc(
       dataSize      = size_of(ShaderConfig),
       pData         = &configs[mask],
     }
-    shader_stages_arr[mask] = [2]vk.PipelineShaderStageCreateInfo {
+    shader_stages[mask] = [?]vk.PipelineShaderStageCreateInfo {
       {
         sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
         stage = {.VERTEX},
@@ -599,8 +599,8 @@ renderer_main_build_wireframe_unlit_pipeline :: proc(
     pipeline_infos[mask] = {
       sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
       pNext               = &rendering_info_khr,
-      stageCount          = len(shader_stages_arr[mask]),
-      pStages             = raw_data(shader_stages_arr[mask][:]),
+      stageCount          = len(shader_stages[mask]),
+      pStages             = raw_data(shader_stages[mask][:]),
       pVertexInputState   = &vertex_input_info,
       pInputAssemblyState = &input_assembly,
       pViewportState      = &viewport_state,

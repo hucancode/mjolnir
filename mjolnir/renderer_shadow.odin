@@ -128,7 +128,7 @@ renderer_shadow_init :: proc(
   shader_stages: [SHADOW_SHADER_VARIANT_COUNT][1]vk.PipelineShaderStageCreateInfo
   for mask in 0 ..< SHADOW_SHADER_VARIANT_COUNT {
     features := transmute(ShaderFeatureSet)mask & ShaderFeatureSet{.SKINNING}
-    configs[mask] = ShadowShaderConfig {
+    configs[mask] = {
       is_skinned = .SKINNING in features,
     }
     entries[mask] = [SHADOW_SHADER_OPTION_COUNT]vk.SpecializationMapEntry {
@@ -448,7 +448,7 @@ render_shadow_batches :: proc(
     )
     offsets := [1]u32{offset_shadow}
     if is_skinned {
-      descriptor_sets := [2]vk.DescriptorSet {
+      descriptor_sets := [?]vk.DescriptorSet {
         frame.camera_descriptor_set,
         g_bindless_bone_buffer_descriptor_set,
       }
@@ -464,7 +464,7 @@ render_shadow_batches :: proc(
       )
     } else {
       // Bind descriptor sets for static meshes
-      descriptor_sets := [1]vk.DescriptorSet{frame.camera_descriptor_set}
+      descriptor_sets := [?]vk.DescriptorSet{frame.camera_descriptor_set}
       vk.CmdBindDescriptorSets(
         command_buffer,
         .GRAPHICS,

@@ -9,87 +9,97 @@ import "resource"
 import vk "vendor:vulkan"
 
 RendererGBuffer :: struct {
-  pipelines:             [SHADER_VARIANT_COUNT]vk.Pipeline,
-  pipeline_layout:       vk.PipelineLayout,
-  descriptor_set_layout: vk.DescriptorSetLayout,
-  normal_buffer:         ImageBuffer,
-  albedo_buffer:         ImageBuffer,
+  pipelines:                 [SHADER_VARIANT_COUNT]vk.Pipeline,
+  pipeline_layout:           vk.PipelineLayout,
+  descriptor_set_layout:     vk.DescriptorSetLayout,
+  normal_buffer:             ImageBuffer,
+  albedo_buffer:             ImageBuffer,
   metallic_roughness_buffer: ImageBuffer,
-  emissive_buffer:       ImageBuffer,
-  descriptor_sets:       [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
-  scene_uniform_buffers: [MAX_FRAMES_IN_FLIGHT]DataBuffer(SceneUniform),
-  light_uniform_buffers: [MAX_FRAMES_IN_FLIGHT]DataBuffer(SceneLightUniform),
+  emissive_buffer:           ImageBuffer,
+  descriptor_sets:           [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
+  scene_uniform_buffers:     [MAX_FRAMES_IN_FLIGHT]DataBuffer(SceneUniform),
+  light_uniform_buffers:     [MAX_FRAMES_IN_FLIGHT]DataBuffer(
+    SceneLightUniform,
+  ),
 }
 
 // Helper to create images for G-buffer
-renderer_gbuffer_create_images :: proc(self: ^RendererGBuffer, width: u32, height: u32) -> vk.Result {
-    self.normal_buffer = malloc_image_buffer(
-        width,
-        height,
-        .R8G8B8A8_UNORM,
-        .OPTIMAL,
-        {.COLOR_ATTACHMENT, .SAMPLED},
-        {.DEVICE_LOCAL},
-    ) or_return
-    self.normal_buffer.view = create_image_view(
-        self.normal_buffer.image,
-        .R8G8B8A8_UNORM,
-        {.COLOR},
-    ) or_return
-    self.albedo_buffer = malloc_image_buffer(
-        width,
-        height,
-        .R8G8B8A8_UNORM,
-        .OPTIMAL,
-        {.COLOR_ATTACHMENT, .SAMPLED},
-        {.DEVICE_LOCAL},
-    ) or_return
-    self.albedo_buffer.view = create_image_view(
-        self.albedo_buffer.image,
-        .R8G8B8A8_UNORM,
-        {.COLOR},
-    ) or_return
-    self.metallic_roughness_buffer = malloc_image_buffer(
-        width,
-        height,
-        .R8G8B8A8_UNORM,
-        .OPTIMAL,
-        {.COLOR_ATTACHMENT, .SAMPLED},
-        {.DEVICE_LOCAL},
-    ) or_return
-    self.metallic_roughness_buffer.view = create_image_view(
-        self.metallic_roughness_buffer.image,
-        .R8G8B8A8_UNORM,
-        {.COLOR},
-    ) or_return
-    self.emissive_buffer = malloc_image_buffer(
-        width,
-        height,
-        .R8G8B8A8_UNORM,
-        .OPTIMAL,
-        {.COLOR_ATTACHMENT, .SAMPLED},
-        {.DEVICE_LOCAL},
-    ) or_return
-    self.emissive_buffer.view = create_image_view(
-        self.emissive_buffer.image,
-        .R8G8B8A8_UNORM,
-        {.COLOR},
-    ) or_return
-    return .SUCCESS
+renderer_gbuffer_create_images :: proc(
+  self: ^RendererGBuffer,
+  width: u32,
+  height: u32,
+) -> vk.Result {
+  self.normal_buffer = malloc_image_buffer(
+    width,
+    height,
+    .R8G8B8A8_UNORM,
+    .OPTIMAL,
+    {.COLOR_ATTACHMENT, .SAMPLED},
+    {.DEVICE_LOCAL},
+  ) or_return
+  self.normal_buffer.view = create_image_view(
+    self.normal_buffer.image,
+    .R8G8B8A8_UNORM,
+    {.COLOR},
+  ) or_return
+  self.albedo_buffer = malloc_image_buffer(
+    width,
+    height,
+    .R8G8B8A8_UNORM,
+    .OPTIMAL,
+    {.COLOR_ATTACHMENT, .SAMPLED},
+    {.DEVICE_LOCAL},
+  ) or_return
+  self.albedo_buffer.view = create_image_view(
+    self.albedo_buffer.image,
+    .R8G8B8A8_UNORM,
+    {.COLOR},
+  ) or_return
+  self.metallic_roughness_buffer = malloc_image_buffer(
+    width,
+    height,
+    .R8G8B8A8_UNORM,
+    .OPTIMAL,
+    {.COLOR_ATTACHMENT, .SAMPLED},
+    {.DEVICE_LOCAL},
+  ) or_return
+  self.metallic_roughness_buffer.view = create_image_view(
+    self.metallic_roughness_buffer.image,
+    .R8G8B8A8_UNORM,
+    {.COLOR},
+  ) or_return
+  self.emissive_buffer = malloc_image_buffer(
+    width,
+    height,
+    .R8G8B8A8_UNORM,
+    .OPTIMAL,
+    {.COLOR_ATTACHMENT, .SAMPLED},
+    {.DEVICE_LOCAL},
+  ) or_return
+  self.emissive_buffer.view = create_image_view(
+    self.emissive_buffer.image,
+    .R8G8B8A8_UNORM,
+    {.COLOR},
+  ) or_return
+  return .SUCCESS
 }
 
 // Helper to deinit images for G-buffer
 renderer_gbuffer_deinit_images :: proc(self: ^RendererGBuffer) {
-    image_buffer_deinit(&self.normal_buffer)
-    image_buffer_deinit(&self.albedo_buffer)
-    image_buffer_deinit(&self.metallic_roughness_buffer)
-    image_buffer_deinit(&self.emissive_buffer)
+  image_buffer_deinit(&self.normal_buffer)
+  image_buffer_deinit(&self.albedo_buffer)
+  image_buffer_deinit(&self.metallic_roughness_buffer)
+  image_buffer_deinit(&self.emissive_buffer)
 }
 
 // Helper to recreate images for G-buffer
-renderer_gbuffer_recreate_images :: proc(self: ^RendererGBuffer, width: u32, height: u32) -> vk.Result {
-    renderer_gbuffer_deinit_images(self)
-    return renderer_gbuffer_create_images(self, width, height)
+renderer_gbuffer_recreate_images :: proc(
+  self: ^RendererGBuffer,
+  width: u32,
+  height: u32,
+) -> vk.Result {
+  renderer_gbuffer_deinit_images(self)
+  return renderer_gbuffer_create_images(self, width, height)
 }
 
 renderer_gbuffer_init :: proc(
@@ -329,7 +339,7 @@ renderer_gbuffer_build_pipelines :: proc(
     dynamicStateCount = len(dynamic_states),
     pDynamicStates    = raw_data(dynamic_states[:]),
   }
-  color_formats := [?]vk.Format{
+  color_formats := [?]vk.Format {
     .R8G8B8A8_UNORM, // normal
     .R8G8B8A8_UNORM, // albedo
     .R8G8B8A8_UNORM, // metallic/roughness
@@ -348,7 +358,7 @@ renderer_gbuffer_build_pipelines :: proc(
   shader_stages: [SHADER_VARIANT_COUNT][2]vk.PipelineShaderStageCreateInfo
   for mask in 0 ..< SHADER_VARIANT_COUNT {
     features := transmute(ShaderFeatureSet)mask
-    configs[mask] = ShaderConfig {
+    configs[mask] = {
       is_skinned                     = .SKINNING in features,
       has_albedo_texture             = .ALBEDO_TEXTURE in features,
       has_metallic_roughness_texture = .METALLIC_ROUGHNESS_TEXTURE in features,
@@ -357,12 +367,36 @@ renderer_gbuffer_build_pipelines :: proc(
       has_emissive_texture           = .EMISSIVE_TEXTURE in features,
     }
     entries[mask] = [SHADER_OPTION_COUNT]vk.SpecializationMapEntry {
-      { constantID = 0, offset = u32(offset_of(ShaderConfig, is_skinned)),                     size = size_of(b32) },
-      { constantID = 1, offset = u32(offset_of(ShaderConfig, has_albedo_texture)),             size = size_of(b32) },
-      { constantID = 2, offset = u32(offset_of(ShaderConfig, has_metallic_roughness_texture)), size = size_of(b32) },
-      { constantID = 3, offset = u32(offset_of(ShaderConfig, has_normal_texture)),             size = size_of(b32) },
-      { constantID = 4, offset = u32(offset_of(ShaderConfig, has_displacement_texture)),       size = size_of(b32) },
-      { constantID = 5, offset = u32(offset_of(ShaderConfig, has_emissive_texture)),           size = size_of(b32) },
+      {
+        constantID = 0,
+        offset = u32(offset_of(ShaderConfig, is_skinned)),
+        size = size_of(b32),
+      },
+      {
+        constantID = 1,
+        offset = u32(offset_of(ShaderConfig, has_albedo_texture)),
+        size = size_of(b32),
+      },
+      {
+        constantID = 2,
+        offset = u32(offset_of(ShaderConfig, has_metallic_roughness_texture)),
+        size = size_of(b32),
+      },
+      {
+        constantID = 3,
+        offset = u32(offset_of(ShaderConfig, has_normal_texture)),
+        size = size_of(b32),
+      },
+      {
+        constantID = 4,
+        offset = u32(offset_of(ShaderConfig, has_displacement_texture)),
+        size = size_of(b32),
+      },
+      {
+        constantID = 5,
+        offset = u32(offset_of(ShaderConfig, has_emissive_texture)),
+        size = size_of(b32),
+      },
     }
     spec_infos[mask] = {
       mapEntryCount = len(entries[mask]),
@@ -370,7 +404,7 @@ renderer_gbuffer_build_pipelines :: proc(
       dataSize      = size_of(ShaderConfig),
       pData         = &configs[mask],
     }
-    shader_stages[mask] = [2]vk.PipelineShaderStageCreateInfo {
+    shader_stages[mask] = [?]vk.PipelineShaderStageCreateInfo {
       {
         sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
         stage = {.VERTEX},
@@ -418,10 +452,26 @@ renderer_gbuffer_begin :: proc(
   command_buffer: vk.CommandBuffer,
   extent: vk.Extent2D,
 ) {
-  prepare_image_for_render(command_buffer, engine.gbuffer.normal_buffer.image, .COLOR_ATTACHMENT_OPTIMAL)
-  prepare_image_for_render(command_buffer, engine.gbuffer.albedo_buffer.image, .COLOR_ATTACHMENT_OPTIMAL)
-  prepare_image_for_render(command_buffer, engine.gbuffer.metallic_roughness_buffer.image, .COLOR_ATTACHMENT_OPTIMAL)
-  prepare_image_for_render(command_buffer, engine.gbuffer.emissive_buffer.image, .COLOR_ATTACHMENT_OPTIMAL)
+  prepare_image_for_render(
+    command_buffer,
+    engine.gbuffer.normal_buffer.image,
+    .COLOR_ATTACHMENT_OPTIMAL,
+  )
+  prepare_image_for_render(
+    command_buffer,
+    engine.gbuffer.albedo_buffer.image,
+    .COLOR_ATTACHMENT_OPTIMAL,
+  )
+  prepare_image_for_render(
+    command_buffer,
+    engine.gbuffer.metallic_roughness_buffer.image,
+    .COLOR_ATTACHMENT_OPTIMAL,
+  )
+  prepare_image_for_render(
+    command_buffer,
+    engine.gbuffer.emissive_buffer.image,
+    .COLOR_ATTACHMENT_OPTIMAL,
+  )
   normal_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
     imageView = engine.gbuffer.normal_buffer.view,
@@ -461,7 +511,7 @@ renderer_gbuffer_begin :: proc(
     loadOp      = .LOAD,
     storeOp     = .STORE,
   }
-  color_attachments := [?]vk.RenderingAttachmentInfoKHR{
+  color_attachments := [?]vk.RenderingAttachmentInfoKHR {
     normal_attachment,
     albedo_attachment,
     metallic_roughness_attachment,
@@ -496,10 +546,22 @@ renderer_gbuffer_end :: proc(
   command_buffer: vk.CommandBuffer,
 ) {
   vk.CmdEndRenderingKHR(command_buffer)
-  prepare_image_for_shader_read(command_buffer, engine.gbuffer.normal_buffer.image)
-  prepare_image_for_shader_read(command_buffer, engine.gbuffer.albedo_buffer.image)
-  prepare_image_for_shader_read(command_buffer, engine.gbuffer.metallic_roughness_buffer.image)
-  prepare_image_for_shader_read(command_buffer, engine.gbuffer.emissive_buffer.image)
+  prepare_image_for_shader_read(
+    command_buffer,
+    engine.gbuffer.normal_buffer.image,
+  )
+  prepare_image_for_shader_read(
+    command_buffer,
+    engine.gbuffer.albedo_buffer.image,
+  )
+  prepare_image_for_shader_read(
+    command_buffer,
+    engine.gbuffer.metallic_roughness_buffer.image,
+  )
+  prepare_image_for_shader_read(
+    command_buffer,
+    engine.gbuffer.emissive_buffer.image,
+  )
 }
 
 renderer_gbuffer_render :: proc(
