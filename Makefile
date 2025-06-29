@@ -41,4 +41,4 @@ $(SHADER_DIR)/%/frag.spv: $(SHADER_DIR)/%/shader.frag
 	@echo "Compiling fragment shader $<..."
 	@glslc "$<" -o "$@"
 
-.PHONY: release debug shader test check clean
+.PHONY: build run debug shader test check clean
