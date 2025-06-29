@@ -5,6 +5,7 @@ layout(location = 0) out vec4 out_color;
 
 layout(set = 0, binding = 0) uniform sampler2D u_input_image;
 layout(set = 0, binding = 1) uniform sampler2D u_normal_texture;
+layout(set = 0, binding = 2) uniform sampler2D u_depth_texture;
 
 layout(push_constant) uniform CrossHatchParams {
     vec2 resolution;
@@ -22,25 +23,50 @@ const float EDGE_SENSITIVITY = 0.3; // lesser means less edge detected
 vec3 edge() {
     vec2 texel_size = 1.0 / resolution;
 
-    // Sobel operator for edge detection on normals
-    vec4 horiz_edge = vec4(0.0);
-    horiz_edge -= texture(u_normal_texture, v_uv + vec2(-texel_size.x, -texel_size.y)) * 1.0;
-    horiz_edge -= texture(u_normal_texture, v_uv + vec2(-texel_size.x, 0.0)) * 2.0;
-    horiz_edge -= texture(u_normal_texture, v_uv + vec2(-texel_size.x, texel_size.y)) * 1.0;
-    horiz_edge += texture(u_normal_texture, v_uv + vec2(texel_size.x, -texel_size.y)) * 1.0;
-    horiz_edge += texture(u_normal_texture, v_uv + vec2(texel_size.x, 0.0)) * 2.0;
-    horiz_edge += texture(u_normal_texture, v_uv + vec2(texel_size.x, texel_size.y)) * 1.0;
+    // Sobel kernels
+    float kernelX[9] = float[](
+        -1.0, -2.0, -1.0,
+         0.0,  0.0,  0.0,
+         1.0,  2.0,  1.0
+    );
+    float kernelY[9] = float[](
+        -1.0,  0.0,  1.0,
+        -2.0,  0.0,  2.0,
+        -1.0,  0.0,  1.0
+    );
+    vec2 offset[9] = vec2[](
+        vec2(-1, -1), vec2(0, -1), vec2(1, -1),
+        vec2(-1,  0), vec2(0,  0), vec2(1,  0),
+        vec2(-1,  1), vec2(0,  1), vec2(1,  1)
+    );
 
-    vec4 vert_edge = vec4(0.0);
-    vert_edge -= texture(u_normal_texture, v_uv + vec2(-texel_size.x, -texel_size.y)) * 1.0;
-    vert_edge -= texture(u_normal_texture, v_uv + vec2(0.0, -texel_size.y)) * 2.0;
-    vert_edge -= texture(u_normal_texture, v_uv + vec2(texel_size.x, -texel_size.y)) * 1.0;
-    vert_edge += texture(u_normal_texture, v_uv + vec2(-texel_size.x, texel_size.y)) * 1.0;
-    vert_edge += texture(u_normal_texture, v_uv + vec2(0.0, texel_size.y)) * 2.0;
-    vert_edge += texture(u_normal_texture, v_uv + vec2(texel_size.x, texel_size.y)) * 1.0;
+    // Normal Sobel
+    vec3 sumX_normal = vec3(0.0);
+    vec3 sumY_normal = vec3(0.0);
 
-    vec3 edge_strength = sqrt((horiz_edge.rgb * horiz_edge.rgb) + (vert_edge.rgb * vert_edge.rgb));
-    float k = clamp((edge_strength.r + edge_strength.g + edge_strength.b) * EDGE_SENSITIVITY, 0.0, 1.0);
+    // Depth Sobel
+    float sumX_depth = 0.0;
+    float sumY_depth = 0.0;
+    float center_depth = texture(u_depth_texture, v_uv).r;
+
+    for (int i = 0; i < 9; ++i) {
+        vec2 uv_offset = v_uv + offset[i] * texel_size;
+        vec3 normal = texture(u_normal_texture, uv_offset).rgb;
+        sumX_normal += normal * kernelX[i];
+        sumY_normal += normal * kernelY[i];
+
+        float depth = texture(u_depth_texture, uv_offset).r;
+        sumX_depth += (depth - center_depth) * kernelX[i];
+        sumY_depth += (depth - center_depth) * kernelY[i];
+    }
+
+    float edge_strength_normal = length(sumX_normal) + length(sumY_normal);
+    float k_normal = clamp(edge_strength_normal * EDGE_SENSITIVITY, 0.0, 1.0);
+
+    float edge_strength_depth = sqrt(sumX_depth * sumX_depth + sumY_depth * sumY_depth) * 200.0;
+    float k_depth = clamp(edge_strength_depth * EDGE_SENSITIVITY, 0.0, 1.0);
+
+    float k = max(k_normal, k_depth);
     return vec3(k);
 }
 
