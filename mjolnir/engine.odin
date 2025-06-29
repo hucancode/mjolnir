@@ -450,6 +450,7 @@ deinit :: proc(self: ^Engine) {
 }
 
 recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
+  // vk.DeviceWaitIdle(g_device)
   swapchain_recreate(&engine.swapchain, engine.window) or_return
   new_aspect_ratio :=
     f32(engine.swapchain.extent.width) / f32(engine.swapchain.extent.height)
@@ -462,6 +463,17 @@ recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
   renderer_depth_prepass_recreate_images(
     &engine.depth_prepass,
     engine.swapchain.extent,
+  ) or_return
+  renderer_gbuffer_recreate_images(
+    &engine.gbuffer,
+    engine.swapchain.extent.width,
+    engine.swapchain.extent.height,
+  ) or_return
+  renderer_postprocess_recreate_images(
+    &engine.postprocess,
+    engine.swapchain.extent.width,
+    engine.swapchain.extent.height,
+    engine.swapchain.format.format,
   ) or_return
   return .SUCCESS
 }
@@ -679,6 +691,7 @@ run :: proc(self: ^Engine, width: u32, height: u32, title: string) {
     res := render(self)
     if res == .ERROR_OUT_OF_DATE_KHR || res == .SUBOPTIMAL_KHR {
       recreate_swapchain(self) or_continue
+
     }
     if res != .SUCCESS {
       log.errorf("Error during rendering", res)

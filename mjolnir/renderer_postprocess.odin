@@ -108,7 +108,6 @@ RendererPostProcess :: struct {
     fence:                     vk.Fence,
     command_buffer:            vk.CommandBuffer,
     descriptor_set:            vk.DescriptorSet,
-    postprocess_images:        [2]ImageBuffer,
   },
 }
 
@@ -470,21 +469,7 @@ renderer_postprocess_init :: proc(
       &set,
     ) or_return
   }
-  for &image in self.images {
-    image = malloc_image_buffer(
-      width,
-      height,
-      color_format,
-      .OPTIMAL,
-      {.COLOR_ATTACHMENT, .SAMPLED, .TRANSFER_SRC, .TRANSFER_DST},
-      {.DEVICE_LOCAL},
-    ) or_return
-    image.view = create_image_view(
-      image.image,
-      color_format,
-      {.COLOR},
-    ) or_return
-  }
+  renderer_postprocess_create_images(self, width, height, color_format) or_return
   shader_stages_arr: [count][2]vk.PipelineShaderStageCreateInfo
   pipeline_infos: [count]vk.GraphicsPipelineCreateInfo
   for effect_type, i in PostProcessEffectType {
@@ -593,25 +578,48 @@ renderer_postprocess_init :: proc(
       },
       &frame.descriptor_set,
     ) or_return
-    for &image in frame.postprocess_images {
-      image = malloc_image_buffer(
-        width,
-        height,
-        color_format,
-        .OPTIMAL,
-        {.COLOR_ATTACHMENT, .SAMPLED, .TRANSFER_SRC, .TRANSFER_DST},
-        {.DEVICE_LOCAL},
-      ) or_return
-      image.view = create_image_view(
-        image.image,
-        color_format,
-        {.COLOR},
-      ) or_return
-    }
+  }
+  return .SUCCESS
+}
+
+renderer_postprocess_create_images :: proc(
+  self: ^RendererPostProcess,
+  width: u32,
+  height: u32,
+  format: vk.Format,
+) -> vk.Result {
+  for &image in self.images {
+    image = malloc_image_buffer(
+      width,
+      height,
+      format,
+      .OPTIMAL,
+      {.COLOR_ATTACHMENT, .SAMPLED, .TRANSFER_SRC, .TRANSFER_DST},
+      {.DEVICE_LOCAL},
+    ) or_return
+    image.view = create_image_view(
+      image.image,
+      format,
+      {.COLOR},
+    ) or_return
   }
   postprocess_update_input(self, 1, self.images[0].view)
   postprocess_update_input(self, 2, self.images[1].view)
   return .SUCCESS
+}
+
+renderer_postprocess_deinit_images :: proc(self: ^RendererPostProcess) {
+  for &image in self.images do image_buffer_deinit(&image)
+}
+
+renderer_postprocess_recreate_images :: proc(
+  self: ^RendererPostProcess,
+  width: u32,
+  height: u32,
+  format: vk.Format,
+) -> vk.Result {
+  renderer_postprocess_deinit_images(self)
+  return renderer_postprocess_create_images(self, width, height, format)
 }
 
 renderer_postprocess_deinit :: proc(self: ^RendererPostProcess) {
@@ -620,9 +628,6 @@ renderer_postprocess_deinit :: proc(self: ^RendererPostProcess) {
     vk.DestroySemaphore(g_device, frame.render_finished_semaphore, nil)
     vk.DestroyFence(g_device, frame.fence, nil)
     vk.FreeCommandBuffers(g_device, g_command_pool, 1, &frame.command_buffer)
-    for &image in frame.postprocess_images {
-      image_buffer_deinit(&image)
-    }
     frame.descriptor_set = 0
   }
   for &p in self.pipelines {
@@ -638,7 +643,7 @@ renderer_postprocess_deinit :: proc(self: ^RendererPostProcess) {
     layout = 0
   }
   delete(self.effect_stack)
-  for &image in self.images do image_buffer_deinit(&image)
+  renderer_postprocess_deinit_images(self)
 }
 
 // Modular postprocess API

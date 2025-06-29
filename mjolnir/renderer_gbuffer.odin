@@ -25,24 +25,41 @@ RendererGBuffer :: struct {
   light_uniform_buffers: [MAX_FRAMES_IN_FLIGHT]DataBuffer(SceneLightUniform),
 }
 
+// Helper to create images for G-buffer
+renderer_gbuffer_create_images :: proc(self: ^RendererGBuffer, width: u32, height: u32) -> vk.Result {
+    self.normal_buffer = malloc_image_buffer(
+        width,
+        height,
+        .R8G8B8A8_UNORM,
+        .OPTIMAL,
+        {.COLOR_ATTACHMENT, .SAMPLED},
+        {.DEVICE_LOCAL},
+    ) or_return
+    self.normal_buffer.view = create_image_view(
+        self.normal_buffer.image,
+        .R8G8B8A8_UNORM,
+        {.COLOR},
+    ) or_return
+    return .SUCCESS
+}
+
+// Helper to deinit images for G-buffer
+renderer_gbuffer_deinit_images :: proc(self: ^RendererGBuffer) {
+    image_buffer_deinit(&self.normal_buffer)
+}
+
+// Helper to recreate images for G-buffer
+renderer_gbuffer_recreate_images :: proc(self: ^RendererGBuffer, width: u32, height: u32) -> vk.Result {
+    renderer_gbuffer_deinit_images(self)
+    return renderer_gbuffer_create_images(self, width, height)
+}
+
 renderer_gbuffer_init :: proc(
   self: ^RendererGBuffer,
   width: u32,
   height: u32,
 ) -> vk.Result {
-  self.normal_buffer = malloc_image_buffer(
-    width,
-    height,
-    .R8G8B8A8_UNORM,
-    .OPTIMAL,
-    {.COLOR_ATTACHMENT, .SAMPLED},
-    {.DEVICE_LOCAL},
-  ) or_return
-  self.normal_buffer.view = create_image_view(
-    self.normal_buffer.image,
-    .R8G8B8A8_UNORM,
-    {.COLOR},
-  ) or_return
+  renderer_gbuffer_create_images(self, width, height) or_return
   depth_format: vk.Format = .D32_SFLOAT
   // Create uniform buffers
   for i in 0 ..< MAX_FRAMES_IN_FLIGHT {

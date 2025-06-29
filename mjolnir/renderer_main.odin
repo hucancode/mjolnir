@@ -774,6 +774,10 @@ renderer_main_render :: proc(
       &engine.ui.ctx,
       fmt.tprintf("Lights %d", len(batching_ctx.lights)),
     )
+    mu.label(
+      &engine.ui.ctx,
+      fmt.tprintf("%dx%d", engine.main.frames[0].main_pass_image.width, engine.main.frames[0].main_pass_image.height),
+    )
     // if .SUBMIT in mu.button(&engine.ui.ctx, "Button 1") {
     //     log.info("Pressed button 1")
     // }
@@ -1058,7 +1062,6 @@ renderer_recreate_images :: proc(
   new_format: vk.Format,
   new_extent: vk.Extent2D,
 ) -> vk.Result {
-  vk.DeviceWaitIdle(g_device)
   renderer_main_deinit_images(self)
   renderer_main_init_images(
     self,
@@ -1114,7 +1117,6 @@ populate_render_batches :: proc(ctx: ^BatchingContext) {
           break
         }
       }
-
       if batch_data == nil {
         new_batch := BatchData {
           material_handle = data.material,
@@ -1123,7 +1125,6 @@ populate_render_batches :: proc(ctx: ^BatchingContext) {
         append(batch_group, new_batch)
         batch_data = &batch_group[len(batch_group) - 1]
       }
-
       append(&batch_data.nodes, node)
     }
   }

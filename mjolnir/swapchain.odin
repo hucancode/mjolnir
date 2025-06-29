@@ -69,6 +69,11 @@ swapchain_init :: proc(
     u32(width),
     u32(height),
   )
+  log.infof(
+    "Swapchain format: %v, extent: %v",
+    self.format,
+    self.extent,
+  )
   image_count := support.capabilities.minImageCount + 1
   if support.capabilities.maxImageCount > 0 &&
      image_count > support.capabilities.maxImageCount {
@@ -148,6 +153,8 @@ swapchain_deinit :: proc(self: ^Swapchain) {
   for view in self.views do vk.DestroyImageView(g_device, view, nil)
   delete(self.views)
   self.views = nil
+  // TODO: destroying image will make app crash
+  // for image in self.images do vk.DestroyImage(g_device, image, nil)
   delete(self.images)
   self.images = nil
   for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
