@@ -61,7 +61,6 @@ BatchingContext :: struct {
   batches: map[BatchKey][dynamic]BatchData,
 }
 
-
 InputState :: struct {
   mouse_pos:         linalg.Vector2f64,
   mouse_drag_origin: linalg.Vector2f32,
@@ -92,6 +91,21 @@ VisibleLightInfo :: struct {
   cube_shadow_map: ^CubeImageBuffer,
 }
 
+FrameData :: struct {
+  camera_uniform:             DataBuffer(SceneUniform),
+  light_uniform:              DataBuffer(SceneLightUniform),
+  shadow_maps:                [MAX_SHADOW_MAPS]ImageBuffer,
+  cube_shadow_maps:           [MAX_SHADOW_MAPS]CubeImageBuffer,
+  // G-buffer images
+  gbuffer_normal:             ImageBuffer,
+  gbuffer_albedo:             ImageBuffer,
+  gbuffer_metallic_roughness: ImageBuffer,
+  gbuffer_emissive:           ImageBuffer,
+  depth_buffer:               ImageBuffer,
+  final_image:                ImageBuffer,
+  // Add more per-frame resources as needed (gbuffer, particles, etc.)
+}
+
 Engine :: struct {
   window:                glfw.WindowHandle,
   swapchain:             Swapchain,
@@ -120,6 +134,7 @@ Engine :: struct {
   visible_lights:        [MAX_FRAMES_IN_FLIGHT][dynamic]VisibleLightInfo,
   node_idx_to_light_idx: [MAX_FRAMES_IN_FLIGHT]map[int]int,
   cursor_pos:            [2]i32,
+  frames:                [MAX_FRAMES_IN_FLIGHT]FrameData,
 }
 
 get_window_dpi :: proc(window: glfw.WindowHandle) -> f32 {
@@ -168,6 +183,70 @@ init :: proc(
   self.last_update_timestamp = self.start_timestamp
   scene_init(&self.scene)
   swapchain_init(&self.swapchain, self.window) or_return
+  for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
+    frame_data_init(&self.frames[i], &self.swapchain)
+    shadow_image_infos: [MAX_SHADOW_MAPS]vk.DescriptorImageInfo
+    for j in 0 ..< MAX_SHADOW_MAPS {
+      shadow_image_infos[j] = vk.DescriptorImageInfo {
+        sampler     = g_linear_clamp_sampler,
+        imageView   = self.frames[i].shadow_maps[j].view,
+        imageLayout = .SHADER_READ_ONLY_OPTIMAL,
+      }
+    }
+    cube_shadow_image_infos: [MAX_SHADOW_MAPS]vk.DescriptorImageInfo
+    for j in 0 ..< MAX_SHADOW_MAPS {
+      cube_shadow_image_infos[j] = vk.DescriptorImageInfo {
+        sampler     = g_linear_clamp_sampler,
+        imageView   = self.frames[i].cube_shadow_maps[j].view,
+        imageLayout = .SHADER_READ_ONLY_OPTIMAL,
+      }
+    }
+    writes := [?]vk.WriteDescriptorSet {
+      {
+        sType = .WRITE_DESCRIPTOR_SET,
+        dstSet = g_camera_descriptor_sets[i],
+        dstBinding = 0,
+        dstArrayElement = 0,
+        descriptorCount = 1,
+        descriptorType = .UNIFORM_BUFFER,
+        pBufferInfo = &{
+          buffer = self.frames[i].camera_uniform.buffer,
+          range = size_of(SceneUniform),
+        },
+      },
+      {
+        sType = .WRITE_DESCRIPTOR_SET,
+        dstSet = g_lights_descriptor_sets[i],
+        dstBinding = 0,
+        dstArrayElement = 0,
+        descriptorCount = 1,
+        descriptorType = .UNIFORM_BUFFER,
+        pBufferInfo = &{
+          buffer = self.frames[i].light_uniform.buffer,
+          range = size_of(SceneLightUniform),
+        },
+      },
+      {
+        sType = .WRITE_DESCRIPTOR_SET,
+        dstSet = g_lights_descriptor_sets[i],
+        dstBinding = 1,
+        dstArrayElement = 0,
+        descriptorCount = len(shadow_image_infos),
+        descriptorType = .COMBINED_IMAGE_SAMPLER,
+        pImageInfo = raw_data(shadow_image_infos[:]),
+      },
+      {
+        sType = .WRITE_DESCRIPTOR_SET,
+        dstSet = g_lights_descriptor_sets[i],
+        dstBinding = 2,
+        dstArrayElement = 0,
+        descriptorCount = len(cube_shadow_image_infos),
+        descriptorType = .COMBINED_IMAGE_SAMPLER,
+        pImageInfo = raw_data(cube_shadow_image_infos[:]),
+      },
+    }
+    vk.UpdateDescriptorSets(g_device, len(writes), raw_data(writes[:]), 0, nil)
+  }
   vk.AllocateCommandBuffers(
     g_device,
     &{
@@ -305,7 +384,7 @@ init :: proc(
         engine.cursor_pos.y,
       )
       if engine.mouse_move_proc != nil {
-        engine.mouse_move_proc(engine, {xpos, ypos}, {0, 0}) // You may want to pass delta
+        engine.mouse_move_proc(engine, {xpos, ypos}, {0, 0}) // TODO: pass delta
       }
     },
   )
@@ -434,6 +513,20 @@ deinit :: proc(self: ^Engine) {
     len(self.command_buffers),
     raw_data(self.command_buffers[:]),
   )
+  for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
+    data_buffer_deinit(&self.frames[i].camera_uniform)
+    data_buffer_deinit(&self.frames[i].light_uniform)
+    image_buffer_deinit(&self.frames[i].final_image)
+    for j in 0 ..< MAX_SHADOW_MAPS {
+      image_buffer_deinit(&self.frames[i].shadow_maps[j])
+      cube_depth_texture_deinit(&self.frames[i].cube_shadow_maps[j])
+    }
+    image_buffer_deinit(&self.frames[i].gbuffer_normal)
+    image_buffer_deinit(&self.frames[i].gbuffer_albedo)
+    image_buffer_deinit(&self.frames[i].gbuffer_metallic_roughness)
+    image_buffer_deinit(&self.frames[i].gbuffer_emissive)
+    image_buffer_deinit(&self.frames[i].depth_buffer)
+  }
   renderer_ui_deinit(&self.ui)
   scene_deinit(&self.scene)
   renderer_main_deinit(&self.main)
@@ -455,20 +548,10 @@ recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
   new_aspect_ratio :=
     f32(engine.swapchain.extent.width) / f32(engine.swapchain.extent.height)
   geometry.camera_update_aspect_ratio(&engine.scene.camera, new_aspect_ratio)
-  renderer_recreate_images(
-    &engine.main,
-    engine.swapchain.format.format,
-    engine.swapchain.extent,
-  ) or_return
-  renderer_depth_prepass_recreate_images(
-    &engine.depth_prepass,
-    engine.swapchain.extent,
-  ) or_return
-  renderer_gbuffer_recreate_images(
-    &engine.gbuffer,
-    engine.swapchain.extent.width,
-    engine.swapchain.extent.height,
-  ) or_return
+  for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
+    frame_data_deinit(&engine.frames[i])
+    frame_data_init(&engine.frames[i], &engine.swapchain)
+  }
   renderer_postprocess_recreate_images(
     &engine.postprocess,
     engine.swapchain.extent.width,
@@ -539,8 +622,8 @@ update_visible_lights :: proc(self: ^Engine) {
       append(visible_lights, light_info)
       node_idx_to_light_idx[i] = j
     }
-    visible_lights[j].shadow_map = &self.main.frames[g_frame_index].shadow_maps[j]
-    visible_lights[j].cube_shadow_map = &self.main.frames[g_frame_index].cube_shadow_maps[j]
+    visible_lights[j].shadow_map = &self.frames[g_frame_index].shadow_maps[j]
+    visible_lights[j].cube_shadow_map = &self.frames[g_frame_index].cube_shadow_maps[j]
     seen[j] = true
   }
   // Remove lights that are no longer present
@@ -560,6 +643,32 @@ render :: proc(self: ^Engine) -> vk.Result {
   mu.begin(&self.ui.ctx)
   command_buffer := self.command_buffers[g_frame_index]
   vk.ResetCommandBuffer(command_buffer, {}) or_return
+  scene_uniform := data_buffer_get(&self.frames[g_frame_index].camera_uniform)
+  scene_uniform.view = geometry.calculate_view_matrix(self.scene.camera)
+  scene_uniform.projection = geometry.calculate_projection_matrix(
+    self.scene.camera,
+  )
+  scene_uniform.time = f32(
+    time.duration_seconds(time.since(self.start_timestamp)),
+  )
+  light_uniform := data_buffer_get(&self.frames[g_frame_index].light_uniform)
+  light_uniform.light_count = u32(len(self.visible_lights[g_frame_index]))
+  for light, i in self.visible_lights[g_frame_index] {
+    light_uniform.lights[i].kind = light.kind
+    light_uniform.lights[i].color = linalg.Vector4f32 {
+      light.color.x,
+      light.color.y,
+      light.color.z,
+      1.0,
+    }
+    light_uniform.lights[i].radius = light.radius
+    light_uniform.lights[i].angle = light.angle
+    light_uniform.lights[i].has_shadow = b32(light.has_shadow)
+    light_uniform.lights[i].position = light.position
+    light_uniform.lights[i].direction = light.direction
+    light_uniform.lights[i].view_proj = light.view * light.projection
+  }
+
   vk.BeginCommandBuffer(
     command_buffer,
     &{sType = .COMMAND_BUFFER_BEGIN_INFO, flags = {.ONE_TIME_SUBMIT}},
@@ -573,43 +682,43 @@ render :: proc(self: ^Engine) -> vk.Result {
   renderer_shadow_end(self, command_buffer)
   prepare_image_for_render(
     command_buffer,
-    self.main.frames[g_frame_index].main_pass_image.image,
+    self.frames[g_frame_index].final_image.image,
   )
-  log.debug("============ rendering depth pre-pass... =============")
+  // log.debug("============ rendering depth pre-pass... =============")
   renderer_depth_prepass_begin(self, command_buffer)
   renderer_depth_prepass_render(self, command_buffer)
   renderer_depth_prepass_end(self, command_buffer)
   if true {
-    log.debug("============ rendering G-buffer pass... =============")
+    // log.debug("============ rendering G-buffer pass... =============")
     renderer_gbuffer_begin(self, command_buffer, self.swapchain.extent)
     renderer_gbuffer_render(self, command_buffer)
     renderer_gbuffer_end(self, command_buffer)
 
-    log.debug("============ rendering main pass... =============")
+    // log.debug("============ rendering main pass... =============")
     renderer_main_begin(self, command_buffer)
     renderer_main_render(self, command_buffer)
     renderer_main_end(self, command_buffer)
-    log.debug("============ rendering particles... =============")
+    // log.debug("============ rendering particles... =============")
     renderer_particle_begin(
       self,
       command_buffer,
-      self.main.frames[g_frame_index].main_pass_image.view,
-      self.depth_prepass.depth_buffer.view,
+      self.frames[g_frame_index].final_image.view,
+      self.frames[g_frame_index].depth_buffer.view,
     )
     renderer_particle_render(self, command_buffer)
     renderer_particle_end(self, command_buffer)
   }
-  log.debug("============ rendering post processes... =============")
+  // log.debug("============ rendering post processes... =============")
   prepare_image_for_shader_read(
     command_buffer,
-    self.main.frames[g_frame_index].main_pass_image.image,
+    self.frames[g_frame_index].final_image.image,
   )
   renderer_postprocess_begin(
     &self.postprocess,
     command_buffer,
-    self.main.frames[g_frame_index].main_pass_image.view,
-    self.depth_prepass.depth_buffer.view,
-    self.gbuffer.normal_buffer.view,
+    self.frames[g_frame_index].final_image.view,
+    self.frames[g_frame_index].depth_buffer.view,
+    self.frames[g_frame_index].gbuffer_normal.view,
     self.swapchain.extent,
   )
   prepare_image_for_render(
@@ -693,7 +802,6 @@ run :: proc(self: ^Engine, width: u32, height: u32, title: string) {
     res := render(self)
     if res == .ERROR_OUT_OF_DATE_KHR || res == .SUBOPTIMAL_KHR {
       recreate_swapchain(self) or_continue
-
     }
     if res != .SUCCESS {
       log.errorf("Error during rendering", res)
@@ -709,4 +817,123 @@ run :: proc(self: ^Engine, width: u32, height: u32, title: string) {
     self.last_frame_timestamp = time.now()
     frame += 1
   }
+}
+
+frame_data_init :: proc(
+  frame: ^FrameData,
+  swapchain: ^Swapchain,
+) -> vk.Result {
+  frame.final_image = malloc_image_buffer(
+    swapchain.extent.width,
+    swapchain.extent.height,
+    swapchain.format.format,
+    .OPTIMAL,
+    {.COLOR_ATTACHMENT, .SAMPLED},
+    {.DEVICE_LOCAL},
+  ) or_return
+  frame.final_image.view = create_image_view(
+    frame.final_image.image,
+    swapchain.format.format,
+    {.COLOR},
+  ) or_return
+  frame.gbuffer_normal = malloc_image_buffer(
+    swapchain.extent.width,
+    swapchain.extent.height,
+    .R8G8B8A8_UNORM,
+    .OPTIMAL,
+    {.COLOR_ATTACHMENT, .SAMPLED},
+    {.DEVICE_LOCAL},
+  ) or_return
+  frame.gbuffer_normal.view = create_image_view(
+    frame.gbuffer_normal.image,
+    .R8G8B8A8_UNORM,
+    {.COLOR},
+  ) or_return
+  frame.gbuffer_albedo = malloc_image_buffer(
+    swapchain.extent.width,
+    swapchain.extent.height,
+    .R8G8B8A8_UNORM,
+    .OPTIMAL,
+    {.COLOR_ATTACHMENT, .SAMPLED},
+    {.DEVICE_LOCAL},
+  ) or_return
+  frame.gbuffer_albedo.view = create_image_view(
+    frame.gbuffer_albedo.image,
+    .R8G8B8A8_UNORM,
+    {.COLOR},
+  ) or_return
+  frame.gbuffer_metallic_roughness = malloc_image_buffer(
+    swapchain.extent.width,
+    swapchain.extent.height,
+    .R8G8B8A8_UNORM,
+    .OPTIMAL,
+    {.COLOR_ATTACHMENT, .SAMPLED},
+    {.DEVICE_LOCAL},
+  ) or_return
+  frame.gbuffer_metallic_roughness.view = create_image_view(
+    frame.gbuffer_metallic_roughness.image,
+    .R8G8B8A8_UNORM,
+    {.COLOR},
+  ) or_return
+  frame.gbuffer_emissive = malloc_image_buffer(
+    swapchain.extent.width,
+    swapchain.extent.height,
+    .R8G8B8A8_UNORM,
+    .OPTIMAL,
+    {.COLOR_ATTACHMENT, .SAMPLED},
+    {.DEVICE_LOCAL},
+  ) or_return
+  frame.gbuffer_emissive.view = create_image_view(
+    frame.gbuffer_emissive.image,
+    .R8G8B8A8_UNORM,
+    {.COLOR},
+  ) or_return
+  depth_image_init(
+    &frame.depth_buffer,
+    swapchain.extent.width,
+    swapchain.extent.height,
+    .D32_SFLOAT,
+    {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
+  ) or_return
+  for j in 0 ..< MAX_SHADOW_MAPS {
+    depth_image_init(
+      &frame.shadow_maps[j],
+      SHADOW_MAP_SIZE,
+      SHADOW_MAP_SIZE,
+      .D32_SFLOAT,
+      {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
+    ) or_return
+    cube_depth_texture_init(
+      &frame.cube_shadow_maps[j],
+      SHADOW_MAP_SIZE,
+      .D32_SFLOAT,
+      {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
+    ) or_return
+  }
+  frame.camera_uniform = create_host_visible_buffer(
+    SceneUniform,
+    (MAX_SCENE_UNIFORMS),
+    {.UNIFORM_BUFFER},
+  ) or_return
+  frame.light_uniform = create_host_visible_buffer(
+    SceneLightUniform,
+    1,
+    {.UNIFORM_BUFFER},
+  ) or_return
+  return .SUCCESS
+}
+
+frame_data_deinit :: proc(frame: ^FrameData) {
+  data_buffer_deinit(&frame.camera_uniform)
+  data_buffer_deinit(&frame.light_uniform)
+  image_buffer_deinit(&frame.final_image)
+  for j in 0 ..< MAX_SHADOW_MAPS {
+    image_buffer_deinit(&frame.shadow_maps[j])
+    cube_depth_texture_deinit(&frame.cube_shadow_maps[j])
+  }
+  image_buffer_deinit(&frame.gbuffer_normal)
+  image_buffer_deinit(&frame.gbuffer_albedo)
+  image_buffer_deinit(&frame.gbuffer_metallic_roughness)
+  image_buffer_deinit(&frame.gbuffer_emissive)
+  image_buffer_deinit(&frame.depth_buffer)
 }

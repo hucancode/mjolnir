@@ -83,19 +83,12 @@ SHADER_UNLIT_VERT :: #load("shader/unlit/vert.spv")
 SHADER_UNLIT_FRAG :: #load("shader/unlit/frag.spv")
 
 RendererMain :: struct {
-  frames:                    [MAX_FRAMES_IN_FLIGHT]struct {
-    camera_uniform:        DataBuffer(SceneUniform),
-    light_uniform:         DataBuffer(SceneLightUniform),
-    main_pass_image:       ImageBuffer,
-    shadow_maps:           [MAX_SHADOW_MAPS]ImageBuffer,
-    cube_shadow_maps:      [MAX_SHADOW_MAPS]CubeImageBuffer,
-  },
-  pipeline_layout:           vk.PipelineLayout,
-  pipelines:                 [SHADER_VARIANT_COUNT]vk.Pipeline,
-  unlit_pipelines:           [UNLIT_SHADER_VARIANT_COUNT]vk.Pipeline,
-  wireframe_unlit_pipelines: [UNLIT_SHADER_VARIANT_COUNT]vk.Pipeline,
-  environment_map:           Handle,
-  brdf_lut:                  Handle,
+  pipeline_layout:     vk.PipelineLayout,
+  pipelines:           [SHADER_VARIANT_COUNT]vk.Pipeline,
+  unlit_pipelines:     [UNLIT_SHADER_VARIANT_COUNT]vk.Pipeline,
+  wireframe_pipelines: [UNLIT_SHADER_VARIANT_COUNT]vk.Pipeline,
+  environment_map:     Handle,
+  brdf_lut:            Handle,
 }
 
 renderer_main_build_pbr_pipeline :: proc(
@@ -578,12 +571,10 @@ renderer_main_build_wireframe_unlit_pipeline :: proc(
     len(pipeline_infos),
     raw_data(pipeline_infos[:]),
     nil,
-    raw_data(self.wireframe_unlit_pipelines[:]),
+    raw_data(self.wireframe_pipelines[:]),
   ) or_return
   return .SUCCESS
 }
-
-// Depth prepass pipeline builder has been moved to renderer_depth_prepass.odin
 
 renderer_main_get_pipeline :: proc(
   self: ^RendererMain,
@@ -595,8 +586,7 @@ renderer_main_get_pipeline :: proc(
   case .UNLIT:
     return self.unlit_pipelines[transmute(u32)material.features]
   case .WIREFRAME:
-    // Wireframe materials always use unlit wireframe pipelines
-    return self.wireframe_unlit_pipelines[transmute(u32)material.features]
+    return self.wireframe_pipelines[transmute(u32)material.features]
   }
   // Fallback
   return self.pipelines[0]
@@ -610,7 +600,7 @@ renderer_main_begin :: proc(
 ) {
   color_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
-    imageView = engine.main.frames[g_frame_index].main_pass_image.view,
+    imageView = engine.frames[g_frame_index].final_image.view,
     imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
     loadOp = .CLEAR,
     storeOp = .STORE,
@@ -618,7 +608,7 @@ renderer_main_begin :: proc(
   }
   depth_attachment := vk.RenderingAttachmentInfoKHR {
     sType       = .RENDERING_ATTACHMENT_INFO_KHR,
-    imageView   = engine.depth_prepass.depth_buffer.view,
+    imageView   = engine.frames[g_frame_index].depth_buffer.view,
     imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
     loadOp      = .LOAD, // Load existing depth from dedicated depth pre-pass
     storeOp     = .STORE,
@@ -631,6 +621,7 @@ renderer_main_begin :: proc(
     pColorAttachments = &color_attachment,
     pDepthAttachment = &depth_attachment,
   }
+  log.debugf("begin rendering...")
   vk.CmdBeginRenderingKHR(command_buffer, &render_info)
   viewport := vk.Viewport {
     x        = 0.0,
@@ -643,23 +634,34 @@ renderer_main_begin :: proc(
   scissor := vk.Rect2D {
     extent = engine.swapchain.extent,
   }
+  log.debugf("setting viewport ...")
   vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
   vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
   scene_uniform := data_buffer_get(
-    &engine.main.frames[g_frame_index].camera_uniform,
+    &engine.frames[g_frame_index].camera_uniform,
+  )
+  log.debugf(
+    "calculating camera view matrix ... %v %x",
+    engine.scene.camera,
+    scene_uniform,
   )
   scene_uniform.view = geometry.calculate_view_matrix(engine.scene.camera)
+  log.debugf("calculating camera projection matrix ...")
   scene_uniform.projection = geometry.calculate_projection_matrix(
     engine.scene.camera,
   )
+  log.debugf("calculating time ...")
   scene_uniform.time = f32(
     time.duration_seconds(time.since(engine.start_timestamp)),
   )
   // Fill light_uniform from visible_lights
-  light_uniform := data_buffer_get(
-    &engine.main.frames[g_frame_index].light_uniform,
-  )
+  log.debugf("getting light uniform buffer ...")
+  light_uniform := data_buffer_get(&engine.frames[g_frame_index].light_uniform)
   light_uniform.light_count = u32(len(engine.visible_lights[g_frame_index]))
+  log.debugf(
+    "looping over %d visible lights",
+    len(engine.visible_lights[g_frame_index]),
+  )
   for light, i in engine.visible_lights[g_frame_index] {
     light_uniform.lights[i].kind = light.kind
     light_uniform.lights[i].color = linalg.Vector4f32 {
@@ -738,8 +740,8 @@ renderer_main_render :: proc(
       &engine.ui.ctx,
       fmt.tprintf(
         "%dx%d",
-        engine.main.frames[0].main_pass_image.width,
-        engine.main.frames[0].main_pass_image.height,
+        engine.frames[0].final_image.width,
+        engine.frames[0].final_image.height,
       ),
     )
     // if .SUBMIT in mu.button(&engine.ui.ctx, "Button 1") {
@@ -763,7 +765,7 @@ render_to_texture :: proc(
   command_buffer := engine.command_buffers[g_frame_index]
   render_camera := camera.? or_else engine.scene.camera
   scene_uniform := data_buffer_get(
-    &engine.main.frames[g_frame_index].camera_uniform,
+    &engine.frames[g_frame_index].camera_uniform,
   )
   scene_uniform.view = geometry.calculate_view_matrix(render_camera)
   scene_uniform.projection = geometry.calculate_projection_matrix(
@@ -875,175 +877,14 @@ renderer_main_init :: proc(
   self.brdf_lut, brdf_lut = create_texture_from_data(
     #load("assets/lut_ggx.png"),
   ) or_return
-  for &frame in self.frames {
-    frame.camera_uniform = create_host_visible_buffer(
-      SceneUniform,
-      (MAX_SCENE_UNIFORMS),
-      {.UNIFORM_BUFFER},
-    ) or_return
-    frame.light_uniform = create_host_visible_buffer(
-      SceneLightUniform,
-      1,
-      {.UNIFORM_BUFFER},
-    ) or_return
-    for i in 0 ..< MAX_SHADOW_MAPS {
-      depth_image_init(
-        &frame.shadow_maps[i],
-        SHADOW_MAP_SIZE,
-        SHADOW_MAP_SIZE,
-        .D32_SFLOAT,
-        {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
-      ) or_return
-      cube_depth_texture_init(
-        &frame.cube_shadow_maps[i],
-        SHADOW_MAP_SIZE,
-        .D32_SFLOAT,
-        {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
-      ) or_return
-    }
-    // No per-frame descriptor set allocation or update needed
-  }
-  // Allocate and update a separate descriptor set for each frame in flight
-  for frame_index in 0 ..< MAX_FRAMES_IN_FLIGHT {
-    // Allocate descriptor sets for camera and lights for this frame
-    set_layouts := [?]vk.DescriptorSetLayout {
-      g_camera_descriptor_set_layout,
-      g_lights_descriptor_set_layout,
-    }
-    descriptor_sets: [2]vk.DescriptorSet
-    vk.AllocateDescriptorSets(
-      g_device,
-      &{
-        sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
-        descriptorPool = g_descriptor_pool,
-        descriptorSetCount = 2,
-        pSetLayouts = raw_data(set_layouts[:]),
-      },
-      raw_data(descriptor_sets[:]),
-    ) or_return
-    // Write buffer info to each descriptor set
-    camera_buffer_info := vk.DescriptorBufferInfo {
-      buffer = self.frames[frame_index].camera_uniform.buffer,
-      offset = 0,
-      range  = vk.DeviceSize(size_of(SceneUniform)),
-    }
-    light_buffer_info := vk.DescriptorBufferInfo {
-      buffer = self.frames[frame_index].light_uniform.buffer,
-      offset = 0,
-      range  = vk.DeviceSize(size_of(SceneLightUniform)),
-    }
-    shadow_map_image_infos: [MAX_SHADOW_MAPS]vk.DescriptorImageInfo
-    for i in 0 ..< MAX_SHADOW_MAPS {
-      shadow_map_image_infos[i] = {
-        sampler     = g_linear_clamp_sampler,
-        imageView   = self.frames[frame_index].shadow_maps[i].view,
-        imageLayout = .SHADER_READ_ONLY_OPTIMAL,
-      }
-    }
-    cube_shadow_map_image_infos: [MAX_SHADOW_MAPS]vk.DescriptorImageInfo
-    for i in 0 ..< MAX_SHADOW_MAPS {
-      cube_shadow_map_image_infos[i] = {
-        sampler     = g_linear_clamp_sampler,
-        imageView   = self.frames[frame_index].cube_shadow_maps[i].view,
-        imageLayout = .SHADER_READ_ONLY_OPTIMAL,
-      }
-    }
-    writes := [?]vk.WriteDescriptorSet {
-      {
-        sType = .WRITE_DESCRIPTOR_SET,
-        dstSet = g_camera_descriptor_sets[frame_index],
-        dstBinding = 0,
-        descriptorType = .UNIFORM_BUFFER,
-        descriptorCount = 1,
-        pBufferInfo = &camera_buffer_info,
-      },
-      {
-        sType = .WRITE_DESCRIPTOR_SET,
-        dstSet = g_lights_descriptor_sets[frame_index],
-        dstBinding = 0,
-        descriptorType = .UNIFORM_BUFFER,
-        descriptorCount = 1,
-        pBufferInfo = &light_buffer_info,
-      },
-      {
-        sType = .WRITE_DESCRIPTOR_SET,
-        dstSet = g_lights_descriptor_sets[frame_index],
-        dstBinding = 1,
-        descriptorType = .COMBINED_IMAGE_SAMPLER,
-        descriptorCount = len(shadow_map_image_infos),
-        pImageInfo = raw_data(shadow_map_image_infos[:]),
-      },
-      {
-        sType = .WRITE_DESCRIPTOR_SET,
-        dstSet = g_lights_descriptor_sets[frame_index],
-        dstBinding = 2,
-        descriptorType = .COMBINED_IMAGE_SAMPLER,
-        descriptorCount = len(cube_shadow_map_image_infos),
-        pImageInfo = raw_data(cube_shadow_map_image_infos[:]),
-      },
-    }
-    vk.UpdateDescriptorSets(g_device, len(writes), raw_data(writes[:]), 0, nil)
-  }
-  renderer_main_init_images(self, width, height, color_format)
   return .SUCCESS
 }
 
 renderer_main_deinit :: proc(self: ^RendererMain) {
   vk.DestroyPipelineLayout(g_device, self.pipeline_layout, nil)
-  for &frame in self.frames {
-    data_buffer_deinit(&frame.camera_uniform)
-    data_buffer_deinit(&frame.light_uniform)
-  }
   for p in self.pipelines do vk.DestroyPipeline(g_device, p, nil)
   for p in self.unlit_pipelines do vk.DestroyPipeline(g_device, p, nil)
-  for p in self.wireframe_unlit_pipelines do vk.DestroyPipeline(g_device, p, nil)
-  renderer_main_deinit_images(self)
-}
-
-renderer_main_init_images :: proc(
-  self: ^RendererMain,
-  width: u32,
-  height: u32,
-  color_format: vk.Format,
-) -> vk.Result {
-  for &frame in self.frames {
-    frame.main_pass_image = malloc_image_buffer(
-      width,
-      height,
-      color_format,
-      .OPTIMAL,
-      {.COLOR_ATTACHMENT, .SAMPLED, .TRANSFER_SRC, .TRANSFER_DST},
-      {.DEVICE_LOCAL},
-    ) or_return
-    frame.main_pass_image.view = create_image_view(
-      frame.main_pass_image.image,
-      color_format,
-      {.COLOR},
-    ) or_return
-  }
-  return .SUCCESS
-}
-
-renderer_main_deinit_images :: proc(self: ^RendererMain) {
-  // depth buffer is now managed by depth_prepass renderer
-  for &frame in self.frames {
-    image_buffer_deinit(&frame.main_pass_image)
-  }
-}
-
-renderer_recreate_images :: proc(
-  self: ^RendererMain,
-  new_format: vk.Format,
-  new_extent: vk.Extent2D,
-) -> vk.Result {
-  renderer_main_deinit_images(self)
-  renderer_main_init_images(
-    self,
-    new_extent.width,
-    new_extent.height,
-    new_format,
-  ) or_return
-  return .SUCCESS
+  for p in self.wireframe_pipelines do vk.DestroyPipeline(g_device, p, nil)
 }
 
 populate_render_batches :: proc(ctx: ^BatchingContext) {

@@ -3,6 +3,7 @@ package mjolnir
 import "core:c"
 import "core:log"
 import linalg "core:math/linalg"
+import "core:slice"
 import "core:strings"
 import "geometry"
 import "resource"
@@ -63,8 +64,8 @@ factory_init :: proc() -> vk.Result {
     nil,
     &g_camera_descriptor_set_layout,
   ) or_return
-  camera_set_layouts := [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSetLayout{}
-  for i in 0..<MAX_FRAMES_IN_FLIGHT do camera_set_layouts[i] = g_camera_descriptor_set_layout
+  camera_set_layouts: [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSetLayout
+  slice.fill(camera_set_layouts[:], g_camera_descriptor_set_layout)
   vk.AllocateDescriptorSets(
     g_device,
     &{
@@ -106,17 +107,17 @@ factory_init :: proc() -> vk.Result {
     nil,
     &g_lights_descriptor_set_layout,
   ) or_return
-  lights_set_layouts := [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSetLayout{}
-  for i in 0..<MAX_FRAMES_IN_FLIGHT do lights_set_layouts[i] = g_lights_descriptor_set_layout
+  lights_set_layouts: [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSetLayout
+  slice.fill(lights_set_layouts[:], g_lights_descriptor_set_layout)
   vk.AllocateDescriptorSets(
     g_device,
     &{
       sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
       descriptorPool = g_descriptor_pool,
       descriptorSetCount = MAX_FRAMES_IN_FLIGHT,
-      pSetLayouts = &lights_set_layouts[0],
+      pSetLayouts = raw_data(lights_set_layouts[:]),
     },
-    &g_lights_descriptor_sets[0],
+    raw_data(g_lights_descriptor_sets[:]),
   ) or_return
   // Textures+samplers descriptor set
   textures_bindings := [?]vk.DescriptorSetLayoutBinding {
@@ -609,8 +610,10 @@ create_texture_from_data :: proc(
   return
 }
 
-// Calculate frame-specific bone matrix offset
-get_frame_bone_matrix_offset :: proc(base_offset: u32, frame_index: u32) -> u32 {
+get_frame_bone_matrix_offset :: proc(
+  base_offset: u32,
+  frame_index: u32,
+) -> u32 {
   frame_capacity := g_bone_matrix_slab.capacity
   return base_offset + frame_index * frame_capacity
 }

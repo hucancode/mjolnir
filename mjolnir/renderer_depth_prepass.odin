@@ -15,14 +15,8 @@ DEPTH_PREPASS_OPTION_COUNT :: 1
 DEPTH_PREPASS_VARIANT_COUNT: u32 : 1 << DEPTH_PREPASS_OPTION_COUNT
 
 RendererDepthPrepass :: struct {
-  frames:                       [MAX_FRAMES_IN_FLIGHT]struct {
-    camera_uniform:        DataBuffer(SceneUniform),
-    camera_descriptor_set: vk.DescriptorSet,
-  },
-  camera_descriptor_set_layout: vk.DescriptorSetLayout,
-  pipeline_layout:              vk.PipelineLayout,
-  pipelines:                    [DEPTH_PREPASS_VARIANT_COUNT]vk.Pipeline,
-  depth_buffer:                 ImageBuffer,
+  pipeline_layout: vk.PipelineLayout,
+  pipelines:       [DEPTH_PREPASS_VARIANT_COUNT]vk.Pipeline,
 }
 
 renderer_depth_prepass_init :: proc(
@@ -31,74 +25,12 @@ renderer_depth_prepass_init :: proc(
 ) -> (
   res: vk.Result,
 ) {
-  log.info("DEPTH PREPASS INIT: Creating depth buffer...")
-  depth_image_init(
-    &self.depth_buffer,
-    swapchain_extent.width,
-    swapchain_extent.height,
-  ) or_return
-  log.info("DEPTH PREPASS INIT: Depth buffer created successfully.")
-  camera_bindings := [?]vk.DescriptorSetLayoutBinding {
-    {
-      binding = 0,
-      descriptorType = .UNIFORM_BUFFER,
-      descriptorCount = 1,
-      stageFlags = {.VERTEX, .FRAGMENT},
-    },
-  }
-  vk.CreateDescriptorSetLayout(
-    g_device,
-    &vk.DescriptorSetLayoutCreateInfo {
-      sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-      bindingCount = u32(len(camera_bindings)),
-      pBindings = raw_data(camera_bindings[:]),
-    },
-    nil,
-    &self.camera_descriptor_set_layout,
-  ) or_return
-  for &frame in self.frames {
-    frame.camera_uniform = create_host_visible_buffer(
-      SceneUniform,
-      1,
-      {.UNIFORM_BUFFER},
-    ) or_return
-    vk.AllocateDescriptorSets(
-      g_device,
-      &{
-        sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
-        descriptorPool = g_descriptor_pool,
-        descriptorSetCount = 1,
-        pSetLayouts = &self.camera_descriptor_set_layout,
-      },
-      &frame.camera_descriptor_set,
-    ) or_return
-    buffer_info := vk.DescriptorBufferInfo {
-      buffer = frame.camera_uniform.buffer,
-      range  = vk.DeviceSize(size_of(SceneUniform)),
-    }
-    vk.UpdateDescriptorSets(
-      g_device,
-      1,
-      &vk.WriteDescriptorSet {
-        sType = .WRITE_DESCRIPTOR_SET,
-        dstSet = frame.camera_descriptor_set,
-        dstBinding = 0,
-        dstArrayElement = 0,
-        descriptorCount = 1,
-        descriptorType = .UNIFORM_BUFFER,
-        pBufferInfo = &buffer_info,
-      },
-      0,
-      nil,
-    )
-  }
-  log.info("DEPTH PREPASS INIT: Creating pipeline layout...")
   push_constant_range := vk.PushConstantRange {
     stageFlags = {.VERTEX},
     size       = size_of(PushConstant),
   }
   set_layouts := [?]vk.DescriptorSetLayout {
-    self.camera_descriptor_set_layout, // set = 0 (camera uniforms)
+    g_camera_descriptor_set_layout, // set = 0 (camera uniforms)
     g_bindless_bone_buffer_set_layout, // set = 1 (for skinning)
   }
   pipeline_layout_info := vk.PipelineLayoutCreateInfo {
@@ -114,7 +46,6 @@ renderer_depth_prepass_init :: proc(
     nil,
     &self.pipeline_layout,
   ) or_return
-  log.info("DEPTH PREPASS INIT: Pipeline layout created successfully.")
   for mask in 0 ..< DEPTH_PREPASS_VARIANT_COUNT {
     features := transmute(ShaderFeatureSet)mask & ShaderFeatureSet{.SKINNING}
     config := ShaderConfig {
@@ -127,57 +58,26 @@ renderer_depth_prepass_init :: proc(
       swapchain_extent,
     ) or_return
   }
-  log.info(
-    "DEPTH PREPASS INIT: All pipelines built successfully. Initialization complete.",
-  )
   return .SUCCESS
-}
-
-renderer_depth_prepass_recreate_images :: proc(
-  self: ^RendererDepthPrepass,
-  swapchain_extent: vk.Extent2D,
-) -> (
-  res: vk.Result = .SUCCESS,
-) {
-  renderer_depth_prepass_deinit_images(self)
-  depth_image_init(
-    &self.depth_buffer,
-    swapchain_extent.width,
-    swapchain_extent.height,
-  ) or_return
-  return .SUCCESS
-}
-
-renderer_depth_prepass_deinit_images :: proc(self: ^RendererDepthPrepass) {
-  image_buffer_deinit(&self.depth_buffer)
 }
 
 renderer_depth_prepass_deinit :: proc(self: ^RendererDepthPrepass) {
-  renderer_depth_prepass_deinit_images(self)
-  for &frame in self.frames {
-    data_buffer_deinit(&frame.camera_uniform)
-  }
   for &p in self.pipelines {
     vk.DestroyPipeline(g_device, p, nil)
     p = 0
   }
   vk.DestroyPipelineLayout(g_device, self.pipeline_layout, nil)
   self.pipeline_layout = 0
-  vk.DestroyDescriptorSetLayout(
-    g_device,
-    self.camera_descriptor_set_layout,
-    nil,
-  )
-  self.camera_descriptor_set_layout = 0
 }
 
 renderer_depth_prepass_begin :: proc(
   engine: ^Engine,
   command_buffer: vk.CommandBuffer,
 ) {
+  // Use global g_frame_index
   depth_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
-    imageView = engine.depth_prepass.depth_buffer.view,
+    imageView = engine.frames[g_frame_index].depth_buffer.view,
     imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
     loadOp = .CLEAR,
     storeOp = .STORE,
@@ -198,13 +98,14 @@ renderer_depth_prepass_begin :: proc(
     minDepth = 0.0,
     maxDepth = 1.0,
   }
+  vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
   scissor := vk.Rect2D {
+    offset = {x = 0, y = 0},
     extent = engine.swapchain.extent,
   }
-  vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
   vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
   scene_uniform := data_buffer_get(
-    &engine.depth_prepass.frames[g_frame_index].camera_uniform,
+    &engine.frames[g_frame_index].camera_uniform,
   )
   scene_uniform.view = geometry.calculate_view_matrix(engine.scene.camera)
   scene_uniform.projection = geometry.calculate_projection_matrix(
@@ -241,7 +142,7 @@ renderer_depth_prepass_render :: proc(
   renderer_depth_prepass_populate_batches(&batching_ctx)
   layout := engine.depth_prepass.pipeline_layout
   descriptor_sets := [?]vk.DescriptorSet {
-    engine.depth_prepass.frames[g_frame_index].camera_descriptor_set, // set 0
+    g_camera_descriptor_sets[g_frame_index], // set 0
     g_bindless_bone_buffer_descriptor_set, // set 1
   }
   vk.CmdBindDescriptorSets(
@@ -323,7 +224,6 @@ renderer_depth_prepass_populate_batches :: proc(ctx: ^BatchingContext) {
   }
 }
 
-// Render batches for depth prepass
 renderer_depth_prepass_render_batches :: proc(
   self: ^RendererDepthPrepass,
   ctx: ^BatchingContext,
@@ -404,7 +304,6 @@ renderer_depth_prepass_render_batches :: proc(
   return rendered
 }
 
-// Get the appropriate pipeline for a mesh
 renderer_depth_prepass_get_pipeline :: proc(
   self: ^RendererDepthPrepass,
   material: ^Material,
@@ -415,7 +314,6 @@ renderer_depth_prepass_get_pipeline :: proc(
   return self.pipelines[transmute(u32)features]
 }
 
-// Build pipeline for depth prepass
 renderer_depth_prepass_build_pipeline :: proc(
   self: ^RendererDepthPrepass,
   config: ^ShaderConfig,

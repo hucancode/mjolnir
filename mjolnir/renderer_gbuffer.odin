@@ -7,88 +7,8 @@ import "resource"
 import vk "vendor:vulkan"
 
 RendererGBuffer :: struct {
-  pipelines:                 [SHADER_VARIANT_COUNT]vk.Pipeline,
-  pipeline_layout:           vk.PipelineLayout,
-  normal_buffer:             ImageBuffer,
-  albedo_buffer:             ImageBuffer,
-  metallic_roughness_buffer: ImageBuffer,
-  emissive_buffer:           ImageBuffer,
-}
-
-renderer_gbuffer_create_images :: proc(
-  self: ^RendererGBuffer,
-  width: u32,
-  height: u32,
-) -> vk.Result {
-  self.normal_buffer = malloc_image_buffer(
-    width,
-    height,
-    .R8G8B8A8_UNORM,
-    .OPTIMAL,
-    {.COLOR_ATTACHMENT, .SAMPLED},
-    {.DEVICE_LOCAL},
-  ) or_return
-  self.normal_buffer.view = create_image_view(
-    self.normal_buffer.image,
-    .R8G8B8A8_UNORM,
-    {.COLOR},
-  ) or_return
-  self.albedo_buffer = malloc_image_buffer(
-    width,
-    height,
-    .R8G8B8A8_UNORM,
-    .OPTIMAL,
-    {.COLOR_ATTACHMENT, .SAMPLED},
-    {.DEVICE_LOCAL},
-  ) or_return
-  self.albedo_buffer.view = create_image_view(
-    self.albedo_buffer.image,
-    .R8G8B8A8_UNORM,
-    {.COLOR},
-  ) or_return
-  self.metallic_roughness_buffer = malloc_image_buffer(
-    width,
-    height,
-    .R8G8B8A8_UNORM,
-    .OPTIMAL,
-    {.COLOR_ATTACHMENT, .SAMPLED},
-    {.DEVICE_LOCAL},
-  ) or_return
-  self.metallic_roughness_buffer.view = create_image_view(
-    self.metallic_roughness_buffer.image,
-    .R8G8B8A8_UNORM,
-    {.COLOR},
-  ) or_return
-  self.emissive_buffer = malloc_image_buffer(
-    width,
-    height,
-    .R8G8B8A8_UNORM,
-    .OPTIMAL,
-    {.COLOR_ATTACHMENT, .SAMPLED},
-    {.DEVICE_LOCAL},
-  ) or_return
-  self.emissive_buffer.view = create_image_view(
-    self.emissive_buffer.image,
-    .R8G8B8A8_UNORM,
-    {.COLOR},
-  ) or_return
-  return .SUCCESS
-}
-
-renderer_gbuffer_deinit_images :: proc(self: ^RendererGBuffer) {
-  image_buffer_deinit(&self.normal_buffer)
-  image_buffer_deinit(&self.albedo_buffer)
-  image_buffer_deinit(&self.metallic_roughness_buffer)
-  image_buffer_deinit(&self.emissive_buffer)
-}
-
-renderer_gbuffer_recreate_images :: proc(
-  self: ^RendererGBuffer,
-  width: u32,
-  height: u32,
-) -> vk.Result {
-  renderer_gbuffer_deinit_images(self)
-  return renderer_gbuffer_create_images(self, width, height)
+  pipelines:       [SHADER_VARIANT_COUNT]vk.Pipeline,
+  pipeline_layout: vk.PipelineLayout,
 }
 
 renderer_gbuffer_init :: proc(
@@ -96,7 +16,6 @@ renderer_gbuffer_init :: proc(
   width: u32,
   height: u32,
 ) -> vk.Result {
-  renderer_gbuffer_create_images(self, width, height) or_return
   depth_format: vk.Format = .D32_SFLOAT
   set_layouts := [?]vk.DescriptorSetLayout {
     g_camera_descriptor_set_layout, // set = 0 (camera uniforms)
@@ -121,16 +40,6 @@ renderer_gbuffer_init :: proc(
     &self.pipeline_layout,
   ) or_return
   log.info("About to build G-buffer pipelines...")
-  // Create G-buffer specific pipelines (focus on normals output)
-  renderer_gbuffer_build_pipelines(self, depth_format) or_return
-  log.info("G-buffer renderer initialized successfully")
-  return .SUCCESS
-}
-
-renderer_gbuffer_build_pipelines :: proc(
-  self: ^RendererGBuffer,
-  depth_format: vk.Format,
-) -> vk.Result {
   vert_shader_code := #load("shader/gbuffer/vert.spv")
   vert_module := create_shader_module(vert_shader_code) or_return
   defer vk.DestroyShaderModule(g_device, vert_module, nil)
@@ -334,6 +243,7 @@ renderer_gbuffer_build_pipelines :: proc(
     nil,
     raw_data(self.pipelines[:]),
   ) or_return
+  log.info("G-buffer renderer initialized successfully")
   return .SUCCESS
 }
 
@@ -342,29 +252,30 @@ renderer_gbuffer_begin :: proc(
   command_buffer: vk.CommandBuffer,
   extent: vk.Extent2D,
 ) {
+  frame := &engine.frames[g_frame_index]
   prepare_image_for_render(
     command_buffer,
-    engine.gbuffer.normal_buffer.image,
+    frame.gbuffer_normal.image,
     .COLOR_ATTACHMENT_OPTIMAL,
   )
   prepare_image_for_render(
     command_buffer,
-    engine.gbuffer.albedo_buffer.image,
+    frame.gbuffer_albedo.image,
     .COLOR_ATTACHMENT_OPTIMAL,
   )
   prepare_image_for_render(
     command_buffer,
-    engine.gbuffer.metallic_roughness_buffer.image,
+    frame.gbuffer_metallic_roughness.image,
     .COLOR_ATTACHMENT_OPTIMAL,
   )
   prepare_image_for_render(
     command_buffer,
-    engine.gbuffer.emissive_buffer.image,
+    frame.gbuffer_emissive.image,
     .COLOR_ATTACHMENT_OPTIMAL,
   )
   normal_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
-    imageView = engine.gbuffer.normal_buffer.view,
+    imageView = frame.gbuffer_normal.view,
     imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
     loadOp = .CLEAR,
     storeOp = .STORE,
@@ -372,7 +283,7 @@ renderer_gbuffer_begin :: proc(
   }
   albedo_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
-    imageView = engine.gbuffer.albedo_buffer.view,
+    imageView = frame.gbuffer_albedo.view,
     imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
     loadOp = .CLEAR,
     storeOp = .STORE,
@@ -380,7 +291,7 @@ renderer_gbuffer_begin :: proc(
   }
   metallic_roughness_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
-    imageView = engine.gbuffer.metallic_roughness_buffer.view,
+    imageView = frame.gbuffer_metallic_roughness.view,
     imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
     loadOp = .CLEAR,
     storeOp = .STORE,
@@ -388,7 +299,7 @@ renderer_gbuffer_begin :: proc(
   }
   emissive_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
-    imageView = engine.gbuffer.emissive_buffer.view,
+    imageView = frame.gbuffer_emissive.view,
     imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
     loadOp = .CLEAR,
     storeOp = .STORE,
@@ -396,7 +307,7 @@ renderer_gbuffer_begin :: proc(
   }
   depth_attachment := vk.RenderingAttachmentInfoKHR {
     sType       = .RENDERING_ATTACHMENT_INFO_KHR,
-    imageView   = engine.depth_prepass.depth_buffer.view,
+    imageView   = frame.depth_buffer.view,
     imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
     loadOp      = .LOAD,
     storeOp     = .STORE,
@@ -436,22 +347,14 @@ renderer_gbuffer_end :: proc(
   command_buffer: vk.CommandBuffer,
 ) {
   vk.CmdEndRenderingKHR(command_buffer)
+  frame := &engine.frames[g_frame_index]
+  prepare_image_for_shader_read(command_buffer, frame.gbuffer_normal.image)
+  prepare_image_for_shader_read(command_buffer, frame.gbuffer_albedo.image)
   prepare_image_for_shader_read(
     command_buffer,
-    engine.gbuffer.normal_buffer.image,
+    frame.gbuffer_metallic_roughness.image,
   )
-  prepare_image_for_shader_read(
-    command_buffer,
-    engine.gbuffer.albedo_buffer.image,
-  )
-  prepare_image_for_shader_read(
-    command_buffer,
-    engine.gbuffer.metallic_roughness_buffer.image,
-  )
-  prepare_image_for_shader_read(
-    command_buffer,
-    engine.gbuffer.emissive_buffer.image,
-  )
+  prepare_image_for_shader_read(command_buffer, frame.gbuffer_emissive.image)
 }
 
 renderer_gbuffer_render :: proc(
@@ -473,7 +376,7 @@ renderer_gbuffer_render :: proc(
   for &entry in engine.scene.nodes.entries do if entry.active {
     node := &entry.item
     mesh_att, has_mesh := &node.attachment.(MeshAttachment)
-    if !has_mesh{
+    if !has_mesh {
       continue
     }
     mesh := resource.get(g_meshes, mesh_att.handle)
@@ -534,5 +437,4 @@ renderer_gbuffer_deinit :: proc(self: ^RendererGBuffer) {
     vk.DestroyPipeline(g_device, pipeline, nil)
   }
   vk.DestroyPipelineLayout(g_device, self.pipeline_layout, nil)
-  image_buffer_deinit(&self.normal_buffer)
 }
