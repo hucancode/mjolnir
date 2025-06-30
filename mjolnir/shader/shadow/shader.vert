@@ -28,7 +28,8 @@ layout(push_constant) uniform PushConstants {
     uint bone_matrix_offset;
     float metallic_value;
     float roughness_value;
-    uint padding[2];
+    float emissive_value;
+    float padding;
 };
 
 void main() {

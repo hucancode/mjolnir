@@ -29,6 +29,10 @@ layout(push_constant) uniform Constants {
     uint environment_index;
     uint brdf_lut_index;
     uint bone_matrix_offset;
+    float metallic_value;
+    float roughness_value;
+    float emissive_value;
+    float padding;
 };
 
 layout(location = 0) out vec3 outPosition;

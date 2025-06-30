@@ -30,7 +30,11 @@ layout(push_constant) uniform PushConstants {
     uint environment_index;
     uint brdf_lut_index;
     uint bone_matrix_offset;
-} pc;
+    float metallic_value;
+    float roughness_value;
+    float emissive_value;
+    float padding;
+};
 
 layout(location = 0) in vec3 position;
 layout(location = 1) in vec4 color;
@@ -38,5 +42,5 @@ layout(location = 2) in vec2 uv;
 layout(location = 0) out vec4 outColor;
 
 void main() {
-    outColor = HAS_ALBEDO_TEXTURE ? texture(sampler2D(textures[pc.albedo_index], samplers[SAMPLER_LINEAR_REPEAT]), uv) : color;
+    outColor = HAS_ALBEDO_TEXTURE ? texture(sampler2D(textures[albedo_index], samplers[SAMPLER_LINEAR_REPEAT]), uv) : color;
 }

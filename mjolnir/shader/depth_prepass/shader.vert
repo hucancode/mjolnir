@@ -9,13 +9,11 @@ layout(location = 3) in vec4 inTangent;
 layout(location = 4) in uvec4 inJoints;
 layout(location = 5) in vec4 inWeights;
 
-// Descriptor sets
 layout(set = 0, binding = 0) uniform SceneUniform {
     mat4 view;
     mat4 projection;
     float time;
-    float padding[3];
-} scene;
+};
 
 layout(set = 1, binding = 0) readonly buffer BoneBuffer {
     mat4 bone_matrices[];
@@ -24,7 +22,6 @@ layout(set = 1, binding = 0) readonly buffer BoneBuffer {
 // Push constants for world matrix
 layout(push_constant) uniform PushConstant {
     mat4 world;
-    // Other material properties from PushConstant struct (not used in depth pre-pass)
     uint albedo_index;
     uint metallic_roughness_index;
     uint normal_index;
@@ -37,12 +34,12 @@ layout(push_constant) uniform PushConstant {
     float roughness_value;
     float emissive_value;
     float padding;
-} push;
+};
 
 void main() {
     vec4 modelPos;
     if (SKINNED) {
-        uvec4 indices = inJoints + uvec4(push.bone_matrix_offset);
+        uvec4 indices = inJoints + uvec4(bone_matrix_offset);
         mat4 skinMatrix =
             inWeights.x * bone_matrices[indices.x] +
             inWeights.y * bone_matrices[indices.y] +
@@ -52,6 +49,6 @@ void main() {
     } else {
         modelPos = vec4(inPosition, 1.0);
     }
-    vec4 worldPos = push.world * modelPos;
-    gl_Position = scene.projection * scene.view * worldPos;
+    vec4 worldPos = world * modelPos;
+    gl_Position = projection * view * worldPos;
 }

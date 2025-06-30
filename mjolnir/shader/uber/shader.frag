@@ -65,8 +65,8 @@ layout(push_constant) uniform PushConstants {
     float metallic_value;
     float roughness_value;
     float emissive_value;
-    uint padding[1];
-} pc;
+    float padding;
+};
 
 layout(location = 0) in vec3 position;
 layout(location = 1) in vec4 color;
@@ -177,21 +177,21 @@ vec3 brdf(vec3 N, vec3 V, vec3 albedo, float roughness, float metallic) {
 
 void main() {
     vec3 cameraPosition = -inverse(view)[3].xyz;
-    vec3 albedo = HAS_ALBEDO_TEXTURE ? texture(sampler2D(textures[pc.albedo_index], samplers[SAMPLER_LINEAR_REPEAT]), uv).rgb : color.rgb;
-    float occlusion = HAS_METALLIC_ROUGHNESS_TEXTURE ? texture(sampler2D(textures[pc.metallic_roughness_index], samplers[SAMPLER_LINEAR_REPEAT]), uv).r : 1.0;
-    float roughness = HAS_METALLIC_ROUGHNESS_TEXTURE ? texture(sampler2D(textures[pc.metallic_roughness_index], samplers[SAMPLER_LINEAR_REPEAT]), uv).g : pc.roughness_value;
-    float metallic = HAS_METALLIC_ROUGHNESS_TEXTURE ? texture(sampler2D(textures[pc.metallic_roughness_index], samplers[SAMPLER_LINEAR_REPEAT]), uv).b : pc.metallic_value;
-    vec3 emissive = HAS_EMISSIVE_TEXTURE ? texture(sampler2D(textures[pc.emissive_index], samplers[SAMPLER_LINEAR_REPEAT]), uv).rgb : (vec3(1.0) * pc.emissive_value);
+    vec3 albedo = HAS_ALBEDO_TEXTURE ? texture(sampler2D(textures[albedo_index], samplers[SAMPLER_LINEAR_REPEAT]), uv).rgb : color.rgb;
+    float occlusion = HAS_METALLIC_ROUGHNESS_TEXTURE ? texture(sampler2D(textures[metallic_roughness_index], samplers[SAMPLER_LINEAR_REPEAT]), uv).r : 1.0;
+    float roughness = HAS_METALLIC_ROUGHNESS_TEXTURE ? texture(sampler2D(textures[metallic_roughness_index], samplers[SAMPLER_LINEAR_REPEAT]), uv).g : roughness_value;
+    float metallic = HAS_METALLIC_ROUGHNESS_TEXTURE ? texture(sampler2D(textures[metallic_roughness_index], samplers[SAMPLER_LINEAR_REPEAT]), uv).b : metallic_value;
+    vec3 emissive = HAS_EMISSIVE_TEXTURE ? texture(sampler2D(textures[emissive_index], samplers[SAMPLER_LINEAR_REPEAT]), uv).rgb : (vec3(1.0) * emissive_value);
     metallic = clamp(metallic, 0.0, 1.0);
     roughness = clamp(roughness, 0.0, 1.0);
     vec3 N = normalize(normal);
     if (HAS_NORMAL_TEXTURE && false) {
-        vec3 tangentNormal = texture(sampler2D(textures[pc.normal_index], samplers[SAMPLER_LINEAR_REPEAT]), uv).xyz * 2.0 - 1.0;
+        vec3 tangentNormal = texture(sampler2D(textures[normal_index], samplers[SAMPLER_LINEAR_REPEAT]), uv).xyz * 2.0 - 1.0;
         N = normalize(tangentNormal);
     }
     vec3 displacedPosition = position;
     if (HAS_DISPLACEMENT_TEXTURE) {
-        float disp = texture(sampler2D(textures[pc.displacement_index], samplers[SAMPLER_LINEAR_REPEAT]), uv).r;
+        float disp = texture(sampler2D(textures[displacement_index], samplers[SAMPLER_LINEAR_REPEAT]), uv).r;
         displacedPosition += N * disp;
     }
     vec3 V = normalize(cameraPosition - displacedPosition);
@@ -199,12 +199,12 @@ void main() {
     vec3 F0 = mix(vec3(0.04), albedo, metallic);
     // Diffuse: sample environment in the normal direction (approximate)
     vec2 uvN = dirToEquirectUV(N);
-    vec3 diffuseIBL = texture(sampler2D(textures[pc.environment_index], samplers[SAMPLER_LINEAR_REPEAT]), uvN).rgb * albedo;
+    vec3 diffuseIBL = texture(sampler2D(textures[environment_index], samplers[SAMPLER_LINEAR_REPEAT]), uvN).rgb * albedo;
     // Specular: sample environment in the reflection direction (no LOD, no roughness blur)
     vec2 uvR = dirToEquirectUV(R);
-    vec3 prefilteredColor = texture(sampler2D(textures[pc.environment_index], samplers[SAMPLER_LINEAR_REPEAT]), uvR).rgb;
+    vec3 prefilteredColor = texture(sampler2D(textures[environment_index], samplers[SAMPLER_LINEAR_REPEAT]), uvR).rgb;
     float NdotV = max(dot(N, V), 0.0);
-    vec2 brdfSample = texture(sampler2D(textures[pc.brdf_lut_index], samplers[SAMPLER_LINEAR_REPEAT]), vec2(NdotV, roughness)).rg;
+    vec2 brdfSample = texture(sampler2D(textures[brdf_lut_index], samplers[SAMPLER_LINEAR_REPEAT]), vec2(NdotV, roughness)).rg;
     // Attenuate specular by (1.0 - roughness) to fake roughness blur
     vec3 specularIBL = prefilteredColor * (F0 * brdfSample.x + brdfSample.y) * (1.0 - roughness)*0.1;
     vec3 kS = F0 + (1.0 - F0) * pow(1.0 - NdotV, 5.0);

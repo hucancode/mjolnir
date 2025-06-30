@@ -40,7 +40,6 @@ layout(set = 0, binding = 1) uniform LightUniforms {
     Light lights[MAX_LIGHTS];
     uint lightCount;
 };
-// Shadow maps removed - not used in G-buffer pass
 // layout(set = 0, binding = 2) uniform sampler2D shadowMaps[MAX_LIGHTS];
 // layout(set = 0, binding = 3) uniform samplerCube cubeShadowMaps[MAX_LIGHTS];
 layout(set = 1, binding = 0) uniform texture2D textures[MAX_TEXTURES];
@@ -59,8 +58,8 @@ layout(push_constant) uniform PushConstants {
     float metallic_value;
     float roughness_value;
     float emissive_value;
-    uint padding[1];
-} pc;
+    float padding;
+};
 
 layout(location = 0) in vec3 position;
 layout(location = 1) in vec4 color;
@@ -73,14 +72,13 @@ layout(location = 2) out vec4 outMetallicRoughness;
 layout(location = 3) out vec4 outEmissive;
 
 void main() {
-    // Output world-space normals encoded in 0-1 range
     vec3 N = normalize(normal);
     vec3 normal_encoded = N * 0.5 + 0.5;
     outNormal = vec4(normal_encoded, 1.0);
 
     vec4 albedo;
     if (ALBEDO_TEXTURE) {
-        albedo = texture(sampler2D(textures[pc.albedo_index], samplers[SAMPLER_LINEAR_REPEAT]), uv);
+        albedo = texture(sampler2D(textures[albedo_index], samplers[SAMPLER_LINEAR_REPEAT]), uv);
     } else {
         albedo = color;
     }
@@ -89,19 +87,19 @@ void main() {
     float metallic;
     float roughness;
     if (METALLIC_ROUGHNESS_TEXTURE) {
-        vec4 mr = texture(sampler2D(textures[pc.metallic_roughness_index], samplers[SAMPLER_LINEAR_REPEAT]), uv);
+        vec4 mr = texture(sampler2D(textures[metallic_roughness_index], samplers[SAMPLER_LINEAR_REPEAT]), uv);
         metallic = mr.b;
         roughness = mr.g;
     } else {
-        metallic = pc.metallic_value;
-        roughness = pc.roughness_value;
+        metallic = metallic_value;
+        roughness = roughness_value;
     }
     outMetallicRoughness = vec4(metallic, roughness, 0.0, 1.0);
     vec3 emissive;
     if (EMISSIVE_TEXTURE) {
-        emissive = texture(sampler2D(textures[pc.emissive_index], samplers[SAMPLER_LINEAR_REPEAT]), uv).rgb;
+        emissive = texture(sampler2D(textures[emissive_index], samplers[SAMPLER_LINEAR_REPEAT]), uv).rgb;
     } else {
-        emissive = vec3(pc.emissive_value);
+        emissive = vec3(emissive_value);
     }
     outEmissive = vec4(emissive, 1.0);
 }
