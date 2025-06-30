@@ -14,12 +14,15 @@ layout(location = 3) in vec2 inUV;
 layout(location = 4) in uvec4 inJoints;
 layout(location = 5) in vec4 inWeights;
 
-layout(set = 0, binding = 0) uniform Uniforms {
+// camera set = 0
+layout(set = 0, binding = 0) uniform SceneUniforms {
     mat4 view;
     mat4 proj;
     float time;
 };
-
+// lights and shadow maps set = 1, not available in vertex shader
+// textures and samplers set = 2, not available in vertex shader
+// bone matrices set = 3
 layout(set = 3, binding = 0) readonly buffer BoneMatrices {
     mat4 bones[];
 };
@@ -44,10 +47,6 @@ layout(location = 0) out vec3 outPosition;
 layout(location = 1) out vec4 outColor;
 layout(location = 2) out vec3 outNormal;
 layout(location = 3) out vec2 outUV;
-
-// If you ever use samplers or textures in this vertex shader, use:
-// layout(set = 1, binding = 0) uniform texture2D textures[MAX_TEXTURES];
-// layout(set = 2, binding = 0) uniform sampler samplers[MAX_SAMPLERS];
 
 void main() {
     vec4 modelPosition;

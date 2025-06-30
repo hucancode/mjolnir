@@ -212,8 +212,7 @@ render_particles :: proc(
   vk.CmdBindPipeline(command_buffer, .GRAPHICS, self.render_pipeline)
   // Bind the bindless texture and sampler descriptor sets
   descriptor_sets := [?]vk.DescriptorSet {
-    g_bindless_textures, // set 0
-    g_bindless_samplers, // set 1
+    g_textures_set, // set 0
   }
   vk.CmdBindDescriptorSets(
     command_buffer,
@@ -474,8 +473,7 @@ renderer_particle_init :: proc(self: ^RendererParticle) -> vk.Result {
     {stageFlags = {.VERTEX, .FRAGMENT}, size = size_of(ParticlePushConstants)},
   }
   descriptor_set_layouts := [?]vk.DescriptorSetLayout {
-    g_bindless_textures_layout, // set = 0 for textures
-    g_bindless_samplers_layout, // set = 1 for samplers
+    g_textures_set_layout, // set = 0 for textures
   }
   vk.CreatePipelineLayout(
     g_device,

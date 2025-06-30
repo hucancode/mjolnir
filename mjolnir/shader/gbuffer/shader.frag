@@ -8,8 +8,6 @@ layout(constant_id = 3) const bool NORMAL_TEXTURE = false;
 layout(constant_id = 4) const bool DISPLACEMENT_TEXTURE = false;
 layout(constant_id = 5) const bool EMISSIVE_TEXTURE = false;
 
-const uint MAX_TEXTURES = 50;
-const uint MAX_SAMPLERS = 4;
 const uint SAMPLER_NEAREST_CLAMP = 0;
 const uint SAMPLER_LINEAR_CLAMP = 1;
 const uint SAMPLER_NEAREST_REPEAT = 2;
@@ -36,14 +34,8 @@ layout(set = 0, binding = 0) uniform SceneUniforms {
     mat4 proj;
     float time;
 };
-layout(set = 0, binding = 1) uniform LightUniforms {
-    Light lights[MAX_LIGHTS];
-    uint lightCount;
-};
-// layout(set = 0, binding = 2) uniform sampler2D shadowMaps[MAX_LIGHTS];
-// layout(set = 0, binding = 3) uniform samplerCube cubeShadowMaps[MAX_LIGHTS];
-layout(set = 1, binding = 0) uniform texture2D textures[MAX_TEXTURES];
-layout(set = 2, binding = 0) uniform sampler samplers[MAX_SAMPLERS];
+layout(set = 1, binding = 0) uniform texture2D textures[];
+layout(set = 1, binding = 1) uniform sampler samplers[];
 
 layout(push_constant) uniform PushConstants {
     mat4 world;

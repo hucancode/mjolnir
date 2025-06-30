@@ -71,10 +71,6 @@ g_present_queue: vk.Queue
 g_descriptor_pool: vk.DescriptorPool
 g_command_pool: vk.CommandPool
 g_device_properties: vk.PhysicalDeviceProperties
-g_bindless_textures_layout: vk.DescriptorSetLayout
-g_bindless_textures: vk.DescriptorSet
-g_bindless_samplers_layout: vk.DescriptorSetLayout
-g_bindless_samplers: vk.DescriptorSet
 
 vulkan_context_init :: proc(window: glfw.WindowHandle) -> vk.Result {
   g_window = window
@@ -85,7 +81,6 @@ vulkan_context_init :: proc(window: glfw.WindowHandle) -> vk.Result {
   logical_device_init() or_return
   command_pool_init() or_return
   descriptor_pool_init() or_return
-  init_texture_descriptors() or_return
   return .SUCCESS
 }
 
@@ -616,84 +611,3 @@ allocate_vulkan_memory :: proc(
   return
 }
 
-init_texture_descriptors :: proc() -> vk.Result {
-  texture_binding := vk.DescriptorSetLayoutBinding {
-    binding         = 0,
-    descriptorType  = .SAMPLED_IMAGE,
-    descriptorCount = MAX_TEXTURES,
-    stageFlags      = {.FRAGMENT},
-  }
-  texture_layout_info := vk.DescriptorSetLayoutCreateInfo {
-    sType        = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-    bindingCount = 1,
-    pBindings    = &texture_binding,
-  }
-  vk.CreateDescriptorSetLayout(
-    g_device,
-    &texture_layout_info,
-    nil,
-    &g_bindless_textures_layout,
-  ) or_return
-  log.infof("Bindless textures layout created")
-  vk.AllocateDescriptorSets(
-    g_device,
-    &{
-      sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
-      descriptorPool = g_descriptor_pool,
-      descriptorSetCount = 1,
-      pSetLayouts = &g_bindless_textures_layout,
-    },
-    &g_bindless_textures,
-  ) or_return
-  log.infof("Bindless textures descriptor set allocated")
-  sampler_binding := vk.DescriptorSetLayoutBinding {
-    binding         = 0,
-    descriptorType  = .SAMPLER,
-    descriptorCount = MAX_SAMPLERS,
-    stageFlags      = {.FRAGMENT},
-  }
-  sampler_layout_info := vk.DescriptorSetLayoutCreateInfo {
-    sType        = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-    bindingCount = 1,
-    pBindings    = &sampler_binding,
-  }
-  vk.CreateDescriptorSetLayout(
-    g_device,
-    &sampler_layout_info,
-    nil,
-    &g_bindless_samplers_layout,
-  ) or_return
-  log.infof("Bindless samplers layout created")
-  vk.AllocateDescriptorSets(
-    g_device,
-    &{
-      sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
-      descriptorPool = g_descriptor_pool,
-      descriptorSetCount = 1,
-      pSetLayouts = &g_bindless_samplers_layout,
-    },
-    &g_bindless_samplers,
-  ) or_return
-  log.infof("Bindless samplers descriptor set allocated")
-  return .SUCCESS
-}
-
-set_texture_descriptor :: proc(index: u32, image_view: vk.ImageView) {
-  if index >= MAX_TEXTURES {
-    log.infof("Error: Index %d out of bounds for bindless textures", index)
-    return
-  }
-  write := vk.WriteDescriptorSet {
-    sType           = .WRITE_DESCRIPTOR_SET,
-    dstSet          = g_bindless_textures,
-    dstBinding      = 0,
-    dstArrayElement = index,
-    descriptorType  = .SAMPLED_IMAGE,
-    descriptorCount = 1,
-    pImageInfo      = &vk.DescriptorImageInfo {
-      imageView = image_view,
-      imageLayout = .SHADER_READ_ONLY_OPTIMAL,
-    },
-  }
-  vk.UpdateDescriptorSets(g_device, 1, &write, 0, nil)
-}

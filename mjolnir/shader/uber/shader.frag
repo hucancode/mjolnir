@@ -8,8 +8,6 @@ layout(constant_id = 3) const bool HAS_NORMAL_TEXTURE = false;
 layout(constant_id = 4) const bool HAS_DISPLACEMENT_TEXTURE = false;
 layout(constant_id = 5) const bool HAS_EMISSIVE_TEXTURE = false;
 
-const uint MAX_TEXTURES = 50;
-const uint MAX_SAMPLERS = 4;
 const uint SAMPLER_NEAREST_CLAMP = 0;
 const uint SAMPLER_LINEAR_CLAMP = 1;
 const uint SAMPLER_NEAREST_REPEAT = 2;
@@ -19,13 +17,6 @@ const uint POINT_LIGHT = 0;
 const uint DIRECTIONAL_LIGHT = 1;
 const uint SPOT_LIGHT = 2;
 const float PI = 3.14159265359;
-
-// Convert a direction vector to equirectangular UV coordinates
-vec2 dirToEquirectUV(vec3 dir) {
-    float u = atan(dir.z, dir.x) / (2.0 * PI) + 0.5;
-    float v = acos(clamp(-dir.y, -1.0, 1.0)) / PI;
-    return vec2(u, v);
-}
 
 struct Light {
     mat4 viewProj;
@@ -37,20 +28,26 @@ struct Light {
     float radius;
     uint hasShadow;
 };
-
+// camera set = 0
 layout(set = 0, binding = 0) uniform SceneUniforms {
     mat4 view;
     mat4 proj;
     float time;
 };
-layout(set = 0, binding = 1) uniform LightUniforms {
+// lights and shadow maps set = 1
+layout(set = 1, binding = 0) uniform LightUniforms {
     Light lights[MAX_LIGHTS];
     uint lightCount;
 };
-layout(set = 0, binding = 2) uniform sampler2D shadowMaps[MAX_LIGHTS];
-layout(set = 0, binding = 3) uniform samplerCube cubeShadowMaps[MAX_LIGHTS];
-layout(set = 1, binding = 0) uniform texture2D textures[MAX_TEXTURES];
-layout(set = 2, binding = 0) uniform sampler samplers[MAX_SAMPLERS];
+layout(set = 1, binding = 1) uniform sampler2D shadowMaps[MAX_LIGHTS];
+layout(set = 1, binding = 2) uniform samplerCube cubeShadowMaps[MAX_LIGHTS];
+// textures and samplers set = 2
+layout(set = 2, binding = 0) uniform texture2D textures[];
+layout(set = 2, binding = 1) uniform sampler samplers[];
+// bone matrices set = 3
+layout(set = 3, binding = 0) readonly buffer BoneMatrices {
+    mat4 bones[];
+};
 
 layout(push_constant) uniform PushConstants {
     mat4 world;
@@ -79,6 +76,13 @@ const float ambientStrength = 0.2;
 const float specularStrength = 0.8;
 const float shininess = 20.0;
 const float diffuseStrength = 1.0;
+
+// Convert a direction vector to equirectangular UV coordinates
+vec2 dirToEquirectUV(vec3 dir) {
+    float u = atan(dir.z, dir.x) / (2.0 * PI) + 0.5;
+    float v = acos(clamp(-dir.y, -1.0, 1.0)) / PI;
+    return vec2(u, v);
+}
 
 float linearizeDepth(float depth, float near, float far) {
     // Converts depth from [0,1] (texture) to linear view space depth
@@ -181,7 +185,7 @@ void main() {
     float occlusion = HAS_METALLIC_ROUGHNESS_TEXTURE ? texture(sampler2D(textures[metallic_roughness_index], samplers[SAMPLER_LINEAR_REPEAT]), uv).r : 1.0;
     float roughness = HAS_METALLIC_ROUGHNESS_TEXTURE ? texture(sampler2D(textures[metallic_roughness_index], samplers[SAMPLER_LINEAR_REPEAT]), uv).g : roughness_value;
     float metallic = HAS_METALLIC_ROUGHNESS_TEXTURE ? texture(sampler2D(textures[metallic_roughness_index], samplers[SAMPLER_LINEAR_REPEAT]), uv).b : metallic_value;
-    vec3 emissive = HAS_EMISSIVE_TEXTURE ? texture(sampler2D(textures[emissive_index], samplers[SAMPLER_LINEAR_REPEAT]), uv).rgb : (vec3(1.0) * emissive_value);
+    vec3 emissive = HAS_EMISSIVE_TEXTURE ? texture(sampler2D(textures[emissive_index], samplers[SAMPLER_LINEAR_REPEAT]), uv).rgb : (color.rgb * emissive_value);
     metallic = clamp(metallic, 0.0, 1.0);
     roughness = clamp(roughness, 0.0, 1.0);
     vec3 N = normalize(normal);

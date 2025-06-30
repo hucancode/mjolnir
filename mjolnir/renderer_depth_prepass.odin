@@ -2,8 +2,6 @@ package mjolnir
 
 import "core:fmt"
 import "core:log"
-import "core:math"
-import linalg "core:math/linalg"
 import "core:mem"
 import "core:time"
 import "geometry"

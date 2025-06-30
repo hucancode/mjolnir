@@ -1,8 +1,6 @@
 package mjolnir
 
 import "core:log"
-import linalg "core:math/linalg"
-import "core:mem"
 import "core:time"
 import "geometry"
 import "resource"
@@ -164,10 +162,10 @@ renderer_gbuffer_init :: proc(
     &self.descriptor_set_layout,
   ) or_return
   set_layouts := [?]vk.DescriptorSetLayout {
-    self.descriptor_set_layout, // set = 0 (camera/scene uniforms)
-    g_bindless_textures_layout, // set = 1 (textures)
-    g_bindless_samplers_layout, // set = 2 (samplers)
-    g_bindless_bone_buffer_set_layout, // set = 3 (bone matrices)
+    g_camera_descriptor_set_layout, // set = 0 (camera uniforms)
+    // g_lights_descriptor_set_layout, // set = 1 (light uniforms)
+    g_textures_set_layout, // set = 1 (textures)
+    g_bindless_bone_buffer_set_layout, // set = 2 (bone matrices)
   }
   push_constant_range := vk.PushConstantRange {
     stageFlags = {.VERTEX, .FRAGMENT},
@@ -623,10 +621,9 @@ renderer_gbuffer_render :: proc(
       pipeline := renderer_gbuffer_get_pipeline(&engine.gbuffer, features)
       vk.CmdBindPipeline(command_buffer, .GRAPHICS, pipeline)
       descriptor_sets := [?]vk.DescriptorSet {
-        engine.gbuffer.descriptor_sets[g_frame_index], // set = 0 (camera/scene uniforms)
-        g_bindless_textures, // set = 1 (textures)
-        g_bindless_samplers, // set = 2 (samplers)
-        g_bindless_bone_buffer_descriptor_set, // set = 3 (bone matrices)
+        engine.gbuffer.descriptor_sets[g_frame_index], // set = 0 (camera uniforms)
+        g_textures_set, // set = 1 (textures)
+        g_bindless_bone_buffer_descriptor_set, // set = 2 (bone matrices)
       }
       vk.CmdBindDescriptorSets(command_buffer, .GRAPHICS, engine.gbuffer.pipeline_layout, 0, len(descriptor_sets), raw_data(descriptor_sets[:]), 0, nil)
       vk.CmdPushConstants(command_buffer, engine.gbuffer.pipeline_layout, {.VERTEX, .FRAGMENT}, 0, size_of(PushConstant), &push_constants)

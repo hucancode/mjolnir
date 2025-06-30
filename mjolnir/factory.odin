@@ -23,6 +23,16 @@ g_bindless_bone_buffer_descriptor_set: vk.DescriptorSet
 g_bindless_bone_buffer: DataBuffer(linalg.Matrix4f32)
 g_bone_matrix_slab: resource.SlabAllocator
 
+// Engine-level global descriptor sets and layouts for camera and lights
+
+g_camera_descriptor_set_layout: vk.DescriptorSetLayout
+g_camera_descriptor_set: vk.DescriptorSet
+g_lights_descriptor_set_layout: vk.DescriptorSetLayout
+g_lights_descriptor_set: vk.DescriptorSet
+
+g_textures_set_layout: vk.DescriptorSetLayout
+g_textures_set: vk.DescriptorSet
+
 factory_init :: proc() -> vk.Result {
   log.infof("Initializing mesh pool... ")
   resource.pool_init(&g_meshes)
@@ -33,6 +43,150 @@ factory_init :: proc() -> vk.Result {
   log.infof("All resource pools initialized successfully")
   init_global_samplers()
   init_bone_matrix_allocator() or_return
+  // Camera descriptor set layout and set
+  camera_bindings := [?]vk.DescriptorSetLayoutBinding {
+    {
+      binding = 0,
+      descriptorType = .UNIFORM_BUFFER,
+      descriptorCount = 1,
+      stageFlags = {.VERTEX, .FRAGMENT},
+    },
+  }
+  vk.CreateDescriptorSetLayout(
+    g_device,
+    &vk.DescriptorSetLayoutCreateInfo {
+      sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+      bindingCount = len(camera_bindings),
+      pBindings = raw_data(camera_bindings[:]),
+    },
+    nil,
+    &g_camera_descriptor_set_layout,
+  ) or_return
+  vk.AllocateDescriptorSets(
+    g_device,
+    &{
+      sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
+      descriptorPool = g_descriptor_pool,
+      descriptorSetCount = 1,
+      pSetLayouts = &g_camera_descriptor_set_layout,
+    },
+    &g_camera_descriptor_set,
+  ) or_return
+  // Lights descriptor set layout and set
+  lights_bindings := [?]vk.DescriptorSetLayoutBinding {
+    {
+      binding = 0,
+      descriptorType = .UNIFORM_BUFFER,
+      descriptorCount = 1,
+      stageFlags = {.FRAGMENT},
+    },
+    {
+      binding = 1,
+      descriptorType = .COMBINED_IMAGE_SAMPLER,
+      descriptorCount = MAX_LIGHTS,
+      stageFlags = {.FRAGMENT},
+    },
+    {
+      binding = 2,
+      descriptorType = .COMBINED_IMAGE_SAMPLER,
+      descriptorCount = MAX_LIGHTS,
+      stageFlags = {.FRAGMENT},
+    },
+  }
+  vk.CreateDescriptorSetLayout(
+    g_device,
+    &vk.DescriptorSetLayoutCreateInfo {
+      sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+      bindingCount = len(lights_bindings),
+      pBindings = raw_data(lights_bindings[:]),
+    },
+    nil,
+    &g_lights_descriptor_set_layout,
+  ) or_return
+  vk.AllocateDescriptorSets(
+    g_device,
+    &{
+      sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
+      descriptorPool = g_descriptor_pool,
+      descriptorSetCount = 1,
+      pSetLayouts = &g_lights_descriptor_set_layout,
+    },
+    &g_lights_descriptor_set,
+  ) or_return
+  // Create textures+samplers descriptor set layout (set = 2)
+  textures_bindings := [?]vk.DescriptorSetLayoutBinding {
+    {
+      binding = 0,
+      descriptorType = .SAMPLED_IMAGE,
+      descriptorCount = MAX_TEXTURES,
+      stageFlags = {.FRAGMENT},
+    },
+    {
+      binding = 1,
+      descriptorType = .SAMPLER,
+      descriptorCount = MAX_SAMPLERS,
+      stageFlags = {.FRAGMENT},
+    },
+  }
+  vk.CreateDescriptorSetLayout(
+    g_device,
+    &vk.DescriptorSetLayoutCreateInfo {
+      sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+      bindingCount = len(textures_bindings),
+      pBindings = raw_data(textures_bindings[:]),
+    },
+    nil,
+    &g_textures_set_layout,
+  ) or_return
+  vk.AllocateDescriptorSets(
+    g_device,
+    &{
+      sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
+      descriptorPool = g_descriptor_pool,
+      descriptorSetCount = 1,
+      pSetLayouts = &g_textures_set_layout,
+    },
+    &g_textures_set,
+  ) or_return
+  writes := [?]vk.WriteDescriptorSet {
+    {
+      sType = .WRITE_DESCRIPTOR_SET,
+      dstSet = g_textures_set,
+      dstBinding = 1,
+      dstArrayElement = 0,
+      descriptorType = .SAMPLER,
+      descriptorCount = 1,
+      pImageInfo = &{sampler = g_nearest_clamp_sampler},
+    },
+    {
+      sType = .WRITE_DESCRIPTOR_SET,
+      dstSet = g_textures_set,
+      dstBinding = 1,
+      dstArrayElement = 1,
+      descriptorType = .SAMPLER,
+      descriptorCount = 1,
+      pImageInfo = &{sampler = g_linear_clamp_sampler},
+    },
+    {
+      sType = .WRITE_DESCRIPTOR_SET,
+      dstSet = g_textures_set,
+      dstBinding = 1,
+      dstArrayElement = 2,
+      descriptorType = .SAMPLER,
+      descriptorCount = 1,
+      pImageInfo = &{sampler = g_nearest_repeat_sampler},
+    },
+    {
+      sType = .WRITE_DESCRIPTOR_SET,
+      dstSet = g_textures_set,
+      dstBinding = 1,
+      dstArrayElement = 3,
+      descriptorType = .SAMPLER,
+      descriptorCount = 1,
+      pImageInfo = &{sampler = g_linear_repeat_sampler},
+    },
+  }
+  vk.UpdateDescriptorSets(g_device, len(writes), raw_data(writes[:]), 0, nil)
   return .SUCCESS
 }
 
@@ -43,6 +197,15 @@ factory_deinit :: proc() {
   resource.pool_deinit(g_materials, proc(_: ^Material) {})
   deinit_global_samplers()
   deinit_bone_matrix_allocator()
+  vk.DestroyDescriptorSetLayout(g_device, g_camera_descriptor_set_layout, nil)
+  vk.DestroyDescriptorSetLayout(g_device, g_lights_descriptor_set_layout, nil)
+  vk.DestroyDescriptorSetLayout(g_device, g_textures_set_layout, nil)
+  g_camera_descriptor_set_layout = 0
+  g_camera_descriptor_set = 0
+  g_lights_descriptor_set_layout = 0
+  g_lights_descriptor_set = 0
+  g_textures_set_layout = 0
+  g_textures_set = 0
 }
 
 init_global_samplers :: proc() -> vk.Result {
@@ -71,51 +234,6 @@ init_global_samplers :: proc() -> vk.Result {
   info.addressModeV = .CLAMP_TO_EDGE
   info.addressModeW = .CLAMP_TO_EDGE
   vk.CreateSampler(g_device, &info, nil, &g_nearest_clamp_sampler) or_return
-  write_samplers := [?]vk.WriteDescriptorSet {
-    {
-      sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = g_bindless_samplers,
-      dstBinding = 0,
-      dstArrayElement = 0,
-      descriptorType = .SAMPLER,
-      descriptorCount = 1,
-      pImageInfo = &{sampler = g_nearest_clamp_sampler},
-    },
-    {
-      sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = g_bindless_samplers,
-      dstBinding = 0,
-      dstArrayElement = 1,
-      descriptorType = .SAMPLER,
-      descriptorCount = 1,
-      pImageInfo = &{sampler = g_linear_clamp_sampler},
-    },
-    {
-      sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = g_bindless_samplers,
-      dstBinding = 0,
-      dstArrayElement = 2,
-      descriptorType = .SAMPLER,
-      descriptorCount = 1,
-      pImageInfo = &{sampler = g_nearest_repeat_sampler},
-    },
-    {
-      sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = g_bindless_samplers,
-      dstBinding = 0,
-      dstArrayElement = 3,
-      descriptorType = .SAMPLER,
-      descriptorCount = 1,
-      pImageInfo = &{sampler = g_linear_repeat_sampler},
-    },
-  }
-  vk.UpdateDescriptorSets(
-    g_device,
-    len(write_samplers),
-    raw_data(write_samplers[:]),
-    0,
-    nil,
-  )
   return .SUCCESS
 }
 
@@ -213,6 +331,26 @@ deinit_global_samplers :: proc() {
     g_nearest_clamp_sampler,
     nil,
   );g_nearest_clamp_sampler = 0
+}
+
+set_texture_descriptor :: proc(index: u32, image_view: vk.ImageView) {
+  if index >= MAX_TEXTURES {
+    log.infof("Error: Index %d out of bounds for bindless textures", index)
+    return
+  }
+  write := vk.WriteDescriptorSet {
+    sType           = .WRITE_DESCRIPTOR_SET,
+    dstSet          = g_textures_set,
+    dstBinding      = 0,
+    dstArrayElement = index,
+    descriptorType  = .SAMPLED_IMAGE,
+    descriptorCount = 1,
+    pImageInfo      = &vk.DescriptorImageInfo {
+      imageView = image_view,
+      imageLayout = .SHADER_READ_ONLY_OPTIMAL,
+    },
+  }
+  vk.UpdateDescriptorSets(g_device, 1, &write, 0, nil)
 }
 
 deinit_bone_matrix_allocator :: proc() {

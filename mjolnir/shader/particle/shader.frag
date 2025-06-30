@@ -2,7 +2,7 @@
 #extension GL_EXT_nonuniform_qualifier : require
 
 layout (set = 0, binding = 0) uniform texture2D textures[];
-layout (set = 1, binding = 0) uniform sampler samplers[];
+layout (set = 0, binding = 1) uniform sampler samplers[];
 
 layout(push_constant) uniform PushConstants {
     mat4 view;

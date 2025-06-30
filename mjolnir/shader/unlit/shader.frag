@@ -1,8 +1,6 @@
 #version 450
 #extension GL_EXT_nonuniform_qualifier : require
 
-const uint MAX_TEXTURES = 50;
-const uint MAX_SAMPLERS = 4;
 const uint SAMPLER_NEAREST_CLAMP = 0;
 const uint SAMPLER_LINEAR_CLAMP = 1;
 const uint SAMPLER_NEAREST_REPEAT = 2;
@@ -17,8 +15,10 @@ layout(set = 0, binding = 0) uniform SceneUniforms {
     float time;
 };
 
-layout(set = 1, binding = 0) uniform texture2D textures[MAX_TEXTURES];
-layout(set = 2, binding = 0) uniform sampler samplers[MAX_SAMPLERS];
+// lights and shadow maps set = 1, not used in unlit shader
+// textures and samplers set = 2
+layout(set = 2, binding = 0) uniform texture2D textures[];
+layout(set = 2, binding = 1) uniform sampler samplers[];
 
 layout(push_constant) uniform PushConstants {
     mat4 world;

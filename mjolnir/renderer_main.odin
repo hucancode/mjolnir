@@ -83,21 +83,21 @@ SHADER_UNLIT_VERT :: #load("shader/unlit/vert.spv")
 SHADER_UNLIT_FRAG :: #load("shader/unlit/frag.spv")
 
 RendererMain :: struct {
-  frames:                       [MAX_FRAMES_IN_FLIGHT]struct {
+  frames:                    [MAX_FRAMES_IN_FLIGHT]struct {
     camera_uniform:        DataBuffer(SceneUniform),
     light_uniform:         DataBuffer(SceneLightUniform),
-    camera_descriptor_set: vk.DescriptorSet,
     main_pass_image:       ImageBuffer,
     shadow_maps:           [MAX_SHADOW_MAPS]ImageBuffer,
     cube_shadow_maps:      [MAX_SHADOW_MAPS]CubeImageBuffer,
+    camera_descriptor_set: vk.DescriptorSet,
+    lights_descriptor_set: vk.DescriptorSet,
   },
-  camera_descriptor_set_layout: vk.DescriptorSetLayout,
-  pipeline_layout:              vk.PipelineLayout,
-  pipelines:                    [SHADER_VARIANT_COUNT]vk.Pipeline,
-  unlit_pipelines:              [UNLIT_SHADER_VARIANT_COUNT]vk.Pipeline,
-  wireframe_unlit_pipelines:    [UNLIT_SHADER_VARIANT_COUNT]vk.Pipeline,
-  environment_map:              Handle,
-  brdf_lut:                     Handle,
+  pipeline_layout:           vk.PipelineLayout,
+  pipelines:                 [SHADER_VARIANT_COUNT]vk.Pipeline,
+  unlit_pipelines:           [UNLIT_SHADER_VARIANT_COUNT]vk.Pipeline,
+  wireframe_unlit_pipelines: [UNLIT_SHADER_VARIANT_COUNT]vk.Pipeline,
+  environment_map:           Handle,
+  brdf_lut:                  Handle,
 }
 
 renderer_main_build_pbr_pipeline :: proc(
@@ -105,48 +105,33 @@ renderer_main_build_pbr_pipeline :: proc(
   color_format: vk.Format,
   depth_format: vk.Format,
 ) -> vk.Result {
-  bindings_main := [?]vk.DescriptorSetLayoutBinding {
-    {   // Scene Uniforms (view, proj, time)
-      binding         = 0,
-      descriptorType  = .UNIFORM_BUFFER,
-      descriptorCount = 1,
-      stageFlags      = {.VERTEX, .FRAGMENT},
-    },
-    {   // Light Uniforms
-      binding         = 1,
-      descriptorType  = .UNIFORM_BUFFER,
-      descriptorCount = 1,
-      stageFlags      = {.FRAGMENT},
-    },
-    {   // Shadow Maps
-      binding         = 2,
-      descriptorType  = .COMBINED_IMAGE_SAMPLER,
-      descriptorCount = MAX_SHADOW_MAPS,
-      stageFlags      = {.FRAGMENT},
-    },
-    {   // Cube Shadow Maps
-      binding         = 3,
-      descriptorType  = .COMBINED_IMAGE_SAMPLER,
-      descriptorCount = MAX_SHADOW_MAPS,
-      stageFlags      = {.FRAGMENT},
-    },
+  set_layouts := [?]vk.DescriptorSetLayout {
+    g_camera_descriptor_set_layout, // set = 0
+    g_lights_descriptor_set_layout, // set = 1
+    g_textures_set_layout, // set = 2
+    g_bindless_bone_buffer_set_layout, // set = 3
   }
-  layout_info_main := vk.DescriptorSetLayoutCreateInfo {
-    sType        = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-    bindingCount = len(bindings_main),
-    pBindings    = raw_data(bindings_main[:]),
+  push_constant_range := vk.PushConstantRange {
+    stageFlags = {.VERTEX, .FRAGMENT},
+    size       = size_of(PushConstant),
   }
-  vk.CreateDescriptorSetLayout(
+  vk.CreatePipelineLayout(
     g_device,
-    &layout_info_main,
+    &vk.PipelineLayoutCreateInfo {
+      sType = .PIPELINE_LAYOUT_CREATE_INFO,
+      setLayoutCount = len(set_layouts),
+      pSetLayouts = raw_data(set_layouts[:]),
+      pushConstantRangeCount = 1,
+      pPushConstantRanges = &push_constant_range,
+    },
     nil,
-    &self.camera_descriptor_set_layout,
+    &self.pipeline_layout,
   ) or_return
   pipeline_infos: [SHADER_VARIANT_COUNT]vk.GraphicsPipelineCreateInfo
   spec_infos: [SHADER_VARIANT_COUNT]vk.SpecializationInfo
   configs: [SHADER_VARIANT_COUNT]ShaderConfig
   entries: [SHADER_VARIANT_COUNT][SHADER_OPTION_COUNT]vk.SpecializationMapEntry
-  shader_stages_arr: [SHADER_VARIANT_COUNT][2]vk.PipelineShaderStageCreateInfo
+  shader_stages: [SHADER_VARIANT_COUNT][2]vk.PipelineShaderStageCreateInfo
   vert_module := create_shader_module(SHADER_UBER_VERT) or_return
   defer vk.DestroyShaderModule(g_device, vert_module, nil)
   frag_module := create_shader_module(SHADER_UBER_FRAG) or_return
@@ -210,28 +195,6 @@ renderer_main_build_pbr_pipeline :: proc(
       geometry.VERTEX_ATTRIBUTE_DESCRIPTIONS[:],
     ),
   }
-  // Only keep camera, bindless textures, bindless samplers, and skinning layouts
-  set_layouts := [?]vk.DescriptorSetLayout {
-    self.camera_descriptor_set_layout, // set = 0
-    g_bindless_textures_layout, // set = 1
-    g_bindless_samplers_layout, // set = 2
-    g_bindless_bone_buffer_set_layout, // set = 3
-  }
-  push_constant_range := [?]vk.PushConstantRange {
-    {stageFlags = {.VERTEX, .FRAGMENT}, size = size_of(PushConstant)},
-  }
-  vk.CreatePipelineLayout(
-    g_device,
-    &{
-      sType = .PIPELINE_LAYOUT_CREATE_INFO,
-      setLayoutCount = len(set_layouts),
-      pSetLayouts = raw_data(set_layouts[:]),
-      pushConstantRangeCount = len(push_constant_range),
-      pPushConstantRanges = raw_data(push_constant_range[:]),
-    },
-    nil,
-    &self.pipeline_layout,
-  ) or_return
   for mask in 0 ..< SHADER_VARIANT_COUNT {
     features := transmute(ShaderFeatureSet)mask
     configs[mask] = {
@@ -280,7 +243,7 @@ renderer_main_build_pbr_pipeline :: proc(
       dataSize      = size_of(ShaderConfig),
       pData         = &configs[mask],
     }
-    shader_stages_arr[mask] = [?]vk.PipelineShaderStageCreateInfo {
+    shader_stages[mask] = [?]vk.PipelineShaderStageCreateInfo {
       {
         sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
         stage = {.VERTEX},
@@ -305,8 +268,8 @@ renderer_main_build_pbr_pipeline :: proc(
     pipeline_infos[mask] = {
       sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
       pNext               = &rendering_info_khr,
-      stageCount          = len(shader_stages_arr[mask]),
-      pStages             = raw_data(shader_stages_arr[mask][:]),
+      stageCount          = len(shader_stages[mask]),
+      pStages             = raw_data(shader_stages[mask][:]),
       pVertexInputState   = &vertex_input_info,
       pInputAssemblyState = &input_assembly,
       pViewportState      = &viewport_state,
@@ -338,7 +301,7 @@ renderer_main_build_unlit_pipeline :: proc(
   spec_infos: [UNLIT_SHADER_VARIANT_COUNT]vk.SpecializationInfo
   configs: [UNLIT_SHADER_VARIANT_COUNT]ShaderConfig
   entries: [UNLIT_SHADER_VARIANT_COUNT][UNLIT_SHADER_OPTION_COUNT]vk.SpecializationMapEntry
-  shader_stages_arr: [UNLIT_SHADER_VARIANT_COUNT][2]vk.PipelineShaderStageCreateInfo
+  shader_stages: [UNLIT_SHADER_VARIANT_COUNT][2]vk.PipelineShaderStageCreateInfo
   vert_module := create_shader_module(SHADER_UNLIT_VERT) or_return
   defer vk.DestroyShaderModule(g_device, vert_module, nil)
   frag_module := create_shader_module(SHADER_UNLIT_FRAG) or_return
@@ -426,7 +389,7 @@ renderer_main_build_unlit_pipeline :: proc(
       dataSize      = size_of(ShaderConfig),
       pData         = &configs[mask],
     }
-    shader_stages_arr[mask] = [2]vk.PipelineShaderStageCreateInfo {
+    shader_stages[mask] = [2]vk.PipelineShaderStageCreateInfo {
       {
         sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
         stage = {.VERTEX},
@@ -451,8 +414,8 @@ renderer_main_build_unlit_pipeline :: proc(
     pipeline_infos[mask] = {
       sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
       pNext               = &rendering_info_khr,
-      stageCount          = len(shader_stages_arr[mask]),
-      pStages             = raw_data(shader_stages_arr[mask][:]),
+      stageCount          = len(shader_stages[mask]),
+      pStages             = raw_data(shader_stages[mask][:]),
       pVertexInputState   = &vertex_input_info,
       pInputAssemblyState = &input_assembly,
       pViewportState      = &viewport_state,
@@ -529,7 +492,6 @@ renderer_main_build_wireframe_unlit_pipeline :: proc(
     depthWriteEnable = true, // Wireframe objects write their own depth (skip depth pre-pass)
     depthCompareOp   = .LESS, // Use LESS since wireframe objects don't use depth pre-pass
   }
-
   color_formats := [?]vk.Format{target_color_format}
   rendering_info_khr := vk.PipelineRenderingCreateInfoKHR {
     sType                   = .PIPELINE_RENDERING_CREATE_INFO_KHR,
@@ -739,10 +701,10 @@ renderer_main_render :: proc(
   populate_render_batches(&batching_ctx)
   layout := engine.main.pipeline_layout
   descriptor_sets := [?]vk.DescriptorSet {
-    engine.main.frames[g_frame_index].camera_descriptor_set, // set 0
-    g_bindless_textures, // set 1
-    g_bindless_samplers, // set 2
-    g_bindless_bone_buffer_descriptor_set, // set 3
+    engine.main.frames[g_frame_index].camera_descriptor_set, // set = 0
+    engine.main.frames[g_frame_index].lights_descriptor_set, // set = 1
+    g_textures_set, // set = 2
+    g_bindless_bone_buffer_descriptor_set, // set = 3
   }
   vk.CmdBindDescriptorSets(
     command_buffer,
@@ -776,7 +738,11 @@ renderer_main_render :: proc(
     )
     mu.label(
       &engine.ui.ctx,
-      fmt.tprintf("%dx%d", engine.main.frames[0].main_pass_image.width, engine.main.frames[0].main_pass_image.height),
+      fmt.tprintf(
+        "%dx%d",
+        engine.main.frames[0].main_pass_image.width,
+        engine.main.frames[0].main_pass_image.height,
+      ),
     )
     // if .SUBMIT in mu.button(&engine.ui.ctx, "Button 1") {
     //     log.info("Pressed button 1")
@@ -865,10 +831,10 @@ render_to_texture :: proc(
   populate_render_batches(&batching_ctx)
   layout := engine.main.pipeline_layout
   descriptor_sets := [?]vk.DescriptorSet {
-    engine.main.frames[g_frame_index].camera_descriptor_set, // set 0
-    g_bindless_textures, // set 1
-    g_bindless_samplers, // set 2
-    g_bindless_bone_buffer_descriptor_set, // set 3
+    engine.main.frames[g_frame_index].camera_descriptor_set, // set = 0
+    engine.main.frames[g_frame_index].lights_descriptor_set, // set = 1
+    g_textures_set, // set = 2
+    g_bindless_bone_buffer_descriptor_set, // set = 3
   }
   vk.CmdBindDescriptorSets(
     command_buffer,
@@ -937,21 +903,45 @@ renderer_main_init :: proc(
         {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
       ) or_return
     }
+    // No per-frame descriptor set allocation or update needed
+  }
+  // Allocate and update a separate descriptor set for each frame in flight
+  for frame_index in 0 ..< MAX_FRAMES_IN_FLIGHT {
+    // Allocate descriptor sets for camera and lights for this frame
+    set_layouts := [?]vk.DescriptorSetLayout {
+      g_camera_descriptor_set_layout,
+      g_lights_descriptor_set_layout,
+    }
+    descriptor_sets: [2]vk.DescriptorSet
     vk.AllocateDescriptorSets(
       g_device,
       &{
         sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
         descriptorPool = g_descriptor_pool,
-        descriptorSetCount = 1,
-        pSetLayouts = &self.camera_descriptor_set_layout,
+        descriptorSetCount = 2,
+        pSetLayouts = raw_data(set_layouts[:]),
       },
-      &frame.camera_descriptor_set,
+      raw_data(descriptor_sets[:]),
     ) or_return
+    // Store per-frame descriptor sets
+    self.frames[frame_index].camera_descriptor_set = descriptor_sets[0]
+    self.frames[frame_index].lights_descriptor_set = descriptor_sets[1]
+    // Write buffer info to each descriptor set
+    camera_buffer_info := vk.DescriptorBufferInfo {
+      buffer = self.frames[frame_index].camera_uniform.buffer,
+      offset = 0,
+      range  = vk.DeviceSize(size_of(SceneUniform)),
+    }
+    light_buffer_info := vk.DescriptorBufferInfo {
+      buffer = self.frames[frame_index].light_uniform.buffer,
+      offset = 0,
+      range  = vk.DeviceSize(size_of(SceneLightUniform)),
+    }
     shadow_map_image_infos: [MAX_SHADOW_MAPS]vk.DescriptorImageInfo
     for i in 0 ..< MAX_SHADOW_MAPS {
       shadow_map_image_infos[i] = {
         sampler     = g_linear_clamp_sampler,
-        imageView   = frame.shadow_maps[i].view,
+        imageView   = self.frames[frame_index].shadow_maps[i].view,
         imageLayout = .SHADER_READ_ONLY_OPTIMAL,
       }
     }
@@ -959,47 +949,41 @@ renderer_main_init :: proc(
     for i in 0 ..< MAX_SHADOW_MAPS {
       cube_shadow_map_image_infos[i] = {
         sampler     = g_linear_clamp_sampler,
-        imageView   = frame.cube_shadow_maps[i].view,
+        imageView   = self.frames[frame_index].cube_shadow_maps[i].view,
         imageLayout = .SHADER_READ_ONLY_OPTIMAL,
       }
     }
     writes := [?]vk.WriteDescriptorSet {
       {
         sType = .WRITE_DESCRIPTOR_SET,
-        dstSet = frame.camera_descriptor_set,
+        dstSet = self.frames[frame_index].camera_descriptor_set,
         dstBinding = 0,
         descriptorType = .UNIFORM_BUFFER,
         descriptorCount = 1,
-        pBufferInfo = &{
-          buffer = frame.camera_uniform.buffer,
-          range = vk.DeviceSize(size_of(SceneUniform)),
-        },
+        pBufferInfo = &camera_buffer_info,
       },
       {
         sType = .WRITE_DESCRIPTOR_SET,
-        dstSet = frame.camera_descriptor_set,
-        dstBinding = 1,
+        dstSet = self.frames[frame_index].lights_descriptor_set,
+        dstBinding = 0,
         descriptorType = .UNIFORM_BUFFER,
         descriptorCount = 1,
-        pBufferInfo = &{
-          buffer = frame.light_uniform.buffer,
-          range = vk.DeviceSize(size_of(SceneLightUniform)),
-        },
+        pBufferInfo = &light_buffer_info,
       },
       {
         sType = .WRITE_DESCRIPTOR_SET,
-        dstSet = frame.camera_descriptor_set,
-        dstBinding = 2,
+        dstSet = self.frames[frame_index].lights_descriptor_set,
+        dstBinding = 1,
         descriptorType = .COMBINED_IMAGE_SAMPLER,
-        descriptorCount = MAX_SHADOW_MAPS,
+        descriptorCount = len(shadow_map_image_infos),
         pImageInfo = raw_data(shadow_map_image_infos[:]),
       },
       {
         sType = .WRITE_DESCRIPTOR_SET,
-        dstSet = frame.camera_descriptor_set,
-        dstBinding = 3,
+        dstSet = self.frames[frame_index].lights_descriptor_set,
+        dstBinding = 2,
         descriptorType = .COMBINED_IMAGE_SAMPLER,
-        descriptorCount = MAX_SHADOW_MAPS,
+        descriptorCount = len(cube_shadow_map_image_infos),
         pImageInfo = raw_data(cube_shadow_map_image_infos[:]),
       },
     }
@@ -1011,11 +995,6 @@ renderer_main_init :: proc(
 
 renderer_main_deinit :: proc(self: ^RendererMain) {
   vk.DestroyPipelineLayout(g_device, self.pipeline_layout, nil)
-  vk.DestroyDescriptorSetLayout(
-    g_device,
-    self.camera_descriptor_set_layout,
-    nil,
-  )
   for &frame in self.frames {
     data_buffer_deinit(&frame.camera_uniform)
     data_buffer_deinit(&frame.light_uniform)
@@ -1138,7 +1117,7 @@ render_batched_meshes :: proc(
   rendered := 0
   layout := self.pipeline_layout
   current_pipeline: vk.Pipeline = 0
-  for batch_key, batch_group in ctx.batches {
+  for _, batch_group in ctx.batches {
     sample_material := resource.get(
       g_materials,
       batch_group[0].material_handle,

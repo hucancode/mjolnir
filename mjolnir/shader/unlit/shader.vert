@@ -14,8 +14,10 @@ layout(set = 0, binding = 0) uniform Uniforms {
     mat4 proj;
     float time;
 };
-
-layout(set = 2, binding = 0) readonly buffer BoneMatrices {
+// lights and shadow maps set = 1, not used in unlit shader
+// textures and samplers set = 2, not available in vertex shader
+// bone matrices set = 3
+layout(set = 3, binding = 0) readonly buffer BoneMatrices {
     mat4 bones[];
 };
 

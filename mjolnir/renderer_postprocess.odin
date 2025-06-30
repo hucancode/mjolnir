@@ -470,7 +470,7 @@ renderer_postprocess_init :: proc(
     ) or_return
   }
   renderer_postprocess_create_images(self, width, height, color_format) or_return
-  shader_stages_arr: [count][2]vk.PipelineShaderStageCreateInfo
+  shader_stages: [count][2]vk.PipelineShaderStageCreateInfo
   pipeline_infos: [count]vk.GraphicsPipelineCreateInfo
   for effect_type, i in PostProcessEffectType {
     push_constant_size: u32
@@ -510,7 +510,7 @@ renderer_postprocess_init :: proc(
       nil,
       &self.pipeline_layouts[i],
     ) or_return
-    shader_stages_arr[i] = [2]vk.PipelineShaderStageCreateInfo {
+    shader_stages[i] = [2]vk.PipelineShaderStageCreateInfo {
       {
         sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
         stage = {.VERTEX},
@@ -527,8 +527,8 @@ renderer_postprocess_init :: proc(
     pipeline_infos[i] = {
       sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
       pNext               = &rendering_info,
-      stageCount          = len(shader_stages_arr[i]),
-      pStages             = raw_data(shader_stages_arr[i][:]),
+      stageCount          = len(shader_stages[i]),
+      pStages             = raw_data(shader_stages[i][:]),
       pVertexInputState   = &vertex_input,
       pInputAssemblyState = &input_assembly,
       pViewportState      = &viewport_state,
