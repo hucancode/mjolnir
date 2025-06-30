@@ -9,19 +9,12 @@ import vk "vendor:vulkan"
 RendererGBuffer :: struct {
   pipelines:                 [SHADER_VARIANT_COUNT]vk.Pipeline,
   pipeline_layout:           vk.PipelineLayout,
-  descriptor_set_layout:     vk.DescriptorSetLayout,
   normal_buffer:             ImageBuffer,
   albedo_buffer:             ImageBuffer,
   metallic_roughness_buffer: ImageBuffer,
   emissive_buffer:           ImageBuffer,
-  descriptor_sets:           [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
-  scene_uniform_buffers:     [MAX_FRAMES_IN_FLIGHT]DataBuffer(SceneUniform),
-  light_uniform_buffers:     [MAX_FRAMES_IN_FLIGHT]DataBuffer(
-    SceneLightUniform,
-  ),
 }
 
-// Helper to create images for G-buffer
 renderer_gbuffer_create_images :: proc(
   self: ^RendererGBuffer,
   width: u32,
@@ -82,7 +75,6 @@ renderer_gbuffer_create_images :: proc(
   return .SUCCESS
 }
 
-// Helper to deinit images for G-buffer
 renderer_gbuffer_deinit_images :: proc(self: ^RendererGBuffer) {
   image_buffer_deinit(&self.normal_buffer)
   image_buffer_deinit(&self.albedo_buffer)
@@ -90,7 +82,6 @@ renderer_gbuffer_deinit_images :: proc(self: ^RendererGBuffer) {
   image_buffer_deinit(&self.emissive_buffer)
 }
 
-// Helper to recreate images for G-buffer
 renderer_gbuffer_recreate_images :: proc(
   self: ^RendererGBuffer,
   width: u32,
@@ -107,63 +98,9 @@ renderer_gbuffer_init :: proc(
 ) -> vk.Result {
   renderer_gbuffer_create_images(self, width, height) or_return
   depth_format: vk.Format = .D32_SFLOAT
-  // Create uniform buffers
-  for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
-    self.scene_uniform_buffers[i] = create_host_visible_buffer(
-      SceneUniform,
-      1,
-      {.UNIFORM_BUFFER},
-    ) or_return
-
-    self.light_uniform_buffers[i] = create_host_visible_buffer(
-      SceneLightUniform,
-      1,
-      {.UNIFORM_BUFFER},
-    ) or_return
-  }
-  bindings := [?]vk.DescriptorSetLayoutBinding {
-    // Scene uniform (set = 0, binding = 0)
-    {
-      binding = 0,
-      descriptorType = .UNIFORM_BUFFER,
-      descriptorCount = 1,
-      stageFlags = {.VERTEX, .FRAGMENT},
-    },
-    // Light uniform (set = 0, binding = 1)
-    {
-      binding = 1,
-      descriptorType = .UNIFORM_BUFFER,
-      descriptorCount = 1,
-      stageFlags = {.VERTEX, .FRAGMENT},
-    },
-    // Shadow maps (set = 0, binding = 2) - required for layout compatibility
-    {
-      binding = 2,
-      descriptorType = .COMBINED_IMAGE_SAMPLER,
-      descriptorCount = MAX_SHADOW_MAPS,
-      stageFlags = {.FRAGMENT},
-    },
-    // Cube shadow maps (set = 0, binding = 3) - required for layout compatibility
-    {
-      binding = 3,
-      descriptorType = .COMBINED_IMAGE_SAMPLER,
-      descriptorCount = MAX_SHADOW_MAPS,
-      stageFlags = {.FRAGMENT},
-    },
-  }
-  vk.CreateDescriptorSetLayout(
-    g_device,
-    &{
-      sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-      bindingCount = len(bindings),
-      pBindings = raw_data(bindings[:]),
-    },
-    nil,
-    &self.descriptor_set_layout,
-  ) or_return
   set_layouts := [?]vk.DescriptorSetLayout {
     g_camera_descriptor_set_layout, // set = 0 (camera uniforms)
-    // g_lights_descriptor_set_layout, // set = 1 (light uniforms)
+    g_lights_descriptor_set_layout, // set = 1 (light uniforms)
     g_textures_set_layout, // set = 1 (textures)
     g_bindless_bone_buffer_set_layout, // set = 2 (bone matrices)
   }
@@ -183,51 +120,6 @@ renderer_gbuffer_init :: proc(
     nil,
     &self.pipeline_layout,
   ) or_return
-  // Create descriptor sets (only for set 0 - camera/scene uniforms)
-  // Other sets (textures, samplers, bone matrices) use global descriptor sets
-  for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
-    vk.AllocateDescriptorSets(
-      g_device,
-      &{
-        sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
-        descriptorPool = g_descriptor_pool,
-        descriptorSetCount = 1,
-        pSetLayouts = &self.descriptor_set_layout,
-      },
-      &self.descriptor_sets[i],
-    ) or_return
-    // Update descriptor sets - camera/scene uniforms and dummy shadow maps for compatibility
-    scene_buffer_info := vk.DescriptorBufferInfo {
-      buffer = self.scene_uniform_buffers[i].buffer,
-      range  = vk.DeviceSize(self.scene_uniform_buffers[i].bytes_count),
-    }
-    light_buffer_info := vk.DescriptorBufferInfo {
-      buffer = self.light_uniform_buffers[i].buffer,
-      range  = vk.DeviceSize(self.light_uniform_buffers[i].bytes_count),
-    }
-    writes := [?]vk.WriteDescriptorSet {
-      // Scene uniform (binding 0)
-      {
-        sType = .WRITE_DESCRIPTOR_SET,
-        dstSet = self.descriptor_sets[i],
-        dstBinding = 0,
-        descriptorType = .UNIFORM_BUFFER,
-        descriptorCount = 1,
-        pBufferInfo = &scene_buffer_info,
-      },
-      // Light uniform (binding 1)
-      {
-        sType = .WRITE_DESCRIPTOR_SET,
-        dstSet = self.descriptor_sets[i],
-        dstBinding = 1,
-        descriptorType = .UNIFORM_BUFFER,
-        descriptorCount = 1,
-        pBufferInfo = &light_buffer_info,
-      },
-    }
-    vk.UpdateDescriptorSets(g_device, len(writes), raw_data(writes[:]), 0, nil)
-  }
-  self.pipelines = {}
   log.info("About to build G-buffer pipelines...")
   // Create G-buffer specific pipelines (focus on normals output)
   renderer_gbuffer_build_pipelines(self, depth_format) or_return
@@ -566,16 +458,6 @@ renderer_gbuffer_render :: proc(
   engine: ^Engine,
   command_buffer: vk.CommandBuffer,
 ) {
-  scene_uniform := data_buffer_get(
-    &engine.gbuffer.scene_uniform_buffers[g_frame_index],
-  )
-  scene_uniform.view = geometry.calculate_view_matrix(engine.scene.camera)
-  scene_uniform.projection = geometry.calculate_projection_matrix(
-    engine.scene.camera,
-  )
-  scene_uniform.time = f32(
-    time.duration_seconds(time.since(engine.start_timestamp)),
-  )
   camera_frustum := geometry.camera_make_frustum(engine.scene.camera)
   vk.CmdBindDescriptorSets(
     command_buffer,
@@ -583,58 +465,60 @@ renderer_gbuffer_render :: proc(
     engine.gbuffer.pipeline_layout,
     0,
     1,
-    &engine.gbuffer.descriptor_sets[g_frame_index],
+    &g_camera_descriptor_sets[g_frame_index],
     0,
     nil,
   )
   mesh_count := 0
   for &entry in engine.scene.nodes.entries do if entry.active {
     node := &entry.item
-    #partial switch data in node.attachment {
-    case MeshAttachment:
-      mesh := resource.get(g_meshes, data.handle)
-      if mesh == nil do continue
-      material := resource.get(g_materials, data.material)
-      if material == nil do continue
-      mesh_count += 1
-      world_aabb := geometry.aabb_transform(mesh.aabb, node.transform.world_matrix)
-      if !geometry.frustum_test_aabb(&camera_frustum, world_aabb) do continue
-      texture_indices: MaterialTextures = {
-        albedo_index             = min(MAX_TEXTURES - 1, material.albedo.index),
-        metallic_roughness_index = min(MAX_TEXTURES - 1, material.metallic_roughness.index),
-        normal_index             = min(MAX_TEXTURES - 1, material.normal.index),
-        displacement_index       = min(MAX_TEXTURES - 1, material.displacement.index),
-        emissive_index           = min(MAX_TEXTURES - 1, material.emissive.index),
-      }
-      node_skinning, has_skinning := data.skinning.?
-      if has_skinning {
-        texture_indices.bone_matrix_offset = node_skinning.bone_matrix_offset + g_frame_index * g_bone_matrix_slab.capacity
-      }
-      push_constants := PushConstant {
-        world           = node.transform.world_matrix,
-        textures        = texture_indices,
-        metallic_value  = material.metallic_value,
-        roughness_value = material.roughness_value,
-        emissive_value  = material.emissive_value,
-      }
-      features := material.features & ShaderFeatureSet{.SKINNING}
-      pipeline := renderer_gbuffer_get_pipeline(&engine.gbuffer, features)
-      vk.CmdBindPipeline(command_buffer, .GRAPHICS, pipeline)
-      descriptor_sets := [?]vk.DescriptorSet {
-        engine.gbuffer.descriptor_sets[g_frame_index], // set = 0 (camera uniforms)
-        g_textures_set, // set = 1 (textures)
-        g_bindless_bone_buffer_descriptor_set, // set = 2 (bone matrices)
-      }
-      vk.CmdBindDescriptorSets(command_buffer, .GRAPHICS, engine.gbuffer.pipeline_layout, 0, len(descriptor_sets), raw_data(descriptor_sets[:]), 0, nil)
-      vk.CmdPushConstants(command_buffer, engine.gbuffer.pipeline_layout, {.VERTEX, .FRAGMENT}, 0, size_of(PushConstant), &push_constants)
-      offset: vk.DeviceSize = 0
-      vk.CmdBindVertexBuffers(command_buffer, 0, 1, &mesh.vertex_buffer.buffer, &offset)
-      if skinning, has_skinning := &mesh.skinning.?; has_skinning {
-        vk.CmdBindVertexBuffers(command_buffer, 1, 1, &skinning.skin_buffer.buffer, &offset)
-      }
-      vk.CmdBindIndexBuffer(command_buffer, mesh.index_buffer.buffer, 0, .UINT32)
-      vk.CmdDrawIndexed(command_buffer, mesh.indices_len, 1, 0, 0, 0)
+    mesh_att, has_mesh := &node.attachment.(MeshAttachment)
+    if !has_mesh{
+      continue
     }
+    mesh := resource.get(g_meshes, mesh_att.handle)
+    if mesh == nil do continue
+    material := resource.get(g_materials, mesh_att.material)
+    if material == nil do continue
+    mesh_count += 1
+    world_aabb := geometry.aabb_transform(mesh.aabb, node.transform.world_matrix)
+    if !geometry.frustum_test_aabb(&camera_frustum, world_aabb) do continue
+    texture_indices: MaterialTextures = {
+      albedo_index             = min(MAX_TEXTURES - 1, material.albedo.index),
+      metallic_roughness_index = min(MAX_TEXTURES - 1, material.metallic_roughness.index),
+      normal_index             = min(MAX_TEXTURES - 1, material.normal.index),
+      displacement_index       = min(MAX_TEXTURES - 1, material.displacement.index),
+      emissive_index           = min(MAX_TEXTURES - 1, material.emissive.index),
+    }
+    node_skinning, has_skinning := mesh_att.skinning.?
+    if has_skinning {
+      texture_indices.bone_matrix_offset = node_skinning.bone_matrix_offset + g_frame_index * g_bone_matrix_slab.capacity
+    }
+    push_constants := PushConstant {
+      world           = node.transform.world_matrix,
+      textures        = texture_indices,
+      metallic_value  = material.metallic_value,
+      roughness_value = material.roughness_value,
+      emissive_value  = material.emissive_value,
+    }
+    features := material.features & ShaderFeatureSet{.SKINNING}
+    pipeline := renderer_gbuffer_get_pipeline(&engine.gbuffer, features)
+    vk.CmdBindPipeline(command_buffer, .GRAPHICS, pipeline)
+    descriptor_sets := [?]vk.DescriptorSet {
+      g_camera_descriptor_sets[g_frame_index], // set = 0 (camera uniforms)
+      g_lights_descriptor_sets[g_frame_index], // set = 1 (light uniforms)
+      g_textures_descriptor_set, // set = 2 (textures)
+      g_bindless_bone_buffer_descriptor_set, // set = 3 (bone matrices)
+    }
+    vk.CmdBindDescriptorSets(command_buffer, .GRAPHICS, engine.gbuffer.pipeline_layout, 0, len(descriptor_sets), raw_data(descriptor_sets[:]), 0, nil)
+    vk.CmdPushConstants(command_buffer, engine.gbuffer.pipeline_layout, {.VERTEX, .FRAGMENT}, 0, size_of(PushConstant), &push_constants)
+    offset: vk.DeviceSize = 0
+    vk.CmdBindVertexBuffers(command_buffer, 0, 1, &mesh.vertex_buffer.buffer, &offset)
+    if skinning, has_skinning := &mesh.skinning.?; has_skinning {
+      vk.CmdBindVertexBuffers(command_buffer, 1, 1, &skinning.skin_buffer.buffer, &offset)
+    }
+    vk.CmdBindIndexBuffer(command_buffer, mesh.index_buffer.buffer, 0, .UINT32)
+    vk.CmdDrawIndexed(command_buffer, mesh.indices_len, 1, 0, 0, 0)
   }
 }
 
@@ -647,15 +531,8 @@ renderer_gbuffer_get_pipeline :: proc(
 
 renderer_gbuffer_deinit :: proc(self: ^RendererGBuffer) {
   for pipeline in self.pipelines {
-    if pipeline != 0 {
-      vk.DestroyPipeline(g_device, pipeline, nil)
-    }
+    vk.DestroyPipeline(g_device, pipeline, nil)
   }
   vk.DestroyPipelineLayout(g_device, self.pipeline_layout, nil)
-  vk.DestroyDescriptorSetLayout(g_device, self.descriptor_set_layout, nil)
   image_buffer_deinit(&self.normal_buffer)
-  for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
-    data_buffer_deinit(&self.scene_uniform_buffers[i])
-    data_buffer_deinit(&self.light_uniform_buffers[i])
-  }
 }

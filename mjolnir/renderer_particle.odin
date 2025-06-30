@@ -212,7 +212,7 @@ render_particles :: proc(
   vk.CmdBindPipeline(command_buffer, .GRAPHICS, self.render_pipeline)
   // Bind the bindless texture and sampler descriptor sets
   descriptor_sets := [?]vk.DescriptorSet {
-    g_textures_set, // set 0
+    g_textures_descriptor_set, // set 0 (textures)
   }
   vk.CmdBindDescriptorSets(
     command_buffer,

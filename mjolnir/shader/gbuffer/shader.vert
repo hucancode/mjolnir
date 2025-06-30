@@ -14,11 +14,11 @@ layout(set = 0, binding = 0) uniform Uniforms {
     mat4 proj;
     float time;
 };
-// set 1 (textures), not available in vertex shader
-// layout(set = 1, binding = 0) uniform texture2D textures[];
+// set 1 (light uniforms), not available in vertex shader
+// set 2 (textures), not available in vertex shader
+// layout(set = 2, binding = 0) uniform texture2D textures[];
 // layout(set = 2, binding = 0) uniform sampler samplers[];
-
-layout(set = 2, binding = 0) readonly buffer BoneMatrices {
+layout(set = 3, binding = 0) readonly buffer BoneMatrices {
     mat4 bones[];
 };
 

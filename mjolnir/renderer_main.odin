@@ -701,7 +701,7 @@ renderer_main_render :: proc(
   descriptor_sets := [?]vk.DescriptorSet {
     g_camera_descriptor_sets[g_frame_index], // set = 0
     g_lights_descriptor_sets[g_frame_index], // set = 1
-    g_textures_set, // set = 2
+    g_textures_descriptor_set, // set = 2
     g_bindless_bone_buffer_descriptor_set, // set = 3
   }
   vk.CmdBindDescriptorSets(
@@ -831,7 +831,7 @@ render_to_texture :: proc(
   descriptor_sets := [?]vk.DescriptorSet {
     g_camera_descriptor_sets[g_frame_index], // set = 0
     g_lights_descriptor_sets[g_frame_index], // set = 1
-    g_textures_set, // set = 2
+    g_textures_descriptor_set, // set = 2
     g_bindless_bone_buffer_descriptor_set, // set = 3
   }
   vk.CmdBindDescriptorSets(

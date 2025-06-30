@@ -34,8 +34,16 @@ layout(set = 0, binding = 0) uniform SceneUniforms {
     mat4 proj;
     float time;
 };
-layout(set = 1, binding = 0) uniform texture2D textures[];
-layout(set = 1, binding = 1) uniform sampler samplers[];
+// lights and shadow maps set = 1
+layout(set = 1, binding = 0) uniform LightUniforms {
+    Light lights[MAX_LIGHTS];
+    uint lightCount;
+};
+layout(set = 1, binding = 1) uniform sampler2D shadowMaps[MAX_LIGHTS];
+layout(set = 1, binding = 2) uniform samplerCube cubeShadowMaps[MAX_LIGHTS];
+// textures and samplers set = 2
+layout(set = 2, binding = 0) uniform texture2D textures[];
+layout(set = 2, binding = 1) uniform sampler samplers[];
 
 layout(push_constant) uniform PushConstants {
     mat4 world;

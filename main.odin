@@ -171,116 +171,114 @@ setup :: proc(engine: ^mjolnir.Engine) {
       cast_shadow = true,
     },
   )
-  effect_add_tonemap(&engine.postprocess, 1.5, 1.3)
-  effect_add_fog(&engine.postprocess, {0.2, 0.5, 0.9}, 0.02, 50.0, 200.0)
+  // effect_add_tonemap(&engine.postprocess, 1.5, 1.3)
+  // effect_add_fog(&engine.postprocess, {0.2, 0.5, 0.9}, 0.02, 50.0, 200.0)
   // effect_add_crosshatch(&engine.postprocess, {1280, 720}) // Add cross-hatch effect
-  // effect_add_dof(&engine.postprocess, 8.0, 4.0, 6.0, 0.8) // Focus at 8 units, 4 unit range, 6 blur strength, 0.8 bokeh
-  // effect_add_outline(&engine.postprocess, 2.0, {0.0, 1.0, 0.0}) // Green outline with thickness 2.0
-  // effect_add_bloom(&engine.postprocess, 0.8, 0.5, 16.0)
-  // effect_add_blur(&engine.postprocess, 8.0)
 
-  // Create a bright white ball to test bloom effect
-  bright_material_handle, _, _ := create_material(
-    emissive_value = 30.0,
-  )
-  _, bright_ball_node := spawn(
-    &engine.scene,
-    MeshAttachment {
-      handle = sphere_mesh_handle,
-      material = bright_material_handle,
-      cast_shadow = false, // Emissive objects don't need shadows
-    },
-  )
-  translate(&bright_ball_node.transform, x = 1.0) // Position it above the ground
-  scale(&bright_ball_node.transform, 0.2) // Make it a reasonable size
+  if false {
+    // effect_add_bloom(&engine.postprocess, 0.8, 0.5, 16.0)
+    // Create a bright white ball to test bloom effect
+    bright_material_handle, _, _ := create_material(emissive_value = 30.0)
+    _, bright_ball_node := spawn(
+      &engine.scene,
+      MeshAttachment {
+        handle      = sphere_mesh_handle,
+        material    = bright_material_handle,
+        cast_shadow = false, // Emissive objects don't need shadows
+      },
+    )
+    translate(&bright_ball_node.transform, x = 1.0) // Position it above the ground
+    scale(&bright_ball_node.transform, 0.2) // Make it a reasonable size
+  }
 
-  // Create particle system 1 with gold star texture
-  particle_texture1_handle, _, _ := mjolnir.create_texture_from_path(
-    "assets/gold-star.png",
-  )
-  // Create particle system 2 with black circle texture
-  particle_texture2_handle, _, _ := mjolnir.create_texture_from_path(
-    "assets/black-circle.png",
-  )
+  if false {
+    // Create particle system 1 with gold star texture
+    particle_texture1_handle, _, _ := mjolnir.create_texture_from_path(
+      "assets/gold-star.png",
+    )
+    // Create particle system 2 with black circle texture
+    particle_texture2_handle, _, _ := mjolnir.create_texture_from_path(
+      "assets/black-circle.png",
+    )
+    psys_handle1, _ := spawn_at(
+      &engine.scene,
+      {-2.0, 1.9, 0.3},
+      mjolnir.ParticleSystemAttachment {
+        bounding_box = geometry.Aabb{min = {-1, -1, -1}, max = {1, 1, 1}},
+        texture_handle = particle_texture1_handle,
+      },
+    )
+    spawn_child(
+      &engine.scene,
+      psys_handle1,
+      EmitterAttachment {
+        emission_rate     = 10,
+        particle_lifetime = 5.0,
+        position_spread   = 0.05,
+        initial_velocity  = {0, -0.1, 0, 0},
+        velocity_spread   = 0.1,
+        color_start       = {1, 1, 0, 1}, // Yellow particles
+        color_end         = {1, 0.5, 0, 0},
+        size_start        = 200.0,
+        size_end          = 50.0,
+        weight            = 0.3,
+        weight_spread     = 0.05,
+        texture_handle    = particle_texture1_handle,
+        enabled           = true,
+      },
+    )
 
-  psys_handle1, _ := spawn_at(
-    &engine.scene,
-    {-2.0, 1.9, 0.3},
-    mjolnir.ParticleSystemAttachment {
-      bounding_box = geometry.Aabb{min = {-1, -1, -1}, max = {1, 1, 1}},
-      texture_handle = particle_texture1_handle,
-    },
-  )
-  spawn_child(
-    &engine.scene,
-    psys_handle1,
-    EmitterAttachment {
-      emission_rate     = 10,
-      particle_lifetime = 5.0,
-      position_spread   = 0.05,
-      initial_velocity  = {0, -0.1, 0, 0},
-      velocity_spread   = 0.1,
-      color_start       = {1, 1, 0, 1}, // Yellow particles
-      color_end         = {1, 0.5, 0, 0},
-      size_start        = 200.0,
-      size_end          = 50.0,
-      weight            = 0.3,
-      weight_spread     = 0.05,
-      texture_handle    = particle_texture1_handle,
-      enabled           = true,
-    },
-  )
+    psys_handle2, _ := spawn_at(
+      &engine.scene,
+      {2.0, 1.9, 0.3},
+      mjolnir.ParticleSystemAttachment {
+        bounding_box = geometry.Aabb{min = {-1, -1, -1}, max = {1, 1, 1}},
+        texture_handle = particle_texture2_handle,
+      },
+    )
 
-  psys_handle2, _ := spawn_at(
-    &engine.scene,
-    {2.0, 1.9, 0.3},
-    mjolnir.ParticleSystemAttachment {
-      bounding_box = geometry.Aabb{min = {-1, -1, -1}, max = {1, 1, 1}},
-      texture_handle = particle_texture2_handle,
-    },
-  )
-
-  // Create an emitter for the second particle system
-  spawn_child(
-    &engine.scene,
-    psys_handle2,
-    EmitterAttachment {
-      emission_rate     = 15,
-      particle_lifetime = 3.0,
-      position_spread   = 0.1,
-      initial_velocity  = {0, 0.2, 0, 0},
-      velocity_spread   = 0.15,
-      color_start       = {0, 0, 1, 1}, // Blue particles
-      color_end         = {0, 1, 1, 0},
-      size_start        = 150.0,
-      size_end          = 75.0,
-      weight            = 0.2,
-      weight_spread     = 0.05,
-      texture_handle    = particle_texture2_handle,
-      enabled           = true,
-    },
-  )
-  // Create a force field that affects both particle systems
-  forcefield_handle, forcefield_node = spawn_child(
-    &engine.scene,
-    psys_handle1, // Attach to first particle system
-    mjolnir.ForceFieldAttachment {
-      behavior = .ATTRACT,
-      strength = 20.0,
-      area_of_effect = 5.0,
-    },
-  )
-  geometry.translate(&forcefield_node.transform, x = 5.0, y = 4.0, z = 0.0)
-  _, forcefield_visual := spawn_child(
-    &engine.scene,
-    forcefield_handle,
-    MeshAttachment {
-      handle = sphere_mesh_handle,
-      material = wireframe_material_handle,
-      cast_shadow = false,
-    },
-  )
-  geometry.scale(&forcefield_visual.transform, 0.2)
+    // Create an emitter for the second particle system
+    spawn_child(
+      &engine.scene,
+      psys_handle2,
+      EmitterAttachment {
+        emission_rate     = 15,
+        particle_lifetime = 3.0,
+        position_spread   = 0.1,
+        initial_velocity  = {0, 0.2, 0, 0},
+        velocity_spread   = 0.15,
+        color_start       = {0, 0, 1, 1}, // Blue particles
+        color_end         = {0, 1, 1, 0},
+        size_start        = 150.0,
+        size_end          = 75.0,
+        weight            = 0.2,
+        weight_spread     = 0.05,
+        texture_handle    = particle_texture2_handle,
+        enabled           = true,
+      },
+    )
+    // Create a force field that affects both particle systems
+    forcefield_handle, forcefield_node = spawn_child(
+      &engine.scene,
+      psys_handle1, // Attach to first particle system
+      mjolnir.ForceFieldAttachment {
+        behavior = .ATTRACT,
+        strength = 20.0,
+        area_of_effect = 5.0,
+      },
+    )
+    geometry.translate(&forcefield_node.transform, x = 5.0, y = 4.0, z = 0.0)
+    _, forcefield_visual := spawn_child(
+      &engine.scene,
+      forcefield_handle,
+      MeshAttachment {
+        handle = sphere_mesh_handle,
+        material = wireframe_material_handle,
+        cast_shadow = false,
+      },
+    )
+    geometry.scale(&forcefield_visual.transform, 0.2)
+  }
   log.info("setup complete")
 }
 
@@ -296,12 +294,14 @@ render_2d :: proc(engine: ^mjolnir.Engine, ctx: ^mu.Context) {
 update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
   using mjolnir, geometry
   t := time_since_app_start(engine) * 0.5
-  geometry.translate(
-    &forcefield_node.transform,
-    math.cos(t) * 2.0,
-    2.0,
-    math.sin(t) * 2.0,
-  )
+  if forcefield_node != nil {
+    geometry.translate(
+      &forcefield_node.transform,
+      math.cos(t) * 2.0,
+      2.0,
+      math.sin(t) * 2.0,
+    )
+  }
   // Animate lights
   for handle, i in light_handles {
     if i == 0 {

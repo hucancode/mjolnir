@@ -206,7 +206,6 @@ submit_queue_and_present :: proc(
   self: ^Swapchain,
   command_buffer: ^vk.CommandBuffer,
 ) -> vk.Result {
-  // log.debug("============ submitting queue... =============")
   wait_stage_mask: vk.PipelineStageFlags = {.COLOR_ATTACHMENT_OUTPUT}
   submit_info := vk.SubmitInfo {
     sType                = .SUBMIT_INFO,
@@ -218,6 +217,7 @@ submit_queue_and_present :: proc(
     signalSemaphoreCount = 1,
     pSignalSemaphores    = &self.render_finished_semaphores[g_frame_index],
   }
+  log.debug("============ submitting queue... =============")
   vk.QueueSubmit(
     g_graphics_queue,
     1,
@@ -233,5 +233,6 @@ submit_queue_and_present :: proc(
     pSwapchains        = &self.handle,
     pImageIndices      = raw_data(image_indices[:]),
   }
+  log.debug("============ presenting... =============")
   return vk.QueuePresentKHR(g_present_queue, &present_info)
 }

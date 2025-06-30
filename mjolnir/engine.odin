@@ -567,7 +567,7 @@ render :: proc(self: ^Engine) -> vk.Result {
   // dispatch computation early and doing other work while GPU is busy
   compute_particles(&self.particle, command_buffer)
   update_visible_lights(self)
-  // log.debug("============ rendering shadow pass...============ ")
+  log.debug("============ rendering shadow pass...============ ")
   renderer_shadow_begin(self, command_buffer)
   renderer_shadow_render(self, command_buffer)
   renderer_shadow_end(self, command_buffer)
@@ -575,21 +575,21 @@ render :: proc(self: ^Engine) -> vk.Result {
     command_buffer,
     self.main.frames[g_frame_index].main_pass_image.image,
   )
-  // log.debug("============ rendering depth pre-pass... =============")
+  log.debug("============ rendering depth pre-pass... =============")
   renderer_depth_prepass_begin(self, command_buffer)
   renderer_depth_prepass_render(self, command_buffer)
   renderer_depth_prepass_end(self, command_buffer)
   if true {
-    // log.debug("============ rendering G-buffer pass... =============")
+    log.debug("============ rendering G-buffer pass... =============")
     renderer_gbuffer_begin(self, command_buffer, self.swapchain.extent)
     renderer_gbuffer_render(self, command_buffer)
     renderer_gbuffer_end(self, command_buffer)
 
-    // log.debug("============ rendering main pass... =============")
+    log.debug("============ rendering main pass... =============")
     renderer_main_begin(self, command_buffer)
     renderer_main_render(self, command_buffer)
     renderer_main_end(self, command_buffer)
-    // log.debug("============ rendering particles... =============")
+    log.debug("============ rendering particles... =============")
     renderer_particle_begin(
       self,
       command_buffer,
@@ -599,7 +599,7 @@ render :: proc(self: ^Engine) -> vk.Result {
     renderer_particle_render(self, command_buffer)
     renderer_particle_end(self, command_buffer)
   }
-  // log.debug("============ rendering post processes... =============")
+  log.debug("============ rendering post processes... =============")
   prepare_image_for_shader_read(
     command_buffer,
     self.main.frames[g_frame_index].main_pass_image.image,
@@ -657,6 +657,7 @@ render :: proc(self: ^Engine) -> vk.Result {
     self.render2d_proc(self, &self.ui.ctx)
   }
   mu.end(&self.ui.ctx)
+  log.debug("============ rendering UI... =============")
   renderer_ui_begin(
     &self.ui,
     command_buffer,
@@ -665,6 +666,7 @@ render :: proc(self: ^Engine) -> vk.Result {
   )
   renderer_ui_render(&self.ui, command_buffer)
   renderer_ui_end(&self.ui, command_buffer)
+  log.debug("============ preparing image for present... =============")
   prepare_image_for_present(
     command_buffer,
     self.swapchain.images[self.swapchain.image_index],

@@ -32,7 +32,7 @@ g_lights_descriptor_set_layout: vk.DescriptorSetLayout
 g_lights_descriptor_sets: [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet
 
 g_textures_set_layout: vk.DescriptorSetLayout
-g_textures_set: vk.DescriptorSet
+g_textures_descriptor_set: vk.DescriptorSet
 
 factory_init :: proc() -> vk.Result {
   log.infof("Initializing mesh pool... ")
@@ -151,12 +151,12 @@ factory_init :: proc() -> vk.Result {
       descriptorSetCount = 1,
       pSetLayouts = &g_textures_set_layout,
     },
-    &g_textures_set,
+    &g_textures_descriptor_set,
   ) or_return
   writes := [?]vk.WriteDescriptorSet {
     {
       sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = g_textures_set,
+      dstSet = g_textures_descriptor_set,
       dstBinding = 1,
       dstArrayElement = 0,
       descriptorType = .SAMPLER,
@@ -165,7 +165,7 @@ factory_init :: proc() -> vk.Result {
     },
     {
       sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = g_textures_set,
+      dstSet = g_textures_descriptor_set,
       dstBinding = 1,
       dstArrayElement = 1,
       descriptorType = .SAMPLER,
@@ -174,7 +174,7 @@ factory_init :: proc() -> vk.Result {
     },
     {
       sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = g_textures_set,
+      dstSet = g_textures_descriptor_set,
       dstBinding = 1,
       dstArrayElement = 2,
       descriptorType = .SAMPLER,
@@ -183,7 +183,7 @@ factory_init :: proc() -> vk.Result {
     },
     {
       sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = g_textures_set,
+      dstSet = g_textures_descriptor_set,
       dstBinding = 1,
       dstArrayElement = 3,
       descriptorType = .SAMPLER,
@@ -210,7 +210,7 @@ factory_deinit :: proc() {
   g_lights_descriptor_set_layout = 0
   for &set in g_lights_descriptor_sets do set = 0
   g_textures_set_layout = 0
-  g_textures_set = 0
+  g_textures_descriptor_set = 0
 }
 
 init_global_samplers :: proc() -> vk.Result {
@@ -345,7 +345,7 @@ set_texture_descriptor :: proc(index: u32, image_view: vk.ImageView) {
   }
   write := vk.WriteDescriptorSet {
     sType           = .WRITE_DESCRIPTOR_SET,
-    dstSet          = g_textures_set,
+    dstSet          = g_textures_descriptor_set,
     dstBinding      = 0,
     dstArrayElement = index,
     descriptorType  = .SAMPLED_IMAGE,
