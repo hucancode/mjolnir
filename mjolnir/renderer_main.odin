@@ -89,8 +89,6 @@ RendererMain :: struct {
     main_pass_image:       ImageBuffer,
     shadow_maps:           [MAX_SHADOW_MAPS]ImageBuffer,
     cube_shadow_maps:      [MAX_SHADOW_MAPS]CubeImageBuffer,
-    camera_descriptor_set: vk.DescriptorSet,
-    lights_descriptor_set: vk.DescriptorSet,
   },
   pipeline_layout:           vk.PipelineLayout,
   pipelines:                 [SHADER_VARIANT_COUNT]vk.Pipeline,
@@ -701,8 +699,8 @@ renderer_main_render :: proc(
   populate_render_batches(&batching_ctx)
   layout := engine.main.pipeline_layout
   descriptor_sets := [?]vk.DescriptorSet {
-    engine.main.frames[g_frame_index].camera_descriptor_set, // set = 0
-    engine.main.frames[g_frame_index].lights_descriptor_set, // set = 1
+    g_camera_descriptor_sets[g_frame_index], // set = 0
+    g_lights_descriptor_sets[g_frame_index], // set = 1
     g_textures_set, // set = 2
     g_bindless_bone_buffer_descriptor_set, // set = 3
   }
@@ -831,8 +829,8 @@ render_to_texture :: proc(
   populate_render_batches(&batching_ctx)
   layout := engine.main.pipeline_layout
   descriptor_sets := [?]vk.DescriptorSet {
-    engine.main.frames[g_frame_index].camera_descriptor_set, // set = 0
-    engine.main.frames[g_frame_index].lights_descriptor_set, // set = 1
+    g_camera_descriptor_sets[g_frame_index], // set = 0
+    g_lights_descriptor_sets[g_frame_index], // set = 1
     g_textures_set, // set = 2
     g_bindless_bone_buffer_descriptor_set, // set = 3
   }
@@ -923,9 +921,6 @@ renderer_main_init :: proc(
       },
       raw_data(descriptor_sets[:]),
     ) or_return
-    // Store per-frame descriptor sets
-    self.frames[frame_index].camera_descriptor_set = descriptor_sets[0]
-    self.frames[frame_index].lights_descriptor_set = descriptor_sets[1]
     // Write buffer info to each descriptor set
     camera_buffer_info := vk.DescriptorBufferInfo {
       buffer = self.frames[frame_index].camera_uniform.buffer,
@@ -956,7 +951,7 @@ renderer_main_init :: proc(
     writes := [?]vk.WriteDescriptorSet {
       {
         sType = .WRITE_DESCRIPTOR_SET,
-        dstSet = self.frames[frame_index].camera_descriptor_set,
+        dstSet = g_camera_descriptor_sets[frame_index],
         dstBinding = 0,
         descriptorType = .UNIFORM_BUFFER,
         descriptorCount = 1,
@@ -964,7 +959,7 @@ renderer_main_init :: proc(
       },
       {
         sType = .WRITE_DESCRIPTOR_SET,
-        dstSet = self.frames[frame_index].lights_descriptor_set,
+        dstSet = g_lights_descriptor_sets[frame_index],
         dstBinding = 0,
         descriptorType = .UNIFORM_BUFFER,
         descriptorCount = 1,
@@ -972,7 +967,7 @@ renderer_main_init :: proc(
       },
       {
         sType = .WRITE_DESCRIPTOR_SET,
-        dstSet = self.frames[frame_index].lights_descriptor_set,
+        dstSet = g_lights_descriptor_sets[frame_index],
         dstBinding = 1,
         descriptorType = .COMBINED_IMAGE_SAMPLER,
         descriptorCount = len(shadow_map_image_infos),
@@ -980,7 +975,7 @@ renderer_main_init :: proc(
       },
       {
         sType = .WRITE_DESCRIPTOR_SET,
-        dstSet = self.frames[frame_index].lights_descriptor_set,
+        dstSet = g_lights_descriptor_sets[frame_index],
         dstBinding = 2,
         descriptorType = .COMBINED_IMAGE_SAMPLER,
         descriptorCount = len(cube_shadow_map_image_infos),

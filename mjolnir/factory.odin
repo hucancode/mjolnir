@@ -23,12 +23,13 @@ g_bindless_bone_buffer_descriptor_set: vk.DescriptorSet
 g_bindless_bone_buffer: DataBuffer(linalg.Matrix4f32)
 g_bone_matrix_slab: resource.SlabAllocator
 
-// Engine-level global descriptor sets and layouts for camera and lights
+// Engine-level global descriptor sets and layouts
 
 g_camera_descriptor_set_layout: vk.DescriptorSetLayout
-g_camera_descriptor_set: vk.DescriptorSet
+g_camera_descriptor_sets: [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet
+
 g_lights_descriptor_set_layout: vk.DescriptorSetLayout
-g_lights_descriptor_set: vk.DescriptorSet
+g_lights_descriptor_sets: [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet
 
 g_textures_set_layout: vk.DescriptorSetLayout
 g_textures_set: vk.DescriptorSet
@@ -43,7 +44,7 @@ factory_init :: proc() -> vk.Result {
   log.infof("All resource pools initialized successfully")
   init_global_samplers()
   init_bone_matrix_allocator() or_return
-  // Camera descriptor set layout and set
+  // Camera descriptor set layout and sets
   camera_bindings := [?]vk.DescriptorSetLayoutBinding {
     {
       binding = 0,
@@ -62,17 +63,19 @@ factory_init :: proc() -> vk.Result {
     nil,
     &g_camera_descriptor_set_layout,
   ) or_return
+  camera_set_layouts := [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSetLayout{}
+  for i in 0..<MAX_FRAMES_IN_FLIGHT do camera_set_layouts[i] = g_camera_descriptor_set_layout
   vk.AllocateDescriptorSets(
     g_device,
     &{
       sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
       descriptorPool = g_descriptor_pool,
-      descriptorSetCount = 1,
-      pSetLayouts = &g_camera_descriptor_set_layout,
+      descriptorSetCount = MAX_FRAMES_IN_FLIGHT,
+      pSetLayouts = &camera_set_layouts[0],
     },
-    &g_camera_descriptor_set,
+    &g_camera_descriptor_sets[0],
   ) or_return
-  // Lights descriptor set layout and set
+  // Lights descriptor set layout and sets
   lights_bindings := [?]vk.DescriptorSetLayoutBinding {
     {
       binding = 0,
@@ -103,17 +106,19 @@ factory_init :: proc() -> vk.Result {
     nil,
     &g_lights_descriptor_set_layout,
   ) or_return
+  lights_set_layouts := [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSetLayout{}
+  for i in 0..<MAX_FRAMES_IN_FLIGHT do lights_set_layouts[i] = g_lights_descriptor_set_layout
   vk.AllocateDescriptorSets(
     g_device,
     &{
       sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
       descriptorPool = g_descriptor_pool,
-      descriptorSetCount = 1,
-      pSetLayouts = &g_lights_descriptor_set_layout,
+      descriptorSetCount = MAX_FRAMES_IN_FLIGHT,
+      pSetLayouts = &lights_set_layouts[0],
     },
-    &g_lights_descriptor_set,
+    &g_lights_descriptor_sets[0],
   ) or_return
-  // Create textures+samplers descriptor set layout (set = 2)
+  // Textures+samplers descriptor set
   textures_bindings := [?]vk.DescriptorSetLayoutBinding {
     {
       binding = 0,
@@ -201,9 +206,9 @@ factory_deinit :: proc() {
   vk.DestroyDescriptorSetLayout(g_device, g_lights_descriptor_set_layout, nil)
   vk.DestroyDescriptorSetLayout(g_device, g_textures_set_layout, nil)
   g_camera_descriptor_set_layout = 0
-  g_camera_descriptor_set = 0
+  for &set in g_camera_descriptor_sets do set = 0
   g_lights_descriptor_set_layout = 0
-  g_lights_descriptor_set = 0
+  for &set in g_lights_descriptor_sets do set = 0
   g_textures_set_layout = 0
   g_textures_set = 0
 }
