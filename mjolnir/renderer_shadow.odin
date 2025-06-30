@@ -236,8 +236,49 @@ renderer_shadow_begin :: proc(
 ) {
   // Transition all shadow maps to depth attachment optimal
   for light in engine.visible_lights[g_frame_index] do if light.has_shadow {
-    initial_barriers := [?]vk.ImageMemoryBarrier{{sType = .IMAGE_MEMORY_BARRIER, oldLayout = .UNDEFINED, newLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL, srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED, dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED, image = light.cube_shadow_map.image, subresourceRange = {aspectMask = {.DEPTH}, baseMipLevel = 0, levelCount = 1, baseArrayLayer = 0, layerCount = 6}, dstAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE}}, {sType = .IMAGE_MEMORY_BARRIER, oldLayout = .UNDEFINED, newLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL, srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED, dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED, image = light.shadow_map.image, subresourceRange = {aspectMask = {.DEPTH}, baseMipLevel = 0, levelCount = 1, baseArrayLayer = 0, layerCount = 1}, dstAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE}}}
-    vk.CmdPipelineBarrier(command_buffer, {.TOP_OF_PIPE}, {.EARLY_FRAGMENT_TESTS}, {}, 0, nil, 0, nil, len(initial_barriers), raw_data(initial_barriers[:]))
+    initial_barriers := [?]vk.ImageMemoryBarrier{
+      {
+        sType = .IMAGE_MEMORY_BARRIER,
+        oldLayout = .UNDEFINED,
+        newLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+        srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+        dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+        image = light.cube_shadow_map.image,
+        subresourceRange = {
+          aspectMask = {.DEPTH},
+          baseMipLevel = 0,
+          levelCount = 1,
+          baseArrayLayer = 0,
+          layerCount = 6,
+        },
+        dstAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE},
+      },
+      {
+        sType = .IMAGE_MEMORY_BARRIER,
+        oldLayout = .UNDEFINED,
+        newLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+        srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+        dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+        image = light.shadow_map.image,
+        subresourceRange = {
+          aspectMask = {.DEPTH},
+          baseMipLevel = 0,
+          levelCount = 1,
+          baseArrayLayer = 0,
+          layerCount = 1,
+        },
+        dstAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE},
+      },
+    }
+    vk.CmdPipelineBarrier(
+      command_buffer,
+      {.TOP_OF_PIPE},
+      {.EARLY_FRAGMENT_TESTS},
+      {},
+      0, nil,
+      0, nil,
+      len(initial_barriers), raw_data(initial_barriers[:]),
+    )
   }
 }
 
@@ -349,8 +390,50 @@ renderer_shadow_end :: proc(
 ) {
   // Transition all shadow maps to depth attachment optimal
   for light in engine.visible_lights[g_frame_index] do if light.has_shadow {
-    initial_barriers := [?]vk.ImageMemoryBarrier{{sType = .IMAGE_MEMORY_BARRIER, oldLayout = .UNDEFINED, newLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL, srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED, dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED, image = light.cube_shadow_map.image, subresourceRange = {aspectMask = {.DEPTH}, baseMipLevel = 0, levelCount = 1, baseArrayLayer = 0, layerCount = 6}, dstAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE}}, {sType = .IMAGE_MEMORY_BARRIER, oldLayout = .UNDEFINED, newLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL, srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED, dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED, image = light.shadow_map.image, subresourceRange = {aspectMask = {.DEPTH}, baseMipLevel = 0, levelCount = 1, baseArrayLayer = 0, layerCount = 1}, dstAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE}}, {sType = .IMAGE_MEMORY_BARRIER, oldLayout = .UNDEFINED, newLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL, srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED, dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED, image = light.shadow_map.image, subresourceRange = {aspectMask = {.DEPTH}, baseMipLevel = 0, levelCount = 1, baseArrayLayer = 1, layerCount = 1}, dstAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE}}, {sType = .IMAGE_MEMORY_BARRIER, oldLayout = .UNDEFINED, newLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL, srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED, dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED, image = light.shadow_map.image, subresourceRange = {aspectMask = {.DEPTH}, baseMipLevel = 0, levelCount = 1, baseArrayLayer = 2, layerCount = 1}, dstAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE}}, {sType = .IMAGE_MEMORY_BARRIER, oldLayout = .UNDEFINED, newLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL, srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED, dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED, image = light.shadow_map.image, subresourceRange = {aspectMask = {.DEPTH}, baseMipLevel = 0, levelCount = 1, baseArrayLayer = 3, layerCount = 1}, dstAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE}}, {sType = .IMAGE_MEMORY_BARRIER, oldLayout = .UNDEFINED, newLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL, srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED, dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED, image = light.shadow_map.image, subresourceRange = {aspectMask = {.DEPTH}, baseMipLevel = 0, levelCount = 1, baseArrayLayer = 4, layerCount = 1}, dstAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE}}, {sType = .IMAGE_MEMORY_BARRIER, oldLayout = .UNDEFINED, newLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL, srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED, dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED, image = light.shadow_map.image, subresourceRange = {aspectMask = {.DEPTH}, baseMipLevel = 0, levelCount = 1, baseArrayLayer = 5, layerCount = 1}, dstAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE}}}
-    vk.CmdPipelineBarrier(command_buffer, {.TOP_OF_PIPE}, {.EARLY_FRAGMENT_TESTS}, {}, 0, nil, 0, nil, len(initial_barriers), raw_data(initial_barriers[:]))
+    initial_barriers : [7]vk.ImageMemoryBarrier
+    initial_barriers[0] = {
+      sType = .IMAGE_MEMORY_BARRIER,
+      oldLayout = .UNDEFINED,
+      newLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+      srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+      dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+      image = light.cube_shadow_map.image,
+      subresourceRange = {
+        aspectMask = {.DEPTH},
+        baseMipLevel = 0,
+        levelCount = 1,
+        baseArrayLayer = 0,
+        layerCount = 6,
+      },
+      dstAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE},
+    }
+    for i in 0 ..<6 {
+      initial_barriers[i+1] = {
+        sType = .IMAGE_MEMORY_BARRIER,
+        oldLayout = .UNDEFINED,
+        newLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+        srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+        dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+        image = light.shadow_map.image,
+        subresourceRange = {
+          aspectMask = {.DEPTH},
+          baseMipLevel = 0,
+          levelCount = 1,
+          baseArrayLayer = u32(i),
+          layerCount = 1,
+        },
+        dstAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE}
+      }
+    }
+    vk.CmdPipelineBarrier(
+      command_buffer,
+      {.TOP_OF_PIPE},
+      {.EARLY_FRAGMENT_TESTS},
+      {},
+      0, nil,
+      0, nil,
+      len(initial_barriers), raw_data(initial_barriers[:]),
+    )
   }
 }
 

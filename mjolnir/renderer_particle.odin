@@ -688,15 +688,12 @@ renderer_particle_begin :: proc(
   }
   vk.CmdPipelineBarrier(
     command_buffer,
-    {.COMPUTE_SHADER}, // srcStageMask
-    {.VERTEX_INPUT}, // dstStageMask
-    {}, // dependencyFlags
-    0,
-    nil, // memoryBarrierCount, pMemoryBarriers
-    1,
-    &barrier, // bufferMemoryBarrierCount, pBufferMemoryBarriers
-    0, // imageMemoryBarrierCount, pImageMemoryBarriers
-    nil,
+    {.COMPUTE_SHADER},
+    {.VERTEX_INPUT},
+    {},
+    0, nil, // memoryBarrierCount, pMemoryBarriers
+    1, &barrier, // bufferMemoryBarrierCount, pBufferMemoryBarriers
+    0, nil, // imageMemoryBarrierCount, pImageMemoryBarriers
   )
 
   color_attachment := vk.RenderingAttachmentInfoKHR {
