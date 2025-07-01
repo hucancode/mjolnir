@@ -43,10 +43,6 @@ layout(set = 1, binding = 2) uniform samplerCube cubeShadowMaps[MAX_LIGHTS];
 // textures and samplers set = 2
 layout(set = 2, binding = 0) uniform texture2D textures[];
 layout(set = 2, binding = 1) uniform sampler samplers[];
-// bone matrices set = 3
-layout(set = 3, binding = 0) readonly buffer BoneMatrices {
-    mat4 bones[];
-};
 
 layout(push_constant) uniform PushConstants {
     mat4 world;

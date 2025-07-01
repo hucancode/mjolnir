@@ -591,7 +591,6 @@ renderer_main_begin :: proc(
     pColorAttachments = &color_attachment,
     pDepthAttachment = &depth_attachment,
   }
-  log.debugf("begin rendering...")
   vk.CmdBeginRenderingKHR(command_buffer, &render_info)
   viewport := vk.Viewport {
     x        = 0.0,
@@ -604,31 +603,17 @@ renderer_main_begin :: proc(
   scissor := vk.Rect2D {
     extent = engine.swapchain.extent,
   }
-  log.debugf("setting viewport ...")
   vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
   vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
   camera_uniform := data_buffer_get(
     &engine.frames[g_frame_index].camera_uniform,
   )
-  log.debugf(
-    "calculating camera view matrix ... %v %x",
-    engine.scene.camera,
-    camera_uniform,
-  )
   camera_uniform.view = geometry.calculate_view_matrix(engine.scene.camera)
-  log.debugf("calculating camera projection matrix ...")
   camera_uniform.projection = geometry.calculate_projection_matrix(
     engine.scene.camera,
   )
-  log.debugf("calculating time ...")
-  // Fill light_uniform from visible_lights
-  log.debugf("getting light uniform buffer ...")
   light_uniform := data_buffer_get(&engine.frames[g_frame_index].light_uniform)
   light_uniform.light_count = u32(len(engine.visible_lights[g_frame_index]))
-  log.debugf(
-    "looping over %d visible lights",
-    len(engine.visible_lights[g_frame_index]),
-  )
   for light, i in engine.visible_lights[g_frame_index] {
     light_uniform.lights[i].kind = light.kind
     light_uniform.lights[i].color = linalg.Vector4f32 {
