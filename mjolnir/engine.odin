@@ -114,8 +114,6 @@ VisibleLightInfo :: struct {
   direction:       linalg.Vector4f32,
   view:            linalg.Matrix4f32,
   projection:      linalg.Matrix4f32,
-  shadow_map:      ^ImageBuffer,
-  cube_shadow_map: ^CubeImageBuffer,
 }
 
 FrameData :: struct {
@@ -137,7 +135,6 @@ Engine :: struct {
   window:                glfw.WindowHandle,
   swapchain:             Swapchain,
   scene:                 Scene,
-  ui:                    RendererUI,
   last_frame_timestamp:  time.Time,
   last_update_timestamp: time.Time,
   start_timestamp:       time.Time,
@@ -151,6 +148,7 @@ Engine :: struct {
   mouse_move_proc:       MouseMoveProc,
   mouse_scroll_proc:     MouseScrollProc,
   render_error_count:    u32,
+  ui:                    RendererUI,
   main:                  RendererMain,
   shadow:                RendererShadow,
   particle:              RendererParticle,
@@ -159,7 +157,6 @@ Engine :: struct {
   depth_prepass:         RendererDepthPrepass,
   command_buffers:       [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
   visible_lights:        [MAX_FRAMES_IN_FLIGHT][dynamic]VisibleLightInfo,
-  node_idx_to_light_idx: [MAX_FRAMES_IN_FLIGHT]map[int]int,
   cursor_pos:            [2]i32,
   frames:                [MAX_FRAMES_IN_FLIGHT]FrameData,
 }
@@ -574,9 +571,7 @@ recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
 }
 
 update_visible_lights :: proc(self: ^Engine) {
-  visible_lights := &self.visible_lights[g_frame_index]
-  node_idx_to_light_idx := &self.node_idx_to_light_idx[g_frame_index]
-  seen: [MAX_LIGHTS]bool
+  clear(&self.visible_lights[g_frame_index])
   // Traverse scene and update/add visible lights
   for entry, i in self.scene.nodes.entries do if entry.active {
     node := entry.item
@@ -626,27 +621,11 @@ update_visible_lights :: proc(self: ^Engine) {
     case:
       continue
     }
-    j, found := node_idx_to_light_idx[i]
-    if found {
-      visible_lights[j] = light_info
-    } else if len(visible_lights) < MAX_LIGHTS {
-      j = len(visible_lights)
-      append(visible_lights, light_info)
-      node_idx_to_light_idx[i] = j
+    if len(self.visible_lights[g_frame_index]) >= MAX_LIGHTS {
+      log.errorf("Too many lights in scene, max is %d", MAX_LIGHTS)
+      break
     }
-    visible_lights[j].shadow_map = &self.frames[g_frame_index].shadow_maps[j]
-    visible_lights[j].cube_shadow_map = &self.frames[g_frame_index].cube_shadow_maps[j]
-    seen[j] = true
-  }
-  // Remove lights that are no longer present
-  for j := 0; j < len(visible_lights); {
-    if seen[j] {
-      j += 1
-      continue
-    }
-    delete_key(node_idx_to_light_idx, visible_lights[j].index_in_scene)
-    unordered_remove(visible_lights, j)
-    node_idx_to_light_idx[visible_lights[j].index_in_scene] = j
+    append(&self.visible_lights[g_frame_index], light_info)
   }
 }
 
