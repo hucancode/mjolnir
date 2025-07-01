@@ -192,7 +192,6 @@ renderer_shadow_init :: proc(
       },
       &frame.camera_descriptor_set,
     ) or_return
-
     writes := [?]vk.WriteDescriptorSet {
       {
         sType = .WRITE_DESCRIPTOR_SET,
@@ -400,8 +399,8 @@ renderer_shadow_end :: proc(
     case .POINT:
       append(&initial_barriers, vk.ImageMemoryBarrier {
         sType = .IMAGE_MEMORY_BARRIER,
-        oldLayout = .UNDEFINED,
-        newLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+        oldLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+        newLayout = .SHADER_READ_ONLY_OPTIMAL,
         srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
         dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
         image = engine.frames[g_frame_index].cube_shadow_maps[i].image,
@@ -417,8 +416,8 @@ renderer_shadow_end :: proc(
     case .DIRECTIONAL, .SPOT:
       append(&initial_barriers, vk.ImageMemoryBarrier {
         sType = .IMAGE_MEMORY_BARRIER,
-        oldLayout = .UNDEFINED,
-        newLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+        oldLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+        newLayout = .SHADER_READ_ONLY_OPTIMAL,
         srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
         dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
         image = engine.frames[g_frame_index].shadow_maps[i].image,
@@ -435,8 +434,8 @@ renderer_shadow_end :: proc(
   }
   vk.CmdPipelineBarrier(
     command_buffer,
-    {.TOP_OF_PIPE},
-    {.EARLY_FRAGMENT_TESTS},
+    {.LATE_FRAGMENT_TESTS},
+    {.FRAGMENT_SHADER},
     {},
     0, nil,
     0, nil,
@@ -549,7 +548,6 @@ render_shadow_batches :: proc(
         raw_data(offsets[:]),
       )
     } else {
-      // Bind descriptor sets for static meshes
       descriptor_sets := [?]vk.DescriptorSet{frame.camera_descriptor_set}
       vk.CmdBindDescriptorSets(
         command_buffer,

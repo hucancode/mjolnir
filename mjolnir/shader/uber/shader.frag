@@ -210,5 +210,5 @@ void main() {
     vec3 kD = (vec3(1.0) - kS) * (1.0 - metallic);
     vec3 ambient = kD * diffuseIBL + specularIBL + emissive;
     vec3 colorOut = ambient * 0.5 + brdf(N, V, albedo, roughness, metallic);
-    outColor = vec4(colorOut , 1.0);
+    outColor = vec4(colorOut, 1.0);
 }
