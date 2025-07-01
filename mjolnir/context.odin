@@ -147,7 +147,7 @@ vulkan_instance_init :: proc() -> vk.Result {
     create_info.enabledLayerCount = u32(len(VALIDATION_LAYERS))
     create_info.ppEnabledLayerNames = raw_data(VALIDATION_LAYERS)
     append(&extensions, vk.EXT_DEBUG_UTILS_EXTENSION_NAME)
-    dbg_create_info = vk.DebugUtilsMessengerCreateInfoEXT {
+    dbg_create_info = {
       sType           = .DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
       messageSeverity = {
         .WARNING,

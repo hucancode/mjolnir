@@ -292,7 +292,6 @@ renderer_shadow_render :: proc(
   defer delete(temp_buffer)
   mem.arena_init(&temp_arena, temp_buffer)
   temp_allocator := mem.arena_allocator(&temp_arena)
-
   lights := &engine.visible_lights[g_frame_index]
   for light, i in lights do if light.has_shadow {
     if light.kind == .POINT {

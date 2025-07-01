@@ -187,7 +187,7 @@ init :: proc(
     frame_data_init(&self.frames[i], &self.swapchain)
     shadow_image_infos: [MAX_SHADOW_MAPS]vk.DescriptorImageInfo
     for j in 0 ..< MAX_SHADOW_MAPS {
-      shadow_image_infos[j] = vk.DescriptorImageInfo {
+      shadow_image_infos[j] = {
         sampler     = g_linear_clamp_sampler,
         imageView   = self.frames[i].shadow_maps[j].view,
         imageLayout = .SHADER_READ_ONLY_OPTIMAL,
@@ -195,7 +195,7 @@ init :: proc(
     }
     cube_shadow_image_infos: [MAX_SHADOW_MAPS]vk.DescriptorImageInfo
     for j in 0 ..< MAX_SHADOW_MAPS {
-      cube_shadow_image_infos[j] = vk.DescriptorImageInfo {
+      cube_shadow_image_infos[j] = {
         sampler     = g_linear_clamp_sampler,
         imageView   = self.frames[i].cube_shadow_maps[j].view,
         imageLayout = .SHADER_READ_ONLY_OPTIMAL,
@@ -283,7 +283,6 @@ init :: proc(
   ) or_return
   renderer_ui_init(
     &self.ui,
-    self,
     self.swapchain.format.format,
     self.swapchain.extent.width,
     self.swapchain.extent.height,
@@ -513,20 +512,7 @@ deinit :: proc(self: ^Engine) {
     len(self.command_buffers),
     raw_data(self.command_buffers[:]),
   )
-  for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
-    data_buffer_deinit(&self.frames[i].camera_uniform)
-    data_buffer_deinit(&self.frames[i].light_uniform)
-    image_buffer_deinit(&self.frames[i].final_image)
-    for j in 0 ..< MAX_SHADOW_MAPS {
-      image_buffer_deinit(&self.frames[i].shadow_maps[j])
-      cube_depth_texture_deinit(&self.frames[i].cube_shadow_maps[j])
-    }
-    image_buffer_deinit(&self.frames[i].gbuffer_normal)
-    image_buffer_deinit(&self.frames[i].gbuffer_albedo)
-    image_buffer_deinit(&self.frames[i].gbuffer_metallic_roughness)
-    image_buffer_deinit(&self.frames[i].gbuffer_emissive)
-    image_buffer_deinit(&self.frames[i].depth_buffer)
-  }
+  for &f in self.frames do frame_data_deinit(&f)
   renderer_ui_deinit(&self.ui)
   scene_deinit(&self.scene)
   renderer_main_deinit(&self.main)
@@ -927,10 +913,8 @@ frame_data_deinit :: proc(frame: ^FrameData) {
   data_buffer_deinit(&frame.camera_uniform)
   data_buffer_deinit(&frame.light_uniform)
   image_buffer_deinit(&frame.final_image)
-  for j in 0 ..< MAX_SHADOW_MAPS {
-    image_buffer_deinit(&frame.shadow_maps[j])
-    cube_depth_texture_deinit(&frame.cube_shadow_maps[j])
-  }
+  for &t in frame.shadow_maps do image_buffer_deinit(&t)
+  for &t in frame.cube_shadow_maps do cube_depth_texture_deinit(&t)
   image_buffer_deinit(&frame.gbuffer_normal)
   image_buffer_deinit(&frame.gbuffer_albedo)
   image_buffer_deinit(&frame.gbuffer_metallic_roughness)

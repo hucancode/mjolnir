@@ -42,7 +42,6 @@ Vertex2D :: struct {
 
 renderer_ui_init :: proc(
   self: ^RendererUI,
-  engine: ^Engine,
   color_format: vk.Format,
   width: u32,
   height: u32,
