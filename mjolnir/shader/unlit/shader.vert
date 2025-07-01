@@ -12,7 +12,6 @@ layout(location = 5) in vec4 inWeights;
 layout(set = 0, binding = 0) uniform Uniforms {
     mat4 view;
     mat4 proj;
-    float time;
 };
 // lights and shadow maps set = 1, not used in unlit shader
 // textures and samplers set = 2, not available in vertex shader

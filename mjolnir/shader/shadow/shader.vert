@@ -9,7 +9,6 @@ layout(location = 5) in vec4 inWeights;
 layout(set = 0, binding = 0) uniform Uniforms {
     mat4 view;
     mat4 proj;
-    float time;
 };
 
 layout(set = 1, binding = 0) readonly buffer BoneMatrices {

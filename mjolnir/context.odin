@@ -36,7 +36,7 @@ when ENABLE_VALIDATION_LAYERS {
 ACTIVE_MATERIAL_COUNT :: 1000
 MAX_SAMPLER_PER_MATERIAL :: 3
 MAX_SAMPLER_COUNT :: ACTIVE_MATERIAL_COUNT * MAX_SAMPLER_PER_MATERIAL
-SCENE_UNIFORM_COUNT :: 3
+SCENE_CAMERA_COUNT :: 3
 
 MAX_SAMPLERS :: 4
 SAMPLER_NEAREST_CLAMP :: 0
@@ -476,7 +476,7 @@ descriptor_pool_init :: proc() -> vk.Result {
   log.infof(" - Combined Image Samplers: %d", MAX_SAMPLER_COUNT)
   log.infof(
     " - Uniform Buffers: %d",
-    MAX_FRAMES_IN_FLIGHT * SCENE_UNIFORM_COUNT,
+    MAX_FRAMES_IN_FLIGHT * SCENE_CAMERA_COUNT,
   )
   log.infof(" - Storage Buffers: %d", ACTIVE_MATERIAL_COUNT)
   pool_info := vk.DescriptorPoolCreateInfo {

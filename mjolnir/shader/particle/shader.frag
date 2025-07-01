@@ -7,7 +7,6 @@ layout (set = 0, binding = 1) uniform sampler samplers[];
 layout(push_constant) uniform PushConstants {
     mat4 view;
     mat4 proj;
-    float time;
     uint texture_index;
 };
 

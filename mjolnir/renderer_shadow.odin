@@ -21,7 +21,7 @@ RendererShadow :: struct {
   pipelines:                    [SHADOW_SHADER_VARIANT_COUNT]vk.Pipeline,
   camera_descriptor_set_layout: vk.DescriptorSetLayout,
   frames:                       [MAX_FRAMES_IN_FLIGHT]struct {
-    camera_uniform:        DataBuffer(SceneUniform),
+    camera_uniform:        DataBuffer(CameraUniform),
     camera_descriptor_set: vk.DescriptorSet,
   },
 }
@@ -178,7 +178,7 @@ renderer_shadow_init :: proc(
   ) or_return
   for &frame in self.frames {
     frame.camera_uniform = create_host_visible_buffer(
-      SceneUniform,
+      CameraUniform,
       (6 * MAX_LIGHTS),
       {.UNIFORM_BUFFER},
     ) or_return
@@ -202,7 +202,7 @@ renderer_shadow_init :: proc(
         descriptorCount = 1,
         pBufferInfo = &{
           buffer = frame.camera_uniform.buffer,
-          range = vk.DeviceSize(size_of(SceneUniform)),
+          range = vk.DeviceSize(size_of(CameraUniform)),
         },
       },
     }
@@ -324,9 +324,9 @@ renderer_shadow_render :: proc(
         scissor := vk.Rect2D {
           extent = {width = cube_shadow.width, height = cube_shadow.height},
         }
-        shadow_scene_uniform := data_buffer_get(&engine.shadow.frames[g_frame_index].camera_uniform, u32(i) * 6 + u32(face))
-        shadow_scene_uniform.view = view
-        shadow_scene_uniform.projection = light.projection
+        camera_uniform := data_buffer_get(&engine.shadow.frames[g_frame_index].camera_uniform, u32(i) * 6 + u32(face))
+        camera_uniform.view = view
+        camera_uniform.projection = light.projection
         vk.CmdBeginRenderingKHR(command_buffer, &face_render_info)
         vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
         vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
@@ -355,9 +355,9 @@ renderer_shadow_render :: proc(
         layerCount = 1,
         pDepthAttachment = &depth_attachment,
       }
-      shadow_scene_uniform := data_buffer_get(&engine.shadow.frames[g_frame_index].camera_uniform, u32(i) * 6)
-      shadow_scene_uniform.view = light.view
-      shadow_scene_uniform.projection = light.projection
+      camera_uniform := data_buffer_get(&engine.shadow.frames[g_frame_index].camera_uniform, u32(i) * 6)
+      camera_uniform.view = light.view
+      camera_uniform.projection = light.projection
       vk.CmdBeginRenderingKHR(command_buffer, &render_info_khr)
       viewport := vk.Viewport {
         width    = f32(shadow_map_texture.width),
@@ -373,7 +373,7 @@ renderer_shadow_render :: proc(
       shadow_ctx := BatchingContext {
         engine  = engine,
         frustum = geometry.make_frustum(light.projection * light.view),
-        lights  = make([dynamic]SingleLightUniform, allocator = temp_allocator),
+        lights  = make([dynamic]LightUniform, allocator = temp_allocator),
         batches = make(map[BatchKey][dynamic]BatchData, allocator = temp_allocator),
       }
       collect_shadow_data(&shadow_ctx)

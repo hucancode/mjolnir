@@ -18,8 +18,6 @@ layout (location = 1) out flat uint outTextureIndex;
 layout(push_constant) uniform PushConstants {
     mat4 view;
     mat4 proj;
-    float time;
-    uint texture_index;
 };
 
 out gl_PerVertex {
@@ -36,7 +34,6 @@ void main() {
         outTextureIndex = 0;
         return;
     }
-
     vec4 cameraPosition = -inverse(view)[3];
     outColor = inColor;
     outTextureIndex = inTextureIndex;

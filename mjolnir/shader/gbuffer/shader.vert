@@ -12,7 +12,6 @@ layout(location = 5) in vec4 inWeights;
 layout(set = 0, binding = 0) uniform Uniforms {
     mat4 view;
     mat4 proj;
-    float time;
 };
 // set 1 (light uniforms), not available in vertex shader
 // set 2 (textures), not available in vertex shader

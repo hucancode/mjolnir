@@ -10,12 +10,6 @@ import "resource"
 import mu "vendor:microui"
 import vk "vendor:vulkan"
 
-MAX_LIGHTS :: 10
-SHADOW_MAP_SIZE :: 512
-MAX_SHADOW_MAPS :: MAX_LIGHTS
-MAX_SCENE_UNIFORMS :: 16
-MAX_TEXTURES :: 50
-
 BG_BLUE_GRAY :: [4]f32{0.0117, 0.0117, 0.0179, 1.0}
 BG_DARK_GRAY :: [4]f32{0.0117, 0.0117, 0.0117, 1.0}
 BG_ORANGE_GRAY :: [4]f32{0.0179, 0.0179, 0.0117, 1.0}
@@ -27,30 +21,6 @@ PushConstant :: struct {
   roughness_value: f32,
   emissive_value:  f32,
   padding:         f32,
-}
-
-SingleLightUniform :: struct {
-  view_proj:  linalg.Matrix4f32, // 64 bytes
-  color:      linalg.Vector4f32, // 16 bytes
-  position:   linalg.Vector4f32, // 16 bytes
-  direction:  linalg.Vector4f32, // 16 bytes
-  kind:       LightKind, // 4 bytes
-  angle:      f32, // 4 bytes (spot light angle)
-  radius:     f32, // 4 bytes (point/spot light radius)
-  has_shadow: b32, // 4 bytes
-}
-
-SceneUniform :: struct {
-  view:       linalg.Matrix4f32,
-  projection: linalg.Matrix4f32,
-  time:       f32,
-  padding:    [3]f32,
-}
-
-SceneLightUniform :: struct {
-  lights:      [MAX_LIGHTS]SingleLightUniform,
-  light_count: u32,
-  padding:     [3]u32,
 }
 
 ShaderFeatures :: enum {
@@ -637,23 +607,20 @@ renderer_main_begin :: proc(
   log.debugf("setting viewport ...")
   vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
   vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
-  scene_uniform := data_buffer_get(
+  camera_uniform := data_buffer_get(
     &engine.frames[g_frame_index].camera_uniform,
   )
   log.debugf(
     "calculating camera view matrix ... %v %x",
     engine.scene.camera,
-    scene_uniform,
+    camera_uniform,
   )
-  scene_uniform.view = geometry.calculate_view_matrix(engine.scene.camera)
+  camera_uniform.view = geometry.calculate_view_matrix(engine.scene.camera)
   log.debugf("calculating camera projection matrix ...")
-  scene_uniform.projection = geometry.calculate_projection_matrix(
+  camera_uniform.projection = geometry.calculate_projection_matrix(
     engine.scene.camera,
   )
   log.debugf("calculating time ...")
-  scene_uniform.time = f32(
-    time.duration_seconds(time.since(engine.start_timestamp)),
-  )
   // Fill light_uniform from visible_lights
   log.debugf("getting light uniform buffer ...")
   light_uniform := data_buffer_get(&engine.frames[g_frame_index].light_uniform)
@@ -692,7 +659,7 @@ renderer_main_render :: proc(
   batching_ctx := BatchingContext {
     engine  = engine,
     frustum = camera_frustum,
-    lights  = make([dynamic]SingleLightUniform, allocator = temp_allocator),
+    lights  = make([dynamic]LightUniform, allocator = temp_allocator),
     batches = make(
       map[BatchKey][dynamic]BatchData,
       allocator = temp_allocator,
@@ -764,15 +731,12 @@ render_to_texture :: proc(
 ) -> vk.Result {
   command_buffer := engine.command_buffers[g_frame_index]
   render_camera := camera.? or_else engine.scene.camera
-  scene_uniform := data_buffer_get(
+  camera_uniform := data_buffer_get(
     &engine.frames[g_frame_index].camera_uniform,
   )
-  scene_uniform.view = geometry.calculate_view_matrix(render_camera)
-  scene_uniform.projection = geometry.calculate_projection_matrix(
+  camera_uniform.view = geometry.calculate_view_matrix(render_camera)
+  camera_uniform.projection = geometry.calculate_projection_matrix(
     render_camera,
-  )
-  scene_uniform.time = f32(
-    time.duration_seconds(time.since(engine.start_timestamp)),
   )
   camera_frustum := geometry.camera_make_frustum(render_camera)
   color_attachment := vk.RenderingAttachmentInfoKHR {
@@ -822,7 +786,7 @@ render_to_texture :: proc(
   batching_ctx := BatchingContext {
     engine  = engine,
     frustum = camera_frustum,
-    lights  = make([dynamic]SingleLightUniform, allocator = temp_allocator),
+    lights  = make([dynamic]LightUniform, allocator = temp_allocator),
     batches = make(
       map[BatchKey][dynamic]BatchData,
       allocator = temp_allocator,
@@ -889,7 +853,7 @@ renderer_main_deinit :: proc(self: ^RendererMain) {
 
 populate_render_batches :: proc(ctx: ^BatchingContext) {
   for light in ctx.engine.visible_lights[g_frame_index] {
-    light_uniform := SingleLightUniform {
+    light_uniform := LightUniform {
       kind       = light.kind,
       color      = linalg.Vector4f32 {
         light.color.x,

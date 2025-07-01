@@ -12,7 +12,6 @@ layout(constant_id = 1) const bool HAS_ALBEDO_TEXTURE = false;
 layout(set = 0, binding = 0) uniform SceneUniforms {
     mat4 view;
     mat4 proj;
-    float time;
 };
 
 // lights and shadow maps set = 1, not used in unlit shader

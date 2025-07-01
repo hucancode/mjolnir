@@ -32,7 +32,6 @@ struct Light {
 layout(set = 0, binding = 0) uniform SceneUniforms {
     mat4 view;
     mat4 proj;
-    float time;
 };
 // lights and shadow maps set = 1
 layout(set = 1, binding = 0) uniform LightUniforms {

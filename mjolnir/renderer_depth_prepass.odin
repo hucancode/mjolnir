@@ -104,15 +104,12 @@ renderer_depth_prepass_begin :: proc(
     extent = engine.swapchain.extent,
   }
   vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
-  scene_uniform := data_buffer_get(
+  camera_uniform := data_buffer_get(
     &engine.frames[g_frame_index].camera_uniform,
   )
-  scene_uniform.view = geometry.calculate_view_matrix(engine.scene.camera)
-  scene_uniform.projection = geometry.calculate_projection_matrix(
+  camera_uniform.view = geometry.calculate_view_matrix(engine.scene.camera)
+  camera_uniform.projection = geometry.calculate_projection_matrix(
     engine.scene.camera,
-  )
-  scene_uniform.time = f32(
-    time.duration_seconds(time.since(engine.start_timestamp)),
   )
 }
 
@@ -136,7 +133,7 @@ renderer_depth_prepass_render :: proc(
   batching_ctx := BatchingContext {
     engine  = engine,
     frustum = camera_frustum,
-    lights  = make([dynamic]SingleLightUniform, temp_allocator),
+    lights  = make([dynamic]LightUniform, temp_allocator),
     batches = make(map[BatchKey][dynamic]BatchData, temp_allocator),
   }
   renderer_depth_prepass_populate_batches(&batching_ctx)

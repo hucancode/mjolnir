@@ -27,6 +27,11 @@ MOUSE_SENSITIVITY_X :: 0.005
 MOUSE_SENSITIVITY_Y :: 0.005
 SCROLL_SENSITIVITY :: 0.5
 MAX_CONSECUTIVE_RENDER_ERROR_COUNT_ALLOWED :: 20
+MAX_LIGHTS :: 10
+SHADOW_MAP_SIZE :: 512
+MAX_SHADOW_MAPS :: MAX_LIGHTS
+MAX_CAMERA_UNIFORMS :: 16
+MAX_TEXTURES :: 50
 
 Handle :: resource.Handle
 
@@ -41,6 +46,28 @@ MousePressProc :: #type proc(engine: ^Engine, key, action, mods: int)
 MouseDragProc :: #type proc(engine: ^Engine, delta, offset: linalg.Vector2f64)
 MouseScrollProc :: #type proc(engine: ^Engine, offset: linalg.Vector2f64)
 MouseMoveProc :: #type proc(engine: ^Engine, pos, delta: linalg.Vector2f64)
+
+LightUniform :: struct {
+  view_proj:  linalg.Matrix4f32, // 64 bytes
+  color:      linalg.Vector4f32, // 16 bytes
+  position:   linalg.Vector4f32, // 16 bytes
+  direction:  linalg.Vector4f32, // 16 bytes
+  kind:       LightKind, // 4 bytes
+  angle:      f32, // 4 bytes (spot light angle)
+  radius:     f32, // 4 bytes (point/spot light radius)
+  has_shadow: b32, // 4 bytes
+}
+
+CameraUniform :: struct {
+  view:       linalg.Matrix4f32,
+  projection: linalg.Matrix4f32,
+}
+
+LightArrayUniform :: struct {
+  lights:      [MAX_LIGHTS]LightUniform,
+  light_count: u32,
+  padding:     [3]u32,
+}
 
 // Batch key for grouping objects by material features
 BatchKey :: struct {
@@ -57,7 +84,7 @@ BatchData :: struct {
 BatchingContext :: struct {
   engine:  ^Engine,
   frustum: geometry.Frustum,
-  lights:  [dynamic]SingleLightUniform,
+  lights:  [dynamic]LightUniform,
   batches: map[BatchKey][dynamic]BatchData,
 }
 
@@ -92,8 +119,8 @@ VisibleLightInfo :: struct {
 }
 
 FrameData :: struct {
-  camera_uniform:             DataBuffer(SceneUniform),
-  light_uniform:              DataBuffer(SceneLightUniform),
+  camera_uniform:             DataBuffer(CameraUniform),
+  light_uniform:              DataBuffer(LightArrayUniform),
   shadow_maps:                [MAX_SHADOW_MAPS]ImageBuffer,
   cube_shadow_maps:           [MAX_SHADOW_MAPS]CubeImageBuffer,
   // G-buffer images
@@ -211,7 +238,7 @@ init :: proc(
         descriptorType = .UNIFORM_BUFFER,
         pBufferInfo = &{
           buffer = self.frames[i].camera_uniform.buffer,
-          range = size_of(SceneUniform),
+          range = size_of(CameraUniform),
         },
       },
       {
@@ -223,7 +250,7 @@ init :: proc(
         descriptorType = .UNIFORM_BUFFER,
         pBufferInfo = &{
           buffer = self.frames[i].light_uniform.buffer,
-          range = size_of(SceneLightUniform),
+          range = size_of(LightArrayUniform),
         },
       },
       {
@@ -370,7 +397,6 @@ init :: proc(
       }
     },
   )
-
   glfw.SetCursorPosCallback(
     self.window,
     proc "c" (window: glfw.WindowHandle, xpos, ypos: f64) {
@@ -629,13 +655,10 @@ render :: proc(self: ^Engine) -> vk.Result {
   mu.begin(&self.ui.ctx)
   command_buffer := self.command_buffers[g_frame_index]
   vk.ResetCommandBuffer(command_buffer, {}) or_return
-  scene_uniform := data_buffer_get(&self.frames[g_frame_index].camera_uniform)
-  scene_uniform.view = geometry.calculate_view_matrix(self.scene.camera)
-  scene_uniform.projection = geometry.calculate_projection_matrix(
+  camera_uniform := data_buffer_get(&self.frames[g_frame_index].camera_uniform)
+  camera_uniform.view = geometry.calculate_view_matrix(self.scene.camera)
+  camera_uniform.projection = geometry.calculate_projection_matrix(
     self.scene.camera,
-  )
-  scene_uniform.time = f32(
-    time.duration_seconds(time.since(self.start_timestamp)),
   )
   light_uniform := data_buffer_get(&self.frames[g_frame_index].light_uniform)
   light_uniform.light_count = u32(len(self.visible_lights[g_frame_index]))
@@ -897,12 +920,12 @@ frame_data_init :: proc(
     ) or_return
   }
   frame.camera_uniform = create_host_visible_buffer(
-    SceneUniform,
-    (MAX_SCENE_UNIFORMS),
+    CameraUniform,
+    (MAX_CAMERA_UNIFORMS),
     {.UNIFORM_BUFFER},
   ) or_return
   frame.light_uniform = create_host_visible_buffer(
-    SceneLightUniform,
+    LightArrayUniform,
     1,
     {.UNIFORM_BUFFER},
   ) or_return

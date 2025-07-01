@@ -210,7 +210,6 @@ render_particles :: proc(
   command_buffer: vk.CommandBuffer,
 ) {
   vk.CmdBindPipeline(command_buffer, .GRAPHICS, self.render_pipeline)
-  // Bind the bindless texture and sampler descriptor sets
   descriptor_sets := [?]vk.DescriptorSet {
     g_textures_descriptor_set, // set 0 (textures)
   }
@@ -224,7 +223,6 @@ render_particles :: proc(
     0,
     nil,
   )
-
   offset: vk.DeviceSize = 0
   vk.CmdBindVertexBuffers(
     command_buffer,
