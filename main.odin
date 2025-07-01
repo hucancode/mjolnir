@@ -52,8 +52,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
       for y in 1 ..< ny {
         for z in 1 ..< nz {
           mat_handle, _ := create_material(
-            metallic_value = f32(x) / f32(nx),
-            roughness_value = f32(y) / f32(ny),
+            metallic_value = f32(x - 1) / f32(nx - 1),
+            roughness_value = f32(z - 1) / f32(nz - 1),
           ) or_continue
           _, node := spawn(
             &engine.scene,

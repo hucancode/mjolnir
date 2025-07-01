@@ -57,7 +57,8 @@ layout(push_constant) uniform PushConstants {
     float metallic_value;
     float roughness_value;
     float emissive_value;
-    float padding;
+    float environment_max_lod;
+    float ibl_intensity;
 };
 
 layout(location = 0) in vec3 position;
@@ -66,11 +67,7 @@ layout(location = 2) in vec3 normal;
 layout(location = 3) in vec2 uv;
 layout(location = 0) out vec4 outColor;
 
-const vec3 ambientColor = vec3(0.0, 0.5, 1.0);
-const float ambientStrength = 0.2;
-const float specularStrength = 0.8;
-const float shininess = 20.0;
-const float diffuseStrength = 1.0;
+const float AMBIENT_STRENGTH = 0.8;
 
 // Convert a direction vector to equirectangular UV coordinates
 vec2 dirToEquirectUV(vec3 dir) {
@@ -196,19 +193,27 @@ void main() {
     vec3 V = normalize(cameraPosition - displacedPosition);
     vec3 R = reflect(-V, N);
     vec3 F0 = mix(vec3(0.04), albedo, metallic);
-    // Diffuse: sample environment in the normal direction (approximate)
-    vec2 uvN = dirToEquirectUV(N);
-    vec3 diffuseIBL = texture(sampler2D(textures[environment_index], samplers[SAMPLER_LINEAR_REPEAT]), uvN).rgb * albedo;
-    // Specular: sample environment in the reflection direction (no LOD, no roughness blur)
-    vec2 uvR = dirToEquirectUV(R);
-    vec3 prefilteredColor = texture(sampler2D(textures[environment_index], samplers[SAMPLER_LINEAR_REPEAT]), uvR).rgb;
     float NdotV = max(dot(N, V), 0.0);
-    vec2 brdfSample = texture(sampler2D(textures[brdf_lut_index], samplers[SAMPLER_LINEAR_REPEAT]), vec2(NdotV, roughness)).rg;
-    // Attenuate specular by (1.0 - roughness) to fake roughness blur
-    vec3 specularIBL = prefilteredColor * (F0 * brdfSample.x + brdfSample.y) * (1.0 - roughness)*0.1;
-    vec3 kS = F0 + (1.0 - F0) * pow(1.0 - NdotV, 5.0);
-    vec3 kD = (vec3(1.0) - kS) * (1.0 - metallic);
-    vec3 ambient = kD * diffuseIBL + specularIBL + emissive;
-    vec3 colorOut = ambient * 0.5 + brdf(N, V, albedo, roughness, metallic);
+
+    vec2 uvN = dirToEquirectUV(N);
+    float diffuseLod = min(6.0, environment_max_lod); // Clamped diffuse LOD
+    vec3 diffuseIBL = textureLod(sampler2D(textures[environment_index], samplers[SAMPLER_LINEAR_CLAMP]), uvN, environment_max_lod).rgb * albedo * ibl_intensity;
+    vec2 uvR = dirToEquirectUV(R);
+    float specularLod = roughness * environment_max_lod;
+    vec3 prefilteredColor = textureLod(sampler2D(textures[environment_index], samplers[SAMPLER_LINEAR_CLAMP]), uvR, specularLod).rgb * ibl_intensity;
+    vec2 brdfSample = texture(sampler2D(textures[brdf_lut_index], samplers[SAMPLER_LINEAR_CLAMP]), vec2(NdotV, roughness)).rg;
+
+    // Metallic workflow: F0 = albedo color, no diffuse contribution
+    vec3 f_metal_fresnel_ibl = albedo * brdfSample.x + brdfSample.y;
+    vec3 f_metal_brdf_ibl = f_metal_fresnel_ibl * prefilteredColor;
+
+    // Dielectric workflow: F0 = 0.04, mix diffuse and specular based on fresnel
+    vec3 f_dielectric_fresnel_ibl = vec3(0.04) * brdfSample.x + brdfSample.y;
+    vec3 f_dielectric_brdf_ibl = mix(diffuseIBL, prefilteredColor * f_dielectric_fresnel_ibl, f_dielectric_fresnel_ibl);
+
+    // Mix between dielectric and metallic based on metallic parameter
+    vec3 ambient = mix(f_dielectric_brdf_ibl, f_metal_brdf_ibl, metallic);
+    vec3 colorOut = albedo * ambient * AMBIENT_STRENGTH + brdf(N, V, albedo, roughness, metallic) + emissive;
+
     outColor = vec4(colorOut, 1.0);
 }

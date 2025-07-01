@@ -15,12 +15,13 @@ BG_DARK_GRAY :: [4]f32{0.0117, 0.0117, 0.0117, 1.0}
 BG_ORANGE_GRAY :: [4]f32{0.0179, 0.0179, 0.0117, 1.0}
 
 PushConstant :: struct {
-  world:           linalg.Matrix4f32,
-  using textures:  MaterialTextures,
-  metallic_value:  f32,
-  roughness_value: f32,
-  emissive_value:  f32,
-  padding:         f32,
+  world:               linalg.Matrix4f32,
+  using textures:      MaterialTextures,
+  metallic_value:      f32,
+  roughness_value:     f32,
+  emissive_value:      f32,
+  environment_max_lod: f32,
+  ibl_intensity:       f32,
 }
 
 ShaderFeatures :: enum {
@@ -59,6 +60,7 @@ RendererMain :: struct {
   wireframe_pipelines: [UNLIT_SHADER_VARIANT_COUNT]vk.Pipeline,
   environment_map:     Handle,
   brdf_lut:            Handle,
+  ibl_intensity:       f32,
 }
 
 renderer_main_build_pbr_pipeline :: proc(
@@ -819,13 +821,14 @@ renderer_main_init :: proc(
     depth_format,
   ) or_return
   environment_map: ^ImageBuffer
-  self.environment_map, environment_map = create_hdr_texture_from_path(
-    "assets/teutonic_castle.hdr",
+  self.environment_map, environment_map = create_hdr_texture_from_path_with_mips(
+    "assets/Cannon_Exterior.hdr",
   ) or_return
   brdf_lut: ^ImageBuffer
   self.brdf_lut, brdf_lut = create_texture_from_data(
     #load("assets/lut_ggx.png"),
   ) or_return
+  self.ibl_intensity = 1.0 // Default IBL intensity
   return .SUCCESS
 }
 
@@ -956,12 +959,21 @@ render_batched_meshes :: proc(
             node_skinning.bone_matrix_offset +
             g_frame_index * g_bone_matrix_slab.capacity
         }
+        // Calculate max LOD based on environment texture
+        environment_texture := resource.get(g_image_buffers, self.environment_map) or_else nil
+        max_lod: f32 = 8.0 // Default fallback
+        if environment_texture != nil {
+          max_lod = f32(calculate_mip_levels(environment_texture.width, environment_texture.height) - 1)
+        }
+
         push_constant := PushConstant {
-          world           = node.transform.world_matrix,
-          textures        = texture_indices,
-          metallic_value  = material.metallic_value,
-          roughness_value = material.roughness_value,
-          emissive_value  = material.emissive_value,
+          world               = node.transform.world_matrix,
+          textures            = texture_indices,
+          metallic_value      = material.metallic_value,
+          roughness_value     = material.roughness_value,
+          emissive_value      = material.emissive_value,
+          environment_max_lod = max_lod,
+          ibl_intensity       = self.ibl_intensity,
         }
         vk.CmdPushConstants(
           command_buffer,

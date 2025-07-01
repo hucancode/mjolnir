@@ -610,6 +610,95 @@ create_texture_from_data :: proc(
   return
 }
 
+// Calculate number of mip levels for a given texture size
+calculate_mip_levels :: proc(width, height: u32) -> u32 {
+  return u32(linalg.floor(linalg.log2(f32(max(width, height))))) + 1
+}
+
+// Create image buffer with mip maps
+create_image_buffer_with_mips :: proc(
+  data: rawptr,
+  size: vk.DeviceSize,
+  format: vk.Format,
+  width, height: u32,
+) -> (
+  img: ImageBuffer,
+  ret: vk.Result,
+) {
+  mip_levels := calculate_mip_levels(width, height)
+
+  staging := create_host_visible_buffer(
+    u8,
+    int(size),
+    {.TRANSFER_SRC},
+    data,
+  ) or_return
+  defer data_buffer_deinit(&staging)
+
+  img = malloc_image_buffer_with_mips(
+    width,
+    height,
+    format,
+    .OPTIMAL,
+    {.TRANSFER_DST, .SAMPLED, .TRANSFER_SRC},
+    {.DEVICE_LOCAL},
+    mip_levels,
+  ) or_return
+
+  copy_image_for_mips(img, staging) or_return
+  generate_mipmaps(img, format, width, height, mip_levels) or_return
+
+  aspect_mask := vk.ImageAspectFlags{.COLOR}
+  img.view = create_image_view_with_mips(img.image, format, aspect_mask, mip_levels) or_return
+  ret = .SUCCESS
+  return
+}
+
+// Create HDR texture with mip maps
+create_hdr_texture_from_path_with_mips :: proc(
+  path: string,
+) -> (
+  handle: resource.Handle,
+  texture: ^ImageBuffer,
+  ret: vk.Result,
+) {
+  handle, texture = resource.alloc(&g_image_buffers)
+  path_cstr := strings.clone_to_cstring(path)
+  width, height, c_in_file: c.int
+  actual_channels: c.int = 4 // we always want RGBA for HDR
+  float_pixels := stbi.loadf(
+    path_cstr,
+    &width,
+    &height,
+    &c_in_file,
+    actual_channels,
+  )
+  if float_pixels == nil {
+    log.errorf(
+      "Failed to load HDR texture from path '%s': %s\n",
+      path,
+      stbi.failure_reason(),
+    )
+    ret = .ERROR_UNKNOWN
+    return handle, texture, ret
+  }
+  defer stbi.image_free(float_pixels)
+  num_floats := int(width * height * actual_channels)
+
+
+
+  texture^ = create_image_buffer_with_mips(
+    float_pixels,
+    size_of(f32) * vk.DeviceSize(num_floats),
+    .R32G32B32A32_SFLOAT,
+    u32(width),
+    u32(height),
+  ) or_return
+  set_texture_descriptor(handle.index, texture.view)
+  ret = .SUCCESS
+  return handle, texture, ret
+}
+
 get_frame_bone_matrix_offset :: proc(
   base_offset: u32,
   frame_index: u32,

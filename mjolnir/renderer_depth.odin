@@ -160,7 +160,7 @@ renderer_depth_prepass_render :: proc(
   if mu.window(
     &engine.ui.ctx,
     "Depth Pre-pass",
-    {360, 200, 300, 100},
+    {960, 40, 300, 100},
     {.NO_CLOSE},
   ) {
     mu.label(&engine.ui.ctx, fmt.tprintf("Pre-pass: %v", rendered_count))

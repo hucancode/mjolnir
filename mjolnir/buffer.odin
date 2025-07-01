@@ -385,6 +385,41 @@ copy_image :: proc(dst: ImageBuffer, src: DataBuffer(u8)) -> vk.Result {
   return .SUCCESS
 }
 
+// Copy image but leave in TRANSFER_DST_OPTIMAL for mip generation
+copy_image_for_mips :: proc(dst: ImageBuffer, src: DataBuffer(u8)) -> vk.Result {
+  transition_image_layout(
+    dst.image,
+    dst.format,
+    .UNDEFINED,
+    .TRANSFER_DST_OPTIMAL,
+  ) or_return
+  cmd_buffer := begin_single_time_command() or_return
+  region := vk.BufferImageCopy {
+    bufferOffset = 0,
+    bufferRowLength = 0,
+    bufferImageHeight = 0,
+    imageSubresource = {
+      aspectMask = {.COLOR},
+      mipLevel = 0,
+      baseArrayLayer = 0,
+      layerCount = 1,
+    },
+    imageOffset = {0, 0, 0},
+    imageExtent = {dst.width, dst.height, 1},
+  }
+  vk.CmdCopyBufferToImage(
+    cmd_buffer,
+    src.buffer,
+    dst.image,
+    .TRANSFER_DST_OPTIMAL,
+    1,
+    &region,
+  )
+  end_single_time_command(&cmd_buffer) or_return
+  // Don't transition to SHADER_READ_ONLY - leave in TRANSFER_DST_OPTIMAL for mip generation
+  return .SUCCESS
+}
+
 create_image_buffer :: proc(
   data: rawptr,
   size: vk.DeviceSize,
@@ -632,6 +667,187 @@ prepare_image_for_render :: proc(
     1,
     &barrier,
   )
+}
+
+// Create image buffer with custom mip levels
+malloc_image_buffer_with_mips :: proc(
+  width: u32,
+  height: u32,
+  format: vk.Format,
+  tiling: vk.ImageTiling,
+  usage: vk.ImageUsageFlags,
+  mem_properties: vk.MemoryPropertyFlags,
+  mip_levels: u32,
+) -> (
+  img_buffer: ImageBuffer,
+  ret: vk.Result,
+) {
+  create_info := vk.ImageCreateInfo {
+    sType         = .IMAGE_CREATE_INFO,
+    imageType     = .D2,
+    extent        = {width, height, 1},
+    mipLevels     = mip_levels,
+    arrayLayers   = 1,
+    format        = format,
+    tiling        = tiling,
+    initialLayout = .UNDEFINED,
+    usage         = usage,
+    sharingMode   = .EXCLUSIVE,
+    samples       = {._1},
+  }
+  vk.CreateImage(g_device, &create_info, nil, &img_buffer.image) or_return
+  mem_reqs: vk.MemoryRequirements
+  vk.GetImageMemoryRequirements(g_device, img_buffer.image, &mem_reqs)
+  img_buffer.memory = allocate_vulkan_memory(
+    mem_reqs,
+    mem_properties,
+  ) or_return
+  vk.BindImageMemory(
+    g_device,
+    img_buffer.image,
+    img_buffer.memory,
+    0,
+  ) or_return
+  img_buffer.width = width
+  img_buffer.height = height
+  img_buffer.format = format
+  return img_buffer, .SUCCESS
+}
+
+// Create image view with mip levels
+create_image_view_with_mips :: proc(
+  image: vk.Image,
+  format: vk.Format,
+  aspect: vk.ImageAspectFlags,
+  mip_levels: u32,
+) -> (
+  view: vk.ImageView,
+  ret: vk.Result,
+) {
+  log.infof("Creating image view with %d mip levels", mip_levels)
+  create_info := vk.ImageViewCreateInfo {
+    sType = .IMAGE_VIEW_CREATE_INFO,
+    image = image,
+    viewType = .D2,
+    format = format,
+    subresourceRange = {
+      aspectMask = aspect,
+      baseMipLevel = 0,
+      levelCount = mip_levels,
+      baseArrayLayer = 0,
+      layerCount = 1,
+    },
+  }
+  vk.CreateImageView(g_device, &create_info, nil, &view) or_return
+  log.infof("Image view created successfully with mip levels 0-%d", mip_levels - 1)
+  return view, .SUCCESS
+}
+
+// Generate mip maps for an image
+generate_mipmaps :: proc(
+  img: ImageBuffer,
+  format: vk.Format,
+  tex_width, tex_height: u32,
+  mip_levels: u32,
+) -> vk.Result {
+  format_props: vk.FormatProperties
+  vk.GetPhysicalDeviceFormatProperties(g_physical_device, format, &format_props)
+  if .SAMPLED_IMAGE_FILTER_LINEAR not_in format_props.optimalTilingFeatures {
+    log.errorf("Texture image format does not support linear blitting!")
+    return .ERROR_UNKNOWN
+  }
+  cmd_buffer := begin_single_time_command() or_return
+  defer end_single_time_command(&cmd_buffer)
+  barrier := vk.ImageMemoryBarrier {
+    sType = .IMAGE_MEMORY_BARRIER,
+    image = img.image,
+    srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    subresourceRange = {
+      aspectMask = {.COLOR},
+      baseArrayLayer = 0,
+      layerCount = 1,
+      levelCount = 1,
+    },
+  }
+  mip_width := i32(tex_width)
+  mip_height := i32(tex_height)
+  for i in 1..<mip_levels {
+    barrier.subresourceRange.baseMipLevel = i - 1
+    barrier.oldLayout = .TRANSFER_DST_OPTIMAL
+    barrier.newLayout = .TRANSFER_SRC_OPTIMAL
+    barrier.srcAccessMask = {.TRANSFER_WRITE}
+    barrier.dstAccessMask = {.TRANSFER_READ}
+    vk.CmdPipelineBarrier(
+      cmd_buffer,
+      {.TRANSFER},
+      {.TRANSFER},
+      {},
+      0, nil,
+      0, nil,
+      1, &barrier,
+    )
+    blit := vk.ImageBlit {
+      srcOffsets = {
+        {0, 0, 0},
+        {mip_width, mip_height, 1},
+      },
+      srcSubresource = {
+        aspectMask = {.COLOR},
+        mipLevel = i - 1,
+        baseArrayLayer = 0,
+        layerCount = 1,
+      },
+      dstOffsets = {
+        {0, 0, 0},
+        {max(mip_width / 2, 1), max(mip_height / 2, 1), 1},
+      },
+      dstSubresource = {
+        aspectMask = {.COLOR},
+        mipLevel = i,
+        baseArrayLayer = 0,
+        layerCount = 1,
+      },
+    }
+    vk.CmdBlitImage(
+      cmd_buffer,
+      img.image, .TRANSFER_SRC_OPTIMAL,
+      img.image, .TRANSFER_DST_OPTIMAL,
+      1, &blit,
+      .LINEAR,
+    )
+    barrier.oldLayout = .TRANSFER_SRC_OPTIMAL
+    barrier.newLayout = .SHADER_READ_ONLY_OPTIMAL
+    barrier.srcAccessMask = {.TRANSFER_READ}
+    barrier.dstAccessMask = {.SHADER_READ}
+    vk.CmdPipelineBarrier(
+      cmd_buffer,
+      {.TRANSFER},
+      {.FRAGMENT_SHADER},
+      {},
+      0, nil,
+      0, nil,
+      1, &barrier,
+    )
+    mip_width = max(mip_width / 2, 1)
+    mip_height = max(mip_height / 2, 1)
+  }
+  // Mip generation complete
+  barrier.subresourceRange.baseMipLevel = mip_levels - 1
+  barrier.oldLayout = .TRANSFER_DST_OPTIMAL
+  barrier.newLayout = .SHADER_READ_ONLY_OPTIMAL
+  barrier.srcAccessMask = {.TRANSFER_WRITE}
+  barrier.dstAccessMask = {.SHADER_READ}
+  vk.CmdPipelineBarrier(
+    cmd_buffer,
+    {.TRANSFER},
+    {.FRAGMENT_SHADER},
+    {},
+    0, nil,
+    0, nil,
+    1, &barrier,
+  )
+  return .SUCCESS
 }
 
 prepare_image_for_shader_read :: proc(
