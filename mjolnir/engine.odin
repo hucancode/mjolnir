@@ -560,6 +560,68 @@ recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
   for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
     frame_data_deinit(&engine.frames[i])
     frame_data_init(&engine.frames[i], &engine.swapchain)
+    // this code is copied from init procedure. TODO: deduplicate this
+    shadow_image_infos: [MAX_SHADOW_MAPS]vk.DescriptorImageInfo
+    for j in 0 ..< MAX_SHADOW_MAPS {
+      shadow_image_infos[j] = {
+        sampler     = g_linear_clamp_sampler,
+        imageView   = engine.frames[i].shadow_maps[j].view,
+        imageLayout = .SHADER_READ_ONLY_OPTIMAL,
+      }
+    }
+    cube_shadow_image_infos: [MAX_SHADOW_MAPS]vk.DescriptorImageInfo
+    for j in 0 ..< MAX_SHADOW_MAPS {
+      cube_shadow_image_infos[j] = {
+        sampler     = g_linear_clamp_sampler,
+        imageView   = engine.frames[i].cube_shadow_maps[j].view,
+        imageLayout = .SHADER_READ_ONLY_OPTIMAL,
+      }
+    }
+    writes := [?]vk.WriteDescriptorSet {
+      {
+        sType = .WRITE_DESCRIPTOR_SET,
+        dstSet = g_camera_descriptor_sets[i],
+        dstBinding = 0,
+        dstArrayElement = 0,
+        descriptorCount = 1,
+        descriptorType = .UNIFORM_BUFFER,
+        pBufferInfo = &{
+          buffer = engine.frames[i].camera_uniform.buffer,
+          range = size_of(CameraUniform),
+        },
+      },
+      {
+        sType = .WRITE_DESCRIPTOR_SET,
+        dstSet = g_lights_descriptor_sets[i],
+        dstBinding = 0,
+        dstArrayElement = 0,
+        descriptorCount = 1,
+        descriptorType = .UNIFORM_BUFFER,
+        pBufferInfo = &{
+          buffer = engine.frames[i].light_uniform.buffer,
+          range = size_of(LightArrayUniform),
+        },
+      },
+      {
+        sType = .WRITE_DESCRIPTOR_SET,
+        dstSet = g_lights_descriptor_sets[i],
+        dstBinding = 1,
+        dstArrayElement = 0,
+        descriptorCount = len(shadow_image_infos),
+        descriptorType = .COMBINED_IMAGE_SAMPLER,
+        pImageInfo = raw_data(shadow_image_infos[:]),
+      },
+      {
+        sType = .WRITE_DESCRIPTOR_SET,
+        dstSet = g_lights_descriptor_sets[i],
+        dstBinding = 2,
+        dstArrayElement = 0,
+        descriptorCount = len(cube_shadow_image_infos),
+        descriptorType = .COMBINED_IMAGE_SAMPLER,
+        pImageInfo = raw_data(cube_shadow_image_infos[:]),
+      },
+    }
+    vk.UpdateDescriptorSets(g_device, len(writes), raw_data(writes[:]), 0, nil)
   }
   renderer_postprocess_recreate_images(
     &engine.postprocess,
