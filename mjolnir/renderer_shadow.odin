@@ -76,7 +76,7 @@ renderer_shadow_init :: proc(
   dynamic_states_values := [?]vk.DynamicState{.VIEWPORT, .SCISSOR}
   dynamic_state_info := vk.PipelineDynamicStateCreateInfo {
     sType             = .PIPELINE_DYNAMIC_STATE_CREATE_INFO,
-    dynamicStateCount = u32(len(dynamic_states_values)),
+    dynamicStateCount = len(dynamic_states_values),
     pDynamicStates    = raw_data(dynamic_states_values[:]),
   }
   viewport_state := vk.PipelineViewportStateCreateInfo {

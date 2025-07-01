@@ -75,7 +75,7 @@ renderer_ui_init :: proc(
   dynamic_states := [?]vk.DynamicState{.VIEWPORT, .SCISSOR}
   dynamic_state_info := vk.PipelineDynamicStateCreateInfo {
     sType             = .PIPELINE_DYNAMIC_STATE_CREATE_INFO,
-    dynamicStateCount = u32(len(dynamic_states)),
+    dynamicStateCount = len(dynamic_states),
     pDynamicStates    = raw_data(dynamic_states[:]),
   }
   vertex_binding := vk.VertexInputBindingDescription {

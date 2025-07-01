@@ -35,7 +35,7 @@ renderer_depth_prepass_init :: proc(
   }
   pipeline_layout_info := vk.PipelineLayoutCreateInfo {
     sType                  = .PIPELINE_LAYOUT_CREATE_INFO,
-    setLayoutCount         = u32(len(set_layouts)),
+    setLayoutCount         = len(set_layouts),
     pSetLayouts            = raw_data(set_layouts[:]),
     pushConstantRangeCount = 1,
     pPushConstantRanges    = &push_constant_range,
@@ -147,7 +147,7 @@ renderer_depth_prepass_render :: proc(
     .GRAPHICS,
     layout,
     0,
-    u32(len(descriptor_sets)),
+    len(descriptor_sets),
     raw_data(descriptor_sets[:]),
     0,
     nil,
@@ -357,51 +357,51 @@ renderer_depth_prepass_build_pipeline :: proc(
       location = 0,
       binding = 0,
       format = .R32G32B32_SFLOAT,
-      offset = cast(u32)offset_of(geometry.Vertex, position),
+      offset = u32(offset_of(geometry.Vertex, position)),
     },
     {
       location = 1,
       binding = 0,
       format = .R32G32B32_SFLOAT,
-      offset = cast(u32)offset_of(geometry.Vertex, normal),
+      offset = u32(offset_of(geometry.Vertex, normal)),
     },
     {
       location = 2,
       binding = 0,
       format = .R32G32B32A32_SFLOAT,
-      offset = cast(u32)offset_of(geometry.Vertex, color),
+      offset = u32(offset_of(geometry.Vertex, color)),
     },
     {
       location = 3,
       binding = 0,
       format = .R32G32_SFLOAT,
-      offset = cast(u32)offset_of(geometry.Vertex, uv),
+      offset = u32(offset_of(geometry.Vertex, uv)),
     },
     {
       location = 4,
       binding = 1,
       format = .R32G32B32A32_UINT,
-      offset = cast(u32)offset_of(geometry.SkinningData, joints),
+      offset = u32(offset_of(geometry.SkinningData, joints)),
     },
     {
       location = 5,
       binding = 1,
       format = .R32G32B32A32_SFLOAT,
-      offset = cast(u32)offset_of(geometry.SkinningData, weights),
+      offset = u32(offset_of(geometry.SkinningData, weights)),
     },
   }
   vertex_input_info := vk.PipelineVertexInputStateCreateInfo {
     sType                           = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-    vertexBindingDescriptionCount   = u32(len(vertex_bindings)),
+    vertexBindingDescriptionCount   = len(vertex_bindings),
     pVertexBindingDescriptions      = raw_data(vertex_bindings[:]),
-    vertexAttributeDescriptionCount = u32(len(vertex_attributes)),
+    vertexAttributeDescriptionCount = len(vertex_attributes),
     pVertexAttributeDescriptions    = raw_data(vertex_attributes[:]),
   }
   dynamic_states := [?]vk.DynamicState{.VIEWPORT, .SCISSOR}
   dynamic_state := vk.PipelineDynamicStateCreateInfo {
     sType             = .PIPELINE_DYNAMIC_STATE_CREATE_INFO,
-    dynamicStateCount = u32(len(dynamic_states)),
-    pDynamicStates    = &dynamic_states[0],
+    dynamicStateCount = len(dynamic_states),
+    pDynamicStates    = raw_data(dynamic_states[:]),
   }
   input_assembly := vk.PipelineInputAssemblyStateCreateInfo {
     sType                  = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
@@ -458,7 +458,7 @@ renderer_depth_prepass_build_pipeline :: proc(
   pipeline_info := vk.GraphicsPipelineCreateInfo {
     sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
     pNext               = &dynamic_rendering,
-    stageCount          = u32(len(shader_stages)),
+    stageCount          = len(shader_stages),
     pStages             = raw_data(shader_stages[:]),
     pVertexInputState   = &vertex_input_info,
     pInputAssemblyState = &input_assembly,

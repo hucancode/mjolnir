@@ -100,7 +100,7 @@ renderer_main_build_pbr_pipeline :: proc(
   dynamic_states_values := [?]vk.DynamicState{.VIEWPORT, .SCISSOR}
   dynamic_state_info := vk.PipelineDynamicStateCreateInfo {
     sType             = .PIPELINE_DYNAMIC_STATE_CREATE_INFO,
-    dynamicStateCount = u32(len(dynamic_states_values)),
+    dynamicStateCount = len(dynamic_states_values),
     pDynamicStates    = raw_data(dynamic_states_values[:]),
   }
   input_assembly := vk.PipelineInputAssemblyStateCreateInfo {
@@ -270,7 +270,7 @@ renderer_main_build_unlit_pipeline :: proc(
   dynamic_states_values := [?]vk.DynamicState{.VIEWPORT, .SCISSOR}
   dynamic_state_info := vk.PipelineDynamicStateCreateInfo {
     sType             = .PIPELINE_DYNAMIC_STATE_CREATE_INFO,
-    dynamicStateCount = u32(len(dynamic_states_values)),
+    dynamicStateCount = len(dynamic_states_values),
     pDynamicStates    = raw_data(dynamic_states_values[:]),
   }
   input_assembly := vk.PipelineInputAssemblyStateCreateInfo {
@@ -416,7 +416,7 @@ renderer_main_build_wireframe_unlit_pipeline :: proc(
   dynamic_states_values := [?]vk.DynamicState{.VIEWPORT, .SCISSOR}
   dynamic_state_info := vk.PipelineDynamicStateCreateInfo {
     sType             = .PIPELINE_DYNAMIC_STATE_CREATE_INFO,
-    dynamicStateCount = u32(len(dynamic_states_values)),
+    dynamicStateCount = len(dynamic_states_values),
     pDynamicStates    = raw_data(dynamic_states_values[:]),
   }
   input_assembly := vk.PipelineInputAssemblyStateCreateInfo {
@@ -678,7 +678,7 @@ renderer_main_render :: proc(
     .GRAPHICS,
     layout,
     0,
-    u32(len(descriptor_sets)),
+    len(descriptor_sets),
     raw_data(descriptor_sets[:]),
     0,
     nil,
@@ -805,7 +805,7 @@ render_to_texture :: proc(
     .GRAPHICS,
     layout,
     0,
-    u32(len(descriptor_sets)),
+    len(descriptor_sets),
     raw_data(descriptor_sets[:]),
     0,
     nil,
