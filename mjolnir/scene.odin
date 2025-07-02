@@ -29,8 +29,6 @@ SpotLightAttachment :: struct {
 NodeSkinning :: struct {
   animation:          Maybe(animation.Instance),
   bone_matrix_offset: u32,
-  // TODO: for best quality we should use 1 matrix set per frame
-  // but it requires twice as much memory
 }
 
 MeshAttachment :: struct {
