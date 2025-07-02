@@ -15,14 +15,15 @@ layout (location = 10) in uint inTextureIndex;
 layout (location = 0) out vec4 outColor;
 layout (location = 1) out flat uint outTextureIndex;
 
-layout(push_constant) uniform PushConstants {
-    mat4 view;
-    mat4 proj;
-};
-
 out gl_PerVertex {
     vec4 gl_Position;
     float gl_PointSize;
+};
+
+// camera set = 0
+layout(set = 0, binding = 0) uniform SceneUniforms {
+    mat4 view;
+    mat4 proj;
 };
 
 void main() {

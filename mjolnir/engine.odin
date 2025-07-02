@@ -1025,14 +1025,21 @@ render :: proc(self: ^Engine) -> vk.Result {
     renderer_main_render(&self.main, render_input, command_buffer)
     renderer_main_end(command_buffer)
     // log.debug("============ rendering particles... =============")
+    update_force_fields(self)
     renderer_particle_begin(
-      self,
+      &self.particle,
       command_buffer,
-      self.frames[g_frame_index].final_image.view,
-      self.frames[g_frame_index].depth_buffer.view,
+      RenderTarget {
+        final = self.frames[g_frame_index].final_image.view,
+        depth = self.frames[g_frame_index].depth_buffer.view,
+        extent = self.swapchain.extent,
+        width = self.swapchain.extent.width,
+        height = self.swapchain.extent.height,
+      },
+      render_input,
     )
-    renderer_particle_render(self, command_buffer)
-    renderer_particle_end(self, command_buffer)
+    renderer_particle_render(&self.particle, command_buffer)
+    renderer_particle_end(command_buffer)
   }
   // log.debug("============ rendering post processes... =============")
   prepare_image_for_shader_read(

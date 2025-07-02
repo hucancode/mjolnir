@@ -195,7 +195,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     scale(&bright_ball_node.transform, 0.2) // Make it a reasonable size
   }
 
-  if false {
+  if true {
     // Create particle system 1 with gold star texture
     particle_texture1_handle, _, _ := mjolnir.create_texture_from_path(
       "assets/gold-star.png",
