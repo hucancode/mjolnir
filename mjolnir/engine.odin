@@ -48,7 +48,8 @@ MouseScrollProc :: #type proc(engine: ^Engine, offset: linalg.Vector2f64)
 MouseMoveProc :: #type proc(engine: ^Engine, pos, delta: linalg.Vector2f64)
 
 LightUniform :: struct {
-  view_proj:  linalg.Matrix4f32, // 64 bytes
+  view:       linalg.Matrix4f32, // 64 bytes
+  proj:       linalg.Matrix4f32, // 64 bytes
   color:      linalg.Vector4f32, // 16 bytes
   position:   linalg.Vector4f32, // 16 bytes
   direction:  linalg.Vector4f32, // 16 bytes
@@ -88,6 +89,49 @@ BatchingContext :: struct {
   batches: map[BatchKey][dynamic]BatchData,
 }
 
+// RenderInput groups render batches and other per-frame data for the renderer.
+RenderInput :: struct {
+  batches: map[BatchKey][dynamic]BatchData,
+}
+
+// RenderTarget describes the output textures for a render pass.
+RenderTarget :: struct {
+  final:    vk.ImageView,
+  normal:   vk.ImageView,
+  albedo:   vk.ImageView,
+  metallic: vk.ImageView,
+  emissive: vk.ImageView,
+  depth:    vk.ImageView,
+  extra1:   vk.ImageView,
+  extra2:   vk.ImageView,
+  width:    u32,
+  height:   u32,
+  extent:   vk.Extent2D,
+}
+
+
+// Generate render input for a given frustum (camera or light)
+generate_render_input_for_frustum :: proc(
+  self: ^Engine,
+  frustum: geometry.Frustum,
+) -> RenderInput {
+  batching_ctx := BatchingContext {
+    engine  = self,
+    frustum = frustum,
+    lights  = make([dynamic]LightUniform),
+    batches = make(map[BatchKey][dynamic]BatchData),
+  }
+  populate_render_batches(&batching_ctx)
+  return RenderInput{batches = batching_ctx.batches}
+}
+
+generate_render_input :: proc(self: ^Engine) -> RenderInput {
+  return generate_render_input_for_frustum(
+    self,
+    geometry.camera_make_frustum(self.scene.camera),
+  )
+}
+
 InputState :: struct {
   mouse_pos:         linalg.Vector2f64,
   mouse_drag_origin: linalg.Vector2f32,
@@ -101,19 +145,6 @@ LightKind :: enum u32 {
   POINT       = 0,
   DIRECTIONAL = 1,
   SPOT        = 2,
-}
-
-VisibleLightInfo :: struct {
-  index_in_scene:  int,
-  kind:            LightKind,
-  color:           linalg.Vector3f32,
-  radius:          f32,
-  angle:           f32,
-  has_shadow:      bool,
-  position:        linalg.Vector4f32,
-  direction:       linalg.Vector4f32,
-  view:            linalg.Matrix4f32,
-  projection:      linalg.Matrix4f32,
 }
 
 FrameData :: struct {
@@ -156,7 +187,6 @@ Engine :: struct {
   gbuffer:               RendererGBuffer,
   depth_prepass:         RendererDepthPrepass,
   command_buffers:       [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
-  visible_lights:        [MAX_FRAMES_IN_FLIGHT][dynamic]VisibleLightInfo,
   cursor_pos:            [2]i32,
   frames:                [MAX_FRAMES_IN_FLIGHT]FrameData,
 }
@@ -633,61 +663,54 @@ recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
 }
 
 update_visible_lights :: proc(self: ^Engine) {
-  clear(&self.visible_lights[g_frame_index])
+  light_uniform := data_buffer_get(&self.frames[g_frame_index].light_uniform)
+  light_uniform.light_count = 0
   // Traverse scene and update/add visible lights
-  for entry, i in self.scene.nodes.entries do if entry.active {
+  for entry in self.scene.nodes.entries do if entry.active {
     node := entry.item
-    light_info: VisibleLightInfo
+    light_info := &light_uniform.lights[light_uniform.light_count]
     #partial switch light in node.attachment {
     case PointLightAttachment:
       position := node.transform.world_matrix * linalg.Vector4f32{0, 0, 0, 1}
-      light_info = {
-        index_in_scene = i,
-        kind           = .POINT,
-        color          = light.color.xyz,
-        radius         = light.radius,
-        has_shadow     = light.cast_shadow,
-        position       = position,
-        projection     = linalg.matrix4_perspective(math.PI * 0.5, 1.0, 0.01, light.radius),
-        // point light needs 6 view matrices, it will not be calculated here
-      }
+      light_info.kind = .POINT
+      light_info.color = light.color
+      light_info.radius = light.radius
+      light_info.has_shadow = b32(light.cast_shadow)
+      light_info.position = position
+      light_info.proj = linalg.matrix4_perspective(math.PI * 0.5, 1.0, 0.01, light.radius)
+      // point light needs 6 view matrices, it will not be calculated here
+      light_uniform.light_count += 1
     case DirectionalLightAttachment:
       ortho_size: f32 = 20.0
       position := node.transform.world_matrix * linalg.Vector4f32{0, 0, 0, 1}
       direction := node.transform.world_matrix * linalg.Vector4f32{0, 0, 1, 0}
-      light_info = {
-        index_in_scene = i,
-        kind           = .DIRECTIONAL,
-        color          = light.color.xyz,
-        has_shadow     = light.cast_shadow,
-        position       = position,
-        direction      = direction,
-        projection     = linalg.matrix_ortho3d(-ortho_size, ortho_size, -ortho_size, ortho_size, 0.1, 999999.0),
-        view           = linalg.matrix4_look_at(position.xyz, position.xyz + direction.xyz, linalg.VECTOR3F32_Y_AXIS),
-      }
+      light_info.kind = .DIRECTIONAL
+      light_info.color = light.color
+      light_info.has_shadow = b32(light.cast_shadow)
+      light_info.position = position
+      light_info.direction = direction
+      light_info.proj = linalg.matrix_ortho3d(-ortho_size, ortho_size, -ortho_size, ortho_size, 0.1, 9999.0)
+      light_info.view = linalg.matrix4_look_at(position.xyz, position.xyz + direction.xyz, linalg.VECTOR3F32_Y_AXIS)
+      light_uniform.light_count += 1
     case SpotLightAttachment:
       position := node.transform.world_matrix * linalg.Vector4f32{0, 0, 0, 1}
       direction := node.transform.world_matrix * linalg.Vector4f32{0, 0, 1, 0}
-      light_info = {
-        index_in_scene = i,
-        kind           = .SPOT,
-        color          = light.color.xyz,
-        radius         = light.radius,
-        angle          = light.angle,
-        has_shadow     = light.cast_shadow,
-        position       = position,
-        direction      = direction,
-        projection     = linalg.matrix4_perspective(light.angle, 1.0, 0.01, light.radius),
-        view           = linalg.matrix4_look_at(position.xyz, position.xyz + direction.xyz, linalg.VECTOR3F32_Y_AXIS),
-      }
+      light_info.kind = .SPOT
+      light_info.color = light.color
+      light_info.radius = light.radius
+      light_info.angle = light.angle
+      light_info.has_shadow = b32(light.cast_shadow)
+      light_info.position = position
+      light_info.direction = direction
+      light_info.proj = linalg.matrix4_perspective(light.angle, 1.0, 0.01, light.radius)
+      light_info.view = linalg.matrix4_look_at(position.xyz, position.xyz + direction.xyz, linalg.VECTOR3F32_Y_AXIS)
+      light_uniform.light_count += 1
     case:
       continue
     }
-    if len(self.visible_lights[g_frame_index]) >= MAX_LIGHTS {
-      log.errorf("Too many lights in scene, max is %d", MAX_LIGHTS)
+    if light_uniform.light_count >= MAX_LIGHTS {
       break
     }
-    append(&self.visible_lights[g_frame_index], light_info)
   }
 }
 
@@ -701,24 +724,6 @@ render :: proc(self: ^Engine) -> vk.Result {
   camera_uniform.projection = geometry.calculate_projection_matrix(
     self.scene.camera,
   )
-  light_uniform := data_buffer_get(&self.frames[g_frame_index].light_uniform)
-  light_uniform.light_count = u32(len(self.visible_lights[g_frame_index]))
-  for light, i in self.visible_lights[g_frame_index] {
-    light_uniform.lights[i].kind = light.kind
-    light_uniform.lights[i].color = linalg.Vector4f32 {
-      light.color.x,
-      light.color.y,
-      light.color.z,
-      1.0,
-    }
-    light_uniform.lights[i].radius = light.radius
-    light_uniform.lights[i].angle = light.angle
-    light_uniform.lights[i].has_shadow = b32(light.has_shadow)
-    light_uniform.lights[i].position = light.position
-    light_uniform.lights[i].direction = light.direction
-    light_uniform.lights[i].view_proj = light.view * light.projection
-  }
-
   vk.BeginCommandBuffer(
     command_buffer,
     &{sType = .COMMAND_BUFFER_BEGIN_INFO, flags = {.ONE_TIME_SUBMIT}},
@@ -727,27 +732,298 @@ render :: proc(self: ^Engine) -> vk.Result {
   compute_particles(&self.particle, command_buffer)
   update_visible_lights(self)
   // log.debug("============ rendering shadow pass...============ ")
-  renderer_shadow_begin(self, command_buffer)
-  renderer_shadow_render(self, command_buffer)
-  renderer_shadow_end(self, command_buffer)
+  initial_barriers := make([dynamic]vk.ImageMemoryBarrier, 0)
+  defer delete(initial_barriers)
+  light_uniform := data_buffer_get(&self.frames[g_frame_index].light_uniform)
+  // Transition all shadow maps to depth attachment optimal
+  for i in 0 ..< light_uniform.light_count {
+    light := &light_uniform.lights[i]
+    if !light.has_shadow do continue
+    switch light.kind {
+    case .POINT:
+      append(
+        &initial_barriers,
+        vk.ImageMemoryBarrier {
+          sType = .IMAGE_MEMORY_BARRIER,
+          oldLayout = .UNDEFINED,
+          newLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+          srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+          dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+          image = self.frames[g_frame_index].cube_shadow_maps[i].image,
+          subresourceRange = {
+            aspectMask = {.DEPTH},
+            baseMipLevel = 0,
+            levelCount = 1,
+            baseArrayLayer = 0,
+            layerCount = 6,
+          },
+          dstAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE},
+        },
+      )
+    case .DIRECTIONAL, .SPOT:
+      append(
+        &initial_barriers,
+        vk.ImageMemoryBarrier {
+          sType = .IMAGE_MEMORY_BARRIER,
+          oldLayout = .UNDEFINED,
+          newLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+          srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+          dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+          image = self.frames[g_frame_index].shadow_maps[i].image,
+          subresourceRange = {
+            aspectMask = {.DEPTH},
+            baseMipLevel = 0,
+            levelCount = 1,
+            baseArrayLayer = 0,
+            layerCount = 1,
+          },
+          dstAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE},
+        },
+      )
+    }
+  }
+  vk.CmdPipelineBarrier(
+    command_buffer,
+    {.TOP_OF_PIPE},
+    {.EARLY_FRAGMENT_TESTS},
+    {},
+    0,
+    nil,
+    0,
+    nil,
+    u32(len(initial_barriers)),
+    raw_data(initial_barriers),
+  )
+  for i in 0 ..< light_uniform.light_count {
+    light := &light_uniform.lights[i]
+    if !light.has_shadow do continue
+    switch light.kind {
+    case .POINT:
+      // Render 6 faces for point light shadow cubemap
+      cube_shadow := &self.frames[g_frame_index].cube_shadow_maps[i]
+      for face in 0 ..< 6 {
+        @(static) face_dirs := [6][3]f32 {
+          {1, 0, 0},
+          {-1, 0, 0},
+          {0, 1, 0},
+          {0, -1, 0},
+          {0, 0, 1},
+          {0, 0, -1},
+        }
+        @(static) face_ups := [6][3]f32 {
+          {0, -1, 0},
+          {0, -1, 0},
+          {0, 0, 1},
+          {0, 0, -1},
+          {0, -1, 0},
+          {0, -1, 0},
+        }
+        light.view = linalg.matrix4_look_at(
+          light.position.xyz,
+          light.position.xyz + face_dirs[face],
+          face_ups[face],
+        )
+        frustum := geometry.make_frustum(light.proj * light.view)
+        shadow_render_input := generate_render_input_for_frustum(self, frustum)
+        shadow_target: RenderTarget
+        shadow_target.depth = cube_shadow.face_views[face]
+        shadow_target.extent = {
+          width  = cube_shadow.width,
+          height = cube_shadow.height,
+        }
+        shadow_target.width = cube_shadow.width
+        shadow_target.height = cube_shadow.height
+        renderer_shadow_begin(shadow_target, command_buffer)
+        renderer_shadow_render(
+          &self.shadow,
+          shadow_render_input,
+          light,
+          shadow_target,
+          u32(i),
+          u32(face),
+          command_buffer,
+        )
+        renderer_shadow_end(command_buffer)
+      }
+    case .DIRECTIONAL, .SPOT:
+      frustum := geometry.make_frustum(light.proj * light.view)
+      shadow_render_input := generate_render_input_for_frustum(self, frustum)
+      shadow_map_texture := &self.frames[g_frame_index].shadow_maps[i]
+      shadow_target: RenderTarget
+      shadow_target.depth = shadow_map_texture.view
+      shadow_target.extent = {
+        width  = shadow_map_texture.width,
+        height = shadow_map_texture.height,
+      }
+      shadow_target.width = shadow_map_texture.width
+      shadow_target.height = shadow_map_texture.height
+      renderer_shadow_begin(shadow_target, command_buffer)
+      renderer_shadow_render(
+        &self.shadow,
+        shadow_render_input,
+        light,
+        shadow_target,
+        u32(i),
+        0,
+        command_buffer,
+      )
+      renderer_shadow_end(command_buffer)
+    }
+  }
+  final_barriers := make([dynamic]vk.ImageMemoryBarrier, 0)
+  defer delete(final_barriers)
+  // Transition all shadow maps to depth attachment optimal
+  for i in 0 ..< light_uniform.light_count {
+    light := &light_uniform.lights[i]
+    if !light.has_shadow do continue
+    switch light.kind {
+    case .POINT:
+      append(
+        &final_barriers,
+        vk.ImageMemoryBarrier {
+          sType = .IMAGE_MEMORY_BARRIER,
+          oldLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+          newLayout = .SHADER_READ_ONLY_OPTIMAL,
+          srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+          dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+          image = self.frames[g_frame_index].cube_shadow_maps[i].image,
+          subresourceRange = {
+            aspectMask = {.DEPTH},
+            baseMipLevel = 0,
+            levelCount = 1,
+            baseArrayLayer = 0,
+            layerCount = 6,
+          },
+          dstAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE},
+        },
+      )
+    case .DIRECTIONAL, .SPOT:
+      append(
+        &final_barriers,
+        vk.ImageMemoryBarrier {
+          sType = .IMAGE_MEMORY_BARRIER,
+          oldLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+          newLayout = .SHADER_READ_ONLY_OPTIMAL,
+          srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+          dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+          image = self.frames[g_frame_index].shadow_maps[i].image,
+          subresourceRange = {
+            aspectMask = {.DEPTH},
+            baseMipLevel = 0,
+            levelCount = 1,
+            baseArrayLayer = 0,
+            layerCount = 1,
+          },
+          dstAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE},
+        },
+      )
+    }
+  }
+  vk.CmdPipelineBarrier(
+    command_buffer,
+    {.LATE_FRAGMENT_TESTS},
+    {.FRAGMENT_SHADER},
+    {},
+    0,
+    nil,
+    0,
+    nil,
+    u32(len(final_barriers)),
+    raw_data(final_barriers),
+  )
   prepare_image_for_render(
     command_buffer,
     self.frames[g_frame_index].final_image.image,
   )
   // log.debug("============ rendering depth pre-pass... =============")
-  renderer_depth_prepass_begin(self, command_buffer)
-  renderer_depth_prepass_render(self, command_buffer)
-  renderer_depth_prepass_end(self, command_buffer)
+  depth_target: RenderTarget
+  depth_target.depth = self.frames[g_frame_index].depth_buffer.view
+  depth_target.extent = self.swapchain.extent
+  depth_target.width = self.swapchain.extent.width
+  depth_target.height = self.swapchain.extent.height
+  depth_input := generate_render_input(self)
+  renderer_depth_prepass_begin(&depth_target, command_buffer)
+  renderer_depth_prepass_render(
+    &self.depth_prepass,
+    &depth_input,
+    command_buffer,
+  )
+  renderer_depth_prepass_end(command_buffer)
   if true {
     // log.debug("============ rendering G-buffer pass... =============")
-    renderer_gbuffer_begin(self, command_buffer, self.swapchain.extent)
-    renderer_gbuffer_render(self, command_buffer)
-    renderer_gbuffer_end(self, command_buffer)
+    prepare_image_for_render(
+      command_buffer,
+      self.frames[g_frame_index].gbuffer_normal.image,
+      .COLOR_ATTACHMENT_OPTIMAL,
+    )
+    prepare_image_for_render(
+      command_buffer,
+      self.frames[g_frame_index].gbuffer_albedo.image,
+      .COLOR_ATTACHMENT_OPTIMAL,
+    )
+    prepare_image_for_render(
+      command_buffer,
+      self.frames[g_frame_index].gbuffer_metallic_roughness.image,
+      .COLOR_ATTACHMENT_OPTIMAL,
+    )
+    prepare_image_for_render(
+      command_buffer,
+      self.frames[g_frame_index].gbuffer_emissive.image,
+      .COLOR_ATTACHMENT_OPTIMAL,
+    )
+    gbuffer_target: RenderTarget
+    gbuffer_target.normal = self.frames[g_frame_index].gbuffer_normal.view
+    gbuffer_target.albedo = self.frames[g_frame_index].gbuffer_albedo.view
+    gbuffer_target.metallic =
+      self.frames[g_frame_index].gbuffer_metallic_roughness.view
+    gbuffer_target.emissive = self.frames[g_frame_index].gbuffer_emissive.view
+    gbuffer_target.depth = self.frames[g_frame_index].depth_buffer.view
+    gbuffer_target.extent = self.swapchain.extent
+    gbuffer_target.width = self.swapchain.extent.width
+    gbuffer_target.height = self.swapchain.extent.height
+    gbuffer_input := generate_render_input(self)
+    renderer_gbuffer_begin(&gbuffer_target, command_buffer)
+    renderer_gbuffer_render(
+      &self.gbuffer,
+      &gbuffer_input,
+      &gbuffer_target,
+      command_buffer,
+    )
+    renderer_gbuffer_end(&gbuffer_target, command_buffer)
 
+    prepare_image_for_shader_read(
+      command_buffer,
+      self.frames[g_frame_index].gbuffer_normal.image,
+    )
+    prepare_image_for_shader_read(
+      command_buffer,
+      self.frames[g_frame_index].gbuffer_albedo.image,
+    )
+    prepare_image_for_shader_read(
+      command_buffer,
+      self.frames[g_frame_index].gbuffer_metallic_roughness.image,
+    )
+    prepare_image_for_shader_read(
+      command_buffer,
+      self.frames[g_frame_index].gbuffer_emissive.image,
+    )
     // log.debug("============ rendering main pass... =============")
-    renderer_main_begin(self, command_buffer)
-    renderer_main_render(self, command_buffer)
-    renderer_main_end(self, command_buffer)
+    // Prepare RenderTarget and RenderInput for decoupled renderer
+    render_target: RenderTarget
+    render_target.final = self.frames[g_frame_index].final_image.view
+    render_target.depth = self.frames[g_frame_index].depth_buffer.view
+    render_target.normal = self.frames[g_frame_index].gbuffer_normal.view
+    render_target.albedo = self.frames[g_frame_index].gbuffer_albedo.view
+    render_target.metallic =
+      self.frames[g_frame_index].gbuffer_metallic_roughness.view
+    render_target.emissive = self.frames[g_frame_index].gbuffer_emissive.view
+    render_target.extent = self.swapchain.extent
+    render_target.width = self.swapchain.extent.width
+    render_target.height = self.swapchain.extent.height
+    render_input := generate_render_input(self)
+    renderer_main_begin(render_target, command_buffer)
+    renderer_main_render(&self.main, render_input, command_buffer)
+    renderer_main_end(command_buffer)
     // log.debug("============ rendering particles... =============")
     renderer_particle_begin(
       self,
@@ -842,8 +1118,8 @@ run :: proc(self: ^Engine, width: u32, height: u32, title: string) {
   }
   defer deinit(self)
   frame := 0
-  // for !glfw.WindowShouldClose(self.window) && frame < 3 {
   for !glfw.WindowShouldClose(self.window) {
+    // if frame > 1 do break
     update(self)
     if time.duration_milliseconds(time.since(self.last_frame_timestamp)) <
        FRAME_TIME_MILIS {

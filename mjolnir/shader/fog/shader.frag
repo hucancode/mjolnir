@@ -47,5 +47,5 @@ void main() {
     float linear_depth = linearize_depth(depth);
     float fog_factor = compute_fog_factor(linear_depth);
     vec3 final_color = mix(color.rgb, fog.fog_color, fog_factor);
-    out_color = vec4(color.rgb, color.a);
+    out_color = vec4(final_color, color.a);
 }

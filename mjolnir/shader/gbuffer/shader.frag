@@ -19,7 +19,8 @@ const uint SPOT_LIGHT = 2;
 const float PI = 3.14159265359;
 
 struct Light {
-    mat4 viewProj;
+    mat4 view;
+    mat4 proj;
     vec4 color;
     vec4 position;
     vec4 direction;

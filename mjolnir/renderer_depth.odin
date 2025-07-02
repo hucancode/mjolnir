@@ -2,8 +2,6 @@ package mjolnir
 
 import "core:fmt"
 import "core:log"
-import "core:mem"
-import "core:time"
 import "geometry"
 import "resource"
 import mu "vendor:microui"
@@ -71,13 +69,12 @@ renderer_depth_prepass_deinit :: proc(self: ^RendererDepthPrepass) {
 }
 
 renderer_depth_prepass_begin :: proc(
-  engine: ^Engine,
+  render_target: ^RenderTarget,
   command_buffer: vk.CommandBuffer,
 ) {
-  // Use global g_frame_index
   depth_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
-    imageView = engine.frames[g_frame_index].depth_buffer.view,
+    imageView = render_target.depth,
     imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
     loadOp = .CLEAR,
     storeOp = .STORE,
@@ -85,59 +82,36 @@ renderer_depth_prepass_begin :: proc(
   }
   render_info := vk.RenderingInfoKHR {
     sType = .RENDERING_INFO_KHR,
-    renderArea = {extent = engine.swapchain.extent},
+    renderArea = {extent = render_target.extent},
     layerCount = 1,
     pDepthAttachment = &depth_attachment,
   }
   vk.CmdBeginRenderingKHR(command_buffer, &render_info)
   viewport := vk.Viewport {
     x        = 0.0,
-    y        = f32(engine.swapchain.extent.height),
-    width    = f32(engine.swapchain.extent.width),
-    height   = -f32(engine.swapchain.extent.height),
+    y        = f32(render_target.extent.height),
+    width    = f32(render_target.extent.width),
+    height   = -f32(render_target.extent.height),
     minDepth = 0.0,
     maxDepth = 1.0,
   }
   vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
   scissor := vk.Rect2D {
     offset = {x = 0, y = 0},
-    extent = engine.swapchain.extent,
+    extent = render_target.extent,
   }
   vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
-  camera_uniform := data_buffer_get(
-    &engine.frames[g_frame_index].camera_uniform,
-  )
-  camera_uniform.view = geometry.calculate_view_matrix(engine.scene.camera)
-  camera_uniform.projection = geometry.calculate_projection_matrix(
-    engine.scene.camera,
-  )
 }
 
-renderer_depth_prepass_end :: proc(
-  engine: ^Engine,
-  command_buffer: vk.CommandBuffer,
-) {
+renderer_depth_prepass_end :: proc(command_buffer: vk.CommandBuffer) {
   vk.CmdEndRenderingKHR(command_buffer)
 }
 
 renderer_depth_prepass_render :: proc(
-  engine: ^Engine,
+  self: ^RendererDepthPrepass,
+  render_input: ^RenderInput,
   command_buffer: vk.CommandBuffer,
-) {
-  camera_frustum := geometry.camera_make_frustum(engine.scene.camera)
-  temp_arena: mem.Arena
-  temp_allocator_buffer := make([]u8, mem.Megabyte) // 1MB should be enough for depth pre-pass batching
-  defer delete(temp_allocator_buffer)
-  mem.arena_init(&temp_arena, temp_allocator_buffer)
-  temp_allocator := mem.arena_allocator(&temp_arena)
-  batching_ctx := BatchingContext {
-    engine  = engine,
-    frustum = camera_frustum,
-    lights  = make([dynamic]LightUniform, temp_allocator),
-    batches = make(map[BatchKey][dynamic]BatchData, temp_allocator),
-  }
-  renderer_depth_prepass_populate_batches(&batching_ctx)
-  layout := engine.depth_prepass.pipeline_layout
+) -> int {
   descriptor_sets := [?]vk.DescriptorSet {
     g_camera_descriptor_sets[g_frame_index], // set 0
     g_bindless_bone_buffer_descriptor_set, // set 1
@@ -145,30 +119,86 @@ renderer_depth_prepass_render :: proc(
   vk.CmdBindDescriptorSets(
     command_buffer,
     .GRAPHICS,
-    layout,
+    self.pipeline_layout,
     0,
     len(descriptor_sets),
     raw_data(descriptor_sets[:]),
     0,
     nil,
   )
-  rendered_count := renderer_depth_prepass_render_batches(
-    &engine.depth_prepass,
-    &batching_ctx,
-    command_buffer,
-  )
-  if mu.window(
-    &engine.ui.ctx,
-    "Depth Pre-pass",
-    {960, 40, 300, 100},
-    {.NO_CLOSE},
-  ) {
-    mu.label(&engine.ui.ctx, fmt.tprintf("Pre-pass: %v", rendered_count))
-    mu.label(
-      &engine.ui.ctx,
-      fmt.tprintf("Batches: %v", len(batching_ctx.batches)),
-    )
+  rendered_count := 0
+  current_pipeline: vk.Pipeline = 0
+  for batch_key, batch_group in render_input.batches {
+    if batch_key.material_type == .WIREFRAME {
+      continue
+    }
+    for batch_data in batch_group {
+      material := resource.get(
+        g_materials,
+        batch_data.material_handle,
+      ) or_continue
+      for node in batch_data.nodes {
+        #partial switch data in node.attachment {
+        case MeshAttachment:
+          mesh := resource.get(g_meshes, data.handle) or_continue
+          mesh_skinning, mesh_has_skin := &mesh.skinning.?
+          node_skinning, node_has_skin := data.skinning.?
+          pipeline := renderer_depth_prepass_get_pipeline(
+            self,
+            material,
+            mesh,
+            data,
+          )
+          if pipeline != current_pipeline {
+            vk.CmdBindPipeline(command_buffer, .GRAPHICS, pipeline)
+            current_pipeline = pipeline
+          }
+          push_constant := PushConstant {
+            world = node.transform.world_matrix,
+          }
+          if node_has_skin {
+            push_constant.bone_matrix_offset =
+              node_skinning.bone_matrix_offset +
+              g_frame_index * g_bone_matrix_slab.capacity
+          }
+          vk.CmdPushConstants(
+            command_buffer,
+            self.pipeline_layout,
+            {.VERTEX},
+            0,
+            size_of(PushConstant),
+            &push_constant,
+          )
+          offset: vk.DeviceSize = 0
+          vk.CmdBindVertexBuffers(
+            command_buffer,
+            0,
+            1,
+            &mesh.vertex_buffer.buffer,
+            &offset,
+          )
+          if mesh_has_skin {
+            vk.CmdBindVertexBuffers(
+              command_buffer,
+              1,
+              1,
+              &mesh_skinning.skin_buffer.buffer,
+              &offset,
+            )
+          }
+          vk.CmdBindIndexBuffer(
+            command_buffer,
+            mesh.index_buffer.buffer,
+            0,
+            .UINT32,
+          )
+          vk.CmdDrawIndexed(command_buffer, mesh.indices_len, 1, 0, 0, 0)
+          rendered_count += 1
+        }
+      }
+    }
   }
+  return rendered_count
 }
 
 // Populate batches for depth prepass rendering
@@ -347,9 +377,15 @@ renderer_depth_prepass_build_pipeline :: proc(
   vertex_input_info := vk.PipelineVertexInputStateCreateInfo {
     sType                           = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
     vertexBindingDescriptionCount   = len(geometry.VERTEX_BINDING_DESCRIPTION),
-    pVertexBindingDescriptions      = raw_data(geometry.VERTEX_BINDING_DESCRIPTION[:]),
-    vertexAttributeDescriptionCount = len(geometry.VERTEX_ATTRIBUTE_DESCRIPTIONS),
-    pVertexAttributeDescriptions    = raw_data(geometry.VERTEX_ATTRIBUTE_DESCRIPTIONS[:]),
+    pVertexBindingDescriptions      = raw_data(
+      geometry.VERTEX_BINDING_DESCRIPTION[:],
+    ),
+    vertexAttributeDescriptionCount = len(
+      geometry.VERTEX_ATTRIBUTE_DESCRIPTIONS,
+    ),
+    pVertexAttributeDescriptions    = raw_data(
+      geometry.VERTEX_ATTRIBUTE_DESCRIPTIONS[:],
+    ),
   }
   dynamic_states := [?]vk.DynamicState{.VIEWPORT, .SCISSOR}
   dynamic_state := vk.PipelineDynamicStateCreateInfo {

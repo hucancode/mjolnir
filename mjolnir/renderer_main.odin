@@ -3,8 +3,6 @@ package mjolnir
 import "core:fmt"
 import "core:log"
 import linalg "core:math/linalg"
-import "core:mem"
-import "core:time"
 import "geometry"
 import "resource"
 import mu "vendor:microui"
@@ -564,15 +562,13 @@ renderer_main_get_pipeline :: proc(
   return self.pipelines[0]
 }
 
-// Depth prepass pipeline getter has been moved to renderer_depth_prepass.odin
-
 renderer_main_begin :: proc(
-  engine: ^Engine,
+  target: RenderTarget,
   command_buffer: vk.CommandBuffer,
 ) {
   color_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
-    imageView = engine.frames[g_frame_index].final_image.view,
+    imageView = target.final,
     imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
     loadOp = .CLEAR,
     storeOp = .STORE,
@@ -580,14 +576,14 @@ renderer_main_begin :: proc(
   }
   depth_attachment := vk.RenderingAttachmentInfoKHR {
     sType       = .RENDERING_ATTACHMENT_INFO_KHR,
-    imageView   = engine.frames[g_frame_index].depth_buffer.view,
+    imageView   = target.depth,
     imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
     loadOp      = .LOAD, // Load existing depth from dedicated depth pre-pass
     storeOp     = .STORE,
   }
   render_info := vk.RenderingInfoKHR {
     sType = .RENDERING_INFO_KHR,
-    renderArea = {extent = engine.swapchain.extent},
+    renderArea = {extent = {width = target.width, height = target.height}},
     layerCount = 1,
     colorAttachmentCount = 1,
     pColorAttachments = &color_attachment,
@@ -596,316 +592,43 @@ renderer_main_begin :: proc(
   vk.CmdBeginRenderingKHR(command_buffer, &render_info)
   viewport := vk.Viewport {
     x        = 0.0,
-    y        = f32(engine.swapchain.extent.height),
-    width    = f32(engine.swapchain.extent.width),
-    height   = -f32(engine.swapchain.extent.height),
+    y        = f32(target.height),
+    width    = f32(target.width),
+    height   = -f32(target.height),
     minDepth = 0.0,
     maxDepth = 1.0,
   }
   scissor := vk.Rect2D {
-    extent = engine.swapchain.extent,
+    extent = {width = target.width, height = target.height},
   }
   vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
   vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
-  camera_uniform := data_buffer_get(
-    &engine.frames[g_frame_index].camera_uniform,
-  )
-  camera_uniform.view = geometry.calculate_view_matrix(engine.scene.camera)
-  camera_uniform.projection = geometry.calculate_projection_matrix(
-    engine.scene.camera,
-  )
-  light_uniform := data_buffer_get(&engine.frames[g_frame_index].light_uniform)
-  light_uniform.light_count = u32(len(engine.visible_lights[g_frame_index]))
-  for light, i in engine.visible_lights[g_frame_index] {
-    light_uniform.lights[i].kind = light.kind
-    light_uniform.lights[i].color = linalg.Vector4f32 {
-      light.color.x,
-      light.color.y,
-      light.color.z,
-      1.0,
-    }
-    light_uniform.lights[i].radius = light.radius
-    light_uniform.lights[i].angle = light.angle
-    light_uniform.lights[i].has_shadow = b32(light.has_shadow)
-    light_uniform.lights[i].position = light.position
-    light_uniform.lights[i].direction = light.direction
-    light_uniform.lights[i].view_proj = light.view * light.projection
-  }
 }
 
 renderer_main_render :: proc(
-  engine: ^Engine,
-  command_buffer: vk.CommandBuffer,
-) {
-  camera_frustum := geometry.camera_make_frustum(engine.scene.camera)
-  temp_arena: mem.Arena
-  temp_allocator_buffer := make([]u8, mem.Megabyte * 2) // 2MB should be enough for batching
-  defer delete(temp_allocator_buffer)
-  mem.arena_init(&temp_arena, temp_allocator_buffer)
-  temp_allocator := mem.arena_allocator(&temp_arena)
-  batching_ctx := BatchingContext {
-    engine  = engine,
-    frustum = camera_frustum,
-    lights  = make([dynamic]LightUniform, allocator = temp_allocator),
-    batches = make(
-      map[BatchKey][dynamic]BatchData,
-      allocator = temp_allocator,
-    ),
-  }
-  populate_render_batches(&batching_ctx)
-  layout := engine.main.pipeline_layout
-  descriptor_sets := [?]vk.DescriptorSet {
-    g_camera_descriptor_sets[g_frame_index], // set = 0
-    g_lights_descriptor_sets[g_frame_index], // set = 1
-    g_textures_descriptor_set, // set = 2
-    g_bindless_bone_buffer_descriptor_set, // set = 3
-  }
-  vk.CmdBindDescriptorSets(
-    command_buffer,
-    .GRAPHICS,
-    layout,
-    0,
-    len(descriptor_sets),
-    raw_data(descriptor_sets[:]),
-    0,
-    nil,
-  )
-  rendered_count := render_batched_meshes(
-    &engine.main,
-    &batching_ctx,
-    command_buffer,
-  )
-  if mu.window(
-    &engine.ui.ctx,
-    "Main pass renderer",
-    {40, 200, 300, 150},
-    {.NO_CLOSE, .NO_SCROLL},
-  ) {
-    mu.label(&engine.ui.ctx, fmt.tprintf("Rendered %v", rendered_count))
-    mu.label(
-      &engine.ui.ctx,
-      fmt.tprintf("Batches %v", len(batching_ctx.batches)),
-    )
-    mu.label(
-      &engine.ui.ctx,
-      fmt.tprintf("Lights %d", len(batching_ctx.lights)),
-    )
-    mu.label(
-      &engine.ui.ctx,
-      fmt.tprintf(
-        "%dx%d",
-        engine.frames[0].final_image.width,
-        engine.frames[0].final_image.height,
-      ),
-    )
-    // if .SUBMIT in mu.button(&engine.ui.ctx, "Button 1") {
-    //     log.info("Pressed button 1")
-    // }
-  }
-}
-
-renderer_main_end :: proc(engine: ^Engine, command_buffer: vk.CommandBuffer) {
-  vk.CmdEndRenderingKHR(command_buffer)
-}
-
-// Add render-to-texture capability
-render_to_texture :: proc(
-  engine: ^Engine,
-  color_view: vk.ImageView,
-  depth_view: vk.ImageView,
-  extent: vk.Extent2D,
-  camera: Maybe(geometry.Camera) = nil,
-) -> vk.Result {
-  command_buffer := engine.command_buffers[g_frame_index]
-  render_camera := camera.? or_else engine.scene.camera
-  camera_uniform := data_buffer_get(
-    &engine.frames[g_frame_index].camera_uniform,
-  )
-  camera_uniform.view = geometry.calculate_view_matrix(render_camera)
-  camera_uniform.projection = geometry.calculate_projection_matrix(
-    render_camera,
-  )
-  camera_frustum := geometry.camera_make_frustum(render_camera)
-  color_attachment := vk.RenderingAttachmentInfoKHR {
-    sType = .RENDERING_ATTACHMENT_INFO_KHR,
-    imageView = color_view,
-    imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
-    loadOp = .CLEAR,
-    storeOp = .STORE,
-    clearValue = {color = {float32 = BG_BLUE_GRAY}},
-  }
-  depth_attachment := vk.RenderingAttachmentInfoKHR {
-    sType = .RENDERING_ATTACHMENT_INFO_KHR,
-    imageView = depth_view,
-    imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-    loadOp = .CLEAR,
-    storeOp = .STORE,
-    clearValue = {depthStencil = {1.0, 0}},
-  }
-  render_info := vk.RenderingInfoKHR {
-    sType = .RENDERING_INFO_KHR,
-    renderArea = {extent = extent},
-    layerCount = 1,
-    colorAttachmentCount = 1,
-    pColorAttachments = &color_attachment,
-    pDepthAttachment = &depth_attachment,
-  }
-  vk.CmdBeginRenderingKHR(command_buffer, &render_info)
-  viewport := vk.Viewport {
-    x        = 0.0,
-    y        = f32(extent.height),
-    width    = f32(extent.width),
-    height   = -f32(extent.height),
-    minDepth = 0.0,
-    maxDepth = 1.0,
-  }
-  scissor := vk.Rect2D {
-    extent = extent,
-  }
-  vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
-  vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
-  // Create temporary batching context for render-to-texture
-  temp_arena: mem.Arena
-  temp_buffer := make([]u8, mem.Megabyte)
-  defer delete(temp_buffer)
-  mem.arena_init(&temp_arena, temp_buffer)
-  temp_allocator := mem.arena_allocator(&temp_arena)
-  batching_ctx := BatchingContext {
-    engine  = engine,
-    frustum = camera_frustum,
-    lights  = make([dynamic]LightUniform, allocator = temp_allocator),
-    batches = make(
-      map[BatchKey][dynamic]BatchData,
-      allocator = temp_allocator,
-    ),
-  }
-  populate_render_batches(&batching_ctx)
-  layout := engine.main.pipeline_layout
-  descriptor_sets := [?]vk.DescriptorSet {
-    g_camera_descriptor_sets[g_frame_index], // set = 0
-    g_lights_descriptor_sets[g_frame_index], // set = 1
-    g_textures_descriptor_set, // set = 2
-    g_bindless_bone_buffer_descriptor_set, // set = 3
-  }
-  vk.CmdBindDescriptorSets(
-    command_buffer,
-    .GRAPHICS,
-    layout,
-    0,
-    len(descriptor_sets),
-    raw_data(descriptor_sets[:]),
-    0,
-    nil,
-  )
-  render_batched_meshes(&engine.main, &batching_ctx, command_buffer)
-  vk.CmdEndRenderingKHR(command_buffer)
-  return .SUCCESS
-}
-
-renderer_main_init :: proc(
   self: ^RendererMain,
-  width: u32,
-  height: u32,
-  color_format: vk.Format = .B8G8R8A8_SRGB,
-  depth_format: vk.Format = .D32_SFLOAT,
-) -> vk.Result {
-  renderer_main_build_pbr_pipeline(self, color_format, depth_format) or_return
-  renderer_main_build_unlit_pipeline(
-    self,
-    color_format,
-    depth_format,
-  ) or_return
-  renderer_main_build_wireframe_unlit_pipeline(
-    self,
-    color_format,
-    depth_format,
-  ) or_return
-  environment_map: ^ImageBuffer
-  self.environment_map, environment_map = create_hdr_texture_from_path_with_mips(
-    "assets/Cannon_Exterior.hdr",
-  ) or_return
-  brdf_lut: ^ImageBuffer
-  self.brdf_lut, brdf_lut = create_texture_from_data(
-    #load("assets/lut_ggx.png"),
-  ) or_return
-  self.ibl_intensity = 1.0 // Default IBL intensity
-  return .SUCCESS
-}
-
-renderer_main_deinit :: proc(self: ^RendererMain) {
-  vk.DestroyPipelineLayout(g_device, self.pipeline_layout, nil)
-  for p in self.pipelines do vk.DestroyPipeline(g_device, p, nil)
-  for p in self.unlit_pipelines do vk.DestroyPipeline(g_device, p, nil)
-  for p in self.wireframe_pipelines do vk.DestroyPipeline(g_device, p, nil)
-}
-
-populate_render_batches :: proc(ctx: ^BatchingContext) {
-  for light in ctx.engine.visible_lights[g_frame_index] {
-    light_uniform := LightUniform {
-      kind       = light.kind,
-      color      = linalg.Vector4f32 {
-        light.color.x,
-        light.color.y,
-        light.color.z,
-        1.0,
-      },
-      radius     = light.radius,
-      angle      = light.angle,
-      has_shadow = b32(light.has_shadow),
-      position   = light.position,
-      direction  = light.direction,
-      view_proj  = light.view * light.projection,
-    }
-    append(&ctx.lights, light_uniform)
-  }
-  for &entry in ctx.engine.scene.nodes.entries do if entry.active {
-    node := &entry.item
-    #partial switch data in node.attachment {
-    case MeshAttachment:
-      mesh := resource.get(g_meshes, data.handle)
-      if mesh == nil do continue
-      material := resource.get(g_materials, data.material)
-      if material == nil do continue
-      world_aabb := geometry.aabb_transform(mesh.aabb, node.transform.world_matrix)
-      if !geometry.frustum_test_aabb(&ctx.frustum, world_aabb) do continue
-      batch_key := BatchKey {
-        features      = material.features,
-        material_type = material.type,
-      }
-      batch_group, group_found := &ctx.batches[batch_key]
-      if !group_found {
-        ctx.batches[batch_key] = make([dynamic]BatchData, allocator = context.temp_allocator)
-        batch_group = &ctx.batches[batch_key]
-      }
-      batch_data: ^BatchData
-      for &batch in batch_group {
-        if batch.material_handle == data.material {
-          batch_data = &batch
-          break
-        }
-      }
-      if batch_data == nil {
-        new_batch := BatchData {
-          material_handle = data.material,
-          nodes           = make([dynamic]^Node, allocator = context.temp_allocator),
-        }
-        append(batch_group, new_batch)
-        batch_data = &batch_group[len(batch_group) - 1]
-      }
-      append(&batch_data.nodes, node)
-    }
-  }
-}
-
-render_batched_meshes :: proc(
-  self: ^RendererMain,
-  ctx: ^BatchingContext,
+  input: RenderInput,
   command_buffer: vk.CommandBuffer,
 ) -> int {
-  rendered := 0
-  layout := self.pipeline_layout
+  descriptor_sets := [?]vk.DescriptorSet {
+    g_camera_descriptor_sets[g_frame_index],
+    g_lights_descriptor_sets[g_frame_index],
+    g_textures_descriptor_set,
+    g_bindless_bone_buffer_descriptor_set,
+  }
+  vk.CmdBindDescriptorSets(
+    command_buffer,
+    .GRAPHICS,
+    self.pipeline_layout,
+    0,
+    len(descriptor_sets),
+    raw_data(descriptor_sets[:]),
+    0,
+    nil,
+  )
+  rendered_count := 0
   current_pipeline: vk.Pipeline = 0
-  for _, batch_group in ctx.batches {
+  for _, batch_group in input.batches {
     sample_material := resource.get(
       g_materials,
       batch_group[0].material_handle,
@@ -960,12 +683,18 @@ render_batched_meshes :: proc(
             g_frame_index * g_bone_matrix_slab.capacity
         }
         // Calculate max LOD based on environment texture
-        environment_texture := resource.get(g_image_buffers, self.environment_map) or_else nil
+        environment_texture :=
+          resource.get(g_image_buffers, self.environment_map) or_else nil
         max_lod: f32 = 8.0 // Default fallback
         if environment_texture != nil {
-          max_lod = f32(calculate_mip_levels(environment_texture.width, environment_texture.height) - 1)
+          max_lod = f32(
+            calculate_mip_levels(
+              environment_texture.width,
+              environment_texture.height,
+            ) -
+            1,
+          )
         }
-
         push_constant := PushConstant {
           world               = node.transform.world_matrix,
           textures            = texture_indices,
@@ -977,7 +706,7 @@ render_batched_meshes :: proc(
         }
         vk.CmdPushConstants(
           command_buffer,
-          layout,
+          self.pipeline_layout,
           {.VERTEX, .FRAGMENT},
           0,
           size_of(PushConstant),
@@ -992,16 +721,13 @@ render_batched_meshes :: proc(
           &offset,
         )
         if mesh_skinning, mesh_has_skin := &mesh.skinning.?; mesh_has_skin {
-          if node_skinning, node_has_skin := mesh_attachment.skinning.?;
-             node_has_skin {
-            vk.CmdBindVertexBuffers(
-              command_buffer,
-              1,
-              1,
-              &mesh_skinning.skin_buffer.buffer,
-              &offset,
-            )
-          }
+          vk.CmdBindVertexBuffers(
+            command_buffer,
+            1,
+            1,
+            &mesh_skinning.skin_buffer.buffer,
+            &offset,
+          )
         }
         vk.CmdBindIndexBuffer(
           command_buffer,
@@ -1010,9 +736,91 @@ render_batched_meshes :: proc(
           .UINT32,
         )
         vk.CmdDrawIndexed(command_buffer, mesh.indices_len, 1, 0, 0, 0)
-        rendered += 1
+        rendered_count += 1
       }
     }
   }
-  return rendered
+  return rendered_count
+}
+
+renderer_main_end :: proc(command_buffer: vk.CommandBuffer) {
+  vk.CmdEndRenderingKHR(command_buffer)
+}
+
+renderer_main_init :: proc(
+  self: ^RendererMain,
+  width: u32,
+  height: u32,
+  color_format: vk.Format = .B8G8R8A8_SRGB,
+  depth_format: vk.Format = .D32_SFLOAT,
+) -> vk.Result {
+  renderer_main_build_pbr_pipeline(self, color_format, depth_format) or_return
+  renderer_main_build_unlit_pipeline(
+    self,
+    color_format,
+    depth_format,
+  ) or_return
+  renderer_main_build_wireframe_unlit_pipeline(
+    self,
+    color_format,
+    depth_format,
+  ) or_return
+  environment_map: ^ImageBuffer
+  self.environment_map, environment_map =
+    create_hdr_texture_from_path_with_mips(
+      "assets/Cannon_Exterior.hdr",
+    ) or_return
+  brdf_lut: ^ImageBuffer
+  self.brdf_lut, brdf_lut = create_texture_from_data(
+    #load("assets/lut_ggx.png"),
+  ) or_return
+  self.ibl_intensity = 1.0 // Default IBL intensity
+  return .SUCCESS
+}
+
+renderer_main_deinit :: proc(self: ^RendererMain) {
+  vk.DestroyPipelineLayout(g_device, self.pipeline_layout, nil)
+  for p in self.pipelines do vk.DestroyPipeline(g_device, p, nil)
+  for p in self.unlit_pipelines do vk.DestroyPipeline(g_device, p, nil)
+  for p in self.wireframe_pipelines do vk.DestroyPipeline(g_device, p, nil)
+}
+
+populate_render_batches :: proc(ctx: ^BatchingContext) {
+  for &entry in ctx.engine.scene.nodes.entries do if entry.active {
+    node := &entry.item
+    #partial switch data in node.attachment {
+    case MeshAttachment:
+      mesh := resource.get(g_meshes, data.handle)
+      if mesh == nil do continue
+      material := resource.get(g_materials, data.material)
+      if material == nil do continue
+      world_aabb := geometry.aabb_transform(mesh.aabb, node.transform.world_matrix)
+      if !geometry.frustum_test_aabb(&ctx.frustum, world_aabb) do continue
+      batch_key := BatchKey {
+        features      = material.features,
+        material_type = material.type,
+      }
+      batch_group, group_found := &ctx.batches[batch_key]
+      if !group_found {
+        ctx.batches[batch_key] = make([dynamic]BatchData, allocator = context.temp_allocator)
+        batch_group = &ctx.batches[batch_key]
+      }
+      batch_data: ^BatchData
+      for &batch in batch_group {
+        if batch.material_handle == data.material {
+          batch_data = &batch
+          break
+        }
+      }
+      if batch_data == nil {
+        new_batch := BatchData {
+          material_handle = data.material,
+          nodes           = make([dynamic]^Node, allocator = context.temp_allocator),
+        }
+        append(batch_group, new_batch)
+        batch_data = &batch_group[len(batch_group) - 1]
+      }
+      append(&batch_data.nodes, node)
+    }
+  }
 }

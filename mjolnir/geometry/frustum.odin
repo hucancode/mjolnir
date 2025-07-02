@@ -12,7 +12,6 @@ Frustum :: struct {
   planes: [6]Plane,
 }
 
-
 make_frustum :: proc(view_projection_matrix: linalg.Matrix4f32) -> Frustum {
   m := linalg.transpose(view_projection_matrix)
   // Each plane is a Vec4: a*x + b*y + c*z + d = 0
@@ -30,7 +29,6 @@ make_frustum :: proc(view_projection_matrix: linalg.Matrix4f32) -> Frustum {
     // Far
     m[3] - m[2],
   }
-
   for &plane in planes {
     mag := linalg.length(plane.xyz)
     if mag > 1e-6 {
@@ -55,17 +53,26 @@ frustum_test_aabb :: proc(
   frustum: ^Frustum,
   aabb: Aabb,
 ) -> bool {
-  for plane_vec in frustum.planes {
-    p_vertex: linalg.Vector3f32
-    p_vertex.x = plane_vec.x > 0.0 ? aabb.max.x : aabb.min.x
-    p_vertex.y = plane_vec.y > 0.0 ? aabb.max.y : aabb.min.y
-    p_vertex.z = plane_vec.z > 0.0 ? aabb.max.z : aabb.min.z
-
-    if signed_distance_to_plane(plane_vec, p_vertex) < 0.0 {
-      return false
-    }
+  extremes := [?]linalg.Vector3f32{
+    {aabb.min.x, aabb.min.y, aabb.min.z},
+    {aabb.max.x, aabb.min.y, aabb.min.z},
+    {aabb.min.x, aabb.max.y, aabb.min.z},
+    {aabb.min.x, aabb.min.y, aabb.max.z},
+    {aabb.max.x, aabb.max.y, aabb.min.z},
+    {aabb.max.x, aabb.min.y, aabb.max.z},
+    {aabb.min.x, aabb.max.y, aabb.max.z},
+    {aabb.max.x, aabb.max.y, aabb.max.z},
   }
-  return true // AABB is inside or intersects all planes
+  plane: for plane_vec in frustum.planes {
+    for p in extremes {
+      if signed_distance_to_plane(plane_vec, p) >= 0.0 {
+        continue plane
+      }
+    }
+    // log.debugf("AABB %v is inside frustum plane: %v, frustum = %v", aabb, plane_vec, frustum)
+    return false
+  }
+  return true // AABB is inside or intersects some planes
 }
 
 frustum_test_sphere :: proc(
@@ -89,7 +96,6 @@ aabb_transform :: proc(
 ) -> (ret: Aabb) {
   min_p := aabb.min
   max_p := aabb.max
-
   corners: [8]linalg.Vector4f32
   corners[0] = {min_p.x, min_p.y, min_p.z, 1.0}
   corners[1] = {max_p.x, min_p.y, min_p.z, 1.0}
@@ -99,9 +105,7 @@ aabb_transform :: proc(
   corners[5] = {max_p.x, min_p.y, max_p.z, 1.0}
   corners[6] = {min_p.x, max_p.y, max_p.z, 1.0}
   corners[7] = {max_p.x, max_p.y, max_p.z, 1.0}
-
   ret = AABB_UNDEFINED
-
   for corner in corners {
     transformed_corner := transform_matrix * corner
     ret.min = linalg.min(ret.min, transformed_corner.xyz)

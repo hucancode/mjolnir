@@ -1,7 +1,6 @@
 package mjolnir
 
 import "core:log"
-import "core:time"
 import "geometry"
 import "resource"
 import vk "vendor:vulkan"
@@ -49,9 +48,15 @@ renderer_gbuffer_init :: proc(
   vertex_input_info := vk.PipelineVertexInputStateCreateInfo {
     sType                           = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
     vertexBindingDescriptionCount   = len(geometry.VERTEX_BINDING_DESCRIPTION),
-    pVertexBindingDescriptions      = raw_data(geometry.VERTEX_BINDING_DESCRIPTION[:]),
-    vertexAttributeDescriptionCount = len(geometry.VERTEX_ATTRIBUTE_DESCRIPTIONS),
-    pVertexAttributeDescriptions    = raw_data(geometry.VERTEX_ATTRIBUTE_DESCRIPTIONS[:]),
+    pVertexBindingDescriptions      = raw_data(
+      geometry.VERTEX_BINDING_DESCRIPTION[:],
+    ),
+    vertexAttributeDescriptionCount = len(
+      geometry.VERTEX_ATTRIBUTE_DESCRIPTIONS,
+    ),
+    pVertexAttributeDescriptions    = raw_data(
+      geometry.VERTEX_ATTRIBUTE_DESCRIPTIONS[:],
+    ),
   }
   input_assembly := vk.PipelineInputAssemblyStateCreateInfo {
     sType    = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
@@ -202,34 +207,13 @@ renderer_gbuffer_init :: proc(
 }
 
 renderer_gbuffer_begin :: proc(
-  engine: ^Engine,
+  render_target: ^RenderTarget,
   command_buffer: vk.CommandBuffer,
-  extent: vk.Extent2D,
 ) {
-  frame := &engine.frames[g_frame_index]
-  prepare_image_for_render(
-    command_buffer,
-    frame.gbuffer_normal.image,
-    .COLOR_ATTACHMENT_OPTIMAL,
-  )
-  prepare_image_for_render(
-    command_buffer,
-    frame.gbuffer_albedo.image,
-    .COLOR_ATTACHMENT_OPTIMAL,
-  )
-  prepare_image_for_render(
-    command_buffer,
-    frame.gbuffer_metallic_roughness.image,
-    .COLOR_ATTACHMENT_OPTIMAL,
-  )
-  prepare_image_for_render(
-    command_buffer,
-    frame.gbuffer_emissive.image,
-    .COLOR_ATTACHMENT_OPTIMAL,
-  )
+
   normal_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
-    imageView = frame.gbuffer_normal.view,
+    imageView = render_target.normal,
     imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
     loadOp = .CLEAR,
     storeOp = .STORE,
@@ -237,7 +221,7 @@ renderer_gbuffer_begin :: proc(
   }
   albedo_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
-    imageView = frame.gbuffer_albedo.view,
+    imageView = render_target.albedo,
     imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
     loadOp = .CLEAR,
     storeOp = .STORE,
@@ -245,7 +229,7 @@ renderer_gbuffer_begin :: proc(
   }
   metallic_roughness_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
-    imageView = frame.gbuffer_metallic_roughness.view,
+    imageView = render_target.metallic,
     imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
     loadOp = .CLEAR,
     storeOp = .STORE,
@@ -253,7 +237,7 @@ renderer_gbuffer_begin :: proc(
   }
   emissive_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
-    imageView = frame.gbuffer_emissive.view,
+    imageView = render_target.emissive,
     imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
     loadOp = .CLEAR,
     storeOp = .STORE,
@@ -261,7 +245,7 @@ renderer_gbuffer_begin :: proc(
   }
   depth_attachment := vk.RenderingAttachmentInfoKHR {
     sType       = .RENDERING_ATTACHMENT_INFO_KHR,
-    imageView   = frame.depth_buffer.view,
+    imageView   = render_target.depth,
     imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
     loadOp      = .LOAD,
     storeOp     = .STORE,
@@ -274,7 +258,7 @@ renderer_gbuffer_begin :: proc(
   }
   render_info := vk.RenderingInfoKHR {
     sType = .RENDERING_INFO_KHR,
-    renderArea = {extent = extent},
+    renderArea = {extent = render_target.extent},
     layerCount = 1,
     colorAttachmentCount = len(color_attachments),
     pColorAttachments = raw_data(color_attachments[:]),
@@ -283,99 +267,147 @@ renderer_gbuffer_begin :: proc(
   vk.CmdBeginRenderingKHR(command_buffer, &render_info)
   viewport := vk.Viewport {
     x        = 0.0,
-    y        = f32(extent.height),
-    width    = f32(extent.width),
-    height   = -f32(extent.height),
+    y        = f32(render_target.extent.height),
+    width    = f32(render_target.extent.width),
+    height   = -f32(render_target.extent.height),
     minDepth = 0.0,
     maxDepth = 1.0,
   }
   scissor := vk.Rect2D {
-    extent = extent,
+    extent = render_target.extent,
   }
   vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
   vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
 }
 
 renderer_gbuffer_end :: proc(
-  engine: ^Engine,
+  render_target: ^RenderTarget,
   command_buffer: vk.CommandBuffer,
 ) {
   vk.CmdEndRenderingKHR(command_buffer)
-  frame := &engine.frames[g_frame_index]
-  prepare_image_for_shader_read(command_buffer, frame.gbuffer_normal.image)
-  prepare_image_for_shader_read(command_buffer, frame.gbuffer_albedo.image)
-  prepare_image_for_shader_read(
-    command_buffer,
-    frame.gbuffer_metallic_roughness.image,
-  )
-  prepare_image_for_shader_read(command_buffer, frame.gbuffer_emissive.image)
 }
 
 renderer_gbuffer_render :: proc(
-  engine: ^Engine,
+  self: ^RendererGBuffer,
+  render_input: ^RenderInput,
+  render_target: ^RenderTarget,
   command_buffer: vk.CommandBuffer,
 ) {
-  camera_frustum := geometry.camera_make_frustum(engine.scene.camera)
+  // Bind global descriptor sets (assume these are set up by the engine)
   vk.CmdBindDescriptorSets(
     command_buffer,
     .GRAPHICS,
-    engine.gbuffer.pipeline_layout,
+    self.pipeline_layout,
     0,
     1,
     &g_camera_descriptor_sets[g_frame_index],
     0,
     nil,
   )
-  mesh_count := 0
-  for &entry in engine.scene.nodes.entries do if entry.active {
-    node := &entry.item
-    mesh_att, has_mesh := &node.attachment.(MeshAttachment)
-    if !has_mesh {
-      continue
+  current_pipeline: vk.Pipeline = 0
+  for _, batch_group in render_input.batches {
+    // Each batch_group is [dynamic]BatchData for a given BatchKey
+    sample_material := resource.get(
+      g_materials,
+      batch_group[0].material_handle,
+    ) or_continue
+    pipeline := renderer_gbuffer_get_pipeline(self, sample_material.features)
+    if pipeline != current_pipeline {
+      vk.CmdBindPipeline(command_buffer, .GRAPHICS, pipeline)
+      current_pipeline = pipeline
     }
-    mesh := resource.get(g_meshes, mesh_att.handle)
-    if mesh == nil do continue
-    material := resource.get(g_materials, mesh_att.material)
-    if material == nil do continue
-    mesh_count += 1
-    world_aabb := geometry.aabb_transform(mesh.aabb, node.transform.world_matrix)
-    if !geometry.frustum_test_aabb(&camera_frustum, world_aabb) do continue
-    texture_indices: MaterialTextures = {
-      albedo_index             = min(MAX_TEXTURES - 1, material.albedo.index),
-      metallic_roughness_index = min(MAX_TEXTURES - 1, material.metallic_roughness.index),
-      normal_index             = min(MAX_TEXTURES - 1, material.normal.index),
-      displacement_index       = min(MAX_TEXTURES - 1, material.displacement.index),
-      emissive_index           = min(MAX_TEXTURES - 1, material.emissive.index),
-    }
-    node_skinning, has_skinning := mesh_att.skinning.?
-    if has_skinning {
-      texture_indices.bone_matrix_offset = node_skinning.bone_matrix_offset + g_frame_index * g_bone_matrix_slab.capacity
-    }
-    push_constants := PushConstant {
-      world           = node.transform.world_matrix,
-      textures        = texture_indices,
-      metallic_value  = material.metallic_value,
-      roughness_value = material.roughness_value,
-      emissive_value  = material.emissive_value,
-    }
-    features := material.features & ShaderFeatureSet{.SKINNING}
-    pipeline := renderer_gbuffer_get_pipeline(&engine.gbuffer, features)
-    vk.CmdBindPipeline(command_buffer, .GRAPHICS, pipeline)
     descriptor_sets := [?]vk.DescriptorSet {
-      g_camera_descriptor_sets[g_frame_index], // set = 0 (camera uniforms)
-      g_lights_descriptor_sets[g_frame_index], // set = 1 (light uniforms)
-      g_textures_descriptor_set, // set = 2 (textures)
-      g_bindless_bone_buffer_descriptor_set, // set = 3 (bone matrices)
+      g_camera_descriptor_sets[g_frame_index],
+      g_lights_descriptor_sets[g_frame_index],
+      g_textures_descriptor_set,
+      g_bindless_bone_buffer_descriptor_set,
     }
-    vk.CmdBindDescriptorSets(command_buffer, .GRAPHICS, engine.gbuffer.pipeline_layout, 0, len(descriptor_sets), raw_data(descriptor_sets[:]), 0, nil)
-    vk.CmdPushConstants(command_buffer, engine.gbuffer.pipeline_layout, {.VERTEX, .FRAGMENT}, 0, size_of(PushConstant), &push_constants)
-    offset: vk.DeviceSize = 0
-    vk.CmdBindVertexBuffers(command_buffer, 0, 1, &mesh.vertex_buffer.buffer, &offset)
-    if skinning, has_skinning := &mesh.skinning.?; has_skinning {
-      vk.CmdBindVertexBuffers(command_buffer, 1, 1, &skinning.skin_buffer.buffer, &offset)
+    vk.CmdBindDescriptorSets(
+      command_buffer,
+      .GRAPHICS,
+      self.pipeline_layout,
+      0,
+      len(descriptor_sets),
+      raw_data(descriptor_sets[:]),
+      0,
+      nil,
+    )
+    for batch_data in batch_group {
+      material := resource.get(
+        g_materials,
+        batch_data.material_handle,
+      ) or_continue
+      for node in batch_data.nodes {
+        mesh_attachment := node.attachment.(MeshAttachment)
+        mesh := resource.get(g_meshes, mesh_attachment.handle) or_continue
+        texture_indices: MaterialTextures = {
+          albedo_index             = min(
+            MAX_TEXTURES - 1,
+            material.albedo.index,
+          ),
+          metallic_roughness_index = min(
+            MAX_TEXTURES - 1,
+            material.metallic_roughness.index,
+          ),
+          normal_index             = min(
+            MAX_TEXTURES - 1,
+            material.normal.index,
+          ),
+          displacement_index       = min(
+            MAX_TEXTURES - 1,
+            material.displacement.index,
+          ),
+          emissive_index           = min(
+            MAX_TEXTURES - 1,
+            material.emissive.index,
+          ),
+        }
+        if skinning, has_skinning := mesh_attachment.skinning.?; has_skinning {
+          texture_indices.bone_matrix_offset =
+            skinning.bone_matrix_offset +
+            g_frame_index * g_bone_matrix_slab.capacity
+        }
+        push_constants := PushConstant {
+          world           = node.transform.world_matrix,
+          textures        = texture_indices,
+          metallic_value  = material.metallic_value,
+          roughness_value = material.roughness_value,
+          emissive_value  = material.emissive_value,
+        }
+        vk.CmdPushConstants(
+          command_buffer,
+          self.pipeline_layout,
+          {.VERTEX, .FRAGMENT},
+          0,
+          size_of(PushConstant),
+          &push_constants,
+        )
+        offset: vk.DeviceSize = 0
+        vk.CmdBindVertexBuffers(
+          command_buffer,
+          0,
+          1,
+          &mesh.vertex_buffer.buffer,
+          &offset,
+        )
+        if mesh_skin, mesh_has_skin := mesh.skinning.?; mesh_has_skin {
+          vk.CmdBindVertexBuffers(
+            command_buffer,
+            1,
+            1,
+            &mesh_skin.skin_buffer.buffer,
+            &offset,
+          )
+        }
+        vk.CmdBindIndexBuffer(
+          command_buffer,
+          mesh.index_buffer.buffer,
+          0,
+          .UINT32,
+        )
+        vk.CmdDrawIndexed(command_buffer, mesh.indices_len, 1, 0, 0, 0)
+      }
     }
-    vk.CmdBindIndexBuffer(command_buffer, mesh.index_buffer.buffer, 0, .UINT32)
-    vk.CmdDrawIndexed(command_buffer, mesh.indices_len, 1, 0, 0, 0)
   }
 }
 
