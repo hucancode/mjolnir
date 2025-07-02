@@ -4,11 +4,11 @@ Mjolnir is a minimalistic rendering engine. The goal is to create a simple set o
 
 [![Run Tests](https://github.com/hucancode/mjolnir/actions/workflows/test.yml/badge.svg)](https://github.com/hucancode/mjolnir/actions/workflows/test.yml)
 
-![](./readme/pbr.gif)
+![](./readme/pbr-cross-hatching.png)
 
 # Work in Progress
 
-- PBR Material
+- Shadow
 - Batching, culling, optimization
 
 ## To do
