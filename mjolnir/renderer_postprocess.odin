@@ -469,7 +469,12 @@ renderer_postprocess_init :: proc(
       &set,
     ) or_return
   }
-  renderer_postprocess_create_images(self, width, height, color_format) or_return
+  renderer_postprocess_create_images(
+    self,
+    width,
+    height,
+    color_format,
+  ) or_return
   shader_stages: [count][2]vk.PipelineShaderStageCreateInfo
   pipeline_infos: [count]vk.GraphicsPipelineCreateInfo
   for effect_type, i in PostProcessEffectType {
@@ -597,11 +602,7 @@ renderer_postprocess_create_images :: proc(
       {.COLOR_ATTACHMENT, .SAMPLED, .TRANSFER_SRC, .TRANSFER_DST},
       {.DEVICE_LOCAL},
     ) or_return
-    image.view = create_image_view(
-      image.image,
-      format,
-      {.COLOR},
-    ) or_return
+    image.view = create_image_view(image.image, format, {.COLOR}) or_return
   }
   postprocess_update_input(self, 1, self.images[0].view)
   postprocess_update_input(self, 2, self.images[1].view)

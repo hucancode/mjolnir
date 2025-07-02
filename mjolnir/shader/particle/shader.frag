@@ -1,14 +1,14 @@
 #version 450
 #extension GL_EXT_nonuniform_qualifier : require
 
-layout (set = 0, binding = 0) uniform texture2D textures[];
-layout (set = 0, binding = 1) uniform sampler samplers[];
-
-layout(push_constant) uniform PushConstants {
+// camera set = 0
+layout(set = 0, binding = 0) uniform SceneUniforms {
     mat4 view;
     mat4 proj;
-    uint texture_index;
 };
+// textures set = 1
+layout (set = 1, binding = 0) uniform texture2D textures[];
+layout (set = 1, binding = 1) uniform sampler samplers[];
 
 layout (location = 0) in vec4 inColor;
 layout (location = 1) in flat uint inTextureIndex;

@@ -67,27 +67,6 @@ VERTEX_ATTRIBUTE_DESCRIPTIONS := [?]vk.VertexInputAttributeDescription {
   },
 }
 
-SIMPLE_VERTEX_ATTRIBUTE_DESCRIPTIONS := [?]vk.VertexInputAttributeDescription {
-  {
-    binding = 0,
-    location = 0,
-    format = .R32G32B32_SFLOAT,
-    offset = u32(offset_of(Vertex, position)),
-  },
-  {
-    binding = 1,
-    location = 4,
-    format = .R32G32B32A32_UINT,
-    offset = u32(offset_of(SkinningData, joints)),
-  },
-  {
-    binding = 1,
-    location = 5,
-    format = .R32G32B32A32_SFLOAT,
-    offset = u32(offset_of(SkinningData, weights)),
-  },
-}
-
 VEC_FORWARD :: [3]f32{0.0, 0.0, 1.0}
 VEC_BACKWARD :: [3]f32{0.0, 0.0, -1.0}
 VEC_UP :: [3]f32{0.0, 1.0, 0.0}

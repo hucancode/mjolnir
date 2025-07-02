@@ -14,6 +14,7 @@ LIGHT_COUNT :: 3
 light_handles: [LIGHT_COUNT]mjolnir.Handle
 light_cube_handles: [LIGHT_COUNT]mjolnir.Handle
 ground_mat_handle: mjolnir.Handle
+hammer_handle: mjolnir.Handle
 engine: mjolnir.Engine
 forcefield_handle: mjolnir.Handle
 forcefield_node: ^mjolnir.Node
@@ -93,8 +94,10 @@ setup :: proc(engine: ^mjolnir.Engine) {
     gltf_nodes := load_gltf(engine, "assets/Mjolnir.glb") or_else {}
     log.infof("Loaded GLTF nodes: %v", gltf_nodes)
     for handle in gltf_nodes {
-      duck := resource.get(engine.scene.nodes, handle) or_continue
-      translate(&duck.transform, 0, 2, -2)
+      hammer_handle = handle
+      node := resource.get(engine.scene.nodes, handle) or_continue
+      translate(&node.transform, 0, 1, -1)
+      scale(&node.transform, 0.2)
     }
   }
   if true {
@@ -162,6 +165,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
         material = plain_material_handle,
       },
     )
+    translate(&cube_node.transform, 0, 0.3, 0)
     scale(&cube_node.transform, 0.1)
   }
   spawn(
@@ -191,7 +195,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     scale(&bright_ball_node.transform, 0.2) // Make it a reasonable size
   }
 
-  if false {
+  if true {
     // Create particle system 1 with gold star texture
     particle_texture1_handle, _, _ := mjolnir.create_texture_from_path(
       "assets/gold-star.png",

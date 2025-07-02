@@ -19,7 +19,8 @@ const uint SPOT_LIGHT = 2;
 const float PI = 3.14159265359;
 
 struct Light {
-    mat4 viewProj;
+    mat4 view;
+    mat4 proj;
     vec4 color;
     vec4 position;
     vec4 direction;
@@ -133,7 +134,7 @@ float calculateShadow(uint lightIdx) {
         float bias = max(bias_max * (1.0 - dot(normalize(normal), normalize(lightToSurface))), bias_min);
         return smoothstep(currentDepth - bias, currentDepth, shadowDepth);
     }
-    vec4 lightSpacePos = lights[lightIdx].viewProj * vec4(position, 1.0);
+    vec4 lightSpacePos = lights[lightIdx].proj * lights[lightIdx].view * vec4(position, 1.0);
     vec3 shadowCoord = lightSpacePos.xyz / lightSpacePos.w;
     shadowCoord = shadowCoord * 0.5 + 0.5;
     bool outOfSight = shadowCoord.x < 0.0 || shadowCoord.x > 1.0 ||

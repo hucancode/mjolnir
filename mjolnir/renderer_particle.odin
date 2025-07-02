@@ -205,45 +205,8 @@ compute_particles :: proc(
 
 render_particles :: proc(
   self: ^RendererParticle,
-  scene: ^Scene,
-  camera: geometry.Camera,
   command_buffer: vk.CommandBuffer,
 ) {
-  vk.CmdBindPipeline(command_buffer, .GRAPHICS, self.render_pipeline)
-  descriptor_sets := [?]vk.DescriptorSet {
-    g_textures_descriptor_set, // set 0 (textures)
-  }
-  vk.CmdBindDescriptorSets(
-    command_buffer,
-    .GRAPHICS,
-    self.render_pipeline_layout,
-    0,
-    len(descriptor_sets),
-    raw_data(descriptor_sets[:]),
-    0,
-    nil,
-  )
-  offset: vk.DeviceSize = 0
-  vk.CmdBindVertexBuffers(
-    command_buffer,
-    0,
-    1,
-    &self.particle_buffer.buffer,
-    &offset,
-  )
-  push_constants := ParticlePushConstants {
-    view       = geometry.calculate_view_matrix(camera),
-    projection = geometry.calculate_projection_matrix(camera),
-  }
-  vk.CmdPushConstants(
-    command_buffer,
-    self.render_pipeline_layout,
-    {.VERTEX, .FRAGMENT},
-    0,
-    size_of(ParticlePushConstants),
-    &push_constants,
-  )
-  vk.CmdDraw(command_buffer, MAX_PARTICLES, 1, 0, 0)
 }
 
 update_emitters :: proc(self: ^Engine, delta_time: f32) {
@@ -467,11 +430,9 @@ renderer_particle_init :: proc(self: ^RendererParticle) -> vk.Result {
     nil,
     &self.compute_pipeline,
   ) or_return
-  push_constant_range := [?]vk.PushConstantRange {
-    {stageFlags = {.VERTEX, .FRAGMENT}, size = size_of(ParticlePushConstants)},
-  }
   descriptor_set_layouts := [?]vk.DescriptorSetLayout {
-    g_textures_set_layout, // set = 0 for textures
+    g_camera_descriptor_set_layout, // set = 0 for camera
+    g_textures_set_layout, // set = 1 for textures
   }
   vk.CreatePipelineLayout(
     g_device,
@@ -479,8 +440,6 @@ renderer_particle_init :: proc(self: ^RendererParticle) -> vk.Result {
       sType = .PIPELINE_LAYOUT_CREATE_INFO,
       setLayoutCount = len(descriptor_set_layouts),
       pSetLayouts = raw_data(descriptor_set_layouts[:]),
-      pushConstantRangeCount = len(push_constant_range),
-      pPushConstantRanges = raw_data(push_constant_range[:]),
     },
     nil,
     &self.render_pipeline_layout,
@@ -668,12 +627,11 @@ renderer_particle_init :: proc(self: ^RendererParticle) -> vk.Result {
 }
 
 renderer_particle_begin :: proc(
-  engine: ^Engine,
+  self: ^RendererParticle,
   command_buffer: vk.CommandBuffer,
-  color_view: vk.ImageView,
-  depth_view: vk.ImageView,
+  render_target: RenderTarget,
+  render_input: RenderInput,
 ) {
-  update_force_fields(engine)
   // Memory barrier to ensure compute results are visible before rendering
   barrier := vk.BufferMemoryBarrier {
     sType               = .BUFFER_MEMORY_BARRIER,
@@ -681,7 +639,7 @@ renderer_particle_begin :: proc(
     dstAccessMask       = {.VERTEX_ATTRIBUTE_READ},
     srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
     dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-    buffer              = engine.particle.particle_buffer.buffer,
+    buffer              = self.particle_buffer.buffer,
     size                = vk.DeviceSize(vk.WHOLE_SIZE),
   }
   vk.CmdPipelineBarrier(
@@ -689,14 +647,17 @@ renderer_particle_begin :: proc(
     {.COMPUTE_SHADER},
     {.VERTEX_INPUT},
     {},
-    0, nil, // memoryBarrierCount, pMemoryBarriers
-    1, &barrier, // bufferMemoryBarrierCount, pBufferMemoryBarriers
-    0, nil, // imageMemoryBarrierCount, pImageMemoryBarriers
+    0,
+    nil, // memoryBarrierCount, pMemoryBarriers
+    1,
+    &barrier, // bufferMemoryBarrierCount, pBufferMemoryBarriers
+    0,
+    nil, // imageMemoryBarrierCount, pImageMemoryBarriers
   )
 
   color_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
-    imageView = color_view,
+    imageView = render_target.final,
     imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
     loadOp = .LOAD, // preserve previous contents
     storeOp = .STORE,
@@ -704,7 +665,7 @@ renderer_particle_begin :: proc(
   }
   depth_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
-    imageView = depth_view,
+    imageView = render_target.depth,
     imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
     loadOp = .LOAD,
     storeOp = .STORE,
@@ -712,7 +673,7 @@ renderer_particle_begin :: proc(
   }
   render_info := vk.RenderingInfoKHR {
     sType = .RENDERING_INFO_KHR,
-    renderArea = {extent = engine.swapchain.extent},
+    renderArea = {extent = render_target.extent},
     layerCount = 1,
     colorAttachmentCount = 1,
     pColorAttachments = &color_attachment,
@@ -721,35 +682,50 @@ renderer_particle_begin :: proc(
   vk.CmdBeginRenderingKHR(command_buffer, &render_info)
   viewport := vk.Viewport {
     x        = 0.0,
-    y        = f32(engine.swapchain.extent.height),
-    width    = f32(engine.swapchain.extent.width),
-    height   = -f32(engine.swapchain.extent.height),
+    y        = f32(render_target.extent.height),
+    width    = f32(render_target.extent.width),
+    height   = -f32(render_target.extent.height),
     minDepth = 0.0,
     maxDepth = 1.0,
   }
   scissor := vk.Rect2D {
-    extent = engine.swapchain.extent,
+    extent = render_target.extent,
   }
   vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
   vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
 }
 
 renderer_particle_render :: proc(
-  engine: ^Engine,
+  self: ^RendererParticle,
   command_buffer: vk.CommandBuffer,
 ) {
-  render_particles(
-    &engine.particle,
-    &engine.scene,
-    engine.scene.camera,
+  vk.CmdBindPipeline(command_buffer, .GRAPHICS, self.render_pipeline)
+  descriptor_sets := [?]vk.DescriptorSet {
+    g_camera_descriptor_sets[g_frame_index], // set 0 (camera)
+    g_textures_descriptor_set, // set 1 (textures)
+  }
+  vk.CmdBindDescriptorSets(
     command_buffer,
+    .GRAPHICS,
+    self.render_pipeline_layout,
+    0,
+    len(descriptor_sets),
+    raw_data(descriptor_sets[:]),
+    0,
+    nil,
   )
+  offset: vk.DeviceSize = 0
+  vk.CmdBindVertexBuffers(
+    command_buffer,
+    0,
+    1,
+    &self.particle_buffer.buffer,
+    &offset,
+  )
+  vk.CmdDraw(command_buffer, MAX_PARTICLES, 1, 0, 0)
 }
 
-renderer_particle_end :: proc(
-  engine: ^Engine,
-  command_buffer: vk.CommandBuffer,
-) {
+renderer_particle_end :: proc(command_buffer: vk.CommandBuffer) {
   vk.CmdEndRenderingKHR(command_buffer)
 }
 

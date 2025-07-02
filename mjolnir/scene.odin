@@ -238,6 +238,10 @@ scene_init :: proc(self: ^Scene) {
     0.01, // near
     100.0, // far
   )
+  log.infof(
+    "Initializing scene with camera: %v",
+    self.camera,
+  )
   // log.infof("Initializing nodes pool... ")
   resource.pool_init(&self.nodes)
   root: ^Node
