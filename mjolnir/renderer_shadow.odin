@@ -115,10 +115,10 @@ renderer_shadow_init :: proc(
       geometry.VERTEX_BINDING_DESCRIPTION[:],
     ),
     vertexAttributeDescriptionCount = len(
-      geometry.SIMPLE_VERTEX_ATTRIBUTE_DESCRIPTIONS,
+      geometry.VERTEX_ATTRIBUTE_DESCRIPTIONS ,
     ),
     pVertexAttributeDescriptions    = raw_data(
-      geometry.SIMPLE_VERTEX_ATTRIBUTE_DESCRIPTIONS[:],
+      geometry.VERTEX_ATTRIBUTE_DESCRIPTIONS [:],
     ),
   }
   pipeline_infos: [SHADOW_SHADER_VARIANT_COUNT]vk.GraphicsPipelineCreateInfo
