@@ -181,9 +181,9 @@ void main() {
     metallic = clamp(metallic, 0.0, 1.0);
     roughness = clamp(roughness, 0.0, 1.0);
     vec3 N = normalize(normal);
-    if (HAS_NORMAL_TEXTURE && false) {
+    if (HAS_NORMAL_TEXTURE) {
         vec3 tangentNormal = texture(sampler2D(textures[normal_index], samplers[SAMPLER_LINEAR_REPEAT]), uv).xyz * 2.0 - 1.0;
-        N = normalize(tangentNormal);
+        N = normalize(N+tangentNormal);
     }
     vec3 displacedPosition = position;
     if (HAS_DISPLACEMENT_TEXTURE) {
