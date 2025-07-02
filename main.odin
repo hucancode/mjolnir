@@ -141,7 +141,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
         SpotLightAttachment {
           color = color,
           angle = f32(spot_angle),
-          radius = 4,
+          radius = 10,
           cast_shadow = true,
         },
       )

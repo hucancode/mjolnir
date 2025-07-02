@@ -150,7 +150,7 @@ vec3 brdf(vec3 N, vec3 V, vec3 albedo, float roughness, float metallic) {
         vec3 L = light.kind == DIRECTIONAL_LIGHT ? normalize(-light.direction.xyz) : normalize(light.position.xyz - position);
         vec3 H = normalize(V + L);
         float distance = light.kind == DIRECTIONAL_LIGHT ? 1.0 : length(light.position.xyz - position);
-        float attenuation = 2.0;
+        float attenuation = light.radius;
         if (light.kind != DIRECTIONAL_LIGHT) {
             float norm_dist = distance / max(0.01, light.radius);
             attenuation *= 1.0 - clamp(norm_dist * norm_dist, 0.0, 1.0);
@@ -211,9 +211,14 @@ void main() {
     vec3 f_dielectric_fresnel_ibl = vec3(0.04) * brdfSample.x + brdfSample.y;
     vec3 f_dielectric_brdf_ibl = mix(diffuseIBL, prefilteredColor * f_dielectric_fresnel_ibl, f_dielectric_fresnel_ibl);
 
+    // Fresnel effect for edge highlighting
+    float fresnel_strength = mix(metallic, 0.5 * roughness, 0.5); // Adjust for desired edge brightness
+    float fresnel = 1.0 - pow(1.0 - NdotV, fresnel_strength);
+    vec3 fresnelColor = (albedo + emissive) * fresnel * fresnel_strength;
+
     // Mix between dielectric and metallic based on metallic parameter
     vec3 ambient = mix(f_dielectric_brdf_ibl, f_metal_brdf_ibl, metallic);
-    vec3 colorOut = albedo * ambient * AMBIENT_STRENGTH + brdf(N, V, albedo, roughness, metallic) + emissive;
+    vec3 final = albedo * ambient * AMBIENT_STRENGTH + brdf(N, V, albedo, roughness, metallic) + emissive + fresnelColor;
 
-    outColor = vec4(colorOut, 1.0);
+    outColor = vec4(final, 1.0);
 }
