@@ -575,12 +575,8 @@ find_memory_type_index :: proc(
   mem_properties: vk.PhysicalDeviceMemoryProperties
   vk.GetPhysicalDeviceMemoryProperties(g_physical_device, &mem_properties)
   for i in 0 ..< mem_properties.memoryTypeCount {
-    if type_filter & (1 << i) == 0 {
-      continue
-    }
-    if mem_properties.memoryTypes[i].propertyFlags & properties != properties {
-      continue
-    }
+    if type_filter & (1 << i) == 0 do continue
+    if mem_properties.memoryTypes[i].propertyFlags & properties != properties do continue
     return u32(i), true
   }
   return 0, false

@@ -129,9 +129,7 @@ renderer_depth_prepass_render :: proc(
   rendered_count := 0
   current_pipeline: vk.Pipeline = 0
   for batch_key, batch_group in render_input.batches {
-    if batch_key.material_type == .WIREFRAME {
-      continue
-    }
+    if batch_key.material_type == .WIREFRAME do continue
     for batch_data in batch_group {
       material := resource.get(
         g_materials,
@@ -213,9 +211,7 @@ renderer_depth_prepass_populate_batches :: proc(ctx: ^BatchingContext) {
       if !found_mat do continue
       // Skip transparent and wireframe materials in depth pre-pass
       // Wireframe materials need to write their own depth with bias
-      if material.type == .WIREFRAME {
-        continue
-      }
+      if material.type == .WIREFRAME do continue
       world_aabb := geometry.aabb_transform(mesh.aabb, node.transform.world_matrix)
       if !geometry.frustum_test_aabb(&ctx.frustum, world_aabb) do continue
       // Depth prepass only cares about skinning
@@ -259,9 +255,7 @@ renderer_depth_prepass_render_batches :: proc(
   rendered := 0
   current_pipeline: vk.Pipeline = 0
   for batch_key, batch_group in ctx.batches {
-    if batch_key.material_type == .WIREFRAME {
-      continue
-    }
+    if batch_key.material_type == .WIREFRAME do continue
     for batch_data in batch_group {
       material := resource.get(
         g_materials,

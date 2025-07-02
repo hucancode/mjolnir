@@ -74,9 +74,7 @@ load_gltf :: proc(
     entry := pop(&stack)
     gltf_node := &gltf_data.nodes[entry.idx]
     node_handle, node := resource.alloc(&engine.scene.nodes)
-    if node == nil {
-      continue
-    }
+    if node == nil do continue
     node.name = string(gltf_node.name)
     node.transform = geometry.TRANSFORM_IDENTITY
     if gltf_node.has_matrix {

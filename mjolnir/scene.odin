@@ -238,10 +238,7 @@ scene_init :: proc(self: ^Scene) {
     0.01, // near
     100.0, // far
   )
-  log.infof(
-    "Initializing scene with camera: %v",
-    self.camera,
-  )
+  log.infof("Initializing scene with camera: %v", self.camera)
   // log.infof("Initializing nodes pool... ")
   resource.pool_init(&self.nodes)
   root: ^Node
@@ -289,11 +286,7 @@ scene_traverse :: proc(
     if entry.parent_is_dirty || is_dirty {
       transform_update_world(&current_node.transform, entry.parent_transform)
     }
-    if callback != nil {
-      if !callback(current_node, cb_context) {
-        continue
-      }
-    }
+    if callback != nil && !callback(current_node, cb_context) do continue
     for child_handle in current_node.children {
       append(
         &self.traversal_stack,
@@ -317,50 +310,4 @@ scene_traverse_linear :: proc(
     callback(&entry.item, cb_context)
   }
   return true
-}
-
-// Context for emitter collection callback
-EmitterCollectContext :: struct {
-  scene:    ^Scene,
-  emitters: [dynamic]^Node,
-}
-
-collect_emitters_cb :: proc(node: ^Node, user_ctx: rawptr) -> bool {
-  ctx := cast(^EmitterCollectContext)user_ctx
-  _, is_emitter := &node.attachment.(EmitterAttachment)
-  if is_emitter {
-    append(&ctx.emitters, node)
-  }
-  return true
-}
-
-collect_emitters_for_particle_systems :: proc(
-  self: ^Scene,
-) -> [dynamic]^Node {
-  ctx := EmitterCollectContext{self, make([dynamic]^Node, 0)}
-  scene_traverse(self, &ctx, collect_emitters_cb)
-  return ctx.emitters
-}
-
-// Context for emitter collection callback
-ForceFieldCollectContext :: struct {
-  scene:    ^Scene,
-  forcefields: [dynamic]^Node,
-}
-
-collect_forcefields_cb :: proc(node: ^Node, user_ctx: rawptr) -> bool {
-  ctx := cast(^ForceFieldCollectContext)user_ctx
-  _, is_ff := &node.attachment.(ForceFieldAttachment)
-  if is_ff {
-    append(&ctx.forcefields, node)
-  }
-  return true
-}
-
-collect_forcefields_for_particle_systems :: proc(
-  self: ^Scene,
-) -> [dynamic]^Node {
-  ctx := ForceFieldCollectContext{self, make([dynamic]^Node, 0)}
-  scene_traverse(self, &ctx, collect_forcefields_cb)
-  return ctx.forcefields
 }

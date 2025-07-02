@@ -98,9 +98,7 @@ make_animation_instance :: proc(
     return instance, false
   }
   for clip, i in skin.animations {
-    if clip.name != animation_name {
-      continue
-    }
+    if clip.name != animation_name do continue
     instance = {
       clip_handle = u32(i),
       mode        = mode,

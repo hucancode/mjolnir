@@ -203,67 +203,6 @@ compute_particles :: proc(
   )
 }
 
-render_particles :: proc(
-  self: ^RendererParticle,
-  command_buffer: vk.CommandBuffer,
-) {
-}
-
-update_emitters :: proc(self: ^Engine, delta_time: f32) {
-  params := data_buffer_get(&self.particle.params_buffer)
-  params.delta_time = delta_time
-  recycle_dead_particles(&self.particle)
-  emitters := collect_emitters_for_particle_systems(&self.scene)
-  params.emitter_count = u32(len(emitters))
-  spawned_this_frame := 0
-  for &entry in emitters {
-    emitter := &entry.attachment.(EmitterAttachment)
-    emitter_transform := entry.transform.world_matrix
-    if !emitter.enabled {
-      continue
-    }
-    emitter.time_accumulator += delta_time
-    emission_interval := 1.0 / emitter.emission_rate
-    for emitter.time_accumulator >= emission_interval {
-      if !spawn_particle(&self.particle, emitter_transform, emitter) {
-        break
-      }
-      spawned_this_frame += 1
-      emitter.time_accumulator -= emission_interval
-    }
-  }
-  params.particle_count = self.particle.active_particle_count
-}
-
-// Fill force field buffer each frame before compute dispatch
-update_force_fields :: proc(self: ^Engine) {
-  forcefield_nodes := collect_forcefields_for_particle_systems(&self.scene)
-  forcefields := slice.from_ptr(
-    self.particle.force_field_buffer.mapped,
-    MAX_FORCE_FIELDS,
-  )
-  params := data_buffer_get(&self.particle.params_buffer)
-  count := 0
-  for &node in forcefield_nodes {
-    if count >= MAX_FORCE_FIELDS {
-      break
-    }
-    force_att, is_ff := &node.attachment.(ForceFieldAttachment)
-    if !is_ff {
-      continue
-    }
-    forcefield := force_att.force_field
-    forcefield.position =
-      node.transform.world_matrix * linalg.Vector4f32{0, 0, 0, 1}
-    forcefields[count] = forcefield
-    count += 1
-  }
-  params.forcefield_count = u32(count)
-  for i in count ..< MAX_FORCE_FIELDS {
-    forcefields[i] = ForceField{}
-  }
-}
-
 renderer_particle_deinit :: proc(self: ^RendererParticle) {
   vk.DestroyPipeline(g_device, self.compute_pipeline, nil)
   vk.DestroyPipelineLayout(g_device, self.compute_pipeline_layout, nil)

@@ -3,6 +3,7 @@ package mjolnir
 import "animation"
 import "base:runtime"
 import "core:c"
+import "core:slice"
 import "core:fmt"
 import "core:log"
 import "core:math"
@@ -85,7 +86,6 @@ BatchData :: struct {
 BatchingContext :: struct {
   engine:  ^Engine,
   frustum: geometry.Frustum,
-  lights:  [dynamic]LightUniform,
   batches: map[BatchKey][dynamic]BatchData,
 }
 
@@ -118,7 +118,6 @@ generate_render_input_for_frustum :: proc(
   batching_ctx := BatchingContext {
     engine  = self,
     frustum = frustum,
-    lights  = make([dynamic]LightUniform),
     batches = make(map[BatchKey][dynamic]BatchData),
   }
   populate_render_batches(&batching_ctx)
@@ -486,6 +485,48 @@ time_since_app_start :: proc(self: ^Engine) -> f32 {
   return f32(time.duration_seconds(time.since(self.start_timestamp)))
 }
 
+update_emitters :: proc(self: ^Engine, delta_time: f32) {
+  recycle_dead_particles(&self.particle)
+  params := data_buffer_get(&self.particle.params_buffer)
+  params.delta_time = delta_time
+  params.emitter_count = 0
+  spawned_this_frame := 0
+  for &entry in self.scene.nodes.entries do if entry.active {
+    e, is_emitter := &entry.item.attachment.(EmitterAttachment)
+    if !is_emitter do continue
+    if !e.enabled do continue
+    emitter_transform := entry.item.transform.world_matrix
+    e.time_accumulator += delta_time
+    emission_interval := 1.0 / e.emission_rate
+    for e.time_accumulator >= emission_interval {
+      if !spawn_particle(&self.particle, emitter_transform, e) do break
+      spawned_this_frame += 1
+      e.time_accumulator -= emission_interval
+    }
+  }
+  params.particle_count = self.particle.active_particle_count
+}
+
+update_force_fields :: proc(self: ^Engine) {
+  params := data_buffer_get(&self.particle.params_buffer)
+  params.forcefield_count = 0
+  forcefields := slice.from_ptr(
+    self.particle.force_field_buffer.mapped,
+    MAX_FORCE_FIELDS,
+  )
+  for &entry in self.scene.nodes.entries do if entry.active {
+    ff, is_ff := &entry.item.attachment.(ForceFieldAttachment)
+    if !is_ff do continue
+    ff.position =
+      entry.item.transform.world_matrix * linalg.Vector4f32{0, 0, 0, 1}
+    forcefields[params.forcefield_count] = ff
+    params.forcefield_count += 1
+  }
+  for i in params.forcefield_count ..< MAX_FORCE_FIELDS {
+    forcefields[i] = {}
+  }
+}
+
 update :: proc(self: ^Engine) -> bool {
   glfw.PollEvents()
   delta_time := get_delta_time(self)
@@ -494,27 +535,17 @@ update :: proc(self: ^Engine) -> bool {
   }
   scene_traverse(&self.scene)
   for &entry in self.scene.nodes.entries {
-    if !entry.active {
-      continue
-    }
+    if !entry.active do continue
     data, is_mesh := &entry.item.attachment.(MeshAttachment)
-    if !is_mesh {
-      continue
-    }
+    if !is_mesh do continue
     skinning, has_skin := &data.skinning.?
-    if !has_skin {
-      continue
-    }
+    if !has_skin do continue
     anim_inst, has_animation := &skinning.animation.?
-    if !has_animation {
-      continue
-    }
+    if !has_animation do continue
     animation.instance_update(anim_inst, delta_time)
     mesh := resource.get(g_meshes, data.handle) or_continue
     mesh_skin, mesh_has_skin := mesh.skinning.?
-    if !mesh_has_skin {
-      continue
-    }
+    if !mesh_has_skin do continue
     l, r :=
       skinning.bone_matrix_offset +
       g_frame_index * g_bone_matrix_slab.capacity,
