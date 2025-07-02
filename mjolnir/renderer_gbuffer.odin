@@ -46,58 +46,12 @@ renderer_gbuffer_init :: proc(
   frag_shader_code := #load("shader/gbuffer/frag.spv")
   frag_module := create_shader_module(frag_shader_code) or_return
   defer vk.DestroyShaderModule(g_device, frag_module, nil)
-  vertex_bindings := [?]vk.VertexInputBindingDescription {
-    {binding = 0, stride = size_of(geometry.Vertex), inputRate = .VERTEX},
-    {
-      binding = 1,
-      stride = size_of(geometry.SkinningData),
-      inputRate = .VERTEX,
-    },
-  }
-  vertex_attributes := [?]vk.VertexInputAttributeDescription {
-    {
-      location = 0,
-      binding = 0,
-      format = .R32G32B32_SFLOAT,
-      offset = u32(offset_of(geometry.Vertex, position)),
-    },
-    {
-      location = 1,
-      binding = 0,
-      format = .R32G32B32_SFLOAT,
-      offset = u32(offset_of(geometry.Vertex, normal)),
-    },
-    {
-      location = 2,
-      binding = 0,
-      format = .R32G32B32A32_SFLOAT,
-      offset = u32(offset_of(geometry.Vertex, color)),
-    },
-    {
-      location = 3,
-      binding = 0,
-      format = .R32G32_SFLOAT,
-      offset = u32(offset_of(geometry.Vertex, uv)),
-    },
-    {
-      location = 4,
-      binding = 1,
-      format = .R32G32B32A32_UINT,
-      offset = u32(offset_of(geometry.SkinningData, joints)),
-    },
-    {
-      location = 5,
-      binding = 1,
-      format = .R32G32B32A32_SFLOAT,
-      offset = u32(offset_of(geometry.SkinningData, weights)),
-    },
-  }
   vertex_input_info := vk.PipelineVertexInputStateCreateInfo {
     sType                           = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-    vertexBindingDescriptionCount   = len(vertex_bindings),
-    pVertexBindingDescriptions      = raw_data(vertex_bindings[:]),
-    vertexAttributeDescriptionCount = len(vertex_attributes),
-    pVertexAttributeDescriptions    = raw_data(vertex_attributes[:]),
+    vertexBindingDescriptionCount   = len(geometry.VERTEX_BINDING_DESCRIPTION),
+    pVertexBindingDescriptions      = raw_data(geometry.VERTEX_BINDING_DESCRIPTION[:]),
+    vertexAttributeDescriptionCount = len(geometry.VERTEX_ATTRIBUTE_DESCRIPTIONS),
+    pVertexAttributeDescriptions    = raw_data(geometry.VERTEX_ATTRIBUTE_DESCRIPTIONS[:]),
   }
   input_assembly := vk.PipelineInputAssemblyStateCreateInfo {
     sType    = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,

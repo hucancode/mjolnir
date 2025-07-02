@@ -3,8 +3,8 @@
 layout(constant_id = 0) const bool SKINNED = false;
 
 layout(location = 0) in vec3 inPosition;
-layout(location = 4) in uvec4 inJoints;
-layout(location = 5) in vec4 inWeights;
+layout(location = 5) in uvec4 inJoints;
+layout(location = 6) in vec4 inWeights;
 
 layout(set = 0, binding = 0) uniform Uniforms {
     mat4 view;

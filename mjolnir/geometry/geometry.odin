@@ -9,6 +9,7 @@ Vertex :: struct {
   normal:   [3]f32,
   color:    [4]f32,
   uv:       [2]f32,
+  tangent:  [4]f32, // xyz = tangent, w = handedness (for bitangent reconstruction)
 }
 
 SkinningData :: struct {
@@ -47,14 +48,20 @@ VERTEX_ATTRIBUTE_DESCRIPTIONS := [?]vk.VertexInputAttributeDescription {
     offset = u32(offset_of(Vertex, uv)),
   },
   {
-    binding = 1,
+    binding = 0,
     location = 4,
+    format = .R32G32B32A32_SFLOAT,
+    offset = u32(offset_of(Vertex, tangent)),
+  },
+  {
+    binding = 1,
+    location = 5,
     format = .R32G32B32A32_UINT,
     offset = u32(offset_of(SkinningData, joints)),
   },
   {
     binding = 1,
-    location = 5,
+    location = 6,
     format = .R32G32B32A32_SFLOAT,
     offset = u32(offset_of(SkinningData, weights)),
   },
@@ -124,6 +131,51 @@ make_geometry :: proc(
   indices: []u32,
   skinnings: []SkinningData = nil,
 ) -> Geometry {
+  // Calculate tangents if missing (all zeros)
+  if len(vertices) > 0 && vertices[0].tangent == {} {
+    // Accumulate tangents per triangle
+    for i in 0 ..< len(indices)/3 {
+      i0 := indices[i*3+0];
+      i1 := indices[i*3+1];
+      i2 := indices[i*3+2];
+      v0 := vertices[i0];
+      v1 := vertices[i1];
+      v2 := vertices[i2];
+      p0 := v0.position;
+      p1 := v1.position;
+      p2 := v2.position;
+      uv0 := v0.uv;
+      uv1 := v1.uv;
+      uv2 := v2.uv;
+      edge1 := [3]f32{p1[0]-p0[0], p1[1]-p0[1], p1[2]-p0[2]};
+      edge2 := [3]f32{p2[0]-p0[0], p2[1]-p0[1], p2[2]-p0[2]};
+      deltaUV1 := [2]f32{uv1[0]-uv0[0], uv1[1]-uv0[1]};
+      deltaUV2 := [2]f32{uv2[0]-uv0[0], uv2[1]-uv0[1]};
+      f := 1.0 / (deltaUV1[0]*deltaUV2[1] - deltaUV2[0]*deltaUV1[1]);
+      tangent := [3]f32{
+        f * (deltaUV2[1]*edge1[0] - deltaUV1[1]*edge2[0]),
+        f * (deltaUV2[1]*edge1[1] - deltaUV1[1]*edge2[1]),
+        f * (deltaUV2[1]*edge1[2] - deltaUV1[1]*edge2[2]),
+      };
+      // Accumulate tangent
+      ids := [3]u32{i0, i1, i2}
+      for idx in ids {
+        vertices[idx].tangent[0] += tangent[0];
+        vertices[idx].tangent[1] += tangent[1];
+        vertices[idx].tangent[2] += tangent[2];
+      }
+    }
+    // Normalize tangents and set handedness to +1
+    for &v in vertices {
+      len_t := math.sqrt(v.tangent[0]*v.tangent[0] + v.tangent[1]*v.tangent[1] + v.tangent[2]*v.tangent[2]);
+      if len_t > 0.0 {
+        v.tangent[0] /= len_t;
+        v.tangent[1] /= len_t;
+        v.tangent[2] /= len_t;
+      }
+      v.tangent[3] = 1.0;
+    }
+  }
   return {
     vertices = vertices,
     skinnings = skinnings,
@@ -142,35 +194,35 @@ make_cube :: proc(color: [4]f32 = {1.0, 1.0, 1.0, 1.0}) -> (ret: Geometry) {
   ret.vertices = make([]Vertex, 24)
   ret.indices = make([]u32, 36)
   // Front face
-  ret.vertices[0] = {{-1, -1, 1}, VEC_FORWARD, color, {0, 1}}
-  ret.vertices[1] = {{1, -1, 1}, VEC_FORWARD, color, {1, 1}}
-  ret.vertices[2] = {{1, 1, 1}, VEC_FORWARD, color, {1, 0}}
-  ret.vertices[3] = {{-1, 1, 1}, VEC_FORWARD, color, {0, 0}}
+  ret.vertices[0] = {{-1, -1, 1}, VEC_FORWARD, color, {0, 1}, {1, 0, 0, 1}}
+  ret.vertices[1] = {{1, -1, 1}, VEC_FORWARD, color, {1, 1}, {1, 0, 0, 1}}
+  ret.vertices[2] = {{1, 1, 1}, VEC_FORWARD, color, {1, 0}, {1, 0, 0, 1}}
+  ret.vertices[3] = {{-1, 1, 1}, VEC_FORWARD, color, {0, 0}, {1, 0, 0, 1}}
   // Back face
-  ret.vertices[4] = {{-1, 1, -1}, VEC_BACKWARD, color, {1, 1}}
-  ret.vertices[5] = {{1, 1, -1}, VEC_BACKWARD, color, {0, 1}}
-  ret.vertices[6] = {{1, -1, -1}, VEC_BACKWARD, color, {0, 0}}
-  ret.vertices[7] = {{-1, -1, -1}, VEC_BACKWARD, color, {1, 0}}
+  ret.vertices[4] = {{-1, 1, -1}, VEC_BACKWARD, color, {1, 1}, {-1, 0, 0, 1}}
+  ret.vertices[5] = {{1, 1, -1}, VEC_BACKWARD, color, {0, 1}, {-1, 0, 0, 1}}
+  ret.vertices[6] = {{1, -1, -1}, VEC_BACKWARD, color, {0, 0}, {-1, 0, 0, 1}}
+  ret.vertices[7] = {{-1, -1, -1}, VEC_BACKWARD, color, {1, 0}, {-1, 0, 0, 1}}
   // Top face
-  ret.vertices[8] = {{1, 1, -1}, VEC_UP, color, {0, 1}}
-  ret.vertices[9] = {{-1, 1, -1}, VEC_UP, color, {1, 1}}
-  ret.vertices[10] = {{-1, 1, 1}, VEC_UP, color, {1, 0}}
-  ret.vertices[11] = {{1, 1, 1}, VEC_UP, color, {0, 0}}
+  ret.vertices[8] = {{1, 1, -1}, VEC_UP, color, {0, 1}, {0, 1, 0, 1}}
+  ret.vertices[9] = {{-1, 1, -1}, VEC_UP, color, {1, 1}, {0, 1, 0, 1}}
+  ret.vertices[10] = {{-1, 1, 1}, VEC_UP, color, {1, 0}, {0, 1, 0, 1}}
+  ret.vertices[11] = {{1, 1, 1}, VEC_UP, color, {0, 0}, {0, 1, 0, 1}}
   // Bottom face
-  ret.vertices[12] = {{1, -1, 1}, VEC_DOWN, color, {0, 1}}
-  ret.vertices[13] = {{-1, -1, 1}, VEC_DOWN, color, {1, 1}}
-  ret.vertices[14] = {{-1, -1, -1}, VEC_DOWN, color, {1, 0}}
-  ret.vertices[15] = {{1, -1, -1}, VEC_DOWN, color, {0, 0}}
+  ret.vertices[12] = {{1, -1, 1}, VEC_DOWN, color, {0, 1}, {0, 1, 0, 1}}
+  ret.vertices[13] = {{-1, -1, 1}, VEC_DOWN, color, {1, 1}, {0, 1, 0, 1}}
+  ret.vertices[14] = {{-1, -1, -1}, VEC_DOWN, color, {1, 0}, {0, 1, 0, 1}}
+  ret.vertices[15] = {{1, -1, -1}, VEC_DOWN, color, {0, 0}, {0, 1, 0, 1}}
   // Right face
-  ret.vertices[16] = {{1, -1, -1}, VEC_RIGHT, color, {0, 1}}
-  ret.vertices[17] = {{1, 1, -1}, VEC_RIGHT, color, {1, 1}}
-  ret.vertices[18] = {{1, 1, 1}, VEC_RIGHT, color, {1, 0}}
-  ret.vertices[19] = {{1, -1, 1}, VEC_RIGHT, color, {0, 0}}
+  ret.vertices[16] = {{1, -1, -1}, VEC_RIGHT, color, {0, 1}, {0, 1, 0, 1}}
+  ret.vertices[17] = {{1, 1, -1}, VEC_RIGHT, color, {1, 1}, {0, 1, 0, 1}}
+  ret.vertices[18] = {{1, 1, 1}, VEC_RIGHT, color, {1, 0}, {0, 1, 0, 1}}
+  ret.vertices[19] = {{1, -1, 1}, VEC_RIGHT, color, {0, 0}, {0, 1, 0, 1}}
   // Left face
-  ret.vertices[20] = {{-1, -1, 1}, VEC_LEFT, color, {0, 1}}
-  ret.vertices[21] = {{-1, 1, 1}, VEC_LEFT, color, {1, 1}}
-  ret.vertices[22] = {{-1, 1, -1}, VEC_LEFT, color, {1, 0}}
-  ret.vertices[23] = {{-1, -1, -1}, VEC_LEFT, color, {0, 0}}
+  ret.vertices[20] = {{-1, -1, 1}, VEC_LEFT, color, {0, 1}, {0, 1, 0, 1}}
+  ret.vertices[21] = {{-1, 1, 1}, VEC_LEFT, color, {1, 1}, {0, 1, 0, 1}}
+  ret.vertices[22] = {{-1, 1, -1}, VEC_LEFT, color, {1, 0}, {0, 1, 0, 1}}
+  ret.vertices[23] = {{-1, -1, -1}, VEC_LEFT, color, {0, 0}, {0, 1, 0, 1}}
   for face in 0 ..< 6 {
     i := u32(face * 4)
     p := ret.indices[face * 6:]
@@ -190,9 +242,9 @@ make_triangle :: proc(
 ) {
   ret.vertices = make([]Vertex, 3)
   ret.indices = make([]u32, 3)
-  ret.vertices[0] = {{0.0, 0.0, 0.0}, VEC_FORWARD, color, {0.0, 0.0}}
-  ret.vertices[1] = {{1.0, 0.0, 0.0}, VEC_FORWARD, color, {1.0, 0.0}}
-  ret.vertices[2] = {{0.5, 1.0, 0.0}, VEC_FORWARD, color, {0.5, 1.0}}
+  ret.vertices[0] = {{0.0, 0.0, 0.0}, VEC_FORWARD, color, {0.0, 0.0}, {0, 1, 0, 1}}
+  ret.vertices[1] = {{1.0, 0.0, 0.0}, VEC_FORWARD, color, {1.0, 0.0}, {0, 1, 0, 1}}
+  ret.vertices[2] = {{0.5, 1.0, 0.0}, VEC_FORWARD, color, {0.5, 1.0}, {0, 1, 0, 1}}
   ret.indices[0], ret.indices[1], ret.indices[2] = 0, 1, 2
   ret.aabb = Aabb {
     min = {0, 0, 0},
@@ -205,10 +257,10 @@ make_triangle :: proc(
 make_quad :: proc(color: [4]f32 = {1.0, 1.0, 1.0, 1.0}) -> (ret: Geometry) {
   ret.vertices = make([]Vertex, 4)
   ret.indices = make([]u32, 6)
-  ret.vertices[0] = {{0, 0, 0}, VEC_UP, color, {0, 0}}
-  ret.vertices[1] = {{0, 0, 1}, VEC_UP, color, {0, 1}}
-  ret.vertices[2] = {{1, 0, 1}, VEC_UP, color, {1, 1}}
-  ret.vertices[3] = {{1, 0, 0}, VEC_UP, color, {1, 0}}
+  ret.vertices[0] = {{0, 0, 0}, VEC_UP, color, {0, 0}, {0, 1, 0, 1}}
+  ret.vertices[1] = {{0, 0, 1}, VEC_UP, color, {0, 1}, {0, 1, 0, 1}}
+  ret.vertices[2] = {{1, 0, 1}, VEC_UP, color, {1, 1}, {0, 1, 0, 1}}
+  ret.vertices[3] = {{1, 0, 0}, VEC_UP, color, {1, 0}, {0, 1, 0, 1}}
   ret.indices[0], ret.indices[1], ret.indices[2] = 0, 1, 2
   ret.indices[3], ret.indices[4], ret.indices[5] = 2, 3, 0
   ret.aabb = Aabb {

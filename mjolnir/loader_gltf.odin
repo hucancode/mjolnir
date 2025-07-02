@@ -461,6 +461,15 @@ load_gltf_primitive :: proc(
           vertices[i].uv = {floats_data[i * 2 + 0], floats_data[i * 2 + 1]}
         }
       }
+    case .tangent:
+      for i in 0 ..< min(int(accessor.count), len(vertices)) {
+        vertices[i].tangent = {
+          floats_data[i * 4 + 0],
+          floats_data[i * 4 + 1],
+          floats_data[i * 4 + 2],
+          floats_data[i * 4 + 3],
+        }
+      }
     }
   }
   indices: []u32
@@ -575,6 +584,15 @@ load_gltf_skinned_primitive :: proc(
       if attribute.index == 0 {
         for i in 0 ..< min(int(accessor.count), len(vertices)) {
           vertices[i].uv = {data[i * 2 + 0], data[i * 2 + 1]}
+        }
+      }
+    case .tangent:
+      for i in 0 ..< min(int(accessor.count), len(vertices)) {
+        vertices[i].tangent = {
+          data[i * 4 + 0],
+          data[i * 4 + 1],
+          data[i * 4 + 2],
+          data[i * 4 + 3],
         }
       }
     case .joints:

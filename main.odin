@@ -90,7 +90,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   }
   if true {
     log.info("loading GLTF...")
-    gltf_nodes := load_gltf(engine, "assets/Suzanne.glb") or_else {}
+    gltf_nodes := load_gltf(engine, "assets/Mjolnir.glb") or_else {}
     log.infof("Loaded GLTF nodes: %v", gltf_nodes)
     for handle in gltf_nodes {
       duck := resource.get(engine.scene.nodes, handle) or_continue
@@ -171,9 +171,9 @@ setup :: proc(engine: ^mjolnir.Engine) {
       cast_shadow = true,
     },
   )
-  effect_add_tonemap(&engine.postprocess, 1.5, 1.3)
+  // effect_add_tonemap(&engine.postprocess, 1.5, 1.3)
   effect_add_fog(&engine.postprocess, {0.2, 0.5, 0.9}, 0.02, 50.0, 200.0)
-  effect_add_crosshatch(&engine.postprocess, {1280, 720}) // Add cross-hatch effect
+  // effect_add_crosshatch(&engine.postprocess, {1280, 720}) // Add cross-hatch effect
 
   if false {
     // effect_add_bloom(&engine.postprocess, 0.8, 0.5, 16.0)
