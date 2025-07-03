@@ -41,6 +41,7 @@ layout(location = 0) in vec3 position;
 layout(location = 1) in vec4 color;
 layout(location = 2) in vec3 normal;
 layout(location = 3) in vec2 uv;
+layout(location = 4) in vec4 tangent;
 
 layout(location = 0) out vec4 outPosition;
 layout(location = 1) out vec4 outNormal;
@@ -51,6 +52,17 @@ layout(location = 4) out vec4 outEmissive;
 void main() {
     outPosition = vec4(position, 1.0);
     vec3 N = normalize(normal);
+    if (NORMAL_TEXTURE) {
+        // Sample tangent-space normal from normal map (BC5/XY: .xy, reconstruct z)
+        vec2 n_xy = texture(sampler2D(textures[normal_index], samplers[SAMPLER_LINEAR_REPEAT]), uv).xy * 2.0 - 1.0;
+        float n_z = sqrt(clamp(1.0 - dot(n_xy, n_xy), 0.0, 1.0));
+        vec3 tangentNormal = vec3(n_xy, n_z);
+        // Reconstruct TBN matrix
+        vec3 T = normalize(tangent.xyz);
+        vec3 B = normalize(cross(N, T)) * tangent.w;
+        mat3 TBN = mat3(T, B, N);
+        N = normalize(TBN * tangentNormal);
+    }
     vec3 normal_encoded = N * 0.5 + 0.5;
     outNormal = vec4(normal_encoded, 1.0);
 
