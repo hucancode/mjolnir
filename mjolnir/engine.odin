@@ -556,6 +556,7 @@ update :: proc(self: ^Engine) -> bool {
     sample_clip(mesh, anim_inst.clip_handle, anim_inst.time, bone_matrices)
   }
   update_emitters(self, delta_time)
+  update_force_fields(self)
   last_mouse_pos := self.input.mouse_pos
   self.input.mouse_pos.x, self.input.mouse_pos.y = glfw.GetCursorPos(
     self.window,
@@ -1056,7 +1057,6 @@ render :: proc(self: ^Engine) -> vk.Result {
     renderer_main_render(&self.main, render_input, command_buffer)
     renderer_main_end(command_buffer)
     // log.debug("============ rendering particles... =============")
-    update_force_fields(self)
     renderer_particle_begin(
       &self.particle,
       command_buffer,
