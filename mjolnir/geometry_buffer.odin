@@ -80,8 +80,8 @@ renderer_gbuffer_init :: proc(
   depth_stencil := vk.PipelineDepthStencilStateCreateInfo {
     sType            = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
     depthTestEnable  = true,
-    depthWriteEnable = true,
-    depthCompareOp   = .LESS,
+    depthWriteEnable = false,
+    depthCompareOp   = .LESS_OR_EQUAL,
   }
   color_blend_attachment := vk.PipelineColorBlendAttachmentState {
     colorWriteMask = {.R, .G, .B, .A},

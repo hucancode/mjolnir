@@ -432,8 +432,6 @@ renderer_depth_prepass_build_pipeline :: proc(
     depthTestEnable       = true,
     depthWriteEnable      = true,
     depthCompareOp        = .LESS,
-    depthBoundsTestEnable = false,
-    stencilTestEnable     = false,
   }
   dynamic_rendering := vk.PipelineRenderingCreateInfoKHR {
     sType                 = .PIPELINE_RENDERING_CREATE_INFO_KHR,
