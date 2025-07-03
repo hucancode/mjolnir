@@ -687,13 +687,7 @@ renderer_main_render :: proc(
           resource.get(g_image_buffers, self.environment_map) or_else nil
         max_lod: f32 = 8.0 // Default fallback
         if environment_texture != nil {
-          max_lod = f32(
-            calculate_mip_levels(
-              environment_texture.width,
-              environment_texture.height,
-            ) -
-            1,
-          )
+          max_lod = calculate_mip_levels(environment_texture.width, environment_texture.height) - 1.0
         }
         push_constant := PushConstant {
           world               = node.transform.world_matrix,

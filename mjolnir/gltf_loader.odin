@@ -20,7 +20,7 @@ load_gltf :: proc(
   engine: ^Engine,
   path: string,
 ) -> (
-  root_node_handles: []Handle,
+  nodes: [dynamic]Handle,
   ret: cgltf.result,
 ) {
   gltf_path_cstr := strings.clone_to_cstring(path)
@@ -31,9 +31,9 @@ load_gltf :: proc(
   if len(gltf_data.buffers) > 0 {
     cgltf.load_buffers(options, gltf_data, gltf_path_cstr) or_return
   }
-  created_root_handles := make([dynamic]resource.Handle, 0)
+  nodes = make([dynamic]Handle, 0)
   if len(gltf_data.nodes) == 0 {
-    return created_root_handles[:], .success
+    return nodes, .success
   }
   // Track bone matrix buffer mapping (1 skin = 1 bone matrix buffer)
   skin_to_bone_offset := make(map[^cgltf.skin]u32)
@@ -212,7 +212,7 @@ load_gltf :: proc(
     }
     attach(engine.scene.nodes, entry.parent, node_handle)
     if entry.parent == engine.scene.root {
-      append(&created_root_handles, node_handle)
+      append(&nodes, node_handle)
     }
     for child_ptr in gltf_node.children {
       if child_idx, found := node_ptr_to_idx_map[child_ptr]; found {
@@ -225,7 +225,7 @@ load_gltf :: proc(
   log.infof("  - Skins with animations: %d", len(skin_to_first_mesh))
   log.infof("  - Unique textures: %d", len(texture_to_handle))
   log.infof("  - Unique materials: %d", len(material_to_handle))
-  return created_root_handles[:], .success
+  return nodes, .success
 }
 
 load_gltf_texture :: proc(

@@ -611,8 +611,8 @@ create_texture_from_data :: proc(
 }
 
 // Calculate number of mip levels for a given texture size
-calculate_mip_levels :: proc(width, height: u32) -> u32 {
-  return u32(linalg.floor(linalg.log2(f32(max(width, height))))) + 1
+calculate_mip_levels :: proc(width, height: u32) -> f32 {
+  return linalg.floor(linalg.log2(f32(max(width, height)))) + 1
 }
 
 // Create image buffer with mip maps
@@ -625,7 +625,7 @@ create_image_buffer_with_mips :: proc(
   img: ImageBuffer,
   ret: vk.Result,
 ) {
-  mip_levels := calculate_mip_levels(width, height)
+  mip_levels := u32(calculate_mip_levels(width, height))
 
   staging := create_host_visible_buffer(
     u8,

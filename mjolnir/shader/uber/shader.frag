@@ -69,7 +69,7 @@ layout(location = 3) in vec2 uv;
 layout(location = 4) in vec4 tangent;
 layout(location = 0) out vec4 outColor;
 
-const float AMBIENT_STRENGTH = 0.8;
+const float AMBIENT_STRENGTH = 0.2;
 
 // Convert a direction vector to equirectangular UV coordinates
 vec2 dirToEquirectUV(vec3 dir) {
@@ -232,7 +232,7 @@ void main() {
         if (light.kind != DIRECTIONAL_LIGHT) {
             float distance = length(light.position.xyz - position);
             float norm_dist = distance / max(0.01, light.radius);
-            attenuation += pow(1.0 - clamp(norm_dist * norm_dist, 0.0, 1.0), 2) * 0.4;
+            attenuation += pow(1.0 - clamp(norm_dist * norm_dist, 0.0, 1.0), 2) * 0.3;
         }
         shadowFactor *= shadow;
     }

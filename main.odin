@@ -117,10 +117,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     for armature in gltf_nodes {
       armature_ptr := resource.get(engine.scene.nodes, armature) or_continue
       for i in 1 ..< len(armature_ptr.children) {
-        skeleton := armature_ptr.children[i]
-        // skeleton_ptr := resource.get(engine.scene.nodes, skeleton) or_continue
-        // skeleton_ptr.transform.scale = {0.5, 0.5, 0.5}
-        play_animation(engine, skeleton, "idle")
+        play_animation(engine, armature_ptr.children[i], "idle")
       }
     }
   }
@@ -175,9 +172,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
       cast_shadow = true,
     },
   )
-  // effect_add_tonemap(&engine.postprocess, 1.5, 1.3)
-  effect_add_fog(&engine.postprocess, {0.2, 0.5, 0.9}, 0.02, 50.0, 200.0)
-  effect_add_crosshatch(&engine.postprocess, {1280, 720}) // Add cross-hatch effect
 
   if false {
     // effect_add_bloom(&engine.postprocess, 0.8, 0.5, 16.0)
@@ -283,6 +277,9 @@ setup :: proc(engine: ^mjolnir.Engine) {
     )
     geometry.scale(&forcefield_visual.transform, 0.2)
   }
+  // effect_add_tonemap(&engine.postprocess, 1.5, 1.3)
+  effect_add_fog(&engine.postprocess, {0.2, 0.5, 0.9}, 0.02, 50.0, 200.0)
+  // effect_add_crosshatch(&engine.postprocess, {1280, 720}) // Add cross-hatch effect
   log.info("setup complete")
 }
 
