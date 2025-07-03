@@ -167,8 +167,7 @@ vec3 brdf(vec3 N, vec3 V, vec3 albedo, float roughness, float metallic) {
         vec3 spec = (NDF * G * F) / (4.0 * max(dot(N, V), 0.0) * NdotL + 0.001);
         vec3 kS = F;
         vec3 kD = (vec3(1.0) - kS) * (1.0 - metallic);
-        float shadow = calculateShadow(i);
-        Lo += (kD * albedo / PI + spec) * light.color.rgb * NdotL * attenuation * shadow;
+        Lo += (kD * albedo / PI + spec) * light.color.rgb * NdotL * attenuation;
     }
     return Lo;
 }
@@ -225,9 +224,26 @@ void main() {
     float fresnel = 1.0 - pow(1.0 - NdotV, fresnel_strength);
     vec3 fresnelColor = (albedo + emissive) * fresnel * fresnel_strength;
 
+    float shadowFactor = 1.0;
+    float attenuation = 0.0;
+    for (int i = 0; i < min(lightCount, MAX_LIGHTS); i++) {
+        Light light = lights[i];
+        float shadow = calculateShadow(i);
+        if (light.kind != DIRECTIONAL_LIGHT) {
+            float distance = length(light.position.xyz - position);
+            float norm_dist = distance / max(0.01, light.radius);
+            attenuation += pow(1.0 - clamp(norm_dist * norm_dist, 0.0, 1.0), 2) * 0.4;
+        }
+        shadowFactor *= shadow;
+    }
+    shadowFactor = clamp(shadowFactor + attenuation, 0.0, 1.0);
+
     // Mix between dielectric and metallic based on metallic parameter
     vec3 ambient = mix(f_dielectric_brdf_ibl, f_metal_brdf_ibl, metallic);
-    vec3 final = albedo * ambient * AMBIENT_STRENGTH + brdf(N, V, albedo, roughness, metallic) + emissive + fresnelColor;
+    vec3 final = (albedo * ambient * AMBIENT_STRENGTH
+        + brdf(N, V, albedo, roughness, metallic)
+        + fresnelColor) * shadowFactor
+        + emissive;
 
     outColor = vec4(final, 1.0);
 }
