@@ -88,10 +88,8 @@ renderer_depth_prepass_begin :: proc(
   }
   vk.CmdBeginRenderingKHR(command_buffer, &render_info)
   viewport := vk.Viewport {
-    x        = 0.0,
-    y        = f32(render_target.extent.height),
     width    = f32(render_target.extent.width),
-    height   = -f32(render_target.extent.height),
+    height   = f32(render_target.extent.height),
     minDepth = 0.0,
     maxDepth = 1.0,
   }
@@ -199,132 +197,6 @@ renderer_depth_prepass_render :: proc(
   return rendered_count
 }
 
-// Populate batches for depth prepass rendering
-renderer_depth_prepass_populate_batches :: proc(ctx: ^BatchingContext) {
-  for &entry in ctx.engine.scene.nodes.entries do if entry.active {
-    node := &entry.item
-    #partial switch data in node.attachment {
-    case MeshAttachment:
-      mesh, found_mesh := resource.get(g_meshes, data.handle)
-      if !found_mesh do continue
-      material, found_mat := resource.get(g_materials, data.material)
-      if !found_mat do continue
-      // Skip transparent and wireframe materials in depth pre-pass
-      // Wireframe materials need to write their own depth with bias
-      if material.type == .WIREFRAME do continue
-      world_aabb := geometry.aabb_transform(mesh.aabb, node.transform.world_matrix)
-      if !geometry.frustum_test_aabb(&ctx.frustum, world_aabb) do continue
-      // Depth prepass only cares about skinning
-      depth_features := material.features & ShaderFeatureSet{.SKINNING}
-      batch_key := BatchKey {
-        features      = depth_features,
-        material_type = material.type,
-      }
-      // Find or create batch group for this feature set
-      batch_group, group_found := &ctx.batches[batch_key]
-      if !group_found {
-        ctx.batches[batch_key] = make([dynamic]BatchData, allocator = context.temp_allocator)
-        batch_group = &ctx.batches[batch_key]
-      }
-      // Find or create batch data for this specific material within the group
-      batch_data: ^BatchData = nil
-      for &batch in batch_group {
-        if batch.material_handle == data.material {
-          batch_data = &batch
-          break
-        }
-      }
-      if batch_data == nil {
-        new_batch := BatchData {
-          material_handle = data.material,
-          nodes           = make([dynamic]^Node, allocator = context.temp_allocator),
-        }
-        append(batch_group, new_batch)
-        batch_data = &batch_group[len(batch_group) - 1]
-      }
-      append(&batch_data.nodes, node)
-    }
-  }
-}
-
-renderer_depth_prepass_render_batches :: proc(
-  self: ^RendererDepthPrepass,
-  ctx: ^BatchingContext,
-  command_buffer: vk.CommandBuffer,
-) -> int {
-  rendered := 0
-  current_pipeline: vk.Pipeline = 0
-  for batch_key, batch_group in ctx.batches {
-    if batch_key.material_type == .WIREFRAME do continue
-    for batch_data in batch_group {
-      material := resource.get(
-        g_materials,
-        batch_data.material_handle,
-      ) or_continue
-      for node in batch_data.nodes {
-        #partial switch data in node.attachment {
-        case MeshAttachment:
-          mesh := resource.get(g_meshes, data.handle) or_continue
-          mesh_skinning, mesh_has_skin := &mesh.skinning.?
-          node_skinning, node_has_skin := data.skinning.?
-          pipeline := renderer_depth_prepass_get_pipeline(
-            self,
-            material,
-            mesh,
-            data,
-          )
-          if pipeline != current_pipeline {
-            vk.CmdBindPipeline(command_buffer, .GRAPHICS, pipeline)
-            current_pipeline = pipeline
-          }
-          push_constant := PushConstant {
-            world = node.transform.world_matrix,
-          }
-          if node_has_skin {
-            push_constant.bone_matrix_offset =
-              node_skinning.bone_matrix_offset +
-              g_frame_index * g_bone_matrix_slab.capacity
-          }
-          vk.CmdPushConstants(
-            command_buffer,
-            self.pipeline_layout,
-            {.VERTEX},
-            0,
-            size_of(PushConstant),
-            &push_constant,
-          )
-          offset: vk.DeviceSize = 0
-          vk.CmdBindVertexBuffers(
-            command_buffer,
-            0,
-            1,
-            &mesh.vertex_buffer.buffer,
-            &offset,
-          )
-          if mesh_has_skin {
-            vk.CmdBindVertexBuffers(
-              command_buffer,
-              1,
-              1,
-              &mesh_skinning.skin_buffer.buffer,
-              &offset,
-            )
-          }
-          vk.CmdBindIndexBuffer(
-            command_buffer,
-            mesh.index_buffer.buffer,
-            0,
-            .UINT32,
-          )
-          vk.CmdDrawIndexed(command_buffer, mesh.indices_len, 1, 0, 0, 0)
-          rendered += 1
-        }
-      }
-    }
-  }
-  return rendered
-}
-
 renderer_depth_prepass_get_pipeline :: proc(
   self: ^RendererDepthPrepass,
   material: ^Material,
@@ -392,29 +264,17 @@ renderer_depth_prepass_build_pipeline :: proc(
     topology               = .TRIANGLE_LIST,
     primitiveRestartEnable = false,
   }
-  viewport := vk.Viewport {
-    x        = 0.0,
-    y        = f32(swapchain_extent.height),
-    width    = f32(swapchain_extent.width),
-    height   = -f32(swapchain_extent.height),
-    minDepth = 0.0,
-    maxDepth = 1.0,
-  }
-  scissor := vk.Rect2D {
-    extent = swapchain_extent,
-  }
   viewport_state := vk.PipelineViewportStateCreateInfo {
     sType         = .PIPELINE_VIEWPORT_STATE_CREATE_INFO,
     viewportCount = 1,
-    pViewports    = &viewport,
     scissorCount  = 1,
-    pScissors     = &scissor,
   }
   rasterizer := vk.PipelineRasterizationStateCreateInfo {
     sType                   = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
     polygonMode             = .FILL,
     cullMode                = {.BACK},
-    frontFace               = .COUNTER_CLOCKWISE,
+    frontFace               = .CLOCKWISE,
+    lineWidth               = 1.0,
     depthBiasEnable         = true,
     depthBiasConstantFactor = 0.1,
     depthBiasSlopeFactor    = 0.2,

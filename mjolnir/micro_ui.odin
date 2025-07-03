@@ -114,28 +114,15 @@ renderer_ui_init :: proc(
     sType    = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
     topology = .TRIANGLE_LIST,
   }
-  viewport := vk.Viewport {
-    width    = f32(g_surface_capabilities.currentExtent.width),
-    height   = f32(g_surface_capabilities.currentExtent.height),
-    minDepth = 0,
-    maxDepth = 1,
-  }
-  scissor := vk.Rect2D {
-    extent = {
-      width = g_surface_capabilities.currentExtent.width,
-      height = g_surface_capabilities.currentExtent.height,
-    },
-  }
   viewport_state := vk.PipelineViewportStateCreateInfo {
     sType         = .PIPELINE_VIEWPORT_STATE_CREATE_INFO,
     viewportCount = 1,
-    pViewports    = &viewport,
     scissorCount  = 1,
-    pScissors     = &scissor,
   }
   rasterizer := vk.PipelineRasterizationStateCreateInfo {
     sType       = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
     polygonMode = .FILL,
+    lineWidth   = 1.0,
   }
   multisampling := vk.PipelineMultisampleStateCreateInfo {
     sType                = .PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
@@ -226,7 +213,6 @@ renderer_ui_init :: proc(
     sType                   = .PIPELINE_RENDERING_CREATE_INFO_KHR,
     colorAttachmentCount    = len(color_formats),
     pColorAttachmentFormats = raw_data(color_formats[:]),
-    depthAttachmentFormat   = .D32_SFLOAT,
   }
   depth_stencil_state := vk.PipelineDepthStencilStateCreateInfo {
     sType = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
@@ -291,7 +277,6 @@ renderer_ui_init :: proc(
       sType = .WRITE_DESCRIPTOR_SET,
       dstSet = self.projection_descriptor_set,
       dstBinding = 0,
-      dstArrayElement = 0,
       descriptorCount = 1,
       descriptorType = .UNIFORM_BUFFER,
       pBufferInfo = &buffer_info,
@@ -300,7 +285,6 @@ renderer_ui_init :: proc(
       sType = .WRITE_DESCRIPTOR_SET,
       dstSet = self.texture_descriptor_set,
       dstBinding = 0,
-      dstArrayElement = 0,
       descriptorCount = 1,
       descriptorType = .COMBINED_IMAGE_SAMPLER,
       pImageInfo = &{
@@ -504,7 +488,6 @@ renderer_ui_begin :: proc(
     imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
     loadOp = .LOAD, // preserve previous contents
     storeOp = .STORE,
-    clearValue = {color = {float32 = {0, 0, 0, 0}}},
   }
   render_info := vk.RenderingInfoKHR {
     sType = .RENDERING_INFO_KHR,

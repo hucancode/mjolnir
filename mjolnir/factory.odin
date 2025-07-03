@@ -29,8 +29,8 @@ g_bone_matrix_slab: resource.SlabAllocator
 g_camera_descriptor_set_layout: vk.DescriptorSetLayout
 g_camera_descriptor_sets: [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet
 
-g_lights_descriptor_set_layout: vk.DescriptorSetLayout
-g_lights_descriptor_sets: [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet
+g_shadow_descriptor_set_layout: vk.DescriptorSetLayout
+g_shadow_descriptor_sets: [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet
 
 g_textures_set_layout: vk.DescriptorSetLayout
 g_textures_descriptor_set: vk.DescriptorSet
@@ -80,18 +80,12 @@ factory_init :: proc() -> vk.Result {
   lights_bindings := [?]vk.DescriptorSetLayoutBinding {
     {
       binding = 0,
-      descriptorType = .UNIFORM_BUFFER,
-      descriptorCount = 1,
-      stageFlags = {.FRAGMENT},
-    },
-    {
-      binding = 1,
       descriptorType = .COMBINED_IMAGE_SAMPLER,
       descriptorCount = MAX_LIGHTS,
       stageFlags = {.FRAGMENT},
     },
     {
-      binding = 2,
+      binding = 1,
       descriptorType = .COMBINED_IMAGE_SAMPLER,
       descriptorCount = MAX_LIGHTS,
       stageFlags = {.FRAGMENT},
@@ -105,10 +99,10 @@ factory_init :: proc() -> vk.Result {
       pBindings = raw_data(lights_bindings[:]),
     },
     nil,
-    &g_lights_descriptor_set_layout,
+    &g_shadow_descriptor_set_layout,
   ) or_return
   lights_set_layouts: [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSetLayout
-  slice.fill(lights_set_layouts[:], g_lights_descriptor_set_layout)
+  slice.fill(lights_set_layouts[:], g_shadow_descriptor_set_layout)
   vk.AllocateDescriptorSets(
     g_device,
     &{
@@ -117,7 +111,7 @@ factory_init :: proc() -> vk.Result {
       descriptorSetCount = MAX_FRAMES_IN_FLIGHT,
       pSetLayouts = raw_data(lights_set_layouts[:]),
     },
-    raw_data(g_lights_descriptor_sets[:]),
+    raw_data(g_shadow_descriptor_sets[:]),
   ) or_return
   // Textures+samplers descriptor set
   textures_bindings := [?]vk.DescriptorSetLayoutBinding {
@@ -159,7 +153,6 @@ factory_init :: proc() -> vk.Result {
       sType = .WRITE_DESCRIPTOR_SET,
       dstSet = g_textures_descriptor_set,
       dstBinding = 1,
-      dstArrayElement = 0,
       descriptorType = .SAMPLER,
       descriptorCount = 1,
       pImageInfo = &{sampler = g_nearest_clamp_sampler},
@@ -204,12 +197,12 @@ factory_deinit :: proc() {
   deinit_global_samplers()
   deinit_bone_matrix_allocator()
   vk.DestroyDescriptorSetLayout(g_device, g_camera_descriptor_set_layout, nil)
-  vk.DestroyDescriptorSetLayout(g_device, g_lights_descriptor_set_layout, nil)
+  vk.DestroyDescriptorSetLayout(g_device, g_shadow_descriptor_set_layout, nil)
   vk.DestroyDescriptorSetLayout(g_device, g_textures_set_layout, nil)
   g_camera_descriptor_set_layout = 0
-  for &set in g_camera_descriptor_sets do set = 0
-  g_lights_descriptor_set_layout = 0
-  for &set in g_lights_descriptor_sets do set = 0
+  g_camera_descriptor_sets = {}
+  g_shadow_descriptor_set_layout = 0
+  g_shadow_descriptor_sets = {}
   g_textures_set_layout = 0
   g_textures_descriptor_set = 0
 }

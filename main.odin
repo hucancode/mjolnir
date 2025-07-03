@@ -278,7 +278,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     geometry.scale(&forcefield_visual.transform, 0.2)
   }
   // effect_add_tonemap(&engine.postprocess, 1.5, 1.3)
-  effect_add_fog(&engine.postprocess, {0.2, 0.5, 0.9}, 0.02, 50.0, 200.0)
+  // effect_add_fog(&engine.postprocess, {0.2, 0.5, 0.9}, 0.02, 50.0, 200.0)
   // effect_add_crosshatch(&engine.postprocess, {1280, 720}) // Add cross-hatch effect
   log.info("setup complete")
 }

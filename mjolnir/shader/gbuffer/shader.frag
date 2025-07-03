@@ -13,34 +13,9 @@ const uint SAMPLER_LINEAR_CLAMP = 1;
 const uint SAMPLER_NEAREST_REPEAT = 2;
 const uint SAMPLER_LINEAR_REPEAT = 3;
 const uint MAX_LIGHTS = 10;
-const uint POINT_LIGHT = 0;
-const uint DIRECTIONAL_LIGHT = 1;
-const uint SPOT_LIGHT = 2;
-const float PI = 3.14159265359;
 
-struct Light {
-    mat4 view;
-    mat4 proj;
-    vec4 color;
-    vec4 position;
-    vec4 direction;
-    uint kind;
-    float angle;
-    float radius;
-    uint hasShadow;
-};
-
-layout(set = 0, binding = 0) uniform SceneUniforms {
-    mat4 view;
-    mat4 proj;
-};
-// lights and shadow maps set = 1
-layout(set = 1, binding = 0) uniform LightUniforms {
-    Light lights[MAX_LIGHTS];
-    uint lightCount;
-};
-layout(set = 1, binding = 1) uniform sampler2D shadowMaps[MAX_LIGHTS];
-layout(set = 1, binding = 2) uniform samplerCube cubeShadowMaps[MAX_LIGHTS];
+layout(set = 1, binding = 0) uniform sampler2D shadowMaps[MAX_LIGHTS];
+layout(set = 1, binding = 1) uniform samplerCube cubeShadowMaps[MAX_LIGHTS];
 // textures and samplers set = 2
 layout(set = 2, binding = 0) uniform texture2D textures[];
 layout(set = 2, binding = 1) uniform sampler samplers[];
@@ -61,17 +36,20 @@ layout(push_constant) uniform PushConstants {
     float padding;
 };
 
+
 layout(location = 0) in vec3 position;
 layout(location = 1) in vec4 color;
 layout(location = 2) in vec3 normal;
 layout(location = 3) in vec2 uv;
 
-layout(location = 0) out vec4 outNormal;
-layout(location = 1) out vec4 outAlbedo;
-layout(location = 2) out vec4 outMetallicRoughness;
-layout(location = 3) out vec4 outEmissive;
+layout(location = 0) out vec4 outPosition;
+layout(location = 1) out vec4 outNormal;
+layout(location = 2) out vec4 outAlbedo;
+layout(location = 3) out vec4 outMetallicRoughness;
+layout(location = 4) out vec4 outEmissive;
 
 void main() {
+    outPosition = vec4(position, 1.0);
     vec3 N = normalize(normal);
     vec3 normal_encoded = N * 0.5 + 0.5;
     outNormal = vec4(normal_encoded, 1.0);

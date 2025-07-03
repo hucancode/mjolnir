@@ -1,5 +1,6 @@
 package mjolnir
 
+import "core:math/linalg"
 import "core:log"
 import "geometry"
 import "resource"
@@ -87,6 +88,7 @@ renderer_shadow_init :: proc(
     polygonMode             = .FILL,
     cullMode                = {.BACK},
     frontFace               = .COUNTER_CLOCKWISE,
+    lineWidth               = 1.0,
     depthBiasEnable         = true,
     depthBiasConstantFactor = 1.25,
     depthBiasClamp          = 0.0,
@@ -266,7 +268,7 @@ renderer_shadow_begin :: proc(
 renderer_shadow_render :: proc(
   self: ^RendererShadow,
   render_input: RenderInput,
-  light: ^LightUniform,
+  light_data: LightData,
   shadow_target: RenderTarget,
   shadow_idx: u32, // index of the light in light array
   shadow_layer: u32, // for cube faces (0..5) or 0 for others
@@ -277,10 +279,16 @@ renderer_shadow_render :: proc(
     &frame.camera_uniform,
     shadow_idx * 6 + shadow_layer,
   )
-  camera_uniform.view = light.view
-  camera_uniform.projection = light.proj
-  // Draw all shadow-casting objects from the pre-batched render_input
-  // Only use batches that cast shadows (engine should filter these in render_input)
+  switch light in light_data {
+  case PointLightData:
+    camera_uniform.projection = light.proj
+    camera_uniform.view = light.views[shadow_layer]
+  case SpotLightData:
+    camera_uniform.projection = light.proj
+    camera_uniform.view = light.view
+  case DirectionalLightData:
+    camera_uniform.projection = light.proj
+  }
   current_pipeline: vk.Pipeline = 0
   offset_shadow := data_buffer_offset_of(
     &frame.camera_uniform,

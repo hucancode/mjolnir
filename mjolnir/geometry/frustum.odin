@@ -50,7 +50,7 @@ signed_distance_to_plane :: proc(
 // Assumes Frustum planes have normals pointing inwards.
 // Returns true if the AABB is (at least partially) inside the frustum, false if completely outside.
 frustum_test_aabb :: proc(
-  frustum: ^Frustum,
+  frustum: Frustum,
   aabb: Aabb,
 ) -> bool {
   extremes := [?]linalg.Vector3f32{

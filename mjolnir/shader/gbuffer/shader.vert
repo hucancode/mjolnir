@@ -14,7 +14,7 @@ layout(set = 0, binding = 0) uniform Uniforms {
     mat4 view;
     mat4 proj;
 };
-// set 1 (light uniforms), not available in vertex shader
+// set 1 (shadow uniforms), not available in vertex shader
 // set 2 (textures), not available in vertex shader
 // layout(set = 2, binding = 0) uniform texture2D textures[];
 // layout(set = 2, binding = 0) uniform sampler samplers[];
