@@ -409,7 +409,6 @@ renderer_gbuffer_render :: proc(
       }
     }
   }
-  log.debugf("Rendered %d meshes in G-buffer pass", rendered)
 }
 
 renderer_gbuffer_get_pipeline :: proc(

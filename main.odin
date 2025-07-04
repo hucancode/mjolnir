@@ -76,7 +76,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     }
   }
   if true {
-    log.info("spawning ground quad")
+    log.info("spawning ground quad and walls")
     // Ground node
     size: f32 = 15.0
     _, ground_node := spawn(
@@ -88,6 +88,54 @@ setup :: proc(engine: ^mjolnir.Engine) {
     )
     translate(&ground_node.transform, x = -0.5 * size, z = -0.5 * size)
     scale(&ground_node.transform, size)
+
+    // Left wall
+    _, left_wall := spawn(
+      &engine.scene,
+      MeshAttachment {
+        handle = ground_mesh_handle,
+        material = ground_mat_handle,
+      },
+    )
+    translate(&left_wall.transform, x = size * 0.5, y = 0, z = -0.5 * size)
+    rotate(&left_wall.transform, math.PI * 0.5, linalg.VECTOR3F32_Z_AXIS)
+    scale(&left_wall.transform, size)
+
+    // Right wall
+    _, right_wall := spawn(
+      &engine.scene,
+      MeshAttachment {
+        handle = ground_mesh_handle,
+        material = ground_mat_handle,
+      },
+    )
+    translate(&right_wall.transform, x = -size * 0.5, y = size * 1.0, z = -0.5 * size)
+    rotate(&right_wall.transform, -math.PI * 0.5, linalg.VECTOR3F32_Z_AXIS)
+    scale(&right_wall.transform, size)
+
+    // Back wall
+    _, back_wall := spawn(
+      &engine.scene,
+      MeshAttachment {
+        handle = ground_mesh_handle,
+        material = ground_mat_handle,
+      },
+    )
+    translate(&back_wall.transform, x = -0.5 * size, y = size * 1.0, z = -size * 0.5)
+    rotate(&back_wall.transform, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
+    scale(&back_wall.transform, size)
+
+    // // Ceiling
+    _, ceiling := spawn(
+      &engine.scene,
+      MeshAttachment {
+        handle = ground_mesh_handle,
+        material = ground_mat_handle,
+      },
+    )
+    translate(&ceiling.transform, x = -0.5 * size, y = size, z = 0.5 * size)
+    rotate(&ceiling.transform, -math.PI, linalg.VECTOR3F32_X_AXIS)
+    scale(&ceiling.transform, size)
   }
   if true {
     log.info("loading GLTF...")
