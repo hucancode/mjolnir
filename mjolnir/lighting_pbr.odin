@@ -14,21 +14,19 @@ BG_BLUE_GRAY :: [4]f32{0.0117, 0.0117, 0.0179, 1.0}
 BG_DARK_GRAY :: [4]f32{0.0117, 0.0117, 0.0117, 1.0}
 BG_ORANGE_GRAY :: [4]f32{0.0179, 0.0179, 0.0117, 1.0}
 
+// 128 byte push constant for G-buffer, PBR/IBL params are specialization constants
 PushConstant :: struct {
-  world:                    linalg.Matrix4f32,
-  albedo_index:             u32,
-  metallic_roughness_index: u32,
-  normal_index:             u32,
-  displacement_index:       u32,
-  emissive_index:           u32,
-  environment_index:        u32,
-  brdf_lut_index:           u32,
-  bone_matrix_offset:       u32,
-  metallic_value:           f32,
-  roughness_value:          f32,
-  emissive_value:           f32,
-  environment_max_lod:      f32,
-  ibl_intensity:            f32,
+  world:                    linalg.Matrix4f32, // 64 bytes
+  bone_matrix_offset:       u32,               // 4
+  albedo_index:             u32,               // 4
+  metallic_roughness_index: u32,               // 4
+  normal_index:             u32,               // 4
+  displacement_index:       u32,               // 4
+  emissive_index:           u32,               // 4
+  metallic_value:           f32,               // 4
+  roughness_value:          f32,               // 4
+  emissive_value:           f32,               // 4
+  padding:                  [3]u32,            // 4 (pad to 128)
 }
 
 ShaderFeatures :: enum {
@@ -64,21 +62,24 @@ RendererMain :: struct {
   ibl_intensity:            f32,
 }
 // Push constant struct for lighting pass (matches shader/lighting/shader.frag)
+// 128 byte push constant budget, 2 matrices max
 LightPushConstant :: struct {
-  light_view:          linalg.Matrix4f32,
-  light_proj:          linalg.Matrix4f32,
-  light_color:         [4]f32,
-  light_position:      [4]f32,
-  light_direction:     [4]f32,
-  camera_position:     [3]f32,
-  light_kind:          LightKind,
-  light_angle:         f32,
-  light_radius:        f32,
-  environment_index:   u32,
-  brdf_lut_index:      u32,
-  environment_max_lod: f32,
-  ibl_intensity:       f32,
+  light_view_proj:    linalg.Matrix4f32, // 64 bytes
+  light_color:        [3]f32,            // 12 bytes
+  light_angle:        f32,               // 4 bytes
+  light_position:     [3]f32,            // 12 bytes
+  light_radius:       f32,               // 4 bytes
+  light_direction:    [3]f32,            // 12 bytes
+  light_kind:         LightKind,         // 4 bytes
+  camera_position:    [3]f32,            // 12 bytes
+  shadow_map_id:      u32,               // 4 bytes
 }
+
+// Specialization constants for PBR/IBL textures (set at pipeline creation)
+// ENVIRONMENT_INDEX:   u32
+// BRDF_LUT_INDEX:      u32
+// ENVIRONMENT_MAX_LOD: f32
+// IBL_INTENSITY:       f32
 
 renderer_main_begin :: proc(
   self: ^RendererMain,
@@ -140,22 +141,18 @@ renderer_main_render :: proc(
   rendered_count := 0
   node_count := 0
   // TODO: use different shape for lights to reduce overdraw, e.g. a quad or sphere
-  for light_data in input {
+  for light_data, light_id in input {
     node_count += 1
     #partial switch light in light_data {
     case PointLightData:
       light_push := LightPushConstant {
-        light_view          = light.views[0],
-        light_proj          = light.proj,
-        light_color         = light.color,
-        light_position      = light.position,
-        light_kind          = LightKind.POINT,
-        light_radius        = light.radius,
-        camera_position     = camera_position,
-        environment_index   = self.environment_map.index,
-        brdf_lut_index      = self.brdf_lut.index,
-        environment_max_lod = self.environment_max_lod,
-        ibl_intensity       = self.ibl_intensity,
+        light_view_proj  = light.proj * light.views[0],
+        light_color      = light.color.xyz,
+        light_position   = light.position.xyz,
+        light_radius     = light.radius,
+        light_kind       = LightKind.POINT,
+        camera_position  = camera_position.xyz,
+        shadow_map_id    = u32(light_id),
       }
       vk.CmdPushConstants(
         command_buffer,
@@ -169,14 +166,12 @@ renderer_main_render :: proc(
       rendered_count += 1
     case DirectionalLightData:
       light_push := LightPushConstant {
-        light_color         = light.color,
-        light_direction     = light.direction,
-        light_kind          = LightKind.DIRECTIONAL,
-        camera_position     = camera_position,
-        environment_index   = self.environment_map.index,
-        brdf_lut_index      = self.brdf_lut.index,
-        environment_max_lod = self.environment_max_lod,
-        ibl_intensity       = self.ibl_intensity,
+        light_view_proj  = light.proj * light.view,
+        light_color      = light.color.xyz,
+        light_direction  = light.direction.xyz,
+        light_kind       = LightKind.DIRECTIONAL,
+        camera_position  = camera_position.xyz,
+        shadow_map_id    = u32(light_id),
       }
       vk.CmdPushConstants(
         command_buffer,
@@ -190,19 +185,15 @@ renderer_main_render :: proc(
       rendered_count += 1
     case SpotLightData:
       light_push := LightPushConstant {
-        light_view          = light.view,
-        light_proj          = light.proj,
-        light_color         = light.color,
-        light_position      = light.position,
-        light_direction     = light.direction,
-        light_kind          = LightKind.SPOT,
-        light_angle         = light.angle,
-        light_radius        = light.radius,
-        camera_position     = camera_position,
-        environment_index   = self.environment_map.index,
-        brdf_lut_index      = self.brdf_lut.index,
-        environment_max_lod = self.environment_max_lod,
-        ibl_intensity       = self.ibl_intensity,
+        light_view_proj  = light.proj * light.view,
+        light_color      = light.color.rgb,
+        light_angle      = light.angle,
+        light_position   = light.position.xyz,
+        light_radius     = light.radius,
+        light_direction  = light.direction.xyz,
+        light_kind       = LightKind.SPOT,
+        camera_position  = camera_position.xyz,
+        shadow_map_id    = u32(light_id),
       }
       vk.CmdPushConstants(
         command_buffer,

@@ -12,28 +12,27 @@ const uint SAMPLER_NEAREST_CLAMP = 0;
 const uint SAMPLER_LINEAR_CLAMP = 1;
 const uint SAMPLER_NEAREST_REPEAT = 2;
 const uint SAMPLER_LINEAR_REPEAT = 3;
-const uint MAX_LIGHTS = 10;
+const uint MAX_SHADOW_MAPS = 10;
 
-layout(set = 1, binding = 0) uniform sampler2D shadowMaps[MAX_LIGHTS];
-layout(set = 1, binding = 1) uniform samplerCube cubeShadowMaps[MAX_LIGHTS];
+layout(set = 1, binding = 0) uniform sampler2D shadowMaps[MAX_SHADOW_MAPS];
+layout(set = 1, binding = 1) uniform samplerCube cubeShadowMaps[MAX_SHADOW_MAPS];
 // textures and samplers set = 2
 layout(set = 2, binding = 0) uniform texture2D textures[];
 layout(set = 2, binding = 1) uniform sampler samplers[];
 
+// Push constant budget: 128 bytes
 layout(push_constant) uniform PushConstants {
-    mat4 world;
-    uint albedo_index;
-    uint metallic_roughness_index;
-    uint normal_index;
-    uint displacement_index;
-    uint emissive_index;
-    uint environment_index;
-    uint brdf_lut_index;
-    uint bone_matrix_offset;
-    float metallic_value;
-    float roughness_value;
-    float emissive_value;
-    float padding;
+    mat4 world;            // 64 bytes
+    uint bone_matrix_offset; // 4
+    uint albedo_index;     // 4
+    uint metallic_roughness_index; // 4
+    uint normal_index;     // 4
+    uint displacement_index; // 4
+    uint emissive_index;   // 4
+    float metallic_value;  // 4
+    float roughness_value; // 4
+    float emissive_value;  // 4
+    float padding[3];        // 12 (pad to 128)
 };
 
 

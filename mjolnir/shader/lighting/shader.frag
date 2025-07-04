@@ -4,11 +4,9 @@
 const uint MAX_SHADOW_MAPS = 10;
 const float PI = 3.14159265359;
 
-
 layout(location = 0) in vec2 v_uv;
 layout(location = 0) out vec4 outColor;
 
-const float AMBIENT_STRENGTH = 0.2;
 const int POINT_LIGHT = 0;
 const int DIRECTIONAL_LIGHT = 1;
 const int SPOT_LIGHT = 2;
@@ -24,20 +22,18 @@ layout(set = 0, binding = 6) uniform samplerCube cube_shadow_maps[MAX_SHADOW_MAP
 layout(set = 1, binding = 0) uniform texture2D textures[];
 layout(set = 1, binding = 1) uniform sampler samplers[];
 
+// We have a budget of 128 bytes for push constants
+// We can fit 2 matrices in here
 layout(push_constant) uniform LightPushConstant {
-    mat4 light_view;
-    mat4 light_proj;
-    vec4 light_color;
-    vec4 light_position;
-    vec4 light_direction;
-    vec3 camera_position;
-    uint light_kind;
-    float light_angle;
-    float light_radius;
-    uint environment_index;
-    uint brdf_lut_index;
-    float environment_max_lod;
-    float ibl_intensity;
+    mat4 light_view_proj; // 64 bytes
+    vec3 light_color;     // 12 bytes
+    float light_angle;    // 4 bytes
+    vec3 light_position;  // 12 bytes
+    float light_radius;   // 4 bytes
+    vec3 light_direction; // 12 bytes
+    uint light_kind;      // 4 bytes
+    vec3 camera_position; // 12 bytes
+    uint shadow_map_id;   // 4 bytes
 };
 
 // Convert a direction vector to equirectangular UV coordinates
@@ -56,7 +52,7 @@ float calculateShadow(vec3 fragPos, vec3 N) {
     // Point light shadow (light_kind == 0), Directional shadow (light_kind == 1)
     if (light_kind == DIRECTIONAL_LIGHT) {
         // Directional light shadow (existing code)
-        vec4 lightSpacePos = light_proj * light_view * vec4(fragPos, 1.0);
+        vec4 lightSpacePos = light_view_proj * vec4(fragPos, 1.0);
         vec3 shadowCoord = lightSpacePos.xyz / lightSpacePos.w;
         shadowCoord = shadowCoord * 0.5 + 0.5;
         if (shadowCoord.x < 0.0 || shadowCoord.x > 1.0 ||
@@ -64,14 +60,14 @@ float calculateShadow(vec3 fragPos, vec3 N) {
             shadowCoord.z < 0.0 || shadowCoord.z > 1.0) {
             return 1.0;
         }
-        float shadowDepth = texture(shadow_maps[0], shadowCoord.xy).r;
+        float shadowDepth = texture(shadow_maps[shadow_map_id], shadowCoord.xy).r;
         float bias = max(0.1 * (1.0 - dot(N, normalize(-light_direction.xyz))), 0.05);
         return (shadowCoord.z > shadowDepth + bias) ? 0.1 : 1.0;
     } else if (light_kind == POINT_LIGHT) {
         // Point light shadow using cubemap
         vec3 lightToFrag = fragPos - light_position.xyz;
         float currentDepth = length(lightToFrag);
-        float shadowMapDepth = texture(cube_shadow_maps[0], lightToFrag).r;
+        float shadowMapDepth = texture(cube_shadow_maps[shadow_map_id], lightToFrag).r;
         float far_plane = light_radius;
         shadowMapDepth *= far_plane; // Remap [0,1] to [0,far_plane]
         float bias = 0.05;
@@ -115,12 +111,8 @@ void main() {
     vec2 mr = texture(gbuffer_metallic_roughness, v_uv).rg;
     float metallic = clamp(mr.r, 0.0, 1.0);
     float roughness = clamp(mr.g, 0.0, 1.0);
-
-    // Camera position from push constant
     vec3 V = normalize(camera_position - position);
-
     float shadowFactor = calculateShadow(position, normal);
-
     // Only direct lighting, no ambient/IBL/emissive
     vec3 direct = brdf(normal, V, albedo, roughness, metallic, position) * shadowFactor;
     outColor = vec4(direct, 1.0);

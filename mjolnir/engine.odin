@@ -69,6 +69,7 @@ SpotLightData :: struct {
 }
 
 DirectionalLightData :: struct {
+  view:      linalg.Matrix4f32,
   proj:      linalg.Matrix4f32,
   world:     linalg.Matrix4f32,
   color:     linalg.Vector4f32,
@@ -766,6 +767,7 @@ render :: proc(self: ^Engine) -> vk.Result {
       ortho_size: f32 = 20.0
       data.direction = entry.item.transform.world_matrix * linalg.Vector4f32{0, 0, -1, 0}
       data.proj = linalg.matrix_ortho3d(-ortho_size, ortho_size, -ortho_size, ortho_size, 0.1, 9999.0)
+      data.view = linalg.matrix4_look_at(linalg.Vector3f32{}, data.direction.xyz, linalg.VECTOR3F32_Y_AXIS)
       data.world = entry.item.transform.world_matrix
       data.color = light.color
       append(&lights, data)

@@ -4,7 +4,6 @@
 const uint MAX_SHADOW_MAPS = 10;
 const float PI = 3.14159265359;
 
-
 layout(location = 0) in vec2 v_uv;
 layout(location = 0) out vec4 outColor;
 
@@ -49,14 +48,12 @@ void main() {
     float metallic = clamp(mr.r, 0.0, 1.0);
     float roughness = clamp(mr.g, 0.0, 1.0);
     vec3 emissive = texture(gbuffer_emissive, v_uv).rgb;
-
     // Camera position from push constant
     vec3 V = normalize(camera_position - position);
     vec3 R = reflect(-V, normal);
     float NdotV = max(dot(normal, V), 0.0);
-
     // IBL using bindless textures
-    vec3 ibl = vec3(0.0);
+    vec3 ambient = vec3(0);
     if (environment_max_lod > 0.0 && ibl_intensity > 0.0) {
         vec2 uvN = dirToEquirectUV(normal);
         float diffuseLod = min(6.0, environment_max_lod);
@@ -69,15 +66,12 @@ void main() {
         vec3 f_metal_brdf_ibl = f_metal_fresnel_ibl * prefilteredColor;
         vec3 f_dielectric_fresnel_ibl = vec3(0.04) * brdfSample.x + brdfSample.y;
         vec3 f_dielectric_brdf_ibl = mix(diffuseIBL, prefilteredColor * f_dielectric_fresnel_ibl, f_dielectric_fresnel_ibl);
-        ibl = mix(f_dielectric_brdf_ibl, f_metal_brdf_ibl, metallic);
+        ambient = mix(f_dielectric_brdf_ibl, f_metal_brdf_ibl, metallic);
     }
-
     // Fresnel effect for edge highlighting
     float fresnel_strength = mix(metallic, 0.5 * roughness, 0.5);
     float fresnel = 1.0 - pow(1.0 - NdotV, fresnel_strength);
     vec3 fresnelColor = (albedo + emissive) * fresnel * fresnel_strength;
-
-    vec3 ambient = ibl;
     vec3 final = albedo * ambient * AMBIENT_STRENGTH
         + fresnelColor
         + emissive;

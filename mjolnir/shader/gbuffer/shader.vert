@@ -24,18 +24,7 @@ layout(set = 3, binding = 0) readonly buffer BoneMatrices {
 
 layout(push_constant) uniform PushConstants {
     mat4 world;
-    uint albedo_index;
-    uint metallic_roughness_index;
-    uint normal_index;
-    uint displacement_index;
-    uint emissive_index;
-    uint environment_index;
-    uint brdf_lut_index;
     uint bone_matrix_offset;
-    float metallic_value;
-    float roughness_value;
-    float emissive_value;
-    float padding;
 };
 
 layout(location = 0) out vec3 outPosition;
