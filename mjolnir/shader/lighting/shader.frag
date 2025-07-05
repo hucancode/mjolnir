@@ -70,9 +70,8 @@ float calculateShadow(vec3 fragPos, vec3 N) {
         float currentDepth = length(lightToFrag);
         float shadowMapDepth = texture(cube_shadow_maps[shadow_map_id], lightToFrag).r;
         shadowMapDepth = linearizeDepth(shadowMapDepth, 0.01, light_radius);
-        float bias = max(0.05 * (1.0 - dot(N, normalize(lightToFrag))), 0.01);
-        bias = 0.05;
-        return (currentDepth - bias > shadowMapDepth) ? 0.1 : 1.0;
+        float bias = max(0.5 * (1.0 - dot(N, normalize(lightToFrag))), 0.01);
+        return 1.0 - smoothstep(bias, bias*2, currentDepth - shadowMapDepth);
     }
     return 1.0;
 }
@@ -112,6 +111,7 @@ void main() {
     float roughness = clamp(mr.g, 0.0, 1.0);
     vec3 V = normalize(camera_position - position);
     float shadowFactor = calculateShadow(position, normal);
+    // shadowFactor = 1.0;
     // Only direct lighting, no ambient/IBL/emissive
     vec3 direct = brdf(normal, V, albedo, roughness, metallic, position) * shadowFactor;
     outColor = vec4(direct, 1.0);
