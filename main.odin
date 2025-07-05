@@ -213,13 +213,13 @@ setup :: proc(engine: ^mjolnir.Engine) {
     translate(&cube_node.transform, 0, 0.3, 0)
     scale(&cube_node.transform, 0.1)
   }
-  spawn(
-    &engine.scene,
-    DirectionalLightAttachment {
-      color = {0.3, 0.3, 0.3, 1.0},
-      cast_shadow = true,
-    },
-  )
+  // spawn(
+  //   &engine.scene,
+  //   DirectionalLightAttachment {
+  //     color = {0.3, 0.3, 0.3, 1.0},
+  //     cast_shadow = true,
+  //   },
+  // )
 
   if false {
     // effect_add_bloom(&engine.postprocess, 0.8, 0.5, 16.0)

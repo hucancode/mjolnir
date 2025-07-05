@@ -179,7 +179,7 @@ renderer_shadow_init :: proc(
   for &frame in self.frames {
     frame.camera_uniform = create_host_visible_buffer(
       CameraUniform,
-      (6 * MAX_LIGHTS),
+      (6 * MAX_SHADOW_MAPS),
       {.UNIFORM_BUFFER},
     ) or_return
     vk.AllocateDescriptorSets(

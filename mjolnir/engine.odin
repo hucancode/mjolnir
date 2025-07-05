@@ -842,7 +842,7 @@ render :: proc(self: ^Engine) -> vk.Result {
       // Render 6 faces for point light shadow cubemap
       cube_shadow := &self.frames[g_frame_index].cube_shadow_maps[i]
       for face in 0 ..< 6 {
-        frustum := geometry.make_frustum(light.proj * light.views[i])
+        frustum := geometry.make_frustum(light.proj * light.views[face])
         shadow_render_input := generate_render_input(self, frustum)
         shadow_target: RenderTarget
         shadow_target.depth = cube_shadow.face_views[face]
@@ -931,10 +931,8 @@ render :: proc(self: ^Engine) -> vk.Result {
     {.LATE_FRAGMENT_TESTS},
     {.FRAGMENT_SHADER},
     {},
-    0,
-    nil,
-    0,
-    nil,
+    0, nil,
+    0, nil,
     u32(len(final_barriers)),
     raw_data(final_barriers),
   )

@@ -44,6 +44,7 @@ vec2 dirToEquirectUV(vec3 dir) {
 }
 
 float linearizeDepth(float depth, float near, float far) {
+    // Converts depth from [0,1] (texture) to [near, far]
     float z = depth * 2.0 - 1.0;
     return (2.0 * near * far) / (far + near - z * (far - near));
 }
@@ -68,11 +69,9 @@ float calculateShadow(vec3 fragPos, vec3 N) {
         vec3 lightToFrag = fragPos - light_position.xyz;
         float currentDepth = length(lightToFrag);
         float shadowMapDepth = texture(cube_shadow_maps[shadow_map_id], lightToFrag).r;
-        float far_plane = light_radius;
-        shadowMapDepth *= far_plane; // Remap [0,1] to [0,far_plane]
-        float bias = 0.05;
-        // Optionally, add bias based on angle between normal and light direction
-        // float bias = max(0.05 * (1.0 - dot(N, normalize(lightToFrag))), 0.01);
+        shadowMapDepth = linearizeDepth(shadowMapDepth, 0.01, light_radius);
+        float bias = max(0.05 * (1.0 - dot(N, normalize(lightToFrag))), 0.01);
+        bias = 0.05;
         return (currentDepth - bias > shadowMapDepth) ? 0.1 : 1.0;
     }
     return 1.0;

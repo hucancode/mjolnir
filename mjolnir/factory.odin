@@ -81,13 +81,13 @@ factory_init :: proc() -> vk.Result {
     {
       binding = 0,
       descriptorType = .COMBINED_IMAGE_SAMPLER,
-      descriptorCount = MAX_LIGHTS,
+      descriptorCount = MAX_SHADOW_MAPS,
       stageFlags = {.FRAGMENT},
     },
     {
       binding = 1,
       descriptorType = .COMBINED_IMAGE_SAMPLER,
-      descriptorCount = MAX_LIGHTS,
+      descriptorCount = MAX_SHADOW_MAPS,
       stageFlags = {.FRAGMENT},
     },
   }
