@@ -50,9 +50,7 @@ float linearizeDepth(float depth, float near, float far) {
 }
 
 float calculateShadow(vec3 fragPos, vec3 N) {
-    // Point light shadow (light_kind == 0), Directional shadow (light_kind == 1)
     if (light_kind == DIRECTIONAL_LIGHT) {
-        // Directional light shadow (existing code)
         vec4 lightSpacePos = light_view_proj * vec4(fragPos, 1.0);
         vec3 shadowCoord = lightSpacePos.xyz / lightSpacePos.w;
         shadowCoord = shadowCoord * 0.5 + 0.5;
@@ -65,13 +63,24 @@ float calculateShadow(vec3 fragPos, vec3 N) {
         float bias = max(0.1 * (1.0 - dot(N, normalize(-light_direction.xyz))), 0.05);
         return (shadowCoord.z > shadowDepth + bias) ? 0.1 : 1.0;
     } else if (light_kind == POINT_LIGHT) {
-        // Point light shadow using cubemap
         vec3 lightToFrag = fragPos - light_position.xyz;
         float currentDepth = length(lightToFrag);
         float shadowMapDepth = texture(cube_shadow_maps[shadow_map_id], lightToFrag).r;
         shadowMapDepth = linearizeDepth(shadowMapDepth, 0.01, light_radius);
         float bias = max(0.5 * (1.0 - dot(N, normalize(lightToFrag))), 0.01);
         return 1.0 - smoothstep(bias, bias*2, currentDepth - shadowMapDepth);
+    } else if (light_kind == SPOT_LIGHT) {
+        vec4 lightSpacePos = light_view_proj * vec4(fragPos, 1.0);
+        vec3 shadowCoord = lightSpacePos.xyz / lightSpacePos.w;
+        shadowCoord = shadowCoord * 0.5 + 0.5;
+        if (shadowCoord.x < 0.0 || shadowCoord.x > 1.0 ||
+            shadowCoord.y < 0.0 || shadowCoord.y > 1.0 ||
+            shadowCoord.z < 0.0 || shadowCoord.z > 1.0) {
+            return 1.0;
+        }
+        float shadowDepth = texture(shadow_maps[shadow_map_id], shadowCoord.xy).r;
+        float bias = max(0.1 * (1.0 - dot(N, normalize(light_position.xyz - fragPos))), 0.05);
+        return (shadowCoord.z > shadowDepth + bias) ? 0.1 : 1.0;
     }
     return 1.0;
 }
@@ -80,14 +89,27 @@ vec3 brdf(vec3 N, vec3 V, vec3 albedo, float roughness, float metallic, vec3 fra
     vec3 F0 = mix(vec3(0.04), albedo, metallic);
     vec3 Lo = vec3(0.0);
     // Only one light for now (deferred pass is usually per-light or with a light buffer)
-    vec3 L = light_kind == 1 ? normalize(-light_direction.xyz) : normalize(light_position.xyz - fragPos);
+    vec3 L = light_kind == DIRECTIONAL_LIGHT ? normalize(-light_direction.xyz) : normalize(light_position.xyz - fragPos);
     vec3 H = normalize(V + L);
-    float distance = light_kind == 1 ? 1.0 : length(light_position.xyz - fragPos);
+    float distance = light_kind == DIRECTIONAL_LIGHT ? 1.0 : length(light_position.xyz - fragPos);
     float attenuation = light_radius;
-    if (light_kind != 1) {
+    if (light_kind != DIRECTIONAL_LIGHT) {
         float norm_dist = distance / max(0.01, light_radius);
         attenuation *= 1.0 - clamp(norm_dist * norm_dist, 0.0, 1.0);
     }
+    
+    // Spot light cone attenuation
+    if (light_kind == SPOT_LIGHT) {
+        vec3 lightToFrag = normalize(fragPos - light_position.xyz);
+        float cosTheta = dot(lightToFrag, normalize(light_direction.xyz));
+        float cosOuterCone = cos(light_angle);
+        float cosInnerCone = cos(light_angle * 0.7); // Inner cone is 70% of outer cone
+        
+        // Smooth falloff from inner to outer cone
+        float spotEffect = smoothstep(cosOuterCone, cosInnerCone, cosTheta);
+        attenuation *= spotEffect;
+    }
+    
     float NdotL = max(dot(N, L), 0.0);
     // Cook-Torrance BRDF
     float NDF = pow(roughness, 4.0) / (PI * pow((dot(N, H) * dot(N, H)) * (pow(roughness, 4.0) - 1.0) + 1.0, 2.0));

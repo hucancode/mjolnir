@@ -862,6 +862,27 @@ render :: proc(self: ^Engine) -> vk.Result {
         )
         renderer_shadow_end(command_buffer)
       }
+    case DirectionalLightData:
+      frustum := geometry.make_frustum(light.proj * light.view)
+      shadow_render_input := generate_render_input(self, frustum)
+      shadow_map_texture := &self.frames[g_frame_index].shadow_maps[i]
+      shadow_target: RenderTarget
+      shadow_target.depth = shadow_map_texture.view
+      shadow_target.extent = {
+        width  = shadow_map_texture.width,
+        height = shadow_map_texture.height,
+      }
+      renderer_shadow_begin(shadow_target, command_buffer)
+      renderer_shadow_render(
+        &self.shadow,
+        shadow_render_input,
+        node,
+        shadow_target,
+        u32(i),
+        0,
+        command_buffer,
+      )
+      renderer_shadow_end(command_buffer)
     case SpotLightData:
       frustum := geometry.make_frustum(light.proj * light.view)
       shadow_render_input := generate_render_input(self, frustum)
