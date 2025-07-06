@@ -543,9 +543,9 @@ renderer_main_init :: proc(
   vk.UpdateDescriptorSets(g_device, len(writes), raw_data(writes[:]), 0, nil)
 
   // Initialize light volume meshes
-  self.sphere_mesh, _, _ = create_mesh(geometry.make_sphere())
+  self.sphere_mesh, _, _ = create_mesh(geometry.make_sphere(segments = 128, rings = 128))
   self.cone_mesh, _, _ = create_mesh(
-    geometry.make_cone(height = 1, radius = 1),
+    geometry.make_cone(segments = 128, height = 1, radius = 1),
   )
   self.directional_triangle_mesh, _, _ = create_mesh(
     geometry.make_fullscreen_triangle(),
