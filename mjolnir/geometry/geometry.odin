@@ -339,14 +339,14 @@ make_cone :: proc(
   for i in 0 ..< segments {
     next := 2 + ((i + 1) % (segments + 1))
     p := ret.indices[idx:]
-    p[0], p[1], p[2] = 0, next, 2 + i
+    p[0], p[1], p[2] = 0, 2 + i, next
     idx += 3
   }
   // Indices (base)
   for i in 0 ..< segments {
     next := 2 + ((i + 1) % (segments + 1))
     p := ret.indices[idx:]
-    p[0], p[1], p[2] = 1, 2 + i, next
+    p[0], p[1], p[2] = 1, next, 2 + i
     idx += 3
   }
   ret.aabb = aabb_from_vertices(ret.vertices)
@@ -362,7 +362,7 @@ make_fullscreen_triangle :: proc(
 ) {
   ret.vertices = make([]Vertex, 3)
   ret.indices = make([]u32, 3)
-  
+
   // Full-screen triangle vertices in NDC space (clip coordinates)
   // These coordinates cover the entire screen when used directly
   ret.vertices[0] = Vertex {
@@ -374,7 +374,7 @@ make_fullscreen_triangle :: proc(
   ret.vertices[1] = Vertex {
     position = {3.0, -1.0, 0.0},  // Bottom-right (extends beyond screen)
     normal   = {0.0, 0.0, 1.0},
-    color    = color, 
+    color    = color,
     uv       = {2.0, 0.0},
   }
   ret.vertices[2] = Vertex {
@@ -383,12 +383,12 @@ make_fullscreen_triangle :: proc(
     color    = color,
     uv       = {0.0, 2.0},
   }
-  
+
   // Simple triangle indices
   ret.indices[0] = 0
-  ret.indices[1] = 1  
+  ret.indices[1] = 1
   ret.indices[2] = 2
-  
+
   ret.aabb = aabb_from_vertices(ret.vertices)
   return
 }

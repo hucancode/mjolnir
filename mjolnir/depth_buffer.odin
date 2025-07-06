@@ -88,8 +88,10 @@ renderer_depth_prepass_begin :: proc(
   }
   vk.CmdBeginRenderingKHR(command_buffer, &render_info)
   viewport := vk.Viewport {
+    x        = 0,
+    y        = f32(render_target.extent.height),
     width    = f32(render_target.extent.width),
-    height   = f32(render_target.extent.height),
+    height   = -f32(render_target.extent.height),
     minDepth = 0.0,
     maxDepth = 1.0,
   }
@@ -273,7 +275,7 @@ renderer_depth_prepass_build_pipeline :: proc(
     sType                   = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
     polygonMode             = .FILL,
     cullMode                = {.BACK},
-    frontFace               = .CLOCKWISE,
+    frontFace               = .COUNTER_CLOCKWISE,
     lineWidth               = 1.0,
     depthBiasEnable         = true,
     depthBiasConstantFactor = 0.1,
@@ -288,10 +290,10 @@ renderer_depth_prepass_build_pipeline :: proc(
     sType = .PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
   }
   depth_stencil := vk.PipelineDepthStencilStateCreateInfo {
-    sType                 = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
-    depthTestEnable       = true,
-    depthWriteEnable      = true,
-    depthCompareOp        = .LESS,
+    sType            = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+    depthTestEnable  = true,
+    depthWriteEnable = true,
+    depthCompareOp   = .LESS,
   }
   dynamic_rendering := vk.PipelineRenderingCreateInfoKHR {
     sType                 = .PIPELINE_RENDERING_CREATE_INFO_KHR,

@@ -92,16 +92,24 @@ renderer_main_begin :: proc(
     storeOp = .STORE,
     clearValue = {color = {float32 = BG_BLUE_GRAY}},
   }
+  depth_attachment := vk.RenderingAttachmentInfoKHR {
+    sType       = .RENDERING_ATTACHMENT_INFO_KHR,
+    imageView   = target.depth,
+    imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+    loadOp      = .LOAD,
+    storeOp     = .DONT_CARE,
+  }
   render_info := vk.RenderingInfoKHR {
     sType = .RENDERING_INFO_KHR,
     renderArea = {extent = target.extent},
     layerCount = 1,
     colorAttachmentCount = 1,
     pColorAttachments = &color_attachment,
+    pDepthAttachment = &depth_attachment,
   }
   vk.CmdBeginRenderingKHR(command_buffer, &render_info)
   viewport := vk.Viewport {
-    x        = 0.0,
+    x        = 0,
     y        = f32(target.extent.height),
     width    = f32(target.extent.width),
     height   = -f32(target.extent.height),
@@ -349,8 +357,8 @@ renderer_main_init :: proc(
   rasterizer := vk.PipelineRasterizationStateCreateInfo {
     sType       = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
     polygonMode = .FILL,
-    cullMode    = {.BACK},
-    frontFace   = .CLOCKWISE,
+    cullMode    = {.FRONT},
+    frontFace   = .COUNTER_CLOCKWISE,
     lineWidth   = 1.0,
   }
   multisampling := vk.PipelineMultisampleStateCreateInfo {
@@ -373,13 +381,16 @@ renderer_main_init :: proc(
     pAttachments    = &color_blend_attachment,
   }
   depth_stencil := vk.PipelineDepthStencilStateCreateInfo {
-    sType = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+    sType           = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+    depthTestEnable = true,
+    depthCompareOp  = .GREATER_OR_EQUAL,
   }
   color_formats := [?]vk.Format{color_format}
   rendering_info := vk.PipelineRenderingCreateInfo {
     sType                   = .PIPELINE_RENDERING_CREATE_INFO,
     colorAttachmentCount    = len(color_formats),
     pColorAttachmentFormats = raw_data(color_formats[:]),
+    depthAttachmentFormat   = depth_format,
   }
   shader_stages := [?]vk.PipelineShaderStageCreateInfo {
     {
@@ -424,6 +435,11 @@ renderer_main_init :: proc(
     create_hdr_texture_from_path_with_mips(
       "assets/Cannon_Exterior.hdr",
     ) or_return
+  self.environment_max_lod = 8.0 // default fallback
+  if environment_map != nil {
+    self.environment_max_lod =
+      calculate_mip_levels(environment_map.width, environment_map.height) - 1.0
+  }
   brdf_lut: ^ImageBuffer
   self.brdf_lut, brdf_lut = create_texture_from_data(
     #load("assets/lut_ggx.png"),
@@ -543,9 +559,11 @@ renderer_main_init :: proc(
   vk.UpdateDescriptorSets(g_device, len(writes), raw_data(writes[:]), 0, nil)
 
   // Initialize light volume meshes
-  self.sphere_mesh, _, _ = create_mesh(geometry.make_sphere(segments = 128, rings = 128))
+  self.sphere_mesh, _, _ = create_mesh(
+    geometry.make_sphere(segments = 128, rings = 128),
+  )
   self.cone_mesh, _, _ = create_mesh(
-    geometry.make_cone(segments = 128, height = 1, radius = 1),
+    geometry.make_cone(segments = 512, height = 1, radius = 1),
   )
   self.directional_triangle_mesh, _, _ = create_mesh(
     geometry.make_fullscreen_triangle(),

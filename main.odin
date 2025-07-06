@@ -206,7 +206,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     } else {
       light_handles[i], light = spawn(
         &engine.scene,
-        PointLightAttachment{color = color, radius = 10, cast_shadow = true},
+        PointLightAttachment{color = color, radius = 5, cast_shadow = true},
       )
     }
     translate(&light.transform, 0, 3, -1)

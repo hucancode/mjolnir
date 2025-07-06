@@ -4,12 +4,17 @@
 const uint MAX_SHADOW_MAPS = 10;
 const float PI = 3.14159265359;
 
-layout(location = 0) in vec2 v_uv;
 layout(location = 0) out vec4 outColor;
 
 const int POINT_LIGHT = 0;
 const int DIRECTIONAL_LIGHT = 1;
 const int SPOT_LIGHT = 2;
+
+layout(set = 0, binding = 0) uniform CameraUniform {
+    mat4 view;
+    mat4 projection;
+    vec2 viewport_size;
+} camera;
 
 layout(set = 1, binding = 0) uniform texture2D textures[];
 layout(set = 1, binding = 1) uniform sampler samplers[];
@@ -23,7 +28,6 @@ layout(set = 2, binding = 5) uniform sampler2D shadow_maps[MAX_SHADOW_MAPS];
 layout(set = 2, binding = 6) uniform samplerCube cube_shadow_maps[MAX_SHADOW_MAPS];
 
 // We have a budget of 128 bytes for push constants
-// We can fit 2 matrices in here
 layout(push_constant) uniform LightPushConstant {
     mat4 light_view_proj; // 64 bytes
     vec3 light_color;     // 12 bytes
@@ -65,12 +69,13 @@ float calculateShadow(vec3 fragPos, vec3 N) {
     } else if (light_kind == POINT_LIGHT) {
         vec3 lightToFrag = fragPos - light_position.xyz;
         float currentDepth = length(lightToFrag);
-        float shadowMapDepth = texture(cube_shadow_maps[shadow_map_id], lightToFrag).r;
-        shadowMapDepth = linearizeDepth(shadowMapDepth, 0.01, light_radius);
+        float shadowDepth = texture(cube_shadow_maps[shadow_map_id], lightToFrag).r;
+        shadowDepth = linearizeDepth(shadowDepth, 0.01, light_radius);
         float bias = max(0.5 * (1.0 - dot(N, normalize(lightToFrag))), 0.01);
-        return 1.0 - smoothstep(bias, bias*2, currentDepth - shadowMapDepth);
+        return 1.0 - smoothstep(bias, bias*2, currentDepth - shadowDepth);
     } else if (light_kind == SPOT_LIGHT) {
         vec4 lightSpacePos = light_view_proj * vec4(fragPos, 1.0);
+        float currentDepth = lightSpacePos.z;
         vec3 shadowCoord = lightSpacePos.xyz / lightSpacePos.w;
         shadowCoord = shadowCoord * 0.5 + 0.5;
         if (shadowCoord.x < 0.0 || shadowCoord.x > 1.0 ||
@@ -79,8 +84,10 @@ float calculateShadow(vec3 fragPos, vec3 N) {
             return 1.0;
         }
         float shadowDepth = texture(shadow_maps[shadow_map_id], shadowCoord.xy).r;
-        float bias = max(0.1 * (1.0 - dot(N, normalize(light_position.xyz - fragPos))), 0.05);
-        return (shadowCoord.z > shadowDepth + bias) ? 0.1 : 1.0;
+        // return shadowDepth * shadowDepth;
+        shadowDepth = linearizeDepth(shadowDepth, 0.01, light_radius);
+        float bias = max(0.5 * (1.0 - dot(N, normalize(lightSpacePos.xyz))), 0.01);
+        return 1.0 - smoothstep(bias, bias*2, currentDepth - shadowDepth);
     }
     return 1.0;
 }
@@ -88,7 +95,7 @@ float calculateShadow(vec3 fragPos, vec3 N) {
 vec3 brdf(vec3 N, vec3 V, vec3 albedo, float roughness, float metallic, vec3 fragPos) {
     vec3 F0 = mix(vec3(0.04), albedo, metallic);
     vec3 Lo = vec3(0.0);
-    // Only one light for now (deferred pass is usually per-light or with a light buffer)
+    // Light direction and distance
     vec3 L = light_kind == DIRECTIONAL_LIGHT ? normalize(-light_direction.xyz) : normalize(light_position.xyz - fragPos);
     vec3 H = normalize(V + L);
     float distance = light_kind == DIRECTIONAL_LIGHT ? 1.0 : length(light_position.xyz - fragPos);
@@ -97,16 +104,14 @@ vec3 brdf(vec3 N, vec3 V, vec3 albedo, float roughness, float metallic, vec3 fra
         float norm_dist = distance / max(0.01, light_radius);
         attenuation *= 1.0 - clamp(norm_dist * norm_dist, 0.0, 1.0);
     }
-
     // Spot light cone attenuation
     if (light_kind == SPOT_LIGHT) {
         vec3 lightToFrag = normalize(fragPos - light_position.xyz);
         float cosTheta = dot(lightToFrag, normalize(light_direction.xyz));
         float cosOuterCone = cos(light_angle);
         float cosInnerCone = cos(light_angle * 0.7); // Inner cone is 70% of outer cone
-
         // Smooth falloff from inner to outer cone
-        float spotEffect = smoothstep(cosOuterCone, cosInnerCone, cosTheta);
+        float spotEffect = smoothstep(cosInnerCone, cosOuterCone, cosTheta);
         attenuation *= spotEffect;
     }
 
@@ -125,12 +130,14 @@ vec3 brdf(vec3 N, vec3 V, vec3 albedo, float roughness, float metallic, vec3 fra
 }
 
 void main() {
-    vec3 position = texture(gbuffer_position, v_uv).xyz;
-    vec3 normal = texture(gbuffer_normal, v_uv).xyz * 2.0 - 1.0;
-    vec3 albedo = texture(gbuffer_albedo, v_uv).rgb;
-    vec2 mr = texture(gbuffer_metallic_roughness, v_uv).rg;
+    vec2 uv = (gl_FragCoord.xy / camera.viewport_size);
+    vec3 position = texture(gbuffer_position, uv).xyz;
+    vec3 normal = texture(gbuffer_normal, uv).xyz * 2.0 - 1.0;
+    vec3 albedo = texture(gbuffer_albedo, uv).rgb;
+    vec2 mr = texture(gbuffer_metallic_roughness, uv).rg;
     float metallic = clamp(mr.r, 0.0, 1.0);
     float roughness = clamp(mr.g, 0.0, 1.0);
+    roughness = max(roughness, 0.05);
     vec3 V = normalize(camera_position - position);
     float shadowFactor = calculateShadow(position, normal);
     // Only direct lighting, no ambient/IBL/emissive

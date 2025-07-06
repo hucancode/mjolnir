@@ -46,10 +46,8 @@ renderer_ambient_begin :: proc(
   }
   vk.CmdBeginRenderingKHR(command_buffer, &render_info)
   viewport := vk.Viewport {
-    x        = 0.0,
-    y        = f32(target.extent.height),
     width    = f32(target.extent.width),
-    height   = -f32(target.extent.height),
+    height   = f32(target.extent.height),
     minDepth = 0.0,
     maxDepth = 1.0,
   }
@@ -204,8 +202,6 @@ renderer_ambient_init :: proc(
   rasterizer := vk.PipelineRasterizationStateCreateInfo {
     sType       = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
     polygonMode = .FILL,
-    cullMode    = {.BACK},
-    frontFace   = .COUNTER_CLOCKWISE,
     lineWidth   = 1.0,
   }
   multisampling := vk.PipelineMultisampleStateCreateInfo {

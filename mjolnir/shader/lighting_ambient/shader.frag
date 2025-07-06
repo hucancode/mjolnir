@@ -7,7 +7,7 @@ const float PI = 3.14159265359;
 layout(location = 0) in vec2 v_uv;
 layout(location = 0) out vec4 outColor;
 
-const float AMBIENT_STRENGTH = 0.2;
+const float AMBIENT_STRENGTH = 0.5;
 
 layout(set = 0, binding = 0) uniform sampler2D gbuffer_position;
 layout(set = 0, binding = 1) uniform sampler2D gbuffer_normal;
@@ -41,13 +41,14 @@ float linearizeDepth(float depth, float near, float far) {
 }
 
 void main() {
-    vec3 position = texture(gbuffer_position, v_uv).xyz;
-    vec3 normal = texture(gbuffer_normal, v_uv).xyz * 2.0 - 1.0;
-    vec3 albedo = texture(gbuffer_albedo, v_uv).rgb;
-    vec2 mr = texture(gbuffer_metallic_roughness, v_uv).rg;
+    vec2 uv = vec2(v_uv.x, v_uv.y);
+    vec3 position = texture(gbuffer_position, uv).xyz;
+    vec3 normal = texture(gbuffer_normal, uv).xyz * 2.0 - 1.0;
+    vec3 albedo = texture(gbuffer_albedo, uv).rgb;
+    vec2 mr = texture(gbuffer_metallic_roughness, uv).rg;
     float metallic = clamp(mr.r, 0.0, 1.0);
     float roughness = clamp(mr.g, 0.0, 1.0);
-    vec3 emissive = texture(gbuffer_emissive, v_uv).rgb;
+    vec3 emissive = texture(gbuffer_emissive, uv).rgb;
     // Camera position from push constant
     vec3 V = normalize(camera_position - position);
     vec3 R = reflect(-V, normal);
@@ -75,7 +76,5 @@ void main() {
     vec3 final = albedo * ambient * AMBIENT_STRENGTH
         + fresnelColor
         + emissive;
-
     outColor = vec4(final, 1.0);
 }
-

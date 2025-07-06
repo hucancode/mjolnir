@@ -1,7 +1,6 @@
 #version 450
 
 layout(location = 0) in vec3 a_position; // Vertex position for light volume geometry
-layout(location = 0) out vec2 v_uv;
 
 // Camera uniform buffer (set 1, binding 0)
 layout(set = 0, binding = 0) uniform CameraUniform {
@@ -51,6 +50,4 @@ void main() {
         // Transform world position to clip space using camera view-projection
         gl_Position = camera.projection * camera.view * vec4(world_position, 1.0);
     }
-    v_uv = (gl_Position.xy / gl_Position.w) * 0.5 + 0.5;
 }
-

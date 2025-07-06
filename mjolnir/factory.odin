@@ -619,7 +619,6 @@ create_image_buffer_with_mips :: proc(
   ret: vk.Result,
 ) {
   mip_levels := u32(calculate_mip_levels(width, height))
-
   staging := create_host_visible_buffer(
     u8,
     int(size),
@@ -677,9 +676,6 @@ create_hdr_texture_from_path_with_mips :: proc(
   }
   defer stbi.image_free(float_pixels)
   num_floats := int(width * height * actual_channels)
-
-
-
   texture^ = create_image_buffer_with_mips(
     float_pixels,
     size_of(f32) * vk.DeviceSize(num_floats),

@@ -85,6 +85,7 @@ LightData :: union {
 CameraUniform :: struct {
   view:       linalg.Matrix4f32,
   projection: linalg.Matrix4f32,
+  viewport_size: [2]f32,
 }
 
 // Batch key for grouping objects by material features
@@ -730,6 +731,10 @@ render :: proc(self: ^Engine) -> vk.Result {
   camera_uniform.projection = geometry.calculate_projection_matrix(
     self.scene.camera,
   )
+  camera_uniform.viewport_size = {
+    f32(self.swapchain.extent.width),
+    f32(self.swapchain.extent.height),
+  }
   frustum := geometry.make_frustum(
     camera_uniform.projection * camera_uniform.view,
   )
@@ -780,6 +785,7 @@ render :: proc(self: ^Engine) -> vk.Result {
       data.view = linalg.matrix4_look_at(data.position.xyz, data.position.xyz + data.direction.xyz, linalg.VECTOR3F32_Y_AXIS)
       data.radius = light.radius
       data.angle = light.angle
+      data.color = light.color
       append(&lights, data)
       if light.cast_shadow && len(shadow_casters) < MAX_SHADOW_MAPS {
         append(&shadow_casters, data)

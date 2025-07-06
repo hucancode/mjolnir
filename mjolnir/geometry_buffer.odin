@@ -71,7 +71,7 @@ renderer_gbuffer_init :: proc(
     sType       = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
     polygonMode = .FILL,
     cullMode    = {.BACK},
-    frontFace   = .CLOCKWISE,
+    frontFace   = .COUNTER_CLOCKWISE,
     lineWidth   = 1.0,
   }
   multisampling := vk.PipelineMultisampleStateCreateInfo {
@@ -85,11 +85,11 @@ renderer_gbuffer_init :: proc(
     depthCompareOp   = .LESS_OR_EQUAL,
   }
   color_blend_attachments := [?]vk.PipelineColorBlendAttachmentState {
-    { colorWriteMask = {.R, .G, .B, .A} }, // position
-    { colorWriteMask = {.R, .G, .B, .A} }, // normal
-    { colorWriteMask = {.R, .G, .B, .A} }, // albedo
-    { colorWriteMask = {.R, .G, .B, .A} }, // metallic/roughness
-    { colorWriteMask = {.R, .G, .B, .A} }, // emissive
+    {colorWriteMask = {.R, .G, .B, .A}}, // position
+    {colorWriteMask = {.R, .G, .B, .A}}, // normal
+    {colorWriteMask = {.R, .G, .B, .A}}, // albedo
+    {colorWriteMask = {.R, .G, .B, .A}}, // metallic/roughness
+    {colorWriteMask = {.R, .G, .B, .A}}, // emissive
   }
   color_blending := vk.PipelineColorBlendStateCreateInfo {
     sType           = .PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
@@ -280,8 +280,10 @@ renderer_gbuffer_begin :: proc(
   }
   vk.CmdBeginRenderingKHR(command_buffer, &render_info)
   viewport := vk.Viewport {
+    x        = 0,
+    y        = f32(render_target.extent.height),
     width    = f32(render_target.extent.width),
-    height   = f32(render_target.extent.height),
+    height   = -f32(render_target.extent.height),
     minDepth = 0.0,
     maxDepth = 1.0,
   }
