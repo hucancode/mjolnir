@@ -10,7 +10,7 @@ import "mjolnir/resource"
 import glfw "vendor:glfw"
 import mu "vendor:microui"
 
-LIGHT_COUNT :: 3
+LIGHT_COUNT :: 10
 light_handles: [LIGHT_COUNT]mjolnir.Handle
 light_cube_handles: [LIGHT_COUNT]mjolnir.Handle
 ground_mat_handle: mjolnir.Handle
@@ -135,7 +135,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     rotate(&back_wall.transform, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
     scale(&back_wall.transform, size)
 
-    // // Ceiling
+    // Ceiling
     _, ceiling := spawn(
       &engine.scene,
       MeshAttachment {
@@ -197,7 +197,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
         &engine.scene,
         SpotLightAttachment {
           color = color,
-          angle = math.PI * 0.2,
+          angle = math.PI * 0.3,
           radius = 5,
           cast_shadow = true,
         },
@@ -222,25 +222,25 @@ setup :: proc(engine: ^mjolnir.Engine) {
     translate(&cube_node.transform, 0, 0.3, 0)
     scale(&cube_node.transform, 0.1)
   }
-  // spawn(
-  //   &engine.scene,
-  //   DirectionalLightAttachment {
-  //     color = {0.3, 0.3, 0.3, 1.0},
-  //     cast_shadow = true,
-  //   },
-  // )
+  spawn(
+    &engine.scene,
+    DirectionalLightAttachment {
+      color = {0.3, 0.3, 0.3, 1.0},
+      cast_shadow = true,
+    },
+  )
 
   if false {
     // effect_add_bloom(&engine.postprocess, 0.8, 0.5, 16.0)
     // Create a bright white ball to test bloom effect
     bright_material_handle, _, _ := create_material(emissive_value = 30.0)
     _, bright_ball_node := spawn(
-    &engine.scene,
-    MeshAttachment {
-      handle      = sphere_mesh_handle,
-      material    = bright_material_handle,
-      cast_shadow = false, // Emissive objects don't need shadows
-    },
+      &engine.scene,
+      MeshAttachment {
+        handle      = sphere_mesh_handle,
+        material    = bright_material_handle,
+        cast_shadow = false, // Emissive objects don't need shadows
+      },
     )
     translate(&bright_ball_node.transform, x = 1.0) // Position it above the ground
     scale(&bright_ball_node.transform, 0.2) // Make it a reasonable size

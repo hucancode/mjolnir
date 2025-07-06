@@ -1,5 +1,6 @@
 #version 450
 
+const float PI = 3.14159265359;
 layout(location = 0) in vec3 a_position; // Vertex position for light volume geometry
 
 // Camera uniform buffer (set 1, binding 0)
@@ -35,15 +36,14 @@ void main() {
             world_position = light_position + a_position * light_radius;
         } else if (light_kind == SPOT_LIGHT) {
             // Standard cone mesh: height=1 (Y+), base radius=1 (XZ)
-            float tana = tan(light_angle * 0.5);
+            float tana = tan(min(light_angle*0.5, PI*0.45));
             float y_scale = light_radius;
-            float xz_scale = light_radius * tana;
+            float xz_scale = light_radius * tana * 2;
             vec3 scaled_pos = vec3(a_position.x * xz_scale, (a_position.y - 0.5) * y_scale, a_position.z * xz_scale);
             // Orient cone along light_direction
-            vec3 forward = normalize(light_direction);
-            vec3 up = abs(forward.y) < 0.9 ? vec3(0, 1, 0) : vec3(1, 0, 0);
-            vec3 right = normalize(cross(forward, up));
-            up = cross(right, forward);
+            vec3 up = normalize(-light_direction);
+            vec3 forward = abs(up.y) < 0.9 ? normalize(cross(vec3(0, 1, 0), up)) : vec3(1, 0, 0);
+            vec3 right = cross(up, forward);
             mat3 orientation = mat3(right, up, forward);
             world_position = light_position + orientation * scaled_pos;
         }

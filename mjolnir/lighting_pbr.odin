@@ -563,7 +563,7 @@ renderer_main_init :: proc(
     geometry.make_sphere(segments = 128, rings = 128),
   )
   self.cone_mesh, _, _ = create_mesh(
-    geometry.make_cone(segments = 512, height = 1, radius = 1),
+    geometry.make_cone(segments = 128, height = 1, radius = 0.5),
   )
   self.directional_triangle_mesh, _, _ = create_mesh(
     geometry.make_fullscreen_triangle(),

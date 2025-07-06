@@ -108,10 +108,7 @@ vec3 brdf(vec3 N, vec3 V, vec3 albedo, float roughness, float metallic, vec3 fra
     if (light_kind == SPOT_LIGHT) {
         vec3 lightToFrag = normalize(fragPos - light_position.xyz);
         float cosTheta = dot(lightToFrag, normalize(light_direction.xyz));
-        float cosOuterCone = cos(light_angle);
-        float cosInnerCone = cos(light_angle * 0.7); // Inner cone is 70% of outer cone
-        // Smooth falloff from inner to outer cone
-        float spotEffect = smoothstep(cosInnerCone, cosOuterCone, cosTheta);
+        float spotEffect = smoothstep(0.9, 1.1, abs(cosTheta));
         attenuation *= spotEffect;
     }
 

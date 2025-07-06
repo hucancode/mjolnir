@@ -83,8 +83,8 @@ LightData :: union {
 }
 
 CameraUniform :: struct {
-  view:       linalg.Matrix4f32,
-  projection: linalg.Matrix4f32,
+  view:          linalg.Matrix4f32,
+  projection:    linalg.Matrix4f32,
   viewport_size: [2]f32,
 }
 
@@ -779,7 +779,7 @@ render :: proc(self: ^Engine) -> vk.Result {
     case SpotLightAttachment:
       data: SpotLightData
       data.position = entry.item.transform.world_matrix * linalg.Vector4f32{0, 0, 0, 1}
-      data.direction = entry.item.transform.world_matrix * linalg.Vector4f32{0, 0, -1, 0}
+      data.direction = entry.item.transform.world_matrix * linalg.Vector4f32{0, -1, 0, 0}
       data.proj = linalg.matrix4_perspective(light.angle, 1.0, 0.01, light.radius)
       data.world = entry.item.transform.world_matrix
       data.view = linalg.matrix4_look_at(data.position.xyz, data.position.xyz + data.direction.xyz, linalg.VECTOR3F32_Y_AXIS)
