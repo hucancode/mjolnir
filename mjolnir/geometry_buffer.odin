@@ -18,9 +18,9 @@ renderer_gbuffer_init :: proc(
   depth_format: vk.Format = .D32_SFLOAT
   set_layouts := [?]vk.DescriptorSetLayout {
     g_camera_descriptor_set_layout, // set = 0 (camera uniforms)
-    g_lights_descriptor_set_layout, // set = 1 (light uniforms)
-    g_textures_set_layout, // set = 1 (textures)
-    g_bindless_bone_buffer_set_layout, // set = 2 (bone matrices)
+    g_shadow_descriptor_set_layout, // set = 1 (shadow maps)
+    g_textures_set_layout, // set = 2 (textures)
+    g_bindless_bone_buffer_set_layout, // set = 3 (bone matrices)
   }
   push_constant_range := vk.PushConstantRange {
     stageFlags = {.VERTEX, .FRAGMENT},
@@ -72,6 +72,7 @@ renderer_gbuffer_init :: proc(
     polygonMode = .FILL,
     cullMode    = {.BACK},
     frontFace   = .COUNTER_CLOCKWISE,
+    lineWidth   = 1.0,
   }
   multisampling := vk.PipelineMultisampleStateCreateInfo {
     sType                = .PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
@@ -83,13 +84,17 @@ renderer_gbuffer_init :: proc(
     depthWriteEnable = false,
     depthCompareOp   = .LESS_OR_EQUAL,
   }
-  color_blend_attachment := vk.PipelineColorBlendAttachmentState {
-    colorWriteMask = {.R, .G, .B, .A},
+  color_blend_attachments := [?]vk.PipelineColorBlendAttachmentState {
+    {colorWriteMask = {.R, .G, .B, .A}}, // position
+    {colorWriteMask = {.R, .G, .B, .A}}, // normal
+    {colorWriteMask = {.R, .G, .B, .A}}, // albedo
+    {colorWriteMask = {.R, .G, .B, .A}}, // metallic/roughness
+    {colorWriteMask = {.R, .G, .B, .A}}, // emissive
   }
   color_blending := vk.PipelineColorBlendStateCreateInfo {
     sType           = .PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
-    attachmentCount = 1,
-    pAttachments    = &color_blend_attachment,
+    attachmentCount = len(color_blend_attachments),
+    pAttachments    = raw_data(color_blend_attachments[:]),
   }
   dynamic_states := [?]vk.DynamicState{.VIEWPORT, .SCISSOR}
   dynamic_state := vk.PipelineDynamicStateCreateInfo {
@@ -98,6 +103,7 @@ renderer_gbuffer_init :: proc(
     pDynamicStates    = raw_data(dynamic_states[:]),
   }
   color_formats := [?]vk.Format {
+    .R32G32B32A32_SFLOAT, // position
     .R8G8B8A8_UNORM, // normal
     .R8G8B8A8_UNORM, // albedo
     .R8G8B8A8_UNORM, // metallic/roughness
@@ -210,7 +216,14 @@ renderer_gbuffer_begin :: proc(
   render_target: ^RenderTarget,
   command_buffer: vk.CommandBuffer,
 ) {
-
+  position_attachment := vk.RenderingAttachmentInfoKHR {
+    sType = .RENDERING_ATTACHMENT_INFO_KHR,
+    imageView = render_target.position,
+    imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
+    loadOp = .CLEAR,
+    storeOp = .STORE,
+    clearValue = {color = {float32 = {0.0, 0.0, 0.0, 0.0}}},
+  }
   normal_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
     imageView = render_target.normal,
@@ -251,6 +264,7 @@ renderer_gbuffer_begin :: proc(
     storeOp     = .STORE,
   }
   color_attachments := [?]vk.RenderingAttachmentInfoKHR {
+    position_attachment,
     normal_attachment,
     albedo_attachment,
     metallic_roughness_attachment,
@@ -266,7 +280,7 @@ renderer_gbuffer_begin :: proc(
   }
   vk.CmdBeginRenderingKHR(command_buffer, &render_info)
   viewport := vk.Viewport {
-    x        = 0.0,
+    x        = 0,
     y        = f32(render_target.extent.height),
     width    = f32(render_target.extent.width),
     height   = -f32(render_target.extent.height),
@@ -293,20 +307,25 @@ renderer_gbuffer_render :: proc(
   render_target: ^RenderTarget,
   command_buffer: vk.CommandBuffer,
 ) {
-  // Bind global descriptor sets (assume these are set up by the engine)
+  descriptor_sets := [?]vk.DescriptorSet {
+    g_camera_descriptor_sets[g_frame_index],
+    g_shadow_descriptor_sets[g_frame_index],
+    g_textures_descriptor_set,
+    g_bindless_bone_buffer_descriptor_set,
+  }
   vk.CmdBindDescriptorSets(
     command_buffer,
     .GRAPHICS,
     self.pipeline_layout,
     0,
-    1,
-    &g_camera_descriptor_sets[g_frame_index],
+    len(descriptor_sets),
+    raw_data(descriptor_sets[:]),
     0,
     nil,
   )
+  rendered := 0
   current_pipeline: vk.Pipeline = 0
   for _, batch_group in render_input.batches {
-    // Each batch_group is [dynamic]BatchData for a given BatchKey
     sample_material := resource.get(
       g_materials,
       batch_group[0].material_handle,
@@ -316,22 +335,6 @@ renderer_gbuffer_render :: proc(
       vk.CmdBindPipeline(command_buffer, .GRAPHICS, pipeline)
       current_pipeline = pipeline
     }
-    descriptor_sets := [?]vk.DescriptorSet {
-      g_camera_descriptor_sets[g_frame_index],
-      g_lights_descriptor_sets[g_frame_index],
-      g_textures_descriptor_set,
-      g_bindless_bone_buffer_descriptor_set,
-    }
-    vk.CmdBindDescriptorSets(
-      command_buffer,
-      .GRAPHICS,
-      self.pipeline_layout,
-      0,
-      len(descriptor_sets),
-      raw_data(descriptor_sets[:]),
-      0,
-      nil,
-    )
     for batch_data in batch_group {
       material := resource.get(
         g_materials,
@@ -340,7 +343,9 @@ renderer_gbuffer_render :: proc(
       for node in batch_data.nodes {
         mesh_attachment := node.attachment.(MeshAttachment)
         mesh := resource.get(g_meshes, mesh_attachment.handle) or_continue
-        texture_indices: MaterialTextures = {
+        // DEBUG: Use a constant color for albedo to test G-buffer -> lighting pass
+        push_constants := PushConstant {
+          world                    = node.transform.world_matrix,
           albedo_index             = min(
             MAX_TEXTURES - 1,
             material.albedo.index,
@@ -361,18 +366,14 @@ renderer_gbuffer_render :: proc(
             MAX_TEXTURES - 1,
             material.emissive.index,
           ),
+          metallic_value           = material.metallic_value,
+          roughness_value          = material.roughness_value,
+          emissive_value           = material.emissive_value,
         }
         if skinning, has_skinning := mesh_attachment.skinning.?; has_skinning {
-          texture_indices.bone_matrix_offset =
+          push_constants.bone_matrix_offset =
             skinning.bone_matrix_offset +
             g_frame_index * g_bone_matrix_slab.capacity
-        }
-        push_constants := PushConstant {
-          world           = node.transform.world_matrix,
-          textures        = texture_indices,
-          metallic_value  = material.metallic_value,
-          roughness_value = material.roughness_value,
-          emissive_value  = material.emissive_value,
         }
         vk.CmdPushConstants(
           command_buffer,
@@ -406,6 +407,7 @@ renderer_gbuffer_render :: proc(
           .UINT32,
         )
         vk.CmdDrawIndexed(command_buffer, mesh.indices_len, 1, 0, 0, 0)
+        rendered += 1
       }
     }
   }

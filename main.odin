@@ -10,7 +10,7 @@ import "mjolnir/resource"
 import glfw "vendor:glfw"
 import mu "vendor:microui"
 
-LIGHT_COUNT :: 3
+LIGHT_COUNT :: 10
 light_handles: [LIGHT_COUNT]mjolnir.Handle
 light_cube_handles: [LIGHT_COUNT]mjolnir.Handle
 ground_mat_handle: mjolnir.Handle
@@ -76,7 +76,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     }
   }
   if true {
-    log.info("spawning ground quad")
+    log.info("spawning ground quad and walls")
     // Ground node
     size: f32 = 15.0
     _, ground_node := spawn(
@@ -88,6 +88,64 @@ setup :: proc(engine: ^mjolnir.Engine) {
     )
     translate(&ground_node.transform, x = -0.5 * size, z = -0.5 * size)
     scale(&ground_node.transform, size)
+
+    // Left wall
+    _, left_wall := spawn(
+      &engine.scene,
+      MeshAttachment {
+        handle = ground_mesh_handle,
+        material = ground_mat_handle,
+      },
+    )
+    translate(&left_wall.transform, x = size * 0.5, y = 0, z = -0.5 * size)
+    rotate(&left_wall.transform, math.PI * 0.5, linalg.VECTOR3F32_Z_AXIS)
+    scale(&left_wall.transform, size)
+
+    // Right wall
+    _, right_wall := spawn(
+      &engine.scene,
+      MeshAttachment {
+        handle = ground_mesh_handle,
+        material = ground_mat_handle,
+      },
+    )
+    translate(
+      &right_wall.transform,
+      x = -size * 0.5,
+      y = size * 1.0,
+      z = -0.5 * size,
+    )
+    rotate(&right_wall.transform, -math.PI * 0.5, linalg.VECTOR3F32_Z_AXIS)
+    scale(&right_wall.transform, size)
+
+    // Back wall
+    _, back_wall := spawn(
+      &engine.scene,
+      MeshAttachment {
+        handle = ground_mesh_handle,
+        material = ground_mat_handle,
+      },
+    )
+    translate(
+      &back_wall.transform,
+      x = -0.5 * size,
+      y = size * 1.0,
+      z = -size * 0.5,
+    )
+    rotate(&back_wall.transform, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
+    scale(&back_wall.transform, size)
+
+    // Ceiling
+    _, ceiling := spawn(
+      &engine.scene,
+      MeshAttachment {
+        handle = ground_mesh_handle,
+        material = ground_mat_handle,
+      },
+    )
+    translate(&ceiling.transform, x = -0.5 * size, y = size, z = 0.5 * size)
+    rotate(&ceiling.transform, -math.PI, linalg.VECTOR3F32_X_AXIS)
+    scale(&ceiling.transform, size)
   }
   if true {
     log.info("loading GLTF...")
@@ -135,24 +193,23 @@ setup :: proc(engine: ^mjolnir.Engine) {
     should_make_spot_light = i % 2 != 0
     // should_make_spot_light = true
     if should_make_spot_light {
-      spot_angle := math.PI / 1.2
       light_handles[i], light = spawn(
         &engine.scene,
         SpotLightAttachment {
           color = color,
-          angle = f32(spot_angle),
-          radius = 10,
+          angle = math.PI * 0.3,
+          radius = 5,
           cast_shadow = true,
         },
       )
+      rotate(&light.transform, math.PI * 0.2, linalg.VECTOR3F32_X_AXIS)
     } else {
       light_handles[i], light = spawn(
         &engine.scene,
-        PointLightAttachment{color = color, radius = 10, cast_shadow = true},
+        PointLightAttachment{color = color, radius = 5, cast_shadow = true},
       )
     }
     translate(&light.transform, 0, 3, -1)
-    rotate(&light.transform, math.PI * 0.45, linalg.VECTOR3F32_X_AXIS)
     cube_node: ^Node
     light_cube_handles[i], cube_node = spawn_child(
       &engine.scene,
@@ -278,7 +335,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     geometry.scale(&forcefield_visual.transform, 0.2)
   }
   // effect_add_tonemap(&engine.postprocess, 1.5, 1.3)
-  effect_add_fog(&engine.postprocess, {0.2, 0.5, 0.9}, 0.02, 50.0, 200.0)
+  // effect_add_fog(&engine.postprocess, {0.2, 0.5, 0.9}, 0.02, 50.0, 200.0)
   // effect_add_crosshatch(&engine.postprocess, {1280, 720}) // Add cross-hatch effect
   log.info("setup complete")
 }

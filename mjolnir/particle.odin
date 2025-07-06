@@ -476,6 +476,7 @@ renderer_particle_init :: proc(self: ^RendererParticle) -> vk.Result {
     depthClampEnable        = false,
     rasterizerDiscardEnable = false,
     polygonMode             = .FILL,
+    lineWidth               = 1.0,
   }
   color_blend_attachment := vk.PipelineColorBlendAttachmentState {
     blendEnable         = true,
@@ -534,6 +535,12 @@ renderer_particle_init :: proc(self: ^RendererParticle) -> vk.Result {
     pColorAttachmentFormats = raw_data(color_formats[:]),
     depthAttachmentFormat   = .D32_SFLOAT,
   }
+  depth_stencil := vk.PipelineDepthStencilStateCreateInfo {
+    sType            = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+    depthTestEnable  = true,
+    depthWriteEnable = false,
+    depthCompareOp   = .LESS_OR_EQUAL,
+  }
   pipeline_info := vk.GraphicsPipelineCreateInfo {
     sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
     stageCount          = len(shader_stages),
@@ -547,12 +554,7 @@ renderer_particle_init :: proc(self: ^RendererParticle) -> vk.Result {
     pDynamicState       = &dynamic_state,
     layout              = self.render_pipeline_layout,
     pNext               = &rendering_info,
-    pDepthStencilState  = &{
-      sType = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
-      depthTestEnable = true,
-      depthWriteEnable = true,
-      depthCompareOp = .LESS_OR_EQUAL,
-    },
+    pDepthStencilState  = &depth_stencil,
   }
   vk.CreateGraphicsPipelines(
     g_device,
@@ -569,7 +571,6 @@ renderer_particle_begin :: proc(
   self: ^RendererParticle,
   command_buffer: vk.CommandBuffer,
   render_target: RenderTarget,
-  render_input: RenderInput,
 ) {
   // Memory barrier to ensure compute results are visible before rendering
   barrier := vk.BufferMemoryBarrier {
@@ -586,12 +587,9 @@ renderer_particle_begin :: proc(
     {.COMPUTE_SHADER},
     {.VERTEX_INPUT},
     {},
-    0,
-    nil, // memoryBarrierCount, pMemoryBarriers
-    1,
-    &barrier, // bufferMemoryBarrierCount, pBufferMemoryBarriers
-    0,
-    nil, // imageMemoryBarrierCount, pImageMemoryBarriers
+    0, nil, // memoryBarrierCount, pMemoryBarriers
+    1, &barrier, // bufferMemoryBarrierCount, pBufferMemoryBarriers
+    0, nil, // imageMemoryBarrierCount, pImageMemoryBarriers
   )
 
   color_attachment := vk.RenderingAttachmentInfoKHR {
@@ -600,7 +598,6 @@ renderer_particle_begin :: proc(
     imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
     loadOp = .LOAD, // preserve previous contents
     storeOp = .STORE,
-    clearValue = {color = {float32 = {0, 0, 0, 0}}},
   }
   depth_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
@@ -608,7 +605,6 @@ renderer_particle_begin :: proc(
     imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
     loadOp = .LOAD,
     storeOp = .STORE,
-    clearValue = {depthStencil = {1.0, 0}},
   }
   render_info := vk.RenderingInfoKHR {
     sType = .RENDERING_INFO_KHR,

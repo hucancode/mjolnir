@@ -3,11 +3,11 @@ package mjolnir
 import "animation"
 import "base:runtime"
 import "core:c"
-import "core:slice"
 import "core:fmt"
 import "core:log"
 import "core:math"
 import linalg "core:math/linalg"
+import "core:slice"
 import "core:strings"
 import "core:time"
 import "core:unicode/utf8"
@@ -48,27 +48,44 @@ MouseDragProc :: #type proc(engine: ^Engine, delta, offset: linalg.Vector2f64)
 MouseScrollProc :: #type proc(engine: ^Engine, offset: linalg.Vector2f64)
 MouseMoveProc :: #type proc(engine: ^Engine, pos, delta: linalg.Vector2f64)
 
-LightUniform :: struct {
-  view:       linalg.Matrix4f32, // 64 bytes
-  proj:       linalg.Matrix4f32, // 64 bytes
-  color:      linalg.Vector4f32, // 16 bytes
-  position:   linalg.Vector4f32, // 16 bytes
-  direction:  linalg.Vector4f32, // 16 bytes
-  kind:       LightKind, // 4 bytes
-  angle:      f32, // 4 bytes (spot light angle)
-  radius:     f32, // 4 bytes (point/spot light radius)
-  has_shadow: b32, // 4 bytes
+PointLightData :: struct {
+  views:    [6]linalg.Matrix4f32,
+  proj:     linalg.Matrix4f32,
+  world:    linalg.Matrix4f32,
+  color:    linalg.Vector4f32,
+  position: linalg.Vector4f32,
+  radius:   f32,
+}
+
+SpotLightData :: struct {
+  view:      linalg.Matrix4f32,
+  proj:      linalg.Matrix4f32,
+  world:     linalg.Matrix4f32,
+  color:     linalg.Vector4f32,
+  position:  linalg.Vector4f32,
+  direction: linalg.Vector4f32,
+  radius:    f32,
+  angle:     f32,
+}
+
+DirectionalLightData :: struct {
+  view:      linalg.Matrix4f32,
+  proj:      linalg.Matrix4f32,
+  world:     linalg.Matrix4f32,
+  color:     linalg.Vector4f32,
+  direction: linalg.Vector4f32,
+}
+
+LightData :: union {
+  PointLightData,
+  SpotLightData,
+  DirectionalLightData,
 }
 
 CameraUniform :: struct {
-  view:       linalg.Matrix4f32,
-  projection: linalg.Matrix4f32,
-}
-
-LightArrayUniform :: struct {
-  lights:      [MAX_LIGHTS]LightUniform,
-  light_count: u32,
-  padding:     [3]u32,
+  view:          linalg.Matrix4f32,
+  projection:    linalg.Matrix4f32,
+  viewport_size: [2]f32,
 }
 
 // Batch key for grouping objects by material features
@@ -83,12 +100,6 @@ BatchData :: struct {
   nodes:           [dynamic]^Node,
 }
 
-BatchingContext :: struct {
-  engine:  ^Engine,
-  frustum: geometry.Frustum,
-  batches: map[BatchKey][dynamic]BatchData,
-}
-
 // RenderInput groups render batches and other per-frame data for the renderer.
 RenderInput :: struct {
   batches: map[BatchKey][dynamic]BatchData,
@@ -97,6 +108,7 @@ RenderInput :: struct {
 // RenderTarget describes the output textures for a render pass.
 RenderTarget :: struct {
   final:    vk.ImageView,
+  position: vk.ImageView,
   normal:   vk.ImageView,
   albedo:   vk.ImageView,
   metallic: vk.ImageView,
@@ -104,31 +116,58 @@ RenderTarget :: struct {
   depth:    vk.ImageView,
   extra1:   vk.ImageView,
   extra2:   vk.ImageView,
-  width:    u32,
-  height:   u32,
   extent:   vk.Extent2D,
 }
 
-
 // Generate render input for a given frustum (camera or light)
-generate_render_input_for_frustum :: proc(
+generate_render_input :: proc(
   self: ^Engine,
   frustum: geometry.Frustum,
-) -> RenderInput {
-  batching_ctx := BatchingContext {
-    engine  = self,
-    frustum = frustum,
-    batches = make(map[BatchKey][dynamic]BatchData),
-  }
-  populate_render_batches(&batching_ctx)
-  return RenderInput{batches = batching_ctx.batches}
-}
-
-generate_render_input :: proc(self: ^Engine) -> RenderInput {
-  return generate_render_input_for_frustum(
-    self,
-    geometry.camera_make_frustum(self.scene.camera),
+) -> (
+  ret: RenderInput,
+) {
+  ret.batches = make(
+    map[BatchKey][dynamic]BatchData,
+    allocator = context.temp_allocator,
   )
+  for &entry in self.scene.nodes.entries do if entry.active {
+    node := &entry.item
+    #partial switch data in node.attachment {
+    case MeshAttachment:
+      mesh := resource.get(g_meshes, data.handle)
+      if mesh == nil do continue
+      material := resource.get(g_materials, data.material)
+      if material == nil do continue
+      world_aabb := geometry.aabb_transform(mesh.aabb, node.transform.world_matrix)
+      if !geometry.frustum_test_aabb(frustum, world_aabb) do continue
+      batch_key := BatchKey {
+        features      = material.features,
+        material_type = material.type,
+      }
+      batch_group, group_found := &ret.batches[batch_key]
+      if !group_found {
+        ret.batches[batch_key] = make([dynamic]BatchData, allocator = context.temp_allocator)
+        batch_group = &ret.batches[batch_key]
+      }
+      batch_data: ^BatchData
+      for &batch in batch_group {
+        if batch.material_handle == data.material {
+          batch_data = &batch
+          break
+        }
+      }
+      if batch_data == nil {
+        new_batch := BatchData {
+          material_handle = data.material,
+          nodes           = make([dynamic]^Node, allocator = context.temp_allocator),
+        }
+        append(batch_group, new_batch)
+        batch_data = &batch_group[len(batch_group) - 1]
+      }
+      append(&batch_data.nodes, node)
+    }
+  }
+  return
 }
 
 InputState :: struct {
@@ -148,17 +187,16 @@ LightKind :: enum u32 {
 
 FrameData :: struct {
   camera_uniform:             DataBuffer(CameraUniform),
-  light_uniform:              DataBuffer(LightArrayUniform),
   shadow_maps:                [MAX_SHADOW_MAPS]ImageBuffer,
   cube_shadow_maps:           [MAX_SHADOW_MAPS]CubeImageBuffer,
   // G-buffer images
+  gbuffer_position:           ImageBuffer,
   gbuffer_normal:             ImageBuffer,
   gbuffer_albedo:             ImageBuffer,
   gbuffer_metallic_roughness: ImageBuffer,
   gbuffer_emissive:           ImageBuffer,
   depth_buffer:               ImageBuffer,
   final_image:                ImageBuffer,
-  // Add more per-frame resources as needed (gbuffer, particles, etc.)
 }
 
 Engine :: struct {
@@ -180,6 +218,7 @@ Engine :: struct {
   render_error_count:    u32,
   ui:                    RendererUI,
   main:                  RendererMain,
+  ambient:               RendererAmbient,
   shadow:                RendererShadow,
   particle:              RendererParticle,
   postprocess:           RendererPostProcess,
@@ -236,70 +275,61 @@ init :: proc(
   self.last_update_timestamp = self.start_timestamp
   scene_init(&self.scene)
   swapchain_init(&self.swapchain, self.window) or_return
+  DESCRIPTOR_PER_FRAME :: 3
+  writes: [MAX_FRAMES_IN_FLIGHT * DESCRIPTOR_PER_FRAME]vk.WriteDescriptorSet
+  shadow_image_infos: [MAX_FRAMES_IN_FLIGHT *
+  MAX_SHADOW_MAPS]vk.DescriptorImageInfo
+  cube_shadow_image_infos: [MAX_FRAMES_IN_FLIGHT *
+  MAX_SHADOW_MAPS]vk.DescriptorImageInfo
   for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
     frame_data_init(&self.frames[i], &self.swapchain)
-    shadow_image_infos: [MAX_SHADOW_MAPS]vk.DescriptorImageInfo
+    log.debugf("write frame descriptor sets for frame %d", i)
     for j in 0 ..< MAX_SHADOW_MAPS {
-      shadow_image_infos[j] = {
+      shadow_image_infos[i * MAX_SHADOW_MAPS + j] = {
         sampler     = g_linear_clamp_sampler,
         imageView   = self.frames[i].shadow_maps[j].view,
         imageLayout = .SHADER_READ_ONLY_OPTIMAL,
       }
     }
-    cube_shadow_image_infos: [MAX_SHADOW_MAPS]vk.DescriptorImageInfo
     for j in 0 ..< MAX_SHADOW_MAPS {
-      cube_shadow_image_infos[j] = {
+      cube_shadow_image_infos[i * MAX_SHADOW_MAPS + j] = {
         sampler     = g_linear_clamp_sampler,
         imageView   = self.frames[i].cube_shadow_maps[j].view,
         imageLayout = .SHADER_READ_ONLY_OPTIMAL,
       }
     }
-    writes := [?]vk.WriteDescriptorSet {
-      {
-        sType = .WRITE_DESCRIPTOR_SET,
-        dstSet = g_camera_descriptor_sets[i],
-        dstBinding = 0,
-        dstArrayElement = 0,
-        descriptorCount = 1,
-        descriptorType = .UNIFORM_BUFFER,
-        pBufferInfo = &{
-          buffer = self.frames[i].camera_uniform.buffer,
-          range = size_of(CameraUniform),
-        },
-      },
-      {
-        sType = .WRITE_DESCRIPTOR_SET,
-        dstSet = g_lights_descriptor_sets[i],
-        dstBinding = 0,
-        dstArrayElement = 0,
-        descriptorCount = 1,
-        descriptorType = .UNIFORM_BUFFER,
-        pBufferInfo = &{
-          buffer = self.frames[i].light_uniform.buffer,
-          range = size_of(LightArrayUniform),
-        },
-      },
-      {
-        sType = .WRITE_DESCRIPTOR_SET,
-        dstSet = g_lights_descriptor_sets[i],
-        dstBinding = 1,
-        dstArrayElement = 0,
-        descriptorCount = len(shadow_image_infos),
-        descriptorType = .COMBINED_IMAGE_SAMPLER,
-        pImageInfo = raw_data(shadow_image_infos[:]),
-      },
-      {
-        sType = .WRITE_DESCRIPTOR_SET,
-        dstSet = g_lights_descriptor_sets[i],
-        dstBinding = 2,
-        dstArrayElement = 0,
-        descriptorCount = len(cube_shadow_image_infos),
-        descriptorType = .COMBINED_IMAGE_SAMPLER,
-        pImageInfo = raw_data(cube_shadow_image_infos[:]),
+    writes[i * DESCRIPTOR_PER_FRAME + 0] = {
+      sType           = .WRITE_DESCRIPTOR_SET,
+      dstSet          = g_camera_descriptor_sets[i],
+      dstBinding      = 0,
+      descriptorCount = 1,
+      descriptorType  = .UNIFORM_BUFFER,
+      pBufferInfo     = &{
+        buffer = self.frames[i].camera_uniform.buffer,
+        range = size_of(CameraUniform),
       },
     }
-    vk.UpdateDescriptorSets(g_device, len(writes), raw_data(writes[:]), 0, nil)
+    writes[i * DESCRIPTOR_PER_FRAME + 1] = {
+      sType           = .WRITE_DESCRIPTOR_SET,
+      dstSet          = g_shadow_descriptor_sets[i],
+      dstBinding      = 0,
+      descriptorCount = MAX_SHADOW_MAPS,
+      descriptorType  = .COMBINED_IMAGE_SAMPLER,
+      pImageInfo      = raw_data(shadow_image_infos[i * MAX_SHADOW_MAPS:]),
+    }
+    writes[i * DESCRIPTOR_PER_FRAME + 2] = {
+      sType           = .WRITE_DESCRIPTOR_SET,
+      dstSet          = g_shadow_descriptor_sets[i],
+      dstBinding      = 1,
+      descriptorCount = MAX_SHADOW_MAPS,
+      descriptorType  = .COMBINED_IMAGE_SAMPLER,
+      pImageInfo      = raw_data(
+        cube_shadow_image_infos[i * MAX_SHADOW_MAPS:],
+      ),
+    }
   }
+  log.debugf("vk.UpdateDescriptorSets %d", len(writes))
+  vk.UpdateDescriptorSets(g_device, len(writes), raw_data(writes[:]), 0, nil)
   vk.AllocateCommandBuffers(
     g_device,
     &{
@@ -312,11 +342,24 @@ init :: proc(
   ) or_return
   renderer_main_init(
     &self.main,
+    &self.frames,
     self.swapchain.extent.width,
     self.swapchain.extent.height,
     self.swapchain.format.format,
     .D32_SFLOAT,
   ) or_return
+  renderer_ambient_init(
+    &self.ambient,
+    &self.frames,
+    self.swapchain.extent.width,
+    self.swapchain.extent.height,
+    self.swapchain.format.format,
+  )
+  // Initialize ambient renderer fields to match main renderer
+  self.ambient.environment_index = self.main.environment_map.index
+  self.ambient.brdf_lut_index = self.main.brdf_lut.index
+  self.ambient.environment_max_lod = self.main.environment_max_lod
+  self.ambient.ibl_intensity = self.main.ibl_intensity
   renderer_gbuffer_init(
     &self.gbuffer,
     self.swapchain.extent.width,
@@ -517,8 +560,7 @@ update_force_fields :: proc(self: ^Engine) {
   for &entry in self.scene.nodes.entries do if entry.active {
     ff, is_ff := &entry.item.attachment.(ForceFieldAttachment)
     if !is_ff do continue
-    ff.position =
-      entry.item.transform.world_matrix * linalg.Vector4f32{0, 0, 0, 1}
+    ff.position = entry.item.transform.world_matrix * linalg.Vector4f32{0, 0, 0, 1}
     forcefields[params.forcefield_count] = ff
     params.forcefield_count += 1
   }
@@ -644,7 +686,6 @@ recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
         sType = .WRITE_DESCRIPTOR_SET,
         dstSet = g_camera_descriptor_sets[i],
         dstBinding = 0,
-        dstArrayElement = 0,
         descriptorCount = 1,
         descriptorType = .UNIFORM_BUFFER,
         pBufferInfo = &{
@@ -654,30 +695,16 @@ recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
       },
       {
         sType = .WRITE_DESCRIPTOR_SET,
-        dstSet = g_lights_descriptor_sets[i],
+        dstSet = g_shadow_descriptor_sets[i],
         dstBinding = 0,
-        dstArrayElement = 0,
-        descriptorCount = 1,
-        descriptorType = .UNIFORM_BUFFER,
-        pBufferInfo = &{
-          buffer = engine.frames[i].light_uniform.buffer,
-          range = size_of(LightArrayUniform),
-        },
-      },
-      {
-        sType = .WRITE_DESCRIPTOR_SET,
-        dstSet = g_lights_descriptor_sets[i],
-        dstBinding = 1,
-        dstArrayElement = 0,
         descriptorCount = len(shadow_image_infos),
         descriptorType = .COMBINED_IMAGE_SAMPLER,
         pImageInfo = raw_data(shadow_image_infos[:]),
       },
       {
         sType = .WRITE_DESCRIPTOR_SET,
-        dstSet = g_lights_descriptor_sets[i],
-        dstBinding = 2,
-        dstArrayElement = 0,
+        dstSet = g_shadow_descriptor_sets[i],
+        dstBinding = 1,
         descriptorCount = len(cube_shadow_image_infos),
         descriptorType = .COMBINED_IMAGE_SAMPLER,
         pImageInfo = raw_data(cube_shadow_image_infos[:]),
@@ -694,58 +721,6 @@ recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
   return .SUCCESS
 }
 
-update_visible_lights :: proc(self: ^Engine) {
-  light_uniform := data_buffer_get(&self.frames[g_frame_index].light_uniform)
-  light_uniform.light_count = 0
-  // Traverse scene and update/add visible lights
-  for entry in self.scene.nodes.entries do if entry.active {
-    node := entry.item
-    light_info := &light_uniform.lights[light_uniform.light_count]
-    #partial switch light in node.attachment {
-    case PointLightAttachment:
-      position := node.transform.world_matrix * linalg.Vector4f32{0, 0, 0, 1}
-      light_info.kind = .POINT
-      light_info.color = light.color
-      light_info.radius = light.radius
-      light_info.has_shadow = b32(light.cast_shadow)
-      light_info.position = position
-      light_info.proj = linalg.matrix4_perspective(math.PI * 0.5, 1.0, 0.01, light.radius)
-      // point light needs 6 view matrices, it will not be calculated here
-      light_uniform.light_count += 1
-    case DirectionalLightAttachment:
-      ortho_size: f32 = 20.0
-      position := node.transform.world_matrix * linalg.Vector4f32{0, 0, 0, 1}
-      direction := node.transform.world_matrix * linalg.Vector4f32{0, 0, 1, 0}
-      light_info.kind = .DIRECTIONAL
-      light_info.color = light.color
-      light_info.has_shadow = b32(light.cast_shadow)
-      light_info.position = position
-      light_info.direction = direction
-      light_info.proj = linalg.matrix_ortho3d(-ortho_size, ortho_size, -ortho_size, ortho_size, 0.1, 9999.0)
-      light_info.view = linalg.matrix4_look_at(position.xyz, position.xyz + direction.xyz, linalg.VECTOR3F32_Y_AXIS)
-      light_uniform.light_count += 1
-    case SpotLightAttachment:
-      position := node.transform.world_matrix * linalg.Vector4f32{0, 0, 0, 1}
-      direction := node.transform.world_matrix * linalg.Vector4f32{0, 0, 1, 0}
-      light_info.kind = .SPOT
-      light_info.color = light.color
-      light_info.radius = light.radius
-      light_info.angle = light.angle
-      light_info.has_shadow = b32(light.cast_shadow)
-      light_info.position = position
-      light_info.direction = direction
-      light_info.proj = linalg.matrix4_perspective(light.angle, 1.0, 0.01, light.radius)
-      light_info.view = linalg.matrix4_look_at(position.xyz, position.xyz + direction.xyz, linalg.VECTOR3F32_Y_AXIS)
-      light_uniform.light_count += 1
-    case:
-      continue
-    }
-    if light_uniform.light_count >= MAX_LIGHTS {
-      break
-    }
-  }
-}
-
 render :: proc(self: ^Engine) -> vk.Result {
   acquire_next_image(&self.swapchain) or_return
   mu.begin(&self.ui.ctx)
@@ -756,63 +731,108 @@ render :: proc(self: ^Engine) -> vk.Result {
   camera_uniform.projection = geometry.calculate_projection_matrix(
     self.scene.camera,
   )
+  camera_uniform.viewport_size = {
+    f32(self.swapchain.extent.width),
+    f32(self.swapchain.extent.height),
+  }
+  frustum := geometry.make_frustum(
+    camera_uniform.projection * camera_uniform.view,
+  )
   vk.BeginCommandBuffer(
     command_buffer,
     &{sType = .COMMAND_BUFFER_BEGIN_INFO, flags = {.ONE_TIME_SUBMIT}},
   ) or_return
   // dispatch computation early and doing other work while GPU is busy
   compute_particles(&self.particle, command_buffer)
-  update_visible_lights(self)
+  lights := make([dynamic]LightData, 0)
+  defer delete(lights)
+  shadow_casters := make([dynamic]LightData, 0)
+  defer delete(shadow_casters)
+  for &entry in self.scene.nodes.entries do if entry.active {
+    #partial switch light in &entry.item.attachment {
+    case PointLightAttachment:
+      @(static) face_dirs := [6][3]f32{{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}}
+      @(static) face_ups := [6][3]f32{{0, -1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}, {0, -1, 0}, {0, -1, 0}}
+      data: PointLightData
+      position := entry.item.transform.world_matrix * linalg.Vector4f32{0, 0, 0, 1}
+      for i in 0 ..< 6 {
+        data.views[i] = linalg.matrix4_look_at(position.xyz, position.xyz + face_dirs[i], face_ups[i])
+      }
+      data.proj = linalg.matrix4_perspective(math.PI * 0.5, 1.0, 0.01, light.radius)
+      data.world = entry.item.transform.world_matrix
+      data.color = light.color
+      data.position = position
+      data.radius = light.radius
+      append(&lights, data)
+      if light.cast_shadow && len(shadow_casters) < MAX_SHADOW_MAPS {
+        append(&shadow_casters, data)
+      }
+    case DirectionalLightAttachment:
+      data: DirectionalLightData
+      ortho_size: f32 = 20.0
+      data.direction = entry.item.transform.world_matrix * linalg.Vector4f32{0, 0, -1, 0}
+      data.proj = linalg.matrix_ortho3d(-ortho_size, ortho_size, -ortho_size, ortho_size, 0.1, 9999.0)
+      data.view = linalg.matrix4_look_at(linalg.Vector3f32{}, data.direction.xyz, linalg.VECTOR3F32_Y_AXIS)
+      data.world = entry.item.transform.world_matrix
+      data.color = light.color
+      append(&lights, data)
+    case SpotLightAttachment:
+      data: SpotLightData
+      data.position = entry.item.transform.world_matrix * linalg.Vector4f32{0, 0, 0, 1}
+      data.direction = entry.item.transform.world_matrix * linalg.Vector4f32{0, -1, 0, 0}
+      data.proj = linalg.matrix4_perspective(light.angle, 1.0, 0.01, light.radius)
+      data.world = entry.item.transform.world_matrix
+      data.view = linalg.matrix4_look_at(data.position.xyz, data.position.xyz + data.direction.xyz, linalg.VECTOR3F32_Y_AXIS)
+      data.radius = light.radius
+      data.angle = light.angle
+      data.color = light.color
+      append(&lights, data)
+      if light.cast_shadow && len(shadow_casters) < MAX_SHADOW_MAPS {
+        append(&shadow_casters, data)
+      }
+    }
+  }
   // log.debug("============ rendering shadow pass...============ ")
   initial_barriers := make([dynamic]vk.ImageMemoryBarrier, 0)
   defer delete(initial_barriers)
-  light_uniform := data_buffer_get(&self.frames[g_frame_index].light_uniform)
   // Transition all shadow maps to depth attachment optimal
-  for i in 0 ..< light_uniform.light_count {
-    light := &light_uniform.lights[i]
-    if !light.has_shadow do continue
-    switch light.kind {
-    case .POINT:
-      append(
-        &initial_barriers,
-        vk.ImageMemoryBarrier {
-          sType = .IMAGE_MEMORY_BARRIER,
-          oldLayout = .UNDEFINED,
-          newLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-          srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-          dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-          image = self.frames[g_frame_index].cube_shadow_maps[i].image,
-          subresourceRange = {
-            aspectMask = {.DEPTH},
-            baseMipLevel = 0,
-            levelCount = 1,
-            baseArrayLayer = 0,
-            layerCount = 6,
-          },
-          dstAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE},
+  for texture in self.frames[g_frame_index].shadow_maps {
+    append(
+      &initial_barriers,
+      vk.ImageMemoryBarrier {
+        sType = .IMAGE_MEMORY_BARRIER,
+        oldLayout = .UNDEFINED,
+        newLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+        srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+        dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+        image = texture.image,
+        subresourceRange = {
+          aspectMask = {.DEPTH},
+          levelCount = 1,
+          layerCount = 1,
         },
-      )
-    case .DIRECTIONAL, .SPOT:
-      append(
-        &initial_barriers,
-        vk.ImageMemoryBarrier {
-          sType = .IMAGE_MEMORY_BARRIER,
-          oldLayout = .UNDEFINED,
-          newLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-          srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-          dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-          image = self.frames[g_frame_index].shadow_maps[i].image,
-          subresourceRange = {
-            aspectMask = {.DEPTH},
-            baseMipLevel = 0,
-            levelCount = 1,
-            baseArrayLayer = 0,
-            layerCount = 1,
-          },
-          dstAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE},
+        dstAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE},
+      },
+    )
+  }
+  for texture in self.frames[g_frame_index].cube_shadow_maps {
+    append(
+      &initial_barriers,
+      vk.ImageMemoryBarrier {
+        sType = .IMAGE_MEMORY_BARRIER,
+        oldLayout = .UNDEFINED,
+        newLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+        srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+        dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+        image = texture.image,
+        subresourceRange = {
+          aspectMask = {.DEPTH},
+          levelCount = 1,
+          layerCount = 6,
         },
-      )
-    }
+        dstAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE},
+      },
+    )
   }
   vk.CmdPipelineBarrier(
     command_buffer,
@@ -826,50 +846,25 @@ render :: proc(self: ^Engine) -> vk.Result {
     u32(len(initial_barriers)),
     raw_data(initial_barriers),
   )
-  for i in 0 ..< light_uniform.light_count {
-    light := &light_uniform.lights[i]
-    if !light.has_shadow do continue
-    switch light.kind {
-    case .POINT:
+  for node, i in shadow_casters {
+    #partial switch light in node {
+    case PointLightData:
       // Render 6 faces for point light shadow cubemap
       cube_shadow := &self.frames[g_frame_index].cube_shadow_maps[i]
       for face in 0 ..< 6 {
-        @(static) face_dirs := [6][3]f32 {
-          {1, 0, 0},
-          {-1, 0, 0},
-          {0, 1, 0},
-          {0, -1, 0},
-          {0, 0, 1},
-          {0, 0, -1},
-        }
-        @(static) face_ups := [6][3]f32 {
-          {0, -1, 0},
-          {0, -1, 0},
-          {0, 0, 1},
-          {0, 0, -1},
-          {0, -1, 0},
-          {0, -1, 0},
-        }
-        light.view = linalg.matrix4_look_at(
-          light.position.xyz,
-          light.position.xyz + face_dirs[face],
-          face_ups[face],
-        )
-        frustum := geometry.make_frustum(light.proj * light.view)
-        shadow_render_input := generate_render_input_for_frustum(self, frustum)
+        frustum := geometry.make_frustum(light.proj * light.views[face])
+        shadow_render_input := generate_render_input(self, frustum)
         shadow_target: RenderTarget
         shadow_target.depth = cube_shadow.face_views[face]
         shadow_target.extent = {
           width  = cube_shadow.width,
           height = cube_shadow.height,
         }
-        shadow_target.width = cube_shadow.width
-        shadow_target.height = cube_shadow.height
         renderer_shadow_begin(shadow_target, command_buffer)
         renderer_shadow_render(
           &self.shadow,
           shadow_render_input,
-          light,
+          node,
           shadow_target,
           u32(i),
           u32(face),
@@ -877,9 +872,9 @@ render :: proc(self: ^Engine) -> vk.Result {
         )
         renderer_shadow_end(command_buffer)
       }
-    case .DIRECTIONAL, .SPOT:
+    case DirectionalLightData:
       frustum := geometry.make_frustum(light.proj * light.view)
-      shadow_render_input := generate_render_input_for_frustum(self, frustum)
+      shadow_render_input := generate_render_input(self, frustum)
       shadow_map_texture := &self.frames[g_frame_index].shadow_maps[i]
       shadow_target: RenderTarget
       shadow_target.depth = shadow_map_texture.view
@@ -887,13 +882,32 @@ render :: proc(self: ^Engine) -> vk.Result {
         width  = shadow_map_texture.width,
         height = shadow_map_texture.height,
       }
-      shadow_target.width = shadow_map_texture.width
-      shadow_target.height = shadow_map_texture.height
       renderer_shadow_begin(shadow_target, command_buffer)
       renderer_shadow_render(
         &self.shadow,
         shadow_render_input,
-        light,
+        node,
+        shadow_target,
+        u32(i),
+        0,
+        command_buffer,
+      )
+      renderer_shadow_end(command_buffer)
+    case SpotLightData:
+      frustum := geometry.make_frustum(light.proj * light.view)
+      shadow_render_input := generate_render_input(self, frustum)
+      shadow_map_texture := &self.frames[g_frame_index].shadow_maps[i]
+      shadow_target: RenderTarget
+      shadow_target.depth = shadow_map_texture.view
+      shadow_target.extent = {
+        width  = shadow_map_texture.width,
+        height = shadow_map_texture.height,
+      }
+      renderer_shadow_begin(shadow_target, command_buffer)
+      renderer_shadow_render(
+        &self.shadow,
+        shadow_render_input,
+        node,
         shadow_target,
         u32(i),
         0,
@@ -904,52 +918,44 @@ render :: proc(self: ^Engine) -> vk.Result {
   }
   final_barriers := make([dynamic]vk.ImageMemoryBarrier, 0)
   defer delete(final_barriers)
-  // Transition all shadow maps to depth attachment optimal
-  for i in 0 ..< light_uniform.light_count {
-    light := &light_uniform.lights[i]
-    if !light.has_shadow do continue
-    switch light.kind {
-    case .POINT:
-      append(
-        &final_barriers,
-        vk.ImageMemoryBarrier {
-          sType = .IMAGE_MEMORY_BARRIER,
-          oldLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-          newLayout = .SHADER_READ_ONLY_OPTIMAL,
-          srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-          dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-          image = self.frames[g_frame_index].cube_shadow_maps[i].image,
-          subresourceRange = {
-            aspectMask = {.DEPTH},
-            baseMipLevel = 0,
-            levelCount = 1,
-            baseArrayLayer = 0,
-            layerCount = 6,
-          },
-          dstAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE},
+  // Transition all shadow maps to shader read only optimal
+  for texture in self.frames[g_frame_index].shadow_maps {
+    append(
+      &final_barriers,
+      vk.ImageMemoryBarrier {
+        sType = .IMAGE_MEMORY_BARRIER,
+        oldLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+        newLayout = .SHADER_READ_ONLY_OPTIMAL,
+        srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+        dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+        image = texture.image,
+        subresourceRange = {
+          aspectMask = {.DEPTH},
+          levelCount = 1,
+          layerCount = 1,
         },
-      )
-    case .DIRECTIONAL, .SPOT:
-      append(
-        &final_barriers,
-        vk.ImageMemoryBarrier {
-          sType = .IMAGE_MEMORY_BARRIER,
-          oldLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-          newLayout = .SHADER_READ_ONLY_OPTIMAL,
-          srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-          dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-          image = self.frames[g_frame_index].shadow_maps[i].image,
-          subresourceRange = {
-            aspectMask = {.DEPTH},
-            baseMipLevel = 0,
-            levelCount = 1,
-            baseArrayLayer = 0,
-            layerCount = 1,
-          },
-          dstAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE},
+        dstAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE},
+      },
+    )
+  }
+  for texture in self.frames[g_frame_index].cube_shadow_maps {
+    append(
+      &final_barriers,
+      vk.ImageMemoryBarrier {
+        sType = .IMAGE_MEMORY_BARRIER,
+        oldLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+        newLayout = .SHADER_READ_ONLY_OPTIMAL,
+        srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+        dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+        image = texture.image,
+        subresourceRange = {
+          aspectMask = {.DEPTH},
+          levelCount = 1,
+          layerCount = 6,
         },
-      )
-    }
+        dstAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE},
+      },
+    )
   }
   vk.CmdPipelineBarrier(
     command_buffer,
@@ -971,9 +977,7 @@ render :: proc(self: ^Engine) -> vk.Result {
   depth_target: RenderTarget
   depth_target.depth = self.frames[g_frame_index].depth_buffer.view
   depth_target.extent = self.swapchain.extent
-  depth_target.width = self.swapchain.extent.width
-  depth_target.height = self.swapchain.extent.height
-  depth_input := generate_render_input(self)
+  depth_input := generate_render_input(self, frustum)
   renderer_depth_prepass_begin(&depth_target, command_buffer)
   renderer_depth_prepass_render(
     &self.depth_prepass,
@@ -981,97 +985,233 @@ render :: proc(self: ^Engine) -> vk.Result {
     command_buffer,
   )
   renderer_depth_prepass_end(command_buffer)
-  if true {
-    // log.debug("============ rendering G-buffer pass... =============")
-    prepare_image_for_render(
-      command_buffer,
-      self.frames[g_frame_index].gbuffer_normal.image,
-      .COLOR_ATTACHMENT_OPTIMAL,
-    )
-    prepare_image_for_render(
-      command_buffer,
-      self.frames[g_frame_index].gbuffer_albedo.image,
-      .COLOR_ATTACHMENT_OPTIMAL,
-    )
-    prepare_image_for_render(
-      command_buffer,
-      self.frames[g_frame_index].gbuffer_metallic_roughness.image,
-      .COLOR_ATTACHMENT_OPTIMAL,
-    )
-    prepare_image_for_render(
-      command_buffer,
-      self.frames[g_frame_index].gbuffer_emissive.image,
-      .COLOR_ATTACHMENT_OPTIMAL,
-    )
-    gbuffer_target: RenderTarget
-    gbuffer_target.normal = self.frames[g_frame_index].gbuffer_normal.view
-    gbuffer_target.albedo = self.frames[g_frame_index].gbuffer_albedo.view
-    gbuffer_target.metallic =
-      self.frames[g_frame_index].gbuffer_metallic_roughness.view
-    gbuffer_target.emissive = self.frames[g_frame_index].gbuffer_emissive.view
-    gbuffer_target.depth = self.frames[g_frame_index].depth_buffer.view
-    gbuffer_target.extent = self.swapchain.extent
-    gbuffer_target.width = self.swapchain.extent.width
-    gbuffer_target.height = self.swapchain.extent.height
-    gbuffer_input := generate_render_input(self)
-    renderer_gbuffer_begin(&gbuffer_target, command_buffer)
-    renderer_gbuffer_render(
-      &self.gbuffer,
-      &gbuffer_input,
-      &gbuffer_target,
-      command_buffer,
-    )
-    renderer_gbuffer_end(&gbuffer_target, command_buffer)
-
-    prepare_image_for_shader_read(
-      command_buffer,
-      self.frames[g_frame_index].gbuffer_normal.image,
-    )
-    prepare_image_for_shader_read(
-      command_buffer,
-      self.frames[g_frame_index].gbuffer_albedo.image,
-    )
-    prepare_image_for_shader_read(
-      command_buffer,
-      self.frames[g_frame_index].gbuffer_metallic_roughness.image,
-    )
-    prepare_image_for_shader_read(
-      command_buffer,
-      self.frames[g_frame_index].gbuffer_emissive.image,
-    )
-    // log.debug("============ rendering main pass... =============")
-    // Prepare RenderTarget and RenderInput for decoupled renderer
-    render_target: RenderTarget
-    render_target.final = self.frames[g_frame_index].final_image.view
-    render_target.depth = self.frames[g_frame_index].depth_buffer.view
-    render_target.normal = self.frames[g_frame_index].gbuffer_normal.view
-    render_target.albedo = self.frames[g_frame_index].gbuffer_albedo.view
-    render_target.metallic =
-      self.frames[g_frame_index].gbuffer_metallic_roughness.view
-    render_target.emissive = self.frames[g_frame_index].gbuffer_emissive.view
-    render_target.extent = self.swapchain.extent
-    render_target.width = self.swapchain.extent.width
-    render_target.height = self.swapchain.extent.height
-    render_input := generate_render_input(self)
-    renderer_main_begin(render_target, command_buffer)
-    renderer_main_render(&self.main, render_input, command_buffer)
-    renderer_main_end(command_buffer)
-    // log.debug("============ rendering particles... =============")
-    renderer_particle_begin(
-      &self.particle,
-      command_buffer,
-      RenderTarget {
-        final = self.frames[g_frame_index].final_image.view,
-        depth = self.frames[g_frame_index].depth_buffer.view,
-        extent = self.swapchain.extent,
-        width = self.swapchain.extent.width,
-        height = self.swapchain.extent.height,
+  // log.debug("============ rendering G-buffer pass... =============")
+  gbuffer_initial_barriers := [?]vk.ImageMemoryBarrier {
+    {
+      sType = .IMAGE_MEMORY_BARRIER,
+      oldLayout = .UNDEFINED,
+      newLayout = .COLOR_ATTACHMENT_OPTIMAL,
+      srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+      dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+      image = self.frames[g_frame_index].gbuffer_position.image,
+      subresourceRange = {
+        aspectMask = {.COLOR},
+        levelCount = 1,
+        layerCount = 1,
       },
-      render_input,
-    )
-    renderer_particle_render(&self.particle, command_buffer)
-    renderer_particle_end(command_buffer)
+      dstAccessMask = {.COLOR_ATTACHMENT_WRITE},
+    },
+    {
+      sType = .IMAGE_MEMORY_BARRIER,
+      oldLayout = .UNDEFINED,
+      newLayout = .COLOR_ATTACHMENT_OPTIMAL,
+      srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+      dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+      image = self.frames[g_frame_index].gbuffer_normal.image,
+      subresourceRange = {
+        aspectMask = {.COLOR},
+        levelCount = 1,
+        layerCount = 1,
+      },
+      dstAccessMask = {.COLOR_ATTACHMENT_WRITE},
+    },
+    {
+      sType = .IMAGE_MEMORY_BARRIER,
+      oldLayout = .UNDEFINED,
+      newLayout = .COLOR_ATTACHMENT_OPTIMAL,
+      srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+      dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+      image = self.frames[g_frame_index].gbuffer_albedo.image,
+      subresourceRange = {
+        aspectMask = {.COLOR},
+        levelCount = 1,
+        layerCount = 1,
+      },
+      dstAccessMask = {.COLOR_ATTACHMENT_WRITE},
+    },
+    {
+      sType = .IMAGE_MEMORY_BARRIER,
+      oldLayout = .UNDEFINED,
+      newLayout = .COLOR_ATTACHMENT_OPTIMAL,
+      srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+      dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+      image = self.frames[g_frame_index].gbuffer_metallic_roughness.image,
+      subresourceRange = {
+        aspectMask = {.COLOR},
+        levelCount = 1,
+        layerCount = 1,
+      },
+      dstAccessMask = {.COLOR_ATTACHMENT_WRITE},
+    },
+    {
+      sType = .IMAGE_MEMORY_BARRIER,
+      oldLayout = .UNDEFINED,
+      newLayout = .COLOR_ATTACHMENT_OPTIMAL,
+      srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+      dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+      image = self.frames[g_frame_index].gbuffer_emissive.image,
+      subresourceRange = {
+        aspectMask = {.COLOR},
+        levelCount = 1,
+        layerCount = 1,
+      },
+      dstAccessMask = {.COLOR_ATTACHMENT_WRITE},
+    },
   }
+  vk.CmdPipelineBarrier(
+    command_buffer,
+    {.TOP_OF_PIPE},
+    {.COLOR_ATTACHMENT_OUTPUT},
+    {},
+    0,
+    nil,
+    0,
+    nil,
+    len(gbuffer_initial_barriers),
+    raw_data(gbuffer_initial_barriers[:]),
+  )
+  gbuffer_target: RenderTarget
+  gbuffer_target.position = self.frames[g_frame_index].gbuffer_position.view
+  gbuffer_target.normal = self.frames[g_frame_index].gbuffer_normal.view
+  gbuffer_target.albedo = self.frames[g_frame_index].gbuffer_albedo.view
+  gbuffer_target.metallic =
+    self.frames[g_frame_index].gbuffer_metallic_roughness.view
+  gbuffer_target.emissive = self.frames[g_frame_index].gbuffer_emissive.view
+  gbuffer_target.depth = self.frames[g_frame_index].depth_buffer.view
+  gbuffer_target.extent = self.swapchain.extent
+  gbuffer_input := depth_input
+  renderer_gbuffer_begin(&gbuffer_target, command_buffer)
+  renderer_gbuffer_render(
+    &self.gbuffer,
+    &gbuffer_input,
+    &gbuffer_target,
+    command_buffer,
+  )
+  renderer_gbuffer_end(&gbuffer_target, command_buffer)
+  gbuffer_final_barriers := [?]vk.ImageMemoryBarrier {
+    {
+      sType = .IMAGE_MEMORY_BARRIER,
+      oldLayout = .COLOR_ATTACHMENT_OPTIMAL,
+      newLayout = .SHADER_READ_ONLY_OPTIMAL,
+      srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+      dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+      image = self.frames[g_frame_index].gbuffer_position.image,
+      subresourceRange = {
+        aspectMask = {.COLOR},
+        levelCount = 1,
+        layerCount = 1,
+      },
+      srcAccessMask = {.COLOR_ATTACHMENT_WRITE},
+      dstAccessMask = {.SHADER_READ},
+    },
+    {
+      sType = .IMAGE_MEMORY_BARRIER,
+      oldLayout = .COLOR_ATTACHMENT_OPTIMAL,
+      newLayout = .SHADER_READ_ONLY_OPTIMAL,
+      srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+      dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+      image = self.frames[g_frame_index].gbuffer_normal.image,
+      subresourceRange = {
+        aspectMask = {.COLOR},
+        levelCount = 1,
+        layerCount = 1,
+      },
+      srcAccessMask = {.COLOR_ATTACHMENT_WRITE},
+      dstAccessMask = {.SHADER_READ},
+    },
+    {
+      sType = .IMAGE_MEMORY_BARRIER,
+      oldLayout = .COLOR_ATTACHMENT_OPTIMAL,
+      newLayout = .SHADER_READ_ONLY_OPTIMAL,
+      srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+      dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+      image = self.frames[g_frame_index].gbuffer_albedo.image,
+      subresourceRange = {
+        aspectMask = {.COLOR},
+        levelCount = 1,
+        layerCount = 1,
+      },
+      srcAccessMask = {.COLOR_ATTACHMENT_WRITE},
+      dstAccessMask = {.SHADER_READ},
+    },
+    {
+      sType = .IMAGE_MEMORY_BARRIER,
+      oldLayout = .COLOR_ATTACHMENT_OPTIMAL,
+      newLayout = .SHADER_READ_ONLY_OPTIMAL,
+      srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+      dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+      image = self.frames[g_frame_index].gbuffer_metallic_roughness.image,
+      subresourceRange = {
+        aspectMask = {.COLOR},
+        levelCount = 1,
+        layerCount = 1,
+      },
+      srcAccessMask = {.COLOR_ATTACHMENT_WRITE},
+      dstAccessMask = {.SHADER_READ},
+    },
+    {
+      sType = .IMAGE_MEMORY_BARRIER,
+      oldLayout = .COLOR_ATTACHMENT_OPTIMAL,
+      newLayout = .SHADER_READ_ONLY_OPTIMAL,
+      srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+      dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+      image = self.frames[g_frame_index].gbuffer_emissive.image,
+      subresourceRange = {
+        aspectMask = {.COLOR},
+        levelCount = 1,
+        layerCount = 1,
+      },
+      srcAccessMask = {.COLOR_ATTACHMENT_WRITE},
+      dstAccessMask = {.SHADER_READ},
+    },
+  }
+  vk.CmdPipelineBarrier(
+    command_buffer,
+    {.COLOR_ATTACHMENT_OUTPUT},
+    {.FRAGMENT_SHADER},
+    {},
+    0,
+    nil,
+    0,
+    nil,
+    len(gbuffer_final_barriers),
+    raw_data(gbuffer_final_barriers[:]),
+  )
+  // log.debug("============ rendering main pass... =============")
+  // Prepare RenderTarget and RenderInput for decoupled renderer
+  render_target: RenderTarget
+  render_target.final = self.frames[g_frame_index].final_image.view
+  render_target.depth = self.frames[g_frame_index].depth_buffer.view
+  render_target.extent = self.swapchain.extent
+  // Ambient pass
+  renderer_ambient_begin(&self.ambient, render_target, command_buffer)
+  renderer_ambient_render(
+    &self.ambient,
+    self.scene.camera.position,
+    command_buffer,
+  )
+  renderer_ambient_end(command_buffer)
+  // Per-light additive pass
+  renderer_main_begin(&self.main, render_target, command_buffer)
+  renderer_main_render(
+    &self.main,
+    lights,
+    self.scene.camera.position,
+    command_buffer,
+  )
+  renderer_main_end(command_buffer)
+  // log.debug("============ rendering particles... =============")
+  renderer_particle_begin(
+    &self.particle,
+    command_buffer,
+    RenderTarget {
+      final = self.frames[g_frame_index].final_image.view,
+      depth = self.frames[g_frame_index].depth_buffer.view,
+      extent = self.swapchain.extent,
+    },
+  )
+  renderer_particle_render(&self.particle, command_buffer)
+  renderer_particle_end(command_buffer)
   // log.debug("============ rendering post processes... =============")
   prepare_image_for_shader_read(
     command_buffer,
@@ -1187,6 +1327,19 @@ frame_data_init :: proc(
   frame: ^FrameData,
   swapchain: ^Swapchain,
 ) -> vk.Result {
+  frame.gbuffer_position = malloc_image_buffer(
+    swapchain.extent.width,
+    swapchain.extent.height,
+    .R32G32B32A32_SFLOAT,
+    .OPTIMAL,
+    {.COLOR_ATTACHMENT, .SAMPLED},
+    {.DEVICE_LOCAL},
+  ) or_return
+  frame.gbuffer_position.view = create_image_view(
+    frame.gbuffer_position.image,
+    .R32G32B32A32_SFLOAT,
+    {.COLOR},
+  ) or_return
   frame.final_image = malloc_image_buffer(
     swapchain.extent.width,
     swapchain.extent.height,
@@ -1276,12 +1429,7 @@ frame_data_init :: proc(
   }
   frame.camera_uniform = create_host_visible_buffer(
     CameraUniform,
-    (MAX_CAMERA_UNIFORMS),
-    {.UNIFORM_BUFFER},
-  ) or_return
-  frame.light_uniform = create_host_visible_buffer(
-    LightArrayUniform,
-    1,
+    MAX_CAMERA_UNIFORMS,
     {.UNIFORM_BUFFER},
   ) or_return
   return .SUCCESS
@@ -1289,10 +1437,10 @@ frame_data_init :: proc(
 
 frame_data_deinit :: proc(frame: ^FrameData) {
   data_buffer_deinit(&frame.camera_uniform)
-  data_buffer_deinit(&frame.light_uniform)
   image_buffer_deinit(&frame.final_image)
   for &t in frame.shadow_maps do image_buffer_deinit(&t)
   for &t in frame.cube_shadow_maps do cube_depth_texture_deinit(&t)
+  image_buffer_deinit(&frame.gbuffer_position)
   image_buffer_deinit(&frame.gbuffer_normal)
   image_buffer_deinit(&frame.gbuffer_albedo)
   image_buffer_deinit(&frame.gbuffer_metallic_roughness)

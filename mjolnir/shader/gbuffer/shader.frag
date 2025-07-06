@@ -12,67 +12,56 @@ const uint SAMPLER_NEAREST_CLAMP = 0;
 const uint SAMPLER_LINEAR_CLAMP = 1;
 const uint SAMPLER_NEAREST_REPEAT = 2;
 const uint SAMPLER_LINEAR_REPEAT = 3;
-const uint MAX_LIGHTS = 10;
-const uint POINT_LIGHT = 0;
-const uint DIRECTIONAL_LIGHT = 1;
-const uint SPOT_LIGHT = 2;
-const float PI = 3.14159265359;
+const uint MAX_SHADOW_MAPS = 10;
 
-struct Light {
-    mat4 view;
-    mat4 proj;
-    vec4 color;
-    vec4 position;
-    vec4 direction;
-    uint kind;
-    float angle;
-    float radius;
-    uint hasShadow;
-};
-
-layout(set = 0, binding = 0) uniform SceneUniforms {
-    mat4 view;
-    mat4 proj;
-};
-// lights and shadow maps set = 1
-layout(set = 1, binding = 0) uniform LightUniforms {
-    Light lights[MAX_LIGHTS];
-    uint lightCount;
-};
-layout(set = 1, binding = 1) uniform sampler2D shadowMaps[MAX_LIGHTS];
-layout(set = 1, binding = 2) uniform samplerCube cubeShadowMaps[MAX_LIGHTS];
+layout(set = 1, binding = 0) uniform sampler2D shadowMaps[MAX_SHADOW_MAPS];
+layout(set = 1, binding = 1) uniform samplerCube cubeShadowMaps[MAX_SHADOW_MAPS];
 // textures and samplers set = 2
 layout(set = 2, binding = 0) uniform texture2D textures[];
 layout(set = 2, binding = 1) uniform sampler samplers[];
 
+// Push constant budget: 128 bytes
 layout(push_constant) uniform PushConstants {
-    mat4 world;
-    uint albedo_index;
-    uint metallic_roughness_index;
-    uint normal_index;
-    uint displacement_index;
-    uint emissive_index;
-    uint environment_index;
-    uint brdf_lut_index;
-    uint bone_matrix_offset;
-    float metallic_value;
-    float roughness_value;
-    float emissive_value;
-    float padding;
+    mat4 world;            // 64 bytes
+    uint bone_matrix_offset; // 4
+    uint albedo_index;     // 4
+    uint metallic_roughness_index; // 4
+    uint normal_index;     // 4
+    uint displacement_index; // 4
+    uint emissive_index;   // 4
+    float metallic_value;  // 4
+    float roughness_value; // 4
+    float emissive_value;  // 4
+    float padding[3];        // 12 (pad to 128)
 };
+
 
 layout(location = 0) in vec3 position;
 layout(location = 1) in vec4 color;
 layout(location = 2) in vec3 normal;
 layout(location = 3) in vec2 uv;
+layout(location = 4) in vec4 tangent;
 
-layout(location = 0) out vec4 outNormal;
-layout(location = 1) out vec4 outAlbedo;
-layout(location = 2) out vec4 outMetallicRoughness;
-layout(location = 3) out vec4 outEmissive;
+layout(location = 0) out vec4 outPosition;
+layout(location = 1) out vec4 outNormal;
+layout(location = 2) out vec4 outAlbedo;
+layout(location = 3) out vec4 outMetallicRoughness;
+layout(location = 4) out vec4 outEmissive;
 
 void main() {
+    outPosition = vec4(position, 1.0);
     vec3 N = normalize(normal);
+    if (NORMAL_TEXTURE) {
+        // Sample tangent-space normal from normal map (BC5/XY: .xy, reconstruct z)
+        vec2 n_xy = texture(sampler2D(textures[normal_index], samplers[SAMPLER_LINEAR_REPEAT]), uv).xy * 2.0 - 1.0;
+        float n_z = sqrt(clamp(1.0 - dot(n_xy, n_xy), 0.0, 1.0));
+        vec3 tangentNormal = vec3(n_xy, n_z);
+        // Reconstruct TBN matrix
+        vec3 T = normalize(tangent.xyz);
+        vec3 B = normalize(cross(N, T)) * tangent.w;
+        mat3 TBN = mat3(T, B, N);
+        N = normalize(TBN * tangentNormal);
+    }
     vec3 normal_encoded = N * 0.5 + 0.5;
     outNormal = vec4(normal_encoded, 1.0);
 
