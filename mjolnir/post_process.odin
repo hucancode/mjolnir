@@ -702,16 +702,22 @@ renderer_postprocess_render :: proc(
     }
     // Prepare destination image for rendering
     if !is_last {
-      prepare_image_for_render(
+      transition_image(
         command_buffer,
         self.images[dst_image_idx].image,
         .COLOR_ATTACHMENT_OPTIMAL,
+        .COLOR_ATTACHMENT_OPTIMAL,
+        {.COLOR},
+        {.TOP_OF_PIPE},
+        {.COLOR_ATTACHMENT_OUTPUT},
+        {},
+        {.COLOR_ATTACHMENT_WRITE},
       )
     } else {
       // For the last effect, output is the swapchain image, which should already be transitioned
     }
     if !is_first {
-      prepare_image_for_shader_read(
+      transition_image_to_shader_read(
         command_buffer,
         self.images[src_image_idx].image,
       )

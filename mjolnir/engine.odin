@@ -793,58 +793,28 @@ render :: proc(self: ^Engine) -> vk.Result {
     }
   }
   // log.debug("============ rendering shadow pass...============ ")
-  initial_barriers := make([dynamic]vk.ImageMemoryBarrier, 0)
-  defer delete(initial_barriers)
   // Transition all shadow maps to depth attachment optimal
-  for texture in self.frames[g_frame_index].shadow_maps {
-    append(
-      &initial_barriers,
-      vk.ImageMemoryBarrier {
-        sType = .IMAGE_MEMORY_BARRIER,
-        oldLayout = .UNDEFINED,
-        newLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-        srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-        dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-        image = texture.image,
-        subresourceRange = {
-          aspectMask = {.DEPTH},
-          levelCount = 1,
-          layerCount = 1,
-        },
-        dstAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE},
-      },
-    )
-  }
-  for texture in self.frames[g_frame_index].cube_shadow_maps {
-    append(
-      &initial_barriers,
-      vk.ImageMemoryBarrier {
-        sType = .IMAGE_MEMORY_BARRIER,
-        oldLayout = .UNDEFINED,
-        newLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-        srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-        dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-        image = texture.image,
-        subresourceRange = {
-          aspectMask = {.DEPTH},
-          levelCount = 1,
-          layerCount = 6,
-        },
-        dstAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE},
-      },
-    )
-  }
-  vk.CmdPipelineBarrier(
+  transition_images(
     command_buffer,
+    self.frames[g_frame_index].shadow_maps[:],
+    .UNDEFINED,
+    .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+    {.DEPTH},
+    1,
     {.TOP_OF_PIPE},
     {.EARLY_FRAGMENT_TESTS},
-    {},
-    0,
-    nil,
-    0,
-    nil,
-    u32(len(initial_barriers)),
-    raw_data(initial_barriers),
+    {.DEPTH_STENCIL_ATTACHMENT_WRITE},
+  )
+  transition_images(
+    command_buffer,
+    self.frames[g_frame_index].cube_shadow_maps[:],
+    .UNDEFINED,
+    .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+    {.DEPTH},
+    6,
+    {.TOP_OF_PIPE},
+    {.EARLY_FRAGMENT_TESTS},
+    {.DEPTH_STENCIL_ATTACHMENT_WRITE},
   )
   for node, i in shadow_casters {
     #partial switch light in node {
@@ -916,62 +886,39 @@ render :: proc(self: ^Engine) -> vk.Result {
       renderer_shadow_end(command_buffer)
     }
   }
-  final_barriers := make([dynamic]vk.ImageMemoryBarrier, 0)
-  defer delete(final_barriers)
   // Transition all shadow maps to shader read only optimal
-  for texture in self.frames[g_frame_index].shadow_maps {
-    append(
-      &final_barriers,
-      vk.ImageMemoryBarrier {
-        sType = .IMAGE_MEMORY_BARRIER,
-        oldLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-        newLayout = .SHADER_READ_ONLY_OPTIMAL,
-        srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-        dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-        image = texture.image,
-        subresourceRange = {
-          aspectMask = {.DEPTH},
-          levelCount = 1,
-          layerCount = 1,
-        },
-        dstAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE},
-      },
-    )
-  }
-  for texture in self.frames[g_frame_index].cube_shadow_maps {
-    append(
-      &final_barriers,
-      vk.ImageMemoryBarrier {
-        sType = .IMAGE_MEMORY_BARRIER,
-        oldLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-        newLayout = .SHADER_READ_ONLY_OPTIMAL,
-        srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-        dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-        image = texture.image,
-        subresourceRange = {
-          aspectMask = {.DEPTH},
-          levelCount = 1,
-          layerCount = 6,
-        },
-        dstAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE},
-      },
-    )
-  }
-  vk.CmdPipelineBarrier(
+  transition_images(
     command_buffer,
+    self.frames[g_frame_index].shadow_maps[:],
+    .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+    .SHADER_READ_ONLY_OPTIMAL,
+    {.DEPTH},
+    1,
     {.LATE_FRAGMENT_TESTS},
     {.FRAGMENT_SHADER},
-    {},
-    0,
-    nil,
-    0,
-    nil,
-    u32(len(final_barriers)),
-    raw_data(final_barriers),
+    {.DEPTH_STENCIL_ATTACHMENT_WRITE},
   )
-  prepare_image_for_render(
+  transition_images(
+    command_buffer,
+    self.frames[g_frame_index].cube_shadow_maps[:],
+    .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+    .SHADER_READ_ONLY_OPTIMAL,
+    {.DEPTH},
+    6,
+    {.LATE_FRAGMENT_TESTS},
+    {.FRAGMENT_SHADER},
+    {.DEPTH_STENCIL_ATTACHMENT_WRITE},
+  )
+  transition_image(
     command_buffer,
     self.frames[g_frame_index].final_image.image,
+    .UNDEFINED,
+    .COLOR_ATTACHMENT_OPTIMAL,
+    {.COLOR},
+    {.TOP_OF_PIPE},
+    {.COLOR_ATTACHMENT_OUTPUT},
+    {},
+    {.COLOR_ATTACHMENT_WRITE},
   )
   // log.debug("============ rendering depth pre-pass... =============")
   depth_target: RenderTarget
@@ -986,89 +933,25 @@ render :: proc(self: ^Engine) -> vk.Result {
   )
   renderer_depth_prepass_end(command_buffer)
   // log.debug("============ rendering G-buffer pass... =============")
-  gbuffer_initial_barriers := [?]vk.ImageMemoryBarrier {
-    {
-      sType = .IMAGE_MEMORY_BARRIER,
-      oldLayout = .UNDEFINED,
-      newLayout = .COLOR_ATTACHMENT_OPTIMAL,
-      srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-      dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-      image = self.frames[g_frame_index].gbuffer_position.image,
-      subresourceRange = {
-        aspectMask = {.COLOR},
-        levelCount = 1,
-        layerCount = 1,
-      },
-      dstAccessMask = {.COLOR_ATTACHMENT_WRITE},
-    },
-    {
-      sType = .IMAGE_MEMORY_BARRIER,
-      oldLayout = .UNDEFINED,
-      newLayout = .COLOR_ATTACHMENT_OPTIMAL,
-      srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-      dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-      image = self.frames[g_frame_index].gbuffer_normal.image,
-      subresourceRange = {
-        aspectMask = {.COLOR},
-        levelCount = 1,
-        layerCount = 1,
-      },
-      dstAccessMask = {.COLOR_ATTACHMENT_WRITE},
-    },
-    {
-      sType = .IMAGE_MEMORY_BARRIER,
-      oldLayout = .UNDEFINED,
-      newLayout = .COLOR_ATTACHMENT_OPTIMAL,
-      srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-      dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-      image = self.frames[g_frame_index].gbuffer_albedo.image,
-      subresourceRange = {
-        aspectMask = {.COLOR},
-        levelCount = 1,
-        layerCount = 1,
-      },
-      dstAccessMask = {.COLOR_ATTACHMENT_WRITE},
-    },
-    {
-      sType = .IMAGE_MEMORY_BARRIER,
-      oldLayout = .UNDEFINED,
-      newLayout = .COLOR_ATTACHMENT_OPTIMAL,
-      srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-      dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-      image = self.frames[g_frame_index].gbuffer_metallic_roughness.image,
-      subresourceRange = {
-        aspectMask = {.COLOR},
-        levelCount = 1,
-        layerCount = 1,
-      },
-      dstAccessMask = {.COLOR_ATTACHMENT_WRITE},
-    },
-    {
-      sType = .IMAGE_MEMORY_BARRIER,
-      oldLayout = .UNDEFINED,
-      newLayout = .COLOR_ATTACHMENT_OPTIMAL,
-      srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-      dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-      image = self.frames[g_frame_index].gbuffer_emissive.image,
-      subresourceRange = {
-        aspectMask = {.COLOR},
-        levelCount = 1,
-        layerCount = 1,
-      },
-      dstAccessMask = {.COLOR_ATTACHMENT_WRITE},
-    },
+  // Transition G-buffer images to COLOR_ATTACHMENT_OPTIMAL
+  gbuffer_images := [?]vk.Image {
+    self.frames[g_frame_index].gbuffer_position.image,
+    self.frames[g_frame_index].gbuffer_normal.image,
+    self.frames[g_frame_index].gbuffer_albedo.image,
+    self.frames[g_frame_index].gbuffer_metallic_roughness.image,
+    self.frames[g_frame_index].gbuffer_emissive.image,
   }
-  vk.CmdPipelineBarrier(
+  // Batch transition all G-buffer images to COLOR_ATTACHMENT_OPTIMAL in a single API call
+  transition_images(
     command_buffer,
+    gbuffer_images[:],
+    .UNDEFINED,
+    .COLOR_ATTACHMENT_OPTIMAL,
+    {.COLOR},
+    1,
     {.TOP_OF_PIPE},
     {.COLOR_ATTACHMENT_OUTPUT},
-    {},
-    0,
-    nil,
-    0,
-    nil,
-    len(gbuffer_initial_barriers),
-    raw_data(gbuffer_initial_barriers[:]),
+    {.COLOR_ATTACHMENT_WRITE},
   )
   gbuffer_target: RenderTarget
   gbuffer_target.position = self.frames[g_frame_index].gbuffer_position.view
@@ -1088,94 +971,18 @@ render :: proc(self: ^Engine) -> vk.Result {
     command_buffer,
   )
   renderer_gbuffer_end(&gbuffer_target, command_buffer)
-  gbuffer_final_barriers := [?]vk.ImageMemoryBarrier {
-    {
-      sType = .IMAGE_MEMORY_BARRIER,
-      oldLayout = .COLOR_ATTACHMENT_OPTIMAL,
-      newLayout = .SHADER_READ_ONLY_OPTIMAL,
-      srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-      dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-      image = self.frames[g_frame_index].gbuffer_position.image,
-      subresourceRange = {
-        aspectMask = {.COLOR},
-        levelCount = 1,
-        layerCount = 1,
-      },
-      srcAccessMask = {.COLOR_ATTACHMENT_WRITE},
-      dstAccessMask = {.SHADER_READ},
-    },
-    {
-      sType = .IMAGE_MEMORY_BARRIER,
-      oldLayout = .COLOR_ATTACHMENT_OPTIMAL,
-      newLayout = .SHADER_READ_ONLY_OPTIMAL,
-      srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-      dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-      image = self.frames[g_frame_index].gbuffer_normal.image,
-      subresourceRange = {
-        aspectMask = {.COLOR},
-        levelCount = 1,
-        layerCount = 1,
-      },
-      srcAccessMask = {.COLOR_ATTACHMENT_WRITE},
-      dstAccessMask = {.SHADER_READ},
-    },
-    {
-      sType = .IMAGE_MEMORY_BARRIER,
-      oldLayout = .COLOR_ATTACHMENT_OPTIMAL,
-      newLayout = .SHADER_READ_ONLY_OPTIMAL,
-      srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-      dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-      image = self.frames[g_frame_index].gbuffer_albedo.image,
-      subresourceRange = {
-        aspectMask = {.COLOR},
-        levelCount = 1,
-        layerCount = 1,
-      },
-      srcAccessMask = {.COLOR_ATTACHMENT_WRITE},
-      dstAccessMask = {.SHADER_READ},
-    },
-    {
-      sType = .IMAGE_MEMORY_BARRIER,
-      oldLayout = .COLOR_ATTACHMENT_OPTIMAL,
-      newLayout = .SHADER_READ_ONLY_OPTIMAL,
-      srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-      dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-      image = self.frames[g_frame_index].gbuffer_metallic_roughness.image,
-      subresourceRange = {
-        aspectMask = {.COLOR},
-        levelCount = 1,
-        layerCount = 1,
-      },
-      srcAccessMask = {.COLOR_ATTACHMENT_WRITE},
-      dstAccessMask = {.SHADER_READ},
-    },
-    {
-      sType = .IMAGE_MEMORY_BARRIER,
-      oldLayout = .COLOR_ATTACHMENT_OPTIMAL,
-      newLayout = .SHADER_READ_ONLY_OPTIMAL,
-      srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-      dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-      image = self.frames[g_frame_index].gbuffer_emissive.image,
-      subresourceRange = {
-        aspectMask = {.COLOR},
-        levelCount = 1,
-        layerCount = 1,
-      },
-      srcAccessMask = {.COLOR_ATTACHMENT_WRITE},
-      dstAccessMask = {.SHADER_READ},
-    },
-  }
-  vk.CmdPipelineBarrier(
+  // Transition G-buffer images to SHADER_READ_ONLY_OPTIMAL
+  // Batch transition all G-buffer images to SHADER_READ_ONLY_OPTIMAL in a single API call
+  transition_images(
     command_buffer,
+    gbuffer_images[:],
+    .COLOR_ATTACHMENT_OPTIMAL,
+    .SHADER_READ_ONLY_OPTIMAL,
+    {.COLOR},
+    1,
     {.COLOR_ATTACHMENT_OUTPUT},
     {.FRAGMENT_SHADER},
-    {},
-    0,
-    nil,
-    0,
-    nil,
-    len(gbuffer_final_barriers),
-    raw_data(gbuffer_final_barriers[:]),
+    {.SHADER_READ},
   )
   // log.debug("============ rendering main pass... =============")
   // Prepare RenderTarget and RenderInput for decoupled renderer
@@ -1213,7 +1020,7 @@ render :: proc(self: ^Engine) -> vk.Result {
   renderer_particle_render(&self.particle, command_buffer)
   renderer_particle_end(command_buffer)
   // log.debug("============ rendering post processes... =============")
-  prepare_image_for_shader_read(
+  transition_image_to_shader_read(
     command_buffer,
     self.frames[g_frame_index].final_image.image,
   )
@@ -1225,9 +1032,16 @@ render :: proc(self: ^Engine) -> vk.Result {
     self.frames[g_frame_index].gbuffer_normal.view,
     self.swapchain.extent,
   )
-  prepare_image_for_render(
+  transition_image(
     command_buffer,
     self.swapchain.images[self.swapchain.image_index],
+    .UNDEFINED,
+    .COLOR_ATTACHMENT_OPTIMAL,
+    {.COLOR},
+    {.TOP_OF_PIPE},
+    {.COLOR_ATTACHMENT_OUTPUT},
+    {},
+    {.COLOR_ATTACHMENT_WRITE},
   )
   renderer_postprocess_render(
     &self.postprocess,
@@ -1280,7 +1094,7 @@ render :: proc(self: ^Engine) -> vk.Result {
   renderer_ui_render(&self.ui, command_buffer)
   renderer_ui_end(&self.ui, command_buffer)
   // log.debug("============ preparing image for present... =============")
-  prepare_image_for_present(
+  transition_image_to_present(
     command_buffer,
     self.swapchain.images[self.swapchain.image_index],
   )

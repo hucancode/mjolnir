@@ -386,7 +386,10 @@ copy_image :: proc(dst: ImageBuffer, src: DataBuffer(u8)) -> vk.Result {
 }
 
 // Copy image but leave in TRANSFER_DST_OPTIMAL for mip generation
-copy_image_for_mips :: proc(dst: ImageBuffer, src: DataBuffer(u8)) -> vk.Result {
+copy_image_for_mips :: proc(
+  dst: ImageBuffer,
+  src: DataBuffer(u8),
+) -> vk.Result {
   transition_image_layout(
     dst.image,
     dst.format,
@@ -634,41 +637,6 @@ cube_depth_texture_deinit :: proc(self: ^CubeImageBuffer) {
   image_buffer_deinit(&self.buffer)
 }
 
-prepare_image_for_render :: proc(
-  command_buffer: vk.CommandBuffer,
-  image: vk.Image,
-  old_layout: vk.ImageLayout = .UNDEFINED,
-) {
-  barrier := vk.ImageMemoryBarrier {
-    sType = .IMAGE_MEMORY_BARRIER,
-    oldLayout = old_layout,
-    newLayout = .COLOR_ATTACHMENT_OPTIMAL,
-    srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-    dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-    image = image,
-    subresourceRange = {
-      aspectMask = {.COLOR},
-      baseMipLevel = 0,
-      levelCount = 1,
-      baseArrayLayer = 0,
-      layerCount = 1,
-    },
-    dstAccessMask = {.COLOR_ATTACHMENT_WRITE},
-  }
-  vk.CmdPipelineBarrier(
-    command_buffer,
-    {.TOP_OF_PIPE},
-    {.COLOR_ATTACHMENT_OUTPUT},
-    {},
-    0,
-    nil,
-    0,
-    nil,
-    1,
-    &barrier,
-  )
-}
-
 // Create image buffer with custom mip levels
 malloc_image_buffer_with_mips :: proc(
   width: u32,
@@ -739,7 +707,10 @@ create_image_view_with_mips :: proc(
     },
   }
   vk.CreateImageView(g_device, &create_info, nil, &view) or_return
-  log.infof("Image view created successfully with mip levels 0-%d", mip_levels - 1)
+  log.infof(
+    "Image view created successfully with mip levels 0-%d",
+    mip_levels - 1,
+  )
   return view, .SUCCESS
 }
 
@@ -751,7 +722,11 @@ generate_mipmaps :: proc(
   mip_levels: u32,
 ) -> vk.Result {
   format_props: vk.FormatProperties
-  vk.GetPhysicalDeviceFormatProperties(g_physical_device, format, &format_props)
+  vk.GetPhysicalDeviceFormatProperties(
+    g_physical_device,
+    format,
+    &format_props,
+  )
   if .SAMPLED_IMAGE_FILTER_LINEAR not_in format_props.optimalTilingFeatures {
     log.errorf("Texture image format does not support linear blitting!")
     return .ERROR_UNKNOWN
@@ -772,7 +747,7 @@ generate_mipmaps :: proc(
   }
   mip_width := i32(tex_width)
   mip_height := i32(tex_height)
-  for i in 1..<mip_levels {
+  for i in 1 ..< mip_levels {
     barrier.subresourceRange.baseMipLevel = i - 1
     barrier.oldLayout = .TRANSFER_DST_OPTIMAL
     barrier.newLayout = .TRANSFER_SRC_OPTIMAL
@@ -783,15 +758,15 @@ generate_mipmaps :: proc(
       {.TRANSFER},
       {.TRANSFER},
       {},
-      0, nil,
-      0, nil,
-      1, &barrier,
+      0,
+      nil,
+      0,
+      nil,
+      1,
+      &barrier,
     )
     blit := vk.ImageBlit {
-      srcOffsets = {
-        {0, 0, 0},
-        {mip_width, mip_height, 1},
-      },
+      srcOffsets = {{0, 0, 0}, {mip_width, mip_height, 1}},
       srcSubresource = {
         aspectMask = {.COLOR},
         mipLevel = i - 1,
@@ -811,9 +786,12 @@ generate_mipmaps :: proc(
     }
     vk.CmdBlitImage(
       cmd_buffer,
-      img.image, .TRANSFER_SRC_OPTIMAL,
-      img.image, .TRANSFER_DST_OPTIMAL,
-      1, &blit,
+      img.image,
+      .TRANSFER_SRC_OPTIMAL,
+      img.image,
+      .TRANSFER_DST_OPTIMAL,
+      1,
+      &blit,
       .LINEAR,
     )
     barrier.oldLayout = .TRANSFER_SRC_OPTIMAL
@@ -825,9 +803,12 @@ generate_mipmaps :: proc(
       {.TRANSFER},
       {.FRAGMENT_SHADER},
       {},
-      0, nil,
-      0, nil,
-      1, &barrier,
+      0,
+      nil,
+      0,
+      nil,
+      1,
+      &barrier,
     )
     mip_width = max(mip_width / 2, 1)
     mip_height = max(mip_height / 2, 1)
@@ -843,39 +824,95 @@ generate_mipmaps :: proc(
     {.TRANSFER},
     {.FRAGMENT_SHADER},
     {},
-    0, nil,
-    0, nil,
-    1, &barrier,
+    0,
+    nil,
+    0,
+    nil,
+    1,
+    &barrier,
   )
   return .SUCCESS
 }
 
-prepare_image_for_shader_read :: proc(
+transition_vk_images :: proc(
+  command_buffer: vk.CommandBuffer,
+  images: []vk.Image,
+  old_layout: vk.ImageLayout,
+  new_layout: vk.ImageLayout,
+  aspect_mask: vk.ImageAspectFlags,
+  layer_count: u32,
+  src_stage: vk.PipelineStageFlags,
+  dst_stage: vk.PipelineStageFlags,
+  dst_access_mask: vk.AccessFlags,
+) {
+  barriers := make([]vk.ImageMemoryBarrier, len(images))
+  defer delete(barriers)
+  for image, i in images {
+    barriers[i] = vk.ImageMemoryBarrier {
+      sType = .IMAGE_MEMORY_BARRIER,
+      oldLayout = old_layout,
+      newLayout = new_layout,
+      srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+      dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+      image = image,
+      subresourceRange = {
+        aspectMask = aspect_mask,
+        levelCount = 1,
+        layerCount = layer_count,
+      },
+      dstAccessMask = dst_access_mask,
+    }
+  }
+  vk.CmdPipelineBarrier(
+    command_buffer,
+    src_stage,
+    dst_stage,
+    {},
+    0,
+    nil,
+    0,
+    nil,
+    u32(len(barriers)),
+    raw_data(barriers),
+  )
+}
+
+transition_vk_image :: proc(
   command_buffer: vk.CommandBuffer,
   image: vk.Image,
-  old_layout: vk.ImageLayout = .COLOR_ATTACHMENT_OPTIMAL,
+  old_layout: vk.ImageLayout,
+  new_layout: vk.ImageLayout,
+  aspect_mask: vk.ImageAspectFlags,
+  src_stage: vk.PipelineStageFlags,
+  dst_stage: vk.PipelineStageFlags,
+  src_access_mask: vk.AccessFlags = {},
+  dst_access_mask: vk.AccessFlags = {},
+  base_mip_level: u32 = 0,
+  level_count: u32 = 1,
+  base_array_layer: u32 = 0,
+  layer_count: u32 = 1,
 ) {
   barrier := vk.ImageMemoryBarrier {
     sType = .IMAGE_MEMORY_BARRIER,
     oldLayout = old_layout,
-    newLayout = .SHADER_READ_ONLY_OPTIMAL,
+    newLayout = new_layout,
     srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
     dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
     image = image,
     subresourceRange = {
-      aspectMask = {.COLOR},
-      baseMipLevel = 0,
-      levelCount = 1,
-      baseArrayLayer = 0,
-      layerCount = 1,
+      aspectMask = aspect_mask,
+      baseMipLevel = base_mip_level,
+      levelCount = level_count,
+      baseArrayLayer = base_array_layer,
+      layerCount = layer_count,
     },
-    srcAccessMask = {.COLOR_ATTACHMENT_WRITE},
-    dstAccessMask = {.SHADER_READ},
+    srcAccessMask = src_access_mask,
+    dstAccessMask = dst_access_mask,
   }
   vk.CmdPipelineBarrier(
     command_buffer,
-    {.COLOR_ATTACHMENT_OUTPUT},
-    {.FRAGMENT_SHADER},
+    src_stage,
+    dst_stage,
     {},
     0,
     nil,
@@ -886,36 +923,133 @@ prepare_image_for_shader_read :: proc(
   )
 }
 
-prepare_image_for_present :: proc(
+transition_2d_images :: proc(
   command_buffer: vk.CommandBuffer,
-  image: vk.Image,
+  images: []ImageBuffer,
+  old_layout: vk.ImageLayout,
+  new_layout: vk.ImageLayout,
+  aspect_mask: vk.ImageAspectFlags,
+  layer_count: u32,
+  src_stage: vk.PipelineStageFlags,
+  dst_stage: vk.PipelineStageFlags,
+  dst_access_mask: vk.AccessFlags,
 ) {
-  barrier := vk.ImageMemoryBarrier {
-    sType = .IMAGE_MEMORY_BARRIER,
-    oldLayout = .COLOR_ATTACHMENT_OPTIMAL,
-    newLayout = .PRESENT_SRC_KHR,
-    srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-    dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-    image = image,
-    subresourceRange = {
-      aspectMask = {.COLOR},
-      baseMipLevel = 0,
-      levelCount = 1,
-      baseArrayLayer = 0,
-      layerCount = 1,
-    },
-    srcAccessMask = {.COLOR_ATTACHMENT_WRITE},
+  barriers := make([]vk.ImageMemoryBarrier, len(images))
+  defer delete(barriers)
+  for texture, i in images {
+    barriers[i] = vk.ImageMemoryBarrier {
+      sType = .IMAGE_MEMORY_BARRIER,
+      oldLayout = old_layout,
+      newLayout = new_layout,
+      srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+      dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+      image = texture.image,
+      subresourceRange = {
+        aspectMask = aspect_mask,
+        levelCount = 1,
+        layerCount = layer_count,
+      },
+      dstAccessMask = dst_access_mask,
+    }
   }
   vk.CmdPipelineBarrier(
     command_buffer,
-    {.COLOR_ATTACHMENT_OUTPUT},
-    {.BOTTOM_OF_PIPE},
+    src_stage,
+    dst_stage,
     {},
     0,
     nil,
     0,
     nil,
-    1,
-    &barrier,
+    u32(len(barriers)),
+    raw_data(barriers),
   )
+}
+
+transition_cube_images :: proc(
+  command_buffer: vk.CommandBuffer,
+  images: []CubeImageBuffer,
+  old_layout: vk.ImageLayout,
+  new_layout: vk.ImageLayout,
+  aspect_mask: vk.ImageAspectFlags,
+  layer_count: u32,
+  src_stage: vk.PipelineStageFlags,
+  dst_stage: vk.PipelineStageFlags,
+  dst_access_mask: vk.AccessFlags,
+) {
+  barriers := make([]vk.ImageMemoryBarrier, len(images))
+  defer delete(barriers)
+  for texture, i in images {
+    barriers[i] = vk.ImageMemoryBarrier {
+      sType = .IMAGE_MEMORY_BARRIER,
+      oldLayout = old_layout,
+      newLayout = new_layout,
+      srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+      dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+      image = texture.image,
+      subresourceRange = {
+        aspectMask = aspect_mask,
+        levelCount = 1,
+        layerCount = layer_count,
+      },
+      dstAccessMask = dst_access_mask,
+    }
+  }
+  vk.CmdPipelineBarrier(
+    command_buffer,
+    src_stage,
+    dst_stage,
+    {},
+    0,
+    nil,
+    0,
+    nil,
+    u32(len(barriers)),
+    raw_data(barriers),
+  )
+}
+
+transition_image_to_shader_read :: proc(
+  command_buffer: vk.CommandBuffer,
+  image: vk.Image,
+  old_layout: vk.ImageLayout = vk.ImageLayout.COLOR_ATTACHMENT_OPTIMAL,
+) {
+  transition_image(
+    command_buffer,
+    image,
+    old_layout,
+    .SHADER_READ_ONLY_OPTIMAL,
+    {.COLOR},
+    {.COLOR_ATTACHMENT_OUTPUT},
+    {.FRAGMENT_SHADER},
+    {.COLOR_ATTACHMENT_WRITE},
+    {.SHADER_READ},
+  )
+}
+
+transition_image_to_present :: proc(
+  command_buffer: vk.CommandBuffer,
+  image: vk.Image,
+) {
+  transition_image(
+    command_buffer,
+    image,
+    .COLOR_ATTACHMENT_OPTIMAL,
+    .PRESENT_SRC_KHR,
+    {.COLOR},
+    {.COLOR_ATTACHMENT_OUTPUT},
+    {.BOTTOM_OF_PIPE},
+    {.COLOR_ATTACHMENT_WRITE},
+    {},
+  )
+}
+
+transition_images :: proc {
+  transition_2d_images,
+  transition_cube_images,
+  transition_vk_images,
+}
+
+transition_image :: proc {
+  transition_vk_image,
 }
