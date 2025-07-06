@@ -4,6 +4,7 @@ import "../mjolnir/geometry"
 import "core:math"
 import linalg "core:math/linalg"
 import "core:testing"
+import "core:log"
 
 @(test)
 test_frustum_aabb_inside :: proc(t: ^testing.T) {
