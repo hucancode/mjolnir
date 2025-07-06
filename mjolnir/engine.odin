@@ -778,6 +778,8 @@ render :: proc(self: ^Engine) -> vk.Result {
       data.proj = linalg.matrix4_perspective(light.angle, 1.0, 0.01, light.radius)
       data.world = entry.item.transform.world_matrix
       data.view = linalg.matrix4_look_at(data.position.xyz, data.position.xyz + data.direction.xyz, linalg.VECTOR3F32_Y_AXIS)
+      data.radius = light.radius
+      data.angle = light.angle
       append(&lights, data)
       if light.cast_shadow && len(shadow_casters) < MAX_SHADOW_MAPS {
         append(&shadow_casters, data)
@@ -831,8 +833,10 @@ render :: proc(self: ^Engine) -> vk.Result {
     {.TOP_OF_PIPE},
     {.EARLY_FRAGMENT_TESTS},
     {},
-    0, nil,
-    0, nil,
+    0,
+    nil,
+    0,
+    nil,
     u32(len(initial_barriers)),
     raw_data(initial_barriers),
   )
@@ -952,8 +956,10 @@ render :: proc(self: ^Engine) -> vk.Result {
     {.LATE_FRAGMENT_TESTS},
     {.FRAGMENT_SHADER},
     {},
-    0, nil,
-    0, nil,
+    0,
+    nil,
+    0,
+    nil,
     u32(len(final_barriers)),
     raw_data(final_barriers),
   )
@@ -1051,8 +1057,10 @@ render :: proc(self: ^Engine) -> vk.Result {
     {.TOP_OF_PIPE},
     {.COLOR_ATTACHMENT_OUTPUT},
     {},
-    0, nil,
-    0, nil,
+    0,
+    nil,
+    0,
+    nil,
     len(gbuffer_initial_barriers),
     raw_data(gbuffer_initial_barriers[:]),
   )
@@ -1171,11 +1179,20 @@ render :: proc(self: ^Engine) -> vk.Result {
   render_target.extent = self.swapchain.extent
   // Ambient pass
   renderer_ambient_begin(&self.ambient, render_target, command_buffer)
-  renderer_ambient_render(&self.ambient, self.scene.camera.position, command_buffer)
+  renderer_ambient_render(
+    &self.ambient,
+    self.scene.camera.position,
+    command_buffer,
+  )
   renderer_ambient_end(command_buffer)
   // Per-light additive pass
   renderer_main_begin(&self.main, render_target, command_buffer)
-  renderer_main_render(&self.main, lights, self.scene.camera.position, command_buffer)
+  renderer_main_render(
+    &self.main,
+    lights,
+    self.scene.camera.position,
+    command_buffer,
+  )
   renderer_main_end(command_buffer)
   // log.debug("============ rendering particles... =============")
   renderer_particle_begin(

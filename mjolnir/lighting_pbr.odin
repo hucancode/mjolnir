@@ -17,16 +17,16 @@ BG_ORANGE_GRAY :: [4]f32{0.0179, 0.0179, 0.0117, 1.0}
 // 128 byte push constant for G-buffer, PBR/IBL params are specialization constants
 PushConstant :: struct {
   world:                    linalg.Matrix4f32, // 64 bytes
-  bone_matrix_offset:       u32,               // 4
-  albedo_index:             u32,               // 4
-  metallic_roughness_index: u32,               // 4
-  normal_index:             u32,               // 4
-  displacement_index:       u32,               // 4
-  emissive_index:           u32,               // 4
-  metallic_value:           f32,               // 4
-  roughness_value:          f32,               // 4
-  emissive_value:           f32,               // 4
-  padding:                  [3]u32,            // 4 (pad to 128)
+  bone_matrix_offset:       u32, // 4
+  albedo_index:             u32, // 4
+  metallic_roughness_index: u32, // 4
+  normal_index:             u32, // 4
+  displacement_index:       u32, // 4
+  emissive_index:           u32, // 4
+  metallic_value:           f32, // 4
+  roughness_value:          f32, // 4
+  emissive_value:           f32, // 4
+  padding:                  [3]u32, // 4 (pad to 128)
 }
 
 ShaderFeatures :: enum {
@@ -52,34 +52,32 @@ ShaderConfig :: struct {
 }
 
 RendererMain :: struct {
-  lighting_pipeline:        vk.Pipeline,
-  lighting_pipeline_layout: vk.PipelineLayout,
-  lighting_set_layout:      vk.DescriptorSetLayout,
-  lighting_descriptor_sets: [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
-  environment_map:          Handle,
-  brdf_lut:                 Handle,
-  environment_max_lod:      f32,
-  ibl_intensity:            f32,
+  lighting_pipeline:         vk.Pipeline,
+  lighting_pipeline_layout:  vk.PipelineLayout,
+  lighting_set_layout:       vk.DescriptorSetLayout,
+  lighting_descriptor_sets:  [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
+  environment_map:           Handle,
+  brdf_lut:                  Handle,
+  environment_max_lod:       f32,
+  ibl_intensity:             f32,
+  // Light volume meshes
+  sphere_mesh:               Handle,
+  cone_mesh:                 Handle,
+  directional_triangle_mesh: Handle,
 }
 // Push constant struct for lighting pass (matches shader/lighting/shader.frag)
-// 128 byte push constant budget, 2 matrices max
+// 128 byte push constant budget, no world matrix for light volume
 LightPushConstant :: struct {
-  light_view_proj:    linalg.Matrix4f32, // 64 bytes
-  light_color:        [3]f32,            // 12 bytes
-  light_angle:        f32,               // 4 bytes
-  light_position:     [3]f32,            // 12 bytes
-  light_radius:       f32,               // 4 bytes
-  light_direction:    [3]f32,            // 12 bytes
-  light_kind:         LightKind,         // 4 bytes
-  camera_position:    [3]f32,            // 12 bytes
-  shadow_map_id:      u32,               // 4 bytes
+  light_view_proj: linalg.Matrix4f32, // 64 bytes - for shadow mapping
+  light_color:     [3]f32, // 12 bytes
+  light_angle:     f32, // 4 bytes
+  light_position:  [3]f32, // 12 bytes
+  light_radius:    f32, // 4 bytes
+  light_direction: [3]f32, // 12 bytes
+  light_kind:      LightKind, // 4 bytes
+  camera_position: [3]f32, // 12 bytes
+  shadow_map_id:   u32, // 4 bytes
 }
-
-// Specialization constants for PBR/IBL textures (set at pipeline creation)
-// ENVIRONMENT_INDEX:   u32
-// BRDF_LUT_INDEX:      u32
-// ENVIRONMENT_MAX_LOD: f32
-// IBL_INTENSITY:       f32
 
 renderer_main_begin :: proc(
   self: ^RendererMain,
@@ -116,8 +114,9 @@ renderer_main_begin :: proc(
   vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
   vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
   descriptor_sets := [?]vk.DescriptorSet {
-    self.lighting_descriptor_sets[g_frame_index], // set = 0 (gbuffer textures, shadow maps)
-    g_textures_descriptor_set, // set = 1 (bindless textures)
+    g_camera_descriptor_sets[g_frame_index], // set = 0 (camera)
+    g_textures_descriptor_set, // set = 2 (bindless textures)
+    self.lighting_descriptor_sets[g_frame_index], // set = 1 (gbuffer textures, shadow maps)
   }
   vk.CmdBindDescriptorSets(
     command_buffer,
@@ -140,70 +139,88 @@ renderer_main_render :: proc(
 ) -> int {
   rendered_count := 0
   node_count := 0
-  // TODO: use different shape for lights to reduce overdraw, e.g. a quad or sphere
+
+  // Helper proc to bind and draw a mesh
+  bind_and_draw_mesh :: proc(
+    mesh_handle: Handle,
+    command_buffer: vk.CommandBuffer,
+  ) {
+    mesh := resource.get(g_meshes, mesh_handle)
+    offset: vk.DeviceSize = 0
+    vk.CmdBindVertexBuffers(
+      command_buffer,
+      0,
+      1,
+      &mesh.vertex_buffer.buffer,
+      &offset,
+    )
+    vk.CmdBindIndexBuffer(command_buffer, mesh.index_buffer.buffer, 0, .UINT32)
+    vk.CmdDrawIndexed(command_buffer, mesh.indices_len, 1, 0, 0, 0)
+  }
+
   for light_data, light_id in input {
     node_count += 1
     #partial switch light in light_data {
     case PointLightData:
       light_push := LightPushConstant {
-        light_view_proj  = light.proj * light.views[0],
-        light_color      = light.color.xyz,
-        light_position   = light.position.xyz,
-        light_radius     = light.radius,
-        light_kind       = LightKind.POINT,
-        camera_position  = camera_position.xyz,
-        shadow_map_id    = u32(light_id),
+        light_view_proj = light.proj * light.views[0],
+        light_color     = light.color.xyz,
+        light_position  = light.position.xyz,
+        light_radius    = light.radius,
+        light_kind      = LightKind.POINT,
+        camera_position = camera_position.xyz,
+        shadow_map_id   = u32(light_id),
       }
       vk.CmdPushConstants(
         command_buffer,
         self.lighting_pipeline_layout,
-        {.FRAGMENT},
+        {.VERTEX, .FRAGMENT},
         0,
         size_of(LightPushConstant),
         &light_push,
       )
-      vk.CmdDraw(command_buffer, 3, 1, 0, 0)
+      bind_and_draw_mesh(self.sphere_mesh, command_buffer)
       rendered_count += 1
     case DirectionalLightData:
       light_push := LightPushConstant {
-        light_view_proj  = light.proj * light.view,
-        light_color      = light.color.xyz,
-        light_direction  = light.direction.xyz,
-        light_kind       = LightKind.DIRECTIONAL,
-        camera_position  = camera_position.xyz,
-        shadow_map_id    = u32(light_id),
+        light_view_proj = light.proj * light.view,
+        light_color     = light.color.xyz,
+        light_direction = light.direction.xyz,
+        light_kind      = LightKind.DIRECTIONAL,
+        camera_position = camera_position.xyz,
+        shadow_map_id   = u32(light_id),
       }
       vk.CmdPushConstants(
         command_buffer,
         self.lighting_pipeline_layout,
-        {.FRAGMENT},
+        {.VERTEX, .FRAGMENT},
         0,
         size_of(LightPushConstant),
         &light_push,
       )
-      vk.CmdDraw(command_buffer, 3, 1, 0, 0)
+      bind_and_draw_mesh(self.directional_triangle_mesh, command_buffer)
       rendered_count += 1
     case SpotLightData:
       light_push := LightPushConstant {
-        light_view_proj  = light.proj * light.view,
-        light_color      = light.color.rgb,
-        light_angle      = light.angle,
-        light_position   = light.position.xyz,
-        light_radius     = light.radius,
-        light_direction  = light.direction.xyz,
-        light_kind       = LightKind.SPOT,
-        camera_position  = camera_position.xyz,
-        shadow_map_id    = u32(light_id),
+        light_view_proj = light.proj * light.view,
+        light_color     = light.color.rgb,
+        light_angle     = light.angle,
+        light_position  = light.position.xyz,
+        light_radius    = light.radius,
+        light_direction = light.direction.xyz,
+        light_kind      = LightKind.SPOT,
+        camera_position = camera_position.xyz,
+        shadow_map_id   = u32(light_id),
       }
       vk.CmdPushConstants(
         command_buffer,
         self.lighting_pipeline_layout,
-        {.FRAGMENT},
+        {.VERTEX, .FRAGMENT},
         0,
         size_of(LightPushConstant),
         &light_push,
       )
-      vk.CmdDraw(command_buffer, 3, 1, 0, 0)
+      bind_and_draw_mesh(self.cone_mesh, command_buffer)
       rendered_count += 1
     }
   }
@@ -281,11 +298,12 @@ renderer_main_init :: proc(
   ) or_return
   // g_textures_set_layout (set 1) must be created and managed globally, not here
   pipeline_set_layouts := [?]vk.DescriptorSetLayout {
-    self.lighting_set_layout, // set = 0 (gbuffer textures, shadow maps)
+    g_camera_descriptor_set_layout, // set = 0 (camera)
     g_textures_set_layout, // set = 1 (bindless textures)
+    self.lighting_set_layout, // set = 2 (gbuffer textures, shadow maps)
   }
   push_constant_range := vk.PushConstantRange {
-    stageFlags = {.FRAGMENT},
+    stageFlags = {.VERTEX, .FRAGMENT},
     size       = size_of(LightPushConstant),
   }
   vk.CreatePipelineLayout(
@@ -317,7 +335,11 @@ renderer_main_init :: proc(
     topology = .TRIANGLE_LIST,
   }
   vertex_input := vk.PipelineVertexInputStateCreateInfo {
-    sType = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+    sType                           = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+    vertexBindingDescriptionCount   = 1,
+    pVertexBindingDescriptions      = &geometry.VERTEX_BINDING_DESCRIPTION[0],
+    vertexAttributeDescriptionCount = 1, // Only position needed for lighting
+    pVertexAttributeDescriptions    = &geometry.VERTEX_ATTRIBUTE_DESCRIPTIONS[0], // Position at location 0
   }
   viewport_state := vk.PipelineViewportStateCreateInfo {
     sType         = .PIPELINE_VIEWPORT_STATE_CREATE_INFO,
@@ -328,7 +350,7 @@ renderer_main_init :: proc(
     sType       = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
     polygonMode = .FILL,
     cullMode    = {.BACK},
-    frontFace   = .COUNTER_CLOCKWISE,
+    frontFace   = .CLOCKWISE,
     lineWidth   = 1.0,
   }
   multisampling := vk.PipelineMultisampleStateCreateInfo {
@@ -351,7 +373,7 @@ renderer_main_init :: proc(
     pAttachments    = &color_blend_attachment,
   }
   depth_stencil := vk.PipelineDepthStencilStateCreateInfo {
-    sType            = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+    sType = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
   }
   color_formats := [?]vk.Format{color_format}
   rendering_info := vk.PipelineRenderingCreateInfo {
@@ -519,6 +541,17 @@ renderer_main_init :: proc(
   }
   log.debugf("Updating descriptor sets for lighting pass... %v", writes)
   vk.UpdateDescriptorSets(g_device, len(writes), raw_data(writes[:]), 0, nil)
+
+  // Initialize light volume meshes
+  self.sphere_mesh, _, _ = create_mesh(geometry.make_sphere())
+  self.cone_mesh, _, _ = create_mesh(
+    geometry.make_cone(height = 1, radius = 1),
+  )
+  self.directional_triangle_mesh, _, _ = create_mesh(
+    geometry.make_fullscreen_triangle(),
+  )
+  log.info("Light volume meshes initialized")
+
   return .SUCCESS
 }
 

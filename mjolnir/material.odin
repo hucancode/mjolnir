@@ -11,7 +11,7 @@ MaterialType :: enum {
 Material :: struct {
   type:               MaterialType,
   features:           ShaderFeatureSet,
-  is_lit:             bool,
+  is_transparent:     bool,
   albedo:             Handle,
   metallic_roughness: Handle,
   normal:             Handle,

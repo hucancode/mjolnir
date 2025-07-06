@@ -11,16 +11,16 @@ const int POINT_LIGHT = 0;
 const int DIRECTIONAL_LIGHT = 1;
 const int SPOT_LIGHT = 2;
 
-layout(set = 0, binding = 0) uniform sampler2D gbuffer_position;
-layout(set = 0, binding = 1) uniform sampler2D gbuffer_normal;
-layout(set = 0, binding = 2) uniform sampler2D gbuffer_albedo;
-layout(set = 0, binding = 3) uniform sampler2D gbuffer_metallic_roughness;
-layout(set = 0, binding = 4) uniform sampler2D gbuffer_emissive;
-layout(set = 0, binding = 5) uniform sampler2D shadow_maps[MAX_SHADOW_MAPS];
-layout(set = 0, binding = 6) uniform samplerCube cube_shadow_maps[MAX_SHADOW_MAPS];
-
 layout(set = 1, binding = 0) uniform texture2D textures[];
 layout(set = 1, binding = 1) uniform sampler samplers[];
+
+layout(set = 2, binding = 0) uniform sampler2D gbuffer_position;
+layout(set = 2, binding = 1) uniform sampler2D gbuffer_normal;
+layout(set = 2, binding = 2) uniform sampler2D gbuffer_albedo;
+layout(set = 2, binding = 3) uniform sampler2D gbuffer_metallic_roughness;
+layout(set = 2, binding = 4) uniform sampler2D gbuffer_emissive;
+layout(set = 2, binding = 5) uniform sampler2D shadow_maps[MAX_SHADOW_MAPS];
+layout(set = 2, binding = 6) uniform samplerCube cube_shadow_maps[MAX_SHADOW_MAPS];
 
 // We have a budget of 128 bytes for push constants
 // We can fit 2 matrices in here
@@ -97,19 +97,19 @@ vec3 brdf(vec3 N, vec3 V, vec3 albedo, float roughness, float metallic, vec3 fra
         float norm_dist = distance / max(0.01, light_radius);
         attenuation *= 1.0 - clamp(norm_dist * norm_dist, 0.0, 1.0);
     }
-    
+
     // Spot light cone attenuation
     if (light_kind == SPOT_LIGHT) {
         vec3 lightToFrag = normalize(fragPos - light_position.xyz);
         float cosTheta = dot(lightToFrag, normalize(light_direction.xyz));
         float cosOuterCone = cos(light_angle);
         float cosInnerCone = cos(light_angle * 0.7); // Inner cone is 70% of outer cone
-        
+
         // Smooth falloff from inner to outer cone
         float spotEffect = smoothstep(cosOuterCone, cosInnerCone, cosTheta);
         attenuation *= spotEffect;
     }
-    
+
     float NdotL = max(dot(N, L), 0.0);
     // Cook-Torrance BRDF
     float NDF = pow(roughness, 4.0) / (PI * pow((dot(N, H) * dot(N, H)) * (pow(roughness, 4.0) - 1.0) + 1.0, 2.0));
@@ -133,7 +133,6 @@ void main() {
     float roughness = clamp(mr.g, 0.0, 1.0);
     vec3 V = normalize(camera_position - position);
     float shadowFactor = calculateShadow(position, normal);
-    // shadowFactor = 1.0;
     // Only direct lighting, no ambient/IBL/emissive
     vec3 direct = brdf(normal, V, albedo, roughness, metallic, position) * shadowFactor;
     outColor = vec4(direct, 1.0);

@@ -109,7 +109,12 @@ setup :: proc(engine: ^mjolnir.Engine) {
         material = ground_mat_handle,
       },
     )
-    translate(&right_wall.transform, x = -size * 0.5, y = size * 1.0, z = -0.5 * size)
+    translate(
+      &right_wall.transform,
+      x = -size * 0.5,
+      y = size * 1.0,
+      z = -0.5 * size,
+    )
     rotate(&right_wall.transform, -math.PI * 0.5, linalg.VECTOR3F32_Z_AXIS)
     scale(&right_wall.transform, size)
 
@@ -121,7 +126,12 @@ setup :: proc(engine: ^mjolnir.Engine) {
         material = ground_mat_handle,
       },
     )
-    translate(&back_wall.transform, x = -0.5 * size, y = size * 1.0, z = -size * 0.5)
+    translate(
+      &back_wall.transform,
+      x = -0.5 * size,
+      y = size * 1.0,
+      z = -size * 0.5,
+    )
     rotate(&back_wall.transform, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
     scale(&back_wall.transform, size)
 
@@ -183,16 +193,16 @@ setup :: proc(engine: ^mjolnir.Engine) {
     should_make_spot_light = i % 2 != 0
     // should_make_spot_light = true
     if should_make_spot_light {
-      spot_angle := math.PI / 1.2
       light_handles[i], light = spawn(
         &engine.scene,
         SpotLightAttachment {
           color = color,
-          angle = f32(spot_angle),
-          radius = 10,
+          angle = math.PI * 0.2,
+          radius = 5,
           cast_shadow = true,
         },
       )
+      rotate(&light.transform, math.PI * 0.2, linalg.VECTOR3F32_X_AXIS)
     } else {
       light_handles[i], light = spawn(
         &engine.scene,
@@ -200,7 +210,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
       )
     }
     translate(&light.transform, 0, 3, -1)
-    rotate(&light.transform, math.PI * 0.45, linalg.VECTOR3F32_X_AXIS)
     cube_node: ^Node
     light_cube_handles[i], cube_node = spawn_child(
       &engine.scene,
@@ -226,12 +235,12 @@ setup :: proc(engine: ^mjolnir.Engine) {
     // Create a bright white ball to test bloom effect
     bright_material_handle, _, _ := create_material(emissive_value = 30.0)
     _, bright_ball_node := spawn(
-      &engine.scene,
-      MeshAttachment {
-        handle      = sphere_mesh_handle,
-        material    = bright_material_handle,
-        cast_shadow = false, // Emissive objects don't need shadows
-      },
+    &engine.scene,
+    MeshAttachment {
+      handle      = sphere_mesh_handle,
+      material    = bright_material_handle,
+      cast_shadow = false, // Emissive objects don't need shadows
+    },
     )
     translate(&bright_ball_node.transform, x = 1.0) // Position it above the ground
     scale(&bright_ball_node.transform, 0.2) // Make it a reasonable size

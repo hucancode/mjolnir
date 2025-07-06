@@ -353,6 +353,46 @@ make_cone :: proc(
   return
 }
 
+// Generate a full-screen triangle for directional lights
+// Uses special coordinates that cover the entire screen when transformed
+make_fullscreen_triangle :: proc(
+  color: [4]f32 = {1.0, 1.0, 1.0, 1.0},
+) -> (
+  ret: Geometry,
+) {
+  ret.vertices = make([]Vertex, 3)
+  ret.indices = make([]u32, 3)
+  
+  // Full-screen triangle vertices in NDC space (clip coordinates)
+  // These coordinates cover the entire screen when used directly
+  ret.vertices[0] = Vertex {
+    position = {-1.0, -1.0, 0.0}, // Bottom-left
+    normal   = {0.0, 0.0, 1.0},
+    color    = color,
+    uv       = {0.0, 0.0},
+  }
+  ret.vertices[1] = Vertex {
+    position = {3.0, -1.0, 0.0},  // Bottom-right (extends beyond screen)
+    normal   = {0.0, 0.0, 1.0},
+    color    = color, 
+    uv       = {2.0, 0.0},
+  }
+  ret.vertices[2] = Vertex {
+    position = {-1.0, 3.0, 0.0},  // Top-left (extends beyond screen)
+    normal   = {0.0, 0.0, 1.0},
+    color    = color,
+    uv       = {0.0, 2.0},
+  }
+  
+  // Simple triangle indices
+  ret.indices[0] = 0
+  ret.indices[1] = 1  
+  ret.indices[2] = 2
+  
+  ret.aabb = aabb_from_vertices(ret.vertices)
+  return
+}
+
 make_capsule :: proc(
   segments: u32 = 16,
   rings: u32 = 8,
