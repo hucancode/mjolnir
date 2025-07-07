@@ -5,8 +5,8 @@ VERT_SHADERS := $(shell find $(SHADER_DIR) -name "shader.vert")
 FRAG_SHADERS := $(shell find $(SHADER_DIR) -name "shader.frag")
 SPV_SHADERS := $(patsubst $(SHADER_DIR)/%/shader.vert,$(SHADER_DIR)/%/vert.spv,$(VERT_SHADERS)) \
                $(patsubst $(SHADER_DIR)/%/shader.frag,$(SHADER_DIR)/%/frag.spv,$(FRAG_SHADERS))
-COMP_SHADERS := $(shell find $(SHADER_DIR) -name "compute.comp")
-SPV_COMPUTE_SHADERS := $(patsubst $(SHADER_DIR)/%/compute.comp,$(SHADER_DIR)/%/compute.spv,$(COMP_SHADERS))
+COMP_SHADERS := $(shell find $(SHADER_DIR) -name "*.comp")
+SPV_COMPUTE_SHADERS := $(patsubst %.comp,%.spv,$(COMP_SHADERS))
 
 run: shader
 	odin run . -out:bin/main
@@ -29,7 +29,7 @@ test:
 clean:
 	rm -rf bin/*
 
-$(SHADER_DIR)/%/compute.spv: $(SHADER_DIR)/%/compute.comp
+%.spv: %.comp
 	@echo "Compiling compute shader $<..."
 	@glslc "$<" -o "$@"
 
