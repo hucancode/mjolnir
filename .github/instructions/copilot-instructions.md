@@ -1,4 +1,4 @@
-__This file is used to teach GitHub Copilot or other AI assistants.__
+__This file is used to teach GitHub Copilot or other AI assistants__
 
 # Odin features
 variable declaration
@@ -147,4 +147,21 @@ for i in 0..<10 do log.infof("i = %d", i)
 for i in 0..<10 {
     log.infof("i = %d", i)
 }
+```
+slice and dynamic slice
+```odin
+// dynamic slice can be append after creation, this is not recommended for performance critical code
+my_slice := make([dynamic]f32, 0)
+defer delete(my_slice)
+append(&my_slice, 10.0)
+log.infof("%v", my_slice)
+// fixed slice can not be append after creation, but we can create with a good size at creation time, this is not recommended for performance critical code but it is better than dynamic slice
+my_slice_fixed := make([]f32, 1)
+defer delete(my_slice_fixed)
+my_slice_fixed[0] = 10.0
+log.infof("%v", my_slice_fixed)
+// static array must be specify with size at compile time, this is the fastest
+my_array := [1]f32
+my_array[0] = 10.0
+log.infof("%v", my_array)
 ```
