@@ -75,6 +75,14 @@ ParticlePushConstants :: struct {
   projection: linalg.Matrix4f32,
 }
 
+// Draw command for indirect rendering
+DrawCommand :: struct {
+  vertex_count:    u32,
+  instance_count:  u32,
+  first_vertex:    u32,
+  first_instance:  u32,
+}
+
 RendererParticle :: struct {
   // Compute pipeline
   params_buffer:                 DataBuffer(ParticleSystemParams),
@@ -85,6 +93,14 @@ RendererParticle :: struct {
   compute_descriptor_set:        vk.DescriptorSet,
   compute_pipeline_layout:       vk.PipelineLayout,
   compute_pipeline:              vk.Pipeline,
+  // Compaction pipeline
+  compact_particle_buffer:       DataBuffer(Particle),
+  draw_command_buffer:           DataBuffer(DrawCommand),
+  compact_count_buffer:          DataBuffer(u32),
+  compact_descriptor_set_layout: vk.DescriptorSetLayout,
+  compact_descriptor_set:        vk.DescriptorSet,
+  compact_pipeline_layout:       vk.PipelineLayout,
+  compact_pipeline:              vk.Pipeline,
   // Particle pool management
   free_particle_indices:         [dynamic]int,
   active_particle_count:         u32,
@@ -108,6 +124,7 @@ spawn_particle :: proc(
   emitter: ^Emitter,
 ) -> bool {
   if len(self.free_particle_indices) == 0 {
+    log.warn("No free particle indices available")
     return false
   }
   idx := pop(&self.free_particle_indices)
@@ -162,10 +179,7 @@ compute_particles :: proc(
   self: ^RendererParticle,
   command_buffer: vk.CommandBuffer,
 ) {
-  // log.info(
-  //   "binding compute pipeline",
-  //   renderer.pipeline_particle_comp.pipeline,
-  // )
+  // Update particles
   vk.CmdBindPipeline(command_buffer, .COMPUTE, self.compute_pipeline)
   vk.CmdBindDescriptorSets(
     command_buffer,
@@ -183,19 +197,65 @@ compute_particles :: proc(
     1,
     1,
   )
-  // Insert memory barrier to ensure compute results are visible
-  barrier := vk.MemoryBarrier {
+
+  // Memory barrier before compaction
+  barrier1 := vk.MemoryBarrier {
     sType         = .MEMORY_BARRIER,
     srcAccessMask = {.SHADER_WRITE},
-    dstAccessMask = {.VERTEX_ATTRIBUTE_READ},
+    dstAccessMask = {.SHADER_READ},
   }
   vk.CmdPipelineBarrier(
     command_buffer,
     {.COMPUTE_SHADER},
-    {.VERTEX_INPUT},
+    {.COMPUTE_SHADER},
     {},
     1,
-    &barrier,
+    &barrier1,
+    0,
+    nil,
+    0,
+    nil,
+  )
+
+  compact_particles(self, command_buffer)
+}
+
+compact_particles :: proc(
+  self: ^RendererParticle,
+  command_buffer: vk.CommandBuffer,
+) {
+  // Run compaction
+  vk.CmdBindPipeline(command_buffer, .COMPUTE, self.compact_pipeline)
+  vk.CmdBindDescriptorSets(
+    command_buffer,
+    .COMPUTE,
+    self.compact_pipeline_layout,
+    0,
+    1,
+    &self.compact_descriptor_set,
+    0,
+    nil,
+  )
+  vk.CmdDispatch(
+    command_buffer,
+    u32(MAX_PARTICLES + COMPUTE_PARTICLE_BATCH - 1) / COMPUTE_PARTICLE_BATCH,
+    1,
+    1,
+  )
+
+  // Final barrier for rendering
+  barrier3 := vk.MemoryBarrier {
+    sType         = .MEMORY_BARRIER,
+    srcAccessMask = {.SHADER_WRITE},
+    dstAccessMask = {.VERTEX_ATTRIBUTE_READ, .INDIRECT_COMMAND_READ},
+  }
+  vk.CmdPipelineBarrier(
+    command_buffer,
+    {.COMPUTE_SHADER},
+    {.VERTEX_INPUT, .DRAW_INDIRECT},
+    {},
+    1,
+    &barrier3,
     0,
     nil,
     0,
@@ -211,10 +271,23 @@ renderer_particle_deinit :: proc(self: ^RendererParticle) {
     self.compute_descriptor_set_layout,
     nil,
   )
+  vk.DestroyPipeline(g_device, self.compact_pipeline, nil)
+  vk.DestroyPipelineLayout(g_device, self.compact_pipeline_layout, nil)
+  vk.DestroyDescriptorSetLayout(
+    g_device,
+    self.compact_descriptor_set_layout,
+    nil,
+  )
   vk.DestroyPipeline(g_device, self.render_pipeline, nil)
   vk.DestroyPipelineLayout(g_device, self.render_pipeline_layout, nil)
   delete(self.free_particle_indices)
-  // Free buffers
+  data_buffer_deinit(&self.params_buffer)
+  data_buffer_deinit(&self.particle_buffer)
+  data_buffer_deinit(&self.compact_particle_buffer)
+  data_buffer_deinit(&self.draw_command_buffer)
+  data_buffer_deinit(&self.compact_count_buffer)
+  data_buffer_deinit(&self.emitter_buffer)
+  data_buffer_deinit(&self.force_field_buffer)
 }
 
 renderer_particle_init :: proc(self: ^RendererParticle) -> vk.Result {
@@ -238,6 +311,24 @@ renderer_particle_init :: proc(self: ^RendererParticle) -> vk.Result {
     MAX_FORCE_FIELDS,
     {.STORAGE_BUFFER},
   ) or_return
+
+  // Create compaction buffers
+  self.compact_particle_buffer = create_host_visible_buffer(
+    Particle,
+    MAX_PARTICLES,
+    {.STORAGE_BUFFER, .VERTEX_BUFFER},
+  ) or_return
+  self.draw_command_buffer = create_host_visible_buffer(
+    DrawCommand,
+    1,
+    {.STORAGE_BUFFER, .INDIRECT_BUFFER},
+  ) or_return
+  self.compact_count_buffer = create_host_visible_buffer(
+    u32,
+    1,
+    {.STORAGE_BUFFER},
+  ) or_return
+
   self.free_particle_indices = make([dynamic]int, 0)
   initialize_particle_pool(self)
   compute_bindings := [?]vk.DescriptorSetLayoutBinding {
@@ -369,6 +460,142 @@ renderer_particle_init :: proc(self: ^RendererParticle) -> vk.Result {
     nil,
     &self.compute_pipeline,
   ) or_return
+
+  // Create compaction pipeline
+  compact_bindings := [?]vk.DescriptorSetLayoutBinding {
+    {
+      binding = 0,
+      descriptorType = .STORAGE_BUFFER,
+      descriptorCount = 1,
+      stageFlags = {.COMPUTE},
+    },
+    {
+      binding = 1,
+      descriptorType = .STORAGE_BUFFER,
+      descriptorCount = 1,
+      stageFlags = {.COMPUTE},
+    },
+    {
+      binding = 2,
+      descriptorType = .STORAGE_BUFFER,
+      descriptorCount = 1,
+      stageFlags = {.COMPUTE},
+    },
+    {
+      binding = 3,
+      descriptorType = .STORAGE_BUFFER,
+      descriptorCount = 1,
+      stageFlags = {.COMPUTE},
+    },
+  }
+  vk.CreateDescriptorSetLayout(
+    g_device,
+    &{
+      sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+      bindingCount = len(compact_bindings),
+      pBindings = raw_data(compact_bindings[:]),
+    },
+    nil,
+    &self.compact_descriptor_set_layout,
+  ) or_return
+  vk.AllocateDescriptorSets(
+    g_device,
+    &{
+      sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
+      descriptorPool = g_descriptor_pool,
+      descriptorSetCount = 1,
+      pSetLayouts = &self.compact_descriptor_set_layout,
+    },
+    &self.compact_descriptor_set,
+  ) or_return
+
+  source_buffer_info := vk.DescriptorBufferInfo {
+    buffer = self.particle_buffer.buffer,
+    range  = vk.DeviceSize(self.particle_buffer.bytes_count),
+  }
+  compact_buffer_info := vk.DescriptorBufferInfo {
+    buffer = self.compact_particle_buffer.buffer,
+    range  = vk.DeviceSize(self.compact_particle_buffer.bytes_count),
+  }
+  draw_cmd_buffer_info := vk.DescriptorBufferInfo {
+    buffer = self.draw_command_buffer.buffer,
+    range  = vk.DeviceSize(self.draw_command_buffer.bytes_count),
+  }
+  count_buffer_info := vk.DescriptorBufferInfo {
+    buffer = self.compact_count_buffer.buffer,
+    range  = vk.DeviceSize(self.compact_count_buffer.bytes_count),
+  }
+
+  compact_writes := [?]vk.WriteDescriptorSet {
+    {
+      sType = .WRITE_DESCRIPTOR_SET,
+      dstSet = self.compact_descriptor_set,
+      dstBinding = 0,
+      descriptorType = .STORAGE_BUFFER,
+      descriptorCount = 1,
+      pBufferInfo = &source_buffer_info,
+    },
+    {
+      sType = .WRITE_DESCRIPTOR_SET,
+      dstSet = self.compact_descriptor_set,
+      dstBinding = 1,
+      descriptorType = .STORAGE_BUFFER,
+      descriptorCount = 1,
+      pBufferInfo = &compact_buffer_info,
+    },
+    {
+      sType = .WRITE_DESCRIPTOR_SET,
+      dstSet = self.compact_descriptor_set,
+      dstBinding = 2,
+      descriptorType = .STORAGE_BUFFER,
+      descriptorCount = 1,
+      pBufferInfo = &draw_cmd_buffer_info,
+    },
+    {
+      sType = .WRITE_DESCRIPTOR_SET,
+      dstSet = self.compact_descriptor_set,
+      dstBinding = 3,
+      descriptorType = .STORAGE_BUFFER,
+      descriptorCount = 1,
+      pBufferInfo = &count_buffer_info,
+    },
+  }
+  vk.UpdateDescriptorSets(g_device, len(compact_writes), raw_data(compact_writes[:]), 0, nil)
+
+  vk.CreatePipelineLayout(
+    g_device,
+    &{
+      sType = .PIPELINE_LAYOUT_CREATE_INFO,
+      setLayoutCount = 1,
+      pSetLayouts = &self.compact_descriptor_set_layout,
+    },
+    nil,
+    &self.compact_pipeline_layout,
+  ) or_return
+
+  compact_shader_module := create_shader_module(
+    #load("shader/particle/compact.spv"),
+  ) or_return
+  defer vk.DestroyShaderModule(g_device, compact_shader_module, nil)
+  compact_pipeline_info := vk.ComputePipelineCreateInfo {
+    sType = .COMPUTE_PIPELINE_CREATE_INFO,
+    stage = {
+      sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
+      stage = {.COMPUTE},
+      module = compact_shader_module,
+      pName = "main",
+    },
+    layout = self.compact_pipeline_layout,
+  }
+  vk.CreateComputePipelines(
+    g_device,
+    0,
+    1,
+    &compact_pipeline_info,
+    nil,
+    &self.compact_pipeline,
+  ) or_return
+
   descriptor_set_layouts := [?]vk.DescriptorSetLayout {
     g_camera_descriptor_set_layout, // set = 0 for camera
     g_textures_set_layout, // set = 1 for textures
@@ -634,6 +861,11 @@ renderer_particle_render :: proc(
   self: ^RendererParticle,
   command_buffer: vk.CommandBuffer,
 ) {
+  compact_count := data_buffer_get(&self.compact_count_buffer)
+  draw_count := compact_count^
+  if draw_count == 0 {
+    return
+  }
   vk.CmdBindPipeline(command_buffer, .GRAPHICS, self.render_pipeline)
   descriptor_sets := [?]vk.DescriptorSet {
     g_camera_descriptor_sets[g_frame_index], // set 0 (camera)
@@ -654,10 +886,10 @@ renderer_particle_render :: proc(
     command_buffer,
     0,
     1,
-    &self.particle_buffer.buffer,
+    &self.compact_particle_buffer.buffer,
     &offset,
   )
-  vk.CmdDraw(command_buffer, MAX_PARTICLES, 1, 0, 0)
+  vk.CmdDraw(command_buffer, draw_count, 1, 0, 0)
 }
 
 renderer_particle_end :: proc(command_buffer: vk.CommandBuffer) {
@@ -674,4 +906,14 @@ get_particle_pool_stats :: proc(
   return self.active_particle_count,
     u32(len(self.free_particle_indices)),
     MAX_PARTICLES
+}
+
+get_particle_render_stats :: proc(
+  self: ^RendererParticle,
+) -> (
+  rendered: u32,
+  total_allocated: u32,
+) {
+  compact_count := data_buffer_get(&self.compact_count_buffer)
+  return compact_count^, MAX_PARTICLES
 }

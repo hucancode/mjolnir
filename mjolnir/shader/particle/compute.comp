@@ -93,11 +93,11 @@ const vec3 GRAVITY = vec3(0.0, -9.8, 0.0);
 void main() {
     uint i = gl_GlobalInvocationID.x;
     if (i >= MAX_PARTICLES) return;
-    if (particles[i].is_dead != 0) return;
     if (particles[i].life <= 0.0) return;
     vec3 p = particles[i].position.xyz;
     // Process actual force fields, using the dynamic forcefield_count
-    for (int f = 0; f < min(forcefield_count, MAX_FORCE_FIELDS); ++f) {
+    uint n = min(forcefield_count, MAX_FORCE_FIELDS);
+    for (int f = 0; f < n; ++f) {
         ForceField ff = forcefields[f];
         // Ignore unused slots (area_of_effect == 0 means unused)
         if (ff.area_of_effect <= 0.0) continue;

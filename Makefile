@@ -17,6 +17,9 @@ debug: shader
 build: shader
 	odin build . -out:bin/main
 
+build-debug: shader
+	odin build . -out:bin/main -debug
+
 check: shader
 	odin check .
 

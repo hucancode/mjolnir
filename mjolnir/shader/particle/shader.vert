@@ -27,19 +27,10 @@ layout(set = 0, binding = 0) uniform SceneUniforms {
 };
 
 void main() {
-    // Skip dead particles by moving them off screen
-    if (inIsDead != 0) {
-        gl_Position = vec4(0.0, 0.0, -1.0, 1.0); // Behind camera
-        gl_PointSize = 0.0;
-        outColor = vec4(0.0);
-        outTextureIndex = 0;
-        return;
-    }
     vec4 cameraPosition = -inverse(view)[3];
     outColor = inColor;
     outTextureIndex = inTextureIndex;
     gl_Position = proj * view * inPosition;
     float dist = clamp(length((cameraPosition - inPosition).xyz), 1.0, 20.0);
     gl_PointSize = clamp(inSize / dist, 10.0, 100.0);
-    // gl_PointSize = 50.0;
 }

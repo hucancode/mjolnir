@@ -342,10 +342,14 @@ setup :: proc(engine: ^mjolnir.Engine) {
 
 render_2d :: proc(engine: ^mjolnir.Engine, ctx: ^mu.Context) {
   using mjolnir
-  if mu.window(ctx, "Particle System", {40, 360, 300, 150}, {.NO_CLOSE}) {
+  if mu.window(ctx, "Particle System", {40, 360, 300, 200}, {.NO_CLOSE}) {
     active, _, total := get_particle_pool_stats(&engine.particle)
+    rendered, max_particles := get_particle_render_stats(&engine.particle)
     mu.label(ctx, fmt.tprintf("Active %d", active))
-    mu.label(ctx, fmt.tprintf("Total %d", total))
+    mu.label(ctx, fmt.tprintf("Rendered %d", rendered))
+    mu.label(ctx, fmt.tprintf("Max Particles %d", max_particles))
+    efficiency := f32(rendered) / f32(max_particles) * 100.0
+    mu.label(ctx, fmt.tprintf("Efficiency %.1f%%", efficiency))
   }
 }
 

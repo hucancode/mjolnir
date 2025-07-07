@@ -1,0 +1,111 @@
+#version 450
+
+const int MAX_PARTICLES = 65536;
+
+struct Particle {
+    vec4 position;
+    vec4 velocity;
+    vec4 color_start;
+    vec4 color_end;
+    vec4 color;
+    float size;
+    float size_end;
+    float life;
+    float max_life;
+    uint is_dead;
+    float weight;
+    uint texture_index;
+    uint padding;
+};
+
+struct DrawCommand {
+    uint vertex_count;
+    uint instance_count;
+    uint first_vertex;
+    uint first_instance;
+};
+
+layout(binding = 0) buffer SourceParticleBuffer {
+    Particle source_particles[];
+};
+
+layout(binding = 1) buffer CompactParticleBuffer {
+    Particle compact_particles[];
+};
+
+layout(binding = 2) buffer DrawCommandBuffer {
+    DrawCommand draw_command;
+};
+
+layout(binding = 3) buffer CompactCountBuffer {
+    uint compact_count;
+};
+
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+shared uint local_count;
+shared uint local_alive_particles[256];
+shared uint local_alive_count;
+
+void main() {
+    uint global_index = gl_GlobalInvocationID.x;
+    uint local_index = gl_LocalInvocationIndex;
+
+    // First thread resets the global counter
+    if (global_index == 0) {
+        compact_count = 0;
+    }
+
+    // Initialize shared memory
+    if (local_index == 0) {
+        local_alive_count = 0;
+    }
+    barrier();
+
+    // Check if this particle is alive
+    bool is_alive = false;
+    if (global_index < MAX_PARTICLES) {
+        is_alive = source_particles[global_index].life > 0.0;
+    }
+
+    // Compact alive particles within workgroup
+    if (is_alive) {
+        uint local_write_index = atomicAdd(local_alive_count, 1);
+        local_alive_particles[local_write_index] = global_index;
+    }
+
+    barrier();
+
+    // First thread in workgroup reserves space in global compact buffer
+    uint global_write_offset = 0;
+    if (local_index == 0 && local_alive_count > 0) {
+        global_write_offset = atomicAdd(compact_count, local_alive_count);
+    }
+
+    barrier();
+
+    // Copy alive particles to compact buffer
+    if (local_index < local_alive_count) {
+        uint source_index = local_alive_particles[local_index];
+        uint compact_index = global_write_offset + local_index;
+        compact_particles[compact_index] = source_particles[source_index];
+    }
+
+    // Ensure all workgroups have finished compaction before writing draw command
+    memoryBarrierBuffer();
+
+    // Only the first thread initializes the draw command after all compaction is done
+    if (gl_GlobalInvocationID.x == 0) {
+        // Ensure all memory operations from all workgroups are visible
+        memoryBarrierBuffer();
+
+        // Read the final compact count
+        uint final_count = compact_count;
+
+        // Initialize draw command with the final count
+        draw_command.vertex_count = final_count;
+        draw_command.instance_count = 1;
+        draw_command.first_vertex = 0;
+        draw_command.first_instance = 0;
+    }
+}
