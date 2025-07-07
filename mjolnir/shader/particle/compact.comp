@@ -12,10 +12,9 @@ struct Particle {
     float size_end;
     float life;
     float max_life;
-    uint is_dead;
     float weight;
     uint texture_index;
-    uint padding;
+    uint padding[6];
 };
 
 struct DrawCommand {
@@ -51,11 +50,6 @@ void main() {
     uint global_index = gl_GlobalInvocationID.x;
     uint local_index = gl_LocalInvocationIndex;
 
-    // First thread resets the global counter
-    if (global_index == 0) {
-        compact_count = 0;
-    }
-
     // Initialize shared memory
     if (local_index == 0) {
         local_alive_count = 0;
@@ -63,10 +57,7 @@ void main() {
     barrier();
 
     // Check if this particle is alive
-    bool is_alive = false;
-    if (global_index < MAX_PARTICLES) {
-        is_alive = source_particles[global_index].life > 0.0;
-    }
+    bool is_alive = global_index < MAX_PARTICLES && source_particles[global_index].life > 0.0;
 
     // Compact alive particles within workgroup
     if (is_alive) {
@@ -81,8 +72,7 @@ void main() {
     if (local_index == 0 && local_alive_count > 0) {
         global_write_offset = atomicAdd(compact_count, local_alive_count);
     }
-
-    barrier();
+    barrier(); // Ensure all threads see the correct global_write_offset
 
     // Copy alive particles to compact buffer
     if (local_index < local_alive_count) {
@@ -98,12 +88,8 @@ void main() {
     if (gl_GlobalInvocationID.x == 0) {
         // Ensure all memory operations from all workgroups are visible
         memoryBarrierBuffer();
-
-        // Read the final compact count
-        uint final_count = compact_count;
-
         // Initialize draw command with the final count
-        draw_command.vertex_count = final_count;
+        draw_command.vertex_count = compact_count;
         draw_command.instance_count = 1;
         draw_command.first_vertex = 0;
         draw_command.first_instance = 0;
