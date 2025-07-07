@@ -51,19 +51,19 @@ ShaderConfig :: struct {
   has_emissive_texture:           b32,
 }
 
-RendererMain :: struct {
-  lighting_pipeline:         vk.Pipeline,
-  lighting_pipeline_layout:  vk.PipelineLayout,
-  lighting_set_layout:       vk.DescriptorSetLayout,
-  lighting_descriptor_sets:  [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
-  environment_map:           Handle,
-  brdf_lut:                  Handle,
-  environment_max_lod:       f32,
-  ibl_intensity:             f32,
+RendererLighting :: struct {
+  lighting_pipeline:        vk.Pipeline,
+  lighting_pipeline_layout: vk.PipelineLayout,
+  lighting_set_layout:      vk.DescriptorSetLayout,
+  lighting_descriptor_sets: [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
+  environment_map:          Handle,
+  brdf_lut:                 Handle,
+  environment_max_lod:      f32,
+  ibl_intensity:            f32,
   // Light volume meshes
-  sphere_mesh:               Handle,
-  cone_mesh:                 Handle,
-  directional_triangle_mesh: Handle,
+  sphere_mesh:              Handle,
+  cone_mesh:                Handle,
+  fullscreen_triangle_mesh: Handle,
 }
 // Push constant struct for lighting pass (matches shader/lighting/shader.frag)
 // 128 byte push constant budget, no world matrix for light volume
@@ -79,168 +79,8 @@ LightPushConstant :: struct {
   shadow_map_id:   u32, // 4 bytes
 }
 
-renderer_main_begin :: proc(
-  self: ^RendererMain,
-  target: RenderTarget,
-  command_buffer: vk.CommandBuffer,
-) {
-  color_attachment := vk.RenderingAttachmentInfoKHR {
-    sType = .RENDERING_ATTACHMENT_INFO_KHR,
-    imageView = target.final,
-    imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
-    loadOp = .LOAD,
-    storeOp = .STORE,
-    clearValue = {color = {float32 = BG_BLUE_GRAY}},
-  }
-  depth_attachment := vk.RenderingAttachmentInfoKHR {
-    sType       = .RENDERING_ATTACHMENT_INFO_KHR,
-    imageView   = target.depth,
-    imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-    loadOp      = .LOAD,
-    storeOp     = .DONT_CARE,
-  }
-  render_info := vk.RenderingInfoKHR {
-    sType = .RENDERING_INFO_KHR,
-    renderArea = {extent = target.extent},
-    layerCount = 1,
-    colorAttachmentCount = 1,
-    pColorAttachments = &color_attachment,
-    pDepthAttachment = &depth_attachment,
-  }
-  vk.CmdBeginRenderingKHR(command_buffer, &render_info)
-  viewport := vk.Viewport {
-    x        = 0,
-    y        = f32(target.extent.height),
-    width    = f32(target.extent.width),
-    height   = -f32(target.extent.height),
-    minDepth = 0.0,
-    maxDepth = 1.0,
-  }
-  scissor := vk.Rect2D {
-    extent = target.extent,
-  }
-  vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
-  vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
-  descriptor_sets := [?]vk.DescriptorSet {
-    g_camera_descriptor_sets[g_frame_index], // set = 0 (camera)
-    g_textures_descriptor_set, // set = 2 (bindless textures)
-    self.lighting_descriptor_sets[g_frame_index], // set = 1 (gbuffer textures, shadow maps)
-  }
-  vk.CmdBindDescriptorSets(
-    command_buffer,
-    .GRAPHICS,
-    self.lighting_pipeline_layout,
-    0,
-    len(descriptor_sets),
-    raw_data(descriptor_sets[:]),
-    0,
-    nil,
-  )
-  vk.CmdBindPipeline(command_buffer, .GRAPHICS, self.lighting_pipeline)
-}
-
-renderer_main_render :: proc(
-  self: ^RendererMain,
-  input: [dynamic]LightData,
-  camera_position: linalg.Vector3f32,
-  command_buffer: vk.CommandBuffer,
-) -> int {
-  rendered_count := 0
-  node_count := 0
-
-  // Helper proc to bind and draw a mesh
-  bind_and_draw_mesh :: proc(
-    mesh_handle: Handle,
-    command_buffer: vk.CommandBuffer,
-  ) {
-    mesh := resource.get(g_meshes, mesh_handle)
-    offset: vk.DeviceSize = 0
-    vk.CmdBindVertexBuffers(
-      command_buffer,
-      0,
-      1,
-      &mesh.vertex_buffer.buffer,
-      &offset,
-    )
-    vk.CmdBindIndexBuffer(command_buffer, mesh.index_buffer.buffer, 0, .UINT32)
-    vk.CmdDrawIndexed(command_buffer, mesh.indices_len, 1, 0, 0, 0)
-  }
-
-  for light_data, light_id in input {
-    node_count += 1
-    #partial switch light in light_data {
-    case PointLightData:
-      light_push := LightPushConstant {
-        light_view_proj = light.proj * light.views[0],
-        light_color     = light.color.xyz,
-        light_position  = light.position.xyz,
-        light_radius    = light.radius,
-        light_kind      = LightKind.POINT,
-        camera_position = camera_position.xyz,
-        shadow_map_id   = u32(light_id),
-      }
-      vk.CmdPushConstants(
-        command_buffer,
-        self.lighting_pipeline_layout,
-        {.VERTEX, .FRAGMENT},
-        0,
-        size_of(LightPushConstant),
-        &light_push,
-      )
-      bind_and_draw_mesh(self.sphere_mesh, command_buffer)
-      rendered_count += 1
-    case DirectionalLightData:
-      light_push := LightPushConstant {
-        light_view_proj = light.proj * light.view,
-        light_color     = light.color.xyz,
-        light_direction = light.direction.xyz,
-        light_kind      = LightKind.DIRECTIONAL,
-        camera_position = camera_position.xyz,
-        shadow_map_id   = u32(light_id),
-      }
-      vk.CmdPushConstants(
-        command_buffer,
-        self.lighting_pipeline_layout,
-        {.VERTEX, .FRAGMENT},
-        0,
-        size_of(LightPushConstant),
-        &light_push,
-      )
-      bind_and_draw_mesh(self.directional_triangle_mesh, command_buffer)
-      rendered_count += 1
-    case SpotLightData:
-      light_push := LightPushConstant {
-        light_view_proj = light.proj * light.view,
-        light_color     = light.color.rgb,
-        light_angle     = light.angle,
-        light_position  = light.position.xyz,
-        light_radius    = light.radius,
-        light_direction = light.direction.xyz,
-        light_kind      = LightKind.SPOT,
-        camera_position = camera_position.xyz,
-        shadow_map_id   = u32(light_id),
-      }
-      vk.CmdPushConstants(
-        command_buffer,
-        self.lighting_pipeline_layout,
-        {.VERTEX, .FRAGMENT},
-        0,
-        size_of(LightPushConstant),
-        &light_push,
-      )
-      bind_and_draw_mesh(self.cone_mesh, command_buffer)
-      rendered_count += 1
-    }
-  }
-  return rendered_count
-}
-
-renderer_main_end :: proc(command_buffer: vk.CommandBuffer) {
-  vk.CmdEndRenderingKHR(command_buffer)
-}
-
-renderer_main_init :: proc(
-  self: ^RendererMain,
+renderer_lighting_init :: proc(
+  self: ^RendererLighting,
   frames: ^[MAX_FRAMES_IN_FLIGHT]FrameData,
   width: u32,
   height: u32,
@@ -565,7 +405,7 @@ renderer_main_init :: proc(
   self.cone_mesh, _, _ = create_mesh(
     geometry.make_cone(segments = 128, height = 1, radius = 0.5),
   )
-  self.directional_triangle_mesh, _, _ = create_mesh(
+  self.fullscreen_triangle_mesh, _, _ = create_mesh(
     geometry.make_fullscreen_triangle(),
   )
   log.info("Light volume meshes initialized")
@@ -573,7 +413,167 @@ renderer_main_init :: proc(
   return .SUCCESS
 }
 
-renderer_main_deinit :: proc(self: ^RendererMain) {
+renderer_lighting_deinit :: proc(self: ^RendererLighting) {
   vk.DestroyPipelineLayout(g_device, self.lighting_pipeline_layout, nil)
   vk.DestroyPipeline(g_device, self.lighting_pipeline, nil)
+}
+
+renderer_lighting_begin :: proc(
+  self: ^RendererLighting,
+  target: RenderTarget,
+  command_buffer: vk.CommandBuffer,
+) {
+  color_attachment := vk.RenderingAttachmentInfoKHR {
+    sType = .RENDERING_ATTACHMENT_INFO_KHR,
+    imageView = target.final,
+    imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
+    loadOp = .LOAD,
+    storeOp = .STORE,
+    clearValue = {color = {float32 = BG_BLUE_GRAY}},
+  }
+  depth_attachment := vk.RenderingAttachmentInfoKHR {
+    sType       = .RENDERING_ATTACHMENT_INFO_KHR,
+    imageView   = target.depth,
+    imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+    loadOp      = .LOAD,
+    storeOp     = .DONT_CARE,
+  }
+  render_info := vk.RenderingInfoKHR {
+    sType = .RENDERING_INFO_KHR,
+    renderArea = {extent = target.extent},
+    layerCount = 1,
+    colorAttachmentCount = 1,
+    pColorAttachments = &color_attachment,
+    pDepthAttachment = &depth_attachment,
+  }
+  vk.CmdBeginRenderingKHR(command_buffer, &render_info)
+  viewport := vk.Viewport {
+    x        = 0,
+    y        = f32(target.extent.height),
+    width    = f32(target.extent.width),
+    height   = -f32(target.extent.height),
+    minDepth = 0.0,
+    maxDepth = 1.0,
+  }
+  scissor := vk.Rect2D {
+    extent = target.extent,
+  }
+  vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
+  vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
+  descriptor_sets := [?]vk.DescriptorSet {
+    g_camera_descriptor_sets[g_frame_index], // set = 0 (camera)
+    g_textures_descriptor_set, // set = 2 (bindless textures)
+    self.lighting_descriptor_sets[g_frame_index], // set = 1 (gbuffer textures, shadow maps)
+  }
+  vk.CmdBindDescriptorSets(
+    command_buffer,
+    .GRAPHICS,
+    self.lighting_pipeline_layout,
+    0,
+    len(descriptor_sets),
+    raw_data(descriptor_sets[:]),
+    0,
+    nil,
+  )
+  vk.CmdBindPipeline(command_buffer, .GRAPHICS, self.lighting_pipeline)
+}
+
+renderer_lighting_render :: proc(
+  self: ^RendererLighting,
+  input: [dynamic]LightData,
+  camera_position: linalg.Vector3f32,
+  command_buffer: vk.CommandBuffer,
+) -> int {
+  rendered_count := 0
+  node_count := 0
+
+  // Helper proc to bind and draw a mesh
+  bind_and_draw_mesh :: proc(
+    mesh_handle: Handle,
+    command_buffer: vk.CommandBuffer,
+  ) {
+    mesh := resource.get(g_meshes, mesh_handle)
+    offset: vk.DeviceSize = 0
+    vk.CmdBindVertexBuffers(
+      command_buffer,
+      0,
+      1,
+      &mesh.vertex_buffer.buffer,
+      &offset,
+    )
+    vk.CmdBindIndexBuffer(command_buffer, mesh.index_buffer.buffer, 0, .UINT32)
+    vk.CmdDrawIndexed(command_buffer, mesh.indices_len, 1, 0, 0, 0)
+  }
+
+  for light_data, light_id in input {
+    node_count += 1
+    #partial switch light in light_data {
+    case PointLightData:
+      light_push := LightPushConstant {
+        light_view_proj = light.proj * light.views[0],
+        light_color     = light.color.xyz,
+        light_position  = light.position.xyz,
+        light_radius    = light.radius,
+        light_kind      = LightKind.POINT,
+        camera_position = camera_position.xyz,
+        shadow_map_id   = u32(light_id),
+      }
+      vk.CmdPushConstants(
+        command_buffer,
+        self.lighting_pipeline_layout,
+        {.VERTEX, .FRAGMENT},
+        0,
+        size_of(LightPushConstant),
+        &light_push,
+      )
+      bind_and_draw_mesh(self.sphere_mesh, command_buffer)
+      rendered_count += 1
+    case DirectionalLightData:
+      light_push := LightPushConstant {
+        light_view_proj = light.proj * light.view,
+        light_color     = light.color.xyz,
+        light_direction = light.direction.xyz,
+        light_kind      = LightKind.DIRECTIONAL,
+        camera_position = camera_position.xyz,
+        shadow_map_id   = u32(light_id),
+      }
+      vk.CmdPushConstants(
+        command_buffer,
+        self.lighting_pipeline_layout,
+        {.VERTEX, .FRAGMENT},
+        0,
+        size_of(LightPushConstant),
+        &light_push,
+      )
+      bind_and_draw_mesh(self.fullscreen_triangle_mesh, command_buffer)
+      rendered_count += 1
+    case SpotLightData:
+      light_push := LightPushConstant {
+        light_view_proj = light.proj * light.view,
+        light_color     = light.color.rgb,
+        light_angle     = light.angle,
+        light_position  = light.position.xyz,
+        light_radius    = light.radius,
+        light_direction = light.direction.xyz,
+        light_kind      = LightKind.SPOT,
+        camera_position = camera_position.xyz,
+        shadow_map_id   = u32(light_id),
+      }
+      vk.CmdPushConstants(
+        command_buffer,
+        self.lighting_pipeline_layout,
+        {.VERTEX, .FRAGMENT},
+        0,
+        size_of(LightPushConstant),
+        &light_push,
+      )
+      bind_and_draw_mesh(self.cone_mesh, command_buffer)
+      rendered_count += 1
+    }
+  }
+  return rendered_count
+}
+
+renderer_lighting_end :: proc(command_buffer: vk.CommandBuffer) {
+  vk.CmdEndRenderingKHR(command_buffer)
 }

@@ -217,7 +217,7 @@ Engine :: struct {
   mouse_scroll_proc:     MouseScrollProc,
   render_error_count:    u32,
   ui:                    RendererUI,
-  main:                  RendererMain,
+  main:                  RendererLighting,
   ambient:               RendererAmbient,
   shadow:                RendererShadow,
   particle:              RendererParticle,
@@ -340,7 +340,7 @@ init :: proc(
     },
     raw_data(self.command_buffers[:]),
   ) or_return
-  renderer_main_init(
+  renderer_lighting_init(
     &self.main,
     &self.frames,
     self.swapchain.extent.width,
@@ -642,7 +642,7 @@ deinit :: proc(self: ^Engine) {
   for &f in self.frames do frame_data_deinit(&f)
   renderer_ui_deinit(&self.ui)
   scene_deinit(&self.scene)
-  renderer_main_deinit(&self.main)
+  renderer_lighting_deinit(&self.main)
   renderer_gbuffer_deinit(&self.gbuffer)
   renderer_shadow_deinit(&self.shadow)
   renderer_postprocess_deinit(&self.postprocess)
@@ -999,14 +999,14 @@ render :: proc(self: ^Engine) -> vk.Result {
   )
   renderer_ambient_end(command_buffer)
   // Per-light additive pass
-  renderer_main_begin(&self.main, render_target, command_buffer)
-  renderer_main_render(
+  renderer_lighting_begin(&self.main, render_target, command_buffer)
+  renderer_lighting_render(
     &self.main,
     lights,
     self.scene.camera.position,
     command_buffer,
   )
-  renderer_main_end(command_buffer)
+  renderer_lighting_end(command_buffer)
   // log.debug("============ rendering particles... =============")
   renderer_particle_begin(
     &self.particle,
