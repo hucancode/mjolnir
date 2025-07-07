@@ -1,6 +1,5 @@
 package mjolnir
 
-import "core:math/linalg"
 import "core:log"
 import "geometry"
 import "resource"

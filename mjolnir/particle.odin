@@ -2,7 +2,6 @@ package mjolnir
 
 import "core:log"
 import linalg "core:math/linalg"
-import "core:math/rand"
 import "core:slice"
 import "geometry"
 import "resource"
@@ -221,9 +220,7 @@ compute_particles :: proc(
     self.compact_particle_buffer.buffer,
     self.particle_buffer.buffer,
     1,
-    &vk.BufferCopy{
-      size = vk.DeviceSize(self.particle_buffer.bytes_count),
-    },
+    &vk.BufferCopy{size = vk.DeviceSize(self.particle_buffer.bytes_count)},
   )
 
   // Final barrier for rendering
@@ -250,8 +247,6 @@ compact_particles :: proc(
   self: ^RendererParticle,
   command_buffer: vk.CommandBuffer,
 ) {
-  count_ptr := data_buffer_get(&self.particle_counter_buffer)
-  // count_ptr^ = 0
   // Run compaction
   vk.CmdBindPipeline(command_buffer, .COMPUTE, self.compact_pipeline)
   vk.CmdBindDescriptorSets(
@@ -541,10 +536,6 @@ renderer_particle_init_compute_pipeline :: proc(
   particle_buffer_info := vk.DescriptorBufferInfo {
     buffer = self.compact_particle_buffer.buffer,
     range  = vk.DeviceSize(self.compact_particle_buffer.bytes_count),
-  }
-  emitter_buffer_info := vk.DescriptorBufferInfo {
-    buffer = self.emitter_buffer.buffer,
-    range  = vk.DeviceSize(self.emitter_buffer.bytes_count),
   }
   force_field_buffer_info := vk.DescriptorBufferInfo {
     buffer = self.force_field_buffer.buffer,
