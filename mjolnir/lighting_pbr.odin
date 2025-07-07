@@ -418,6 +418,115 @@ renderer_lighting_deinit :: proc(self: ^RendererLighting) {
   vk.DestroyPipeline(g_device, self.lighting_pipeline, nil)
 }
 
+renderer_lighting_recreate_images :: proc(
+  self: ^RendererLighting,
+  frames: ^[MAX_FRAMES_IN_FLIGHT]FrameData,
+  width: u32,
+  height: u32,
+  color_format: vk.Format,
+  depth_format: vk.Format,
+) -> vk.Result {
+  image_infos: [MAX_FRAMES_IN_FLIGHT * MAX_SHADOW_MAPS]vk.DescriptorImageInfo
+  cube_image_infos: [MAX_FRAMES_IN_FLIGHT * MAX_SHADOW_MAPS]vk.DescriptorImageInfo
+  DESCRIPTOR_PER_FRAME :: 7
+  writes: [MAX_FRAMES_IN_FLIGHT * DESCRIPTOR_PER_FRAME]vk.WriteDescriptorSet
+  for frame, i in frames {
+    for image, j in frame.shadow_maps {
+      image_infos[i * MAX_SHADOW_MAPS + j] = {
+        sampler     = g_linear_clamp_sampler,
+        imageView   = image.view,
+        imageLayout = .SHADER_READ_ONLY_OPTIMAL,
+      }
+    }
+    for image, j in frame.cube_shadow_maps {
+      cube_image_infos[i * MAX_SHADOW_MAPS + j] = {
+        sampler     = g_linear_clamp_sampler,
+        imageView   = image.view,
+        imageLayout = .SHADER_READ_ONLY_OPTIMAL,
+      }
+    }
+    writes[i * DESCRIPTOR_PER_FRAME + 0] = vk.WriteDescriptorSet {
+      sType           = .WRITE_DESCRIPTOR_SET,
+      dstSet          = self.lighting_descriptor_sets[i],
+      dstBinding      = 0,
+      descriptorCount = 1,
+      descriptorType  = .COMBINED_IMAGE_SAMPLER,
+      pImageInfo      = &{
+        sampler = g_linear_clamp_sampler,
+        imageView = frame.gbuffer_position.view,
+        imageLayout = .SHADER_READ_ONLY_OPTIMAL,
+      },
+    }
+    writes[i * DESCRIPTOR_PER_FRAME + 1] = {
+      sType           = .WRITE_DESCRIPTOR_SET,
+      dstSet          = self.lighting_descriptor_sets[i],
+      dstBinding      = 1,
+      descriptorCount = 1,
+      descriptorType  = .COMBINED_IMAGE_SAMPLER,
+      pImageInfo      = &{
+        sampler = g_linear_clamp_sampler,
+        imageView = frame.gbuffer_normal.view,
+        imageLayout = .SHADER_READ_ONLY_OPTIMAL,
+      },
+    }
+    writes[i * DESCRIPTOR_PER_FRAME + 2] = {
+      sType           = .WRITE_DESCRIPTOR_SET,
+      dstSet          = self.lighting_descriptor_sets[i],
+      dstBinding      = 2,
+      descriptorCount = 1,
+      descriptorType  = .COMBINED_IMAGE_SAMPLER,
+      pImageInfo      = &{
+        sampler = g_linear_clamp_sampler,
+        imageView = frame.gbuffer_albedo.view,
+        imageLayout = .SHADER_READ_ONLY_OPTIMAL,
+      },
+    }
+    writes[i * DESCRIPTOR_PER_FRAME + 3] = {
+      sType           = .WRITE_DESCRIPTOR_SET,
+      dstSet          = self.lighting_descriptor_sets[i],
+      dstBinding      = 3,
+      descriptorCount = 1,
+      descriptorType  = .COMBINED_IMAGE_SAMPLER,
+      pImageInfo      = &{
+        sampler = g_linear_clamp_sampler,
+        imageView = frame.gbuffer_metallic_roughness.view,
+        imageLayout = .SHADER_READ_ONLY_OPTIMAL,
+      },
+    }
+    writes[i * DESCRIPTOR_PER_FRAME + 4] = {
+      sType           = .WRITE_DESCRIPTOR_SET,
+      dstSet          = self.lighting_descriptor_sets[i],
+      dstBinding      = 4,
+      descriptorCount = 1,
+      descriptorType  = .COMBINED_IMAGE_SAMPLER,
+      pImageInfo      = &{
+        sampler = g_linear_clamp_sampler,
+        imageView = frame.gbuffer_emissive.view,
+        imageLayout = .SHADER_READ_ONLY_OPTIMAL,
+      },
+    }
+    writes[i * DESCRIPTOR_PER_FRAME + 5] = {
+      sType           = .WRITE_DESCRIPTOR_SET,
+      dstSet          = self.lighting_descriptor_sets[i],
+      dstBinding      = 5,
+      descriptorCount = MAX_SHADOW_MAPS,
+      descriptorType  = .COMBINED_IMAGE_SAMPLER,
+      pImageInfo      = raw_data(image_infos[i * MAX_SHADOW_MAPS:]),
+    }
+    writes[i * DESCRIPTOR_PER_FRAME + 6] = {
+      sType           = .WRITE_DESCRIPTOR_SET,
+      dstSet          = self.lighting_descriptor_sets[i],
+      dstBinding      = 6,
+      descriptorCount = MAX_SHADOW_MAPS,
+      descriptorType  = .COMBINED_IMAGE_SAMPLER,
+      pImageInfo      = raw_data(cube_image_infos[i * MAX_SHADOW_MAPS:]),
+    }
+  }
+  log.debugf("Updating descriptor sets for lighting pass on resize... %v", writes)
+  vk.UpdateDescriptorSets(g_device, len(writes), raw_data(writes[:]), 0, nil)
+  return .SUCCESS
+}
+
 renderer_lighting_begin :: proc(
   self: ^RendererLighting,
   target: RenderTarget,

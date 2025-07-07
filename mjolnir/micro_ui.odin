@@ -475,6 +475,25 @@ renderer_ui_deinit :: proc(self: ^RendererUI) {
   self.texture_layout = 0
 }
 
+renderer_ui_recreate_images :: proc(
+  self: ^RendererUI,
+  color_format: vk.Format,
+  width: u32,
+  height: u32,
+  dpi_scale: f32,
+) -> vk.Result {
+  // Only update frame dimensions and DPI scale
+  self.frame_width = width
+  self.frame_height = height
+  self.dpi_scale = dpi_scale
+
+  // Update the projection matrix with new dimensions and DPI scale
+  ortho := linalg.matrix_ortho3d(0, f32(width), f32(height), 0, -1, 1) * linalg.matrix4_scale(dpi_scale)
+  data_buffer_write(&self.proj_buffer, &ortho) or_return
+
+  return .SUCCESS
+}
+
 // Modular UI renderer API
 renderer_ui_begin :: proc(
   self: ^RendererUI,

@@ -352,3 +352,92 @@ renderer_ambient_init :: proc(
   log.info("Ambient pipeline initialized successfully")
   return .SUCCESS
 }
+
+renderer_ambient_recreate_images :: proc(
+  self: ^RendererAmbient,
+  frames: ^[MAX_FRAMES_IN_FLIGHT]FrameData,
+  width: u32,
+  height: u32,
+  format: vk.Format,
+) -> vk.Result {
+  // Only update descriptor sets that reference G-buffer images
+  // The pipeline and layouts can remain unchanged
+
+  // Extract the same descriptor set update logic from init
+  for frame, i in frames {
+    writes := [?]vk.WriteDescriptorSet {
+      {
+        sType = .WRITE_DESCRIPTOR_SET,
+        dstSet = self.descriptor_sets[i],
+        dstBinding = 0,
+        descriptorCount = 1,
+        descriptorType = .COMBINED_IMAGE_SAMPLER,
+        pImageInfo = &{
+          sampler = g_linear_clamp_sampler,
+          imageView = frame.gbuffer_position.view,
+          imageLayout = .SHADER_READ_ONLY_OPTIMAL,
+        },
+      },
+      {
+        sType = .WRITE_DESCRIPTOR_SET,
+        dstSet = self.descriptor_sets[i],
+        dstBinding = 1,
+        descriptorCount = 1,
+        descriptorType = .COMBINED_IMAGE_SAMPLER,
+        pImageInfo = &{
+          sampler = g_linear_clamp_sampler,
+          imageView = frame.gbuffer_normal.view,
+          imageLayout = .SHADER_READ_ONLY_OPTIMAL,
+        },
+      },
+      {
+        sType = .WRITE_DESCRIPTOR_SET,
+        dstSet = self.descriptor_sets[i],
+        dstBinding = 2,
+        descriptorCount = 1,
+        descriptorType = .COMBINED_IMAGE_SAMPLER,
+        pImageInfo = &{
+          sampler = g_linear_clamp_sampler,
+          imageView = frame.gbuffer_albedo.view,
+          imageLayout = .SHADER_READ_ONLY_OPTIMAL,
+        },
+      },
+      {
+        sType = .WRITE_DESCRIPTOR_SET,
+        dstSet = self.descriptor_sets[i],
+        dstBinding = 3,
+        descriptorCount = 1,
+        descriptorType = .COMBINED_IMAGE_SAMPLER,
+        pImageInfo = &{
+          sampler = g_linear_clamp_sampler,
+          imageView = frame.gbuffer_metallic_roughness.view,
+          imageLayout = .SHADER_READ_ONLY_OPTIMAL,
+        },
+      },
+      {
+        sType = .WRITE_DESCRIPTOR_SET,
+        dstSet = self.descriptor_sets[i],
+        dstBinding = 4,
+        descriptorCount = 1,
+        descriptorType = .COMBINED_IMAGE_SAMPLER,
+        pImageInfo = &{
+          sampler = g_linear_clamp_sampler,
+          imageView = frame.gbuffer_emissive.view,
+          imageLayout = .SHADER_READ_ONLY_OPTIMAL,
+        },
+      },
+    }
+    vk.UpdateDescriptorSets(g_device, len(writes), raw_data(writes[:]), 0, nil)
+  }
+
+  return .SUCCESS
+}
+
+renderer_ambient_deinit :: proc(self: ^RendererAmbient) {
+  vk.DestroyPipeline(g_device, self.pipeline, nil)
+  self.pipeline = 0
+  vk.DestroyPipelineLayout(g_device, self.pipeline_layout, nil)
+  self.pipeline_layout = 0
+  vk.DestroyDescriptorSetLayout(g_device, self.set_layout, nil)
+  self.set_layout = 0
+}

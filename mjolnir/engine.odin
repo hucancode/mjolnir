@@ -643,6 +643,7 @@ deinit :: proc(self: ^Engine) {
   renderer_ui_deinit(&self.ui)
   scene_deinit(&self.scene)
   renderer_lighting_deinit(&self.main)
+  renderer_ambient_deinit(&self.ambient)
   renderer_gbuffer_deinit(&self.gbuffer)
   renderer_shadow_deinit(&self.shadow)
   renderer_postprocess_deinit(&self.postprocess)
@@ -661,6 +662,7 @@ recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
   new_aspect_ratio :=
     f32(engine.swapchain.extent.width) / f32(engine.swapchain.extent.height)
   geometry.camera_update_aspect_ratio(&engine.scene.camera, new_aspect_ratio)
+  // Recreate all images that depend on swapchain dimensions
   for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
     frame_data_deinit(&engine.frames[i])
     frame_data_init(&engine.frames[i], &engine.swapchain)
@@ -712,11 +714,33 @@ recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
     }
     vk.UpdateDescriptorSets(g_device, len(writes), raw_data(writes[:]), 0, nil)
   }
+  renderer_lighting_recreate_images(
+    &engine.main,
+    &engine.frames,
+    engine.swapchain.extent.width,
+    engine.swapchain.extent.height,
+    engine.swapchain.format.format,
+    .D32_SFLOAT,
+  ) or_return
+  renderer_ambient_recreate_images(
+    &engine.ambient,
+    &engine.frames,
+    engine.swapchain.extent.width,
+    engine.swapchain.extent.height,
+    engine.swapchain.format.format,
+  ) or_return
   renderer_postprocess_recreate_images(
     &engine.postprocess,
     engine.swapchain.extent.width,
     engine.swapchain.extent.height,
     engine.swapchain.format.format,
+  ) or_return
+  renderer_ui_recreate_images(
+    &engine.ui,
+    engine.swapchain.format.format,
+    engine.swapchain.extent.width,
+    engine.swapchain.extent.height,
+    get_window_dpi(engine.window),
   ) or_return
   return .SUCCESS
 }
