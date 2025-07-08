@@ -44,7 +44,19 @@ ParticleSystemAttachment :: struct {
 }
 
 EmitterAttachment :: struct {
-  using emitter: Emitter,
+  initial_velocity:  linalg.Vector4f32,
+  color_start:       linalg.Vector4f32,
+  color_end:         linalg.Vector4f32,
+  emission_rate:     f32,
+  particle_lifetime: f32,
+  position_spread:   f32,
+  velocity_spread:   f32,
+  size_start:        f32,
+  size_end:          f32,
+  enabled:           b32,
+  weight:            f32,
+  weight_spread:     f32,
+  texture_handle:    resource.Handle,
 }
 
 ForceFieldAttachment :: struct {

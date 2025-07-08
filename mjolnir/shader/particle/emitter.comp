@@ -1,0 +1,124 @@
+#version 450
+
+const int MAX_PARTICLES = 65536;
+const int MAX_EMITTERS = 64;
+
+struct Particle {
+    vec4 position;
+    vec4 velocity;
+    vec4 color_start;
+    vec4 color_end;
+    vec4 color;
+    float size;
+    float size_end;
+    float life;
+    float max_life;
+    float weight;
+    uint texture_index;
+    uint padding[6];
+};
+
+struct Emitter {
+    mat4 transform;
+    vec4 initial_velocity;
+    vec4 color_start;
+    vec4 color_end;
+    float emission_rate;
+    float particle_lifetime;
+    float position_spread;
+    float velocity_spread;
+    float time_accumulator;
+    float size_start;
+    float size_end;
+    float weight;
+    float weight_spread;
+    uint texture_index;
+uint padding[10];
+    };
+
+layout(set = 0, binding = 0) buffer ParticleBuffer {
+    Particle particles[];
+};
+
+layout(set = 0, binding = 1) buffer EmitterBuffer {
+    Emitter emitters[];
+};
+
+layout(set = 0, binding = 2) buffer ParticleCounter {
+    uint particle_count;
+};
+
+layout(set = 0, binding = 3) uniform ParamsBuffer {
+    uint max_particles;
+    uint emitter_count;
+    uint forcefield_count;
+    float delta_time;
+};
+
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+// Simple random number generator based on input seed
+float rand(vec2 co) {
+    return fract(sin(dot(co.xy ,vec2(12.9898,78.233))) * 43758.5453);
+}
+
+// Generates a random vector within a sphere of given radius
+vec3 random_in_sphere(float radius, vec2 seed) {
+    float u = rand(seed);
+    float v = rand(seed * 1.3);
+    float theta = u * 2.0 * 3.14159265;
+    float phi = acos(2.0 * v - 1.0);
+    float r = pow(rand(seed * 2.1), 1.0/3.0) * radius;
+    return vec3(
+        r * sin(phi) * cos(theta),
+        r * sin(phi) * sin(theta),
+        r * cos(phi)
+    );
+}
+
+void main() {
+    uint emitter_idx = gl_GlobalInvocationID.x;
+    if (emitter_idx >= emitter_count) return;
+    // Calculate how many particles to emit this frame
+    emitters[emitter_idx].time_accumulator += emitters[emitter_idx].emission_rate * delta_time;
+    uint emit_count = uint(emitters[emitter_idx].time_accumulator);
+    emitters[emitter_idx].time_accumulator -= float(emit_count);
+    for (uint i = 0; i < emit_count; ++i) {
+        uint idx = atomicAdd(particle_count, 1);
+        if (idx >= MAX_PARTICLES) break;
+        // Random seed per particle
+        vec2 seed = vec2(float(idx), float(emitter_idx) + float(i) * 0.123);
+        // Position: emitter position + random spread
+        vec4 base_pos = emitters[emitter_idx].transform[3];
+        vec3 pos_spread = random_in_sphere(emitters[emitter_idx].position_spread, seed);
+        vec4 position = base_pos + vec4(pos_spread, 0.0);
+        // Velocity: initial_velocity + random spread
+        vec3 base_vel = emitters[emitter_idx].initial_velocity.xyz;
+        vec3 vel_spread = random_in_sphere(emitters[emitter_idx].velocity_spread, seed * 2.0);
+        vec4 velocity = vec4(base_vel + vel_spread, 0.0);
+        // Color
+        vec4 color_start = emitters[emitter_idx].color_start;
+        vec4 color_end = emitters[emitter_idx].color_end;
+        // Size
+        float size_start = emitters[emitter_idx].size_start;
+        float size_end = emitters[emitter_idx].size_end;
+        // Life
+        float lifetime = emitters[emitter_idx].particle_lifetime;
+        // Weight
+        float weight = emitters[emitter_idx].weight + (rand(seed * 3.0) - 0.5) * emitters[emitter_idx].weight_spread;
+        // Texture index
+        uint texture_index = emitters[emitter_idx].texture_index;
+        // Write particle
+        particles[idx].position = position;
+        particles[idx].velocity = velocity;
+        particles[idx].color_start = color_start;
+        particles[idx].color_end = color_end;
+        particles[idx].color = color_start;
+        particles[idx].size = size_start;
+        particles[idx].size_end = size_end;
+        particles[idx].life = lifetime;
+        particles[idx].max_life = lifetime;
+        particles[idx].weight = weight;
+        particles[idx].texture_index = texture_index;
+    }
+}

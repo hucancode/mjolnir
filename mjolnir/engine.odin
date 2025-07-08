@@ -329,6 +329,8 @@ init :: proc(
     }
   }
   log.debugf("vk.UpdateDescriptorSets %d", len(writes))
+  // TODO: investigate this, why do we need this
+  vk.DeviceWaitIdle(g_device)
   vk.UpdateDescriptorSets(g_device, len(writes), raw_data(writes[:]), 0, nil)
   vk.AllocateCommandBuffers(
     g_device,
@@ -529,25 +531,34 @@ time_since_app_start :: proc(self: ^Engine) -> f32 {
 }
 
 update_emitters :: proc(self: ^Engine, delta_time: f32) {
-  recycle_dead_particles(&self.particle)
   params := data_buffer_get(&self.particle.params_buffer)
   params.delta_time = delta_time
-  params.emitter_count = 0
-  spawned_this_frame := 0
+
+  emitters_ptr := data_buffer_get(&self.particle.emitter_buffer)
+  emitters := slice.from_ptr(emitters_ptr, MAX_EMITTERS)
+  emitter_idx: int = 0
+
   for &entry in self.scene.nodes.entries do if entry.active {
     e, is_emitter := &entry.item.attachment.(EmitterAttachment)
     if !is_emitter do continue
     if !e.enabled do continue
-    emitter_transform := entry.item.transform.world_matrix
-    e.time_accumulator += delta_time
-    emission_interval := 1.0 / e.emission_rate
-    for e.time_accumulator >= emission_interval {
-      if !spawn_particle(&self.particle, emitter_transform, e) do break
-      spawned_this_frame += 1
-      e.time_accumulator -= emission_interval
-    }
+    if emitter_idx >= MAX_EMITTERS do break
+    emitters[emitter_idx].transform = entry.item.transform.world_matrix
+    emitters[emitter_idx].initial_velocity = e.initial_velocity
+    emitters[emitter_idx].color_start = e.color_start
+    emitters[emitter_idx].color_end = e.color_end
+    emitters[emitter_idx].emission_rate = e.emission_rate
+    emitters[emitter_idx].particle_lifetime = e.particle_lifetime
+    emitters[emitter_idx].position_spread = e.position_spread
+    emitters[emitter_idx].velocity_spread = e.velocity_spread
+    emitters[emitter_idx].size_start = e.size_start
+    emitters[emitter_idx].size_end = e.size_end
+    emitters[emitter_idx].weight = e.weight
+    emitters[emitter_idx].weight_spread = e.weight_spread
+    emitters[emitter_idx].texture_index = e.texture_handle.index
+    emitter_idx += 1
   }
-  params.particle_count = self.particle.active_particle_count
+  params.emitter_count = u32(emitter_idx)
 }
 
 update_force_fields :: proc(self: ^Engine) {
@@ -712,6 +723,8 @@ recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
         pImageInfo = raw_data(cube_shadow_image_infos[:]),
       },
     }
+    // TODO: investigate this, why do we need this
+    vk.DeviceWaitIdle(g_device)
     vk.UpdateDescriptorSets(g_device, len(writes), raw_data(writes[:]), 0, nil)
   }
   renderer_lighting_recreate_images(
@@ -920,7 +933,7 @@ render :: proc(self: ^Engine) -> vk.Result {
     1,
     {.LATE_FRAGMENT_TESTS},
     {.FRAGMENT_SHADER},
-    {.DEPTH_STENCIL_ATTACHMENT_WRITE},
+    {.SHADER_READ},
   )
   transition_images(
     command_buffer,
@@ -931,7 +944,7 @@ render :: proc(self: ^Engine) -> vk.Result {
     6,
     {.LATE_FRAGMENT_TESTS},
     {.FRAGMENT_SHADER},
-    {.DEPTH_STENCIL_ATTACHMENT_WRITE},
+    {.SHADER_READ},
   )
   transition_image(
     command_buffer,

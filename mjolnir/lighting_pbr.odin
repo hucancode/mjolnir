@@ -1,7 +1,6 @@
 package mjolnir
 
 import "core:fmt"
-import "core:image"
 import "core:log"
 import linalg "core:math/linalg"
 import "core:slice"
@@ -427,7 +426,8 @@ renderer_lighting_recreate_images :: proc(
   depth_format: vk.Format,
 ) -> vk.Result {
   image_infos: [MAX_FRAMES_IN_FLIGHT * MAX_SHADOW_MAPS]vk.DescriptorImageInfo
-  cube_image_infos: [MAX_FRAMES_IN_FLIGHT * MAX_SHADOW_MAPS]vk.DescriptorImageInfo
+  cube_image_infos: [MAX_FRAMES_IN_FLIGHT *
+  MAX_SHADOW_MAPS]vk.DescriptorImageInfo
   DESCRIPTOR_PER_FRAME :: 7
   writes: [MAX_FRAMES_IN_FLIGHT * DESCRIPTOR_PER_FRAME]vk.WriteDescriptorSet
   for frame, i in frames {
@@ -522,7 +522,12 @@ renderer_lighting_recreate_images :: proc(
       pImageInfo      = raw_data(cube_image_infos[i * MAX_SHADOW_MAPS:]),
     }
   }
-  log.debugf("Updating descriptor sets for lighting pass on resize... %v", writes)
+  log.debugf(
+    "Updating descriptor sets for lighting pass on resize... %v",
+    writes,
+  )
+  // TODO: investigate this, why do we need this
+  vk.DeviceWaitIdle(g_device)
   vk.UpdateDescriptorSets(g_device, len(writes), raw_data(writes[:]), 0, nil)
   return .SUCCESS
 }

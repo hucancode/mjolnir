@@ -1,6 +1,5 @@
 package mjolnir
 
-import "core:math/linalg"
 import "core:log"
 import "geometry"
 import "resource"
@@ -295,11 +294,20 @@ renderer_shadow_render :: proc(
     shadow_idx * 6 + shadow_layer,
   )
   offsets := [1]u32{offset_shadow}
-  skinned_descriptor_sets := [?]vk.DescriptorSet {
+  descriptor_sets := [?]vk.DescriptorSet {
     frame.camera_descriptor_set,
     g_bindless_bone_buffer_descriptor_set,
   }
-  static_descriptor_sets := [?]vk.DescriptorSet{frame.camera_descriptor_set}
+  vk.CmdBindDescriptorSets(
+    command_buffer,
+    .GRAPHICS,
+    self.pipeline_layout,
+    0,
+    len(descriptor_sets),
+    raw_data(descriptor_sets[:]),
+    len(offsets),
+    raw_data(offsets[:]),
+  )
   for batch_key, batch_group in render_input.batches {
     // Only care about skinning for shadow pipeline
     shadow_features: ShaderFeatureSet
@@ -311,29 +319,6 @@ renderer_shadow_render :: proc(
     if pipeline != current_pipeline {
       vk.CmdBindPipeline(command_buffer, .GRAPHICS, pipeline)
       current_pipeline = pipeline
-    }
-    if is_skinned {
-      vk.CmdBindDescriptorSets(
-        command_buffer,
-        .GRAPHICS,
-        self.pipeline_layout,
-        0,
-        len(skinned_descriptor_sets),
-        raw_data(skinned_descriptor_sets[:]),
-        len(offsets),
-        raw_data(offsets[:]),
-      )
-    } else {
-      vk.CmdBindDescriptorSets(
-        command_buffer,
-        .GRAPHICS,
-        self.pipeline_layout,
-        0,
-        len(static_descriptor_sets),
-        raw_data(static_descriptor_sets[:]),
-        len(offsets),
-        raw_data(offsets[:]),
-      )
     }
     for batch_data in batch_group {
       for node in batch_data.nodes {
@@ -391,23 +376,21 @@ render_single_shadow_node :: proc(
     size_of(PushConstant),
     &push_constant,
   )
-  offset: vk.DeviceSize = 0
+  // Always bind both vertex buffer and skinning buffer (real or dummy)
+  skin_buffer := g_dummy_skinning_buffer.buffer
+  if is_skinned && mesh_has_skin && node_has_skin {
+    skin_buffer = mesh_skinning.skin_buffer.buffer
+  }
+  
+  buffers := [2]vk.Buffer{mesh.vertex_buffer.buffer, skin_buffer}
+  offsets := [2]vk.DeviceSize{0, 0}
   vk.CmdBindVertexBuffers(
     command_buffer,
     0,
-    1,
-    &mesh.vertex_buffer.buffer,
-    &offset,
+    2,
+    raw_data(buffers[:]),
+    raw_data(offsets[:]),
   )
-  if is_skinned && mesh_has_skin && node_has_skin {
-    vk.CmdBindVertexBuffers(
-      command_buffer,
-      1,
-      1,
-      &mesh_skinning.skin_buffer.buffer,
-      &offset,
-    )
-  }
   vk.CmdBindIndexBuffer(command_buffer, mesh.index_buffer.buffer, 0, .UINT32)
   vk.CmdDrawIndexed(command_buffer, mesh.indices_len, 1, 0, 0, 0)
 }

@@ -297,6 +297,8 @@ postprocess_update_input :: proc(
       imageLayout = .SHADER_READ_ONLY_OPTIMAL,
     },
   }
+  // TODO: investigate this, why do we need this
+  vk.DeviceWaitIdle(g_device)
   vk.UpdateDescriptorSets(g_device, 1, &write, 0, nil)
   return .SUCCESS
 }
@@ -318,6 +320,8 @@ postprocess_update_depth_input :: proc(
       imageLayout = .DEPTH_STENCIL_READ_ONLY_OPTIMAL,
     },
   }
+  // TODO: investigate this, why do we need this
+  vk.DeviceWaitIdle(g_device)
   vk.UpdateDescriptorSets(g_device, 1, &write, 0, nil)
   return .SUCCESS
 }
@@ -339,6 +343,8 @@ postprocess_update_normal_input :: proc(
       imageLayout = .SHADER_READ_ONLY_OPTIMAL,
     },
   }
+  // TODO: investigate this, why do we need this
+  vk.DeviceWaitIdle(g_device)
   vk.UpdateDescriptorSets(g_device, 1, &write, 0, nil)
   return .SUCCESS
 }

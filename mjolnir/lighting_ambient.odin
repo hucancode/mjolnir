@@ -427,6 +427,8 @@ renderer_ambient_recreate_images :: proc(
         },
       },
     }
+    // TODO: investigate this, why do we need this
+    vk.DeviceWaitIdle(g_device)
     vk.UpdateDescriptorSets(g_device, len(writes), raw_data(writes[:]), 0, nil)
   }
 

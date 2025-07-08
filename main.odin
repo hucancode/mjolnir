@@ -267,16 +267,16 @@ setup :: proc(engine: ^mjolnir.Engine) {
       &engine.scene,
       psys_handle1,
       EmitterAttachment {
-        emission_rate     = 10,
-        particle_lifetime = 5.0,
-        position_spread   = 0.05,
+        emission_rate     = 43,
+        particle_lifetime = 50.0,
+        position_spread   = 1.5,
         initial_velocity  = {0, -0.1, 0, 0},
         velocity_spread   = 0.1,
         color_start       = {1, 1, 0, 1}, // Yellow particles
         color_end         = {1, 0.5, 0, 0},
         size_start        = 200.0,
-        size_end          = 50.0,
-        weight            = 0.3,
+        size_end          = 100.0,
+        weight            = 0.7,
         weight_spread     = 0.05,
         texture_handle    = particle_texture1_handle,
         enabled           = true,
@@ -297,17 +297,17 @@ setup :: proc(engine: ^mjolnir.Engine) {
       &engine.scene,
       psys_handle2,
       EmitterAttachment {
-        emission_rate     = 15,
+        emission_rate     = 7,
         particle_lifetime = 3.0,
-        position_spread   = 0.1,
+        position_spread   = 0.3,
         initial_velocity  = {0, 0.2, 0, 0},
         velocity_spread   = 0.15,
         color_start       = {0, 0, 1, 1}, // Blue particles
         color_end         = {0, 1, 1, 0},
-        size_start        = 150.0,
-        size_end          = 75.0,
-        weight            = 0.2,
-        weight_spread     = 0.05,
+        size_start        = 350.0,
+        size_end          = 175.0,
+        weight            = 0.6,
+        weight_spread     = 0.3,
         texture_handle    = particle_texture2_handle,
         enabled           = true,
       },
@@ -343,9 +343,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
 render_2d :: proc(engine: ^mjolnir.Engine, ctx: ^mu.Context) {
   using mjolnir
   if mu.window(ctx, "Particle System", {40, 360, 300, 200}, {.NO_CLOSE}) {
-    active, _, total := get_particle_pool_stats(&engine.particle)
     rendered, max_particles := get_particle_render_stats(&engine.particle)
-    mu.label(ctx, fmt.tprintf("Active %d", active))
     mu.label(ctx, fmt.tprintf("Rendered %d", rendered))
     mu.label(ctx, fmt.tprintf("Max Particles %d", max_particles))
     efficiency := f32(rendered) / f32(max_particles) * 100.0
