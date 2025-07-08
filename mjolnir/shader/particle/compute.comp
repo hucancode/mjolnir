@@ -19,7 +19,7 @@ struct Particle {
 };
 
 struct ForceField {
-    uint behavior; // 0: ATTRACT, 1: REPEL, 2: ORBIT
+    float tangent_strength;
     float strength;
     float area_of_effect;
     float fade;
@@ -86,15 +86,12 @@ void main() {
         if (dist > ff.area_of_effect) continue;
         float effect = 1.0 - clamp(dist / ff.area_of_effect, 0.0, 1.0);
         vec3 dir = normalize(ff_pos - p);
-        if (ff.behavior == 0) { // ATTRACT
-            particles[i].velocity.xyz += dir * ff.strength * effect * delta_time;
-        } else if (ff.behavior == 1) { // REPEL
-            particles[i].velocity.xyz += -dir * ff.strength * effect * delta_time;
-        } else if (ff.behavior == 2) { // ORBIT
-            vec3 up = vec3(0,1,0);
-            vec3 tangent = normalize(cross(up, dir));
-            particles[i].velocity.xyz += tangent * ff.strength * effect * delta_time;
-        }
+        vec3 up = vec3(0, 1, 0);
+        vec3 tangent = normalize(cross(up, dir));
+        vec3 force =
+            (dir * ff.strength) +
+            (tangent * ff.tangent_strength);
+        particles[i].velocity.xyz += force * effect * delta_time;
     }
     particles[i].velocity.xyz += GRAVITY * particles[i].weight * delta_time;
     // Apply velocity limiting to prevent excessive speeds

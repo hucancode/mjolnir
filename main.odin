@@ -267,8 +267,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
       &engine.scene,
       psys_handle1,
       EmitterAttachment {
-        emission_rate     = 43,
-        particle_lifetime = 50.0,
+        emission_rate     = 7,
+        particle_lifetime = 5.0,
         position_spread   = 1.5,
         initial_velocity  = {0, -0.1, 0, 0},
         velocity_spread   = 0.1,
@@ -276,7 +276,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
         color_end         = {1, 0.5, 0, 0},
         size_start        = 200.0,
         size_end          = 100.0,
-        weight            = 0.7,
+        weight            = 0.1,
         weight_spread     = 0.05,
         texture_handle    = particle_texture1_handle,
         enabled           = true,
@@ -306,7 +306,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
         color_end         = {0, 1, 1, 0},
         size_start        = 350.0,
         size_end          = 175.0,
-        weight            = 0.6,
+        weight            = 0.1,
         weight_spread     = 0.3,
         texture_handle    = particle_texture2_handle,
         enabled           = true,
@@ -317,7 +317,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
       &engine.scene,
       psys_handle1, // Attach to first particle system
       mjolnir.ForceFieldAttachment {
-        behavior = .ATTRACT,
+        tangent_strength = 2.0,
         strength = 20.0,
         area_of_effect = 5.0,
       },

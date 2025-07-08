@@ -31,15 +31,9 @@ Emitter :: struct {
   padding:           [10]f32,
 }
 
-ForceFieldBehavior :: enum (u32) {
-  ATTRACT,
-  REPEL,
-  ORBIT,
-}
-
 ForceField :: struct {
-  behavior:       ForceFieldBehavior,
-  strength:       f32,
+  tangent_strength : f32, // 0 = push/pull in straight line, 1 = push/pull in tangent line
+  strength:       f32, // positive = attract, negative = repel
   area_of_effect: f32, // radius
   fade:           f32, // 0..1, linear fade factor
   position:       linalg.Vector4f32, // world position
