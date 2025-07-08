@@ -23,7 +23,9 @@ pool_init :: proc(pool: ^Pool($T)) {
 
 pool_deinit :: proc(pool: Pool($T), deinit_proc: proc(_: ^T)) {
   for &entry in pool.entries {
-    if entry.active {
+    // Only deinit entries that are still active (not freed with callback)
+    // Resources freed with callback have already been cleaned up
+    if entry.generation > 0 && entry.active {
       deinit_proc(&entry.item)
     }
   }
@@ -49,7 +51,12 @@ alloc :: proc(pool: ^Pool($T)) -> (Handle, ^T) {
   }
 }
 
-free :: proc(pool: ^Pool($T), handle: Handle) {
+free :: proc {
+  free_without_callback,
+  free_with_callback,
+}
+
+free_without_callback :: proc(pool: ^Pool($T), handle: Handle) {
   if handle.index >= u32(len(pool.entries)) {
     return
   }
@@ -57,6 +64,24 @@ free :: proc(pool: ^Pool($T), handle: Handle) {
   if !entry.active || entry.generation != handle.generation {
     return
   }
+  entry.active = false
+  entry.generation += 1
+  if entry.generation == 0 {
+    entry.generation = 1
+  }
+  append(&pool.free_indices, handle.index)
+}
+
+free_with_callback :: proc(pool: ^Pool($T), handle: Handle, deinit_proc: proc(_: ^T)) {
+  if handle.index >= u32(len(pool.entries)) {
+    return
+  }
+  entry := &pool.entries[handle.index]
+  if !entry.active || entry.generation != handle.generation {
+    return
+  }
+  // Call the deinit procedure immediately before marking as freed
+  deinit_proc(&entry.item)
   entry.active = false
   entry.generation += 1
   if entry.generation == 0 {

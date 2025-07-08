@@ -580,7 +580,7 @@ renderer_postprocess_create_images :: proc(
 
 renderer_postprocess_deinit_images :: proc(self: ^RendererPostProcess) {
   for handle in self.images {
-    resource.free(&g_image_2d_buffers, handle)
+    resource.free(&g_image_2d_buffers, handle, image_buffer_deinit)
   }
 }
 

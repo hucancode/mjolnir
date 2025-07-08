@@ -1238,20 +1238,20 @@ frame_data_init :: proc(
 frame_data_deinit :: proc(frame: ^FrameData) {
   data_buffer_deinit(&frame.camera_uniform)
 
-  // Release 2D texture handles
-  resource.free(&g_image_2d_buffers, frame.final_image)
-  resource.free(&g_image_2d_buffers, frame.gbuffer_position)
-  resource.free(&g_image_2d_buffers, frame.gbuffer_normal)
-  resource.free(&g_image_2d_buffers, frame.gbuffer_albedo)
-  resource.free(&g_image_2d_buffers, frame.gbuffer_metallic_roughness)
-  resource.free(&g_image_2d_buffers, frame.gbuffer_emissive)
-  resource.free(&g_image_2d_buffers, frame.depth_buffer)
+  // Release 2D texture handles with immediate cleanup
+  resource.free(&g_image_2d_buffers, frame.final_image, image_buffer_deinit)
+  resource.free(&g_image_2d_buffers, frame.gbuffer_position, image_buffer_deinit)
+  resource.free(&g_image_2d_buffers, frame.gbuffer_normal, image_buffer_deinit)
+  resource.free(&g_image_2d_buffers, frame.gbuffer_albedo, image_buffer_deinit)
+  resource.free(&g_image_2d_buffers, frame.gbuffer_metallic_roughness, image_buffer_deinit)
+  resource.free(&g_image_2d_buffers, frame.gbuffer_emissive, image_buffer_deinit)
+  resource.free(&g_image_2d_buffers, frame.depth_buffer, image_buffer_deinit)
 
-  // Release shadow map handles
+  // Release shadow map handles with immediate cleanup
   for handle in frame.shadow_maps {
-    resource.free(&g_image_2d_buffers, handle)
+    resource.free(&g_image_2d_buffers, handle, image_buffer_deinit)
   }
   for handle in frame.cube_shadow_maps {
-    resource.free(&g_image_cube_buffers, handle)
+    resource.free(&g_image_cube_buffers, handle, cube_depth_texture_deinit)
   }
 }
