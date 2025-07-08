@@ -312,9 +312,9 @@ init_bone_matrix_allocator :: proc() -> vk.Result {
 
   // Initialize dummy skinning buffer for static meshes
   g_dummy_skinning_buffer = create_host_visible_buffer(
-    geometry.SkinningData,
-    1,  // Just one dummy element
-    {.VERTEX_BUFFER},
+  geometry.SkinningData,
+  1, // Just one dummy element
+  {.VERTEX_BUFFER},
   ) or_return
 
   return .SUCCESS
@@ -437,6 +437,20 @@ create_unlit_material :: proc(
   mat.features = features
   mat.albedo = albedo_handle
   mat.emissive_value = emissive_value
+  res = .SUCCESS
+  return
+}
+
+create_transparent_material :: proc(
+  features: ShaderFeatureSet = {},
+) -> (
+  ret: Handle,
+  mat: ^Material,
+  res: vk.Result,
+) {
+  ret, mat = resource.alloc(&g_materials)
+  mat.type = .TRANSPARENT
+  mat.features = features
   res = .SUCCESS
   return
 }
@@ -649,7 +663,12 @@ create_image_buffer_with_mips :: proc(
   generate_mipmaps(img, format, width, height, mip_levels) or_return
 
   aspect_mask := vk.ImageAspectFlags{.COLOR}
-  img.view = create_image_view_with_mips(img.image, format, aspect_mask, mip_levels) or_return
+  img.view = create_image_view_with_mips(
+    img.image,
+    format,
+    aspect_mask,
+    mip_levels,
+  ) or_return
   ret = .SUCCESS
   return
 }

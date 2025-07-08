@@ -893,7 +893,7 @@ renderer_particle_init_render_pipeline :: proc(
   depth_stencil := vk.PipelineDepthStencilStateCreateInfo {
     sType            = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
     depthTestEnable  = true,
-    depthWriteEnable = false,
+    depthWriteEnable = true,
     depthCompareOp   = .LESS_OR_EQUAL,
   }
   pipeline_info := vk.GraphicsPipelineCreateInfo {

@@ -221,6 +221,7 @@ Engine :: struct {
   ambient:               RendererAmbient,
   shadow:                RendererShadow,
   particle:              RendererParticle,
+  transparent:           RendererTransparent,
   postprocess:           RendererPostProcess,
   gbuffer:               RendererGBuffer,
   depth_prepass:         RendererDepthPrepass,
@@ -328,7 +329,6 @@ init :: proc(
       ),
     }
   }
-  log.debugf("vk.UpdateDescriptorSets %d", len(writes))
   // TODO: investigate this, why do we need this
   vk.DeviceWaitIdle(g_device)
   vk.UpdateDescriptorSets(g_device, len(writes), raw_data(writes[:]), 0, nil)
@@ -372,6 +372,11 @@ init :: proc(
     self.swapchain.extent,
   ) or_return
   renderer_particle_init(&self.particle) or_return
+  renderer_transparent_init(
+    &self.transparent,
+    self.swapchain.extent.width,
+    self.swapchain.extent.height,
+  ) or_return
   renderer_shadow_init(&self.shadow, .D32_SFLOAT) or_return
   renderer_postprocess_init(
     &self.postprocess,
@@ -659,6 +664,7 @@ deinit :: proc(self: ^Engine) {
   renderer_shadow_deinit(&self.shadow)
   renderer_postprocess_deinit(&self.postprocess)
   renderer_particle_deinit(&self.particle)
+  renderer_transparent_deinit(&self.transparent)
   renderer_depth_prepass_deinit(&self.depth_prepass)
   factory_deinit()
   swapchain_deinit(&self.swapchain)
@@ -1046,17 +1052,20 @@ render :: proc(self: ^Engine) -> vk.Result {
   )
   renderer_lighting_end(command_buffer)
   // log.debug("============ rendering particles... =============")
-  renderer_particle_begin(
-    &self.particle,
-    command_buffer,
-    RenderTarget {
-      final = self.frames[g_frame_index].final_image.view,
-      depth = self.frames[g_frame_index].depth_buffer.view,
-      extent = self.swapchain.extent,
-    },
-  )
+  renderer_particle_begin(&self.particle, command_buffer, render_target)
   renderer_particle_render(&self.particle, command_buffer)
   renderer_particle_end(command_buffer)
+
+  // Transparent & wireframe pass
+  renderer_transparent_begin(&self.transparent, render_target, command_buffer)
+  renderer_transparent_render(
+    &self.transparent,
+    gbuffer_input,
+    render_target,
+    command_buffer,
+  )
+  renderer_transparent_end(&self.transparent, command_buffer)
+
   // log.debug("============ rendering post processes... =============")
   transition_image_to_shader_read(
     command_buffer,

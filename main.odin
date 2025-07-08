@@ -30,8 +30,13 @@ main :: proc() {
 
 setup :: proc(engine: ^mjolnir.Engine) {
   using mjolnir, geometry
+  goldstar_texture_handle, _, _ := mjolnir.create_texture_from_path(
+    "assets/gold-star.png",
+  )
   plain_material_handle, _, _ := create_material()
   wireframe_material_handle, _, _ := create_wireframe_material()
+  goldstar_material_handle, goldstar_material, _ := create_transparent_material({.ALBEDO_TEXTURE})
+  goldstar_material.albedo = goldstar_texture_handle
   cube_geom := make_cube()
   cube_mesh_handle, _, _ := create_mesh(cube_geom)
   sphere_mesh_handle, _, _ := create_mesh(make_sphere())
@@ -247,12 +252,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   }
 
   if true {
-    // Create particle system 1 with gold star texture
-    particle_texture1_handle, _, _ := mjolnir.create_texture_from_path(
-      "assets/gold-star.png",
-    )
-    // Create particle system 2 with black circle texture
-    particle_texture2_handle, _, _ := mjolnir.create_texture_from_path(
+    black_circle_texture_handle, _, _ := mjolnir.create_texture_from_path(
       "assets/black-circle.png",
     )
     psys_handle1, _ := spawn_at(
@@ -260,7 +260,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
       {-2.0, 1.9, 0.3},
       mjolnir.ParticleSystemAttachment {
         bounding_box = geometry.Aabb{min = {-1, -1, -1}, max = {1, 1, 1}},
-        texture_handle = particle_texture1_handle,
+        texture_handle = goldstar_texture_handle,
       },
     )
     spawn_child(
@@ -278,20 +278,18 @@ setup :: proc(engine: ^mjolnir.Engine) {
         size_end          = 100.0,
         weight            = 0.1,
         weight_spread     = 0.05,
-        texture_handle    = particle_texture1_handle,
+        texture_handle    = goldstar_texture_handle,
         enabled           = true,
       },
     )
-
     psys_handle2, _ := spawn_at(
       &engine.scene,
       {2.0, 1.9, 0.3},
       mjolnir.ParticleSystemAttachment {
         bounding_box = geometry.Aabb{min = {-1, -1, -1}, max = {1, 1, 1}},
-        texture_handle = particle_texture2_handle,
+        texture_handle = black_circle_texture_handle,
       },
     )
-
     // Create an emitter for the second particle system
     spawn_child(
       &engine.scene,
@@ -308,7 +306,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
         size_end          = 175.0,
         weight            = 0.1,
         weight_spread     = 0.3,
-        texture_handle    = particle_texture2_handle,
+        texture_handle    = black_circle_texture_handle,
         enabled           = true,
       },
     )
@@ -328,7 +326,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
       forcefield_handle,
       MeshAttachment {
         handle = sphere_mesh_handle,
-        material = wireframe_material_handle,
+        material = goldstar_material_handle,
         cast_shadow = false,
       },
     )

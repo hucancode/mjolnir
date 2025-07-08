@@ -333,7 +333,11 @@ renderer_gbuffer_render :: proc(
   )
   rendered := 0
   current_pipeline: vk.Pipeline = 0
-  for _, batch_group in render_input.batches {
+  for batch_key, batch_group in render_input.batches {
+    if batch_key.material_type == .TRANSPARENT ||
+       batch_key.material_type == .WIREFRAME {
+      continue
+    }
     sample_material := resource.get(
       g_materials,
       batch_group[0].material_handle,

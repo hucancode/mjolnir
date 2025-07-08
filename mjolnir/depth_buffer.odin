@@ -129,7 +129,10 @@ renderer_depth_prepass_render :: proc(
   rendered_count := 0
   current_pipeline: vk.Pipeline = 0
   for batch_key, batch_group in render_input.batches {
-    if batch_key.material_type == .WIREFRAME do continue
+    if batch_key.material_type == .WIREFRAME ||
+       batch_key.material_type == .TRANSPARENT {
+      continue
+    }
     for batch_data in batch_group {
       material := resource.get(
         g_materials,
@@ -172,7 +175,7 @@ renderer_depth_prepass_render :: proc(
           if mesh_has_skin {
             skin_buffer = mesh_skinning.skin_buffer.buffer
           }
-          
+
           buffers := [2]vk.Buffer{mesh.vertex_buffer.buffer, skin_buffer}
           offsets := [2]vk.DeviceSize{0, 0}
           vk.CmdBindVertexBuffers(
