@@ -660,6 +660,7 @@ deinit :: proc(self: ^Engine) {
   renderer_postprocess_deinit(&self.postprocess)
   renderer_particle_deinit(&self.particle)
   renderer_depth_prepass_deinit(&self.depth_prepass)
+  factory_deinit()
   swapchain_deinit(&self.swapchain)
   vulkan_context_deinit()
   glfw.DestroyWindow(self.window)

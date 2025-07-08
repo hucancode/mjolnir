@@ -47,6 +47,7 @@ malloc_data_buffer :: proc(
   vk.GetBufferMemoryRequirements(g_device, data_buf.buffer, &mem_reqs)
   data_buf.memory = allocate_vulkan_memory(mem_reqs, mem_properties) or_return
   vk.BindBufferMemory(g_device, data_buf.buffer, data_buf.memory, 0) or_return
+  log.infof("buffer created 0x%x", data_buf.buffer)
   return data_buf, .SUCCESS
 }
 
@@ -172,7 +173,6 @@ create_local_buffer :: proc(
   ret: vk.Result,
 ) {
   buffer = malloc_local_buffer(T, count, usage | {.TRANSFER_DST}) or_return
-  defer log.info("done creating buffer")
   if data == nil {
     ret = .SUCCESS
     return
@@ -197,7 +197,7 @@ copy_buffer :: proc(dst, src: DataBuffer($T)) -> vk.Result {
   }
   vk.CmdCopyBuffer(cmd_buffer, src.buffer, dst.buffer, 1, &region)
   log.infof(
-    "Copying buffer %x mapped %x to %x",
+    "Copying buffer 0x%x mapped %x to 0x%x",
     src.buffer,
     src.mapped,
     dst.buffer,
@@ -738,6 +738,38 @@ generate_mipmaps :: proc(
   }
   cmd_buffer := begin_single_time_command() or_return
   defer end_single_time_command(&cmd_buffer)
+
+  // First, transition all mip levels from UNDEFINED to TRANSFER_DST_OPTIMAL
+  init_barrier := vk.ImageMemoryBarrier {
+    sType = .IMAGE_MEMORY_BARRIER,
+    image = img.image,
+    srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    oldLayout = .UNDEFINED,
+    newLayout = .TRANSFER_DST_OPTIMAL,
+    srcAccessMask = {},
+    dstAccessMask = {.TRANSFER_WRITE},
+    subresourceRange = {
+      aspectMask = {.COLOR},
+      baseArrayLayer = 0,
+      layerCount = 1,
+      baseMipLevel = 0,
+      levelCount = mip_levels,
+    },
+  }
+  vk.CmdPipelineBarrier(
+    cmd_buffer,
+    {.TOP_OF_PIPE},
+    {.TRANSFER},
+    {},
+    0,
+    nil,
+    0,
+    nil,
+    1,
+    &init_barrier,
+  )
+
   barrier := vk.ImageMemoryBarrier {
     sType = .IMAGE_MEMORY_BARRIER,
     image = img.image,

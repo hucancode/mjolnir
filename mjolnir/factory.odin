@@ -193,7 +193,6 @@ factory_init :: proc() -> vk.Result {
 }
 
 factory_deinit :: proc() {
-  data_buffer_deinit(&g_bindless_bone_buffer)
   data_buffer_deinit(&g_dummy_skinning_buffer)
   resource.pool_deinit(g_image_buffers, image_buffer_deinit)
   resource.pool_deinit(g_meshes, mesh_deinit)

@@ -173,6 +173,9 @@ load_gltf :: proc(
               mesh_handle,
             )
           }
+        } else {
+          // Clean up the allocated mesh if skinned primitive loading failed
+          resource.free(&g_meshes, mesh_handle)
         }
       } else {
         log.infof("Loading static mesh %s", string(gltf_node.name))

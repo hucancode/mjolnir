@@ -32,11 +32,11 @@ Emitter :: struct {
 }
 
 ForceField :: struct {
-  tangent_strength : f32, // 0 = push/pull in straight line, 1 = push/pull in tangent line
-  strength:       f32, // positive = attract, negative = repel
-  area_of_effect: f32, // radius
-  fade:           f32, // 0..1, linear fade factor
-  position:       linalg.Vector4f32, // world position
+  tangent_strength: f32, // 0 = push/pull in straight line, 1 = push/pull in tangent line
+  strength:         f32, // positive = attract, negative = repel
+  area_of_effect:   f32, // radius
+  fade:             f32, // 0..1, linear fade factor
+  position:         linalg.Vector4f32, // world position
 }
 
 Particle :: struct {
@@ -268,6 +268,13 @@ renderer_particle_deinit :: proc(self: ^RendererParticle) {
     self.compute_descriptor_set_layout,
     nil,
   )
+  vk.DestroyPipeline(g_device, self.emitter_pipeline, nil)
+  vk.DestroyPipelineLayout(g_device, self.emitter_pipeline_layout, nil)
+  vk.DestroyDescriptorSetLayout(
+    g_device,
+    self.emitter_descriptor_set_layout,
+    nil,
+  )
   vk.DestroyPipeline(g_device, self.compact_pipeline, nil)
   vk.DestroyPipelineLayout(g_device, self.compact_pipeline_layout, nil)
   vk.DestroyDescriptorSetLayout(
@@ -283,6 +290,7 @@ renderer_particle_deinit :: proc(self: ^RendererParticle) {
   data_buffer_deinit(&self.draw_command_buffer)
   data_buffer_deinit(&self.emitter_buffer)
   data_buffer_deinit(&self.force_field_buffer)
+  data_buffer_deinit(&self.particle_counter_buffer)
 }
 
 renderer_particle_init :: proc(self: ^RendererParticle) -> vk.Result {

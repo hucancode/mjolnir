@@ -465,6 +465,9 @@ renderer_ui_deinit :: proc(self: ^RendererUI) {
   if self == nil {
     return
   }
+  data_buffer_deinit(&self.vertex_buffer)
+  data_buffer_deinit(&self.index_buffer)
+  data_buffer_deinit(&self.proj_buffer)
   vk.DestroyPipeline(g_device, self.pipeline, nil)
   self.pipeline = 0
   vk.DestroyPipelineLayout(g_device, self.pipeline_layout, nil)

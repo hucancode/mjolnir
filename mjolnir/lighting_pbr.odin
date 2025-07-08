@@ -357,7 +357,7 @@ renderer_lighting_init :: proc(
     }
     // No writes for environment_map or brdf_lut; use bindless and push constant indices
   }
-  log.debugf("Updating descriptor sets for lighting pass... %v", writes)
+  // log.debugf("Updating descriptor sets for lighting pass... %v", writes)
   vk.UpdateDescriptorSets(g_device, len(writes), raw_data(writes[:]), 0, nil)
 
   // Initialize light volume meshes
@@ -378,6 +378,7 @@ renderer_lighting_init :: proc(
 renderer_lighting_deinit :: proc(self: ^RendererLighting) {
   vk.DestroyPipelineLayout(g_device, self.lighting_pipeline_layout, nil)
   vk.DestroyPipeline(g_device, self.lighting_pipeline, nil)
+  vk.DestroyDescriptorSetLayout(g_device, self.lighting_set_layout, nil)
 }
 
 renderer_lighting_recreate_images :: proc(

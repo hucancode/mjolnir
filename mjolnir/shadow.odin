@@ -206,6 +206,7 @@ renderer_shadow_deinit :: proc(self: ^RendererShadow) {
   for &frame in self.frames {
     // descriptor set will eventually be freed by the pool
     frame.camera_descriptor_set = 0
+    data_buffer_deinit(&frame.camera_uniform)
   }
   for &p in self.pipelines {
     vk.DestroyPipeline(g_device, p, nil)
