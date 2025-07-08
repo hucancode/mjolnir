@@ -1,9 +1,23 @@
 package mjolnir
 
 import "core:log"
+import "core:math/linalg"
 import "geometry"
 import "resource"
 import vk "vendor:vulkan"
+
+// 128 byte push constant budget
+PushConstant :: struct {
+  world:                    linalg.Matrix4f32, // 64 bytes
+  bone_matrix_offset:       u32, // 4
+  albedo_index:             u32, // 4
+  metallic_roughness_index: u32, // 4
+  normal_index:             u32, // 4
+  emissive_index:           u32, // 4
+  metallic_value:           f32, // 4
+  roughness_value:          f32, // 4
+  emissive_value:           f32, // 4
+}
 
 RendererGBuffer :: struct {
   pipelines:       [SHADER_VARIANT_COUNT]vk.Pipeline,

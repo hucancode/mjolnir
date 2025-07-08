@@ -7,13 +7,6 @@ import vk "vendor:vulkan"
 
 SHADER_SHADOW_VERT :: #load("shader/shadow/vert.spv")
 
-SHADOW_SHADER_OPTION_COUNT: u32 : 1 // Only SKINNING
-SHADOW_SHADER_VARIANT_COUNT: u32 : 1 << SHADOW_SHADER_OPTION_COUNT
-
-ShadowShaderConfig :: struct {
-  is_skinned: b32,
-}
-
 RendererShadow :: struct {
   pipeline_layout:              vk.PipelineLayout,
   pipelines:                    [SHADOW_SHADER_VARIANT_COUNT]vk.Pipeline,
@@ -381,7 +374,7 @@ render_single_shadow_node :: proc(
   if is_skinned && mesh_has_skin && node_has_skin {
     skin_buffer = mesh_skinning.skin_buffer.buffer
   }
-  
+
   buffers := [2]vk.Buffer{mesh.vertex_buffer.buffer, skin_buffer}
   offsets := [2]vk.DeviceSize{0, 0}
   vk.CmdBindVertexBuffers(

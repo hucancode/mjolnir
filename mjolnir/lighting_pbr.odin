@@ -13,40 +13,6 @@ BG_BLUE_GRAY :: [4]f32{0.0117, 0.0117, 0.0179, 1.0}
 BG_DARK_GRAY :: [4]f32{0.0117, 0.0117, 0.0117, 1.0}
 BG_ORANGE_GRAY :: [4]f32{0.0179, 0.0179, 0.0117, 1.0}
 
-// 128 byte push constant for G-buffer, PBR/IBL params are specialization constants
-PushConstant :: struct {
-  world:                    linalg.Matrix4f32, // 64 bytes
-  bone_matrix_offset:       u32, // 4
-  albedo_index:             u32, // 4
-  metallic_roughness_index: u32, // 4
-  normal_index:             u32, // 4
-  emissive_index:           u32, // 4
-  metallic_value:           f32, // 4
-  roughness_value:          f32, // 4
-  emissive_value:           f32, // 4
-  padding:                  [4]u32, // 4 (pad to 128)
-}
-
-ShaderFeatures :: enum {
-  SKINNING                   = 0,
-  ALBEDO_TEXTURE             = 1,
-  METALLIC_ROUGHNESS_TEXTURE = 2,
-  NORMAL_TEXTURE             = 3,
-  EMISSIVE_TEXTURE           = 4,
-}
-
-ShaderFeatureSet :: bit_set[ShaderFeatures;u32]
-SHADER_OPTION_COUNT: u32 : len(ShaderFeatures)
-SHADER_VARIANT_COUNT: u32 : 1 << SHADER_OPTION_COUNT
-
-ShaderConfig :: struct {
-  is_skinned:                     b32,
-  has_albedo_texture:             b32,
-  has_metallic_roughness_texture: b32,
-  has_normal_texture:             b32,
-  has_emissive_texture:           b32,
-}
-
 RendererLighting :: struct {
   lighting_pipeline:        vk.Pipeline,
   lighting_pipeline_layout: vk.PipelineLayout,
@@ -62,7 +28,7 @@ RendererLighting :: struct {
   fullscreen_triangle_mesh: Handle,
 }
 // Push constant struct for lighting pass (matches shader/lighting/shader.frag)
-// 128 byte push constant budget, no world matrix for light volume
+// 128 byte push constant budget
 LightPushConstant :: struct {
   light_view_proj: linalg.Matrix4f32, // 64 bytes - for shadow mapping
   light_color:     [3]f32, // 12 bytes
