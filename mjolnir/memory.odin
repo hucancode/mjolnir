@@ -27,6 +27,11 @@ malloc_data_buffer :: proc(
       size_of(T),
       int(g_device_properties.limits.minUniformBufferOffsetAlignment),
     )
+  } else if .STORAGE_BUFFER in usage && count > 1 {
+    data_buf.element_size = align_up(
+      size_of(T),
+      int(g_device_properties.limits.minStorageBufferOffsetAlignment),
+    )
   } else {
     data_buf.element_size = size_of(T)
   }
