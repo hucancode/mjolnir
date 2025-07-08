@@ -60,6 +60,9 @@ The engine uses a deferred rendering approach with multiple passes:
 - **GLTF Loading**: Full support for loading 3D models via `mjolnir/gltf_loader.odin`
 - **Texture Loading**: Various formats supported
 - **Shader System**: GLSL shaders compiled to SPIR-V (in `mjolnir/shader/`)
+  + vertex shader must be `shader.vert` and compiled to `vert.spv`
+  + fragment shader must be `shader.frag` and compiled to `frag.spv`
+  + compute shaders must be `*.comp` and compiled to `*.spv`, compute shader must not be named `vert.comp` or `frag.comp`
 
 ## Development Notes
 
