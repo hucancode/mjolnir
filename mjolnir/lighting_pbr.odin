@@ -526,6 +526,8 @@ renderer_lighting_recreate_images :: proc(
     "Updating descriptor sets for lighting pass on resize... %v",
     writes,
   )
+  // TODO: investigate this, why do we need this
+  vk.DeviceWaitIdle(g_device)
   vk.UpdateDescriptorSets(g_device, len(writes), raw_data(writes[:]), 0, nil)
   return .SUCCESS
 }

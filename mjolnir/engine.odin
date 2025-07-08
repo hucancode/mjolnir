@@ -329,6 +329,8 @@ init :: proc(
     }
   }
   log.debugf("vk.UpdateDescriptorSets %d", len(writes))
+  // TODO: investigate this, why do we need this
+  vk.DeviceWaitIdle(g_device)
   vk.UpdateDescriptorSets(g_device, len(writes), raw_data(writes[:]), 0, nil)
   vk.AllocateCommandBuffers(
     g_device,
@@ -721,6 +723,8 @@ recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
         pImageInfo = raw_data(cube_shadow_image_infos[:]),
       },
     }
+    // TODO: investigate this, why do we need this
+    vk.DeviceWaitIdle(g_device)
     vk.UpdateDescriptorSets(g_device, len(writes), raw_data(writes[:]), 0, nil)
   }
   renderer_lighting_recreate_images(
