@@ -1,8 +1,12 @@
 #version 450
 #extension GL_EXT_nonuniform_qualifier : require
 
-const uint MAX_SHADOW_MAPS = 10;
 const float PI = 3.14159265359;
+
+const uint SAMPLER_NEAREST_CLAMP = 0;
+const uint SAMPLER_LINEAR_CLAMP = 1;
+const uint SAMPLER_NEAREST_REPEAT = 2;
+const uint SAMPLER_LINEAR_REPEAT = 3;
 
 layout(location = 0) out vec4 outColor;
 
@@ -18,14 +22,16 @@ layout(set = 0, binding = 0) uniform CameraUniform {
 
 layout(set = 1, binding = 0) uniform texture2D textures[];
 layout(set = 1, binding = 1) uniform sampler samplers[];
+layout(set = 1, binding = 2) uniform textureCube cube_textures[];
 
-layout(set = 2, binding = 0) uniform sampler2D gbuffer_position;
-layout(set = 2, binding = 1) uniform sampler2D gbuffer_normal;
-layout(set = 2, binding = 2) uniform sampler2D gbuffer_albedo;
-layout(set = 2, binding = 3) uniform sampler2D gbuffer_metallic_roughness;
-layout(set = 2, binding = 4) uniform sampler2D gbuffer_emissive;
-layout(set = 2, binding = 5) uniform sampler2D shadow_maps[MAX_SHADOW_MAPS];
-layout(set = 2, binding = 6) uniform samplerCube cube_shadow_maps[MAX_SHADOW_MAPS];
+layout(set = 2, binding = 0) uniform GBufferIndices {
+    uint gbuffer_position_index;
+    uint gbuffer_normal_index;
+    uint gbuffer_albedo_index;
+    uint gbuffer_metallic_index;
+    uint gbuffer_emissive_index;
+    uint padding[3];
+} gbuffer_indices;
 
 // We have a budget of 128 bytes for push constants
 layout(push_constant) uniform LightPushConstant {
@@ -63,13 +69,13 @@ float calculateShadow(vec3 fragPos, vec3 N) {
             shadowCoord.z < 0.0 || shadowCoord.z > 1.0) {
             return 1.0;
         }
-        float shadowDepth = texture(shadow_maps[shadow_map_id], shadowCoord.xy).r;
+        float shadowDepth = texture(sampler2D(textures[shadow_map_id], samplers[SAMPLER_LINEAR_CLAMP]), shadowCoord.xy).r;
         float bias = max(0.1 * (1.0 - dot(N, normalize(-light_direction.xyz))), 0.05);
         return (shadowCoord.z > shadowDepth + bias) ? 0.1 : 1.0;
     } else if (light_kind == POINT_LIGHT) {
         vec3 lightToFrag = fragPos - light_position.xyz;
         float currentDepth = length(lightToFrag);
-        float shadowDepth = texture(cube_shadow_maps[shadow_map_id], lightToFrag).r;
+        float shadowDepth = texture(samplerCube(cube_textures[shadow_map_id], samplers[SAMPLER_LINEAR_CLAMP]), lightToFrag).r;
         shadowDepth = linearizeDepth(shadowDepth, 0.01, light_radius);
         float bias = max(0.5 * (1.0 - dot(N, normalize(lightToFrag))), 0.01);
         return 1.0 - smoothstep(bias, bias*2, currentDepth - shadowDepth);
@@ -83,7 +89,7 @@ float calculateShadow(vec3 fragPos, vec3 N) {
             shadowCoord.z < 0.0 || shadowCoord.z > 1.0) {
             return 1.0;
         }
-        float shadowDepth = texture(shadow_maps[shadow_map_id], shadowCoord.xy).r;
+        float shadowDepth = texture(sampler2D(textures[shadow_map_id], samplers[SAMPLER_LINEAR_CLAMP]), shadowCoord.xy).r;
         // return shadowDepth * shadowDepth;
         shadowDepth = linearizeDepth(shadowDepth, 0.01, light_radius);
         float bias = max(0.5 * (1.0 - dot(N, normalize(lightSpacePos.xyz))), 0.01);
@@ -128,10 +134,10 @@ vec3 brdf(vec3 N, vec3 V, vec3 albedo, float roughness, float metallic, vec3 fra
 
 void main() {
     vec2 uv = (gl_FragCoord.xy / camera.viewport_size);
-    vec3 position = texture(gbuffer_position, uv).xyz;
-    vec3 normal = texture(gbuffer_normal, uv).xyz * 2.0 - 1.0;
-    vec3 albedo = texture(gbuffer_albedo, uv).rgb;
-    vec2 mr = texture(gbuffer_metallic_roughness, uv).rg;
+    vec3 position = texture(sampler2D(textures[gbuffer_indices.gbuffer_position_index], samplers[SAMPLER_NEAREST_CLAMP]), uv).xyz;
+    vec3 normal = texture(sampler2D(textures[gbuffer_indices.gbuffer_normal_index], samplers[SAMPLER_NEAREST_CLAMP]), uv).xyz * 2.0 - 1.0;
+    vec3 albedo = texture(sampler2D(textures[gbuffer_indices.gbuffer_albedo_index], samplers[SAMPLER_NEAREST_CLAMP]), uv).rgb;
+    vec2 mr = texture(sampler2D(textures[gbuffer_indices.gbuffer_metallic_index], samplers[SAMPLER_NEAREST_CLAMP]), uv).rg;
     float metallic = clamp(mr.r, 0.0, 1.0);
     float roughness = clamp(mr.g, 0.0, 1.0);
     roughness = max(roughness, 0.05);

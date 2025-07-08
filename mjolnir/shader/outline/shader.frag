@@ -1,9 +1,27 @@
 #version 450
+#extension GL_EXT_nonuniform_qualifier : require
+
+const uint SAMPLER_NEAREST_CLAMP = 0;
+const uint SAMPLER_LINEAR_CLAMP = 1;
+const uint SAMPLER_NEAREST_REPEAT = 2;
+const uint SAMPLER_LINEAR_REPEAT = 3;
 
 layout(location = 0) in vec2 v_uv;
 layout(location = 0) out vec4 out_color;
 
-layout(set = 0, binding = 0) uniform sampler2D u_input_image;
+layout(set = 0, binding = 0) uniform GBufferIndices {
+    uint gbuffer_position_index;
+    uint gbuffer_normal_index;
+    uint gbuffer_albedo_index;
+    uint gbuffer_metallic_index;
+    uint gbuffer_emissive_index;
+    uint input_image_index;
+    uint padding[2];
+} gbuffer_indices;
+
+layout(set = 1, binding = 0) uniform texture2D textures[];
+layout(set = 1, binding = 1) uniform sampler samplers[];
+layout(set = 1, binding = 2) uniform textureCube textures_cube[];
 
 layout(push_constant) uniform OutlineParams {
     vec3 color;
@@ -11,25 +29,25 @@ layout(push_constant) uniform OutlineParams {
 };
 
 void main() {
-    vec2 texel = 1.0 / vec2(textureSize(u_input_image, 0));
-    float edge = 0.0;
+    vec2 texel = 1.0 / vec2(textureSize(sampler2D(textures[gbuffer_indices.input_image_index], samplers[SAMPLER_LINEAR_CLAMP]), 0));
 
+    vec4 center_color = texture(sampler2D(textures[gbuffer_indices.input_image_index], samplers[SAMPLER_LINEAR_CLAMP]), v_uv);
+    vec4 left_color = texture(sampler2D(textures[gbuffer_indices.input_image_index], samplers[SAMPLER_LINEAR_CLAMP]), v_uv + vec2(-texel.x * line_width, 0));
+    vec4 right_color = texture(sampler2D(textures[gbuffer_indices.input_image_index], samplers[SAMPLER_LINEAR_CLAMP]), v_uv + vec2( texel.x * line_width, 0));
+    vec4 up_color = texture(sampler2D(textures[gbuffer_indices.input_image_index], samplers[SAMPLER_LINEAR_CLAMP]), v_uv + vec2(0,  texel.y * line_width));
+    vec4 down_color = texture(sampler2D(textures[gbuffer_indices.input_image_index], samplers[SAMPLER_LINEAR_CLAMP]), v_uv + vec2(0, -texel.y * line_width));
     // Simple edge detection using luminance difference with neighbors
-    float center = dot(texture(u_input_image, v_uv).rgb, vec3(0.299, 0.587, 0.114));
+    float center = dot(center_color.rgb, vec3(0.299, 0.587, 0.114));
     float threshold = 0.2;
 
-    float left   = dot(texture(u_input_image, v_uv + vec2(-texel.x * line_width, 0)).rgb, vec3(0.299, 0.587, 0.114));
-    float right  = dot(texture(u_input_image, v_uv + vec2( texel.x * line_width, 0)).rgb, vec3(0.299, 0.587, 0.114));
-    float up     = dot(texture(u_input_image, v_uv + vec2(0,  texel.y * line_width)).rgb, vec3(0.299, 0.587, 0.114));
-    float down   = dot(texture(u_input_image, v_uv + vec2(0, -texel.y * line_width)).rgb, vec3(0.299, 0.587, 0.114));
+    float left   = dot(left_color.rgb, vec3(0.299, 0.587, 0.114));
+    float right  = dot(right_color.rgb, vec3(0.299, 0.587, 0.114));
+    float up     = dot(up_color.rgb, vec3(0.299, 0.587, 0.114));
+    float down   = dot(down_color.rgb, vec3(0.299, 0.587, 0.114));
 
-    if (abs(center - left) > threshold ||
-        abs(center - right) > threshold ||
-        abs(center - up) > threshold ||
-        abs(center - down) > threshold) {
-        edge = 1.0;
-    }
-
-    vec3 base = texture(u_input_image, v_uv).rgb;
-    out_color = vec4(mix(base, color, edge), 1.0);
+    float edge =  smoothstep(threshold, threshold + 0.1, abs(center - left)) +
+        smoothstep(threshold, threshold + 0.1, abs(center - right)) +
+        smoothstep(threshold, threshold + 0.1, abs(center - up)) +
+        smoothstep(threshold, threshold + 0.1, abs(center - down));
+    out_color = vec4(mix(center_color.rgb, color, clamp(edge, 0, 1)), 1.0);
 }

@@ -27,9 +27,8 @@ renderer_transparent_init :: proc(
   // Use the existing descriptor set layouts
   set_layouts := [?]vk.DescriptorSetLayout {
     g_camera_descriptor_set_layout, // set = 0 (camera uniforms)
-    g_shadow_descriptor_set_layout, // set = 1 (shadow maps)
-    g_textures_set_layout, // set = 2 (textures)
-    g_bindless_bone_buffer_set_layout, // set = 3 (bone matrices)
+    g_textures_set_layout, // set = 1 (bindless textures)
+    g_bindless_bone_buffer_set_layout, // set = 2 (bone matrices)
   }
   // Create pipeline layout with push constants
   push_constant_range := vk.PushConstantRange {
@@ -420,25 +419,19 @@ create_wireframe_pipelines :: proc(self: ^RendererTransparent) -> vk.Result {
 renderer_transparent_deinit :: proc(self: ^RendererTransparent) {
   // Destroy all transparent material pipelines
   for i in 0 ..< SHADER_VARIANT_COUNT {
-    if self.transparent_pipelines[i] != 0 {
-      vk.DestroyPipeline(g_device, self.transparent_pipelines[i], nil)
-      self.transparent_pipelines[i] = 0
-    }
+    vk.DestroyPipeline(g_device, self.transparent_pipelines[i], nil)
+    self.transparent_pipelines[i] = 0
   }
 
   // Destroy wireframe material pipelines
   for i in 0 ..< 2 {
-    if self.wireframe_pipelines[i] != 0 {
-      vk.DestroyPipeline(g_device, self.wireframe_pipelines[i], nil)
-      self.wireframe_pipelines[i] = 0
-    }
+    vk.DestroyPipeline(g_device, self.wireframe_pipelines[i], nil)
+    self.wireframe_pipelines[i] = 0
   }
 
   // Destroy pipeline layout
-  if self.pipeline_layout != 0 {
-    vk.DestroyPipelineLayout(g_device, self.pipeline_layout, nil)
-    self.pipeline_layout = 0
-  }
+  vk.DestroyPipelineLayout(g_device, self.pipeline_layout, nil)
+  self.pipeline_layout = 0
 }
 
 renderer_transparent_begin :: proc(
@@ -502,7 +495,6 @@ renderer_transparent_render :: proc(
 ) {
   descriptor_sets := [?]vk.DescriptorSet {
     g_camera_descriptor_sets[g_frame_index],
-    g_shadow_descriptor_sets[g_frame_index],
     g_textures_descriptor_set,
     g_bindless_bone_buffer_descriptor_set,
   }

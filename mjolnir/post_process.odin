@@ -1,6 +1,7 @@
 package mjolnir
 
 import "core:log"
+import "resource"
 import vk "vendor:vulkan"
 
 SHADER_POSTPROCESS_VERT :: #load("shader/postprocess/vert.spv")
@@ -97,11 +98,9 @@ RendererPostProcess :: struct {
   pipeline_layouts:       [len(PostProcessEffectType)]vk.PipelineLayout,
   descriptor_sets:        [3]vk.DescriptorSet,
   descriptor_set_layouts: [1]vk.DescriptorSetLayout,
-  sampler:                vk.Sampler,
+  uniform_buffers:        [3]DataBuffer(GBufferIndicesUniform),
   effect_stack:           [dynamic]PostprocessEffect,
-  images:                 [2]ImageBuffer,
-  depth_view:             vk.ImageView, // Store depth view for binding to all descriptor sets
-  normal_view:            vk.ImageView, // Store normal view for binding to all descriptor sets
+  images:                 [2]Handle,
   frames:                 [MAX_FRAMES_IN_FLIGHT]struct {
     image_available_semaphore: vk.Semaphore,
     render_finished_semaphore: vk.Semaphore,
@@ -262,9 +261,9 @@ effect_add_crosshatch :: proc(
 
 effect_add_dof :: proc(
   self: ^RendererPostProcess,
-  focus_distance: f32 = 10.0,
+  focus_distance: f32 = 3.0,
   focus_range: f32 = 2.0,
-  blur_strength: f32 = 8.0,
+  blur_strength: f32 = 20.0,
   bokeh_intensity: f32 = 0.5,
 ) {
   effect := DoFEffect {
@@ -280,72 +279,26 @@ effect_clear :: proc(self: ^RendererPostProcess) {
   resize(&self.effect_stack, 0)
 }
 
-postprocess_update_input :: proc(
+postprocess_update_indices :: proc(
   self: ^RendererPostProcess,
   set_idx: int,
-  input_view: vk.ImageView,
+  frame: FrameData,
 ) -> vk.Result {
-  write := vk.WriteDescriptorSet {
-    sType           = .WRITE_DESCRIPTOR_SET,
-    dstSet          = self.descriptor_sets[set_idx],
-    dstBinding      = 0,
-    descriptorType  = .COMBINED_IMAGE_SAMPLER,
-    descriptorCount = 1,
-    pImageInfo      = &{
-      sampler = g_nearest_repeat_sampler,
-      imageView = input_view,
-      imageLayout = .SHADER_READ_ONLY_OPTIMAL,
-    },
+  for &b in self.uniform_buffers {
+    u := data_buffer_get(&b)
+    u.gbuffer_position_index = frame.gbuffer_position.index
+    u.gbuffer_normal_index = frame.gbuffer_normal.index
+    u.gbuffer_albedo_index = frame.gbuffer_albedo.index
+    u.gbuffer_metallic_index = frame.gbuffer_metallic_roughness.index
+    u.gbuffer_emissive_index = frame.gbuffer_emissive.index
+    u.gbuffer_depth_index = frame.depth_buffer.index
   }
-  // TODO: investigate this, why do we need this
-  vk.DeviceWaitIdle(g_device)
-  vk.UpdateDescriptorSets(g_device, 1, &write, 0, nil)
-  return .SUCCESS
-}
-
-postprocess_update_depth_input :: proc(
-  self: ^RendererPostProcess,
-  set_idx: int,
-  depth_view: vk.ImageView,
-) -> vk.Result {
-  write := vk.WriteDescriptorSet {
-    sType           = .WRITE_DESCRIPTOR_SET,
-    dstSet          = self.descriptor_sets[set_idx],
-    dstBinding      = 2,
-    descriptorType  = .COMBINED_IMAGE_SAMPLER,
-    descriptorCount = 1,
-    pImageInfo      = &{
-      sampler = g_nearest_repeat_sampler,
-      imageView = depth_view,
-      imageLayout = .DEPTH_STENCIL_READ_ONLY_OPTIMAL,
-    },
-  }
-  // TODO: investigate this, why do we need this
-  vk.DeviceWaitIdle(g_device)
-  vk.UpdateDescriptorSets(g_device, 1, &write, 0, nil)
-  return .SUCCESS
-}
-
-postprocess_update_normal_input :: proc(
-  self: ^RendererPostProcess,
-  set_idx: int,
-  normal_view: vk.ImageView,
-) -> vk.Result {
-  write := vk.WriteDescriptorSet {
-    sType           = .WRITE_DESCRIPTOR_SET,
-    dstSet          = self.descriptor_sets[set_idx],
-    dstBinding      = 1, // Normal texture binding
-    descriptorType  = .COMBINED_IMAGE_SAMPLER,
-    descriptorCount = 1,
-    pImageInfo      = &{
-      sampler = g_nearest_repeat_sampler,
-      imageView = normal_view,
-      imageLayout = .SHADER_READ_ONLY_OPTIMAL,
-    },
-  }
-  // TODO: investigate this, why do we need this
-  vk.DeviceWaitIdle(g_device)
-  vk.UpdateDescriptorSets(g_device, 1, &write, 0, nil)
+  u0 := data_buffer_get(&self.uniform_buffers[0])
+  u1 := data_buffer_get(&self.uniform_buffers[1])
+  u2 := data_buffer_get(&self.uniform_buffers[2])
+  u0.input_image_index = frame.final_image.index
+  u1.input_image_index = self.images[1].index
+  u2.input_image_index = self.images[0].index
   return .SUCCESS
 }
 
@@ -427,24 +380,12 @@ renderer_postprocess_init :: proc(
     rasterizationSamples = {._1},
   }
   depth_stencil_state := vk.PipelineDepthStencilStateCreateInfo {
-    sType            = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+    sType = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
   }
   bindings := [?]vk.DescriptorSetLayoutBinding {
     {
-      binding         = 0, // input image
-      descriptorType  = .COMBINED_IMAGE_SAMPLER,
-      descriptorCount = 1,
-      stageFlags      = {.FRAGMENT},
-    },
-    {
-      binding         = 1, // normal image
-      descriptorType  = .COMBINED_IMAGE_SAMPLER,
-      descriptorCount = 1,
-      stageFlags      = {.FRAGMENT},
-    },
-    {
-      binding         = 2, // depth image
-      descriptorType  = .COMBINED_IMAGE_SAMPLER,
+      binding         = 0, // indices uniform buffer
+      descriptorType  = .UNIFORM_BUFFER,
       descriptorCount = 1,
       stageFlags      = {.FRAGMENT},
     },
@@ -473,6 +414,29 @@ renderer_postprocess_init :: proc(
       },
       &set,
     ) or_return
+  }
+
+  // Initialize uniform buffers
+  for i in 0 ..< len(self.uniform_buffers) {
+    self.uniform_buffers[i] = create_host_visible_buffer(
+      GBufferIndicesUniform,
+      1,
+      {.UNIFORM_BUFFER},
+    ) or_return
+
+    write := vk.WriteDescriptorSet {
+      sType           = .WRITE_DESCRIPTOR_SET,
+      dstSet          = self.descriptor_sets[i],
+      dstBinding      = 0,
+      descriptorCount = 1,
+      descriptorType  = .UNIFORM_BUFFER,
+      pBufferInfo     = &{
+        buffer = self.uniform_buffers[i].buffer,
+        offset = 0,
+        range = size_of(GBufferIndicesUniform),
+      },
+    }
+    vk.UpdateDescriptorSets(g_device, 1, &write, 0, nil)
   }
   renderer_postprocess_create_images(
     self,
@@ -508,12 +472,16 @@ renderer_postprocess_init :: proc(
       stageFlags = {.FRAGMENT},
       size       = push_constant_size,
     }
+    layout_sets := [?]vk.DescriptorSetLayout {
+      self.descriptor_set_layouts[0], // set = 0 (indices uniform buffer)
+      g_textures_set_layout, // set = 1 (bindless textures)
+    }
     vk.CreatePipelineLayout(
       g_device,
       &{
         sType = .PIPELINE_LAYOUT_CREATE_INFO,
-        setLayoutCount = len(self.descriptor_set_layouts),
-        pSetLayouts = raw_data(self.descriptor_set_layouts[:]),
+        setLayoutCount = len(layout_sets),
+        pSetLayouts = raw_data(layout_sets[:]),
         pushConstantRangeCount = 1 if push_constant_size > 0 else 0,
         pPushConstantRanges = &push_constant_range,
       },
@@ -598,24 +566,22 @@ renderer_postprocess_create_images :: proc(
   height: u32,
   format: vk.Format,
 ) -> vk.Result {
-  for &image in self.images {
-    image = malloc_image_buffer(
+  for &handle in self.images {
+    handle, _ = create_empty_texture_2d(
       width,
       height,
       format,
-      .OPTIMAL,
       {.COLOR_ATTACHMENT, .SAMPLED, .TRANSFER_SRC, .TRANSFER_DST},
-      {.DEVICE_LOCAL},
     ) or_return
-    image.view = create_image_view(image.image, format, {.COLOR}) or_return
   }
-  postprocess_update_input(self, 1, self.images[0].view)
-  postprocess_update_input(self, 2, self.images[1].view)
+  log.debugf("created post-process image")
   return .SUCCESS
 }
 
 renderer_postprocess_deinit_images :: proc(self: ^RendererPostProcess) {
-  for &image in self.images do image_buffer_deinit(&image)
+  for handle in self.images {
+    resource.free(&g_image_2d_buffers, handle)
+  }
 }
 
 renderer_postprocess_recreate_images :: proc(
@@ -629,6 +595,9 @@ renderer_postprocess_recreate_images :: proc(
 }
 
 renderer_postprocess_deinit :: proc(self: ^RendererPostProcess) {
+  for &buffer in self.uniform_buffers {
+    data_buffer_deinit(&buffer)
+  }
   for &frame in self.frames {
     vk.DestroySemaphore(g_device, frame.image_available_semaphore, nil)
     vk.DestroySemaphore(g_device, frame.render_finished_semaphore, nil)
@@ -656,24 +625,19 @@ renderer_postprocess_deinit :: proc(self: ^RendererPostProcess) {
 renderer_postprocess_begin :: proc(
   self: ^RendererPostProcess,
   command_buffer: vk.CommandBuffer,
-  input_view: vk.ImageView,
-  depth_view: vk.ImageView,
-  normal_view: vk.ImageView,
+  frame: FrameData,
   extent: vk.Extent2D,
 ) {
   if len(self.effect_stack) == 0 {
     // if no postprocess effect, just copy the input to output
     append(&self.effect_stack, nil)
   }
-  self.depth_view = depth_view
-  self.normal_view = normal_view
-  postprocess_update_input(self, 0, input_view)
 
-  // Update normal buffer for ALL descriptor sets (since crosshatch might not be first effect)
+  // Update indices for all descriptor sets
   for i in 0 ..< len(self.descriptor_sets) {
-    postprocess_update_normal_input(self, i, normal_view)
-    postprocess_update_depth_input(self, i, depth_view)
+    postprocess_update_indices(self, i, frame)
   }
+
   viewport := vk.Viewport {
     width    = f32(extent.width),
     height   = f32(extent.height),
@@ -696,22 +660,49 @@ renderer_postprocess_render :: proc(
   for effect, i in self.effect_stack {
     is_first := i == 0
     is_last := i == len(self.effect_stack) - 1
-    src_idx := 0 if is_first else (i - 1) % 2 + 1
-    dst_image_idx := i % 2
-    src_image_idx := (i - 1) % 2
-    // For the last pass, always sample from the last offscreen image
-    if is_last && !is_first {
-      postprocess_update_input(self, src_idx, self.images[src_image_idx].view)
-      postprocess_update_depth_input(self, src_idx, self.depth_view)
-      // Make sure normal buffer is still bound for effects like crosshatch
-      postprocess_update_normal_input(self, src_idx, self.normal_view)
+
+    // Simple ping-pong logic:
+    // Pass 0: reads from original input (descriptor_set[0]), writes to image[0]
+    // Pass 1: reads from image[0] (descriptor_set[2]), writes to image[1]
+    // Pass 2: reads from image[1] (descriptor_set[1]), writes to image[0]
+    // etc.
+
+    src_idx: u32
+    dst_image_idx: u32
+
+    if is_first {
+      src_idx = 0 // Use original input
+      dst_image_idx = 0 // Write to image[0]
+    } else {
+      prev_dst_image_idx := (i - 1) % 2
+      if prev_dst_image_idx == 0 {
+        src_idx = 2 // Read from image[0] using descriptor_set[2]
+      } else {
+        src_idx = 1 // Read from image[1] using descriptor_set[1]
+      }
+      dst_image_idx = u32(i % 2) // Alternate between image[0] and image[1]
     }
-    // Prepare destination image for rendering
+
+    // Ping-pong logic:
+    // Pass 0: input -> image[0]     (src: original input, dst: image[0])
+    // Pass 1: image[0] -> image[1]  (src: image[0], dst: image[1])
+    // Pass 2: image[1] -> image[0]  (src: image[1], dst: image[0])
+    // Pass N: image[(N+1)%2] -> swapchain (src: image[(N-1)%2], dst: swapchain)
+
+    dst_view := output_view
     if !is_last {
+      dst_texture := resource.get(
+        g_image_2d_buffers,
+        self.images[dst_image_idx],
+      )
+      log.debugf(
+        "transitioning image to color attachment optimal 0x%x",
+        dst_texture.image,
+      )
       transition_image(
         command_buffer,
-        self.images[dst_image_idx].image,
-        .COLOR_ATTACHMENT_OPTIMAL,
+        dst_texture.image,
+        .UNDEFINED,
         .COLOR_ATTACHMENT_OPTIMAL,
         {.COLOR},
         {.TOP_OF_PIPE},
@@ -719,18 +710,21 @@ renderer_postprocess_render :: proc(
         {},
         {.COLOR_ATTACHMENT_WRITE},
       )
+      dst_view = dst_texture.view
     } else {
       // For the last effect, output is the swapchain image, which should already be transitioned
     }
     if !is_first {
-      transition_image_to_shader_read(
-        command_buffer,
-        self.images[src_image_idx].image,
+      src_texture_idx := (i - 1) % 2 // Which ping-pong buffer the previous pass wrote to
+      src_texture := resource.get(
+        g_image_2d_buffers,
+        self.images[src_texture_idx],
       )
+      transition_image_to_shader_read(command_buffer, src_texture.image)
     }
     color_attachment := vk.RenderingAttachmentInfoKHR {
       sType = .RENDERING_ATTACHMENT_INFO_KHR,
-      imageView = self.images[dst_image_idx].view if !is_last else output_view,
+      imageView = dst_view,
       imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
       loadOp = .CLEAR,
       storeOp = .STORE,
@@ -746,13 +740,17 @@ renderer_postprocess_render :: proc(
     vk.CmdBeginRenderingKHR(command_buffer, &render_info)
     effect_type := get_effect_type(effect)
     vk.CmdBindPipeline(command_buffer, .GRAPHICS, self.pipelines[effect_type])
+    descriptor_sets := [?]vk.DescriptorSet {
+      self.descriptor_sets[src_idx], // set 0 = inputs
+      g_textures_descriptor_set, // set = 1 (bindless textures)
+    }
     vk.CmdBindDescriptorSets(
       command_buffer,
       .GRAPHICS,
       self.pipeline_layouts[effect_type],
       0,
-      1,
-      &self.descriptor_sets[src_idx],
+      len(descriptor_sets),
+      raw_data(descriptor_sets[:]),
       0,
       nil,
     )

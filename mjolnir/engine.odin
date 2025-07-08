@@ -28,11 +28,11 @@ MOUSE_SENSITIVITY_X :: 0.005
 MOUSE_SENSITIVITY_Y :: 0.005
 SCROLL_SENSITIVITY :: 0.5
 MAX_CONSECUTIVE_RENDER_ERROR_COUNT_ALLOWED :: 20
-MAX_LIGHTS :: 10
 SHADOW_MAP_SIZE :: 512
-MAX_SHADOW_MAPS :: MAX_LIGHTS
+MAX_SHADOW_MAPS :: 10
 MAX_CAMERA_UNIFORMS :: 16
-MAX_TEXTURES :: 50
+MAX_TEXTURES :: 90
+MAX_CUBE_TEXTURES :: 20
 
 Handle :: resource.Handle
 
@@ -119,57 +119,6 @@ RenderTarget :: struct {
   extent:   vk.Extent2D,
 }
 
-// Generate render input for a given frustum (camera or light)
-generate_render_input :: proc(
-  self: ^Engine,
-  frustum: geometry.Frustum,
-) -> (
-  ret: RenderInput,
-) {
-  ret.batches = make(
-    map[BatchKey][dynamic]BatchData,
-    allocator = context.temp_allocator,
-  )
-  for &entry in self.scene.nodes.entries do if entry.active {
-    node := &entry.item
-    #partial switch data in node.attachment {
-    case MeshAttachment:
-      mesh := resource.get(g_meshes, data.handle)
-      if mesh == nil do continue
-      material := resource.get(g_materials, data.material)
-      if material == nil do continue
-      world_aabb := geometry.aabb_transform(mesh.aabb, node.transform.world_matrix)
-      if !geometry.frustum_test_aabb(frustum, world_aabb) do continue
-      batch_key := BatchKey {
-        features      = material.features,
-        material_type = material.type,
-      }
-      batch_group, group_found := &ret.batches[batch_key]
-      if !group_found {
-        ret.batches[batch_key] = make([dynamic]BatchData, allocator = context.temp_allocator)
-        batch_group = &ret.batches[batch_key]
-      }
-      batch_data: ^BatchData
-      for &batch in batch_group {
-        if batch.material_handle == data.material {
-          batch_data = &batch
-          break
-        }
-      }
-      if batch_data == nil {
-        new_batch := BatchData {
-          material_handle = data.material,
-          nodes           = make([dynamic]^Node, allocator = context.temp_allocator),
-        }
-        append(batch_group, new_batch)
-        batch_data = &batch_group[len(batch_group) - 1]
-      }
-      append(&batch_data.nodes, node)
-    }
-  }
-  return
-}
-
 InputState :: struct {
   mouse_pos:         linalg.Vector2f64,
   mouse_drag_origin: linalg.Vector2f32,
@@ -187,16 +136,16 @@ LightKind :: enum u32 {
 
 FrameData :: struct {
   camera_uniform:             DataBuffer(CameraUniform),
-  shadow_maps:                [MAX_SHADOW_MAPS]ImageBuffer,
-  cube_shadow_maps:           [MAX_SHADOW_MAPS]CubeImageBuffer,
+  shadow_maps:                [MAX_SHADOW_MAPS]Handle,
+  cube_shadow_maps:           [MAX_SHADOW_MAPS]Handle,
   // G-buffer images
-  gbuffer_position:           ImageBuffer,
-  gbuffer_normal:             ImageBuffer,
-  gbuffer_albedo:             ImageBuffer,
-  gbuffer_metallic_roughness: ImageBuffer,
-  gbuffer_emissive:           ImageBuffer,
-  depth_buffer:               ImageBuffer,
-  final_image:                ImageBuffer,
+  gbuffer_position:           Handle,
+  gbuffer_normal:             Handle,
+  gbuffer_albedo:             Handle,
+  gbuffer_metallic_roughness: Handle,
+  gbuffer_emissive:           Handle,
+  depth_buffer:               Handle,
+  final_image:                Handle,
 }
 
 Engine :: struct {
@@ -276,29 +225,11 @@ init :: proc(
   self.last_update_timestamp = self.start_timestamp
   scene_init(&self.scene)
   swapchain_init(&self.swapchain, self.window) or_return
-  DESCRIPTOR_PER_FRAME :: 3
+  // Only need camera uniforms now - shadow textures use bindless system
+  DESCRIPTOR_PER_FRAME :: 1
   writes: [MAX_FRAMES_IN_FLIGHT * DESCRIPTOR_PER_FRAME]vk.WriteDescriptorSet
-  shadow_image_infos: [MAX_FRAMES_IN_FLIGHT *
-  MAX_SHADOW_MAPS]vk.DescriptorImageInfo
-  cube_shadow_image_infos: [MAX_FRAMES_IN_FLIGHT *
-  MAX_SHADOW_MAPS]vk.DescriptorImageInfo
   for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
     frame_data_init(&self.frames[i], &self.swapchain)
-    log.debugf("write frame descriptor sets for frame %d", i)
-    for j in 0 ..< MAX_SHADOW_MAPS {
-      shadow_image_infos[i * MAX_SHADOW_MAPS + j] = {
-        sampler     = g_linear_clamp_sampler,
-        imageView   = self.frames[i].shadow_maps[j].view,
-        imageLayout = .SHADER_READ_ONLY_OPTIMAL,
-      }
-    }
-    for j in 0 ..< MAX_SHADOW_MAPS {
-      cube_shadow_image_infos[i * MAX_SHADOW_MAPS + j] = {
-        sampler     = g_linear_clamp_sampler,
-        imageView   = self.frames[i].cube_shadow_maps[j].view,
-        imageLayout = .SHADER_READ_ONLY_OPTIMAL,
-      }
-    }
     writes[i * DESCRIPTOR_PER_FRAME + 0] = {
       sType           = .WRITE_DESCRIPTOR_SET,
       dstSet          = g_camera_descriptor_sets[i],
@@ -310,27 +241,7 @@ init :: proc(
         range = size_of(CameraUniform),
       },
     }
-    writes[i * DESCRIPTOR_PER_FRAME + 1] = {
-      sType           = .WRITE_DESCRIPTOR_SET,
-      dstSet          = g_shadow_descriptor_sets[i],
-      dstBinding      = 0,
-      descriptorCount = MAX_SHADOW_MAPS,
-      descriptorType  = .COMBINED_IMAGE_SAMPLER,
-      pImageInfo      = raw_data(shadow_image_infos[i * MAX_SHADOW_MAPS:]),
-    }
-    writes[i * DESCRIPTOR_PER_FRAME + 2] = {
-      sType           = .WRITE_DESCRIPTOR_SET,
-      dstSet          = g_shadow_descriptor_sets[i],
-      dstBinding      = 1,
-      descriptorCount = MAX_SHADOW_MAPS,
-      descriptorType  = .COMBINED_IMAGE_SAMPLER,
-      pImageInfo      = raw_data(
-        cube_shadow_image_infos[i * MAX_SHADOW_MAPS:],
-      ),
-    }
   }
-  // TODO: investigate this, why do we need this
-  vk.DeviceWaitIdle(g_device)
   vk.UpdateDescriptorSets(g_device, len(writes), raw_data(writes[:]), 0, nil)
   vk.AllocateCommandBuffers(
     g_device,
@@ -377,7 +288,9 @@ init :: proc(
     self.swapchain.extent.width,
     self.swapchain.extent.height,
   ) or_return
+  log.debugf("initializing shadow pipeline")
   renderer_shadow_init(&self.shadow, .D32_SFLOAT) or_return
+  log.debugf("initializing post process pipeline")
   renderer_postprocess_init(
     &self.postprocess,
     self.swapchain.format.format,
@@ -684,55 +597,19 @@ recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
   for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
     frame_data_deinit(&engine.frames[i])
     frame_data_init(&engine.frames[i], &engine.swapchain)
-    // this code is copied from init procedure. TODO: deduplicate this
-    shadow_image_infos: [MAX_SHADOW_MAPS]vk.DescriptorImageInfo
-    for j in 0 ..< MAX_SHADOW_MAPS {
-      shadow_image_infos[j] = {
-        sampler     = g_linear_clamp_sampler,
-        imageView   = engine.frames[i].shadow_maps[j].view,
-        imageLayout = .SHADER_READ_ONLY_OPTIMAL,
-      }
-    }
-    cube_shadow_image_infos: [MAX_SHADOW_MAPS]vk.DescriptorImageInfo
-    for j in 0 ..< MAX_SHADOW_MAPS {
-      cube_shadow_image_infos[j] = {
-        sampler     = g_linear_clamp_sampler,
-        imageView   = engine.frames[i].cube_shadow_maps[j].view,
-        imageLayout = .SHADER_READ_ONLY_OPTIMAL,
-      }
-    }
-    writes := [?]vk.WriteDescriptorSet {
-      {
-        sType = .WRITE_DESCRIPTOR_SET,
-        dstSet = g_camera_descriptor_sets[i],
-        dstBinding = 0,
-        descriptorCount = 1,
-        descriptorType = .UNIFORM_BUFFER,
-        pBufferInfo = &{
-          buffer = engine.frames[i].camera_uniform.buffer,
-          range = size_of(CameraUniform),
-        },
-      },
-      {
-        sType = .WRITE_DESCRIPTOR_SET,
-        dstSet = g_shadow_descriptor_sets[i],
-        dstBinding = 0,
-        descriptorCount = len(shadow_image_infos),
-        descriptorType = .COMBINED_IMAGE_SAMPLER,
-        pImageInfo = raw_data(shadow_image_infos[:]),
-      },
-      {
-        sType = .WRITE_DESCRIPTOR_SET,
-        dstSet = g_shadow_descriptor_sets[i],
-        dstBinding = 1,
-        descriptorCount = len(cube_shadow_image_infos),
-        descriptorType = .COMBINED_IMAGE_SAMPLER,
-        pImageInfo = raw_data(cube_shadow_image_infos[:]),
+    // Only need to update camera uniform - shadow textures use bindless system
+    write := vk.WriteDescriptorSet {
+      sType = .WRITE_DESCRIPTOR_SET,
+      dstSet = g_camera_descriptor_sets[i],
+      dstBinding = 0,
+      descriptorCount = 1,
+      descriptorType = .UNIFORM_BUFFER,
+      pBufferInfo = &{
+        buffer = engine.frames[i].camera_uniform.buffer,
+        range = size_of(CameraUniform),
       },
     }
-    // TODO: investigate this, why do we need this
-    vk.DeviceWaitIdle(g_device)
-    vk.UpdateDescriptorSets(g_device, len(writes), raw_data(writes[:]), 0, nil)
+    vk.UpdateDescriptorSets(g_device, 1, &write, 0, nil)
   }
   renderer_lighting_recreate_images(
     &engine.main,
@@ -764,6 +641,58 @@ recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
   ) or_return
   return .SUCCESS
 }
+
+// Generate render input for a given frustum (camera or light)
+generate_render_input :: proc(
+  self: ^Engine,
+  frustum: geometry.Frustum,
+) -> (
+  ret: RenderInput,
+) {
+  ret.batches = make(
+    map[BatchKey][dynamic]BatchData,
+    allocator = context.temp_allocator,
+  )
+  for &entry in self.scene.nodes.entries do if entry.active {
+    node := &entry.item
+    #partial switch data in node.attachment {
+    case MeshAttachment:
+      mesh := resource.get(g_meshes, data.handle)
+      if mesh == nil do continue
+      material := resource.get(g_materials, data.material)
+      if material == nil do continue
+      world_aabb := geometry.aabb_transform(mesh.aabb, node.transform.world_matrix)
+      if !geometry.frustum_test_aabb(frustum, world_aabb) do continue
+      batch_key := BatchKey {
+        features      = material.features,
+        material_type = material.type,
+      }
+      batch_group, group_found := &ret.batches[batch_key]
+      if !group_found {
+        ret.batches[batch_key] = make([dynamic]BatchData, allocator = context.temp_allocator)
+        batch_group = &ret.batches[batch_key]
+      }
+      batch_data: ^BatchData
+      for &batch in batch_group {
+        if batch.material_handle == data.material {
+          batch_data = &batch
+          break
+        }
+      }
+      if batch_data == nil {
+        new_batch := BatchData {
+          material_handle = data.material,
+          nodes           = make([dynamic]^Node, allocator = context.temp_allocator),
+        }
+        append(batch_group, new_batch)
+        batch_data = &batch_group[len(batch_group) - 1]
+      }
+      append(&batch_data.nodes, node)
+    }
+  }
+  return
+}
+
 
 render :: proc(self: ^Engine) -> vk.Result {
   acquire_next_image(&self.swapchain) or_return
@@ -836,35 +765,62 @@ render :: proc(self: ^Engine) -> vk.Result {
       }
     }
   }
-  // log.debug("============ rendering shadow pass...============ ")
+  log.debug("============ rendering shadow pass...============ ")
   // Transition all shadow maps to depth attachment optimal
-  transition_images(
-    command_buffer,
-    self.frames[g_frame_index].shadow_maps[:],
-    .UNDEFINED,
-    .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-    {.DEPTH},
-    1,
-    {.TOP_OF_PIPE},
-    {.EARLY_FRAGMENT_TESTS},
-    {.DEPTH_STENCIL_ATTACHMENT_WRITE},
-  )
-  transition_images(
-    command_buffer,
-    self.frames[g_frame_index].cube_shadow_maps[:],
-    .UNDEFINED,
-    .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-    {.DEPTH},
-    6,
-    {.TOP_OF_PIPE},
-    {.EARLY_FRAGMENT_TESTS},
-    {.DEPTH_STENCIL_ATTACHMENT_WRITE},
-  )
+  shadow_2d_images : [MAX_SHADOW_MAPS]vk.Image
+  shadow_2d_count := 0
+  for h, i in self.frames[g_frame_index].shadow_maps {
+      b, ok := resource.get(g_image_2d_buffers, h)
+      if !ok {
+        log.debugf("Shadow map 2D texture not found for handle 0x%x at index %d", h, i)
+        continue
+      }
+      shadow_2d_images[shadow_2d_count] = b.image
+      shadow_2d_count += 1
+  }
+  if shadow_2d_count > 0 {
+    transition_images(
+      command_buffer,
+      shadow_2d_images[:shadow_2d_count],
+      .UNDEFINED,
+      .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+      {.DEPTH},
+      1,
+      {.TOP_OF_PIPE},
+      {.EARLY_FRAGMENT_TESTS},
+      {.DEPTH_STENCIL_ATTACHMENT_WRITE},
+    )
+  }
+  shadow_cube_images : [MAX_SHADOW_MAPS]vk.Image
+  shadow_cube_count := 0
+  for h, i in self.frames[g_frame_index].cube_shadow_maps {
+      b, ok := resource.get(g_image_cube_buffers, h)
+      if !ok {
+        log.debugf("Shadow map cube texture not found for handle 0x%x at index %d", h, i)
+        continue
+      }
+      shadow_cube_images[shadow_cube_count] = b.image
+      shadow_cube_count += 1
+  }
+  if shadow_cube_count > 0 {
+    transition_images(
+      command_buffer,
+      shadow_cube_images[:shadow_cube_count],
+      .UNDEFINED,
+      .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+      {.DEPTH},
+      6,
+      {.TOP_OF_PIPE},
+      {.EARLY_FRAGMENT_TESTS},
+      {.DEPTH_STENCIL_ATTACHMENT_WRITE},
+    )
+  }
   for node, i in shadow_casters {
     #partial switch light in node {
     case PointLightData:
       // Render 6 faces for point light shadow cubemap
-      cube_shadow := &self.frames[g_frame_index].cube_shadow_maps[i]
+      cube_shadow_handle := self.frames[g_frame_index].cube_shadow_maps[i]
+      cube_shadow := resource.get(g_image_cube_buffers, cube_shadow_handle)
       for face in 0 ..< 6 {
         frustum := geometry.make_frustum(light.proj * light.views[face])
         shadow_render_input := generate_render_input(self, frustum)
@@ -889,7 +845,7 @@ render :: proc(self: ^Engine) -> vk.Result {
     case DirectionalLightData:
       frustum := geometry.make_frustum(light.proj * light.view)
       shadow_render_input := generate_render_input(self, frustum)
-      shadow_map_texture := &self.frames[g_frame_index].shadow_maps[i]
+      shadow_map_texture := resource.get(g_image_2d_buffers, self.frames[g_frame_index].shadow_maps[i])
       shadow_target: RenderTarget
       shadow_target.depth = shadow_map_texture.view
       shadow_target.extent = {
@@ -910,7 +866,7 @@ render :: proc(self: ^Engine) -> vk.Result {
     case SpotLightData:
       frustum := geometry.make_frustum(light.proj * light.view)
       shadow_render_input := generate_render_input(self, frustum)
-      shadow_map_texture := &self.frames[g_frame_index].shadow_maps[i]
+      shadow_map_texture := resource.get(g_image_2d_buffers, self.frames[g_frame_index].shadow_maps[i])
       shadow_target: RenderTarget
       shadow_target.depth = shadow_map_texture.view
       shadow_target.extent = {
@@ -933,7 +889,7 @@ render :: proc(self: ^Engine) -> vk.Result {
   // Transition all shadow maps to shader read only optimal
   transition_images(
     command_buffer,
-    self.frames[g_frame_index].shadow_maps[:],
+    shadow_2d_images[:shadow_2d_count],
     .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
     .SHADER_READ_ONLY_OPTIMAL,
     {.DEPTH},
@@ -944,7 +900,7 @@ render :: proc(self: ^Engine) -> vk.Result {
   )
   transition_images(
     command_buffer,
-    self.frames[g_frame_index].cube_shadow_maps[:],
+    shadow_cube_images[:shadow_cube_count],
     .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
     .SHADER_READ_ONLY_OPTIMAL,
     {.DEPTH},
@@ -953,9 +909,10 @@ render :: proc(self: ^Engine) -> vk.Result {
     {.FRAGMENT_SHADER},
     {.SHADER_READ},
   )
+  final_image := resource.get(g_image_2d_buffers, self.frames[g_frame_index].final_image)
   transition_image(
     command_buffer,
-    self.frames[g_frame_index].final_image.image,
+    final_image.image,
     .UNDEFINED,
     .COLOR_ATTACHMENT_OPTIMAL,
     {.COLOR},
@@ -964,9 +921,10 @@ render :: proc(self: ^Engine) -> vk.Result {
     {},
     {.COLOR_ATTACHMENT_WRITE},
   )
-  // log.debug("============ rendering depth pre-pass... =============")
+  log.debug("============ rendering depth pre-pass... =============")
   depth_target: RenderTarget
-  depth_target.depth = self.frames[g_frame_index].depth_buffer.view
+  depth_texture := resource.get(g_image_2d_buffers, self.frames[g_frame_index].depth_buffer)
+  depth_target.depth = depth_texture.view
   depth_target.extent = self.swapchain.extent
   depth_input := generate_render_input(self, frustum)
   renderer_depth_prepass_begin(&depth_target, command_buffer)
@@ -976,14 +934,21 @@ render :: proc(self: ^Engine) -> vk.Result {
     command_buffer,
   )
   renderer_depth_prepass_end(command_buffer)
-  // log.debug("============ rendering G-buffer pass... =============")
+  log.debug("============ rendering G-buffer pass... =============")
   // Transition G-buffer images to COLOR_ATTACHMENT_OPTIMAL
+  frame := &self.frames[g_frame_index]
+  gbuffer_position := resource.get(g_image_2d_buffers, frame.gbuffer_position)
+  gbuffer_normal := resource.get(g_image_2d_buffers, frame.gbuffer_normal)
+  gbuffer_albedo := resource.get(g_image_2d_buffers, frame.gbuffer_albedo)
+  gbuffer_metallic := resource.get(g_image_2d_buffers, frame.gbuffer_metallic_roughness)
+  gbuffer_emissive := resource.get(g_image_2d_buffers, frame.gbuffer_emissive)
+
   gbuffer_images := [?]vk.Image {
-    self.frames[g_frame_index].gbuffer_position.image,
-    self.frames[g_frame_index].gbuffer_normal.image,
-    self.frames[g_frame_index].gbuffer_albedo.image,
-    self.frames[g_frame_index].gbuffer_metallic_roughness.image,
-    self.frames[g_frame_index].gbuffer_emissive.image,
+    gbuffer_position.image,
+    gbuffer_normal.image,
+    gbuffer_albedo.image,
+    gbuffer_metallic.image,
+    gbuffer_emissive.image,
   }
   // Batch transition all G-buffer images to COLOR_ATTACHMENT_OPTIMAL in a single API call
   transition_images(
@@ -998,13 +963,12 @@ render :: proc(self: ^Engine) -> vk.Result {
     {.COLOR_ATTACHMENT_WRITE},
   )
   gbuffer_target: RenderTarget
-  gbuffer_target.position = self.frames[g_frame_index].gbuffer_position.view
-  gbuffer_target.normal = self.frames[g_frame_index].gbuffer_normal.view
-  gbuffer_target.albedo = self.frames[g_frame_index].gbuffer_albedo.view
-  gbuffer_target.metallic =
-    self.frames[g_frame_index].gbuffer_metallic_roughness.view
-  gbuffer_target.emissive = self.frames[g_frame_index].gbuffer_emissive.view
-  gbuffer_target.depth = self.frames[g_frame_index].depth_buffer.view
+  gbuffer_target.position = gbuffer_position.view
+  gbuffer_target.normal = gbuffer_normal.view
+  gbuffer_target.albedo = gbuffer_albedo.view
+  gbuffer_target.metallic = gbuffer_metallic.view
+  gbuffer_target.emissive = gbuffer_emissive.view
+  gbuffer_target.depth = resource.get(g_image_2d_buffers, frame.depth_buffer).view
   gbuffer_target.extent = self.swapchain.extent
   gbuffer_input := depth_input
   renderer_gbuffer_begin(&gbuffer_target, command_buffer)
@@ -1028,11 +992,11 @@ render :: proc(self: ^Engine) -> vk.Result {
     {.FRAGMENT_SHADER},
     {.SHADER_READ},
   )
-  // log.debug("============ rendering main pass... =============")
+  log.debug("============ rendering main pass... =============")
   // Prepare RenderTarget and RenderInput for decoupled renderer
   render_target: RenderTarget
-  render_target.final = self.frames[g_frame_index].final_image.view
-  render_target.depth = self.frames[g_frame_index].depth_buffer.view
+  render_target.final = final_image.view
+  render_target.depth = resource.get(g_image_2d_buffers, frame.depth_buffer).view
   render_target.extent = self.swapchain.extent
   // Ambient pass
   renderer_ambient_begin(&self.ambient, render_target, command_buffer)
@@ -1051,7 +1015,7 @@ render :: proc(self: ^Engine) -> vk.Result {
     command_buffer,
   )
   renderer_lighting_end(command_buffer)
-  // log.debug("============ rendering particles... =============")
+  log.debug("============ rendering particles... =============")
   renderer_particle_begin(&self.particle, command_buffer, render_target)
   renderer_particle_render(&self.particle, command_buffer)
   renderer_particle_end(command_buffer)
@@ -1066,17 +1030,15 @@ render :: proc(self: ^Engine) -> vk.Result {
   )
   renderer_transparent_end(&self.transparent, command_buffer)
 
-  // log.debug("============ rendering post processes... =============")
+  log.debug("============ rendering post processes... =============")
   transition_image_to_shader_read(
     command_buffer,
-    self.frames[g_frame_index].final_image.image,
+    final_image.image,
   )
   renderer_postprocess_begin(
     &self.postprocess,
     command_buffer,
-    self.frames[g_frame_index].final_image.view,
-    self.frames[g_frame_index].depth_buffer.view,
-    self.frames[g_frame_index].gbuffer_normal.view,
+    self.frames[g_frame_index],
     self.swapchain.extent,
   )
   transition_image(
@@ -1109,7 +1071,7 @@ render :: proc(self: ^Engine) -> vk.Result {
       &self.ui.ctx,
       fmt.tprintf(
         "Textures %d",
-        len(g_image_buffers.entries) - len(g_image_buffers.free_indices),
+        len(g_image_2d_buffers.entries) - len(g_image_2d_buffers.free_indices),
       ),
     )
     mu.label(
@@ -1131,7 +1093,7 @@ render :: proc(self: ^Engine) -> vk.Result {
     self.render2d_proc(self, &self.ui.ctx)
   }
   mu.end(&self.ui.ctx)
-  // log.debug("============ rendering UI... =============")
+  log.debug("============ rendering UI... =============")
   renderer_ui_begin(
     &self.ui,
     command_buffer,
@@ -1140,12 +1102,13 @@ render :: proc(self: ^Engine) -> vk.Result {
   )
   renderer_ui_render(&self.ui, command_buffer)
   renderer_ui_end(&self.ui, command_buffer)
-  // log.debug("============ preparing image for present... =============")
+  log.debug("============ preparing image for present... =============")
   transition_image_to_present(
     command_buffer,
     self.swapchain.images[self.swapchain.image_index],
   )
   vk.EndCommandBuffer(command_buffer) or_return
+  log.debug("============ submit queue... =============")
   submit_queue_and_present(&self.swapchain, &command_buffer) or_return
   g_frame_index = (g_frame_index + 1) % MAX_FRAMES_IN_FLIGHT
   return .SUCCESS
@@ -1188,106 +1151,82 @@ frame_data_init :: proc(
   frame: ^FrameData,
   swapchain: ^Swapchain,
 ) -> vk.Result {
-  frame.gbuffer_position = malloc_image_buffer(
+  // G-buffer position (high precision for world position)
+  frame.gbuffer_position, _ = create_empty_texture_2d(
     swapchain.extent.width,
     swapchain.extent.height,
     .R32G32B32A32_SFLOAT,
-    .OPTIMAL,
     {.COLOR_ATTACHMENT, .SAMPLED},
-    {.DEVICE_LOCAL},
   ) or_return
-  frame.gbuffer_position.view = create_image_view(
-    frame.gbuffer_position.image,
-    .R32G32B32A32_SFLOAT,
-    {.COLOR},
-  ) or_return
-  frame.final_image = malloc_image_buffer(
+  log.debugf("created g buffer position image")
+
+  // Final color image (matches swapchain format)
+  frame.final_image, _ = create_empty_texture_2d(
     swapchain.extent.width,
     swapchain.extent.height,
     swapchain.format.format,
-    .OPTIMAL,
     {.COLOR_ATTACHMENT, .SAMPLED},
-    {.DEVICE_LOCAL},
   ) or_return
-  frame.final_image.view = create_image_view(
-    frame.final_image.image,
-    swapchain.format.format,
-    {.COLOR},
-  ) or_return
-  frame.gbuffer_normal = malloc_image_buffer(
+  log.debugf("created g buffer final image")
+
+  // G-buffer normal (standard precision)
+  frame.gbuffer_normal, _ = create_empty_texture_2d(
     swapchain.extent.width,
     swapchain.extent.height,
     .R8G8B8A8_UNORM,
-    .OPTIMAL,
     {.COLOR_ATTACHMENT, .SAMPLED},
-    {.DEVICE_LOCAL},
   ) or_return
-  frame.gbuffer_normal.view = create_image_view(
-    frame.gbuffer_normal.image,
-    .R8G8B8A8_UNORM,
-    {.COLOR},
-  ) or_return
-  frame.gbuffer_albedo = malloc_image_buffer(
+  log.debugf("created g buffer normal image")
+
+  // G-buffer albedo (standard precision)
+  frame.gbuffer_albedo, _ = create_empty_texture_2d(
     swapchain.extent.width,
     swapchain.extent.height,
     .R8G8B8A8_UNORM,
-    .OPTIMAL,
     {.COLOR_ATTACHMENT, .SAMPLED},
-    {.DEVICE_LOCAL},
   ) or_return
-  frame.gbuffer_albedo.view = create_image_view(
-    frame.gbuffer_albedo.image,
-    .R8G8B8A8_UNORM,
-    {.COLOR},
-  ) or_return
-  frame.gbuffer_metallic_roughness = malloc_image_buffer(
+  log.debugf("created g buffer albedo image")
+
+  // G-buffer metallic/roughness (standard precision)
+  frame.gbuffer_metallic_roughness, _ = create_empty_texture_2d(
     swapchain.extent.width,
     swapchain.extent.height,
     .R8G8B8A8_UNORM,
-    .OPTIMAL,
     {.COLOR_ATTACHMENT, .SAMPLED},
-    {.DEVICE_LOCAL},
   ) or_return
-  frame.gbuffer_metallic_roughness.view = create_image_view(
-    frame.gbuffer_metallic_roughness.image,
-    .R8G8B8A8_UNORM,
-    {.COLOR},
-  ) or_return
-  frame.gbuffer_emissive = malloc_image_buffer(
+  log.debugf("created g buffer metallic roughness image")
+
+  // G-buffer emissive (standard precision)
+  frame.gbuffer_emissive, _ = create_empty_texture_2d(
     swapchain.extent.width,
     swapchain.extent.height,
     .R8G8B8A8_UNORM,
-    .OPTIMAL,
     {.COLOR_ATTACHMENT, .SAMPLED},
-    {.DEVICE_LOCAL},
   ) or_return
-  frame.gbuffer_emissive.view = create_image_view(
-    frame.gbuffer_emissive.image,
-    .R8G8B8A8_UNORM,
-    {.COLOR},
-  ) or_return
-  depth_image_init(
-    &frame.depth_buffer,
+  log.debugf("created g buffer emissive image")
+
+  // Depth buffer (special case - still needs manual initialization for depth aspect)
+  frame.depth_buffer, _ = create_empty_texture_2d(
     swapchain.extent.width,
     swapchain.extent.height,
     .D32_SFLOAT,
     {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
   ) or_return
+  log.debugf("created g buffer depth image")
   for j in 0 ..< MAX_SHADOW_MAPS {
-    depth_image_init(
-      &frame.shadow_maps[j],
+    frame.shadow_maps[j], _ = create_empty_texture_2d(
       SHADOW_MAP_SIZE,
       SHADOW_MAP_SIZE,
       .D32_SFLOAT,
       {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
     ) or_return
-    cube_depth_texture_init(
-      &frame.cube_shadow_maps[j],
+    frame.cube_shadow_maps[j], _ = create_empty_texture_cube(
       SHADOW_MAP_SIZE,
       .D32_SFLOAT,
       {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
     ) or_return
   }
+  log.debugf("created shadow map image")
   frame.camera_uniform = create_host_visible_buffer(
     CameraUniform,
     MAX_CAMERA_UNIFORMS,
@@ -1298,13 +1237,21 @@ frame_data_init :: proc(
 
 frame_data_deinit :: proc(frame: ^FrameData) {
   data_buffer_deinit(&frame.camera_uniform)
-  image_buffer_deinit(&frame.final_image)
-  for &t in frame.shadow_maps do image_buffer_deinit(&t)
-  for &t in frame.cube_shadow_maps do cube_depth_texture_deinit(&t)
-  image_buffer_deinit(&frame.gbuffer_position)
-  image_buffer_deinit(&frame.gbuffer_normal)
-  image_buffer_deinit(&frame.gbuffer_albedo)
-  image_buffer_deinit(&frame.gbuffer_metallic_roughness)
-  image_buffer_deinit(&frame.gbuffer_emissive)
-  image_buffer_deinit(&frame.depth_buffer)
+
+  // Release 2D texture handles
+  resource.free(&g_image_2d_buffers, frame.final_image)
+  resource.free(&g_image_2d_buffers, frame.gbuffer_position)
+  resource.free(&g_image_2d_buffers, frame.gbuffer_normal)
+  resource.free(&g_image_2d_buffers, frame.gbuffer_albedo)
+  resource.free(&g_image_2d_buffers, frame.gbuffer_metallic_roughness)
+  resource.free(&g_image_2d_buffers, frame.gbuffer_emissive)
+  resource.free(&g_image_2d_buffers, frame.depth_buffer)
+
+  // Release shadow map handles
+  for handle in frame.shadow_maps {
+    resource.free(&g_image_2d_buffers, handle)
+  }
+  for handle in frame.cube_shadow_maps {
+    resource.free(&g_image_cube_buffers, handle)
+  }
 }

@@ -13,11 +13,25 @@ BG_BLUE_GRAY :: [4]f32{0.0117, 0.0117, 0.0179, 1.0}
 BG_DARK_GRAY :: [4]f32{0.0117, 0.0117, 0.0117, 1.0}
 BG_ORANGE_GRAY :: [4]f32{0.0179, 0.0179, 0.0117, 1.0}
 
+GBufferIndicesUniform :: struct {
+  gbuffer_position_index: u32,
+  gbuffer_normal_index:   u32,
+  gbuffer_albedo_index:   u32,
+  gbuffer_metallic_index: u32,
+  gbuffer_emissive_index: u32,
+  gbuffer_depth_index:    u32,
+  input_image_index:      u32, // For post-processing input
+  padding:                [1]u32,
+}
+
 RendererLighting :: struct {
   lighting_pipeline:        vk.Pipeline,
   lighting_pipeline_layout: vk.PipelineLayout,
   lighting_set_layout:      vk.DescriptorSetLayout,
   lighting_descriptor_sets: [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
+  gbuffer_uniform_buffers:  [MAX_FRAMES_IN_FLIGHT]DataBuffer(
+    GBufferIndicesUniform,
+  ),
   environment_map:          Handle,
   brdf_lut:                 Handle,
   environment_max_lod:      f32,
@@ -51,49 +65,12 @@ renderer_lighting_init :: proc(
 ) -> vk.Result {
   log.debugf("renderer main init %d x %d", width, height)
   bindings := [?]vk.DescriptorSetLayoutBinding {
-    {   // Position
+    {   // G-buffer indices uniform buffer
       binding         = 0,
-      descriptorType  = .COMBINED_IMAGE_SAMPLER,
+      descriptorType  = .UNIFORM_BUFFER,
       descriptorCount = 1,
       stageFlags      = {.FRAGMENT},
     },
-    {   // Normal
-      binding         = 1,
-      descriptorType  = .COMBINED_IMAGE_SAMPLER,
-      descriptorCount = 1,
-      stageFlags      = {.FRAGMENT},
-    },
-    {   // Albedo
-      binding         = 2,
-      descriptorType  = .COMBINED_IMAGE_SAMPLER,
-      descriptorCount = 1,
-      stageFlags      = {.FRAGMENT},
-    },
-    {   // Metallic Roughness
-      binding         = 3,
-      descriptorType  = .COMBINED_IMAGE_SAMPLER,
-      descriptorCount = 1,
-      stageFlags      = {.FRAGMENT},
-    },
-    {   // Emissive
-      binding         = 4,
-      descriptorType  = .COMBINED_IMAGE_SAMPLER,
-      descriptorCount = 1,
-      stageFlags      = {.FRAGMENT},
-    },
-    {   // Shadow Map 2D
-      binding         = 5,
-      descriptorType  = .COMBINED_IMAGE_SAMPLER,
-      descriptorCount = MAX_SHADOW_MAPS,
-      stageFlags      = {.FRAGMENT},
-    },
-    {   // Shadow Map Cube
-      binding         = 6,
-      descriptorType  = .COMBINED_IMAGE_SAMPLER,
-      descriptorCount = MAX_SHADOW_MAPS,
-      stageFlags      = {.FRAGMENT},
-    },
-    // No bindless here; use g_textures_set_layout for set 1
   }
   set_layout_info := vk.DescriptorSetLayoutCreateInfo {
     sType        = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
@@ -110,7 +87,7 @@ renderer_lighting_init :: proc(
   pipeline_set_layouts := [?]vk.DescriptorSetLayout {
     g_camera_descriptor_set_layout, // set = 0 (camera)
     g_textures_set_layout, // set = 1 (bindless textures)
-    self.lighting_set_layout, // set = 2 (gbuffer textures, shadow maps)
+    self.lighting_set_layout, // set = 2 (gbuffer indices uniform buffer)
   }
   push_constant_range := vk.PushConstantRange {
     stageFlags = {.VERTEX, .FRAGMENT},
@@ -259,106 +236,39 @@ renderer_lighting_init :: proc(
     },
     auto_cast &self.lighting_descriptor_sets,
   ) or_return
-  image_infos: [MAX_FRAMES_IN_FLIGHT * MAX_SHADOW_MAPS]vk.DescriptorImageInfo
-  cube_image_infos: [MAX_FRAMES_IN_FLIGHT *
-  MAX_SHADOW_MAPS]vk.DescriptorImageInfo
-  DESCRIPTOR_PER_FRAME :: 7
-  writes: [MAX_FRAMES_IN_FLIGHT * DESCRIPTOR_PER_FRAME]vk.WriteDescriptorSet
-  for frame, i in frames {
-    for image, j in frame.shadow_maps {
-      image_infos[i * MAX_SHADOW_MAPS + j] = {
-        sampler     = g_linear_clamp_sampler,
-        imageView   = image.view,
-        imageLayout = .SHADER_READ_ONLY_OPTIMAL,
-      }
-    }
-    for image, j in frame.cube_shadow_maps {
-      cube_image_infos[i * MAX_SHADOW_MAPS + j] = {
-        sampler     = g_linear_clamp_sampler,
-        imageView   = image.view,
-        imageLayout = .SHADER_READ_ONLY_OPTIMAL,
-      }
-    }
-    writes[i * DESCRIPTOR_PER_FRAME + 0] = vk.WriteDescriptorSet {
+
+  // Initialize G-buffer uniform buffers and update descriptor sets
+  for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
+    self.gbuffer_uniform_buffers[i] = create_host_visible_buffer(
+      GBufferIndicesUniform,
+      1,
+      {.UNIFORM_BUFFER},
+    ) or_return
+
+    // Update G-buffer indices with actual handle indices
+    gbuffer_uniform := data_buffer_get(&self.gbuffer_uniform_buffers[i], 0)
+    gbuffer_uniform.gbuffer_position_index = frames[i].gbuffer_position.index
+    gbuffer_uniform.gbuffer_normal_index = frames[i].gbuffer_normal.index
+    gbuffer_uniform.gbuffer_albedo_index = frames[i].gbuffer_albedo.index
+    gbuffer_uniform.gbuffer_metallic_index =
+      frames[i].gbuffer_metallic_roughness.index
+    gbuffer_uniform.gbuffer_emissive_index = frames[i].gbuffer_emissive.index
+    gbuffer_uniform.gbuffer_depth_index = frames[i].depth_buffer.index
+
+    write := vk.WriteDescriptorSet {
       sType           = .WRITE_DESCRIPTOR_SET,
       dstSet          = self.lighting_descriptor_sets[i],
       dstBinding      = 0,
       descriptorCount = 1,
-      descriptorType  = .COMBINED_IMAGE_SAMPLER,
-      pImageInfo      = &{
-        sampler = g_linear_clamp_sampler,
-        imageView = frame.gbuffer_position.view,
-        imageLayout = .SHADER_READ_ONLY_OPTIMAL,
+      descriptorType  = .UNIFORM_BUFFER,
+      pBufferInfo     = &{
+        buffer = self.gbuffer_uniform_buffers[i].buffer,
+        offset = 0,
+        range = size_of(GBufferIndicesUniform),
       },
     }
-    writes[i * DESCRIPTOR_PER_FRAME + 1] = {
-      sType           = .WRITE_DESCRIPTOR_SET,
-      dstSet          = self.lighting_descriptor_sets[i],
-      dstBinding      = 1,
-      descriptorCount = 1,
-      descriptorType  = .COMBINED_IMAGE_SAMPLER,
-      pImageInfo      = &{
-        sampler = g_linear_clamp_sampler,
-        imageView = frame.gbuffer_normal.view,
-        imageLayout = .SHADER_READ_ONLY_OPTIMAL,
-      },
-    }
-    writes[i * DESCRIPTOR_PER_FRAME + 2] = {
-      sType           = .WRITE_DESCRIPTOR_SET,
-      dstSet          = self.lighting_descriptor_sets[i],
-      dstBinding      = 2,
-      descriptorCount = 1,
-      descriptorType  = .COMBINED_IMAGE_SAMPLER,
-      pImageInfo      = &{
-        sampler = g_linear_clamp_sampler,
-        imageView = frame.gbuffer_albedo.view,
-        imageLayout = .SHADER_READ_ONLY_OPTIMAL,
-      },
-    }
-    writes[i * DESCRIPTOR_PER_FRAME + 3] = {
-      sType           = .WRITE_DESCRIPTOR_SET,
-      dstSet          = self.lighting_descriptor_sets[i],
-      dstBinding      = 3,
-      descriptorCount = 1,
-      descriptorType  = .COMBINED_IMAGE_SAMPLER,
-      pImageInfo      = &{
-        sampler = g_linear_clamp_sampler,
-        imageView = frame.gbuffer_metallic_roughness.view,
-        imageLayout = .SHADER_READ_ONLY_OPTIMAL,
-      },
-    }
-    writes[i * DESCRIPTOR_PER_FRAME + 4] = {
-      sType           = .WRITE_DESCRIPTOR_SET,
-      dstSet          = self.lighting_descriptor_sets[i],
-      dstBinding      = 4,
-      descriptorCount = 1,
-      descriptorType  = .COMBINED_IMAGE_SAMPLER,
-      pImageInfo      = &{
-        sampler = g_linear_clamp_sampler,
-        imageView = frame.gbuffer_emissive.view,
-        imageLayout = .SHADER_READ_ONLY_OPTIMAL,
-      },
-    }
-    writes[i * DESCRIPTOR_PER_FRAME + 5] = {
-      sType           = .WRITE_DESCRIPTOR_SET,
-      dstSet          = self.lighting_descriptor_sets[i],
-      dstBinding      = 5,
-      descriptorCount = MAX_SHADOW_MAPS,
-      descriptorType  = .COMBINED_IMAGE_SAMPLER,
-      pImageInfo      = raw_data(image_infos[i * MAX_SHADOW_MAPS:]),
-    }
-    writes[i * DESCRIPTOR_PER_FRAME + 6] = {
-      sType           = .WRITE_DESCRIPTOR_SET,
-      dstSet          = self.lighting_descriptor_sets[i],
-      dstBinding      = 6,
-      descriptorCount = MAX_SHADOW_MAPS,
-      descriptorType  = .COMBINED_IMAGE_SAMPLER,
-      pImageInfo      = raw_data(cube_image_infos[i * MAX_SHADOW_MAPS:]),
-    }
-    // No writes for environment_map or brdf_lut; use bindless and push constant indices
+    vk.UpdateDescriptorSets(g_device, 1, &write, 0, nil)
   }
-  // log.debugf("Updating descriptor sets for lighting pass... %v", writes)
-  vk.UpdateDescriptorSets(g_device, len(writes), raw_data(writes[:]), 0, nil)
 
   // Initialize light volume meshes
   self.sphere_mesh, _, _ = create_mesh(
@@ -376,6 +286,9 @@ renderer_lighting_init :: proc(
 }
 
 renderer_lighting_deinit :: proc(self: ^RendererLighting) {
+  for &buffer in self.gbuffer_uniform_buffers {
+    data_buffer_deinit(&buffer)
+  }
   vk.DestroyPipelineLayout(g_device, self.lighting_pipeline_layout, nil)
   vk.DestroyPipeline(g_device, self.lighting_pipeline, nil)
   vk.DestroyDescriptorSetLayout(g_device, self.lighting_set_layout, nil)
@@ -389,110 +302,18 @@ renderer_lighting_recreate_images :: proc(
   color_format: vk.Format,
   depth_format: vk.Format,
 ) -> vk.Result {
-  image_infos: [MAX_FRAMES_IN_FLIGHT * MAX_SHADOW_MAPS]vk.DescriptorImageInfo
-  cube_image_infos: [MAX_FRAMES_IN_FLIGHT *
-  MAX_SHADOW_MAPS]vk.DescriptorImageInfo
-  DESCRIPTOR_PER_FRAME :: 7
-  writes: [MAX_FRAMES_IN_FLIGHT * DESCRIPTOR_PER_FRAME]vk.WriteDescriptorSet
-  for frame, i in frames {
-    for image, j in frame.shadow_maps {
-      image_infos[i * MAX_SHADOW_MAPS + j] = {
-        sampler     = g_linear_clamp_sampler,
-        imageView   = image.view,
-        imageLayout = .SHADER_READ_ONLY_OPTIMAL,
-      }
-    }
-    for image, j in frame.cube_shadow_maps {
-      cube_image_infos[i * MAX_SHADOW_MAPS + j] = {
-        sampler     = g_linear_clamp_sampler,
-        imageView   = image.view,
-        imageLayout = .SHADER_READ_ONLY_OPTIMAL,
-      }
-    }
-    writes[i * DESCRIPTOR_PER_FRAME + 0] = vk.WriteDescriptorSet {
-      sType           = .WRITE_DESCRIPTOR_SET,
-      dstSet          = self.lighting_descriptor_sets[i],
-      dstBinding      = 0,
-      descriptorCount = 1,
-      descriptorType  = .COMBINED_IMAGE_SAMPLER,
-      pImageInfo      = &{
-        sampler = g_linear_clamp_sampler,
-        imageView = frame.gbuffer_position.view,
-        imageLayout = .SHADER_READ_ONLY_OPTIMAL,
-      },
-    }
-    writes[i * DESCRIPTOR_PER_FRAME + 1] = {
-      sType           = .WRITE_DESCRIPTOR_SET,
-      dstSet          = self.lighting_descriptor_sets[i],
-      dstBinding      = 1,
-      descriptorCount = 1,
-      descriptorType  = .COMBINED_IMAGE_SAMPLER,
-      pImageInfo      = &{
-        sampler = g_linear_clamp_sampler,
-        imageView = frame.gbuffer_normal.view,
-        imageLayout = .SHADER_READ_ONLY_OPTIMAL,
-      },
-    }
-    writes[i * DESCRIPTOR_PER_FRAME + 2] = {
-      sType           = .WRITE_DESCRIPTOR_SET,
-      dstSet          = self.lighting_descriptor_sets[i],
-      dstBinding      = 2,
-      descriptorCount = 1,
-      descriptorType  = .COMBINED_IMAGE_SAMPLER,
-      pImageInfo      = &{
-        sampler = g_linear_clamp_sampler,
-        imageView = frame.gbuffer_albedo.view,
-        imageLayout = .SHADER_READ_ONLY_OPTIMAL,
-      },
-    }
-    writes[i * DESCRIPTOR_PER_FRAME + 3] = {
-      sType           = .WRITE_DESCRIPTOR_SET,
-      dstSet          = self.lighting_descriptor_sets[i],
-      dstBinding      = 3,
-      descriptorCount = 1,
-      descriptorType  = .COMBINED_IMAGE_SAMPLER,
-      pImageInfo      = &{
-        sampler = g_linear_clamp_sampler,
-        imageView = frame.gbuffer_metallic_roughness.view,
-        imageLayout = .SHADER_READ_ONLY_OPTIMAL,
-      },
-    }
-    writes[i * DESCRIPTOR_PER_FRAME + 4] = {
-      sType           = .WRITE_DESCRIPTOR_SET,
-      dstSet          = self.lighting_descriptor_sets[i],
-      dstBinding      = 4,
-      descriptorCount = 1,
-      descriptorType  = .COMBINED_IMAGE_SAMPLER,
-      pImageInfo      = &{
-        sampler = g_linear_clamp_sampler,
-        imageView = frame.gbuffer_emissive.view,
-        imageLayout = .SHADER_READ_ONLY_OPTIMAL,
-      },
-    }
-    writes[i * DESCRIPTOR_PER_FRAME + 5] = {
-      sType           = .WRITE_DESCRIPTOR_SET,
-      dstSet          = self.lighting_descriptor_sets[i],
-      dstBinding      = 5,
-      descriptorCount = MAX_SHADOW_MAPS,
-      descriptorType  = .COMBINED_IMAGE_SAMPLER,
-      pImageInfo      = raw_data(image_infos[i * MAX_SHADOW_MAPS:]),
-    }
-    writes[i * DESCRIPTOR_PER_FRAME + 6] = {
-      sType           = .WRITE_DESCRIPTOR_SET,
-      dstSet          = self.lighting_descriptor_sets[i],
-      dstBinding      = 6,
-      descriptorCount = MAX_SHADOW_MAPS,
-      descriptorType  = .COMBINED_IMAGE_SAMPLER,
-      pImageInfo      = raw_data(cube_image_infos[i * MAX_SHADOW_MAPS:]),
-    }
+  // Update G-buffer indices in uniform buffers
+  for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
+    gbuffer_uniform := data_buffer_get(&self.gbuffer_uniform_buffers[i], 0)
+    gbuffer_uniform.gbuffer_position_index = frames[i].gbuffer_position.index
+    gbuffer_uniform.gbuffer_normal_index = frames[i].gbuffer_normal.index
+    gbuffer_uniform.gbuffer_albedo_index = frames[i].gbuffer_albedo.index
+    gbuffer_uniform.gbuffer_metallic_index =
+      frames[i].gbuffer_metallic_roughness.index
+    gbuffer_uniform.gbuffer_emissive_index = frames[i].gbuffer_emissive.index
+    gbuffer_uniform.gbuffer_depth_index = frames[i].depth_buffer.index
   }
-  log.debugf(
-    "Updating descriptor sets for lighting pass on resize... %v",
-    writes,
-  )
-  // TODO: investigate this, why do we need this
-  vk.DeviceWaitIdle(g_device)
-  vk.UpdateDescriptorSets(g_device, len(writes), raw_data(writes[:]), 0, nil)
+  log.debugf("Updated G-buffer indices for lighting pass on resize")
   return .SUCCESS
 }
 
@@ -540,8 +361,8 @@ renderer_lighting_begin :: proc(
   vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
   descriptor_sets := [?]vk.DescriptorSet {
     g_camera_descriptor_sets[g_frame_index], // set = 0 (camera)
-    g_textures_descriptor_set, // set = 2 (bindless textures)
-    self.lighting_descriptor_sets[g_frame_index], // set = 1 (gbuffer textures, shadow maps)
+    g_textures_descriptor_set, // set = 1 (bindless textures)
+    self.lighting_descriptor_sets[g_frame_index], // set = 2 (gbuffer indices uniform buffer)
   }
   vk.CmdBindDescriptorSets(
     command_buffer,

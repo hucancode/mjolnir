@@ -14,14 +14,17 @@ AmbientPushConstant :: struct {
 }
 
 RendererAmbient :: struct {
-  pipeline:            vk.Pipeline,
-  pipeline_layout:     vk.PipelineLayout,
-  set_layout:          vk.DescriptorSetLayout,
-  descriptor_sets:     [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
-  environment_index:   u32,
-  brdf_lut_index:      u32,
-  environment_max_lod: f32,
-  ibl_intensity:       f32,
+  pipeline:                vk.Pipeline,
+  pipeline_layout:         vk.PipelineLayout,
+  set_layout:              vk.DescriptorSetLayout,
+  descriptor_sets:         [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
+  gbuffer_uniform_buffers: [MAX_FRAMES_IN_FLIGHT]DataBuffer(
+    GBufferIndicesUniform,
+  ),
+  environment_index:       u32,
+  brdf_lut_index:          u32,
+  environment_max_lod:     f32,
+  ibl_intensity:           f32,
 }
 
 renderer_ambient_begin :: proc(
@@ -111,33 +114,9 @@ renderer_ambient_init :: proc(
 ) -> vk.Result {
   log.debugf("renderer ambient init %d x %d", width, height)
   bindings := [?]vk.DescriptorSetLayoutBinding {
-    {   // Position
+    {   // G-buffer indices uniform buffer
       binding         = 0,
-      descriptorType  = .COMBINED_IMAGE_SAMPLER,
-      descriptorCount = 1,
-      stageFlags      = {.FRAGMENT},
-    },
-    {   // Normal
-      binding         = 1,
-      descriptorType  = .COMBINED_IMAGE_SAMPLER,
-      descriptorCount = 1,
-      stageFlags      = {.FRAGMENT},
-    },
-    {   // Albedo
-      binding         = 2,
-      descriptorType  = .COMBINED_IMAGE_SAMPLER,
-      descriptorCount = 1,
-      stageFlags      = {.FRAGMENT},
-    },
-    {   // Metallic Roughness
-      binding         = 3,
-      descriptorType  = .COMBINED_IMAGE_SAMPLER,
-      descriptorCount = 1,
-      stageFlags      = {.FRAGMENT},
-    },
-    {   // Emissive
-      binding         = 4,
-      descriptorType  = .COMBINED_IMAGE_SAMPLER,
+      descriptorType  = .UNIFORM_BUFFER,
       descriptorCount = 1,
       stageFlags      = {.FRAGMENT},
     },
@@ -284,70 +263,37 @@ renderer_ambient_init :: proc(
     auto_cast &self.descriptor_sets,
   ) or_return
 
-  for frame, i in frames {
-    writes := [?]vk.WriteDescriptorSet {
-      {
-        sType = .WRITE_DESCRIPTOR_SET,
-        dstSet = self.descriptor_sets[i],
-        dstBinding = 0,
-        descriptorCount = 1,
-        descriptorType = .COMBINED_IMAGE_SAMPLER,
-        pImageInfo = &{
-          sampler = g_linear_clamp_sampler,
-          imageView = frame.gbuffer_position.view,
-          imageLayout = .SHADER_READ_ONLY_OPTIMAL,
-        },
-      },
-      {
-        sType = .WRITE_DESCRIPTOR_SET,
-        dstSet = self.descriptor_sets[i],
-        dstBinding = 1,
-        descriptorCount = 1,
-        descriptorType = .COMBINED_IMAGE_SAMPLER,
-        pImageInfo = &{
-          sampler = g_linear_clamp_sampler,
-          imageView = frame.gbuffer_normal.view,
-          imageLayout = .SHADER_READ_ONLY_OPTIMAL,
-        },
-      },
-      {
-        sType = .WRITE_DESCRIPTOR_SET,
-        dstSet = self.descriptor_sets[i],
-        dstBinding = 2,
-        descriptorCount = 1,
-        descriptorType = .COMBINED_IMAGE_SAMPLER,
-        pImageInfo = &{
-          sampler = g_linear_clamp_sampler,
-          imageView = frame.gbuffer_albedo.view,
-          imageLayout = .SHADER_READ_ONLY_OPTIMAL,
-        },
-      },
-      {
-        sType = .WRITE_DESCRIPTOR_SET,
-        dstSet = self.descriptor_sets[i],
-        dstBinding = 3,
-        descriptorCount = 1,
-        descriptorType = .COMBINED_IMAGE_SAMPLER,
-        pImageInfo = &{
-          sampler = g_linear_clamp_sampler,
-          imageView = frame.gbuffer_metallic_roughness.view,
-          imageLayout = .SHADER_READ_ONLY_OPTIMAL,
-        },
-      },
-      {
-        sType = .WRITE_DESCRIPTOR_SET,
-        dstSet = self.descriptor_sets[i],
-        dstBinding = 4,
-        descriptorCount = 1,
-        descriptorType = .COMBINED_IMAGE_SAMPLER,
-        pImageInfo = &{
-          sampler = g_linear_clamp_sampler,
-          imageView = frame.gbuffer_emissive.view,
-          imageLayout = .SHADER_READ_ONLY_OPTIMAL,
-        },
+  // Initialize G-buffer uniform buffers and update descriptor sets
+  for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
+    self.gbuffer_uniform_buffers[i] = create_host_visible_buffer(
+      GBufferIndicesUniform,
+      1,
+      {.UNIFORM_BUFFER},
+    ) or_return
+
+    // Update G-buffer indices with actual handle indices
+    gbuffer_uniform := data_buffer_get(&self.gbuffer_uniform_buffers[i], 0)
+    gbuffer_uniform.gbuffer_position_index = frames[i].gbuffer_position.index
+    gbuffer_uniform.gbuffer_normal_index = frames[i].gbuffer_normal.index
+    gbuffer_uniform.gbuffer_albedo_index = frames[i].gbuffer_albedo.index
+    gbuffer_uniform.gbuffer_metallic_index =
+      frames[i].gbuffer_metallic_roughness.index
+    gbuffer_uniform.gbuffer_emissive_index = frames[i].gbuffer_emissive.index
+    gbuffer_uniform.gbuffer_depth_index = frames[i].depth_buffer.index
+
+    write := vk.WriteDescriptorSet {
+      sType           = .WRITE_DESCRIPTOR_SET,
+      dstSet          = self.descriptor_sets[i],
+      dstBinding      = 0,
+      descriptorCount = 1,
+      descriptorType  = .UNIFORM_BUFFER,
+      pBufferInfo     = &{
+        buffer = self.gbuffer_uniform_buffers[i].buffer,
+        offset = 0,
+        range = size_of(GBufferIndicesUniform),
       },
     }
-    vk.UpdateDescriptorSets(g_device, len(writes), raw_data(writes[:]), 0, nil)
+    vk.UpdateDescriptorSets(g_device, 1, &write, 0, nil)
   }
   log.info("Ambient pipeline initialized successfully")
   return .SUCCESS
@@ -360,82 +306,25 @@ renderer_ambient_recreate_images :: proc(
   height: u32,
   format: vk.Format,
 ) -> vk.Result {
-  // Only update descriptor sets that reference G-buffer images
-  // The pipeline and layouts can remain unchanged
-
-  // Extract the same descriptor set update logic from init
-  for frame, i in frames {
-    writes := [?]vk.WriteDescriptorSet {
-      {
-        sType = .WRITE_DESCRIPTOR_SET,
-        dstSet = self.descriptor_sets[i],
-        dstBinding = 0,
-        descriptorCount = 1,
-        descriptorType = .COMBINED_IMAGE_SAMPLER,
-        pImageInfo = &{
-          sampler = g_linear_clamp_sampler,
-          imageView = frame.gbuffer_position.view,
-          imageLayout = .SHADER_READ_ONLY_OPTIMAL,
-        },
-      },
-      {
-        sType = .WRITE_DESCRIPTOR_SET,
-        dstSet = self.descriptor_sets[i],
-        dstBinding = 1,
-        descriptorCount = 1,
-        descriptorType = .COMBINED_IMAGE_SAMPLER,
-        pImageInfo = &{
-          sampler = g_linear_clamp_sampler,
-          imageView = frame.gbuffer_normal.view,
-          imageLayout = .SHADER_READ_ONLY_OPTIMAL,
-        },
-      },
-      {
-        sType = .WRITE_DESCRIPTOR_SET,
-        dstSet = self.descriptor_sets[i],
-        dstBinding = 2,
-        descriptorCount = 1,
-        descriptorType = .COMBINED_IMAGE_SAMPLER,
-        pImageInfo = &{
-          sampler = g_linear_clamp_sampler,
-          imageView = frame.gbuffer_albedo.view,
-          imageLayout = .SHADER_READ_ONLY_OPTIMAL,
-        },
-      },
-      {
-        sType = .WRITE_DESCRIPTOR_SET,
-        dstSet = self.descriptor_sets[i],
-        dstBinding = 3,
-        descriptorCount = 1,
-        descriptorType = .COMBINED_IMAGE_SAMPLER,
-        pImageInfo = &{
-          sampler = g_linear_clamp_sampler,
-          imageView = frame.gbuffer_metallic_roughness.view,
-          imageLayout = .SHADER_READ_ONLY_OPTIMAL,
-        },
-      },
-      {
-        sType = .WRITE_DESCRIPTOR_SET,
-        dstSet = self.descriptor_sets[i],
-        dstBinding = 4,
-        descriptorCount = 1,
-        descriptorType = .COMBINED_IMAGE_SAMPLER,
-        pImageInfo = &{
-          sampler = g_linear_clamp_sampler,
-          imageView = frame.gbuffer_emissive.view,
-          imageLayout = .SHADER_READ_ONLY_OPTIMAL,
-        },
-      },
-    }
-    // TODO: investigate this, why do we need this
-    vk.DeviceWaitIdle(g_device)
-    vk.UpdateDescriptorSets(g_device, len(writes), raw_data(writes[:]), 0, nil)
+  // Update G-buffer indices in uniform buffers
+  for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
+    gbuffer_uniform := data_buffer_get(&self.gbuffer_uniform_buffers[i], 0)
+    gbuffer_uniform.gbuffer_position_index = frames[i].gbuffer_position.index
+    gbuffer_uniform.gbuffer_normal_index = frames[i].gbuffer_normal.index
+    gbuffer_uniform.gbuffer_albedo_index = frames[i].gbuffer_albedo.index
+    gbuffer_uniform.gbuffer_metallic_index =
+      frames[i].gbuffer_metallic_roughness.index
+    gbuffer_uniform.gbuffer_emissive_index = frames[i].gbuffer_emissive.index
+    gbuffer_uniform.gbuffer_depth_index = frames[i].depth_buffer.index
   }
-
+  log.debugf("Updated G-buffer indices for ambient pass on resize")
   return .SUCCESS
 }
 
 renderer_ambient_deinit :: proc(self: ^RendererAmbient) {
+  for &buffer in self.gbuffer_uniform_buffers {
+    data_buffer_deinit(&buffer)
+  }
   vk.DestroyPipeline(g_device, self.pipeline, nil)
   self.pipeline = 0
   vk.DestroyPipelineLayout(g_device, self.pipeline_layout, nil)

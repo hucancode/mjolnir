@@ -21,7 +21,7 @@ layout(set = 0, binding = 0) uniform CameraUniform {
 } camera;
 
 // Bone matrices
-layout(set = 3, binding = 0) readonly buffer BoneMatrices {
+layout(set = 2, binding = 0) readonly buffer BoneMatrices {
     mat4 matrices[];
 } boneMatrices;
 

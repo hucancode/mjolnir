@@ -1,9 +1,27 @@
 #version 450
+#extension GL_EXT_nonuniform_qualifier : require
+
+const uint SAMPLER_NEAREST_CLAMP = 0;
+const uint SAMPLER_LINEAR_CLAMP = 1;
+const uint SAMPLER_NEAREST_REPEAT = 2;
+const uint SAMPLER_LINEAR_REPEAT = 3;
 
 layout(location = 0) in vec2 v_uv;
 layout(location = 0) out vec4 out_color;
 
-layout(set = 0, binding = 0) uniform sampler2D u_input_image;
+layout(set = 0, binding = 0) uniform GBufferIndices {
+    uint gbuffer_position_index;
+    uint gbuffer_normal_index;
+    uint gbuffer_albedo_index;
+    uint gbuffer_metallic_index;
+    uint gbuffer_emissive_index;
+    uint input_image_index;
+    uint padding[2];
+} gbuffer_indices;
+
+layout(set = 1, binding = 0) uniform texture2D textures[];
+layout(set = 1, binding = 1) uniform sampler samplers[];
+layout(set = 1, binding = 2) uniform textureCube textures_cube[];
 
 layout(push_constant) uniform BloomParams {
     float threshold;      // Brightness threshold for bloom
@@ -24,8 +42,8 @@ float gaussian_weight(float distance, float sigma) {
 }
 
 void main() {
-    vec2 texel_size = 1.0 / vec2(textureSize(u_input_image, 0));
-    vec4 original_color = texture(u_input_image, v_uv);
+    vec2 texel_size = 1.0 / vec2(textureSize(sampler2D(textures[gbuffer_indices.input_image_index], samplers[SAMPLER_LINEAR_CLAMP]), 0));
+    vec4 original_color = texture(sampler2D(textures[gbuffer_indices.input_image_index], samplers[SAMPLER_LINEAR_CLAMP]), v_uv);
 
     // Normal blur with luminance weighting
     vec4 blur_sum = vec4(0.0);
@@ -36,7 +54,7 @@ void main() {
     vec2 blur_direction = mix(vec2(1.0, 0.0), vec2(0.0, 1.0), direction);
     for (float i = -effective_radius; i <= effective_radius; i += 0.5) {
         vec2 offset = blur_direction * i * texel_size;
-        vec4 sample_color = texture(u_input_image, v_uv + offset);
+        vec4 sample_color = texture(sampler2D(textures[gbuffer_indices.input_image_index], samplers[SAMPLER_LINEAR_CLAMP]), v_uv + offset);
         float sample_lum = luminance(sample_color.rgb);
         float gaussian_weight_val = gaussian_weight(abs(i), sigma);
         sample_lum = smoothstep(0.0, threshold, sample_lum);

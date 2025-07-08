@@ -1,5 +1,11 @@
 #version 450
 #extension GL_EXT_nonuniform_qualifier : require
+// Specialization constants
+layout(constant_id = 0) const bool SKINNED = false;
+layout(constant_id = 1) const bool ALBEDO_TEXTURE = false;
+layout(constant_id = 2) const bool METALLIC_ROUGHNESS_TEXTURE = false;
+layout(constant_id = 3) const bool NORMAL_TEXTURE = false;
+layout(constant_id = 4) const bool EMISSIVE_TEXTURE = false;
 
 // Input from vertex shader
 layout(location = 0) in vec3 inWorldPos;
@@ -12,15 +18,10 @@ layout(location = 4) in mat3 inTBN;
 layout(location = 0) out vec4 outColor;
 
 // Constants
-const uint MAX_SHADOW_MAPS = 10;
 const uint SAMPLER_NEAREST_CLAMP = 0;
 const uint SAMPLER_LINEAR_CLAMP = 1;
 const uint SAMPLER_NEAREST_REPEAT = 2;
 const uint SAMPLER_LINEAR_REPEAT = 3;
-
-// Textures and samplers
-layout(set = 2, binding = 0) uniform texture2D textures[];
-layout(set = 2, binding = 1) uniform sampler samplers[];
 
 layout(set = 0, binding = 0) uniform CameraUniform {
     mat4 view;
@@ -28,12 +29,11 @@ layout(set = 0, binding = 0) uniform CameraUniform {
     vec2 viewportSize;
 } camera;
 
-// Specialization constants
-layout(constant_id = 0) const bool SKINNED = false;
-layout(constant_id = 1) const bool ALBEDO_TEXTURE = false;
-layout(constant_id = 2) const bool METALLIC_ROUGHNESS_TEXTURE = false;
-layout(constant_id = 3) const bool NORMAL_TEXTURE = false;
-layout(constant_id = 4) const bool EMISSIVE_TEXTURE = false;
+
+// textures and samplers set = 1
+layout(set = 1, binding = 0) uniform texture2D textures[];
+layout(set = 1, binding = 1) uniform sampler samplers[];
+layout(set = 1, binding = 2) uniform textureCube cube_textures[];
 
 // Push constants
 layout(push_constant) uniform PushConstant {

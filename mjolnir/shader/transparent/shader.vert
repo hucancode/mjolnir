@@ -1,11 +1,6 @@
 #version 450
-#extension GL_EXT_nonuniform_qualifier : require
 
 layout(constant_id = 0) const bool SKINNED = false;
-layout(constant_id = 1) const bool ALBEDO_TEXTURE = false;
-layout(constant_id = 2) const bool METALLIC_ROUGHNESS_TEXTURE = false;
-layout(constant_id = 3) const bool NORMAL_TEXTURE = false;
-layout(constant_id = 4) const bool EMISSIVE_TEXTURE = false;
 
 layout(location = 0) in vec3 inPosition;
 layout(location = 1) in vec3 inNormal;
@@ -28,9 +23,8 @@ layout(set = 0, binding = 0) uniform CameraUniform {
     mat4 projection;
     vec2 viewportSize;
 } camera;
-
 // Bone matrices
-layout(set = 3, binding = 0) readonly buffer BoneMatrices {
+layout(set = 2, binding = 0) readonly buffer BoneMatrices {
     mat4 matrices[];
 } boneMatrices;
 
@@ -51,8 +45,7 @@ void main() {
     // Calculate position based on skinning
     vec4 modelPosition;
     vec3 modelNormal;
-    vec4 modelTangent = inTangent;
-
+    vec4 modelTangent;
     if (SKINNED) {
         uint baseOffset = bone_matrix_offset;
         mat4 skinMatrix =
@@ -67,32 +60,21 @@ void main() {
     } else {
         modelPosition = vec4(inPosition, 1.0);
         modelNormal = inNormal;
+        modelTangent = inTangent;
     }
-
-    // Transform to world space
     vec4 worldPos = world * modelPosition;
-
     // Output to fragment shader
     outWorldPos = worldPos.xyz;
-
-    // Transform normal to world space
-    mat3 normalMatrix = transpose(inverse(mat3(world)));
-    outNormal = normalize(normalMatrix * modelNormal);
-
-    // Pass texture coordinates to fragment shader
+    outNormal = mat3(world) * modelNormal;
     outTexCoord = inTexCoord;
-
-    // Pass vertex color to fragment shader
     outColor = inColor;
-
     // Calculate tangent-bitangent-normal matrix for normal mapping
-    vec3 N = normalize(normalMatrix * modelNormal);
-    vec3 T = normalize(normalMatrix * modelTangent.xyz);
+    vec3 N = normalize(outNormal).xyz;
+    vec3 T = normalize(world * modelTangent).xyz;
     // Re-orthogonalize T with respect to N
     T = normalize(T - dot(T, N) * N);
     vec3 B = normalize(cross(N, T)) * modelTangent.w;
     outTBN = mat3(T, B, N);
-
     // Calculate final position
     gl_Position = camera.projection * camera.view * worldPos;
 }

@@ -17,7 +17,8 @@ g_nearest_clamp_sampler: vk.Sampler
 
 g_meshes: resource.Pool(Mesh)
 g_materials: resource.Pool(Material)
-g_image_buffers: resource.Pool(ImageBuffer)
+g_image_2d_buffers: resource.Pool(ImageBuffer)
+g_image_cube_buffers: resource.Pool(CubeImageBuffer)
 
 g_bindless_bone_buffer_set_layout: vk.DescriptorSetLayout
 g_bindless_bone_buffer_descriptor_set: vk.DescriptorSet
@@ -32,8 +33,7 @@ g_dummy_skinning_buffer: DataBuffer(geometry.SkinningData)
 g_camera_descriptor_set_layout: vk.DescriptorSetLayout
 g_camera_descriptor_sets: [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet
 
-g_shadow_descriptor_set_layout: vk.DescriptorSetLayout
-g_shadow_descriptor_sets: [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet
+// Shadow descriptor sets removed - now using bindless textures
 
 g_textures_set_layout: vk.DescriptorSetLayout
 g_textures_descriptor_set: vk.DescriptorSet
@@ -43,8 +43,10 @@ factory_init :: proc() -> vk.Result {
   resource.pool_init(&g_meshes)
   log.infof("Initializing materials pool... ")
   resource.pool_init(&g_materials)
-  log.infof("Initializing image buffer pool... ")
-  resource.pool_init(&g_image_buffers)
+  log.infof("Initializing image 2d buffer pool... ")
+  resource.pool_init(&g_image_2d_buffers)
+  log.infof("Initializing image cube buffer pool... ")
+  resource.pool_init(&g_image_cube_buffers)
   log.infof("All resource pools initialized successfully")
   init_global_samplers()
   init_bone_matrix_allocator() or_return
@@ -74,47 +76,10 @@ factory_init :: proc() -> vk.Result {
     &{
       sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
       descriptorPool = g_descriptor_pool,
-      descriptorSetCount = MAX_FRAMES_IN_FLIGHT,
-      pSetLayouts = &camera_set_layouts[0],
+      descriptorSetCount = len(camera_set_layouts),
+      pSetLayouts = raw_data(camera_set_layouts[:]),
     },
-    &g_camera_descriptor_sets[0],
-  ) or_return
-  // Lights descriptor set layout and sets
-  lights_bindings := [?]vk.DescriptorSetLayoutBinding {
-    {
-      binding = 0,
-      descriptorType = .COMBINED_IMAGE_SAMPLER,
-      descriptorCount = MAX_SHADOW_MAPS,
-      stageFlags = {.FRAGMENT},
-    },
-    {
-      binding = 1,
-      descriptorType = .COMBINED_IMAGE_SAMPLER,
-      descriptorCount = MAX_SHADOW_MAPS,
-      stageFlags = {.FRAGMENT},
-    },
-  }
-  vk.CreateDescriptorSetLayout(
-    g_device,
-    &vk.DescriptorSetLayoutCreateInfo {
-      sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-      bindingCount = len(lights_bindings),
-      pBindings = raw_data(lights_bindings[:]),
-    },
-    nil,
-    &g_shadow_descriptor_set_layout,
-  ) or_return
-  lights_set_layouts: [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSetLayout
-  slice.fill(lights_set_layouts[:], g_shadow_descriptor_set_layout)
-  vk.AllocateDescriptorSets(
-    g_device,
-    &{
-      sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
-      descriptorPool = g_descriptor_pool,
-      descriptorSetCount = MAX_FRAMES_IN_FLIGHT,
-      pSetLayouts = raw_data(lights_set_layouts[:]),
-    },
-    raw_data(g_shadow_descriptor_sets[:]),
+    raw_data(g_camera_descriptor_sets[:]),
   ) or_return
   // Textures+samplers descriptor set
   textures_bindings := [?]vk.DescriptorSetLayoutBinding {
@@ -128,6 +93,12 @@ factory_init :: proc() -> vk.Result {
       binding = 1,
       descriptorType = .SAMPLER,
       descriptorCount = MAX_SAMPLERS,
+      stageFlags = {.FRAGMENT},
+    },
+    {
+      binding = 2,
+      descriptorType = .SAMPLED_IMAGE,
+      descriptorCount = MAX_CUBE_TEXTURES,
       stageFlags = {.FRAGMENT},
     },
   }
@@ -194,18 +165,16 @@ factory_init :: proc() -> vk.Result {
 
 factory_deinit :: proc() {
   data_buffer_deinit(&g_dummy_skinning_buffer)
-  resource.pool_deinit(g_image_buffers, image_buffer_deinit)
+  resource.pool_deinit(g_image_2d_buffers, image_buffer_deinit)
+  resource.pool_deinit(g_image_cube_buffers, cube_depth_texture_deinit)
   resource.pool_deinit(g_meshes, mesh_deinit)
   resource.pool_deinit(g_materials, proc(_: ^Material) {})
   deinit_global_samplers()
   deinit_bone_matrix_allocator()
   vk.DestroyDescriptorSetLayout(g_device, g_camera_descriptor_set_layout, nil)
-  vk.DestroyDescriptorSetLayout(g_device, g_shadow_descriptor_set_layout, nil)
   vk.DestroyDescriptorSetLayout(g_device, g_textures_set_layout, nil)
   g_camera_descriptor_set_layout = 0
   g_camera_descriptor_sets = {}
-  g_shadow_descriptor_set_layout = 0
-  g_shadow_descriptor_sets = {}
   g_textures_set_layout = 0
   g_textures_descriptor_set = 0
 }
@@ -343,7 +312,7 @@ deinit_global_samplers :: proc() {
   );g_nearest_clamp_sampler = 0
 }
 
-set_texture_descriptor :: proc(index: u32, image_view: vk.ImageView) {
+set_texture_2d_descriptor :: proc(index: u32, image_view: vk.ImageView) {
   if index >= MAX_TEXTURES {
     log.infof("Error: Index %d out of bounds for bindless textures", index)
     return
@@ -361,6 +330,75 @@ set_texture_descriptor :: proc(index: u32, image_view: vk.ImageView) {
     },
   }
   vk.UpdateDescriptorSets(g_device, 1, &write, 0, nil)
+}
+
+set_texture_cube_descriptor :: proc(index: u32, image_view: vk.ImageView) {
+  if index >= MAX_CUBE_TEXTURES {
+    log.infof("Error: Index %d out of bounds for bindless cube textures", index)
+    return
+  }
+  write := vk.WriteDescriptorSet {
+    sType           = .WRITE_DESCRIPTOR_SET,
+    dstSet          = g_textures_descriptor_set,
+    dstBinding      = 2,
+    dstArrayElement = index,
+    descriptorType  = .SAMPLED_IMAGE,
+    descriptorCount = 1,
+    pImageInfo      = &vk.DescriptorImageInfo {
+      imageView = image_view,
+      imageLayout = .SHADER_READ_ONLY_OPTIMAL,
+    },
+  }
+  vk.UpdateDescriptorSets(g_device, 1, &write, 0, nil)
+}
+
+create_empty_texture_2d :: proc(
+  width: u32,
+  height: u32,
+  format: vk.Format,
+  usage: vk.ImageUsageFlags = {.COLOR_ATTACHMENT, .SAMPLED},
+) -> (
+  handle: Handle,
+  texture: ^ImageBuffer,
+  ret: vk.Result,
+) {
+  handle, texture = resource.alloc(&g_image_2d_buffers)
+  texture^ = malloc_image_buffer(
+    width,
+    height,
+    format,
+    .OPTIMAL,
+    usage,
+    {.DEVICE_LOCAL},
+  ) or_return
+
+  // Determine aspect mask based on format
+  aspect_mask := vk.ImageAspectFlags{.COLOR}
+  if format == .D32_SFLOAT || format == .D24_UNORM_S8_UINT || format == .D16_UNORM {
+    aspect_mask = {.DEPTH}
+  }
+
+  texture.view = create_image_view(texture.image, format, aspect_mask) or_return
+  set_texture_2d_descriptor(handle.index, texture.view)
+  ret = .SUCCESS
+  log.debugf("created empty texture %d x %d %v 0x%x", width, height, format, texture.image)
+  return
+}
+
+create_empty_texture_cube :: proc(
+  size: u32,
+  format: vk.Format = .D32_SFLOAT,
+  usage: vk.ImageUsageFlags = {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
+) -> (
+  handle: Handle,
+  texture: ^CubeImageBuffer,
+  ret: vk.Result,
+) {
+  handle, texture = resource.alloc(&g_image_cube_buffers)
+  cube_depth_texture_init(texture, size, format, usage) or_return
+  set_texture_cube_descriptor(handle.index, texture.view)
+  ret = .SUCCESS
+  return
 }
 
 deinit_bone_matrix_allocator :: proc() {
@@ -476,7 +514,7 @@ create_texture_from_path :: proc(
   texture: ^ImageBuffer,
   ret: vk.Result,
 ) {
-  handle, texture = resource.alloc(&g_image_buffers)
+  handle, texture = resource.alloc(&g_image_2d_buffers)
   width, height, c_in_file: c.int
   path_cstr := strings.clone_to_cstring(path)
   pixels := stbi.load(path_cstr, &width, &height, &c_in_file, 4) // force RGBA
@@ -498,7 +536,7 @@ create_texture_from_path :: proc(
     u32(width),
     u32(height),
   ) or_return
-  set_texture_descriptor(handle.index, texture.view)
+  set_texture_2d_descriptor(handle.index, texture.view)
   ret = .SUCCESS
   return handle, texture, ret
 }
@@ -510,7 +548,7 @@ create_hdr_texture_from_path :: proc(
   texture: ^ImageBuffer,
   ret: vk.Result,
 ) {
-  handle, texture = resource.alloc(&g_image_buffers)
+  handle, texture = resource.alloc(&g_image_2d_buffers)
   path_cstr := strings.clone_to_cstring(path)
   width, height, c_in_file: c.int
   actual_channels: c.int = 4 // we always want RGBA for HDR
@@ -539,7 +577,7 @@ create_hdr_texture_from_path :: proc(
     u32(width),
     u32(height),
   ) or_return
-  set_texture_descriptor(handle.index, texture.view)
+  set_texture_2d_descriptor(handle.index, texture.view)
   ret = .SUCCESS
   return handle, texture, ret
 }
@@ -555,7 +593,7 @@ create_texture_from_pixels :: proc(
   texture: ^ImageBuffer,
   ret: vk.Result,
 ) {
-  handle, texture = resource.alloc(&g_image_buffers)
+  handle, texture = resource.alloc(&g_image_2d_buffers)
   texture^ = create_image_buffer(
     raw_data(pixels),
     size_of(u8) * vk.DeviceSize(len(pixels)),
@@ -569,7 +607,7 @@ create_texture_from_pixels :: proc(
     texture.height,
     texture.image,
   )
-  set_texture_descriptor(handle.index, texture.view)
+  set_texture_2d_descriptor(handle.index, texture.view)
   ret = .SUCCESS
   return
 }
@@ -581,7 +619,7 @@ create_texture_from_data :: proc(
   texture: ^ImageBuffer,
   ret: vk.Result,
 ) {
-  handle, texture = resource.alloc(&g_image_buffers)
+  handle, texture = resource.alloc(&g_image_2d_buffers)
   width, height, ch: c.int
   actual_channels: c.int = 4
   pixels := stbi.load_from_memory(
@@ -620,7 +658,7 @@ create_texture_from_data :: proc(
     texture.height,
     texture.image,
   )
-  set_texture_descriptor(handle.index, texture.view)
+  set_texture_2d_descriptor(handle.index, texture.view)
   ret = .SUCCESS
   return
 }
@@ -681,7 +719,7 @@ create_hdr_texture_from_path_with_mips :: proc(
   texture: ^ImageBuffer,
   ret: vk.Result,
 ) {
-  handle, texture = resource.alloc(&g_image_buffers)
+  handle, texture = resource.alloc(&g_image_2d_buffers)
   path_cstr := strings.clone_to_cstring(path)
   width, height, c_in_file: c.int
   actual_channels: c.int = 4 // we always want RGBA for HDR
@@ -710,7 +748,7 @@ create_hdr_texture_from_path_with_mips :: proc(
     u32(width),
     u32(height),
   ) or_return
-  set_texture_descriptor(handle.index, texture.view)
+  set_texture_2d_descriptor(handle.index, texture.view)
   ret = .SUCCESS
   return handle, texture, ret
 }

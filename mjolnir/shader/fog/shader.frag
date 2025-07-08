@@ -1,11 +1,28 @@
 #version 450
+#extension GL_EXT_nonuniform_qualifier : require
+
+const uint SAMPLER_NEAREST_CLAMP = 0;
+const uint SAMPLER_LINEAR_CLAMP = 1;
+const uint SAMPLER_NEAREST_REPEAT = 2;
+const uint SAMPLER_LINEAR_REPEAT = 3;
 
 layout(location = 0) in vec2 v_uv;
 layout(location = 0) out vec4 out_color;
 
-layout(set = 0, binding = 0) uniform sampler2D u_input_image;
-layout(set = 0, binding = 1) uniform sampler2D u_normal_texture;
-layout(set = 0, binding = 2) uniform sampler2D u_depth_texture;
+layout(set = 0, binding = 0) uniform GBufferIndices {
+    uint gbuffer_position_index;
+    uint gbuffer_normal_index;
+    uint gbuffer_albedo_index;
+    uint gbuffer_metallic_index;
+    uint gbuffer_emissive_index;
+    uint gbuffer_depth_index;
+    uint input_image_index;
+    uint padding[1];
+} gbuffer_indices;
+
+layout(set = 1, binding = 0) uniform texture2D textures[];
+layout(set = 1, binding = 1) uniform sampler samplers[];
+layout(set = 1, binding = 2) uniform textureCube textures_cube[];
 
 layout(push_constant) uniform FogData {
     vec3 fog_color;
@@ -15,9 +32,10 @@ layout(push_constant) uniform FogData {
     vec2 padding;
 } fog;
 
-// Camera parameters - these should match your camera setup
-const float near_plane = 0.1;
-const float far_plane = 1000.0;
+// Camera parameters - these should match camera setup
+// TODO: move those to uniform buffer
+const float near_plane = 0.01;
+const float far_plane = 100.0;
 
 float linearize_depth(float depth) {
     float z = depth * 2.0 - 1.0; // Back to NDC
@@ -41,9 +59,9 @@ float compute_fog_factor(float distance) {
 }
 
 void main() {
-    vec4 color = texture(u_input_image, v_uv);
-    vec4 normal = texture(u_normal_texture, v_uv);
-    float depth = texture(u_depth_texture, v_uv).r;
+    vec4 color = texture(sampler2D(textures[gbuffer_indices.input_image_index], samplers[SAMPLER_LINEAR_CLAMP]), v_uv);
+    vec4 normal = texture(sampler2D(textures[gbuffer_indices.gbuffer_normal_index], samplers[SAMPLER_NEAREST_CLAMP]), v_uv);
+    float depth = texture(sampler2D(textures[gbuffer_indices.gbuffer_depth_index], samplers[SAMPLER_NEAREST_CLAMP]), v_uv).r;
     float linear_depth = linearize_depth(depth);
     float fog_factor = compute_fog_factor(linear_depth);
     vec3 final_color = mix(color.rgb, fog.fog_color, fog_factor);

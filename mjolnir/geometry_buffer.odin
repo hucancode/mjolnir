@@ -32,9 +32,8 @@ renderer_gbuffer_init :: proc(
   depth_format: vk.Format = .D32_SFLOAT
   set_layouts := [?]vk.DescriptorSetLayout {
     g_camera_descriptor_set_layout, // set = 0 (camera uniforms)
-    g_shadow_descriptor_set_layout, // set = 1 (shadow maps)
-    g_textures_set_layout, // set = 2 (textures)
-    g_bindless_bone_buffer_set_layout, // set = 3 (bone matrices)
+    g_textures_set_layout, // set = 1 (bindless textures)
+    g_bindless_bone_buffer_set_layout, // set = 2 (bone matrices)
   }
   push_constant_range := vk.PushConstantRange {
     stageFlags = {.VERTEX, .FRAGMENT},
@@ -317,7 +316,6 @@ renderer_gbuffer_render :: proc(
 ) {
   descriptor_sets := [?]vk.DescriptorSet {
     g_camera_descriptor_sets[g_frame_index],
-    g_shadow_descriptor_sets[g_frame_index],
     g_textures_descriptor_set,
     g_bindless_bone_buffer_descriptor_set,
   }

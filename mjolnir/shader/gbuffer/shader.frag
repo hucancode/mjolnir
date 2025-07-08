@@ -11,13 +11,11 @@ const uint SAMPLER_NEAREST_CLAMP = 0;
 const uint SAMPLER_LINEAR_CLAMP = 1;
 const uint SAMPLER_NEAREST_REPEAT = 2;
 const uint SAMPLER_LINEAR_REPEAT = 3;
-const uint MAX_SHADOW_MAPS = 10;
 
-layout(set = 1, binding = 0) uniform sampler2D shadowMaps[MAX_SHADOW_MAPS];
-layout(set = 1, binding = 1) uniform samplerCube cubeShadowMaps[MAX_SHADOW_MAPS];
-// textures and samplers set = 2
-layout(set = 2, binding = 0) uniform texture2D textures[];
-layout(set = 2, binding = 1) uniform sampler samplers[];
+// textures and samplers set = 1
+layout(set = 1, binding = 0) uniform texture2D textures[];
+layout(set = 1, binding = 1) uniform sampler samplers[];
+layout(set = 1, binding = 2) uniform textureCube cube_textures[];
 
 // Push constant budget: 128 bytes
 layout(push_constant) uniform PushConstants {
