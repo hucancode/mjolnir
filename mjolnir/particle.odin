@@ -132,7 +132,6 @@ compute_particles :: proc(
     nil,
   )
   // One thread per emitter (local_size_x = 64)
-  log.debugf("dispatching emitter compute...")
   vk.CmdDispatch(command_buffer, u32(MAX_EMITTERS + 63) / 64, 1, 1)
 
   // Barrier to ensure emission is complete before compaction
@@ -199,12 +198,12 @@ compute_particles :: proc(
   barrier2 := vk.MemoryBarrier {
     sType         = .MEMORY_BARRIER,
     srcAccessMask = {.SHADER_WRITE},
-    dstAccessMask = {.SHADER_READ},
+    dstAccessMask = {.TRANSFER_READ},
   }
   vk.CmdPipelineBarrier(
     command_buffer,
     {.COMPUTE_SHADER},
-    {.COMPUTE_SHADER},
+    {.TRANSFER},
     {},
     1,
     &barrier2,
@@ -259,7 +258,6 @@ compact_particles :: proc(
     0,
     nil,
   )
-  log.debugf("dispatching particles update compute...")
   vk.CmdDispatch(
     command_buffer,
     u32(MAX_PARTICLES + COMPUTE_PARTICLE_BATCH - 1) / COMPUTE_PARTICLE_BATCH,
@@ -303,7 +301,7 @@ renderer_particle_init :: proc(self: ^RendererParticle) -> vk.Result {
   self.particle_buffer = create_host_visible_buffer(
     Particle,
     MAX_PARTICLES,
-    {.STORAGE_BUFFER, .VERTEX_BUFFER},
+    {.STORAGE_BUFFER, .VERTEX_BUFFER, .TRANSFER_DST},
   ) or_return
   self.emitter_buffer = create_host_visible_buffer(
     Emitter,
@@ -674,7 +672,7 @@ renderer_particle_init_compact_pipeline :: proc(
   self.compact_particle_buffer = create_host_visible_buffer(
     Particle,
     MAX_PARTICLES,
-    {.STORAGE_BUFFER, .VERTEX_BUFFER},
+    {.STORAGE_BUFFER, .VERTEX_BUFFER, .TRANSFER_SRC},
   ) or_return
   self.draw_command_buffer = create_host_visible_buffer(
     DrawCommand,

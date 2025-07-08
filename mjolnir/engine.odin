@@ -557,7 +557,6 @@ update_emitters :: proc(self: ^Engine, delta_time: f32) {
     emitter_idx += 1
   }
   params.emitter_count = u32(emitter_idx)
-  log.debugf("found %d emitters %v", emitter_idx, emitters[:emitter_idx])
 }
 
 update_force_fields :: proc(self: ^Engine) {
