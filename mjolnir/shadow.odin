@@ -390,23 +390,21 @@ render_single_shadow_node :: proc(
     size_of(PushConstant),
     &push_constant,
   )
-  offset: vk.DeviceSize = 0
+  // Always bind both vertex buffer and skinning buffer (real or dummy)
+  skin_buffer := g_dummy_skinning_buffer.buffer
+  if is_skinned && mesh_has_skin && node_has_skin {
+    skin_buffer = mesh_skinning.skin_buffer.buffer
+  }
+  
+  buffers := [2]vk.Buffer{mesh.vertex_buffer.buffer, skin_buffer}
+  offsets := [2]vk.DeviceSize{0, 0}
   vk.CmdBindVertexBuffers(
     command_buffer,
     0,
-    1,
-    &mesh.vertex_buffer.buffer,
-    &offset,
+    2,
+    raw_data(buffers[:]),
+    raw_data(offsets[:]),
   )
-  if is_skinned && mesh_has_skin && node_has_skin {
-    vk.CmdBindVertexBuffers(
-      command_buffer,
-      1,
-      1,
-      &mesh_skinning.skin_buffer.buffer,
-      &offset,
-    )
-  }
   vk.CmdBindIndexBuffer(command_buffer, mesh.index_buffer.buffer, 0, .UINT32)
   vk.CmdDrawIndexed(command_buffer, mesh.indices_len, 1, 0, 0, 0)
 }

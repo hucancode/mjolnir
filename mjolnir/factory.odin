@@ -24,6 +24,9 @@ g_bindless_bone_buffer_descriptor_set: vk.DescriptorSet
 g_bindless_bone_buffer: DataBuffer(linalg.Matrix4f32)
 g_bone_matrix_slab: resource.SlabAllocator
 
+// Dummy skinning buffer for static meshes
+g_dummy_skinning_buffer: DataBuffer(geometry.SkinningData)
+
 // Engine-level global descriptor sets and layouts
 
 g_camera_descriptor_set_layout: vk.DescriptorSetLayout
@@ -191,6 +194,7 @@ factory_init :: proc() -> vk.Result {
 
 factory_deinit :: proc() {
   data_buffer_deinit(&g_bindless_bone_buffer)
+  data_buffer_deinit(&g_dummy_skinning_buffer)
   resource.pool_deinit(g_image_buffers, image_buffer_deinit)
   resource.pool_deinit(g_meshes, mesh_deinit)
   resource.pool_deinit(g_materials, proc(_: ^Material) {})
@@ -306,6 +310,14 @@ init_bone_matrix_allocator :: proc() -> vk.Result {
     pBufferInfo     = &buffer_info,
   }
   vk.UpdateDescriptorSets(g_device, 1, &write, 0, nil)
+  
+  // Initialize dummy skinning buffer for static meshes
+  g_dummy_skinning_buffer = create_host_visible_buffer(
+    geometry.SkinningData,
+    1,  // Just one dummy element
+    {.VERTEX_BUFFER},
+  ) or_return
+  
   return .SUCCESS
 }
 

@@ -383,23 +383,21 @@ renderer_gbuffer_render :: proc(
           size_of(PushConstant),
           &push_constants,
         )
-        offset: vk.DeviceSize = 0
+        // Always bind both vertex buffer and skinning buffer (real or dummy)
+        skin_buffer := g_dummy_skinning_buffer.buffer
+        if mesh_skin, mesh_has_skin := mesh.skinning.?; mesh_has_skin {
+          skin_buffer = mesh_skin.skin_buffer.buffer
+        }
+        
+        buffers := [2]vk.Buffer{mesh.vertex_buffer.buffer, skin_buffer}
+        offsets := [2]vk.DeviceSize{0, 0}
         vk.CmdBindVertexBuffers(
           command_buffer,
           0,
-          1,
-          &mesh.vertex_buffer.buffer,
-          &offset,
+          2,
+          raw_data(buffers[:]),
+          raw_data(offsets[:]),
         )
-        if mesh_skin, mesh_has_skin := mesh.skinning.?; mesh_has_skin {
-          vk.CmdBindVertexBuffers(
-            command_buffer,
-            1,
-            1,
-            &mesh_skin.skin_buffer.buffer,
-            &offset,
-          )
-        }
         vk.CmdBindIndexBuffer(
           command_buffer,
           mesh.index_buffer.buffer,
