@@ -929,7 +929,7 @@ render :: proc(self: ^Engine) -> vk.Result {
     1,
     {.LATE_FRAGMENT_TESTS},
     {.FRAGMENT_SHADER},
-    {.DEPTH_STENCIL_ATTACHMENT_WRITE},
+    {.SHADER_READ},
   )
   transition_images(
     command_buffer,
@@ -940,7 +940,7 @@ render :: proc(self: ^Engine) -> vk.Result {
     6,
     {.LATE_FRAGMENT_TESTS},
     {.FRAGMENT_SHADER},
-    {.DEPTH_STENCIL_ATTACHMENT_WRITE},
+    {.SHADER_READ},
   )
   transition_image(
     command_buffer,
