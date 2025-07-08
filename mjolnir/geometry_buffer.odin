@@ -127,7 +127,6 @@ renderer_gbuffer_init :: proc(
       has_albedo_texture             = .ALBEDO_TEXTURE in features,
       has_metallic_roughness_texture = .METALLIC_ROUGHNESS_TEXTURE in features,
       has_normal_texture             = .NORMAL_TEXTURE in features,
-      has_displacement_texture       = .DISPLACEMENT_TEXTURE in features,
       has_emissive_texture           = .EMISSIVE_TEXTURE in features,
     }
     entries[mask] = [SHADER_OPTION_COUNT]vk.SpecializationMapEntry {
@@ -153,11 +152,6 @@ renderer_gbuffer_init :: proc(
       },
       {
         constantID = 4,
-        offset = u32(offset_of(ShaderConfig, has_displacement_texture)),
-        size = size_of(b32),
-      },
-      {
-        constantID = 5,
         offset = u32(offset_of(ShaderConfig, has_emissive_texture)),
         size = size_of(b32),
       },
@@ -358,10 +352,6 @@ renderer_gbuffer_render :: proc(
             MAX_TEXTURES - 1,
             material.normal.index,
           ),
-          displacement_index       = min(
-            MAX_TEXTURES - 1,
-            material.displacement.index,
-          ),
           emissive_index           = min(
             MAX_TEXTURES - 1,
             material.emissive.index,
@@ -388,7 +378,7 @@ renderer_gbuffer_render :: proc(
         if mesh_skin, mesh_has_skin := mesh.skinning.?; mesh_has_skin {
           skin_buffer = mesh_skin.skin_buffer.buffer
         }
-        
+
         buffers := [2]vk.Buffer{mesh.vertex_buffer.buffer, skin_buffer}
         offsets := [2]vk.DeviceSize{0, 0}
         vk.CmdBindVertexBuffers(

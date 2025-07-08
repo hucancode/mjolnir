@@ -20,12 +20,11 @@ PushConstant :: struct {
   albedo_index:             u32, // 4
   metallic_roughness_index: u32, // 4
   normal_index:             u32, // 4
-  displacement_index:       u32, // 4
   emissive_index:           u32, // 4
   metallic_value:           f32, // 4
   roughness_value:          f32, // 4
   emissive_value:           f32, // 4
-  padding:                  [3]u32, // 4 (pad to 128)
+  padding:                  [4]u32, // 4 (pad to 128)
 }
 
 ShaderFeatures :: enum {
@@ -33,8 +32,7 @@ ShaderFeatures :: enum {
   ALBEDO_TEXTURE             = 1,
   METALLIC_ROUGHNESS_TEXTURE = 2,
   NORMAL_TEXTURE             = 3,
-  DISPLACEMENT_TEXTURE       = 4,
-  EMISSIVE_TEXTURE           = 5,
+  EMISSIVE_TEXTURE           = 4,
 }
 
 ShaderFeatureSet :: bit_set[ShaderFeatures;u32]
@@ -46,7 +44,6 @@ ShaderConfig :: struct {
   has_albedo_texture:             b32,
   has_metallic_roughness_texture: b32,
   has_normal_texture:             b32,
-  has_displacement_texture:       b32,
   has_emissive_texture:           b32,
 }
 

@@ -5,8 +5,7 @@ layout(constant_id = 0) const bool SKINNED = false;
 layout(constant_id = 1) const bool ALBEDO_TEXTURE = false;
 layout(constant_id = 2) const bool METALLIC_ROUGHNESS_TEXTURE = false;
 layout(constant_id = 3) const bool NORMAL_TEXTURE = false;
-layout(constant_id = 4) const bool DISPLACEMENT_TEXTURE = false;
-layout(constant_id = 5) const bool EMISSIVE_TEXTURE = false;
+layout(constant_id = 4) const bool EMISSIVE_TEXTURE = false;
 
 const uint SAMPLER_NEAREST_CLAMP = 0;
 const uint SAMPLER_LINEAR_CLAMP = 1;
@@ -27,12 +26,11 @@ layout(push_constant) uniform PushConstants {
     uint albedo_index;     // 4
     uint metallic_roughness_index; // 4
     uint normal_index;     // 4
-    uint displacement_index; // 4
     uint emissive_index;   // 4
     float metallic_value;  // 4
     float roughness_value; // 4
     float emissive_value;  // 4
-    float padding[3];        // 12 (pad to 128)
+    float padding[4];        // 12 (pad to 128)
 };
 
 

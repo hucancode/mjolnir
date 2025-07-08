@@ -310,14 +310,14 @@ init_bone_matrix_allocator :: proc() -> vk.Result {
     pBufferInfo     = &buffer_info,
   }
   vk.UpdateDescriptorSets(g_device, 1, &write, 0, nil)
-  
+
   // Initialize dummy skinning buffer for static meshes
   g_dummy_skinning_buffer = create_host_visible_buffer(
     geometry.SkinningData,
     1,  // Just one dummy element
     {.VERTEX_BUFFER},
   ) or_return
-  
+
   return .SUCCESS
 }
 
@@ -393,7 +393,6 @@ create_material :: proc(
   albedo_handle: Handle = {},
   metallic_roughness_handle: Handle = {},
   normal_handle: Handle = {},
-  displacement_handle: Handle = {},
   emissive_handle: Handle = {},
   metallic_value: f32 = 0.0,
   roughness_value: f32 = 1.0,
@@ -410,17 +409,15 @@ create_material :: proc(
   mat.albedo = albedo_handle
   mat.metallic_roughness = metallic_roughness_handle
   mat.normal = normal_handle
-  mat.displacement = displacement_handle
   mat.emissive = emissive_handle
   mat.metallic_value = metallic_value
   mat.roughness_value = roughness_value
   mat.emissive_value = emissive_value
   log.infof(
-    "Material created: albedo=%d metallic_roughness=%d normal=%d displacement=%d emissive=%d",
+    "Material created: albedo=%d metallic_roughness=%d normal=%d emissive=%d",
     mat.albedo.index,
     mat.metallic_roughness.index,
     mat.normal.index,
-    mat.displacement.index,
     mat.emissive.index,
   )
   res = .SUCCESS

@@ -298,7 +298,6 @@ load_gltf_pbr_textures :: proc(
   albedo_handle: Handle,
   metallic_roughness_handle: Handle,
   normal_handle: Handle,
-  displacement_handle: Handle,
   emissive_handle: Handle,
   features: ShaderFeatureSet,
   ret: vk.Result,
@@ -366,8 +365,6 @@ load_gltf_pbr_textures :: proc(
     ) or_return
     features |= {.NORMAL_TEXTURE}
   }
-
-  // TODO: Displacement map (GLTF extension, not implemented here)
   if gltf_material.emissive_texture.texture != nil {
     emissive_handle, _ = load_gltf_texture(
       engine,
@@ -404,7 +401,7 @@ load_gltf_primitive :: proc(
     material_handle = existing_handle
     log.infof("Reusing material %v", material_handle)
   } else {
-    albedo_handle, metallic_roughness_handle, normal_handle, displacement_handle, emissive_handle, features :=
+    albedo_handle, metallic_roughness_handle, normal_handle, emissive_handle, features :=
       load_gltf_pbr_textures(
         engine,
         path,
@@ -417,7 +414,6 @@ load_gltf_primitive :: proc(
       albedo_handle,
       metallic_roughness_handle,
       normal_handle,
-      displacement_handle,
       emissive_handle,
     ) or_return
     material_cache[primitive.material] = material_handle
@@ -519,7 +515,7 @@ load_gltf_skinned_primitive :: proc(
     mat_handle = existing_handle
     log.infof("Reusing skinned material %v", mat_handle)
   } else {
-    albedo_handle, metallic_roughness_handle, normal_handle, displacement_handle, emissive_handle, features :=
+    albedo_handle, metallic_roughness_handle, normal_handle, emissive_handle, features :=
       load_gltf_pbr_textures(
         engine,
         path,
@@ -532,7 +528,6 @@ load_gltf_skinned_primitive :: proc(
       albedo_handle,
       metallic_roughness_handle,
       normal_handle,
-      displacement_handle,
       emissive_handle,
     ) or_return
     material_cache[primitive.material] = mat_handle
@@ -541,7 +536,6 @@ load_gltf_skinned_primitive :: proc(
       albedo_handle,
       metallic_roughness_handle,
       normal_handle,
-      displacement_handle,
       emissive_handle,
       mat_handle,
     )

@@ -15,7 +15,6 @@ Material :: struct {
   albedo:             Handle,
   metallic_roughness: Handle,
   normal:             Handle,
-  displacement:       Handle,
   emissive:           Handle,
   metallic_value:     f32,
   roughness_value:    f32,
