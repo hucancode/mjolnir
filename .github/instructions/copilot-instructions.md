@@ -1,4 +1,103 @@
 __This file is used to teach GitHub Copilot or other AI assistants__
+# Project Overview
+
+Mjolnir is a minimalistic 3D rendering engine written in Odin, using Vulkan for graphics rendering. It implements a deferred rendering pipeline with features like PBR (Physically Based Rendering), particle systems, shadow mapping, and post-processing effects.
+
+## Build Commands
+
+```bash
+# Build and run in release mode
+make run
+
+# Build and run in debug mode
+make debug
+
+# Build only (release mode)
+make build
+
+# Run tests
+make test
+
+# Check for compiler errors without building
+make check
+
+# Build all shaders
+make shader
+
+# Build single shader
+make mjolnir/shader/{shader_name}/vert.spv # build a specific vertex shader, use frag.spv for fragment shader
+
+# Clean build artifacts
+make clean
+```
+
+## Architecture Overview
+
+### Core Engine Structure
+- **Main Entry Point**: `main.odin` - Application setup and game loop
+- **Engine Core**: `mjolnir/engine.odin` - Main engine systems, rendering pipeline
+- **Vulkan Context**: `mjolnir/context.odin` - Vulkan initialization and device management
+
+### Rendering Pipeline
+The engine uses a deferred rendering approach with multiple passes:
+
+1. **Depth Pre-pass** - Early depth testing for performance
+2. **G-Buffer Pass** - Geometry data (position, normal, albedo, metallic/roughness, emissive)
+3. **Shadow Pass** - Shadow map generation for point, directional, and spot lights
+4. **Lighting Pass** - Ambient + per-light additive rendering
+5. **Particle Rendering** - GPU-based particle systems
+6. **Post-Processing** - Effects like bloom, fog, cross-hatching, tone mapping
+
+### Key Systems
+- **Scene Management**: `mjolnir/scene.odin` - Node-based scene graph
+- **Geometry**: `mjolnir/geometry/` - Camera, transforms, primitives
+- **Materials**: `mjolnir/material.odin` - PBR material system
+- **Animation**: `mjolnir/animation/` - Skeletal animation support
+- **Particle System**: `mjolnir/particle.odin` - GPU compute-based particles with compaction optimization
+- **Resource Management**: `mjolnir/resource/` - Handle-based resource system
+
+### Asset Support
+- **GLTF Loading**: Full support for loading 3D models via `mjolnir/gltf_loader.odin`
+- **Texture Loading**: Various formats supported
+- **Shader System**: GLSL shaders compiled to SPIR-V (in `mjolnir/shader/`)
+
+## Development Notes
+
+### Code Style
+- Uses `odinfmt.json` for formatting: 80 character width, 2 spaces, no tabs
+- Follows Odin language conventions
+
+### Shader Development
+- Shaders are in `mjolnir/shader/` organized by render pass
+- Use `make shader` to rebuild all shaders
+- Individual shaders: `make mjolnir/shader/{shader_name}/vert.spv` (or frag.spv)
+- Compute shaders: particle physics (`compute.comp`) and compaction (`compact.comp`)
+
+### Testing
+- Tests are in `test/` directory
+- Run with `make test`
+- Tests cover geometry, animation, resource management, and core engine features
+
+### Memory Management
+- Uses custom slab allocators and generational arrays for efficient resource management
+- Handle-based system for referencing resources safely
+
+## Common File Locations
+
+- **Main application**: `main.odin`
+- **Engine core**: `mjolnir/engine.odin`
+- **Rendering backends**: `mjolnir/lighting_*.odin`, `mjolnir/geometry_buffer.odin`
+- **Shaders**: `mjolnir/shader/{pass_name}/`
+- **Assets**: `assets/` (models, textures, etc.)
+- **Tests**: `test/`
+
+## Particle System Optimization
+
+The particle system uses GPU-based compaction for efficient rendering:
+- **Compaction Pipeline**: `mjolnir/shader/particle/compact.comp` removes dead particles
+- **Indirect Rendering**: Only renders alive particles using `vk.CmdDrawIndirect`
+- **Performance**: Reduces draw calls from MAX_PARTICLES (65K) to actual alive count
+- **Monitoring**: UI shows efficiency ratio (rendered/total particles)
 
 # Odin features
 variable declaration
