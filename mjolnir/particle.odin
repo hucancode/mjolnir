@@ -118,7 +118,7 @@ compute_particles :: proc(
   counter_ptr := data_buffer_get(&self.particle_counter_buffer)
   params_ptr := data_buffer_get(&self.params_buffer)
   params_ptr.particle_count = counter_ptr^
-  log.debugf("previous frame's particle count %d", counter_ptr^)
+  // log.debugf("previous frame's particle count %d", counter_ptr^)
   counter_ptr^ = 0
   vk.CmdBindPipeline(command_buffer, .COMPUTE, self.emitter_pipeline)
   vk.CmdBindDescriptorSets(

@@ -267,9 +267,9 @@ setup :: proc(engine: ^mjolnir.Engine) {
       &engine.scene,
       psys_handle1,
       EmitterAttachment {
-        emission_rate     = 120,
-        particle_lifetime = 5.0,
-        position_spread   = 0.5,
+        emission_rate     = 43,
+        particle_lifetime = 50.0,
+        position_spread   = 1.5,
         initial_velocity  = {0, -0.1, 0, 0},
         velocity_spread   = 0.1,
         color_start       = {1, 1, 0, 1}, // Yellow particles
@@ -297,9 +297,9 @@ setup :: proc(engine: ^mjolnir.Engine) {
       &engine.scene,
       psys_handle2,
       EmitterAttachment {
-        emission_rate     = 25,
+        emission_rate     = 7,
         particle_lifetime = 3.0,
-        position_spread   = 0.1,
+        position_spread   = 0.3,
         initial_velocity  = {0, 0.2, 0, 0},
         velocity_spread   = 0.15,
         color_start       = {0, 0, 1, 1}, // Blue particles
