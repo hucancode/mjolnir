@@ -51,9 +51,9 @@ setup :: proc(engine: ^mjolnir.Engine) {
   ground_mesh_handle, _, _ := create_mesh(make_quad())
   if true {
     log.info("spawning cubes in a grid")
-    space: f32 = 1.0
+    space: f32 = 2.0
     size: f32 = 0.3
-    nx, ny, nz := 5, 2, 5
+    nx, ny, nz := 15, 2, 15
     for x in 1 ..< nx {
       for y in 1 ..< ny {
         for z in 1 ..< nz {
@@ -71,7 +71,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
           )
           translate(
             &node.transform,
-            (f32(x) - f32(nx) * 0.5) * space,
+            (f32(x) - f32(nx) * 0.5) * space + 10.0,
             (f32(y) - f32(ny) * 0.5) * space + 0.5,
             (f32(z) - f32(nz) * 0.5) * space,
           )
@@ -333,7 +333,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     geometry.scale(&forcefield_visual.transform, 0.2)
   }
   effect_add_fog(&engine.postprocess, {0.2, 0.5, 0.9}, 0.02, 3.0, 50.0)
-  effect_add_crosshatch(&engine.postprocess, {1280, 720})
+  // effect_add_crosshatch(&engine.postprocess, {1280, 720})
   // effect_add_blur(&engine.postprocess, 18.0)
   // effect_add_tonemap(&engine.postprocess, 1.5, 1.3)
   // effect_add_dof(&engine.postprocess)

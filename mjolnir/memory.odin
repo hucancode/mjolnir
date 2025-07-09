@@ -120,6 +120,11 @@ data_buffer_get :: proc(self: ^DataBuffer($T), index: u32 = 0) -> ^T {
   return &self.mapped[index]
 }
 
+data_buffer_get_all :: proc(self: ^DataBuffer($T)) -> []T {
+  element_count := self.bytes_count / self.element_size
+  return slice.from_ptr(self.mapped, element_count)
+}
+
 data_buffer_offset_of :: proc(self: ^DataBuffer($T), index: u32) -> u32 {
   return index * u32(self.element_size)
 }

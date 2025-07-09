@@ -74,11 +74,12 @@ NodeAttachment :: union {
 }
 
 Node :: struct {
-  parent:     Handle,
-  children:   [dynamic]Handle,
-  transform:  geometry.Transform,
-  name:       string,
-  attachment: NodeAttachment,
+  parent:         Handle,
+  children:       [dynamic]Handle,
+  transform:      geometry.Transform,
+  name:           string,
+  attachment:     NodeAttachment,
+  culling_enabled: bool,
 }
 
 SceneTraversalCallback :: #type proc(node: ^Node, ctx: rawptr) -> bool
@@ -87,6 +88,7 @@ init_node :: proc(self: ^Node, name: string = "") {
   self.children = make([dynamic]Handle, 0)
   self.transform = geometry.TRANSFORM_IDENTITY
   self.name = name
+  self.culling_enabled = true
 }
 
 deinit_node :: proc(self: ^Node) {

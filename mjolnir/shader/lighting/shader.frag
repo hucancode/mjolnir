@@ -18,6 +18,11 @@ layout(set = 0, binding = 0) uniform CameraUniform {
     mat4 view;
     mat4 projection;
     vec2 viewport_size;
+    float camera_near;
+    float camera_far;
+    vec2 padding;
+    vec3 camera_position;
+    float padding2;
 } camera;
 
 layout(set = 1, binding = 0) uniform texture2D textures[];
@@ -141,7 +146,7 @@ void main() {
     float metallic = clamp(mr.r, 0.0, 1.0);
     float roughness = clamp(mr.g, 0.0, 1.0);
     roughness = max(roughness, 0.05);
-    vec3 V = normalize(camera_position - position);
+    vec3 V = normalize(camera.camera_position - position);
     float shadowFactor = calculateShadow(position, normal);
     // Only direct lighting, no ambient/IBL/emissive
     vec3 direct = brdf(normal, V, albedo, roughness, metallic, position) * shadowFactor;

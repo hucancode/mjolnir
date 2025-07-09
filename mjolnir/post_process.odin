@@ -695,10 +695,6 @@ renderer_postprocess_render :: proc(
         g_image_2d_buffers,
         self.images[dst_image_idx],
       )
-      log.debugf(
-        "transitioning image to color attachment optimal 0x%x",
-        dst_texture.image,
-      )
       transition_image(
         command_buffer,
         dst_texture.image,

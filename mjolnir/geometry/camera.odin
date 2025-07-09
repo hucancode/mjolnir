@@ -17,7 +17,7 @@ CameraOrbitMovement :: struct {
 
 DEFAULT_ORBIT_DATA := CameraOrbitMovement {
   target       = {0.0, 0.0, 0.0},
-  distance     = 3.0,
+  distance     = 1.0,
   yaw          = 0.0,
   pitch        = 0.0,
   min_distance = 1.0,
@@ -281,5 +281,16 @@ camera_update_aspect_ratio :: proc(camera: ^Camera, new_aspect_ratio: f32) {
   case OrthographicProjection:
     // For orthographic projection, we might want to adjust width/height
     // based on the aspect ratio, but this depends on the desired behavior
+  }
+}
+
+camera_get_near_far :: proc(camera: Camera) -> (near: f32, far: f32) {
+  switch proj in camera.projection {
+  case PerspectiveProjection:
+    return proj.near, proj.far
+  case OrthographicProjection:
+    return proj.near, proj.far
+  case:
+    return 0.1, 100.0 // Default fallback values
   }
 }

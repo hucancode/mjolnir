@@ -1,0 +1,107 @@
+#version 450
+
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+// Emitter struct - must match Odin definition
+struct Emitter {
+  mat4 transform;
+  vec4 initial_velocity;
+  vec4 color_start;
+  vec4 color_end;
+  float emission_rate;
+  float particle_lifetime;
+  float position_spread;
+  float velocity_spread;
+  float time_accumulator;
+  float size_start;
+  float size_end;
+  float weight;
+  float weight_spread;
+  uint texture_index;
+  vec4 aabb_min;
+  vec4 aabb_max;
+  uint culling_enabled;
+  float padding[7];
+};
+
+struct ParticleSystemParams {
+  uint particle_count;
+  uint emitter_count;
+  uint forcefield_count;
+  float delta_time;
+  vec4 frustum_planes[6];
+};
+
+layout(set = 0, binding = 0) uniform ParticleSystemParamsBuffer {
+  ParticleSystemParams params;
+};
+
+layout(set = 0, binding = 1) readonly buffer EmitterBuffer {
+  Emitter emitters[];
+};
+
+layout(set = 0, binding = 2) writeonly buffer VisibilityBuffer {
+  uint visibility[];
+};
+
+// Test if AABB is inside frustum
+bool test_aabb_frustum(vec3 aabb_min, vec3 aabb_max, vec4 frustum_planes[6]) {
+  // Get all 8 corners of the AABB
+  vec3 corners[8];
+  corners[0] = vec3(aabb_min.x, aabb_min.y, aabb_min.z);
+  corners[1] = vec3(aabb_max.x, aabb_min.y, aabb_min.z);
+  corners[2] = vec3(aabb_min.x, aabb_max.y, aabb_min.z);
+  corners[3] = vec3(aabb_min.x, aabb_min.y, aabb_max.z);
+  corners[4] = vec3(aabb_max.x, aabb_max.y, aabb_min.z);
+  corners[5] = vec3(aabb_max.x, aabb_min.y, aabb_max.z);
+  corners[6] = vec3(aabb_min.x, aabb_max.y, aabb_max.z);
+  corners[7] = vec3(aabb_max.x, aabb_max.y, aabb_max.z);
+
+  // Test each frustum plane
+  for (int plane = 0; plane < 6; plane++) {
+    vec4 plane_vec = frustum_planes[plane];
+    bool all_outside = true;
+    
+    // Check if all corners are outside this plane
+    for (int corner = 0; corner < 8; corner++) {
+      float distance = dot(plane_vec.xyz, corners[corner]) + plane_vec.w;
+      if (distance >= 0.0) {
+        all_outside = false;
+        break;
+      }
+    }
+    
+    // If all corners are outside this plane, the AABB is outside the frustum
+    if (all_outside) {
+      return false;
+    }
+  }
+  
+  return true; // AABB is inside or intersects the frustum
+}
+
+void main() {
+  uint emitter_id = gl_GlobalInvocationID.x;
+  
+  // Early exit if beyond emitter count
+  if (emitter_id >= params.emitter_count) {
+    return;
+  }
+  
+  Emitter emitter = emitters[emitter_id];
+  
+  // Default to visible if culling is disabled
+  if (emitter.culling_enabled == 0) {
+    visibility[emitter_id] = 1;
+    return;
+  }
+  
+  // Test AABB against frustum
+  bool is_visible = test_aabb_frustum(
+    emitter.aabb_min.xyz,
+    emitter.aabb_max.xyz,
+    params.frustum_planes
+  );
+  
+  visibility[emitter_id] = is_visible ? 1 : 0;
+}

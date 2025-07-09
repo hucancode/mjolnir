@@ -21,7 +21,12 @@ layout(location = 4) out mat3 outTBN;
 layout(set = 0, binding = 0) uniform CameraUniform {
     mat4 view;
     mat4 projection;
-    vec2 viewportSize;
+    vec2 viewport_size;
+    float camera_near;
+    float camera_far;
+    vec2 padding;
+    vec3 camera_position;
+    float padding2;
 } camera;
 // Bone matrices
 layout(set = 2, binding = 0) readonly buffer BoneMatrices {

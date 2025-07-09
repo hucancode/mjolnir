@@ -439,7 +439,6 @@ create_material :: proc(
   mat: ^Material,
   res: vk.Result,
 ) {
-  log.info("creating material")
   ret, mat = resource.alloc(&g_materials)
   mat.type = .PBR
   mat.features = features
