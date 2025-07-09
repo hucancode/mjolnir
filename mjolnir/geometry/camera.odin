@@ -17,9 +17,9 @@ CameraOrbitMovement :: struct {
 
 DEFAULT_ORBIT_DATA := CameraOrbitMovement {
   target       = {0.0, 0.0, 0.0},
-  distance     = 1.0,
-  yaw          = 0.0,
-  pitch        = 0.0,
+  distance     = 6.0,
+  yaw          = math.PI * 0.2,
+  pitch        = math.PI * 0.2,
   min_distance = 1.0,
   max_distance = 20.0,
   min_pitch    = -0.2 * math.PI,
