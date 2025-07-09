@@ -10,7 +10,7 @@ import "mjolnir/resource"
 import glfw "vendor:glfw"
 import mu "vendor:microui"
 
-LIGHT_COUNT :: 10
+LIGHT_COUNT :: 1
 light_handles: [LIGHT_COUNT]mjolnir.Handle
 light_cube_handles: [LIGHT_COUNT]mjolnir.Handle
 ground_mat_handle: mjolnir.Handle

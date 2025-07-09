@@ -194,13 +194,11 @@ update_orbit_position :: proc(camera: ^Camera) {
   cos_pitch := math.cos(movement.pitch)
   sin_yaw := math.sin_f32(movement.yaw)
   cos_yaw := math.cos(movement.yaw)
-
   offset_direction := [3]f32 {
     cos_pitch * cos_yaw,
     sin_pitch,
     cos_pitch * sin_yaw,
   }
-
   camera.position = movement.target + offset_direction * movement.distance
 }
 
@@ -291,6 +289,6 @@ camera_get_near_far :: proc(camera: Camera) -> (near: f32, far: f32) {
   case OrthographicProjection:
     return proj.near, proj.far
   case:
-    return 0.1, 100.0 // Default fallback values
+    return 0.01, 100.0
   }
 }

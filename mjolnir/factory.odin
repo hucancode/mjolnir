@@ -19,10 +19,11 @@ g_meshes: resource.Pool(Mesh)
 g_materials: resource.Pool(Material)
 g_image_2d_buffers: resource.Pool(ImageBuffer)
 g_image_cube_buffers: resource.Pool(CubeImageBuffer)
+g_cameras: resource.Pool(geometry.Camera)
 
 g_bindless_bone_buffer_set_layout: vk.DescriptorSetLayout
 g_bindless_bone_buffer_descriptor_set: vk.DescriptorSet
-g_bindless_bone_buffer: DataBuffer(matrix[4,4]f32)
+g_bindless_bone_buffer: DataBuffer(matrix[4, 4]f32)
 g_bone_matrix_slab: resource.SlabAllocator
 
 // Dummy skinning buffer for static meshes
@@ -47,6 +48,8 @@ factory_init :: proc() -> vk.Result {
   resource.pool_init(&g_image_2d_buffers)
   log.infof("Initializing image cube buffer pool... ")
   resource.pool_init(&g_image_cube_buffers)
+  log.infof("Initializing cameras pool... ")
+  resource.pool_init(&g_cameras)
   log.infof("All resource pools initialized successfully")
   init_global_samplers()
   init_bone_matrix_allocator() or_return
@@ -169,6 +172,7 @@ factory_deinit :: proc() {
   resource.pool_deinit(g_image_cube_buffers, cube_depth_texture_deinit)
   resource.pool_deinit(g_meshes, mesh_deinit)
   resource.pool_deinit(g_materials, proc(_: ^Material) {})
+  resource.pool_deinit(g_cameras, proc(_: ^geometry.Camera) {})
   deinit_global_samplers()
   deinit_bone_matrix_allocator()
   vk.DestroyDescriptorSetLayout(g_device, g_camera_descriptor_set_layout, nil)
@@ -231,7 +235,7 @@ init_bone_matrix_allocator :: proc() -> vk.Result {
   )
   // Create bone buffer with space for all frames in flight
   g_bindless_bone_buffer, _ = create_host_visible_buffer(
-    matrix[4,4]f32,
+    matrix[4, 4]f32,
     int(g_bone_matrix_slab.capacity) * MAX_FRAMES_IN_FLIGHT,
     {.STORAGE_BUFFER},
     nil,
@@ -334,7 +338,10 @@ set_texture_2d_descriptor :: proc(index: u32, image_view: vk.ImageView) {
 
 set_texture_cube_descriptor :: proc(index: u32, image_view: vk.ImageView) {
   if index >= MAX_CUBE_TEXTURES {
-    log.infof("Error: Index %d out of bounds for bindless cube textures", index)
+    log.infof(
+      "Error: Index %d out of bounds for bindless cube textures",
+      index,
+    )
     return
   }
   write := vk.WriteDescriptorSet {
@@ -374,14 +381,26 @@ create_empty_texture_2d :: proc(
 
   // Determine aspect mask based on format
   aspect_mask := vk.ImageAspectFlags{.COLOR}
-  if format == .D32_SFLOAT || format == .D24_UNORM_S8_UINT || format == .D16_UNORM {
+  if format == .D32_SFLOAT ||
+     format == .D24_UNORM_S8_UINT ||
+     format == .D16_UNORM {
     aspect_mask = {.DEPTH}
   }
 
-  texture.view = create_image_view(texture.image, format, aspect_mask) or_return
+  texture.view = create_image_view(
+    texture.image,
+    format,
+    aspect_mask,
+  ) or_return
   set_texture_2d_descriptor(handle.index, texture.view)
   ret = .SUCCESS
-  log.debugf("created empty texture %d x %d %v 0x%x", width, height, format, texture.image)
+  log.debugf(
+    "created empty texture %d x %d %v 0x%x",
+    width,
+    height,
+    format,
+    texture.image,
+  )
   return
 }
 

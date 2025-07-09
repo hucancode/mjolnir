@@ -33,7 +33,7 @@ MAX_SHADOW_MAPS :: 10
 MAX_CAMERA_UNIFORMS :: 16
 MAX_TEXTURES :: 90
 MAX_CUBE_TEXTURES :: 20
-USE_GPU_CULLING :: true  // Set to false to use CPU culling instead
+USE_GPU_CULLING :: true // Set to false to use CPU culling instead
 
 Handle :: resource.Handle
 
@@ -50,29 +50,31 @@ MouseScrollProc :: #type proc(engine: ^Engine, offset: [2]f64)
 MouseMoveProc :: #type proc(engine: ^Engine, pos, delta: [2]f64)
 
 PointLightData :: struct {
-  views:    [6]matrix[4,4]f32,
-  proj:     matrix[4,4]f32,
-  world:    matrix[4,4]f32,
+  views:    [6]matrix[4, 4]f32,
+  proj:     matrix[4, 4]f32,
+  world:    matrix[4, 4]f32,
   color:    [4]f32,
   position: [4]f32,
   radius:   f32,
+  cameras:  [6]resource.Handle, // Camera handles for each cube face
 }
 
 SpotLightData :: struct {
-  view:      matrix[4,4]f32,
-  proj:      matrix[4,4]f32,
-  world:     matrix[4,4]f32,
+  view:      matrix[4, 4]f32,
+  proj:      matrix[4, 4]f32,
+  world:     matrix[4, 4]f32,
   color:     [4]f32,
   position:  [4]f32,
   direction: [4]f32,
   radius:    f32,
   angle:     f32,
+  camera:    resource.Handle, // Camera handle for shadow mapping
 }
 
 DirectionalLightData :: struct {
-  view:      matrix[4,4]f32,
-  proj:      matrix[4,4]f32,
-  world:     matrix[4,4]f32,
+  view:      matrix[4, 4]f32,
+  proj:      matrix[4, 4]f32,
+  world:     matrix[4, 4]f32,
   color:     [4]f32,
   direction: [4]f32,
 }
@@ -84,14 +86,14 @@ LightData :: union {
 }
 
 CameraUniform :: struct {
-  view:          matrix[4,4]f32,
-  projection:    matrix[4,4]f32,
-  viewport_size: [2]f32,
-  camera_near:   f32,
-  camera_far:    f32,
-  padding:       [2]f32, // Align to 16-byte boundary
+  view:            matrix[4, 4]f32,
+  projection:      matrix[4, 4]f32,
+  viewport_size:   [2]f32,
+  camera_near:     f32,
+  camera_far:      f32,
+  padding:         [2]f32, // Align to 16-byte boundary
   camera_position: [3]f32,
-  padding2:      f32, // Align to 16-byte boundary
+  padding2:        f32, // Align to 16-byte boundary
 }
 
 // Batch key for grouping objects by material features
@@ -176,7 +178,7 @@ Engine :: struct {
   ambient:               RendererAmbient,
   shadow:                RendererShadow,
   particle:              RendererParticle,
-  scene_culling:         RendererSceneCulling,
+  visibility_culler:     VisibilityCuller,
   transparent:           RendererTransparent,
   postprocess:           RendererPostProcess,
   gbuffer:               RendererGBuffer,
@@ -291,7 +293,7 @@ init :: proc(
   ) or_return
   renderer_particle_init(&self.particle) or_return
   when USE_GPU_CULLING {
-    renderer_scene_culling_init(&self.scene_culling) or_return
+    visibility_culler_init(&self.visibility_culler) or_return
   }
   renderer_transparent_init(
     &self.transparent,
@@ -423,10 +425,13 @@ init :: proc(
         -i32(math.round(xoffset)),
         -i32(math.round(yoffset)),
       )
-      geometry.camera_orbit_zoom(
-        &engine.scene.camera,
-        -f32(yoffset) * SCROLL_SENSITIVITY,
-      )
+      if main_camera := resource.get(g_cameras, engine.scene.main_camera);
+         main_camera != nil {
+        geometry.camera_orbit_zoom(
+          main_camera,
+          -f32(yoffset) * SCROLL_SENSITIVITY,
+        )
+      }
       if engine.mouse_scroll_proc != nil {
         engine.mouse_scroll_proc(engine, {xoffset, yoffset})
       }
@@ -554,11 +559,14 @@ update :: proc(self: ^Engine) -> bool {
     self.input.keys[k] = is_pressed
   }
   if self.input.mouse_holding[glfw.MOUSE_BUTTON_1] {
-    geometry.camera_orbit_rotate(
-      &self.scene.camera,
-      f32(delta.x * MOUSE_SENSITIVITY_X),
-      f32(delta.y * MOUSE_SENSITIVITY_Y),
-    )
+    if main_camera := resource.get(g_cameras, self.scene.main_camera);
+       main_camera != nil {
+      geometry.camera_orbit_rotate(
+        main_camera,
+        f32(delta.x * MOUSE_SENSITIVITY_X),
+        f32(delta.y * MOUSE_SENSITIVITY_Y),
+      )
+    }
   }
   if self.mouse_move_proc != nil {
     self.mouse_move_proc(self, self.input.mouse_pos, delta)
@@ -588,7 +596,7 @@ deinit :: proc(self: ^Engine) {
   renderer_postprocess_deinit(&self.postprocess)
   renderer_particle_deinit(&self.particle)
   when USE_GPU_CULLING {
-    renderer_scene_culling_deinit(&self.scene_culling)
+    visibility_culler_deinit(&self.visibility_culler)
   }
   renderer_transparent_deinit(&self.transparent)
   renderer_depth_prepass_deinit(&self.depth_prepass)
@@ -605,19 +613,22 @@ recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
   swapchain_recreate(&engine.swapchain, engine.window) or_return
   new_aspect_ratio :=
     f32(engine.swapchain.extent.width) / f32(engine.swapchain.extent.height)
-  geometry.camera_update_aspect_ratio(&engine.scene.camera, new_aspect_ratio)
+  if main_camera := resource.get(g_cameras, engine.scene.main_camera);
+     main_camera != nil {
+    geometry.camera_update_aspect_ratio(main_camera, new_aspect_ratio)
+  }
   // Recreate all images that depend on swapchain dimensions
   for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
     frame_data_deinit(&engine.frames[i])
     frame_data_init(&engine.frames[i], &engine.swapchain)
     // Only need to update camera uniform - shadow textures use bindless system
     write := vk.WriteDescriptorSet {
-      sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = g_camera_descriptor_sets[i],
-      dstBinding = 0,
+      sType           = .WRITE_DESCRIPTOR_SET,
+      dstSet          = g_camera_descriptor_sets[i],
+      dstBinding      = 0,
       descriptorCount = 1,
-      descriptorType = .UNIFORM_BUFFER,
-      pBufferInfo = &{
+      descriptorType  = .UNIFORM_BUFFER,
+      pBufferInfo     = &{
         buffer = engine.frames[i].camera_uniform.buffer,
         range = size_of(CameraUniform),
       },
@@ -659,6 +670,7 @@ recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
 generate_render_input :: proc(
   self: ^Engine,
   frustum: geometry.Frustum,
+  camera_handle: resource.Handle,
 ) -> (
   ret: RenderInput,
 ) {
@@ -681,7 +693,8 @@ generate_render_input :: proc(
       // Use GPU culling results if available, otherwise fall back to CPU culling
       visible := true
       when USE_GPU_CULLING {
-        visible = is_node_visible(&self.scene_culling, u32(entry_index))
+        camera_index := get_camera_index(camera_handle)
+        visible = is_node_visible(&self.visibility_culler, camera_index, u32(entry_index))
       } else {
         world_aabb := geometry.aabb_transform(mesh.aabb, node.transform.world_matrix)
         visible = geometry.frustum_test_aabb(frustum, world_aabb)
@@ -715,6 +728,15 @@ generate_render_input :: proc(
       append(&batch_data.nodes, node)
     }
   }
+  // Debug: log shadow render visibility
+  if camera_handle.index > 0 {
+    log.debugf(
+      "Shadow camera %d: %d/%d objects visible",
+      camera_handle.index,
+      visible_count,
+      total_count,
+    )
+  }
   return
 }
 
@@ -725,16 +747,29 @@ render :: proc(self: ^Engine) -> vk.Result {
   command_buffer := self.command_buffers[g_frame_index]
   vk.ResetCommandBuffer(command_buffer, {}) or_return
   camera_uniform := data_buffer_get(&self.frames[g_frame_index].camera_uniform)
-  camera_uniform.view = geometry.calculate_view_matrix(self.scene.camera)
+  main_camera := resource.get(g_cameras, self.scene.main_camera)
+  if main_camera == nil {
+    log.errorf("Main camera not found with handle: %v", self.scene.main_camera)
+    return .ERROR_UNKNOWN
+  }
+  camera_uniform.view = geometry.calculate_view_matrix(main_camera^)
   camera_uniform.projection = geometry.calculate_projection_matrix(
-    self.scene.camera,
+    main_camera^,
   )
   camera_uniform.viewport_size = {
     f32(self.swapchain.extent.width),
     f32(self.swapchain.extent.height),
   }
-  camera_uniform.camera_near, camera_uniform.camera_far = geometry.camera_get_near_far(self.scene.camera)
-  camera_uniform.camera_position = self.scene.camera.position
+  // Get near/far from camera projection
+  #partial switch proj in main_camera.projection {
+  case geometry.PerspectiveProjection:
+    camera_uniform.camera_near = proj.near
+    camera_uniform.camera_far = proj.far
+  case geometry.OrthographicProjection:
+    camera_uniform.camera_near = proj.near
+    camera_uniform.camera_far = proj.far
+  }
+  camera_uniform.camera_position = main_camera.position
   frustum := geometry.make_frustum(
     camera_uniform.projection * camera_uniform.view,
   )
@@ -745,18 +780,25 @@ render :: proc(self: ^Engine) -> vk.Result {
   // dispatch computation early and doing other work while GPU is busy
   when USE_GPU_CULLING {
     // Update and perform GPU scene culling
-    update_scene_culling_data(&self.scene_culling, &self.scene)
-    perform_scene_culling_with_frustum(&self.scene_culling, command_buffer, frustum)
+    visibility_culler_update(&self.visibility_culler, &self.scene)
+    visibility_culler_execute_with_frustum(
+      &self.visibility_culler,
+      command_buffer,
+      0,
+      frustum,
+    )
     // Memory barrier to ensure culling is complete before other operations
     visibility_buffer_barrier := vk.BufferMemoryBarrier {
-      sType = .BUFFER_MEMORY_BARRIER,
-      srcAccessMask = {.SHADER_WRITE},
-      dstAccessMask = {.SHADER_READ, .HOST_READ},
+      sType               = .BUFFER_MEMORY_BARRIER,
+      srcAccessMask       = {.SHADER_WRITE},
+      dstAccessMask       = {.SHADER_READ, .HOST_READ},
       srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
       dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-      buffer = self.scene_culling.visibility_buffer[g_frame_index].buffer,
-      offset = 0,
-      size = vk.DeviceSize(self.scene_culling.visibility_buffer[g_frame_index].bytes_count),
+      buffer              = self.visibility_culler.camera_data[g_frame_index][0].visibility_buffer.buffer,
+      offset              = 0,
+      size                = vk.DeviceSize(
+        self.visibility_culler.camera_data[g_frame_index][0].visibility_buffer.bytes_count,
+      ),
     }
     vk.CmdPipelineBarrier(
       command_buffer,
@@ -773,9 +815,9 @@ render :: proc(self: ^Engine) -> vk.Result {
     // End command buffer and submit immediately to ensure GPU work completes
     vk.EndCommandBuffer(command_buffer) or_return
     submit_info := vk.SubmitInfo {
-      sType = .SUBMIT_INFO,
+      sType              = .SUBMIT_INFO,
       commandBufferCount = 1,
-      pCommandBuffers = &command_buffer,
+      pCommandBuffers    = &command_buffer,
     }
     vk.QueueSubmit(g_graphics_queue, 1, &submit_info, 0) or_return
     vk.QueueWaitIdle(g_graphics_queue) or_return
@@ -786,7 +828,7 @@ render :: proc(self: ^Engine) -> vk.Result {
     ) or_return
   }
 
-  compute_particles(&self.particle, command_buffer, self.scene.camera)
+  compute_particles(&self.particle, command_buffer, main_camera^)
   lights := make([dynamic]LightData, 0)
   defer delete(lights)
   shadow_casters := make([dynamic]LightData, 0)
@@ -794,23 +836,42 @@ render :: proc(self: ^Engine) -> vk.Result {
   for &entry, entry_index in self.scene.nodes.entries do if entry.active {
     node := &entry.item
     when USE_GPU_CULLING {
-        visible := is_node_visible(&self.scene_culling, u32(entry_index))
-        if !visible do continue
+      visible := is_node_visible(&self.visibility_culler, 0, u32(entry_index))
+      if !visible do continue
     }
-    #partial switch light in &node.attachment {
+    #partial switch &light in &node.attachment {
     case PointLightAttachment:
-      @(static) face_dirs := [6][3]f32{{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}}
-      @(static) face_ups := [6][3]f32{{0, -1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}, {0, -1, 0}, {0, -1, 0}}
+      if light.cast_shadow {
+        init_point_light_cameras(&light)
+      }
       data: PointLightData
       position := node.transform.world_matrix * [4]f32{0, 0, 0, 1}
-      for i in 0 ..< 6 {
-        data.views[i] = linalg.matrix4_look_at(position.xyz, position.xyz + face_dirs[i], face_ups[i])
+
+      if light.cast_shadow {
+        // Get projection matrix from the first camera (they should all be the same)
+        first_camera := resource.get(g_cameras, light.cameras[0])
+        data.proj = geometry.calculate_projection_matrix(first_camera^)
+        // Generate view matrices manually for each cube face
+        face_dirs := [6][3]f32{{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}}
+        face_ups := [6][3]f32{{0, -1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}, {0, -1, 0}, {0, -1, 0}}
+        for i in 0 ..< 6 {
+          target := position.xyz + face_dirs[i]
+          data.views[i] = linalg.matrix4_look_at(position.xyz, target, face_ups[i])
+        }
+
+        // CAMERA-BASED APPROACH (commented out):
+        // for i in 0 ..< 6 {
+        //   face_camera := resource.get(g_cameras, light.cameras[i])
+        //   // Update camera position to current light position
+        //   face_camera.position = position.xyz
+        //   data.views[i] = geometry.calculate_view_matrix(face_camera^)
+        // }
       }
-      data.proj = linalg.matrix4_perspective(math.PI * 0.5, 1.0, 0.01, light.radius)
       data.world = node.transform.world_matrix
       data.color = light.color
       data.position = position
       data.radius = light.radius
+      data.cameras = light.cameras
       append(&lights, data)
       if light.cast_shadow && len(shadow_casters) < MAX_SHADOW_MAPS {
         append(&shadow_casters, data)
@@ -825,33 +886,182 @@ render :: proc(self: ^Engine) -> vk.Result {
       data.color = light.color
       append(&lights, data)
     case SpotLightAttachment:
+      if light.cast_shadow {
+        init_spot_light_camera(&light)
+      }
       data: SpotLightData
       data.position = node.transform.world_matrix * [4]f32{0, 0, 0, 1}
       data.direction = node.transform.world_matrix * [4]f32{0, -1, 0, 0}
-      data.proj = linalg.matrix4_perspective(light.angle, 1.0, 0.01, light.radius)
       data.world = node.transform.world_matrix
-      data.view = linalg.matrix4_look_at(data.position.xyz, data.position.xyz + data.direction.xyz, linalg.VECTOR3F32_Y_AXIS)
+
+      if light.cast_shadow {
+        // Get projection matrix from camera and generate view matrix manually
+        spot_camera := resource.get(g_cameras, light.camera)
+        data.proj = geometry.calculate_projection_matrix(spot_camera^)
+        target := data.position.xyz + data.direction.xyz
+        data.view = linalg.matrix4_look_at(data.position.xyz, target, linalg.VECTOR3F32_Y_AXIS)
+
+        // CAMERA-BASED APPROACH (commented out):
+        // spot_camera.position = data.position.xyz
+        // spot_camera.rotation = linalg.quaternion_look_at_f32(
+        //   data.position.xyz,
+        //   data.position.xyz + data.direction.xyz,
+        //   linalg.VECTOR3F32_Y_AXIS
+        // )
+        // data.proj = geometry.calculate_projection_matrix(spot_camera^)
+        // data.view = geometry.calculate_view_matrix(spot_camera^)
+      }
       data.radius = light.radius
       data.angle = light.angle
       data.color = light.color
+      data.camera = light.camera
       append(&lights, data)
       if light.cast_shadow && len(shadow_casters) < MAX_SHADOW_MAPS {
         append(&shadow_casters, data)
       }
     }
   }
+
+  // Execute visibility culling for each light's cameras BEFORE image transitions
+  when USE_GPU_CULLING {
+    for node, i in shadow_casters {
+      #partial switch light in node {
+      case PointLightData:
+        // Execute culling for each cube face camera
+        for face in 0 ..< 6 {
+          camera_handle := light.cameras[face]
+          camera_index := get_camera_index(camera_handle)
+          log.debugf(
+            "Point light face %d: camera handle %v -> index %d",
+            face,
+            camera_handle,
+            camera_index,
+          )
+          frustum := geometry.make_frustum(light.proj * light.views[face])
+          visibility_culler_execute_with_frustum(
+            &self.visibility_culler,
+            command_buffer,
+            camera_index,
+            frustum,
+          )
+
+          // Add barrier between compute dispatches
+          vk.CmdPipelineBarrier(
+            command_buffer,
+            {.COMPUTE_SHADER},
+            {.COMPUTE_SHADER},
+            {},
+            0,
+            nil,
+            0,
+            nil,
+            0,
+            nil,
+          )
+        }
+      case SpotLightData:
+        camera_handle := light.camera
+        frustum := geometry.make_frustum(light.proj * light.view)
+        visibility_culler_execute_with_frustum(
+          &self.visibility_culler,
+          command_buffer,
+          get_camera_index(camera_handle),
+          frustum,
+        )
+
+        // Add barrier after spot light compute dispatch
+        vk.CmdPipelineBarrier(
+          command_buffer,
+          {.COMPUTE_SHADER},
+          {.COMPUTE_SHADER},
+          {},
+          0,
+          nil,
+          0,
+          nil,
+          0,
+          nil,
+        )
+      }
+    }
+    // Memory barriers to ensure all culling is complete before shadow rendering
+    // Add buffer memory barriers for each light camera's visibility buffer
+    buffer_barriers := make(
+      [dynamic]vk.BufferMemoryBarrier,
+      0,
+      context.temp_allocator,
+    )
+    for node in shadow_casters {
+      #partial switch light in node {
+      case PointLightData:
+        for face in 0 ..< 6 {
+          camera_index := get_camera_index(light.cameras[face])
+          if camera_index < MAX_CAMERA {
+            barrier := vk.BufferMemoryBarrier {
+              sType               = .BUFFER_MEMORY_BARRIER,
+              srcAccessMask       = {.SHADER_WRITE},
+              dstAccessMask       = {.SHADER_READ, .HOST_READ},
+              srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+              dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+              buffer              = self.visibility_culler.camera_data[g_frame_index][camera_index].visibility_buffer.buffer,
+              offset              = 0,
+              size                = vk.DeviceSize(
+                self.visibility_culler.camera_data[g_frame_index][camera_index].visibility_buffer.bytes_count,
+              ),
+            }
+            append(&buffer_barriers, barrier)
+          }
+        }
+      case SpotLightData:
+        camera_index := get_camera_index(light.camera)
+        if camera_index < MAX_CAMERA {
+          barrier := vk.BufferMemoryBarrier {
+            sType               = .BUFFER_MEMORY_BARRIER,
+            srcAccessMask       = {.SHADER_WRITE},
+            dstAccessMask       = {.SHADER_READ, .HOST_READ},
+            srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+            dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+            buffer              = self.visibility_culler.camera_data[g_frame_index][camera_index].visibility_buffer.buffer,
+            offset              = 0,
+            size                = vk.DeviceSize(
+              self.visibility_culler.camera_data[g_frame_index][camera_index].visibility_buffer.bytes_count,
+            ),
+          }
+          append(&buffer_barriers, barrier)
+        }
+      }
+    }
+
+    vk.CmdPipelineBarrier(
+      command_buffer,
+      {.COMPUTE_SHADER},
+      {.VERTEX_SHADER, .FRAGMENT_SHADER, .HOST},
+      {},
+      0,
+      nil,
+      u32(len(buffer_barriers)),
+      raw_data(buffer_barriers),
+      0,
+      nil,
+    )
+  }
+
   // log.debug("============ rendering shadow pass...============ ")
   // Transition all shadow maps to depth attachment optimal
-  shadow_2d_images : [MAX_SHADOW_MAPS]vk.Image
+  shadow_2d_images: [MAX_SHADOW_MAPS]vk.Image
   shadow_2d_count := 0
   for h, i in self.frames[g_frame_index].shadow_maps {
-      b, ok := resource.get(g_image_2d_buffers, h)
-      if !ok {
-        log.debugf("Shadow map 2D texture not found for handle 0x%x at index %d", h, i)
-        continue
-      }
-      shadow_2d_images[shadow_2d_count] = b.image
-      shadow_2d_count += 1
+    b, ok := resource.get(g_image_2d_buffers, h)
+    if !ok {
+      log.debugf(
+        "Shadow map 2D texture not found for handle 0x%x at index %d",
+        h,
+        i,
+      )
+      continue
+    }
+    shadow_2d_images[shadow_2d_count] = b.image
+    shadow_2d_count += 1
   }
   if shadow_2d_count > 0 {
     transition_images(
@@ -866,16 +1076,20 @@ render :: proc(self: ^Engine) -> vk.Result {
       {.DEPTH_STENCIL_ATTACHMENT_WRITE},
     )
   }
-  shadow_cube_images : [MAX_SHADOW_MAPS]vk.Image
+  shadow_cube_images: [MAX_SHADOW_MAPS]vk.Image
   shadow_cube_count := 0
   for h, i in self.frames[g_frame_index].cube_shadow_maps {
-      b, ok := resource.get(g_image_cube_buffers, h)
-      if !ok {
-        log.debugf("Shadow map cube texture not found for handle 0x%x at index %d", h, i)
-        continue
-      }
-      shadow_cube_images[shadow_cube_count] = b.image
-      shadow_cube_count += 1
+    b, ok := resource.get(g_image_cube_buffers, h)
+    if !ok {
+      log.debugf(
+        "Shadow map cube texture not found for handle 0x%x at index %d",
+        h,
+        i,
+      )
+      continue
+    }
+    shadow_cube_images[shadow_cube_count] = b.image
+    shadow_cube_count += 1
   }
   if shadow_cube_count > 0 {
     transition_images(
@@ -890,6 +1104,7 @@ render :: proc(self: ^Engine) -> vk.Result {
       {.DEPTH_STENCIL_ATTACHMENT_WRITE},
     )
   }
+
   for node, i in shadow_casters {
     #partial switch light in node {
     case PointLightData:
@@ -898,7 +1113,12 @@ render :: proc(self: ^Engine) -> vk.Result {
       cube_shadow := resource.get(g_image_cube_buffers, cube_shadow_handle)
       for face in 0 ..< 6 {
         frustum := geometry.make_frustum(light.proj * light.views[face])
-        shadow_render_input := generate_render_input(self, frustum)
+        // TODO: we supposed to use light.cameras[face] but it does not work yet
+        shadow_render_input := generate_render_input(
+          self,
+          frustum,
+          light.cameras[face],
+        )
         shadow_target: RenderTarget
         shadow_target.depth = cube_shadow.face_views[face]
         shadow_target.extent = {
@@ -919,8 +1139,16 @@ render :: proc(self: ^Engine) -> vk.Result {
       }
     case DirectionalLightData:
       frustum := geometry.make_frustum(light.proj * light.view)
-      shadow_render_input := generate_render_input(self, frustum)
-      shadow_map_texture := resource.get(g_image_2d_buffers, self.frames[g_frame_index].shadow_maps[i])
+      // Directional lights don't have dedicated cameras, use main camera
+      shadow_render_input := generate_render_input(
+        self,
+        frustum,
+        self.scene.main_camera,
+      )
+      shadow_map_texture := resource.get(
+        g_image_2d_buffers,
+        self.frames[g_frame_index].shadow_maps[i],
+      )
       shadow_target: RenderTarget
       shadow_target.depth = shadow_map_texture.view
       shadow_target.extent = {
@@ -940,8 +1168,12 @@ render :: proc(self: ^Engine) -> vk.Result {
       renderer_shadow_end(command_buffer)
     case SpotLightData:
       frustum := geometry.make_frustum(light.proj * light.view)
-      shadow_render_input := generate_render_input(self, frustum)
-      shadow_map_texture := resource.get(g_image_2d_buffers, self.frames[g_frame_index].shadow_maps[i])
+      // TODO: we supposed to use light.camera but it does not work yet
+      shadow_render_input := generate_render_input(self, frustum, light.camera)
+      shadow_map_texture := resource.get(
+        g_image_2d_buffers,
+        self.frames[g_frame_index].shadow_maps[i],
+      )
       shadow_target: RenderTarget
       shadow_target.depth = shadow_map_texture.view
       shadow_target.extent = {
@@ -984,7 +1216,10 @@ render :: proc(self: ^Engine) -> vk.Result {
     {.FRAGMENT_SHADER},
     {.SHADER_READ},
   )
-  final_image := resource.get(g_image_2d_buffers, self.frames[g_frame_index].final_image)
+  final_image := resource.get(
+    g_image_2d_buffers,
+    self.frames[g_frame_index].final_image,
+  )
   transition_image(
     command_buffer,
     final_image.image,
@@ -998,10 +1233,13 @@ render :: proc(self: ^Engine) -> vk.Result {
   )
   // log.debug("============ rendering depth pre-pass... =============")
   depth_target: RenderTarget
-  depth_texture := resource.get(g_image_2d_buffers, self.frames[g_frame_index].depth_buffer)
+  depth_texture := resource.get(
+    g_image_2d_buffers,
+    self.frames[g_frame_index].depth_buffer,
+  )
   depth_target.depth = depth_texture.view
   depth_target.extent = self.swapchain.extent
-  depth_input := generate_render_input(self, frustum)
+  depth_input := generate_render_input(self, frustum, self.scene.main_camera)
   renderer_depth_prepass_begin(&depth_target, command_buffer)
   renderer_depth_prepass_render(
     &self.depth_prepass,
@@ -1015,7 +1253,10 @@ render :: proc(self: ^Engine) -> vk.Result {
   gbuffer_position := resource.get(g_image_2d_buffers, frame.gbuffer_position)
   gbuffer_normal := resource.get(g_image_2d_buffers, frame.gbuffer_normal)
   gbuffer_albedo := resource.get(g_image_2d_buffers, frame.gbuffer_albedo)
-  gbuffer_metallic := resource.get(g_image_2d_buffers, frame.gbuffer_metallic_roughness)
+  gbuffer_metallic := resource.get(
+    g_image_2d_buffers,
+    frame.gbuffer_metallic_roughness,
+  )
   gbuffer_emissive := resource.get(g_image_2d_buffers, frame.gbuffer_emissive)
 
   gbuffer_images := [?]vk.Image {
@@ -1043,7 +1284,8 @@ render :: proc(self: ^Engine) -> vk.Result {
   gbuffer_target.albedo = gbuffer_albedo.view
   gbuffer_target.metallic = gbuffer_metallic.view
   gbuffer_target.emissive = gbuffer_emissive.view
-  gbuffer_target.depth = resource.get(g_image_2d_buffers, frame.depth_buffer).view
+  gbuffer_target.depth =
+    resource.get(g_image_2d_buffers, frame.depth_buffer).view
   gbuffer_target.extent = self.swapchain.extent
   gbuffer_input := depth_input
   renderer_gbuffer_begin(&gbuffer_target, command_buffer)
@@ -1071,22 +1313,19 @@ render :: proc(self: ^Engine) -> vk.Result {
   // Prepare RenderTarget and RenderInput for decoupled renderer
   render_target: RenderTarget
   render_target.final = final_image.view
-  render_target.depth = resource.get(g_image_2d_buffers, frame.depth_buffer).view
+  render_target.depth =
+    resource.get(g_image_2d_buffers, frame.depth_buffer).view
   render_target.extent = self.swapchain.extent
   // Ambient pass
   renderer_ambient_begin(&self.ambient, render_target, command_buffer)
-  renderer_ambient_render(
-    &self.ambient,
-    self.scene.camera.position,
-    command_buffer,
-  )
+  renderer_ambient_render(&self.ambient, main_camera.position, command_buffer)
   renderer_ambient_end(command_buffer)
   // Per-light additive pass
   renderer_lighting_begin(&self.main, render_target, command_buffer)
   renderer_lighting_render(
     &self.main,
     lights,
-    self.scene.camera.position,
+    main_camera.position,
     command_buffer,
   )
   renderer_lighting_end(command_buffer)
@@ -1106,10 +1345,7 @@ render :: proc(self: ^Engine) -> vk.Result {
   renderer_transparent_end(&self.transparent, command_buffer)
 
   // log.debug("============ rendering post processes... =============")
-  transition_image_to_shader_read(
-    command_buffer,
-    final_image.image,
-  )
+  transition_image_to_shader_read(command_buffer, final_image.image)
   renderer_postprocess_begin(
     &self.postprocess,
     command_buffer,
@@ -1315,11 +1551,23 @@ frame_data_deinit :: proc(frame: ^FrameData) {
 
   // Release 2D texture handles with immediate cleanup
   resource.free(&g_image_2d_buffers, frame.final_image, image_buffer_deinit)
-  resource.free(&g_image_2d_buffers, frame.gbuffer_position, image_buffer_deinit)
+  resource.free(
+    &g_image_2d_buffers,
+    frame.gbuffer_position,
+    image_buffer_deinit,
+  )
   resource.free(&g_image_2d_buffers, frame.gbuffer_normal, image_buffer_deinit)
   resource.free(&g_image_2d_buffers, frame.gbuffer_albedo, image_buffer_deinit)
-  resource.free(&g_image_2d_buffers, frame.gbuffer_metallic_roughness, image_buffer_deinit)
-  resource.free(&g_image_2d_buffers, frame.gbuffer_emissive, image_buffer_deinit)
+  resource.free(
+    &g_image_2d_buffers,
+    frame.gbuffer_metallic_roughness,
+    image_buffer_deinit,
+  )
+  resource.free(
+    &g_image_2d_buffers,
+    frame.gbuffer_emissive,
+    image_buffer_deinit,
+  )
   resource.free(&g_image_2d_buffers, frame.depth_buffer, image_buffer_deinit)
 
   // Release shadow map handles with immediate cleanup
