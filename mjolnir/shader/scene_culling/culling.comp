@@ -37,40 +37,37 @@ bool test_point_in_frustum(vec3 p) {
   return true;
 }
 bool test_aabb_frustum(vec3 aabb_min, vec3 aabb_max) {
-  // find at least 1 point inside all plane, we can safely says this AABB is inside the frustum
-  // min,min,min
-  if (test_point_in_frustum(vec3(aabb_min.x, aabb_min.y, aabb_min.z))) {
-    return true;
+  // For each frustum plane, test if the AABB is completely on the negative side
+  for (int i = 0; i < 6; i++) {
+    vec4 plane = params.frustum_planes[i];
+    vec3 plane_normal = plane.xyz;
+    // Find the "positive" vertex of the AABB relative to the plane normal
+    // The positive vertex is the one furthest in the direction of the plane normal
+    vec3 positive_vertex;
+    // For each axis, choose min or max based on plane normal direction
+    if (plane_normal.x >= 0.0) {
+      positive_vertex.x = aabb_max.x;
+    } else {
+      positive_vertex.x = aabb_min.x;
+    }
+    if (plane_normal.y >= 0.0) {
+      positive_vertex.y = aabb_max.y;
+    } else {
+      positive_vertex.y = aabb_min.y;
+    }
+    if (plane_normal.z >= 0.0) {
+      positive_vertex.z = aabb_max.z;
+    } else {
+      positive_vertex.z = aabb_min.z;
+    }
+    // If the positive vertex is on the negative side of the plane, the entire AABB is outside
+    float distance = dot(plane_normal, positive_vertex) + plane.w;
+    if (distance < 0.0) {
+      return false;
+    }
   }
-  // max,min,min
-  if (test_point_in_frustum(vec3(aabb_max.x, aabb_min.y, aabb_min.z))) {
-    return true;
-  }
-  //min,max,min
-  if (test_point_in_frustum(vec3(aabb_min.x, aabb_max.y, aabb_min.z))) {
-    return true;
-  }
-  //min,min,max
-  if (test_point_in_frustum(vec3(aabb_min.x, aabb_min.y, aabb_max.z))) {
-    return true;
-  }
-  //max,max,min
-  if (test_point_in_frustum(vec3(aabb_max.x, aabb_max.y, aabb_min.z))) {
-    return true;
-  }
-  //max,min,max
-  if (test_point_in_frustum(vec3(aabb_max.x, aabb_min.y, aabb_max.z))) {
-    return true;
-  }
-  //min,max,max
-  if (test_point_in_frustum(vec3(aabb_min.x, aabb_max.y, aabb_max.z))) {
-    return true;
-  }
-  //max,max,max
-  if (test_point_in_frustum(vec3(aabb_max.x, aabb_max.y, aabb_max.z))) {
-    return true;
-  }
-  return false;
+  // If we get here, the AABB is not completely outside any plane, so it intersects the frustum
+  return true;
 }
 
 void main() {

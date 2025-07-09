@@ -57,17 +57,42 @@ frustum_test_point :: proc(frustum: Frustum, p: [3]f32) -> bool {
 }
 // test_aabb_frustum tests if an Axis-Aligned Bounding Box (AABB) intersects or is contained within a Frustum.
 // Assumes Frustum planes have normals pointing inwards.
-// Returns true if the AABB is (at least partially) inside the frustum, false if completely outside.
 frustum_test_aabb :: proc(frustum: Frustum, aabb: Aabb) -> bool {
-  if frustum_test_point(frustum, {aabb.min.x, aabb.min.y, aabb.min.z}) do return true
-  if frustum_test_point(frustum, {aabb.max.x, aabb.min.y, aabb.min.z}) do return true
-  if frustum_test_point(frustum, {aabb.min.x, aabb.max.y, aabb.min.z}) do return true
-  if frustum_test_point(frustum, {aabb.min.x, aabb.min.y, aabb.max.z}) do return true
-  if frustum_test_point(frustum, {aabb.max.x, aabb.max.y, aabb.min.z}) do return true
-  if frustum_test_point(frustum, {aabb.max.x, aabb.min.y, aabb.max.z}) do return true
-  if frustum_test_point(frustum, {aabb.min.x, aabb.max.y, aabb.max.z}) do return true
-  if frustum_test_point(frustum, {aabb.max.x, aabb.max.y, aabb.max.z}) do return true
-  return false
+  // For each frustum plane, test if the AABB is completely on the negative side
+  for plane in frustum.planes {
+    // Find the "positive" and "negative" vertices of the AABB relative to the plane normal
+    // The positive vertex is the one furthest in the direction of the plane normal
+    positive_vertex: [3]f32
+    negative_vertex: [3]f32
+    // For each axis, choose min or max based on plane normal direction
+    if plane.x >= 0 {
+      positive_vertex.x = aabb.max.x
+      negative_vertex.x = aabb.min.x
+    } else {
+      positive_vertex.x = aabb.min.x
+      negative_vertex.x = aabb.max.x
+    }
+    if plane.y >= 0 {
+      positive_vertex.y = aabb.max.y
+      negative_vertex.y = aabb.min.y
+    } else {
+      positive_vertex.y = aabb.min.y
+      negative_vertex.y = aabb.max.y
+    }
+    if plane.z >= 0 {
+      positive_vertex.z = aabb.max.z
+      negative_vertex.z = aabb.min.z
+    } else {
+      positive_vertex.z = aabb.min.z
+      negative_vertex.z = aabb.max.z
+    }
+    // If the positive vertex is on the negative side of the plane, the entire AABB is outside
+    if signed_distance_to_plane(plane, positive_vertex) < 0 {
+      return false
+    }
+  }
+  // If we get here, the AABB is not completely outside any plane, so it intersects the frustum
+  return true
 }
 
 frustum_test_sphere :: proc(

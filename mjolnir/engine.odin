@@ -728,15 +728,6 @@ generate_render_input :: proc(
       append(&batch_data.nodes, node)
     }
   }
-  // Debug: log shadow render visibility
-  if camera_handle.index > 0 {
-    log.debugf(
-      "Shadow camera %d: %d/%d objects visible",
-      camera_handle.index,
-      visible_count,
-      total_count,
-    )
-  }
   return
 }
 
@@ -921,7 +912,6 @@ render :: proc(self: ^Engine) -> vk.Result {
       }
     }
   }
-
   // Execute visibility culling for each light's cameras BEFORE image transitions
   when USE_GPU_CULLING {
     for node, i in shadow_casters {
@@ -931,12 +921,6 @@ render :: proc(self: ^Engine) -> vk.Result {
         for face in 0 ..< 6 {
           camera_handle := light.cameras[face]
           camera_index := get_camera_index(camera_handle)
-          log.debugf(
-            "Point light face %d: camera handle %v -> index %d",
-            face,
-            camera_handle,
-            camera_index,
-          )
           frustum := geometry.make_frustum(light.proj * light.views[face])
           visibility_culler_execute_with_frustum(
             &self.visibility_culler,
