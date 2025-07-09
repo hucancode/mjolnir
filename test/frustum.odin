@@ -14,8 +14,8 @@ test_frustum_aabb_inside :: proc(t: ^testing.T) {
   frustum := geometry.make_frustum(m)
   // AABB fully inside the frustum
   aabb := geometry.Aabb {
-    linalg.Vector3f32{-0.5, -0.5, -0.5},
-    linalg.Vector3f32{0.5, 0.5, 0.5},
+    [3]f32{-0.5, -0.5, -0.5},
+    [3]f32{0.5, 0.5, 0.5},
   }
   inside := geometry.frustum_test_aabb(frustum, aabb)
   testing.expect(t, inside, "AABB should be inside the frustum")
@@ -27,8 +27,8 @@ test_frustum_aabb_outside :: proc(t: ^testing.T) {
   frustum := geometry.make_frustum(m)
   // AABB completely outside the frustum (on +X side)
   aabb := geometry.Aabb {
-    linalg.Vector3f32{2, -0.5, -0.5},
-    linalg.Vector3f32{3, 0.5, 0.5},
+    [3]f32{2, -0.5, -0.5},
+    [3]f32{3, 0.5, 0.5},
   }
   inside := geometry.frustum_test_aabb(frustum, aabb)
   testing.expect(t, !inside, "AABB should be outside the frustum")
@@ -40,8 +40,8 @@ test_frustum_aabb_intersect :: proc(t: ^testing.T) {
   frustum := geometry.make_frustum(m)
   // AABB partially inside the frustum
   aabb := geometry.Aabb {
-    linalg.Vector3f32{0.5, -0.5, -0.5},
-    linalg.Vector3f32{1.5, 0.5, 0.5},
+    [3]f32{0.5, -0.5, -0.5},
+    [3]f32{1.5, 0.5, 0.5},
   }
   inside := geometry.frustum_test_aabb(frustum, aabb)
   testing.expect(t, inside, "AABB should intersect the frustum")
@@ -51,7 +51,7 @@ test_frustum_aabb_intersect :: proc(t: ^testing.T) {
 test_frustum_sphere_inside :: proc(t: ^testing.T) {
   m := linalg.MATRIX4F32_IDENTITY
   frustum := geometry.make_frustum(m)
-  center := linalg.Vector3f32{0, 0, 0}
+  center := [3]f32{0, 0, 0}
   radius: f32 = 0.5
   inside := geometry.frustum_test_sphere(center, radius, &frustum)
   testing.expect(t, inside, "Sphere should be inside the frustum")
@@ -61,7 +61,7 @@ test_frustum_sphere_inside :: proc(t: ^testing.T) {
 test_frustum_sphere_outside :: proc(t: ^testing.T) {
   m := linalg.MATRIX4F32_IDENTITY
   frustum := geometry.make_frustum(m)
-  center := linalg.Vector3f32{2, 0, 0}
+  center := [3]f32{2, 0, 0}
   radius: f32 = 0.5
   inside := geometry.frustum_test_sphere(center, radius, &frustum)
   testing.expect(t, !inside, "Sphere should be outside the frustum")
@@ -78,15 +78,15 @@ test_frustum_aabb_perspective_projection :: proc(t: ^testing.T) {
   frustum := geometry.make_frustum(proj)
   // AABB fully inside the frustum (centered at origin, small size)
   aabb := geometry.Aabb {
-    linalg.Vector3f32{-0.5, -0.5, -2.0},
-    linalg.Vector3f32{0.5, 0.5, -1.5},
+    [3]f32{-0.5, -0.5, -2.0},
+    [3]f32{0.5, 0.5, -1.5},
   }
   inside := geometry.frustum_test_aabb(frustum, aabb)
   testing.expect(t, inside, "AABB should be inside the perspective frustum")
   // AABB outside the frustum (behind the camera)
   aabb2 := geometry.Aabb {
-    linalg.Vector3f32{-0.5, -0.5, 1.0},
-    linalg.Vector3f32{0.5, 0.5, 2.0},
+    [3]f32{-0.5, -0.5, 1.0},
+    [3]f32{0.5, 0.5, 2.0},
   }
   inside2 := geometry.frustum_test_aabb(frustum, aabb2)
   testing.expect(
@@ -99,9 +99,9 @@ test_frustum_aabb_perspective_projection :: proc(t: ^testing.T) {
 @(test)
 test_frustum_camera_perspective :: proc(t: ^testing.T) {
   // Create a realistic camera setup
-  camera_pos := linalg.Vector3f32{0, 0, 0}
-  camera_target := linalg.Vector3f32{0, 0, -1}  // Looking down -Z
-  camera_up := linalg.Vector3f32{0, 1, 0}       // Y is up
+  camera_pos := [3]f32{0, 0, 0}
+  camera_target := [3]f32{0, 0, -1}  // Looking down -Z
+  camera_up := [3]f32{0, 1, 0}       // Y is up
 
   // Create view matrix (camera looking down -Z axis)
   view := linalg.matrix4_look_at(camera_pos, camera_target, camera_up)
@@ -124,8 +124,8 @@ test_frustum_camera_perspective :: proc(t: ^testing.T) {
 
   // Test 1: Object in front of camera (should be visible)
   aabb_front := geometry.Aabb {
-    linalg.Vector3f32{-1, -1, -5},  // In front of camera
-    linalg.Vector3f32{1, 1, -3},
+    [3]f32{-1, -1, -5},  // In front of camera
+    [3]f32{1, 1, -3},
   }
   inside_front := geometry.frustum_test_aabb(frustum, aabb_front)
   testing.expect(t, inside_front, "AABB in front of camera should be visible")
@@ -133,8 +133,8 @@ test_frustum_camera_perspective :: proc(t: ^testing.T) {
 
   // Test 2: Object behind camera (should NOT be visible)
   aabb_behind := geometry.Aabb {
-    linalg.Vector3f32{-1, -1, 1},   // Behind camera
-    linalg.Vector3f32{1, 1, 3},
+    [3]f32{-1, -1, 1},   // Behind camera
+    [3]f32{1, 1, 3},
   }
   inside_behind := geometry.frustum_test_aabb(frustum, aabb_behind)
   testing.expect(t, !inside_behind, "AABB behind camera should NOT be visible")
@@ -142,8 +142,8 @@ test_frustum_camera_perspective :: proc(t: ^testing.T) {
 
   // Test 3: Object to the right of camera (should NOT be visible with 90° FOV)
   aabb_right := geometry.Aabb {
-    linalg.Vector3f32{10, -1, -5},  // Far to the right
-    linalg.Vector3f32{12, 1, -3},
+    [3]f32{10, -1, -5},  // Far to the right
+    [3]f32{12, 1, -3},
   }
   inside_right := geometry.frustum_test_aabb(frustum, aabb_right)
   testing.expect(t, !inside_right, "AABB far to the right should NOT be visible")
@@ -151,8 +151,8 @@ test_frustum_camera_perspective :: proc(t: ^testing.T) {
 
   // Test 4: Object to the left of camera (should NOT be visible with 90° FOV)
   aabb_left := geometry.Aabb {
-    linalg.Vector3f32{-12, -1, -5}, // Far to the left
-    linalg.Vector3f32{-10, 1, -3},
+    [3]f32{-12, -1, -5}, // Far to the left
+    [3]f32{-10, 1, -3},
   }
   inside_left := geometry.frustum_test_aabb(frustum, aabb_left)
   testing.expect(t, !inside_left, "AABB far to the left should NOT be visible")
@@ -160,8 +160,8 @@ test_frustum_camera_perspective :: proc(t: ^testing.T) {
 
   // Test 5: Object above camera (should NOT be visible with 90° FOV)
   aabb_above := geometry.Aabb {
-    linalg.Vector3f32{-1, 10, -5},  // Far above
-    linalg.Vector3f32{1, 12, -3},
+    [3]f32{-1, 10, -5},  // Far above
+    [3]f32{1, 12, -3},
   }
   inside_above := geometry.frustum_test_aabb(frustum, aabb_above)
   testing.expect(t, !inside_above, "AABB far above should NOT be visible")
@@ -169,8 +169,8 @@ test_frustum_camera_perspective :: proc(t: ^testing.T) {
 
   // Test 6: Object below camera (should NOT be visible with 90° FOV)
   aabb_below := geometry.Aabb {
-    linalg.Vector3f32{-1, -12, -5}, // Far below
-    linalg.Vector3f32{1, -10, -3},
+    [3]f32{-1, -12, -5}, // Far below
+    [3]f32{1, -10, -3},
   }
   inside_below := geometry.frustum_test_aabb(frustum, aabb_below)
   testing.expect(t, !inside_below, "AABB far below should NOT be visible")
@@ -179,8 +179,8 @@ test_frustum_camera_perspective :: proc(t: ^testing.T) {
   // Test 7: Object at edge of frustum (should be visible)
   // With 90° FOV, at distance 5, the half-width should be tan(45°) * 5 = 5
   aabb_edge := geometry.Aabb {
-    linalg.Vector3f32{4, 4, -5},    // Near the edge
-    linalg.Vector3f32{4.5, 4.5, -4.5},
+    [3]f32{4, 4, -5},    // Near the edge
+    [3]f32{4.5, 4.5, -4.5},
   }
   inside_edge := geometry.frustum_test_aabb(frustum, aabb_edge)
   testing.expect(t, inside_edge, "AABB at edge of frustum should be visible")
@@ -188,8 +188,8 @@ test_frustum_camera_perspective :: proc(t: ^testing.T) {
 
   // Test 8: Object too far away (beyond far plane)
   aabb_far := geometry.Aabb {
-    linalg.Vector3f32{-1, -1, -150}, // Beyond far plane
-    linalg.Vector3f32{1, 1, -120},
+    [3]f32{-1, -1, -150}, // Beyond far plane
+    [3]f32{1, 1, -120},
   }
   inside_far := geometry.frustum_test_aabb(frustum, aabb_far)
   testing.expect(t, !inside_far, "AABB beyond far plane should NOT be visible")
@@ -197,8 +197,8 @@ test_frustum_camera_perspective :: proc(t: ^testing.T) {
 
   // Test 9: Object too close (before near plane)
   aabb_near := geometry.Aabb {
-    linalg.Vector3f32{-0.01, -0.01, -0.05}, // Before near plane
-    linalg.Vector3f32{0.01, 0.01, -0.01},
+    [3]f32{-0.01, -0.01, -0.05}, // Before near plane
+    [3]f32{0.01, 0.01, -0.01},
   }
   inside_near := geometry.frustum_test_aabb(frustum, aabb_near)
   testing.expect(t, !inside_near, "AABB before near plane should NOT be visible")
@@ -208,9 +208,9 @@ test_frustum_camera_perspective :: proc(t: ^testing.T) {
 @(test)
 test_frustum_camera_orthographic :: proc(t: ^testing.T) {
   // Test with orthographic projection
-  camera_pos := linalg.Vector3f32{0, 0, 0}
-  camera_target := linalg.Vector3f32{0, 0, -1}
-  camera_up := linalg.Vector3f32{0, 1, 0}
+  camera_pos := [3]f32{0, 0, 0}
+  camera_target := [3]f32{0, 0, -1}
+  camera_up := [3]f32{0, 1, 0}
 
   view := linalg.matrix4_look_at(camera_pos, camera_target, camera_up)
 
@@ -224,8 +224,8 @@ test_frustum_camera_orthographic :: proc(t: ^testing.T) {
 
   // Test 1: Object within orthographic bounds (should be visible)
   aabb_inside := geometry.Aabb {
-    linalg.Vector3f32{-3, -3, -10},
-    linalg.Vector3f32{3, 3, -5},
+    [3]f32{-3, -3, -10},
+    [3]f32{3, 3, -5},
   }
   inside := geometry.frustum_test_aabb(frustum, aabb_inside)
   testing.expect(t, inside, "AABB within orthographic bounds should be visible")
@@ -233,8 +233,8 @@ test_frustum_camera_orthographic :: proc(t: ^testing.T) {
 
   // Test 2: Object outside orthographic bounds (should NOT be visible)
   aabb_outside := geometry.Aabb {
-    linalg.Vector3f32{-10, -10, -10},
-    linalg.Vector3f32{-7, -7, -5},
+    [3]f32{-10, -10, -10},
+    [3]f32{-7, -7, -5},
   }
   outside := geometry.frustum_test_aabb(frustum, aabb_outside)
   testing.expect(t, !outside, "AABB outside orthographic bounds should NOT be visible")
@@ -244,9 +244,9 @@ test_frustum_camera_orthographic :: proc(t: ^testing.T) {
 @(test)
 test_frustum_camera_moved :: proc(t: ^testing.T) {
   // Test camera moved to a different position
-  camera_pos := linalg.Vector3f32{10, 5, 10}
-  camera_target := linalg.Vector3f32{0, 0, 0}    // Looking at origin
-  camera_up := linalg.Vector3f32{0, 1, 0}
+  camera_pos := [3]f32{10, 5, 10}
+  camera_target := [3]f32{0, 0, 0}    // Looking at origin
+  camera_up := [3]f32{0, 1, 0}
 
   view := linalg.matrix4_look_at(camera_pos, camera_target, camera_up)
 
@@ -263,8 +263,8 @@ test_frustum_camera_moved :: proc(t: ^testing.T) {
 
   // Test 1: Object at origin (should be visible since camera is looking at it)
   aabb_origin := geometry.Aabb {
-    linalg.Vector3f32{-1, -1, -1},
-    linalg.Vector3f32{1, 1, 1},
+    [3]f32{-1, -1, -1},
+    [3]f32{1, 1, 1},
   }
   at_origin := geometry.frustum_test_aabb(frustum, aabb_origin)
   testing.expect(t, at_origin, "AABB at origin should be visible")
@@ -272,8 +272,8 @@ test_frustum_camera_moved :: proc(t: ^testing.T) {
 
   // Test 2: Object behind camera (should NOT be visible)
   aabb_behind_moved := geometry.Aabb {
-    linalg.Vector3f32{15, 3, 15},   // Behind the moved camera
-    linalg.Vector3f32{17, 7, 17},
+    [3]f32{15, 3, 15},   // Behind the moved camera
+    [3]f32{17, 7, 17},
   }
   behind_moved := geometry.frustum_test_aabb(frustum, aabb_behind_moved)
   testing.expect(t, !behind_moved, "AABB behind moved camera should NOT be visible")
@@ -283,9 +283,9 @@ test_frustum_camera_moved :: proc(t: ^testing.T) {
 @(test)
 test_frustum_sphere_camera :: proc(t: ^testing.T) {
   // Test sphere frustum culling with camera
-  camera_pos := linalg.Vector3f32{0, 0, 0}
-  camera_target := linalg.Vector3f32{0, 0, -1}
-  camera_up := linalg.Vector3f32{0, 1, 0}
+  camera_pos := [3]f32{0, 0, 0}
+  camera_target := [3]f32{0, 0, -1}
+  camera_up := [3]f32{0, 1, 0}
 
   view := linalg.matrix4_look_at(camera_pos, camera_target, camera_up)
   proj := linalg.matrix4_perspective_f32(math.PI / 2.0, 1.0, 0.1, 100.0)
@@ -294,20 +294,20 @@ test_frustum_sphere_camera :: proc(t: ^testing.T) {
   frustum := geometry.make_frustum(view_proj)
 
   // Test 1: Sphere in front of camera
-  sphere_center := linalg.Vector3f32{0, 0, -5}
+  sphere_center := [3]f32{0, 0, -5}
   sphere_radius: f32 = 1.0
   inside_front := geometry.frustum_test_sphere(sphere_center, sphere_radius, &frustum)
   testing.expect(t, inside_front, "Sphere in front of camera should be visible")
   log.infof("Front sphere at %v with radius %v: %v", sphere_center, sphere_radius, inside_front)
 
   // Test 2: Sphere behind camera
-  sphere_behind := linalg.Vector3f32{0, 0, 5}
+  sphere_behind := [3]f32{0, 0, 5}
   inside_behind := geometry.frustum_test_sphere(sphere_behind, sphere_radius, &frustum)
   testing.expect(t, !inside_behind, "Sphere behind camera should NOT be visible")
   log.infof("Behind sphere at %v with radius %v: %v", sphere_behind, sphere_radius, inside_behind)
 
   // Test 3: Large sphere that intersects frustum
-  large_sphere_center := linalg.Vector3f32{10, 0, -5}
+  large_sphere_center := [3]f32{10, 0, -5}
   large_sphere_radius: f32 = 8.0  // Large enough to intersect frustum
   inside_large := geometry.frustum_test_sphere(large_sphere_center, large_sphere_radius, &frustum)
   testing.expect(t, inside_large, "Large sphere intersecting frustum should be visible")

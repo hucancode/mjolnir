@@ -9,7 +9,7 @@ import "core:slice"
 import "core:testing"
 import "core:time"
 
-matrix4_almost_equal :: proc(t: ^testing.T, actual, expected: linalg.Matrix4f32) {
+matrix4_almost_equal :: proc(t: ^testing.T, actual, expected: matrix[4,4]f32) {
   for i in 0..<4 {
     for j in 0..<4 {
       delta := math.abs(actual[i,j] - expected[i,j])

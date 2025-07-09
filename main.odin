@@ -187,7 +187,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   log.infof("creating %d lights", LIGHT_COUNT)
   // Create lights and light cubes
   for i in 0 ..< LIGHT_COUNT {
-    color := linalg.Vector4f32 {
+    color := [4]f32 {
       math.sin(f32(i)),
       math.cos(f32(i)),
       math.sin(f32(i)),
@@ -378,7 +378,7 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
     rx := math.sin(t)
     ry := (math.sin(t) + 1.0) * 0.5 * 1.5 + 1.0
     rz := math.cos(t)
-    v := linalg.vector_normalize(linalg.Vector3f32{rx, ry, rz})
+    v := linalg.vector_normalize([3]f32{rx, ry, rz})
     radius: f32 = 6
     v = v * radius + linalg.VECTOR3F32_Y_AXIS * -1.0
     translate(&light_ptr.transform, v.x, v.y, v.z)

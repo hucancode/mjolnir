@@ -124,9 +124,9 @@ instance_update :: proc(instance: ^Instance, delta_time: f32) {
 }
 
 Channel :: struct {
-  positions: []Keyframe(linalg.Vector3f32),
+  positions: []Keyframe([3]f32),
   rotations: []Keyframe(linalg.Quaternionf32),
-  scales:    []Keyframe(linalg.Vector3f32),
+  scales:    []Keyframe([3]f32),
 }
 
 channel_deinit :: proc(channel: ^Channel) {
@@ -142,15 +142,15 @@ channel_sample :: proc(
   channel: Channel,
   t: f32,
 ) -> (
-  position: linalg.Vector3f32,
+  position: [3]f32,
   rotation: linalg.Quaternionf32,
-  scale: linalg.Vector3f32,
+  scale: [3]f32,
 ) {
   position = keyframe_sample(channel.positions, t)
   rotation =
     keyframe_sample_or(channel.rotations, t, linalg.QUATERNIONF32_IDENTITY)
   scale =
-    keyframe_sample_or(channel.scales, t, linalg.Vector3f32{1, 1, 1})
+    keyframe_sample_or(channel.scales, t, [3]f32{1, 1, 1})
   return
 }
 

@@ -77,8 +77,8 @@ F32_MIN :: -3.40282347E+38
 F32_MAX :: 3.40282347E+38
 
 Aabb :: struct {
-  min: linalg.Vector3f32,
-  max: linalg.Vector3f32,
+  min: [3]f32,
+  max: [3]f32,
 }
 
 AABB_UNDEFINED := Aabb {
@@ -348,7 +348,7 @@ make_cone :: proc(
     x := radius * math.cos(theta)
     z := radius * math.sin(theta)
     // Side normal calculation
-    side_normal := linalg.normalize(linalg.Vector3f32{x, radius / height, z})
+    side_normal := linalg.normalize([3]f32{x, radius / height, z})
     ret.vertices[2 + i] = Vertex {
       position = {x, -height / 2, z},
       normal   = side_normal,
@@ -458,7 +458,7 @@ make_capsule :: proc(
       z := r * math.sin(theta)
       ret.vertices[v] = Vertex {
         position = {radius * x, cyl_height / 2 + radius * y, radius * z},
-        normal   = linalg.normalize(linalg.Vector3f32{x, y, z}),
+        normal   = linalg.normalize([3]f32{x, y, z}),
         color    = color,
         uv       = {
           f32(seg) / f32(segments),
@@ -480,7 +480,7 @@ make_capsule :: proc(
       z := r * math.sin(theta)
       ret.vertices[v] = Vertex {
         position = {radius * x, -cyl_height / 2 + radius * y, radius * z},
-        normal   = linalg.normalize(linalg.Vector3f32{x, y, z}),
+        normal   = linalg.normalize([3]f32{x, y, z}),
         color    = color,
         uv       = {
           f32(seg) / f32(segments),
@@ -499,7 +499,7 @@ make_capsule :: proc(
     // Top ring
     ret.vertices[v] = Vertex {
       position = {radius * x, cyl_height / 2, radius * z},
-      normal   = linalg.normalize(linalg.Vector3f32{x, 0, z}),
+      normal   = linalg.normalize([3]f32{x, 0, z}),
       color    = color,
       uv       = {f32(seg) / f32(segments), 0.5},
     }
@@ -507,7 +507,7 @@ make_capsule :: proc(
     // Bottom ring
     ret.vertices[v] = Vertex {
       position = {radius * x, -cyl_height / 2, radius * z},
-      normal   = linalg.normalize(linalg.Vector3f32{x, 0, z}),
+      normal   = linalg.normalize([3]f32{x, 0, z}),
       color    = color,
       uv       = {f32(seg) / f32(segments), 0.5},
     }

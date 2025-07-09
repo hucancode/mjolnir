@@ -45,36 +45,36 @@ UpdateProc :: #type proc(engine: ^Engine, delta_time: f32)
 Render2DProc :: #type proc(engine: ^Engine, ctx: ^mu.Context)
 KeyInputProc :: #type proc(engine: ^Engine, key, action, mods: int)
 MousePressProc :: #type proc(engine: ^Engine, key, action, mods: int)
-MouseDragProc :: #type proc(engine: ^Engine, delta, offset: linalg.Vector2f64)
-MouseScrollProc :: #type proc(engine: ^Engine, offset: linalg.Vector2f64)
-MouseMoveProc :: #type proc(engine: ^Engine, pos, delta: linalg.Vector2f64)
+MouseDragProc :: #type proc(engine: ^Engine, delta, offset: [2]f64)
+MouseScrollProc :: #type proc(engine: ^Engine, offset: [2]f64)
+MouseMoveProc :: #type proc(engine: ^Engine, pos, delta: [2]f64)
 
 PointLightData :: struct {
-  views:    [6]linalg.Matrix4f32,
-  proj:     linalg.Matrix4f32,
-  world:    linalg.Matrix4f32,
-  color:    linalg.Vector4f32,
-  position: linalg.Vector4f32,
+  views:    [6]matrix[4,4]f32,
+  proj:     matrix[4,4]f32,
+  world:    matrix[4,4]f32,
+  color:    [4]f32,
+  position: [4]f32,
   radius:   f32,
 }
 
 SpotLightData :: struct {
-  view:      linalg.Matrix4f32,
-  proj:      linalg.Matrix4f32,
-  world:     linalg.Matrix4f32,
-  color:     linalg.Vector4f32,
-  position:  linalg.Vector4f32,
-  direction: linalg.Vector4f32,
+  view:      matrix[4,4]f32,
+  proj:      matrix[4,4]f32,
+  world:     matrix[4,4]f32,
+  color:     [4]f32,
+  position:  [4]f32,
+  direction: [4]f32,
   radius:    f32,
   angle:     f32,
 }
 
 DirectionalLightData :: struct {
-  view:      linalg.Matrix4f32,
-  proj:      linalg.Matrix4f32,
-  world:     linalg.Matrix4f32,
-  color:     linalg.Vector4f32,
-  direction: linalg.Vector4f32,
+  view:      matrix[4,4]f32,
+  proj:      matrix[4,4]f32,
+  world:     matrix[4,4]f32,
+  color:     [4]f32,
+  direction: [4]f32,
 }
 
 LightData :: union {
@@ -84,13 +84,13 @@ LightData :: union {
 }
 
 CameraUniform :: struct {
-  view:          linalg.Matrix4f32,
-  projection:    linalg.Matrix4f32,
+  view:          matrix[4,4]f32,
+  projection:    matrix[4,4]f32,
   viewport_size: [2]f32,
   camera_near:   f32,
   camera_far:    f32,
   padding:       [2]f32, // Align to 16-byte boundary
-  camera_position: linalg.Vector3f32,
+  camera_position: [3]f32,
   padding2:      f32, // Align to 16-byte boundary
 }
 
@@ -126,8 +126,8 @@ RenderTarget :: struct {
 }
 
 InputState :: struct {
-  mouse_pos:         linalg.Vector2f64,
-  mouse_drag_origin: linalg.Vector2f32,
+  mouse_pos:         [2]f64,
+  mouse_drag_origin: [2]f32,
   mouse_buttons:     [8]bool,
   mouse_holding:     [8]bool,
   key_holding:       [512]bool,
@@ -499,7 +499,7 @@ update_force_fields :: proc(self: ^Engine) {
   for &entry in self.scene.nodes.entries do if entry.active {
     ff, is_ff := &entry.item.attachment.(ForceFieldAttachment)
     if !is_ff do continue
-    ff.position = entry.item.transform.world_matrix * linalg.Vector4f32{0, 0, 0, 1}
+    ff.position = entry.item.transform.world_matrix * [4]f32{0, 0, 0, 1}
     forcefields[params.forcefield_count] = ff
     params.forcefield_count += 1
   }
@@ -872,7 +872,7 @@ render :: proc(self: ^Engine) -> vk.Result {
       @(static) face_dirs := [6][3]f32{{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}}
       @(static) face_ups := [6][3]f32{{0, -1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}, {0, -1, 0}, {0, -1, 0}}
       data: PointLightData
-      position := node.transform.world_matrix * linalg.Vector4f32{0, 0, 0, 1}
+      position := node.transform.world_matrix * [4]f32{0, 0, 0, 1}
       for i in 0 ..< 6 {
         data.views[i] = linalg.matrix4_look_at(position.xyz, position.xyz + face_dirs[i], face_ups[i])
       }
@@ -888,16 +888,16 @@ render :: proc(self: ^Engine) -> vk.Result {
     case DirectionalLightAttachment:
       data: DirectionalLightData
       ortho_size: f32 = 20.0
-      data.direction = node.transform.world_matrix * linalg.Vector4f32{0, 0, -1, 0}
+      data.direction = node.transform.world_matrix * [4]f32{0, 0, -1, 0}
       data.proj = linalg.matrix_ortho3d(-ortho_size, ortho_size, -ortho_size, ortho_size, 0.1, 9999.0)
-      data.view = linalg.matrix4_look_at(linalg.Vector3f32{}, data.direction.xyz, linalg.VECTOR3F32_Y_AXIS)
+      data.view = linalg.matrix4_look_at([3]f32{}, data.direction.xyz, linalg.VECTOR3F32_Y_AXIS)
       data.world = node.transform.world_matrix
       data.color = light.color
       append(&lights, data)
     case SpotLightAttachment:
       data: SpotLightData
-      data.position = node.transform.world_matrix * linalg.Vector4f32{0, 0, 0, 1}
-      data.direction = node.transform.world_matrix * linalg.Vector4f32{0, -1, 0, 0}
+      data.position = node.transform.world_matrix * [4]f32{0, 0, 0, 1}
+      data.direction = node.transform.world_matrix * [4]f32{0, -1, 0, 0}
       data.proj = linalg.matrix4_perspective(light.angle, 1.0, 0.01, light.radius)
       data.world = node.transform.world_matrix
       data.view = linalg.matrix4_look_at(data.position.xyz, data.position.xyz + data.direction.xyz, linalg.VECTOR3F32_Y_AXIS)

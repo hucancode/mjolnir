@@ -5,7 +5,7 @@ import "core:log"
 import linalg "core:math/linalg"
 
 CameraOrbitMovement :: struct {
-  target:       linalg.Vector3f32,
+  target:       [3]f32,
   distance:     f32,
   yaw:          f32, // Rotation around Y-axis
   pitch:        f32, // Rotation around X-axis
@@ -48,8 +48,8 @@ Camera :: struct {
     CameraFreeMovement,
     CameraOrbitMovement,
   },
-  up:            linalg.Vector3f32,
-  position:      linalg.Vector3f32,
+  up:            [3]f32,
+  position:      [3]f32,
   rotation:      linalg.Quaternionf32,
   projection:    union {
     PerspectiveProjection,
@@ -120,7 +120,7 @@ make_camera_orbit :: proc(
 
 camera_switch_to_orbit :: proc(
   camera: ^Camera,
-  target: Maybe(linalg.Vector3f32),
+  target: Maybe([3]f32),
   distance: Maybe(f32),
 ) {
   orbit_data := DEFAULT_ORBIT_DATA
@@ -175,7 +175,7 @@ camera_orbit_zoom :: proc(camera: ^Camera, delta_distance: f32) {
 
 set_orbit_target :: proc(
   camera: ^Camera,
-  new_target: linalg.Vector3f32,
+  new_target: [3]f32,
 ) {
   movement, ok := &camera.movement_data.(CameraOrbitMovement)
   if !ok {
@@ -195,7 +195,7 @@ update_orbit_position :: proc(camera: ^Camera) {
   sin_yaw := math.sin_f32(movement.yaw)
   cos_yaw := math.cos(movement.yaw)
 
-  offset_direction := linalg.Vector3f32 {
+  offset_direction := [3]f32 {
     cos_pitch * cos_yaw,
     sin_pitch,
     cos_pitch * sin_yaw,
@@ -206,7 +206,7 @@ update_orbit_position :: proc(camera: ^Camera) {
 
 calculate_projection_matrix :: proc(
   camera: Camera,
-) -> linalg.Matrix4f32 {
+) -> matrix[4,4]f32 {
   switch proj in camera.projection {
   case PerspectiveProjection:
     return linalg.matrix4_perspective(
@@ -229,7 +229,7 @@ calculate_projection_matrix :: proc(
   }
 }
 
-calculate_view_matrix :: proc(camera: Camera) -> linalg.Matrix4f32 {
+calculate_view_matrix :: proc(camera: Camera) -> matrix[4,4]f32 {
   switch movement_data in camera.movement_data {
   case CameraOrbitMovement:
     return linalg.matrix4_look_at(
@@ -247,21 +247,21 @@ calculate_view_matrix :: proc(camera: Camera) -> linalg.Matrix4f32 {
   }
 }
 
-camera_forward :: proc(camera: Camera) -> linalg.Vector3f32 {
+camera_forward :: proc(camera: Camera) -> [3]f32 {
   return linalg.quaternion_mul_vector3(
     camera.rotation,
     linalg.VECTOR3F32_Z_AXIS,
   )
 }
 
-camera_right :: proc(camera: Camera) -> linalg.Vector3f32 {
+camera_right :: proc(camera: Camera) -> [3]f32 {
   return linalg.quaternion_mul_vector3(
     camera.rotation,
     linalg.VECTOR3F32_X_AXIS,
   )
 }
 
-camera_up :: proc(camera: Camera) -> linalg.Vector3f32 {
+camera_up :: proc(camera: Camera) -> [3]f32 {
   return linalg.quaternion_mul_vector3(
     camera.rotation,
     linalg.VECTOR3F32_Y_AXIS,

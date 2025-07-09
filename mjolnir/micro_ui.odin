@@ -22,7 +22,7 @@ RendererUI :: struct {
   pipeline_layout:           vk.PipelineLayout,
   pipeline:                  vk.Pipeline,
   atlas:                     ^ImageBuffer,
-  proj_buffer:               DataBuffer(linalg.Matrix4f32),
+  proj_buffer:               DataBuffer(matrix[4,4]f32),
   vertex_buffer:             DataBuffer(Vertex2D),
   index_buffer:              DataBuffer(u32),
   vertex_count:              u32,
@@ -263,14 +263,14 @@ renderer_ui_init :: proc(
   ortho := linalg.matrix_ortho3d(0, f32(width), f32(height), 0, -1, 1) * linalg.matrix4_scale(dpi_scale)
   log.infof("init UI proj buffer...")
   self.proj_buffer = create_host_visible_buffer(
-    linalg.Matrix4f32,
+    matrix[4,4]f32,
     1,
     {.UNIFORM_BUFFER},
     raw_data(&ortho),
   ) or_return
   buffer_info := vk.DescriptorBufferInfo {
     buffer = self.proj_buffer.buffer,
-    range  = size_of(linalg.Matrix4f32),
+    range  = size_of(matrix[4,4]f32),
   }
   writes := [?]vk.WriteDescriptorSet {
     {

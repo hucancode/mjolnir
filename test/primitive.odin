@@ -12,8 +12,8 @@ test_cube_generation :: proc(t: ^testing.T) {
     testing.expect_value(t, len(cube.vertices), 24) // 6 faces * 4 vertices
     testing.expect_value(t, len(cube.indices), 36)  // 6 faces * 2 triangles * 3 indices
     // Check AABB
-    testing.expect_value(t, cube.aabb.min, linalg.Vector3f32{-1, -1, -1})
-    testing.expect_value(t, cube.aabb.max, linalg.Vector3f32{1, 1, 1})
+    testing.expect_value(t, cube.aabb.min, [3]f32{-1, -1, -1})
+    testing.expect_value(t, cube.aabb.max, [3]f32{1, 1, 1})
 }
 
 @(test)
@@ -29,8 +29,8 @@ test_sphere_generation :: proc(t: ^testing.T) {
         distance := linalg.length(vertex.position)
         testing.expect(t, abs(distance - 1.0) < math.F32_EPSILON)
     }
-    testing.expect_value(t, sphere.aabb.min, linalg.Vector3f32{-1, -1, -1})
-    testing.expect_value(t, sphere.aabb.max, linalg.Vector3f32{1, 1, 1})
+    testing.expect_value(t, sphere.aabb.min, [3]f32{-1, -1, -1})
+    testing.expect_value(t, sphere.aabb.max, [3]f32{1, 1, 1})
 }
 
 @(test)

@@ -8,7 +8,7 @@ import vk "vendor:vulkan"
 
 Bone :: struct {
   children:            []u32,
-  inverse_bind_matrix: linalg.Matrix4f32,
+  inverse_bind_matrix: matrix[4,4]f32,
   name:                string,
 }
 
@@ -116,7 +116,7 @@ sample_clip :: proc(
   self: ^Mesh,
   clip_idx: u32,
   t: f32,
-  out_bone_matrices: []linalg.Matrix4f32,
+  out_bone_matrices: []matrix[4,4]f32,
 ) {
   skin, has_skin := &self.skinning.?
   if !has_skin {
@@ -127,7 +127,7 @@ sample_clip :: proc(
     return
   }
   TraverseEntry :: struct {
-    transform: linalg.Matrix4f32,
+    transform: matrix[4,4]f32,
     bone:      u32,
   }
   stack := make([dynamic]TraverseEntry, 0, len(skin.bones))

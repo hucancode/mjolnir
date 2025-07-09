@@ -11,15 +11,15 @@ MAX_SCENE_NODES :: 4096
 
 // Structure passed to GPU for culling
 NodeCullingData :: struct {
-  aabb_min:        linalg.Vector3f32,
+  aabb_min:        [3]f32,
   culling_enabled: b32,
-  aabb_max:        linalg.Vector3f32,
+  aabb_max:        [3]f32,
   padding:         f32,
 }
 
 // GPU culling parameters
 SceneCullingParams :: struct {
-  frustum_planes: [6]linalg.Vector4f32,
+  frustum_planes: [6][4]f32,
   node_count:     u32,
   padding:        [3]u32,
 }

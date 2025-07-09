@@ -3,7 +3,7 @@ package geometry
 import "core:log"
 import linalg "core:math/linalg"
 
-// Plane is represented as a linalg.Vector4f32 {A, B, C, D}
+// Plane is represented as a [4]f32 {A, B, C, D}
 // for the plane equation Ax + By + Cz + D = 0.
 // The normal {A, B, C} is assumed to point "inwards" for a convex volume.
 Plane :: [4]f32
@@ -12,7 +12,7 @@ Frustum :: struct {
   planes: [6]Plane,
 }
 
-make_frustum :: proc(view_projection_matrix: linalg.Matrix4f32) -> Frustum {
+make_frustum :: proc(view_projection_matrix: matrix[4,4]f32) -> Frustum {
   m := linalg.transpose(view_projection_matrix)
   // Each plane is a Vec4: a*x + b*y + c*z + d = 0
   planes := [6]Plane {
@@ -41,7 +41,7 @@ make_frustum :: proc(view_projection_matrix: linalg.Matrix4f32) -> Frustum {
 
 signed_distance_to_plane :: proc(
   plane: Plane,
-  point: linalg.Vector3f32,
+  point: [3]f32,
 ) -> f32 {
   return linalg.dot(plane.xyz, point) + plane.w
 }
@@ -71,7 +71,7 @@ frustum_test_aabb :: proc(frustum: Frustum, aabb: Aabb) -> bool {
 }
 
 frustum_test_sphere :: proc(
-  sphere_center: linalg.Vector3f32,
+  sphere_center: [3]f32,
   sphere_radius: f32,
   frustum: ^Frustum,
 ) -> bool {
@@ -87,13 +87,13 @@ frustum_test_sphere :: proc(
 // transform_aabb transforms an AABB by a given matrix.
 aabb_transform :: proc(
   aabb: Aabb,
-  transform_matrix: linalg.Matrix4f32,
+  transform_matrix: matrix[4,4]f32,
 ) -> (
   ret: Aabb,
 ) {
   min_p := aabb.min
   max_p := aabb.max
-  corners: [8]linalg.Vector4f32
+  corners: [8][4]f32
   corners[0] = {min_p.x, min_p.y, min_p.z, 1.0}
   corners[1] = {max_p.x, min_p.y, min_p.z, 1.0}
   corners[2] = {min_p.x, max_p.y, min_p.z, 1.0}

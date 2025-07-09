@@ -22,7 +22,7 @@ g_image_cube_buffers: resource.Pool(CubeImageBuffer)
 
 g_bindless_bone_buffer_set_layout: vk.DescriptorSetLayout
 g_bindless_bone_buffer_descriptor_set: vk.DescriptorSet
-g_bindless_bone_buffer: DataBuffer(linalg.Matrix4f32)
+g_bindless_bone_buffer: DataBuffer(matrix[4,4]f32)
 g_bone_matrix_slab: resource.SlabAllocator
 
 // Dummy skinning buffer for static meshes
@@ -231,7 +231,7 @@ init_bone_matrix_allocator :: proc() -> vk.Result {
   )
   // Create bone buffer with space for all frames in flight
   g_bindless_bone_buffer, _ = create_host_visible_buffer(
-    linalg.Matrix4f32,
+    matrix[4,4]f32,
     int(g_bone_matrix_slab.capacity) * MAX_FRAMES_IN_FLIGHT,
     {.STORAGE_BUFFER},
     nil,

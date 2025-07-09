@@ -14,10 +14,10 @@ MAX_EMITTERS :: 64
 MAX_FORCE_FIELDS :: 32
 
 Emitter :: struct {
-  transform:         linalg.Matrix4f32,
-  initial_velocity:  linalg.Vector4f32,
-  color_start:       linalg.Vector4f32,
-  color_end:         linalg.Vector4f32,
+  transform:         matrix[4,4]f32,
+  initial_velocity:  [4]f32,
+  color_start:       [4]f32,
+  color_end:         [4]f32,
   emission_rate:     f32,
   particle_lifetime: f32,
   position_spread:   f32,
@@ -29,8 +29,8 @@ Emitter :: struct {
   weight_spread:     f32,
   texture_index:     u32,
   // AABB bounds for culling
-  aabb_min:          linalg.Vector4f32, // xyz = min bounds, w = unused
-  aabb_max:          linalg.Vector4f32, // xyz = max bounds, w = unused
+  aabb_min:          [4]f32, // xyz = min bounds, w = unused
+  aabb_max:          [4]f32, // xyz = max bounds, w = unused
   culling_enabled:   b32,
   padding:           [7]f32,
 }
@@ -40,15 +40,15 @@ ForceField :: struct {
   strength:         f32, // positive = attract, negative = repel
   area_of_effect:   f32, // radius
   fade:             f32, // 0..1, linear fade factor
-  position:         linalg.Vector4f32, // world position
+  position:         [4]f32, // world position
 }
 
 Particle :: struct {
-  position:      linalg.Vector4f32,
-  velocity:      linalg.Vector4f32,
-  color_start:   linalg.Vector4f32,
-  color_end:     linalg.Vector4f32,
-  color:         linalg.Vector4f32,
+  position:      [4]f32,
+  velocity:      [4]f32,
+  color_start:   [4]f32,
+  color_end:     [4]f32,
+  color:         [4]f32,
   size:          f32,
   size_end:      f32,
   life:          f32,
@@ -64,13 +64,13 @@ ParticleSystemParams :: struct {
   forcefield_count: u32,
   delta_time:       f32,
   // Camera frustum planes for culling (6 planes, each has 4 components)
-  frustum_planes:   [6]linalg.Vector4f32,
+  frustum_planes:   [6][4]f32,
 }
 
 // Push constants for particle rendering
 ParticlePushConstants :: struct {
-  view:       linalg.Matrix4f32,
-  projection: linalg.Matrix4f32,
+  view:       matrix[4,4]f32,
+  projection: matrix[4,4]f32,
 }
 
 // Draw command for indirect rendering
@@ -1249,9 +1249,9 @@ get_particle_render_stats :: proc(
 
 // Helper function to create an emitter with AABB culling bounds
 create_emitter_with_aabb :: proc(
-  transform: linalg.Matrix4f32,
-  aabb_min: linalg.Vector3f32,
-  aabb_max: linalg.Vector3f32,
+  transform: matrix[4,4]f32,
+  aabb_min: [3]f32,
+  aabb_max: [3]f32,
   enable_culling: bool = true,
 ) -> Emitter {
   return Emitter {
@@ -1279,8 +1279,8 @@ create_emitter_with_aabb :: proc(
 // Helper function to update emitter AABB bounds
 update_emitter_aabb :: proc(
   emitter: ^Emitter,
-  aabb_min: linalg.Vector3f32,
-  aabb_max: linalg.Vector3f32,
+  aabb_min: [3]f32,
+  aabb_max: [3]f32,
 ) {
   emitter.aabb_min = {aabb_min.x, aabb_min.y, aabb_min.z, 0.0}
   emitter.aabb_max = {aabb_max.x, aabb_max.y, aabb_max.z, 0.0}

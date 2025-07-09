@@ -44,7 +44,7 @@ RendererLighting :: struct {
 // Push constant struct for lighting pass (matches shader/lighting/shader.frag)
 // 128 byte push constant budget
 LightPushConstant :: struct {
-  light_view_proj: linalg.Matrix4f32, // 64 bytes - for shadow mapping
+  light_view_proj: matrix[4,4]f32, // 64 bytes - for shadow mapping
   light_color:     [3]f32, // 12 bytes
   light_angle:     f32, // 4 bytes
   light_position:  [3]f32, // 12 bytes
@@ -380,7 +380,7 @@ renderer_lighting_begin :: proc(
 renderer_lighting_render :: proc(
   self: ^RendererLighting,
   input: [dynamic]LightData,
-  camera_position: linalg.Vector3f32,
+  camera_position: [3]f32,
   command_buffer: vk.CommandBuffer,
 ) -> int {
   rendered_count := 0
