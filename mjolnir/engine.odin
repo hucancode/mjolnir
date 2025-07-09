@@ -659,7 +659,6 @@ recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
 generate_render_input :: proc(
   self: ^Engine,
   frustum: geometry.Frustum,
-  log_culling: bool = false,
 ) -> (
   ret: RenderInput,
 ) {
@@ -716,15 +715,6 @@ generate_render_input :: proc(
       append(&batch_data.nodes, node)
     }
   }
-
-  when !USE_GPU_CULLING {
-    if log_culling && total_count > 0 {
-      log.infof("CPU Culling: %d/%d objects visible (%.1f%%)",
-                visible_count, total_count,
-                f32(visible_count) / f32(total_count) * 100.0)
-    }
-  }
-
   return
 }
 
@@ -757,7 +747,6 @@ render :: proc(self: ^Engine) -> vk.Result {
     // Update and perform GPU scene culling
     update_scene_culling_data(&self.scene_culling, &self.scene)
     perform_scene_culling_with_frustum(&self.scene_culling, command_buffer, frustum)
-
     // Memory barrier to ensure culling is complete before other operations
     visibility_buffer_barrier := vk.BufferMemoryBarrier {
       sType = .BUFFER_MEMORY_BARRIER,
@@ -769,7 +758,6 @@ render :: proc(self: ^Engine) -> vk.Result {
       offset = 0,
       size = vk.DeviceSize(self.scene_culling.visibility_buffer[g_frame_index].bytes_count),
     }
-
     vk.CmdPipelineBarrier(
       command_buffer,
       {.COMPUTE_SHADER},
@@ -782,10 +770,8 @@ render :: proc(self: ^Engine) -> vk.Result {
       0,
       nil,
     )
-
     // End command buffer and submit immediately to ensure GPU work completes
     vk.EndCommandBuffer(command_buffer) or_return
-
     submit_info := vk.SubmitInfo {
       sType = .SUBMIT_INFO,
       commandBufferCount = 1,
@@ -793,61 +779,11 @@ render :: proc(self: ^Engine) -> vk.Result {
     }
     vk.QueueSubmit(g_graphics_queue, 1, &submit_info, 0) or_return
     vk.QueueWaitIdle(g_graphics_queue) or_return
-
     // Begin command buffer again for the rest of the rendering
     vk.BeginCommandBuffer(
       command_buffer,
       &{sType = .COMMAND_BUFFER_BEGIN_INFO, flags = {.ONE_TIME_SUBMIT}},
     ) or_return
-
-    // Log culling results
-    disabled_count, visible_count, total_count := count_visible_objects(&self.scene_culling)
-    log.infof("GPU Culling: %d/%d objects visible (%.1f%%) %d disabled",
-              visible_count, total_count,
-              total_count > 0 ? (f32(visible_count) / f32(total_count) * 100.0) : 0.0,
-              disabled_count,
-    )
-
-    // Debug: Compare with CPU culling for a few frames
-    @(static) debug_frame_count: u32 = 0
-    debug_frame_count += 1
-    if debug_frame_count <= 5 {
-      params_ptr := data_buffer_get(&self.scene_culling.params_buffer[g_frame_index])
-      for i in 0..<6 {
-        plane := params_ptr.frustum_planes[i]
-        log.debugf("  GPU Plane %d: %v", i, plane)
-      }
-
-      // Compare with CPU frustum planes
-      log.debugf("CPU Culling debug - Frustum planes:")
-      for i in 0..<6 {
-        plane := frustum.planes[i]
-        log.debugf("  CPU Plane %d: %v", i, plane)
-      }
-
-      // Compare with CPU culling for debugging
-      cpu_visible: u32 = 0
-      cpu_total: u32 = 0
-      for &entry, entry_index in self.scene.nodes.entries do if entry.active {
-        node := &entry.item
-        #partial switch data in node.attachment {
-        case MeshAttachment:
-          mesh := resource.get(g_meshes, data.handle)
-          if mesh == nil do continue
-          material := resource.get(g_materials, data.material)
-          if material == nil do continue
-
-          cpu_total += 1
-          world_aabb := geometry.aabb_transform(mesh.aabb, node.transform.world_matrix)
-          if geometry.frustum_test_aabb(frustum, world_aabb) {
-            cpu_visible += 1
-          }
-        }
-      }
-      log.debugf("CPU Culling comparison: %d/%d objects visible (%.1f%%)",
-                 cpu_visible, cpu_total,
-                 cpu_total > 0 ? (f32(cpu_visible) / f32(cpu_total) * 100.0) : 0.0)
-    }
   }
 
   compute_particles(&self.particle, command_buffer, self.scene.camera)
@@ -1065,7 +1001,7 @@ render :: proc(self: ^Engine) -> vk.Result {
   depth_texture := resource.get(g_image_2d_buffers, self.frames[g_frame_index].depth_buffer)
   depth_target.depth = depth_texture.view
   depth_target.extent = self.swapchain.extent
-  depth_input := generate_render_input(self, frustum, true)
+  depth_input := generate_render_input(self, frustum)
   renderer_depth_prepass_begin(&depth_target, command_buffer)
   renderer_depth_prepass_render(
     &self.depth_prepass,
