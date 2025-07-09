@@ -53,7 +53,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     log.info("spawning cubes in a grid")
     space: f32 = 2.0
     size: f32 = 0.3
-    nx, ny, nz := 15, 2, 15
+    nx, ny, nz := 5, 2, 5
     for x in 1 ..< nx {
       for y in 1 ..< ny {
         for z in 1 ..< nz {
@@ -71,7 +71,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
           )
           translate(
             &node.transform,
-            (f32(x) - f32(nx) * 0.5) * space + 10.0,
+            (f32(x) - f32(nx) * 0.5) * space,
             (f32(y) - f32(ny) * 0.5) * space + 0.5,
             (f32(z) - f32(nz) * 0.5) * space,
           )
