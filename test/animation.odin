@@ -66,7 +66,7 @@ test_sample_out_of_range :: proc(t: ^testing.T) {
 
 @(test)
 test_position_sampling :: proc(t: ^testing.T) {
-  frames := []animation.Keyframe(linalg.Vector3f32) {
+  frames := []animation.Keyframe([3]f32) {
     {time = 0.0, value = {0, 0, 0}},
     {time = 1.0, value = {1, 2, 3}},
     {time = 2.0, value = {2, 4, 6}},
@@ -76,43 +76,43 @@ test_position_sampling :: proc(t: ^testing.T) {
   testing.expect_value(
     t,
     animation.keyframe_sample(frames, 0.0),
-    linalg.Vector3f32{0, 0, 0},
+    [3]f32{0, 0, 0},
   )
   testing.expect_value(
     t,
     animation.keyframe_sample(frames, 1.0),
-    linalg.Vector3f32{1, 2, 3},
+    [3]f32{1, 2, 3},
   )
   testing.expect_value(
     t,
     animation.keyframe_sample(frames, 2.0),
-    linalg.Vector3f32{2, 4, 6},
+    [3]f32{2, 4, 6},
   )
   // interpolation
   testing.expect_value(
     t,
     animation.keyframe_sample(frames, 0.5),
-    linalg.Vector3f32{0.5, 1, 1.5},
+    [3]f32{0.5, 1, 1.5},
   )
   testing.expect_value(
     t,
     animation.keyframe_sample(frames, 1.5),
-    linalg.Vector3f32{1.5, 3, 4.5},
+    [3]f32{1.5, 3, 4.5},
   )
   // out of range
   testing.expect_value(
     t,
     animation.keyframe_sample(frames, -1.0),
-    linalg.Vector3f32{0, 0, 0},
+    [3]f32{0, 0, 0},
   )
   testing.expect_value(
     t,
     animation.keyframe_sample(frames, 3.0),
-    linalg.Vector3f32{2, 4, 6},
+    [3]f32{2, 4, 6},
   )
 }
 
-almost_equal_quaternion :: proc(a, b: linalg.Quaternionf32) -> bool {
+almost_equal_quaternion :: proc(a, b: quaternion128) -> bool {
   return(
     a.x - b.x <= linalg.F32_EPSILON &&
     a.y - b.y <= linalg.F32_EPSILON &&
@@ -128,7 +128,7 @@ test_quaternion_sampling :: proc(t: ^testing.T) {
   q3 := linalg.quaternion_angle_axis_f32(math.PI, {0, 1, 0}) // 180 around Y
   q4 := linalg.quaternion_angle_axis_f32(math.PI, {1, 0, 0}) // 180 around X
 
-  frames := []animation.Keyframe(linalg.Quaternionf32) {
+  frames := []animation.Keyframe(quaternion128) {
     {time = 0.0, value = q1},
     {time = 1.0, value = q2},
     {time = 2.0, value = q3},
@@ -163,14 +163,14 @@ animation_sample_benchmark :: proc(t: ^testing.T) {
   FRAME_COUNT :: 1e6
   DURATION :: 10.0
   Transform :: struct {
-    position: linalg.Vector4f32,
-    rotation: linalg.Quaternionf32,
-    scale:    linalg.Vector4f32,
+    position: [4]f32,
+    rotation: quaternion128,
+    scale:    [4]f32,
   }
   Animation :: struct {
-    position: []animation.Keyframe(linalg.Vector4f32),
-    rotation: []animation.Keyframe(linalg.Quaternionf32),
-    scale:    []animation.Keyframe(linalg.Vector4f32),
+    position: []animation.Keyframe([4]f32),
+    rotation: []animation.Keyframe(quaternion128),
+    scale:    []animation.Keyframe([4]f32),
   }
   options := &time.Benchmark_Options {
     rounds = n,
@@ -183,23 +183,23 @@ animation_sample_benchmark :: proc(t: ^testing.T) {
       time_step := DURATION / f32(FRAME_COUNT)
       value_step := 5000.0 / f32(FRAME_COUNT)
       anim.position = make(
-        []animation.Keyframe(linalg.Vector4f32),
+        []animation.Keyframe([4]f32),
         FRAME_COUNT,
         allocator,
       )
       anim.rotation = make(
-        []animation.Keyframe(linalg.Quaternionf32),
+        []animation.Keyframe(quaternion128),
         FRAME_COUNT,
         allocator,
       )
       anim.scale = make(
-        []animation.Keyframe(linalg.Vector4f32),
+        []animation.Keyframe([4]f32),
         FRAME_COUNT,
         allocator,
       )
       for i in 0 ..< FRAME_COUNT {
         anim.position[i].value =
-          linalg.Vector4f32{f32(i), f32(i), f32(i), f32(i)} * value_step
+          [4]f32{f32(i), f32(i), f32(i), f32(i)} * value_step
         anim.rotation[i].value = quaternion(
           x = f32(i) * value_step,
           y = f32(i) * value_step,
@@ -207,7 +207,7 @@ animation_sample_benchmark :: proc(t: ^testing.T) {
           w = f32(i) * value_step,
         )
         anim.scale[i].value =
-          linalg.Vector4f32{f32(i), f32(i), f32(i), f32(i)} * value_step
+          [4]f32{f32(i), f32(i), f32(i), f32(i)} * value_step
         anim.position[i].time = f32(i) * time_step
         anim.rotation[i].time = f32(i) * time_step
         anim.scale[i].time = f32(i) * time_step

@@ -22,7 +22,7 @@ test_node_translate :: proc(t: ^testing.T) {
   geometry.translate(&child.transform, 4, 5, 6)
   scene_traverse(&scene)
   actual := child.transform.world_matrix
-  expected := linalg.Matrix4f32 {
+  expected := matrix[4,4]f32 {
     1.0,
     0.0,
     0.0,
@@ -58,7 +58,7 @@ test_node_rotate :: proc(t: ^testing.T) {
   geometry.translate(&child.transform, 1, 0, 0)
   scene_traverse(&scene)
   actual := child.transform.world_matrix
-  expected := linalg.Matrix4f32 {
+  expected := matrix[4,4]f32 {
     0.0,
     0.0,
     1.0,
@@ -91,7 +91,7 @@ test_node_scale :: proc(t: ^testing.T) {
   geometry.scale_xyz(&child.transform, 2, 3, 4)
   scene_traverse(&scene)
   actual := child.transform.world_matrix
-  expected := linalg.Matrix4f32 {
+  expected := matrix[4,4]f32 {
     2.0,
     0.0,
     0.0,
@@ -126,7 +126,7 @@ test_node_combined_transform :: proc(t: ^testing.T) {
   actual := node.transform.world_matrix
   // Expected matrix after applying scale, rotation, and translation
   // Scale by 2, then rotate 90 degree around Y, then translate by (3,4,5)
-  expected := linalg.Matrix4f32 {
+  expected := matrix[4,4]f32 {
     0.0,
     0.0,
     2.0,
@@ -175,7 +175,7 @@ test_node_chain_transform :: proc(t: ^testing.T) {
   // 2. Translate by (1,0,0)
   // 3. Rotate 90° around Y axis (makes Z become X, and X become -Z)
   // 4. Scale by 2 in all dimensions
-  expected := linalg.Matrix4f32 {
+  expected := matrix[4,4]f32 {
     0.0,
     0.0,
     2.0,

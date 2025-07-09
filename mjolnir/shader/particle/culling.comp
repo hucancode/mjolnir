@@ -1,0 +1,105 @@
+#version 450
+
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+struct Emitter {
+  mat4 transform;
+  vec4 initial_velocity;
+  vec4 color_start;
+  vec4 color_end;
+  float emission_rate;
+  float particle_lifetime;
+  float position_spread;
+  float velocity_spread;
+  float time_accumulator;
+  float size_start;
+  float size_end;
+  float weight;
+  float weight_spread;
+  uint texture_index;
+  uint culling_enabled;
+  uint padding;
+  vec4 aabb_min;
+  vec4 aabb_max;
+};
+
+struct ParticleSystemParams {
+  uint particle_count;
+  uint emitter_count;
+  uint forcefield_count;
+  float delta_time;
+  vec4 frustum_planes[6];
+};
+
+layout(set = 0, binding = 0) uniform ParticleSystemParamsBuffer {
+  ParticleSystemParams params;
+};
+
+layout(set = 0, binding = 1) readonly buffer EmitterBuffer {
+  Emitter emitters[];
+};
+
+layout(set = 0, binding = 2) writeonly buffer VisibilityBuffer {
+  uint visibility[];
+};
+
+bool test_point_in_frustum(vec3 p) {
+  for (int i = 0; i < 6; i++) {
+    float distance = dot(params.frustum_planes[i].xyz, p) + params.frustum_planes[i].w;
+    if (distance < 0.0) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool test_aabb_frustum(vec3 aabb_min, vec3 aabb_max) {
+  // find at least 1 point inside all plane, we can safely says this AABB is inside the frustum
+  // min,min,min
+  if (test_point_in_frustum(vec3(aabb_min.x, aabb_min.y, aabb_min.z))) {
+    return true;
+  }
+  // max,min,min
+  if (test_point_in_frustum(vec3(aabb_max.x, aabb_min.y, aabb_min.z))) {
+    return true;
+  }
+  //min,max,min
+  if (test_point_in_frustum(vec3(aabb_min.x, aabb_max.y, aabb_min.z))) {
+    return true;
+  }
+  //min,min,max
+  if (test_point_in_frustum(vec3(aabb_min.x, aabb_min.y, aabb_max.z))) {
+    return true;
+  }
+  //max,max,min
+  if (test_point_in_frustum(vec3(aabb_max.x, aabb_max.y, aabb_min.z))) {
+    return true;
+  }
+  //max,min,max
+  if (test_point_in_frustum(vec3(aabb_max.x, aabb_min.y, aabb_max.z))) {
+    return true;
+  }
+  //min,max,max
+  if (test_point_in_frustum(vec3(aabb_min.x, aabb_max.y, aabb_max.z))) {
+    return true;
+  }
+  //max,max,max
+  if (test_point_in_frustum(vec3(aabb_max.x, aabb_max.y, aabb_max.z))) {
+    return true;
+  }
+  return false;
+}
+
+void main() {
+  uint emitter_id = gl_GlobalInvocationID.x;
+  if (emitter_id >= params.emitter_count) {
+    return;
+  }
+  Emitter emitter = emitters[emitter_id];
+  if (emitter.culling_enabled == 0) {
+    visibility[emitter_id] = 1;
+    return;
+  }
+  bool is_visible = test_aabb_frustum(emitter.aabb_min.xyz, emitter.aabb_max.xyz);
+  visibility[emitter_id] = is_visible ? 1 : 0;
+}

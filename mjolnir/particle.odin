@@ -1,10 +1,7 @@
 package mjolnir
 
 import "core:log"
-import linalg "core:math/linalg"
-import "core:slice"
 import "geometry"
-import "resource"
 import vk "vendor:vulkan"
 
 MAX_PARTICLES :: 65536
@@ -14,10 +11,10 @@ MAX_EMITTERS :: 64
 MAX_FORCE_FIELDS :: 32
 
 Emitter :: struct {
-  transform:         linalg.Matrix4f32,
-  initial_velocity:  linalg.Vector4f32,
-  color_start:       linalg.Vector4f32,
-  color_end:         linalg.Vector4f32,
+  transform:         matrix[4,4]f32,
+  initial_velocity:  [4]f32,
+  color_start:       [4]f32,
+  color_end:         [4]f32,
   emission_rate:     f32,
   particle_lifetime: f32,
   position_spread:   f32,
@@ -28,7 +25,10 @@ Emitter :: struct {
   weight:            f32,
   weight_spread:     f32,
   texture_index:     u32,
-  padding:           [10]f32,
+  culling_enabled:   b32,
+  padding:           u32,
+  aabb_min:          [4]f32, // xyz = min bounds, w = unused
+  aabb_max:          [4]f32, // xyz = max bounds, w = unused
 }
 
 ForceField :: struct {
@@ -36,15 +36,15 @@ ForceField :: struct {
   strength:         f32, // positive = attract, negative = repel
   area_of_effect:   f32, // radius
   fade:             f32, // 0..1, linear fade factor
-  position:         linalg.Vector4f32, // world position
+  position:         [4]f32, // world position
 }
 
 Particle :: struct {
-  position:      linalg.Vector4f32,
-  velocity:      linalg.Vector4f32,
-  color_start:   linalg.Vector4f32,
-  color_end:     linalg.Vector4f32,
-  color:         linalg.Vector4f32,
+  position:      [4]f32,
+  velocity:      [4]f32,
+  color_start:   [4]f32,
+  color_end:     [4]f32,
+  color:         [4]f32,
   size:          f32,
   size_end:      f32,
   life:          f32,
@@ -59,12 +59,14 @@ ParticleSystemParams :: struct {
   emitter_count:    u32,
   forcefield_count: u32,
   delta_time:       f32,
+  // Camera frustum planes for culling (6 planes, each has 4 components)
+  frustum_planes:   [6][4]f32,
 }
 
 // Push constants for particle rendering
 ParticlePushConstants :: struct {
-  view:       linalg.Matrix4f32,
-  projection: linalg.Matrix4f32,
+  view:       matrix[4,4]f32,
+  projection: matrix[4,4]f32,
 }
 
 // Draw command for indirect rendering
@@ -91,6 +93,12 @@ RendererParticle :: struct {
   emitter_descriptor_set_layout: vk.DescriptorSetLayout,
   emitter_descriptor_set:        vk.DescriptorSet,
   particle_counter_buffer:       DataBuffer(u32),
+  // Culling pipeline
+  emitter_visibility_buffer:     DataBuffer(u32), // One u32 per emitter for visibility
+  culling_descriptor_set_layout: vk.DescriptorSetLayout,
+  culling_descriptor_set:        vk.DescriptorSet,
+  culling_pipeline_layout:       vk.PipelineLayout,
+  culling_pipeline:              vk.Pipeline,
   // Compaction pipeline
   compact_particle_buffer:       DataBuffer(Particle),
   draw_command_buffer:           DataBuffer(DrawCommand),
@@ -107,10 +115,51 @@ RendererParticle :: struct {
 compute_particles :: proc(
   self: ^RendererParticle,
   command_buffer: vk.CommandBuffer,
+  camera: geometry.Camera,
 ) {
+  // --- Update frustum planes for culling ---
+  params_ptr := data_buffer_get(&self.params_buffer)
+  frustum := geometry.camera_make_frustum(camera)
+  for i in 0..<6 {
+    params_ptr.frustum_planes[i] = frustum.planes[i]
+  }
+
+  // --- GPU Culling Dispatch ---
+  vk.CmdBindPipeline(command_buffer, .COMPUTE, self.culling_pipeline)
+  vk.CmdBindDescriptorSets(
+    command_buffer,
+    .COMPUTE,
+    self.culling_pipeline_layout,
+    0,
+    1,
+    &self.culling_descriptor_set,
+    0,
+    nil,
+  )
+  // One thread per emitter (local_size_x = 64)
+  vk.CmdDispatch(command_buffer, u32(MAX_EMITTERS + 63) / 64, 1, 1)
+
+  // Barrier to ensure culling is complete before emission
+  barrier_cull := vk.MemoryBarrier {
+    sType         = .MEMORY_BARRIER,
+    srcAccessMask = {.SHADER_WRITE},
+    dstAccessMask = {.SHADER_READ},
+  }
+  vk.CmdPipelineBarrier(
+    command_buffer,
+    {.COMPUTE_SHADER},
+    {.COMPUTE_SHADER},
+    {},
+    1,
+    &barrier_cull,
+    0,
+    nil,
+    0,
+    nil,
+  )
+
   // --- GPU Emitter Dispatch ---
   counter_ptr := data_buffer_get(&self.particle_counter_buffer)
-  params_ptr := data_buffer_get(&self.params_buffer)
   params_ptr.particle_count = counter_ptr^
   // log.debugf("previous frame's particle count %d", counter_ptr^)
   counter_ptr^ = 0
@@ -275,6 +324,13 @@ renderer_particle_deinit :: proc(self: ^RendererParticle) {
     self.emitter_descriptor_set_layout,
     nil,
   )
+  vk.DestroyPipeline(g_device, self.culling_pipeline, nil)
+  vk.DestroyPipelineLayout(g_device, self.culling_pipeline_layout, nil)
+  vk.DestroyDescriptorSetLayout(
+    g_device,
+    self.culling_descriptor_set_layout,
+    nil,
+  )
   vk.DestroyPipeline(g_device, self.compact_pipeline, nil)
   vk.DestroyPipelineLayout(g_device, self.compact_pipeline_layout, nil)
   vk.DestroyDescriptorSetLayout(
@@ -291,6 +347,7 @@ renderer_particle_deinit :: proc(self: ^RendererParticle) {
   data_buffer_deinit(&self.emitter_buffer)
   data_buffer_deinit(&self.force_field_buffer)
   data_buffer_deinit(&self.particle_counter_buffer)
+  data_buffer_deinit(&self.emitter_visibility_buffer)
 }
 
 renderer_particle_init :: proc(self: ^RendererParticle) -> vk.Result {
@@ -321,7 +378,13 @@ renderer_particle_init :: proc(self: ^RendererParticle) -> vk.Result {
     1,
     {.STORAGE_BUFFER},
   ) or_return
+  self.emitter_visibility_buffer = create_host_visible_buffer(
+    u32,
+    MAX_EMITTERS,
+    {.STORAGE_BUFFER},
+  ) or_return
   renderer_particle_init_emitter_pipeline(self) or_return
+  renderer_particle_init_culling_pipeline(self) or_return
   renderer_particle_init_compact_pipeline(self) or_return
   renderer_particle_init_compute_pipeline(self) or_return
   renderer_particle_init_render_pipeline(self) or_return
@@ -353,6 +416,12 @@ renderer_particle_init_emitter_pipeline :: proc(
     {
       binding         = 3,
       descriptorType  = .UNIFORM_BUFFER, // Params buffer
+      descriptorCount = 1,
+      stageFlags      = {.COMPUTE},
+    },
+    {
+      binding         = 4,
+      descriptorType  = .STORAGE_BUFFER, // Visibility buffer
       descriptorCount = 1,
       stageFlags      = {.COMPUTE},
     },
@@ -403,6 +472,10 @@ renderer_particle_init_emitter_pipeline :: proc(
     buffer = self.params_buffer.buffer,
     range  = vk.DeviceSize(self.params_buffer.bytes_count),
   }
+  emitter_visibility_buffer_info := vk.DescriptorBufferInfo {
+    buffer = self.emitter_visibility_buffer.buffer,
+    range  = vk.DeviceSize(self.emitter_visibility_buffer.bytes_count),
+  }
   emitter_writes := [?]vk.WriteDescriptorSet {
     {
       sType = .WRITE_DESCRIPTOR_SET,
@@ -436,6 +509,14 @@ renderer_particle_init_emitter_pipeline :: proc(
       descriptorCount = 1,
       pBufferInfo = &emitter_params_buffer_info,
     },
+    {
+      sType = .WRITE_DESCRIPTOR_SET,
+      dstSet = self.emitter_descriptor_set,
+      dstBinding = 4,
+      descriptorType = .STORAGE_BUFFER,
+      descriptorCount = 1,
+      pBufferInfo = &emitter_visibility_buffer_info,
+    },
   }
   vk.UpdateDescriptorSets(
     g_device,
@@ -465,6 +546,130 @@ renderer_particle_init_emitter_pipeline :: proc(
     &emitter_pipeline_info,
     nil,
     &self.emitter_pipeline,
+  ) or_return
+  return .SUCCESS
+}
+
+renderer_particle_init_culling_pipeline :: proc(
+  self: ^RendererParticle,
+) -> vk.Result {
+  // --- Culling pipeline ---
+  culling_bindings := [?]vk.DescriptorSetLayoutBinding {
+    {
+      binding         = 0,
+      descriptorType  = .UNIFORM_BUFFER, // Params buffer
+      descriptorCount = 1,
+      stageFlags      = {.COMPUTE},
+    },
+    {
+      binding         = 1,
+      descriptorType  = .STORAGE_BUFFER, // Emitter buffer
+      descriptorCount = 1,
+      stageFlags      = {.COMPUTE},
+    },
+    {
+      binding         = 2,
+      descriptorType  = .STORAGE_BUFFER, // Visibility buffer
+      descriptorCount = 1,
+      stageFlags      = {.COMPUTE},
+    },
+  }
+  vk.CreateDescriptorSetLayout(
+    g_device,
+    &{
+      sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+      bindingCount = len(culling_bindings),
+      pBindings = raw_data(culling_bindings[:]),
+    },
+    nil,
+    &self.culling_descriptor_set_layout,
+  ) or_return
+  vk.AllocateDescriptorSets(
+    g_device,
+    &{
+      sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
+      descriptorPool = g_descriptor_pool,
+      descriptorSetCount = 1,
+      pSetLayouts = &self.culling_descriptor_set_layout,
+    },
+    &self.culling_descriptor_set,
+  ) or_return
+  vk.CreatePipelineLayout(
+    g_device,
+    &{
+      sType = .PIPELINE_LAYOUT_CREATE_INFO,
+      setLayoutCount = 1,
+      pSetLayouts = &self.culling_descriptor_set_layout,
+    },
+    nil,
+    &self.culling_pipeline_layout,
+  ) or_return
+  culling_params_buffer_info := vk.DescriptorBufferInfo {
+    buffer = self.params_buffer.buffer,
+    range  = vk.DeviceSize(self.params_buffer.bytes_count),
+  }
+  culling_emitter_buffer_info := vk.DescriptorBufferInfo {
+    buffer = self.emitter_buffer.buffer,
+    range  = vk.DeviceSize(self.emitter_buffer.bytes_count),
+  }
+  culling_visibility_buffer_info := vk.DescriptorBufferInfo {
+    buffer = self.emitter_visibility_buffer.buffer,
+    range  = vk.DeviceSize(self.emitter_visibility_buffer.bytes_count),
+  }
+  culling_writes := [?]vk.WriteDescriptorSet {
+    {
+      sType = .WRITE_DESCRIPTOR_SET,
+      dstSet = self.culling_descriptor_set,
+      dstBinding = 0,
+      descriptorType = .UNIFORM_BUFFER,
+      descriptorCount = 1,
+      pBufferInfo = &culling_params_buffer_info,
+    },
+    {
+      sType = .WRITE_DESCRIPTOR_SET,
+      dstSet = self.culling_descriptor_set,
+      dstBinding = 1,
+      descriptorType = .STORAGE_BUFFER,
+      descriptorCount = 1,
+      pBufferInfo = &culling_emitter_buffer_info,
+    },
+    {
+      sType = .WRITE_DESCRIPTOR_SET,
+      dstSet = self.culling_descriptor_set,
+      dstBinding = 2,
+      descriptorType = .STORAGE_BUFFER,
+      descriptorCount = 1,
+      pBufferInfo = &culling_visibility_buffer_info,
+    },
+  }
+  vk.UpdateDescriptorSets(
+    g_device,
+    len(culling_writes),
+    raw_data(culling_writes[:]),
+    0,
+    nil,
+  )
+  culling_shader_module := create_shader_module(
+    #load("shader/particle/culling.spv"),
+  ) or_return
+  defer vk.DestroyShaderModule(g_device, culling_shader_module, nil)
+  culling_pipeline_info := vk.ComputePipelineCreateInfo {
+    sType = .COMPUTE_PIPELINE_CREATE_INFO,
+    stage = {
+      sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
+      stage = {.COMPUTE},
+      module = culling_shader_module,
+      pName = "main",
+    },
+    layout = self.culling_pipeline_layout,
+  }
+  vk.CreateComputePipelines(
+    g_device,
+    0,
+    1,
+    &culling_pipeline_info,
+    nil,
+    &self.culling_pipeline,
   ) or_return
   return .SUCCESS
 }
@@ -1036,4 +1241,48 @@ get_particle_render_stats :: proc(
 ) {
   count := data_buffer_get(&self.particle_counter_buffer)
   return count^, MAX_PARTICLES
+}
+
+// Helper function to create an emitter with AABB culling bounds
+create_emitter_with_aabb :: proc(
+  transform: matrix[4,4]f32,
+  aabb_min: [3]f32,
+  aabb_max: [3]f32,
+  enable_culling: bool = true,
+) -> Emitter {
+  return Emitter {
+    transform = transform,
+    aabb_min = {aabb_min.x, aabb_min.y, aabb_min.z, 0.0},
+    aabb_max = {aabb_max.x, aabb_max.y, aabb_max.z, 0.0},
+    culling_enabled = b32(enable_culling),
+    // Default values - user should set these
+    emission_rate = 10.0,
+    particle_lifetime = 5.0,
+    position_spread = 1.0,
+    velocity_spread = 0.1,
+    size_start = 1.0,
+    size_end = 0.1,
+    weight = 1.0,
+    weight_spread = 0.0,
+    texture_index = 0,
+    initial_velocity = {0.0, 1.0, 0.0, 0.0},
+    color_start = {1.0, 1.0, 1.0, 1.0},
+    color_end = {0.5, 0.5, 0.5, 0.0},
+    time_accumulator = 0.0,
+  }
+}
+
+// Helper function to update emitter AABB bounds
+update_emitter_aabb :: proc(
+  emitter: ^Emitter,
+  aabb_min: [3]f32,
+  aabb_max: [3]f32,
+) {
+  emitter.aabb_min = {aabb_min.x, aabb_min.y, aabb_min.z, 0.0}
+  emitter.aabb_max = {aabb_max.x, aabb_max.y, aabb_max.z, 0.0}
+}
+
+// Helper function to enable/disable culling for an emitter
+set_emitter_culling :: proc(emitter: ^Emitter, enable: bool) {
+  emitter.culling_enabled = b32(enable)
 }

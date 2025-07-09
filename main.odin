@@ -51,7 +51,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   ground_mesh_handle, _, _ := create_mesh(make_quad())
   if true {
     log.info("spawning cubes in a grid")
-    space: f32 = 1.0
+    space: f32 = 2.0
     size: f32 = 0.3
     nx, ny, nz := 5, 2, 5
     for x in 1 ..< nx {
@@ -187,7 +187,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   log.infof("creating %d lights", LIGHT_COUNT)
   // Create lights and light cubes
   for i in 0 ..< LIGHT_COUNT {
-    color := linalg.Vector4f32 {
+    color := [4]f32 {
       math.sin(f32(i)),
       math.cos(f32(i)),
       math.sin(f32(i)),
@@ -333,7 +333,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     geometry.scale(&forcefield_visual.transform, 0.2)
   }
   effect_add_fog(&engine.postprocess, {0.2, 0.5, 0.9}, 0.02, 3.0, 50.0)
-  effect_add_crosshatch(&engine.postprocess, {1280, 720})
+  // effect_add_crosshatch(&engine.postprocess, {1280, 720})
   // effect_add_blur(&engine.postprocess, 18.0)
   // effect_add_tonemap(&engine.postprocess, 1.5, 1.3)
   // effect_add_dof(&engine.postprocess)
@@ -378,7 +378,7 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
     rx := math.sin(t)
     ry := (math.sin(t) + 1.0) * 0.5 * 1.5 + 1.0
     rz := math.cos(t)
-    v := linalg.vector_normalize(linalg.Vector3f32{rx, ry, rz})
+    v := linalg.vector_normalize([3]f32{rx, ry, rz})
     radius: f32 = 6
     v = v * radius + linalg.VECTOR3F32_Y_AXIS * -1.0
     translate(&light_ptr.transform, v.x, v.y, v.z)

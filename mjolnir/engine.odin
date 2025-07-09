@@ -33,6 +33,7 @@ MAX_SHADOW_MAPS :: 10
 MAX_CAMERA_UNIFORMS :: 16
 MAX_TEXTURES :: 90
 MAX_CUBE_TEXTURES :: 20
+USE_GPU_CULLING :: true  // Set to false to use CPU culling instead
 
 Handle :: resource.Handle
 
@@ -44,36 +45,36 @@ UpdateProc :: #type proc(engine: ^Engine, delta_time: f32)
 Render2DProc :: #type proc(engine: ^Engine, ctx: ^mu.Context)
 KeyInputProc :: #type proc(engine: ^Engine, key, action, mods: int)
 MousePressProc :: #type proc(engine: ^Engine, key, action, mods: int)
-MouseDragProc :: #type proc(engine: ^Engine, delta, offset: linalg.Vector2f64)
-MouseScrollProc :: #type proc(engine: ^Engine, offset: linalg.Vector2f64)
-MouseMoveProc :: #type proc(engine: ^Engine, pos, delta: linalg.Vector2f64)
+MouseDragProc :: #type proc(engine: ^Engine, delta, offset: [2]f64)
+MouseScrollProc :: #type proc(engine: ^Engine, offset: [2]f64)
+MouseMoveProc :: #type proc(engine: ^Engine, pos, delta: [2]f64)
 
 PointLightData :: struct {
-  views:    [6]linalg.Matrix4f32,
-  proj:     linalg.Matrix4f32,
-  world:    linalg.Matrix4f32,
-  color:    linalg.Vector4f32,
-  position: linalg.Vector4f32,
+  views:    [6]matrix[4,4]f32,
+  proj:     matrix[4,4]f32,
+  world:    matrix[4,4]f32,
+  color:    [4]f32,
+  position: [4]f32,
   radius:   f32,
 }
 
 SpotLightData :: struct {
-  view:      linalg.Matrix4f32,
-  proj:      linalg.Matrix4f32,
-  world:     linalg.Matrix4f32,
-  color:     linalg.Vector4f32,
-  position:  linalg.Vector4f32,
-  direction: linalg.Vector4f32,
+  view:      matrix[4,4]f32,
+  proj:      matrix[4,4]f32,
+  world:     matrix[4,4]f32,
+  color:     [4]f32,
+  position:  [4]f32,
+  direction: [4]f32,
   radius:    f32,
   angle:     f32,
 }
 
 DirectionalLightData :: struct {
-  view:      linalg.Matrix4f32,
-  proj:      linalg.Matrix4f32,
-  world:     linalg.Matrix4f32,
-  color:     linalg.Vector4f32,
-  direction: linalg.Vector4f32,
+  view:      matrix[4,4]f32,
+  proj:      matrix[4,4]f32,
+  world:     matrix[4,4]f32,
+  color:     [4]f32,
+  direction: [4]f32,
 }
 
 LightData :: union {
@@ -83,9 +84,14 @@ LightData :: union {
 }
 
 CameraUniform :: struct {
-  view:          linalg.Matrix4f32,
-  projection:    linalg.Matrix4f32,
+  view:          matrix[4,4]f32,
+  projection:    matrix[4,4]f32,
   viewport_size: [2]f32,
+  camera_near:   f32,
+  camera_far:    f32,
+  padding:       [2]f32, // Align to 16-byte boundary
+  camera_position: [3]f32,
+  padding2:      f32, // Align to 16-byte boundary
 }
 
 // Batch key for grouping objects by material features
@@ -120,8 +126,8 @@ RenderTarget :: struct {
 }
 
 InputState :: struct {
-  mouse_pos:         linalg.Vector2f64,
-  mouse_drag_origin: linalg.Vector2f32,
+  mouse_pos:         [2]f64,
+  mouse_drag_origin: [2]f32,
   mouse_buttons:     [8]bool,
   mouse_holding:     [8]bool,
   key_holding:       [512]bool,
@@ -170,6 +176,7 @@ Engine :: struct {
   ambient:               RendererAmbient,
   shadow:                RendererShadow,
   particle:              RendererParticle,
+  scene_culling:         RendererSceneCulling,
   transparent:           RendererTransparent,
   postprocess:           RendererPostProcess,
   gbuffer:               RendererGBuffer,
@@ -283,6 +290,9 @@ init :: proc(
     self.swapchain.extent,
   ) or_return
   renderer_particle_init(&self.particle) or_return
+  when USE_GPU_CULLING {
+    renderer_scene_culling_init(&self.scene_culling) or_return
+  }
   renderer_transparent_init(
     &self.transparent,
     self.swapchain.extent.width,
@@ -489,7 +499,7 @@ update_force_fields :: proc(self: ^Engine) {
   for &entry in self.scene.nodes.entries do if entry.active {
     ff, is_ff := &entry.item.attachment.(ForceFieldAttachment)
     if !is_ff do continue
-    ff.position = entry.item.transform.world_matrix * linalg.Vector4f32{0, 0, 0, 1}
+    ff.position = entry.item.transform.world_matrix * [4]f32{0, 0, 0, 1}
     forcefields[params.forcefield_count] = ff
     params.forcefield_count += 1
   }
@@ -577,6 +587,9 @@ deinit :: proc(self: ^Engine) {
   renderer_shadow_deinit(&self.shadow)
   renderer_postprocess_deinit(&self.postprocess)
   renderer_particle_deinit(&self.particle)
+  when USE_GPU_CULLING {
+    renderer_scene_culling_deinit(&self.scene_culling)
+  }
   renderer_transparent_deinit(&self.transparent)
   renderer_depth_prepass_deinit(&self.depth_prepass)
   factory_deinit()
@@ -653,16 +666,28 @@ generate_render_input :: proc(
     map[BatchKey][dynamic]BatchData,
     allocator = context.temp_allocator,
   )
-  for &entry in self.scene.nodes.entries do if entry.active {
+  visible_count: u32 = 0
+  total_count: u32 = 0
+  for &entry, entry_index in self.scene.nodes.entries do if entry.active {
     node := &entry.item
+    handle := Handle{entry.generation, u32(entry_index)}
     #partial switch data in node.attachment {
     case MeshAttachment:
       mesh := resource.get(g_meshes, data.handle)
       if mesh == nil do continue
       material := resource.get(g_materials, data.material)
       if material == nil do continue
-      world_aabb := geometry.aabb_transform(mesh.aabb, node.transform.world_matrix)
-      if !geometry.frustum_test_aabb(frustum, world_aabb) do continue
+      total_count += 1
+      // Use GPU culling results if available, otherwise fall back to CPU culling
+      visible := true
+      when USE_GPU_CULLING {
+        visible = is_node_visible(&self.scene_culling, u32(entry_index))
+      } else {
+        world_aabb := geometry.aabb_transform(mesh.aabb, node.transform.world_matrix)
+        visible = geometry.frustum_test_aabb(frustum, world_aabb)
+      }
+      if !visible do continue
+      visible_count += 1
       batch_key := BatchKey {
         features      = material.features,
         material_type = material.type,
@@ -708,6 +733,8 @@ render :: proc(self: ^Engine) -> vk.Result {
     f32(self.swapchain.extent.width),
     f32(self.swapchain.extent.height),
   }
+  camera_uniform.camera_near, camera_uniform.camera_far = geometry.camera_get_near_far(self.scene.camera)
+  camera_uniform.camera_position = self.scene.camera.position
   frustum := geometry.make_frustum(
     camera_uniform.projection * camera_uniform.view,
   )
@@ -716,23 +743,71 @@ render :: proc(self: ^Engine) -> vk.Result {
     &{sType = .COMMAND_BUFFER_BEGIN_INFO, flags = {.ONE_TIME_SUBMIT}},
   ) or_return
   // dispatch computation early and doing other work while GPU is busy
-  compute_particles(&self.particle, command_buffer)
+  when USE_GPU_CULLING {
+    // Update and perform GPU scene culling
+    update_scene_culling_data(&self.scene_culling, &self.scene)
+    perform_scene_culling_with_frustum(&self.scene_culling, command_buffer, frustum)
+    // Memory barrier to ensure culling is complete before other operations
+    visibility_buffer_barrier := vk.BufferMemoryBarrier {
+      sType = .BUFFER_MEMORY_BARRIER,
+      srcAccessMask = {.SHADER_WRITE},
+      dstAccessMask = {.SHADER_READ, .HOST_READ},
+      srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+      dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+      buffer = self.scene_culling.visibility_buffer[g_frame_index].buffer,
+      offset = 0,
+      size = vk.DeviceSize(self.scene_culling.visibility_buffer[g_frame_index].bytes_count),
+    }
+    vk.CmdPipelineBarrier(
+      command_buffer,
+      {.COMPUTE_SHADER},
+      {.VERTEX_SHADER, .FRAGMENT_SHADER, .HOST},
+      {},
+      0,
+      nil,
+      1,
+      &visibility_buffer_barrier,
+      0,
+      nil,
+    )
+    // End command buffer and submit immediately to ensure GPU work completes
+    vk.EndCommandBuffer(command_buffer) or_return
+    submit_info := vk.SubmitInfo {
+      sType = .SUBMIT_INFO,
+      commandBufferCount = 1,
+      pCommandBuffers = &command_buffer,
+    }
+    vk.QueueSubmit(g_graphics_queue, 1, &submit_info, 0) or_return
+    vk.QueueWaitIdle(g_graphics_queue) or_return
+    // Begin command buffer again for the rest of the rendering
+    vk.BeginCommandBuffer(
+      command_buffer,
+      &{sType = .COMMAND_BUFFER_BEGIN_INFO, flags = {.ONE_TIME_SUBMIT}},
+    ) or_return
+  }
+
+  compute_particles(&self.particle, command_buffer, self.scene.camera)
   lights := make([dynamic]LightData, 0)
   defer delete(lights)
   shadow_casters := make([dynamic]LightData, 0)
   defer delete(shadow_casters)
-  for &entry in self.scene.nodes.entries do if entry.active {
-    #partial switch light in &entry.item.attachment {
+  for &entry, entry_index in self.scene.nodes.entries do if entry.active {
+    node := &entry.item
+    when USE_GPU_CULLING {
+        visible := is_node_visible(&self.scene_culling, u32(entry_index))
+        if !visible do continue
+    }
+    #partial switch light in &node.attachment {
     case PointLightAttachment:
       @(static) face_dirs := [6][3]f32{{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}}
       @(static) face_ups := [6][3]f32{{0, -1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}, {0, -1, 0}, {0, -1, 0}}
       data: PointLightData
-      position := entry.item.transform.world_matrix * linalg.Vector4f32{0, 0, 0, 1}
+      position := node.transform.world_matrix * [4]f32{0, 0, 0, 1}
       for i in 0 ..< 6 {
         data.views[i] = linalg.matrix4_look_at(position.xyz, position.xyz + face_dirs[i], face_ups[i])
       }
       data.proj = linalg.matrix4_perspective(math.PI * 0.5, 1.0, 0.01, light.radius)
-      data.world = entry.item.transform.world_matrix
+      data.world = node.transform.world_matrix
       data.color = light.color
       data.position = position
       data.radius = light.radius
@@ -743,18 +818,18 @@ render :: proc(self: ^Engine) -> vk.Result {
     case DirectionalLightAttachment:
       data: DirectionalLightData
       ortho_size: f32 = 20.0
-      data.direction = entry.item.transform.world_matrix * linalg.Vector4f32{0, 0, -1, 0}
+      data.direction = node.transform.world_matrix * [4]f32{0, 0, -1, 0}
       data.proj = linalg.matrix_ortho3d(-ortho_size, ortho_size, -ortho_size, ortho_size, 0.1, 9999.0)
-      data.view = linalg.matrix4_look_at(linalg.Vector3f32{}, data.direction.xyz, linalg.VECTOR3F32_Y_AXIS)
-      data.world = entry.item.transform.world_matrix
+      data.view = linalg.matrix4_look_at([3]f32{}, data.direction.xyz, linalg.VECTOR3F32_Y_AXIS)
+      data.world = node.transform.world_matrix
       data.color = light.color
       append(&lights, data)
     case SpotLightAttachment:
       data: SpotLightData
-      data.position = entry.item.transform.world_matrix * linalg.Vector4f32{0, 0, 0, 1}
-      data.direction = entry.item.transform.world_matrix * linalg.Vector4f32{0, -1, 0, 0}
+      data.position = node.transform.world_matrix * [4]f32{0, 0, 0, 1}
+      data.direction = node.transform.world_matrix * [4]f32{0, -1, 0, 0}
       data.proj = linalg.matrix4_perspective(light.angle, 1.0, 0.01, light.radius)
-      data.world = entry.item.transform.world_matrix
+      data.world = node.transform.world_matrix
       data.view = linalg.matrix4_look_at(data.position.xyz, data.position.xyz + data.direction.xyz, linalg.VECTOR3F32_Y_AXIS)
       data.radius = light.radius
       data.angle = light.angle
@@ -765,7 +840,7 @@ render :: proc(self: ^Engine) -> vk.Result {
       }
     }
   }
-  log.debug("============ rendering shadow pass...============ ")
+  // log.debug("============ rendering shadow pass...============ ")
   // Transition all shadow maps to depth attachment optimal
   shadow_2d_images : [MAX_SHADOW_MAPS]vk.Image
   shadow_2d_count := 0
@@ -921,7 +996,7 @@ render :: proc(self: ^Engine) -> vk.Result {
     {},
     {.COLOR_ATTACHMENT_WRITE},
   )
-  log.debug("============ rendering depth pre-pass... =============")
+  // log.debug("============ rendering depth pre-pass... =============")
   depth_target: RenderTarget
   depth_texture := resource.get(g_image_2d_buffers, self.frames[g_frame_index].depth_buffer)
   depth_target.depth = depth_texture.view
@@ -934,7 +1009,7 @@ render :: proc(self: ^Engine) -> vk.Result {
     command_buffer,
   )
   renderer_depth_prepass_end(command_buffer)
-  log.debug("============ rendering G-buffer pass... =============")
+  // log.debug("============ rendering G-buffer pass... =============")
   // Transition G-buffer images to COLOR_ATTACHMENT_OPTIMAL
   frame := &self.frames[g_frame_index]
   gbuffer_position := resource.get(g_image_2d_buffers, frame.gbuffer_position)
@@ -992,7 +1067,7 @@ render :: proc(self: ^Engine) -> vk.Result {
     {.FRAGMENT_SHADER},
     {.SHADER_READ},
   )
-  log.debug("============ rendering main pass... =============")
+  // log.debug("============ rendering main pass... =============")
   // Prepare RenderTarget and RenderInput for decoupled renderer
   render_target: RenderTarget
   render_target.final = final_image.view
@@ -1015,7 +1090,7 @@ render :: proc(self: ^Engine) -> vk.Result {
     command_buffer,
   )
   renderer_lighting_end(command_buffer)
-  log.debug("============ rendering particles... =============")
+  // log.debug("============ rendering particles... =============")
   renderer_particle_begin(&self.particle, command_buffer, render_target)
   renderer_particle_render(&self.particle, command_buffer)
   renderer_particle_end(command_buffer)
@@ -1030,7 +1105,7 @@ render :: proc(self: ^Engine) -> vk.Result {
   )
   renderer_transparent_end(&self.transparent, command_buffer)
 
-  log.debug("============ rendering post processes... =============")
+  // log.debug("============ rendering post processes... =============")
   transition_image_to_shader_read(
     command_buffer,
     final_image.image,
@@ -1093,7 +1168,7 @@ render :: proc(self: ^Engine) -> vk.Result {
     self.render2d_proc(self, &self.ui.ctx)
   }
   mu.end(&self.ui.ctx)
-  log.debug("============ rendering UI... =============")
+  // log.debug("============ rendering UI... =============")
   renderer_ui_begin(
     &self.ui,
     command_buffer,
@@ -1102,13 +1177,13 @@ render :: proc(self: ^Engine) -> vk.Result {
   )
   renderer_ui_render(&self.ui, command_buffer)
   renderer_ui_end(&self.ui, command_buffer)
-  log.debug("============ preparing image for present... =============")
+  // log.debug("============ preparing image for present... =============")
   transition_image_to_present(
     command_buffer,
     self.swapchain.images[self.swapchain.image_index],
   )
   vk.EndCommandBuffer(command_buffer) or_return
-  log.debug("============ submit queue... =============")
+  // log.debug("============ submit queue... =============")
   submit_queue_and_present(&self.swapchain, &command_buffer) or_return
   g_frame_index = (g_frame_index + 1) % MAX_FRAMES_IN_FLIGHT
   return .SUCCESS
@@ -1121,7 +1196,7 @@ run :: proc(self: ^Engine, width: u32, height: u32, title: string) {
   defer deinit(self)
   frame := 0
   for !glfw.WindowShouldClose(self.window) {
-    // if frame > 1 do break
+    // if frame > 3 do break
     update(self)
     if time.duration_milliseconds(time.since(self.last_frame_timestamp)) <
        FRAME_TIME_MILIS {

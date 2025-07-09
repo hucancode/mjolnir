@@ -2,12 +2,6 @@ package mjolnir
 
 import "core:fmt"
 import "core:log"
-import "core:math"
-import "core:math/linalg"
-import "core:mem"
-import "core:slice"
-import "core:strings"
-
 import "geometry"
 import "resource"
 import vk "vendor:vulkan"
@@ -604,12 +598,6 @@ renderer_transparent_render :: proc(
       }
     } else if batch_key.material_type == .WIREFRAME {
       for batch_data in batch_group {
-        // Process each batch of wireframe materials
-        material := resource.get(
-          g_materials,
-          batch_data.material_handle,
-        ) or_continue
-
         // Render all nodes in this batch
         for node in batch_data.nodes {
           mesh_attachment, ok := node.attachment.(MeshAttachment)
@@ -630,15 +618,6 @@ renderer_transparent_render :: proc(
 
           push_constant := PushConstant {
             world                    = node.transform.world_matrix,
-            bone_matrix_offset       = 0,
-            // Wireframe doesn't need textures
-            albedo_index             = 0,
-            metallic_roughness_index = 0,
-            normal_index             = 0,
-            emissive_index           = 0,
-            metallic_value           = 0,
-            roughness_value          = 0,
-            emissive_value           = 0,
           }
 
           // Set bone matrix offset if skinning is available

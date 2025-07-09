@@ -1,7 +1,6 @@
 package mjolnir
 
 import "core:log"
-import linalg "core:math/linalg"
 import "core:slice"
 import vk "vendor:vulkan"
 
@@ -78,7 +77,7 @@ renderer_ambient_begin :: proc(
 
 renderer_ambient_render :: proc(
   self: ^RendererAmbient,
-  camera_position: linalg.Vector3f32,
+  camera_position: [3]f32,
   command_buffer: vk.CommandBuffer,
 ) {
   // Use the same environment/IBL values as RendererMain (assume engine.ambient is initialized like main)

@@ -3,16 +3,16 @@ package geometry
 import "core:log"
 import linalg "core:math/linalg"
 
-// Plane is represented as a linalg.Vector4f32 {A, B, C, D}
+// Plane is represented as a [4]f32 {A, B, C, D}
 // for the plane equation Ax + By + Cz + D = 0.
 // The normal {A, B, C} is assumed to point "inwards" for a convex volume.
-Plane :: linalg.Vector4f32
+Plane :: [4]f32
 
 Frustum :: struct {
   planes: [6]Plane,
 }
 
-make_frustum :: proc(view_projection_matrix: linalg.Matrix4f32) -> Frustum {
+make_frustum :: proc(view_projection_matrix: matrix[4,4]f32) -> Frustum {
   m := linalg.transpose(view_projection_matrix)
   // Each plane is a Vec4: a*x + b*y + c*z + d = 0
   planes := [6]Plane {
@@ -41,42 +41,37 @@ make_frustum :: proc(view_projection_matrix: linalg.Matrix4f32) -> Frustum {
 
 signed_distance_to_plane :: proc(
   plane: Plane,
-  point: linalg.Vector3f32,
+  point: [3]f32,
 ) -> f32 {
   return linalg.dot(plane.xyz, point) + plane.w
 }
 
+frustum_test_point :: proc(frustum: Frustum, p: [3]f32) -> bool {
+  for plane in frustum.planes {
+    distance := linalg.dot(plane.xyz, p) + plane.w
+    if distance < 0.0 {
+      return false
+    }
+  }
+  return true
+}
 // test_aabb_frustum tests if an Axis-Aligned Bounding Box (AABB) intersects or is contained within a Frustum.
 // Assumes Frustum planes have normals pointing inwards.
 // Returns true if the AABB is (at least partially) inside the frustum, false if completely outside.
-frustum_test_aabb :: proc(
-  frustum: Frustum,
-  aabb: Aabb,
-) -> bool {
-  extremes := [?]linalg.Vector3f32{
-    {aabb.min.x, aabb.min.y, aabb.min.z},
-    {aabb.max.x, aabb.min.y, aabb.min.z},
-    {aabb.min.x, aabb.max.y, aabb.min.z},
-    {aabb.min.x, aabb.min.y, aabb.max.z},
-    {aabb.max.x, aabb.max.y, aabb.min.z},
-    {aabb.max.x, aabb.min.y, aabb.max.z},
-    {aabb.min.x, aabb.max.y, aabb.max.z},
-    {aabb.max.x, aabb.max.y, aabb.max.z},
-  }
-  plane: for plane_vec in frustum.planes {
-    for p in extremes {
-      if signed_distance_to_plane(plane_vec, p) >= 0.0 {
-        continue plane
-      }
-    }
-    // log.debugf("AABB %v is inside frustum plane: %v, frustum = %v", aabb, plane_vec, frustum)
-    return false
-  }
-  return true // AABB is inside or intersects some planes
+frustum_test_aabb :: proc(frustum: Frustum, aabb: Aabb) -> bool {
+  if frustum_test_point(frustum, {aabb.min.x, aabb.min.y, aabb.min.z}) do return true
+  if frustum_test_point(frustum, {aabb.max.x, aabb.min.y, aabb.min.z}) do return true
+  if frustum_test_point(frustum, {aabb.min.x, aabb.max.y, aabb.min.z}) do return true
+  if frustum_test_point(frustum, {aabb.min.x, aabb.min.y, aabb.max.z}) do return true
+  if frustum_test_point(frustum, {aabb.max.x, aabb.max.y, aabb.min.z}) do return true
+  if frustum_test_point(frustum, {aabb.max.x, aabb.min.y, aabb.max.z}) do return true
+  if frustum_test_point(frustum, {aabb.min.x, aabb.max.y, aabb.max.z}) do return true
+  if frustum_test_point(frustum, {aabb.max.x, aabb.max.y, aabb.max.z}) do return true
+  return false
 }
 
 frustum_test_sphere :: proc(
-  sphere_center: linalg.Vector3f32,
+  sphere_center: [3]f32,
   sphere_radius: f32,
   frustum: ^Frustum,
 ) -> bool {
@@ -92,11 +87,13 @@ frustum_test_sphere :: proc(
 // transform_aabb transforms an AABB by a given matrix.
 aabb_transform :: proc(
   aabb: Aabb,
-  transform_matrix: linalg.Matrix4f32,
-) -> (ret: Aabb) {
+  transform_matrix: matrix[4,4]f32,
+) -> (
+  ret: Aabb,
+) {
   min_p := aabb.min
   max_p := aabb.max
-  corners: [8]linalg.Vector4f32
+  corners: [8][4]f32
   corners[0] = {min_p.x, min_p.y, min_p.z, 1.0}
   corners[1] = {max_p.x, min_p.y, min_p.z, 1.0}
   corners[2] = {min_p.x, max_p.y, min_p.z, 1.0}

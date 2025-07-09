@@ -26,7 +26,12 @@ const uint SAMPLER_LINEAR_REPEAT = 3;
 layout(set = 0, binding = 0) uniform CameraUniform {
     mat4 view;
     mat4 projection;
-    vec2 viewportSize;
+    vec2 viewport_size;
+    float camera_near;
+    float camera_far;
+    vec2 padding;
+    vec3 camera_position;
+    float padding2;
 } camera;
 
 

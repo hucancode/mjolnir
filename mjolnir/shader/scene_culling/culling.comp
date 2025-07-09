@@ -1,0 +1,88 @@
+#version 450
+
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+struct NodeCullingData {
+  vec3 aabb_min;           // xyz = min bounds
+  uint culling_enabled;    // 0 = disabled, 1 = enabled
+  vec3 aabb_max;           // xyz = max bounds
+  uint padding;         // Align to 16 bytes
+};
+
+struct SceneCullingParams {
+  vec4 frustum_planes[6];
+  uint node_count;
+  uint padding[3];
+};
+
+layout(set = 0, binding = 0) uniform SceneCullingParamsBuffer {
+  SceneCullingParams params;
+};
+
+layout(set = 0, binding = 1) readonly buffer NodeDataBuffer {
+  NodeCullingData nodes[];
+};
+
+layout(set = 0, binding = 2) writeonly buffer VisibilityBuffer {
+  uint visibility[];
+};
+
+bool test_point_in_frustum(vec3 p) {
+  for (int i = 0; i < 6; i++) {
+    float distance = dot(params.frustum_planes[i].xyz, p) + params.frustum_planes[i].w;
+    if (distance < 0.0) {
+      return false;
+    }
+  }
+  return true;
+}
+bool test_aabb_frustum(vec3 aabb_min, vec3 aabb_max) {
+  // find at least 1 point inside all plane, we can safely says this AABB is inside the frustum
+  // min,min,min
+  if (test_point_in_frustum(vec3(aabb_min.x, aabb_min.y, aabb_min.z))) {
+    return true;
+  }
+  // max,min,min
+  if (test_point_in_frustum(vec3(aabb_max.x, aabb_min.y, aabb_min.z))) {
+    return true;
+  }
+  //min,max,min
+  if (test_point_in_frustum(vec3(aabb_min.x, aabb_max.y, aabb_min.z))) {
+    return true;
+  }
+  //min,min,max
+  if (test_point_in_frustum(vec3(aabb_min.x, aabb_min.y, aabb_max.z))) {
+    return true;
+  }
+  //max,max,min
+  if (test_point_in_frustum(vec3(aabb_max.x, aabb_max.y, aabb_min.z))) {
+    return true;
+  }
+  //max,min,max
+  if (test_point_in_frustum(vec3(aabb_max.x, aabb_min.y, aabb_max.z))) {
+    return true;
+  }
+  //min,max,max
+  if (test_point_in_frustum(vec3(aabb_min.x, aabb_max.y, aabb_max.z))) {
+    return true;
+  }
+  //max,max,max
+  if (test_point_in_frustum(vec3(aabb_max.x, aabb_max.y, aabb_max.z))) {
+    return true;
+  }
+  return false;
+}
+
+void main() {
+  uint node_id = gl_GlobalInvocationID.x;
+  if (node_id >= params.node_count) {
+    return;
+  }
+  NodeCullingData node = nodes[node_id];
+  if (node.culling_enabled == 0) {
+    visibility[node_id] = 1;  // If culling is disabled, object is always visible
+    return;
+  }
+  bool is_visible = test_aabb_frustum(node.aabb_min, node.aabb_max);
+  visibility[node_id] = is_visible ? 1 : 0;
+}

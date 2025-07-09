@@ -4,12 +4,12 @@ import "core:log"
 import linalg "core:math/linalg"
 
 Transform :: struct {
-  position:     linalg.Vector3f32,
-  rotation:     linalg.Quaternionf32,
-  scale:        linalg.Vector3f32,
+  position:     [3]f32,
+  rotation:     quaternion128,
+  scale:        [3]f32,
   is_dirty:     bool,
-  local_matrix: linalg.Matrix4f32,
-  world_matrix: linalg.Matrix4f32,
+  local_matrix: matrix[4,4]f32,
+  world_matrix: matrix[4,4]f32,
 }
 
 TRANSFORM_IDENTITY :: Transform {
@@ -21,7 +21,7 @@ TRANSFORM_IDENTITY :: Transform {
   world_matrix = linalg.MATRIX4F32_IDENTITY,
 }
 
-decompose_matrix :: proc(m: linalg.Matrix4f32) -> (ret: Transform) {
+decompose_matrix :: proc(m: matrix[4,4]f32) -> (ret: Transform) {
   // Extract translation (last column of the matrix)
   ret.position = m[3].xyz
   // Extract scale (length of each basis vector)
@@ -32,7 +32,7 @@ decompose_matrix :: proc(m: linalg.Matrix4f32) -> (ret: Transform) {
   return
 }
 
-matrix_from_arr :: proc(a: [16]f32) -> (m: linalg.Matrix4f32) {
+matrix_from_arr :: proc(a: [16]f32) -> (m: matrix[4,4]f32) {
   m[0, 0], m[1, 0], m[2, 0], m[3, 0] = a[0], a[1], a[2], a[3]
   m[0, 1], m[1, 1], m[2, 1], m[3, 1] = a[4], a[5], a[6], a[7]
   m[0, 2], m[1, 2], m[2, 2], m[3, 2] = a[8], a[9], a[10], a[11]
@@ -63,7 +63,7 @@ rotate_by :: proc {
     rotate_by_angle,
 }
 
-rotate_by_quaternion :: proc(t: ^Transform, q: linalg.Quaternionf32) {
+rotate_by_quaternion :: proc(t: ^Transform, q: quaternion128) {
   t.rotation *= q
   t.is_dirty = true
 }
@@ -71,7 +71,7 @@ rotate_by_quaternion :: proc(t: ^Transform, q: linalg.Quaternionf32) {
 rotate_by_angle :: proc(
   t: ^Transform,
   angle: f32,
-  axis: linalg.Vector3f32 = linalg.VECTOR3F32_Y_AXIS,
+  axis: [3]f32 = linalg.VECTOR3F32_Y_AXIS,
 ) {
   t.rotation *= linalg.quaternion_angle_axis(angle, axis)
   t.is_dirty = true
@@ -82,7 +82,7 @@ rotate :: proc {
   rotate_angle,
 }
 
-rotate_quaternion :: proc(t: ^Transform, q: linalg.Quaternionf32) {
+rotate_quaternion :: proc(t: ^Transform, q: quaternion128) {
   t.rotation = q
   t.is_dirty = true
 }
@@ -90,7 +90,7 @@ rotate_quaternion :: proc(t: ^Transform, q: linalg.Quaternionf32) {
 rotate_angle :: proc(
   t: ^Transform,
   angle: f32,
-  axis: linalg.Vector3f32 = linalg.VECTOR3F32_Y_AXIS,
+  axis: [3]f32 = linalg.VECTOR3F32_Y_AXIS,
 ) {
   t.rotation = linalg.quaternion_angle_axis(angle, axis)
   t.is_dirty = true
@@ -127,7 +127,7 @@ transform_update_local :: proc(t: ^Transform) -> bool {
 
 transform_update_world :: proc(
   t: ^Transform,
-  parent: linalg.Matrix4f32,
+  parent: matrix[4,4]f32,
 ) -> bool {
   t.world_matrix = parent * t.local_matrix
   t.is_dirty = false

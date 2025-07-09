@@ -9,18 +9,18 @@ import "geometry"
 import "resource"
 
 PointLightAttachment :: struct {
-  color:       linalg.Vector4f32,
+  color:       [4]f32,
   radius:      f32,
   cast_shadow: bool,
 }
 
 DirectionalLightAttachment :: struct {
-  color:       linalg.Vector4f32,
+  color:       [4]f32,
   cast_shadow: bool,
 }
 
 SpotLightAttachment :: struct {
-  color:       linalg.Vector4f32,
+  color:       [4]f32,
   radius:      f32,
   angle:       f32,
   cast_shadow: bool,
@@ -44,9 +44,9 @@ ParticleSystemAttachment :: struct {
 }
 
 EmitterAttachment :: struct {
-  initial_velocity:  linalg.Vector4f32,
-  color_start:       linalg.Vector4f32,
-  color_end:         linalg.Vector4f32,
+  initial_velocity:  [4]f32,
+  color_start:       [4]f32,
+  color_end:         [4]f32,
   emission_rate:     f32,
   particle_lifetime: f32,
   position_spread:   f32,
@@ -74,11 +74,12 @@ NodeAttachment :: union {
 }
 
 Node :: struct {
-  parent:     Handle,
-  children:   [dynamic]Handle,
-  transform:  geometry.Transform,
-  name:       string,
-  attachment: NodeAttachment,
+  parent:         Handle,
+  children:       [dynamic]Handle,
+  transform:      geometry.Transform,
+  name:           string,
+  attachment:     NodeAttachment,
+  culling_enabled: bool,
 }
 
 SceneTraversalCallback :: #type proc(node: ^Node, ctx: rawptr) -> bool
@@ -87,6 +88,7 @@ init_node :: proc(self: ^Node, name: string = "") {
   self.children = make([dynamic]Handle, 0)
   self.transform = geometry.TRANSFORM_IDENTITY
   self.name = name
+  self.culling_enabled = true
 }
 
 deinit_node :: proc(self: ^Node) {
@@ -176,7 +178,7 @@ play_animation :: proc(
 
 spawn_at :: proc(
   self: ^Scene,
-  position: linalg.Vector3f32,
+  position: [3]f32,
   attachment: NodeAttachment = nil,
 ) -> (
   handle: Handle,
@@ -230,7 +232,7 @@ spawn_child :: proc(
 
 SceneTraverseEntry :: struct {
   handle:           Handle,
-  parent_transform: linalg.Matrix4f32,
+  parent_transform: matrix[4,4]f32,
   parent_is_dirty:  bool,
 }
 
