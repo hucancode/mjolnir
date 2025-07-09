@@ -2,7 +2,6 @@
 
 layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 
-// Emitter struct - must match Odin definition
 struct Emitter {
   mat4 transform;
   vec4 initial_velocity;
@@ -18,10 +17,10 @@ struct Emitter {
   float weight;
   float weight_spread;
   uint texture_index;
+  uint culling_enabled;
+  uint padding;
   vec4 aabb_min;
   vec4 aabb_max;
-  uint culling_enabled;
-  float padding[7];
 };
 
 struct ParticleSystemParams {

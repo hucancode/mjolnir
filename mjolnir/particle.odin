@@ -25,11 +25,10 @@ Emitter :: struct {
   weight:            f32,
   weight_spread:     f32,
   texture_index:     u32,
-  // AABB bounds for culling
+  culling_enabled:   b32,
+  padding:           u32,
   aabb_min:          [4]f32, // xyz = min bounds, w = unused
   aabb_max:          [4]f32, // xyz = max bounds, w = unused
-  culling_enabled:   b32,
-  padding:           [7]f32,
 }
 
 ForceField :: struct {
