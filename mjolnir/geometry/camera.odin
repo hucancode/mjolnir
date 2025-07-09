@@ -50,7 +50,7 @@ Camera :: struct {
   },
   up:            [3]f32,
   position:      [3]f32,
-  rotation:      linalg.Quaternionf32,
+  rotation:      quaternion128,
   projection:    union {
     PerspectiveProjection,
     OrthographicProjection,

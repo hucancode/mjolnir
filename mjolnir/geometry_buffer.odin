@@ -1,7 +1,6 @@
 package mjolnir
 
 import "core:log"
-import "core:math/linalg"
 import "geometry"
 import "resource"
 import vk "vendor:vulkan"

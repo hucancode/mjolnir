@@ -31,7 +31,7 @@ keyframe_sample :: proc(frames: []Keyframe($T), t: f32) -> T {
   a := frames[i - 1]
   b := frames[i]
   alpha := (t - a.time) / (b.time - a.time)
-  when T == linalg.Quaternionf16 || T == linalg.Quaternionf32 || T == linalg.Quaternionf64 {
+  when T == quaternion64 || T == quaternion128 || T == quaternion256 {
     return linalg.quaternion_slerp(a.value, b.value, alpha)
   } else {
     return linalg.lerp(a.value, b.value, alpha)
@@ -125,7 +125,7 @@ instance_update :: proc(instance: ^Instance, delta_time: f32) {
 
 Channel :: struct {
   positions: []Keyframe([3]f32),
-  rotations: []Keyframe(linalg.Quaternionf32),
+  rotations: []Keyframe(quaternion128),
   scales:    []Keyframe([3]f32),
 }
 
@@ -143,7 +143,7 @@ channel_sample :: proc(
   t: f32,
 ) -> (
   position: [3]f32,
-  rotation: linalg.Quaternionf32,
+  rotation: quaternion128,
   scale: [3]f32,
 ) {
   position = keyframe_sample(channel.positions, t)

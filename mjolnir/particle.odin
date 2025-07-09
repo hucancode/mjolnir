@@ -1,10 +1,7 @@
 package mjolnir
 
 import "core:log"
-import linalg "core:math/linalg"
-import "core:slice"
 import "geometry"
-import "resource"
 import vk "vendor:vulkan"
 
 MAX_PARTICLES :: 65536

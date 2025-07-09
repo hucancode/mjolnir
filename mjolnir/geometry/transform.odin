@@ -5,7 +5,7 @@ import linalg "core:math/linalg"
 
 Transform :: struct {
   position:     [3]f32,
-  rotation:     linalg.Quaternionf32,
+  rotation:     quaternion128,
   scale:        [3]f32,
   is_dirty:     bool,
   local_matrix: matrix[4,4]f32,
@@ -63,7 +63,7 @@ rotate_by :: proc {
     rotate_by_angle,
 }
 
-rotate_by_quaternion :: proc(t: ^Transform, q: linalg.Quaternionf32) {
+rotate_by_quaternion :: proc(t: ^Transform, q: quaternion128) {
   t.rotation *= q
   t.is_dirty = true
 }
@@ -82,7 +82,7 @@ rotate :: proc {
   rotate_angle,
 }
 
-rotate_quaternion :: proc(t: ^Transform, q: linalg.Quaternionf32) {
+rotate_quaternion :: proc(t: ^Transform, q: quaternion128) {
   t.rotation = q
   t.is_dirty = true
 }

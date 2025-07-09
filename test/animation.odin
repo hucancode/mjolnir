@@ -112,7 +112,7 @@ test_position_sampling :: proc(t: ^testing.T) {
   )
 }
 
-almost_equal_quaternion :: proc(a, b: linalg.Quaternionf32) -> bool {
+almost_equal_quaternion :: proc(a, b: quaternion128) -> bool {
   return(
     a.x - b.x <= linalg.F32_EPSILON &&
     a.y - b.y <= linalg.F32_EPSILON &&
@@ -128,7 +128,7 @@ test_quaternion_sampling :: proc(t: ^testing.T) {
   q3 := linalg.quaternion_angle_axis_f32(math.PI, {0, 1, 0}) // 180 around Y
   q4 := linalg.quaternion_angle_axis_f32(math.PI, {1, 0, 0}) // 180 around X
 
-  frames := []animation.Keyframe(linalg.Quaternionf32) {
+  frames := []animation.Keyframe(quaternion128) {
     {time = 0.0, value = q1},
     {time = 1.0, value = q2},
     {time = 2.0, value = q3},
@@ -164,12 +164,12 @@ animation_sample_benchmark :: proc(t: ^testing.T) {
   DURATION :: 10.0
   Transform :: struct {
     position: [4]f32,
-    rotation: linalg.Quaternionf32,
+    rotation: quaternion128,
     scale:    [4]f32,
   }
   Animation :: struct {
     position: []animation.Keyframe([4]f32),
-    rotation: []animation.Keyframe(linalg.Quaternionf32),
+    rotation: []animation.Keyframe(quaternion128),
     scale:    []animation.Keyframe([4]f32),
   }
   options := &time.Benchmark_Options {
@@ -188,7 +188,7 @@ animation_sample_benchmark :: proc(t: ^testing.T) {
         allocator,
       )
       anim.rotation = make(
-        []animation.Keyframe(linalg.Quaternionf32),
+        []animation.Keyframe(quaternion128),
         FRAME_COUNT,
         allocator,
       )

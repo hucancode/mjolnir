@@ -857,16 +857,10 @@ render :: proc(self: ^Engine) -> vk.Result {
   defer delete(shadow_casters)
   for &entry, entry_index in self.scene.nodes.entries do if entry.active {
     node := &entry.item
-    handle := Handle{entry.generation, u32(entry_index)}
-
-    // Check visibility for lights when using GPU culling
-    visible := true
     when USE_GPU_CULLING {
-        visible = is_node_visible(&self.scene_culling, u32(entry_index))
+        visible := is_node_visible(&self.scene_culling, u32(entry_index))
+        if !visible do continue
     }
-
-    if !visible do continue
-
     #partial switch light in &node.attachment {
     case PointLightAttachment:
       @(static) face_dirs := [6][3]f32{{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}}
