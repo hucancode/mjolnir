@@ -8,12 +8,11 @@ Mjolnir is a minimalistic rendering engine. The goal is to create a simple set o
 
 # Work in Progress
 
-- Culling
-- Defered Rendering
+- Render To Texture
 
 ## To do
 
-- Multi thread rendering
+- Parallel rendering / GPU Indirect Drawing
 
 # Disclaimer
 
