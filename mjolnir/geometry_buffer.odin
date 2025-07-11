@@ -7,7 +7,7 @@ import vk "vendor:vulkan"
 
 // 128 byte push constant budget
 PushConstant :: struct {
-  world:                    matrix[4,4]f32, // 64 bytes
+  world:                    matrix[4, 4]f32, // 64 bytes
   bone_matrix_offset:       u32, // 4
   albedo_index:             u32, // 4
   metallic_roughness_index: u32, // 4
@@ -16,6 +16,7 @@ PushConstant :: struct {
   metallic_value:           f32, // 4
   roughness_value:          f32, // 4
   emissive_value:           f32, // 4
+  camera_index:             u32, // 4
 }
 
 RendererGBuffer :: struct {
@@ -30,7 +31,7 @@ renderer_gbuffer_init :: proc(
 ) -> vk.Result {
   depth_format: vk.Format = .D32_SFLOAT
   set_layouts := [?]vk.DescriptorSetLayout {
-    g_camera_descriptor_set_layout, // set = 0 (camera uniforms)
+    g_bindless_camera_buffer_set_layout, // set = 0 (bindless camera buffer)
     g_textures_set_layout, // set = 1 (bindless textures)
     g_bindless_bone_buffer_set_layout, // set = 2 (bone matrices)
   }
@@ -222,49 +223,73 @@ renderer_gbuffer_begin :: proc(
   render_target: ^RenderTarget,
   command_buffer: vk.CommandBuffer,
 ) {
+  position_texture := resource.get(
+    g_image_2d_buffers,
+    render_target.position_texture,
+  )
   position_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
-    imageView = render_target.position,
+    imageView = position_texture.view,
     imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
     loadOp = .CLEAR,
     storeOp = .STORE,
     clearValue = {color = {float32 = {0.0, 0.0, 0.0, 0.0}}},
   }
+  normal_texture := resource.get(
+    g_image_2d_buffers,
+    render_target.normal_texture,
+  )
   normal_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
-    imageView = render_target.normal,
+    imageView = normal_texture.view,
     imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
     loadOp = .CLEAR,
     storeOp = .STORE,
     clearValue = {color = {float32 = {0.0, 0.0, 0.0, 1.0}}},
   }
+  albedo_texture := resource.get(
+    g_image_2d_buffers,
+    render_target.albedo_texture,
+  )
   albedo_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
-    imageView = render_target.albedo,
+    imageView = albedo_texture.view,
     imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
     loadOp = .CLEAR,
     storeOp = .STORE,
     clearValue = {color = {float32 = {0.0, 0.0, 0.0, 1.0}}},
   }
+  metallic_roughness_texture := resource.get(
+    g_image_2d_buffers,
+    render_target.metallic_roughness_texture,
+  )
   metallic_roughness_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
-    imageView = render_target.metallic,
+    imageView = metallic_roughness_texture.view,
     imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
     loadOp = .CLEAR,
     storeOp = .STORE,
     clearValue = {color = {float32 = {0.0, 0.0, 0.0, 1.0}}},
   }
+  emissive_texture := resource.get(
+    g_image_2d_buffers,
+    render_target.emissive_texture,
+  )
   emissive_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
-    imageView = render_target.emissive,
+    imageView = emissive_texture.view,
     imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
     loadOp = .CLEAR,
     storeOp = .STORE,
     clearValue = {color = {float32 = {0.0, 0.0, 0.0, 1.0}}},
   }
+  depth_texture := resource.get(
+    g_image_2d_buffers,
+    render_target.depth_texture,
+  )
   depth_attachment := vk.RenderingAttachmentInfoKHR {
     sType       = .RENDERING_ATTACHMENT_INFO_KHR,
-    imageView   = render_target.depth,
+    imageView   = depth_texture.view,
     imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
     loadOp      = .LOAD,
     storeOp     = .STORE,
@@ -314,7 +339,7 @@ renderer_gbuffer_render :: proc(
   command_buffer: vk.CommandBuffer,
 ) {
   descriptor_sets := [?]vk.DescriptorSet {
-    g_camera_descriptor_sets[g_frame_index],
+    g_bindless_camera_buffer_descriptor_set,
     g_textures_descriptor_set,
     g_bindless_bone_buffer_descriptor_set,
   }
@@ -355,6 +380,7 @@ renderer_gbuffer_render :: proc(
         // DEBUG: Use a constant color for albedo to test G-buffer -> lighting pass
         push_constants := PushConstant {
           world                    = node.transform.world_matrix,
+          camera_index             = render_target.camera.index,
           albedo_index             = min(
             MAX_TEXTURES - 1,
             material.albedo.index,

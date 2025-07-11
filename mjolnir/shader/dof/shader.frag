@@ -9,7 +9,7 @@ const uint SAMPLER_LINEAR_REPEAT = 3;
 layout(location = 0) in vec2 v_uv;
 layout(location = 0) out vec4 out_color;
 
-layout(set = 0, binding = 0) uniform GBufferIndices {
+layout(push_constant) uniform PostProcessPushConstant {
     uint gbuffer_position_index;
     uint gbuffer_normal_index;
     uint gbuffer_albedo_index;
@@ -17,24 +17,20 @@ layout(set = 0, binding = 0) uniform GBufferIndices {
     uint gbuffer_emissive_index;
     uint gbuffer_depth_index;
     uint input_image_index;
-    uint padding[1];
-} gbuffer_indices;
-
-layout(set = 1, binding = 0) uniform texture2D textures[];
-layout(set = 1, binding = 1) uniform sampler samplers[];
-layout(set = 1, binding = 2) uniform textureCube textures_cube[];
-
-layout(push_constant) uniform DoFParams {
     float focus_distance;    // Distance to the focus plane
     float focus_range;       // Range where objects are in focus
     float blur_strength;     // Maximum blur radius
     float bokeh_intensity;   // Bokeh effect intensity
 } dof;
 
+layout(set = 0, binding = 0) uniform texture2D textures[];
+layout(set = 0, binding = 1) uniform sampler samplers[];
+layout(set = 0, binding = 2) uniform textureCube textures_cube[];
+
 // Camera parameters - these should match camera setup
 // TODO: move those to uniform buffer
-const float near_plane = 0.01;
-const float far_plane = 100.0;
+const float near_plane = 0.1;
+const float far_plane = 50.0;
 const float MAX_BLUR_RADIUS = 16.0;
 
 float linearize_depth(float depth) {
@@ -63,7 +59,7 @@ float gaussian_weight(float distance, float sigma) {
 
 // Bokeh blur - creates circular blur pattern
 vec4 bokeh_blur(vec2 uv, float blur_radius) {
-    vec2 texel_size = 1.0 / vec2(textureSize(sampler2D(textures[gbuffer_indices.input_image_index], samplers[SAMPLER_LINEAR_CLAMP]), 0));
+    vec2 texel_size = 1.0 / vec2(textureSize(sampler2D(textures[dof.input_image_index], samplers[SAMPLER_LINEAR_CLAMP]), 0));
     vec4 color = vec4(0.0);
     float total_weight = 0.0;
 
@@ -82,7 +78,7 @@ vec4 bokeh_blur(vec2 uv, float blur_radius) {
 
                 // Check bounds
                 if (sample_uv.x >= 0.0 && sample_uv.x <= 1.0 && sample_uv.y >= 0.0 && sample_uv.y <= 1.0) {
-                    vec4 sample_color = texture(sampler2D(textures[gbuffer_indices.input_image_index], samplers[SAMPLER_LINEAR_CLAMP]), sample_uv);
+                    vec4 sample_color = texture(sampler2D(textures[dof.input_image_index], samplers[SAMPLER_LINEAR_CLAMP]), sample_uv);
 
                     // Gaussian weight for smooth falloff
                     float weight = gaussian_weight(distance, sigma);
@@ -98,13 +94,13 @@ vec4 bokeh_blur(vec2 uv, float blur_radius) {
         }
     }
 
-    vec4 original = texture(sampler2D(textures[gbuffer_indices.input_image_index], samplers[SAMPLER_LINEAR_CLAMP]), v_uv);
+    vec4 original = texture(sampler2D(textures[dof.input_image_index], samplers[SAMPLER_LINEAR_CLAMP]), v_uv);
     return total_weight > 0.0 ? color / total_weight : original;
 }
 
 // Fast separable Gaussian blur for performance
 vec4 gaussian_blur(vec2 uv, float blur_radius, bool horizontal) {
-    vec2 texel_size = 1.0 / vec2(textureSize(sampler2D(textures[gbuffer_indices.input_image_index], samplers[SAMPLER_LINEAR_CLAMP]), 0));
+    vec2 texel_size = 1.0 / vec2(textureSize(sampler2D(textures[dof.input_image_index], samplers[SAMPLER_LINEAR_CLAMP]), 0));
     vec4 color = vec4(0.0);
     float total_weight = 0.0;
 
@@ -114,7 +110,7 @@ vec4 gaussian_blur(vec2 uv, float blur_radius, bool horizontal) {
     // Use fewer samples for performance
     for (float i = -blur_radius; i <= blur_radius; i += 1.0) {
         vec2 offset = direction * i * texel_size;
-        vec4 sample_color = texture(sampler2D(textures[gbuffer_indices.input_image_index], samplers[SAMPLER_LINEAR_CLAMP]), uv + offset);
+        vec4 sample_color = texture(sampler2D(textures[dof.input_image_index], samplers[SAMPLER_LINEAR_CLAMP]), uv + offset);
         float weight = gaussian_weight(abs(i), sigma);
 
         color += sample_color * weight;
@@ -125,8 +121,8 @@ vec4 gaussian_blur(vec2 uv, float blur_radius, bool horizontal) {
 }
 
 void main() {
-    vec4 original_color = texture(sampler2D(textures[gbuffer_indices.input_image_index], samplers[SAMPLER_LINEAR_CLAMP]), v_uv);
-    float depth = texture(sampler2D(textures[gbuffer_indices.gbuffer_depth_index], samplers[SAMPLER_NEAREST_CLAMP]), v_uv).r;
+    vec4 original_color = texture(sampler2D(textures[dof.input_image_index], samplers[SAMPLER_LINEAR_CLAMP]), v_uv);
+    float depth = texture(sampler2D(textures[dof.gbuffer_depth_index], samplers[SAMPLER_NEAREST_CLAMP]), v_uv).r;
     float linear_depth = linearize_depth(depth);
     // Calculate blur amount based on depth
     float blur_radius = compute_blur_amount(linear_depth);

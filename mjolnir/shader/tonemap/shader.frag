@@ -9,28 +9,24 @@ const uint SAMPLER_LINEAR_REPEAT = 3;
 layout(location = 0) in vec2 v_uv;
 layout(location = 0) out vec4 out_color;
 
-layout(set = 0, binding = 0) uniform GBufferIndices {
+layout(set = 0, binding = 0) uniform texture2D textures[];
+layout(set = 0, binding = 1) uniform sampler samplers[];
+layout(set = 0, binding = 2) uniform textureCube textures_cube[];
+
+layout(push_constant) uniform PostProcessPushConstant {
     uint gbuffer_position_index;
     uint gbuffer_normal_index;
     uint gbuffer_albedo_index;
     uint gbuffer_metallic_index;
     uint gbuffer_emissive_index;
+    uint gbuffer_depth_index;
     uint input_image_index;
-    uint padding[2];
-} gbuffer_indices;
-
-layout(set = 1, binding = 0) uniform texture2D textures[];
-layout(set = 1, binding = 1) uniform sampler samplers[];
-layout(set = 1, binding = 2) uniform textureCube textures_cube[];
-
-layout(push_constant) uniform ToneMapParams {
     float exposure;
     float gamma;
-    float padding[2];
 };
 
 void main() {
-    vec3 color = texture(sampler2D(textures[gbuffer_indices.input_image_index], samplers[SAMPLER_LINEAR_CLAMP]), v_uv).rgb;
+    vec3 color = texture(sampler2D(textures[input_image_index], samplers[SAMPLER_LINEAR_CLAMP]), v_uv).rgb;
     // Simple Reinhard tonemapping
     color = vec3(1.0) - exp(-color * exposure);
     color = pow(color, vec3(1.0 / gamma));

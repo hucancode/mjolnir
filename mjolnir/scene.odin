@@ -248,11 +248,13 @@ Scene :: struct {
 scene_init :: proc(self: ^Scene) {
   // Create main camera
   main_camera_handle, main_camera_ptr := resource.alloc(&g_cameras)
-  main_camera_ptr^ = geometry.make_camera_orbit(
+  main_camera_ptr^ = geometry.make_camera_look_at(
+    {10, 5, 10}, // from
+    {0, 0, 0}, // to
     math.PI * 0.5, // fov
     16.0 / 9.0, // aspect_ratio
-    0.01, // near
-    100.0, // far
+    0.1, // near
+    20.0, // far
   )
   self.main_camera = main_camera_handle
   log.infof(
@@ -268,79 +270,15 @@ scene_init :: proc(self: ^Scene) {
   self.traversal_stack = make([dynamic]SceneTraverseEntry, 0)
 }
 
-// Helper function to initialize cameras for point lights
-init_point_light_cameras :: proc(light: ^PointLightAttachment) {
-  if light.cameras[0].index != 0 || light.cameras[0].generation != 0 {
-    return
-  }
-  // Face directions and ups for cube faces (negated to match camera +Z forward)
-  @(static) face_dirs := [6][3]f32 {
-    {-1, 0, 0},
-    {1, 0, 0},
-    {0, -1, 0},
-    {0, 1, 0},
-    {0, 0, -1},
-    {0, 0, 1},
-  }
-  @(static) face_ups := [6][3]f32 {
-    {0, -1, 0},
-    {0, -1, 0},
-    {0, 0, 1},
-    {0, 0, -1},
-    {0, -1, 0},
-    {0, -1, 0},
-  }
-  // Create 6 cameras for cube faces
-  for i in 0 ..< 6 {
-    camera_handle, camera_ptr := resource.alloc(&g_cameras)
-    camera_ptr^ = geometry.make_camera_perspective(
-      math.PI * 0.5, // 90 degrees FOV for cube faces
-      1.0, // Square aspect ratio
-      0.01, // near
-      light.radius, // far based on light radius
-    )
-    camera_ptr.rotation = linalg.quaternion_from_forward_and_up(
-      face_dirs[i],
-      face_ups[i],
-    )
-    light.cameras[i] = camera_handle
-  }
-  log.debugf("Initialized 6 cameras for point light")
-}
-
-// Helper function to initialize camera for spot lights
-init_spot_light_camera :: proc(light: ^SpotLightAttachment) {
-  if light.camera.index != 0 || light.camera.generation != 0 {
-    return
-  }
-  camera_handle, camera_ptr := resource.alloc(&g_cameras)
-  camera_ptr^ = geometry.make_camera_perspective(
-    light.angle * 2.0, // FOV based on spot light angle
-    1.0, // Square aspect ratio for shadow map
-    0.01, // near
-    light.radius, // far based on light radius
-  )
-  light.camera = camera_handle
-  log.debugf("Initialized camera for spot light: %v", camera_handle)
-}
-
 scene_deinit :: proc(self: ^Scene) {
   resource.pool_deinit(self.nodes, deinit_node)
   delete(self.traversal_stack)
 }
 
-switch_camera_mode_scene :: proc(self: ^Scene) {
-  main_camera := resource.get(g_cameras, self.main_camera)
-  if main_camera == nil {
-    return
-  }
-  _, in_orbit_mode := main_camera.movement_data.(geometry.CameraOrbitMovement)
-  if in_orbit_mode {
-    geometry.camera_switch_to_free(main_camera)
-  } else {
-    geometry.camera_switch_to_orbit(main_camera, nil, nil)
-  }
-}
+// Camera mode switching is now handled by camera controllers
+// switch_camera_mode_scene :: proc(self: ^Scene) {
+//   // This function is no longer needed with the new camera controller system
+// }
 
 scene_traverse :: proc(
   self: ^Scene,

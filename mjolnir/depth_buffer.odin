@@ -28,7 +28,7 @@ renderer_depth_prepass_init :: proc(
     size       = size_of(PushConstant),
   }
   set_layouts := [?]vk.DescriptorSetLayout {
-    g_camera_descriptor_set_layout, // set = 0 (camera uniforms)
+    g_bindless_camera_buffer_set_layout, // set = 0 (bindless camera buffer)
     g_bindless_bone_buffer_set_layout, // set = 1 (for skinning)
   }
   pipeline_layout_info := vk.PipelineLayoutCreateInfo {
@@ -72,9 +72,13 @@ renderer_depth_prepass_begin :: proc(
   render_target: ^RenderTarget,
   command_buffer: vk.CommandBuffer,
 ) {
+  depth_texture := resource.get(
+    g_image_2d_buffers,
+    render_target.depth_texture,
+  )
   depth_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
-    imageView = render_target.depth,
+    imageView = depth_texture.view,
     imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
     loadOp = .CLEAR,
     storeOp = .STORE,
@@ -111,9 +115,12 @@ renderer_depth_prepass_render :: proc(
   self: ^RendererDepthPrepass,
   render_input: ^RenderInput,
   command_buffer: vk.CommandBuffer,
+  camera_index: u32,
 ) -> int {
+  rendered_count := 0
+  log.debugf("Depth prepass: processing %d batches", len(render_input.batches))
   descriptor_sets := [?]vk.DescriptorSet {
-    g_camera_descriptor_sets[g_frame_index], // set 0
+    g_bindless_camera_buffer_descriptor_set, // set 0
     g_bindless_bone_buffer_descriptor_set, // set 1
   }
   vk.CmdBindDescriptorSets(
@@ -126,7 +133,6 @@ renderer_depth_prepass_render :: proc(
     0,
     nil,
   )
-  rendered_count := 0
   current_pipeline: vk.Pipeline = 0
   for batch_key, batch_group in render_input.batches {
     if batch_key.material_type == .WIREFRAME ||
@@ -155,7 +161,8 @@ renderer_depth_prepass_render :: proc(
             current_pipeline = pipeline
           }
           push_constant := PushConstant {
-            world = node.transform.world_matrix,
+            world        = node.transform.world_matrix,
+            camera_index = camera_index,
           }
           if node_has_skin {
             push_constant.bone_matrix_offset =

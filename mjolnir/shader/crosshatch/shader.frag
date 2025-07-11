@@ -9,7 +9,11 @@ const uint SAMPLER_LINEAR_REPEAT = 3;
 layout(location = 0) in vec2 v_uv;
 layout(location = 0) out vec4 out_color;
 
-layout(set = 0, binding = 0) uniform GBufferIndices {
+layout(set = 0, binding = 0) uniform texture2D textures[];
+layout(set = 0, binding = 1) uniform sampler samplers[];
+layout(set = 0, binding = 2) uniform textureCube textures_cube[];
+
+layout(push_constant) uniform PostProcessPushConstant {
     uint gbuffer_position_index;
     uint gbuffer_normal_index;
     uint gbuffer_albedo_index;
@@ -17,14 +21,6 @@ layout(set = 0, binding = 0) uniform GBufferIndices {
     uint gbuffer_emissive_index;
     uint gbuffer_depth_index;
     uint input_image_index;
-    uint padding[1];
-} gbuffer_indices;
-
-layout(set = 1, binding = 0) uniform texture2D textures[];
-layout(set = 1, binding = 1) uniform sampler samplers[];
-layout(set = 1, binding = 2) uniform textureCube textures_cube[];
-
-layout(push_constant) uniform CrossHatchParams {
     vec2 resolution;
     float hatch_offset_y;
     float lum_threshold_01;
@@ -39,8 +35,8 @@ const float EDGE_SENSITIVITY = 0.3; // lesser means less edge detected
 
 // Camera parameters - these should match camera setup
 // TODO: move those to uniform buffer
-const float near_plane = 0.01;
-const float far_plane = 100.0;
+const float near_plane = 0.1;
+const float far_plane = 50.0;
 
 float linearize_depth(float depth) {
     float z = depth * 2.0 - 1.0; // Back to NDC
@@ -48,7 +44,7 @@ float linearize_depth(float depth) {
 }
 
 vec3 edge() {
-    vec2 texel_size = 1.0 / vec2(textureSize(sampler2D(textures[gbuffer_indices.input_image_index], samplers[SAMPLER_LINEAR_CLAMP]), 0));
+    vec2 texel_size = 1.0 / vec2(textureSize(sampler2D(textures[input_image_index], samplers[SAMPLER_LINEAR_CLAMP]), 0));
 
     // Sobel kernels
     float kernelX[9] = float[](
@@ -74,15 +70,15 @@ vec3 edge() {
     // Depth Sobel
     float sumX_depth = 0.0;
     float sumY_depth = 0.0;
-    float center_depth = linearize_depth(texture(sampler2D(textures[gbuffer_indices.gbuffer_depth_index], samplers[SAMPLER_NEAREST_CLAMP]), v_uv).r);
+    float center_depth = linearize_depth(texture(sampler2D(textures[gbuffer_depth_index], samplers[SAMPLER_NEAREST_CLAMP]), v_uv).r);
 
     for (int i = 0; i < 9; ++i) {
         vec2 uv_offset = v_uv + offset[i] * texel_size;
-        vec3 normal = texture(sampler2D(textures[gbuffer_indices.gbuffer_normal_index], samplers[SAMPLER_NEAREST_CLAMP]), uv_offset).rgb;
+        vec3 normal = texture(sampler2D(textures[gbuffer_normal_index], samplers[SAMPLER_NEAREST_CLAMP]), uv_offset).rgb;
         sumX_normal += normal * kernelX[i];
         sumY_normal += normal * kernelY[i];
 
-        float depth = linearize_depth(texture(sampler2D(textures[gbuffer_indices.gbuffer_depth_index], samplers[SAMPLER_NEAREST_CLAMP]), uv_offset).r);
+        float depth = linearize_depth(texture(sampler2D(textures[gbuffer_depth_index], samplers[SAMPLER_NEAREST_CLAMP]), uv_offset).r);
         sumX_depth += (depth - center_depth) * kernelX[i];
         sumY_depth += (depth - center_depth) * kernelY[i];
     }
@@ -98,7 +94,7 @@ vec3 edge() {
 }
 
 vec3 hatch() {
-    vec3 color = texture(sampler2D(textures[gbuffer_indices.input_image_index], samplers[SAMPLER_LINEAR_CLAMP]), v_uv).rgb;
+    vec3 color = texture(sampler2D(textures[input_image_index], samplers[SAMPLER_LINEAR_CLAMP]), v_uv).rgb;
 
     float lum = length(color) / sqrt(3.0);
     float ret = 1.0;
@@ -125,7 +121,7 @@ vec3 hatch() {
 }
 
 void main() {
-    vec4 rgba = texture(sampler2D(textures[gbuffer_indices.input_image_index], samplers[SAMPLER_LINEAR_CLAMP]), v_uv);
+    vec4 rgba = texture(sampler2D(textures[input_image_index], samplers[SAMPLER_LINEAR_CLAMP]), v_uv);
     vec3 color = rgba.rgb;
     // Apply edge detection using the normal buffer (darkens edges)
     color *= 1.0 - max(edge(), 0.4);

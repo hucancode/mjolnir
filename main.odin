@@ -19,6 +19,12 @@ engine: mjolnir.Engine
 forcefield_handle: mjolnir.Handle
 forcefield_node: ^mjolnir.Node
 
+// Camera controllers
+orbit_controller: geometry.CameraController
+free_controller: geometry.CameraController
+current_controller: ^geometry.CameraController
+tab_was_pressed: bool
+
 main :: proc() {
   context.logger = log.create_console_logger()
   engine.setup_proc = setup
@@ -35,7 +41,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
   )
   plain_material_handle, _, _ := create_material()
   wireframe_material_handle, _, _ := create_wireframe_material()
-  goldstar_material_handle, goldstar_material, _ := create_transparent_material({.ALBEDO_TEXTURE})
+  goldstar_material_handle, goldstar_material, _ :=
+    create_transparent_material({.ALBEDO_TEXTURE})
   goldstar_material.albedo = goldstar_texture_handle
   cube_geom := make_cube()
   cube_mesh_handle, _, _ := create_mesh(cube_geom)
@@ -49,11 +56,12 @@ setup :: proc(engine: ^mjolnir.Engine) {
     ground_albedo_handle,
   )
   ground_mesh_handle, _, _ := create_mesh(make_quad())
+  cone_mesh_handle, _, _ := create_mesh(make_cone())
   if true {
     log.info("spawning cubes in a grid")
     space: f32 = 2.0
     size: f32 = 0.3
-    nx, ny, nz := 5, 2, 5
+    nx, ny, nz := 10, 2, 15
     for x in 1 ..< nx {
       for y in 1 ..< ny {
         for z in 1 ..< nz {
@@ -61,14 +69,26 @@ setup :: proc(engine: ^mjolnir.Engine) {
             metallic_value = f32(x - 1) / f32(nx - 1),
             roughness_value = f32(z - 1) / f32(nz - 1),
           ) or_continue
-          _, node := spawn(
-            &engine.scene,
-            MeshAttachment {
-              handle = sphere_mesh_handle,
-              material = mat_handle,
-              cast_shadow = true,
-            },
-          )
+          node: ^Node
+          if x % 3 == 0 {
+            _, node = spawn(
+              &engine.scene,
+              MeshAttachment{handle = cube_mesh_handle, material = mat_handle},
+            )
+          } else if x % 3 == 1 {
+            _, node = spawn(
+              &engine.scene,
+              MeshAttachment{handle = cone_mesh_handle, material = mat_handle},
+            )
+          } else {
+            _, node = spawn(
+              &engine.scene,
+              MeshAttachment {
+                handle = sphere_mesh_handle,
+                material = mat_handle,
+              },
+            )
+          }
           translate(
             &node.transform,
             (f32(x) - f32(nx) * 0.5) * space,
@@ -89,6 +109,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
       MeshAttachment {
         handle = ground_mesh_handle,
         material = ground_mat_handle,
+        cast_shadow = true,
       },
     )
     translate(&ground_node.transform, x = -0.5 * size, z = -0.5 * size)
@@ -100,6 +121,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
       MeshAttachment {
         handle = ground_mesh_handle,
         material = ground_mat_handle,
+        cast_shadow = true,
       },
     )
     translate(&left_wall.transform, x = size * 0.5, y = 0, z = -0.5 * size)
@@ -112,6 +134,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
       MeshAttachment {
         handle = ground_mesh_handle,
         material = ground_mat_handle,
+        cast_shadow = true,
       },
     )
     translate(
@@ -129,6 +152,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
       MeshAttachment {
         handle = ground_mesh_handle,
         material = ground_mat_handle,
+        cast_shadow = true,
       },
     )
     translate(
@@ -146,9 +170,15 @@ setup :: proc(engine: ^mjolnir.Engine) {
       MeshAttachment {
         handle = ground_mesh_handle,
         material = ground_mat_handle,
+        cast_shadow = true,
       },
     )
-    translate(&ceiling.transform, x = -0.5 * size, y = size, z = 0.5 * size)
+    translate(
+      &ceiling.transform,
+      x = -0.5 * size,
+      y = size * 0.5,
+      z = 0.5 * size,
+    )
     rotate(&ceiling.transform, -math.PI, linalg.VECTOR3F32_X_AXIS)
     scale(&ceiling.transform, size)
   }
@@ -184,68 +214,70 @@ setup :: proc(engine: ^mjolnir.Engine) {
       }
     }
   }
-  log.infof("creating %d lights", LIGHT_COUNT)
-  // Create lights and light cubes
-  for i in 0 ..< LIGHT_COUNT {
-    color := [4]f32 {
-      math.sin(f32(i)),
-      math.cos(f32(i)),
-      math.sin(f32(i)),
-      1.0,
-    }
-    light: ^Node
-    should_make_spot_light := false
-    should_make_spot_light = i % 2 != 0
-    // should_make_spot_light = true
-    if should_make_spot_light {
-      light_handles[i], light = spawn(
+  if true {
+    log.infof("creating %d lights", LIGHT_COUNT)
+    // Create lights and light cubes
+    for i in 0 ..< LIGHT_COUNT {
+      color := [4]f32 {
+        math.sin(f32(i)),
+        math.cos(f32(i)),
+        math.sin(f32(i)),
+        1.0,
+      }
+      light: ^Node
+      should_make_spot_light := false
+      should_make_spot_light = i % 2 != 0
+      // should_make_spot_light = true
+      if should_make_spot_light {
+        light_handles[i], light = spawn(
+          &engine.scene,
+          SpotLightAttachment {
+            color = color,
+            angle = math.PI * 0.4,
+            radius = 10,
+            cast_shadow = true,
+          },
+        )
+        rotate(&light.transform, math.PI * 0.2, linalg.VECTOR3F32_X_AXIS)
+      } else {
+        light_handles[i], light = spawn(
+          &engine.scene,
+          PointLightAttachment{color = color, radius = 7, cast_shadow = true},
+        )
+      }
+      translate(&light.transform, 0, 3, -1)
+      cube_node: ^Node
+      light_cube_handles[i], cube_node = spawn_child(
         &engine.scene,
-        SpotLightAttachment {
-          color = color,
-          angle = math.PI * 0.3,
-          radius = 5,
-          cast_shadow = true,
+        light_handles[i],
+        MeshAttachment {
+          handle = cube_mesh_handle,
+          material = plain_material_handle,
         },
       )
-      rotate(&light.transform, math.PI * 0.2, linalg.VECTOR3F32_X_AXIS)
-    } else {
-      light_handles[i], light = spawn(
-        &engine.scene,
-        PointLightAttachment{color = color, radius = 5, cast_shadow = true},
-      )
+      translate(&cube_node.transform, x = 0.5)
+      scale(&cube_node.transform, 0.1)
     }
-    translate(&light.transform, 0, 3, -1)
-    cube_node: ^Node
-    light_cube_handles[i], cube_node = spawn_child(
-      &engine.scene,
-      light_handles[i],
-      MeshAttachment {
-        handle = cube_mesh_handle,
-        material = plain_material_handle,
-      },
-    )
-    translate(&cube_node.transform, 0, 0.3, 0)
-    scale(&cube_node.transform, 0.1)
+    // spawn(
+    //   &engine.scene,
+    //   DirectionalLightAttachment {
+    //     color = {0.3, 0.3, 0.3, 1.0},
+    //     cast_shadow = true,
+    //   },
+    // )
   }
-  spawn(
-    &engine.scene,
-    DirectionalLightAttachment {
-      color = {0.3, 0.3, 0.3, 1.0},
-      cast_shadow = true,
-    },
-  )
 
   if false {
     // effect_add_bloom(&engine.postprocess, 0.8, 0.5, 16.0)
     // Create a bright white ball to test bloom effect
     bright_material_handle, _, _ := create_material(emissive_value = 30.0)
     _, bright_ball_node := spawn(
-      &engine.scene,
-      MeshAttachment {
-        handle      = sphere_mesh_handle,
-        material    = bright_material_handle,
-        cast_shadow = false, // Emissive objects don't need shadows
-      },
+    &engine.scene,
+    MeshAttachment {
+      handle      = sphere_mesh_handle,
+      material    = bright_material_handle,
+      cast_shadow = false, // Emissive objects don't need shadows
+    },
     )
     translate(&bright_ball_node.transform, x = 1.0) // Position it above the ground
     scale(&bright_ball_node.transform, 0.2) // Make it a reasonable size
@@ -332,14 +364,28 @@ setup :: proc(engine: ^mjolnir.Engine) {
     )
     geometry.scale(&forcefield_visual.transform, 0.2)
   }
-  effect_add_fog(&engine.postprocess, {0.2, 0.5, 0.9}, 0.02, 3.0, 50.0)
+  // effect_add_fog(&engine.postprocess, {0.4, 0.0, 0.8}, 0.02, 5.0, 20.0)
   // effect_add_crosshatch(&engine.postprocess, {1280, 720})
   // effect_add_blur(&engine.postprocess, 18.0)
   // effect_add_tonemap(&engine.postprocess, 1.5, 1.3)
   // effect_add_dof(&engine.postprocess)
-  // effect_add_grayscale(&engine.postprocess, 0.3)
+  // effect_add_grayscale(&engine.postprocess, 0.9)
   // effect_add_bloom(&engine.postprocess)
   // effect_add_outline(&engine.postprocess, 2.0, {1.0, 0.0, 0.0})
+  // Initialize camera controllers
+  geometry.setup_camera_controller_callbacks(engine.window)
+  orbit_controller = geometry.camera_controller_orbit_init(
+    engine.window,
+    {0, 0, 0},
+    10.0,
+  )
+  free_controller = geometry.camera_controller_free_init(
+    engine.window,
+    5.0,
+    2.0,
+  )
+  current_controller = &orbit_controller
+
   log.info("setup complete")
 }
 
@@ -356,6 +402,38 @@ render_2d :: proc(engine: ^mjolnir.Engine, ctx: ^mu.Context) {
 
 update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
   using mjolnir, geometry
+
+  // Handle camera controller switching with Tab key
+  tab_pressed := glfw.GetKey(engine.window, glfw.KEY_TAB) == glfw.PRESS
+  if tab_pressed && !tab_was_pressed {
+    if current_controller == &orbit_controller {
+      current_controller = &free_controller
+      log.info("Switched to free camera")
+    } else {
+      current_controller = &orbit_controller
+      log.info("Switched to orbit camera")
+    }
+  }
+  tab_was_pressed = tab_pressed
+
+  // Update camera controller
+  main_camera := resource.get(mjolnir.g_cameras, engine.scene.main_camera)
+  if main_camera != nil {
+    if current_controller == &orbit_controller {
+      geometry.camera_controller_orbit_update(
+        current_controller,
+        main_camera,
+        delta_time,
+      )
+    } else {
+      geometry.camera_controller_free_update(
+        current_controller,
+        main_camera,
+        delta_time,
+      )
+    }
+  }
+
   t := time_since_app_start(engine) * 0.5
   if forcefield_node != nil {
     geometry.translate(

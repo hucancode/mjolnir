@@ -1,11 +1,22 @@
 #version 450
 #extension GL_EXT_nonuniform_qualifier : require
 
-// camera set = 0
-layout(set = 0, binding = 0) uniform SceneUniforms {
+// Camera structure
+struct CameraUniform {
     mat4 view;
-    mat4 proj;
+    mat4 projection;
+    vec2 viewport_size;
+    float camera_near;
+    float camera_far;
+    vec3 camera_position;
+    float padding[9]; // Align to 192-byte
 };
+
+// Bindless camera buffer set = 0
+layout(set = 0, binding = 0) readonly buffer CameraBuffer {
+    CameraUniform cameras[];
+} camera_buffer;
+
 // textures set = 1
 layout (set = 1, binding = 0) uniform texture2D textures[];
 layout (set = 1, binding = 1) uniform sampler samplers[];

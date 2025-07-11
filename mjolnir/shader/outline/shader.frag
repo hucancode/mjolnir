@@ -9,33 +9,30 @@ const uint SAMPLER_LINEAR_REPEAT = 3;
 layout(location = 0) in vec2 v_uv;
 layout(location = 0) out vec4 out_color;
 
-layout(set = 0, binding = 0) uniform GBufferIndices {
+layout(set = 0, binding = 0) uniform texture2D textures[];
+layout(set = 0, binding = 1) uniform sampler samplers[];
+layout(set = 0, binding = 2) uniform textureCube textures_cube[];
+
+layout(push_constant) uniform PostProcessPushConstant {
     uint gbuffer_position_index;
     uint gbuffer_normal_index;
     uint gbuffer_albedo_index;
     uint gbuffer_metallic_index;
     uint gbuffer_emissive_index;
+    uint gbuffer_depth_index;
     uint input_image_index;
-    uint padding[2];
-} gbuffer_indices;
-
-layout(set = 1, binding = 0) uniform texture2D textures[];
-layout(set = 1, binding = 1) uniform sampler samplers[];
-layout(set = 1, binding = 2) uniform textureCube textures_cube[];
-
-layout(push_constant) uniform OutlineParams {
     vec3 color;
     float line_width;
 };
 
 void main() {
-    vec2 texel = 1.0 / vec2(textureSize(sampler2D(textures[gbuffer_indices.input_image_index], samplers[SAMPLER_LINEAR_CLAMP]), 0));
+    vec2 texel = 1.0 / vec2(textureSize(sampler2D(textures[input_image_index], samplers[SAMPLER_LINEAR_CLAMP]), 0));
 
-    vec4 center_color = texture(sampler2D(textures[gbuffer_indices.input_image_index], samplers[SAMPLER_LINEAR_CLAMP]), v_uv);
-    vec4 left_color = texture(sampler2D(textures[gbuffer_indices.input_image_index], samplers[SAMPLER_LINEAR_CLAMP]), v_uv + vec2(-texel.x * line_width, 0));
-    vec4 right_color = texture(sampler2D(textures[gbuffer_indices.input_image_index], samplers[SAMPLER_LINEAR_CLAMP]), v_uv + vec2( texel.x * line_width, 0));
-    vec4 up_color = texture(sampler2D(textures[gbuffer_indices.input_image_index], samplers[SAMPLER_LINEAR_CLAMP]), v_uv + vec2(0,  texel.y * line_width));
-    vec4 down_color = texture(sampler2D(textures[gbuffer_indices.input_image_index], samplers[SAMPLER_LINEAR_CLAMP]), v_uv + vec2(0, -texel.y * line_width));
+    vec4 center_color = texture(sampler2D(textures[input_image_index], samplers[SAMPLER_LINEAR_CLAMP]), v_uv);
+    vec4 left_color = texture(sampler2D(textures[input_image_index], samplers[SAMPLER_LINEAR_CLAMP]), v_uv + vec2(-texel.x * line_width, 0));
+    vec4 right_color = texture(sampler2D(textures[input_image_index], samplers[SAMPLER_LINEAR_CLAMP]), v_uv + vec2( texel.x * line_width, 0));
+    vec4 up_color = texture(sampler2D(textures[input_image_index], samplers[SAMPLER_LINEAR_CLAMP]), v_uv + vec2(0,  texel.y * line_width));
+    vec4 down_color = texture(sampler2D(textures[input_image_index], samplers[SAMPLER_LINEAR_CLAMP]), v_uv + vec2(0, -texel.y * line_width));
     // Simple edge detection using luminance difference with neighbors
     float center = dot(center_color.rgb, vec3(0.299, 0.587, 0.114));
     float threshold = 0.2;

@@ -4,31 +4,6 @@ import "core:math"
 import "core:log"
 import linalg "core:math/linalg"
 
-CameraOrbitMovement :: struct {
-  target:       [3]f32,
-  distance:     f32,
-  yaw:          f32, // Rotation around Y-axis
-  pitch:        f32, // Rotation around X-axis
-  min_distance: f32,
-  max_distance: f32,
-  min_pitch:    f32,
-  max_pitch:    f32,
-}
-
-DEFAULT_ORBIT_DATA := CameraOrbitMovement {
-  target       = {0.0, 0.0, 0.0},
-  distance     = 6.0,
-  yaw          = math.PI * 0.2,
-  pitch        = math.PI * 0.2,
-  min_distance = 1.0,
-  max_distance = 20.0,
-  min_pitch    = -0.2 * math.PI,
-  max_pitch    = 0.45 * math.PI,
-}
-
-
-CameraFreeMovement :: struct {
-}
 PerspectiveProjection :: struct {
   fov:          f32,
   aspect_ratio: f32,
@@ -44,14 +19,9 @@ OrthographicProjection :: struct {
 }
 
 Camera :: struct {
-  movement_data: union {
-    CameraFreeMovement,
-    CameraOrbitMovement,
-  },
-  up:            [3]f32,
-  position:      [3]f32,
-  rotation:      quaternion128,
-  projection:    union {
+  position:   [3]f32,
+  rotation:   quaternion128,
+  projection: union {
     PerspectiveProjection,
     OrthographicProjection,
   },
@@ -64,10 +34,8 @@ make_camera_perspective :: proc(
   far: f32,
 ) -> Camera {
   return Camera {
-    up = {0.0, 1.0, 0.0},
     position = {0.0, 0.0, 0.0},
     rotation = linalg.QUATERNIONF32_IDENTITY,
-    movement_data = CameraFreeMovement{},
     projection = PerspectiveProjection {
       fov = fov,
       aspect_ratio = aspect_ratio,
@@ -84,10 +52,8 @@ make_camera_ortho :: proc(
   far: f32,
 ) -> Camera {
   return Camera {
-    up = {0.0, 1.0, 0.0},
     position = {0.0, 0.0, 0.0},
     rotation = linalg.QUATERNIONF32_IDENTITY,
-    movement_data = CameraFreeMovement{},
     projection = OrthographicProjection {
       width = width,
       height = height,
@@ -97,109 +63,86 @@ make_camera_ortho :: proc(
   }
 }
 
-make_camera_orbit :: proc(
-  fov: f32,
-  aspect_ratio: f32,
-  near: f32,
-  far: f32,
+// Camera creation with look-at functionality
+make_camera_look_at :: proc(
+  from, to: [3]f32,
+  fov, aspect_ratio, near, far: f32,
 ) -> Camera {
-  cam := Camera {
-    up = {0.0, 1.0, 0.0},
-    rotation = linalg.QUATERNIONF32_IDENTITY,
-    movement_data = DEFAULT_ORBIT_DATA,
-    projection = PerspectiveProjection {
-      fov = fov,
-      aspect_ratio = aspect_ratio,
-      near = near,
-      far = far,
-    },
-  }
-  update_orbit_position(&cam) // Set initial position and rotation
-  return cam
+  camera := make_camera_perspective(fov, aspect_ratio, near, far)
+  camera_look_at(&camera, from, to)
+  return camera
 }
 
-camera_switch_to_orbit :: proc(
-  camera: ^Camera,
-  target: Maybe([3]f32),
-  distance: Maybe(f32),
-) {
-  orbit_data := DEFAULT_ORBIT_DATA
-  if t, ok := target.?; ok {
-    orbit_data.target = t
+// Safe up vector calculation to avoid gimbal lock
+calculate_safe_up_vector :: proc(forward: [3]f32) -> [3]f32 {
+  world_up := [3]f32{0, 1, 0}
+  // If forward is nearly parallel with world up, use alternative up
+  if math.abs(linalg.dot(forward, world_up)) > 0.999 {
+    world_up = {0, 0, 1}  // Use Z-axis as fallback
   }
-  if d, ok := distance.?; ok {
-    orbit_data.distance = d
-  }
-  // Reset yaw and pitch or carry them over if desired
-  orbit_data.yaw = 0.0
-  orbit_data.pitch = 0.0
-  camera.movement_data = orbit_data
-  update_orbit_position(camera)
+  return world_up
 }
 
-camera_switch_to_free :: proc(camera: ^Camera) {
-  camera.movement_data = CameraFreeMovement{}
+// Quaternion creation from forward and up vectors
+quaternion_from_forward_and_up :: proc(forward, up: [3]f32) -> quaternion128 {
+  right := linalg.normalize(linalg.cross(forward, up))
+  recalc_up := linalg.cross(right, forward)
+  
+  // Create rotation matrix from basis vectors
+  rotation_matrix := linalg.Matrix3f32{
+    right.x,     recalc_up.x,     -forward.x,
+    right.y,     recalc_up.y,     -forward.y,
+    right.z,     recalc_up.z,     -forward.z,
+  }
+  
+  return linalg.quaternion_from_matrix3_f32(rotation_matrix)
 }
 
-camera_orbit_rotate :: proc(self: ^Camera, yaw_delta: f32, pitch_delta: f32) {
-  movement, ok := &self.movement_data.(CameraOrbitMovement)
-  if !ok {
-    return
+// Universal camera manipulation functions
+
+// Look at target with automatic up vector calculation
+camera_look_at :: proc(camera: ^Camera, from, to: [3]f32, world_up := [3]f32{0, 1, 0}) {
+  camera.position = from
+  forward := linalg.normalize(to - from)
+  
+  // Safe up vector calculation
+  safe_up := world_up
+  if math.abs(linalg.dot(forward, world_up)) > 0.999 {
+    safe_up = {0, 0, 1}  // Use Z-axis if Y is too close to forward
+    if math.abs(linalg.dot(forward, safe_up)) > 0.999 {
+      safe_up = {1, 0, 0}  // Use X-axis as last resort
+    }
   }
-  movement.yaw += yaw_delta
-  movement.pitch += pitch_delta
-  PI_HALF :: math.PI / 2.0
-  epsilon :: 0.001
-  movement.pitch = math.clamp(
-    movement.pitch,
-    -PI_HALF + epsilon,
-    PI_HALF - epsilon,
-  )
-  update_orbit_position(self)
-  //log.infof("Orbit camera rotated: yaw %f, pitch %f", movement.yaw, movement.pitch)
+  
+  camera.rotation = quaternion_from_forward_and_up(forward, safe_up)
 }
 
-camera_orbit_zoom :: proc(camera: ^Camera, delta_distance: f32) {
-  movement, ok := &camera.movement_data.(CameraOrbitMovement)
-  if !ok {
-    return
-  }
-  movement.distance = clamp(
-    movement.distance + delta_distance,
-    movement.min_distance,
-    movement.max_distance,
-  )
-  // log.infof("Zoomed to distance: delta %f -> %f", delta_distance, movement.distance)
-  update_orbit_position(camera)
+// Set camera position
+camera_set_position :: proc(camera: ^Camera, position: [3]f32) {
+  camera.position = position
 }
 
-set_orbit_target :: proc(
-  camera: ^Camera,
-  new_target: [3]f32,
-) {
-  movement, ok := &camera.movement_data.(CameraOrbitMovement)
-  if !ok {
-    return
-  }
-  movement.target = new_target
-  update_orbit_position(camera)
+// Set camera rotation
+camera_set_rotation :: proc(camera: ^Camera, rotation: quaternion128) {
+  camera.rotation = rotation
 }
 
-update_orbit_position :: proc(camera: ^Camera) {
-  movement, ok := &camera.movement_data.(CameraOrbitMovement)
-  if !ok {
-    return
-  }
-  sin_pitch := math.sin_f32(movement.pitch)
-  cos_pitch := math.cos(movement.pitch)
-  sin_yaw := math.sin_f32(movement.yaw)
-  cos_yaw := math.cos(movement.yaw)
-  offset_direction := [3]f32 {
-    cos_pitch * cos_yaw,
-    sin_pitch,
-    cos_pitch * sin_yaw,
-  }
-  camera.position = movement.target + offset_direction * movement.distance
+// Move camera by delta
+camera_move :: proc(camera: ^Camera, delta: [3]f32) {
+  camera.position += delta
+}
+
+// Rotate camera by yaw/pitch deltas
+camera_rotate :: proc(camera: ^Camera, delta_yaw, delta_pitch: f32) {
+  // Create rotation quaternions for yaw (around world Y) and pitch (around local X)
+  yaw_rotation := linalg.quaternion_angle_axis(delta_yaw, [3]f32{0, 1, 0})
+  right := camera_right(camera^)
+  pitch_rotation := linalg.quaternion_angle_axis(delta_pitch, right)
+  
+  // Apply rotations
+  camera.rotation = yaw_rotation * camera.rotation
+  camera.rotation = camera.rotation * pitch_rotation
+  camera.rotation = linalg.quaternion_normalize(camera.rotation)
 }
 
 calculate_projection_matrix :: proc(
@@ -228,27 +171,16 @@ calculate_projection_matrix :: proc(
 }
 
 calculate_view_matrix :: proc(camera: Camera) -> matrix[4,4]f32 {
-  switch movement_data in camera.movement_data {
-  case CameraOrbitMovement:
-    return linalg.matrix4_look_at(
-      camera.position,
-      movement_data.target,
-      camera.up,
-    )
-  case CameraFreeMovement:
-    forward_vec := camera_forward(camera)
-    up_vec := camera_up(camera)
-    target_point := camera.position + forward_vec
-    return linalg.matrix4_look_at(camera.position, target_point, up_vec)
-  case:
-    return linalg.MATRIX4F32_IDENTITY
-  }
+  forward_vec := camera_forward(camera)
+  up_vec := camera_up(camera)
+  target_point := camera.position + forward_vec
+  return linalg.matrix4_look_at(camera.position, target_point, up_vec)
 }
 
 camera_forward :: proc(camera: Camera) -> [3]f32 {
   return linalg.quaternion_mul_vector3(
     camera.rotation,
-    linalg.VECTOR3F32_Z_AXIS,
+    -linalg.VECTOR3F32_Z_AXIS,
   )
 }
 
@@ -289,6 +221,6 @@ camera_get_near_far :: proc(camera: Camera) -> (near: f32, far: f32) {
   case OrthographicProjection:
     return proj.near, proj.far
   case:
-    return 0.01, 100.0
+    return 0.1, 50.0
   }
 }

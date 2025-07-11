@@ -50,7 +50,6 @@ FogEffect :: struct {
   density: f32,
   start:   f32,
   end:     f32,
-  padding: [2]f32,
 }
 
 CrossHatchEffect :: struct {
@@ -82,6 +81,85 @@ PostProcessEffectType :: enum int {
   NONE,
 }
 
+// Combined push constant structures for each effect type
+GrayscalePushConstant :: struct {
+  using base: BasePushConstant,
+  // Effect parameters
+  weights:    [3]f32,
+  strength:   f32,
+}
+
+ToneMapPushConstant :: struct {
+  using base: BasePushConstant,
+  // Effect parameters
+  exposure:   f32,
+  gamma:      f32,
+}
+
+BlurPushConstant :: struct {
+  using base:     BasePushConstant,
+  // Effect parameters
+  radius:         f32,
+  direction:      f32,
+  weight_falloff: f32,
+}
+
+BloomPushConstant :: struct {
+  using base:  BasePushConstant,
+  // Effect parameters
+  threshold:   f32,
+  intensity:   f32,
+  blur_radius: f32,
+  direction:   f32,
+}
+
+OutlinePushConstant :: struct {
+  using base: BasePushConstant,
+  // Effect parameters
+  color:      [3]f32,
+  thickness:  f32,
+}
+
+FogPushConstant :: struct {
+  using base: BasePushConstant,
+  // Effect parameters
+  color:      [4]f32, // Changed from [3]f32 to [4]f32 to match GLSL vec4
+  density:    f32,
+  start:      f32,
+  end:        f32,
+}
+
+CrossHatchPushConstant :: struct {
+  using base:       BasePushConstant,
+  // Effect parameters
+  resolution:       [2]f32,
+  hatch_offset_y:   f32,
+  lum_threshold_01: f32,
+  lum_threshold_02: f32,
+  lum_threshold_03: f32,
+  lum_threshold_04: f32,
+}
+
+DoFPushConstant :: struct {
+  using base:      BasePushConstant,
+  // Effect parameters
+  focus_distance:  f32,
+  focus_range:     f32,
+  blur_strength:   f32,
+  bokeh_intensity: f32,
+}
+
+BasePushConstant :: struct {
+  gbuffer_position_index: u32,
+  gbuffer_normal_index:   u32,
+  gbuffer_albedo_index:   u32,
+  gbuffer_metallic_index: u32,
+  gbuffer_emissive_index: u32,
+  gbuffer_depth_index:    u32,
+  input_image_index:      u32,
+  padding:                u32, // Add padding to align to 16-byte boundary for next vec4
+}
+
 PostprocessEffect :: union {
   GrayscaleEffect,
   ToneMapEffect,
@@ -94,19 +172,15 @@ PostprocessEffect :: union {
 }
 
 RendererPostProcess :: struct {
-  pipelines:              [len(PostProcessEffectType)]vk.Pipeline,
-  pipeline_layouts:       [len(PostProcessEffectType)]vk.PipelineLayout,
-  descriptor_sets:        [3]vk.DescriptorSet,
-  descriptor_set_layouts: [1]vk.DescriptorSetLayout,
-  uniform_buffers:        [3]DataBuffer(GBufferIndicesUniform),
-  effect_stack:           [dynamic]PostprocessEffect,
-  images:                 [2]Handle,
-  frames:                 [MAX_FRAMES_IN_FLIGHT]struct {
+  pipelines:        [len(PostProcessEffectType)]vk.Pipeline,
+  pipeline_layouts: [len(PostProcessEffectType)]vk.PipelineLayout,
+  effect_stack:     [dynamic]PostprocessEffect,
+  images:           [2]Handle,
+  frames:           [MAX_FRAMES_IN_FLIGHT]struct {
     image_available_semaphore: vk.Semaphore,
     render_finished_semaphore: vk.Semaphore,
     fence:                     vk.Fence,
     command_buffer:            vk.CommandBuffer,
-    descriptor_set:            vk.DescriptorSet,
   },
 }
 
@@ -279,29 +353,6 @@ effect_clear :: proc(self: ^RendererPostProcess) {
   resize(&self.effect_stack, 0)
 }
 
-postprocess_update_indices :: proc(
-  self: ^RendererPostProcess,
-  set_idx: int,
-  frame: FrameData,
-) -> vk.Result {
-  for &b in self.uniform_buffers {
-    u := data_buffer_get(&b)
-    u.gbuffer_position_index = frame.gbuffer_position.index
-    u.gbuffer_normal_index = frame.gbuffer_normal.index
-    u.gbuffer_albedo_index = frame.gbuffer_albedo.index
-    u.gbuffer_metallic_index = frame.gbuffer_metallic_roughness.index
-    u.gbuffer_emissive_index = frame.gbuffer_emissive.index
-    u.gbuffer_depth_index = frame.depth_buffer.index
-  }
-  u0 := data_buffer_get(&self.uniform_buffers[0])
-  u1 := data_buffer_get(&self.uniform_buffers[1])
-  u2 := data_buffer_get(&self.uniform_buffers[2])
-  u0.input_image_index = frame.final_image.index
-  u1.input_image_index = self.images[1].index
-  u2.input_image_index = self.images[0].index
-  return .SUCCESS
-}
-
 renderer_postprocess_init :: proc(
   self: ^RendererPostProcess,
   color_format: vk.Format,
@@ -382,62 +433,6 @@ renderer_postprocess_init :: proc(
   depth_stencil_state := vk.PipelineDepthStencilStateCreateInfo {
     sType = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
   }
-  bindings := [?]vk.DescriptorSetLayoutBinding {
-    {
-      binding         = 0, // indices uniform buffer
-      descriptorType  = .UNIFORM_BUFFER,
-      descriptorCount = 1,
-      stageFlags      = {.FRAGMENT},
-    },
-  }
-  layout_info := vk.DescriptorSetLayoutCreateInfo {
-    sType        = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-    bindingCount = len(bindings),
-    pBindings    = raw_data(bindings[:]),
-  }
-  for &set_layout in self.descriptor_set_layouts {
-    vk.CreateDescriptorSetLayout(
-      g_device,
-      &layout_info,
-      nil,
-      &set_layout,
-    ) or_return
-  }
-  for &set in self.descriptor_sets {
-    vk.AllocateDescriptorSets(
-      g_device,
-      &{
-        sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
-        descriptorPool = g_descriptor_pool,
-        descriptorSetCount = len(self.descriptor_set_layouts),
-        pSetLayouts = raw_data(self.descriptor_set_layouts[:]),
-      },
-      &set,
-    ) or_return
-  }
-
-  // Initialize uniform buffers
-  for i in 0 ..< len(self.uniform_buffers) {
-    self.uniform_buffers[i] = create_host_visible_buffer(
-      GBufferIndicesUniform,
-      1,
-      {.UNIFORM_BUFFER},
-    ) or_return
-
-    write := vk.WriteDescriptorSet {
-      sType           = .WRITE_DESCRIPTOR_SET,
-      dstSet          = self.descriptor_sets[i],
-      dstBinding      = 0,
-      descriptorCount = 1,
-      descriptorType  = .UNIFORM_BUFFER,
-      pBufferInfo     = &{
-        buffer = self.uniform_buffers[i].buffer,
-        offset = 0,
-        range = size_of(GBufferIndicesUniform),
-      },
-    }
-    vk.UpdateDescriptorSets(g_device, 1, &write, 0, nil)
-  }
   renderer_postprocess_create_images(
     self,
     width,
@@ -450,31 +445,30 @@ renderer_postprocess_init :: proc(
     push_constant_size: u32
     switch effect_type {
     case .BLUR:
-      push_constant_size = size_of(BlurEffect)
+      push_constant_size = size_of(BlurPushConstant)
     case .OUTLINE:
-      push_constant_size = size_of(OutlineEffect)
+      push_constant_size = size_of(OutlinePushConstant)
     case .GRAYSCALE:
-      push_constant_size = size_of(GrayscaleEffect)
+      push_constant_size = size_of(GrayscalePushConstant)
     case .BLOOM:
-      push_constant_size = size_of(BloomEffect)
+      push_constant_size = size_of(BloomPushConstant)
     case .TONEMAP:
-      push_constant_size = size_of(ToneMapEffect)
+      push_constant_size = size_of(ToneMapPushConstant)
     case .FOG:
-      push_constant_size = size_of(FogEffect)
+      push_constant_size = size_of(FogPushConstant)
     case .CROSSHATCH:
-      push_constant_size = size_of(CrossHatchEffect)
+      push_constant_size = size_of(CrossHatchPushConstant)
     case .DOF:
-      push_constant_size = size_of(DoFEffect)
+      push_constant_size = size_of(DoFPushConstant)
     case .NONE:
-      push_constant_size = 0
+      push_constant_size = size_of(BasePushConstant)
     }
-    push_constant_range := vk.PushConstantRange {
-      stageFlags = {.FRAGMENT},
-      size       = push_constant_size,
+    push_constant_ranges := [?]vk.PushConstantRange {
+      {stageFlags = {.FRAGMENT}, offset = 0, size = push_constant_size},
     }
+
     layout_sets := [?]vk.DescriptorSetLayout {
-      self.descriptor_set_layouts[0], // set = 0 (indices uniform buffer)
-      g_textures_set_layout, // set = 1 (bindless textures)
+      g_textures_set_layout, // set = 0 (bindless textures)
     }
     vk.CreatePipelineLayout(
       g_device,
@@ -483,7 +477,7 @@ renderer_postprocess_init :: proc(
         setLayoutCount = len(layout_sets),
         pSetLayouts = raw_data(layout_sets[:]),
         pushConstantRangeCount = 1 if push_constant_size > 0 else 0,
-        pPushConstantRanges = &push_constant_range,
+        pPushConstantRanges = raw_data(push_constant_ranges[:]),
       },
       nil,
       &self.pipeline_layouts[i],
@@ -546,16 +540,6 @@ renderer_postprocess_init :: proc(
       nil,
       &frame.fence,
     ) or_return
-    vk.AllocateDescriptorSets(
-      g_device,
-      &{
-        sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
-        descriptorPool = g_descriptor_pool,
-        descriptorSetCount = 1,
-        pSetLayouts = &self.descriptor_set_layouts[0],
-      },
-      &frame.descriptor_set,
-    ) or_return
   }
   return .SUCCESS
 }
@@ -595,15 +579,11 @@ renderer_postprocess_recreate_images :: proc(
 }
 
 renderer_postprocess_deinit :: proc(self: ^RendererPostProcess) {
-  for &buffer in self.uniform_buffers {
-    data_buffer_deinit(&buffer)
-  }
   for &frame in self.frames {
     vk.DestroySemaphore(g_device, frame.image_available_semaphore, nil)
     vk.DestroySemaphore(g_device, frame.render_finished_semaphore, nil)
     vk.DestroyFence(g_device, frame.fence, nil)
     vk.FreeCommandBuffers(g_device, g_command_pool, 1, &frame.command_buffer)
-    frame.descriptor_set = 0
   }
   for &p in self.pipelines {
     vk.DestroyPipeline(g_device, p, nil)
@@ -611,10 +591,6 @@ renderer_postprocess_deinit :: proc(self: ^RendererPostProcess) {
   }
   for &layout in self.pipeline_layouts {
     vk.DestroyPipelineLayout(g_device, layout, nil)
-    layout = 0
-  }
-  for &layout in self.descriptor_set_layouts {
-    vk.DestroyDescriptorSetLayout(g_device, layout, nil)
     layout = 0
   }
   delete(self.effect_stack)
@@ -625,17 +601,11 @@ renderer_postprocess_deinit :: proc(self: ^RendererPostProcess) {
 renderer_postprocess_begin :: proc(
   self: ^RendererPostProcess,
   command_buffer: vk.CommandBuffer,
-  frame: FrameData,
   extent: vk.Extent2D,
 ) {
   if len(self.effect_stack) == 0 {
     // if no postprocess effect, just copy the input to output
     append(&self.effect_stack, nil)
-  }
-
-  // Update indices for all descriptor sets
-  for i in 0 ..< len(self.descriptor_sets) {
-    postprocess_update_indices(self, i, frame)
   }
 
   viewport := vk.Viewport {
@@ -656,30 +626,27 @@ renderer_postprocess_render :: proc(
   command_buffer: vk.CommandBuffer,
   extent: vk.Extent2D,
   output_view: vk.ImageView,
+  render_target: ^RenderTarget,
 ) {
   for effect, i in self.effect_stack {
     is_first := i == 0
     is_last := i == len(self.effect_stack) - 1
 
     // Simple ping-pong logic:
-    // Pass 0: reads from original input (descriptor_set[0]), writes to image[0]
-    // Pass 1: reads from image[0] (descriptor_set[2]), writes to image[1]
-    // Pass 2: reads from image[1] (descriptor_set[1]), writes to image[0]
+    // Pass 0: reads from original input (final_image), writes to image[0]
+    // Pass 1: reads from image[0], writes to image[1]
+    // Pass 2: reads from image[1], writes to image[0]
     // etc.
 
-    src_idx: u32
+    input_image_index: u32
     dst_image_idx: u32
 
     if is_first {
-      src_idx = 0 // Use original input
+      input_image_index = render_target.final_image.index // Use original input
       dst_image_idx = 0 // Write to image[0]
     } else {
       prev_dst_image_idx := (i - 1) % 2
-      if prev_dst_image_idx == 0 {
-        src_idx = 2 // Read from image[0] using descriptor_set[2]
-      } else {
-        src_idx = 1 // Read from image[1] using descriptor_set[1]
-      }
+      input_image_index = self.images[prev_dst_image_idx].index // Read from previous output
       dst_image_idx = u32(i % 2) // Alternate between image[0] and image[1]
     }
 
@@ -736,9 +703,10 @@ renderer_postprocess_render :: proc(
     vk.CmdBeginRenderingKHR(command_buffer, &render_info)
     effect_type := get_effect_type(effect)
     vk.CmdBindPipeline(command_buffer, .GRAPHICS, self.pipelines[effect_type])
+
+    // Bind textures descriptor set
     descriptor_sets := [?]vk.DescriptorSet {
-      self.descriptor_sets[src_idx], // set 0 = inputs
-      g_textures_descriptor_set, // set = 1 (bindless textures)
+      g_textures_descriptor_set, // set = 0 (bindless textures)
     }
     vk.CmdBindDescriptorSets(
       command_buffer,
@@ -750,78 +718,148 @@ renderer_postprocess_render :: proc(
       0,
       nil,
     )
+    base: BasePushConstant
+    base.gbuffer_position_index = render_target.position_texture.index
+    base.gbuffer_normal_index = render_target.normal_texture.index
+    base.gbuffer_albedo_index = render_target.albedo_texture.index
+    base.gbuffer_metallic_index =
+      render_target.metallic_roughness_texture.index
+    base.gbuffer_emissive_index = render_target.emissive_texture.index
+    base.gbuffer_depth_index = render_target.depth_texture.index
+    base.input_image_index = input_image_index
+    // Create and push combined push constants based on effect type
     switch &e in effect {
     case BlurEffect:
+      push_constant := BlurPushConstant {
+        radius         = e.radius,
+        direction      = e.direction,
+        weight_falloff = e.weight_falloff,
+      }
+      push_constant.base = base
       vk.CmdPushConstants(
         command_buffer,
         self.pipeline_layouts[effect_type],
         {.FRAGMENT},
         0,
-        size_of(BlurEffect),
-        &e,
+        size_of(BlurPushConstant),
+        &push_constant,
       )
     case GrayscaleEffect:
+      push_constant := GrayscalePushConstant {
+        weights  = e.weights,
+        strength = e.strength,
+      }
+      push_constant.base = base
       vk.CmdPushConstants(
         command_buffer,
         self.pipeline_layouts[effect_type],
         {.FRAGMENT},
         0,
-        size_of(GrayscaleEffect),
-        &e,
+        size_of(GrayscalePushConstant),
+        &push_constant,
       )
     case ToneMapEffect:
+      push_constant := ToneMapPushConstant {
+        exposure = e.exposure,
+        gamma    = e.gamma,
+      }
+      push_constant.base = base
       vk.CmdPushConstants(
         command_buffer,
         self.pipeline_layouts[effect_type],
         {.FRAGMENT},
         0,
-        size_of(ToneMapEffect),
-        &e,
+        size_of(ToneMapPushConstant),
+        &push_constant,
       )
     case BloomEffect:
+      push_constant := BloomPushConstant {
+        threshold   = e.threshold,
+        intensity   = e.intensity,
+        blur_radius = e.blur_radius,
+        direction   = e.direction,
+      }
+      push_constant.base = base
       vk.CmdPushConstants(
         command_buffer,
         self.pipeline_layouts[effect_type],
         {.FRAGMENT},
         0,
-        size_of(BloomEffect),
-        &e,
+        size_of(BloomPushConstant),
+        &push_constant,
       )
     case OutlineEffect:
+      push_constant := OutlinePushConstant {
+        color     = e.color,
+        thickness = e.thickness,
+      }
+      push_constant.base = base
       vk.CmdPushConstants(
         command_buffer,
         self.pipeline_layouts[effect_type],
         {.FRAGMENT},
         0,
-        size_of(OutlineEffect),
-        &e,
+        size_of(OutlinePushConstant),
+        &push_constant,
       )
     case FogEffect:
+      push_constant: FogPushConstant
+      push_constant.base = base
+      push_constant.color = {e.color.x, e.color.y, e.color.z, 1.0} // Convert [3]f32 to [4]f32
+      push_constant.density = e.density
+      push_constant.start = e.start
+      push_constant.end = e.end
       vk.CmdPushConstants(
         command_buffer,
         self.pipeline_layouts[effect_type],
         {.FRAGMENT},
         0,
-        size_of(FogEffect),
-        &e,
+        size_of(FogPushConstant),
+        &push_constant,
       )
     case CrossHatchEffect:
+      push_constant := CrossHatchPushConstant {
+        resolution       = e.resolution,
+        hatch_offset_y   = e.hatch_offset_y,
+        lum_threshold_01 = e.lum_threshold_01,
+        lum_threshold_02 = e.lum_threshold_02,
+        lum_threshold_03 = e.lum_threshold_03,
+        lum_threshold_04 = e.lum_threshold_04,
+      }
+      push_constant.base = base
       vk.CmdPushConstants(
         command_buffer,
         self.pipeline_layouts[effect_type],
         {.FRAGMENT},
         0,
-        size_of(CrossHatchEffect),
-        &e,
+        size_of(CrossHatchPushConstant),
+        &push_constant,
       )
     case DoFEffect:
+      push_constant := DoFPushConstant {
+        focus_distance  = e.focus_distance,
+        focus_range     = e.focus_range,
+        blur_strength   = e.blur_strength,
+        bokeh_intensity = e.bokeh_intensity,
+      }
+      push_constant.base = base
       vk.CmdPushConstants(
         command_buffer,
         self.pipeline_layouts[effect_type],
         {.FRAGMENT},
         0,
-        size_of(DoFEffect),
-        &e,
+        size_of(DoFPushConstant),
+        &push_constant,
+      )
+    case:
+      // No effect or nil effect - just copy input to output
+      vk.CmdPushConstants(
+        command_buffer,
+        self.pipeline_layouts[effect_type],
+        {.FRAGMENT},
+        0,
+        size_of(BasePushConstant),
+        &base,
       )
     }
     vk.CmdDraw(command_buffer, 3, 1, 0, 0)

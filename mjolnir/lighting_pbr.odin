@@ -12,25 +12,10 @@ BG_BLUE_GRAY :: [4]f32{0.0117, 0.0117, 0.0179, 1.0}
 BG_DARK_GRAY :: [4]f32{0.0117, 0.0117, 0.0117, 1.0}
 BG_ORANGE_GRAY :: [4]f32{0.0179, 0.0179, 0.0117, 1.0}
 
-GBufferIndicesUniform :: struct {
-  gbuffer_position_index: u32,
-  gbuffer_normal_index:   u32,
-  gbuffer_albedo_index:   u32,
-  gbuffer_metallic_index: u32,
-  gbuffer_emissive_index: u32,
-  gbuffer_depth_index:    u32,
-  input_image_index:      u32, // For post-processing input
-  padding:                [1]u32,
-}
-
 RendererLighting :: struct {
   lighting_pipeline:        vk.Pipeline,
+  spot_light_pipeline:      vk.Pipeline,
   lighting_pipeline_layout: vk.PipelineLayout,
-  lighting_set_layout:      vk.DescriptorSetLayout,
-  lighting_descriptor_sets: [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
-  gbuffer_uniform_buffers:  [MAX_FRAMES_IN_FLIGHT]DataBuffer(
-    GBufferIndicesUniform,
-  ),
   environment_map:          Handle,
   brdf_lut:                 Handle,
   environment_max_lod:      f32,
@@ -43,50 +28,37 @@ RendererLighting :: struct {
 // Push constant struct for lighting pass (matches shader/lighting/shader.frag)
 // 128 byte push constant budget
 LightPushConstant :: struct {
-  light_view_proj: matrix[4,4]f32, // 64 bytes - for shadow mapping
-  light_color:     [3]f32, // 12 bytes
-  light_angle:     f32, // 4 bytes
-  light_position:  [3]f32, // 12 bytes
-  light_radius:    f32, // 4 bytes
-  light_direction: [3]f32, // 12 bytes
-  light_kind:      LightKind, // 4 bytes
-  camera_position: [3]f32, // 12 bytes
-  shadow_map_id:   u32, // 4 bytes
+  scene_camera_idx:       u32,
+  light_camera_idx:       u32, // for shadow mapping
+  shadow_map_id:          u32, // 4 bytes
+  light_kind:             LightKind, // 4 bytes
+  light_color:            [3]f32, // 12 bytes
+  light_angle:            f32, // 4 bytes
+  light_position:         [3]f32,
+  light_radius:           f32, // 4 bytes
+  light_direction:        [3]f32,
+  light_cast_shadow:      b32,
+  gbuffer_position_index: u32,
+  gbuffer_normal_index:   u32,
+  gbuffer_albedo_index:   u32,
+  gbuffer_metallic_index: u32,
+  gbuffer_emissive_index: u32,
+  gbuffer_depth_index:    u32,
+  input_image_index:      u32, // For post-processing input
 }
 
 renderer_lighting_init :: proc(
   self: ^RendererLighting,
-  frames: ^[MAX_FRAMES_IN_FLIGHT]FrameData,
   width: u32,
   height: u32,
   color_format: vk.Format = .B8G8R8A8_SRGB,
   depth_format: vk.Format = .D32_SFLOAT,
 ) -> vk.Result {
   log.debugf("renderer main init %d x %d", width, height)
-  bindings := [?]vk.DescriptorSetLayoutBinding {
-    {   // G-buffer indices uniform buffer
-      binding         = 0,
-      descriptorType  = .UNIFORM_BUFFER,
-      descriptorCount = 1,
-      stageFlags      = {.FRAGMENT},
-    },
-  }
-  set_layout_info := vk.DescriptorSetLayoutCreateInfo {
-    sType        = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-    bindingCount = len(bindings),
-    pBindings    = raw_data(bindings[:]),
-  }
-  vk.CreateDescriptorSetLayout(
-    g_device,
-    &set_layout_info,
-    nil,
-    &self.lighting_set_layout,
-  ) or_return
   // g_textures_set_layout (set 1) must be created and managed globally, not here
   pipeline_set_layouts := [?]vk.DescriptorSetLayout {
-    g_camera_descriptor_set_layout, // set = 0 (camera)
+    g_bindless_camera_buffer_set_layout, // set = 0 (camera)
     g_textures_set_layout, // set = 1 (bindless textures)
-    self.lighting_set_layout, // set = 2 (gbuffer indices uniform buffer)
   }
   push_constant_range := vk.PushConstantRange {
     stageFlags = {.VERTEX, .FRAGMENT},
@@ -161,7 +133,7 @@ renderer_lighting_init :: proc(
   depth_stencil := vk.PipelineDepthStencilStateCreateInfo {
     sType           = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
     depthTestEnable = true,
-    depthCompareOp  = .GREATER_OR_EQUAL,
+    depthCompareOp  = .GREATER_OR_EQUAL, // Default value, will be overridden dynamically
   }
   color_formats := [?]vk.Format{color_format}
   rendering_info := vk.PipelineRenderingCreateInfo {
@@ -208,6 +180,38 @@ renderer_lighting_init :: proc(
     &self.lighting_pipeline,
   ) or_return
   log.info("Lighting pipeline initialized successfully")
+
+  // Create second pipeline for spot lights with LESS_OR_EQUAL depth test
+  spot_depth_stencil := vk.PipelineDepthStencilStateCreateInfo {
+    sType           = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+    depthTestEnable = true,
+    depthCompareOp  = .LESS_OR_EQUAL,
+  }
+  spot_pipeline_info := vk.GraphicsPipelineCreateInfo {
+    sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
+    pNext               = &rendering_info,
+    stageCount          = len(shader_stages),
+    pStages             = raw_data(shader_stages[:]),
+    pVertexInputState   = &vertex_input,
+    pInputAssemblyState = &input_assembly,
+    pViewportState      = &viewport_state,
+    pRasterizationState = &rasterizer,
+    pMultisampleState   = &multisampling,
+    pColorBlendState    = &color_blending,
+    pDynamicState       = &dynamic_state,
+    pDepthStencilState  = &spot_depth_stencil,
+    layout              = self.lighting_pipeline_layout,
+  }
+  vk.CreateGraphicsPipelines(
+    g_device,
+    0,
+    1,
+    &spot_pipeline_info,
+    nil,
+    &self.spot_light_pipeline,
+  ) or_return
+  log.info("Spot light pipeline initialized successfully")
+
   environment_map: ^ImageBuffer
   self.environment_map, environment_map =
     create_hdr_texture_from_path_with_mips(
@@ -223,52 +227,6 @@ renderer_lighting_init :: proc(
     #load("assets/lut_ggx.png"),
   ) or_return
   self.ibl_intensity = 1.0 // Default IBL intensity
-  lighting_set_layouts: [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSetLayout
-  slice.fill(lighting_set_layouts[:], self.lighting_set_layout)
-  vk.AllocateDescriptorSets(
-    g_device,
-    &{
-      sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
-      descriptorPool = g_descriptor_pool,
-      descriptorSetCount = len(lighting_set_layouts),
-      pSetLayouts = raw_data(lighting_set_layouts[:]),
-    },
-    auto_cast &self.lighting_descriptor_sets,
-  ) or_return
-
-  // Initialize G-buffer uniform buffers and update descriptor sets
-  for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
-    self.gbuffer_uniform_buffers[i] = create_host_visible_buffer(
-      GBufferIndicesUniform,
-      1,
-      {.UNIFORM_BUFFER},
-    ) or_return
-
-    // Update G-buffer indices with actual handle indices
-    gbuffer_uniform := data_buffer_get(&self.gbuffer_uniform_buffers[i], 0)
-    gbuffer_uniform.gbuffer_position_index = frames[i].gbuffer_position.index
-    gbuffer_uniform.gbuffer_normal_index = frames[i].gbuffer_normal.index
-    gbuffer_uniform.gbuffer_albedo_index = frames[i].gbuffer_albedo.index
-    gbuffer_uniform.gbuffer_metallic_index =
-      frames[i].gbuffer_metallic_roughness.index
-    gbuffer_uniform.gbuffer_emissive_index = frames[i].gbuffer_emissive.index
-    gbuffer_uniform.gbuffer_depth_index = frames[i].depth_buffer.index
-
-    write := vk.WriteDescriptorSet {
-      sType           = .WRITE_DESCRIPTOR_SET,
-      dstSet          = self.lighting_descriptor_sets[i],
-      dstBinding      = 0,
-      descriptorCount = 1,
-      descriptorType  = .UNIFORM_BUFFER,
-      pBufferInfo     = &{
-        buffer = self.gbuffer_uniform_buffers[i].buffer,
-        offset = 0,
-        range = size_of(GBufferIndicesUniform),
-      },
-    }
-    vk.UpdateDescriptorSets(g_device, 1, &write, 0, nil)
-  }
-
   // Initialize light volume meshes
   self.sphere_mesh, _, _ = create_mesh(
     geometry.make_sphere(segments = 128, rings = 128),
@@ -285,33 +243,18 @@ renderer_lighting_init :: proc(
 }
 
 renderer_lighting_deinit :: proc(self: ^RendererLighting) {
-  for &buffer in self.gbuffer_uniform_buffers {
-    data_buffer_deinit(&buffer)
-  }
   vk.DestroyPipelineLayout(g_device, self.lighting_pipeline_layout, nil)
   vk.DestroyPipeline(g_device, self.lighting_pipeline, nil)
-  vk.DestroyDescriptorSetLayout(g_device, self.lighting_set_layout, nil)
+  vk.DestroyPipeline(g_device, self.spot_light_pipeline, nil)
 }
 
 renderer_lighting_recreate_images :: proc(
   self: ^RendererLighting,
-  frames: ^[MAX_FRAMES_IN_FLIGHT]FrameData,
   width: u32,
   height: u32,
   color_format: vk.Format,
   depth_format: vk.Format,
 ) -> vk.Result {
-  // Update G-buffer indices in uniform buffers
-  for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
-    gbuffer_uniform := data_buffer_get(&self.gbuffer_uniform_buffers[i], 0)
-    gbuffer_uniform.gbuffer_position_index = frames[i].gbuffer_position.index
-    gbuffer_uniform.gbuffer_normal_index = frames[i].gbuffer_normal.index
-    gbuffer_uniform.gbuffer_albedo_index = frames[i].gbuffer_albedo.index
-    gbuffer_uniform.gbuffer_metallic_index =
-      frames[i].gbuffer_metallic_roughness.index
-    gbuffer_uniform.gbuffer_emissive_index = frames[i].gbuffer_emissive.index
-    gbuffer_uniform.gbuffer_depth_index = frames[i].depth_buffer.index
-  }
   log.debugf("Updated G-buffer indices for lighting pass on resize")
   return .SUCCESS
 }
@@ -321,17 +264,19 @@ renderer_lighting_begin :: proc(
   target: RenderTarget,
   command_buffer: vk.CommandBuffer,
 ) {
+  final_image := resource.get(g_image_2d_buffers, target.final_image)
   color_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
-    imageView = target.final,
+    imageView = final_image.view,
     imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
     loadOp = .LOAD,
     storeOp = .STORE,
     clearValue = {color = {float32 = BG_BLUE_GRAY}},
   }
+  depth_texture := resource.get(g_image_2d_buffers, target.depth_texture)
   depth_attachment := vk.RenderingAttachmentInfoKHR {
     sType       = .RENDERING_ATTACHMENT_INFO_KHR,
-    imageView   = target.depth,
+    imageView   = depth_texture.view,
     imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
     loadOp      = .LOAD,
     storeOp     = .DONT_CARE,
@@ -359,9 +304,8 @@ renderer_lighting_begin :: proc(
   vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
   vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
   descriptor_sets := [?]vk.DescriptorSet {
-    g_camera_descriptor_sets[g_frame_index], // set = 0 (camera)
+    g_bindless_camera_buffer_descriptor_set, // set = 0 (bindless camera buffer)
     g_textures_descriptor_set, // set = 1 (bindless textures)
-    self.lighting_descriptor_sets[g_frame_index], // set = 2 (gbuffer indices uniform buffer)
   }
   vk.CmdBindDescriptorSets(
     command_buffer,
@@ -379,7 +323,7 @@ renderer_lighting_begin :: proc(
 renderer_lighting_render :: proc(
   self: ^RendererLighting,
   input: [dynamic]LightData,
-  camera_position: [3]f32,
+  render_target: ^RenderTarget,
   command_buffer: vk.CommandBuffer,
 ) -> int {
   rendered_count := 0
@@ -407,14 +351,24 @@ renderer_lighting_render :: proc(
     node_count += 1
     #partial switch light in light_data {
     case PointLightData:
+      // Bind regular pipeline with GREATER_OR_EQUAL depth test
+      vk.CmdBindPipeline(command_buffer, .GRAPHICS, self.lighting_pipeline)
+
       light_push := LightPushConstant {
-        light_view_proj = light.proj * light.views[0],
-        light_color     = light.color.xyz,
-        light_position  = light.position.xyz,
-        light_radius    = light.radius,
-        light_kind      = LightKind.POINT,
-        camera_position = camera_position.xyz,
-        shadow_map_id   = u32(light_id),
+        scene_camera_idx       = render_target.camera.index,
+        shadow_map_id          = light.shadow_map.index,
+        light_kind             = LightKind.POINT,
+        light_color            = light.color.xyz,
+        light_position         = light.position.xyz,
+        light_radius           = light.radius,
+        light_cast_shadow      = light.shadow_map.generation != 0, // Check if shadow map is valid
+        gbuffer_position_index = render_target.position_texture.index,
+        gbuffer_normal_index   = render_target.normal_texture.index,
+        gbuffer_albedo_index   = render_target.albedo_texture.index,
+        gbuffer_metallic_index = render_target.metallic_roughness_texture.index,
+        gbuffer_emissive_index = render_target.emissive_texture.index,
+        gbuffer_depth_index    = render_target.depth_texture.index,
+        input_image_index      = render_target.final_image.index,
       }
       vk.CmdPushConstants(
         command_buffer,
@@ -427,13 +381,22 @@ renderer_lighting_render :: proc(
       bind_and_draw_mesh(self.sphere_mesh, command_buffer)
       rendered_count += 1
     case DirectionalLightData:
+      // Bind regular pipeline with GREATER_OR_EQUAL depth test
+      vk.CmdBindPipeline(command_buffer, .GRAPHICS, self.lighting_pipeline)
+
       light_push := LightPushConstant {
-        light_view_proj = light.proj * light.view,
-        light_color     = light.color.xyz,
-        light_direction = light.direction.xyz,
-        light_kind      = LightKind.DIRECTIONAL,
-        camera_position = camera_position.xyz,
-        shadow_map_id   = u32(light_id),
+        scene_camera_idx       = render_target.camera.index,
+        light_camera_idx       = 0, // TODO: pass correct camera id
+        light_kind             = LightKind.DIRECTIONAL,
+        light_color            = light.color.xyz,
+        light_direction        = light.direction.xyz,
+        gbuffer_position_index = render_target.position_texture.index,
+        gbuffer_normal_index   = render_target.normal_texture.index,
+        gbuffer_albedo_index   = render_target.albedo_texture.index,
+        gbuffer_metallic_index = render_target.metallic_roughness_texture.index,
+        gbuffer_emissive_index = render_target.emissive_texture.index,
+        gbuffer_depth_index    = render_target.depth_texture.index,
+        input_image_index      = render_target.final_image.index,
       }
       vk.CmdPushConstants(
         command_buffer,
@@ -446,16 +409,28 @@ renderer_lighting_render :: proc(
       bind_and_draw_mesh(self.fullscreen_triangle_mesh, command_buffer)
       rendered_count += 1
     case SpotLightData:
+      // Bind spot light pipeline with LESS_OR_EQUAL depth test
+      vk.CmdBindPipeline(command_buffer, .GRAPHICS, self.spot_light_pipeline)
+
+      rt := resource.get(g_render_targets, light.render_target)
       light_push := LightPushConstant {
-        light_view_proj = light.proj * light.view,
-        light_color     = light.color.rgb,
-        light_angle     = light.angle,
-        light_position  = light.position.xyz,
-        light_radius    = light.radius,
-        light_direction = light.direction.xyz,
-        light_kind      = LightKind.SPOT,
-        camera_position = camera_position.xyz,
-        shadow_map_id   = u32(light_id),
+        scene_camera_idx       = render_target.camera.index,
+        light_camera_idx       = rt.camera.index,
+        shadow_map_id          = light.shadow_map.index,
+        light_kind             = LightKind.SPOT,
+        light_color            = light.color.xyz,
+        light_angle            = light.angle,
+        light_position         = light.position.xyz,
+        light_radius           = light.radius,
+        light_direction        = light.direction.xyz,
+        light_cast_shadow      = light.shadow_map.generation != 0, // Check if shadow map is valid
+        gbuffer_position_index = render_target.position_texture.index,
+        gbuffer_normal_index   = render_target.normal_texture.index,
+        gbuffer_albedo_index   = render_target.albedo_texture.index,
+        gbuffer_metallic_index = render_target.metallic_roughness_texture.index,
+        gbuffer_emissive_index = render_target.emissive_texture.index,
+        gbuffer_depth_index    = render_target.depth_texture.index,
+        input_image_index      = render_target.final_image.index,
       }
       vk.CmdPushConstants(
         command_buffer,
