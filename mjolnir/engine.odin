@@ -589,13 +589,14 @@ init :: proc(
         -i32(math.round(xoffset)),
         -i32(math.round(yoffset)),
       )
-      if main_camera := resource.get(g_cameras, engine.scene.main_camera);
-         main_camera != nil {
-        geometry.camera_orbit_zoom(
-          main_camera,
-          -f32(yoffset) * SCROLL_SENSITIVITY,
-        )
-      }
+      // Camera control moved to camera controllers
+      // if main_camera := resource.get(g_cameras, engine.scene.main_camera);
+      //    main_camera != nil {
+      //   geometry.camera_orbit_zoom(
+      //     main_camera,
+      //     -f32(yoffset) * SCROLL_SENSITIVITY,
+      //   )
+      // }
       if engine.mouse_scroll_proc != nil {
         engine.mouse_scroll_proc(engine, {xoffset, yoffset})
       }
@@ -722,16 +723,17 @@ update :: proc(self: ^Engine) -> bool {
     self.input.key_holding[k] = is_pressed && self.input.keys[k]
     self.input.keys[k] = is_pressed
   }
-  if self.input.mouse_holding[glfw.MOUSE_BUTTON_1] {
-    if main_camera := resource.get(g_cameras, self.scene.main_camera);
-       main_camera != nil {
-      geometry.camera_orbit_rotate(
-        main_camera,
-        f32(delta.x * MOUSE_SENSITIVITY_X),
-        f32(delta.y * MOUSE_SENSITIVITY_Y),
-      )
-    }
-  }
+  // Camera control moved to camera controllers
+  // if self.input.mouse_holding[glfw.MOUSE_BUTTON_1] {
+  //   if main_camera := resource.get(g_cameras, self.scene.main_camera);
+  //      main_camera != nil {
+  //     geometry.camera_orbit_rotate(
+  //       main_camera,
+  //       f32(delta.x * MOUSE_SENSITIVITY_X),
+  //       f32(delta.y * MOUSE_SENSITIVITY_Y),
+  //     )
+  //   }
+  // }
   if self.mouse_move_proc != nil {
     self.mouse_move_proc(self, self.input.mouse_pos, delta)
   }
@@ -1029,10 +1031,25 @@ render :: proc(self: ^Engine) -> vk.Result {
       if light.cast_shadow {
         data.shadow_map = self.cube_shadow_maps[g_frame_index][cube_shadow_map_count]
         cube_shadow_map_count += 1
-        // Generate view matrices manually for each cube face
-        // cube map layout: [-X, +X, -Y, +Y, -Z, +Z] TODO: this is different from standard layout, figure out why
-        @(static) face_dirs := [6][3]f32{{-1, 0, 0}, {1, 0, 0}, {0, -1, 0}, {0, 1, 0}, {0, 0, -1}, {0, 0, 1}}
-        @(static) face_ups := [6][3]f32{{0, -1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}, {0, -1, 0}, {0, -1, 0}}
+        // Generate view matrices for each cube face using Vulkan standard layout
+        // Vulkan cube map layers: [+X, -X, +Y, -Y, +Z, -Z] (Right, Left, Top, Bottom, Front, Back)
+        // With proper up vectors according to Vulkan coordinate system (Y-up, right-handed)
+        @(static) face_dirs := [6][3]f32{
+          { 1,  0,  0}, // +X (Right)
+          {-1,  0,  0}, // -X (Left)  
+          { 0,  1,  0}, // +Y (Top)
+          { 0, -1,  0}, // -Y (Bottom)
+          { 0,  0,  1}, // +Z (Front)
+          { 0,  0, -1}, // -Z (Back)
+        }
+        @(static) face_ups := [6][3]f32{
+          { 0, -1,  0}, // +X: Up is -Y
+          { 0, -1,  0}, // -X: Up is -Y  
+          { 0,  0,  1}, // +Y: Up is +Z
+          { 0,  0, -1}, // -Y: Up is -Z
+          { 0, -1,  0}, // +Z: Up is -Y
+          { 0, -1,  0}, // -Z: Up is -Y
+        }
         for i in 0 ..< 6 {
           // Allocate render target for this cube face
           render_target : ^RenderTarget
@@ -1050,9 +1067,8 @@ render :: proc(self: ^Engine) -> vk.Result {
             light.radius, // far based on light radius
           )
           // Set camera position and orientation for this cube face
-          camera.position = position.xyz
-          camera.rotation = linalg.quaternion_look_at([3]f32{0, 0, 0}, face_dirs[i], face_ups[i])
-          camera.up = face_ups[i]
+          target_pos := position.xyz + face_dirs[i]
+          geometry.camera_look_at(camera, position.xyz, target_pos, face_ups[i])
           render_target_update_camera_uniform(render_target)
           // Update camera in bindless buffer
           camera_uniform := get_camera_uniform(render_target.camera.index)
@@ -1084,7 +1100,7 @@ render :: proc(self: ^Engine) -> vk.Result {
     case SpotLightAttachment:
       data: SpotLightData
       data.position = node.transform.world_matrix * [4]f32{0, 0, 0, 1}
-      data.direction = node.transform.world_matrix * [4]f32{0, -1, 0, 0} // Point downward (-Y)
+      data.direction = node.transform.world_matrix * [4]f32{0, -1, 0, 0} // Point downward (-Y), toward illuminated objects
       data.world = node.transform.world_matrix
       data.radius = light.radius
       data.angle = light.angle
@@ -1108,27 +1124,13 @@ render :: proc(self: ^Engine) -> vk.Result {
           data.radius, // far
         )
 
-        camera.position = data.position.xyz
-        // Directly set camera rotation to match light direction
-        // Use light direction as forward, and Z-axis as up
-        forward := linalg.normalize(data.direction.xyz)
-        up := linalg.VECTOR3F32_Z_AXIS
-        right := linalg.normalize(linalg.cross(forward, up))
-        up = linalg.cross(right, forward) // Recompute up to ensure orthogonality
-
-        // Create rotation matrix from basis vectors
-        rotation_matrix := linalg.Matrix3f32{
-            right.x, up.x, -forward.x,
-            right.y, up.y, -forward.y,
-            right.z, up.z, -forward.z,
-        }
-        camera.rotation = linalg.quaternion_from_matrix3_f32(rotation_matrix)
+        // Set camera to look in the direction of the light
+        target_pos := data.position.xyz + data.direction.xyz
+        geometry.camera_look_at(camera, data.position.xyz, target_pos)
 
         // Debug: verify the camera direction matches light direction
         camera_forward := geometry.camera_forward(camera^)
         log.infof("camera forward: %v, light direction: %v", camera_forward, data.direction.xyz)
-
-        log.infof("spot light camera: pos=%v up=%v dir=%v", data.position.xyz, up, data.direction.xyz)
         log.infof("spot light angle=%f degrees, radius=%f", data.angle * 180.0 / math.PI, data.radius)
 
         render_target_update_camera_uniform(render_target)

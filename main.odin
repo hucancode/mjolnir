@@ -10,7 +10,7 @@ import "mjolnir/resource"
 import glfw "vendor:glfw"
 import mu "vendor:microui"
 
-LIGHT_COUNT :: 10
+LIGHT_COUNT :: 1
 light_handles: [LIGHT_COUNT]mjolnir.Handle
 light_cube_handles: [LIGHT_COUNT]mjolnir.Handle
 ground_mat_handle: mjolnir.Handle
@@ -18,6 +18,12 @@ hammer_handle: mjolnir.Handle
 engine: mjolnir.Engine
 forcefield_handle: mjolnir.Handle
 forcefield_node: ^mjolnir.Node
+
+// Camera controllers
+orbit_controller: geometry.CameraController
+free_controller: geometry.CameraController
+current_controller: ^geometry.CameraController
+tab_was_pressed: bool
 
 main :: proc() {
   context.logger = log.create_console_logger()
@@ -54,7 +60,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     log.info("spawning cubes in a grid")
     space: f32 = 2.0
     size: f32 = 0.3
-    nx, ny, nz := 15, 2, 15
+    nx, ny, nz := 10, 2, 15
     for x in 1 ..< nx {
       for y in 1 ..< ny {
         for z in 1 ..< nz {
@@ -197,7 +203,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
       }
       light: ^Node
       should_make_spot_light := false
-      should_make_spot_light = i % 2 != 0
+      // should_make_spot_light = i % 2 != 0
       // should_make_spot_light = true
       if should_make_spot_light {
         light_handles[i], light = spawn(
@@ -209,7 +215,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
             cast_shadow = true,
           },
         )
-        rotate(&light.transform, math.PI * 0.8, linalg.VECTOR3F32_X_AXIS)
+        rotate(&light.transform, math.PI * 0.2, linalg.VECTOR3F32_X_AXIS)
       } else {
         light_handles[i], light = spawn(
           &engine.scene,
@@ -335,14 +341,20 @@ setup :: proc(engine: ^mjolnir.Engine) {
     )
     geometry.scale(&forcefield_visual.transform, 0.2)
   }
-  effect_add_fog(&engine.postprocess, {0.4, 0.0, 0.8}, 0.02, 5.0, 20.0)
-  effect_add_crosshatch(&engine.postprocess, {1280, 720})
+  // effect_add_fog(&engine.postprocess, {0.4, 0.0, 0.8}, 0.02, 5.0, 20.0)
+  // effect_add_crosshatch(&engine.postprocess, {1280, 720})
   // effect_add_blur(&engine.postprocess, 18.0)
   // effect_add_tonemap(&engine.postprocess, 1.5, 1.3)
   // effect_add_dof(&engine.postprocess)
   // effect_add_grayscale(&engine.postprocess, 0.9)
   // effect_add_bloom(&engine.postprocess)
   // effect_add_outline(&engine.postprocess, 2.0, {1.0, 0.0, 0.0})
+  // Initialize camera controllers
+  geometry.setup_camera_controller_callbacks(engine.window)
+  orbit_controller = geometry.camera_controller_orbit_init(engine.window, {0, 0, 0}, 10.0)
+  free_controller = geometry.camera_controller_free_init(engine.window, 5.0, 2.0)
+  current_controller = &orbit_controller
+
   log.info("setup complete")
 }
 
@@ -359,6 +371,30 @@ render_2d :: proc(engine: ^mjolnir.Engine, ctx: ^mu.Context) {
 
 update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
   using mjolnir, geometry
+
+  // Handle camera controller switching with Tab key
+  tab_pressed := glfw.GetKey(engine.window, glfw.KEY_TAB) == glfw.PRESS
+  if tab_pressed && !tab_was_pressed {
+    if current_controller == &orbit_controller {
+      current_controller = &free_controller
+      log.info("Switched to free camera")
+    } else {
+      current_controller = &orbit_controller
+      log.info("Switched to orbit camera")
+    }
+  }
+  tab_was_pressed = tab_pressed
+
+  // Update camera controller
+  main_camera := resource.get(mjolnir.g_cameras, engine.scene.main_camera)
+  if main_camera != nil {
+    if current_controller == &orbit_controller {
+      geometry.camera_controller_orbit_update(current_controller, main_camera, delta_time)
+    } else {
+      geometry.camera_controller_free_update(current_controller, main_camera, delta_time)
+    }
+  }
+
   t := time_since_app_start(engine) * 0.5
   if forcefield_node != nil {
     geometry.translate(

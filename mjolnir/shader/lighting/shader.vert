@@ -59,7 +59,7 @@ void main() {
             float xz_scale = push.light_radius * tana * 2;
             vec3 scaled_pos = vec3(a_position.x * xz_scale, (a_position.y - 0.5) * -y_scale, a_position.z * xz_scale);
             // Orient cone along light_direction
-            vec3 up = normalize(-push.light_direction);
+            vec3 up = normalize(push.light_direction);
             vec3 forward = abs(up.y) < 0.9 ? normalize(cross(vec3(0, 1, 0), up)) : vec3(1, 0, 0);
             vec3 right = cross(up, forward);
             mat3 orientation = mat3(right, up, forward);

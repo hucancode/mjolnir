@@ -82,9 +82,10 @@ float calculateShadow(vec3 fragPos, vec3 N, CameraUniform light_camera) {
         vec3 lightToFrag = fragPos - push.light_position;
         vec3 coord = normalize(lightToFrag);
         float currentDepth = length(lightToFrag);
-        float shadowDepth = texture(samplerCube(cube_textures[push.shadow_map_id], samplers[SAMPLER_NEAREST_CLAMP]), coord).r;
-        shadowDepth = linearizeDepth(shadowDepth, 0.01, push.light_radius);
-        float bias = max(0.5 * (1.0 - dot(N, normalize(lightToFrag))), 0.01);
+        float shadowDepth = texture(samplerCube(cube_textures[push.shadow_map_id], samplers[SAMPLER_LINEAR_CLAMP]), coord).r;
+        return shadowDepth;
+        shadowDepth = linearizeDepth(shadowDepth, 0.1, push.light_radius);
+        float bias = max(0.05 * (1.0 - dot(N, normalize(lightToFrag))), 0.01);
         return (currentDepth > shadowDepth + bias) ? 0.0 : 1.0;
     } else if (push.light_kind == SPOT_LIGHT) {
         vec4 lightSpacePos = light_camera.projection * light_camera.view * vec4(fragPos, 1.0);
@@ -96,8 +97,8 @@ float calculateShadow(vec3 fragPos, vec3 N, CameraUniform light_camera) {
             shadowCoord.z < 0.0 || shadowCoord.z > 1.0) {
             return 1.0; // No shadow outside frustum
         }
-        float shadowDepth = texture(sampler2D(textures[push.shadow_map_id], samplers[SAMPLER_NEAREST_CLAMP]), shadowCoord.xy).r;
-        float bias = 0.005; // Increase bias to reduce shadow acne
+        float shadowDepth = texture(sampler2D(textures[push.shadow_map_id], samplers[SAMPLER_LINEAR_CLAMP]), shadowCoord.xy).r;
+        float bias = max(0.05 * (1.0 - dot(N, normalize(lightToFrag))), 0.01);
         return (shadowCoord.z > shadowDepth + bias) ? 0.1 : 1.0;
     }
     return 1.0;
@@ -151,5 +152,25 @@ void main() {
     CameraUniform light_camera = camera_buffer.cameras[push.light_camera_idx];
     float shadowFactor = calculateShadow(position, normal, light_camera);
     vec3 direct = brdf(normal, V, albedo, roughness, metallic, position);
-    outColor = vec4(direct * shadowFactor, 1.0);
+
+    // DEBUG: Visualize spot light shadow map data
+    if (push.light_kind == SPOT_LIGHT && false) {
+        vec4 lightSpacePos = light_camera.projection * light_camera.view * vec4(position, 1.0);
+        vec3 shadowCoord = lightSpacePos.xyz / lightSpacePos.w;
+        shadowCoord = shadowCoord * 0.5 + 0.5;
+
+        // Show shadow coordinates as color for debugging
+        if (shadowCoord.x >= 0.0 && shadowCoord.x <= 1.0 &&
+            shadowCoord.y >= 0.0 && shadowCoord.y <= 1.0 &&
+            shadowCoord.z >= 0.0 && shadowCoord.z <= 1.0) {
+            float shadowDepth = texture(sampler2D(textures[push.shadow_map_id], samplers[SAMPLER_NEAREST_CLAMP]), shadowCoord.xy).r;
+            outColor = vec4(vec3(shadowDepth), 1.0);
+            // Visualize: Red=shadow map depth, Green=current depth, Blue=shadow factor
+            return;
+        }
+            outColor = vec4(1,0,0, 1.0);
+            return;
+    }
+
+    outColor = vec4(vec3(pow(shadowFactor, 10)), 1.0);
 }

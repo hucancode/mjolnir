@@ -248,7 +248,9 @@ Scene :: struct {
 scene_init :: proc(self: ^Scene) {
   // Create main camera
   main_camera_handle, main_camera_ptr := resource.alloc(&g_cameras)
-  main_camera_ptr^ = geometry.make_camera_orbit(
+  main_camera_ptr^ = geometry.make_camera_look_at(
+    {10, 5, 10}, // from
+    {0, 0, 0},   // to
     math.PI * 0.5, // fov
     16.0 / 9.0, // aspect_ratio
     0.1, // near
@@ -273,18 +275,10 @@ scene_deinit :: proc(self: ^Scene) {
   delete(self.traversal_stack)
 }
 
-switch_camera_mode_scene :: proc(self: ^Scene) {
-  main_camera := resource.get(g_cameras, self.main_camera)
-  if main_camera == nil {
-    return
-  }
-  _, in_orbit_mode := main_camera.movement_data.(geometry.CameraOrbitMovement)
-  if in_orbit_mode {
-    geometry.camera_switch_to_free(main_camera)
-  } else {
-    geometry.camera_switch_to_orbit(main_camera, nil, nil)
-  }
-}
+// Camera mode switching is now handled by camera controllers
+// switch_camera_mode_scene :: proc(self: ^Scene) {
+//   // This function is no longer needed with the new camera controller system
+// }
 
 scene_traverse :: proc(
   self: ^Scene,
