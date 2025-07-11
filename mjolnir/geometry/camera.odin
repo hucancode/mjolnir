@@ -239,6 +239,7 @@ calculate_view_matrix :: proc(camera: Camera) -> matrix[4,4]f32 {
     forward_vec := camera_forward(camera)
     up_vec := camera_up(camera)
     target_point := camera.position + forward_vec
+    log.debugf("making camera with forward %v up %v", forward_vec, up_vec)
     return linalg.matrix4_look_at(camera.position, target_point, up_vec)
   case:
     return linalg.MATRIX4F32_IDENTITY
@@ -289,6 +290,6 @@ camera_get_near_far :: proc(camera: Camera) -> (near: f32, far: f32) {
   case OrthographicProjection:
     return proj.near, proj.far
   case:
-    return 0.01, 100.0
+    return 0.1, 50.0
   }
 }

@@ -35,7 +35,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
   )
   plain_material_handle, _, _ := create_material()
   wireframe_material_handle, _, _ := create_wireframe_material()
-  goldstar_material_handle, goldstar_material, _ := create_transparent_material({.ALBEDO_TEXTURE})
+  goldstar_material_handle, goldstar_material, _ :=
+    create_transparent_material({.ALBEDO_TEXTURE})
   goldstar_material.albedo = goldstar_texture_handle
   cube_geom := make_cube()
   cube_mesh_handle, _, _ := create_mesh(cube_geom)
@@ -148,7 +149,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
         material = ground_mat_handle,
       },
     )
-    translate(&ceiling.transform, x = -0.5 * size, y = size, z = 0.5 * size)
+    translate(&ceiling.transform, x = -0.5 * size, y = size*0.5, z = 0.5 * size)
     rotate(&ceiling.transform, -math.PI, linalg.VECTOR3F32_X_AXIS)
     scale(&ceiling.transform, size)
   }
@@ -184,56 +185,58 @@ setup :: proc(engine: ^mjolnir.Engine) {
       }
     }
   }
-  log.infof("creating %d lights", LIGHT_COUNT)
-  // Create lights and light cubes
-  for i in 0 ..< LIGHT_COUNT {
-    color := [4]f32 {
-      math.sin(f32(i)),
-      math.cos(f32(i)),
-      math.sin(f32(i)),
-      1.0,
-    }
-    light: ^Node
-    should_make_spot_light := false
-    should_make_spot_light = i % 2 != 0
-    // should_make_spot_light = true
-    if should_make_spot_light {
-      light_handles[i], light = spawn(
+  if true {
+    log.infof("creating %d lights", LIGHT_COUNT)
+    // Create lights and light cubes
+    for i in 0 ..< LIGHT_COUNT {
+      color := [4]f32 {
+        math.sin(f32(i)),
+        math.cos(f32(i)),
+        math.sin(f32(i)),
+        1.0,
+      }
+      light: ^Node
+      should_make_spot_light := false
+      should_make_spot_light = i % 2 != 0
+      // should_make_spot_light = true
+      if should_make_spot_light {
+        light_handles[i], light = spawn(
+          &engine.scene,
+          SpotLightAttachment {
+            color = color,
+            angle = math.PI * 0.4,
+            radius = 10,
+            cast_shadow = true,
+          },
+        )
+        rotate(&light.transform, math.PI * 0.8, linalg.VECTOR3F32_X_AXIS)
+      } else {
+        light_handles[i], light = spawn(
+          &engine.scene,
+          PointLightAttachment{color = color, radius = 7, cast_shadow = true},
+        )
+      }
+      translate(&light.transform, 0, 3, -1)
+      cube_node: ^Node
+      light_cube_handles[i], cube_node = spawn_child(
         &engine.scene,
-        SpotLightAttachment {
-          color = color,
-          angle = math.PI * 0.3,
-          radius = 5,
-          cast_shadow = true,
+        light_handles[i],
+        MeshAttachment {
+          handle = cube_mesh_handle,
+          material = plain_material_handle,
         },
       )
-      rotate(&light.transform, math.PI * 0.2, linalg.VECTOR3F32_X_AXIS)
-    } else {
-      light_handles[i], light = spawn(
-        &engine.scene,
-        PointLightAttachment{color = color, radius = 5, cast_shadow = true},
-      )
+      translate(&cube_node.transform, x = 0.5)
+      scale(&cube_node.transform, 0.1)
     }
-    translate(&light.transform, 0, 3, -1)
-    cube_node: ^Node
-    light_cube_handles[i], cube_node = spawn_child(
-      &engine.scene,
-      light_handles[i],
-      MeshAttachment {
-        handle = cube_mesh_handle,
-        material = plain_material_handle,
-      },
-    )
-    translate(&cube_node.transform, 0, 0.3, 0)
-    scale(&cube_node.transform, 0.1)
+    // spawn(
+    //   &engine.scene,
+    //   DirectionalLightAttachment {
+    //     color = {0.3, 0.3, 0.3, 1.0},
+    //     cast_shadow = true,
+    //   },
+    // )
   }
-  spawn(
-    &engine.scene,
-    DirectionalLightAttachment {
-      color = {0.3, 0.3, 0.3, 1.0},
-      cast_shadow = true,
-    },
-  )
 
   if false {
     // effect_add_bloom(&engine.postprocess, 0.8, 0.5, 16.0)
@@ -332,12 +335,12 @@ setup :: proc(engine: ^mjolnir.Engine) {
     )
     geometry.scale(&forcefield_visual.transform, 0.2)
   }
-  effect_add_fog(&engine.postprocess, {0.2, 0.5, 0.9}, 0.02, 3.0, 50.0)
-  // effect_add_crosshatch(&engine.postprocess, {1280, 720})
+  effect_add_fog(&engine.postprocess, {0.4, 0.0, 0.8}, 0.02, 5.0, 20.0)
+  effect_add_crosshatch(&engine.postprocess, {1280, 720})
   // effect_add_blur(&engine.postprocess, 18.0)
   // effect_add_tonemap(&engine.postprocess, 1.5, 1.3)
   // effect_add_dof(&engine.postprocess)
-  // effect_add_grayscale(&engine.postprocess, 0.3)
+  // effect_add_grayscale(&engine.postprocess, 0.9)
   // effect_add_bloom(&engine.postprocess)
   // effect_add_outline(&engine.postprocess, 2.0, {1.0, 0.0, 0.0})
   log.info("setup complete")

@@ -10,9 +10,18 @@ layout(location = 4) in vec4 inTangent;
 layout(location = 5) in uvec4 inJoints;
 layout(location = 6) in vec4 inWeights;
 
-layout(set = 0, binding = 0) uniform Uniforms {
+struct CameraUniform {
     mat4 view;
-    mat4 proj;
+    mat4 projection;
+    vec2 viewport_size;
+    float camera_near;
+    float camera_far;
+    vec3 camera_position;
+    float padding[9]; // Align to 192-byte
+};
+
+layout(set = 0, binding = 0) readonly buffer CameraBuffer {
+    CameraUniform cameras[];
 };
 // set 1 (textures), not available in vertex shader
 layout(set = 2, binding = 0) readonly buffer BoneMatrices {
@@ -22,6 +31,15 @@ layout(set = 2, binding = 0) readonly buffer BoneMatrices {
 layout(push_constant) uniform PushConstants {
     mat4 world;
     uint bone_matrix_offset;
+    uint albedo_index;
+    uint metallic_roughness_index;
+    uint normal_index;
+    uint emissive_index;
+    float metallic_value;
+    float roughness_value;
+    float emissive_value;
+    uint camera_index;
+    float padding[3];        // 12 (pad to 128)
 };
 
 layout(location = 0) out vec3 outPosition;
@@ -31,6 +49,8 @@ layout(location = 3) out vec2 outUV;
 layout(location = 4) out vec4 outTangent;
 
 void main() {
+    CameraUniform camera = cameras[camera_index];
+
     vec4 modelPosition;
     vec3 modelNormal;
     vec4 modelTangent;
@@ -55,5 +75,5 @@ void main() {
     outUV = inUV;
     outColor = inColor;
     outPosition = worldPosition.xyz;
-    gl_Position = proj * view * worldPosition;
+    gl_Position = camera.projection * camera.view * worldPosition;
 }

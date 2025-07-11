@@ -28,7 +28,8 @@ layout(push_constant) uniform PushConstants {
     float metallic_value;  // 4
     float roughness_value; // 4
     float emissive_value;  // 4
-    float padding[4];        // 12 (pad to 128)
+    uint camera_index;     // 4
+    float padding[3];        // 12 (pad to 128)
 };
 
 

@@ -13,30 +13,47 @@ layout(location = 6) in vec4 inJointWeights;
 // Output to fragment shader
 layout(location = 0) out vec4 outColor;
 
-// Uniform buffer - camera data
-layout(set = 0, binding = 0) uniform CameraUniform {
+// Camera structure
+struct CameraUniform {
     mat4 view;
     mat4 projection;
     vec2 viewport_size;
     float camera_near;
     float camera_far;
-    vec2 padding;
     vec3 camera_position;
-    float padding2;
-} camera;
+    float padding[9]; // Align to 192-byte
+};
+
+// Bindless camera buffer set = 0
+layout(set = 0, binding = 0) readonly buffer CameraBuffer {
+    CameraUniform cameras[];
+} camera_buffer;
 
 // Bone matrices
 layout(set = 2, binding = 0) readonly buffer BoneMatrices {
     mat4 matrices[];
 } boneMatrices;
 
-// Push constants
+// Push constant budget: 128 bytes
 layout(push_constant) uniform PushConstants {
     mat4 world;            // 64 bytes
     uint bone_matrix_offset; // 4
+    uint albedo_index;     // 4
+    uint metallic_roughness_index; // 4
+    uint normal_index;     // 4
+    uint emissive_index;   // 4
+    float metallic_value;  // 4
+    float roughness_value; // 4
+    float emissive_value;  // 4
+    uint camera_index;     // 4
+    float padding[3];        // 12 (pad to 128)
 };
 
+
 void main() {
+    // Get camera from bindless buffer
+    CameraUniform camera = camera_buffer.cameras[camera_index];
+
     // Calculate position based on skinning
     vec4 modelPosition;
     if (SKINNED) {

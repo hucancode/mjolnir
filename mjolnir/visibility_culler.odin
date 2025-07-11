@@ -6,7 +6,7 @@ import "geometry"
 import "resource"
 import vk "vendor:vulkan"
 
-MAX_CAMERA :: 64
+MAX_CAMERA :: 128
 MAX_NODES_IN_SCENE :: 65536
 
 // Structure passed to GPU for culling
@@ -445,19 +445,6 @@ is_node_visible :: proc(
     )^,
   )
   return result
-}
-
-// Helper functions for camera management
-get_camera_index :: proc(camera_handle: resource.Handle) -> u32 {
-  if camera_handle.index >= MAX_CAMERA {
-    log.errorf(
-      "Camera handle index %d exceeds MAX_CAMERA %d",
-      camera_handle.index,
-      MAX_CAMERA,
-    )
-    return 0
-  }
-  return camera_handle.index
 }
 
 // Count visible objects after GPU culling for a specific camera

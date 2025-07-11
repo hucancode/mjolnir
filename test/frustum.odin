@@ -72,7 +72,7 @@ test_frustum_aabb_perspective_projection :: proc(t: ^testing.T) {
   // Create a perspective projection matrix (fov = 90deg, aspect = 1, near = 1, far = 10)
   fov: f32 = math.PI / 2.0
   aspect: f32 = 1.0
-  near: f32 = 0.01
+  near: f32 = 0.1
   far: f32 = 10.0
   proj := linalg.matrix4_perspective(fov, aspect, near, far)
   frustum := geometry.make_frustum(proj)
@@ -110,7 +110,7 @@ test_frustum_camera_perspective :: proc(t: ^testing.T) {
   fov: f32 = math.PI / 2.0  // 90 degrees
   aspect: f32 = 1.0
   near: f32 = 0.1
-  far: f32 = 100.0
+  far: f32 = 50.0
   proj := linalg.matrix4_perspective(fov, aspect, near, far)
 
   // Create combined view-projection matrix
@@ -253,7 +253,7 @@ test_frustum_camera_moved :: proc(t: ^testing.T) {
   fov: f32 = math.PI / 3.0  // 60 degrees
   aspect: f32 = 16.0 / 9.0  // Widescreen aspect ratio
   near: f32 = 0.1
-  far: f32 = 100.0
+  far: f32 = 50.0
   proj := linalg.matrix4_perspective(fov, aspect, near, far)
 
   view_proj := proj * view
@@ -288,7 +288,7 @@ test_frustum_sphere_camera :: proc(t: ^testing.T) {
   camera_up := [3]f32{0, 1, 0}
 
   view := linalg.matrix4_look_at(camera_pos, camera_target, camera_up)
-  proj := linalg.matrix4_perspective_f32(math.PI / 2.0, 1.0, 0.1, 100.0)
+  proj := linalg.matrix4_perspective_f32(math.PI / 2.0, 1.0, 0.1, 50.0)
 
   view_proj := proj * view
   frustum := geometry.make_frustum(view_proj)

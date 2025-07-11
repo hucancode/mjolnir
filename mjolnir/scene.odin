@@ -251,8 +251,8 @@ scene_init :: proc(self: ^Scene) {
   main_camera_ptr^ = geometry.make_camera_orbit(
     math.PI * 0.5, // fov
     16.0 / 9.0, // aspect_ratio
-    0.01, // near
-    100.0, // far
+    0.1, // near
+    20.0, // far
   )
   self.main_camera = main_camera_handle
   log.infof(
@@ -266,62 +266,6 @@ scene_init :: proc(self: ^Scene) {
   init_node(root, "root")
   root.parent = self.root
   self.traversal_stack = make([dynamic]SceneTraverseEntry, 0)
-}
-
-// Helper function to initialize cameras for point lights
-init_point_light_cameras :: proc(light: ^PointLightAttachment) {
-  if light.cameras[0].index != 0 || light.cameras[0].generation != 0 {
-    return
-  }
-  // Face directions and ups for cube faces (negated to match camera +Z forward)
-  @(static) face_dirs := [6][3]f32 {
-    {-1, 0, 0},
-    {1, 0, 0},
-    {0, -1, 0},
-    {0, 1, 0},
-    {0, 0, -1},
-    {0, 0, 1},
-  }
-  @(static) face_ups := [6][3]f32 {
-    {0, -1, 0},
-    {0, -1, 0},
-    {0, 0, 1},
-    {0, 0, -1},
-    {0, -1, 0},
-    {0, -1, 0},
-  }
-  // Create 6 cameras for cube faces
-  for i in 0 ..< 6 {
-    camera_handle, camera_ptr := resource.alloc(&g_cameras)
-    camera_ptr^ = geometry.make_camera_perspective(
-      math.PI * 0.5, // 90 degrees FOV for cube faces
-      1.0, // Square aspect ratio
-      0.01, // near
-      light.radius, // far based on light radius
-    )
-    camera_ptr.rotation = linalg.quaternion_from_forward_and_up(
-      face_dirs[i],
-      face_ups[i],
-    )
-    light.cameras[i] = camera_handle
-  }
-  log.debugf("Initialized 6 cameras for point light")
-}
-
-// Helper function to initialize camera for spot lights
-init_spot_light_camera :: proc(light: ^SpotLightAttachment) {
-  if light.camera.index != 0 || light.camera.generation != 0 {
-    return
-  }
-  camera_handle, camera_ptr := resource.alloc(&g_cameras)
-  camera_ptr^ = geometry.make_camera_perspective(
-    light.angle * 2.0, // FOV based on spot light angle
-    1.0, // Square aspect ratio for shadow map
-    0.01, // near
-    light.radius, // far based on light radius
-  )
-  light.camera = camera_handle
-  log.debugf("Initialized camera for spot light: %v", camera_handle)
 }
 
 scene_deinit :: proc(self: ^Scene) {

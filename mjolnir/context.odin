@@ -603,4 +603,3 @@ allocate_vulkan_memory :: proc(
   ret = .SUCCESS
   return
 }
-

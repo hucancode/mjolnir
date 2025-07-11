@@ -2,6 +2,7 @@ package mjolnir
 
 import "core:log"
 import "geometry"
+import "resource"
 import vk "vendor:vulkan"
 
 MAX_PARTICLES :: 65536
@@ -842,8 +843,12 @@ renderer_particle_init_render_pipeline :: proc(
   self: ^RendererParticle,
 ) -> vk.Result {
   descriptor_set_layouts := [?]vk.DescriptorSetLayout {
-    g_camera_descriptor_set_layout, // set = 0 for camera
+    g_bindless_camera_buffer_set_layout, // set = 0 for bindless camera buffer
     g_textures_set_layout, // set = 1 for textures
+  }
+  push_constant_range := vk.PushConstantRange {
+    stageFlags = {.VERTEX},
+    size = size_of(u32), // camera_index
   }
   vk.CreatePipelineLayout(
     g_device,
@@ -851,6 +856,8 @@ renderer_particle_init_render_pipeline :: proc(
       sType = .PIPELINE_LAYOUT_CREATE_INFO,
       setLayoutCount = len(descriptor_set_layouts),
       pSetLayouts = raw_data(descriptor_set_layouts[:]),
+      pushConstantRangeCount = 1,
+      pPushConstantRanges = &push_constant_range,
     },
     nil,
     &self.render_pipeline_layout,
@@ -1026,14 +1033,14 @@ renderer_particle_begin :: proc(
   )
   color_attachment := vk.RenderingAttachmentInfoKHR {
     sType       = .RENDERING_ATTACHMENT_INFO_KHR,
-    imageView   = render_target.final,
+    imageView   = resource.get(g_image_2d_buffers, render_target.final_image).view,
     imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
     loadOp      = .LOAD, // preserve previous contents
     storeOp     = .STORE,
   }
   depth_attachment := vk.RenderingAttachmentInfoKHR {
     sType       = .RENDERING_ATTACHMENT_INFO_KHR,
-    imageView   = render_target.depth,
+    imageView   = resource.get(g_image_2d_buffers, render_target.depth_texture).view,
     imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
     loadOp      = .LOAD,
     storeOp     = .STORE,
@@ -1065,11 +1072,12 @@ renderer_particle_begin :: proc(
 renderer_particle_render :: proc(
   self: ^RendererParticle,
   command_buffer: vk.CommandBuffer,
+  camera_index: u32,
 ) {
   // Use indirect draw - GPU handles the count
   vk.CmdBindPipeline(command_buffer, .GRAPHICS, self.render_pipeline)
   descriptor_sets := [?]vk.DescriptorSet {
-    g_camera_descriptor_sets[g_frame_index], // set 0 (camera)
+    g_bindless_camera_buffer_descriptor_set, // set 0 (bindless camera buffer)
     g_textures_descriptor_set, // set 1 (textures)
   }
   vk.CmdBindDescriptorSets(
@@ -1081,6 +1089,16 @@ renderer_particle_render :: proc(
     raw_data(descriptor_sets[:]),
     0,
     nil,
+  )
+  // Set camera index via push constants
+  camera_idx := camera_index
+  vk.CmdPushConstants(
+    command_buffer,
+    self.render_pipeline_layout,
+    {.VERTEX},
+    0,
+    size_of(u32),
+    &camera_idx,
   )
   offset: vk.DeviceSize = 0
   vk.CmdBindVertexBuffers(

@@ -13,17 +13,32 @@ out gl_PerVertex {
     float gl_PointSize;
 };
 
-// camera set = 0
-layout(set = 0, binding = 0) uniform SceneUniforms {
+// Camera structure
+struct CameraUniform {
     mat4 view;
-    mat4 proj;
+    mat4 projection;
+    vec2 viewport_size;
+    float camera_near;
+    float camera_far;
+    vec3 camera_position;
+    float padding[9]; // Align to 192-byte
 };
 
+// Bindless camera buffer set = 0
+layout(set = 0, binding = 0) readonly buffer CameraBuffer {
+    CameraUniform cameras[];
+} camera_buffer;
+
+layout(push_constant) uniform ParticlePushConstants {
+    uint camera_index;
+} push;
+
 void main() {
-    vec4 cameraPosition = -inverse(view)[3];
+    CameraUniform camera = camera_buffer.cameras[push.camera_index];
+    vec4 cameraPosition = -inverse(camera.view)[3];
     outColor = inColor;
     outTextureIndex = inTextureIndex;
-    gl_Position = proj * view * inPosition;
+    gl_Position = camera.projection * camera.view * inPosition;
     float dist = clamp(length((cameraPosition - inPosition).xyz), 1.0, 20.0);
     gl_PointSize = clamp(inSize / dist, 10.0, 100.0);
 }

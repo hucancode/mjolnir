@@ -23,16 +23,21 @@ const uint SAMPLER_LINEAR_CLAMP = 1;
 const uint SAMPLER_NEAREST_REPEAT = 2;
 const uint SAMPLER_LINEAR_REPEAT = 3;
 
-layout(set = 0, binding = 0) uniform CameraUniform {
+// Camera structure
+struct CameraUniform {
     mat4 view;
     mat4 projection;
     vec2 viewport_size;
     float camera_near;
     float camera_far;
-    vec2 padding;
     vec3 camera_position;
-    float padding2;
-} camera;
+    float padding[9]; // Align to 192-byte
+};
+
+// Bindless camera buffer set = 0
+layout(set = 0, binding = 0) readonly buffer CameraBuffer {
+    CameraUniform cameras[];
+} camera_buffer;
 
 
 // textures and samplers set = 1
@@ -40,8 +45,8 @@ layout(set = 1, binding = 0) uniform texture2D textures[];
 layout(set = 1, binding = 1) uniform sampler samplers[];
 layout(set = 1, binding = 2) uniform textureCube cube_textures[];
 
-// Push constants
-layout(push_constant) uniform PushConstant {
+// Push constant budget: 128 bytes
+layout(push_constant) uniform PushConstants {
     mat4 world;            // 64 bytes
     uint bone_matrix_offset; // 4
     uint albedo_index;     // 4
@@ -51,6 +56,8 @@ layout(push_constant) uniform PushConstant {
     float metallic_value;  // 4
     float roughness_value; // 4
     float emissive_value;  // 4
+    uint camera_index;     // 4
+    float padding[3];        // 12 (pad to 128)
 };
 
 // Constants
@@ -105,6 +112,9 @@ void main() {
     } else {
         albedo = inColor;
     }
+    if (albedo.a < 0.001) {
+        discard;
+    }
 
     float metallic;
     float roughness;
@@ -136,6 +146,9 @@ void main() {
         N = normalize(inNormal);
     }
 
+    // Get camera from bindless buffer
+    CameraUniform camera = camera_buffer.cameras[camera_index];
+
     // Calculate camera position from inverse view matrix
     mat4 invView = inverse(camera.view);
     vec3 cameraPos = invView[3].xyz;
@@ -161,10 +174,6 @@ void main() {
     vec3 prefilteredColor = vec3(0.1, 0.1, 0.1);
     vec2 brdf = vec2(1.0, 0.0);
     vec3 specular = prefilteredColor * (F * brdf.x + brdf.y);
-
-    // Combine lighting components
     vec3 ambient = (kD * diffuse + specular) * AMBIENT_STRENGTH + emissive;
-
-    // Final color
-    outColor = vec4(ambient, albedo.a);
+    outColor = vec4(ambient.rgb, albedo.a);
 }

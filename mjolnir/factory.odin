@@ -20,21 +20,22 @@ g_materials: resource.Pool(Material)
 g_image_2d_buffers: resource.Pool(ImageBuffer)
 g_image_cube_buffers: resource.Pool(CubeImageBuffer)
 g_cameras: resource.Pool(geometry.Camera)
+g_render_targets: resource.Pool(RenderTarget)
 
 g_bindless_bone_buffer_set_layout: vk.DescriptorSetLayout
 g_bindless_bone_buffer_descriptor_set: vk.DescriptorSet
 g_bindless_bone_buffer: DataBuffer(matrix[4, 4]f32)
 g_bone_matrix_slab: resource.SlabAllocator
 
+// Bindless camera buffer system
+g_bindless_camera_buffer_set_layout: vk.DescriptorSetLayout
+g_bindless_camera_buffer_descriptor_set: vk.DescriptorSet
+g_bindless_camera_buffer: DataBuffer(CameraUniform)
+
 // Dummy skinning buffer for static meshes
 g_dummy_skinning_buffer: DataBuffer(geometry.SkinningData)
 
 // Engine-level global descriptor sets and layouts
-
-g_camera_descriptor_set_layout: vk.DescriptorSetLayout
-g_camera_descriptor_sets: [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet
-
-// Shadow descriptor sets removed - now using bindless textures
 
 g_textures_set_layout: vk.DescriptorSetLayout
 g_textures_descriptor_set: vk.DescriptorSet
@@ -50,40 +51,12 @@ factory_init :: proc() -> vk.Result {
   resource.pool_init(&g_image_cube_buffers)
   log.infof("Initializing cameras pool... ")
   resource.pool_init(&g_cameras)
+  log.infof("Initializing render target pool... ")
+  resource.pool_init(&g_render_targets)
   log.infof("All resource pools initialized successfully")
   init_global_samplers()
   init_bone_matrix_allocator() or_return
-  // Camera descriptor set layout and sets
-  camera_bindings := [?]vk.DescriptorSetLayoutBinding {
-    {
-      binding = 0,
-      descriptorType = .UNIFORM_BUFFER,
-      descriptorCount = 1,
-      stageFlags = {.VERTEX, .FRAGMENT},
-    },
-  }
-  vk.CreateDescriptorSetLayout(
-    g_device,
-    &vk.DescriptorSetLayoutCreateInfo {
-      sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-      bindingCount = len(camera_bindings),
-      pBindings = raw_data(camera_bindings[:]),
-    },
-    nil,
-    &g_camera_descriptor_set_layout,
-  ) or_return
-  camera_set_layouts: [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSetLayout
-  slice.fill(camera_set_layouts[:], g_camera_descriptor_set_layout)
-  vk.AllocateDescriptorSets(
-    g_device,
-    &{
-      sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
-      descriptorPool = g_descriptor_pool,
-      descriptorSetCount = len(camera_set_layouts),
-      pSetLayouts = raw_data(camera_set_layouts[:]),
-    },
-    raw_data(g_camera_descriptor_sets[:]),
-  ) or_return
+  init_camera_buffer() or_return
   // Textures+samplers descriptor set
   textures_bindings := [?]vk.DescriptorSetLayoutBinding {
     {
@@ -175,10 +148,8 @@ factory_deinit :: proc() {
   resource.pool_deinit(g_cameras, proc(_: ^geometry.Camera) {})
   deinit_global_samplers()
   deinit_bone_matrix_allocator()
-  vk.DestroyDescriptorSetLayout(g_device, g_camera_descriptor_set_layout, nil)
+  deinit_camera_buffer()
   vk.DestroyDescriptorSetLayout(g_device, g_textures_set_layout, nil)
-  g_camera_descriptor_set_layout = 0
-  g_camera_descriptor_sets = {}
   g_textures_set_layout = 0
   g_textures_descriptor_set = 0
 }
@@ -291,6 +262,90 @@ init_bone_matrix_allocator :: proc() -> vk.Result {
   ) or_return
 
   return .SUCCESS
+}
+
+init_camera_buffer :: proc() -> vk.Result {
+  log.infof("Creating camera buffer with capacity %d cameras...", MAX_CAMERA)
+
+  // Create camera buffer
+  g_bindless_camera_buffer = create_host_visible_buffer(
+    CameraUniform,
+    MAX_CAMERA,
+    {.STORAGE_BUFFER},
+    nil,
+  ) or_return
+
+  // Create descriptor set layout
+  camera_bindings := [?]vk.DescriptorSetLayoutBinding {
+    {
+      binding = 0,
+      descriptorType = .STORAGE_BUFFER,
+      descriptorCount = 1,
+      stageFlags = {.VERTEX, .FRAGMENT, .COMPUTE},
+    },
+  }
+
+  vk.CreateDescriptorSetLayout(
+    g_device,
+    &vk.DescriptorSetLayoutCreateInfo {
+      sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+      bindingCount = len(camera_bindings),
+      pBindings = raw_data(camera_bindings[:]),
+    },
+    nil,
+    &g_bindless_camera_buffer_set_layout,
+  ) or_return
+
+  // Allocate descriptor set
+  vk.AllocateDescriptorSets(
+    g_device,
+    &{
+      sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
+      descriptorPool = g_descriptor_pool,
+      descriptorSetCount = 1,
+      pSetLayouts = &g_bindless_camera_buffer_set_layout,
+    },
+    &g_bindless_camera_buffer_descriptor_set,
+  ) or_return
+
+  // Update descriptor set
+  buffer_info := vk.DescriptorBufferInfo {
+    buffer = g_bindless_camera_buffer.buffer,
+    offset = 0,
+    range  = vk.DeviceSize(vk.WHOLE_SIZE),
+  }
+
+  write := vk.WriteDescriptorSet {
+    sType           = .WRITE_DESCRIPTOR_SET,
+    dstSet          = g_bindless_camera_buffer_descriptor_set,
+    dstBinding      = 0,
+    descriptorType  = .STORAGE_BUFFER,
+    descriptorCount = 1,
+    pBufferInfo     = &buffer_info,
+  }
+
+  vk.UpdateDescriptorSets(g_device, 1, &write, 0, nil)
+
+  log.infof("Camera buffer initialized successfully")
+  return .SUCCESS
+}
+
+// Get mutable reference to camera uniform in bindless buffer
+get_camera_uniform :: proc(camera_index: u32) -> ^CameraUniform {
+  if camera_index >= MAX_CAMERA {
+    return nil
+  }
+  return data_buffer_get(&g_bindless_camera_buffer, camera_index)
+}
+
+deinit_camera_buffer :: proc() {
+  data_buffer_deinit(&g_bindless_camera_buffer)
+  vk.DestroyDescriptorSetLayout(
+    g_device,
+    g_bindless_camera_buffer_set_layout,
+    nil,
+  )
+  g_bindless_camera_buffer_set_layout = 0
 }
 
 deinit_global_samplers :: proc() {

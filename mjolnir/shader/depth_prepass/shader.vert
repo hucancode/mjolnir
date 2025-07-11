@@ -6,9 +6,18 @@ layout(location = 0) in vec3 inPosition;
 layout(location = 5) in uvec4 inJoints;
 layout(location = 6) in vec4 inWeights;
 
-layout(set = 0, binding = 0) uniform SceneUniform {
+struct CameraUniform {
     mat4 view;
     mat4 projection;
+    vec2 viewport_size;
+    float camera_near;
+    float camera_far;
+    vec3 camera_position;
+    float padding[9]; // Align to 192-byte
+};
+
+layout(set = 0, binding = 0) readonly buffer CameraBuffer {
+    CameraUniform cameras[];
 };
 
 layout(set = 1, binding = 0) readonly buffer BoneBuffer {
@@ -19,9 +28,12 @@ layout(set = 1, binding = 0) readonly buffer BoneBuffer {
 layout(push_constant) uniform PushConstant {
     mat4 world;
     uint bone_matrix_offset;
+    uint camera_index;
 };
 
 void main() {
+    CameraUniform camera = cameras[camera_index];
+    
     vec4 modelPos;
     if (SKINNED) {
         uvec4 indices = inJoints + uvec4(bone_matrix_offset);
@@ -35,5 +47,5 @@ void main() {
         modelPos = vec4(inPosition, 1.0);
     }
     vec4 worldPos = world * modelPos;
-    gl_Position = projection * view * worldPos;
+    gl_Position = camera.projection * camera.view * worldPos;
 }

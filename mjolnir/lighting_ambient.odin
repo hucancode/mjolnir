@@ -2,28 +2,30 @@ package mjolnir
 
 import "core:log"
 import "core:slice"
+import "resource"
 import vk "vendor:vulkan"
 
 AmbientPushConstant :: struct {
-  camera_position:     [3]f32,
+  camera_index:            u32,
+  environment_index:       u32,
+  brdf_lut_index:          u32,
+  gbuffer_position_index:  u32,
+  gbuffer_normal_index:    u32,
+  gbuffer_albedo_index:    u32,
+  gbuffer_metallic_index:  u32,
+  gbuffer_emissive_index:  u32,
+  gbuffer_depth_index:     u32,
+  environment_max_lod:     f32,
+  ibl_intensity:           f32,
+}
+
+RendererAmbient :: struct {
+  pipeline:            vk.Pipeline,
+  pipeline_layout:     vk.PipelineLayout,
   environment_index:   u32,
   brdf_lut_index:      u32,
   environment_max_lod: f32,
   ibl_intensity:       f32,
-}
-
-RendererAmbient :: struct {
-  pipeline:                vk.Pipeline,
-  pipeline_layout:         vk.PipelineLayout,
-  set_layout:              vk.DescriptorSetLayout,
-  descriptor_sets:         [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
-  gbuffer_uniform_buffers: [MAX_FRAMES_IN_FLIGHT]DataBuffer(
-    GBufferIndicesUniform,
-  ),
-  environment_index:       u32,
-  brdf_lut_index:          u32,
-  environment_max_lod:     f32,
-  ibl_intensity:           f32,
 }
 
 renderer_ambient_begin :: proc(
@@ -31,9 +33,10 @@ renderer_ambient_begin :: proc(
   target: RenderTarget,
   command_buffer: vk.CommandBuffer,
 ) {
+  color_texture := resource.get(g_image_2d_buffers, target.final_image)
   color_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
-    imageView = target.final,
+    imageView = color_texture.view,
     imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
     loadOp = .CLEAR,
     storeOp = .STORE,
@@ -59,7 +62,7 @@ renderer_ambient_begin :: proc(
   vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
   vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
   descriptor_sets := [?]vk.DescriptorSet {
-    self.descriptor_sets[g_frame_index], // set = 0 (gbuffer, etc)
+    g_bindless_camera_buffer_descriptor_set, // set = 0 (bindless camera buffer)
     g_textures_descriptor_set, // set = 1 (bindless textures)
   }
   vk.CmdBindDescriptorSets(
@@ -77,17 +80,23 @@ renderer_ambient_begin :: proc(
 
 renderer_ambient_render :: proc(
   self: ^RendererAmbient,
-  camera_position: [3]f32,
+  render_target: ^RenderTarget,
   command_buffer: vk.CommandBuffer,
 ) {
   // Use the same environment/IBL values as RendererMain (assume engine.ambient is initialized like main)
   // Use environment/BRDF LUT/IBL values from the main renderer (assume ambient renderer is initialized with these fields)
   push := AmbientPushConstant {
-    camera_position     = camera_position,
-    environment_index   = self.environment_index,
-    brdf_lut_index      = self.brdf_lut_index,
-    environment_max_lod = self.environment_max_lod,
-    ibl_intensity       = self.ibl_intensity,
+    camera_index           = render_target.camera.index,
+    environment_index      = self.environment_index,
+    brdf_lut_index         = self.brdf_lut_index,
+    gbuffer_position_index = render_target.position_texture.index,
+    gbuffer_normal_index   = render_target.normal_texture.index,
+    gbuffer_albedo_index   = render_target.albedo_texture.index,
+    gbuffer_metallic_index = render_target.metallic_roughness_texture.index,
+    gbuffer_emissive_index = render_target.emissive_texture.index,
+    gbuffer_depth_index    = render_target.depth_texture.index,
+    environment_max_lod    = self.environment_max_lod,
+    ibl_intensity          = self.ibl_intensity,
   }
   vk.CmdPushConstants(
     command_buffer,
@@ -106,33 +115,13 @@ renderer_ambient_end :: proc(command_buffer: vk.CommandBuffer) {
 
 renderer_ambient_init :: proc(
   self: ^RendererAmbient,
-  frames: ^[MAX_FRAMES_IN_FLIGHT]FrameData,
   width: u32,
   height: u32,
   color_format: vk.Format = .B8G8R8A8_SRGB,
 ) -> vk.Result {
   log.debugf("renderer ambient init %d x %d", width, height)
-  bindings := [?]vk.DescriptorSetLayoutBinding {
-    {   // G-buffer indices uniform buffer
-      binding         = 0,
-      descriptorType  = .UNIFORM_BUFFER,
-      descriptorCount = 1,
-      stageFlags      = {.FRAGMENT},
-    },
-  }
-  set_layout_info := vk.DescriptorSetLayoutCreateInfo {
-    sType        = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-    bindingCount = len(bindings),
-    pBindings    = raw_data(bindings[:]),
-  }
-  vk.CreateDescriptorSetLayout(
-    g_device,
-    &set_layout_info,
-    nil,
-    &self.set_layout,
-  ) or_return
   pipeline_set_layouts := [?]vk.DescriptorSetLayout {
-    self.set_layout, // set = 0 (gbuffer)
+    g_bindless_camera_buffer_set_layout, // set = 0 (bindless camera buffer)
     g_textures_set_layout, // set = 1 (bindless textures)
   }
   push_constant_range := vk.PushConstantRange {
@@ -248,86 +237,14 @@ renderer_ambient_init :: proc(
     &self.pipeline,
   ) or_return
 
-  // Allocate and update descriptor sets for G-buffer
-  set_layouts: [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSetLayout
-  slice.fill(set_layouts[:], self.set_layout)
-  vk.AllocateDescriptorSets(
-    g_device,
-    &{
-      sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
-      descriptorPool = g_descriptor_pool,
-      descriptorSetCount = len(set_layouts),
-      pSetLayouts = raw_data(set_layouts[:]),
-    },
-    auto_cast &self.descriptor_sets,
-  ) or_return
-
-  // Initialize G-buffer uniform buffers and update descriptor sets
-  for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
-    self.gbuffer_uniform_buffers[i] = create_host_visible_buffer(
-      GBufferIndicesUniform,
-      1,
-      {.UNIFORM_BUFFER},
-    ) or_return
-
-    // Update G-buffer indices with actual handle indices
-    gbuffer_uniform := data_buffer_get(&self.gbuffer_uniform_buffers[i], 0)
-    gbuffer_uniform.gbuffer_position_index = frames[i].gbuffer_position.index
-    gbuffer_uniform.gbuffer_normal_index = frames[i].gbuffer_normal.index
-    gbuffer_uniform.gbuffer_albedo_index = frames[i].gbuffer_albedo.index
-    gbuffer_uniform.gbuffer_metallic_index =
-      frames[i].gbuffer_metallic_roughness.index
-    gbuffer_uniform.gbuffer_emissive_index = frames[i].gbuffer_emissive.index
-    gbuffer_uniform.gbuffer_depth_index = frames[i].depth_buffer.index
-
-    write := vk.WriteDescriptorSet {
-      sType           = .WRITE_DESCRIPTOR_SET,
-      dstSet          = self.descriptor_sets[i],
-      dstBinding      = 0,
-      descriptorCount = 1,
-      descriptorType  = .UNIFORM_BUFFER,
-      pBufferInfo     = &{
-        buffer = self.gbuffer_uniform_buffers[i].buffer,
-        offset = 0,
-        range = size_of(GBufferIndicesUniform),
-      },
-    }
-    vk.UpdateDescriptorSets(g_device, 1, &write, 0, nil)
-  }
   log.info("Ambient pipeline initialized successfully")
   return .SUCCESS
 }
 
-renderer_ambient_recreate_images :: proc(
-  self: ^RendererAmbient,
-  frames: ^[MAX_FRAMES_IN_FLIGHT]FrameData,
-  width: u32,
-  height: u32,
-  format: vk.Format,
-) -> vk.Result {
-  // Update G-buffer indices in uniform buffers
-  for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
-    gbuffer_uniform := data_buffer_get(&self.gbuffer_uniform_buffers[i], 0)
-    gbuffer_uniform.gbuffer_position_index = frames[i].gbuffer_position.index
-    gbuffer_uniform.gbuffer_normal_index = frames[i].gbuffer_normal.index
-    gbuffer_uniform.gbuffer_albedo_index = frames[i].gbuffer_albedo.index
-    gbuffer_uniform.gbuffer_metallic_index =
-      frames[i].gbuffer_metallic_roughness.index
-    gbuffer_uniform.gbuffer_emissive_index = frames[i].gbuffer_emissive.index
-    gbuffer_uniform.gbuffer_depth_index = frames[i].depth_buffer.index
-  }
-  log.debugf("Updated G-buffer indices for ambient pass on resize")
-  return .SUCCESS
-}
 
 renderer_ambient_deinit :: proc(self: ^RendererAmbient) {
-  for &buffer in self.gbuffer_uniform_buffers {
-    data_buffer_deinit(&buffer)
-  }
   vk.DestroyPipeline(g_device, self.pipeline, nil)
   self.pipeline = 0
   vk.DestroyPipelineLayout(g_device, self.pipeline_layout, nil)
   self.pipeline_layout = 0
-  vk.DestroyDescriptorSetLayout(g_device, self.set_layout, nil)
-  self.set_layout = 0
 }

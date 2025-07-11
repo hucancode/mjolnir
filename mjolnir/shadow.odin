@@ -8,39 +8,16 @@ import vk "vendor:vulkan"
 SHADER_SHADOW_VERT :: #load("shader/shadow/vert.spv")
 
 RendererShadow :: struct {
-  pipeline_layout:              vk.PipelineLayout,
-  pipelines:                    [SHADOW_SHADER_VARIANT_COUNT]vk.Pipeline,
-  camera_descriptor_set_layout: vk.DescriptorSetLayout,
-  frames:                       [MAX_FRAMES_IN_FLIGHT]struct {
-    camera_uniform:        DataBuffer(CameraUniform),
-    camera_descriptor_set: vk.DescriptorSet,
-  },
+  pipeline_layout: vk.PipelineLayout,
+  pipelines:       [SHADOW_SHADER_VARIANT_COUNT]vk.Pipeline,
 }
 
 renderer_shadow_init :: proc(
   self: ^RendererShadow,
   depth_format: vk.Format = .D32_SFLOAT,
 ) -> vk.Result {
-  camera_bindings := [?]vk.DescriptorSetLayoutBinding {
-    {
-      binding = 0,
-      descriptorType = .UNIFORM_BUFFER_DYNAMIC,
-      descriptorCount = 1,
-      stageFlags = {.VERTEX},
-    },
-  }
-  vk.CreateDescriptorSetLayout(
-    g_device,
-    &vk.DescriptorSetLayoutCreateInfo {
-      sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-      bindingCount = 1,
-      pBindings = raw_data(camera_bindings[:]),
-    },
-    nil,
-    &self.camera_descriptor_set_layout,
-  ) or_return
   set_layouts := [?]vk.DescriptorSetLayout {
-    self.camera_descriptor_set_layout,
+    g_bindless_camera_buffer_set_layout,
     g_bindless_bone_buffer_set_layout,
   }
   push_constant_range := [?]vk.PushConstantRange {
@@ -168,67 +145,44 @@ renderer_shadow_init :: proc(
     nil,
     raw_data(self.pipelines[:]),
   ) or_return
-  for &frame in self.frames {
-    frame.camera_uniform = create_host_visible_buffer(
-      CameraUniform,
-      (6 * MAX_SHADOW_MAPS),
-      {.UNIFORM_BUFFER},
-    ) or_return
-    vk.AllocateDescriptorSets(
-      g_device,
-      &{
-        sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
-        descriptorPool = g_descriptor_pool,
-        descriptorSetCount = 1,
-        pSetLayouts = &self.camera_descriptor_set_layout,
-      },
-      &frame.camera_descriptor_set,
-    ) or_return
-    writes := [?]vk.WriteDescriptorSet {
-      {
-        sType = .WRITE_DESCRIPTOR_SET,
-        dstSet = frame.camera_descriptor_set,
-        dstBinding = 0,
-        descriptorType = .UNIFORM_BUFFER_DYNAMIC,
-        descriptorCount = 1,
-        pBufferInfo = &{
-          buffer = frame.camera_uniform.buffer,
-          range = vk.DeviceSize(size_of(CameraUniform)),
-        },
-      },
-    }
-    vk.UpdateDescriptorSets(g_device, len(writes), raw_data(writes[:]), 0, nil)
-  }
   return .SUCCESS
 }
 
 renderer_shadow_deinit :: proc(self: ^RendererShadow) {
-  for &frame in self.frames {
-    // descriptor set will eventually be freed by the pool
-    frame.camera_descriptor_set = 0
-    data_buffer_deinit(&frame.camera_uniform)
-  }
   for &p in self.pipelines {
     vk.DestroyPipeline(g_device, p, nil)
     p = 0
   }
   vk.DestroyPipelineLayout(g_device, self.pipeline_layout, nil)
   self.pipeline_layout = 0
-  vk.DestroyDescriptorSetLayout(
-    g_device,
-    self.camera_descriptor_set_layout,
-    nil,
-  )
-  self.camera_descriptor_set_layout = 0
 }
 
 renderer_shadow_begin :: proc(
   shadow_target: RenderTarget,
   command_buffer: vk.CommandBuffer,
+  face: Maybe(u32) = nil,
 ) {
+  depth_image_view: vk.ImageView
+  face_index, has_face := face.?
+  if has_face {
+    cube_texture := resource.get(g_image_cube_buffers, shadow_target.depth_texture)
+    if cube_texture == nil {
+      log.errorf("Invalid cube shadow map handle: %v", shadow_target.depth_texture)
+      return
+    }
+    depth_image_view = cube_texture.face_views[face_index]
+  } else {
+    texture_2d := resource.get(g_image_2d_buffers, shadow_target.depth_texture)
+    if texture_2d == nil {
+      log.errorf("Invalid 2D shadow map handle: %v", shadow_target.depth_texture)
+      return
+    }
+    depth_image_view = texture_2d.view
+  }
+
   depth_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
-    imageView = shadow_target.depth,
+    imageView   = depth_image_view,
     imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
     loadOp = .CLEAR,
     storeOp = .STORE,
@@ -263,33 +217,11 @@ renderer_shadow_render :: proc(
   render_input: RenderInput,
   light_data: LightData,
   shadow_target: RenderTarget,
-  shadow_idx: u32, // index of the light in light array
-  shadow_layer: u32, // for cube faces (0..5) or 0 for others
   command_buffer: vk.CommandBuffer,
 ) {
-  frame := &self.frames[g_frame_index]
-  camera_uniform := data_buffer_get(
-    &frame.camera_uniform,
-    shadow_idx * 6 + shadow_layer,
-  )
-  switch light in light_data {
-  case PointLightData:
-    camera_uniform.projection = light.proj
-    camera_uniform.view = light.views[shadow_layer]
-  case SpotLightData:
-    camera_uniform.projection = light.proj
-    camera_uniform.view = light.view
-  case DirectionalLightData:
-    camera_uniform.projection = light.proj
-  }
   current_pipeline: vk.Pipeline = 0
-  offset_shadow := data_buffer_offset_of(
-    &frame.camera_uniform,
-    shadow_idx * 6 + shadow_layer,
-  )
-  offsets := [1]u32{offset_shadow}
   descriptor_sets := [?]vk.DescriptorSet {
-    frame.camera_descriptor_set,
+    g_bindless_camera_buffer_descriptor_set,
     g_bindless_bone_buffer_descriptor_set,
   }
   vk.CmdBindDescriptorSets(
@@ -299,9 +231,10 @@ renderer_shadow_render :: proc(
     0,
     len(descriptor_sets),
     raw_data(descriptor_sets[:]),
-    len(offsets),
-    raw_data(offsets[:]),
+    0,
+    nil,
   )
+  rendered_count := 0
   for batch_key, batch_group in render_input.batches {
     // Only care about skinning for shadow pipeline
     shadow_features: ShaderFeatureSet
@@ -321,7 +254,9 @@ renderer_shadow_render :: proc(
           self.pipeline_layout,
           node,
           is_skinned,
+          shadow_target.camera.index,
         )
+        rendered_count += 1
       }
     }
   }
@@ -350,6 +285,7 @@ render_single_shadow_node :: proc(
   layout: vk.PipelineLayout,
   node: ^Node,
   is_skinned: bool,
+  camera_index: u32,
 ) {
   mesh_attachment := node.attachment.(MeshAttachment)
   mesh, found_mesh := resource.get(g_meshes, mesh_attachment.handle)
@@ -358,6 +294,7 @@ render_single_shadow_node :: proc(
   node_skinning, node_has_skin := mesh_attachment.skinning.?
   push_constant := PushConstant {
     world = node.transform.world_matrix,
+    camera_index = camera_index,
   }
   if is_skinned && node_has_skin {
     push_constant.bone_matrix_offset = node_skinning.bone_matrix_offset

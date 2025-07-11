@@ -20,7 +20,7 @@ renderer_transparent_init :: proc(
   log.info("Initializing transparent renderer")
   // Use the existing descriptor set layouts
   set_layouts := [?]vk.DescriptorSetLayout {
-    g_camera_descriptor_set_layout, // set = 0 (camera uniforms)
+    g_bindless_camera_buffer_set_layout, // set = 0 (bindless camera buffer)
     g_textures_set_layout, // set = 1 (bindless textures)
     g_bindless_bone_buffer_set_layout, // set = 2 (bone matrices)
   }
@@ -436,21 +436,19 @@ renderer_transparent_begin :: proc(
   // Setup color attachment - load existing content
   color_attachment := vk.RenderingAttachmentInfoKHR {
     sType       = .RENDERING_ATTACHMENT_INFO_KHR,
-    imageView   = render_target.final,
+    imageView   = resource.get(g_image_2d_buffers, render_target.final_image).view,
     imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
     loadOp      = .LOAD,
     storeOp     = .STORE,
   }
-
   // Setup depth attachment - load existing depth buffer
   depth_attachment := vk.RenderingAttachmentInfoKHR {
     sType       = .RENDERING_ATTACHMENT_INFO_KHR,
-    imageView   = render_target.depth,
+    imageView   = resource.get(g_image_2d_buffers, render_target.depth_texture).view,
     imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
     loadOp      = .LOAD,
     storeOp     = .STORE,
   }
-
   // Begin dynamic rendering
   render_info := vk.RenderingInfoKHR {
     sType = .RENDERING_INFO_KHR,
@@ -460,10 +458,7 @@ renderer_transparent_begin :: proc(
     pColorAttachments = &color_attachment,
     pDepthAttachment = &depth_attachment,
   }
-
   vk.CmdBeginRenderingKHR(command_buffer, &render_info)
-
-  // Set viewport and scissor
   viewport := vk.Viewport {
     x        = 0,
     y        = f32(render_target.extent.height),
@@ -472,11 +467,9 @@ renderer_transparent_begin :: proc(
     minDepth = 0.0,
     maxDepth = 1.0,
   }
-
   scissor := vk.Rect2D {
     extent = render_target.extent,
   }
-
   vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
   vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
 }
@@ -488,11 +481,10 @@ renderer_transparent_render :: proc(
   command_buffer: vk.CommandBuffer,
 ) {
   descriptor_sets := [?]vk.DescriptorSet {
-    g_camera_descriptor_sets[g_frame_index],
+    g_bindless_camera_buffer_descriptor_set,
     g_textures_descriptor_set,
     g_bindless_bone_buffer_descriptor_set,
   }
-
   vk.CmdBindDescriptorSets(
     command_buffer,
     .GRAPHICS,
@@ -503,7 +495,6 @@ renderer_transparent_render :: proc(
     0,
     nil,
   )
-
   // First render transparent materials
   for batch_key, batch_group in render_input.batches {
     if batch_key.material_type == .TRANSPARENT {
@@ -532,6 +523,7 @@ renderer_transparent_render :: proc(
           push_constants := PushConstant {
             world                    = node.transform.world_matrix,
             bone_matrix_offset       = 0,
+            camera_index             = render_target.camera.index,
             albedo_index             = min(
               MAX_TEXTURES - 1,
               material.albedo.index,
@@ -552,7 +544,6 @@ renderer_transparent_render :: proc(
             roughness_value          = material.roughness_value,
             emissive_value           = material.emissive_value,
           }
-
           // Set bone matrix offset if skinning is available
           if skinning, has_skinning := mesh_attachment.skinning.?;
              has_skinning {
@@ -561,6 +552,7 @@ renderer_transparent_render :: proc(
               g_frame_index * g_bone_matrix_slab.capacity
           }
 
+          log.debugf("rendering transparent object with push constant ... %v", push_constants)
           // Push constants
           vk.CmdPushConstants(
             command_buffer,
@@ -570,14 +562,11 @@ renderer_transparent_render :: proc(
             size_of(PushConstant),
             &push_constants,
           )
-
           // Draw mesh
-          // Always bind both vertex buffer and skinning buffer (real or dummy)
           skin_buffer := g_dummy_skinning_buffer.buffer
           if mesh_skin, mesh_has_skin := mesh.skinning.?; mesh_has_skin {
             skin_buffer = mesh_skin.skin_buffer.buffer
           }
-
           buffers := [2]vk.Buffer{mesh.vertex_buffer.buffer, skin_buffer}
           offsets := [2]vk.DeviceSize{0, 0}
           vk.CmdBindVertexBuffers(
@@ -602,24 +591,20 @@ renderer_transparent_render :: proc(
         for node in batch_data.nodes {
           mesh_attachment, ok := node.attachment.(MeshAttachment)
           if !ok do continue
-
           mesh := resource.get(g_meshes, mesh_attachment.handle) or_continue
-
           // Check if skinning feature is enabled
           is_skinned := .SKINNING in batch_key.features
           pipeline_idx := is_skinned ? 1 : 0
-
           // Bind the appropriate wireframe pipeline
           vk.CmdBindPipeline(
             command_buffer,
             .GRAPHICS,
             self.wireframe_pipelines[pipeline_idx],
           )
-
           push_constant := PushConstant {
             world                    = node.transform.world_matrix,
+            camera_index             = render_target.camera.index,
           }
-
           // Set bone matrix offset if skinning is available
           if skinning, has_skinning := mesh_attachment.skinning.?;
              has_skinning {
