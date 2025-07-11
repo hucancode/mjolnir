@@ -1,0 +1,99 @@
+#version 450
+
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+#define MAX_ACTIVE_CAMERAS 64
+
+struct NodeCullingData {
+  vec3 aabb_min;           // xyz = min bounds
+  uint culling_enabled;    // 0 = disabled, 1 = enabled
+  vec3 aabb_max;           // xyz = max bounds
+  uint padding;         // Align to 16 bytes
+};
+
+struct ActiveCameraData {
+  vec4 frustum_planes[6];
+  uint camera_index;       // Index in the global camera array
+  uint padding[3];
+};
+
+struct MultiCameraCullingParams {
+  uint node_count;
+  uint active_camera_count;
+  uint current_frame;    // 0 or 1 for double buffering
+  uint padding;
+};
+
+layout(set = 0, binding = 0) uniform MultiCameraCullingParamsBuffer {
+  MultiCameraCullingParams params;
+};
+
+layout(set = 0, binding = 1) readonly buffer NodeDataBuffer {
+  NodeCullingData nodes[];
+};
+
+layout(set = 0, binding = 2) readonly buffer ActiveCameraBuffer {
+  ActiveCameraData active_cameras[MAX_ACTIVE_CAMERAS];
+};
+
+layout(set = 0, binding = 3) writeonly buffer VisibilityBuffer {
+  // Layout: [camera0_node0, camera0_node1, ..., camera1_node0, camera1_node1, ...]
+  uint visibility[];
+};
+
+bool test_aabb_frustum(vec3 aabb_min, vec3 aabb_max, uint camera_slot) {
+  // For each frustum plane, test if the AABB is completely on the negative side
+  for (int i = 0; i < 6; i++) {
+    vec4 plane = active_cameras[camera_slot].frustum_planes[i];
+    vec3 plane_normal = plane.xyz;
+    
+    // Find the "positive" vertex of the AABB relative to the plane normal
+    vec3 positive_vertex;
+    if (plane_normal.x >= 0.0) {
+      positive_vertex.x = aabb_max.x;
+    } else {
+      positive_vertex.x = aabb_min.x;
+    }
+    if (plane_normal.y >= 0.0) {
+      positive_vertex.y = aabb_max.y;
+    } else {
+      positive_vertex.y = aabb_min.y;
+    }
+    if (plane_normal.z >= 0.0) {
+      positive_vertex.z = aabb_max.z;
+    } else {
+      positive_vertex.z = aabb_min.z;
+    }
+    
+    // If the positive vertex is on the negative side of the plane, the entire AABB is outside
+    float distance = dot(plane_normal, positive_vertex) + plane.w;
+    if (distance < 0.0) {
+      return false;
+    }
+  }
+  return true;
+}
+
+void main() {
+  uint node_id = gl_GlobalInvocationID.x;
+  if (node_id >= params.node_count) {
+    return;
+  }
+  
+  NodeCullingData node = nodes[node_id];
+  
+  // Test visibility against all active cameras
+  for (uint camera_slot = 0; camera_slot < params.active_camera_count; camera_slot++) {
+    uint visibility_index = camera_slot * params.node_count + node_id;
+    
+    // If culling is disabled for this node, it's always visible
+    if (node.culling_enabled == 0) {
+      visibility[visibility_index] = 1;
+      continue;
+    }
+    
+    // Perform frustum culling test
+    bool is_visible = test_aabb_frustum(node.aabb_min, node.aabb_max, camera_slot);
+    visibility[visibility_index] = is_visible ? 1 : 0;
+  }
+}

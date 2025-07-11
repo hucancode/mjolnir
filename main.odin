@@ -54,7 +54,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     log.info("spawning cubes in a grid")
     space: f32 = 2.0
     size: f32 = 0.3
-    nx, ny, nz := 5, 2, 5
+    nx, ny, nz := 15, 2, 15
     for x in 1 ..< nx {
       for y in 1 ..< ny {
         for z in 1 ..< nz {

@@ -32,7 +32,7 @@ SHADOW_MAP_SIZE :: 512
 MAX_SHADOW_MAPS :: 10
 MAX_TEXTURES :: 90
 MAX_CUBE_TEXTURES :: 20
-USE_GPU_CULLING :: false // Set to false to use CPU culling instead
+USE_GPU_CULLING :: true // Set to false to use CPU culling instead
 
 Handle :: resource.Handle
 
@@ -823,6 +823,16 @@ recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
   return .SUCCESS
 }
 
+// Helper function to find camera slot in active render targets
+find_camera_slot :: proc(camera_handle: resource.Handle, active_render_targets: []RenderTarget) -> (slot: u32, found: bool) {
+  for target, i in active_render_targets {
+    if target.camera.index == camera_handle.index {
+      return u32(i), true
+    }
+  }
+  return 0, false
+}
+
 // Generate render input for a given frustum (camera or light)
 generate_render_input :: proc(
   self: ^Engine,
@@ -850,8 +860,73 @@ generate_render_input :: proc(
       // Use GPU culling results if available, otherwise fall back to CPU culling
       visible := true
       when USE_GPU_CULLING {
-        camera_index := get_camera_index(camera_handle)
-        visible = is_node_visible(&self.visibility_culler, camera_index, u32(entry_index))
+        // For multi-camera culling, we need to check against slot 0 (main camera) for now
+        // Shadow rendering will use appropriate camera slots
+        visible = multi_camera_is_node_visible(&self.visibility_culler, 0, u32(entry_index))
+      } else {
+        world_aabb := geometry.aabb_transform(mesh.aabb, node.transform.world_matrix)
+        visible = geometry.frustum_test_aabb(frustum, world_aabb)
+      }
+      if !visible do continue
+      visible_count += 1
+      batch_key := BatchKey {
+        features      = material.features,
+        material_type = material.type,
+      }
+      batch_group, group_found := &ret.batches[batch_key]
+      if !group_found {
+        ret.batches[batch_key] = make([dynamic]BatchData, allocator = context.temp_allocator)
+        batch_group = &ret.batches[batch_key]
+      }
+      batch_data: ^BatchData
+      for &batch in batch_group {
+        if batch.material_handle == data.material {
+          batch_data = &batch
+          break
+        }
+      }
+      if batch_data == nil {
+        new_batch := BatchData {
+          material_handle = data.material,
+          nodes           = make([dynamic]^Node, allocator = context.temp_allocator),
+        }
+        append(batch_group, new_batch)
+        batch_data = &batch_group[len(batch_group) - 1]
+      }
+      append(&batch_data.nodes, node)
+    }
+  }
+  return
+}
+
+// Generate render input for a specific camera slot (for shadow rendering)
+generate_render_input_for_camera_slot :: proc(
+  self: ^Engine,
+  frustum: geometry.Frustum,
+  camera_slot: u32,
+) -> (
+  ret: RenderInput,
+) {
+  ret.batches = make(
+    map[BatchKey][dynamic]BatchData,
+    allocator = context.temp_allocator,
+  )
+  visible_count: u32 = 0
+  total_count: u32 = 0
+  for &entry, entry_index in self.scene.nodes.entries do if entry.active {
+    node := &entry.item
+    handle := Handle{entry.generation, u32(entry_index)}
+    #partial switch data in node.attachment {
+    case MeshAttachment:
+      mesh := resource.get(g_meshes, data.handle)
+      if mesh == nil do continue
+      material := resource.get(g_materials, data.material)
+      if material == nil do continue
+      total_count += 1
+      // Use GPU culling results if available, otherwise fall back to CPU culling
+      visible := true
+      when USE_GPU_CULLING {
+        visible = multi_camera_is_node_visible(&self.visibility_culler, camera_slot, u32(entry_index))
       } else {
         world_aabb := geometry.aabb_transform(mesh.aabb, node.transform.world_matrix)
         visible = geometry.frustum_test_aabb(frustum, world_aabb)
@@ -910,62 +985,7 @@ render :: proc(self: ^Engine) -> vk.Result {
   frustum := geometry.make_frustum(
     camera_uniform.projection * camera_uniform.view,
   )
-  log.debug("============ run visibility culling...============ ")
-  vk.BeginCommandBuffer(
-    command_buffer,
-    &{sType = .COMMAND_BUFFER_BEGIN_INFO, flags = {.ONE_TIME_SUBMIT}},
-  ) or_return
-  // dispatch computation early and doing other work while GPU is busy
-  when USE_GPU_CULLING {
-    // Update and perform GPU scene culling
-    visibility_culler_update(&self.visibility_culler, &self.scene)
-    visibility_culler_execute_with_frustum(
-      &self.visibility_culler,
-      command_buffer,
-      0,
-      frustum,
-    )
-    // Memory barrier to ensure culling is complete before other operations
-    visibility_buffer_barrier := vk.BufferMemoryBarrier {
-      sType               = .BUFFER_MEMORY_BARRIER,
-      srcAccessMask       = {.SHADER_WRITE},
-      dstAccessMask       = {.SHADER_READ, .HOST_READ},
-      srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-      dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-      buffer              = self.visibility_culler.camera_data[g_frame_index][0].visibility_buffer.buffer,
-      offset              = 0,
-      size                = vk.DeviceSize(
-        self.visibility_culler.camera_data[g_frame_index][0].visibility_buffer.bytes_count,
-      ),
-    }
-    vk.CmdPipelineBarrier(
-      command_buffer,
-      {.COMPUTE_SHADER},
-      {.VERTEX_SHADER, .FRAGMENT_SHADER, .HOST},
-      {},
-      0,
-      nil,
-      1,
-      &visibility_buffer_barrier,
-      0,
-      nil,
-    )
-    // End command buffer and submit immediately to ensure GPU work completes
-    vk.EndCommandBuffer(command_buffer) or_return
-    submit_info := vk.SubmitInfo {
-      sType              = .SUBMIT_INFO,
-      commandBufferCount = 1,
-      pCommandBuffers    = &command_buffer,
-    }
-    vk.QueueSubmit(g_graphics_queue, 1, &submit_info, 0) or_return
-    vk.QueueWaitIdle(g_graphics_queue) or_return
-    // Begin command buffer again for the rest of the rendering
-    vk.BeginCommandBuffer(
-      command_buffer,
-      &{sType = .COMMAND_BUFFER_BEGIN_INFO, flags = {.ONE_TIME_SUBMIT}},
-    ) or_return
-  }
-  compute_particles(&self.particle, command_buffer, main_camera^)
+  log.debug("============ collecting lights and shadow casters...============ ")
   lights := make([dynamic]LightData, 0)
   defer delete(lights)
   shadow_casters := make([dynamic]LightData, 0)
@@ -995,7 +1015,7 @@ render :: proc(self: ^Engine) -> vk.Result {
   for &entry, entry_index in self.scene.nodes.entries do if entry.active {
     node := &entry.item
     when USE_GPU_CULLING {
-      visible := is_node_visible(&self.visibility_culler, 0, u32(entry_index))
+      visible := multi_camera_is_node_visible(&self.visibility_culler, 0, u32(entry_index))
       if !visible do continue
     }
     #partial switch &light in &node.attachment {
@@ -1122,11 +1142,88 @@ render :: proc(self: ^Engine) -> vk.Result {
       append(&lights, data)
     }
   }
+  log.debug("============ run visibility culling...============ ")
+  vk.BeginCommandBuffer(
+    command_buffer,
+    &{sType = .COMMAND_BUFFER_BEGIN_INFO, flags = {.ONE_TIME_SUBMIT}},
+  ) or_return
+
   when USE_GPU_CULLING {
-    // TODO: dispatch a compute workload to calculate visibility of ALL objects agains ALL active camera
-    // Light-specific culling is temporarily disabled during refactoring
-    // The visibility culling system will be updated to work with the new bindless camera architecture
+    // Collect all active render targets for multi-camera culling
+    active_render_targets := make([dynamic]RenderTarget, 0, context.temp_allocator)
+    append(&active_render_targets, self.main_render_target[g_frame_index])
+
+    // Add shadow map render targets from shadow casters
+    for caster in shadow_casters {
+      #partial switch light in caster {
+      case PointLightData:
+        for target_handle in light.render_targets {
+          if target := resource.get(g_render_targets, target_handle); target != nil {
+            append(&active_render_targets, target^)
+          }
+        }
+      case SpotLightData:
+        if target := resource.get(g_render_targets, light.render_target); target != nil {
+          append(&active_render_targets, target^)
+        }
+      }
+    }
+
+    // Update and perform multi-camera GPU scene culling
+    visibility_culler_update_multi_camera(&self.visibility_culler, &self.scene, active_render_targets[:])
+    visibility_culler_execute_multi_camera(&self.visibility_culler, command_buffer)
+
+    // Memory barrier to ensure culling is complete before other operations
+    visibility_buffer_barrier := vk.BufferMemoryBarrier {
+      sType               = .BUFFER_MEMORY_BARRIER,
+      srcAccessMask       = {.SHADER_WRITE},
+      dstAccessMask       = {.SHADER_READ, .HOST_READ},
+      srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+      dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+      buffer              = self.visibility_culler.multi_visibility_buffer[g_frame_index].buffer,
+      offset              = 0,
+      size                = vk.DeviceSize(
+        self.visibility_culler.multi_visibility_buffer[g_frame_index].bytes_count,
+      ),
+    }
+    vk.CmdPipelineBarrier(
+      command_buffer,
+      {.COMPUTE_SHADER},
+      {.VERTEX_SHADER, .FRAGMENT_SHADER, .HOST},
+      {},
+      0,
+      nil,
+      1,
+      &visibility_buffer_barrier,
+      0,
+      nil,
+    )
+    // End command buffer and submit immediately to ensure GPU work completes
+    vk.EndCommandBuffer(command_buffer) or_return
+    submit_info := vk.SubmitInfo {
+      sType              = .SUBMIT_INFO,
+      commandBufferCount = 1,
+      pCommandBuffers    = &command_buffer,
+    }
+    vk.QueueSubmit(g_graphics_queue, 1, &submit_info, 0) or_return
+    vk.QueueWaitIdle(g_graphics_queue) or_return
+    // Begin command buffer again for the rest of the rendering
+    vk.BeginCommandBuffer(
+      command_buffer,
+      &{sType = .COMMAND_BUFFER_BEGIN_INFO, flags = {.ONE_TIME_SUBMIT}},
+    ) or_return
+  } else {
+    // Legacy single-camera culling for main camera
+    visibility_culler_update(&self.visibility_culler, &self.scene)
+    visibility_culler_execute_with_frustum(
+      &self.visibility_culler,
+      command_buffer,
+      0,
+      frustum,
+    )
   }
+
+  compute_particles(&self.particle, command_buffer, main_camera^)
 
   log.debug("============ rendering shadow pass...============ ")
   // Transition all shadow maps to depth attachment optimal
@@ -1182,6 +1279,7 @@ render :: proc(self: ^Engine) -> vk.Result {
     "============ checking shadow casters (%d)...============ ",
     len(shadow_casters),
   )
+  current_camera_slot: u32 = 1 // Start from slot 1 (slot 0 is main camera)
   for node, i in shadow_casters {
     log.debugf("Processing shadow caster %d", i)
     #partial switch light in node {
@@ -1194,16 +1292,19 @@ render :: proc(self: ^Engine) -> vk.Result {
       cube_shadow := resource.get(g_image_cube_buffers, light.shadow_map)
       for face in 0 ..< 6 {
         frustum := geometry.make_frustum(light.proj * light.views[face])
-        // Use main camera for shadow culling - proper camera will be set in renderer
-        shadow_render_input := generate_render_input(
-          self,
-          frustum,
-          self.scene.main_camera,
-        )
+
+        shadow_render_input: RenderInput
+        when USE_GPU_CULLING {
+          shadow_render_input = generate_render_input_for_camera_slot(self, frustum, current_camera_slot)
+        } else {
+          shadow_render_input = generate_render_input(self, frustum, self.scene.main_camera)
+        }
+
         log.debugf(
-          "Point light face %d: shadow render input has %d batches",
+          "Point light face %d: shadow render input has %d batches (camera slot %d)",
           face,
           len(shadow_render_input.batches),
+          current_camera_slot,
         )
         target := resource.get(g_render_targets, light.render_targets[face])
         renderer_shadow_begin(target^, command_buffer, u32(face))
@@ -1215,6 +1316,7 @@ render :: proc(self: ^Engine) -> vk.Result {
           command_buffer,
         )
         renderer_shadow_end(command_buffer)
+        current_camera_slot += 1
       }
     case DirectionalLightData:
       log.debugf("Processing directional light %d, skip", i)
@@ -1225,15 +1327,17 @@ render :: proc(self: ^Engine) -> vk.Result {
         continue
       }
       frustum := geometry.make_frustum(light.proj * light.view)
-      // Use main camera for shadow culling - proper camera will be set in renderer
-      shadow_render_input := generate_render_input(
-        self,
-        frustum,
-        self.scene.main_camera,
-      )
+
+      shadow_render_input: RenderInput
+      when USE_GPU_CULLING {
+        shadow_render_input = generate_render_input_for_camera_slot(self, frustum, current_camera_slot)
+      } else {
+        shadow_render_input = generate_render_input(self, frustum, self.scene.main_camera)
+      }
+
       shadow_map_texture := resource.get(g_image_2d_buffers, light.shadow_map)
       shadow_target := resource.get(g_render_targets, light.render_target)
-      log.infof("Spot light shadow: %d batches, shadow_map_id=%d", len(shadow_render_input.batches), light.shadow_map.index)
+      log.infof("Spot light shadow: %d batches, shadow_map_id=%d (camera slot %d)", len(shadow_render_input.batches), light.shadow_map.index, current_camera_slot)
       renderer_shadow_begin(shadow_target^, command_buffer)
       renderer_shadow_render(
         &self.shadow,
@@ -1243,6 +1347,7 @@ render :: proc(self: ^Engine) -> vk.Result {
         command_buffer,
       )
       renderer_shadow_end(command_buffer)
+      current_camera_slot += 1
     }
   }
   // Transition all shadow maps to shader read only optimal
@@ -1431,7 +1536,7 @@ render :: proc(self: ^Engine) -> vk.Result {
     &self.main_render_target[g_frame_index],
   )
   renderer_postprocess_end(&self.postprocess, command_buffer)
-  if mu.window(&self.ui.ctx, "Engine", {40, 40, 300, 150}, {.NO_CLOSE}) {
+  if mu.window(&self.ui.ctx, "Engine", {40, 40, 300, 200}, {.NO_CLOSE}) {
     mu.label(
       &self.ui.ctx,
       fmt.tprintf(
@@ -1460,6 +1565,28 @@ render :: proc(self: ^Engine) -> vk.Result {
         len(g_meshes.entries) - len(g_meshes.free_indices),
       ),
     )
+
+    // Show visibility statistics for main camera
+    when USE_GPU_CULLING {
+      disabled, visible, total := multi_camera_count_visible_objects(&self.visibility_culler, 0)
+      log.debugf("Main Cam: %d/%d visible, culling disabled %d", visible, total, disabled)
+      mu.label(
+        &self.ui.ctx,
+        fmt.tprintf(
+          "Main Cam: %d/%d visible",
+          visible, total,
+        ),
+      )
+      if disabled > 0 {
+        mu.label(
+          &self.ui.ctx,
+          fmt.tprintf(
+            "Culling disabled: %d",
+            disabled,
+          ),
+        )
+      }
+    }
   }
   if self.render2d_proc != nil {
     self.render2d_proc(self, &self.ui.ctx)
