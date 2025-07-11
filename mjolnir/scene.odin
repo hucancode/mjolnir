@@ -250,7 +250,7 @@ scene_init :: proc(self: ^Scene) {
   main_camera_handle, main_camera_ptr := resource.alloc(&g_cameras)
   main_camera_ptr^ = geometry.make_camera_look_at(
     {10, 5, 10}, // from
-    {0, 0, 0},   // to
+    {0, 0, 0}, // to
     math.PI * 0.5, // fov
     16.0 / 9.0, // aspect_ratio
     0.1, // near

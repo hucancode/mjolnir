@@ -552,7 +552,10 @@ renderer_transparent_render :: proc(
               g_frame_index * g_bone_matrix_slab.capacity
           }
 
-          log.debugf("rendering transparent object with push constant ... %v", push_constants)
+          log.debugf(
+            "rendering transparent object with push constant ... %v",
+            push_constants,
+          )
           // Push constants
           vk.CmdPushConstants(
             command_buffer,
@@ -602,8 +605,8 @@ renderer_transparent_render :: proc(
             self.wireframe_pipelines[pipeline_idx],
           )
           push_constant := PushConstant {
-            world                    = node.transform.world_matrix,
-            camera_index             = render_target.camera.index,
+            world        = node.transform.world_matrix,
+            camera_index = render_target.camera.index,
           }
           // Set bone matrix offset if skinning is available
           if skinning, has_skinning := mesh_attachment.skinning.?;

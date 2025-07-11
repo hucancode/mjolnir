@@ -108,7 +108,10 @@ debug_callback :: proc "system" (
 ) -> b32 {
   context = g_context
   message := string(p_callback_data.pMessage)
-  short_msg, verbose := strings.substring_to(message, strings.index(message, "\nThe Vulkan spec states:"))
+  short_msg, verbose := strings.substring_to(
+    message,
+    strings.index(message, "\nThe Vulkan spec states:"),
+  )
   switch {
   case .ERROR in message_severity:
     log.errorf("Validation: %s", short_msg if verbose else message)
@@ -154,10 +157,7 @@ vulkan_instance_init :: proc() -> vk.Result {
         // .WARNING,
         .ERROR,
       },
-      messageType     = {
-        .VALIDATION,
-        .PERFORMANCE,
-      },
+      messageType     = {.VALIDATION, .PERFORMANCE},
       pfnUserCallback = debug_callback,
     }
     create_info.pNext = &dbg_create_info

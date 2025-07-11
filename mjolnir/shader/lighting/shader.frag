@@ -76,16 +76,15 @@ float calculateShadow(vec3 fragPos, vec3 N, CameraUniform light_camera) {
             return 1.0;
         }
         float shadowDepth = texture(sampler2D(textures[push.shadow_map_id], samplers[SAMPLER_LINEAR_CLAMP]), shadowCoord.xy).r;
-        float bias = max(0.1 * (1.0 - dot(N, normalize(-push.light_direction))), 0.05);
+        float bias = max(0.005 * (1.0 - dot(N, normalize(-push.light_direction))), 0.002);
         return (shadowCoord.z > shadowDepth + bias) ? 0.1 : 1.0;
     } else if (push.light_kind == POINT_LIGHT) {
         vec3 lightToFrag = fragPos - push.light_position;
         vec3 coord = normalize(lightToFrag);
         float currentDepth = length(lightToFrag);
         float shadowDepth = texture(samplerCube(cube_textures[push.shadow_map_id], samplers[SAMPLER_LINEAR_CLAMP]), coord).r;
-        return shadowDepth;
         shadowDepth = linearizeDepth(shadowDepth, 0.1, push.light_radius);
-        float bias = max(0.05 * (1.0 - dot(N, normalize(lightToFrag))), 0.01);
+        float bias = max(0.01 * (1.0 - dot(N, normalize(lightToFrag))), 0.005);
         return (currentDepth > shadowDepth + bias) ? 0.0 : 1.0;
     } else if (push.light_kind == SPOT_LIGHT) {
         vec4 lightSpacePos = light_camera.projection * light_camera.view * vec4(fragPos, 1.0);
@@ -98,7 +97,8 @@ float calculateShadow(vec3 fragPos, vec3 N, CameraUniform light_camera) {
             return 1.0; // No shadow outside frustum
         }
         float shadowDepth = texture(sampler2D(textures[push.shadow_map_id], samplers[SAMPLER_LINEAR_CLAMP]), shadowCoord.xy).r;
-        float bias = max(0.05 * (1.0 - dot(N, normalize(lightToFrag))), 0.01);
+        vec3 lightToFrag = normalize(fragPos - push.light_position);
+        float bias = max(0.005 * (1.0 - dot(N, -lightToFrag)), 0.002);
         return (shadowCoord.z > shadowDepth + bias) ? 0.1 : 1.0;
     }
     return 1.0;
@@ -172,5 +172,6 @@ void main() {
             return;
     }
 
-    outColor = vec4(vec3(pow(shadowFactor, 10)), 1.0);
+    // Apply lighting with shadow factor
+    outColor = vec4(direct * shadowFactor, 1.0);
 }

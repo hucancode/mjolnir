@@ -6,17 +6,17 @@ import "resource"
 import vk "vendor:vulkan"
 
 AmbientPushConstant :: struct {
-  camera_index:            u32,
-  environment_index:       u32,
-  brdf_lut_index:          u32,
-  gbuffer_position_index:  u32,
-  gbuffer_normal_index:    u32,
-  gbuffer_albedo_index:    u32,
-  gbuffer_metallic_index:  u32,
-  gbuffer_emissive_index:  u32,
-  gbuffer_depth_index:     u32,
-  environment_max_lod:     f32,
-  ibl_intensity:           f32,
+  camera_index:           u32,
+  environment_index:      u32,
+  brdf_lut_index:         u32,
+  gbuffer_position_index: u32,
+  gbuffer_normal_index:   u32,
+  gbuffer_albedo_index:   u32,
+  gbuffer_metallic_index: u32,
+  gbuffer_emissive_index: u32,
+  gbuffer_depth_index:    u32,
+  environment_max_lod:    f32,
+  ibl_intensity:          f32,
 }
 
 RendererAmbient :: struct {

@@ -848,7 +848,7 @@ renderer_particle_init_render_pipeline :: proc(
   }
   push_constant_range := vk.PushConstantRange {
     stageFlags = {.VERTEX},
-    size = size_of(u32), // camera_index
+    size       = size_of(u32), // camera_index
   }
   vk.CreatePipelineLayout(
     g_device,

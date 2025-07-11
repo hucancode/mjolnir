@@ -28,16 +28,16 @@ RendererLighting :: struct {
 // Push constant struct for lighting pass (matches shader/lighting/shader.frag)
 // 128 byte push constant budget
 LightPushConstant :: struct {
-  scene_camera_idx :u32,
-  light_camera_idx :u32, // for shadow mapping
-  shadow_map_id:   u32, // 4 bytes
-  light_kind:      LightKind, // 4 bytes
-  light_color:     [3]f32, // 12 bytes
-  light_angle:     f32, // 4 bytes
-  light_position:  [3]f32,
-  light_radius:    f32, // 4 bytes
-  light_direction: [3]f32,
-  light_cast_shadow: b32,
+  scene_camera_idx:       u32,
+  light_camera_idx:       u32, // for shadow mapping
+  shadow_map_id:          u32, // 4 bytes
+  light_kind:             LightKind, // 4 bytes
+  light_color:            [3]f32, // 12 bytes
+  light_angle:            f32, // 4 bytes
+  light_position:         [3]f32,
+  light_radius:           f32, // 4 bytes
+  light_direction:        [3]f32,
+  light_cast_shadow:      b32,
   gbuffer_position_index: u32,
   gbuffer_normal_index:   u32,
   gbuffer_albedo_index:   u32,
@@ -180,7 +180,7 @@ renderer_lighting_init :: proc(
     &self.lighting_pipeline,
   ) or_return
   log.info("Lighting pipeline initialized successfully")
-  
+
   // Create second pipeline for spot lights with LESS_OR_EQUAL depth test
   spot_depth_stencil := vk.PipelineDepthStencilStateCreateInfo {
     sType           = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
@@ -211,7 +211,7 @@ renderer_lighting_init :: proc(
     &self.spot_light_pipeline,
   ) or_return
   log.info("Spot light pipeline initialized successfully")
-  
+
   environment_map: ^ImageBuffer
   self.environment_map, environment_map =
     create_hdr_texture_from_path_with_mips(
@@ -353,22 +353,22 @@ renderer_lighting_render :: proc(
     case PointLightData:
       // Bind regular pipeline with GREATER_OR_EQUAL depth test
       vk.CmdBindPipeline(command_buffer, .GRAPHICS, self.lighting_pipeline)
-      
+
       light_push := LightPushConstant {
-        scene_camera_idx         = render_target.camera.index,
-        shadow_map_id            = light.shadow_map.index,
-        light_kind               = LightKind.POINT,
-        light_color              = light.color.xyz,
-        light_position           = light.position.xyz,
-        light_radius             = light.radius,
-        light_cast_shadow        = light.shadow_map.generation != 0, // Check if shadow map is valid
-        gbuffer_position_index   = render_target.position_texture.index,
-        gbuffer_normal_index     = render_target.normal_texture.index,
-        gbuffer_albedo_index     = render_target.albedo_texture.index,
-        gbuffer_metallic_index   = render_target.metallic_roughness_texture.index,
-        gbuffer_emissive_index   = render_target.emissive_texture.index,
-        gbuffer_depth_index      = render_target.depth_texture.index,
-        input_image_index        = render_target.final_image.index,
+        scene_camera_idx       = render_target.camera.index,
+        shadow_map_id          = light.shadow_map.index,
+        light_kind             = LightKind.POINT,
+        light_color            = light.color.xyz,
+        light_position         = light.position.xyz,
+        light_radius           = light.radius,
+        light_cast_shadow      = light.shadow_map.generation != 0, // Check if shadow map is valid
+        gbuffer_position_index = render_target.position_texture.index,
+        gbuffer_normal_index   = render_target.normal_texture.index,
+        gbuffer_albedo_index   = render_target.albedo_texture.index,
+        gbuffer_metallic_index = render_target.metallic_roughness_texture.index,
+        gbuffer_emissive_index = render_target.emissive_texture.index,
+        gbuffer_depth_index    = render_target.depth_texture.index,
+        input_image_index      = render_target.final_image.index,
       }
       vk.CmdPushConstants(
         command_buffer,
@@ -383,20 +383,20 @@ renderer_lighting_render :: proc(
     case DirectionalLightData:
       // Bind regular pipeline with GREATER_OR_EQUAL depth test
       vk.CmdBindPipeline(command_buffer, .GRAPHICS, self.lighting_pipeline)
-      
+
       light_push := LightPushConstant {
-        scene_camera_idx         = render_target.camera.index,
-        light_camera_idx         = 0, // TODO: pass correct camera id
-        light_kind               = LightKind.DIRECTIONAL,
-        light_color              = light.color.xyz,
-        light_direction          = light.direction.xyz,
-        gbuffer_position_index   = render_target.position_texture.index,
-        gbuffer_normal_index     = render_target.normal_texture.index,
-        gbuffer_albedo_index     = render_target.albedo_texture.index,
-        gbuffer_metallic_index   = render_target.metallic_roughness_texture.index,
-        gbuffer_emissive_index   = render_target.emissive_texture.index,
-        gbuffer_depth_index      = render_target.depth_texture.index,
-        input_image_index        = render_target.final_image.index,
+        scene_camera_idx       = render_target.camera.index,
+        light_camera_idx       = 0, // TODO: pass correct camera id
+        light_kind             = LightKind.DIRECTIONAL,
+        light_color            = light.color.xyz,
+        light_direction        = light.direction.xyz,
+        gbuffer_position_index = render_target.position_texture.index,
+        gbuffer_normal_index   = render_target.normal_texture.index,
+        gbuffer_albedo_index   = render_target.albedo_texture.index,
+        gbuffer_metallic_index = render_target.metallic_roughness_texture.index,
+        gbuffer_emissive_index = render_target.emissive_texture.index,
+        gbuffer_depth_index    = render_target.depth_texture.index,
+        input_image_index      = render_target.final_image.index,
       }
       vk.CmdPushConstants(
         command_buffer,
@@ -411,26 +411,26 @@ renderer_lighting_render :: proc(
     case SpotLightData:
       // Bind spot light pipeline with LESS_OR_EQUAL depth test
       vk.CmdBindPipeline(command_buffer, .GRAPHICS, self.spot_light_pipeline)
-      
+
       rt := resource.get(g_render_targets, light.render_target)
       light_push := LightPushConstant {
-        scene_camera_idx         = render_target.camera.index,
-        light_camera_idx         = rt.camera.index,
-        shadow_map_id            = light.shadow_map.index,
-        light_kind               = LightKind.SPOT,
-        light_color              = light.color.xyz,
-        light_angle              = light.angle,
-        light_position           = light.position.xyz,
-        light_radius             = light.radius,
-        light_direction          = light.direction.xyz,
-        light_cast_shadow        = light.shadow_map.generation != 0, // Check if shadow map is valid
-        gbuffer_position_index   = render_target.position_texture.index,
-        gbuffer_normal_index     = render_target.normal_texture.index,
-        gbuffer_albedo_index     = render_target.albedo_texture.index,
-        gbuffer_metallic_index   = render_target.metallic_roughness_texture.index,
-        gbuffer_emissive_index   = render_target.emissive_texture.index,
-        gbuffer_depth_index      = render_target.depth_texture.index,
-        input_image_index        = render_target.final_image.index,
+        scene_camera_idx       = render_target.camera.index,
+        light_camera_idx       = rt.camera.index,
+        shadow_map_id          = light.shadow_map.index,
+        light_kind             = LightKind.SPOT,
+        light_color            = light.color.xyz,
+        light_angle            = light.angle,
+        light_position         = light.position.xyz,
+        light_radius           = light.radius,
+        light_direction        = light.direction.xyz,
+        light_cast_shadow      = light.shadow_map.generation != 0, // Check if shadow map is valid
+        gbuffer_position_index = render_target.position_texture.index,
+        gbuffer_normal_index   = render_target.normal_texture.index,
+        gbuffer_albedo_index   = render_target.albedo_texture.index,
+        gbuffer_metallic_index = render_target.metallic_roughness_texture.index,
+        gbuffer_emissive_index = render_target.emissive_texture.index,
+        gbuffer_depth_index    = render_target.depth_texture.index,
+        input_image_index      = render_target.final_image.index,
       }
       vk.CmdPushConstants(
         command_buffer,

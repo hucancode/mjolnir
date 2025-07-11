@@ -7,7 +7,7 @@ import vk "vendor:vulkan"
 
 // 128 byte push constant budget
 PushConstant :: struct {
-  world:                    matrix[4,4]f32, // 64 bytes
+  world:                    matrix[4, 4]f32, // 64 bytes
   bone_matrix_offset:       u32, // 4
   albedo_index:             u32, // 4
   metallic_roughness_index: u32, // 4
@@ -223,7 +223,10 @@ renderer_gbuffer_begin :: proc(
   render_target: ^RenderTarget,
   command_buffer: vk.CommandBuffer,
 ) {
-  position_texture := resource.get(g_image_2d_buffers, render_target.position_texture)
+  position_texture := resource.get(
+    g_image_2d_buffers,
+    render_target.position_texture,
+  )
   position_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
     imageView = position_texture.view,
@@ -232,7 +235,10 @@ renderer_gbuffer_begin :: proc(
     storeOp = .STORE,
     clearValue = {color = {float32 = {0.0, 0.0, 0.0, 0.0}}},
   }
-  normal_texture := resource.get(g_image_2d_buffers, render_target.normal_texture)
+  normal_texture := resource.get(
+    g_image_2d_buffers,
+    render_target.normal_texture,
+  )
   normal_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
     imageView = normal_texture.view,
@@ -241,7 +247,10 @@ renderer_gbuffer_begin :: proc(
     storeOp = .STORE,
     clearValue = {color = {float32 = {0.0, 0.0, 0.0, 1.0}}},
   }
-  albedo_texture := resource.get(g_image_2d_buffers, render_target.albedo_texture)
+  albedo_texture := resource.get(
+    g_image_2d_buffers,
+    render_target.albedo_texture,
+  )
   albedo_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
     imageView = albedo_texture.view,
@@ -250,7 +259,10 @@ renderer_gbuffer_begin :: proc(
     storeOp = .STORE,
     clearValue = {color = {float32 = {0.0, 0.0, 0.0, 1.0}}},
   }
-  metallic_roughness_texture := resource.get(g_image_2d_buffers, render_target.metallic_roughness_texture)
+  metallic_roughness_texture := resource.get(
+    g_image_2d_buffers,
+    render_target.metallic_roughness_texture,
+  )
   metallic_roughness_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
     imageView = metallic_roughness_texture.view,
@@ -259,7 +271,10 @@ renderer_gbuffer_begin :: proc(
     storeOp = .STORE,
     clearValue = {color = {float32 = {0.0, 0.0, 0.0, 1.0}}},
   }
-  emissive_texture := resource.get(g_image_2d_buffers, render_target.emissive_texture)
+  emissive_texture := resource.get(
+    g_image_2d_buffers,
+    render_target.emissive_texture,
+  )
   emissive_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
     imageView = emissive_texture.view,
@@ -268,7 +283,10 @@ renderer_gbuffer_begin :: proc(
     storeOp = .STORE,
     clearValue = {color = {float32 = {0.0, 0.0, 0.0, 1.0}}},
   }
-  depth_texture := resource.get(g_image_2d_buffers, render_target.depth_texture)
+  depth_texture := resource.get(
+    g_image_2d_buffers,
+    render_target.depth_texture,
+  )
   depth_attachment := vk.RenderingAttachmentInfoKHR {
     sType       = .RENDERING_ATTACHMENT_INFO_KHR,
     imageView   = depth_texture.view,

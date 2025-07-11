@@ -51,25 +51,31 @@ CameraVisibilityData :: struct {
 // Visibility culler
 VisibilityCuller :: struct {
   // Shared node data buffer (per frame in flight)
-  node_data_buffer:      [MAX_FRAMES_IN_FLIGHT]DataBuffer(NodeCullingData),
+  node_data_buffer:            [MAX_FRAMES_IN_FLIGHT]DataBuffer(
+    NodeCullingData,
+  ),
   // Per-camera visibility data (per frame in flight) - legacy
-  camera_data:           [MAX_FRAMES_IN_FLIGHT][MAX_CAMERA]CameraVisibilityData,
+  camera_data:                 [MAX_FRAMES_IN_FLIGHT][MAX_CAMERA]CameraVisibilityData,
   // Multi-camera buffers
-  multi_params_buffer:   [MAX_FRAMES_IN_FLIGHT]DataBuffer(MultiCameraCullingParams),
-  active_camera_buffer:  [MAX_FRAMES_IN_FLIGHT]DataBuffer(ActiveCameraData),
-  multi_visibility_buffer: [MAX_FRAMES_IN_FLIGHT]DataBuffer(b32),
+  multi_params_buffer:         [MAX_FRAMES_IN_FLIGHT]DataBuffer(
+    MultiCameraCullingParams,
+  ),
+  active_camera_buffer:        [MAX_FRAMES_IN_FLIGHT]DataBuffer(
+    ActiveCameraData,
+  ),
+  multi_visibility_buffer:     [MAX_FRAMES_IN_FLIGHT]DataBuffer(b32),
   // GPU pipelines
-  descriptor_set_layout: vk.DescriptorSetLayout,
-  pipeline_layout:       vk.PipelineLayout,
-  pipeline:              vk.Pipeline,
+  descriptor_set_layout:       vk.DescriptorSetLayout,
+  pipeline_layout:             vk.PipelineLayout,
+  pipeline:                    vk.Pipeline,
   // Multi-camera pipeline
   multi_descriptor_set_layout: vk.DescriptorSetLayout,
   multi_pipeline_layout:       vk.PipelineLayout,
   multi_pipeline:              vk.Pipeline,
   multi_descriptor_sets:       [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
   // CPU tracking
-  node_count:            u32,
-  current_frame:         u32, // 0 or 1 for double buffering
+  node_count:                  u32,
+  current_frame:               u32, // 0 or 1 for double buffering
 }
 
 visibility_culler_init :: proc(self: ^VisibilityCuller) -> vk.Result {
@@ -124,25 +130,25 @@ visibility_culler_init :: proc(self: ^VisibilityCuller) -> vk.Result {
 
   // Create descriptor set layout
   culling_bindings := [?]vk.DescriptorSetLayoutBinding {
-      {
-        binding         = 0,
-        descriptorType  = .UNIFORM_BUFFER, // Params buffer
-        descriptorCount = 1,
-        stageFlags      = {.COMPUTE},
-      },
-      {
-        binding         = 1,
-        descriptorType  = .STORAGE_BUFFER, // Node data buffer
-        descriptorCount = 1,
-        stageFlags      = {.COMPUTE},
-      },
-      {
-        binding         = 2,
-        descriptorType  = .STORAGE_BUFFER, // Visibility buffer
-        descriptorCount = 1,
-        stageFlags      = {.COMPUTE},
-      },
-    }
+    {
+      binding         = 0,
+      descriptorType  = .UNIFORM_BUFFER, // Params buffer
+      descriptorCount = 1,
+      stageFlags      = {.COMPUTE},
+    },
+    {
+      binding         = 1,
+      descriptorType  = .STORAGE_BUFFER, // Node data buffer
+      descriptorCount = 1,
+      stageFlags      = {.COMPUTE},
+    },
+    {
+      binding         = 2,
+      descriptorType  = .STORAGE_BUFFER, // Visibility buffer
+      descriptorCount = 1,
+      stageFlags      = {.COMPUTE},
+    },
+  }
 
   vk.CreateDescriptorSetLayout(
     g_device,
@@ -202,21 +208,21 @@ visibility_culler_init :: proc(self: ^VisibilityCuller) -> vk.Result {
   for frame_idx in 0 ..< MAX_FRAMES_IN_FLIGHT {
     for cam_idx in 0 ..< MAX_CAMERA {
       params_buffer_info := vk.DescriptorBufferInfo {
-          buffer = self.camera_data[frame_idx][cam_idx].params_buffer.buffer,
-          range  = vk.DeviceSize(
-            self.camera_data[frame_idx][cam_idx].params_buffer.bytes_count,
-          ),
-        }
+        buffer = self.camera_data[frame_idx][cam_idx].params_buffer.buffer,
+        range  = vk.DeviceSize(
+          self.camera_data[frame_idx][cam_idx].params_buffer.bytes_count,
+        ),
+      }
       node_data_buffer_info := vk.DescriptorBufferInfo {
-          buffer = self.node_data_buffer[frame_idx].buffer,
-          range  = vk.DeviceSize(self.node_data_buffer[frame_idx].bytes_count),
-        }
+        buffer = self.node_data_buffer[frame_idx].buffer,
+        range  = vk.DeviceSize(self.node_data_buffer[frame_idx].bytes_count),
+      }
       visibility_buffer_info := vk.DescriptorBufferInfo {
-          buffer = self.camera_data[frame_idx][cam_idx].visibility_buffer.buffer,
-          range  = vk.DeviceSize(
-            self.camera_data[frame_idx][cam_idx].visibility_buffer.bytes_count,
-          ),
-        }
+        buffer = self.camera_data[frame_idx][cam_idx].visibility_buffer.buffer,
+        range  = vk.DeviceSize(
+          self.camera_data[frame_idx][cam_idx].visibility_buffer.bytes_count,
+        ),
+      }
 
       culling_writes := [?]vk.WriteDescriptorSet {
         {
@@ -282,7 +288,7 @@ visibility_culler_init :: proc(self: ^VisibilityCuller) -> vk.Result {
   ) or_return
 
   // Create multi-camera descriptor set layout
-  multi_culling_bindings := [?]vk.DescriptorSetLayoutBinding{
+  multi_culling_bindings := [?]vk.DescriptorSetLayoutBinding {
     {
       binding         = 0,
       descriptorType  = .UNIFORM_BUFFER, // Multi-camera params buffer
@@ -351,24 +357,26 @@ visibility_culler_init :: proc(self: ^VisibilityCuller) -> vk.Result {
 
   // Update multi-camera descriptor sets
   for frame_idx in 0 ..< MAX_FRAMES_IN_FLIGHT {
-    multi_params_buffer_info := vk.DescriptorBufferInfo{
+    multi_params_buffer_info := vk.DescriptorBufferInfo {
       buffer = self.multi_params_buffer[frame_idx].buffer,
       range  = vk.DeviceSize(self.multi_params_buffer[frame_idx].bytes_count),
     }
-    node_data_buffer_info := vk.DescriptorBufferInfo{
+    node_data_buffer_info := vk.DescriptorBufferInfo {
       buffer = self.node_data_buffer[frame_idx].buffer,
       range  = vk.DeviceSize(self.node_data_buffer[frame_idx].bytes_count),
     }
-    active_camera_buffer_info := vk.DescriptorBufferInfo{
+    active_camera_buffer_info := vk.DescriptorBufferInfo {
       buffer = self.active_camera_buffer[frame_idx].buffer,
       range  = vk.DeviceSize(self.active_camera_buffer[frame_idx].bytes_count),
     }
-    multi_visibility_buffer_info := vk.DescriptorBufferInfo{
+    multi_visibility_buffer_info := vk.DescriptorBufferInfo {
       buffer = self.multi_visibility_buffer[frame_idx].buffer,
-      range  = vk.DeviceSize(self.multi_visibility_buffer[frame_idx].bytes_count),
+      range  = vk.DeviceSize(
+        self.multi_visibility_buffer[frame_idx].bytes_count,
+      ),
     }
 
-    multi_culling_writes := [?]vk.WriteDescriptorSet{
+    multi_culling_writes := [?]vk.WriteDescriptorSet {
       {
         sType = .WRITE_DESCRIPTOR_SET,
         dstSet = self.multi_descriptor_sets[frame_idx],
@@ -418,7 +426,7 @@ visibility_culler_init :: proc(self: ^VisibilityCuller) -> vk.Result {
   ) or_return
   defer vk.DestroyShaderModule(g_device, multi_culling_shader_module, nil)
 
-  multi_culling_pipeline_info := vk.ComputePipelineCreateInfo{
+  multi_culling_pipeline_info := vk.ComputePipelineCreateInfo {
     sType = .COMPUTE_PIPELINE_CREATE_INFO,
     stage = {
       sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
@@ -448,7 +456,11 @@ visibility_culler_deinit :: proc(self: ^VisibilityCuller) {
   vk.DestroyDescriptorSetLayout(g_device, self.descriptor_set_layout, nil)
   vk.DestroyPipeline(g_device, self.multi_pipeline, nil)
   vk.DestroyPipelineLayout(g_device, self.multi_pipeline_layout, nil)
-  vk.DestroyDescriptorSetLayout(g_device, self.multi_descriptor_set_layout, nil)
+  vk.DestroyDescriptorSetLayout(
+    g_device,
+    self.multi_descriptor_set_layout,
+    nil,
+  )
   for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
     data_buffer_deinit(&self.node_data_buffer[i])
     data_buffer_deinit(&self.multi_params_buffer[i])
@@ -717,8 +729,10 @@ visibility_culler_update_multi_camera :: proc(
   }
 
   // Update active camera data
-  active_camera_slice := data_buffer_get_all(&self.active_camera_buffer[g_frame_index])
-  
+  active_camera_slice := data_buffer_get_all(
+    &self.active_camera_buffer[g_frame_index],
+  )
+
   // Clear active camera data
   for i in 0 ..< MAX_ACTIVE_CAMERAS {
     active_camera_slice[i] = {}
@@ -728,18 +742,18 @@ visibility_culler_update_multi_camera :: proc(
   camera_count: u32 = 0
   for &target in render_targets {
     if camera_count >= MAX_ACTIVE_CAMERAS do break
-    
+
     camera := resource.get(g_cameras, target.camera)
     if camera == nil do continue
-    
+
     // Calculate frustum for this camera
     view_matrix := geometry.calculate_view_matrix(camera^)
     proj_matrix := geometry.calculate_projection_matrix(camera^)
     frustum := geometry.make_frustum(proj_matrix * view_matrix)
-    
+
     active_camera_slice[camera_count] = {
       frustum_planes = frustum.planes,
-      camera_index = target.camera.index,
+      camera_index   = target.camera.index,
     }
     camera_count += 1
   }
@@ -765,7 +779,9 @@ visibility_culler_execute_multi_camera :: proc(
   }
 
   // Clear visibility buffer
-  visibility_slice := data_buffer_get_all(&self.multi_visibility_buffer[g_frame_index])
+  visibility_slice := data_buffer_get_all(
+    &self.multi_visibility_buffer[g_frame_index],
+  )
   slice.fill(visibility_slice, false)
 
   // Dispatch culling compute shader
@@ -793,16 +809,19 @@ multi_camera_is_node_visible :: proc(
   node_index: u32,
 ) -> bool {
   params := data_buffer_get(&self.multi_params_buffer[g_frame_index])
-  if camera_slot >= params.active_camera_count || node_index >= self.node_count {
+  if camera_slot >= params.active_camera_count ||
+     node_index >= self.node_count {
     return false
   }
-  
-  visibility_slice := data_buffer_get_all(&self.multi_visibility_buffer[g_frame_index])
+
+  visibility_slice := data_buffer_get_all(
+    &self.multi_visibility_buffer[g_frame_index],
+  )
   visibility_index := camera_slot * self.node_count + node_index
   if visibility_index >= u32(len(visibility_slice)) {
     return false
   }
-  
+
   return bool(visibility_slice[visibility_index])
 }
 
@@ -810,20 +829,26 @@ multi_camera_is_node_visible :: proc(
 multi_camera_count_visible_objects :: proc(
   self: ^VisibilityCuller,
   camera_slot: u32,
-) -> (disabled: u32, visible: u32, total: u32) {
+) -> (
+  disabled: u32,
+  visible: u32,
+  total: u32,
+) {
   total = self.node_count
   params := data_buffer_get(&self.multi_params_buffer[g_frame_index])
   if self.node_count == 0 || camera_slot >= params.active_camera_count {
     return 0, 0, 0
   }
 
-  visibility_slice := data_buffer_get_all(&self.multi_visibility_buffer[g_frame_index])
+  visibility_slice := data_buffer_get_all(
+    &self.multi_visibility_buffer[g_frame_index],
+  )
   node_data_slice := data_buffer_get_all(&self.node_data_buffer[g_frame_index])
 
   for i in 0 ..< self.node_count {
     visibility_index := camera_slot * self.node_count + i
     if visibility_index >= u32(len(visibility_slice)) do continue
-    
+
     if !node_data_slice[i].culling_enabled {
       disabled += 1
     } else if visibility_slice[visibility_index] {

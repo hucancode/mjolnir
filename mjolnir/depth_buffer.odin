@@ -72,7 +72,10 @@ renderer_depth_prepass_begin :: proc(
   render_target: ^RenderTarget,
   command_buffer: vk.CommandBuffer,
 ) {
-  depth_texture := resource.get(g_image_2d_buffers, render_target.depth_texture)
+  depth_texture := resource.get(
+    g_image_2d_buffers,
+    render_target.depth_texture,
+  )
   depth_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
     imageView = depth_texture.view,
@@ -158,7 +161,7 @@ renderer_depth_prepass_render :: proc(
             current_pipeline = pipeline
           }
           push_constant := PushConstant {
-            world = node.transform.world_matrix,
+            world        = node.transform.world_matrix,
             camera_index = camera_index,
           }
           if node_has_skin {

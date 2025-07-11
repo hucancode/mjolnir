@@ -165,16 +165,25 @@ renderer_shadow_begin :: proc(
   depth_image_view: vk.ImageView
   face_index, has_face := face.?
   if has_face {
-    cube_texture := resource.get(g_image_cube_buffers, shadow_target.depth_texture)
+    cube_texture := resource.get(
+      g_image_cube_buffers,
+      shadow_target.depth_texture,
+    )
     if cube_texture == nil {
-      log.errorf("Invalid cube shadow map handle: %v", shadow_target.depth_texture)
+      log.errorf(
+        "Invalid cube shadow map handle: %v",
+        shadow_target.depth_texture,
+      )
       return
     }
     depth_image_view = cube_texture.face_views[face_index]
   } else {
     texture_2d := resource.get(g_image_2d_buffers, shadow_target.depth_texture)
     if texture_2d == nil {
-      log.errorf("Invalid 2D shadow map handle: %v", shadow_target.depth_texture)
+      log.errorf(
+        "Invalid 2D shadow map handle: %v",
+        shadow_target.depth_texture,
+      )
       return
     }
     depth_image_view = texture_2d.view
@@ -182,7 +191,7 @@ renderer_shadow_begin :: proc(
 
   depth_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
-    imageView   = depth_image_view,
+    imageView = depth_image_view,
     imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
     loadOp = .CLEAR,
     storeOp = .STORE,
@@ -262,9 +271,7 @@ renderer_shadow_render :: proc(
   }
 }
 
-renderer_shadow_end :: proc(
-  command_buffer: vk.CommandBuffer,
-) {
+renderer_shadow_end :: proc(command_buffer: vk.CommandBuffer) {
   vk.CmdEndRenderingKHR(command_buffer)
 }
 
@@ -293,7 +300,7 @@ render_single_shadow_node :: proc(
   mesh_skinning, mesh_has_skin := &mesh.skinning.?
   node_skinning, node_has_skin := mesh_attachment.skinning.?
   push_constant := PushConstant {
-    world = node.transform.world_matrix,
+    world        = node.transform.world_matrix,
     camera_index = camera_index,
   }
   if is_skinned && node_has_skin {
