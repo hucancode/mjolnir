@@ -267,3 +267,8 @@ my_array := [1]f32
 my_array[0] = 10.0
 log.infof("%v", my_array)
 ```
+
+# Accessibility
+
+I am color blind, I have difficulty distinguish some green-red color (protan). When use color to debug, avoid using colors with similar red shade and green shade with different meaning
+As an AI you have difficulty checking visual information. When you want to see something on the screen for debugging, for example shadow artifact, light color, you can pause and ask me to run and tell you the result. To check the numerical result, you can hard code the app stop render after few frame (the code is at engine.odin `render` procedure) and use `grep` to see the log for your self.
