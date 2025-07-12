@@ -338,7 +338,6 @@ renderer_particle_init :: proc(self: ^RendererParticle) -> vk.Result {
     {.STORAGE_BUFFER},
   ) or_return
   renderer_particle_init_emitter_pipeline(self) or_return
-  renderer_particle_init_culling_pipeline(self) or_return
   renderer_particle_init_compact_pipeline(self) or_return
   renderer_particle_init_compute_pipeline(self) or_return
   renderer_particle_init_render_pipeline(self) or_return
@@ -501,47 +500,6 @@ renderer_particle_init_emitter_pipeline :: proc(
     nil,
     &self.emitter_pipeline,
   ) or_return
-  return .SUCCESS
-}
-
-renderer_particle_init_culling_pipeline :: proc(
-  self: ^RendererParticle,
-) -> vk.Result {
-  // --- Culling pipeline ---
-  culling_bindings := [?]vk.DescriptorSetLayoutBinding {
-    {
-      binding         = 0,
-      descriptorType  = .UNIFORM_BUFFER, // Params buffer
-      descriptorCount = 1,
-      stageFlags      = {.COMPUTE},
-    },
-    {
-      binding         = 1,
-      descriptorType  = .STORAGE_BUFFER, // Emitter buffer
-      descriptorCount = 1,
-      stageFlags      = {.COMPUTE},
-    },
-    {
-      binding         = 2,
-      descriptorType  = .STORAGE_BUFFER, // Visibility buffer
-      descriptorCount = 1,
-      stageFlags      = {.COMPUTE},
-    },
-  }
-
-  culling_params_buffer_info := vk.DescriptorBufferInfo {
-    buffer = self.params_buffer.buffer,
-    range  = vk.DeviceSize(self.params_buffer.bytes_count),
-  }
-  culling_emitter_buffer_info := vk.DescriptorBufferInfo {
-    buffer = self.emitter_buffer.buffer,
-    range  = vk.DeviceSize(self.emitter_buffer.bytes_count),
-  }
-  culling_visibility_buffer_info := vk.DescriptorBufferInfo {
-    buffer = self.emitter_visibility_buffer.buffer,
-    range  = vk.DeviceSize(self.emitter_visibility_buffer.bytes_count),
-  }
-
   return .SUCCESS
 }
 
