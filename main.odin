@@ -393,6 +393,12 @@ setup :: proc(engine: ^mjolnir.Engine) {
     2.0,
   )
   current_controller = &orbit_controller
+  
+  // Sync orbit controller with current camera position to prevent jumps
+  main_camera := resource.get(mjolnir.g_cameras, engine.scene.main_camera)
+  if main_camera != nil {
+    geometry.camera_controller_sync(current_controller, main_camera)
+  }
 
   log.info("setup complete")
 }
@@ -422,12 +428,17 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
   // Handle camera controller switching with Tab key
   tab_pressed := glfw.GetKey(engine.window, glfw.KEY_TAB) == glfw.PRESS
   if tab_pressed && !tab_was_pressed {
+    main_camera_for_sync := resource.get(mjolnir.g_cameras, engine.scene.main_camera)
     if current_controller == &orbit_controller {
       current_controller = &free_controller
       log.info("Switched to free camera")
     } else {
       current_controller = &orbit_controller
       log.info("Switched to orbit camera")
+    }
+    // Sync new controller with current camera state to prevent jumps
+    if main_camera_for_sync != nil {
+      geometry.camera_controller_sync(current_controller, main_camera_for_sync)
     }
   }
   tab_was_pressed = tab_pressed

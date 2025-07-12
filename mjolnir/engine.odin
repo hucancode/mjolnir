@@ -1156,7 +1156,6 @@ render :: proc(self: ^Engine) -> vk.Result {
           )
         }
         target := resource.get(g_render_targets, light.render_targets[face])
-        log.debugf("draw shadow for point light face %d with rt %v", face, target)
         shadow_begin(target^, command_buffer, u32(face))
         shadow_render(
           &self.shadow,
