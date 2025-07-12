@@ -39,7 +39,6 @@ layout(push_constant) uniform PushConstants {
     float roughness_value;
     float emissive_value;
     uint camera_index;
-    float padding[3];        // 12 (pad to 128)
 };
 
 layout(location = 0) out vec3 outPosition;

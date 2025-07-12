@@ -87,14 +87,14 @@ calculate_safe_up_vector :: proc(forward: [3]f32) -> [3]f32 {
 quaternion_from_forward_and_up :: proc(forward, up: [3]f32) -> quaternion128 {
   right := linalg.normalize(linalg.cross(forward, up))
   recalc_up := linalg.cross(right, forward)
-  
+
   // Create rotation matrix from basis vectors
   rotation_matrix := linalg.Matrix3f32{
     right.x,     recalc_up.x,     -forward.x,
     right.y,     recalc_up.y,     -forward.y,
     right.z,     recalc_up.z,     -forward.z,
   }
-  
+
   return linalg.quaternion_from_matrix3_f32(rotation_matrix)
 }
 
@@ -104,7 +104,6 @@ quaternion_from_forward_and_up :: proc(forward, up: [3]f32) -> quaternion128 {
 camera_look_at :: proc(camera: ^Camera, from, to: [3]f32, world_up := [3]f32{0, 1, 0}) {
   camera.position = from
   forward := linalg.normalize(to - from)
-  
   // Safe up vector calculation
   safe_up := world_up
   if math.abs(linalg.dot(forward, world_up)) > 0.999 {
@@ -113,7 +112,6 @@ camera_look_at :: proc(camera: ^Camera, from, to: [3]f32, world_up := [3]f32{0, 
       safe_up = {1, 0, 0}  // Use X-axis as last resort
     }
   }
-  
   camera.rotation = quaternion_from_forward_and_up(forward, safe_up)
 }
 
@@ -138,7 +136,7 @@ camera_rotate :: proc(camera: ^Camera, delta_yaw, delta_pitch: f32) {
   yaw_rotation := linalg.quaternion_angle_axis(delta_yaw, [3]f32{0, 1, 0})
   right := camera_right(camera^)
   pitch_rotation := linalg.quaternion_angle_axis(delta_pitch, right)
-  
+
   // Apply rotations
   camera.rotation = yaw_rotation * camera.rotation
   camera.rotation = camera.rotation * pitch_rotation

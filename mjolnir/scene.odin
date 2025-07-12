@@ -254,7 +254,7 @@ scene_init :: proc(self: ^Scene) {
     math.PI * 0.5, // fov
     16.0 / 9.0, // aspect_ratio
     0.1, // near
-    20.0, // far
+    50.0, // far
   )
   self.main_camera = main_camera_handle
   log.infof(

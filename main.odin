@@ -10,7 +10,9 @@ import "mjolnir/resource"
 import glfw "vendor:glfw"
 import mu "vendor:microui"
 
-LIGHT_COUNT :: 1
+LIGHT_COUNT :: 10
+ALL_SPOT_LIGHT :: false
+ALL_POINT_LIGHT :: false
 light_handles: [LIGHT_COUNT]mjolnir.Handle
 light_cube_handles: [LIGHT_COUNT]mjolnir.Handle
 ground_mat_handle: mjolnir.Handle
@@ -153,40 +155,40 @@ setup :: proc(engine: ^mjolnir.Engine) {
     rotate(&right_wall.transform, -math.PI * 0.5, linalg.VECTOR3F32_Z_AXIS)
     scale(&right_wall.transform, size)
     // Back wall
-    // back_wall_handle, back_wall := spawn(
-    //   &engine.scene,
-    //   MeshAttachment {
-    //     handle = ground_mesh_handle,
-    //     material = ground_mat_handle,
-    //     cast_shadow = true,
-    //   },
-    // )
-    // log.infof("Back wall handle: %v", back_wall_handle)
-    // translate(
-    //   &back_wall.transform,
-    //   x = -0.5 * size,
-    //   y = size * 1.0,
-    //   z = -size * 0.5,
-    // )
-    // rotate(&back_wall.transform, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
-    // scale(&back_wall.transform, size)
-    // // Ceiling
-    // _, ceiling := spawn(
-    //   &engine.scene,
-    //   MeshAttachment {
-    //     handle = ground_mesh_handle,
-    //     material = ground_mat_handle,
-    //     cast_shadow = true,
-    //   },
-    // )
-    // translate(
-    //   &ceiling.transform,
-    //   x = -0.5 * size,
-    //   y = size * 0.5,
-    //   z = 0.5 * size,
-    // )
-    // rotate(&ceiling.transform, -math.PI, linalg.VECTOR3F32_X_AXIS)
-    // scale(&ceiling.transform, size)
+    back_wall_handle, back_wall := spawn(
+      &engine.scene,
+      MeshAttachment {
+        handle = ground_mesh_handle,
+        material = ground_mat_handle,
+        cast_shadow = true,
+      },
+    )
+    log.infof("Back wall handle: %v", back_wall_handle)
+    translate(
+      &back_wall.transform,
+      x = -0.5 * size,
+      y = size * 1.0,
+      z = -size * 0.5,
+    )
+    rotate(&back_wall.transform, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
+    scale(&back_wall.transform, size)
+    // Ceiling
+    _, ceiling := spawn(
+      &engine.scene,
+      MeshAttachment {
+        handle = ground_mesh_handle,
+        material = ground_mat_handle,
+        cast_shadow = true,
+      },
+    )
+    translate(
+      &ceiling.transform,
+      x = -0.5 * size,
+      y = size * 0.5,
+      z = 0.5 * size,
+    )
+    rotate(&ceiling.transform, -math.PI, linalg.VECTOR3F32_X_AXIS)
+    scale(&ceiling.transform, size)
   }
   if true {
     log.info("loading GLTF...")
@@ -231,9 +233,12 @@ setup :: proc(engine: ^mjolnir.Engine) {
         1.0,
       }
       light: ^Node
-      should_make_spot_light := false
-      should_make_spot_light = i % 2 != 0
-      // should_make_spot_light = true
+      should_make_spot_light := i % 2 != 0
+      if ALL_SPOT_LIGHT {
+          should_make_spot_light = true
+      } else if ALL_POINT_LIGHT {
+          should_make_spot_light = false
+      }
       if should_make_spot_light {
         light_handles[i], light = spawn(
           &engine.scene,
@@ -248,7 +253,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
       } else {
         light_handles[i], light = spawn(
           &engine.scene,
-          PointLightAttachment{color = color, radius = 7, cast_shadow = true},
+          PointLightAttachment{color = color, radius = 10, cast_shadow = true},
         )
       }
       translate(&light.transform, 6, 2, -1)

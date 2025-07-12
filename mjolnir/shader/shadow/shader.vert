@@ -6,6 +6,8 @@ layout(location = 0) in vec3 inPosition;
 layout(location = 5) in uvec4 inJoints;
 layout(location = 6) in vec4 inWeights;
 
+layout(location = 0) out vec3 worldPos;
+
 struct CameraUniform {
     mat4 view;
     mat4 projection;
@@ -53,5 +55,6 @@ void main() {
         modelPosition = vec4(inPosition, 1.0);
     }
     vec4 worldPosition = world * modelPosition;
+    worldPos = worldPosition.xyz;
     gl_Position = camera.projection * camera.view * worldPosition;
 }

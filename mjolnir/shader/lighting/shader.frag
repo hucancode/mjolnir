@@ -60,13 +60,28 @@ vec2 dirToEquirectUV(vec3 dir) {
 }
 
 float linearizeDepth(float depth, float near, float far) {
-    // Converts depth from [0,1] (texture) to [near, far]
+    // Converts depth from [0,1] to [near, far]
     float z = depth * 2.0 - 1.0;
     return (2.0 * near * far) / (far + near - z * (far - near));
 }
 
 float calculateShadow(vec3 fragPos, vec3 N, CameraUniform light_camera) {
     if (push.light_kind == DIRECTIONAL_LIGHT) {
+        // WIP, currently we don't calculate directional light's shadow
+        return 1.0;
+    } else if (push.light_kind == POINT_LIGHT) {
+        vec3 lightToFrag = fragPos - push.light_position;
+        vec3 coord = normalize(lightToFrag);
+        float currentDepth = length(lightToFrag);
+        float shadowDepth = texture(samplerCube(cube_textures[push.shadow_map_id], samplers[SAMPLER_LINEAR_CLAMP]), coord).r;
+        float near = 0.1;
+        float far = push.light_radius;
+        float normalizedCurrentDepth = (currentDepth - near) / (far - near);
+        float bias = 0.001; // Small bias to prevent acne
+        return (normalizedCurrentDepth > shadowDepth + bias) ? 0.1 : 1.0;
+    } else if (push.light_kind == SPOT_LIGHT) {
+        vec3 lightToFrag = fragPos - push.light_position;
+        float currentDepth = length(lightToFrag);
         vec4 lightSpacePos = light_camera.projection * light_camera.view * vec4(fragPos, 1.0);
         vec3 shadowCoord = lightSpacePos.xyz / lightSpacePos.w;
         shadowCoord = shadowCoord * 0.5 + 0.5;
@@ -75,31 +90,12 @@ float calculateShadow(vec3 fragPos, vec3 N, CameraUniform light_camera) {
             shadowCoord.z < 0.0 || shadowCoord.z > 1.0) {
             return 1.0;
         }
+        float near = 0.1;
+        float far = push.light_radius;
+        float normalizedCurrentDepth = (currentDepth - near) / (far - near);
         float shadowDepth = texture(sampler2D(textures[push.shadow_map_id], samplers[SAMPLER_LINEAR_CLAMP]), shadowCoord.xy).r;
-        float bias = max(0.005 * (1.0 - dot(N, normalize(-push.light_direction))), 0.002);
-        return (shadowCoord.z > shadowDepth + bias) ? 0.1 : 1.0;
-    } else if (push.light_kind == POINT_LIGHT) {
-        vec3 lightToFrag = fragPos - push.light_position;
-        vec3 coord = normalize(lightToFrag);
-        float currentDepth = length(lightToFrag);
-        float shadowDepth = texture(samplerCube(cube_textures[push.shadow_map_id], samplers[SAMPLER_LINEAR_CLAMP]), coord).r;
-        shadowDepth = linearizeDepth(shadowDepth, 0.1, push.light_radius);
-        float bias = max(0.01 * (1.0 - dot(N, normalize(lightToFrag))), 0.005);
-        return (currentDepth > shadowDepth + bias) ? 0.0 : 1.0;
-    } else if (push.light_kind == SPOT_LIGHT) {
-        vec4 lightSpacePos = light_camera.projection * light_camera.view * vec4(fragPos, 1.0);
-        vec3 shadowCoord = lightSpacePos.xyz / lightSpacePos.w;
-        shadowCoord = shadowCoord * 0.5 + 0.5;
-        // Simple bounds check
-        if (shadowCoord.x < 0.0 || shadowCoord.x > 1.0 ||
-            shadowCoord.y < 0.0 || shadowCoord.y > 1.0 ||
-            shadowCoord.z < 0.0 || shadowCoord.z > 1.0) {
-            return 1.0; // No shadow outside frustum
-        }
-        float shadowDepth = texture(sampler2D(textures[push.shadow_map_id], samplers[SAMPLER_LINEAR_CLAMP]), shadowCoord.xy).r;
-        vec3 lightToFrag = normalize(fragPos - push.light_position);
-        float bias = max(0.005 * (1.0 - dot(N, -lightToFrag)), 0.002);
-        return (shadowCoord.z > shadowDepth + bias) ? 0.1 : 1.0;
+        float bias = 0.001;
+        return (normalizedCurrentDepth > shadowDepth + bias) ? 0.0 : 1.0;
     }
     return 1.0;
 }
@@ -118,7 +114,7 @@ vec3 brdf(vec3 N, vec3 V, vec3 albedo, float roughness, float metallic, vec3 fra
     }
     if (push.light_kind == SPOT_LIGHT) {
         vec3 lightToFrag = normalize(fragPos - push.light_position);
-        float cosTheta = dot(-lightToFrag, normalize(push.light_direction)); // Note: negative lightToFrag
+        float cosTheta = dot(-lightToFrag, normalize(push.light_direction));
         float spotEffect = smoothstep(0.9, 1.1, abs(cosTheta));
         attenuation *= spotEffect;
     }
@@ -134,6 +130,20 @@ vec3 brdf(vec3 N, vec3 V, vec3 albedo, float roughness, float metallic, vec3 fra
     vec3 kD = (vec3(1.0) - kS) * (1.0 - metallic);
     Lo += (kD * albedo / PI + spec) * push.light_color * NdotL * attenuation;
     return Lo;
+}
+
+vec3 colorBand(float x) {
+    vec3 ret;
+    if (x < 0.25) {
+        ret = vec3(1.0, 0.0, 0.0); // Red
+    } else if (x < 0.5) {
+        ret = vec3(0.0, 0.0, 1.0); // Blue
+    } else if (x < 0.75) {
+        ret = vec3(0.0, 1.0, 0.0); // Green
+    } else {
+        ret = vec3(1.0, 1.0, 1.0); // White
+    }
+    return ret;
 }
 
 void main() {
@@ -152,26 +162,16 @@ void main() {
     CameraUniform light_camera = camera_buffer.cameras[push.light_camera_idx];
     float shadowFactor = calculateShadow(position, normal, light_camera);
     vec3 direct = brdf(normal, V, albedo, roughness, metallic, position);
-
-    // DEBUG: Visualize spot light shadow map data
-    if (push.light_kind == SPOT_LIGHT && false) {
-        vec4 lightSpacePos = light_camera.projection * light_camera.view * vec4(position, 1.0);
-        vec3 shadowCoord = lightSpacePos.xyz / lightSpacePos.w;
-        shadowCoord = shadowCoord * 0.5 + 0.5;
-
-        // Show shadow coordinates as color for debugging
-        if (shadowCoord.x >= 0.0 && shadowCoord.x <= 1.0 &&
-            shadowCoord.y >= 0.0 && shadowCoord.y <= 1.0 &&
-            shadowCoord.z >= 0.0 && shadowCoord.z <= 1.0) {
-            float shadowDepth = texture(sampler2D(textures[push.shadow_map_id], samplers[SAMPLER_NEAREST_CLAMP]), shadowCoord.xy).r;
-            outColor = vec4(vec3(shadowDepth), 1.0);
-            // Visualize: Red=shadow map depth, Green=current depth, Blue=shadow factor
-            return;
-        }
-            outColor = vec4(1,0,0, 1.0);
-            return;
-    }
-
-    // Apply lighting with shadow factor
     outColor = vec4(direct * shadowFactor, 1.0);
+    // outColor = vec4(vec3(shadowFactor), 1.0);
+    // === DEBUG COLOR BANDS ===
+    // if (false) {
+    //     vec2 screenUV = gl_FragCoord.xy / camera_buffer.cameras[push.scene_camera_idx].viewport_size;
+    //     vec4 lightSpacePos = light_camera.projection * light_camera.view * vec4(position, 1.0);
+    //     vec3 shadowCoord = lightSpacePos.xyz / lightSpacePos.w;
+    //     shadowCoord = shadowCoord * 0.5 + 0.5;
+    //     float currentDepth = length(position - push.light_position) / push.light_radius;
+    //     float shadowDepth = texture(sampler2D(textures[push.shadow_map_id], samplers[SAMPLER_LINEAR_CLAMP]), shadowCoord.xy).r;
+    //     outColor = vec4(colorBand(currentDepth), 1.0);
+    // }
 }

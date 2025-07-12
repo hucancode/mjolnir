@@ -6,6 +6,7 @@ import "resource"
 import vk "vendor:vulkan"
 
 SHADER_SHADOW_VERT :: #load("shader/shadow/vert.spv")
+SHADER_SHADOW_FRAG :: #load("shader/shadow/frag.spv")
 
 RendererShadow :: struct {
   pipeline_layout: vk.PipelineLayout,
@@ -21,7 +22,7 @@ renderer_shadow_init :: proc(
     g_bindless_bone_buffer_set_layout,
   }
   push_constant_range := [?]vk.PushConstantRange {
-    {stageFlags = {.VERTEX}, size = size_of(PushConstant)},
+    {stageFlags = {.FRAGMENT, .VERTEX}, size = size_of(PushConstant)},
   }
   vk.CreatePipelineLayout(
     g_device,
@@ -37,6 +38,8 @@ renderer_shadow_init :: proc(
   ) or_return
   vert_module := create_shader_module(SHADER_SHADOW_VERT) or_return
   defer vk.DestroyShaderModule(g_device, vert_module, nil)
+  frag_module := create_shader_module(SHADER_SHADOW_FRAG) or_return
+  defer vk.DestroyShaderModule(g_device, frag_module, nil)
   input_assembly := vk.PipelineInputAssemblyStateCreateInfo {
     sType    = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
     topology = .TRIANGLE_LIST,
@@ -56,11 +59,11 @@ renderer_shadow_init :: proc(
     sType                   = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
     polygonMode             = .FILL,
     cullMode                = {.BACK},
-    frontFace               = .COUNTER_CLOCKWISE,
+    frontFace               = .CLOCKWISE,
     lineWidth               = 1.0,
     depthBiasEnable         = true,
-    depthBiasConstantFactor = 1.25,
-    depthBiasClamp          = 0.0,
+    depthBiasConstantFactor = 1.0,
+    depthBiasClamp          = 0.01,
     depthBiasSlopeFactor    = 1.75,
   }
   multisampling := vk.PipelineMultisampleStateCreateInfo {
@@ -94,7 +97,7 @@ renderer_shadow_init :: proc(
   configs: [SHADOW_SHADER_VARIANT_COUNT]ShadowShaderConfig
   entries: [SHADOW_SHADER_VARIANT_COUNT][SHADOW_SHADER_OPTION_COUNT]vk.SpecializationMapEntry
   spec_infos: [SHADOW_SHADER_VARIANT_COUNT]vk.SpecializationInfo
-  shader_stages: [SHADOW_SHADER_VARIANT_COUNT][1]vk.PipelineShaderStageCreateInfo
+  shader_stages: [SHADOW_SHADER_VARIANT_COUNT][2]vk.PipelineShaderStageCreateInfo
   for mask in 0 ..< SHADOW_SHADER_VARIANT_COUNT {
     features := transmute(ShaderFeatureSet)mask & ShaderFeatureSet{.SKINNING}
     configs[mask] = {
@@ -113,13 +116,19 @@ renderer_shadow_init :: proc(
       dataSize      = size_of(ShadowShaderConfig),
       pData         = &configs[mask],
     }
-    shader_stages[mask] = [1]vk.PipelineShaderStageCreateInfo {
+    shader_stages[mask] = [2]vk.PipelineShaderStageCreateInfo {
       {
         sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
         stage = {.VERTEX},
         module = vert_module,
         pName = "main",
         pSpecializationInfo = &spec_infos[mask],
+      },
+      {
+        sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
+        stage = {.FRAGMENT},
+        module = frag_module,
+        pName = "main",
       },
     }
     pipeline_infos[mask] = {
@@ -195,7 +204,7 @@ renderer_shadow_begin :: proc(
     imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
     loadOp = .CLEAR,
     storeOp = .STORE,
-    clearValue = {depthStencil = {1.0, 0}},
+    clearValue = {depthStencil = {1.0, 0}}, // Clear to far distance
   }
   render_info_khr := vk.RenderingInfoKHR {
     sType = .RENDERING_INFO_KHR,
@@ -309,7 +318,7 @@ render_single_shadow_node :: proc(
   vk.CmdPushConstants(
     command_buffer,
     layout,
-    {.VERTEX},
+    {.VERTEX, .FRAGMENT},
     0,
     size_of(PushConstant),
     &push_constant,

@@ -354,8 +354,11 @@ renderer_lighting_render :: proc(
       // Bind regular pipeline with GREATER_OR_EQUAL depth test
       vk.CmdBindPipeline(command_buffer, .GRAPHICS, self.lighting_pipeline)
 
+      // Get the first camera from the point light's render targets (all 6 have same position)
+      rt := resource.get(g_render_targets, light.render_targets[0])
       light_push := LightPushConstant {
         scene_camera_idx       = render_target.camera.index,
+        light_camera_idx       = rt.camera.index, // Use first cube face camera for position
         shadow_map_id          = light.shadow_map.index,
         light_kind             = LightKind.POINT,
         light_color            = light.color.xyz,

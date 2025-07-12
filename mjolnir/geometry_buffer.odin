@@ -17,6 +17,7 @@ PushConstant :: struct {
   roughness_value:          f32, // 4
   emissive_value:           f32, // 4
   camera_index:             u32, // 4
+  padding:                  [3]u32,
 }
 
 RendererGBuffer :: struct {

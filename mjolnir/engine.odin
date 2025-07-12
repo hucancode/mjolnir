@@ -1127,16 +1127,13 @@ render :: proc(self: ^Engine) -> vk.Result {
         camera: ^geometry.Camera
         render_target.camera, camera = resource.alloc(&g_cameras)
         camera^ = geometry.make_camera_perspective(data.angle * 2.0,  1.0,  0.1,  data.radius )// Simple FOV calculation// Square aspect ratio// near// far
-
         // Set camera to look in the direction of the light
         target_pos := data.position.xyz + data.direction.xyz
         geometry.camera_look_at(camera, data.position.xyz, target_pos)
-
         // Debug: verify the camera direction matches light direction
         camera_forward := geometry.camera_forward(camera^)
         log.infof("camera forward: %v, light direction: %v", camera_forward, data.direction.xyz)
         log.infof("spot light angle=%f degrees, radius=%f", data.angle * 180.0 / math.PI, data.radius)
-
         render_target_update_camera_uniform(render_target)
         camera_uniform := get_camera_uniform(render_target.camera.index)
         data.view = camera_uniform.view
@@ -1317,7 +1314,6 @@ render :: proc(self: ^Engine) -> vk.Result {
       cube_shadow := resource.get(g_image_cube_buffers, light.shadow_map)
       for face in 0 ..< 6 {
         frustum := geometry.make_frustum(light.proj * light.views[face])
-
         shadow_render_input: RenderInput
         when USE_GPU_CULLING {
           shadow_render_input = generate_render_input_for_camera_slot(
@@ -1334,14 +1330,8 @@ render :: proc(self: ^Engine) -> vk.Result {
             shadow_pass = true,
           )
         }
-
-        log.debugf(
-          "Point light face %d: shadow render input has %d batches (camera slot %d)",
-          face,
-          len(shadow_render_input.batches),
-          current_camera_slot,
-        )
         target := resource.get(g_render_targets, light.render_targets[face])
+        log.debugf("draw shadow for point light face %d with rt %v", face, target)
         renderer_shadow_begin(target^, command_buffer, u32(face))
         renderer_shadow_render(
           &self.shadow,
@@ -1447,14 +1437,13 @@ render :: proc(self: ^Engine) -> vk.Result {
     {.COLOR_ATTACHMENT_WRITE},
   )
   log.debug("============ rendering depth pre-pass... =============")
-  depth_target: RenderTarget = self.main_render_target[g_frame_index]
   depth_input := generate_render_input(self, frustum, self.scene.main_camera)
-  renderer_depth_prepass_begin(&depth_target, command_buffer)
+  renderer_depth_prepass_begin(&self.main_render_target[g_frame_index], command_buffer)
   renderer_depth_prepass_render(
     &self.depth_prepass,
     &depth_input,
     command_buffer,
-    depth_target.camera.index,
+    self.main_render_target[g_frame_index].camera.index,
   )
   renderer_depth_prepass_end(command_buffer)
   log.debug("============ rendering G-buffer pass... =============")

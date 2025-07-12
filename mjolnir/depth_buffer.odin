@@ -118,7 +118,6 @@ renderer_depth_prepass_render :: proc(
   camera_index: u32,
 ) -> int {
   rendered_count := 0
-  log.debugf("Depth prepass: processing %d batches", len(render_input.batches))
   descriptor_sets := [?]vk.DescriptorSet {
     g_bindless_camera_buffer_descriptor_set, // set 0
     g_bindless_bone_buffer_descriptor_set, // set 1
