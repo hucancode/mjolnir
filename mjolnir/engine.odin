@@ -804,13 +804,12 @@ generate_render_input_camera_slot :: proc(
 
 
 render :: proc(self: ^Engine) -> vk.Result {
-  log.debug("============ acquiring image...============ ")
+  // log.debug("============ acquiring image...============ ")
   acquire_next_image(&self.swapchain) or_return
   mu.begin(&self.ui.ctx)
   command_buffer := self.command_buffers[g_frame_index]
   vk.ResetCommandBuffer(command_buffer, {}) or_return
-  log.debug("============ setup main camera...============ ")
-
+  // log.debug("============ setup main camera...============ ")
   // Update camera uniform for main render target
   render_target_update_camera_uniform(&self.main_render_target[g_frame_index])
 
@@ -824,9 +823,7 @@ render :: proc(self: ^Engine) -> vk.Result {
   frustum := geometry.make_frustum(
     camera_uniform.projection * camera_uniform.view,
   )
-  log.debug(
-    "============ collecting lights and shadow casters...============ ",
-  )
+  // log.debug("============ collecting lights ...============ ")
   lights := make([dynamic]LightData, 0)
   defer delete(lights)
   shadow_casters := make([dynamic]LightData, 0)
@@ -955,27 +952,20 @@ render :: proc(self: ^Engine) -> vk.Result {
         // Set camera to look in the direction of the light
         target_pos := data.position.xyz + data.direction.xyz
         geometry.camera_look_at(camera, data.position.xyz, target_pos)
-        // Debug: verify the camera direction matches light direction
-        camera_forward := geometry.camera_forward(camera^)
-        log.infof("camera forward: %v, light direction: %v", camera_forward, data.direction.xyz)
-        log.infof("spot light angle=%f degrees, radius=%f", data.angle * 180.0 / math.PI, data.radius)
         render_target_update_camera_uniform(render_target)
         camera_uniform := get_camera_uniform(render_target.camera.index)
         data.view = camera_uniform.view
         data.proj = camera_uniform.projection
-
-        log.debugf("spot light: pos=%v dir=%v angle=%f", data.position, data.direction, data.angle)
         append(&shadow_casters, data)
       }
       append(&lights, data)
     }
   }
-  log.debug("============ run visibility culling...============ ")
+  // log.debug("============ run visibility culling...============ ")
   vk.BeginCommandBuffer(
     command_buffer,
     &{sType = .COMMAND_BUFFER_BEGIN_INFO, flags = {.ONE_TIME_SUBMIT}},
   ) or_return
-
   when USE_GPU_CULLING {
     // Collect all active render targets for multi-camera culling
     active_render_targets := make(
@@ -1065,8 +1055,7 @@ render :: proc(self: ^Engine) -> vk.Result {
   }
 
   compute_particles(&self.particle, command_buffer, main_camera^)
-
-  log.debug("============ rendering shadow pass...============ ")
+  // log.debug("============ rendering shadow pass...============ ")
   // Transition all shadow maps to depth attachment optimal
   shadow_2d_images: [MAX_SHADOW_MAPS]vk.Image
   for i in 0 ..< shadow_map_count {
@@ -1079,7 +1068,7 @@ render :: proc(self: ^Engine) -> vk.Result {
     }
     shadow_2d_images[i] = b.image
   }
-  log.debugf("Transitioning %d 2d shadow maps to attachment", shadow_map_count)
+  // log.debugf("Transitioning %d 2d shadow maps to attachment", shadow_map_count)
   if shadow_map_count > 0 {
     transition_images(
       command_buffer,
@@ -1104,10 +1093,7 @@ render :: proc(self: ^Engine) -> vk.Result {
     }
     shadow_cube_images[i] = b.image
   }
-  log.debugf(
-    "Transitioning %d cube shadow maps to attachment",
-    cube_shadow_map_count,
-  )
+  // log.debugf("Transitioning %d cube shadow maps to attachment", cube_shadow_map_count)
   if cube_shadow_map_count > 0 {
     transition_images(
       command_buffer,
@@ -1121,17 +1107,13 @@ render :: proc(self: ^Engine) -> vk.Result {
       {.DEPTH_STENCIL_ATTACHMENT_WRITE},
     )
   }
-
-  log.debugf(
-    "============ checking shadow casters (%d)...============ ",
-    len(shadow_casters),
-  )
+  // log.debugf("============ shadow casters (%d)...============ ", len(shadow_casters))
   current_camera_slot: u32 = 1 // Start from slot 1 (slot 0 is main camera)
   for node, i in shadow_casters {
-    log.debugf("Processing shadow caster %d", i)
+    // log.debugf("Processing shadow caster %d", i)
     #partial switch light in node {
     case PointLightData:
-      log.debugf("Processing point light %d", i)
+      // log.debugf("Processing point light %d", i)
       if light.shadow_map.generation == 0 {
         log.errorf("Point light %d has invalid shadow map handle", i)
         continue
@@ -1168,9 +1150,7 @@ render :: proc(self: ^Engine) -> vk.Result {
         current_camera_slot += 1
       }
     case DirectionalLightData:
-      log.debugf("Processing directional light %d, skip", i)
     case SpotLightData:
-      log.debugf("Processing spot light %d", i)
       if light.shadow_map.generation == 0 {
         log.errorf("Spot light %d has invalid shadow map handle", i)
         continue
@@ -1196,12 +1176,6 @@ render :: proc(self: ^Engine) -> vk.Result {
 
       shadow_map_texture := resource.get(g_image_2d_buffers, light.shadow_map)
       shadow_target := resource.get(g_render_targets, light.render_target)
-      log.infof(
-        "Spot light shadow: %d batches, shadow_map_id=%d (camera slot %d)",
-        len(shadow_render_input.batches),
-        light.shadow_map.index,
-        current_camera_slot,
-      )
       shadow_begin(shadow_target^, command_buffer)
       shadow_render(
         &self.shadow,
@@ -1215,10 +1189,7 @@ render :: proc(self: ^Engine) -> vk.Result {
     }
   }
   // Transition all shadow maps to shader read only optimal
-  log.debugf(
-    "Transitioning %d 2D shadow maps to shader read",
-    shadow_map_count,
-  )
+  // log.debugf("Transitioning %d 2D shadow maps to shader read", shadow_map_count)
   transition_images(
     command_buffer,
     shadow_2d_images[:shadow_map_count],
@@ -1230,10 +1201,7 @@ render :: proc(self: ^Engine) -> vk.Result {
     {.FRAGMENT_SHADER},
     {.SHADER_READ},
   )
-  log.debugf(
-    "Transitioning %d cube shadow maps to shader read",
-    cube_shadow_map_count,
-  )
+  // log.debugf("Transitioning %d cube shadow maps to shader read", cube_shadow_map_count)
   transition_images(
     command_buffer,
     shadow_cube_images[:cube_shadow_map_count],
@@ -1260,7 +1228,7 @@ render :: proc(self: ^Engine) -> vk.Result {
     {},
     {.COLOR_ATTACHMENT_WRITE},
   )
-  log.debug("============ rendering depth pre-pass... =============")
+  // log.debug("============ rendering depth pre-pass... =============")
   depth_input := generate_render_input(self, frustum, self.scene.main_camera)
   depth_prepass_begin(&self.main_render_target[g_frame_index], command_buffer)
   depth_prepass_render(
@@ -1270,7 +1238,7 @@ render :: proc(self: ^Engine) -> vk.Result {
     self.main_render_target[g_frame_index].camera.index,
   )
   depth_prepass_end(command_buffer)
-  log.debug("============ rendering G-buffer pass... =============")
+  // log.debug("============ rendering G-buffer pass... =============")
   // Transition G-buffer images to COLOR_ATTACHMENT_OPTIMAL
   render_target := &self.main_render_target
   gbuffer_position := resource.get(
@@ -1337,7 +1305,7 @@ render :: proc(self: ^Engine) -> vk.Result {
     {.FRAGMENT_SHADER},
     {.SHADER_READ},
   )
-  log.debug("============ rendering main pass... =============")
+  // log.debug("============ rendering main pass... =============")
   // Prepare RenderTarget and RenderInput for decoupled renderer
   // Ambient pass
   ambient_begin(
@@ -1364,7 +1332,7 @@ render :: proc(self: ^Engine) -> vk.Result {
     command_buffer,
   )
   lighting_end(command_buffer)
-  log.debug("============ rendering particles... =============")
+  // log.debug("============ rendering particles... =============")
   particle_begin(
     &self.particle,
     command_buffer,
@@ -1390,8 +1358,7 @@ render :: proc(self: ^Engine) -> vk.Result {
     command_buffer,
   )
   transparent_end(&self.transparent, command_buffer)
-
-  log.debug("============ rendering post processes... =============")
+  // log.debug("============ rendering post processes... =============")
   transition_image_to_shader_read(command_buffer, final_image.image)
   postprocess_begin(
     &self.postprocess,
@@ -1453,12 +1420,6 @@ render :: proc(self: ^Engine) -> vk.Result {
         &self.visibility_culler,
         0,
       )
-      log.debugf(
-        "Main Cam: %d/%d visible, culling disabled %d",
-        visible,
-        total,
-        disabled,
-      )
       mu.label(
         &self.ui.ctx,
         fmt.tprintf("Main Cam: %d/%d visible", visible, total),
@@ -1472,7 +1433,7 @@ render :: proc(self: ^Engine) -> vk.Result {
     self.render2d_proc(self, &self.ui.ctx)
   }
   mu.end(&self.ui.ctx)
-  log.debug("============ rendering UI... =============")
+  // log.debug("============ rendering UI... =============")
   ui_begin(
     &self.ui,
     command_buffer,
@@ -1481,13 +1442,13 @@ render :: proc(self: ^Engine) -> vk.Result {
   )
   ui_render(&self.ui, command_buffer)
   ui_end(&self.ui, command_buffer)
-  log.debug("============ preparing image for present... =============")
+  // log.debug("============ preparing image for present... =============")
   transition_image_to_present(
     command_buffer,
     self.swapchain.images[self.swapchain.image_index],
   )
   vk.EndCommandBuffer(command_buffer) or_return
-  log.debug("============ submit queue... =============")
+  // log.debug("============ submit queue... =============")
   submit_queue_and_present(&self.swapchain, &command_buffer) or_return
   g_frame_index = (g_frame_index + 1) % MAX_FRAMES_IN_FLIGHT
   return .SUCCESS

@@ -551,11 +551,6 @@ transparent_render :: proc(
               skinning.bone_matrix_offset +
               g_frame_index * g_bone_matrix_slab.capacity
           }
-
-          log.debugf(
-            "rendering transparent object with push constant ... %v",
-            push_constants,
-          )
           // Push constants
           vk.CmdPushConstants(
             command_buffer,

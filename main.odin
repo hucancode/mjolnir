@@ -393,7 +393,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     2.0,
   )
   current_controller = &orbit_controller
-  
+
   // Sync orbit controller with current camera position to prevent jumps
   main_camera := resource.get(mjolnir.g_cameras, engine.scene.main_camera)
   if main_camera != nil {
