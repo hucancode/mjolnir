@@ -10,7 +10,7 @@ import "mjolnir/resource"
 import glfw "vendor:glfw"
 import mu "vendor:microui"
 
-LIGHT_COUNT :: 10
+LIGHT_COUNT :: 1
 light_handles: [LIGHT_COUNT]mjolnir.Handle
 light_cube_handles: [LIGHT_COUNT]mjolnir.Handle
 ground_mat_handle: mjolnir.Handle
@@ -59,12 +59,26 @@ setup :: proc(engine: ^mjolnir.Engine) {
   cone_mesh_handle, _, _ := create_mesh(make_cone())
   if true {
     log.info("spawning cubes in a grid")
-    space: f32 = 2.0
+    space: f32 = 2.1
     size: f32 = 0.3
     nx, ny, nz := 10, 2, 15
+    wall_x_pos: f32 = 7.5  // Left wall position from debug output
+
     for x in 1 ..< nx {
       for y in 1 ..< ny {
         for z in 1 ..< nz {
+          // Calculate world position
+          world_x := (f32(x) - f32(nx) * 0.5) * space
+          world_y := (f32(y) - f32(ny) * 0.5) * space + 0.5
+          world_z := (f32(z) - f32(nz) * 0.5) * space
+
+          // DEBUG: Only keep objects behind the wall (x > wall_x_pos)
+          // if world_x <= wall_x_pos {
+          //   log.debugf("Skipping object at x=%.2f (in front of wall at x=%.2f)", world_x, wall_x_pos)
+          //   continue
+          // }
+          log.debugf("Keeping object at x=%.2f (behind wall at x=%.2f)", world_x, wall_x_pos)
+
           mat_handle, _ := create_material(
             metallic_value = f32(x - 1) / f32(nx - 1),
             roughness_value = f32(z - 1) / f32(nz - 1),
@@ -73,28 +87,23 @@ setup :: proc(engine: ^mjolnir.Engine) {
           if x % 3 == 0 {
             _, node = spawn(
               &engine.scene,
-              MeshAttachment{handle = cube_mesh_handle, material = mat_handle},
+              MeshAttachment{handle = cube_mesh_handle, material = mat_handle, cast_shadow = true,},
             )
           } else if x % 3 == 1 {
             _, node = spawn(
               &engine.scene,
-              MeshAttachment{handle = cone_mesh_handle, material = mat_handle},
+              MeshAttachment{handle = cone_mesh_handle, material = mat_handle, cast_shadow = true, },
             )
           } else {
             _, node = spawn(
               &engine.scene,
               MeshAttachment {
                 handle = sphere_mesh_handle,
-                material = mat_handle,
+                material = mat_handle, cast_shadow = true,
               },
             )
           }
-          translate(
-            &node.transform,
-            (f32(x) - f32(nx) * 0.5) * space,
-            (f32(y) - f32(ny) * 0.5) * space + 0.5,
-            (f32(z) - f32(nz) * 0.5) * space,
-          )
+          translate(&node.transform, world_x, world_y, world_z)
           scale(&node.transform, size)
         }
       }
@@ -112,11 +121,9 @@ setup :: proc(engine: ^mjolnir.Engine) {
         cast_shadow = true,
       },
     )
-    translate(&ground_node.transform, x = -0.5 * size, z = -0.5 * size)
-    scale(&ground_node.transform, size)
-
+    scale(&ground_node.transform, size * 0.5)
     // Left wall
-    _, left_wall := spawn(
+    left_wall_handle, left_wall := spawn(
       &engine.scene,
       MeshAttachment {
         handle = ground_mesh_handle,
@@ -124,12 +131,12 @@ setup :: proc(engine: ^mjolnir.Engine) {
         cast_shadow = true,
       },
     )
-    translate(&left_wall.transform, x = size * 0.5, y = 0, z = -0.5 * size)
+    log.infof("Left wall handle: %v", left_wall_handle)
+    translate(&left_wall.transform, x = size * 0.5)
     rotate(&left_wall.transform, math.PI * 0.5, linalg.VECTOR3F32_Z_AXIS)
     scale(&left_wall.transform, size)
-
     // Right wall
-    _, right_wall := spawn(
+    right_wall_handle, right_wall := spawn(
       &engine.scene,
       MeshAttachment {
         handle = ground_mesh_handle,
@@ -137,50 +144,49 @@ setup :: proc(engine: ^mjolnir.Engine) {
         cast_shadow = true,
       },
     )
+    log.infof("Right wall handle: %v", right_wall_handle)
     translate(
       &right_wall.transform,
       x = -size * 0.5,
-      y = size * 1.0,
       z = -0.5 * size,
     )
     rotate(&right_wall.transform, -math.PI * 0.5, linalg.VECTOR3F32_Z_AXIS)
     scale(&right_wall.transform, size)
-
     // Back wall
-    _, back_wall := spawn(
-      &engine.scene,
-      MeshAttachment {
-        handle = ground_mesh_handle,
-        material = ground_mat_handle,
-        cast_shadow = true,
-      },
-    )
-    translate(
-      &back_wall.transform,
-      x = -0.5 * size,
-      y = size * 1.0,
-      z = -size * 0.5,
-    )
-    rotate(&back_wall.transform, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
-    scale(&back_wall.transform, size)
-
-    // Ceiling
-    _, ceiling := spawn(
-      &engine.scene,
-      MeshAttachment {
-        handle = ground_mesh_handle,
-        material = ground_mat_handle,
-        cast_shadow = true,
-      },
-    )
-    translate(
-      &ceiling.transform,
-      x = -0.5 * size,
-      y = size * 0.5,
-      z = 0.5 * size,
-    )
-    rotate(&ceiling.transform, -math.PI, linalg.VECTOR3F32_X_AXIS)
-    scale(&ceiling.transform, size)
+    // back_wall_handle, back_wall := spawn(
+    //   &engine.scene,
+    //   MeshAttachment {
+    //     handle = ground_mesh_handle,
+    //     material = ground_mat_handle,
+    //     cast_shadow = true,
+    //   },
+    // )
+    // log.infof("Back wall handle: %v", back_wall_handle)
+    // translate(
+    //   &back_wall.transform,
+    //   x = -0.5 * size,
+    //   y = size * 1.0,
+    //   z = -size * 0.5,
+    // )
+    // rotate(&back_wall.transform, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
+    // scale(&back_wall.transform, size)
+    // // Ceiling
+    // _, ceiling := spawn(
+    //   &engine.scene,
+    //   MeshAttachment {
+    //     handle = ground_mesh_handle,
+    //     material = ground_mat_handle,
+    //     cast_shadow = true,
+    //   },
+    // )
+    // translate(
+    //   &ceiling.transform,
+    //   x = -0.5 * size,
+    //   y = size * 0.5,
+    //   z = 0.5 * size,
+    // )
+    // rotate(&ceiling.transform, -math.PI, linalg.VECTOR3F32_X_AXIS)
+    // scale(&ceiling.transform, size)
   }
   if true {
     log.info("loading GLTF...")
@@ -245,7 +251,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
           PointLightAttachment{color = color, radius = 7, cast_shadow = true},
         )
       }
-      translate(&light.transform, 0, 3, -1)
+      translate(&light.transform, 6, 2, -1)
       cube_node: ^Node
       light_cube_handles[i], cube_node = spawn_child(
         &engine.scene,
@@ -253,9 +259,10 @@ setup :: proc(engine: ^mjolnir.Engine) {
         MeshAttachment {
           handle = cube_mesh_handle,
           material = plain_material_handle,
+          cast_shadow = false,
         },
       )
-      translate(&cube_node.transform, x = 0.5)
+      // translate(&cube_node.transform, x = 0.5)
       scale(&cube_node.transform, 0.1)
     }
     // spawn(
@@ -365,19 +372,20 @@ setup :: proc(engine: ^mjolnir.Engine) {
     geometry.scale(&forcefield_visual.transform, 0.2)
   }
   // effect_add_fog(&engine.postprocess, {0.4, 0.0, 0.8}, 0.02, 5.0, 20.0)
+  // effect_add_bloom(&engine.postprocess)
   // effect_add_crosshatch(&engine.postprocess, {1280, 720})
   // effect_add_blur(&engine.postprocess, 18.0)
   // effect_add_tonemap(&engine.postprocess, 1.5, 1.3)
   // effect_add_dof(&engine.postprocess)
   // effect_add_grayscale(&engine.postprocess, 0.9)
-  // effect_add_bloom(&engine.postprocess)
   // effect_add_outline(&engine.postprocess, 2.0, {1.0, 0.0, 0.0})
   // Initialize camera controllers
   geometry.setup_camera_controller_callbacks(engine.window)
   orbit_controller = geometry.camera_controller_orbit_init(
     engine.window,
     {0, 0, 0},
-    10.0,
+    5.0,
+    pitch = math.PI * 0.8,
   )
   free_controller = geometry.camera_controller_free_init(
     engine.window,
@@ -397,6 +405,14 @@ render_2d :: proc(engine: ^mjolnir.Engine, ctx: ^mu.Context) {
     mu.label(ctx, fmt.tprintf("Max Particles %d", max_particles))
     efficiency := f32(rendered) / f32(max_particles) * 100.0
     mu.label(ctx, fmt.tprintf("Efficiency %.1f%%", efficiency))
+  }
+
+  if mu.window(ctx, "Shadow Debug", {350, 360, 300, 150}, {.NO_CLOSE}) {
+    mu.label(ctx, "Shadow Map Information:")
+    mu.label(ctx, fmt.tprintf("Shadow Map Size: %dx%d", SHADOW_MAP_SIZE, SHADOW_MAP_SIZE))
+    mu.label(ctx, fmt.tprintf("Max Shadow Maps: %d", MAX_SHADOW_MAPS))
+    mu.text(ctx, "Check console for detailed")
+    mu.text(ctx, "shadow rendering debug info")
   }
 }
 

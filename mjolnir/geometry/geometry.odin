@@ -258,14 +258,14 @@ make_triangle :: proc(
 make_quad :: proc(color: [4]f32 = {1.0, 1.0, 1.0, 1.0}) -> (ret: Geometry) {
   ret.vertices = make([]Vertex, 4)
   ret.indices = make([]u32, 6)
-  ret.vertices[0] = {{0, 0, 0}, VEC_UP, color, {0, 0}, {0, 1, 0, 1}}
-  ret.vertices[1] = {{0, 0, 1}, VEC_UP, color, {0, 1}, {0, 1, 0, 1}}
+  ret.vertices[0] = {{-1, 0, -1}, VEC_UP, color, {0, 0}, {0, 1, 0, 1}}
+  ret.vertices[1] = {{-1, 0, 1}, VEC_UP, color, {0, 1}, {0, 1, 0, 1}}
   ret.vertices[2] = {{1, 0, 1}, VEC_UP, color, {1, 1}, {0, 1, 0, 1}}
-  ret.vertices[3] = {{1, 0, 0}, VEC_UP, color, {1, 0}, {0, 1, 0, 1}}
+  ret.vertices[3] = {{1, 0, -1}, VEC_UP, color, {1, 0}, {0, 1, 0, 1}}
   ret.indices[0], ret.indices[1], ret.indices[2] = 0, 1, 2
   ret.indices[3], ret.indices[4], ret.indices[5] = 2, 3, 0
   ret.aabb = Aabb {
-    min = {0, 0, 0},
+    min = {-1, 0, -1},
     max = {1, linalg.F32_EPSILON, 1},
   }
   return
