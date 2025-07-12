@@ -319,6 +319,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
         weight_spread     = 0.05,
         texture_handle    = goldstar_texture_handle,
         enabled           = true,
+        bounding_box      = geometry.Aabb{min = {-2, -2, -2}, max = {2, 2, 2}},
       },
     )
     psys_handle2, _ := spawn_at(
@@ -347,6 +348,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
         weight_spread     = 0.3,
         texture_handle    = black_circle_texture_handle,
         enabled           = true,
+        bounding_box      = geometry.Aabb{min = {-1, -1, -1}, max = {1, 1, 1}},
       },
     )
     // Create a force field that affects both particle systems

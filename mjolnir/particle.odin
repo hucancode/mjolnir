@@ -26,8 +26,8 @@ Emitter :: struct {
   weight:            f32,
   weight_spread:     f32,
   texture_index:     u32,
-  culling_enabled:   b32,
-  padding:           u32,
+  visible:   b32,
+  padding:           [1]u32,
   aabb_min:          [4]f32, // xyz = min bounds, w = unused
   aabb_max:          [4]f32, // xyz = max bounds, w = unused
 }
@@ -94,8 +94,6 @@ RendererParticle :: struct {
   emitter_descriptor_set_layout: vk.DescriptorSetLayout,
   emitter_descriptor_set:        vk.DescriptorSet,
   particle_counter_buffer:       DataBuffer(u32),
-  // Culling pipeline
-  emitter_visibility_buffer:     DataBuffer(u32), // One u32 per emitter for visibility
   // Compaction pipeline
   compact_particle_buffer:       DataBuffer(Particle),
   draw_command_buffer:           DataBuffer(DrawCommand),
@@ -332,11 +330,6 @@ particle_init :: proc(self: ^RendererParticle) -> vk.Result {
     1,
     {.STORAGE_BUFFER},
   ) or_return
-  self.emitter_visibility_buffer = create_host_visible_buffer(
-    u32,
-    MAX_EMITTERS,
-    {.STORAGE_BUFFER},
-  ) or_return
   particle_init_emitter_pipeline(self) or_return
   particle_init_compact_pipeline(self) or_return
   particle_init_compute_pipeline(self) or_return
@@ -369,12 +362,6 @@ particle_init_emitter_pipeline :: proc(
     {
       binding         = 3,
       descriptorType  = .UNIFORM_BUFFER, // Params buffer
-      descriptorCount = 1,
-      stageFlags      = {.COMPUTE},
-    },
-    {
-      binding         = 4,
-      descriptorType  = .STORAGE_BUFFER, // Visibility buffer
       descriptorCount = 1,
       stageFlags      = {.COMPUTE},
     },
@@ -425,10 +412,6 @@ particle_init_emitter_pipeline :: proc(
     buffer = self.params_buffer.buffer,
     range  = vk.DeviceSize(self.params_buffer.bytes_count),
   }
-  emitter_visibility_buffer_info := vk.DescriptorBufferInfo {
-    buffer = self.emitter_visibility_buffer.buffer,
-    range  = vk.DeviceSize(self.emitter_visibility_buffer.bytes_count),
-  }
   emitter_writes := [?]vk.WriteDescriptorSet {
     {
       sType = .WRITE_DESCRIPTOR_SET,
@@ -461,14 +444,6 @@ particle_init_emitter_pipeline :: proc(
       descriptorType = .UNIFORM_BUFFER,
       descriptorCount = 1,
       pBufferInfo = &emitter_params_buffer_info,
-    },
-    {
-      sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = self.emitter_descriptor_set,
-      dstBinding = 4,
-      descriptorType = .STORAGE_BUFFER,
-      descriptorCount = 1,
-      pBufferInfo = &emitter_visibility_buffer_info,
     },
   }
   vk.UpdateDescriptorSets(
@@ -1079,16 +1054,6 @@ particle_end :: proc(command_buffer: vk.CommandBuffer) {
   vk.CmdEndRenderingKHR(command_buffer)
 }
 
-get_particle_render_stats :: proc(
-  self: ^RendererParticle,
-) -> (
-  rendered: u32,
-  total_allocated: u32,
-) {
-  count := data_buffer_get(&self.particle_counter_buffer)
-  return count^, MAX_PARTICLES
-}
-
 // Helper function to create an emitter with AABB culling bounds
 create_emitter_with_aabb :: proc(
   transform: matrix[4, 4]f32,
@@ -1100,7 +1065,7 @@ create_emitter_with_aabb :: proc(
     transform         = transform,
     aabb_min          = {aabb_min.x, aabb_min.y, aabb_min.z, 0.0},
     aabb_max          = {aabb_max.x, aabb_max.y, aabb_max.z, 0.0},
-    culling_enabled   = b32(enable_culling),
+    visible   = b32(enable_culling),
     // Default values - user should set these
     emission_rate     = 10.0,
     particle_lifetime = 5.0,
@@ -1119,16 +1084,28 @@ create_emitter_with_aabb :: proc(
 }
 
 // Helper function to update emitter AABB bounds
-update_emitter_aabb :: proc(
-  emitter: ^Emitter,
+update_emitter_attachment_aabb :: proc(
+  emitter: ^EmitterAttachment,
   aabb_min: [3]f32,
   aabb_max: [3]f32,
 ) {
-  emitter.aabb_min = {aabb_min.x, aabb_min.y, aabb_min.z, 0.0}
-  emitter.aabb_max = {aabb_max.x, aabb_max.y, aabb_max.z, 0.0}
+  emitter.bounding_box = geometry.Aabb {
+    min = {aabb_min.x, aabb_min.y, aabb_min.z},
+    max = {aabb_max.x, aabb_max.y, aabb_max.z},
+  }
 }
 
-// Helper function to enable/disable culling for an emitter
-set_emitter_culling :: proc(emitter: ^Emitter, enable: bool) {
-  emitter.culling_enabled = b32(enable)
+// Helper function to enable/disable culling for an emitter node
+set_emitter_node_culling :: proc(node: ^Node, enable: bool) {
+  node.culling_enabled = enable
+}
+
+get_particle_render_stats :: proc(
+  self: ^RendererParticle,
+) -> (
+  rendered: u32,
+  total_allocated: u32,
+) {
+  count := data_buffer_get(&self.particle_counter_buffer)
+  return count^, MAX_PARTICLES
 }

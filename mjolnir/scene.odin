@@ -59,6 +59,7 @@ EmitterAttachment :: struct {
   weight:            f32,
   weight_spread:     f32,
   texture_handle:    resource.Handle,
+  bounding_box:      geometry.Aabb,
 }
 
 ForceFieldAttachment :: struct {

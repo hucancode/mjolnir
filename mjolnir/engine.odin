@@ -477,11 +477,20 @@ update_emitters :: proc(self: ^Engine, delta_time: f32) {
   emitters := slice.from_ptr(emitters_ptr, MAX_EMITTERS)
   emitter_idx: int = 0
 
-  for &entry in self.scene.nodes.entries do if entry.active {
+  for &entry, entry_index in self.scene.nodes.entries do if entry.active {
     e, is_emitter := &entry.item.attachment.(EmitterAttachment)
     if !is_emitter do continue
     if !e.enabled do continue
     if emitter_idx >= MAX_EMITTERS do break
+
+    // Check visibility for culling
+    visible := true
+    culling_enabled := entry.item.culling_enabled
+    when USE_GPU_CULLING {
+      if culling_enabled {
+        visible = multi_camera_is_node_visible(&self.visibility_culler, 0, u32(entry_index))
+      }
+    }
     emitters[emitter_idx].transform = entry.item.transform.world_matrix
     emitters[emitter_idx].initial_velocity = e.initial_velocity
     emitters[emitter_idx].color_start = e.color_start
@@ -495,6 +504,9 @@ update_emitters :: proc(self: ^Engine, delta_time: f32) {
     emitters[emitter_idx].weight = e.weight
     emitters[emitter_idx].weight_spread = e.weight_spread
     emitters[emitter_idx].texture_index = e.texture_handle.index
+    emitters[emitter_idx].visible = b32(!culling_enabled || visible)
+    emitters[emitter_idx].aabb_min = {e.bounding_box.min.x, e.bounding_box.min.y, e.bounding_box.min.z, 0.0}
+    emitters[emitter_idx].aabb_max = {e.bounding_box.max.x, e.bounding_box.max.y, e.bounding_box.max.z, 0.0}
     emitter_idx += 1
   }
   params.emitter_count = u32(emitter_idx)

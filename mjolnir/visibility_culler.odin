@@ -516,8 +516,7 @@ calculate_node_aabb :: proc(node: ^Node) -> geometry.Aabb {
   case ParticleSystemAttachment:
     return data.bounding_box
   case EmitterAttachment:
-    // Default emitter bounds (can be customized)
-    return {{-1.0, -1.0, -1.0}, {1.0, 1.0, 1.0}}
+    return data.bounding_box
   case PointLightAttachment:
     // Light bounds based on radius
     radius := data.radius
