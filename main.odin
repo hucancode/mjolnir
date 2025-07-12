@@ -262,7 +262,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
           cast_shadow = false,
         },
       )
-      // translate(&cube_node.transform, x = 0.5)
       scale(&cube_node.transform, 0.1)
     }
     // spawn(

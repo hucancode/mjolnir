@@ -846,6 +846,7 @@ generate_render_input :: proc(
   self: ^Engine,
   frustum: geometry.Frustum,
   camera_handle: resource.Handle,
+  shadow_pass: bool = false,
 ) -> (
   ret: RenderInput,
 ) {
@@ -860,6 +861,8 @@ generate_render_input :: proc(
     handle := Handle{entry.generation, u32(entry_index)}
     #partial switch data in node.attachment {
     case MeshAttachment:
+      // Skip nodes that don't cast shadows when rendering shadow pass
+      if shadow_pass && !data.cast_shadow do continue
       mesh := resource.get(g_meshes, data.handle)
       if mesh == nil do continue
       material := resource.get(g_materials, data.material)
@@ -912,6 +915,7 @@ generate_render_input_for_camera_slot :: proc(
   self: ^Engine,
   frustum: geometry.Frustum,
   camera_slot: u32,
+  shadow_pass: bool = false,
 ) -> (
   ret: RenderInput,
 ) {
@@ -926,6 +930,8 @@ generate_render_input_for_camera_slot :: proc(
     handle := Handle{entry.generation, u32(entry_index)}
     #partial switch data in node.attachment {
     case MeshAttachment:
+      // Skip nodes that don't cast shadows when rendering shadow pass
+      if shadow_pass && !data.cast_shadow do continue
       mesh := resource.get(g_meshes, data.handle)
       if mesh == nil do continue
       material := resource.get(g_materials, data.material)
@@ -1318,12 +1324,14 @@ render :: proc(self: ^Engine) -> vk.Result {
             self,
             frustum,
             current_camera_slot,
+            shadow_pass = true,
           )
         } else {
           shadow_render_input = generate_render_input(
             self,
             frustum,
             self.scene.main_camera,
+            shadow_pass = true,
           )
         }
 
@@ -1361,12 +1369,14 @@ render :: proc(self: ^Engine) -> vk.Result {
           self,
           frustum,
           current_camera_slot,
+          shadow_pass = true,
         )
       } else {
         shadow_render_input = generate_render_input(
           self,
           frustum,
           self.scene.main_camera,
+          shadow_pass = true,
         )
       }
 
