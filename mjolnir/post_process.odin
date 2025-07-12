@@ -353,7 +353,7 @@ effect_clear :: proc(self: ^RendererPostProcess) {
   resize(&self.effect_stack, 0)
 }
 
-renderer_postprocess_init :: proc(
+postprocess_init :: proc(
   self: ^RendererPostProcess,
   color_format: vk.Format,
   width: u32,
@@ -433,7 +433,7 @@ renderer_postprocess_init :: proc(
   depth_stencil_state := vk.PipelineDepthStencilStateCreateInfo {
     sType = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
   }
-  renderer_postprocess_create_images(
+  postprocess_create_images(
     self,
     width,
     height,
@@ -544,7 +544,7 @@ renderer_postprocess_init :: proc(
   return .SUCCESS
 }
 
-renderer_postprocess_create_images :: proc(
+postprocess_create_images :: proc(
   self: ^RendererPostProcess,
   width: u32,
   height: u32,
@@ -562,23 +562,23 @@ renderer_postprocess_create_images :: proc(
   return .SUCCESS
 }
 
-renderer_postprocess_deinit_images :: proc(self: ^RendererPostProcess) {
+postprocess_deinit_images :: proc(self: ^RendererPostProcess) {
   for handle in self.images {
     resource.free(&g_image_2d_buffers, handle, image_buffer_deinit)
   }
 }
 
-renderer_postprocess_recreate_images :: proc(
+postprocess_recreate_images :: proc(
   self: ^RendererPostProcess,
   width: u32,
   height: u32,
   format: vk.Format,
 ) -> vk.Result {
-  renderer_postprocess_deinit_images(self)
-  return renderer_postprocess_create_images(self, width, height, format)
+  postprocess_deinit_images(self)
+  return postprocess_create_images(self, width, height, format)
 }
 
-renderer_postprocess_deinit :: proc(self: ^RendererPostProcess) {
+postprocess_deinit :: proc(self: ^RendererPostProcess) {
   for &frame in self.frames {
     vk.DestroySemaphore(g_device, frame.image_available_semaphore, nil)
     vk.DestroySemaphore(g_device, frame.render_finished_semaphore, nil)
@@ -594,11 +594,11 @@ renderer_postprocess_deinit :: proc(self: ^RendererPostProcess) {
     layout = 0
   }
   delete(self.effect_stack)
-  renderer_postprocess_deinit_images(self)
+  postprocess_deinit_images(self)
 }
 
 // Modular postprocess API
-renderer_postprocess_begin :: proc(
+postprocess_begin :: proc(
   self: ^RendererPostProcess,
   command_buffer: vk.CommandBuffer,
   extent: vk.Extent2D,
@@ -621,7 +621,7 @@ renderer_postprocess_begin :: proc(
   vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
 }
 
-renderer_postprocess_render :: proc(
+postprocess_render :: proc(
   self: ^RendererPostProcess,
   command_buffer: vk.CommandBuffer,
   extent: vk.Extent2D,
@@ -867,7 +867,7 @@ renderer_postprocess_render :: proc(
   }
 }
 
-renderer_postprocess_end :: proc(
+postprocess_end :: proc(
   self: ^RendererPostProcess,
   command_buffer: vk.CommandBuffer,
 ) {

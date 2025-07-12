@@ -10,7 +10,7 @@ import "mjolnir/resource"
 import glfw "vendor:glfw"
 import mu "vendor:microui"
 
-LIGHT_COUNT :: 10
+LIGHT_COUNT :: 5
 ALL_SPOT_LIGHT :: false
 ALL_POINT_LIGHT :: false
 light_handles: [LIGHT_COUNT]mjolnir.Handle
@@ -63,7 +63,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     log.info("spawning cubes in a grid")
     space: f32 = 2.1
     size: f32 = 0.3
-    nx, ny, nz := 10, 2, 15
+    nx, ny, nz := 20, 2, 20
     wall_x_pos: f32 = 7.5  // Left wall position from debug output
 
     for x in 1 ..< nx {
@@ -123,7 +123,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
         cast_shadow = true,
       },
     )
-    scale(&ground_node.transform, size * 0.5)
+    scale(&ground_node.transform, size)
     // Left wall
     left_wall_handle, left_wall := spawn(
       &engine.scene,
@@ -134,7 +134,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
       },
     )
     log.infof("Left wall handle: %v", left_wall_handle)
-    translate(&left_wall.transform, x = size * 0.5)
+    translate(&left_wall.transform, x = size)
     rotate(&left_wall.transform, math.PI * 0.5, linalg.VECTOR3F32_Z_AXIS)
     scale(&left_wall.transform, size)
     // Right wall
@@ -149,8 +149,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     log.infof("Right wall handle: %v", right_wall_handle)
     translate(
       &right_wall.transform,
-      x = -size * 0.5,
-      z = -0.5 * size,
+      x = -size,
     )
     rotate(&right_wall.transform, -math.PI * 0.5, linalg.VECTOR3F32_Z_AXIS)
     scale(&right_wall.transform, size)
@@ -166,9 +165,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
     log.infof("Back wall handle: %v", back_wall_handle)
     translate(
       &back_wall.transform,
-      x = -0.5 * size,
-      y = size * 1.0,
-      z = -size * 0.5,
+      y = size,
+      z = -size,
     )
     rotate(&back_wall.transform, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
     scale(&back_wall.transform, size)
@@ -183,9 +181,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     )
     translate(
       &ceiling.transform,
-      x = -0.5 * size,
-      y = size * 0.5,
-      z = 0.5 * size,
+      y = size,
     )
     rotate(&ceiling.transform, -math.PI, linalg.VECTOR3F32_X_AXIS)
     scale(&ceiling.transform, size)
@@ -375,9 +371,9 @@ setup :: proc(engine: ^mjolnir.Engine) {
     )
     geometry.scale(&forcefield_visual.transform, 0.2)
   }
-  // effect_add_fog(&engine.postprocess, {0.4, 0.0, 0.8}, 0.02, 5.0, 20.0)
-  // effect_add_bloom(&engine.postprocess)
-  // effect_add_crosshatch(&engine.postprocess, {1280, 720})
+  effect_add_fog(&engine.postprocess, {0.4, 0.0, 0.8}, 0.02, 5.0, 20.0)
+  effect_add_bloom(&engine.postprocess)
+  effect_add_crosshatch(&engine.postprocess, {1280, 720})
   // effect_add_blur(&engine.postprocess, 18.0)
   // effect_add_tonemap(&engine.postprocess, 1.5, 1.3)
   // effect_add_dof(&engine.postprocess)

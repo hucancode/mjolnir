@@ -13,7 +13,7 @@ RendererShadow :: struct {
   pipelines:       [SHADOW_SHADER_VARIANT_COUNT]vk.Pipeline,
 }
 
-renderer_shadow_init :: proc(
+shadow_init :: proc(
   self: ^RendererShadow,
   depth_format: vk.Format = .D32_SFLOAT,
 ) -> vk.Result {
@@ -157,7 +157,7 @@ renderer_shadow_init :: proc(
   return .SUCCESS
 }
 
-renderer_shadow_deinit :: proc(self: ^RendererShadow) {
+shadow_deinit :: proc(self: ^RendererShadow) {
   for &p in self.pipelines {
     vk.DestroyPipeline(g_device, p, nil)
     p = 0
@@ -166,7 +166,7 @@ renderer_shadow_deinit :: proc(self: ^RendererShadow) {
   self.pipeline_layout = 0
 }
 
-renderer_shadow_begin :: proc(
+shadow_begin :: proc(
   shadow_target: RenderTarget,
   command_buffer: vk.CommandBuffer,
   face: Maybe(u32) = nil,
@@ -230,7 +230,7 @@ renderer_shadow_begin :: proc(
 }
 
 // Render shadow for a single light
-renderer_shadow_render :: proc(
+shadow_render :: proc(
   self: ^RendererShadow,
   render_input: RenderInput,
   light_data: LightData,
@@ -260,7 +260,7 @@ renderer_shadow_render :: proc(
     if is_skinned {
       shadow_features += {.SKINNING}
     }
-    pipeline := renderer_shadow_get_pipeline(self, shadow_features)
+    pipeline := shadow_get_pipeline(self, shadow_features)
     if pipeline != current_pipeline {
       vk.CmdBindPipeline(command_buffer, .GRAPHICS, pipeline)
       current_pipeline = pipeline
@@ -280,11 +280,11 @@ renderer_shadow_render :: proc(
   }
 }
 
-renderer_shadow_end :: proc(command_buffer: vk.CommandBuffer) {
+shadow_end :: proc(command_buffer: vk.CommandBuffer) {
   vk.CmdEndRenderingKHR(command_buffer)
 }
 
-renderer_shadow_get_pipeline :: proc(
+shadow_get_pipeline :: proc(
   self: ^RendererShadow,
   features: ShaderFeatureSet = {},
 ) -> vk.Pipeline {

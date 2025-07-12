@@ -25,7 +25,7 @@ RendererGBuffer :: struct {
   pipeline_layout: vk.PipelineLayout,
 }
 
-renderer_gbuffer_init :: proc(
+gbuffer_init :: proc(
   self: ^RendererGBuffer,
   width: u32,
   height: u32,
@@ -220,7 +220,7 @@ renderer_gbuffer_init :: proc(
   return .SUCCESS
 }
 
-renderer_gbuffer_begin :: proc(
+gbuffer_begin :: proc(
   render_target: ^RenderTarget,
   command_buffer: vk.CommandBuffer,
 ) {
@@ -326,14 +326,14 @@ renderer_gbuffer_begin :: proc(
   vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
 }
 
-renderer_gbuffer_end :: proc(
+gbuffer_end :: proc(
   render_target: ^RenderTarget,
   command_buffer: vk.CommandBuffer,
 ) {
   vk.CmdEndRenderingKHR(command_buffer)
 }
 
-renderer_gbuffer_render :: proc(
+gbuffer_render :: proc(
   self: ^RendererGBuffer,
   render_input: ^RenderInput,
   render_target: ^RenderTarget,
@@ -365,7 +365,7 @@ renderer_gbuffer_render :: proc(
       g_materials,
       batch_group[0].material_handle,
     ) or_continue
-    pipeline := renderer_gbuffer_get_pipeline(self, sample_material.features)
+    pipeline := gbuffer_get_pipeline(self, sample_material.features)
     if pipeline != current_pipeline {
       vk.CmdBindPipeline(command_buffer, .GRAPHICS, pipeline)
       current_pipeline = pipeline
@@ -443,14 +443,14 @@ renderer_gbuffer_render :: proc(
   }
 }
 
-renderer_gbuffer_get_pipeline :: proc(
+gbuffer_get_pipeline :: proc(
   self: ^RendererGBuffer,
   features: ShaderFeatureSet = {},
 ) -> vk.Pipeline {
   return self.pipelines[transmute(u32)features]
 }
 
-renderer_gbuffer_deinit :: proc(self: ^RendererGBuffer) {
+gbuffer_deinit :: proc(self: ^RendererGBuffer) {
   for pipeline in self.pipelines {
     vk.DestroyPipeline(g_device, pipeline, nil)
   }

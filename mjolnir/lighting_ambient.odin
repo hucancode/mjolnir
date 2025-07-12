@@ -28,7 +28,7 @@ RendererAmbient :: struct {
   ibl_intensity:       f32,
 }
 
-renderer_ambient_begin :: proc(
+ambient_begin :: proc(
   self: ^RendererAmbient,
   target: RenderTarget,
   command_buffer: vk.CommandBuffer,
@@ -78,7 +78,7 @@ renderer_ambient_begin :: proc(
   vk.CmdBindPipeline(command_buffer, .GRAPHICS, self.pipeline)
 }
 
-renderer_ambient_render :: proc(
+ambient_render :: proc(
   self: ^RendererAmbient,
   render_target: ^RenderTarget,
   command_buffer: vk.CommandBuffer,
@@ -109,11 +109,11 @@ renderer_ambient_render :: proc(
   vk.CmdDraw(command_buffer, 3, 1, 0, 0) // fullscreen triangle
 }
 
-renderer_ambient_end :: proc(command_buffer: vk.CommandBuffer) {
+ambient_end :: proc(command_buffer: vk.CommandBuffer) {
   vk.CmdEndRenderingKHR(command_buffer)
 }
 
-renderer_ambient_init :: proc(
+ambient_init :: proc(
   self: ^RendererAmbient,
   width: u32,
   height: u32,
@@ -242,7 +242,7 @@ renderer_ambient_init :: proc(
 }
 
 
-renderer_ambient_deinit :: proc(self: ^RendererAmbient) {
+ambient_deinit :: proc(self: ^RendererAmbient) {
   vk.DestroyPipeline(g_device, self.pipeline, nil)
   self.pipeline = 0
   vk.DestroyPipelineLayout(g_device, self.pipeline_layout, nil)

@@ -40,7 +40,7 @@ Vertex2D :: struct {
   color: [4]u8,
 }
 
-renderer_ui_init :: proc(
+ui_init :: proc(
   self: ^RendererUI,
   color_format: vk.Format,
   width: u32,
@@ -461,7 +461,7 @@ ui_set_clip_rect :: proc(
   vk.CmdSetScissor(cmd_buf, 0, 1, &scissor)
 }
 
-renderer_ui_deinit :: proc(self: ^RendererUI) {
+ui_deinit :: proc(self: ^RendererUI) {
   if self == nil {
     return
   }
@@ -478,7 +478,7 @@ renderer_ui_deinit :: proc(self: ^RendererUI) {
   self.texture_layout = 0
 }
 
-renderer_ui_recreate_images :: proc(
+ui_recreate_images :: proc(
   self: ^RendererUI,
   color_format: vk.Format,
   width: u32,
@@ -498,7 +498,7 @@ renderer_ui_recreate_images :: proc(
 }
 
 // Modular UI renderer API
-renderer_ui_begin :: proc(
+ui_begin :: proc(
   self: ^RendererUI,
   command_buffer: vk.CommandBuffer,
   color_view: vk.ImageView,
@@ -534,7 +534,7 @@ renderer_ui_begin :: proc(
   vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
 }
 
-renderer_ui_render :: proc(
+ui_render :: proc(
   self: ^RendererUI,
   command_buffer: vk.CommandBuffer,
 ) {
@@ -557,6 +557,6 @@ renderer_ui_render :: proc(
   ui_flush(self, command_buffer)
 }
 
-renderer_ui_end :: proc(self: ^RendererUI, command_buffer: vk.CommandBuffer) {
+ui_end :: proc(self: ^RendererUI, command_buffer: vk.CommandBuffer) {
   vk.CmdEndRenderingKHR(command_buffer)
 }

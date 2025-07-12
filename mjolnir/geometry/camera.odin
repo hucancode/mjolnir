@@ -196,9 +196,15 @@ camera_up :: proc(camera: Camera) -> [3]f32 {
   )
 }
 
+// Helper to get both view and projection matrices simultaneously
+camera_calculate_matrices :: proc(camera: Camera) -> (view: matrix[4,4]f32, projection: matrix[4,4]f32) {
+  view = calculate_view_matrix(camera)
+  projection = calculate_projection_matrix(camera)
+  return
+}
+
 camera_make_frustum :: proc(camera: Camera) -> Frustum {
-  view_matrix := calculate_view_matrix(camera)
-  proj_matrix := calculate_projection_matrix(camera)
+  view_matrix, proj_matrix := camera_calculate_matrices(camera)
   return make_frustum(proj_matrix * view_matrix)
 }
 

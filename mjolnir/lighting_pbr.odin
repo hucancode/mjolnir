@@ -47,7 +47,7 @@ LightPushConstant :: struct {
   input_image_index:      u32, // For post-processing input
 }
 
-renderer_lighting_init :: proc(
+lighting_init :: proc(
   self: ^RendererLighting,
   width: u32,
   height: u32,
@@ -242,13 +242,13 @@ renderer_lighting_init :: proc(
   return .SUCCESS
 }
 
-renderer_lighting_deinit :: proc(self: ^RendererLighting) {
+lighting_deinit :: proc(self: ^RendererLighting) {
   vk.DestroyPipelineLayout(g_device, self.lighting_pipeline_layout, nil)
   vk.DestroyPipeline(g_device, self.lighting_pipeline, nil)
   vk.DestroyPipeline(g_device, self.spot_light_pipeline, nil)
 }
 
-renderer_lighting_recreate_images :: proc(
+lighting_recreate_images :: proc(
   self: ^RendererLighting,
   width: u32,
   height: u32,
@@ -259,7 +259,7 @@ renderer_lighting_recreate_images :: proc(
   return .SUCCESS
 }
 
-renderer_lighting_begin :: proc(
+lighting_begin :: proc(
   self: ^RendererLighting,
   target: RenderTarget,
   command_buffer: vk.CommandBuffer,
@@ -320,7 +320,7 @@ renderer_lighting_begin :: proc(
   vk.CmdBindPipeline(command_buffer, .GRAPHICS, self.lighting_pipeline)
 }
 
-renderer_lighting_render :: proc(
+lighting_render :: proc(
   self: ^RendererLighting,
   input: [dynamic]LightData,
   render_target: ^RenderTarget,
@@ -450,6 +450,6 @@ renderer_lighting_render :: proc(
   return rendered_count
 }
 
-renderer_lighting_end :: proc(command_buffer: vk.CommandBuffer) {
+lighting_end :: proc(command_buffer: vk.CommandBuffer) {
   vk.CmdEndRenderingKHR(command_buffer)
 }

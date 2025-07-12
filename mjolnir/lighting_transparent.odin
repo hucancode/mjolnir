@@ -12,7 +12,7 @@ RendererTransparent :: struct {
   wireframe_pipelines:   [2]vk.Pipeline,
 }
 
-renderer_transparent_init :: proc(
+transparent_init :: proc(
   self: ^RendererTransparent,
   width: u32,
   height: u32,
@@ -410,7 +410,7 @@ create_wireframe_pipelines :: proc(self: ^RendererTransparent) -> vk.Result {
   return .SUCCESS
 }
 
-renderer_transparent_deinit :: proc(self: ^RendererTransparent) {
+transparent_deinit :: proc(self: ^RendererTransparent) {
   // Destroy all transparent material pipelines
   for i in 0 ..< SHADER_VARIANT_COUNT {
     vk.DestroyPipeline(g_device, self.transparent_pipelines[i], nil)
@@ -428,7 +428,7 @@ renderer_transparent_deinit :: proc(self: ^RendererTransparent) {
   self.pipeline_layout = 0
 }
 
-renderer_transparent_begin :: proc(
+transparent_begin :: proc(
   self: ^RendererTransparent,
   render_target: RenderTarget,
   command_buffer: vk.CommandBuffer,
@@ -474,7 +474,7 @@ renderer_transparent_begin :: proc(
   vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
 }
 
-renderer_transparent_render :: proc(
+transparent_render :: proc(
   self: ^RendererTransparent,
   render_input: RenderInput,
   render_target: RenderTarget,
@@ -655,7 +655,7 @@ renderer_transparent_render :: proc(
   }
 }
 
-renderer_transparent_end :: proc(
+transparent_end :: proc(
   self: ^RendererTransparent,
   command_buffer: vk.CommandBuffer,
 ) {

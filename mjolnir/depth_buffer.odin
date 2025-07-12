@@ -17,7 +17,7 @@ RendererDepthPrepass :: struct {
   pipelines:       [DEPTH_PREPASS_VARIANT_COUNT]vk.Pipeline,
 }
 
-renderer_depth_prepass_init :: proc(
+depth_prepass_init :: proc(
   self: ^RendererDepthPrepass,
   swapchain_extent: vk.Extent2D,
 ) -> (
@@ -49,7 +49,7 @@ renderer_depth_prepass_init :: proc(
     config := ShaderConfig {
       is_skinned = .SKINNING in features,
     }
-    renderer_depth_prepass_build_pipeline(
+    depth_prepass_build_pipeline(
       self,
       &config,
       &self.pipelines[mask],
@@ -59,7 +59,7 @@ renderer_depth_prepass_init :: proc(
   return .SUCCESS
 }
 
-renderer_depth_prepass_deinit :: proc(self: ^RendererDepthPrepass) {
+depth_prepass_deinit :: proc(self: ^RendererDepthPrepass) {
   for &p in self.pipelines {
     vk.DestroyPipeline(g_device, p, nil)
     p = 0
@@ -68,7 +68,7 @@ renderer_depth_prepass_deinit :: proc(self: ^RendererDepthPrepass) {
   self.pipeline_layout = 0
 }
 
-renderer_depth_prepass_begin :: proc(
+depth_prepass_begin :: proc(
   render_target: ^RenderTarget,
   command_buffer: vk.CommandBuffer,
 ) {
@@ -107,11 +107,11 @@ renderer_depth_prepass_begin :: proc(
   vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
 }
 
-renderer_depth_prepass_end :: proc(command_buffer: vk.CommandBuffer) {
+depth_prepass_end :: proc(command_buffer: vk.CommandBuffer) {
   vk.CmdEndRenderingKHR(command_buffer)
 }
 
-renderer_depth_prepass_render :: proc(
+depth_prepass_render :: proc(
   self: ^RendererDepthPrepass,
   render_input: ^RenderInput,
   command_buffer: vk.CommandBuffer,
@@ -149,7 +149,7 @@ renderer_depth_prepass_render :: proc(
           mesh := resource.get(g_meshes, data.handle) or_continue
           mesh_skinning, mesh_has_skin := &mesh.skinning.?
           node_skinning, node_has_skin := data.skinning.?
-          pipeline := renderer_depth_prepass_get_pipeline(
+          pipeline := depth_prepass_get_pipeline(
             self,
             material,
             mesh,
@@ -206,7 +206,7 @@ renderer_depth_prepass_render :: proc(
   return rendered_count
 }
 
-renderer_depth_prepass_get_pipeline :: proc(
+depth_prepass_get_pipeline :: proc(
   self: ^RendererDepthPrepass,
   material: ^Material,
   mesh: ^Mesh,
@@ -216,7 +216,7 @@ renderer_depth_prepass_get_pipeline :: proc(
   return self.pipelines[transmute(u32)features]
 }
 
-renderer_depth_prepass_build_pipeline :: proc(
+depth_prepass_build_pipeline :: proc(
   self: ^RendererDepthPrepass,
   config: ^ShaderConfig,
   pipeline: ^vk.Pipeline,

@@ -747,8 +747,7 @@ visibility_culler_update_multi_camera :: proc(
     if camera == nil do continue
 
     // Calculate frustum for this camera
-    view_matrix := geometry.calculate_view_matrix(camera^)
-    proj_matrix := geometry.calculate_projection_matrix(camera^)
+    view_matrix, proj_matrix := geometry.camera_calculate_matrices(camera^)
     frustum := geometry.make_frustum(proj_matrix * view_matrix)
 
     active_camera_slice[camera_count] = {

@@ -113,31 +113,6 @@ RenderInput :: struct {
   batches: map[BatchKey][dynamic]BatchData,
 }
 
-// RenderTarget describes the output textures and camera for a render pass.
-RenderTarget :: struct {
-  // Camera management
-  camera:                          Handle,
-  extent:                          vk.Extent2D,
-  // Texture handles (may or may not be owned by this render target)
-  final_image:                     Handle,
-  position_texture:                Handle,
-  normal_texture:                  Handle,
-  albedo_texture:                  Handle,
-  metallic_roughness_texture:      Handle,
-  emissive_texture:                Handle,
-  depth_texture:                   Handle,
-  // Ownership flags for textures (true = owned by this RenderTarget)
-  owns_final_image:                bool,
-  owns_position_texture:           bool,
-  owns_normal_texture:             bool,
-  owns_albedo_texture:             bool,
-  owns_metallic_roughness_texture: bool,
-  owns_emissive_texture:           bool,
-  owns_depth_texture:              bool,
-  // Pool management
-  in_use:                          bool,
-}
-
 InputState :: struct {
   mouse_pos:         [2]f64,
   mouse_drag_origin: [2]f32,
@@ -198,98 +173,6 @@ get_window_dpi :: proc(window: glfw.WindowHandle) -> f32 {
   return sw
 }
 
-// Initialize RenderTarget with camera and create all textures
-render_target_init :: proc(
-  target: ^RenderTarget,
-  camera: resource.Handle,
-  width, height: u32,
-  color_format: vk.Format,
-  depth_format: vk.Format,
-) -> vk.Result {
-  target.camera = camera
-  target.extent = {width, height}
-  target.in_use = true
-
-  // Create all texture handles and mark as owned
-  target.final_image, _ = create_empty_texture_2d(
-    width,
-    height,
-    color_format,
-    {.COLOR_ATTACHMENT, .SAMPLED},
-  ) or_return
-  target.owns_final_image = true
-
-  target.position_texture, _ = create_empty_texture_2d(
-    width,
-    height,
-    .R32G32B32A32_SFLOAT,
-    {.COLOR_ATTACHMENT, .SAMPLED},
-  ) or_return
-  target.owns_position_texture = true
-
-  target.normal_texture, _ = create_empty_texture_2d(
-    width,
-    height,
-    .R8G8B8A8_UNORM,
-    {.COLOR_ATTACHMENT, .SAMPLED},
-  ) or_return
-  target.owns_normal_texture = true
-
-  target.albedo_texture, _ = create_empty_texture_2d(
-    width,
-    height,
-    .R8G8B8A8_UNORM,
-    {.COLOR_ATTACHMENT, .SAMPLED},
-  ) or_return
-  target.owns_albedo_texture = true
-
-  target.metallic_roughness_texture, _ = create_empty_texture_2d(
-    width,
-    height,
-    .R8G8B8A8_UNORM,
-    {.COLOR_ATTACHMENT, .SAMPLED},
-  ) or_return
-  target.owns_metallic_roughness_texture = true
-
-  target.emissive_texture, _ = create_empty_texture_2d(
-    width,
-    height,
-    .R8G8B8A8_UNORM,
-    {.COLOR_ATTACHMENT, .SAMPLED},
-  ) or_return
-  target.owns_emissive_texture = true
-
-  target.depth_texture, _ = create_empty_texture_2d(
-    width,
-    height,
-    depth_format,
-    {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
-  ) or_return
-  target.owns_depth_texture = true
-
-  return .SUCCESS
-}
-
-// Update camera uniform for the render target using bindless camera buffer
-render_target_update_camera_uniform :: proc(target: ^RenderTarget) {
-  camera := resource.get(g_cameras, target.camera)
-  uniform := get_camera_uniform(target.camera.index)
-  if camera == nil || uniform == nil {
-    log.errorf("Camera %v or uniform %v not found", target.camera, uniform)
-    return
-  }
-  uniform.view = geometry.calculate_view_matrix(camera^)
-  uniform.projection = geometry.calculate_projection_matrix(camera^)
-  uniform.viewport_size = [2]f32 {
-    f32(target.extent.width),
-    f32(target.extent.height),
-  }
-  uniform.camera_position = camera.position
-  uniform.camera_near, uniform.camera_far = geometry.camera_get_near_far(
-    camera^,
-  )
-}
-
 // Initialize engine shadow map pools
 engine_init_shadow_maps :: proc(engine: ^Engine) -> vk.Result {
   for f in 0 ..< MAX_FRAMES_IN_FLIGHT {
@@ -312,58 +195,16 @@ engine_init_shadow_maps :: proc(engine: ^Engine) -> vk.Result {
   return .SUCCESS
 }
 
-// Clean up all engine shadow maps
-
-
-// Clean up RenderTarget resources (only owned textures)
-render_target_deinit :: proc(target: ^RenderTarget) {
-
-  // Release only owned texture handles
-  if target.owns_final_image {
-    resource.free(&g_image_2d_buffers, target.final_image, image_buffer_deinit)
-  }
-  if target.owns_position_texture {
-    resource.free(
-      &g_image_2d_buffers,
-      target.position_texture,
-      image_buffer_deinit,
-    )
-  }
-  if target.owns_normal_texture {
-    resource.free(
-      &g_image_2d_buffers,
-      target.normal_texture,
-      image_buffer_deinit,
-    )
-  }
-  if target.owns_albedo_texture {
-    resource.free(
-      &g_image_2d_buffers,
-      target.albedo_texture,
-      image_buffer_deinit,
-    )
-  }
-  if target.owns_metallic_roughness_texture {
-    resource.free(
-      &g_image_2d_buffers,
-      target.metallic_roughness_texture,
-      image_buffer_deinit,
-    )
-  }
-  if target.owns_emissive_texture {
-    resource.free(
-      &g_image_2d_buffers,
-      target.emissive_texture,
-      image_buffer_deinit,
-    )
-  }
-  if target.owns_depth_texture {
-    resource.free(
-      &g_image_2d_buffers,
-      target.depth_texture,
-      image_buffer_deinit,
-    )
-  }
+// Helper to update camera uniform from camera data
+camera_uniform_update :: proc(
+  uniform: ^CameraUniform,
+  camera: ^geometry.Camera,
+  viewport_width, viewport_height: u32,
+) {
+  uniform.view, uniform.projection = geometry.camera_calculate_matrices(camera^)
+  uniform.viewport_size = [2]f32{f32(viewport_width), f32(viewport_height)}
+  uniform.camera_position = camera.position
+  uniform.camera_near, uniform.camera_far = geometry.camera_get_near_far(camera^)
 }
 
 init :: proc(
@@ -428,14 +269,14 @@ init :: proc(
     },
     raw_data(self.command_buffers[:]),
   ) or_return
-  renderer_lighting_init(
+  lighting_init(
     &self.main,
     self.swapchain.extent.width,
     self.swapchain.extent.height,
     self.swapchain.format.format,
     vk.Format.D32_SFLOAT,
   ) or_return
-  renderer_ambient_init(
+  ambient_init(
     &self.ambient,
     self.swapchain.extent.width,
     self.swapchain.extent.height,
@@ -446,34 +287,34 @@ init :: proc(
   self.ambient.brdf_lut_index = self.main.brdf_lut.index
   self.ambient.environment_max_lod = self.main.environment_max_lod
   self.ambient.ibl_intensity = self.main.ibl_intensity
-  renderer_gbuffer_init(
+  gbuffer_init(
     &self.gbuffer,
     self.swapchain.extent.width,
     self.swapchain.extent.height,
   ) or_return
-  renderer_depth_prepass_init(
+  depth_prepass_init(
     &self.depth_prepass,
     self.swapchain.extent,
   ) or_return
-  renderer_particle_init(&self.particle) or_return
+  particle_init(&self.particle) or_return
   when USE_GPU_CULLING {
     visibility_culler_init(&self.visibility_culler) or_return
   }
-  renderer_transparent_init(
+  transparent_init(
     &self.transparent,
     self.swapchain.extent.width,
     self.swapchain.extent.height,
   ) or_return
   log.debugf("initializing shadow pipeline")
-  renderer_shadow_init(&self.shadow, .D32_SFLOAT) or_return
+  shadow_init(&self.shadow, .D32_SFLOAT) or_return
   log.debugf("initializing post process pipeline")
-  renderer_postprocess_init(
+  postprocess_init(
     &self.postprocess,
     self.swapchain.format.format,
     self.swapchain.extent.width,
     self.swapchain.extent.height,
   ) or_return
-  renderer_ui_init(
+  ui_init(
     &self.ui,
     self.swapchain.format.format,
     self.swapchain.extent.width,
@@ -755,19 +596,19 @@ deinit :: proc(self: ^Engine) {
   for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
     render_target_deinit(&self.main_render_target[i])
   }
-  renderer_ui_deinit(&self.ui)
+  ui_deinit(&self.ui)
   scene_deinit(&self.scene)
-  renderer_lighting_deinit(&self.main)
-  renderer_ambient_deinit(&self.ambient)
-  renderer_gbuffer_deinit(&self.gbuffer)
-  renderer_shadow_deinit(&self.shadow)
-  renderer_postprocess_deinit(&self.postprocess)
-  renderer_particle_deinit(&self.particle)
+  lighting_deinit(&self.main)
+  ambient_deinit(&self.ambient)
+  gbuffer_deinit(&self.gbuffer)
+  shadow_deinit(&self.shadow)
+  postprocess_deinit(&self.postprocess)
+  particle_deinit(&self.particle)
   when USE_GPU_CULLING {
     visibility_culler_deinit(&self.visibility_culler)
   }
-  renderer_transparent_deinit(&self.transparent)
-  renderer_depth_prepass_deinit(&self.depth_prepass)
+  transparent_deinit(&self.transparent)
+  depth_prepass_deinit(&self.depth_prepass)
   factory_deinit()
   swapchain_deinit(&self.swapchain)
   vulkan_context_deinit()
@@ -801,7 +642,7 @@ recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
 
   // No need to update camera uniform descriptor sets with bindless cameras
 
-  renderer_lighting_recreate_images(
+  lighting_recreate_images(
     &engine.main,
     engine.swapchain.extent.width,
     engine.swapchain.extent.height,
@@ -809,13 +650,13 @@ recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
     vk.Format.D32_SFLOAT,
   ) or_return
   // renderer_ambient_recreate_images does not exist - skip
-  renderer_postprocess_recreate_images(
+  postprocess_recreate_images(
     &engine.postprocess,
     engine.swapchain.extent.width,
     engine.swapchain.extent.height,
     engine.swapchain.format.format,
   ) or_return
-  renderer_ui_recreate_images(
+  ui_recreate_images(
     &engine.ui,
     engine.swapchain.format.format,
     engine.swapchain.extent.width,
@@ -823,22 +664,6 @@ recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
     get_window_dpi(engine.window),
   ) or_return
   return .SUCCESS
-}
-
-// Helper function to find camera slot in active render targets
-find_camera_slot :: proc(
-  camera_handle: resource.Handle,
-  active_render_targets: []RenderTarget,
-) -> (
-  slot: u32,
-  found: bool,
-) {
-  for target, i in active_render_targets {
-    if target.camera.index == camera_handle.index {
-      return u32(i), true
-    }
-  }
-  return 0, false
 }
 
 // Generate render input for a given frustum (camera or light)
@@ -911,7 +736,7 @@ generate_render_input :: proc(
 }
 
 // Generate render input for a specific camera slot (for shadow rendering)
-generate_render_input_for_camera_slot :: proc(
+generate_render_input_camera_slot :: proc(
   self: ^Engine,
   frustum: geometry.Frustum,
   camera_slot: u32,
@@ -1316,7 +1141,7 @@ render :: proc(self: ^Engine) -> vk.Result {
         frustum := geometry.make_frustum(light.proj * light.views[face])
         shadow_render_input: RenderInput
         when USE_GPU_CULLING {
-          shadow_render_input = generate_render_input_for_camera_slot(
+          shadow_render_input = generate_render_input_camera_slot(
             self,
             frustum,
             current_camera_slot,
@@ -1332,15 +1157,15 @@ render :: proc(self: ^Engine) -> vk.Result {
         }
         target := resource.get(g_render_targets, light.render_targets[face])
         log.debugf("draw shadow for point light face %d with rt %v", face, target)
-        renderer_shadow_begin(target^, command_buffer, u32(face))
-        renderer_shadow_render(
+        shadow_begin(target^, command_buffer, u32(face))
+        shadow_render(
           &self.shadow,
           shadow_render_input,
           node,
           target^,
           command_buffer,
         )
-        renderer_shadow_end(command_buffer)
+        shadow_end(command_buffer)
         current_camera_slot += 1
       }
     case DirectionalLightData:
@@ -1355,7 +1180,7 @@ render :: proc(self: ^Engine) -> vk.Result {
 
       shadow_render_input: RenderInput
       when USE_GPU_CULLING {
-        shadow_render_input = generate_render_input_for_camera_slot(
+        shadow_render_input = generate_render_input_camera_slot(
           self,
           frustum,
           current_camera_slot,
@@ -1378,15 +1203,15 @@ render :: proc(self: ^Engine) -> vk.Result {
         light.shadow_map.index,
         current_camera_slot,
       )
-      renderer_shadow_begin(shadow_target^, command_buffer)
-      renderer_shadow_render(
+      shadow_begin(shadow_target^, command_buffer)
+      shadow_render(
         &self.shadow,
         shadow_render_input,
         node,
         shadow_target^,
         command_buffer,
       )
-      renderer_shadow_end(command_buffer)
+      shadow_end(command_buffer)
       current_camera_slot += 1
     }
   }
@@ -1438,14 +1263,14 @@ render :: proc(self: ^Engine) -> vk.Result {
   )
   log.debug("============ rendering depth pre-pass... =============")
   depth_input := generate_render_input(self, frustum, self.scene.main_camera)
-  renderer_depth_prepass_begin(&self.main_render_target[g_frame_index], command_buffer)
-  renderer_depth_prepass_render(
+  depth_prepass_begin(&self.main_render_target[g_frame_index], command_buffer)
+  depth_prepass_render(
     &self.depth_prepass,
     &depth_input,
     command_buffer,
     self.main_render_target[g_frame_index].camera.index,
   )
-  renderer_depth_prepass_end(command_buffer)
+  depth_prepass_end(command_buffer)
   log.debug("============ rendering G-buffer pass... =============")
   // Transition G-buffer images to COLOR_ATTACHMENT_OPTIMAL
   render_target := &self.main_render_target
@@ -1489,17 +1314,17 @@ render :: proc(self: ^Engine) -> vk.Result {
     {.COLOR_ATTACHMENT_WRITE},
   )
   gbuffer_input := depth_input
-  renderer_gbuffer_begin(
+  gbuffer_begin(
     &self.main_render_target[g_frame_index],
     command_buffer,
   )
-  renderer_gbuffer_render(
+  gbuffer_render(
     &self.gbuffer,
     &gbuffer_input,
     &self.main_render_target[g_frame_index],
     command_buffer,
   )
-  renderer_gbuffer_end(&self.main_render_target[g_frame_index], command_buffer)
+  gbuffer_end(&self.main_render_target[g_frame_index], command_buffer)
   // Transition G-buffer images to SHADER_READ_ONLY_OPTIMAL
   // Batch transition all G-buffer images to SHADER_READ_ONLY_OPTIMAL in a single API call
   transition_images(
@@ -1516,60 +1341,60 @@ render :: proc(self: ^Engine) -> vk.Result {
   log.debug("============ rendering main pass... =============")
   // Prepare RenderTarget and RenderInput for decoupled renderer
   // Ambient pass
-  renderer_ambient_begin(
+  ambient_begin(
     &self.ambient,
     self.main_render_target[g_frame_index],
     command_buffer,
   )
-  renderer_ambient_render(
+  ambient_render(
     &self.ambient,
     &self.main_render_target[g_frame_index],
     command_buffer,
   )
-  renderer_ambient_end(command_buffer)
+  ambient_end(command_buffer)
   // Per-light additive pass
-  renderer_lighting_begin(
+  lighting_begin(
     &self.main,
     self.main_render_target[g_frame_index],
     command_buffer,
   )
-  renderer_lighting_render(
+  lighting_render(
     &self.main,
     lights,
     &self.main_render_target[g_frame_index],
     command_buffer,
   )
-  renderer_lighting_end(command_buffer)
+  lighting_end(command_buffer)
   log.debug("============ rendering particles... =============")
-  renderer_particle_begin(
+  particle_begin(
     &self.particle,
     command_buffer,
     self.main_render_target[g_frame_index],
   )
-  renderer_particle_render(
+  particle_render(
     &self.particle,
     command_buffer,
     self.main_render_target[g_frame_index].camera.index,
   )
-  renderer_particle_end(command_buffer)
+  particle_end(command_buffer)
 
   // Transparent & wireframe pass
-  renderer_transparent_begin(
+  transparent_begin(
     &self.transparent,
     self.main_render_target[g_frame_index],
     command_buffer,
   )
-  renderer_transparent_render(
+  transparent_render(
     &self.transparent,
     gbuffer_input,
     self.main_render_target[g_frame_index],
     command_buffer,
   )
-  renderer_transparent_end(&self.transparent, command_buffer)
+  transparent_end(&self.transparent, command_buffer)
 
   log.debug("============ rendering post processes... =============")
   transition_image_to_shader_read(command_buffer, final_image.image)
-  renderer_postprocess_begin(
+  postprocess_begin(
     &self.postprocess,
     command_buffer,
     self.swapchain.extent,
@@ -1585,14 +1410,14 @@ render :: proc(self: ^Engine) -> vk.Result {
     {},
     {.COLOR_ATTACHMENT_WRITE},
   )
-  renderer_postprocess_render(
+  postprocess_render(
     &self.postprocess,
     command_buffer,
     self.swapchain.extent,
     self.swapchain.views[self.swapchain.image_index],
     &self.main_render_target[g_frame_index],
   )
-  renderer_postprocess_end(&self.postprocess, command_buffer)
+  postprocess_end(&self.postprocess, command_buffer)
   if mu.window(&self.ui.ctx, "Engine", {40, 40, 300, 200}, {.NO_CLOSE}) {
     mu.label(
       &self.ui.ctx,
@@ -1649,14 +1474,14 @@ render :: proc(self: ^Engine) -> vk.Result {
   }
   mu.end(&self.ui.ctx)
   log.debug("============ rendering UI... =============")
-  renderer_ui_begin(
+  ui_begin(
     &self.ui,
     command_buffer,
     self.swapchain.views[self.swapchain.image_index],
     self.swapchain.extent,
   )
-  renderer_ui_render(&self.ui, command_buffer)
-  renderer_ui_end(&self.ui, command_buffer)
+  ui_render(&self.ui, command_buffer)
+  ui_end(&self.ui, command_buffer)
   log.debug("============ preparing image for present... =============")
   transition_image_to_present(
     command_buffer,

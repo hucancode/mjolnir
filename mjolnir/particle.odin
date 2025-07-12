@@ -271,7 +271,7 @@ compact_particles :: proc(
   )
 }
 
-renderer_particle_deinit :: proc(self: ^RendererParticle) {
+particle_deinit :: proc(self: ^RendererParticle) {
   vk.DestroyPipeline(g_device, self.compute_pipeline, nil)
   vk.DestroyPipelineLayout(g_device, self.compute_pipeline_layout, nil)
   vk.DestroyDescriptorSetLayout(
@@ -304,7 +304,7 @@ renderer_particle_deinit :: proc(self: ^RendererParticle) {
   data_buffer_deinit(&self.particle_counter_buffer)
 }
 
-renderer_particle_init :: proc(self: ^RendererParticle) -> vk.Result {
+particle_init :: proc(self: ^RendererParticle) -> vk.Result {
   log.debugf("Initializing particle renderer")
   self.params_buffer = create_host_visible_buffer(
     ParticleSystemParams,
@@ -337,13 +337,13 @@ renderer_particle_init :: proc(self: ^RendererParticle) -> vk.Result {
     MAX_EMITTERS,
     {.STORAGE_BUFFER},
   ) or_return
-  renderer_particle_init_emitter_pipeline(self) or_return
-  renderer_particle_init_compact_pipeline(self) or_return
-  renderer_particle_init_compute_pipeline(self) or_return
-  renderer_particle_init_render_pipeline(self) or_return
+  particle_init_emitter_pipeline(self) or_return
+  particle_init_compact_pipeline(self) or_return
+  particle_init_compute_pipeline(self) or_return
+  particle_init_render_pipeline(self) or_return
   return .SUCCESS
 }
-renderer_particle_init_emitter_pipeline :: proc(
+particle_init_emitter_pipeline :: proc(
   self: ^RendererParticle,
 ) -> vk.Result {
   // --- Emitter pipeline ---
@@ -503,7 +503,7 @@ renderer_particle_init_emitter_pipeline :: proc(
   return .SUCCESS
 }
 
-renderer_particle_init_compute_pipeline :: proc(
+particle_init_compute_pipeline :: proc(
   self: ^RendererParticle,
 ) -> vk.Result {
   // --- Compute pipeline (particle simulation) ---
@@ -645,7 +645,7 @@ renderer_particle_init_compute_pipeline :: proc(
   return .SUCCESS
 }
 
-renderer_particle_init_compact_pipeline :: proc(
+particle_init_compact_pipeline :: proc(
   self: ^RendererParticle,
 ) -> vk.Result {
   // --- Compaction pipeline ---
@@ -797,7 +797,7 @@ renderer_particle_init_compact_pipeline :: proc(
   return .SUCCESS
 }
 
-renderer_particle_init_render_pipeline :: proc(
+particle_init_render_pipeline :: proc(
   self: ^RendererParticle,
 ) -> vk.Result {
   descriptor_set_layouts := [?]vk.DescriptorSetLayout {
@@ -962,7 +962,7 @@ renderer_particle_init_render_pipeline :: proc(
   return .SUCCESS
 }
 
-renderer_particle_begin :: proc(
+particle_begin :: proc(
   self: ^RendererParticle,
   command_buffer: vk.CommandBuffer,
   render_target: RenderTarget,
@@ -1027,7 +1027,7 @@ renderer_particle_begin :: proc(
   vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
 }
 
-renderer_particle_render :: proc(
+particle_render :: proc(
   self: ^RendererParticle,
   command_buffer: vk.CommandBuffer,
   camera_index: u32,
@@ -1075,7 +1075,7 @@ renderer_particle_render :: proc(
   )
 }
 
-renderer_particle_end :: proc(command_buffer: vk.CommandBuffer) {
+particle_end :: proc(command_buffer: vk.CommandBuffer) {
   vk.CmdEndRenderingKHR(command_buffer)
 }
 
