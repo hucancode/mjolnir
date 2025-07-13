@@ -16,10 +16,6 @@ RendererLighting :: struct {
   lighting_pipeline:        vk.Pipeline,
   spot_light_pipeline:      vk.Pipeline,
   lighting_pipeline_layout: vk.PipelineLayout,
-  environment_map:          Handle,
-  brdf_lut:                 Handle,
-  environment_max_lod:      f32,
-  ibl_intensity:            f32,
   // Light volume meshes
   sphere_mesh:              Handle,
   cone_mesh:                Handle,
@@ -189,22 +185,6 @@ lighting_init :: proc(
     &self.spot_light_pipeline,
   ) or_return
   log.info("Spot light pipeline initialized successfully")
-
-  environment_map: ^ImageBuffer
-  self.environment_map, environment_map =
-    create_hdr_texture_from_path_with_mips(
-      "assets/Cannon_Exterior.hdr",
-    ) or_return
-  self.environment_max_lod = 8.0 // default fallback
-  if environment_map != nil {
-    self.environment_max_lod =
-      calculate_mip_levels(environment_map.width, environment_map.height) - 1.0
-  }
-  brdf_lut: ^ImageBuffer
-  self.brdf_lut, brdf_lut = create_texture_from_data(
-    #load("assets/lut_ggx.png"),
-  ) or_return
-  self.ibl_intensity = 1.0 // Default IBL intensity
   // Initialize light volume meshes
   self.sphere_mesh, _, _ = create_mesh(
     geometry.make_sphere(segments = 128, rings = 128),
@@ -242,7 +222,10 @@ lighting_begin :: proc(
   target: ^RenderTarget,
   command_buffer: vk.CommandBuffer,
 ) {
-  final_image := resource.get(g_image_2d_buffers, render_target_final_image(target))
+  final_image := resource.get(
+    g_image_2d_buffers,
+    render_target_final_image(target),
+  )
   color_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
     imageView = final_image.view,
@@ -251,7 +234,10 @@ lighting_begin :: proc(
     storeOp = .STORE,
     clearValue = {color = {float32 = BG_BLUE_GRAY}},
   }
-  depth_texture := resource.get(g_image_2d_buffers, render_target_depth_texture(target))
+  depth_texture := resource.get(
+    g_image_2d_buffers,
+    render_target_depth_texture(target),
+  )
   depth_attachment := vk.RenderingAttachmentInfoKHR {
     sType       = .RENDERING_ATTACHMENT_INFO_KHR,
     imageView   = depth_texture.view,
@@ -330,14 +316,20 @@ lighting_render :: proc(
 
     // Fill in the common G-buffer indices that are always the same
     light_info.scene_camera_idx = render_target.camera.index
-    light_info.gbuffer_position_index = render_target_position_texture(render_target).index
-    light_info.gbuffer_normal_index = render_target_normal_texture(render_target).index
-    light_info.gbuffer_albedo_index = render_target_albedo_texture(render_target).index
+    light_info.gbuffer_position_index =
+      render_target_position_texture(render_target).index
+    light_info.gbuffer_normal_index =
+      render_target_normal_texture(render_target).index
+    light_info.gbuffer_albedo_index =
+      render_target_albedo_texture(render_target).index
     light_info.gbuffer_metallic_index =
       render_target_metallic_roughness_texture(render_target).index
-    light_info.gbuffer_emissive_index = render_target_emissive_texture(render_target).index
-    light_info.gbuffer_depth_index = render_target_depth_texture(render_target).index
-    light_info.input_image_index = render_target_final_image(render_target).index
+    light_info.gbuffer_emissive_index =
+      render_target_emissive_texture(render_target).index
+    light_info.gbuffer_depth_index =
+      render_target_depth_texture(render_target).index
+    light_info.input_image_index =
+      render_target_final_image(render_target).index
 
     // Render based on light type
     switch light_info.light_kind {

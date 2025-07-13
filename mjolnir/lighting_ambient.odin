@@ -22,8 +22,9 @@ AmbientPushConstant :: struct {
 RendererAmbient :: struct {
   pipeline:            vk.Pipeline,
   pipeline_layout:     vk.PipelineLayout,
-  environment_index:   u32,
-  brdf_lut_index:      u32,
+  // Environment resources (moved from lighting pass)
+  environment_map:     Handle,
+  brdf_lut:            Handle,
   environment_max_lod: f32,
   ibl_intensity:       f32,
 }
@@ -33,7 +34,10 @@ ambient_begin :: proc(
   target: ^RenderTarget,
   command_buffer: vk.CommandBuffer,
 ) {
-  color_texture := resource.get(g_image_2d_buffers, render_target_final_image(target))
+  color_texture := resource.get(
+    g_image_2d_buffers,
+    render_target_final_image(target),
+  )
   color_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
     imageView = color_texture.view,
@@ -87,8 +91,8 @@ ambient_render :: proc(
   // Use environment/BRDF LUT/IBL values from the main renderer (assume ambient renderer is initialized with these fields)
   push := AmbientPushConstant {
     camera_index           = render_target.camera.index,
-    environment_index      = self.environment_index,
-    brdf_lut_index         = self.brdf_lut_index,
+    environment_index      = self.environment_map.index,
+    brdf_lut_index         = self.brdf_lut.index,
     gbuffer_position_index = render_target_position_texture(render_target).index,
     gbuffer_normal_index   = render_target_normal_texture(render_target).index,
     gbuffer_albedo_index   = render_target_albedo_texture(render_target).index,
@@ -237,6 +241,23 @@ ambient_init :: proc(
     &self.pipeline,
   ) or_return
 
+  // Initialize environment resources
+  environment_map: ^ImageBuffer
+  self.environment_map, environment_map =
+    create_hdr_texture_from_path_with_mips(
+      "assets/Cannon_Exterior.hdr",
+    ) or_return
+  self.environment_max_lod = 8.0 // default fallback
+  if environment_map != nil {
+    self.environment_max_lod =
+      calculate_mip_levels(environment_map.width, environment_map.height) - 1.0
+  }
+  brdf_lut: ^ImageBuffer
+  self.brdf_lut, brdf_lut = create_texture_from_data(
+    #load("assets/lut_ggx.png"),
+  ) or_return
+  self.ibl_intensity = 1.0 // Default IBL intensity
+
   log.info("Ambient pipeline initialized successfully")
   return .SUCCESS
 }
@@ -247,4 +268,7 @@ ambient_deinit :: proc(self: ^RendererAmbient) {
   self.pipeline = 0
   vk.DestroyPipelineLayout(g_device, self.pipeline_layout, nil)
   self.pipeline_layout = 0
+  // Clean up environment resources
+  resource.free(&g_image_2d_buffers, self.environment_map, image_buffer_deinit)
+  resource.free(&g_image_2d_buffers, self.brdf_lut, image_buffer_deinit)
 }

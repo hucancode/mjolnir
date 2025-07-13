@@ -200,7 +200,7 @@ Engine :: struct {
   depth_prepass:               RendererDepthPrepass,
   gbuffer:                     RendererGBuffer,
   ambient:                     RendererAmbient,
-  main:                        RendererLighting,
+  lighting:                    RendererLighting,
   particle:                    RendererParticle,
   transparent:                 RendererTransparent,
   postprocess:                 RendererPostProcess,
@@ -362,7 +362,7 @@ init :: proc(
     raw_data(self.command_buffers[:]),
   ) or_return
   lighting_init(
-    &self.main,
+    &self.lighting,
     self.swapchain.extent.width,
     self.swapchain.extent.height,
     self.swapchain.format.format,
@@ -374,10 +374,7 @@ init :: proc(
     self.swapchain.extent.height,
     self.swapchain.format.format,
   ) or_return
-  self.ambient.environment_index = self.main.environment_map.index
-  self.ambient.brdf_lut_index = self.main.brdf_lut.index
-  self.ambient.environment_max_lod = self.main.environment_max_lod
-  self.ambient.ibl_intensity = self.main.ibl_intensity
+  // Environment resources will be moved to ambient pass
   gbuffer_init(
     &self.gbuffer,
     self.swapchain.extent.width,
@@ -731,7 +728,7 @@ deinit :: proc(self: ^Engine) {
   }
   ui_deinit(&self.ui)
   scene_deinit(&self.scene)
-  lighting_deinit(&self.main)
+  lighting_deinit(&self.lighting)
   ambient_deinit(&self.ambient)
   gbuffer_deinit(&self.gbuffer)
   shadow_deinit(&self.shadow)
@@ -785,7 +782,7 @@ recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
   // No need to update camera uniform descriptor sets with bindless cameras
 
   lighting_recreate_images(
-    &engine.main,
+    &engine.lighting,
     engine.swapchain.extent.width,
     engine.swapchain.extent.height,
     engine.swapchain.format.format,
@@ -1252,7 +1249,6 @@ render :: proc(self: ^Engine) -> vk.Result {
   current_camera_slot: u32 = 1 // Start from slot 1 (slot 0 is main camera)
   for light_info, i in self.lights[:self.active_light_count] {
     if !light_info.light_cast_shadow do continue
-
     // log.debugf("Processing shadow caster %d", i)
     switch light_info.light_kind {
     case .POINT:
@@ -1261,7 +1257,6 @@ render :: proc(self: ^Engine) -> vk.Result {
         log.errorf("Point light %d has invalid shadow map handle", i)
         continue
       }
-
       for face in 0 ..< 6 {
         camera_uniform := get_camera_uniform(
           light_info.cube_cameras[face].index,
@@ -1293,21 +1288,17 @@ render :: proc(self: ^Engine) -> vk.Result {
         shadow_end(command_buffer)
         current_camera_slot += 1
       }
-
     case .DIRECTIONAL:
     // TODO: Implement directional light shadows
-
     case .SPOT:
       if light_info.shadow_map.generation == 0 {
         log.errorf("Spot light %d has invalid shadow map handle", i)
         continue
       }
-
       camera_uniform := get_camera_uniform(light_info.camera.index)
       frustum := geometry.make_frustum(
         camera_uniform.projection * camera_uniform.view,
       )
-
       shadow_target := resource.get(g_render_targets, light_info.render_target)
       // Create render targets array for this spot light shadow camera
       spot_light_targets := [1]RenderTarget{shadow_target^}
@@ -1423,9 +1414,9 @@ render :: proc(self: ^Engine) -> vk.Result {
   ambient_render(&self.ambient, main_render_target, command_buffer)
   ambient_end(command_buffer)
   // Per-light additive pass
-  lighting_begin(&self.main, main_render_target, command_buffer)
+  lighting_begin(&self.lighting, main_render_target, command_buffer)
   lighting_render(
-    &self.main,
+    &self.lighting,
     self.lights[:self.active_light_count],
     main_render_target,
     command_buffer,
