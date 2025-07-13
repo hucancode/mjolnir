@@ -246,18 +246,3 @@ render_target_depth_texture :: proc(target: ^RenderTarget) -> Handle {
   return target.depth_textures[g_frame_index]
 }
 
-// Helper function to find camera slot in active render targets
-find_camera_slot :: proc(
-  camera_handle: resource.Handle,
-  active_render_targets: []RenderTarget,
-) -> (
-  slot: u32,
-  found: bool,
-) {
-  for target, i in active_render_targets {
-    if target.camera.index == camera_handle.index {
-      return u32(i), true
-    }
-  }
-  return 0, false
-}

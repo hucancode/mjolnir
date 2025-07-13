@@ -605,12 +605,6 @@ custom_render :: proc(engine: ^mjolnir.Engine, command_buffer: vk.CommandBuffer)
   frustum := geometry.make_frustum(
     camera_uniform.projection * camera_uniform.view,
   )
-
-  log.debugf("Portal camera position: %v", camera_uniform.camera_position)
-  log.debugf("Portal camera view matrix: %v", camera_uniform.view[3])
-
-  // Image transitions are now handled automatically by gbuffer_begin/end
-
   portal_render_input := generate_render_input(engine, frustum, portal_render_target.camera)
   // Render G-buffer pass with self-managed depth
   gbuffer_begin(portal_render_target, command_buffer, self_manage_depth = true)
@@ -621,15 +615,13 @@ custom_render :: proc(engine: ^mjolnir.Engine, command_buffer: vk.CommandBuffer)
     command_buffer,
   )
   gbuffer_end(portal_render_target, command_buffer)
-  // Transition to shader read is now handled by gbuffer_end
-
   // Update portal material to use the rendered texture (from current frame)
   if portal_material := resource.get(g_materials, portal_material_handle);
      portal_material != nil {
     old_texture := portal_material.albedo
     new_texture := render_target_albedo_texture(portal_render_target)
     portal_material.albedo = new_texture
-    log.infof("Portal material updated: old_texture=%v, new_texture=%v", old_texture, new_texture)
+    // log.infof("Portal material updated: old_texture=%v, new_texture=%v", old_texture, new_texture)
   } else {
     log.errorf("Portal material not found!")
   }

@@ -213,13 +213,13 @@ Engine :: struct {
   shadow_maps:                 [MAX_FRAMES_IN_FLIGHT][MAX_SHADOW_MAPS]Handle,
   cube_shadow_maps:            [MAX_FRAMES_IN_FLIGHT][MAX_SHADOW_MAPS]Handle,
   // Persistent shadow render targets
-  shadow_render_targets:       [MAX_FRAMES_IN_FLIGHT][MAX_SHADOW_MAPS]Handle,
-  cube_shadow_render_targets:  [MAX_FRAMES_IN_FLIGHT][MAX_SHADOW_MAPS][6]Handle,
+  shadow_render_targets:       [MAX_SHADOW_MAPS]Handle,
+  cube_shadow_render_targets:  [MAX_SHADOW_MAPS][6]Handle,
   // Light management with pre-allocated pools
   lights:                      [256]LightInfo, // Pre-allocated light pool
   active_light_count:          u32, // Number of currently active lights
   // Current frame's active render targets (for custom render procs to use correct visibility data)
-  frame_active_render_targets: []RenderTarget,
+  frame_active_render_targets: [dynamic]Handle,
 }
 
 get_window_dpi :: proc(window: glfw.WindowHandle) -> f32 {
@@ -247,35 +247,37 @@ engine_init_shadow_maps :: proc(engine: ^Engine) -> vk.Result {
         .D32_SFLOAT,
         {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
       )
-
-      // Create persistent render targets for spot/directional lights
-      render_target: ^RenderTarget
-      engine.shadow_render_targets[f][i], render_target = resource.alloc(
-        &g_render_targets,
-      )
-      render_target.extent = {SHADOW_MAP_SIZE, SHADOW_MAP_SIZE}
-      // Set depth texture for all frames to the same shadow map for this frame
-      for frame_idx in 0 ..< MAX_FRAMES_IN_FLIGHT {
-        render_target.depth_textures[frame_idx] = engine.shadow_maps[f][i]
-      }
-      render_target.owns_depth_texture = false
-
-      // Create persistent render targets for point lights (6 cube faces)
-      for face in 0 ..< 6 {
-        cube_render_target: ^RenderTarget
-        engine.cube_shadow_render_targets[f][i][face], cube_render_target =
-          resource.alloc(&g_render_targets)
-        cube_render_target.extent = {SHADOW_MAP_SIZE, SHADOW_MAP_SIZE}
-        // Set depth texture for all frames to the same cube shadow map for this frame
-        for frame_idx in 0 ..< MAX_FRAMES_IN_FLIGHT {
-          cube_render_target.depth_textures[frame_idx] =
-            engine.cube_shadow_maps[f][i]
-        }
-        cube_render_target.owns_depth_texture = false
-      }
     }
     log.debugf("Created new 2D shadow maps %v", engine.shadow_maps[f])
     log.debugf("Created new cube shadow maps %v", engine.cube_shadow_maps[f])
+  }
+
+  for i in 0 ..< MAX_SHADOW_MAPS {
+    // Create persistent render targets for spot/directional lights
+    render_target: ^RenderTarget
+    engine.shadow_render_targets[i], render_target = resource.alloc(
+      &g_render_targets,
+    )
+    render_target.extent = {SHADOW_MAP_SIZE, SHADOW_MAP_SIZE}
+    // Set depth texture for all frames to the appropriate shadow map
+    for frame_idx in 0 ..< MAX_FRAMES_IN_FLIGHT {
+      render_target.depth_textures[frame_idx] = engine.shadow_maps[frame_idx][i]
+    }
+    render_target.owns_depth_texture = false
+
+    // Create persistent render targets for point lights (6 cube faces)
+    for face in 0 ..< 6 {
+      cube_render_target: ^RenderTarget
+      engine.cube_shadow_render_targets[i][face], cube_render_target =
+        resource.alloc(&g_render_targets)
+      cube_render_target.extent = {SHADOW_MAP_SIZE, SHADOW_MAP_SIZE}
+      // Set depth texture for all frames to the appropriate cube shadow map
+      for frame_idx in 0 ..< MAX_FRAMES_IN_FLIGHT {
+        cube_render_target.depth_textures[frame_idx] =
+          engine.cube_shadow_maps[frame_idx][i]
+      }
+      cube_render_target.owns_depth_texture = false
+    }
   }
   return .SUCCESS
 }
@@ -333,6 +335,9 @@ init :: proc(
   self.last_update_timestamp = self.start_timestamp
   scene_init(&self.scene)
   swapchain_init(&self.swapchain, self.window) or_return
+
+  // Initialize frame active render targets
+  self.frame_active_render_targets = make([dynamic]Handle, 0)
 
   // Initialize engine shadow map pools
   engine_init_shadow_maps(self) or_return
@@ -609,6 +614,7 @@ get_main_camera :: proc(engine: ^Engine) -> ^geometry.Camera {
   return resource.get(g_cameras, main_render_target.camera)
 }
 
+
 update_force_fields :: proc(self: ^Engine) {
   params := data_buffer_get(&self.particle.params_buffer)
   params.forcefield_count = 0
@@ -714,18 +720,23 @@ deinit :: proc(self: ^Engine) {
     )
   }
 
-  for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
-    // Clean up persistent shadow render targets
-    for j in 0 ..< MAX_SHADOW_MAPS {
-      resource.free(&g_render_targets, self.shadow_render_targets[i][j])
-      for face in 0 ..< 6 {
-        resource.free(
-          &g_render_targets,
-          self.cube_shadow_render_targets[i][j][face],
-        )
-      }
+  // Clean up persistent shadow render targets
+  for j in 0 ..< MAX_SHADOW_MAPS {
+    resource.free(&g_render_targets, self.shadow_render_targets[j])
+    for face in 0 ..< 6 {
+      resource.free(
+        &g_render_targets,
+        self.cube_shadow_render_targets[j][face],
+      )
     }
   }
+
+  for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
+  }
+
+  // Clean up frame active render targets
+  delete(self.frame_active_render_targets)
+
   ui_deinit(&self.ui)
   scene_deinit(&self.scene)
   lighting_deinit(&self.lighting)
@@ -810,18 +821,31 @@ generate_render_input :: proc(
   self: ^Engine,
   frustum: geometry.Frustum,
   camera_handle: resource.Handle,
-  active_render_targets: []RenderTarget = {},
   shadow_pass: bool = false,
 ) -> (
   ret: RenderInput,
 ) {
-  // Use frame active render targets by default, or provided targets for shadow passes
-  targets :=
-    active_render_targets if len(active_render_targets) > 0 else self.frame_active_render_targets
+  // Convert frame active render target handles to render targets for consistent camera slot mapping
+  targets := make([dynamic]RenderTarget, 0, context.temp_allocator)
+  for handle in self.frame_active_render_targets {
+    if target := resource.get(g_render_targets, handle); target != nil {
+      append(&targets, target^)
+    }
+  }
   ret.batches = make(
     map[BatchKey][dynamic]BatchData,
     allocator = context.temp_allocator,
   )
+  // Find the correct camera slot for this camera handle
+  camera_slot: u32 = 0
+  camera_slot_found: bool = false
+  for target, i in targets {
+    if target.camera.index == camera_handle.index {
+      camera_slot = u32(i)
+      camera_slot_found = true
+      break
+    }
+  }
   visible_count: u32 = 0
   total_count: u32 = 0
   for &entry, entry_index in self.scene.nodes.entries do if entry.active {
@@ -839,9 +863,7 @@ generate_render_input :: proc(
       // Use GPU culling results if available, otherwise fall back to CPU culling
       visible := true
       when USE_GPU_CULLING {
-        // Find the correct camera slot for this camera handle
-        camera_slot, slot_found := find_camera_slot(camera_handle, targets)
-        if slot_found {
+        if camera_slot_found {
           visible = is_node_visible(&self.visibility_culler, camera_slot, u32(entry_index))
         } else {
           // Fall back to CPU culling if camera slot not found
@@ -881,6 +903,9 @@ generate_render_input :: proc(
       append(&batch_data.nodes, node)
     }
   }
+  
+  log.infof("generate_render_input: camera_slot=%d found=%v, visible=%d/%d objects", 
+            camera_slot, camera_slot_found, visible_count, total_count)
   return
 }
 
@@ -969,7 +994,7 @@ render :: proc(self: ^Engine) -> vk.Result {
         cube_shadow_map_count += 1
 
         // Use persistent render targets and create temporary cameras
-        light_info.cube_render_targets = self.cube_shadow_render_targets[g_frame_index][cube_shadow_map_count - 1]
+        light_info.cube_render_targets = self.cube_shadow_render_targets[cube_shadow_map_count - 1]
 
         @(static) face_dirs := [6][3]f32 {
           {1, 0, 0}, // +X (Right)
@@ -1048,7 +1073,7 @@ render :: proc(self: ^Engine) -> vk.Result {
         shadow_map_count += 1
 
         // Use persistent render target and create temporary camera
-        light_info.render_target = self.shadow_render_targets[g_frame_index][shadow_map_count - 1]
+        light_info.render_target = self.shadow_render_targets[shadow_map_count - 1]
         render_target := resource.get(g_render_targets, light_info.render_target)
 
         // Allocate camera for spot light
@@ -1079,12 +1104,11 @@ render :: proc(self: ^Engine) -> vk.Result {
   ) or_return
   when USE_GPU_CULLING {
     // Collect all active render targets for multi-camera culling
-    active_render_targets := make(
-      [dynamic]RenderTarget,
-      0,
-      context.temp_allocator,
-    )
-    append(&active_render_targets, main_render_target^)
+    clear(&self.frame_active_render_targets)
+    
+    // Add main render target
+    append(&self.frame_active_render_targets, self.main_render_target)
+    log.infof("Added main render target: %v", self.main_render_target)
 
     // Add shadow map render targets from shadow-casting lights
     for light_info in self.lights[:self.active_light_count] {
@@ -1093,50 +1117,70 @@ render :: proc(self: ^Engine) -> vk.Result {
       switch light_info.light_kind {
       case .POINT:
         for target_handle in light_info.cube_render_targets {
-          if target := resource.get(g_render_targets, target_handle);
-             target != nil {
-            append(&active_render_targets, target^)
+          if resource.get(g_render_targets, target_handle) != nil {
+            append(&self.frame_active_render_targets, target_handle)
           }
         }
       case .SPOT:
-        if target := resource.get(g_render_targets, light_info.render_target);
-           target != nil {
-          append(&active_render_targets, target^)
+        if resource.get(g_render_targets, light_info.render_target) != nil {
+          append(&self.frame_active_render_targets, light_info.render_target)
         }
       case .DIRECTIONAL:
       // TODO: Add when directional shadows are implemented
       }
     }
 
-    // Add all other active user render targets from global pool
-    for &entry in g_render_targets.entries {
+    // Add user-defined render targets (like portals)
+    // Look for render targets that aren't main or shadow targets
+    user_targets_added := 0
+    for &entry, i in g_render_targets.entries {
       if !entry.active do continue
-      target := &entry.item
-
-      // Skip if already added (main camera or shadow cameras)
-      already_added := false
-      for existing_target in active_render_targets {
-        if existing_target.camera.index == target.camera.index {
-          already_added = true
+      handle := Handle{entry.generation, u32(i)}
+      
+      // Skip if it's the main render target
+      if handle.index == self.main_render_target.index do continue
+      
+      // Skip if it's already added as a shadow render target
+      is_shadow_target := false
+      for existing_handle in self.frame_active_render_targets {
+        if handle.index == existing_handle.index {
+          is_shadow_target = true
           break
         }
       }
+      if is_shadow_target do continue
+      
+      // This must be a user-defined render target - add it
+      append(&self.frame_active_render_targets, handle)
+      user_targets_added += 1
+      log.infof("Added user render target: %v", handle)
+    }
+    log.infof("Added %d shadow targets, %d user targets", 
+              len(self.frame_active_render_targets) - 1 - user_targets_added, user_targets_added)
 
-      if !already_added {
-        append(&active_render_targets, target^)
+    // Convert handles to render targets for visibility culling
+    active_targets := make([dynamic]RenderTarget, 0, context.temp_allocator)
+    for handle in self.frame_active_render_targets {
+      if target := resource.get(g_render_targets, handle); target != nil {
+        append(&active_targets, target^)
       }
     }
 
-    // Store active render targets for custom render procs to use
-    self.frame_active_render_targets = active_render_targets[:]
+    log.infof("Visibility culling with %d render targets, %d cameras", 
+              len(active_targets), len(active_targets))
 
     // Update and perform GPU scene culling
     visibility_culler_update(
       &self.visibility_culler,
       &self.scene,
-      active_render_targets[:],
+      active_targets[:],
     )
     visibility_culler_execute(&self.visibility_culler, command_buffer)
+
+    // Log visibility results for main camera (slot 0)
+    disabled, visible, total := count_visible_objects(&self.visibility_culler, 0)
+    log.infof("Main camera visibility: %d visible / %d total (disabled: %d)", 
+              visible, total, disabled)
 
     // Memory barrier to ensure culling is complete before other operations
     visibility_buffer_barrier := vk.BufferMemoryBarrier {
@@ -1181,7 +1225,7 @@ render :: proc(self: ^Engine) -> vk.Result {
     // CPU culling mode - no visibility culler operations needed
     // Culling will be done per-object in generate_render_input using CPU frustum tests
     // Still need to provide an empty array for custom render procs
-    self.frame_active_render_targets = {}
+    clear(&self.frame_active_render_targets)
   }
 
   compute_particles(&self.particle, command_buffer, main_camera^)
@@ -1268,13 +1312,11 @@ render :: proc(self: ^Engine) -> vk.Result {
           g_render_targets,
           light_info.cube_render_targets[face],
         )
-        // Create render targets array for this cube face shadow camera
-        cube_face_targets := [1]RenderTarget{target^}
+        // Use frame active render targets for correct camera slot mapping
         shadow_render_input := generate_render_input(
           self,
           frustum,
           light_info.cube_cameras[face],
-          cube_face_targets[:],
           shadow_pass = true,
         )
         shadow_begin(target, command_buffer, u32(face))
@@ -1300,13 +1342,11 @@ render :: proc(self: ^Engine) -> vk.Result {
         camera_uniform.projection * camera_uniform.view,
       )
       shadow_target := resource.get(g_render_targets, light_info.render_target)
-      // Create render targets array for this spot light shadow camera
-      spot_light_targets := [1]RenderTarget{shadow_target^}
+      // Use frame active render targets for correct camera slot mapping
       shadow_render_input := generate_render_input(
         self,
         frustum,
         light_info.camera,
-        spot_light_targets[:],
         shadow_pass = true,
       )
       shadow_begin(shadow_target, command_buffer)
