@@ -594,12 +594,25 @@ custom_render :: proc(engine: ^mjolnir.Engine, command_buffer: vk.CommandBuffer)
   }
   log.debugf("Custom render called, portal target extent: %v", portal_render_target.extent)
 
-  // Update portal camera uniform
-  render_target_update_camera_uniform(portal_render_target)
-
-  // Get camera for frustum culling
+  // Animate portal camera - orbit around the scene center
   portal_camera := resource.get(g_cameras, portal_render_target.camera)
   if portal_camera == nil do return
+  
+  t := mjolnir.time_since_app_start(engine) * 0.3 // Slow orbit speed
+  radius: f32 = 12.0
+  height: f32 = 8.0
+  
+  // Calculate circular orbit position
+  camera_x := math.cos(t) * radius
+  camera_z := math.sin(t) * radius
+  camera_pos := [3]f32{camera_x, height, camera_z}
+  target := [3]f32{0, 0, 0} // Always look at scene center
+  
+  // Update camera position and orientation
+  geometry.camera_look_at(portal_camera, camera_pos, target, {0, 1, 0})
+  
+  // Update portal camera uniform
+  render_target_update_camera_uniform(portal_render_target)
 
   camera_uniform := get_camera_uniform(portal_render_target.camera.index)
   frustum := geometry.make_frustum(
