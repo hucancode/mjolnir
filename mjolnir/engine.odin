@@ -1350,6 +1350,24 @@ render :: proc(self: ^Engine) -> vk.Result {
     {},
     {.COLOR_ATTACHMENT_WRITE},
   )
+  // Get depth texture for transitions
+  render_target := &self.main_render_target
+  gbuffer_depth := resource.get(
+    g_image_2d_buffers,
+    render_target[g_frame_index].depth_texture,
+  )
+  // Transition depth texture to DEPTH_STENCIL_ATTACHMENT_OPTIMAL for depth prepass
+  transition_image(
+    command_buffer,
+    gbuffer_depth.image,
+    .UNDEFINED,
+    .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+    {.DEPTH},
+    {.TOP_OF_PIPE},
+    {.EARLY_FRAGMENT_TESTS},
+    {},
+    {.DEPTH_STENCIL_ATTACHMENT_WRITE},
+  )
   // log.debug("============ rendering depth pre-pass... =============")
   depth_input := generate_render_input(self, frustum, self.scene.main_camera)
   depth_prepass_begin(&self.main_render_target[g_frame_index], command_buffer)
@@ -1362,7 +1380,6 @@ render :: proc(self: ^Engine) -> vk.Result {
   depth_prepass_end(command_buffer)
   // log.debug("============ rendering G-buffer pass... =============")
   // Transition G-buffer images to COLOR_ATTACHMENT_OPTIMAL
-  render_target := &self.main_render_target
   gbuffer_position := resource.get(
     g_image_2d_buffers,
     render_target[g_frame_index].position_texture,
@@ -1422,6 +1439,18 @@ render :: proc(self: ^Engine) -> vk.Result {
     1,
     {.COLOR_ATTACHMENT_OUTPUT},
     {.FRAGMENT_SHADER},
+    {.SHADER_READ},
+  )
+  // Transition depth texture to SHADER_READ_ONLY_OPTIMAL for use in post-processing
+  transition_image(
+    command_buffer,
+    gbuffer_depth.image,
+    .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+    .SHADER_READ_ONLY_OPTIMAL,
+    {.DEPTH},
+    {.LATE_FRAGMENT_TESTS},
+    {.FRAGMENT_SHADER},
+    {.DEPTH_STENCIL_ATTACHMENT_WRITE},
     {.SHADER_READ},
   )
   // log.debug("============ rendering main pass... =============")
