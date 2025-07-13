@@ -52,7 +52,7 @@ transparent_init :: proc(
 create_transparent_pipelines :: proc(self: ^RendererTransparent) -> vk.Result {
   // Create all shader variants for transparent PBR materials
   depth_format: vk.Format = .D32_SFLOAT
-  color_format: vk.Format = .R8G8B8A8_UNORM
+  color_format: vk.Format = .B8G8R8A8_SRGB
   // Load shader modules at compile time
   vert_shader_code := #load("shader/transparent/vert.spv")
   vert_module := create_shader_module(vert_shader_code) or_return
@@ -236,7 +236,7 @@ create_transparent_pipelines :: proc(self: ^RendererTransparent) -> vk.Result {
 
 create_wireframe_pipelines :: proc(self: ^RendererTransparent) -> vk.Result {
   depth_format: vk.Format = .D32_SFLOAT
-  color_format: vk.Format = .R8G8B8A8_UNORM
+  color_format: vk.Format = .B8G8R8A8_SRGB
 
   // Load shader modules at compile time
   vert_shader_code := #load("shader/wireframe/vert.spv")
