@@ -95,7 +95,7 @@ gbuffer_init :: proc(
   depth_stencil := vk.PipelineDepthStencilStateCreateInfo {
     sType            = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
     depthTestEnable  = true,
-    depthWriteEnable = false,
+    depthWriteEnable = true,  // Changed to true to enable depth writes in gbuffer pass
     depthCompareOp   = .LESS_OR_EQUAL,
   }
   color_blend_attachments := [?]vk.PipelineColorBlendAttachmentState {
@@ -223,10 +223,11 @@ gbuffer_init :: proc(
 gbuffer_begin :: proc(
   render_target: ^RenderTarget,
   command_buffer: vk.CommandBuffer,
+  self_manage_depth: bool = false,
 ) {
   position_texture := resource.get(
     g_image_2d_buffers,
-    render_target.position_texture,
+    render_target_position_texture(render_target),
   )
   position_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
@@ -238,7 +239,7 @@ gbuffer_begin :: proc(
   }
   normal_texture := resource.get(
     g_image_2d_buffers,
-    render_target.normal_texture,
+    render_target_normal_texture(render_target),
   )
   normal_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
@@ -250,7 +251,7 @@ gbuffer_begin :: proc(
   }
   albedo_texture := resource.get(
     g_image_2d_buffers,
-    render_target.albedo_texture,
+    render_target_albedo_texture(render_target),
   )
   albedo_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
@@ -262,7 +263,7 @@ gbuffer_begin :: proc(
   }
   metallic_roughness_texture := resource.get(
     g_image_2d_buffers,
-    render_target.metallic_roughness_texture,
+    render_target_metallic_roughness_texture(render_target),
   )
   metallic_roughness_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
@@ -274,7 +275,7 @@ gbuffer_begin :: proc(
   }
   emissive_texture := resource.get(
     g_image_2d_buffers,
-    render_target.emissive_texture,
+    render_target_emissive_texture(render_target),
   )
   emissive_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
@@ -286,14 +287,15 @@ gbuffer_begin :: proc(
   }
   depth_texture := resource.get(
     g_image_2d_buffers,
-    render_target.depth_texture,
+    render_target_depth_texture(render_target),
   )
   depth_attachment := vk.RenderingAttachmentInfoKHR {
     sType       = .RENDERING_ATTACHMENT_INFO_KHR,
     imageView   = depth_texture.view,
     imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-    loadOp      = .LOAD,
+    loadOp      = self_manage_depth ? .CLEAR : .LOAD,
     storeOp     = .STORE,
+    clearValue  = {depthStencil = {depth = 1.0, stencil = 0}},
   }
   color_attachments := [?]vk.RenderingAttachmentInfoKHR {
     position_attachment,

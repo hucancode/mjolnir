@@ -239,10 +239,10 @@ lighting_recreate_images :: proc(
 
 lighting_begin :: proc(
   self: ^RendererLighting,
-  target: RenderTarget,
+  target: ^RenderTarget,
   command_buffer: vk.CommandBuffer,
 ) {
-  final_image := resource.get(g_image_2d_buffers, target.final_image)
+  final_image := resource.get(g_image_2d_buffers, render_target_final_image(target))
   color_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
     imageView = final_image.view,
@@ -251,7 +251,7 @@ lighting_begin :: proc(
     storeOp = .STORE,
     clearValue = {color = {float32 = BG_BLUE_GRAY}},
   }
-  depth_texture := resource.get(g_image_2d_buffers, target.depth_texture)
+  depth_texture := resource.get(g_image_2d_buffers, render_target_depth_texture(target))
   depth_attachment := vk.RenderingAttachmentInfoKHR {
     sType       = .RENDERING_ATTACHMENT_INFO_KHR,
     imageView   = depth_texture.view,
@@ -330,14 +330,14 @@ lighting_render :: proc(
 
     // Fill in the common G-buffer indices that are always the same
     light_info.scene_camera_idx = render_target.camera.index
-    light_info.gbuffer_position_index = render_target.position_texture.index
-    light_info.gbuffer_normal_index = render_target.normal_texture.index
-    light_info.gbuffer_albedo_index = render_target.albedo_texture.index
+    light_info.gbuffer_position_index = render_target_position_texture(render_target).index
+    light_info.gbuffer_normal_index = render_target_normal_texture(render_target).index
+    light_info.gbuffer_albedo_index = render_target_albedo_texture(render_target).index
     light_info.gbuffer_metallic_index =
-      render_target.metallic_roughness_texture.index
-    light_info.gbuffer_emissive_index = render_target.emissive_texture.index
-    light_info.gbuffer_depth_index = render_target.depth_texture.index
-    light_info.input_image_index = render_target.final_image.index
+      render_target_metallic_roughness_texture(render_target).index
+    light_info.gbuffer_emissive_index = render_target_emissive_texture(render_target).index
+    light_info.gbuffer_depth_index = render_target_depth_texture(render_target).index
+    light_info.input_image_index = render_target_final_image(render_target).index
 
     // Render based on light type
     switch light_info.light_kind {

@@ -9,6 +9,7 @@ import "mjolnir/geometry"
 import "mjolnir/resource"
 import glfw "vendor:glfw"
 import mu "vendor:microui"
+import vk "vendor:vulkan"
 
 LIGHT_COUNT :: 20
 ALL_SPOT_LIGHT :: false
@@ -20,6 +21,11 @@ hammer_handle: mjolnir.Handle
 engine: mjolnir.Engine
 forcefield_handle: mjolnir.Handle
 forcefield_node: ^mjolnir.Node
+
+// Portal render target and related data
+portal_render_target_handle: mjolnir.Handle
+portal_material_handle: mjolnir.Handle
+portal_quad_handle: mjolnir.Handle
 
 // Camera controllers
 orbit_controller: geometry.CameraController
@@ -33,11 +39,13 @@ main :: proc() {
   engine.update_proc = update
   engine.render2d_proc = render_2d
   engine.key_press_proc = on_key_pressed
+  engine.custom_render_proc = custom_render
   mjolnir.run(&engine, 1280, 720, "Mjolnir Odin")
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {
   using mjolnir, geometry
+  log.info("Setup function called!")
   goldstar_texture_handle, _, _ := mjolnir.create_texture_from_path(
     "assets/gold-star.png",
   )
@@ -176,18 +184,18 @@ setup :: proc(engine: ^mjolnir.Engine) {
     translate(&back_wall.transform, y = size, z = -size)
     rotate(&back_wall.transform, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
     scale(&back_wall.transform, size)
-    // Ceiling
-    _, ceiling := spawn(
-      &engine.scene,
-      MeshAttachment {
-        handle = ground_mesh_handle,
-        material = ground_mat_handle,
-        cast_shadow = true,
-      },
-    )
-    translate(&ceiling.transform, y = size)
-    rotate(&ceiling.transform, -math.PI, linalg.VECTOR3F32_X_AXIS)
-    scale(&ceiling.transform, size)
+    // // Ceiling
+    // _, ceiling := spawn(
+    //   &engine.scene,
+    //   MeshAttachment {
+    //     handle = ground_mesh_handle,
+    //     material = ground_mat_handle,
+    //     cast_shadow = true,
+    //   },
+    // )
+    // translate(&ceiling.transform, y = size)
+    // rotate(&ceiling.transform, -math.PI, linalg.VECTOR3F32_X_AXIS)
+    // scale(&ceiling.transform, size)
   }
   if true {
     log.info("loading GLTF...")
@@ -405,6 +413,50 @@ setup :: proc(engine: ^mjolnir.Engine) {
     geometry.camera_controller_sync(current_controller, main_camera)
   }
 
+  // Portal setup
+  if true {
+    log.info("Setting up portal...")
+
+    // Create portal render target via global pool
+    portal_render_target: ^mjolnir.RenderTarget
+    portal_render_target_handle, portal_render_target = resource.alloc(&mjolnir.g_render_targets)
+    render_target_init(
+      portal_render_target,
+      512,  // Portal texture resolution
+      512,
+      .R8G8B8A8_UNORM,  // Color format
+      .D32_SFLOAT,      // Depth format
+    )
+    log.infof("Portal render target created: handle=%v, extent=%v", portal_render_target_handle, portal_render_target.extent)
+
+    // Configure the portal camera to look down from above
+    portal_camera := render_target_get_camera(portal_render_target)
+    geometry.camera_look_at(portal_camera, {0, 20, 0}, {0, 0, 0}, {0, 0, -1})
+
+    // Create portal material (albedo only)
+    portal_material: ^mjolnir.Material
+    portal_material_handle, portal_material, _ = create_material({.ALBEDO_TEXTURE})
+    // We'll set the texture handle after first render
+    log.infof("Portal material created with handle: %v", portal_material_handle)
+
+    // Create portal quad mesh and spawn it
+    portal_quad_geom := make_quad()
+    portal_quad_mesh_handle, _, _ := create_mesh(portal_quad_geom)
+    portal_quad_handle, portal_node := spawn(
+      &engine.scene,
+      MeshAttachment {
+        handle = portal_quad_mesh_handle,
+        material = portal_material_handle,
+        cast_shadow = false,
+      },
+    )
+
+    // Position the portal vertically
+    translate(&portal_node.transform, 0, 3, -5)
+    rotate(&portal_node.transform, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
+    scale(&portal_node.transform, 2.0)
+  }
+
   log.info("setup complete")
 }
 
@@ -529,5 +581,101 @@ on_key_pressed :: proc(engine: ^mjolnir.Engine, key, action, mods: int) {
   } else if key == glfw.KEY_X && action == glfw.PRESS {
     light := resource.get(engine.scene.nodes, light_handles[0])
     translate_by(&light.transform, y = -0.1)
+  }
+}
+
+custom_render :: proc(engine: ^mjolnir.Engine, command_buffer: vk.CommandBuffer) {
+  using mjolnir, geometry
+
+  // Portal rendering - render scene from top-down view
+  portal_render_target := resource.get(g_render_targets, portal_render_target_handle)
+  if portal_render_target == nil {
+    log.errorf("Portal render target not found!")
+    return
+  }
+  log.debugf("Custom render called, portal target extent: %v", portal_render_target.extent)
+
+  // Update portal camera uniform
+  render_target_update_camera_uniform(portal_render_target)
+
+  // Get camera for frustum culling
+  portal_camera := resource.get(g_cameras, portal_render_target.camera)
+  if portal_camera == nil do return
+
+  camera_uniform := get_camera_uniform(portal_render_target.camera.index)
+  frustum := geometry.make_frustum(
+    camera_uniform.projection * camera_uniform.view,
+  )
+
+  // Transition portal render target textures (using frame-aware accessors)
+  portal_albedo := resource.get(
+    g_image_2d_buffers,
+    render_target_albedo_texture(portal_render_target),
+  )
+  portal_depth := resource.get(
+    g_image_2d_buffers,
+    render_target_depth_texture(portal_render_target),
+  )
+
+  // Transition textures to attachment optimal
+  transition_image(
+    command_buffer,
+    portal_albedo.image,
+    .UNDEFINED,
+    .COLOR_ATTACHMENT_OPTIMAL,
+    {.COLOR},
+    {.TOP_OF_PIPE},
+    {.COLOR_ATTACHMENT_OUTPUT},
+    {},
+    {.COLOR_ATTACHMENT_WRITE},
+  )
+
+  transition_image(
+    command_buffer,
+    portal_depth.image,
+    .UNDEFINED,
+    .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+    {.DEPTH},
+    {.TOP_OF_PIPE},
+    {.EARLY_FRAGMENT_TESTS},
+    {},
+    {.DEPTH_STENCIL_ATTACHMENT_WRITE},
+  )
+
+  // Generate render input for portal camera view
+  portal_render_input := generate_render_input(engine, frustum, portal_render_target.camera)
+
+  // Render G-buffer pass with self-managed depth
+  gbuffer_begin(portal_render_target, command_buffer, self_manage_depth = true)
+  gbuffer_render(
+    &engine.gbuffer,
+    &portal_render_input,
+    portal_render_target,
+    command_buffer,
+  )
+  gbuffer_end(portal_render_target, command_buffer)
+
+  // Transition portal albedo texture to shader read for use as material texture
+  transition_image(
+    command_buffer,
+    portal_albedo.image,
+    .COLOR_ATTACHMENT_OPTIMAL,
+    .SHADER_READ_ONLY_OPTIMAL,
+    {.COLOR},
+    {.COLOR_ATTACHMENT_OUTPUT},
+    {.FRAGMENT_SHADER},
+    {.COLOR_ATTACHMENT_WRITE},
+    {.SHADER_READ},
+  )
+
+  // Update portal material to use the rendered texture (from current frame)
+  if portal_material := resource.get(g_materials, portal_material_handle);
+     portal_material != nil {
+    old_texture := portal_material.albedo
+    new_texture := render_target_albedo_texture(portal_render_target)
+    portal_material.albedo = new_texture
+    log.infof("Portal material updated: old_texture=%v, new_texture=%v", old_texture, new_texture)
+  } else {
+    log.errorf("Portal material not found!")
   }
 }

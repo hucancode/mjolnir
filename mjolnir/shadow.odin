@@ -167,7 +167,7 @@ shadow_deinit :: proc(self: ^RendererShadow) {
 }
 
 shadow_begin :: proc(
-  shadow_target: RenderTarget,
+  shadow_target: ^RenderTarget,
   command_buffer: vk.CommandBuffer,
   face: Maybe(u32) = nil,
 ) {
@@ -176,22 +176,22 @@ shadow_begin :: proc(
   if has_face {
     cube_texture := resource.get(
       g_image_cube_buffers,
-      shadow_target.depth_texture,
+      render_target_depth_texture(shadow_target),
     )
     if cube_texture == nil {
       log.errorf(
         "Invalid cube shadow map handle: %v",
-        shadow_target.depth_texture,
+        render_target_depth_texture(shadow_target),
       )
       return
     }
     depth_image_view = cube_texture.face_views[face_index]
   } else {
-    texture_2d := resource.get(g_image_2d_buffers, shadow_target.depth_texture)
+    texture_2d := resource.get(g_image_2d_buffers, render_target_depth_texture(shadow_target))
     if texture_2d == nil {
       log.errorf(
         "Invalid 2D shadow map handle: %v",
-        shadow_target.depth_texture,
+        render_target_depth_texture(shadow_target),
       )
       return
     }

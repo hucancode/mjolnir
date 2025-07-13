@@ -30,10 +30,10 @@ RendererAmbient :: struct {
 
 ambient_begin :: proc(
   self: ^RendererAmbient,
-  target: RenderTarget,
+  target: ^RenderTarget,
   command_buffer: vk.CommandBuffer,
 ) {
-  color_texture := resource.get(g_image_2d_buffers, target.final_image)
+  color_texture := resource.get(g_image_2d_buffers, render_target_final_image(target))
   color_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
     imageView = color_texture.view,
@@ -89,12 +89,12 @@ ambient_render :: proc(
     camera_index           = render_target.camera.index,
     environment_index      = self.environment_index,
     brdf_lut_index         = self.brdf_lut_index,
-    gbuffer_position_index = render_target.position_texture.index,
-    gbuffer_normal_index   = render_target.normal_texture.index,
-    gbuffer_albedo_index   = render_target.albedo_texture.index,
-    gbuffer_metallic_index = render_target.metallic_roughness_texture.index,
-    gbuffer_emissive_index = render_target.emissive_texture.index,
-    gbuffer_depth_index    = render_target.depth_texture.index,
+    gbuffer_position_index = render_target_position_texture(render_target).index,
+    gbuffer_normal_index   = render_target_normal_texture(render_target).index,
+    gbuffer_albedo_index   = render_target_albedo_texture(render_target).index,
+    gbuffer_metallic_index = render_target_metallic_roughness_texture(render_target).index,
+    gbuffer_emissive_index = render_target_emissive_texture(render_target).index,
+    gbuffer_depth_index    = render_target_depth_texture(render_target).index,
     environment_max_lod    = self.environment_max_lod,
     ibl_intensity          = self.ibl_intensity,
   }

@@ -642,7 +642,7 @@ postprocess_render :: proc(
     dst_image_idx: u32
 
     if is_first {
-      input_image_index = render_target.final_image.index // Use original input
+      input_image_index = render_target_final_image(render_target).index // Use original input
       dst_image_idx = 0 // Write to image[0]
     } else {
       prev_dst_image_idx := (i - 1) % 2
@@ -719,13 +719,13 @@ postprocess_render :: proc(
       nil,
     )
     base: BasePushConstant
-    base.gbuffer_position_index = render_target.position_texture.index
-    base.gbuffer_normal_index = render_target.normal_texture.index
-    base.gbuffer_albedo_index = render_target.albedo_texture.index
+    base.gbuffer_position_index = render_target_position_texture(render_target).index
+    base.gbuffer_normal_index = render_target_normal_texture(render_target).index
+    base.gbuffer_albedo_index = render_target_albedo_texture(render_target).index
     base.gbuffer_metallic_index =
-      render_target.metallic_roughness_texture.index
-    base.gbuffer_emissive_index = render_target.emissive_texture.index
-    base.gbuffer_depth_index = render_target.depth_texture.index
+      render_target_metallic_roughness_texture(render_target).index
+    base.gbuffer_emissive_index = render_target_emissive_texture(render_target).index
+    base.gbuffer_depth_index = render_target_depth_texture(render_target).index
     base.input_image_index = input_image_index
     // Create and push combined push constants based on effect type
     switch &e in effect {

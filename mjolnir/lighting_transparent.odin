@@ -430,13 +430,13 @@ transparent_deinit :: proc(self: ^RendererTransparent) {
 
 transparent_begin :: proc(
   self: ^RendererTransparent,
-  render_target: RenderTarget,
+  render_target: ^RenderTarget,
   command_buffer: vk.CommandBuffer,
 ) {
   // Setup color attachment - load existing content
   color_attachment := vk.RenderingAttachmentInfoKHR {
     sType       = .RENDERING_ATTACHMENT_INFO_KHR,
-    imageView   = resource.get(g_image_2d_buffers, render_target.final_image).view,
+    imageView   = resource.get(g_image_2d_buffers, render_target_final_image(render_target)).view,
     imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
     loadOp      = .LOAD,
     storeOp     = .STORE,
@@ -444,7 +444,7 @@ transparent_begin :: proc(
   // Setup depth attachment - load existing depth buffer
   depth_attachment := vk.RenderingAttachmentInfoKHR {
     sType       = .RENDERING_ATTACHMENT_INFO_KHR,
-    imageView   = resource.get(g_image_2d_buffers, render_target.depth_texture).view,
+    imageView   = resource.get(g_image_2d_buffers, render_target_depth_texture(render_target)).view,
     imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
     loadOp      = .LOAD,
     storeOp     = .STORE,
@@ -477,7 +477,7 @@ transparent_begin :: proc(
 transparent_render :: proc(
   self: ^RendererTransparent,
   render_input: RenderInput,
-  render_target: RenderTarget,
+  render_target: ^RenderTarget,
   command_buffer: vk.CommandBuffer,
 ) {
   descriptor_sets := [?]vk.DescriptorSet {

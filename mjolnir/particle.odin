@@ -940,7 +940,7 @@ particle_init_render_pipeline :: proc(
 particle_begin :: proc(
   self: ^RendererParticle,
   command_buffer: vk.CommandBuffer,
-  render_target: RenderTarget,
+  render_target: ^RenderTarget,
 ) {
   // Memory barrier to ensure compute results are visible before rendering
   barrier := vk.BufferMemoryBarrier {
@@ -966,14 +966,14 @@ particle_begin :: proc(
   )
   color_attachment := vk.RenderingAttachmentInfoKHR {
     sType       = .RENDERING_ATTACHMENT_INFO_KHR,
-    imageView   = resource.get(g_image_2d_buffers, render_target.final_image).view,
+    imageView   = resource.get(g_image_2d_buffers, render_target_final_image(render_target)).view,
     imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
     loadOp      = .LOAD, // preserve previous contents
     storeOp     = .STORE,
   }
   depth_attachment := vk.RenderingAttachmentInfoKHR {
     sType       = .RENDERING_ATTACHMENT_INFO_KHR,
-    imageView   = resource.get(g_image_2d_buffers, render_target.depth_texture).view,
+    imageView   = resource.get(g_image_2d_buffers, render_target_depth_texture(render_target)).view,
     imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
     loadOp      = .LOAD,
     storeOp     = .STORE,

@@ -74,7 +74,7 @@ depth_prepass_begin :: proc(
 ) {
   depth_texture := resource.get(
     g_image_2d_buffers,
-    render_target.depth_texture,
+    render_target_depth_texture(render_target),
   )
   depth_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
