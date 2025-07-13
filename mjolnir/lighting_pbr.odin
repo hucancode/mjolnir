@@ -25,28 +25,6 @@ RendererLighting :: struct {
   cone_mesh:                Handle,
   fullscreen_triangle_mesh: Handle,
 }
-// Push constant struct for lighting pass (matches shader/lighting/shader.frag)
-// 128 byte push constant budget
-LightPushConstant :: struct {
-  scene_camera_idx:       u32,
-  light_camera_idx:       u32, // for shadow mapping
-  shadow_map_id:          u32, // 4 bytes
-  light_kind:             LightKind, // 4 bytes
-  light_color:            [3]f32, // 12 bytes
-  light_angle:            f32, // 4 bytes
-  light_position:         [3]f32,
-  light_radius:           f32, // 4 bytes
-  light_direction:        [3]f32,
-  light_cast_shadow:      b32,
-  gbuffer_position_index: u32,
-  gbuffer_normal_index:   u32,
-  gbuffer_albedo_index:   u32,
-  gbuffer_metallic_index: u32,
-  gbuffer_emissive_index: u32,
-  gbuffer_depth_index:    u32,
-  input_image_index:      u32, // For post-processing input
-}
-
 lighting_init :: proc(
   self: ^RendererLighting,
   width: u32,
@@ -322,7 +300,7 @@ lighting_begin :: proc(
 
 lighting_render :: proc(
   self: ^RendererLighting,
-  input: [dynamic]LightData,
+  input: []LightInfo,
   render_target: ^RenderTarget,
   command_buffer: vk.CommandBuffer,
 ) -> int {
@@ -347,101 +325,57 @@ lighting_render :: proc(
     vk.CmdDrawIndexed(command_buffer, mesh.indices_len, 1, 0, 0, 0)
   }
 
-  for light_data, light_id in input {
+  for &light_info, light_id in input {
     node_count += 1
-    #partial switch light in light_data {
-    case PointLightData:
-      // Bind regular pipeline with GREATER_OR_EQUAL depth test
-      vk.CmdBindPipeline(command_buffer, .GRAPHICS, self.lighting_pipeline)
 
-      // Get the first camera from the point light's render targets (all 6 have same position)
-      rt := resource.get(g_render_targets, light.render_targets[0])
-      light_push := LightPushConstant {
-        scene_camera_idx       = render_target.camera.index,
-        light_camera_idx       = rt.camera.index, // Use first cube face camera for position
-        shadow_map_id          = light.shadow_map.index,
-        light_kind             = LightKind.POINT,
-        light_color            = light.color.xyz,
-        light_position         = light.position.xyz,
-        light_radius           = light.radius,
-        light_cast_shadow      = light.shadow_map.generation != 0, // Check if shadow map is valid
-        gbuffer_position_index = render_target.position_texture.index,
-        gbuffer_normal_index   = render_target.normal_texture.index,
-        gbuffer_albedo_index   = render_target.albedo_texture.index,
-        gbuffer_metallic_index = render_target.metallic_roughness_texture.index,
-        gbuffer_emissive_index = render_target.emissive_texture.index,
-        gbuffer_depth_index    = render_target.depth_texture.index,
-        input_image_index      = render_target.final_image.index,
-      }
+    // Fill in the common G-buffer indices that are always the same
+    light_info.scene_camera_idx = render_target.camera.index
+    light_info.gbuffer_position_index = render_target.position_texture.index
+    light_info.gbuffer_normal_index = render_target.normal_texture.index
+    light_info.gbuffer_albedo_index = render_target.albedo_texture.index
+    light_info.gbuffer_metallic_index =
+      render_target.metallic_roughness_texture.index
+    light_info.gbuffer_emissive_index = render_target.emissive_texture.index
+    light_info.gbuffer_depth_index = render_target.depth_texture.index
+    light_info.input_image_index = render_target.final_image.index
+
+    // Render based on light type
+    switch light_info.light_kind {
+    case .POINT:
+      vk.CmdBindPipeline(command_buffer, .GRAPHICS, self.lighting_pipeline)
       vk.CmdPushConstants(
         command_buffer,
         self.lighting_pipeline_layout,
         {.VERTEX, .FRAGMENT},
         0,
         size_of(LightPushConstant),
-        &light_push,
+        &light_info.gpu_data,
       )
       bind_and_draw_mesh(self.sphere_mesh, command_buffer)
       rendered_count += 1
-    case DirectionalLightData:
-      // Bind regular pipeline with GREATER_OR_EQUAL depth test
-      vk.CmdBindPipeline(command_buffer, .GRAPHICS, self.lighting_pipeline)
 
-      light_push := LightPushConstant {
-        scene_camera_idx       = render_target.camera.index,
-        light_camera_idx       = 0, // TODO: pass correct camera id
-        light_kind             = LightKind.DIRECTIONAL,
-        light_color            = light.color.xyz,
-        light_direction        = light.direction.xyz,
-        gbuffer_position_index = render_target.position_texture.index,
-        gbuffer_normal_index   = render_target.normal_texture.index,
-        gbuffer_albedo_index   = render_target.albedo_texture.index,
-        gbuffer_metallic_index = render_target.metallic_roughness_texture.index,
-        gbuffer_emissive_index = render_target.emissive_texture.index,
-        gbuffer_depth_index    = render_target.depth_texture.index,
-        input_image_index      = render_target.final_image.index,
-      }
+    case .DIRECTIONAL:
+      vk.CmdBindPipeline(command_buffer, .GRAPHICS, self.lighting_pipeline)
       vk.CmdPushConstants(
         command_buffer,
         self.lighting_pipeline_layout,
         {.VERTEX, .FRAGMENT},
         0,
         size_of(LightPushConstant),
-        &light_push,
+        &light_info.gpu_data,
       )
       bind_and_draw_mesh(self.fullscreen_triangle_mesh, command_buffer)
       rendered_count += 1
-    case SpotLightData:
-      // Bind spot light pipeline with LESS_OR_EQUAL depth test
-      vk.CmdBindPipeline(command_buffer, .GRAPHICS, self.spot_light_pipeline)
 
-      rt := resource.get(g_render_targets, light.render_target)
-      light_push := LightPushConstant {
-        scene_camera_idx       = render_target.camera.index,
-        light_camera_idx       = rt.camera.index,
-        shadow_map_id          = light.shadow_map.index,
-        light_kind             = LightKind.SPOT,
-        light_color            = light.color.xyz,
-        light_angle            = light.angle,
-        light_position         = light.position.xyz,
-        light_radius           = light.radius,
-        light_direction        = light.direction.xyz,
-        light_cast_shadow      = light.shadow_map.generation != 0, // Check if shadow map is valid
-        gbuffer_position_index = render_target.position_texture.index,
-        gbuffer_normal_index   = render_target.normal_texture.index,
-        gbuffer_albedo_index   = render_target.albedo_texture.index,
-        gbuffer_metallic_index = render_target.metallic_roughness_texture.index,
-        gbuffer_emissive_index = render_target.emissive_texture.index,
-        gbuffer_depth_index    = render_target.depth_texture.index,
-        input_image_index      = render_target.final_image.index,
-      }
+    case .SPOT:
+      vk.CmdBindPipeline(command_buffer, .GRAPHICS, self.spot_light_pipeline)
       vk.CmdPushConstants(
         command_buffer,
         self.lighting_pipeline_layout,
         {.VERTEX, .FRAGMENT},
         0,
         size_of(LightPushConstant),
-        &light_push,
+        &light_info.gpu_data,
       )
       bind_and_draw_mesh(self.cone_mesh, command_buffer)
       rendered_count += 1

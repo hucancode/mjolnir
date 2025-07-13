@@ -64,7 +64,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     space: f32 = 2.1
     size: f32 = 0.3
     nx, ny, nz := 20, 2, 20
-    wall_x_pos: f32 = 7.5  // Left wall position from debug output
+    wall_x_pos: f32 = 7.5 // Left wall position from debug output
 
     for x in 1 ..< nx {
       for y in 1 ..< ny {
@@ -79,7 +79,11 @@ setup :: proc(engine: ^mjolnir.Engine) {
           //   log.debugf("Skipping object at x=%.2f (in front of wall at x=%.2f)", world_x, wall_x_pos)
           //   continue
           // }
-          log.debugf("Keeping object at x=%.2f (behind wall at x=%.2f)", world_x, wall_x_pos)
+          log.debugf(
+            "Keeping object at x=%.2f (behind wall at x=%.2f)",
+            world_x,
+            wall_x_pos,
+          )
 
           mat_handle, _ := create_material(
             metallic_value = f32(x - 1) / f32(nx - 1),
@@ -89,19 +93,28 @@ setup :: proc(engine: ^mjolnir.Engine) {
           if x % 3 == 0 {
             _, node = spawn(
               &engine.scene,
-              MeshAttachment{handle = cube_mesh_handle, material = mat_handle, cast_shadow = true,},
+              MeshAttachment {
+                handle = cube_mesh_handle,
+                material = mat_handle,
+                cast_shadow = true,
+              },
             )
           } else if x % 3 == 1 {
             _, node = spawn(
               &engine.scene,
-              MeshAttachment{handle = cone_mesh_handle, material = mat_handle, cast_shadow = true, },
+              MeshAttachment {
+                handle = cone_mesh_handle,
+                material = mat_handle,
+                cast_shadow = true,
+              },
             )
           } else {
             _, node = spawn(
               &engine.scene,
               MeshAttachment {
                 handle = sphere_mesh_handle,
-                material = mat_handle, cast_shadow = true,
+                material = mat_handle,
+                cast_shadow = true,
               },
             )
           }
@@ -147,10 +160,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
       },
     )
     log.infof("Right wall handle: %v", right_wall_handle)
-    translate(
-      &right_wall.transform,
-      x = -size,
-    )
+    translate(&right_wall.transform, x = -size)
     rotate(&right_wall.transform, -math.PI * 0.5, linalg.VECTOR3F32_Z_AXIS)
     scale(&right_wall.transform, size)
     // Back wall
@@ -163,11 +173,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
       },
     )
     log.infof("Back wall handle: %v", back_wall_handle)
-    translate(
-      &back_wall.transform,
-      y = size,
-      z = -size,
-    )
+    translate(&back_wall.transform, y = size, z = -size)
     rotate(&back_wall.transform, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
     scale(&back_wall.transform, size)
     // Ceiling
@@ -179,10 +185,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
         cast_shadow = true,
       },
     )
-    translate(
-      &ceiling.transform,
-      y = size,
-    )
+    translate(&ceiling.transform, y = size)
     rotate(&ceiling.transform, -math.PI, linalg.VECTOR3F32_X_AXIS)
     scale(&ceiling.transform, size)
   }
@@ -231,9 +234,9 @@ setup :: proc(engine: ^mjolnir.Engine) {
       light: ^Node
       should_make_spot_light := i % 2 != 0
       if ALL_SPOT_LIGHT {
-          should_make_spot_light = true
+        should_make_spot_light = true
       } else if ALL_POINT_LIGHT {
-          should_make_spot_light = false
+        should_make_spot_light = false
       }
       if should_make_spot_light {
         light_handles[i], light = spawn(
@@ -306,20 +309,20 @@ setup :: proc(engine: ^mjolnir.Engine) {
       &engine.scene,
       psys_handle1,
       EmitterAttachment {
-        emission_rate     = 7,
+        emission_rate = 7,
         particle_lifetime = 5.0,
-        position_spread   = 1.5,
-        initial_velocity  = {0, -0.1, 0, 0},
-        velocity_spread   = 0.1,
-        color_start       = {1, 1, 0, 1}, // Yellow particles
-        color_end         = {1, 0.5, 0, 0},
-        size_start        = 200.0,
-        size_end          = 100.0,
-        weight            = 0.1,
-        weight_spread     = 0.05,
-        texture_handle    = goldstar_texture_handle,
-        enabled           = true,
-        bounding_box      = geometry.Aabb{min = {-2, -2, -2}, max = {2, 2, 2}},
+        position_spread = 1.5,
+        initial_velocity = {0, -0.1, 0, 0},
+        velocity_spread = 0.1,
+        color_start = {1, 1, 0, 1}, // Yellow particles
+        color_end = {1, 0.5, 0, 0},
+        size_start = 200.0,
+        size_end = 100.0,
+        weight = 0.1,
+        weight_spread = 0.05,
+        texture_handle = goldstar_texture_handle,
+        enabled = true,
+        bounding_box = geometry.Aabb{min = {-2, -2, -2}, max = {2, 2, 2}},
       },
     )
     psys_handle2, _ := spawn_at(
@@ -335,20 +338,20 @@ setup :: proc(engine: ^mjolnir.Engine) {
       &engine.scene,
       psys_handle2,
       EmitterAttachment {
-        emission_rate     = 7,
+        emission_rate = 7,
         particle_lifetime = 3.0,
-        position_spread   = 0.3,
-        initial_velocity  = {0, 0.2, 0, 0},
-        velocity_spread   = 0.15,
-        color_start       = {0, 0, 1, 1}, // Blue particles
-        color_end         = {0, 1, 1, 0},
-        size_start        = 350.0,
-        size_end          = 175.0,
-        weight            = 0.1,
-        weight_spread     = 0.3,
-        texture_handle    = black_circle_texture_handle,
-        enabled           = true,
-        bounding_box      = geometry.Aabb{min = {-1, -1, -1}, max = {1, 1, 1}},
+        position_spread = 0.3,
+        initial_velocity = {0, 0.2, 0, 0},
+        velocity_spread = 0.15,
+        color_start = {0, 0, 1, 1}, // Blue particles
+        color_end = {0, 1, 1, 0},
+        size_start = 350.0,
+        size_end = 175.0,
+        weight = 0.1,
+        weight_spread = 0.3,
+        texture_handle = black_circle_texture_handle,
+        enabled = true,
+        bounding_box = geometry.Aabb{min = {-1, -1, -1}, max = {1, 1, 1}},
       },
     )
     // Create a force field that affects both particle systems
@@ -374,7 +377,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     geometry.scale(&forcefield_visual.transform, 0.2)
   }
   effect_add_fog(&engine.postprocess, {0.4, 0.0, 0.8}, 0.02, 5.0, 20.0)
-  effect_add_bloom(&engine.postprocess)
+  // effect_add_bloom(&engine.postprocess)
   effect_add_crosshatch(&engine.postprocess, {1280, 720})
   // effect_add_blur(&engine.postprocess, 18.0)
   // effect_add_tonemap(&engine.postprocess, 1.5, 1.3)
@@ -417,7 +420,10 @@ render_2d :: proc(engine: ^mjolnir.Engine, ctx: ^mu.Context) {
 
   if mu.window(ctx, "Shadow Debug", {350, 360, 300, 150}, {.NO_CLOSE}) {
     mu.label(ctx, "Shadow Map Information:")
-    mu.label(ctx, fmt.tprintf("Shadow Map Size: %dx%d", SHADOW_MAP_SIZE, SHADOW_MAP_SIZE))
+    mu.label(
+      ctx,
+      fmt.tprintf("Shadow Map Size: %dx%d", SHADOW_MAP_SIZE, SHADOW_MAP_SIZE),
+    )
     mu.label(ctx, fmt.tprintf("Max Shadow Maps: %d", MAX_SHADOW_MAPS))
     mu.text(ctx, "Check console for detailed")
     mu.text(ctx, "shadow rendering debug info")
@@ -430,7 +436,10 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
   // Handle camera controller switching with Tab key
   tab_pressed := glfw.GetKey(engine.window, glfw.KEY_TAB) == glfw.PRESS
   if tab_pressed && !tab_was_pressed {
-    main_camera_for_sync := resource.get(mjolnir.g_cameras, engine.scene.main_camera)
+    main_camera_for_sync := resource.get(
+      mjolnir.g_cameras,
+      engine.scene.main_camera,
+    )
     if current_controller == &orbit_controller {
       current_controller = &free_controller
       log.info("Switched to free camera")

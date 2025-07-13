@@ -233,7 +233,7 @@ shadow_begin :: proc(
 shadow_render :: proc(
   self: ^RendererShadow,
   render_input: RenderInput,
-  light_data: LightData,
+  light_info: LightInfo,
   shadow_target: RenderTarget,
   command_buffer: vk.CommandBuffer,
 ) {
