@@ -215,6 +215,8 @@ Engine :: struct {
   // Light management with pre-allocated pools
   lights:                     [256]LightInfo, // Pre-allocated light pool
   active_light_count:         u32, // Number of currently active lights
+  // Current frame's active render targets (for custom render procs to use correct visibility data)
+  frame_active_render_targets: []RenderTarget,
 }
 
 get_window_dpi :: proc(window: glfw.WindowHandle) -> f32 {
@@ -782,6 +784,7 @@ generate_render_input :: proc(
   self: ^Engine,
   frustum: geometry.Frustum,
   camera_handle: resource.Handle,
+  active_render_targets: []RenderTarget,
   shadow_pass: bool = false,
 ) -> (
   ret: RenderInput,
@@ -807,76 +810,15 @@ generate_render_input :: proc(
       // Use GPU culling results if available, otherwise fall back to CPU culling
       visible := true
       when USE_GPU_CULLING {
-        // For multi-camera culling, we need to check against slot 0 (main camera) for now
-        // Shadow rendering will use appropriate camera slots
-        visible = multi_camera_is_node_visible(&self.visibility_culler, 0, u32(entry_index))
-      } else {
-        world_aabb := geometry.aabb_transform(mesh.aabb, node.transform.world_matrix)
-        visible = geometry.frustum_test_aabb(frustum, world_aabb)
-      }
-      if !visible do continue
-      visible_count += 1
-      batch_key := BatchKey {
-        features      = material.features,
-        material_type = material.type,
-      }
-      batch_group, group_found := &ret.batches[batch_key]
-      if !group_found {
-        ret.batches[batch_key] = make([dynamic]BatchData, allocator = context.temp_allocator)
-        batch_group = &ret.batches[batch_key]
-      }
-      batch_data: ^BatchData
-      for &batch in batch_group {
-        if batch.material_handle == data.material {
-          batch_data = &batch
-          break
+        // Find the correct camera slot for this camera handle
+        camera_slot, slot_found := find_camera_slot(camera_handle, active_render_targets)
+        if slot_found {
+          visible = multi_camera_is_node_visible(&self.visibility_culler, camera_slot, u32(entry_index))
+        } else {
+          // Fall back to CPU culling if camera slot not found
+          world_aabb := geometry.aabb_transform(mesh.aabb, node.transform.world_matrix)
+          visible = geometry.frustum_test_aabb(frustum, world_aabb)
         }
-      }
-      if batch_data == nil {
-        new_batch := BatchData {
-          material_handle = data.material,
-          nodes           = make([dynamic]^Node, allocator = context.temp_allocator),
-        }
-        append(batch_group, new_batch)
-        batch_data = &batch_group[len(batch_group) - 1]
-      }
-      append(&batch_data.nodes, node)
-    }
-  }
-  return
-}
-
-// Generate render input for a specific camera slot (for shadow rendering)
-generate_render_input_camera_slot :: proc(
-  self: ^Engine,
-  frustum: geometry.Frustum,
-  camera_slot: u32,
-  shadow_pass: bool = false,
-) -> (
-  ret: RenderInput,
-) {
-  ret.batches = make(
-    map[BatchKey][dynamic]BatchData,
-    allocator = context.temp_allocator,
-  )
-  visible_count: u32 = 0
-  total_count: u32 = 0
-  for &entry, entry_index in self.scene.nodes.entries do if entry.active {
-    node := &entry.item
-    handle := Handle{entry.generation, u32(entry_index)}
-    #partial switch data in node.attachment {
-    case MeshAttachment:
-      // Skip nodes that don't cast shadows when rendering shadow pass
-      if shadow_pass && !data.cast_shadow do continue
-      mesh := resource.get(g_meshes, data.handle)
-      if mesh == nil do continue
-      material := resource.get(g_materials, data.material)
-      if material == nil do continue
-      total_count += 1
-      // Use GPU culling results if available, otherwise fall back to CPU culling
-      visible := true
-      when USE_GPU_CULLING {
-        visible = multi_camera_is_node_visible(&self.visibility_culler, camera_slot, u32(entry_index))
       } else {
         world_aabb := geometry.aabb_transform(mesh.aabb, node.transform.world_matrix)
         visible = geometry.frustum_test_aabb(frustum, world_aabb)
@@ -1137,6 +1079,28 @@ render :: proc(self: ^Engine) -> vk.Result {
       }
     }
 
+    // Add all other active user render targets from global pool
+    for &entry in g_render_targets.entries {
+      if !entry.active do continue
+      target := &entry.item
+
+      // Skip if already added (main camera or shadow cameras)
+      already_added := false
+      for existing_target in active_render_targets {
+        if existing_target.camera.index == target.camera.index {
+          already_added = true
+          break
+        }
+      }
+
+      if !already_added {
+        append(&active_render_targets, target^)
+      }
+    }
+
+    // Store active render targets for custom render procs to use
+    self.frame_active_render_targets = active_render_targets[:]
+
     // Update and perform multi-camera GPU scene culling
     visibility_culler_update_multi_camera(
       &self.visibility_culler,
@@ -1190,11 +1154,14 @@ render :: proc(self: ^Engine) -> vk.Result {
   } else {
     // CPU culling mode - no visibility culler operations needed
     // Culling will be done per-object in generate_render_input using CPU frustum tests
+    // Still need to provide an empty array for custom render procs
+    self.frame_active_render_targets = {}
   }
 
   compute_particles(&self.particle, command_buffer, main_camera^)
 
   // Call custom render proc if provided (for user-defined render targets)
+  // This happens AFTER visibility culling so portal cameras have fresh visibility data
   if self.custom_render_proc != nil {
     self.custom_render_proc(self, command_buffer)
   }
@@ -1273,25 +1240,18 @@ render :: proc(self: ^Engine) -> vk.Result {
         frustum := geometry.make_frustum(
           camera_uniform.projection * camera_uniform.view,
         )
-        shadow_render_input: RenderInput
-        when USE_GPU_CULLING {
-          shadow_render_input = generate_render_input_camera_slot(
-            self,
-            frustum,
-            current_camera_slot,
-            shadow_pass = true,
-          )
-        } else {
-          shadow_render_input = generate_render_input(
-            self,
-            frustum,
-            self.scene.main_camera,
-            shadow_pass = true,
-          )
-        }
         target := resource.get(
           g_render_targets,
           light_info.cube_render_targets[face],
+        )
+        // Create render targets array for this cube face shadow camera
+        cube_face_targets := [1]RenderTarget{target^}
+        shadow_render_input := generate_render_input(
+          self,
+          frustum,
+          light_info.cube_cameras[face],
+          cube_face_targets[:],
+          shadow_pass = true,
         )
         shadow_begin(target, command_buffer, u32(face))
         shadow_render(
@@ -1319,24 +1279,16 @@ render :: proc(self: ^Engine) -> vk.Result {
         camera_uniform.projection * camera_uniform.view,
       )
 
-      shadow_render_input: RenderInput
-      when USE_GPU_CULLING {
-        shadow_render_input = generate_render_input_camera_slot(
-          self,
-          frustum,
-          current_camera_slot,
-          shadow_pass = true,
-        )
-      } else {
-        shadow_render_input = generate_render_input(
-          self,
-          frustum,
-          self.scene.main_camera,
-          shadow_pass = true,
-        )
-      }
-
       shadow_target := resource.get(g_render_targets, light_info.render_target)
+      // Create render targets array for this spot light shadow camera
+      spot_light_targets := [1]RenderTarget{shadow_target^}
+      shadow_render_input := generate_render_input(
+        self,
+        frustum,
+        light_info.camera,
+        spot_light_targets[:],
+        shadow_pass = true,
+      )
       shadow_begin(shadow_target, command_buffer)
       shadow_render(
         &self.shadow,
@@ -1378,17 +1330,7 @@ render :: proc(self: ^Engine) -> vk.Result {
     g_image_2d_buffers,
     render_target_final_image(main_render_target),
   )
-  transition_image(
-    command_buffer,
-    final_image.image,
-    .UNDEFINED,
-    .COLOR_ATTACHMENT_OPTIMAL,
-    {.COLOR},
-    {.TOP_OF_PIPE},
-    {.COLOR_ATTACHMENT_OUTPUT},
-    {},
-    {.COLOR_ATTACHMENT_WRITE},
-  )
+  // Final image transition is now handled by gbuffer_begin
   // Get depth texture for transitions
   gbuffer_depth := resource.get(
     g_image_2d_buffers,
@@ -1407,7 +1349,9 @@ render :: proc(self: ^Engine) -> vk.Result {
     {.DEPTH_STENCIL_ATTACHMENT_WRITE},
   )
   // log.debug("============ rendering depth pre-pass... =============")
-  depth_input := generate_render_input(self, frustum, self.scene.main_camera)
+  // For depth prepass, we only need the main camera
+  main_camera_targets := [1]RenderTarget{main_render_target^}
+  depth_input := generate_render_input(self, frustum, self.scene.main_camera, main_camera_targets[:])
   depth_prepass_begin(main_render_target, command_buffer)
   depth_prepass_render(
     &self.depth_prepass,
@@ -1417,46 +1361,7 @@ render :: proc(self: ^Engine) -> vk.Result {
   )
   depth_prepass_end(command_buffer)
   // log.debug("============ rendering G-buffer pass... =============")
-  // Transition G-buffer images to COLOR_ATTACHMENT_OPTIMAL
-  gbuffer_position := resource.get(
-    g_image_2d_buffers,
-    render_target_position_texture(main_render_target),
-  )
-  gbuffer_normal := resource.get(
-    g_image_2d_buffers,
-    render_target_normal_texture(main_render_target),
-  )
-  gbuffer_albedo := resource.get(
-    g_image_2d_buffers,
-    render_target_albedo_texture(main_render_target),
-  )
-  gbuffer_metallic := resource.get(
-    g_image_2d_buffers,
-    render_target_metallic_roughness_texture(main_render_target),
-  )
-  gbuffer_emissive := resource.get(
-    g_image_2d_buffers,
-    render_target_emissive_texture(main_render_target),
-  )
-  gbuffer_images := [?]vk.Image {
-    gbuffer_position.image,
-    gbuffer_normal.image,
-    gbuffer_albedo.image,
-    gbuffer_metallic.image,
-    gbuffer_emissive.image,
-  }
-  // Batch transition all G-buffer images to COLOR_ATTACHMENT_OPTIMAL in a single API call
-  transition_images(
-    command_buffer,
-    gbuffer_images[:],
-    .UNDEFINED,
-    .COLOR_ATTACHMENT_OPTIMAL,
-    {.COLOR},
-    1,
-    {.TOP_OF_PIPE},
-    {.COLOR_ATTACHMENT_OUTPUT},
-    {.COLOR_ATTACHMENT_WRITE},
-  )
+  // G-buffer image transitions are now handled by gbuffer_begin/end
   gbuffer_input := depth_input
   gbuffer_begin(main_render_target, command_buffer)
   gbuffer_render(
@@ -1466,19 +1371,7 @@ render :: proc(self: ^Engine) -> vk.Result {
     command_buffer,
   )
   gbuffer_end(main_render_target, command_buffer)
-  // Transition G-buffer images to SHADER_READ_ONLY_OPTIMAL
-  // Batch transition all G-buffer images to SHADER_READ_ONLY_OPTIMAL in a single API call
-  transition_images(
-    command_buffer,
-    gbuffer_images[:],
-    .COLOR_ATTACHMENT_OPTIMAL,
-    .SHADER_READ_ONLY_OPTIMAL,
-    {.COLOR},
-    1,
-    {.COLOR_ATTACHMENT_OUTPUT},
-    {.FRAGMENT_SHADER},
-    {.SHADER_READ},
-  )
+  // G-buffer to shader read transition is now handled by gbuffer_end
   // Transition depth texture to SHADER_READ_ONLY_OPTIMAL for use in post-processing
   transition_image(
     command_buffer,

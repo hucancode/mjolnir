@@ -225,10 +225,73 @@ gbuffer_begin :: proc(
   command_buffer: vk.CommandBuffer,
   self_manage_depth: bool = false,
 ) {
+  // Transition all G-buffer textures to COLOR_ATTACHMENT_OPTIMAL
   position_texture := resource.get(
     g_image_2d_buffers,
     render_target_position_texture(render_target),
   )
+  normal_texture := resource.get(
+    g_image_2d_buffers,
+    render_target_normal_texture(render_target),
+  )
+  albedo_texture := resource.get(
+    g_image_2d_buffers,
+    render_target_albedo_texture(render_target),
+  )
+  metallic_roughness_texture := resource.get(
+    g_image_2d_buffers,
+    render_target_metallic_roughness_texture(render_target),
+  )
+  emissive_texture := resource.get(
+    g_image_2d_buffers,
+    render_target_emissive_texture(render_target),
+  )
+  final_texture := resource.get(
+    g_image_2d_buffers,
+    render_target_final_image(render_target),
+  )
+
+  // Collect all G-buffer images for batch transition
+  gbuffer_images := [?]vk.Image{
+    position_texture.image,
+    normal_texture.image,
+    albedo_texture.image,
+    metallic_roughness_texture.image,
+    emissive_texture.image,
+    final_texture.image,
+  }
+
+  // Batch transition all G-buffer images to COLOR_ATTACHMENT_OPTIMAL
+  transition_images(
+    command_buffer,
+    gbuffer_images[:],
+    .UNDEFINED,
+    .COLOR_ATTACHMENT_OPTIMAL,
+    {.COLOR},
+    1,
+    {.TOP_OF_PIPE},
+    {.COLOR_ATTACHMENT_OUTPUT},
+    {.COLOR_ATTACHMENT_WRITE},
+  )
+
+  // Transition depth if self-managing
+  if self_manage_depth {
+    depth_texture := resource.get(
+      g_image_2d_buffers,
+      render_target_depth_texture(render_target),
+    )
+    transition_image(
+      command_buffer,
+      depth_texture.image,
+      .UNDEFINED,
+      .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+      {.DEPTH},
+      {.TOP_OF_PIPE},
+      {.EARLY_FRAGMENT_TESTS},
+      {},
+      {.DEPTH_STENCIL_ATTACHMENT_WRITE},
+    )
+  }
   position_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
     imageView = position_texture.view,
@@ -237,10 +300,6 @@ gbuffer_begin :: proc(
     storeOp = .STORE,
     clearValue = {color = {float32 = {0.0, 0.0, 0.0, 0.0}}},
   }
-  normal_texture := resource.get(
-    g_image_2d_buffers,
-    render_target_normal_texture(render_target),
-  )
   normal_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
     imageView = normal_texture.view,
@@ -249,10 +308,6 @@ gbuffer_begin :: proc(
     storeOp = .STORE,
     clearValue = {color = {float32 = {0.0, 0.0, 0.0, 1.0}}},
   }
-  albedo_texture := resource.get(
-    g_image_2d_buffers,
-    render_target_albedo_texture(render_target),
-  )
   albedo_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
     imageView = albedo_texture.view,
@@ -261,10 +316,6 @@ gbuffer_begin :: proc(
     storeOp = .STORE,
     clearValue = {color = {float32 = {0.0, 0.0, 0.0, 1.0}}},
   }
-  metallic_roughness_texture := resource.get(
-    g_image_2d_buffers,
-    render_target_metallic_roughness_texture(render_target),
-  )
   metallic_roughness_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
     imageView = metallic_roughness_texture.view,
@@ -273,10 +324,6 @@ gbuffer_begin :: proc(
     storeOp = .STORE,
     clearValue = {color = {float32 = {0.0, 0.0, 0.0, 1.0}}},
   }
-  emissive_texture := resource.get(
-    g_image_2d_buffers,
-    render_target_emissive_texture(render_target),
-  )
   emissive_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
     imageView = emissive_texture.view,
@@ -333,6 +380,50 @@ gbuffer_end :: proc(
   command_buffer: vk.CommandBuffer,
 ) {
   vk.CmdEndRenderingKHR(command_buffer)
+
+  // Transition all G-buffer textures to SHADER_READ_ONLY_OPTIMAL for use by lighting
+  position_texture := resource.get(
+    g_image_2d_buffers,
+    render_target_position_texture(render_target),
+  )
+  normal_texture := resource.get(
+    g_image_2d_buffers,
+    render_target_normal_texture(render_target),
+  )
+  albedo_texture := resource.get(
+    g_image_2d_buffers,
+    render_target_albedo_texture(render_target),
+  )
+  metallic_roughness_texture := resource.get(
+    g_image_2d_buffers,
+    render_target_metallic_roughness_texture(render_target),
+  )
+  emissive_texture := resource.get(
+    g_image_2d_buffers,
+    render_target_emissive_texture(render_target),
+  )
+
+  // Collect G-buffer images for batch transition (excluding final image which stays as attachment)
+  gbuffer_images := [?]vk.Image{
+    position_texture.image,
+    normal_texture.image,
+    albedo_texture.image,
+    metallic_roughness_texture.image,
+    emissive_texture.image,
+  }
+
+  // Batch transition all G-buffer images to SHADER_READ_ONLY_OPTIMAL
+  transition_images(
+    command_buffer,
+    gbuffer_images[:],
+    .COLOR_ATTACHMENT_OPTIMAL,
+    .SHADER_READ_ONLY_OPTIMAL,
+    {.COLOR},
+    1,
+    {.COLOR_ATTACHMENT_OUTPUT},
+    {.FRAGMENT_SHADER},
+    {.SHADER_READ},
+  )
 }
 
 gbuffer_render :: proc(

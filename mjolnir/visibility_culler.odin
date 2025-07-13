@@ -7,7 +7,7 @@ import "resource"
 import vk "vendor:vulkan"
 
 MAX_CAMERA :: 128
-MAX_ACTIVE_CAMERAS :: 64
+MAX_ACTIVE_CAMERAS :: 128  // Increased to handle more shadow cameras + user cameras
 MAX_NODES_IN_SCENE :: 65536
 
 // Structure passed to GPU for culling

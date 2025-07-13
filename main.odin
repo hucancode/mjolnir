@@ -429,9 +429,10 @@ setup :: proc(engine: ^mjolnir.Engine) {
     )
     log.infof("Portal render target created: handle=%v, extent=%v", portal_render_target_handle, portal_render_target.extent)
 
-    // Configure the portal camera to look down from above
+    // Configure the portal camera to look down from above at a steep angle
     portal_camera := render_target_get_camera(portal_render_target)
-    geometry.camera_look_at(portal_camera, {0, 20, 0}, {0, 0, 0}, {0, 0, -1})
+    geometry.camera_look_at(portal_camera, {5, 15, 7}, {0, 0, 0}, {0, 1, 0})
+    log.infof("Portal camera configured: pos={10, 30, 10}, target={0, 0, 0}")
 
     // Create portal material (albedo only)
     portal_material: ^mjolnir.Material
@@ -607,43 +608,14 @@ custom_render :: proc(engine: ^mjolnir.Engine, command_buffer: vk.CommandBuffer)
     camera_uniform.projection * camera_uniform.view,
   )
 
-  // Transition portal render target textures (using frame-aware accessors)
-  portal_albedo := resource.get(
-    g_image_2d_buffers,
-    render_target_albedo_texture(portal_render_target),
-  )
-  portal_depth := resource.get(
-    g_image_2d_buffers,
-    render_target_depth_texture(portal_render_target),
-  )
+  log.debugf("Portal camera position: %v", camera_uniform.camera_position)
+  log.debugf("Portal camera view matrix: %v", camera_uniform.view[3])
 
-  // Transition textures to attachment optimal
-  transition_image(
-    command_buffer,
-    portal_albedo.image,
-    .UNDEFINED,
-    .COLOR_ATTACHMENT_OPTIMAL,
-    {.COLOR},
-    {.TOP_OF_PIPE},
-    {.COLOR_ATTACHMENT_OUTPUT},
-    {},
-    {.COLOR_ATTACHMENT_WRITE},
-  )
-
-  transition_image(
-    command_buffer,
-    portal_depth.image,
-    .UNDEFINED,
-    .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-    {.DEPTH},
-    {.TOP_OF_PIPE},
-    {.EARLY_FRAGMENT_TESTS},
-    {},
-    {.DEPTH_STENCIL_ATTACHMENT_WRITE},
-  )
+  // Image transitions are now handled automatically by gbuffer_begin/end
 
   // Generate render input for portal camera view
-  portal_render_input := generate_render_input(engine, frustum, portal_render_target.camera)
+  // Use the engine's active render targets array so find_camera_slot works correctly
+  portal_render_input := generate_render_input(engine, frustum, portal_render_target.camera, engine.frame_active_render_targets)
 
   // Render G-buffer pass with self-managed depth
   gbuffer_begin(portal_render_target, command_buffer, self_manage_depth = true)
@@ -654,19 +626,7 @@ custom_render :: proc(engine: ^mjolnir.Engine, command_buffer: vk.CommandBuffer)
     command_buffer,
   )
   gbuffer_end(portal_render_target, command_buffer)
-
-  // Transition portal albedo texture to shader read for use as material texture
-  transition_image(
-    command_buffer,
-    portal_albedo.image,
-    .COLOR_ATTACHMENT_OPTIMAL,
-    .SHADER_READ_ONLY_OPTIMAL,
-    {.COLOR},
-    {.COLOR_ATTACHMENT_OUTPUT},
-    {.FRAGMENT_SHADER},
-    {.COLOR_ATTACHMENT_WRITE},
-    {.SHADER_READ},
-  )
+  // Transition to shader read is now handled by gbuffer_end
 
   // Update portal material to use the rendered texture (from current frame)
   if portal_material := resource.get(g_materials, portal_material_handle);
