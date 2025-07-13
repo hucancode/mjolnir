@@ -240,28 +240,13 @@ SceneTraverseEntry :: struct {
 }
 
 Scene :: struct {
-  main_camera:     resource.Handle,
   root:            Handle,
   nodes:           resource.Pool(Node),
   traversal_stack: [dynamic]SceneTraverseEntry,
 }
 
 scene_init :: proc(self: ^Scene) {
-  // Create main camera
-  main_camera_handle, main_camera_ptr := resource.alloc(&g_cameras)
-  main_camera_ptr^ = geometry.make_camera_look_at(
-    {10, 5, 10}, // from
-    {0, 0, 0}, // to
-    math.PI * 0.5, // fov
-    16.0 / 9.0, // aspect_ratio
-    0.1, // near
-    50.0, // far
-  )
-  self.main_camera = main_camera_handle
-  log.infof(
-    "Initializing scene with main camera handle: %v",
-    main_camera_handle,
-  )
+  // Camera is now owned by the main render target, not the scene
   // log.infof("Initializing nodes pool... ")
   resource.pool_init(&self.nodes)
   root: ^Node

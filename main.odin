@@ -394,25 +394,27 @@ setup :: proc(engine: ^mjolnir.Engine) {
   // effect_add_outline(&engine.postprocess, 2.0, {1.0, 0.0, 0.0})
   // Initialize camera controllers
   geometry.setup_camera_controller_callbacks(engine.window)
+  main_camera := mjolnir.get_main_camera(engine)
   orbit_controller = geometry.camera_controller_orbit_init(
     engine.window,
-    {0, 0, 0},
-    5.0,
-    pitch = math.PI * 0.8,
+    {0, 0, 0},  // dummy target
+    1.0,        // dummy distance
+    0,          // dummy yaw
+    0,          // dummy pitch
   )
+
+  // Initialize free controller
   free_controller = geometry.camera_controller_free_init(
     engine.window,
     5.0,
     2.0,
   )
-  current_controller = &orbit_controller
 
-  // Sync orbit controller with current camera position to prevent jumps
-  main_camera := resource.get(mjolnir.g_cameras, engine.scene.main_camera)
   if main_camera != nil {
-    geometry.camera_controller_sync(current_controller, main_camera)
+    geometry.camera_controller_sync(&orbit_controller, main_camera)
+    geometry.camera_controller_sync(&free_controller, main_camera)
   }
-
+  current_controller = &orbit_controller
   // Portal setup
   if true {
     log.info("Setting up portal...")
@@ -489,10 +491,7 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
   // Handle camera controller switching with Tab key
   tab_pressed := glfw.GetKey(engine.window, glfw.KEY_TAB) == glfw.PRESS
   if tab_pressed && !tab_was_pressed {
-    main_camera_for_sync := resource.get(
-      mjolnir.g_cameras,
-      engine.scene.main_camera,
-    )
+    main_camera_for_sync := mjolnir.get_main_camera(engine)
     if current_controller == &orbit_controller {
       current_controller = &free_controller
       log.info("Switched to free camera")
@@ -507,8 +506,7 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
   }
   tab_was_pressed = tab_pressed
 
-  // Update camera controller
-  main_camera := resource.get(mjolnir.g_cameras, engine.scene.main_camera)
+  main_camera := mjolnir.get_main_camera(engine)
   if main_camera != nil {
     if current_controller == &orbit_controller {
       geometry.camera_controller_orbit_update(
@@ -613,10 +611,7 @@ custom_render :: proc(engine: ^mjolnir.Engine, command_buffer: vk.CommandBuffer)
 
   // Image transitions are now handled automatically by gbuffer_begin/end
 
-  // Generate render input for portal camera view
-  // Use the engine's active render targets array so find_camera_slot works correctly
-  portal_render_input := generate_render_input(engine, frustum, portal_render_target.camera, engine.frame_active_render_targets)
-
+  portal_render_input := generate_render_input(engine, frustum, portal_render_target.camera)
   // Render G-buffer pass with self-managed depth
   gbuffer_begin(portal_render_target, command_buffer, self_manage_depth = true)
   gbuffer_render(

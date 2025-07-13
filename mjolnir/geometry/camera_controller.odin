@@ -85,6 +85,9 @@ camera_controller_orbit_init :: proc(
   yaw := f32(0),
   pitch := f32(0),
 ) -> CameraController {
+  // Get current mouse position to prevent jump on first input
+  current_mouse_x, current_mouse_y := glfw.GetCursorPos(window)
+  
   return {
     type = .ORBIT,
     window = window,
@@ -100,7 +103,7 @@ camera_controller_orbit_init :: proc(
       zoom_speed = 2.0,
       rotate_speed = 2.0,
     },
-    last_mouse_pos = {0, 0},
+    last_mouse_pos = {current_mouse_x, current_mouse_y},
     mouse_delta = {0, 0},
     scroll_delta = 0,
     is_orbiting = false,
@@ -113,6 +116,9 @@ camera_controller_free_init :: proc(
   move_speed := f32(5.0),
   rotation_speed := f32(2.0),
 ) -> CameraController {
+  // Get current mouse position to prevent jump on first input
+  current_mouse_x, current_mouse_y := glfw.GetCursorPos(window)
+  
   return {
     type = .FREE,
     window = window,
@@ -122,7 +128,7 @@ camera_controller_free_init :: proc(
       boost_multiplier = 3.0,
       mouse_sensitivity = 0.002,
     },
-    last_mouse_pos = {0, 0},
+    last_mouse_pos = {current_mouse_x, current_mouse_y},
     mouse_delta = {0, 0},
     scroll_delta = 0,
     is_orbiting = false,
@@ -136,6 +142,9 @@ camera_controller_follow_init :: proc(
   offset: [3]f32,
   follow_speed := f32(5.0),
 ) -> CameraController {
+  // Get current mouse position to prevent jump on first input
+  current_mouse_x, current_mouse_y := glfw.GetCursorPos(window)
+  
   return {
     type = .FOLLOW,
     window = window,
@@ -145,7 +154,7 @@ camera_controller_follow_init :: proc(
       follow_speed = follow_speed,
       look_at_target = true,
     },
-    last_mouse_pos = {0, 0},
+    last_mouse_pos = {current_mouse_x, current_mouse_y},
     mouse_delta = {0, 0},
     scroll_delta = 0,
     is_orbiting = false,
@@ -298,7 +307,7 @@ camera_controller_orbit_sync :: proc(controller: ^CameraController, camera: ^Cam
     offset := camera.position - orbit.target
     orbit.distance = linalg.length(offset)
     
-    if orbit.distance > 0 {
+    if orbit.distance > 0.001 {
       // Calculate yaw (rotation around Y axis)
       orbit.yaw = math.atan2(offset.z, offset.x)
       
@@ -306,11 +315,16 @@ camera_controller_orbit_sync :: proc(controller: ^CameraController, camera: ^Cam
       horizontal_distance := math.sqrt(offset.x * offset.x + offset.z * offset.z)
       orbit.pitch = math.atan2(offset.y, horizontal_distance)
       
-      // Clamp pitch to valid range
+      // Clamp values to valid ranges
       orbit.pitch = clamp(orbit.pitch, orbit.min_pitch, orbit.max_pitch)
-      
-      // Ensure distance is within valid range
       orbit.distance = clamp(orbit.distance, orbit.min_distance, orbit.max_distance)
+      
+      // Immediately apply the synced state to the camera to ensure first frame is correct
+      x := orbit.distance * math.cos(orbit.pitch) * math.cos(orbit.yaw)
+      y := orbit.distance * math.sin(orbit.pitch)
+      z := orbit.distance * math.cos(orbit.pitch) * math.sin(orbit.yaw)
+      camera_position := orbit.target + [3]f32{x, y, z}
+      camera_look_at(camera, camera_position, orbit.target)
     }
   }
 }

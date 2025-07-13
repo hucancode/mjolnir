@@ -265,12 +265,15 @@ init_bone_matrix_allocator :: proc() -> vk.Result {
 }
 
 init_camera_buffer :: proc() -> vk.Result {
-  log.infof("Creating camera buffer with capacity %d cameras...", MAX_CAMERA)
+  log.infof(
+    "Creating camera buffer with capacity %d cameras...",
+    MAX_ACTIVE_CAMERAS,
+  )
 
   // Create camera buffer
   g_bindless_camera_buffer = create_host_visible_buffer(
     CameraUniform,
-    MAX_CAMERA,
+    MAX_ACTIVE_CAMERAS,
     {.STORAGE_BUFFER},
     nil,
   ) or_return
@@ -332,7 +335,7 @@ init_camera_buffer :: proc() -> vk.Result {
 
 // Get mutable reference to camera uniform in bindless buffer
 get_camera_uniform :: proc(camera_index: u32) -> ^CameraUniform {
-  if camera_index >= MAX_CAMERA {
+  if camera_index >= MAX_ACTIVE_CAMERAS {
     return nil
   }
   return data_buffer_get(&g_bindless_camera_buffer, camera_index)

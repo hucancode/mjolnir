@@ -47,7 +47,10 @@ MousePressProc :: #type proc(engine: ^Engine, key, action, mods: int)
 MouseDragProc :: #type proc(engine: ^Engine, delta, offset: [2]f64)
 MouseScrollProc :: #type proc(engine: ^Engine, offset: [2]f64)
 MouseMoveProc :: #type proc(engine: ^Engine, pos, delta: [2]f64)
-CustomRenderProc :: #type proc(engine: ^Engine, command_buffer: vk.CommandBuffer)
+CustomRenderProc :: #type proc(
+  engine: ^Engine,
+  command_buffer: vk.CommandBuffer,
+)
 
 PointLightData :: struct {
   views:          [6]matrix[4, 4]f32,
@@ -175,46 +178,46 @@ LightInfo :: struct {
 }
 
 Engine :: struct {
-  window:                     glfw.WindowHandle,
-  swapchain:                  Swapchain,
-  scene:                      Scene,
-  last_frame_timestamp:       time.Time,
-  last_update_timestamp:      time.Time,
-  start_timestamp:            time.Time,
-  input:                      InputState,
-  setup_proc:                 SetupProc,
-  update_proc:                UpdateProc,
-  render2d_proc:              Render2DProc,
-  key_press_proc:             KeyInputProc,
-  mouse_press_proc:           MousePressProc,
-  mouse_drag_proc:            MouseDragProc,
-  mouse_move_proc:            MouseMoveProc,
-  mouse_scroll_proc:          MouseScrollProc,
-  custom_render_proc:         CustomRenderProc,
-  render_error_count:         u32,
-  visibility_culler:          VisibilityCuller,
-  shadow:                     RendererShadow,
-  depth_prepass:              RendererDepthPrepass,
-  gbuffer:                    RendererGBuffer,
-  ambient:                    RendererAmbient,
-  main:                       RendererLighting,
-  particle:                   RendererParticle,
-  transparent:                RendererTransparent,
-  postprocess:                RendererPostProcess,
-  ui:                         RendererUI,
-  command_buffers:            [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
-  cursor_pos:                 [2]i32,
+  window:                      glfw.WindowHandle,
+  swapchain:                   Swapchain,
+  scene:                       Scene,
+  last_frame_timestamp:        time.Time,
+  last_update_timestamp:       time.Time,
+  start_timestamp:             time.Time,
+  input:                       InputState,
+  setup_proc:                  SetupProc,
+  update_proc:                 UpdateProc,
+  render2d_proc:               Render2DProc,
+  key_press_proc:              KeyInputProc,
+  mouse_press_proc:            MousePressProc,
+  mouse_drag_proc:             MouseDragProc,
+  mouse_move_proc:             MouseMoveProc,
+  mouse_scroll_proc:           MouseScrollProc,
+  custom_render_proc:          CustomRenderProc,
+  render_error_count:          u32,
+  visibility_culler:           VisibilityCuller,
+  shadow:                      RendererShadow,
+  depth_prepass:               RendererDepthPrepass,
+  gbuffer:                     RendererGBuffer,
+  ambient:                     RendererAmbient,
+  main:                        RendererLighting,
+  particle:                    RendererParticle,
+  transparent:                 RendererTransparent,
+  postprocess:                 RendererPostProcess,
+  ui:                          RendererUI,
+  command_buffers:             [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
+  cursor_pos:                  [2]i32,
   // Main render target for primary rendering
-  main_render_target:         Handle,
+  main_render_target:          Handle,
   // Engine-managed shadow maps
-  shadow_maps:                [MAX_FRAMES_IN_FLIGHT][MAX_SHADOW_MAPS]Handle,
-  cube_shadow_maps:           [MAX_FRAMES_IN_FLIGHT][MAX_SHADOW_MAPS]Handle,
+  shadow_maps:                 [MAX_FRAMES_IN_FLIGHT][MAX_SHADOW_MAPS]Handle,
+  cube_shadow_maps:            [MAX_FRAMES_IN_FLIGHT][MAX_SHADOW_MAPS]Handle,
   // Persistent shadow render targets
-  shadow_render_targets:      [MAX_FRAMES_IN_FLIGHT][MAX_SHADOW_MAPS]Handle,
-  cube_shadow_render_targets: [MAX_FRAMES_IN_FLIGHT][MAX_SHADOW_MAPS][6]Handle,
+  shadow_render_targets:       [MAX_FRAMES_IN_FLIGHT][MAX_SHADOW_MAPS]Handle,
+  cube_shadow_render_targets:  [MAX_FRAMES_IN_FLIGHT][MAX_SHADOW_MAPS][6]Handle,
   // Light management with pre-allocated pools
-  lights:                     [256]LightInfo, // Pre-allocated light pool
-  active_light_count:         u32, // Number of currently active lights
+  lights:                      [256]LightInfo, // Pre-allocated light pool
+  active_light_count:          u32, // Number of currently active lights
   // Current frame's active render targets (for custom render procs to use correct visibility data)
   frame_active_render_targets: []RenderTarget,
 }
@@ -265,7 +268,8 @@ engine_init_shadow_maps :: proc(engine: ^Engine) -> vk.Result {
         cube_render_target.extent = {SHADOW_MAP_SIZE, SHADOW_MAP_SIZE}
         // Set depth texture for all frames to the same cube shadow map for this frame
         for frame_idx in 0 ..< MAX_FRAMES_IN_FLIGHT {
-          cube_render_target.depth_textures[frame_idx] = engine.cube_shadow_maps[f][i]
+          cube_render_target.depth_textures[frame_idx] =
+            engine.cube_shadow_maps[f][i]
         }
         cube_render_target.owns_depth_texture = false
       }
@@ -333,19 +337,20 @@ init :: proc(
   // Initialize engine shadow map pools
   engine_init_shadow_maps(self) or_return
 
-  // Initialize main render target (now handles multiple frames internally)
+  // Initialize main render target with default camera settings
   main_render_target: ^RenderTarget
-  self.main_render_target, main_render_target = resource.alloc(&g_render_targets)
+  self.main_render_target, main_render_target = resource.alloc(
+    &g_render_targets,
+  )
   render_target_init(
     main_render_target,
     self.swapchain.extent.width,
     self.swapchain.extent.height,
     self.swapchain.format.format,
     .D32_SFLOAT,
+    {5, 8, 5}, // Camera slightly above and diagonal to origin
+    {0, 0, 0}, // Looking at origin
   ) or_return
-
-  // Use the render target's camera as the main scene camera
-  self.scene.main_camera = main_render_target.camera
   vk.AllocateCommandBuffers(
     g_device,
     &{
@@ -369,7 +374,6 @@ init :: proc(
     self.swapchain.extent.height,
     self.swapchain.format.format,
   ) or_return
-  // Initialize ambient renderer fields to match main renderer
   self.ambient.environment_index = self.main.environment_map.index
   self.ambient.brdf_lut_index = self.main.brdf_lut.index
   self.ambient.environment_max_lod = self.main.environment_max_lod
@@ -572,7 +576,7 @@ update_emitters :: proc(self: ^Engine, delta_time: f32) {
     culling_enabled := entry.item.culling_enabled
     when USE_GPU_CULLING {
       if culling_enabled {
-        visible = multi_camera_is_node_visible(&self.visibility_culler, 0, u32(entry_index))
+        visible = is_node_visible(&self.visibility_culler, 0, u32(entry_index))
       }
     }
     emitters[emitter_idx].transform = entry.item.transform.world_matrix
@@ -594,6 +598,18 @@ update_emitters :: proc(self: ^Engine, delta_time: f32) {
     emitter_idx += 1
   }
   params.emitter_count = u32(emitter_idx)
+}
+
+// Get main camera from the main render target for the current frame
+get_main_camera :: proc(engine: ^Engine) -> ^geometry.Camera {
+  main_render_target := resource.get(
+    g_render_targets,
+    engine.main_render_target,
+  )
+  if main_render_target == nil {
+    return nil
+  }
+  return resource.get(g_cameras, main_render_target.camera)
 }
 
 update_force_fields :: proc(self: ^Engine) {
@@ -690,9 +706,15 @@ deinit :: proc(self: ^Engine) {
     raw_data(self.command_buffers[:]),
   )
   // Clean up main render target
-  if main_render_target := resource.get(g_render_targets, self.main_render_target);
-     main_render_target != nil {
-    resource.free(&g_render_targets, self.main_render_target, render_target_deinit)
+  if main_render_target := resource.get(
+    g_render_targets,
+    self.main_render_target,
+  ); main_render_target != nil {
+    resource.free(
+      &g_render_targets,
+      self.main_render_target,
+      render_target_deinit,
+    )
   }
 
   for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
@@ -733,14 +755,21 @@ recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
   swapchain_recreate(&engine.swapchain, engine.window) or_return
   new_aspect_ratio :=
     f32(engine.swapchain.extent.width) / f32(engine.swapchain.extent.height)
-  if main_camera := resource.get(g_cameras, engine.scene.main_camera);
-     main_camera != nil {
+  if main_camera := get_main_camera(engine); main_camera != nil {
     geometry.camera_update_aspect_ratio(main_camera, new_aspect_ratio)
   }
 
   // Recreate main render target with new dimensions
-  if main_render_target := resource.get(g_render_targets, engine.main_render_target);
-     main_render_target != nil {
+  if main_render_target := resource.get(
+    g_render_targets,
+    engine.main_render_target,
+  ); main_render_target != nil {
+    // Save current camera state
+    old_camera := resource.get(g_cameras, main_render_target.camera)
+    old_position :=
+      old_camera.position if old_camera != nil else [3]f32{0, 0, 3}
+    old_target := [3]f32{0, 0, 0} // Calculate from camera direction if needed
+
     render_target_deinit(main_render_target)
     render_target_init(
       main_render_target,
@@ -748,9 +777,9 @@ recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
       engine.swapchain.extent.height,
       engine.swapchain.format.format,
       .D32_SFLOAT,
+      old_position, // Preserve camera position
+      old_target, // Preserve camera target
     ) or_return
-    // Update main scene camera to the new camera
-    engine.scene.main_camera = main_render_target.camera
   }
 
   // No need to update camera uniform descriptor sets with bindless cameras
@@ -784,11 +813,14 @@ generate_render_input :: proc(
   self: ^Engine,
   frustum: geometry.Frustum,
   camera_handle: resource.Handle,
-  active_render_targets: []RenderTarget,
+  active_render_targets: []RenderTarget = {},
   shadow_pass: bool = false,
 ) -> (
   ret: RenderInput,
 ) {
+  // Use frame active render targets by default, or provided targets for shadow passes
+  targets :=
+    active_render_targets if len(active_render_targets) > 0 else self.frame_active_render_targets
   ret.batches = make(
     map[BatchKey][dynamic]BatchData,
     allocator = context.temp_allocator,
@@ -811,9 +843,9 @@ generate_render_input :: proc(
       visible := true
       when USE_GPU_CULLING {
         // Find the correct camera slot for this camera handle
-        camera_slot, slot_found := find_camera_slot(camera_handle, active_render_targets)
+        camera_slot, slot_found := find_camera_slot(camera_handle, targets)
         if slot_found {
-          visible = multi_camera_is_node_visible(&self.visibility_culler, camera_slot, u32(entry_index))
+          visible = is_node_visible(&self.visibility_culler, camera_slot, u32(entry_index))
         } else {
           // Fall back to CPU culling if camera slot not found
           world_aabb := geometry.aabb_transform(mesh.aabb, node.transform.world_matrix)
@@ -871,9 +903,9 @@ render :: proc(self: ^Engine) -> vk.Result {
   }
   render_target_update_camera_uniform(main_render_target)
 
-  main_camera := resource.get(g_cameras, self.scene.main_camera)
+  main_camera := get_main_camera(self)
   if main_camera == nil {
-    log.errorf("Main camera not found with handle: %v", self.scene.main_camera)
+    log.errorf("Main camera not found")
     return .ERROR_UNKNOWN
   }
   main_camera_index := main_render_target.camera.index
@@ -914,7 +946,7 @@ render :: proc(self: ^Engine) -> vk.Result {
   for &entry, entry_index in self.scene.nodes.entries do if entry.active {
     node := &entry.item
     when USE_GPU_CULLING {
-      visible := multi_camera_is_node_visible(&self.visibility_culler, 0, u32(entry_index))
+      visible := is_node_visible(&self.visibility_culler, 0, u32(entry_index))
       if !visible do continue
     } else {
       // TODO: do CPU culling for light node here
@@ -1101,16 +1133,13 @@ render :: proc(self: ^Engine) -> vk.Result {
     // Store active render targets for custom render procs to use
     self.frame_active_render_targets = active_render_targets[:]
 
-    // Update and perform multi-camera GPU scene culling
-    visibility_culler_update_multi_camera(
+    // Update and perform GPU scene culling
+    visibility_culler_update(
       &self.visibility_culler,
       &self.scene,
       active_render_targets[:],
     )
-    visibility_culler_execute_multi_camera(
-      &self.visibility_culler,
-      command_buffer,
-    )
+    visibility_culler_execute(&self.visibility_culler, command_buffer)
 
     // Memory barrier to ensure culling is complete before other operations
     visibility_buffer_barrier := vk.BufferMemoryBarrier {
@@ -1119,10 +1148,10 @@ render :: proc(self: ^Engine) -> vk.Result {
       dstAccessMask       = {.SHADER_READ, .HOST_READ},
       srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
       dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-      buffer              = self.visibility_culler.multi_visibility_buffer[g_frame_index].buffer,
+      buffer              = self.visibility_culler.visibility_buffer[g_frame_index].buffer,
       offset              = 0,
       size                = vk.DeviceSize(
-        self.visibility_culler.multi_visibility_buffer[g_frame_index].bytes_count,
+        self.visibility_culler.visibility_buffer[g_frame_index].bytes_count,
       ),
     }
     vk.CmdPipelineBarrier(
@@ -1349,9 +1378,12 @@ render :: proc(self: ^Engine) -> vk.Result {
     {.DEPTH_STENCIL_ATTACHMENT_WRITE},
   )
   // log.debug("============ rendering depth pre-pass... =============")
-  // For depth prepass, we only need the main camera
-  main_camera_targets := [1]RenderTarget{main_render_target^}
-  depth_input := generate_render_input(self, frustum, self.scene.main_camera, main_camera_targets[:])
+  // For depth prepass, use frame active render targets for visibility culling
+  depth_input := generate_render_input(
+    self,
+    frustum,
+    main_render_target.camera,
+  )
   depth_prepass_begin(main_render_target, command_buffer)
   depth_prepass_render(
     &self.depth_prepass,
@@ -1387,23 +1419,11 @@ render :: proc(self: ^Engine) -> vk.Result {
   // log.debug("============ rendering main pass... =============")
   // Prepare RenderTarget and RenderInput for decoupled renderer
   // Ambient pass
-  ambient_begin(
-    &self.ambient,
-    main_render_target,
-    command_buffer,
-  )
-  ambient_render(
-    &self.ambient,
-    main_render_target,
-    command_buffer,
-  )
+  ambient_begin(&self.ambient, main_render_target, command_buffer)
+  ambient_render(&self.ambient, main_render_target, command_buffer)
   ambient_end(command_buffer)
   // Per-light additive pass
-  lighting_begin(
-    &self.main,
-    main_render_target,
-    command_buffer,
-  )
+  lighting_begin(&self.main, main_render_target, command_buffer)
   lighting_render(
     &self.main,
     self.lights[:self.active_light_count],
@@ -1412,11 +1432,7 @@ render :: proc(self: ^Engine) -> vk.Result {
   )
   lighting_end(command_buffer)
   // log.debug("============ rendering particles... =============")
-  particle_begin(
-    &self.particle,
-    command_buffer,
-    main_render_target,
-  )
+  particle_begin(&self.particle, command_buffer, main_render_target)
   particle_render(
     &self.particle,
     command_buffer,
@@ -1425,11 +1441,7 @@ render :: proc(self: ^Engine) -> vk.Result {
   particle_end(command_buffer)
 
   // Transparent & wireframe pass
-  transparent_begin(
-    &self.transparent,
-    main_render_target,
-    command_buffer,
-  )
+  transparent_begin(&self.transparent, main_render_target, command_buffer)
   transparent_render(
     &self.transparent,
     gbuffer_input,
@@ -1491,7 +1503,7 @@ render :: proc(self: ^Engine) -> vk.Result {
 
     // Show visibility statistics for main camera
     when USE_GPU_CULLING {
-      disabled, visible, total := multi_camera_count_visible_objects(
+      disabled, visible, total := count_visible_objects(
         &self.visibility_culler,
         0,
       )
