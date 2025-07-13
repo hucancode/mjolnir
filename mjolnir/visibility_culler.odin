@@ -345,7 +345,8 @@ visibility_culler_execute :: proc(
     return
   }
 
-  // Update descriptor set to use current write buffer
+  // TODO: Update descriptor set only when write buffer changes
+  // TODO: Most frames reuse the same buffer, reducing per-frame overhead
   visibility_buffer_info := vk.DescriptorBufferInfo {
     buffer = self.visibility_buffer[self.visibility_write_idx].buffer,
     range  = vk.DeviceSize(self.visibility_buffer[self.visibility_write_idx].bytes_count),

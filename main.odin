@@ -11,9 +11,9 @@ import glfw "vendor:glfw"
 import mu "vendor:microui"
 import vk "vendor:vulkan"
 
-LIGHT_COUNT :: 5
+LIGHT_COUNT :: 20
 ALL_SPOT_LIGHT :: false
-ALL_POINT_LIGHT :: false
+ALL_POINT_LIGHT :: true
 light_handles: [LIGHT_COUNT]mjolnir.Handle
 light_cube_handles: [LIGHT_COUNT]mjolnir.Handle
 ground_mat_handle: mjolnir.Handle

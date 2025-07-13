@@ -1162,7 +1162,8 @@ render :: proc(self: ^Engine) -> vk.Result {
     // log.infof("Main camera visibility (1-2 frames old): %d visible / %d total (disabled: %d)",
     //           visible, total, disabled)
 
-    // Memory barrier to ensure culling completes before subsequent GPU operations
+    // Optimized memory barrier - only wait for what we need
+    // Since we use 1-2 frame latency, this barrier is mainly for GPU-GPU synchronization
     write_idx := self.visibility_culler.visibility_write_idx
     prev_write_idx := (write_idx + VISIBILITY_BUFFER_COUNT - 1) % VISIBILITY_BUFFER_COUNT
     visibility_buffer_barrier := vk.BufferMemoryBarrier {
@@ -1177,10 +1178,11 @@ render :: proc(self: ^Engine) -> vk.Result {
         self.visibility_culler.visibility_buffer[prev_write_idx].bytes_count,
       ),
     }
+    // More specific pipeline stage synchronization
     vk.CmdPipelineBarrier(
       command_buffer,
       {.COMPUTE_SHADER},
-      {.VERTEX_SHADER, .FRAGMENT_SHADER},
+      {.VERTEX_SHADER, .VERTEX_INPUT}, // Only wait for vertex stage, not fragment
       {},
       0,
       nil,
@@ -1217,20 +1219,6 @@ render :: proc(self: ^Engine) -> vk.Result {
     }
     shadow_2d_images[i] = b.image
   }
-  // log.debugf("Transitioning %d 2d shadow maps to attachment", shadow_map_count)
-  if shadow_map_count > 0 {
-    transition_images(
-      command_buffer,
-      shadow_2d_images[:shadow_map_count],
-      .UNDEFINED,
-      .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-      {.DEPTH},
-      1,
-      {.TOP_OF_PIPE},
-      {.EARLY_FRAGMENT_TESTS},
-      {.DEPTH_STENCIL_ATTACHMENT_WRITE},
-    )
-  }
   shadow_cube_images: [MAX_SHADOW_MAPS]vk.Image
   for i in 0 ..< cube_shadow_map_count {
     b, ok := resource.get(
@@ -1242,18 +1230,50 @@ render :: proc(self: ^Engine) -> vk.Result {
     }
     shadow_cube_images[i] = b.image
   }
-  // log.debugf("Transitioning %d cube shadow maps to attachment", cube_shadow_map_count)
-  if cube_shadow_map_count > 0 {
-    transition_images(
+  
+  // Batched shadow map transitions to attachment optimal
+  // Combine 2D and cube shadow maps in a single barrier for better performance
+  if shadow_map_count > 0 || cube_shadow_map_count > 0 {
+    image_barriers := make([dynamic]vk.ImageMemoryBarrier, 0, MAX_SHADOW_MAPS * 2, context.temp_allocator)
+    
+    // Add 2D shadow map barriers
+    for i in 0 ..< shadow_map_count {
+      append(&image_barriers, vk.ImageMemoryBarrier{
+        sType = .IMAGE_MEMORY_BARRIER,
+        srcAccessMask = {},
+        dstAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE},
+        oldLayout = .UNDEFINED,
+        newLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+        srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+        dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+        image = shadow_2d_images[i],
+        subresourceRange = {aspectMask = {.DEPTH}, levelCount = 1, layerCount = 1},
+      })
+    }
+    
+    // Add cube shadow map barriers
+    for i in 0 ..< cube_shadow_map_count {
+      append(&image_barriers, vk.ImageMemoryBarrier{
+        sType = .IMAGE_MEMORY_BARRIER,
+        srcAccessMask = {},
+        dstAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE},
+        oldLayout = .UNDEFINED,
+        newLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+        srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+        dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+        image = shadow_cube_images[i],
+        subresourceRange = {aspectMask = {.DEPTH}, levelCount = 1, layerCount = 6},
+      })
+    }
+    
+    vk.CmdPipelineBarrier(
       command_buffer,
-      shadow_cube_images[:cube_shadow_map_count],
-      .UNDEFINED,
-      .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-      {.DEPTH},
-      6,
       {.TOP_OF_PIPE},
       {.EARLY_FRAGMENT_TESTS},
-      {.DEPTH_STENCIL_ATTACHMENT_WRITE},
+      {},
+      0, nil,
+      0, nil,
+      u32(len(image_barriers)), raw_data(image_barriers),
     )
   }
   // log.debugf("============ shadow casters (%d)...============ ", len(shadow_casters))
@@ -1329,31 +1349,51 @@ render :: proc(self: ^Engine) -> vk.Result {
       current_camera_slot += 1
     }
   }
-  // Transition all shadow maps to shader read only optimal
-  // log.debugf("Transitioning %d 2D shadow maps to shader read", shadow_map_count)
-  transition_images(
-    command_buffer,
-    shadow_2d_images[:shadow_map_count],
-    .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-    .SHADER_READ_ONLY_OPTIMAL,
-    {.DEPTH},
-    1,
-    {.LATE_FRAGMENT_TESTS},
-    {.FRAGMENT_SHADER},
-    {.SHADER_READ},
-  )
-  // log.debugf("Transitioning %d cube shadow maps to shader read", cube_shadow_map_count)
-  transition_images(
-    command_buffer,
-    shadow_cube_images[:cube_shadow_map_count],
-    .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-    .SHADER_READ_ONLY_OPTIMAL,
-    {.DEPTH},
-    6,
-    {.LATE_FRAGMENT_TESTS},
-    {.FRAGMENT_SHADER},
-    {.SHADER_READ},
-  )
+  // Batched shadow map transitions to shader read optimal
+  // Combine 2D and cube shadow maps in a single barrier for better performance
+  if shadow_map_count > 0 || cube_shadow_map_count > 0 {
+    image_barriers := make([dynamic]vk.ImageMemoryBarrier, 0, MAX_SHADOW_MAPS * 2, context.temp_allocator)
+    
+    // Add 2D shadow map barriers
+    for i in 0 ..< shadow_map_count {
+      append(&image_barriers, vk.ImageMemoryBarrier{
+        sType = .IMAGE_MEMORY_BARRIER,
+        srcAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE},
+        dstAccessMask = {.SHADER_READ},
+        oldLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+        newLayout = .SHADER_READ_ONLY_OPTIMAL,
+        srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+        dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+        image = shadow_2d_images[i],
+        subresourceRange = {aspectMask = {.DEPTH}, levelCount = 1, layerCount = 1},
+      })
+    }
+    
+    // Add cube shadow map barriers
+    for i in 0 ..< cube_shadow_map_count {
+      append(&image_barriers, vk.ImageMemoryBarrier{
+        sType = .IMAGE_MEMORY_BARRIER,
+        srcAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE},
+        dstAccessMask = {.SHADER_READ},
+        oldLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+        newLayout = .SHADER_READ_ONLY_OPTIMAL,
+        srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+        dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+        image = shadow_cube_images[i],
+        subresourceRange = {aspectMask = {.DEPTH}, levelCount = 1, layerCount = 6},
+      })
+    }
+    
+    vk.CmdPipelineBarrier(
+      command_buffer,
+      {.LATE_FRAGMENT_TESTS},
+      {.FRAGMENT_SHADER},
+      {},
+      0, nil,
+      0, nil,
+      u32(len(image_barriers)), raw_data(image_barriers),
+    )
+  }
   final_image := resource.get(
     g_image_2d_buffers,
     render_target_final_image(main_render_target),
