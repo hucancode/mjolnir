@@ -32,7 +32,7 @@ SHADOW_MAP_SIZE :: 512
 MAX_SHADOW_MAPS :: 10
 MAX_TEXTURES :: 90
 MAX_CUBE_TEXTURES :: 20
-USE_GPU_CULLING :: true // Set to false to use CPU culling instead
+USE_GPU_CULLING :: false // Set to false to use CPU culling instead
 
 Handle :: resource.Handle
 
@@ -903,9 +903,8 @@ generate_render_input :: proc(
       append(&batch_data.nodes, node)
     }
   }
-  
-  log.infof("generate_render_input: camera_slot=%d found=%v, visible=%d/%d objects", 
-            camera_slot, camera_slot_found, visible_count, total_count)
+  // log.infof("generate_render_input: camera_slot=%d found=%v, visible=%d/%d objects",
+  //           camera_slot, camera_slot_found, visible_count, total_count)
   return
 }
 
@@ -1105,7 +1104,7 @@ render :: proc(self: ^Engine) -> vk.Result {
   when USE_GPU_CULLING {
     // Collect all active render targets for multi-camera culling
     clear(&self.frame_active_render_targets)
-    
+
     // Add main render target
     append(&self.frame_active_render_targets, self.main_render_target)
     log.infof("Added main render target: %v", self.main_render_target)
@@ -1136,10 +1135,10 @@ render :: proc(self: ^Engine) -> vk.Result {
     for &entry, i in g_render_targets.entries {
       if !entry.active do continue
       handle := Handle{entry.generation, u32(i)}
-      
+
       // Skip if it's the main render target
       if handle.index == self.main_render_target.index do continue
-      
+
       // Skip if it's already added as a shadow render target
       is_shadow_target := false
       for existing_handle in self.frame_active_render_targets {
@@ -1149,13 +1148,13 @@ render :: proc(self: ^Engine) -> vk.Result {
         }
       }
       if is_shadow_target do continue
-      
+
       // This must be a user-defined render target - add it
       append(&self.frame_active_render_targets, handle)
       user_targets_added += 1
       log.infof("Added user render target: %v", handle)
     }
-    log.infof("Added %d shadow targets, %d user targets", 
+    log.infof("Added %d shadow targets, %d user targets",
               len(self.frame_active_render_targets) - 1 - user_targets_added, user_targets_added)
 
     // Convert handles to render targets for visibility culling
@@ -1166,7 +1165,7 @@ render :: proc(self: ^Engine) -> vk.Result {
       }
     }
 
-    log.infof("Visibility culling with %d render targets, %d cameras", 
+    log.infof("Visibility culling with %d render targets, %d cameras",
               len(active_targets), len(active_targets))
 
     // Update and perform GPU scene culling
@@ -1179,7 +1178,7 @@ render :: proc(self: ^Engine) -> vk.Result {
 
     // Log visibility results for main camera (slot 0)
     disabled, visible, total := count_visible_objects(&self.visibility_culler, 0)
-    log.infof("Main camera visibility: %d visible / %d total (disabled: %d)", 
+    log.infof("Main camera visibility: %d visible / %d total (disabled: %d)",
               visible, total, disabled)
 
     // Memory barrier to ensure culling is complete before other operations
