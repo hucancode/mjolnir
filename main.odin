@@ -11,7 +11,7 @@ import glfw "vendor:glfw"
 import mu "vendor:microui"
 import vk "vendor:vulkan"
 
-LIGHT_COUNT :: 20
+LIGHT_COUNT :: 5
 ALL_SPOT_LIGHT :: false
 ALL_POINT_LIGHT :: false
 light_handles: [LIGHT_COUNT]mjolnir.Handle
@@ -81,18 +81,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
           world_x := (f32(x) - f32(nx) * 0.5) * space
           world_y := (f32(y) - f32(ny) * 0.5) * space + 0.5
           world_z := (f32(z) - f32(nz) * 0.5) * space
-
-          // DEBUG: Only keep objects behind the wall (x > wall_x_pos)
-          // if world_x <= wall_x_pos {
-          //   log.debugf("Skipping object at x=%.2f (in front of wall at x=%.2f)", world_x, wall_x_pos)
-          //   continue
-          // }
-          log.debugf(
-            "Keeping object at x=%.2f (behind wall at x=%.2f)",
-            world_x,
-            wall_x_pos,
-          )
-
           mat_handle, _ := create_material(
             metallic_value = f32(x - 1) / f32(nx - 1),
             roughness_value = f32(z - 1) / f32(nz - 1),
@@ -133,7 +121,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     }
   }
   if true {
-    log.info("spawning ground quad and walls")
+    log.info("spawning ground and walls")
     // Ground node
     size: f32 = 15.0
     _, ground_node := spawn(
@@ -154,7 +142,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
         cast_shadow = true,
       },
     )
-    log.infof("Left wall handle: %v", left_wall_handle)
     translate(&left_wall.transform, x = size)
     rotate(&left_wall.transform, math.PI * 0.5, linalg.VECTOR3F32_Z_AXIS)
     scale(&left_wall.transform, size)
@@ -167,7 +154,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
         cast_shadow = true,
       },
     )
-    log.infof("Right wall handle: %v", right_wall_handle)
     translate(&right_wall.transform, x = -size)
     rotate(&right_wall.transform, -math.PI * 0.5, linalg.VECTOR3F32_Z_AXIS)
     scale(&right_wall.transform, size)
@@ -180,7 +166,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
         cast_shadow = true,
       },
     )
-    log.infof("Back wall handle: %v", back_wall_handle)
     translate(&back_wall.transform, y = size, z = -size)
     rotate(&back_wall.transform, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
     scale(&back_wall.transform, size)
@@ -204,7 +189,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     for handle in gltf_nodes {
       hammer_handle = handle
       node := resource.get(engine.scene.nodes, handle) or_continue
-      translate(&node.transform, 0, 2, -2)
+      translate(&node.transform, 3, 1, -2)
       scale(&node.transform, 0.2)
     }
   }
@@ -214,8 +199,17 @@ setup :: proc(engine: ^mjolnir.Engine) {
     log.infof("Loaded GLTF nodes: %v", gltf_nodes)
     for handle in gltf_nodes {
       helm := resource.get(engine.scene.nodes, handle) or_continue
-      translate(&helm.transform, 0, 1, 2)
+      translate(&helm.transform, 0, 1, 3)
       scale(&helm.transform, 0.5)
+    }
+  }
+  if true {
+    log.info("loading GLTF...")
+    gltf_nodes := load_gltf(engine, "assets/Suzanne.glb") or_else {}
+    log.infof("Loaded GLTF nodes: %v", gltf_nodes)
+    for handle in gltf_nodes {
+      monkey := resource.get(engine.scene.nodes, handle) or_continue
+      translate(&monkey.transform, -3, 1, -2)
     }
   }
   if true {
@@ -227,6 +221,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
       for i in 1 ..< len(armature_ptr.children) {
         play_animation(engine, armature_ptr.children[i], "idle")
       }
+      translate(&armature_ptr.transform, 0, 0, 1)
     }
   }
   if true {
@@ -434,8 +429,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
     // Configure the portal camera to look down from above at a steep angle
     portal_camera := render_target_get_camera(portal_render_target)
     geometry.camera_look_at(portal_camera, {5, 15, 7}, {0, 0, 0}, {0, 1, 0})
-    log.infof("Portal camera configured: pos={10, 30, 10}, target={0, 0, 0}")
-
     // Create portal material (albedo only)
     portal_material: ^mjolnir.Material
     portal_material_handle, portal_material, _ = create_material({.ALBEDO_TEXTURE})

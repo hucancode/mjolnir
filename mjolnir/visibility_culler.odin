@@ -33,6 +33,8 @@ ActiveCameraData :: struct {
 }
 
 
+VISIBILITY_BUFFER_COUNT :: 3 // Ring buffer for 1-2 frame latency
+
 // Visibility culler
 VisibilityCuller :: struct {
   // Shared node data buffer (per frame in flight)
@@ -42,7 +44,7 @@ VisibilityCuller :: struct {
     MultiCameraCullingParams,
   ),
   active_camera_buffer:  [MAX_FRAMES_IN_FLIGHT]DataBuffer(ActiveCameraData),
-  visibility_buffer:     [MAX_FRAMES_IN_FLIGHT]DataBuffer(b32),
+  visibility_buffer:     [VISIBILITY_BUFFER_COUNT]DataBuffer(b32),
   // Multi-camera pipeline
   descriptor_set_layout: vk.DescriptorSetLayout,
   pipeline_layout:       vk.PipelineLayout,
@@ -51,6 +53,9 @@ VisibilityCuller :: struct {
   // CPU tracking
   node_count:            u32,
   current_frame:         u32, // 0 or 1 for double buffering
+  visibility_write_idx:  u32, // Ring buffer write index
+  visibility_read_idx:   u32, // Ring buffer read index
+  frames_processed:      u32, // Total frames processed
 }
 
 visibility_culler_init :: proc(self: ^VisibilityCuller) -> vk.Result {
@@ -76,7 +81,10 @@ visibility_culler_init :: proc(self: ^VisibilityCuller) -> vk.Result {
       {.STORAGE_BUFFER},
     ) or_return
 
-    // Visibility buffer size: MAX_ACTIVE_CAMERAS * MAX_NODES_IN_SCENE
+  }
+
+  // Create visibility buffers (ring buffer for async reads)
+  for i in 0 ..< VISIBILITY_BUFFER_COUNT {
     self.visibility_buffer[i] = create_host_visible_buffer(
       b32,
       MAX_ACTIVE_CAMERAS * MAX_NODES_IN_SCENE,
@@ -167,8 +175,8 @@ visibility_culler_init :: proc(self: ^VisibilityCuller) -> vk.Result {
       range  = vk.DeviceSize(self.active_camera_buffer[frame_idx].bytes_count),
     }
     visibility_buffer_info := vk.DescriptorBufferInfo {
-      buffer = self.visibility_buffer[frame_idx].buffer,
-      range  = vk.DeviceSize(self.visibility_buffer[frame_idx].bytes_count),
+      buffer = self.visibility_buffer[0].buffer,
+      range  = vk.DeviceSize(self.visibility_buffer[0].bytes_count),
     }
 
     culling_writes := [?]vk.WriteDescriptorSet {
@@ -242,6 +250,9 @@ visibility_culler_init :: proc(self: ^VisibilityCuller) -> vk.Result {
   ) or_return
 
   self.current_frame = 0
+  self.visibility_write_idx = 0
+  self.visibility_read_idx = 0
+  self.frames_processed = 0
   return .SUCCESS
 }
 
@@ -253,6 +264,8 @@ visibility_culler_deinit :: proc(self: ^VisibilityCuller) {
     data_buffer_deinit(&self.node_data_buffer[i])
     data_buffer_deinit(&self.params_buffer[i])
     data_buffer_deinit(&self.active_camera_buffer[i])
+  }
+  for i in 0 ..< VISIBILITY_BUFFER_COUNT {
     data_buffer_deinit(&self.visibility_buffer[i])
   }
 }
@@ -332,9 +345,26 @@ visibility_culler_execute :: proc(
     return
   }
 
+  // Update descriptor set to use current write buffer
+  visibility_buffer_info := vk.DescriptorBufferInfo {
+    buffer = self.visibility_buffer[self.visibility_write_idx].buffer,
+    range  = vk.DeviceSize(self.visibility_buffer[self.visibility_write_idx].bytes_count),
+  }
+
+  write_descriptor := vk.WriteDescriptorSet {
+    sType = .WRITE_DESCRIPTOR_SET,
+    dstSet = self.descriptor_sets[g_frame_index],
+    dstBinding = 3,
+    descriptorType = .STORAGE_BUFFER,
+    descriptorCount = 1,
+    pBufferInfo = &visibility_buffer_info,
+  }
+
+  vk.UpdateDescriptorSets(g_device, 1, &write_descriptor, 0, nil)
+
   // Clear visibility buffer
   visibility_slice := data_buffer_get_all(
-    &self.visibility_buffer[g_frame_index],
+    &self.visibility_buffer[self.visibility_write_idx],
   )
   slice.fill(visibility_slice, false)
 
@@ -354,6 +384,13 @@ visibility_culler_execute :: proc(
   // One thread per node (local_size_x = 64)
   dispatch_count := (self.node_count + 63) / 64
   vk.CmdDispatch(command_buffer, dispatch_count, 1, 1)
+  // Advance write index for next frame
+  self.visibility_write_idx = (self.visibility_write_idx + 1) % VISIBILITY_BUFFER_COUNT
+  self.frames_processed += 1
+  // Update read index to lag 1-2 frames behind write
+  if self.frames_processed >= 2 {
+    self.visibility_read_idx = (self.visibility_write_idx + VISIBILITY_BUFFER_COUNT - 2) % VISIBILITY_BUFFER_COUNT
+  }
 }
 
 // Check if a node is visible for a specific camera slot
@@ -362,6 +399,11 @@ is_node_visible :: proc(
   camera_slot: u32,
   node_index: u32,
 ) -> bool {
+  // Use stale data if not enough frames processed yet
+  if self.frames_processed < 2 {
+    return true // Conservative: assume visible until we have data
+  }
+
   params := data_buffer_get(&self.params_buffer[g_frame_index])
   if camera_slot >= params.active_camera_count ||
      node_index >= self.node_count {
@@ -369,7 +411,7 @@ is_node_visible :: proc(
   }
 
   visibility_slice := data_buffer_get_all(
-    &self.visibility_buffer[g_frame_index],
+    &self.visibility_buffer[self.visibility_read_idx],
   )
   visibility_index := camera_slot * self.node_count + node_index
   if visibility_index >= u32(len(visibility_slice)) {
@@ -389,13 +431,19 @@ count_visible_objects :: proc(
   total: u32,
 ) {
   total = self.node_count
+
+  // Return conservative counts if not enough frames processed
+  if self.frames_processed < 2 {
+    return 0, total, total // All visible until we have data
+  }
+
   params := data_buffer_get(&self.params_buffer[g_frame_index])
   if self.node_count == 0 || camera_slot >= params.active_camera_count {
     return 0, 0, 0
   }
 
   visibility_slice := data_buffer_get_all(
-    &self.visibility_buffer[g_frame_index],
+    &self.visibility_buffer[self.visibility_read_idx],
   )
   node_data_slice := data_buffer_get_all(&self.node_data_buffer[g_frame_index])
 

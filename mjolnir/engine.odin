@@ -32,7 +32,7 @@ SHADOW_MAP_SIZE :: 512
 MAX_SHADOW_MAPS :: 10
 MAX_TEXTURES :: 90
 MAX_CUBE_TEXTURES :: 20
-USE_GPU_CULLING :: false // Set to false to use CPU culling instead
+USE_GPU_CULLING :: true // Set to false to use CPU culling instead
 
 Handle :: resource.Handle
 
@@ -966,12 +966,6 @@ render :: proc(self: ^Engine) -> vk.Result {
   }
   for &entry, entry_index in self.scene.nodes.entries do if entry.active {
     node := &entry.item
-    when USE_GPU_CULLING {
-      visible := is_node_visible(&self.visibility_culler, 0, u32(entry_index))
-      if !visible do continue
-    } else {
-      // TODO: do CPU culling for light node here
-    }
     // Check if we have room for more lights
     if self.active_light_count >= len(self.lights) do continue
 
@@ -1104,15 +1098,12 @@ render :: proc(self: ^Engine) -> vk.Result {
   when USE_GPU_CULLING {
     // Collect all active render targets for multi-camera culling
     clear(&self.frame_active_render_targets)
-
     // Add main render target
     append(&self.frame_active_render_targets, self.main_render_target)
     log.infof("Added main render target: %v", self.main_render_target)
-
     // Add shadow map render targets from shadow-casting lights
     for light_info in self.lights[:self.active_light_count] {
       if !light_info.light_cast_shadow do continue
-
       switch light_info.light_kind {
       case .POINT:
         for target_handle in light_info.cube_render_targets {
@@ -1128,17 +1119,13 @@ render :: proc(self: ^Engine) -> vk.Result {
       // TODO: Add when directional shadows are implemented
       }
     }
-
-    // Add user-defined render targets (like portals)
     // Look for render targets that aren't main or shadow targets
     user_targets_added := 0
     for &entry, i in g_render_targets.entries {
       if !entry.active do continue
       handle := Handle{entry.generation, u32(i)}
-
       // Skip if it's the main render target
       if handle.index == self.main_render_target.index do continue
-
       // Skip if it's already added as a shadow render target
       is_shadow_target := false
       for existing_handle in self.frame_active_render_targets {
@@ -1148,16 +1135,10 @@ render :: proc(self: ^Engine) -> vk.Result {
         }
       }
       if is_shadow_target do continue
-
       // This must be a user-defined render target - add it
       append(&self.frame_active_render_targets, handle)
       user_targets_added += 1
-      log.infof("Added user render target: %v", handle)
     }
-    log.infof("Added %d shadow targets, %d user targets",
-              len(self.frame_active_render_targets) - 1 - user_targets_added, user_targets_added)
-
-    // Convert handles to render targets for visibility culling
     active_targets := make([dynamic]RenderTarget, 0, context.temp_allocator)
     for handle in self.frame_active_render_targets {
       if target := resource.get(g_render_targets, handle); target != nil {
@@ -1176,28 +1157,30 @@ render :: proc(self: ^Engine) -> vk.Result {
     )
     visibility_culler_execute(&self.visibility_culler, command_buffer)
 
-    // Log visibility results for main camera (slot 0)
+    // Log visibility results for main camera (slot 0) - using data from 1-2 frames ago
     disabled, visible, total := count_visible_objects(&self.visibility_culler, 0)
-    log.infof("Main camera visibility: %d visible / %d total (disabled: %d)",
-              visible, total, disabled)
+    // log.infof("Main camera visibility (1-2 frames old): %d visible / %d total (disabled: %d)",
+    //           visible, total, disabled)
 
-    // Memory barrier to ensure culling is complete before other operations
+    // Memory barrier to ensure culling completes before subsequent GPU operations
+    write_idx := self.visibility_culler.visibility_write_idx
+    prev_write_idx := (write_idx + VISIBILITY_BUFFER_COUNT - 1) % VISIBILITY_BUFFER_COUNT
     visibility_buffer_barrier := vk.BufferMemoryBarrier {
       sType               = .BUFFER_MEMORY_BARRIER,
       srcAccessMask       = {.SHADER_WRITE},
-      dstAccessMask       = {.SHADER_READ, .HOST_READ},
+      dstAccessMask       = {.SHADER_READ},
       srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
       dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-      buffer              = self.visibility_culler.visibility_buffer[g_frame_index].buffer,
+      buffer              = self.visibility_culler.visibility_buffer[prev_write_idx].buffer,
       offset              = 0,
       size                = vk.DeviceSize(
-        self.visibility_culler.visibility_buffer[g_frame_index].bytes_count,
+        self.visibility_culler.visibility_buffer[prev_write_idx].bytes_count,
       ),
     }
     vk.CmdPipelineBarrier(
       command_buffer,
       {.COMPUTE_SHADER},
-      {.VERTEX_SHADER, .FRAGMENT_SHADER, .HOST},
+      {.VERTEX_SHADER, .FRAGMENT_SHADER},
       {},
       0,
       nil,
@@ -1206,20 +1189,6 @@ render :: proc(self: ^Engine) -> vk.Result {
       0,
       nil,
     )
-    // End command buffer and submit immediately to ensure GPU work completes
-    vk.EndCommandBuffer(command_buffer) or_return
-    submit_info := vk.SubmitInfo {
-      sType              = .SUBMIT_INFO,
-      commandBufferCount = 1,
-      pCommandBuffers    = &command_buffer,
-    }
-    vk.QueueSubmit(g_graphics_queue, 1, &submit_info, 0) or_return
-    vk.QueueWaitIdle(g_graphics_queue) or_return
-    // Begin command buffer again for the rest of the rendering
-    vk.BeginCommandBuffer(
-      command_buffer,
-      &{sType = .COMMAND_BUFFER_BEGIN_INFO, flags = {.ONE_TIME_SUBMIT}},
-    ) or_return
   } else {
     // CPU culling mode - no visibility culler operations needed
     // Culling will be done per-object in generate_render_input using CPU frustum tests
