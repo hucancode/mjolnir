@@ -268,7 +268,9 @@ my_array[0] = 10.0
 log.infof("%v", my_array)
 ```
 
-# Accessibility
+# Preference
 
 I am color blind, I have difficulty distinguish some green-red color (protan). When use color to debug, avoid using colors with similar red shade and green shade with different meaning
-As an AI you have difficulty checking visual information. When you want to see something on the screen for debugging, for example shadow artifact, light color, you can pause and ask me to run and tell you the result. To check the numerical result, you can hard code the app stop render after few frame (the code is at engine.odin `render` procedure) and use `grep` to see the log for your self.
+As an AI you have difficulty checking visual information. When you want to see something on the screen for debugging, for example shadow artifact, light color, you can pause and ask me to run and tell you the result. To check the numerical result, you can hard code the app stop render after few frame (the code is at engine.odin `run` procedure) and use `grep` to see the log for your self.
+Except for mathematical formular where the intuition is not obvious, I am prefer not to use explaination comment in the code. Except when I am debugging and want to iterate fast, I use meaningful variable/constant names to describe the intent. I use long variable name if the variable scope is wide, short variable name if the variable scope is narrow (i,j,k for counter, u,v,x,y,z for coordinate, r,g,b for color, alpha, theta, for angle, alpha for opacity, t for time, l,r for left right bound).
+I am prefer not to have empty line inside function/procedure implementation
