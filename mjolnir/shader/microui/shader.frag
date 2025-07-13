@@ -6,6 +6,6 @@ layout(location = 1) in vec2 uv;
 layout(location = 0) out vec4 outColor;
 
 void main() {
-    float alpha = texture(currentTexture, uv).r;
-    outColor = vec4(color.rgb, alpha);
+    float texAlpha = texture(currentTexture, uv).r;
+    outColor = vec4(color.rgb, color.a * texAlpha);
 }

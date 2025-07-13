@@ -32,6 +32,7 @@ RendererUI :: struct {
   frame_width:               u32,
   frame_height:              u32,
   dpi_scale:                 f32,
+  current_scissor:           vk.Rect2D,
 }
 
 Vertex2D :: struct {
@@ -53,6 +54,7 @@ ui_init :: proc(
   self.frame_width = width
   self.frame_height = height
   self.dpi_scale = dpi_scale
+  self.current_scissor = vk.Rect2D{extent = {width, height}}
   log.infof("init UI pipeline...")
   vert_shader_module := create_shader_module(SHADER_MICROUI_VERT) or_return
   defer vk.DestroyShaderModule(g_device, vert_shader_module, nil)
@@ -307,8 +309,8 @@ ui_flush :: proc(self: ^RendererUI, cmd_buf: vk.CommandBuffer) -> vk.Result {
     self.vertex_count = 0
     self.index_count = 0
   }
-  data_buffer_write(&self.vertex_buffer, self.vertices[:]) or_return
-  data_buffer_write(&self.index_buffer, self.indices[:]) or_return
+  data_buffer_write(&self.vertex_buffer, self.vertices[:self.vertex_count]) or_return
+  data_buffer_write(&self.index_buffer, self.indices[:self.index_count]) or_return
   vk.CmdBindPipeline(cmd_buf, .GRAPHICS, self.pipeline)
   descriptor_sets := [?]vk.DescriptorSet {
     self.projection_descriptor_set,
@@ -333,6 +335,7 @@ ui_flush :: proc(self: ^RendererUI, cmd_buf: vk.CommandBuffer) -> vk.Result {
     maxDepth = 1,
   }
   vk.CmdSetViewport(cmd_buf, 0, 1, &viewport)
+  vk.CmdSetScissor(cmd_buf, 0, 1, &self.current_scissor)
   offsets := [?]vk.DeviceSize{0}
   vk.CmdBindVertexBuffers(
     cmd_buf,
@@ -352,8 +355,8 @@ ui_push_quad :: proc(
   dst, src: mu.Rect,
   color: mu.Color,
 ) {
-  if (self.vertex_count >= UI_MAX_VERTICES ||
-       self.index_count >= UI_MAX_INDICES) {
+  if (self.vertex_count + 4 > UI_MAX_VERTICES ||
+       self.index_count + 6 > UI_MAX_INDICES) {
     ui_flush(self, cmd_buf)
   }
   x, y, w, h :=
@@ -386,12 +389,13 @@ ui_push_quad :: proc(
     uv    = [2]f32{x, y + h},
     color = [4]u8{color.r, color.g, color.b, color.a},
   }
-  self.indices[self.index_count + 0] = self.vertex_count + 0
-  self.indices[self.index_count + 1] = self.vertex_count + 1
-  self.indices[self.index_count + 2] = self.vertex_count + 2
-  self.indices[self.index_count + 3] = self.vertex_count + 2
-  self.indices[self.index_count + 4] = self.vertex_count + 3
-  self.indices[self.index_count + 5] = self.vertex_count + 0
+  vertex_base := u32(self.vertex_count)
+  self.indices[self.index_count + 0] = vertex_base + 0
+  self.indices[self.index_count + 1] = vertex_base + 1
+  self.indices[self.index_count + 2] = vertex_base + 2
+  self.indices[self.index_count + 3] = vertex_base + 2
+  self.indices[self.index_count + 4] = vertex_base + 3
+  self.indices[self.index_count + 5] = vertex_base + 0
   self.index_count += 6
   self.vertex_count += 4
 }
@@ -449,16 +453,15 @@ ui_set_clip_rect :: proc(
   cmd_buf: vk.CommandBuffer,
   rect: mu.Rect,
 ) {
-  ui_flush(self, cmd_buf)
-  x := min(rect.x, i32(self.frame_width))
-  y := min(rect.y, i32(self.frame_height))
-  w := u32(min(rect.w, i32(self.frame_width) - x))
-  h := u32(min(rect.h, i32(self.frame_height) - y))
-  scissor := vk.Rect2D {
-    offset = {x, y},
+  x := min(u32(max(rect.x, 0)), self.frame_width)
+  y := min(u32(max(rect.y, 0)), self.frame_height)
+  w := min(u32(rect.w), self.frame_width - x)
+  h := min(u32(rect.h), self.frame_height - y)
+  self.current_scissor = vk.Rect2D {
+    offset = {i32(x), i32(y)},
     extent = {w, h},
   }
-  vk.CmdSetScissor(cmd_buf, 0, 1, &scissor)
+  vk.CmdSetScissor(cmd_buf, 0, 1, &self.current_scissor)
 }
 
 ui_deinit :: proc(self: ^RendererUI) {
@@ -489,6 +492,8 @@ ui_recreate_images :: proc(
   self.frame_width = width
   self.frame_height = height
   self.dpi_scale = dpi_scale
+  // Reset scissor to full screen on resize
+  self.current_scissor = vk.Rect2D{extent = {width, height}}
 
   // Update the projection matrix with new dimensions and DPI scale
   ortho := linalg.matrix_ortho3d(0, f32(width), f32(height), 0, -1, 1) * linalg.matrix4_scale(dpi_scale)
