@@ -8,7 +8,7 @@ layout(location = 6) in vec4 inWeights;
 
 layout(location = 0) out vec3 worldPos;
 
-struct CameraUniform {
+struct Camera {
     mat4 view;
     mat4 projection;
     vec2 viewport_size;
@@ -19,7 +19,7 @@ struct CameraUniform {
 };
 
 layout(set = 0, binding = 0) readonly buffer CameraBuffer {
-    CameraUniform cameras[];
+    Camera cameras[];
 };
 
 layout(set = 1, binding = 0) readonly buffer BoneMatrices {
@@ -41,7 +41,7 @@ layout(push_constant) uniform PushConstants {
 };
 
 void main() {
-    CameraUniform camera = cameras[camera_index];
+    Camera camera = cameras[camera_index];
     vec4 modelPosition;
     if (SKINNED) {
         uvec4 indices = inJoints + uvec4(bone_matrix_offset);

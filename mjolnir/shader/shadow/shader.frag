@@ -2,7 +2,7 @@
 
 layout(location = 0) in vec3 worldPos;
 
-struct CameraUniform {
+struct Camera {
     mat4 view;
     mat4 projection;
     vec2 viewport_size;
@@ -13,7 +13,7 @@ struct CameraUniform {
 };
 
 layout(set = 0, binding = 0) readonly buffer CameraBuffer {
-    CameraUniform cameras[];
+    Camera cameras[];
 };
 
 layout(push_constant) uniform PushConstants {
@@ -30,7 +30,7 @@ layout(push_constant) uniform PushConstants {
 };
 
 void main() {
-    CameraUniform camera = cameras[camera_index];
+    Camera camera = cameras[camera_index];
     // calculate distance from light center to fragment
     vec3 lightPos = camera.camera_position;
     float distance = length(worldPos - lightPos);

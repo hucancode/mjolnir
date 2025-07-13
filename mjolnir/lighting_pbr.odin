@@ -316,17 +316,17 @@ lighting_render :: proc(
 
     // Fill in the common G-buffer indices that are always the same
     light_info.scene_camera_idx = render_target.camera.index
-    light_info.gbuffer_position_index =
+    light_info.position_texture_index =
       render_target_position_texture(render_target).index
-    light_info.gbuffer_normal_index =
+    light_info.normal_texture_index =
       render_target_normal_texture(render_target).index
-    light_info.gbuffer_albedo_index =
+    light_info.albedo_texture_index =
       render_target_albedo_texture(render_target).index
-    light_info.gbuffer_metallic_index =
+    light_info.metallic_texture_index =
       render_target_metallic_roughness_texture(render_target).index
-    light_info.gbuffer_emissive_index =
+    light_info.emissive_texture_index =
       render_target_emissive_texture(render_target).index
-    light_info.gbuffer_depth_index =
+    light_info.depth_texture_index =
       render_target_depth_texture(render_target).index
     light_info.input_image_index =
       render_target_final_image(render_target).index

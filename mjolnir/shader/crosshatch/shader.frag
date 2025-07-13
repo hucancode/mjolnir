@@ -14,12 +14,12 @@ layout(set = 0, binding = 1) uniform sampler samplers[];
 layout(set = 0, binding = 2) uniform textureCube textures_cube[];
 
 layout(push_constant) uniform PostProcessPushConstant {
-    uint gbuffer_position_index;
-    uint gbuffer_normal_index;
-    uint gbuffer_albedo_index;
-    uint gbuffer_metallic_index;
-    uint gbuffer_emissive_index;
-    uint gbuffer_depth_index;
+    uint position_texture_index;
+    uint normal_texture_index;
+    uint albedo_texture_index;
+    uint metallic_texture_index;
+    uint emissive_texture_index;
+    uint depth_texture_index;
     uint input_image_index;
     vec2 resolution;
     float hatch_offset_y;
@@ -70,15 +70,15 @@ vec3 edge() {
     // Depth Sobel
     float sumX_depth = 0.0;
     float sumY_depth = 0.0;
-    float center_depth = linearize_depth(texture(sampler2D(textures[gbuffer_depth_index], samplers[SAMPLER_NEAREST_CLAMP]), v_uv).r);
+    float center_depth = linearize_depth(texture(sampler2D(textures[depth_texture_index], samplers[SAMPLER_NEAREST_CLAMP]), v_uv).r);
 
     for (int i = 0; i < 9; ++i) {
         vec2 uv_offset = v_uv + offset[i] * texel_size;
-        vec3 normal = texture(sampler2D(textures[gbuffer_normal_index], samplers[SAMPLER_NEAREST_CLAMP]), uv_offset).rgb;
+        vec3 normal = texture(sampler2D(textures[normal_texture_index], samplers[SAMPLER_NEAREST_CLAMP]), uv_offset).rgb;
         sumX_normal += normal * kernelX[i];
         sumY_normal += normal * kernelY[i];
 
-        float depth = linearize_depth(texture(sampler2D(textures[gbuffer_depth_index], samplers[SAMPLER_NEAREST_CLAMP]), uv_offset).r);
+        float depth = linearize_depth(texture(sampler2D(textures[depth_texture_index], samplers[SAMPLER_NEAREST_CLAMP]), uv_offset).r);
         sumX_depth += (depth - center_depth) * kernelX[i];
         sumY_depth += (depth - center_depth) * kernelY[i];
     }

@@ -14,7 +14,7 @@ layout(location = 6) in vec4 inJointWeights;
 layout(location = 0) out vec4 outColor;
 
 // Camera structure
-struct CameraUniform {
+struct Camera {
     mat4 view;
     mat4 projection;
     vec2 viewport_size;
@@ -26,7 +26,7 @@ struct CameraUniform {
 
 // Bindless camera buffer set = 0
 layout(set = 0, binding = 0) readonly buffer CameraBuffer {
-    CameraUniform cameras[];
+    Camera cameras[];
 } camera_buffer;
 
 // Bone matrices
@@ -52,7 +52,7 @@ layout(push_constant) uniform PushConstants {
 
 void main() {
     // Get camera from bindless buffer
-    CameraUniform camera = camera_buffer.cameras[camera_index];
+    Camera camera = camera_buffer.cameras[camera_index];
 
     // Calculate position based on skinning
     vec4 modelPosition;

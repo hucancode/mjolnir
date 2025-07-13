@@ -14,7 +14,7 @@ out gl_PerVertex {
 };
 
 // Camera structure
-struct CameraUniform {
+struct Camera {
     mat4 view;
     mat4 projection;
     vec2 viewport_size;
@@ -26,7 +26,7 @@ struct CameraUniform {
 
 // Bindless camera buffer set = 0
 layout(set = 0, binding = 0) readonly buffer CameraBuffer {
-    CameraUniform cameras[];
+    Camera cameras[];
 } camera_buffer;
 
 layout(push_constant) uniform ParticlePushConstants {
@@ -34,7 +34,7 @@ layout(push_constant) uniform ParticlePushConstants {
 } push;
 
 void main() {
-    CameraUniform camera = camera_buffer.cameras[push.camera_index];
+    Camera camera = camera_buffer.cameras[push.camera_index];
     vec4 cameraPosition = -inverse(camera.view)[3];
     outColor = inColor;
     outTextureIndex = inTextureIndex;

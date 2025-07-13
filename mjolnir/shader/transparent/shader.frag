@@ -24,7 +24,7 @@ const uint SAMPLER_NEAREST_REPEAT = 2;
 const uint SAMPLER_LINEAR_REPEAT = 3;
 
 // Camera structure
-struct CameraUniform {
+struct Camera {
     mat4 view;
     mat4 projection;
     vec2 viewport_size;
@@ -36,7 +36,7 @@ struct CameraUniform {
 
 // Bindless camera buffer set = 0
 layout(set = 0, binding = 0) readonly buffer CameraBuffer {
-    CameraUniform cameras[];
+    Camera cameras[];
 } camera_buffer;
 
 
@@ -147,7 +147,7 @@ void main() {
     }
 
     // Get camera from bindless buffer
-    CameraUniform camera = camera_buffer.cameras[camera_index];
+    Camera camera = camera_buffer.cameras[camera_index];
 
     // Calculate camera position from inverse view matrix
     mat4 invView = inverse(camera.view);

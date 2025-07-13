@@ -10,7 +10,7 @@ layout(location = 4) in vec4 inTangent;
 layout(location = 5) in uvec4 inJoints;
 layout(location = 6) in vec4 inWeights;
 
-struct CameraUniform {
+struct Camera {
     mat4 view;
     mat4 projection;
     vec2 viewport_size;
@@ -21,7 +21,7 @@ struct CameraUniform {
 };
 
 layout(set = 0, binding = 0) readonly buffer CameraBuffer {
-    CameraUniform cameras[];
+    Camera cameras[];
 };
 // set 1 (textures), not available in vertex shader
 layout(set = 2, binding = 0) readonly buffer BoneMatrices {
@@ -48,7 +48,7 @@ layout(location = 3) out vec2 outUV;
 layout(location = 4) out vec4 outTangent;
 
 void main() {
-    CameraUniform camera = cameras[camera_index];
+    Camera camera = cameras[camera_index];
 
     vec4 modelPosition;
     vec3 modelNormal;

@@ -18,7 +18,7 @@ layout(location = 2) out vec2 outTexCoord;
 layout(location = 3) out vec4 outColor;
 layout(location = 4) out mat3 outTBN;
 
-struct CameraUniform {
+struct Camera {
     mat4 view;
     mat4 projection;
     vec2 viewport_size;
@@ -30,7 +30,7 @@ struct CameraUniform {
 
 // Bindless camera buffer (set 0, binding 0)
 layout(set = 0, binding = 0) readonly buffer CameraBuffer {
-    CameraUniform cameras[];
+    Camera cameras[];
 } camera_buffer;
 // Bone matrices
 layout(set = 2, binding = 0) readonly buffer BoneMatrices {
@@ -53,7 +53,7 @@ layout(push_constant) uniform PushConstants {
 };
 
 void main() {
-    CameraUniform camera = camera_buffer.cameras[camera_index];
+    Camera camera = camera_buffer.cameras[camera_index];
     // Calculate position based on skinning
     vec4 modelPosition;
     vec3 modelNormal;

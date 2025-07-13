@@ -14,15 +14,15 @@ layout(set = 0, binding = 1) uniform sampler samplers[];
 layout(set = 0, binding = 2) uniform textureCube textures_cube[];
 
 layout(push_constant) uniform PostProcessPushConstant {
-    uint gbuffer_position_index;
-    uint gbuffer_normal_index;
-    uint gbuffer_albedo_index;
-    uint gbuffer_metallic_index;
-    uint gbuffer_emissive_index;
-    uint gbuffer_depth_index;
+    uint position_texture_index;
+    uint normal_texture_index;
+    uint albedo_texture_index;
+    uint metallic_texture_index;
+    uint emissive_texture_index;
+    uint depth_texture_index;
     uint input_image_index;
-} push;
+};
 
 void main() {
-    out_color = texture(sampler2D(textures[push.input_image_index], samplers[SAMPLER_LINEAR_CLAMP]), v_uv);
+    out_color = texture(sampler2D(textures[input_image_index], samplers[SAMPLER_LINEAR_CLAMP]), v_uv);
 }

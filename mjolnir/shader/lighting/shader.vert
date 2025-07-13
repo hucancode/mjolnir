@@ -3,7 +3,7 @@
 const float PI = 3.14159265359;
 layout(location = 0) in vec3 a_position; // Vertex position for light volume geometry
 
-struct CameraUniform {
+struct Camera {
     mat4 view;
     mat4 projection;
     vec2 viewport_size;
@@ -15,7 +15,7 @@ struct CameraUniform {
 
 // Bindless camera buffer (set 0, binding 0)
 layout(set = 0, binding = 0) readonly buffer CameraBuffer {
-    CameraUniform cameras[];
+    Camera cameras[];
 } camera_buffer;
 
 layout(push_constant) uniform LightPushConstant {
@@ -43,7 +43,7 @@ const uint DIRECTIONAL_LIGHT = 1;
 const uint SPOT_LIGHT = 2;
 
 void main() {
-    CameraUniform camera = camera_buffer.cameras[push.scene_camera_idx];
+    Camera camera = camera_buffer.cameras[push.scene_camera_idx];
     if (push.light_kind == DIRECTIONAL_LIGHT) {
         // For directional lights, use the NDC triangle mesh directly
         gl_Position = vec4(a_position, 1.0);

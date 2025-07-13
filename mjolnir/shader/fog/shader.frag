@@ -14,12 +14,12 @@ layout(set = 0, binding = 1) uniform sampler samplers[];
 layout(set = 0, binding = 2) uniform textureCube textures_cube[];
 
 layout(push_constant) uniform PostProcessPushConstant {
-    uint gbuffer_position_index;
-    uint gbuffer_normal_index;
-    uint gbuffer_albedo_index;
-    uint gbuffer_metallic_index;
-    uint gbuffer_emissive_index;
-    uint gbuffer_depth_index;
+    uint position_texture_index;
+    uint normal_texture_index;
+    uint albedo_texture_index;
+    uint metallic_texture_index;
+    uint emissive_texture_index;
+    uint depth_texture_index;
     uint input_image_index;
     uint padding; // Add padding to match Odin struct
     vec4 fog_color;
@@ -56,8 +56,8 @@ float compute_fog_factor(float distance) {
 
 void main() {
     vec4 color = texture(sampler2D(textures[input_image_index], samplers[SAMPLER_LINEAR_CLAMP]), v_uv);
-    vec4 normal = texture(sampler2D(textures[gbuffer_normal_index], samplers[SAMPLER_NEAREST_CLAMP]), v_uv);
-    float depth = texture(sampler2D(textures[gbuffer_depth_index], samplers[SAMPLER_NEAREST_CLAMP]), v_uv).r;
+    vec4 normal = texture(sampler2D(textures[normal_texture_index], samplers[SAMPLER_NEAREST_CLAMP]), v_uv);
+    float depth = texture(sampler2D(textures[depth_texture_index], samplers[SAMPLER_NEAREST_CLAMP]), v_uv).r;
     float linear_depth = linearize_depth(depth);
     float fog_factor = compute_fog_factor(linear_depth);
     vec3 final_color = mix(color.rgb, fog_color.rgb, fog_factor);

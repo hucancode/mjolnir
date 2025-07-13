@@ -150,12 +150,12 @@ DoFPushConstant :: struct {
 }
 
 BasePushConstant :: struct {
-  gbuffer_position_index: u32,
-  gbuffer_normal_index:   u32,
-  gbuffer_albedo_index:   u32,
-  gbuffer_metallic_index: u32,
-  gbuffer_emissive_index: u32,
-  gbuffer_depth_index:    u32,
+  position_texture_index: u32,
+  normal_texture_index:   u32,
+  albedo_texture_index:   u32,
+  metallic_texture_index: u32,
+  emissive_texture_index: u32,
+  depth_texture_index:    u32,
   input_image_index:      u32,
   padding:                u32, // Add padding to align to 16-byte boundary for next vec4
 }
@@ -719,13 +719,13 @@ postprocess_render :: proc(
       nil,
     )
     base: BasePushConstant
-    base.gbuffer_position_index = render_target_position_texture(render_target).index
-    base.gbuffer_normal_index = render_target_normal_texture(render_target).index
-    base.gbuffer_albedo_index = render_target_albedo_texture(render_target).index
-    base.gbuffer_metallic_index =
+    base.position_texture_index = render_target_position_texture(render_target).index
+    base.normal_texture_index = render_target_normal_texture(render_target).index
+    base.albedo_texture_index = render_target_albedo_texture(render_target).index
+    base.metallic_texture_index =
       render_target_metallic_roughness_texture(render_target).index
-    base.gbuffer_emissive_index = render_target_emissive_texture(render_target).index
-    base.gbuffer_depth_index = render_target_depth_texture(render_target).index
+    base.emissive_texture_index = render_target_emissive_texture(render_target).index
+    base.depth_texture_index = render_target_depth_texture(render_target).index
     base.input_image_index = input_image_index
     // Create and push combined push constants based on effect type
     switch &e in effect {

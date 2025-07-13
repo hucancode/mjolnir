@@ -145,12 +145,12 @@ LightPushConstant :: struct {
   light_radius:           f32,
   light_direction:        [3]f32,
   light_cast_shadow:      b32,
-  gbuffer_position_index: u32,
-  gbuffer_normal_index:   u32,
-  gbuffer_albedo_index:   u32,
-  gbuffer_metallic_index: u32,
-  gbuffer_emissive_index: u32,
-  gbuffer_depth_index:    u32,
+  position_texture_index: u32,
+  normal_texture_index:   u32,
+  albedo_texture_index:   u32,
+  metallic_texture_index: u32,
+  emissive_texture_index: u32,
+  depth_texture_index:    u32,
   input_image_index:      u32,
 }
 
