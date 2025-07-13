@@ -10,7 +10,7 @@ import "mjolnir/resource"
 import glfw "vendor:glfw"
 import mu "vendor:microui"
 
-LIGHT_COUNT :: 5
+LIGHT_COUNT :: 20
 ALL_SPOT_LIGHT :: false
 ALL_POINT_LIGHT :: false
 light_handles: [LIGHT_COUNT]mjolnir.Handle
