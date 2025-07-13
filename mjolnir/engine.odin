@@ -923,15 +923,15 @@ render :: proc(self: ^Engine) -> vk.Result {
     when USE_GPU_CULLING {
       visible := multi_camera_is_node_visible(&self.visibility_culler, 0, u32(entry_index))
       if !visible do continue
+    } else {
+        // TODO: do CPU culling for light node here
     }
-
     // Check if we have room for more lights
     if self.active_light_count >= len(self.lights) do continue
 
     #partial switch &attachment in &node.attachment {
     case PointLightAttachment:
       light_info := &self.lights[self.active_light_count]
-
       // Fill GPU data directly via embedded struct
       position := node.transform.world_matrix * [4]f32{0, 0, 0, 1}
       light_info.light_kind = .POINT
@@ -1144,14 +1144,8 @@ render :: proc(self: ^Engine) -> vk.Result {
       &{sType = .COMMAND_BUFFER_BEGIN_INFO, flags = {.ONE_TIME_SUBMIT}},
     ) or_return
   } else {
-    // Legacy single-camera culling for main camera
-    visibility_culler_update(&self.visibility_culler, &self.scene)
-    visibility_culler_execute_with_frustum(
-      &self.visibility_culler,
-      command_buffer,
-      0,
-      frustum,
-    )
+    // CPU culling mode - no visibility culler operations needed
+    // Culling will be done per-object in generate_render_input using CPU frustum tests
   }
 
   compute_particles(&self.particle, command_buffer, main_camera^)
