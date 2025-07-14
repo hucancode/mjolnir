@@ -76,6 +76,7 @@ malloc_host_visible_buffer :: proc(
   return malloc_data_buffer(gpu_context, T, count, usage, {.HOST_VISIBLE, .HOST_COHERENT})
 }
 
+@(private = "file")
 align_up :: proc(value: int, alignment: int) -> int {
   return (value + alignment - 1) & ~(alignment - 1)
 }
@@ -201,6 +202,7 @@ create_local_buffer :: proc(
   return
 }
 
+@(private = "file")
 copy_buffer :: proc(gpu_context: ^GPUContext, dst, src: DataBuffer($T)) -> vk.Result {
   cmd_buffer := begin_single_time_command(gpu_context) or_return
   region := vk.BufferCopy {

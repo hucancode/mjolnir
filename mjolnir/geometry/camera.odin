@@ -74,6 +74,7 @@ make_camera_look_at :: proc(
 }
 
 // Safe up vector calculation to avoid gimbal lock
+@(private = "file")
 calculate_safe_up_vector :: proc(forward: [3]f32) -> [3]f32 {
   world_up := [3]f32{0, 1, 0}
   // If forward is nearly parallel with world up, use alternative up
@@ -84,6 +85,7 @@ calculate_safe_up_vector :: proc(forward: [3]f32) -> [3]f32 {
 }
 
 // Quaternion creation from forward and up vectors
+@(private = "file")
 quaternion_from_forward_and_up :: proc(forward, up: [3]f32) -> quaternion128 {
   right := linalg.normalize(linalg.cross(forward, up))
   recalc_up := linalg.cross(right, forward)

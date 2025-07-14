@@ -59,10 +59,8 @@ free :: proc(pool: ^Pool($T), handle: Handle) -> (item: ^T, freed: bool) {
   if !entry.active || entry.generation != handle.generation {
     return nil, false
   }
-
   // Return pointer to item before marking as freed
   item = &entry.item
-
   // Mark as freed
   entry.active = false
   entry.generation += 1
@@ -70,23 +68,7 @@ free :: proc(pool: ^Pool($T), handle: Handle) -> (item: ^T, freed: bool) {
     entry.generation = 1
   }
   append(&pool.free_indices, handle.index)
-
   return item, true
-}
-
-// Legacy functions for backward compatibility (deprecated)
-free_without_callback :: proc(pool: ^Pool($T), handle: Handle) {
-  free(pool, handle)
-}
-
-free_with_callback :: proc(
-  pool: ^Pool($T),
-  handle: Handle,
-  deinit_proc: proc(_: ^T),
-) {
-  if item, freed := free(pool, handle); freed {
-    deinit_proc(item)
-  }
 }
 
 get :: proc(

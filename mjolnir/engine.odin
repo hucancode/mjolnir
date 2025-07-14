@@ -235,6 +235,7 @@ get_window_dpi :: proc(window: glfw.WindowHandle) -> f32 {
 }
 
 // Initialize engine shadow map pools
+@(private = "file")
 engine_init_shadow_maps :: proc(engine: ^Engine) -> vk.Result {
   for f in 0 ..< MAX_FRAMES_IN_FLIGHT {
     for i in 0 ..< MAX_SHADOW_MAPS {
@@ -594,6 +595,7 @@ time_since_app_start :: proc(self: ^Engine) -> f32 {
   return f32(time.duration_seconds(time.since(self.start_timestamp)))
 }
 
+@(private = "file")
 update_emitters :: proc(self: ^Engine, delta_time: f32) {
   params := gpu.data_buffer_get(&self.particle.params_buffer)
   params.delta_time = delta_time
@@ -650,6 +652,7 @@ get_main_camera :: proc(engine: ^Engine) -> ^geometry.Camera {
 }
 
 
+@(private = "file")
 update_force_fields :: proc(self: ^Engine) {
   params := gpu.data_buffer_get(&self.particle.params_buffer)
   params.forcefield_count = 0
@@ -797,6 +800,7 @@ deinit :: proc(self: ^Engine) {
   log.infof("Engine deinitialized")
 }
 
+@(private = "file")
 recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
   // vk.DeviceWaitIdle(engine.gpu_context.device)
   swapchain_recreate(

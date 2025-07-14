@@ -106,6 +106,7 @@ gpu_context_deinit :: proc(self: ^GPUContext) {
   self.present_modes = nil
 }
 
+@(private = "file")
 debug_callback :: proc "system" (
   message_severity: vk.DebugUtilsMessageSeverityFlagsEXT,
   message_type: vk.DebugUtilsMessageTypeFlagsEXT,
@@ -133,6 +134,7 @@ debug_callback :: proc "system" (
   return false
 }
 
+@(private = "file")
 vulkan_instance_init :: proc(self: ^GPUContext) -> vk.Result {
   extensions := slice.clone_to_dynamic(glfw.GetRequiredInstanceExtensions())
   defer delete(extensions)
@@ -184,6 +186,7 @@ vulkan_instance_init :: proc(self: ^GPUContext) -> vk.Result {
   return .SUCCESS
 }
 
+@(private = "file")
 surface_init :: proc(self: ^GPUContext) -> vk.Result {
   glfw.CreateWindowSurface(self.instance, self.window, nil, &self.surface) or_return
   log.infof("Vulkan surface created")
@@ -243,6 +246,7 @@ swapchain_support_deinit :: proc(self: ^SwapchainSupport) {
   self.present_modes = nil
 }
 
+@(private = "file")
 score_physical_device :: proc(
   self: ^GPUContext,
   device: vk.PhysicalDevice,
@@ -315,6 +319,7 @@ score_physical_device :: proc(
   return current_score, .SUCCESS
 }
 
+@(private = "file")
 physical_device_init :: proc(self: ^GPUContext) -> vk.Result {
   count: u32
   vk.EnumeratePhysicalDevices(self.instance, &count, nil) or_return
@@ -352,6 +357,7 @@ physical_device_init :: proc(self: ^GPUContext) -> vk.Result {
   return .SUCCESS
 }
 
+@(private = "file")
 find_queue_families :: proc(
   physical_device: vk.PhysicalDevice,
   surface: vk.SurfaceKHR,
@@ -398,6 +404,7 @@ find_queue_families :: proc(
   return
 }
 
+@(private = "file")
 logical_device_init :: proc(self: ^GPUContext) -> vk.Result {
   indices := find_queue_families(self.physical_device, self.surface) or_return
   self.graphics_family = indices.graphics_family
@@ -466,6 +473,7 @@ logical_device_init :: proc(self: ^GPUContext) -> vk.Result {
   return .SUCCESS
 }
 
+@(private = "file")
 descriptor_pool_init :: proc(self: ^GPUContext) -> vk.Result {
   MAX_FRAMES_IN_FLIGHT :: 2 // TODO: get this from a common place
   // expand those limits as needed
@@ -506,6 +514,7 @@ descriptor_pool_init :: proc(self: ^GPUContext) -> vk.Result {
   return .SUCCESS
 }
 
+@(private = "file")
 command_pool_init :: proc(self: ^GPUContext) -> vk.Result {
   pool_info := vk.CommandPoolCreateInfo {
     sType            = .COMMAND_POOL_CREATE_INFO,
