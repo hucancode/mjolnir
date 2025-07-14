@@ -5,12 +5,11 @@ on:
     workflows: ["Run Smoke Test"]
     types:
       - completed
-    branches: [master]
   workflow_dispatch:
 
 jobs:
   build-and-run:
-    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+    if: ${{ (github.event.workflow_run.conclusion == 'success' && github.ref == 'refs/heads/master') || github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
 
     steps:
