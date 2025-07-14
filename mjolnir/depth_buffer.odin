@@ -19,8 +19,8 @@ RendererDepthPrepass :: struct {
 }
 
 depth_prepass_init :: proc(
-  gpu_context: ^gpu.GPUContext,
   self: ^RendererDepthPrepass,
+  gpu_context: ^gpu.GPUContext,
   swapchain_extent: vk.Extent2D,
   warehouse: ^ResourceWarehouse,
 ) -> (
@@ -63,7 +63,10 @@ depth_prepass_init :: proc(
   return .SUCCESS
 }
 
-depth_prepass_deinit :: proc(gpu_context: ^gpu.GPUContext, self: ^RendererDepthPrepass) {
+depth_prepass_deinit :: proc(
+  self: ^RendererDepthPrepass,
+  gpu_context: ^gpu.GPUContext,
+) {
   for &p in self.pipelines {
     vk.DestroyPipeline(gpu_context.device, p, nil)
     p = 0
@@ -157,12 +160,7 @@ depth_prepass_render :: proc(
           mesh := resource.get(warehouse.meshes, data.handle) or_continue
           mesh_skinning, mesh_has_skin := &mesh.skinning.?
           node_skinning, node_has_skin := data.skinning.?
-          pipeline := depth_prepass_get_pipeline(
-            self,
-            material,
-            mesh,
-            data,
-          )
+          pipeline := depth_prepass_get_pipeline(self, material, mesh, data)
           if pipeline != current_pipeline {
             vk.CmdBindPipeline(command_buffer, .GRAPHICS, pipeline)
             current_pipeline = pipeline

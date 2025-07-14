@@ -1,15 +1,15 @@
 package mjolnir
 
-import "gpu"
 import "animation"
 import "core:log"
 import linalg "core:math/linalg"
 import "geometry"
+import "gpu"
 import vk "vendor:vulkan"
 
 Bone :: struct {
   children:            []u32,
-  inverse_bind_matrix: matrix[4,4]f32,
+  inverse_bind_matrix: matrix[4, 4]f32,
   name:                string,
 }
 
@@ -36,7 +36,7 @@ Mesh :: struct {
   skinning:      Maybe(Skinning),
 }
 
-mesh_deinit :: proc(gpu_context: ^gpu.GPUContext, self: ^Mesh) {
+mesh_deinit :: proc(self: ^Mesh, gpu_context: ^gpu.GPUContext) {
   gpu.data_buffer_deinit(gpu_context, &self.vertex_buffer)
   gpu.data_buffer_deinit(gpu_context, &self.index_buffer)
   skin, has_skin := &self.skinning.?
@@ -50,7 +50,11 @@ mesh_deinit :: proc(gpu_context: ^gpu.GPUContext, self: ^Mesh) {
   delete(skin.animations)
 }
 
-mesh_init :: proc(gpu_context: ^gpu.GPUContext, self: ^Mesh, data: geometry.Geometry) -> vk.Result {
+mesh_init :: proc(
+  self: ^Mesh,
+  gpu_context: ^gpu.GPUContext,
+  data: geometry.Geometry,
+) -> vk.Result {
   defer geometry.delete_geometry(data)
   self.vertices_len = u32(len(data.vertices))
   self.indices_len = u32(len(data.indices))
@@ -120,7 +124,7 @@ sample_clip :: proc(
   self: ^Mesh,
   clip_idx: u32,
   t: f32,
-  out_bone_matrices: []matrix[4,4]f32,
+  out_bone_matrices: []matrix[4, 4]f32,
 ) {
   skin, has_skin := &self.skinning.?
   if !has_skin {
@@ -131,7 +135,7 @@ sample_clip :: proc(
     return
   }
   TraverseEntry :: struct {
-    transform: matrix[4,4]f32,
+    transform: matrix[4, 4]f32,
     bone:      u32,
   }
   stack := make([dynamic]TraverseEntry, 0, len(skin.bones))

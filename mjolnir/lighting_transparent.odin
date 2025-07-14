@@ -14,8 +14,8 @@ RendererTransparent :: struct {
 }
 
 transparent_init :: proc(
-  gpu_context: ^gpu.GPUContext,
   self: ^RendererTransparent,
+  gpu_context: ^gpu.GPUContext,
   width: u32,
   height: u32,
   warehouse: ^ResourceWarehouse,
@@ -52,16 +52,25 @@ transparent_init :: proc(
   return .SUCCESS
 }
 
-create_transparent_pipelines :: proc(gpu_context: ^gpu.GPUContext, self: ^RendererTransparent) -> vk.Result {
+create_transparent_pipelines :: proc(
+  gpu_context: ^gpu.GPUContext,
+  self: ^RendererTransparent,
+) -> vk.Result {
   // Create all shader variants for transparent PBR materials
   depth_format: vk.Format = .D32_SFLOAT
   color_format: vk.Format = .B8G8R8A8_SRGB
   // Load shader modules at compile time
   vert_shader_code := #load("shader/transparent/vert.spv")
-  vert_module := gpu.create_shader_module(gpu_context, vert_shader_code) or_return
+  vert_module := gpu.create_shader_module(
+    gpu_context,
+    vert_shader_code,
+  ) or_return
   defer vk.DestroyShaderModule(gpu_context.device, vert_module, nil)
   frag_shader_code := #load("shader/transparent/frag.spv")
-  frag_module := gpu.create_shader_module(gpu_context, frag_shader_code) or_return
+  frag_module := gpu.create_shader_module(
+    gpu_context,
+    frag_shader_code,
+  ) or_return
   defer vk.DestroyShaderModule(gpu_context.device, frag_module, nil)
 
   vertex_input_info := vk.PipelineVertexInputStateCreateInfo {
@@ -237,17 +246,26 @@ create_transparent_pipelines :: proc(gpu_context: ^gpu.GPUContext, self: ^Render
   return .SUCCESS
 }
 
-create_wireframe_pipelines :: proc(gpu_context: ^gpu.GPUContext, self: ^RendererTransparent) -> vk.Result {
+create_wireframe_pipelines :: proc(
+  gpu_context: ^gpu.GPUContext,
+  self: ^RendererTransparent,
+) -> vk.Result {
   depth_format: vk.Format = .D32_SFLOAT
   color_format: vk.Format = .B8G8R8A8_SRGB
 
   // Load shader modules at compile time
   vert_shader_code := #load("shader/wireframe/vert.spv")
-  vert_module := gpu.create_shader_module(gpu_context, vert_shader_code) or_return
+  vert_module := gpu.create_shader_module(
+    gpu_context,
+    vert_shader_code,
+  ) or_return
   defer vk.DestroyShaderModule(gpu_context.device, vert_module, nil)
 
   frag_shader_code := #load("shader/wireframe/frag.spv")
-  frag_module := gpu.create_shader_module(gpu_context, frag_shader_code) or_return
+  frag_module := gpu.create_shader_module(
+    gpu_context,
+    frag_shader_code,
+  ) or_return
   defer vk.DestroyShaderModule(gpu_context.device, frag_module, nil)
 
   vertex_input_info := vk.PipelineVertexInputStateCreateInfo {
@@ -413,7 +431,10 @@ create_wireframe_pipelines :: proc(gpu_context: ^gpu.GPUContext, self: ^Renderer
   return .SUCCESS
 }
 
-transparent_deinit :: proc(gpu_context: ^gpu.GPUContext, self: ^RendererTransparent) {
+transparent_deinit :: proc(
+  self: ^RendererTransparent,
+  gpu_context: ^gpu.GPUContext,
+) {
   // Destroy all transparent material pipelines
   for i in 0 ..< SHADER_VARIANT_COUNT {
     vk.DestroyPipeline(gpu_context.device, self.transparent_pipelines[i], nil)
@@ -525,7 +546,10 @@ transparent_render :: proc(
           mesh_attachment, ok := node.attachment.(MeshAttachment)
           if !ok do continue
 
-          mesh := resource.get(warehouse.meshes, mesh_attachment.handle) or_continue
+          mesh := resource.get(
+            warehouse.meshes,
+            mesh_attachment.handle,
+          ) or_continue
 
           push_constants := PushConstant {
             world                    = node.transform.world_matrix,
@@ -596,7 +620,10 @@ transparent_render :: proc(
         for node in batch_data.nodes {
           mesh_attachment, ok := node.attachment.(MeshAttachment)
           if !ok do continue
-          mesh := resource.get(warehouse.meshes, mesh_attachment.handle) or_continue
+          mesh := resource.get(
+            warehouse.meshes,
+            mesh_attachment.handle,
+          ) or_continue
           // Check if skinning feature is enabled
           is_skinned := .SKINNING in batch_key.features
           pipeline_idx := is_skinned ? 1 : 0

@@ -2,9 +2,9 @@ package mjolnir
 
 import "core:log"
 import "geometry"
+import "gpu"
 import "resource"
 import vk "vendor:vulkan"
-import "gpu"
 
 MAX_PARTICLES :: 65536
 COMPUTE_PARTICLE_BATCH :: 256
@@ -27,7 +27,7 @@ Emitter :: struct {
   weight:            f32,
   weight_spread:     f32,
   texture_index:     u32,
-  visible:   b32,
+  visible:           b32,
   padding:           [1]u32,
   aabb_min:          [4]f32, // xyz = min bounds, w = unused
   aabb_max:          [4]f32, // xyz = max bounds, w = unused
@@ -270,30 +270,49 @@ compact_particles :: proc(
   )
 }
 
-particle_deinit :: proc(gpu_context: ^gpu.GPUContext, self: ^RendererParticle) {
+particle_deinit :: proc(
+  self: ^RendererParticle,
+  gpu_context: ^gpu.GPUContext,
+) {
   vk.DestroyPipeline(gpu_context.device, self.compute_pipeline, nil)
-  vk.DestroyPipelineLayout(gpu_context.device, self.compute_pipeline_layout, nil)
+  vk.DestroyPipelineLayout(
+    gpu_context.device,
+    self.compute_pipeline_layout,
+    nil,
+  )
   vk.DestroyDescriptorSetLayout(
     gpu_context.device,
     self.compute_descriptor_set_layout,
     nil,
   )
   vk.DestroyPipeline(gpu_context.device, self.emitter_pipeline, nil)
-  vk.DestroyPipelineLayout(gpu_context.device, self.emitter_pipeline_layout, nil)
+  vk.DestroyPipelineLayout(
+    gpu_context.device,
+    self.emitter_pipeline_layout,
+    nil,
+  )
   vk.DestroyDescriptorSetLayout(
     gpu_context.device,
     self.emitter_descriptor_set_layout,
     nil,
   )
   vk.DestroyPipeline(gpu_context.device, self.compact_pipeline, nil)
-  vk.DestroyPipelineLayout(gpu_context.device, self.compact_pipeline_layout, nil)
+  vk.DestroyPipelineLayout(
+    gpu_context.device,
+    self.compact_pipeline_layout,
+    nil,
+  )
   vk.DestroyDescriptorSetLayout(
     gpu_context.device,
     self.compact_descriptor_set_layout,
     nil,
   )
   vk.DestroyPipeline(gpu_context.device, self.render_pipeline, nil)
-  vk.DestroyPipelineLayout(gpu_context.device, self.render_pipeline_layout, nil)
+  vk.DestroyPipelineLayout(
+    gpu_context.device,
+    self.render_pipeline_layout,
+    nil,
+  )
   gpu.data_buffer_deinit(gpu_context, &self.params_buffer)
   gpu.data_buffer_deinit(gpu_context, &self.particle_buffer)
   gpu.data_buffer_deinit(gpu_context, &self.compact_particle_buffer)
@@ -303,7 +322,11 @@ particle_deinit :: proc(gpu_context: ^gpu.GPUContext, self: ^RendererParticle) {
   gpu.data_buffer_deinit(gpu_context, &self.particle_counter_buffer)
 }
 
-particle_init :: proc(gpu_context: ^gpu.GPUContext, self: ^RendererParticle, warehouse: ^ResourceWarehouse) -> vk.Result {
+particle_init :: proc(
+  self: ^RendererParticle,
+  gpu_context: ^gpu.GPUContext,
+  warehouse: ^ResourceWarehouse,
+) -> vk.Result {
   log.debugf("Initializing particle renderer")
   self.params_buffer = gpu.create_host_visible_buffer(
     gpu_context,
@@ -898,8 +921,14 @@ particle_init_render_pipeline :: proc(
   }
   vert_shader_code := #load("shader/particle/vert.spv")
   frag_shader_code := #load("shader/particle/frag.spv")
-  vert_module := gpu.create_shader_module(gpu_context, vert_shader_code) or_return
-  frag_module := gpu.create_shader_module(gpu_context, frag_shader_code) or_return
+  vert_module := gpu.create_shader_module(
+    gpu_context,
+    vert_shader_code,
+  ) or_return
+  frag_module := gpu.create_shader_module(
+    gpu_context,
+    frag_shader_code,
+  ) or_return
   defer vk.DestroyShaderModule(gpu_context.device, vert_module, nil)
   defer vk.DestroyShaderModule(gpu_context.device, frag_module, nil)
   shader_stages := [?]vk.PipelineShaderStageCreateInfo {
@@ -1086,7 +1115,7 @@ create_emitter_with_aabb :: proc(
     transform         = transform,
     aabb_min          = {aabb_min.x, aabb_min.y, aabb_min.z, 0.0},
     aabb_max          = {aabb_max.x, aabb_max.y, aabb_max.z, 0.0},
-    visible   = b32(enable_culling),
+    visible           = b32(enable_culling),
     // Default values - user should set these
     emission_rate     = 10.0,
     particle_lifetime = 5.0,

@@ -15,8 +15,8 @@ RendererShadow :: struct {
 }
 
 shadow_init :: proc(
-  gpu_context: ^gpu.GPUContext,
   self: ^RendererShadow,
+  gpu_context: ^gpu.GPUContext,
   depth_format: vk.Format = .D32_SFLOAT,
   warehouse: ^ResourceWarehouse,
 ) -> vk.Result {
@@ -39,9 +39,15 @@ shadow_init :: proc(
     nil,
     &self.pipeline_layout,
   ) or_return
-  vert_module := gpu.create_shader_module(gpu_context, SHADER_SHADOW_VERT) or_return
+  vert_module := gpu.create_shader_module(
+    gpu_context,
+    SHADER_SHADOW_VERT,
+  ) or_return
   defer vk.DestroyShaderModule(gpu_context.device, vert_module, nil)
-  frag_module := gpu.create_shader_module(gpu_context, SHADER_SHADOW_FRAG) or_return
+  frag_module := gpu.create_shader_module(
+    gpu_context,
+    SHADER_SHADOW_FRAG,
+  ) or_return
   defer vk.DestroyShaderModule(gpu_context.device, frag_module, nil)
   input_assembly := vk.PipelineInputAssemblyStateCreateInfo {
     sType    = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
@@ -160,7 +166,7 @@ shadow_init :: proc(
   return .SUCCESS
 }
 
-shadow_deinit :: proc(gpu_context: ^gpu.GPUContext, self: ^RendererShadow) {
+shadow_deinit :: proc(self: ^RendererShadow, gpu_context: ^gpu.GPUContext) {
   for &p in self.pipelines {
     vk.DestroyPipeline(gpu_context.device, p, nil)
     p = 0
@@ -192,7 +198,10 @@ shadow_begin :: proc(
     }
     depth_image_view = cube_texture.face_views[face_index]
   } else {
-    texture_2d := resource.get(warehouse.image_2d_buffers, render_target_depth_texture(shadow_target, frame_index))
+    texture_2d := resource.get(
+      warehouse.image_2d_buffers,
+      render_target_depth_texture(shadow_target, frame_index),
+    )
     if texture_2d == nil {
       log.errorf(
         "Invalid 2D shadow map handle: %v",
@@ -324,7 +333,9 @@ render_single_shadow_node :: proc(
     camera_index = camera_index,
   }
   if is_skinned && node_has_skin {
-    push_constant.bone_matrix_offset = node_skinning.bone_matrix_offset + frame_index * warehouse.bone_matrix_slab.capacity
+    push_constant.bone_matrix_offset =
+      node_skinning.bone_matrix_offset +
+      frame_index * warehouse.bone_matrix_slab.capacity
   }
   vk.CmdPushConstants(
     command_buffer,

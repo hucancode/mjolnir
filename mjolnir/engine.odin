@@ -337,12 +337,12 @@ init :: proc(
   }
   log.infof("Window created %v\n", self.window)
   gpu.gpu_context_init(&self.gpu_context, self.window) or_return
-  resource_init(&self.gpu_context, &self.warehouse) or_return
+  resource_init(&self.warehouse, &self.gpu_context) or_return
   self.start_timestamp = time.now()
   self.last_frame_timestamp = self.start_timestamp
   self.last_update_timestamp = self.start_timestamp
   scene_init(&self.scene)
-  swapchain_init(&self.gpu_context, &self.swapchain, self.window) or_return
+  swapchain_init(&self.swapchain, &self.gpu_context, self.window) or_return
 
   // Initialize frame active render targets
   self.frame_active_render_targets = make([dynamic]Handle, 0)
@@ -356,9 +356,9 @@ init :: proc(
     &self.warehouse.render_targets,
   )
   render_target_init(
+    main_render_target,
     &self.gpu_context,
     &self.warehouse,
-    main_render_target,
     self.swapchain.extent.width,
     self.swapchain.extent.height,
     self.swapchain.format.format,
@@ -377,8 +377,8 @@ init :: proc(
     raw_data(self.command_buffers[:]),
   ) or_return
   lighting_init(
-    &self.gpu_context,
     &self.lighting,
+    &self.gpu_context,
     self.swapchain.extent.width,
     self.swapchain.extent.height,
     self.swapchain.format.format,
@@ -386,8 +386,8 @@ init :: proc(
     &self.warehouse,
   ) or_return
   ambient_init(
-    &self.gpu_context,
     &self.ambient,
+    &self.gpu_context,
     &self.warehouse,
     self.swapchain.extent.width,
     self.swapchain.extent.height,
@@ -395,46 +395,51 @@ init :: proc(
   ) or_return
   // Environment resources will be moved to ambient pass
   gbuffer_init(
-    &self.gpu_context,
     &self.gbuffer,
+    &self.gpu_context,
     self.swapchain.extent.width,
     self.swapchain.extent.height,
     &self.warehouse,
   ) or_return
   depth_prepass_init(
-    &self.gpu_context,
     &self.depth_prepass,
+    &self.gpu_context,
     self.swapchain.extent,
     &self.warehouse,
   ) or_return
-  particle_init(&self.gpu_context, &self.particle, &self.warehouse) or_return
+  particle_init(&self.particle, &self.gpu_context, &self.warehouse) or_return
   when USE_GPU_CULLING {
     visibility_culler_init(
-      &self.gpu_context,
       &self.visibility_culler,
+      &self.gpu_context,
     ) or_return
   }
   transparent_init(
-    &self.gpu_context,
     &self.transparent,
+    &self.gpu_context,
     self.swapchain.extent.width,
     self.swapchain.extent.height,
     &self.warehouse,
   ) or_return
   log.debugf("initializing shadow pipeline")
-  shadow_init(&self.gpu_context, &self.shadow, .D32_SFLOAT, &self.warehouse) or_return
+  shadow_init(
+    &self.shadow,
+    &self.gpu_context,
+    .D32_SFLOAT,
+    &self.warehouse,
+  ) or_return
   log.debugf("initializing post process pipeline")
   postprocess_init(
-    &self.gpu_context,
     &self.postprocess,
+    &self.gpu_context,
     self.swapchain.format.format,
     self.swapchain.extent.width,
     self.swapchain.extent.height,
     &self.warehouse,
   ) or_return
   ui_init(
-    &self.gpu_context,
     &self.ui,
+    &self.gpu_context,
     self.swapchain.format.format,
     self.swapchain.extent.width,
     self.swapchain.extent.height,
@@ -747,7 +752,7 @@ deinit :: proc(self: ^Engine) {
       &self.warehouse.render_targets,
       self.main_render_target,
     ); freed {
-      render_target_deinit(&self.gpu_context, &self.warehouse, item)
+      render_target_deinit(item, &self.gpu_context, &self.warehouse)
     }
   }
 
@@ -771,21 +776,21 @@ deinit :: proc(self: ^Engine) {
   // Clean up frame active render targets
   delete(self.frame_active_render_targets)
 
-  ui_deinit(&self.gpu_context, &self.ui)
+  ui_deinit(&self.ui, &self.gpu_context)
   scene_deinit(&self.scene, &self.warehouse)
-  lighting_deinit(&self.gpu_context, &self.lighting)
-  ambient_deinit(&self.gpu_context, &self.ambient, &self.warehouse)
-  gbuffer_deinit(&self.gpu_context, &self.gbuffer)
-  shadow_deinit(&self.gpu_context, &self.shadow)
-  postprocess_deinit(&self.gpu_context, &self.postprocess, &self.warehouse)
-  particle_deinit(&self.gpu_context, &self.particle)
+  lighting_deinit(&self.lighting, &self.gpu_context)
+  ambient_deinit(&self.ambient, &self.gpu_context, &self.warehouse)
+  gbuffer_deinit(&self.gbuffer, &self.gpu_context)
+  shadow_deinit(&self.shadow, &self.gpu_context)
+  postprocess_deinit(&self.postprocess, &self.gpu_context, &self.warehouse)
+  particle_deinit(&self.particle, &self.gpu_context)
   when USE_GPU_CULLING {
-    visibility_culler_deinit(&self.gpu_context, &self.visibility_culler)
+    visibility_culler_deinit(&self.visibility_culler, &self.gpu_context)
   }
-  transparent_deinit(&self.gpu_context, &self.transparent)
-  depth_prepass_deinit(&self.gpu_context, &self.depth_prepass)
-  resource_deinit(&self.gpu_context, &self.warehouse)
-  swapchain_deinit(&self.gpu_context, &self.swapchain)
+  transparent_deinit(&self.transparent, &self.gpu_context)
+  depth_prepass_deinit(&self.depth_prepass, &self.gpu_context)
+  resource_deinit(&self.warehouse, &self.gpu_context)
+  swapchain_deinit(&self.swapchain, &self.gpu_context)
   gpu.gpu_context_deinit(&self.gpu_context)
   glfw.DestroyWindow(self.window)
   glfw.Terminate()
@@ -820,14 +825,14 @@ recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
     old_target := [3]f32{0, 0, 0} // Calculate from camera direction if needed
 
     render_target_deinit(
+      main_render_target,
       &engine.gpu_context,
       &engine.warehouse,
-      main_render_target,
     )
     render_target_init(
+      main_render_target,
       &engine.gpu_context,
       &engine.warehouse,
-      main_render_target,
       engine.swapchain.extent.width,
       engine.swapchain.extent.height,
       engine.swapchain.format.format,
@@ -961,7 +966,11 @@ generate_render_input :: proc(
 
 render :: proc(self: ^Engine) -> vk.Result {
   // log.debug("============ acquiring image...============ ")
-  acquire_next_image(&self.gpu_context, &self.swapchain, self.frame_index) or_return
+  acquire_next_image(
+    &self.gpu_context,
+    &self.swapchain,
+    self.frame_index,
+  ) or_return
   mu.begin(&self.ui.ctx)
   command_buffer := self.command_buffers[self.frame_index]
   vk.ResetCommandBuffer(command_buffer, {}) or_return
@@ -1223,8 +1232,8 @@ render :: proc(self: ^Engine) -> vk.Result {
       self.frame_index,
     )
     visibility_culler_execute(
-      &self.gpu_context,
       &self.visibility_culler,
+      &self.gpu_context,
       command_buffer,
       self.frame_index,
     )
@@ -1407,7 +1416,13 @@ render :: proc(self: ^Engine) -> vk.Result {
           light_info.cube_cameras[face],
           shadow_pass = true,
         )
-        shadow_begin(target, command_buffer, &self.warehouse, self.frame_index, u32(face))
+        shadow_begin(
+          target,
+          command_buffer,
+          &self.warehouse,
+          self.frame_index,
+          u32(face),
+        )
         shadow_render(
           &self.shadow,
           shadow_render_input,
@@ -1445,7 +1460,12 @@ render :: proc(self: ^Engine) -> vk.Result {
         light_info.camera,
         shadow_pass = true,
       )
-      shadow_begin(shadow_target, command_buffer, &self.warehouse, self.frame_index)
+      shadow_begin(
+        shadow_target,
+        command_buffer,
+        &self.warehouse,
+        self.frame_index,
+      )
       shadow_render(
         &self.shadow,
         shadow_render_input,
@@ -1555,7 +1575,12 @@ render :: proc(self: ^Engine) -> vk.Result {
     frustum,
     main_render_target.camera,
   )
-  depth_prepass_begin(main_render_target, command_buffer, &self.warehouse, self.frame_index)
+  depth_prepass_begin(
+    main_render_target,
+    command_buffer,
+    &self.warehouse,
+    self.frame_index,
+  )
   depth_prepass_render(
     &self.depth_prepass,
     &depth_input,
@@ -1604,11 +1629,29 @@ render :: proc(self: ^Engine) -> vk.Result {
   // log.debug("============ rendering main pass... =============")
   // Prepare RenderTarget and RenderInput for decoupled renderer
   // Ambient pass
-  ambient_begin(&self.ambient, main_render_target, command_buffer, &self.warehouse, self.frame_index)
-  ambient_render(&self.ambient, main_render_target, command_buffer, &self.warehouse, self.frame_index)
+  ambient_begin(
+    &self.ambient,
+    main_render_target,
+    command_buffer,
+    &self.warehouse,
+    self.frame_index,
+  )
+  ambient_render(
+    &self.ambient,
+    main_render_target,
+    command_buffer,
+    &self.warehouse,
+    self.frame_index,
+  )
   ambient_end(command_buffer)
   // Per-light additive pass
-  lighting_begin(&self.lighting, main_render_target, command_buffer, &self.warehouse, self.frame_index)
+  lighting_begin(
+    &self.lighting,
+    main_render_target,
+    command_buffer,
+    &self.warehouse,
+    self.frame_index,
+  )
   lighting_render(
     &self.lighting,
     self.lights[:self.active_light_count],
@@ -1635,7 +1678,13 @@ render :: proc(self: ^Engine) -> vk.Result {
   particle_end(command_buffer)
 
   // Transparent & wireframe pass
-  transparent_begin(&self.transparent, main_render_target, command_buffer, &self.warehouse, self.frame_index)
+  transparent_begin(
+    &self.transparent,
+    main_render_target,
+    command_buffer,
+    &self.warehouse,
+    self.frame_index,
+  )
   transparent_render(
     &self.transparent,
     gbuffer_input,

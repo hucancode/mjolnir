@@ -117,7 +117,7 @@ load_gltf :: proc(
             &material_to_handle,
           )
         if res == .SUCCESS {
-          mesh_init(&engine.gpu_context, mesh, data)
+          mesh_init(mesh, &engine.gpu_context, data)
           skinning, _ := &mesh.skinning.?
           skinning.bones = bones
           skinning.root_bone_index = root_bone_idx
@@ -143,7 +143,8 @@ load_gltf :: proc(
             // Set bind pose for all frames (otherwise zeroed out matrices will cause model to be invisible)
             for frame_idx in 0 ..< MAX_FRAMES_IN_FLIGHT {
               l :=
-                bone_matrix_id + u32(frame_idx) * engine.warehouse.bone_matrix_slab.capacity
+                bone_matrix_id +
+                u32(frame_idx) * engine.warehouse.bone_matrix_slab.capacity
               r := l + u32(len(bones))
               bone_matrices := engine.warehouse.bone_buffer.mapped[l:r]
               slice.fill(bone_matrices, linalg.MATRIX4F32_IDENTITY)
@@ -176,8 +177,11 @@ load_gltf :: proc(
           }
         } else {
           // Clean up the allocated mesh if skinned primitive loading failed
-          if mesh, freed := resource.free(&engine.warehouse.meshes, mesh_handle); freed {
-            mesh_deinit(&engine.gpu_context, mesh)
+          if mesh, freed := resource.free(
+            &engine.warehouse.meshes,
+            mesh_handle,
+          ); freed {
+            mesh_deinit(mesh, &engine.gpu_context)
           }
         }
       } else {
@@ -200,7 +204,11 @@ load_gltf :: proc(
           len(mesh_data.indices),
           mesh_data.skinnings,
         )
-        mesh_handle, _, ret := create_mesh(&engine.gpu_context, &engine.warehouse, mesh_data)
+        mesh_handle, _, ret := create_mesh(
+          &engine.gpu_context,
+          &engine.warehouse,
+          mesh_data,
+        )
         if ret != .SUCCESS {
           log.error("Failed to create static mesh ", ret)
           continue
@@ -286,7 +294,11 @@ load_gltf_texture :: proc(
     return
   }
   log.infof("Creating new texture from %d bytes", len(pixel_data))
-  tex_handle, texture = create_texture_from_data(&engine.gpu_context, &engine.warehouse, pixel_data) or_return
+  tex_handle, texture = create_texture_from_data(
+    &engine.gpu_context,
+    &engine.warehouse,
+    pixel_data,
+  ) or_return
   delete(pixel_data)
   // Cache the texture
   texture_cache[gltf_texture] = tex_handle

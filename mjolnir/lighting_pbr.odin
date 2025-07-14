@@ -23,8 +23,8 @@ RendererLighting :: struct {
   fullscreen_triangle_mesh: Handle,
 }
 lighting_init :: proc(
-  gpu_context: ^gpu.GPUContext,
   self: ^RendererLighting,
+  gpu_context: ^gpu.GPUContext,
   width: u32,
   height: u32,
   color_format: vk.Format = .B8G8R8A8_SRGB,
@@ -54,10 +54,16 @@ lighting_init :: proc(
     &self.lighting_pipeline_layout,
   ) or_return
   vert_shader_code := #load("shader/lighting/vert.spv")
-  vert_module := gpu.create_shader_module(gpu_context, vert_shader_code) or_return
+  vert_module := gpu.create_shader_module(
+    gpu_context,
+    vert_shader_code,
+  ) or_return
   defer vk.DestroyShaderModule(gpu_context.device, vert_module, nil)
   frag_shader_code := #load("shader/lighting/frag.spv")
-  frag_module := gpu.create_shader_module(gpu_context, frag_shader_code) or_return
+  frag_module := gpu.create_shader_module(
+    gpu_context,
+    frag_shader_code,
+  ) or_return
   defer vk.DestroyShaderModule(gpu_context.device, frag_module, nil)
   dynamic_states := [?]vk.DynamicState{.VIEWPORT, .SCISSOR}
   dynamic_state := vk.PipelineDynamicStateCreateInfo {
@@ -209,8 +215,15 @@ lighting_init :: proc(
   return .SUCCESS
 }
 
-lighting_deinit :: proc(gpu_context: ^gpu.GPUContext, self: ^RendererLighting) {
-  vk.DestroyPipelineLayout(gpu_context.device, self.lighting_pipeline_layout, nil)
+lighting_deinit :: proc(
+  self: ^RendererLighting,
+  gpu_context: ^gpu.GPUContext,
+) {
+  vk.DestroyPipelineLayout(
+    gpu_context.device,
+    self.lighting_pipeline_layout,
+    nil,
+  )
   vk.DestroyPipeline(gpu_context.device, self.lighting_pipeline, nil)
   vk.DestroyPipeline(gpu_context.device, self.spot_light_pipeline, nil)
 }
@@ -370,7 +383,11 @@ lighting_render :: proc(
         size_of(LightPushConstant),
         &light_info.gpu_data,
       )
-      bind_and_draw_mesh(self.fullscreen_triangle_mesh, command_buffer, warehouse)
+      bind_and_draw_mesh(
+        self.fullscreen_triangle_mesh,
+        command_buffer,
+        warehouse,
+      )
       rendered_count += 1
 
     case .SPOT:

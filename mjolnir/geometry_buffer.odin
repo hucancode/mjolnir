@@ -27,8 +27,8 @@ RendererGBuffer :: struct {
 }
 
 gbuffer_init :: proc(
-  gpu_context: ^gpu.GPUContext,
   self: ^RendererGBuffer,
+  gpu_context: ^gpu.GPUContext,
   width: u32,
   height: u32,
   warehouse: ^ResourceWarehouse,
@@ -57,10 +57,16 @@ gbuffer_init :: proc(
   ) or_return
   log.info("About to build G-buffer pipelines...")
   vert_shader_code := #load("shader/gbuffer/vert.spv")
-  vert_module := gpu.create_shader_module(gpu_context, vert_shader_code) or_return
+  vert_module := gpu.create_shader_module(
+    gpu_context,
+    vert_shader_code,
+  ) or_return
   defer vk.DestroyShaderModule(gpu_context.device, vert_module, nil)
   frag_shader_code := #load("shader/gbuffer/frag.spv")
-  frag_module := gpu.create_shader_module(gpu_context, frag_shader_code) or_return
+  frag_module := gpu.create_shader_module(
+    gpu_context,
+    frag_shader_code,
+  ) or_return
   defer vk.DestroyShaderModule(gpu_context.device, frag_module, nil)
   vertex_input_info := vk.PipelineVertexInputStateCreateInfo {
     sType                           = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
@@ -98,7 +104,7 @@ gbuffer_init :: proc(
   depth_stencil := vk.PipelineDepthStencilStateCreateInfo {
     sType            = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
     depthTestEnable  = true,
-    depthWriteEnable = true,  // Changed to true to enable depth writes in gbuffer pass
+    depthWriteEnable = true, // Changed to true to enable depth writes in gbuffer pass
     depthCompareOp   = .LESS_OR_EQUAL,
   }
   color_blend_attachments := [?]vk.PipelineColorBlendAttachmentState {
@@ -257,7 +263,7 @@ gbuffer_begin :: proc(
   )
 
   // Collect all G-buffer images for batch transition
-  gbuffer_images := [?]vk.Image{
+  gbuffer_images := [?]vk.Image {
     position_texture.image,
     normal_texture.image,
     albedo_texture.image,
@@ -342,12 +348,12 @@ gbuffer_begin :: proc(
     render_target_depth_texture(render_target, frame_index),
   )
   depth_attachment := vk.RenderingAttachmentInfoKHR {
-    sType       = .RENDERING_ATTACHMENT_INFO_KHR,
-    imageView   = depth_texture.view,
+    sType = .RENDERING_ATTACHMENT_INFO_KHR,
+    imageView = depth_texture.view,
     imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-    loadOp      = self_manage_depth ? .CLEAR : .LOAD,
-    storeOp     = .STORE,
-    clearValue  = {depthStencil = {depth = 1.0, stencil = 0}},
+    loadOp = self_manage_depth ? .CLEAR : .LOAD,
+    storeOp = .STORE,
+    clearValue = {depthStencil = {depth = 1.0, stencil = 0}},
   }
   color_attachments := [?]vk.RenderingAttachmentInfoKHR {
     position_attachment,
@@ -411,7 +417,7 @@ gbuffer_end :: proc(
   )
 
   // Collect G-buffer images for batch transition (excluding final image which stays as attachment)
-  gbuffer_images := [?]vk.Image{
+  gbuffer_images := [?]vk.Image {
     position_texture.image,
     normal_texture.image,
     albedo_texture.image,
@@ -479,7 +485,10 @@ gbuffer_render :: proc(
       ) or_continue
       for node in batch_data.nodes {
         mesh_attachment := node.attachment.(MeshAttachment)
-        mesh := resource.get(warehouse.meshes, mesh_attachment.handle) or_continue
+        mesh := resource.get(
+          warehouse.meshes,
+          mesh_attachment.handle,
+        ) or_continue
         // DEBUG: Use a constant color for albedo to test G-buffer -> lighting pass
         push_constants := PushConstant {
           world                    = node.transform.world_matrix,
@@ -552,7 +561,7 @@ gbuffer_get_pipeline :: proc(
   return self.pipelines[transmute(u32)features]
 }
 
-gbuffer_deinit :: proc(gpu_context: ^gpu.GPUContext, self: ^RendererGBuffer) {
+gbuffer_deinit :: proc(self: ^RendererGBuffer, gpu_context: ^gpu.GPUContext) {
   for pipeline in self.pipelines {
     vk.DestroyPipeline(gpu_context.device, pipeline, nil)
   }

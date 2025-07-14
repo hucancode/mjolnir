@@ -16,9 +16,9 @@ Pool :: struct($T: typeid) {
   free_indices: [dynamic]u32,
 }
 
-pool_init :: proc(pool: ^Pool($T)) {
-  pool.entries = make([dynamic]Entry(T), 0, 0)
-  pool.free_indices = make([dynamic]u32, 0, 0)
+pool_init :: proc(self: ^Pool($T)) {
+  self.entries = make([dynamic]Entry(T), 0, 0)
+  self.free_indices = make([dynamic]u32, 0, 0)
 }
 
 pool_deinit :: proc(pool: Pool($T), deinit_proc: proc(_: ^T)) {
@@ -59,10 +59,10 @@ free :: proc(pool: ^Pool($T), handle: Handle) -> (item: ^T, freed: bool) {
   if !entry.active || entry.generation != handle.generation {
     return nil, false
   }
-  
+
   // Return pointer to item before marking as freed
   item = &entry.item
-  
+
   // Mark as freed
   entry.active = false
   entry.generation += 1
@@ -70,7 +70,7 @@ free :: proc(pool: ^Pool($T), handle: Handle) -> (item: ^T, freed: bool) {
     entry.generation = 1
   }
   append(&pool.free_indices, handle.index)
-  
+
   return item, true
 }
 
@@ -79,7 +79,11 @@ free_without_callback :: proc(pool: ^Pool($T), handle: Handle) {
   free(pool, handle)
 }
 
-free_with_callback :: proc(pool: ^Pool($T), handle: Handle, deinit_proc: proc(_: ^T)) {
+free_with_callback :: proc(
+  pool: ^Pool($T),
+  handle: Handle,
+  deinit_proc: proc(_: ^T),
+) {
   if item, freed := free(pool, handle); freed {
     deinit_proc(item)
   }
