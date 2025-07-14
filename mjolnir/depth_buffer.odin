@@ -3,6 +3,7 @@ package mjolnir
 import "core:fmt"
 import "core:log"
 import "geometry"
+import "gpu"
 import "resource"
 import mu "vendor:microui"
 import vk "vendor:vulkan"
@@ -18,7 +19,7 @@ RendererDepthPrepass :: struct {
 }
 
 depth_prepass_init :: proc(
-  gpu_context: ^GPUContext,
+  gpu_context: ^gpu.GPUContext,
   self: ^RendererDepthPrepass,
   swapchain_extent: vk.Extent2D,
 ) -> (
@@ -61,7 +62,7 @@ depth_prepass_init :: proc(
   return .SUCCESS
 }
 
-depth_prepass_deinit :: proc(gpu_context: ^GPUContext, self: ^RendererDepthPrepass) {
+depth_prepass_deinit :: proc(gpu_context: ^gpu.GPUContext, self: ^RendererDepthPrepass) {
   for &p in self.pipelines {
     vk.DestroyPipeline(gpu_context.device, p, nil)
     p = 0
@@ -219,7 +220,7 @@ depth_prepass_get_pipeline :: proc(
 }
 
 depth_prepass_build_pipeline :: proc(
-  gpu_context: ^GPUContext,
+  gpu_context: ^gpu.GPUContext,
   self: ^RendererDepthPrepass,
   config: ^ShaderConfig,
   pipeline: ^vk.Pipeline,
@@ -228,7 +229,7 @@ depth_prepass_build_pipeline :: proc(
   res: vk.Result,
 ) {
   log.debugf("Building depth prepass pipeline with config: %v", config)
-  vert_shader_module := create_shader_module(
+  vert_shader_module := gpu.create_shader_module(
     gpu_context,
     SHADER_DEPTH_PREPASS_VERT,
   ) or_return

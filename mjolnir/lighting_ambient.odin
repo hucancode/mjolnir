@@ -2,6 +2,7 @@ package mjolnir
 
 import "core:log"
 import "core:slice"
+import "gpu"
 import "resource"
 import vk "vendor:vulkan"
 
@@ -118,7 +119,7 @@ ambient_end :: proc(command_buffer: vk.CommandBuffer) {
 }
 
 ambient_init :: proc(
-  gpu_context: ^GPUContext,
+  gpu_context: ^gpu.GPUContext,
   self: ^RendererAmbient,
   width: u32,
   height: u32,
@@ -147,10 +148,10 @@ ambient_init :: proc(
   ) or_return
 
   vert_shader_code := #load("shader/lighting_ambient/vert.spv")
-  vert_module := create_shader_module(gpu_context, vert_shader_code) or_return
+  vert_module := gpu.create_shader_module(gpu_context, vert_shader_code) or_return
   defer vk.DestroyShaderModule(gpu_context.device, vert_module, nil)
   frag_shader_code := #load("shader/lighting_ambient/frag.spv")
-  frag_module := create_shader_module(gpu_context, frag_shader_code) or_return
+  frag_module := gpu.create_shader_module(gpu_context, frag_shader_code) or_return
   defer vk.DestroyShaderModule(gpu_context.device, frag_module, nil)
 
   dynamic_states := [?]vk.DynamicState{.VIEWPORT, .SCISSOR}
@@ -243,7 +244,7 @@ ambient_init :: proc(
   ) or_return
 
   // Initialize environment resources
-  environment_map: ^ImageBuffer
+  environment_map: ^gpu.ImageBuffer
   self.environment_map, environment_map =
     create_hdr_texture_from_path_with_mips(
       gpu_context,
@@ -254,7 +255,7 @@ ambient_init :: proc(
     self.environment_max_lod =
       calculate_mip_levels(environment_map.width, environment_map.height) - 1.0
   }
-  brdf_lut: ^ImageBuffer
+  brdf_lut: ^gpu.ImageBuffer
   self.brdf_lut, brdf_lut = create_texture_from_data(
     gpu_context,
     #load("assets/lut_ggx.png"),
@@ -266,16 +267,16 @@ ambient_init :: proc(
 }
 
 
-ambient_deinit :: proc(gpu_context: ^GPUContext, self: ^RendererAmbient) {
+ambient_deinit :: proc(gpu_context: ^gpu.GPUContext, self: ^RendererAmbient) {
   vk.DestroyPipeline(gpu_context.device, self.pipeline, nil)
   self.pipeline = 0
   vk.DestroyPipelineLayout(gpu_context.device, self.pipeline_layout, nil)
   self.pipeline_layout = 0
   // Clean up environment resources
   if item, freed := resource.free(&g_image_2d_buffers, self.environment_map); freed {
-    image_buffer_deinit(gpu_context, item)
+    gpu.image_buffer_deinit(gpu_context, item)
   }
   if item, freed := resource.free(&g_image_2d_buffers, self.brdf_lut); freed {
-    image_buffer_deinit(gpu_context, item)
+    gpu.image_buffer_deinit(gpu_context, item)
   }
 }

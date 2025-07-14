@@ -14,6 +14,7 @@ import vk "vendor:vulkan"
 
 import "animation"
 import "geometry"
+import "gpu"
 import "resource"
 
 load_gltf :: proc(
@@ -241,7 +242,7 @@ load_gltf_texture :: proc(
   texture_cache: ^map[^cgltf.texture]resource.Handle,
 ) -> (
   tex_handle: Handle,
-  texture: ^ImageBuffer,
+  texture: ^gpu.ImageBuffer,
   ret: vk.Result,
 ) {
   if gltf_texture == nil {

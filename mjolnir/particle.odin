@@ -4,6 +4,7 @@ import "core:log"
 import "geometry"
 import "resource"
 import vk "vendor:vulkan"
+import "gpu"
 
 MAX_PARTICLES :: 65536
 COMPUTE_PARTICLE_BATCH :: 256
@@ -80,10 +81,10 @@ DrawCommand :: struct {
 
 RendererParticle :: struct {
   // Compute pipeline
-  params_buffer:                 DataBuffer(ParticleSystemParams),
-  particle_buffer:               DataBuffer(Particle),
-  emitter_buffer:                DataBuffer(Emitter),
-  force_field_buffer:            DataBuffer(ForceField),
+  params_buffer:                 gpu.DataBuffer(ParticleSystemParams),
+  particle_buffer:               gpu.DataBuffer(Particle),
+  emitter_buffer:                gpu.DataBuffer(Emitter),
+  force_field_buffer:            gpu.DataBuffer(ForceField),
   compute_descriptor_set_layout: vk.DescriptorSetLayout,
   compute_descriptor_set:        vk.DescriptorSet,
   compute_pipeline_layout:       vk.PipelineLayout,
@@ -93,10 +94,10 @@ RendererParticle :: struct {
   emitter_pipeline:              vk.Pipeline,
   emitter_descriptor_set_layout: vk.DescriptorSetLayout,
   emitter_descriptor_set:        vk.DescriptorSet,
-  particle_counter_buffer:       DataBuffer(u32),
+  particle_counter_buffer:       gpu.DataBuffer(u32),
   // Compaction pipeline
-  compact_particle_buffer:       DataBuffer(Particle),
-  draw_command_buffer:           DataBuffer(DrawCommand),
+  compact_particle_buffer:       gpu.DataBuffer(Particle),
+  draw_command_buffer:           gpu.DataBuffer(DrawCommand),
   compact_descriptor_set_layout: vk.DescriptorSetLayout,
   compact_descriptor_set:        vk.DescriptorSet,
   compact_pipeline_layout:       vk.PipelineLayout,
@@ -113,13 +114,13 @@ compute_particles :: proc(
   camera: geometry.Camera,
 ) {
   // --- Update frustum planes for culling ---
-  params_ptr := data_buffer_get(&self.params_buffer)
+  params_ptr := gpu.data_buffer_get(&self.params_buffer)
   frustum := geometry.camera_make_frustum(camera)
   for i in 0 ..< 6 {
     params_ptr.frustum_planes[i] = frustum.planes[i]
   }
   // --- GPU Emitter Dispatch ---
-  counter_ptr := data_buffer_get(&self.particle_counter_buffer)
+  counter_ptr := gpu.data_buffer_get(&self.particle_counter_buffer)
   params_ptr.particle_count = counter_ptr^
   // log.debugf("previous frame's particle count %d", counter_ptr^)
   counter_ptr^ = 0
@@ -269,7 +270,7 @@ compact_particles :: proc(
   )
 }
 
-particle_deinit :: proc(gpu_context: ^GPUContext, self: ^RendererParticle) {
+particle_deinit :: proc(gpu_context: ^gpu.GPUContext, self: ^RendererParticle) {
   vk.DestroyPipeline(gpu_context.device, self.compute_pipeline, nil)
   vk.DestroyPipelineLayout(gpu_context.device, self.compute_pipeline_layout, nil)
   vk.DestroyDescriptorSetLayout(
@@ -293,43 +294,43 @@ particle_deinit :: proc(gpu_context: ^GPUContext, self: ^RendererParticle) {
   )
   vk.DestroyPipeline(gpu_context.device, self.render_pipeline, nil)
   vk.DestroyPipelineLayout(gpu_context.device, self.render_pipeline_layout, nil)
-  data_buffer_deinit(gpu_context, &self.params_buffer)
-  data_buffer_deinit(gpu_context, &self.particle_buffer)
-  data_buffer_deinit(gpu_context, &self.compact_particle_buffer)
-  data_buffer_deinit(gpu_context, &self.draw_command_buffer)
-  data_buffer_deinit(gpu_context, &self.emitter_buffer)
-  data_buffer_deinit(gpu_context, &self.force_field_buffer)
-  data_buffer_deinit(gpu_context, &self.particle_counter_buffer)
+  gpu.data_buffer_deinit(gpu_context, &self.params_buffer)
+  gpu.data_buffer_deinit(gpu_context, &self.particle_buffer)
+  gpu.data_buffer_deinit(gpu_context, &self.compact_particle_buffer)
+  gpu.data_buffer_deinit(gpu_context, &self.draw_command_buffer)
+  gpu.data_buffer_deinit(gpu_context, &self.emitter_buffer)
+  gpu.data_buffer_deinit(gpu_context, &self.force_field_buffer)
+  gpu.data_buffer_deinit(gpu_context, &self.particle_counter_buffer)
 }
 
-particle_init :: proc(gpu_context: ^GPUContext, self: ^RendererParticle) -> vk.Result {
+particle_init :: proc(gpu_context: ^gpu.GPUContext, self: ^RendererParticle) -> vk.Result {
   log.debugf("Initializing particle renderer")
-  self.params_buffer = create_host_visible_buffer(
+  self.params_buffer = gpu.create_host_visible_buffer(
     gpu_context,
     ParticleSystemParams,
     1,
     {.UNIFORM_BUFFER},
   ) or_return
-  self.particle_buffer = create_host_visible_buffer(
+  self.particle_buffer = gpu.create_host_visible_buffer(
     gpu_context,
     Particle,
     MAX_PARTICLES,
     {.STORAGE_BUFFER, .VERTEX_BUFFER, .TRANSFER_DST},
   ) or_return
-  self.emitter_buffer = create_host_visible_buffer(
+  self.emitter_buffer = gpu.create_host_visible_buffer(
     gpu_context,
     Emitter,
     MAX_EMITTERS,
     {.STORAGE_BUFFER},
   ) or_return
-  self.force_field_buffer = create_host_visible_buffer(
+  self.force_field_buffer = gpu.create_host_visible_buffer(
     gpu_context,
     ForceField,
     MAX_FORCE_FIELDS,
     {.STORAGE_BUFFER},
   ) or_return
   // Emitter pipeline buffers
-  self.particle_counter_buffer = create_host_visible_buffer(
+  self.particle_counter_buffer = gpu.create_host_visible_buffer(
     gpu_context,
     u32,
     1,
@@ -342,7 +343,7 @@ particle_init :: proc(gpu_context: ^GPUContext, self: ^RendererParticle) -> vk.R
   return .SUCCESS
 }
 particle_init_emitter_pipeline :: proc(
-  gpu_context: ^GPUContext,
+  gpu_context: ^gpu.GPUContext,
   self: ^RendererParticle,
 ) -> vk.Result {
   // --- Emitter pipeline ---
@@ -459,7 +460,7 @@ particle_init_emitter_pipeline :: proc(
     0,
     nil,
   )
-  emitter_shader_module := create_shader_module(
+  emitter_shader_module := gpu.create_shader_module(
     gpu_context,
     #load("shader/particle/emitter.spv"),
   ) or_return
@@ -486,7 +487,7 @@ particle_init_emitter_pipeline :: proc(
 }
 
 particle_init_compute_pipeline :: proc(
-  gpu_context: ^GPUContext,
+  gpu_context: ^gpu.GPUContext,
   self: ^RendererParticle,
 ) -> vk.Result {
   // --- Compute pipeline (particle simulation) ---
@@ -603,7 +604,7 @@ particle_init_compute_pipeline :: proc(
     0,
     nil,
   )
-  compute_shader_module := create_shader_module(
+  compute_shader_module := gpu.create_shader_module(
     gpu_context,
     #load("shader/particle/compute.spv"),
   ) or_return
@@ -630,7 +631,7 @@ particle_init_compute_pipeline :: proc(
 }
 
 particle_init_compact_pipeline :: proc(
-  gpu_context: ^GPUContext,
+  gpu_context: ^gpu.GPUContext,
   self: ^RendererParticle,
 ) -> vk.Result {
   // --- Compaction pipeline ---
@@ -690,13 +691,13 @@ particle_init_compact_pipeline :: proc(
     nil,
     &self.compact_pipeline_layout,
   ) or_return
-  self.compact_particle_buffer = create_host_visible_buffer(
+  self.compact_particle_buffer = gpu.create_host_visible_buffer(
     gpu_context,
     Particle,
     MAX_PARTICLES,
     {.STORAGE_BUFFER, .VERTEX_BUFFER, .TRANSFER_SRC},
   ) or_return
-  self.draw_command_buffer = create_host_visible_buffer(
+  self.draw_command_buffer = gpu.create_host_visible_buffer(
     gpu_context,
     DrawCommand,
     1,
@@ -759,7 +760,7 @@ particle_init_compact_pipeline :: proc(
     0,
     nil,
   )
-  compact_shader_module := create_shader_module(
+  compact_shader_module := gpu.create_shader_module(
     gpu_context,
     #load("shader/particle/compact.spv"),
   ) or_return
@@ -786,7 +787,7 @@ particle_init_compact_pipeline :: proc(
 }
 
 particle_init_render_pipeline :: proc(
-  gpu_context: ^GPUContext,
+  gpu_context: ^gpu.GPUContext,
   self: ^RendererParticle,
 ) -> vk.Result {
   descriptor_set_layouts := [?]vk.DescriptorSetLayout {
@@ -895,8 +896,8 @@ particle_init_render_pipeline :: proc(
   }
   vert_shader_code := #load("shader/particle/vert.spv")
   frag_shader_code := #load("shader/particle/frag.spv")
-  vert_module := create_shader_module(gpu_context, vert_shader_code) or_return
-  frag_module := create_shader_module(gpu_context, frag_shader_code) or_return
+  vert_module := gpu.create_shader_module(gpu_context, vert_shader_code) or_return
+  frag_module := gpu.create_shader_module(gpu_context, frag_shader_code) or_return
   defer vk.DestroyShaderModule(gpu_context.device, vert_module, nil)
   defer vk.DestroyShaderModule(gpu_context.device, frag_module, nil)
   shader_stages := [?]vk.PipelineShaderStageCreateInfo {
@@ -1121,6 +1122,6 @@ get_particle_render_stats :: proc(
   rendered: u32,
   total_allocated: u32,
 ) {
-  count := data_buffer_get(&self.particle_counter_buffer)
+  count := gpu.data_buffer_get(&self.particle_counter_buffer)
   return count^, MAX_PARTICLES
 }

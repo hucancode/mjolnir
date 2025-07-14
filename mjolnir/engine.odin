@@ -571,10 +571,10 @@ time_since_app_start :: proc(self: ^Engine) -> f32 {
 }
 
 update_emitters :: proc(self: ^Engine, delta_time: f32) {
-  params := data_buffer_get(&self.particle.params_buffer)
+  params := gpu.data_buffer_get(&self.particle.params_buffer)
   params.delta_time = delta_time
 
-  emitters_ptr := data_buffer_get(&self.particle.emitter_buffer)
+  emitters_ptr := gpu.data_buffer_get(&self.particle.emitter_buffer)
   emitters := slice.from_ptr(emitters_ptr, MAX_EMITTERS)
   emitter_idx: int = 0
 
@@ -627,7 +627,7 @@ get_main_camera :: proc(engine: ^Engine) -> ^geometry.Camera {
 
 
 update_force_fields :: proc(self: ^Engine) {
-  params := data_buffer_get(&self.particle.params_buffer)
+  params := gpu.data_buffer_get(&self.particle.params_buffer)
   params.forcefield_count = 0
   forcefields := slice.from_ptr(
     self.particle.force_field_buffer.mapped,
@@ -1416,7 +1416,7 @@ render :: proc(self: ^Engine) -> vk.Result {
     render_target_depth_texture(main_render_target),
   )
   // Transition depth texture to DEPTH_STENCIL_ATTACHMENT_OPTIMAL for depth prepass
-  transition_image(
+  gpu.transition_image(
     command_buffer,
     gbuffer_depth.image,
     .UNDEFINED,
@@ -1455,7 +1455,7 @@ render :: proc(self: ^Engine) -> vk.Result {
   gbuffer_end(main_render_target, command_buffer)
   // G-buffer to shader read transition is now handled by gbuffer_end
   // Transition depth texture to SHADER_READ_ONLY_OPTIMAL for use in post-processing
-  transition_image(
+  gpu.transition_image(
     command_buffer,
     gbuffer_depth.image,
     .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
@@ -1500,9 +1500,9 @@ render :: proc(self: ^Engine) -> vk.Result {
   )
   transparent_end(&self.transparent, command_buffer)
   // log.debug("============ rendering post processes... =============")
-  transition_image_to_shader_read(command_buffer, final_image.image)
+  gpu.transition_image_to_shader_read(command_buffer, final_image.image)
   postprocess_begin(&self.postprocess, command_buffer, self.swapchain.extent)
-  transition_image(
+  gpu.transition_image(
     command_buffer,
     self.swapchain.images[self.swapchain.image_index],
     .UNDEFINED,
@@ -1580,7 +1580,7 @@ render :: proc(self: ^Engine) -> vk.Result {
   ui_render(&self.ui, command_buffer)
   ui_end(&self.ui, command_buffer)
   // log.debug("============ preparing image for present... =============")
-  transition_image_to_present(
+  gpu.transition_image_to_present(
     command_buffer,
     self.swapchain.images[self.swapchain.image_index],
   )

@@ -3,6 +3,7 @@ package mjolnir
 import "core:log"
 import "core:math"
 import "core:slice"
+import "gpu"
 import glfw "vendor:glfw"
 import vk "vendor:vulkan"
 
@@ -19,7 +20,7 @@ Swapchain :: struct {
 }
 
 swapchain_init :: proc(
-  gpu_context: ^GPUContext,
+  gpu_context: ^gpu.GPUContext,
   self: ^Swapchain,
   window: glfw.WindowHandle,
 ) -> vk.Result {
@@ -62,8 +63,8 @@ swapchain_init :: proc(
   }
 
   width, height := glfw.GetFramebufferSize(window)
-  support := query_swapchain_support(gpu_context.physical_device, gpu_context.surface) or_return
-  defer swapchain_support_deinit(&support)
+  support := gpu.query_swapchain_support(gpu_context.physical_device, gpu_context.surface) or_return
+  defer gpu.swapchain_support_deinit(&support)
   self.format = pick_swapchain_format(support.formats)
   self.extent = pick_swapchain_extent(
     support.capabilities,
@@ -114,7 +115,7 @@ swapchain_init :: proc(
   )
   self.views = make([]vk.ImageView, swapchain_image_count)
   for i in 0 ..< swapchain_image_count {
-    self.views[i] = create_image_view(
+    self.views[i] = gpu.create_image_view(
       gpu_context,
       self.images[i],
       self.format.format,
@@ -151,7 +152,7 @@ swapchain_init :: proc(
   return .SUCCESS
 }
 
-swapchain_deinit :: proc(gpu_context: ^GPUContext, self: ^Swapchain) {
+swapchain_deinit :: proc(gpu_context: ^gpu.GPUContext, self: ^Swapchain) {
   for view in self.views do vk.DestroyImageView(gpu_context.device, view, nil)
   delete(self.views)
   self.views = nil
@@ -169,7 +170,7 @@ swapchain_deinit :: proc(gpu_context: ^GPUContext, self: ^Swapchain) {
 }
 
 swapchain_recreate :: proc(
-  gpu_context: ^GPUContext,
+  gpu_context: ^gpu.GPUContext,
   self: ^Swapchain,
   window: glfw.WindowHandle,
 ) -> vk.Result {
@@ -180,7 +181,7 @@ swapchain_recreate :: proc(
 }
 
 acquire_next_image :: proc(
-  gpu_context: ^GPUContext,
+  gpu_context: ^gpu.GPUContext,
   self: ^Swapchain,
 ) -> (
   result: vk.Result,
@@ -207,7 +208,7 @@ acquire_next_image :: proc(
 }
 
 submit_queue_and_present :: proc(
-  gpu_context: ^GPUContext,
+  gpu_context: ^gpu.GPUContext,
   self: ^Swapchain,
   command_buffer: ^vk.CommandBuffer,
 ) -> vk.Result {

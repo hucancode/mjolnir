@@ -4,6 +4,7 @@ import "core:fmt"
 import "core:log"
 import "core:slice"
 import "geometry"
+import "gpu"
 import "resource"
 import mu "vendor:microui"
 import vk "vendor:vulkan"
@@ -22,7 +23,7 @@ RendererLighting :: struct {
   fullscreen_triangle_mesh: Handle,
 }
 lighting_init :: proc(
-  gpu_context: ^GPUContext,
+  gpu_context: ^gpu.GPUContext,
   self: ^RendererLighting,
   width: u32,
   height: u32,
@@ -52,10 +53,10 @@ lighting_init :: proc(
     &self.lighting_pipeline_layout,
   ) or_return
   vert_shader_code := #load("shader/lighting/vert.spv")
-  vert_module := create_shader_module(gpu_context, vert_shader_code) or_return
+  vert_module := gpu.create_shader_module(gpu_context, vert_shader_code) or_return
   defer vk.DestroyShaderModule(gpu_context.device, vert_module, nil)
   frag_shader_code := #load("shader/lighting/frag.spv")
-  frag_module := create_shader_module(gpu_context, frag_shader_code) or_return
+  frag_module := gpu.create_shader_module(gpu_context, frag_shader_code) or_return
   defer vk.DestroyShaderModule(gpu_context.device, frag_module, nil)
   dynamic_states := [?]vk.DynamicState{.VIEWPORT, .SCISSOR}
   dynamic_state := vk.PipelineDynamicStateCreateInfo {
@@ -204,7 +205,7 @@ lighting_init :: proc(
   return .SUCCESS
 }
 
-lighting_deinit :: proc(gpu_context: ^GPUContext, self: ^RendererLighting) {
+lighting_deinit :: proc(gpu_context: ^gpu.GPUContext, self: ^RendererLighting) {
   vk.DestroyPipelineLayout(gpu_context.device, self.lighting_pipeline_layout, nil)
   vk.DestroyPipeline(gpu_context.device, self.lighting_pipeline, nil)
   vk.DestroyPipeline(gpu_context.device, self.spot_light_pipeline, nil)

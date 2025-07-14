@@ -2,6 +2,7 @@ package mjolnir
 
 import "core:log"
 import "geometry"
+import "gpu"
 import "resource"
 import vk "vendor:vulkan"
 
@@ -14,7 +15,7 @@ RendererShadow :: struct {
 }
 
 shadow_init :: proc(
-  gpu_context: ^GPUContext,
+  gpu_context: ^gpu.GPUContext,
   self: ^RendererShadow,
   depth_format: vk.Format = .D32_SFLOAT,
 ) -> vk.Result {
@@ -37,9 +38,9 @@ shadow_init :: proc(
     nil,
     &self.pipeline_layout,
   ) or_return
-  vert_module := create_shader_module(gpu_context, SHADER_SHADOW_VERT) or_return
+  vert_module := gpu.create_shader_module(gpu_context, SHADER_SHADOW_VERT) or_return
   defer vk.DestroyShaderModule(gpu_context.device, vert_module, nil)
-  frag_module := create_shader_module(gpu_context, SHADER_SHADOW_FRAG) or_return
+  frag_module := gpu.create_shader_module(gpu_context, SHADER_SHADOW_FRAG) or_return
   defer vk.DestroyShaderModule(gpu_context.device, frag_module, nil)
   input_assembly := vk.PipelineInputAssemblyStateCreateInfo {
     sType    = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
@@ -158,7 +159,7 @@ shadow_init :: proc(
   return .SUCCESS
 }
 
-shadow_deinit :: proc(gpu_context: ^GPUContext, self: ^RendererShadow) {
+shadow_deinit :: proc(gpu_context: ^gpu.GPUContext, self: ^RendererShadow) {
   for &p in self.pipelines {
     vk.DestroyPipeline(gpu_context.device, p, nil)
     p = 0

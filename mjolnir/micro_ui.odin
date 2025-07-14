@@ -1,5 +1,6 @@
 package mjolnir
 
+import "gpu"
 import intr "base:intrinsics"
 import "core:log"
 import linalg "core:math/linalg"
@@ -21,10 +22,10 @@ RendererUI :: struct {
   texture_descriptor_set:    vk.DescriptorSet,
   pipeline_layout:           vk.PipelineLayout,
   pipeline:                  vk.Pipeline,
-  atlas:                     ^ImageBuffer,
-  proj_buffer:               DataBuffer(matrix[4,4]f32),
-  vertex_buffer:             DataBuffer(Vertex2D),
-  index_buffer:              DataBuffer(u32),
+  atlas:                     ^gpu.ImageBuffer,
+  proj_buffer:               gpu.DataBuffer(matrix[4,4]f32),
+  vertex_buffer:             gpu.DataBuffer(Vertex2D),
+  index_buffer:              gpu.DataBuffer(u32),
   vertex_count:              u32,
   index_count:               u32,
   vertices:                  [UI_MAX_VERTICES]Vertex2D,
@@ -42,7 +43,7 @@ Vertex2D :: struct {
 }
 
 ui_init :: proc(
-  gpu_context: ^GPUContext,
+  gpu_context: ^gpu.GPUContext,
   self: ^RendererUI,
   color_format: vk.Format,
   width: u32,
@@ -57,9 +58,9 @@ ui_init :: proc(
   self.dpi_scale = dpi_scale
   self.current_scissor = vk.Rect2D{extent = {width, height}}
   log.infof("init UI pipeline...")
-  vert_shader_module := create_shader_module(gpu_context, SHADER_MICROUI_VERT) or_return
+  vert_shader_module := gpu.create_shader_module(gpu_context, SHADER_MICROUI_VERT) or_return
   defer vk.DestroyShaderModule(gpu_context.device, vert_shader_module, nil)
-  frag_shader_module := create_shader_module(gpu_context, SHADER_MICROUI_FRAG) or_return
+  frag_shader_module := gpu.create_shader_module(gpu_context, SHADER_MICROUI_FRAG) or_return
   defer vk.DestroyShaderModule(gpu_context.device, frag_shader_module, nil)
   shader_stages := [?]vk.PipelineShaderStageCreateInfo {
     {
@@ -253,14 +254,14 @@ ui_init :: proc(
     .R8_UNORM,
   ) or_return
   log.infof("init UI vertex buffer...")
-  self.vertex_buffer = create_host_visible_buffer(
+  self.vertex_buffer = gpu.create_host_visible_buffer(
     gpu_context,
     Vertex2D,
     UI_MAX_VERTICES,
     {.VERTEX_BUFFER},
   ) or_return
   log.infof("init UI indices buffer...")
-  self.index_buffer = create_host_visible_buffer(
+  self.index_buffer = gpu.create_host_visible_buffer(
     gpu_context,
     u32,
     UI_MAX_INDICES,
@@ -268,7 +269,7 @@ ui_init :: proc(
   ) or_return
   ortho := linalg.matrix_ortho3d(0, f32(width), f32(height), 0, -1, 1) * linalg.matrix4_scale(dpi_scale)
   log.infof("init UI proj buffer...")
-  self.proj_buffer = create_host_visible_buffer(
+  self.proj_buffer = gpu.create_host_visible_buffer(
     gpu_context,
     matrix[4,4]f32,
     1,
@@ -314,8 +315,8 @@ ui_flush :: proc(self: ^RendererUI, cmd_buf: vk.CommandBuffer) -> vk.Result {
     self.vertex_count = 0
     self.index_count = 0
   }
-  data_buffer_write(&self.vertex_buffer, self.vertices[:self.vertex_count]) or_return
-  data_buffer_write(&self.index_buffer, self.indices[:self.index_count]) or_return
+  gpu.data_buffer_write(&self.vertex_buffer, self.vertices[:self.vertex_count]) or_return
+  gpu.data_buffer_write(&self.index_buffer, self.indices[:self.index_count]) or_return
   vk.CmdBindPipeline(cmd_buf, .GRAPHICS, self.pipeline)
   descriptor_sets := [?]vk.DescriptorSet {
     self.projection_descriptor_set,
@@ -469,13 +470,13 @@ ui_set_clip_rect :: proc(
   vk.CmdSetScissor(cmd_buf, 0, 1, &self.current_scissor)
 }
 
-ui_deinit :: proc(gpu_context: ^GPUContext, self: ^RendererUI) {
+ui_deinit :: proc(gpu_context: ^gpu.GPUContext, self: ^RendererUI) {
   if self == nil {
     return
   }
-  data_buffer_deinit(gpu_context, &self.vertex_buffer)
-  data_buffer_deinit(gpu_context, &self.index_buffer)
-  data_buffer_deinit(gpu_context, &self.proj_buffer)
+  gpu.data_buffer_deinit(gpu_context, &self.vertex_buffer)
+  gpu.data_buffer_deinit(gpu_context, &self.index_buffer)
+  gpu.data_buffer_deinit(gpu_context, &self.proj_buffer)
   vk.DestroyPipeline(gpu_context.device, self.pipeline, nil)
   self.pipeline = 0
   vk.DestroyPipelineLayout(gpu_context.device, self.pipeline_layout, nil)
@@ -502,7 +503,7 @@ ui_recreate_images :: proc(
 
   // Update the projection matrix with new dimensions and DPI scale
   ortho := linalg.matrix_ortho3d(0, f32(width), f32(height), 0, -1, 1) * linalg.matrix4_scale(dpi_scale)
-  data_buffer_write(&self.proj_buffer, &ortho) or_return
+  gpu.data_buffer_write(&self.proj_buffer, &ortho) or_return
 
   return .SUCCESS
 }

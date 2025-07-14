@@ -1,5 +1,6 @@
 package mjolnir
 
+import "gpu"
 import "animation"
 import "core:log"
 import linalg "core:math/linalg"
@@ -23,45 +24,45 @@ Skinning :: struct {
   root_bone_index: u32,
   bones:           []Bone,
   animations:      []animation.Clip,
-  skin_buffer:     DataBuffer(geometry.SkinningData),
+  skin_buffer:     gpu.DataBuffer(geometry.SkinningData),
 }
 
 Mesh :: struct {
   vertices_len:  u32,
   indices_len:   u32,
-  vertex_buffer: DataBuffer(geometry.Vertex),
-  index_buffer:  DataBuffer(u32),
+  vertex_buffer: gpu.DataBuffer(geometry.Vertex),
+  index_buffer:  gpu.DataBuffer(u32),
   aabb:          geometry.Aabb,
   skinning:      Maybe(Skinning),
 }
 
-mesh_deinit :: proc(gpu_context: ^GPUContext, self: ^Mesh) {
-  data_buffer_deinit(gpu_context, &self.vertex_buffer)
-  data_buffer_deinit(gpu_context, &self.index_buffer)
+mesh_deinit :: proc(gpu_context: ^gpu.GPUContext, self: ^Mesh) {
+  gpu.data_buffer_deinit(gpu_context, &self.vertex_buffer)
+  gpu.data_buffer_deinit(gpu_context, &self.index_buffer)
   skin, has_skin := &self.skinning.?
   if !has_skin {
     return
   }
-  data_buffer_deinit(gpu_context, &skin.skin_buffer)
+  gpu.data_buffer_deinit(gpu_context, &skin.skin_buffer)
   for &bone in skin.bones do bone_deinit(&bone)
   delete(skin.bones)
   for &clip in skin.animations do animation.clip_deinit(&clip)
   delete(skin.animations)
 }
 
-mesh_init :: proc(gpu_context: ^GPUContext, self: ^Mesh, data: geometry.Geometry) -> vk.Result {
+mesh_init :: proc(gpu_context: ^gpu.GPUContext, self: ^Mesh, data: geometry.Geometry) -> vk.Result {
   defer geometry.delete_geometry(data)
   self.vertices_len = u32(len(data.vertices))
   self.indices_len = u32(len(data.indices))
   self.aabb = data.aabb
-  self.vertex_buffer = create_local_buffer(
+  self.vertex_buffer = gpu.create_local_buffer(
     gpu_context,
     geometry.Vertex,
     len(data.vertices),
     {.VERTEX_BUFFER},
     raw_data(data.vertices),
   ) or_return
-  self.index_buffer = create_local_buffer(
+  self.index_buffer = gpu.create_local_buffer(
     gpu_context,
     u32,
     len(data.indices),
@@ -72,7 +73,7 @@ mesh_init :: proc(gpu_context: ^GPUContext, self: ^Mesh, data: geometry.Geometry
     return .SUCCESS
   }
   log.info("creating skin buffer", len(data.skinnings))
-  skin_buffer := create_local_buffer(
+  skin_buffer := gpu.create_local_buffer(
     gpu_context,
     geometry.SkinningData,
     len(data.skinnings),

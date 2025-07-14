@@ -3,6 +3,7 @@ package mjolnir
 import "core:log"
 import "core:math"
 import "geometry"
+import "gpu"
 import "resource"
 import vk "vendor:vulkan"
 
@@ -28,7 +29,7 @@ RenderTarget :: struct {
 }
 
 render_target_init :: proc(
-  gpu_context: ^GPUContext,
+  gpu_context: ^gpu.GPUContext,
   target: ^RenderTarget,
   width, height: u32,
   color_format: vk.Format,
@@ -122,44 +123,44 @@ render_target_init :: proc(
 }
 
 // Clean up RenderTarget resources (camera and owned textures)
-render_target_deinit :: proc(gpu_context: ^GPUContext, target: ^RenderTarget) {
+render_target_deinit :: proc(gpu_context: ^gpu.GPUContext, target: ^RenderTarget) {
   // Always release camera since we always own it
   resource.free(&g_cameras, target.camera)
   // Release only owned texture handles for all frames
   for frame in 0 ..< MAX_FRAMES_IN_FLIGHT {
     if target.owns_final_image {
       if item, freed := resource.free(&g_image_2d_buffers, target.final_images[frame]); freed {
-        image_buffer_deinit(gpu_context, item)
+        gpu.image_buffer_deinit(gpu_context, item)
       }
     }
     if target.owns_position_texture {
       if item, freed := resource.free(&g_image_2d_buffers, target.position_textures[frame]); freed {
-        image_buffer_deinit(gpu_context, item)
+        gpu.image_buffer_deinit(gpu_context, item)
       }
     }
     if target.owns_normal_texture {
       if item, freed := resource.free(&g_image_2d_buffers, target.normal_textures[frame]); freed {
-        image_buffer_deinit(gpu_context, item)
+        gpu.image_buffer_deinit(gpu_context, item)
       }
     }
     if target.owns_albedo_texture {
       if item, freed := resource.free(&g_image_2d_buffers, target.albedo_textures[frame]); freed {
-        image_buffer_deinit(gpu_context, item)
+        gpu.image_buffer_deinit(gpu_context, item)
       }
     }
     if target.owns_metallic_roughness_texture {
       if item, freed := resource.free(&g_image_2d_buffers, target.metallic_roughness_textures[frame]); freed {
-        image_buffer_deinit(gpu_context, item)
+        gpu.image_buffer_deinit(gpu_context, item)
       }
     }
     if target.owns_emissive_texture {
       if item, freed := resource.free(&g_image_2d_buffers, target.emissive_textures[frame]); freed {
-        image_buffer_deinit(gpu_context, item)
+        gpu.image_buffer_deinit(gpu_context, item)
       }
     }
     if target.owns_depth_texture {
       if item, freed := resource.free(&g_image_2d_buffers, target.depth_textures[frame]); freed {
-        image_buffer_deinit(gpu_context, item)
+        gpu.image_buffer_deinit(gpu_context, item)
       }
     }
   }

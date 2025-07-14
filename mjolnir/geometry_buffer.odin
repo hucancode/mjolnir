@@ -2,6 +2,7 @@ package mjolnir
 
 import "core:log"
 import "geometry"
+import "gpu"
 import "resource"
 import vk "vendor:vulkan"
 
@@ -26,7 +27,7 @@ RendererGBuffer :: struct {
 }
 
 gbuffer_init :: proc(
-  gpu_context: ^GPUContext,
+  gpu_context: ^gpu.GPUContext,
   self: ^RendererGBuffer,
   width: u32,
   height: u32,
@@ -55,10 +56,10 @@ gbuffer_init :: proc(
   ) or_return
   log.info("About to build G-buffer pipelines...")
   vert_shader_code := #load("shader/gbuffer/vert.spv")
-  vert_module := create_shader_module(gpu_context, vert_shader_code) or_return
+  vert_module := gpu.create_shader_module(gpu_context, vert_shader_code) or_return
   defer vk.DestroyShaderModule(gpu_context.device, vert_module, nil)
   frag_shader_code := #load("shader/gbuffer/frag.spv")
-  frag_module := create_shader_module(gpu_context, frag_shader_code) or_return
+  frag_module := gpu.create_shader_module(gpu_context, frag_shader_code) or_return
   defer vk.DestroyShaderModule(gpu_context.device, frag_module, nil)
   vertex_input_info := vk.PipelineVertexInputStateCreateInfo {
     sType                           = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
@@ -263,7 +264,7 @@ gbuffer_begin :: proc(
   }
 
   // Batch transition all G-buffer images to COLOR_ATTACHMENT_OPTIMAL
-  transition_images(
+  gpu.transition_images(
     command_buffer,
     gbuffer_images[:],
     .UNDEFINED,
@@ -281,7 +282,7 @@ gbuffer_begin :: proc(
       g_image_2d_buffers,
       render_target_depth_texture(render_target),
     )
-    transition_image(
+    gpu.transition_image(
       command_buffer,
       depth_texture.image,
       .UNDEFINED,
@@ -414,7 +415,7 @@ gbuffer_end :: proc(
   }
 
   // Batch transition all G-buffer images to SHADER_READ_ONLY_OPTIMAL
-  transition_images(
+  gpu.transition_images(
     command_buffer,
     gbuffer_images[:],
     .COLOR_ATTACHMENT_OPTIMAL,
@@ -544,7 +545,7 @@ gbuffer_get_pipeline :: proc(
   return self.pipelines[transmute(u32)features]
 }
 
-gbuffer_deinit :: proc(gpu_context: ^GPUContext, self: ^RendererGBuffer) {
+gbuffer_deinit :: proc(gpu_context: ^gpu.GPUContext, self: ^RendererGBuffer) {
   for pipeline in self.pipelines {
     vk.DestroyPipeline(gpu_context.device, pipeline, nil)
   }

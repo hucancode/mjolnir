@@ -1,6 +1,7 @@
 package mjolnir
 
 import "core:log"
+import "gpu"
 import "resource"
 import vk "vendor:vulkan"
 
@@ -354,7 +355,7 @@ effect_clear :: proc(self: ^RendererPostProcess) {
 }
 
 postprocess_init :: proc(
-  gpu_context: ^GPUContext,
+  gpu_context: ^gpu.GPUContext,
   self: ^RendererPostProcess,
   color_format: vk.Format,
   width: u32,
@@ -362,7 +363,7 @@ postprocess_init :: proc(
 ) -> vk.Result {
   self.effect_stack = make([dynamic]PostprocessEffect)
   count :: len(PostProcessEffectType)
-  vert_module := create_shader_module(gpu_context, SHADER_POSTPROCESS_VERT) or_return
+  vert_module := gpu.create_shader_module(gpu_context, SHADER_POSTPROCESS_VERT) or_return
   defer vk.DestroyShaderModule(gpu_context.device, vert_module, nil)
   frag_modules: [count]vk.ShaderModule
   defer for m in frag_modules do vk.DestroyShaderModule(gpu_context.device, m, nil)
@@ -388,7 +389,7 @@ postprocess_init :: proc(
     case .NONE:
       shader_code = SHADER_POSTPROCESS_FRAG
     }
-    frag_modules[i] = create_shader_module(gpu_context, shader_code) or_return
+    frag_modules[i] = gpu.create_shader_module(gpu_context, shader_code) or_return
   }
   color_blend_attachment := vk.PipelineColorBlendAttachmentState {
     colorWriteMask = {.R, .G, .B, .A},
@@ -547,7 +548,7 @@ postprocess_init :: proc(
 }
 
 postprocess_create_images :: proc(
-  gpu_context: ^GPUContext,
+  gpu_context: ^gpu.GPUContext,
   self: ^RendererPostProcess,
   width: u32,
   height: u32,
@@ -566,16 +567,16 @@ postprocess_create_images :: proc(
   return .SUCCESS
 }
 
-postprocess_deinit_images :: proc(gpu_context: ^GPUContext, self: ^RendererPostProcess) {
+postprocess_deinit_images :: proc(gpu_context: ^gpu.GPUContext, self: ^RendererPostProcess) {
   for handle in self.images {
     if item, freed := resource.free(&g_image_2d_buffers, handle); freed {
-      image_buffer_deinit(gpu_context, item)
+      gpu.image_buffer_deinit(gpu_context, item)
     }
   }
 }
 
 postprocess_recreate_images :: proc(
-  gpu_context: ^GPUContext,
+  gpu_context: ^gpu.GPUContext,
   self: ^RendererPostProcess,
   width: u32,
   height: u32,
@@ -585,7 +586,7 @@ postprocess_recreate_images :: proc(
   return postprocess_create_images(gpu_context, self, width, height, format)
 }
 
-postprocess_deinit :: proc(gpu_context: ^GPUContext, self: ^RendererPostProcess) {
+postprocess_deinit :: proc(gpu_context: ^gpu.GPUContext, self: ^RendererPostProcess) {
   for &frame in self.frames {
     vk.DestroySemaphore(gpu_context.device, frame.image_available_semaphore, nil)
     vk.DestroySemaphore(gpu_context.device, frame.render_finished_semaphore, nil)
@@ -669,7 +670,7 @@ postprocess_render :: proc(
         g_image_2d_buffers,
         self.images[dst_image_idx],
       )
-      transition_image(
+      gpu.transition_image(
         command_buffer,
         dst_texture.image,
         .UNDEFINED,
@@ -690,7 +691,7 @@ postprocess_render :: proc(
         g_image_2d_buffers,
         self.images[src_texture_idx],
       )
-      transition_image_to_shader_read(command_buffer, src_texture.image)
+      gpu.transition_image_to_shader_read(command_buffer, src_texture.image)
     }
     color_attachment := vk.RenderingAttachmentInfoKHR {
       sType = .RENDERING_ATTACHMENT_INFO_KHR,
