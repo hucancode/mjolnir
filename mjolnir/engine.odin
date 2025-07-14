@@ -1733,7 +1733,6 @@ render :: proc(self: ^Engine) -> vk.Result {
         len(self.warehouse.meshes.free_indices),
       ),
     )
-
     // Show visibility statistics for main camera
     when USE_GPU_CULLING {
       disabled, visible, total := count_visible_objects(
