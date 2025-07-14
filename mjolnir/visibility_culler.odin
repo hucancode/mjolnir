@@ -281,9 +281,11 @@ visibility_culler_update :: proc(
   self: ^VisibilityCuller,
   scene: ^Scene,
   render_targets: []RenderTarget,
+  warehouse: ^ResourceWarehouse,
+  frame_index: u32,
 ) {
   // Update node data (same as single camera)
-  node_data_slice := gpu.data_buffer_get_all(&self.node_data_buffer[g_frame_index])
+  node_data_slice := gpu.data_buffer_get_all(&self.node_data_buffer[frame_index])
   self.node_count = u32(len(scene.nodes.entries))
 
   for &entry, entry_index in scene.nodes.entries {
@@ -292,7 +294,7 @@ visibility_culler_update :: proc(
     if entry_index >= MAX_NODES_IN_SCENE do continue
     node := &entry.item
     if !node.culling_enabled do continue
-    aabb := calculate_node_aabb(node)
+    aabb := calculate_node_aabb(node, warehouse)
     if aabb == geometry.AABB_UNDEFINED do continue
     world_aabb := geometry.aabb_transform(aabb, node.transform.world_matrix)
     node_data_slice[entry_index] = {
@@ -304,7 +306,7 @@ visibility_culler_update :: proc(
 
   // Update active camera data
   active_camera_slice := gpu.data_buffer_get_all(
-    &self.active_camera_buffer[g_frame_index],
+    &self.active_camera_buffer[frame_index],
   )
 
   // Clear active camera data
@@ -317,7 +319,7 @@ visibility_culler_update :: proc(
   for &target in render_targets {
     if camera_count >= MAX_ACTIVE_CAMERAS do break
 
-    camera := resource.get(g_cameras, target.camera)
+    camera := resource.get(warehouse.cameras, target.camera)
     if camera == nil do continue
 
     // Calculate frustum for this camera
@@ -332,7 +334,7 @@ visibility_culler_update :: proc(
   }
 
   // Update params buffer
-  params := gpu.data_buffer_get(&self.params_buffer[g_frame_index])
+  params := gpu.data_buffer_get(&self.params_buffer[frame_index])
   params.node_count = self.node_count
   params.active_camera_count = camera_count
   params.current_frame = self.current_frame
@@ -346,8 +348,9 @@ visibility_culler_execute :: proc(
   gpu_context: ^gpu.GPUContext,
   self: ^VisibilityCuller,
   command_buffer: vk.CommandBuffer,
+  frame_index: u32,
 ) {
-  params := gpu.data_buffer_get(&self.params_buffer[g_frame_index])
+  params := gpu.data_buffer_get(&self.params_buffer[frame_index])
   if self.node_count == 0 || params.active_camera_count == 0 {
     return
   }
@@ -361,7 +364,7 @@ visibility_culler_execute :: proc(
 
   write_descriptor := vk.WriteDescriptorSet {
     sType = .WRITE_DESCRIPTOR_SET,
-    dstSet = self.descriptor_sets[g_frame_index],
+    dstSet = self.descriptor_sets[frame_index],
     dstBinding = 3,
     descriptorType = .STORAGE_BUFFER,
     descriptorCount = 1,
@@ -384,7 +387,7 @@ visibility_culler_execute :: proc(
     self.pipeline_layout,
     0,
     1,
-    &self.descriptor_sets[g_frame_index],
+    &self.descriptor_sets[frame_index],
     0,
     nil,
   )
@@ -406,13 +409,14 @@ is_node_visible :: proc(
   self: ^VisibilityCuller,
   camera_slot: u32,
   node_index: u32,
+  frame_index: u32,
 ) -> bool {
   // Use stale data if not enough frames processed yet
   if self.frames_processed < 2 {
     return true // Conservative: assume visible until we have data
   }
 
-  params := gpu.data_buffer_get(&self.params_buffer[g_frame_index])
+  params := gpu.data_buffer_get(&self.params_buffer[frame_index])
   if camera_slot >= params.active_camera_count ||
      node_index >= self.node_count {
     return false
@@ -433,6 +437,7 @@ is_node_visible :: proc(
 count_visible_objects :: proc(
   self: ^VisibilityCuller,
   camera_slot: u32,
+  frame_index: u32,
 ) -> (
   disabled: u32,
   visible: u32,
@@ -445,7 +450,7 @@ count_visible_objects :: proc(
     return 0, total, total // All visible until we have data
   }
 
-  params := gpu.data_buffer_get(&self.params_buffer[g_frame_index])
+  params := gpu.data_buffer_get(&self.params_buffer[frame_index])
   if self.node_count == 0 || camera_slot >= params.active_camera_count {
     return 0, 0, 0
   }
@@ -453,7 +458,7 @@ count_visible_objects :: proc(
   visibility_slice := gpu.data_buffer_get_all(
     &self.visibility_buffer[self.visibility_read_idx],
   )
-  node_data_slice := gpu.data_buffer_get_all(&self.node_data_buffer[g_frame_index])
+  node_data_slice := gpu.data_buffer_get_all(&self.node_data_buffer[frame_index])
 
   for i in 0 ..< self.node_count {
     visibility_index := camera_slot * self.node_count + i
@@ -469,11 +474,11 @@ count_visible_objects :: proc(
 }
 
 // Calculate AABB for a node based on its attachment type
-calculate_node_aabb :: proc(node: ^Node) -> geometry.Aabb {
+calculate_node_aabb :: proc(node: ^Node, warehouse: ^ResourceWarehouse) -> geometry.Aabb {
   // Otherwise, calculate based on attachment type
   #partial switch data in node.attachment {
   case MeshAttachment:
-    mesh := resource.get(g_meshes, data.handle)
+    mesh := resource.get(warehouse.meshes, data.handle)
     if mesh != nil {
       return mesh.aabb
     }

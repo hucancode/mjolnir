@@ -22,6 +22,7 @@ depth_prepass_init :: proc(
   gpu_context: ^gpu.GPUContext,
   self: ^RendererDepthPrepass,
   swapchain_extent: vk.Extent2D,
+  warehouse: ^ResourceWarehouse,
 ) -> (
   res: vk.Result,
 ) {
@@ -30,8 +31,8 @@ depth_prepass_init :: proc(
     size       = size_of(PushConstant),
   }
   set_layouts := [?]vk.DescriptorSetLayout {
-    g_camera_buffer_set_layout, // set = 0 (bindless camera buffer)
-    g_bone_buffer_set_layout, // set = 1 (for skinning)
+    warehouse.camera_buffer_set_layout, // set = 0 (bindless camera buffer)
+    warehouse.bone_buffer_set_layout, // set = 1 (for skinning)
   }
   pipeline_layout_info := vk.PipelineLayoutCreateInfo {
     sType                  = .PIPELINE_LAYOUT_CREATE_INFO,
@@ -74,10 +75,12 @@ depth_prepass_deinit :: proc(gpu_context: ^gpu.GPUContext, self: ^RendererDepthP
 depth_prepass_begin :: proc(
   render_target: ^RenderTarget,
   command_buffer: vk.CommandBuffer,
+  warehouse: ^ResourceWarehouse,
+  frame_index: u32,
 ) {
   depth_texture := resource.get(
-    g_image_2d_buffers,
-    render_target_depth_texture(render_target),
+    warehouse.image_2d_buffers,
+    render_target_depth_texture(render_target, frame_index),
   )
   depth_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
@@ -119,11 +122,13 @@ depth_prepass_render :: proc(
   render_input: ^RenderInput,
   command_buffer: vk.CommandBuffer,
   camera_index: u32,
+  warehouse: ^ResourceWarehouse,
+  frame_index: u32,
 ) -> int {
   rendered_count := 0
   descriptor_sets := [?]vk.DescriptorSet {
-    g_camera_buffer_descriptor_set, // set 0
-    g_bone_buffer_descriptor_set, // set 1
+    warehouse.camera_buffer_descriptor_set, // set 0
+    warehouse.bone_buffer_descriptor_set, // set 1
   }
   vk.CmdBindDescriptorSets(
     command_buffer,
@@ -143,13 +148,13 @@ depth_prepass_render :: proc(
     }
     for batch_data in batch_group {
       material := resource.get(
-        g_materials,
+        warehouse.materials,
         batch_data.material_handle,
       ) or_continue
       for node in batch_data.nodes {
         #partial switch data in node.attachment {
         case MeshAttachment:
-          mesh := resource.get(g_meshes, data.handle) or_continue
+          mesh := resource.get(warehouse.meshes, data.handle) or_continue
           mesh_skinning, mesh_has_skin := &mesh.skinning.?
           node_skinning, node_has_skin := data.skinning.?
           pipeline := depth_prepass_get_pipeline(
@@ -169,7 +174,7 @@ depth_prepass_render :: proc(
           if node_has_skin {
             push_constant.bone_matrix_offset =
               node_skinning.bone_matrix_offset +
-              g_frame_index * g_bone_matrix_slab.capacity
+              frame_index * warehouse.bone_matrix_slab.capacity
           }
           vk.CmdPushConstants(
             command_buffer,
@@ -180,7 +185,7 @@ depth_prepass_render :: proc(
             &push_constant,
           )
           // Always bind both vertex buffer and skinning buffer (real or dummy)
-          skin_buffer := g_dummy_skinning_buffer.buffer
+          skin_buffer := warehouse.dummy_skinning_buffer.buffer
           if mesh_has_skin {
             skin_buffer = mesh_skinning.skin_buffer.buffer
           }

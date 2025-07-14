@@ -38,7 +38,6 @@ USE_GPU_CULLING :: true // Set to false to use CPU culling instead
 Handle :: resource.Handle
 
 g_context: runtime.Context
-g_frame_index: u32 = 0
 
 SetupProc :: #type proc(engine: ^Engine)
 UpdateProc :: #type proc(engine: ^Engine, delta_time: f32)
@@ -181,6 +180,8 @@ LightInfo :: struct {
 Engine :: struct {
   window:                      glfw.WindowHandle,
   gpu_context:                 gpu.GPUContext,
+  warehouse:                   ResourceWarehouse,
+  frame_index:                 u32,
   swapchain:                   Swapchain,
   scene:                       Scene,
   last_frame_timestamp:        time.Time,
@@ -240,6 +241,7 @@ engine_init_shadow_maps :: proc(engine: ^Engine) -> vk.Result {
       // Create shadow maps
       engine.shadow_maps[f][i], _, _ = create_empty_texture_2d(
         &engine.gpu_context,
+        &engine.warehouse,
         SHADOW_MAP_SIZE,
         SHADOW_MAP_SIZE,
         .D32_SFLOAT,
@@ -247,6 +249,7 @@ engine_init_shadow_maps :: proc(engine: ^Engine) -> vk.Result {
       )
       engine.cube_shadow_maps[f][i], _, _ = create_empty_texture_cube(
         &engine.gpu_context,
+        &engine.warehouse,
         SHADOW_MAP_SIZE,
         .D32_SFLOAT,
         {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
@@ -260,12 +263,13 @@ engine_init_shadow_maps :: proc(engine: ^Engine) -> vk.Result {
     // Create persistent render targets for spot/directional lights
     render_target: ^RenderTarget
     engine.shadow_render_targets[i], render_target = resource.alloc(
-      &g_render_targets,
+      &engine.warehouse.render_targets,
     )
     render_target.extent = {SHADOW_MAP_SIZE, SHADOW_MAP_SIZE}
     // Set depth texture for all frames to the appropriate shadow map
     for frame_idx in 0 ..< MAX_FRAMES_IN_FLIGHT {
-      render_target.depth_textures[frame_idx] = engine.shadow_maps[frame_idx][i]
+      render_target.depth_textures[frame_idx] =
+        engine.shadow_maps[frame_idx][i]
     }
     render_target.owns_depth_texture = false
 
@@ -273,7 +277,7 @@ engine_init_shadow_maps :: proc(engine: ^Engine) -> vk.Result {
     for face in 0 ..< 6 {
       cube_render_target: ^RenderTarget
       engine.cube_shadow_render_targets[i][face], cube_render_target =
-        resource.alloc(&g_render_targets)
+        resource.alloc(&engine.warehouse.render_targets)
       cube_render_target.extent = {SHADOW_MAP_SIZE, SHADOW_MAP_SIZE}
       // Set depth texture for all frames to the appropriate cube shadow map
       for frame_idx in 0 ..< MAX_FRAMES_IN_FLIGHT {
@@ -333,7 +337,7 @@ init :: proc(
   }
   log.infof("Window created %v\n", self.window)
   gpu.gpu_context_init(&self.gpu_context, self.window) or_return
-  factory_init(&self.gpu_context) or_return
+  factory_init(&self.gpu_context, &self.warehouse) or_return
   self.start_timestamp = time.now()
   self.last_frame_timestamp = self.start_timestamp
   self.last_update_timestamp = self.start_timestamp
@@ -349,10 +353,11 @@ init :: proc(
   // Initialize main render target with default camera settings
   main_render_target: ^RenderTarget
   self.main_render_target, main_render_target = resource.alloc(
-    &g_render_targets,
+    &self.warehouse.render_targets,
   )
   render_target_init(
     &self.gpu_context,
+    &self.warehouse,
     main_render_target,
     self.swapchain.extent.width,
     self.swapchain.extent.height,
@@ -378,10 +383,12 @@ init :: proc(
     self.swapchain.extent.height,
     self.swapchain.format.format,
     vk.Format.D32_SFLOAT,
+    &self.warehouse,
   ) or_return
   ambient_init(
     &self.gpu_context,
     &self.ambient,
+    &self.warehouse,
     self.swapchain.extent.width,
     self.swapchain.extent.height,
     self.swapchain.format.format,
@@ -392,20 +399,30 @@ init :: proc(
     &self.gbuffer,
     self.swapchain.extent.width,
     self.swapchain.extent.height,
+    &self.warehouse,
   ) or_return
-  depth_prepass_init(&self.gpu_context, &self.depth_prepass, self.swapchain.extent) or_return
-  particle_init(&self.gpu_context, &self.particle) or_return
+  depth_prepass_init(
+    &self.gpu_context,
+    &self.depth_prepass,
+    self.swapchain.extent,
+    &self.warehouse,
+  ) or_return
+  particle_init(&self.gpu_context, &self.particle, &self.warehouse) or_return
   when USE_GPU_CULLING {
-    visibility_culler_init(&self.gpu_context, &self.visibility_culler) or_return
+    visibility_culler_init(
+      &self.gpu_context,
+      &self.visibility_culler,
+    ) or_return
   }
   transparent_init(
     &self.gpu_context,
     &self.transparent,
     self.swapchain.extent.width,
     self.swapchain.extent.height,
+    &self.warehouse,
   ) or_return
   log.debugf("initializing shadow pipeline")
-  shadow_init(&self.gpu_context, &self.shadow, .D32_SFLOAT) or_return
+  shadow_init(&self.gpu_context, &self.shadow, .D32_SFLOAT, &self.warehouse) or_return
   log.debugf("initializing post process pipeline")
   postprocess_init(
     &self.gpu_context,
@@ -413,6 +430,7 @@ init :: proc(
     self.swapchain.format.format,
     self.swapchain.extent.width,
     self.swapchain.extent.height,
+    &self.warehouse,
   ) or_return
   ui_init(
     &self.gpu_context,
@@ -421,6 +439,7 @@ init :: proc(
     self.swapchain.extent.width,
     self.swapchain.extent.height,
     get_window_dpi(self.window),
+    &self.warehouse,
   )
   glfw.SetKeyCallback(
     self.window,
@@ -589,7 +608,7 @@ update_emitters :: proc(self: ^Engine, delta_time: f32) {
     culling_enabled := entry.item.culling_enabled
     when USE_GPU_CULLING {
       if culling_enabled {
-        visible = is_node_visible(&self.visibility_culler, 0, u32(entry_index))
+        visible = is_node_visible(&self.visibility_culler, 0, u32(entry_index), self.frame_index)
       }
     }
     emitters[emitter_idx].transform = entry.item.transform.world_matrix
@@ -616,13 +635,13 @@ update_emitters :: proc(self: ^Engine, delta_time: f32) {
 // Get main camera from the main render target for the current frame
 get_main_camera :: proc(engine: ^Engine) -> ^geometry.Camera {
   main_render_target := resource.get(
-    g_render_targets,
+    engine.warehouse.render_targets,
     engine.main_render_target,
   )
   if main_render_target == nil {
     return nil
   }
-  return resource.get(g_cameras, main_render_target.camera)
+  return resource.get(engine.warehouse.cameras, main_render_target.camera)
 }
 
 
@@ -661,16 +680,16 @@ update :: proc(self: ^Engine) -> bool {
     anim_inst, has_animation := &skinning.animation.?
     if !has_animation do continue
     animation.instance_update(anim_inst, delta_time)
-    mesh := resource.get(g_meshes, data.handle) or_continue
+    mesh := resource.get(self.warehouse.meshes, data.handle) or_continue
     mesh_skin, mesh_has_skin := mesh.skinning.?
     if !mesh_has_skin do continue
     l, r :=
       skinning.bone_matrix_offset +
-      g_frame_index * g_bone_matrix_slab.capacity,
+      self.frame_index * self.warehouse.bone_matrix_slab.capacity,
       skinning.bone_matrix_offset +
-      g_frame_index * g_bone_matrix_slab.capacity +
+      self.frame_index * self.warehouse.bone_matrix_slab.capacity +
       u32(len(mesh_skin.bones))
-    bone_matrices := g_bone_buffer.mapped[l:r]
+    bone_matrices := self.warehouse.bone_buffer.mapped[l:r]
     sample_clip(mesh, anim_inst.clip_handle, anim_inst.time, bone_matrices)
   }
   update_emitters(self, delta_time)
@@ -721,20 +740,26 @@ deinit :: proc(self: ^Engine) {
   )
   // Clean up main render target
   if main_render_target := resource.get(
-    g_render_targets,
+    self.warehouse.render_targets,
     self.main_render_target,
   ); main_render_target != nil {
-    if item, freed := resource.free(&g_render_targets, self.main_render_target); freed {
-      render_target_deinit(&self.gpu_context, item)
+    if item, freed := resource.free(
+      &self.warehouse.render_targets,
+      self.main_render_target,
+    ); freed {
+      render_target_deinit(&self.gpu_context, &self.warehouse, item)
     }
   }
 
   // Clean up persistent shadow render targets
   for j in 0 ..< MAX_SHADOW_MAPS {
-    resource.free(&g_render_targets, self.shadow_render_targets[j])
+    resource.free(
+      &self.warehouse.render_targets,
+      self.shadow_render_targets[j],
+    )
     for face in 0 ..< 6 {
       resource.free(
-        &g_render_targets,
+        &self.warehouse.render_targets,
         self.cube_shadow_render_targets[j][face],
       )
     }
@@ -747,19 +772,19 @@ deinit :: proc(self: ^Engine) {
   delete(self.frame_active_render_targets)
 
   ui_deinit(&self.gpu_context, &self.ui)
-  scene_deinit(&self.scene)
+  scene_deinit(&self.scene, &self.warehouse)
   lighting_deinit(&self.gpu_context, &self.lighting)
-  ambient_deinit(&self.gpu_context, &self.ambient)
+  ambient_deinit(&self.gpu_context, &self.ambient, &self.warehouse)
   gbuffer_deinit(&self.gpu_context, &self.gbuffer)
   shadow_deinit(&self.gpu_context, &self.shadow)
-  postprocess_deinit(&self.gpu_context, &self.postprocess)
+  postprocess_deinit(&self.gpu_context, &self.postprocess, &self.warehouse)
   particle_deinit(&self.gpu_context, &self.particle)
   when USE_GPU_CULLING {
     visibility_culler_deinit(&self.gpu_context, &self.visibility_culler)
   }
   transparent_deinit(&self.gpu_context, &self.transparent)
   depth_prepass_deinit(&self.gpu_context, &self.depth_prepass)
-  factory_deinit(&self.gpu_context)
+  factory_deinit(&self.gpu_context, &self.warehouse)
   swapchain_deinit(&self.gpu_context, &self.swapchain)
   gpu.gpu_context_deinit(&self.gpu_context)
   glfw.DestroyWindow(self.window)
@@ -769,7 +794,11 @@ deinit :: proc(self: ^Engine) {
 
 recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
   // vk.DeviceWaitIdle(engine.gpu_context.device)
-  swapchain_recreate(&engine.gpu_context, &engine.swapchain, engine.window) or_return
+  swapchain_recreate(
+    &engine.gpu_context,
+    &engine.swapchain,
+    engine.window,
+  ) or_return
   new_aspect_ratio :=
     f32(engine.swapchain.extent.width) / f32(engine.swapchain.extent.height)
   if main_camera := get_main_camera(engine); main_camera != nil {
@@ -778,18 +807,26 @@ recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
 
   // Recreate main render target with new dimensions
   if main_render_target := resource.get(
-    g_render_targets,
+    engine.warehouse.render_targets,
     engine.main_render_target,
   ); main_render_target != nil {
     // Save current camera state
-    old_camera := resource.get(g_cameras, main_render_target.camera)
+    old_camera := resource.get(
+      engine.warehouse.cameras,
+      main_render_target.camera,
+    )
     old_position :=
       old_camera.position if old_camera != nil else [3]f32{0, 0, 3}
     old_target := [3]f32{0, 0, 0} // Calculate from camera direction if needed
 
-    render_target_deinit(&engine.gpu_context, main_render_target)
+    render_target_deinit(
+      &engine.gpu_context,
+      &engine.warehouse,
+      main_render_target,
+    )
     render_target_init(
       &engine.gpu_context,
+      &engine.warehouse,
       main_render_target,
       engine.swapchain.extent.width,
       engine.swapchain.extent.height,
@@ -816,6 +853,7 @@ recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
     engine.swapchain.extent.width,
     engine.swapchain.extent.height,
     engine.swapchain.format.format,
+    &engine.warehouse,
   ) or_return
   ui_recreate_images(
     &engine.ui,
@@ -839,7 +877,8 @@ generate_render_input :: proc(
   // Convert frame active render target handles to render targets for consistent camera slot mapping
   targets := make([dynamic]RenderTarget, 0, context.temp_allocator)
   for handle in self.frame_active_render_targets {
-    if target := resource.get(g_render_targets, handle); target != nil {
+    if target := resource.get(self.warehouse.render_targets, handle);
+       target != nil {
       append(&targets, target^)
     }
   }
@@ -866,16 +905,16 @@ generate_render_input :: proc(
     case MeshAttachment:
       // Skip nodes that don't cast shadows when rendering shadow pass
       if shadow_pass && !data.cast_shadow do continue
-      mesh := resource.get(g_meshes, data.handle)
+      mesh := resource.get(self.warehouse.meshes, data.handle)
       if mesh == nil do continue
-      material := resource.get(g_materials, data.material)
+      material := resource.get(self.warehouse.materials, data.material)
       if material == nil do continue
       total_count += 1
       // Use GPU culling results if available, otherwise fall back to CPU culling
       visible := true
       when USE_GPU_CULLING {
         if camera_slot_found {
-          visible = is_node_visible(&self.visibility_culler, camera_slot, u32(entry_index))
+          visible = is_node_visible(&self.visibility_culler, camera_slot, u32(entry_index), self.frame_index)
         } else {
           // Fall back to CPU culling if camera slot not found
           world_aabb := geometry.aabb_transform(mesh.aabb, node.transform.world_matrix)
@@ -922,18 +961,21 @@ generate_render_input :: proc(
 
 render :: proc(self: ^Engine) -> vk.Result {
   // log.debug("============ acquiring image...============ ")
-  acquire_next_image(&self.gpu_context, &self.swapchain) or_return
+  acquire_next_image(&self.gpu_context, &self.swapchain, self.frame_index) or_return
   mu.begin(&self.ui.ctx)
-  command_buffer := self.command_buffers[g_frame_index]
+  command_buffer := self.command_buffers[self.frame_index]
   vk.ResetCommandBuffer(command_buffer, {}) or_return
   // log.debug("============ setup main camera...============ ")
   // Update camera uniform for main render target
-  main_render_target := resource.get(g_render_targets, self.main_render_target)
+  main_render_target := resource.get(
+    self.warehouse.render_targets,
+    self.main_render_target,
+  )
   if main_render_target == nil {
     log.errorf("Main render target not found")
     return .ERROR_UNKNOWN
   }
-  render_target_update_camera_uniform(main_render_target)
+  render_target_update_camera_uniform(&self.warehouse, main_render_target)
 
   main_camera := get_main_camera(self)
   if main_camera == nil {
@@ -941,7 +983,7 @@ render :: proc(self: ^Engine) -> vk.Result {
     return .ERROR_UNKNOWN
   }
   main_camera_index := main_render_target.camera.index
-  camera_uniform := get_camera_uniform(main_camera_index)
+  camera_uniform := get_camera_uniform(&self.warehouse, main_camera_index)
   frustum := geometry.make_frustum(
     camera_uniform.projection * camera_uniform.view,
   )
@@ -960,12 +1002,15 @@ render :: proc(self: ^Engine) -> vk.Result {
       case .POINT:
         for camera_handle in light_info.cube_cameras {
           if camera_handle.generation != 0 {
-            resource.free(&g_cameras, camera_handle)
+            resource.free(&self.warehouse.cameras, camera_handle)
           }
         }
       case .SPOT:
         if light_info.camera.generation != 0 {
-          resource.free(&g_cameras, light_info.shadow_resources.camera)
+          resource.free(
+            &self.warehouse.cameras,
+            light_info.shadow_resources.camera,
+          )
         }
       case .DIRECTIONAL:
       // TODO: Add when directional shadows are implemented
@@ -993,8 +1038,8 @@ render :: proc(self: ^Engine) -> vk.Result {
 
       // Set up shadow mapping if needed
       if light_info.light_cast_shadow {
-        light_info.shadow_map_id = self.cube_shadow_maps[g_frame_index][cube_shadow_map_count].index
-        light_info.shadow_map = self.cube_shadow_maps[g_frame_index][cube_shadow_map_count]
+        light_info.shadow_map_id = self.cube_shadow_maps[self.frame_index][cube_shadow_map_count].index
+        light_info.shadow_map = self.cube_shadow_maps[self.frame_index][cube_shadow_map_count]
         cube_shadow_map_count += 1
 
         // Use persistent render targets and create temporary cameras
@@ -1019,11 +1064,11 @@ render :: proc(self: ^Engine) -> vk.Result {
 
         for i in 0 ..< 6 {
           // Get persistent render target for this cube face
-          render_target := resource.get(g_render_targets, light_info.cube_render_targets[i])
+          render_target := resource.get(self.warehouse.render_targets, light_info.cube_render_targets[i])
 
           // Allocate camera for this cube face
           camera: ^geometry.Camera
-          light_info.cube_cameras[i], camera = resource.alloc(&g_cameras)
+          light_info.cube_cameras[i], camera = resource.alloc(&self.warehouse.cameras)
           camera^ = geometry.make_camera_perspective(math.PI * 0.5, 1.0, 0.1, light_info.light_radius)
 
           // Associate camera with render target BEFORE updating uniform
@@ -1032,7 +1077,7 @@ render :: proc(self: ^Engine) -> vk.Result {
           // Set camera position and orientation for this cube face
           target_pos := position.xyz + face_dirs[i]
           geometry.camera_look_at(camera, position.xyz, target_pos, face_ups[i])
-          render_target_update_camera_uniform(render_target)
+          render_target_update_camera_uniform(&self.warehouse, render_target)
         }
 
         // Use first cube camera for light_camera_idx
@@ -1072,17 +1117,17 @@ render :: proc(self: ^Engine) -> vk.Result {
 
       // Set up shadow mapping if needed
       if light_info.light_cast_shadow {
-        light_info.shadow_map_id = self.shadow_maps[g_frame_index][shadow_map_count].index
-        light_info.shadow_map = self.shadow_maps[g_frame_index][shadow_map_count]
+        light_info.shadow_map_id = self.shadow_maps[self.frame_index][shadow_map_count].index
+        light_info.shadow_map = self.shadow_maps[self.frame_index][shadow_map_count]
         shadow_map_count += 1
 
         // Use persistent render target and create temporary camera
         light_info.render_target = self.shadow_render_targets[shadow_map_count - 1]
-        render_target := resource.get(g_render_targets, light_info.render_target)
+        render_target := resource.get(self.warehouse.render_targets, light_info.render_target)
 
         // Allocate camera for spot light
         camera: ^geometry.Camera
-        light_info.camera, camera = resource.alloc(&g_cameras)
+        light_info.camera, camera = resource.alloc(&self.warehouse.cameras)
         camera^ = geometry.make_camera_perspective(light_info.light_angle * 2.0, 1.0, 0.1, light_info.light_radius)
 
         // Associate camera with render target BEFORE updating uniform
@@ -1091,7 +1136,7 @@ render :: proc(self: ^Engine) -> vk.Result {
         // Set camera to look in the direction of the light
         target_pos := position.xyz + direction.xyz
         geometry.camera_look_at(camera, position.xyz, target_pos)
-        render_target_update_camera_uniform(render_target)
+        render_target_update_camera_uniform(&self.warehouse, render_target)
 
         light_info.light_camera_idx = light_info.camera.index
       } else {
@@ -1118,12 +1163,17 @@ render :: proc(self: ^Engine) -> vk.Result {
       switch light_info.light_kind {
       case .POINT:
         for target_handle in light_info.cube_render_targets {
-          if resource.get(g_render_targets, target_handle) != nil {
+          if resource.get(self.warehouse.render_targets, target_handle) !=
+             nil {
             append(&self.frame_active_render_targets, target_handle)
           }
         }
       case .SPOT:
-        if resource.get(g_render_targets, light_info.render_target) != nil {
+        if resource.get(
+             self.warehouse.render_targets,
+             light_info.render_target,
+           ) !=
+           nil {
           append(&self.frame_active_render_targets, light_info.render_target)
         }
       case .DIRECTIONAL:
@@ -1132,7 +1182,7 @@ render :: proc(self: ^Engine) -> vk.Result {
     }
     // Look for render targets that aren't main or shadow targets
     user_targets_added := 0
-    for &entry, i in g_render_targets.entries {
+    for &entry, i in self.warehouse.render_targets.entries {
       if !entry.active do continue
       handle := Handle{entry.generation, u32(i)}
       // Skip if it's the main render target
@@ -1152,31 +1202,47 @@ render :: proc(self: ^Engine) -> vk.Result {
     }
     active_targets := make([dynamic]RenderTarget, 0, context.temp_allocator)
     for handle in self.frame_active_render_targets {
-      if target := resource.get(g_render_targets, handle); target != nil {
+      if target := resource.get(self.warehouse.render_targets, handle);
+         target != nil {
         append(&active_targets, target^)
       }
     }
 
-    log.infof("Visibility culling with %d render targets, %d cameras",
-              len(active_targets), len(active_targets))
+    log.infof(
+      "Visibility culling with %d render targets, %d cameras",
+      len(active_targets),
+      len(active_targets),
+    )
 
     // Update and perform GPU scene culling
     visibility_culler_update(
       &self.visibility_culler,
       &self.scene,
       active_targets[:],
+      &self.warehouse,
+      self.frame_index,
     )
-    visibility_culler_execute(&self.gpu_context, &self.visibility_culler, command_buffer)
+    visibility_culler_execute(
+      &self.gpu_context,
+      &self.visibility_culler,
+      command_buffer,
+      self.frame_index,
+    )
 
     // Log visibility results for main camera (slot 0) - using data from 1-2 frames ago
-    disabled, visible, total := count_visible_objects(&self.visibility_culler, 0)
+    disabled, visible, total := count_visible_objects(
+      &self.visibility_culler,
+      0,
+      self.frame_index,
+    )
     // log.infof("Main camera visibility (1-2 frames old): %d visible / %d total (disabled: %d)",
     //           visible, total, disabled)
 
     // Optimized memory barrier - only wait for what we need
     // Since we use 1-2 frame latency, this barrier is mainly for GPU-GPU synchronization
     write_idx := self.visibility_culler.visibility_write_idx
-    prev_write_idx := (write_idx + VISIBILITY_BUFFER_COUNT - 1) % VISIBILITY_BUFFER_COUNT
+    prev_write_idx :=
+      (write_idx + VISIBILITY_BUFFER_COUNT - 1) % VISIBILITY_BUFFER_COUNT
     visibility_buffer_barrier := vk.BufferMemoryBarrier {
       sType               = .BUFFER_MEMORY_BARRIER,
       srcAccessMask       = {.SHADER_WRITE},
@@ -1222,8 +1288,8 @@ render :: proc(self: ^Engine) -> vk.Result {
   shadow_2d_images: [MAX_SHADOW_MAPS]vk.Image
   for i in 0 ..< shadow_map_count {
     b, ok := resource.get(
-      g_image_2d_buffers,
-      self.shadow_maps[g_frame_index][i],
+      self.warehouse.image_2d_buffers,
+      self.shadow_maps[self.frame_index][i],
     )
     if !ok {
       continue
@@ -1233,8 +1299,8 @@ render :: proc(self: ^Engine) -> vk.Result {
   shadow_cube_images: [MAX_SHADOW_MAPS]vk.Image
   for i in 0 ..< cube_shadow_map_count {
     b, ok := resource.get(
-      g_image_cube_buffers,
-      self.cube_shadow_maps[g_frame_index][i],
+      self.warehouse.image_cube_buffers,
+      self.cube_shadow_maps[self.frame_index][i],
     )
     if !ok {
       continue
@@ -1245,36 +1311,55 @@ render :: proc(self: ^Engine) -> vk.Result {
   // Batched shadow map transitions to attachment optimal
   // Combine 2D and cube shadow maps in a single barrier for better performance
   if shadow_map_count > 0 || cube_shadow_map_count > 0 {
-    image_barriers := make([dynamic]vk.ImageMemoryBarrier, 0, MAX_SHADOW_MAPS * 2, context.temp_allocator)
+    image_barriers := make(
+      [dynamic]vk.ImageMemoryBarrier,
+      0,
+      MAX_SHADOW_MAPS * 2,
+      context.temp_allocator,
+    )
 
     // Add 2D shadow map barriers
     for i in 0 ..< shadow_map_count {
-      append(&image_barriers, vk.ImageMemoryBarrier{
-        sType = .IMAGE_MEMORY_BARRIER,
-        srcAccessMask = {},
-        dstAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE},
-        oldLayout = .UNDEFINED,
-        newLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-        srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-        dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-        image = shadow_2d_images[i],
-        subresourceRange = {aspectMask = {.DEPTH}, levelCount = 1, layerCount = 1},
-      })
+      append(
+        &image_barriers,
+        vk.ImageMemoryBarrier {
+          sType = .IMAGE_MEMORY_BARRIER,
+          srcAccessMask = {},
+          dstAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE},
+          oldLayout = .UNDEFINED,
+          newLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+          srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+          dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+          image = shadow_2d_images[i],
+          subresourceRange = {
+            aspectMask = {.DEPTH},
+            levelCount = 1,
+            layerCount = 1,
+          },
+        },
+      )
     }
 
     // Add cube shadow map barriers
     for i in 0 ..< cube_shadow_map_count {
-      append(&image_barriers, vk.ImageMemoryBarrier{
-        sType = .IMAGE_MEMORY_BARRIER,
-        srcAccessMask = {},
-        dstAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE},
-        oldLayout = .UNDEFINED,
-        newLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-        srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-        dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-        image = shadow_cube_images[i],
-        subresourceRange = {aspectMask = {.DEPTH}, levelCount = 1, layerCount = 6},
-      })
+      append(
+        &image_barriers,
+        vk.ImageMemoryBarrier {
+          sType = .IMAGE_MEMORY_BARRIER,
+          srcAccessMask = {},
+          dstAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE},
+          oldLayout = .UNDEFINED,
+          newLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+          srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+          dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+          image = shadow_cube_images[i],
+          subresourceRange = {
+            aspectMask = {.DEPTH},
+            levelCount = 1,
+            layerCount = 6,
+          },
+        },
+      )
     }
 
     vk.CmdPipelineBarrier(
@@ -1282,9 +1367,12 @@ render :: proc(self: ^Engine) -> vk.Result {
       {.TOP_OF_PIPE},
       {.EARLY_FRAGMENT_TESTS},
       {},
-      0, nil,
-      0, nil,
-      u32(len(image_barriers)), raw_data(image_barriers),
+      0,
+      nil,
+      0,
+      nil,
+      u32(len(image_barriers)),
+      raw_data(image_barriers),
     )
   }
   // log.debugf("============ shadow casters (%d)...============ ", len(shadow_casters))
@@ -1302,13 +1390,14 @@ render :: proc(self: ^Engine) -> vk.Result {
       }
       for face in 0 ..< 6 {
         camera_uniform := get_camera_uniform(
+          &self.warehouse,
           light_info.cube_cameras[face].index,
         )
         frustum := geometry.make_frustum(
           camera_uniform.projection * camera_uniform.view,
         )
         target := resource.get(
-          g_render_targets,
+          self.warehouse.render_targets,
           light_info.cube_render_targets[face],
         )
         // Use frame active render targets for correct camera slot mapping
@@ -1318,13 +1407,15 @@ render :: proc(self: ^Engine) -> vk.Result {
           light_info.cube_cameras[face],
           shadow_pass = true,
         )
-        shadow_begin(target, command_buffer, u32(face))
+        shadow_begin(target, command_buffer, &self.warehouse, self.frame_index, u32(face))
         shadow_render(
           &self.shadow,
           shadow_render_input,
           light_info,
           target^,
           command_buffer,
+          &self.warehouse,
+          self.frame_index,
         )
         shadow_end(command_buffer)
         current_camera_slot += 1
@@ -1336,11 +1427,17 @@ render :: proc(self: ^Engine) -> vk.Result {
         log.errorf("Spot light %d has invalid shadow map handle", i)
         continue
       }
-      camera_uniform := get_camera_uniform(light_info.camera.index)
+      camera_uniform := get_camera_uniform(
+        &self.warehouse,
+        light_info.camera.index,
+      )
       frustum := geometry.make_frustum(
         camera_uniform.projection * camera_uniform.view,
       )
-      shadow_target := resource.get(g_render_targets, light_info.render_target)
+      shadow_target := resource.get(
+        self.warehouse.render_targets,
+        light_info.render_target,
+      )
       // Use frame active render targets for correct camera slot mapping
       shadow_render_input := generate_render_input(
         self,
@@ -1348,13 +1445,15 @@ render :: proc(self: ^Engine) -> vk.Result {
         light_info.camera,
         shadow_pass = true,
       )
-      shadow_begin(shadow_target, command_buffer)
+      shadow_begin(shadow_target, command_buffer, &self.warehouse, self.frame_index)
       shadow_render(
         &self.shadow,
         shadow_render_input,
         light_info,
         shadow_target^,
         command_buffer,
+        &self.warehouse,
+        self.frame_index,
       )
       shadow_end(command_buffer)
       current_camera_slot += 1
@@ -1363,36 +1462,55 @@ render :: proc(self: ^Engine) -> vk.Result {
   // Batched shadow map transitions to shader read optimal
   // Combine 2D and cube shadow maps in a single barrier for better performance
   if shadow_map_count > 0 || cube_shadow_map_count > 0 {
-    image_barriers := make([dynamic]vk.ImageMemoryBarrier, 0, MAX_SHADOW_MAPS * 2, context.temp_allocator)
+    image_barriers := make(
+      [dynamic]vk.ImageMemoryBarrier,
+      0,
+      MAX_SHADOW_MAPS * 2,
+      context.temp_allocator,
+    )
 
     // Add 2D shadow map barriers
     for i in 0 ..< shadow_map_count {
-      append(&image_barriers, vk.ImageMemoryBarrier{
-        sType = .IMAGE_MEMORY_BARRIER,
-        srcAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE},
-        dstAccessMask = {.SHADER_READ},
-        oldLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-        newLayout = .SHADER_READ_ONLY_OPTIMAL,
-        srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-        dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-        image = shadow_2d_images[i],
-        subresourceRange = {aspectMask = {.DEPTH}, levelCount = 1, layerCount = 1},
-      })
+      append(
+        &image_barriers,
+        vk.ImageMemoryBarrier {
+          sType = .IMAGE_MEMORY_BARRIER,
+          srcAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE},
+          dstAccessMask = {.SHADER_READ},
+          oldLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+          newLayout = .SHADER_READ_ONLY_OPTIMAL,
+          srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+          dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+          image = shadow_2d_images[i],
+          subresourceRange = {
+            aspectMask = {.DEPTH},
+            levelCount = 1,
+            layerCount = 1,
+          },
+        },
+      )
     }
 
     // Add cube shadow map barriers
     for i in 0 ..< cube_shadow_map_count {
-      append(&image_barriers, vk.ImageMemoryBarrier{
-        sType = .IMAGE_MEMORY_BARRIER,
-        srcAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE},
-        dstAccessMask = {.SHADER_READ},
-        oldLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-        newLayout = .SHADER_READ_ONLY_OPTIMAL,
-        srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-        dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-        image = shadow_cube_images[i],
-        subresourceRange = {aspectMask = {.DEPTH}, levelCount = 1, layerCount = 6},
-      })
+      append(
+        &image_barriers,
+        vk.ImageMemoryBarrier {
+          sType = .IMAGE_MEMORY_BARRIER,
+          srcAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE},
+          dstAccessMask = {.SHADER_READ},
+          oldLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+          newLayout = .SHADER_READ_ONLY_OPTIMAL,
+          srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+          dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+          image = shadow_cube_images[i],
+          subresourceRange = {
+            aspectMask = {.DEPTH},
+            levelCount = 1,
+            layerCount = 6,
+          },
+        },
+      )
     }
 
     vk.CmdPipelineBarrier(
@@ -1400,20 +1518,23 @@ render :: proc(self: ^Engine) -> vk.Result {
       {.LATE_FRAGMENT_TESTS},
       {.FRAGMENT_SHADER},
       {},
-      0, nil,
-      0, nil,
-      u32(len(image_barriers)), raw_data(image_barriers),
+      0,
+      nil,
+      0,
+      nil,
+      u32(len(image_barriers)),
+      raw_data(image_barriers),
     )
   }
   final_image := resource.get(
-    g_image_2d_buffers,
-    render_target_final_image(main_render_target),
+    self.warehouse.image_2d_buffers,
+    render_target_final_image(main_render_target, self.frame_index),
   )
   // Final image transition is now handled by gbuffer_begin
   // Get depth texture for transitions
   gbuffer_depth := resource.get(
-    g_image_2d_buffers,
-    render_target_depth_texture(main_render_target),
+    self.warehouse.image_2d_buffers,
+    render_target_depth_texture(main_render_target, self.frame_index),
   )
   // Transition depth texture to DEPTH_STENCIL_ATTACHMENT_OPTIMAL for depth prepass
   gpu.transition_image(
@@ -1434,25 +1555,39 @@ render :: proc(self: ^Engine) -> vk.Result {
     frustum,
     main_render_target.camera,
   )
-  depth_prepass_begin(main_render_target, command_buffer)
+  depth_prepass_begin(main_render_target, command_buffer, &self.warehouse, self.frame_index)
   depth_prepass_render(
     &self.depth_prepass,
     &depth_input,
     command_buffer,
     main_render_target.camera.index,
+    &self.warehouse,
+    self.frame_index,
   )
   depth_prepass_end(command_buffer)
   // log.debug("============ rendering G-buffer pass... =============")
   // G-buffer image transitions are now handled by gbuffer_begin/end
   gbuffer_input := depth_input
-  gbuffer_begin(main_render_target, command_buffer)
+  gbuffer_begin(
+    main_render_target,
+    command_buffer,
+    &self.warehouse,
+    self.frame_index,
+  )
   gbuffer_render(
     &self.gbuffer,
     &gbuffer_input,
     main_render_target,
     command_buffer,
+    &self.warehouse,
+    self.frame_index,
   )
-  gbuffer_end(main_render_target, command_buffer)
+  gbuffer_end(
+    main_render_target,
+    command_buffer,
+    &self.warehouse,
+    self.frame_index,
+  )
   // G-buffer to shader read transition is now handled by gbuffer_end
   // Transition depth texture to SHADER_READ_ONLY_OPTIMAL for use in post-processing
   gpu.transition_image(
@@ -1469,34 +1604,45 @@ render :: proc(self: ^Engine) -> vk.Result {
   // log.debug("============ rendering main pass... =============")
   // Prepare RenderTarget and RenderInput for decoupled renderer
   // Ambient pass
-  ambient_begin(&self.ambient, main_render_target, command_buffer)
-  ambient_render(&self.ambient, main_render_target, command_buffer)
+  ambient_begin(&self.ambient, main_render_target, command_buffer, &self.warehouse, self.frame_index)
+  ambient_render(&self.ambient, main_render_target, command_buffer, &self.warehouse, self.frame_index)
   ambient_end(command_buffer)
   // Per-light additive pass
-  lighting_begin(&self.lighting, main_render_target, command_buffer)
+  lighting_begin(&self.lighting, main_render_target, command_buffer, &self.warehouse, self.frame_index)
   lighting_render(
     &self.lighting,
     self.lights[:self.active_light_count],
     main_render_target,
     command_buffer,
+    &self.warehouse,
+    self.frame_index,
   )
   lighting_end(command_buffer)
   // log.debug("============ rendering particles... =============")
-  particle_begin(&self.particle, command_buffer, main_render_target)
+  particle_begin(
+    &self.particle,
+    command_buffer,
+    main_render_target,
+    &self.warehouse,
+    self.frame_index,
+  )
   particle_render(
     &self.particle,
     command_buffer,
     main_render_target.camera.index,
+    &self.warehouse,
   )
   particle_end(command_buffer)
 
   // Transparent & wireframe pass
-  transparent_begin(&self.transparent, main_render_target, command_buffer)
+  transparent_begin(&self.transparent, main_render_target, command_buffer, &self.warehouse, self.frame_index)
   transparent_render(
     &self.transparent,
     gbuffer_input,
     main_render_target,
     command_buffer,
+    &self.warehouse,
+    self.frame_index,
   )
   transparent_end(&self.transparent, command_buffer)
   // log.debug("============ rendering post processes... =============")
@@ -1519,6 +1665,8 @@ render :: proc(self: ^Engine) -> vk.Result {
     self.swapchain.extent,
     self.swapchain.views[self.swapchain.image_index],
     main_render_target,
+    &self.warehouse,
+    self.frame_index,
   )
   postprocess_end(&self.postprocess, command_buffer)
   if mu.window(&self.ui.ctx, "Engine", {40, 40, 300, 200}, {.NO_CLOSE}) {
@@ -1533,21 +1681,24 @@ render :: proc(self: ^Engine) -> vk.Result {
       &self.ui.ctx,
       fmt.tprintf(
         "Textures %d",
-        len(g_image_2d_buffers.entries) - len(g_image_2d_buffers.free_indices),
+        len(self.warehouse.image_2d_buffers.entries) -
+        len(self.warehouse.image_2d_buffers.free_indices),
       ),
     )
     mu.label(
       &self.ui.ctx,
       fmt.tprintf(
         "Materials %d",
-        len(g_materials.entries) - len(g_materials.free_indices),
+        len(self.warehouse.materials.entries) -
+        len(self.warehouse.materials.free_indices),
       ),
     )
     mu.label(
       &self.ui.ctx,
       fmt.tprintf(
         "Meshes %d",
-        len(g_meshes.entries) - len(g_meshes.free_indices),
+        len(self.warehouse.meshes.entries) -
+        len(self.warehouse.meshes.free_indices),
       ),
     )
 
@@ -1556,6 +1707,7 @@ render :: proc(self: ^Engine) -> vk.Result {
       disabled, visible, total := count_visible_objects(
         &self.visibility_culler,
         0,
+        self.frame_index,
       )
       mu.label(
         &self.ui.ctx,
@@ -1586,8 +1738,13 @@ render :: proc(self: ^Engine) -> vk.Result {
   )
   vk.EndCommandBuffer(command_buffer) or_return
   // log.debug("============ submit queue... =============")
-  submit_queue_and_present(&self.gpu_context, &self.swapchain, &command_buffer) or_return
-  g_frame_index = (g_frame_index + 1) % MAX_FRAMES_IN_FLIGHT
+  submit_queue_and_present(
+    &self.gpu_context,
+    &self.swapchain,
+    &command_buffer,
+    self.frame_index,
+  ) or_return
+  self.frame_index = (self.frame_index + 1) % MAX_FRAMES_IN_FLIGHT
   return .SUCCESS
 }
 

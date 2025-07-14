@@ -18,13 +18,14 @@ transparent_init :: proc(
   self: ^RendererTransparent,
   width: u32,
   height: u32,
+  warehouse: ^ResourceWarehouse,
 ) -> vk.Result {
   log.info("Initializing transparent renderer")
   // Use the existing descriptor set layouts
   set_layouts := [?]vk.DescriptorSetLayout {
-    g_camera_buffer_set_layout, // set = 0 (bindless camera buffer)
-    g_textures_set_layout, // set = 1 (bindless textures)
-    g_bone_buffer_set_layout, // set = 2 (bone matrices)
+    warehouse.camera_buffer_set_layout, // set = 0 (bindless camera buffer)
+    warehouse.textures_set_layout, // set = 1 (bindless textures)
+    warehouse.bone_buffer_set_layout, // set = 2 (bone matrices)
   }
   // Create pipeline layout with push constants
   push_constant_range := vk.PushConstantRange {
@@ -434,11 +435,13 @@ transparent_begin :: proc(
   self: ^RendererTransparent,
   render_target: ^RenderTarget,
   command_buffer: vk.CommandBuffer,
+  warehouse: ^ResourceWarehouse,
+  frame_index: u32,
 ) {
   // Setup color attachment - load existing content
   color_attachment := vk.RenderingAttachmentInfoKHR {
     sType       = .RENDERING_ATTACHMENT_INFO_KHR,
-    imageView   = resource.get(g_image_2d_buffers, render_target_final_image(render_target)).view,
+    imageView   = resource.get(warehouse.image_2d_buffers, render_target_final_image(render_target, frame_index)).view,
     imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
     loadOp      = .LOAD,
     storeOp     = .STORE,
@@ -446,7 +449,7 @@ transparent_begin :: proc(
   // Setup depth attachment - load existing depth buffer
   depth_attachment := vk.RenderingAttachmentInfoKHR {
     sType       = .RENDERING_ATTACHMENT_INFO_KHR,
-    imageView   = resource.get(g_image_2d_buffers, render_target_depth_texture(render_target)).view,
+    imageView   = resource.get(warehouse.image_2d_buffers, render_target_depth_texture(render_target, frame_index)).view,
     imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
     loadOp      = .LOAD,
     storeOp     = .STORE,
@@ -481,11 +484,13 @@ transparent_render :: proc(
   render_input: RenderInput,
   render_target: ^RenderTarget,
   command_buffer: vk.CommandBuffer,
+  warehouse: ^ResourceWarehouse,
+  frame_index: u32,
 ) {
   descriptor_sets := [?]vk.DescriptorSet {
-    g_camera_buffer_descriptor_set,
-    g_textures_descriptor_set,
-    g_bone_buffer_descriptor_set,
+    warehouse.camera_buffer_descriptor_set,
+    warehouse.textures_descriptor_set,
+    warehouse.bone_buffer_descriptor_set,
   }
   vk.CmdBindDescriptorSets(
     command_buffer,
@@ -511,7 +516,7 @@ transparent_render :: proc(
       for batch_data in batch_group {
         // Process each batch of transparent materials
         material := resource.get(
-          g_materials,
+          warehouse.materials,
           batch_data.material_handle,
         ) or_continue
 
@@ -520,7 +525,7 @@ transparent_render :: proc(
           mesh_attachment, ok := node.attachment.(MeshAttachment)
           if !ok do continue
 
-          mesh := resource.get(g_meshes, mesh_attachment.handle) or_continue
+          mesh := resource.get(warehouse.meshes, mesh_attachment.handle) or_continue
 
           push_constants := PushConstant {
             world                    = node.transform.world_matrix,
@@ -551,7 +556,7 @@ transparent_render :: proc(
              has_skinning {
             push_constants.bone_matrix_offset =
               skinning.bone_matrix_offset +
-              g_frame_index * g_bone_matrix_slab.capacity
+              frame_index * warehouse.bone_matrix_slab.capacity
           }
           // Push constants
           vk.CmdPushConstants(
@@ -563,7 +568,7 @@ transparent_render :: proc(
             &push_constants,
           )
           // Draw mesh
-          skin_buffer := g_dummy_skinning_buffer.buffer
+          skin_buffer := warehouse.dummy_skinning_buffer.buffer
           if mesh_skin, mesh_has_skin := mesh.skinning.?; mesh_has_skin {
             skin_buffer = mesh_skin.skin_buffer.buffer
           }
@@ -591,7 +596,7 @@ transparent_render :: proc(
         for node in batch_data.nodes {
           mesh_attachment, ok := node.attachment.(MeshAttachment)
           if !ok do continue
-          mesh := resource.get(g_meshes, mesh_attachment.handle) or_continue
+          mesh := resource.get(warehouse.meshes, mesh_attachment.handle) or_continue
           // Check if skinning feature is enabled
           is_skinned := .SKINNING in batch_key.features
           pipeline_idx := is_skinned ? 1 : 0
@@ -610,7 +615,7 @@ transparent_render :: proc(
              has_skinning {
             push_constant.bone_matrix_offset =
               skinning.bone_matrix_offset +
-              g_frame_index * g_bone_matrix_slab.capacity
+              frame_index * warehouse.bone_matrix_slab.capacity
           }
 
           // Push constants
@@ -625,7 +630,7 @@ transparent_render :: proc(
 
           // Draw mesh
           // Always bind both vertex buffer and skinning buffer (real or dummy)
-          skin_buffer := g_dummy_skinning_buffer.buffer
+          skin_buffer := warehouse.dummy_skinning_buffer.buffer
           if mesh_skin, mesh_has_skin := mesh.skinning.?; mesh_has_skin {
             skin_buffer = mesh_skin.skin_buffer.buffer
           }

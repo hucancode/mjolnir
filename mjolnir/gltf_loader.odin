@@ -105,7 +105,7 @@ load_gltf :: proc(
     if gltf_node.mesh != nil {
       if gltf_node.skin != nil {
         log.infof("Loading skinned mesh %s", string(gltf_node.name))
-        mesh_handle, mesh := resource.alloc(&g_meshes)
+        mesh_handle, mesh := resource.alloc(&engine.warehouse.meshes)
         data, bones, material, root_bone_idx, res :=
           load_gltf_skinned_primitive(
             engine,
@@ -131,7 +131,7 @@ load_gltf :: proc(
             )
           } else {
             bone_matrix_id = resource.slab_alloc(
-              &g_bone_matrix_slab,
+              &engine.warehouse.bone_matrix_slab,
               u32(len(bones)),
             )
             skin_to_bone_offset[gltf_node.skin] = bone_matrix_id
@@ -143,9 +143,9 @@ load_gltf :: proc(
             // Set bind pose for all frames (otherwise zeroed out matrices will cause model to be invisible)
             for frame_idx in 0 ..< MAX_FRAMES_IN_FLIGHT {
               l :=
-                bone_matrix_id + u32(frame_idx) * g_bone_matrix_slab.capacity
+                bone_matrix_id + u32(frame_idx) * engine.warehouse.bone_matrix_slab.capacity
               r := l + u32(len(bones))
-              bone_matrices := g_bone_buffer.mapped[l:r]
+              bone_matrices := engine.warehouse.bone_buffer.mapped[l:r]
               slice.fill(bone_matrices, linalg.MATRIX4F32_IDENTITY)
             }
           }
@@ -176,7 +176,7 @@ load_gltf :: proc(
           }
         } else {
           // Clean up the allocated mesh if skinned primitive loading failed
-          if mesh, freed := resource.free(&g_meshes, mesh_handle); freed {
+          if mesh, freed := resource.free(&engine.warehouse.meshes, mesh_handle); freed {
             mesh_deinit(&engine.gpu_context, mesh)
           }
         }
@@ -200,7 +200,7 @@ load_gltf :: proc(
           len(mesh_data.indices),
           mesh_data.skinnings,
         )
-        mesh_handle, _, ret := create_mesh(&engine.gpu_context, mesh_data)
+        mesh_handle, _, ret := create_mesh(&engine.gpu_context, &engine.warehouse, mesh_data)
         if ret != .SUCCESS {
           log.error("Failed to create static mesh ", ret)
           continue
@@ -286,7 +286,7 @@ load_gltf_texture :: proc(
     return
   }
   log.infof("Creating new texture from %d bytes", len(pixel_data))
-  tex_handle, texture = create_texture_from_data(&engine.gpu_context, pixel_data) or_return
+  tex_handle, texture = create_texture_from_data(&engine.gpu_context, &engine.warehouse, pixel_data) or_return
   delete(pixel_data)
   // Cache the texture
   texture_cache[gltf_texture] = tex_handle
@@ -355,6 +355,7 @@ load_gltf_pbr_textures :: proc(
         }
         metallic_roughness_handle, _ = create_texture_from_data(
           &engine.gpu_context,
+          &engine.warehouse,
           pixel_data,
         ) or_return
         features |= {.METALLIC_ROUGHNESS_TEXTURE}
@@ -417,6 +418,7 @@ load_gltf_primitive :: proc(
         texture_cache,
       ) or_return
     material_handle, _ = create_material(
+      &engine.warehouse,
       features,
       albedo_handle,
       metallic_roughness_handle,
@@ -531,6 +533,7 @@ load_gltf_skinned_primitive :: proc(
         texture_cache,
       ) or_return
     mat_handle, _ = create_material(
+      &engine.warehouse,
       features | {.SKINNING},
       albedo_handle,
       metallic_roughness_handle,
@@ -712,7 +715,7 @@ load_gltf_animations :: proc(
   gltf_skin: ^cgltf.skin,
   engine_mesh_handle: resource.Handle,
 ) -> bool {
-  mesh := resource.get(g_meshes, engine_mesh_handle)
+  mesh := resource.get(engine.warehouse.meshes, engine_mesh_handle)
   skinning := &mesh.skinning.?
   skinning.animations = make([]animation.Clip, len(gltf_data.animations))
   for gltf_anim, i in gltf_data.animations {

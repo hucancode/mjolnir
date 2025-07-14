@@ -360,6 +360,7 @@ postprocess_init :: proc(
   color_format: vk.Format,
   width: u32,
   height: u32,
+  warehouse: ^ResourceWarehouse,
 ) -> vk.Result {
   self.effect_stack = make([dynamic]PostprocessEffect)
   count :: len(PostProcessEffectType)
@@ -438,6 +439,7 @@ postprocess_init :: proc(
   postprocess_create_images(
     gpu_context,
     self,
+    warehouse,
     width,
     height,
     color_format,
@@ -471,7 +473,7 @@ postprocess_init :: proc(
     }
 
     layout_sets := [?]vk.DescriptorSetLayout {
-      g_textures_set_layout, // set = 0 (bindless textures)
+      warehouse.textures_set_layout, // set = 0 (bindless textures)
     }
     vk.CreatePipelineLayout(
       gpu_context.device,
@@ -550,6 +552,7 @@ postprocess_init :: proc(
 postprocess_create_images :: proc(
   gpu_context: ^gpu.GPUContext,
   self: ^RendererPostProcess,
+  warehouse: ^ResourceWarehouse,
   width: u32,
   height: u32,
   format: vk.Format,
@@ -557,6 +560,7 @@ postprocess_create_images :: proc(
   for &handle in self.images {
     handle, _ = create_empty_texture_2d(
       gpu_context,
+      warehouse,
       width,
       height,
       format,
@@ -567,9 +571,9 @@ postprocess_create_images :: proc(
   return .SUCCESS
 }
 
-postprocess_deinit_images :: proc(gpu_context: ^gpu.GPUContext, self: ^RendererPostProcess) {
+postprocess_deinit_images :: proc(gpu_context: ^gpu.GPUContext, self: ^RendererPostProcess, warehouse: ^ResourceWarehouse) {
   for handle in self.images {
-    if item, freed := resource.free(&g_image_2d_buffers, handle); freed {
+    if item, freed := resource.free(&warehouse.image_2d_buffers, handle); freed {
       gpu.image_buffer_deinit(gpu_context, item)
     }
   }
@@ -581,12 +585,13 @@ postprocess_recreate_images :: proc(
   width: u32,
   height: u32,
   format: vk.Format,
+  warehouse: ^ResourceWarehouse,
 ) -> vk.Result {
-  postprocess_deinit_images(gpu_context, self)
-  return postprocess_create_images(gpu_context, self, width, height, format)
+  postprocess_deinit_images(gpu_context, self, warehouse)
+  return postprocess_create_images(gpu_context, self, warehouse, width, height, format)
 }
 
-postprocess_deinit :: proc(gpu_context: ^gpu.GPUContext, self: ^RendererPostProcess) {
+postprocess_deinit :: proc(gpu_context: ^gpu.GPUContext, self: ^RendererPostProcess, warehouse: ^ResourceWarehouse) {
   for &frame in self.frames {
     vk.DestroySemaphore(gpu_context.device, frame.image_available_semaphore, nil)
     vk.DestroySemaphore(gpu_context.device, frame.render_finished_semaphore, nil)
@@ -602,7 +607,7 @@ postprocess_deinit :: proc(gpu_context: ^gpu.GPUContext, self: ^RendererPostProc
     layout = 0
   }
   delete(self.effect_stack)
-  postprocess_deinit_images(gpu_context, self)
+  postprocess_deinit_images(gpu_context, self, warehouse)
 }
 
 // Modular postprocess API
@@ -635,6 +640,8 @@ postprocess_render :: proc(
   extent: vk.Extent2D,
   output_view: vk.ImageView,
   render_target: ^RenderTarget,
+  warehouse: ^ResourceWarehouse,
+  frame_index: u32,
 ) {
   for effect, i in self.effect_stack {
     is_first := i == 0
@@ -650,7 +657,7 @@ postprocess_render :: proc(
     dst_image_idx: u32
 
     if is_first {
-      input_image_index = render_target_final_image(render_target).index // Use original input
+      input_image_index = render_target_final_image(render_target, frame_index).index // Use original input
       dst_image_idx = 0 // Write to image[0]
     } else {
       prev_dst_image_idx := (i - 1) % 2
@@ -667,7 +674,7 @@ postprocess_render :: proc(
     dst_view := output_view
     if !is_last {
       dst_texture := resource.get(
-        g_image_2d_buffers,
+        warehouse.image_2d_buffers,
         self.images[dst_image_idx],
       )
       gpu.transition_image(
@@ -688,7 +695,7 @@ postprocess_render :: proc(
     if !is_first {
       src_texture_idx := (i - 1) % 2 // Which ping-pong buffer the previous pass wrote to
       src_texture := resource.get(
-        g_image_2d_buffers,
+        warehouse.image_2d_buffers,
         self.images[src_texture_idx],
       )
       gpu.transition_image_to_shader_read(command_buffer, src_texture.image)
@@ -714,7 +721,7 @@ postprocess_render :: proc(
 
     // Bind textures descriptor set
     descriptor_sets := [?]vk.DescriptorSet {
-      g_textures_descriptor_set, // set = 0 (bindless textures)
+      warehouse.textures_descriptor_set, // set = 0 (bindless textures)
     }
     vk.CmdBindDescriptorSets(
       command_buffer,
@@ -727,13 +734,13 @@ postprocess_render :: proc(
       nil,
     )
     base: BasePushConstant
-    base.position_texture_index = render_target_position_texture(render_target).index
-    base.normal_texture_index = render_target_normal_texture(render_target).index
-    base.albedo_texture_index = render_target_albedo_texture(render_target).index
+    base.position_texture_index = render_target_position_texture(render_target, frame_index).index
+    base.normal_texture_index = render_target_normal_texture(render_target, frame_index).index
+    base.albedo_texture_index = render_target_albedo_texture(render_target, frame_index).index
     base.metallic_texture_index =
-      render_target_metallic_roughness_texture(render_target).index
-    base.emissive_texture_index = render_target_emissive_texture(render_target).index
-    base.depth_texture_index = render_target_depth_texture(render_target).index
+      render_target_metallic_roughness_texture(render_target, frame_index).index
+    base.emissive_texture_index = render_target_emissive_texture(render_target, frame_index).index
+    base.depth_texture_index = render_target_depth_texture(render_target, frame_index).index
     base.input_image_index = input_image_index
     // Create and push combined push constants based on effect type
     switch &e in effect {

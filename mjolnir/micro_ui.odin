@@ -49,6 +49,7 @@ ui_init :: proc(
   width: u32,
   height: u32,
   dpi_scale: f32 = 1.0,
+  warehouse: ^ResourceWarehouse,
 ) -> vk.Result {
   mu.init(&self.ctx)
   self.ctx.text_width = mu.default_atlas_text_width
@@ -247,6 +248,7 @@ ui_init :: proc(
   log.infof("init UI texture...")
   _, self.atlas = create_texture_from_pixels(
     gpu_context,
+    warehouse,
     mu.default_atlas_alpha[:],
     mu.DEFAULT_ATLAS_WIDTH,
     mu.DEFAULT_ATLAS_HEIGHT,
@@ -296,7 +298,7 @@ ui_init :: proc(
       descriptorCount = 1,
       descriptorType = .COMBINED_IMAGE_SAMPLER,
       pImageInfo = &{
-        sampler = g_nearest_clamp_sampler,
+        sampler = warehouse.nearest_clamp_sampler,
         imageView = self.atlas.view,
         imageLayout = .SHADER_READ_ONLY_OPTIMAL,
       },

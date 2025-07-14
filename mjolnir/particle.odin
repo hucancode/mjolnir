@@ -303,7 +303,7 @@ particle_deinit :: proc(gpu_context: ^gpu.GPUContext, self: ^RendererParticle) {
   gpu.data_buffer_deinit(gpu_context, &self.particle_counter_buffer)
 }
 
-particle_init :: proc(gpu_context: ^gpu.GPUContext, self: ^RendererParticle) -> vk.Result {
+particle_init :: proc(gpu_context: ^gpu.GPUContext, self: ^RendererParticle, warehouse: ^ResourceWarehouse) -> vk.Result {
   log.debugf("Initializing particle renderer")
   self.params_buffer = gpu.create_host_visible_buffer(
     gpu_context,
@@ -339,7 +339,7 @@ particle_init :: proc(gpu_context: ^gpu.GPUContext, self: ^RendererParticle) -> 
   particle_init_emitter_pipeline(gpu_context, self) or_return
   particle_init_compact_pipeline(gpu_context, self) or_return
   particle_init_compute_pipeline(gpu_context, self) or_return
-  particle_init_render_pipeline(gpu_context, self) or_return
+  particle_init_render_pipeline(gpu_context, self, warehouse) or_return
   return .SUCCESS
 }
 particle_init_emitter_pipeline :: proc(
@@ -789,10 +789,11 @@ particle_init_compact_pipeline :: proc(
 particle_init_render_pipeline :: proc(
   gpu_context: ^gpu.GPUContext,
   self: ^RendererParticle,
+  warehouse: ^ResourceWarehouse,
 ) -> vk.Result {
   descriptor_set_layouts := [?]vk.DescriptorSetLayout {
-    g_camera_buffer_set_layout, // set = 0 for bindless camera buffer
-    g_textures_set_layout, // set = 1 for textures
+    warehouse.camera_buffer_set_layout, // set = 0 for bindless camera buffer
+    warehouse.textures_set_layout, // set = 1 for textures
   }
   push_constant_range := vk.PushConstantRange {
     stageFlags = {.VERTEX},
@@ -812,6 +813,7 @@ particle_init_render_pipeline :: proc(
   ) or_return
   default_texture_handle, _ := create_texture_from_data(
     gpu_context,
+    warehouse,
     #load("assets/black-circle.png"),
   ) or_return
   self.default_texture_index = default_texture_handle.index
@@ -957,6 +959,8 @@ particle_begin :: proc(
   self: ^RendererParticle,
   command_buffer: vk.CommandBuffer,
   render_target: ^RenderTarget,
+  warehouse: ^ResourceWarehouse,
+  frame_index: u32,
 ) {
   // Memory barrier to ensure compute results are visible before rendering
   barrier := vk.BufferMemoryBarrier {
@@ -982,14 +986,14 @@ particle_begin :: proc(
   )
   color_attachment := vk.RenderingAttachmentInfoKHR {
     sType       = .RENDERING_ATTACHMENT_INFO_KHR,
-    imageView   = resource.get(g_image_2d_buffers, render_target_final_image(render_target)).view,
+    imageView   = resource.get(warehouse.image_2d_buffers, render_target_final_image(render_target, frame_index)).view,
     imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
     loadOp      = .LOAD, // preserve previous contents
     storeOp     = .STORE,
   }
   depth_attachment := vk.RenderingAttachmentInfoKHR {
     sType       = .RENDERING_ATTACHMENT_INFO_KHR,
-    imageView   = resource.get(g_image_2d_buffers, render_target_depth_texture(render_target)).view,
+    imageView   = resource.get(warehouse.image_2d_buffers, render_target_depth_texture(render_target, frame_index)).view,
     imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
     loadOp      = .LOAD,
     storeOp     = .STORE,
@@ -1022,12 +1026,13 @@ particle_render :: proc(
   self: ^RendererParticle,
   command_buffer: vk.CommandBuffer,
   camera_index: u32,
+  warehouse: ^ResourceWarehouse,
 ) {
   // Use indirect draw - GPU handles the count
   vk.CmdBindPipeline(command_buffer, .GRAPHICS, self.render_pipeline)
   descriptor_sets := [?]vk.DescriptorSet {
-    g_camera_buffer_descriptor_set, // set 0 (bindless camera buffer)
-    g_textures_descriptor_set, // set 1 (textures)
+    warehouse.camera_buffer_descriptor_set, // set 0 (bindless camera buffer)
+    warehouse.textures_descriptor_set, // set 1 (textures)
   }
   vk.CmdBindDescriptorSets(
     command_buffer,

@@ -30,6 +30,7 @@ RenderTarget :: struct {
 
 render_target_init :: proc(
   gpu_context: ^gpu.GPUContext,
+  warehouse: ^ResourceWarehouse,
   target: ^RenderTarget,
   width, height: u32,
   color_format: vk.Format,
@@ -41,7 +42,7 @@ render_target_init :: proc(
   far_plane: f32 = 100.0,
 ) -> vk.Result {
   camera_ptr: ^geometry.Camera
-  target.camera, camera_ptr = resource.alloc(&g_cameras)
+  target.camera, camera_ptr = resource.alloc(&warehouse.cameras)
   camera_ptr^ = geometry.make_camera_perspective(
     fov,
     f32(width) / f32(height),
@@ -54,61 +55,68 @@ render_target_init :: proc(
   // Create textures for all frames in flight
   for frame in 0 ..< MAX_FRAMES_IN_FLIGHT {
     // Create all texture handles and mark as owned
-    target.final_images[frame], _ = create_empty_texture_2d(
+    target.final_images[frame], _, _ = create_empty_texture_2d(
       gpu_context,
+      warehouse,
       width,
       height,
       color_format,
       {.COLOR_ATTACHMENT, .SAMPLED},
-    ) or_return
+    )
 
-    target.position_textures[frame], _ = create_empty_texture_2d(
+    target.position_textures[frame], _, _ = create_empty_texture_2d(
       gpu_context,
+      warehouse,
       width,
       height,
       .R32G32B32A32_SFLOAT,
       {.COLOR_ATTACHMENT, .SAMPLED},
-    ) or_return
+    )
 
-    target.normal_textures[frame], _ = create_empty_texture_2d(
+    target.normal_textures[frame], _, _ = create_empty_texture_2d(
       gpu_context,
+      warehouse,
       width,
       height,
       .R8G8B8A8_UNORM,
       {.COLOR_ATTACHMENT, .SAMPLED},
-    ) or_return
+    )
 
-    target.albedo_textures[frame], _ = create_empty_texture_2d(
+    target.albedo_textures[frame], _, _ = create_empty_texture_2d(
       gpu_context,
+      warehouse,
       width,
       height,
       .R8G8B8A8_UNORM,
       {.COLOR_ATTACHMENT, .SAMPLED},
-    ) or_return
+    )
 
-    target.metallic_roughness_textures[frame], _ = create_empty_texture_2d(
+    target.metallic_roughness_textures[frame], _, _ = create_empty_texture_2d(
       gpu_context,
+      warehouse,
       width,
       height,
       .R8G8B8A8_UNORM,
       {.COLOR_ATTACHMENT, .SAMPLED},
-    ) or_return
+    )
 
-    target.emissive_textures[frame], _ = create_empty_texture_2d(
+    target.emissive_textures[frame], _, _ = create_empty_texture_2d(
       gpu_context,
+      warehouse,
       width,
       height,
       .R8G8B8A8_UNORM,
       {.COLOR_ATTACHMENT, .SAMPLED},
-    ) or_return
+    )
 
-    target.depth_textures[frame], _ = create_empty_texture_2d(
+    target.depth_textures[frame], _, _ = create_empty_texture_2d(
       gpu_context,
+      warehouse,
       width,
       height,
       depth_format,
       {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
-    ) or_return
+    )
   }
 
   target.owns_final_image = true
@@ -123,43 +131,43 @@ render_target_init :: proc(
 }
 
 // Clean up RenderTarget resources (camera and owned textures)
-render_target_deinit :: proc(gpu_context: ^gpu.GPUContext, target: ^RenderTarget) {
+render_target_deinit :: proc(gpu_context: ^gpu.GPUContext, warehouse: ^ResourceWarehouse, target: ^RenderTarget) {
   // Always release camera since we always own it
-  resource.free(&g_cameras, target.camera)
+  resource.free(&warehouse.cameras, target.camera)
   // Release only owned texture handles for all frames
   for frame in 0 ..< MAX_FRAMES_IN_FLIGHT {
     if target.owns_final_image {
-      if item, freed := resource.free(&g_image_2d_buffers, target.final_images[frame]); freed {
+      if item, freed := resource.free(&warehouse.image_2d_buffers, target.final_images[frame]); freed {
         gpu.image_buffer_deinit(gpu_context, item)
       }
     }
     if target.owns_position_texture {
-      if item, freed := resource.free(&g_image_2d_buffers, target.position_textures[frame]); freed {
+      if item, freed := resource.free(&warehouse.image_2d_buffers, target.position_textures[frame]); freed {
         gpu.image_buffer_deinit(gpu_context, item)
       }
     }
     if target.owns_normal_texture {
-      if item, freed := resource.free(&g_image_2d_buffers, target.normal_textures[frame]); freed {
+      if item, freed := resource.free(&warehouse.image_2d_buffers, target.normal_textures[frame]); freed {
         gpu.image_buffer_deinit(gpu_context, item)
       }
     }
     if target.owns_albedo_texture {
-      if item, freed := resource.free(&g_image_2d_buffers, target.albedo_textures[frame]); freed {
+      if item, freed := resource.free(&warehouse.image_2d_buffers, target.albedo_textures[frame]); freed {
         gpu.image_buffer_deinit(gpu_context, item)
       }
     }
     if target.owns_metallic_roughness_texture {
-      if item, freed := resource.free(&g_image_2d_buffers, target.metallic_roughness_textures[frame]); freed {
+      if item, freed := resource.free(&warehouse.image_2d_buffers, target.metallic_roughness_textures[frame]); freed {
         gpu.image_buffer_deinit(gpu_context, item)
       }
     }
     if target.owns_emissive_texture {
-      if item, freed := resource.free(&g_image_2d_buffers, target.emissive_textures[frame]); freed {
+      if item, freed := resource.free(&warehouse.image_2d_buffers, target.emissive_textures[frame]); freed {
         gpu.image_buffer_deinit(gpu_context, item)
       }
     }
     if target.owns_depth_texture {
-      if item, freed := resource.free(&g_image_2d_buffers, target.depth_textures[frame]); freed {
+      if item, freed := resource.free(&warehouse.image_2d_buffers, target.depth_textures[frame]); freed {
         gpu.image_buffer_deinit(gpu_context, item)
       }
     }
@@ -167,9 +175,9 @@ render_target_deinit :: proc(gpu_context: ^gpu.GPUContext, target: ^RenderTarget
 }
 
 // Update camera uniform for the render target using bindless camera buffer
-render_target_update_camera_uniform :: proc(target: ^RenderTarget) {
-  camera := resource.get(g_cameras, target.camera)
-  uniform := get_camera_uniform(target.camera.index)
+render_target_update_camera_uniform :: proc(warehouse: ^ResourceWarehouse, target: ^RenderTarget) {
+  camera := resource.get(warehouse.cameras, target.camera)
+  uniform := get_camera_uniform(warehouse, target.camera.index)
   if camera == nil || uniform == nil {
     log.errorf("Camera %v or uniform %v not found", target.camera, uniform)
     return
@@ -185,6 +193,7 @@ render_target_update_camera_uniform :: proc(target: ^RenderTarget) {
 // Get texture handles for current frame
 render_target_get_current_textures :: proc(
   target: ^RenderTarget,
+  frame_index: u32,
 ) -> (
   final_image: Handle,
   position_texture: Handle,
@@ -194,7 +203,7 @@ render_target_get_current_textures :: proc(
   emissive_texture: Handle,
   depth_texture: Handle,
 ) {
-  frame := g_frame_index
+  frame := frame_index
   return target.final_images[frame],
     target.position_textures[frame],
     target.normal_textures[frame],
@@ -205,37 +214,38 @@ render_target_get_current_textures :: proc(
 }
 
 // Get camera for this render target
-render_target_get_camera :: proc(target: ^RenderTarget) -> ^geometry.Camera {
-  return resource.get(g_cameras, target.camera)
+render_target_get_camera :: proc(warehouse: ^ResourceWarehouse, target: ^RenderTarget) -> ^geometry.Camera {
+  return resource.get(warehouse.cameras, target.camera)
 }
 
 // Get specific texture for current frame
-render_target_final_image :: proc(target: ^RenderTarget) -> Handle {
-  return target.final_images[g_frame_index]
+render_target_final_image :: proc(target: ^RenderTarget, frame_index: u32) -> Handle {
+  return target.final_images[frame_index]
 }
 
-render_target_position_texture :: proc(target: ^RenderTarget) -> Handle {
-  return target.position_textures[g_frame_index]
+render_target_position_texture :: proc(target: ^RenderTarget, frame_index: u32) -> Handle {
+  return target.position_textures[frame_index]
 }
 
-render_target_normal_texture :: proc(target: ^RenderTarget) -> Handle {
-  return target.normal_textures[g_frame_index]
+render_target_normal_texture :: proc(target: ^RenderTarget, frame_index: u32) -> Handle {
+  return target.normal_textures[frame_index]
 }
 
-render_target_albedo_texture :: proc(target: ^RenderTarget) -> Handle {
-  return target.albedo_textures[g_frame_index]
+render_target_albedo_texture :: proc(target: ^RenderTarget, frame_index: u32) -> Handle {
+  return target.albedo_textures[frame_index]
 }
 
 render_target_metallic_roughness_texture :: proc(
   target: ^RenderTarget,
+  frame_index: u32,
 ) -> Handle {
-  return target.metallic_roughness_textures[g_frame_index]
+  return target.metallic_roughness_textures[frame_index]
 }
 
-render_target_emissive_texture :: proc(target: ^RenderTarget) -> Handle {
-  return target.emissive_textures[g_frame_index]
+render_target_emissive_texture :: proc(target: ^RenderTarget, frame_index: u32) -> Handle {
+  return target.emissive_textures[frame_index]
 }
 
-render_target_depth_texture :: proc(target: ^RenderTarget) -> Handle {
-  return target.depth_textures[g_frame_index]
+render_target_depth_texture :: proc(target: ^RenderTarget, frame_index: u32) -> Handle {
+  return target.depth_textures[frame_index]
 }

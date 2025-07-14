@@ -183,6 +183,7 @@ swapchain_recreate :: proc(
 acquire_next_image :: proc(
   gpu_context: ^gpu.GPUContext,
   self: ^Swapchain,
+  frame_index: u32,
 ) -> (
   result: vk.Result,
 ) {
@@ -190,7 +191,7 @@ acquire_next_image :: proc(
   vk.WaitForFences(
     gpu_context.device,
     1,
-    &self.in_flight_fences[g_frame_index],
+    &self.in_flight_fences[frame_index],
     true,
     math.max(u64),
   ) or_return
@@ -198,11 +199,11 @@ acquire_next_image :: proc(
     gpu_context.device,
     self.handle,
     math.max(u64),
-    self.image_available_semaphores[g_frame_index],
+    self.image_available_semaphores[frame_index],
     0,
     &self.image_index,
   ) or_return
-  vk.ResetFences(gpu_context.device, 1, &self.in_flight_fences[g_frame_index]) or_return
+  vk.ResetFences(gpu_context.device, 1, &self.in_flight_fences[frame_index]) or_return
   result = .SUCCESS
   return
 }
@@ -211,29 +212,30 @@ submit_queue_and_present :: proc(
   gpu_context: ^gpu.GPUContext,
   self: ^Swapchain,
   command_buffer: ^vk.CommandBuffer,
+  frame_index: u32,
 ) -> vk.Result {
   wait_stage_mask: vk.PipelineStageFlags = {.COLOR_ATTACHMENT_OUTPUT}
   submit_info := vk.SubmitInfo {
     sType                = .SUBMIT_INFO,
     waitSemaphoreCount   = 1,
-    pWaitSemaphores      = &self.image_available_semaphores[g_frame_index],
+    pWaitSemaphores      = &self.image_available_semaphores[frame_index],
     pWaitDstStageMask    = &wait_stage_mask,
     commandBufferCount   = 1,
     pCommandBuffers      = command_buffer,
     signalSemaphoreCount = 1,
-    pSignalSemaphores    = &self.render_finished_semaphores[g_frame_index],
+    pSignalSemaphores    = &self.render_finished_semaphores[frame_index],
   }
   vk.QueueSubmit(
     gpu_context.graphics_queue,
     1,
     &submit_info,
-    self.in_flight_fences[g_frame_index],
+    self.in_flight_fences[frame_index],
   ) or_return
   image_indices := [?]u32{self.image_index}
   present_info := vk.PresentInfoKHR {
     sType              = .PRESENT_INFO_KHR,
     waitSemaphoreCount = 1,
-    pWaitSemaphores    = &self.render_finished_semaphores[g_frame_index],
+    pWaitSemaphores    = &self.render_finished_semaphores[frame_index],
     swapchainCount     = 1,
     pSwapchains        = &self.handle,
     pImageIndices      = raw_data(image_indices[:]),

@@ -31,12 +31,13 @@ gbuffer_init :: proc(
   self: ^RendererGBuffer,
   width: u32,
   height: u32,
+  warehouse: ^ResourceWarehouse,
 ) -> vk.Result {
   depth_format: vk.Format = .D32_SFLOAT
   set_layouts := [?]vk.DescriptorSetLayout {
-    g_camera_buffer_set_layout, // set = 0 (bindless camera buffer)
-    g_textures_set_layout, // set = 1 (bindless textures)
-    g_bone_buffer_set_layout, // set = 2 (bone matrices)
+    warehouse.camera_buffer_set_layout, // set = 0 (bindless camera buffer)
+    warehouse.textures_set_layout, // set = 1 (bindless textures)
+    warehouse.bone_buffer_set_layout, // set = 2 (bone matrices)
   }
   push_constant_range := vk.PushConstantRange {
     stageFlags = {.VERTEX, .FRAGMENT},
@@ -225,32 +226,34 @@ gbuffer_init :: proc(
 gbuffer_begin :: proc(
   render_target: ^RenderTarget,
   command_buffer: vk.CommandBuffer,
+  warehouse: ^ResourceWarehouse,
+  frame_index: u32,
   self_manage_depth: bool = false,
 ) {
   // Transition all G-buffer textures to COLOR_ATTACHMENT_OPTIMAL
   position_texture := resource.get(
-    g_image_2d_buffers,
-    render_target_position_texture(render_target),
+    warehouse.image_2d_buffers,
+    render_target_position_texture(render_target, frame_index),
   )
   normal_texture := resource.get(
-    g_image_2d_buffers,
-    render_target_normal_texture(render_target),
+    warehouse.image_2d_buffers,
+    render_target_normal_texture(render_target, frame_index),
   )
   albedo_texture := resource.get(
-    g_image_2d_buffers,
-    render_target_albedo_texture(render_target),
+    warehouse.image_2d_buffers,
+    render_target_albedo_texture(render_target, frame_index),
   )
   metallic_roughness_texture := resource.get(
-    g_image_2d_buffers,
-    render_target_metallic_roughness_texture(render_target),
+    warehouse.image_2d_buffers,
+    render_target_metallic_roughness_texture(render_target, frame_index),
   )
   emissive_texture := resource.get(
-    g_image_2d_buffers,
-    render_target_emissive_texture(render_target),
+    warehouse.image_2d_buffers,
+    render_target_emissive_texture(render_target, frame_index),
   )
   final_texture := resource.get(
-    g_image_2d_buffers,
-    render_target_final_image(render_target),
+    warehouse.image_2d_buffers,
+    render_target_final_image(render_target, frame_index),
   )
 
   // Collect all G-buffer images for batch transition
@@ -279,8 +282,8 @@ gbuffer_begin :: proc(
   // Transition depth if self-managing
   if self_manage_depth {
     depth_texture := resource.get(
-      g_image_2d_buffers,
-      render_target_depth_texture(render_target),
+      warehouse.image_2d_buffers,
+      render_target_depth_texture(render_target, frame_index),
     )
     gpu.transition_image(
       command_buffer,
@@ -335,8 +338,8 @@ gbuffer_begin :: proc(
     clearValue = {color = {float32 = {0.0, 0.0, 0.0, 1.0}}},
   }
   depth_texture := resource.get(
-    g_image_2d_buffers,
-    render_target_depth_texture(render_target),
+    warehouse.image_2d_buffers,
+    render_target_depth_texture(render_target, frame_index),
   )
   depth_attachment := vk.RenderingAttachmentInfoKHR {
     sType       = .RENDERING_ATTACHMENT_INFO_KHR,
@@ -380,29 +383,31 @@ gbuffer_begin :: proc(
 gbuffer_end :: proc(
   render_target: ^RenderTarget,
   command_buffer: vk.CommandBuffer,
+  warehouse: ^ResourceWarehouse,
+  frame_index: u32,
 ) {
   vk.CmdEndRenderingKHR(command_buffer)
 
   // Transition all G-buffer textures to SHADER_READ_ONLY_OPTIMAL for use by lighting
   position_texture := resource.get(
-    g_image_2d_buffers,
-    render_target_position_texture(render_target),
+    warehouse.image_2d_buffers,
+    render_target_position_texture(render_target, frame_index),
   )
   normal_texture := resource.get(
-    g_image_2d_buffers,
-    render_target_normal_texture(render_target),
+    warehouse.image_2d_buffers,
+    render_target_normal_texture(render_target, frame_index),
   )
   albedo_texture := resource.get(
-    g_image_2d_buffers,
-    render_target_albedo_texture(render_target),
+    warehouse.image_2d_buffers,
+    render_target_albedo_texture(render_target, frame_index),
   )
   metallic_roughness_texture := resource.get(
-    g_image_2d_buffers,
-    render_target_metallic_roughness_texture(render_target),
+    warehouse.image_2d_buffers,
+    render_target_metallic_roughness_texture(render_target, frame_index),
   )
   emissive_texture := resource.get(
-    g_image_2d_buffers,
-    render_target_emissive_texture(render_target),
+    warehouse.image_2d_buffers,
+    render_target_emissive_texture(render_target, frame_index),
   )
 
   // Collect G-buffer images for batch transition (excluding final image which stays as attachment)
@@ -433,11 +438,13 @@ gbuffer_render :: proc(
   render_input: ^RenderInput,
   render_target: ^RenderTarget,
   command_buffer: vk.CommandBuffer,
+  warehouse: ^ResourceWarehouse,
+  frame_index: u32,
 ) {
   descriptor_sets := [?]vk.DescriptorSet {
-    g_camera_buffer_descriptor_set,
-    g_textures_descriptor_set,
-    g_bone_buffer_descriptor_set,
+    warehouse.camera_buffer_descriptor_set,
+    warehouse.textures_descriptor_set,
+    warehouse.bone_buffer_descriptor_set,
   }
   vk.CmdBindDescriptorSets(
     command_buffer,
@@ -457,7 +464,7 @@ gbuffer_render :: proc(
       continue
     }
     sample_material := resource.get(
-      g_materials,
+      warehouse.materials,
       batch_group[0].material_handle,
     ) or_continue
     pipeline := gbuffer_get_pipeline(self, sample_material.features)
@@ -467,12 +474,12 @@ gbuffer_render :: proc(
     }
     for batch_data in batch_group {
       material := resource.get(
-        g_materials,
+        warehouse.materials,
         batch_data.material_handle,
       ) or_continue
       for node in batch_data.nodes {
         mesh_attachment := node.attachment.(MeshAttachment)
-        mesh := resource.get(g_meshes, mesh_attachment.handle) or_continue
+        mesh := resource.get(warehouse.meshes, mesh_attachment.handle) or_continue
         // DEBUG: Use a constant color for albedo to test G-buffer -> lighting pass
         push_constants := PushConstant {
           world                    = node.transform.world_matrix,
@@ -500,7 +507,7 @@ gbuffer_render :: proc(
         if skinning, has_skinning := mesh_attachment.skinning.?; has_skinning {
           push_constants.bone_matrix_offset =
             skinning.bone_matrix_offset +
-            g_frame_index * g_bone_matrix_slab.capacity
+            frame_index * warehouse.bone_matrix_slab.capacity
         }
         vk.CmdPushConstants(
           command_buffer,
@@ -511,7 +518,7 @@ gbuffer_render :: proc(
           &push_constants,
         )
         // Always bind both vertex buffer and skinning buffer (real or dummy)
-        skin_buffer := g_dummy_skinning_buffer.buffer
+        skin_buffer := warehouse.dummy_skinning_buffer.buffer
         if mesh_skin, mesh_has_skin := mesh.skinning.?; mesh_has_skin {
           skin_buffer = mesh_skin.skin_buffer.buffer
         }
