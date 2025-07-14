@@ -30,8 +30,8 @@ depth_prepass_init :: proc(
     size       = size_of(PushConstant),
   }
   set_layouts := [?]vk.DescriptorSetLayout {
-    g_bindless_camera_buffer_set_layout, // set = 0 (bindless camera buffer)
-    g_bindless_bone_buffer_set_layout, // set = 1 (for skinning)
+    g_camera_buffer_set_layout, // set = 0 (bindless camera buffer)
+    g_bone_buffer_set_layout, // set = 1 (for skinning)
   }
   pipeline_layout_info := vk.PipelineLayoutCreateInfo {
     sType                  = .PIPELINE_LAYOUT_CREATE_INFO,
@@ -122,8 +122,8 @@ depth_prepass_render :: proc(
 ) -> int {
   rendered_count := 0
   descriptor_sets := [?]vk.DescriptorSet {
-    g_bindless_camera_buffer_descriptor_set, // set 0
-    g_bindless_bone_buffer_descriptor_set, // set 1
+    g_camera_buffer_descriptor_set, // set 0
+    g_bone_buffer_descriptor_set, // set 1
   }
   vk.CmdBindDescriptorSets(
     command_buffer,

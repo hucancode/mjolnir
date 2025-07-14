@@ -67,7 +67,7 @@ ambient_begin :: proc(
   vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
   vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
   descriptor_sets := [?]vk.DescriptorSet {
-    g_bindless_camera_buffer_descriptor_set, // set = 0 (bindless camera buffer)
+    g_camera_buffer_descriptor_set, // set = 0 (bindless camera buffer)
     g_textures_descriptor_set, // set = 1 (bindless textures)
   }
   vk.CmdBindDescriptorSets(
@@ -127,7 +127,7 @@ ambient_init :: proc(
 ) -> vk.Result {
   log.debugf("renderer ambient init %d x %d", width, height)
   pipeline_set_layouts := [?]vk.DescriptorSetLayout {
-    g_bindless_camera_buffer_set_layout, // set = 0 (bindless camera buffer)
+    g_camera_buffer_set_layout, // set = 0 (bindless camera buffer)
     g_textures_set_layout, // set = 1 (bindless textures)
   }
   push_constant_range := vk.PushConstantRange {

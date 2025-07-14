@@ -791,7 +791,7 @@ particle_init_render_pipeline :: proc(
   self: ^RendererParticle,
 ) -> vk.Result {
   descriptor_set_layouts := [?]vk.DescriptorSetLayout {
-    g_bindless_camera_buffer_set_layout, // set = 0 for bindless camera buffer
+    g_camera_buffer_set_layout, // set = 0 for bindless camera buffer
     g_textures_set_layout, // set = 1 for textures
   }
   push_constant_range := vk.PushConstantRange {
@@ -1026,7 +1026,7 @@ particle_render :: proc(
   // Use indirect draw - GPU handles the count
   vk.CmdBindPipeline(command_buffer, .GRAPHICS, self.render_pipeline)
   descriptor_sets := [?]vk.DescriptorSet {
-    g_bindless_camera_buffer_descriptor_set, // set 0 (bindless camera buffer)
+    g_camera_buffer_descriptor_set, // set 0 (bindless camera buffer)
     g_textures_descriptor_set, // set 1 (textures)
   }
   vk.CmdBindDescriptorSets(

@@ -23,15 +23,15 @@ g_image_cube_buffers: resource.Pool(gpu.CubeImageBuffer)
 g_cameras: resource.Pool(geometry.Camera)
 g_render_targets: resource.Pool(RenderTarget)
 
-g_bindless_bone_buffer_set_layout: vk.DescriptorSetLayout
-g_bindless_bone_buffer_descriptor_set: vk.DescriptorSet
-g_bindless_bone_buffer: gpu.DataBuffer(matrix[4, 4]f32)
+g_bone_buffer_set_layout: vk.DescriptorSetLayout
+g_bone_buffer_descriptor_set: vk.DescriptorSet
+g_bone_buffer: gpu.DataBuffer(matrix[4, 4]f32)
 g_bone_matrix_slab: resource.SlabAllocator
 
 // Bindless camera buffer system
-g_bindless_camera_buffer_set_layout: vk.DescriptorSetLayout
-g_bindless_camera_buffer_descriptor_set: vk.DescriptorSet
-g_bindless_camera_buffer: gpu.DataBuffer(CameraUniform)
+g_camera_buffer_set_layout: vk.DescriptorSetLayout
+g_camera_buffer_descriptor_set: vk.DescriptorSet
+g_camera_buffer: gpu.DataBuffer(CameraUniform)
 
 // Dummy skinning buffer for static meshes
 g_dummy_skinning_buffer: gpu.DataBuffer(geometry.SkinningData)
@@ -256,7 +256,7 @@ init_bone_matrix_allocator :: proc(gpu_context: ^gpu.GPUContext) -> vk.Result {
     MAX_FRAMES_IN_FLIGHT,
   )
   // Create bone buffer with space for all frames in flight
-  g_bindless_bone_buffer, _ = gpu.create_host_visible_buffer(
+  g_bone_buffer, _ = gpu.create_host_visible_buffer(
     gpu_context,
     matrix[4, 4]f32,
     int(g_bone_matrix_slab.capacity) * MAX_FRAMES_IN_FLIGHT,
@@ -279,7 +279,7 @@ init_bone_matrix_allocator :: proc(gpu_context: ^gpu.GPUContext) -> vk.Result {
       pBindings = raw_data(skinning_bindings[:]),
     },
     nil,
-    &g_bindless_bone_buffer_set_layout,
+    &g_bone_buffer_set_layout,
   ) or_return
   vk.AllocateDescriptorSets(
     gpu_context.device,
@@ -287,18 +287,18 @@ init_bone_matrix_allocator :: proc(gpu_context: ^gpu.GPUContext) -> vk.Result {
       sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
       descriptorPool = gpu_context.descriptor_pool,
       descriptorSetCount = 1,
-      pSetLayouts = &g_bindless_bone_buffer_set_layout,
+      pSetLayouts = &g_bone_buffer_set_layout,
     },
-    &g_bindless_bone_buffer_descriptor_set,
+    &g_bone_buffer_descriptor_set,
   ) or_return
   buffer_info := vk.DescriptorBufferInfo {
-    buffer = g_bindless_bone_buffer.buffer,
+    buffer = g_bone_buffer.buffer,
     offset = 0,
     range  = vk.DeviceSize(vk.WHOLE_SIZE),
   }
   write := vk.WriteDescriptorSet {
     sType           = .WRITE_DESCRIPTOR_SET,
-    dstSet          = g_bindless_bone_buffer_descriptor_set,
+    dstSet          = g_bone_buffer_descriptor_set,
     dstBinding      = 0,
     descriptorType  = .STORAGE_BUFFER,
     descriptorCount = 1,
@@ -324,7 +324,7 @@ init_camera_buffer :: proc(gpu_context: ^gpu.GPUContext) -> vk.Result {
   )
 
   // Create camera buffer
-  g_bindless_camera_buffer = gpu.create_host_visible_buffer(
+  g_camera_buffer = gpu.create_host_visible_buffer(
     gpu_context,
     CameraUniform,
     MAX_ACTIVE_CAMERAS,
@@ -350,7 +350,7 @@ init_camera_buffer :: proc(gpu_context: ^gpu.GPUContext) -> vk.Result {
       pBindings = raw_data(camera_bindings[:]),
     },
     nil,
-    &g_bindless_camera_buffer_set_layout,
+    &g_camera_buffer_set_layout,
   ) or_return
 
   // Allocate descriptor set
@@ -360,21 +360,21 @@ init_camera_buffer :: proc(gpu_context: ^gpu.GPUContext) -> vk.Result {
       sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
       descriptorPool = gpu_context.descriptor_pool,
       descriptorSetCount = 1,
-      pSetLayouts = &g_bindless_camera_buffer_set_layout,
+      pSetLayouts = &g_camera_buffer_set_layout,
     },
-    &g_bindless_camera_buffer_descriptor_set,
+    &g_camera_buffer_descriptor_set,
   ) or_return
 
   // Update descriptor set
   buffer_info := vk.DescriptorBufferInfo {
-    buffer = g_bindless_camera_buffer.buffer,
+    buffer = g_camera_buffer.buffer,
     offset = 0,
     range  = vk.DeviceSize(vk.WHOLE_SIZE),
   }
 
   write := vk.WriteDescriptorSet {
     sType           = .WRITE_DESCRIPTOR_SET,
-    dstSet          = g_bindless_camera_buffer_descriptor_set,
+    dstSet          = g_camera_buffer_descriptor_set,
     dstBinding      = 0,
     descriptorType  = .STORAGE_BUFFER,
     descriptorCount = 1,
@@ -392,17 +392,17 @@ get_camera_uniform :: proc(camera_index: u32) -> ^CameraUniform {
   if camera_index >= MAX_ACTIVE_CAMERAS {
     return nil
   }
-  return gpu.data_buffer_get(&g_bindless_camera_buffer, camera_index)
+  return gpu.data_buffer_get(&g_camera_buffer, camera_index)
 }
 
 deinit_camera_buffer :: proc(gpu_context: ^gpu.GPUContext) {
-  gpu.data_buffer_deinit(gpu_context, &g_bindless_camera_buffer)
+  gpu.data_buffer_deinit(gpu_context, &g_camera_buffer)
   vk.DestroyDescriptorSetLayout(
     gpu_context.device,
-    g_bindless_camera_buffer_set_layout,
+    g_camera_buffer_set_layout,
     nil,
   )
-  g_bindless_camera_buffer_set_layout = 0
+  g_camera_buffer_set_layout = 0
 }
 
 deinit_global_samplers :: proc(gpu_context: ^gpu.GPUContext) {
@@ -545,13 +545,13 @@ create_empty_texture_cube :: proc(
 }
 
 deinit_bone_matrix_allocator :: proc(gpu_context: ^gpu.GPUContext) {
-  gpu.data_buffer_deinit(gpu_context, &g_bindless_bone_buffer)
+  gpu.data_buffer_deinit(gpu_context, &g_bone_buffer)
   vk.DestroyDescriptorSetLayout(
     gpu_context.device,
-    g_bindless_bone_buffer_set_layout,
+    g_bone_buffer_set_layout,
     nil,
   )
-  g_bindless_bone_buffer_set_layout = 0
+  g_bone_buffer_set_layout = 0
   resource.slab_allocator_deinit(&g_bone_matrix_slab)
 }
 

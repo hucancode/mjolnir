@@ -34,9 +34,9 @@ gbuffer_init :: proc(
 ) -> vk.Result {
   depth_format: vk.Format = .D32_SFLOAT
   set_layouts := [?]vk.DescriptorSetLayout {
-    g_bindless_camera_buffer_set_layout, // set = 0 (bindless camera buffer)
+    g_camera_buffer_set_layout, // set = 0 (bindless camera buffer)
     g_textures_set_layout, // set = 1 (bindless textures)
-    g_bindless_bone_buffer_set_layout, // set = 2 (bone matrices)
+    g_bone_buffer_set_layout, // set = 2 (bone matrices)
   }
   push_constant_range := vk.PushConstantRange {
     stageFlags = {.VERTEX, .FRAGMENT},
@@ -435,9 +435,9 @@ gbuffer_render :: proc(
   command_buffer: vk.CommandBuffer,
 ) {
   descriptor_sets := [?]vk.DescriptorSet {
-    g_bindless_camera_buffer_descriptor_set,
+    g_camera_buffer_descriptor_set,
     g_textures_descriptor_set,
-    g_bindless_bone_buffer_descriptor_set,
+    g_bone_buffer_descriptor_set,
   }
   vk.CmdBindDescriptorSets(
     command_buffer,

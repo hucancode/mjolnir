@@ -20,8 +20,8 @@ shadow_init :: proc(
   depth_format: vk.Format = .D32_SFLOAT,
 ) -> vk.Result {
   set_layouts := [?]vk.DescriptorSetLayout {
-    g_bindless_camera_buffer_set_layout,
-    g_bindless_bone_buffer_set_layout,
+    g_camera_buffer_set_layout,
+    g_bone_buffer_set_layout,
   }
   push_constant_range := [?]vk.PushConstantRange {
     {stageFlags = {.FRAGMENT, .VERTEX}, size = size_of(PushConstant)},
@@ -241,8 +241,8 @@ shadow_render :: proc(
 ) {
   current_pipeline: vk.Pipeline = 0
   descriptor_sets := [?]vk.DescriptorSet {
-    g_bindless_camera_buffer_descriptor_set,
-    g_bindless_bone_buffer_descriptor_set,
+    g_camera_buffer_descriptor_set,
+    g_bone_buffer_descriptor_set,
   }
   vk.CmdBindDescriptorSets(
     command_buffer,

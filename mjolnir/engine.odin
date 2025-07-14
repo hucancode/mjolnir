@@ -670,7 +670,7 @@ update :: proc(self: ^Engine) -> bool {
       skinning.bone_matrix_offset +
       g_frame_index * g_bone_matrix_slab.capacity +
       u32(len(mesh_skin.bones))
-    bone_matrices := g_bindless_bone_buffer.mapped[l:r]
+    bone_matrices := g_bone_buffer.mapped[l:r]
     sample_clip(mesh, anim_inst.clip_handle, anim_inst.time, bone_matrices)
   }
   update_emitters(self, delta_time)
