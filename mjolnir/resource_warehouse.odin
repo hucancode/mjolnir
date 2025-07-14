@@ -46,7 +46,7 @@ ResourceWarehouse :: struct {
 }
 
 
-factory_init :: proc(gpu_context: ^gpu.GPUContext, warehouse: ^ResourceWarehouse) -> vk.Result {
+resource_init :: proc(gpu_context: ^gpu.GPUContext, warehouse: ^ResourceWarehouse) -> vk.Result {
   log.infof("Initializing mesh pool... ")
   resource.pool_init(&warehouse.meshes)
   log.infof("Initializing materials pool... ")
@@ -151,7 +151,7 @@ factory_init :: proc(gpu_context: ^gpu.GPUContext, warehouse: ^ResourceWarehouse
   return .SUCCESS
 }
 
-factory_deinit :: proc(gpu_context: ^gpu.GPUContext, warehouse: ^ResourceWarehouse) {
+resource_deinit :: proc(gpu_context: ^gpu.GPUContext, warehouse: ^ResourceWarehouse) {
   gpu.data_buffer_deinit(gpu_context, &warehouse.dummy_skinning_buffer)
   // Manually clean up each pool since callbacks can't capture gpu_context
   for &entry in warehouse.image_2d_buffers.entries {

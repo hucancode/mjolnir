@@ -337,7 +337,7 @@ init :: proc(
   }
   log.infof("Window created %v\n", self.window)
   gpu.gpu_context_init(&self.gpu_context, self.window) or_return
-  factory_init(&self.gpu_context, &self.warehouse) or_return
+  resource_init(&self.gpu_context, &self.warehouse) or_return
   self.start_timestamp = time.now()
   self.last_frame_timestamp = self.start_timestamp
   self.last_update_timestamp = self.start_timestamp
@@ -784,7 +784,7 @@ deinit :: proc(self: ^Engine) {
   }
   transparent_deinit(&self.gpu_context, &self.transparent)
   depth_prepass_deinit(&self.gpu_context, &self.depth_prepass)
-  factory_deinit(&self.gpu_context, &self.warehouse)
+  resource_deinit(&self.gpu_context, &self.warehouse)
   swapchain_deinit(&self.gpu_context, &self.swapchain)
   gpu.gpu_context_deinit(&self.gpu_context)
   glfw.DestroyWindow(self.window)
