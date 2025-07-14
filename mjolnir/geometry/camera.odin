@@ -34,7 +34,6 @@ make_camera_perspective :: proc(
   far: f32,
 ) -> Camera {
   return Camera {
-    position = {0.0, 0.0, 0.0},
     rotation = linalg.QUATERNIONF32_IDENTITY,
     projection = PerspectiveProjection {
       fov = fov,
@@ -52,7 +51,6 @@ make_camera_ortho :: proc(
   far: f32,
 ) -> Camera {
   return Camera {
-    position = {0.0, 0.0, 0.0},
     rotation = linalg.QUATERNIONF32_IDENTITY,
     projection = OrthographicProjection {
       width = width,
@@ -74,6 +72,7 @@ make_camera_look_at :: proc(
 }
 
 // Safe up vector calculation to avoid gimbal lock
+@(private = "file")
 calculate_safe_up_vector :: proc(forward: [3]f32) -> [3]f32 {
   world_up := [3]f32{0, 1, 0}
   // If forward is nearly parallel with world up, use alternative up
@@ -84,22 +83,20 @@ calculate_safe_up_vector :: proc(forward: [3]f32) -> [3]f32 {
 }
 
 // Quaternion creation from forward and up vectors
+@(private = "file")
 quaternion_from_forward_and_up :: proc(forward, up: [3]f32) -> quaternion128 {
   right := linalg.normalize(linalg.cross(forward, up))
   recalc_up := linalg.cross(right, forward)
-
   // Create rotation matrix from basis vectors
   rotation_matrix := linalg.Matrix3f32{
     right.x,     recalc_up.x,     -forward.x,
     right.y,     recalc_up.y,     -forward.y,
     right.z,     recalc_up.z,     -forward.z,
   }
-
-  return linalg.quaternion_from_matrix3_f32(rotation_matrix)
+  return linalg.quaternion_from_matrix3(rotation_matrix)
 }
 
 // Universal camera manipulation functions
-
 // Look at target with automatic up vector calculation
 camera_look_at :: proc(camera: ^Camera, from, to: [3]f32, world_up := [3]f32{0, 1, 0}) {
   camera.position = from
@@ -112,6 +109,8 @@ camera_look_at :: proc(camera: ^Camera, from, to: [3]f32, world_up := [3]f32{0, 
       safe_up = {1, 0, 0}  // Use X-axis as last resort
     }
   }
+  // linalg.quaternion_from_forward_and_up expect row-major matrix
+  // our custom calculation expect column-major matrix
   camera.rotation = quaternion_from_forward_and_up(forward, safe_up)
 }
 
@@ -136,7 +135,6 @@ camera_rotate :: proc(camera: ^Camera, delta_yaw, delta_pitch: f32) {
   yaw_rotation := linalg.quaternion_angle_axis(delta_yaw, [3]f32{0, 1, 0})
   right := camera_right(camera^)
   pitch_rotation := linalg.quaternion_angle_axis(delta_pitch, right)
-
   // Apply rotations
   camera.rotation = yaw_rotation * camera.rotation
   camera.rotation = camera.rotation * pitch_rotation

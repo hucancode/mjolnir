@@ -3,6 +3,7 @@ package mjolnir
 import "core:fmt"
 import "core:log"
 import "geometry"
+import "gpu"
 import "resource"
 import vk "vendor:vulkan"
 
@@ -14,15 +15,16 @@ RendererTransparent :: struct {
 
 transparent_init :: proc(
   self: ^RendererTransparent,
-  width: u32,
-  height: u32,
+  gpu_context: ^gpu.GPUContext,
+  width, height: u32,
+  warehouse: ^ResourceWarehouse,
 ) -> vk.Result {
   log.info("Initializing transparent renderer")
   // Use the existing descriptor set layouts
   set_layouts := [?]vk.DescriptorSetLayout {
-    g_bindless_camera_buffer_set_layout, // set = 0 (bindless camera buffer)
-    g_textures_set_layout, // set = 1 (bindless textures)
-    g_bindless_bone_buffer_set_layout, // set = 2 (bone matrices)
+    warehouse.camera_buffer_set_layout, // set = 0 (bindless camera buffer)
+    warehouse.textures_set_layout, // set = 1 (bindless textures)
+    warehouse.bone_buffer_set_layout, // set = 2 (bone matrices)
   }
   // Create pipeline layout with push constants
   push_constant_range := vk.PushConstantRange {
@@ -30,7 +32,7 @@ transparent_init :: proc(
     size       = size_of(PushConstant),
   }
   vk.CreatePipelineLayout(
-    g_device,
+    gpu_context.device,
     &{
       sType = .PIPELINE_LAYOUT_CREATE_INFO,
       setLayoutCount = len(set_layouts),
@@ -42,24 +44,33 @@ transparent_init :: proc(
     &self.pipeline_layout,
   ) or_return
 
-  create_transparent_pipelines(self) or_return
-  create_wireframe_pipelines(self) or_return
+  create_transparent_pipelines(gpu_context, self) or_return
+  create_wireframe_pipelines(gpu_context, self) or_return
 
   log.info("Transparent renderer initialized successfully")
   return .SUCCESS
 }
 
-create_transparent_pipelines :: proc(self: ^RendererTransparent) -> vk.Result {
+create_transparent_pipelines :: proc(
+  gpu_context: ^gpu.GPUContext,
+  self: ^RendererTransparent,
+) -> vk.Result {
   // Create all shader variants for transparent PBR materials
   depth_format: vk.Format = .D32_SFLOAT
   color_format: vk.Format = .B8G8R8A8_SRGB
   // Load shader modules at compile time
   vert_shader_code := #load("shader/transparent/vert.spv")
-  vert_module := create_shader_module(vert_shader_code) or_return
-  defer vk.DestroyShaderModule(g_device, vert_module, nil)
+  vert_module := gpu.create_shader_module(
+    gpu_context,
+    vert_shader_code,
+  ) or_return
+  defer vk.DestroyShaderModule(gpu_context.device, vert_module, nil)
   frag_shader_code := #load("shader/transparent/frag.spv")
-  frag_module := create_shader_module(frag_shader_code) or_return
-  defer vk.DestroyShaderModule(g_device, frag_module, nil)
+  frag_module := gpu.create_shader_module(
+    gpu_context,
+    frag_shader_code,
+  ) or_return
+  defer vk.DestroyShaderModule(gpu_context.device, frag_module, nil)
 
   vertex_input_info := vk.PipelineVertexInputStateCreateInfo {
     sType                           = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
@@ -223,7 +234,7 @@ create_transparent_pipelines :: proc(self: ^RendererTransparent) -> vk.Result {
   }
 
   vk.CreateGraphicsPipelines(
-    g_device,
+    gpu_context.device,
     0,
     len(pipeline_infos),
     raw_data(pipeline_infos[:]),
@@ -234,18 +245,27 @@ create_transparent_pipelines :: proc(self: ^RendererTransparent) -> vk.Result {
   return .SUCCESS
 }
 
-create_wireframe_pipelines :: proc(self: ^RendererTransparent) -> vk.Result {
+create_wireframe_pipelines :: proc(
+  gpu_context: ^gpu.GPUContext,
+  self: ^RendererTransparent,
+) -> vk.Result {
   depth_format: vk.Format = .D32_SFLOAT
   color_format: vk.Format = .B8G8R8A8_SRGB
 
   // Load shader modules at compile time
   vert_shader_code := #load("shader/wireframe/vert.spv")
-  vert_module := create_shader_module(vert_shader_code) or_return
-  defer vk.DestroyShaderModule(g_device, vert_module, nil)
+  vert_module := gpu.create_shader_module(
+    gpu_context,
+    vert_shader_code,
+  ) or_return
+  defer vk.DestroyShaderModule(gpu_context.device, vert_module, nil)
 
   frag_shader_code := #load("shader/wireframe/frag.spv")
-  frag_module := create_shader_module(frag_shader_code) or_return
-  defer vk.DestroyShaderModule(g_device, frag_module, nil)
+  frag_module := gpu.create_shader_module(
+    gpu_context,
+    frag_shader_code,
+  ) or_return
+  defer vk.DestroyShaderModule(gpu_context.device, frag_module, nil)
 
   vertex_input_info := vk.PipelineVertexInputStateCreateInfo {
     sType                           = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
@@ -386,7 +406,7 @@ create_wireframe_pipelines :: proc(self: ^RendererTransparent) -> vk.Result {
   }
 
   vk.CreateGraphicsPipelines(
-    g_device,
+    gpu_context.device,
     0,
     1,
     &create_info,
@@ -399,7 +419,7 @@ create_wireframe_pipelines :: proc(self: ^RendererTransparent) -> vk.Result {
   shader_stages[0].pSpecializationInfo = &wireframe_spec_infos[1]
 
   vk.CreateGraphicsPipelines(
-    g_device,
+    gpu_context.device,
     0,
     1,
     &create_info,
@@ -410,21 +430,24 @@ create_wireframe_pipelines :: proc(self: ^RendererTransparent) -> vk.Result {
   return .SUCCESS
 }
 
-transparent_deinit :: proc(self: ^RendererTransparent) {
+transparent_deinit :: proc(
+  self: ^RendererTransparent,
+  gpu_context: ^gpu.GPUContext,
+) {
   // Destroy all transparent material pipelines
   for i in 0 ..< SHADER_VARIANT_COUNT {
-    vk.DestroyPipeline(g_device, self.transparent_pipelines[i], nil)
+    vk.DestroyPipeline(gpu_context.device, self.transparent_pipelines[i], nil)
     self.transparent_pipelines[i] = 0
   }
 
   // Destroy wireframe material pipelines
   for i in 0 ..< 2 {
-    vk.DestroyPipeline(g_device, self.wireframe_pipelines[i], nil)
+    vk.DestroyPipeline(gpu_context.device, self.wireframe_pipelines[i], nil)
     self.wireframe_pipelines[i] = 0
   }
 
   // Destroy pipeline layout
-  vk.DestroyPipelineLayout(g_device, self.pipeline_layout, nil)
+  vk.DestroyPipelineLayout(gpu_context.device, self.pipeline_layout, nil)
   self.pipeline_layout = 0
 }
 
@@ -432,11 +455,13 @@ transparent_begin :: proc(
   self: ^RendererTransparent,
   render_target: ^RenderTarget,
   command_buffer: vk.CommandBuffer,
+  warehouse: ^ResourceWarehouse,
+  frame_index: u32,
 ) {
   // Setup color attachment - load existing content
   color_attachment := vk.RenderingAttachmentInfoKHR {
     sType       = .RENDERING_ATTACHMENT_INFO_KHR,
-    imageView   = resource.get(g_image_2d_buffers, render_target_final_image(render_target)).view,
+    imageView   = resource.get(warehouse.image_2d_buffers, render_target_final_image(render_target, frame_index)).view,
     imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
     loadOp      = .LOAD,
     storeOp     = .STORE,
@@ -444,7 +469,7 @@ transparent_begin :: proc(
   // Setup depth attachment - load existing depth buffer
   depth_attachment := vk.RenderingAttachmentInfoKHR {
     sType       = .RENDERING_ATTACHMENT_INFO_KHR,
-    imageView   = resource.get(g_image_2d_buffers, render_target_depth_texture(render_target)).view,
+    imageView   = resource.get(warehouse.image_2d_buffers, render_target_depth_texture(render_target, frame_index)).view,
     imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
     loadOp      = .LOAD,
     storeOp     = .STORE,
@@ -479,11 +504,13 @@ transparent_render :: proc(
   render_input: RenderInput,
   render_target: ^RenderTarget,
   command_buffer: vk.CommandBuffer,
+  warehouse: ^ResourceWarehouse,
+  frame_index: u32,
 ) {
   descriptor_sets := [?]vk.DescriptorSet {
-    g_bindless_camera_buffer_descriptor_set,
-    g_textures_descriptor_set,
-    g_bindless_bone_buffer_descriptor_set,
+    warehouse.camera_buffer_descriptor_set,
+    warehouse.textures_descriptor_set,
+    warehouse.bone_buffer_descriptor_set,
   }
   vk.CmdBindDescriptorSets(
     command_buffer,
@@ -509,7 +536,7 @@ transparent_render :: proc(
       for batch_data in batch_group {
         // Process each batch of transparent materials
         material := resource.get(
-          g_materials,
+          warehouse.materials,
           batch_data.material_handle,
         ) or_continue
 
@@ -518,7 +545,10 @@ transparent_render :: proc(
           mesh_attachment, ok := node.attachment.(MeshAttachment)
           if !ok do continue
 
-          mesh := resource.get(g_meshes, mesh_attachment.handle) or_continue
+          mesh := resource.get(
+            warehouse.meshes,
+            mesh_attachment.handle,
+          ) or_continue
 
           push_constants := PushConstant {
             world                    = node.transform.world_matrix,
@@ -549,7 +579,7 @@ transparent_render :: proc(
              has_skinning {
             push_constants.bone_matrix_offset =
               skinning.bone_matrix_offset +
-              g_frame_index * g_bone_matrix_slab.capacity
+              frame_index * warehouse.bone_matrix_slab.capacity
           }
           // Push constants
           vk.CmdPushConstants(
@@ -561,7 +591,7 @@ transparent_render :: proc(
             &push_constants,
           )
           // Draw mesh
-          skin_buffer := g_dummy_skinning_buffer.buffer
+          skin_buffer := warehouse.dummy_skinning_buffer.buffer
           if mesh_skin, mesh_has_skin := mesh.skinning.?; mesh_has_skin {
             skin_buffer = mesh_skin.skin_buffer.buffer
           }
@@ -589,7 +619,10 @@ transparent_render :: proc(
         for node in batch_data.nodes {
           mesh_attachment, ok := node.attachment.(MeshAttachment)
           if !ok do continue
-          mesh := resource.get(g_meshes, mesh_attachment.handle) or_continue
+          mesh := resource.get(
+            warehouse.meshes,
+            mesh_attachment.handle,
+          ) or_continue
           // Check if skinning feature is enabled
           is_skinned := .SKINNING in batch_key.features
           pipeline_idx := is_skinned ? 1 : 0
@@ -608,7 +641,7 @@ transparent_render :: proc(
              has_skinning {
             push_constant.bone_matrix_offset =
               skinning.bone_matrix_offset +
-              g_frame_index * g_bone_matrix_slab.capacity
+              frame_index * warehouse.bone_matrix_slab.capacity
           }
 
           // Push constants
@@ -623,7 +656,7 @@ transparent_render :: proc(
 
           // Draw mesh
           // Always bind both vertex buffer and skinning buffer (real or dummy)
-          skin_buffer := g_dummy_skinning_buffer.buffer
+          skin_buffer := warehouse.dummy_skinning_buffer.buffer
           if mesh_skin, mesh_has_skin := mesh.skinning.?; mesh_has_skin {
             skin_buffer = mesh_skin.skin_buffer.buffer
           }

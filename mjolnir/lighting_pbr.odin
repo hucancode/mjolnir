@@ -4,6 +4,7 @@ import "core:fmt"
 import "core:log"
 import "core:slice"
 import "geometry"
+import "gpu"
 import "resource"
 import mu "vendor:microui"
 import vk "vendor:vulkan"
@@ -23,23 +24,24 @@ RendererLighting :: struct {
 }
 lighting_init :: proc(
   self: ^RendererLighting,
-  width: u32,
-  height: u32,
+  gpu_context: ^gpu.GPUContext,
+  width, height: u32,
   color_format: vk.Format = .B8G8R8A8_SRGB,
   depth_format: vk.Format = .D32_SFLOAT,
+  warehouse: ^ResourceWarehouse,
 ) -> vk.Result {
   log.debugf("renderer main init %d x %d", width, height)
   // g_textures_set_layout (set 1) must be created and managed globally, not here
   pipeline_set_layouts := [?]vk.DescriptorSetLayout {
-    g_bindless_camera_buffer_set_layout, // set = 0 (camera)
-    g_textures_set_layout, // set = 1 (bindless textures)
+    warehouse.camera_buffer_set_layout, // set = 0 (camera)
+    warehouse.textures_set_layout, // set = 1 (bindless textures)
   }
   push_constant_range := vk.PushConstantRange {
     stageFlags = {.VERTEX, .FRAGMENT},
     size       = size_of(LightPushConstant),
   }
   vk.CreatePipelineLayout(
-    g_device,
+    gpu_context.device,
     &vk.PipelineLayoutCreateInfo {
       sType = .PIPELINE_LAYOUT_CREATE_INFO,
       setLayoutCount = len(pipeline_set_layouts),
@@ -51,11 +53,17 @@ lighting_init :: proc(
     &self.lighting_pipeline_layout,
   ) or_return
   vert_shader_code := #load("shader/lighting/vert.spv")
-  vert_module := create_shader_module(vert_shader_code) or_return
-  defer vk.DestroyShaderModule(g_device, vert_module, nil)
+  vert_module := gpu.create_shader_module(
+    gpu_context,
+    vert_shader_code,
+  ) or_return
+  defer vk.DestroyShaderModule(gpu_context.device, vert_module, nil)
   frag_shader_code := #load("shader/lighting/frag.spv")
-  frag_module := create_shader_module(frag_shader_code) or_return
-  defer vk.DestroyShaderModule(g_device, frag_module, nil)
+  frag_module := gpu.create_shader_module(
+    gpu_context,
+    frag_shader_code,
+  ) or_return
+  defer vk.DestroyShaderModule(gpu_context.device, frag_module, nil)
   dynamic_states := [?]vk.DynamicState{.VIEWPORT, .SCISSOR}
   dynamic_state := vk.PipelineDynamicStateCreateInfo {
     sType             = .PIPELINE_DYNAMIC_STATE_CREATE_INFO,
@@ -146,7 +154,7 @@ lighting_init :: proc(
     layout              = self.lighting_pipeline_layout,
   }
   vk.CreateGraphicsPipelines(
-    g_device,
+    gpu_context.device,
     0,
     1,
     &pipeline_info,
@@ -177,7 +185,7 @@ lighting_init :: proc(
     layout              = self.lighting_pipeline_layout,
   }
   vk.CreateGraphicsPipelines(
-    g_device,
+    gpu_context.device,
     0,
     1,
     &spot_pipeline_info,
@@ -187,12 +195,18 @@ lighting_init :: proc(
   log.info("Spot light pipeline initialized successfully")
   // Initialize light volume meshes
   self.sphere_mesh, _, _ = create_mesh(
+    gpu_context,
+    warehouse,
     geometry.make_sphere(segments = 128, rings = 128),
   )
   self.cone_mesh, _, _ = create_mesh(
+    gpu_context,
+    warehouse,
     geometry.make_cone(segments = 128, height = 1, radius = 0.5),
   )
   self.fullscreen_triangle_mesh, _, _ = create_mesh(
+    gpu_context,
+    warehouse,
     geometry.make_fullscreen_triangle(),
   )
   log.info("Light volume meshes initialized")
@@ -200,16 +214,22 @@ lighting_init :: proc(
   return .SUCCESS
 }
 
-lighting_deinit :: proc(self: ^RendererLighting) {
-  vk.DestroyPipelineLayout(g_device, self.lighting_pipeline_layout, nil)
-  vk.DestroyPipeline(g_device, self.lighting_pipeline, nil)
-  vk.DestroyPipeline(g_device, self.spot_light_pipeline, nil)
+lighting_deinit :: proc(
+  self: ^RendererLighting,
+  gpu_context: ^gpu.GPUContext,
+) {
+  vk.DestroyPipelineLayout(
+    gpu_context.device,
+    self.lighting_pipeline_layout,
+    nil,
+  )
+  vk.DestroyPipeline(gpu_context.device, self.lighting_pipeline, nil)
+  vk.DestroyPipeline(gpu_context.device, self.spot_light_pipeline, nil)
 }
 
 lighting_recreate_images :: proc(
   self: ^RendererLighting,
-  width: u32,
-  height: u32,
+  width, height: u32,
   color_format: vk.Format,
   depth_format: vk.Format,
 ) -> vk.Result {
@@ -221,10 +241,12 @@ lighting_begin :: proc(
   self: ^RendererLighting,
   target: ^RenderTarget,
   command_buffer: vk.CommandBuffer,
+  warehouse: ^ResourceWarehouse,
+  frame_index: u32,
 ) {
   final_image := resource.get(
-    g_image_2d_buffers,
-    render_target_final_image(target),
+    warehouse.image_2d_buffers,
+    render_target_final_image(target, frame_index),
   )
   color_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
@@ -235,8 +257,8 @@ lighting_begin :: proc(
     clearValue = {color = {float32 = BG_BLUE_GRAY}},
   }
   depth_texture := resource.get(
-    g_image_2d_buffers,
-    render_target_depth_texture(target),
+    warehouse.image_2d_buffers,
+    render_target_depth_texture(target, frame_index),
   )
   depth_attachment := vk.RenderingAttachmentInfoKHR {
     sType       = .RENDERING_ATTACHMENT_INFO_KHR,
@@ -268,8 +290,8 @@ lighting_begin :: proc(
   vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
   vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
   descriptor_sets := [?]vk.DescriptorSet {
-    g_bindless_camera_buffer_descriptor_set, // set = 0 (bindless camera buffer)
-    g_textures_descriptor_set, // set = 1 (bindless textures)
+    warehouse.camera_buffer_descriptor_set, // set = 0 (bindless camera buffer)
+    warehouse.textures_descriptor_set, // set = 1 (bindless textures)
   }
   vk.CmdBindDescriptorSets(
     command_buffer,
@@ -289,6 +311,8 @@ lighting_render :: proc(
   input: []LightInfo,
   render_target: ^RenderTarget,
   command_buffer: vk.CommandBuffer,
+  warehouse: ^ResourceWarehouse,
+  frame_index: u32,
 ) -> int {
   rendered_count := 0
   node_count := 0
@@ -297,8 +321,9 @@ lighting_render :: proc(
   bind_and_draw_mesh :: proc(
     mesh_handle: Handle,
     command_buffer: vk.CommandBuffer,
+    warehouse: ^ResourceWarehouse,
   ) {
-    mesh := resource.get(g_meshes, mesh_handle)
+    mesh := resource.get(warehouse.meshes, mesh_handle)
     offset: vk.DeviceSize = 0
     vk.CmdBindVertexBuffers(
       command_buffer,
@@ -317,19 +342,19 @@ lighting_render :: proc(
     // Fill in the common G-buffer indices that are always the same
     light_info.scene_camera_idx = render_target.camera.index
     light_info.position_texture_index =
-      render_target_position_texture(render_target).index
+      render_target_position_texture(render_target, frame_index).index
     light_info.normal_texture_index =
-      render_target_normal_texture(render_target).index
+      render_target_normal_texture(render_target, frame_index).index
     light_info.albedo_texture_index =
-      render_target_albedo_texture(render_target).index
+      render_target_albedo_texture(render_target, frame_index).index
     light_info.metallic_texture_index =
-      render_target_metallic_roughness_texture(render_target).index
+      render_target_metallic_roughness_texture(render_target, frame_index).index
     light_info.emissive_texture_index =
-      render_target_emissive_texture(render_target).index
+      render_target_emissive_texture(render_target, frame_index).index
     light_info.depth_texture_index =
-      render_target_depth_texture(render_target).index
+      render_target_depth_texture(render_target, frame_index).index
     light_info.input_image_index =
-      render_target_final_image(render_target).index
+      render_target_final_image(render_target, frame_index).index
 
     // Render based on light type
     switch light_info.light_kind {
@@ -343,7 +368,7 @@ lighting_render :: proc(
         size_of(LightPushConstant),
         &light_info.gpu_data,
       )
-      bind_and_draw_mesh(self.sphere_mesh, command_buffer)
+      bind_and_draw_mesh(self.sphere_mesh, command_buffer, warehouse)
       rendered_count += 1
 
     case .DIRECTIONAL:
@@ -356,7 +381,11 @@ lighting_render :: proc(
         size_of(LightPushConstant),
         &light_info.gpu_data,
       )
-      bind_and_draw_mesh(self.fullscreen_triangle_mesh, command_buffer)
+      bind_and_draw_mesh(
+        self.fullscreen_triangle_mesh,
+        command_buffer,
+        warehouse,
+      )
       rendered_count += 1
 
     case .SPOT:
@@ -369,7 +398,7 @@ lighting_render :: proc(
         size_of(LightPushConstant),
         &light_info.gpu_data,
       )
-      bind_and_draw_mesh(self.cone_mesh, command_buffer)
+      bind_and_draw_mesh(self.cone_mesh, command_buffer, warehouse)
       rendered_count += 1
     }
   }

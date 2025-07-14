@@ -3,6 +3,7 @@ package mjolnir
 import "core:log"
 import "core:slice"
 import "geometry"
+import "gpu"
 import "resource"
 import vk "vendor:vulkan"
 
@@ -38,13 +39,15 @@ VISIBILITY_BUFFER_COUNT :: 3 // Ring buffer for 1-2 frame latency
 // Visibility culler
 VisibilityCuller :: struct {
   // Shared node data buffer (per frame in flight)
-  node_data_buffer:      [MAX_FRAMES_IN_FLIGHT]DataBuffer(NodeCullingData),
+  node_data_buffer:      [MAX_FRAMES_IN_FLIGHT]gpu.DataBuffer(NodeCullingData),
   // Multi-camera buffers
-  params_buffer:         [MAX_FRAMES_IN_FLIGHT]DataBuffer(
+  params_buffer:         [MAX_FRAMES_IN_FLIGHT]gpu.DataBuffer(
     MultiCameraCullingParams,
   ),
-  active_camera_buffer:  [MAX_FRAMES_IN_FLIGHT]DataBuffer(ActiveCameraData),
-  visibility_buffer:     [VISIBILITY_BUFFER_COUNT]DataBuffer(b32),
+  active_camera_buffer:  [MAX_FRAMES_IN_FLIGHT]gpu.DataBuffer(
+    ActiveCameraData,
+  ),
+  visibility_buffer:     [VISIBILITY_BUFFER_COUNT]gpu.DataBuffer(b32),
   // Multi-camera pipeline
   descriptor_set_layout: vk.DescriptorSetLayout,
   pipeline_layout:       vk.PipelineLayout,
@@ -58,24 +61,30 @@ VisibilityCuller :: struct {
   frames_processed:      u32, // Total frames processed
 }
 
-visibility_culler_init :: proc(self: ^VisibilityCuller) -> vk.Result {
+visibility_culler_init :: proc(
+  self: ^VisibilityCuller,
+  gpu_context: ^gpu.GPUContext,
+) -> vk.Result {
   log.debugf("Initializing visibility culler")
 
   // Create buffers for each frame in flight
   for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
-    self.node_data_buffer[i] = create_host_visible_buffer(
+    self.node_data_buffer[i] = gpu.create_host_visible_buffer(
+      gpu_context,
       NodeCullingData,
       MAX_NODES_IN_SCENE,
       {.STORAGE_BUFFER},
     ) or_return
 
-    self.params_buffer[i] = create_host_visible_buffer(
+    self.params_buffer[i] = gpu.create_host_visible_buffer(
+      gpu_context,
       MultiCameraCullingParams,
       1,
       {.UNIFORM_BUFFER},
     ) or_return
 
-    self.active_camera_buffer[i] = create_host_visible_buffer(
+    self.active_camera_buffer[i] = gpu.create_host_visible_buffer(
+      gpu_context,
       ActiveCameraData,
       MAX_ACTIVE_CAMERAS,
       {.STORAGE_BUFFER},
@@ -85,7 +94,8 @@ visibility_culler_init :: proc(self: ^VisibilityCuller) -> vk.Result {
 
   // Create visibility buffers (ring buffer for async reads)
   for i in 0 ..< VISIBILITY_BUFFER_COUNT {
-    self.visibility_buffer[i] = create_host_visible_buffer(
+    self.visibility_buffer[i] = gpu.create_host_visible_buffer(
+      gpu_context,
       b32,
       MAX_ACTIVE_CAMERAS * MAX_NODES_IN_SCENE,
       {.STORAGE_BUFFER, .TRANSFER_DST},
@@ -121,7 +131,7 @@ visibility_culler_init :: proc(self: ^VisibilityCuller) -> vk.Result {
   }
 
   vk.CreateDescriptorSetLayout(
-    g_device,
+    gpu_context.device,
     &{
       sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
       bindingCount = len(culling_bindings),
@@ -139,10 +149,10 @@ visibility_culler_init :: proc(self: ^VisibilityCuller) -> vk.Result {
   }
 
   vk.AllocateDescriptorSets(
-    g_device,
+    gpu_context.device,
     &{
       sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
-      descriptorPool = g_descriptor_pool,
+      descriptorPool = gpu_context.descriptor_pool,
       descriptorSetCount = MAX_FRAMES_IN_FLIGHT,
       pSetLayouts = raw_data(layouts[:]),
     },
@@ -150,7 +160,7 @@ visibility_culler_init :: proc(self: ^VisibilityCuller) -> vk.Result {
   ) or_return
 
   vk.CreatePipelineLayout(
-    g_device,
+    gpu_context.device,
     &{
       sType = .PIPELINE_LAYOUT_CREATE_INFO,
       setLayoutCount = 1,
@@ -215,7 +225,7 @@ visibility_culler_init :: proc(self: ^VisibilityCuller) -> vk.Result {
     }
 
     vk.UpdateDescriptorSets(
-      g_device,
+      gpu_context.device,
       len(culling_writes),
       raw_data(culling_writes[:]),
       0,
@@ -224,10 +234,11 @@ visibility_culler_init :: proc(self: ^VisibilityCuller) -> vk.Result {
   }
 
   // Create multi-camera compute pipeline
-  culling_shader_module := create_shader_module(
-    #load("shader/multi_camera_culling/culling.spv"),
+  culling_shader_module := gpu.create_shader_module(
+    gpu_context,
+    #load("shader/visibility_culling/culling.spv"),
   ) or_return
-  defer vk.DestroyShaderModule(g_device, culling_shader_module, nil)
+  defer vk.DestroyShaderModule(gpu_context.device, culling_shader_module, nil)
 
   culling_pipeline_info := vk.ComputePipelineCreateInfo {
     sType = .COMPUTE_PIPELINE_CREATE_INFO,
@@ -241,7 +252,7 @@ visibility_culler_init :: proc(self: ^VisibilityCuller) -> vk.Result {
   }
 
   vk.CreateComputePipelines(
-    g_device,
+    gpu_context.device,
     0,
     1,
     &culling_pipeline_info,
@@ -256,17 +267,24 @@ visibility_culler_init :: proc(self: ^VisibilityCuller) -> vk.Result {
   return .SUCCESS
 }
 
-visibility_culler_deinit :: proc(self: ^VisibilityCuller) {
-  vk.DestroyPipeline(g_device, self.pipeline, nil)
-  vk.DestroyPipelineLayout(g_device, self.pipeline_layout, nil)
-  vk.DestroyDescriptorSetLayout(g_device, self.descriptor_set_layout, nil)
+visibility_culler_deinit :: proc(
+  self: ^VisibilityCuller,
+  gpu_context: ^gpu.GPUContext,
+) {
+  vk.DestroyPipeline(gpu_context.device, self.pipeline, nil)
+  vk.DestroyPipelineLayout(gpu_context.device, self.pipeline_layout, nil)
+  vk.DestroyDescriptorSetLayout(
+    gpu_context.device,
+    self.descriptor_set_layout,
+    nil,
+  )
   for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
-    data_buffer_deinit(&self.node_data_buffer[i])
-    data_buffer_deinit(&self.params_buffer[i])
-    data_buffer_deinit(&self.active_camera_buffer[i])
+    gpu.data_buffer_deinit(gpu_context, &self.node_data_buffer[i])
+    gpu.data_buffer_deinit(gpu_context, &self.params_buffer[i])
+    gpu.data_buffer_deinit(gpu_context, &self.active_camera_buffer[i])
   }
   for i in 0 ..< VISIBILITY_BUFFER_COUNT {
-    data_buffer_deinit(&self.visibility_buffer[i])
+    gpu.data_buffer_deinit(gpu_context, &self.visibility_buffer[i])
   }
 }
 
@@ -275,9 +293,13 @@ visibility_culler_update :: proc(
   self: ^VisibilityCuller,
   scene: ^Scene,
   render_targets: []RenderTarget,
+  warehouse: ^ResourceWarehouse,
+  frame_index: u32,
 ) {
   // Update node data (same as single camera)
-  node_data_slice := data_buffer_get_all(&self.node_data_buffer[g_frame_index])
+  node_data_slice := gpu.data_buffer_get_all(
+    &self.node_data_buffer[frame_index],
+  )
   self.node_count = u32(len(scene.nodes.entries))
 
   for &entry, entry_index in scene.nodes.entries {
@@ -286,7 +308,7 @@ visibility_culler_update :: proc(
     if entry_index >= MAX_NODES_IN_SCENE do continue
     node := &entry.item
     if !node.culling_enabled do continue
-    aabb := calculate_node_aabb(node)
+    aabb := calculate_node_aabb(node, warehouse)
     if aabb == geometry.AABB_UNDEFINED do continue
     world_aabb := geometry.aabb_transform(aabb, node.transform.world_matrix)
     node_data_slice[entry_index] = {
@@ -297,8 +319,8 @@ visibility_culler_update :: proc(
   }
 
   // Update active camera data
-  active_camera_slice := data_buffer_get_all(
-    &self.active_camera_buffer[g_frame_index],
+  active_camera_slice := gpu.data_buffer_get_all(
+    &self.active_camera_buffer[frame_index],
   )
 
   // Clear active camera data
@@ -311,7 +333,7 @@ visibility_culler_update :: proc(
   for &target in render_targets {
     if camera_count >= MAX_ACTIVE_CAMERAS do break
 
-    camera := resource.get(g_cameras, target.camera)
+    camera := resource.get(warehouse.cameras, target.camera)
     if camera == nil do continue
 
     // Calculate frustum for this camera
@@ -326,7 +348,7 @@ visibility_culler_update :: proc(
   }
 
   // Update params buffer
-  params := data_buffer_get(&self.params_buffer[g_frame_index])
+  params := gpu.data_buffer_get(&self.params_buffer[frame_index])
   params.node_count = self.node_count
   params.active_camera_count = camera_count
   params.current_frame = self.current_frame
@@ -338,9 +360,11 @@ visibility_culler_update :: proc(
 // Execute GPU culling
 visibility_culler_execute :: proc(
   self: ^VisibilityCuller,
+  gpu_context: ^gpu.GPUContext,
   command_buffer: vk.CommandBuffer,
+  frame_index: u32,
 ) {
-  params := data_buffer_get(&self.params_buffer[g_frame_index])
+  params := gpu.data_buffer_get(&self.params_buffer[frame_index])
   if self.node_count == 0 || params.active_camera_count == 0 {
     return
   }
@@ -349,22 +373,24 @@ visibility_culler_execute :: proc(
   // TODO: Most frames reuse the same buffer, reducing per-frame overhead
   visibility_buffer_info := vk.DescriptorBufferInfo {
     buffer = self.visibility_buffer[self.visibility_write_idx].buffer,
-    range  = vk.DeviceSize(self.visibility_buffer[self.visibility_write_idx].bytes_count),
+    range  = vk.DeviceSize(
+      self.visibility_buffer[self.visibility_write_idx].bytes_count,
+    ),
   }
 
   write_descriptor := vk.WriteDescriptorSet {
-    sType = .WRITE_DESCRIPTOR_SET,
-    dstSet = self.descriptor_sets[g_frame_index],
-    dstBinding = 3,
-    descriptorType = .STORAGE_BUFFER,
+    sType           = .WRITE_DESCRIPTOR_SET,
+    dstSet          = self.descriptor_sets[frame_index],
+    dstBinding      = 3,
+    descriptorType  = .STORAGE_BUFFER,
     descriptorCount = 1,
-    pBufferInfo = &visibility_buffer_info,
+    pBufferInfo     = &visibility_buffer_info,
   }
 
-  vk.UpdateDescriptorSets(g_device, 1, &write_descriptor, 0, nil)
+  vk.UpdateDescriptorSets(gpu_context.device, 1, &write_descriptor, 0, nil)
 
   // Clear visibility buffer
-  visibility_slice := data_buffer_get_all(
+  visibility_slice := gpu.data_buffer_get_all(
     &self.visibility_buffer[self.visibility_write_idx],
   )
   slice.fill(visibility_slice, false)
@@ -377,7 +403,7 @@ visibility_culler_execute :: proc(
     self.pipeline_layout,
     0,
     1,
-    &self.descriptor_sets[g_frame_index],
+    &self.descriptor_sets[frame_index],
     0,
     nil,
   )
@@ -386,11 +412,14 @@ visibility_culler_execute :: proc(
   dispatch_count := (self.node_count + 63) / 64
   vk.CmdDispatch(command_buffer, dispatch_count, 1, 1)
   // Advance write index for next frame
-  self.visibility_write_idx = (self.visibility_write_idx + 1) % VISIBILITY_BUFFER_COUNT
+  self.visibility_write_idx =
+    (self.visibility_write_idx + 1) % VISIBILITY_BUFFER_COUNT
   self.frames_processed += 1
   // Update read index to lag 1-2 frames behind write
   if self.frames_processed >= 2 {
-    self.visibility_read_idx = (self.visibility_write_idx + VISIBILITY_BUFFER_COUNT - 2) % VISIBILITY_BUFFER_COUNT
+    self.visibility_read_idx =
+      (self.visibility_write_idx + VISIBILITY_BUFFER_COUNT - 2) %
+      VISIBILITY_BUFFER_COUNT
   }
 }
 
@@ -399,19 +428,20 @@ is_node_visible :: proc(
   self: ^VisibilityCuller,
   camera_slot: u32,
   node_index: u32,
+  frame_index: u32,
 ) -> bool {
   // Use stale data if not enough frames processed yet
   if self.frames_processed < 2 {
     return true // Conservative: assume visible until we have data
   }
 
-  params := data_buffer_get(&self.params_buffer[g_frame_index])
+  params := gpu.data_buffer_get(&self.params_buffer[frame_index])
   if camera_slot >= params.active_camera_count ||
      node_index >= self.node_count {
     return false
   }
 
-  visibility_slice := data_buffer_get_all(
+  visibility_slice := gpu.data_buffer_get_all(
     &self.visibility_buffer[self.visibility_read_idx],
   )
   visibility_index := camera_slot * self.node_count + node_index
@@ -426,6 +456,7 @@ is_node_visible :: proc(
 count_visible_objects :: proc(
   self: ^VisibilityCuller,
   camera_slot: u32,
+  frame_index: u32,
 ) -> (
   disabled: u32,
   visible: u32,
@@ -438,15 +469,17 @@ count_visible_objects :: proc(
     return 0, total, total // All visible until we have data
   }
 
-  params := data_buffer_get(&self.params_buffer[g_frame_index])
+  params := gpu.data_buffer_get(&self.params_buffer[frame_index])
   if self.node_count == 0 || camera_slot >= params.active_camera_count {
     return 0, 0, 0
   }
 
-  visibility_slice := data_buffer_get_all(
+  visibility_slice := gpu.data_buffer_get_all(
     &self.visibility_buffer[self.visibility_read_idx],
   )
-  node_data_slice := data_buffer_get_all(&self.node_data_buffer[g_frame_index])
+  node_data_slice := gpu.data_buffer_get_all(
+    &self.node_data_buffer[frame_index],
+  )
 
   for i in 0 ..< self.node_count {
     visibility_index := camera_slot * self.node_count + i
@@ -462,11 +495,14 @@ count_visible_objects :: proc(
 }
 
 // Calculate AABB for a node based on its attachment type
-calculate_node_aabb :: proc(node: ^Node) -> geometry.Aabb {
+calculate_node_aabb :: proc(
+  node: ^Node,
+  warehouse: ^ResourceWarehouse,
+) -> geometry.Aabb {
   // Otherwise, calculate based on attachment type
   #partial switch data in node.attachment {
   case MeshAttachment:
-    mesh := resource.get(g_meshes, data.handle)
+    mesh := resource.get(warehouse.meshes, data.handle)
     if mesh != nil {
       return mesh.aabb
     }

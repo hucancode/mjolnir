@@ -16,7 +16,8 @@ test_node_translate :: proc(t: ^testing.T) {
   using mjolnir
   scene: Scene
   scene_init(&scene)
-  defer scene_deinit(&scene)
+  warehouse: ResourceWarehouse
+  defer scene_deinit(&scene, &warehouse)
   parent_handle, _ := spawn_at(&scene, {1, 2, 3})
   _, child := spawn_child(&scene, parent_handle)
   geometry.translate(&child.transform, 4, 5, 6)
@@ -48,7 +49,8 @@ test_node_rotate :: proc(t: ^testing.T) {
   using mjolnir
   scene: Scene
   scene_init(&scene)
-  defer scene_deinit(&scene)
+  warehouse: ResourceWarehouse
+  defer scene_deinit(&scene, &warehouse)
   _, child := spawn(&scene)
   geometry.rotate_angle(
     &child.transform,
@@ -84,7 +86,8 @@ test_node_scale :: proc(t: ^testing.T) {
   using mjolnir
   scene: Scene
   scene_init(&scene)
-  defer scene_deinit(&scene)
+  warehouse: ResourceWarehouse
+  defer scene_deinit(&scene, &warehouse)
   parent_handle, _ := spawn_at(&scene, {1, 2, 3})
   _, child := spawn_child(&scene, parent_handle)
   geometry.translate(&child.transform, 1, 1, 1)
@@ -117,7 +120,8 @@ test_node_combined_transform :: proc(t: ^testing.T) {
   using mjolnir
   scene: Scene
   scene_init(&scene)
-  defer scene_deinit(&scene)
+  warehouse: ResourceWarehouse
+  defer scene_deinit(&scene, &warehouse)
   _, node := spawn(&scene)
   geometry.scale(&node.transform, 2)
   geometry.rotate(&node.transform, math.PI / 2, linalg.VECTOR3F32_Y_AXIS)
@@ -152,7 +156,8 @@ test_node_chain_transform :: proc(t: ^testing.T) {
   using mjolnir
   scene: Scene
   scene_init(&scene)
-  defer scene_deinit(&scene)
+  warehouse: ResourceWarehouse
+  defer scene_deinit(&scene, &warehouse)
   // Create a 4-node chain
   node1_handle, node1 := spawn(&scene)
   node2_handle, node2 := spawn_child(&scene, node1_handle)
@@ -272,7 +277,8 @@ teardown_scene :: proc(
   allocator := context.allocator,
 ) -> time.Benchmark_Error {
   scene := cast(^mjolnir.Scene)(raw_data(options.input))
-  mjolnir.scene_deinit(scene)
+  warehouse: mjolnir.ResourceWarehouse
+  mjolnir.scene_deinit(scene, &warehouse)
   free(scene, allocator)
   return nil
 }
@@ -371,7 +377,8 @@ benchmark_balanced_scene_traversal :: proc(t: ^testing.T) {
 test_scene_memory_cleanup :: proc(t: ^testing.T) {
     scene: mjolnir.Scene
     mjolnir.scene_init(&scene)
-    defer mjolnir.scene_deinit(&scene)
+    warehouse: mjolnir.ResourceWarehouse
+    defer mjolnir.scene_deinit(&scene, &warehouse)
     for i in 0..<1000 {
         mjolnir.spawn(&scene)
     }
@@ -381,7 +388,8 @@ test_scene_memory_cleanup :: proc(t: ^testing.T) {
 test_scene_with_multiple_attachments :: proc(t: ^testing.T) {
     scene: mjolnir.Scene
     mjolnir.scene_init(&scene)
-    defer mjolnir.scene_deinit(&scene)
+    warehouse: mjolnir.ResourceWarehouse
+    defer mjolnir.scene_deinit(&scene, &warehouse)
     mjolnir.spawn(&scene, mjolnir.PointLightAttachment{
         // In reality we would need valid light
     })

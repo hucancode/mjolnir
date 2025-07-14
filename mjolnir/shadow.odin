@@ -2,6 +2,7 @@ package mjolnir
 
 import "core:log"
 import "geometry"
+import "gpu"
 import "resource"
 import vk "vendor:vulkan"
 
@@ -15,17 +16,19 @@ RendererShadow :: struct {
 
 shadow_init :: proc(
   self: ^RendererShadow,
+  gpu_context: ^gpu.GPUContext,
   depth_format: vk.Format = .D32_SFLOAT,
+  warehouse: ^ResourceWarehouse,
 ) -> vk.Result {
   set_layouts := [?]vk.DescriptorSetLayout {
-    g_bindless_camera_buffer_set_layout,
-    g_bindless_bone_buffer_set_layout,
+    warehouse.camera_buffer_set_layout,
+    warehouse.bone_buffer_set_layout,
   }
   push_constant_range := [?]vk.PushConstantRange {
     {stageFlags = {.FRAGMENT, .VERTEX}, size = size_of(PushConstant)},
   }
   vk.CreatePipelineLayout(
-    g_device,
+    gpu_context.device,
     &{
       sType = .PIPELINE_LAYOUT_CREATE_INFO,
       setLayoutCount = len(set_layouts),
@@ -36,10 +39,16 @@ shadow_init :: proc(
     nil,
     &self.pipeline_layout,
   ) or_return
-  vert_module := create_shader_module(SHADER_SHADOW_VERT) or_return
-  defer vk.DestroyShaderModule(g_device, vert_module, nil)
-  frag_module := create_shader_module(SHADER_SHADOW_FRAG) or_return
-  defer vk.DestroyShaderModule(g_device, frag_module, nil)
+  vert_module := gpu.create_shader_module(
+    gpu_context,
+    SHADER_SHADOW_VERT,
+  ) or_return
+  defer vk.DestroyShaderModule(gpu_context.device, vert_module, nil)
+  frag_module := gpu.create_shader_module(
+    gpu_context,
+    SHADER_SHADOW_FRAG,
+  ) or_return
+  defer vk.DestroyShaderModule(gpu_context.device, frag_module, nil)
   input_assembly := vk.PipelineInputAssemblyStateCreateInfo {
     sType    = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
     topology = .TRIANGLE_LIST,
@@ -147,7 +156,7 @@ shadow_init :: proc(
     }
   }
   vk.CreateGraphicsPipelines(
-    g_device,
+    gpu_context.device,
     0,
     len(pipeline_infos),
     raw_data(pipeline_infos[:]),
@@ -157,41 +166,46 @@ shadow_init :: proc(
   return .SUCCESS
 }
 
-shadow_deinit :: proc(self: ^RendererShadow) {
+shadow_deinit :: proc(self: ^RendererShadow, gpu_context: ^gpu.GPUContext) {
   for &p in self.pipelines {
-    vk.DestroyPipeline(g_device, p, nil)
+    vk.DestroyPipeline(gpu_context.device, p, nil)
     p = 0
   }
-  vk.DestroyPipelineLayout(g_device, self.pipeline_layout, nil)
+  vk.DestroyPipelineLayout(gpu_context.device, self.pipeline_layout, nil)
   self.pipeline_layout = 0
 }
 
 shadow_begin :: proc(
   shadow_target: ^RenderTarget,
   command_buffer: vk.CommandBuffer,
+  warehouse: ^ResourceWarehouse,
+  frame_index: u32,
   face: Maybe(u32) = nil,
 ) {
   depth_image_view: vk.ImageView
   face_index, has_face := face.?
   if has_face {
     cube_texture := resource.get(
-      g_image_cube_buffers,
-      render_target_depth_texture(shadow_target),
+      warehouse.image_cube_buffers,
+      render_target_depth_texture(shadow_target, frame_index),
     )
     if cube_texture == nil {
       log.errorf(
         "Invalid cube shadow map handle: %v",
-        render_target_depth_texture(shadow_target),
+        render_target_depth_texture(shadow_target, frame_index),
       )
       return
     }
     depth_image_view = cube_texture.face_views[face_index]
   } else {
-    texture_2d := resource.get(g_image_2d_buffers, render_target_depth_texture(shadow_target))
+    texture_2d := resource.get(
+      warehouse.image_2d_buffers,
+      render_target_depth_texture(shadow_target, frame_index),
+    )
     if texture_2d == nil {
       log.errorf(
         "Invalid 2D shadow map handle: %v",
-        render_target_depth_texture(shadow_target),
+        render_target_depth_texture(shadow_target, frame_index),
       )
       return
     }
@@ -236,11 +250,13 @@ shadow_render :: proc(
   light_info: LightInfo,
   shadow_target: RenderTarget,
   command_buffer: vk.CommandBuffer,
+  warehouse: ^ResourceWarehouse,
+  frame_index: u32,
 ) {
   current_pipeline: vk.Pipeline = 0
   descriptor_sets := [?]vk.DescriptorSet {
-    g_bindless_camera_buffer_descriptor_set,
-    g_bindless_bone_buffer_descriptor_set,
+    warehouse.camera_buffer_descriptor_set,
+    warehouse.bone_buffer_descriptor_set,
   }
   vk.CmdBindDescriptorSets(
     command_buffer,
@@ -273,6 +289,8 @@ shadow_render :: proc(
           node,
           is_skinned,
           shadow_target.camera.index,
+          warehouse,
+          frame_index,
         )
         rendered_count += 1
       }
@@ -302,9 +320,11 @@ render_single_shadow_node :: proc(
   node: ^Node,
   is_skinned: bool,
   camera_index: u32,
+  warehouse: ^ResourceWarehouse,
+  frame_index: u32,
 ) {
   mesh_attachment := node.attachment.(MeshAttachment)
-  mesh, found_mesh := resource.get(g_meshes, mesh_attachment.handle)
+  mesh, found_mesh := resource.get(warehouse.meshes, mesh_attachment.handle)
   if !found_mesh do return
   mesh_skinning, mesh_has_skin := &mesh.skinning.?
   node_skinning, node_has_skin := mesh_attachment.skinning.?
@@ -313,7 +333,9 @@ render_single_shadow_node :: proc(
     camera_index = camera_index,
   }
   if is_skinned && node_has_skin {
-    push_constant.bone_matrix_offset = node_skinning.bone_matrix_offset
+    push_constant.bone_matrix_offset =
+      node_skinning.bone_matrix_offset +
+      frame_index * warehouse.bone_matrix_slab.capacity
   }
   vk.CmdPushConstants(
     command_buffer,
@@ -324,7 +346,7 @@ render_single_shadow_node :: proc(
     &push_constant,
   )
   // Always bind both vertex buffer and skinning buffer (real or dummy)
-  skin_buffer := g_dummy_skinning_buffer.buffer
+  skin_buffer := warehouse.dummy_skinning_buffer.buffer
   if is_skinned && mesh_has_skin && node_has_skin {
     skin_buffer = mesh_skinning.skin_buffer.buffer
   }

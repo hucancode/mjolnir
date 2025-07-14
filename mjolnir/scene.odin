@@ -94,7 +94,7 @@ init_node :: proc(self: ^Node, name: string = "") {
   self.culling_enabled = true
 }
 
-deinit_node :: proc(self: ^Node) {
+deinit_node :: proc(self: ^Node, warehouse: ^ResourceWarehouse) {
   delete(self.children)
   data, has_mesh := &self.attachment.(MeshAttachment)
   if !has_mesh {
@@ -104,7 +104,7 @@ deinit_node :: proc(self: ^Node) {
   if !has_skin || skinning.bone_matrix_offset == 0xFFFFFFFF {
     return
   }
-  resource.slab_free(&g_bone_matrix_slab, skinning.bone_matrix_offset)
+  resource.slab_free(&warehouse.bone_matrix_slab, skinning.bone_matrix_offset)
   skinning.bone_matrix_offset = 0xFFFFFFFF
 }
 
@@ -166,7 +166,7 @@ play_animation :: proc(
   if !ok {
     return false
   }
-  mesh := resource.get(g_meshes, data.handle)
+  mesh := resource.get(engine.warehouse.meshes, data.handle)
   skinning, has_skin := &data.skinning.?
   if mesh == nil || !has_skin {
     return false
@@ -256,8 +256,13 @@ scene_init :: proc(self: ^Scene) {
   self.traversal_stack = make([dynamic]SceneTraverseEntry, 0)
 }
 
-scene_deinit :: proc(self: ^Scene) {
-  resource.pool_deinit(self.nodes, deinit_node)
+scene_deinit :: proc(self: ^Scene, warehouse: ^ResourceWarehouse) {
+  for &entry in self.nodes.entries {
+    if entry.active {
+      deinit_node(&entry.item, warehouse)
+    }
+  }
+  resource.pool_deinit(self.nodes, proc(node: ^Node) {})
   delete(self.traversal_stack)
 }
 

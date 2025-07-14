@@ -2,6 +2,7 @@ package mjolnir
 
 import "core:log"
 import "core:slice"
+import "gpu"
 import "resource"
 import vk "vendor:vulkan"
 
@@ -33,10 +34,12 @@ ambient_begin :: proc(
   self: ^RendererAmbient,
   target: ^RenderTarget,
   command_buffer: vk.CommandBuffer,
+  warehouse: ^ResourceWarehouse,
+  frame_index: u32,
 ) {
   color_texture := resource.get(
-    g_image_2d_buffers,
-    render_target_final_image(target),
+    warehouse.image_2d_buffers,
+    render_target_final_image(target, frame_index),
   )
   color_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
@@ -66,8 +69,8 @@ ambient_begin :: proc(
   vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
   vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
   descriptor_sets := [?]vk.DescriptorSet {
-    g_bindless_camera_buffer_descriptor_set, // set = 0 (bindless camera buffer)
-    g_textures_descriptor_set, // set = 1 (bindless textures)
+    warehouse.camera_buffer_descriptor_set, // set = 0 (bindless camera buffer)
+    warehouse.textures_descriptor_set, // set = 1 (bindless textures)
   }
   vk.CmdBindDescriptorSets(
     command_buffer,
@@ -86,6 +89,8 @@ ambient_render :: proc(
   self: ^RendererAmbient,
   render_target: ^RenderTarget,
   command_buffer: vk.CommandBuffer,
+  warehouse: ^ResourceWarehouse,
+  frame_index: u32,
 ) {
   // Use the same environment/IBL values as RendererMain (assume engine.ambient is initialized like main)
   // Use environment/BRDF LUT/IBL values from the main renderer (assume ambient renderer is initialized with these fields)
@@ -93,12 +98,12 @@ ambient_render :: proc(
     camera_index           = render_target.camera.index,
     environment_index      = self.environment_map.index,
     brdf_lut_index         = self.brdf_lut.index,
-    position_texture_index = render_target_position_texture(render_target).index,
-    normal_texture_index   = render_target_normal_texture(render_target).index,
-    albedo_texture_index   = render_target_albedo_texture(render_target).index,
-    metallic_texture_index = render_target_metallic_roughness_texture(render_target).index,
-    emissive_texture_index = render_target_emissive_texture(render_target).index,
-    depth_texture_index    = render_target_depth_texture(render_target).index,
+    position_texture_index = render_target_position_texture(render_target, frame_index).index,
+    normal_texture_index   = render_target_normal_texture(render_target, frame_index).index,
+    albedo_texture_index   = render_target_albedo_texture(render_target, frame_index).index,
+    metallic_texture_index = render_target_metallic_roughness_texture(render_target, frame_index).index,
+    emissive_texture_index = render_target_emissive_texture(render_target, frame_index).index,
+    depth_texture_index    = render_target_depth_texture(render_target, frame_index).index,
     environment_max_lod    = self.environment_max_lod,
     ibl_intensity          = self.ibl_intensity,
   }
@@ -119,21 +124,22 @@ ambient_end :: proc(command_buffer: vk.CommandBuffer) {
 
 ambient_init :: proc(
   self: ^RendererAmbient,
-  width: u32,
-  height: u32,
+  gpu_context: ^gpu.GPUContext,
+  warehouse: ^ResourceWarehouse,
+  width, height: u32,
   color_format: vk.Format = .B8G8R8A8_SRGB,
 ) -> vk.Result {
   log.debugf("renderer ambient init %d x %d", width, height)
   pipeline_set_layouts := [?]vk.DescriptorSetLayout {
-    g_bindless_camera_buffer_set_layout, // set = 0 (bindless camera buffer)
-    g_textures_set_layout, // set = 1 (bindless textures)
+    warehouse.camera_buffer_set_layout, // set = 0 (bindless camera buffer)
+    warehouse.textures_set_layout, // set = 1 (bindless textures)
   }
   push_constant_range := vk.PushConstantRange {
     stageFlags = {.FRAGMENT},
     size       = size_of(AmbientPushConstant),
   }
   vk.CreatePipelineLayout(
-    g_device,
+    gpu_context.device,
     &{
       sType = .PIPELINE_LAYOUT_CREATE_INFO,
       setLayoutCount = len(pipeline_set_layouts),
@@ -146,11 +152,17 @@ ambient_init :: proc(
   ) or_return
 
   vert_shader_code := #load("shader/lighting_ambient/vert.spv")
-  vert_module := create_shader_module(vert_shader_code) or_return
-  defer vk.DestroyShaderModule(g_device, vert_module, nil)
+  vert_module := gpu.create_shader_module(
+    gpu_context,
+    vert_shader_code,
+  ) or_return
+  defer vk.DestroyShaderModule(gpu_context.device, vert_module, nil)
   frag_shader_code := #load("shader/lighting_ambient/frag.spv")
-  frag_module := create_shader_module(frag_shader_code) or_return
-  defer vk.DestroyShaderModule(g_device, frag_module, nil)
+  frag_module := gpu.create_shader_module(
+    gpu_context,
+    frag_shader_code,
+  ) or_return
+  defer vk.DestroyShaderModule(gpu_context.device, frag_module, nil)
 
   dynamic_states := [?]vk.DynamicState{.VIEWPORT, .SCISSOR}
   dynamic_state := vk.PipelineDynamicStateCreateInfo {
@@ -233,7 +245,7 @@ ambient_init :: proc(
     layout              = self.pipeline_layout,
   }
   vk.CreateGraphicsPipelines(
-    g_device,
+    gpu_context.device,
     0,
     1,
     &pipeline_info,
@@ -242,9 +254,11 @@ ambient_init :: proc(
   ) or_return
 
   // Initialize environment resources
-  environment_map: ^ImageBuffer
+  environment_map: ^gpu.ImageBuffer
   self.environment_map, environment_map =
     create_hdr_texture_from_path_with_mips(
+      gpu_context,
+      warehouse,
       "assets/Cannon_Exterior.hdr",
     ) or_return
   self.environment_max_lod = 8.0 // default fallback
@@ -252,8 +266,10 @@ ambient_init :: proc(
     self.environment_max_lod =
       calculate_mip_levels(environment_map.width, environment_map.height) - 1.0
   }
-  brdf_lut: ^ImageBuffer
+  brdf_lut: ^gpu.ImageBuffer
   self.brdf_lut, brdf_lut = create_texture_from_data(
+    gpu_context,
+    warehouse,
     #load("assets/lut_ggx.png"),
   ) or_return
   self.ibl_intensity = 1.0 // Default IBL intensity
@@ -263,12 +279,24 @@ ambient_init :: proc(
 }
 
 
-ambient_deinit :: proc(self: ^RendererAmbient) {
-  vk.DestroyPipeline(g_device, self.pipeline, nil)
+ambient_deinit :: proc(
+  self: ^RendererAmbient,
+  gpu_context: ^gpu.GPUContext,
+  warehouse: ^ResourceWarehouse,
+) {
+  vk.DestroyPipeline(gpu_context.device, self.pipeline, nil)
   self.pipeline = 0
-  vk.DestroyPipelineLayout(g_device, self.pipeline_layout, nil)
+  vk.DestroyPipelineLayout(gpu_context.device, self.pipeline_layout, nil)
   self.pipeline_layout = 0
   // Clean up environment resources
-  resource.free(&g_image_2d_buffers, self.environment_map, image_buffer_deinit)
-  resource.free(&g_image_2d_buffers, self.brdf_lut, image_buffer_deinit)
+  if item, freed := resource.free(
+    &warehouse.image_2d_buffers,
+    self.environment_map,
+  ); freed {
+    gpu.image_buffer_deinit(gpu_context, item)
+  }
+  if item, freed := resource.free(&warehouse.image_2d_buffers, self.brdf_lut);
+     freed {
+    gpu.image_buffer_deinit(gpu_context, item)
+  }
 }
