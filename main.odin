@@ -47,6 +47,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   using mjolnir, geometry
   log.info("Setup function called!")
   goldstar_texture_handle, _, _ := mjolnir.create_texture_from_path(
+    &engine.gpu_context,
     "assets/gold-star.png",
   )
   plain_material_handle, _, _ := create_material()
@@ -55,18 +56,19 @@ setup :: proc(engine: ^mjolnir.Engine) {
     create_transparent_material({.ALBEDO_TEXTURE})
   goldstar_material.albedo = goldstar_texture_handle
   cube_geom := make_cube()
-  cube_mesh_handle, _, _ := create_mesh(cube_geom)
-  sphere_mesh_handle, _, _ := create_mesh(make_sphere())
+  cube_mesh_handle, _, _ := create_mesh(&engine.gpu_context, cube_geom)
+  sphere_mesh_handle, _, _ := create_mesh(&engine.gpu_context, make_sphere())
   // Create ground plane
   ground_albedo_handle, _, _ := create_texture_from_path(
+    &engine.gpu_context,
     "assets/t_brick_floor_002_diffuse_1k.jpg",
   )
   ground_mat_handle, _, _ = create_material(
     {.ALBEDO_TEXTURE},
     ground_albedo_handle,
   )
-  ground_mesh_handle, _, _ := create_mesh(make_quad())
-  cone_mesh_handle, _, _ := create_mesh(make_cone())
+  ground_mesh_handle, _, _ := create_mesh(&engine.gpu_context, make_quad())
+  cone_mesh_handle, _, _ := create_mesh(&engine.gpu_context, make_cone())
   if true {
     log.info("spawning cubes in a grid")
     space: f32 = 2.1
@@ -298,6 +300,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
 
   if true {
     black_circle_texture_handle, _, _ := mjolnir.create_texture_from_path(
+      &engine.gpu_context,
       "assets/black-circle.png",
     )
     psys_handle1, _ := spawn_at(
@@ -418,6 +421,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     portal_render_target: ^mjolnir.RenderTarget
     portal_render_target_handle, portal_render_target = resource.alloc(&mjolnir.g_render_targets)
     render_target_init(
+      &engine.gpu_context,
       portal_render_target,
       512,  // Portal texture resolution
       512,
@@ -437,7 +441,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
 
     // Create portal quad mesh and spawn it
     portal_quad_geom := make_quad()
-    portal_quad_mesh_handle, _, _ := create_mesh(portal_quad_geom)
+    portal_quad_mesh_handle, _, _ := create_mesh(&engine.gpu_context, portal_quad_geom)
     portal_quad_handle, portal_node := spawn(
       &engine.scene,
       MeshAttachment {

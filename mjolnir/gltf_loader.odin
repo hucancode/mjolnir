@@ -116,7 +116,7 @@ load_gltf :: proc(
             &material_to_handle,
           )
         if res == .SUCCESS {
-          mesh_init(mesh, data)
+          mesh_init(&engine.gpu_context, mesh, data)
           skinning, _ := &mesh.skinning.?
           skinning.bones = bones
           skinning.root_bone_index = root_bone_idx
@@ -175,7 +175,9 @@ load_gltf :: proc(
           }
         } else {
           // Clean up the allocated mesh if skinned primitive loading failed
-          resource.free(&g_meshes, mesh_handle, mesh_deinit)
+          if mesh, freed := resource.free(&g_meshes, mesh_handle); freed {
+            mesh_deinit(&engine.gpu_context, mesh)
+          }
         }
       } else {
         log.infof("Loading static mesh %s", string(gltf_node.name))
@@ -197,7 +199,7 @@ load_gltf :: proc(
           len(mesh_data.indices),
           mesh_data.skinnings,
         )
-        mesh_handle, _, ret := create_mesh(mesh_data)
+        mesh_handle, _, ret := create_mesh(&engine.gpu_context, mesh_data)
         if ret != .SUCCESS {
           log.error("Failed to create static mesh ", ret)
           continue
@@ -283,7 +285,7 @@ load_gltf_texture :: proc(
     return
   }
   log.infof("Creating new texture from %d bytes", len(pixel_data))
-  tex_handle, texture = create_texture_from_data(pixel_data) or_return
+  tex_handle, texture = create_texture_from_data(&engine.gpu_context, pixel_data) or_return
   delete(pixel_data)
   // Cache the texture
   texture_cache[gltf_texture] = tex_handle
@@ -351,6 +353,7 @@ load_gltf_pbr_textures :: proc(
           return
         }
         metallic_roughness_handle, _ = create_texture_from_data(
+          &engine.gpu_context,
           pixel_data,
         ) or_return
         features |= {.METALLIC_ROUGHNESS_TEXTURE}

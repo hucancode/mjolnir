@@ -23,8 +23,7 @@ pool_init :: proc(pool: ^Pool($T)) {
 
 pool_deinit :: proc(pool: Pool($T), deinit_proc: proc(_: ^T)) {
   for &entry in pool.entries {
-    // Only deinit entries that are still active (not freed with callback)
-    // Resources freed with callback have already been cleaned up
+    // Only deinit entries that are still active
     if entry.generation > 0 && entry.active {
       deinit_proc(&entry.item)
     }
@@ -51,43 +50,39 @@ alloc :: proc(pool: ^Pool($T)) -> (Handle, ^T) {
   }
 }
 
-free :: proc {
-  free_without_callback,
-  free_with_callback,
-}
-
-free_without_callback :: proc(pool: ^Pool($T), handle: Handle) {
+// New free function that returns (item, freed) for caller-managed deinitialization
+free :: proc(pool: ^Pool($T), handle: Handle) -> (item: ^T, freed: bool) {
   if handle.index >= u32(len(pool.entries)) {
-    return
+    return nil, false
   }
   entry := &pool.entries[handle.index]
   if !entry.active || entry.generation != handle.generation {
-    return
+    return nil, false
   }
+  
+  // Return pointer to item before marking as freed
+  item = &entry.item
+  
+  // Mark as freed
   entry.active = false
   entry.generation += 1
   if entry.generation == 0 {
     entry.generation = 1
   }
   append(&pool.free_indices, handle.index)
+  
+  return item, true
+}
+
+// Legacy functions for backward compatibility (deprecated)
+free_without_callback :: proc(pool: ^Pool($T), handle: Handle) {
+  free(pool, handle)
 }
 
 free_with_callback :: proc(pool: ^Pool($T), handle: Handle, deinit_proc: proc(_: ^T)) {
-  if handle.index >= u32(len(pool.entries)) {
-    return
+  if item, freed := free(pool, handle); freed {
+    deinit_proc(item)
   }
-  entry := &pool.entries[handle.index]
-  if !entry.active || entry.generation != handle.generation {
-    return
-  }
-  // Call the deinit procedure immediately before marking as freed
-  deinit_proc(&entry.item)
-  entry.active = false
-  entry.generation += 1
-  if entry.generation == 0 {
-    entry.generation = 1
-  }
-  append(&pool.free_indices, handle.index)
 }
 
 get :: proc(

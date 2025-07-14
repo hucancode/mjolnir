@@ -42,6 +42,7 @@ Vertex2D :: struct {
 }
 
 ui_init :: proc(
+  gpu_context: ^GPUContext,
   self: ^RendererUI,
   color_format: vk.Format,
   width: u32,
@@ -56,10 +57,10 @@ ui_init :: proc(
   self.dpi_scale = dpi_scale
   self.current_scissor = vk.Rect2D{extent = {width, height}}
   log.infof("init UI pipeline...")
-  vert_shader_module := create_shader_module(SHADER_MICROUI_VERT) or_return
-  defer vk.DestroyShaderModule(g_device, vert_shader_module, nil)
-  frag_shader_module := create_shader_module(SHADER_MICROUI_FRAG) or_return
-  defer vk.DestroyShaderModule(g_device, frag_shader_module, nil)
+  vert_shader_module := create_shader_module(gpu_context, SHADER_MICROUI_VERT) or_return
+  defer vk.DestroyShaderModule(gpu_context.device, vert_shader_module, nil)
+  frag_shader_module := create_shader_module(gpu_context, SHADER_MICROUI_FRAG) or_return
+  defer vk.DestroyShaderModule(gpu_context.device, frag_shader_module, nil)
   shader_stages := [?]vk.PipelineShaderStageCreateInfo {
     {
       sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
@@ -156,23 +157,23 @@ ui_init :: proc(
     },
   }
   vk.CreateDescriptorSetLayout(
-    g_device,
+    gpu_context.device,
     &projection_layout_info,
     nil,
     &self.projection_layout,
   ) or_return
   vk.AllocateDescriptorSets(
-    g_device,
+    gpu_context.device,
     &{
       sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
-      descriptorPool = g_descriptor_pool,
+      descriptorPool = gpu_context.descriptor_pool,
       descriptorSetCount = 1,
       pSetLayouts = &self.projection_layout,
     },
     &self.projection_descriptor_set,
   ) or_return
   vk.CreateDescriptorSetLayout(
-    g_device,
+    gpu_context.device,
     &vk.DescriptorSetLayoutCreateInfo {
       sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
       bindingCount = 1,
@@ -187,10 +188,10 @@ ui_init :: proc(
     &self.texture_layout,
   ) or_return
   vk.AllocateDescriptorSets(
-    g_device,
+    gpu_context.device,
     &{
       sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
-      descriptorPool = g_descriptor_pool,
+      descriptorPool = gpu_context.descriptor_pool,
       descriptorSetCount = 1,
       pSetLayouts = &self.texture_layout,
     },
@@ -201,7 +202,7 @@ ui_init :: proc(
     self.texture_layout,
   }
   vk.CreatePipelineLayout(
-    g_device,
+    gpu_context.device,
     &{
       sType = .PIPELINE_LAYOUT_CREATE_INFO,
       setLayoutCount = len(set_layouts),
@@ -235,7 +236,7 @@ ui_init :: proc(
     layout              = self.pipeline_layout,
   }
   vk.CreateGraphicsPipelines(
-    g_device,
+    gpu_context.device,
     0,
     1,
     &pipeline_info,
@@ -244,6 +245,7 @@ ui_init :: proc(
   ) or_return
   log.infof("init UI texture...")
   _, self.atlas = create_texture_from_pixels(
+    gpu_context,
     mu.default_atlas_alpha[:],
     mu.DEFAULT_ATLAS_WIDTH,
     mu.DEFAULT_ATLAS_HEIGHT,
@@ -252,12 +254,14 @@ ui_init :: proc(
   ) or_return
   log.infof("init UI vertex buffer...")
   self.vertex_buffer = create_host_visible_buffer(
+    gpu_context,
     Vertex2D,
     UI_MAX_VERTICES,
     {.VERTEX_BUFFER},
   ) or_return
   log.infof("init UI indices buffer...")
   self.index_buffer = create_host_visible_buffer(
+    gpu_context,
     u32,
     UI_MAX_INDICES,
     {.INDEX_BUFFER},
@@ -265,6 +269,7 @@ ui_init :: proc(
   ortho := linalg.matrix_ortho3d(0, f32(width), f32(height), 0, -1, 1) * linalg.matrix4_scale(dpi_scale)
   log.infof("init UI proj buffer...")
   self.proj_buffer = create_host_visible_buffer(
+    gpu_context,
     matrix[4,4]f32,
     1,
     {.UNIFORM_BUFFER},
@@ -296,7 +301,7 @@ ui_init :: proc(
       },
     },
   }
-  vk.UpdateDescriptorSets(g_device, len(writes), raw_data(writes[:]), 0, nil)
+  vk.UpdateDescriptorSets(gpu_context.device, len(writes), raw_data(writes[:]), 0, nil)
   log.infof("done init UI")
   return .SUCCESS
 }
@@ -464,20 +469,20 @@ ui_set_clip_rect :: proc(
   vk.CmdSetScissor(cmd_buf, 0, 1, &self.current_scissor)
 }
 
-ui_deinit :: proc(self: ^RendererUI) {
+ui_deinit :: proc(gpu_context: ^GPUContext, self: ^RendererUI) {
   if self == nil {
     return
   }
-  data_buffer_deinit(&self.vertex_buffer)
-  data_buffer_deinit(&self.index_buffer)
-  data_buffer_deinit(&self.proj_buffer)
-  vk.DestroyPipeline(g_device, self.pipeline, nil)
+  data_buffer_deinit(gpu_context, &self.vertex_buffer)
+  data_buffer_deinit(gpu_context, &self.index_buffer)
+  data_buffer_deinit(gpu_context, &self.proj_buffer)
+  vk.DestroyPipeline(gpu_context.device, self.pipeline, nil)
   self.pipeline = 0
-  vk.DestroyPipelineLayout(g_device, self.pipeline_layout, nil)
+  vk.DestroyPipelineLayout(gpu_context.device, self.pipeline_layout, nil)
   self.pipeline_layout = 0
-  vk.DestroyDescriptorSetLayout(g_device, self.projection_layout, nil)
+  vk.DestroyDescriptorSetLayout(gpu_context.device, self.projection_layout, nil)
   self.projection_layout = 0
-  vk.DestroyDescriptorSetLayout(g_device, self.texture_layout, nil)
+  vk.DestroyDescriptorSetLayout(gpu_context.device, self.texture_layout, nil)
   self.texture_layout = 0
 }
 

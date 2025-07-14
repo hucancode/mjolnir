@@ -18,6 +18,7 @@ RendererDepthPrepass :: struct {
 }
 
 depth_prepass_init :: proc(
+  gpu_context: ^GPUContext,
   self: ^RendererDepthPrepass,
   swapchain_extent: vk.Extent2D,
 ) -> (
@@ -39,7 +40,7 @@ depth_prepass_init :: proc(
     pPushConstantRanges    = &push_constant_range,
   }
   vk.CreatePipelineLayout(
-    g_device,
+    gpu_context.device,
     &pipeline_layout_info,
     nil,
     &self.pipeline_layout,
@@ -50,6 +51,7 @@ depth_prepass_init :: proc(
       is_skinned = .SKINNING in features,
     }
     depth_prepass_build_pipeline(
+      gpu_context,
       self,
       &config,
       &self.pipelines[mask],
@@ -59,12 +61,12 @@ depth_prepass_init :: proc(
   return .SUCCESS
 }
 
-depth_prepass_deinit :: proc(self: ^RendererDepthPrepass) {
+depth_prepass_deinit :: proc(gpu_context: ^GPUContext, self: ^RendererDepthPrepass) {
   for &p in self.pipelines {
-    vk.DestroyPipeline(g_device, p, nil)
+    vk.DestroyPipeline(gpu_context.device, p, nil)
     p = 0
   }
-  vk.DestroyPipelineLayout(g_device, self.pipeline_layout, nil)
+  vk.DestroyPipelineLayout(gpu_context.device, self.pipeline_layout, nil)
   self.pipeline_layout = 0
 }
 
@@ -217,6 +219,7 @@ depth_prepass_get_pipeline :: proc(
 }
 
 depth_prepass_build_pipeline :: proc(
+  gpu_context: ^GPUContext,
   self: ^RendererDepthPrepass,
   config: ^ShaderConfig,
   pipeline: ^vk.Pipeline,
@@ -226,9 +229,10 @@ depth_prepass_build_pipeline :: proc(
 ) {
   log.debugf("Building depth prepass pipeline with config: %v", config)
   vert_shader_module := create_shader_module(
+    gpu_context,
     SHADER_DEPTH_PREPASS_VERT,
   ) or_return
-  defer vk.DestroyShaderModule(g_device, vert_shader_module, nil)
+  defer vk.DestroyShaderModule(gpu_context.device, vert_shader_module, nil)
   entry := vk.SpecializationMapEntry {
     constantID = 0,
     offset     = u32(offset_of(ShaderConfig, is_skinned)),
@@ -322,7 +326,7 @@ depth_prepass_build_pipeline :: proc(
     layout              = self.pipeline_layout,
   }
   vk.CreateGraphicsPipelines(
-    g_device,
+    gpu_context.device,
     0,
     1,
     &pipeline_info,

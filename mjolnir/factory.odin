@@ -6,6 +6,7 @@ import linalg "core:math/linalg"
 import "core:slice"
 import "core:strings"
 import "geometry"
+import "gpu"
 import "resource"
 import stbi "vendor:stb/image"
 import vk "vendor:vulkan"
@@ -40,7 +41,7 @@ g_dummy_skinning_buffer: DataBuffer(geometry.SkinningData)
 g_textures_set_layout: vk.DescriptorSetLayout
 g_textures_descriptor_set: vk.DescriptorSet
 
-factory_init :: proc() -> vk.Result {
+factory_init :: proc(gpu_context: ^GPUContext) -> vk.Result {
   log.infof("Initializing mesh pool... ")
   resource.pool_init(&g_meshes)
   log.infof("Initializing materials pool... ")
@@ -54,9 +55,9 @@ factory_init :: proc() -> vk.Result {
   log.infof("Initializing render target pool... ")
   resource.pool_init(&g_render_targets)
   log.infof("All resource pools initialized successfully")
-  init_global_samplers()
-  init_bone_matrix_allocator() or_return
-  init_camera_buffer() or_return
+  init_global_samplers(gpu_context)
+  init_bone_matrix_allocator(gpu_context) or_return
+  init_camera_buffer(gpu_context) or_return
   // Textures+samplers descriptor set
   textures_bindings := [?]vk.DescriptorSetLayoutBinding {
     {
@@ -79,7 +80,7 @@ factory_init :: proc() -> vk.Result {
     },
   }
   vk.CreateDescriptorSetLayout(
-    g_device,
+    gpu_context.device,
     &vk.DescriptorSetLayoutCreateInfo {
       sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
       bindingCount = len(textures_bindings),
@@ -89,10 +90,10 @@ factory_init :: proc() -> vk.Result {
     &g_textures_set_layout,
   ) or_return
   vk.AllocateDescriptorSets(
-    g_device,
+    gpu_context.device,
     &{
       sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
-      descriptorPool = g_descriptor_pool,
+      descriptorPool = gpu_context.descriptor_pool,
       descriptorSetCount = 1,
       pSetLayouts = &g_textures_set_layout,
     },
@@ -135,26 +136,56 @@ factory_init :: proc() -> vk.Result {
       pImageInfo = &{sampler = g_linear_repeat_sampler},
     },
   }
-  vk.UpdateDescriptorSets(g_device, len(writes), raw_data(writes[:]), 0, nil)
+  vk.UpdateDescriptorSets(
+    gpu_context.device,
+    len(writes),
+    raw_data(writes[:]),
+    0,
+    nil,
+  )
   return .SUCCESS
 }
 
-factory_deinit :: proc() {
-  data_buffer_deinit(&g_dummy_skinning_buffer)
-  resource.pool_deinit(g_image_2d_buffers, image_buffer_deinit)
-  resource.pool_deinit(g_image_cube_buffers, cube_depth_texture_deinit)
-  resource.pool_deinit(g_meshes, mesh_deinit)
-  resource.pool_deinit(g_materials, proc(_: ^Material) {})
-  resource.pool_deinit(g_cameras, proc(_: ^geometry.Camera) {})
-  deinit_global_samplers()
-  deinit_bone_matrix_allocator()
-  deinit_camera_buffer()
-  vk.DestroyDescriptorSetLayout(g_device, g_textures_set_layout, nil)
+factory_deinit :: proc(gpu_context: ^GPUContext) {
+  data_buffer_deinit(gpu_context, &g_dummy_skinning_buffer)
+  // Manually clean up each pool since callbacks can't capture gpu_context
+  for &entry in g_image_2d_buffers.entries {
+    if entry.generation > 0 && entry.active {
+      image_buffer_deinit(gpu_context, &entry.item)
+    }
+  }
+  delete(g_image_2d_buffers.entries)
+  delete(g_image_2d_buffers.free_indices)
+
+  for &entry in g_image_cube_buffers.entries {
+    if entry.generation > 0 && entry.active {
+      cube_depth_texture_deinit(gpu_context, &entry.item)
+    }
+  }
+  delete(g_image_cube_buffers.entries)
+  delete(g_image_cube_buffers.free_indices)
+
+  for &entry in g_meshes.entries {
+    if entry.generation > 0 && entry.active {
+      mesh_deinit(gpu_context, &entry.item)
+    }
+  }
+  delete(g_meshes.entries)
+  delete(g_meshes.free_indices)
+  // Simple cleanup for pools without GPU resources
+  delete(g_materials.entries)
+  delete(g_materials.free_indices)
+  delete(g_cameras.entries)
+  delete(g_cameras.free_indices)
+  deinit_global_samplers(gpu_context)
+  deinit_bone_matrix_allocator(gpu_context)
+  deinit_camera_buffer(gpu_context)
+  vk.DestroyDescriptorSetLayout(gpu_context.device, g_textures_set_layout, nil)
   g_textures_set_layout = 0
   g_textures_descriptor_set = 0
 }
 
-init_global_samplers :: proc() -> vk.Result {
+init_global_samplers :: proc(gpu_context: ^GPUContext) -> vk.Result {
   info := vk.SamplerCreateInfo {
     sType        = .SAMPLER_CREATE_INFO,
     magFilter    = .LINEAR,
@@ -165,25 +196,45 @@ init_global_samplers :: proc() -> vk.Result {
     mipmapMode   = .LINEAR,
     maxLod       = 1000,
   }
-  vk.CreateSampler(g_device, &info, nil, &g_linear_repeat_sampler) or_return
+  vk.CreateSampler(
+    gpu_context.device,
+    &info,
+    nil,
+    &g_linear_repeat_sampler,
+  ) or_return
   info.addressModeU = .CLAMP_TO_EDGE
   info.addressModeV = .CLAMP_TO_EDGE
   info.addressModeW = .CLAMP_TO_EDGE
-  vk.CreateSampler(g_device, &info, nil, &g_linear_clamp_sampler) or_return
+  vk.CreateSampler(
+    gpu_context.device,
+    &info,
+    nil,
+    &g_linear_clamp_sampler,
+  ) or_return
   info.magFilter = .NEAREST
   info.minFilter = .NEAREST
   info.addressModeU = .REPEAT
   info.addressModeV = .REPEAT
   info.addressModeW = .REPEAT
-  vk.CreateSampler(g_device, &info, nil, &g_nearest_repeat_sampler) or_return
+  vk.CreateSampler(
+    gpu_context.device,
+    &info,
+    nil,
+    &g_nearest_repeat_sampler,
+  ) or_return
   info.addressModeU = .CLAMP_TO_EDGE
   info.addressModeV = .CLAMP_TO_EDGE
   info.addressModeW = .CLAMP_TO_EDGE
-  vk.CreateSampler(g_device, &info, nil, &g_nearest_clamp_sampler) or_return
+  vk.CreateSampler(
+    gpu_context.device,
+    &info,
+    nil,
+    &g_nearest_clamp_sampler,
+  ) or_return
   return .SUCCESS
 }
 
-init_bone_matrix_allocator :: proc() -> vk.Result {
+init_bone_matrix_allocator :: proc(gpu_context: ^GPUContext) -> vk.Result {
   resource.slab_allocator_init(
     &g_bone_matrix_slab,
     {
@@ -206,6 +257,7 @@ init_bone_matrix_allocator :: proc() -> vk.Result {
   )
   // Create bone buffer with space for all frames in flight
   g_bindless_bone_buffer, _ = create_host_visible_buffer(
+    gpu_context,
     matrix[4, 4]f32,
     int(g_bone_matrix_slab.capacity) * MAX_FRAMES_IN_FLIGHT,
     {.STORAGE_BUFFER},
@@ -220,7 +272,7 @@ init_bone_matrix_allocator :: proc() -> vk.Result {
     },
   }
   vk.CreateDescriptorSetLayout(
-    g_device,
+    gpu_context.device,
     &vk.DescriptorSetLayoutCreateInfo {
       sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
       bindingCount = len(skinning_bindings),
@@ -230,10 +282,10 @@ init_bone_matrix_allocator :: proc() -> vk.Result {
     &g_bindless_bone_buffer_set_layout,
   ) or_return
   vk.AllocateDescriptorSets(
-    g_device,
+    gpu_context.device,
     &{
       sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
-      descriptorPool = g_descriptor_pool,
+      descriptorPool = gpu_context.descriptor_pool,
       descriptorSetCount = 1,
       pSetLayouts = &g_bindless_bone_buffer_set_layout,
     },
@@ -252,10 +304,11 @@ init_bone_matrix_allocator :: proc() -> vk.Result {
     descriptorCount = 1,
     pBufferInfo     = &buffer_info,
   }
-  vk.UpdateDescriptorSets(g_device, 1, &write, 0, nil)
+  vk.UpdateDescriptorSets(gpu_context.device, 1, &write, 0, nil)
 
   // Initialize dummy skinning buffer for static meshes
   g_dummy_skinning_buffer = create_host_visible_buffer(
+  gpu_context,
   geometry.SkinningData,
   1, // Just one dummy element
   {.VERTEX_BUFFER},
@@ -264,7 +317,7 @@ init_bone_matrix_allocator :: proc() -> vk.Result {
   return .SUCCESS
 }
 
-init_camera_buffer :: proc() -> vk.Result {
+init_camera_buffer :: proc(gpu_context: ^GPUContext) -> vk.Result {
   log.infof(
     "Creating camera buffer with capacity %d cameras...",
     MAX_ACTIVE_CAMERAS,
@@ -272,6 +325,7 @@ init_camera_buffer :: proc() -> vk.Result {
 
   // Create camera buffer
   g_bindless_camera_buffer = create_host_visible_buffer(
+    gpu_context,
     CameraUniform,
     MAX_ACTIVE_CAMERAS,
     {.STORAGE_BUFFER},
@@ -289,7 +343,7 @@ init_camera_buffer :: proc() -> vk.Result {
   }
 
   vk.CreateDescriptorSetLayout(
-    g_device,
+    gpu_context.device,
     &vk.DescriptorSetLayoutCreateInfo {
       sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
       bindingCount = len(camera_bindings),
@@ -301,10 +355,10 @@ init_camera_buffer :: proc() -> vk.Result {
 
   // Allocate descriptor set
   vk.AllocateDescriptorSets(
-    g_device,
+    gpu_context.device,
     &{
       sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
-      descriptorPool = g_descriptor_pool,
+      descriptorPool = gpu_context.descriptor_pool,
       descriptorSetCount = 1,
       pSetLayouts = &g_bindless_camera_buffer_set_layout,
     },
@@ -327,7 +381,7 @@ init_camera_buffer :: proc() -> vk.Result {
     pBufferInfo     = &buffer_info,
   }
 
-  vk.UpdateDescriptorSets(g_device, 1, &write, 0, nil)
+  vk.UpdateDescriptorSets(gpu_context.device, 1, &write, 0, nil)
 
   log.infof("Camera buffer initialized successfully")
   return .SUCCESS
@@ -341,40 +395,44 @@ get_camera_uniform :: proc(camera_index: u32) -> ^CameraUniform {
   return data_buffer_get(&g_bindless_camera_buffer, camera_index)
 }
 
-deinit_camera_buffer :: proc() {
-  data_buffer_deinit(&g_bindless_camera_buffer)
+deinit_camera_buffer :: proc(gpu_context: ^GPUContext) {
+  data_buffer_deinit(gpu_context, &g_bindless_camera_buffer)
   vk.DestroyDescriptorSetLayout(
-    g_device,
+    gpu_context.device,
     g_bindless_camera_buffer_set_layout,
     nil,
   )
   g_bindless_camera_buffer_set_layout = 0
 }
 
-deinit_global_samplers :: proc() {
+deinit_global_samplers :: proc(gpu_context: ^GPUContext) {
   vk.DestroySampler(
-    g_device,
+    gpu_context.device,
     g_linear_repeat_sampler,
     nil,
   );g_linear_repeat_sampler = 0
   vk.DestroySampler(
-    g_device,
+    gpu_context.device,
     g_linear_clamp_sampler,
     nil,
   );g_linear_clamp_sampler = 0
   vk.DestroySampler(
-    g_device,
+    gpu_context.device,
     g_nearest_repeat_sampler,
     nil,
   );g_nearest_repeat_sampler = 0
   vk.DestroySampler(
-    g_device,
+    gpu_context.device,
     g_nearest_clamp_sampler,
     nil,
   );g_nearest_clamp_sampler = 0
 }
 
-set_texture_2d_descriptor :: proc(index: u32, image_view: vk.ImageView) {
+set_texture_2d_descriptor :: proc(
+  gpu_context: ^GPUContext,
+  index: u32,
+  image_view: vk.ImageView,
+) {
   if index >= MAX_TEXTURES {
     log.infof("Error: Index %d out of bounds for bindless textures", index)
     return
@@ -391,10 +449,14 @@ set_texture_2d_descriptor :: proc(index: u32, image_view: vk.ImageView) {
       imageLayout = .SHADER_READ_ONLY_OPTIMAL,
     },
   }
-  vk.UpdateDescriptorSets(g_device, 1, &write, 0, nil)
+  vk.UpdateDescriptorSets(gpu_context.device, 1, &write, 0, nil)
 }
 
-set_texture_cube_descriptor :: proc(index: u32, image_view: vk.ImageView) {
+set_texture_cube_descriptor :: proc(
+  gpu_context: ^GPUContext,
+  index: u32,
+  image_view: vk.ImageView,
+) {
   if index >= MAX_CUBE_TEXTURES {
     log.infof(
       "Error: Index %d out of bounds for bindless cube textures",
@@ -414,10 +476,11 @@ set_texture_cube_descriptor :: proc(index: u32, image_view: vk.ImageView) {
       imageLayout = .SHADER_READ_ONLY_OPTIMAL,
     },
   }
-  vk.UpdateDescriptorSets(g_device, 1, &write, 0, nil)
+  vk.UpdateDescriptorSets(gpu_context.device, 1, &write, 0, nil)
 }
 
 create_empty_texture_2d :: proc(
+  gpu_context: ^GPUContext,
   width: u32,
   height: u32,
   format: vk.Format,
@@ -429,6 +492,7 @@ create_empty_texture_2d :: proc(
 ) {
   handle, texture = resource.alloc(&g_image_2d_buffers)
   texture^ = malloc_image_buffer(
+    gpu_context,
     width,
     height,
     format,
@@ -446,11 +510,12 @@ create_empty_texture_2d :: proc(
   }
 
   texture.view = create_image_view(
+    gpu_context,
     texture.image,
     format,
     aspect_mask,
   ) or_return
-  set_texture_2d_descriptor(handle.index, texture.view)
+  set_texture_2d_descriptor(gpu_context, handle.index, texture.view)
   ret = .SUCCESS
   log.debugf(
     "created empty texture %d x %d %v 0x%x",
@@ -463,6 +528,7 @@ create_empty_texture_2d :: proc(
 }
 
 create_empty_texture_cube :: proc(
+  gpu_context: ^GPUContext,
   size: u32,
   format: vk.Format = .D32_SFLOAT,
   usage: vk.ImageUsageFlags = {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
@@ -472,16 +538,16 @@ create_empty_texture_cube :: proc(
   ret: vk.Result,
 ) {
   handle, texture = resource.alloc(&g_image_cube_buffers)
-  cube_depth_texture_init(texture, size, format, usage) or_return
-  set_texture_cube_descriptor(handle.index, texture.view)
+  cube_depth_texture_init(gpu_context, texture, size, format, usage) or_return
+  set_texture_cube_descriptor(gpu_context, handle.index, texture.view)
   ret = .SUCCESS
   return
 }
 
-deinit_bone_matrix_allocator :: proc() {
-  data_buffer_deinit(&g_bindless_bone_buffer)
+deinit_bone_matrix_allocator :: proc(gpu_context: ^GPUContext) {
+  data_buffer_deinit(gpu_context, &g_bindless_bone_buffer)
   vk.DestroyDescriptorSetLayout(
-    g_device,
+    gpu_context.device,
     g_bindless_bone_buffer_set_layout,
     nil,
   )
@@ -490,6 +556,7 @@ deinit_bone_matrix_allocator :: proc() {
 }
 
 create_mesh :: proc(
+  gpu_context: ^GPUContext,
   data: geometry.Geometry,
 ) -> (
   handle: Handle,
@@ -497,7 +564,7 @@ create_mesh :: proc(
   ret: vk.Result,
 ) {
   handle, mesh = resource.alloc(&g_meshes)
-  mesh_init(mesh, data)
+  mesh_init(gpu_context, mesh, data)
   ret = .SUCCESS
   return
 }
@@ -584,6 +651,7 @@ create_wireframe_material :: proc(
 }
 
 create_texture_from_path :: proc(
+  gpu_context: ^GPUContext,
   path: string,
 ) -> (
   handle: resource.Handle,
@@ -606,18 +674,20 @@ create_texture_from_path :: proc(
   defer stbi.image_free(pixels)
   num_pixels := int(width * height * 4)
   texture^ = create_image_buffer(
+    gpu_context,
     pixels,
     size_of(u8) * vk.DeviceSize(num_pixels),
     .R8G8B8A8_SRGB,
     u32(width),
     u32(height),
   ) or_return
-  set_texture_2d_descriptor(handle.index, texture.view)
+  set_texture_2d_descriptor(gpu_context, handle.index, texture.view)
   ret = .SUCCESS
   return handle, texture, ret
 }
 
 create_hdr_texture_from_path :: proc(
+  gpu_context: ^GPUContext,
   path: string,
 ) -> (
   handle: resource.Handle,
@@ -647,18 +717,20 @@ create_hdr_texture_from_path :: proc(
   defer stbi.image_free(float_pixels)
   num_floats := int(width * height * actual_channels)
   texture^ = create_image_buffer(
+    gpu_context,
     float_pixels,
     size_of(f32) * vk.DeviceSize(num_floats),
     .R32G32B32A32_SFLOAT,
     u32(width),
     u32(height),
   ) or_return
-  set_texture_2d_descriptor(handle.index, texture.view)
+  set_texture_2d_descriptor(gpu_context, handle.index, texture.view)
   ret = .SUCCESS
   return handle, texture, ret
 }
 
 create_texture_from_pixels :: proc(
+  gpu_context: ^GPUContext,
   pixels: []u8,
   width: int,
   height: int,
@@ -671,6 +743,7 @@ create_texture_from_pixels :: proc(
 ) {
   handle, texture = resource.alloc(&g_image_2d_buffers)
   texture^ = create_image_buffer(
+    gpu_context,
     raw_data(pixels),
     size_of(u8) * vk.DeviceSize(len(pixels)),
     format,
@@ -683,12 +756,13 @@ create_texture_from_pixels :: proc(
     texture.height,
     texture.image,
   )
-  set_texture_2d_descriptor(handle.index, texture.view)
+  set_texture_2d_descriptor(gpu_context, handle.index, texture.view)
   ret = .SUCCESS
   return
 }
 
 create_texture_from_data :: proc(
+  gpu_context: ^GPUContext,
   data: []u8,
 ) -> (
   handle: resource.Handle,
@@ -722,6 +796,7 @@ create_texture_from_data :: proc(
     format = vk.Format.R8_SRGB
   }
   texture^ = create_image_buffer(
+    gpu_context,
     pixels,
     size_of(u8) * vk.DeviceSize(bytes_count),
     format,
@@ -734,7 +809,7 @@ create_texture_from_data :: proc(
     texture.height,
     texture.image,
   )
-  set_texture_2d_descriptor(handle.index, texture.view)
+  set_texture_2d_descriptor(gpu_context, handle.index, texture.view)
   ret = .SUCCESS
   return
 }
@@ -746,6 +821,7 @@ calculate_mip_levels :: proc(width, height: u32) -> f32 {
 
 // Create image buffer with mip maps
 create_image_buffer_with_mips :: proc(
+  gpu_context: ^GPUContext,
   data: rawptr,
   size: vk.DeviceSize,
   format: vk.Format,
@@ -756,14 +832,16 @@ create_image_buffer_with_mips :: proc(
 ) {
   mip_levels := u32(calculate_mip_levels(width, height))
   staging := create_host_visible_buffer(
+    gpu_context,
     u8,
     int(size),
     {.TRANSFER_SRC},
     data,
   ) or_return
-  defer data_buffer_deinit(&staging)
+  defer data_buffer_deinit(gpu_context, &staging)
 
   img = malloc_image_buffer_with_mips(
+    gpu_context,
     width,
     height,
     format,
@@ -773,11 +851,12 @@ create_image_buffer_with_mips :: proc(
     mip_levels,
   ) or_return
 
-  copy_image_for_mips(img, staging) or_return
-  generate_mipmaps(img, format, width, height, mip_levels) or_return
+  copy_image_for_mips(gpu_context, img, staging) or_return
+  generate_mipmaps(gpu_context, img, format, width, height, mip_levels) or_return
 
   aspect_mask := vk.ImageAspectFlags{.COLOR}
   img.view = create_image_view_with_mips(
+    gpu_context,
     img.image,
     format,
     aspect_mask,
@@ -789,6 +868,7 @@ create_image_buffer_with_mips :: proc(
 
 // Create HDR texture with mip maps
 create_hdr_texture_from_path_with_mips :: proc(
+  gpu_context: ^GPUContext,
   path: string,
 ) -> (
   handle: resource.Handle,
@@ -818,13 +898,14 @@ create_hdr_texture_from_path_with_mips :: proc(
   defer stbi.image_free(float_pixels)
   num_floats := int(width * height * actual_channels)
   texture^ = create_image_buffer_with_mips(
+    gpu_context,
     float_pixels,
     size_of(f32) * vk.DeviceSize(num_floats),
     .R32G32B32A32_SFLOAT,
     u32(width),
     u32(height),
   ) or_return
-  set_texture_2d_descriptor(handle.index, texture.view)
+  set_texture_2d_descriptor(gpu_context, handle.index, texture.view)
   ret = .SUCCESS
   return handle, texture, ret
 }

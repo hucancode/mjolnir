@@ -22,6 +22,7 @@ RendererLighting :: struct {
   fullscreen_triangle_mesh: Handle,
 }
 lighting_init :: proc(
+  gpu_context: ^GPUContext,
   self: ^RendererLighting,
   width: u32,
   height: u32,
@@ -39,7 +40,7 @@ lighting_init :: proc(
     size       = size_of(LightPushConstant),
   }
   vk.CreatePipelineLayout(
-    g_device,
+    gpu_context.device,
     &vk.PipelineLayoutCreateInfo {
       sType = .PIPELINE_LAYOUT_CREATE_INFO,
       setLayoutCount = len(pipeline_set_layouts),
@@ -51,11 +52,11 @@ lighting_init :: proc(
     &self.lighting_pipeline_layout,
   ) or_return
   vert_shader_code := #load("shader/lighting/vert.spv")
-  vert_module := create_shader_module(vert_shader_code) or_return
-  defer vk.DestroyShaderModule(g_device, vert_module, nil)
+  vert_module := create_shader_module(gpu_context, vert_shader_code) or_return
+  defer vk.DestroyShaderModule(gpu_context.device, vert_module, nil)
   frag_shader_code := #load("shader/lighting/frag.spv")
-  frag_module := create_shader_module(frag_shader_code) or_return
-  defer vk.DestroyShaderModule(g_device, frag_module, nil)
+  frag_module := create_shader_module(gpu_context, frag_shader_code) or_return
+  defer vk.DestroyShaderModule(gpu_context.device, frag_module, nil)
   dynamic_states := [?]vk.DynamicState{.VIEWPORT, .SCISSOR}
   dynamic_state := vk.PipelineDynamicStateCreateInfo {
     sType             = .PIPELINE_DYNAMIC_STATE_CREATE_INFO,
@@ -146,7 +147,7 @@ lighting_init :: proc(
     layout              = self.lighting_pipeline_layout,
   }
   vk.CreateGraphicsPipelines(
-    g_device,
+    gpu_context.device,
     0,
     1,
     &pipeline_info,
@@ -177,7 +178,7 @@ lighting_init :: proc(
     layout              = self.lighting_pipeline_layout,
   }
   vk.CreateGraphicsPipelines(
-    g_device,
+    gpu_context.device,
     0,
     1,
     &spot_pipeline_info,
@@ -187,12 +188,15 @@ lighting_init :: proc(
   log.info("Spot light pipeline initialized successfully")
   // Initialize light volume meshes
   self.sphere_mesh, _, _ = create_mesh(
+    gpu_context,
     geometry.make_sphere(segments = 128, rings = 128),
   )
   self.cone_mesh, _, _ = create_mesh(
+    gpu_context,
     geometry.make_cone(segments = 128, height = 1, radius = 0.5),
   )
   self.fullscreen_triangle_mesh, _, _ = create_mesh(
+    gpu_context,
     geometry.make_fullscreen_triangle(),
   )
   log.info("Light volume meshes initialized")
@@ -200,10 +204,10 @@ lighting_init :: proc(
   return .SUCCESS
 }
 
-lighting_deinit :: proc(self: ^RendererLighting) {
-  vk.DestroyPipelineLayout(g_device, self.lighting_pipeline_layout, nil)
-  vk.DestroyPipeline(g_device, self.lighting_pipeline, nil)
-  vk.DestroyPipeline(g_device, self.spot_light_pipeline, nil)
+lighting_deinit :: proc(gpu_context: ^GPUContext, self: ^RendererLighting) {
+  vk.DestroyPipelineLayout(gpu_context.device, self.lighting_pipeline_layout, nil)
+  vk.DestroyPipeline(gpu_context.device, self.lighting_pipeline, nil)
+  vk.DestroyPipeline(gpu_context.device, self.spot_light_pipeline, nil)
 }
 
 lighting_recreate_images :: proc(

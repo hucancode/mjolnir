@@ -19,6 +19,7 @@ Swapchain :: struct {
 }
 
 swapchain_init :: proc(
+  gpu_context: ^GPUContext,
   self: ^Swapchain,
   window: glfw.WindowHandle,
 ) -> vk.Result {
@@ -61,7 +62,7 @@ swapchain_init :: proc(
   }
 
   width, height := glfw.GetFramebufferSize(window)
-  support := query_swapchain_support(g_physical_device, g_surface) or_return
+  support := query_swapchain_support(gpu_context.physical_device, gpu_context.surface) or_return
   defer swapchain_support_deinit(&support)
   self.format = pick_swapchain_format(support.formats)
   self.extent = pick_swapchain_extent(
@@ -81,7 +82,7 @@ swapchain_init :: proc(
   }
   create_info := vk.SwapchainCreateInfoKHR {
     sType            = .SWAPCHAIN_CREATE_INFO_KHR,
-    surface          = g_surface,
+    surface          = gpu_context.surface,
     minImageCount    = image_count,
     imageFormat      = self.format.format,
     imageColorSpace  = self.format.colorSpace,
@@ -93,20 +94,20 @@ swapchain_init :: proc(
     presentMode      = pick_swap_present_mode(support.present_modes),
     clipped          = true,
   }
-  queue_family_indices := [?]u32{g_graphics_family, g_present_family}
-  if g_graphics_family != g_present_family {
+  queue_family_indices := [?]u32{gpu_context.graphics_family, gpu_context.present_family}
+  if gpu_context.graphics_family != gpu_context.present_family {
     create_info.imageSharingMode = .CONCURRENT
     create_info.queueFamilyIndexCount = 2
     create_info.pQueueFamilyIndices = raw_data(queue_family_indices[:])
   } else {
     create_info.imageSharingMode = .EXCLUSIVE
   }
-  vk.CreateSwapchainKHR(g_device, &create_info, nil, &self.handle) or_return
+  vk.CreateSwapchainKHR(gpu_context.device, &create_info, nil, &self.handle) or_return
   swapchain_image_count: u32
-  vk.GetSwapchainImagesKHR(g_device, self.handle, &swapchain_image_count, nil)
+  vk.GetSwapchainImagesKHR(gpu_context.device, self.handle, &swapchain_image_count, nil)
   self.images = make([]vk.Image, swapchain_image_count)
   vk.GetSwapchainImagesKHR(
-    g_device,
+    gpu_context.device,
     self.handle,
     &swapchain_image_count,
     raw_data(self.images),
@@ -114,6 +115,7 @@ swapchain_init :: proc(
   self.views = make([]vk.ImageView, swapchain_image_count)
   for i in 0 ..< swapchain_image_count {
     self.views[i] = create_image_view(
+      gpu_context,
       self.images[i],
       self.format.format,
       {.COLOR},
@@ -124,13 +126,13 @@ swapchain_init :: proc(
       sType = .SEMAPHORE_CREATE_INFO,
     }
     vk.CreateSemaphore(
-      g_device,
+      gpu_context.device,
       &semaphore_info,
       nil,
       &self.image_available_semaphores[i],
     ) or_return
     vk.CreateSemaphore(
-      g_device,
+      gpu_context.device,
       &semaphore_info,
       nil,
       &self.render_finished_semaphores[i],
@@ -140,7 +142,7 @@ swapchain_init :: proc(
       flags = {.SIGNALED},
     }
     vk.CreateFence(
-      g_device,
+      gpu_context.device,
       &fence_info,
       nil,
       &self.in_flight_fences[i],
@@ -149,60 +151,63 @@ swapchain_init :: proc(
   return .SUCCESS
 }
 
-swapchain_deinit :: proc(self: ^Swapchain) {
-  for view in self.views do vk.DestroyImageView(g_device, view, nil)
+swapchain_deinit :: proc(gpu_context: ^GPUContext, self: ^Swapchain) {
+  for view in self.views do vk.DestroyImageView(gpu_context.device, view, nil)
   delete(self.views)
   self.views = nil
   // TODO: destroying image will make app crash
-  // for image in self.images do vk.DestroyImage(g_device, image, nil)
+  // for image in self.images do vk.DestroyImage(gpu_context.device, image, nil)
   delete(self.images)
   self.images = nil
   for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
-    vk.DestroySemaphore(g_device, self.image_available_semaphores[i], nil)
-    vk.DestroySemaphore(g_device, self.render_finished_semaphores[i], nil)
-    vk.DestroyFence(g_device, self.in_flight_fences[i], nil)
+    vk.DestroySemaphore(gpu_context.device, self.image_available_semaphores[i], nil)
+    vk.DestroySemaphore(gpu_context.device, self.render_finished_semaphores[i], nil)
+    vk.DestroyFence(gpu_context.device, self.in_flight_fences[i], nil)
   }
-  vk.DestroySwapchainKHR(g_device, self.handle, nil)
+  vk.DestroySwapchainKHR(gpu_context.device, self.handle, nil)
   self.handle = 0
 }
 
 swapchain_recreate :: proc(
+  gpu_context: ^GPUContext,
   self: ^Swapchain,
   window: glfw.WindowHandle,
 ) -> vk.Result {
-  vk.DeviceWaitIdle(g_device)
-  swapchain_deinit(self)
-  swapchain_init(self, window) or_return
+  vk.DeviceWaitIdle(gpu_context.device)
+  swapchain_deinit(gpu_context, self)
+  swapchain_init(gpu_context, self, window) or_return
   return .SUCCESS
 }
 
 acquire_next_image :: proc(
+  gpu_context: ^GPUContext,
   self: ^Swapchain,
 ) -> (
   result: vk.Result,
 ) {
   // log.debug("waiting for fence...")
   vk.WaitForFences(
-    g_device,
+    gpu_context.device,
     1,
     &self.in_flight_fences[g_frame_index],
     true,
     math.max(u64),
   ) or_return
   vk.AcquireNextImageKHR(
-    g_device,
+    gpu_context.device,
     self.handle,
     math.max(u64),
     self.image_available_semaphores[g_frame_index],
     0,
     &self.image_index,
   ) or_return
-  vk.ResetFences(g_device, 1, &self.in_flight_fences[g_frame_index]) or_return
+  vk.ResetFences(gpu_context.device, 1, &self.in_flight_fences[g_frame_index]) or_return
   result = .SUCCESS
   return
 }
 
 submit_queue_and_present :: proc(
+  gpu_context: ^GPUContext,
   self: ^Swapchain,
   command_buffer: ^vk.CommandBuffer,
 ) -> vk.Result {
@@ -218,7 +223,7 @@ submit_queue_and_present :: proc(
     pSignalSemaphores    = &self.render_finished_semaphores[g_frame_index],
   }
   vk.QueueSubmit(
-    g_graphics_queue,
+    gpu_context.graphics_queue,
     1,
     &submit_info,
     self.in_flight_fences[g_frame_index],
@@ -232,5 +237,5 @@ submit_queue_and_present :: proc(
     pSwapchains        = &self.handle,
     pImageIndices      = raw_data(image_indices[:]),
   }
-  return vk.QueuePresentKHR(g_present_queue, &present_info)
+  return vk.QueuePresentKHR(gpu_context.present_queue, &present_info)
 }

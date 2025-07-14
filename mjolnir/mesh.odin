@@ -35,32 +35,34 @@ Mesh :: struct {
   skinning:      Maybe(Skinning),
 }
 
-mesh_deinit :: proc(self: ^Mesh) {
-  data_buffer_deinit(&self.vertex_buffer)
-  data_buffer_deinit(&self.index_buffer)
+mesh_deinit :: proc(gpu_context: ^GPUContext, self: ^Mesh) {
+  data_buffer_deinit(gpu_context, &self.vertex_buffer)
+  data_buffer_deinit(gpu_context, &self.index_buffer)
   skin, has_skin := &self.skinning.?
   if !has_skin {
     return
   }
-  data_buffer_deinit(&skin.skin_buffer)
+  data_buffer_deinit(gpu_context, &skin.skin_buffer)
   for &bone in skin.bones do bone_deinit(&bone)
   delete(skin.bones)
   for &clip in skin.animations do animation.clip_deinit(&clip)
   delete(skin.animations)
 }
 
-mesh_init :: proc(self: ^Mesh, data: geometry.Geometry) -> vk.Result {
+mesh_init :: proc(gpu_context: ^GPUContext, self: ^Mesh, data: geometry.Geometry) -> vk.Result {
   defer geometry.delete_geometry(data)
   self.vertices_len = u32(len(data.vertices))
   self.indices_len = u32(len(data.indices))
   self.aabb = data.aabb
   self.vertex_buffer = create_local_buffer(
+    gpu_context,
     geometry.Vertex,
     len(data.vertices),
     {.VERTEX_BUFFER},
     raw_data(data.vertices),
   ) or_return
   self.index_buffer = create_local_buffer(
+    gpu_context,
     u32,
     len(data.indices),
     {.INDEX_BUFFER},
@@ -71,6 +73,7 @@ mesh_init :: proc(self: ^Mesh, data: geometry.Geometry) -> vk.Result {
   }
   log.info("creating skin buffer", len(data.skinnings))
   skin_buffer := create_local_buffer(
+    gpu_context,
     geometry.SkinningData,
     len(data.skinnings),
     {.VERTEX_BUFFER},

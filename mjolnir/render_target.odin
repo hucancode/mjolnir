@@ -28,6 +28,7 @@ RenderTarget :: struct {
 }
 
 render_target_init :: proc(
+  gpu_context: ^GPUContext,
   target: ^RenderTarget,
   width, height: u32,
   color_format: vk.Format,
@@ -53,6 +54,7 @@ render_target_init :: proc(
   for frame in 0 ..< MAX_FRAMES_IN_FLIGHT {
     // Create all texture handles and mark as owned
     target.final_images[frame], _ = create_empty_texture_2d(
+      gpu_context,
       width,
       height,
       color_format,
@@ -60,6 +62,7 @@ render_target_init :: proc(
     ) or_return
 
     target.position_textures[frame], _ = create_empty_texture_2d(
+      gpu_context,
       width,
       height,
       .R32G32B32A32_SFLOAT,
@@ -67,6 +70,7 @@ render_target_init :: proc(
     ) or_return
 
     target.normal_textures[frame], _ = create_empty_texture_2d(
+      gpu_context,
       width,
       height,
       .R8G8B8A8_UNORM,
@@ -74,6 +78,7 @@ render_target_init :: proc(
     ) or_return
 
     target.albedo_textures[frame], _ = create_empty_texture_2d(
+      gpu_context,
       width,
       height,
       .R8G8B8A8_UNORM,
@@ -81,6 +86,7 @@ render_target_init :: proc(
     ) or_return
 
     target.metallic_roughness_textures[frame], _ = create_empty_texture_2d(
+      gpu_context,
       width,
       height,
       .R8G8B8A8_UNORM,
@@ -88,6 +94,7 @@ render_target_init :: proc(
     ) or_return
 
     target.emissive_textures[frame], _ = create_empty_texture_2d(
+      gpu_context,
       width,
       height,
       .R8G8B8A8_UNORM,
@@ -95,6 +102,7 @@ render_target_init :: proc(
     ) or_return
 
     target.depth_textures[frame], _ = create_empty_texture_2d(
+      gpu_context,
       width,
       height,
       depth_format,
@@ -114,60 +122,45 @@ render_target_init :: proc(
 }
 
 // Clean up RenderTarget resources (camera and owned textures)
-render_target_deinit :: proc(target: ^RenderTarget) {
+render_target_deinit :: proc(gpu_context: ^GPUContext, target: ^RenderTarget) {
   // Always release camera since we always own it
   resource.free(&g_cameras, target.camera)
-
   // Release only owned texture handles for all frames
   for frame in 0 ..< MAX_FRAMES_IN_FLIGHT {
     if target.owns_final_image {
-      resource.free(
-        &g_image_2d_buffers,
-        target.final_images[frame],
-        image_buffer_deinit,
-      )
+      if item, freed := resource.free(&g_image_2d_buffers, target.final_images[frame]); freed {
+        image_buffer_deinit(gpu_context, item)
+      }
     }
     if target.owns_position_texture {
-      resource.free(
-        &g_image_2d_buffers,
-        target.position_textures[frame],
-        image_buffer_deinit,
-      )
+      if item, freed := resource.free(&g_image_2d_buffers, target.position_textures[frame]); freed {
+        image_buffer_deinit(gpu_context, item)
+      }
     }
     if target.owns_normal_texture {
-      resource.free(
-        &g_image_2d_buffers,
-        target.normal_textures[frame],
-        image_buffer_deinit,
-      )
+      if item, freed := resource.free(&g_image_2d_buffers, target.normal_textures[frame]); freed {
+        image_buffer_deinit(gpu_context, item)
+      }
     }
     if target.owns_albedo_texture {
-      resource.free(
-        &g_image_2d_buffers,
-        target.albedo_textures[frame],
-        image_buffer_deinit,
-      )
+      if item, freed := resource.free(&g_image_2d_buffers, target.albedo_textures[frame]); freed {
+        image_buffer_deinit(gpu_context, item)
+      }
     }
     if target.owns_metallic_roughness_texture {
-      resource.free(
-        &g_image_2d_buffers,
-        target.metallic_roughness_textures[frame],
-        image_buffer_deinit,
-      )
+      if item, freed := resource.free(&g_image_2d_buffers, target.metallic_roughness_textures[frame]); freed {
+        image_buffer_deinit(gpu_context, item)
+      }
     }
     if target.owns_emissive_texture {
-      resource.free(
-        &g_image_2d_buffers,
-        target.emissive_textures[frame],
-        image_buffer_deinit,
-      )
+      if item, freed := resource.free(&g_image_2d_buffers, target.emissive_textures[frame]); freed {
+        image_buffer_deinit(gpu_context, item)
+      }
     }
     if target.owns_depth_texture {
-      resource.free(
-        &g_image_2d_buffers,
-        target.depth_textures[frame],
-        image_buffer_deinit,
-      )
+      if item, freed := resource.free(&g_image_2d_buffers, target.depth_textures[frame]); freed {
+        image_buffer_deinit(gpu_context, item)
+      }
     }
   }
 }
@@ -245,4 +238,3 @@ render_target_emissive_texture :: proc(target: ^RenderTarget) -> Handle {
 render_target_depth_texture :: proc(target: ^RenderTarget) -> Handle {
   return target.depth_textures[g_frame_index]
 }
-

@@ -13,6 +13,7 @@ RendererTransparent :: struct {
 }
 
 transparent_init :: proc(
+  gpu_context: ^GPUContext,
   self: ^RendererTransparent,
   width: u32,
   height: u32,
@@ -30,7 +31,7 @@ transparent_init :: proc(
     size       = size_of(PushConstant),
   }
   vk.CreatePipelineLayout(
-    g_device,
+    gpu_context.device,
     &{
       sType = .PIPELINE_LAYOUT_CREATE_INFO,
       setLayoutCount = len(set_layouts),
@@ -42,24 +43,24 @@ transparent_init :: proc(
     &self.pipeline_layout,
   ) or_return
 
-  create_transparent_pipelines(self) or_return
-  create_wireframe_pipelines(self) or_return
+  create_transparent_pipelines(gpu_context, self) or_return
+  create_wireframe_pipelines(gpu_context, self) or_return
 
   log.info("Transparent renderer initialized successfully")
   return .SUCCESS
 }
 
-create_transparent_pipelines :: proc(self: ^RendererTransparent) -> vk.Result {
+create_transparent_pipelines :: proc(gpu_context: ^GPUContext, self: ^RendererTransparent) -> vk.Result {
   // Create all shader variants for transparent PBR materials
   depth_format: vk.Format = .D32_SFLOAT
   color_format: vk.Format = .B8G8R8A8_SRGB
   // Load shader modules at compile time
   vert_shader_code := #load("shader/transparent/vert.spv")
-  vert_module := create_shader_module(vert_shader_code) or_return
-  defer vk.DestroyShaderModule(g_device, vert_module, nil)
+  vert_module := create_shader_module(gpu_context, vert_shader_code) or_return
+  defer vk.DestroyShaderModule(gpu_context.device, vert_module, nil)
   frag_shader_code := #load("shader/transparent/frag.spv")
-  frag_module := create_shader_module(frag_shader_code) or_return
-  defer vk.DestroyShaderModule(g_device, frag_module, nil)
+  frag_module := create_shader_module(gpu_context, frag_shader_code) or_return
+  defer vk.DestroyShaderModule(gpu_context.device, frag_module, nil)
 
   vertex_input_info := vk.PipelineVertexInputStateCreateInfo {
     sType                           = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
@@ -223,7 +224,7 @@ create_transparent_pipelines :: proc(self: ^RendererTransparent) -> vk.Result {
   }
 
   vk.CreateGraphicsPipelines(
-    g_device,
+    gpu_context.device,
     0,
     len(pipeline_infos),
     raw_data(pipeline_infos[:]),
@@ -234,18 +235,18 @@ create_transparent_pipelines :: proc(self: ^RendererTransparent) -> vk.Result {
   return .SUCCESS
 }
 
-create_wireframe_pipelines :: proc(self: ^RendererTransparent) -> vk.Result {
+create_wireframe_pipelines :: proc(gpu_context: ^GPUContext, self: ^RendererTransparent) -> vk.Result {
   depth_format: vk.Format = .D32_SFLOAT
   color_format: vk.Format = .B8G8R8A8_SRGB
 
   // Load shader modules at compile time
   vert_shader_code := #load("shader/wireframe/vert.spv")
-  vert_module := create_shader_module(vert_shader_code) or_return
-  defer vk.DestroyShaderModule(g_device, vert_module, nil)
+  vert_module := create_shader_module(gpu_context, vert_shader_code) or_return
+  defer vk.DestroyShaderModule(gpu_context.device, vert_module, nil)
 
   frag_shader_code := #load("shader/wireframe/frag.spv")
-  frag_module := create_shader_module(frag_shader_code) or_return
-  defer vk.DestroyShaderModule(g_device, frag_module, nil)
+  frag_module := create_shader_module(gpu_context, frag_shader_code) or_return
+  defer vk.DestroyShaderModule(gpu_context.device, frag_module, nil)
 
   vertex_input_info := vk.PipelineVertexInputStateCreateInfo {
     sType                           = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
@@ -386,7 +387,7 @@ create_wireframe_pipelines :: proc(self: ^RendererTransparent) -> vk.Result {
   }
 
   vk.CreateGraphicsPipelines(
-    g_device,
+    gpu_context.device,
     0,
     1,
     &create_info,
@@ -399,7 +400,7 @@ create_wireframe_pipelines :: proc(self: ^RendererTransparent) -> vk.Result {
   shader_stages[0].pSpecializationInfo = &wireframe_spec_infos[1]
 
   vk.CreateGraphicsPipelines(
-    g_device,
+    gpu_context.device,
     0,
     1,
     &create_info,
@@ -410,21 +411,21 @@ create_wireframe_pipelines :: proc(self: ^RendererTransparent) -> vk.Result {
   return .SUCCESS
 }
 
-transparent_deinit :: proc(self: ^RendererTransparent) {
+transparent_deinit :: proc(gpu_context: ^GPUContext, self: ^RendererTransparent) {
   // Destroy all transparent material pipelines
   for i in 0 ..< SHADER_VARIANT_COUNT {
-    vk.DestroyPipeline(g_device, self.transparent_pipelines[i], nil)
+    vk.DestroyPipeline(gpu_context.device, self.transparent_pipelines[i], nil)
     self.transparent_pipelines[i] = 0
   }
 
   // Destroy wireframe material pipelines
   for i in 0 ..< 2 {
-    vk.DestroyPipeline(g_device, self.wireframe_pipelines[i], nil)
+    vk.DestroyPipeline(gpu_context.device, self.wireframe_pipelines[i], nil)
     self.wireframe_pipelines[i] = 0
   }
 
   // Destroy pipeline layout
-  vk.DestroyPipelineLayout(g_device, self.pipeline_layout, nil)
+  vk.DestroyPipelineLayout(gpu_context.device, self.pipeline_layout, nil)
   self.pipeline_layout = 0
 }
 

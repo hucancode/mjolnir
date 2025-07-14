@@ -14,6 +14,7 @@ RendererShadow :: struct {
 }
 
 shadow_init :: proc(
+  gpu_context: ^GPUContext,
   self: ^RendererShadow,
   depth_format: vk.Format = .D32_SFLOAT,
 ) -> vk.Result {
@@ -25,7 +26,7 @@ shadow_init :: proc(
     {stageFlags = {.FRAGMENT, .VERTEX}, size = size_of(PushConstant)},
   }
   vk.CreatePipelineLayout(
-    g_device,
+    gpu_context.device,
     &{
       sType = .PIPELINE_LAYOUT_CREATE_INFO,
       setLayoutCount = len(set_layouts),
@@ -36,10 +37,10 @@ shadow_init :: proc(
     nil,
     &self.pipeline_layout,
   ) or_return
-  vert_module := create_shader_module(SHADER_SHADOW_VERT) or_return
-  defer vk.DestroyShaderModule(g_device, vert_module, nil)
-  frag_module := create_shader_module(SHADER_SHADOW_FRAG) or_return
-  defer vk.DestroyShaderModule(g_device, frag_module, nil)
+  vert_module := create_shader_module(gpu_context, SHADER_SHADOW_VERT) or_return
+  defer vk.DestroyShaderModule(gpu_context.device, vert_module, nil)
+  frag_module := create_shader_module(gpu_context, SHADER_SHADOW_FRAG) or_return
+  defer vk.DestroyShaderModule(gpu_context.device, frag_module, nil)
   input_assembly := vk.PipelineInputAssemblyStateCreateInfo {
     sType    = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
     topology = .TRIANGLE_LIST,
@@ -147,7 +148,7 @@ shadow_init :: proc(
     }
   }
   vk.CreateGraphicsPipelines(
-    g_device,
+    gpu_context.device,
     0,
     len(pipeline_infos),
     raw_data(pipeline_infos[:]),
@@ -157,12 +158,12 @@ shadow_init :: proc(
   return .SUCCESS
 }
 
-shadow_deinit :: proc(self: ^RendererShadow) {
+shadow_deinit :: proc(gpu_context: ^GPUContext, self: ^RendererShadow) {
   for &p in self.pipelines {
-    vk.DestroyPipeline(g_device, p, nil)
+    vk.DestroyPipeline(gpu_context.device, p, nil)
     p = 0
   }
-  vk.DestroyPipelineLayout(g_device, self.pipeline_layout, nil)
+  vk.DestroyPipelineLayout(gpu_context.device, self.pipeline_layout, nil)
   self.pipeline_layout = 0
 }
 

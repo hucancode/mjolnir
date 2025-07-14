@@ -118,6 +118,7 @@ ambient_end :: proc(command_buffer: vk.CommandBuffer) {
 }
 
 ambient_init :: proc(
+  gpu_context: ^GPUContext,
   self: ^RendererAmbient,
   width: u32,
   height: u32,
@@ -133,7 +134,7 @@ ambient_init :: proc(
     size       = size_of(AmbientPushConstant),
   }
   vk.CreatePipelineLayout(
-    g_device,
+    gpu_context.device,
     &{
       sType = .PIPELINE_LAYOUT_CREATE_INFO,
       setLayoutCount = len(pipeline_set_layouts),
@@ -146,11 +147,11 @@ ambient_init :: proc(
   ) or_return
 
   vert_shader_code := #load("shader/lighting_ambient/vert.spv")
-  vert_module := create_shader_module(vert_shader_code) or_return
-  defer vk.DestroyShaderModule(g_device, vert_module, nil)
+  vert_module := create_shader_module(gpu_context, vert_shader_code) or_return
+  defer vk.DestroyShaderModule(gpu_context.device, vert_module, nil)
   frag_shader_code := #load("shader/lighting_ambient/frag.spv")
-  frag_module := create_shader_module(frag_shader_code) or_return
-  defer vk.DestroyShaderModule(g_device, frag_module, nil)
+  frag_module := create_shader_module(gpu_context, frag_shader_code) or_return
+  defer vk.DestroyShaderModule(gpu_context.device, frag_module, nil)
 
   dynamic_states := [?]vk.DynamicState{.VIEWPORT, .SCISSOR}
   dynamic_state := vk.PipelineDynamicStateCreateInfo {
@@ -233,7 +234,7 @@ ambient_init :: proc(
     layout              = self.pipeline_layout,
   }
   vk.CreateGraphicsPipelines(
-    g_device,
+    gpu_context.device,
     0,
     1,
     &pipeline_info,
@@ -245,6 +246,7 @@ ambient_init :: proc(
   environment_map: ^ImageBuffer
   self.environment_map, environment_map =
     create_hdr_texture_from_path_with_mips(
+      gpu_context,
       "assets/Cannon_Exterior.hdr",
     ) or_return
   self.environment_max_lod = 8.0 // default fallback
@@ -254,6 +256,7 @@ ambient_init :: proc(
   }
   brdf_lut: ^ImageBuffer
   self.brdf_lut, brdf_lut = create_texture_from_data(
+    gpu_context,
     #load("assets/lut_ggx.png"),
   ) or_return
   self.ibl_intensity = 1.0 // Default IBL intensity
@@ -263,12 +266,16 @@ ambient_init :: proc(
 }
 
 
-ambient_deinit :: proc(self: ^RendererAmbient) {
-  vk.DestroyPipeline(g_device, self.pipeline, nil)
+ambient_deinit :: proc(gpu_context: ^GPUContext, self: ^RendererAmbient) {
+  vk.DestroyPipeline(gpu_context.device, self.pipeline, nil)
   self.pipeline = 0
-  vk.DestroyPipelineLayout(g_device, self.pipeline_layout, nil)
+  vk.DestroyPipelineLayout(gpu_context.device, self.pipeline_layout, nil)
   self.pipeline_layout = 0
   // Clean up environment resources
-  resource.free(&g_image_2d_buffers, self.environment_map, image_buffer_deinit)
-  resource.free(&g_image_2d_buffers, self.brdf_lut, image_buffer_deinit)
+  if item, freed := resource.free(&g_image_2d_buffers, self.environment_map); freed {
+    image_buffer_deinit(gpu_context, item)
+  }
+  if item, freed := resource.free(&g_image_2d_buffers, self.brdf_lut); freed {
+    image_buffer_deinit(gpu_context, item)
+  }
 }

@@ -354,6 +354,7 @@ effect_clear :: proc(self: ^RendererPostProcess) {
 }
 
 postprocess_init :: proc(
+  gpu_context: ^GPUContext,
   self: ^RendererPostProcess,
   color_format: vk.Format,
   width: u32,
@@ -361,10 +362,10 @@ postprocess_init :: proc(
 ) -> vk.Result {
   self.effect_stack = make([dynamic]PostprocessEffect)
   count :: len(PostProcessEffectType)
-  vert_module := create_shader_module(SHADER_POSTPROCESS_VERT) or_return
-  defer vk.DestroyShaderModule(g_device, vert_module, nil)
+  vert_module := create_shader_module(gpu_context, SHADER_POSTPROCESS_VERT) or_return
+  defer vk.DestroyShaderModule(gpu_context.device, vert_module, nil)
   frag_modules: [count]vk.ShaderModule
-  defer for m in frag_modules do vk.DestroyShaderModule(g_device, m, nil)
+  defer for m in frag_modules do vk.DestroyShaderModule(gpu_context.device, m, nil)
   for effect_type, i in PostProcessEffectType {
     shader_code: []u8
     switch effect_type {
@@ -387,7 +388,7 @@ postprocess_init :: proc(
     case .NONE:
       shader_code = SHADER_POSTPROCESS_FRAG
     }
-    frag_modules[i] = create_shader_module(shader_code) or_return
+    frag_modules[i] = create_shader_module(gpu_context, shader_code) or_return
   }
   color_blend_attachment := vk.PipelineColorBlendAttachmentState {
     colorWriteMask = {.R, .G, .B, .A},
@@ -434,6 +435,7 @@ postprocess_init :: proc(
     sType = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
   }
   postprocess_create_images(
+    gpu_context,
     self,
     width,
     height,
@@ -471,7 +473,7 @@ postprocess_init :: proc(
       g_textures_set_layout, // set = 0 (bindless textures)
     }
     vk.CreatePipelineLayout(
-      g_device,
+      gpu_context.device,
       &{
         sType = .PIPELINE_LAYOUT_CREATE_INFO,
         setLayoutCount = len(layout_sets),
@@ -513,7 +515,7 @@ postprocess_init :: proc(
     }
   }
   vk.CreateGraphicsPipelines(
-    g_device,
+    gpu_context.device,
     0,
     count,
     raw_data(pipeline_infos[:]),
@@ -523,19 +525,19 @@ postprocess_init :: proc(
   log.info("Postprocess pipeline initialized successfully")
   for &frame in self.frames {
     vk.CreateSemaphore(
-      g_device,
+      gpu_context.device,
       &{sType = .SEMAPHORE_CREATE_INFO},
       nil,
       &frame.image_available_semaphore,
     ) or_return
     vk.CreateSemaphore(
-      g_device,
+      gpu_context.device,
       &{sType = .SEMAPHORE_CREATE_INFO},
       nil,
       &frame.render_finished_semaphore,
     ) or_return
     vk.CreateFence(
-      g_device,
+      gpu_context.device,
       &{sType = .FENCE_CREATE_INFO, flags = {.SIGNALED}},
       nil,
       &frame.fence,
@@ -545,6 +547,7 @@ postprocess_init :: proc(
 }
 
 postprocess_create_images :: proc(
+  gpu_context: ^GPUContext,
   self: ^RendererPostProcess,
   width: u32,
   height: u32,
@@ -552,6 +555,7 @@ postprocess_create_images :: proc(
 ) -> vk.Result {
   for &handle in self.images {
     handle, _ = create_empty_texture_2d(
+      gpu_context,
       width,
       height,
       format,
@@ -562,39 +566,42 @@ postprocess_create_images :: proc(
   return .SUCCESS
 }
 
-postprocess_deinit_images :: proc(self: ^RendererPostProcess) {
+postprocess_deinit_images :: proc(gpu_context: ^GPUContext, self: ^RendererPostProcess) {
   for handle in self.images {
-    resource.free(&g_image_2d_buffers, handle, image_buffer_deinit)
+    if item, freed := resource.free(&g_image_2d_buffers, handle); freed {
+      image_buffer_deinit(gpu_context, item)
+    }
   }
 }
 
 postprocess_recreate_images :: proc(
+  gpu_context: ^GPUContext,
   self: ^RendererPostProcess,
   width: u32,
   height: u32,
   format: vk.Format,
 ) -> vk.Result {
-  postprocess_deinit_images(self)
-  return postprocess_create_images(self, width, height, format)
+  postprocess_deinit_images(gpu_context, self)
+  return postprocess_create_images(gpu_context, self, width, height, format)
 }
 
-postprocess_deinit :: proc(self: ^RendererPostProcess) {
+postprocess_deinit :: proc(gpu_context: ^GPUContext, self: ^RendererPostProcess) {
   for &frame in self.frames {
-    vk.DestroySemaphore(g_device, frame.image_available_semaphore, nil)
-    vk.DestroySemaphore(g_device, frame.render_finished_semaphore, nil)
-    vk.DestroyFence(g_device, frame.fence, nil)
-    vk.FreeCommandBuffers(g_device, g_command_pool, 1, &frame.command_buffer)
+    vk.DestroySemaphore(gpu_context.device, frame.image_available_semaphore, nil)
+    vk.DestroySemaphore(gpu_context.device, frame.render_finished_semaphore, nil)
+    vk.DestroyFence(gpu_context.device, frame.fence, nil)
+    vk.FreeCommandBuffers(gpu_context.device, gpu_context.command_pool, 1, &frame.command_buffer)
   }
   for &p in self.pipelines {
-    vk.DestroyPipeline(g_device, p, nil)
+    vk.DestroyPipeline(gpu_context.device, p, nil)
     p = 0
   }
   for &layout in self.pipeline_layouts {
-    vk.DestroyPipelineLayout(g_device, layout, nil)
+    vk.DestroyPipelineLayout(gpu_context.device, layout, nil)
     layout = 0
   }
   delete(self.effect_stack)
-  postprocess_deinit_images(self)
+  postprocess_deinit_images(gpu_context, self)
 }
 
 // Modular postprocess API

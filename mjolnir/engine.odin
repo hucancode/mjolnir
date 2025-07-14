@@ -12,6 +12,7 @@ import "core:strings"
 import "core:time"
 import "core:unicode/utf8"
 import "geometry"
+import "gpu"
 import "resource"
 import glfw "vendor:glfw"
 import mu "vendor:microui"
@@ -179,6 +180,7 @@ LightInfo :: struct {
 
 Engine :: struct {
   window:                      glfw.WindowHandle,
+  gpu_context:                 gpu.GPUContext,
   swapchain:                   Swapchain,
   scene:                       Scene,
   last_frame_timestamp:        time.Time,
@@ -237,12 +239,14 @@ engine_init_shadow_maps :: proc(engine: ^Engine) -> vk.Result {
     for i in 0 ..< MAX_SHADOW_MAPS {
       // Create shadow maps
       engine.shadow_maps[f][i], _, _ = create_empty_texture_2d(
+        &engine.gpu_context,
         SHADOW_MAP_SIZE,
         SHADOW_MAP_SIZE,
         .D32_SFLOAT,
         {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
       )
       engine.cube_shadow_maps[f][i], _, _ = create_empty_texture_cube(
+        &engine.gpu_context,
         SHADOW_MAP_SIZE,
         .D32_SFLOAT,
         {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
@@ -328,13 +332,13 @@ init :: proc(
     return .ERROR_INITIALIZATION_FAILED
   }
   log.infof("Window created %v\n", self.window)
-  vulkan_context_init(self.window) or_return
-  factory_init()
+  gpu.gpu_context_init(&self.gpu_context, self.window) or_return
+  factory_init(&self.gpu_context) or_return
   self.start_timestamp = time.now()
   self.last_frame_timestamp = self.start_timestamp
   self.last_update_timestamp = self.start_timestamp
   scene_init(&self.scene)
-  swapchain_init(&self.swapchain, self.window) or_return
+  swapchain_init(&self.gpu_context, &self.swapchain, self.window) or_return
 
   // Initialize frame active render targets
   self.frame_active_render_targets = make([dynamic]Handle, 0)
@@ -348,6 +352,7 @@ init :: proc(
     &g_render_targets,
   )
   render_target_init(
+    &self.gpu_context,
     main_render_target,
     self.swapchain.extent.width,
     self.swapchain.extent.height,
@@ -357,16 +362,17 @@ init :: proc(
     {0, 0, 0}, // Looking at origin
   ) or_return
   vk.AllocateCommandBuffers(
-    g_device,
+    self.gpu_context.device,
     &{
       sType = .COMMAND_BUFFER_ALLOCATE_INFO,
-      commandPool = g_command_pool,
+      commandPool = self.gpu_context.command_pool,
       level = .PRIMARY,
       commandBufferCount = MAX_FRAMES_IN_FLIGHT,
     },
     raw_data(self.command_buffers[:]),
   ) or_return
   lighting_init(
+    &self.gpu_context,
     &self.lighting,
     self.swapchain.extent.width,
     self.swapchain.extent.height,
@@ -374,6 +380,7 @@ init :: proc(
     vk.Format.D32_SFLOAT,
   ) or_return
   ambient_init(
+    &self.gpu_context,
     &self.ambient,
     self.swapchain.extent.width,
     self.swapchain.extent.height,
@@ -381,30 +388,34 @@ init :: proc(
   ) or_return
   // Environment resources will be moved to ambient pass
   gbuffer_init(
+    &self.gpu_context,
     &self.gbuffer,
     self.swapchain.extent.width,
     self.swapchain.extent.height,
   ) or_return
-  depth_prepass_init(&self.depth_prepass, self.swapchain.extent) or_return
-  particle_init(&self.particle) or_return
+  depth_prepass_init(&self.gpu_context, &self.depth_prepass, self.swapchain.extent) or_return
+  particle_init(&self.gpu_context, &self.particle) or_return
   when USE_GPU_CULLING {
-    visibility_culler_init(&self.visibility_culler) or_return
+    visibility_culler_init(&self.gpu_context, &self.visibility_culler) or_return
   }
   transparent_init(
+    &self.gpu_context,
     &self.transparent,
     self.swapchain.extent.width,
     self.swapchain.extent.height,
   ) or_return
   log.debugf("initializing shadow pipeline")
-  shadow_init(&self.shadow, .D32_SFLOAT) or_return
+  shadow_init(&self.gpu_context, &self.shadow, .D32_SFLOAT) or_return
   log.debugf("initializing post process pipeline")
   postprocess_init(
+    &self.gpu_context,
     &self.postprocess,
     self.swapchain.format.format,
     self.swapchain.extent.width,
     self.swapchain.extent.height,
   ) or_return
   ui_init(
+    &self.gpu_context,
     &self.ui,
     self.swapchain.format.format,
     self.swapchain.extent.width,
@@ -701,10 +712,10 @@ update :: proc(self: ^Engine) -> bool {
 }
 
 deinit :: proc(self: ^Engine) {
-  vk.DeviceWaitIdle(g_device)
+  vk.DeviceWaitIdle(self.gpu_context.device)
   vk.FreeCommandBuffers(
-    g_device,
-    g_command_pool,
+    self.gpu_context.device,
+    self.gpu_context.command_pool,
     len(self.command_buffers),
     raw_data(self.command_buffers[:]),
   )
@@ -713,11 +724,9 @@ deinit :: proc(self: ^Engine) {
     g_render_targets,
     self.main_render_target,
   ); main_render_target != nil {
-    resource.free(
-      &g_render_targets,
-      self.main_render_target,
-      render_target_deinit,
-    )
+    if item, freed := resource.free(&g_render_targets, self.main_render_target); freed {
+      render_target_deinit(&self.gpu_context, item)
+    }
   }
 
   // Clean up persistent shadow render targets
@@ -737,30 +746,30 @@ deinit :: proc(self: ^Engine) {
   // Clean up frame active render targets
   delete(self.frame_active_render_targets)
 
-  ui_deinit(&self.ui)
+  ui_deinit(&self.gpu_context, &self.ui)
   scene_deinit(&self.scene)
-  lighting_deinit(&self.lighting)
-  ambient_deinit(&self.ambient)
-  gbuffer_deinit(&self.gbuffer)
-  shadow_deinit(&self.shadow)
-  postprocess_deinit(&self.postprocess)
-  particle_deinit(&self.particle)
+  lighting_deinit(&self.gpu_context, &self.lighting)
+  ambient_deinit(&self.gpu_context, &self.ambient)
+  gbuffer_deinit(&self.gpu_context, &self.gbuffer)
+  shadow_deinit(&self.gpu_context, &self.shadow)
+  postprocess_deinit(&self.gpu_context, &self.postprocess)
+  particle_deinit(&self.gpu_context, &self.particle)
   when USE_GPU_CULLING {
-    visibility_culler_deinit(&self.visibility_culler)
+    visibility_culler_deinit(&self.gpu_context, &self.visibility_culler)
   }
-  transparent_deinit(&self.transparent)
-  depth_prepass_deinit(&self.depth_prepass)
-  factory_deinit()
-  swapchain_deinit(&self.swapchain)
-  vulkan_context_deinit()
+  transparent_deinit(&self.gpu_context, &self.transparent)
+  depth_prepass_deinit(&self.gpu_context, &self.depth_prepass)
+  factory_deinit(&self.gpu_context)
+  swapchain_deinit(&self.gpu_context, &self.swapchain)
+  gpu.gpu_context_deinit(&self.gpu_context)
   glfw.DestroyWindow(self.window)
   glfw.Terminate()
   log.infof("Engine deinitialized")
 }
 
 recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
-  // vk.DeviceWaitIdle(g_device)
-  swapchain_recreate(&engine.swapchain, engine.window) or_return
+  // vk.DeviceWaitIdle(engine.gpu_context.device)
+  swapchain_recreate(&engine.gpu_context, &engine.swapchain, engine.window) or_return
   new_aspect_ratio :=
     f32(engine.swapchain.extent.width) / f32(engine.swapchain.extent.height)
   if main_camera := get_main_camera(engine); main_camera != nil {
@@ -778,8 +787,9 @@ recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
       old_camera.position if old_camera != nil else [3]f32{0, 0, 3}
     old_target := [3]f32{0, 0, 0} // Calculate from camera direction if needed
 
-    render_target_deinit(main_render_target)
+    render_target_deinit(&engine.gpu_context, main_render_target)
     render_target_init(
+      &engine.gpu_context,
       main_render_target,
       engine.swapchain.extent.width,
       engine.swapchain.extent.height,
@@ -801,6 +811,7 @@ recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
   ) or_return
   // renderer_ambient_recreate_images does not exist - skip
   postprocess_recreate_images(
+    &engine.gpu_context,
     &engine.postprocess,
     engine.swapchain.extent.width,
     engine.swapchain.extent.height,
@@ -911,7 +922,7 @@ generate_render_input :: proc(
 
 render :: proc(self: ^Engine) -> vk.Result {
   // log.debug("============ acquiring image...============ ")
-  acquire_next_image(&self.swapchain) or_return
+  acquire_next_image(&self.gpu_context, &self.swapchain) or_return
   mu.begin(&self.ui.ctx)
   command_buffer := self.command_buffers[g_frame_index]
   vk.ResetCommandBuffer(command_buffer, {}) or_return
@@ -1155,7 +1166,7 @@ render :: proc(self: ^Engine) -> vk.Result {
       &self.scene,
       active_targets[:],
     )
-    visibility_culler_execute(&self.visibility_culler, command_buffer)
+    visibility_culler_execute(&self.gpu_context, &self.visibility_culler, command_buffer)
 
     // Log visibility results for main camera (slot 0) - using data from 1-2 frames ago
     disabled, visible, total := count_visible_objects(&self.visibility_culler, 0)
@@ -1230,12 +1241,12 @@ render :: proc(self: ^Engine) -> vk.Result {
     }
     shadow_cube_images[i] = b.image
   }
-  
+
   // Batched shadow map transitions to attachment optimal
   // Combine 2D and cube shadow maps in a single barrier for better performance
   if shadow_map_count > 0 || cube_shadow_map_count > 0 {
     image_barriers := make([dynamic]vk.ImageMemoryBarrier, 0, MAX_SHADOW_MAPS * 2, context.temp_allocator)
-    
+
     // Add 2D shadow map barriers
     for i in 0 ..< shadow_map_count {
       append(&image_barriers, vk.ImageMemoryBarrier{
@@ -1250,7 +1261,7 @@ render :: proc(self: ^Engine) -> vk.Result {
         subresourceRange = {aspectMask = {.DEPTH}, levelCount = 1, layerCount = 1},
       })
     }
-    
+
     // Add cube shadow map barriers
     for i in 0 ..< cube_shadow_map_count {
       append(&image_barriers, vk.ImageMemoryBarrier{
@@ -1265,7 +1276,7 @@ render :: proc(self: ^Engine) -> vk.Result {
         subresourceRange = {aspectMask = {.DEPTH}, levelCount = 1, layerCount = 6},
       })
     }
-    
+
     vk.CmdPipelineBarrier(
       command_buffer,
       {.TOP_OF_PIPE},
@@ -1353,7 +1364,7 @@ render :: proc(self: ^Engine) -> vk.Result {
   // Combine 2D and cube shadow maps in a single barrier for better performance
   if shadow_map_count > 0 || cube_shadow_map_count > 0 {
     image_barriers := make([dynamic]vk.ImageMemoryBarrier, 0, MAX_SHADOW_MAPS * 2, context.temp_allocator)
-    
+
     // Add 2D shadow map barriers
     for i in 0 ..< shadow_map_count {
       append(&image_barriers, vk.ImageMemoryBarrier{
@@ -1368,7 +1379,7 @@ render :: proc(self: ^Engine) -> vk.Result {
         subresourceRange = {aspectMask = {.DEPTH}, levelCount = 1, layerCount = 1},
       })
     }
-    
+
     // Add cube shadow map barriers
     for i in 0 ..< cube_shadow_map_count {
       append(&image_barriers, vk.ImageMemoryBarrier{
@@ -1383,7 +1394,7 @@ render :: proc(self: ^Engine) -> vk.Result {
         subresourceRange = {aspectMask = {.DEPTH}, levelCount = 1, layerCount = 6},
       })
     }
-    
+
     vk.CmdPipelineBarrier(
       command_buffer,
       {.LATE_FRAGMENT_TESTS},
@@ -1575,7 +1586,7 @@ render :: proc(self: ^Engine) -> vk.Result {
   )
   vk.EndCommandBuffer(command_buffer) or_return
   // log.debug("============ submit queue... =============")
-  submit_queue_and_present(&self.swapchain, &command_buffer) or_return
+  submit_queue_and_present(&self.gpu_context, &self.swapchain, &command_buffer) or_return
   g_frame_index = (g_frame_index + 1) % MAX_FRAMES_IN_FLIGHT
   return .SUCCESS
 }

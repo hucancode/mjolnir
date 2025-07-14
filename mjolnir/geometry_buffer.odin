@@ -26,6 +26,7 @@ RendererGBuffer :: struct {
 }
 
 gbuffer_init :: proc(
+  gpu_context: ^GPUContext,
   self: ^RendererGBuffer,
   width: u32,
   height: u32,
@@ -41,7 +42,7 @@ gbuffer_init :: proc(
     size       = size_of(PushConstant),
   }
   vk.CreatePipelineLayout(
-    g_device,
+    gpu_context.device,
     &{
       sType = .PIPELINE_LAYOUT_CREATE_INFO,
       setLayoutCount = len(set_layouts),
@@ -54,11 +55,11 @@ gbuffer_init :: proc(
   ) or_return
   log.info("About to build G-buffer pipelines...")
   vert_shader_code := #load("shader/gbuffer/vert.spv")
-  vert_module := create_shader_module(vert_shader_code) or_return
-  defer vk.DestroyShaderModule(g_device, vert_module, nil)
+  vert_module := create_shader_module(gpu_context, vert_shader_code) or_return
+  defer vk.DestroyShaderModule(gpu_context.device, vert_module, nil)
   frag_shader_code := #load("shader/gbuffer/frag.spv")
-  frag_module := create_shader_module(frag_shader_code) or_return
-  defer vk.DestroyShaderModule(g_device, frag_module, nil)
+  frag_module := create_shader_module(gpu_context, frag_shader_code) or_return
+  defer vk.DestroyShaderModule(gpu_context.device, frag_module, nil)
   vertex_input_info := vk.PipelineVertexInputStateCreateInfo {
     sType                           = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
     vertexBindingDescriptionCount   = len(geometry.VERTEX_BINDING_DESCRIPTION),
@@ -209,7 +210,7 @@ gbuffer_init :: proc(
     }
   }
   vk.CreateGraphicsPipelines(
-    g_device,
+    gpu_context.device,
     0,
     len(pipeline_infos),
     raw_data(pipeline_infos[:]),
@@ -543,9 +544,9 @@ gbuffer_get_pipeline :: proc(
   return self.pipelines[transmute(u32)features]
 }
 
-gbuffer_deinit :: proc(self: ^RendererGBuffer) {
+gbuffer_deinit :: proc(gpu_context: ^GPUContext, self: ^RendererGBuffer) {
   for pipeline in self.pipelines {
-    vk.DestroyPipeline(g_device, pipeline, nil)
+    vk.DestroyPipeline(gpu_context.device, pipeline, nil)
   }
-  vk.DestroyPipelineLayout(g_device, self.pipeline_layout, nil)
+  vk.DestroyPipelineLayout(gpu_context.device, self.pipeline_layout, nil)
 }
