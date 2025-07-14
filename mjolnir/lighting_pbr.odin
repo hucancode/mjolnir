@@ -25,8 +25,7 @@ RendererLighting :: struct {
 lighting_init :: proc(
   self: ^RendererLighting,
   gpu_context: ^gpu.GPUContext,
-  width: u32,
-  height: u32,
+  width, height: u32,
   color_format: vk.Format = .B8G8R8A8_SRGB,
   depth_format: vk.Format = .D32_SFLOAT,
   warehouse: ^ResourceWarehouse,
@@ -230,8 +229,7 @@ lighting_deinit :: proc(
 
 lighting_recreate_images :: proc(
   self: ^RendererLighting,
-  width: u32,
-  height: u32,
+  width, height: u32,
   color_format: vk.Format,
   depth_format: vk.Format,
 ) -> vk.Result {

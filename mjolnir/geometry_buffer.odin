@@ -29,8 +29,7 @@ RendererGBuffer :: struct {
 gbuffer_init :: proc(
   self: ^RendererGBuffer,
   gpu_context: ^gpu.GPUContext,
-  width: u32,
-  height: u32,
+  width, height: u32,
   warehouse: ^ResourceWarehouse,
 ) -> vk.Result {
   depth_format: vk.Format = .D32_SFLOAT

@@ -271,7 +271,7 @@ engine_init_shadow_maps :: proc(engine: ^Engine) -> vk.Result {
       render_target.depth_textures[frame_idx] =
         engine.shadow_maps[frame_idx][i]
     }
-    render_target.owns_depth_texture = false
+    render_target.features = {.DEPTH_TEXTURE}
 
     // Create persistent render targets for point lights (6 cube faces)
     for face in 0 ..< 6 {
@@ -284,7 +284,7 @@ engine_init_shadow_maps :: proc(engine: ^Engine) -> vk.Result {
         cube_render_target.depth_textures[frame_idx] =
           engine.cube_shadow_maps[frame_idx][i]
       }
-      cube_render_target.owns_depth_texture = false
+      cube_render_target.features = {.DEPTH_TEXTURE}
     }
   }
   return .SUCCESS
@@ -308,8 +308,7 @@ camera_uniform_update :: proc(
 
 init :: proc(
   self: ^Engine,
-  width: u32,
-  height: u32,
+  width, height: u32,
   title: string,
 ) -> vk.Result {
   context.user_ptr = self
@@ -363,6 +362,7 @@ init :: proc(
     self.swapchain.extent.height,
     self.swapchain.format.format,
     .D32_SFLOAT,
+    {.FINAL_IMAGE, .POSITION_TEXTURE, .NORMAL_TEXTURE, .ALBEDO_TEXTURE, .METALLIC_ROUGHNESS, .EMISSIVE_TEXTURE, .DEPTH_TEXTURE},
     {5, 8, 5}, // Camera slightly above and diagonal to origin
     {0, 0, 0}, // Looking at origin
   ) or_return
@@ -837,6 +837,7 @@ recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
       engine.swapchain.extent.height,
       engine.swapchain.format.format,
       .D32_SFLOAT,
+      {.FINAL_IMAGE, .POSITION_TEXTURE, .NORMAL_TEXTURE, .ALBEDO_TEXTURE, .METALLIC_ROUGHNESS, .EMISSIVE_TEXTURE, .DEPTH_TEXTURE},
       old_position, // Preserve camera position
       old_target, // Preserve camera target
     ) or_return
@@ -1165,7 +1166,6 @@ render :: proc(self: ^Engine) -> vk.Result {
     clear(&self.frame_active_render_targets)
     // Add main render target
     append(&self.frame_active_render_targets, self.main_render_target)
-    log.infof("Added main render target: %v", self.main_render_target)
     // Add shadow map render targets from shadow-casting lights
     for light_info in self.lights[:self.active_light_count] {
       if !light_info.light_cast_shadow do continue
@@ -1217,12 +1217,6 @@ render :: proc(self: ^Engine) -> vk.Result {
       }
     }
 
-    log.infof(
-      "Visibility culling with %d render targets, %d cameras",
-      len(active_targets),
-      len(active_targets),
-    )
-
     // Update and perform GPU scene culling
     visibility_culler_update(
       &self.visibility_culler,
@@ -1238,16 +1232,6 @@ render :: proc(self: ^Engine) -> vk.Result {
       self.frame_index,
     )
 
-    // Log visibility results for main camera (slot 0) - using data from 1-2 frames ago
-    disabled, visible, total := count_visible_objects(
-      &self.visibility_culler,
-      0,
-      self.frame_index,
-    )
-    // log.infof("Main camera visibility (1-2 frames old): %d visible / %d total (disabled: %d)",
-    //           visible, total, disabled)
-
-    // Optimized memory barrier - only wait for what we need
     // Since we use 1-2 frame latency, this barrier is mainly for GPU-GPU synchronization
     write_idx := self.visibility_culler.visibility_write_idx
     prev_write_idx :=
@@ -1317,7 +1301,6 @@ render :: proc(self: ^Engine) -> vk.Result {
     shadow_cube_images[i] = b.image
   }
 
-  // Batched shadow map transitions to attachment optimal
   // Combine 2D and cube shadow maps in a single barrier for better performance
   if shadow_map_count > 0 || cube_shadow_map_count > 0 {
     image_barriers := make(
@@ -1370,7 +1353,6 @@ render :: proc(self: ^Engine) -> vk.Result {
         },
       )
     }
-
     vk.CmdPipelineBarrier(
       command_buffer,
       {.TOP_OF_PIPE},
@@ -1386,7 +1368,6 @@ render :: proc(self: ^Engine) -> vk.Result {
   }
   // log.debugf("============ shadow casters (%d)...============ ", len(shadow_casters))
   // Shadow rendering for shadow-casting lights
-  current_camera_slot: u32 = 1 // Start from slot 1 (slot 0 is main camera)
   for light_info, i in self.lights[:self.active_light_count] {
     if !light_info.light_cast_shadow do continue
     // log.debugf("Processing shadow caster %d", i)
@@ -1433,7 +1414,6 @@ render :: proc(self: ^Engine) -> vk.Result {
           self.frame_index,
         )
         shadow_end(command_buffer)
-        current_camera_slot += 1
       }
     case .DIRECTIONAL:
     // TODO: Implement directional light shadows
@@ -1476,7 +1456,6 @@ render :: proc(self: ^Engine) -> vk.Result {
         self.frame_index,
       )
       shadow_end(command_buffer)
-      current_camera_slot += 1
     }
   }
   // Batched shadow map transitions to shader read optimal
@@ -1797,7 +1776,7 @@ render :: proc(self: ^Engine) -> vk.Result {
   return .SUCCESS
 }
 
-run :: proc(self: ^Engine, width: u32, height: u32, title: string) {
+run :: proc(self: ^Engine, width, height: u32, title: string) {
   if init(self, width, height, title) != .SUCCESS {
     return
   }

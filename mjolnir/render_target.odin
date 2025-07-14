@@ -7,9 +7,24 @@ import "gpu"
 import "resource"
 import vk "vendor:vulkan"
 
+RenderTargetFeature :: enum {
+  FINAL_IMAGE         = 0,
+  POSITION_TEXTURE    = 1,
+  NORMAL_TEXTURE      = 2,
+  ALBEDO_TEXTURE      = 3,
+  METALLIC_ROUGHNESS  = 4,
+  EMISSIVE_TEXTURE    = 5,
+  DEPTH_TEXTURE       = 6,
+}
+
+RenderTargetFeatureSet :: bit_set[RenderTargetFeature;u32]
+
+RENDER_TARGET_FEATURE_COUNT: u32 : len(RenderTargetFeature)
+
 RenderTarget :: struct {
   camera:                          Handle,
   extent:                          vk.Extent2D,
+  features:                        RenderTargetFeatureSet,
   // Texture handles per frame in flight
   final_images:                    [MAX_FRAMES_IN_FLIGHT]Handle,
   position_textures:               [MAX_FRAMES_IN_FLIGHT]Handle,
@@ -18,14 +33,6 @@ RenderTarget :: struct {
   metallic_roughness_textures:     [MAX_FRAMES_IN_FLIGHT]Handle,
   emissive_textures:               [MAX_FRAMES_IN_FLIGHT]Handle,
   depth_textures:                  [MAX_FRAMES_IN_FLIGHT]Handle,
-  // Ownership flags for textures (true = owned by this RenderTarget)
-  owns_final_image:                bool,
-  owns_position_texture:           bool,
-  owns_normal_texture:             bool,
-  owns_albedo_texture:             bool,
-  owns_metallic_roughness_texture: bool,
-  owns_emissive_texture:           bool,
-  owns_depth_texture:              bool,
 }
 
 render_target_init :: proc(
@@ -35,6 +42,7 @@ render_target_init :: proc(
   width, height: u32,
   color_format: vk.Format,
   depth_format: vk.Format,
+  features: RenderTargetFeatureSet = {.FINAL_IMAGE, .POSITION_TEXTURE, .NORMAL_TEXTURE, .ALBEDO_TEXTURE, .METALLIC_ROUGHNESS, .EMISSIVE_TEXTURE, .DEPTH_TEXTURE},
   camera_position: [3]f32 = {0, 0, 3},
   camera_target: [3]f32 = {0, 0, 0},
   fov: f32 = math.PI * 0.5,
@@ -52,95 +60,98 @@ render_target_init :: proc(
   geometry.camera_look_at(camera_ptr, camera_position, camera_target)
 
   target.extent = {width, height}
-  // Create textures for all frames in flight
+  target.features = features
+
   for frame in 0 ..< MAX_FRAMES_IN_FLIGHT {
-    // Create all texture handles and mark as owned
-    target.final_images[frame], _, _ = create_empty_texture_2d(
-      gpu_context,
-      warehouse,
-      width,
-      height,
-      color_format,
-      {.COLOR_ATTACHMENT, .SAMPLED},
-    )
+    if .FINAL_IMAGE in features {
+      target.final_images[frame], _, _ = create_empty_texture_2d(
+        gpu_context,
+        warehouse,
+        width,
+        height,
+        color_format,
+        {.COLOR_ATTACHMENT, .SAMPLED},
+      )
+    }
 
-    target.position_textures[frame], _, _ = create_empty_texture_2d(
-      gpu_context,
-      warehouse,
-      width,
-      height,
-      .R32G32B32A32_SFLOAT,
-      {.COLOR_ATTACHMENT, .SAMPLED},
-    )
+    if .POSITION_TEXTURE in features {
+      target.position_textures[frame], _, _ = create_empty_texture_2d(
+        gpu_context,
+        warehouse,
+        width,
+        height,
+        .R32G32B32A32_SFLOAT,
+        {.COLOR_ATTACHMENT, .SAMPLED},
+      )
+    }
 
-    target.normal_textures[frame], _, _ = create_empty_texture_2d(
-      gpu_context,
-      warehouse,
-      width,
-      height,
-      .R8G8B8A8_UNORM,
-      {.COLOR_ATTACHMENT, .SAMPLED},
-    )
+    if .NORMAL_TEXTURE in features {
+      target.normal_textures[frame], _, _ = create_empty_texture_2d(
+        gpu_context,
+        warehouse,
+        width,
+        height,
+        .R8G8B8A8_UNORM,
+        {.COLOR_ATTACHMENT, .SAMPLED},
+      )
+    }
 
-    target.albedo_textures[frame], _, _ = create_empty_texture_2d(
-      gpu_context,
-      warehouse,
-      width,
-      height,
-      .R8G8B8A8_UNORM,
-      {.COLOR_ATTACHMENT, .SAMPLED},
-    )
+    if .ALBEDO_TEXTURE in features {
+      target.albedo_textures[frame], _, _ = create_empty_texture_2d(
+        gpu_context,
+        warehouse,
+        width,
+        height,
+        .R8G8B8A8_UNORM,
+        {.COLOR_ATTACHMENT, .SAMPLED},
+      )
+    }
 
-    target.metallic_roughness_textures[frame], _, _ = create_empty_texture_2d(
-      gpu_context,
-      warehouse,
-      width,
-      height,
-      .R8G8B8A8_UNORM,
-      {.COLOR_ATTACHMENT, .SAMPLED},
-    )
+    if .METALLIC_ROUGHNESS in features {
+      target.metallic_roughness_textures[frame], _, _ = create_empty_texture_2d(
+        gpu_context,
+        warehouse,
+        width,
+        height,
+        .R8G8B8A8_UNORM,
+        {.COLOR_ATTACHMENT, .SAMPLED},
+      )
+    }
 
-    target.emissive_textures[frame], _, _ = create_empty_texture_2d(
-      gpu_context,
-      warehouse,
-      width,
-      height,
-      .R8G8B8A8_UNORM,
-      {.COLOR_ATTACHMENT, .SAMPLED},
-    )
+    if .EMISSIVE_TEXTURE in features {
+      target.emissive_textures[frame], _, _ = create_empty_texture_2d(
+        gpu_context,
+        warehouse,
+        width,
+        height,
+        .R8G8B8A8_UNORM,
+        {.COLOR_ATTACHMENT, .SAMPLED},
+      )
+    }
 
-    target.depth_textures[frame], _, _ = create_empty_texture_2d(
-      gpu_context,
-      warehouse,
-      width,
-      height,
-      depth_format,
-      {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
-    )
+    if .DEPTH_TEXTURE in features {
+      target.depth_textures[frame], _, _ = create_empty_texture_2d(
+        gpu_context,
+        warehouse,
+        width,
+        height,
+        depth_format,
+        {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
+      )
+    }
   }
-
-  target.owns_final_image = true
-  target.owns_position_texture = true
-  target.owns_normal_texture = true
-  target.owns_albedo_texture = true
-  target.owns_metallic_roughness_texture = true
-  target.owns_emissive_texture = true
-  target.owns_depth_texture = true
 
   return .SUCCESS
 }
 
-// Clean up RenderTarget resources (camera and owned textures)
 render_target_deinit :: proc(
   target: ^RenderTarget,
   gpu_context: ^gpu.GPUContext,
   warehouse: ^ResourceWarehouse,
 ) {
-  // Always release camera since we always own it
   resource.free(&warehouse.cameras, target.camera)
-  // Release only owned texture handles for all frames
   for frame in 0 ..< MAX_FRAMES_IN_FLIGHT {
-    if target.owns_final_image {
+    if .FINAL_IMAGE in target.features {
       if item, freed := resource.free(
         &warehouse.image_2d_buffers,
         target.final_images[frame],
@@ -148,7 +159,7 @@ render_target_deinit :: proc(
         gpu.image_buffer_deinit(gpu_context, item)
       }
     }
-    if target.owns_position_texture {
+    if .POSITION_TEXTURE in target.features {
       if item, freed := resource.free(
         &warehouse.image_2d_buffers,
         target.position_textures[frame],
@@ -156,7 +167,7 @@ render_target_deinit :: proc(
         gpu.image_buffer_deinit(gpu_context, item)
       }
     }
-    if target.owns_normal_texture {
+    if .NORMAL_TEXTURE in target.features {
       if item, freed := resource.free(
         &warehouse.image_2d_buffers,
         target.normal_textures[frame],
@@ -164,7 +175,7 @@ render_target_deinit :: proc(
         gpu.image_buffer_deinit(gpu_context, item)
       }
     }
-    if target.owns_albedo_texture {
+    if .ALBEDO_TEXTURE in target.features {
       if item, freed := resource.free(
         &warehouse.image_2d_buffers,
         target.albedo_textures[frame],
@@ -172,7 +183,7 @@ render_target_deinit :: proc(
         gpu.image_buffer_deinit(gpu_context, item)
       }
     }
-    if target.owns_metallic_roughness_texture {
+    if .METALLIC_ROUGHNESS in target.features {
       if item, freed := resource.free(
         &warehouse.image_2d_buffers,
         target.metallic_roughness_textures[frame],
@@ -180,7 +191,7 @@ render_target_deinit :: proc(
         gpu.image_buffer_deinit(gpu_context, item)
       }
     }
-    if target.owns_emissive_texture {
+    if .EMISSIVE_TEXTURE in target.features {
       if item, freed := resource.free(
         &warehouse.image_2d_buffers,
         target.emissive_textures[frame],
@@ -188,7 +199,7 @@ render_target_deinit :: proc(
         gpu.image_buffer_deinit(gpu_context, item)
       }
     }
-    if target.owns_depth_texture {
+    if .DEPTH_TEXTURE in target.features {
       if item, freed := resource.free(
         &warehouse.image_2d_buffers,
         target.depth_textures[frame],
@@ -297,4 +308,100 @@ render_target_depth_texture :: proc(
   frame_index: u32,
 ) -> Handle {
   return target.depth_textures[frame_index]
+}
+
+render_target_has_feature :: proc(
+  target: ^RenderTarget,
+  feature: RenderTargetFeature,
+) -> bool {
+  return feature in target.features
+}
+
+render_target_init_gbuffer :: proc(
+  target: ^RenderTarget,
+  gpu_context: ^gpu.GPUContext,
+  warehouse: ^ResourceWarehouse,
+  width, height: u32,
+  color_format: vk.Format,
+  depth_format: vk.Format,
+  camera_position: [3]f32 = {0, 0, 3},
+  camera_target: [3]f32 = {0, 0, 0},
+  fov: f32 = math.PI * 0.5,
+  near_plane: f32 = 0.1,
+  far_plane: f32 = 100.0,
+) -> vk.Result {
+  return render_target_init(
+    target,
+    gpu_context,
+    warehouse,
+    width,
+    height,
+    color_format,
+    depth_format,
+    {.FINAL_IMAGE, .POSITION_TEXTURE, .NORMAL_TEXTURE, .ALBEDO_TEXTURE, .METALLIC_ROUGHNESS, .EMISSIVE_TEXTURE, .DEPTH_TEXTURE},
+    camera_position,
+    camera_target,
+    fov,
+    near_plane,
+    far_plane,
+  )
+}
+
+render_target_init_shadow :: proc(
+  target: ^RenderTarget,
+  gpu_context: ^gpu.GPUContext,
+  warehouse: ^ResourceWarehouse,
+  width, height: u32,
+  depth_format: vk.Format,
+  camera_position: [3]f32 = {0, 0, 3},
+  camera_target: [3]f32 = {0, 0, 0},
+  fov: f32 = math.PI * 0.5,
+  near_plane: f32 = 0.1,
+  far_plane: f32 = 100.0,
+) -> vk.Result {
+  return render_target_init(
+    target,
+    gpu_context,
+    warehouse,
+    width,
+    height,
+    .UNDEFINED,
+    depth_format,
+    {.DEPTH_TEXTURE},
+    camera_position,
+    camera_target,
+    fov,
+    near_plane,
+    far_plane,
+  )
+}
+
+render_target_init_minimal :: proc(
+  target: ^RenderTarget,
+  gpu_context: ^gpu.GPUContext,
+  warehouse: ^ResourceWarehouse,
+  width, height: u32,
+  color_format: vk.Format,
+  depth_format: vk.Format,
+  camera_position: [3]f32 = {0, 0, 3},
+  camera_target: [3]f32 = {0, 0, 0},
+  fov: f32 = math.PI * 0.5,
+  near_plane: f32 = 0.1,
+  far_plane: f32 = 100.0,
+) -> vk.Result {
+  return render_target_init(
+    target,
+    gpu_context,
+    warehouse,
+    width,
+    height,
+    color_format,
+    depth_format,
+    {.FINAL_IMAGE, .DEPTH_TEXTURE},
+    camera_position,
+    camera_target,
+    fov,
+    near_plane,
+    far_plane,
+  )
 }

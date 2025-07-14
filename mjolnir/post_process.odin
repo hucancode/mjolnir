@@ -358,8 +358,7 @@ postprocess_init :: proc(
   self: ^RendererPostProcess,
   gpu_context: ^gpu.GPUContext,
   color_format: vk.Format,
-  width: u32,
-  height: u32,
+  width, height: u32,
   warehouse: ^ResourceWarehouse,
 ) -> vk.Result {
   self.effect_stack = make([dynamic]PostprocessEffect)
@@ -559,8 +558,7 @@ postprocess_create_images :: proc(
   gpu_context: ^gpu.GPUContext,
   self: ^RendererPostProcess,
   warehouse: ^ResourceWarehouse,
-  width: u32,
-  height: u32,
+  width, height: u32,
   format: vk.Format,
 ) -> vk.Result {
   for &handle in self.images {
@@ -593,8 +591,7 @@ postprocess_deinit_images :: proc(
 postprocess_recreate_images :: proc(
   gpu_context: ^gpu.GPUContext,
   self: ^RendererPostProcess,
-  width: u32,
-  height: u32,
+  width, height: u32,
   format: vk.Format,
   warehouse: ^ResourceWarehouse,
 ) -> vk.Result {

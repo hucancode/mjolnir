@@ -517,8 +517,7 @@ set_texture_cube_descriptor :: proc(
 create_empty_texture_2d :: proc(
   gpu_context: ^gpu.GPUContext,
   warehouse: ^ResourceWarehouse,
-  width: u32,
-  height: u32,
+  width, height: u32,
   format: vk.Format,
   usage: vk.ImageUsageFlags = {.COLOR_ATTACHMENT, .SAMPLED},
 ) -> (

@@ -236,7 +236,7 @@ visibility_culler_init :: proc(
   // Create multi-camera compute pipeline
   culling_shader_module := gpu.create_shader_module(
     gpu_context,
-    #load("shader/multi_camera_culling/culling.spv"),
+    #load("shader/visibility_culling/culling.spv"),
   ) or_return
   defer vk.DestroyShaderModule(gpu_context.device, culling_shader_module, nil)
 

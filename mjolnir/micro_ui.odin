@@ -46,8 +46,7 @@ ui_init :: proc(
   self: ^RendererUI,
   gpu_context: ^gpu.GPUContext,
   color_format: vk.Format,
-  width: u32,
-  height: u32,
+  width, height: u32,
   dpi_scale: f32 = 1.0,
   warehouse: ^ResourceWarehouse,
 ) -> vk.Result {
@@ -518,8 +517,7 @@ ui_deinit :: proc(self: ^RendererUI, gpu_context: ^gpu.GPUContext) {
 ui_recreate_images :: proc(
   self: ^RendererUI,
   color_format: vk.Format,
-  width: u32,
-  height: u32,
+  width, height: u32,
   dpi_scale: f32,
 ) -> vk.Result {
   // Only update frame dimensions and DPI scale

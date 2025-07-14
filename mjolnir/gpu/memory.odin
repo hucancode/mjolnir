@@ -218,8 +218,7 @@ copy_buffer :: proc(gpu_context: ^GPUContext, dst, src: DataBuffer($T)) -> vk.Re
 
 malloc_image_buffer :: proc(
   gpu_context: ^GPUContext,
-  width: u32,
-  height: u32,
+  width, height: u32,
   format: vk.Format,
   tiling: vk.ImageTiling,
   usage: vk.ImageUsageFlags,
@@ -672,8 +671,7 @@ cube_depth_texture_deinit :: proc(gpu_context: ^GPUContext, self: ^CubeImageBuff
 // Create image buffer with custom mip levels
 malloc_image_buffer_with_mips :: proc(
   gpu_context: ^GPUContext,
-  width: u32,
-  height: u32,
+  width, height: u32,
   format: vk.Format,
   tiling: vk.ImageTiling,
   usage: vk.ImageUsageFlags,

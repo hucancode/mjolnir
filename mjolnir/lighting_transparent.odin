@@ -16,8 +16,7 @@ RendererTransparent :: struct {
 transparent_init :: proc(
   self: ^RendererTransparent,
   gpu_context: ^gpu.GPUContext,
-  width: u32,
-  height: u32,
+  width, height: u32,
   warehouse: ^ResourceWarehouse,
 ) -> vk.Result {
   log.info("Initializing transparent renderer")

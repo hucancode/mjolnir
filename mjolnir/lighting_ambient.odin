@@ -126,8 +126,7 @@ ambient_init :: proc(
   self: ^RendererAmbient,
   gpu_context: ^gpu.GPUContext,
   warehouse: ^ResourceWarehouse,
-  width: u32,
-  height: u32,
+  width, height: u32,
   color_format: vk.Format = .B8G8R8A8_SRGB,
 ) -> vk.Result {
   log.debugf("renderer ambient init %d x %d", width, height)
