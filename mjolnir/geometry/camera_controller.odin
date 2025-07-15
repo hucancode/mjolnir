@@ -2,8 +2,8 @@ package geometry
 
 import "core:log"
 import "core:math"
-import linalg "core:math/linalg"
-import glfw "vendor:glfw"
+import "core:math/linalg"
+import "vendor:glfw"
 
 CameraControllerType :: enum {
   ORBIT,

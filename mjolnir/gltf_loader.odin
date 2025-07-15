@@ -8,8 +8,8 @@ import path "core:path/filepath"
 import "core:slice"
 import "core:strings"
 
-import linalg "core:math/linalg"
-import cgltf "vendor:cgltf"
+import "core:math/linalg"
+import "vendor:cgltf"
 import vk "vendor:vulkan"
 
 import "animation"

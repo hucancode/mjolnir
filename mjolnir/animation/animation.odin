@@ -2,7 +2,7 @@ package animation
 
 import "core:log"
 import "core:math"
-import linalg "core:math/linalg"
+import "core:math/linalg"
 import "core:slice"
 
 Keyframe :: struct($T: typeid) {

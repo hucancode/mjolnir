@@ -2,7 +2,7 @@ package mjolnir
 
 import "animation"
 import "core:log"
-import linalg "core:math/linalg"
+import "core:math/linalg"
 import "geometry"
 import "gpu"
 import vk "vendor:vulkan"

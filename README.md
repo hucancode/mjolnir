@@ -2,7 +2,7 @@
 
 Mjolnir is a minimalistic rendering engine. The goal is to create a simple set of tools to help people quickly create fast graphical applications
 
-[![Run Tests](https://github.com/hucancode/mjolnir/actions/workflows/test.yml/badge.svg)](https://github.com/hucancode/mjolnir/actions/workflows/test.yml)
+[![Run Tests](https://github.com/hucancode/mjolnir/actions/workflows/logic-test.yml/badge.svg)](https://github.com/hucancode/mjolnir/actions/workflows/logic-test.yml)
 
 ![](./readme/render-target.png)
 

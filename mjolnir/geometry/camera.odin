@@ -2,7 +2,7 @@ package geometry
 
 import "core:math"
 import "core:log"
-import linalg "core:math/linalg"
+import "core:math/linalg"
 
 PerspectiveProjection :: struct {
   fov:          f32,

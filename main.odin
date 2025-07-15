@@ -3,18 +3,18 @@ package main
 import "core:fmt"
 import "core:log"
 import "core:math"
-import linalg "core:math/linalg"
+import "core:math/linalg"
 import "mjolnir"
 import "mjolnir/geometry"
 import "mjolnir/gpu"
 import "mjolnir/resource"
-import glfw "vendor:glfw"
+import "vendor:glfw"
 import mu "vendor:microui"
 import vk "vendor:vulkan"
 
-LIGHT_COUNT :: 20
+LIGHT_COUNT :: 5
 ALL_SPOT_LIGHT :: false
-ALL_POINT_LIGHT :: true
+ALL_POINT_LIGHT :: false
 light_handles: [LIGHT_COUNT]mjolnir.Handle
 light_cube_handles: [LIGHT_COUNT]mjolnir.Handle
 ground_mat_handle: mjolnir.Handle
@@ -96,7 +96,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
     space: f32 = 2.1
     size: f32 = 0.3
     nx, ny, nz := 20, 2, 20
-    wall_x_pos: f32 = 7.5 // Left wall position from debug output
 
     for x in 1 ..< nx {
       for y in 1 ..< ny {
@@ -159,7 +158,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     )
     scale(&ground_node.transform, size)
     // Left wall
-    left_wall_handle, left_wall := spawn(
+    _, left_wall := spawn(
       &engine.scene,
       MeshAttachment {
         handle = ground_mesh_handle,
@@ -171,7 +170,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     rotate(&left_wall.transform, math.PI * 0.5, linalg.VECTOR3F32_Z_AXIS)
     scale(&left_wall.transform, size)
     // Right wall
-    right_wall_handle, right_wall := spawn(
+    _, right_wall := spawn(
       &engine.scene,
       MeshAttachment {
         handle = ground_mesh_handle,
@@ -183,7 +182,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     rotate(&right_wall.transform, -math.PI * 0.5, linalg.VECTOR3F32_Z_AXIS)
     scale(&right_wall.transform, size)
     // Back wall
-    back_wall_handle, back_wall := spawn(
+    _, back_wall := spawn(
       &engine.scene,
       MeshAttachment {
         handle = ground_mesh_handle,
@@ -486,7 +485,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
       &engine.warehouse,
       portal_quad_geom,
     )
-    portal_quad_handle, portal_node := spawn(
+    _, portal_node := spawn(
       &engine.scene,
       MeshAttachment {
         handle = portal_quad_mesh_handle,

@@ -4,7 +4,7 @@ import "core:log"
 import "core:math"
 import "core:slice"
 import "gpu"
-import glfw "vendor:glfw"
+import "vendor:glfw"
 import vk "vendor:vulkan"
 
 Swapchain :: struct {

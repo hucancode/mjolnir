@@ -1,8 +1,7 @@
 package mjolnir
 
-import intr "base:intrinsics"
 import "core:log"
-import linalg "core:math/linalg"
+import "core:math/linalg"
 import "gpu"
 import mu "vendor:microui"
 import vk "vendor:vulkan"

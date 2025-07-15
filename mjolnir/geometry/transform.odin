@@ -1,7 +1,7 @@
 package geometry
 
 import "core:log"
-import linalg "core:math/linalg"
+import "core:math/linalg"
 
 Transform :: struct {
   position:     [3]f32,

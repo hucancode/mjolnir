@@ -1,7 +1,7 @@
 package tests
 import "base:intrinsics"
 import "core:log"
-import linalg "core:math/linalg"
+import "core:math/linalg"
 import "core:mem"
 import "core:simd"
 import "core:slice"

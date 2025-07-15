@@ -2,7 +2,7 @@ package mjolnir
 
 import "core:c"
 import "core:log"
-import linalg "core:math/linalg"
+import "core:math/linalg"
 import "core:slice"
 import "core:strings"
 import "geometry"

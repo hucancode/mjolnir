@@ -336,9 +336,8 @@ lighting_render :: proc(
     vk.CmdDrawIndexed(command_buffer, mesh.indices_len, 1, 0, 0, 0)
   }
 
-  for &light_info, light_id in input {
+  for &light_info in input {
     node_count += 1
-
     // Fill in the common G-buffer indices that are always the same
     light_info.scene_camera_idx = render_target.camera.index
     light_info.position_texture_index =

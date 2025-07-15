@@ -6,7 +6,7 @@ import "core:c"
 import "core:fmt"
 import "core:log"
 import "core:math"
-import linalg "core:math/linalg"
+import "core:math/linalg"
 import "core:slice"
 import "core:strings"
 import "core:time"
@@ -14,7 +14,7 @@ import "core:unicode/utf8"
 import "geometry"
 import "gpu"
 import "resource"
-import glfw "vendor:glfw"
+import "vendor:glfw"
 import mu "vendor:microui"
 import vk "vendor:vulkan"
 
@@ -667,9 +667,6 @@ update_force_fields :: proc(self: ^Engine) {
     forcefields[params.forcefield_count] = ff
     params.forcefield_count += 1
   }
-  for i in params.forcefield_count ..< MAX_FORCE_FIELDS {
-    forcefields[i] = {}
-  }
 }
 
 update :: proc(self: ^Engine) -> bool {
@@ -771,9 +768,6 @@ deinit :: proc(self: ^Engine) {
         self.cube_shadow_render_targets[j][face],
       )
     }
-  }
-
-  for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
   }
 
   // Clean up frame active render targets
@@ -908,9 +902,8 @@ generate_render_input :: proc(
   }
   visible_count: u32 = 0
   total_count: u32 = 0
-  for &entry, entry_index in self.scene.nodes.entries do if entry.active {
+  for &entry, i in self.scene.nodes.entries do if entry.active {
     node := &entry.item
-    handle := Handle{entry.generation, u32(entry_index)}
     #partial switch data in node.attachment {
     case MeshAttachment:
       // Skip nodes that don't cast shadows when rendering shadow pass
@@ -924,7 +917,7 @@ generate_render_input :: proc(
       visible := true
       when USE_GPU_CULLING {
         if camera_slot_found {
-          visible = is_node_visible(&self.visibility_culler, camera_slot, u32(entry_index), self.frame_index)
+          visible = is_node_visible(&self.visibility_culler, camera_slot, u32(i), self.frame_index)
         } else {
           // Fall back to CPU culling if camera slot not found
           world_aabb := geometry.aabb_transform(mesh.aabb, node.transform.world_matrix)
@@ -1034,7 +1027,7 @@ render :: proc(self: ^Engine) -> vk.Result {
       light_info.shadow_resources.allocated = false
     }
   }
-  for &entry, entry_index in self.scene.nodes.entries do if entry.active {
+  for &entry in self.scene.nodes.entries do if entry.active {
     node := &entry.item
     // Check if we have room for more lights
     if self.active_light_count >= len(self.lights) do continue

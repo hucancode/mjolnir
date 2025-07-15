@@ -3,7 +3,7 @@ package mjolnir
 import "animation"
 import "core:log"
 import "core:math"
-import linalg "core:math/linalg"
+import "core:math/linalg"
 import "core:slice"
 import "geometry"
 import "resource"

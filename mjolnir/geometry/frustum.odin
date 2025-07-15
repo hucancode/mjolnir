@@ -1,7 +1,7 @@
 package geometry
 
 import "core:log"
-import linalg "core:math/linalg"
+import "core:math/linalg"
 
 // Plane is represented as a [4]f32 {A, B, C, D}
 // for the plane equation Ax + By + Cz + D = 0.

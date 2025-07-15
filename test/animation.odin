@@ -3,7 +3,7 @@ package tests
 import "../mjolnir/animation"
 import "core:log"
 import "core:math"
-import linalg "core:math/linalg"
+import "core:math/linalg"
 import "core:slice"
 import "core:testing"
 import "core:time"

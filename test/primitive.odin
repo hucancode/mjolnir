@@ -3,7 +3,7 @@ package tests
 import "../mjolnir/geometry"
 import "core:testing"
 import "core:math"
-import linalg "core:math/linalg"
+import "core:math/linalg"
 
 @(test)
 test_cube_generation :: proc(t: ^testing.T) {

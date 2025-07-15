@@ -1,7 +1,7 @@
 package geometry
 
 import "core:math"
-import linalg "core:math/linalg"
+import "core:math/linalg"
 import vk "vendor:vulkan"
 
 Vertex :: struct {

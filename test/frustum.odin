@@ -2,7 +2,7 @@ package tests
 
 import "../mjolnir/geometry"
 import "core:math"
-import linalg "core:math/linalg"
+import "core:math/linalg"
 import "core:testing"
 import "core:log"
 
