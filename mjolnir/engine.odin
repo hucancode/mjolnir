@@ -24,7 +24,7 @@ MAX_FRAMES_IN_FLIGHT :: 2
 RENDER_FPS :: 60.0
 FRAME_TIME :: 1.0 / RENDER_FPS
 FRAME_TIME_MILIS :: FRAME_TIME * 1_000.0
-UPDATE_FPS :: 60.0
+UPDATE_FPS :: 30.0
 UPDATE_FRAME_TIME :: 1.0 / UPDATE_FPS
 UPDATE_FRAME_TIME_MILIS :: UPDATE_FRAME_TIME * 1_000.0
 MOUSE_SENSITIVITY_X :: 0.005
@@ -240,6 +240,7 @@ Engine :: struct {
   render_active:               bool,
   update_active:               bool,
   transforms_updated:          bool,
+  last_render_timestamp:       time.Time,
 }
 
 get_window_dpi :: proc(window: glfw.WindowHandle) -> f32 {
@@ -749,27 +750,7 @@ update :: proc(self: ^Engine) -> bool {
     return false
   }
   scene_traverse(&self.scene)
-  for &entry in self.scene.nodes.entries {
-    if !entry.active do continue
-    data, is_mesh := &entry.item.attachment.(MeshAttachment)
-    if !is_mesh do continue
-    skinning, has_skin := &data.skinning.?
-    if !has_skin do continue
-    anim_inst, has_animation := &skinning.animation.?
-    if !has_animation do continue
-    animation.instance_update(anim_inst, delta_time)
-    mesh := resource.get(self.warehouse.meshes, data.handle) or_continue
-    mesh_skin, mesh_has_skin := mesh.skinning.?
-    if !mesh_has_skin do continue
-    l, r :=
-      skinning.bone_matrix_offset +
-      self.frame_index * self.warehouse.bone_matrix_slab.capacity,
-      skinning.bone_matrix_offset +
-      self.frame_index * self.warehouse.bone_matrix_slab.capacity +
-      u32(len(mesh_skin.bones))
-    bone_matrices := self.warehouse.bone_buffer.mapped[l:r]
-    sample_clip(mesh, anim_inst.clip_handle, anim_inst.time, bone_matrices)
-  }
+  // Animation updates are now handled in render thread for smooth animation at render FPS
   update_emitters(self, delta_time)
   update_force_fields(self)
   if self.update_proc != nil {
@@ -1041,6 +1022,28 @@ render :: proc(self: ^Engine) -> vk.Result {
   mu.begin(&self.ui.ctx)
   command_buffer := self.command_buffers[self.frame_index]
   vk.ResetCommandBuffer(command_buffer, {}) or_return
+  render_delta_time := f32(time.duration_seconds(time.since(self.last_render_timestamp)))
+  for &entry in self.scene.nodes.entries {
+    if !entry.active do continue
+    data, is_mesh := &entry.item.attachment.(MeshAttachment)
+    if !is_mesh do continue
+    skinning, has_skin := &data.skinning.?
+    if !has_skin do continue
+    anim_inst, has_animation := &skinning.animation.?
+    if !has_animation do continue
+    animation.instance_update(anim_inst, render_delta_time)
+    mesh := resource.get(self.warehouse.meshes, data.handle) or_continue
+    mesh_skin, mesh_has_skin := mesh.skinning.?
+    if !mesh_has_skin do continue
+    l, r :=
+      skinning.bone_matrix_offset +
+      self.frame_index * self.warehouse.bone_matrix_slab.capacity,
+      skinning.bone_matrix_offset +
+      self.frame_index * self.warehouse.bone_matrix_slab.capacity +
+      u32(len(mesh_skin.bones))
+    bone_matrices := self.warehouse.bone_buffer.mapped[l:r]
+    sample_clip(mesh, anim_inst.clip_handle, anim_inst.time, bone_matrices)
+  }
   // log.debug("============ setup main camera...============ ")
   // Update camera uniform for main render target
   main_render_target := resource.get(
@@ -1869,7 +1872,7 @@ render :: proc(self: ^Engine) -> vk.Result {
 
   // Process pending deletions at end of frame
   process_pending_deletions(self)
-
+  self.last_render_timestamp = time.now()
   return .SUCCESS
 }
 
