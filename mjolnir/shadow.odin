@@ -17,8 +17,8 @@ RendererShadow :: struct {
 shadow_init :: proc(
   self: ^RendererShadow,
   gpu_context: ^gpu.GPUContext,
-  depth_format: vk.Format = .D32_SFLOAT,
   warehouse: ^ResourceWarehouse,
+  depth_format: vk.Format = .D32_SFLOAT,
 ) -> vk.Result {
   set_layouts := [?]vk.DescriptorSetLayout {
     warehouse.camera_buffer_set_layout,

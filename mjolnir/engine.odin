@@ -473,7 +473,6 @@ init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
   shadow_init(
     &self.shadow,
     &self.gpu_context,
-    .D32_SFLOAT,
     &self.warehouse,
   ) or_return
   log.debugf("initializing post process pipeline")
@@ -603,14 +602,6 @@ init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
         -i32(math.round(xoffset)),
         -i32(math.round(yoffset)),
       )
-      // Camera control moved to camera controllers
-      // if main_camera := resource.get(g_cameras, engine.scene.main_camera);
-      //    main_camera != nil {
-      //   geometry.camera_orbit_zoom(
-      //     main_camera,
-      //     -f32(yoffset) * SCROLL_SENSITIVITY,
-      //   )
-      // }
       if engine.mouse_scroll_proc != nil {
         engine.mouse_scroll_proc(engine, {xoffset, yoffset})
       }

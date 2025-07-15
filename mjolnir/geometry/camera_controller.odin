@@ -85,12 +85,11 @@ camera_controller_orbit_init :: proc(
   window: glfw.WindowHandle,
   target: [3]f32,
   distance: f32,
-  yaw := f32(0),
-  pitch := f32(0),
+  yaw :f32 = 0,
+  pitch :f32 = 0,
 ) -> CameraController {
   // Get current mouse position to prevent jump on first input
   current_mouse_x, current_mouse_y := glfw.GetCursorPos(window)
-
   return {
     type = .ORBIT,
     window = window,
@@ -147,7 +146,6 @@ camera_controller_follow_init :: proc(
 ) -> CameraController {
   // Get current mouse position to prevent jump on first input
   current_mouse_x, current_mouse_y := glfw.GetCursorPos(window)
-
   return {
     type = .FOLLOW,
     window = window,

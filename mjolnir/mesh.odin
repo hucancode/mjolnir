@@ -40,9 +40,7 @@ mesh_deinit :: proc(self: ^Mesh, gpu_context: ^gpu.GPUContext) {
   gpu.data_buffer_deinit(gpu_context, &self.vertex_buffer)
   gpu.data_buffer_deinit(gpu_context, &self.index_buffer)
   skin, has_skin := &self.skinning.?
-  if !has_skin {
-    return
-  }
+  if !has_skin do return
   gpu.data_buffer_deinit(gpu_context, &skin.skin_buffer)
   for &bone in skin.bones do bone_deinit(&bone)
   delete(skin.bones)
@@ -102,9 +100,7 @@ make_animation_instance :: proc(
   ok: bool,
 ) #optional_ok {
   skin, has_skin := &self.skinning.?
-  if !has_skin {
-    return instance, false
-  }
+  if !has_skin do return
   for clip, i in skin.animations {
     if clip.name != animation_name do continue
     instance = {
@@ -115,9 +111,10 @@ make_animation_instance :: proc(
       duration    = clip.duration,
       speed       = speed,
     }
-    return instance, true
+    ok = true
+    return
   }
-  return instance, false
+  return
 }
 
 sample_clip :: proc(
@@ -127,9 +124,7 @@ sample_clip :: proc(
   out_bone_matrices: []matrix[4, 4]f32,
 ) {
   skin, has_skin := &self.skinning.?
-  if !has_skin {
-    return
-  }
+  if !has_skin do  return
   if len(out_bone_matrices) < len(skin.bones) ||
      clip_idx >= u32(len(skin.animations)) {
     return

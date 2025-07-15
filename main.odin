@@ -12,7 +12,7 @@ import "vendor:glfw"
 import mu "vendor:microui"
 import vk "vendor:vulkan"
 
-LIGHT_COUNT :: 50
+LIGHT_COUNT :: 5
 ALL_SPOT_LIGHT :: false
 ALL_POINT_LIGHT :: false
 light_handles: [LIGHT_COUNT]mjolnir.Handle
