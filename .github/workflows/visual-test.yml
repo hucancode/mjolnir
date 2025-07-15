@@ -1,0 +1,89 @@
+name: Visual Test
+
+on:
+  workflow_run:
+    workflows: ["Logic Test"]
+    types:
+      - completed
+  workflow_dispatch:
+
+jobs:
+  run-and-analyze-color:
+    if: ${{ (github.event.workflow_run.conclusion == 'success' && github.ref == 'refs/heads/master') || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup Odin
+      uses: laytan/setup-odin@v2
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Compile Odin vendor library
+      run: |
+        make -C /home/runner/odin/vendor/stb/src
+        make -C /home/runner/odin/vendor/cgltf/src
+
+    - name: Setup Vulkan SDK
+      uses: humbletim/install-vulkan-sdk@v1.2
+      with:
+        vulkan-query-version: 1.4.309.0
+        vulkan-use-cache: true
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y xvfb libglfw3-dev imagemagick libgl1-mesa-dev libglu1-mesa-dev x11-utils
+        sudo ln -sf /usr/lib/x86_64-linux-gnu/libglfw.so.3 /usr/lib/x86_64-linux-gnu/libglfw.so
+
+    - name: Build the game
+      run: make build
+
+    - name: Run game and capture screenshot
+      run: |
+        export DISPLAY=:99
+        Xvfb :99 -screen 0 1024x768x24 &
+        XVFB_PID=$!
+        sleep 3
+        echo "Starting game..."
+        bin/main 2>&1 | tee game_output.log &
+        GAME_PID=$!
+        sleep 5
+        echo "Capturing screenshot..."
+        echo "All windows:"
+        xwininfo -root -tree || echo "Failed to get window info"
+        echo "Attempting to capture game window..."
+        WINDOW_ID=$(xwininfo -root -tree | grep -i "mjolnir odin" | head -1 | cut -d' ' -f4)
+        if [ -n "$WINDOW_ID" ]; then
+          echo "Found game window: $WINDOW_ID"
+          import -window $WINDOW_ID screenshot.png
+        else
+          echo "Game window not found, capturing root window"
+          import -window root screenshot.png
+        fi
+        kill $GAME_PID || true
+        kill $XVFB_PID || true
+        echo "Game ran and screenshot captured"
+
+    - name: Analyze screenshot
+      run: |
+        if [ -f screenshot.png ]; then
+          echo "Screenshot captured successfully"
+          identify screenshot.png
+          echo "Color analysis:"
+          convert screenshot.png -format "%c" histogram:info: | head -10
+          echo "Unique colors count:"
+          convert screenshot.png -format "%k" info:
+        else
+          echo "Screenshot not found"
+        fi
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: game-artifacts
+        path: |
+          screenshot.png
+          game_output.log
