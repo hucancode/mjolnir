@@ -12,7 +12,6 @@ PointLightAttachment :: struct {
   color:       [4]f32,
   radius:      f32,
   cast_shadow: bool,
-  cameras:     [6]resource.Handle, // One for each cube face
 }
 
 DirectionalLightAttachment :: struct {
@@ -25,7 +24,6 @@ SpotLightAttachment :: struct {
   radius:      f32,
   angle:       f32,
   cast_shadow: bool,
-  camera:      resource.Handle,
 }
 
 NodeSkinning :: struct {
@@ -63,7 +61,10 @@ EmitterAttachment :: struct {
 }
 
 ForceFieldAttachment :: struct {
-  using force_field: ForceField,
+  tangent_strength: f32, // 0 = push/pull in straight line, 1 = push/pull in tangent line
+  strength:         f32, // positive = attract, negative = repel
+  area_of_effect:   f32, // radius
+  fade:             f32, // 0..1, linear fade factor
 }
 
 NodeAttachment :: union {

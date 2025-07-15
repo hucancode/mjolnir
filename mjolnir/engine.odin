@@ -307,11 +307,7 @@ camera_uniform_update :: proc(
   )
 }
 
-init :: proc(
-  self: ^Engine,
-  width, height: u32,
-  title: string,
-) -> vk.Result {
+init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
   context.user_ptr = self
   g_context = context
   // glfw.SetErrorCallback(glfw_error_callback)
@@ -363,7 +359,15 @@ init :: proc(
     self.swapchain.extent.height,
     self.swapchain.format.format,
     .D32_SFLOAT,
-    {.FINAL_IMAGE, .POSITION_TEXTURE, .NORMAL_TEXTURE, .ALBEDO_TEXTURE, .METALLIC_ROUGHNESS, .EMISSIVE_TEXTURE, .DEPTH_TEXTURE},
+    {
+      .FINAL_IMAGE,
+      .POSITION_TEXTURE,
+      .NORMAL_TEXTURE,
+      .ALBEDO_TEXTURE,
+      .METALLIC_ROUGHNESS,
+      .EMISSIVE_TEXTURE,
+      .DEPTH_TEXTURE,
+    },
     {5, 8, 5}, // Camera slightly above and diagonal to origin
     {0, 0, 0}, // Looking at origin
   ) or_return
@@ -663,8 +667,11 @@ update_force_fields :: proc(self: ^Engine) {
   for &entry in self.scene.nodes.entries do if entry.active {
     ff, is_ff := &entry.item.attachment.(ForceFieldAttachment)
     if !is_ff do continue
-    ff.position = entry.item.transform.world_matrix * [4]f32{0, 0, 0, 1}
-    forcefields[params.forcefield_count] = ff
+    forcefields[params.forcefield_count].position = entry.item.transform.world_matrix * [4]f32{0, 0, 0, 1}
+    forcefields[params.forcefield_count].tangent_strength = ff.tangent_strength
+    forcefields[params.forcefield_count].strength = ff.strength
+    forcefields[params.forcefield_count].area_of_effect = ff.area_of_effect
+    forcefields[params.forcefield_count].fade = ff.fade
     params.forcefield_count += 1
   }
 }
@@ -835,7 +842,15 @@ recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
       engine.swapchain.extent.height,
       engine.swapchain.format.format,
       .D32_SFLOAT,
-      {.FINAL_IMAGE, .POSITION_TEXTURE, .NORMAL_TEXTURE, .ALBEDO_TEXTURE, .METALLIC_ROUGHNESS, .EMISSIVE_TEXTURE, .DEPTH_TEXTURE},
+      {
+        .FINAL_IMAGE,
+        .POSITION_TEXTURE,
+        .NORMAL_TEXTURE,
+        .ALBEDO_TEXTURE,
+        .METALLIC_ROUGHNESS,
+        .EMISSIVE_TEXTURE,
+        .DEPTH_TEXTURE,
+      },
       old_position, // Preserve camera position
       old_target, // Preserve camera target
     ) or_return
