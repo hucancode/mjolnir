@@ -209,6 +209,8 @@ Engine :: struct {
   postprocess:                 RendererPostProcess,
   ui:                          RendererUI,
   command_buffers:             [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
+  // Parallel shadow command buffers  
+  shadow_command_buffers:      [MAX_FRAMES_IN_FLIGHT][MAX_SHADOW_MAPS]vk.CommandBuffer,
   cursor_pos:                  [2]i32,
   // Main render target for primary rendering
   main_render_target:          Handle,
@@ -381,6 +383,20 @@ init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
     },
     raw_data(self.command_buffers[:]),
   ) or_return
+  
+  // Allocate shadow command buffers for parallel recording
+  for frame_idx in 0 ..< MAX_FRAMES_IN_FLIGHT {
+    vk.AllocateCommandBuffers(
+      self.gpu_context.device,
+      &{
+        sType = .COMMAND_BUFFER_ALLOCATE_INFO,
+        commandPool = self.gpu_context.command_pool,
+        level = .PRIMARY,
+        commandBufferCount = MAX_SHADOW_MAPS,
+      },
+      raw_data(self.shadow_command_buffers[frame_idx][:]),
+    ) or_return
+  }
   lighting_init(
     &self.lighting,
     &self.gpu_context,
@@ -750,6 +766,16 @@ deinit :: proc(self: ^Engine) {
     len(self.command_buffers),
     raw_data(self.command_buffers[:]),
   )
+  
+  // Free shadow command buffers
+  for frame_idx in 0 ..< MAX_FRAMES_IN_FLIGHT {
+    vk.FreeCommandBuffers(
+      self.gpu_context.device,
+      self.gpu_context.command_pool,
+      len(self.shadow_command_buffers[frame_idx]),
+      raw_data(self.shadow_command_buffers[frame_idx][:]),
+    )
+  }
   // Clean up main render target
   if main_render_target := resource.get(
     self.warehouse.render_targets,
@@ -1380,13 +1406,22 @@ render :: proc(self: ^Engine) -> vk.Result {
     )
   }
   // log.debugf("============ shadow casters (%d)...============ ", len(shadow_casters))
-  // Shadow rendering for shadow-casting lights
+  // Shadow rendering for shadow-casting lights using separate command buffers
+  shadow_cmd_count: u32 = 0
   for light_info, i in self.lights[:self.active_light_count] {
     if !light_info.light_cast_shadow do continue
-    // log.debugf("Processing shadow caster %d", i)
+    if shadow_cmd_count >= MAX_SHADOW_MAPS do break
+    
+    // Use separate command buffer for this shadow map
+    shadow_cmd := self.shadow_command_buffers[self.frame_index][shadow_cmd_count]
+    vk.ResetCommandBuffer(shadow_cmd, {}) or_continue
+    vk.BeginCommandBuffer(
+      shadow_cmd,
+      &{sType = .COMMAND_BUFFER_BEGIN_INFO, flags = {.ONE_TIME_SUBMIT}},
+    ) or_continue
+    
     switch light_info.light_kind {
     case .POINT:
-      // log.debugf("Processing point light %d", i)
       if light_info.shadow_map.generation == 0 {
         log.errorf("Point light %d has invalid shadow map handle", i)
         continue
@@ -1403,7 +1438,6 @@ render :: proc(self: ^Engine) -> vk.Result {
           self.warehouse.render_targets,
           light_info.cube_render_targets[face],
         )
-        // Use frame active render targets for correct camera slot mapping
         shadow_render_input := generate_render_input(
           self,
           frustum,
@@ -1412,7 +1446,7 @@ render :: proc(self: ^Engine) -> vk.Result {
         )
         shadow_begin(
           target,
-          command_buffer,
+          shadow_cmd,
           &self.warehouse,
           self.frame_index,
           u32(face),
@@ -1422,11 +1456,11 @@ render :: proc(self: ^Engine) -> vk.Result {
           shadow_render_input,
           light_info,
           target^,
-          command_buffer,
+          shadow_cmd,
           &self.warehouse,
           self.frame_index,
         )
-        shadow_end(command_buffer)
+        shadow_end(shadow_cmd)
       }
     case .DIRECTIONAL:
     // TODO: Implement directional light shadows
@@ -1446,7 +1480,6 @@ render :: proc(self: ^Engine) -> vk.Result {
         self.warehouse.render_targets,
         light_info.render_target,
       )
-      // Use frame active render targets for correct camera slot mapping
       shadow_render_input := generate_render_input(
         self,
         frustum,
@@ -1455,7 +1488,7 @@ render :: proc(self: ^Engine) -> vk.Result {
       )
       shadow_begin(
         shadow_target,
-        command_buffer,
+        shadow_cmd,
         &self.warehouse,
         self.frame_index,
       )
@@ -1464,13 +1497,33 @@ render :: proc(self: ^Engine) -> vk.Result {
         shadow_render_input,
         light_info,
         shadow_target^,
-        command_buffer,
+        shadow_cmd,
         &self.warehouse,
         self.frame_index,
       )
-      shadow_end(command_buffer)
+      shadow_end(shadow_cmd)
     }
+    
+    // End this shadow command buffer
+    vk.EndCommandBuffer(shadow_cmd) or_continue
+    shadow_cmd_count += 1
   }
+  
+  // Submit all shadow command buffers for parallel execution
+  if shadow_cmd_count > 0 {
+    shadow_submit_info := vk.SubmitInfo {
+      sType = .SUBMIT_INFO,
+      commandBufferCount = shadow_cmd_count,
+      pCommandBuffers = raw_data(self.shadow_command_buffers[self.frame_index][:shadow_cmd_count]),
+    }
+    vk.QueueSubmit(
+      self.gpu_context.graphics_queue,
+      1,
+      &shadow_submit_info,
+      0,
+    ) or_return
+  }
+  
   // Batched shadow map transitions to shader read optimal
   // Combine 2D and cube shadow maps in a single barrier for better performance
   if shadow_map_count > 0 || cube_shadow_map_count > 0 {
