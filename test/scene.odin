@@ -22,7 +22,7 @@ test_node_translate :: proc(t: ^testing.T) {
   _, child := spawn_child(&scene, parent_handle)
   geometry.translate(&child.transform, 4, 5, 6)
   scene_traverse(&scene)
-  actual := child.transform.world_matrix
+  actual := geometry.transform_get_world_matrix(&child.transform)
   expected := matrix[4,4]f32 {
     1.0,
     0.0,
@@ -59,7 +59,7 @@ test_node_rotate :: proc(t: ^testing.T) {
   )
   geometry.translate(&child.transform, 1, 0, 0)
   scene_traverse(&scene)
-  actual := child.transform.world_matrix
+  actual := geometry.transform_get_world_matrix(&child.transform)
   expected := matrix[4,4]f32 {
     0.0,
     0.0,
@@ -93,7 +93,7 @@ test_node_scale :: proc(t: ^testing.T) {
   geometry.translate(&child.transform, 1, 1, 1)
   geometry.scale_xyz(&child.transform, 2, 3, 4)
   scene_traverse(&scene)
-  actual := child.transform.world_matrix
+  actual := geometry.transform_get_world_matrix(&child.transform)
   expected := matrix[4,4]f32 {
     2.0,
     0.0,
@@ -127,7 +127,7 @@ test_node_combined_transform :: proc(t: ^testing.T) {
   geometry.rotate(&node.transform, math.PI / 2, linalg.VECTOR3F32_Y_AXIS)
   geometry.translate(&node.transform, 3, 4, 5)
   scene_traverse(&scene)
-  actual := node.transform.world_matrix
+  actual := geometry.transform_get_world_matrix(&node.transform)
   // Expected matrix after applying scale, rotation, and translation
   // Scale by 2, then rotate 90 degree around Y, then translate by (3,4,5)
   expected := matrix[4,4]f32 {
@@ -174,7 +174,7 @@ test_node_chain_transform :: proc(t: ^testing.T) {
   // node1: translate(1,0,0)
   // node2: translate(1,0,0) * rotate_y(90°)
   // node3: translate(1,0,0) * rotate_y(90°) * scale(2)
-  actual := node3.transform.world_matrix
+  actual := geometry.transform_get_world_matrix(&node3.transform)
   // Note: The node chain transforms in this order:
   // 1. Start at origin
   // 2. Translate by (1,0,0)
