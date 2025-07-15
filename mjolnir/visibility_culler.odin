@@ -324,7 +324,7 @@ visibility_culler_update :: proc(
     if !node.culling_enabled do continue
     aabb := calculate_node_aabb(node, warehouse)
     if aabb == geometry.AABB_UNDEFINED do continue
-    world_aabb := geometry.aabb_transform(aabb, node.transform.world_matrix)
+    world_aabb := geometry.aabb_transform(aabb, geometry.transform_get_world_matrix(&node.transform))
     node_data_slice[entry_index] = {
       aabb_min        = world_aabb.min,
       aabb_max        = world_aabb.max,

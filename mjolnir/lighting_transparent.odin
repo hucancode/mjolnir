@@ -551,7 +551,7 @@ transparent_render :: proc(
           ) or_continue
 
           push_constants := PushConstant {
-            world                    = node.transform.world_matrix,
+            world                    = geometry.transform_get_world_matrix_for_render(&node.transform),
             bone_matrix_offset       = 0,
             camera_index             = render_target.camera.index,
             albedo_index             = min(
@@ -633,7 +633,7 @@ transparent_render :: proc(
             self.wireframe_pipelines[pipeline_idx],
           )
           push_constant := PushConstant {
-            world        = node.transform.world_matrix,
+            world        = geometry.transform_get_world_matrix_for_render(&node.transform),
             camera_index = render_target.camera.index,
           }
           // Set bone matrix offset if skinning is available

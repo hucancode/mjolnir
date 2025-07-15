@@ -488,9 +488,8 @@ gbuffer_render :: proc(
           warehouse.meshes,
           mesh_attachment.handle,
         ) or_continue
-        // DEBUG: Use a constant color for albedo to test G-buffer -> lighting pass
         push_constants := PushConstant {
-          world                    = node.transform.world_matrix,
+          world                    = geometry.transform_get_world_matrix_for_render(&node.transform),
           camera_index             = render_target.camera.index,
           albedo_index             = min(
             MAX_TEXTURES - 1,

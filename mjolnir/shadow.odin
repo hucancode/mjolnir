@@ -329,7 +329,7 @@ render_single_shadow_node :: proc(
   mesh_skinning, mesh_has_skin := &mesh.skinning.?
   node_skinning, node_has_skin := mesh_attachment.skinning.?
   push_constant := PushConstant {
-    world        = node.transform.world_matrix,
+    world        = geometry.transform_get_world_matrix_for_render(&node.transform),
     camera_index = camera_index,
   }
   if is_skinned && node_has_skin {

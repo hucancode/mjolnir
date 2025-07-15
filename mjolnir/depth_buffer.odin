@@ -166,7 +166,7 @@ depth_prepass_render :: proc(
             current_pipeline = pipeline
           }
           push_constant := PushConstant {
-            world        = node.transform.world_matrix,
+            world        = geometry.transform_get_world_matrix_for_render(&node.transform),
             camera_index = camera_index,
           }
           if node_has_skin {

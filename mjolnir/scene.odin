@@ -84,6 +84,7 @@ Node :: struct {
   name:            string,
   attachment:      NodeAttachment,
   culling_enabled: bool,
+  pending_deletion: bool, // Atomic flag for safe deletion
 }
 
 SceneTraversalCallback :: #type proc(node: ^Node, ctx: rawptr) -> bool
@@ -292,17 +293,22 @@ scene_traverse :: proc(
       )
       continue
     }
+    // Skip nodes that are pending deletion
+    if current_node.pending_deletion do continue
     is_dirty := transform_update_local(&current_node.transform)
     if entry.parent_is_dirty || is_dirty {
       transform_update_world(&current_node.transform, entry.parent_transform)
     }
     if callback != nil && !callback(current_node, cb_context) do continue
-    for child_handle in current_node.children {
+    // Copy children array to avoid race conditions during iteration
+    children_copy := make([]Handle, len(current_node.children), context.temp_allocator)
+    copy(children_copy, current_node.children[:])
+    for child_handle in children_copy {
       append(
         &self.traversal_stack,
         SceneTraverseEntry {
           child_handle,
-          current_node.transform.world_matrix,
+          geometry.transform_get_world_matrix(&current_node.transform),
           is_dirty || entry.parent_is_dirty,
         },
       )
@@ -320,4 +326,49 @@ scene_traverse_linear :: proc(
     callback(&entry.item, cb_context)
   }
   return true
+}
+
+// Safe despawn function that uses deferred cleanup
+despawn :: proc(engine: ^Engine, handle: Handle) {
+  // Mark node as pending deletion to prevent processing
+  if node := resource.get(engine.scene.nodes, handle); node != nil {
+    node.pending_deletion = true
+    // Detach from parent first to prevent traversal issues
+    detach(engine.scene.nodes, handle)
+  }
+  // Queue for deletion at end of frame
+  queue_node_deletion(engine, handle)
+}
+
+// Safe spawn functions that ensure frame-boundary safety
+safe_spawn :: proc(
+  engine: ^Engine,
+  attachment: NodeAttachment = nil,
+) -> (
+  handle: Handle,
+  node: ^Node,
+) {
+  return spawn(&engine.scene, attachment)
+}
+
+safe_spawn_at :: proc(
+  engine: ^Engine,
+  position: [3]f32,
+  attachment: NodeAttachment = nil,
+) -> (
+  handle: Handle,
+  node: ^Node,
+) {
+  return spawn_at(&engine.scene, position, attachment)
+}
+
+safe_spawn_child :: proc(
+  engine: ^Engine,
+  parent: Handle,
+  attachment: NodeAttachment = nil,
+) -> (
+  handle: Handle,
+  node: ^Node,
+) {
+  return spawn_child(&engine.scene, parent, attachment)
 }

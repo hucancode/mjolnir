@@ -7,8 +7,10 @@ import "core:fmt"
 import "core:log"
 import "core:math"
 import "core:math/linalg"
+import "core:os"
 import "core:slice"
 import "core:strings"
+import "core:thread"
 import "core:time"
 import "core:unicode/utf8"
 import "geometry"
@@ -34,6 +36,7 @@ MAX_SHADOW_MAPS :: 10
 MAX_TEXTURES :: 90
 MAX_CUBE_TEXTURES :: 20
 USE_GPU_CULLING :: true // Set to false to use CPU culling instead
+USE_PARALLEL_UPDATE :: true // Set to false to disable threading for debugging
 
 Handle :: resource.Handle
 
@@ -51,6 +54,10 @@ CustomRenderProc :: #type proc(
   engine: ^Engine,
   command_buffer: vk.CommandBuffer,
 )
+
+UpdateThreadData :: struct {
+  engine: ^Engine,
+}
 
 PointLightData :: struct {
   views:          [6]matrix[4, 4]f32,
@@ -209,7 +216,7 @@ Engine :: struct {
   postprocess:                 RendererPostProcess,
   ui:                          RendererUI,
   command_buffers:             [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
-  // Parallel shadow command buffers  
+  // Parallel shadow command buffers
   shadow_command_buffers:      [MAX_FRAMES_IN_FLIGHT][MAX_SHADOW_MAPS]vk.CommandBuffer,
   cursor_pos:                  [2]i32,
   // Main render target for primary rendering
@@ -225,6 +232,14 @@ Engine :: struct {
   active_light_count:          u32, // Number of currently active lights
   // Current frame's active render targets (for custom render procs to use correct visibility data)
   frame_active_render_targets: [dynamic]Handle,
+  // Deferred cleanup for thread safety
+  pending_node_deletions:      [dynamic]Handle,
+  // Frame synchronization for parallel update/render
+  frame_fence:                 vk.Fence,
+  update_thread:               Maybe(^thread.Thread),
+  render_active:               bool,
+  update_active:               bool,
+  transforms_updated:          bool,
 }
 
 get_window_dpi :: proc(window: glfw.WindowHandle) -> f32 {
@@ -345,6 +360,17 @@ init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
   // Initialize frame active render targets
   self.frame_active_render_targets = make([dynamic]Handle, 0)
 
+  // Initialize deferred cleanup
+  self.pending_node_deletions = make([dynamic]Handle, 0)
+
+  // Create fence for frame synchronization
+  vk.CreateFence(
+    self.gpu_context.device,
+    &vk.FenceCreateInfo{sType = .FENCE_CREATE_INFO},
+    nil,
+    &self.frame_fence,
+  ) or_return
+
   // Initialize engine shadow map pools
   engine_init_shadow_maps(self) or_return
 
@@ -383,7 +409,7 @@ init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
     },
     raw_data(self.command_buffers[:]),
   ) or_return
-  
+
   // Allocate shadow command buffers for parallel recording
   for frame_idx in 0 ..< MAX_FRAMES_IN_FLIGHT {
     vk.AllocateCommandBuffers(
@@ -638,7 +664,7 @@ update_emitters :: proc(self: ^Engine, delta_time: f32) {
         visible = is_node_visible(&self.visibility_culler, 0, u32(entry_index), self.frame_index)
       }
     }
-    emitters[emitter_idx].transform = entry.item.transform.world_matrix
+    emitters[emitter_idx].transform = geometry.transform_get_world_matrix(&entry.item.transform)
     emitters[emitter_idx].initial_velocity = e.initial_velocity
     emitters[emitter_idx].color_start = e.color_start
     emitters[emitter_idx].color_end = e.color_end
@@ -683,7 +709,7 @@ update_force_fields :: proc(self: ^Engine) {
   for &entry in self.scene.nodes.entries do if entry.active {
     ff, is_ff := &entry.item.attachment.(ForceFieldAttachment)
     if !is_ff do continue
-    forcefields[params.forcefield_count].position = entry.item.transform.world_matrix * [4]f32{0, 0, 0, 1}
+    forcefields[params.forcefield_count].position = geometry.transform_get_world_matrix(&entry.item.transform) * [4]f32{0, 0, 0, 1}
     forcefields[params.forcefield_count].tangent_strength = ff.tangent_strength
     forcefields[params.forcefield_count].strength = ff.strength
     forcefields[params.forcefield_count].area_of_effect = ff.area_of_effect
@@ -692,8 +718,32 @@ update_force_fields :: proc(self: ^Engine) {
   }
 }
 
-update :: proc(self: ^Engine) -> bool {
+// Main thread input handling - only GLFW and input operations
+update_input :: proc(self: ^Engine) -> bool {
   glfw.PollEvents()
+  last_mouse_pos := self.input.mouse_pos
+  self.input.mouse_pos.x, self.input.mouse_pos.y = glfw.GetCursorPos(
+    self.window,
+  )
+  delta := self.input.mouse_pos - last_mouse_pos
+  for i in 0 ..< len(self.input.mouse_buttons) {
+    is_pressed := glfw.GetMouseButton(self.window, c.int(i)) == glfw.PRESS
+    self.input.mouse_holding[i] = is_pressed && self.input.mouse_buttons[i]
+    self.input.mouse_buttons[i] = is_pressed
+  }
+  for k in 0 ..< len(self.input.keys) {
+    is_pressed := glfw.GetKey(self.window, c.int(k)) == glfw.PRESS
+    self.input.key_holding[k] = is_pressed && self.input.keys[k]
+    self.input.keys[k] = is_pressed
+  }
+  if self.mouse_move_proc != nil {
+    self.mouse_move_proc(self, self.input.mouse_pos, delta)
+  }
+  return true
+}
+
+// Update thread - no GLFW operations
+update :: proc(self: ^Engine) -> bool {
   delta_time := get_delta_time(self)
   if delta_time < UPDATE_FRAME_TIME {
     return false
@@ -722,39 +772,11 @@ update :: proc(self: ^Engine) -> bool {
   }
   update_emitters(self, delta_time)
   update_force_fields(self)
-  last_mouse_pos := self.input.mouse_pos
-  self.input.mouse_pos.x, self.input.mouse_pos.y = glfw.GetCursorPos(
-    self.window,
-  )
-  delta := self.input.mouse_pos - last_mouse_pos
-  for i in 0 ..< len(self.input.mouse_buttons) {
-    is_pressed := glfw.GetMouseButton(self.window, c.int(i)) == glfw.PRESS
-    self.input.mouse_holding[i] = is_pressed && self.input.mouse_buttons[i]
-    self.input.mouse_buttons[i] = is_pressed
-  }
-  for k in 0 ..< len(self.input.keys) {
-    is_pressed := glfw.GetKey(self.window, c.int(k)) == glfw.PRESS
-    self.input.key_holding[k] = is_pressed && self.input.keys[k]
-    self.input.keys[k] = is_pressed
-  }
-  // Camera control moved to camera controllers
-  // if self.input.mouse_holding[glfw.MOUSE_BUTTON_1] {
-  //   if main_camera := resource.get(g_cameras, self.scene.main_camera);
-  //      main_camera != nil {
-  //     geometry.camera_orbit_rotate(
-  //       main_camera,
-  //       f32(delta.x * MOUSE_SENSITIVITY_X),
-  //       f32(delta.y * MOUSE_SENSITIVITY_Y),
-  //     )
-  //   }
-  // }
-  if self.mouse_move_proc != nil {
-    self.mouse_move_proc(self, self.input.mouse_pos, delta)
-  }
   if self.update_proc != nil {
     self.update_proc(self, delta_time)
   }
   self.last_update_timestamp = time.now()
+  self.transforms_updated = true
   return true
 }
 
@@ -766,7 +788,7 @@ deinit :: proc(self: ^Engine) {
     len(self.command_buffers),
     raw_data(self.command_buffers[:]),
   )
-  
+
   // Free shadow command buffers
   for frame_idx in 0 ..< MAX_FRAMES_IN_FLIGHT {
     vk.FreeCommandBuffers(
@@ -805,6 +827,12 @@ deinit :: proc(self: ^Engine) {
 
   // Clean up frame active render targets
   delete(self.frame_active_render_targets)
+
+  // Clean up deferred cleanup
+  delete(self.pending_node_deletions)
+
+  // Clean up synchronization
+  vk.DestroyFence(self.gpu_context.device, self.frame_fence, nil)
 
   ui_deinit(&self.ui, &self.gpu_context)
   scene_deinit(&self.scene, &self.warehouse)
@@ -961,11 +989,11 @@ generate_render_input :: proc(
           visible = is_node_visible(&self.visibility_culler, camera_slot, u32(i), self.frame_index)
         } else {
           // Fall back to CPU culling if camera slot not found
-          world_aabb := geometry.aabb_transform(mesh.aabb, node.transform.world_matrix)
+          world_aabb := geometry.aabb_transform(mesh.aabb, geometry.transform_get_world_matrix_for_render(&node.transform))
           visible = geometry.frustum_test_aabb(frustum, world_aabb)
         }
       } else {
-        world_aabb := geometry.aabb_transform(mesh.aabb, node.transform.world_matrix)
+        world_aabb := geometry.aabb_transform(mesh.aabb, geometry.transform_get_world_matrix_for_render(&node.transform))
         visible = geometry.frustum_test_aabb(frustum, world_aabb)
       }
       if !visible do continue
@@ -1077,7 +1105,7 @@ render :: proc(self: ^Engine) -> vk.Result {
     case PointLightAttachment:
       light_info := &self.lights[self.active_light_count]
       // Fill GPU data directly via embedded struct
-      position := node.transform.world_matrix * [4]f32{0, 0, 0, 1}
+      position := geometry.transform_get_world_matrix_for_render(&node.transform) * [4]f32{0, 0, 0, 1}
       light_info.light_kind = .POINT
       light_info.light_color = attachment.color.xyz
       light_info.light_position = position.xyz
@@ -1140,7 +1168,7 @@ render :: proc(self: ^Engine) -> vk.Result {
       light_info := &self.lights[self.active_light_count]
 
       // Fill GPU data directly
-      direction := node.transform.world_matrix * [4]f32{0, 0, -1, 0}
+      direction := geometry.transform_get_world_matrix_for_render(&node.transform) * [4]f32{0, 0, -1, 0}
       light_info.light_kind = .DIRECTIONAL
       light_info.light_color = attachment.color.xyz
       light_info.light_direction = direction.xyz
@@ -1153,8 +1181,8 @@ render :: proc(self: ^Engine) -> vk.Result {
       light_info := &self.lights[self.active_light_count]
 
       // Fill GPU data directly
-      position := node.transform.world_matrix * [4]f32{0, 0, 0, 1}
-      direction := node.transform.world_matrix * [4]f32{0, -1, 0, 0}
+      position := geometry.transform_get_world_matrix_for_render(&node.transform) * [4]f32{0, 0, 0, 1}
+      direction := geometry.transform_get_world_matrix_for_render(&node.transform) * [4]f32{0, -1, 0, 0}
       light_info.light_kind = .SPOT
       light_info.light_color = attachment.color.xyz
       light_info.light_position = position.xyz
@@ -1411,7 +1439,7 @@ render :: proc(self: ^Engine) -> vk.Result {
   for light_info, i in self.lights[:self.active_light_count] {
     if !light_info.light_cast_shadow do continue
     if shadow_cmd_count >= MAX_SHADOW_MAPS do break
-    
+
     // Use separate command buffer for this shadow map
     shadow_cmd := self.shadow_command_buffers[self.frame_index][shadow_cmd_count]
     vk.ResetCommandBuffer(shadow_cmd, {}) or_continue
@@ -1419,7 +1447,7 @@ render :: proc(self: ^Engine) -> vk.Result {
       shadow_cmd,
       &{sType = .COMMAND_BUFFER_BEGIN_INFO, flags = {.ONE_TIME_SUBMIT}},
     ) or_continue
-    
+
     switch light_info.light_kind {
     case .POINT:
       if light_info.shadow_map.generation == 0 {
@@ -1503,12 +1531,12 @@ render :: proc(self: ^Engine) -> vk.Result {
       )
       shadow_end(shadow_cmd)
     }
-    
+
     // End this shadow command buffer
     vk.EndCommandBuffer(shadow_cmd) or_continue
     shadow_cmd_count += 1
   }
-  
+
   // Submit all shadow command buffers for parallel execution
   if shadow_cmd_count > 0 {
     shadow_submit_info := vk.SubmitInfo {
@@ -1523,7 +1551,7 @@ render :: proc(self: ^Engine) -> vk.Result {
       0,
     ) or_return
   }
-  
+
   // Batched shadow map transitions to shader read optimal
   // Combine 2D and cube shadow maps in a single barrier for better performance
   if shadow_map_count > 0 || cube_shadow_map_count > 0 {
@@ -1838,6 +1866,10 @@ render :: proc(self: ^Engine) -> vk.Result {
     self.frame_index,
   ) or_return
   self.frame_index = (self.frame_index + 1) % MAX_FRAMES_IN_FLIGHT
+
+  // Process pending deletions at end of frame
+  process_pending_deletions(self)
+
   return .SUCCESS
 }
 
@@ -1846,15 +1878,46 @@ run :: proc(self: ^Engine, width, height: u32, title: string) {
     return
   }
   defer deinit(self)
+
+  when USE_PARALLEL_UPDATE {
+    // Start update thread
+    self.update_active = true
+    update_data := UpdateThreadData{engine = self}
+    update_thread := thread.create(update_thread_proc)
+    update_thread.data = &update_data
+    update_thread.init_context = context
+    thread.start(update_thread)
+    self.update_thread = update_thread
+    defer {
+      // Stop update thread
+      self.update_active = false
+      thread.join(update_thread)
+      thread.destroy(update_thread)
+    }
+  }
+
   frame := 0
   for !glfw.WindowShouldClose(self.window) {
-    // DEBUG: engine is not stable, only render 1 or some few frames first
-    // if frame > 0 do break
-    update(self)
+    // Handle input and GLFW events on main thread
+    update_input(self)
+
+    when USE_PARALLEL_UPDATE {
+      // Always flush any staged transforms from logic to render buffers
+      flush_transforms_to_render(self)
+      if self.transforms_updated {
+        self.transforms_updated = false
+      }
+    } else {
+      // Single threaded mode - run update directly
+      update(self)
+    }
+
+    // Check update timing
     if time.duration_milliseconds(time.since(self.last_frame_timestamp)) <
        FRAME_TIME_MILIS {
       continue
     }
+
     res := render(self)
     if res == .ERROR_OUT_OF_DATE_KHR || res == .SUBOPTIMAL_KHR {
       recreate_swapchain(self) or_continue
@@ -1872,5 +1935,51 @@ run :: proc(self: ^Engine, width, height: u32, title: string) {
     }
     self.last_frame_timestamp = time.now()
     frame += 1
+  }
+}
+
+// Update thread procedure that runs continuously
+update_thread_proc :: proc(thread: ^thread.Thread) {
+  data := cast(^UpdateThreadData)thread.data
+  engine := data.engine
+
+  for engine.update_active {
+    // Run update at consistent rate
+    should_update := update(engine)
+    if !should_update {
+      // Sleep briefly to avoid busy waiting
+      // MAXIMUM 200 FPS
+      time.sleep(time.Millisecond * 5)
+    }
+  }
+  log.info("Update thread terminating")
+}
+
+// Deferred cleanup functions for thread safety
+queue_node_deletion :: proc(engine: ^Engine, handle: Handle) {
+  append(&engine.pending_node_deletions, handle)
+}
+
+process_pending_deletions :: proc(engine: ^Engine) {
+  for handle in engine.pending_node_deletions {
+    if node, freed := resource.free(&engine.scene.nodes, handle); freed {
+      deinit_node(node, &engine.warehouse)
+    }
+  }
+  clear(&engine.pending_node_deletions)
+}
+
+// Safe scene functions that copy dynamic arrays
+safe_get_node_children :: proc(engine: ^Engine, handle: Handle) -> []Handle {
+  node := resource.get(engine.scene.nodes, handle)
+  children_copy := make([]Handle, len(node.children), context.temp_allocator)
+  copy(children_copy, node.children[:])
+  return children_copy
+}
+
+// Swap transform buffers for all nodes (call at end of update)
+flush_transforms_to_render :: proc(engine: ^Engine) {
+  for &entry in engine.scene.nodes.entries do if entry.active {
+    geometry.transform_flush_to_render(&entry.item.transform)
   }
 }

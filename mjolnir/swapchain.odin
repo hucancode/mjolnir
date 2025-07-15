@@ -270,3 +270,39 @@ submit_queue_and_present :: proc(
   }
   return vk.QueuePresentKHR(gpu_context.present_queue, &present_info)
 }
+
+submit_queue_and_present_with_fence :: proc(
+  gpu_context: ^gpu.GPUContext,
+  self: ^Swapchain,
+  command_buffer: ^vk.CommandBuffer,
+  frame_index: u32,
+  custom_fence: vk.Fence,
+) -> vk.Result {
+  wait_stage_mask: vk.PipelineStageFlags = {.COLOR_ATTACHMENT_OUTPUT}
+  submit_info := vk.SubmitInfo {
+    sType                = .SUBMIT_INFO,
+    waitSemaphoreCount   = 1,
+    pWaitSemaphores      = &self.image_available_semaphores[frame_index],
+    pWaitDstStageMask    = &wait_stage_mask,
+    commandBufferCount   = 1,
+    pCommandBuffers      = command_buffer,
+    signalSemaphoreCount = 1,
+    pSignalSemaphores    = &self.render_finished_semaphores[frame_index],
+  }
+  vk.QueueSubmit(
+    gpu_context.graphics_queue,
+    1,
+    &submit_info,
+    custom_fence,
+  ) or_return
+  image_indices := [?]u32{self.image_index}
+  present_info := vk.PresentInfoKHR {
+    sType              = .PRESENT_INFO_KHR,
+    waitSemaphoreCount = 1,
+    pWaitSemaphores    = &self.render_finished_semaphores[frame_index],
+    swapchainCount     = 1,
+    pSwapchains        = &self.handle,
+    pImageIndices      = raw_data(image_indices[:]),
+  }
+  return vk.QueuePresentKHR(gpu_context.present_queue, &present_info)
+}
