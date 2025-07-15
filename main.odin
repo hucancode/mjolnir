@@ -12,7 +12,7 @@ import "vendor:glfw"
 import mu "vendor:microui"
 import vk "vendor:vulkan"
 
-LIGHT_COUNT :: 5
+LIGHT_COUNT :: 50
 ALL_SPOT_LIGHT :: false
 ALL_POINT_LIGHT :: false
 light_handles: [LIGHT_COUNT]mjolnir.Handle
@@ -95,7 +95,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     log.info("spawning cubes in a grid")
     space: f32 = 2.1
     size: f32 = 0.3
-    nx, ny, nz := 20, 2, 20
+    nx, ny, nz := 30, 2, 30
 
     for x in 1 ..< nx {
       for y in 1 ..< ny {
@@ -512,7 +512,7 @@ render_2d :: proc(engine: ^mjolnir.Engine, ctx: ^mu.Context) {
     mu.label(ctx, fmt.tprintf("Efficiency %.1f%%", efficiency))
   }
 
-  if mu.window(ctx, "Shadow Debug", {350, 360, 300, 150}, {.NO_CLOSE}) {
+  if mu.window(ctx, "Shadow Debug", {990, 40, 280, 150}, {.NO_CLOSE}) {
     mu.label(ctx, "Shadow Map Information:")
     mu.label(
       ctx,
@@ -521,6 +521,25 @@ render_2d :: proc(engine: ^mjolnir.Engine, ctx: ^mu.Context) {
     mu.label(ctx, fmt.tprintf("Max Shadow Maps: %d", MAX_SHADOW_MAPS))
     mu.text(ctx, "Check console for detailed")
     mu.text(ctx, "shadow rendering debug info")
+  }
+
+  when mjolnir.USE_GPU_CULLING {
+    if mu.window(ctx, "GPU Culling", {990, 200, 280, 240}, {.NO_CLOSE}) {
+      mu.label(ctx, fmt.tprintf("Max Nodes: %d", mjolnir.MAX_NODES_IN_SCENE))
+      mu.label(ctx, fmt.tprintf("Max Cameras: %d", mjolnir.MAX_ACTIVE_CAMERAS))
+
+      total_nodes := len(engine.scene.nodes.entries) - len(engine.scene.nodes.free_indices)
+      mu.label(ctx, fmt.tprintf("Active Nodes: %d", total_nodes))
+
+      // Memory usage calculation
+      visibility_buffer_mb := f32(mjolnir.MAX_ACTIVE_CAMERAS * mjolnir.MAX_NODES_IN_SCENE * size_of(b32) * mjolnir.VISIBILITY_BUFFER_COUNT) / (1024 * 1024)
+      node_data_mb := f32(mjolnir.MAX_NODES_IN_SCENE * size_of(mjolnir.NodeCullingData) * mjolnir.MAX_FRAMES_IN_FLIGHT) / (1024 * 1024)
+      total_mb := visibility_buffer_mb + node_data_mb
+
+      mu.label(ctx, fmt.tprintf("Memory: %.1f MB", total_mb))
+      mu.label(ctx, fmt.tprintf("Visibility: %.1f MB", visibility_buffer_mb))
+      mu.label(ctx, fmt.tprintf("Node Data: %.1f MB", node_data_mb))
+    }
   }
 }
 

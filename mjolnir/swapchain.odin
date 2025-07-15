@@ -27,9 +27,13 @@ swapchain_init :: proc(
   pick_swap_present_mode :: proc(
     present_modes: []vk.PresentModeKHR,
   ) -> vk.PresentModeKHR {
-    return(
-      .MAILBOX if slice.contains(present_modes, vk.PresentModeKHR.MAILBOX) else .FIFO \
-    )
+    if slice.contains(present_modes, vk.PresentModeKHR.MAILBOX) {
+      return .MAILBOX
+    }
+    if slice.contains(present_modes, vk.PresentModeKHR.IMMEDIATE) {
+      return .IMMEDIATE
+    }
+    return .FIFO
   }
   pick_swapchain_format :: proc(
     formats: []vk.SurfaceFormatKHR,

@@ -7,7 +7,17 @@ import "gpu"
 import "resource"
 import vk "vendor:vulkan"
 
-MAX_ACTIVE_CAMERAS :: 128 // Increased to handle more shadow cameras + user cameras
+// Maximum number of cameras that can be culled simultaneously.
+// Includes main camera + shadow cameras (point lights need 6 cameras each).
+// Example: 1 main + 20 point lights = 1 + (20 * 6) = 121 cameras
+// Keep some headroom for spot lights and user-defined cameras.
+MAX_ACTIVE_CAMERAS :: 128
+
+// Maximum number of scene nodes that can be processed for culling.
+// Each node (mesh, light, particle system, etc.) gets tested against all active cameras.
+// Memory usage: 128 cameras * 65536 nodes * 1 byte * 3 buffers = ~25MB for visibility results
+// Additional: 65536 nodes * 32 bytes * 2 frames = ~4MB for node data
+// Total GPU memory for culling: ~29MB
 MAX_NODES_IN_SCENE :: 65536
 
 // Structure passed to GPU for culling
@@ -59,6 +69,7 @@ VisibilityCuller :: struct {
   visibility_write_idx:  u32, // Ring buffer write index
   visibility_read_idx:   u32, // Ring buffer read index
   frames_processed:      u32, // Total frames processed
+  last_descriptor_write_idx: [MAX_FRAMES_IN_FLIGHT]u32, // Track last write idx per frame
 }
 
 visibility_culler_init :: proc(
@@ -264,6 +275,9 @@ visibility_culler_init :: proc(
   self.visibility_write_idx = 0
   self.visibility_read_idx = 0
   self.frames_processed = 0
+  for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
+    self.last_descriptor_write_idx[i] = ~u32(0) // Force initial update
+  }
   return .SUCCESS
 }
 
@@ -369,31 +383,60 @@ visibility_culler_execute :: proc(
     return
   }
 
-  // TODO: Update descriptor set only when write buffer changes
-  // TODO: Most frames reuse the same buffer, reducing per-frame overhead
-  visibility_buffer_info := vk.DescriptorBufferInfo {
-    buffer = self.visibility_buffer[self.visibility_write_idx].buffer,
-    range  = vk.DeviceSize(
-      self.visibility_buffer[self.visibility_write_idx].bytes_count,
-    ),
+  // Update descriptor set only when write buffer changes
+  if self.last_descriptor_write_idx[frame_index] != self.visibility_write_idx {
+    visibility_buffer_info := vk.DescriptorBufferInfo {
+      buffer = self.visibility_buffer[self.visibility_write_idx].buffer,
+      range  = vk.DeviceSize(
+        self.visibility_buffer[self.visibility_write_idx].bytes_count,
+      ),
+    }
+
+    write_descriptor := vk.WriteDescriptorSet {
+      sType           = .WRITE_DESCRIPTOR_SET,
+      dstSet          = self.descriptor_sets[frame_index],
+      dstBinding      = 3,
+      descriptorType  = .STORAGE_BUFFER,
+      descriptorCount = 1,
+      pBufferInfo     = &visibility_buffer_info,
+    }
+
+    vk.UpdateDescriptorSets(gpu_context.device, 1, &write_descriptor, 0, nil)
+    self.last_descriptor_write_idx[frame_index] = self.visibility_write_idx
   }
 
-  write_descriptor := vk.WriteDescriptorSet {
-    sType           = .WRITE_DESCRIPTOR_SET,
-    dstSet          = self.descriptor_sets[frame_index],
-    dstBinding      = 3,
-    descriptorType  = .STORAGE_BUFFER,
-    descriptorCount = 1,
-    pBufferInfo     = &visibility_buffer_info,
-  }
-
-  vk.UpdateDescriptorSets(gpu_context.device, 1, &write_descriptor, 0, nil)
-
-  // Clear visibility buffer
-  visibility_slice := gpu.data_buffer_get_all(
-    &self.visibility_buffer[self.visibility_write_idx],
+  // Clear visibility buffer on GPU instead of CPU to avoid stalls
+  vk.CmdFillBuffer(
+    command_buffer,
+    self.visibility_buffer[self.visibility_write_idx].buffer,
+    0,
+    vk.DeviceSize(self.visibility_buffer[self.visibility_write_idx].bytes_count),
+    0,
   )
-  slice.fill(visibility_slice, false)
+
+  // Barrier to ensure clear completes before compute shader
+  buffer_barrier := vk.BufferMemoryBarrier {
+    sType               = .BUFFER_MEMORY_BARRIER,
+    srcAccessMask       = {.TRANSFER_WRITE},
+    dstAccessMask       = {.SHADER_WRITE},
+    srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    buffer              = self.visibility_buffer[self.visibility_write_idx].buffer,
+    offset              = 0,
+    size                = vk.DeviceSize(self.visibility_buffer[self.visibility_write_idx].bytes_count),
+  }
+  vk.CmdPipelineBarrier(
+    command_buffer,
+    {.TRANSFER},
+    {.COMPUTE_SHADER},
+    {},
+    0,
+    nil,
+    1,
+    &buffer_barrier,
+    0,
+    nil,
+  )
 
   // Dispatch culling compute shader
   vk.CmdBindPipeline(command_buffer, .COMPUTE, self.pipeline)

@@ -1244,35 +1244,36 @@ render :: proc(self: ^Engine) -> vk.Result {
       self.frame_index,
     )
 
-    // Since we use 1-2 frame latency, this barrier is mainly for GPU-GPU synchronization
-    write_idx := self.visibility_culler.visibility_write_idx
-    prev_write_idx :=
-      (write_idx + VISIBILITY_BUFFER_COUNT - 1) % VISIBILITY_BUFFER_COUNT
-    visibility_buffer_barrier := vk.BufferMemoryBarrier {
-      sType               = .BUFFER_MEMORY_BARRIER,
-      srcAccessMask       = {.SHADER_WRITE},
-      dstAccessMask       = {.SHADER_READ},
-      srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-      dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-      buffer              = self.visibility_culler.visibility_buffer[prev_write_idx].buffer,
-      offset              = 0,
-      size                = vk.DeviceSize(
-        self.visibility_culler.visibility_buffer[prev_write_idx].bytes_count,
-      ),
-    }
-    // More specific pipeline stage synchronization
-    vk.CmdPipelineBarrier(
-      command_buffer,
-      {.COMPUTE_SHADER},
-      {.VERTEX_SHADER, .VERTEX_INPUT}, // Only wait for vertex stage, not fragment
-      {},
-      0,
-      nil,
-      1,
-      &visibility_buffer_barrier,
-      0,
-      nil,
-    )
+    // write_idx := self.visibility_culler.visibility_write_idx
+    // prev_write_idx :=
+    //   (write_idx + VISIBILITY_BUFFER_COUNT - 1) % VISIBILITY_BUFFER_COUNT
+    // visibility_buffer_barrier := vk.BufferMemoryBarrier {
+    //   sType               = .BUFFER_MEMORY_BARRIER,
+    //   srcAccessMask       = {.SHADER_WRITE},
+    //   dstAccessMask       = {.SHADER_READ},
+    //   srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    //   dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    //   buffer              = self.visibility_culler.visibility_buffer[prev_write_idx].buffer,
+    //   offset              = 0,
+    //   size                = vk.DeviceSize(
+    //     self.visibility_culler.visibility_buffer[prev_write_idx].bytes_count,
+    //   ),
+    // }
+    // vk.CmdPipelineBarrier(
+    //   command_buffer,
+    //   {.COMPUTE_SHADER},
+    //   {.VERTEX_SHADER, .VERTEX_INPUT}, // Only wait for vertex stage, not fragment
+    //   {},
+    //   0,
+    //   nil,
+    //   1,
+    //   &visibility_buffer_barrier,
+    //   0,
+    //   nil,
+    // )
+    // We rely on natural frame latency for synchronization
+    // The compute shader writes to the current frame's buffer while graphics reads from previous frames
+    // The code above ensures synchronization at the cost of performance
   } else {
     // CPU culling mode - no visibility culler operations needed
     // Culling will be done per-object in generate_render_input using CPU frustum tests
