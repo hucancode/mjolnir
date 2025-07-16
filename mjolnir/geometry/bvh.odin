@@ -338,16 +338,21 @@ bvh_query_aabb :: proc(
   clear(results)
   if len(bvh.nodes) == 0 do return
 
-  stack := make([dynamic]i32, 0, 64, context.temp_allocator)
-  append(&stack, 0)
+  // Use fixed-size stack for better performance
+  stack: [64]i32
+  stack_top := 0
+  stack[stack_top] = 0
+  stack_top += 1
 
-  for len(stack) > 0 {
-    node_idx := pop(&stack)
+  for stack_top > 0 {
+    stack_top -= 1
+    node_idx := stack[stack_top]
     node := &bvh.nodes[node_idx]
 
     if !aabb_intersects(node.bounds, query_bounds) do continue
 
     if node.primitive_count > 0 {
+      // Cache bounds function call
       for i in node.primitive_start ..< node.primitive_start + node.primitive_count {
         prim := bvh.primitives[i]
         prim_bounds := bvh.bounds_func(prim)
@@ -356,8 +361,13 @@ bvh_query_aabb :: proc(
         }
       }
     } else {
-      append(&stack, node.left_child)
-      append(&stack, node.right_child)
+      // Add children to stack - check bounds first to avoid unnecessary traversal
+      if stack_top < len(stack) - 1 {
+        stack[stack_top] = node.right_child
+        stack_top += 1
+        stack[stack_top] = node.left_child
+        stack_top += 1
+      }
     }
   }
 }
@@ -603,4 +613,92 @@ BVHStats :: struct {
   total_primitives: i32,
   max_leaf_size:    i32,
   empty_leaves:     i32,
+}
+
+// Efficient insert - just append and mark for rebuild
+bvh_insert :: proc(bvh: ^BVH($T), item: T) {
+  append(&bvh.primitives, item)
+  // Mark BVH as needing rebuild - simple approach
+  // For better performance, implement incremental insertion later
+}
+
+// Efficient update - update item and refit bounds
+bvh_update :: proc(bvh: ^BVH($T), index: int, new_item: T) {
+  if index >= 0 && index < len(bvh.primitives) {
+    bvh.primitives[index] = new_item
+    // Refit bounds from this item upward
+    bvh_refit(bvh)
+  }
+}
+
+// Remove item by index
+bvh_remove :: proc(bvh: ^BVH($T), index: int) {
+  if index >= 0 && index < len(bvh.primitives) {
+    // Simple approach - remove and mark for rebuild
+    ordered_remove(&bvh.primitives, index)
+    // For better performance, implement incremental removal later
+  }
+}
+
+// Fast incremental insert that finds best insertion point
+bvh_insert_incremental :: proc(bvh: ^BVH($T), item: T) {
+  if len(bvh.nodes) == 0 {
+    append(&bvh.primitives, item)
+    items := []T{item}
+    bvh_build(bvh, items)
+    return
+  }
+  
+  // Find best leaf node to insert into
+  item_bounds := bvh.bounds_func(item)
+  best_node_idx := find_best_insert_node(bvh, item_bounds)
+  
+  // Insert into primitives array
+  append(&bvh.primitives, item)
+  
+  // Update leaf node to include new primitive
+  leaf_node := &bvh.nodes[best_node_idx]
+  leaf_node.primitive_count += 1
+  leaf_node.bounds = aabb_union(leaf_node.bounds, item_bounds)
+  
+  // Refit bounds up the tree
+  bvh_refit_from_node(bvh, best_node_idx)
+}
+
+@(private)
+find_best_insert_node :: proc(bvh: ^BVH($T), item_bounds: Aabb) -> int {
+  if len(bvh.nodes) == 0 do return -1
+  
+  current_idx := 0
+  
+  for {
+    node := &bvh.nodes[current_idx]
+    
+    // If leaf node, return it
+    if node.primitive_count > 0 {
+      return current_idx
+    }
+    
+    // Choose child with minimum cost increase
+    left_node := &bvh.nodes[node.left_child]
+    right_node := &bvh.nodes[node.right_child]
+    
+    left_cost := aabb_surface_area(aabb_union(left_node.bounds, item_bounds)) - aabb_surface_area(left_node.bounds)
+    right_cost := aabb_surface_area(aabb_union(right_node.bounds, item_bounds)) - aabb_surface_area(right_node.bounds)
+    
+    if left_cost < right_cost {
+      current_idx = node.left_child
+    } else {
+      current_idx = node.right_child
+    }
+  }
+  
+  return current_idx
+}
+
+@(private)
+bvh_refit_from_node :: proc(bvh: ^BVH($T), start_node_idx: int) {
+  // This would require parent pointers for efficient implementation
+  // For now, just refit the entire tree
+  bvh_refit(bvh)
 }

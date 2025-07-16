@@ -584,6 +584,7 @@ test_bvh_precision :: proc(t: ^testing.T) {
 
 @(test)
 bvh_build_benchmark :: proc(t: ^testing.T) {
+  testing.set_fail_timeout(t, 30 * time.Second)
   bench_proc :: proc(
     options: ^time.Benchmark_Options,
     allocator := context.allocator,
@@ -640,6 +641,7 @@ bvh_build_benchmark :: proc(t: ^testing.T) {
 
 @(test)
 bvh_query_benchmark :: proc(t: ^testing.T) {
+  testing.set_fail_timeout(t, 15 * time.Second)
   setup_proc :: proc(
     options: ^time.Benchmark_Options,
     allocator := context.allocator,
@@ -647,13 +649,13 @@ bvh_query_benchmark :: proc(t: ^testing.T) {
     bvh_ptr := new(geometry.BVH(TestItem))
     bvh_ptr.bounds_func = test_item_bounds
 
-    item_count := 15000
+    item_count := 50000
     items := make([]TestItem, item_count)
 
     for i in 0 ..< item_count {
-      x := f32(i % 80 - 40) * 1.8
-      y := f32((i / 80) % 80 - 40) * 1.8
-      z := f32((i / 6400) % 80 - 40) * 1.8
+      x := f32(i % 200 - 100) * 1.8
+      y := f32((i / 200) % 200 - 100) * 1.8
+      z := f32((i / 40000) % 200 - 100) * 1.8
 
       items[i] = TestItem {
         id   = i32(i),
@@ -700,8 +702,8 @@ bvh_query_benchmark :: proc(t: ^testing.T) {
   }
 
   options := &time.Benchmark_Options {
-    rounds = 2000,
-    bytes = size_of(TestItem) * 50 * 2000,
+    rounds = 10000,
+    bytes = size_of(TestItem) * 50 * 10000,
     setup = setup_proc,
     bench = bench_proc,
     teardown = teardown_proc,
@@ -719,6 +721,7 @@ bvh_query_benchmark :: proc(t: ^testing.T) {
 
 @(test)
 bvh_ray_benchmark :: proc(t: ^testing.T) {
+  testing.set_fail_timeout(t, 15 * time.Second)
   setup_proc :: proc(
     options: ^time.Benchmark_Options,
     allocator := context.allocator,
@@ -726,7 +729,7 @@ bvh_ray_benchmark :: proc(t: ^testing.T) {
     bvh_ptr := new(geometry.BVH(TestItem))
     bvh_ptr.bounds_func = test_item_bounds
 
-    item_count := 12000
+    item_count := 50000
     items := make([]TestItem, item_count)
 
     for i in 0 ..< item_count {
@@ -779,8 +782,8 @@ bvh_ray_benchmark :: proc(t: ^testing.T) {
   }
 
   options := &time.Benchmark_Options {
-    rounds = 15000,
-    bytes = size_of(TestItem) * 30 * 15000,
+    rounds = 10000,
+    bytes = size_of(TestItem) * 30 * 10000,
     setup = setup_proc,
     bench = bench_proc,
     teardown = teardown_proc,
