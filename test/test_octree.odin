@@ -404,223 +404,8 @@ test_octree_subdivision :: proc(t: ^testing.T) {
   geometry.octree_deinit(&octree)
 }
 
-@(test)
-octree_insert_benchmark :: proc(t: ^testing.T) {
-  item_count := 1000
-  items := make([]TestItem, item_count)
-  defer delete(items)
 
-  for i in 0 ..< item_count {
-    x := f32(i % 20 - 10) * 5
-    y := f32((i / 20) % 20 - 10) * 5
-    z := f32((i / 400) % 20 - 10) * 5
 
-    items[i] = TestItem {
-      id   = i32(i),
-      pos  = {x, y, z},
-      size = 2,
-    }
-  }
-
-  bench_proc :: proc(
-    options: ^time.Benchmark_Options,
-    allocator := context.allocator,
-  ) -> time.Benchmark_Error {
-    items_ptr := cast(^[]TestItem)raw_data(options.input)
-    items := items_ptr^
-    bounds := geometry.Aabb {
-      min = {-100, -100, -100},
-      max = {100, 100, 100},
-    }
-
-    for _ in 0 ..< options.rounds {
-      octree: geometry.Octree(TestItem)
-      geometry.octree_init(&octree, bounds, 6, 8)
-      octree.bounds_func = test_item_bounds
-      octree.point_func = test_item_point
-      defer geometry.octree_deinit(&octree)
-
-      // Insert all items
-      for item in items {
-        geometry.octree_insert(&octree, item)
-      }
-
-      options.processed += len(items) * size_of(TestItem)
-    }
-
-    return nil
-  }
-
-  options := &time.Benchmark_Options {
-    rounds = 100,
-    bytes = item_count * size_of(TestItem) * 100,
-    input = slice.bytes_from_ptr(&items, size_of([]TestItem)),
-    bench = bench_proc,
-  }
-
-  err := time.benchmark(options)
-  log.infof(
-    "Octree insert benchmark: %d items inserted %d times in %v (%.2f MB/s)",
-    item_count,
-    options.rounds,
-    options.duration,
-    options.megabytes_per_second,
-  )
-}
-
-@(test)
-octree_query_benchmark :: proc(t: ^testing.T) {
-  setup_proc :: proc(
-    options: ^time.Benchmark_Options,
-    allocator := context.allocator,
-  ) -> time.Benchmark_Error {
-    bounds := geometry.Aabb {
-      min = {-100, -100, -100},
-      max = {100, 100, 100},
-    }
-
-    octree_ptr := new(geometry.Octree(TestItem))
-    octree_ptr^ = geometry.Octree(TestItem){}
-    geometry.octree_init(octree_ptr, bounds, 6, 8)
-    octree_ptr.bounds_func = test_item_bounds
-    octree_ptr.point_func = test_item_point
-
-    // Pre-generate and insert test items
-    item_count := 1000
-    for i in 0 ..< item_count {
-      x := f32(i % 20 - 10) * 5
-      y := f32((i / 20) % 20 - 10) * 5
-      z := f32((i / 400) % 20 - 10) * 5
-
-      item := TestItem {
-        id   = i32(i),
-        pos  = {x, y, z},
-        size = 2,
-      }
-      geometry.octree_insert(octree_ptr, item)
-    }
-
-    options.input = slice.bytes_from_ptr(octree_ptr, size_of(geometry.Octree(TestItem)))
-    return nil
-  }
-
-  bench_proc :: proc(
-    options: ^time.Benchmark_Options,
-    allocator := context.allocator,
-  ) -> time.Benchmark_Error {
-    octree := cast(^geometry.Octree(TestItem))raw_data(options.input)
-    query_bounds := geometry.Aabb {
-      min = {-55, -55, -55},
-      max = {-35, -35, -35},
-    }
-
-    results := make([dynamic]TestItem, 0, 100)
-    defer delete(results)
-
-    for _ in 0 ..< options.rounds {
-      clear(&results)
-      geometry.octree_query_aabb(octree, query_bounds, &results)
-      options.processed += len(results) * size_of(TestItem)
-    }
-
-    return nil
-  }
-
-  teardown_proc :: proc(
-    options: ^time.Benchmark_Options,
-    allocator := context.allocator,
-  ) -> time.Benchmark_Error {
-    octree_ptr :^geometry.Octree(TestItem) = cast(^geometry.Octree(TestItem))raw_data(options.input)
-    geometry.octree_deinit(octree_ptr)
-    free(octree_ptr)
-    return nil
-  }
-
-  options := &time.Benchmark_Options {
-    rounds = 10000,
-    bytes = size_of(TestItem) * 100 * 10000,
-    setup = setup_proc,
-    bench = bench_proc,
-    teardown = teardown_proc,
-  }
-
-  err := time.benchmark(options)
-  log.infof(
-    "Octree query benchmark: %d queries in %v (%.2f MB/s)",
-    options.rounds,
-    options.duration,
-    options.megabytes_per_second,
-  )
-}
-
-@(test)
-octree_remove_benchmark :: proc(t: ^testing.T) {
-  item_count := 1000
-  items := make([]TestItem, item_count)
-  defer delete(items)
-
-  for i in 0 ..< item_count {
-    x := f32(i % 20 - 10) * 5
-    y := f32((i / 20) % 20 - 10) * 5
-    z := f32((i / 400) % 20 - 10) * 5
-
-    items[i] = TestItem {
-      id   = i32(i),
-      pos  = {x, y, z},
-      size = 2,
-    }
-  }
-
-  bench_proc :: proc(
-    options: ^time.Benchmark_Options,
-    allocator := context.allocator,
-  ) -> time.Benchmark_Error {
-    items_ptr := cast(^[]TestItem)raw_data(options.input)
-    items := items_ptr^
-    bounds := geometry.Aabb {
-      min = {-100, -100, -100},
-      max = {100, 100, 100},
-    }
-
-    for _ in 0 ..< options.rounds {
-      octree: geometry.Octree(TestItem)
-      geometry.octree_init(&octree, bounds, 6, 8)
-      octree.bounds_func = test_item_bounds
-      octree.point_func = test_item_point
-      defer geometry.octree_deinit(&octree)
-
-      // Insert all items
-      for item in items {
-        geometry.octree_insert(&octree, item)
-      }
-
-      // Remove all items
-      for item in items {
-        geometry.octree_remove(&octree, item)
-      }
-
-      options.processed += len(items) * size_of(TestItem) * 2  // insert + remove
-    }
-
-    return nil
-  }
-
-  options := &time.Benchmark_Options {
-    rounds = 50,
-    bytes = item_count * size_of(TestItem) * 2 * 50,  // insert + remove
-    input = slice.bytes_from_ptr(&items, size_of([]TestItem)),
-    bench = bench_proc,
-  }
-
-  err := time.benchmark(options)
-  log.infof(
-    "Octree remove benchmark: %d items insert+remove %d times in %v (%.2f MB/s)",
-    item_count,
-    options.rounds,
-    options.duration,
-    options.megabytes_per_second,
-  )
-}
 
 @(test)
 test_octree_edge_cases :: proc(t: ^testing.T) {
@@ -704,82 +489,82 @@ test_octree_stats :: proc(t: ^testing.T) {
   geometry.octree_deinit(&octree)
 }
 
-single_insert_setup :: proc(
-  options: ^time.Benchmark_Options,
-  allocator := context.allocator,
-) -> time.Benchmark_Error {
-  bounds := geometry.Aabb {
-    min = {-100, -100, -100},
-    max = {100, 100, 100},
-  }
-
-  octree_ptr := new(geometry.Octree(TestItem))
-  octree_ptr^ = geometry.Octree(TestItem){}
-  geometry.octree_init(octree_ptr, bounds, 8, 16)
-  octree_ptr.bounds_func = test_item_bounds
-  octree_ptr.point_func = test_item_point
-
-  // Pre-populate with 5000 items to simulate realistic game world
-  for i in 0 ..< 5000 {
-    x := f32(i % 50 - 25) * 3
-    y := f32((i / 50) % 50 - 25) * 3
-    z := f32((i / 2500) % 50 - 25) * 3
-
-    item := TestItem {
-      id = i32(i),
-      pos = {x, y, z},
-      size = 1,
-    }
-    geometry.octree_insert(octree_ptr, item)
-  }
-
-  options.input = slice.bytes_from_ptr(octree_ptr, size_of(^geometry.Octree(TestItem)))
-  return nil
-}
-
-single_insert_bench :: proc(
-  options: ^time.Benchmark_Options,
-  allocator := context.allocator,
-) -> time.Benchmark_Error {
-  octree_ptr := cast(^geometry.Octree(TestItem))raw_data(options.input)
-
-  for i in 0 ..< options.rounds {
-    // Vary position for each insert
-    varied_item := TestItem{
-      id = i32(i + 100000),
-      pos = {
-        f32(i % 100 - 50) * 0.1,
-        f32((i / 100) % 100 - 50) * 0.1,
-        0,
-      },
-      size = 1,
-    }
-
-    geometry.octree_insert(octree_ptr, varied_item)
-    options.processed += size_of(TestItem)
-  }
-
-  return nil
-}
-
-single_insert_teardown :: proc(
-  options: ^time.Benchmark_Options,
-  allocator := context.allocator,
-) -> time.Benchmark_Error {
-  octree_ptr := cast(^geometry.Octree(TestItem))raw_data(options.input)
-  geometry.octree_deinit(octree_ptr)
-  free(octree_ptr)
-  return nil
-}
-
 @(test)
 octree_single_insert_benchmark :: proc(t: ^testing.T) {
+  setup_proc :: proc(
+    options: ^time.Benchmark_Options,
+    allocator := context.allocator,
+  ) -> time.Benchmark_Error {
+    bounds := geometry.Aabb {
+      min = {-100, -100, -100},
+      max = {100, 100, 100},
+    }
+
+    octree_ptr := new(geometry.Octree(TestItem))
+    octree_ptr^ = geometry.Octree(TestItem){}
+    geometry.octree_init(octree_ptr, bounds, 8, 16)
+    octree_ptr.bounds_func = test_item_bounds
+    octree_ptr.point_func = test_item_point
+
+    // Pre-populate with 5000 items to simulate realistic game world
+    for i in 0 ..< 5000 {
+      x := f32(i % 50 - 25) * 3
+      y := f32((i / 50) % 50 - 25) * 3
+      z := f32((i / 2500) % 50 - 25) * 3
+
+      item := TestItem {
+        id = i32(i),
+        pos = {x, y, z},
+        size = 1,
+      }
+      geometry.octree_insert(octree_ptr, item)
+    }
+
+    options.input = slice.bytes_from_ptr(octree_ptr, size_of(^geometry.Octree(TestItem)))
+    return nil
+  }
+
+  bench_proc :: proc(
+    options: ^time.Benchmark_Options,
+    allocator := context.allocator,
+  ) -> time.Benchmark_Error {
+    octree_ptr := cast(^geometry.Octree(TestItem))raw_data(options.input)
+
+    for i in 0 ..< options.rounds {
+      // Vary position for each insert
+      varied_item := TestItem{
+        id = i32(i + 100000),
+        pos = {
+          f32(i % 100 - 50) * 0.1,
+          f32((i / 100) % 100 - 50) * 0.1,
+          0,
+        },
+        size = 1,
+      }
+
+      geometry.octree_insert(octree_ptr, varied_item)
+      options.processed += size_of(TestItem)
+    }
+
+    return nil
+  }
+
+  teardown_proc :: proc(
+    options: ^time.Benchmark_Options,
+    allocator := context.allocator,
+  ) -> time.Benchmark_Error {
+    octree_ptr := cast(^geometry.Octree(TestItem))raw_data(options.input)
+    geometry.octree_deinit(octree_ptr)
+    free(octree_ptr)
+    return nil
+  }
+
   options := &time.Benchmark_Options {
     rounds = 10000,  // 10k single inserts
     bytes = size_of(TestItem) * 10000,
-    setup = single_insert_setup,
-    bench = single_insert_bench,
-    teardown = single_insert_teardown,
+    setup = setup_proc,
+    bench = bench_proc,
+    teardown = teardown_proc,
   }
 
   err := time.benchmark(options)
@@ -792,89 +577,90 @@ octree_single_insert_benchmark :: proc(t: ^testing.T) {
   )
 }
 
-BenchmarkData :: struct {
-  octree_ptr: ^geometry.Octree(TestItem),
-  items: []TestItem,
-}
-
-single_remove_setup :: proc(
-  options: ^time.Benchmark_Options,
-  allocator := context.allocator,
-) -> time.Benchmark_Error {
-  bounds := geometry.Aabb {
-    min = {-100, -100, -100},
-    max = {100, 100, 100},
-  }
-
-  octree_ptr := new(geometry.Octree(TestItem))
-  octree_ptr^ = geometry.Octree(TestItem){}
-  geometry.octree_init(octree_ptr, bounds, 8, 16)
-  octree_ptr.bounds_func = test_item_bounds
-  octree_ptr.point_func = test_item_point
-
-  // Pre-populate with removable items
-  removable_items := make([]TestItem, 15000)
-
-  for i in 0 ..< 15000 {
-    x := f32(i % 50 - 25) * 3
-    y := f32((i / 50) % 50 - 25) * 3
-    z := f32((i / 2500) % 50 - 25) * 3
-
-    removable_items[i] = TestItem {
-      id = i32(i),
-      pos = {x, y, z},
-      size = 1,
-    }
-    geometry.octree_insert(octree_ptr, removable_items[i])
-  }
-
-  bench_data := new(BenchmarkData)
-  bench_data.octree_ptr = octree_ptr
-  bench_data.items = removable_items
-
-  options.input = slice.bytes_from_ptr(bench_data, size_of(^BenchmarkData))
-  return nil
-}
-
-single_remove_bench :: proc(
-  options: ^time.Benchmark_Options,
-  allocator := context.allocator,
-) -> time.Benchmark_Error {
-  bench_data := cast(^BenchmarkData)raw_data(options.input)
-
-  for i in 0 ..< options.rounds {
-    // Remove items cyclically
-    item_index := i % len(bench_data.items)
-    geometry.octree_remove(bench_data.octree_ptr, bench_data.items[item_index])
-    options.processed += size_of(TestItem)
-
-    // Re-insert to maintain structure for next iterations
-    geometry.octree_insert(bench_data.octree_ptr, bench_data.items[item_index])
-  }
-
-  return nil
-}
-
-single_remove_teardown :: proc(
-  options: ^time.Benchmark_Options,
-  allocator := context.allocator,
-) -> time.Benchmark_Error {
-  bench_data := cast(^BenchmarkData)raw_data(options.input)
-  geometry.octree_deinit(bench_data.octree_ptr)
-  free(bench_data.octree_ptr)
-  delete(bench_data.items)
-  free(bench_data)
-  return nil
-}
 
 @(test)
 octree_single_remove_benchmark :: proc(t: ^testing.T) {
+  BenchmarkData :: struct {
+    octree_ptr: ^geometry.Octree(TestItem),
+    items: []TestItem,
+  }
+
+  setup_proc :: proc(
+    options: ^time.Benchmark_Options,
+    allocator := context.allocator,
+  ) -> time.Benchmark_Error {
+    bounds := geometry.Aabb {
+      min = {-100, -100, -100},
+      max = {100, 100, 100},
+    }
+
+    octree_ptr := new(geometry.Octree(TestItem))
+    octree_ptr^ = geometry.Octree(TestItem){}
+    geometry.octree_init(octree_ptr, bounds, 8, 16)
+    octree_ptr.bounds_func = test_item_bounds
+    octree_ptr.point_func = test_item_point
+
+    // Pre-populate with removable items
+    removable_items := make([]TestItem, 15000)
+
+    for i in 0 ..< 15000 {
+      x := f32(i % 50 - 25) * 3
+      y := f32((i / 50) % 50 - 25) * 3
+      z := f32((i / 2500) % 50 - 25) * 3
+
+      removable_items[i] = TestItem {
+        id = i32(i),
+        pos = {x, y, z},
+        size = 1,
+      }
+      geometry.octree_insert(octree_ptr, removable_items[i])
+    }
+
+    bench_data := new(BenchmarkData)
+    bench_data.octree_ptr = octree_ptr
+    bench_data.items = removable_items
+
+    options.input = slice.bytes_from_ptr(bench_data, size_of(^BenchmarkData))
+    return nil
+  }
+
+  bench_proc :: proc(
+    options: ^time.Benchmark_Options,
+    allocator := context.allocator,
+  ) -> time.Benchmark_Error {
+    bench_data := cast(^BenchmarkData)raw_data(options.input)
+
+    for i in 0 ..< options.rounds {
+      // Remove items cyclically
+      item_index := i % len(bench_data.items)
+      geometry.octree_remove(bench_data.octree_ptr, bench_data.items[item_index])
+      options.processed += size_of(TestItem)
+
+      // Re-insert to maintain structure for next iterations
+      geometry.octree_insert(bench_data.octree_ptr, bench_data.items[item_index])
+    }
+
+    return nil
+  }
+
+  teardown_proc :: proc(
+    options: ^time.Benchmark_Options,
+    allocator := context.allocator,
+  ) -> time.Benchmark_Error {
+    bench_data := cast(^BenchmarkData)raw_data(options.input)
+    geometry.octree_deinit(bench_data.octree_ptr)
+    free(bench_data.octree_ptr)
+    delete(bench_data.items)
+    free(bench_data)
+    return nil
+  }
+
   options := &time.Benchmark_Options {
     rounds = 10000,
     bytes = size_of(TestItem) * 10000,
-    setup = single_remove_setup,
-    bench = single_remove_bench,
-    teardown = single_remove_teardown,
+    setup = setup_proc,
+    bench = bench_proc,
+    teardown = teardown_proc,
   }
 
   err := time.benchmark(options)
@@ -977,194 +763,83 @@ octree_optimized_query_benchmark :: proc(t: ^testing.T) {
   )
 }
 
-game_simulation_setup :: proc(
-  options: ^time.Benchmark_Options,
-  allocator := context.allocator,
-) -> time.Benchmark_Error {
-  bounds := geometry.Aabb {
-    min = {-100, -100, -100},
-    max = {100, 100, 100},
-  }
 
-  octree_ptr := new(geometry.Octree(TestItem))
-  octree_ptr^ = geometry.Octree(TestItem){}
-  geometry.octree_init(octree_ptr, bounds, 8, 16)
-  octree_ptr.bounds_func = test_item_bounds
-  octree_ptr.point_func = test_item_point
-
-  // Initial world population
-  base_items := make([]TestItem, 8000)
-
-  for i in 0 ..< 8000 {
-    x := f32(i % 60 - 30) * 2.5
-    y := f32((i / 60) % 60 - 30) * 2.5
-    z := f32((i / 3600) % 60 - 30) * 2.5
-
-    base_items[i] = TestItem {
-      id = i32(i),
-      pos = {x, y, z},
-      size = 1,
-    }
-    geometry.octree_insert(octree_ptr, base_items[i])
-  }
-
-  bench_data := new(BenchmarkData)
-  bench_data.octree_ptr = octree_ptr
-  bench_data.items = base_items
-
-  options.input = slice.bytes_from_ptr(bench_data, size_of(^BenchmarkData))
-  return nil
-}
-
-game_simulation_bench :: proc(
-  options: ^time.Benchmark_Options,
-  allocator := context.allocator,
-) -> time.Benchmark_Error {
-  bench_data := cast(^BenchmarkData)raw_data(options.input)
-  results := make([dynamic]TestItem, 0, 50)
-  defer delete(results)
-
-  for i in 0 ..< options.rounds {
-    // Mix of operations per "frame"
-    frame_offset := f32(i % 100 - 50) * 0.2
-
-    // 1. Query for nearby objects (collision detection)
-    clear(&results)
-    query_bounds := geometry.Aabb {
-      min = {-8 + frame_offset, -8 + frame_offset, -8 + frame_offset},
-      max = {8 + frame_offset, 8 + frame_offset, 8 + frame_offset},
-    }
-    geometry.octree_query_aabb(bench_data.octree_ptr, query_bounds, &results)
-
-    // 2. Remove a few objects (destruction)
-    if i % 10 == 0 {
-      item_to_remove := bench_data.items[i % len(bench_data.items)]
-      geometry.octree_remove(bench_data.octree_ptr, item_to_remove)
-    }
-
-    // 3. Insert new objects (spawning)
-    if i % 8 == 0 {
-      new_item := TestItem {
-        id = i32(i + 100000),
-        pos = {frame_offset * 10, frame_offset * 10, frame_offset * 10},
-        size = 1,
-      }
-      geometry.octree_insert(bench_data.octree_ptr, new_item)
-    }
-
-    options.processed += len(results) * size_of(TestItem) + size_of(TestItem) * 2
-  }
-
-  return nil
-}
-
-game_simulation_teardown :: proc(
-  options: ^time.Benchmark_Options,
-  allocator := context.allocator,
-) -> time.Benchmark_Error {
-  bench_data := cast(^BenchmarkData)raw_data(options.input)
-  geometry.octree_deinit(bench_data.octree_ptr)
-  free(bench_data.octree_ptr)
-  delete(bench_data.items)
-  free(bench_data)
-  return nil
-}
-
-@(test)
-octree_game_simulation_benchmark :: proc(t: ^testing.T) {
-  options := &time.Benchmark_Options {
-    rounds = 1000,  // 1000 "frames"
-    bytes = size_of(TestItem) * 50 * 1000,  // avg operations per frame
-    setup = game_simulation_setup,
-    bench = game_simulation_bench,
-    teardown = game_simulation_teardown,
-  }
-
-  err := time.benchmark(options)
-  log.infof(
-    "Game simulation benchmark: %d frames in %v (%.2f MB/s) | %.2f μs/frame",
-    options.rounds,
-    options.duration,
-    options.megabytes_per_second,
-    f64(options.duration) / 1000 / f64(options.rounds),
-  )
-}
-
-realistic_insert_setup :: proc(
-  options: ^time.Benchmark_Options,
-  allocator := context.allocator,
-) -> time.Benchmark_Error {
-  bounds := geometry.Aabb {
-    min = {-100, -100, -100},
-    max = {100, 100, 100},
-  }
-
-  octree_ptr := new(geometry.Octree(TestItem))
-  octree_ptr^ = geometry.Octree(TestItem){}
-  geometry.octree_init(octree_ptr, bounds, 8, 16)
-  octree_ptr.bounds_func = test_item_bounds
-  octree_ptr.point_func = test_item_point
-
-  // Pre-populate with 5000 items to simulate realistic game world
-  for i in 0 ..< 5000 {
-    x := f32(i % 50 - 25) * 2
-    y := f32((i / 50) % 50 - 25) * 2
-    z := f32((i / 2500) % 50 - 25) * 2
-
-    item := TestItem {
-      id = i32(i),
-      pos = {x, y, z},
-      size = 0.8,
-    }
-    geometry.octree_insert(octree_ptr, item)
-  }
-
-  options.input = slice.bytes_from_ptr(octree_ptr, size_of(^geometry.Octree(TestItem)))
-  return nil
-}
-
-realistic_insert_bench :: proc(
-  options: ^time.Benchmark_Options,
-  allocator := context.allocator,
-) -> time.Benchmark_Error {
-  octree_ptr := cast(^geometry.Octree(TestItem))raw_data(options.input)
-
-  for i in 0 ..< options.rounds {
-    // Create a unique item for each insert
-    item := TestItem {
-      id = i32(i + 100000),
-      pos = {
-        f32(i % 100 - 50) * 0.1,
-        f32((i / 100) % 100 - 50) * 0.1,
-        f32((i / 10000) % 100 - 50) * 0.1,
-      },
-      size = 0.8,
-    }
-
-    geometry.octree_insert(octree_ptr, item)
-    options.processed += size_of(TestItem)
-  }
-  return nil
-}
-
-realistic_insert_teardown :: proc(
-  options: ^time.Benchmark_Options,
-  allocator := context.allocator,
-) -> time.Benchmark_Error {
-  octree_ptr := cast(^geometry.Octree(TestItem))raw_data(options.input)
-  geometry.octree_deinit(octree_ptr)
-  free(octree_ptr)
-  return nil
-}
 
 @(test)
 octree_realistic_insert_benchmark :: proc(t: ^testing.T) {
+  setup_proc :: proc(
+    options: ^time.Benchmark_Options,
+    allocator := context.allocator,
+  ) -> time.Benchmark_Error {
+    bounds := geometry.Aabb {
+      min = {-100, -100, -100},
+      max = {100, 100, 100},
+    }
+
+    octree_ptr := new(geometry.Octree(TestItem))
+    octree_ptr^ = geometry.Octree(TestItem){}
+    geometry.octree_init(octree_ptr, bounds, 8, 16)
+    octree_ptr.bounds_func = test_item_bounds
+    octree_ptr.point_func = test_item_point
+
+    // Pre-populate with 5000 items to simulate realistic game world
+    for i in 0 ..< 5000 {
+      x := f32(i % 50 - 25) * 2
+      y := f32((i / 50) % 50 - 25) * 2
+      z := f32((i / 2500) % 50 - 25) * 2
+
+      item := TestItem {
+        id = i32(i),
+        pos = {x, y, z},
+        size = 0.8,
+      }
+      geometry.octree_insert(octree_ptr, item)
+    }
+
+    options.input = slice.bytes_from_ptr(octree_ptr, size_of(^geometry.Octree(TestItem)))
+    return nil
+  }
+
+  bench_proc :: proc(
+    options: ^time.Benchmark_Options,
+    allocator := context.allocator,
+  ) -> time.Benchmark_Error {
+    octree_ptr := cast(^geometry.Octree(TestItem))raw_data(options.input)
+
+    for i in 0 ..< options.rounds {
+      // Create a unique item for each insert
+      item := TestItem {
+        id = i32(i + 100000),
+        pos = {
+          f32(i % 100 - 50) * 0.1,
+          f32((i / 100) % 100 - 50) * 0.1,
+          f32((i / 10000) % 100 - 50) * 0.1,
+        },
+        size = 0.8,
+      }
+
+      geometry.octree_insert(octree_ptr, item)
+      options.processed += size_of(TestItem)
+    }
+    return nil
+  }
+
+  teardown_proc :: proc(
+    options: ^time.Benchmark_Options,
+    allocator := context.allocator,
+  ) -> time.Benchmark_Error {
+    octree_ptr := cast(^geometry.Octree(TestItem))raw_data(options.input)
+    geometry.octree_deinit(octree_ptr)
+    free(octree_ptr)
+    return nil
+  }
+
   options := &time.Benchmark_Options {
     rounds = 10000,
     bytes = size_of(TestItem) * 10000,
-    setup = realistic_insert_setup,
-    bench = realistic_insert_bench,
-    teardown = realistic_insert_teardown,
+    setup = setup_proc,
+    bench = bench_proc,
+    teardown = teardown_proc,
   }
 
   err := time.benchmark(options)
@@ -1177,86 +852,91 @@ octree_realistic_insert_benchmark :: proc(t: ^testing.T) {
   )
 }
 
-realistic_remove_setup :: proc(
-  options: ^time.Benchmark_Options,
-  allocator := context.allocator,
-) -> time.Benchmark_Error {
-  bounds := geometry.Aabb {
-    min = {-100, -100, -100},
-    max = {100, 100, 100},
-  }
-
-  octree_ptr := new(geometry.Octree(TestItem))
-  octree_ptr^ = geometry.Octree(TestItem){}
-  geometry.octree_init(octree_ptr, bounds, 8, 16)
-  octree_ptr.bounds_func = test_item_bounds
-  octree_ptr.point_func = test_item_point
-
-  // Pre-populate with items we can remove
-  item_pool := make([]TestItem, 10000)
-
-  for i in 0 ..< 10000 {
-    x := f32(i % 50 - 25) * 2
-    y := f32((i / 50) % 50 - 25) * 2
-    z := f32((i / 2500) % 50 - 25) * 2
-
-    item_pool[i] = TestItem {
-      id = i32(i),
-      pos = {x, y, z},
-      size = 0.8,
-    }
-    geometry.octree_insert(octree_ptr, item_pool[i])
-  }
-
-  bench_data := new(BenchmarkData)
-  bench_data.octree_ptr = octree_ptr
-  bench_data.items = item_pool
-
-  options.input = slice.bytes_from_ptr(bench_data, size_of(^BenchmarkData))
-  return nil
-}
-
-realistic_remove_bench :: proc(
-  options: ^time.Benchmark_Options,
-  allocator := context.allocator,
-) -> time.Benchmark_Error {
-  bench_data := cast(^BenchmarkData)raw_data(options.input)
-
-  for i in 0 ..< options.rounds {
-    // Remove and re-insert to maintain octree state
-    item_index := i % len(bench_data.items)
-    removed := geometry.octree_remove(bench_data.octree_ptr, bench_data.items[item_index])
-
-    // Re-insert for next iteration
-    if removed {
-      geometry.octree_insert(bench_data.octree_ptr, bench_data.items[item_index])
-    }
-
-    options.processed += size_of(TestItem)
-  }
-  return nil
-}
-
-realistic_remove_teardown :: proc(
-  options: ^time.Benchmark_Options,
-  allocator := context.allocator,
-) -> time.Benchmark_Error {
-  bench_data := cast(^BenchmarkData)raw_data(options.input)
-  geometry.octree_deinit(bench_data.octree_ptr)
-  free(bench_data.octree_ptr)
-  delete(bench_data.items)
-  free(bench_data)
-  return nil
-}
-
 @(test)
 octree_realistic_remove_benchmark :: proc(t: ^testing.T) {
+  BenchmarkData :: struct {
+    octree_ptr: ^geometry.Octree(TestItem),
+    items: []TestItem,
+  }
+
+  setup_proc :: proc(
+    options: ^time.Benchmark_Options,
+    allocator := context.allocator,
+  ) -> time.Benchmark_Error {
+    bounds := geometry.Aabb {
+      min = {-100, -100, -100},
+      max = {100, 100, 100},
+    }
+
+    octree_ptr := new(geometry.Octree(TestItem))
+    octree_ptr^ = geometry.Octree(TestItem){}
+    geometry.octree_init(octree_ptr, bounds, 8, 16)
+    octree_ptr.bounds_func = test_item_bounds
+    octree_ptr.point_func = test_item_point
+
+    // Pre-populate with items we can remove
+    item_pool := make([]TestItem, 10000)
+
+    for i in 0 ..< 10000 {
+      x := f32(i % 50 - 25) * 2
+      y := f32((i / 50) % 50 - 25) * 2
+      z := f32((i / 2500) % 50 - 25) * 2
+
+      item_pool[i] = TestItem {
+        id = i32(i),
+        pos = {x, y, z},
+        size = 0.8,
+      }
+      geometry.octree_insert(octree_ptr, item_pool[i])
+    }
+
+    bench_data := new(BenchmarkData)
+    bench_data.octree_ptr = octree_ptr
+    bench_data.items = item_pool
+
+    options.input = slice.bytes_from_ptr(bench_data, size_of(^BenchmarkData))
+    return nil
+  }
+
+  bench_proc :: proc(
+    options: ^time.Benchmark_Options,
+    allocator := context.allocator,
+  ) -> time.Benchmark_Error {
+    bench_data := cast(^BenchmarkData)raw_data(options.input)
+
+    for i in 0 ..< options.rounds {
+      // Remove and re-insert to maintain octree state
+      item_index := i % len(bench_data.items)
+      removed := geometry.octree_remove(bench_data.octree_ptr, bench_data.items[item_index])
+
+      // Re-insert for next iteration
+      if removed {
+        geometry.octree_insert(bench_data.octree_ptr, bench_data.items[item_index])
+      }
+
+      options.processed += size_of(TestItem)
+    }
+    return nil
+  }
+
+  teardown_proc :: proc(
+    options: ^time.Benchmark_Options,
+    allocator := context.allocator,
+  ) -> time.Benchmark_Error {
+    bench_data := cast(^BenchmarkData)raw_data(options.input)
+    geometry.octree_deinit(bench_data.octree_ptr)
+    free(bench_data.octree_ptr)
+    delete(bench_data.items)
+    free(bench_data)
+    return nil
+  }
+
   options := &time.Benchmark_Options {
     rounds = 10000,
     bytes = size_of(TestItem) * 10000,
-    setup = realistic_remove_setup,
-    bench = realistic_remove_bench,
-    teardown = realistic_remove_teardown,
+    setup = setup_proc,
+    bench = bench_proc,
+    teardown = teardown_proc,
   }
 
   err := time.benchmark(options)
@@ -1269,79 +949,79 @@ octree_realistic_remove_benchmark :: proc(t: ^testing.T) {
   )
 }
 
-realistic_query_setup :: proc(
-  options: ^time.Benchmark_Options,
-  allocator := context.allocator,
-) -> time.Benchmark_Error {
-  bounds := geometry.Aabb {
-    min = {-100, -100, -100},
-    max = {100, 100, 100},
-  }
-
-  octree_ptr := new(geometry.Octree(TestItem))
-  octree_ptr^ = geometry.Octree(TestItem){}
-  geometry.octree_init(octree_ptr, bounds, 8, 16)
-  octree_ptr.bounds_func = test_item_bounds
-  octree_ptr.point_func = test_item_point
-
-  // Dense population for realistic game world
-  for i in 0 ..< 15000 {
-    x := f32(i % 80 - 40) * 1.2
-    y := f32((i / 80) % 80 - 40) * 1.2
-    z := f32((i / 6400) % 80 - 40) * 1.2
-
-    item := TestItem {
-      id   = i32(i),
-      pos  = {x, y, z},
-      size = 0.8,
-    }
-    geometry.octree_insert(octree_ptr, item)
-  }
-
-  options.input = slice.bytes_from_ptr(octree_ptr, size_of(^geometry.Octree(TestItem)))
-  return nil
-}
-
-realistic_query_bench :: proc(
-  options: ^time.Benchmark_Options,
-  allocator := context.allocator,
-) -> time.Benchmark_Error {
-  octree_ptr := cast(^geometry.Octree(TestItem))raw_data(options.input)
-  results := make([dynamic]TestItem, 0, 50)
-  defer delete(results)
-
-  for i in 0 ..< options.rounds {
-    // Character-shaped query region (wider vertically)
-    offset := f32(i % 200 - 100) * 0.05
-    query_bounds := geometry.Aabb {
-      min = {-0.25 + offset, -0.5 + offset, -0.25 + offset},
-      max = {0.25 + offset, 0.5 + offset, 0.25 + offset},
-    }
-    // Use limited query to avoid processing too many results
-    geometry.octree_query_aabb_limited(octree_ptr, query_bounds, &results, 10)
-    options.processed += len(results) * size_of(TestItem)
-  }
-  return nil
-}
-
-realistic_query_teardown :: proc(
-  options: ^time.Benchmark_Options,
-  allocator := context.allocator,
-) -> time.Benchmark_Error {
-  octree_ptr := cast(^geometry.Octree(TestItem))raw_data(options.input)
-  geometry.octree_deinit(octree_ptr)
-  free(octree_ptr)
-  return nil
-}
-
 @(test)
 octree_realistic_query_benchmark :: proc(t: ^testing.T) {
+  setup_proc :: proc(
+    options: ^time.Benchmark_Options,
+    allocator := context.allocator,
+  ) -> time.Benchmark_Error {
+    bounds := geometry.Aabb {
+      min = {-100, -100, -100},
+      max = {100, 100, 100},
+    }
+
+    octree_ptr := new(geometry.Octree(TestItem))
+    octree_ptr^ = geometry.Octree(TestItem){}
+    geometry.octree_init(octree_ptr, bounds, 8, 16)
+    octree_ptr.bounds_func = test_item_bounds
+    octree_ptr.point_func = test_item_point
+
+    // Dense population for realistic game world
+    for i in 0 ..< 15000 {
+      x := f32(i % 80 - 40) * 1.2
+      y := f32((i / 80) % 80 - 40) * 1.2
+      z := f32((i / 6400) % 80 - 40) * 1.2
+
+      item := TestItem {
+        id   = i32(i),
+        pos  = {x, y, z},
+        size = 0.8,
+      }
+      geometry.octree_insert(octree_ptr, item)
+    }
+
+    options.input = slice.bytes_from_ptr(octree_ptr, size_of(^geometry.Octree(TestItem)))
+    return nil
+  }
+
+  bench_proc :: proc(
+    options: ^time.Benchmark_Options,
+    allocator := context.allocator,
+  ) -> time.Benchmark_Error {
+    octree_ptr := cast(^geometry.Octree(TestItem))raw_data(options.input)
+    results := make([dynamic]TestItem, 0, 50)
+    defer delete(results)
+
+    for i in 0 ..< options.rounds {
+      // Character-shaped query region (wider vertically)
+      offset := f32(i % 200 - 100) * 0.05
+      query_bounds := geometry.Aabb {
+        min = {-0.25 + offset, -0.5 + offset, -0.25 + offset},
+        max = {0.25 + offset, 0.5 + offset, 0.25 + offset},
+      }
+      // Use limited query to avoid processing too many results
+      geometry.octree_query_aabb_limited(octree_ptr, query_bounds, &results, 10)
+      options.processed += len(results) * size_of(TestItem)
+    }
+    return nil
+  }
+
+  teardown_proc :: proc(
+    options: ^time.Benchmark_Options,
+    allocator := context.allocator,
+  ) -> time.Benchmark_Error {
+    octree_ptr := cast(^geometry.Octree(TestItem))raw_data(options.input)
+    geometry.octree_deinit(octree_ptr)
+    free(octree_ptr)
+    return nil
+  }
+
   options := &time.Benchmark_Options {
     rounds = 10000,
     bytes = size_of(TestItem) * 15 * 10000,  // Estimate ~15 items per query
-    setup = realistic_query_setup,
-    bench = realistic_query_bench,
-    teardown = realistic_query_teardown,
+    setup = setup_proc,
+    bench = bench_proc,
+    teardown = teardown_proc,
   }
 
   err := time.benchmark(options)
@@ -1354,108 +1034,113 @@ octree_realistic_query_benchmark :: proc(t: ^testing.T) {
   )
 }
 
-frame_simulation_setup :: proc(
-  options: ^time.Benchmark_Options,
-  allocator := context.allocator,
-) -> time.Benchmark_Error {
-  bounds := geometry.Aabb {
-    min = {-100, -100, -100},
-    max = {100, 100, 100},
-  }
-
-  octree_ptr := new(geometry.Octree(TestItem))
-  octree_ptr^ = geometry.Octree(TestItem){}
-  geometry.octree_init(octree_ptr, bounds, 8, 16)
-  octree_ptr.bounds_func = test_item_bounds
-  octree_ptr.point_func = test_item_point
-
-  // Initial world population
-  world_items := make([]TestItem, 6000)
-
-  for i in 0 ..< 6000 {
-    x := f32(i % 50 - 25) * 2
-    y := f32((i / 50) % 50 - 25) * 2
-    z := f32((i / 2500) % 50 - 25) * 2
-
-    world_items[i] = TestItem {
-      id = i32(i),
-      pos = {x, y, z},
-      size = 1,
-    }
-    geometry.octree_insert(octree_ptr, world_items[i])
-  }
-
-  bench_data := new(BenchmarkData)
-  bench_data.octree_ptr = octree_ptr
-  bench_data.items = world_items
-
-  options.input = slice.bytes_from_ptr(bench_data, size_of(^BenchmarkData))
-  return nil
-}
-
-frame_simulation_bench :: proc(
-  options: ^time.Benchmark_Options,
-  allocator := context.allocator,
-) -> time.Benchmark_Error {
-  bench_data := cast(^BenchmarkData)raw_data(options.input)
-  results := make([dynamic]TestItem, 0, 30)
-  defer delete(results)
-
-  for i in 0 ..< options.rounds {
-    frame_offset := f32(i % 100 - 50) * 0.15
-
-    // 1. Multiple queries per frame (collision detection, AI)
-    for q in 0 ..< 3 {
-      clear(&results)
-      query_pos := f32(q) * 10 + frame_offset
-      query_bounds := geometry.Aabb {
-        min = {-4 + query_pos, -4 + query_pos, -4 + query_pos},
-        max = {4 + query_pos, 4 + query_pos, 4 + query_pos},
-      }
-      geometry.octree_query_aabb(bench_data.octree_ptr, query_bounds, &results)
-    }
-
-    // 2. Occasional object destruction
-    if i % 20 == 0 && len(bench_data.items) > 0 {
-      remove_item := bench_data.items[i % len(bench_data.items)]
-      geometry.octree_remove(bench_data.octree_ptr, remove_item)
-    }
-
-    // 3. Occasional object spawning
-    if i % 15 == 0 {
-      new_item := TestItem {
-        id = i32(i + 100000),
-        pos = {frame_offset * 8, frame_offset * 8, frame_offset * 8},
-        size = 1,
-      }
-      geometry.octree_insert(bench_data.octree_ptr, new_item)
-    }
-
-    options.processed += size_of(TestItem) * 10  // Rough estimate
-  }
-  return nil
-}
-
-frame_simulation_teardown :: proc(
-  options: ^time.Benchmark_Options,
-  allocator := context.allocator,
-) -> time.Benchmark_Error {
-  bench_data := cast(^BenchmarkData)raw_data(options.input)
-  geometry.octree_deinit(bench_data.octree_ptr)
-  free(bench_data.octree_ptr)
-  delete(bench_data.items)
-  free(bench_data)
-  return nil
-}
-
 @(test)
 octree_frame_simulation_benchmark :: proc(t: ^testing.T) {
+  BenchmarkData :: struct {
+    octree_ptr: ^geometry.Octree(TestItem),
+    items: []TestItem,
+  }
+
+  setup_proc :: proc(
+    options: ^time.Benchmark_Options,
+    allocator := context.allocator,
+  ) -> time.Benchmark_Error {
+    bounds := geometry.Aabb {
+      min = {-100, -100, -100},
+      max = {100, 100, 100},
+    }
+
+    octree_ptr := new(geometry.Octree(TestItem))
+    octree_ptr^ = geometry.Octree(TestItem){}
+    geometry.octree_init(octree_ptr, bounds, 8, 16)
+    octree_ptr.bounds_func = test_item_bounds
+    octree_ptr.point_func = test_item_point
+
+    // Initial world population
+    world_items := make([]TestItem, 6000)
+
+    for i in 0 ..< 6000 {
+      x := f32(i % 50 - 25) * 2
+      y := f32((i / 50) % 50 - 25) * 2
+      z := f32((i / 2500) % 50 - 25) * 2
+
+      world_items[i] = TestItem {
+        id = i32(i),
+        pos = {x, y, z},
+        size = 1,
+      }
+      geometry.octree_insert(octree_ptr, world_items[i])
+    }
+
+    bench_data := new(BenchmarkData)
+    bench_data.octree_ptr = octree_ptr
+    bench_data.items = world_items
+
+    options.input = slice.bytes_from_ptr(bench_data, size_of(^BenchmarkData))
+    return nil
+  }
+
+  bench_proc :: proc(
+    options: ^time.Benchmark_Options,
+    allocator := context.allocator,
+  ) -> time.Benchmark_Error {
+    bench_data := cast(^BenchmarkData)raw_data(options.input)
+    results := make([dynamic]TestItem, 0, 30)
+    defer delete(results)
+
+    for i in 0 ..< options.rounds {
+      frame_offset := f32(i % 100 - 50) * 0.15
+
+      // 1. Multiple queries per frame (collision detection, AI)
+      for q in 0 ..< 3 {
+        clear(&results)
+        query_pos := f32(q) * 10 + frame_offset
+        query_bounds := geometry.Aabb {
+          min = {-4 + query_pos, -4 + query_pos, -4 + query_pos},
+          max = {4 + query_pos, 4 + query_pos, 4 + query_pos},
+        }
+        geometry.octree_query_aabb(bench_data.octree_ptr, query_bounds, &results)
+      }
+
+      // 2. Occasional object destruction
+      if i % 20 == 0 && len(bench_data.items) > 0 {
+        remove_item := bench_data.items[i % len(bench_data.items)]
+        geometry.octree_remove(bench_data.octree_ptr, remove_item)
+      }
+
+      // 3. Occasional object spawning
+      if i % 15 == 0 {
+        new_item := TestItem {
+          id = i32(i + 100000),
+          pos = {frame_offset * 8, frame_offset * 8, frame_offset * 8},
+          size = 1,
+        }
+        geometry.octree_insert(bench_data.octree_ptr, new_item)
+      }
+
+      options.processed += size_of(TestItem) * 10  // Rough estimate
+    }
+    return nil
+  }
+
+  teardown_proc :: proc(
+    options: ^time.Benchmark_Options,
+    allocator := context.allocator,
+  ) -> time.Benchmark_Error {
+    bench_data := cast(^BenchmarkData)raw_data(options.input)
+    geometry.octree_deinit(bench_data.octree_ptr)
+    free(bench_data.octree_ptr)
+    delete(bench_data.items)
+    free(bench_data)
+    return nil
+  }
+
   options := &time.Benchmark_Options {
     rounds = 1000,  // 1000 "frames"
     bytes = size_of(TestItem) * 100 * 1000,  // Est. operations per frame
-    setup = frame_simulation_setup,
-    bench = frame_simulation_bench,
-    teardown = frame_simulation_teardown,
+    setup = setup_proc,
+    bench = bench_proc,
+    teardown = teardown_proc,
   }
 
   err := time.benchmark(options)
@@ -1465,5 +1150,89 @@ octree_frame_simulation_benchmark :: proc(t: ^testing.T) {
     options.duration,
     options.megabytes_per_second,
     f64(options.duration) / 1000000 / f64(options.rounds),
+  )
+}
+
+@(test)
+octree_empty_query_benchmark :: proc(t: ^testing.T) {
+  setup_proc :: proc(
+    options: ^time.Benchmark_Options,
+    allocator := context.allocator,
+  ) -> time.Benchmark_Error {
+    bounds := geometry.Aabb {
+      min = {-100, -100, -100},
+      max = {100, 100, 100},
+    }
+
+    octree_ptr := new(geometry.Octree(TestItem))
+    octree_ptr^ = geometry.Octree(TestItem){}
+    geometry.octree_init(octree_ptr, bounds, 8, 16)
+    octree_ptr.bounds_func = test_item_bounds
+    octree_ptr.point_func = test_item_point
+
+    // Populate only the negative region
+    for i in 0 ..< 10000 {
+      x := f32(i % 50 - 75) * 1.2  // -75 to -25
+      y := f32((i / 50) % 50 - 75) * 1.2
+      z := f32((i / 2500) % 50 - 75) * 1.2
+
+      item := TestItem {
+        id   = i32(i),
+        pos  = {x, y, z},
+        size = 0.8,
+      }
+      geometry.octree_insert(octree_ptr, item)
+    }
+
+    options.input = slice.bytes_from_ptr(octree_ptr, size_of(^geometry.Octree(TestItem)))
+    return nil
+  }
+
+  bench_proc :: proc(
+    options: ^time.Benchmark_Options,
+    allocator := context.allocator,
+  ) -> time.Benchmark_Error {
+    octree_ptr := cast(^geometry.Octree(TestItem))raw_data(options.input)
+    results := make([dynamic]TestItem, 0, 50)
+    defer delete(results)
+
+    for i in 0 ..< options.rounds {
+      // Query the positive region where no items exist
+      offset := f32(i % 200 - 100) * 0.05
+      query_bounds := geometry.Aabb {
+        min = {50 + offset, 50 + offset, 50 + offset},
+        max = {60 + offset, 60 + offset, 60 + offset},
+      }
+      geometry.octree_query_aabb(octree_ptr, query_bounds, &results)
+      options.processed += len(results) * size_of(TestItem)
+    }
+    return nil
+  }
+
+  teardown_proc :: proc(
+    options: ^time.Benchmark_Options,
+    allocator := context.allocator,
+  ) -> time.Benchmark_Error {
+    octree_ptr := cast(^geometry.Octree(TestItem))raw_data(options.input)
+    geometry.octree_deinit(octree_ptr)
+    free(octree_ptr)
+    return nil
+  }
+
+  options := &time.Benchmark_Options {
+    rounds = 10000,
+    bytes = size_of(TestItem) * 0 * 10000,  // No items found, but still process queries
+    setup = setup_proc,
+    bench = bench_proc,
+    teardown = teardown_proc,
+  }
+
+  err := time.benchmark(options)
+  log.infof(
+    "Empty query: %d queries in %v (%.2f MB/s) | %.2f μs/query",
+    options.rounds,
+    options.duration,
+    options.megabytes_per_second,
+    f64(options.duration) / 1000 / f64(options.rounds),
   )
 }
