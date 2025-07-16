@@ -49,6 +49,8 @@ bvh_build :: proc(bvh: ^BVH($T), items: []T, max_leaf_size: i32 = 4) {
 
   if len(items) == 0 do return
 
+  // Pre-reserve capacity for better performance
+  reserve(&bvh.primitives, len(items))
   append(&bvh.primitives, ..items)
 
   build_prims := make([]BVHPrimitive, len(items))
@@ -75,6 +77,7 @@ bvh_build :: proc(bvh: ^BVH($T), items: []T, max_leaf_size: i32 = 4) {
   free_build_nodes(root)
 }
 
+@(private)
 build_recursive :: proc(prims: []BVHPrimitive, start, end: i32, max_leaf_size: i32) -> ^BVHBuildNode {
   node := new(BVHBuildNode)
 
@@ -122,6 +125,7 @@ build_recursive :: proc(prims: []BVHPrimitive, start, end: i32, max_leaf_size: i
   return node
 }
 
+@(private)
 split_sah :: proc(prims: []BVHPrimitive, node_bounds: Aabb) -> (axis: i32, split_pos: i32) {
   best_cost := f32(F32_MAX)
   best_axis := -1
@@ -188,6 +192,7 @@ split_sah :: proc(prims: []BVHPrimitive, node_bounds: Aabb) -> (axis: i32, split
   return i32(best_axis), i32(best_split)
 }
 
+@(private)
 sah_cost :: proc(left_bounds: Aabb, left_count: i32, right_bounds: Aabb, right_count: i32, parent_bounds: Aabb) -> f32 {
   TRAVERSAL_COST :: 1.0
   INTERSECTION_COST :: 1.0
@@ -204,11 +209,13 @@ sah_cost :: proc(left_bounds: Aabb, left_count: i32, right_bounds: Aabb, right_c
   return TRAVERSAL_COST + INTERSECTION_COST * (p_left * f32(left_count) + p_right * f32(right_count))
 }
 
+@(private)
 count_build_nodes :: proc(node: ^BVHBuildNode) -> i32 {
   if node == nil do return 0
   return 1 + count_build_nodes(node.left) + count_build_nodes(node.right)
 }
 
+@(private)
 flatten_bvh_tree :: proc(bvh: ^BVH($T), root: ^BVHBuildNode) {
   node_count := count_build_nodes(root)
   resize(&bvh.nodes, int(node_count))
@@ -217,6 +224,7 @@ flatten_bvh_tree :: proc(bvh: ^BVH($T), root: ^BVHBuildNode) {
   flatten_node(bvh, root, &next_node_idx)
 }
 
+@(private)
 flatten_node :: proc(bvh: ^BVH($T), build_node: ^BVHBuildNode, next_idx: ^i32) -> i32 {
   node_idx := next_idx^
   next_idx^ += 1
@@ -241,6 +249,7 @@ flatten_node :: proc(bvh: ^BVH($T), build_node: ^BVHBuildNode, next_idx: ^i32) -
   return node_idx
 }
 
+@(private)
 free_build_nodes :: proc(node: ^BVHBuildNode) {
   if node == nil do return
 
@@ -277,6 +286,7 @@ bvh_query_aabb :: proc(bvh: ^BVH($T), query_bounds: Aabb, results: ^[dynamic]T) 
   }
 }
 
+@(private)
 ray_aabb_intersection_safe :: proc(origin: [3]f32, direction: [3]f32, aabb: Aabb) -> (t_near, t_far: f32) {
   t_min := [3]f32{-F32_MAX, -F32_MAX, -F32_MAX}
   t_max := [3]f32{F32_MAX, F32_MAX, F32_MAX}

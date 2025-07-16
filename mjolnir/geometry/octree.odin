@@ -5,11 +5,12 @@ import "core:math/linalg"
 import "core:slice"
 
 OctreeNode :: struct($T: typeid) {
-  bounds:   Aabb,
-  center:   [3]f32,
-  children: [8]^OctreeNode(T),
-  items:    [dynamic]T,
-  depth:    i32,
+  bounds:      Aabb,
+  center:      [3]f32,
+  children:    [8]^OctreeNode(T),
+  items:       [dynamic]T,
+  depth:       i32,
+  total_items: i32,
 }
 
 Octree :: struct($T: typeid) {
@@ -27,6 +28,7 @@ octree_init :: proc(octree: ^Octree($T), bounds: Aabb, max_depth: i32 = 8, max_i
   octree.root.center = aabb_center(bounds)
   octree.root.depth = 0
   octree.root.items = make([dynamic]T)
+  octree.root.total_items = 0
   octree.max_depth = max_depth
   octree.max_items = max_items
   shift_val := u32(1) << u32(max_depth)
@@ -39,6 +41,7 @@ octree_deinit :: proc(octree: ^Octree($T)) {
   octree.root = nil
 }
 
+@(private)
 octree_node_deinit :: proc(node: ^OctreeNode($T)) {
   if node == nil do return
 
@@ -52,6 +55,7 @@ octree_node_deinit :: proc(node: ^OctreeNode($T)) {
   delete(node.items)
 }
 
+@(private)
 get_octant :: proc(center: [3]f32, point: [3]f32) -> i32 {
   octant: i32 = 0
   if point.x >= center.x do octant |= 0b001
@@ -60,6 +64,7 @@ get_octant :: proc(center: [3]f32, point: [3]f32) -> i32 {
   return octant
 }
 
+@(private)
 get_octant_for_aabb :: proc(node_center: [3]f32, aabb: Aabb) -> i32 {
   aabb_center := aabb_center(aabb)
 
@@ -70,6 +75,7 @@ get_octant_for_aabb :: proc(node_center: [3]f32, aabb: Aabb) -> i32 {
   return get_octant(node_center, aabb_center)
 }
 
+@(private)
 get_child_bounds :: proc(parent: ^OctreeNode($T), octant: i32) -> Aabb {
   size := (parent.bounds.max - parent.bounds.min) * 0.5
   min := parent.bounds.min
@@ -81,6 +87,7 @@ get_child_bounds :: proc(parent: ^OctreeNode($T), octant: i32) -> Aabb {
   return Aabb{min = min, max = min + size}
 }
 
+@(private)
 get_child_center :: proc(parent_center: [3]f32, parent_size: [3]f32, octant: i32) -> [3]f32 {
   offset := parent_size * 0.25
   center := parent_center
@@ -104,6 +111,7 @@ get_child_center :: proc(parent_center: [3]f32, parent_size: [3]f32, octant: i32
   return center
 }
 
+@(private)
 octree_subdivide :: proc(node: ^OctreeNode($T)) {
   parent_size := node.bounds.max - node.bounds.min
 
@@ -113,10 +121,12 @@ octree_subdivide :: proc(node: ^OctreeNode($T)) {
     child.center = get_child_center(node.center, parent_size, i32(i))
     child.depth = node.depth + 1
     child.items = make([dynamic]T)
+    child.total_items = 0
     node.children[i] = child
   }
 }
 
+@(private)
 should_subdivide :: proc(octree: ^Octree($T), node: ^OctreeNode(T)) -> bool {
   if node.depth >= octree.max_depth do return false
 
@@ -149,15 +159,18 @@ octree_insert :: proc(octree: ^Octree($T), item: T) -> bool {
   return octree_node_insert(octree, octree.root, item, bounds)
 }
 
+@(private)
 octree_node_insert :: proc(octree: ^Octree($T), node: ^OctreeNode(T), item: T, bounds: Aabb) -> bool {
   if node.children[0] == nil {
     append(&node.items, item)
+    node.total_items += 1
 
     if should_subdivide(octree, node) {
       octree_subdivide(node)
 
       old_items := node.items[:]
       clear(&node.items)
+      node.total_items = i32(len(node.items))
 
       for old_item in old_items {
         old_bounds := octree.bounds_func(old_item)
@@ -168,9 +181,14 @@ octree_node_insert :: proc(octree: ^Octree($T), node: ^OctreeNode(T), item: T, b
     return true
   }
 
-  return octree_node_insert_to_children(octree, node, item, bounds)
+  if octree_node_insert_to_children(octree, node, item, bounds) {
+    node.total_items += 1
+    return true
+  }
+  return false
 }
 
+@(private)
 octree_node_insert_to_children :: proc(octree: ^Octree($T), node: ^OctreeNode(T), item: T, bounds: Aabb) -> bool {
   octant := get_octant_for_aabb(node.center, bounds)
 
@@ -178,6 +196,7 @@ octree_node_insert_to_children :: proc(octree: ^Octree($T), node: ^OctreeNode(T)
     return octree_node_insert(octree, node.children[octant], item, bounds)
   } else {
     append(&node.items, item)
+    node.total_items += 1
     return true
   }
 }
@@ -187,6 +206,12 @@ octree_query_aabb :: proc(octree: ^Octree($T), query_bounds: Aabb, results: ^[dy
   octree_node_query_aabb(octree, octree.root, query_bounds, results)
 }
 
+octree_query_aabb_limited :: proc(octree: ^Octree($T), query_bounds: Aabb, results: ^[dynamic]T, max_results: int) {
+  clear(results)
+  octree_node_query_aabb_limited(octree, octree.root, query_bounds, results, max_results)
+}
+
+@(private)
 octree_node_query_aabb :: proc(octree: ^Octree($T), node: ^OctreeNode(T), query_bounds: Aabb, results: ^[dynamic]T) {
   if !aabb_intersects(node.bounds, query_bounds) do return
 
@@ -204,11 +229,33 @@ octree_node_query_aabb :: proc(octree: ^Octree($T), node: ^OctreeNode(T), query_
   }
 }
 
+@(private)
+octree_node_query_aabb_limited :: proc(octree: ^Octree($T), node: ^OctreeNode(T), query_bounds: Aabb, results: ^[dynamic]T, max_results: int) {
+  if !aabb_intersects(node.bounds, query_bounds) do return
+  if len(results) >= max_results do return
+
+  for item in node.items {
+    if len(results) >= max_results do return
+    item_bounds := octree.bounds_func(item)
+    if aabb_intersects(item_bounds, query_bounds) {
+      append(results, item)
+    }
+  }
+
+  if node.children[0] != nil {
+    for i in 0..<8 {
+      if len(results) >= max_results do return
+      octree_node_query_aabb_limited(octree, node.children[i], query_bounds, results, max_results)
+    }
+  }
+}
+
 octree_query_sphere :: proc(octree: ^Octree($T), center: [3]f32, radius: f32, results: ^[dynamic]T) {
   clear(results)
   octree_node_query_sphere(octree, octree.root, center, radius, results)
 }
 
+@(private)
 octree_node_query_sphere :: proc(octree: ^Octree($T), node: ^OctreeNode(T), center: [3]f32, radius: f32, results: ^[dynamic]T) {
   if !aabb_sphere_intersects(node.bounds, center, radius) do return
 
@@ -242,6 +289,7 @@ octree_query_ray :: proc(octree: ^Octree($T), ray: Ray, max_dist: f32, results: 
   octree_node_query_ray(octree, octree.root, ray, inv_dir, max_f32(t_min, 0), min_f32(t_max, max_dist), results)
 }
 
+@(private)
 octree_node_query_ray :: proc(octree: ^Octree($T), node: ^OctreeNode(T), ray: Ray, inv_dir: [3]f32, t_min, t_max: f32, results: ^[dynamic]T) {
   for item in node.items {
     item_bounds := octree.bounds_func(item)
@@ -282,12 +330,14 @@ octree_remove :: proc(octree: ^Octree($T), item: T) -> bool {
   return octree_node_remove(octree, octree.root, item, bounds)
 }
 
+@(private)
 octree_node_remove :: proc(octree: ^Octree($T), node: ^OctreeNode(T), item: T, bounds: Aabb) -> bool {
   if !aabb_intersects(node.bounds, bounds) do return false
 
   for i in 0..<len(node.items) {
     if octree_items_equal(item, node.items[i]) {
       unordered_remove(&node.items, i)
+      node.total_items -= 1
       return true
     }
   }
@@ -295,6 +345,7 @@ octree_node_remove :: proc(octree: ^Octree($T), node: ^OctreeNode(T), item: T, b
   if node.children[0] != nil {
     for i in 0..<8 {
       if octree_node_remove(octree, node.children[i], item, bounds) {
+        node.total_items -= 1
         if should_collapse(node) {
           octree_collapse(node)
         }
@@ -306,21 +357,18 @@ octree_node_remove :: proc(octree: ^Octree($T), node: ^OctreeNode(T), item: T, b
   return false
 }
 
+@(private)
 octree_items_equal :: proc(a: $T, b: T) -> bool {
   return a == b
 }
 
+@(private)
 should_collapse :: proc(node: ^OctreeNode($T)) -> bool {
   if node.children[0] == nil do return false
-
-  total_items := len(node.items)
-  for i in 0..<8 {
-    total_items += count_items_recursive(node.children[i])
-  }
-
-  return total_items < 4
+  return node.total_items < 4
 }
 
+@(private)
 count_items_recursive :: proc(node: ^OctreeNode($T)) -> int {
   if node == nil do return 0
 
@@ -334,27 +382,16 @@ count_items_recursive :: proc(node: ^OctreeNode($T)) -> int {
   return count
 }
 
+@(private)
 octree_collapse :: proc(node: ^OctreeNode($T)) {
-  // Create a temporary array to collect all items
-  all_items := make([dynamic]T, 0, len(node.items))
-  defer delete(all_items)
+  if node.children[0] == nil do return
 
-  // First add the node's existing items
-  for item in node.items {
-    append(&all_items, item)
-  }
+  // Pre-allocate space for all items using cached count
+  reserve(&node.items, int(node.total_items))
 
-  // Then collect items from children
-  if node.children[0] != nil {
-    for i in 0..<8 {
-      collect_items_recursive(node.children[i], &all_items)
-    }
-  }
-
-  // Clear the node's items and replace with all collected items
-  clear(&node.items)
-  for item in all_items {
-    append(&node.items, item)
+  // Collect items from children
+  for i in 0..<8 {
+    collect_items_recursive(node.children[i], &node.items)
   }
 
   // Clean up children
@@ -365,6 +402,7 @@ octree_collapse :: proc(node: ^OctreeNode($T)) {
   }
 }
 
+@(private)
 collect_items_recursive :: proc(node: ^OctreeNode($T), results: ^[dynamic]T) {
   if node == nil do return
 
@@ -427,6 +465,7 @@ OctreeStats :: struct {
   empty_nodes:    i32,
 }
 
+@(private)
 calculate_stats_recursive :: proc(node: ^OctreeNode($T), stats: ^OctreeStats, depth: i32) {
   stats.total_nodes += 1
   stats.total_items += i32(len(node.items))

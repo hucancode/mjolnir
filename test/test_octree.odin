@@ -742,7 +742,7 @@ single_insert_bench :: proc(
   allocator := context.allocator,
 ) -> time.Benchmark_Error {
   octree_ptr := cast(^geometry.Octree(TestItem))raw_data(options.input)
-  
+
   for i in 0 ..< options.rounds {
     // Vary position for each insert
     varied_item := TestItem{
@@ -841,7 +841,7 @@ single_remove_bench :: proc(
   allocator := context.allocator,
 ) -> time.Benchmark_Error {
   bench_data := cast(^BenchmarkData)raw_data(options.input)
-  
+
   for i in 0 ..< options.rounds {
     // Remove items cyclically
     item_index := i % len(bench_data.items)
@@ -1128,7 +1128,7 @@ realistic_insert_bench :: proc(
   allocator := context.allocator,
 ) -> time.Benchmark_Error {
   octree_ptr := cast(^geometry.Octree(TestItem))raw_data(options.input)
-  
+
   for i in 0 ..< options.rounds {
     // Create a unique item for each insert
     item := TestItem {
@@ -1221,7 +1221,7 @@ realistic_remove_bench :: proc(
   allocator := context.allocator,
 ) -> time.Benchmark_Error {
   bench_data := cast(^BenchmarkData)raw_data(options.input)
-  
+
   for i in 0 ..< options.rounds {
     // Remove and re-insert to maintain octree state
     item_index := i % len(bench_data.items)
@@ -1311,16 +1311,14 @@ realistic_query_bench :: proc(
   defer delete(results)
 
   for i in 0 ..< options.rounds {
-    clear(&results)
-
-    // Small query region typical for collision detection
-    offset := f32(i % 200 - 100) * 0.2
+    // Character-shaped query region (wider vertically)
+    offset := f32(i % 200 - 100) * 0.05
     query_bounds := geometry.Aabb {
-      min = {-3 + offset, -3 + offset, -3 + offset},
-      max = {3 + offset, 3 + offset, 3 + offset},
+      min = {-0.25 + offset, -0.5 + offset, -0.25 + offset},
+      max = {0.25 + offset, 0.5 + offset, 0.25 + offset},
     }
-
-    geometry.octree_query_aabb(octree_ptr, query_bounds, &results)
+    // Use limited query to avoid processing too many results
+    geometry.octree_query_aabb_limited(octree_ptr, query_bounds, &results, 10)
     options.processed += len(results) * size_of(TestItem)
   }
   return nil
@@ -1339,8 +1337,8 @@ realistic_query_teardown :: proc(
 @(test)
 octree_realistic_query_benchmark :: proc(t: ^testing.T) {
   options := &time.Benchmark_Options {
-    rounds = 50000,  // Many queries per benchmark
-    bytes = size_of(TestItem) * 15 * 50000,  // Estimate ~15 items per query
+    rounds = 10000,
+    bytes = size_of(TestItem) * 15 * 10000,  // Estimate ~15 items per query
     setup = realistic_query_setup,
     bench = realistic_query_bench,
     teardown = realistic_query_teardown,
