@@ -76,28 +76,6 @@ VEC_RIGHT :: [3]f32{1.0, 0.0, 0.0}
 F32_MIN :: -3.40282347E+38
 F32_MAX :: 3.40282347E+38
 
-Aabb :: struct {
-  min: [3]f32,
-  max: [3]f32,
-}
-
-AABB_UNDEFINED := Aabb {
-  min = {F32_MAX, F32_MAX, F32_MAX},
-  max = {F32_MIN, F32_MIN, F32_MIN},
-}
-
-aabb_from_vertices :: proc(vertices: []Vertex) -> (ret: Aabb) {
-  ret = AABB_UNDEFINED
-  for vertex in vertices {
-    ret.min = linalg.min(ret.min, vertex.position)
-    ret.max = linalg.max(ret.max, vertex.position)
-  }
-  if len(vertices) == 0 {
-    ret.min, ret.max = {0, 0, 0}, {0, 0, 0}
-  }
-  return ret
-}
-
 Geometry :: struct {
   vertices:  []Vertex,
   skinnings: []SkinningData,
