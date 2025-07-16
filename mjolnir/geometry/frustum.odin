@@ -35,7 +35,6 @@ make_frustum :: proc(view_projection_matrix: matrix[4,4]f32) -> Frustum {
       plane /= mag
     }
   }
-  // log.infof("Make frustum with: %v, m0 %v, m1 %v, m2 %v, m3 %v -> %v", m, m[0], m[1], m[2], m[3], planes)
   return Frustum{planes}
 }
 

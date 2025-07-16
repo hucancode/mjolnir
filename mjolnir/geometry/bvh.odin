@@ -437,54 +437,22 @@ bvh_validate :: proc(bvh: ^BVH($T)) -> bool {
     node := bvh.nodes[i]
     if node.left_child >= 0 {
       // Internal node checks
-      if node.right_child < 0 {
-        log.infof("Node %d: Internal node missing right child", i)
-        return false
-      }
-      if node.primitive_count != -1 {
-        log.infof("Node %d: Internal node has primitive count %d", i, node.primitive_count)
-        return false
-      }
-      if node.left_child >= i32(len(bvh.nodes)) {
-        log.infof("Node %d: Left child index %d out of bounds (max %d)", i, node.left_child, len(bvh.nodes))
-        return false
-      }
-      if node.right_child >= i32(len(bvh.nodes)) {
-        log.infof("Node %d: Right child index %d out of bounds (max %d)", i, node.right_child, len(bvh.nodes))
-        return false
-      }
+      if node.right_child < 0 do return false
+      if node.primitive_count != -1 do return false
+      if node.left_child >= i32(len(bvh.nodes)) do return false
+      if node.right_child >= i32(len(bvh.nodes)) do return false
 
       left := bvh.nodes[node.left_child]
       right := bvh.nodes[node.right_child]
 
       // Check bounds contain children (with some tolerance)
-      if !aabb_contains_approx(node.bounds, left.bounds, 1e-3) {
-        log.infof("Node %d: Does not contain left child bounds", i)
-        log.infof("  Parent: min=%v max=%v", node.bounds.min, node.bounds.max)
-        log.infof("  Left:   min=%v max=%v", left.bounds.min, left.bounds.max)
-        return false
-      }
-      if !aabb_contains_approx(node.bounds, right.bounds, 1e-3) {
-        log.infof("Node %d: Does not contain right child bounds", i)
-        log.infof("  Parent: min=%v max=%v", node.bounds.min, node.bounds.max)
-        log.infof("  Right:  min=%v max=%v", right.bounds.min, right.bounds.max)
-        return false
-      }
+      if !aabb_contains_approx(node.bounds, left.bounds, 1e-3) do return false
+      if !aabb_contains_approx(node.bounds, right.bounds, 1e-3) do return false
     } else {
       // Leaf node checks
-      if node.primitive_count <= 0 {
-        log.infof("Node %d: Leaf node has invalid primitive count %d", i, node.primitive_count)
-        return false
-      }
-      if node.primitive_start < 0 {
-        log.infof("Node %d: Leaf node has invalid primitive start %d", i, node.primitive_start)
-        return false
-      }
-      if node.primitive_start + node.primitive_count > i32(len(bvh.primitives)) {
-        log.infof("Node %d: Primitive range out of bounds (start=%d, count=%d, max=%d)",
-                  i, node.primitive_start, node.primitive_count, len(bvh.primitives))
-        return false
-      }
+      if node.primitive_count <= 0 do return false
+      if node.primitive_start < 0 do return false
+      if node.primitive_start + node.primitive_count > i32(len(bvh.primitives)) do return false
     }
   }
   return true
