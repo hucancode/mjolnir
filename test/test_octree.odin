@@ -491,6 +491,7 @@ test_octree_stats :: proc(t: ^testing.T) {
 
 @(test)
 octree_single_insert_benchmark :: proc(t: ^testing.T) {
+  testing.set_fail_timeout(t, 15 * time.Second)
   setup_proc :: proc(
     options: ^time.Benchmark_Options,
     allocator := context.allocator,
@@ -580,6 +581,7 @@ octree_single_insert_benchmark :: proc(t: ^testing.T) {
 
 @(test)
 octree_single_remove_benchmark :: proc(t: ^testing.T) {
+  testing.set_fail_timeout(t, 15 * time.Second)
   BenchmarkData :: struct {
     octree_ptr: ^geometry.Octree(TestItem),
     items: []TestItem,
@@ -675,6 +677,7 @@ octree_single_remove_benchmark :: proc(t: ^testing.T) {
 
 @(test)
 octree_optimized_query_benchmark :: proc(t: ^testing.T) {
+  testing.set_fail_timeout(t, 15 * time.Second)
   setup_proc :: proc(
     options: ^time.Benchmark_Options,
     allocator := context.allocator,
@@ -767,6 +770,7 @@ octree_optimized_query_benchmark :: proc(t: ^testing.T) {
 
 @(test)
 octree_realistic_insert_benchmark :: proc(t: ^testing.T) {
+  testing.set_fail_timeout(t, 15 * time.Second)
   setup_proc :: proc(
     options: ^time.Benchmark_Options,
     allocator := context.allocator,
@@ -854,6 +858,7 @@ octree_realistic_insert_benchmark :: proc(t: ^testing.T) {
 
 @(test)
 octree_realistic_remove_benchmark :: proc(t: ^testing.T) {
+  testing.set_fail_timeout(t, 15 * time.Second)
   BenchmarkData :: struct {
     octree_ptr: ^geometry.Octree(TestItem),
     items: []TestItem,
@@ -951,6 +956,7 @@ octree_realistic_remove_benchmark :: proc(t: ^testing.T) {
 
 @(test)
 octree_realistic_query_benchmark :: proc(t: ^testing.T) {
+  testing.set_fail_timeout(t, 15 * time.Second)
   setup_proc :: proc(
     options: ^time.Benchmark_Options,
     allocator := context.allocator,
@@ -1036,6 +1042,7 @@ octree_realistic_query_benchmark :: proc(t: ^testing.T) {
 
 @(test)
 octree_frame_simulation_benchmark :: proc(t: ^testing.T) {
+  testing.set_fail_timeout(t, 15 * time.Second)
   BenchmarkData :: struct {
     octree_ptr: ^geometry.Octree(TestItem),
     items: []TestItem,
@@ -1155,6 +1162,7 @@ octree_frame_simulation_benchmark :: proc(t: ^testing.T) {
 
 @(test)
 octree_empty_query_benchmark :: proc(t: ^testing.T) {
+  testing.set_fail_timeout(t, 15 * time.Second)
   setup_proc :: proc(
     options: ^time.Benchmark_Options,
     allocator := context.allocator,
