@@ -602,14 +602,16 @@ bvh_build_benchmark :: proc(t: ^testing.T) {
     return nil
   }
 
-  item_count := 100
+  item_count := 100000
   items := make([]TestItem, item_count)
   defer delete(items)
 
+  // Generate items in a large cube for realistic distribution
+  cube_size := 200
   for i in 0 ..< item_count {
-    x := f32(i % 100 - 50) * 2
-    y := f32((i / 100) % 100 - 50) * 2
-    z := f32((i / 10000) % 100 - 50) * 2
+    x := f32(i % cube_size - cube_size/2) * 2
+    y := f32((i / cube_size) % cube_size - cube_size/2) * 2
+    z := f32((i / (cube_size * cube_size)) % cube_size - cube_size/2) * 2
 
     items[i] = TestItem {
       id   = i32(i),
@@ -619,8 +621,8 @@ bvh_build_benchmark :: proc(t: ^testing.T) {
   }
 
   options := &time.Benchmark_Options {
-    rounds = 2,
-    bytes = item_count * size_of(TestItem) * 2,
+    rounds = 3,
+    bytes = item_count * size_of(TestItem) * 3,
     input = slice.bytes_from_ptr(&items, size_of([]TestItem)),
     bench = bench_proc,
   }

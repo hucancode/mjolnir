@@ -141,42 +141,56 @@ split_sah :: proc(
   best_axis := -1
   best_split := -1
 
-  // Store a copy for each axis test
-  prims_copy := make([]BVHPrimitive, len(prims), context.temp_allocator)
+  // Fast path for small arrays - use simple median split
+  if len(prims) <= 8 {
+    return split_median(prims, node_bounds)
+  }
+
+  // Pre-allocate arrays for prefix/suffix bounds computation
+  left_bounds := make([]Aabb, len(prims), context.temp_allocator)
+  right_bounds := make([]Aabb, len(prims), context.temp_allocator)
+
+  // Sample fewer split positions for better performance
+  num_samples := min(len(prims), 32)
+  step := max(1, len(prims) / num_samples)
 
   for ax in 0 ..< 3 {
-    copy(prims_copy, prims)
-
+    // Sort by axis
     if ax == 0 {
-      slice.sort_by(prims_copy, proc(a, b: BVHPrimitive) -> bool {
+      slice.sort_by(prims, proc(a, b: BVHPrimitive) -> bool {
         return a.centroid[0] < b.centroid[0]
       })
     } else if ax == 1 {
-      slice.sort_by(prims_copy, proc(a, b: BVHPrimitive) -> bool {
+      slice.sort_by(prims, proc(a, b: BVHPrimitive) -> bool {
         return a.centroid[1] < b.centroid[1]
       })
     } else {
-      slice.sort_by(prims_copy, proc(a, b: BVHPrimitive) -> bool {
+      slice.sort_by(prims, proc(a, b: BVHPrimitive) -> bool {
         return a.centroid[2] < b.centroid[2]
       })
     }
 
-    for i in 1 ..< len(prims_copy) {
-      left_bounds := AABB_UNDEFINED
-      for j in 0 ..< i {
-        left_bounds = aabb_union(left_bounds, prims_copy[j].bounds)
-      }
+    // Compute prefix bounds (left side)
+    left_bounds[0] = prims[0].bounds
+    for i in 1 ..< len(prims) {
+      left_bounds[i] = aabb_union(left_bounds[i-1], prims[i].bounds)
+    }
 
-      right_bounds := AABB_UNDEFINED
-      for j in i ..< len(prims_copy) {
-        right_bounds = aabb_union(right_bounds, prims_copy[j].bounds)
-      }
+    // Compute suffix bounds (right side)
+    right_bounds[len(prims)-1] = prims[len(prims)-1].bounds
+    for i := len(prims)-2; i >= 0; i -= 1 {
+      right_bounds[i] = aabb_union(right_bounds[i+1], prims[i].bounds)
+    }
 
+    // Sample split positions instead of testing all
+    for i := step; i < len(prims); i += step {
+      if i >= len(prims) - 1 do break
+      
       cost := sah_cost(
-        left_bounds,
+        left_bounds[i-1],
         i32(i),
-        right_bounds,
-        i32(len(prims_copy) - i),
+        right_bounds[i],
+        i32(len(prims) - i),
         node_bounds,
       )
 
@@ -188,8 +202,8 @@ split_sah :: proc(
     }
   }
 
-  // Apply the best split to the original array
-  if best_axis >= 0 {
+  // Re-sort by best axis if needed
+  if best_axis >= 0 && best_axis != 2 {
     if best_axis == 0 {
       slice.sort_by(prims, proc(a, b: BVHPrimitive) -> bool {
         return a.centroid[0] < b.centroid[0]
@@ -198,14 +212,42 @@ split_sah :: proc(
       slice.sort_by(prims, proc(a, b: BVHPrimitive) -> bool {
         return a.centroid[1] < b.centroid[1]
       })
-    } else {
-      slice.sort_by(prims, proc(a, b: BVHPrimitive) -> bool {
-        return a.centroid[2] < b.centroid[2]
-      })
     }
   }
 
   return i32(best_axis), i32(best_split)
+}
+
+@(private)
+split_median :: proc(
+  prims: []BVHPrimitive,
+  node_bounds: Aabb,
+) -> (
+  axis: i32,
+  split_pos: i32,
+) {
+  // Choose the axis with the largest extent
+  extent := node_bounds.max - node_bounds.min
+  best_axis := 0
+  if extent[1] > extent[0] do best_axis = 1
+  if extent[2] > extent[best_axis] do best_axis = 2
+
+  // Sort by the chosen axis
+  if best_axis == 0 {
+    slice.sort_by(prims, proc(a, b: BVHPrimitive) -> bool {
+      return a.centroid[0] < b.centroid[0]
+    })
+  } else if best_axis == 1 {
+    slice.sort_by(prims, proc(a, b: BVHPrimitive) -> bool {
+      return a.centroid[1] < b.centroid[1]
+    })
+  } else {
+    slice.sort_by(prims, proc(a, b: BVHPrimitive) -> bool {
+      return a.centroid[2] < b.centroid[2]
+    })
+  }
+
+  return i32(best_axis), i32(len(prims) / 2)
 }
 
 @(private)
