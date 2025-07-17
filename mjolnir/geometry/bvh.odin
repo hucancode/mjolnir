@@ -1,5 +1,6 @@
 package geometry
 
+import "base:intrinsics"
 import "core:log"
 import "core:math"
 import "core:math/linalg"
@@ -14,14 +15,33 @@ BVHNode :: struct {
 }
 
 BVH :: struct($T: typeid) {
-  nodes:       [dynamic]BVHNode,
-  primitives:  [dynamic]T,
-  bounds_func: proc(t: T) -> Aabb,
+  nodes:         [dynamic]BVHNode,
+  primitives:    [dynamic]T,
+  bounds_func:   proc(t: T) -> Aabb,
+  bounds_cache:  []Aabb,  // Optional cached bounds for primitives (only for numeric types like u16)
+}
+
+// Helper to get bounds for primitives, using cache if available and primitive is index-like
+get_primitive_bounds :: proc(bvh: ^BVH($T), prim: T) -> Aabb {
+  // For integer types that can be used as indices, try to use cache
+  when T == u16 || T == u32 || T == int || T == i32 {
+    if bvh.bounds_cache != nil {
+      idx := int(prim)
+      if idx >= 0 && idx < len(bvh.bounds_cache) {
+        return bvh.bounds_cache[idx]
+      }
+    }
+  }
+  // Fall back to bounds function
+  return bvh.bounds_func(prim)
 }
 
 bvh_deinit :: proc(bvh: ^BVH($T)) {
   delete(bvh.nodes)
   delete(bvh.primitives)
+  if bvh.bounds_cache != nil {
+    delete(bvh.bounds_cache)
+  }
 }
 
 BVHBuildNode :: struct {
@@ -57,7 +77,7 @@ bvh_build :: proc(bvh: ^BVH($T), items: []T, max_leaf_size: i32 = 4) {
   defer delete(build_prims)
   for i in 0 ..< len(items) {
     item := items[i]
-    bounds := bvh.bounds_func(item)
+    bounds := get_primitive_bounds(bvh, item)
     build_prims[i] = BVHPrimitive {
       index    = i32(i),
       bounds   = bounds,
@@ -352,10 +372,9 @@ bvh_query_aabb :: proc(
     if !aabb_intersects(node.bounds, query_bounds) do continue
 
     if node.primitive_count > 0 {
-      // Cache bounds function call
       for i in node.primitive_start ..< node.primitive_start + node.primitive_count {
         prim := bvh.primitives[i]
-        prim_bounds := bvh.bounds_func(prim)
+        prim_bounds := get_primitive_bounds(bvh, prim)
         if aabb_intersects(prim_bounds, query_bounds) {
           append(results, prim)
         }
@@ -436,7 +455,7 @@ bvh_query_ray :: proc(
     if node.primitive_count > 0 {
       for i in node.primitive_start ..< node.primitive_start + node.primitive_count {
         prim := bvh.primitives[i]
-        prim_bounds := bvh.bounds_func(prim)
+        prim_bounds := get_primitive_bounds(bvh, prim)
         prim_t_near, prim_t_far := ray_aabb_intersection_safe(
           ray.origin,
           ray.direction,
@@ -469,7 +488,7 @@ bvh_query_sphere :: proc(
 
   clear(results)
   for item in temp_results {
-    bounds := bvh.bounds_func(item)
+    bounds := get_primitive_bounds(bvh, item)
     if aabb_sphere_intersects(bounds, center, radius) {
       append(results, item)
     }
@@ -503,7 +522,7 @@ bvh_query_nearest :: proc(
     if node.left_child < 0 {
       for i in node.primitive_start ..< node.primitive_start + node.primitive_count {
         prim := bvh.primitives[i]
-        prim_bounds := bvh.bounds_func(prim)
+        prim_bounds := get_primitive_bounds(bvh, prim)
 
         d := distance_point_aabb(point, prim_bounds)
 
@@ -547,7 +566,7 @@ bvh_refit :: proc(bvh: ^BVH($T)) {
     if node.left_child < 0 {
       node.bounds = AABB_UNDEFINED
       for j in node.primitive_start ..< node.primitive_start + node.primitive_count {
-        prim_bounds := bvh.bounds_func(bvh.primitives[j])
+        prim_bounds := get_primitive_bounds(bvh, bvh.primitives[j])
         node.bounds = aabb_union(node.bounds, prim_bounds)
       }
     } else {
@@ -650,7 +669,7 @@ bvh_insert_incremental :: proc(bvh: ^BVH($T), item: T) {
   }
   
   // Find best leaf node to insert into
-  item_bounds := bvh.bounds_func(item)
+  item_bounds := get_primitive_bounds(bvh, item)
   best_node_idx := find_best_insert_node(bvh, item_bounds)
   
   // Insert into primitives array
