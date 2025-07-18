@@ -204,6 +204,7 @@ Engine :: struct {
   mouse_move_proc:             MouseMoveProc,
   mouse_scroll_proc:           MouseScrollProc,
   custom_render_proc:          CustomRenderProc,
+  post_lighting_render_proc:   CustomRenderProc,
   render_error_count:          u32,
   visibility_culler:           VisibilityCuller,
   shadow:                      RendererShadow,
@@ -1336,8 +1337,6 @@ render :: proc(self: ^Engine) -> vk.Result {
   if self.custom_render_proc != nil {
     self.custom_render_proc(self, command_buffer)
   }
-
-  // log.debug("============ rendering shadow pass...============ ")
   // Transition all shadow maps to depth attachment optimal
   shadow_2d_images: [MAX_SHADOW_MAPS]vk.Image
   for i in 0 ..< shadow_map_count {
@@ -1761,6 +1760,12 @@ render :: proc(self: ^Engine) -> vk.Result {
     self.frame_index,
   )
   transparent_end(&self.transparent, command_buffer)
+  
+  // Call post-lighting custom render proc if provided (after all lighting is done)
+  if self.post_lighting_render_proc != nil {
+    self.post_lighting_render_proc(self, command_buffer)
+  }
+  
   // log.debug("============ rendering post processes... =============")
   gpu.transition_image_to_shader_read(command_buffer, final_image.image)
   postprocess_begin(&self.postprocess, command_buffer, self.swapchain.extent)

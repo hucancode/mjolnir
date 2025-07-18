@@ -3,6 +3,7 @@ package mjolnir
 import "animation"
 import "core:log"
 import "core:math/linalg"
+import "core:slice"
 import "geometry"
 import "gpu"
 import vk "vendor:vulkan"
@@ -34,11 +35,14 @@ Mesh :: struct {
   index_buffer:  gpu.DataBuffer(u32),
   aabb:          geometry.Aabb,
   skinning:      Maybe(Skinning),
+  // Keep original geometry data for navigation mesh building
+  geometry_data: geometry.Geometry,
 }
 
 mesh_deinit :: proc(self: ^Mesh, gpu_context: ^gpu.GPUContext) {
   gpu.data_buffer_deinit(gpu_context, &self.vertex_buffer)
   gpu.data_buffer_deinit(gpu_context, &self.index_buffer)
+  geometry.delete_geometry(self.geometry_data)
   skin, has_skin := &self.skinning.?
   if !has_skin do return
   gpu.data_buffer_deinit(gpu_context, &skin.skin_buffer)
@@ -53,6 +57,13 @@ mesh_init :: proc(
   gpu_context: ^gpu.GPUContext,
   data: geometry.Geometry,
 ) -> vk.Result {
+  // Store a copy of the geometry data for navigation mesh building
+  self.geometry_data = geometry.Geometry{
+    vertices = slice.clone(data.vertices),
+    indices = slice.clone(data.indices),
+    skinnings = slice.clone(data.skinnings),
+    aabb = data.aabb,
+  }
   defer geometry.delete_geometry(data)
   self.vertices_len = u32(len(data.vertices))
   self.indices_len = u32(len(data.indices))

@@ -7,6 +7,7 @@ import "core:slice"
 import "core:strings"
 import "geometry"
 import "gpu"
+import "navigation"
 import "resource"
 import stbi "vendor:stb/image"
 import vk "vendor:vulkan"
@@ -25,6 +26,7 @@ ResourceWarehouse :: struct {
   image_cube_buffers:           resource.Pool(gpu.CubeImageBuffer),
   cameras:                      resource.Pool(geometry.Camera),
   render_targets:               resource.Pool(RenderTarget),
+  navigation_meshes:            resource.Pool(navigation.NavMesh),
 
   // Bone matrix system
   bone_buffer_set_layout:       vk.DescriptorSetLayout,
@@ -62,6 +64,8 @@ resource_init :: proc(
   resource.pool_init(&warehouse.cameras)
   log.infof("Initializing render target pool... ")
   resource.pool_init(&warehouse.render_targets)
+  log.infof("Initializing navigation mesh pool... ")
+  resource.pool_init(&warehouse.navigation_meshes)
   log.infof("All resource pools initialized successfully")
   init_global_samplers(gpu_context, warehouse)
   init_bone_matrix_allocator(gpu_context, warehouse) or_return
@@ -183,6 +187,14 @@ resource_deinit :: proc(
   }
   delete(warehouse.meshes.entries)
   delete(warehouse.meshes.free_indices)
+  // Cleanup navigation meshes
+  for &entry in warehouse.navigation_meshes.entries {
+    if entry.generation > 0 && entry.active {
+      navigation.destroy(&entry.item)
+    }
+  }
+  delete(warehouse.navigation_meshes.entries)
+  delete(warehouse.navigation_meshes.free_indices)
   // Simple cleanup for pools without GPU resources
   delete(warehouse.materials.entries)
   delete(warehouse.materials.free_indices)

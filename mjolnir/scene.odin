@@ -6,6 +6,7 @@ import "core:math"
 import "core:math/linalg"
 import "core:slice"
 import "geometry"
+import "navigation"
 import "resource"
 
 PointLightAttachment :: struct {
@@ -67,6 +68,11 @@ ForceFieldAttachment :: struct {
   fade:             f32, // 0..1, linear fade factor
 }
 
+NavigationMeshAttachment :: struct {
+  handle:       Handle,  // Handle to geometry for this nav mesh part
+  is_walkable:  bool,
+}
+
 NodeAttachment :: union {
   PointLightAttachment,
   DirectionalLightAttachment,
@@ -75,6 +81,7 @@ NodeAttachment :: union {
   ParticleSystemAttachment,
   EmitterAttachment,
   ForceFieldAttachment,
+  NavigationMeshAttachment,
 }
 
 Node :: struct {
