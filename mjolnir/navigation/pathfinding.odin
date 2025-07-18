@@ -491,14 +491,18 @@ string_pull_path :: proc(navmesh: ^NavMesh, poly_path: []PolyRef, start_pos, end
   }
   
   // Get portal edges between polygons
-  portals := make([][6]f32, len(poly_path) - 1)
+  portals := make([][6]f32, len(poly_path) + 1)
   defer delete(portals)
+  
+  // First portal is from start position
+  portals[0] = [6]f32{start_pos.x, start_pos.y, start_pos.z, 
+                      start_pos.x, start_pos.y, start_pos.z}
   
   portal_count := 0
   for i in 0..<len(poly_path) - 1 {
     portal_left, portal_right := get_portal_points(navmesh, poly_path[i], poly_path[i+1])
-    portals[i] = [6]f32{portal_left.x, portal_left.y, portal_left.z, 
-                         portal_right.x, portal_right.y, portal_right.z}
+    portals[i+1] = [6]f32{portal_left.x, portal_left.y, portal_left.z, 
+                          portal_right.x, portal_right.y, portal_right.z}
     
     // Check if we got valid portal points
     if portal_left == portal_right {
@@ -507,6 +511,10 @@ string_pull_path :: proc(navmesh: ^NavMesh, poly_path: []PolyRef, start_pos, end
       portal_count += 1
     }
   }
+  
+  // Last portal is to end position
+  portals[len(poly_path)] = [6]f32{end_pos.x, end_pos.y, end_pos.z, 
+                                    end_pos.x, end_pos.y, end_pos.z}
   
   log.debugf("string_pull_path: Found %d valid portals out of %d polygon transitions", portal_count, len(poly_path) - 1)
   
@@ -521,6 +529,9 @@ string_pull_path :: proc(navmesh: ^NavMesh, poly_path: []PolyRef, start_pos, end
   right := [3]f32{portals[0][3], portals[0][4], portals[0][5]}
   left_idx := 0
   right_idx := 0
+  
+  log.debugf("string_pull: Starting funnel - apex: [%.2f,%.2f,%.2f], left: [%.2f,%.2f,%.2f], right: [%.2f,%.2f,%.2f]",
+            apex.x, apex.y, apex.z, left.x, left.y, left.z, right.x, right.y, right.z)
   
   i := 1
   max_string_pull_iterations := len(portals) * 10  // Safety limit
@@ -588,8 +599,11 @@ string_pull_path :: proc(navmesh: ^NavMesh, poly_path: []PolyRef, start_pos, end
     i += 1
   }
   
-  // Add the final destination
-  append(&path, end_pos)
+  // The final portal to end_pos was already processed in the loop
+  // Just add the final destination if not already added
+  if len(path) == 0 || path[len(path)-1] != end_pos {
+    append(&path, end_pos)
+  }
   
   return path[:]
 }
@@ -656,7 +670,33 @@ get_portal_points :: proc(navmesh: ^NavMesh, poly_ref1, poly_ref2: PolyRef) -> (
     tile1.verts[v1_idx * 3 + 2],
   }
   
-  return v0, v1
+  // IMPORTANT: Order vertices as left/right based on traversal direction
+  // We need to determine which vertex is "left" and which is "right"
+  // when moving from poly1 to poly2
+  
+  // Get the centers of both polygons to determine traversal direction
+  center1 := get_poly_center(navmesh, poly_ref1)
+  center2 := get_poly_center(navmesh, poly_ref2)
+  
+  // Calculate the direction vector from poly1 to poly2
+  dir := [3]f32{
+    center2.x - center1.x,
+    center2.y - center1.y,
+    center2.z - center1.z,
+  }
+  
+  // Calculate which vertex is on the left side of the traversal direction
+  // Using cross product in XZ plane (Y-up coordinate system)
+  edge_dir := [3]f32{v1.x - v0.x, 0, v1.z - v0.z}
+  cross := dir.x * edge_dir.z - dir.z * edge_dir.x
+  
+  // If cross product is positive, v0 is on the left, v1 on the right
+  // Otherwise, swap them
+  if cross > 0 {
+    return v0, v1
+  } else {
+    return v1, v0
+  }
 }
 
 
