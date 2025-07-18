@@ -93,16 +93,16 @@ navigation_debug_init :: proc(
   debug.enabled = true
   debug.colors = DEFAULT_NAVMESH_COLORS
   debug.mesh_built = false
-  
+
   // Store debug data from builder
   debug.heightfield_data = builder.debug_heightfield
   debug.compact_hf_data = builder.debug_compact_hf
   debug.contour_data = builder.debug_contours
   debug.poly_mesh_data = builder.debug_poly_mesh
-  
-  log.infof("Debug data stored: heightfield=%p, compact_hf=%p, contours=%p, poly_mesh=%p", 
+
+  log.infof("Debug data stored: heightfield=%p, compact_hf=%p, contours=%p, poly_mesh=%p",
     debug.heightfield_data, debug.compact_hf_data, debug.contour_data, debug.poly_mesh_data)
-  
+
   return true
 }
 
@@ -269,7 +269,7 @@ create_navmesh_debug_pipeline :: proc(
     polygonMode = .FILL,
     lineWidth = 1.0,
     cullMode = {.BACK},
-    frontFace = .CLOCKWISE,
+    frontFace = .COUNTER_CLOCKWISE,
   }
 
   // Multisampling
@@ -544,7 +544,7 @@ build_debug_mesh :: proc(
       return false
     }
     generate_navmesh_debug_geometry(debug.navmesh, debug.colors, &vertices, &indices)
-    
+
   case .HEIGHTFIELD:
     if debug.heightfield_data == nil {
       log.warn("No heightfield data to visualize")
@@ -553,28 +553,28 @@ build_debug_mesh :: proc(
     log.infof("Generating heightfield debug geometry for heightfield %p", debug.heightfield_data)
     generate_heightfield_debug_geometry(debug.heightfield_data, debug.colors, &vertices, &indices)
     log.infof("Generated %d vertices, %d indices for heightfield", len(vertices), len(indices))
-    
+
   case .COMPACT_HEIGHTFIELD, .DISTANCE_FIELD:
     if debug.compact_hf_data == nil {
       log.warn("No compact heightfield data to visualize")
       return false
     }
     generate_compact_heightfield_debug_geometry(debug.compact_hf_data, debug.colors, &vertices, &indices)
-    
+
   case .REGIONS:
     if debug.compact_hf_data == nil {
       log.warn("No compact heightfield data to visualize regions")
       return false
     }
     generate_regions_debug_geometry(debug.compact_hf_data, debug.colors, &vertices, &indices)
-    
+
   case .CONTOURS:
     if debug.contour_data == nil {
       log.warn("No contour data to visualize")
       return false
     }
     generate_contour_debug_geometry(debug.contour_data, debug.colors, &vertices, &indices)
-    
+
   case .POLY_MESH:
     if debug.poly_mesh_data == nil {
       log.warn("No poly mesh data to visualize")
@@ -648,6 +648,15 @@ generate_navmesh_debug_geometry :: proc(
       poly := &tile.polys[poly_idx]
       if poly.vert_count < 3 do continue
 
+      // Generate a color for this polygon based on its index
+      // Use a simple hash to get varied colors
+      poly_color := [4]f32{
+        f32((poly_idx * 73 + 29) % 256) / 255.0,
+        f32((poly_idx * 97 + 53) % 256) / 255.0,
+        f32((poly_idx * 139 + 71) % 256) / 255.0,
+        colors.mesh.w,  // Keep original alpha
+      }
+
       // Add polygon vertices
       base_vertex := vertex_offset
       for i in 0..<poly.vert_count {
@@ -662,7 +671,7 @@ generate_navmesh_debug_geometry :: proc(
 
         append(vertices, DebugVertex{
           position = vert_pos,
-          color = colors.mesh,
+          color = poly_color,
         })
         vertex_offset += 1
       }
@@ -685,29 +694,29 @@ generate_heightfield_debug_geometry :: proc(
   indices: ^[dynamic]u32,
 ) {
   if hf == nil do return
-  
+
   log.infof("Heightfield: width=%d, height=%d, spans=%p", hf.width, hf.height, hf.spans)
-  
+
   if hf.spans == nil {
     log.warn("Heightfield spans is nil, cannot visualize")
     return
   }
-  
+
   vertex_offset: u32 = 0
-  
+
   // Visualize each span in the heightfield
   for z in 0..<hf.height {
     for x in 0..<hf.width {
       idx := x + z * hf.width
       span := hf.spans[idx]
-      
+
       for span != nil {
         // Calculate world position
         wx := hf.bmin.x + f32(x) * hf.cs
         wz := hf.bmin.z + f32(z) * hf.cs
         wy_bottom := hf.bmin.y + f32(span.smin) * hf.ch
         wy_top := hf.bmin.y + f32(span.smax) * hf.ch + NAVMESH_DEBUG_ELEVATION
-        
+
         // Choose color based on area type
         color := colors.mesh
         if span.area == navigation.NULL_AREA {
@@ -715,7 +724,7 @@ generate_heightfield_debug_geometry :: proc(
         } else if span.area == navigation.WALKABLE_AREA {
           color = {0.2, 0.8, 0.2, 0.5}  // Green for walkable
         }
-        
+
         // Create a quad for the top of the span
         base_vertex := vertex_offset
         append(vertices, DebugVertex{[3]f32{wx, wy_top, wz}, color})
@@ -723,11 +732,11 @@ generate_heightfield_debug_geometry :: proc(
         append(vertices, DebugVertex{[3]f32{wx + hf.cs, wy_top, wz + hf.cs}, color})
         append(vertices, DebugVertex{[3]f32{wx, wy_top, wz + hf.cs}, color})
         vertex_offset += 4
-        
+
         // Create quad indices
         append(indices, base_vertex + 0, base_vertex + 1, base_vertex + 2)
         append(indices, base_vertex + 0, base_vertex + 2, base_vertex + 3)
-        
+
         span = span.next
       }
     }
@@ -742,24 +751,24 @@ generate_compact_heightfield_debug_geometry :: proc(
   indices: ^[dynamic]u32,
 ) {
   if chf == nil do return
-  
+
   vertex_offset: u32 = 0
-  
+
   // Visualize each span in the compact heightfield
   for y in 0..<chf.height {
     for x in 0..<chf.width {
       c := &chf.cells[x + y * chf.width]
       cellIndex, cellCount := navigation.unpack_compact_cell(c.index)
-      
+
       for i in cellIndex..<cellIndex + u32(cellCount) {
         s := &chf.spans[i]
         area := chf.areas[i]
-        
+
         // Calculate world position
         wx := chf.bmin.x + f32(x) * chf.cs
         wz := chf.bmin.z + f32(y) * chf.cs
         wy := chf.bmin.y + f32(s.y) * chf.ch + NAVMESH_DEBUG_ELEVATION
-        
+
         // Choose color based on area or distance field
         color := colors.mesh
         if chf.dist != nil && i < u32(len(chf.dist)) {
@@ -771,7 +780,7 @@ generate_compact_heightfield_debug_geometry :: proc(
         } else {
           color = {0.2, 0.8, 0.2, 0.5}
         }
-        
+
         // Create a quad for the span
         base_vertex := vertex_offset
         append(vertices, DebugVertex{[3]f32{wx, wy, wz}, color})
@@ -779,7 +788,7 @@ generate_compact_heightfield_debug_geometry :: proc(
         append(vertices, DebugVertex{[3]f32{wx + chf.cs, wy, wz + chf.cs}, color})
         append(vertices, DebugVertex{[3]f32{wx, wy, wz + chf.cs}, color})
         vertex_offset += 4
-        
+
         // Create quad indices
         append(indices, base_vertex + 0, base_vertex + 1, base_vertex + 2)
         append(indices, base_vertex + 0, base_vertex + 2, base_vertex + 3)
@@ -796,9 +805,9 @@ generate_regions_debug_geometry :: proc(
   indices: ^[dynamic]u32,
 ) {
   if chf == nil do return
-  
+
   vertex_offset: u32 = 0
-  
+
   // Create a color palette for different regions
   region_colors := [20][4]f32{
     {0.8, 0.2, 0.2, 0.5},
@@ -823,26 +832,26 @@ generate_regions_debug_geometry :: proc(
     {0.9, 0.5, 0.7, 0.5},
     {0.5, 0.9, 0.5, 0.5},
   }
-  
+
   // Visualize regions
   for y in 0..<chf.height {
     for x in 0..<chf.width {
       c := &chf.cells[x + y * chf.width]
       cellIndex, cellCount := navigation.unpack_compact_cell(c.index)
-      
+
       for i in cellIndex..<cellIndex + u32(cellCount) {
         s := &chf.spans[i]
-        
+
         if s.reg == 0 do continue
-        
+
         // Calculate world position
         wx := chf.bmin.x + f32(x) * chf.cs
         wz := chf.bmin.z + f32(y) * chf.cs
         wy := chf.bmin.y + f32(s.y) * chf.ch + NAVMESH_DEBUG_ELEVATION
-        
+
         // Choose color based on region ID
         color := region_colors[s.reg % 20]
-        
+
         // Create a quad for the span
         base_vertex := vertex_offset
         append(vertices, DebugVertex{[3]f32{wx, wy, wz}, color})
@@ -850,7 +859,7 @@ generate_regions_debug_geometry :: proc(
         append(vertices, DebugVertex{[3]f32{wx + chf.cs, wy, wz + chf.cs}, color})
         append(vertices, DebugVertex{[3]f32{wx, wy, wz + chf.cs}, color})
         vertex_offset += 4
-        
+
         // Create quad indices
         append(indices, base_vertex + 0, base_vertex + 1, base_vertex + 2)
         append(indices, base_vertex + 0, base_vertex + 2, base_vertex + 3)
@@ -1129,9 +1138,9 @@ generate_contour_debug_geometry :: proc(
   indices: ^[dynamic]u32,
 ) {
   if cset == nil do return
-  
+
   vertex_offset: u32 = 0
-  
+
   // Create a color palette for different contours
   contour_colors := [10][4]f32{
     {1.0, 0.0, 0.0, 0.8},
@@ -1145,26 +1154,26 @@ generate_contour_debug_geometry :: proc(
     {0.0, 0.5, 1.0, 0.8},
     {1.0, 0.0, 0.5, 0.8},
   }
-  
+
   // Draw each contour
   for i in 0..<cset.nconts {
     cont := &cset.conts[i]
     color := contour_colors[i % 10]
-    
+
     // Draw simplified contour as line loop
     if cont.nverts > 0 {
       base_vertex := vertex_offset
-      
+
       // Add vertices
       for j in 0..<cont.nverts {
         wx := f32(cont.verts[j*4 + 0]) * cset.cs + cset.bmin.x
         wy := f32(cont.verts[j*4 + 1]) * cset.ch + cset.bmin.y + NAVMESH_DEBUG_ELEVATION * 2
         wz := f32(cont.verts[j*4 + 2]) * cset.cs + cset.bmin.z
-        
+
         append(vertices, DebugVertex{[3]f32{wx, wy, wz}, color})
         vertex_offset += 1
       }
-      
+
       // Create line indices
       for j in 0..<cont.nverts-1 {
         append(indices, base_vertex + u32(j), base_vertex + u32(j) + 1, base_vertex + u32(j))
@@ -1185,9 +1194,9 @@ generate_polymesh_debug_geometry :: proc(
   indices: ^[dynamic]u32,
 ) {
   if pmesh == nil do return
-  
+
   vertex_offset: u32 = 0
-  
+
   // Add all vertices
   base_vertex := vertex_offset
   for i in 0..<pmesh.nverts {
@@ -1195,22 +1204,22 @@ generate_polymesh_debug_geometry :: proc(
     wx := pmesh.bmin.x + f32(pmesh.verts[idx + 0]) * pmesh.cs
     wy := pmesh.bmin.y + f32(pmesh.verts[idx + 1]) * pmesh.ch + NAVMESH_DEBUG_ELEVATION
     wz := pmesh.bmin.z + f32(pmesh.verts[idx + 2]) * pmesh.cs
-    
+
     append(vertices, DebugVertex{[3]f32{wx, wy, wz}, colors.mesh})
     vertex_offset += 1
   }
-  
+
   // Create polygons
   for i in 0..<pmesh.npolys {
     p_base := i * pmesh.nvp * 2
-    
+
     // Count valid vertices
     vert_count := 0
     for j in 0..<pmesh.nvp {
       if pmesh.polys[p_base + i32(j)] == 0xffff do break
       vert_count += 1
     }
-    
+
     // Create triangle fan for polygon
     if vert_count >= 3 {
       v0 := base_vertex + u32(pmesh.polys[p_base])
@@ -1237,7 +1246,7 @@ navigation_debug_cycle_mode :: proc(debug: ^NavigationDebug) {
     .FINAL_MESH,
     .COMPACT_HEIGHTFIELD,
   }
-  
+
   current_idx := 0
   for mode, i in modes {
     if mode == debug.vis_mode {
@@ -1245,7 +1254,7 @@ navigation_debug_cycle_mode :: proc(debug: ^NavigationDebug) {
       break
     }
   }
-  
+
   next_idx := (current_idx + 1) % len(modes)
   debug.vis_mode = modes[next_idx]
   debug.mesh_built = false
