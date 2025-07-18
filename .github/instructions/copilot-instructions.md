@@ -15,8 +15,11 @@ make debug
 # Build only (release mode)
 make build
 
-# Run tests
+# Run all tests
 make test
+
+# Run single test
+odin test test -define:ODIN_TEST_NAMES=tests.test_name
 
 # Check for compiler errors without building
 make check
@@ -25,7 +28,7 @@ make check
 make shader
 
 # Build single shader
-make mjolnir/shader/{shader_name}/vert.spv # build a specific vertex shader, use frag.spv for fragment shader
+make mjolnir/shader/shader_name/vert.spv
 
 # Clean build artifacts
 make clean
