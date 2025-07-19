@@ -828,21 +828,51 @@ build_poly_mesh :: proc(cset: ^ContourSet, nvp: i32) -> ^PolyMesh {
       vert_indices[j] = vert_idx
     }
     
-    // Build polygons from contour
-    // If contour fits in a single polygon, use it directly to avoid triangulation issues
-    if cont.nverts <= nvp {
-      if pmesh.npolys >= pmesh.max_polys do continue
+    // Always triangulate first to get a consistent mesh
+    // We'll merge triangles later to optimize polygon count
+    log.debugf("Triangulating contour %d with %d vertices", i, cont.nverts)
+    
+    // Convert vert_indices to u16 array for triangulation
+    contour_verts := make([]u16, cont.nverts)
+    defer delete(contour_verts)
+    for j in 0..<cont.nverts {
+      contour_verts[j] = u16(vert_indices[j])
+    }
+    
+    // Triangulate the contour
+    triangles := make([dynamic]u16)
+    defer delete(triangles)
+    
+    // Convert pmesh verts from u16 to f32 for triangulation
+    verts_f32 := make([]f32, len(pmesh.verts))
+    defer delete(verts_f32)
+    for v in 0..<len(pmesh.verts) {
+      verts_f32[v] = f32(pmesh.verts[v])
+    }
+    
+    ntris := triangulate_polygon(contour_verts, verts_f32, &triangles)
+    
+    if ntris < 0 {
+      log.errorf("Failed to triangulate contour %d with %d vertices", i, cont.nverts)
+      // Fall back to simple fan triangulation
+      ntris = -ntris
+    }
+    
+    // Add triangles to polygon mesh
+    tri_idx := 0
+    for t in 0..<ntris {
+      if pmesh.npolys >= pmesh.max_polys do break
       
       poly_idx := pmesh.npolys * nvp * 2
       
-      // Add all vertices directly
-      for j in 0..<cont.nverts {
-        pmesh.polys[poly_idx + i32(j)] = u16(vert_indices[j])
-      }
+      // Add triangle vertices
+      pmesh.polys[poly_idx + 0] = triangles[tri_idx * 3 + 0]
+      pmesh.polys[poly_idx + 1] = triangles[tri_idx * 3 + 1]
+      pmesh.polys[poly_idx + 2] = triangles[tri_idx * 3 + 2]
       
       // Fill remaining vertices with null idx
-      for j in cont.nverts..<nvp {
-        pmesh.polys[poly_idx + i32(j)] = 0xffff
+      for k in 3..<nvp {
+        pmesh.polys[poly_idx + i32(k)] = 0xffff
       }
       
       // Set region and area
@@ -851,66 +881,10 @@ build_poly_mesh :: proc(cset: ^ContourSet, nvp: i32) -> ^PolyMesh {
       pmesh.flags[pmesh.npolys] = 0
       
       pmesh.npolys += 1
-      
-      log.debugf("Created single polygon with %d vertices for contour %d", cont.nverts, i)
-    } else {
-      // For large contours, use proper ear-clipping triangulation
-      log.infof("Contour %d has %d vertices (max %d), using ear-clipping triangulation", i, cont.nverts, nvp)
-      
-      // Convert vert_indices to u16 array for triangulation
-      contour_verts := make([]u16, cont.nverts)
-      defer delete(contour_verts)
-      for j in 0..<cont.nverts {
-        contour_verts[j] = u16(vert_indices[j])
-      }
-      
-      // Triangulate the contour
-      triangles := make([dynamic]u16)
-      defer delete(triangles)
-      
-      // Convert pmesh verts from u16 to f32 for triangulation
-      verts_f32 := make([]f32, len(pmesh.verts))
-      defer delete(verts_f32)
-      for v in 0..<len(pmesh.verts) {
-        verts_f32[v] = f32(pmesh.verts[v])
-      }
-      
-      ntris := triangulate_polygon(contour_verts, verts_f32, &triangles)
-      
-      if ntris < 0 {
-        log.errorf("Failed to triangulate contour %d with %d vertices", i, cont.nverts)
-        // Fall back to simple fan triangulation
-        ntris = -ntris
-      }
-      
-      // Add triangles to polygon mesh
-      tri_idx := 0
-      for t in 0..<ntris {
-        if pmesh.npolys >= pmesh.max_polys do break
-        
-        poly_idx := pmesh.npolys * nvp * 2
-        
-        // Add triangle vertices
-        pmesh.polys[poly_idx + 0] = triangles[tri_idx * 3 + 0]
-        pmesh.polys[poly_idx + 1] = triangles[tri_idx * 3 + 1]
-        pmesh.polys[poly_idx + 2] = triangles[tri_idx * 3 + 2]
-        
-        // Fill remaining vertices with null idx
-        for k in 3..<nvp {
-          pmesh.polys[poly_idx + i32(k)] = 0xffff
-        }
-        
-        // Set region and area
-        pmesh.regs[pmesh.npolys] = cont.reg
-        pmesh.areas[pmesh.npolys] = cont.area
-        pmesh.flags[pmesh.npolys] = 0
-        
-        pmesh.npolys += 1
-        tri_idx += 1
-      }
-      
-      log.infof("Triangulated contour %d into %d triangles", i, ntris)
+      tri_idx += 1
     }
+    
+    log.infof("Triangulated contour %d into %d triangles", i, ntris)
     
     poly_count_after := pmesh.npolys
     
@@ -943,6 +917,16 @@ build_poly_mesh :: proc(cset: ^ContourSet, nvp: i32) -> ^PolyMesh {
   
   // Build mesh adjacency
   build_mesh_adjacency(pmesh)
+  
+  // Merge polygons to reduce triangle count
+  if nvp > 3 {
+    log.infof("Merging polygons to optimize mesh (initial count: %d)", pmesh.npolys)
+    merge_polygons(pmesh, nvp)
+    log.infof("After merging: %d polygons", pmesh.npolys)
+    
+    // Rebuild adjacency after merging
+    build_mesh_adjacency(pmesh)
+  }
   
   // Validate polygon connectivity
   disconnected_count := 0
@@ -1118,9 +1102,10 @@ are_polygons_adjacent :: proc(center1, center2, edge_mid: [3]f32) -> bool {
   dist2 := distance_2d(center2, edge_mid)
   center_dist := distance_2d(center1, center2)
   
-  // More permissive check - if polygons share an edge, they should be close
-  max_edge_distance := f32(50.0) // Very permissive
-  max_center_distance := f32(100.0) // Very permissive
+  // Note: distances are in grid units, not world units!
+  // For a grid with cell size ~0.3-0.5, we need much smaller thresholds
+  max_edge_distance := f32(20.0) // In grid units
+  max_center_distance := f32(40.0) // In grid units
   
   return dist1 <= max_edge_distance && dist2 <= max_edge_distance && center_dist <= max_center_distance
 }
@@ -1336,4 +1321,182 @@ triangulate_polygon :: proc(vertices: []u16, verts: []f32, triangles: ^[dynamic]
   }
   
   return ntris
+}
+
+// Count vertices in polygon (up to first 0xffff)
+count_poly_verts :: proc(poly: []u16, nvp: i32) -> i32 {
+  for i in 0..<nvp {
+    if poly[i] == 0xffff do return i
+  }
+  return nvp
+}
+
+// Check if vertex ordering forms a left turn (for convexity check)
+uleft :: proc(verts: []u16, a, b, c: u16) -> bool {
+  ax := i32(verts[a*3])
+  ay := i32(verts[a*3+2])
+  bx := i32(verts[b*3])
+  by := i32(verts[b*3+2])
+  cx := i32(verts[c*3])
+  cy := i32(verts[c*3+2])
+  
+  return ((bx - ax) * (cy - ay) - (cx - ax) * (by - ay)) < 0
+}
+
+// Get the merge value for two polygons
+get_poly_merge_value :: proc(verts: []u16, pa, pb: []u16, nvp: i32) -> (value: i32, ea, eb: i32) {
+  na := count_poly_verts(pa, nvp)
+  nb := count_poly_verts(pb, nvp)
+  
+  // If merged polygon would be too big, cannot merge
+  if na + nb - 2 > nvp do return -1, -1, -1
+  
+  // Check if polygons share an edge
+  ea = -1
+  eb = -1
+  
+  for i in 0..<na {
+    va0 := pa[i]
+    va1 := pa[(i+1) % na]
+    if va0 > va1 {
+      va0, va1 = va1, va0
+    }
+    
+    for j in 0..<nb {
+      vb0 := pb[j]
+      vb1 := pb[(j+1) % nb]
+      if vb0 > vb1 {
+        vb0, vb1 = vb1, vb0
+      }
+      
+      if va0 == vb0 && va1 == vb1 {
+        ea = i32(i)
+        eb = i32(j)
+        break
+      }
+    }
+    
+    if ea != -1 do break
+  }
+  
+  // No common edge
+  if ea == -1 || eb == -1 do return -1, -1, -1
+  
+  // Check if merged polygon would be convex
+  // Check vertex before shared edge on pa with vertex after shared edge on pb
+  va := pa[(ea + na - 1) % na]
+  vb := pa[ea]
+  vc := pb[(eb + 2) % nb]
+  if !uleft(verts, va, vb, vc) do return -1, -1, -1
+  
+  // Check vertex before shared edge on pb with vertex after shared edge on pa
+  va = pb[(eb + nb - 1) % nb]
+  vb = pb[eb]
+  vc = pa[(ea + 2) % na]
+  if !uleft(verts, va, vb, vc) do return -1, -1, -1
+  
+  // Calculate merge value (squared length of shared edge)
+  va = pa[ea]
+  vb = pa[(ea + 1) % na]
+  
+  dx := i32(verts[va*3]) - i32(verts[vb*3])
+  dy := i32(verts[va*3+2]) - i32(verts[vb*3+2])
+  
+  return dx*dx + dy*dy, ea, eb
+}
+
+// Merge two polygons
+merge_poly_verts :: proc(pa, pb: []u16, ea, eb: i32, nvp: i32) {
+  na := count_poly_verts(pa, nvp)
+  nb := count_poly_verts(pb, nvp)
+  
+  // Temporary buffer for merged result
+  tmp := make([]u16, nvp)
+  defer delete(tmp)
+  for i in 0..<nvp do tmp[i] = 0xffff
+  
+  n := 0
+  // Add vertices from pa, skipping the shared edge
+  for i in 0..<na-1 {
+    tmp[n] = pa[(ea+1+i) % na]
+    n += 1
+  }
+  // Add vertices from pb, skipping the shared edge  
+  for i in 0..<nb-1 {
+    tmp[n] = pb[(eb+1+i) % nb]
+    n += 1
+  }
+  
+  // Copy back to pa
+  for i in 0..<nvp {
+    pa[i] = tmp[i]
+  }
+}
+
+// Merge polygons in the mesh to reduce triangle count
+merge_polygons :: proc(mesh: ^PolyMesh, nvp: i32) {
+  if mesh == nil || mesh.npolys == 0 do return
+  
+  max_iterations := mesh.npolys * mesh.npolys  // Safety limit
+  
+  for iter in 0..<max_iterations {
+    // Find best merge candidate
+    best_merge_val := i32(0)
+    best_pa := i32(-1)
+    best_pb := i32(-1) 
+    best_ea := i32(-1)
+    best_eb := i32(-1)
+    
+    for i in 0..<mesh.npolys-1 {
+      pa_idx := i * nvp * 2
+      pa := mesh.polys[pa_idx:pa_idx+nvp]
+      
+      for j in i+1..<mesh.npolys {
+        pb_idx := j * nvp * 2
+        pb := mesh.polys[pb_idx:pb_idx+nvp]
+        
+        // Only merge if regions match
+        if mesh.regs[i] != mesh.regs[j] do continue
+        
+        val, ea, eb := get_poly_merge_value(mesh.verts, pa, pb, nvp)
+        if val > best_merge_val {
+          best_merge_val = val
+          best_pa = i
+          best_pb = j
+          best_ea = ea
+          best_eb = eb
+        }
+      }
+    }
+    
+    // If no good merge found, we're done
+    if best_merge_val <= 0 do break
+    
+    // Merge the polygons
+    pa_idx := best_pa * nvp * 2
+    pb_idx := best_pb * nvp * 2
+    pa := mesh.polys[pa_idx:pa_idx+nvp]
+    pb := mesh.polys[pb_idx:pb_idx+nvp]
+    
+    merge_poly_verts(pa, pb, best_ea, best_eb, nvp)
+    
+    // Move last polygon to position of merged polygon
+    last_idx := (mesh.npolys - 1) * nvp * 2
+    if pb_idx != last_idx {
+      // Copy polygon data
+      for k in 0..<nvp*2 {
+        mesh.polys[pb_idx + k] = mesh.polys[last_idx + k]
+      }
+      // Copy metadata
+      mesh.regs[best_pb] = mesh.regs[mesh.npolys - 1]
+      mesh.areas[best_pb] = mesh.areas[mesh.npolys - 1]
+      mesh.flags[best_pb] = mesh.flags[mesh.npolys - 1]
+    }
+    
+    mesh.npolys -= 1
+    
+    if iter % 100 == 0 && iter > 0 {
+      log.debugf("Polygon merging progress: %d merges completed, %d polygons remaining", iter, mesh.npolys)
+    }
+  }
 }

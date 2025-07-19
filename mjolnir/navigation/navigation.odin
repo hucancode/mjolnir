@@ -340,10 +340,10 @@ build_with_heightfield :: proc(builder: ^NavMeshBuilder, input: ^Input) -> (NavM
   }
   log.infof("Before filtering: %d walkable spans, %d null spans", walkable_before, null_before)
 
-  // Disable all filtering temporarily to debug
-  // filter_lowHanging_walkable_obstacles(config.walkable_climb, hf)
-  // filter_ledge_spans(config.walkable_height, config.walkable_climb, hf)
-  // filter_walkable_low_height_spans(config.walkable_height, hf)
+  // Apply filters to mark obstacles and ledges properly
+  filter_lowHanging_walkable_obstacles(config.walkable_climb, hf)
+  filter_ledge_spans(config.walkable_height, config.walkable_climb, hf)
+  filter_walkable_low_height_spans(config.walkable_height, hf)
 
   // Count after filtering
   walkable_after := 0
@@ -363,6 +363,29 @@ build_with_heightfield :: proc(builder: ^NavMeshBuilder, input: ^Input) -> (NavM
     }
   }
   log.infof("After filtering: %d walkable spans, %d null spans", walkable_after, null_after)
+  
+  // Debug: Check if any areas have NULL spans that should create holes
+  holes_count := 0
+  for z in 0..<hf.height {
+    for x in 0..<hf.width {
+      idx := x + z * hf.width
+      s := hf.spans[idx]
+      has_null := false
+      has_walkable := false
+      
+      for s != nil {
+        if s.area == NULL_AREA do has_null = true
+        if s.area == WALKABLE_AREA do has_walkable = true
+        s = s.next
+      }
+      
+      // Count cells that have NULL area but no walkable area (true holes)
+      if has_null && !has_walkable {
+        holes_count += 1
+      }
+    }
+  }
+  log.infof("Cells with holes (NULL area only): %d out of %d total cells", holes_count, hf.width * hf.height)
   
   // Debug: Check heightfield values at specific locations
   log.info("Checking heightfield values at key locations:")
@@ -998,8 +1021,9 @@ create_navmesh_from_poly_mesh :: proc(pmesh: ^PolyMesh, dmesh: ^PolyMeshDetail, 
       if neighbor == 0xffff {
         dst_poly.neis[j] = 0  // Detour uses 0 for no neighbor
       } else {
-        // PolyMesh uses 1-based indices, Detour also expects this
-        dst_poly.neis[j] = u16(neighbor)
+        // PolyMesh stores 0-based indices, but we'll use 1-based for consistency
+        // This matches how we'll interpret them when building links
+        dst_poly.neis[j] = u16(neighbor) + 1
       }
     }
 
@@ -1053,6 +1077,59 @@ create_navmesh_from_poly_mesh :: proc(pmesh: ^PolyMesh, dmesh: ^PolyMeshDetail, 
   }
   
   log.infof("Created %d links for %d/%d polygons", total_links, polys_with_links, tile.header.poly_count)
+  
+  // Validate connectivity
+  connectivity_issues := 0
+  asymmetric_connections := 0
+  
+  for i in 0..<tile.header.poly_count {
+    poly := &tile.polys[i]
+    
+    // Check each neighbor reference
+    for link_idx := poly.first_link; link_idx != NULL_LINK; {
+      if link_idx >= u32(len(links)) do break
+      link := &links[link_idx]
+      
+      // Decode neighbor reference
+      neighbor_tile := decode_poly_id_tile(link.ref)
+      neighbor_poly := decode_poly_id_poly(link.ref)
+      
+      if neighbor_tile != 0 || neighbor_poly >= u32(tile.header.poly_count) {
+        log.warnf("Polygon %d has invalid neighbor reference: tile=%d, poly=%d", i, neighbor_tile, neighbor_poly)
+        connectivity_issues += 1
+      } else {
+        // Check if neighbor has reciprocal link back to us
+        neighbor := &tile.polys[neighbor_poly]
+        found_reciprocal := false
+        
+        for nlink_idx := neighbor.first_link; nlink_idx != NULL_LINK; {
+          if nlink_idx >= u32(len(links)) do break
+          nlink := &links[nlink_idx]
+          
+          if decode_poly_id_poly(nlink.ref) == u32(i) {
+            found_reciprocal = true
+            break
+          }
+          
+          nlink_idx = nlink.next
+        }
+        
+        if !found_reciprocal {
+          if asymmetric_connections < 5 {  // Log first few for debugging
+            log.warnf("Asymmetric connection: poly %d -> %d has no reciprocal link", i, neighbor_poly)
+          }
+          asymmetric_connections += 1
+        }
+      }
+      
+      link_idx = link.next
+    }
+  }
+  
+  if connectivity_issues > 0 || asymmetric_connections > 0 {
+    log.warnf("Connectivity issues found: %d connections to invalid polygons, %d asymmetric connections", 
+              connectivity_issues, asymmetric_connections)
+  }
   
   // Convert dynamic array to slice - allocate new slice and copy
   tile.links = make([]Link, len(links))

@@ -128,8 +128,12 @@ add_span :: proc(hf: ^Heightfield, x, z: i32, smin, smax: u32, area: u8, flagMer
 
     // Merge flags
     if abs(i32(s.smax) - i32(cur.smax)) <= flagMergeThr {
-      // Merge area if within threshold
-      if cur.area != NULL_AREA do s.area = cur.area
+      // Merge area - NULL_AREA (obstacles) take priority over walkable areas
+      if s.area == NULL_AREA || cur.area == NULL_AREA {
+        s.area = NULL_AREA
+      } else {
+        s.area = max(s.area, cur.area)
+      }
     }
 
     // Remove current span
@@ -269,6 +273,7 @@ filter_ledge_spans :: proc(walkable_height, walkable_climb: i32, hf: ^Heightfiel
 
         // Find neighbors minimum floor
         minh := max(i32)
+        neighbor_found := false
 
         // Check all 4 neighbors
         for dir in 0..<4 {
@@ -292,6 +297,8 @@ filter_ledge_spans :: proc(walkable_height, walkable_climb: i32, hf: ^Heightfiel
               continue
             }
 
+            neighbor_found = true
+            
             // Check if the neighbor span is accessible
             if nbot - bot > walkable_climb {
               minh = min(minh, nbot - bot)
@@ -301,7 +308,9 @@ filter_ledge_spans :: proc(walkable_height, walkable_climb: i32, hf: ^Heightfiel
         }
 
         // The span is ledge if it's significantly higher than all neighbors
-        if minh > walkable_climb {
+        // Only mark as ledge if we found at least one neighbor to compare against
+        // and the height difference is too large
+        if neighbor_found && minh > walkable_climb && minh != max(i32) {
           s.area = NULL_AREA
         }
 

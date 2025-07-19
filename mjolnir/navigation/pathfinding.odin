@@ -35,6 +35,14 @@ PathQuery :: struct {
   max_nodes:    int,
 }
 
+// Heuristic scale factor (matching Detour's value)
+H_SCALE :: 0.999
+
+// Check if polygon passes filter (matching Detour's logic)
+pass_filter :: proc(filter: ^QueryFilter, poly: ^Poly) -> bool {
+  return (poly.flags & filter.include_flags) != 0 && (poly.flags & filter.exclude_flags) == 0
+}
+
 query_init :: proc(mesh: ^NavMesh, max_nodes: int = 2048) -> PathQuery {
   open_list := priority_queue.Priority_Queue(PathNode){}
   priority_queue.init(&open_list, path_node_less, priority_queue.default_swap_proc(PathNode))
@@ -311,7 +319,7 @@ find_polygon_path :: proc(query: ^PathQuery, start_ref, end_ref: PolyRef, start_
     poly_ref = start_ref,
     position = start_pos,
     g_cost = 0,
-    h_cost = linalg.distance(start_pos, end_pos),
+    h_cost = linalg.distance(start_pos, end_pos) * H_SCALE,
     f_cost = 0,
     parent = 0,
     flags = NODE_OPEN,
@@ -412,6 +420,21 @@ expand_neighbors :: proc(query: ^PathQuery, current: PathNode, end_ref: PolyRef,
       continue
     }
     
+    // Get neighbor polygon for filter check
+    neighbor_tile_idx := decode_poly_id_tile(neighbor_ref)
+    neighbor_poly_idx := decode_poly_id_poly(neighbor_ref)
+    
+    if neighbor_tile_idx >= u32(query.mesh.max_tiles) do continue
+    neighbor_tile := &query.mesh.tiles[neighbor_tile_idx]
+    if neighbor_tile.header == nil || neighbor_poly_idx >= u32(neighbor_tile.header.poly_count) do continue
+    neighbor_poly := &neighbor_tile.polys[neighbor_poly_idx]
+    
+    // Apply filter (matching Detour's approach)
+    if !pass_filter(&query.filter, neighbor_poly) {
+      log.debugf("  Polygon %x failed filter check", neighbor_ref)
+      continue
+    }
+    
     // Check if neighbor is already processed
     if neighbor_node, exists := query.nodes[neighbor_ref]; exists {
       if neighbor_node.flags & NODE_CLOSED != 0 {
@@ -422,13 +445,31 @@ expand_neighbors :: proc(query: ^PathQuery, current: PathNode, end_ref: PolyRef,
       }
     }
     
-    // Calculate neighbor position (simplified - use polygon center)
-    neighbor_pos := get_poly_center(query.mesh, neighbor_ref)
+    // Calculate neighbor position (use edge midpoint for better accuracy)
+    neighbor_pos := get_edge_midpoint(query.mesh, current.poly_ref, neighbor_ref)
+    if neighbor_pos == {} {
+      neighbor_pos = get_poly_center(query.mesh, neighbor_ref)  // Fallback
+    }
     
-    // Calculate costs
-    move_cost := linalg.distance(current.position, neighbor_pos)
+    // Calculate costs (matching Detour's approach)
+    base_move_cost := linalg.distance(current.position, neighbor_pos)
+    poly_area := get_poly_area(neighbor_poly)
+    area_cost := query.filter.area_cost[poly_area]
+    move_cost := base_move_cost * area_cost
     new_g_cost := current.g_cost + move_cost
-    new_h_cost := linalg.distance(neighbor_pos, end_pos)
+    
+    // Special handling for goal node (matching Detour)
+    new_h_cost: f32
+    if neighbor_ref == end_ref {
+      // Goal node: add cost to actual end position and zero heuristic
+      end_cost := linalg.distance(neighbor_pos, end_pos)
+      new_g_cost += end_cost
+      new_h_cost = 0
+    } else {
+      // Regular node: standard heuristic with scaling
+      new_h_cost = linalg.distance(neighbor_pos, end_pos) * H_SCALE
+    }
+    
     new_f_cost := new_g_cost + new_h_cost
     
     // Check if this path is better
@@ -490,33 +531,12 @@ string_pull_path :: proc(navmesh: ^NavMesh, poly_path: []PolyRef, start_pos, end
     return path
   }
   
-  // Get portal edges between polygons
-  portals := make([][6]f32, len(poly_path) + 1)
-  defer delete(portals)
-  
-  // First portal is from start position
-  portals[0] = [6]f32{start_pos.x, start_pos.y, start_pos.z, 
-                      start_pos.x, start_pos.y, start_pos.z}
-  
-  portal_count := 0
-  for i in 0..<len(poly_path) - 1 {
-    portal_left, portal_right := get_portal_points(navmesh, poly_path[i], poly_path[i+1])
-    portals[i+1] = [6]f32{portal_left.x, portal_left.y, portal_left.z, 
-                          portal_right.x, portal_right.y, portal_right.z}
-    
-    // Check if we got valid portal points
-    if portal_left == portal_right {
-      log.warnf("string_pull_path: Portal %d has identical left/right points (likely no shared edge found)", i)
-    } else {
-      portal_count += 1
+  log.debugf("string_pull_path: Processing polygon path:")
+  for i, poly_ref in poly_path {
+    if i < 5 {  // Debug first few polygons
+      log.debugf("  Polygon %d: %x", i, poly_ref)
     }
   }
-  
-  // Last portal is to end position
-  portals[len(poly_path)] = [6]f32{end_pos.x, end_pos.y, end_pos.z, 
-                                    end_pos.x, end_pos.y, end_pos.z}
-  
-  log.debugf("string_pull_path: Found %d valid portals out of %d polygon transitions", portal_count, len(poly_path) - 1)
   
   // Run funnel algorithm
   path := make([dynamic][3]f32)
@@ -525,34 +545,74 @@ string_pull_path :: proc(navmesh: ^NavMesh, poly_path: []PolyRef, start_pos, end
   apex := start_pos
   apex_idx := 0
   
-  left := [3]f32{portals[0][0], portals[0][1], portals[0][2]}
-  right := [3]f32{portals[0][3], portals[0][4], portals[0][5]}
+  // Initialize funnel with start position
+  left := start_pos
+  right := start_pos
   left_idx := 0
   right_idx := 0
   
   log.debugf("string_pull: Starting funnel - apex: [%.2f,%.2f,%.2f], left: [%.2f,%.2f,%.2f], right: [%.2f,%.2f,%.2f]",
             apex.x, apex.y, apex.z, left.x, left.y, left.z, right.x, right.y, right.z)
   
-  i := 1
-  max_string_pull_iterations := len(portals) * 10  // Safety limit
+  // Process portals starting from 0 (matching Detour's approach)
+  i := 0
+  max_string_pull_iterations := len(poly_path) * 10  // Safety limit based on polygon count
   string_pull_iterations := 0
   
-  for i < len(portals) {
+  for i < len(poly_path) {
     string_pull_iterations += 1
     if string_pull_iterations > max_string_pull_iterations {
       log.errorf("string_pull_path: Infinite loop detected after %d iterations", string_pull_iterations)
       break
     }
-    portal_left := [3]f32{portals[i][0], portals[i][1], portals[i][2]}
-    portal_right := [3]f32{portals[i][3], portals[i][4], portals[i][5]}
+    
+    // Get the portal edges
+    portal_left: [3]f32
+    portal_right: [3]f32
+    
+    if i < len(poly_path) - 1 {
+      // Regular portal between polygons
+      portal_left, portal_right = get_portal_points(navmesh, poly_path[i], poly_path[i+1])
+    } else {
+      // Last "portal" is the end position
+      portal_left = end_pos
+      portal_right = end_pos
+    }
+    
+    log.debugf("string_pull: Processing portal %d - left[%.2f,%.2f,%.2f], right[%.2f,%.2f,%.2f]", 
+              i, portal_left.x, portal_left.y, portal_left.z, portal_right.x, portal_right.y, portal_right.z)
+    log.debugf("  Current funnel - apex[%.2f,%.2f,%.2f], left[%.2f,%.2f,%.2f], right[%.2f,%.2f,%.2f]",
+              apex.x, apex.y, apex.z, left.x, left.y, left.z, right.x, right.y, right.z)
+    
+    // Skip portal if we're starting very close to it (Detour does this)
+    if i == 0 {
+      // Check distance to portal line segment
+      edge_dir := portal_right - portal_left
+      edge_len_sq := linalg.dot(edge_dir, edge_dir)
+      if edge_len_sq > 0.0001 {
+        t := linalg.dot(apex - portal_left, edge_dir) / edge_len_sq
+        t = max(0, min(1, t))
+        closest_pt := portal_left + t * edge_dir
+        dist := apex - closest_pt
+        dist_sq := linalg.dot(dist, dist)
+        if dist_sq < 0.001 * 0.001 {
+          i += 1
+          continue
+        }
+      }
+    }
     
     // Update right vertex
     if tri_area_2d(apex, right, portal_right) <= 0 {
       if apex == right || tri_area_2d(apex, left, portal_right) > 0 {
         right = portal_right
         right_idx = i
+        if i <= 3 {
+          log.debugf("Funnel %d: Updated right to portal %d", i, i)
+        }
       } else {
         // Tighten the funnel
+        log.debugf("Funnel %d: Adding corner at left (tightening), left_idx=%d", i, left_idx)
         append(&path, left)
         
         // Move apex to the left vertex
@@ -565,7 +625,8 @@ string_pull_path :: proc(navmesh: ^NavMesh, poly_path: []PolyRef, start_pos, end
         left_idx = apex_idx
         right_idx = apex_idx
         
-        // Restart from the next portal after apex
+        // Restart from apex (matching Detour's behavior)
+        // Continue from the next portal after the apex to avoid reprocessing
         i = apex_idx + 1
         continue
       }
@@ -576,8 +637,12 @@ string_pull_path :: proc(navmesh: ^NavMesh, poly_path: []PolyRef, start_pos, end
       if apex == left || tri_area_2d(apex, right, portal_left) < 0 {
         left = portal_left
         left_idx = i
+        if i <= 3 {
+          log.debugf("Funnel %d: Updated left to portal %d", i, i)
+        }
       } else {
         // Tighten the funnel
+        log.debugf("Funnel %d: Adding corner at right (tightening), right_idx=%d", i, right_idx)
         append(&path, right)
         
         // Move apex to the right vertex
@@ -590,7 +655,8 @@ string_pull_path :: proc(navmesh: ^NavMesh, poly_path: []PolyRef, start_pos, end
         left_idx = apex_idx
         right_idx = apex_idx
         
-        // Restart from the next portal after apex
+        // Restart from apex (matching Detour's behavior)
+        // Continue from the next portal after the apex to avoid reprocessing
         i = apex_idx + 1
         continue
       }
@@ -599,8 +665,8 @@ string_pull_path :: proc(navmesh: ^NavMesh, poly_path: []PolyRef, start_pos, end
     i += 1
   }
   
-  // The final portal to end_pos was already processed in the loop
-  // Just add the final destination if not already added
+  // The loop should have processed all portals including the end position
+  // Only add the end position if it wasn't already added
   if len(path) == 0 || path[len(path)-1] != end_pos {
     append(&path, end_pos)
   }
@@ -670,35 +736,31 @@ get_portal_points :: proc(navmesh: ^NavMesh, poly_ref1, poly_ref2: PolyRef) -> (
     tile1.verts[v1_idx * 3 + 2],
   }
   
-  // IMPORTANT: Order vertices as left/right based on traversal direction
-  // We need to determine which vertex is "left" and which is "right"
-  // when moving from poly1 to poly2
+  // In Detour, the portal vertices need to be ordered consistently
+  // The vertices should form a "gate" that we're passing through
+  // When moving from poly1 to poly2, we need to return the vertices
+  // in an order that makes sense for the string pulling algorithm
   
-  // Get the centers of both polygons to determine traversal direction
-  center1 := get_poly_center(navmesh, poly_ref1)
-  center2 := get_poly_center(navmesh, poly_ref2)
+  // Debug: Log the portal edge for analysis
+  log.debugf("get_portal_points: poly %x->%x, edge %d, v0[%.2f,%.2f,%.2f], v1[%.2f,%.2f,%.2f]", 
+            poly_ref1, poly_ref2, edge_idx, v0.x, v0.y, v0.z, v1.x, v1.y, v1.z)
   
-  // Calculate the direction vector from poly1 to poly2
-  dir := [3]f32{
-    center2.x - center1.x,
-    center2.y - center1.y,
-    center2.z - center1.z,
-  }
-  
-  // Calculate which vertex is on the left side of the traversal direction
-  // Using cross product in XZ plane (Y-up coordinate system)
-  edge_dir := [3]f32{v1.x - v0.x, 0, v1.z - v0.z}
-  cross := dir.x * edge_dir.z - dir.z * edge_dir.x
-  
-  // If cross product is positive, v0 is on the left, v1 on the right
-  // Otherwise, swap them
-  if cross > 0 {
-    return v0, v1
-  } else {
-    return v1, v0
-  }
+  // The edge vertices in a polygon are ordered counter-clockwise
+  // When traversing from poly1 to poly2, we need the vertices in consistent order
+  // The funnel algorithm expects (left, right) vertices when looking from poly1 to poly2
+  // Since polygon vertices are CCW, v0 is left and v1 is right when exiting the edge
+  return v0, v1
 }
 
+
+// Get edge midpoint between two adjacent polygons (for better pathfinding accuracy)
+get_edge_midpoint :: proc(navmesh: ^NavMesh, poly_ref1, poly_ref2: PolyRef) -> [3]f32 {
+  // Get portal points between the polygons
+  left, right := get_portal_points(navmesh, poly_ref1, poly_ref2)
+  
+  // Return midpoint of the shared edge
+  return (left + right) * 0.5
+}
 
 // Calculate 2D triangle area (for funnel algorithm)
 tri_area_2d :: proc(a, b, c: [3]f32) -> f32 {
