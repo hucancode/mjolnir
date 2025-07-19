@@ -878,7 +878,23 @@ build_poly_mesh :: proc(cset: ^ContourSet, nvp: i32) -> ^PolyMesh {
       // Set region and area
       pmesh.regs[pmesh.npolys] = cont.reg
       pmesh.areas[pmesh.npolys] = cont.area
-      pmesh.flags[pmesh.npolys] = 0
+      
+      // Set flags based on area type (matching Detour conventions)
+      switch cont.area {
+      case u8(WALKABLE_AREA):
+        pmesh.flags[pmesh.npolys] = POLYFLAGS_WALK
+      case u8(AREA_WATER):
+        pmesh.flags[pmesh.npolys] = POLYFLAGS_SWIM
+      case u8(AREA_DOOR):
+        pmesh.flags[pmesh.npolys] = POLYFLAGS_WALK | POLYFLAGS_DOOR
+      case:
+        // Other areas get walk flag by default if they're not null
+        if cont.area != u8(NULL_AREA) {
+          pmesh.flags[pmesh.npolys] = POLYFLAGS_WALK
+        } else {
+          pmesh.flags[pmesh.npolys] = 0
+        }
+      }
       
       pmesh.npolys += 1
       tri_idx += 1
@@ -918,14 +934,23 @@ build_poly_mesh :: proc(cset: ^ContourSet, nvp: i32) -> ^PolyMesh {
   // Build mesh adjacency
   build_mesh_adjacency(pmesh)
   
-  // Merge polygons to reduce triangle count
-  if nvp > 3 {
+  // Merge polygons to reduce triangle count - but only if we have enough polygons
+  // to maintain connectivity. Don't merge if we'd end up with a single polygon.
+  if nvp > 3 && pmesh.npolys > 2 {
     log.infof("Merging polygons to optimize mesh (initial count: %d)", pmesh.npolys)
+    initial_count := pmesh.npolys
     merge_polygons(pmesh, nvp)
-    log.infof("After merging: %d polygons", pmesh.npolys)
+    log.infof("After merging: %d polygons (reduced by %d)", pmesh.npolys, initial_count - pmesh.npolys)
+    
+    // If merging reduced us to a single polygon, this destroys connectivity
+    if pmesh.npolys == 1 {
+      log.warnf("Polygon merging created single polygon - this will cause pathfinding issues")
+    }
     
     // Rebuild adjacency after merging
     build_mesh_adjacency(pmesh)
+  } else {
+    log.infof("Skipping polygon merging: nvp=%d, npolys=%d (need nvp>3 and npolys>2)", nvp, pmesh.npolys)
   }
   
   // Validate polygon connectivity
@@ -963,12 +988,20 @@ build_poly_mesh :: proc(cset: ^ContourSet, nvp: i32) -> ^PolyMesh {
   return pmesh
 }
 
-// Build mesh adjacency information
+// Edge structure for building adjacency (following Recast reference)
+MeshEdge :: struct {
+  vert: [2]u16,      // Edge vertices  
+  poly: [2]u16,      // Polygons using this edge
+  poly_edge: [2]u16, // Edge index within each polygon
+}
+
+// Build mesh adjacency information using reference Recast algorithm
 build_mesh_adjacency :: proc(mesh: ^PolyMesh) -> bool {
   if mesh == nil do return false
   
   nvp := mesh.nvp
   npolys := mesh.npolys
+  nverts := mesh.nverts
   
   // Initialize all edges as unconnected
   for i in 0..<npolys {
@@ -979,151 +1012,104 @@ build_mesh_adjacency :: proc(mesh: ^PolyMesh) -> bool {
     }
   }
   
-  // Find matching edges
-  rejected_count := 0
-  edge_match_attempts := 0
-  successful_connections := 0
-  cross_contour_connections := 0
+  max_edge_count := npolys * nvp
   
+  // Allocate edge tracking structures
+  first_edge := make([]u16, nverts + max_edge_count)
+  defer delete(first_edge)
+  next_edge := first_edge[nverts:]
+  
+  edges := make([]MeshEdge, max_edge_count)
+  defer delete(edges)
+  edge_count := 0
+  
+  // Initialize first_edge array
+  for i in 0..<nverts {
+    first_edge[i] = 0xffff
+  }
+  
+  // First pass: Create edges for v0 < v1
   for i in 0..<npolys {
-    p := i * nvp * 2
+    poly_base := i * nvp * 2
     for j in 0..<nvp {
-      if mesh.polys[p + j] == 0xffff do break
-      if mesh.polys[p + nvp + j] != 0xffff do continue // Already connected
+      if mesh.polys[poly_base + j] == 0xffff do break
       
-      // Get edge vertices
-      v0 := mesh.polys[p + j]
-      v1 := mesh.polys[p + ((j + 1) % nvp)]
-      if j + 1 >= nvp || mesh.polys[p + j + 1] == 0xffff {
-        v1 = mesh.polys[p + 0]
+      v0 := mesh.polys[poly_base + j]
+      v1: u16
+      if j + 1 >= nvp || mesh.polys[poly_base + j + 1] == 0xffff {
+        v1 = mesh.polys[poly_base + 0]
+      } else {
+        v1 = mesh.polys[poly_base + j + 1]
       }
       
-      // Find matching edge in other polygons
-      for k in i+1..<npolys {
-        q := k * nvp * 2
-        for m in 0..<nvp {
-          if mesh.polys[q + m] == 0xffff do break
-          
-          // Get edge vertices
-          w0 := mesh.polys[q + m]
-          w1 := mesh.polys[q + ((m + 1) % nvp)]
-          if m + 1 >= nvp || mesh.polys[q + m + 1] == 0xffff {
-            w1 = mesh.polys[q + 0]
-          }
-          
-          // Check if edges match (reversed)
-          if v0 == w1 && v1 == w0 {
-            edge_match_attempts += 1
-            // Additional check: ensure polygons are spatially adjacent
-            // Get polygon centers to check if they're reasonably close
-            poly_i_center := get_polygon_center(mesh, i, nvp)
-            poly_k_center := get_polygon_center(mesh, k, nvp)
-            
-            // Calculate edge midpoint
-            edge_mid := [3]f32{
-              (f32(mesh.verts[v0*3+0]) + f32(mesh.verts[v1*3+0])) / 2,
-              (f32(mesh.verts[v0*3+1]) + f32(mesh.verts[v1*3+1])) / 2,
-              (f32(mesh.verts[v0*3+2]) + f32(mesh.verts[v1*3+2])) / 2,
-            }
-            
-            // Check if both polygon centers are on the same side of the edge
-            // This prevents connecting polygons across holes
-            if are_polygons_adjacent(poly_i_center, poly_k_center, edge_mid) {
-              // Connect edges - store as 1-based indices (0 means no neighbor)
-              mesh.polys[p + nvp + j] = u16(k + 1)
-              mesh.polys[q + nvp + m] = u16(i + 1)
-              successful_connections += 1
-              
-              // Check if cross-contour connection
-              if mesh.regs[i] != mesh.regs[k] {
-                cross_contour_connections += 1
-                if cross_contour_connections <= 3 {
-                  log.debugf("Cross-contour connection: poly %d (region %d) <-> poly %d (region %d)", 
-                            i, mesh.regs[i], k, mesh.regs[k])
-                }
-              }
-              break
-            } else {
-              // Debug logging for rejected connections
-              dist1 := distance_2d(poly_i_center, edge_mid)
-              dist2 := distance_2d(poly_k_center, edge_mid)
-              center_dist := distance_2d(poly_i_center, poly_k_center)
-              rejected_count += 1
-              if rejected_count <= 10 {
-                log.debugf("Rejected adjacency: poly %d-%d, edge_dists=[%.1f,%.1f], center_dist=%.1f", 
-                          i, k, dist1, dist2, center_dist)
-              }
-            }
+      if v0 < v1 {
+        edge := &edges[edge_count]
+        edge.vert[0] = v0
+        edge.vert[1] = v1  
+        edge.poly[0] = u16(i)
+        edge.poly_edge[0] = u16(j)
+        edge.poly[1] = u16(i)  // Will be updated in second pass
+        edge.poly_edge[1] = 0
+        
+        // Insert edge into linked list
+        next_edge[edge_count] = first_edge[v0]
+        first_edge[v0] = u16(edge_count)
+        edge_count += 1
+      }
+    }
+  }
+  
+  // Second pass: Find matching edges for v0 > v1  
+  for i in 0..<npolys {
+    poly_base := i * nvp * 2
+    for j in 0..<nvp {
+      if mesh.polys[poly_base + j] == 0xffff do break
+      
+      v0 := mesh.polys[poly_base + j]
+      v1: u16
+      if j + 1 >= nvp || mesh.polys[poly_base + j + 1] == 0xffff {
+        v1 = mesh.polys[poly_base + 0]
+      } else {
+        v1 = mesh.polys[poly_base + j + 1]
+      }
+      
+      if v0 > v1 {
+        // Look for matching edge
+        for e := first_edge[v1]; e != 0xffff; e = next_edge[e] {
+          edge := &edges[e]
+          if edge.vert[1] == v0 && edge.poly[0] == edge.poly[1] {
+            edge.poly[1] = u16(i)
+            edge.poly_edge[1] = u16(j) 
+            break
           }
         }
       }
     }
   }
   
-  log.infof("build_mesh_adjacency: Edge matching stats:")
-  log.infof("  Edge match attempts: %d", edge_match_attempts)
-  log.infof("  Successful connections: %d", successful_connections)
-  log.infof("  Cross-contour connections: %d", cross_contour_connections)
-  if rejected_count > 0 {
-    log.infof("  Rejected connections: %d", rejected_count)
+  // Store adjacency information
+  successful_connections := 0
+  for i in 0..<edge_count {
+    edge := &edges[i]
+    if edge.poly[0] != edge.poly[1] {
+      // Connect the two polygons
+      p0_base := i32(edge.poly[0]) * nvp * 2
+      p1_base := i32(edge.poly[1]) * nvp * 2
+      
+      mesh.polys[p0_base + nvp + i32(edge.poly_edge[0])] = edge.poly[1]
+      mesh.polys[p1_base + nvp + i32(edge.poly_edge[1])] = edge.poly[0]
+      successful_connections += 1
+    }
   }
+  
+  log.infof("build_mesh_adjacency: Reference algorithm stats:")
+  log.infof("  Total edges processed: %d", edge_count)
+  log.infof("  Successful connections: %d", successful_connections)
+  log.infof("  Max possible connections: %d", npolys * nvp)
   
   return true
 }
 
-// Get polygon center for spatial adjacency checking
-get_polygon_center :: proc(mesh: ^PolyMesh, poly_idx: i32, nvp: i32) -> [3]f32 {
-  p := poly_idx * nvp * 2
-  center := [3]f32{0, 0, 0}
-  count := 0
-  
-  for j in 0..<nvp {
-    if mesh.polys[p + j] == 0xffff do break
-    vi := mesh.polys[p + j]
-    center.x += f32(mesh.verts[vi*3+0])
-    center.y += f32(mesh.verts[vi*3+1])
-    center.z += f32(mesh.verts[vi*3+2])
-    count += 1
-  }
-  
-  if count > 0 {
-    center.x /= f32(count)
-    center.y /= f32(count)
-    center.z /= f32(count)
-  }
-  
-  return center
-}
-
-// Check if two polygons are spatially adjacent (not separated by holes)
-are_polygons_adjacent :: proc(center1, center2, edge_mid: [3]f32) -> bool {
-  // Use 2D distance check since navigation is primarily 2D
-  dist1 := distance_2d(center1, edge_mid)
-  dist2 := distance_2d(center2, edge_mid)
-  center_dist := distance_2d(center1, center2)
-  
-  // Note: distances are in grid units, not world units!
-  // For a grid with cell size ~0.3-0.5, we need much smaller thresholds
-  max_edge_distance := f32(20.0) // In grid units
-  max_center_distance := f32(40.0) // In grid units
-  
-  return dist1 <= max_edge_distance && dist2 <= max_edge_distance && center_dist <= max_center_distance
-}
-
-// Calculate 3D distance between two points
-distance_3d :: proc(a, b: [3]f32) -> f32 {
-  dx := a.x - b.x
-  dy := a.y - b.y
-  dz := a.z - b.z
-  return math.sqrt(dx*dx + dy*dy + dz*dz)
-}
-
-// Calculate 2D distance between two points (ignoring Y axis)
-distance_2d :: proc(a, b: [3]f32) -> f32 {
-  dx := a.x - b.x
-  dz := a.z - b.z
-  return math.sqrt(dx*dx + dz*dz)
-}
 
 // ===== EAR CLIPPING TRIANGULATION HELPERS =====
 

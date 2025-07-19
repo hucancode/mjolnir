@@ -99,10 +99,21 @@ find_path :: proc(query: ^PathQuery, start_pos, end_pos: [3]f32) -> ([][3]f32, b
   
   log.infof("find_path: Found polygon path with %d polygons", len(poly_path))
   
+  // Debug: Log the polygon path
+  for poly_ref, i in poly_path {
+    center := get_poly_center(query.mesh, poly_ref)
+    log.infof("  Polygon %d: %x at center [%.2f, %.2f, %.2f]", i, poly_ref, center.x, center.y, center.z)
+  }
+  
   // Convert polygon path to world positions using string pulling
   log.info("find_path: Starting string pulling...")
   path := string_pull_path(query.mesh, poly_path, start_pos, end_pos)
   log.infof("find_path: String pulling completed, path has %d points", len(path))
+  
+  // Debug: Log the final path
+  for point, i in path {
+    log.infof("  Waypoint %d: [%.2f, %.2f, %.2f]", i, point.x, point.y, point.z)
+  }
   if len(path) == 0 {
     log.warn("String pulling failed, falling back to polygon centers")
     // Fallback to polygon centers
@@ -430,9 +441,16 @@ expand_neighbors :: proc(query: ^PathQuery, current: PathNode, end_ref: PolyRef,
     neighbor_poly := &neighbor_tile.polys[neighbor_poly_idx]
     
     // Apply filter (matching Detour's approach)
+    poly_area := get_poly_area(neighbor_poly)
     if !pass_filter(&query.filter, neighbor_poly) {
-      log.debugf("  Polygon %x failed filter check", neighbor_ref)
+      log.debugf("  Polygon %x failed filter check (flags=%x, area=%d, include=%x, exclude=%x)", 
+                 neighbor_ref, neighbor_poly.flags, poly_area, 
+                 query.filter.include_flags, query.filter.exclude_flags)
       continue
+    }
+    
+    if neighbor_count < 3 {  // Debug successful neighbors
+      log.debugf("  Polygon %x passed filter (flags=%x, area=%d)", neighbor_ref, neighbor_poly.flags, poly_area)
     }
     
     // Check if neighbor is already processed
@@ -453,7 +471,6 @@ expand_neighbors :: proc(query: ^PathQuery, current: PathNode, end_ref: PolyRef,
     
     // Calculate costs (matching Detour's approach)
     base_move_cost := linalg.distance(current.position, neighbor_pos)
-    poly_area := get_poly_area(neighbor_poly)
     area_cost := query.filter.area_cost[poly_area]
     move_cost := base_move_cost * area_cost
     new_g_cost := current.g_cost + move_cost

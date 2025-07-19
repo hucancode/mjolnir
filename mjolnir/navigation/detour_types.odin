@@ -14,6 +14,14 @@ TILE_FREE_DATA :: 0x01
 POLYTYPE_GROUND :: 0
 POLYTYPE_OFFMESH_CONNECTION :: 1
 
+// Polygon flags (standard Detour flags)
+POLYFLAGS_WALK :: 0x01        // Ability to walk (ground, doors)
+POLYFLAGS_SWIM :: 0x02        // Ability to swim (water)
+POLYFLAGS_DOOR :: 0x04        // Door passage
+POLYFLAGS_JUMP :: 0x08        // Ability to jump
+POLYFLAGS_DISABLED :: 0x10    // Disabled polygon
+POLYFLAGS_ALL :: 0xFFFF       // All flags
+
 // Status codes as enum with bit flags
 StatusFlag :: enum u32 {
   // High level status

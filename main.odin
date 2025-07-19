@@ -43,32 +43,18 @@ navmesh: navigation.NavMesh
 nav_debug: mjolnir.NavigationDebug
 nav_query: navigation.PathQuery
 current_path: [][3]f32
-start_pos: [3]f32 = {-9.5, 0.1, 9.5}   // Top-left corner of the room
-end_pos: [3]f32 = {9.5, 0.1, -9.5}     // Bottom-right corner of the room
+start_pos: [3]f32 = {0, 0.1, -4}   // South of obstacle
+end_pos: [3]f32 = {0, 0.1, 4}     // North of obstacle
 nav_debug_enabled: bool = true
 
-// Helper function to check if a position intersects with cube grid obstacles
+// Helper function to check if a position intersects with the test obstacle
 position_in_obstacle :: proc(pos: [3]f32) -> bool {
-  x, z := pos.x, pos.z
+  x, y, z := pos.x, pos.y, pos.z
 
-  // Cube grid parameters (matching the scene setup)
-  space: f32 = 2.1
-  cube_size: f32 = 0.3
-  nx, nz := 5, 5
-  cube_half_size := cube_size * 0.5
-
-  for grid_x in 1..<nx {
-    for grid_z in 1..<nz {
-      // Calculate cube world position (same as in setup)
-      world_x := (f32(grid_x) - f32(nx) * 0.5) * space
-      world_z := (f32(grid_z) - f32(nz) * 0.5) * space
-
-      // Check if position is inside this cube (with some padding)
-      if x >= world_x - cube_half_size && x <= world_x + cube_half_size &&
-         z >= world_z - cube_half_size && z <= world_z + cube_half_size {
-        return true
-      }
-    }
+  // Test obstacle: 10x2x2 box centered at origin (2x2x2 cube scaled by 5x1x1)
+  // Box extends from (-5, 0, -1) to (5, 2, 1)
+  if x >= -5 && x <= 5 && z >= -1 && z <= 1 && y >= 0 && y <= 2 {
+    return true
   }
 
   return false
@@ -132,55 +118,32 @@ setup :: proc(engine: ^mjolnir.Engine) {
     make_cone(),
   )
   if true {
-    log.info("spawning debug obstacles at specific positions")
-    
-    // Define the same obstacle positions as in navmesh generation
-    debug_obstacles := [][3]f32{
-      {0, 0.5, 0},      // Exact center
-      {5, 0.5, 5},      // Northeast
-      {-5, 0.5, -5},    // Southwest
-      {10, 0.5, 0},     // East edge
-      {0, 0.5, -10},    // South edge
-      // Double the obstacles - add 5 more
-      {-10, 0.5, 0},    // West edge
-      {0, 0.5, 10},     // North edge
-      {-8, 0.5, -8},    // Southwest corner area
-      {8, 0.5, 8},      // Northeast corner area
-      {-3, 0.5, 7},     // Northwest area
-    }
-    
-    obstacle_size := f32(0.8)  // Visual obstacle size (matches actual objects)
-    
-    for obstacle_pos, idx in debug_obstacles {
-      world_x := obstacle_pos.x
-      world_y := obstacle_pos.y  
-      world_z := obstacle_pos.z
-      
-      // Create a different colored material for each obstacle
-      mat_handle, _ := create_material(
-        &engine.warehouse,
-        metallic_value = 0.0,
-        roughness_value = 0.8,
-      ) or_continue
-      
-      // Spawn cube at position
-      _, node := spawn(
-        &engine.scene,
-        MeshAttachment {
-          handle = cube_mesh_handle,
-          material = mat_handle,
-          cast_shadow = true,
-        },
-      )
-      
-      translate(&node.transform, world_x, world_y, world_z)
-      scale(&node.transform, obstacle_size)
-    }
+    log.info("spawning test obstacle: 5x2x5 box")
+
+    // Single obstacle: 5x2x5 box centered at (5,0,5)
+    obstacle_material_handle, _ := create_material(
+      &engine.warehouse,
+      metallic_value = 0.0,
+      roughness_value = 0.8,
+    ) or_else {}
+
+    // Spawn obstacle cube
+    _, obstacle_node := spawn(
+      &engine.scene,
+      MeshAttachment {
+        handle = cube_mesh_handle,
+        material = obstacle_material_handle,
+        cast_shadow = true,
+      },
+    )
+
+    // Position and scale obstacle - centered at origin
+    translate(&obstacle_node.transform, 0, 0.5, 0)  // Lift up to avoid ground intersection
+    scale_xyz(&obstacle_node.transform, 5, 1, 1)  // Scale to 5x1x1 (width x height x depth)
   }
   if true {
-    log.info("spawning ground and walls")
-    // Ground node
-    size: f32 = 15.0
+    log.info("spawning ground plane")
+    // Ground plane: 20x20 at y=0 (2x2 quad scaled by 10)
     _, ground_node := spawn(
       &engine.scene,
       MeshAttachment {
@@ -189,55 +152,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
         cast_shadow = true,
       },
     )
-    scale(&ground_node.transform, size)
-    // Left wall
-    _, left_wall := spawn(
-      &engine.scene,
-      MeshAttachment {
-        handle = ground_mesh_handle,
-        material = ground_mat_handle,
-        cast_shadow = true,
-      },
-    )
-    translate(&left_wall.transform, x = size)
-    rotate(&left_wall.transform, math.PI * 0.5, linalg.VECTOR3F32_Z_AXIS)
-    scale(&left_wall.transform, size)
-    // Right wall
-    _, right_wall := spawn(
-      &engine.scene,
-      MeshAttachment {
-        handle = ground_mesh_handle,
-        material = ground_mat_handle,
-        cast_shadow = true,
-      },
-    )
-    translate(&right_wall.transform, x = -size)
-    rotate(&right_wall.transform, -math.PI * 0.5, linalg.VECTOR3F32_Z_AXIS)
-    scale(&right_wall.transform, size)
-    // Back wall
-    _, back_wall := spawn(
-      &engine.scene,
-      MeshAttachment {
-        handle = ground_mesh_handle,
-        material = ground_mat_handle,
-        cast_shadow = true,
-      },
-    )
-    translate(&back_wall.transform, y = size, z = -size)
-    rotate(&back_wall.transform, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
-    scale(&back_wall.transform, size)
-    // // Ceiling
-    // _, ceiling := spawn(
-    //   &engine.scene,
-    //   MeshAttachment {
-    //     handle = ground_mesh_handle,
-    //     material = ground_mat_handle,
-    //     cast_shadow = true,
-    //   },
-    // )
-    // translate(&ceiling.transform, y = size)
-    // rotate(&ceiling.transform, -math.PI, linalg.VECTOR3F32_X_AXIS)
-    // scale(&ceiling.transform, size)
+    scale(&ground_node.transform, 10)  // 10x10 scale, centered at origin
   }
   if true {
     log.info("loading GLTF...")
@@ -538,11 +453,12 @@ setup :: proc(engine: ^mjolnir.Engine) {
   log.info("setup complete")
 }
 
-// Build navigation mesh from the scene geometry
+// Build navigation mesh from the test scene (10x10 ground with single 5x2 obstacle)
 build_navigation_from_scene :: proc(engine: ^mjolnir.Engine) {
   using mjolnir, geometry
 
-  log.info("=== Building Navigation Mesh from Scene ===")
+  log.info("=== Building Test Navigation Scene ===")
+  log.info("Scene: 15x15 ground with 5x2x5 obstacle in center")
 
   vertices_list := make([dynamic][3]f32)
   indices_list := make([dynamic]u32)
@@ -551,190 +467,105 @@ build_navigation_from_scene :: proc(engine: ^mjolnir.Engine) {
   defer delete(indices_list)
   defer delete(areas_list)
 
-  // Collect walkable geometry (ground planes and floors)
-  ground_size: f32 = 15.0  // Matching the ground scale in setup
-
-  // Create subdivided ground mesh for better obstacle detection
-  // Recast needs smaller triangles to properly cut holes for obstacles
-  grid_divisions := 20  // Subdivide ground into 20x20 grid
-  cell_size := (ground_size * 2) / f32(grid_divisions)
-
-  // Generate grid vertices
-  for z in 0..=grid_divisions {
-    for x in 0..=grid_divisions {
-      vx := -ground_size + f32(x) * cell_size
-      vz := -ground_size + f32(z) * cell_size
-      append(&vertices_list, [3]f32{vx, 0, vz})
-    }
+  // Ground: 20x20 plane at y=0, centered at origin (2x2 quad scaled by 10)
+  ground_verts := [][3]f32{
+    {-10, 0, -10}, // 0
+    {10, 0, -10},  // 1
+    {10, 0, 10},   // 2
+    {-10, 0, 10},  // 3
   }
 
-  // Generate grid triangles
-  grid_width := grid_divisions + 1
-  log.infof("Grid generation: divisions=%d, width=%d", grid_divisions, grid_width)
-  for z in 0..<grid_divisions {
-    for x in 0..<grid_divisions {
-      // Calculate vertex indices for this cell
-      v0 := u32(z * grid_width + x)
-      v1 := u32(z * grid_width + x + 1)
-      v2 := u32((z + 1) * grid_width + x + 1)
-      v3 := u32((z + 1) * grid_width + x)
-      
-      // Debug problematic triangle generation
-      if v0 >= 441 || v1 >= 441 || v2 >= 441 || v3 >= 441 {
-        log.errorf("Grid cell (%d,%d): vertices %d,%d,%d,%d exceed grid vertex count 441", x, z, v0, v1, v2, v3)
-      }
-
-      // Add two triangles for this cell
-      append(&indices_list, v0, v1, v2)
-      append(&indices_list, v0, v2, v3)
-      append(&areas_list, navigation.WALKABLE_AREA, navigation.WALKABLE_AREA)
-    }
+  ground_indices := []u32{
+    0, 1, 2,  // Triangle 1
+    0, 2, 3,  // Triangle 2
   }
 
-  log.infof("Ground plane: %.0fx%.0f units with %dx%d grid",
-    ground_size * 2, ground_size * 2, grid_divisions, grid_divisions)
-  log.infof("Ground vertices: %d, indices: %d", len(vertices_list), len(indices_list))
-
-  // Add obstacles from the scene (cubes, cones, spheres)
-  // Create a debug-friendly obstacle layout:
-  obstacle_count := 0
-  
-  // Define specific obstacle positions for debugging
-  debug_obstacles := [][3]f32{
-    {0, 0, 0},      // Exact center - should block cell (15,15)
-    {5, 0, 5},      // Northeast - should block cell (20,20)
-    {-5, 0, -5},    // Southwest - should block cell (10,10)
-    {10, 0, 0},     // East edge - should block cell (25,15)
-    {0, 0, -10},    // South edge - should block cell (15,5)
-    // Double the obstacles - add 5 more
-    {-10, 0, 0},    // West edge
-    {0, 0, 10},     // North edge
-    {-8, 0, -8},    // Southwest corner area
-    {8, 0, 8},      // Northeast corner area
-    {-3, 0, 7},     // Northwest area
+  // Add ground vertices and indices
+  for vert in ground_verts {
+    append(&vertices_list, vert)
   }
-  
-  navmesh_obstacle_size := f32(2.0)  // Larger obstacles in navmesh for better visualization
-  box_half := navmesh_obstacle_size * 0.5
-  obstacle_height := f32(2.5)
-  
-  for obstacle_pos in debug_obstacles {
-    world_x := obstacle_pos.x
-    world_y := obstacle_pos.y  
-    world_z := obstacle_pos.z
+  for idx in ground_indices {
+    append(&indices_list, idx)
+  }
+  // Add ground triangle areas (one per triangle, not per index)
+  for _ in 0..<len(ground_indices)/3 {
+    append(&areas_list, navigation.WALKABLE_AREA)
+  }
 
-    // Create a box obstacle starting from slightly below ground level
-    // This ensures the obstacle intersects with the ground mesh for proper hole cutting
-    ground_offset := f32(-0.05)  // Extend slightly below ground to ensure intersection
-    box_verts := [][3]f32{
-      // Bottom vertices below ground level
-      {world_x - box_half, ground_offset, world_z - box_half},
-      {world_x + box_half, ground_offset, world_z - box_half},
-      {world_x + box_half, ground_offset, world_z + box_half},
-      {world_x - box_half, ground_offset, world_z + box_half},
-      // Top vertices
-      {world_x - box_half, obstacle_height, world_z - box_half},
-      {world_x + box_half, obstacle_height, world_z - box_half},
-      {world_x + box_half, obstacle_height, world_z + box_half},
-      {world_x - box_half, obstacle_height, world_z + box_half},
-    }
+  log.infof("Ground: %d vertices, %d triangles", len(ground_verts), len(ground_indices)/3)
 
-    base_idx := u32(len(vertices_list))
-    for v in box_verts {
-      append(&vertices_list, v)
-    }
+  // Obstacle: 10x2x2 box centered at origin (2x2x2 cube scaled by 5x1x1)
+  // Box extends from (-5, 0, -1) to (5, 2, 1)
+  obstacle_verts := [][3]f32{
+    // Bottom face (y=0)
+    {-5, 0, -1}, // 4
+    {5, 0, -1},  // 5
+    {5, 0, 1},   // 6
+    {-5, 0, 1},  // 7
 
-    // Add all faces including bottom to block the ground beneath
+    // Top face (y=2)
+    {-5, 2, -1}, // 8
+    {5, 2, -1},  // 9
+    {5, 2, 1},   // 10
+    {-5, 2, 1},  // 11
+  }
+
+  obstacle_indices := []u32{
     // Bottom face
-    append(&indices_list, base_idx + 0, base_idx + 2, base_idx + 1)
-    append(&indices_list, base_idx + 0, base_idx + 3, base_idx + 2)
-    append(&areas_list, navigation.NULL_AREA, navigation.NULL_AREA)
-
-    // Top face - mark as obstacle
-    append(&indices_list, base_idx + 4, base_idx + 5, base_idx + 6)
-    append(&indices_list, base_idx + 4, base_idx + 6, base_idx + 7)
-    append(&areas_list, navigation.NULL_AREA, navigation.NULL_AREA)
-
-    // Side faces - all non-walkable
-    // All sides - mark as obstacles
-    // Front
-    append(&indices_list, base_idx + 0, base_idx + 1, base_idx + 5)
-    append(&indices_list, base_idx + 0, base_idx + 5, base_idx + 4)
-    append(&areas_list, navigation.NULL_AREA, navigation.NULL_AREA)
-
-    // Right
-    append(&indices_list, base_idx + 1, base_idx + 2, base_idx + 6)
-    append(&indices_list, base_idx + 1, base_idx + 6, base_idx + 5)
-    append(&areas_list, navigation.NULL_AREA, navigation.NULL_AREA)
-
-    // Back
-    append(&indices_list, base_idx + 2, base_idx + 3, base_idx + 7)
-    append(&indices_list, base_idx + 2, base_idx + 7, base_idx + 6)
-    append(&areas_list, navigation.NULL_AREA, navigation.NULL_AREA)
-
-    // Left
-    append(&indices_list, base_idx + 3, base_idx + 0, base_idx + 4)
-    append(&indices_list, base_idx + 3, base_idx + 4, base_idx + 7)
-    append(&areas_list, navigation.NULL_AREA, navigation.NULL_AREA)
-
-    obstacle_count += 1
-  }
-  
-  log.infof("Added %d obstacles to navigation mesh", obstacle_count)
-  log.infof("Final navigation geometry: %d vertices, %d indices (%d triangles)", 
-    len(vertices_list), len(indices_list), len(indices_list)/3)
-
-  // Convert to arrays for navigation system
-  vertices := vertices_list[:]
-  indices := indices_list[:]
-  
-  // Debug: Check first few indices before passing to navigation
-  log.debugf("Input indices [0:15]: %v", indices[0:min(15, len(indices))])
-  areas := areas_list[:]
-
-  // Configure navigation mesh generation
-  config := navigation.Config{
-    cs = 0.2,                     // Cell size - smaller cells for better obstacle representation
-    ch = 0.2,                     // Cell height
-    walkable_slope_angle = 45,     // Max slope
-    walkable_height = 3,          // Agent height (0.6m / 0.2m = 3 cells)
-    walkable_climb = 2,           // Max climb (0.4m / 0.2m = 2 cells)
-    walkable_radius = 1,          // Agent radius (0.2m / 0.2m = 1 cell)
-    max_edge_len = 60,            // Max edge length (adjusted for smaller cells)
-    max_simplification_error = 0.8,  // Lower error for smoother boundaries
-    min_region_area = 8,          // Min region size (remove tiny regions)
-    merge_region_area = 40,       // Merge region size (create cleaner regions)
-    max_verts_per_poly = 6,       // Max vertices per polygon
-    detail_sample_dist = 6,
-    detail_sample_max_error = 1,
-    tile_size = 0,                // Single tile for now
-    border_size = 0,
+    4, 6, 5,  4, 7, 6,
+    // Top face
+    8, 9, 10,  8, 10, 11,
+    // Front face (z=4)
+    4, 5, 9,  4, 9, 8,
+    // Back face (z=6)
+    6, 11, 10,  6, 7, 11,
+    // Left face (x=2.5)
+    7, 8, 11,  7, 4, 8,
+    // Right face (x=7.5)
+    5, 10, 9,  5, 6, 10,
   }
 
-  // Create navigation builder and build mesh
-  navmesh_builder = navigation.builder_init(config)
-  defer navigation.builder_destroy(&navmesh_builder)
-
-  // Create input for navigation building
-  nav_input := navigation.Input{
-    vertices = vertices,
-    indices = indices,
-    areas = areas,
+  // Add obstacle vertices and indices (offset indices by ground vertex count)
+  ground_vert_count := u32(len(ground_verts))
+  for vert in obstacle_verts {
+    append(&vertices_list, vert)
+  }
+  for idx in obstacle_indices {
+    append(&indices_list, idx)
+  }
+  // Add obstacle triangle areas (one per triangle, not per index)
+  for _ in 0..<len(obstacle_indices)/3 {
+    append(&areas_list, navigation.NULL_AREA)  // Non-walkable
   }
 
-  // Build the mesh
+  log.infof("Obstacle: %d vertices, %d triangles", len(obstacle_verts), len(obstacle_indices)/3)
+  log.infof("Total scene: %d vertices, %d triangles", len(vertices_list), len(indices_list)/3)
+
+  // Convert to input format for new navigation system
+  input := navigation.NavMeshInput{
+    vertices = vertices_list[:],
+    indices = indices_list[:],
+    areas = areas_list[:],
+  }
+
+  // Use reasonable configuration for 10x2x2 obstacle on 20x20 ground
+  config := mjolnir.default_navmesh_config()
+  config.cell_size = 0.3          // Reasonable resolution
+  config.agent_radius = 0.1       // Small agent expansion
+  config.agent_height = 1.5       // Standard agent height
+  config.agent_max_climb = 0.5    // Standard climb value
+
+  // Build the navigation mesh
+  log.info("Building navigation mesh...")
   ok: bool
-  log.info("Calling navigation.build...")
-  navmesh, ok = navigation.build(&navmesh_builder, &nav_input)
-  log.infof("navigation.build returned: ok=%v", ok)
+  navmesh, ok = mjolnir.build_navmesh(input, config)
 
   if !ok {
     log.error("Failed to build navigation mesh from scene!")
     return
   }
 
-  log.info("Navigation mesh built successfully from scene geometry")
-  log.infof("NavMesh: tiles=%p, max_tiles=%d", navmesh.tiles, navmesh.max_tiles)
+  log.info("Navigation mesh built successfully!")
 
   // Add obstacles for scene objects
   log.info("Adding scene obstacles...")
@@ -822,7 +653,7 @@ find_navigation_path :: proc(start, end: [3]f32) -> bool {
     log.warnf("End position [%.1f, %.1f, %.1f] is inside an obstacle!", end.x, end.y, end.z)
   }
 
-  log.infof("Pathfinding from [%.1f, %.1f, %.1f] to [%.1f, %.1f, %.1f]", 
+  log.infof("Pathfinding from [%.1f, %.1f, %.1f] to [%.1f, %.1f, %.1f]",
             start.x, start.y, start.z, end.x, end.y, end.z)
 
   // Initialize query if needed
@@ -1073,8 +904,8 @@ on_key_pressed :: proc(engine: ^mjolnir.Engine, key, action, mods: int) {
     case glfw.KEY_R:
       // Randomize start and end positions
       {
-        // Generate random positions on the ground plane
-        ground_size: f32 = 14.0  // Slightly smaller than actual to stay on mesh
+        // Generate random positions on the 15x15 ground plane
+        ground_size: f32 = 7.0  // Stay within 15x15 bounds (-7.5 to 7.5)
 
         // Keep trying until we get valid positions not in obstacles
         for attempts in 0..<10 {
