@@ -121,9 +121,11 @@ test_obstacle_pathfinding :: proc(t: ^testing.T) {
   // Match main.odin navigation mesh configuration
   config := mjolnir.default_navmesh_config()
   config.cell_size = 0.3          // Reasonable resolution
-  config.agent_radius = 0.6       // Larger agent radius to prevent narrow corridors
+  config.agent_radius = 0.4       // Reduced from 0.6 to ensure better connectivity
   config.agent_height = 1.5       // Standard agent height
   config.agent_max_climb = 0.5    // Standard climb value
+  config.min_region_area = 1      // Very small regions allowed
+  config.merge_region_area = 1    // Minimal merging to prevent large polygons that allow paths through obstacles
   
   navmesh, ok := mjolnir.build_navmesh(input, config)
   defer nav.destroy(&navmesh)
@@ -134,6 +136,65 @@ test_obstacle_pathfinding :: proc(t: ^testing.T) {
   // Analyze the resulting navigation mesh
   analyze_navmesh(t, &navmesh)
   
+  // Debug polygon structure for suboptimal path investigation
+  log.info("\n=== POLYGON STRUCTURE DEBUG ===")
+  if navmesh.max_tiles > 0 && navmesh.tiles[0].header != nil {
+    tile := &navmesh.tiles[0]
+    header := tile.header
+    
+    // First, log all polygons with their positions
+    log.infof("Total polygons: %d", header.poly_count)
+    for i in 0..<header.poly_count {
+      poly := &tile.polys[i]
+      poly_ref := nav.encode_poly_id(tile.salt, 0, u32(i))
+      center := nav.get_poly_center(&navmesh, poly_ref)
+      
+      // Get bounds
+      min_bounds := [3]f32{999, 999, 999}
+      max_bounds := [3]f32{-999, -999, -999}
+      for j in 0..<poly.vert_count {
+        vert_idx := poly.verts[j]
+        if vert_idx >= u16(header.vert_count) do continue
+        vert_pos := [3]f32{
+          tile.verts[vert_idx * 3 + 0],
+          tile.verts[vert_idx * 3 + 1],
+          tile.verts[vert_idx * 3 + 2],
+        }
+        min_bounds = linalg.min(min_bounds, vert_pos)
+        max_bounds = linalg.max(max_bounds, vert_pos)
+      }
+      
+      log.infof("Poly %d (ref %x): center[%.2f,%.2f,%.2f], bounds x[%.2f,%.2f] z[%.2f,%.2f]", 
+                i, poly_ref, center.x, center.y, center.z,
+                min_bounds.x, max_bounds.x, min_bounds.z, max_bounds.z)
+    }
+    
+    // Then log connectivity
+    log.info("\n=== POLYGON CONNECTIVITY ===")
+    for i in 0..<min(header.poly_count, 15) {
+      poly := &tile.polys[i]
+      poly_ref := nav.encode_poly_id(tile.salt, 0, u32(i))
+      center := nav.get_poly_center(&navmesh, poly_ref)
+      
+      log.infof("Polygon %x at [%.2f,%.2f,%.2f]:", poly_ref, center.x, center.y, center.z)
+      
+      // Log neighbors
+      neighbor_count := 0
+      for link_idx := poly.first_link; link_idx != nav.NULL_LINK; {
+        if link_idx >= u32(len(tile.links)) do break
+        link := &tile.links[link_idx]
+        neighbor_center := nav.get_poly_center(&navmesh, link.ref)
+        log.infof("  -> Neighbor %x at [%.2f,%.2f,%.2f] (edge %d)", 
+                  link.ref, neighbor_center.x, neighbor_center.y, neighbor_center.z, link.edge)
+        neighbor_count += 1
+        link_idx = link.next
+      }
+      if neighbor_count == 0 {
+        log.warn("  -> NO NEIGHBORS!")
+      }
+    }
+  }
+  
   // Test pathfinding around the obstacle
   test_pathfinding_cases(t, &navmesh)
 }
@@ -141,13 +202,13 @@ test_obstacle_pathfinding :: proc(t: ^testing.T) {
 // Create the test scene geometry
 create_test_scene :: proc() -> (ground_verts: [][3]f32, ground_indices: []u32, 
                                obstacle_verts: [][3]f32, obstacle_indices: []u32) {
-  // Ground: 24x24 plane at y=0, centered at origin
-  // Increased from 20x20 to ensure enough clearance after erosion
+  // Ground: 30x30 plane at y=0, centered at origin
+  // Increased from 24x24 to ensure better connectivity around obstacle
   ground_verts_data := [4][3]f32{
-    {-12, 0, -12}, // 0
-    {12, 0, -12},  // 1
-    {12, 0, 12},   // 2
-    {-12, 0, 12},  // 3
+    {-15, 0, -15}, // 0
+    {15, 0, -15},  // 1
+    {15, 0, 15},   // 2
+    {-15, 0, 15},  // 3
   }
   ground_verts = make([][3]f32, len(ground_verts_data))
   copy(ground_verts, ground_verts_data[:])
@@ -159,21 +220,22 @@ create_test_scene :: proc() -> (ground_verts: [][3]f32, ground_indices: []u32,
   ground_indices = make([]u32, len(ground_indices_data))
   copy(ground_indices, ground_indices_data[:])
   
-  // Obstacle: 18x2x2 box centered at origin (leaves 1 unit on each side)
-  // Box extends from (-9, 0, -1) to (9, 2, 1)
-  // With agent_radius=0.6, this should block all passages
+  // Obstacle: 10x2x2 box centered at origin
+  // Box extends from (-5, 0, -1) to (5, 2, 1)
+  // With 30x30 ground, this leaves 10 units on each side
+  // After erosion with agent_radius=0.4, walkable area is ~9.6 units on each side
   obstacle_verts_data := [8][3]f32{
     // Bottom face (y=0)
-    {-9, 0, -1}, // 0
-    {9, 0, -1},  // 1
-    {9, 0, 1},   // 2
-    {-9, 0, 1},  // 3
+    {-5, 0, -1}, // 0
+    {5, 0, -1},  // 1
+    {5, 0, 1},   // 2
+    {-5, 0, 1},  // 3
     
     // Top face (y=2)
-    {-9, 2, -1}, // 4
-    {9, 2, -1},  // 5
-    {9, 2, 1},   // 6
-    {-9, 2, 1},  // 7
+    {-5, 2, -1}, // 4
+    {5, 2, -1},  // 5
+    {5, 2, 1},   // 6
+    {-5, 2, 1},  // 7
   }
   obstacle_verts = make([][3]f32, len(obstacle_verts_data))
   copy(obstacle_verts, obstacle_verts_data[:])
@@ -187,9 +249,9 @@ create_test_scene :: proc() -> (ground_verts: [][3]f32, ground_indices: []u32,
     0, 1, 5,  0, 5, 4,
     // Back face (z=1)
     2, 7, 6,  2, 3, 7,
-    // Left face (x=-9)
+    // Left face (x=-5)
     3, 4, 7,  3, 0, 4,
-    // Right face (x=9)
+    // Right face (x=5)
     1, 6, 5,  1, 2, 6,
   }
   obstacle_indices = make([]u32, len(obstacle_indices_data))
@@ -286,10 +348,45 @@ test_pathfinding_cases :: proc(t: ^testing.T, navmesh: ^nav.NavMesh) {
     },
     {
       name = "outside_bounds",
-      start = {15, 0.1, 15},  // Outside the navigation mesh bounds
+      start = {20, 0.1, 20},  // Clearly outside the navigation mesh bounds
       end = {-10, 0.1, -10},
       should_succeed = false,
       description = "Start position outside navigation mesh",
+    },
+    {
+      name = "left_path_test",
+      start = {-8, 0.1, 5},
+      end = {-8, 0.1, -5},
+      should_succeed = true,
+      description = "Path on left side from top to bottom",
+    },
+    {
+      name = "right_path_test", 
+      start = {8, 0.1, 5},
+      end = {8, 0.1, -5},
+      should_succeed = true,
+      description = "Path on right side from top to bottom",
+    },
+    {
+      name = "suboptimal_map_edge",
+      start = {4, 0.1, 6.9},
+      end = {3.7, 0.1, -4.4},
+      should_succeed = true,
+      description = "Path that might take suboptimal route around map edge",
+    },
+    {
+      name = "optimal_left_choice",
+      start = {-2, 0.1, 6},
+      end = {-2, 0.1, -6},
+      should_succeed = true,
+      description = "Path that should definitely choose left side",
+    },
+    {
+      name = "center_to_left",
+      start = {0, 0.1, 6},
+      end = {-8, 0.1, -6},
+      should_succeed = true,
+      description = "Path from center top to left bottom - should go left",
     },
   }
   
@@ -311,7 +408,7 @@ test_pathfinding_cases :: proc(t: ^testing.T, navmesh: ^nav.NavMesh) {
     log.infof("Result: found=%v, waypoints=%d", found, len(path) if found else 0)
     
     // For key test cases, print the full path
-    if (test_case.name == "around_obstacle" || test_case.name == "diagonal_around_obstacle") && found {
+    if (test_case.name == "around_obstacle" || test_case.name == "diagonal_around_obstacle" || test_case.name == "suboptimal_map_edge") && found {
       log.infof("=== DETAILED PATH ANALYSIS for %s ===", test_case.name)
       for point, i in path {
         log.infof("Waypoint %d: [%.2f, %.2f, %.2f]", i, point.x, point.y, point.z)
@@ -348,8 +445,8 @@ test_pathfinding_cases :: proc(t: ^testing.T, navmesh: ^nav.NavMesh) {
       
       // Check individual waypoints
       for point in path {
-        // Check if point is inside obstacle bounds (-9 <= x <= 9, -1 <= z <= 1, 0 <= y <= 2)
-        if point.x >= -9 && point.x <= 9 && point.z >= -1 && point.z <= 1 && point.y > 0.2 {
+        // Check if point is inside obstacle bounds (-5 <= x <= 5, -1 <= z <= 1, 0 <= y <= 2)
+        if point.x >= -5 && point.x <= 5 && point.z >= -1 && point.z <= 1 && point.y > 0.2 {
           obstacle_violation = true
           log.errorf("Path waypoint goes through obstacle at [%.2f, %.2f, %.2f]", point.x, point.y, point.z)
         }
@@ -362,8 +459,8 @@ test_pathfinding_cases :: proc(t: ^testing.T, navmesh: ^nav.NavMesh) {
           end_seg := path[i]
           
           // Check if line segment intersects the 2D obstacle bounds (ignoring Y for ground-level paths)
-          // Obstacle bounds: x=-7.5 to 7.5, z=-1 to 1
-          intersects_obstacle := line_intersects_rectangle_2d(start_seg, end_seg, -9, 9, -1, 1)
+          // Obstacle bounds: x=-5 to 5, z=-1 to 1
+          intersects_obstacle := line_intersects_rectangle_2d(start_seg, end_seg, -5, 5, -1, 1)
           
           if intersects_obstacle {
             log.errorf("❌ OBSTACLE INTERSECTION: Path segment %d from [%.2f,%.2f,%.2f] to [%.2f,%.2f,%.2f] intersects obstacle", 

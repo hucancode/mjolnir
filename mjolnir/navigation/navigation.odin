@@ -156,6 +156,9 @@ build :: proc(builder: ^NavMeshBuilder, input: ^Input) -> (NavMesh, bool) {
   }
 
   log.infof("Building navigation mesh with %d vertices, %d triangles", len(input.vertices), triangle_count)
+  log.infof("Config: cell_size=%.2f, agent_radius=%.2f, walkable_radius=%d cells", 
+            builder.config.cs, f32(builder.config.walkable_radius) * builder.config.cs, 
+            builder.config.walkable_radius)
   
   // Debug: Log area distribution
   area_counts: map[u8]int
@@ -254,6 +257,9 @@ build :: proc(builder: ^NavMeshBuilder, input: ^Input) -> (NavMesh, bool) {
     for j in 0..<3 {
       poly.neis[j] = NOT_CONNECTED
     }
+    
+    // Initialize first_link to NULL_LINK (no links in simple build)
+    poly.first_link = NULL_LINK
   }
 
   log.infof("Created navigation mesh with %d polygons", len(tile.polys))
@@ -1094,9 +1100,9 @@ create_navmesh_from_poly_mesh :: proc(pmesh: ^PolyMesh, dmesh: ^PolyMeshDetail, 
     poly_link_count := 0
 
     for j in 0..<poly.vert_count {
-      if j == 0 && i < 5 {  // Debug first few polygons
-        log.debugf("Poly %d edge %d: neighbor = %d (0 means no neighbor)", i, j, poly.neis[j])
-      }
+      // if i < 5 {  // Debug first few polygons - all edges
+      //   log.infof("Poly %d edge %d: neighbor = %d (0 means no neighbor)", i, j, poly.neis[j])
+      // }
       
       if poly.neis[j] != 0 {
         // Create link to neighbor (neis stores 1-based indices)
@@ -1188,6 +1194,7 @@ create_navmesh_from_poly_mesh :: proc(pmesh: ^PolyMesh, dmesh: ^PolyMeshDetail, 
 
   log.infof("Created Detour navmesh with %d vertices, %d polygons", tile.header.vert_count, tile.header.poly_count)
   log.infof("NavMesh tiles: %p, tile[0].verts: %p, tile[0].polys: %p", navmesh.tiles, tile.verts, tile.polys)
+  log.infof("Links array: %p, length: %d", tile.links, len(tile.links))
 
   return navmesh, true
 }

@@ -217,35 +217,110 @@ bounds_overlap :: proc(amin, amax, bmin, bmax: [3]f32) -> bool {
            amax.z < bmin.z || amin.z > bmax.z)
 }
 
-// Find closest point on polygon (simplified)
+// Distance from point to line segment (2D)
+distance_pt_seg_sqr_2d :: proc(pt: [3]f32, a: [3]f32, b: [3]f32) -> (f32, f32) {
+  dx := b.x - a.x
+  dz := b.z - a.z
+  
+  if dx*dx + dz*dz < 0.0001 {
+    // Points are very close, just return distance to a
+    dx2 := pt.x - a.x
+    dz2 := pt.z - a.z
+    return dx2*dx2 + dz2*dz2, 0
+  }
+  
+  // Parameter t of closest point on segment
+  t := ((pt.x - a.x) * dx + (pt.z - a.z) * dz) / (dx*dx + dz*dz)
+  t = math.clamp(t, 0, 1)
+  
+  // Closest point
+  closest_x := a.x + t * dx
+  closest_z := a.z + t * dz
+  
+  // Distance squared
+  dx3 := pt.x - closest_x
+  dz3 := pt.z - closest_z
+  
+  return dx3*dx3 + dz3*dz3, t
+}
+
+// Point in polygon test using ray casting algorithm (2D)
+point_in_polygon_2d :: proc(pt: [3]f32, verts: []f32, nverts: int) -> bool {
+  c := false
+  for i, j := 0, nverts-1; i < nverts; j, i = i, i+1 {
+    vi_x := verts[i*3 + 0]
+    vi_z := verts[i*3 + 2]
+    vj_x := verts[j*3 + 0]
+    vj_z := verts[j*3 + 2]
+    
+    if ((vi_z > pt.z) != (vj_z > pt.z)) &&
+       (pt.x < (vj_x - vi_x) * (pt.z - vi_z) / (vj_z - vi_z) + vi_x) {
+      c = !c
+    }
+  }
+  return c
+}
+
+// Find closest point on polygon (matching Detour's closestPointOnPolyBoundary)
 closest_point_on_poly :: proc(tile: ^MeshTile, poly: ^Poly, pos: [3]f32) -> ([3]f32, f32) {
   if poly.vert_count < 3 do return pos, math.F32_MAX
   
-  // Simple implementation: find closest point to polygon center
-  // This could be improved with proper point-in-polygon tests and edge projection
-  center := [3]f32{0, 0, 0}
-  valid_verts := 0
+  // Collect vertices
+  verts := make([]f32, poly.vert_count * 3)
+  defer delete(verts)
   
   for i in 0..<poly.vert_count {
     vert_idx := poly.verts[i]
     if vert_idx >= u16(tile.header.vert_count) do continue
     
-    vert_pos := [3]f32{
-      tile.verts[vert_idx * 3 + 0],
-      tile.verts[vert_idx * 3 + 1],
-      tile.verts[vert_idx * 3 + 2],
-    }
-    
-    center += vert_pos
-    valid_verts += 1
+    verts[i*3 + 0] = tile.verts[vert_idx * 3 + 0]
+    verts[i*3 + 1] = tile.verts[vert_idx * 3 + 1]
+    verts[i*3 + 2] = tile.verts[vert_idx * 3 + 2]
   }
   
-  if valid_verts == 0 do return pos, math.F32_MAX
+  // Check if point is inside polygon
+  inside := point_in_polygon_2d(pos, verts, int(poly.vert_count))
   
-  center /= f32(valid_verts)
+  if inside {
+    // Point is inside, return the point projected to polygon height
+    // For now, use average height
+    avg_y := f32(0)
+    for i in 0..<poly.vert_count {
+      avg_y += verts[i*3 + 1]
+    }
+    avg_y /= f32(poly.vert_count)
+    
+    closest := [3]f32{pos.x, avg_y, pos.z}
+    diff := pos - closest
+    // When over polygon, prefer based on height difference
+    distance_sqr := diff.y * diff.y
+    return closest, distance_sqr
+  }
   
-  // Project query point to polygon's Y level
-  closest := [3]f32{pos.x, center.y, pos.z}
+  // Point is outside, find closest edge
+  best_dist_sqr := f32(math.F32_MAX)
+  best_t := f32(0)
+  best_edge := 0
+  
+  for i, j := 0, int(poly.vert_count)-1; i < int(poly.vert_count); j, i = i, i+1 {
+    va := [3]f32{verts[j*3], verts[j*3+1], verts[j*3+2]}
+    vb := [3]f32{verts[i*3], verts[i*3+1], verts[i*3+2]}
+    
+    dist_sqr, t := distance_pt_seg_sqr_2d(pos, va, vb)
+    if dist_sqr < best_dist_sqr {
+      best_dist_sqr = dist_sqr
+      best_t = t
+      best_edge = j
+    }
+  }
+  
+  // Calculate closest point on best edge
+  j := best_edge
+  i := (j + 1) % int(poly.vert_count)
+  va := [3]f32{verts[j*3], verts[j*3+1], verts[j*3+2]}
+  vb := [3]f32{verts[i*3], verts[i*3+1], verts[i*3+2]}
+  
+  closest := linalg.lerp(va, vb, best_t)
   diff := pos - closest
   distance_sqr := linalg.dot(diff, diff)
   
@@ -316,6 +391,15 @@ find_polygon_path :: proc(query: ^PathQuery, start_ref, end_ref: PolyRef, start_
   log.infof("  Start pos: [%.2f, %.2f, %.2f], End pos: [%.2f, %.2f, %.2f]", 
             start_pos.x, start_pos.y, start_pos.z, end_pos.x, end_pos.y, end_pos.z)
   
+  start_center := get_poly_center(query.mesh, start_ref)
+  end_center := get_poly_center(query.mesh, end_ref)
+  log.infof("  Start poly center: [%.2f, %.2f, %.2f], End poly center: [%.2f, %.2f, %.2f]",
+            start_center.x, start_center.y, start_center.z, end_center.x, end_center.y, end_center.z)
+  
+  // Log heuristic distance for debugging
+  direct_dist := linalg.distance(start_pos, end_pos)
+  log.infof("  Direct distance: %.2f", direct_dist)
+  
   if start_ref == end_ref {
     log.info("find_polygon_path: Start and end are in same polygon")
     path := make([]PolyRef, 1)
@@ -368,7 +452,7 @@ find_polygon_path :: proc(query: ^PathQuery, start_ref, end_ref: PolyRef, start_
     
     // Check if we reached the goal
     if current.poly_ref == end_ref {
-      log.infof("A* found path after %d iterations!", iterations)
+      log.infof("A* found path to goal %x after %d iterations!", end_ref, iterations)
       best_node = current
       break
     }
@@ -492,6 +576,20 @@ expand_neighbors :: proc(query: ^PathQuery, current: PathNode, end_ref: PolyRef,
     
     new_f_cost := new_g_cost + new_h_cost
     
+    // Debug logging for cost analysis (first few neighbors)
+    if iteration <= 5 && neighbor_count < 5 {
+      log.infof("    Neighbor %x: pos[%.2f,%.2f,%.2f], base_cost=%.2f, area_cost=%.2f, g=%.2f, h=%.2f, f=%.2f",
+                neighbor_ref, neighbor_pos.x, neighbor_pos.y, neighbor_pos.z,
+                base_move_cost, area_cost, new_g_cost, new_h_cost, new_f_cost)
+      
+      // Also log why we might skip this neighbor
+      if neighbor_node, exists := query.nodes[neighbor_ref]; exists {
+        if new_g_cost >= neighbor_node.g_cost {
+          log.infof("      -> Skipped: existing g_cost %.2f is better", neighbor_node.g_cost)
+        }
+      }
+    }
+    
     // Check if this path is better
     if neighbor_node, exists := query.nodes[neighbor_ref]; exists {
       if new_g_cost >= neighbor_node.g_cost do continue
@@ -539,6 +637,55 @@ reconstruct_path_from_nodes :: proc(query: ^PathQuery, end_node: PathNode) -> []
   return path[:]
 }
 
+// Get constrained portal points to avoid extreme waypoints
+get_constrained_portal_points :: proc(navmesh: ^NavMesh, poly_ref1, poly_ref2: PolyRef, 
+                                     from_pos, to_pos: [3]f32) -> (left, right: [3]f32) {
+  // Get the full portal edge
+  full_left, full_right := get_portal_points(navmesh, poly_ref1, poly_ref2)
+  
+  // If the portal is reasonably sized, use it as is
+  edge_length := linalg.distance(full_left, full_right)
+  if edge_length <= 3.0 {
+    return full_left, full_right
+  }
+  
+  // For large portals, constrain based on the path direction
+  // Project from_pos and to_pos onto the portal edge
+  edge_dir := full_right - full_left
+  edge_len_sq := linalg.dot(edge_dir, edge_dir)
+  
+  if edge_len_sq > 0.001 {
+    // Project from_pos
+    t_from := linalg.dot(from_pos - full_left, edge_dir) / edge_len_sq
+    t_from = math.clamp(t_from, 0.1, 0.9)  // Keep away from extremes
+    
+    // Project to_pos
+    t_to := linalg.dot(to_pos - full_left, edge_dir) / edge_len_sq
+    t_to = math.clamp(t_to, 0.1, 0.9)
+    
+    // Ensure some minimum portal width
+    t_min := math.min(t_from, t_to) - 0.1
+    t_max := math.max(t_from, t_to) + 0.1
+    t_min = math.clamp(t_min, 0, 1)
+    t_max = math.clamp(t_max, 0, 1)
+    
+    // Ensure minimum width
+    if t_max - t_min < 0.2 {
+      center := (t_min + t_max) * 0.5
+      t_min = center - 0.1
+      t_max = center + 0.1
+    }
+    
+    left := linalg.lerp(full_left, full_right, t_min)
+    right := linalg.lerp(full_left, full_right, t_max)
+    
+    log.infof("  Constrained large portal from %.1f to range [%.2f,%.2f]", edge_length, t_min, t_max)
+    return left, right
+  }
+  
+  return full_left, full_right
+}
+
 // String pulling algorithm for path smoothing
 string_pull_path :: proc(navmesh: ^NavMesh, poly_path: []PolyRef, start_pos, end_pos: [3]f32) -> [][3]f32 {
   log.debugf("string_pull_path: Processing path with %d polygons", len(poly_path))
@@ -551,13 +698,47 @@ string_pull_path :: proc(navmesh: ^NavMesh, poly_path: []PolyRef, start_pos, end
     return path
   }
   
+  // Clamp start and end positions to polygon boundaries (matching Detour)
+  clamped_start := start_pos
+  clamped_end := end_pos
+  
+  // Clamp start position to first polygon
+  if len(poly_path) > 0 {
+    first_tile_idx := decode_poly_id_tile(poly_path[0])
+    first_poly_idx := decode_poly_id_poly(poly_path[0])
+    if first_tile_idx < u32(navmesh.max_tiles) {
+      first_tile := &navmesh.tiles[first_tile_idx]
+      if first_tile.header != nil && first_poly_idx < u32(first_tile.header.poly_count) {
+        first_poly := &first_tile.polys[first_poly_idx]
+        clamped_start, _ = closest_point_on_poly(first_tile, first_poly, start_pos)
+        log.debugf("Clamped start from [%.2f,%.2f,%.2f] to [%.2f,%.2f,%.2f]", 
+                  start_pos.x, start_pos.y, start_pos.z, clamped_start.x, clamped_start.y, clamped_start.z)
+      }
+    }
+  }
+  
+  // Clamp end position to last polygon
+  if len(poly_path) > 0 {
+    last_tile_idx := decode_poly_id_tile(poly_path[len(poly_path)-1])
+    last_poly_idx := decode_poly_id_poly(poly_path[len(poly_path)-1])
+    if last_tile_idx < u32(navmesh.max_tiles) {
+      last_tile := &navmesh.tiles[last_tile_idx]
+      if last_tile.header != nil && last_poly_idx < u32(last_tile.header.poly_count) {
+        last_poly := &last_tile.polys[last_poly_idx]
+        clamped_end, _ = closest_point_on_poly(last_tile, last_poly, end_pos)
+        log.debugf("Clamped end from [%.2f,%.2f,%.2f] to [%.2f,%.2f,%.2f]", 
+                  end_pos.x, end_pos.y, end_pos.z, clamped_end.x, clamped_end.y, clamped_end.z)
+      }
+    }
+  }
+  
   // Check if we can go straight from start to end
   if len(poly_path) == 2 {
     // Validate that the straight path doesn't exit the navigation mesh
-    if can_go_straight(navmesh, poly_path[0], poly_path[1], start_pos, end_pos) {
+    if can_go_straight(navmesh, poly_path[0], poly_path[1], clamped_start, clamped_end) {
       path := make([][3]f32, 2)
-      path[0] = start_pos
-      path[1] = end_pos
+      path[0] = clamped_start
+      path[1] = clamped_end
       return path
     }
   }
@@ -571,14 +752,14 @@ string_pull_path :: proc(navmesh: ^NavMesh, poly_path: []PolyRef, start_pos, end
   
   // Run funnel algorithm
   path := make([dynamic][3]f32)
-  append(&path, start_pos)
+  append(&path, clamped_start)
   
-  apex := start_pos
+  apex := clamped_start
   apex_idx := 0
   
   // Initialize funnel with start position
-  left := start_pos
-  right := start_pos
+  left := clamped_start
+  right := clamped_start
   left_idx := 0
   right_idx := 0
   
@@ -603,17 +784,27 @@ string_pull_path :: proc(navmesh: ^NavMesh, poly_path: []PolyRef, start_pos, end
     
     if i < len(poly_path) - 1 {
       // Regular portal between polygons
+      // First try using the full portal edge (matching Detour)
       portal_left, portal_right = get_portal_points(navmesh, poly_path[i], poly_path[i+1])
+      
+      // Only constrain if the portal is extremely wide
+      edge_length := linalg.distance(portal_left, portal_right)
+      if edge_length > 10.0 {
+        // For very large portals, use constrained version
+        portal_left, portal_right = get_constrained_portal_points(navmesh, poly_path[i], poly_path[i+1], apex, clamped_end)
+      }
     } else {
-      // Last "portal" is the end position
-      portal_left = end_pos
-      portal_right = end_pos
+      // Last "portal" is the clamped end position
+      portal_left = clamped_end
+      portal_right = clamped_end
     }
     
-    log.debugf("string_pull: Processing portal %d - left[%.2f,%.2f,%.2f], right[%.2f,%.2f,%.2f]", 
-              i, portal_left.x, portal_left.y, portal_left.z, portal_right.x, portal_right.y, portal_right.z)
-    log.debugf("  Current funnel - apex[%.2f,%.2f,%.2f], left[%.2f,%.2f,%.2f], right[%.2f,%.2f,%.2f]",
-              apex.x, apex.y, apex.z, left.x, left.y, left.z, right.x, right.y, right.z)
+    if i < 5 {  // Log first few portals
+      log.infof("string_pull: Processing portal %d - left[%.2f,%.2f,%.2f], right[%.2f,%.2f,%.2f]", 
+                i, portal_left.x, portal_left.y, portal_left.z, portal_right.x, portal_right.y, portal_right.z)
+      log.infof("  Current funnel - apex[%.2f,%.2f,%.2f], left[%.2f,%.2f,%.2f], right[%.2f,%.2f,%.2f]",
+                apex.x, apex.y, apex.z, left.x, left.y, left.z, right.x, right.y, right.z)
+    }
     
     // Skip portal if we're starting very close to it (Detour does this)
     if i == 0 {
@@ -698,8 +889,8 @@ string_pull_path :: proc(navmesh: ^NavMesh, poly_path: []PolyRef, start_pos, end
   
   // The loop should have processed all portals including the end position
   // Only add the end position if it wasn't already added
-  if len(path) == 0 || path[len(path)-1] != end_pos {
-    append(&path, end_pos)
+  if len(path) == 0 || path[len(path)-1] != clamped_end {
+    append(&path, clamped_end)
   }
   
   // Post-process: validate path segments don't cut through obstacles
@@ -728,12 +919,19 @@ get_portal_points :: proc(navmesh: ^NavMesh, poly_ref1, poly_ref2: PolyRef) -> (
   
   // Find the link from poly1 to poly2
   edge_idx := -1
+  link_side := u8(0xff)
+  link_bmin := u8(0)
+  link_bmax := u8(255)
+  
   for link_idx := poly1.first_link; link_idx != NULL_LINK; {
     if link_idx >= u32(len(tile1.links)) do break
     link := &tile1.links[link_idx]
     
     if link.ref == poly_ref2 {
       edge_idx = int(link.edge)
+      link_side = link.side
+      link_bmin = link.bmin
+      link_bmax = link.bmax
       break
     }
     
@@ -777,8 +975,32 @@ get_portal_points :: proc(navmesh: ^NavMesh, poly_ref1, poly_ref2: PolyRef) -> (
   // in an order that makes sense for the string pulling algorithm
   
   // Debug: Log the portal edge for analysis
-  log.debugf("get_portal_points: poly %x->%x, edge %d, v0[%.2f,%.2f,%.2f], v1[%.2f,%.2f,%.2f]", 
+  log.infof("get_portal_points: poly %x->%x, edge %d, v0[%.2f,%.2f,%.2f], v1[%.2f,%.2f,%.2f]", 
             poly_ref1, poly_ref2, edge_idx, v0.x, v0.y, v0.z, v1.x, v1.y, v1.z)
+  
+  // Check if we need to clamp the portal based on the link's bmin/bmax
+  // This is important for tile boundaries and large polygons
+  if link_side != 0xff {
+    // This is a tile boundary edge, check if we need to clamp
+    if link_bmin != 0 || link_bmax != 255 {
+      s := f32(1.0 / 255.0)
+      tmin := f32(link_bmin) * s
+      tmax := f32(link_bmax) * s
+      left := linalg.lerp(v0, v1, tmin)
+      right := linalg.lerp(v0, v1, tmax)
+      log.infof("  Clamped portal: tmin=%.2f, tmax=%.2f, left[%.2f,%.2f,%.2f], right[%.2f,%.2f,%.2f]",
+                tmin, tmax, left.x, left.y, left.z, right.x, right.y, right.z)
+      return left, right
+    }
+  }
+  
+  // For internal edges, we should still limit the portal size to something reasonable
+  // Let's find the actual shared portion of the edge with poly2
+  // For now, return the full edge but log a warning if it's very long
+  edge_length := linalg.distance(v0, v1)
+  if edge_length > 5.0 {
+    log.warnf("  Large portal edge: length %.2f", edge_length)
+  }
   
   // The edge vertices in a polygon are ordered counter-clockwise
   // When traversing from poly1 to poly2, we need the vertices in consistent order
@@ -786,7 +1008,6 @@ get_portal_points :: proc(navmesh: ^NavMesh, poly_ref1, poly_ref2: PolyRef) -> (
   // Since polygon vertices are CCW, v0 is left and v1 is right when exiting the edge
   return v0, v1
 }
-
 
 // Get edge midpoint between two adjacent polygons (for better pathfinding accuracy)
 get_edge_midpoint :: proc(navmesh: ^NavMesh, poly_ref1, poly_ref2: PolyRef) -> [3]f32 {

@@ -95,8 +95,8 @@ default_navmesh_config :: proc() -> NavMeshBuildConfig {
     agent_radius = 0.6,
     agent_max_climb = 0.9,
     agent_max_slope = 45.0,
-    min_region_area = 64,
-    merge_region_area = 400,
+    min_region_area = 1,
+    merge_region_area = 2,
     max_edge_length = 12.0,
     max_edge_error = 1.3,
     max_verts_per_poly = 6,
@@ -112,6 +112,7 @@ build_navmesh :: proc(
 ) -> (navmesh: navigation.NavMesh, success: bool) {
 
   log.info("Building navigation mesh from input data")
+  log.infof("NavMeshBuildConfig: cell_size=%.2f, agent_radius=%.2f", config.cell_size, config.agent_radius)
 
   // Convert build config to navigation config
   nav_config := navigation.Config{
@@ -213,7 +214,7 @@ build_level_navmesh :: proc(scene: ^Scene, warehouse: ^ResourceWarehouse) -> res
     indices = input.indices,
     areas = input.areas,
   }
-  
+
   navmesh, ok := navigation.build(&builder, &builder_input)
   if !ok {
     log.error("Failed to build navigation mesh")

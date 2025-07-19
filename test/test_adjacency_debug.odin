@@ -240,8 +240,16 @@ analyze_adjacency_detailed :: proc(t: ^testing.T, navmesh: ^nav.NavMesh, test_na
 
 // Get the neighbor of a polygon edge by accessing the mesh structure directly
 get_polygon_neighbor :: proc(tile: ^nav.MeshTile, poly_idx: i32, edge_idx: i32) -> u16 {
-  // This is a simplified approach - in a real implementation we'd need to
-  // access the actual neighbor data structure. For now, return 0xffff (no neighbor)
-  // since the real adjacency info is in the links, not in the polys array
-  return 0xffff
+  if poly_idx < 0 || poly_idx >= i32(tile.header.poly_count) {
+    return 0xffff
+  }
+  
+  poly := &tile.polys[poly_idx]
+  if edge_idx < 0 || edge_idx >= i32(poly.vert_count) {
+    return 0xffff
+  }
+  
+  // Return the neighbor value stored in the polygon
+  // Note: neis stores 1-based indices, 0 means no neighbor
+  return poly.neis[edge_idx]
 }
