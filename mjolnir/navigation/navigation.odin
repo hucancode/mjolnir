@@ -157,6 +157,16 @@ build :: proc(builder: ^NavMeshBuilder, input: ^Input) -> (NavMesh, bool) {
 
   log.infof("Building navigation mesh with %d vertices, %d triangles", len(input.vertices), triangle_count)
   
+  // Debug: Log area distribution
+  area_counts: map[u8]int
+  defer delete(area_counts)
+  for area in input.areas {
+    area_counts[area] = area_counts[area] + 1
+  }
+  for area, count in area_counts {
+    log.infof("  Area %d: %d triangles", area, count)
+  }
+  
   // Debug: Check input.indices before processing
   log.debugf("input.indices[0:15] in navigation: %v", input.indices[0:min(15, len(input.indices))])
   
@@ -781,6 +791,8 @@ build_with_heightfield :: proc(builder: ^NavMeshBuilder, input: ^Input) -> (NavM
   }
 
   // Step 5: Erode walkable area for agent radius
+  log.infof("Eroding walkable area with radius: %d cells (cell_size=%.2f)", 
+            config.walkable_radius, config.cs)
   if !erode_walkable_area(config.walkable_radius, chf) {
     log.error("Failed to erode walkable area")
     return NavMesh{}, false
@@ -824,6 +836,34 @@ build_with_heightfield :: proc(builder: ^NavMeshBuilder, input: ^Input) -> (NavM
   }
   
   log.infof("build_poly_mesh: Created %d polygons, %d vertices", pmesh.npolys, pmesh.nverts)
+  
+  // Debug: Log polygon centers and bounds to understand layout
+  log.debugf("Polygon centers and bounds:")
+  for i in 0..<pmesh.npolys {
+    center := [3]f32{0, 0, 0}
+    min_bounds := [3]f32{999, 999, 999}
+    max_bounds := [3]f32{-999, -999, -999}
+    vert_count := 0
+    for j in 0..<pmesh.nvp {
+      vert_idx := pmesh.polys[i * pmesh.nvp * 2 + j]
+      if vert_idx == 0xffff do break
+      v_idx := vert_idx * 3
+      wx := pmesh.bmin.x + f32(pmesh.verts[v_idx + 0]) * pmesh.cs
+      wy := pmesh.bmin.y + f32(pmesh.verts[v_idx + 1]) * pmesh.ch
+      wz := pmesh.bmin.z + f32(pmesh.verts[v_idx + 2]) * pmesh.cs
+      center.x += wx
+      center.y += wy
+      center.z += wz
+      min_bounds = linalg.min(min_bounds, [3]f32{wx, wy, wz})
+      max_bounds = linalg.max(max_bounds, [3]f32{wx, wy, wz})
+      vert_count += 1
+    }
+    if vert_count > 0 {
+      center /= f32(vert_count)
+      log.debugf("  Polygon %d: center [%.2f, %.2f, %.2f], bounds x[%.2f,%.2f] z[%.2f,%.2f]", 
+                i, center.x, center.y, center.z, min_bounds.x, max_bounds.x, min_bounds.z, max_bounds.z)
+    }
+  }
   
   // Note: Don't defer free_poly_mesh(pmesh) - we'll store it for visualization
 
@@ -990,9 +1030,18 @@ create_navmesh_from_poly_mesh :: proc(pmesh: ^PolyMesh, dmesh: ^PolyMeshDetail, 
   tile.verts = make([]f32, pmesh.nverts * 3)
   for i in 0..<pmesh.nverts {
     idx := i * 3
-    tile.verts[idx + 0] = pmesh.bmin.x + f32(pmesh.verts[idx + 0]) * pmesh.cs
-    tile.verts[idx + 1] = pmesh.bmin.y + f32(pmesh.verts[idx + 1]) * pmesh.ch
-    tile.verts[idx + 2] = pmesh.bmin.z + f32(pmesh.verts[idx + 2]) * pmesh.cs
+    x := pmesh.bmin.x + f32(pmesh.verts[idx + 0]) * pmesh.cs
+    y := pmesh.bmin.y + f32(pmesh.verts[idx + 1]) * pmesh.ch
+    z := pmesh.bmin.z + f32(pmesh.verts[idx + 2]) * pmesh.cs
+    
+    // Clamp vertices to input bounds to prevent expansion beyond original geometry
+    // This prevents pathfinding issues where portal vertices extend outside the mesh
+    x = clamp(x, config.bmin.x, config.bmax.x)
+    z = clamp(z, config.bmin.z, config.bmax.z)
+    
+    tile.verts[idx + 0] = x
+    tile.verts[idx + 1] = y
+    tile.verts[idx + 2] = z
   }
 
   // Convert polygons

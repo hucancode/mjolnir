@@ -313,6 +313,8 @@ get_poly_center :: proc(navmesh: ^NavMesh, poly_ref: PolyRef) -> [3]f32 {
 // Detour-style pathfinding algorithm
 find_polygon_path :: proc(query: ^PathQuery, start_ref, end_ref: PolyRef, start_pos, end_pos: [3]f32) -> []PolyRef {
   log.infof("find_polygon_path: Searching from poly %x to poly %x", start_ref, end_ref)
+  log.infof("  Start pos: [%.2f, %.2f, %.2f], End pos: [%.2f, %.2f, %.2f]", 
+            start_pos.x, start_pos.y, start_pos.z, end_pos.x, end_pos.y, end_pos.z)
   
   if start_ref == end_ref {
     log.info("find_polygon_path: Start and end are in same polygon")
@@ -358,9 +360,10 @@ find_polygon_path :: proc(query: ^PathQuery, start_ref, end_ref: PolyRef, start_
     current.flags |= NODE_CLOSED
     query.nodes[current.poly_ref] = current
     
-    if iterations <= 5 {  // Debug first few iterations
-      log.debugf("A* iter %d: current poly=%x, f_cost=%.2f, g_cost=%.2f, h_cost=%.2f", 
-                 iterations, current.poly_ref, current.f_cost, current.g_cost, current.h_cost)
+    if iterations <= 10 {  // Debug first few iterations
+      log.infof("A* iter %d: current poly=%x, f_cost=%.2f, g_cost=%.2f, h_cost=%.2f, pos[%.2f,%.2f,%.2f]", 
+                 iterations, current.poly_ref, current.f_cost, current.g_cost, current.h_cost,
+                 current.position.x, current.position.y, current.position.z)
     }
     
     // Check if we reached the goal
@@ -376,7 +379,7 @@ find_polygon_path :: proc(query: ^PathQuery, start_ref, end_ref: PolyRef, start_
     }
     
     // Expand neighbors
-    expand_neighbors(query, current, end_ref, end_pos)
+    expand_neighbors(query, current, end_ref, end_pos, iterations)
   }
   
   // Reconstruct path from best node
@@ -392,7 +395,7 @@ find_polygon_path :: proc(query: ^PathQuery, start_ref, end_ref: PolyRef, start_
 }
 
 // Expand neighbors for A* search
-expand_neighbors :: proc(query: ^PathQuery, current: PathNode, end_ref: PolyRef, end_pos: [3]f32) {
+expand_neighbors :: proc(query: ^PathQuery, current: PathNode, end_ref: PolyRef, end_pos: [3]f32, iteration: int) {
   tile_idx := decode_poly_id_tile(current.poly_ref)
   poly_idx := decode_poly_id_poly(current.poly_ref)
   
@@ -418,8 +421,8 @@ expand_neighbors :: proc(query: ^PathQuery, current: PathNode, end_ref: PolyRef,
     link := &tile.links[link_idx]
     neighbor_ref := link.ref
     
-    if neighbor_count < 3 {  // Debug first few neighbors of each polygon
-      log.debugf("  Link %d: neighbor_ref=%x, edge=%d, parent=%x", link_idx, neighbor_ref, link.edge, current.parent)
+    if iteration <= 5 && neighbor_count < 5 {  // Debug neighbors for first few iterations
+      log.infof("  Link %d: neighbor_ref=%x, edge=%d, parent=%x", link_idx, neighbor_ref, link.edge, current.parent)
     }
     
     if neighbor_ref == 0 {
@@ -546,6 +549,17 @@ string_pull_path :: proc(navmesh: ^NavMesh, poly_path: []PolyRef, start_pos, end
     path[0] = start_pos
     path[1] = end_pos
     return path
+  }
+  
+  // Check if we can go straight from start to end
+  if len(poly_path) == 2 {
+    // Validate that the straight path doesn't exit the navigation mesh
+    if can_go_straight(navmesh, poly_path[0], poly_path[1], start_pos, end_pos) {
+      path := make([][3]f32, 2)
+      path[0] = start_pos
+      path[1] = end_pos
+      return path
+    }
   }
   
   log.debugf("string_pull_path: Processing polygon path:")
@@ -688,7 +702,11 @@ string_pull_path :: proc(navmesh: ^NavMesh, poly_path: []PolyRef, start_pos, end
     append(&path, end_pos)
   }
   
-  return path[:]
+  // Post-process: validate path segments don't cut through obstacles
+  validated_path := validate_and_fix_path(navmesh, path[:], poly_path)
+  delete(path)
+  
+  return validated_path
 }
 
 // Get portal points between two adjacent polygons
@@ -782,4 +800,77 @@ get_edge_midpoint :: proc(navmesh: ^NavMesh, poly_ref1, poly_ref2: PolyRef) -> [
 // Calculate 2D triangle area (for funnel algorithm)
 tri_area_2d :: proc(a, b, c: [3]f32) -> f32 {
   return (b.x - a.x) * (c.z - a.z) - (c.x - a.x) * (b.z - a.z)
+}
+
+// Check if we can go straight between two adjacent polygons
+can_go_straight :: proc(navmesh: ^NavMesh, poly_ref1, poly_ref2: PolyRef, start_pos, end_pos: [3]f32) -> bool {
+  // Get the shared edge between the two polygons
+  left, right := get_portal_points(navmesh, poly_ref1, poly_ref2)
+  
+  // Check if the straight line from start to end crosses through the portal
+  // Using 2D projection (ignoring Y)
+  t1 := tri_area_2d(start_pos, end_pos, left)
+  t2 := tri_area_2d(start_pos, end_pos, right)
+  
+  // If signs are different, the line crosses between the portal points
+  // If both are on the same side, the straight path would exit the mesh
+  return t1 * t2 <= 0
+}
+
+// Validate path segments and fix any that cut through obstacles
+validate_and_fix_path :: proc(navmesh: ^NavMesh, path: [][3]f32, poly_path: []PolyRef) -> [][3]f32 {
+  if len(path) <= 2 do return path
+  
+  validated := make([dynamic][3]f32)
+  append(&validated, path[0])
+  
+  for i in 1..<len(path) {
+    start_point := validated[len(validated)-1]
+    end_point := path[i]
+    
+    // Check if this segment might cut through an obstacle
+    // For now, detect potentially problematic segments based on distance and direction
+    segment_length := linalg.distance(start_point, end_point)
+    
+    // If segment is very long and changes direction significantly, it might be cutting through
+    if segment_length > 5.0 && i < len(path) - 1 {
+      // Add intermediate waypoints from the polygon path to ensure we go around obstacles
+      // Find which polygons this segment should traverse
+      start_poly_idx := find_polygon_in_path(navmesh, poly_path, start_point)
+      end_poly_idx := find_polygon_in_path(navmesh, poly_path, end_point)
+      
+      if start_poly_idx >= 0 && end_poly_idx >= 0 && end_poly_idx - start_poly_idx > 1 {
+        // Add intermediate waypoints for long segments
+        for j in start_poly_idx + 1..<end_poly_idx {
+          if j < len(poly_path) {
+            intermediate := get_poly_center(navmesh, poly_path[j])
+            // Project to ground level
+            intermediate.y = start_point.y
+            append(&validated, intermediate)
+          }
+        }
+      }
+    }
+    
+    append(&validated, end_point)
+  }
+  
+  return validated[:]
+}
+
+// Find which polygon in the path contains or is nearest to a point
+find_polygon_in_path :: proc(navmesh: ^NavMesh, poly_path: []PolyRef, pos: [3]f32) -> int {
+  best_idx := -1
+  best_dist := f32(math.F32_MAX)
+  
+  for poly_ref, idx in poly_path {
+    center := get_poly_center(navmesh, poly_ref)
+    dist := linalg.distance(pos, center)
+    if dist < best_dist {
+      best_dist = dist
+      best_idx = idx
+    }
+  }
+  
+  return best_idx
 }
