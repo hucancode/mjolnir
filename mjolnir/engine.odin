@@ -15,6 +15,7 @@ import "core:time"
 import "core:unicode/utf8"
 import "geometry"
 import "gpu"
+import "gui"
 import "resource"
 import "vendor:glfw"
 import mu "vendor:microui"
@@ -215,6 +216,7 @@ Engine :: struct {
   transparent:                 RendererTransparent,
   postprocess:                 RendererPostProcess,
   ui:                          RendererUI,
+  gui:                         gui.GUISystem,
   command_buffers:             [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
   // Parallel shadow command buffers
   shadow_command_buffers:      [MAX_FRAMES_IN_FLIGHT][MAX_SHADOW_MAPS]vk.CommandBuffer,
@@ -493,11 +495,57 @@ init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
     get_window_dpi(self.window),
     &self.warehouse,
   )
+  // Create GUI atlas texture
+  atlas_pixels := gui.generate_gui_atlas()
+  defer delete(atlas_pixels)
+  gui_atlas_texture: ^gpu.ImageBuffer
+  _, gui_atlas_texture, _ = create_texture_from_pixels(
+    &self.gpu_context,
+    &self.warehouse,
+    atlas_pixels,
+    gui.GUI_ATLAS_WIDTH,
+    gui.GUI_ATLAS_HEIGHT,
+    4, // RGBA
+    .R8G8B8A8_UNORM,
+  )
+  if gui_atlas_texture == nil {
+    log.error("Failed to create GUI atlas texture")
+    return .ERROR_INITIALIZATION_FAILED
+  }
+  
+  // Create font atlas texture
+  font_pixels := gui.generate_font_atlas()
+  defer delete(font_pixels)
+  font_atlas_texture: ^gpu.ImageBuffer
+  _, font_atlas_texture, _ = create_texture_from_pixels(
+    &self.gpu_context,
+    &self.warehouse,
+    font_pixels,
+    gui.FONT_ATLAS_WIDTH,
+    gui.FONT_ATLAS_HEIGHT,
+    1, // single channel
+    .R8_UNORM,
+  )
+  if font_atlas_texture == nil {
+    log.error("Failed to create font atlas texture")
+    return .ERROR_INITIALIZATION_FAILED
+  }
+  
+  if !gui.gui_system_init(&self.gui, &self.gpu_context, gui_atlas_texture, font_atlas_texture) {
+    log.error("Failed to initialize GUI system")
+    return .ERROR_INITIALIZATION_FAILED
+  }
   glfw.SetKeyCallback(
     self.window,
     proc "c" (window: glfw.WindowHandle, key, scancode, action, mods: c.int) {
       context = g_context
       engine := cast(^Engine)context.user_ptr
+      // Handle GUI input first
+      if action == glfw.PRESS || action == glfw.REPEAT {
+        gui.gui_system_handle_key(&engine.gui, i32(key), true)
+      } else if action == glfw.RELEASE {
+        gui.gui_system_handle_key(&engine.gui, i32(key), false)
+      }
       if engine.key_press_proc != nil {
         engine.key_press_proc(engine, int(key), int(action), int(mods))
       }
@@ -564,6 +612,13 @@ init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
       }
       x := engine.cursor_pos.x
       y := engine.cursor_pos.y
+      // Handle GUI input first
+      gui_button := gui.convert_glfw_button(int(button))
+      if action == glfw.PRESS {
+        gui.gui_system_handle_mouse_button(&engine.gui, gui_button, true)
+      } else if action == glfw.RELEASE {
+        gui.gui_system_handle_mouse_button(&engine.gui, gui_button, false)
+      }
       switch action {
       case glfw.PRESS, glfw.REPEAT:
         mu.input_mouse_down(&engine.ui.ctx, x, y, mu_btn)
@@ -586,6 +641,7 @@ init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
         engine.cursor_pos.x,
         engine.cursor_pos.y,
       )
+      gui.gui_system_handle_mouse_move(&engine.gui, f32(xpos), f32(ypos))
       if engine.mouse_move_proc != nil {
         engine.mouse_move_proc(engine, {xpos, ypos}, {0, 0}) // TODO: pass delta
       }
@@ -615,6 +671,7 @@ init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
       engine := cast(^Engine)context.user_ptr
       bytes, size := utf8.encode_rune(ch)
       mu.input_text(&engine.ui.ctx, string(bytes[:size]))
+      gui.gui_system_handle_char(&engine.gui, ch)
     },
   )
 
@@ -806,6 +863,7 @@ deinit :: proc(self: ^Engine) {
   // Clean up synchronization
   vk.DestroyFence(self.gpu_context.device, self.frame_fence, nil)
 
+  gui.gui_system_destroy(&self.gui)
   ui_deinit(&self.ui, &self.gpu_context)
   scene_deinit(&self.scene, &self.warehouse)
   lighting_deinit(&self.lighting, &self.gpu_context)
@@ -1846,6 +1904,11 @@ render :: proc(self: ^Engine) -> vk.Result {
   )
   ui_render(&self.ui, command_buffer)
   ui_end(&self.ui, command_buffer)
+  // log.debug("============ rendering GUI... =============")
+  // Update and render GUI system
+  gui.gui_system_update(&self.gui, f32(time.duration_seconds(time.since(self.last_frame_timestamp))))
+  gui.gui_system_generate_commands(&self.gui)
+  gui.gui_system_render(&self.gui, command_buffer)
   // log.debug("============ preparing image for present... =============")
   gpu.transition_image_to_present(
     command_buffer,
