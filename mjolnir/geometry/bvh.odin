@@ -453,6 +453,202 @@ bvh_query_ray :: proc(
   }
 }
 
+RayHit :: struct($T: typeid) {
+  primitive: T,
+  t: f32,
+  hit: bool,
+}
+
+bvh_raycast :: proc(
+  bvh: ^BVH($T),
+  ray: Ray,
+  max_dist: f32 = F32_MAX,
+  intersection_func: proc(ray: Ray, primitive: T, max_t: f32) -> (hit: bool, t: f32),
+) -> RayHit(T) {
+  if len(bvh.nodes) == 0 do return {}
+  
+  best_hit: RayHit(T)
+  best_hit.t = max_dist
+  
+  stack := make([dynamic]i32, 0, 64, context.temp_allocator)
+  append(&stack, 0)
+  
+  for len(stack) > 0 {
+    node_idx := pop(&stack)
+    node := &bvh.nodes[node_idx]
+    
+    t_near, t_far := ray_aabb_intersection_safe(
+      ray.origin,
+      ray.direction,
+      node.bounds,
+    )
+    if t_near > best_hit.t || t_far < 0 do continue
+    
+    if node.primitive_count > 0 {
+      for i in node.primitive_start ..< node.primitive_start + node.primitive_count {
+        prim := bvh.primitives[i]
+        hit, t := intersection_func(ray, prim, best_hit.t)
+        if hit && t < best_hit.t {
+          best_hit.primitive = prim
+          best_hit.t = t
+          best_hit.hit = true
+        }
+      }
+    } else {
+      left_node := &bvh.nodes[node.left_child]
+      right_node := &bvh.nodes[node.right_child]
+      
+      left_t_near, _ := ray_aabb_intersection_safe(
+        ray.origin,
+        ray.direction,
+        left_node.bounds,
+      )
+      right_t_near, _ := ray_aabb_intersection_safe(
+        ray.origin,
+        ray.direction,
+        right_node.bounds,
+      )
+      
+      if left_t_near < right_t_near {
+        append(&stack, node.right_child)
+        append(&stack, node.left_child)
+      } else {
+        append(&stack, node.left_child)
+        append(&stack, node.right_child)
+      }
+    }
+  }
+  
+  return best_hit
+}
+
+bvh_raycast_single :: proc(
+  bvh: ^BVH($T),
+  ray: Ray,
+  max_dist: f32 = F32_MAX,
+  intersection_func: proc(ray: Ray, primitive: T, max_t: f32) -> (hit: bool, t: f32),
+) -> RayHit(T) {
+  if len(bvh.nodes) == 0 do return {}
+  
+  stack := make([dynamic]i32, 0, 64, context.temp_allocator)
+  append(&stack, 0)
+  
+  for len(stack) > 0 {
+    node_idx := pop(&stack)
+    node := &bvh.nodes[node_idx]
+    
+    t_near, t_far := ray_aabb_intersection_safe(
+      ray.origin,
+      ray.direction,
+      node.bounds,
+    )
+    if t_near > max_dist || t_far < 0 do continue
+    
+    if node.primitive_count > 0 {
+      for i in node.primitive_start ..< node.primitive_start + node.primitive_count {
+        prim := bvh.primitives[i]
+        hit, t := intersection_func(ray, prim, max_dist)
+        if hit && t < max_dist {
+          return RayHit(T){
+            primitive = prim,
+            t = t,
+            hit = true,
+          }
+        }
+      }
+    } else {
+      append(&stack, node.left_child)
+      append(&stack, node.right_child)
+    }
+  }
+  
+  return {}
+}
+
+bvh_raycast_multi :: proc(
+  bvh: ^BVH($T),
+  ray: Ray,
+  max_dist: f32 = F32_MAX,
+  intersection_func: proc(ray: Ray, primitive: T, max_t: f32) -> (hit: bool, t: f32),
+  results: ^[dynamic]RayHit(T),
+) {
+  clear(results)
+  if len(bvh.nodes) == 0 do return
+  
+  stack := make([dynamic]i32, 0, 64, context.temp_allocator)
+  append(&stack, 0)
+  
+  for len(stack) > 0 {
+    node_idx := pop(&stack)
+    node := &bvh.nodes[node_idx]
+    
+    t_near, t_far := ray_aabb_intersection_safe(
+      ray.origin,
+      ray.direction,
+      node.bounds,
+    )
+    if t_near > max_dist || t_far < 0 do continue
+    
+    if node.primitive_count > 0 {
+      for i in node.primitive_start ..< node.primitive_start + node.primitive_count {
+        prim := bvh.primitives[i]
+        hit, t := intersection_func(ray, prim, max_dist)
+        if hit && t <= max_dist {
+          append(results, RayHit(T){
+            primitive = prim,
+            t = t,
+            hit = true,
+          })
+        }
+      }
+    } else {
+      append(&stack, node.left_child)
+      append(&stack, node.right_child)
+    }
+  }
+  
+  // Sort results by distance
+  if len(results^) > 1 {
+    slice.sort_by(results[:], proc(a, b: RayHit(T)) -> bool {
+      return a.t < b.t
+    })
+  }
+}
+
+bvh_query_sphere_primitives :: proc(
+  bvh: ^BVH($T),
+  sphere: Sphere,
+  results: ^[dynamic]T,
+  intersection_func: proc(sphere: Sphere, primitive: T) -> bool,
+) {
+  clear(results)
+  if len(bvh.nodes) == 0 do return
+  
+  sphere_bounds := sphere_bounds(sphere)
+  
+  stack := make([dynamic]i32, 0, 64, context.temp_allocator)
+  append(&stack, 0)
+  
+  for len(stack) > 0 {
+    node_idx := pop(&stack)
+    node := &bvh.nodes[node_idx]
+    
+    if !aabb_sphere_intersects(node.bounds, sphere.center, sphere.radius) do continue
+    
+    if node.primitive_count > 0 {
+      for i in node.primitive_start ..< node.primitive_start + node.primitive_count {
+        prim := bvh.primitives[i]
+        if intersection_func(sphere, prim) {
+          append(results, prim)
+        }
+      }
+    } else {
+      append(&stack, node.left_child)
+      append(&stack, node.right_child)
+    }
+  }
+}
+
 bvh_query_sphere :: proc(
   bvh: ^BVH($T),
   center: [3]f32,
