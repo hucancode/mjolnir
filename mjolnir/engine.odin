@@ -16,6 +16,7 @@ import "core:unicode/utf8"
 import "geometry"
 import "gpu"
 import "resource"
+import recast "navigation/recast"
 import "vendor:glfw"
 import mu "vendor:microui"
 import vk "vendor:vulkan"
@@ -215,6 +216,7 @@ Engine :: struct {
   transparent:                 RendererTransparent,
   postprocess:                 RendererPostProcess,
   ui:                          RendererUI,
+  navmesh:                     NavMeshRenderer,
   command_buffers:             [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
   // Parallel shadow command buffers
   shadow_command_buffers:      [MAX_FRAMES_IN_FLIGHT][MAX_SHADOW_MAPS]vk.CommandBuffer,
@@ -484,6 +486,8 @@ init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
     self.swapchain.extent.height,
     &self.warehouse,
   ) or_return
+  log.debugf("initializing navigation mesh renderer")
+  navmesh_renderer_init(&self.navmesh, &self.gpu_context, &self.warehouse) or_return
   ui_init(
     &self.ui,
     &self.gpu_context,
@@ -807,6 +811,7 @@ deinit :: proc(self: ^Engine) {
   vk.DestroyFence(self.gpu_context.device, self.frame_fence, nil)
 
   ui_deinit(&self.ui, &self.gpu_context)
+  navmesh_renderer_deinit(&self.navmesh, &self.gpu_context)
   scene_deinit(&self.scene, &self.warehouse)
   lighting_deinit(&self.lighting, &self.gpu_context)
   ambient_deinit(&self.ambient, &self.gpu_context, &self.warehouse)
@@ -825,6 +830,28 @@ deinit :: proc(self: ^Engine) {
   glfw.DestroyWindow(self.window)
   glfw.Terminate()
   log.infof("Engine deinitialized")
+}
+
+// ========================================
+// NAVIGATION MESH INTEGRATION
+// ========================================
+
+// Load navigation mesh from Recast data
+engine_set_navigation_mesh :: proc(engine: ^Engine, poly_mesh: ^recast.Rc_Poly_Mesh, detail_mesh: ^recast.Rc_Poly_Mesh_Detail) -> bool {
+    return navmesh_renderer_build_from_recast(&engine.navmesh, &engine.gpu_context, poly_mesh, detail_mesh)
+}
+
+engine_navmesh_clear :: proc(engine: ^Engine) {
+    navmesh_renderer_clear(&engine.navmesh)
+}
+
+// Navigation mesh info
+engine_navmesh_get_triangle_count :: proc(engine: ^Engine) -> u32 {
+    return navmesh_renderer_get_triangle_count(&engine.navmesh)
+}
+
+engine_navmesh_has_data :: proc(engine: ^Engine) -> bool {
+    return navmesh_renderer_has_data(&engine.navmesh)
 }
 
 @(private = "file")
@@ -1743,6 +1770,14 @@ render :: proc(self: ^Engine) -> vk.Result {
     &self.warehouse,
   )
   particle_end(command_buffer)
+
+  // Navigation mesh pass
+  navmesh_renderer_render(
+    &self.navmesh,
+    command_buffer,
+    linalg.MATRIX4F32_IDENTITY,
+    main_render_target.camera.index,
+  )
 
   // Transparent & wireframe pass
   transparent_begin(

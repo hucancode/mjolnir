@@ -1,0 +1,96 @@
+package navigation_recast
+
+// Build time configuration constants
+RC_COMPRESSION :: true  // Enable compression for tile cache
+RC_LARGE_WORLDS :: true // Enable 64-bit tile/poly references
+
+// Heightfield edge flags
+RC_LEDGE_BORDER :: 0x1
+RC_LEDGE_WALKABLE :: 0x2
+
+// Poly mesh flags
+RC_MESH_FLAG_16BIT_INDICES :: 1 << 0
+
+// Detail mesh flags
+DT_DETAIL_EDGE_BOUNDARY :: 0x01
+
+// Tile flags
+DT_TILE_FREE_DATA :: 0x01
+
+// Off-mesh connection flags
+DT_OFFMESH_CON_BIDIR :: 1
+
+// Poly types
+DT_POLYTYPE_GROUND :: 0
+DT_POLYTYPE_OFFMESH_CONNECTION :: 1
+
+// Find path options
+DT_FINDPATH_ANY_ANGLE :: 0x02
+
+// Raycast options  
+DT_RAYCAST_USE_COSTS :: 0x01
+
+// Straightpath options
+DT_STRAIGHTPATH_AREA_CROSSINGS :: 0x01
+DT_STRAIGHTPATH_ALL_CROSSINGS :: 0x02
+
+// Navigation mesh parameters
+DT_VERTS_PER_POLYGON :: 6
+DT_NAVMESH_MAGIC :: 'D'<<24 | 'N'<<16 | 'A'<<8 | 'V'
+DT_NAVMESH_VERSION :: 7
+DT_NAVMESH_STATE_MAGIC :: 'D'<<24 | 'N'<<16 | 'M'<<8 | 'S'
+DT_NAVMESH_STATE_VERSION :: 1
+
+// Tile parameters
+DT_MAX_AREAS :: 64
+
+// Default query limits
+DEFAULT_MAX_PATH :: 256
+DEFAULT_MAX_POLYGONS :: 256
+DEFAULT_MAX_SMOOTH :: 2048
+
+// Crowd agent states
+DT_CROWDAGENT_STATE_INVALID :: 0
+DT_CROWDAGENT_STATE_WALKING :: 1
+DT_CROWDAGENT_STATE_OFFMESH :: 2
+
+// Crowd agent update flags
+DT_CROWDAGENT_TARGET_NONE :: 0
+DT_CROWDAGENT_TARGET_FAILED :: 1
+DT_CROWDAGENT_TARGET_VALID :: 2
+DT_CROWDAGENT_TARGET_REQUESTING :: 3
+DT_CROWDAGENT_TARGET_WAITING_FOR_QUEUE :: 4
+DT_CROWDAGENT_TARGET_WAITING_FOR_PATH :: 5
+DT_CROWDAGENT_TARGET_VELOCITY :: 6
+
+// Move request states
+DT_CROWDAGENT_TARGET_ADJUSTED :: 16
+
+// Obstacle avoidance
+DT_MAX_PATTERN_DIVS :: 32
+DT_MAX_PATTERN_RINGS :: 4
+
+// Sample area types (used in test scenes and examples)
+SAMPLE_POLYAREA_NULL :: 0
+SAMPLE_POLYAREA_GROUND :: 1
+SAMPLE_POLYAREA_WATER :: 2
+SAMPLE_POLYAREA_DOOR :: 3
+SAMPLE_POLYAREA_GRASS :: 4
+SAMPLE_POLYAREA_JUMP :: 5
+SAMPLE_POLYAREA_LADDER :: 6
+
+// TileCache parameters  
+DT_TILECACHE_MAGIC :: 'D'<<24 | 'T'<<16 | 'L'<<8 | 'R'
+DT_TILECACHE_VERSION :: 1
+DT_TILECACHE_NULL_AREA :: 0
+DT_TILECACHE_WALKABLE_AREA :: 63
+DT_TILECACHE_NULL_IDX :: 0xffff
+
+// Compressed tile flags
+DT_COMPRESSEDTILE_FREE_DATA :: 0x01
+
+// Layer region flags
+DT_LAYER_MAX_NEIS :: 16
+
+// Max layers
+RC_MAX_LAYERS :: 32

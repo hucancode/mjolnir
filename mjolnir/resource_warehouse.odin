@@ -25,6 +25,11 @@ ResourceWarehouse :: struct {
   image_cube_buffers:           resource.Pool(gpu.CubeImageBuffer),
   cameras:                      resource.Pool(geometry.Camera),
   render_targets:               resource.Pool(RenderTarget),
+  
+  // Navigation system resources
+  nav_meshes:                   resource.Pool(NavMesh),
+  nav_contexts:                 resource.Pool(NavContext),
+  navigation_system:            NavigationSystem,
 
   // Bone matrix system
   bone_buffer_set_layout:       vk.DescriptorSetLayout,
@@ -62,6 +67,12 @@ resource_init :: proc(
   resource.pool_init(&warehouse.cameras)
   log.infof("Initializing render target pool... ")
   resource.pool_init(&warehouse.render_targets)
+  log.infof("Initializing navigation mesh pool... ")
+  resource.pool_init(&warehouse.nav_meshes)
+  log.infof("Initializing navigation context pool... ")
+  resource.pool_init(&warehouse.nav_contexts)
+  log.infof("Initializing navigation system... ")
+  warehouse.navigation_system = {}
   log.infof("All resource pools initialized successfully")
   init_global_samplers(gpu_context, warehouse)
   init_bone_matrix_allocator(gpu_context, warehouse) or_return
@@ -188,6 +199,29 @@ resource_deinit :: proc(
   delete(warehouse.materials.free_indices)
   delete(warehouse.cameras.entries)
   delete(warehouse.cameras.free_indices)
+  
+  // Navigation system cleanup
+  for &entry in warehouse.nav_meshes.entries {
+    if entry.generation > 0 && entry.active {
+      // Clean up navigation mesh
+      // Note: detour mesh cleanup would be added here if needed
+    }
+  }
+  delete(warehouse.nav_meshes.entries)
+  delete(warehouse.nav_meshes.free_indices)
+  
+  for &entry in warehouse.nav_contexts.entries {
+    if entry.generation > 0 && entry.active {
+      // Clean up navigation contexts
+      // Note: context cleanup would be added here if needed
+    }
+  }
+  delete(warehouse.nav_contexts.entries)
+  delete(warehouse.nav_contexts.free_indices)
+  
+  // Clean up navigation system
+  delete(warehouse.navigation_system.geometry_cache)
+  delete(warehouse.navigation_system.dirty_tiles)
   deinit_global_samplers(gpu_context, warehouse)
   deinit_bone_matrix_allocator(gpu_context, warehouse)
   deinit_camera_buffer(gpu_context, warehouse)

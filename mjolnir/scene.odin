@@ -75,6 +75,9 @@ NodeAttachment :: union {
   ParticleSystemAttachment,
   EmitterAttachment,
   ForceFieldAttachment,
+  NavMeshAttachment,
+  NavMeshAgentAttachment,
+  NavMeshObstacleAttachment,
 }
 
 Node :: struct {
