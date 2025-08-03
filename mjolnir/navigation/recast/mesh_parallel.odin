@@ -95,7 +95,7 @@ parallel_mesh_worker :: proc(data: rawptr) {
 rc_build_poly_mesh_parallel :: proc(cset: ^Rc_Contour_Set, nvp: i32, pmesh: ^Rc_Poly_Mesh,
                                    config: Parallel_Mesh_Config = PARALLEL_MESH_DEFAULT_CONFIG) -> bool {
     if cset == nil || pmesh == nil do return false
-    if cset.nconts == 0 do return false
+    if len(cset.conts) == 0 do return false
     if nvp < 3 do return false
 
     return _build_mesh_parallel_impl(cset, nvp, pmesh, config)
@@ -103,7 +103,7 @@ rc_build_poly_mesh_parallel :: proc(cset: ^Rc_Contour_Set, nvp: i32, pmesh: ^Rc_
 
 // Internal implementation with proper error handling
 _build_mesh_parallel_impl :: proc(cset: ^Rc_Contour_Set, nvp: i32, pmesh: ^Rc_Poly_Mesh, config: Parallel_Mesh_Config) -> bool {
-    log.infof("Building polygon mesh in parallel from %d contours, max verts per poly: %d", cset.nconts, nvp)
+    log.infof("Building polygon mesh in parallel from %d contours, max verts per poly: %d", len(cset.conts), nvp)
 
     // Determine number of worker threads
     num_workers := config.max_workers
@@ -111,7 +111,7 @@ _build_mesh_parallel_impl :: proc(cset: ^Rc_Contour_Set, nvp: i32, pmesh: ^Rc_Po
         // Fallback for auto-detection
         num_workers = max(1, 4) // Default to 4 threads if runtime info not available
     }
-    num_workers = min(num_workers, int(cset.nconts)) // Don't use more workers than contours
+    num_workers = min(num_workers, int(len(cset.conts))) // Don't use more workers than contours
 
     log.infof("Using %d worker threads for mesh building", num_workers)
 
@@ -226,7 +226,7 @@ _build_mesh_parallel_impl :: proc(cset: ^Rc_Contour_Set, nvp: i32, pmesh: ^Rc_Po
 // Create work items for distributing contours across threads
 create_work_items :: proc(build_ctx: ^Mesh_Build_Context) -> bool {
     chunk_size := build_ctx.config.chunk_size
-    total_contours := int(build_ctx.contour_set.nconts)
+    total_contours := int(len(build_ctx.contour_set.conts))
 
     log.infof("Creating work items: total_contours=%d, chunk_size=%d", total_contours, chunk_size)
 
@@ -287,7 +287,7 @@ process_contour_chunk :: proc(build_ctx: ^Mesh_Build_Context, work_item: Contour
     max_polygons := 0
 
     for i in work_item.contour_start..<(work_item.contour_start + work_item.contour_count) {
-        if i >= int(cset.nconts) do break
+        if i >= int(len(cset.conts)) do break
         cont := &cset.conts[i]
         if len(cont.verts) < 3 do continue
         max_vertices += len(cont.verts)
@@ -327,8 +327,8 @@ process_contour_chunk :: proc(build_ctx: ^Mesh_Build_Context, work_item: Contour
               work_item.contour_start, work_item.contour_start + work_item.contour_count - 1)
 
     for i in work_item.contour_start..<(work_item.contour_start + work_item.contour_count) {
-        if i >= int(cset.nconts) {
-            log.warnf("Worker %d: Contour index %d exceeds total contours %d", work_item.worker_id, i, cset.nconts)
+        if i >= int(len(cset.conts)) {
+            log.warnf("Worker %d: Contour index %d exceeds total contours %d", work_item.worker_id, i, len(cset.conts))
             break
         }
 

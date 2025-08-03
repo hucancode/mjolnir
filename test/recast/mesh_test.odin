@@ -377,7 +377,7 @@ test_build_simple_contour_mesh :: proc(t: ^testing.T) {
     defer {
         if cset.conts != nil {
             // Clean up individual contour verts
-            for i in 0..<cset.nconts {
+            for i in 0..<len(cset.conts) {
                 if cset.conts[i].verts != nil {
                     delete(cset.conts[i].verts)
                 }
@@ -390,8 +390,8 @@ test_build_simple_contour_mesh :: proc(t: ^testing.T) {
         free(cset)
     }
 
-    cset.nconts = 1
-    cset.conts = make([]nav_recast.Rc_Contour, 1)
+    cset.conts = make([dynamic]nav_recast.Rc_Contour, 0)
+    append(&cset.conts, nav_recast.Rc_Contour{})
     cset.bmin = {0, 0, 0}
     cset.bmax = {10, 2, 10}
     cset.cs = 0.3

@@ -18,15 +18,13 @@ Off_Mesh_Connection_Verts :: struct {
 Rc_Contour :: struct {
     verts:   [][4]i32,     // Simplified contour vertex and connection data [x, y, z, connection]
     rverts:  [][4]i32,     // Raw contour vertex and connection data [x, y, z, connection]
-
     reg:     u16,          // Region id of the contour
     area:    u8,           // Area id of the contour
 }
 
 // Contour set
 Rc_Contour_Set :: struct {
-    conts:       []Rc_Contour,    // Array of contours
-    nconts:      i32,              // Number of contours
+    conts:       [dynamic]Rc_Contour,    // Dynamic array of contours
     bmin:        [3]f32,   // Minimum bounds
     bmax:        [3]f32,   // Maximum bounds
     cs:          f32,              // Cell size
@@ -141,25 +139,12 @@ Rc_Heightfield_Layer :: struct {
     cons:        []u8,           // Packed neighbor connection information [Size: width * height]
 }
 
-// Helper to allocate contour
+// Helper to allocate contour - DEPRECATED
+// This function is no longer needed since we're using dynamic arrays
+// The caller should append to cset.conts directly
 rc_alloc_contour :: proc(cset: ^Rc_Contour_Set) -> ^Rc_Contour {
-    if int(cset.nconts) >= len(cset.conts) {
-        old_max := len(cset.conts)
-        new_max := old_max == 0 ? 8 : old_max * 2
-        new_conts := make([]Rc_Contour, new_max)
-        if old_max > 0 {
-            copy(new_conts[:old_max], cset.conts)
-            delete(cset.conts)
-        }
-        cset.conts = new_conts
-    }
-
-    c := &cset.conts[cset.nconts]
-    cset.nconts += 1
-    return c
+    panic("rc_alloc_contour is deprecated, modify code to use append instead")
 }
-
-// rc_free_contour_set is defined in builder.odin
 
 // Helper to allocate poly mesh
 rc_alloc_poly_mesh :: proc() -> ^Rc_Poly_Mesh {

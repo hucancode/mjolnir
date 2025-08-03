@@ -2,6 +2,8 @@ package navigation_recast
 
 import "core:mem"
 import "core:log"
+import "core:math"
+import "core:math/linalg"
 
 // Build navigation mesh from triangle mesh
 // This is the main entry point - follows C++ API closely
@@ -46,6 +48,25 @@ rc_build_navmesh :: proc(vertices: []f32, indices: []i32, areas: []u8, cfg: Conf
         for i in 0..<min(10, len(areas)) {
             log.infof("  Triangle %d: area=%d", i, areas[i])
         }
+        
+        // Also check if we're marking triangles as unwalkable due to slope
+        walkable_thr := math.cos(config.walkable_slope_angle * math.PI / 180.0)
+        log.infof("Walkable slope threshold: %.3f (angle=%.1f degrees)", walkable_thr, config.walkable_slope_angle)
+        
+        // Check first triangle normal
+        if len(indices) >= 3 {
+            v0 := [3]f32{vertices[indices[0]*3+0], vertices[indices[0]*3+1], vertices[indices[0]*3+2]}
+            v1 := [3]f32{vertices[indices[1]*3+0], vertices[indices[1]*3+1], vertices[indices[1]*3+2]}
+            v2 := [3]f32{vertices[indices[2]*3+0], vertices[indices[2]*3+1], vertices[indices[2]*3+2]}
+            
+            e0 := v1 - v0
+            e1 := v2 - v0
+            norm := linalg.normalize(linalg.cross(e0, e1))
+            
+            log.infof("First triangle normal: (%.3f, %.3f, %.3f), Y=%.3f %s threshold %.3f", 
+                      norm.x, norm.y, norm.z, norm.y, 
+                      norm.y > walkable_thr ? ">" : "<=", walkable_thr)
+        }
     }
     
     if !rc_rasterize_triangles(vertices, i32(len(vertices)/3), indices, areas, i32(len(indices)/3), hf, config.walkable_climb) {
@@ -55,18 +76,28 @@ rc_build_navmesh :: proc(vertices: []f32, indices: []i32, areas: []u8, cfg: Conf
     // Debug: Count spans in heightfield
     when ODIN_DEBUG {
         span_count := 0
+        null_area_count := 0
+        total_spans := 0
+        non_empty_cells := 0
         for y in 0..<hf.height {
             for x in 0..<hf.width {
                 s := hf.spans[x + y * hf.width]
+                if s != nil {
+                    non_empty_cells += 1
+                }
                 for s != nil {
+                    total_spans += 1
                     if s.area != RC_NULL_AREA {
                         span_count += 1
+                    } else {
+                        null_area_count += 1
                     }
                     s = s.next
                 }
             }
         }
-        log.infof("Heightfield after rasterization: %d walkable spans", span_count)
+        log.infof("Heightfield after rasterization: %d total spans in %d non-empty cells", total_spans, non_empty_cells)
+        log.infof("  %d walkable spans, %d null area spans", span_count, null_area_count)
         
         // Check span distribution
         quadrants := [4]int{0, 0, 0, 0}  // NE, NW, SW, SE

@@ -154,7 +154,7 @@ test_complete_navmesh_generation_simple :: proc(t: ^testing.T) {
     
     // 4. Validate contour generation produced reasonable boundary representation
     total_contour_verts := 0
-    for i in 0..<cset.nconts {
+    for i in 0..<len(cset.conts) {
         if i32(i) < i32(len(cset.conts)) {
             total_contour_verts += len(cset.conts[i].verts)
         }

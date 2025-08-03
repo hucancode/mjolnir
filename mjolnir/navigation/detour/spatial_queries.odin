@@ -22,7 +22,7 @@ dt_find_nearest_poly :: proc(query: ^Dt_Nav_Mesh_Query, center: [3]f32, half_ext
     // Find tiles that overlap query region
     tx0, ty0 := dt_calc_tile_loc_simple(query.nav_mesh, bmin)
     tx1, ty1 := dt_calc_tile_loc_simple(query.nav_mesh, bmax)
-    // Removed debug output
+    log.infof("dt_find_nearest_poly: Searching tiles (%d,%d) to (%d,%d) for position %v", tx0, ty0, tx1, ty1, center)
 
     nearest_dist_sqr := f32(math.F32_MAX)
 
@@ -31,12 +31,15 @@ dt_find_nearest_poly :: proc(query: ^Dt_Nav_Mesh_Query, center: [3]f32, half_ext
         for tx in tx0..=tx1 {
             tile := dt_get_tile_at(query.nav_mesh, tx, ty, 0)
             if tile == nil || tile.header == nil {
+                log.infof("  No tile at (%d,%d)", tx, ty)
                 continue
             }
+            log.infof("  Found tile at (%d,%d) with %d polygons", tx, ty, tile.header.poly_count)
 
             // Query polygons in tile using temp allocator
             poly_refs := make([]nav_recast.Poly_Ref, 128, context.temp_allocator)
             poly_count := dt_query_polygons_in_tile(query.nav_mesh, tile, bmin, bmax, poly_refs, 128)
+            log.infof("  Query returned %d polygons", poly_count)
 
             for i in 0..<poly_count {
                 ref := poly_refs[i]
@@ -90,8 +93,10 @@ dt_query_polygons :: proc(query: ^Dt_Nav_Mesh_Query, center: [3]f32, half_extent
         for tx in tx0..=tx1 {
             tile := dt_get_tile_at(query.nav_mesh, tx, ty, 0)
             if tile == nil || tile.header == nil {
+                log.infof("  No tile at (%d,%d)", tx, ty)
                 continue
             }
+            log.infof("  Found tile at (%d,%d) with %d polygons", tx, ty, tile.header.poly_count)
 
             // Query polygons in tile
             remaining := max_polys - poly_count^
@@ -309,10 +314,8 @@ dt_find_random_point_around_circle :: proc(query: ^Dt_Nav_Mesh_Query, start_ref:
 dt_query_polygons_in_tile :: proc(nav_mesh: ^Dt_Nav_Mesh, tile: ^Dt_Mesh_Tile, qmin: [3]f32, qmax: [3]f32,
                                  polys: []nav_recast.Poly_Ref, max_polys: i32) -> i32 {
 
-    if tile.bv_tree != nil && len(tile.bv_tree) > 0 {
-        // Use BV tree for fast spatial queries
-        return dt_query_polygons_in_tile_bv(nav_mesh, tile, qmin, qmax, polys, max_polys)
-    }
+    // For now, always use brute force to verify the BV tree issue
+    log.infof("    Using brute force for polygon query")
 
     // Fallback: test all polygons
     count := i32(0)
@@ -340,7 +343,12 @@ dt_query_polygons_in_tile :: proc(nav_mesh: ^Dt_Nav_Mesh, tile: ^Dt_Mesh_Tile, q
         }
 
         // Test overlap
-        if dt_overlap_bounds(qmin, qmax, poly_min, poly_max) {
+        overlap := dt_overlap_bounds(qmin, qmax, poly_min, poly_max)
+        if i < 5 { // Debug first few polygons
+            log.infof("    Polygon %d: bounds %v-%v, query %v-%v, overlap=%t", 
+                      i, poly_min, poly_max, qmin, qmax, overlap)
+        }
+        if overlap {
             if count < max_polys {
                 polys[count] = base | nav_recast.Poly_Ref(i)
                 count += 1
@@ -361,6 +369,20 @@ dt_query_polygons_in_tile_bv :: proc(nav_mesh: ^Dt_Nav_Mesh, tile: ^Dt_Mesh_Tile
     factor := tile.header.bv_quant_factor
     iqmin := nav_recast.quantize_float(qmin - tile.header.bmin, factor)
     iqmax := nav_recast.quantize_float(qmax - tile.header.bmin, factor)
+    log.infof("    BV tree: qmin=%v qmax=%v, tile.bmin=%v, bmax=%v, factor=%v", qmin, qmax, tile.header.bmin, tile.header.bmax, factor)
+    log.infof("    BV tree: iqmin=%v iqmax=%v", iqmin, iqmax)
+    
+    // Debug: Show some polygon vertices
+    if len(tile.verts) > 0 && len(tile.polys) > 0 {
+        log.infof("    First polygon has %d verts, showing first vertex:", tile.polys[0].vert_count)
+        if tile.polys[0].vert_count > 0 {
+            vert_idx := tile.polys[0].verts[0]
+            if int(vert_idx) < len(tile.verts) {
+                v := tile.verts[vert_idx]
+                log.infof("      Vertex %d: world pos %v", vert_idx, v)
+            }
+        }
+    }
 
     // Traverse BV tree
     stack := make([]i32, 32, context.temp_allocator)
@@ -385,7 +407,13 @@ dt_query_polygons_in_tile_bv :: proc(nav_mesh: ^Dt_Nav_Mesh, tile: ^Dt_Mesh_Tile
         node_min := [3]i32{i32(node.bmin[0]), i32(node.bmin[1]), i32(node.bmin[2])}
         node_max := [3]i32{i32(node.bmax[0]), i32(node.bmax[1]), i32(node.bmax[2])}
 
-        if !nav_recast.overlap_quantized_bounds(iqmin, iqmax, node_min, node_max) {
+        overlap := nav_recast.overlap_quantized_bounds(iqmin, iqmax, node_min, node_max)
+        if node_index < 10 {
+            log.infof("      BV node %d: bounds %v-%v, overlap=%t, leaf=%t", 
+                      node_index, node_min, node_max, overlap, node.i >= 0)
+        }
+        
+        if !overlap {
             continue
         }
 
@@ -394,17 +422,24 @@ dt_query_polygons_in_tile_bv :: proc(nav_mesh: ^Dt_Nav_Mesh, tile: ^Dt_Mesh_Tile
             if count < max_polys {
                 polys[count] = base | nav_recast.Poly_Ref(node.i)
                 count += 1
+                if node_index < 5 {
+                    log.infof("      Added polygon %d from leaf node %d", node.i, node_index)
+                }
             }
         } else {
             // Internal node, add children to stack
             child1 := (-node.i) - 1
             child2 := child1 + 1
+            
+            if node_index < 5 {
+                log.infof("      Internal node %d: children %d, %d", node_index, child1, child2)
+            }
 
-            if stack_size < 30 {
+            if stack_size < 30 && child1 >= 0 && child1 < i32(len(tile.bv_tree)) {
                 stack[stack_size] = child1
                 stack_size += 1
 
-                if stack_size < 30 {
+                if stack_size < 30 && child2 >= 0 && child2 < i32(len(tile.bv_tree)) {
                     stack[stack_size] = child2
                     stack_size += 1
                 }

@@ -127,7 +127,7 @@ rc_dump_detail_mesh_to_obj :: proc(dmesh: ^Rc_Poly_Mesh_Detail, filepath: string
 
 // Export contour set to a simple text format for debugging
 rc_dump_contour_set :: proc(cset: ^Rc_Contour_Set, filepath: string) -> bool {
-    if cset == nil || cset.nconts == 0 do return false
+    if cset == nil || len(cset.conts) == 0 do return false
 
     log.infof("Exporting contour set to file: %s", filepath)
 
@@ -141,14 +141,14 @@ rc_dump_contour_set :: proc(cset: ^Rc_Contour_Set, filepath: string) -> bool {
     // Write header
     os.write_string(file, "# Recast Navigation Contour Set\n")
     os.write_string(file, fmt.tprintf("# Generated with Mjolnir Recast\n"))
-    os.write_string(file, fmt.tprintf("# Contours: %d\n", cset.nconts))
+    os.write_string(file, fmt.tprintf("# Contours: %d\n", len(cset.conts)))
     os.write_string(file, fmt.tprintf("# Bounds: (%.3f,%.3f,%.3f) to (%.3f,%.3f,%.3f)\n",
                     cset.bmin.x, cset.bmin.y, cset.bmin.z,
                     cset.bmax.x, cset.bmax.y, cset.bmax.z))
     os.write_string(file, fmt.tprintf("# Cell size: %.3f, Cell height: %.3f\n", cset.cs, cset.ch))
     os.write_string(file, "\n")
 
-    for i in 0..<cset.nconts {
+    for i in 0..<len(cset.conts) {
         cont := &cset.conts[i]
 
         os.write_string(file, fmt.tprintf("# Contour %d\n", i))
@@ -367,11 +367,11 @@ rc_dump_statistics :: proc(chf: ^Rc_Compact_Heightfield, cset: ^Rc_Contour_Set,
     // Contour set stats
     if cset != nil {
         os.write_string(file, "contour_set:\n")
-        os.write_string(file, fmt.tprintf("  contour_count: %d\n", cset.nconts))
+        os.write_string(file, fmt.tprintf("  contour_count: %d\n", len(cset.conts)))
 
         total_verts := 0
         total_raw_verts := 0
-        for i in 0..<cset.nconts {
+        for i in 0..<len(cset.conts) {
             total_verts += len(cset.conts[i].verts)
             total_raw_verts += len(cset.conts[i].rverts)
         }

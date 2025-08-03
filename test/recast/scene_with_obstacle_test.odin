@@ -166,13 +166,13 @@ test_scene_with_obstacle :: proc(t: ^testing.T) {
     ok = nav_recast.rc_build_contours(chf, config.max_simplification_error,
                                       config.max_edge_len, cset)
     testing.expect(t, ok, "Failed to build contours")
-    testing.expect(t, cset.nconts > 0, "Should have at least one contour")
+    testing.expect(t, len(cset.conts) > 0, "Should have at least one contour")
 
-    log.infof("Built %d contours", cset.nconts)
+    log.infof("Built %d contours", len(cset.conts))
 
     // Verify contours
     total_contour_verts := 0
-    for i in 0..<cset.nconts {
+    for i in 0..<len(cset.conts) {
         cont := &cset.conts[i]
         testing.expect(t, len(cont.verts) >= 3, "Each contour should have at least 3 vertices")
         total_contour_verts += len(cont.verts)
@@ -247,7 +247,7 @@ test_scene_with_obstacle :: proc(t: ^testing.T) {
     log.infof("Summary:")
     log.infof("  - Heightfield: %dx%d cells", config.width, config.height)
     log.infof("  - Regions: %d", max_region)
-    log.infof("  - Contours: %d (total %d vertices)", cset.nconts, total_contour_verts)
+    log.infof("  - Contours: %d (total %d vertices)", len(cset.conts), total_contour_verts)
     log.infof("  - Polygon mesh: %d vertices, %d polygons", len(pmesh.verts), pmesh.npolys)
     log.infof("  - Detail mesh: %d vertices, %d triangles", len(dmesh.verts), len(dmesh.tris))
 
@@ -357,9 +357,9 @@ test_contour_with_real_heightfield :: proc(t: ^testing.T) {
     testing.expect(t, ok, "Failed to build contours")
 
     // Verify contours follow the terrain
-    testing.expect(t, cset.nconts > 0, "Should have contours for terrain")
+    testing.expect(t, len(cset.conts) > 0, "Should have contours for terrain")
 
-    for i in 0..<cset.nconts {
+    for i in 0..<len(cset.conts) {
         cont := &cset.conts[i]
         testing.expect(t, len(cont.verts) >= 3, "Contour should have valid shape")
 
@@ -375,5 +375,5 @@ test_contour_with_real_heightfield :: proc(t: ^testing.T) {
         log.infof("Contour %d: height range [%d, %d]", i, min_y, max_y)
     }
 
-    log.infof("Terrain contour test: generated %d contours", cset.nconts)
+    log.infof("Terrain contour test: generated %d contours", len(cset.conts))
 }

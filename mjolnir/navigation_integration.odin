@@ -228,11 +228,56 @@ build_navigation_mesh_from_scene :: proc(engine: ^Engine, config: recast.Config 
         return nav_mesh_handle, false
     }
     
-    // TODO: Initialize navigation mesh from build result
-    // This needs to be implemented based on the actual detour API
-    // The current Build_Result only contains polygon_mesh and detail_mesh
-    // We need to convert these to detour format first
-    log.warn("Navigation mesh initialization not yet implemented - Build_Result doesn't contain nav_mesh_params or nav_mesh_data")
+    // Create navigation mesh data from Recast polygon mesh
+    nav_params := detour.Dt_Create_Nav_Mesh_Data_Params{
+        poly_mesh = pmesh,
+        poly_mesh_detail = dmesh,
+        
+        // Agent parameters (convert from cells to world units)
+        walkable_height = f32(config.walkable_height) * config.ch,
+        walkable_radius = f32(config.walkable_radius) * config.cs,
+        walkable_climb = f32(config.walkable_climb) * config.ch,
+        
+        // Tile parameters (for single tile mesh)
+        tile_x = 0,
+        tile_y = 0,
+        tile_layer = 0,
+        user_id = 0,
+        
+        // Off-mesh connections (none for now)
+        off_mesh_con_count = 0,
+    }
+    
+    // Create navigation mesh data
+    nav_data, create_status := detour.dt_create_nav_mesh_data(&nav_params)
+    if nav_recast.status_failed(create_status) {
+        log.errorf("Failed to create navigation mesh data: %v", create_status)
+        return nav_mesh_handle, false
+    }
+    // Don't delete nav_data - ownership is transferred to nav mesh with DT_TILE_FREE_DATA flag
+    
+    // Initialize navigation mesh with parameters
+    mesh_params := detour.Dt_Nav_Mesh_Params{
+        orig = pmesh.bmin,
+        tile_width = pmesh.bmax[0] - pmesh.bmin[0],
+        tile_height = pmesh.bmax[2] - pmesh.bmin[2],
+        max_tiles = 1,
+        max_polys = 1024,
+    }
+    
+    init_status := detour.dt_nav_mesh_init(&nav_mesh.detour_mesh, &mesh_params)
+    if nav_recast.status_failed(init_status) {
+        log.errorf("Failed to initialize navigation mesh: %v", init_status)
+        return nav_mesh_handle, false
+    }
+    
+    // Add the tile to the navigation mesh with DT_TILE_FREE_DATA flag
+    _, add_status := detour.dt_nav_mesh_add_tile(&nav_mesh.detour_mesh, nav_data, nav_recast.DT_TILE_FREE_DATA)
+    if nav_recast.status_failed(add_status) {
+        log.errorf("Failed to add tile to navigation mesh: %v", add_status)
+        detour.dt_nav_mesh_destroy(&nav_mesh.detour_mesh)
+        return nav_mesh_handle, false
+    }
     
     // Set navigation mesh properties
     nav_mesh.bounds = calculate_bounds_from_vertices(collector.vertices[:])
@@ -296,9 +341,56 @@ build_navigation_mesh_from_scene_filtered :: proc(
         return nav_mesh_handle, false
     }
     
-    // TODO: Initialize navigation mesh from build result
-    // This needs to be implemented based on the actual detour API
-    log.warn("Navigation mesh initialization not yet implemented - Build_Result doesn't contain nav_mesh_params or nav_mesh_data")
+    // Create navigation mesh data from Recast polygon mesh
+    nav_params := detour.Dt_Create_Nav_Mesh_Data_Params{
+        poly_mesh = pmesh,
+        poly_mesh_detail = dmesh,
+        
+        // Agent parameters (convert from cells to world units)
+        walkable_height = f32(config.walkable_height) * config.ch,
+        walkable_radius = f32(config.walkable_radius) * config.cs,
+        walkable_climb = f32(config.walkable_climb) * config.ch,
+        
+        // Tile parameters (for single tile mesh)
+        tile_x = 0,
+        tile_y = 0,
+        tile_layer = 0,
+        user_id = 0,
+        
+        // Off-mesh connections (none for now)
+        off_mesh_con_count = 0,
+    }
+    
+    // Create navigation mesh data
+    nav_data, create_status := detour.dt_create_nav_mesh_data(&nav_params)
+    if nav_recast.status_failed(create_status) {
+        log.errorf("Failed to create navigation mesh data: %v", create_status)
+        return nav_mesh_handle, false
+    }
+    // Don't delete nav_data - ownership is transferred to nav mesh with DT_TILE_FREE_DATA flag
+    
+    // Initialize navigation mesh with parameters
+    mesh_params := detour.Dt_Nav_Mesh_Params{
+        orig = pmesh.bmin,
+        tile_width = pmesh.bmax[0] - pmesh.bmin[0],
+        tile_height = pmesh.bmax[2] - pmesh.bmin[2],
+        max_tiles = 1,
+        max_polys = 1024,
+    }
+    
+    init_status := detour.dt_nav_mesh_init(&nav_mesh.detour_mesh, &mesh_params)
+    if nav_recast.status_failed(init_status) {
+        log.errorf("Failed to initialize navigation mesh: %v", init_status)
+        return nav_mesh_handle, false
+    }
+    
+    // Add the tile to the navigation mesh with DT_TILE_FREE_DATA flag
+    _, add_status := detour.dt_nav_mesh_add_tile(&nav_mesh.detour_mesh, nav_data, nav_recast.DT_TILE_FREE_DATA)
+    if nav_recast.status_failed(add_status) {
+        log.errorf("Failed to add tile to navigation mesh: %v", add_status)
+        detour.dt_nav_mesh_destroy(&nav_mesh.detour_mesh)
+        return nav_mesh_handle, false
+    }
     
     nav_mesh.bounds = calculate_bounds_from_vertices(collector.vertices[:])
     nav_mesh.cell_size = config.cs
@@ -374,15 +466,67 @@ nav_find_path :: proc(engine: ^Engine, context_handle: Handle, start: [3]f32, en
         return nil, false
     }
     
-    // TODO: Implement pathfinding using detour API
-    // For now, return a simple straight line path
-    log.warn("Full pathfinding not yet implemented - returning straight line path")
+    // Get navigation mesh from context
+    nav_mesh := resource.get(engine.warehouse.nav_meshes, nav_context.associated_mesh)
+    if nav_mesh == nil {
+        log.error("Invalid navigation mesh associated with context")
+        return nil, false
+    }
     
-    // Create a simple straight line path as placeholder
-    result_path := make([][3]f32, 2)
-    result_path[0] = start
-    result_path[1] = end
+    // Find nearest polygon to start and end positions
+    half_extents := [3]f32{2.0, 4.0, 2.0}  // Search area for finding polygons
     
+    start_ref: nav_recast.Poly_Ref
+    start_pos: [3]f32
+    status := detour.dt_find_nearest_poly(&nav_context.nav_mesh_query, start, half_extents, &nav_context.query_filter, &start_ref, &start_pos)
+    if nav_recast.status_failed(status) || start_ref == nav_recast.INVALID_POLY_REF {
+        log.errorf("Failed to find start polygon for pathfinding at position %v", start)
+        return nil, false
+    }
+    
+    end_ref: nav_recast.Poly_Ref
+    end_pos: [3]f32
+    status = detour.dt_find_nearest_poly(&nav_context.nav_mesh_query, end, half_extents, &nav_context.query_filter, &end_ref, &end_pos)
+    if nav_recast.status_failed(status) || end_ref == nav_recast.INVALID_POLY_REF {
+        log.errorf("Failed to find end polygon for pathfinding at position %v", end)
+        return nil, false
+    }
+    
+    // Find path between polygons
+    poly_path := make([]nav_recast.Poly_Ref, max_path_length)
+    defer delete(poly_path)
+    path_count: i32
+    
+    status = detour.dt_find_path(&nav_context.nav_mesh_query, start_ref, end_ref, start_pos, end_pos, 
+                                &nav_context.query_filter, poly_path[:], &path_count, max_path_length)
+    
+    if nav_recast.status_failed(status) || path_count == 0 {
+        log.errorf("Failed to find path from %v to %v: %v", start, end, status)
+        return nil, false
+    }
+    
+    // Convert polygon path to straight path (string pulling)
+    straight_path := make([]detour.Dt_Straight_Path_Point, max_path_length)
+    defer delete(straight_path)
+    straight_path_count: i32
+    
+    status = detour.dt_find_straight_path(&nav_context.nav_mesh_query, start_pos, end_pos, 
+                                         poly_path[:path_count], path_count,
+                                         straight_path[:], nil, nil, &straight_path_count, 
+                                         max_path_length, u32(detour.Dt_Straight_Path_Options.All_Crossings))
+    
+    if nav_recast.status_failed(status) || straight_path_count == 0 {
+        log.errorf("Failed to create straight path: %v", status)
+        return nil, false
+    }
+    
+    // Convert straight path points to result
+    result_path := make([][3]f32, straight_path_count)
+    for i in 0..<straight_path_count {
+        result_path[i] = straight_path[i].pos
+    }
+    
+    log.infof("Found path with %d waypoints from %v to %v", straight_path_count, start, end)
     return result_path, true
 }
 

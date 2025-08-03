@@ -387,6 +387,15 @@ dt_setup_tile_data :: proc(tile: ^Dt_Mesh_Tile, data: []u8, header: ^Dt_Mesh_Hea
         bv_node_ptr := cast(^Dt_BV_Node)(bv_node_ptr_addr)
         tile.bv_tree = slice.from_ptr(bv_node_ptr, int(header.bv_node_count))
         offset += size_of(Dt_BV_Node) * int(header.bv_node_count)
+        
+        // Debug: Log first few BV tree nodes
+        log.infof("Parsed BV tree with %d nodes", header.bv_node_count)
+        for i in 0..<min(5, int(header.bv_node_count)) {
+            node := &tile.bv_tree[i]
+            log.infof("  BV node %d: bmin=[%d,%d,%d], bmax=[%d,%d,%d], i=%d", 
+                      i, node.bmin[0], node.bmin[1], node.bmin[2],
+                      node.bmax[0], node.bmax[1], node.bmax[2], node.i)
+        }
     }
     
     // Off-mesh connections - eighth data section per navmesh format specification

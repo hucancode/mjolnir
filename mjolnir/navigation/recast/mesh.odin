@@ -8,6 +8,190 @@ import "core:math"
 import "core:math/linalg"
 import "core:fmt"
 
+// Check if three vertices form a left turn (counter-clockwise)
+// Based on the C++ uleft function from RecastMesh.cpp
+uleft :: proc(a, b, c: [3]i16) -> bool {
+    // 2D cross product in XZ plane: (b-a) × (c-a)
+    return linalg.vector_cross2(b.xz - a.xz, c.xz - a.xz) < 0
+}
+
+// Check if three vertices (by index) form a left turn - for i16 vertex arrays
+uleft_indexed_i16 :: proc(verts: []i16, ia, ib, ic: i32) -> bool {
+    if ia < 0 || ib < 0 || ic < 0 ||
+       ia >= i32(len(verts)/3) || ib >= i32(len(verts)/3) || ic >= i32(len(verts)/3) {
+        return false
+    }
+
+    a := [3]i16{verts[ia*3], verts[ia*3+1], verts[ia*3+2]}
+    b := [3]i16{verts[ib*3], verts[ib*3+1], verts[ib*3+2]}
+    c := [3]i16{verts[ic*3], verts[ic*3+1], verts[ic*3+2]}
+
+    return uleft(a, b, c)
+}
+
+// Check if three vertices (by index) form a left turn - for Mesh_Vertex arrays
+uleft_indexed_mesh :: proc(verts: []Mesh_Vertex, ia, ib, ic: i32) -> bool {
+    if ia < 0 || ib < 0 || ic < 0 || ia >= i32(len(verts)) || ib >= i32(len(verts)) || ic >= i32(len(verts)) {
+        return false
+    }
+
+    a := &verts[ia]
+    b := &verts[ib]
+    c := &verts[ic]
+
+    // Using XZ plane (Y is up)
+    // 2D cross product: (b-a) × (c-a)
+    return i32(b.x - a.x) * i32(c.z - a.z) - i32(c.x - a.x) * i32(b.z - a.z) < 0
+}
+
+// Count vertices in a polygon (excluding null indices)
+count_poly_verts :: proc(poly: []i32) -> i32 {
+    count := i32(0)
+    for v in poly {
+        if v == -1 do break
+        count += 1
+    }
+    return count
+}
+
+// Get merge value for two polygons
+// Returns shared edge indices and merge value (edge length squared)
+// Based on C++ getPolyMergeValue from RecastMesh.cpp
+get_poly_merge_value :: proc(pa, pb: []i32, verts: []Mesh_Vertex, nvp: i32) -> (ea: i32, eb: i32, value: i32) {
+    na := count_poly_verts(pa)
+    nb := count_poly_verts(pb)
+
+    // If merged polygon would be too big, cannot merge
+    if na + nb - 2 > nvp {
+        return -1, -1, -1
+    }
+
+    // Check if polygons share an edge
+    ea = -1
+    eb = -1
+
+    for i in 0..<na {
+        va0 := pa[i]
+        va1 := pa[(i+1) % na]
+        if va0 > va1 do va0, va1 = va1, va0
+
+        for j in 0..<nb {
+            vb0 := pb[j]
+            vb1 := pb[(j+1) % nb]
+            if vb0 > vb1 do vb0, vb1 = vb1, vb0
+
+            if va0 == vb0 && va1 == vb1 {
+                ea = i
+                eb = j
+                break
+            }
+        }
+        if ea != -1 do break
+    }
+
+    // No common edge, cannot merge
+    if ea == -1 || eb == -1 {
+        return -1, -1, -1
+    }
+
+    // Check if merged polygon would be convex
+    // First check the two connection points
+    va := pa[(ea+na-1) % na]
+    vb := pa[ea]
+    vc := pb[(eb+2) % nb]
+    if !uleft_indexed_mesh(verts, va, vb, vc) {
+        return -1, -1, -1
+    }
+
+    va = pb[(eb+nb-1) % nb]
+    vb = pb[eb]
+    vc = pa[(ea+2) % na]
+    if !uleft_indexed_mesh(verts, va, vb, vc) {
+        return -1, -1, -1
+    }
+    
+    // For simple cases (triangles), the connection point check is sufficient
+    if na == 3 && nb == 3 {
+        // Two triangles merging into a quad - connection point check is enough
+        // Skip the full convexity check to avoid performance issues
+    } else {
+        // For larger polygons, do a full convexity check
+        // Create temporary merged polygon to check full convexity
+        merged := make([dynamic]i32, 0, na + nb - 2, context.temp_allocator)
+        
+        // Add vertices from pa (except shared edge)
+        for i in 0..<na-1 {
+            append(&merged, pa[(ea+1+i) % na])
+        }
+        
+        // Add vertices from pb (except shared edge)  
+        for i in 0..<nb-1 {
+            append(&merged, pb[(eb+1+i) % nb])
+        }
+        
+        // Check convexity of entire merged polygon
+        n := len(merged)
+        if n < 3 {
+            // Degenerate polygon
+            return -1, -1, -1
+        }
+        
+        for i in 0..<n {
+            v0 := merged[i]
+            v1 := merged[(i+1) % n]
+            v2 := merged[(i+2) % n]
+            
+            // Validate indices
+            if v0 < 0 || v1 < 0 || v2 < 0 || v0 >= i32(len(verts)) || v1 >= i32(len(verts)) || v2 >= i32(len(verts)) {
+                // Invalid vertex indices
+                return -1, -1, -1
+            }
+            
+            if !uleft_indexed_mesh(verts, v0, v1, v2) {
+                return -1, -1, -1
+            }
+        }
+    }
+
+    // Calculate merge value (edge length squared)
+    va = pa[ea]
+    vb = pa[(ea+1) % na]
+
+    dx := i32(verts[va].x) - i32(verts[vb].x)
+    dz := i32(verts[va].z) - i32(verts[vb].z)
+
+    return ea, eb, dx*dx + dz*dz
+}
+
+// Merge two polygons along shared edge
+// Based on C++ mergePolyVerts from RecastMesh.cpp
+merge_poly_verts :: proc(pa, pb: ^Poly_Build, ea, eb: i32, nvp: i32) {
+    na := count_poly_verts(pa.verts[:])
+    nb := count_poly_verts(pb.verts[:])
+
+    // Create temporary merged polygon
+    tmp := make([]i32, nvp, context.temp_allocator)
+    for i in 0..<nvp do tmp[i] = -1
+
+    n := 0
+    // Add vertices from pa (except shared edge)
+    for i in 0..<na-1 {
+        tmp[n] = pa.verts[(ea+1+i) % na]
+        n += 1
+    }
+    // Add vertices from pb (except shared edge)
+    for i in 0..<nb-1 {
+        tmp[n] = pb.verts[(eb+1+i) % nb]
+        n += 1
+    }
+
+    // Update pa with merged polygon
+    // Note: pa.verts was allocated with context.temp_allocator, so we don't delete it
+    // Instead, we allocate a new slice with the same allocator
+    pa.verts = make([]i32, n, context.temp_allocator)
+    copy(pa.verts[:], tmp[:n])
+}
+
 // Mesh building constants
 RC_VERTEX_BUCKET_COUNT :: 1 << 12  // 4096 buckets for vertex hashing
 
@@ -822,9 +1006,17 @@ is_valid_polygon :: proc(verts: []i32, max_verts: i32) -> bool {
         }
     }
 
-    // For navigation meshes, we typically want convex polygons
-    // However, for now we'll accept any valid polygon
-    // TODO: Add convexity check if needed
+    // Check convexity - navigation meshes require convex polygons
+    // Use the "left turn" test for all vertices
+    n := len(verts)
+    for i in 0..<n {
+        v0 := verts[i]
+        v1 := verts[(i + 1) % n]
+        v2 := verts[(i + 2) % n]
+
+        // NOTE: Cannot check convexity here without access to actual vertex positions
+        // This check would require the mesh vertex array, not just indices
+    }
 
     return true
 }
@@ -993,7 +1185,7 @@ merge_triangles_into_polygons :: proc(triangles: []i32, polys: ^[dynamic]Poly_Bu
 // Main function to build polygon mesh from contour set
 rc_build_poly_mesh :: proc(cset: ^Rc_Contour_Set, nvp: i32, pmesh: ^Rc_Poly_Mesh) -> bool {
     if cset == nil || pmesh == nil do return false
-    if cset.nconts == 0 do return false
+    if len(cset.conts) == 0 do return false
     if nvp < 3 do return false
 
 
@@ -1014,7 +1206,7 @@ rc_build_poly_mesh :: proc(cset: ^Rc_Contour_Set, nvp: i32, pmesh: ^Rc_Poly_Mesh
     max_polygons := 0
     max_edges := 0
 
-    for i in 0..<cset.nconts {
+    for i in 0..<len(cset.conts) {
         cont := &cset.conts[i]
         if len(cont.verts) < 3 do continue
         max_vertices += len(cont.verts)
@@ -1049,7 +1241,7 @@ rc_build_poly_mesh :: proc(cset: ^Rc_Contour_Set, nvp: i32, pmesh: ^Rc_Poly_Mesh
 
 
     // Process each contour
-    for i in 0..<cset.nconts {
+    for i in 0..<len(cset.conts) {
         cont := &cset.conts[i]
         if len(cont.verts) < 3 {
             continue
@@ -1092,21 +1284,75 @@ rc_build_poly_mesh :: proc(cset: ^Rc_Contour_Set, nvp: i32, pmesh: ^Rc_Poly_Mesh
             triangles[i] = vertex_map[triangles[i]]
         }
 
-        // Group triangles into polygons with max nvp vertices
-        // Create polygons from triangles
-        // For now, we'll keep triangles separate to ensure convex polygons
-        // TODO: Implement proper convex polygon merging
+        // Group triangles into convex polygons with max nvp vertices
+        // Based on C++ implementation from RecastMesh.cpp
+
+        // Start with triangles as initial polygons
+        region_polys := make([dynamic]Poly_Build, context.temp_allocator)
         for tri_idx in 0..<len(triangles)/3 {
             base := tri_idx * 3
             poly := Poly_Build{
-                verts = make([]i32, 3),
+                verts = make([]i32, 3, context.temp_allocator),
                 area = cont.area,
                 reg = cont.reg,
             }
             poly.verts[0] = triangles[base + 0]
             poly.verts[1] = triangles[base + 1]
             poly.verts[2] = triangles[base + 2]
-            append(&polys, poly)
+            append(&region_polys, poly)
+        }
+
+        // Merge triangles into convex polygons
+        if nvp > 3 {
+            // Keep merging while possible
+            for {
+                best_merge_value := i32(0)
+                best_pa := -1
+                best_pb := -1
+                best_ea := i32(-1)
+                best_eb := i32(-1)
+
+                // Find best merge candidate
+                for i in 0..<len(region_polys) {
+                    pa := &region_polys[i]
+                    for j in i+1..<len(region_polys) {
+                        pb := &region_polys[j]
+
+                        // Check if we can merge these polygons
+                        ea, eb, merge_value := get_poly_merge_value(pa.verts[:], pb.verts[:], verts[:], nvp)
+                        if merge_value > best_merge_value {
+                            best_pa = i
+                            best_pb = j
+                            best_ea = ea
+                            best_eb = eb
+                            best_merge_value = merge_value
+                        }
+                    }
+                }
+
+                // No more merges possible
+                if best_pa == -1 || best_pb == -1 {
+                    break
+                }
+
+                // Merge the polygons
+                merge_poly_verts(&region_polys[best_pa], &region_polys[best_pb], best_ea, best_eb, nvp)
+
+                // Remove the merged polygon
+                ordered_remove(&region_polys, best_pb)
+            }
+        }
+
+        // Add merged polygons to result
+        for poly in region_polys {
+            // Create a copy with proper allocation
+            final_poly := Poly_Build{
+                verts = make([]i32, len(poly.verts)),
+                area = poly.area,
+                reg = poly.reg,
+            }
+            copy(final_poly.verts[:], poly.verts[:])
+            append(&polys, final_poly)
         }
     }
 

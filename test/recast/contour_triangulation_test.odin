@@ -71,9 +71,9 @@ test_contour_generation_simple :: proc(t: ^testing.T) {
 
     result := nav_recast.rc_build_contours(chf, 1.0, 10, cset)
     testing.expect(t, result, "Contour building should succeed")
-    testing.expect(t, cset.nconts == 1, "Should have exactly one contour for the square region")
+    testing.expect(t, len(cset.conts) == 1, "Should have exactly one contour for the square region")
 
-    if cset.nconts > 0 {
+    if len(cset.conts) > 0 {
         cont := &cset.conts[0]
         testing.expect(t, len(cont.verts) >= 4, "Square contour should have at least 4 vertices")
         testing.expect(t, cont.reg == 1, "Contour should have correct region ID")
@@ -151,11 +151,11 @@ test_contour_generation_multiple_regions :: proc(t: ^testing.T) {
 
     result := nav_recast.rc_build_contours(chf, 1.0, 10, cset)
     testing.expect(t, result, "Contour building should succeed")
-    testing.expect(t, cset.nconts == 2, "Should have exactly two contours for two regions")
+    testing.expect(t, len(cset.conts) == 2, "Should have exactly two contours for two regions")
 
     // Verify both contours
     region1_found, region2_found := false, false
-    for i in 0..<cset.nconts {
+    for i in 0..<len(cset.conts) {
         cont := &cset.conts[i]
         if cont.reg == 1 {
             region1_found = true
@@ -167,7 +167,7 @@ test_contour_generation_multiple_regions :: proc(t: ^testing.T) {
     }
 
     testing.expect(t, region1_found && region2_found, "Both regions should have contours")
-    log.infof("Generated %d contours for multiple regions", cset.nconts)
+    log.infof("Generated %d contours for multiple regions", len(cset.conts))
 }
 
 // Test triangulation with complex polygons
@@ -309,8 +309,9 @@ test_simple_square_mesh :: proc(t: ^testing.T) {
     cset := nav_recast.rc_alloc_contour_set()
     defer nav_recast.rc_free_contour_set(cset)
 
-    cset.nconts = 1
-    cset.conts = make([]nav_recast.Rc_Contour, 1)
+    // Set up contours with append instead
+    cset.conts = make([dynamic]nav_recast.Rc_Contour, 0)
+    append(&cset.conts, nav_recast.Rc_Contour{})
     cset.bmin = {0, 0, 0}
     cset.bmax = {30, 10, 30}
     cset.cs = 0.3
@@ -350,8 +351,9 @@ test_simple_l_shape_mesh :: proc(t: ^testing.T) {
     cset := nav_recast.rc_alloc_contour_set()
     defer nav_recast.rc_free_contour_set(cset)
 
-    cset.nconts = 1
-    cset.conts = make([]nav_recast.Rc_Contour, 1)
+    // Set up contours with append instead
+    cset.conts = make([dynamic]nav_recast.Rc_Contour, 0)
+    append(&cset.conts, nav_recast.Rc_Contour{})
     cset.bmin = {0, 0, 0}
     cset.bmax = {30, 10, 30}
     cset.cs = 1.0
@@ -400,8 +402,9 @@ test_contour_to_mesh_pipeline :: proc(t: ^testing.T) {
     cset := nav_recast.rc_alloc_contour_set()
     defer nav_recast.rc_free_contour_set(cset)
 
-    cset.nconts = 1
-    cset.conts = make([]nav_recast.Rc_Contour, 1)
+    // Set up contours with append instead
+    cset.conts = make([dynamic]nav_recast.Rc_Contour, 0)
+    append(&cset.conts, nav_recast.Rc_Contour{})
     cset.bmin = {0, 0, 0}
     cset.bmax = {30, 10, 30}
     cset.cs = 0.3

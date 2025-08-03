@@ -44,7 +44,7 @@ rc_build_compact_heightfield :: proc(walkable_height, walkable_climb: i32,
                 if s.area != RC_NULL_AREA {
                     span_count += 1
                     span_num += 1
-                    
+
 
                 }
                 s = s.next
@@ -146,8 +146,7 @@ rc_build_contours :: proc(chf: ^Rc_Compact_Heightfield,
     cset.height = h
     cset.border_size = border_size
     cset.max_error = max_error
-    cset.nconts = 0
-    cset.conts = make([]Rc_Contour, 0)
+    cset.conts = make([dynamic]Rc_Contour, 0)
     // defer delete(cset.conts) // Will be freed by rc_free_contour_set
 
     // Create flags array to mark region boundaries
@@ -232,7 +231,7 @@ rc_build_contours :: proc(chf: ^Rc_Compact_Heightfield,
                 if region_id == 0 || (region_id & RC_BORDER_REG) != 0 {
                     continue
                 }
-                
+
                 area_id := chf.areas[i]
 
                 // Extract contour for this region
@@ -261,18 +260,9 @@ rc_build_contours :: proc(chf: ^Rc_Compact_Heightfield,
 
                     // Only create contour if we have meaningful vertices after simplification
                     if len(simplified) >= 3 { // Need at least 3 vertices for a valid contour
-                        // Check if we have space for more contours
-                        if cset.nconts >= i32(len(cset.conts)) {
-                            // Resize the contours array if needed
-                            old_conts := cset.conts
-                            new_size := max(len(old_conts) * 2, 16) // Start with at least 16 contours
-                            cset.conts = make([]Rc_Contour, new_size)
-                            copy(cset.conts, old_conts)
-                            delete(old_conts)
-                        }
-
                         // Allocate new contour
-                        cont := &cset.conts[cset.nconts]
+                        append(&cset.conts, Rc_Contour{})
+                        cont := &cset.conts[len(cset.conts)-1]
                         cont.area = area_id
                         cont.reg = region_id
 
@@ -280,17 +270,11 @@ rc_build_contours :: proc(chf: ^Rc_Compact_Heightfield,
                         cont.verts = make([][4]i32, len(simplified))
                         copy(cont.verts, simplified[:])
 
-                        cset.nconts += 1
                         contours_created += 1
                         total_verts_processed += len(verts)
 
 
 
-                        // Stop if we've reached the maximum number of contours
-                        if cset.nconts >= i32(len(cset.conts)) {
-                            log.warnf("Reached maximum contour limit (%d), stopping", len(cset.conts))
-                            return true
-                        }
                         }                }
             }
         }
@@ -320,7 +304,7 @@ walk_contour_boundary :: proc(x, y, i: i32, chf: ^Rc_Compact_Heightfield,
     for (flags[i] & (1 << dir)) == 0 {
         dir += 1
         if dir >= 4 {
-    
+
             return false // No boundary found
         }
     }
@@ -821,7 +805,7 @@ remove_degenerate_contour_segments :: proc(simplified: ^[dynamic][4]i32) {
     i := 0
     for i < npts {
         ni := (i + 1) % npts
-        
+
         // Check if vertices are equal on xz-plane
         if simplified[i][0] == simplified[ni][0] && simplified[i][2] == simplified[ni][2] {
             // Degenerate segment, remove vertex ni
@@ -903,15 +887,14 @@ calculate_contour_area :: proc(verts: [][4]i32) -> i32 {
 // Allocate contour set
 rc_alloc_contour_set :: proc() -> ^Rc_Contour_Set {
     cset := new(Rc_Contour_Set)
-    cset.conts = make([]Rc_Contour, 256) // Allocate space for up to 256 contours
-    cset.nconts = 0
+    cset.conts = make([dynamic]Rc_Contour, 0)
     return cset
 }
 
 // Free contour set
 rc_free_contour_set :: proc(cset: ^Rc_Contour_Set) {
     if cset == nil do return
-    for i in 0..<cset.nconts {
+    for i in 0..<len(cset.conts) {
         cont := &cset.conts[i]
         if cont.verts != nil {
             delete(cont.verts)
@@ -934,12 +917,12 @@ insert_at :: proc(arr: ^[dynamic]i32, pos: int, v1, v2, v3, v4: i32) {
     // Resize array
     old_len := len(arr)
     resize(arr, old_len + 4)
-    
+
     // Shift elements to make room
     for i := old_len - 1; i >= pos; i -= 1 {
         arr[i + 4] = arr[i]
     }
-    
+
     // Insert new values
     arr[pos] = v1
     arr[pos + 1] = v2
@@ -951,27 +934,27 @@ insert_at :: proc(arr: ^[dynamic]i32, pos: int, v1, v2, v3, v4: i32) {
 distance_pt_seg :: proc(px, pz, ax, az, bx, bz: i32) -> f32 {
     dx := f32(bx - ax)
     dz := f32(bz - az)
-    
+
     if abs(dx) < 0.0001 && abs(dz) < 0.0001 {
         // Degenerate segment
         return (f32(px - ax) * f32(px - ax)) + (f32(pz - az) * f32(pz - az))
     }
-    
+
     t := ((f32(px - ax) * dx) + (f32(pz - az) * dz)) / (dx*dx + dz*dz)
     t = clamp(t, 0.0, 1.0)
-    
+
     nearx := f32(ax) + t * dx
     nearz := f32(az) + t * dz
-    
+
     dx_near := f32(px) - nearx
     dz_near := f32(pz) - nearz
-    
+
     return dx_near*dx_near + dz_near*dz_near
 }
 
 simplify_contour :: proc(raw_verts: [][4]i32, simplified: ^[dynamic][4]i32, max_error: f32, cell_size: f32) {
     clear(simplified)
-    
+
     if len(raw_verts) < 3 { // Need at least 3 vertices
         // Too few vertices to simplify
         for v in raw_verts {
@@ -981,16 +964,16 @@ simplify_contour :: proc(raw_verts: [][4]i32, simplified: ^[dynamic][4]i32, max_
     }
 
     n_verts := len(raw_verts)
-    
+
     // Find lower-left and upper-right vertices as initial seed points
     llx, llz := raw_verts[0][0], raw_verts[0][2]
     urx, urz := raw_verts[0][0], raw_verts[0][2]
     lli, uri := 0, 0
-    
+
     for i := 0; i < n_verts; i += 1 {
         x := raw_verts[i][0]
         z := raw_verts[i][2]
-        
+
         if x < llx || (x == llx && z < llz) {
             llx = x
             llz = z
@@ -1002,36 +985,36 @@ simplify_contour :: proc(raw_verts: [][4]i32, simplified: ^[dynamic][4]i32, max_
             uri = i
         }
     }
-    
+
     // Add initial seed points
     v := raw_verts[lli]
     append(simplified, [4]i32{v[0], v[1], v[2], i32(lli)})
-    
+
     if uri != lli {
         v = raw_verts[uri]
         append(simplified, [4]i32{v[0], v[1], v[2], i32(uri)})
     }
-    
+
     // Add points until all raw points are within error tolerance to the simplified shape
     error_sq := max_error * max_error
-    
+
     for i := 0; i < len(simplified); {
         ii := (i + 1) % len(simplified)
-        
+
         a := simplified[i]
         ax := a[0]
         az := a[2]
         ai := a[3]
-        
+
         b := simplified[ii]
         bx := b[0]
         bz := b[2]
         bi := b[3]
-        
+
         // Find maximum deviation from the segment
         max_d := f32(0)
         max_i := -1
-        
+
         // Traverse vertices between a and b
         ci := (ai + 1) % i32(n_verts)
         for ci != bi {
@@ -1043,7 +1026,7 @@ simplify_contour :: proc(raw_verts: [][4]i32, simplified: ^[dynamic][4]i32, max_
             }
             ci = (ci + 1) % i32(n_verts)
         }
-        
+
         // If the max deviation is larger than accepted error, add new point
         if max_i != -1 && max_d > error_sq {
             // Insert the new point after current point

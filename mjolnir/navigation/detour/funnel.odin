@@ -63,15 +63,39 @@ dt_find_straight_path :: proc(query: ^Dt_Nav_Mesh_Query,
     // plus one final segment to the end position
     i := i32(0)
     funnel_restarts := 0
-    max_restarts := path_count  // In worst case, we restart at each polygon
+    max_restarts := path_count * 2  // Allow more restarts since we might need to process some portals multiple times
+    
+    // Track how many times we've processed each index to prevent infinite loops
+    process_counts := make([]i32, path_count, context.temp_allocator)
 
-    for i < path_count {
-        // Current and next polygon
-        from_ref := path[i]
-        to_ref := nav_recast.INVALID_POLY_REF
-        if i + 1 < path_count {
-            to_ref = path[i + 1]
+    // log.infof("Funnel: Starting with path_count=%d, start_pos=%v, end_pos=%v", path_count, start_pos, end_pos)
+
+    for i <= path_count { // Include one extra iteration for the end position
+        // Prevent infinite loops by limiting how many times we process the same index
+        if i < path_count {
+            process_counts[i] += 1
+            if process_counts[i] > 3 {
+                log.errorf("Processed index %d too many times, breaking to prevent infinite loop", i)
+                break
+            }
         }
+        
+        // For the last iteration, we process from the last polygon to the end position
+        from_ref := nav_recast.INVALID_POLY_REF
+        to_ref := nav_recast.INVALID_POLY_REF
+        
+        if i < path_count {
+            from_ref = path[i]
+            if i + 1 < path_count {
+                to_ref = path[i + 1]
+            }
+        } else if path_count > 0 {
+            // Special case: processing from last polygon to end position
+            from_ref = path[path_count - 1]
+            to_ref = nav_recast.INVALID_POLY_REF
+        }
+        
+        // log.infof("Funnel: Processing i=%d, from_ref=0x%x, to_ref=0x%x", i, from_ref, to_ref)
 
         // Get portal between polygons
         left: [3]f32
@@ -83,6 +107,7 @@ dt_find_straight_path :: proc(query: ^Dt_Nav_Mesh_Query,
             left = end_pos
             right = end_pos
             portal_type = u8(Dt_Straight_Path_Flags.End)
+            // log.infof("  Last polygon, using end position as portal: %v", end_pos)
         } else {
             // Get portal between from_ref and to_ref
             portal_status := dt_get_portal_points(query, from_ref, to_ref, &left, &right, &portal_type)
@@ -93,7 +118,10 @@ dt_find_straight_path :: proc(query: ^Dt_Nav_Mesh_Query,
                     center := dt_calc_poly_center(from_tile, from_poly)
                     left = center
                     right = center
+                    // log.warnf("  Failed to get portal, using polygon center: %v", center)
                 }
+            } else {
+                // log.infof("  Got portal: left=%v, right=%v", left, right)
             }
         }
 
@@ -101,15 +129,28 @@ dt_find_straight_path :: proc(query: ^Dt_Nav_Mesh_Query,
 
         // If moving around the funnel, skip this portal
         if i > 0 {
+            // Special case: if we're at apex_index and the current portal would be degenerate, advance
+            if i == apex_index && linalg.length2(portal_right - portal_left) < 0.001 {
+                // log.infof("  Skipping degenerate portal at apex index %d", i)
+                i += 1
+                continue
+            }
+            
             // Right vertex
-            if nav_recast.vec2f_perp(portal_apex, portal_right, right) <= 0.0 {
-                if nav_recast.vec2f_perp(portal_apex, portal_left, right) > 0.0 {
+            perp_right := nav_recast.vec2f_perp(portal_apex, portal_right, right)
+            perp_left := nav_recast.vec2f_perp(portal_apex, portal_left, right)
+            // log.infof("  Right vertex check: apex=%v, portal_right=%v, right=%v, perp_right=%f, perp_left=%f", 
+            //           portal_apex, portal_right, right, perp_right, perp_left)
+            
+            if perp_right <= 0.0 {
+                if perp_left > 0.0 {
                     // Tighten the funnel
                     portal_right = right
                     right_poly_ref = from_ref
                     right_index = i
                 } else {
                     // Right vertex is crossing left edge, advance apex
+                    // log.infof("    Right vertex crossing left edge, advancing apex to left at index %d", left_index)
                     if n_straight_path < max_straight_path {
                         straight_path[n_straight_path] = {
                             pos = portal_left,
@@ -125,7 +166,8 @@ dt_find_straight_path :: proc(query: ^Dt_Nav_Mesh_Query,
                     portal_apex = portal_left
                     apex_index = left_index
 
-                    // Reset portal
+                    // Reset portal - but ensure we don't have a degenerate funnel
+                    // When apex advances to left side, the new right side is the old apex
                     portal_left = portal_apex
                     portal_right = portal_apex
                     left_index = apex_index
@@ -135,26 +177,34 @@ dt_find_straight_path :: proc(query: ^Dt_Nav_Mesh_Query,
 
                     // Restart scan from apex
                     funnel_restarts += 1
+                    // log.infof("    Restart #%d: apex_index=%d, i will be %d", funnel_restarts, apex_index, apex_index)
                     if i32(funnel_restarts) > max_restarts {
                         log.errorf("Funnel algorithm exceeded restart limit (%d), path may be corrupted", max_restarts)
                         stat |= {.Out_Of_Nodes}
                         break
                     }
 
-                    i = max(apex_index - 1, 0) // Ensure i never goes below 0
+                    // Always make forward progress - restart from max of current position or apex+1
+                    i = max(i + 1, apex_index + 1)
                     continue
                 }
             }
 
             // Left vertex
-            if nav_recast.vec2f_perp(portal_apex, portal_left, left) >= 0.0 {
-                if nav_recast.vec2f_perp(portal_apex, portal_right, left) < 0.0 {
+            perp_left2 := nav_recast.vec2f_perp(portal_apex, portal_left, left)
+            perp_right2 := nav_recast.vec2f_perp(portal_apex, portal_right, left)
+            // log.infof("  Left vertex check: apex=%v, portal_left=%v, left=%v, perp_left=%f, perp_right=%f", 
+            //           portal_apex, portal_left, left, perp_left2, perp_right2)
+            
+            if perp_left2 >= 0.0 {
+                if perp_right2 < 0.0 {
                     // Tighten the funnel
                     portal_left = left
                     left_poly_ref = from_ref
                     left_index = i
                 } else {
                     // Left vertex is crossing right edge, advance apex
+                    // log.infof("    Left vertex crossing right edge, advancing apex to right at index %d", right_index)
                     if n_straight_path < max_straight_path {
                         straight_path[n_straight_path] = {
                             pos = portal_right,
@@ -170,7 +220,8 @@ dt_find_straight_path :: proc(query: ^Dt_Nav_Mesh_Query,
                     portal_apex = portal_right
                     apex_index = right_index
 
-                    // Reset portal
+                    // Reset portal - but ensure we don't have a degenerate funnel
+                    // When apex advances to right side, the new left side is the old apex
                     portal_left = portal_apex
                     portal_right = portal_apex
                     left_index = apex_index
@@ -180,13 +231,15 @@ dt_find_straight_path :: proc(query: ^Dt_Nav_Mesh_Query,
 
                     // Restart scan from apex
                     funnel_restarts += 1
+                    // log.infof("    Restart #%d: apex_index=%d, i will be %d", funnel_restarts, apex_index, apex_index)
                     if i32(funnel_restarts) > max_restarts {
                         log.errorf("Funnel algorithm exceeded restart limit (%d), path may be corrupted", max_restarts)
                         stat |= {.Out_Of_Nodes}
                         break
                     }
 
-                    i = max(apex_index - 1, 0) // Ensure i never goes below 0
+                    // Always make forward progress - restart from max of current position or apex+1
+                    i = max(i + 1, apex_index + 1)
                     continue
                 }
             }
@@ -204,7 +257,7 @@ dt_find_straight_path :: proc(query: ^Dt_Nav_Mesh_Query,
     }
 
     if funnel_restarts > 0 {
-        log.debugf("Funnel algorithm completed with %d restarts", funnel_restarts)
+        // log.debugf("Funnel algorithm completed with %d restarts", funnel_restarts)
     }
 
     // Add end point
@@ -233,36 +286,65 @@ dt_find_straight_path :: proc(query: ^Dt_Nav_Mesh_Query,
 dt_get_portal_points :: proc(query: ^Dt_Nav_Mesh_Query, from: nav_recast.Poly_Ref, to: nav_recast.Poly_Ref,
                             left: ^[3]f32, right: ^[3]f32, portal_type: ^u8) -> nav_recast.Status {
 
+    // log.infof("dt_get_portal_points: from=0x%x to=0x%x", from, to)
+
     from_tile, from_poly, from_status := dt_get_tile_and_poly_by_ref(query.nav_mesh, from)
     if nav_recast.status_failed(from_status) {
+        // log.warnf("  Failed to get from polygon")
         return from_status
     }
 
     to_tile, to_poly, to_status := dt_get_tile_and_poly_by_ref(query.nav_mesh, to)
     if nav_recast.status_failed(to_status) {
+        // log.warnf("  Failed to get to polygon")
         return to_status
     }
 
     // Find the shared edge between the polygons
     for i in 0..<int(from_poly.vert_count) {
         // Check if this edge connects to target polygon
+        nei := from_poly.neis[i]
+        // log.infof("  Edge %d: nei=%d", i, nei)
+        
+        // Check direct neighbor reference (1-based index)
+        if nei > 0 && i32(nei - 1) == i32(to & 0xffff) {
+            // Found the connection through neighbor reference
+            va := from_tile.verts[from_poly.verts[i]]
+            vb := from_tile.verts[from_poly.verts[(i + 1) % int(from_poly.vert_count)]]
+
+            left^ = va
+            right^ = vb
+            portal_type^ = 0
+
+            // log.infof("  Found portal via neighbor: left=%v right=%v", va, vb)
+            return {.Success}
+        }
+        
+        // Also check via links
         link := dt_get_first_link(from_tile, i32(from & 0xffff))
         for link != nav_recast.DT_NULL_LINK {
-            if dt_get_link_poly_ref(from_tile, link) == to {
+            link_ref := dt_get_link_poly_ref(from_tile, link)
+            // log.infof("    Link to: 0x%x", link_ref)
+            if link_ref == to {
                 // Found the connection, extract portal vertices
                 va := from_tile.verts[from_poly.verts[i]]
                 vb := from_tile.verts[from_poly.verts[(i + 1) % int(from_poly.vert_count)]]
 
+                // Portal vertices should be ordered consistently
+                // For a portal from polygon A to polygon B, the vertices should be
+                // ordered such that when walking from A to B, left is on the left side
                 left^ = va
                 right^ = vb
                 portal_type^ = 0
 
+                // log.infof("  Found portal via link: left=%v right=%v", va, vb)
                 return {.Success}
             }
             link = dt_get_next_link(from_tile, link)
         }
     }
 
+    // log.warnf("  No portal found between polygons")
     return {.Invalid_Param}
 }
 
