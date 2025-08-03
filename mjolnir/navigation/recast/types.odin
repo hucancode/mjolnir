@@ -8,12 +8,17 @@ Partition_Type :: enum {
     Layers,
 }
 
+// Off-mesh connection endpoints
+Off_Mesh_Connection_Verts :: struct {
+    start: [3]f32,  // Start position (ax, ay, az)
+    end:   [3]f32,  // End position (bx, by, bz)
+}
+
 // Contour structure
 Rc_Contour :: struct {
-    verts:   []i32,        // Simplified contour vertex and connection data [Size: 4 * nverts]
-    nverts:  i32,          // Number of vertices in simplified contour
-    rverts:  []i32,        // Raw contour vertex and connection data [Size: 4 * nrverts]
-    nrverts: i32,          // Number of vertices in raw contour
+    verts:   [][4]i32,     // Simplified contour vertex and connection data [x, y, z, connection]
+    rverts:  [][4]i32,     // Raw contour vertex and connection data [x, y, z, connection]
+
     reg:     u16,          // Region id of the contour
     area:    u8,           // Area id of the contour
 }
@@ -34,12 +39,11 @@ Rc_Contour_Set :: struct {
 
 // Polygon mesh
 Rc_Poly_Mesh :: struct {
-    verts:          []u16,         // Mesh vertices [Form: (x, y, z) * nverts]
+    verts:          [][3]u16,      // Mesh vertices [x, y, z]
     polys:          []u16,         // Polygon and neighbor data [Length: maxpolys * 2 * nvp]
     regs:           []u16,         // Region id per polygon [Length: maxpolys]
     flags:          []u16,         // User flags per polygon [Length: maxpolys]
     areas:          []u8,          // Area id per polygon [Length: maxpolys]
-    nverts:         i32,           // Number of vertices
     npolys:         i32,           // Number of polygons
     maxpolys:       i32,           // Number of allocated polygons
     nvp:            i32,           // Max vertices per polygon
@@ -53,12 +57,9 @@ Rc_Poly_Mesh :: struct {
 
 // Polygon mesh detail
 Rc_Poly_Mesh_Detail :: struct {
-    meshes:  []u32,      // Sub-mesh data [Size: 4 * nmeshes]
-    verts:   []f32,      // Mesh vertices [Size: 3 * nverts]
-    tris:    []u8,       // Mesh triangles [Size: 4 * ntris]
-    nmeshes: i32,        // Number of sub-meshes
-    nverts:  i32,        // Number of vertices
-    ntris:   i32,        // Number of triangles
+    meshes:  [][4]u32,   // Sub-mesh data [vert_base, vert_count, tri_base, tri_count]
+    verts:   [][3]f32,   // Mesh vertices [x, y, z]
+    tris:    [][4]u8,    // Mesh triangles [vertA, vertB, vertC, flags]
 }
 
 // Edge structure for contour building

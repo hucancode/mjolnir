@@ -58,7 +58,8 @@ Dt_BV_Node :: struct {
 
 // Off-mesh connection
 Dt_Off_Mesh_Connection :: struct {
-    pos:     [6]f32,  // Endpoints of connection [(ax, ay, az, bx, by, bz)]
+    start:   [3]f32,  // Start position
+    end:     [3]f32,  // End position
     rad:     f32,     // Radius of endpoints
     poly:    u16,     // Polygon reference within tile
     flags:   u8,      // Link flags (internal use)
@@ -101,7 +102,7 @@ Dt_Mesh_Tile :: struct {
     links:             []Dt_Link,                 // Tile links
     detail_meshes:     []Dt_Poly_Detail,          // Detail sub-meshes
     detail_verts:      [][3]f32,                  // Detail vertices
-    detail_tris:       []u8,                      // Detail triangles
+    detail_tris:       [][4]u8,                   // Detail triangles [vertA, vertB, vertC, flags]
     bv_tree:           []Dt_BV_Node,              // Bounding volume tree
     off_mesh_cons:     []Dt_Off_Mesh_Connection,  // Off-mesh connections
     data:              []u8,                      // Raw tile data

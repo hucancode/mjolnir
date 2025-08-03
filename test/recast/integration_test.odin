@@ -156,7 +156,7 @@ test_complete_navmesh_generation_simple :: proc(t: ^testing.T) {
     total_contour_verts := 0
     for i in 0..<cset.nconts {
         if i32(i) < i32(len(cset.conts)) {
-            total_contour_verts += int(cset.conts[i].nverts)
+            total_contour_verts += len(cset.conts[i].verts)
         }
     }
     testing.expect(t, total_contour_verts >= 4, 

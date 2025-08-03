@@ -224,7 +224,7 @@ build_navmesh :: proc(engine: ^mjolnir.Engine) {
     navmesh_state.detail_mesh = dmesh
     navmesh_state.navmesh_built = true
     
-    log.infof("Navigation mesh built: %d polygons, %d vertices", pmesh.npolys, pmesh.nverts)
+    log.infof("Navigation mesh built: %d polygons, %d vertices", pmesh.npolys, len(pmesh.verts))
     
     // Create visualization
     success := navmesh_renderer_build_from_recast(&engine.navmesh, &engine.gpu_context, pmesh, dmesh)
@@ -273,7 +273,7 @@ navmesh_render2d :: proc(engine: ^mjolnir.Engine, ctx: ^mu.Context) {
             mu.label(ctx, "Status: Built")
             if navmesh_state.poly_mesh != nil {
                 mu.label(ctx, fmt.tprintf("Polygons: %d", navmesh_state.poly_mesh.npolys))
-                mu.label(ctx, fmt.tprintf("Vertices: %d", navmesh_state.poly_mesh.nverts))
+                mu.label(ctx, fmt.tprintf("Vertices: %d", len(navmesh_state.poly_mesh.verts)))
             }
             
             // Toggle original mesh visibility

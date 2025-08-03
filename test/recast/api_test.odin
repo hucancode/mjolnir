@@ -62,11 +62,11 @@ test_api_simple_build :: proc(t: ^testing.T) {
     defer recast.rc_free_poly_mesh_detail(dmesh)
     
     // Check generated mesh
-    testing.expect(t, pmesh.nverts > 0, "No vertices generated")
+    testing.expect(t, len(pmesh.verts) > 0, "No vertices generated")
     testing.expect(t, pmesh.npolys > 0, "No polygons generated")
     
     log.infof("API Simple Build Test: Generated %d polygons, %d vertices", 
-              pmesh.npolys, pmesh.nverts)
+              pmesh.npolys, len(pmesh.verts))
 }
 
 @(test)
@@ -125,7 +125,7 @@ test_api_quick_build :: proc(t: ^testing.T) {
     }
     
     // Check result
-    testing.expect(t, pmesh.nverts > 0, "Quick build generated no vertices")
+    testing.expect(t, len(pmesh.verts) > 0, "Quick build generated no vertices")
     testing.expect(t, pmesh.npolys > 0, "Quick build generated no polygons")
     
     log.infof("API Quick Build Test: Generated %d polygons with cell size 0.5", 

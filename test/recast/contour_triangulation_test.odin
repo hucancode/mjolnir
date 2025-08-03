@@ -75,11 +75,11 @@ test_contour_generation_simple :: proc(t: ^testing.T) {
 
     if cset.nconts > 0 {
         cont := &cset.conts[0]
-        testing.expect(t, cont.nverts >= 4, "Square contour should have at least 4 vertices")
+        testing.expect(t, len(cont.verts) >= 4, "Square contour should have at least 4 vertices")
         testing.expect(t, cont.reg == 1, "Contour should have correct region ID")
         testing.expect(t, cont.area == nav_recast.RC_WALKABLE_AREA, "Contour should have walkable area")
 
-        log.infof("Generated contour with %d vertices for region %d", cont.nverts, cont.reg)
+        log.infof("Generated contour with %d vertices for region %d", len(cont.verts), cont.reg)
     }
 }
 
@@ -159,10 +159,10 @@ test_contour_generation_multiple_regions :: proc(t: ^testing.T) {
         cont := &cset.conts[i]
         if cont.reg == 1 {
             region1_found = true
-            testing.expect(t, cont.nverts >= 4, "Region 1 contour should have at least 4 vertices")
+            testing.expect(t, len(cont.verts) >= 4, "Region 1 contour should have at least 4 vertices")
         } else if cont.reg == 2 {
             region2_found = true
-            testing.expect(t, cont.nverts >= 4, "Region 2 contour should have at least 4 vertices")
+            testing.expect(t, len(cont.verts) >= 4, "Region 2 contour should have at least 4 vertices")
         }
     }
 
@@ -176,7 +176,7 @@ test_triangulation_complex_polygon :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
 
     // Test with a more complex polygon (octagon)
-    verts := make([]u16, 8 * 3)
+    verts := make([][3]u16, 8)
     defer delete(verts)
 
     // Define octagon vertices
@@ -187,9 +187,7 @@ test_triangulation_complex_polygon :: proc(t: ^testing.T) {
         angle := f32(i) * math.TAU / 8.0
         x := center_x + u16(f32(radius) * math.cos(angle))
         z := center_z + u16(f32(radius) * math.sin(angle))
-        verts[i*3 + 0] = x
-        verts[i*3 + 1] = 0
-        verts[i*3 + 2] = z
+        verts[i] = {x, 0, z}
     }
 
     // Create indices in clockwise order
@@ -197,7 +195,7 @@ test_triangulation_complex_polygon :: proc(t: ^testing.T) {
     triangles := make([dynamic]i32)
     defer delete(triangles)
 
-    result := nav_recast.triangulate_polygon(verts, indices, 8, &triangles)
+    result := nav_recast.triangulate_polygon(verts, indices, &triangles)
     testing.expect(t, result, "Octagon triangulation should succeed")
     testing.expect(t, len(triangles) == 18, "Octagon should produce 6 triangles (18 indices)")
 
@@ -220,43 +218,35 @@ test_triangulation_edge_cases :: proc(t: ^testing.T) {
 
     // Test 1: Triangle (minimum polygon)
     {
-        verts := []u16{0, 0, 0, 10, 0, 0, 5, 0, 10}
+        verts := [][3]u16{{0, 0, 0}, {10, 0, 0}, {5, 0, 10}}
         indices := []i32{0, 2, 1}
         triangles := make([dynamic]i32)
         defer delete(triangles)
 
-        result := nav_recast.triangulate_polygon(verts, indices, 3, &triangles)
+        result := nav_recast.triangulate_polygon(verts, indices, &triangles)
         testing.expect(t, result, "Triangle triangulation should succeed")
         testing.expect(t, len(triangles) == 3, "Triangle should produce 1 triangle (3 indices)")
     }
 
     // Test 2: Degenerate case - less than 3 vertices
     {
-        verts := []u16{0, 0, 0, 10, 0, 0}
+        verts := [][3]u16{{0, 0, 0}, {10, 0, 0}}
         indices := []i32{0, 1}
         triangles := make([dynamic]i32)
         defer delete(triangles)
 
-        result := nav_recast.triangulate_polygon(verts, indices, 2, &triangles)
+        result := nav_recast.triangulate_polygon(verts[:], indices, &triangles)
         testing.expect(t, !result, "Triangulation with 2 vertices should fail")
     }
 
     // Test 3: Self-intersecting polygon (bowtie)
     {
-        verts := make([]u16, 4 * 3)
-        defer delete(verts)
-
-        // Bowtie shape
-        verts[0], verts[1], verts[2] = 0, 0, 0      // Bottom-left
-        verts[3], verts[4], verts[5] = 10, 0, 10    // Top-right
-        verts[6], verts[7], verts[8] = 10, 0, 0     // Bottom-right
-        verts[9], verts[10], verts[11] = 0, 0, 10   // Top-left
-
+        verts := [][3]u16{{0, 0, 0}, {10, 0, 10}, {10, 0, 0}, {0, 0, 10}}
         indices := []i32{0, 1, 2, 3}
         triangles := make([dynamic]i32)
         defer delete(triangles)
 
-        result := nav_recast.triangulate_polygon(verts, indices, 4, &triangles)
+        result := nav_recast.triangulate_polygon(verts[:], indices, &triangles)
         // Should either succeed with some triangulation or fail gracefully
         if result {
             testing.expect(t, len(triangles) > 0, "If successful, should produce triangles")
@@ -272,31 +262,31 @@ test_contour_simplification :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
 
     // Create a contour with many collinear points
-    raw_verts := make([dynamic]i32)
+    raw_verts := make([dynamic][4]i32)
     defer delete(raw_verts)
 
     // Add points along a square with extra collinear points
     // Bottom edge with extra points
-    append(&raw_verts, 0, 10, 0, 0)
-    append(&raw_verts, 10, 10, 0, 0)  // Extra point
-    append(&raw_verts, 20, 10, 0, 0)  // Extra point
-    append(&raw_verts, 30, 10, 0, 0)
+    append(&raw_verts, [4]i32{0, 10, 0, 0})
+    append(&raw_verts, [4]i32{10, 10, 0, 0})  // Extra point
+    append(&raw_verts, [4]i32{20, 10, 0, 0})  // Extra point
+    append(&raw_verts, [4]i32{30, 10, 0, 0})
 
     // Right edge
-    append(&raw_verts, 30, 10, 10, 0)
-    append(&raw_verts, 30, 10, 20, 0) // Extra point
-    append(&raw_verts, 30, 10, 30, 0)
+    append(&raw_verts, [4]i32{30, 10, 10, 0})
+    append(&raw_verts, [4]i32{30, 10, 20, 0}) // Extra point
+    append(&raw_verts, [4]i32{30, 10, 30, 0})
 
     // Top edge
-    append(&raw_verts, 20, 10, 30, 0) // Extra point
-    append(&raw_verts, 10, 10, 30, 0) // Extra point
-    append(&raw_verts, 0, 10, 30, 0)
+    append(&raw_verts, [4]i32{20, 10, 30, 0}) // Extra point
+    append(&raw_verts, [4]i32{10, 10, 30, 0}) // Extra point
+    append(&raw_verts, [4]i32{0, 10, 30, 0})
 
     // Left edge
-    append(&raw_verts, 0, 10, 20, 0)  // Extra point
-    append(&raw_verts, 0, 10, 10, 0)  // Extra point
+    append(&raw_verts, [4]i32{0, 10, 20, 0})  // Extra point
+    append(&raw_verts, [4]i32{0, 10, 10, 0})  // Extra point
 
-    simplified := make([dynamic]i32)
+    simplified := make([dynamic][4]i32)
     defer delete(simplified)
 
     // Simplify with reasonable error tolerance
@@ -304,11 +294,10 @@ test_contour_simplification :: proc(t: ^testing.T) {
 
     // Should have fewer vertices after simplification
     testing.expect(t, len(simplified) < len(raw_verts), "Simplification should reduce vertex count")
-    testing.expect(t, len(simplified) >= 12, "Should have at least 4 vertices (x,y,z,r each)")
-    testing.expect(t, len(simplified) % 4 == 0, "Vertices should have 4 components each")
+    testing.expect(t, len(simplified) >= 4, "Should have at least 4 vertices")
 
-    log.infof("Contour simplified from %d to %d components (%d to %d vertices)",
-              len(raw_verts), len(simplified), len(raw_verts)/4, len(simplified)/4)
+    log.infof("Contour simplified from %d to %d vertices",
+              len(raw_verts), len(simplified))
 }
 
 // Test simple square first
@@ -329,16 +318,15 @@ test_simple_square_mesh :: proc(t: ^testing.T) {
 
     // Create square contour
     cont := &cset.conts[0]
-    cont.nverts = 4
-    cont.verts = make([]i32, 16)  // 4 vertices * 4 components
+    cont.verts = make([][4]i32, 4)  // 4 vertices
     cont.area = nav_recast.RC_WALKABLE_AREA
     cont.reg = 1
 
     // Define square vertices (clockwise)
-    cont.verts[0], cont.verts[1], cont.verts[2], cont.verts[3] = 0, 5, 0, 0      // Bottom-left
-    cont.verts[4], cont.verts[5], cont.verts[6], cont.verts[7] = 10, 5, 0, 0     // Bottom-right
-    cont.verts[8], cont.verts[9], cont.verts[10], cont.verts[11] = 10, 5, 10, 0  // Top-right
-    cont.verts[12], cont.verts[13], cont.verts[14], cont.verts[15] = 0, 5, 10, 0 // Top-left
+    cont.verts[0] = {0, 5, 0, 0}      // Bottom-left
+    cont.verts[1] = {10, 5, 0, 0}     // Bottom-right
+    cont.verts[2] = {10, 5, 10, 0}    // Top-right
+    cont.verts[3] = {0, 5, 10, 0}     // Top-left
 
     // Build polygon mesh
     pmesh := nav_recast.rc_alloc_poly_mesh()
@@ -346,15 +334,15 @@ test_simple_square_mesh :: proc(t: ^testing.T) {
 
     result := nav_recast.rc_build_poly_mesh(cset, 6, pmesh)
     testing.expect(t, result, "Mesh building from square contour should succeed")
-    testing.expect(t, pmesh.nverts == 4, "Square should have exactly 4 vertices")
+    testing.expect(t, len(pmesh.verts) == 4, "Square should have exactly 4 vertices")
     testing.expect(t, pmesh.npolys >= 1, "Square should have at least 1 polygon")
 
     log.infof("Square contour converted to mesh: %d vertices, %d polygons",
-              pmesh.nverts, pmesh.npolys)
+              len(pmesh.verts), pmesh.npolys)
 }
 
 // Test simple L-shape
-@(test) 
+@(test)
 test_simple_l_shape_mesh :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
 
@@ -371,24 +359,23 @@ test_simple_l_shape_mesh :: proc(t: ^testing.T) {
 
     // Create L-shaped contour
     cont := &cset.conts[0]
-    cont.nverts = 6
-    cont.verts = make([]i32, 24)  // 6 vertices * 4 components
+    cont.verts = make([][4]i32, 6)  // 6 vertices
     cont.area = nav_recast.RC_WALKABLE_AREA
     cont.reg = 1
 
     // Define L-shape vertices (clockwise) - using integer coordinates
-    cont.verts[0], cont.verts[1], cont.verts[2], cont.verts[3] = 0, 0, 0, 0      // Bottom-left
-    cont.verts[4], cont.verts[5], cont.verts[6], cont.verts[7] = 2, 0, 0, 0      // Bottom-right
-    cont.verts[8], cont.verts[9], cont.verts[10], cont.verts[11] = 2, 0, 1, 0    // Mid-right
-    cont.verts[12], cont.verts[13], cont.verts[14], cont.verts[15] = 1, 0, 1, 0  // Mid-inner
-    cont.verts[16], cont.verts[17], cont.verts[18], cont.verts[19] = 1, 0, 2, 0  // Top-right
-    cont.verts[20], cont.verts[21], cont.verts[22], cont.verts[23] = 0, 0, 2, 0  // Top-left
+    cont.verts[0] = {0, 0, 0, 0}      // Bottom-left
+    cont.verts[1] = {2, 0, 0, 0}      // Bottom-right
+    cont.verts[2] = {2, 0, 1, 0}      // Mid-right
+    cont.verts[3] = {1, 0, 1, 0}      // Mid-inner
+    cont.verts[4] = {1, 0, 2, 0}      // Top-right
+    cont.verts[5] = {0, 0, 2, 0}      // Top-left
 
     // Debug: Print input vertices
     log.info("L-shape input vertices:")
     for i in 0..<6 {
-        log.infof("  v[%d] = (%d, %d, %d)", i, 
-            cont.verts[i*4], cont.verts[i*4+1], cont.verts[i*4+2])
+        v := cont.verts[i]
+        log.infof("  v[%d] = (%d, %d, %d)", i, v[0], v[1], v[2])
     }
 
     // Build polygon mesh
@@ -397,11 +384,11 @@ test_simple_l_shape_mesh :: proc(t: ^testing.T) {
 
     result := nav_recast.rc_build_poly_mesh(cset, 6, pmesh)
     testing.expect(t, result, "Mesh building from L-shaped contour should succeed")
-    testing.expect(t, pmesh.nverts == 6, "L-shape should have exactly 6 vertices")
+    testing.expect(t, len(pmesh.verts) == 6, "L-shape should have exactly 6 vertices")
     testing.expect(t, pmesh.npolys >= 2, "L-shape should have at least 2 polygons")
 
     log.infof("L-shaped contour converted to mesh: %d vertices, %d polygons",
-              pmesh.nverts, pmesh.npolys)
+              len(pmesh.verts), pmesh.npolys)
 }
 
 // Integration test: contour to mesh pipeline
@@ -422,26 +409,23 @@ test_contour_to_mesh_pipeline :: proc(t: ^testing.T) {
 
     // Create L-shaped contour
     cont := &cset.conts[0]
-    cont.nverts = 6
-    cont.verts = make([]i32, 24)  // 6 vertices * 4 components
+    cont.verts = make([][4]i32, 6)  // 6 vertices
     cont.area = nav_recast.RC_WALKABLE_AREA
     cont.reg = 1
 
     // Define L-shape vertices (clockwise)
-    cont.verts[0], cont.verts[1], cont.verts[2], cont.verts[3] = 0, 5, 0, 0      // Bottom-left
-    cont.verts[4], cont.verts[5], cont.verts[6], cont.verts[7] = 20, 5, 0, 0     // Bottom-right
-    cont.verts[8], cont.verts[9], cont.verts[10], cont.verts[11] = 20, 5, 10, 0  // Mid-right
-    cont.verts[12], cont.verts[13], cont.verts[14], cont.verts[15] = 10, 5, 10, 0 // Mid-inner
-    cont.verts[16], cont.verts[17], cont.verts[18], cont.verts[19] = 10, 5, 20, 0 // Top-right
-    cont.verts[20], cont.verts[21], cont.verts[22], cont.verts[23] = 0, 5, 20, 0  // Top-left
+    cont.verts[0] = {0, 5, 0, 0}      // Bottom-left
+    cont.verts[1] = {20, 5, 0, 0}     // Bottom-right
+    cont.verts[2] = {20, 5, 10, 0}    // Mid-right
+    cont.verts[3] = {10, 5, 10, 0}    // Mid-inner
+    cont.verts[4] = {10, 5, 20, 0}    // Top-right
+    cont.verts[5] = {0, 5, 20, 0}     // Top-left
 
     // Debug: Print input contour vertices
     log.info("Input contour vertices:")
     for i in 0..<6 {
-        x := cont.verts[i*4]
-        y := cont.verts[i*4+1]
-        z := cont.verts[i*4+2]
-        log.infof("  cont v[%d] = (%d, %d, %d)", i, x, y, z)
+        v := cont.verts[i]
+        log.infof("  cont v[%d] = (%d, %d, %d)", i, v[0], v[1], v[2])
     }
 
     // Build polygon mesh
@@ -450,14 +434,14 @@ test_contour_to_mesh_pipeline :: proc(t: ^testing.T) {
 
     result := nav_recast.rc_build_poly_mesh(cset, 6, pmesh)
     testing.expect(t, result, "Mesh building from L-shaped contour should succeed")
-    testing.expect(t, pmesh.nverts >= 6, "Should have at least 6 vertices")
+    testing.expect(t, len(pmesh.verts) >= 6, "Should have at least 6 vertices")
     testing.expect(t, pmesh.npolys >= 1, "Should have at least 1 polygon")
 
     // Debug: Print mesh vertices
-    log.infof("Mesh has %d vertices:", pmesh.nverts)
-    for i in 0..<pmesh.nverts {
-        vi := int(i) * 3
-        log.infof("  mesh v[%d] = (%d, %d, %d)", i, pmesh.verts[vi], pmesh.verts[vi+1], pmesh.verts[vi+2])
+    log.infof("Mesh has %d vertices:", len(pmesh.verts))
+    for i in 0..<len(pmesh.verts) {
+        v := pmesh.verts[i]
+        log.infof("  mesh v[%d] = (%d, %d, %d)", i, v[0], v[1], v[2])
     }
 
     // Debug: Print mesh polygons
@@ -465,7 +449,7 @@ test_contour_to_mesh_pipeline :: proc(t: ^testing.T) {
     for i in 0..<pmesh.npolys {
         poly_idx := int(i) * int(pmesh.nvp) * 2
         log.infof("  poly[%d]:", i)
-        
+
         // Count and print vertices
         vert_count := 0
         verts_str := "    vertices: "
@@ -476,7 +460,7 @@ test_contour_to_mesh_pipeline :: proc(t: ^testing.T) {
             }
         }
         log.infof("%s(count=%d)", verts_str, vert_count)
-        
+
         // Print area and region
         log.infof("    area=%d, reg=%d", pmesh.areas[i], pmesh.regs[i])
     }
@@ -488,7 +472,7 @@ test_contour_to_mesh_pipeline :: proc(t: ^testing.T) {
     total_poly_verts := 0
     unique_verts := make(map[u16]bool)
     defer delete(unique_verts)
-    
+
     for i in 0..<pmesh.npolys {
         poly_idx := int(i) * int(pmesh.nvp) * 2
         for j in 0..<pmesh.nvp {
@@ -504,5 +488,5 @@ test_contour_to_mesh_pipeline :: proc(t: ^testing.T) {
     testing.expect(t, len(unique_verts) >= 6, "Should use at least 6 unique vertices")
 
     log.infof("L-shaped contour converted to mesh: %d vertices, %d polygons",
-              pmesh.nverts, pmesh.npolys)
+              len(pmesh.verts), pmesh.npolys)
 }

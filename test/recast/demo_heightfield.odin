@@ -86,7 +86,7 @@ test_demo_heightfield :: proc(t: ^testing.T) {
     
     log.info("Successfully built navigation mesh")
     if pmesh != nil {
-        log.infof("Polymesh: %d vertices, %d polygons", pmesh.nverts, pmesh.npolys)
+        log.infof("Polymesh: %d vertices, %d polygons", len(pmesh.verts), pmesh.npolys)
     }
     
     // Note: In the minimal API, we don't have access to intermediate heightfield data

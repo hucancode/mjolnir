@@ -17,7 +17,7 @@ dt_create_nav_mesh_data :: proc(params: ^Dt_Create_Nav_Mesh_Data_Params) -> ([]u
     pmesh := params.poly_mesh
     dmesh := params.poly_mesh_detail
     
-    if pmesh.nverts >= 0xfffe {
+    if len(pmesh.verts) >= 0xfffe {
         return nil, {.Invalid_Param}
     }
     
@@ -41,7 +41,7 @@ dt_create_nav_mesh_data :: proc(params: ^Dt_Create_Nav_Mesh_Data_Params) -> ([]u
     max_link_count := i32(0)
     
     // Polygon mesh vertices and polygons
-    total_vert_count += pmesh.nverts
+    total_vert_count += i32(len(pmesh.verts))
     total_poly_count += pmesh.npolys
     
     // Calculate maximum link count per polygon
@@ -69,8 +69,8 @@ dt_create_nav_mesh_data :: proc(params: ^Dt_Create_Nav_Mesh_Data_Params) -> ([]u
     
     if dmesh != nil {
         detail_mesh_count = pmesh.npolys
-        detail_vert_count = dmesh.nverts - pmesh.nverts
-        detail_tri_count = dmesh.ntris
+        detail_vert_count = i32(len(dmesh.verts)) - i32(len(pmesh.verts))
+        detail_tri_count = i32(len(dmesh.tris))
     }
     
     // Calculate data size using validated format specification
@@ -132,22 +132,19 @@ dt_create_nav_mesh_data :: proc(params: ^Dt_Create_Nav_Mesh_Data_Params) -> ([]u
     verts := slice.from_ptr(cast(^[3]f32)(verts_ptr_addr), int(total_vert_count))
     offset += verts_size
     
-    for i in 0..<pmesh.nverts {
+    for v, i in pmesh.verts {
         vert := &verts[i]
-        vert[0] = pmesh.bmin[0] + f32(pmesh.verts[i * 3 + 0]) * cs
-        vert[1] = pmesh.bmin[1] + f32(pmesh.verts[i * 3 + 1]) * ch
-        vert[2] = pmesh.bmin[2] + f32(pmesh.verts[i * 3 + 2]) * cs
+        vert[0] = pmesh.bmin[0] + f32(v[0]) * cs
+        vert[1] = pmesh.bmin[1] + f32(v[1]) * ch
+        vert[2] = pmesh.bmin[2] + f32(v[2]) * cs
     }
     
     // Add off-mesh connection vertices
     for i in 0..<params.off_mesh_con_count {
-        base := pmesh.nverts + i * 2
-        verts[base + 0] = {params.off_mesh_con_verts[i * 6 + 0], 
-                          params.off_mesh_con_verts[i * 6 + 1], 
-                          params.off_mesh_con_verts[i * 6 + 2]}
-        verts[base + 1] = {params.off_mesh_con_verts[i * 6 + 3], 
-                          params.off_mesh_con_verts[i * 6 + 4], 
-                          params.off_mesh_con_verts[i * 6 + 5]}
+        base := len(pmesh.verts) + int(i) * 2
+        conn := params.off_mesh_con_verts[i]
+        verts[base + 0] = conn.start
+        verts[base + 1] = conn.end
     }
     
     // Copy polygons - second data section per navmesh format specification
@@ -198,8 +195,8 @@ dt_create_nav_mesh_data :: proc(params: ^Dt_Create_Nav_Mesh_Data_Params) -> ([]u
     for i in 0..<params.off_mesh_con_count {
         poly := &polys[pmesh.npolys + i]
         poly.vert_count = 2
-        poly.verts[0] = u16(pmesh.nverts + i * 2 + 0)
-        poly.verts[1] = u16(pmesh.nverts + i * 2 + 1)
+        poly.verts[0] = u16(len(pmesh.verts) + int(i) * 2 + 0)
+        poly.verts[1] = u16(len(pmesh.verts) + int(i) * 2 + 1)
         poly.flags = params.off_mesh_con_flags[i]
         dt_poly_set_area(poly, params.off_mesh_con_areas[i])
         dt_poly_set_type(poly, nav_recast.DT_POLYTYPE_OFFMESH_CONNECTION)
@@ -229,11 +226,11 @@ dt_create_nav_mesh_data :: proc(params: ^Dt_Create_Nav_Mesh_Data_Params) -> ([]u
         
         for i in 0..<pmesh.npolys {
             detail := &detail_meshes[i]
-            mesh_base := i * 4
-            detail.vert_base = dmesh.meshes[mesh_base + 0]
-            detail.tri_base = dmesh.meshes[mesh_base + 2]
-            detail.vert_count = u8(dmesh.meshes[mesh_base + 1])
-            detail.tri_count = u8(dmesh.meshes[mesh_base + 3])
+            mesh_info := dmesh.meshes[i]
+            detail.vert_base = mesh_info[0]
+            detail.tri_base = mesh_info[2]
+            detail.vert_count = u8(mesh_info[1])
+            detail.tri_count = u8(mesh_info[3])
         }
         
         // Copy detail vertices (skip shared vertices)
@@ -241,22 +238,15 @@ dt_create_nav_mesh_data :: proc(params: ^Dt_Create_Nav_Mesh_Data_Params) -> ([]u
         offset += detail_verts_size
         
         for i in 0..<detail_vert_count {
-            detail_verts[i] = {dmesh.verts[(pmesh.nverts + i) * 3 + 0],
-                              dmesh.verts[(pmesh.nverts + i) * 3 + 1],
-                              dmesh.verts[(pmesh.nverts + i) * 3 + 2]}
+            detail_verts[i] = dmesh.verts[len(pmesh.verts) + int(i)]
         }
         
         // Copy detail triangles
-        detail_tris := slice.from_ptr(cast(^u8)(raw_data(data)[offset:]), int(detail_tri_count) * 4)
+        detail_tris := slice.from_ptr(cast(^[4]u8)(raw_data(data)[offset:]), int(detail_tri_count))
         offset += detail_tris_size
         
         for i in 0..<detail_tri_count {
-            tri_base := i * 4
-            src_base := i * 4
-            detail_tris[tri_base + 0] = dmesh.tris[src_base + 0]
-            detail_tris[tri_base + 1] = dmesh.tris[src_base + 1]
-            detail_tris[tri_base + 2] = dmesh.tris[src_base + 2]
-            detail_tris[tri_base + 3] = dmesh.tris[src_base + 3]
+            detail_tris[i] = dmesh.tris[i]
         }
     }
     
@@ -269,9 +259,9 @@ dt_create_nav_mesh_data :: proc(params: ^Dt_Create_Nav_Mesh_Data_Params) -> ([]u
             con.poly = u16(pmesh.npolys + i)
             
             // Copy connection endpoints
-            for j in 0..<6 {
-                con.pos[j] = params.off_mesh_con_verts[i32(i) * 6 + i32(j)]
-            }
+            conn := params.off_mesh_con_verts[i]
+            con.start = conn.start
+            con.end = conn.end
             
             con.rad = params.off_mesh_con_rad[i]
             if params.off_mesh_con_dir[i] != 0 {
@@ -326,7 +316,7 @@ Dt_Create_Nav_Mesh_Data_Params :: struct {
     poly_mesh_detail: ^nav_recast.Rc_Poly_Mesh_Detail,
     
     // Off-mesh connections
-    off_mesh_con_verts: []f32,      // [(ax, ay, az, bx, by, bz) * nOffMeshCons]
+    off_mesh_con_verts: []nav_recast.Off_Mesh_Connection_Verts,  // Connection endpoints
     off_mesh_con_rad: []f32,        // [nOffMeshCons]
     off_mesh_con_flags: []u16,      // [nOffMeshCons]
     off_mesh_con_areas: []u8,       // [nOffMeshCons]
@@ -559,10 +549,11 @@ dt_calc_polygon_bounds_fast :: proc(pmesh: ^nav_recast.Rc_Poly_Mesh, poly_base: 
         
         // Direct quantization from vertex coordinates (avoid float conversion)
         // Vertices are already relative to bmin in mesh coordinates
+        v := pmesh.verts[vert_idx]
         quant_coords := [3]u16{
-            u16(math.clamp(f32(pmesh.verts[vert_idx * 3 + 0]) * quant_factor, 0, 65535)),
-            u16(math.clamp(f32(pmesh.verts[vert_idx * 3 + 1]) * quant_factor, 0, 65535)),
-            u16(math.clamp(f32(pmesh.verts[vert_idx * 3 + 2]) * quant_factor, 0, 65535)),
+            u16(math.clamp(f32(v[0]) * quant_factor, 0, 65535)),
+            u16(math.clamp(f32(v[1]) * quant_factor, 0, 65535)),
+            u16(math.clamp(f32(v[2]) * quant_factor, 0, 65535)),
         }
         
         // Update bounds

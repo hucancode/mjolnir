@@ -370,10 +370,10 @@ dt_setup_tile_data :: proc(tile: ^Dt_Mesh_Tile, data: []u8, header: ^Dt_Mesh_Hea
     
     // Detail triangles - sixth data section per navmesh format specification
     if header.detail_tri_count > 0 {
-        // Detail triangles are u8 arrays, so alignment is always satisfied
-        detail_tri_ptr := cast(^u8)(uintptr(raw_data(data)) + uintptr(offset))
-        tile.detail_tris = slice.from_ptr(detail_tri_ptr, int(header.detail_tri_count) * 4)
-        offset += size_of(u8) * int(header.detail_tri_count) * 4
+        // Detail triangles are [4]u8 arrays, so we need to cast properly
+        detail_tri_ptr := cast(^[4]u8)(uintptr(raw_data(data)) + uintptr(offset))
+        tile.detail_tris = slice.from_ptr(detail_tri_ptr, int(header.detail_tri_count))
+        offset += size_of([4]u8) * int(header.detail_tri_count)
     }
     
     // BV tree - seventh data section per navmesh format specification

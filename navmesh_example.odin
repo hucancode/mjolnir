@@ -73,7 +73,7 @@ navmesh_simple_main :: proc() {
     log.info("\n✓ Navigation mesh built successfully!")
     log.infof("Results:")
     log.infof("  - Polygons: %d", pmesh.npolys)
-    log.infof("  - Vertices: %d", pmesh.nverts)
+    log.infof("  - Vertices: %d", len(pmesh.verts))
     log.infof("  - Bounds: min(%.1f, %.1f, %.1f) max(%.1f, %.1f, %.1f)", 
               pmesh.bmin[0], pmesh.bmin[1], pmesh.bmin[2],
               pmesh.bmax[0], pmesh.bmax[1], pmesh.bmax[2])

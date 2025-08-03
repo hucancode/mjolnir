@@ -364,13 +364,13 @@ init_detail_polygon :: proc(poly: ^Detail_Polygon, pmesh: ^Rc_Poly_Mesh, chf: ^R
     // Add polygon vertices
     for i in 0..<nverts {
         vert_idx := int(pmesh.polys[pi + i])
-        if vert_idx >= int(pmesh.nverts) do return false
+        if vert_idx >= len(pmesh.verts) do return false
 
-        vi := vert_idx * 3
+        v := pmesh.verts[vert_idx]
         pos := [3]f32{
-            pmesh.bmin.x + f32(pmesh.verts[vi+0]) * pmesh.cs,
-            pmesh.bmin.y + f32(pmesh.verts[vi+1]) * pmesh.ch,
-            pmesh.bmin.z + f32(pmesh.verts[vi+2]) * pmesh.cs,
+            pmesh.bmin.x + f32(v[0]) * pmesh.cs,
+            pmesh.bmin.y + f32(v[1]) * pmesh.ch,
+            pmesh.bmin.z + f32(v[2]) * pmesh.cs,
         }
 
         // Sample height from heightfield
@@ -439,33 +439,29 @@ free_detail_polygon :: proc(poly: ^Detail_Polygon) {
 // Validate detail mesh data
 validate_poly_mesh_detail :: proc(dmesh: ^Rc_Poly_Mesh_Detail) -> bool {
     if dmesh == nil do return false
-    if dmesh.nmeshes <= 0 || dmesh.nverts <= 0 || dmesh.ntris <= 0 do return false
+    if len(dmesh.meshes) <= 0 || len(dmesh.verts) <= 0 || len(dmesh.tris) <= 0 do return false
 
     // Check mesh data bounds
-    for i in 0..<dmesh.nmeshes {
-        mi := int(i) * 4
-        if mi + 3 >= len(dmesh.meshes) do return false
+    for i in 0..<len(dmesh.meshes) {
 
         // Each mesh entry: [vertex_base, vertex_count, triangle_base, triangle_count]
-        vert_base := dmesh.meshes[mi + 0]
-        vert_count := dmesh.meshes[mi + 1]
-        tri_base := dmesh.meshes[mi + 2]
-        tri_count := dmesh.meshes[mi + 3]
+        mesh_info := dmesh.meshes[i]
+        vert_base := mesh_info[0]
+        vert_count := mesh_info[1]
+        tri_base := mesh_info[2]
+        tri_count := mesh_info[3]
 
         // Validate bounds
-        if vert_base + vert_count > u32(dmesh.nverts) do return false
-        if tri_base + tri_count > u32(dmesh.ntris) do return false
+        if vert_base + vert_count > u32(len(dmesh.verts)) do return false
+        if tri_base + tri_count > u32(len(dmesh.tris)) do return false
     }
 
     // Check triangle data
-    for i in 0..<dmesh.ntris {
-        ti := int(i) * 4
-        if ti + 3 >= len(dmesh.tris) do return false
-
+    for tri in dmesh.tris {
         // Check vertex indices
         for j in 0..<3 {
-            vert_idx := dmesh.tris[ti + j]
-            if int(vert_idx) >= int(dmesh.nverts) do return false
+            vert_idx := tri[j]
+            if int(vert_idx) >= len(dmesh.verts) do return false
         }
     }
     return true
@@ -475,24 +471,19 @@ validate_poly_mesh_detail :: proc(dmesh: ^Rc_Poly_Mesh_Detail) -> bool {
 rc_copy_poly_mesh_detail :: proc(src: ^Rc_Poly_Mesh_Detail, dst: ^Rc_Poly_Mesh_Detail) -> bool {
     if src == nil || dst == nil do return false
 
-    // Copy header data
-    dst.nmeshes = src.nmeshes
-    dst.nverts = src.nverts
-    dst.ntris = src.ntris
-
     // Copy arrays
-    if src.nmeshes > 0 {
-        dst.meshes = make([]u32, src.nmeshes * 4)
+    if len(src.meshes) > 0 {
+        dst.meshes = make([][4]u32, len(src.meshes))
         copy(dst.meshes, src.meshes)
     }
 
-    if src.nverts > 0 {
-        dst.verts = make([]f32, src.nverts * 3)
+    if len(src.verts) > 0 {
+        dst.verts = make([][3]f32, len(src.verts))
         copy(dst.verts, src.verts)
     }
 
-    if src.ntris > 0 {
-        dst.tris = make([]u8, src.ntris * 4)
+    if len(src.tris) > 0 {
+        dst.tris = make([][4]u8, len(src.tris))
         copy(dst.tris, src.tris)
     }
 
@@ -514,22 +505,17 @@ rc_merge_poly_mesh_details :: proc(meshes: []^Rc_Poly_Mesh_Detail, nmeshes: i32,
 
     for i in 0..<nmeshes {
         if meshes[i] == nil do continue
-        total_meshes += int(meshes[i].nmeshes)
-        total_verts += int(meshes[i].nverts)
-        total_tris += int(meshes[i].ntris)
+        total_meshes += len(meshes[i].meshes)
+        total_verts += len(meshes[i].verts)
+        total_tris += len(meshes[i].tris)
     }
 
     if total_meshes == 0 do return false
 
-    // Initialize merged mesh
-    mesh.nmeshes = i32(total_meshes)
-    mesh.nverts = i32(total_verts)
-    mesh.ntris = i32(total_tris)
-
     // Allocate arrays
-    mesh.meshes = make([]u32, total_meshes * 4)
-    mesh.verts = make([]f32, total_verts * 3)
-    mesh.tris = make([]u8, total_tris * 4)
+    mesh.meshes = make([][4]u32, total_meshes)
+    mesh.verts = make([][3]f32, total_verts)
+    mesh.tris = make([][4]u8, total_tris)
 
     // Merge data
     mesh_offset := 0
@@ -541,38 +527,28 @@ rc_merge_poly_mesh_details :: proc(meshes: []^Rc_Poly_Mesh_Detail, nmeshes: i32,
         if src == nil do continue
 
         // Copy mesh headers (with adjusted offsets)
-        for j in 0..<src.nmeshes {
-            mi_src := int(j) * 4
-            mi_dst := mesh_offset * 4
-
-            mesh.meshes[mi_dst + 0] = src.meshes[mi_src + 0] + u32(vert_offset)  // Adjust vertex base
-            mesh.meshes[mi_dst + 1] = src.meshes[mi_src + 1]                     // Vertex count
-            mesh.meshes[mi_dst + 2] = src.meshes[mi_src + 2] + u32(tri_offset)   // Adjust triangle base
-            mesh.meshes[mi_dst + 3] = src.meshes[mi_src + 3]                     // Triangle count
+        for j in 0..<len(src.meshes) {
+            mesh.meshes[mesh_offset][0] = src.meshes[j][0] + u32(vert_offset)  // Adjust vertex base
+            mesh.meshes[mesh_offset][1] = src.meshes[j][1]                     // Vertex count
+            mesh.meshes[mesh_offset][2] = src.meshes[j][2] + u32(tri_offset)   // Adjust triangle base
+            mesh.meshes[mesh_offset][3] = src.meshes[j][3]                     // Triangle count
 
             mesh_offset += 1
         }
 
         // Copy vertices
-        for j in 0..<src.nverts {
-            vi_src := int(j) * 3
-            vi_dst := vert_offset * 3
-            mesh.verts[vi_dst + 0] = src.verts[vi_src + 0]
-            mesh.verts[vi_dst + 1] = src.verts[vi_src + 1]
-            mesh.verts[vi_dst + 2] = src.verts[vi_src + 2]
+        for j in 0..<len(src.verts) {
+            mesh.verts[vert_offset] = src.verts[j]
             vert_offset += 1
         }
 
         // Copy triangles (with adjusted vertex indices)
-        for j in 0..<src.ntris {
-            ti_src := int(j) * 4
-            ti_dst := tri_offset * 4
-
+        for j in 0..<len(src.tris) {
             // Adjust vertex indices for the first 3 elements
             for k in 0..<3 {
-                mesh.tris[ti_dst + k] = src.tris[ti_src + k] + u8(vert_offset - int(src.nverts))
+                mesh.tris[tri_offset][k] = src.tris[j][k] + u8(vert_offset - len(src.verts))
             }
-            mesh.tris[ti_dst + 3] = src.tris[ti_src + 3]  // Triangle flags
+            mesh.tris[tri_offset][3] = src.tris[j][3]  // Triangle flags
 
             tri_offset += 1
         }
@@ -1623,9 +1599,6 @@ rc_build_poly_mesh_detail :: proc(pmesh: ^Rc_Poly_Mesh, chf: ^Rc_Compact_Heightf
 
 
     // Initialize detail mesh
-    dmesh.nmeshes = 0
-    dmesh.nverts = 0
-    dmesh.ntris = 0
 
     // Process each polygon
     detail_polygons := make([dynamic]Detail_Polygon, pmesh.npolys)
@@ -1708,13 +1681,9 @@ rc_build_poly_mesh_detail :: proc(pmesh: ^Rc_Poly_Mesh, chf: ^Rc_Compact_Heightf
     }
 
     // Allocate final detail mesh arrays
-    dmesh.nmeshes = pmesh.npolys
-    dmesh.nverts = i32(total_verts)
-    dmesh.ntris = i32(total_tris)
-
-    dmesh.meshes = make([]u32, dmesh.nmeshes * 4)
-    dmesh.verts = make([]f32, dmesh.nverts * 3)
-    dmesh.tris = make([]u8, dmesh.ntris * 4)
+    dmesh.meshes = make([][4]u32, pmesh.npolys)
+    dmesh.verts = make([][3]f32, total_verts)
+    dmesh.tris = make([][4]u8, total_tris)
 
     // Copy data to final arrays
     mesh_idx := 0
@@ -1727,35 +1696,29 @@ rc_build_poly_mesh_detail :: proc(pmesh: ^Rc_Poly_Mesh, chf: ^Rc_Compact_Heightf
         if len(poly.vertices) == 0 || len(poly.triangles) == 0 do continue
 
         // Set mesh header
-        mi := mesh_idx * 4
-        dmesh.meshes[mi + 0] = u32(vert_offset)          // Vertex base
-        dmesh.meshes[mi + 1] = u32(len(poly.vertices))   // Vertex count
-        dmesh.meshes[mi + 2] = u32(tri_offset)           // Triangle base
-        dmesh.meshes[mi + 3] = u32(len(poly.triangles))  // Triangle count
+        dmesh.meshes[mesh_idx] = [4]u32{
+            u32(vert_offset),          // Vertex base
+            u32(len(poly.vertices)),   // Vertex count
+            u32(tri_offset),           // Triangle base
+            u32(len(poly.triangles)),  // Triangle count
+        }
 
         // Copy vertices
         for &vertex in poly.vertices {
-            vi := vert_offset * 3
-            dmesh.verts[vi + 0] = vertex.pos.x
-            dmesh.verts[vi + 1] = vertex.pos.y
-            dmesh.verts[vi + 2] = vertex.pos.z
+            dmesh.verts[vert_offset] = [3]f32{vertex.pos.x, vertex.pos.y, vertex.pos.z}
             vert_offset += 1
         }
 
         // Copy triangles
         for &triangle in poly.triangles {
-            ti := tri_offset * 4
 
             // Store triangle with vertex indices relative to mesh base
-            for j in 0..<3 {
-                local_idx := triangle.v[j]
-                if local_idx >= 0 && local_idx < i32(len(poly.vertices)) {
-                    dmesh.tris[ti + j] = u8(local_idx)
-                } else {
-                    dmesh.tris[ti + j] = 0
-                }
+            dmesh.tris[tri_offset] = [4]u8{
+                u8(triangle.v[0]),
+                u8(triangle.v[1]),
+                u8(triangle.v[2]),
+                0,  // Triangle flags (reserved)
             }
-            dmesh.tris[ti + 3] = 0  // Triangle flags (reserved)
 
             tri_offset += 1
         }
@@ -1764,9 +1727,7 @@ rc_build_poly_mesh_detail :: proc(pmesh: ^Rc_Poly_Mesh, chf: ^Rc_Compact_Heightf
     }
 
     // Update actual counts (in case some polygons failed)
-    dmesh.nmeshes = i32(mesh_idx)
-    dmesh.nverts = i32(vert_offset)
-    dmesh.ntris = i32(tri_offset)
+    // Arrays are already properly sized, no need to update counts
 
     // Validate final mesh
     if !validate_poly_mesh_detail(dmesh) {

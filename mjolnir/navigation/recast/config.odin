@@ -9,10 +9,10 @@ rc_calc_bounds :: proc(verts: []f32, nverts: i32, bmin, bmax: ^[3]f32) {
         bmax^ = {0, 0, 0}
         return
     }
-    
+
     bmin^ = {verts[0], verts[1], verts[2]}
     bmax^ = bmin^
-    
+
     for i in 1..<nverts {
         v := [3]f32{verts[i*3+0], verts[i*3+1], verts[i*3+2]}
         bmin.x = min(bmin.x, v.x)
@@ -43,7 +43,7 @@ validate_config :: proc(cfg: ^Config) -> bool {
     if cfg.cs <= 0 || cfg.ch <= 0 {
         return false
     }
-    
+
     // Check bounds (allow zero bounds which indicates they haven't been set yet)
     if cfg.bmin == cfg.bmax && cfg.bmin != {0, 0, 0} {
         return false  // Same bounds but not zero (invalid)
@@ -51,34 +51,34 @@ validate_config :: proc(cfg: ^Config) -> bool {
     if cfg.bmin.x > cfg.bmax.x || cfg.bmin.y > cfg.bmax.y || cfg.bmin.z > cfg.bmax.z {
         return false  // Inverted bounds (invalid)
     }
-    
+
     // Check agent parameters
     if cfg.walkable_height < 3 {
         return false
     }
-    
+
     if cfg.walkable_climb < 0 {
         return false
     }
-    
+
     if cfg.walkable_slope_angle < 0 || cfg.walkable_slope_angle > 90 {
         return false
     }
-    
+
     // Check region parameters
     if cfg.min_region_area < 0 || cfg.merge_region_area < 0 {
         return false
     }
-    
+
     // Check polygon parameters
     if cfg.max_verts_per_poly < 3 {
         return false
     }
-    
+
     if cfg.max_verts_per_poly > DT_VERTS_PER_POLYGON {
         return false
     }
-    
+
     return true
 }
 
@@ -107,7 +107,7 @@ rc_config_create :: proc() -> Config {
 rc_calc_tile_bounds :: proc(cfg: ^Config, tx, ty: i32) -> (bmin, bmax: [3]f32) {
     bmin = cfg.bmin
     bmax = cfg.bmax
-    
+
     if cfg.tile_size > 0 {
         ts := f32(cfg.tile_size) * cfg.cs
         bmin.x = cfg.bmin.x + f32(tx) * ts
@@ -115,7 +115,7 @@ rc_calc_tile_bounds :: proc(cfg: ^Config, tx, ty: i32) -> (bmin, bmax: [3]f32) {
         bmax.x = cfg.bmin.x + f32(tx + 1) * ts
         bmax.z = cfg.bmin.z + f32(ty + 1) * ts
     }
-    
+
     return
 }
 
@@ -124,7 +124,7 @@ get_tile_count :: proc(cfg: ^Config) -> (tw, th: i32) {
     if cfg.tile_size <= 0 {
         return 1, 1
     }
-    
+
     gw, gh := calc_grid_size(cfg)
     tw = (gw + cfg.tile_size - 1) / cfg.tile_size
     th = (gh + cfg.tile_size - 1) / cfg.tile_size
@@ -151,7 +151,6 @@ Area_Mask_Type :: enum {
 // Convex volume for area marking
 Convex_Volume :: struct {
     verts:     [][3]f32,
-    nverts:    i32,
     hmin:      f32,
     hmax:      f32,
     area_id:   u8,
@@ -162,5 +161,5 @@ point_in_convex_volume :: proc(pt: [3]f32, vol: ^Convex_Volume) -> bool {
     if pt.y < vol.hmin || pt.y > vol.hmax {
         return false
     }
-    return point_in_polygon_2d(pt, vol.verts[:vol.nverts])
+    return point_in_polygon_2d(pt, vol.verts)
 }

@@ -83,18 +83,18 @@ test_debug_polygon_mesh :: proc(t: ^testing.T) {
     ok := nav_recast.rc_build_poly_mesh(cset, cfg.max_verts_per_poly, pmesh)
     testing.expect(t, ok, "Polygon mesh building failed")
     
-    log.infof("Polygon mesh: %d vertices, %d polygons", pmesh.nverts, pmesh.npolys)
+    log.infof("Polygon mesh: %d vertices, %d polygons", len(pmesh.verts), pmesh.npolys)
     log.infof("Mesh bounds: bmin=%v, bmax=%v", pmesh.bmin, pmesh.bmax)
     
     // Check first few vertices
-    for i in 0..<min(10, pmesh.nverts) {
-        v_idx := i * 3
-        x := f32(pmesh.verts[v_idx]) * pmesh.cs + pmesh.bmin.x
-        y := f32(pmesh.verts[v_idx + 1]) * pmesh.ch + pmesh.bmin.y
-        z := f32(pmesh.verts[v_idx + 2]) * pmesh.cs + pmesh.bmin.z
+    for i in 0..<min(10, len(pmesh.verts)) {
+        v := pmesh.verts[i]
+        x := f32(v[0]) * pmesh.cs + pmesh.bmin.x
+        y := f32(v[1]) * pmesh.ch + pmesh.bmin.y
+        z := f32(v[2]) * pmesh.cs + pmesh.bmin.z
         
         log.infof("Vertex %d: stored=(%d,%d,%d), world=(%.2f,%.2f,%.2f)", 
-                  i, pmesh.verts[v_idx], pmesh.verts[v_idx + 1], pmesh.verts[v_idx + 2],
+                  i, v[0], v[1], v[2],
                   x, y, z)
     }
 }

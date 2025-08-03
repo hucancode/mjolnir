@@ -32,7 +32,6 @@ Mesh_Edge :: struct {
 // Temporary structure for building polygons
 Poly_Build :: struct {
     verts:     []i32,       // Vertex indices
-    nverts:    i32,         // Number of vertices
     area:      u8,          // Area type
     reg:       u16,         // Region ID
 }
@@ -78,17 +77,17 @@ add_vertex :: proc(x, y, z: u16, verts: ^[dynamic]Mesh_Vertex, buckets: []Vertex
 }
 
 // Calculate 2D area of polygon (used for winding order)
-calc_poly_area_2d :: proc "contextless" (verts: []u16, indices: []i32, nverts: i32) -> i32 {
+calc_poly_area_2d :: proc "contextless" (verts: [][3]u16, indices: []int) -> i32 {
     area: i32 = 0
-    j := nverts - 1
+    j := len(verts) - 1
 
-    for i in 0..<nverts {
-        vi := indices[i] * 3
-        vj := indices[j] * 3
+    for i in 0..<len(verts) {
+        vi := verts[indices[i]]
+        vj := verts[indices[j]]
 
         // Get XZ coordinates as 3D vectors and compute 2D cross product (Z component)
-        v1 := [3]i32{i32(verts[vi+0]), 0, i32(verts[vi+2])}
-        v2 := [3]i32{i32(verts[vj+0]), 0, i32(verts[vj+2])}
+        v1 := [3]i32{i32(vi[0]), 0, i32(vi[2])}
+        v2 := [3]i32{i32(vj[0]), 0, i32(vj[2])}
         area += linalg.cross(v1, v2).y
 
         j = i
@@ -98,33 +97,34 @@ calc_poly_area_2d :: proc "contextless" (verts: []u16, indices: []i32, nverts: i
 }
 
 // Check if vertex is convex (for ear clipping)
-is_convex_vertex :: proc "contextless" (verts: []u16, indices: []i32, nverts: i32, i: i32) -> bool {
-    prev := (i + nverts - 1) % nverts
-    next := (i + 1) % nverts
+is_convex_vertex :: proc "contextless" (verts: [][3]u16, indices: []i32, i: int) -> bool {
 
-    a := indices[prev] * 3
-    b := indices[i] * 3
-    c := indices[next] * 3
+    prev := (i + len(verts) - 1) % len(verts)
+    next := (i + 1) % len(verts)
+
+    va := verts[indices[prev]]
+    vb := verts[indices[i]]
+    vc := verts[indices[next]]
 
     // Get XZ coordinates as 3D vectors
-    va := [3]i32{i32(verts[a+0]), 0, i32(verts[a+2])}
-    vb := [3]i32{i32(verts[b+0]), 0, i32(verts[b+2])}
-    vc := [3]i32{i32(verts[c+0]), 0, i32(verts[c+2])}
+    v1 := [3]i32{i32(va[0]), 0, i32(va[2])}
+    v2 := [3]i32{i32(vb[0]), 0, i32(vb[2])}
+    v3 := [3]i32{i32(vc[0]), 0, i32(vc[2])}
 
     // Calculate cross product to determine if angle is convex (Y component gives 2D cross product)
-    ab := vb - va
-    bc := vc - vb
+    ab := v2 - v1
+    bc := v3 - v2
 
     return linalg.cross(ab, bc).y >= 0
 }
 
 // Check if point is inside triangle (for ear clipping)
-point_in_triangle :: proc "contextless" (verts: []u16, a, b, c, p: i32) -> bool {
+point_in_triangle :: proc "contextless" (verts: [][3]u16, a, b, c, p: int) -> bool {
     // Get XZ coordinates as vectors
-    va := [2]i32{i32(verts[a*3+0]), i32(verts[a*3+2])}
-    vb := [2]i32{i32(verts[b*3+0]), i32(verts[b*3+2])}
-    vc := [2]i32{i32(verts[c*3+0]), i32(verts[c*3+2])}
-    vp := [2]i32{i32(verts[p*3+0]), i32(verts[p*3+2])}
+    va := verts[a].xz
+    vb := verts[b].xz
+    vc := verts[c].xz
+    vp := verts[p].xz
 
     // Calculate barycentric coordinates
     v0 := vc - va
@@ -147,46 +147,47 @@ point_in_triangle :: proc "contextless" (verts: []u16, a, b, c, p: i32) -> bool 
 // Geometric primitive functions for triangulation
 
 // Calculate twice the signed area of triangle formed by three points
-area2 :: proc "contextless" (verts: []i32, a, b, c: i32) -> i32 {
-    return (verts[b*4+0] - verts[a*4+0]) * (verts[c*4+2] - verts[a*4+2]) -
-           (verts[c*4+0] - verts[a*4+0]) * (verts[b*4+2] - verts[a*4+2])
+area2 :: proc "contextless" (verts: [][4]i32, a, b, c: i32) -> i32 {
+    ab := verts[b].xz - verts[a].xz
+    ac := verts[c].xz - verts[a].xz
+    return linalg.vector_cross2(ab, ac)
 }
 
 // Check if point c is to the left of line from a to b
-left :: proc "contextless" (verts: []i32, a, b, c: i32) -> bool {
+left :: proc "contextless" (verts: [][4]i32, a, b, c: i32) -> bool {
     return area2(verts, a, b, c) < 0
 }
 
 // Check if point c is to the left of or on line from a to b
-left_on :: proc "contextless" (verts: []i32, a, b, c: i32) -> bool {
+left_on :: proc "contextless" (verts: [][4]i32, a, b, c: i32) -> bool {
     return area2(verts, a, b, c) <= 0
 }
 
 // Check if three points are collinear
-collinear :: proc "contextless" (verts: []i32, a, b, c: i32) -> bool {
+collinear :: proc "contextless" (verts: [][4]i32, a, b, c: i32) -> bool {
     return area2(verts, a, b, c) == 0
 }
 
 // Check if vertices a and b are equal (in XZ plane) - matches C++ vequal behavior
-vequal :: proc "contextless" (verts: []i32, a, b: i32) -> bool {
-    return verts[a*4+0] == verts[b*4+0] && verts[a*4+2] == verts[b*4+2]
+vequal :: proc "contextless" (verts: [][4]i32, a, b: i32) -> bool {
+    return verts[a].xz == verts[b].xz
 }
 
 // Check if point c is between points a and b on the same line
-between :: proc "contextless" (verts: []i32, a, b, c: i32) -> bool {
+between :: proc "contextless" (verts: [][4]i32, a, b, c: i32) -> bool {
     if !collinear(verts, a, b, c) do return false
 
-    if verts[a*4+0] != verts[b*4+0] {
-        return (verts[a*4+0] <= verts[c*4+0] && verts[c*4+0] <= verts[b*4+0]) ||
-               (verts[a*4+0] >= verts[c*4+0] && verts[c*4+0] >= verts[b*4+0])
+    if verts[a][0] != verts[b][0] {
+        return (verts[a][0] <= verts[c][0] && verts[c][0] <= verts[b][0]) ||
+               (verts[a][0] >= verts[c][0] && verts[c][0] >= verts[b][0])
     } else {
-        return (verts[a*4+2] <= verts[c*4+2] && verts[c*4+2] <= verts[b*4+2]) ||
-               (verts[a*4+2] >= verts[c*4+2] && verts[c*4+2] >= verts[b*4+2])
+        return (verts[a][2] <= verts[c][2] && verts[c][2] <= verts[b][2]) ||
+               (verts[a][2] >= verts[c][2] && verts[c][2] >= verts[b][2])
     }
 }
 
 // Check if segments ab and cd intersect properly (interiors intersect)
-intersect_prop :: proc "contextless" (verts: []i32, a, b, c, d: i32) -> bool {
+intersect_prop :: proc "contextless" (verts: [][4]i32, a, b, c, d: i32) -> bool {
     if collinear(verts, a, b, c) || collinear(verts, a, b, d) ||
        collinear(verts, c, d, a) || collinear(verts, c, d, b) {
         return false
@@ -197,7 +198,7 @@ intersect_prop :: proc "contextless" (verts: []i32, a, b, c, d: i32) -> bool {
 }
 
 // Check if segments ab and cd intersect (including endpoints)
-intersect :: proc "contextless" (verts: []i32, a, b, c, d: i32) -> bool {
+intersect :: proc "contextless" (verts: [][4]i32, a, b, c, d: i32) -> bool {
     if intersect_prop(verts, a, b, c, d) {
         return true
     } else if between(verts, a, b, c) || between(verts, a, b, d) ||
@@ -209,7 +210,7 @@ intersect :: proc "contextless" (verts: []i32, a, b, c, d: i32) -> bool {
 }
 
 // Check if diagonal from vertex a to vertex c is internal to polygon
-diagonalie :: proc "contextless" (verts: []i32, indices: []u32, n: i32, a, c: i32) -> bool {
+diagonalie :: proc "contextless" (verts: [][4]i32, indices: []u32, n: i32, a, c: i32) -> bool {
     a_idx := i32(indices[a] & 0x0fffffff)
     c_idx := i32(indices[c] & 0x0fffffff)
 
@@ -231,7 +232,7 @@ diagonalie :: proc "contextless" (verts: []i32, indices: []u32, n: i32, a, c: i3
 }
 
 // Check if diagonal is in cone of vertex a
-in_cone :: proc "contextless" (verts: []i32, indices: []u32, n: i32, a, b: i32) -> bool {
+in_cone :: proc "contextless" (verts: [][4]i32, indices: []u32, n: i32, a, b: i32) -> bool {
     a0_idx := i32(indices[(a + n - 1) % n] & 0x0fffffff)
     a1_idx := i32(indices[a] & 0x0fffffff)
     a2_idx := i32(indices[(a + 1) % n] & 0x0fffffff)
@@ -245,7 +246,7 @@ in_cone :: proc "contextless" (verts: []i32, indices: []u32, n: i32, a, b: i32) 
 }
 
 // Check if diagonal from a to b is valid
-diagonal :: proc "contextless" (verts: []i32, indices: []u32, n: i32, a, b: i32) -> bool {
+diagonal :: proc "contextless" (verts: [][4]i32, indices: []u32, n: i32, a, b: i32) -> bool {
     cone_check := in_cone(verts, indices, n, a, b)
     diag_check := diagonalie(verts, indices, n, a, b)
     if !cone_check || !diag_check {
@@ -256,7 +257,7 @@ diagonal :: proc "contextless" (verts: []i32, indices: []u32, n: i32, a, b: i32)
 
 
 // Loose versions for degenerate cases (more permissive)
-diagonalie_loose :: proc "contextless" (verts: []i32, indices: []u32, n: i32, a, c: i32) -> bool {
+diagonalie_loose :: proc "contextless" (verts: [][4]i32, indices: []u32, n: i32, a, c: i32) -> bool {
     a_idx := i32(indices[a] & 0x0fffffff)
     c_idx := i32(indices[c] & 0x0fffffff)
 
@@ -276,7 +277,7 @@ diagonalie_loose :: proc "contextless" (verts: []i32, indices: []u32, n: i32, a,
     return true
 }
 
-in_cone_loose :: proc "contextless" (verts: []i32, indices: []u32, n: i32, a, b: i32) -> bool {
+in_cone_loose :: proc "contextless" (verts: [][4]i32, indices: []u32, n: i32, a, b: i32) -> bool {
     a0_idx := i32(indices[(a + n - 1) % n] & 0x0fffffff)
     a1_idx := i32(indices[a] & 0x0fffffff)
     a2_idx := i32(indices[(a + 1) % n] & 0x0fffffff)
@@ -289,7 +290,7 @@ in_cone_loose :: proc "contextless" (verts: []i32, indices: []u32, n: i32, a, b:
     }
 }
 
-diagonal_loose :: proc "contextless" (verts: []i32, indices: []u32, n: i32, a, b: i32) -> bool {
+diagonal_loose :: proc "contextless" (verts: [][4]i32, indices: []u32, n: i32, a, b: i32) -> bool {
     return in_cone_loose(verts, indices, n, a, b) &&
            diagonalie_loose(verts, indices, n, a, b)
 }
@@ -305,36 +306,34 @@ prev :: proc "contextless" (i, n: i32) -> i32 {
 }
 
 // Triangulate polygon using C++ Recast ear clipping algorithm
-triangulate_polygon :: proc(verts: []u16, indices: []i32, nverts: i32, triangles: ^[dynamic]i32) -> bool {
-    if nverts < 3 do return false
-    if nverts == 3 {
+triangulate_polygon :: proc(verts: [][3]u16, indices: []i32, triangles: ^[dynamic]i32) -> bool {
+    if len(verts) < 3 do return false
+    if len(verts) == 3 {
         append(triangles, indices[0], indices[1], indices[2])
         return true
     }
 
-
     // Copy indices for manipulation and add ear marking bits
-    work_indices := make([]u32, nverts)
+    // Use u32 to support the 0x80000000 flag bit
+    work_indices := make([]u32, len(indices))
     defer delete(work_indices)
-    for i in 0..<nverts {
+    for i in 0..<len(indices) {
         work_indices[i] = u32(indices[i])
     }
-
     // Convert vertices to int array for C++ compatibility (4 components per vertex)
-    int_verts := make([]i32, (len(verts) / 3) * 4)
+    // We need all vertices that might be referenced by indices
+    int_verts := make([][4]i32, len(verts))
     defer delete(int_verts)
-    for i in 0..<len(verts)/3 {
-        int_verts[i*4 + 0] = i32(verts[i*3 + 0])  // x
-        int_verts[i*4 + 1] = i32(verts[i*3 + 1])  // y
-        int_verts[i*4 + 2] = i32(verts[i*3 + 2])  // z
-        int_verts[i*4 + 3] = 0                    // padding (C++ uses 4-component vertices)
+    for i in 0..<len(verts) {
+        v := verts[i]
+        int_verts[i] = {i32(v[0]), i32(v[1]), i32(v[2]), 0}  // x, y, z, padding
     }
 
-    n := nverts
+    n := i32(len(indices))
 
     // Pre-mark all ears using bit flags
     // The last bit of the index is used to indicate if the vertex can be removed
-    for i in i32(0)..<n {
+    for i in 0..<n {
         i1 := next(i, n)
         i2 := next(i1, n)
         if diagonal(int_verts, work_indices, n, i, i2) {
@@ -344,14 +343,14 @@ triangulate_polygon :: proc(verts: []u16, indices: []i32, nverts: i32, triangles
 
     // Check if we found any ears, fall back to loose diagonal test if needed
     ear_count := 0
-    for i in i32(0)..<n {
+    for i in 0..<n {
         if work_indices[i] & 0x80000000 != 0 {
             ear_count += 1
         }
     }
     if ear_count == 0 {
         // Try using loose diagonal test as fallback
-        for i in i32(0)..<n {
+        for i in 0..<n {
             i1 := next(i, n)
             i2 := next(i1, n)
             if diagonal_loose(int_verts, work_indices, n, i, i2) {
@@ -361,7 +360,7 @@ triangulate_polygon :: proc(verts: []u16, indices: []i32, nverts: i32, triangles
 
         // Recount ears after loose test
         ear_count = 0
-        for i in i32(0)..<n {
+        for i in 0..<n {
             if work_indices[i] & 0x80000000 != 0 {
                 ear_count += 1
             }
@@ -376,7 +375,7 @@ triangulate_polygon :: proc(verts: []u16, indices: []i32, nverts: i32, triangles
         mini := i32(-1)
 
         // Find ear with shortest diagonal (C++ algorithm)
-        for i in i32(0)..<n {
+        for i in 0..<n {
             i1 := next(i, n)
             if work_indices[i1] & 0x80000000 != 0 {
                 // This is a marked ear, calculate diagonal length
@@ -385,8 +384,8 @@ triangulate_polygon :: proc(verts: []u16, indices: []i32, nverts: i32, triangles
                 p2_idx := i32(work_indices[i2] & 0x0fffffff)
 
                 diff := [2]i32{
-                    int_verts[p2_idx*4 + 0] - int_verts[p0_idx*4 + 0],
-                    int_verts[p2_idx*4 + 2] - int_verts[p0_idx*4 + 2],
+                    int_verts[p2_idx][0] - int_verts[p0_idx][0],
+                    int_verts[p2_idx][2] - int_verts[p0_idx][2],
                 }
                 length := linalg.length2(diff)
 
@@ -408,8 +407,8 @@ triangulate_polygon :: proc(verts: []u16, indices: []i32, nverts: i32, triangles
                     p0_idx := i32(work_indices[i] & 0x0fffffff)
                     p2_idx := i32(work_indices[i2] & 0x0fffffff)
 
-                    dx := int_verts[p2_idx*4 + 0] - int_verts[p0_idx*4 + 0]
-                    dy := int_verts[p2_idx*4 + 2] - int_verts[p0_idx*4 + 2]
+                    dx := int_verts[p2_idx][0] - int_verts[p0_idx][0]
+                    dy := int_verts[p2_idx][2] - int_verts[p0_idx][2]
                     length := dx*dx + dy*dy
 
                     if min_len < 0 || length < min_len {
@@ -487,14 +486,11 @@ triangulate_polygon :: proc(verts: []u16, indices: []i32, nverts: i32, triangles
 // Validate polygon mesh data
 validate_poly_mesh :: proc(pmesh: ^Rc_Poly_Mesh) -> bool {
     if pmesh == nil do return false
-    if pmesh.nverts <= 0 || pmesh.npolys <= 0 do return false
+    if len(pmesh.verts) <= 0 || pmesh.npolys <= 0 do return false
     if pmesh.nvp < 3 do return false
 
     // Check vertex bounds
-    for i in 0..<pmesh.nverts {
-        vi := int(i) * 3
-        if vi+2 >= len(pmesh.verts) do return false
-    }
+    // verts are now [][3]u16, so no need to check bounds
 
     // Check polygon data
     for i in 0..<pmesh.npolys {
@@ -504,7 +500,7 @@ validate_poly_mesh :: proc(pmesh: ^Rc_Poly_Mesh) -> bool {
         // Check vertex indices
         for j in 0..<pmesh.nvp {
             vert_idx := pmesh.polys[pi + int(j)]
-            if vert_idx != RC_MESH_NULL_IDX && int(vert_idx) >= int(pmesh.nverts) {
+            if vert_idx != RC_MESH_NULL_IDX && int(vert_idx) >= len(pmesh.verts) {
                 return false
             }
         }
@@ -518,7 +514,6 @@ rc_copy_poly_mesh :: proc(src: ^Rc_Poly_Mesh, dst: ^Rc_Poly_Mesh) -> bool {
     if src == nil || dst == nil do return false
 
     // Copy header data
-    dst.nverts = src.nverts
     dst.npolys = src.npolys
     dst.maxpolys = src.maxpolys
     dst.nvp = src.nvp
@@ -530,8 +525,8 @@ rc_copy_poly_mesh :: proc(src: ^Rc_Poly_Mesh, dst: ^Rc_Poly_Mesh) -> bool {
     dst.max_edge_error = src.max_edge_error
 
     // Copy arrays
-    if src.nverts > 0 {
-        dst.verts = make([]u16, src.nverts * 3)
+    if len(src.verts) > 0 {
+        dst.verts = make([][3]u16, len(src.verts))
         copy(dst.verts, src.verts)
     }
 
@@ -567,7 +562,7 @@ rc_merge_poly_meshes :: proc(meshes: []^Rc_Poly_Mesh, nmeshes: i32, mesh: ^Rc_Po
 
     for i in 0..<nmeshes {
         if meshes[i] == nil do continue
-        max_verts += int(meshes[i].nverts)
+        max_verts += len(meshes[i].verts)
         max_polys += int(meshes[i].npolys)
         max_nvp = max(max_nvp, int(meshes[i].nvp))
     }
@@ -576,7 +571,6 @@ rc_merge_poly_meshes :: proc(meshes: []^Rc_Poly_Mesh, nmeshes: i32, mesh: ^Rc_Po
 
     // Use first mesh as template
     template := meshes[0]
-    mesh.nverts = 0
     mesh.npolys = 0
     mesh.maxpolys = i32(max_polys)
     mesh.nvp = i32(max_nvp)
@@ -588,7 +582,7 @@ rc_merge_poly_meshes :: proc(meshes: []^Rc_Poly_Mesh, nmeshes: i32, mesh: ^Rc_Po
     mesh.max_edge_error = template.max_edge_error
 
     // Allocate arrays
-    mesh.verts = make([]u16, max_verts * 3)
+    mesh.verts = make([][3]u16, max_verts)
     mesh.polys = make([]u16, max_polys * max_nvp * 2)
     mesh.regs = make([]u16, max_polys)
     mesh.flags = make([]u16, max_polys)
@@ -606,12 +600,8 @@ rc_merge_poly_meshes :: proc(meshes: []^Rc_Poly_Mesh, nmeshes: i32, mesh: ^Rc_Po
 
         // Copy vertices
         vert_offset := next_vert
-        for j in 0..<src.nverts {
-            vi_src := j * 3
-            vi_dst := next_vert * 3
-            mesh.verts[vi_dst+0] = src.verts[vi_src+0]
-            mesh.verts[vi_dst+1] = src.verts[vi_src+1]
-            mesh.verts[vi_dst+2] = src.verts[vi_src+2]
+        for j in 0..<len(src.verts) {
+            mesh.verts[next_vert] = src.verts[j]
             next_vert += 1
         }
 
@@ -642,7 +632,6 @@ rc_merge_poly_meshes :: proc(meshes: []^Rc_Poly_Mesh, nmeshes: i32, mesh: ^Rc_Po
         }
     }
 
-    mesh.nverts = i32(next_vert)
     mesh.npolys = i32(next_poly)
 
     return true
@@ -960,7 +949,6 @@ merge_triangles_into_polygons :: proc(triangles: []i32, polys: ^[dynamic]Poly_Bu
 
             poly := Poly_Build{
                 verts = make([]i32, len(final_verts)),
-                nverts = i32(len(final_verts)),
                 area = area,
                 reg = reg,
             }
@@ -982,7 +970,6 @@ merge_triangles_into_polygons :: proc(triangles: []i32, polys: ^[dynamic]Poly_Bu
 
                 poly := Poly_Build{
                     verts = make([]i32, 3),
-                    nverts = 3,
                     area = area,
                     reg = reg,
                 }
@@ -1012,7 +999,6 @@ rc_build_poly_mesh :: proc(cset: ^Rc_Contour_Set, nvp: i32, pmesh: ^Rc_Poly_Mesh
 
 
     // Initialize mesh
-    pmesh.nverts = 0
     pmesh.npolys = 0
     pmesh.maxpolys = 0
     pmesh.nvp = nvp
@@ -1030,10 +1016,10 @@ rc_build_poly_mesh :: proc(cset: ^Rc_Contour_Set, nvp: i32, pmesh: ^Rc_Poly_Mesh
 
     for i in 0..<cset.nconts {
         cont := &cset.conts[i]
-        if cont.nverts < 3 do continue
-        max_vertices += int(cont.nverts)
-        max_polygons += int(cont.nverts) - 2  // Triangulation creates n-2 triangles
-        max_edges += int(cont.nverts) * 3     // Conservative estimate
+        if len(cont.verts) < 3 do continue
+        max_vertices += len(cont.verts)
+        max_polygons += len(cont.verts) - 2  // Triangulation creates n-2 triangles
+        max_edges += len(cont.verts) * 3     // Conservative estimate
     }
 
     if max_vertices == 0 do return false
@@ -1065,40 +1051,45 @@ rc_build_poly_mesh :: proc(cset: ^Rc_Contour_Set, nvp: i32, pmesh: ^Rc_Poly_Mesh
     // Process each contour
     for i in 0..<cset.nconts {
         cont := &cset.conts[i]
-        if cont.nverts < 3 {
+        if len(cont.verts) < 3 {
             continue
         }
 
-        // Convert contour vertices to mesh vertices and build vertex indices
-        contour_indices := make([]i32, cont.nverts)
-        defer delete(contour_indices)
+        // Build arrays for triangulation (matching C++ implementation)
+        // First, create vertices array just for this contour
+        contour_verts := make([][3]u16, len(cont.verts))
+        defer delete(contour_verts)
 
-        for j in 0..<cont.nverts {
-            vi := j * 4
-            x := u16(cont.verts[vi+0])
-            y := u16(cont.verts[vi+1])
-            z := u16(cont.verts[vi+2])
+        // Create sequential indices as expected by triangulate_polygon
+        indices := make([]i32, len(cont.verts))
+        defer delete(indices)
 
-            vert_idx := add_vertex(x, y, z, &verts, buckets)
-            contour_indices[j] = vert_idx
-        }
+        // Map from contour vertex index to global vertex index
+        vertex_map := make([]i32, len(cont.verts))
+        defer delete(vertex_map)
 
-        // Build vertex coordinate array for triangulation
-        vert_coords := make([]u16, len(verts) * 3)
-        defer delete(vert_coords)
+        for j in 0..<len(cont.verts) {
+            v := cont.verts[j]
+            // Add to global vertex list and store the mapping
+            vert_idx := add_vertex(u16(v.x), u16(v.y), u16(v.z), &verts, buckets)
+            vertex_map[j] = vert_idx
 
-        for v_idx in 0..<len(verts) {
-            coord_idx := v_idx * 3
-            vert_coords[coord_idx+0] = verts[v_idx].x
-            vert_coords[coord_idx+1] = verts[v_idx].y
-            vert_coords[coord_idx+2] = verts[v_idx].z
+            // Set up data for triangulation
+            contour_verts[j] = {u16(v.x), u16(v.y), u16(v.z)}
+            indices[j] = i32(j)  // Sequential indices as expected by triangulate
         }
 
         // Triangulate the contour
         clear(&triangles)
 
-        if !triangulate_polygon(vert_coords, contour_indices, cont.nverts, &triangles) {
+        if !triangulate_polygon(contour_verts, indices, &triangles) {
             continue
+        }
+
+        // Map triangulated indices back to global vertex indices
+        // The triangles contain indices into contour_verts, we need to map them to global vertex indices
+        for i in 0..<len(triangles) {
+            triangles[i] = vertex_map[triangles[i]]
         }
 
         // Group triangles into polygons with max nvp vertices
@@ -1109,7 +1100,6 @@ rc_build_poly_mesh :: proc(cset: ^Rc_Contour_Set, nvp: i32, pmesh: ^Rc_Poly_Mesh
             base := tri_idx * 3
             poly := Poly_Build{
                 verts = make([]i32, 3),
-                nverts = 3,
                 area = cont.area,
                 reg = cont.reg,
             }
@@ -1125,11 +1115,10 @@ rc_build_poly_mesh :: proc(cset: ^Rc_Contour_Set, nvp: i32, pmesh: ^Rc_Poly_Mesh
     }
 
     // Allocate final mesh arrays
-    pmesh.nverts = i32(len(verts))
     pmesh.npolys = i32(len(polys))
     pmesh.maxpolys = pmesh.npolys
 
-    pmesh.verts = make([]u16, pmesh.nverts * 3)
+    pmesh.verts = make([][3]u16, len(verts))
     pmesh.polys = make([]u16, pmesh.npolys * nvp * 2)
     pmesh.regs = make([]u16, pmesh.npolys)
     pmesh.flags = make([]u16, pmesh.npolys)
@@ -1139,10 +1128,7 @@ rc_build_poly_mesh :: proc(cset: ^Rc_Contour_Set, nvp: i32, pmesh: ^Rc_Poly_Mesh
     // Copy vertices to final mesh
     for i := 0; i < len(verts); i += 1 {
         vert := verts[i]
-        vi := i * 3
-        pmesh.verts[vi+0] = vert.x
-        pmesh.verts[vi+1] = vert.y
-        pmesh.verts[vi+2] = vert.z
+        pmesh.verts[i] = {vert.x, vert.y, vert.z}
     }
 
     // Copy polygons to final mesh
@@ -1151,7 +1137,7 @@ rc_build_poly_mesh :: proc(cset: ^Rc_Contour_Set, nvp: i32, pmesh: ^Rc_Poly_Mesh
         pi := i * int(nvp) * 2
 
         // Copy vertex indices
-        for j in 0..<poly.nverts {
+        for j in 0..<len(poly.verts) {
             pmesh.polys[pi + int(j)] = u16(poly.verts[j])
         }
 
@@ -1179,80 +1165,62 @@ rc_build_poly_mesh :: proc(cset: ^Rc_Contour_Set, nvp: i32, pmesh: ^Rc_Poly_Mesh
 
 // Weld nearby vertices together to reduce mesh complexity
 rc_weld_poly_mesh_vertices :: proc(pmesh: ^Rc_Poly_Mesh, weld_tolerance: f32) -> bool {
-    if pmesh == nil || pmesh.nverts == 0 do return false
-
-
-
-    old_vert_count := pmesh.nverts
+    if pmesh == nil || len(pmesh.verts) == 0 do return false
+    old_vert_count := len(pmesh.verts)
     tolerance_sq := weld_tolerance * weld_tolerance
-
     // Create vertex remapping table
-    remap := make([]i32, pmesh.nverts)
+    remap := make([]i32, len(pmesh.verts))
     defer delete(remap)
 
     // Initialize remap to identity
-    for i in 0..<pmesh.nverts {
-        remap[i] = i
+    for i in 0..<len(pmesh.verts) {
+        remap[i] = i32(i)
     }
 
     // Find vertices to weld
-    for i in 0..<pmesh.nverts {
-        if remap[i] != i do continue  // Already remapped
-
-        vi := i * 3
-        v1 := [3]f32{f32(pmesh.verts[vi+0]), f32(pmesh.verts[vi+1]), f32(pmesh.verts[vi+2])}
-
+    for i in 0..<len(pmesh.verts) {
+        if remap[i] != i32(i) do continue  // Already remapped
         // Check all subsequent vertices for welding candidates
-        for j in i+1..<pmesh.nverts {
-            if remap[j] != j do continue  // Already remapped
-
-            vj := j * 3
-            v2 := [3]f32{f32(pmesh.verts[vj+0]), f32(pmesh.verts[vj+1]), f32(pmesh.verts[vj+2])}
-
-            // Calculate distance squared using vector operations
-            dist_sq := linalg.length2(v2 - v1)
-
+        for j in i+1..<len(pmesh.verts) {
+            if remap[j] != i32(j) do continue  // Already remapped
+            delta := [3]f32{
+                f32(pmesh.verts[j].x - pmesh.verts[i].x),
+                f32(pmesh.verts[j].y - pmesh.verts[i].y),
+                f32(pmesh.verts[j].z - pmesh.verts[i].z),
+            }
+            dist_sq := linalg.length2(delta)
             if dist_sq <= tolerance_sq {
-                remap[j] = i  // Weld vertex j to vertex i
+                remap[j] = i32(i)  // Weld vertex j to vertex i
             }
         }
     }
 
     // Compact vertex array and build final remapping
-    new_verts := make([dynamic]u16, 0, pmesh.nverts * 3)
+    new_verts := make([dynamic][3]u16, 0, len(pmesh.verts))
     defer delete(new_verts)
 
-    final_remap := make([]i32, pmesh.nverts)
+    final_remap := make([]i32, len(pmesh.verts))
     defer delete(final_remap)
 
     new_vert_count := 0
-    for i in 0..<pmesh.nverts {
-        if remap[i] == i {
-            // This vertex is kept
+    for i in 0..<len(pmesh.verts) {
+        if remap[i] == i32(i) {
             final_remap[i] = i32(new_vert_count)
-
-            vi := i * 3
-            vertex := [3]u16{pmesh.verts[vi+0], pmesh.verts[vi+1], pmesh.verts[vi+2]}
-            append(&new_verts, ..vertex[:])
+            append(&new_verts, pmesh.verts[i])
             new_vert_count += 1
         } else {
             // This vertex is welded to another
             final_remap[i] = final_remap[remap[i]]
         }
     }
-
-
-
-    if new_vert_count == int(pmesh.nverts) {
+    if new_vert_count == len(pmesh.verts) {
         // No vertices were welded
         return true
     }
-
     // Update vertex array
     delete(pmesh.verts)
-    pmesh.verts = make([]u16, len(new_verts))
+    pmesh.verts = make([][3]u16, len(new_verts))
     copy(pmesh.verts, new_verts[:])
-    pmesh.nverts = i32(new_vert_count)
 
     // Update polygon vertex indices
     for i in 0..<pmesh.npolys {
@@ -1337,12 +1305,10 @@ rc_remove_degenerate_polys :: proc(pmesh: ^Rc_Poly_Mesh) -> bool {
 
 // Remove unused vertices from the mesh
 rc_remove_unused_vertices :: proc(pmesh: ^Rc_Poly_Mesh) -> bool {
-    if pmesh == nil || pmesh.nverts == 0 do return false
-
-
+    if pmesh == nil || len(pmesh.verts) == 0 do return false
 
     // Mark used vertices
-    used := make([]bool, pmesh.nverts)
+    used := make([]bool, len(pmesh.verts))
     defer delete(used)
 
     for i in 0..<pmesh.npolys {
@@ -1358,11 +1324,11 @@ rc_remove_unused_vertices :: proc(pmesh: ^Rc_Poly_Mesh) -> bool {
     }
 
     // Build vertex remapping
-    remap := make([]i32, pmesh.nverts)
+    remap := make([]i32, len(pmesh.verts))
     defer delete(remap)
 
     new_vert_count := 0
-    for i in 0..<pmesh.nverts {
+    for i in 0..<len(pmesh.verts) {
         if used[i] {
             remap[i] = i32(new_vert_count)
             new_vert_count += 1
@@ -1371,7 +1337,7 @@ rc_remove_unused_vertices :: proc(pmesh: ^Rc_Poly_Mesh) -> bool {
         }
     }
 
-    if new_vert_count == int(pmesh.nverts) {
+    if new_vert_count == len(pmesh.verts) {
         // All vertices are used
         return true
     }
@@ -1379,24 +1345,19 @@ rc_remove_unused_vertices :: proc(pmesh: ^Rc_Poly_Mesh) -> bool {
 
 
     // Compact vertex array
-    new_verts := make([]u16, new_vert_count * 3)
+    new_verts := make([][3]u16, new_vert_count)
     defer delete(new_verts)
 
-    for i in 0..<pmesh.nverts {
+    for i in 0..<len(pmesh.verts) {
         if used[i] {
-            old_vi := i * 3
-            new_vi := int(remap[i]) * 3
-            new_verts[new_vi+0] = pmesh.verts[old_vi+0]
-            new_verts[new_vi+1] = pmesh.verts[old_vi+1]
-            new_verts[new_vi+2] = pmesh.verts[old_vi+2]
+            new_verts[remap[i]] = pmesh.verts[i]
         }
     }
 
     // Update vertex array
     delete(pmesh.verts)
-    pmesh.verts = make([]u16, len(new_verts))
+    pmesh.verts = make([][3]u16, len(new_verts))
     copy(pmesh.verts, new_verts)
-    pmesh.nverts = i32(new_vert_count)
 
     // Update polygon vertex indices
     for i in 0..<pmesh.npolys {

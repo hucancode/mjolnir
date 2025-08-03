@@ -43,7 +43,6 @@ test_simple_detail_mesh_build :: proc(t: ^testing.T) {
     defer nav_recast.rc_free_poly_mesh_detail(dmesh)
     
     // Set up minimal polygon mesh (single triangle)
-    pmesh.nverts = 3
     pmesh.npolys = 1
     pmesh.nvp = 3
     pmesh.bmin = {0, 0, 0}
@@ -51,10 +50,10 @@ test_simple_detail_mesh_build :: proc(t: ^testing.T) {
     pmesh.cs = 0.1
     pmesh.ch = 0.1
     
-    pmesh.verts = make([]u16, 9)
-    pmesh.verts[0] = 0;  pmesh.verts[1] = 0;  pmesh.verts[2] = 0
-    pmesh.verts[3] = 10; pmesh.verts[4] = 0;  pmesh.verts[5] = 0
-    pmesh.verts[6] = 5;  pmesh.verts[7] = 0;  pmesh.verts[8] = 10
+    pmesh.verts = make([][3]u16, 3)
+    pmesh.verts[0] = {0, 0, 0}
+    pmesh.verts[1] = {10, 0, 0}
+    pmesh.verts[2] = {5, 0, 10}
     
     pmesh.polys = make([]u16, 6)  // 1 poly * 3 verts * 2 (verts + neighbors)
     pmesh.polys[0] = 0; pmesh.polys[1] = 1; pmesh.polys[2] = 2
@@ -98,7 +97,7 @@ test_simple_detail_mesh_build :: proc(t: ^testing.T) {
         testing.expect(t, valid, "Built detail mesh should be valid")
         
         log.infof("Built detail mesh: %d meshes, %d vertices, %d triangles", 
-                  dmesh.nmeshes, dmesh.nverts, dmesh.ntris)
+                  len(dmesh.meshes), len(dmesh.verts), len(dmesh.tris))
     }
     
     log.info("✓ Simple detail mesh build test passed")
