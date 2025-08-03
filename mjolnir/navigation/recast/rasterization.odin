@@ -1,9 +1,9 @@
 package navigation_recast
 
-
-import "core:math"
-import "core:math/linalg"
 import "core:log"
+import "core:math"
+import "core:fmt"
+import "core:math/linalg"
 import "base:runtime"
 
 // Axis enumeration for polygon division
@@ -17,36 +17,7 @@ Rc_Axis :: enum {
 // Allocates a new span in the heightfield.
 // Uses a memory pool and free list to minimize actual allocations.
 allocate_span :: proc(hf: ^Rc_Heightfield) -> ^Rc_Span {
-    // If necessary, allocate new page and update the freelist
-    if hf.freelist == nil {
-        // Create new page
-        // Allocate memory for the new pool
-        span_pool := new(Rc_Span_Pool)
-        if span_pool == nil {
-            return nil
-        }
-
-        // Add the pool into the list of pools
-        span_pool.next = hf.pools
-        hf.pools = span_pool
-
-        // Add new spans to the free list
-        free_list := hf.freelist
-        head := &span_pool.items[0]
-        it := &span_pool.items[RC_SPANS_PER_POOL - 1]
-
-        // Link all spans in the pool to the free list
-        for i := RC_SPANS_PER_POOL - 1; i >= 0; i -= 1 {
-            span_pool.items[i].next = free_list
-            free_list = &span_pool.items[i]
-        }
-        hf.freelist = free_list
-    }
-
-    // Pop item from the front of the free list
-    new_span := hf.freelist
-    hf.freelist = hf.freelist.next
-    return new_span
+    return alloc_span(hf)
 }
 
 // Releases the memory used by the span back to the heightfield
@@ -54,112 +25,153 @@ free_span :: proc(hf: ^Rc_Heightfield, span: ^Rc_Span) {
     if span == nil {
         return
     }
+    // Clear span data before adding to freelist
+    span.smin = 0
+    span.smax = 0
+    span.area = 0
     // Add the span to the front of the free list
     span.next = hf.freelist
     hf.freelist = span
 }
 
-// Adds a span to the heightfield. If the new span overlaps existing spans,
-// it will merge the new span with the existing ones.
-@(optimization_mode="none")
+// Span cache for recently accessed columns
+Span_Column_Cache :: struct {
+    column_index: i32,
+    first_span: ^Rc_Span,
+    span_count: i32,
+    last_access: u32,
+}
+
+// Add span cache to heightfield (would need to be added to Rc_Heightfield struct)
+// For now, we'll optimize the algorithm itself
+
+// Adds a span to the heightfield with optimized merging
 add_span :: proc(hf: ^Rc_Heightfield,
                  x, z: i32, smin, smax: u16, area_id: u8,
                  flag_merge_threshold: i32) -> bool {
-    // Input validation to prevent corruption
+    // Input validation with early exit
     if x < 0 || x >= hf.width || z < 0 || z >= hf.height {
-        log.errorf("add_span: Invalid coordinates (%d, %d) for heightfield size %dx%d", x, z, hf.width, hf.height)
+        when ODIN_DEBUG {
+            log.warnf("add_span: Invalid coordinates (%d, %d) for heightfield size %dx%d", x, z, hf.width, hf.height)
+        }
         return false
     }
 
     if smin > smax {
-        log.errorf("add_span: Invalid span range [%d, %d] - min must be <= max", smin, smax)
+        when ODIN_DEBUG {
+            log.warnf("add_span: Invalid span range [%d, %d] - min must be <= max", smin, smax)
+        }
         return false
     }
 
-    // Create the new span
-    new_span := allocate_span(hf)
-    if new_span == nil {
-        return false
+    column_index := x + z * hf.width
+    
+    // Fast path: empty column
+    if hf.spans[column_index] == nil {
+        new_span := allocate_span(hf)
+        if new_span == nil do return false
+        
+        new_span.smin = u32(smin)
+        new_span.smax = u32(smax)
+        new_span.area = u32(area_id)
+        new_span.next = nil
+        hf.spans[column_index] = new_span
+        return true
     }
+
+    // Optimized merge with single pass
+    // Pre-allocate span to avoid allocation in critical path
+    new_span := allocate_span(hf)
+    if new_span == nil do return false
+    
     new_span.smin = u32(smin)
     new_span.smax = u32(smax)
     new_span.area = u32(area_id)
     new_span.next = nil
 
-    column_index := x + z * hf.width
+    // Track merge state
+    merge_start: ^Rc_Span = nil
+    merge_end: ^Rc_Span = nil
+    insert_after: ^Rc_Span = nil
+    
     previous_span: ^Rc_Span = nil
     current_span := hf.spans[column_index]
-
-    // Safety counter to prevent infinite loops
-    max_iterations := 1000  // Should be more than enough for any reasonable span list
-    iterations := 0
-
-    // Insert the new span, possibly merging it with existing spans
-    // This algorithm must terminate because:
-    // 1. We only advance through the linked list (current_span = current_span.next or break)
-    // 2. When merging, we remove nodes, making the list shorter
-    // 3. We break when finding a span completely after our range
+    
+    // Single pass to find merge range and insertion point
     for current_span != nil {
-        iterations += 1
-        if iterations > max_iterations {
-            log.errorf("add_span: Infinite loop detected in span merging at (%d, %d). List may be corrupted.", x, z)
-            free_span(hf, new_span)  // Clean up the new span
-            return false
-        }
-
-        // Check if current span is completely after the new span
-        if current_span.smin > u32(smax) {
-            // Current span is completely after the new span, insert here
+        if current_span.smin > new_span.smax {
+            // Found insertion point
             break
         }
-
-        // Check if current span is completely before the new span
-        if current_span.smax < u32(smin) {
-            // Current span is completely before the new span. Keep going
+        
+        if current_span.smax < new_span.smin {
+            // No overlap yet, update insertion point
+            insert_after = current_span
             previous_span = current_span
             current_span = current_span.next
+            continue
+        }
+        
+        // Found overlap - mark merge range
+        if merge_start == nil {
+            merge_start = current_span
+            insert_after = previous_span
+        }
+        merge_end = current_span
+        
+        // Update merged span bounds
+        new_span.smin = min(new_span.smin, current_span.smin)
+        new_span.smax = max(new_span.smax, current_span.smax)
+        
+        // Merge area flags
+        // Check difference between the updated new_span.smax and current_span.smax
+        // This matches the C++ implementation: rcAbs((int)newSpan->smax - (int)currentSpan->smax)
+        if abs(i32(new_span.smax) - i32(current_span.smax)) <= flag_merge_threshold {
+            // If within threshold, take max area
+            new_span.area = max(new_span.area, current_span.area)
+        }
+        
+        // Don't update previous_span when merging
+        current_span = current_span.next
+    }
+    
+    // Apply merges if any
+    if merge_start != nil {
+        // Save the next pointer after merge_end before modifying the list
+        next_after_merge := merge_end.next
+        
+
+        
+        // Free merged spans - be careful not to free past merge_end
+        current := merge_start
+        for current != nil {
+            next := current.next
+            free_span(hf, current)
+            if current == merge_end {
+                break
+            }
+            current = next
+        }
+        
+        // Insert new merged span
+        new_span.next = next_after_merge
+        if insert_after != nil {
+            insert_after.next = new_span
         } else {
-            // The new span overlaps with an existing span. Merge them
-            // Expand new span to encompass current span
-            if current_span.smin < u32(smin) {
-                new_span.smin = current_span.smin
-            }
-            if current_span.smax > u32(smax) {
-                new_span.smax = current_span.smax
-            }
-
-            // Merge area flags based on threshold
-            if abs(i32(new_span.smax) - i32(current_span.smax)) <= flag_merge_threshold {
-                // Higher area ID numbers indicate higher resolution priority
-                new_span.area = max(new_span.area, current_span.area)
-            }
-
-            // Remove the current span since it's now merged with new_span
-            next_span := current_span.next
-            free_span(hf, current_span)
-            if previous_span != nil {
-                previous_span.next = next_span
-            } else {
-                hf.spans[column_index] = next_span
-            }
-            current_span = next_span
-
-            // Note: We continue with the expanded span bounds for further merging
-            // The new_span now contains the merged range
+            hf.spans[column_index] = new_span
+        }
+    } else {
+        // No merge - just insert new span
+        if insert_after != nil {
+            new_span.next = insert_after.next
+            insert_after.next = new_span
+        } else {
+            new_span.next = hf.spans[column_index]
+            hf.spans[column_index] = new_span
         }
     }
 
-    // Insert new span at the correct position
-    if previous_span != nil {
-        new_span.next = previous_span.next
-        previous_span.next = new_span
-    } else {
-        // This span should go at the head of the list
-        new_span.next = hf.spans[column_index]
-        hf.spans[column_index] = new_span
-    }
-
-    // Validate the resulting list structure (debug mode)
+    // Validate in debug mode
     when ODIN_DEBUG {
         validate_span_list(hf.spans[column_index], x, z)
     }
@@ -171,18 +183,32 @@ add_span :: proc(hf: ^Rc_Heightfield,
 validate_span_list :: proc(first_span: ^Rc_Span, x, z: i32) {
     if first_span == nil do return
 
-    span := first_span
-    prev_smax: u32 = 0
+    // Use Floyd's cycle detection algorithm
+    slow := first_span
+    fast := first_span
     count := 0
-    max_spans_per_column := 100  // Reasonable limit
-
-    for span != nil {
+    
+    for fast != nil && fast.next != nil {
+        slow = slow.next
+        fast = fast.next.next
         count += 1
-        if count > max_spans_per_column {
-            log.errorf("validate_span_list: Too many spans (%d) in column (%d, %d), possible cycle", count, x, z)
+        
+        if slow == fast {
+            log.errorf("validate_span_list: Cycle detected in span list at column (%d, %d) after %d steps", x, z, count)
+            panic("Span list has a cycle!")
+        }
+        
+        if count > 1000 {
+            log.errorf("validate_span_list: Too many spans in column (%d, %d)", x, z)
             break
         }
+    }
 
+    // Also validate ordering
+    span := first_span
+    prev_smax: u32 = 0
+    
+    for span != nil {
         smin := span.smin
         smax := span.smax
 
@@ -205,11 +231,7 @@ validate_span_list :: proc(first_span: ^Rc_Span, x, z: i32) {
 rc_add_span :: proc(hf: ^Rc_Heightfield,
                     x, z: i32, span_min, span_max: u16,
                     area_id: u8, flag_merge_threshold: i32) -> bool {
-    if !add_span(hf, x, z, span_min, span_max, area_id, flag_merge_threshold) {
-        log.error("rcAddSpan: Out of memory.")
-        return false
-    }
-    return true
+    return add_span(hf, x, z, span_min, span_max, area_id, flag_merge_threshold)
 }
 
 // Divides a convex polygon of max 12 vertices into two convex polygons
@@ -238,9 +260,13 @@ divide_poly :: proc(in_verts: []f32, in_verts_count: i32,
 
         if !same_side {
             s := in_vert_axis_delta[in_vert_b] / (in_vert_axis_delta[in_vert_b] - in_vert_axis_delta[in_vert_a])
-            out_verts1[poly1_vert * 3 + 0] = in_verts[in_vert_b * 3 + 0] + (in_verts[in_vert_a * 3 + 0] - in_verts[in_vert_b * 3 + 0]) * s
-            out_verts1[poly1_vert * 3 + 1] = in_verts[in_vert_b * 3 + 1] + (in_verts[in_vert_a * 3 + 1] - in_verts[in_vert_b * 3 + 1]) * s
-            out_verts1[poly1_vert * 3 + 2] = in_verts[in_vert_b * 3 + 2] + (in_verts[in_vert_a * 3 + 2] - in_verts[in_vert_b * 3 + 2]) * s
+            // Interpolate between vertices
+            vert_a := [3]f32{in_verts[in_vert_a * 3 + 0], in_verts[in_vert_a * 3 + 1], in_verts[in_vert_a * 3 + 2]}
+            vert_b := [3]f32{in_verts[in_vert_b * 3 + 0], in_verts[in_vert_b * 3 + 1], in_verts[in_vert_b * 3 + 2]}
+            interpolated := linalg.mix(vert_b, vert_a, s)
+            out_verts1[poly1_vert * 3 + 0] = interpolated.x
+            out_verts1[poly1_vert * 3 + 1] = interpolated.y
+            out_verts1[poly1_vert * 3 + 2] = interpolated.z
 
             // Copy to second polygon
             copy(out_verts2[poly2_vert * 3:poly2_vert * 3 + 3], out_verts1[poly1_vert * 3:poly1_vert * 3 + 3])
@@ -275,7 +301,7 @@ divide_poly :: proc(in_verts: []f32, in_verts_count: i32,
 
 // Rasterize a single triangle to the heightfield.
 // This code is extremely hot, so much care should be given to maintaining maximum perf here.
-@(optimization_mode="none")
+
 rasterize_tri :: proc(v0, v1, v2: [3]f32, area_id: u8,
                      hf: ^Rc_Heightfield,
                      hf_bb_min, hf_bb_max: [3]f32,
@@ -305,6 +331,17 @@ rasterize_tri :: proc(v0, v1, v2: [3]f32, area_id: u8,
     // Calculate the footprint of the triangle on the grid's z-axis
     z0 := i32((tri_bb_min.z - hf_bb_min.z) * inverse_cell_size)
     z1 := i32((tri_bb_max.z - hf_bb_min.z) * inverse_cell_size)
+
+    // Debug logging for first few triangles
+    when ODIN_DEBUG {
+        @(static) debug_count := 0
+        if debug_count < 10 {
+            log.infof("Triangle %d: BB=(%.2f,%.2f,%.2f)-(%.2f,%.2f,%.2f), Grid Z=%d-%d, area=%d", 
+                     debug_count, tri_bb_min.x, tri_bb_min.y, tri_bb_min.z,
+                     tri_bb_max.x, tri_bb_max.y, tri_bb_max.z, z0, z1, area_id)
+            debug_count += 1
+        }
+    }
 
     // use -1 rather than 0 to cut the polygon properly at the start of the tile
     z0 = math.clamp(z0, -1, h - 1)
@@ -355,6 +392,17 @@ rasterize_tri :: proc(v0, v1, v2: [3]f32, area_id: u8,
         }
         x0 := i32((min_x - hf_bb_min.x) * inverse_cell_size)
         x1 := i32((max_x - hf_bb_min.x) * inverse_cell_size)
+        
+        // Debug logging for X coordinates
+        when ODIN_DEBUG {
+            @(static) x_debug_count := 0
+            if x_debug_count < 10 && z >= 0 && z < h {
+                log.infof("  Row Z=%d: X range %.2f-%.2f -> Grid X=%d-%d (w=%d)", 
+                         z, min_x, max_x, x0, x1, w)
+                x_debug_count += 1
+            }
+        }
+        
         if x1 < 0 || x0 >= w {
             continue
         }
@@ -407,6 +455,16 @@ rasterize_tri :: proc(v0, v1, v2: [3]f32, area_id: u8,
             span_min_cell_index := u16(math.clamp(i32(math.floor(span_min * inverse_cell_height)), 0, RC_SPAN_MAX_HEIGHT))
             span_max_cell_index := u16(math.clamp(i32(math.ceil(span_max * inverse_cell_height)), i32(span_min_cell_index) + 1, RC_SPAN_MAX_HEIGHT))
 
+            // Debug logging for spans
+            when ODIN_DEBUG {
+                @(static) span_debug_count := 0
+                if span_debug_count < 20 {
+                    log.infof("    Adding span at (%d,%d): height %d-%d, area=%d", 
+                             x, z, span_min_cell_index, span_max_cell_index, area_id)
+                    span_debug_count += 1
+                }
+            }
+            
             if !add_span(hf, x, z, span_min_cell_index, span_max_cell_index, area_id, flag_merge_threshold) {
                 return false
             }
@@ -540,6 +598,28 @@ rc_rasterize_triangles_direct :: proc(verts: []f32, tri_area_ids: []u8, num_tris
     return true
 }
 
+// Clear unwalkable triangles (mark steep slopes as non-walkable)
+rc_clear_unwalkable_triangles :: proc(walkable_slope_angle: f32,
+                                     verts: []f32, nv: i32,
+                                     tris: []i32, num_tris: i32,
+                                     areas: []u8) {
+    walkable_thr := math.cos(walkable_slope_angle * math.PI / 180.0)
+    norm: [3]f32
+
+    for i in 0..<num_tris {
+        tri := tris[i*3:]
+        v0 := [3]f32{verts[tri[0]*3+0], verts[tri[0]*3+1], verts[tri[0]*3+2]}
+        v1 := [3]f32{verts[tri[1]*3+0], verts[tri[1]*3+1], verts[tri[1]*3+2]}
+        v2 := [3]f32{verts[tri[2]*3+0], verts[tri[2]*3+1], verts[tri[2]*3+2]}
+
+        calc_tri_normal(v0, v1, v2, &norm)
+        // Check if the face is NOT walkable (steep slope)
+        if norm.y <= walkable_thr {
+            areas[i] = RC_NULL_AREA
+        }
+    }
+}
+
 // Mark triangles by their walkable slope
 rc_mark_walkable_triangles :: proc(walkable_slope_angle: f32,
                                   verts: []f32, nv: i32,
@@ -569,6 +649,28 @@ calc_tri_normal :: proc(v0, v1, v2: [3]f32, norm: ^[3]f32) {
     e1 := v2 - v0
     norm^ = linalg.cross(e0, e1)
     norm^ = linalg.normalize(norm^)
+}
+
+// Clear unwalkable triangles with 16-bit indices
+rc_clear_unwalkable_triangles_u16 :: proc(walkable_slope_angle: f32,
+                                          verts: []f32, nv: i32,
+                                          tris: []u16, num_tris: i32,
+                                          areas: []u8) {
+    walkable_thr := math.cos(walkable_slope_angle * math.PI / 180.0)
+    norm: [3]f32
+
+    for i in 0..<num_tris {
+        tri := tris[i*3:]
+        v0 := [3]f32{verts[tri[0]*3+0], verts[tri[0]*3+1], verts[tri[0]*3+2]}
+        v1 := [3]f32{verts[tri[1]*3+0], verts[tri[1]*3+1], verts[tri[1]*3+2]}
+        v2 := [3]f32{verts[tri[2]*3+0], verts[tri[2]*3+1], verts[tri[2]*3+2]}
+
+        calc_tri_normal(v0, v1, v2, &norm)
+        // Check if the face is NOT walkable (steep slope)
+        if norm.y <= walkable_thr {
+            areas[i] = RC_NULL_AREA
+        }
+    }
 }
 
 // Mark walkable triangles with 16-bit indices

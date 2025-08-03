@@ -43,7 +43,7 @@ Contour_Work_Result :: struct {
     worker_id:        int,
 }
 
-// Context for mesh building (can be extended for parallel processing)
+// Context for mesh building with parallel support
 Mesh_Build_Context :: struct {
     contour_set:      ^Rc_Contour_Set,
     config:           Parallel_Mesh_Config,
@@ -53,6 +53,42 @@ Mesh_Build_Context :: struct {
     
     // Result collection
     results:          [dynamic]Contour_Work_Result,
+}
+
+// Parallel worker context
+Parallel_Worker_Context :: struct {
+    build_ctx:      ^Mesh_Build_Context,
+    work_index:     int,
+    results_mutex:  sync.Mutex,
+    work_mutex:     sync.Mutex,
+}
+
+// Worker thread procedure
+parallel_mesh_worker :: proc(data: rawptr) {
+    worker_ctx := cast(^Parallel_Worker_Context)data
+    worker_id := sync.current_thread_id()
+    
+    for {
+        // Get next work item (work stealing)
+        sync.mutex_lock(&worker_ctx.work_mutex)
+        if worker_ctx.work_index >= len(worker_ctx.build_ctx.work_queue) {
+            sync.mutex_unlock(&worker_ctx.work_mutex)
+            break
+        }
+        
+        work_item := worker_ctx.build_ctx.work_queue[worker_ctx.work_index]
+        work_item.worker_id = int(worker_id)
+        worker_ctx.work_index += 1
+        sync.mutex_unlock(&worker_ctx.work_mutex)
+        
+        // Process work item
+        result := process_contour_chunk(worker_ctx.build_ctx, work_item)
+        
+        // Store result
+        sync.mutex_lock(&worker_ctx.results_mutex)
+        append(&worker_ctx.build_ctx.results, result)
+        sync.mutex_unlock(&worker_ctx.results_mutex)
+    }
 }
 
 // Build polygon mesh using multiple threads
@@ -114,34 +150,53 @@ _build_mesh_parallel_impl :: proc(cset: ^Rc_Contour_Set, nvp: i32, pmesh: ^Rc_Po
     // Debug: Immediate check after work items creation
     log.infof("Work items created successfully, queue length: %d", len(build_ctx.work_queue))
     
-    // Process work items sequentially for now (can be extended to parallel later)
-    // This provides the infrastructure for parallel processing with immediate benefits
+    // Process work items in parallel using thread pool
     work_queue_len := len(build_ctx.work_queue)
-    log.infof("Starting to process %d work items", work_queue_len)
+    log.infof("Starting to process %d work items with %d workers", work_queue_len, num_workers)
     
-    // Additional safety check
     if work_queue_len == 0 {
         log.warn("No work items to process")
         return false
     }
     
-    for work_idx := 0; work_idx < work_queue_len; work_idx += 1 {
-        if work_idx >= len(build_ctx.work_queue) {
-            log.errorf("Work queue index out of bounds: %d >= %d", work_idx, len(build_ctx.work_queue))
-            break
+    // Parallel processing with work stealing
+    if num_workers > 1 {
+        // Create worker context
+        worker_ctx := Parallel_Worker_Context{
+            build_ctx = &build_ctx,
+            work_index = 0,
+            results_mutex = {},
+            work_mutex = {},
         }
         
-        work_item := build_ctx.work_queue[work_idx]
-        work_item.worker_id = 0
+        // Create thread pool
+        thread_pool := make([]^thread.Thread, num_workers)
+        defer delete(thread_pool)
         
-        log.infof("Processing work item %d/%d: contours %d-%d", 
-                  work_idx + 1, work_queue_len,
-                  work_item.contour_start, work_item.contour_start + work_item.contour_count - 1)
+        // Launch worker threads
+        for i in 0..<num_workers {
+            thread_pool[i] = thread.create_and_start_with_data(&worker_ctx, parallel_mesh_worker, context)
+        }
         
-        result := process_contour_chunk(&build_ctx, work_item)
-        append(&build_ctx.results, result)
-        
-        log.infof("Completed work item %d/%d", work_idx + 1, work_queue_len)
+        // Wait for completion
+        for i in 0..<num_workers {
+            thread.join(thread_pool[i])
+            thread.destroy(thread_pool[i])
+        }
+    } else {
+        // Fallback to sequential processing
+        for work_idx := 0; work_idx < work_queue_len; work_idx += 1 {
+            if work_idx >= len(build_ctx.work_queue) {
+                log.errorf("Work queue index out of bounds: %d >= %d", work_idx, len(build_ctx.work_queue))
+                break
+            }
+            
+            work_item := build_ctx.work_queue[work_idx]
+            work_item.worker_id = 0
+            
+            result := process_contour_chunk(&build_ctx, work_item)
+            append(&build_ctx.results, result)
+        }
     }
     
     log.infof("All worker threads completed, merging results from %d chunks", len(build_ctx.results))

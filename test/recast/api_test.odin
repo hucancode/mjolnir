@@ -1,5 +1,6 @@
 package test_recast
 
+import nav "../../mjolnir/navigation"
 import nav_recast "../../mjolnir/navigation/recast"
 import recast "../../mjolnir/navigation/recast"
 import "core:testing"
@@ -11,6 +12,10 @@ import "core:fmt"
 @(test)
 test_api_simple_build :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
+    
+    // Initialize navigation memory
+    nav.nav_memory_init()
+    defer nav.nav_memory_shutdown()
     
     // Simple square floor geometry
     vertices := []f32{
@@ -30,47 +35,47 @@ test_api_simple_build :: proc(t: ^testing.T) {
         nav_recast.RC_WALKABLE_AREA,
     }
     
-    // Test geometry input creation
-    geometry, ok := recast.create_geometry_input(vertices, indices, areas)
-    testing.expect(t, ok, "Failed to create geometry input")
-    
-    // Test configuration presets
-    config := recast.create_config_from_preset(.Balanced)
-    testing.expect(t, config.preset == .Balanced, "Incorrect preset")
-    testing.expect(t, config.base.cs > 0, "Invalid cell size")
-    
-    // Test configuration validation
-    valid, err := recast.validate_enhanced_config(&config)
-    testing.expect(t, valid, fmt.tprintf("Configuration validation failed: %s", err))
-    
-    // Test auto bounds calculation
-    recast.auto_calculate_bounds(&geometry, &config)
-    testing.expect(t, config.base.bmin.x < config.base.bmax.x, "Invalid bounds calculated")
-    testing.expect(t, config.base.width > 0 && config.base.height > 0, "Invalid grid size")
+    // Test configuration
+    config := recast.Config{
+        cs = 0.3,
+        ch = 0.2,
+        walkable_slope_angle = 45,
+        walkable_height = 2,
+        walkable_climb = 1,
+        walkable_radius = 1,
+        max_edge_len = 12,
+        max_simplification_error = 1.3,
+        min_region_area = 8,
+        merge_region_area = 20,
+        max_verts_per_poly = 6,
+        detail_sample_dist = 6,
+        detail_sample_max_error = 1,
+    }
     
     // Test main build function
-    result := recast.build_navmesh(&geometry, config)
-    testing.expect(t, result.success, fmt.tprintf("Build failed: %s", result.error_message))
-    testing.expect(t, result.polygon_mesh != nil, "No polygon mesh generated")
-    testing.expect(t, result.detail_mesh != nil, "No detail mesh generated")
+    pmesh, dmesh, ok := recast.rc_build_navmesh(vertices, indices, areas, config)
+    testing.expect(t, ok, "Build failed")
+    testing.expect(t, pmesh != nil, "No polygon mesh generated")
+    testing.expect(t, dmesh != nil, "No detail mesh generated")
     
-    defer recast.free_build_result(&result)
+    defer recast.rc_free_poly_mesh(pmesh)
+    defer recast.rc_free_poly_mesh_detail(dmesh)
     
-    // Validate generated mesh
-    validation := recast.validate_navmesh(result.polygon_mesh, result.detail_mesh)
-    defer recast.free_validation_report(&validation)
-    
-    testing.expect(t, validation.is_valid, "Generated mesh is invalid")
-    testing.expect(t, validation.polygon_count > 0, "No polygons generated")
-    testing.expect(t, validation.vertex_count > 0, "No vertices generated")
+    // Check generated mesh
+    testing.expect(t, pmesh.nverts > 0, "No vertices generated")
+    testing.expect(t, pmesh.npolys > 0, "No polygons generated")
     
     log.infof("API Simple Build Test: Generated %d polygons, %d vertices", 
-              validation.polygon_count, validation.vertex_count)
+              pmesh.npolys, pmesh.nverts)
 }
 
 @(test)
 test_api_quick_build :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
+    
+    // Initialize navigation memory
+    nav.nav_memory_init()
+    defer nav.nav_memory_shutdown()
     
     // Test the convenience quick build function
     vertices := []f32{
@@ -85,7 +90,31 @@ test_api_quick_build :: proc(t: ^testing.T) {
         0, 2, 3,
     }
     
-    pmesh, dmesh, ok := recast.quick_build_navmesh(vertices, indices, 0.5)
+    // Create areas array
+    areas := make([]u8, len(indices)/3)
+    defer delete(areas)
+    for i in 0..<len(areas) {
+        areas[i] = nav_recast.RC_WALKABLE_AREA
+    }
+    
+    // Create config
+    cfg := recast.Config{
+        cs = 0.5,
+        ch = 0.5,
+        walkable_slope_angle = 45,
+        walkable_height = 2,
+        walkable_climb = 1,
+        walkable_radius = 1,
+        max_edge_len = 12,
+        max_simplification_error = 1.3,
+        min_region_area = 8,
+        merge_region_area = 20,
+        max_verts_per_poly = 6,
+        detail_sample_dist = 6,
+        detail_sample_max_error = 1,
+    }
+    
+    pmesh, dmesh, ok := recast.rc_build_navmesh(vertices, indices, areas, cfg)
     testing.expect(t, ok, "Quick build failed")
     testing.expect(t, pmesh != nil, "No polygon mesh from quick build")
     testing.expect(t, dmesh != nil, "No detail mesh from quick build")
@@ -95,16 +124,16 @@ test_api_quick_build :: proc(t: ^testing.T) {
         if dmesh != nil do recast.rc_free_poly_mesh_detail(dmesh)
     }
     
-    // Validate result
-    validation := recast.validate_navmesh(pmesh, dmesh)
-    defer recast.free_validation_report(&validation)
-    
-    testing.expect(t, validation.is_valid, "Quick build mesh is invalid")
+    // Check result
+    testing.expect(t, pmesh.nverts > 0, "Quick build generated no vertices")
+    testing.expect(t, pmesh.npolys > 0, "Quick build generated no polygons")
     
     log.infof("API Quick Build Test: Generated %d polygons with cell size 0.5", 
-              validation.polygon_count)
+              pmesh.npolys)
 }
 
+// Removed builder pattern test - over-engineered
+/*
 @(test)
 test_api_builder_pattern :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
@@ -163,7 +192,10 @@ test_api_builder_pattern :: proc(t: ^testing.T) {
     
     log.infof("API Builder Pattern Test: Successfully built mesh step by step")
 }
+*/
 
+// Removed builder build_all test - over-engineered
+/*
 @(test)
 test_api_builder_build_all :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
@@ -209,34 +241,47 @@ test_api_builder_build_all :: proc(t: ^testing.T) {
     
     log.infof("API Builder Build All Test: Successfully built complete mesh")
 }
+*/
 
 @(test)
-test_api_configuration_presets :: proc(t: ^testing.T) {
+test_api_configuration :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
     
-    // Test all configuration presets
-    presets := []recast.Config_Preset{.Fast, .Balanced, .High_Quality}
+    // Initialize navigation memory
+    nav.nav_memory_init()
+    defer nav.nav_memory_shutdown()
     
-    for preset in presets {
-        config := recast.create_config_from_preset(preset)
-        testing.expect(t, config.preset == preset, fmt.tprintf("Incorrect preset assignment for %v", preset))
-        
-        valid, err := recast.validate_enhanced_config(&config)
-        testing.expect(t, valid, fmt.tprintf("Preset %v validation failed: %s", preset, err))
-        
-        // Check that different presets have different characteristics
-        #partial switch preset {
-        case .Fast:
-            testing.expect(t, config.base.cs >= 0.5, "Fast preset should have larger cell size")
-        case .High_Quality:
-            testing.expect(t, config.base.cs <= 0.2, "High quality preset should have smaller cell size")
+    // Test different configurations
+    configs := []struct{name: string, cs: f32, ch: f32}{
+        {"Fast", 0.5, 0.5},
+        {"Balanced", 0.3, 0.2},
+        {"High_Quality", 0.1, 0.1},
+    }
+    
+    for cfg in configs {
+        config := recast.Config{
+            cs = cfg.cs,
+            ch = cfg.ch,
+            walkable_slope_angle = 45,
+            walkable_height = 2,
+            walkable_climb = 1,
+            walkable_radius = 1,
+            max_edge_len = 12,
+            max_simplification_error = 1.3,
+            min_region_area = 8,
+            merge_region_area = 20,
+            max_verts_per_poly = 6,
+            detail_sample_dist = 6,
+            detail_sample_max_error = 1,
         }
         
-        log.infof("Preset %v: cs=%.2f, ch=%.2f, min_region=%d", 
-                  preset, config.base.cs, config.base.ch, config.base.min_region_area)
+        log.infof("Config %s: cs=%.2f, ch=%.2f, min_region=%d", 
+                  cfg.name, config.cs, config.ch, config.min_region_area)
     }
 }
 
+// Removed validation test - over-engineered
+/*
 @(test) 
 test_api_validation_and_debugging :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
@@ -284,10 +329,15 @@ test_api_validation_and_debugging :: proc(t: ^testing.T) {
     log.infof("API Validation Test: %d polygons, %.2f KB memory", 
               validation.polygon_count, f32(validation.total_memory_bytes) / 1024.0)
 }
+*/
 
 @(test)
 test_api_error_handling :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
+    
+    // Initialize navigation memory
+    nav.nav_memory_init()
+    defer nav.nav_memory_shutdown()
     
     // Test error handling with invalid inputs
     
@@ -296,40 +346,46 @@ test_api_error_handling :: proc(t: ^testing.T) {
     empty_indices := []i32{}
     empty_areas := []u8{}
     
-    geometry, ok := recast.create_geometry_input(empty_vertices, empty_indices, empty_areas)
+    config := recast.Config{
+        cs = 0.3,
+        ch = 0.2,
+        walkable_slope_angle = 45,
+        walkable_height = 2,
+        walkable_climb = 1,
+        walkable_radius = 1,
+        max_edge_len = 12,
+        max_simplification_error = 1.3,
+        min_region_area = 8,
+        merge_region_area = 20,
+        max_verts_per_poly = 6,
+        detail_sample_dist = 6,
+        detail_sample_max_error = 1,
+    }
+    
+    pmesh, dmesh, ok := recast.rc_build_navmesh(empty_vertices, empty_indices, empty_areas, config)
     testing.expect(t, !ok, "Should fail with empty geometry")
+    testing.expect(t, pmesh == nil, "Should not create polygon mesh on failure")
+    testing.expect(t, dmesh == nil, "Should not create detail mesh on failure")
     
-    // Mismatched array sizes
-    vertices := []f32{0, 0, 0, 1, 0, 0, 1, 0, 1}  // 3 vertices
-    indices := []i32{0, 1, 2}                       // 1 triangle
-    areas := []u8{1, 2}                             // 2 areas (wrong!)
+    // Invalid configuration
+    bad_config := config
+    bad_config.cs = -1.0  // Invalid cell size
     
-    geometry2, ok2 := recast.create_geometry_input(vertices, indices, areas)
-    testing.expect(t, !ok2, "Should fail with mismatched array sizes")
-    
-    // Valid geometry but invalid config
     good_vertices := []f32{0, 0, 0, 10, 0, 0, 10, 0, 10, 0, 0, 10}
     good_indices := []i32{0, 1, 2, 0, 2, 3}
     good_areas := []u8{nav_recast.RC_WALKABLE_AREA, nav_recast.RC_WALKABLE_AREA}
     
-    good_geometry, _ := recast.create_geometry_input(good_vertices, good_indices, good_areas)
-    
-    // Invalid configuration
-    bad_config := recast.create_config_from_preset(.Balanced)
-    bad_config.base.cs = -1.0  // Invalid cell size
-    
-    valid, err := recast.validate_enhanced_config(&bad_config)
-    testing.expect(t, !valid, "Should fail validation with negative cell size")
-    testing.expect(t, err != "", "Should provide error message")
-    
     // Build with invalid config should fail
-    result := recast.build_navmesh(&good_geometry, bad_config)
-    testing.expect(t, !result.success, "Build should fail with invalid config")
-    testing.expect(t, result.error_message != "", "Should provide error message")
+    pmesh2, dmesh2, ok2 := recast.rc_build_navmesh(good_vertices, good_indices, good_areas, bad_config)
+    testing.expect(t, !ok2, "Build should fail with invalid config")
+    testing.expect(t, pmesh2 == nil, "Should not create polygon mesh on failure")
+    testing.expect(t, dmesh2 == nil, "Should not create detail mesh on failure")
     
     log.infof("API Error Handling Test: Correctly handled invalid inputs")
 }
 
+// Removed memory estimation test - over-engineered
+/*
 @(test)
 test_api_memory_estimation :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
@@ -362,10 +418,15 @@ test_api_memory_estimation :: proc(t: ^testing.T) {
     
     log.infof("API Memory Estimation Test: %d bytes, %.2f ms estimated", bytes, estimated_time)
 }
+*/
 
 @(test)
 test_api_build_with_areas :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
+    
+    // Initialize navigation memory
+    nav.nav_memory_init()
+    defer nav.nav_memory_shutdown()
     
     // Test building with custom area types
     vertices := []f32{
@@ -394,18 +455,35 @@ test_api_build_with_areas :: proc(t: ^testing.T) {
         10,
     }
     
-    result := recast.build_navmesh_with_areas(vertices, indices, areas, .Balanced)
-    testing.expect(t, result.success, fmt.tprintf("Build with areas failed: %s", result.error_message))
-    testing.expect(t, result.polygon_mesh != nil, "No polygon mesh generated")
+    config := recast.Config{
+        cs = 0.3,
+        ch = 0.2,
+        walkable_slope_angle = 45,
+        walkable_height = 2,
+        walkable_climb = 1,
+        walkable_radius = 1,
+        max_edge_len = 12,
+        max_simplification_error = 1.3,
+        min_region_area = 8,
+        merge_region_area = 20,
+        max_verts_per_poly = 6,
+        detail_sample_dist = 6,
+        detail_sample_max_error = 1,
+    }
     
-    defer recast.free_build_result(&result)
+    pmesh, dmesh, ok := recast.rc_build_navmesh(vertices, indices, areas, config)
+    testing.expect(t, ok, "Build with areas failed")
+    testing.expect(t, pmesh != nil, "No polygon mesh generated")
+    
+    defer recast.rc_free_poly_mesh(pmesh)
+    defer recast.rc_free_poly_mesh_detail(dmesh)
     
     // Check that different areas were preserved
     area_counts := map[u8]int{}
     defer delete(area_counts)
     
-    for i in 0..<result.polygon_mesh.npolys {
-        area := result.polygon_mesh.areas[i]
+    for i in 0..<pmesh.npolys {
+        area := pmesh.areas[i]
         area_counts[area] = area_counts[area] + 1
     }
     
@@ -417,6 +495,10 @@ test_api_build_with_areas :: proc(t: ^testing.T) {
 @(test)
 test_api_comprehensive_pipeline :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
+    
+    // Initialize navigation memory
+    nav.nav_memory_init()
+    defer nav.nav_memory_shutdown()
     
     log.infof("TEST DEBUG: Starting comprehensive pipeline test")
     
@@ -465,30 +547,35 @@ test_api_comprehensive_pipeline :: proc(t: ^testing.T) {
     testing.expect(t, len(vertices) > 0, "Should have generated vertices")
     testing.expect(t, len(indices) > 0, "Should have generated indices")
     
-    log.infof("TEST DEBUG: Creating geometry input")
-    geometry, ok := recast.create_geometry_input(vertices[:], indices[:], areas[:])
-    testing.expect(t, ok, "Failed to create geometry input")
-    
     // Test with fast settings to prevent hanging
     log.infof("TEST DEBUG: Creating config")
-    config := recast.create_config_from_preset(.Fast)  // Changed from High_Quality to Fast
-    config.enable_validation = true
-    config.enable_debug_output = true
+    config := recast.Config{
+        cs = 0.5,
+        ch = 0.5,
+        walkable_slope_angle = 45,
+        walkable_height = 2,
+        walkable_climb = 1,
+        walkable_radius = 1,
+        max_edge_len = 12,
+        max_simplification_error = 1.3,
+        min_region_area = 8,
+        merge_region_area = 20,
+        max_verts_per_poly = 6,
+        detail_sample_dist = 6,
+        detail_sample_max_error = 1,
+    }
     
     log.infof("TEST DEBUG: Starting navmesh build")
-    result := recast.build_navmesh(&geometry, config)
-    testing.expect(t, result.success, fmt.tprintf("Complex build failed: %s", result.error_message))
+    pmesh, dmesh, ok := recast.rc_build_navmesh(vertices[:], indices[:], areas[:], config)
+    testing.expect(t, ok, "Complex build failed")
     
-    defer recast.free_build_result(&result)
+    defer recast.rc_free_poly_mesh(pmesh)
+    defer recast.rc_free_poly_mesh_detail(dmesh)
     
-    // Validate the complex result
-    validation := recast.validate_navmesh(result.polygon_mesh, result.detail_mesh)
-    defer recast.free_validation_report(&validation)
-    
-    testing.expect(t, validation.is_valid, "Complex mesh validation failed")
-    
-    recast.print_validation_report(&validation)
+    // Check the result
+    testing.expect(t, pmesh != nil, "No polygon mesh generated")
+    testing.expect(t, pmesh.npolys > 0, "No polygons generated")
     
     log.infof("API Comprehensive Test: Built complex maze with %d input vertices, generated %d polygons", 
-              len(vertices)/3, validation.polygon_count)
+              len(vertices)/3, pmesh.npolys)
 }

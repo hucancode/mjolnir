@@ -159,32 +159,29 @@ dt_local_boundary_get_closest_point :: proc(boundary: ^Dt_Local_Boundary, pos: [
 // Distance from point to line segment in 2D (XZ plane)
 dt_distance_point_to_segment_2d :: proc(point, seg_start, seg_end: [3]f32) -> f32 {
     // Use XZ plane for 2D calculations
-    px, pz := point[0], point[2]
-    ax, az := seg_start[0], seg_start[2] 
-    bx, bz := seg_end[0], seg_end[2]
+    p := point.xz
+    a := seg_start.xz
+    b := seg_end.xz
     
-    dx := bx - ax
-    dz := bz - az
+    seg := b - a
+    seg_len_sq := linalg.length2(seg)
     
-    if dx*dx + dz*dz > 1e-6 {
-        t := ((px - ax) * dx + (pz - az) * dz) / (dx*dx + dz*dz)
+    diff: [2]f32
+    if seg_len_sq > 1e-6 {
+        t := linalg.dot(p - a, seg) / seg_len_sq
         
         if t > 1.0 {
-            dx = px - bx
-            dz = pz - bz
+            diff = p - b
         } else if t > 0.0 {
-            dx = px - (ax + t*dx)
-            dz = pz - (az + t*dz)
+            diff = p - (a + t*seg)
         } else {
-            dx = px - ax
-            dz = pz - az
+            diff = p - a
         }
     } else {
-        dx = px - ax
-        dz = pz - az
+        diff = p - a
     }
     
-    return math.sqrt(dx*dx + dz*dz)
+    return linalg.length(diff)
 }
 
 // Find closest point on line segment in 2D (XZ plane)
@@ -201,12 +198,7 @@ dt_closest_point_on_segment_2d :: proc(point, seg_start, seg_end: [3]f32) -> [3]
         t := ((px - ax) * dx + (pz - az) * dz) / (dx*dx + dz*dz)
         t = nav_recast.clamp(t, 0.0, 1.0)
         
-        result := [3]f32{
-            ax + t * dx,
-            seg_start[1] + t * (seg_end[1] - seg_start[1]), // Interpolate Y as well
-            az + t * dz,
-        }
-        return result
+        return linalg.mix(seg_start, seg_end, t)
     }
     
     return seg_start
@@ -272,32 +264,28 @@ dt_local_boundary_project_point :: proc(boundary: ^Dt_Local_Boundary, pos: [3]f3
             closest := dt_closest_point_on_segment_2d(result, seg_start, seg_end)
             
             // Calculate direction away from boundary
-            dx := result[0] - closest[0]
-            dz := result[2] - closest[2]
-            d := math.sqrt(dx*dx + dz*dz)
+            dir := result.xz - closest.xz
+            d := linalg.length(dir)
             
             if d > 1e-6 {
                 // Normalize and scale to required distance
-                scale := radius / d
-                result[0] = closest[0] + dx * scale
-                result[2] = closest[2] + dz * scale
+                dir_scaled := linalg.normalize(dir) * radius
+                result[0] = closest[0] + dir_scaled.x
+                result[2] = closest[2] + dir_scaled.y
             } else {
                 // Point is exactly on boundary - move it slightly away
                 // Use segment normal
-                seg_dx := seg_end[0] - seg_start[0]
-                seg_dz := seg_end[2] - seg_start[2]
+                seg_dir := seg_end.xz - seg_start.xz
                 
                 // Perpendicular vector (rotate 90 degrees)
-                norm_x := -seg_dz
-                norm_z := seg_dx
-                norm_len := math.sqrt(norm_x*norm_x + norm_z*norm_z)
+                norm := [2]f32{-seg_dir.y, seg_dir.x}
+                norm_len := linalg.length(norm)
                 
                 if norm_len > 1e-6 {
-                    norm_x /= norm_len
-                    norm_z /= norm_len
+                    norm_scaled := linalg.normalize(norm) * radius
                     
-                    result[0] = closest[0] + norm_x * radius
-                    result[2] = closest[2] + norm_z * radius
+                    result[0] = closest[0] + norm_scaled.x
+                    result[2] = closest[2] + norm_scaled.y
                 }
             }
         }

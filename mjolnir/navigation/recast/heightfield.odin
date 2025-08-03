@@ -146,53 +146,36 @@ init_heightfield :: proc(
 
 // Allocate a new span from the pool
 alloc_span :: proc(hf: ^Rc_Heightfield) -> ^Rc_Span {
-  // If there's a span in the freelist, use it
-  if hf.freelist != nil {
-    span := hf.freelist
-    hf.freelist = span.next
-    return span
-  }
-
-  // Otherwise, allocate from the pool
-  // If all pools are exhausted, allocate a new pool
-  if hf.pools == nil || all_spans_used(hf.pools) {
+  // If necessary, allocate new page and update the freelist
+  if hf.freelist == nil || hf.freelist.next == nil {
+    // Create new page
+    // Allocate memory for the new pool
     pool := new(Rc_Span_Pool)
     if pool == nil do return nil
 
+    // Add the pool into the list of pools
     pool.next = hf.pools
     hf.pools = pool
-
-    // Add all spans from the new pool to the freelist
-    // Link them in reverse order so we can iterate efficiently
+    
+    // Add new spans to the free list
+    freelist := hf.freelist
+    head := &pool.items[0]
+    it := &pool.items[RC_SPANS_PER_POOL - 1]
+    
+    // Link all items in reverse order
     for i := RC_SPANS_PER_POOL - 1; i >= 0; i -= 1 {
-      pool.items[i].next = hf.freelist
-      hf.freelist = &pool.items[i]
+      pool.items[i].next = freelist
+      freelist = &pool.items[i]
     }
+    hf.freelist = freelist
   }
 
-  // Now use the freelist (which should have spans from the new pool)
-  if hf.freelist != nil {
-    span := hf.freelist
-    hf.freelist = span.next
-    return span
-  }
-
-  // Should not reach here if pool allocation worked correctly
-  return nil
-}
-
-// Helper to check if all spans in pools are used
-all_spans_used :: proc(pools: ^Rc_Span_Pool) -> bool {
-  // Walk through all pools and check if any have available spans
-  for current_pool := pools; current_pool != nil; current_pool = current_pool.next {
-    // For simplicity, we check if there are spans that could be available
-    if current_pool != nil {
-      // If pools exist but we need proper tracking, return false for now
-      // This will trigger new pool allocation when needed
-      return true
-    }
-  }
-  return true
+  // Pop item from the front of the free list
+  new_span := hf.freelist
+  hf.freelist = hf.freelist.next
+  // Clear the next pointer to avoid stale references
+  new_span.next = nil
+  return new_span
 }
 
 // Create heightfield

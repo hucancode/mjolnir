@@ -8,6 +8,23 @@ import "core:strconv"
 
 // Debug mesh export utilities for Recast navigation data
 
+// Debug visualization structures
+Heightfield_Debug_Vertex :: struct {
+    position: [3]f32,
+    color: [4]f32,
+}
+
+Heightfield_Debug_Mesh :: struct {
+    vertices: [dynamic]Heightfield_Debug_Vertex,
+    indices: [dynamic]u32,
+}
+
+// Debug colors
+DEBUG_COLOR_WALKABLE :: [4]f32{0.0, 1.0, 0.0, 0.5}      // Green for walkable
+DEBUG_COLOR_OBSTACLE :: [4]f32{1.0, 0.0, 0.0, 0.5}      // Red for obstacles
+DEBUG_COLOR_NULL :: [4]f32{0.5, 0.5, 0.5, 0.3}          // Gray for null areas
+DEBUG_COLOR_EDGE :: [4]f32{1.0, 1.0, 0.0, 0.8}          // Yellow for connection indicators
+
 // Export polygon mesh to OBJ format
 rc_dump_poly_mesh_to_obj :: proc(pmesh: ^Rc_Poly_Mesh, filepath: string) -> bool {
     if pmesh == nil || pmesh.nverts == 0 || pmesh.npolys == 0 do return false
@@ -462,5 +479,288 @@ rc_dump_statistics :: proc(chf: ^Rc_Compact_Heightfield, cset: ^Rc_Contour_Set,
                     total_bytes, f32(total_bytes) / 1024.0))
 
     log.infof("Successfully exported navigation statistics to: %s", filepath)
+    return true
+}
+
+// ========================================
+// VISUALIZATION FUNCTIONS
+// ========================================
+
+// Generate visual debug mesh for heightfield
+generate_heightfield_debug_mesh :: proc(hf: ^Rc_Heightfield) -> Heightfield_Debug_Mesh {
+    mesh := Heightfield_Debug_Mesh{}
+    
+    if hf == nil {
+        log.error("Heightfield is nil in generate_heightfield_debug_mesh")
+        return mesh
+    }
+    
+    log.infof("Generating heightfield debug mesh: %dx%d grid, bounds: [%.2f,%.2f,%.2f] to [%.2f,%.2f,%.2f]", 
+              hf.width, hf.height, hf.bmin.x, hf.bmin.y, hf.bmin.z, hf.bmax.x, hf.bmax.y, hf.bmax.z)
+    
+    // Reserve space for vertices and indices
+    reserve(&mesh.vertices, hf.width * hf.height * 10) // Estimate
+    reserve(&mesh.indices, hf.width * hf.height * 20)   // Estimate
+    
+    // For each cell in the heightfield
+    span_count := 0
+    for z in 0..<hf.height {
+        for x in 0..<hf.width {
+            // Get cell world position
+            world_x := hf.bmin.x + f32(x) * hf.cs
+            world_z := hf.bmin.z + f32(z) * hf.cs
+            
+            // Traverse all spans in this column
+            span := hf.spans[x + z * hf.width]
+            for span != nil {
+                span_count += 1
+                // Calculate span bounds
+                y_min := hf.bmin.y + f32(span.smin) * hf.ch
+                y_max := hf.bmin.y + f32(span.smax) * hf.ch
+                
+                // Determine color based on area
+                color: [4]f32
+                if span.area == u32(RC_NULL_AREA) {
+                    color = DEBUG_COLOR_OBSTACLE  // NULL areas are obstacles in Recast
+                } else if span.area == u32(RC_WALKABLE_AREA) {
+                    color = DEBUG_COLOR_WALKABLE
+                } else {
+                    color = DEBUG_COLOR_NULL // Other area types
+                }
+                
+                // Debug first few spans
+                if span_count < 5 {
+                    log.infof("Span %d: pos=[%d,%d], y=[%d-%d], area=%d", 
+                              span_count, x, z, span.smin, span.smax, span.area)
+                }
+                
+                // Add box for this span
+                add_debug_box(&mesh, 
+                    {world_x, y_min, world_z},
+                    {world_x + hf.cs, y_max, world_z + hf.cs},
+                    color)
+                
+                span = span.next
+            }
+        }
+    }
+    
+    log.infof("Generated heightfield debug mesh: %d spans processed, %d vertices, %d indices", 
+              span_count, len(mesh.vertices), len(mesh.indices))
+    
+    return mesh
+}
+
+// Generate visual debug mesh for compact heightfield
+generate_compact_heightfield_debug_mesh :: proc(chf: ^Rc_Compact_Heightfield) -> Heightfield_Debug_Mesh {
+    mesh := Heightfield_Debug_Mesh{}
+    
+    if chf == nil do return mesh
+    
+    log.infof("Generating compact heightfield debug mesh: %dx%d grid, %d spans", 
+              chf.width, chf.height, chf.span_count)
+    
+    // Reserve space
+    reserve(&mesh.vertices, int(chf.span_count) * 8)
+    reserve(&mesh.indices, int(chf.span_count) * 36)
+    
+    // For each cell
+    for z in 0..<chf.height {
+        for x in 0..<chf.width {
+            cell := &chf.cells[x + z * chf.width]
+            
+            // Skip empty cells
+            if cell.count == 0 do continue
+            
+            // Get cell world position
+            world_x := chf.bmin.x + f32(x) * chf.cs
+            world_z := chf.bmin.z + f32(z) * chf.cs
+            
+            // Process each span in this cell
+            for i in 0..<cell.count {
+                span_idx := int(cell.index) + int(i)
+                span := &chf.spans[span_idx]
+                area := chf.areas[span_idx]
+                
+                // Calculate span bounds
+                y_min := chf.bmin.y + f32(span.y) * chf.ch
+                y_max := y_min + f32(span.h) * chf.ch
+                
+                // Determine color based on area
+                color: [4]f32
+                if area == RC_NULL_AREA {
+                    color = DEBUG_COLOR_OBSTACLE  // NULL areas are obstacles in Recast
+                } else if area == RC_WALKABLE_AREA {
+                    color = DEBUG_COLOR_WALKABLE
+                } else {
+                    color = {1.0, 0.5, 0.0, 0.5}  // Orange for other area types
+                }
+                
+                // Add box for this span
+                add_debug_box(&mesh,
+                    {world_x, y_min, world_z},
+                    {world_x + chf.cs, y_max, world_z + chf.cs},
+                    color)
+                
+                // Add edge indicators for connections
+                for dir in 0..<4 {
+                    if rc_get_con(span, dir) != RC_NOT_CONNECTED {
+                        add_connection_indicator(&mesh,
+                            {world_x + chf.cs * 0.5, y_max, world_z + chf.cs * 0.5},
+                            dir, chf.cs * 0.3)
+                    }
+                }
+            }
+        }
+    }
+    
+    log.infof("Generated compact heightfield debug mesh: %d vertices, %d indices",
+              len(mesh.vertices), len(mesh.indices))
+    
+    return mesh
+}
+
+// Helper to add a box to the debug mesh
+add_debug_box :: proc(mesh: ^Heightfield_Debug_Mesh, min, max: [3]f32, color: [4]f32) {
+    base_idx := u32(len(mesh.vertices))
+    
+    // Add 8 vertices for the box
+    vertices := [][3]f32{
+        {min.x, min.y, min.z}, // 0
+        {max.x, min.y, min.z}, // 1
+        {max.x, min.y, max.z}, // 2
+        {min.x, min.y, max.z}, // 3
+        {min.x, max.y, min.z}, // 4
+        {max.x, max.y, min.z}, // 5
+        {max.x, max.y, max.z}, // 6
+        {min.x, max.y, max.z}, // 7
+    }
+    
+    for v in vertices {
+        append(&mesh.vertices, Heightfield_Debug_Vertex{
+            position = v,
+            color = color,
+        })
+    }
+    
+    // Add indices for 12 triangles (2 per face)
+    indices := []u32{
+        // Bottom face
+        0, 2, 1,  0, 3, 2,
+        // Top face
+        4, 5, 6,  4, 6, 7,
+        // Front face
+        0, 1, 5,  0, 5, 4,
+        // Back face
+        2, 3, 7,  2, 7, 6,
+        // Left face
+        0, 4, 7,  0, 7, 3,
+        // Right face
+        1, 2, 6,  1, 6, 5,
+    }
+    
+    for idx in indices {
+        append(&mesh.indices, base_idx + idx)
+    }
+}
+
+// Helper to add connection indicator
+add_connection_indicator :: proc(mesh: ^Heightfield_Debug_Mesh, center: [3]f32, dir: int, size: f32) {
+    // Get direction offset
+    dx, dz: f32
+    switch dir {
+    case 0: dx = -1; dz = 0  // -X
+    case 1: dx = 0; dz = -1  // -Z
+    case 2: dx = 1; dz = 0   // +X
+    case 3: dx = 0; dz = 1   // +Z
+    }
+    
+    // Create a small pyramid pointing in the connection direction
+    base_idx := u32(len(mesh.vertices))
+    
+    tip := center + {dx * size, 0, dz * size}
+    base1 := center + {-dz * size * 0.3, -size * 0.2, dx * size * 0.3}
+    base2 := center + {dz * size * 0.3, -size * 0.2, -dx * size * 0.3}
+    base3 := center + {0, -size * 0.2, 0}
+    
+    // Add vertices
+    append(&mesh.vertices, Heightfield_Debug_Vertex{position = tip, color = DEBUG_COLOR_EDGE})
+    append(&mesh.vertices, Heightfield_Debug_Vertex{position = base1, color = DEBUG_COLOR_EDGE})
+    append(&mesh.vertices, Heightfield_Debug_Vertex{position = base2, color = DEBUG_COLOR_EDGE})
+    append(&mesh.vertices, Heightfield_Debug_Vertex{position = base3, color = DEBUG_COLOR_EDGE})
+    
+    // Add triangular faces
+    append(&mesh.indices, base_idx + 0, base_idx + 1, base_idx + 2)
+    append(&mesh.indices, base_idx + 0, base_idx + 2, base_idx + 3)
+    append(&mesh.indices, base_idx + 0, base_idx + 3, base_idx + 1)
+    append(&mesh.indices, base_idx + 1, base_idx + 3, base_idx + 2)
+}
+
+// Free debug mesh resources
+free_heightfield_debug_mesh :: proc(mesh: ^Heightfield_Debug_Mesh) {
+    delete(mesh.vertices)
+    delete(mesh.indices)
+}
+
+// Export heightfield debug mesh to OBJ format for inspection
+export_heightfield_debug_mesh_to_obj :: proc(mesh: ^Heightfield_Debug_Mesh, filepath: string) -> bool {
+    if mesh == nil || len(mesh.vertices) == 0 || len(mesh.indices) == 0 do return false
+    
+    log.infof("Exporting heightfield debug mesh to OBJ: %s", filepath)
+    
+    file, open_err := os.open(filepath, os.O_WRONLY | os.O_CREATE | os.O_TRUNC, 0o644)
+    if open_err != os.ERROR_NONE {
+        log.errorf("Failed to create OBJ file: %s", filepath)
+        return false
+    }
+    defer os.close(file)
+    
+    // Write header
+    os.write_string(file, "# Recast Heightfield Debug Visualization\n")
+    os.write_string(file, fmt.tprintf("# Generated with Mjolnir Recast\n"))
+    os.write_string(file, fmt.tprintf("# Vertices: %d, Triangles: %d\n", 
+                    len(mesh.vertices), len(mesh.indices)/3))
+    os.write_string(file, "\n")
+    
+    // Write vertices with color comments
+    for v in mesh.vertices {
+        color_name := "unknown"
+        if v.color == DEBUG_COLOR_WALKABLE {
+            color_name = "walkable"
+        } else if v.color == DEBUG_COLOR_OBSTACLE {
+            color_name = "obstacle"  // RC_NULL_AREA spans
+        } else if v.color == DEBUG_COLOR_NULL {
+            color_name = "empty"
+        } else if v.color == DEBUG_COLOR_EDGE {
+            color_name = "edge"
+        } else if v.color.r == 1.0 && v.color.g == 0.5 && v.color.b == 0.0 {
+            color_name = "custom_area"
+        }
+        
+        os.write_string(file, fmt.tprintf("v %.6f %.6f %.6f # %s\n", 
+                        v.position.x, v.position.y, v.position.z, color_name))
+    }
+    
+    // Write vertex colors
+    os.write_string(file, "\n# Vertex colors\n")
+    for v in mesh.vertices {
+        os.write_string(file, fmt.tprintf("vn %.3f %.3f %.3f\n", 
+                        v.color.r, v.color.g, v.color.b))
+    }
+    
+    os.write_string(file, "\n")
+    
+    // Write faces
+    for i := 0; i < len(mesh.indices); i += 3 {
+        // OBJ uses 1-based indexing
+        v1 := int(mesh.indices[i]) + 1
+        v2 := int(mesh.indices[i+1]) + 1
+        v3 := int(mesh.indices[i+2]) + 1
+        
+        os.write_string(file, fmt.tprintf("f %d//%d %d//%d %d//%d\n", 
+                        v1, v1, v2, v2, v3, v3))
+    }
+    
+    log.infof("Successfully exported heightfield debug mesh to: %s", filepath)
     return true
 }

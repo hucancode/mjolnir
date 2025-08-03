@@ -216,10 +216,12 @@ dt_obstacle_avoidance_query_sample_velocity_grid :: proc(query: ^Dt_Obstacle_Avo
             }
             
             // Limit speed
-            speed := math.sqrt(sample_vel[0]*sample_vel[0] + sample_vel[2]*sample_vel[2])
+            vel_2d := [2]f32{sample_vel[0], sample_vel[2]}
+            speed := linalg.length(vel_2d)
             if speed > max_speed {
-                sample_vel[0] = sample_vel[0] / speed * max_speed
-                sample_vel[2] = sample_vel[2] / speed * max_speed
+                vel_2d = linalg.normalize(vel_2d) * max_speed
+                sample_vel[0] = vel_2d.x
+                sample_vel[2] = vel_2d.y
             }
             
             // Evaluate this velocity
@@ -288,10 +290,12 @@ dt_obstacle_avoidance_query_sample_velocity_adaptive :: proc(query: ^Dt_Obstacle
                 }
                 
                 // Limit speed
-                speed := math.sqrt(sample_vel[0]*sample_vel[0] + sample_vel[2]*sample_vel[2])
+                vel_2d := [2]f32{sample_vel[0], sample_vel[2]}
+                speed := linalg.length(vel_2d)
                 if speed > max_speed {
-                    sample_vel[0] = sample_vel[0] / speed * max_speed
-                    sample_vel[2] = sample_vel[2] / speed * max_speed
+                    vel_2d = linalg.normalize(vel_2d) * max_speed
+                    sample_vel[0] = vel_2d.x
+                    sample_vel[2] = vel_2d.y
                 }
                 
                 penalty, _ := dt_process_sample(query, pos, radius, vel, sample_vel, dvel,
@@ -379,21 +383,13 @@ dt_process_sample :: proc(query: ^Dt_Obstacle_Avoidance_Query, pos: [3]f32, radi
     }
     
     // Desired velocity penalty
-    dvel_diff := [3]f32{
-        sample_vel[0] - dvel[0],
-        sample_vel[1] - dvel[1],
-        sample_vel[2] - dvel[2],
-    }
-    dvel_penalty := math.sqrt(dvel_diff[0]*dvel_diff[0] + dvel_diff[1]*dvel_diff[1] + dvel_diff[2]*dvel_diff[2])
+    dvel_diff := sample_vel - dvel
+    dvel_penalty := linalg.length(dvel_diff)
     penalty += params.weight_des_vel * dvel_penalty
     
     // Current velocity penalty
-    cvel_diff := [3]f32{
-        sample_vel[0] - vel[0],
-        sample_vel[1] - vel[1],
-        sample_vel[2] - vel[2],
-    }
-    cvel_penalty := math.sqrt(cvel_diff[0]*cvel_diff[0] + cvel_diff[1]*cvel_diff[1] + cvel_diff[2]*cvel_diff[2])
+    cvel_diff := sample_vel - vel
+    cvel_penalty := linalg.length(cvel_diff)
     penalty += params.weight_cur_vel * cvel_penalty
     
     toi = min_toi
@@ -433,15 +429,15 @@ dt_ray_segment_intersect :: proc(pos, vel, seg_start, seg_end: [3]f32, radius: f
     ex, ez := seg_end[0], seg_end[2]
     
     // Segment direction
-    dx := ex - sx
-    dz := ez - sz
-    seg_len := math.sqrt(dx*dx + dz*dz)
+    seg_dir := [2]f32{ex - sx, ez - sz}
+    seg_len := linalg.length(seg_dir)
     
     if seg_len < 1e-6 do return -1
     
     // Normalize segment direction
-    dx /= seg_len
-    dz /= seg_len
+    seg_dir_norm := seg_dir / seg_len
+    dx := seg_dir_norm.x
+    dz := seg_dir_norm.y
     
     // Distance from point to line
     to_start_x := px - sx
@@ -456,14 +452,14 @@ dt_ray_segment_intersect :: proc(pos, vel, seg_start, seg_end: [3]f32, radius: f
     closest_z := sz + proj*dz
     
     // Distance to closest point
-    dist_x := px - closest_x
-    dist_z := pz - closest_z
-    dist := math.sqrt(dist_x*dist_x + dist_z*dist_z)
+    dist_vec := [2]f32{px - closest_x, pz - closest_z}
+    dist := linalg.length(dist_vec)
     
     if dist > radius do return -1
     
     // Simple time calculation (could be more sophisticated)
-    speed := math.sqrt(vx*vx + vz*vz)
+    vel := [2]f32{vx, vz}
+    speed := linalg.length(vel)
     if speed < 1e-6 do return -1
     
     return (dist - radius) / speed

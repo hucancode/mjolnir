@@ -4,7 +4,8 @@ layout(location = 0) in vec3 inPosition;
 layout(location = 1) in vec4 inColor;
 
 // Output to fragment shader
-layout(location = 0) out vec4 outColor;
+layout(location = 0) out flat vec4 outColor;
+layout(location = 1) out flat uint outColorMode;
 
 // Camera structure
 struct Camera {
@@ -35,16 +36,17 @@ layout(push_constant) uniform PushConstants {
 void main() {
     // Get camera from bindless buffer
     Camera camera = camera_buffer.cameras[camera_index];
-    
+
     // Apply height offset to keep navmesh visible above ground
     vec3 position = inPosition;
     position.y += height_offset;
-    
+
     // Transform to world space then camera space
     vec4 worldPos = world * vec4(position, 1.0);
     gl_Position = camera.projection * camera.view * worldPos;
-    
+
     // Pass color to fragment shader
     outColor = inColor;
     outColor.a = alpha;
+    outColorMode = color_mode;
 }

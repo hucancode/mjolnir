@@ -854,6 +854,11 @@ engine_navmesh_has_data :: proc(engine: ^Engine) -> bool {
     return navmesh_renderer_has_data(&engine.navmesh)
 }
 
+// Set navigation mesh color mode
+engine_navmesh_set_color_mode :: proc(engine: ^Engine, color_mode: NavMeshColorMode) {
+    engine.navmesh.color_mode = color_mode
+}
+
 @(private = "file")
 recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
   // vk.DeviceWaitIdle(engine.gpu_context.device)
@@ -1771,14 +1776,6 @@ render :: proc(self: ^Engine) -> vk.Result {
   )
   particle_end(command_buffer)
 
-  // Navigation mesh pass
-  navmesh_renderer_render(
-    &self.navmesh,
-    command_buffer,
-    linalg.MATRIX4F32_IDENTITY,
-    main_render_target.camera.index,
-  )
-
   // Transparent & wireframe pass
   transparent_begin(
     &self.transparent,
@@ -1786,6 +1783,14 @@ render :: proc(self: ^Engine) -> vk.Result {
     command_buffer,
     &self.warehouse,
     self.frame_index,
+  )
+  
+  // Navigation mesh pass (render inside transparent pass)
+  navmesh_renderer_render(
+    &self.navmesh,
+    command_buffer,
+    linalg.MATRIX4F32_IDENTITY,
+    main_render_target.camera.index,
   )
   transparent_render(
     &self.transparent,

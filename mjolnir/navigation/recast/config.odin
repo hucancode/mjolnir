@@ -4,6 +4,12 @@ import "core:math"
 
 // Calculate bounds from vertices
 rc_calc_bounds :: proc(verts: []f32, nverts: i32, bmin, bmax: ^[3]f32) {
+    if nverts == 0 || len(verts) < 3 {
+        bmin^ = {0, 0, 0}
+        bmax^ = {0, 0, 0}
+        return
+    }
+    
     bmin^ = {verts[0], verts[1], verts[2]}
     bmax^ = bmin^
     

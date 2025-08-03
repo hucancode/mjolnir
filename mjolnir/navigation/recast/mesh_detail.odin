@@ -138,9 +138,9 @@ sample_heightfield_height :: proc(chf: ^Rc_Compact_Heightfield, pos: [3]f32) -> 
     heights[3] = get_cell_height(chf, x+1, z+1)   // Top-right
 
     // Bilinear interpolation
-    h0 := heights[0] * (1.0 - fx_frac) + heights[1] * fx_frac
-    h1 := heights[2] * (1.0 - fx_frac) + heights[3] * fx_frac
-    height := h0 * (1.0 - fz_frac) + h1 * fz_frac
+    h0 := linalg.mix(heights[0], heights[1], fx_frac)
+    h1 := linalg.mix(heights[2], heights[3], fx_frac)
+    height := linalg.mix(h0, h1, fz_frac)
 
     return chf.bmin.y + height * chf.ch
 }
@@ -275,7 +275,7 @@ closest_point_on_edge :: proc "contextless" (p, a, b: [3]f32) -> [3]f32 {
     t := linalg.dot(ap, ab) / ab_len_sq
     t = math.clamp(t, 0.0, 1.0)
 
-    return a + ab * t
+    return linalg.mix(a, b, t)
 }
 
 // Calculate distance from point to edge
@@ -618,7 +618,7 @@ subdivide_edge_with_limits :: proc(poly: ^Detail_Polygon, chf: ^Rc_Compact_Heigh
     // Add intermediate points
     for i in 1..<nsubdivs {
         t := f32(i) / f32(nsubdivs)
-        pos := p0 + edge * t
+        pos := linalg.mix(p0, p1, t)
 
         // Sample height from heightfield (this can be slow, so we limit subdivisions)
         height := sample_heightfield_height(chf, pos)
@@ -666,7 +666,7 @@ subdivide_edge :: proc(poly: ^Detail_Polygon, chf: ^Rc_Compact_Heightfield,
     // Add intermediate points
     for i in 1..<nsubdivs {
         t := f32(i) / f32(nsubdivs)
-        pos := p0 + edge * t
+        pos := linalg.mix(p0, p1, t)
 
         // Sample height from heightfield
         height := sample_heightfield_height(chf, pos)
@@ -748,7 +748,10 @@ triangulate_delaunay :: proc(poly: ^Detail_Polygon) -> bool {
 // This is more robust than ear clipping for simple polygons
 triangulate_hull_based :: proc(poly: ^Detail_Polygon) -> bool {
     nverts := len(poly.vertices)
-    if nverts < 3 do return false
+    if nverts < 3 {
+        log.warnf("triangulate_hull_based: Too few vertices (%d)", nverts)
+        return false
+    }
 
     clear(&poly.triangles)
 
@@ -760,11 +763,15 @@ triangulate_hull_based :: proc(poly: ^Detail_Polygon) -> bool {
         
         // Check triangle orientation and area
         area := triangle_area_2d_detail(a, b, c)
-        if area > MIN_POLYGON_AREA {
+        abs_area := abs(area)
+        
+        // For hull triangulation, we accept triangles regardless of winding
+        // The C++ version uses absolute area for hull triangulation
+        if abs_area > MIN_POLYGON_AREA {
             triangle := Detail_Triangle{
                 v = {0, 1, 2},
                 quality = calculate_triangle_quality(a, b, c),
-                area = area,
+                area = abs_area,
             }
             append(&poly.triangles, triangle)
         }
@@ -1009,7 +1016,7 @@ triangulate_ear_clipping_robust :: proc(poly: ^Detail_Polygon) -> bool {
             stalled_iterations += 1
             // Much more lenient stalling detection - allow more attempts
             if stalled_iterations > 3 || iterations > remaining * 6 {
-                log.debugf("Triangulation stalled for %d iterations with %d vertices remaining (total iterations: %d). Using fallback.", stalled_iterations, remaining, iterations)
+
                 // Use fallback triangulation
                 return triangulate_remaining_as_fan(poly, indices[:remaining])
             }
@@ -1020,7 +1027,7 @@ triangulate_ear_clipping_robust :: proc(poly: ^Detail_Polygon) -> bool {
 
         // Additional safety check: prevent runaway iterations (more lenient)
         if iterations > remaining * 10 {
-            log.debugf("Triangulation exceeded maximum iterations (%d > %d), using fallback", iterations, remaining * 10)
+
             return triangulate_remaining_as_fan(poly, indices[:remaining])
         }
 
@@ -1088,7 +1095,7 @@ triangulate_ear_clipping_robust :: proc(poly: ^Detail_Polygon) -> bool {
         if !found_ear {
             // Only warn if this happens early - for complex polygons it's more normal
             if iterations <= 2 {
-                log.debugf("No valid ear found during triangulation after %d iterations, using fan fallback", iterations)  
+  
             }
             // This indicates a degenerate polygon that cannot be properly triangulated
             return triangulate_remaining_as_fan(poly, indices[:remaining])
@@ -1343,8 +1350,7 @@ add_interior_samples_with_limits :: proc(poly: ^Detail_Polygon, chf: ^Rc_Compact
         nx = i32(math.ceil((max_pos.x - min_pos.x) / adjusted_dist))
         nz = i32(math.ceil((max_pos.z - min_pos.z) / adjusted_dist))
 
-        log.debugf("Reduced interior sampling density: %dx%d -> %dx%d",
-                  int(total_samples/(nx*nz)*nx), int(total_samples/(nx*nz)*nz), nx, nz)
+
     }
 
     samples_added := 0
@@ -1368,15 +1374,13 @@ add_interior_samples_with_limits :: proc(poly: ^Detail_Polygon, chf: ^Rc_Compact
 
             // Safety limit on samples added
             if samples_added >= MAX_INTERIOR_SAMPLES / 2 {
-                log.debugf("Reached interior sample limit: %d", samples_added)
+
                 return
             }
         }
     }
 
-    if samples_added > 50 {
-        log.debugf("Added %d interior samples", samples_added)
-    }
+
 }
 
 // Add sample points inside polygon for better triangulation (original version)
@@ -1494,16 +1498,13 @@ build_polygon_detail_mesh_with_timeout :: proc(poly: ^Detail_Polygon, chf: ^Rc_C
     min_extent := f32(math.F32_MAX)
     for i in 0..<len(poly.vertices) {
         j := (i + 1) % len(poly.vertices)
-        dx := poly.vertices[j].pos.x - poly.vertices[i].pos.x
-        dz := poly.vertices[j].pos.z - poly.vertices[i].pos.z
-        edge_len := math.sqrt(dx*dx + dz*dz)
+        edge_vec := poly.vertices[j].pos.xz - poly.vertices[i].pos.xz
+        edge_len := linalg.length(edge_vec)
         min_extent = min(min_extent, edge_len)
     }
     
     // If polygon is too small for sampling, use simple hull triangulation (C++ behavior)
     if min_extent < poly.sample_dist * 2.0 {
-        log.infof("Polygon too small for interior sampling (extent=%.3f < %.3f), using hull triangulation", 
-                  min_extent, poly.sample_dist * 2.0)
         return triangulate_hull_based(poly)
     }
 
@@ -1511,11 +1512,7 @@ build_polygon_detail_mesh_with_timeout :: proc(poly: ^Detail_Polygon, chf: ^Rc_C
     initial_vert_count := len(poly.vertices)
     add_interior_samples_with_limits(poly, chf, poly.sample_dist)
 
-    // Log if we added many vertices
-    added_verts := len(poly.vertices) - initial_vert_count
-    if added_verts > 100 {
-        log.debugf("Added %d interior vertices to polygon", added_verts)
-    }
+
 
     // Step 3: Triangulate with timeout check
     if check_timeout(timeout_ctx, "triangulation") {
@@ -1528,11 +1525,7 @@ build_polygon_detail_mesh_with_timeout :: proc(poly: ^Detail_Polygon, chf: ^Rc_C
         return triangulate_simple_fan(poly)
     }
 
-    elapsed := f64(time.duration_milliseconds(time.diff(start_time, time.now()))) / 1000.0
-    if elapsed > 1.0 {
-        log.debugf("Polygon detail mesh: %d vertices, %d triangles (%.2fs)",
-                  len(poly.vertices), len(poly.triangles), elapsed)
-    }
+
 
     return true
 }
@@ -1579,7 +1572,7 @@ build_polygon_detail_mesh :: proc(poly: ^Detail_Polygon, chf: ^Rc_Compact_Height
         return false
     }
 
-    log.debugf("Detail polygon: %d vertices, %d triangles", len(poly.vertices), len(poly.triangles))
+
     return true
 }
 
@@ -1589,8 +1582,6 @@ check_timeout :: proc(ctx: ^Timeout_Context, operation: string) -> bool {
 
     // Check global timeout
     if time.duration_milliseconds(time.diff(ctx.start_time, now)) > time.duration_milliseconds(ctx.global_timeout) {
-        log.warnf("Global timeout exceeded during %s (%.2fs)", operation,
-                 f64(time.duration_milliseconds(time.diff(ctx.start_time, now))) / 1000.0)
         return true
     }
 
@@ -1609,13 +1600,7 @@ update_progress :: proc(ctx: ^Timeout_Context, polygon_idx: i32) {
     ctx.last_progress = time.now()
     ctx.current_polygon = polygon_idx
 
-    // Log progress every 10 polygons or if taking more than 5 seconds
-    now := time.now()
-    if polygon_idx % 10 == 0 || time.duration_milliseconds(time.diff(ctx.start_time, now)) > 5000 {
-        elapsed := f64(time.duration_milliseconds(time.diff(ctx.start_time, now))) / 1000.0
-        log.infof("Detail mesh progress: %d/%d polygons (%.2fs elapsed)",
-                 polygon_idx + 1, ctx.polygons_processed, elapsed)
-    }
+
 }
 
 // Main function to build poly mesh detail with timeout protection
@@ -1635,9 +1620,7 @@ rc_build_poly_mesh_detail :: proc(pmesh: ^Rc_Poly_Mesh, chf: ^Rc_Compact_Heightf
         current_polygon = 0,
     }
 
-    log.infof("Building detailed mesh from %d polygons (timeout: %.1fs)", pmesh.npolys,
-             f64(GLOBAL_TIMEOUT_MS) / 1000.0)
-    log.infof("Sample distance: %f, max error: %f", sample_dist, sample_max_error)
+
 
     // Initialize detail mesh
     dmesh.nmeshes = 0
@@ -1681,7 +1664,7 @@ rc_build_poly_mesh_detail :: proc(pmesh: ^Rc_Poly_Mesh, chf: ^Rc_Compact_Heightf
 
         // Quick validation: skip polygons that are too small or have too few vertices
         if len(poly.vertices) < 3 {
-            log.debugf("Skipping polygon %d: insufficient vertices (%d)", i, len(poly.vertices))
+
             degenerate_count += 1
             continue
         }
@@ -1691,7 +1674,7 @@ rc_build_poly_mesh_detail :: proc(pmesh: ^Rc_Poly_Mesh, chf: ^Rc_Compact_Heightf
             area := triangle_area_2d_detail(poly.vertices[0].pos, poly.vertices[1].pos, poly.vertices[2].pos)
             abs_area := abs(area)  // Use absolute value to handle both winding directions
             if abs_area < MIN_POLYGON_AREA {
-                log.debugf("Skipping polygon %d: degenerate area (%.9f)", i, abs_area)
+
                 degenerate_count += 1
                 continue
             }
@@ -1716,10 +1699,8 @@ rc_build_poly_mesh_detail :: proc(pmesh: ^Rc_Poly_Mesh, chf: ^Rc_Compact_Heightf
         total_tris += len(poly.triangles)
     }
     
-    log.debugf("DEBUG: About to print processing summary")
-    log.infof("Detail mesh processing summary: processed=%d, failed_init=%d, degenerate=%d, triangulation_fail=%d, zero_triangles=%d", 
-              processed_count, failed_init_count, degenerate_count, triangulation_fail_count, zero_triangle_count)
-    log.debugf("DEBUG: Summary printed, checking totals")
+
+
 
     if total_verts == 0 || total_tris == 0 {
         log.warn("No valid detail mesh data generated")
@@ -1793,9 +1774,7 @@ rc_build_poly_mesh_detail :: proc(pmesh: ^Rc_Poly_Mesh, chf: ^Rc_Compact_Heightf
         return false
     }
 
-    elapsed := f64(time.duration_milliseconds(time.diff(timeout_ctx.start_time, time.now()))) / 1000.0
-    log.infof("Successfully built detail mesh: %d sub-meshes, %d vertices, %d triangles (%.2fs)",
-              dmesh.nmeshes, dmesh.nverts, dmesh.ntris, elapsed)
+
 
     return true
 }

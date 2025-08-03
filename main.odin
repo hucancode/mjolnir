@@ -4,6 +4,7 @@ import "core:fmt"
 import "core:log"
 import "core:math"
 import "core:math/linalg"
+import "core:os"
 import "mjolnir"
 import "mjolnir/geometry"
 import "mjolnir/gpu"
@@ -35,7 +36,26 @@ current_controller: ^geometry.CameraController
 tab_was_pressed: bool
 
 main :: proc() {
+  // Initialize logging
   context.logger = log.create_console_logger()
+  args := os.args
+  log.infof("Starting with %d arguments", len(args))
+  // Check command line arguments
+  if len(args) > 1 {
+    log.infof("Running mode: %s", args[1])
+    switch args[1] {
+    case "navmesh-visual":
+      navmesh_visual_main()
+      return
+    case "navmesh-simple":
+      navmesh_simple_main()
+      return
+    case "demo":
+      return
+    }
+  }
+  mjolnir.init(&engine, 1280, 720, "Mjolnir Demo")
+  defer mjolnir.deinit(&engine)
   engine.setup_proc = setup
   engine.update_proc = update
   engine.render2d_proc = render_2d

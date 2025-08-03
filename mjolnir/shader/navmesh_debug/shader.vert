@@ -6,7 +6,7 @@ layout(location = 1) in vec3 inNormal;
 // Output to fragment shader
 layout(location = 0) out vec3 outNormal;
 layout(location = 1) out vec3 outWorldPos;
-layout(location = 2) out vec4 outDebugColor;
+layout(location = 2) out flat vec4 outDebugColor;
 
 // Camera structure
 struct Camera {
@@ -38,19 +38,19 @@ layout(push_constant) uniform PushConstants {
 void main() {
     // Get camera from bindless buffer
     Camera camera = camera_buffer.cameras[camera_index];
-    
+
     // Apply height offset to keep navmesh visible above ground
     vec3 position = inPosition;
     position.y += height_offset;
-    
+
     // Transform to world space
     vec4 worldPos = world * vec4(position, 1.0);
     outWorldPos = worldPos.xyz;
-    
+
     // Transform normal to world space
     mat3 normalMatrix = mat3(world);
     outNormal = normalize(normalMatrix * inNormal);
-    
+
     // Calculate debug color based on mode
     if (debug_mode == 1) {
         // Normal visualization mode - encode normals as colors
@@ -62,6 +62,6 @@ void main() {
         // Default wireframe mode
         outDebugColor = vec4(debug_color, 1.0);
     }
-    
+
     gl_Position = camera.projection * camera.view * worldPos;
 }

@@ -1,6 +1,7 @@
 package navigation_detour
 
 import "core:math"
+import "core:math/linalg"
 import nav_recast "../recast"
 
 // Detour navigation mesh polygon
@@ -208,11 +209,8 @@ dt_query_filter_get_cost :: proc(filter: ^Dt_Query_Filter,
                                 cur_ref: nav_recast.Poly_Ref, cur_tile: ^Dt_Mesh_Tile, cur_poly: ^Dt_Poly,
                                 next_ref: nav_recast.Poly_Ref, next_tile: ^Dt_Mesh_Tile, next_poly: ^Dt_Poly) -> f32 {
     // Base cost is distance
-    dx := pb[0] - pa[0]
-    dy := pb[1] - pa[1]
-    dz := pb[2] - pa[2]
-    cost := dx*dx + dy*dy + dz*dz
-    cost = math.sqrt(cost)
+    diff := pb - pa
+    cost := linalg.length(diff)
     
     // Apply area-specific multiplier
     area := dt_poly_get_area(cur_poly)

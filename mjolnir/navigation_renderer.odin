@@ -1,7 +1,9 @@
 package mjolnir
 
 import "core:log"
+import "core:math"
 import "core:math/linalg"
+import "core:math/rand"
 import "core:slice"
 import "geometry"
 import "gpu"
@@ -45,6 +47,7 @@ NavMeshColorMode :: enum u32 {
     Area_Colors = 0,  // Color by area type
     Uniform = 1,      // Single color
     Height_Based = 2, // Color by height
+    Random_Colors = 3, // Random color per polygon
 }
 
 NavMeshDebugMode :: enum u32 {
@@ -103,9 +106,9 @@ navmesh_renderer_init :: proc(renderer: ^NavMeshRenderer, gpu_context: ^gpu.GPUC
         return result
     }
     
-    // Initialize empty buffers
-    renderer.vertex_buffer = gpu.create_host_visible_buffer(gpu_context, NavMeshVertex, 1024, {.VERTEX_BUFFER}) or_return
-    renderer.index_buffer = gpu.create_host_visible_buffer(gpu_context, u32, 2048, {.INDEX_BUFFER}) or_return
+    // Initialize empty buffers with larger capacity for complex navigation meshes
+    renderer.vertex_buffer = gpu.create_host_visible_buffer(gpu_context, NavMeshVertex, 16384, {.VERTEX_BUFFER}) or_return
+    renderer.index_buffer = gpu.create_host_visible_buffer(gpu_context, u32, 32768, {.INDEX_BUFFER}) or_return
     
     log.info("Navigation mesh renderer initialized successfully")
     return .SUCCESS
@@ -138,42 +141,224 @@ navmesh_renderer_build_from_recast :: proc(renderer: ^NavMeshRenderer, gpu_conte
         return false
     }
     
+    // For now, don't use detail mesh due to coordinate issues
+    use_detail_mesh := false
+    if detail_mesh != nil && detail_mesh.nverts > 0 {
+        log.infof("Detail mesh available but not used: %d vertices, %d triangles", detail_mesh.nverts, detail_mesh.ntris)
+    }
+    
     vertices := make([dynamic]NavMeshVertex, 0, poly_mesh.nverts)
     indices := make([dynamic]u32, 0, poly_mesh.npolys * 6)  // Estimate
     defer delete(vertices)
     defer delete(indices)
     
-    // Convert polygon mesh vertices
-    for i in 0..<poly_mesh.nverts {
-        vertex_idx := int(i) * 3
-        if vertex_idx + 2 >= len(poly_mesh.verts) do continue
+    // Debug: Log mesh parameters
+    log.infof("NavMesh build params: bmin=(%.2f,%.2f,%.2f) bmax=(%.2f,%.2f,%.2f) cs=%.3f ch=%.3f",
+              poly_mesh.bmin[0], poly_mesh.bmin[1], poly_mesh.bmin[2],
+              poly_mesh.bmax[0], poly_mesh.bmax[1], poly_mesh.bmax[2],
+              poly_mesh.cs, poly_mesh.ch)
+    
+    if use_detail_mesh && detail_mesh.nverts > 0 {
+        // Use detail mesh vertices (already in world space)
+        base_vert_count := poly_mesh.nverts
         
-        pos := [3]f32{
-            f32(poly_mesh.verts[vertex_idx]) * poly_mesh.cs + poly_mesh.bmin[0],
-            f32(poly_mesh.verts[vertex_idx + 1]) * poly_mesh.ch + poly_mesh.bmin[1], 
-            f32(poly_mesh.verts[vertex_idx + 2]) * poly_mesh.cs + poly_mesh.bmin[2],
+        // First add the base poly mesh vertices
+        for i in 0..<poly_mesh.nverts {
+            vertex_idx := int(i) * 3
+            if vertex_idx + 2 >= len(poly_mesh.verts) do continue
+            
+            pos := [3]f32{
+                f32(poly_mesh.verts[vertex_idx]) * poly_mesh.cs + poly_mesh.bmin[0],
+                f32(poly_mesh.verts[vertex_idx + 1]) * poly_mesh.ch + poly_mesh.bmin[1], 
+                f32(poly_mesh.verts[vertex_idx + 2]) * poly_mesh.cs + poly_mesh.bmin[2],
+            }
+            
+            append(&vertices, NavMeshVertex{
+                position = pos,
+                color = [4]f32{0.0, 0.8, 0.2, renderer.alpha},
+                normal = [3]f32{0, 1, 0},
+            })
         }
         
-        // Default normal pointing up
-        normal := [3]f32{0, 1, 0}
-        
-        // Default color (will be overridden based on color mode)
-        color := [4]f32{0.0, 0.8, 0.2, renderer.alpha}
-        
-        append(&vertices, NavMeshVertex{
-            position = pos,
-            color = color,
-            normal = normal,
-        })
+        // Then add detail vertices
+        for i in 0..<detail_mesh.nverts {
+            vertex_idx := int(i) * 3
+            if vertex_idx + 2 >= len(detail_mesh.verts) do continue
+            
+            pos := [3]f32{
+                detail_mesh.verts[vertex_idx],
+                detail_mesh.verts[vertex_idx + 1],
+                detail_mesh.verts[vertex_idx + 2],
+            }
+            
+            if i < 10 {
+                log.debugf("Detail vertex %d: (%.2f,%.2f,%.2f)", i, pos.x, pos.y, pos.z)
+            }
+            
+            append(&vertices, NavMeshVertex{
+                position = pos,
+                color = [4]f32{0.0, 0.8, 0.2, renderer.alpha},
+                normal = [3]f32{0, 1, 0},
+            })
+        }
+    } else {
+        // Convert polygon mesh vertices
+        for i in 0..<poly_mesh.nverts {
+            vertex_idx := int(i) * 3
+            if vertex_idx + 2 >= len(poly_mesh.verts) do continue
+            
+            pos := [3]f32{
+                f32(poly_mesh.verts[vertex_idx]) * poly_mesh.cs + poly_mesh.bmin[0],
+                f32(poly_mesh.verts[vertex_idx + 1]) * poly_mesh.ch + poly_mesh.bmin[1], 
+                f32(poly_mesh.verts[vertex_idx + 2]) * poly_mesh.cs + poly_mesh.bmin[2],
+            }
+            
+        // Debug: Log first few vertices to check Y coordinates
+        if i < 10 {
+            raw_y := poly_mesh.verts[vertex_idx + 1]
+            y_world := f32(raw_y) * poly_mesh.ch + poly_mesh.bmin[1]
+            log.debugf("NavMesh vertex %d: raw_y=%d, ch=%.3f, bmin.y=%.3f => y_world=%.3f (full pos: %.2f,%.2f,%.2f)", 
+                      i, raw_y, poly_mesh.ch, poly_mesh.bmin[1], y_world,
+                      pos.x, pos.y, pos.z)
+        }            
+            // Default normal pointing up
+            normal := [3]f32{0, 1, 0}
+            
+            // Default color (will be overridden based on color mode)
+            color := [4]f32{0.0, 0.8, 0.2, renderer.alpha}
+            
+            append(&vertices, NavMeshVertex{
+                position = pos,
+                color = color,
+                normal = normal,
+            })
+        }
     }
     
-    // Convert polygon indices  
-    for i in 0..<poly_mesh.npolys {
-        poly_base := int(i) * int(poly_mesh.nvp)
+    // Convert polygon indices
+    if use_detail_mesh && detail_mesh.nmeshes > 0 {
+        // Use detail mesh triangles
+        for i in 0..<detail_mesh.nmeshes {
+            if i >= poly_mesh.npolys do break
+            
+            // Get mesh info from detail mesh
+            mesh_idx := int(i) * 4
+            if mesh_idx + 3 >= len(detail_mesh.meshes) do continue
+            
+            base_tri := detail_mesh.meshes[mesh_idx + 0]
+            num_tris := detail_mesh.meshes[mesh_idx + 1]
+            base_vert := detail_mesh.meshes[mesh_idx + 2]
+            num_verts := detail_mesh.meshes[mesh_idx + 3]
+            
+            area_id := poly_mesh.areas[i] if len(poly_mesh.areas) > int(i) else 1
+            area_color := get_area_color(area_id, renderer.color_mode, renderer.base_color, renderer.alpha, u32(i))
+            
+            // Add triangles from detail mesh
+            for j in 0..<num_tris {
+                tri_idx := int(base_tri + j) * 4
+                if tri_idx + 2 >= len(detail_mesh.tris) do continue
+                
+                // Detail mesh triangle indices are relative to base vertex
+                v0 := u32(detail_mesh.tris[tri_idx + 0])
+                v1 := u32(detail_mesh.tris[tri_idx + 1])
+                v2 := u32(detail_mesh.tris[tri_idx + 2])
+                
+                // If vertex is 0xff, it refers to polygon mesh vertex
+                if v0 < 0xff {
+                    v0 += base_vert + u32(poly_mesh.nverts)
+                } else {
+                    v0 = u32(detail_mesh.tris[tri_idx + 0]) - 0xff
+                }
+                
+                if v1 < 0xff {
+                    v1 += base_vert + u32(poly_mesh.nverts)
+                } else {
+                    v1 = u32(detail_mesh.tris[tri_idx + 1]) - 0xff
+                }
+                
+                if v2 < 0xff {
+                    v2 += base_vert + u32(poly_mesh.nverts)
+                } else {
+                    v2 = u32(detail_mesh.tris[tri_idx + 2]) - 0xff
+                }
+                
+                append(&indices, v0, v1, v2)
+                
+                // Update vertex colors
+                if int(v0) < len(vertices) do vertices[v0].color = area_color
+                if int(v1) < len(vertices) do vertices[v1].color = area_color
+                if int(v2) < len(vertices) do vertices[v2].color = area_color
+            }
+        }
+    } else {
+        // Original polygon mesh triangulation
+        for i in 0..<poly_mesh.npolys {
+        // Note: polys array stores both vertices and neighbors, hence * 2
+        poly_base := int(i) * int(poly_mesh.nvp) * 2
         area_id := poly_mesh.areas[i] if len(poly_mesh.areas) > int(i) else 1
         
-        // Get area color
-        area_color := get_area_color(area_id, renderer.color_mode, renderer.base_color, renderer.alpha)
+        // Check polygon bounds and center
+        poly_center := [3]f32{0, 0, 0}
+        poly_min := [2]f32{999999, 999999}
+        poly_max := [2]f32{-999999, -999999}
+        poly_vert_count := 0
+        
+        for j in 0..<poly_mesh.nvp {
+            vert_idx := poly_mesh.polys[poly_base + int(j)]
+            if vert_idx == nav_recast.RC_MESH_NULL_IDX do break
+            
+            vi := int(vert_idx) * 3
+            world_x := f32(poly_mesh.verts[vi]) * poly_mesh.cs + poly_mesh.bmin[0]
+            world_z := f32(poly_mesh.verts[vi + 2]) * poly_mesh.cs + poly_mesh.bmin[2]
+            
+            poly_center.x += world_x
+            poly_center.z += world_z
+            poly_min.x = min(poly_min.x, world_x)
+            poly_min.y = min(poly_min.y, world_z)
+            poly_max.x = max(poly_max.x, world_x)
+            poly_max.y = max(poly_max.y, world_z)
+            poly_vert_count += 1
+        }
+        
+        if poly_vert_count > 0 {
+            poly_center.x /= f32(poly_vert_count)
+            poly_center.z /= f32(poly_vert_count)
+            
+            // Check if polygon overlaps with obstacle (6x6 centered at 0,0)
+            obstacle_min := [2]f32{-3, -3}
+            obstacle_max := [2]f32{3, 3}
+            
+            overlaps := poly_max.x > obstacle_min.x && poly_min.x < obstacle_max.x &&
+                       poly_max.y > obstacle_min.y && poly_min.y < obstacle_max.y
+            
+            if overlaps {
+                log.warnf("Polygon %d OVERLAPS obstacle! Bounds: X=[%.1f,%.1f] Z=[%.1f,%.1f], Center:[%.1f,%.1f]", 
+                          i, poly_min.x, poly_max.x, poly_min.y, poly_max.y, poly_center.x, poly_center.z)
+            }
+            
+            // Debug: Check Y values for this polygon
+            if i < 5 {
+                log.debugf("Polygon %d Y values:", i)
+                for j in 0..<poly_mesh.nvp {
+                    vert_idx := poly_mesh.polys[poly_base + int(j)]
+                    if vert_idx == nav_recast.RC_MESH_NULL_IDX do break
+                    
+                    vi := int(vert_idx) * 3
+                    y_raw := poly_mesh.verts[vi + 1]
+                    y_world := f32(y_raw) * poly_mesh.ch + poly_mesh.bmin[1]
+                    log.debugf("  Vertex %d (idx %d): raw_y=%d, world_y=%.3f", j, vert_idx, y_raw, y_world)
+                }
+            }        }
+        
+        // Get area color (pass polygon index for random colors)
+        area_color := get_area_color(area_id, renderer.color_mode, renderer.base_color, renderer.alpha, u32(i))
+        
+        // Debug: Show polygon position for debugging
+        if i == 0 {
+            log.debugf("First polygon center: [%.1f, %.1f]", poly_center.x, poly_center.z)
+        }
+        
+        
         
         // Count valid vertices in this polygon
         poly_verts: [dynamic]u32
@@ -190,6 +375,29 @@ navmesh_renderer_build_from_recast :: proc(renderer: ^NavMeshRenderer, gpu_conte
             }
         }
         
+        // Check if polygon is mostly horizontal before adding it
+        y_min := f32(999999)
+        y_max := f32(-999999)
+        for vert_idx in poly_verts {
+            if int(vert_idx) < len(vertices) {
+                y := vertices[vert_idx].position.y
+                y_min = min(y_min, y)
+                y_max = max(y_max, y)
+            }
+        }
+        
+        // Filter out non-flat polygons (Y variation > 0.1)
+        y_variation := y_max - y_min
+        if y_variation > 0.1 {
+            continue
+        }
+        
+        // Log remaining issue with missing quadrants
+        if i == 0 {
+            log.warn("KNOWN ISSUE: Recast heightfield only generates navigation mesh for negative coordinates (SW quadrant)")
+            log.warn("This appears to be a bug in the heightfield rasterization process")
+        }
+        
         // Triangulate polygon (simple fan triangulation)
         if len(poly_verts) >= 3 {
             for j in 1..<len(poly_verts) - 1 {
@@ -199,14 +407,27 @@ navmesh_renderer_build_from_recast :: proc(renderer: ^NavMeshRenderer, gpu_conte
             }
         }
     }
+    } // Close the else block for detail mesh
     
     // Update vertex and index counts
     renderer.vertex_count = u32(len(vertices))
     renderer.index_count = u32(len(indices))
     
+    log.infof("Navigation mesh data: %d vertices, %d indices", renderer.vertex_count, renderer.index_count)
+    
     if renderer.vertex_count == 0 || renderer.index_count == 0 {
         log.warn("Navigation mesh has no renderable geometry")
         return true
+    }
+    
+    // Check buffer capacity
+    if renderer.vertex_count > 16384 {
+        log.errorf("Too many vertices (%d) for buffer size (16384)", renderer.vertex_count)
+        return false
+    }
+    if renderer.index_count > 32768 {
+        log.errorf("Too many indices (%d) for buffer size (32768)", renderer.index_count)
+        return false
     }
     
     // Upload to GPU buffers  
@@ -227,8 +448,42 @@ navmesh_renderer_build_from_recast :: proc(renderer: ^NavMeshRenderer, gpu_conte
     return true
 }
 
+// Generate random color with good saturation and brightness
+generate_random_color :: proc(seed: u32, alpha: f32) -> [4]f32 {
+    // Simple deterministic color generation using the seed
+    // This avoids random API complexity while still giving different colors per polygon
+    
+    // Use seed to generate more distinct hues (spread across color wheel)
+    hue := f32((seed * 137) % 360)  // Golden angle approximation for better distribution
+    saturation := 0.8 + f32((seed * 17) % 20) / 100.0  // 0.8 to 1.0 (higher saturation)
+    value := 0.7 + f32((seed * 43) % 30) / 100.0       // 0.7 to 1.0 (brighter)
+    
+    
+    // Convert HSV to RGB
+    c := value * saturation
+    x := c * (1.0 - math.abs(math.mod(hue / 60.0, 2.0) - 1.0))
+    m := value - c
+    
+    rgb: [3]f32
+    if hue < 60.0 {
+        rgb = {c, x, 0}
+    } else if hue < 120.0 {
+        rgb = {x, c, 0}
+    } else if hue < 180.0 {
+        rgb = {0, c, x}
+    } else if hue < 240.0 {
+        rgb = {0, x, c}
+    } else if hue < 300.0 {
+        rgb = {x, 0, c}
+    } else {
+        rgb = {c, 0, x}
+    }
+    
+    return {rgb.x + m, rgb.y + m, rgb.z + m, alpha}
+}
+
 // Get color for area type
-get_area_color :: proc(area_id: u8, color_mode: NavMeshColorMode, base_color: [3]f32, alpha: f32) -> [4]f32 {
+get_area_color :: proc(area_id: u8, color_mode: NavMeshColorMode, base_color: [3]f32, alpha: f32, poly_id: u32 = 0) -> [4]f32 {
     switch color_mode {
     case .Area_Colors:
         if int(area_id) < len(AREA_COLORS) {
@@ -246,6 +501,10 @@ get_area_color :: proc(area_id: u8, color_mode: NavMeshColorMode, base_color: [3
         // For now, use a gradient based on area_id as a proxy
         hue := f32(area_id) / 8.0
         return {hue, 1.0 - hue, 0.5, alpha}
+        
+    case .Random_Colors:
+        // Generate deterministic random color based on polygon ID
+        return generate_random_color(poly_id, alpha)
     }
     
     return {base_color.x, base_color.y, base_color.z, alpha}
@@ -254,9 +513,18 @@ get_area_color :: proc(area_id: u8, color_mode: NavMeshColorMode, base_color: [3
 // Render navigation mesh
 navmesh_renderer_render :: proc(renderer: ^NavMeshRenderer, command_buffer: vk.CommandBuffer, 
                                world_matrix: matrix[4,4]f32, camera_index: u32) {
-    if !renderer.enabled || renderer.vertex_count == 0 || renderer.index_count == 0 {
+    if !renderer.enabled {
+        log.warn("Navigation mesh renderer is disabled")
         return
     }
+    if renderer.vertex_count == 0 || renderer.index_count == 0 {
+        log.warnf("Navigation mesh renderer has no data: vertices=%d, indices=%d", 
+                  renderer.vertex_count, renderer.index_count)
+        return
+    }
+    
+    log.debugf("Rendering navigation mesh: %d vertices, %d indices, camera_index=%d", 
+               renderer.vertex_count, renderer.index_count, camera_index)
     
     pipeline := renderer.debug_pipeline if renderer.debug_mode else renderer.pipeline
     pipeline_layout := renderer.debug_pipeline_layout if renderer.debug_mode else renderer.pipeline_layout

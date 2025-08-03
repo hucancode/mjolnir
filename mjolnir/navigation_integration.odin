@@ -192,7 +192,7 @@ add_mesh_to_collector :: proc(collector: ^SceneGeometryCollector, mesh: ^Mesh, t
 }
 
 // Build navigation mesh from scene geometry
-build_navigation_mesh_from_scene :: proc(engine: ^Engine, config: recast.Enhanced_Config = {}) -> (Handle, bool) {
+build_navigation_mesh_from_scene :: proc(engine: ^Engine, config: recast.Config = {}) -> (Handle, bool) {
     // Initialize geometry collector
     collector: SceneGeometryCollector
     scene_geometry_collector_init(&collector)
@@ -210,25 +210,16 @@ build_navigation_mesh_from_scene :: proc(engine: ^Engine, config: recast.Enhance
     log.infof("Collected %d vertices, %d indices from %d meshes for navigation mesh", 
               len(collector.vertices)/3, len(collector.indices), collector.mesh_count)
     
-    // Create geometry input for Recast
-    geometry_input, ok := recast.create_geometry_input(
-        collector.vertices[:], 
-        collector.indices[:], 
-        collector.area_types[:]
-    )
-    if !ok {
-        log.error("Failed to create geometry input for navigation mesh")
-        return {}, false
-    }
-    // Note: free_geometry_input function doesn't exist - geometry input is cleaned up automatically
-    
     // Build navigation mesh using Recast
-    result := recast.build_navmesh(&geometry_input, config)
-    if !result.success {
-        log.errorf("Failed to build navigation mesh: %v", result.error_message)
+    pmesh, dmesh, ok := recast.rc_build_navmesh(collector.vertices[:], collector.indices[:], collector.area_types[:], config)
+    if !ok {
+        log.error("Failed to build navigation mesh")
         return {}, false
     }
-    defer recast.free_build_result(&result)
+    defer {
+        if pmesh != nil do recast.rc_free_poly_mesh(pmesh)
+        if dmesh != nil do recast.rc_free_poly_mesh_detail(dmesh)
+    }
     
     // Create NavMesh resource
     nav_mesh_handle, nav_mesh := resource.alloc(&engine.warehouse.nav_meshes)
@@ -245,9 +236,9 @@ build_navigation_mesh_from_scene :: proc(engine: ^Engine, config: recast.Enhance
     
     // Set navigation mesh properties
     nav_mesh.bounds = calculate_bounds_from_vertices(collector.vertices[:])
-    nav_mesh.cell_size = config.base.cs
-    nav_mesh.tile_size = config.base.tile_size
-    nav_mesh.is_tiled = config.base.tile_size > 0
+    nav_mesh.cell_size = config.cs
+    nav_mesh.tile_size = config.tile_size
+    nav_mesh.is_tiled = config.tile_size > 0
     
     // Initialize default area costs
     for i in 0..<64 {
@@ -263,7 +254,7 @@ build_navigation_mesh_from_scene_filtered :: proc(
     engine: ^Engine, 
     include_filter: proc(node: ^Node) -> bool,
     area_type_mapper: proc(node: ^Node) -> u8 = nil,
-    config: recast.Enhanced_Config = {}
+    config: recast.Config = {}
 ) -> (Handle, bool) {
     // Initialize geometry collector with custom filters
     collector: SceneGeometryCollector
@@ -287,24 +278,16 @@ build_navigation_mesh_from_scene_filtered :: proc(
     log.infof("Collected %d vertices, %d indices from %d meshes for filtered navigation mesh", 
               len(collector.vertices)/3, len(collector.indices), collector.mesh_count)
     
-    // Use the same building process as the basic version
-    geometry_input, ok := recast.create_geometry_input(
-        collector.vertices[:], 
-        collector.indices[:], 
-        collector.area_types[:]
-    )
+    // Build navigation mesh using Recast
+    pmesh, dmesh, ok := recast.rc_build_navmesh(collector.vertices[:], collector.indices[:], collector.area_types[:], config)
     if !ok {
-        log.error("Failed to create geometry input for navigation mesh")
+        log.error("Failed to build navigation mesh")
         return {}, false
     }
-    // Note: free_geometry_input function doesn't exist - geometry input is cleaned up automatically
-    
-    result := recast.build_navmesh(&geometry_input, config)
-    if !result.success {
-        log.errorf("Failed to build navigation mesh: %v", result.error_message)
-        return {}, false
+    defer {
+        if pmesh != nil do recast.rc_free_poly_mesh(pmesh)
+        if dmesh != nil do recast.rc_free_poly_mesh_detail(dmesh)
     }
-    defer recast.free_build_result(&result)
     
     // Create and initialize NavMesh resource (same as basic version)
     nav_mesh_handle, nav_mesh := resource.alloc(&engine.warehouse.nav_meshes)
@@ -318,9 +301,9 @@ build_navigation_mesh_from_scene_filtered :: proc(
     log.warn("Navigation mesh initialization not yet implemented - Build_Result doesn't contain nav_mesh_params or nav_mesh_data")
     
     nav_mesh.bounds = calculate_bounds_from_vertices(collector.vertices[:])
-    nav_mesh.cell_size = config.base.cs
-    nav_mesh.tile_size = config.base.tile_size
-    nav_mesh.is_tiled = config.base.tile_size > 0
+    nav_mesh.cell_size = config.cs
+    nav_mesh.tile_size = config.tile_size
+    nav_mesh.is_tiled = config.tile_size > 0
     
     for i in 0..<64 {
         nav_mesh.area_costs[i] = 1.0
