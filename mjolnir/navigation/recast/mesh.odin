@@ -86,8 +86,8 @@ calc_poly_area_2d :: proc "contextless" (verts: [][3]u16, indices: []int) -> i32
         vj := verts[indices[j]]
 
         // Get XZ coordinates as 3D vectors and compute 2D cross product (Z component)
-        v1 := [3]i32{i32(vi[0]), 0, i32(vi[2])}
-        v2 := [3]i32{i32(vj[0]), 0, i32(vj[2])}
+        v1 := [3]i32{i32(vi.x), 0, i32(vi.z)}
+        v2 := [3]i32{i32(vj.x), 0, i32(vj.z)}
         area += linalg.cross(v1, v2).y
 
         j = i
@@ -107,9 +107,9 @@ is_convex_vertex :: proc "contextless" (verts: [][3]u16, indices: []i32, i: int)
     vc := verts[indices[next]]
 
     // Get XZ coordinates as 3D vectors
-    v1 := [3]i32{i32(va[0]), 0, i32(va[2])}
-    v2 := [3]i32{i32(vb[0]), 0, i32(vb[2])}
-    v3 := [3]i32{i32(vc[0]), 0, i32(vc[2])}
+    v1 := [3]i32{i32(va.x), 0, i32(va.z)}
+    v2 := [3]i32{i32(vb.x), 0, i32(vb.z)}
+    v3 := [3]i32{i32(vc.x), 0, i32(vc.z)}
 
     // Calculate cross product to determine if angle is convex (Y component gives 2D cross product)
     ab := v2 - v1
@@ -326,7 +326,7 @@ triangulate_polygon :: proc(verts: [][3]u16, indices: []i32, triangles: ^[dynami
     defer delete(int_verts)
     for i in 0..<len(verts) {
         v := verts[i]
-        int_verts[i] = {i32(v[0]), i32(v[1]), i32(v[2]), 0}  // x, y, z, padding
+        int_verts[i] = {i32(v.x), i32(v.y), i32(v.z), 0}  // x, y, z, padding
     }
 
     n := i32(len(indices))

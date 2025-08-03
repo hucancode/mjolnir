@@ -324,9 +324,7 @@ dt_crowd_integrate :: proc(crowd: ^Dt_Crowd, dt: f32) {
             dv = linalg.normalize(dv) * max_delta_v
         }
 
-        agent.velocity[0] += dv[0]
-        agent.velocity[1] += dv[1]
-        agent.velocity[2] += dv[2]
+        agent.velocity += dv
 
         // Integrate position
         if agent.state == .Walking {
