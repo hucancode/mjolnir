@@ -13,7 +13,7 @@ test_recast_detail_compilation :: proc(t: ^testing.T) {
     log.info("Testing Recast detail mesh compilation...")
     
     // Test data structure allocation
-    dmesh := nav_recast.rc_alloc_poly_mesh_detail()
+    dmesh := nav_recast.alloc_poly_mesh_detail()
     testing.expect(t, dmesh != nil, "Should allocate detail mesh successfully")
     
     // Test validation with empty mesh
@@ -21,7 +21,7 @@ test_recast_detail_compilation :: proc(t: ^testing.T) {
     testing.expect(t, !valid, "Empty detail mesh should be invalid")
     
     // Clean up
-    nav_recast.rc_free_poly_mesh_detail(dmesh)
+    nav_recast.free_poly_mesh_detail(dmesh)
     
     log.info("✓ Recast detail mesh compilation test passed")
 }
@@ -33,14 +33,14 @@ test_simple_detail_mesh_build :: proc(t: ^testing.T) {
     log.info("Testing simple detail mesh build...")
     
     // Create minimal working example
-    pmesh := nav_recast.rc_alloc_poly_mesh()
-    defer nav_recast.rc_free_poly_mesh(pmesh)
+    pmesh := nav_recast.alloc_poly_mesh()
+    defer nav_recast.free_poly_mesh(pmesh)
     
-    chf := nav_recast.rc_alloc_compact_heightfield()
-    defer nav_recast.rc_free_compact_heightfield(chf)
+    chf := nav_recast.alloc_compact_heightfield()
+    defer nav_recast.free_compact_heightfield(chf)
     
-    dmesh := nav_recast.rc_alloc_poly_mesh_detail()
-    defer nav_recast.rc_free_poly_mesh_detail(dmesh)
+    dmesh := nav_recast.alloc_poly_mesh_detail()
+    defer nav_recast.free_poly_mesh_detail(dmesh)
     
     // Set up minimal polygon mesh (single triangle)
     pmesh.npolys = 1
@@ -75,8 +75,8 @@ test_simple_detail_mesh_build :: proc(t: ^testing.T) {
     chf.cs = pmesh.cs
     chf.ch = pmesh.ch
     
-    chf.cells = make([]nav_recast.Rc_Compact_Cell, 4)
-    chf.spans = make([]nav_recast.Rc_Compact_Span, 4)
+    chf.cells = make([]nav_recast.Compact_Cell, 4)
+    chf.spans = make([]nav_recast.Compact_Span, 4)
     
     for i in 0..<4 {
         cell := &chf.cells[i]
@@ -89,7 +89,7 @@ test_simple_detail_mesh_build :: proc(t: ^testing.T) {
     }
     
     // Try to build detail mesh
-    success := nav_recast.rc_build_poly_mesh_detail(pmesh, chf, 0.5, 1.0, dmesh)
+    success := nav_recast.build_poly_mesh_detail(pmesh, chf, 0.5, 1.0, dmesh)
     testing.expect(t, success, "Should build detail mesh successfully")
     
     if success {

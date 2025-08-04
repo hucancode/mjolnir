@@ -17,7 +17,7 @@ Level_Stack_Entry :: struct {
 }
 
 // Sweep span for monotone partitioning
-Rc_Sweep_Span :: struct {
+Sweep_Span :: struct {
     rid:  u16,    // row id
     id:   u16,    // region id
     ns:   u16,    // number samples
@@ -46,11 +46,11 @@ Region :: struct {
     floors:            [dynamic]i32,
 }
 
-// Use rc_get_con from filter.odin which is already imported
+// Use get_con from filter.odin which is already imported
 
 // Calculate distance field for watershed algorithm
 @(optimization_mode="none")
-calculate_distance_field :: proc(chf: ^Rc_Compact_Heightfield, src: []u16) -> (max_dist: u16) {
+calculate_distance_field :: proc(chf: ^Compact_Heightfield, src: []u16) -> (max_dist: u16) {
     w := chf.width
     h := chf.height
 
@@ -88,11 +88,11 @@ calculate_distance_field :: proc(chf: ^Rc_Compact_Heightfield, src: []u16) -> (m
 
                 nc := 0
                 for dir in 0..<4 {
-                    if rc_get_con(s, dir) != RC_NOT_CONNECTED {
+                    if get_con(s, dir) != RC_NOT_CONNECTED {
                         ax := x + get_dir_offset_x(dir)
                         ay := y + get_dir_offset_y(dir)
                         if ax >= 0 && ay >= 0 && ax < w && ay < h {
-                            ai := u32(chf.cells[ax + ay * w].index) + u32(rc_get_con(s, dir))
+                            ai := u32(chf.cells[ax + ay * w].index) + u32(get_con(s, dir))
                             if ai < u32(len(chf.areas)) && area == chf.areas[ai] {
                                 nc += 1
                             }
@@ -119,12 +119,12 @@ calculate_distance_field :: proc(chf: ^Rc_Compact_Heightfield, src: []u16) -> (m
                 }
                 s := &chf.spans[i]
 
-                if rc_get_con(s, 0) != RC_NOT_CONNECTED {
+                if get_con(s, 0) != RC_NOT_CONNECTED {
                     // Process direction 0 (-1,0)
                     ax := x + get_dir_offset_x(0)
                     ay := y + get_dir_offset_y(0)
                     if ax >= 0 && ay >= 0 && ax < w && ay < h {
-                        ai := u32(chf.cells[ax + ay * w].index) + u32(rc_get_con(s, 0))
+                        ai := u32(chf.cells[ax + ay * w].index) + u32(get_con(s, 0))
                         if ai < u32(len(src)) && src[ai] != 0xffff && src[ai] < 0xffff - 2 && src[ai] + 2 < src[i] {
                             src[i] = src[ai] + 2
                         }
@@ -132,11 +132,11 @@ calculate_distance_field :: proc(chf: ^Rc_Compact_Heightfield, src: []u16) -> (m
                         // Diagonal (-1,-1)
                         if ai < u32(len(chf.spans)) {
                             as := &chf.spans[ai]
-                            if rc_get_con(as, 3) != RC_NOT_CONNECTED {
+                            if get_con(as, 3) != RC_NOT_CONNECTED {
                                 aax := ax + get_dir_offset_x(3)
                                 aay := ay + get_dir_offset_y(3)
                                 if aax >= 0 && aay >= 0 && aax < w && aay < h {
-                                    aai := u32(chf.cells[aax + aay * w].index) + u32(rc_get_con(as, 3))
+                                    aai := u32(chf.cells[aax + aay * w].index) + u32(get_con(as, 3))
                                     if aai < u32(len(src)) && src[aai] != 0xffff && src[aai] < 0xffff - 3 && src[aai] + 3 < src[i] {
                                         src[i] = src[aai] + 3
                                     }
@@ -147,11 +147,11 @@ calculate_distance_field :: proc(chf: ^Rc_Compact_Heightfield, src: []u16) -> (m
                 }
 
                 // Process direction 3 (0,-1)
-                if rc_get_con(s, 3) != RC_NOT_CONNECTED {
+                if get_con(s, 3) != RC_NOT_CONNECTED {
                     ax := x + get_dir_offset_x(3)
                     ay := y + get_dir_offset_y(3)
                     if ax >= 0 && ay >= 0 && ax < w && ay < h {
-                        ai := u32(chf.cells[ax + ay * w].index) + u32(rc_get_con(s, 3))
+                        ai := u32(chf.cells[ax + ay * w].index) + u32(get_con(s, 3))
                         if ai < u32(len(src)) && src[ai] != 0xffff && src[ai] < 0xffff - 2 && src[ai] + 2 < src[i] {
                             src[i] = src[ai] + 2
                         }
@@ -159,11 +159,11 @@ calculate_distance_field :: proc(chf: ^Rc_Compact_Heightfield, src: []u16) -> (m
                         // Diagonal (1,-1)
                         if ai < u32(len(chf.spans)) {
                             as := &chf.spans[ai]
-                            if rc_get_con(as, 2) != RC_NOT_CONNECTED {
+                            if get_con(as, 2) != RC_NOT_CONNECTED {
                                 aax := ax + get_dir_offset_x(2)
                                 aay := ay + get_dir_offset_y(2)
                                 if aax >= 0 && aay >= 0 && aax < w && aay < h {
-                                    aai := u32(chf.cells[aax + aay * w].index) + u32(rc_get_con(as, 2))
+                                    aai := u32(chf.cells[aax + aay * w].index) + u32(get_con(as, 2))
                                     if aai < u32(len(src)) && src[aai] != 0xffff && src[aai] < 0xffff - 3 && src[aai] + 3 < src[i] {
                                         src[i] = src[aai] + 3
                                     }
@@ -190,11 +190,11 @@ calculate_distance_field :: proc(chf: ^Rc_Compact_Heightfield, src: []u16) -> (m
                 s := &chf.spans[i]
 
                 // Process direction 2 (1,0)
-                if rc_get_con(s, 2) != RC_NOT_CONNECTED {
+                if get_con(s, 2) != RC_NOT_CONNECTED {
                     ax := x + get_dir_offset_x(2)
                     ay := y + get_dir_offset_y(2)
                     if ax >= 0 && ay >= 0 && ax < w && ay < h {
-                        ai := u32(chf.cells[ax + ay * w].index) + u32(rc_get_con(s, 2))
+                        ai := u32(chf.cells[ax + ay * w].index) + u32(get_con(s, 2))
                         if ai < u32(len(src)) && src[ai] != 0xffff && src[ai] < 0xffff - 2 && src[ai] + 2 < src[i] {
                             src[i] = src[ai] + 2
                         }
@@ -202,11 +202,11 @@ calculate_distance_field :: proc(chf: ^Rc_Compact_Heightfield, src: []u16) -> (m
                         // Diagonal (1,1)
                         if ai < u32(len(chf.spans)) {
                             as := &chf.spans[ai]
-                            if rc_get_con(as, 1) != RC_NOT_CONNECTED {
+                            if get_con(as, 1) != RC_NOT_CONNECTED {
                                 aax := ax + get_dir_offset_x(1)
                                 aay := ay + get_dir_offset_y(1)
                                 if aax >= 0 && aay >= 0 && aax < w && aay < h {
-                                    aai := u32(chf.cells[aax + aay * w].index) + u32(rc_get_con(as, 1))
+                                    aai := u32(chf.cells[aax + aay * w].index) + u32(get_con(as, 1))
                                     if aai < u32(len(src)) && src[aai] != 0xffff && src[aai] < 0xffff - 3 && src[aai] + 3 < src[i] {
                                         src[i] = src[aai] + 3
                                     }
@@ -217,11 +217,11 @@ calculate_distance_field :: proc(chf: ^Rc_Compact_Heightfield, src: []u16) -> (m
                 }
 
                 // Process direction 1 (0,1)
-                if rc_get_con(s, 1) != RC_NOT_CONNECTED {
+                if get_con(s, 1) != RC_NOT_CONNECTED {
                     ax := x + get_dir_offset_x(1)
                     ay := y + get_dir_offset_y(1)
                     if ax >= 0 && ay >= 0 && ax < w && ay < h {
-                        ai := u32(chf.cells[ax + ay * w].index) + u32(rc_get_con(s, 1))
+                        ai := u32(chf.cells[ax + ay * w].index) + u32(get_con(s, 1))
                         if ai < u32(len(src)) && src[ai] != 0xffff && src[ai] < 0xffff - 2 && src[ai] + 2 < src[i] {
                             src[i] = src[ai] + 2
                         }
@@ -229,11 +229,11 @@ calculate_distance_field :: proc(chf: ^Rc_Compact_Heightfield, src: []u16) -> (m
                         // Diagonal (-1,1)
                         if ai < u32(len(chf.spans)) {
                             as := &chf.spans[ai]
-                            if rc_get_con(as, 0) != RC_NOT_CONNECTED {
+                            if get_con(as, 0) != RC_NOT_CONNECTED {
                                 aax := ax + get_dir_offset_x(0)
                                 aay := ay + get_dir_offset_y(0)
                                 if aax >= 0 && aay >= 0 && aax < w && aay < h {
-                                    aai := u32(chf.cells[aax + aay * w].index) + u32(rc_get_con(as, 0))
+                                    aai := u32(chf.cells[aax + aay * w].index) + u32(get_con(as, 0))
                                     if aai < u32(len(src)) && src[aai] != 0xffff && src[aai] < 0xffff - 3 && src[aai] + 3 < src[i] {
                                         src[i] = src[aai] + 3
                                     }
@@ -251,7 +251,7 @@ calculate_distance_field :: proc(chf: ^Rc_Compact_Heightfield, src: []u16) -> (m
 
 // Box blur for distance field smoothing
 @(optimization_mode="none")
-box_blur :: proc(chf: ^Rc_Compact_Heightfield, thr: i32, src, dst: []u16) -> []u16 {
+box_blur :: proc(chf: ^Compact_Heightfield, thr: i32, src, dst: []u16) -> []u16 {
     w := chf.width
     h := chf.height
     threshold := thr * 2
@@ -268,23 +268,23 @@ box_blur :: proc(chf: ^Rc_Compact_Heightfield, thr: i32, src, dst: []u16) -> []u
                 }
                 d := i32(cd)
                 for dir in 0..<4 {
-                    if rc_get_con(s, dir) == RC_NOT_CONNECTED {
+                    if get_con(s, dir) == RC_NOT_CONNECTED {
                         d += i32(cd) * 2
                         continue
                     }
                     ax := x + get_dir_offset_x(dir)
                     ay := y + get_dir_offset_y(dir)
-                    ai := u32(chf.cells[ax + ay * w].index) + u32(rc_get_con(s, dir))
+                    ai := u32(chf.cells[ax + ay * w].index) + u32(get_con(s, dir))
                     d += i32(src[ai])
                     as := &chf.spans[ai]
                     dir2 := (dir + 1) & 0x3
-                    if rc_get_con(as, dir2) == RC_NOT_CONNECTED {
+                    if get_con(as, dir2) == RC_NOT_CONNECTED {
                         d += i32(cd)
                         continue
                     }
                     ax2 := ax + get_dir_offset_x(dir2)
                     ay2 := ay + get_dir_offset_y(dir2)
-                    ai2 := chf.cells[ax2 + ay2 * w].index + u32(rc_get_con(as, dir2))
+                    ai2 := chf.cells[ax2 + ay2 * w].index + u32(get_con(as, dir2))
                     d += i32(src[ai2])
                 }
                 dst[i] = u16((d + 5) / 9)
@@ -296,7 +296,7 @@ box_blur :: proc(chf: ^Rc_Compact_Heightfield, thr: i32, src, dst: []u16) -> []u
 
 // Flood region - level set based region growing
 @(optimization_mode="none")
-flood_region :: proc(x, y, i: i32, level, r: u16, chf: ^Rc_Compact_Heightfield,
+flood_region :: proc(x, y, i: i32, level, r: u16, chf: ^Compact_Heightfield,
                     src_reg, src_dist: []u16, stack: ^[dynamic]Level_Stack_Entry) -> bool {
     w := chf.width
     h := chf.height
@@ -329,7 +329,7 @@ flood_region :: proc(x, y, i: i32, level, r: u16, chf: ^Rc_Compact_Heightfield,
         ar: u16 = 0
         for dir in 0..<4 {
             // 8 connected
-            if rc_get_con(cs, dir) == RC_NOT_CONNECTED {
+            if get_con(cs, dir) == RC_NOT_CONNECTED {
                 continue
             }
             ax := cx + get_dir_offset_x(dir)
@@ -337,7 +337,7 @@ flood_region :: proc(x, y, i: i32, level, r: u16, chf: ^Rc_Compact_Heightfield,
             if ax < 0 || ay < 0 || ax >= w || ay >= h {
                 continue
             }
-            ai := i32(u32(chf.cells[ax + ay * w].index)) + i32(rc_get_con(cs, dir))
+            ai := i32(u32(chf.cells[ax + ay * w].index)) + i32(get_con(cs, dir))
             if chf.areas[ai] != area {
                 continue
             }
@@ -353,7 +353,7 @@ flood_region :: proc(x, y, i: i32, level, r: u16, chf: ^Rc_Compact_Heightfield,
             as := &chf.spans[ai]
 
             dir2 := (dir + 1) & 0x3
-            if rc_get_con(as, dir2) == RC_NOT_CONNECTED {
+            if get_con(as, dir2) == RC_NOT_CONNECTED {
                 continue
             }
             ax2 := ax + get_dir_offset_x(dir2)
@@ -361,7 +361,7 @@ flood_region :: proc(x, y, i: i32, level, r: u16, chf: ^Rc_Compact_Heightfield,
             if ax2 < 0 || ay2 < 0 || ax2 >= w || ay2 >= h {
                 continue
             }
-            ai2 := i32(chf.cells[ax2 + ay2 * w].index) + i32(rc_get_con(as, dir2))
+            ai2 := i32(chf.cells[ax2 + ay2 * w].index) + i32(get_con(as, dir2))
             if chf.areas[ai2] != area {
                 continue
             }
@@ -380,7 +380,7 @@ flood_region :: proc(x, y, i: i32, level, r: u16, chf: ^Rc_Compact_Heightfield,
 
         // Expand neighbours
         for dir in 0..<4 {
-            if rc_get_con(cs, dir) == RC_NOT_CONNECTED {
+            if get_con(cs, dir) == RC_NOT_CONNECTED {
                 continue
             }
             ax := cx + get_dir_offset_x(dir)
@@ -388,7 +388,7 @@ flood_region :: proc(x, y, i: i32, level, r: u16, chf: ^Rc_Compact_Heightfield,
             if ax < 0 || ay < 0 || ax >= w || ay >= h {
                 continue
             }
-            ai := i32(u32(chf.cells[ax + ay * w].index)) + i32(rc_get_con(cs, dir))
+            ai := i32(u32(chf.cells[ax + ay * w].index)) + i32(get_con(cs, dir))
             if chf.areas[ai] != area {
                 continue
             }
@@ -405,7 +405,7 @@ flood_region :: proc(x, y, i: i32, level, r: u16, chf: ^Rc_Compact_Heightfield,
 
 // Expand regions to fill gaps
 @(optimization_mode="none")
-expand_regions :: proc(max_iter: i32, level: u16, chf: ^Rc_Compact_Heightfield,
+expand_regions :: proc(max_iter: i32, level: u16, chf: ^Compact_Heightfield,
                       src_reg, src_dist: []u16, stack: ^[dynamic]Level_Stack_Entry,
                       fill_stack: bool) {
     w := chf.width
@@ -457,7 +457,7 @@ expand_regions :: proc(max_iter: i32, level: u16, chf: ^Rc_Compact_Heightfield,
             area := chf.areas[i]
             s := &chf.spans[i]
             for dir in 0..<4 {
-                if rc_get_con(s, dir) == RC_NOT_CONNECTED {
+                if get_con(s, dir) == RC_NOT_CONNECTED {
                     continue
                 }
                 ax := x + get_dir_offset_x(dir)
@@ -465,7 +465,7 @@ expand_regions :: proc(max_iter: i32, level: u16, chf: ^Rc_Compact_Heightfield,
                 if ax < 0 || ay < 0 || ax >= w || ay >= h {
                     continue
                 }
-                ai := i32(u32(chf.cells[ax + ay * w].index)) + i32(rc_get_con(s, dir))
+                ai := i32(u32(chf.cells[ax + ay * w].index)) + i32(get_con(s, dir))
                 if chf.areas[ai] != area {
                     continue
                 }
@@ -504,7 +504,7 @@ expand_regions :: proc(max_iter: i32, level: u16, chf: ^Rc_Compact_Heightfield,
 
 // Paint rectangular region
 paint_rect_region :: proc(minx, maxx, miny, maxy: i32, reg_id: u16,
-                         chf: ^Rc_Compact_Heightfield, src_reg: []u16) {
+                         chf: ^Compact_Heightfield, src_reg: []u16) {
     w := chf.width
     for y in miny..<maxy {
         for x in minx..<maxx {
@@ -520,7 +520,7 @@ paint_rect_region :: proc(minx, maxx, miny, maxy: i32, reg_id: u16,
 
 // Sort cells by level for level-set processing
 @(optimization_mode="none")
-sort_cells_by_level :: proc(start_level: u16, chf: ^Rc_Compact_Heightfield, src_reg: []u16,
+sort_cells_by_level :: proc(start_level: u16, chf: ^Compact_Heightfield, src_reg: []u16,
                            nb_stacks: u32, stacks: [][dynamic]Level_Stack_Entry,
                            log_levels_per_stack: u32) {
     w := chf.width
@@ -702,15 +702,15 @@ is_region_connected_to_border :: proc(reg: ^Region) -> bool {
 }
 
 // Check if edge is solid
-is_solid_edge :: proc(chf: ^Rc_Compact_Heightfield, src_reg: []u16,
+is_solid_edge :: proc(chf: ^Compact_Heightfield, src_reg: []u16,
                      x, y, i: i32, dir: int) -> bool {
     s := &chf.spans[i]
     r: u16 = 0
-    if rc_get_con(s, dir) != RC_NOT_CONNECTED {
+    if get_con(s, dir) != RC_NOT_CONNECTED {
         ax := x + get_dir_offset_x(dir)
         ay := y + get_dir_offset_y(dir)
         if ax >= 0 && ay >= 0 && ax < chf.width && ay < chf.height {
-            ai := i32(chf.cells[ax + ay * chf.width].index) + i32(rc_get_con(s, dir))
+            ai := i32(chf.cells[ax + ay * chf.width].index) + i32(get_con(s, dir))
             r = src_reg[ai]
         }
     }
@@ -722,7 +722,7 @@ is_solid_edge :: proc(chf: ^Rc_Compact_Heightfield, src_reg: []u16,
 
 // Walk contour to find region connections - renamed to avoid conflict with contour.odin
 @(optimization_mode="none")
-walk_contour_for_region :: proc(x_in, y_in, i_in: i32, dir_in: int, chf: ^Rc_Compact_Heightfield,
+walk_contour_for_region :: proc(x_in, y_in, i_in: i32, dir_in: int, chf: ^Compact_Heightfield,
                     src_reg: []u16, cont: ^[dynamic]i32) {
     x, y, i := x_in, y_in, i_in
     dir := dir_in
@@ -731,11 +731,11 @@ walk_contour_for_region :: proc(x_in, y_in, i_in: i32, dir_in: int, chf: ^Rc_Com
 
     ss := &chf.spans[i]
     cur_reg: u16 = 0
-    if rc_get_con(ss, dir) != RC_NOT_CONNECTED {
+    if get_con(ss, dir) != RC_NOT_CONNECTED {
         ax := x + get_dir_offset_x(dir)
         ay := y + get_dir_offset_y(dir)
         if ax >= 0 && ay >= 0 && ax < chf.width && ay < chf.height {
-            ai := i32(chf.cells[ax + ay * chf.width].index) + i32(rc_get_con(ss, dir))
+            ai := i32(chf.cells[ax + ay * chf.width].index) + i32(get_con(ss, dir))
             cur_reg = src_reg[ai]
         }
     }
@@ -750,11 +750,11 @@ walk_contour_for_region :: proc(x_in, y_in, i_in: i32, dir_in: int, chf: ^Rc_Com
         if is_solid_edge(chf, src_reg, x, y, i, dir) {
             // Choose the edge corner
             r: u16 = 0
-            if rc_get_con(s, dir) != RC_NOT_CONNECTED {
+            if get_con(s, dir) != RC_NOT_CONNECTED {
                 ax := x + get_dir_offset_x(dir)
                 ay := y + get_dir_offset_y(dir)
                 if ax >= 0 && ay >= 0 && ax < chf.width && ay < chf.height {
-                    ai := i32(chf.cells[ax + ay * chf.width].index) + i32(rc_get_con(s, dir))
+                    ai := i32(chf.cells[ax + ay * chf.width].index) + i32(get_con(s, dir))
                     r = src_reg[ai]
                 }
             }
@@ -768,10 +768,10 @@ walk_contour_for_region :: proc(x_in, y_in, i_in: i32, dir_in: int, chf: ^Rc_Com
             ni: i32 = -1
             nx := x + get_dir_offset_x(dir)
             ny := y + get_dir_offset_y(dir)
-            if rc_get_con(s, dir) != RC_NOT_CONNECTED {
+            if get_con(s, dir) != RC_NOT_CONNECTED {
                 if nx >= 0 && ny >= 0 && nx < chf.width && ny < chf.height {
                     nc := &chf.cells[nx + ny * chf.width]
-                    ni = i32(nc.index) + i32(rc_get_con(s, dir))
+                    ni = i32(nc.index) + i32(get_con(s, dir))
                 }
             }
             if ni == -1 {
@@ -816,7 +816,7 @@ add_unique_connection :: proc(reg: ^Region, n: i32) {
 // Merge and filter regions
 @(optimization_mode="none")
 merge_and_filter_regions :: proc(min_region_area, merge_region_size: i32,
-                               max_region_id: ^u16, chf: ^Rc_Compact_Heightfield,
+                               max_region_id: ^u16, chf: ^Compact_Heightfield,
                                src_reg: []u16, overlaps: ^[dynamic]i32) -> bool {
     w := chf.width
     h := chf.height
@@ -1084,7 +1084,7 @@ merge_and_filter_regions :: proc(min_region_area, merge_region_size: i32,
 }
 
 // Build regions using watershed partitioning
-rc_build_regions :: proc(chf: ^Rc_Compact_Heightfield,
+build_regions :: proc(chf: ^Compact_Heightfield,
                         border_size, min_region_area, merge_region_area: i32) -> bool {
     // Removed timer code for simplicity
 
@@ -1269,7 +1269,7 @@ rc_build_regions :: proc(chf: ^Rc_Compact_Heightfield,
 }
 
 // Build regions using monotone partitioning
-rc_build_regions_monotone :: proc(chf: ^Rc_Compact_Heightfield,
+build_regions_monotone :: proc(chf: ^Compact_Heightfield,
                                  border_size, min_region_area, merge_region_area: i32) -> bool {
     // Removed timer code for simplicity
 
@@ -1287,7 +1287,7 @@ rc_build_regions_monotone :: proc(chf: ^Rc_Compact_Heightfield,
     // slice.fill(src_reg, 0) // unnecessary
 
     nsweeps := max(chf.width, chf.height)
-    sweeps := make([]Rc_Sweep_Span, nsweeps, allocator)
+    sweeps := make([]Sweep_Span, nsweeps, allocator)
     if sweeps == nil {
         log.errorf("rcBuildRegionsMonotone: Out of memory 'sweeps' (%d).", nsweeps)
         return false
@@ -1333,11 +1333,11 @@ rc_build_regions_monotone :: proc(chf: ^Rc_Compact_Heightfield,
 
                 // -x
                 previd: u16 = 0
-                if rc_get_con(s, 0) != RC_NOT_CONNECTED {
+                if get_con(s, 0) != RC_NOT_CONNECTED {
                     ax := x + get_dir_offset_x(0)
                     ay := y + get_dir_offset_y(0)
                     if ax >= 0 && ay >= 0 && ax < w && ay < h {
-                        ai := u32(chf.cells[ax + ay * w].index) + u32(rc_get_con(s, 0))
+                        ai := u32(chf.cells[ax + ay * w].index) + u32(get_con(s, 0))
                         if (src_reg[ai] & RC_BORDER_REG) == 0 && chf.areas[i] == chf.areas[ai] {
                             previd = src_reg[ai]
                         }
@@ -1353,11 +1353,11 @@ rc_build_regions_monotone :: proc(chf: ^Rc_Compact_Heightfield,
                 }
 
                 // -y
-                if rc_get_con(s, 3) != RC_NOT_CONNECTED {
+                if get_con(s, 3) != RC_NOT_CONNECTED {
                     ax := x + get_dir_offset_x(3)
                     ay := y + get_dir_offset_y(3)
                     if ax >= 0 && ay >= 0 && ax < w && ay < h {
-                        ai := u32(chf.cells[ax + ay * w].index) + u32(rc_get_con(s, 3))
+                        ai := u32(chf.cells[ax + ay * w].index) + u32(get_con(s, 3))
                         if src_reg[ai] != 0 && (src_reg[ai] & RC_BORDER_REG) == 0 && chf.areas[i] == chf.areas[ai] {
                             nr := src_reg[ai]
                             if sweeps[previd].nei == 0 || sweeps[previd].nei == nr {
@@ -1420,7 +1420,7 @@ rc_build_regions_monotone :: proc(chf: ^Rc_Compact_Heightfield,
 
 // Merge and filter layer regions
 merge_and_filter_layer_regions :: proc(min_region_area: i32,
-                                      max_region_id: ^u16, chf: ^Rc_Compact_Heightfield,
+                                      max_region_id: ^u16, chf: ^Compact_Heightfield,
                                       src_reg: []u16) -> bool {
     w := chf.width
     h := chf.height
@@ -1474,11 +1474,11 @@ merge_and_filter_layer_regions :: proc(min_region_area: i32,
 
                 // Update neighbours
                 for dir in 0..<4 {
-                    if rc_get_con(s, dir) != RC_NOT_CONNECTED {
+                    if get_con(s, dir) != RC_NOT_CONNECTED {
                         ax := x + get_dir_offset_x(dir)
                         ay := y + get_dir_offset_y(dir)
                         if ax >= 0 && ay >= 0 && ax < w && ay < h {
-                            ai := u32(chf.cells[ax + ay * w].index) + u32(rc_get_con(s, dir))
+                            ai := u32(chf.cells[ax + ay * w].index) + u32(get_con(s, dir))
                             rai := src_reg[ai]
                             if rai > 0 && rai < u16(nreg) && rai != ri {
                                 add_unique_connection(reg, i32(rai))
@@ -1633,7 +1633,7 @@ merge_and_filter_layer_regions :: proc(min_region_area: i32,
 }
 
 // Build layer regions for multi-story environments
-rc_build_layer_regions :: proc(chf: ^Rc_Compact_Heightfield,
+build_layer_regions :: proc(chf: ^Compact_Heightfield,
                               border_size, min_region_area: i32) -> bool {
     // Removed timer code for simplicity
 
@@ -1651,7 +1651,7 @@ rc_build_layer_regions :: proc(chf: ^Rc_Compact_Heightfield,
     slice.fill(src_reg, 0)
 
     nsweeps := max(chf.width, chf.height)
-    sweeps := make([]Rc_Sweep_Span, nsweeps, allocator)
+    sweeps := make([]Sweep_Span, nsweeps, allocator)
     if sweeps == nil {
         log.errorf("rcBuildLayerRegions: Out of memory 'sweeps' (%d).", nsweeps)
         return false
@@ -1697,11 +1697,11 @@ rc_build_layer_regions :: proc(chf: ^Rc_Compact_Heightfield,
 
                 // -x
                 previd: u16 = 0
-                if rc_get_con(s, 0) != RC_NOT_CONNECTED {
+                if get_con(s, 0) != RC_NOT_CONNECTED {
                     ax := x + get_dir_offset_x(0)
                     ay := y + get_dir_offset_y(0)
                     if ax >= 0 && ay >= 0 && ax < w && ay < h {
-                        ai := u32(chf.cells[ax + ay * w].index) + u32(rc_get_con(s, 0))
+                        ai := u32(chf.cells[ax + ay * w].index) + u32(get_con(s, 0))
                         if (src_reg[ai] & RC_BORDER_REG) == 0 && chf.areas[i] == chf.areas[ai] {
                             previd = src_reg[ai]
                         }
@@ -1717,11 +1717,11 @@ rc_build_layer_regions :: proc(chf: ^Rc_Compact_Heightfield,
                 }
 
                 // -y
-                if rc_get_con(s, 3) != RC_NOT_CONNECTED {
+                if get_con(s, 3) != RC_NOT_CONNECTED {
                     ax := x + get_dir_offset_x(3)
                     ay := y + get_dir_offset_y(3)
                     if ax >= 0 && ay >= 0 && ax < w && ay < h {
-                        ai := u32(chf.cells[ax + ay * w].index) + u32(rc_get_con(s, 3))
+                        ai := u32(chf.cells[ax + ay * w].index) + u32(get_con(s, 3))
                         if src_reg[ai] != 0 && (src_reg[ai] & RC_BORDER_REG) == 0 && chf.areas[i] == chf.areas[ai] {
                             nr := src_reg[ai]
                             if sweeps[previd].nei == 0 || sweeps[previd].nei == nr {

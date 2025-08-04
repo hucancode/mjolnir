@@ -837,7 +837,7 @@ deinit :: proc(self: ^Engine) {
 // ========================================
 
 // Load navigation mesh from Recast data
-engine_set_navigation_mesh :: proc(engine: ^Engine, poly_mesh: ^recast.Rc_Poly_Mesh, detail_mesh: ^recast.Rc_Poly_Mesh_Detail) -> bool {
+engine_set_navigation_mesh :: proc(engine: ^Engine, poly_mesh: ^recast.Poly_Mesh, detail_mesh: ^recast.Poly_Mesh_Detail) -> bool {
     return navmesh_renderer_build_from_recast(&engine.navmesh, &engine.gpu_context, poly_mesh, detail_mesh)
 }
 

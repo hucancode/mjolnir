@@ -2,10 +2,11 @@ package navigation_detour
 
 import "core:math"
 import "core:math/linalg"
+import "core:slice"
 import nav_recast "../recast"
 
 // Detour navigation mesh polygon
-Dt_Poly :: struct {
+Poly :: struct {
     first_link:   u32,                                    // Index to first link in linked list (DT_NULL_LINK if no link)
     verts:        [nav_recast.DT_VERTS_PER_POLYGON]u16,     // Indices of polygon vertices
     neis:         [nav_recast.DT_VERTS_PER_POLYGON]u16,     // Neighbor data for each edge
@@ -15,24 +16,24 @@ Dt_Poly :: struct {
 }
 
 // Polygon area and type helpers
-dt_poly_set_area :: proc(poly: ^Dt_Poly, area: u8) {
+poly_set_area :: proc(poly: ^Poly, area: u8) {
     poly.area_and_type = (poly.area_and_type & 0xc0) | (area & 0x3f)
 }
 
-dt_poly_set_type :: proc(poly: ^Dt_Poly, type: u8) {
+poly_set_type :: proc(poly: ^Poly, type: u8) {
     poly.area_and_type = (poly.area_and_type & 0x3f) | (type << 6)
 }
 
-dt_poly_get_area :: proc(poly: ^Dt_Poly) -> u8 {
+poly_get_area :: proc(poly: ^Poly) -> u8 {
     return poly.area_and_type & 0x3f
 }
 
-dt_poly_get_type :: proc(poly: ^Dt_Poly) -> u8 {
+poly_get_type :: proc(poly: ^Poly) -> u8 {
     return poly.area_and_type >> 6
 }
 
 // Detail polygon mesh data
-Dt_Poly_Detail :: struct {
+Poly_Detail :: struct {
     vert_base:  u32,  // Offset of vertices in detail vertex array
     tri_base:   u32,  // Offset of triangles in detail triangle array
     vert_count: u8,   // Number of vertices in sub-mesh
@@ -40,7 +41,7 @@ Dt_Poly_Detail :: struct {
 }
 
 // Link between polygons
-Dt_Link :: struct {
+Link :: struct {
     ref:   nav_recast.Poly_Ref,  // Neighbor reference (linked polygon)
     next:  u32,                // Index of next link
     edge:  u8,                 // Index of polygon edge that owns this link
@@ -50,14 +51,14 @@ Dt_Link :: struct {
 }
 
 // Bounding volume node for spatial queries
-Dt_BV_Node :: struct {
+BV_Node :: struct {
     bmin: [3]u16,  // Minimum bounds of AABB
     bmax: [3]u16,  // Maximum bounds of AABB
     i:    i32,     // Node index (negative for escape sequence)
 }
 
 // Off-mesh connection
-Dt_Off_Mesh_Connection :: struct {
+Off_Mesh_Connection :: struct {
     start:   [3]f32,  // Start position
     end:     [3]f32,  // End position
     rad:     f32,     // Radius of endpoints
@@ -68,7 +69,7 @@ Dt_Off_Mesh_Connection :: struct {
 }
 
 // Mesh header containing tile metadata
-Dt_Mesh_Header :: struct {
+Mesh_Header :: struct {
     magic:               i32,    // Tile magic number
     version:             i32,    // Data format version
     x:                   i32,    // Tile x-position in grid
@@ -93,25 +94,25 @@ Dt_Mesh_Header :: struct {
 }
 
 // Navigation mesh tile
-Dt_Mesh_Tile :: struct {
+Mesh_Tile :: struct {
     salt:              u32,                       // Counter for modifications to tile
     links_free_list:   u32,                       // Index to next free link
-    header:            ^Dt_Mesh_Header,           // Tile header
-    polys:             []Dt_Poly,                 // Tile polygons
+    header:            ^Mesh_Header,           // Tile header
+    polys:             []Poly,                 // Tile polygons
     verts:             [][3]f32,                  // Tile vertices
-    links:             []Dt_Link,                 // Tile links
-    detail_meshes:     []Dt_Poly_Detail,          // Detail sub-meshes
+    links:             []Link,                 // Tile links
+    detail_meshes:     []Poly_Detail,          // Detail sub-meshes
     detail_verts:      [][3]f32,                  // Detail vertices
     detail_tris:       [][4]u8,                   // Detail triangles [vertA, vertB, vertC, flags]
-    bv_tree:           []Dt_BV_Node,              // Bounding volume tree
-    off_mesh_cons:     []Dt_Off_Mesh_Connection,  // Off-mesh connections
+    bv_tree:           []BV_Node,              // Bounding volume tree
+    off_mesh_cons:     []Off_Mesh_Connection,  // Off-mesh connections
     data:              []u8,                      // Raw tile data
     flags:             i32,                       // Tile flags
-    next:              ^Dt_Mesh_Tile,             // Next tile in spatial grid or free list
+    next:              ^Mesh_Tile,             // Next tile in spatial grid or free list
 }
 
 // Navigation mesh parameters
-Dt_Nav_Mesh_Params :: struct {
+Nav_Mesh_Params :: struct {
     orig:        [3]f32,  // World space origin of tile space
     tile_width:  f32,     // Width of each tile
     tile_height: f32,     // Height of each tile
@@ -120,17 +121,17 @@ Dt_Nav_Mesh_Params :: struct {
 }
 
 // Navigation mesh
-Dt_Nav_Mesh :: struct {
-    params:         Dt_Nav_Mesh_Params,   // Initialization parameters
+Nav_Mesh :: struct {
+    params:         Nav_Mesh_Params,   // Initialization parameters
     orig:           [3]f32,               // Origin of tile (0,0)
     tile_width:     f32,                  // Tile dimensions
     tile_height:    f32,
     max_tiles:      i32,                  // Maximum number of tiles
     tile_lut_size:  i32,                  // Tile hash lookup size (power of 2)
     tile_lut_mask:  i32,                  // Tile hash lookup mask
-    pos_lookup:     []^Dt_Mesh_Tile,      // Tile hash lookup
-    next_free:      ^Dt_Mesh_Tile,        // Free tile list
-    tiles:          []Dt_Mesh_Tile,       // All tiles
+    pos_lookup:     []^Mesh_Tile,      // Tile hash lookup
+    next_free:      ^Mesh_Tile,        // Free tile list
+    tiles:          []Mesh_Tile,       // All tiles
     
     // Reference encoding parameters
     salt_bits:      u32,                  // Number of salt bits
@@ -139,14 +140,14 @@ Dt_Nav_Mesh :: struct {
 }
 
 // Query filter for pathfinding constraints
-Dt_Query_Filter :: struct {
+Query_Filter :: struct {
     area_cost:     [nav_recast.DT_MAX_AREAS]f32,  // Cost per area type
     include_flags: u16,                         // Flags for traversable polygons
     exclude_flags: u16,                         // Flags for non-traversable polygons
 }
 
 // Raycast hit information
-Dt_Raycast_Hit :: struct {
+Raycast_Hit :: struct {
     t:              f32,                           // Hit parameter (FLT_MAX if no hit)
     hit_normal:     [3]f32,                        // Normal of nearest wall hit
     hit_edge_index: i32,                           // Edge index on final polygon
@@ -156,65 +157,63 @@ Dt_Raycast_Hit :: struct {
 }
 
 // Straight path point
-Dt_Straight_Path_Point :: struct {
+Straight_Path_Point :: struct {
     pos:   [3]f32,             // Point position
     flags: u8,                 // Point flags (start, end, off-mesh)
     ref:   nav_recast.Poly_Ref,  // Polygon reference
 }
 
 // Straight path flags
-Dt_Straight_Path_Flags :: enum u8 {
+Straight_Path_Flags :: enum u8 {
     Start                = 0x01,
     End                  = 0x02,
     Off_Mesh_Connection  = 0x04,
 }
 
 // Find path options
-Dt_Find_Path_Options :: enum u8 {
+Find_Path_Options :: enum u8 {
     Any_Angle = 0x02,
 }
 
 // Raycast options
-Dt_Raycast_Options :: enum u8 {
+Raycast_Options :: enum u8 {
     Use_Costs = 0x01,
 }
 
 // Straight path options
-Dt_Straight_Path_Options :: enum u8 {
+Straight_Path_Options :: enum u8 {
     Area_Crossings = 0x01,
     All_Crossings  = 0x02,
 }
 
 // Polygon query interface
-Dt_Poly_Query :: struct {
-    process: proc(ref: nav_recast.Poly_Ref, tile: ^Dt_Mesh_Tile, poly: ^Dt_Poly, user_data: rawptr),
+Poly_Query :: struct {
+    process: proc(ref: nav_recast.Poly_Ref, tile: ^Mesh_Tile, poly: ^Poly, user_data: rawptr),
     user_data: rawptr,
 }
 
 // Default query filter implementation
-dt_query_filter_init :: proc(filter: ^Dt_Query_Filter) {
+query_filter_init :: proc(filter: ^Query_Filter) {
     filter.include_flags = 0xffff
     filter.exclude_flags = 0
-    for i in 0..<nav_recast.DT_MAX_AREAS {
-        filter.area_cost[i] = 1.0
-    }
+    slice.fill(filter.area_cost[:], 1.0)
 }
 
-dt_query_filter_pass_filter :: proc(filter: ^Dt_Query_Filter, ref: nav_recast.Poly_Ref, tile: ^Dt_Mesh_Tile, poly: ^Dt_Poly) -> bool {
+query_filter_pass_filter :: proc(filter: ^Query_Filter, ref: nav_recast.Poly_Ref, tile: ^Mesh_Tile, poly: ^Poly) -> bool {
     return (poly.flags & filter.include_flags) != 0 && (poly.flags & filter.exclude_flags) == 0
 }
 
-dt_query_filter_get_cost :: proc(filter: ^Dt_Query_Filter, 
+query_filter_get_cost :: proc(filter: ^Query_Filter, 
                                 pa: [3]f32, pb: [3]f32,
-                                prev_ref: nav_recast.Poly_Ref, prev_tile: ^Dt_Mesh_Tile, prev_poly: ^Dt_Poly,
-                                cur_ref: nav_recast.Poly_Ref, cur_tile: ^Dt_Mesh_Tile, cur_poly: ^Dt_Poly,
-                                next_ref: nav_recast.Poly_Ref, next_tile: ^Dt_Mesh_Tile, next_poly: ^Dt_Poly) -> f32 {
+                                prev_ref: nav_recast.Poly_Ref, prev_tile: ^Mesh_Tile, prev_poly: ^Poly,
+                                cur_ref: nav_recast.Poly_Ref, cur_tile: ^Mesh_Tile, cur_poly: ^Poly,
+                                next_ref: nav_recast.Poly_Ref, next_tile: ^Mesh_Tile, next_poly: ^Poly) -> f32 {
     // Base cost is distance
     diff := pb - pa
     cost := linalg.length(diff)
     
     // Apply area-specific multiplier
-    area := dt_poly_get_area(cur_poly)
+    area := poly_get_area(cur_poly)
     if area < nav_recast.DT_MAX_AREAS {
         cost *= filter.area_cost[area]
     }
@@ -224,13 +223,13 @@ dt_query_filter_get_cost :: proc(filter: ^Dt_Query_Filter,
 
 
 // Reference encoding/decoding helpers
-dt_encode_poly_id :: proc(nav_mesh: ^Dt_Nav_Mesh, salt: u32, tile_index: u32, poly_index: u32) -> nav_recast.Poly_Ref {
+encode_poly_id :: proc(nav_mesh: ^Nav_Mesh, salt: u32, tile_index: u32, poly_index: u32) -> nav_recast.Poly_Ref {
     return nav_recast.Poly_Ref((salt << (nav_mesh.poly_bits + nav_mesh.tile_bits)) | 
                             (tile_index << nav_mesh.poly_bits) | 
                             poly_index)
 }
 
-dt_decode_poly_id :: proc(nav_mesh: ^Dt_Nav_Mesh, ref: nav_recast.Poly_Ref) -> (salt: u32, tile_index: u32, poly_index: u32) {
+decode_poly_id :: proc(nav_mesh: ^Nav_Mesh, ref: nav_recast.Poly_Ref) -> (salt: u32, tile_index: u32, poly_index: u32) {
     if nav_mesh == nil {
         return 0, 0, 0
     }
@@ -247,7 +246,7 @@ dt_decode_poly_id :: proc(nav_mesh: ^Dt_Nav_Mesh, ref: nav_recast.Poly_Ref) -> (
 }
 
 // Calculate tile location from world position with robust error handling
-dt_calc_tile_loc :: proc(nav_mesh: ^Dt_Nav_Mesh, pos: [3]f32) -> (tx: i32, ty: i32, status: nav_recast.Status) {
+calc_tile_loc :: proc(nav_mesh: ^Nav_Mesh, pos: [3]f32) -> (tx: i32, ty: i32, status: nav_recast.Status) {
     // Input validation
     if nav_mesh == nil {
         return 0, 0, {.Invalid_Param}
@@ -325,9 +324,9 @@ dt_calc_tile_loc :: proc(nav_mesh: ^Dt_Nav_Mesh, pos: [3]f32) -> (tx: i32, ty: i
 }
 
 // Calculate tile location from world position (simple version)
-// Returns (0, 0) for invalid inputs - use dt_calc_tile_loc for full error handling
-dt_calc_tile_loc_simple :: proc(nav_mesh: ^Dt_Nav_Mesh, pos: [3]f32) -> (tx: i32, ty: i32) {
-    result_tx, result_ty, status := dt_calc_tile_loc(nav_mesh, pos)
+// Returns (0, 0) for invalid inputs - use calc_tile_loc for full error handling
+calc_tile_loc_simple :: proc(nav_mesh: ^Nav_Mesh, pos: [3]f32) -> (tx: i32, ty: i32) {
+    result_tx, result_ty, status := calc_tile_loc(nav_mesh, pos)
     if nav_recast.status_failed(status) {
         return 0, 0
     }
@@ -335,6 +334,6 @@ dt_calc_tile_loc_simple :: proc(nav_mesh: ^Dt_Nav_Mesh, pos: [3]f32) -> (tx: i32
 }
 
 // Get detail triangle edge flags
-dt_get_detail_tri_edge_flags :: proc(tri_flags: u8, edge_index: i32) -> i32 {
+get_detail_tri_edge_flags :: proc(tri_flags: u8, edge_index: i32) -> i32 {
     return i32((tri_flags >> (u8(edge_index) * 2)) & 0x3)
 }

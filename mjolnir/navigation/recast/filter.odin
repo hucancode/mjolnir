@@ -12,20 +12,20 @@ MAX_HEIGHTFIELD_HEIGHT :: 0xffff
 // Direction offset helpers are provided by core_utils.odin
 
 // Get connection from compact span in given direction
-rc_get_con :: proc "contextless" (span: ^Rc_Compact_Span, dir: int) -> int {
+get_con :: proc "contextless" (span: ^Compact_Span, dir: int) -> int {
     shift := u32(dir * 6)
     return int((span.con >> shift) & 0x3f)
 }
 
 // Set connection for compact span in given direction
-rc_set_con :: proc "contextless" (span: ^Rc_Compact_Span, dir: int, i: int) {
+set_con :: proc "contextless" (span: ^Compact_Span, dir: int, i: int) {
     shift := u32(dir * 6)
     span.con = (span.con & (~(0x3f << shift))) | (u32(i) << shift)
 }
 
 // Filter low hanging walkable obstacles
 // Remove walkable spans that are below obstacles where the agent could walk over
-rc_filter_low_hanging_walkable_obstacles :: proc(walkable_climb: int, heightfield: ^Rc_Heightfield) {
+filter_low_hanging_walkable_obstacles :: proc(walkable_climb: int, heightfield: ^Heightfield) {
     // Removed timer code for simplicity
 
     x_size := heightfield.width
@@ -34,7 +34,7 @@ rc_filter_low_hanging_walkable_obstacles :: proc(walkable_climb: int, heightfiel
     // Process each column
     for z in 0..<z_size {
         for x in 0..<x_size {
-            previous_span: ^Rc_Span = nil
+            previous_span: ^Span = nil
             previous_was_walkable := false
             previous_area_id: u8 = RC_NULL_AREA
 
@@ -64,7 +64,7 @@ rc_filter_low_hanging_walkable_obstacles :: proc(walkable_climb: int, heightfiel
 
 // Filter ledge spans
 // Mark spans that are ledges as unwalkable
-rc_filter_ledge_spans :: proc(walkable_height: int, walkable_climb: int, heightfield: ^Rc_Heightfield) {
+filter_ledge_spans :: proc(walkable_height: int, walkable_climb: int, heightfield: ^Heightfield) {
     // Removed timer code for simplicity
 
     x_size := heightfield.width
@@ -153,7 +153,7 @@ rc_filter_ledge_spans :: proc(walkable_height: int, walkable_climb: int, heightf
 
 // Filter walkable low height spans
 // Remove walkable spans without enough clearance
-rc_filter_walkable_low_height_spans :: proc(walkable_height: int, heightfield: ^Rc_Heightfield) {
+filter_walkable_low_height_spans :: proc(walkable_height: int, heightfield: ^Heightfield) {
     // Removed timer code for simplicity
 
     x_size := heightfield.width
@@ -177,7 +177,7 @@ rc_filter_walkable_low_height_spans :: proc(walkable_height: int, heightfield: ^
 
 // Apply median filter to walkable area
 // Smooths out small inconsistencies in area assignments
-rc_median_filter_walkable_area :: proc(chf: ^Rc_Compact_Heightfield) -> bool {
+median_filter_walkable_area :: proc(chf: ^Compact_Heightfield) -> bool {
     // Removed timer code for simplicity
 
     x_size := chf.width
@@ -214,13 +214,13 @@ rc_median_filter_walkable_area :: proc(chf: ^Rc_Compact_Heightfield) -> bool {
 
                 // Check all 4 directions
                 for dir in 0..<4 {
-                    if rc_get_con(span, dir) == RC_NOT_CONNECTED {
+                    if get_con(span, dir) == RC_NOT_CONNECTED {
                         continue
                     }
 
                     ax := int(x) + int(get_dir_offset_x(dir))
                     az := int(z) + int(get_dir_offset_y(dir))
-                    ai := int(chf.cells[ax + az * int(z_stride)].index) + rc_get_con(span, dir)
+                    ai := int(chf.cells[ax + az * int(z_stride)].index) + get_con(span, dir)
 
                     if chf.areas[ai] != RC_NULL_AREA {
                         neighbor_areas[dir * 2 + 0] = chf.areas[ai]
@@ -228,7 +228,7 @@ rc_median_filter_walkable_area :: proc(chf: ^Rc_Compact_Heightfield) -> bool {
 
                     a_span := &chf.spans[ai]
                     dir2 := (dir + 1) & 0x3
-                    neighbor_connection2 := rc_get_con(a_span, dir2)
+                    neighbor_connection2 := get_con(a_span, dir2)
 
                     if neighbor_connection2 != RC_NOT_CONNECTED {
                         bx := ax + int(get_dir_offset_x(dir2))
@@ -255,8 +255,8 @@ rc_median_filter_walkable_area :: proc(chf: ^Rc_Compact_Heightfield) -> bool {
 
 // Mark box area
 // Mark all spans within an axis-aligned box with the specified area id
-rc_mark_box_area :: proc(box_min_bounds, box_max_bounds: [3]f32,
-                        area_id: u8, chf: ^Rc_Compact_Heightfield) {
+mark_box_area :: proc(box_min_bounds, box_max_bounds: [3]f32,
+                        area_id: u8, chf: ^Compact_Heightfield) {
     // Removed timer code for simplicity
 
     x_size := chf.width
@@ -337,8 +337,8 @@ point_in_poly :: proc(num_verts: int, verts: []f32, point: [3]f32) -> bool {
 
 // Mark convex polygon area
 // Mark all spans within a convex polygon with the specified area id
-rc_mark_convex_poly_area :: proc(verts: []f32, num_verts: int,
-                                min_y, max_y: f32, area_id: u8, chf: ^Rc_Compact_Heightfield) {
+mark_convex_poly_area :: proc(verts: []f32, num_verts: int,
+                                min_y, max_y: f32, area_id: u8, chf: ^Compact_Heightfield) {
     // Removed timer code for simplicity
 
     x_size := chf.width
@@ -415,8 +415,8 @@ rc_mark_convex_poly_area :: proc(verts: []f32, num_verts: int,
 
 // Mark cylinder area
 // Mark all spans within a cylinder with the specified area id
-rc_mark_cylinder_area :: proc(position: [3]f32, radius, height: f32,
-                             area_id: u8, chf: ^Rc_Compact_Heightfield) {
+mark_cylinder_area :: proc(position: [3]f32, radius, height: f32,
+                             area_id: u8, chf: ^Compact_Heightfield) {
     // Removed timer code for simplicity
 
     x_size := chf.width

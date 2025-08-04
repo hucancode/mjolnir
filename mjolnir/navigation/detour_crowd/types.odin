@@ -20,14 +20,14 @@ DT_MAX_PATTERN_DIVS :: 32
 DT_MAX_PATTERN_RINGS :: 4
 
 // Agent states
-Dt_Crowd_Agent_State :: enum u8 {
+Crowd_Agent_State :: enum u8 {
     Invalid  = 0,
     Walking  = 1,
     Off_Mesh = 2,
 }
 
 // Movement request states
-Dt_Move_Request_State :: enum u8 {
+Move_Request_State :: enum u8 {
     None                = 0,
     Failed              = 1,
     Valid               = 2,
@@ -38,7 +38,7 @@ Dt_Move_Request_State :: enum u8 {
 }
 
 // Agent update flags
-Dt_Update_Flags :: enum u8 {
+Update_Flags :: enum u8 {
     Anticipate_Turns      = 1,
     Obstacle_Avoidance    = 2,
     Separation           = 4,
@@ -47,13 +47,13 @@ Dt_Update_Flags :: enum u8 {
 }
 
 // Crowd neighbor information
-Dt_Crowd_Neighbor :: struct {
+Crowd_Neighbor :: struct {
     agent_index: i32,    // Index of the neighbor agent
     distance:    f32,    // Distance to the neighbor
 }
 
 // Agent configuration parameters
-Dt_Crowd_Agent_Params :: struct {
+Crowd_Agent_Params :: struct {
     radius:                   f32,    // Agent radius [>= 0]
     height:                   f32,    // Agent height [> 0]
     max_acceleration:         f32,    // Maximum acceleration [>= 0]
@@ -61,14 +61,14 @@ Dt_Crowd_Agent_Params :: struct {
     collision_query_range:    f32,    // Collision detection range [> 0]
     path_optimization_range:  f32,    // Path visibility optimization range [> 0]
     separation_weight:        f32,    // Separation force weight [>= 0]
-    update_flags:             Dt_Update_Flags,  // Behavior flags
+    update_flags:             Update_Flags,  // Behavior flags
     obstacle_avoidance_type:  u8,     // Avoidance configuration index
     query_filter_type:        u8,     // Query filter index
     user_data:                rawptr, // User-defined data
 }
 
 // Path corridor for agent navigation
-Dt_Path_Corridor :: struct {
+Path_Corridor :: struct {
     position:     [3]f32,                      // Current corridor position
     target:       [3]f32,                      // Target position
     path:         [dynamic]nav_recast.Poly_Ref,  // Polygon path
@@ -76,7 +76,7 @@ Dt_Path_Corridor :: struct {
 }
 
 // Local boundary for agent movement
-Dt_Local_Boundary :: struct {
+Local_Boundary :: struct {
     center:       [3]f32,              // Center of boundary area
     segments:     [dynamic][6]f32,     // Boundary segments [p0x,p0y,p0z,p1x,p1y,p1z]
     polys:        [dynamic]nav_recast.Poly_Ref,  // Boundary polygons
@@ -84,7 +84,7 @@ Dt_Local_Boundary :: struct {
 }
 
 // Obstacle circle for avoidance
-Dt_Obstacle_Circle :: struct {
+Obstacle_Circle :: struct {
     position:          [3]f32,  // Position of obstacle
     velocity:          [3]f32,  // Velocity of obstacle
     desired_velocity:  [3]f32,  // Desired velocity
@@ -94,14 +94,14 @@ Dt_Obstacle_Circle :: struct {
 }
 
 // Obstacle segment for avoidance
-Dt_Obstacle_Segment :: struct {
+Obstacle_Segment :: struct {
     start_pos:  [3]f32,  // Segment start point
     end_pos:    [3]f32,  // Segment end point
     touch:      bool,    // True if obstacle touches agent
 }
 
 // Obstacle avoidance parameters
-Dt_Obstacle_Avoidance_Params :: struct {
+Obstacle_Avoidance_Params :: struct {
     vel_bias:        f32,  // Velocity bias factor
     weight_des_vel:  f32,  // Desired velocity weight
     weight_cur_vel:  f32,  // Current velocity weight
@@ -115,7 +115,7 @@ Dt_Obstacle_Avoidance_Params :: struct {
 }
 
 // Debug data for obstacle avoidance
-Dt_Obstacle_Avoidance_Debug_Data :: struct {
+Obstacle_Avoidance_Debug_Data :: struct {
     sample_velocities:       [dynamic][3]f32,  // Sample velocities
     sample_sizes:            [dynamic]f32,     // Sample sizes
     sample_penalties:        [dynamic]f32,     // Total penalties
@@ -127,7 +127,7 @@ Dt_Obstacle_Avoidance_Debug_Data :: struct {
 }
 
 // Obstacle avoidance query system
-Dt_Obstacle_Avoidance_Query :: struct {
+Obstacle_Avoidance_Query :: struct {
     max_circles:       i32,                                              // Maximum circles
     max_segments:      i32,                                              // Maximum segments
     vel_bias:          f32,                                              // Velocity bias
@@ -136,13 +136,13 @@ Dt_Obstacle_Avoidance_Query :: struct {
     weight_side:       f32,                                              // Side preference weight
     weight_toi:        f32,                                              // Time of impact weight
     horiz_time:        f32,                                              // Prediction horizon
-    circle_obstacles:  [dynamic]Dt_Obstacle_Circle,                      // Circle obstacles
-    segment_obstacles: [dynamic]Dt_Obstacle_Segment,                     // Segment obstacles
-    params:            [DT_CROWD_MAX_OBSTAVOIDANCE_PARAMS]Dt_Obstacle_Avoidance_Params, // Parameter sets
+    circle_obstacles:  [dynamic]Obstacle_Circle,                      // Circle obstacles
+    segment_obstacles: [dynamic]Obstacle_Segment,                     // Segment obstacles
+    params:            [DT_CROWD_MAX_OBSTAVOIDANCE_PARAMS]Obstacle_Avoidance_Params, // Parameter sets
 }
 
 // Proximity grid for spatial queries
-Dt_Proximity_Grid :: struct {
+Proximity_Grid :: struct {
     max_items:   i32,                     // Maximum items in grid
     cell_size:   f32,                     // Grid cell size
     inv_cell_size: f32,                   // Inverse cell size for fast division
@@ -153,32 +153,32 @@ Dt_Proximity_Grid :: struct {
 }
 
 // Path queue reference
-Dt_Path_Queue_Ref :: distinct u32
+Path_Queue_Ref :: distinct u32
 
 // Path query state
-Dt_Path_Query :: struct {
-    ref:         Dt_Path_Queue_Ref,       // Queue reference
+Path_Query :: struct {
+    ref:         Path_Queue_Ref,       // Queue reference
     start_ref:   nav_recast.Poly_Ref,       // Start polygon
     end_ref:     nav_recast.Poly_Ref,       // End polygon
     start_pos:   [3]f32,                  // Start position
     end_pos:     [3]f32,                  // End position
     status:      nav_recast.Status,         // Query status
     keep_alive:  i32,                     // Keep alive counter
-    filter:      ^detour.Dt_Query_Filter, // Query filter
+    filter:      ^detour.Query_Filter, // Query filter
 }
 
 // Path queue for asynchronous pathfinding
-Dt_Path_Queue :: struct {
+Path_Queue :: struct {
     max_path_size:  i32,                           // Maximum path size
     max_search_nodes: i32,                         // Maximum search nodes
     next_handle:    u32,                           // Next handle counter
     max_queue:      i32,                           // Maximum queue size
-    queue:          [dynamic]Dt_Path_Query,        // Query queue
-    nav_query:      ^detour.Dt_Nav_Mesh_Query,     // Navigation mesh query
+    queue:          [dynamic]Path_Query,        // Query queue
+    nav_query:      ^detour.Nav_Mesh_Query,     // Navigation mesh query
 }
 
 // Agent animation state
-Dt_Crowd_Agent_Animation :: struct {
+Crowd_Agent_Animation :: struct {
     active:     bool,                  // Animation active flag
     init_pos:   [3]f32,               // Initial position
     start_pos:  [3]f32,               // Start position
@@ -189,28 +189,28 @@ Dt_Crowd_Agent_Animation :: struct {
 }
 
 // Debug information for agents
-Dt_Crowd_Agent_Debug_Info :: struct {
+Crowd_Agent_Debug_Info :: struct {
     agent_index:  i32,                                      // Agent index
     opt_start:    [3]f32,                                   // Optimization start
     opt_end:      [3]f32,                                   // Optimization end
-    vod:          ^Dt_Obstacle_Avoidance_Debug_Data,        // Avoidance debug data
+    vod:          ^Obstacle_Avoidance_Debug_Data,        // Avoidance debug data
 }
 
 // Main crowd agent structure
-Dt_Crowd_Agent :: struct {
+Crowd_Agent :: struct {
     // Status and configuration
     active:       bool,                                     // Agent active flag
-    state:        Dt_Crowd_Agent_State,                     // Current state
+    state:        Crowd_Agent_State,                     // Current state
     partial:      bool,                                     // Partial path flag
-    params:       Dt_Crowd_Agent_Params,                    // Agent parameters
+    params:       Crowd_Agent_Params,                    // Agent parameters
     
     // Path and navigation
-    corridor:     Dt_Path_Corridor,                         // Path corridor
-    boundary:     Dt_Local_Boundary,                        // Local boundary
+    corridor:     Path_Corridor,                         // Path corridor
+    boundary:     Local_Boundary,                        // Local boundary
     topology_opt_time: f32,                                 // Time since topology optimization
     
     // Neighbors
-    neighbors:    [DT_CROWD_MAX_NEIGHBORS]Dt_Crowd_Neighbor, // Known neighbors
+    neighbors:    [DT_CROWD_MAX_NEIGHBORS]Crowd_Neighbor, // Known neighbors
     neighbor_count: i32,                                    // Number of neighbors
     
     // Motion state
@@ -228,42 +228,42 @@ Dt_Crowd_Agent :: struct {
     corner_count: i32,                                      // Number of corners
     
     // Target state
-    target_state:     Dt_Move_Request_State,                // Target request state
+    target_state:     Move_Request_State,                // Target request state
     target_ref:       nav_recast.Poly_Ref,                    // Target polygon
     target_pos:       [3]f32,                               // Target position (or velocity)
-    target_path_ref:  Dt_Path_Queue_Ref,                    // Path queue reference
+    target_path_ref:  Path_Queue_Ref,                    // Path queue reference
     target_replan:    bool,                                 // Replanning flag
     target_replan_time: f32,                                // Time since last replan
 }
 
 // Main crowd management system
-Dt_Crowd :: struct {
+Crowd :: struct {
     // Core configuration
     max_agents:        i32,                                 // Maximum agents
     max_agent_radius:  f32,                                 // Maximum agent radius
     
     // Agent management
-    agents:            []Dt_Crowd_Agent,                    // Agent pool
-    active_agents:     [dynamic]^Dt_Crowd_Agent,            // Active agent pointers
-    agent_animations:  []Dt_Crowd_Agent_Animation,          // Agent animations
+    agents:            []Crowd_Agent,                    // Agent pool
+    active_agents:     [dynamic]^Crowd_Agent,            // Active agent pointers
+    agent_animations:  []Crowd_Agent_Animation,          // Agent animations
     
     // Path management
-    path_queue:        Dt_Path_Queue,                       // Asynchronous pathfinding
+    path_queue:        Path_Queue,                       // Asynchronous pathfinding
     path_result:       [dynamic]nav_recast.Poly_Ref,          // Temporary path buffer
     max_path_result:   i32,                                 // Maximum path result size
     
     // Obstacle avoidance
-    obstacle_query:    ^Dt_Obstacle_Avoidance_Query,        // Obstacle avoidance system
-    obstacle_params:   [DT_CROWD_MAX_OBSTAVOIDANCE_PARAMS]Dt_Obstacle_Avoidance_Params,
+    obstacle_query:    ^Obstacle_Avoidance_Query,        // Obstacle avoidance system
+    obstacle_params:   [DT_CROWD_MAX_OBSTAVOIDANCE_PARAMS]Obstacle_Avoidance_Params,
     
     // Spatial queries
-    proximity_grid:    ^Dt_Proximity_Grid,                  // Spatial partitioning
+    proximity_grid:    ^Proximity_Grid,                  // Spatial partitioning
     
     // Query filters
-    filters:           [DT_CROWD_MAX_QUERY_FILTER_TYPE]detour.Dt_Query_Filter,
+    filters:           [DT_CROWD_MAX_QUERY_FILTER_TYPE]detour.Query_Filter,
     
     // Navigation mesh
-    nav_query:         ^detour.Dt_Nav_Mesh_Query,           // Navigation queries
+    nav_query:         ^detour.Nav_Mesh_Query,           // Navigation queries
     
     // Configuration
     agent_placement_half_extents: [3]f32,                   // Agent placement bounds
@@ -271,7 +271,7 @@ Dt_Crowd :: struct {
 }
 
 // Default parameters
-dt_crowd_agent_params_default :: proc() -> Dt_Crowd_Agent_Params {
+crowd_agent_params_default :: proc() -> Crowd_Agent_Params {
     return {
         radius = 0.6,
         height = 2.0,
@@ -287,7 +287,7 @@ dt_crowd_agent_params_default :: proc() -> Dt_Crowd_Agent_Params {
     }
 }
 
-dt_obstacle_avoidance_params_default :: proc() -> Dt_Obstacle_Avoidance_Params {
+obstacle_avoidance_params_default :: proc() -> Obstacle_Avoidance_Params {
     return {
         vel_bias = 0.4,
         weight_des_vel = 2.0,

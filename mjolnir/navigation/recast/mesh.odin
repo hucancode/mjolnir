@@ -668,7 +668,7 @@ triangulate_polygon :: proc(verts: [][3]u16, indices: []i32, triangles: ^[dynami
 }
 
 // Validate polygon mesh data
-validate_poly_mesh :: proc(pmesh: ^Rc_Poly_Mesh) -> bool {
+validate_poly_mesh :: proc(pmesh: ^Poly_Mesh) -> bool {
     if pmesh == nil do return false
     if len(pmesh.verts) <= 0 || pmesh.npolys <= 0 do return false
     if pmesh.nvp < 3 do return false
@@ -694,7 +694,7 @@ validate_poly_mesh :: proc(pmesh: ^Rc_Poly_Mesh) -> bool {
 }
 
 // Copy polygon mesh
-rc_copy_poly_mesh :: proc(src: ^Rc_Poly_Mesh, dst: ^Rc_Poly_Mesh) -> bool {
+copy_poly_mesh :: proc(src: ^Poly_Mesh, dst: ^Poly_Mesh) -> bool {
     if src == nil || dst == nil do return false
 
     // Copy header data
@@ -733,10 +733,10 @@ rc_copy_poly_mesh :: proc(src: ^Rc_Poly_Mesh, dst: ^Rc_Poly_Mesh) -> bool {
 }
 
 // Merge two polygon meshes
-rc_merge_poly_meshes :: proc(meshes: []^Rc_Poly_Mesh, nmeshes: i32, mesh: ^Rc_Poly_Mesh) -> bool {
+merge_poly_meshes :: proc(meshes: []^Poly_Mesh, nmeshes: i32, mesh: ^Poly_Mesh) -> bool {
     if nmeshes == 0 do return false
     if nmeshes == 1 {
-        return rc_copy_poly_mesh(meshes[0], mesh)
+        return copy_poly_mesh(meshes[0], mesh)
     }
 
     // Calculate total sizes
@@ -822,7 +822,7 @@ rc_merge_poly_meshes :: proc(meshes: []^Rc_Poly_Mesh, nmeshes: i32, mesh: ^Rc_Po
 }
 
 // Build edge list from polygon data (for neighbor finding)
-build_mesh_edges :: proc(pmesh: ^Rc_Poly_Mesh, edges: ^[dynamic]Mesh_Edge, max_edges: i32) -> bool {
+build_mesh_edges :: proc(pmesh: ^Poly_Mesh, edges: ^[dynamic]Mesh_Edge, max_edges: i32) -> bool {
     clear(edges)
 
     for i in 0..<pmesh.npolys {
@@ -887,7 +887,7 @@ build_mesh_edges :: proc(pmesh: ^Rc_Poly_Mesh, edges: ^[dynamic]Mesh_Edge, max_e
 }
 
 // Update polygon neighbor information from edge list
-update_polygon_neighbors :: proc(pmesh: ^Rc_Poly_Mesh, edges: []Mesh_Edge) {
+update_polygon_neighbors :: proc(pmesh: ^Poly_Mesh, edges: []Mesh_Edge) {
     // Initialize all neighbors to null
     for i in 0..<pmesh.npolys {
         pi := int(i) * int(pmesh.nvp) * 2
@@ -1183,7 +1183,7 @@ merge_triangles_into_polygons :: proc(triangles: []i32, polys: ^[dynamic]Poly_Bu
 }
 
 // Main function to build polygon mesh from contour set
-rc_build_poly_mesh :: proc(cset: ^Rc_Contour_Set, nvp: i32, pmesh: ^Rc_Poly_Mesh) -> bool {
+build_poly_mesh :: proc(cset: ^Contour_Set, nvp: i32, pmesh: ^Poly_Mesh) -> bool {
     if cset == nil || pmesh == nil do return false
     if len(cset.conts) == 0 do return false
     if nvp < 3 do return false
@@ -1410,7 +1410,7 @@ rc_build_poly_mesh :: proc(cset: ^Rc_Contour_Set, nvp: i32, pmesh: ^Rc_Poly_Mesh
 }
 
 // Weld nearby vertices together to reduce mesh complexity
-rc_weld_poly_mesh_vertices :: proc(pmesh: ^Rc_Poly_Mesh, weld_tolerance: f32) -> bool {
+weld_poly_mesh_vertices :: proc(pmesh: ^Poly_Mesh, weld_tolerance: f32) -> bool {
     if pmesh == nil || len(pmesh.verts) == 0 do return false
     old_vert_count := len(pmesh.verts)
     tolerance_sq := weld_tolerance * weld_tolerance
@@ -1484,7 +1484,7 @@ rc_weld_poly_mesh_vertices :: proc(pmesh: ^Rc_Poly_Mesh, weld_tolerance: f32) ->
 }
 
 // Remove degenerate polygons and unused vertices
-rc_remove_degenerate_polys :: proc(pmesh: ^Rc_Poly_Mesh) -> bool {
+remove_degenerate_polys :: proc(pmesh: ^Poly_Mesh) -> bool {
     if pmesh == nil || pmesh.npolys == 0 do return false
 
 
@@ -1550,7 +1550,7 @@ rc_remove_degenerate_polys :: proc(pmesh: ^Rc_Poly_Mesh) -> bool {
 }
 
 // Remove unused vertices from the mesh
-rc_remove_unused_vertices :: proc(pmesh: ^Rc_Poly_Mesh) -> bool {
+remove_unused_vertices :: proc(pmesh: ^Poly_Mesh) -> bool {
     if pmesh == nil || len(pmesh.verts) == 0 do return false
 
     // Mark used vertices
@@ -1624,25 +1624,25 @@ rc_remove_unused_vertices :: proc(pmesh: ^Rc_Poly_Mesh) -> bool {
 }
 
 // Comprehensive mesh optimization
-rc_optimize_poly_mesh :: proc(pmesh: ^Rc_Poly_Mesh, weld_tolerance: f32) -> bool {
+optimize_poly_mesh :: proc(pmesh: ^Poly_Mesh, weld_tolerance: f32) -> bool {
     if pmesh == nil do return false
 
 
 
     // Step 1: Remove degenerate polygons
-    if !rc_remove_degenerate_polys(pmesh) {
+    if !remove_degenerate_polys(pmesh) {
         log.warn("Failed to remove degenerate polygons")
     }
 
     // Step 2: Weld nearby vertices
     if weld_tolerance > 0.0 {
-        if !rc_weld_poly_mesh_vertices(pmesh, weld_tolerance) {
+        if !weld_poly_mesh_vertices(pmesh, weld_tolerance) {
             log.warn("Failed to weld vertices")
         }
     }
 
     // Step 3: Remove unused vertices
-    if !rc_remove_unused_vertices(pmesh) {
+    if !remove_unused_vertices(pmesh) {
         log.warn("Failed to remove unused vertices")
     }
 

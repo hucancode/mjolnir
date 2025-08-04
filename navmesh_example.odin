@@ -1,17 +1,12 @@
 package main
 
 import "core:log"
-import "mjolnir/navigation"
 import "mjolnir/navigation/recast"
 
 // Minimal navigation mesh example demonstrating Recast API
 navmesh_simple_main :: proc() {
     log.info("=== Navigation Mesh Example ===")
     log.info("Demonstrating Recast API: ground plane with obstacle")
-    
-    // Initialize navigation memory
-    navigation.nav_memory_init()
-    defer navigation.nav_memory_shutdown()
     
     // Create test geometry - ground plane (20x20) with box obstacle (2x3x2) in center
     vertices := []f32{
@@ -59,14 +54,14 @@ navmesh_simple_main :: proc() {
     log.info("\nBuilding navigation mesh...")
     log.infof("Input: %d vertices, %d triangles", len(vertices)/3, len(indices)/3)
     
-    pmesh, dmesh, ok := recast.rc_build_navmesh(vertices, indices, areas, config)
+    pmesh, dmesh, ok := recast.build_navmesh(vertices, indices, areas, config)
     if !ok {
         log.error("Failed to build navigation mesh")
         return
     }
     defer {
-        if pmesh != nil do recast.rc_free_poly_mesh(pmesh)
-        if dmesh != nil do recast.rc_free_poly_mesh_detail(dmesh)
+        if pmesh != nil do recast.free_poly_mesh(pmesh)
+        if dmesh != nil do recast.free_poly_mesh_detail(dmesh)
     }
     
     // Report results

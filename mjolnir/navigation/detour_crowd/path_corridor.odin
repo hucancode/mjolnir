@@ -6,7 +6,7 @@ import nav_recast "../recast"
 import detour "../detour"
 
 // Initialize path corridor
-dt_path_corridor_init :: proc(corridor: ^Dt_Path_Corridor, max_path: i32) -> nav_recast.Status {
+path_corridor_init :: proc(corridor: ^Path_Corridor, max_path: i32) -> nav_recast.Status {
     if corridor == nil || max_path <= 0 {
         return {.Invalid_Param}
     }
@@ -20,7 +20,7 @@ dt_path_corridor_init :: proc(corridor: ^Dt_Path_Corridor, max_path: i32) -> nav
 }
 
 // Destroy path corridor
-dt_path_corridor_destroy :: proc(corridor: ^Dt_Path_Corridor) {
+path_corridor_destroy :: proc(corridor: ^Path_Corridor) {
     if corridor == nil do return
     
     delete(corridor.path)
@@ -29,7 +29,7 @@ dt_path_corridor_destroy :: proc(corridor: ^Dt_Path_Corridor) {
 }
 
 // Reset corridor to a specific position
-dt_path_corridor_reset :: proc(corridor: ^Dt_Path_Corridor, ref: nav_recast.Poly_Ref, pos: [3]f32) -> nav_recast.Status {
+path_corridor_reset :: proc(corridor: ^Path_Corridor, ref: nav_recast.Poly_Ref, pos: [3]f32) -> nav_recast.Status {
     if corridor == nil {
         return {.Invalid_Param}
     }
@@ -46,10 +46,10 @@ dt_path_corridor_reset :: proc(corridor: ^Dt_Path_Corridor, ref: nav_recast.Poly
 }
 
 // Find corners in the corridor from position toward target
-dt_path_corridor_find_corners :: proc(corridor: ^Dt_Path_Corridor,
+path_corridor_find_corners :: proc(corridor: ^Path_Corridor,
                                      corner_verts: []f32, corner_flags: []u8, corner_polys: []nav_recast.Poly_Ref,
-                                     max_corners: i32, nav_query: ^detour.Dt_Nav_Mesh_Query, 
-                                     filter: ^detour.Dt_Query_Filter) -> (i32, nav_recast.Status) {
+                                     max_corners: i32, nav_query: ^detour.Nav_Mesh_Query, 
+                                     filter: ^detour.Query_Filter) -> (i32, nav_recast.Status) {
     
     if corridor == nil || nav_query == nil || filter == nil || max_corners <= 0 {
         return 0, {.Invalid_Param}
@@ -65,13 +65,13 @@ dt_path_corridor_find_corners :: proc(corridor: ^Dt_Path_Corridor,
     path_slice := corridor.path[:]
     
     // Create buffers for straight path results
-    straight_path := make([]detour.Dt_Straight_Path_Point, max_straight)
+    straight_path := make([]detour.Straight_Path_Point, max_straight)
     defer delete(straight_path)
     
     // Find straight path from current position to target
-    straight_count, status := detour.dt_find_straight_path(
+    straight_count, status := detour.find_straight_path(
         nav_query, corridor.position, corridor.target, path_slice,
-        straight_path, detour.Dt_Straight_Path_Options{},
+        straight_path, detour.Straight_Path_Options{},
     )
     
     if nav_recast.status_failed(status) {
@@ -100,9 +100,9 @@ dt_path_corridor_find_corners :: proc(corridor: ^Dt_Path_Corridor,
 }
 
 // Optimize path visibility by checking if next position is visible
-dt_path_corridor_optimize_path_visibility :: proc(corridor: ^Dt_Path_Corridor, next: [3]f32, 
-                                                  path_optimization_range: f32, nav_query: ^detour.Dt_Nav_Mesh_Query,
-                                                  filter: ^detour.Dt_Query_Filter) -> nav_recast.Status {
+path_corridor_optimize_path_visibility :: proc(corridor: ^Path_Corridor, next: [3]f32, 
+                                                  path_optimization_range: f32, nav_query: ^detour.Nav_Mesh_Query,
+                                                  filter: ^detour.Query_Filter) -> nav_recast.Status {
     
     if corridor == nil || nav_query == nil || filter == nil {
         return {.Invalid_Param}
@@ -117,7 +117,7 @@ dt_path_corridor_optimize_path_visibility :: proc(corridor: ^Dt_Path_Corridor, n
     defer delete(result_path)
     
     // Perform raycast to see how far we can optimize
-    hit, status := detour.dt_raycast(nav_query, corridor.path[0], corridor.position, next, filter)
+    hit, status := detour.raycast(nav_query, corridor.path[0], corridor.position, next, filter)
     if nav_recast.status_failed(status) {
         return status
     }
@@ -125,7 +125,7 @@ dt_path_corridor_optimize_path_visibility :: proc(corridor: ^Dt_Path_Corridor, n
     // If we didn't hit anything, we can optimize toward the target
     if hit.t >= 1.0 {
         // Find the polygon containing the next position
-        next_ref, _, query_status := detour.dt_find_nearest_poly(nav_query, next, {2,2,2}, filter)
+        next_ref, _, query_status := detour.find_nearest_poly(nav_query, next, {2,2,2}, filter)
         if nav_recast.status_succeeded(query_status) && next_ref != nav_recast.INVALID_POLY_REF {
             // Replace the path up to this point
             clear(&corridor.path)
@@ -137,8 +137,8 @@ dt_path_corridor_optimize_path_visibility :: proc(corridor: ^Dt_Path_Corridor, n
 }
 
 // Optimize path topology using local area search
-dt_path_corridor_optimize_path_topology :: proc(corridor: ^Dt_Path_Corridor, nav_query: ^detour.Dt_Nav_Mesh_Query,
-                                                filter: ^detour.Dt_Query_Filter) -> (bool, nav_recast.Status) {
+path_corridor_optimize_path_topology :: proc(corridor: ^Path_Corridor, nav_query: ^detour.Nav_Mesh_Query,
+                                                filter: ^detour.Query_Filter) -> (bool, nav_recast.Status) {
     
     if corridor == nil || nav_query == nil || filter == nil {
         return false, {.Invalid_Param}
@@ -206,8 +206,8 @@ dt_path_corridor_optimize_path_topology :: proc(corridor: ^Dt_Path_Corridor, nav
 }
 
 // Move position along the corridor
-dt_path_corridor_move_position :: proc(corridor: ^Dt_Path_Corridor, new_pos: [3]f32, 
-                                      nav_query: ^detour.Dt_Nav_Mesh_Query, filter: ^detour.Dt_Query_Filter) -> (bool, nav_recast.Status) {
+path_corridor_move_position :: proc(corridor: ^Path_Corridor, new_pos: [3]f32, 
+                                      nav_query: ^detour.Nav_Mesh_Query, filter: ^detour.Query_Filter) -> (bool, nav_recast.Status) {
     
     if corridor == nil || nav_query == nil || filter == nil {
         return false, {.Invalid_Param}
@@ -222,7 +222,7 @@ dt_path_corridor_move_position :: proc(corridor: ^Dt_Path_Corridor, new_pos: [3]
     visited := make([]nav_recast.Poly_Ref, MAX_VISITED)
     defer delete(visited)
     
-    visited_count, status := detour.dt_move_along_surface(
+    visited_count, status := detour.move_along_surface(
         nav_query, corridor.path[0], corridor.position, new_pos, filter, visited
     )
     
@@ -269,15 +269,15 @@ dt_path_corridor_move_position :: proc(corridor: ^Dt_Path_Corridor, new_pos: [3]
 }
 
 // Move target to new position
-dt_path_corridor_move_target :: proc(corridor: ^Dt_Path_Corridor, new_target: [3]f32,
-                                    nav_query: ^detour.Dt_Nav_Mesh_Query, filter: ^detour.Dt_Query_Filter) -> nav_recast.Status {
+path_corridor_move_target :: proc(corridor: ^Path_Corridor, new_target: [3]f32,
+                                    nav_query: ^detour.Nav_Mesh_Query, filter: ^detour.Query_Filter) -> nav_recast.Status {
     
     if corridor == nil || nav_query == nil || filter == nil {
         return {.Invalid_Param}
     }
     
     // Find the polygon containing the new target
-    target_ref, _, status := detour.dt_find_nearest_poly(nav_query, new_target, {2,2,2}, filter)
+    target_ref, _, status := detour.find_nearest_poly(nav_query, new_target, {2,2,2}, filter)
     if nav_recast.status_failed(status) {
         return status
     }
@@ -301,7 +301,7 @@ dt_path_corridor_move_target :: proc(corridor: ^Dt_Path_Corridor, new_target: [3
         
         // Find path from current end to new target
         last_poly := corridor.path[len(corridor.path)-1]
-        path_count, find_status := detour.dt_find_path(
+        path_count, find_status := detour.find_path(
             nav_query, last_poly, target_ref, corridor.target, new_target, filter, path_result
         )
         
@@ -320,8 +320,8 @@ dt_path_corridor_move_target :: proc(corridor: ^Dt_Path_Corridor, new_target: [3
 }
 
 // Check if the corridor path is valid
-dt_path_corridor_is_valid :: proc(corridor: ^Dt_Path_Corridor, max_look_ahead: i32,
-                                 nav_query: ^detour.Dt_Nav_Mesh_Query, filter: ^detour.Dt_Query_Filter) -> (bool, nav_recast.Status) {
+path_corridor_is_valid :: proc(corridor: ^Path_Corridor, max_look_ahead: i32,
+                                 nav_query: ^detour.Nav_Mesh_Query, filter: ^detour.Query_Filter) -> (bool, nav_recast.Status) {
     
     if corridor == nil || nav_query == nil || filter == nil {
         return false, {.Invalid_Param}
@@ -338,13 +338,13 @@ dt_path_corridor_is_valid :: proc(corridor: ^Dt_Path_Corridor, max_look_ahead: i
         poly_ref := corridor.path[i]
         
         // Check if polygon is still valid
-        tile, poly, status := detour.dt_get_tile_and_poly_by_ref(nav_query.nav_mesh, poly_ref)
+        tile, poly, status := detour.get_tile_and_poly_by_ref(nav_query.nav_mesh, poly_ref)
         if nav_recast.status_failed(status) || tile == nil || poly == nil {
             return false, {.Success}
         }
         
         // Check if polygon passes filter
-        if !detour.dt_query_filter_pass_filter(filter, poly_ref, tile, poly) {
+        if !detour.query_filter_pass_filter(filter, poly_ref, tile, poly) {
             return false, {.Success}
         }
     }
@@ -353,7 +353,7 @@ dt_path_corridor_is_valid :: proc(corridor: ^Dt_Path_Corridor, max_look_ahead: i
 }
 
 // Fix path start if current start polygon is invalid
-dt_path_corridor_fix_path_start :: proc(corridor: ^Dt_Path_Corridor, safe_ref: nav_recast.Poly_Ref, safe_pos: [3]f32) -> nav_recast.Status {
+path_corridor_fix_path_start :: proc(corridor: ^Path_Corridor, safe_ref: nav_recast.Poly_Ref, safe_pos: [3]f32) -> nav_recast.Status {
     if corridor == nil {
         return {.Invalid_Param}
     }
@@ -375,8 +375,8 @@ dt_path_corridor_fix_path_start :: proc(corridor: ^Dt_Path_Corridor, safe_ref: n
 }
 
 // Trim invalid path back to a safe polygon
-dt_path_corridor_trim_invalid_path :: proc(corridor: ^Dt_Path_Corridor, safe_ref: nav_recast.Poly_Ref, safe_pos: [3]f32,
-                                          nav_query: ^detour.Dt_Nav_Mesh_Query, filter: ^detour.Dt_Query_Filter) -> nav_recast.Status {
+path_corridor_trim_invalid_path :: proc(corridor: ^Path_Corridor, safe_ref: nav_recast.Poly_Ref, safe_pos: [3]f32,
+                                          nav_query: ^detour.Nav_Mesh_Query, filter: ^detour.Query_Filter) -> nav_recast.Status {
     
     if corridor == nil || nav_query == nil || filter == nil {
         return {.Invalid_Param}
@@ -412,7 +412,7 @@ dt_path_corridor_trim_invalid_path :: proc(corridor: ^Dt_Path_Corridor, safe_ref
 }
 
 // Get the first polygon in the path
-dt_path_corridor_get_first_poly :: proc(corridor: ^Dt_Path_Corridor) -> nav_recast.Poly_Ref {
+path_corridor_get_first_poly :: proc(corridor: ^Path_Corridor) -> nav_recast.Poly_Ref {
     if corridor == nil || len(corridor.path) == 0 {
         return nav_recast.INVALID_POLY_REF
     }
@@ -420,7 +420,7 @@ dt_path_corridor_get_first_poly :: proc(corridor: ^Dt_Path_Corridor) -> nav_reca
 }
 
 // Get the last polygon in the path
-dt_path_corridor_get_last_poly :: proc(corridor: ^Dt_Path_Corridor) -> nav_recast.Poly_Ref {
+path_corridor_get_last_poly :: proc(corridor: ^Path_Corridor) -> nav_recast.Poly_Ref {
     if corridor == nil || len(corridor.path) == 0 {
         return nav_recast.INVALID_POLY_REF
     }
@@ -428,7 +428,7 @@ dt_path_corridor_get_last_poly :: proc(corridor: ^Dt_Path_Corridor) -> nav_recas
 }
 
 // Get the target polygon
-dt_path_corridor_get_target :: proc(corridor: ^Dt_Path_Corridor) -> [3]f32 {
+path_corridor_get_target :: proc(corridor: ^Path_Corridor) -> [3]f32 {
     if corridor == nil {
         return {}
     }
@@ -436,7 +436,7 @@ dt_path_corridor_get_target :: proc(corridor: ^Dt_Path_Corridor) -> [3]f32 {
 }
 
 // Get current position
-dt_path_corridor_get_pos :: proc(corridor: ^Dt_Path_Corridor) -> [3]f32 {
+path_corridor_get_pos :: proc(corridor: ^Path_Corridor) -> [3]f32 {
     if corridor == nil {
         return {}
     }

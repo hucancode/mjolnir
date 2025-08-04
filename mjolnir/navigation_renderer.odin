@@ -135,7 +135,7 @@ navmesh_renderer_deinit :: proc(renderer: ^NavMeshRenderer, gpu_context: ^gpu.GP
 
 // Build vertex data from navigation mesh
 navmesh_renderer_build_from_recast :: proc(renderer: ^NavMeshRenderer, gpu_context: ^gpu.GPUContext,
-                                          poly_mesh: ^recast.Rc_Poly_Mesh, detail_mesh: ^recast.Rc_Poly_Mesh_Detail) -> bool {
+                                          poly_mesh: ^recast.Poly_Mesh, detail_mesh: ^recast.Poly_Mesh_Detail) -> bool {
     if poly_mesh == nil {
         log.error("Cannot build navigation mesh renderer: polygon mesh is nil")
         return false

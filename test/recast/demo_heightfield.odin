@@ -7,7 +7,6 @@ import "core:os"
 import "core:fmt"
 import "core:time"
 import "core:testing"
-import nav "../../mjolnir/navigation"
 import "../../mjolnir/navigation/recast"
 
 @(test)
@@ -73,7 +72,7 @@ test_demo_heightfield :: proc(t: ^testing.T) {
         detail_sample_max_error = 1,
     }
     
-    pmesh, dmesh, ok := recast.rc_build_navmesh(vertices[:], indices[:], areas[:], config)
+    pmesh, dmesh, ok := recast.build_navmesh(vertices[:], indices[:], areas[:], config)
     
     if !ok {
         log.error("Failed to build navigation mesh")
@@ -81,8 +80,8 @@ test_demo_heightfield :: proc(t: ^testing.T) {
         return
     }
     
-    defer recast.rc_free_poly_mesh(pmesh)
-    defer recast.rc_free_poly_mesh_detail(dmesh)
+    defer recast.free_poly_mesh(pmesh)
+    defer recast.free_poly_mesh_detail(dmesh)
     
     log.info("Successfully built navigation mesh")
     if pmesh != nil {
@@ -93,7 +92,7 @@ test_demo_heightfield :: proc(t: ^testing.T) {
     log.info("Note: Heightfield visualization not available in minimal API")
 }
 
-export_heightfield_as_obj :: proc(hf: ^recast.Rc_Heightfield, filename: string) {
+export_heightfield_as_obj :: proc(hf: ^recast.Heightfield, filename: string) {
     file, err := os.open(filename, os.O_WRONLY | os.O_CREATE | os.O_TRUNC, 0o644)
     if err != 0 {
         log.errorf("Failed to create file: %s", filename)
@@ -148,7 +147,7 @@ export_heightfield_as_obj :: proc(hf: ^recast.Rc_Heightfield, filename: string) 
     log.infof("Exported %d voxels", vertex_count)
 }
 
-export_compact_heightfield_as_obj :: proc(chf: ^recast.Rc_Compact_Heightfield, filename: string) {
+export_compact_heightfield_as_obj :: proc(chf: ^recast.Compact_Heightfield, filename: string) {
     file, err := os.open(filename, os.O_WRONLY | os.O_CREATE | os.O_TRUNC, 0o644)
     if err != 0 {
         log.errorf("Failed to create file: %s", filename)

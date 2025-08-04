@@ -7,10 +7,10 @@ import nav_recast "../recast"
 import detour "../detour"
 
 // Build proximity grid for spatial queries
-dt_crowd_build_proximity_grid :: proc(crowd: ^Dt_Crowd) {
+crowd_build_proximity_grid :: proc(crowd: ^Crowd) {
     if crowd == nil || crowd.proximity_grid == nil do return
 
-    dt_proximity_grid_clear(crowd.proximity_grid)
+    proximity_grid_clear(crowd.proximity_grid)
 
     for i, &agent in crowd.active_agents {
         if !agent.active do continue
@@ -20,14 +20,14 @@ dt_crowd_build_proximity_grid :: proc(crowd: ^Dt_Crowd) {
         radius := agent.params.radius
 
         // Add agent to grid with bounding box
-        dt_proximity_grid_add_item(crowd.proximity_grid, agent_id,
+        proximity_grid_add_item(crowd.proximity_grid, agent_id,
                                   pos[0] - radius, pos[2] - radius,
                                   pos[0] + radius, pos[2] + radius)
     }
 }
 
 // Find neighbors for each agent
-dt_crowd_find_neighbors :: proc(crowd: ^Dt_Crowd) {
+crowd_find_neighbors :: proc(crowd: ^Crowd) {
     if crowd == nil || crowd.proximity_grid == nil do return
 
     for i, &agent in crowd.active_agents {
@@ -44,7 +44,7 @@ dt_crowd_find_neighbors :: proc(crowd: ^Dt_Crowd) {
         neighbors := make([]u16, DT_CROWD_MAX_NEIGHBORS + 1)  // +1 to avoid including self
         defer delete(neighbors)
 
-        neighbor_count := dt_proximity_grid_query_items(crowd.proximity_grid,
+        neighbor_count := proximity_grid_query_items(crowd.proximity_grid,
                                                        agent.position[0], agent.position[2],
                                                        query_range, neighbors[:], DT_CROWD_MAX_NEIGHBORS + 1)
 
@@ -94,7 +94,7 @@ dt_crowd_find_neighbors :: proc(crowd: ^Dt_Crowd) {
 }
 
 // Find corners for each agent's path
-dt_crowd_find_corners :: proc(crowd: ^Dt_Crowd) {
+crowd_find_corners :: proc(crowd: ^Crowd) {
     if crowd == nil do return
 
     for &agent in crowd.active_agents {
@@ -114,7 +114,7 @@ dt_crowd_find_corners :: proc(crowd: ^Dt_Crowd) {
         corner_polys := make([]nav_recast.Poly_Ref, DT_CROWD_MAX_CORNERS)
         defer delete(corner_polys)
 
-        corner_count, status := dt_path_corridor_find_corners(&agent.corridor,
+        corner_count, status := path_corridor_find_corners(&agent.corridor,
                                                              corner_verts[:], corner_flags[:], corner_polys[:],
                                                              DT_CROWD_MAX_CORNERS, crowd.nav_query,
                                                              &crowd.filters[agent.params.query_filter_type])
@@ -137,7 +137,7 @@ dt_crowd_find_corners :: proc(crowd: ^Dt_Crowd) {
 }
 
 // Trigger off-mesh connections
-dt_crowd_trigger_off_mesh_connections :: proc(crowd: ^Dt_Crowd) {
+crowd_trigger_off_mesh_connections :: proc(crowd: ^Crowd) {
     if crowd == nil do return
 
     for &agent in crowd.active_agents {
@@ -145,7 +145,7 @@ dt_crowd_trigger_off_mesh_connections :: proc(crowd: ^Dt_Crowd) {
 
         // Check if agent should trigger off-mesh connection
         if agent.corner_count > 0 {
-            corner_flags := detour.Dt_Straight_Path_Flags(agent.corner_flags[0])
+            corner_flags := detour.Straight_Path_Flags(agent.corner_flags[0])
             if .Off_Mesh_Connection in corner_flags {
                 // Trigger off-mesh connection
                 agent.state = .Off_Mesh
@@ -156,7 +156,7 @@ dt_crowd_trigger_off_mesh_connections :: proc(crowd: ^Dt_Crowd) {
 }
 
 // Calculate steering for each agent
-dt_crowd_calculate_steering :: proc(crowd: ^Dt_Crowd, dt: f32) {
+crowd_calculate_steering :: proc(crowd: ^Crowd, dt: f32) {
     if crowd == nil do return
 
     for &agent in crowd.active_agents {
@@ -228,7 +228,7 @@ dt_crowd_calculate_steering :: proc(crowd: ^Dt_Crowd, dt: f32) {
 }
 
 // Plan velocity with obstacle avoidance
-dt_crowd_plan_velocity :: proc(crowd: ^Dt_Crowd, dt: f32, debug_data: ^Dt_Crowd_Agent_Debug_Info) {
+crowd_plan_velocity :: proc(crowd: ^Crowd, dt: f32, debug_data: ^Crowd_Agent_Debug_Info) {
     if crowd == nil do return
 
     for i, &agent in crowd.active_agents {
@@ -241,12 +241,12 @@ dt_crowd_plan_velocity :: proc(crowd: ^Dt_Crowd, dt: f32, debug_data: ^Dt_Crowd_
         }
 
         // Update local boundary
-        dt_local_boundary_update(&agent.boundary, dt_path_corridor_get_first_poly(&agent.corridor),
+        local_boundary_update(&agent.boundary, path_corridor_get_first_poly(&agent.corridor),
                                 agent.position, agent.params.collision_query_range, crowd.nav_query,
                                 &crowd.filters[agent.params.query_filter_type])
 
         // Build obstacle list
-        dt_obstacle_avoidance_query_reset(crowd.obstacle_query)
+        obstacle_avoidance_query_reset(crowd.obstacle_query)
 
         // Add other agents as circle obstacles
         for j in 0..<agent.neighbor_count {
@@ -256,20 +256,20 @@ dt_crowd_plan_velocity :: proc(crowd: ^Dt_Crowd, dt: f32, debug_data: ^Dt_Crowd_
                 if !neighbor.active do continue
 
                 // Calculate relative position and velocity
-                dt_obstacle_avoidance_query_add_circle(crowd.obstacle_query,
+                obstacle_avoidance_query_add_circle(crowd.obstacle_query,
                                                       neighbor.position, neighbor.velocity, neighbor.desired_velocity,
                                                       neighbor.params.radius, {}, {})
             }
         }
 
         // Add boundary segments as obstacles
-        boundary_count := dt_local_boundary_get_segment_count(&agent.boundary)
+        boundary_count := local_boundary_get_segment_count(&agent.boundary)
         for j in 0..<boundary_count {
-            segment, has_segment := dt_local_boundary_get_segment(&agent.boundary, j)
+            segment, has_segment := local_boundary_get_segment(&agent.boundary, j)
             if has_segment {
                 seg_start := [3]f32{segment[0], segment[1], segment[2]}
                 seg_end := [3]f32{segment[3], segment[4], segment[5]}
-                dt_obstacle_avoidance_query_add_segment(crowd.obstacle_query, seg_start, seg_end, false)
+                obstacle_avoidance_query_add_segment(crowd.obstacle_query, seg_start, seg_end, false)
             }
         }
 
@@ -278,12 +278,12 @@ dt_crowd_plan_velocity :: proc(crowd: ^Dt_Crowd, dt: f32, debug_data: ^Dt_Crowd_
 
         // Choose sampling method based on grid size
         if params.grid_size > 0 {
-            agent.new_velocity = dt_obstacle_avoidance_query_sample_velocity_grid(crowd.obstacle_query,
+            agent.new_velocity = obstacle_avoidance_query_sample_velocity_grid(crowd.obstacle_query,
                                                                                  agent.position, agent.velocity, agent.desired_velocity,
                                                                                  agent.params.radius, agent.params.max_speed,
                                                                                  params, nil)
         } else {
-            agent.new_velocity = dt_obstacle_avoidance_query_sample_velocity_adaptive(crowd.obstacle_query,
+            agent.new_velocity = obstacle_avoidance_query_sample_velocity_adaptive(crowd.obstacle_query,
                                                                                      agent.position, agent.velocity, agent.desired_velocity,
                                                                                      agent.params.radius, agent.params.max_speed,
                                                                                      params, nil)
@@ -291,7 +291,7 @@ dt_crowd_plan_velocity :: proc(crowd: ^Dt_Crowd, dt: f32, debug_data: ^Dt_Crowd_
 
         // Add separation force
         if .Separation in agent.params.update_flags {
-            separation := dt_calculate_separation_force(&agent, crowd.active_agents[:])
+            separation := calculate_separation_force(&agent, crowd.active_agents[:])
             agent.new_velocity[0] += separation[0] * agent.params.separation_weight
             agent.new_velocity[2] += separation[2] * agent.params.separation_weight
         }
@@ -308,7 +308,7 @@ dt_crowd_plan_velocity :: proc(crowd: ^Dt_Crowd, dt: f32, debug_data: ^Dt_Crowd_
 }
 
 // Integrate agent movement
-dt_crowd_integrate :: proc(crowd: ^Dt_Crowd, dt: f32) {
+crowd_integrate :: proc(crowd: ^Crowd, dt: f32) {
     if crowd == nil do return
 
     for &agent in crowd.active_agents {
@@ -335,17 +335,17 @@ dt_crowd_integrate :: proc(crowd: ^Dt_Crowd, dt: f32) {
             }
 
             // Move along navigation mesh surface
-            moved, _ := dt_path_corridor_move_position(&agent.corridor, new_pos, crowd.nav_query,
+            moved, _ := path_corridor_move_position(&agent.corridor, new_pos, crowd.nav_query,
                                                      &crowd.filters[agent.params.query_filter_type])
             if moved {
-                agent.position = dt_path_corridor_get_pos(&agent.corridor)
+                agent.position = path_corridor_get_pos(&agent.corridor)
             }
         }
     }
 }
 
 // Handle collisions between agents
-dt_crowd_handle_collisions :: proc(crowd: ^Dt_Crowd) {
+crowd_handle_collisions :: proc(crowd: ^Crowd) {
     if crowd == nil do return
 
     // Simple collision resolution - separate overlapping agents
@@ -385,7 +385,7 @@ dt_crowd_handle_collisions :: proc(crowd: ^Dt_Crowd) {
 }
 
 // Calculate separation force for an agent
-dt_calculate_separation_force :: proc(agent: ^Dt_Crowd_Agent, agents: []^Dt_Crowd_Agent) -> [3]f32 {
+calculate_separation_force :: proc(agent: ^Crowd_Agent, agents: []^Crowd_Agent) -> [3]f32 {
     if agent == nil do return {}
 
     separation := [3]f32{}

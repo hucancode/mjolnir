@@ -33,8 +33,8 @@ navmesh_state: struct {
     obstacle_handle: mjolnir.Handle,
     show_original_mesh: bool,
     navmesh_built: bool,
-    poly_mesh: ^recast.Rc_Poly_Mesh,
-    detail_mesh: ^recast.Rc_Poly_Mesh_Detail,
+    poly_mesh: ^recast.Poly_Mesh,
+    detail_mesh: ^recast.Poly_Mesh_Detail,
 } = {
     show_original_mesh = true,
 }
@@ -98,11 +98,11 @@ build_navmesh :: proc(engine: ^mjolnir.Engine) {
     
     // Clean up previous mesh if any
     if navmesh_state.poly_mesh != nil {
-        recast.rc_free_poly_mesh(navmesh_state.poly_mesh)
+        recast.free_poly_mesh(navmesh_state.poly_mesh)
         navmesh_state.poly_mesh = nil
     }
     if navmesh_state.detail_mesh != nil {
-        recast.rc_free_poly_mesh_detail(navmesh_state.detail_mesh)
+        recast.free_poly_mesh_detail(navmesh_state.detail_mesh)
         navmesh_state.detail_mesh = nil
     }
     
@@ -214,7 +214,7 @@ build_navmesh :: proc(engine: ^mjolnir.Engine) {
     
     // Build navigation mesh
     log.info("Building navigation mesh...")
-    pmesh, dmesh, ok := recast.rc_build_navmesh(vertices, indices, areas, config)
+    pmesh, dmesh, ok := recast.build_navmesh(vertices, indices, areas, config)
     if !ok {
         log.error("Failed to build navigation mesh")
         return

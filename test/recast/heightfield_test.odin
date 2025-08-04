@@ -6,7 +6,7 @@ import "core:testing"
 
 @(test)
 test_span_bit_operations :: proc(t: ^testing.T) {
-    span := recast.Rc_Span{}
+    span := recast.Span{}
 
     // Test setting and getting smin
     span.smin = 100
@@ -37,7 +37,7 @@ test_span_bit_operations :: proc(t: ^testing.T) {
 
 @(test)
 test_compact_cell_bit_operations :: proc(t: ^testing.T) {
-    cell := recast.Rc_Compact_Cell{}
+    cell := recast.Compact_Cell{}
 
     // Test setting and getting index
     cell.index = 12345
@@ -60,7 +60,7 @@ test_compact_cell_bit_operations :: proc(t: ^testing.T) {
 
 @(test)
 test_compact_span_bit_operations :: proc(t: ^testing.T) {
-    span := recast.Rc_Compact_Span{}
+    span := recast.Compact_Span{}
 
     // Test y and reg (direct fields)
     span.y = 1000
@@ -91,9 +91,9 @@ test_compact_span_bit_operations :: proc(t: ^testing.T) {
 test_heightfield_allocation :: proc(t: ^testing.T) {
 
     // Test allocation
-    hf := recast.rc_alloc_heightfield()
+    hf := recast.alloc_heightfield()
     testing.expect(t, hf != nil, "Heightfield allocation should succeed")
-    defer recast.rc_free_heightfield(hf)
+    defer recast.free_heightfield(hf)
 
     // Test initial state
     testing.expect_value(t, hf.width, i32(0))
@@ -106,9 +106,9 @@ test_heightfield_allocation :: proc(t: ^testing.T) {
 @(test)
 test_heightfield_creation :: proc(t: ^testing.T) {
 
-    hf := recast.rc_alloc_heightfield()
+    hf := recast.alloc_heightfield()
     testing.expect(t, hf != nil, "Heightfield allocation should succeed")
-    defer recast.rc_free_heightfield(hf)
+    defer recast.free_heightfield(hf)
 
     // Test creation with specific parameters
     width := i32(50)
@@ -118,7 +118,7 @@ test_heightfield_creation :: proc(t: ^testing.T) {
     cs := f32(2.0)
     ch := f32(0.5)
 
-    ok := recast.rc_create_heightfield(hf, width, height, bmin, bmax, cs, ch)
+    ok := recast.create_heightfield(hf, width, height, bmin, bmax, cs, ch)
     testing.expect(t, ok, "Heightfield creation should succeed")
 
     // Verify parameters
@@ -147,9 +147,9 @@ test_heightfield_creation :: proc(t: ^testing.T) {
 test_compact_heightfield_allocation :: proc(t: ^testing.T) {
 
     // Test allocation
-    chf := recast.rc_alloc_compact_heightfield()
+    chf := recast.alloc_compact_heightfield()
     testing.expect(t, chf != nil, "Compact heightfield allocation should succeed")
-    defer recast.rc_free_compact_heightfield(chf)
+    defer recast.free_compact_heightfield(chf)
 
     // Test initial state
     testing.expect_value(t, chf.width, i32(0))
@@ -164,9 +164,9 @@ test_compact_heightfield_allocation :: proc(t: ^testing.T) {
 @(test)
 test_heightfield_bounds :: proc(t: ^testing.T) {
 
-    hf := recast.rc_alloc_heightfield()
+    hf := recast.alloc_heightfield()
     testing.expect(t, hf != nil, "Heightfield allocation should succeed")
-    defer recast.rc_free_heightfield(hf)
+    defer recast.free_heightfield(hf)
 
     // Test with various bounds
     test_cases := []struct {
@@ -190,7 +190,7 @@ test_heightfield_bounds :: proc(t: ^testing.T) {
         width := i32((tc.bmax.x - tc.bmin.x) / tc.cs)
         height := i32((tc.bmax.z - tc.bmin.z) / tc.cs)
 
-        ok := recast.rc_create_heightfield(hf, width, height, tc.bmin, tc.bmax, tc.cs, 0.5)
+        ok := recast.create_heightfield(hf, width, height, tc.bmin, tc.bmax, tc.cs, 0.5)
         testing.expect(t, ok, "Heightfield creation should succeed")
 
         testing.expect_value(t, hf.width, tc.expected_width)
@@ -207,12 +207,12 @@ test_heightfield_bounds :: proc(t: ^testing.T) {
 @(test)
 test_heightfield_edge_cases :: proc(t: ^testing.T) {
 
-    hf := recast.rc_alloc_heightfield()
+    hf := recast.alloc_heightfield()
     testing.expect(t, hf != nil, "Heightfield allocation should succeed")
-    defer recast.rc_free_heightfield(hf)
+    defer recast.free_heightfield(hf)
 
     // Test minimum size (1x1)
-    ok := recast.rc_create_heightfield(hf, 1, 1, {0,0,0}, {1,1,1}, 1.0, 1.0)
+    ok := recast.create_heightfield(hf, 1, 1, {0,0,0}, {1,1,1}, 1.0, 1.0)
     testing.expect(t, ok, "1x1 heightfield should succeed")
     testing.expect_value(t, len(hf.spans), 1)
 
@@ -223,7 +223,7 @@ test_heightfield_edge_cases :: proc(t: ^testing.T) {
     }
 
     // Test zero width/height (should fail or handle gracefully)
-    ok = recast.rc_create_heightfield(hf, 0, 0, {0,0,0}, {1,1,1}, 1.0, 1.0)
+    ok = recast.create_heightfield(hf, 0, 0, {0,0,0}, {1,1,1}, 1.0, 1.0)
     if ok {
         testing.expect_value(t, len(hf.spans), 0)
     }

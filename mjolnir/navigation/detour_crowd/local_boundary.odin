@@ -6,7 +6,7 @@ import nav_recast "../recast"
 import detour "../detour"
 
 // Initialize local boundary
-dt_local_boundary_init :: proc(boundary: ^Dt_Local_Boundary, max_segs: i32) -> nav_recast.Status {
+local_boundary_init :: proc(boundary: ^Local_Boundary, max_segs: i32) -> nav_recast.Status {
     if boundary == nil || max_segs <= 0 {
         return {.Invalid_Param}
     }
@@ -20,7 +20,7 @@ dt_local_boundary_init :: proc(boundary: ^Dt_Local_Boundary, max_segs: i32) -> n
 }
 
 // Destroy local boundary
-dt_local_boundary_destroy :: proc(boundary: ^Dt_Local_Boundary) {
+local_boundary_destroy :: proc(boundary: ^Local_Boundary) {
     if boundary == nil do return
     
     delete(boundary.segments)
@@ -31,7 +31,7 @@ dt_local_boundary_destroy :: proc(boundary: ^Dt_Local_Boundary) {
 }
 
 // Reset boundary data
-dt_local_boundary_reset :: proc(boundary: ^Dt_Local_Boundary) {
+local_boundary_reset :: proc(boundary: ^Local_Boundary) {
     if boundary == nil do return
     
     clear(&boundary.segments)
@@ -39,23 +39,23 @@ dt_local_boundary_reset :: proc(boundary: ^Dt_Local_Boundary) {
 }
 
 // Update boundary around given position
-dt_local_boundary_update :: proc(boundary: ^Dt_Local_Boundary, ref: nav_recast.Poly_Ref, pos: [3]f32,
-                                collision_query_range: f32, nav_query: ^detour.Dt_Nav_Mesh_Query,
-                                filter: ^detour.Dt_Query_Filter) -> nav_recast.Status {
+local_boundary_update :: proc(boundary: ^Local_Boundary, ref: nav_recast.Poly_Ref, pos: [3]f32,
+                                collision_query_range: f32, nav_query: ^detour.Nav_Mesh_Query,
+                                filter: ^detour.Query_Filter) -> nav_recast.Status {
     
     if boundary == nil || nav_query == nil || filter == nil {
         return {.Invalid_Param}
     }
     
     if ref == nav_recast.INVALID_POLY_REF {
-        dt_local_boundary_reset(boundary)
+        local_boundary_reset(boundary)
         return {.Success}
     }
     
     boundary.center = pos
     
     // Clear existing boundary
-    dt_local_boundary_reset(boundary)
+    local_boundary_reset(boundary)
     
     // Find polygons around the agent
     MAX_LOCAL_POLYS :: 256
@@ -77,7 +77,7 @@ dt_local_boundary_update :: proc(boundary: ^Dt_Local_Boundary, ref: nav_recast.P
         poly_ref := polys[i]
         
         // Get polygon and tile
-        tile, poly, get_status := detour.dt_get_tile_and_poly_by_ref(nav_query.nav_mesh, poly_ref)
+        tile, poly, get_status := detour.get_tile_and_poly_by_ref(nav_query.nav_mesh, poly_ref)
         if nav_recast.status_failed(get_status) || tile == nil || poly == nil do continue
         
         // Check each edge of the polygon
@@ -112,7 +112,7 @@ dt_local_boundary_update :: proc(boundary: ^Dt_Local_Boundary, ref: nav_recast.P
 }
 
 // Check if point is valid (not too close to boundary)
-dt_local_boundary_is_valid :: proc(boundary: ^Dt_Local_Boundary, pos: [3]f32, radius: f32) -> bool {
+local_boundary_is_valid :: proc(boundary: ^Local_Boundary, pos: [3]f32, radius: f32) -> bool {
     if boundary == nil do return true
     
     // Check distance to all boundary segments
@@ -130,7 +130,7 @@ dt_local_boundary_is_valid :: proc(boundary: ^Dt_Local_Boundary, pos: [3]f32, ra
 }
 
 // Get closest point on boundary
-dt_local_boundary_get_closest_point :: proc(boundary: ^Dt_Local_Boundary, pos: [3]f32) -> ([3]f32, bool) {
+local_boundary_get_closest_point :: proc(boundary: ^Local_Boundary, pos: [3]f32) -> ([3]f32, bool) {
     if boundary == nil || len(boundary.segments) == 0 {
         return pos, false
     }
@@ -205,13 +205,13 @@ dt_closest_point_on_segment_2d :: proc(point, seg_start, seg_end: [3]f32) -> [3]
 }
 
 // Get number of boundary segments
-dt_local_boundary_get_segment_count :: proc(boundary: ^Dt_Local_Boundary) -> i32 {
+local_boundary_get_segment_count :: proc(boundary: ^Local_Boundary) -> i32 {
     if boundary == nil do return 0
     return i32(len(boundary.segments))
 }
 
 // Get specific boundary segment
-dt_local_boundary_get_segment :: proc(boundary: ^Dt_Local_Boundary, index: i32) -> ([6]f32, bool) {
+local_boundary_get_segment :: proc(boundary: ^Local_Boundary, index: i32) -> ([6]f32, bool) {
     if boundary == nil || index < 0 || index >= i32(len(boundary.segments)) {
         return {}, false
     }
@@ -219,7 +219,7 @@ dt_local_boundary_get_segment :: proc(boundary: ^Dt_Local_Boundary, index: i32) 
 }
 
 // Get boundary polygon for specific segment
-dt_local_boundary_get_segment_poly :: proc(boundary: ^Dt_Local_Boundary, index: i32) -> (nav_recast.Poly_Ref, bool) {
+local_boundary_get_segment_poly :: proc(boundary: ^Local_Boundary, index: i32) -> (nav_recast.Poly_Ref, bool) {
     if boundary == nil || index < 0 || index >= i32(len(boundary.polys)) {
         return nav_recast.INVALID_POLY_REF, false
     }
@@ -227,7 +227,7 @@ dt_local_boundary_get_segment_poly :: proc(boundary: ^Dt_Local_Boundary, index: 
 }
 
 // Check if position is inside boundary area
-dt_local_boundary_contains_point :: proc(boundary: ^Dt_Local_Boundary, pos: [3]f32, radius: f32) -> bool {
+local_boundary_contains_point :: proc(boundary: ^Local_Boundary, pos: [3]f32, radius: f32) -> bool {
     if boundary == nil do return true
     
     // Simple check: ensure we're not too close to any boundary segment
@@ -245,7 +245,7 @@ dt_local_boundary_contains_point :: proc(boundary: ^Dt_Local_Boundary, pos: [3]f
 }
 
 // Project point away from boundary if too close
-dt_local_boundary_project_point :: proc(boundary: ^Dt_Local_Boundary, pos: [3]f32, radius: f32) -> [3]f32 {
+local_boundary_project_point :: proc(boundary: ^Local_Boundary, pos: [3]f32, radius: f32) -> [3]f32 {
     if boundary == nil || len(boundary.segments) == 0 {
         return pos
     }

@@ -10,13 +10,13 @@ RC_MAX_LAYER_ID :: 255
 RC_NULL_LAYER_ID :: 255
 
 // Allocate heightfield layer set
-rc_alloc_heightfield_layer_set :: proc() -> [dynamic]Rc_Heightfield_Layer {
-  lset := make([dynamic]Rc_Heightfield_Layer)
+alloc_heightfield_layer_set :: proc() -> [dynamic]Heightfield_Layer {
+  lset := make([dynamic]Heightfield_Layer)
   return lset
 }
 
 // Free heightfield layer set
-rc_free_heightfield_layer_set :: proc(lset: [dynamic]Rc_Heightfield_Layer) {
+free_heightfield_layer_set :: proc(lset: [dynamic]Heightfield_Layer) {
   for layer in lset {
     delete(layer.heights)
     delete(layer.areas)
@@ -26,12 +26,12 @@ rc_free_heightfield_layer_set :: proc(lset: [dynamic]Rc_Heightfield_Layer) {
 }
 
 // Build heightfield layers from compact heightfield
-rc_build_heightfield_layers :: proc(
-  chf: ^Rc_Compact_Heightfield,
+build_heightfield_layers :: proc(
+  chf: ^Compact_Heightfield,
   border_size: i32,
   walkable_height: i32,
 ) -> (
-  lset: [dynamic]Rc_Heightfield_Layer
+  lset: [dynamic]Heightfield_Layer
 ) {
   if chf == nil do return
 
@@ -40,7 +40,7 @@ rc_build_heightfield_layers :: proc(
 
   log.infof("Building heightfield layers from %dx%d compact heightfield", w, h)
 
-  lset = make([dynamic]Rc_Heightfield_Layer, 0, 32)
+  lset = make([dynamic]Heightfield_Layer, 0, 32)
 
   // Create layer ID array - tracks which layer each span belongs to
   layer_ids := make([]u8, chf.span_count)
@@ -90,7 +90,7 @@ rc_build_heightfield_layers :: proc(
 
 // Assign layer IDs to spans based on height ranges
 assign_layer_ids :: proc(
-  chf: ^Rc_Compact_Heightfield,
+  chf: ^Compact_Heightfield,
   layer_ids: []u8,
 ) -> bool {
   w := chf.width
@@ -129,12 +129,12 @@ assign_layer_ids :: proc(
 
 // Build a single layer from the compact heightfield
 build_single_layer :: proc(
-  chf: ^Rc_Compact_Heightfield,
+  chf: ^Compact_Heightfield,
   layer_ids: []u8,
   layer_id: u8,
   border_size: i32,
   walkable_height: i32,
-  layers: ^[dynamic]Rc_Heightfield_Layer,
+  layers: ^[dynamic]Heightfield_Layer,
 ) -> bool {
   w := chf.width
   h := chf.height
@@ -206,7 +206,7 @@ build_single_layer :: proc(
   )
 
   // Create layer
-  layer := Rc_Heightfield_Layer {
+  layer := Heightfield_Layer {
     bmin    = chf.bmin,
     bmax    = chf.bmax,
     cs      = chf.cs,
@@ -260,7 +260,7 @@ build_single_layer :: proc(
         // Build connections (simplified)
         cons: u8 = 0
         for dir in 0 ..< 4 {
-          if rc_get_con(s, dir) != RC_NOT_CONNECTED {
+          if get_con(s, dir) != RC_NOT_CONNECTED {
             ax := x + get_dir_offset_x(dir)
             ay := y + get_dir_offset_y(dir)
 
@@ -279,7 +279,7 @@ build_single_layer :: proc(
 }
 
 // Get height value from layer at given coordinates
-rc_get_layer_height :: proc(layer: ^Rc_Heightfield_Layer, x, y: i32) -> u8 {
+get_layer_height :: proc(layer: ^Heightfield_Layer, x, y: i32) -> u8 {
   if x < 0 || x >= layer.width || y < 0 || y >= layer.height {
     return 0xff
   }
@@ -293,7 +293,7 @@ rc_get_layer_height :: proc(layer: ^Rc_Heightfield_Layer, x, y: i32) -> u8 {
 }
 
 // Get area ID from layer at given coordinates
-rc_get_layer_area :: proc(layer: ^Rc_Heightfield_Layer, x, y: i32) -> u8 {
+get_layer_area :: proc(layer: ^Heightfield_Layer, x, y: i32) -> u8 {
   if x < 0 || x >= layer.width || y < 0 || y >= layer.height {
     return RC_NULL_AREA
   }
@@ -307,8 +307,8 @@ rc_get_layer_area :: proc(layer: ^Rc_Heightfield_Layer, x, y: i32) -> u8 {
 }
 
 // Get connection info from layer at given coordinates
-rc_get_layer_connection :: proc(
-  layer: ^Rc_Heightfield_Layer,
+get_layer_connection :: proc(
+  layer: ^Heightfield_Layer,
   x, y: i32,
 ) -> u8 {
   if x < 0 || x >= layer.width || y < 0 || y >= layer.height {
@@ -325,7 +325,7 @@ rc_get_layer_connection :: proc(
 
 // Advanced layer assignment for overlapping geometry
 assign_layer_ids_advanced :: proc(
-  chf: ^Rc_Compact_Heightfield,
+  chf: ^Compact_Heightfield,
   layer_ids: []u8,
 ) -> bool {
   w := chf.width
@@ -345,7 +345,7 @@ assign_layer_ids_advanced :: proc(
 
       SpanInfo :: struct {
           idx:  u32,
-          span: ^Rc_Compact_Span,
+          span: ^Compact_Span,
       }
       // Collect spans in this column
       column_spans := make([dynamic]SpanInfo, 0, c.count)
@@ -420,7 +420,7 @@ assign_layer_ids_advanced :: proc(
 }
 
 // Validate layer set integrity
-validate_layer_set :: proc(lset: [dynamic]Rc_Heightfield_Layer) -> bool {
+validate_layer_set :: proc(lset: [dynamic]Heightfield_Layer) -> bool {
   if len(lset) == 0 do return false
 
   for layer, i in lset {

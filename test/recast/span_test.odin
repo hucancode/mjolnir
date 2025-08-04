@@ -8,16 +8,16 @@ import "core:log"
 @(test)
 test_span_allocation :: proc(t: ^testing.T) {
 
-    hf := recast.rc_alloc_heightfield()
+    hf := recast.alloc_heightfield()
     testing.expect(t, hf != nil, "Heightfield allocation should succeed")
-    defer recast.rc_free_heightfield(hf)
+    defer recast.free_heightfield(hf)
 
     // Create a small heightfield
-    ok := recast.rc_create_heightfield(hf, 10, 10, {0,0,0}, {10,10,10}, 1.0, 0.5)
+    ok := recast.create_heightfield(hf, 10, 10, {0,0,0}, {10,10,10}, 1.0, 0.5)
     testing.expect(t, ok, "Heightfield creation should succeed")
 
     // Test adding a single span
-    ok = recast.rc_add_span(hf, 5, 5, 10, 20, nav_recast.RC_WALKABLE_AREA, 1)
+    ok = recast.add_span(hf, 5, 5, 10, 20, nav_recast.RC_WALKABLE_AREA, 1)
     testing.expect(t, ok, "Adding span should succeed")
 
     // Check that the span was added
@@ -33,19 +33,19 @@ test_span_allocation :: proc(t: ^testing.T) {
 @(test)
 test_span_merging :: proc(t: ^testing.T) {
 
-    hf := recast.rc_alloc_heightfield()
+    hf := recast.alloc_heightfield()
     testing.expect(t, hf != nil, "Heightfield allocation should succeed")
-    defer recast.rc_free_heightfield(hf)
+    defer recast.free_heightfield(hf)
 
-    ok := recast.rc_create_heightfield(hf, 10, 10, {0,0,0}, {10,10,10}, 1.0, 0.5)
+    ok := recast.create_heightfield(hf, 10, 10, {0,0,0}, {10,10,10}, 1.0, 0.5)
     testing.expect(t, ok, "Heightfield creation should succeed")
 
     // Add first span
-    ok = recast.rc_add_span(hf, 5, 5, 10, 20, nav_recast.RC_WALKABLE_AREA, 1)
+    ok = recast.add_span(hf, 5, 5, 10, 20, nav_recast.RC_WALKABLE_AREA, 1)
     testing.expect(t, ok, "Adding first span should succeed")
 
     // Add overlapping span (should merge)
-    ok = recast.rc_add_span(hf, 5, 5, 15, 25, nav_recast.RC_WALKABLE_AREA, 1)
+    ok = recast.add_span(hf, 5, 5, 15, 25, nav_recast.RC_WALKABLE_AREA, 1)
     testing.expect(t, ok, "Adding overlapping span should succeed")
 
     // Check that spans were merged
@@ -60,19 +60,19 @@ test_span_merging :: proc(t: ^testing.T) {
 @(test)
 test_span_non_overlapping :: proc(t: ^testing.T) {
 
-    hf := recast.rc_alloc_heightfield()
+    hf := recast.alloc_heightfield()
     testing.expect(t, hf != nil, "Heightfield allocation should succeed")
-    defer recast.rc_free_heightfield(hf)
+    defer recast.free_heightfield(hf)
 
-    ok := recast.rc_create_heightfield(hf, 10, 10, {0,0,0}, {10,10,10}, 1.0, 0.5)
+    ok := recast.create_heightfield(hf, 10, 10, {0,0,0}, {10,10,10}, 1.0, 0.5)
     testing.expect(t, ok, "Heightfield creation should succeed")
 
     // Add first span
-    ok = recast.rc_add_span(hf, 5, 5, 10, 20, nav_recast.RC_WALKABLE_AREA, 1)
+    ok = recast.add_span(hf, 5, 5, 10, 20, nav_recast.RC_WALKABLE_AREA, 1)
     testing.expect(t, ok, "Adding first span should succeed")
 
     // Add non-overlapping span (should create new span)
-    ok = recast.rc_add_span(hf, 5, 5, 30, 40, nav_recast.RC_WALKABLE_AREA, 1)
+    ok = recast.add_span(hf, 5, 5, 30, 40, nav_recast.RC_WALKABLE_AREA, 1)
     testing.expect(t, ok, "Adding non-overlapping span should succeed")
 
     // Check that we have two separate spans
@@ -92,19 +92,19 @@ test_span_non_overlapping :: proc(t: ^testing.T) {
 @(test)
 test_span_area_priority :: proc(t: ^testing.T) {
 
-    hf := recast.rc_alloc_heightfield()
+    hf := recast.alloc_heightfield()
     testing.expect(t, hf != nil, "Heightfield allocation should succeed")
-    defer recast.rc_free_heightfield(hf)
+    defer recast.free_heightfield(hf)
 
-    ok := recast.rc_create_heightfield(hf, 10, 10, {0,0,0}, {10,10,10}, 1.0, 0.5)
+    ok := recast.create_heightfield(hf, 10, 10, {0,0,0}, {10,10,10}, 1.0, 0.5)
     testing.expect(t, ok, "Heightfield creation should succeed")
 
     // Add span with lower priority area
-    ok = recast.rc_add_span(hf, 5, 5, 10, 20, 10, 1)
+    ok = recast.add_span(hf, 5, 5, 10, 20, 10, 1)
     testing.expect(t, ok, "Adding first span should succeed")
 
     // Add overlapping span with higher priority area
-    ok = recast.rc_add_span(hf, 5, 5, 15, 25, 20, 1)
+    ok = recast.add_span(hf, 5, 5, 15, 25, 20, 1)
     testing.expect(t, ok, "Adding higher priority span should succeed")
 
     // Check that the higher priority area was preserved
@@ -116,21 +116,21 @@ test_span_area_priority :: proc(t: ^testing.T) {
 
 @(test)
 test_span_debug_merge :: proc(t: ^testing.T) {
-    hf := recast.rc_alloc_heightfield()
+    hf := recast.alloc_heightfield()
     testing.expect(t, hf != nil, "Heightfield allocation should succeed")
-    defer recast.rc_free_heightfield(hf)
+    defer recast.free_heightfield(hf)
 
-    ok := recast.rc_create_heightfield(hf, 1, 1, {0,0,0}, {1,1,1}, 1.0, 0.5)
+    ok := recast.create_heightfield(hf, 1, 1, {0,0,0}, {1,1,1}, 1.0, 0.5)
     testing.expect(t, ok, "Heightfield creation should succeed")
 
     // Add three separate spans at (0,0)
-    ok = recast.rc_add_span(hf, 0, 0, 10, 20, nav_recast.RC_WALKABLE_AREA, 1)
+    ok = recast.add_span(hf, 0, 0, 10, 20, nav_recast.RC_WALKABLE_AREA, 1)
     testing.expect(t, ok, "Adding span 1 should succeed")
     
-    ok = recast.rc_add_span(hf, 0, 0, 30, 40, nav_recast.RC_WALKABLE_AREA, 1)
+    ok = recast.add_span(hf, 0, 0, 30, 40, nav_recast.RC_WALKABLE_AREA, 1)
     testing.expect(t, ok, "Adding span 2 should succeed")
     
-    ok = recast.rc_add_span(hf, 0, 0, 50, 60, nav_recast.RC_WALKABLE_AREA, 1)
+    ok = recast.add_span(hf, 0, 0, 50, 60, nav_recast.RC_WALKABLE_AREA, 1)
     testing.expect(t, ok, "Adding span 3 should succeed")
     
     // Print current state
@@ -144,7 +144,7 @@ test_span_debug_merge :: proc(t: ^testing.T) {
     }
     
     // Add bridging span
-    ok = recast.rc_add_span(hf, 0, 0, 15, 35, nav_recast.RC_WALKABLE_AREA, 1)
+    ok = recast.add_span(hf, 0, 0, 15, 35, nav_recast.RC_WALKABLE_AREA, 1)
     testing.expect(t, ok, "Adding bridging span should succeed")
     
     // Print result
@@ -173,18 +173,18 @@ test_span_debug_merge :: proc(t: ^testing.T) {
 
 @(test)
 test_span_simple_merge :: proc(t: ^testing.T) {
-    hf := recast.rc_alloc_heightfield()
+    hf := recast.alloc_heightfield()
     testing.expect(t, hf != nil, "Heightfield allocation should succeed")
-    defer recast.rc_free_heightfield(hf)
+    defer recast.free_heightfield(hf)
 
-    ok := recast.rc_create_heightfield(hf, 10, 10, {0,0,0}, {10,10,10}, 1.0, 0.5)
+    ok := recast.create_heightfield(hf, 10, 10, {0,0,0}, {10,10,10}, 1.0, 0.5)
     testing.expect(t, ok, "Heightfield creation should succeed")
 
     // Add two separate spans
-    ok = recast.rc_add_span(hf, 0, 0, 10, 20, nav_recast.RC_WALKABLE_AREA, 1)
+    ok = recast.add_span(hf, 0, 0, 10, 20, nav_recast.RC_WALKABLE_AREA, 1)
     testing.expect(t, ok, "Adding span 1 should succeed")
 
-    ok = recast.rc_add_span(hf, 0, 0, 30, 40, nav_recast.RC_WALKABLE_AREA, 1)
+    ok = recast.add_span(hf, 0, 0, 30, 40, nav_recast.RC_WALKABLE_AREA, 1)
     testing.expect(t, ok, "Adding span 2 should succeed")
 
     // Check we have two spans
@@ -203,17 +203,17 @@ test_span_simple_merge :: proc(t: ^testing.T) {
 @(test)
 test_span_multiple_columns :: proc(t: ^testing.T) {
 
-    hf := recast.rc_alloc_heightfield()
+    hf := recast.alloc_heightfield()
     testing.expect(t, hf != nil, "Heightfield allocation should succeed")
-    defer recast.rc_free_heightfield(hf)
+    defer recast.free_heightfield(hf)
 
-    ok := recast.rc_create_heightfield(hf, 10, 10, {0,0,0}, {10,10,10}, 1.0, 0.5)
+    ok := recast.create_heightfield(hf, 10, 10, {0,0,0}, {10,10,10}, 1.0, 0.5)
     testing.expect(t, ok, "Heightfield creation should succeed")
 
     // Add spans in different columns
     for x in 0..<5 {
         for z in 0..<5 {
-            ok = recast.rc_add_span(hf, i32(x), i32(z), u16(x*10), u16(x*10+10), nav_recast.RC_WALKABLE_AREA, 1)
+            ok = recast.add_span(hf, i32(x), i32(z), u16(x*10), u16(x*10+10), nav_recast.RC_WALKABLE_AREA, 1)
             testing.expect(t, ok, "Adding span should succeed")
         }
     }
@@ -233,24 +233,24 @@ test_span_multiple_columns :: proc(t: ^testing.T) {
 @(test)
 test_span_complex_merging :: proc(t: ^testing.T) {
 
-    hf := recast.rc_alloc_heightfield()
+    hf := recast.alloc_heightfield()
     testing.expect(t, hf != nil, "Heightfield allocation should succeed")
-    defer recast.rc_free_heightfield(hf)
+    defer recast.free_heightfield(hf)
 
-    ok := recast.rc_create_heightfield(hf, 10, 10, {0,0,0}, {10,10,10}, 1.0, 0.5)
+    ok := recast.create_heightfield(hf, 10, 10, {0,0,0}, {10,10,10}, 1.0, 0.5)
     testing.expect(t, ok, "Heightfield creation should succeed")
 
     // Create a complex scenario with multiple overlapping spans
     // Add spans: [10-20], [30-40], [50-60]
-    ok = recast.rc_add_span(hf, 5, 5, 10, 20, nav_recast.RC_WALKABLE_AREA, 1)
+    ok = recast.add_span(hf, 5, 5, 10, 20, nav_recast.RC_WALKABLE_AREA, 1)
     testing.expect(t, ok, "Adding span 1 should succeed")
     log.info("Added span [10-20]")
 
-    ok = recast.rc_add_span(hf, 5, 5, 30, 40, nav_recast.RC_WALKABLE_AREA, 1)
+    ok = recast.add_span(hf, 5, 5, 30, 40, nav_recast.RC_WALKABLE_AREA, 1)
     testing.expect(t, ok, "Adding span 2 should succeed")
     log.info("Added span [30-40]")
 
-    ok = recast.rc_add_span(hf, 5, 5, 50, 60, nav_recast.RC_WALKABLE_AREA, 1)
+    ok = recast.add_span(hf, 5, 5, 50, 60, nav_recast.RC_WALKABLE_AREA, 1)
     testing.expect(t, ok, "Adding span 3 should succeed")
     log.info("Added span [50-60]")
 
@@ -267,7 +267,7 @@ test_span_complex_merging :: proc(t: ^testing.T) {
     }
     
     // Add a span that bridges the gap between first two: [15-35]
-    ok = recast.rc_add_span(hf, 5, 5, 15, 35, nav_recast.RC_WALKABLE_AREA, 1)
+    ok = recast.add_span(hf, 5, 5, 15, 35, nav_recast.RC_WALKABLE_AREA, 1)
     testing.expect(t, ok, "Adding bridging span should succeed")
     log.info("Added bridging span [15-35]")
 

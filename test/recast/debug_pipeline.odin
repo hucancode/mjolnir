@@ -1,7 +1,6 @@
 package test_recast
 
 import nav_recast "../../mjolnir/navigation/recast"
-import nav "../../mjolnir/navigation"
 import "core:testing"
 import "core:log"
 import "core:time"
@@ -10,9 +9,6 @@ import "core:time"
 test_debug_pipeline :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
     
-    // Initialize navigation memory
-    nav.nav_memory_init()
-    defer nav.nav_memory_shutdown()
     
     // Create simple test geometry
     verts := []f32{
@@ -54,14 +50,14 @@ test_debug_pipeline :: proc(t: ^testing.T) {
     log.infof("  width = %d, height = %d", cfg.width, cfg.height)
     
     // Calculate bounds
-    nav_recast.rc_calc_bounds(verts, 4, &cfg.bmin, &cfg.bmax)
+    nav_recast.calc_bounds(verts, 4, &cfg.bmin, &cfg.bmax)
     
     log.info("Config after bounds calculation:")
     log.infof("  bmin = %v", cfg.bmin)
     log.infof("  bmax = %v", cfg.bmax)
     
     // Calculate grid size
-    nav_recast.rc_calc_grid_size(&cfg.bmin, &cfg.bmax, cfg.cs, &cfg.width, &cfg.height)
+    nav_recast.calc_grid_size(&cfg.bmin, &cfg.bmax, cfg.cs, &cfg.width, &cfg.height)
     
     log.infof("Grid size: %dx%d", cfg.width, cfg.height)
     
@@ -76,12 +72,12 @@ test_debug_pipeline :: proc(t: ^testing.T) {
     testing.expect_value(t, cfg.height, i32(20))
     
     // Create heightfield
-    hf := nav_recast.rc_alloc_heightfield()
+    hf := nav_recast.alloc_heightfield()
     testing.expect(t, hf != nil, "Heightfield allocation failed")
-    defer nav_recast.rc_free_heightfield(hf)
+    defer nav_recast.free_heightfield(hf)
     
     log.infof("Creating heightfield with dimensions %dx%d", cfg.width, cfg.height)
-    ok := nav_recast.rc_create_heightfield(hf, cfg.width, cfg.height, cfg.bmin, cfg.bmax, cfg.cs, cfg.ch)
+    ok := nav_recast.create_heightfield(hf, cfg.width, cfg.height, cfg.bmin, cfg.bmax, cfg.cs, cfg.ch)
     testing.expect(t, ok, "Heightfield creation failed")
     
     if ok {

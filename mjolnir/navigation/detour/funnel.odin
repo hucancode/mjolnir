@@ -6,10 +6,10 @@ import "core:log"
 import nav_recast "../recast"
 
 // Find straight path using funnel algorithm for path smoothing
-dt_find_straight_path :: proc(query: ^Dt_Nav_Mesh_Query,
+find_straight_path :: proc(query: ^Nav_Mesh_Query,
                              start_pos: [3]f32, end_pos: [3]f32,
                              path: []nav_recast.Poly_Ref, path_count: i32,
-                             straight_path: []Dt_Straight_Path_Point,
+                             straight_path: []Straight_Path_Point,
                              straight_path_flags: []u8, straight_path_refs: []nav_recast.Poly_Ref,
                              straight_path_count: ^i32, max_straight_path: i32,
                              options: u32) -> nav_recast.Status {
@@ -50,7 +50,7 @@ dt_find_straight_path :: proc(query: ^Dt_Nav_Mesh_Query,
     if n_straight_path < max_straight_path {
         straight_path[n_straight_path] = {
             pos = start_pos,
-            flags = u8(Dt_Straight_Path_Flags.Start),
+            flags = u8(Straight_Path_Flags.Start),
             ref = path[0] if path_count > 0 else nav_recast.INVALID_POLY_REF,
         }
         n_straight_path += 1
@@ -106,16 +106,16 @@ dt_find_straight_path :: proc(query: ^Dt_Nav_Mesh_Query,
             // Last polygon, use end position
             left = end_pos
             right = end_pos
-            portal_type = u8(Dt_Straight_Path_Flags.End)
+            portal_type = u8(Straight_Path_Flags.End)
             // log.infof("  Last polygon, using end position as portal: %v", end_pos)
         } else {
             // Get portal between from_ref and to_ref
-            portal_status := dt_get_portal_points(query, from_ref, to_ref, &left, &right, &portal_type)
+            portal_status := get_portal_points(query, from_ref, to_ref, &left, &right, &portal_type)
             if nav_recast.status_failed(portal_status) {
                 // Could not get portal, use current polygon center
-                from_tile, from_poly, _ := dt_get_tile_and_poly_by_ref(query.nav_mesh, from_ref)
+                from_tile, from_poly, _ := get_tile_and_poly_by_ref(query.nav_mesh, from_ref)
                 if from_tile != nil && from_poly != nil {
-                    center := dt_calc_poly_center(from_tile, from_poly)
+                    center := calc_poly_center(from_tile, from_poly)
                     left = center
                     right = center
                     // log.warnf("  Failed to get portal, using polygon center: %v", center)
@@ -154,7 +154,7 @@ dt_find_straight_path :: proc(query: ^Dt_Nav_Mesh_Query,
                     if n_straight_path < max_straight_path {
                         straight_path[n_straight_path] = {
                             pos = portal_left,
-                            flags = u8(Dt_Straight_Path_Flags.Start) if left_index == 0 else 0,
+                            flags = u8(Straight_Path_Flags.Start) if left_index == 0 else 0,
                             ref = left_poly_ref,
                         }
                         n_straight_path += 1
@@ -208,7 +208,7 @@ dt_find_straight_path :: proc(query: ^Dt_Nav_Mesh_Query,
                     if n_straight_path < max_straight_path {
                         straight_path[n_straight_path] = {
                             pos = portal_right,
-                            flags = u8(Dt_Straight_Path_Flags.Start) if right_index == 0 else 0,
+                            flags = u8(Straight_Path_Flags.Start) if right_index == 0 else 0,
                             ref = right_poly_ref,
                         }
                         n_straight_path += 1
@@ -264,7 +264,7 @@ dt_find_straight_path :: proc(query: ^Dt_Nav_Mesh_Query,
     if n_straight_path < max_straight_path {
         straight_path[n_straight_path] = {
             pos = end_pos,
-            flags = u8(Dt_Straight_Path_Flags.End),
+            flags = u8(Straight_Path_Flags.End),
             ref = path[path_count - 1] if path_count > 0 else nav_recast.INVALID_POLY_REF,
         }
         n_straight_path += 1
@@ -283,18 +283,18 @@ dt_find_straight_path :: proc(query: ^Dt_Nav_Mesh_Query,
 }
 
 // Get portal points between two adjacent polygons
-dt_get_portal_points :: proc(query: ^Dt_Nav_Mesh_Query, from: nav_recast.Poly_Ref, to: nav_recast.Poly_Ref,
+get_portal_points :: proc(query: ^Nav_Mesh_Query, from: nav_recast.Poly_Ref, to: nav_recast.Poly_Ref,
                             left: ^[3]f32, right: ^[3]f32, portal_type: ^u8) -> nav_recast.Status {
 
-    // log.infof("dt_get_portal_points: from=0x%x to=0x%x", from, to)
+    // log.infof("get_portal_points: from=0x%x to=0x%x", from, to)
 
-    from_tile, from_poly, from_status := dt_get_tile_and_poly_by_ref(query.nav_mesh, from)
+    from_tile, from_poly, from_status := get_tile_and_poly_by_ref(query.nav_mesh, from)
     if nav_recast.status_failed(from_status) {
         // log.warnf("  Failed to get from polygon")
         return from_status
     }
 
-    to_tile, to_poly, to_status := dt_get_tile_and_poly_by_ref(query.nav_mesh, to)
+    to_tile, to_poly, to_status := get_tile_and_poly_by_ref(query.nav_mesh, to)
     if nav_recast.status_failed(to_status) {
         // log.warnf("  Failed to get to polygon")
         return to_status
@@ -321,9 +321,9 @@ dt_get_portal_points :: proc(query: ^Dt_Nav_Mesh_Query, from: nav_recast.Poly_Re
         }
         
         // Also check via links
-        link := dt_get_first_link(from_tile, i32(from & 0xffff))
+        link := get_first_link(from_tile, i32(from & 0xffff))
         for link != nav_recast.DT_NULL_LINK {
-            link_ref := dt_get_link_poly_ref(from_tile, link)
+            link_ref := get_link_poly_ref(from_tile, link)
             // log.infof("    Link to: 0x%x", link_ref)
             if link_ref == to {
                 // Found the connection, extract portal vertices
@@ -340,7 +340,7 @@ dt_get_portal_points :: proc(query: ^Dt_Nav_Mesh_Query, from: nav_recast.Poly_Re
                 // log.infof("  Found portal via link: left=%v right=%v", va, vb)
                 return {.Success}
             }
-            link = dt_get_next_link(from_tile, link)
+            link = get_next_link(from_tile, link)
         }
     }
 
@@ -349,7 +349,7 @@ dt_get_portal_points :: proc(query: ^Dt_Nav_Mesh_Query, from: nav_recast.Poly_Re
 }
 
 // Calculate polygon center
-dt_calc_poly_center :: proc(tile: ^Dt_Mesh_Tile, poly: ^Dt_Poly) -> [3]f32 {
+calc_poly_center :: proc(tile: ^Mesh_Tile, poly: ^Poly) -> [3]f32 {
     center := [3]f32{0, 0, 0}
 
     for i in 0..<int(poly.vert_count) {
@@ -365,20 +365,20 @@ dt_calc_poly_center :: proc(tile: ^Dt_Mesh_Tile, poly: ^Dt_Poly) -> [3]f32 {
 }
 
 // Move along surface constrained by navigation mesh
-dt_move_along_surface :: proc(query: ^Dt_Nav_Mesh_Query,
+move_along_surface :: proc(query: ^Nav_Mesh_Query,
                              start_ref: nav_recast.Poly_Ref, start_pos: [3]f32,
-                             end_pos: [3]f32, filter: ^Dt_Query_Filter,
+                             end_pos: [3]f32, filter: ^Query_Filter,
                              result_pos: ^[3]f32, visited: []nav_recast.Poly_Ref,
                              visited_count: ^i32, max_visited: i32) -> nav_recast.Status {
 
     visited_count^ = 0
     result_pos^ = start_pos
 
-    if !dt_is_valid_poly_ref(query.nav_mesh, start_ref) {
+    if !is_valid_poly_ref(query.nav_mesh, start_ref) {
         return {.Invalid_Param}
     }
 
-    tile, poly, status := dt_get_tile_and_poly_by_ref(query.nav_mesh, start_ref)
+    tile, poly, status := get_tile_and_poly_by_ref(query.nav_mesh, start_ref)
     if nav_recast.status_failed(status) {
         return status
     }
@@ -433,12 +433,12 @@ dt_move_along_surface :: proc(query: ^Dt_Nav_Mesh_Query,
         target_pos := cur_pos + step_dir * step_size
 
         // Project target position onto current polygon
-        closest_pos := dt_closest_point_on_poly(query, cur_ref, target_pos)
+        closest_pos := closest_point_on_poly(query, cur_ref, target_pos)
 
         // Check if we moved outside current polygon
-        if !dt_point_in_polygon(query, cur_ref, closest_pos) {
+        if !point_in_polygon(query, cur_ref, closest_pos) {
             // Find which edge we crossed and get neighbor
-            neighbor_ref, wall_hit := dt_find_neighbor_across_edge(query, cur_ref, cur_pos, closest_pos, filter)
+            neighbor_ref, wall_hit := find_neighbor_across_edge(query, cur_ref, cur_pos, closest_pos, filter)
 
             if neighbor_ref != nav_recast.INVALID_POLY_REF {
                 // Move to neighbor polygon
@@ -470,19 +470,19 @@ dt_move_along_surface :: proc(query: ^Dt_Nav_Mesh_Query,
 
 // Helper functions for surface movement
 
-dt_closest_point_on_poly :: proc(query: ^Dt_Nav_Mesh_Query, ref: nav_recast.Poly_Ref, pos: [3]f32) -> [3]f32 {
-    tile, poly, status := dt_get_tile_and_poly_by_ref(query.nav_mesh, ref)
+closest_point_on_poly :: proc(query: ^Nav_Mesh_Query, ref: nav_recast.Poly_Ref, pos: [3]f32) -> [3]f32 {
+    tile, poly, status := get_tile_and_poly_by_ref(query.nav_mesh, ref)
     if nav_recast.status_failed(status) {
         return pos
     }
 
     // For simplicity, project to polygon center
     // A full implementation would project to polygon surface
-    return dt_calc_poly_center(tile, poly)
+    return calc_poly_center(tile, poly)
 }
 
-dt_point_in_polygon :: proc(query: ^Dt_Nav_Mesh_Query, ref: nav_recast.Poly_Ref, pos: [3]f32) -> bool {
-    tile, poly, status := dt_get_tile_and_poly_by_ref(query.nav_mesh, ref)
+point_in_polygon :: proc(query: ^Nav_Mesh_Query, ref: nav_recast.Poly_Ref, pos: [3]f32) -> bool {
+    tile, poly, status := get_tile_and_poly_by_ref(query.nav_mesh, ref)
     if nav_recast.status_failed(status) {
         return false
     }
@@ -496,11 +496,11 @@ dt_point_in_polygon :: proc(query: ^Dt_Nav_Mesh_Query, ref: nav_recast.Poly_Ref,
     return nav_recast.point_in_polygon_2d(pos, verts)
 }
 
-dt_find_neighbor_across_edge :: proc(query: ^Dt_Nav_Mesh_Query, ref: nav_recast.Poly_Ref,
+find_neighbor_across_edge :: proc(query: ^Nav_Mesh_Query, ref: nav_recast.Poly_Ref,
                                     start_pos: [3]f32, end_pos: [3]f32,
-                                    filter: ^Dt_Query_Filter) -> (nav_recast.Poly_Ref, bool) {
+                                    filter: ^Query_Filter) -> (nav_recast.Poly_Ref, bool) {
 
-    tile, poly, status := dt_get_tile_and_poly_by_ref(query.nav_mesh, ref)
+    tile, poly, status := get_tile_and_poly_by_ref(query.nav_mesh, ref)
     if nav_recast.status_failed(status) {
         return nav_recast.INVALID_POLY_REF, false
     }
@@ -513,17 +513,17 @@ dt_find_neighbor_across_edge :: proc(query: ^Dt_Nav_Mesh_Query, ref: nav_recast.
         // Check if movement ray intersects this edge
         if dt_intersect_segment_edge_2d(start_pos, end_pos, va, vb) {
             // Find neighbor across this edge
-            link := dt_get_first_link(tile, i32(ref & 0xffff))
+            link := get_first_link(tile, i32(ref & 0xffff))
             for link != nav_recast.DT_NULL_LINK {
-                neighbor_ref := dt_get_link_poly_ref(tile, link)
+                neighbor_ref := get_link_poly_ref(tile, link)
                 if neighbor_ref != nav_recast.INVALID_POLY_REF {
-                    neighbor_tile, neighbor_poly, neighbor_status := dt_get_tile_and_poly_by_ref(query.nav_mesh, neighbor_ref)
+                    neighbor_tile, neighbor_poly, neighbor_status := get_tile_and_poly_by_ref(query.nav_mesh, neighbor_ref)
                     if nav_recast.status_succeeded(neighbor_status) &&
-                       dt_query_filter_pass_filter(filter, neighbor_ref, neighbor_tile, neighbor_poly) {
+                       query_filter_pass_filter(filter, neighbor_ref, neighbor_tile, neighbor_poly) {
                         return neighbor_ref, false
                     }
                 }
-                link = dt_get_next_link(tile, link)
+                link = get_next_link(tile, link)
             }
 
             // No valid neighbor, hit wall

@@ -10,18 +10,18 @@ import "core:time"
 test_debug_span_merge_threshold :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
     
-    hf := recast.rc_alloc_heightfield()
+    hf := recast.alloc_heightfield()
     testing.expect(t, hf != nil, "Failed to create heightfield")
-    defer recast.rc_free_heightfield(hf)
+    defer recast.free_heightfield(hf)
     
     bmin := [3]f32{0, 0, 0}
     bmax := [3]f32{10, 10, 10}
-    ok := recast.rc_create_heightfield(hf, 10, 10, bmin, bmax, 1.0, 0.5)
+    ok := recast.create_heightfield(hf, 10, 10, bmin, bmax, 1.0, 0.5)
     testing.expect(t, ok, "Failed to create heightfield")
     
     // Test flag merge threshold
     log.info("Adding first span: smin=10, smax=20, area=0 (RC_NULL_AREA)")
-    ok = recast.rc_add_span(hf, 5, 5, 10, 20, recast.RC_NULL_AREA, 1)
+    ok = recast.add_span(hf, 5, 5, 10, 20, recast.RC_NULL_AREA, 1)
     testing.expect(t, ok, "Failed to add first span")
     
     // Check what we have
@@ -32,7 +32,7 @@ test_debug_span_merge_threshold :: proc(t: ^testing.T) {
     log.info("Adding second span: smin=15, smax=30, area=63 (RC_WALKABLE_AREA)")
     log.infof("Expected merge check: |30 - 20| = 10 > 1 (threshold), so area should NOT merge")
     log.info("NOTE: This test expects different behavior than test_span_merge_threshold")
-    ok = recast.rc_add_span(hf, 5, 5, 15, 30, recast.RC_WALKABLE_AREA, 1)
+    ok = recast.add_span(hf, 5, 5, 15, 30, recast.RC_WALKABLE_AREA, 1)
     testing.expect(t, ok, "Failed to add second span")
     
     // Check result

@@ -50,56 +50,56 @@ test_complete_navmesh_generation_simple :: proc(t: ^testing.T) {
     cfg := create_test_config(0.3, 0.2)
 
     // Calculate bounds
-    recast.rc_calc_bounds(verts, 4, &cfg.bmin, &cfg.bmax)
+    recast.calc_bounds(verts, 4, &cfg.bmin, &cfg.bmax)
 
     // Calculate grid size
-    recast.rc_calc_grid_size(&cfg.bmin, &cfg.bmax, cfg.cs, &cfg.width, &cfg.height)
+    recast.calc_grid_size(&cfg.bmin, &cfg.bmax, cfg.cs, &cfg.width, &cfg.height)
 
     // Create heightfield
-    hf := recast.rc_alloc_heightfield()
+    hf := recast.alloc_heightfield()
     testing.expect(t, hf != nil, "Failed to allocate heightfield")
-    defer recast.rc_free_heightfield(hf)
+    defer recast.free_heightfield(hf)
 
-    ok := recast.rc_create_heightfield(hf, cfg.width, cfg.height, cfg.bmin, cfg.bmax, cfg.cs, cfg.ch)
+    ok := recast.create_heightfield(hf, cfg.width, cfg.height, cfg.bmin, cfg.bmax, cfg.cs, cfg.ch)
     testing.expect(t, ok, "Failed to create heightfield")
 
     // Rasterize triangles
-    ok = recast.rc_rasterize_triangles(verts, 4, tris, areas, 2, hf, cfg.walkable_climb)
+    ok = recast.rasterize_triangles(verts, 4, tris, areas, 2, hf, cfg.walkable_climb)
     testing.expect(t, ok, "Failed to rasterize triangles")
 
     // Apply filters
-    recast.rc_filter_low_hanging_walkable_obstacles(int(cfg.walkable_climb), hf)
-    recast.rc_filter_ledge_spans(int(cfg.walkable_height), int(cfg.walkable_climb), hf)
-    recast.rc_filter_walkable_low_height_spans(int(cfg.walkable_height), hf)
+    recast.filter_low_hanging_walkable_obstacles(int(cfg.walkable_climb), hf)
+    recast.filter_ledge_spans(int(cfg.walkable_height), int(cfg.walkable_climb), hf)
+    recast.filter_walkable_low_height_spans(int(cfg.walkable_height), hf)
 
     // Build compact heightfield
-    chf := recast.rc_alloc_compact_heightfield()
-    defer recast.rc_free_compact_heightfield(chf)
+    chf := recast.alloc_compact_heightfield()
+    defer recast.free_compact_heightfield(chf)
 
-    ok = recast.rc_build_compact_heightfield(cfg.walkable_height, cfg.walkable_climb, hf, chf)
+    ok = recast.build_compact_heightfield(cfg.walkable_height, cfg.walkable_climb, hf, chf)
     testing.expect(t, ok, "Failed to build compact heightfield")
     testing.expect(t, chf.span_count > 0, "No spans in compact heightfield")
 
     // Erode walkable area
-    ok = recast.rc_erode_walkable_area(cfg.walkable_radius, chf)
+    ok = recast.erode_walkable_area(cfg.walkable_radius, chf)
     testing.expect(t, ok, "Failed to erode walkable area")
 
     // Build distance field
-    ok = recast.rc_build_distance_field(chf)
+    ok = recast.build_distance_field(chf)
     testing.expect(t, ok, "Failed to build distance field")
     testing.expect(t, chf.max_distance > 0, "Invalid max distance")
 
     // Build regions
-    ok = recast.rc_build_regions(chf, 0, cfg.min_region_area, cfg.merge_region_area)
+    ok = recast.build_regions(chf, 0, cfg.min_region_area, cfg.merge_region_area)
     testing.expect(t, ok, "Failed to build regions")
     testing.expect(t, chf.max_regions > 0, "No regions created")
 
     // Build contours
-    cset := recast.rc_alloc_contour_set()
+    cset := recast.alloc_contour_set()
     testing.expect(t, cset != nil, "Failed to allocate contour set")
-    defer recast.rc_free_contour_set(cset)
+    defer recast.free_contour_set(cset)
 
-    ok = recast.rc_build_contours(chf, cfg.max_simplification_error, cfg.max_edge_len, cset)
+    ok = recast.build_contours(chf, cfg.max_simplification_error, cfg.max_edge_len, cset)
     testing.expect(t, ok, "Failed to build contours")
 
     // THOROUGH VALIDATION: Verify algorithmic correctness of complete pipeline
@@ -225,49 +225,49 @@ test_navmesh_with_obstacles :: proc(t: ^testing.T) {
     cfg := create_test_config(0.3, 0.2)
 
     // Calculate bounds
-    recast.rc_calc_bounds(verts, 12, &cfg.bmin, &cfg.bmax)
+    recast.calc_bounds(verts, 12, &cfg.bmin, &cfg.bmax)
 
     // Calculate grid size
-    recast.rc_calc_grid_size(&cfg.bmin, &cfg.bmax, cfg.cs, &cfg.width, &cfg.height)
+    recast.calc_grid_size(&cfg.bmin, &cfg.bmax, cfg.cs, &cfg.width, &cfg.height)
 
     // Create heightfield
-    hf := recast.rc_alloc_heightfield()
+    hf := recast.alloc_heightfield()
     testing.expect(t, hf != nil, "Failed to allocate heightfield")
-    defer recast.rc_free_heightfield(hf)
+    defer recast.free_heightfield(hf)
 
-    ok := recast.rc_create_heightfield(hf, cfg.width, cfg.height, cfg.bmin, cfg.bmax, cfg.cs, cfg.ch)
+    ok := recast.create_heightfield(hf, cfg.width, cfg.height, cfg.bmin, cfg.bmax, cfg.cs, cfg.ch)
     testing.expect(t, ok, "Failed to create heightfield")
 
     // Rasterize triangles
-    ok = recast.rc_rasterize_triangles(verts, 12, tris, areas, 12, hf, cfg.walkable_climb)
+    ok = recast.rasterize_triangles(verts, 12, tris, areas, 12, hf, cfg.walkable_climb)
     testing.expect(t, ok, "Failed to rasterize triangles")
 
     // Apply filters
-    recast.rc_filter_low_hanging_walkable_obstacles(int(cfg.walkable_climb), hf)
-    recast.rc_filter_ledge_spans(int(cfg.walkable_height), int(cfg.walkable_climb), hf)
-    recast.rc_filter_walkable_low_height_spans(int(cfg.walkable_height), hf)
+    recast.filter_low_hanging_walkable_obstacles(int(cfg.walkable_climb), hf)
+    recast.filter_ledge_spans(int(cfg.walkable_height), int(cfg.walkable_climb), hf)
+    recast.filter_walkable_low_height_spans(int(cfg.walkable_height), hf)
 
     // Build compact heightfield
-    chf := recast.rc_alloc_compact_heightfield()
-    defer recast.rc_free_compact_heightfield(chf)
+    chf := recast.alloc_compact_heightfield()
+    defer recast.free_compact_heightfield(chf)
 
-    ok = recast.rc_build_compact_heightfield(cfg.walkable_height, cfg.walkable_climb, hf, chf)
+    ok = recast.build_compact_heightfield(cfg.walkable_height, cfg.walkable_climb, hf, chf)
     testing.expect(t, ok, "Failed to build compact heightfield")
 
     // Erode walkable area
-    ok = recast.rc_erode_walkable_area(cfg.walkable_radius, chf)
+    ok = recast.erode_walkable_area(cfg.walkable_radius, chf)
     testing.expect(t, ok, "Failed to erode walkable area")
 
     // Apply median filter
-    ok = recast.rc_median_filter_walkable_area(chf)
+    ok = recast.median_filter_walkable_area(chf)
     testing.expect(t, ok, "Failed to apply median filter")
 
     // Build distance field
-    ok = recast.rc_build_distance_field(chf)
+    ok = recast.build_distance_field(chf)
     testing.expect(t, ok, "Failed to build distance field")
 
     // Build regions
-    ok = recast.rc_build_regions(chf, 0, cfg.min_region_area, cfg.merge_region_area)
+    ok = recast.build_regions(chf, 0, cfg.min_region_area, cfg.merge_region_area)
     testing.expect(t, ok, "Failed to build regions")
 
     // THOROUGH VALIDATION: Verify obstacle handling correctness
@@ -400,41 +400,41 @@ test_navmesh_with_slopes :: proc(t: ^testing.T) {
     cfg.walkable_slope_angle = 30.0  // Allow 30 degree slopes
 
     // Calculate bounds
-    recast.rc_calc_bounds(verts, 4, &cfg.bmin, &cfg.bmax)
+    recast.calc_bounds(verts, 4, &cfg.bmin, &cfg.bmax)
 
     // Calculate grid size
-    recast.rc_calc_grid_size(&cfg.bmin, &cfg.bmax, cfg.cs, &cfg.width, &cfg.height)
+    recast.calc_grid_size(&cfg.bmin, &cfg.bmax, cfg.cs, &cfg.width, &cfg.height)
 
     // Create heightfield
-    hf := recast.rc_alloc_heightfield()
+    hf := recast.alloc_heightfield()
     testing.expect(t, hf != nil, "Failed to allocate heightfield")
-    defer recast.rc_free_heightfield(hf)
+    defer recast.free_heightfield(hf)
 
-    ok := recast.rc_create_heightfield(hf, cfg.width, cfg.height, cfg.bmin, cfg.bmax, cfg.cs, cfg.ch)
+    ok := recast.create_heightfield(hf, cfg.width, cfg.height, cfg.bmin, cfg.bmax, cfg.cs, cfg.ch)
     testing.expect(t, ok, "Failed to create heightfield")
 
     // Rasterize triangles
-    ok = recast.rc_rasterize_triangles(verts, 4, tris, areas, 2, hf, cfg.walkable_climb)
+    ok = recast.rasterize_triangles(verts, 4, tris, areas, 2, hf, cfg.walkable_climb)
     testing.expect(t, ok, "Failed to rasterize triangles")
 
     // Apply filters
-    recast.rc_filter_low_hanging_walkable_obstacles(int(cfg.walkable_climb), hf)
-    recast.rc_filter_ledge_spans(int(cfg.walkable_height), int(cfg.walkable_climb), hf)
-    recast.rc_filter_walkable_low_height_spans(int(cfg.walkable_height), hf)
+    recast.filter_low_hanging_walkable_obstacles(int(cfg.walkable_climb), hf)
+    recast.filter_ledge_spans(int(cfg.walkable_height), int(cfg.walkable_climb), hf)
+    recast.filter_walkable_low_height_spans(int(cfg.walkable_height), hf)
 
     // Build compact heightfield
-    chf := recast.rc_alloc_compact_heightfield()
-    defer recast.rc_free_compact_heightfield(chf)
+    chf := recast.alloc_compact_heightfield()
+    defer recast.free_compact_heightfield(chf)
 
-    ok = recast.rc_build_compact_heightfield(cfg.walkable_height, cfg.walkable_climb, hf, chf)
+    ok = recast.build_compact_heightfield(cfg.walkable_height, cfg.walkable_climb, hf, chf)
     testing.expect(t, ok, "Failed to build compact heightfield")
 
     // Build distance field
-    ok = recast.rc_build_distance_field(chf)
+    ok = recast.build_distance_field(chf)
     testing.expect(t, ok, "Failed to build distance field")
 
     // Build regions
-    ok = recast.rc_build_regions(chf, 0, cfg.min_region_area, cfg.merge_region_area)
+    ok = recast.build_regions(chf, 0, cfg.min_region_area, cfg.merge_region_area)
     testing.expect(t, ok, "Failed to build regions")
 
     // Should have created walkable regions on the slope
@@ -468,25 +468,25 @@ test_navmesh_area_marking :: proc(t: ^testing.T) {
     cfg := create_test_config(0.5, 0.2)
 
     // Calculate bounds and grid
-    recast.rc_calc_bounds(verts, 4, &cfg.bmin, &cfg.bmax)
-    recast.rc_calc_grid_size(&cfg.bmin, &cfg.bmax, cfg.cs, &cfg.width, &cfg.height)
+    recast.calc_bounds(verts, 4, &cfg.bmin, &cfg.bmax)
+    recast.calc_grid_size(&cfg.bmin, &cfg.bmax, cfg.cs, &cfg.width, &cfg.height)
 
     // Create and build heightfield
-    hf := recast.rc_alloc_heightfield()
+    hf := recast.alloc_heightfield()
     testing.expect(t, hf != nil, "Failed to allocate heightfield")
-    defer recast.rc_free_heightfield(hf)
+    defer recast.free_heightfield(hf)
 
-    ok := recast.rc_create_heightfield(hf, cfg.width, cfg.height, cfg.bmin, cfg.bmax, cfg.cs, cfg.ch)
+    ok := recast.create_heightfield(hf, cfg.width, cfg.height, cfg.bmin, cfg.bmax, cfg.cs, cfg.ch)
     testing.expect(t, ok, "Failed to create heightfield")
 
-    ok = recast.rc_rasterize_triangles(verts, 4, tris, areas, 2, hf, cfg.walkable_climb)
+    ok = recast.rasterize_triangles(verts, 4, tris, areas, 2, hf, cfg.walkable_climb)
     testing.expect(t, ok, "Failed to rasterize triangles")
 
     // Build compact heightfield
-    chf := recast.rc_alloc_compact_heightfield()
-    defer recast.rc_free_compact_heightfield(chf)
+    chf := recast.alloc_compact_heightfield()
+    defer recast.free_compact_heightfield(chf)
 
-    ok = recast.rc_build_compact_heightfield(cfg.walkable_height, cfg.walkable_climb, hf, chf)
+    ok = recast.build_compact_heightfield(cfg.walkable_height, cfg.walkable_climb, hf, chf)
     testing.expect(t, ok, "Failed to build compact heightfield")
 
     // Mark different areas
@@ -494,11 +494,11 @@ test_navmesh_area_marking :: proc(t: ^testing.T) {
     // Mark a box area
     box_min := [3]f32{5, -1, 5}
     box_max := [3]f32{15, 10, 15}
-    recast.rc_mark_box_area(box_min, box_max, 10, chf)
+    recast.mark_box_area(box_min, box_max, 10, chf)
 
     // Mark a cylinder area
     cylinder_pos := [3]f32{30, 0, 30}
-    recast.rc_mark_cylinder_area(cylinder_pos, 5.0, 10.0, 20, chf)
+    recast.mark_cylinder_area(cylinder_pos, 5.0, 10.0, 20, chf)
 
     // Mark a convex polygon area
     poly_verts := []f32{
@@ -507,7 +507,7 @@ test_navmesh_area_marking :: proc(t: ^testing.T) {
         25, -1, 10,
         20, -1, 10,
     }
-    recast.rc_mark_convex_poly_area(poly_verts, 4, -1, 10, 30, chf)
+    recast.mark_convex_poly_area(poly_verts, 4, -1, 10, 30, chf)
 
     // Verify areas were marked
     marked_areas := map[u8]int{}
@@ -581,44 +581,44 @@ test_navmesh_performance :: proc(t: ^testing.T) {
     cfg := create_test_config(0.3, 0.2)
 
     // Calculate bounds
-    recast.rc_calc_bounds(verts, i32(vert_count), &cfg.bmin, &cfg.bmax)
+    recast.calc_bounds(verts, i32(vert_count), &cfg.bmin, &cfg.bmax)
 
     // Calculate grid size
-    recast.rc_calc_grid_size(&cfg.bmin, &cfg.bmax, cfg.cs, &cfg.width, &cfg.height)
+    recast.calc_grid_size(&cfg.bmin, &cfg.bmax, cfg.cs, &cfg.width, &cfg.height)
 
     log.infof("Performance test: %d vertices, %d triangles, grid %dx%d",
               vert_count, tri_count, cfg.width, cfg.height)
 
     // Create heightfield
-    hf := recast.rc_alloc_heightfield()
+    hf := recast.alloc_heightfield()
     testing.expect(t, hf != nil, "Failed to allocate heightfield")
-    defer recast.rc_free_heightfield(hf)
+    defer recast.free_heightfield(hf)
 
-    ok := recast.rc_create_heightfield(hf, cfg.width, cfg.height, cfg.bmin, cfg.bmax, cfg.cs, cfg.ch)
+    ok := recast.create_heightfield(hf, cfg.width, cfg.height, cfg.bmin, cfg.bmax, cfg.cs, cfg.ch)
     testing.expect(t, ok, "Failed to create heightfield")
 
     // Rasterize triangles
-    ok = recast.rc_rasterize_triangles(verts, i32(vert_count), tris, areas, i32(tri_count), hf, cfg.walkable_climb)
+    ok = recast.rasterize_triangles(verts, i32(vert_count), tris, areas, i32(tri_count), hf, cfg.walkable_climb)
     testing.expect(t, ok, "Failed to rasterize triangles")
 
     // Apply filters
-    recast.rc_filter_low_hanging_walkable_obstacles(int(cfg.walkable_climb), hf)
-    recast.rc_filter_ledge_spans(int(cfg.walkable_height), int(cfg.walkable_climb), hf)
-    recast.rc_filter_walkable_low_height_spans(int(cfg.walkable_height), hf)
+    recast.filter_low_hanging_walkable_obstacles(int(cfg.walkable_climb), hf)
+    recast.filter_ledge_spans(int(cfg.walkable_height), int(cfg.walkable_climb), hf)
+    recast.filter_walkable_low_height_spans(int(cfg.walkable_height), hf)
 
     // Build compact heightfield
-    chf := recast.rc_alloc_compact_heightfield()
-    defer recast.rc_free_compact_heightfield(chf)
+    chf := recast.alloc_compact_heightfield()
+    defer recast.free_compact_heightfield(chf)
 
-    ok = recast.rc_build_compact_heightfield(cfg.walkable_height, cfg.walkable_climb, hf, chf)
+    ok = recast.build_compact_heightfield(cfg.walkable_height, cfg.walkable_climb, hf, chf)
     testing.expect(t, ok, "Failed to build compact heightfield")
 
     // Build distance field
-    ok = recast.rc_build_distance_field(chf)
+    ok = recast.build_distance_field(chf)
     testing.expect(t, ok, "Failed to build distance field")
 
     // Build regions
-    ok = recast.rc_build_regions(chf, 0, cfg.min_region_area, cfg.merge_region_area)
+    ok = recast.build_regions(chf, 0, cfg.min_region_area, cfg.merge_region_area)
     testing.expect(t, ok, "Failed to build regions")
 
     log.infof("Performance test complete: %d spans, %d regions", chf.span_count, chf.max_regions)

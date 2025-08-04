@@ -243,8 +243,8 @@ test_validate_poly_mesh :: proc(t: ^testing.T) {
     testing.expect(t, !nav_recast.validate_poly_mesh(nil), "Nil mesh should be invalid")
 
     // Create a valid simple mesh
-    pmesh := nav_recast.rc_alloc_poly_mesh()
-    defer nav_recast.rc_free_poly_mesh(pmesh)
+    pmesh := nav_recast.alloc_poly_mesh()
+    defer nav_recast.free_poly_mesh(pmesh)
 
     pmesh.npolys = 1
     pmesh.nvp = 3
@@ -276,8 +276,8 @@ test_mesh_copy :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
 
     // Create source mesh
-    src := nav_recast.rc_alloc_poly_mesh()
-    defer nav_recast.rc_free_poly_mesh(src)
+    src := nav_recast.alloc_poly_mesh()
+    defer nav_recast.free_poly_mesh(src)
 
     src.npolys = 1
     src.nvp = 3
@@ -302,11 +302,11 @@ test_mesh_copy :: proc(t: ^testing.T) {
     src.areas[0] = 63
 
     // Create destination mesh
-    dst := nav_recast.rc_alloc_poly_mesh()
-    defer nav_recast.rc_free_poly_mesh(dst)
+    dst := nav_recast.alloc_poly_mesh()
+    defer nav_recast.free_poly_mesh(dst)
 
     // Copy mesh
-    result := nav_recast.rc_copy_poly_mesh(src, dst)
+    result := nav_recast.copy_poly_mesh(src, dst)
     testing.expect(t, result, "Mesh copy should succeed")
 
     // Verify copied data
@@ -333,8 +333,8 @@ test_vertex_welding :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
 
     // Create mesh with duplicate vertices
-    pmesh := nav_recast.rc_alloc_poly_mesh()
-    defer nav_recast.rc_free_poly_mesh(pmesh)
+    pmesh := nav_recast.alloc_poly_mesh()
+    defer nav_recast.free_poly_mesh(pmesh)
 
     pmesh.npolys = 2
     pmesh.nvp = 3
@@ -360,7 +360,7 @@ test_vertex_welding :: proc(t: ^testing.T) {
     original_vert_count := len(pmesh.verts)
 
     // Weld with tolerance that should merge close vertices
-    result := nav_recast.rc_weld_poly_mesh_vertices(pmesh, 2.0)
+    result := nav_recast.weld_poly_mesh_vertices(pmesh, 2.0)
     testing.expect(t, result, "Vertex welding should succeed")
     testing.expect(t, len(pmesh.verts) < original_vert_count, "Should have fewer vertices after welding")
 
@@ -373,7 +373,7 @@ test_build_simple_contour_mesh :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
 
     // Create a simple contour set with one square contour
-    cset := new(nav_recast.Rc_Contour_Set)
+    cset := new(nav_recast.Contour_Set)
     defer {
         if cset.conts != nil {
             // Clean up individual contour verts
@@ -390,8 +390,8 @@ test_build_simple_contour_mesh :: proc(t: ^testing.T) {
         free(cset)
     }
 
-    cset.conts = make([dynamic]nav_recast.Rc_Contour, 0)
-    append(&cset.conts, nav_recast.Rc_Contour{})
+    cset.conts = make([dynamic]nav_recast.Contour, 0)
+    append(&cset.conts, nav_recast.Contour{})
     cset.bmin = {0, 0, 0}
     cset.bmax = {10, 2, 10}
     cset.cs = 0.3
@@ -411,10 +411,10 @@ test_build_simple_contour_mesh :: proc(t: ^testing.T) {
     cont.verts[3] = {0, 5, 10, 0}   // Top-left
 
     // Build polygon mesh
-    pmesh := nav_recast.rc_alloc_poly_mesh()
-    defer nav_recast.rc_free_poly_mesh(pmesh)
+    pmesh := nav_recast.alloc_poly_mesh()
+    defer nav_recast.free_poly_mesh(pmesh)
 
-    result := nav_recast.rc_build_poly_mesh(cset, 6, pmesh)
+    result := nav_recast.build_poly_mesh(cset, 6, pmesh)
     testing.expect(t, result, "Mesh building should succeed")
     testing.expect(t, len(pmesh.verts) > 0, "Should have vertices")
     testing.expect(t, pmesh.npolys > 0, "Should have polygons")
@@ -431,8 +431,8 @@ test_mesh_optimization :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
 
     // Create mesh with degeneracies
-    pmesh := nav_recast.rc_alloc_poly_mesh()
-    defer nav_recast.rc_free_poly_mesh(pmesh)
+    pmesh := nav_recast.alloc_poly_mesh()
+    defer nav_recast.free_poly_mesh(pmesh)
 
     pmesh.npolys = 3
     pmesh.nvp = 3
@@ -468,7 +468,7 @@ test_mesh_optimization :: proc(t: ^testing.T) {
     original_poly_count := pmesh.npolys
 
     // Optimize mesh
-    result := nav_recast.rc_optimize_poly_mesh(pmesh, 0.0)
+    result := nav_recast.optimize_poly_mesh(pmesh, 0.0)
     testing.expect(t, result, "Mesh optimization should succeed")
     testing.expect(t, len(pmesh.verts) <= original_vert_count, "Should have same or fewer vertices")
     testing.expect(t, pmesh.npolys < original_poly_count, "Should have fewer polygons (degenerates removed)")

@@ -20,11 +20,11 @@ test_heightfield_visualization :: proc(t: ^testing.T) {
     bmin := [3]f32{0, 0, 0}
     bmax := [3]f32{f32(field_size), 10, f32(field_size)}
     
-    hf := recast.rc_alloc_heightfield()
+    hf := recast.alloc_heightfield()
     testing.expect(t, hf != nil, "Heightfield allocation should succeed")
-    defer recast.rc_free_heightfield(hf)
+    defer recast.free_heightfield(hf)
     
-    ok := recast.rc_create_heightfield(hf, field_size, field_size, bmin, bmax, cell_size, cell_height)
+    ok := recast.create_heightfield(hf, field_size, field_size, bmin, bmax, cell_size, cell_height)
     testing.expect(t, ok, "Heightfield creation should succeed")
     
     // Add ground level spans
@@ -34,7 +34,7 @@ test_heightfield_visualization :: proc(t: ^testing.T) {
     
     for z in 0..<field_size {
         for x in 0..<field_size {
-            ok = recast.rc_add_span(hf, x, z, ground_level, ground_height, walkable_area, 1)
+            ok = recast.add_span(hf, x, z, ground_level, ground_height, walkable_area, 1)
             testing.expect(t, ok, "Adding ground span should succeed")
         }
     }
@@ -48,7 +48,7 @@ test_heightfield_visualization :: proc(t: ^testing.T) {
     
     for z in obstacle_start..<obstacle_end {
         for x in obstacle_start..<obstacle_end {
-            ok = recast.rc_add_span(hf, x, z, obstacle_bottom, obstacle_top, obstacle_area, 1)
+            ok = recast.add_span(hf, x, z, obstacle_bottom, obstacle_top, obstacle_area, 1)
             testing.expect(t, ok, "Adding obstacle span should succeed")
         }
     }

@@ -13,8 +13,8 @@ test_contour_generation_simple :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
 
     // Create a simple 5x5 heightfield with one region
-    chf := nav_recast.rc_alloc_compact_heightfield()
-    defer nav_recast.rc_free_compact_heightfield(chf)
+    chf := nav_recast.alloc_compact_heightfield()
+    defer nav_recast.free_compact_heightfield(chf)
 
     chf.width = 5
     chf.height = 5
@@ -25,8 +25,8 @@ test_contour_generation_simple :: proc(t: ^testing.T) {
     chf.bmax = {1.5, 1.0, 1.5}
 
     // Allocate cells and spans
-    chf.cells = make([]nav_recast.Rc_Compact_Cell, 25)
-    chf.spans = make([]nav_recast.Rc_Compact_Span, 25)
+    chf.cells = make([]nav_recast.Compact_Cell, 25)
+    chf.spans = make([]nav_recast.Compact_Span, 25)
     chf.areas = make([]u8, 25)
 
     // Create a simple square region in the center (3x3)
@@ -55,9 +55,9 @@ test_contour_generation_simple :: proc(t: ^testing.T) {
                 ny := y + int(nav_recast.get_dir_offset_y(dir))
 
                 if nx >= 0 && nx < 5 && ny >= 0 && ny < 5 {
-                    nav_recast.rc_set_con(&chf.spans[span_idx], dir, 0)
+                    nav_recast.set_con(&chf.spans[span_idx], dir, 0)
                 } else {
-                    nav_recast.rc_set_con(&chf.spans[span_idx], dir, nav_recast.RC_NOT_CONNECTED)
+                    nav_recast.set_con(&chf.spans[span_idx], dir, nav_recast.RC_NOT_CONNECTED)
                 }
             }
 
@@ -66,10 +66,10 @@ test_contour_generation_simple :: proc(t: ^testing.T) {
     }
 
     // Build contours
-    cset := nav_recast.rc_alloc_contour_set()
-    defer nav_recast.rc_free_contour_set(cset)
+    cset := nav_recast.alloc_contour_set()
+    defer nav_recast.free_contour_set(cset)
 
-    result := nav_recast.rc_build_contours(chf, 1.0, 10, cset)
+    result := nav_recast.build_contours(chf, 1.0, 10, cset)
     testing.expect(t, result, "Contour building should succeed")
     testing.expect(t, len(cset.conts) == 1, "Should have exactly one contour for the square region")
 
@@ -89,8 +89,8 @@ test_contour_generation_multiple_regions :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
 
     // Create a 10x10 heightfield with two separate regions
-    chf := nav_recast.rc_alloc_compact_heightfield()
-    defer nav_recast.rc_free_compact_heightfield(chf)
+    chf := nav_recast.alloc_compact_heightfield()
+    defer nav_recast.free_compact_heightfield(chf)
 
     chf.width = 10
     chf.height = 10
@@ -101,8 +101,8 @@ test_contour_generation_multiple_regions :: proc(t: ^testing.T) {
     chf.bmax = {3.0, 1.0, 3.0}
 
     // Allocate cells and spans
-    chf.cells = make([]nav_recast.Rc_Compact_Cell, 100)
-    chf.spans = make([]nav_recast.Rc_Compact_Span, 100)
+    chf.cells = make([]nav_recast.Compact_Cell, 100)
+    chf.spans = make([]nav_recast.Compact_Span, 100)
     chf.areas = make([]u8, 100)
 
     // Create two separate square regions
@@ -135,9 +135,9 @@ test_contour_generation_multiple_regions :: proc(t: ^testing.T) {
                 ny := y + int(nav_recast.get_dir_offset_y(dir))
 
                 if nx >= 0 && nx < 10 && ny >= 0 && ny < 10 {
-                    nav_recast.rc_set_con(&chf.spans[span_idx], dir, 0)
+                    nav_recast.set_con(&chf.spans[span_idx], dir, 0)
                 } else {
-                    nav_recast.rc_set_con(&chf.spans[span_idx], dir, nav_recast.RC_NOT_CONNECTED)
+                    nav_recast.set_con(&chf.spans[span_idx], dir, nav_recast.RC_NOT_CONNECTED)
                 }
             }
 
@@ -146,10 +146,10 @@ test_contour_generation_multiple_regions :: proc(t: ^testing.T) {
     }
 
     // Build contours
-    cset := nav_recast.rc_alloc_contour_set()
-    defer nav_recast.rc_free_contour_set(cset)
+    cset := nav_recast.alloc_contour_set()
+    defer nav_recast.free_contour_set(cset)
 
-    result := nav_recast.rc_build_contours(chf, 1.0, 10, cset)
+    result := nav_recast.build_contours(chf, 1.0, 10, cset)
     testing.expect(t, result, "Contour building should succeed")
     testing.expect(t, len(cset.conts) == 2, "Should have exactly two contours for two regions")
 
@@ -306,12 +306,12 @@ test_simple_square_mesh :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
 
     // Create a contour set with a simple square
-    cset := nav_recast.rc_alloc_contour_set()
-    defer nav_recast.rc_free_contour_set(cset)
+    cset := nav_recast.alloc_contour_set()
+    defer nav_recast.free_contour_set(cset)
 
     // Set up contours with append instead
-    cset.conts = make([dynamic]nav_recast.Rc_Contour, 0)
-    append(&cset.conts, nav_recast.Rc_Contour{})
+    cset.conts = make([dynamic]nav_recast.Contour, 0)
+    append(&cset.conts, nav_recast.Contour{})
     cset.bmin = {0, 0, 0}
     cset.bmax = {30, 10, 30}
     cset.cs = 0.3
@@ -330,10 +330,10 @@ test_simple_square_mesh :: proc(t: ^testing.T) {
     cont.verts[3] = {0, 5, 10, 0}     // Top-left
 
     // Build polygon mesh
-    pmesh := nav_recast.rc_alloc_poly_mesh()
-    defer nav_recast.rc_free_poly_mesh(pmesh)
+    pmesh := nav_recast.alloc_poly_mesh()
+    defer nav_recast.free_poly_mesh(pmesh)
 
-    result := nav_recast.rc_build_poly_mesh(cset, 6, pmesh)
+    result := nav_recast.build_poly_mesh(cset, 6, pmesh)
     testing.expect(t, result, "Mesh building from square contour should succeed")
     testing.expect(t, len(pmesh.verts) == 4, "Square should have exactly 4 vertices")
     testing.expect(t, pmesh.npolys >= 1, "Square should have at least 1 polygon")
@@ -348,12 +348,12 @@ test_simple_l_shape_mesh :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
 
     // Create a contour set with a simple L-shape
-    cset := nav_recast.rc_alloc_contour_set()
-    defer nav_recast.rc_free_contour_set(cset)
+    cset := nav_recast.alloc_contour_set()
+    defer nav_recast.free_contour_set(cset)
 
     // Set up contours with append instead
-    cset.conts = make([dynamic]nav_recast.Rc_Contour, 0)
-    append(&cset.conts, nav_recast.Rc_Contour{})
+    cset.conts = make([dynamic]nav_recast.Contour, 0)
+    append(&cset.conts, nav_recast.Contour{})
     cset.bmin = {0, 0, 0}
     cset.bmax = {30, 10, 30}
     cset.cs = 1.0
@@ -381,10 +381,10 @@ test_simple_l_shape_mesh :: proc(t: ^testing.T) {
     }
 
     // Build polygon mesh
-    pmesh := nav_recast.rc_alloc_poly_mesh()
-    defer nav_recast.rc_free_poly_mesh(pmesh)
+    pmesh := nav_recast.alloc_poly_mesh()
+    defer nav_recast.free_poly_mesh(pmesh)
 
-    result := nav_recast.rc_build_poly_mesh(cset, 6, pmesh)
+    result := nav_recast.build_poly_mesh(cset, 6, pmesh)
     testing.expect(t, result, "Mesh building from L-shaped contour should succeed")
     testing.expect(t, len(pmesh.verts) == 6, "L-shape should have exactly 6 vertices")
     testing.expect(t, pmesh.npolys >= 2, "L-shape should have at least 2 polygons")
@@ -399,12 +399,12 @@ test_contour_to_mesh_pipeline :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
 
     // Create a contour set with an L-shaped region
-    cset := nav_recast.rc_alloc_contour_set()
-    defer nav_recast.rc_free_contour_set(cset)
+    cset := nav_recast.alloc_contour_set()
+    defer nav_recast.free_contour_set(cset)
 
     // Set up contours with append instead
-    cset.conts = make([dynamic]nav_recast.Rc_Contour, 0)
-    append(&cset.conts, nav_recast.Rc_Contour{})
+    cset.conts = make([dynamic]nav_recast.Contour, 0)
+    append(&cset.conts, nav_recast.Contour{})
     cset.bmin = {0, 0, 0}
     cset.bmax = {30, 10, 30}
     cset.cs = 0.3
@@ -432,10 +432,10 @@ test_contour_to_mesh_pipeline :: proc(t: ^testing.T) {
     }
 
     // Build polygon mesh
-    pmesh := nav_recast.rc_alloc_poly_mesh()
-    defer nav_recast.rc_free_poly_mesh(pmesh)
+    pmesh := nav_recast.alloc_poly_mesh()
+    defer nav_recast.free_poly_mesh(pmesh)
 
-    result := nav_recast.rc_build_poly_mesh(cset, 6, pmesh)
+    result := nav_recast.build_poly_mesh(cset, 6, pmesh)
     testing.expect(t, result, "Mesh building from L-shaped contour should succeed")
     testing.expect(t, len(pmesh.verts) >= 6, "Should have at least 6 vertices")
     testing.expect(t, pmesh.npolys >= 1, "Should have at least 1 polygon")

@@ -11,26 +11,26 @@ import "core:strings"
 test_compact_heightfield_building :: proc(t: ^testing.T) {
 
     // Create a regular heightfield
-    hf := recast.rc_alloc_heightfield()
+    hf := recast.alloc_heightfield()
     testing.expect(t, hf != nil, "Heightfield allocation should succeed")
-    defer recast.rc_free_heightfield(hf)
+    defer recast.free_heightfield(hf)
 
-    ok := recast.rc_create_heightfield(hf, 10, 10, {0,0,0}, {10,10,10}, 1.0, 0.5)
+    ok := recast.create_heightfield(hf, 10, 10, {0,0,0}, {10,10,10}, 1.0, 0.5)
     testing.expect(t, ok, "Heightfield creation should succeed")
 
     // Add some spans to create a simple floor
     for x in 0..<10 {
         for z in 0..<10 {
-            ok = recast.rc_add_span(hf, i32(x), i32(z), 0, 10, nav_recast.RC_WALKABLE_AREA, 1)
+            ok = recast.add_span(hf, i32(x), i32(z), 0, 10, nav_recast.RC_WALKABLE_AREA, 1)
             testing.expect(t, ok, "Adding span should succeed")
         }
     }
 
     // Build compact heightfield
-    chf := recast.rc_alloc_compact_heightfield()
-    defer recast.rc_free_compact_heightfield(chf)
+    chf := recast.alloc_compact_heightfield()
+    defer recast.free_compact_heightfield(chf)
 
-    ok = recast.rc_build_compact_heightfield(2, 1, hf, chf)
+    ok = recast.build_compact_heightfield(2, 1, hf, chf)
     testing.expect(t, ok, "Building compact heightfield should succeed")
 
     // Verify results
@@ -56,30 +56,30 @@ test_compact_heightfield_building :: proc(t: ^testing.T) {
 test_erode_walkable_area :: proc(t: ^testing.T) {
 
     // Create a heightfield with a 10x10 floor
-    hf := recast.rc_alloc_heightfield()
+    hf := recast.alloc_heightfield()
     testing.expect(t, hf != nil, "Heightfield allocation should succeed")
-    defer recast.rc_free_heightfield(hf)
+    defer recast.free_heightfield(hf)
 
-    ok := recast.rc_create_heightfield(hf, 10, 10, {0,0,0}, {10,10,10}, 1.0, 0.5)
+    ok := recast.create_heightfield(hf, 10, 10, {0,0,0}, {10,10,10}, 1.0, 0.5)
     testing.expect(t, ok, "Heightfield creation should succeed")
 
     // Add a floor
     for x in 0..<10 {
         for z in 0..<10 {
-            ok = recast.rc_add_span(hf, i32(x), i32(z), 0, 10, nav_recast.RC_WALKABLE_AREA, 1)
+            ok = recast.add_span(hf, i32(x), i32(z), 0, 10, nav_recast.RC_WALKABLE_AREA, 1)
             testing.expect(t, ok, "Adding span should succeed")
         }
     }
 
     // Build compact heightfield
-    chf := recast.rc_alloc_compact_heightfield()
-    defer recast.rc_free_compact_heightfield(chf)
+    chf := recast.alloc_compact_heightfield()
+    defer recast.free_compact_heightfield(chf)
 
-    ok = recast.rc_build_compact_heightfield(2, 1, hf, chf)
+    ok = recast.build_compact_heightfield(2, 1, hf, chf)
     testing.expect(t, ok, "Building compact heightfield should succeed")
 
     // Erode with radius 1
-    ok = recast.rc_erode_walkable_area(1, chf)
+    ok = recast.erode_walkable_area(1, chf)
     testing.expect(t, ok, "Eroding walkable area should succeed")
 
     // Check that border areas were eroded
@@ -108,11 +108,11 @@ test_erode_walkable_area :: proc(t: ^testing.T) {
 test_build_distance_field :: proc(t: ^testing.T) {
 
     // Create a simple heightfield
-    hf := recast.rc_alloc_heightfield()
+    hf := recast.alloc_heightfield()
     testing.expect(t, hf != nil, "Heightfield allocation should succeed")
-    defer recast.rc_free_heightfield(hf)
+    defer recast.free_heightfield(hf)
 
-    ok := recast.rc_create_heightfield(hf, 10, 10, {0,0,0}, {10,10,10}, 1.0, 0.5)
+    ok := recast.create_heightfield(hf, 10, 10, {0,0,0}, {10,10,10}, 1.0, 0.5)
     testing.expect(t, ok, "Heightfield creation should succeed")
 
     // Add a floor with a hole in the middle
@@ -122,7 +122,7 @@ test_build_distance_field :: proc(t: ^testing.T) {
             if x >= 4 && x <= 5 && z >= 4 && z <= 5 {
                 continue
             }
-            ok = recast.rc_add_span(hf, i32(x), i32(z), 0, 10, nav_recast.RC_WALKABLE_AREA, 1)
+            ok = recast.add_span(hf, i32(x), i32(z), 0, 10, nav_recast.RC_WALKABLE_AREA, 1)
             testing.expect(t, ok, "Adding span should succeed")
         }
     }
@@ -133,16 +133,16 @@ test_build_distance_field :: proc(t: ^testing.T) {
     log.infof("Heightfield debug: width=%d, height=%d", hf.width, hf.height)
 
     // Build compact heightfield
-    chf := recast.rc_alloc_compact_heightfield()
-    defer recast.rc_free_compact_heightfield(chf)
+    chf := recast.alloc_compact_heightfield()
+    defer recast.free_compact_heightfield(chf)
 
-    ok = recast.rc_build_compact_heightfield(2, 1, hf, chf)
+    ok = recast.build_compact_heightfield(2, 1, hf, chf)
     testing.expect(t, ok, "Building compact heightfield should succeed")
     
     log.infof("Compact heightfield: width=%d, height=%d, spans=%d", chf.width, chf.height, chf.span_count)
 
     // Build distance field
-    ok = recast.rc_build_distance_field(chf)
+    ok = recast.build_distance_field(chf)
     testing.expect(t, ok, "Building distance field should succeed")
 
     // Check that distance field was created
@@ -152,7 +152,7 @@ test_build_distance_field :: proc(t: ^testing.T) {
     
     // THOROUGH VALIDATION: Check distance field mathematical correctness
     // In a distance field with a hole in center, distances should increase with distance from hole
-    get_distance_at_grid :: proc(chf: ^recast.Rc_Compact_Heightfield, x, z: i32) -> u16 {
+    get_distance_at_grid :: proc(chf: ^recast.Compact_Heightfield, x, z: i32) -> u16 {
         if x < 0 || x >= chf.width || z < 0 || z >= chf.height {
             return 0
         }
@@ -259,7 +259,7 @@ test_build_distance_field :: proc(t: ^testing.T) {
                         if i < u32(len(chf.spans)) {
                             s := &chf.spans[i]
                             for dir in 0..<4 {
-                                if recast.rc_get_con(s, dir) == nav_recast.RC_NOT_CONNECTED {
+                                if recast.get_con(s, dir) == nav_recast.RC_NOT_CONNECTED {
                                     is_edge = true
                                     break
                                 }
@@ -280,18 +280,18 @@ test_build_distance_field :: proc(t: ^testing.T) {
 test_build_regions_watershed :: proc(t: ^testing.T) {
 
     // Create a simple heightfield
-    hf := recast.rc_alloc_heightfield()
+    hf := recast.alloc_heightfield()
     testing.expect(t, hf != nil, "Heightfield allocation should succeed")
-    defer recast.rc_free_heightfield(hf)
+    defer recast.free_heightfield(hf)
 
-    ok := recast.rc_create_heightfield(hf, 20, 20, {0,0,0}, {20,20,20}, 1.0, 0.5)
+    ok := recast.create_heightfield(hf, 20, 20, {0,0,0}, {20,20,20}, 1.0, 0.5)
     testing.expect(t, ok, "Heightfield creation should succeed")
 
     // Create two separate platforms
     // Platform 1: x[0-8], z[0-8]
     for x in 0..<9 {
         for z in 0..<9 {
-            ok = recast.rc_add_span(hf, i32(x), i32(z), 0, 10, nav_recast.RC_WALKABLE_AREA, 1)
+            ok = recast.add_span(hf, i32(x), i32(z), 0, 10, nav_recast.RC_WALKABLE_AREA, 1)
             testing.expect(t, ok, "Adding span should succeed")
         }
     }
@@ -299,24 +299,24 @@ test_build_regions_watershed :: proc(t: ^testing.T) {
     // Platform 2: x[11-19], z[11-19]
     for x in 11..<20 {
         for z in 11..<20 {
-            ok = recast.rc_add_span(hf, i32(x), i32(z), 0, 10, nav_recast.RC_WALKABLE_AREA, 1)
+            ok = recast.add_span(hf, i32(x), i32(z), 0, 10, nav_recast.RC_WALKABLE_AREA, 1)
             testing.expect(t, ok, "Adding span should succeed")
         }
     }
 
     // Build compact heightfield
-    chf := recast.rc_alloc_compact_heightfield()
-    defer recast.rc_free_compact_heightfield(chf)
+    chf := recast.alloc_compact_heightfield()
+    defer recast.free_compact_heightfield(chf)
 
-    ok = recast.rc_build_compact_heightfield(2, 1, hf, chf)
+    ok = recast.build_compact_heightfield(2, 1, hf, chf)
     testing.expect(t, ok, "Building compact heightfield should succeed")
 
     // Build distance field
-    ok = recast.rc_build_distance_field(chf)
+    ok = recast.build_distance_field(chf)
     testing.expect(t, ok, "Building distance field should succeed")
 
     // Build regions
-    ok = recast.rc_build_regions(chf, 0, 8, 20)
+    ok = recast.build_regions(chf, 0, 8, 20)
     testing.expect(t, ok, "Building regions should succeed")
 
     // Check that regions were created
@@ -349,11 +349,11 @@ test_build_regions_watershed :: proc(t: ^testing.T) {
 test_region_merging :: proc(t: ^testing.T) {
 
     // Create a heightfield with small adjacent areas
-    hf := recast.rc_alloc_heightfield()
+    hf := recast.alloc_heightfield()
     testing.expect(t, hf != nil, "Heightfield allocation should succeed")
-    defer recast.rc_free_heightfield(hf)
+    defer recast.free_heightfield(hf)
 
-    ok := recast.rc_create_heightfield(hf, 10, 10, {0,0,0}, {10,10,10}, 1.0, 0.5)
+    ok := recast.create_heightfield(hf, 10, 10, {0,0,0}, {10,10,10}, 1.0, 0.5)
     testing.expect(t, ok, "Heightfield creation should succeed")
 
     // Create a floor with varying heights to force region splitting
@@ -363,25 +363,25 @@ test_region_merging :: proc(t: ^testing.T) {
             if (x + z) % 2 == 0 {
                 height = 3  // Changed from 5 to 3 to be within walkable_climb of 4
             }
-            ok = recast.rc_add_span(hf, i32(x), i32(z), height, height + 10, nav_recast.RC_WALKABLE_AREA, 1)
+            ok = recast.add_span(hf, i32(x), i32(z), height, height + 10, nav_recast.RC_WALKABLE_AREA, 1)
             testing.expect(t, ok, "Adding span should succeed")
         }
     }
 
     // Build compact heightfield
-    chf := recast.rc_alloc_compact_heightfield()
-    defer recast.rc_free_compact_heightfield(chf)
+    chf := recast.alloc_compact_heightfield()
+    defer recast.free_compact_heightfield(chf)
 
-    ok = recast.rc_build_compact_heightfield(2, 4, hf, chf)
+    ok = recast.build_compact_heightfield(2, 4, hf, chf)
     testing.expect(t, ok, "Building compact heightfield should succeed")
 
     // Build distance field
-    ok = recast.rc_build_distance_field(chf)
+    ok = recast.build_distance_field(chf)
     testing.expect(t, ok, "Building distance field should succeed")
 
     // Build regions with small min area and large merge area
     // This should create many small regions that get merged
-    ok = recast.rc_build_regions(chf, 0, 2, 50)
+    ok = recast.build_regions(chf, 0, 2, 50)
     testing.expect(t, ok, "Building regions should succeed")
 
     // Count unique regions
@@ -405,37 +405,37 @@ test_region_merging :: proc(t: ^testing.T) {
 test_border_regions :: proc(t: ^testing.T) {
 
     // Create a heightfield with borders
-    hf := recast.rc_alloc_heightfield()
+    hf := recast.alloc_heightfield()
     testing.expect(t, hf != nil, "Heightfield allocation should succeed")
-    defer recast.rc_free_heightfield(hf)
+    defer recast.free_heightfield(hf)
 
     // Set border size
     hf.border_size = 2
 
-    ok := recast.rc_create_heightfield(hf, 14, 14, {-2,-2,-2}, {12,12,12}, 1.0, 0.5)
+    ok := recast.create_heightfield(hf, 14, 14, {-2,-2,-2}, {12,12,12}, 1.0, 0.5)
     testing.expect(t, ok, "Heightfield creation should succeed")
 
     // Add floor including border area
     for x in 0..<14 {
         for z in 0..<14 {
-            ok = recast.rc_add_span(hf, i32(x), i32(z), 0, 10, nav_recast.RC_WALKABLE_AREA, 1)
+            ok = recast.add_span(hf, i32(x), i32(z), 0, 10, nav_recast.RC_WALKABLE_AREA, 1)
             testing.expect(t, ok, "Adding span should succeed")
         }
     }
 
     // Build compact heightfield
-    chf := recast.rc_alloc_compact_heightfield()
-    defer recast.rc_free_compact_heightfield(chf)
+    chf := recast.alloc_compact_heightfield()
+    defer recast.free_compact_heightfield(chf)
 
-    ok = recast.rc_build_compact_heightfield(2, 1, hf, chf)
+    ok = recast.build_compact_heightfield(2, 1, hf, chf)
     testing.expect(t, ok, "Building compact heightfield should succeed")
 
     // Build distance field
-    ok = recast.rc_build_distance_field(chf)
+    ok = recast.build_distance_field(chf)
     testing.expect(t, ok, "Building distance field should succeed")
 
     // Build regions
-    ok = recast.rc_build_regions(chf, hf.border_size, 8, 20)
+    ok = recast.build_regions(chf, hf.border_size, 8, 20)
     testing.expect(t, ok, "Building regions should succeed")
 
     // Check that border regions are marked correctly

@@ -26,7 +26,7 @@ DEBUG_COLOR_NULL :: [4]f32{0.5, 0.5, 0.5, 0.3}          // Gray for null areas
 DEBUG_COLOR_EDGE :: [4]f32{1.0, 1.0, 0.0, 0.8}          // Yellow for connection indicators
 
 // Export polygon mesh to OBJ format
-rc_dump_poly_mesh_to_obj :: proc(pmesh: ^Rc_Poly_Mesh, filepath: string) -> bool {
+dump_poly_mesh_to_obj :: proc(pmesh: ^Poly_Mesh, filepath: string) -> bool {
     if pmesh == nil || len(pmesh.verts) == 0 || pmesh.npolys == 0 do return false
 
     log.infof("Exporting polygon mesh to OBJ: %s", filepath)
@@ -85,7 +85,7 @@ rc_dump_poly_mesh_to_obj :: proc(pmesh: ^Rc_Poly_Mesh, filepath: string) -> bool
 }
 
 // Export detail mesh to OBJ format
-rc_dump_detail_mesh_to_obj :: proc(dmesh: ^Rc_Poly_Mesh_Detail, filepath: string) -> bool {
+dump_detail_mesh_to_obj :: proc(dmesh: ^Poly_Mesh_Detail, filepath: string) -> bool {
     if dmesh == nil || len(dmesh.verts) == 0 || len(dmesh.tris) == 0 do return false
 
     log.infof("Exporting detail mesh to OBJ: %s", filepath)
@@ -126,7 +126,7 @@ rc_dump_detail_mesh_to_obj :: proc(dmesh: ^Rc_Poly_Mesh_Detail, filepath: string
 }
 
 // Export contour set to a simple text format for debugging
-rc_dump_contour_set :: proc(cset: ^Rc_Contour_Set, filepath: string) -> bool {
+dump_contour_set :: proc(cset: ^Contour_Set, filepath: string) -> bool {
     if cset == nil || len(cset.conts) == 0 do return false
 
     log.infof("Exporting contour set to file: %s", filepath)
@@ -184,7 +184,7 @@ rc_dump_contour_set :: proc(cset: ^Rc_Contour_Set, filepath: string) -> bool {
 }
 
 // Export compact heightfield to a text format for debugging
-rc_dump_compact_heightfield :: proc(chf: ^Rc_Compact_Heightfield, filepath: string) -> bool {
+dump_compact_heightfield :: proc(chf: ^Compact_Heightfield, filepath: string) -> bool {
     if chf == nil do return false
 
     log.infof("Exporting compact heightfield to file: %s", filepath)
@@ -236,7 +236,7 @@ rc_dump_compact_heightfield :: proc(chf: ^Rc_Compact_Heightfield, filepath: stri
         defer strings.builder_destroy(&conn_str)
 
         for dir in 0..<4 {
-            conn := rc_get_con(s, dir)
+            conn := get_con(s, dir)
             if conn != RC_NOT_CONNECTED {
                 if strings.builder_len(conn_str) > 0 {
                     strings.write_string(&conn_str, ",")
@@ -259,7 +259,7 @@ rc_dump_compact_heightfield :: proc(chf: ^Rc_Compact_Heightfield, filepath: stri
 }
 
 // Export heightfield layer set for multi-level geometry debugging
-rc_dump_heightfield_layers :: proc(lset: [dynamic]Rc_Heightfield_Layer, filepath: string) -> bool {
+dump_heightfield_layers :: proc(lset: [dynamic]Heightfield_Layer, filepath: string) -> bool {
     if len(lset) == 0 do return false
 
     log.infof("Exporting heightfield layer set to file: %s", filepath)
@@ -322,8 +322,8 @@ rc_dump_heightfield_layers :: proc(lset: [dynamic]Rc_Heightfield_Layer, filepath
 }
 
 // Export statistics and summary info about navigation data structures
-rc_dump_statistics :: proc(chf: ^Rc_Compact_Heightfield, cset: ^Rc_Contour_Set,
-                          pmesh: ^Rc_Poly_Mesh, dmesh: ^Rc_Poly_Mesh_Detail,
+dump_statistics :: proc(chf: ^Compact_Heightfield, cset: ^Contour_Set,
+                          pmesh: ^Poly_Mesh, dmesh: ^Poly_Mesh_Detail,
                           filepath: string) -> bool {
 
     log.infof("Exporting navigation statistics to file: %s", filepath)
@@ -442,8 +442,8 @@ rc_dump_statistics :: proc(chf: ^Rc_Compact_Heightfield, cset: ^Rc_Contour_Set,
     total_bytes := 0
 
     if chf != nil {
-        chf_bytes := int(chf.span_count) * (size_of(Rc_Compact_Span) + 2) + // spans + areas + dist
-                    int(chf.width * chf.height) * size_of(Rc_Compact_Cell)
+        chf_bytes := int(chf.span_count) * (size_of(Compact_Span) + 2) + // spans + areas + dist
+                    int(chf.width * chf.height) * size_of(Compact_Cell)
         os.write_string(file, fmt.tprintf("  compact_heightfield: %d bytes\n", chf_bytes))
         total_bytes += chf_bytes
     }
@@ -476,7 +476,7 @@ rc_dump_statistics :: proc(chf: ^Rc_Compact_Heightfield, cset: ^Rc_Contour_Set,
 // ========================================
 
 // Generate visual debug mesh for heightfield
-generate_heightfield_debug_mesh :: proc(hf: ^Rc_Heightfield) -> Heightfield_Debug_Mesh {
+generate_heightfield_debug_mesh :: proc(hf: ^Heightfield) -> Heightfield_Debug_Mesh {
     mesh := Heightfield_Debug_Mesh{}
 
     if hf == nil {
@@ -541,7 +541,7 @@ generate_heightfield_debug_mesh :: proc(hf: ^Rc_Heightfield) -> Heightfield_Debu
 }
 
 // Generate visual debug mesh for compact heightfield
-generate_compact_heightfield_debug_mesh :: proc(chf: ^Rc_Compact_Heightfield) -> Heightfield_Debug_Mesh {
+generate_compact_heightfield_debug_mesh :: proc(chf: ^Compact_Heightfield) -> Heightfield_Debug_Mesh {
     mesh := Heightfield_Debug_Mesh{}
 
     if chf == nil do return mesh
@@ -593,7 +593,7 @@ generate_compact_heightfield_debug_mesh :: proc(chf: ^Rc_Compact_Heightfield) ->
 
                 // Add edge indicators for connections
                 for dir in 0..<4 {
-                    if rc_get_con(span, dir) != RC_NOT_CONNECTED {
+                    if get_con(span, dir) != RC_NOT_CONNECTED {
                         add_connection_indicator(&mesh,
                             {world_x + chf.cs * 0.5, y_max, world_z + chf.cs * 0.5},
                             dir, chf.cs * 0.3)

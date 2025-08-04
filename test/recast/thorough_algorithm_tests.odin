@@ -15,11 +15,11 @@ test_distance_field_mathematical_correctness :: proc(t: ^testing.T) {
     // Create a 5x5 heightfield with a single center obstacle
     // This creates a known pattern where distances should form concentric rings
     
-    hf := recast.rc_alloc_heightfield()
+    hf := recast.alloc_heightfield()
     testing.expect(t, hf != nil, "Failed to allocate heightfield")
-    defer recast.rc_free_heightfield(hf)
+    defer recast.free_heightfield(hf)
     
-    ok := recast.rc_create_heightfield(hf, 5, 5, {0,0,0}, {5,5,5}, 1.0, 0.2)
+    ok := recast.create_heightfield(hf, 5, 5, {0,0,0}, {5,5,5}, 1.0, 0.2)
     testing.expect(t, ok, "Failed to create heightfield")
     
     // Add spans everywhere except center (2,2) to create a hole
@@ -28,21 +28,21 @@ test_distance_field_mathematical_correctness :: proc(t: ^testing.T) {
             if x == 2 && z == 2 {
                 continue // Leave center empty (obstacle)
             }
-            ok = recast.rc_add_span(hf, i32(x), i32(z), 0, 10, nav_recast.RC_WALKABLE_AREA, 1)
+            ok = recast.add_span(hf, i32(x), i32(z), 0, 10, nav_recast.RC_WALKABLE_AREA, 1)
             testing.expect(t, ok, "Failed to add span")
         }
     }
     
     // Build compact heightfield
-    chf := recast.rc_alloc_compact_heightfield()
-    defer recast.rc_free_compact_heightfield(chf)
+    chf := recast.alloc_compact_heightfield()
+    defer recast.free_compact_heightfield(chf)
     
-    ok = recast.rc_build_compact_heightfield(2, 1, hf, chf)
+    ok = recast.build_compact_heightfield(2, 1, hf, chf)
     testing.expect(t, ok, "Failed to build compact heightfield")
     
     // Build distance field
     log.info("Building distance field...")
-    ok = recast.rc_build_distance_field(chf)
+    ok = recast.build_distance_field(chf)
     log.info("Distance field build completed")
     testing.expect(t, ok, "Failed to build distance field")
     
@@ -50,7 +50,7 @@ test_distance_field_mathematical_correctness :: proc(t: ^testing.T) {
     // Distance field should be built successfully and contain valid values
     
     // Function to get distance at grid position
-    get_distance_at :: proc(chf: ^recast.Rc_Compact_Heightfield, x, z: i32) -> u16 {
+    get_distance_at :: proc(chf: ^recast.Compact_Heightfield, x, z: i32) -> u16 {
         if x < 0 || x >= chf.width || z < 0 || z >= chf.height {
             return 0
         }
@@ -101,17 +101,17 @@ test_watershed_region_connectivity :: proc(t: ^testing.T) {
     // Create two separate 2x2 platforms with a gap between them
     // This should result in exactly 2 regions with no cross-connections
     
-    hf := recast.rc_alloc_heightfield()
+    hf := recast.alloc_heightfield()
     testing.expect(t, hf != nil, "Failed to allocate heightfield")
-    defer recast.rc_free_heightfield(hf)
+    defer recast.free_heightfield(hf)
     
-    ok := recast.rc_create_heightfield(hf, 6, 3, {0,0,0}, {6,3,3}, 1.0, 0.2)
+    ok := recast.create_heightfield(hf, 6, 3, {0,0,0}, {6,3,3}, 1.0, 0.2)
     testing.expect(t, ok, "Failed to create heightfield")
     
     // Platform 1: (0,0) to (1,1)
     for x in 0..<2 {
         for z in 0..<2 {
-            ok = recast.rc_add_span(hf, i32(x), i32(z), 0, 10, nav_recast.RC_WALKABLE_AREA, 1)
+            ok = recast.add_span(hf, i32(x), i32(z), 0, 10, nav_recast.RC_WALKABLE_AREA, 1)
             testing.expect(t, ok, "Failed to add span to platform 1")
         }
     }
@@ -121,27 +121,27 @@ test_watershed_region_connectivity :: proc(t: ^testing.T) {
     // Platform 2: (3,0) to (4,1)  
     for x in 3..<5 {
         for z in 0..<2 {
-            ok = recast.rc_add_span(hf, i32(x), i32(z), 0, 10, nav_recast.RC_WALKABLE_AREA, 1)
+            ok = recast.add_span(hf, i32(x), i32(z), 0, 10, nav_recast.RC_WALKABLE_AREA, 1)
             testing.expect(t, ok, "Failed to add span to platform 2")
         }
     }
     
     // Build compact heightfield
-    chf := recast.rc_alloc_compact_heightfield()
-    defer recast.rc_free_compact_heightfield(chf)
+    chf := recast.alloc_compact_heightfield()
+    defer recast.free_compact_heightfield(chf)
     
-    ok = recast.rc_build_compact_heightfield(2, 1, hf, chf)
+    ok = recast.build_compact_heightfield(2, 1, hf, chf)
     testing.expect(t, ok, "Failed to build compact heightfield")
     
-    ok = recast.rc_build_distance_field(chf)
+    ok = recast.build_distance_field(chf)
     testing.expect(t, ok, "Failed to build distance field")
     
     // Build regions
-    ok = recast.rc_build_regions(chf, 0, 1, 10)
+    ok = recast.build_regions(chf, 0, 1, 10)
     testing.expect(t, ok, "Failed to build regions")
     
     // Validate region connectivity correctness
-    get_region_at :: proc(chf: ^recast.Rc_Compact_Heightfield, x, z: i32) -> u16 {
+    get_region_at :: proc(chf: ^recast.Compact_Heightfield, x, z: i32) -> u16 {
         if x < 0 || x >= chf.width || z < 0 || z >= chf.height {
             return 0
         }
@@ -202,21 +202,21 @@ test_triangle_rasterization_accuracy :: proc(t: ^testing.T) {
     areas := []u8{nav_recast.RC_WALKABLE_AREA}
     
     // Create heightfield
-    hf := recast.rc_alloc_heightfield()
+    hf := recast.alloc_heightfield()
     testing.expect(t, hf != nil, "Failed to allocate heightfield")
-    defer recast.rc_free_heightfield(hf)
+    defer recast.free_heightfield(hf)
     
-    ok := recast.rc_create_heightfield(hf, 5, 5, {0,0,0}, {5,0,5}, 1.0, 0.2)
+    ok := recast.create_heightfield(hf, 5, 5, {0,0,0}, {5,0,5}, 1.0, 0.2)
     testing.expect(t, ok, "Failed to create heightfield")
     
     // Rasterize the triangle
-    ok = recast.rc_rasterize_triangles(verts, 3, tris, areas, 1, hf, 1)
+    ok = recast.rasterize_triangles(verts, 3, tris, areas, 1, hf, 1)
     testing.expect(t, ok, "Failed to rasterize triangle")
     
     // Validate specific cells that should be covered by the triangle
     // The triangle should cover cells at grid positions based on its geometry
     
-    check_cell_coverage :: proc(hf: ^recast.Rc_Heightfield, x, z: i32, should_be_covered: bool, test_name: string) -> bool {
+    check_cell_coverage :: proc(hf: ^recast.Heightfield, x, z: i32, should_be_covered: bool, test_name: string) -> bool {
         if x < 0 || x >= hf.width || z < 0 || z >= hf.height {
             return false
         }
@@ -276,26 +276,26 @@ test_span_merging_complex_scenarios :: proc(t: ^testing.T) {
     // Test complex span merging with multiple overlapping spans at different heights
     // This validates the correctness of the span merging algorithm
     
-    hf := recast.rc_alloc_heightfield()
+    hf := recast.alloc_heightfield()
     testing.expect(t, hf != nil, "Failed to allocate heightfield")
-    defer recast.rc_free_heightfield(hf)
+    defer recast.free_heightfield(hf)
     
-    ok := recast.rc_create_heightfield(hf, 3, 3, {0,0,0}, {3,3,3}, 1.0, 0.2)
+    ok := recast.create_heightfield(hf, 3, 3, {0,0,0}, {3,3,3}, 1.0, 0.2)
     testing.expect(t, ok, "Failed to create heightfield")
     
     // Add multiple overlapping spans at the same cell (1,1) with different height ranges
     x, z := i32(1), i32(1)
     
     // Span 1: height 0-10 (floor)
-    ok = recast.rc_add_span(hf, x, z, 0, 10, nav_recast.RC_WALKABLE_AREA, 1)
+    ok = recast.add_span(hf, x, z, 0, 10, nav_recast.RC_WALKABLE_AREA, 1)
     testing.expect(t, ok, "Failed to add span 1")
     
     // Span 2: height 15-25 (platform above floor)
-    ok = recast.rc_add_span(hf, x, z, 15, 25, nav_recast.RC_WALKABLE_AREA, 1)
+    ok = recast.add_span(hf, x, z, 15, 25, nav_recast.RC_WALKABLE_AREA, 1)
     testing.expect(t, ok, "Failed to add span 2")
     
     // Span 3: height 5-20 (overlapping span that should merge/clip)
-    ok = recast.rc_add_span(hf, x, z, 5, 20, nav_recast.RC_WALKABLE_AREA, 1)
+    ok = recast.add_span(hf, x, z, 5, 20, nav_recast.RC_WALKABLE_AREA, 1)
     testing.expect(t, ok, "Failed to add span 3")
     
     // Validate the resulting span structure

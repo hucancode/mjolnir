@@ -107,7 +107,7 @@ point_in_triangle_bary :: proc "contextless" (bary: Barycentric) -> bool {
 }
 
 // Sample height from heightfield at given world position
-sample_heightfield_height :: proc(chf: ^Rc_Compact_Heightfield, pos: [3]f32) -> f32 {
+sample_heightfield_height :: proc(chf: ^Compact_Heightfield, pos: [3]f32) -> f32 {
     if chf == nil do return 0.0
 
     // Convert world position to cell coordinates
@@ -146,7 +146,7 @@ sample_heightfield_height :: proc(chf: ^Rc_Compact_Heightfield, pos: [3]f32) -> 
 }
 
 // Get height of cell from compact heightfield
-get_cell_height :: proc(chf: ^Rc_Compact_Heightfield, x, z: i32) -> f32 {
+get_cell_height :: proc(chf: ^Compact_Heightfield, x, z: i32) -> f32 {
     if x < 0 || z < 0 || x >= chf.width || z >= chf.height {
         return 0.0
     }
@@ -333,7 +333,7 @@ add_constrained_edge :: proc(poly: ^Detail_Polygon, v0, v1: i32) {
 }
 
 // Initialize detail polygon from polygon mesh polygon
-init_detail_polygon :: proc(poly: ^Detail_Polygon, pmesh: ^Rc_Poly_Mesh, chf: ^Rc_Compact_Heightfield,
+init_detail_polygon :: proc(poly: ^Detail_Polygon, pmesh: ^Poly_Mesh, chf: ^Compact_Heightfield,
                           poly_idx: i32, sample_dist, max_error: f32) -> bool {
 
     clear(&poly.vertices)
@@ -397,7 +397,7 @@ init_detail_polygon :: proc(poly: ^Detail_Polygon, pmesh: ^Rc_Poly_Mesh, chf: ^R
 }
 
 // Check if a vertex is on the border of the mesh
-is_border_vertex :: proc(pmesh: ^Rc_Poly_Mesh, vert_idx: int) -> bool {
+is_border_vertex :: proc(pmesh: ^Poly_Mesh, vert_idx: int) -> bool {
     // A vertex is on the border if it's used by a polygon edge that has no neighbor
     for i in 0..<pmesh.npolys {
         pi := int(i) * int(pmesh.nvp) * 2
@@ -437,7 +437,7 @@ free_detail_polygon :: proc(poly: ^Detail_Polygon) {
 }
 
 // Validate detail mesh data
-validate_poly_mesh_detail :: proc(dmesh: ^Rc_Poly_Mesh_Detail) -> bool {
+validate_poly_mesh_detail :: proc(dmesh: ^Poly_Mesh_Detail) -> bool {
     if dmesh == nil do return false
     if len(dmesh.meshes) <= 0 || len(dmesh.verts) <= 0 || len(dmesh.tris) <= 0 do return false
 
@@ -468,7 +468,7 @@ validate_poly_mesh_detail :: proc(dmesh: ^Rc_Poly_Mesh_Detail) -> bool {
 }
 
 // Copy detail mesh
-rc_copy_poly_mesh_detail :: proc(src: ^Rc_Poly_Mesh_Detail, dst: ^Rc_Poly_Mesh_Detail) -> bool {
+copy_poly_mesh_detail :: proc(src: ^Poly_Mesh_Detail, dst: ^Poly_Mesh_Detail) -> bool {
     if src == nil || dst == nil do return false
 
     // Copy arrays
@@ -491,11 +491,11 @@ rc_copy_poly_mesh_detail :: proc(src: ^Rc_Poly_Mesh_Detail, dst: ^Rc_Poly_Mesh_D
 }
 
 // Merge multiple detail meshes
-rc_merge_poly_mesh_details :: proc(meshes: []^Rc_Poly_Mesh_Detail, nmeshes: i32,
-                                  mesh: ^Rc_Poly_Mesh_Detail) -> bool {
+merge_poly_mesh_details :: proc(meshes: []^Poly_Mesh_Detail, nmeshes: i32,
+                                  mesh: ^Poly_Mesh_Detail) -> bool {
     if nmeshes == 0 do return false
     if nmeshes == 1 {
-        return rc_copy_poly_mesh_detail(meshes[0], mesh)
+        return copy_poly_mesh_detail(meshes[0], mesh)
     }
 
     // Calculate total sizes
@@ -558,7 +558,7 @@ rc_merge_poly_mesh_details :: proc(meshes: []^Rc_Poly_Mesh_Detail, nmeshes: i32,
 }
 
 // Subdivide edge with limits to prevent excessive subdivision
-subdivide_edge_with_limits :: proc(poly: ^Detail_Polygon, chf: ^Rc_Compact_Heightfield,
+subdivide_edge_with_limits :: proc(poly: ^Detail_Polygon, chf: ^Compact_Heightfield,
                                   v0, v1: i32, sample_dist: f32) -> [dynamic]i32 {
     result := make([dynamic]i32, 0, 8)
 
@@ -609,7 +609,7 @@ subdivide_edge_with_limits :: proc(poly: ^Detail_Polygon, chf: ^Rc_Compact_Heigh
 }
 
 // Subdivide edge by adding sample points along its length (original version)
-subdivide_edge :: proc(poly: ^Detail_Polygon, chf: ^Rc_Compact_Heightfield,
+subdivide_edge :: proc(poly: ^Detail_Polygon, chf: ^Compact_Heightfield,
                       v0, v1: i32, sample_dist: f32) -> [dynamic]i32 {
 
     result := make([dynamic]i32, 0, 8)
@@ -1299,7 +1299,7 @@ triangle_area_2d_detail :: proc "contextless" (a, b, c: [3]f32) -> f32 {
 }
 
 // Add interior samples with limits to prevent excessive point generation
-add_interior_samples_with_limits :: proc(poly: ^Detail_Polygon, chf: ^Rc_Compact_Heightfield, sample_dist: f32) {
+add_interior_samples_with_limits :: proc(poly: ^Detail_Polygon, chf: ^Compact_Heightfield, sample_dist: f32) {
     if len(poly.vertices) < 3 do return
 
     // Calculate polygon bounds
@@ -1360,7 +1360,7 @@ add_interior_samples_with_limits :: proc(poly: ^Detail_Polygon, chf: ^Rc_Compact
 }
 
 // Add sample points inside polygon for better triangulation (original version)
-add_interior_samples :: proc(poly: ^Detail_Polygon, chf: ^Rc_Compact_Heightfield, sample_dist: f32) {
+add_interior_samples :: proc(poly: ^Detail_Polygon, chf: ^Compact_Heightfield, sample_dist: f32) {
     if len(poly.vertices) < 3 do return
 
     // Calculate polygon bounds
@@ -1420,7 +1420,7 @@ point_in_polygon_detail :: proc(pt: [3]f32, poly: ^Detail_Polygon) -> bool {
 }
 
 // Timeout-protected version of polygon detail mesh building
-build_polygon_detail_mesh_with_timeout :: proc(poly: ^Detail_Polygon, chf: ^Rc_Compact_Heightfield,
+build_polygon_detail_mesh_with_timeout :: proc(poly: ^Detail_Polygon, chf: ^Compact_Heightfield,
                                               timeout_ctx: ^Timeout_Context) -> bool {
     start_time := time.now()
 
@@ -1507,7 +1507,7 @@ build_polygon_detail_mesh_with_timeout :: proc(poly: ^Detail_Polygon, chf: ^Rc_C
 }
 
 // Main function to build detailed mesh for a single polygon (legacy version)
-build_polygon_detail_mesh :: proc(poly: ^Detail_Polygon, chf: ^Rc_Compact_Heightfield) -> bool {
+build_polygon_detail_mesh :: proc(poly: ^Detail_Polygon, chf: ^Compact_Heightfield) -> bool {
     if len(poly.vertices) < 3 do return false
 
     // Step 1: Subdivide constraint edges
@@ -1580,8 +1580,8 @@ update_progress :: proc(ctx: ^Timeout_Context, polygon_idx: i32) {
 }
 
 // Main function to build poly mesh detail with timeout protection
-rc_build_poly_mesh_detail :: proc(pmesh: ^Rc_Poly_Mesh, chf: ^Rc_Compact_Heightfield,
-                                 sample_dist, sample_max_error: f32, dmesh: ^Rc_Poly_Mesh_Detail) -> bool {
+build_poly_mesh_detail :: proc(pmesh: ^Poly_Mesh, chf: ^Compact_Heightfield,
+                                 sample_dist, sample_max_error: f32, dmesh: ^Poly_Mesh_Detail) -> bool {
 
     if pmesh == nil || chf == nil || dmesh == nil do return false
     if pmesh.npolys <= 0 do return false

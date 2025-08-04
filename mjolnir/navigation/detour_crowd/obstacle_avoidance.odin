@@ -5,7 +5,7 @@ import "core:slice"
 import nav_recast "../recast"
 
 // Initialize obstacle avoidance debug data
-dt_obstacle_avoidance_debug_data_init :: proc(debug_data: ^Dt_Obstacle_Avoidance_Debug_Data, max_samples: i32) -> nav_recast.Status {
+obstacle_avoidance_debug_data_init :: proc(debug_data: ^Obstacle_Avoidance_Debug_Data, max_samples: i32) -> nav_recast.Status {
     if debug_data == nil || max_samples <= 0 {
         return {.Invalid_Param}
     }
@@ -23,7 +23,7 @@ dt_obstacle_avoidance_debug_data_init :: proc(debug_data: ^Dt_Obstacle_Avoidance
 }
 
 // Destroy obstacle avoidance debug data
-dt_obstacle_avoidance_debug_data_destroy :: proc(debug_data: ^Dt_Obstacle_Avoidance_Debug_Data) {
+obstacle_avoidance_debug_data_destroy :: proc(debug_data: ^Obstacle_Avoidance_Debug_Data) {
     if debug_data == nil do return
     
     delete(debug_data.sample_velocities)
@@ -37,7 +37,7 @@ dt_obstacle_avoidance_debug_data_destroy :: proc(debug_data: ^Dt_Obstacle_Avoida
 }
 
 // Reset debug data
-dt_obstacle_avoidance_debug_data_reset :: proc(debug_data: ^Dt_Obstacle_Avoidance_Debug_Data) {
+obstacle_avoidance_debug_data_reset :: proc(debug_data: ^Obstacle_Avoidance_Debug_Data) {
     if debug_data == nil do return
     
     clear(&debug_data.sample_velocities)
@@ -50,7 +50,7 @@ dt_obstacle_avoidance_debug_data_reset :: proc(debug_data: ^Dt_Obstacle_Avoidanc
 }
 
 // Add debug sample
-dt_obstacle_avoidance_debug_data_add_sample :: proc(debug_data: ^Dt_Obstacle_Avoidance_Debug_Data,
+obstacle_avoidance_debug_data_add_sample :: proc(debug_data: ^Obstacle_Avoidance_Debug_Data,
                                                    vel: [3]f32, size, penalty, vel_penalty, 
                                                    cur_vel_penalty, side_penalty, toi_penalty: f32) -> nav_recast.Status {
     if debug_data == nil {
@@ -73,7 +73,7 @@ dt_obstacle_avoidance_debug_data_add_sample :: proc(debug_data: ^Dt_Obstacle_Avo
 }
 
 // Normalize debug samples
-dt_obstacle_avoidance_debug_data_normalize_samples :: proc(debug_data: ^Dt_Obstacle_Avoidance_Debug_Data) {
+obstacle_avoidance_debug_data_normalize_samples :: proc(debug_data: ^Obstacle_Avoidance_Debug_Data) {
     if debug_data == nil || len(debug_data.sample_penalties) == 0 do return
     
     // Find max penalty for normalization
@@ -104,26 +104,26 @@ dt_obstacle_avoidance_debug_data_normalize_samples :: proc(debug_data: ^Dt_Obsta
 }
 
 // Initialize obstacle avoidance query
-dt_obstacle_avoidance_query_init :: proc(query: ^Dt_Obstacle_Avoidance_Query, max_circles, max_segments: i32) -> nav_recast.Status {
+obstacle_avoidance_query_init :: proc(query: ^Obstacle_Avoidance_Query, max_circles, max_segments: i32) -> nav_recast.Status {
     if query == nil || max_circles <= 0 || max_segments <= 0 {
         return {.Invalid_Param}
     }
     
     query.max_circles = max_circles
     query.max_segments = max_segments
-    query.circle_obstacles = make([dynamic]Dt_Obstacle_Circle, 0, max_circles)
-    query.segment_obstacles = make([dynamic]Dt_Obstacle_Segment, 0, max_segments)
+    query.circle_obstacles = make([dynamic]Obstacle_Circle, 0, max_circles)
+    query.segment_obstacles = make([dynamic]Obstacle_Segment, 0, max_segments)
     
     // Initialize default parameters
     for i in 0..<DT_CROWD_MAX_OBSTAVOIDANCE_PARAMS {
-        query.params[i] = dt_obstacle_avoidance_params_default()
+        query.params[i] = obstacle_avoidance_params_default()
     }
     
     return {.Success}
 }
 
 // Destroy obstacle avoidance query
-dt_obstacle_avoidance_query_destroy :: proc(query: ^Dt_Obstacle_Avoidance_Query) {
+obstacle_avoidance_query_destroy :: proc(query: ^Obstacle_Avoidance_Query) {
     if query == nil do return
     
     delete(query.circle_obstacles)
@@ -135,7 +135,7 @@ dt_obstacle_avoidance_query_destroy :: proc(query: ^Dt_Obstacle_Avoidance_Query)
 }
 
 // Reset obstacles
-dt_obstacle_avoidance_query_reset :: proc(query: ^Dt_Obstacle_Avoidance_Query) {
+obstacle_avoidance_query_reset :: proc(query: ^Obstacle_Avoidance_Query) {
     if query == nil do return
     
     clear(&query.circle_obstacles)
@@ -143,7 +143,7 @@ dt_obstacle_avoidance_query_reset :: proc(query: ^Dt_Obstacle_Avoidance_Query) {
 }
 
 // Add circle obstacle
-dt_obstacle_avoidance_query_add_circle :: proc(query: ^Dt_Obstacle_Avoidance_Query, pos, vel, dvel: [3]f32, 
+obstacle_avoidance_query_add_circle :: proc(query: ^Obstacle_Avoidance_Query, pos, vel, dvel: [3]f32, 
                                               radius: f32, dp, np: [3]f32) -> nav_recast.Status {
     if query == nil {
         return {.Invalid_Param}
@@ -153,7 +153,7 @@ dt_obstacle_avoidance_query_add_circle :: proc(query: ^Dt_Obstacle_Avoidance_Que
         return {.Buffer_Too_Small}
     }
     
-    obstacle := Dt_Obstacle_Circle{
+    obstacle := Obstacle_Circle{
         position = pos,
         velocity = vel,
         desired_velocity = dvel,
@@ -167,7 +167,7 @@ dt_obstacle_avoidance_query_add_circle :: proc(query: ^Dt_Obstacle_Avoidance_Que
 }
 
 // Add segment obstacle
-dt_obstacle_avoidance_query_add_segment :: proc(query: ^Dt_Obstacle_Avoidance_Query, p, q: [3]f32, touch: bool) -> nav_recast.Status {
+obstacle_avoidance_query_add_segment :: proc(query: ^Obstacle_Avoidance_Query, p, q: [3]f32, touch: bool) -> nav_recast.Status {
     if query == nil {
         return {.Invalid_Param}
     }
@@ -176,7 +176,7 @@ dt_obstacle_avoidance_query_add_segment :: proc(query: ^Dt_Obstacle_Avoidance_Qu
         return {.Buffer_Too_Small}
     }
     
-    obstacle := Dt_Obstacle_Segment{
+    obstacle := Obstacle_Segment{
         start_pos = p,
         end_pos = q,
         touch = touch,
@@ -187,15 +187,15 @@ dt_obstacle_avoidance_query_add_segment :: proc(query: ^Dt_Obstacle_Avoidance_Qu
 }
 
 // Sample velocity for obstacle avoidance
-dt_obstacle_avoidance_query_sample_velocity_grid :: proc(query: ^Dt_Obstacle_Avoidance_Query, pos, vel, dvel: [3]f32,
-                                                        radius, max_speed: f32, params: ^Dt_Obstacle_Avoidance_Params,
-                                                        debug_data: ^Dt_Obstacle_Avoidance_Debug_Data) -> [3]f32 {
+obstacle_avoidance_query_sample_velocity_grid :: proc(query: ^Obstacle_Avoidance_Query, pos, vel, dvel: [3]f32,
+                                                        radius, max_speed: f32, params: ^Obstacle_Avoidance_Params,
+                                                        debug_data: ^Obstacle_Avoidance_Debug_Data) -> [3]f32 {
     if query == nil || params == nil {
         return dvel
     }
     
     // Prepare parameters
-    dt_prepare_obstacle_avoidance_params(query, params)
+    prepare_obstacle_avoidance_params(query, params)
     
     // Generate velocity samples on a grid
     best_vel := dvel
@@ -225,12 +225,12 @@ dt_obstacle_avoidance_query_sample_velocity_grid :: proc(query: ^Dt_Obstacle_Avo
             }
             
             // Evaluate this velocity
-            penalty, time := dt_process_sample(query, pos, radius, vel, sample_vel, dvel, 
+            penalty, time := process_sample(query, pos, radius, vel, sample_vel, dvel, 
                                               params.horiz_time, params)
             
             // Track debug data if requested
             if debug_data != nil {
-                dt_obstacle_avoidance_debug_data_add_sample(debug_data, sample_vel, cs, penalty,
+                obstacle_avoidance_debug_data_add_sample(debug_data, sample_vel, cs, penalty,
                                                           0, 0, 0, 0)  // Detailed penalties would need calculation
             }
             
@@ -247,15 +247,15 @@ dt_obstacle_avoidance_query_sample_velocity_grid :: proc(query: ^Dt_Obstacle_Avo
 }
 
 // Sample velocity using adaptive sampling
-dt_obstacle_avoidance_query_sample_velocity_adaptive :: proc(query: ^Dt_Obstacle_Avoidance_Query, pos, vel, dvel: [3]f32,
-                                                           radius, max_speed: f32, params: ^Dt_Obstacle_Avoidance_Params,
-                                                           debug_data: ^Dt_Obstacle_Avoidance_Debug_Data) -> [3]f32 {
+obstacle_avoidance_query_sample_velocity_adaptive :: proc(query: ^Obstacle_Avoidance_Query, pos, vel, dvel: [3]f32,
+                                                           radius, max_speed: f32, params: ^Obstacle_Avoidance_Params,
+                                                           debug_data: ^Obstacle_Avoidance_Debug_Data) -> [3]f32 {
     if query == nil || params == nil {
         return dvel
     }
     
     // Prepare parameters
-    dt_prepare_obstacle_avoidance_params(query, params)
+    prepare_obstacle_avoidance_params(query, params)
     
     // Start with desired velocity
     best_vel := dvel
@@ -271,7 +271,7 @@ dt_obstacle_avoidance_query_sample_velocity_adaptive :: proc(query: ^Dt_Obstacle
         
         if ring == 0 {
             // Center sample (desired velocity)
-            penalty, _ := dt_process_sample(query, pos, radius, vel, dvel, dvel, 
+            penalty, _ := process_sample(query, pos, radius, vel, dvel, dvel, 
                                           params.horiz_time, params)
             if penalty < best_score {
                 best_score = penalty
@@ -298,7 +298,7 @@ dt_obstacle_avoidance_query_sample_velocity_adaptive :: proc(query: ^Dt_Obstacle
                     sample_vel[2] = vel_2d.y
                 }
                 
-                penalty, _ := dt_process_sample(query, pos, radius, vel, sample_vel, dvel,
+                penalty, _ := process_sample(query, pos, radius, vel, sample_vel, dvel,
                                               params.horiz_time, params)
                 
                 if penalty < best_score {
@@ -313,7 +313,7 @@ dt_obstacle_avoidance_query_sample_velocity_adaptive :: proc(query: ^Dt_Obstacle
 }
 
 // Prepare obstacle avoidance parameters
-dt_prepare_obstacle_avoidance_params :: proc(query: ^Dt_Obstacle_Avoidance_Query, params: ^Dt_Obstacle_Avoidance_Params) {
+prepare_obstacle_avoidance_params :: proc(query: ^Obstacle_Avoidance_Query, params: ^Obstacle_Avoidance_Params) {
     if query == nil || params == nil do return
     
     query.vel_bias = params.vel_bias
@@ -325,9 +325,9 @@ dt_prepare_obstacle_avoidance_params :: proc(query: ^Dt_Obstacle_Avoidance_Query
 }
 
 // Process a velocity sample and calculate penalty
-dt_process_sample :: proc(query: ^Dt_Obstacle_Avoidance_Query, pos: [3]f32, radius: f32,
+process_sample :: proc(query: ^Obstacle_Avoidance_Query, pos: [3]f32, radius: f32,
                          vel, sample_vel, dvel: [3]f32, max_toi: f32, 
-                         params: ^Dt_Obstacle_Avoidance_Params) -> (penalty: f32, toi: f32) {
+                         params: ^Obstacle_Avoidance_Params) -> (penalty: f32, toi: f32) {
     
     penalty = 0
     toi = 0
@@ -353,7 +353,7 @@ dt_process_sample :: proc(query: ^Dt_Obstacle_Avoidance_Query, pos: [3]f32, radi
         combined_radius := radius + circle.radius
         
         // Calculate time to collision
-        collision_time := dt_ray_circle_intersect(rel_pos, rel_vel, combined_radius)
+        collision_time := ray_circle_intersect(rel_pos, rel_vel, combined_radius)
         
         if collision_time >= 0 && collision_time < min_toi {
             min_toi = collision_time
@@ -369,7 +369,7 @@ dt_process_sample :: proc(query: ^Dt_Obstacle_Avoidance_Query, pos: [3]f32, radi
     
     // Check against segment obstacles
     for &segment in query.segment_obstacles {
-        collision_time := dt_ray_segment_intersect(pos, sample_vel, segment.start_pos, segment.end_pos, radius)
+        collision_time := ray_segment_intersect(pos, sample_vel, segment.start_pos, segment.end_pos, radius)
         
         if collision_time >= 0 && collision_time < min_toi {
             min_toi = collision_time
@@ -397,7 +397,7 @@ dt_process_sample :: proc(query: ^Dt_Obstacle_Avoidance_Query, pos: [3]f32, radi
 }
 
 // Ray-circle intersection test
-dt_ray_circle_intersect :: proc(pos, vel: [3]f32, radius: f32) -> f32 {
+ray_circle_intersect :: proc(pos, vel: [3]f32, radius: f32) -> f32 {
     // 2D intersection in XZ plane
     px, pz := pos[0], pos[2]
     vx, vz := vel[0], vel[2]
@@ -421,7 +421,7 @@ dt_ray_circle_intersect :: proc(pos, vel: [3]f32, radius: f32) -> f32 {
 }
 
 // Ray-segment intersection test  
-dt_ray_segment_intersect :: proc(pos, vel, seg_start, seg_end: [3]f32, radius: f32) -> f32 {
+ray_segment_intersect :: proc(pos, vel, seg_start, seg_end: [3]f32, radius: f32) -> f32 {
     // Simplified 2D test in XZ plane
     px, pz := pos[0], pos[2]
     vx, vz := vel[0], vel[2]
@@ -466,7 +466,7 @@ dt_ray_segment_intersect :: proc(pos, vel, seg_start, seg_end: [3]f32, radius: f
 }
 
 // Get obstacle avoidance parameters
-dt_obstacle_avoidance_query_get_params :: proc(query: ^Dt_Obstacle_Avoidance_Query, index: i32) -> ^Dt_Obstacle_Avoidance_Params {
+obstacle_avoidance_query_get_params :: proc(query: ^Obstacle_Avoidance_Query, index: i32) -> ^Obstacle_Avoidance_Params {
     if query == nil || index < 0 || index >= DT_CROWD_MAX_OBSTAVOIDANCE_PARAMS {
         return nil
     }
@@ -474,7 +474,7 @@ dt_obstacle_avoidance_query_get_params :: proc(query: ^Dt_Obstacle_Avoidance_Que
 }
 
 // Set obstacle avoidance parameters
-dt_obstacle_avoidance_query_set_params :: proc(query: ^Dt_Obstacle_Avoidance_Query, index: i32, params: Dt_Obstacle_Avoidance_Params) -> nav_recast.Status {
+obstacle_avoidance_query_set_params :: proc(query: ^Obstacle_Avoidance_Query, index: i32, params: Obstacle_Avoidance_Params) -> nav_recast.Status {
     if query == nil || index < 0 || index >= DT_CROWD_MAX_OBSTAVOIDANCE_PARAMS {
         return {.Invalid_Param}
     }

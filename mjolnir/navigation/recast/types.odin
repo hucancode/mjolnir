@@ -15,7 +15,7 @@ Off_Mesh_Connection_Verts :: struct {
 }
 
 // Contour structure
-Rc_Contour :: struct {
+Contour :: struct {
     verts:   [][4]i32,     // Simplified contour vertex and connection data [x, y, z, connection]
     rverts:  [][4]i32,     // Raw contour vertex and connection data [x, y, z, connection]
     reg:     u16,          // Region id of the contour
@@ -23,8 +23,8 @@ Rc_Contour :: struct {
 }
 
 // Contour set
-Rc_Contour_Set :: struct {
-    conts:       [dynamic]Rc_Contour,    // Dynamic array of contours
+Contour_Set :: struct {
+    conts:       [dynamic]Contour,    // Dynamic array of contours
     bmin:        [3]f32,   // Minimum bounds
     bmax:        [3]f32,   // Maximum bounds
     cs:          f32,              // Cell size
@@ -36,7 +36,7 @@ Rc_Contour_Set :: struct {
 }
 
 // Polygon mesh
-Rc_Poly_Mesh :: struct {
+Poly_Mesh :: struct {
     verts:          [][3]u16,      // Mesh vertices [x, y, z]
     polys:          []u16,         // Polygon and neighbor data [Length: maxpolys * 2 * nvp]
     regs:           []u16,         // Region id per polygon [Length: maxpolys]
@@ -54,40 +54,27 @@ Rc_Poly_Mesh :: struct {
 }
 
 // Polygon mesh detail
-Rc_Poly_Mesh_Detail :: struct {
+Poly_Mesh_Detail :: struct {
     meshes:  [][4]u32,   // Sub-mesh data [vert_base, vert_count, tri_base, tri_count]
     verts:   [][3]f32,   // Mesh vertices [x, y, z]
     tris:    [][4]u8,    // Mesh triangles [vertA, vertB, vertC, flags]
 }
 
 // Edge structure for contour building
-Rc_Edge :: struct {
+Edge :: struct {
     vert:     [2]u16,
     poly:     [2]u16,
     poly_edge: [2]u16,
 }
 
 // Potential diagonal for triangulation
-Rc_Potential_Diagonal :: struct {
+Potential_Diagonal :: struct {
     vert: i32,
     dist: i32,
 }
 
-// Region structure for region building
-Rc_Region :: struct {
-    span_count:          i32,
-    id:                  u16,
-    area_type:           u8,
-    remap:               bool,
-    visited:             bool,
-    overlap:             bool,
-    connect_to_border:   bool,
-    ymin:                u16,
-    ymax:                u16,
-}
-
 // Layer region for layer building
-Rc_Layer_Region :: struct {
+Layer_Region :: struct {
     id:            u8,
     layer_id:      u8,
     base:          bool,
@@ -97,22 +84,14 @@ Rc_Layer_Region :: struct {
     nlayers:       u8,
 }
 
-// Dirty entry for distance field
-Rc_Dirty_Entry :: struct {
-    index: i32,
-    x:     i32,
-    y:     i32,
-    z:     i32,
-}
-
 // Build context for passing state between functions
-Rc_Build_Context :: struct {
+Build_Context :: struct {
     // Intermediate results
-    solid:       ^Rc_Heightfield,
-    chf:         ^Rc_Compact_Heightfield,
-    cset:        ^Rc_Contour_Set,
-    pmesh:       ^Rc_Poly_Mesh,
-    dmesh:       ^Rc_Poly_Mesh_Detail,
+    solid:       ^Heightfield,
+    chf:         ^Compact_Heightfield,
+    cset:        ^Contour_Set,
+    pmesh:       ^Poly_Mesh,
+    dmesh:       ^Poly_Mesh_Detail,
 
     // Configuration
     cfg:         Config,
@@ -121,7 +100,7 @@ Rc_Build_Context :: struct {
 }
 
 // Heightfield layer representing a single layer in a layer set
-Rc_Heightfield_Layer :: struct {
+Heightfield_Layer :: struct {
     bmin:        [3]f32,         // Minimum bounds in world space
     bmax:        [3]f32,         // Maximum bounds in world space
     cs:          f32,            // Cell size (XZ plane)
@@ -139,41 +118,34 @@ Rc_Heightfield_Layer :: struct {
     cons:        []u8,           // Packed neighbor connection information [Size: width * height]
 }
 
-// Helper to allocate contour - DEPRECATED
-// This function is no longer needed since we're using dynamic arrays
-// The caller should append to cset.conts directly
-rc_alloc_contour :: proc(cset: ^Rc_Contour_Set) -> ^Rc_Contour {
-    panic("rc_alloc_contour is deprecated, modify code to use append instead")
-}
-
 // Helper to allocate poly mesh
-rc_alloc_poly_mesh :: proc() -> ^Rc_Poly_Mesh {
-    pmesh := new(Rc_Poly_Mesh)
+alloc_poly_mesh :: proc() -> ^Poly_Mesh {
+    pmesh := new(Poly_Mesh)
     return pmesh
 }
 
 // Helper to free poly mesh
-rc_free_poly_mesh :: proc(pmesh: ^Rc_Poly_Mesh) {
-    if pmesh.verts != nil do delete(pmesh.verts)
-    if pmesh.polys != nil do delete(pmesh.polys)
-    if pmesh.regs != nil do delete(pmesh.regs)
-    if pmesh.flags != nil do delete(pmesh.flags)
-    if pmesh.areas != nil do delete(pmesh.areas)
+free_poly_mesh :: proc(pmesh: ^Poly_Mesh) {
+    delete(pmesh.verts)
+    delete(pmesh.polys)
+    delete(pmesh.regs)
+    delete(pmesh.flags)
+    delete(pmesh.areas)
     free(pmesh)
 }
 
 // Helper to allocate poly mesh detail
-rc_alloc_poly_mesh_detail :: proc() -> ^Rc_Poly_Mesh_Detail {
-    dmesh := new(Rc_Poly_Mesh_Detail)
+alloc_poly_mesh_detail :: proc() -> ^Poly_Mesh_Detail {
+    dmesh := new(Poly_Mesh_Detail)
     return dmesh
 }
 
 // Helper to free poly mesh detail
-rc_free_poly_mesh_detail :: proc(dmesh: ^Rc_Poly_Mesh_Detail) {
+free_poly_mesh_detail :: proc(dmesh: ^Poly_Mesh_Detail) {
     if dmesh == nil do return
-    if dmesh.meshes != nil do delete(dmesh.meshes)
-    if dmesh.verts != nil do delete(dmesh.verts)
-    if dmesh.tris != nil do delete(dmesh.tris)
+    delete(dmesh.meshes)
+    delete(dmesh.verts)
+    delete(dmesh.tris)
     free(dmesh)
 }
 

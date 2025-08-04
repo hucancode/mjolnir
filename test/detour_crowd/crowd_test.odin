@@ -8,16 +8,16 @@ import detour "../../mjolnir/navigation/detour"
 import crowd "../../mjolnir/navigation/detour_crowd"
 
 // Mock navigation query for testing
-create_mock_nav_query :: proc() -> ^detour.Dt_Nav_Mesh_Query {
+create_mock_nav_query :: proc() -> ^detour.Nav_Mesh_Query {
     // In a real implementation, this would create a proper navigation mesh
     // For testing, we'll create a minimal mock
-    nav_query := new(detour.Dt_Nav_Mesh_Query)
-    nav_mesh := new(detour.Dt_Nav_Mesh)
+    nav_query := new(detour.Nav_Mesh_Query)
+    nav_mesh := new(detour.Nav_Mesh)
     nav_query.nav_mesh = nav_mesh
     return nav_query
 }
 
-cleanup_mock_nav_query :: proc(nav_query: ^detour.Dt_Nav_Mesh_Query) {
+cleanup_mock_nav_query :: proc(nav_query: ^detour.Nav_Mesh_Query) {
     if nav_query != nil {
         if nav_query.nav_mesh != nil {
             free(nav_query.nav_mesh)
@@ -97,49 +97,49 @@ test_obstacle_avoidance_params :: proc(t: ^testing.T) {
 test_proximity_grid :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
     
-    grid := new(crowd.Dt_Proximity_Grid)
+    grid := new(crowd.Proximity_Grid)
     defer free(grid)
     
     // Test grid initialization
-    status := crowd.dt_proximity_grid_init(grid, 100, 2.0)
+    status := crowd.proximity_grid_init(grid, 100, 2.0)
     testing.expect(t, nav_recast.status_succeeded(status), "Failed to initialize proximity grid")
-    defer crowd.dt_proximity_grid_destroy(grid)
+    defer crowd.proximity_grid_destroy(grid)
     
     testing.expect(t, grid.max_items == 100, "Max items not set correctly")
     testing.expect(t, grid.cell_size == 2.0, "Cell size not set correctly")
     testing.expect(t, grid.inv_cell_size == 0.5, "Inverse cell size not calculated correctly")
     
     // Test adding items
-    status = crowd.dt_proximity_grid_add_item(grid, 1, 0, 0, 2, 2)
+    status = crowd.proximity_grid_add_item(grid, 1, 0, 0, 2, 2)
     testing.expect(t, nav_recast.status_succeeded(status), "Failed to add item to grid")
     
-    status = crowd.dt_proximity_grid_add_item(grid, 2, 3, 3, 5, 5)
+    status = crowd.proximity_grid_add_item(grid, 2, 3, 3, 5, 5)
     testing.expect(t, nav_recast.status_succeeded(status), "Failed to add second item to grid")
     
     // Test querying items
     items := make([]u16, 10)
     defer delete(items)
     
-    count := crowd.dt_proximity_grid_query_items(grid, 1, 1, 3.0, items[:], 10)
+    count := crowd.proximity_grid_query_items(grid, 1, 1, 3.0, items[:], 10)
     testing.expect(t, count > 0, "Should find items in query")
     testing.expect(t, count <= 10, "Should not exceed max items")
     
     // Test clearing grid
-    crowd.dt_proximity_grid_clear(grid)
-    testing.expect(t, crowd.dt_proximity_grid_is_empty(grid), "Grid should be empty after clear")
+    crowd.proximity_grid_clear(grid)
+    testing.expect(t, crowd.proximity_grid_is_empty(grid), "Grid should be empty after clear")
 }
 
 @(test)
 test_path_corridor :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
     
-    corridor := new(crowd.Dt_Path_Corridor)
+    corridor := new(crowd.Path_Corridor)
     defer free(corridor)
     
     // Test corridor initialization
-    status := crowd.dt_path_corridor_init(corridor, 100)
+    status := crowd.path_corridor_init(corridor, 100)
     testing.expect(t, nav_recast.status_succeeded(status), "Failed to initialize path corridor")
-    defer crowd.dt_path_corridor_destroy(corridor)
+    defer crowd.path_corridor_destroy(corridor)
     
     testing.expect(t, corridor.max_path == 100, "Max path not set correctly")
     testing.expect(t, len(corridor.path) == 0, "Path should be empty initially")
@@ -148,17 +148,17 @@ test_path_corridor :: proc(t: ^testing.T) {
     test_ref := nav_recast.Poly_Ref(123)
     test_pos := [3]f32{1, 2, 3}
     
-    status = crowd.dt_path_corridor_reset(corridor, test_ref, test_pos)
+    status = crowd.path_corridor_reset(corridor, test_ref, test_pos)
     testing.expect(t, nav_recast.status_succeeded(status), "Failed to reset corridor")
     testing.expect(t, len(corridor.path) == 1, "Path should have one polygon after reset")
     testing.expect(t, corridor.path[0] == test_ref, "First polygon should match")
     testing.expect(t, corridor.position == test_pos, "Position should match")
     
     // Test getting first and last polygon
-    first_poly := crowd.dt_path_corridor_get_first_poly(corridor)
+    first_poly := crowd.path_corridor_get_first_poly(corridor)
     testing.expect(t, first_poly == test_ref, "First polygon should match")
     
-    last_poly := crowd.dt_path_corridor_get_last_poly(corridor)
+    last_poly := crowd.path_corridor_get_last_poly(corridor)
     testing.expect(t, last_poly == test_ref, "Last polygon should match when path has one element")
 }
 
@@ -166,13 +166,13 @@ test_path_corridor :: proc(t: ^testing.T) {
 test_local_boundary :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
     
-    boundary := new(crowd.Dt_Local_Boundary)
+    boundary := new(crowd.Local_Boundary)
     defer free(boundary)
     
     // Test boundary initialization
-    status := crowd.dt_local_boundary_init(boundary, 10)
+    status := crowd.local_boundary_init(boundary, 10)
     testing.expect(t, nav_recast.status_succeeded(status), "Failed to initialize local boundary")
-    defer crowd.dt_local_boundary_destroy(boundary)
+    defer crowd.local_boundary_destroy(boundary)
     
     testing.expect(t, boundary.max_segs == 10, "Max segments not set correctly")
     testing.expect(t, len(boundary.segments) == 0, "Segments should be empty initially")
@@ -200,13 +200,13 @@ test_local_boundary :: proc(t: ^testing.T) {
 test_obstacle_avoidance_query :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
     
-    query := new(crowd.Dt_Obstacle_Avoidance_Query)
+    query := new(crowd.Obstacle_Avoidance_Query)
     defer free(query)
     
     // Test query initialization
-    status := crowd.dt_obstacle_avoidance_query_init(query, 10, 20)
+    status := crowd.obstacle_avoidance_query_init(query, 10, 20)
     testing.expect(t, nav_recast.status_succeeded(status), "Failed to initialize obstacle avoidance query")
-    defer crowd.dt_obstacle_avoidance_query_destroy(query)
+    defer crowd.obstacle_avoidance_query_destroy(query)
     
     testing.expect(t, query.max_circles == 10, "Max circles not set correctly")
     testing.expect(t, query.max_segments == 20, "Max segments not set correctly")
@@ -216,7 +216,7 @@ test_obstacle_avoidance_query :: proc(t: ^testing.T) {
     vel := [3]f32{0, 0, 1}
     dvel := [3]f32{0, 0, 0.5}
     
-    status = crowd.dt_obstacle_avoidance_query_add_circle(query, pos, vel, dvel, 1.0, {}, {})
+    status = crowd.obstacle_avoidance_query_add_circle(query, pos, vel, dvel, 1.0, {}, {})
     testing.expect(t, nav_recast.status_succeeded(status), "Failed to add circle obstacle")
     testing.expect(t, len(query.circle_obstacles) == 1, "Should have one circle obstacle")
     
@@ -224,12 +224,12 @@ test_obstacle_avoidance_query :: proc(t: ^testing.T) {
     seg_p := [3]f32{0, 0, 0}
     seg_q := [3]f32{2, 0, 0}
     
-    status = crowd.dt_obstacle_avoidance_query_add_segment(query, seg_p, seg_q, false)
+    status = crowd.obstacle_avoidance_query_add_segment(query, seg_p, seg_q, false)
     testing.expect(t, nav_recast.status_succeeded(status), "Failed to add segment obstacle")
     testing.expect(t, len(query.segment_obstacles) == 1, "Should have one segment obstacle")
     
     // Test reset
-    crowd.dt_obstacle_avoidance_query_reset(query)
+    crowd.obstacle_avoidance_query_reset(query)
     testing.expect(t, len(query.circle_obstacles) == 0, "Circle obstacles should be cleared")
     testing.expect(t, len(query.segment_obstacles) == 0, "Segment obstacles should be cleared")
 }
@@ -241,29 +241,29 @@ test_path_queue :: proc(t: ^testing.T) {
     nav_query := create_mock_nav_query()
     defer cleanup_mock_nav_query(nav_query)
     
-    queue := new(crowd.Dt_Path_Queue)
+    queue := new(crowd.Path_Queue)
     defer free(queue)
     
     // Test queue initialization
-    status := crowd.dt_path_queue_init(queue, 100, 1000, nav_query)
+    status := crowd.path_queue_init(queue, 100, 1000, nav_query)
     testing.expect(t, nav_recast.status_succeeded(status), "Failed to initialize path queue")
-    defer crowd.dt_path_queue_destroy(queue)
+    defer crowd.path_queue_destroy(queue)
     
     testing.expect(t, queue.max_path_size == 100, "Max path size not set correctly")
     testing.expect(t, queue.max_search_nodes == 1000, "Max search nodes not set correctly")
     testing.expect(t, queue.nav_query == nav_query, "Nav query not set correctly")
     
     // Test queue state
-    testing.expect(t, crowd.dt_path_queue_is_empty(queue), "Queue should be empty initially")
-    testing.expect(t, !crowd.dt_path_queue_is_full(queue), "Queue should not be full initially")
+    testing.expect(t, crowd.path_queue_is_empty(queue), "Queue should be empty initially")
+    testing.expect(t, !crowd.path_queue_is_full(queue), "Queue should not be full initially")
     
     // Test statistics
-    queue_size, max_queue_size := crowd.dt_path_queue_get_stats(queue)
+    queue_size, max_queue_size := crowd.path_queue_get_stats(queue)
     testing.expect(t, queue_size == 0, "Queue size should be 0")
     testing.expect(t, max_queue_size > 0, "Max queue size should be positive")
     
-    pending_count := crowd.dt_path_queue_get_pending_count(queue)
-    completed_count := crowd.dt_path_queue_get_completed_count(queue)
+    pending_count := crowd.path_queue_get_pending_count(queue)
+    completed_count := crowd.path_queue_get_completed_count(queue)
     testing.expect(t, pending_count == 0, "Pending count should be 0")
     testing.expect(t, completed_count == 0, "Completed count should be 0")
 }

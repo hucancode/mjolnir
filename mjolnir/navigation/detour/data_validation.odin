@@ -47,7 +47,7 @@ byte_swap_u16 :: proc(value: u16) -> u16 {
 }
 
 // Convert header from file endianness to system endianness
-convert_header_endianness :: proc(header: ^Dt_Mesh_Header, from_endianness: Endianness) {
+convert_header_endianness :: proc(header: ^Mesh_Header, from_endianness: Endianness) {
     system_endianness := get_system_endianness()
     
     if from_endianness == system_endianness {
@@ -137,44 +137,44 @@ Version_Features :: struct {
 @(init)
 validate_struct_sizes :: proc() {
     // Runtime size checks with detailed error messages
-    header_size := size_of(Dt_Mesh_Header)
+    header_size := size_of(Mesh_Header)
     if header_size != EXPECTED_DT_MESH_HEADER_SIZE {
-        log.fatalf("Dt_Mesh_Header size mismatch: got %d bytes, expected %d bytes. " +
+        log.fatalf("Mesh_Header size mismatch: got %d bytes, expected %d bytes. " +
                   "This indicates struct padding or field type differences from C++ reference.", 
                   header_size, EXPECTED_DT_MESH_HEADER_SIZE)
     }
     
-    poly_size := size_of(Dt_Poly)
+    poly_size := size_of(Poly)
     if poly_size != EXPECTED_DT_POLY_SIZE {
-        log.fatalf("Dt_Poly size mismatch: got %d bytes, expected %d bytes. " +
+        log.fatalf("Poly size mismatch: got %d bytes, expected %d bytes. " +
                   "Check vertex count constants and field alignment.", 
                   poly_size, EXPECTED_DT_POLY_SIZE)
     }
     
-    link_size := size_of(Dt_Link)
+    link_size := size_of(Link)
     if link_size != EXPECTED_DT_LINK_SIZE {
-        log.fatalf("Dt_Link size mismatch: got %d bytes, expected %d bytes. " +
+        log.fatalf("Link size mismatch: got %d bytes, expected %d bytes. " +
                   "Verify Poly_Ref size and field packing.", 
                   link_size, EXPECTED_DT_LINK_SIZE)
     }
     
-    detail_size := size_of(Dt_Poly_Detail)
+    detail_size := size_of(Poly_Detail)
     if detail_size != EXPECTED_DT_POLY_DETAIL_SIZE {
-        log.fatalf("Dt_Poly_Detail size mismatch: got %d bytes, expected %d bytes. " +
+        log.fatalf("Poly_Detail size mismatch: got %d bytes, expected %d bytes. " +
                   "Check field alignment and padding.", 
                   detail_size, EXPECTED_DT_POLY_DETAIL_SIZE)
     }
     
-    bv_size := size_of(Dt_BV_Node)
+    bv_size := size_of(BV_Node)
     if bv_size != EXPECTED_DT_BV_NODE_SIZE {
-        log.fatalf("Dt_BV_Node size mismatch: got %d bytes, expected %d bytes. " +
+        log.fatalf("BV_Node size mismatch: got %d bytes, expected %d bytes. " +
                   "Verify array field packing.", 
                   bv_size, EXPECTED_DT_BV_NODE_SIZE)
     }
     
-    offmesh_size := size_of(Dt_Off_Mesh_Connection)
+    offmesh_size := size_of(Off_Mesh_Connection)
     if offmesh_size != EXPECTED_DT_OFF_MESH_CONNECTION_SIZE {
-        log.fatalf("Dt_Off_Mesh_Connection size mismatch: got %d bytes, expected %d bytes. " +
+        log.fatalf("Off_Mesh_Connection size mismatch: got %d bytes, expected %d bytes. " +
                   "Check array and field alignment.", 
                   offmesh_size, EXPECTED_DT_OFF_MESH_CONNECTION_SIZE)
     }
@@ -202,7 +202,7 @@ validate_tile_data :: proc(data: []u8) -> (result: Data_Validation_Result) {
     }
     
     // Minimum size check
-    if len(data) < size_of(Dt_Mesh_Header) {
+    if len(data) < size_of(Mesh_Header) {
         add_error(&result, "Tile data too small for header")
         return
     }
@@ -221,7 +221,7 @@ validate_tile_data :: proc(data: []u8) -> (result: Data_Validation_Result) {
     }
     
     // Read and validate header (with endianness conversion)
-    header := cast(^Dt_Mesh_Header)raw_data(data)
+    header := cast(^Mesh_Header)raw_data(data)
     
     // Convert endianness if needed
     if data_endianness != system_endianness {
@@ -290,16 +290,16 @@ validate_tile_data :: proc(data: []u8) -> (result: Data_Validation_Result) {
 }
 
 // Calculate expected tile data size from header
-calculate_expected_tile_size :: proc(header: ^Dt_Mesh_Header) -> int {
-    size := size_of(Dt_Mesh_Header)
+calculate_expected_tile_size :: proc(header: ^Mesh_Header) -> int {
+    size := size_of(Mesh_Header)
     size += size_of([3]f32) * int(header.vert_count)           // Vertices
-    size += size_of(Dt_Poly) * int(header.poly_count)          // Polygons
-    size += size_of(Dt_Link) * int(header.max_link_count)      // Links
-    size += size_of(Dt_Poly_Detail) * int(header.detail_mesh_count)  // Detail meshes
+    size += size_of(Poly) * int(header.poly_count)          // Polygons
+    size += size_of(Link) * int(header.max_link_count)      // Links
+    size += size_of(Poly_Detail) * int(header.detail_mesh_count)  // Detail meshes
     size += size_of([3]f32) * int(header.detail_vert_count)    // Detail vertices
     size += 4 * int(header.detail_tri_count)                   // Detail triangles (4 bytes each)
-    size += size_of(Dt_BV_Node) * int(header.bv_node_count)    // BV tree nodes
-    size += size_of(Dt_Off_Mesh_Connection) * int(header.off_mesh_con_count)  // Off-mesh connections
+    size += size_of(BV_Node) * int(header.bv_node_count)    // BV tree nodes
+    size += size_of(Off_Mesh_Connection) * int(header.off_mesh_con_count)  // Off-mesh connections
     return size
 }
 
@@ -329,7 +329,7 @@ get_version_features :: proc(version: i32) -> Version_Features {
 }
 
 // Validate navigation mesh header with detailed checking and version compatibility
-validate_navmesh_header :: proc(header: ^Dt_Mesh_Header) -> nav_recast.Status {
+validate_navmesh_header :: proc(header: ^Mesh_Header) -> nav_recast.Status {
     if header == nil {
         return {.Invalid_Param}
     }
@@ -406,19 +406,19 @@ calculate_data_checksum :: proc(data: []u8) -> u32 {
 }
 
 // Verify data layout assumptions at runtime
-verify_data_layout :: proc(data: []u8, header: ^Dt_Mesh_Header) -> bool {
-    if len(data) < size_of(Dt_Mesh_Header) {
+verify_data_layout :: proc(data: []u8, header: ^Mesh_Header) -> bool {
+    if len(data) < size_of(Mesh_Header) {
         return false
     }
     
     // Verify header is at expected location
-    header_from_data := cast(^Dt_Mesh_Header)raw_data(data)
+    header_from_data := cast(^Mesh_Header)raw_data(data)
     if header_from_data != header {
         log.warnf("Header pointer mismatch - possible alignment issue")
     }
     
     // Verify data layout order matches expected format
-    offset := size_of(Dt_Mesh_Header)
+    offset := size_of(Mesh_Header)
     
     // Check vertices alignment
     if header.vert_count > 0 {
@@ -434,9 +434,9 @@ verify_data_layout :: proc(data: []u8, header: ^Dt_Mesh_Header) -> bool {
     // Check polygon alignment
     if header.poly_count > 0 {
         poly_ptr := uintptr(raw_data(data)) + uintptr(offset)
-        if poly_ptr % uintptr(align_of(Dt_Poly)) != 0 {
+        if poly_ptr % uintptr(align_of(Poly)) != 0 {
             log.errorf("Polygon data misaligned: offset=%d, required alignment=%d", 
-                      offset, align_of(Dt_Poly))
+                      offset, align_of(Poly))
             return false
         }
     }
@@ -447,11 +447,11 @@ verify_data_layout :: proc(data: []u8, header: ^Dt_Mesh_Header) -> bool {
 // Log detailed struct layout information for debugging
 log_struct_layout_info :: proc() {
     log.infof("=== Navigation Mesh Structure Layout ===")
-    log.infof("Dt_Mesh_Header: size=%d, align=%d", size_of(Dt_Mesh_Header), align_of(Dt_Mesh_Header))
-    log.infof("Dt_Poly: size=%d, align=%d", size_of(Dt_Poly), align_of(Dt_Poly))
-    log.infof("Dt_Link: size=%d, align=%d", size_of(Dt_Link), align_of(Dt_Link))
-    log.infof("Dt_Poly_Detail: size=%d, align=%d", size_of(Dt_Poly_Detail), align_of(Dt_Poly_Detail))
-    log.infof("Dt_BV_Node: size=%d, align=%d", size_of(Dt_BV_Node), align_of(Dt_BV_Node))
-    log.infof("Dt_Off_Mesh_Connection: size=%d, align=%d", size_of(Dt_Off_Mesh_Connection), align_of(Dt_Off_Mesh_Connection))
+    log.infof("Mesh_Header: size=%d, align=%d", size_of(Mesh_Header), align_of(Mesh_Header))
+    log.infof("Poly: size=%d, align=%d", size_of(Poly), align_of(Poly))
+    log.infof("Link: size=%d, align=%d", size_of(Link), align_of(Link))
+    log.infof("Poly_Detail: size=%d, align=%d", size_of(Poly_Detail), align_of(Poly_Detail))
+    log.infof("BV_Node: size=%d, align=%d", size_of(BV_Node), align_of(BV_Node))
+    log.infof("Off_Mesh_Connection: size=%d, align=%d", size_of(Off_Mesh_Connection), align_of(Off_Mesh_Connection))
     log.infof("=========================================")
 }

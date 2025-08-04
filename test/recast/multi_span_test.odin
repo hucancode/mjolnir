@@ -18,38 +18,38 @@ test_multiple_spans_per_cell :: proc(t: ^testing.T) {
     bmin := [3]f32{0, 0, 0}
     bmax := [3]f32{f32(field_size), 50, f32(field_size)}
     
-    hf := recast.rc_alloc_heightfield()
+    hf := recast.alloc_heightfield()
     testing.expect(t, hf != nil, "Heightfield allocation should succeed")
-    defer recast.rc_free_heightfield(hf)
+    defer recast.free_heightfield(hf)
     
-    ok := recast.rc_create_heightfield(hf, field_size, field_size, bmin, bmax, cell_size, cell_height)
+    ok := recast.create_heightfield(hf, field_size, field_size, bmin, bmax, cell_size, cell_height)
     testing.expect(t, ok, "Heightfield creation should succeed")
     
     // Add multiple spans to cell (2,2) - simulating a multi-story building
     x, z := i32(2), i32(2)
     
     // Floor 1: Ground level
-    ok = recast.rc_add_span(hf, x, z, 0, 2, u8(recast.RC_WALKABLE_AREA), 1)
+    ok = recast.add_span(hf, x, z, 0, 2, u8(recast.RC_WALKABLE_AREA), 1)
     testing.expect(t, ok, "Adding floor 1 should succeed")
     
     // Floor 2: Second story (gap for ceiling)
-    ok = recast.rc_add_span(hf, x, z, 6, 8, u8(recast.RC_WALKABLE_AREA), 1)
+    ok = recast.add_span(hf, x, z, 6, 8, u8(recast.RC_WALKABLE_AREA), 1)
     testing.expect(t, ok, "Adding floor 2 should succeed")
     
     // Floor 3: Third story
-    ok = recast.rc_add_span(hf, x, z, 12, 14, u8(recast.RC_WALKABLE_AREA), 1)
+    ok = recast.add_span(hf, x, z, 12, 14, u8(recast.RC_WALKABLE_AREA), 1)
     testing.expect(t, ok, "Adding floor 3 should succeed")
     
     // Floor 4: Fourth story
-    ok = recast.rc_add_span(hf, x, z, 18, 20, u8(recast.RC_WALKABLE_AREA), 1)
+    ok = recast.add_span(hf, x, z, 18, 20, u8(recast.RC_WALKABLE_AREA), 1)
     testing.expect(t, ok, "Adding floor 4 should succeed")
     
     // Floor 5: Fifth story
-    ok = recast.rc_add_span(hf, x, z, 24, 26, u8(recast.RC_WALKABLE_AREA), 1)
+    ok = recast.add_span(hf, x, z, 24, 26, u8(recast.RC_WALKABLE_AREA), 1)
     testing.expect(t, ok, "Adding floor 5 should succeed")
     
     // Add a tall pillar that goes through all floors
-    ok = recast.rc_add_span(hf, x, z, 0, 30, u8(recast.RC_NULL_AREA), 1)
+    ok = recast.add_span(hf, x, z, 0, 30, u8(recast.RC_NULL_AREA), 1)
     testing.expect(t, ok, "Adding pillar should succeed")
     
     // Count spans in the cell
@@ -88,11 +88,11 @@ test_many_thin_spans :: proc(t: ^testing.T) {
     bmin := [3]f32{0, 0, 0}
     bmax := [3]f32{f32(field_size), 100, f32(field_size)}
     
-    hf := recast.rc_alloc_heightfield()
+    hf := recast.alloc_heightfield()
     testing.expect(t, hf != nil, "Heightfield allocation should succeed")
-    defer recast.rc_free_heightfield(hf)
+    defer recast.free_heightfield(hf)
     
-    ok := recast.rc_create_heightfield(hf, field_size, field_size, bmin, bmax, cell_size, cell_height)
+    ok := recast.create_heightfield(hf, field_size, field_size, bmin, bmax, cell_size, cell_height)
     testing.expect(t, ok, "Heightfield creation should succeed")
     
     // Add 20 thin spans with gaps between them
@@ -104,7 +104,7 @@ test_many_thin_spans :: proc(t: ^testing.T) {
         span_top := u16(i * 5 + 2)     // Each span is 2 units tall
         // Gap of 3 units between spans
         
-        ok = recast.rc_add_span(hf, x, z, span_bottom, span_top, u8(recast.RC_WALKABLE_AREA), 1)
+        ok = recast.add_span(hf, x, z, span_bottom, span_top, u8(recast.RC_WALKABLE_AREA), 1)
         if ok {
             spans_added += 1
         }

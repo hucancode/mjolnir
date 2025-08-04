@@ -45,7 +45,7 @@ Contour_Work_Result :: struct {
 
 // Context for mesh building with parallel support
 Mesh_Build_Context :: struct {
-    contour_set:      ^Rc_Contour_Set,
+    contour_set:      ^Contour_Set,
     config:           Parallel_Mesh_Config,
 
     // Work distribution
@@ -92,7 +92,7 @@ parallel_mesh_worker :: proc(data: rawptr) {
 }
 
 // Build polygon mesh using multiple threads
-rc_build_poly_mesh_parallel :: proc(cset: ^Rc_Contour_Set, nvp: i32, pmesh: ^Rc_Poly_Mesh,
+build_poly_mesh_parallel :: proc(cset: ^Contour_Set, nvp: i32, pmesh: ^Poly_Mesh,
                                    config: Parallel_Mesh_Config = PARALLEL_MESH_DEFAULT_CONFIG) -> bool {
     if cset == nil || pmesh == nil do return false
     if len(cset.conts) == 0 do return false
@@ -102,7 +102,7 @@ rc_build_poly_mesh_parallel :: proc(cset: ^Rc_Contour_Set, nvp: i32, pmesh: ^Rc_
 }
 
 // Internal implementation with proper error handling
-_build_mesh_parallel_impl :: proc(cset: ^Rc_Contour_Set, nvp: i32, pmesh: ^Rc_Poly_Mesh, config: Parallel_Mesh_Config) -> bool {
+_build_mesh_parallel_impl :: proc(cset: ^Contour_Set, nvp: i32, pmesh: ^Poly_Mesh, config: Parallel_Mesh_Config) -> bool {
     log.infof("Building polygon mesh in parallel from %d contours, max verts per poly: %d", len(cset.conts), nvp)
 
     // Determine number of worker threads
@@ -375,7 +375,7 @@ process_contour_chunk :: proc(build_ctx: ^Mesh_Build_Context, work_item: Contour
 }
 
 // Merge results from all worker threads into final mesh
-merge_worker_results :: proc(build_ctx: ^Mesh_Build_Context, pmesh: ^Rc_Poly_Mesh) -> bool {
+merge_worker_results :: proc(build_ctx: ^Mesh_Build_Context, pmesh: ^Poly_Mesh) -> bool {
     if len(build_ctx.results) == 0 {
         log.warn("No worker results to merge")
         return false

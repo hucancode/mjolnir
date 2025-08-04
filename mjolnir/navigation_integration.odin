@@ -49,7 +49,7 @@ NavObstacleType :: enum {
 
 // Navigation mesh resource
 NavMesh :: struct {
-    detour_mesh:     detour.Dt_Nav_Mesh,
+    detour_mesh:     detour.Nav_Mesh,
     bounds:          geometry.Aabb,
     cell_size:       f32,
     tile_size:       i32,
@@ -59,9 +59,9 @@ NavMesh :: struct {
 
 // Navigation context for queries
 NavContext :: struct {
-    nav_mesh_query:  detour.Dt_Nav_Mesh_Query,
+    nav_mesh_query:  detour.Nav_Mesh_Query,
     associated_mesh: Handle,    // Handle to NavMesh
-    query_filter:    detour.Dt_Query_Filter,
+    query_filter:    detour.Query_Filter,
 }
 
 // Navigation system state
@@ -211,14 +211,14 @@ build_navigation_mesh_from_scene :: proc(engine: ^Engine, config: recast.Config 
               len(collector.vertices)/3, len(collector.indices), collector.mesh_count)
     
     // Build navigation mesh using Recast
-    pmesh, dmesh, ok := recast.rc_build_navmesh(collector.vertices[:], collector.indices[:], collector.area_types[:], config)
+    pmesh, dmesh, ok := recast.build_navmesh(collector.vertices[:], collector.indices[:], collector.area_types[:], config)
     if !ok {
         log.error("Failed to build navigation mesh")
         return {}, false
     }
     defer {
-        if pmesh != nil do recast.rc_free_poly_mesh(pmesh)
-        if dmesh != nil do recast.rc_free_poly_mesh_detail(dmesh)
+        if pmesh != nil do recast.free_poly_mesh(pmesh)
+        if dmesh != nil do recast.free_poly_mesh_detail(dmesh)
     }
     
     // Create NavMesh resource
@@ -229,7 +229,7 @@ build_navigation_mesh_from_scene :: proc(engine: ^Engine, config: recast.Config 
     }
     
     // Create navigation mesh data from Recast polygon mesh
-    nav_params := detour.Dt_Create_Nav_Mesh_Data_Params{
+    nav_params := detour.Create_Nav_Mesh_Data_Params{
         poly_mesh = pmesh,
         poly_mesh_detail = dmesh,
         
@@ -249,7 +249,7 @@ build_navigation_mesh_from_scene :: proc(engine: ^Engine, config: recast.Config 
     }
     
     // Create navigation mesh data
-    nav_data, create_status := detour.dt_create_nav_mesh_data(&nav_params)
+    nav_data, create_status := detour.create_nav_mesh_data(&nav_params)
     if nav_recast.status_failed(create_status) {
         log.errorf("Failed to create navigation mesh data: %v", create_status)
         return nav_mesh_handle, false
@@ -257,7 +257,7 @@ build_navigation_mesh_from_scene :: proc(engine: ^Engine, config: recast.Config 
     // Don't delete nav_data - ownership is transferred to nav mesh with DT_TILE_FREE_DATA flag
     
     // Initialize navigation mesh with parameters
-    mesh_params := detour.Dt_Nav_Mesh_Params{
+    mesh_params := detour.Nav_Mesh_Params{
         orig = pmesh.bmin,
         tile_width = pmesh.bmax[0] - pmesh.bmin[0],
         tile_height = pmesh.bmax[2] - pmesh.bmin[2],
@@ -265,17 +265,17 @@ build_navigation_mesh_from_scene :: proc(engine: ^Engine, config: recast.Config 
         max_polys = 1024,
     }
     
-    init_status := detour.dt_nav_mesh_init(&nav_mesh.detour_mesh, &mesh_params)
+    init_status := detour.nav_mesh_init(&nav_mesh.detour_mesh, &mesh_params)
     if nav_recast.status_failed(init_status) {
         log.errorf("Failed to initialize navigation mesh: %v", init_status)
         return nav_mesh_handle, false
     }
     
     // Add the tile to the navigation mesh with DT_TILE_FREE_DATA flag
-    _, add_status := detour.dt_nav_mesh_add_tile(&nav_mesh.detour_mesh, nav_data, nav_recast.DT_TILE_FREE_DATA)
+    _, add_status := detour.nav_mesh_add_tile(&nav_mesh.detour_mesh, nav_data, nav_recast.DT_TILE_FREE_DATA)
     if nav_recast.status_failed(add_status) {
         log.errorf("Failed to add tile to navigation mesh: %v", add_status)
-        detour.dt_nav_mesh_destroy(&nav_mesh.detour_mesh)
+        detour.nav_mesh_destroy(&nav_mesh.detour_mesh)
         return nav_mesh_handle, false
     }
     
@@ -324,14 +324,14 @@ build_navigation_mesh_from_scene_filtered :: proc(
               len(collector.vertices)/3, len(collector.indices), collector.mesh_count)
     
     // Build navigation mesh using Recast
-    pmesh, dmesh, ok := recast.rc_build_navmesh(collector.vertices[:], collector.indices[:], collector.area_types[:], config)
+    pmesh, dmesh, ok := recast.build_navmesh(collector.vertices[:], collector.indices[:], collector.area_types[:], config)
     if !ok {
         log.error("Failed to build navigation mesh")
         return {}, false
     }
     defer {
-        if pmesh != nil do recast.rc_free_poly_mesh(pmesh)
-        if dmesh != nil do recast.rc_free_poly_mesh_detail(dmesh)
+        if pmesh != nil do recast.free_poly_mesh(pmesh)
+        if dmesh != nil do recast.free_poly_mesh_detail(dmesh)
     }
     
     // Create and initialize NavMesh resource (same as basic version)
@@ -342,7 +342,7 @@ build_navigation_mesh_from_scene_filtered :: proc(
     }
     
     // Create navigation mesh data from Recast polygon mesh
-    nav_params := detour.Dt_Create_Nav_Mesh_Data_Params{
+    nav_params := detour.Create_Nav_Mesh_Data_Params{
         poly_mesh = pmesh,
         poly_mesh_detail = dmesh,
         
@@ -362,7 +362,7 @@ build_navigation_mesh_from_scene_filtered :: proc(
     }
     
     // Create navigation mesh data
-    nav_data, create_status := detour.dt_create_nav_mesh_data(&nav_params)
+    nav_data, create_status := detour.create_nav_mesh_data(&nav_params)
     if nav_recast.status_failed(create_status) {
         log.errorf("Failed to create navigation mesh data: %v", create_status)
         return nav_mesh_handle, false
@@ -370,7 +370,7 @@ build_navigation_mesh_from_scene_filtered :: proc(
     // Don't delete nav_data - ownership is transferred to nav mesh with DT_TILE_FREE_DATA flag
     
     // Initialize navigation mesh with parameters
-    mesh_params := detour.Dt_Nav_Mesh_Params{
+    mesh_params := detour.Nav_Mesh_Params{
         orig = pmesh.bmin,
         tile_width = pmesh.bmax[0] - pmesh.bmin[0],
         tile_height = pmesh.bmax[2] - pmesh.bmin[2],
@@ -378,17 +378,17 @@ build_navigation_mesh_from_scene_filtered :: proc(
         max_polys = 1024,
     }
     
-    init_status := detour.dt_nav_mesh_init(&nav_mesh.detour_mesh, &mesh_params)
+    init_status := detour.nav_mesh_init(&nav_mesh.detour_mesh, &mesh_params)
     if nav_recast.status_failed(init_status) {
         log.errorf("Failed to initialize navigation mesh: %v", init_status)
         return nav_mesh_handle, false
     }
     
     // Add the tile to the navigation mesh with DT_TILE_FREE_DATA flag
-    _, add_status := detour.dt_nav_mesh_add_tile(&nav_mesh.detour_mesh, nav_data, nav_recast.DT_TILE_FREE_DATA)
+    _, add_status := detour.nav_mesh_add_tile(&nav_mesh.detour_mesh, nav_data, nav_recast.DT_TILE_FREE_DATA)
     if nav_recast.status_failed(add_status) {
         log.errorf("Failed to add tile to navigation mesh: %v", add_status)
-        detour.dt_nav_mesh_destroy(&nav_mesh.detour_mesh)
+        detour.nav_mesh_destroy(&nav_mesh.detour_mesh)
         return nav_mesh_handle, false
     }
     
@@ -441,7 +441,7 @@ create_navigation_context :: proc(engine: ^Engine, nav_mesh_handle: Handle) -> (
     }
     
     // Initialize navigation mesh query
-    init_status := detour.dt_nav_mesh_query_init(&nav_context.nav_mesh_query, &nav_mesh.detour_mesh, 2048)
+    init_status := detour.nav_mesh_query_init(&nav_context.nav_mesh_query, &nav_mesh.detour_mesh, 2048)
     if nav_recast.status_failed(init_status) {
         log.errorf("Failed to initialize navigation mesh query: %v", init_status)
         resource.free(&engine.warehouse.nav_contexts, context_handle)
@@ -449,7 +449,7 @@ create_navigation_context :: proc(engine: ^Engine, nav_mesh_handle: Handle) -> (
     }
     
     // Initialize query filter
-    detour.dt_query_filter_init(&nav_context.query_filter)
+    detour.query_filter_init(&nav_context.query_filter)
     nav_context.associated_mesh = nav_mesh_handle
     
     log.infof("Created navigation context with handle %v", context_handle)
@@ -478,7 +478,7 @@ nav_find_path :: proc(engine: ^Engine, context_handle: Handle, start: [3]f32, en
     
     start_ref: nav_recast.Poly_Ref
     start_pos: [3]f32
-    status := detour.dt_find_nearest_poly(&nav_context.nav_mesh_query, start, half_extents, &nav_context.query_filter, &start_ref, &start_pos)
+    status := detour.find_nearest_poly(&nav_context.nav_mesh_query, start, half_extents, &nav_context.query_filter, &start_ref, &start_pos)
     if nav_recast.status_failed(status) || start_ref == nav_recast.INVALID_POLY_REF {
         log.errorf("Failed to find start polygon for pathfinding at position %v", start)
         return nil, false
@@ -486,7 +486,7 @@ nav_find_path :: proc(engine: ^Engine, context_handle: Handle, start: [3]f32, en
     
     end_ref: nav_recast.Poly_Ref
     end_pos: [3]f32
-    status = detour.dt_find_nearest_poly(&nav_context.nav_mesh_query, end, half_extents, &nav_context.query_filter, &end_ref, &end_pos)
+    status = detour.find_nearest_poly(&nav_context.nav_mesh_query, end, half_extents, &nav_context.query_filter, &end_ref, &end_pos)
     if nav_recast.status_failed(status) || end_ref == nav_recast.INVALID_POLY_REF {
         log.errorf("Failed to find end polygon for pathfinding at position %v", end)
         return nil, false
@@ -497,7 +497,7 @@ nav_find_path :: proc(engine: ^Engine, context_handle: Handle, start: [3]f32, en
     defer delete(poly_path)
     path_count: i32
     
-    status = detour.dt_find_path(&nav_context.nav_mesh_query, start_ref, end_ref, start_pos, end_pos, 
+    status = detour.find_path(&nav_context.nav_mesh_query, start_ref, end_ref, start_pos, end_pos, 
                                 &nav_context.query_filter, poly_path[:], &path_count, max_path_length)
     
     if nav_recast.status_failed(status) || path_count == 0 {
@@ -506,14 +506,14 @@ nav_find_path :: proc(engine: ^Engine, context_handle: Handle, start: [3]f32, en
     }
     
     // Convert polygon path to straight path (string pulling)
-    straight_path := make([]detour.Dt_Straight_Path_Point, max_path_length)
+    straight_path := make([]detour.Straight_Path_Point, max_path_length)
     defer delete(straight_path)
     straight_path_count: i32
     
-    status = detour.dt_find_straight_path(&nav_context.nav_mesh_query, start_pos, end_pos, 
+    status = detour.find_straight_path(&nav_context.nav_mesh_query, start_pos, end_pos, 
                                          poly_path[:path_count], path_count,
                                          straight_path[:], nil, nil, &straight_path_count, 
-                                         max_path_length, u32(detour.Dt_Straight_Path_Options.All_Crossings))
+                                         max_path_length, u32(detour.Straight_Path_Options.All_Crossings))
     
     if nav_recast.status_failed(status) || straight_path_count == 0 {
         log.errorf("Failed to create straight path: %v", status)
@@ -541,7 +541,7 @@ nav_is_position_walkable :: proc(engine: ^Engine, context_handle: Handle, positi
     nearest_pos: [3]f32
     half_extents := [3]f32{1.0, 2.0, 1.0}
     
-    status := detour.dt_find_nearest_poly(&nav_context.nav_mesh_query, position, half_extents, &nav_context.query_filter, &poly_ref, &nearest_pos)
+    status := detour.find_nearest_poly(&nav_context.nav_mesh_query, position, half_extents, &nav_context.query_filter, &poly_ref, &nearest_pos)
     return nav_recast.status_succeeded(status) && poly_ref != nav_recast.INVALID_POLY_REF
 }
 

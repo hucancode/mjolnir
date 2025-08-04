@@ -1,7 +1,6 @@
 package test_recast
 
 import nav_recast "../../mjolnir/navigation/recast"
-import nav "../../mjolnir/navigation"
 import "core:testing"
 import "core:log"
 import "core:time"
@@ -10,9 +9,6 @@ import "core:time"
 test_basic_heightfield :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
     
-    // Initialize navigation memory
-    nav.nav_memory_init()
-    defer nav.nav_memory_shutdown()
     
     // Create simple test geometry - a 10x10 flat square
     verts := []f32{
@@ -54,11 +50,11 @@ test_basic_heightfield :: proc(t: ^testing.T) {
     log.infof("Grid size: %dx%d", cfg.width, cfg.height)
     
     // Create heightfield
-    hf := nav_recast.rc_alloc_heightfield()
+    hf := nav_recast.alloc_heightfield()
     testing.expect(t, hf != nil, "Heightfield allocation failed")
-    defer nav_recast.rc_free_heightfield(hf)
+    defer nav_recast.free_heightfield(hf)
     
-    ok := nav_recast.rc_create_heightfield(hf, cfg.width, cfg.height, cfg.bmin, cfg.bmax, cfg.cs, cfg.ch)
+    ok := nav_recast.create_heightfield(hf, cfg.width, cfg.height, cfg.bmin, cfg.bmax, cfg.cs, cfg.ch)
     testing.expect(t, ok, "Heightfield creation failed")
     
     // Verify heightfield properties
@@ -68,7 +64,7 @@ test_basic_heightfield :: proc(t: ^testing.T) {
     testing.expect_value(t, hf.ch, cfg.ch)
     
     // Rasterize triangles
-    ok = nav_recast.rc_rasterize_triangles(verts, 4, tris, areas, 2, hf, cfg.walkable_climb)
+    ok = nav_recast.rasterize_triangles(verts, 4, tris, areas, 2, hf, cfg.walkable_climb)
     testing.expect(t, ok, "Triangle rasterization failed")
     
     // Count non-empty cells
@@ -89,9 +85,6 @@ test_basic_heightfield :: proc(t: ^testing.T) {
 test_simple_api :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
     
-    // Initialize navigation memory
-    nav.nav_memory_init()
-    defer nav.nav_memory_shutdown()
     
     // Create simple test geometry
     verts := []f32{
@@ -131,15 +124,15 @@ test_simple_api :: proc(t: ^testing.T) {
         detail_sample_max_error = 1,
     }
     
-    pmesh, dmesh, ok := nav_recast.rc_build_navmesh(verts, tris, areas, cfg)
+    pmesh, dmesh, ok := nav_recast.build_navmesh(verts, tris, areas, cfg)
     testing.expect(t, ok, "Quick build should succeed")
     if !ok {
         log.error("Build failed")
         return
     }
     
-    defer nav_recast.rc_free_poly_mesh(pmesh)
-    defer nav_recast.rc_free_poly_mesh_detail(dmesh)
+    defer nav_recast.free_poly_mesh(pmesh)
+    defer nav_recast.free_poly_mesh_detail(dmesh)
     
     testing.expect(t, pmesh != nil, "Should have polygon mesh")
     testing.expect(t, pmesh.npolys > 0, "Should have polygons")

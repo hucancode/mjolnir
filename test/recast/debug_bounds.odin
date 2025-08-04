@@ -26,13 +26,13 @@ test_debug_bounds :: proc(t: ^testing.T) {
     bmin: [3]f32
     bmax: [3]f32
     
-    log.info("Before rc_calc_bounds:")
+    log.info("Before calc_bounds:")
     log.infof("  bmin = %v", bmin)
     log.infof("  bmax = %v", bmax)
     
-    nav_recast.rc_calc_bounds(verts, 4, &bmin, &bmax)
+    nav_recast.calc_bounds(verts, 4, &bmin, &bmax)
     
-    log.info("After rc_calc_bounds:")
+    log.info("After calc_bounds:")
     log.infof("  bmin = %v", bmin)
     log.infof("  bmax = %v", bmax)
     
@@ -48,7 +48,7 @@ test_debug_bounds :: proc(t: ^testing.T) {
     width, height: i32
     cs := f32(0.5)
     
-    nav_recast.rc_calc_grid_size(&bmin, &bmax, cs, &width, &height)
+    nav_recast.calc_grid_size(&bmin, &bmax, cs, &width, &height)
     log.infof("Grid size with cs=%.2f: %dx%d", cs, width, height)
     
     testing.expect_value(t, width, i32(20))

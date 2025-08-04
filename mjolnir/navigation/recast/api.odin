@@ -7,7 +7,7 @@ import "core:math/linalg"
 
 // Build navigation mesh from triangle mesh
 // This is the main entry point - follows C++ API closely
-rc_build_navmesh :: proc(vertices: []f32, indices: []i32, areas: []u8, cfg: Config) -> (pmesh: ^Rc_Poly_Mesh, dmesh: ^Rc_Poly_Mesh_Detail, ok: bool) {
+build_navmesh :: proc(vertices: []f32, indices: []i32, areas: []u8, cfg: Config) -> (pmesh: ^Poly_Mesh, dmesh: ^Poly_Mesh_Detail, ok: bool) {
     // Validate inputs
     if len(vertices) == 0 || len(indices) == 0 || cfg.cs <= 0 || cfg.ch <= 0 {
         return nil, nil, false
@@ -16,7 +16,7 @@ rc_build_navmesh :: proc(vertices: []f32, indices: []i32, areas: []u8, cfg: Conf
     // Calculate bounds if needed
     config := cfg
     if config.bmin == {} && config.bmax == {} {
-        rc_calc_bounds(vertices, i32(len(vertices)/3), &config.bmin, &config.bmax)
+        calc_bounds(vertices, i32(len(vertices)/3), &config.bmin, &config.bmax)
     }
     
     // Debug log bounds
@@ -25,7 +25,7 @@ rc_build_navmesh :: proc(vertices: []f32, indices: []i32, areas: []u8, cfg: Conf
               config.bmax.x, config.bmax.y, config.bmax.z)
     
     // Calculate grid size
-    rc_calc_grid_size(&config.bmin, &config.bmax, config.cs, &config.width, &config.height)
+    calc_grid_size(&config.bmin, &config.bmax, config.cs, &config.width, &config.height)
     
     log.infof("Grid size: %d x %d (cell size=%.2f)", config.width, config.height, config.cs)
     
@@ -35,10 +35,10 @@ rc_build_navmesh :: proc(vertices: []f32, indices: []i32, areas: []u8, cfg: Conf
     }
     
     // Build heightfield
-    hf := rc_alloc_heightfield()
-    defer rc_free_heightfield(hf)
+    hf := alloc_heightfield()
+    defer free_heightfield(hf)
     
-    if !rc_create_heightfield(hf, config.width, config.height, config.bmin, config.bmax, config.cs, config.ch) {
+    if !create_heightfield(hf, config.width, config.height, config.bmin, config.bmax, config.cs, config.ch) {
         return nil, nil, false
     }
     
@@ -69,7 +69,7 @@ rc_build_navmesh :: proc(vertices: []f32, indices: []i32, areas: []u8, cfg: Conf
         }
     }
     
-    if !rc_rasterize_triangles(vertices, i32(len(vertices)/3), indices, areas, i32(len(indices)/3), hf, config.walkable_climb) {
+    if !rasterize_triangles(vertices, i32(len(vertices)/3), indices, areas, i32(len(indices)/3), hf, config.walkable_climb) {
         return nil, nil, false
     }
     
@@ -121,9 +121,9 @@ rc_build_navmesh :: proc(vertices: []f32, indices: []i32, areas: []u8, cfg: Conf
     }
     
     // Filter walkable surfaces
-    rc_filter_low_hanging_walkable_obstacles(int(config.walkable_climb), hf)
-    rc_filter_ledge_spans(int(config.walkable_height), int(config.walkable_climb), hf)
-    rc_filter_walkable_low_height_spans(int(config.walkable_height), hf)
+    filter_low_hanging_walkable_obstacles(int(config.walkable_climb), hf)
+    filter_ledge_spans(int(config.walkable_height), int(config.walkable_climb), hf)
+    filter_walkable_low_height_spans(int(config.walkable_height), hf)
     
     // Debug: Count spans after filtering
     when ODIN_DEBUG {
@@ -154,51 +154,51 @@ rc_build_navmesh :: proc(vertices: []f32, indices: []i32, areas: []u8, cfg: Conf
     }
     
     // Build compact heightfield
-    chf := rc_alloc_compact_heightfield()
-    defer rc_free_compact_heightfield(chf)
+    chf := alloc_compact_heightfield()
+    defer free_compact_heightfield(chf)
     
-    if !rc_build_compact_heightfield(config.walkable_height, config.walkable_climb, hf, chf) {
+    if !build_compact_heightfield(config.walkable_height, config.walkable_climb, hf, chf) {
         return nil, nil, false
     }
     
-    if !rc_erode_walkable_area(config.walkable_radius, chf) {
+    if !erode_walkable_area(config.walkable_radius, chf) {
         return nil, nil, false
     }
     
 
     
-    if !rc_build_distance_field(chf) {
+    if !build_distance_field(chf) {
         return nil, nil, false
     }
     
-    if !rc_build_regions(chf, 0, config.min_region_area, config.merge_region_area) {
+    if !build_regions(chf, 0, config.min_region_area, config.merge_region_area) {
         return nil, nil, false
     }
     
 
     
     // Build contours
-    cset := rc_alloc_contour_set()
-    defer rc_free_contour_set(cset)
+    cset := alloc_contour_set()
+    defer free_contour_set(cset)
     
-    if !rc_build_contours(chf, config.max_simplification_error, config.max_edge_len, cset) {
+    if !build_contours(chf, config.max_simplification_error, config.max_edge_len, cset) {
         return nil, nil, false
     }
     
 
     
     // Build polygon mesh
-    pmesh = rc_alloc_poly_mesh()
-    if !rc_build_poly_mesh(cset, config.max_verts_per_poly, pmesh) {
-        rc_free_poly_mesh(pmesh)
+    pmesh = alloc_poly_mesh()
+    if !build_poly_mesh(cset, config.max_verts_per_poly, pmesh) {
+        free_poly_mesh(pmesh)
         return nil, nil, false
     }
     
     // Build detail mesh
-    dmesh = rc_alloc_poly_mesh_detail()
-    if !rc_build_poly_mesh_detail(pmesh, chf, config.detail_sample_dist, config.detail_sample_max_error, dmesh) {
-        rc_free_poly_mesh(pmesh)
-        rc_free_poly_mesh_detail(dmesh)
+    dmesh = alloc_poly_mesh_detail()
+    if !build_poly_mesh_detail(pmesh, chf, config.detail_sample_dist, config.detail_sample_max_error, dmesh) {
+        free_poly_mesh(pmesh)
+        free_poly_mesh_detail(dmesh)
         return nil, nil, false
     }
     

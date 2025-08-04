@@ -8,8 +8,8 @@ import "core:math"
 import "core:math/linalg"
 
 // Build compact heightfield from regular heightfield
-rc_build_compact_heightfield :: proc(walkable_height, walkable_climb: i32,
-                                    hf: ^Rc_Heightfield, chf: ^Rc_Compact_Heightfield) -> bool {
+build_compact_heightfield :: proc(walkable_height, walkable_climb: i32,
+                                    hf: ^Heightfield, chf: ^Compact_Heightfield) -> bool {
     w := hf.width
     h := hf.height
     span_count := 0
@@ -28,7 +28,7 @@ rc_build_compact_heightfield :: proc(walkable_height, walkable_climb: i32,
     chf.ch = hf.ch
     chf.border_size = hf.border_size
 
-    chf.cells = make([]Rc_Compact_Cell, w * h)
+    chf.cells = make([]Compact_Cell, w * h)
     chf.spans = nil
     chf.areas = nil
 
@@ -59,7 +59,7 @@ rc_build_compact_heightfield :: proc(walkable_height, walkable_climb: i32,
 
     // Allocate spans
     chf.span_count = i32(span_count)
-    chf.spans = make([]Rc_Compact_Span, span_count)
+    chf.spans = make([]Compact_Span, span_count)
     chf.areas = make([]u8, span_count)
 
     // Fill in cells and spans
@@ -94,7 +94,7 @@ rc_build_compact_heightfield :: proc(walkable_height, walkable_climb: i32,
             for i in c.index..<c.index + u32(c.count) {
                 s := &chf.spans[i]
                 for dir in 0..<4 {
-                    rc_set_con(s, dir, RC_NOT_CONNECTED)
+                    set_con(s, dir, RC_NOT_CONNECTED)
                     nx := int(x) + int(get_dir_offset_x(dir))
                     ny := int(y) + int(get_dir_offset_y(dir))
                     if nx < 0 || ny < 0 || nx >= int(w) || ny >= int(h) {
@@ -112,7 +112,7 @@ rc_build_compact_heightfield :: proc(walkable_height, walkable_climb: i32,
                                 too_high_neighbor = max(too_high_neighbor, lidx)
                                 continue
                             }
-                            rc_set_con(s, dir, lidx)
+                            set_con(s, dir, lidx)
                             break
                         }
                     }
@@ -129,8 +129,8 @@ rc_build_compact_heightfield :: proc(walkable_height, walkable_climb: i32,
 }
 
 // Build contours from compact heightfield
-rc_build_contours :: proc(chf: ^Rc_Compact_Heightfield,
-                         max_error: f32, max_edge_len: i32, cset: ^Rc_Contour_Set,
+build_contours :: proc(chf: ^Compact_Heightfield,
+                         max_error: f32, max_edge_len: i32, cset: ^Contour_Set,
                          build_flags: i32 = -1) -> bool {
 
     w := chf.width
@@ -146,8 +146,8 @@ rc_build_contours :: proc(chf: ^Rc_Compact_Heightfield,
     cset.height = h
     cset.border_size = border_size
     cset.max_error = max_error
-    cset.conts = make([dynamic]Rc_Contour, 0)
-    // defer delete(cset.conts) // Will be freed by rc_free_contour_set
+    cset.conts = make([dynamic]Contour, 0)
+    // defer delete(cset.conts) // Will be freed by free_contour_set
 
     // Create flags array to mark region boundaries
     flags := make([]u8, chf.span_count)
@@ -171,10 +171,10 @@ rc_build_contours :: proc(chf: ^Rc_Compact_Heightfield,
                 // Check all 4 directions for region boundaries
                 for dir in 0..<4 {
                     r: u16 = 0
-                    if rc_get_con(s, dir) != RC_NOT_CONNECTED {
+                    if get_con(s, dir) != RC_NOT_CONNECTED {
                         ax := x + get_dir_offset_x(dir)
                         ay := y + get_dir_offset_y(dir)
-                        ai := chf.cells[ax + ay * w].index + u32(rc_get_con(s, dir))
+                        ai := chf.cells[ax + ay * w].index + u32(get_con(s, dir))
                         r = chf.spans[ai].reg
                     }
 
@@ -261,7 +261,7 @@ rc_build_contours :: proc(chf: ^Rc_Compact_Heightfield,
                     // Only create contour if we have meaningful vertices after simplification
                     if len(simplified) >= 3 { // Need at least 3 vertices for a valid contour
                         // Allocate new contour
-                        append(&cset.conts, Rc_Contour{})
+                        append(&cset.conts, Contour{})
                         cont := &cset.conts[len(cset.conts)-1]
                         cont.area = area_id
                         cont.reg = region_id
@@ -286,7 +286,7 @@ rc_build_contours :: proc(chf: ^Rc_Compact_Heightfield,
 
 // Walk along the boundary of a region to extract contour vertices
 // Returns true if boundary walk completed successfully, false if algorithm cannot proceed
-walk_contour_boundary :: proc(x, y, i: i32, chf: ^Rc_Compact_Heightfield,
+walk_contour_boundary :: proc(x, y, i: i32, chf: ^Compact_Heightfield,
                              flags: []u8, points: ^[dynamic][4]i32) -> bool {
     // Input bounds validation
     if i < 0 || i >= i32(len(flags)) {
@@ -341,13 +341,13 @@ walk_contour_boundary :: proc(x, y, i: i32, chf: ^Rc_Compact_Heightfield,
             // Get region info for the edge
             r: i32 = 0
             s := &chf.spans[curr_i]
-            if rc_get_con(s, int(dir)) != RC_NOT_CONNECTED {
+            if get_con(s, int(dir)) != RC_NOT_CONNECTED {
                 ax := curr_x + i32(get_dir_offset_x(int(dir)))
                 ay := curr_y + i32(get_dir_offset_y(int(dir)))
 
                 // Bounds check for neighbor coordinates
                 if ax >= 0 && ax < chf.width && ay >= 0 && ay < chf.height {
-                    ai := i32(chf.cells[ax + ay * chf.width].index) + i32(rc_get_con(s, int(dir)))
+                    ai := i32(chf.cells[ax + ay * chf.width].index) + i32(get_con(s, int(dir)))
                     if ai >= 0 && ai < i32(len(chf.spans)) {
                         r = i32(chf.spans[ai].reg)
 
@@ -374,11 +374,11 @@ walk_contour_boundary :: proc(x, y, i: i32, chf: ^Rc_Compact_Heightfield,
             ny := curr_y + i32(get_dir_offset_y(int(dir)))
             s := &chf.spans[curr_i]
 
-            if rc_get_con(s, int(dir)) != RC_NOT_CONNECTED {
+            if get_con(s, int(dir)) != RC_NOT_CONNECTED {
                 // Bounds check for neighbor coordinates
                 if nx >= 0 && nx < chf.width && ny >= 0 && ny < chf.height {
                     nc := &chf.cells[nx + ny * chf.width]
-                    ni = i32(nc.index) + i32(rc_get_con(s, int(dir)))
+                    ni = i32(nc.index) + i32(get_con(s, int(dir)))
                 }
             }
 
@@ -407,7 +407,7 @@ walk_contour_boundary :: proc(x, y, i: i32, chf: ^Rc_Compact_Heightfield,
 }
 
 // Get height at corner, considering neighboring spans
-get_corner_height_for_contour :: proc(x, y, i, dir: i32, chf: ^Rc_Compact_Heightfield,
+get_corner_height_for_contour :: proc(x, y, i, dir: i32, chf: ^Compact_Heightfield,
                                      is_border_vertex: ^bool) -> i32 {
     // Input validation
     if i < 0 || i >= i32(len(chf.spans)) {
@@ -429,13 +429,13 @@ get_corner_height_for_contour :: proc(x, y, i, dir: i32, chf: ^Rc_Compact_Height
     }
 
     // Check primary direction
-    if rc_get_con(s, int(dir)) != RC_NOT_CONNECTED {
+    if get_con(s, int(dir)) != RC_NOT_CONNECTED {
         ax := x + i32(get_dir_offset_x(int(dir)))
         ay := y + i32(get_dir_offset_y(int(dir)))
 
         // Bounds check for neighbor coordinates
         if ax >= 0 && ax < chf.width && ay >= 0 && ay < chf.height {
-            ai := i32(chf.cells[ax + ay * chf.width].index) + i32(rc_get_con(s, int(dir)))
+            ai := i32(chf.cells[ax + ay * chf.width].index) + i32(get_con(s, int(dir)))
 
             if ai >= 0 && ai < i32(len(chf.spans)) {
                 as := &chf.spans[ai]
@@ -447,12 +447,12 @@ get_corner_height_for_contour :: proc(x, y, i, dir: i32, chf: ^Rc_Compact_Height
                 }
 
                 // Check diagonal
-                if rc_get_con(as, int(dirp)) != RC_NOT_CONNECTED {
+                if get_con(as, int(dirp)) != RC_NOT_CONNECTED {
                     ax2 := ax + i32(get_dir_offset_x(int(dirp)))
                     ay2 := ay + i32(get_dir_offset_y(int(dirp)))
 
                     if ax2 >= 0 && ax2 < chf.width && ay2 >= 0 && ay2 < chf.height {
-                        ai2 := i32(chf.cells[ax2 + ay2 * chf.width].index) + i32(rc_get_con(as, int(dirp)))
+                        ai2 := i32(chf.cells[ax2 + ay2 * chf.width].index) + i32(get_con(as, int(dirp)))
 
                         if ai2 >= 0 && ai2 < i32(len(chf.spans)) {
                             as2 := &chf.spans[ai2]
@@ -470,13 +470,13 @@ get_corner_height_for_contour :: proc(x, y, i, dir: i32, chf: ^Rc_Compact_Height
     }
 
     // Check perpendicular direction
-    if rc_get_con(s, int(dirp)) != RC_NOT_CONNECTED {
+    if get_con(s, int(dirp)) != RC_NOT_CONNECTED {
         ax := x + i32(get_dir_offset_x(int(dirp)))
         ay := y + i32(get_dir_offset_y(int(dirp)))
 
         // Bounds check for neighbor coordinates
         if ax >= 0 && ax < chf.width && ay >= 0 && ay < chf.height {
-            ai := i32(chf.cells[ax + ay * chf.width].index) + i32(rc_get_con(s, int(dirp)))
+            ai := i32(chf.cells[ax + ay * chf.width].index) + i32(get_con(s, int(dirp)))
 
             if ai >= 0 && ai < i32(len(chf.spans)) {
                 as := &chf.spans[ai]
@@ -488,12 +488,12 @@ get_corner_height_for_contour :: proc(x, y, i, dir: i32, chf: ^Rc_Compact_Height
                 }
 
                 // Check diagonal
-                if rc_get_con(as, int(dir)) != RC_NOT_CONNECTED {
+                if get_con(as, int(dir)) != RC_NOT_CONNECTED {
                     ax2 := ax + i32(get_dir_offset_x(int(dir)))
                     ay2 := ay + i32(get_dir_offset_y(int(dir)))
 
                     if ax2 >= 0 && ax2 < chf.width && ay2 >= 0 && ay2 < chf.height {
-                        ai2 := i32(chf.cells[ax2 + ay2 * chf.width].index) + i32(rc_get_con(as, int(dir)))
+                        ai2 := i32(chf.cells[ax2 + ay2 * chf.width].index) + i32(get_con(as, int(dir)))
 
                         if ai2 >= 0 && ai2 < i32(len(chf.spans)) {
                             as2 := &chf.spans[ai2]
@@ -885,14 +885,14 @@ calculate_contour_area :: proc(verts: [][4]i32) -> i32 {
 }
 
 // Allocate contour set
-rc_alloc_contour_set :: proc() -> ^Rc_Contour_Set {
-    cset := new(Rc_Contour_Set)
-    cset.conts = make([dynamic]Rc_Contour, 0)
+alloc_contour_set :: proc() -> ^Contour_Set {
+    cset := new(Contour_Set)
+    cset.conts = make([dynamic]Contour, 0)
     return cset
 }
 
 // Free contour set
-rc_free_contour_set :: proc(cset: ^Rc_Contour_Set) {
+free_contour_set :: proc(cset: ^Contour_Set) {
     if cset == nil do return
     for i in 0..<len(cset.conts) {
         cont := &cset.conts[i]

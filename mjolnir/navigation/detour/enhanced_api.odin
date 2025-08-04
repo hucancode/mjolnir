@@ -12,9 +12,9 @@ import nav_recast "../recast"
 
 // Enhanced navigation context with detailed error tracking
 Enhanced_Nav_Context :: struct {
-    nav_mesh:         ^Dt_Nav_Mesh,
-    query:            Dt_Nav_Mesh_Query,
-    filter:           Dt_Query_Filter,
+    nav_mesh:         ^Nav_Mesh,
+    query:            Nav_Mesh_Query,
+    filter:           Query_Filter,
     
     // Error tracking
     last_error:       nav_recast.Nav_Error,
@@ -60,8 +60,8 @@ DEFAULT_NAV_CONFIG :: Nav_Config{
 // ========================================
 
 // Initialize enhanced navigation context
-nav_init_enhanced :: proc(ctx: ^Enhanced_Nav_Context, pmesh: ^nav_recast.Rc_Poly_Mesh, 
-                         dmesh: ^nav_recast.Rc_Poly_Mesh_Detail, 
+nav_init_enhanced :: proc(ctx: ^Enhanced_Nav_Context, pmesh: ^nav_recast.Poly_Mesh, 
+                         dmesh: ^nav_recast.Poly_Mesh_Detail, 
                          config: Nav_Config = DEFAULT_NAV_CONFIG) -> nav_recast.Nav_Result(bool) {
     
     // Parameter validation
@@ -84,7 +84,7 @@ nav_init_enhanced :: proc(ctx: ^Enhanced_Nav_Context, pmesh: ^nav_recast.Rc_Poly
     ctx.max_nodes = config.max_nodes
     
     // Create navigation mesh parameters
-    params := Dt_Create_Nav_Mesh_Data_Params{
+    params := Create_Nav_Mesh_Data_Params{
         poly_mesh = pmesh,
         poly_mesh_detail = dmesh,
         off_mesh_con_count = 0,
@@ -98,7 +98,7 @@ nav_init_enhanced :: proc(ctx: ^Enhanced_Nav_Context, pmesh: ^nav_recast.Rc_Poly
     }
     
     // Create navigation mesh data
-    nav_data, data_status := dt_create_nav_mesh_data(&params)
+    nav_data, data_status := create_nav_mesh_data(&params)
     if nav_recast.status_failed(data_status) {
         status_result := nav_recast.nav_from_status(data_status)
         return nav_recast.nav_error_chain(bool, nav_recast.Nav_Error_Category.Algorithm_Failed,
@@ -107,9 +107,9 @@ nav_init_enhanced :: proc(ctx: ^Enhanced_Nav_Context, pmesh: ^nav_recast.Rc_Poly
     defer delete(nav_data)
     
     // Create navigation mesh
-    ctx.nav_mesh = new(Dt_Nav_Mesh)
+    ctx.nav_mesh = new(Nav_Mesh)
     
-    mesh_params := Dt_Nav_Mesh_Params{
+    mesh_params := Nav_Mesh_Params{
         orig = pmesh.bmin,
         tile_width = pmesh.bmax[0] - pmesh.bmin[0],
         tile_height = pmesh.bmax[2] - pmesh.bmin[2],
@@ -117,7 +117,7 @@ nav_init_enhanced :: proc(ctx: ^Enhanced_Nav_Context, pmesh: ^nav_recast.Rc_Poly
         max_polys = 1024,
     }
     
-    init_status := dt_nav_mesh_init(ctx.nav_mesh, &mesh_params)
+    init_status := nav_mesh_init(ctx.nav_mesh, &mesh_params)
     if nav_recast.status_failed(init_status) {
         free(ctx.nav_mesh)
         ctx.nav_mesh = nil
@@ -127,9 +127,9 @@ nav_init_enhanced :: proc(ctx: ^Enhanced_Nav_Context, pmesh: ^nav_recast.Rc_Poly
     }
     
     // Add tile
-    _, add_status := dt_nav_mesh_add_tile(ctx.nav_mesh, nav_data, nav_recast.DT_TILE_FREE_DATA)
+    _, add_status := nav_mesh_add_tile(ctx.nav_mesh, nav_data, nav_recast.DT_TILE_FREE_DATA)
     if nav_recast.status_failed(add_status) {
-        dt_nav_mesh_destroy(ctx.nav_mesh)
+        nav_mesh_destroy(ctx.nav_mesh)
         free(ctx.nav_mesh)
         ctx.nav_mesh = nil
         status_result := nav_recast.nav_from_status(add_status)
@@ -138,9 +138,9 @@ nav_init_enhanced :: proc(ctx: ^Enhanced_Nav_Context, pmesh: ^nav_recast.Rc_Poly
     }
     
     // Initialize query
-    query_status := dt_nav_mesh_query_init(&ctx.query, ctx.nav_mesh, config.max_nodes)
+    query_status := nav_mesh_query_init(&ctx.query, ctx.nav_mesh, config.max_nodes)
     if nav_recast.status_failed(query_status) {
-        dt_nav_mesh_destroy(ctx.nav_mesh)
+        nav_mesh_destroy(ctx.nav_mesh)
         free(ctx.nav_mesh)
         ctx.nav_mesh = nil
         status_result := nav_recast.nav_from_status(query_status)
@@ -149,7 +149,7 @@ nav_init_enhanced :: proc(ctx: ^Enhanced_Nav_Context, pmesh: ^nav_recast.Rc_Poly
     }
     
     // Initialize default filter
-    dt_query_filter_init(&ctx.filter)
+    query_filter_init(&ctx.filter)
     
     log.infof("Enhanced navigation context initialized successfully")
     return nav_recast.nav_success()
@@ -160,8 +160,8 @@ nav_destroy_enhanced :: proc(ctx: ^Enhanced_Nav_Context) {
     if ctx == nil do return
     
     if ctx.nav_mesh != nil {
-        dt_nav_mesh_query_destroy(&ctx.query)
-        dt_nav_mesh_destroy(ctx.nav_mesh)
+        nav_mesh_query_destroy(&ctx.query)
+        nav_mesh_destroy(ctx.nav_mesh)
         free(ctx.nav_mesh)
         ctx.nav_mesh = nil
     }
@@ -236,7 +236,7 @@ nav_find_path_enhanced :: proc(ctx: ^Enhanced_Nav_Context, start_pos: [3]f32, en
     // Find start polygon
     start_ref := nav_recast.Poly_Ref(0)
     start_nearest := [3]f32{}
-    start_status := dt_find_nearest_poly(&ctx.query, start_pos, search_extents, &ctx.filter, &start_ref, &start_nearest)
+    start_status := find_nearest_poly(&ctx.query, start_pos, search_extents, &ctx.filter, &start_ref, &start_nearest)
     
     if nav_recast.status_failed(start_status) {
         return Path_Result{
@@ -253,7 +253,7 @@ nav_find_path_enhanced :: proc(ctx: ^Enhanced_Nav_Context, start_pos: [3]f32, en
     // Find end polygon
     end_ref := nav_recast.Poly_Ref(0)
     end_nearest := [3]f32{}
-    end_status := dt_find_nearest_poly(&ctx.query, end_pos, search_extents, &ctx.filter, &end_ref, &end_nearest)
+    end_status := find_nearest_poly(&ctx.query, end_pos, search_extents, &ctx.filter, &end_ref, &end_nearest)
     
     if nav_recast.status_failed(end_status) {
         return Path_Result{
@@ -283,7 +283,7 @@ nav_find_path_enhanced :: proc(ctx: ^Enhanced_Nav_Context, start_pos: [3]f32, en
     defer delete(path_refs)
     
     path_count := i32(0)
-    path_status := dt_find_path(&ctx.query, start_ref, end_ref, start_nearest, end_nearest,
+    path_status := find_path(&ctx.query, start_ref, end_ref, start_nearest, end_nearest,
                                &ctx.filter, path_refs, &path_count, i32(max_waypoints))
     
     if nav_recast.status_failed(path_status) {
@@ -309,7 +309,7 @@ nav_find_path_enhanced :: proc(ctx: ^Enhanced_Nav_Context, start_pos: [3]f32, en
     }
     
     // Generate straight path
-    straight_path := make([]Dt_Straight_Path_Point, max_waypoints)
+    straight_path := make([]Straight_Path_Point, max_waypoints)
     defer delete(straight_path)
     
     straight_path_flags := make([]u8, max_waypoints)
@@ -319,7 +319,7 @@ nav_find_path_enhanced :: proc(ctx: ^Enhanced_Nav_Context, start_pos: [3]f32, en
     defer delete(straight_path_refs)
     
     straight_path_count := i32(0)
-    straight_status := dt_find_straight_path(&ctx.query, start_nearest, end_nearest,
+    straight_status := find_straight_path(&ctx.query, start_nearest, end_nearest,
                                            path_refs[:path_count], path_count,
                                            straight_path, straight_path_flags, straight_path_refs,
                                            &straight_path_count, i32(max_waypoints), 0)
@@ -395,7 +395,7 @@ nav_is_position_valid_enhanced :: proc(ctx: ^Enhanced_Nav_Context, pos: [3]f32,
     
     poly_ref := nav_recast.Poly_Ref(0)
     nearest_pt := [3]f32{}
-    status := dt_find_nearest_poly(&ctx.query, pos, search_extents, &ctx.filter, &poly_ref, &nearest_pt)
+    status := find_nearest_poly(&ctx.query, pos, search_extents, &ctx.filter, &poly_ref, &nearest_pt)
     
     if nav_recast.status_failed(status) {
         return nav_recast.nav_error_here(bool, nav_recast.Nav_Error_Category.Algorithm_Failed,
@@ -425,7 +425,7 @@ nav_get_distance_to_walkable :: proc(ctx: ^Enhanced_Nav_Context, pos: [3]f32,
     
     poly_ref := nav_recast.Poly_Ref(0)
     nearest_pt := [3]f32{}
-    status := dt_find_nearest_poly(&ctx.query, pos, search_extents, &ctx.filter, &poly_ref, &nearest_pt)
+    status := find_nearest_poly(&ctx.query, pos, search_extents, &ctx.filter, &poly_ref, &nearest_pt)
     
     if nav_recast.status_failed(status) {
         return nav_recast.nav_error_here(f32, nav_recast.Nav_Error_Category.Algorithm_Failed,

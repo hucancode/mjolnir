@@ -2,40 +2,40 @@ package navigation_recast
 
 
 // Represents a span in a heightfield.
-Rc_Span :: struct {
+Span :: struct {
   // Bit field for packed data matching C++ layout
   using data: bit_field u32 {
     smin: u32 | 13, // The lower extent of the span
     smax: u32 | 13, // The upper extent of the span
     area: u32 | 6, // The area id assigned to the span
   },
-  next:       ^Rc_Span, // The next span higher up in column
+  next:       ^Span, // The next span higher up in column
 }
 
 
 // A memory pool used for quick allocation of spans within a heightfield.
-Rc_Span_Pool :: struct {
-  next:  ^Rc_Span_Pool, // The next span pool
-  items: [RC_SPANS_PER_POOL]Rc_Span, // Array of spans in the pool
+Span_Pool :: struct {
+  next:  ^Span_Pool, // The next span pool
+  items: [RC_SPANS_PER_POOL]Span, // Array of spans in the pool
 }
 
 // A dynamic heightfield representing obstructed space.
-Rc_Heightfield :: struct {
+Heightfield :: struct {
   width:       i32, // The width of the heightfield (Along the x-axis in cell units)
   height:      i32, // The height of the heightfield (Along the z-axis in cell units)
   bmin:        [3]f32, // The minimum bounds in world space [(x, y, z)]
   bmax:        [3]f32, // The maximum bounds in world space [(x, y, z)]
   cs:          f32, // The size of each cell (On the xz-plane)
   ch:          f32, // The height of each cell (The minimum increment along the y-axis)
-  spans:       []^Rc_Span, // Heightfield of spans (width*height) - using slice instead of **
+  spans:       []^Span, // Heightfield of spans (width*height) - using slice instead of **
   border_size: i32, // Border size used during generation
   // Memory pool for rcSpan instances
-  pools:       ^Rc_Span_Pool, // Linked list of span pools
-  freelist:    ^Rc_Span, // The next free span
+  pools:       ^Span_Pool, // Linked list of span pools
+  freelist:    ^Span, // The next free span
 }
 
 // Provides information on the content of a cell column in a compact heightfield.
-Rc_Compact_Cell :: bit_field u32 {
+Compact_Cell :: bit_field u32 {
   // In C++: unsigned int index : 24 (24 bits)
   // unsigned int count : 8 (8 bits)
   index: u32 | 24,
@@ -43,7 +43,7 @@ Rc_Compact_Cell :: bit_field u32 {
 }
 
 // Represents a span of unobstructed space within a compact heightfield.
-Rc_Compact_Span :: bit_field u64 {
+Compact_Span :: bit_field u64 {
   y:   u16 | 16, // The lower extent of the span (Measured from the heightfield's base)
   reg: u16 | 16, // The id of the region the span belongs to (Or zero if not in a region)
   con: u32 | 24,
@@ -51,7 +51,7 @@ Rc_Compact_Span :: bit_field u64 {
 }
 
 // A compact, static heightfield representing unobstructed space.
-Rc_Compact_Heightfield :: struct {
+Compact_Heightfield :: struct {
   width:           i32, // The width of the heightfield (Along the x-axis in cell units)
   height:          i32, // The height of the heightfield (Along the z-axis in cell units)
   span_count:      i32, // The number of spans in the heightfield
@@ -64,20 +64,20 @@ Rc_Compact_Heightfield :: struct {
   bmax:            [3]f32, // The maximum bounds in world space [(x, y, z)]
   cs:              f32, // The size of each cell (On the xz-plane)
   ch:              f32, // The height of each cell (The minimum increment along the y-axis)
-  cells:           []Rc_Compact_Cell, // Array of cells [Size: width*height]
-  spans:           []Rc_Compact_Span, // Array of spans [Size: span_count]
+  cells:           []Compact_Cell, // Array of cells [Size: width*height]
+  spans:           []Compact_Span, // Array of spans [Size: span_count]
   dist:            []u16, // Array containing border distance data [Size: span_count]
   areas:           []u8, // Array containing area id data [Size: span_count]
 }
 
 // Allocation helpers
 
-alloc_heightfield :: proc() -> ^Rc_Heightfield {
-  hf := new(Rc_Heightfield)
+alloc_heightfield :: proc() -> ^Heightfield {
+  hf := new(Heightfield)
   return hf
 }
 
-free_heightfield :: proc(hf: ^Rc_Heightfield) {
+free_heightfield :: proc(hf: ^Heightfield) {
   if hf == nil do return
 
   // Free all span pools
@@ -97,12 +97,12 @@ free_heightfield :: proc(hf: ^Rc_Heightfield) {
   free(hf)
 }
 
-alloc_compact_heightfield :: proc() -> ^Rc_Compact_Heightfield {
-  chf := new(Rc_Compact_Heightfield)
+alloc_compact_heightfield :: proc() -> ^Compact_Heightfield {
+  chf := new(Compact_Heightfield)
   return chf
 }
 
-free_compact_heightfield :: proc(chf: ^Rc_Compact_Heightfield) {
+free_compact_heightfield :: proc(chf: ^Compact_Heightfield) {
   if chf == nil do return
 
   // Free all arrays
@@ -117,7 +117,7 @@ free_compact_heightfield :: proc(chf: ^Rc_Compact_Heightfield) {
 
 // Initialize a heightfield with the given dimensions
 init_heightfield :: proc(
-  hf: ^Rc_Heightfield,
+  hf: ^Heightfield,
   width, height: i32,
   bmin, bmax: [3]f32,
   cs, ch: f32,
@@ -131,7 +131,7 @@ init_heightfield :: proc(
 
   // Allocate spans array
   span_count := int(width * height)
-  hf.spans = make([]^Rc_Span, span_count)
+  hf.spans = make([]^Span, span_count)
   if hf.spans == nil {
     return false
   }
@@ -145,12 +145,12 @@ init_heightfield :: proc(
 }
 
 // Allocate a new span from the pool
-alloc_span :: proc(hf: ^Rc_Heightfield) -> ^Rc_Span {
+alloc_span :: proc(hf: ^Heightfield) -> ^Span {
   // If necessary, allocate new page and update the freelist
   if hf.freelist == nil || hf.freelist.next == nil {
     // Create new page
     // Allocate memory for the new pool
-    pool := new(Rc_Span_Pool)
+    pool := new(Span_Pool)
     if pool == nil do return nil
 
     // Add the pool into the list of pools
@@ -179,8 +179,8 @@ alloc_span :: proc(hf: ^Rc_Heightfield) -> ^Rc_Span {
 }
 
 // Create heightfield
-rc_create_heightfield :: proc(
-  hf: ^Rc_Heightfield,
+create_heightfield :: proc(
+  hf: ^Heightfield,
   width, height: i32,
   bmin, bmax: [3]f32,
   cs, ch: f32,
@@ -189,16 +189,16 @@ rc_create_heightfield :: proc(
 }
 
 // Create heightfield from configuration - returns heightfield and success status
-rc_create_heightfield_from_config :: proc(
+create_heightfield_from_config :: proc(
   cfg: ^Config,
 ) -> (
-  hf: ^Rc_Heightfield,
+  hf: ^Heightfield,
   success: bool,
 ) {
-  hf = rc_alloc_heightfield()
+  hf = alloc_heightfield()
   if hf == nil do return nil, false
 
-  success = rc_create_heightfield(
+  success = create_heightfield(
     hf,
     cfg.width,
     cfg.height,
@@ -208,7 +208,7 @@ rc_create_heightfield_from_config :: proc(
     cfg.ch,
   )
   if !success {
-    rc_free_heightfield(hf)
+    free_heightfield(hf)
     return nil, false
   }
 
@@ -216,50 +216,28 @@ rc_create_heightfield_from_config :: proc(
 }
 
 // Build compact heightfield from heightfield - returns compact heightfield and success status
-rc_build_compact_heightfield_from_hf :: proc(
+build_compact_heightfield_from_hf :: proc(
   walkable_height, walkable_climb: i32,
-  hf: ^Rc_Heightfield,
+  hf: ^Heightfield,
 ) -> (
-  chf: ^Rc_Compact_Heightfield,
+  chf: ^Compact_Heightfield,
   success: bool,
 ) {
-  chf = rc_alloc_compact_heightfield()
+  chf = alloc_compact_heightfield()
   if chf == nil do return nil, false
 
   // Need to import the builder module
-  success = rc_build_compact_heightfield(
+  success = build_compact_heightfield(
     walkable_height,
     walkable_climb,
     hf,
     chf,
   )
   if !success {
-    rc_free_compact_heightfield(chf)
+    free_compact_heightfield(chf)
     return nil, false
   }
 
   return chf, true
 }
 
-// Allocator wrappers with standard naming
-rc_alloc_heightfield :: proc() -> ^Rc_Heightfield {
-  return alloc_heightfield()
-}
-
-rc_free_heightfield :: proc(hf: ^Rc_Heightfield) {
-  free_heightfield(hf)
-}
-
-rc_alloc_compact_heightfield :: proc() -> ^Rc_Compact_Heightfield {
-  return alloc_compact_heightfield()
-}
-
-rc_free_compact_heightfield :: proc(chf: ^Rc_Compact_Heightfield) {
-  free_compact_heightfield(chf)
-}
-
-// Connection utilities for compact spans
-get_con :: proc "contextless" (s: Rc_Compact_Span, dir: u8) -> u8 {
-  shift := dir * 6
-  return u8((s.con >> shift) & 0x3f)
-}

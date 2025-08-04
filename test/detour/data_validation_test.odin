@@ -13,12 +13,12 @@ test_struct_size_validation :: proc(t: ^testing.T) {
     // Test that our struct sizes match expected C++ reference sizes
     // This should have already been validated at initialization, but verify explicitly
     
-    header_size := size_of(nav_detour.Dt_Mesh_Header)
-    poly_size := size_of(nav_detour.Dt_Poly)
-    link_size := size_of(nav_detour.Dt_Link)
-    detail_size := size_of(nav_detour.Dt_Poly_Detail)
-    bv_size := size_of(nav_detour.Dt_BV_Node)
-    offmesh_size := size_of(nav_detour.Dt_Off_Mesh_Connection)
+    header_size := size_of(nav_detour.Mesh_Header)
+    poly_size := size_of(nav_detour.Poly)
+    link_size := size_of(nav_detour.Link)
+    detail_size := size_of(nav_detour.Poly_Detail)
+    bv_size := size_of(nav_detour.BV_Node)
+    offmesh_size := size_of(nav_detour.Off_Mesh_Connection)
     
     // These are the expected sizes from the validation module (actual Odin sizes)
     testing.expect_value(t, header_size, 100)
@@ -119,7 +119,7 @@ test_version_feature_compatibility :: proc(t: ^testing.T) {
 }
 
 // Test-specific validation function that doesn't log errors (to avoid test failures from error logs)
-validate_navmesh_header_quiet :: proc(header: ^nav_detour.Dt_Mesh_Header) -> nav_recast.Status {
+validate_navmesh_header_quiet :: proc(header: ^nav_detour.Mesh_Header) -> nav_recast.Status {
     if header == nil {
         return {.Invalid_Param}
     }
@@ -151,7 +151,7 @@ test_header_validation :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
     
     // Create a valid header
-    header := nav_detour.Dt_Mesh_Header{
+    header := nav_detour.Mesh_Header{
         magic = nav_recast.DT_NAVMESH_MAGIC,
         version = nav_recast.DT_NAVMESH_VERSION,
         poly_count = 10,
@@ -215,12 +215,12 @@ test_data_layout_verification :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
     
     // Create minimal valid tile data
-    header_size := size_of(nav_detour.Dt_Mesh_Header)
+    header_size := size_of(nav_detour.Mesh_Header)
     test_data := make([]u8, header_size + 100)  // Extra space for safety
     defer delete(test_data)
     
     // Set up header
-    header := cast(^nav_detour.Dt_Mesh_Header)raw_data(test_data)
+    header := cast(^nav_detour.Mesh_Header)raw_data(test_data)
     header.magic = nav_recast.DT_NAVMESH_MAGIC
     header.version = nav_recast.DT_NAVMESH_VERSION
     header.poly_count = 0
@@ -247,7 +247,7 @@ test_expected_size_calculation :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
     
     // Create header with known counts
-    header := nav_detour.Dt_Mesh_Header{
+    header := nav_detour.Mesh_Header{
         poly_count = 2,
         vert_count = 6,
         max_link_count = 4,
@@ -261,14 +261,14 @@ test_expected_size_calculation :: proc(t: ^testing.T) {
     expected_size := nav_detour.calculate_expected_tile_size(&header)
     
     // Manually calculate expected size
-    manual_size := size_of(nav_detour.Dt_Mesh_Header) +
+    manual_size := size_of(nav_detour.Mesh_Header) +
                    size_of([3]f32) * 6 +                                    // vertices
-                   size_of(nav_detour.Dt_Poly) * 2 +                        // polygons
-                   size_of(nav_detour.Dt_Link) * 4 +                        // links
-                   size_of(nav_detour.Dt_Poly_Detail) * 1 +                 // detail meshes
+                   size_of(nav_detour.Poly) * 2 +                        // polygons
+                   size_of(nav_detour.Link) * 4 +                        // links
+                   size_of(nav_detour.Poly_Detail) * 1 +                 // detail meshes
                    size_of([3]f32) * 3 +                                    // detail vertices
                    4 * 2 +                                                  // detail triangles (4 bytes each)
-                   size_of(nav_detour.Dt_Off_Mesh_Connection) * 1           // off-mesh connections
+                   size_of(nav_detour.Off_Mesh_Connection) * 1           // off-mesh connections
     
     testing.expect_value(t, expected_size, manual_size)
     
@@ -280,12 +280,12 @@ test_integration_validation_flow :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
     
     // Test the full validation flow with a minimal valid tile
-    header_size := size_of(nav_detour.Dt_Mesh_Header)
+    header_size := size_of(nav_detour.Mesh_Header)
     test_data := make([]u8, header_size)
     defer delete(test_data)
     
     // Set up minimal valid header
-    header := cast(^nav_detour.Dt_Mesh_Header)raw_data(test_data)
+    header := cast(^nav_detour.Mesh_Header)raw_data(test_data)
     header.magic = nav_recast.DT_NAVMESH_MAGIC
     header.version = nav_recast.DT_NAVMESH_VERSION
     header.poly_count = 0
@@ -308,7 +308,7 @@ test_integration_validation_flow :: proc(t: ^testing.T) {
     testing.expect(t, validation_result.valid, "Minimal valid tile should pass validation")
     
     // Test header parsing
-    parsed_header, parse_status := nav_detour.dt_parse_mesh_header(test_data)
+    parsed_header, parse_status := nav_detour.parse_mesh_header(test_data)
     testing.expect(t, nav_recast.status_succeeded(parse_status), "Header parsing should succeed")
     testing.expect(t, parsed_header != nil, "Should return valid header pointer")
     

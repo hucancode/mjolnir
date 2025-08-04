@@ -167,8 +167,8 @@ nav_mesh_renderer_deinit :: proc(renderer: ^Nav_Mesh_Renderer) {
 
 // Build vertex data from navigation mesh
 nav_mesh_renderer_build_from_recast :: proc(renderer: ^Nav_Mesh_Renderer, 
-                                           poly_mesh: ^nav_recast.Rc_Poly_Mesh, 
-                                           detail_mesh: ^nav_recast.Rc_Poly_Mesh_Detail) -> nav_recast.Nav_Result(bool) {
+                                           poly_mesh: ^nav_recast.Poly_Mesh, 
+                                           detail_mesh: ^nav_recast.Poly_Mesh_Detail) -> nav_recast.Nav_Result(bool) {
     if !renderer.initialized {
         return nav_recast.nav_error(bool, .Algorithm_Failed, "Renderer not initialized")
     }

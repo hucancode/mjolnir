@@ -10,13 +10,13 @@ import "core:time"
 test_span_pool_allocation :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
     
-    hf := recast.rc_alloc_heightfield()
+    hf := recast.alloc_heightfield()
     testing.expect(t, hf != nil, "Failed to allocate heightfield")
-    defer recast.rc_free_heightfield(hf)
+    defer recast.free_heightfield(hf)
     
     bmin := [3]f32{0, 0, 0}
     bmax := [3]f32{100, 10, 100}
-    ok := recast.rc_create_heightfield(hf, 100, 100, bmin, bmax, 1.0, 0.5)
+    ok := recast.create_heightfield(hf, 100, 100, bmin, bmax, 1.0, 0.5)
     testing.expect(t, ok, "Failed to create heightfield")
     
     // Initially no pools should be allocated
@@ -24,7 +24,7 @@ test_span_pool_allocation :: proc(t: ^testing.T) {
     testing.expect(t, hf.freelist == nil, "Freelist should be nil initially")
     
     // Add a span to trigger pool allocation
-    ok = recast.rc_add_span(hf, 0, 0, 10, 20, recast.RC_WALKABLE_AREA, 1)
+    ok = recast.add_span(hf, 0, 0, 10, 20, recast.RC_WALKABLE_AREA, 1)
     testing.expect(t, ok, "Failed to add span")
     
     // Now we should have one pool
@@ -45,13 +45,13 @@ test_span_pool_allocation :: proc(t: ^testing.T) {
 test_span_pool_growth :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
     
-    hf := recast.rc_alloc_heightfield()
+    hf := recast.alloc_heightfield()
     testing.expect(t, hf != nil, "Failed to allocate heightfield")
-    defer recast.rc_free_heightfield(hf)
+    defer recast.free_heightfield(hf)
     
     bmin := [3]f32{0, 0, 0}
     bmax := [3]f32{100, 10, 100}
-    ok := recast.rc_create_heightfield(hf, 100, 100, bmin, bmax, 1.0, 0.5)
+    ok := recast.create_heightfield(hf, 100, 100, bmin, bmax, 1.0, 0.5)
     testing.expect(t, ok, "Failed to create heightfield")
     
     // Add many spans to force multiple pool allocations
@@ -65,7 +65,7 @@ test_span_pool_growth :: proc(t: ^testing.T) {
         smin := u16(i * 10)
         smax := u16(i * 10 + 5)
         
-        ok = recast.rc_add_span(hf, x, z, smin, smax, recast.RC_WALKABLE_AREA, 1)
+        ok = recast.add_span(hf, x, z, smin, smax, recast.RC_WALKABLE_AREA, 1)
         testing.expect(t, ok, "Failed to add span")
     }
     
@@ -85,13 +85,13 @@ test_span_pool_growth :: proc(t: ^testing.T) {
 test_span_freelist_reuse :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
     
-    hf := recast.rc_alloc_heightfield()
+    hf := recast.alloc_heightfield()
     testing.expect(t, hf != nil, "Failed to allocate heightfield")
-    defer recast.rc_free_heightfield(hf)
+    defer recast.free_heightfield(hf)
     
     bmin := [3]f32{0, 0, 0}
     bmax := [3]f32{10, 10, 10}
-    ok := recast.rc_create_heightfield(hf, 10, 10, bmin, bmax, 1.0, 0.5)
+    ok := recast.create_heightfield(hf, 10, 10, bmin, bmax, 1.0, 0.5)
     testing.expect(t, ok, "Failed to create heightfield")
     
     // Add and remove spans multiple times to test freelist reuse
@@ -99,14 +99,14 @@ test_span_freelist_reuse :: proc(t: ^testing.T) {
         // Add spans at different columns to avoid conflicts
         for i in 0..<10 {
             // Add span at column (i, cycle)
-            ok = recast.rc_add_span(hf, i32(i), i32(cycle % 10), 10, 20, recast.RC_WALKABLE_AREA, 1)
+            ok = recast.add_span(hf, i32(i), i32(cycle % 10), 10, 20, recast.RC_WALKABLE_AREA, 1)
             testing.expect(t, ok, "Failed to add span")
         }
         
         // Add more spans to trigger pool allocation
         for i in 0..<10 {
             // Add another span at same location but different height
-            ok = recast.rc_add_span(hf, i32(i), i32(cycle % 10), 30, 40, recast.RC_WALKABLE_AREA, 1)
+            ok = recast.add_span(hf, i32(i), i32(cycle % 10), 30, 40, recast.RC_WALKABLE_AREA, 1)
             testing.expect(t, ok, "Failed to add second span")
         }
     }
@@ -135,19 +135,19 @@ test_memory_cleanup :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
     
     // Test that memory is properly cleaned up
-    hf := recast.rc_alloc_heightfield()
+    hf := recast.alloc_heightfield()
     testing.expect(t, hf != nil, "Failed to allocate heightfield")
     
     bmin := [3]f32{0, 0, 0}
     bmax := [3]f32{50, 10, 50}
-    ok := recast.rc_create_heightfield(hf, 50, 50, bmin, bmax, 1.0, 0.5)
+    ok := recast.create_heightfield(hf, 50, 50, bmin, bmax, 1.0, 0.5)
     testing.expect(t, ok, "Failed to create heightfield")
     
     // Add many spans to allocate multiple pools
     for i in 0..<1000 {
         x := i32(i % 50)
         z := i32(i / 50)
-        ok = recast.rc_add_span(hf, x, z, u16(i*2), u16(i*2+1), recast.RC_WALKABLE_AREA, 1)
+        ok = recast.add_span(hf, x, z, u16(i*2), u16(i*2+1), recast.RC_WALKABLE_AREA, 1)
         testing.expect(t, ok, "Failed to add span")
     }
     
@@ -161,7 +161,7 @@ test_memory_cleanup :: proc(t: ^testing.T) {
     log.infof("Allocated %d pools before cleanup", pool_count)
     
     // Free the heightfield - should clean up all pools
-    recast.rc_free_heightfield(hf)
+    recast.free_heightfield(hf)
     
     // If we get here without crashing, cleanup worked
     testing.expect(t, true, "Memory cleanup completed successfully")
@@ -171,13 +171,13 @@ test_memory_cleanup :: proc(t: ^testing.T) {
 test_span_allocation_stress :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
     
-    hf := recast.rc_alloc_heightfield()
+    hf := recast.alloc_heightfield()
     testing.expect(t, hf != nil, "Failed to allocate heightfield")
-    defer recast.rc_free_heightfield(hf)
+    defer recast.free_heightfield(hf)
     
     bmin := [3]f32{0, 0, 0}
     bmax := [3]f32{200, 10, 200}
-    ok := recast.rc_create_heightfield(hf, 200, 200, bmin, bmax, 1.0, 0.5)
+    ok := recast.create_heightfield(hf, 200, 200, bmin, bmax, 1.0, 0.5)
     testing.expect(t, ok, "Failed to create heightfield")
     
     // Stress test: Add many overlapping spans that will cause lots of allocations and frees
@@ -188,14 +188,14 @@ test_span_allocation_stress :: proc(t: ^testing.T) {
             for h in 0..<5 {
                 smin := u16(h * 20)
                 smax := u16(h * 20 + 15)
-                ok = recast.rc_add_span(hf, i32(x), i32(z), smin, smax, recast.RC_WALKABLE_AREA, 1)
+                ok = recast.add_span(hf, i32(x), i32(z), smin, smax, recast.RC_WALKABLE_AREA, 1)
                 testing.expect(t, ok, "Failed to add span")
                 total_operations += 1
             }
             
             // Add a large span that overlaps all previous ones (causes merging)
             if x % 10 == 0 && z % 10 == 0 {
-                ok = recast.rc_add_span(hf, i32(x), i32(z), 0, 100, recast.RC_NULL_AREA, 1)
+                ok = recast.add_span(hf, i32(x), i32(z), 0, 100, recast.RC_NULL_AREA, 1)
                 testing.expect(t, ok, "Failed to add merging span")
                 total_operations += 1
             }

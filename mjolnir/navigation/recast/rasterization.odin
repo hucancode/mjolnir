@@ -7,7 +7,7 @@ import "core:math/linalg"
 import "base:runtime"
 
 // Axis enumeration for polygon division
-Rc_Axis :: enum {
+Axis :: enum {
     X = 0,
     Y = 1,
     Z = 2,
@@ -16,12 +16,12 @@ Rc_Axis :: enum {
 
 // Allocates a new span in the heightfield.
 // Uses a memory pool and free list to minimize actual allocations.
-allocate_span :: proc(hf: ^Rc_Heightfield) -> ^Rc_Span {
+allocate_span :: proc(hf: ^Heightfield) -> ^Span {
     return alloc_span(hf)
 }
 
 // Releases the memory used by the span back to the heightfield
-free_span :: proc(hf: ^Rc_Heightfield, span: ^Rc_Span) {
+free_span :: proc(hf: ^Heightfield, span: ^Span) {
     if span == nil {
         return
     }
@@ -37,16 +37,16 @@ free_span :: proc(hf: ^Rc_Heightfield, span: ^Rc_Span) {
 // Span cache for recently accessed columns
 Span_Column_Cache :: struct {
     column_index: i32,
-    first_span: ^Rc_Span,
+    first_span: ^Span,
     span_count: i32,
     last_access: u32,
 }
 
-// Add span cache to heightfield (would need to be added to Rc_Heightfield struct)
+// Add span cache to heightfield (would need to be added to Heightfield struct)
 // For now, we'll optimize the algorithm itself
 
 // Adds a span to the heightfield with optimized merging
-add_span :: proc(hf: ^Rc_Heightfield,
+add_span :: proc(hf: ^Heightfield,
                  x, z: i32, smin, smax: u16, area_id: u8,
                  flag_merge_threshold: i32) -> bool {
     // Input validation with early exit
@@ -90,11 +90,11 @@ add_span :: proc(hf: ^Rc_Heightfield,
     new_span.next = nil
 
     // Track merge state
-    merge_start: ^Rc_Span = nil
-    merge_end: ^Rc_Span = nil
-    insert_after: ^Rc_Span = nil
+    merge_start: ^Span = nil
+    merge_end: ^Span = nil
+    insert_after: ^Span = nil
     
-    previous_span: ^Rc_Span = nil
+    previous_span: ^Span = nil
     current_span := hf.spans[column_index]
     
     // Single pass to find merge range and insertion point
@@ -180,7 +180,7 @@ add_span :: proc(hf: ^Rc_Heightfield,
 }
 
 // Validate span list integrity (debug helper)
-validate_span_list :: proc(first_span: ^Rc_Span, x, z: i32) {
+validate_span_list :: proc(first_span: ^Span, x, z: i32) {
     if first_span == nil do return
 
     // Use Floyd's cycle detection algorithm
@@ -227,19 +227,13 @@ validate_span_list :: proc(first_span: ^Rc_Span, x, z: i32) {
     }
 }
 
-// Public API for adding spans
-rc_add_span :: proc(hf: ^Rc_Heightfield,
-                    x, z: i32, span_min, span_max: u16,
-                    area_id: u8, flag_merge_threshold: i32) -> bool {
-    return add_span(hf, x, z, span_min, span_max, area_id, flag_merge_threshold)
-}
 
 // Divides a convex polygon of max 12 vertices into two convex polygons
 // across a separating axis.
 divide_poly :: proc(in_verts: []f32, in_verts_count: i32,
                    out_verts1: []f32, out_verts1_count: ^i32,
                    out_verts2: []f32, out_verts2_count: ^i32,
-                   axis_offset: f32, axis: Rc_Axis) {
+                   axis_offset: f32, axis: Axis) {
     assert(in_verts_count <= 12)
 
     // How far positive or negative away from the separating axis is each vertex
@@ -303,7 +297,7 @@ divide_poly :: proc(in_verts: []f32, in_verts_count: i32,
 // This code is extremely hot, so much care should be given to maintaining maximum perf here.
 
 rasterize_tri :: proc(v0, v1, v2: [3]f32, area_id: u8,
-                     hf: ^Rc_Heightfield,
+                     hf: ^Heightfield,
                      hf_bb_min, hf_bb_max: [3]f32,
                      cell_size, inverse_cell_size, inverse_cell_height: f32,
                      flag_merge_threshold: i32) -> bool {
@@ -475,8 +469,8 @@ rasterize_tri :: proc(v0, v1, v2: [3]f32, area_id: u8,
 }
 
 // Rasterize a single triangle (public API)
-rc_rasterize_triangle :: proc(v0, v1, v2: [3]f32,
-                             area_id: u8, hf: ^Rc_Heightfield,
+rasterize_triangle :: proc(v0, v1, v2: [3]f32,
+                             area_id: u8, hf: ^Heightfield,
                              flag_merge_threshold: i32) -> bool {
     // Rasterize the single triangle
     inverse_cell_size := 1.0 / hf.cs
@@ -491,9 +485,9 @@ rc_rasterize_triangle :: proc(v0, v1, v2: [3]f32,
 }
 
 // Rasterize triangles with indexed vertices (32-bit indices)
-rc_rasterize_triangles :: proc(verts: []f32, nv: i32,
+rasterize_triangles :: proc(verts: []f32, nv: i32,
                               tris: []i32, tri_area_ids: []u8, num_tris: i32,
-                              hf: ^Rc_Heightfield, flag_merge_threshold: i32) -> bool {
+                              hf: ^Heightfield, flag_merge_threshold: i32) -> bool {
     // Rasterize the triangles
     inverse_cell_size := 1.0 / hf.cs
     inverse_cell_height := 1.0 / hf.ch
@@ -528,7 +522,7 @@ rc_rasterize_triangles :: proc(verts: []f32, nv: i32,
 // Rasterize triangles with indexed vertices (16-bit indices)
 rc_rasterize_triangles_u16 :: proc(verts: []f32, nv: i32,
                                   tris: []u16, tri_area_ids: []u8, num_tris: i32,
-                                  hf: ^Rc_Heightfield, flag_merge_threshold: i32) -> bool {
+                                  hf: ^Heightfield, flag_merge_threshold: i32) -> bool {
     // Removed timer code for simplicity
 
     // Rasterize the triangles
@@ -563,8 +557,8 @@ rc_rasterize_triangles_u16 :: proc(verts: []f32, nv: i32,
 }
 
 // Rasterize triangles without indices (direct vertex data)
-rc_rasterize_triangles_direct :: proc(verts: []f32, tri_area_ids: []u8, num_tris: i32,
-                                     hf: ^Rc_Heightfield, flag_merge_threshold: i32) -> bool {
+rasterize_triangles_direct :: proc(verts: []f32, tri_area_ids: []u8, num_tris: i32,
+                                     hf: ^Heightfield, flag_merge_threshold: i32) -> bool {
     // Removed timer code for simplicity
 
     // Rasterize the triangles
@@ -599,7 +593,7 @@ rc_rasterize_triangles_direct :: proc(verts: []f32, tri_area_ids: []u8, num_tris
 }
 
 // Clear unwalkable triangles (mark steep slopes as non-walkable)
-rc_clear_unwalkable_triangles :: proc(walkable_slope_angle: f32,
+clear_unwalkable_triangles :: proc(walkable_slope_angle: f32,
                                      verts: []f32, nv: i32,
                                      tris: []i32, num_tris: i32,
                                      areas: []u8) {
@@ -621,7 +615,7 @@ rc_clear_unwalkable_triangles :: proc(walkable_slope_angle: f32,
 }
 
 // Mark triangles by their walkable slope
-rc_mark_walkable_triangles :: proc(walkable_slope_angle: f32,
+mark_walkable_triangles :: proc(walkable_slope_angle: f32,
                                   verts: []f32, nv: i32,
                                   tris: []i32, num_tris: i32,
                                   areas: []u8) {
@@ -696,8 +690,8 @@ rc_mark_walkable_triangles_u16 :: proc(walkable_slope_angle: f32,
 }
 
 // Rasterize a box into the heightfield
-rc_rasterize_box :: proc(bmin, bmax: [3]f32,
-                        area_id: u8, hf: ^Rc_Heightfield,
+rasterize_box :: proc(bmin, bmax: [3]f32,
+                        area_id: u8, hf: ^Heightfield,
                         flag_merge_threshold: i32) -> bool {
     // Removed timer code for simplicity
 
@@ -757,9 +751,9 @@ rc_rasterize_box :: proc(bmin, bmax: [3]f32,
 }
 
 // Rasterize a convex volume into the heightfield
-rc_rasterize_convex_volume :: proc(verts: []f32, nverts: i32,
+rasterize_convex_volume :: proc(verts: []f32, nverts: i32,
                                   min_y, max_y: f32,
-                                  area_id: u8, hf: ^Rc_Heightfield,
+                                  area_id: u8, hf: ^Heightfield,
                                   flag_merge_threshold: i32) -> bool {
     // Removed timer code for simplicity
 

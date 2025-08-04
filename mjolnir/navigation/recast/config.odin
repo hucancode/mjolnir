@@ -3,7 +3,7 @@ package navigation_recast
 import "core:math"
 
 // Calculate bounds from vertices
-rc_calc_bounds :: proc(verts: []f32, nverts: i32, bmin, bmax: ^[3]f32) {
+calc_bounds :: proc(verts: []f32, nverts: i32, bmin, bmax: ^[3]f32) {
     if nverts == 0 || len(verts) < 3 {
         bmin^ = {0, 0, 0}
         bmax^ = {0, 0, 0}
@@ -25,13 +25,13 @@ rc_calc_bounds :: proc(verts: []f32, nverts: i32, bmin, bmax: ^[3]f32) {
 }
 
 // Calculate grid size from bounds and cell size
-rc_calc_grid_size :: proc(bmin, bmax: ^[3]f32, cs: f32, w, h: ^i32) {
+calc_grid_size :: proc(bmin, bmax: ^[3]f32, cs: f32, w, h: ^i32) {
     w^ = i32((bmax.x - bmin.x) / cs + 0.5)
     h^ = i32((bmax.z - bmin.z) / cs + 0.5)
 }
 
-// Calculate grid size from bounds and cell size
-calc_grid_size :: proc(cfg: ^Config) -> (width, height: i32) {
+// Calculate grid size from config
+calc_grid_size_from_config :: proc(cfg: ^Config) -> (width, height: i32) {
     width = i32((cfg.bmax.x - cfg.bmin.x) / cfg.cs + 0.5)
     height = i32((cfg.bmax.z - cfg.bmin.z) / cfg.cs + 0.5)
     return
@@ -83,7 +83,7 @@ validate_config :: proc(cfg: ^Config) -> bool {
 }
 
 // Create default configuration
-rc_config_create :: proc() -> Config {
+config_create :: proc() -> Config {
     return Config{
         cs = 0.3,
         ch = 0.2,
@@ -104,7 +104,7 @@ rc_config_create :: proc() -> Config {
 }
 
 // Calculate tile bounds
-rc_calc_tile_bounds :: proc(cfg: ^Config, tx, ty: i32) -> (bmin, bmax: [3]f32) {
+calc_tile_bounds :: proc(cfg: ^Config, tx, ty: i32) -> (bmin, bmax: [3]f32) {
     bmin = cfg.bmin
     bmax = cfg.bmax
 
@@ -125,7 +125,7 @@ get_tile_count :: proc(cfg: ^Config) -> (tw, th: i32) {
         return 1, 1
     }
 
-    gw, gh := calc_grid_size(cfg)
+    gw, gh := calc_grid_size_from_config(cfg)
     tw = (gw + cfg.tile_size - 1) / cfg.tile_size
     th = (gh + cfg.tile_size - 1) / cfg.tile_size
     return
