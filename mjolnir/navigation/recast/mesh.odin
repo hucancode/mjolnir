@@ -733,9 +733,9 @@ copy_poly_mesh :: proc(src: ^Poly_Mesh, dst: ^Poly_Mesh) -> bool {
 }
 
 // Merge two polygon meshes
-merge_poly_meshes :: proc(meshes: []^Poly_Mesh, nmeshes: i32, mesh: ^Poly_Mesh) -> bool {
-    if nmeshes == 0 do return false
-    if nmeshes == 1 {
+merge_poly_meshes :: proc(meshes: []^Poly_Mesh, mesh: ^Poly_Mesh) -> bool {
+    if len(meshes) == 0 do return false
+    if len(meshes) == 1 {
         return copy_poly_mesh(meshes[0], mesh)
     }
 
@@ -744,7 +744,7 @@ merge_poly_meshes :: proc(meshes: []^Poly_Mesh, nmeshes: i32, mesh: ^Poly_Mesh) 
     max_polys := 0
     max_nvp := 0
 
-    for i in 0..<nmeshes {
+    for i in 0..<len(meshes) {
         if meshes[i] == nil do continue
         max_verts += len(meshes[i].verts)
         max_polys += int(meshes[i].npolys)
@@ -778,7 +778,7 @@ merge_poly_meshes :: proc(meshes: []^Poly_Mesh, nmeshes: i32, mesh: ^Poly_Mesh) 
     next_vert := 0
     next_poly := 0
 
-    for i in 0..<nmeshes {
+    for i in 0..<len(meshes) {
         src := meshes[i]
         if src == nil do continue
 

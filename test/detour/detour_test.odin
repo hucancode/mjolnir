@@ -7,7 +7,6 @@ import "core:math/linalg"
 import "core:log"
 import nav_recast "../../mjolnir/navigation/recast"
 import nav_detour "../../mjolnir/navigation/detour"
-import nav "../../mjolnir/navigation"
 
 
 @(test)
@@ -287,9 +286,6 @@ test_detour_node_queue_exact_problem :: proc(t: ^testing.T) {
 test_detour_end_to_end_pathfinding :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
     
-    // Initialize navigation memory system
-    nav.nav_memory_init()
-    defer nav.nav_memory_shutdown()
     
     // Test the complete pipeline: create nav mesh -> find path -> verify priority queue behavior
     nav_mesh := create_test_nav_mesh(t)
@@ -377,9 +373,6 @@ test_detour_end_to_end_pathfinding :: proc(t: ^testing.T) {
 test_detour_spatial_queries :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
     
-    // Initialize navigation memory system
-    nav.nav_memory_init()
-    defer nav.nav_memory_shutdown()
     
     // Create a simple test navigation mesh
     nav_mesh := create_test_nav_mesh(t)
@@ -417,9 +410,6 @@ test_detour_spatial_queries :: proc(t: ^testing.T) {
 test_detour_pathfinding :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
     
-    // Initialize navigation memory system
-    nav.nav_memory_init()
-    defer nav.nav_memory_shutdown()
     
     // Create a simple test navigation mesh
     nav_mesh := create_test_nav_mesh(t)
@@ -467,9 +457,6 @@ test_detour_pathfinding :: proc(t: ^testing.T) {
 test_detour_straight_path :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
     
-    // Initialize navigation memory system
-    nav.nav_memory_init()
-    defer nav.nav_memory_shutdown()
     
     // Create a simple test navigation mesh
     nav_mesh := create_test_nav_mesh(t)
@@ -523,9 +510,6 @@ test_detour_straight_path :: proc(t: ^testing.T) {
 test_detour_raycast :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
     
-    // Initialize navigation memory system
-    nav.nav_memory_init()
-    defer nav.nav_memory_shutdown()
     
     // Create a simple test navigation mesh
     nav_mesh := create_test_nav_mesh(t)
@@ -565,9 +549,6 @@ test_detour_raycast :: proc(t: ^testing.T) {
 test_detour_move_along_surface :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
     
-    // Initialize navigation memory system
-    nav.nav_memory_init()
-    defer nav.nav_memory_shutdown()
     
     // Create a simple test navigation mesh
     nav_mesh := create_test_nav_mesh(t)

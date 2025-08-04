@@ -112,11 +112,8 @@ sample_heightfield_height :: proc(chf: ^Compact_Heightfield, pos: [3]f32) -> f32
 
     // Convert world position to cell coordinates
     f := (pos.xz - chf.bmin.xz) / chf.cs
-    fx := f.x
-    fz := f.y
-
     // Get cell indices
-    cell_idx := [2]i32{i32(math.floor(fx)), i32(math.floor(fz))}
+    cell_idx := [2]i32{i32(math.floor(f.x)), i32(math.floor(f.y))}
     x := cell_idx.x
     z := cell_idx.y
 
@@ -491,10 +488,10 @@ copy_poly_mesh_detail :: proc(src: ^Poly_Mesh_Detail, dst: ^Poly_Mesh_Detail) ->
 }
 
 // Merge multiple detail meshes
-merge_poly_mesh_details :: proc(meshes: []^Poly_Mesh_Detail, nmeshes: i32,
+merge_poly_mesh_details :: proc(meshes: []^Poly_Mesh_Detail,
                                   mesh: ^Poly_Mesh_Detail) -> bool {
-    if nmeshes == 0 do return false
-    if nmeshes == 1 {
+    if len(meshes) == 0 do return false
+    if len(meshes) == 1 {
         return copy_poly_mesh_detail(meshes[0], mesh)
     }
 
@@ -503,11 +500,10 @@ merge_poly_mesh_details :: proc(meshes: []^Poly_Mesh_Detail, nmeshes: i32,
     total_verts := 0
     total_tris := 0
 
-    for i in 0..<nmeshes {
-        if meshes[i] == nil do continue
-        total_meshes += len(meshes[i].meshes)
-        total_verts += len(meshes[i].verts)
-        total_tris += len(meshes[i].tris)
+    for mesh in meshes do if mesh != nil {
+        total_meshes += len(mesh.meshes)
+        total_verts += len(mesh.verts)
+        total_tris += len(mesh.tris)
     }
 
     if total_meshes == 0 do return false
@@ -522,17 +518,13 @@ merge_poly_mesh_details :: proc(meshes: []^Poly_Mesh_Detail, nmeshes: i32,
     vert_offset := 0
     tri_offset := 0
 
-    for i in 0..<nmeshes {
-        src := meshes[i]
-        if src == nil do continue
-
+    for src in meshes do if src != nil {
         // Copy mesh headers (with adjusted offsets)
         for j in 0..<len(src.meshes) {
             mesh.meshes[mesh_offset][0] = src.meshes[j][0] + u32(vert_offset)  // Adjust vertex base
             mesh.meshes[mesh_offset][1] = src.meshes[j][1]                     // Vertex count
             mesh.meshes[mesh_offset][2] = src.meshes[j][2] + u32(tri_offset)   // Adjust triangle base
             mesh.meshes[mesh_offset][3] = src.meshes[j][3]                     // Triangle count
-
             mesh_offset += 1
         }
 
@@ -549,7 +541,6 @@ merge_poly_mesh_details :: proc(meshes: []^Poly_Mesh_Detail, nmeshes: i32,
                 mesh.tris[tri_offset][k] = src.tris[j][k] + u8(vert_offset - len(src.verts))
             }
             mesh.tris[tri_offset][3] = src.tris[j][3]  // Triangle flags
-
             tri_offset += 1
         }
     }
@@ -1003,7 +994,6 @@ triangulate_ear_clipping_robust :: proc(poly: ^Detail_Polygon) -> bool {
 
         // Additional safety check: prevent runaway iterations (more lenient)
         if iterations > remaining * 10 {
-
             return triangulate_remaining_as_fan(poly, indices[:remaining])
         }
 
@@ -1012,9 +1002,7 @@ triangulate_ear_clipping_robust :: proc(poly: ^Detail_Polygon) -> bool {
             curr := i
             prev := (i + remaining - 1) % remaining
             next := (i + 1) % remaining
-
             if !is_ear(poly, indices[:remaining], prev, curr, next) do continue
-
             // Calculate triangle quality
             a := poly.vertices[indices[prev]].pos
             b := poly.vertices[indices[curr]].pos
@@ -1206,9 +1194,7 @@ is_ear_relaxed :: proc(poly: ^Detail_Polygon, indices: []i32, prev, curr, next: 
     if is_triangle_degenerate(a, b, c, MIN_POLYGON_AREA * 0.01) do return false
 
     // Relaxed convexity check - just ensure we have some positive area
-    cross := linalg.cross(b.xz - a.xz, c.xz - b.xz)
-
-    if cross <= 0 do return false  // Still need convexity
+    if linalg.vector_cross2(b.xz - a.xz, c.xz - b.xz) <= 0 do return false  // Still need convexity
 
     // Skip the expensive point-in-triangle test for relaxed mode
     return true
