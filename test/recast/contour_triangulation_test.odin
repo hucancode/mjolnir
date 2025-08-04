@@ -5,6 +5,7 @@ import "core:testing"
 import "core:time"
 import "core:math"
 import "core:fmt"
+import "core:strings"
 import nav_recast "../../mjolnir/navigation/recast"
 
 // Test contour generation with simple heightfield
@@ -455,14 +456,18 @@ test_contour_to_mesh_pipeline :: proc(t: ^testing.T) {
 
         // Count and print vertices
         vert_count := 0
-        verts_str := "    vertices: "
+        verts_str_builder: strings.Builder
+        strings.builder_init(&verts_str_builder)
+        defer strings.builder_destroy(&verts_str_builder)
+        
+        strings.write_string(&verts_str_builder, "    vertices: ")
         for j in 0..<pmesh.nvp {
             if pmesh.polys[poly_idx + int(j)] != nav_recast.RC_MESH_NULL_IDX {
-                verts_str = fmt.aprintf("%s%d ", verts_str, pmesh.polys[poly_idx + int(j)])
+                fmt.sbprintf(&verts_str_builder, "%d ", pmesh.polys[poly_idx + int(j)])
                 vert_count += 1
             }
         }
-        log.infof("%s(count=%d)", verts_str, vert_count)
+        log.infof("%s(count=%d)", strings.to_string(verts_str_builder), vert_count)
 
         // Print area and region
         log.infof("    area=%d, reg=%d", pmesh.areas[i], pmesh.regs[i])

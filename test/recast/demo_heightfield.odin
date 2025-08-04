@@ -120,23 +120,23 @@ export_heightfield_as_obj :: proc(hf: ^recast.Heightfield, filename: string) {
                 wx := origin.x + f32(x) * cell_size
                 wz := origin.z + f32(y) * cell_size
                 
-                os.write_string(file, fmt.aprintf("v %f %f %f\n", wx, bot, wz))
-                os.write_string(file, fmt.aprintf("v %f %f %f\n", wx + cell_size, bot, wz))
-                os.write_string(file, fmt.aprintf("v %f %f %f\n", wx + cell_size, bot, wz + cell_size))
-                os.write_string(file, fmt.aprintf("v %f %f %f\n", wx, bot, wz + cell_size))
+                fmt.fprintf(file, "v %f %f %f\n", wx, bot, wz)
+                fmt.fprintf(file, "v %f %f %f\n", wx + cell_size, bot, wz)
+                fmt.fprintf(file, "v %f %f %f\n", wx + cell_size, bot, wz + cell_size)
+                fmt.fprintf(file, "v %f %f %f\n", wx, bot, wz + cell_size)
                 
-                os.write_string(file, fmt.aprintf("v %f %f %f\n", wx, top, wz))
-                os.write_string(file, fmt.aprintf("v %f %f %f\n", wx + cell_size, top, wz))
-                os.write_string(file, fmt.aprintf("v %f %f %f\n", wx + cell_size, top, wz + cell_size))
-                os.write_string(file, fmt.aprintf("v %f %f %f\n", wx, top, wz + cell_size))
+                fmt.fprintf(file, "v %f %f %f\n", wx, top, wz)
+                fmt.fprintf(file, "v %f %f %f\n", wx + cell_size, top, wz)
+                fmt.fprintf(file, "v %f %f %f\n", wx + cell_size, top, wz + cell_size)
+                fmt.fprintf(file, "v %f %f %f\n", wx, top, wz + cell_size)
                 
                 base := vertex_count * 8 + 1
-                os.write_string(file, fmt.aprintf("f %d %d %d %d\n", base, base+1, base+2, base+3))
-                os.write_string(file, fmt.aprintf("f %d %d %d %d\n", base+7, base+6, base+5, base+4))
-                os.write_string(file, fmt.aprintf("f %d %d %d %d\n", base, base+3, base+7, base+4))
-                os.write_string(file, fmt.aprintf("f %d %d %d %d\n", base+2, base+1, base+5, base+6))
-                os.write_string(file, fmt.aprintf("f %d %d %d %d\n", base+3, base+2, base+6, base+7))
-                os.write_string(file, fmt.aprintf("f %d %d %d %d\n", base+1, base, base+4, base+5))
+                fmt.fprintf(file, "f %d %d %d %d\n", base, base+1, base+2, base+3)
+                fmt.fprintf(file, "f %d %d %d %d\n", base+7, base+6, base+5, base+4)
+                fmt.fprintf(file, "f %d %d %d %d\n", base, base+3, base+7, base+4)
+                fmt.fprintf(file, "f %d %d %d %d\n", base+2, base+1, base+5, base+6)
+                fmt.fprintf(file, "f %d %d %d %d\n", base+3, base+2, base+6, base+7)
+                fmt.fprintf(file, "f %d %d %d %d\n", base+1, base, base+4, base+5)
                 
                 vertex_count += 1
                 span = span.next
@@ -176,15 +176,15 @@ export_compact_heightfield_as_obj :: proc(chf: ^recast.Compact_Heightfield, file
                 wx := origin.x + f32(x) * cell_size
                 wz := origin.z + f32(y) * cell_size
                 
-                os.write_string(file, fmt.aprintf("v %f %f %f\n", wx, bot, wz))
-                os.write_string(file, fmt.aprintf("v %f %f %f\n", wx + cell_size, bot, wz))
-                os.write_string(file, fmt.aprintf("v %f %f %f\n", wx + cell_size, bot, wz + cell_size))
-                os.write_string(file, fmt.aprintf("v %f %f %f\n", wx, bot, wz + cell_size))
+                fmt.fprintf(file, "v %f %f %f\n", wx, bot, wz)
+                fmt.fprintf(file, "v %f %f %f\n", wx + cell_size, bot, wz)
+                fmt.fprintf(file, "v %f %f %f\n", wx + cell_size, bot, wz + cell_size)
+                fmt.fprintf(file, "v %f %f %f\n", wx, bot, wz + cell_size)
                 
-                os.write_string(file, fmt.aprintf("v %f %f %f\n", wx, top, wz))
-                os.write_string(file, fmt.aprintf("v %f %f %f\n", wx + cell_size, top, wz))
-                os.write_string(file, fmt.aprintf("v %f %f %f\n", wx + cell_size, top, wz + cell_size))
-                os.write_string(file, fmt.aprintf("v %f %f %f\n", wx, top, wz + cell_size))
+                fmt.fprintf(file, "v %f %f %f\n", wx, top, wz)
+                fmt.fprintf(file, "v %f %f %f\n", wx + cell_size, top, wz)
+                fmt.fprintf(file, "v %f %f %f\n", wx + cell_size, top, wz + cell_size)
+                fmt.fprintf(file, "v %f %f %f\n", wx, top, wz + cell_size)
                 
                 base := vertex_count * 8 + 1
                 
@@ -195,7 +195,7 @@ export_compact_heightfield_as_obj :: proc(chf: ^recast.Compact_Heightfield, file
                     color_comment = " # Walkable"
                 }
                 
-                os.write_string(file, fmt.aprintf("f %d %d %d %d%s\n", base, base+1, base+2, base+3, color_comment))
+                fmt.fprintf(file, "f %d %d %d %d%s\n", base, base+1, base+2, base+3, color_comment)
                 os.write_string(file, fmt.aprintf("f %d %d %d %d\n", base+7, base+6, base+5, base+4))
                 os.write_string(file, fmt.aprintf("f %d %d %d %d\n", base, base+3, base+7, base+4))
                 os.write_string(file, fmt.aprintf("f %d %d %d %d\n", base+2, base+1, base+5, base+6))

@@ -129,6 +129,7 @@ test_complete_navmesh_generation_simple :: proc(t: ^testing.T) {
     // 3. Validate region building created proper connectivity
     // Each region should have reasonable size for the input geometry
     region_sizes := map[u16]int{}
+    defer delete(region_sizes)
     for i in 0..<chf.span_count {
         if chf.areas[i] != nav_recast.RC_NULL_AREA {
             reg := chf.spans[i].reg
@@ -301,6 +302,7 @@ test_navmesh_with_obstacles :: proc(t: ^testing.T) {
         for reg, heights in region_heights {
             delete(heights)
         }
+        delete(region_heights)
     }
     
     for i in 0..<chf.span_count {
@@ -511,6 +513,7 @@ test_navmesh_area_marking :: proc(t: ^testing.T) {
 
     // Verify areas were marked
     marked_areas := map[u8]int{}
+    defer delete(marked_areas)
     for i in 0..<chf.span_count {
         area := chf.areas[i]
         if area != nav_recast.RC_NULL_AREA {
