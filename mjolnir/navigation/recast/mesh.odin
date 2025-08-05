@@ -15,34 +15,8 @@ uleft :: proc(a, b, c: [3]i16) -> bool {
     return linalg.vector_cross2(b.xz - a.xz, c.xz - a.xz) < 0
 }
 
-// Check if three vertices (by index) form a left turn - for i16 vertex arrays
-uleft_indexed_i16 :: proc(verts: []i16, ia, ib, ic: i32) -> bool {
-    if ia < 0 || ib < 0 || ic < 0 ||
-       ia >= i32(len(verts)/3) || ib >= i32(len(verts)/3) || ic >= i32(len(verts)/3) {
-        return false
-    }
-
-    a := [3]i16{verts[ia*3], verts[ia*3+1], verts[ia*3+2]}
-    b := [3]i16{verts[ib*3], verts[ib*3+1], verts[ib*3+2]}
-    c := [3]i16{verts[ic*3], verts[ic*3+1], verts[ic*3+2]}
-
-    return uleft(a, b, c)
-}
-
-// Check if three vertices (by index) form a left turn - for Mesh_Vertex arrays
-uleft_indexed_mesh :: proc(verts: []Mesh_Vertex, ia, ib, ic: i32) -> bool {
-    if ia < 0 || ib < 0 || ic < 0 || ia >= i32(len(verts)) || ib >= i32(len(verts)) || ic >= i32(len(verts)) {
-        return false
-    }
-
-    a := &verts[ia]
-    b := &verts[ib]
-    c := &verts[ic]
-
-    // Using XZ plane (Y is up)
-    // 2D cross product: (b-a) × (c-a)
-    return i32(b.x - a.x) * i32(c.z - a.z) - i32(c.x - a.x) * i32(b.z - a.z) < 0
-}
+// These indexed versions were removed to eliminate indirection.
+// Callers should extract vertices and call uleft directly.
 
 // Count vertices in a polygon (excluding null indices)
 count_poly_verts :: proc(poly: []i32) -> i32 {
@@ -99,17 +73,31 @@ get_poly_merge_value :: proc(pa, pb: []i32, verts: []Mesh_Vertex, nvp: i32) -> (
     va := pa[(ea+na-1) % na]
     vb := pa[ea]
     vc := pb[(eb+2) % nb]
-    if !uleft_indexed_mesh(verts, va, vb, vc) {
+    // Extract vertices and check directly
+    if va < 0 || vb < 0 || vc < 0 || va >= i32(len(verts)) || vb >= i32(len(verts)) || vc >= i32(len(verts)) {
+        return -1, -1, -1
+    }
+    av1 := [3]i16{i16(verts[va].x), i16(verts[va].y), i16(verts[va].z)}
+    bv1 := [3]i16{i16(verts[vb].x), i16(verts[vb].y), i16(verts[vb].z)}
+    cv1 := [3]i16{i16(verts[vc].x), i16(verts[vc].y), i16(verts[vc].z)}
+    if !uleft(av1, bv1, cv1) {
         return -1, -1, -1
     }
 
     va = pb[(eb+nb-1) % nb]
     vb = pb[eb]
     vc = pa[(ea+2) % na]
-    if !uleft_indexed_mesh(verts, va, vb, vc) {
+    // Extract vertices and check directly
+    if va < 0 || vb < 0 || vc < 0 || va >= i32(len(verts)) || vb >= i32(len(verts)) || vc >= i32(len(verts)) {
         return -1, -1, -1
     }
-    
+    av2 := [3]i16{i16(verts[va].x), i16(verts[va].y), i16(verts[va].z)}
+    bv2 := [3]i16{i16(verts[vb].x), i16(verts[vb].y), i16(verts[vb].z)}
+    cv2 := [3]i16{i16(verts[vc].x), i16(verts[vc].y), i16(verts[vc].z)}
+    if !uleft(av2, bv2, cv2) {
+        return -1, -1, -1
+    }
+
     // For simple cases (triangles), the connection point check is sufficient
     if na == 3 && nb == 3 {
         // Two triangles merging into a quad - connection point check is enough
@@ -118,36 +106,40 @@ get_poly_merge_value :: proc(pa, pb: []i32, verts: []Mesh_Vertex, nvp: i32) -> (
         // For larger polygons, do a full convexity check
         // Create temporary merged polygon to check full convexity
         merged := make([dynamic]i32, 0, na + nb - 2, context.temp_allocator)
-        
+
         // Add vertices from pa (except shared edge)
         for i in 0..<na-1 {
             append(&merged, pa[(ea+1+i) % na])
         }
-        
-        // Add vertices from pb (except shared edge)  
+
+        // Add vertices from pb (except shared edge)
         for i in 0..<nb-1 {
             append(&merged, pb[(eb+1+i) % nb])
         }
-        
+
         // Check convexity of entire merged polygon
         n := len(merged)
         if n < 3 {
             // Degenerate polygon
             return -1, -1, -1
         }
-        
+
         for i in 0..<n {
             v0 := merged[i]
             v1 := merged[(i+1) % n]
             v2 := merged[(i+2) % n]
-            
+
             // Validate indices
             if v0 < 0 || v1 < 0 || v2 < 0 || v0 >= i32(len(verts)) || v1 >= i32(len(verts)) || v2 >= i32(len(verts)) {
                 // Invalid vertex indices
                 return -1, -1, -1
             }
-            
-            if !uleft_indexed_mesh(verts, v0, v1, v2) {
+
+            // Extract vertices and check directly
+            v0v := [3]i16{i16(verts[v0].x), i16(verts[v0].y), i16(verts[v0].z)}
+            v1v := [3]i16{i16(verts[v1].x), i16(verts[v1].y), i16(verts[v1].z)}
+            v2v := [3]i16{i16(verts[v2].x), i16(verts[v2].y), i16(verts[v2].z)}
+            if !uleft(v0v, v1v, v2v) {
                 return -1, -1, -1
             }
         }
@@ -260,138 +252,10 @@ add_vertex :: proc(x, y, z: u16, verts: ^[dynamic]Mesh_Vertex, buckets: []Vertex
     return i
 }
 
-// Calculate 2D area of polygon (used for winding order)
-calc_poly_area_2d :: proc "contextless" (verts: [][3]u16, indices: []int) -> i32 {
-    area: i32 = 0
-    j := len(verts) - 1
-
-    for i in 0..<len(verts) {
-        vi := verts[indices[i]]
-        vj := verts[indices[j]]
-
-        // Get XZ coordinates as 3D vectors and compute 2D cross product (Z component)
-        v1 := [3]i32{i32(vi.x), 0, i32(vi.z)}
-        v2 := [3]i32{i32(vj.x), 0, i32(vj.z)}
-        area += linalg.cross(v1, v2).y
-
-        j = i
-    }
-
-    return (area + 1) / 2
-}
-
-// Check if vertex is convex (for ear clipping)
-is_convex_vertex :: proc "contextless" (verts: [][3]u16, indices: []i32, i: int) -> bool {
-
-    prev := (i + len(verts) - 1) % len(verts)
-    next := (i + 1) % len(verts)
-
-    va := verts[indices[prev]]
-    vb := verts[indices[i]]
-    vc := verts[indices[next]]
-
-    // Get XZ coordinates as 3D vectors
-    v1 := [3]i32{i32(va.x), 0, i32(va.z)}
-    v2 := [3]i32{i32(vb.x), 0, i32(vb.z)}
-    v3 := [3]i32{i32(vc.x), 0, i32(vc.z)}
-
-    // Calculate cross product to determine if angle is convex (Y component gives 2D cross product)
-    ab := v2 - v1
-    bc := v3 - v2
-
-    return linalg.cross(ab, bc).y >= 0
-}
-
-// Check if point is inside triangle (for ear clipping)
-point_in_triangle :: proc "contextless" (verts: [][3]u16, a, b, c, p: int) -> bool {
-    // Get XZ coordinates as vectors
-    va := verts[a].xz
-    vb := verts[b].xz
-    vc := verts[c].xz
-    vp := verts[p].xz
-
-    // Calculate barycentric coordinates
-    v0 := vc - va
-    v1 := vb - va
-    v2 := vp - va
-
-    dot00 := linalg.dot(v0, v0)
-    dot01 := linalg.dot(v0, v1)
-    dot02 := linalg.dot(v0, v2)
-    dot11 := linalg.dot(v1, v1)
-    dot12 := linalg.dot(v1, v2)
-
-    inv_denom := 1.0 / f32(dot00 * dot11 - dot01 * dot01)
-    u := f32(dot11 * dot02 - dot01 * dot12) * inv_denom
-    v := f32(dot00 * dot12 - dot01 * dot02) * inv_denom
-
-    return (u >= 0) && (v >= 0) && (u + v < 1)
-}
 
 // Geometric primitive functions for triangulation
 
-// Calculate twice the signed area of triangle formed by three points
-area2 :: proc "contextless" (verts: [][4]i32, a, b, c: i32) -> i32 {
-    ab := verts[b].xz - verts[a].xz
-    ac := verts[c].xz - verts[a].xz
-    return linalg.vector_cross2(ab, ac)
-}
 
-// Check if point c is to the left of line from a to b
-left :: proc "contextless" (verts: [][4]i32, a, b, c: i32) -> bool {
-    return area2(verts, a, b, c) < 0
-}
-
-// Check if point c is to the left of or on line from a to b
-left_on :: proc "contextless" (verts: [][4]i32, a, b, c: i32) -> bool {
-    return area2(verts, a, b, c) <= 0
-}
-
-// Check if three points are collinear
-collinear :: proc "contextless" (verts: [][4]i32, a, b, c: i32) -> bool {
-    return area2(verts, a, b, c) == 0
-}
-
-// Check if vertices a and b are equal (in XZ plane) - matches C++ vequal behavior
-vequal :: proc "contextless" (verts: [][4]i32, a, b: i32) -> bool {
-    return verts[a].xz == verts[b].xz
-}
-
-// Check if point c is between points a and b on the same line
-between :: proc "contextless" (verts: [][4]i32, a, b, c: i32) -> bool {
-    if !collinear(verts, a, b, c) do return false
-
-    if verts[a][0] != verts[b][0] {
-        return (verts[a][0] <= verts[c][0] && verts[c][0] <= verts[b][0]) ||
-               (verts[a][0] >= verts[c][0] && verts[c][0] >= verts[b][0])
-    } else {
-        return (verts[a][2] <= verts[c][2] && verts[c][2] <= verts[b][2]) ||
-               (verts[a][2] >= verts[c][2] && verts[c][2] >= verts[b][2])
-    }
-}
-
-// Check if segments ab and cd intersect properly (interiors intersect)
-intersect_prop :: proc "contextless" (verts: [][4]i32, a, b, c, d: i32) -> bool {
-    if collinear(verts, a, b, c) || collinear(verts, a, b, d) ||
-       collinear(verts, c, d, a) || collinear(verts, c, d, b) {
-        return false
-    }
-
-    return (left(verts, a, b, c) != left(verts, a, b, d)) &&
-           (left(verts, c, d, a) != left(verts, c, d, b))
-}
-
-// Check if segments ab and cd intersect (including endpoints)
-intersect :: proc "contextless" (verts: [][4]i32, a, b, c, d: i32) -> bool {
-    if intersect_prop(verts, a, b, c, d) {
-        return true
-    } else if between(verts, a, b, c) || between(verts, a, b, d) ||
-              between(verts, c, d, a) || between(verts, c, d, b) {
-        return true
-    } else {
-        return false
-    }
-}
 
 // Check if diagonal from vertex a to vertex c is internal to polygon
 diagonalie :: proc "contextless" (verts: [][4]i32, indices: []u32, n: i32, a, c: i32) -> bool {
@@ -403,12 +267,17 @@ diagonalie :: proc "contextless" (verts: [][4]i32, indices: []u32, n: i32, a, c:
         b2_idx := i32(indices[(i + 1) % n] & 0x0fffffff)
 
         // Skip edges if diagonal endpoints match segment endpoints
-        if vequal(verts, a_idx, b1_idx) || vequal(verts, c_idx, b1_idx) ||
-           vequal(verts, a_idx, b2_idx) || vequal(verts, c_idx, b2_idx) {
+        va := verts[a_idx]
+        vc := verts[c_idx]
+        vb1 := verts[b1_idx]
+        vb2 := verts[b2_idx]
+
+        if va.xz == vb1.xz || vc.xz == vb1.xz ||
+           va.xz == vb2.xz || vc.xz == vb2.xz {
             continue
         }
 
-        if intersect(verts, a_idx, c_idx, b1_idx, b2_idx) {
+        if intersect(va.xz, vc.xz, vb1.xz, vb2.xz) {
             return false
         }
     }
@@ -416,22 +285,23 @@ diagonalie :: proc "contextless" (verts: [][4]i32, indices: []u32, n: i32, a, c:
 }
 
 // Check if diagonal is in cone of vertex a
-in_cone :: proc "contextless" (verts: [][4]i32, indices: []u32, n: i32, a, b: i32) -> bool {
+in_cone_indexed :: proc "contextless" (verts: [][4]i32, indices: []u32, n: i32, a, b: i32) -> bool {
     a0_idx := i32(indices[(a + n - 1) % n] & 0x0fffffff)
     a1_idx := i32(indices[a] & 0x0fffffff)
     a2_idx := i32(indices[(a + 1) % n] & 0x0fffffff)
     b_idx := i32(indices[b] & 0x0fffffff)
 
-    if left_on(verts, a0_idx, a1_idx, a2_idx) {
-        return left(verts, a1_idx, b_idx, a0_idx) && left(verts, b_idx, a1_idx, a2_idx)
-    } else {
-        return !(left_on(verts, a1_idx, b_idx, a2_idx) && left_on(verts, b_idx, a1_idx, a0_idx))
-    }
+    va0 := verts[a0_idx]
+    va1 := verts[a1_idx]
+    va2 := verts[a2_idx]
+    vb := verts[b_idx]
+
+    return in_cone(va0.xz, va1.xz, va2.xz, vb.xz)
 }
 
 // Check if diagonal from a to b is valid
 diagonal :: proc "contextless" (verts: [][4]i32, indices: []u32, n: i32, a, b: i32) -> bool {
-    cone_check := in_cone(verts, indices, n, a, b)
+    cone_check := in_cone_indexed(verts, indices, n, a, b)
     diag_check := diagonalie(verts, indices, n, a, b)
     if !cone_check || !diag_check {
         // log.debugf("    diagonal %d->%d failed: in_cone=%v, diagonalie=%v", a, b, cone_check, diag_check)
@@ -449,12 +319,16 @@ diagonalie_loose :: proc "contextless" (verts: [][4]i32, indices: []u32, n: i32,
         b1_idx := i32(indices[i] & 0x0fffffff)
         b2_idx := i32(indices[(i + 1) % n] & 0x0fffffff)
 
-        if vequal(verts, a_idx, b1_idx) || vequal(verts, c_idx, b1_idx) ||
-           vequal(verts, a_idx, b2_idx) || vequal(verts, c_idx, b2_idx) {
+        va := verts[a_idx]
+        vc := verts[c_idx]
+        vb1 := verts[b1_idx]
+        vb2 := verts[b2_idx]
+
+        if va.xz == vb1.xz || vc.xz == vb1.xz || va.xz == vb2.xz || vc.xz == vb2.xz {
             continue
         }
 
-        if intersect_prop(verts, a_idx, c_idx, b1_idx, b2_idx) {
+        if intersect_prop(va.xz, vc.xz, vb1.xz, vb2.xz) {
             return false
         }
     }
@@ -467,10 +341,15 @@ in_cone_loose :: proc "contextless" (verts: [][4]i32, indices: []u32, n: i32, a,
     a2_idx := i32(indices[(a + 1) % n] & 0x0fffffff)
     b_idx := i32(indices[b] & 0x0fffffff)
 
-    if left_on(verts, a0_idx, a1_idx, a2_idx) {
-        return left_on(verts, a1_idx, b_idx, a0_idx) && left_on(verts, b_idx, a1_idx, a2_idx)
+    va0 := verts[a0_idx]
+    va1 := verts[a1_idx]
+    va2 := verts[a2_idx]
+    vb := verts[b_idx]
+
+    if left_on(va0.xz, va1.xz, va2.xz) {
+        return left_on(va1.xz, vb.xz, va0.xz) && left_on(vb.xz, va1.xz, va2.xz)
     } else {
-        return !(left(verts, a1_idx, b_idx, a2_idx) && left(verts, b_idx, a1_idx, a0_idx))
+        return !(left(va1.xz, vb.xz, va2.xz) && left(vb.xz, va1.xz, va0.xz))
     }
 }
 

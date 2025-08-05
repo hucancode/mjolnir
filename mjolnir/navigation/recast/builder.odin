@@ -7,6 +7,19 @@ import "core:time"
 import "core:math"
 import "core:math/linalg"
 
+// Data structures for hole merging
+Contour_Hole :: struct {
+    contour: ^Contour,
+    minx, minz: i32,
+    leftmost: i32,
+}
+
+Contour_Region :: struct {
+    outline: ^Contour,
+    holes: []Contour_Hole,
+    nholes: i32,
+}
+
 // Build compact heightfield from regular heightfield
 build_compact_heightfield :: proc(walkable_height, walkable_climb: i32,
                                     hf: ^Heightfield, chf: ^Compact_Heightfield) -> bool {
@@ -24,6 +37,7 @@ build_compact_heightfield :: proc(walkable_height, walkable_climb: i32,
     chf.max_regions = 0
     chf.bmin = hf.bmin
     chf.bmax = hf.bmax
+    chf.bmax.y += f32(walkable_height) * hf.ch  // Adjust max height
     chf.cs = hf.cs
     chf.ch = hf.ch
     chf.border_size = hf.border_size
@@ -71,12 +85,12 @@ build_compact_heightfield :: proc(walkable_height, walkable_climb: i32,
             c.count = 0
             for s := hf.spans[x + y * w]; s != nil; s = s.next {
                 if s.area != RC_NULL_AREA {
-                    bottom := s.smax
+                    bottom := i32(s.smax)
                     next := s.next
-                    top := next != nil ? u32(next.smin) : u32(RC_SPAN_MAX_HEIGHT)
+                    top := next != nil ? i32(next.smin) : RC_SPAN_MAX_HEIGHT
                     cs := &chf.spans[idx]
-                    cs.y = u16(math.clamp(int(bottom), 0, 0xffff))
-                    cs.h = u8(math.clamp(int(top - bottom), 0, 0xff))
+                    cs.y = u16(math.clamp(bottom, 0, 0xffff))
+                    cs.h = u8(math.clamp(top - bottom, 0, 0xff))
                     chf.areas[idx] = u8(s.area)
                     idx += 1
                     c.count = c.count + 1
@@ -128,6 +142,167 @@ build_compact_heightfield :: proc(walkable_height, walkable_climb: i32,
     return true
 }
 
+// Find the leftmost vertex of a contour
+find_leftmost_vertex :: proc(contour: ^Contour) -> (minx, minz, leftmost: i32) {
+    minx = contour.verts[0].x
+    minz = contour.verts[0].z
+    leftmost = 0
+
+    for i in 1..<len(contour.verts) {
+        x := contour.verts[i].x
+        z := contour.verts[i].z
+        if x < minx || (x == minx && z < minz) {
+            minx = x
+            minz = z
+            leftmost = i32(i)
+        }
+    }
+
+    return minx, minz, leftmost
+}
+
+// Check if vertex pj is inside cone at vertex i
+in_cone_hole :: proc(i: i32, verts: [][4]i32, pj: [4]i32) -> bool {
+    n := i32(len(verts))
+    pi := verts[i]
+    pi1 := verts[(i + 1) % n]
+    pin1 := verts[(i + n - 1) % n]
+
+    return in_cone(pin1.xz, pi.xz, pi1.xz, pj.xz)
+}
+
+// Check if segment d0-d1 intersects with contour
+intersect_segment_contour :: proc(d0, d1: [4]i32, i: i32, verts: [][4]i32) -> bool {
+    n := len(verts)
+    // For each edge (k,k+1) of P
+    for k in 0..<n {
+        k1 := (k + 1) % n
+        // Skip edges incident to i
+        if i32(k) == i || i32(k1) == i {
+            continue
+        }
+        p0 := verts[k]
+        p1 := verts[k1]
+        if d0.xz == p0.xz || d1.xz == p0.xz || d0.xz == p1.xz || d1.xz == p1.xz {
+            continue
+        }
+
+        if intersect(d0.xz, d1.xz, p0.xz, p1.xz) {
+            return true
+        }
+    }
+    return false
+}
+
+// Merge two contours
+merge_contours :: proc(ca, cb: ^Contour, ia, ib: i32) -> bool {
+    max_verts := len(ca.verts) + len(cb.verts) + 2
+    verts := make([dynamic][4]i32, 0, max_verts)
+    defer delete(verts)
+
+    // Copy contour A
+    for i in 0..=len(ca.verts) {
+        src := ca.verts[(int(ia) + i) % len(ca.verts)]
+        append(&verts, src)
+    }
+
+    // Copy contour B
+    for i in 0..=len(cb.verts) {
+        src := cb.verts[(int(ib) + i) % len(cb.verts)]
+        append(&verts, src)
+    }
+
+    // Replace ca verts with merged result
+    delete(ca.verts)
+    ca.verts = make([][4]i32, len(verts))
+    copy(ca.verts, verts[:])
+
+    // Clear cb
+    delete(cb.verts)
+    cb.verts = nil
+
+    return true
+}
+
+// Compare holes by x coordinate for sorting
+compare_holes :: proc(a, b: Contour_Hole) -> bool {
+    if a.minx == b.minx {
+        return a.minz < b.minz
+    }
+    return a.minx < b.minx
+}
+
+// Compare diagonals by distance
+compare_diag_dist :: proc(a, b: Potential_Diagonal) -> bool {
+    return a.dist < b.dist
+}
+
+// Merge region holes into outline
+merge_region_holes :: proc(reg: ^Contour_Region) {
+    // Sort holes from left to right
+    slice.sort_by(reg.holes[:reg.nholes], compare_holes)
+
+    for i in 0..<reg.nholes {
+        hole := &reg.holes[i]
+
+        index := -1
+        best_vertex := hole.leftmost
+
+        for iter in 0..<len(hole.contour.verts) {
+            // Find potential diagonals from current hole vertex
+            diags := make([dynamic]Potential_Diagonal, 0, len(reg.outline.verts))
+            defer delete(diags)
+
+            corner := hole.contour.verts[best_vertex]
+
+            for j in 0..<len(reg.outline.verts) {
+                if in_cone_hole(i32(j), reg.outline.verts, corner) {
+                    dx := reg.outline.verts[j][0] - corner[0]
+                    dz := reg.outline.verts[j][2] - corner[2]
+                    append(&diags, Potential_Diagonal{vert = i32(j), dist = dx*dx + dz*dz})
+                }
+            }
+
+            // Sort by distance
+            slice.sort_by(diags[:], compare_diag_dist)
+
+            // Find a diagonal that doesn't intersect the outline or other holes
+            for j in 0..<len(diags) {
+                pt := reg.outline.verts[diags[j].vert]
+                intersects := intersect_segment_contour(pt, corner, diags[j].vert, reg.outline.verts)
+
+                // Check remaining holes
+                for k := i; k < reg.nholes && !intersects; k += 1 {
+                    intersects = intersects || intersect_segment_contour(pt, corner, -1, reg.holes[k].contour.verts)
+                }
+
+                if !intersects {
+                    index = int(diags[j].vert)
+                    break
+                }
+            }
+
+            // If found valid diagonal, stop
+            if index != -1 {
+                break
+            }
+
+            // Try next vertex
+            best_vertex = (best_vertex + 1) % i32(len(hole.contour.verts))
+        }
+
+        if index == -1 {
+            log.warnf("Failed to find merge point for hole %d", i)
+            continue
+        }
+
+        if !merge_contours(reg.outline, hole.contour, i32(index), best_vertex) {
+            log.warnf("Failed to merge hole %d", i)
+            continue
+        }
+    }
+}
+
 // Build contours from compact heightfield
 build_contours :: proc(chf: ^Compact_Heightfield,
                          max_error: f32, max_edge_len: i32, cset: ^Contour_Set,
@@ -140,10 +315,18 @@ build_contours :: proc(chf: ^Compact_Heightfield,
     // Initialize contour set
     cset.bmin = chf.bmin
     cset.bmax = chf.bmax
+    if border_size > 0 {
+        // If the heightfield was built with bordersize, remove the offset.
+        pad := f32(border_size) * chf.cs
+        cset.bmin[0] += pad
+        cset.bmin[2] += pad
+        cset.bmax[0] -= pad
+        cset.bmax[2] -= pad
+    }
     cset.cs = chf.cs
     cset.ch = chf.ch
-    cset.width = w
-    cset.height = h
+    cset.width = chf.width - border_size * 2
+    cset.height = chf.height - border_size * 2
     cset.border_size = border_size
     cset.max_error = max_error
     cset.conts = make([dynamic]Contour, 0)
@@ -184,7 +367,7 @@ build_contours :: proc(chf: ^Compact_Heightfield,
                 }
 
                 // Invert flags - we want boundaries where regions differ
-                flags[i] = res ~ 0xf
+                flags[i] = res ~ 0xf  // Inverse, mark non-connected edges
                 if flags[i] != 0 do boundary_spans += 1
             }
         }
@@ -270,6 +453,14 @@ build_contours :: proc(chf: ^Compact_Heightfield,
                         cont.verts = make([][4]i32, len(simplified))
                         copy(cont.verts, simplified[:])
 
+                        // Adjust vertices for border size
+                        if border_size > 0 {
+                            for j in 0..<len(cont.verts) {
+                                cont.verts[j][0] -= border_size
+                                cont.verts[j][2] -= border_size
+                            }
+                        }
+
                         contours_created += 1
                         total_verts_processed += len(verts)
 
@@ -280,6 +471,88 @@ build_contours :: proc(chf: ^Compact_Heightfield,
         }
     }
 
+    // Merge holes if needed
+    if len(cset.conts) > 0 {
+        // Calculate winding of all polygons
+        winding := make([]i8, len(cset.conts))
+        defer delete(winding)
+
+        nholes := 0
+        for i in 0..<len(cset.conts) {
+            cont := &cset.conts[i]
+            // If the contour is wound backwards, it is a hole
+            area := calculate_contour_area(cont.verts)
+            winding[i] = area < 0 ? -1 : 1
+            if winding[i] < 0 {
+                nholes += 1
+            }
+        }
+
+        if nholes > 0 {
+            // Collect outline and hole contours per region
+            nregions := chf.max_regions + 1
+            regions := make([]Contour_Region, nregions)
+            defer delete(regions)
+
+            holes := make([]Contour_Hole, len(cset.conts))
+            defer delete(holes)
+
+            // Assign contours to regions
+            for i in 0..<len(cset.conts) {
+                cont := &cset.conts[i]
+                // Positively wound contours are outlines, negative holes
+                if winding[i] > 0 {
+                    if regions[cont.reg].outline != nil {
+                        log.errorf("Multiple outlines for region %d", cont.reg)
+                    }
+                    regions[cont.reg].outline = cont
+                } else {
+                    regions[cont.reg].nholes += 1
+                }
+            }
+
+            // Allocate hole arrays for each region
+            hole_index := 0
+            for i in 0..<nregions {
+                if regions[i].nholes > 0 {
+                    regions[i].holes = holes[hole_index:hole_index + int(regions[i].nholes)]
+                    hole_index += int(regions[i].nholes)
+                    regions[i].nholes = 0 // Reset to use as index
+                }
+            }
+
+            // Fill hole data
+            for i in 0..<len(cset.conts) {
+                cont := &cset.conts[i]
+                reg := &regions[cont.reg]
+                if winding[i] < 0 {
+                    // Find leftmost vertex
+                    minx, minz, leftmost := find_leftmost_vertex(cont)
+                    hole := &reg.holes[reg.nholes]
+                    hole.contour = cont
+                    hole.minx = minx
+                    hole.minz = minz
+                    hole.leftmost = leftmost
+                    reg.nholes += 1
+                }
+            }
+
+            // Merge holes into outlines
+            for i in 0..<nregions {
+                reg := &regions[i]
+                if reg.nholes == 0 do continue
+
+                if reg.outline != nil {
+                    merge_region_holes(reg)
+                } else {
+                    // The region does not have an outline.
+                    // This can happen if the contour becomes self-overlapping because of
+                    // too aggressive simplification settings.
+                    log.errorf("Bad outline for region %d, contour simplification is likely too aggressive.", i)
+                }
+            }
+        }
+    }
 
     return true
 }
@@ -809,7 +1082,6 @@ remove_degenerate_contour_segments :: proc(simplified: ^[dynamic][4]i32) {
         // Check if vertices are equal on xz-plane
         if simplified[i][0] == simplified[ni][0] && simplified[i][2] == simplified[ni][2] {
             // Degenerate segment, remove vertex ni
-            // Remove the duplicate vertex
             ordered_remove(simplified, ni)
             npts -= 1
             // Don't increment i, check the same position again
@@ -830,14 +1102,14 @@ remove_vertex_at :: proc(simplified: ^[dynamic]i32, index: int) {
 
     // Remove 4 consecutive elements (x, y, z, flags)
     start := index * 4
-    end := start + 4
-    if end > len(simplified) do end = len(simplified)
 
-    // Remove the range by shifting elements
-    for i in start..<len(simplified) - (end - start) {
-        simplified[i] = simplified[i + (end - start)]
+    // Shift all elements after the removed vertex
+    for i := start; i < len(simplified) - 4; i += 1 {
+        simplified[i] = simplified[i + 4]
     }
-    resize(simplified, len(simplified) - (end - start))
+
+    // Resize to remove the last 4 elements
+    resize(simplified, len(simplified) - 4)
 }
 
 // Validate vertex data integrity
