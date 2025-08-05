@@ -7,6 +7,10 @@ import "core:container/priority_queue"
 import "core:slice"
 import nav_recast "../recast"
 
+// Heuristic scale factor for A* pathfinding
+// Slightly higher than 1.0 to make the heuristic more aggressive
+H_SCALE :: 0.999
+
 // A* pathfinding node (full data)
 Node :: struct {
     pos:       [3]f32,             // Node position
@@ -232,7 +236,7 @@ find_path :: proc(query: ^Nav_Mesh_Query,
 
     start_node.pos = start_pos
     start_node.cost = 0
-    start_node.total = linalg.distance(start_pos, end_pos)
+    start_node.total = linalg.distance(start_pos, end_pos) * H_SCALE
     start_node.id = start_ref
     start_node.flags = {.Open}
     start_node.parent_id = nav_recast.INVALID_POLY_REF
@@ -315,7 +319,7 @@ find_path :: proc(query: ^Nav_Mesh_Query,
                         neighbor_node.parent_id = current.id
                         neighbor_node.cost = cost
                         neighbor_node.pos = neighbor_pos
-                        neighbor_node.total = neighbor_node.cost + linalg.distance(neighbor_pos, end_pos)
+                        neighbor_node.total = neighbor_node.cost + linalg.distance(neighbor_pos, end_pos) * H_SCALE
 
                         // Always add the updated node to the queue
                         // The priority queue will handle ordering correctly
@@ -408,6 +412,13 @@ get_link_poly_ref :: proc(tile: ^Mesh_Tile, link: u32) -> nav_recast.Poly_Ref {
         return nav_recast.INVALID_POLY_REF
     }
     return tile.links[link].ref
+}
+
+get_link_edge :: proc(tile: ^Mesh_Tile, link: u32) -> u8 {
+    if link == nav_recast.DT_NULL_LINK || int(link) >= len(tile.links) {
+        return 0xff
+    }
+    return tile.links[link].edge
 }
 
 get_edge_mid_point :: proc(tile_a: ^Mesh_Tile, poly_a: ^Poly, edge: int,

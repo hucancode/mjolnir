@@ -3,6 +3,8 @@ package navigation_recast
 
 import "core:slice"
 import "core:log"
+import geometry "../../geometry"
+
 import "core:mem"
 import "core:math"
 import "core:math/linalg"
@@ -332,7 +334,7 @@ diagonalie_loose :: proc "contextless" (verts: [][4]i32, indices: []u32, n: i32,
             continue
         }
 
-        if intersect_prop(va.xz, vc.xz, vb1.xz, vb2.xz) {
+        if geometry.intersect_prop(va.xz, vc.xz, vb1.xz, vb2.xz) {
             return false
         }
     }
@@ -350,10 +352,10 @@ in_cone_loose :: proc "contextless" (verts: [][4]i32, indices: []u32, n: i32, a,
     va2 := verts[a2_idx]
     vb := verts[b_idx]
 
-    if left_on(va0.xz, va1.xz, va2.xz) {
-        return left_on(va1.xz, vb.xz, va0.xz) && left_on(vb.xz, va1.xz, va2.xz)
+    if geometry.left_on(va0.xz, va1.xz, va2.xz) {
+        return geometry.left_on(va1.xz, vb.xz, va0.xz) && geometry.left_on(vb.xz, va1.xz, va2.xz)
     } else {
-        return !(left(va1.xz, vb.xz, va2.xz) && left(vb.xz, va1.xz, va0.xz))
+        return !(geometry.left(va1.xz, vb.xz, va2.xz) && geometry.left(vb.xz, va1.xz, va0.xz))
     }
 }
 

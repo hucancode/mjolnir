@@ -138,13 +138,13 @@ sphere_sphere_intersection :: proc(s1: Sphere, s2: Sphere) -> bool {
 }
 
 sphere_triangle_intersection :: proc(sphere: Sphere, tri: Triangle) -> bool {
-  closest := closest_point_on_triangle(sphere.center, tri)
+  closest := closest_point_on_triangle_struct(sphere.center, tri)
   d := linalg.length(sphere.center - closest)
   return d <= sphere.radius
 }
 
 @(private)
-closest_point_on_triangle :: proc(p: [3]f32, tri: Triangle) -> [3]f32 {
+closest_point_on_triangle_struct :: proc(p: [3]f32, tri: Triangle) -> [3]f32 {
   ab := tri.v1 - tri.v0
   ac := tri.v2 - tri.v0
   ap := p - tri.v0

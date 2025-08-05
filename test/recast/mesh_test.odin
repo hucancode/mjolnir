@@ -4,6 +4,7 @@ import "core:testing"
 import "core:log"
 import "core:time"
 import nav_recast "../../mjolnir/navigation/recast"
+import geometry "../../mjolnir/geometry"
 
 @(test)
 test_mesh_vertex_hash :: proc(t: ^testing.T) {
@@ -178,30 +179,30 @@ test_geometric_primitives :: proc(t: ^testing.T) {
     verts[3] = {5, 0, 5, 0}      // D: Center
 
     // Test area2 function
-    area_abc := nav_recast.area2(verts[0].xz, verts[1].xz, verts[2].xz)
+    area_abc := geometry.area2(verts[0].xz, verts[1].xz, verts[2].xz)
     testing.expect(t, area_abc > 0, "Counter-clockwise triangle should have positive area")
 
-    area_acb := nav_recast.area2(verts[0].xz, verts[2].xz, verts[1].xz)
+    area_acb := geometry.area2(verts[0].xz, verts[2].xz, verts[1].xz)
     testing.expect(t, area_acb < 0, "Clockwise triangle should have negative area")
     testing.expect(t, area_abc == -area_acb, "Areas should be opposite")
 
     // Test left/right functions
     // In the XZ plane: A=(0,0), B=(10,0), C=(0,10)
     // C is to the RIGHT of line AB (positive area2), so left() should return false
-    testing.expect(t, !nav_recast.left(verts[0].xz, verts[1].xz, verts[2].xz), "C should be right of AB (positive Z)")
+    testing.expect(t, !geometry.left(verts[0].xz, verts[1].xz, verts[2].xz), "C should be right of AB (positive Z)")
     // B is to the LEFT of line AC (negative area2), so left() should return true
-    testing.expect(t, nav_recast.left(verts[0].xz, verts[2].xz, verts[1].xz), "B should be left of AC")
+    testing.expect(t, geometry.left(verts[0].xz, verts[2].xz, verts[1].xz), "B should be left of AC")
 
     // Test collinear function
     // Add a point on the line AB
     verts[3] = {5, 0, 0, 0}  // D: On line AB
     // Collinear means area2 is 0
-    testing.expect(t, nav_recast.area2(verts[0].xz, verts[1].xz, verts[3].xz) == 0, "Points A, B, D should be collinear")
-    testing.expect(t, nav_recast.area2(verts[0].xz, verts[1].xz, verts[2].xz) != 0, "Points A, B, C should not be collinear")
+    testing.expect(t, geometry.area2(verts[0].xz, verts[1].xz, verts[3].xz) == 0, "Points A, B, D should be collinear")
+    testing.expect(t, geometry.area2(verts[0].xz, verts[1].xz, verts[2].xz) != 0, "Points A, B, C should not be collinear")
 
     // Test between function
-    testing.expect(t, nav_recast.between(verts[0].xz, verts[1].xz, verts[3].xz), "D should be between A and B")
-    testing.expect(t, !nav_recast.between(verts[0].xz, verts[2].xz, verts[3].xz), "D should not be between A and C")
+    testing.expect(t, geometry.between(verts[0].xz, verts[1].xz, verts[3].xz), "D should be between A and B")
+    testing.expect(t, !geometry.between(verts[0].xz, verts[2].xz, verts[3].xz), "D should not be between A and C")
 }
 
 @(test)

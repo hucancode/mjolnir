@@ -3,6 +3,11 @@ package navigation_recast
 
 import "core:slice"
 import "core:log"
+import geometry "../../geometry"
+
+// Import commonly used functions
+in_cone :: geometry.in_cone
+intersect :: geometry.intersect
 import "core:time"
 import "core:math"
 import "core:math/linalg"

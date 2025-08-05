@@ -4,6 +4,7 @@ import "core:math"
 import "core:math/linalg"
 import "core:log"
 import nav_recast "../recast"
+import geometry "../../geometry"
 
 // Find straight path using funnel algorithm for path smoothing
 find_straight_path :: proc(query: ^Nav_Mesh_Query,
@@ -137,8 +138,8 @@ find_straight_path :: proc(query: ^Nav_Mesh_Query,
             }
             
             // Right vertex
-            perp_right := nav_recast.vec2f_perp(portal_apex, portal_right, right)
-            perp_left := nav_recast.vec2f_perp(portal_apex, portal_left, right)
+            perp_right := geometry.vec2f_perp(portal_apex, portal_right, right)
+            perp_left := geometry.vec2f_perp(portal_apex, portal_left, right)
             // log.infof("  Right vertex check: apex=%v, portal_right=%v, right=%v, perp_right=%f, perp_left=%f", 
             //           portal_apex, portal_right, right, perp_right, perp_left)
             
@@ -191,8 +192,8 @@ find_straight_path :: proc(query: ^Nav_Mesh_Query,
             }
 
             // Left vertex
-            perp_left2 := nav_recast.vec2f_perp(portal_apex, portal_left, left)
-            perp_right2 := nav_recast.vec2f_perp(portal_apex, portal_right, left)
+            perp_left2 := geometry.vec2f_perp(portal_apex, portal_left, left)
+            perp_right2 := geometry.vec2f_perp(portal_apex, portal_right, left)
             // log.infof("  Left vertex check: apex=%v, portal_left=%v, left=%v, perp_left=%f, perp_right=%f", 
             //           portal_apex, portal_left, left, perp_left2, perp_right2)
             
@@ -493,7 +494,7 @@ point_in_polygon :: proc(query: ^Nav_Mesh_Query, ref: nav_recast.Poly_Ref, pos: 
         verts[i] = tile.verts[poly.verts[i]]
     }
 
-    return nav_recast.point_in_polygon_2d(pos, verts)
+    return geometry.point_in_polygon_2d(pos, verts)
 }
 
 find_neighbor_across_edge :: proc(query: ^Nav_Mesh_Query, ref: nav_recast.Poly_Ref,

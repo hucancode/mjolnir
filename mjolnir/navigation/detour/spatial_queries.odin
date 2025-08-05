@@ -5,6 +5,7 @@ import "core:math/linalg"
 import "core:slice"
 import "core:log"
 import nav_recast "../recast"
+import geometry "../../geometry"
 
 // Find nearest polygon to given position
 find_nearest_poly :: proc(query: ^Nav_Mesh_Query, center: [3]f32, half_extents: [3]f32,
@@ -370,8 +371,8 @@ query_polygons_in_tile_bv :: proc(nav_mesh: ^Nav_Mesh, tile: ^Mesh_Tile, qmin: [
 
     // Convert query bounds to quantized space
     factor := tile.header.bv_quant_factor
-    iqmin := nav_recast.quantize_float(qmin - tile.header.bmin, factor)
-    iqmax := nav_recast.quantize_float(qmax - tile.header.bmin, factor)
+    iqmin := geometry.quantize_float(qmin - tile.header.bmin, factor)
+    iqmax := geometry.quantize_float(qmax - tile.header.bmin, factor)
     log.infof("    BV tree: qmin=%v qmax=%v, tile.bmin=%v, bmax=%v, factor=%v", qmin, qmax, tile.header.bmin, tile.header.bmax, factor)
     log.infof("    BV tree: iqmin=%v iqmax=%v", iqmin, iqmax)
     
@@ -410,7 +411,7 @@ query_polygons_in_tile_bv :: proc(nav_mesh: ^Nav_Mesh, tile: ^Mesh_Tile, qmin: [
         node_min := [3]i32{i32(node.bmin[0]), i32(node.bmin[1]), i32(node.bmin[2])}
         node_max := [3]i32{i32(node.bmax[0]), i32(node.bmax[1]), i32(node.bmax[2])}
 
-        overlap := nav_recast.overlap_quantized_bounds(iqmin, iqmax, node_min, node_max)
+        overlap := geometry.overlap_quantized_bounds(iqmin, iqmax, node_min, node_max)
         if node_index < 10 {
             log.infof("      BV node %d: bounds %v-%v, overlap=%t, leaf=%t", 
                       node_index, node_min, node_max, overlap, node.i >= 0)
@@ -464,7 +465,7 @@ closest_point_on_polygon :: proc(tile: ^Mesh_Tile, poly: ^Poly, pos: [3]f32) -> 
         verts[i] = tile.verts[poly.verts[i]]
     }
 
-    inside := nav_recast.point_in_polygon_2d(pos, verts)
+    inside := geometry.point_in_polygon_2d(pos, verts)
 
     if inside {
         return pos, true
@@ -500,4 +501,270 @@ dt_intersect_ray_segment_2d :: proc(ray_start: [3]f32, ray_dir: [3]f32, seg_a: [
     }
 
     return 0, false
+}
+
+// Get height of polygon at given position using detail mesh
+get_poly_height :: proc(query: ^Nav_Mesh_Query, ref: nav_recast.Poly_Ref, pos: [3]f32) -> (height: f32, status: nav_recast.Status) {
+    if !is_valid_poly_ref(query.nav_mesh, ref) {
+        return 0, {.Invalid_Param}
+    }
+
+    tile, poly, poly_status := get_tile_and_poly_by_ref(query.nav_mesh, ref)
+    if nav_recast.status_failed(poly_status) {
+        return 0, poly_status
+    }
+
+    // If no detail mesh, use polygon vertices for height calculation
+    if tile.detail_meshes == nil || len(tile.detail_meshes) == 0 {
+        // Calculate average height of polygon vertices
+        avg_height := f32(0)
+        for i in 0..<int(poly.vert_count) {
+            avg_height += tile.verts[poly.verts[i]].y
+        }
+        return avg_height / f32(poly.vert_count), {.Success}
+    }
+
+    // Get detail mesh for this polygon
+    poly_index := u32(ref) & u32(tile.header.poly_count - 1)
+    if poly_index >= u32(len(tile.detail_meshes)) {
+        return 0, {.Invalid_Param}
+    }
+
+    detail := &tile.detail_meshes[poly_index]
+    
+    // Find which detail triangle contains the position
+    for i in 0..<int(detail.tri_count) {
+        tri_idx := detail.tri_base + u32(i)
+        if tri_idx >= u32(len(tile.detail_tris)) {
+            continue
+        }
+
+        tri := &tile.detail_tris[tri_idx]
+        
+        // Get vertices of detail triangle
+        verts: [3][3]f32
+        for j in 0..<3 {
+            if tri[j] < poly.vert_count {
+                // Use polygon vertex
+                verts[j] = tile.verts[poly.verts[tri[j]]]
+            } else {
+                // Use detail vertex
+                detail_vert_idx := detail.vert_base + u32(tri[j] - poly.vert_count)
+                if detail_vert_idx < u32(len(tile.detail_verts)) {
+                    verts[j] = tile.detail_verts[detail_vert_idx]
+                }
+            }
+        }
+
+        // Check if point is inside triangle (2D test in XZ plane)
+        if geometry.point_in_triangle_2d(pos, verts[0], verts[1], verts[2]) {
+            // Calculate barycentric coordinates and interpolate height
+            bary := geometry.barycentric_2d(pos, verts[0], verts[1], verts[2])
+            height = verts[0].y * bary[0] + verts[1].y * bary[1] + verts[2].y * bary[2]
+            return height, {.Success}
+        }
+    }
+
+    // Fallback: use polygon center height
+    center := calc_poly_center(tile, poly)
+    return center.y, {.Success}
+}
+
+// Find distance from position to nearest wall
+find_distance_to_wall :: proc(query: ^Nav_Mesh_Query, start_ref: nav_recast.Poly_Ref, center_pos: [3]f32, 
+                               max_radius: f32, filter: ^Query_Filter) -> (hit_dist: f32, hit_pos: [3]f32, hit_normal: [3]f32, status: nav_recast.Status) {
+    
+    if !is_valid_poly_ref(query.nav_mesh, start_ref) {
+        return 0, {}, {}, {.Invalid_Param}
+    }
+
+    hit_dist = max_radius
+    hit_normal = {0, 0, 0}
+    
+    // Use visited flags to avoid cycles
+    visited := make(map[nav_recast.Poly_Ref]bool, context.temp_allocator)
+    visited[start_ref] = true
+    
+    // Stack for traversal
+    stack := make([]nav_recast.Poly_Ref, 256, context.temp_allocator)
+    stack_size := 1
+    stack[0] = start_ref
+    
+    for stack_size > 0 {
+        stack_size -= 1
+        cur_ref := stack[stack_size]
+        
+        tile, poly, poly_status := get_tile_and_poly_by_ref(query.nav_mesh, cur_ref)
+        if nav_recast.status_failed(poly_status) {
+            continue
+        }
+        
+        // Check all edges of current polygon
+        for i in 0..<int(poly.vert_count) {
+            va := tile.verts[poly.verts[i]]
+            vb := tile.verts[poly.verts[(i+1) % int(poly.vert_count)]]
+            
+            // Check if this edge is a wall (no neighbor)
+            is_wall := true
+            link := get_first_link(tile, i32(cur_ref & 0xffff))
+            
+            for link != nav_recast.DT_NULL_LINK {
+                if get_link_edge(tile, link) == u8(i) {
+                    neighbor_ref := get_link_poly_ref(tile, link)
+                    if query_filter_pass_filter(filter, neighbor_ref, nil, nil) {
+                        is_wall = false
+                        
+                        // Add neighbor to stack if not visited
+                        if _, exists := visited[neighbor_ref]; !exists && stack_size < 255 {
+                            visited[neighbor_ref] = true
+                            stack[stack_size] = neighbor_ref
+                            stack_size += 1
+                        }
+                        break
+                    }
+                }
+                link = get_next_link(tile, link)
+            }
+            
+            if is_wall {
+                // Calculate distance to edge
+                closest := geometry.closest_point_on_segment_2d(center_pos, va, vb)
+                dist := linalg.length(center_pos - closest)
+                
+                if dist < hit_dist {
+                    hit_dist = dist
+                    hit_pos = closest
+                    
+                    // Calculate normal (perpendicular to edge)
+                    edge := vb - va
+                    hit_normal = {edge.z, 0, -edge.x}
+                    hit_normal = linalg.normalize(hit_normal)
+                }
+            }
+        }
+        
+        // Early exit if we've searched far enough
+        center := calc_poly_center(tile, poly)
+        if linalg.length(center - center_pos) > max_radius {
+            break
+        }
+    }
+    
+    return hit_dist, hit_pos, hit_normal, {.Success}
+}
+
+// Find local neighborhood of polygons
+find_local_neighbourhood :: proc(query: ^Nav_Mesh_Query, start_ref: nav_recast.Poly_Ref, center_pos: [3]f32,
+                                  radius: f32, filter: ^Query_Filter, result_ref: []nav_recast.Poly_Ref, 
+                                  result_parent: []nav_recast.Poly_Ref, max_result: i32) -> (result_count: i32, status: nav_recast.Status) {
+    
+    if !is_valid_poly_ref(query.nav_mesh, start_ref) || max_result <= 0 {
+        return 0, {.Invalid_Param}
+    }
+    
+    result_count = 0
+    
+    // Use a simple flood fill within radius
+    visited := make(map[nav_recast.Poly_Ref]bool, context.temp_allocator)
+    
+    // Queue for BFS
+    queue := make([]struct{ref: nav_recast.Poly_Ref, parent: nav_recast.Poly_Ref}, 256, context.temp_allocator)
+    queue_head, queue_tail := 0, 1
+    queue[0] = {start_ref, nav_recast.INVALID_POLY_REF}
+    
+    visited[start_ref] = true
+    
+    for queue_head < queue_tail && result_count < max_result {
+        cur := queue[queue_head]
+        queue_head += 1
+        
+        tile, poly, poly_status := get_tile_and_poly_by_ref(query.nav_mesh, cur.ref)
+        if nav_recast.status_failed(poly_status) {
+            continue
+        }
+        
+        // Check if polygon center is within radius
+        center := calc_poly_center(tile, poly)
+        if linalg.length(center - center_pos) > radius {
+            continue
+        }
+        
+        // Add to results
+        result_ref[result_count] = cur.ref
+        result_parent[result_count] = cur.parent
+        result_count += 1
+        
+        // Check all neighbors
+        for i in 0..<int(poly.vert_count) {
+            link := get_first_link(tile, i32(cur.ref & 0xffff))
+            
+            for link != nav_recast.DT_NULL_LINK {
+                if get_link_edge(tile, link) == u8(i) {
+                    neighbor_ref := get_link_poly_ref(tile, link)
+                    
+                    if _, exists := visited[neighbor_ref]; !exists {
+                        neighbor_tile, neighbor_poly, neighbor_status := get_tile_and_poly_by_ref(query.nav_mesh, neighbor_ref)
+                        if nav_recast.status_succeeded(neighbor_status) &&
+                           query_filter_pass_filter(filter, neighbor_ref, neighbor_tile, neighbor_poly) {
+                            
+                            visited[neighbor_ref] = true
+                            
+                            if queue_tail < 256 {
+                                queue[queue_tail] = {neighbor_ref, cur.ref}
+                                queue_tail += 1
+                            }
+                        }
+                    }
+                    break
+                }
+                link = get_next_link(tile, link)
+            }
+        }
+    }
+    
+    return result_count, {.Success}
+}
+
+// Check if polygon is in closed list during pathfinding
+is_in_closed_list :: proc(query: ^Nav_Mesh_Query, ref: nav_recast.Poly_Ref) -> bool {
+    if query == nil {
+        return false
+    }
+    
+    node := node_pool_get_node(&query.node_pool, ref)
+    if node == nil {
+        return false
+    }
+    
+    return .Closed in node.flags
+}
+
+// Find closest point on polygon boundary
+closest_point_on_poly_boundary :: proc(tile: ^Mesh_Tile, poly: ^Poly, pos: [3]f32) -> ([3]f32, bool) {
+    closest := pos
+    closest_dist_sqr := f32(math.F32_MAX)
+    
+    // Check all edges
+    for i in 0..<int(poly.vert_count) {
+        va := tile.verts[poly.verts[i]]
+        vb := tile.verts[poly.verts[(i+1) % int(poly.vert_count)]]
+        
+        // Find closest point on edge
+        edge_pt := geometry.closest_point_on_segment_2d(pos, va, vb)
+        dist_sqr := linalg.length2(pos - edge_pt)
+        
+        if dist_sqr < closest_dist_sqr {
+            closest_dist_sqr = dist_sqr
+            closest = edge_pt
+        }
+    }
+    
+    // Check if original point was inside
+    verts := make([][3]f32, poly.vert_count, context.temp_allocator)
+    for i in 0..<int(poly.vert_count) {
+        verts[i] = tile.verts[poly.verts[i]]
+    }
+    inside := geometry.point_in_polygon_2d(pos, verts)
+    
+    return closest, inside
 }

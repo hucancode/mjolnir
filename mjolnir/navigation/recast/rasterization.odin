@@ -3,6 +3,7 @@ package navigation_recast
 import "core:log"
 import "core:math"
 import "core:fmt"
+import geometry "../../geometry"
 import "core:math/linalg"
 import "base:runtime"
 
@@ -282,7 +283,7 @@ rasterize_tri :: proc(v0, v1, v2: [3]f32, area_id: u8,
     }
 
     // If the triangle does not touch the bounding box of the heightfield, skip the triangle
-    if !overlap_bounds(tri_bb_min, tri_bb_max, hf_bb_min, hf_bb_max) {
+    if !geometry.overlap_bounds(tri_bb_min, tri_bb_max, hf_bb_min, hf_bb_max) {
         return true
     }
 
@@ -538,7 +539,7 @@ clear_unwalkable_triangles :: proc(walkable_slope_angle: f32,
         v1 := [3]f32{verts[tri[1]*3+0], verts[tri[1]*3+1], verts[tri[1]*3+2]}
         v2 := [3]f32{verts[tri[2]*3+0], verts[tri[2]*3+1], verts[tri[2]*3+2]}
 
-        norm = calc_tri_normal(v0, v1, v2)
+        norm = geometry.calc_tri_normal(v0, v1, v2)
         // Check if the face is NOT walkable (steep slope)
         if norm.y <= walkable_thr {
             areas[i] = RC_NULL_AREA
@@ -560,22 +561,12 @@ mark_walkable_triangles :: proc(walkable_slope_angle: f32,
         v1 := [3]f32{verts[tri[1]*3+0], verts[tri[1]*3+1], verts[tri[1]*3+2]}
         v2 := [3]f32{verts[tri[2]*3+0], verts[tri[2]*3+1], verts[tri[2]*3+2]}
 
-        norm = calc_tri_normal(v0, v1, v2)
+        norm = geometry.calc_tri_normal(v0, v1, v2)
         // Check if the face is walkable
         if norm.y > walkable_thr {
             areas[i] = RC_WALKABLE_AREA
         }
     }
-}
-
-// Calculate triangle normal
-@(private)
-calc_tri_normal :: proc(v0, v1, v2: [3]f32) -> (norm: [3]f32) {
-    e0 := v1 - v0
-    e1 := v2 - v0
-    norm = linalg.cross(e0, e1)
-    norm = linalg.normalize(norm)
-    return
 }
 
 // Clear unwalkable triangles with 16-bit indices
@@ -592,7 +583,7 @@ rc_clear_unwalkable_triangles_u16 :: proc(walkable_slope_angle: f32,
         v1 := [3]f32{verts[tri[1]*3+0], verts[tri[1]*3+1], verts[tri[1]*3+2]}
         v2 := [3]f32{verts[tri[2]*3+0], verts[tri[2]*3+1], verts[tri[2]*3+2]}
 
-        norm = calc_tri_normal(v0, v1, v2)
+        norm = geometry.calc_tri_normal(v0, v1, v2)
         // Check if the face is NOT walkable (steep slope)
         if norm.y <= walkable_thr {
             areas[i] = RC_NULL_AREA
@@ -614,7 +605,7 @@ rc_mark_walkable_triangles_u16 :: proc(walkable_slope_angle: f32,
         v1 := [3]f32{verts[tri[1]*3+0], verts[tri[1]*3+1], verts[tri[1]*3+2]}
         v2 := [3]f32{verts[tri[2]*3+0], verts[tri[2]*3+1], verts[tri[2]*3+2]}
 
-        norm = calc_tri_normal(v0, v1, v2)
+        norm = geometry.calc_tri_normal(v0, v1, v2)
         // Check if the face is walkable
         if norm.y > walkable_thr {
             areas[i] = RC_WALKABLE_AREA

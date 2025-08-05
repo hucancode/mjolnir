@@ -3,6 +3,10 @@ package navigation_recast
 import "core:slice"
 import "core:log"
 import "core:math"
+import geometry "../../geometry"
+
+// Import commonly used constants
+EPSILON :: geometry.EPSILON
 
 // Erode walkable area by radius
 erode_walkable_area :: proc(radius: i32, chf: ^Compact_Heightfield) -> bool {
