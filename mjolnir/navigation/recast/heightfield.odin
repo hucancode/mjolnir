@@ -43,11 +43,13 @@ Compact_Cell :: bit_field u32 {
 }
 
 // Represents a span of unobstructed space within a compact heightfield.
-Compact_Span :: bit_field u64 {
-  y:   u16 | 16, // The lower extent of the span (Measured from the heightfield's base)
-  reg: u16 | 16, // The id of the region the span belongs to (Or zero if not in a region)
-  con: u32 | 24,
-  h:   u8  | 8,
+Compact_Span :: struct {
+  y:   u16, // The lower extent of the span (Measured from the heightfield's base)
+  reg: u16, // The id of the region the span belongs to (Or zero if not in a region)
+  using data: bit_field u32 {
+    con: u32 | 24, // Packed neighbor connection data
+    h:   u8  | 8,  // The height of the span (Measured from y)
+  },
 }
 
 // A compact, static heightfield representing unobstructed space.
@@ -145,7 +147,7 @@ init_heightfield :: proc(
 }
 
 // Allocate a new span from the pool
-alloc_span :: proc(hf: ^Heightfield) -> ^Span {
+allocate_span :: proc(hf: ^Heightfield) -> ^Span {
   // If necessary, allocate new page and update the freelist
   if hf.freelist == nil || hf.freelist.next == nil {
     // Create new page
@@ -156,12 +158,12 @@ alloc_span :: proc(hf: ^Heightfield) -> ^Span {
     // Add the pool into the list of pools
     pool.next = hf.pools
     hf.pools = pool
-    
+
     // Add new spans to the free list
     freelist := hf.freelist
     head := &pool.items[0]
     it := &pool.items[RC_SPANS_PER_POOL - 1]
-    
+
     // Link all items in reverse order
     for i := RC_SPANS_PER_POOL - 1; i >= 0; i -= 1 {
       pool.items[i].next = freelist
@@ -177,6 +179,29 @@ alloc_span :: proc(hf: ^Heightfield) -> ^Span {
   new_span.next = nil
   return new_span
 }
+
+// Releases the memory used by the span back to the heightfield
+free_span :: proc(hf: ^Heightfield, span: ^Span) {
+    if span == nil {
+        return
+    }
+    // Clear span data before adding to freelist
+    span.smin = 0
+    span.smax = 0
+    span.area = 0
+    // Add the span to the front of the free list
+    span.next = hf.freelist
+    hf.freelist = span
+}
+
+// Span cache for recently accessed columns
+Span_Column_Cache :: struct {
+    column_index: i32,
+    first_span: ^Span,
+    span_count: i32,
+    last_access: u32,
+}
+
 
 // Create heightfield
 create_heightfield :: proc(
@@ -240,4 +265,3 @@ build_compact_heightfield_from_hf :: proc(
 
   return chf, true
 }
-

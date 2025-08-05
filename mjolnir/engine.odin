@@ -1784,7 +1784,7 @@ render :: proc(self: ^Engine) -> vk.Result {
     &self.warehouse,
     self.frame_index,
   )
-  
+
   // Navigation mesh pass (render inside transparent pass)
   navmesh_renderer_render(
     &self.navmesh,
@@ -2001,14 +2001,6 @@ process_pending_deletions :: proc(engine: ^Engine) {
     }
   }
   clear(&engine.pending_node_deletions)
-}
-
-// Safe scene functions that copy dynamic arrays
-safe_get_node_children :: proc(engine: ^Engine, handle: Handle) -> []Handle {
-  node := resource.get(engine.scene.nodes, handle)
-  children_copy := make([]Handle, len(node.children), context.temp_allocator)
-  copy(children_copy, node.children[:])
-  return children_copy
 }
 
 // Swap transform buffers for all nodes (call at end of update)

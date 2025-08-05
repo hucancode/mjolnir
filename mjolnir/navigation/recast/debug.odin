@@ -5,6 +5,7 @@ import "core:fmt"
 import "core:os"
 import "core:strings"
 import "core:strconv"
+import "core:slice"
 
 // Debug mesh export utilities for Recast navigation data
 
@@ -58,19 +59,12 @@ dump_poly_mesh_to_obj :: proc(pmesh: ^Poly_Mesh, filepath: string) -> bool {
     // Write faces
     for i in 0..<pmesh.npolys {
         pi := int(i) * int(pmesh.nvp) * 2
-
         // Count vertices in this polygon
-        nverts := 0
-        for j in 0..<pmesh.nvp {
-            if pmesh.polys[pi + int(j)] != RC_MESH_NULL_IDX {
-                nverts += 1
-            } else {
-                break
-            }
+        nverts, found := slice.linear_search(pmesh.polys[pi:pi + int(pmesh.nvp)], RC_MESH_NULL_IDX)
+        if !found {
+            nverts = int(pmesh.nvp)
         }
-
         if nverts < 3 do continue
-
         // Write face (OBJ uses 1-based indexing)
         os.write_string(file, "f")
         for j in 0..<nverts {

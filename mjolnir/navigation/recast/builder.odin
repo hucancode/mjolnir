@@ -195,32 +195,30 @@ intersect_segment_contour :: proc(d0, d1: [4]i32, i: i32, verts: [][4]i32) -> bo
 }
 
 // Merge two contours
-merge_contours :: proc(ca, cb: ^Contour, ia, ib: i32) -> bool {
-    max_verts := len(ca.verts) + len(cb.verts) + 2
-    verts := make([dynamic][4]i32, 0, max_verts)
+merge_contours :: proc(ca, cb: ^Contour, ia, ib: int) -> bool {
+    na := len(ca.verts)
+    nb := len(cb.verts)
+    verts := make([][4]i32, na + nb + 2)
     defer delete(verts)
-
-    // Copy contour A
-    for i in 0..=len(ca.verts) {
-        src := ca.verts[(int(ia) + i) % len(ca.verts)]
-        append(&verts, src)
-    }
-
-    // Copy contour B
-    for i in 0..=len(cb.verts) {
-        src := cb.verts[(int(ib) + i) % len(cb.verts)]
-        append(&verts, src)
-    }
-
-    // Replace ca verts with merged result
+    // Copy vertices from contour A starting at ia
+    n := 0
+    // First part: from ia to end
+    copy(verts[n:], ca.verts[ia:])
+    n += na - ia
+    // Second part: from start to ia (wrapping around)
+    copy(verts[n:], ca.verts[:ia+1])
+    n += ia + 1
+    // Copy vertices from contour B starting at ib
+    // First part: from ib to end
+    copy(verts[n:], cb.verts[ib:])
+    n += nb - ib
+    // Second part: from start to ib (wrapping around)
+    copy(verts[n:], cb.verts[:ib+1])
+    n += ib + 1
     delete(ca.verts)
-    ca.verts = make([][4]i32, len(verts))
-    copy(ca.verts, verts[:])
-
-    // Clear cb
+    ca.verts = slice.clone(verts[:n])
     delete(cb.verts)
     cb.verts = nil
-
     return true
 }
 
@@ -246,7 +244,7 @@ merge_region_holes :: proc(reg: ^Contour_Region) {
         hole := &reg.holes[i]
 
         index := -1
-        best_vertex := hole.leftmost
+        best_vertex := int(hole.leftmost)
 
         for iter in 0..<len(hole.contour.verts) {
             // Find potential diagonals from current hole vertex
@@ -288,7 +286,7 @@ merge_region_holes :: proc(reg: ^Contour_Region) {
             }
 
             // Try next vertex
-            best_vertex = (best_vertex + 1) % i32(len(hole.contour.verts))
+            best_vertex = (best_vertex + 1) % len(hole.contour.verts)
         }
 
         if index == -1 {
@@ -296,7 +294,7 @@ merge_region_holes :: proc(reg: ^Contour_Region) {
             continue
         }
 
-        if !merge_contours(reg.outline, hole.contour, i32(index), best_vertex) {
+        if !merge_contours(reg.outline, hole.contour, index, best_vertex) {
             log.warnf("Failed to merge hole %d", i)
             continue
         }

@@ -197,25 +197,25 @@ calculate_triangle_quality :: proc "contextless" (a, b, c: [3]f32) -> f32 {
 calculate_polygon_min_extent :: proc(poly: ^Detail_Polygon) -> f32 {
     nverts := len(poly.vertices)
     if nverts < 3 do return 0.0
-    
+
     min_dist := f32(1e30)
-    
+
     for i in 0..<nverts {
         ni := (i + 1) % nverts
         p1 := poly.vertices[i].pos
         p2 := poly.vertices[ni].pos
-        
+
         max_edge_dist := f32(0.0)
         for j in 0..<nverts {
             if j == i || j == ni do continue
-            
+
             // Distance from point to line segment (2D)
             d := distance_to_edge(poly.vertices[j].pos, p1, p2)
             max_edge_dist = max(max_edge_dist, d)
         }
         min_dist = min(min_dist, max_edge_dist)
     }
-    
+
     return math.sqrt(min_dist)
 }
 
@@ -254,7 +254,7 @@ validate_triangle :: proc "contextless" (a, b, c: [3]f32) -> bool {
 
     // Check angle at vertex A
     dot_a := linalg.dot(ab.xz, ac.xz)
-    angle_a := math.acos(math.clamp(dot_a, -1.0, 1.0)) * 180.0 / RC_PI
+    angle_a := math.acos(math.clamp(dot_a, -1.0, 1.0)) * 180.0 / math.PI
 
     if angle_a < MIN_ANGLE_DEGREES || angle_a > MAX_ANGLE_DEGREES do return false
 
@@ -400,13 +400,9 @@ is_border_vertex :: proc(pmesh: ^Poly_Mesh, vert_idx: int) -> bool {
         pi := int(i) * int(pmesh.nvp) * 2
 
         // Check each edge of this polygon
-        nverts := 0
-        for j in 0..<pmesh.nvp {
-            if pmesh.polys[pi + int(j)] != RC_MESH_NULL_IDX {
-                nverts += 1
-            } else {
-                break
-            }
+        nverts, found := slice.linear_search(pmesh.polys[pi:pi + int(pmesh.nvp)], RC_MESH_NULL_IDX)
+        if !found {
+            nverts = int(pmesh.nvp)
         }
 
         for j in 0..<nverts {
@@ -660,7 +656,7 @@ triangulate_delaunay :: proc(poly: ^Detail_Polygon) -> bool {
         a := poly.vertices[0].pos
         b := poly.vertices[1].pos
         c := poly.vertices[2].pos
-        
+
         // Check triangle orientation - must be counter-clockwise
         area := triangle_area_2d_detail(a, b, c)
         if area > MIN_POLYGON_AREA {
@@ -677,7 +673,7 @@ triangulate_delaunay :: proc(poly: ^Detail_Polygon) -> bool {
     // C++ logic: check if polygon is small enough to skip interior sampling
     min_extent := calculate_polygon_min_extent(poly)
     sample_threshold := poly.sample_dist * 2.0
-    
+
     // For small polygons, use simple hull triangulation only (C++ path)
     if min_extent < sample_threshold {
         success := triangulate_hull_based(poly)
@@ -688,25 +684,84 @@ triangulate_delaunay :: proc(poly: ^Detail_Polygon) -> bool {
         return triangulate_simple_fan(poly)
     }
 
-    // For larger polygons, try hull triangulation first
-    // C++ always calls triangulateHull before interior sampling
+    // For larger polygons with interior samples, use Delaunay triangulation
+    // Prepare vertex array
+    verts := make([][3]f32, len(poly.vertices))
+    defer delete(verts)
+
+    for i in 0..<len(poly.vertices) {
+        verts[i] = poly.vertices[i].pos
+    }
+
+    // Create hull indices (outer polygon vertices)
+    hull := make([dynamic]i32, 0, nverts)
+    defer delete(hull)
+
+    // Find vertices that form the outer boundary
+    for i in 0..<nverts {
+        if poly.vertices[i].flag & RC_BORDER_VERTEX != 0 {
+            append(&hull, i32(i))
+        }
+    }
+
+    // If no border vertices marked, use all original polygon vertices as hull
+    if len(hull) == 0 {
+        for i in 0..<nverts {
+            append(&hull, i32(i))
+        }
+    }
+
+    // Perform Delaunay triangulation
+    tris, valid := delaunay_hull(verts, hull[:])
+    defer delete(tris)
+
+    if valid {
+        // Convert triangle indices to Detail_Triangle structures
+        for tri in tris {
+            t0, t1, t2 := tri[0], tri[1], tri[2]
+
+            if t0 >= 0 && t0 < i32(len(verts)) &&
+               t1 >= 0 && t1 < i32(len(verts)) &&
+               t2 >= 0 && t2 < i32(len(verts)) {
+
+                a := verts[t0]
+                b := verts[t1]
+                c := verts[t2]
+
+                area := triangle_area_2d_detail(a, b, c)
+                if abs(area) > MIN_POLYGON_AREA {
+                    triangle := Detail_Triangle{
+                        v = {t0, t1, t2},
+                        quality = calculate_triangle_quality(a, b, c),
+                        area = abs(area),
+                    }
+                    append(&poly.triangles, triangle)
+                }
+            }
+        }
+
+        if len(poly.triangles) > 0 {
+            return true
+        }
+    }
+
+    // Delaunay failed, try hull triangulation
+    clear(&poly.triangles)
     success := triangulate_hull_based(poly)
-    
-    // If hull triangulation succeeds and produces reasonable results, use it
-    expected_triangles := nverts - 2
-    if success && len(poly.triangles) >= expected_triangles {
+
+    if success && len(poly.triangles) > 0 {
         return true
     }
 
-    // Hull triangulation failed or incomplete, try ear clipping
-    clear(&poly.triangles) // Clear partial results
+    // Hull failed, try ear clipping
+    clear(&poly.triangles)
     success = triangulate_ear_clipping_robust(poly)
-    
-    if success && len(poly.triangles) >= expected_triangles {
+
+    if success && len(poly.triangles) > 0 {
         return true
     }
 
-    // Ear clipping failed, use simple fan as last resort
+    // All methods failed, use simple fan as last resort
     clear(&poly.triangles) // Clear partial results
     return triangulate_simple_fan(poly)
 }
@@ -727,11 +782,11 @@ triangulate_hull_based :: proc(poly: ^Detail_Polygon) -> bool {
         a := poly.vertices[0].pos
         b := poly.vertices[1].pos
         c := poly.vertices[2].pos
-        
+
         // Check triangle orientation and area
         area := triangle_area_2d_detail(a, b, c)
         abs_area := abs(area)
-        
+
         // For hull triangulation, we accept triangles regardless of winding
         // The C++ version uses absolute area for hull triangulation
         if abs_area > MIN_POLYGON_AREA {
@@ -748,14 +803,14 @@ triangulate_hull_based :: proc(poly: ^Detail_Polygon) -> bool {
     // Create hull indices - for detail mesh, vertices are in hull order
     hull := make([dynamic]i32, nverts)
     defer delete(hull)
-    
+
     for i in 0..<nverts {
         append(&hull, i32(i))
     }
-    
+
     nhull := nverts
     nin := nverts  // All vertices are original polygon vertices for now
-    
+
     // Validate polygon vertices are in correct order (counter-clockwise)
     // Calculate signed area to check winding
     signed_area := f32(0.0)
@@ -770,7 +825,7 @@ triangulate_hull_based :: proc(poly: ^Detail_Polygon) -> bool {
             hull[i], hull[nverts-1-i] = hull[nverts-1-i], hull[i]
         }
     }
-    
+
     // Find starting ear with shortest perimeter (C++ logic)
     start := 0
     left := 1
@@ -780,14 +835,14 @@ triangulate_hull_based :: proc(poly: ^Detail_Polygon) -> bool {
     for i in 0..<nhull {
         // C++ logic: prefer original vertices for ears (skip non-original in C++)
         if hull[i] >= i32(nin) do continue
-        
+
         pi := (i + nhull - 1) % nhull
         ni := (i + 1) % nhull
-        
+
         pv := poly.vertices[hull[pi]].pos
         cv := poly.vertices[hull[i]].pos
         nv := poly.vertices[hull[ni]].pos
-        
+
         d := linalg.distance(pv.xz, cv.xz) + linalg.distance(cv.xz, nv.xz) + linalg.distance(nv.xz, pv.xz)
         if d < dmin {
             start = i
@@ -804,7 +859,7 @@ triangulate_hull_based :: proc(poly: ^Detail_Polygon) -> bool {
 
     // Ensure triangle has positive area (counter-clockwise)
     area := triangle_area_2d_detail(a, b, c)
-    
+
     // C++ behavior: Always add triangle in hull triangulation, even if degenerate
     // The area check is less strict for hull triangulation
     triangle := Detail_Triangle{
@@ -818,21 +873,21 @@ triangulate_hull_based :: proc(poly: ^Detail_Polygon) -> bool {
     for next_index(left, nhull) != right {
         nleft := next_index(left, nhull)
         nright := prev_index(right, nhull)
-        
+
         cvleft := poly.vertices[hull[left]].pos
         nvleft := poly.vertices[hull[nleft]].pos
         cvright := poly.vertices[hull[right]].pos
         nvright := poly.vertices[hull[nright]].pos
-        
+
         dleft := linalg.distance(cvleft.xz, nvleft.xz) + linalg.distance(nvleft.xz, cvright.xz)
         dright := linalg.distance(cvright.xz, nvright.xz) + linalg.distance(cvleft.xz, nvright.xz)
-        
+
         if dleft < dright {
             // Move left
             a := poly.vertices[hull[left]].pos
             b := poly.vertices[hull[nleft]].pos
             c := poly.vertices[hull[right]].pos
-            
+
             area := triangle_area_2d_detail(a, b, c)
             // C++ behavior: Always add triangle in hull triangulation
             triangle := Detail_Triangle{
@@ -847,7 +902,7 @@ triangulate_hull_based :: proc(poly: ^Detail_Polygon) -> bool {
             a := poly.vertices[hull[left]].pos
             b := poly.vertices[hull[nright]].pos
             c := poly.vertices[hull[right]].pos
-            
+
             area := triangle_area_2d_detail(a, b, c)
             // C++ behavior: Always add triangle in hull triangulation
             triangle := Detail_Triangle{
@@ -881,7 +936,7 @@ triangulate_simple_convex :: proc(poly: ^Detail_Polygon) -> bool {
         a := poly.vertices[0].pos
         b := poly.vertices[1].pos
         c := poly.vertices[2].pos
-        
+
         if !is_triangle_degenerate(a, b, c, MIN_POLYGON_AREA) {
             triangle := Detail_Triangle{
                 v = {0, 1, 2},
@@ -897,17 +952,17 @@ triangulate_simple_convex :: proc(poly: ^Detail_Polygon) -> bool {
         b := poly.vertices[1].pos
         c := poly.vertices[2].pos
         d := poly.vertices[3].pos
-        
+
         // Option 1: triangles (0,1,2) and (0,2,3)
         q1a := calculate_triangle_quality(a, b, c)
         q1b := calculate_triangle_quality(a, c, d)
         quality1 := min(q1a, q1b)
-        
+
         // Option 2: triangles (0,1,3) and (1,2,3)
         q2a := calculate_triangle_quality(a, b, d)
         q2b := calculate_triangle_quality(b, c, d)
         quality2 := min(q2a, q2b)
-        
+
         if quality1 >= quality2 {
             // Use diagonal 0-2
             if !is_triangle_degenerate(a, b, c, MIN_POLYGON_AREA) {
@@ -950,7 +1005,7 @@ triangulate_simple_convex :: proc(poly: ^Detail_Polygon) -> bool {
     return len(poly.triangles) > 0
 }
 
-// Robust ear clipping with improved ear detection  
+// Robust ear clipping with improved ear detection
 // Returns true if triangulation completed successfully
 triangulate_ear_clipping_robust :: proc(poly: ^Detail_Polygon) -> bool {
     nverts := len(poly.vertices)
@@ -1055,11 +1110,11 @@ triangulate_ear_clipping_robust :: proc(poly: ^Detail_Polygon) -> bool {
                 }
             }
         }
-        
+
         if !found_ear {
             // Only warn if this happens early - for complex polygons it's more normal
             if iterations <= 2 {
-  
+
             }
             // This indicates a degenerate polygon that cannot be properly triangulated
             return triangulate_remaining_as_fan(poly, indices[:remaining])
@@ -1261,20 +1316,20 @@ point_in_triangle_2d :: proc "contextless" (p, a, b, c: [3]f32) -> bool {
 point_in_triangle_2d_robust :: proc "contextless" (p, a, b, c: [3]f32) -> bool {
     // Use edge testing method with consistent winding
     // For counter-clockwise triangles, point is inside if all edge tests are positive
-    
+
     EPSILON :: 1e-9
-    
+
     // Edge AB
     cross1 := linalg.cross(b.xz - a.xz, p.xz - a.xz)
-    
-    // Edge BC  
+
+    // Edge BC
     cross2 := linalg.cross(c.xz - b.xz, p.xz - b.xz)
-    
+
     // Edge CA
     cross3 := linalg.cross(a.xz - c.xz, p.xz - c.xz)
 
     // Point is strictly inside if all crosses have the same sign as the triangle orientation
-    // For counter-clockwise triangles, all should be positive  
+    // For counter-clockwise triangles, all should be positive
     // Use epsilon to avoid boundary cases being considered "inside"
     return cross1 > EPSILON && cross2 > EPSILON && cross3 > EPSILON
 }
@@ -1360,14 +1415,20 @@ add_interior_samples :: proc(poly: ^Detail_Polygon, chf: ^Compact_Heightfield, s
         max_pos.z = max(max_pos.z, v.pos.z)
     }
 
-    // Sample points in grid pattern
+    // Sample points in grid pattern with jittering
     nx := i32(math.ceil((max_pos.x - min_pos.x) / sample_dist))
     nz := i32(math.ceil((max_pos.z - min_pos.z) / sample_dist))
 
+    sample_idx := i32(0)
     for i in 1..<nx {
         for j in 1..<nz {
-            x := min_pos.x + f32(i) * sample_dist
-            z := min_pos.z + f32(j) * sample_dist
+            // Add jitter to avoid regular grid artifacts
+            jx := get_jitter_x(sample_idx) * 0.5
+            jz := get_jitter_y(sample_idx) * 0.5
+            sample_idx += 1
+
+            x := min_pos.x + (f32(i) + jx) * sample_dist
+            z := min_pos.z + (f32(j) + jz) * sample_dist
 
             pos := [3]f32{x, 0, z}
 
@@ -1464,7 +1525,7 @@ build_polygon_detail_mesh_with_timeout :: proc(poly: ^Detail_Polygon, chf: ^Comp
         edge_len := linalg.length(edge_vec)
         min_extent = min(min_extent, edge_len)
     }
-    
+
     // If polygon is too small for sampling, use simple hull triangulation (C++ behavior)
     if min_extent < poly.sample_dist * 2.0 {
         return triangulate_hull_based(poly)
@@ -1597,7 +1658,7 @@ build_poly_mesh_detail :: proc(pmesh: ^Poly_Mesh, chf: ^Compact_Heightfield,
 
     total_verts := 0
     total_tris := 0
-    
+
     processed_count := 0
     failed_init_count := 0
     degenerate_count := 0
@@ -1645,9 +1706,9 @@ build_poly_mesh_detail :: proc(pmesh: ^Poly_Mesh, chf: ^Compact_Heightfield,
             triangulation_fail_count += 1
             continue
         }
-        
+
         processed_count += 1
-        
+
         // Debug logging for successful triangulation
         if len(poly.triangles) == 0 {
             log.warnf("Polygon %d has %d vertices but generated 0 triangles", i, len(poly.vertices))
@@ -1657,7 +1718,7 @@ build_poly_mesh_detail :: proc(pmesh: ^Poly_Mesh, chf: ^Compact_Heightfield,
         total_verts += len(poly.vertices)
         total_tris += len(poly.triangles)
     }
-    
+
 
 
 
@@ -1724,4 +1785,389 @@ build_poly_mesh_detail :: proc(pmesh: ^Poly_Mesh, chf: ^Compact_Heightfield,
 
 
     return true
+}
+
+// Calculate circumcircle of a triangle
+// Returns center and radius squared
+// Based on C++ circumCircle from RecastMeshDetail.cpp
+circum_circle :: proc "contextless" (p1, p2, p3: [3]f32) -> (center: [2]f32, r_sq: f32, valid: bool) {
+    EPS :: 1e-6
+
+    // Convert to 2D (using x,z coordinates)
+    ax := p1.x
+    ay := p1.z
+    bx := p2.x
+    by := p2.z
+    cx := p3.x
+    cy := p3.z
+
+    // Calculate differences
+    abx := bx - ax
+    aby := by - ay
+    acx := cx - ax
+    acy := cy - ay
+
+    // Calculate cross product (2D)
+    cross := abx * acy - aby * acx
+
+    // Check if points are collinear
+    if abs(cross) < EPS {
+        return {}, 0, false
+    }
+
+    // Calculate squared lengths
+    len_ab_sq := abx * abx + aby * aby
+    len_ac_sq := acx * acx + acy * acy
+
+    // Calculate circumcenter
+    inv_cross := 1.0 / (2.0 * cross)
+
+    ux := (acy * len_ab_sq - aby * len_ac_sq) * inv_cross
+    uy := (abx * len_ac_sq - acx * len_ab_sq) * inv_cross
+
+    center.x = ax + ux
+    center.y = ay + uy
+
+    // Calculate radius squared
+    r_sq = ux * ux + uy * uy
+
+    return center, r_sq, true
+}
+
+// Check if a point is inside the circumcircle of a triangle
+in_circumcircle :: proc "contextless" (p: [3]f32, p1, p2, p3: [3]f32) -> bool {
+    center, r_sq, valid := circum_circle(p1, p2, p3)
+    if !valid do return false
+
+    dx := p.x - center.x
+    dy := p.z - center.y
+
+    return dx * dx + dy * dy <= r_sq
+}
+
+// Delaunay triangulation with hull constraint
+// Based on C++ delaunayHull from RecastMeshDetail.cpp
+delaunay_hull :: proc(verts: [][3]f32, hull: []i32) -> (tris: [dynamic][3]i32, valid: bool) {
+
+    if len(verts) < 3 do return nil, false
+
+    max_tris := len(verts) * 2 - 2 - len(hull)  // Max triangles for a planar triangulation
+
+    tris = make([dynamic][3]i32, 0, max_tris)
+
+    // Start with first triangle
+    for i in 0..<len(hull) {
+        i1 := hull[i]
+        i2 := hull[(i + 1) % len(hull)]
+        i3 := hull[(i + 2) % len(hull)]
+
+        if i1 < 0 || i1 >= i32(len(verts)) || i2 < 0 || i2 >= i32(len(verts)) || i3 < 0 || i3 >= i32(len(verts)) {
+            continue
+        }
+
+        area := triangle_area_2d_detail(verts[i1], verts[i2], verts[i3])
+        if abs(area) > 1e-6 {
+            // Add first triangle
+            append(&tris, [3]i32{i1, i2, i3})
+            break
+        }
+    }
+
+    if len(tris) == 0 {
+        delete(tris)
+        return nil, false
+    }
+
+    // Add points one by one
+    for i in 0..<len(verts) {
+        // Skip if point is already in hull
+        if slice.contains(hull, i32(i)) do continue
+
+        pt := verts[i]
+
+        // Remove triangles that contain the point in their circumcircle
+        removed_edges := make([dynamic][2]i32, 0, 64)
+        defer delete(removed_edges)
+
+        new_tris := make([dynamic][3]i32, 0, cap(tris))
+        defer delete(new_tris)
+
+        for tri in tris {
+            t0, t1, t2 := tri[0], tri[1], tri[2]
+
+            if in_circumcircle(pt, verts[t0], verts[t1], verts[t2]) {
+                // Remove this triangle - add its edges to removed list
+                append(&removed_edges, [2]i32{t0, t1})
+                append(&removed_edges, [2]i32{t1, t2})
+                append(&removed_edges, [2]i32{t2, t0})
+            } else {
+                // Keep this triangle
+                append(&new_tris, tri)
+            }
+        }
+
+        // Replace triangles with kept ones
+        clear(&tris)
+        for tri in new_tris {
+            append(&tris, tri)
+        }
+
+        // Find boundary of removed triangles
+        boundary := make([dynamic][2]i32, 0, 32)
+        defer delete(boundary)
+
+        for j in 0..<len(removed_edges) {
+            e0, e1 := removed_edges[j][0], removed_edges[j][1]
+
+            // Check if edge appears twice (internal edge)
+            is_boundary := true
+            for k in j+1..<len(removed_edges) {
+                if (removed_edges[k][0] == e1 && removed_edges[k][1] == e0) ||
+                   (removed_edges[k][0] == e0 && removed_edges[k][1] == e1) {
+                    is_boundary = false
+                    break
+                }
+            }
+
+            if is_boundary {
+                append(&boundary, [2]i32{e0, e1})
+            }
+        }
+
+        // Create new triangles from boundary edges to new point
+        for edge in boundary {
+            append(&tris, [3]i32{edge[0], edge[1], i32(i)})
+        }
+    }
+
+    valid = len(tris) > 0
+    return
+}
+
+// Flood fill algorithm for height data collection
+// Based on C++ getHeightData from RecastMeshDetail.cpp
+get_height_data :: proc(chf: ^Compact_Heightfield, poly: []u16, npoly: int,
+                       verts: [][3]u16, borderSize: i32, hp: ^Height_Patch) -> bool {
+
+    if chf == nil || hp == nil do return false
+
+    // Initialize height patch
+    clear(&hp.data)
+    hp.xmin = 0
+    hp.ymin = 0
+    hp.width = 0
+    hp.height = 0
+
+    // Empty polygon
+    if npoly == 0 do return true
+
+    // Find polygon bounding box
+    minx := i32(verts[poly[0]].x)
+    maxx := i32(verts[poly[0]].x)
+    minz := i32(verts[poly[0]].z)
+    maxz := i32(verts[poly[0]].z)
+
+    for i in 1..<npoly {
+        v := verts[poly[i]]
+        minx = min(minx, i32(v.x))
+        maxx = max(maxx, i32(v.x))
+        minz = min(minz, i32(v.z))
+        maxz = max(maxz, i32(v.z))
+    }
+
+    // Expand by border size
+    minx = max(0, minx - borderSize)
+    maxx = min(chf.width - 1, maxx + borderSize)
+    minz = max(0, minz - borderSize)
+    maxz = min(chf.height - 1, maxz + borderSize)
+
+    hp.xmin = minx
+    hp.ymin = minz
+    hp.width = maxx - minx + 1
+    hp.height = maxz - minz + 1
+
+    // Allocate height data
+    resize(&hp.data, int(hp.width * hp.height))
+    for i in 0..<len(hp.data) {
+        hp.data[i] = RC_UNSET_HEIGHT
+    }
+
+    // Use flood fill to collect height data
+    stack := make([dynamic][2]i32, 0, 256)
+    defer delete(stack)
+
+    // Find seed point inside polygon
+    seed := seed_array_with_poly_center(chf, poly[:npoly], verts, minx, minz, hp)
+    if !seed do return false
+
+    // Start flood fill from seed points
+    for y in 0..<hp.height {
+        for x in 0..<hp.width {
+            idx := int(x + y * hp.width)
+            if hp.data[idx] != RC_UNSET_HEIGHT {
+                // Add to stack
+                append(&stack, [2]i32{x, y})
+            }
+        }
+    }
+
+    // 4-way flood fill
+    dirs := [4][2]i32{{1, 0}, {0, 1}, {-1, 0}, {0, -1}}
+
+    for len(stack) > 0 {
+        cur := pop(&stack)
+        cx := cur.x
+        cy := cur.y
+
+        for d in dirs {
+            nx := cx + d.x
+            ny := cy + d.y
+
+            // Check bounds
+            if nx < 0 || ny < 0 || nx >= hp.width || ny >= hp.height do continue
+
+            idx := int(nx + ny * hp.width)
+            if hp.data[idx] != RC_UNSET_HEIGHT do continue
+
+            // Get cell coordinates
+            ax := hp.xmin + nx
+            ay := hp.ymin + ny
+
+            if ax < 0 || ay < 0 || ax >= chf.width || ay >= chf.height do continue
+
+            // Sample height
+            cell_idx := int(ax + ay * chf.width)
+            cell := chf.cells[cell_idx]
+
+            // Skip if no spans
+            if cell.count == 0 do continue
+
+            // Get top span height
+            span_idx := int(cell.index + u32(cell.count) - 1)
+            if span_idx < len(chf.spans) {
+                span := chf.spans[span_idx]
+                h := u16(span.y) + u16(span.h)
+
+                // Set height
+                hp.data[idx] = h
+                append(&stack, [2]i32{nx, ny})
+            }
+        }
+    }
+
+    return true
+}
+
+// Height patch for detail mesh sampling
+Height_Patch :: struct {
+    data:   [dynamic]u16,
+    xmin:   i32,
+    ymin:   i32,
+    width:  i32,
+    height: i32,
+}
+
+// Seed height patch with polygon center
+// Based on C++ seedArrayWithPolyCenter from RecastMeshDetail.cpp
+seed_array_with_poly_center :: proc(chf: ^Compact_Heightfield, poly: []u16,
+                                    verts: [][3]u16, minx, minz: i32, hp: ^Height_Patch) -> bool {
+
+    // Calculate polygon center
+    center := [3]f32{}
+    for i in 0..<len(poly) {
+        v := verts[poly[i]]
+        center.x += f32(v.x)
+        center.z += f32(v.z)
+    }
+    center.x /= f32(len(poly))
+    center.z /= f32(len(poly))
+
+    // Convert to cell coordinates
+    cx := i32(center.x) - minx
+    cz := i32(center.z) - minz
+
+    // Ensure within bounds
+    cx = clamp(cx, 0, hp.width - 1)
+    cz = clamp(cz, 0, hp.height - 1)
+
+    // Get height at center
+    ax := minx + cx
+    az := minz + cz
+
+    if ax >= 0 && az >= 0 && ax < chf.width && az < chf.height {
+        cell_idx := int(ax + az * chf.width)
+        cell := chf.cells[cell_idx]
+
+        if cell.count > 0 {
+            span_idx := int(cell.index + u32(cell.count) - 1)
+            if span_idx < len(chf.spans) {
+                span := chf.spans[span_idx]
+                h := u16(span.y) + u16(span.h)
+
+                idx := int(cx + cz * hp.width)
+                hp.data[idx] = h
+                return true
+            }
+        }
+    }
+
+    return false
+}
+
+// Set triangle edge flags
+// Based on C++ setTriFlags from RecastMeshDetail.cpp
+set_tri_flags :: proc(tris: [][4]u8, ntris: int, verts: [][3]f32, nverts: int,
+                     polys: []u16, npolys: int) {
+
+    // Clear all flags
+    for i in 0..<ntris {
+        tris[i][3] = 0
+    }
+
+    // Mark triangles with edges on polygon boundaries
+    for i in 0..<ntris {
+        v0 := int(tris[i][0])
+        v1 := int(tris[i][1])
+        v2 := int(tris[i][2])
+
+        // Check each edge
+        edges := [3][2]int{{v0, v1}, {v1, v2}, {v2, v0}}
+
+        for edge_idx in 0..<3 {
+            edge := edges[edge_idx]
+            // Check if edge is on polygon boundary
+            is_boundary := false
+
+            // Find if edge exists in polygon
+            for j in 0..<npolys {
+                k := (j + 1) % npolys
+
+                p0 := int(polys[j])
+                p1 := int(polys[k])
+
+                if (p0 == edge[0] && p1 == edge[1]) ||
+                   (p0 == edge[1] && p1 == edge[0]) {
+                    is_boundary = true
+                    break
+                }
+            }
+
+            if is_boundary {
+                // Set flag for this edge
+                tris[i][3] |= u8(1 << uint(edge_idx))
+            }
+        }
+    }
+}
+
+// Jittered sampling functions for interior points
+// Based on C++ getJitterX/Y from RecastMeshDetail.cpp
+get_jitter_x :: proc(i: i32) -> f32 {
+    h: u32 = 0x8da6b343
+    return (f32((u32(i) * h) & 0xffff) / 65535.0 * 2.0) - 1.0
+}
+
+get_jitter_y :: proc(i: i32) -> f32 {
+    h: u32 = 0xd8163841
+    return (f32((u32(i) * h) & 0xffff) / 65535.0 * 2.0) - 1.0
 }

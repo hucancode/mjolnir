@@ -20,12 +20,12 @@ uleft :: proc(a, b, c: [3]i16) -> bool {
 
 // Count vertices in a polygon (excluding null indices)
 count_poly_verts :: proc(poly: []i32) -> i32 {
-    count := i32(0)
-    for v in poly {
-        if v == -1 do break
-        count += 1
+    // Find first -1 and return its index as count
+    idx, found := slice.linear_search(poly[:], i32(-1))
+    if found {
+        return i32(idx)
     }
-    return count
+    return i32(len(poly))
 }
 
 // Get merge value for two polygons
@@ -157,12 +157,13 @@ get_poly_merge_value :: proc(pa, pb: []i32, verts: []Mesh_Vertex, nvp: i32) -> (
 
 // Merge two polygons along shared edge
 // Based on C++ mergePolyVerts from RecastMesh.cpp
-merge_poly_verts :: proc(pa, pb: ^Poly_Build, ea, eb: i32, nvp: i32) {
+merge_poly_verts :: proc(pa, pb: ^Poly_Build, ea, eb: i32, nvp: i32, allocator := context.allocator) {
     na := count_poly_verts(pa.verts[:])
     nb := count_poly_verts(pb.verts[:])
 
     // Create temporary merged polygon
-    tmp := make([]i32, nvp, context.temp_allocator)
+    tmp := make([]i32, nvp)
+    defer delete(tmp)
     for i in 0..<nvp do tmp[i] = -1
 
     n := 0
@@ -178,10 +179,13 @@ merge_poly_verts :: proc(pa, pb: ^Poly_Build, ea, eb: i32, nvp: i32) {
     }
 
     // Update pa with merged polygon
-    // Note: pa.verts was allocated with context.temp_allocator, so we don't delete it
-    // Instead, we allocate a new slice with the same allocator
-    pa.verts = make([]i32, n, context.temp_allocator)
+    // Create new slice with the same allocator that was used for the original
+    old_verts := pa.verts
+    pa.verts = make([]i32, n, allocator)
     copy(pa.verts[:], tmp[:n])
+
+    // Note: old_verts will be cleaned up by the allocator that created it
+    // (either temp_allocator automatically or regular allocator later)
 }
 
 // Mesh building constants
@@ -589,23 +593,18 @@ copy_poly_mesh :: proc(src: ^Poly_Mesh, dst: ^Poly_Mesh) -> bool {
 
     // Copy arrays
     if len(src.verts) > 0 {
-        dst.verts = make([][3]u16, len(src.verts))
-        copy(dst.verts, src.verts)
+        dst.verts = slice.clone(src.verts)
     }
 
     if src.npolys > 0 {
         poly_size := src.npolys * src.nvp * 2
-        dst.polys = make([]u16, poly_size)
-        copy(dst.polys, src.polys)
+        dst.polys = slice.clone(src.polys[:poly_size])
 
-        dst.regs = make([]u16, src.npolys)
-        copy(dst.regs, src.regs)
+        dst.regs = slice.clone(src.regs[:src.npolys])
 
-        dst.flags = make([]u16, src.npolys)
-        copy(dst.flags, src.flags)
+        dst.flags = slice.clone(src.flags[:src.npolys])
 
-        dst.areas = make([]u8, src.npolys)
-        copy(dst.areas, src.areas)
+        dst.areas = slice.clone(src.areas[:src.npolys])
     }
 
     return true
@@ -734,12 +733,12 @@ build_mesh_edges :: proc(pmesh: ^Poly_Mesh, edges: ^[dynamic]Mesh_Edge, max_edge
 
             // Look for existing edge
             found := false
-            for &edge in edges {
-                if edge.vert[0] == va && edge.vert[1] == vb {
+            for idx in 0..<len(edges) {
+                if edges[idx].vert[0] == va && edges[idx].vert[1] == vb {
                     // Found matching edge - this is a shared edge
-                    if edge.poly[1] == RC_MESH_NULL_IDX {
-                        edge.poly[1] = u16(i)
-                        edge.poly_edge[1] = u16(j)
+                    if edges[idx].poly[1] == RC_MESH_NULL_IDX {
+                        edges[idx].poly[1] = u16(i)
+                        edges[idx].poly_edge[1] = u16(j)
                     }
                     found = true
                     break
@@ -1212,7 +1211,7 @@ build_poly_mesh :: proc(cset: ^Contour_Set, nvp: i32, pmesh: ^Poly_Mesh) -> bool
                 }
 
                 // Merge the polygons
-                merge_poly_verts(&region_polys[best_pa], &region_polys[best_pb], best_ea, best_eb, nvp)
+                merge_poly_verts(&region_polys[best_pa], &region_polys[best_pb], best_ea, best_eb, nvp, context.temp_allocator)
 
                 // Remove the merged polygon
                 ordered_remove(&region_polys, best_pb)
@@ -1536,6 +1535,356 @@ optimize_poly_mesh :: proc(pmesh: ^Poly_Mesh, weld_tolerance: f32) -> bool {
         return false
     }
 
+
+    return true
+}
+
+// Check if a vertex can be removed from the mesh
+// Based on C++ canRemoveVertex from RecastMesh.cpp
+can_remove_vertex :: proc(pmesh: ^Poly_Mesh, rem: u16) -> bool {
+    if pmesh == nil do return false
+
+    // Count number of polygon edges that use this vertex
+    nvp := int(pmesh.nvp)
+    numRemovedVerts := 0
+    numTouchedVerts := 0
+    numRemainingEdges := 0
+
+    // Find polygons that use this vertex
+    for i in 0..<pmesh.npolys {
+        pi := int(i) * nvp * 2
+
+        nv := 0
+        for j in 0..<nvp {
+            if pmesh.polys[pi + j] == RC_MESH_NULL_IDX do break
+            nv += 1
+        }
+
+        hasRem := false
+        for j in 0..<nv {
+            if pmesh.polys[pi + j] == rem {
+                hasRem = true
+            }
+        }
+
+        if hasRem {
+            // Polygon uses the vertex
+            numTouchedVerts += nv
+            numRemovedVerts += 1
+
+            // Count edges after removal
+            edges := nv
+            if nv > 3 {
+                edges -= 1
+            }
+            numRemainingEdges += edges
+        }
+    }
+
+    // There must be enough edges remaining to fill the hole
+    if numRemainingEdges <= numRemovedVerts * 2 {
+        return false
+    }
+
+    // Check if vertex is on mesh boundary
+    edge_count := 0
+    for i in 0..<pmesh.npolys {
+        pi := int(i) * nvp * 2
+
+        nv := 0
+        for j in 0..<nvp {
+            if pmesh.polys[pi + j] == RC_MESH_NULL_IDX do break
+            nv += 1
+        }
+
+        for j in 0..<nv {
+            if pmesh.polys[pi + j] == rem {
+                // Check if edge j has a neighbor
+                if pmesh.polys[pi + nvp + j] == RC_MESH_NULL_IDX {
+                    edge_count += 1
+                }
+                // Check previous edge
+                k := (j + nv - 1) % nv
+                if pmesh.polys[pi + k] != RC_MESH_NULL_IDX {
+                    if pmesh.polys[pi + nvp + k] == RC_MESH_NULL_IDX {
+                        edge_count += 1
+                    }
+                }
+            }
+        }
+    }
+
+    // Can't remove vertex on open edges
+    if edge_count > 0 {
+        return false
+    }
+
+    return true
+}
+
+// Remove a vertex from the polygon mesh and re-triangulate the hole
+// Based on C++ removeVertex from RecastMesh.cpp
+remove_vertex :: proc(pmesh: ^Poly_Mesh, rem: u16, maxTris: i32) -> bool {
+    if pmesh == nil do return false
+
+    nvp := int(pmesh.nvp)
+
+    // Collect polygons that use the vertex
+    polys_to_remove := make([dynamic]i32, 0, 16)
+    defer delete(polys_to_remove)
+
+    nv_total := 0
+    for i in 0..<pmesh.npolys {
+        pi := int(i) * nvp * 2
+
+        nv := 0
+        for j in 0..<nvp {
+            if pmesh.polys[pi + j] == RC_MESH_NULL_IDX do break
+            nv += 1
+        }
+
+        hasRem := false
+        for j in 0..<nv {
+            if pmesh.polys[pi + j] == rem {
+                hasRem = true
+                break
+            }
+        }
+
+        if hasRem {
+            append(&polys_to_remove, i)
+            nv_total += nv
+        }
+    }
+
+    if len(polys_to_remove) == 0 do return true
+
+    // Create hole polygon by collecting all edges that don't include rem vertex
+    hole := make([dynamic]u16, 0, nv_total)
+    defer delete(hole)
+
+    nhole := 0
+    navail := 0
+
+    for poly_idx in polys_to_remove {
+        pi := int(poly_idx) * nvp * 2
+
+        nv := 0
+        for j in 0..<nvp {
+            if pmesh.polys[pi + j] == RC_MESH_NULL_IDX do break
+            nv += 1
+        }
+
+        // Find vertex to remove
+        rem_idx := -1
+        for j in 0..<nv {
+            if pmesh.polys[pi + j] == rem {
+                rem_idx = j
+                break
+            }
+        }
+
+        if rem_idx != -1 {
+            // Add vertices except rem to hole
+            for j in 0..<nv {
+                if j != rem_idx {
+                    append(&hole, pmesh.polys[pi + j])
+                    nhole += 1
+                    navail += 1
+                }
+            }
+        }
+    }
+
+    // Generate triangle indices for hole triangulation
+    triangles := make([dynamic]i32, 0, maxTris * 3)
+    defer delete(triangles)
+
+    // Create vertex array for triangulation
+    tverts := make([][3]u16, len(hole))
+    defer delete(tverts)
+
+    tindices := make([]i32, len(hole))
+    defer delete(tindices)
+
+    for i in 0..<len(hole) {
+        vert_idx := int(hole[i])
+        if vert_idx < len(pmesh.verts) {
+            tverts[i] = pmesh.verts[vert_idx]
+            tindices[i] = i32(i)
+        }
+    }
+
+    // Triangulate the hole
+    if !triangulate_polygon(tverts[:], tindices[:], &triangles) {
+        return false
+    }
+
+    // Remap triangle indices back to mesh vertex indices
+    for i in 0..<len(triangles) {
+        triangles[i] = i32(hole[triangles[i]])
+    }
+
+    // Remove old polygons
+    next_free := 0
+    for i in 0..<pmesh.npolys {
+        is_removed := false
+        for rem_idx in polys_to_remove {
+            if i == rem_idx {
+                is_removed = true
+                break
+            }
+        }
+
+        if !is_removed {
+            // Keep this polygon - copy to next free slot if needed
+            if next_free != int(i) {
+                src_pi := int(i) * nvp * 2
+                dst_pi := next_free * nvp * 2
+
+                // Copy polygon data
+                for j in 0..<nvp*2 {
+                    pmesh.polys[dst_pi + j] = pmesh.polys[src_pi + j]
+                }
+
+                // Copy attributes
+                pmesh.regs[next_free] = pmesh.regs[i]
+                pmesh.flags[next_free] = pmesh.flags[i]
+                pmesh.areas[next_free] = pmesh.areas[i]
+            }
+            next_free += 1
+        }
+    }
+
+    // Store first removed polygon area/region for new polygons
+    first_removed := polys_to_remove[0]
+    poly_area := pmesh.areas[first_removed]
+    poly_reg := pmesh.regs[first_removed]
+
+    // Convert triangles to polygons and add to mesh
+    polys := make([dynamic]Poly_Build, 0, len(triangles) / 3)
+    defer {
+        for &p in polys {
+            delete(p.verts)
+        }
+        delete(polys)
+    }
+
+    // Note: We need to convert mesh vertices back for merging
+    mesh_verts := make([dynamic]Mesh_Vertex, len(pmesh.verts))
+    defer delete(mesh_verts)
+
+    for i in 0..<len(pmesh.verts) {
+        v := pmesh.verts[i]
+        mesh_verts[i] = Mesh_Vertex{x = v.x, y = v.y, z = v.z, next = -1}
+    }
+
+    merge_triangles_into_polygons(triangles[:], &polys, i32(nvp), poly_area, poly_reg)
+
+    // Add new polygons to mesh
+    for poly in polys {
+        if next_free >= int(pmesh.maxpolys) do break
+
+        pi := next_free * nvp * 2
+
+        // Clear polygon
+        for j in 0..<nvp*2 {
+            pmesh.polys[pi + j] = RC_MESH_NULL_IDX
+        }
+
+        // Copy vertices
+        for j in 0..<len(poly.verts) {
+            if j < nvp {
+                pmesh.polys[pi + j] = u16(poly.verts[j])
+            }
+        }
+
+        // Set attributes
+        pmesh.regs[next_free] = poly.reg
+        pmesh.flags[next_free] = 1
+        pmesh.areas[next_free] = poly.area
+
+        next_free += 1
+    }
+
+    pmesh.npolys = i32(next_free)
+
+    // Remove unused vertices (optional but recommended)
+    if !remove_unused_vertices(pmesh) {
+        log.warn("Failed to remove unused vertices after vertex removal")
+    }
+
+    // Rebuild adjacency
+    edges := make([dynamic]Mesh_Edge, 0, pmesh.npolys * 3)
+    defer delete(edges)
+
+    if build_mesh_edges(pmesh, &edges, pmesh.npolys * 3) {
+        update_polygon_neighbors(pmesh, edges[:])
+    }
+
+    return true
+}
+
+// Build portal edges between tile boundaries
+// Based on C++ implementation from RecastMesh.cpp
+build_mesh_portal_edges :: proc(pmesh: ^Poly_Mesh) -> bool {
+    if pmesh == nil do return false
+
+    nvp := int(pmesh.nvp)
+
+    // Mark portal edges (edges on tile boundaries)
+    for i in 0..<pmesh.npolys {
+        pi := int(i) * nvp * 2
+
+        for j in 0..<nvp {
+            if pmesh.polys[pi + j] == RC_MESH_NULL_IDX do break
+
+            // Check if edge has no neighbor (boundary edge)
+            if pmesh.polys[pi + nvp + j] == RC_MESH_NULL_IDX {
+                k := (j + 1) % nvp
+                if pmesh.polys[pi + k] == RC_MESH_NULL_IDX do continue
+
+                va := pmesh.polys[pi + j]
+                vb := pmesh.polys[pi + k]
+
+                // Check if edge is on tile boundary by comparing vertex positions
+                if va < u16(len(pmesh.verts)) && vb < u16(len(pmesh.verts)) {
+                    ax := pmesh.verts[va].x
+                    az := pmesh.verts[va].z
+                    bx := pmesh.verts[vb].x
+                    bz := pmesh.verts[vb].z
+
+                    // Check if edge aligns with tile boundary
+                    // Vertices on boundary have x or z == 0 or borderSize*2
+                    border := u16(pmesh.border_size * 2)
+
+                    is_portal := false
+
+                    // Check X boundaries
+                    if (ax == 0 || ax == border) && (bx == 0 || bx == border) && ax == bx {
+                        is_portal = true
+                    }
+                    // Check Z boundaries
+                    if (az == 0 || az == border) && (bz == 0 || bz == border) && az == bz {
+                        is_portal = true
+                    }
+
+                    if is_portal {
+                        // Mark as portal edge using upper bits of neighbor value
+                        // Set portal direction based on which boundary
+                        dir := u16(0)
+                        if ax == 0 { dir = 0 }    // -X
+                        else if ax == border { dir = 1 }  // +X
+                        else if az == 0 { dir = 2 }      // -Z
+                        else if az == border { dir = 3 }  // +Z
+
+                        // Store portal info in upper bits
+                        pmesh.polys[pi + nvp + j] = 0x8000 | (dir << 13)
+                    }
+                }
+            }
+        }
+    }
 
     return true
 }

@@ -120,7 +120,7 @@ safe_normalize :: proc(v: ^[3]f32) {
 
 // Offset polygon - creates an inset/outset polygon with proper miter/bevel handling
 // Returns the offset vertices and success status
-offset_poly :: proc(verts: [][3]f32, offset: f32, allocator := context.allocator) -> (out_verts: [][3]f32, ok: bool) {
+offset_poly :: proc(verts: [][3]f32, offset: f32, allocator := context.allocator) -> (out_verts: [dynamic][3]f32, ok: bool) {
     // Defines the limit at which a miter becomes a bevel
     // Similar in behavior to https://developer.mozilla.org/en-US/docs/Web/SVG/Attribute/stroke-miterlimit
     MITER_LIMIT :: 1.20
@@ -132,8 +132,7 @@ offset_poly :: proc(verts: [][3]f32, offset: f32, allocator := context.allocator
 
     // First pass: calculate how many vertices we'll need
     estimated_verts := num_verts * 2  // Conservative estimate for beveling
-    temp_verts := make([dynamic][3]f32, 0, estimated_verts, context.temp_allocator)
-    defer delete(temp_verts)
+    out_verts = make([dynamic][3]f32, 0, estimated_verts)
 
     for vert_index in 0..<num_verts {
         // Grab three vertices of the polygon
@@ -195,20 +194,20 @@ offset_poly :: proc(verts: [][3]f32, offset: f32, allocator := context.allocator
             // Move each bevel vertex out proportional to the given offset
             d := (1.0 - (prev_segment_dir.x * curr_segment_dir.x + prev_segment_dir.z * curr_segment_dir.z)) * 0.5
 
-            append(&temp_verts, [3]f32{
+            append(&out_verts, [3]f32{
                 vert_b.x + (-prev_segment_norm_x + prev_segment_dir.x * d) * offset,
                 vert_b.y,
                 vert_b.z + (-prev_segment_norm_z + prev_segment_dir.z * d) * offset,
             })
 
-            append(&temp_verts, [3]f32{
+            append(&out_verts, [3]f32{
                 vert_b.x + (-curr_segment_norm_x - curr_segment_dir.x * d) * offset,
                 vert_b.y,
                 vert_b.z + (-curr_segment_norm_z - curr_segment_dir.z * d) * offset,
             })
         } else {
             // Move B along the miter direction by the specified offset
-            append(&temp_verts, [3]f32{
+            append(&out_verts, [3]f32{
                 vert_b.x - corner_miter_x * offset,
                 vert_b.y,
                 vert_b.z - corner_miter_z * offset,
@@ -217,13 +216,11 @@ offset_poly :: proc(verts: [][3]f32, offset: f32, allocator := context.allocator
     }
 
     // Allocate final output with the exact size needed
-    if len(temp_verts) == 0 {
+    if len(out_verts) == 0 {
+        delete(out_verts)
         return nil, false
     }
-    
-    out_verts = make([][3]f32, len(temp_verts), allocator)
-    copy(out_verts, temp_verts[:])
-    
+
     return out_verts, true
 }
 

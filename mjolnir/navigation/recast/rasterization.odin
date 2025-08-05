@@ -13,38 +13,6 @@ Axis :: enum {
     Z = 2,
 }
 
-
-// Allocates a new span in the heightfield.
-// Uses a memory pool and free list to minimize actual allocations.
-allocate_span :: proc(hf: ^Heightfield) -> ^Span {
-    return alloc_span(hf)
-}
-
-// Releases the memory used by the span back to the heightfield
-free_span :: proc(hf: ^Heightfield, span: ^Span) {
-    if span == nil {
-        return
-    }
-    // Clear span data before adding to freelist
-    span.smin = 0
-    span.smax = 0
-    span.area = 0
-    // Add the span to the front of the free list
-    span.next = hf.freelist
-    hf.freelist = span
-}
-
-// Span cache for recently accessed columns
-Span_Column_Cache :: struct {
-    column_index: i32,
-    first_span: ^Span,
-    span_count: i32,
-    last_access: u32,
-}
-
-// Add span cache to heightfield (would need to be added to Heightfield struct)
-// For now, we'll optimize the algorithm itself
-
 // Adds a span to the heightfield with optimized merging
 add_span :: proc(hf: ^Heightfield,
                  x, z: i32, smin, smax: u16, area_id: u8,
@@ -65,12 +33,12 @@ add_span :: proc(hf: ^Heightfield,
     }
 
     column_index := x + z * hf.width
-    
+
     // Fast path: empty column
     if hf.spans[column_index] == nil {
         new_span := allocate_span(hf)
         if new_span == nil do return false
-        
+
         new_span.smin = u32(smin)
         new_span.smax = u32(smax)
         new_span.area = u32(area_id)
@@ -83,7 +51,7 @@ add_span :: proc(hf: ^Heightfield,
     // Pre-allocate span to avoid allocation in critical path
     new_span := allocate_span(hf)
     if new_span == nil do return false
-    
+
     new_span.smin = u32(smin)
     new_span.smax = u32(smax)
     new_span.area = u32(area_id)
@@ -93,17 +61,17 @@ add_span :: proc(hf: ^Heightfield,
     merge_start: ^Span = nil
     merge_end: ^Span = nil
     insert_after: ^Span = nil
-    
+
     previous_span: ^Span = nil
     current_span := hf.spans[column_index]
-    
+
     // Single pass to find merge range and insertion point
     for current_span != nil {
         if current_span.smin > new_span.smax {
             // Found insertion point
             break
         }
-        
+
         if current_span.smax < new_span.smin {
             // No overlap yet, update insertion point
             insert_after = current_span
@@ -111,18 +79,18 @@ add_span :: proc(hf: ^Heightfield,
             current_span = current_span.next
             continue
         }
-        
+
         // Found overlap - mark merge range
         if merge_start == nil {
             merge_start = current_span
             insert_after = previous_span
         }
         merge_end = current_span
-        
+
         // Update merged span bounds
         new_span.smin = min(new_span.smin, current_span.smin)
         new_span.smax = max(new_span.smax, current_span.smax)
-        
+
         // Merge area flags
         // Check difference between the updated new_span.smax and current_span.smax
         // This matches the C++ implementation: rcAbs((int)newSpan->smax - (int)currentSpan->smax)
@@ -130,18 +98,18 @@ add_span :: proc(hf: ^Heightfield,
             // If within threshold, take max area
             new_span.area = max(new_span.area, current_span.area)
         }
-        
+
         // Don't update previous_span when merging
         current_span = current_span.next
     }
-    
+
     // Apply merges if any
     if merge_start != nil {
         // Save the next pointer after merge_end before modifying the list
         next_after_merge := merge_end.next
-        
 
-        
+
+
         // Free merged spans - be careful not to free past merge_end
         current := merge_start
         for current != nil {
@@ -152,7 +120,7 @@ add_span :: proc(hf: ^Heightfield,
             }
             current = next
         }
-        
+
         // Insert new merged span
         new_span.next = next_after_merge
         if insert_after != nil {
@@ -187,17 +155,17 @@ validate_span_list :: proc(first_span: ^Span, x, z: i32) {
     slow := first_span
     fast := first_span
     count := 0
-    
+
     for fast != nil && fast.next != nil {
         slow = slow.next
         fast = fast.next.next
         count += 1
-        
+
         if slow == fast {
             log.errorf("validate_span_list: Cycle detected in span list at column (%d, %d) after %d steps", x, z, count)
             panic("Span list has a cycle!")
         }
-        
+
         if count > 1000 {
             log.errorf("validate_span_list: Too many spans in column (%d, %d)", x, z)
             break
@@ -207,7 +175,7 @@ validate_span_list :: proc(first_span: ^Span, x, z: i32) {
     // Also validate ordering
     span := first_span
     prev_smax: u32 = 0
-    
+
     for span != nil {
         smin := span.smin
         smax := span.smax
@@ -330,7 +298,7 @@ rasterize_tri :: proc(v0, v1, v2: [3]f32, area_id: u8,
     when ODIN_DEBUG {
         @(static) debug_count := 0
         if debug_count < 10 {
-            log.infof("Triangle %d: BB=(%.2f,%.2f,%.2f)-(%.2f,%.2f,%.2f), Grid Z=%d-%d, area=%d", 
+            log.infof("Triangle %d: BB=(%.2f,%.2f,%.2f)-(%.2f,%.2f,%.2f), Grid Z=%d-%d, area=%d",
                      debug_count, tri_bb_min.x, tri_bb_min.y, tri_bb_min.z,
                      tri_bb_max.x, tri_bb_max.y, tri_bb_max.z, z0, z1, area_id)
             debug_count += 1
@@ -386,17 +354,17 @@ rasterize_tri :: proc(v0, v1, v2: [3]f32, area_id: u8,
         }
         x0 := i32((min_x - hf_bb_min.x) * inverse_cell_size)
         x1 := i32((max_x - hf_bb_min.x) * inverse_cell_size)
-        
+
         // Debug logging for X coordinates
         when ODIN_DEBUG {
             @(static) x_debug_count := 0
             if x_debug_count < 10 && z >= 0 && z < h {
-                log.infof("  Row Z=%d: X range %.2f-%.2f -> Grid X=%d-%d (w=%d)", 
+                log.infof("  Row Z=%d: X range %.2f-%.2f -> Grid X=%d-%d (w=%d)",
                          z, min_x, max_x, x0, x1, w)
                 x_debug_count += 1
             }
         }
-        
+
         if x1 < 0 || x0 >= w {
             continue
         }
@@ -453,12 +421,12 @@ rasterize_tri :: proc(v0, v1, v2: [3]f32, area_id: u8,
             when ODIN_DEBUG {
                 @(static) span_debug_count := 0
                 if span_debug_count < 20 {
-                    log.infof("    Adding span at (%d,%d): height %d-%d, area=%d", 
+                    log.infof("    Adding span at (%d,%d): height %d-%d, area=%d",
                              x, z, span_min_cell_index, span_max_cell_index, area_id)
                     span_debug_count += 1
                 }
             }
-            
+
             if !add_span(hf, x, z, span_min_cell_index, span_max_cell_index, area_id, flag_merge_threshold) {
                 return false
             }
@@ -544,42 +512,6 @@ rc_rasterize_triangles_u16 :: proc(verts: []f32, nv: i32,
             verts[tris[tri_index * 3 + 2] * 3 + 0],
             verts[tris[tri_index * 3 + 2] * 3 + 1],
             verts[tris[tri_index * 3 + 2] * 3 + 2],
-        }
-
-        if !rasterize_tri(v0, v1, v2, tri_area_ids[tri_index], hf, hf.bmin, hf.bmax,
-                          hf.cs, inverse_cell_size, inverse_cell_height, flag_merge_threshold) {
-            log.error("rcRasterizeTriangles: Out of memory.")
-            return false
-        }
-    }
-
-    return true
-}
-
-// Rasterize triangles without indices (direct vertex data)
-rasterize_triangles_direct :: proc(verts: []f32, tri_area_ids: []u8, num_tris: i32,
-                                     hf: ^Heightfield, flag_merge_threshold: i32) -> bool {
-    // Removed timer code for simplicity
-
-    // Rasterize the triangles
-    inverse_cell_size := 1.0 / hf.cs
-    inverse_cell_height := 1.0 / hf.ch
-
-    for tri_index in 0..<num_tris {
-        v0 := [3]f32{
-            verts[(tri_index * 3 + 0) * 3 + 0],
-            verts[(tri_index * 3 + 0) * 3 + 1],
-            verts[(tri_index * 3 + 0) * 3 + 2],
-        }
-        v1 := [3]f32{
-            verts[(tri_index * 3 + 1) * 3 + 0],
-            verts[(tri_index * 3 + 1) * 3 + 1],
-            verts[(tri_index * 3 + 1) * 3 + 2],
-        }
-        v2 := [3]f32{
-            verts[(tri_index * 3 + 2) * 3 + 0],
-            verts[(tri_index * 3 + 2) * 3 + 1],
-            verts[(tri_index * 3 + 2) * 3 + 2],
         }
 
         if !rasterize_tri(v0, v1, v2, tri_area_ids[tri_index], hf, hf.bmin, hf.bmax,
@@ -688,147 +620,4 @@ rc_mark_walkable_triangles_u16 :: proc(walkable_slope_angle: f32,
             areas[i] = RC_WALKABLE_AREA
         }
     }
-}
-
-// Rasterize a box into the heightfield
-rasterize_box :: proc(bmin, bmax: [3]f32,
-                        area_id: u8, hf: ^Heightfield,
-                        flag_merge_threshold: i32) -> bool {
-    // Removed timer code for simplicity
-
-    w := hf.width
-    h := hf.height
-    hf_bmin := hf.bmin
-    hf_bmax := hf.bmax
-    cs := hf.cs
-    ch := hf.ch
-    ics := 1.0 / cs
-    ich := 1.0 / ch
-
-    // Clip the box to heightfield bounds
-    box_min := [3]f32{
-        max(bmin.x, hf_bmin.x),
-        max(bmin.y, hf_bmin.y),
-        max(bmin.z, hf_bmin.z),
-    }
-    box_max := [3]f32{
-        min(bmax.x, hf_bmax.x),
-        min(bmax.y, hf_bmax.y),
-        min(bmax.z, hf_bmax.z),
-    }
-
-    // Early out if box doesn't overlap heightfield
-    if box_min.x >= box_max.x || box_min.y >= box_max.y || box_min.z >= box_max.z {
-        return true
-    }
-
-    // Calculate cell coordinates
-    x0 := i32((box_min.x - hf_bmin.x) * ics)
-    y0 := i32((box_min.y - hf_bmin.y) * ich)
-    z0 := i32((box_min.z - hf_bmin.z) * ics)
-    x1 := i32((box_max.x - hf_bmin.x) * ics)
-    y1 := i32((box_max.y - hf_bmin.y) * ich)
-    z1 := i32((box_max.z - hf_bmin.z) * ics)
-
-    // Clamp to field bounds
-    x0 = math.clamp(x0, 0, w - 1)
-    x1 = math.clamp(x1, 0, w - 1)
-    z0 = math.clamp(z0, 0, h - 1)
-    z1 = math.clamp(z1, 0, h - 1)
-
-    // Add spans for the box
-    for z := z0; z <= z1; z += 1 {
-        for x := x0; x <= x1; x += 1 {
-            smin := u16(math.clamp(y0, 0, RC_SPAN_MAX_HEIGHT))
-            smax := u16(math.clamp(y1, i32(smin)+1, RC_SPAN_MAX_HEIGHT))
-            if !add_span(hf, x, z, smin, smax, area_id, flag_merge_threshold) {
-                log.error("rcRasterizeBox: Out of memory.")
-                return false
-            }
-        }
-    }
-
-    return true
-}
-
-// Rasterize a convex volume into the heightfield
-rasterize_convex_volume :: proc(verts: []f32, nverts: i32,
-                                  min_y, max_y: f32,
-                                  area_id: u8, hf: ^Heightfield,
-                                  flag_merge_threshold: i32) -> bool {
-    // Removed timer code for simplicity
-
-    w := hf.width
-    h := hf.height
-    hf_bmin := hf.bmin
-    hf_bmax := hf.bmax
-    cs := hf.cs
-    ch := hf.ch
-    ics := 1.0 / cs
-    ich := 1.0 / ch
-
-    // Calculate the bounding box of the polygon
-    poly_min := [3]f32{verts[0], min_y, verts[2]}
-    poly_max := [3]f32{verts[0], max_y, verts[2]}
-
-    for i in 1..<nverts {
-        poly_min.x = min(poly_min.x, verts[i*3+0])
-        poly_min.z = min(poly_min.z, verts[i*3+2])
-        poly_max.x = max(poly_max.x, verts[i*3+0])
-        poly_max.z = max(poly_max.z, verts[i*3+2])
-    }
-
-    // Clip to heightfield bounds
-    poly_min.x = max(poly_min.x, hf_bmin.x)
-    poly_min.y = max(poly_min.y, hf_bmin.y)
-    poly_min.z = max(poly_min.z, hf_bmin.z)
-    poly_max.x = min(poly_max.x, hf_bmax.x)
-    poly_max.y = min(poly_max.y, hf_bmax.y)
-    poly_max.z = min(poly_max.z, hf_bmax.z)
-
-    // Early out if no overlap
-    if poly_min.x >= poly_max.x || poly_min.y >= poly_max.y || poly_min.z >= poly_max.z {
-        return true
-    }
-
-    // Calculate cell coordinates
-    x0 := i32((poly_min.x - hf_bmin.x) * ics)
-    y0 := i32((poly_min.y - hf_bmin.y) * ich)
-    z0 := i32((poly_min.z - hf_bmin.z) * ics)
-    x1 := i32((poly_max.x - hf_bmin.x) * ics)
-    y1 := i32((poly_max.y - hf_bmin.y) * ich)
-    z1 := i32((poly_max.z - hf_bmin.z) * ics)
-
-    // Clamp to field bounds
-    x0 = math.clamp(x0, 0, w - 1)
-    x1 = math.clamp(x1, 0, w - 1)
-    z0 = math.clamp(z0, 0, h - 1)
-    z1 = math.clamp(z1, 0, h - 1)
-
-    // Prepare polygon as [3]f32 array for point-in-poly test
-    poly_verts := make([][3]f32, nverts, context.temp_allocator)
-    for i in 0..<nverts {
-        poly_verts[i] = [3]f32{verts[i*3+0], 0, verts[i*3+2]}
-    }
-
-    // Rasterize cells
-    for z := z0; z <= z1; z += 1 {
-        for x := x0; x <= x1; x += 1 {
-            // Test if cell center is inside the polygon
-            cell_x := hf_bmin.x + (f32(x) + 0.5) * cs
-            cell_z := hf_bmin.z + (f32(z) + 0.5) * cs
-            pt := [3]f32{cell_x, 0, cell_z}
-
-            if point_in_polygon_2d(pt, poly_verts) {
-                smin := u16(math.clamp(y0, 0, RC_SPAN_MAX_HEIGHT))
-                smax := u16(math.clamp(y1, i32(smin)+1, RC_SPAN_MAX_HEIGHT))
-                if !add_span(hf, x, z, smin, smax, area_id, flag_merge_threshold) {
-                    log.error("rcRasterizeConvexVolume: Out of memory.")
-                    return false
-                }
-            }
-        }
-    }
-
-    return true
 }
