@@ -11,18 +11,18 @@ find_straight_path :: proc(query: ^Nav_Mesh_Query,
                              path: []nav_recast.Poly_Ref, path_count: i32,
                              straight_path: []Straight_Path_Point,
                              straight_path_flags: []u8, straight_path_refs: []nav_recast.Poly_Ref,
-                             straight_path_count: ^i32, max_straight_path: i32,
-                             options: u32) -> nav_recast.Status {
+                             max_straight_path: i32,
+                             options: u32) -> (status: nav_recast.Status, straight_path_count: i32) {
 
-    straight_path_count^ = 0
+    straight_path_count = 0
 
     // Validate input parameters
     if query == nil || query.nav_mesh == nil {
-        return {.Invalid_Param}
+        return {.Invalid_Param}, straight_path_count
     }
 
     if path_count == 0 {
-        return {.Invalid_Param}
+        return {.Invalid_Param}, straight_path_count
     }
 
     stat := nav_recast.Status{}
@@ -272,14 +272,14 @@ find_straight_path :: proc(query: ^Nav_Mesh_Query,
         stat |= {.Buffer_Too_Small}
     }
 
-    straight_path_count^ = i32(n_straight_path)
+    straight_path_count = i32(n_straight_path)
 
     // If no errors occurred, mark as successful
     if stat == {} {
         stat |= {.Success}
     }
 
-    return stat
+    return stat, straight_path_count
 }
 
 // Get portal points between two adjacent polygons

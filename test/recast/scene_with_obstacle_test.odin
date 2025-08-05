@@ -37,7 +37,7 @@ test_scene_with_obstacle :: proc(t: ^testing.T) {
     }
 
     // Calculate grid dimensions
-    nav_recast.calc_grid_size(&config.bmin, &config.bmax, config.cs, &config.width, &config.height)
+    config.width, config.height = nav_recast.calc_grid_size(config.bmin, config.bmax, config.cs)
 
     // Create input mesh: flat ground with a box obstacle in the middle
     vertices := make([dynamic]f32)

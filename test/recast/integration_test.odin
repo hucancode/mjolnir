@@ -50,10 +50,10 @@ test_complete_navmesh_generation_simple :: proc(t: ^testing.T) {
     cfg := create_test_config(0.3, 0.2)
 
     // Calculate bounds
-    recast.calc_bounds(verts, 4, &cfg.bmin, &cfg.bmax)
+    cfg.bmin, cfg.bmax = recast.calc_bounds(verts, 4)
 
     // Calculate grid size
-    recast.calc_grid_size(&cfg.bmin, &cfg.bmax, cfg.cs, &cfg.width, &cfg.height)
+    cfg.width, cfg.height = recast.calc_grid_size(cfg.bmin, cfg.bmax, cfg.cs)
 
     // Create heightfield
     hf := recast.alloc_heightfield()
@@ -226,10 +226,10 @@ test_navmesh_with_obstacles :: proc(t: ^testing.T) {
     cfg := create_test_config(0.3, 0.2)
 
     // Calculate bounds
-    recast.calc_bounds(verts, 12, &cfg.bmin, &cfg.bmax)
+    cfg.bmin, cfg.bmax = recast.calc_bounds(verts, 12)
 
     // Calculate grid size
-    recast.calc_grid_size(&cfg.bmin, &cfg.bmax, cfg.cs, &cfg.width, &cfg.height)
+    cfg.width, cfg.height = recast.calc_grid_size(cfg.bmin, cfg.bmax, cfg.cs)
 
     // Create heightfield
     hf := recast.alloc_heightfield()
@@ -402,10 +402,10 @@ test_navmesh_with_slopes :: proc(t: ^testing.T) {
     cfg.walkable_slope_angle = 30.0  // Allow 30 degree slopes
 
     // Calculate bounds
-    recast.calc_bounds(verts, 4, &cfg.bmin, &cfg.bmax)
+    cfg.bmin, cfg.bmax = recast.calc_bounds(verts, 4)
 
     // Calculate grid size
-    recast.calc_grid_size(&cfg.bmin, &cfg.bmax, cfg.cs, &cfg.width, &cfg.height)
+    cfg.width, cfg.height = recast.calc_grid_size(cfg.bmin, cfg.bmax, cfg.cs)
 
     // Create heightfield
     hf := recast.alloc_heightfield()
@@ -470,8 +470,8 @@ test_navmesh_area_marking :: proc(t: ^testing.T) {
     cfg := create_test_config(0.5, 0.2)
 
     // Calculate bounds and grid
-    recast.calc_bounds(verts, 4, &cfg.bmin, &cfg.bmax)
-    recast.calc_grid_size(&cfg.bmin, &cfg.bmax, cfg.cs, &cfg.width, &cfg.height)
+    cfg.bmin, cfg.bmax = recast.calc_bounds(verts, 4)
+    cfg.width, cfg.height = recast.calc_grid_size(cfg.bmin, cfg.bmax, cfg.cs)
 
     // Create and build heightfield
     hf := recast.alloc_heightfield()
@@ -584,10 +584,10 @@ test_navmesh_performance :: proc(t: ^testing.T) {
     cfg := create_test_config(0.3, 0.2)
 
     // Calculate bounds
-    recast.calc_bounds(verts, i32(vert_count), &cfg.bmin, &cfg.bmax)
+    cfg.bmin, cfg.bmax = recast.calc_bounds(verts, i32(vert_count))
 
     // Calculate grid size
-    recast.calc_grid_size(&cfg.bmin, &cfg.bmax, cfg.cs, &cfg.width, &cfg.height)
+    cfg.width, cfg.height = recast.calc_grid_size(cfg.bmin, cfg.bmax, cfg.cs)
 
     log.infof("Performance test: %d vertices, %d triangles, grid %dx%d",
               vert_count, tri_count, cfg.width, cfg.height)

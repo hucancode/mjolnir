@@ -40,7 +40,7 @@ test_debug_helper :: proc(t: ^testing.T) {
     bmin: [3]f32
     bmax: [3]f32
     
-    nav_recast.calc_bounds(verts, 4, &bmin, &bmax)
+    bmin, bmax = nav_recast.calc_bounds(verts, 4)
     
     log.infof("Bounds: min=%v, max=%v", bmin, bmax)
     

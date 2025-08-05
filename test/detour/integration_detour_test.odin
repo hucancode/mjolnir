@@ -36,13 +36,13 @@ test_integration_pathfinding_priority_queue :: proc(t: ^testing.T) {
     
     start_ref := nav_recast.Poly_Ref(0)
     start_nearest := [3]f32{}
-    status = nav_detour.find_nearest_poly(&query, start_pos, half_extents, &filter, &start_ref, &start_nearest)
+    status, start_ref, start_nearest = nav_detour.find_nearest_poly(&query, start_pos, half_extents, &filter)
     testing.expect(t, nav_recast.status_succeeded(status), "Should find start polygon")
     testing.expect(t, start_ref != nav_recast.INVALID_POLY_REF, "Start reference should be valid")
     
     end_ref := nav_recast.Poly_Ref(0)
     end_nearest := [3]f32{}
-    status = nav_detour.find_nearest_poly(&query, end_pos, half_extents, &filter, &end_ref, &end_nearest)
+    status, end_ref, end_nearest = nav_detour.find_nearest_poly(&query, end_pos, half_extents, &filter)
     testing.expect(t, nav_recast.status_succeeded(status), "Should find end polygon")
     testing.expect(t, end_ref != nav_recast.INVALID_POLY_REF, "End reference should be valid")
     
@@ -50,10 +50,9 @@ test_integration_pathfinding_priority_queue :: proc(t: ^testing.T) {
     path := make([]nav_recast.Poly_Ref, 64)
     defer delete(path)
     
-    path_count := i32(0)
-    status = nav_detour.find_path(&query, start_ref, end_ref, start_nearest, end_nearest, 
-                                    &filter, path, &path_count, 64)
-    testing.expect(t, nav_recast.status_succeeded(status), "Pathfinding should succeed")
+    path_status, path_count := nav_detour.find_path(&query, start_ref, end_ref, start_nearest, end_nearest, 
+                                                &filter, path, 64)
+    testing.expect(t, nav_recast.status_succeeded(path_status), "Pathfinding should succeed")
     testing.expect(t, path_count > 0, "Path should contain at least one polygon")
     testing.expect_value(t, path[0], start_ref)
 }
@@ -94,14 +93,12 @@ test_integration_multiple_pathfinding_operations :: proc(t: ^testing.T) {
     end_pos1 := [3]f32{3.0, 0.0, 3.0}
     half_extents := [3]f32{1.0, 1.0, 1.0}
     
-    start_ref1 := nav_recast.Poly_Ref(0)
-    start_nearest1 := [3]f32{}
-    status := nav_detour.find_nearest_poly(&query1, start_pos1, half_extents, &filter, &start_ref1, &start_nearest1)
+    status, start_ref1, start_nearest1 := nav_detour.find_nearest_poly(&query1, start_pos1, half_extents, &filter)
     testing.expect(t, nav_recast.status_succeeded(status), "Should find start polygon for query1")
     
     end_ref1 := nav_recast.Poly_Ref(0)
     end_nearest1 := [3]f32{}
-    status = nav_detour.find_nearest_poly(&query1, end_pos1, half_extents, &filter, &end_ref1, &end_nearest1)
+    status, end_ref1, end_nearest1 = nav_detour.find_nearest_poly(&query1, end_pos1, half_extents, &filter)
     testing.expect(t, nav_recast.status_succeeded(status), "Should find end polygon for query1")
     
     // Query 2 - longer path
@@ -110,12 +107,12 @@ test_integration_multiple_pathfinding_operations :: proc(t: ^testing.T) {
     
     start_ref2 := nav_recast.Poly_Ref(0)
     start_nearest2 := [3]f32{}
-    status = nav_detour.find_nearest_poly(&query2, start_pos2, half_extents, &filter, &start_ref2, &start_nearest2)
+    status, start_ref2, start_nearest2 = nav_detour.find_nearest_poly(&query2, start_pos2, half_extents, &filter)
     testing.expect(t, nav_recast.status_succeeded(status), "Should find start polygon for query2")
     
     end_ref2 := nav_recast.Poly_Ref(0)
     end_nearest2 := [3]f32{}
-    status = nav_detour.find_nearest_poly(&query2, end_pos2, half_extents, &filter, &end_ref2, &end_nearest2)
+    status, end_ref2, end_nearest2 = nav_detour.find_nearest_poly(&query2, end_pos2, half_extents, &filter)
     testing.expect(t, nav_recast.status_succeeded(status), "Should find end polygon for query2")
     
     // Interleave pathfinding operations to test context switching
@@ -124,19 +121,16 @@ test_integration_multiple_pathfinding_operations :: proc(t: ^testing.T) {
     path2 := make([]nav_recast.Poly_Ref, 32)
     defer delete(path2)
     
-    path_count1 := i32(0)
-    path_count2 := i32(0)
-    
     // First pathfinding on query1
-    status = nav_detour.find_path(&query1, start_ref1, end_ref1, start_nearest1, end_nearest1,
-                                    &filter, path1, &path_count1, 32)
-    testing.expect(t, nav_recast.status_succeeded(status), "Pathfinding on query1 should succeed")
+    path_status1, path_count1 := nav_detour.find_path(&query1, start_ref1, end_ref1, start_nearest1, end_nearest1,
+                                                 &filter, path1, 32)
+    testing.expect(t, nav_recast.status_succeeded(path_status1), "Pathfinding on query1 should succeed")
     testing.expect(t, path_count1 > 0, "Path1 should contain at least one polygon")
     
     // Then pathfinding on query2
-    status = nav_detour.find_path(&query2, start_ref2, end_ref2, start_nearest2, end_nearest2,
-                                    &filter, path2, &path_count2, 32)
-    testing.expect(t, nav_recast.status_succeeded(status), "Pathfinding on query2 should succeed")
+    path_status2, path_count2 := nav_detour.find_path(&query2, start_ref2, end_ref2, start_nearest2, end_nearest2,
+                                                 &filter, path2, 32)
+    testing.expect(t, nav_recast.status_succeeded(path_status2), "Pathfinding on query2 should succeed")
     testing.expect(t, path_count2 > 0, "Path2 should contain at least one polygon")
     
     // Verify both paths are valid and contain their expected start polygons

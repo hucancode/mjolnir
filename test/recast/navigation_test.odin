@@ -48,10 +48,10 @@ test_basic_navigation_mesh_generation :: proc(t: ^testing.T) {
     cfg.detail_sample_max_error = 1
     
     // Calculate bounds
-    recast.calc_bounds(verts, 6, &cfg.bmin, &cfg.bmax)
+    cfg.bmin, cfg.bmax = recast.calc_bounds(verts, 6)
     
     // Calculate grid size
-    recast.calc_grid_size(&cfg.bmin, &cfg.bmax, cfg.cs, &cfg.width, &cfg.height)
+    cfg.width, cfg.height = recast.calc_grid_size(cfg.bmin, cfg.bmax, cfg.cs)
     
     testing.expect_value(t, cfg.width, 33)
     testing.expect_value(t, cfg.height, 33)
@@ -133,7 +133,7 @@ test_bounds_calculation :: proc(t: ^testing.T) {
     }
     
     bmin, bmax: [3]f32
-    recast.calc_bounds(verts, 8, &bmin, &bmax)
+    bmin, bmax = recast.calc_bounds(verts, 8)
     
     testing.expect_value(t, bmin.x, 0.0)
     testing.expect_value(t, bmin.y, 0.0)
@@ -151,12 +151,12 @@ test_grid_size_calculation :: proc(t: ^testing.T) {
     width, height: i32
     
     // Test with cell size 1.0
-    recast.calc_grid_size(&bmin, &bmax, 1.0, &width, &height)
+    width, height = recast.calc_grid_size(bmin, bmax, 1.0)
     testing.expect_value(t, width, 10)
     testing.expect_value(t, height, 20)
     
     // Test with cell size 0.5
-    recast.calc_grid_size(&bmin, &bmax, 0.5, &width, &height)
+    width, height = recast.calc_grid_size(bmin, bmax, 0.5)
     testing.expect_value(t, width, 20)
     testing.expect_value(t, height, 40)
 }

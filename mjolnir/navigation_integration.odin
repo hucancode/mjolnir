@@ -476,18 +476,17 @@ nav_find_path :: proc(engine: ^Engine, context_handle: Handle, start: [3]f32, en
     // Find nearest polygon to start and end positions
     half_extents := [3]f32{2.0, 4.0, 2.0}  // Search area for finding polygons
     
-    start_ref: nav_recast.Poly_Ref
-    start_pos: [3]f32
-    status := detour.find_nearest_poly(&nav_context.nav_mesh_query, start, half_extents, &nav_context.query_filter, &start_ref, &start_pos)
+    status, start_ref, start_pos := detour.find_nearest_poly(&nav_context.nav_mesh_query, start, half_extents, &nav_context.query_filter)
     if nav_recast.status_failed(status) || start_ref == nav_recast.INVALID_POLY_REF {
         log.errorf("Failed to find start polygon for pathfinding at position %v", start)
         return nil, false
     }
     
+    status2: nav_recast.Status
     end_ref: nav_recast.Poly_Ref
     end_pos: [3]f32
-    status = detour.find_nearest_poly(&nav_context.nav_mesh_query, end, half_extents, &nav_context.query_filter, &end_ref, &end_pos)
-    if nav_recast.status_failed(status) || end_ref == nav_recast.INVALID_POLY_REF {
+    status2, end_ref, end_pos = detour.find_nearest_poly(&nav_context.nav_mesh_query, end, half_extents, &nav_context.query_filter)
+    if nav_recast.status_failed(status2) || end_ref == nav_recast.INVALID_POLY_REF {
         log.errorf("Failed to find end polygon for pathfinding at position %v", end)
         return nil, false
     }
@@ -495,28 +494,24 @@ nav_find_path :: proc(engine: ^Engine, context_handle: Handle, start: [3]f32, en
     // Find path between polygons
     poly_path := make([]nav_recast.Poly_Ref, max_path_length)
     defer delete(poly_path)
-    path_count: i32
+    path_status, path_count := detour.find_path(&nav_context.nav_mesh_query, start_ref, end_ref, start_pos, end_pos, 
+                                           &nav_context.query_filter, poly_path[:], max_path_length)
     
-    status = detour.find_path(&nav_context.nav_mesh_query, start_ref, end_ref, start_pos, end_pos, 
-                                &nav_context.query_filter, poly_path[:], &path_count, max_path_length)
-    
-    if nav_recast.status_failed(status) || path_count == 0 {
-        log.errorf("Failed to find path from %v to %v: %v", start, end, status)
+    if nav_recast.status_failed(path_status) || path_count == 0 {
+        log.errorf("Failed to find path from %v to %v: %v", start, end, path_status)
         return nil, false
     }
     
     // Convert polygon path to straight path (string pulling)
     straight_path := make([]detour.Straight_Path_Point, max_path_length)
     defer delete(straight_path)
-    straight_path_count: i32
+    straight_status, straight_path_count := detour.find_straight_path(&nav_context.nav_mesh_query, start_pos, end_pos, 
+                                                              poly_path[:path_count], path_count,
+                                                              straight_path[:], nil, nil, 
+                                                              max_path_length, u32(detour.Straight_Path_Options.All_Crossings))
     
-    status = detour.find_straight_path(&nav_context.nav_mesh_query, start_pos, end_pos, 
-                                         poly_path[:path_count], path_count,
-                                         straight_path[:], nil, nil, &straight_path_count, 
-                                         max_path_length, u32(detour.Straight_Path_Options.All_Crossings))
-    
-    if nav_recast.status_failed(status) || straight_path_count == 0 {
-        log.errorf("Failed to create straight path: %v", status)
+    if nav_recast.status_failed(straight_status) || straight_path_count == 0 {
+        log.errorf("Failed to create straight path: %v", straight_status)
         return nil, false
     }
     
@@ -537,11 +532,9 @@ nav_is_position_walkable :: proc(engine: ^Engine, context_handle: Handle, positi
         return false
     }
     
-    poly_ref: nav_recast.Poly_Ref
-    nearest_pos: [3]f32
     half_extents := [3]f32{1.0, 2.0, 1.0}
     
-    status := detour.find_nearest_poly(&nav_context.nav_mesh_query, position, half_extents, &nav_context.query_filter, &poly_ref, &nearest_pos)
+    status, poly_ref, nearest_pos := detour.find_nearest_poly(&nav_context.nav_mesh_query, position, half_extents, &nav_context.query_filter)
     return nav_recast.status_succeeded(status) && poly_ref != nav_recast.INVALID_POLY_REF
 }
 

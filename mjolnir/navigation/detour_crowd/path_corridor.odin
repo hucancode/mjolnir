@@ -117,7 +117,7 @@ path_corridor_optimize_path_visibility :: proc(corridor: ^Path_Corridor, next: [
     defer delete(result_path)
     
     // Perform raycast to see how far we can optimize
-    hit, status := detour.raycast(nav_query, corridor.path[0], corridor.position, next, filter)
+    status, hit, _ := detour.raycast(nav_query, corridor.path[0], corridor.position, next, filter, 0, result_path, corridor.max_path)
     if nav_recast.status_failed(status) {
         return status
     }

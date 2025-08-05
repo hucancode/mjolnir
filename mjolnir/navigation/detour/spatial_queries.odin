@@ -8,11 +8,12 @@ import nav_recast "../recast"
 
 // Find nearest polygon to given position
 find_nearest_poly :: proc(query: ^Nav_Mesh_Query, center: [3]f32, half_extents: [3]f32,
-                            filter: ^Query_Filter, nearest_ref: ^nav_recast.Poly_Ref,
-                            nearest_pt: ^[3]f32) -> nav_recast.Status {
+                            filter: ^Query_Filter) -> (status: nav_recast.Status,
+                                                      nearest_ref: nav_recast.Poly_Ref,
+                                                      nearest_pt: [3]f32) {
 
-    nearest_ref^ = nav_recast.INVALID_POLY_REF
-    nearest_pt^ = center
+    nearest_ref = nav_recast.INVALID_POLY_REF
+    nearest_pt = center
 
     // Calculate query bounds
     bmin := center - half_extents
@@ -62,22 +63,21 @@ find_nearest_poly :: proc(query: ^Nav_Mesh_Query, center: [3]f32, half_extents: 
                 // Check if this is the nearest so far
                 if dist_sqr < nearest_dist_sqr {
                     nearest_dist_sqr = dist_sqr
-                    nearest_ref^ = ref
-                    nearest_pt^ = closest_pt
+                    nearest_ref = ref
+                    nearest_pt = closest_pt
                 }
             }
         }
     }
 
-    return {.Success}
+    return {.Success}, nearest_ref, nearest_pt
 }
 
 // Query polygons within bounding box
 query_polygons :: proc(query: ^Nav_Mesh_Query, center: [3]f32, half_extents: [3]f32,
-                         filter: ^Query_Filter, polys: []nav_recast.Poly_Ref,
-                         poly_count: ^i32, max_polys: i32) -> nav_recast.Status {
+                         filter: ^Query_Filter, polys: []nav_recast.Poly_Ref) -> (status: nav_recast.Status, poly_count: i32) {
 
-    poly_count^ = 0
+    poly_count = 0
 
     // Calculate query bounds
     bmin := center - half_extents
@@ -98,47 +98,48 @@ query_polygons :: proc(query: ^Nav_Mesh_Query, center: [3]f32, half_extents: [3]
             log.infof("  Found tile at (%d,%d) with %d polygons", tx, ty, tile.header.poly_count)
 
             // Query polygons in tile
-            remaining := max_polys - poly_count^
+            remaining := i32(len(polys)) - poly_count
             if remaining <= 0 {
                 break
             }
 
             tile_poly_count := query_polygons_in_tile(query.nav_mesh, tile, bmin, bmax,
-                                                        polys[poly_count^:], remaining)
+                                                        polys[poly_count:], remaining)
 
             // Apply filter
             filtered_count := i32(0)
             for i in 0..<tile_poly_count {
-                ref := polys[poly_count^ + i]
+                ref := polys[poly_count + i]
                 tile_poly, poly, poly_status := get_tile_and_poly_by_ref(query.nav_mesh, ref)
                 if nav_recast.status_succeeded(poly_status) &&
                    query_filter_pass_filter(filter, ref, tile_poly, poly) {
 
-                    polys[poly_count^ + filtered_count] = ref
+                    polys[poly_count + filtered_count] = ref
                     filtered_count += 1
                 }
             }
 
-            poly_count^ += filtered_count
+            poly_count += filtered_count
         }
     }
 
-    return {.Success}
+    return {.Success}, poly_count
 }
 
 // Raycast along navigation mesh surface
 raycast :: proc(query: ^Nav_Mesh_Query, start_ref: nav_recast.Poly_Ref, start_pos: [3]f32,
                   end_pos: [3]f32, filter: ^Query_Filter, options: u32,
-                  hit: ^Raycast_Hit, path: []nav_recast.Poly_Ref, path_count: ^i32,
-                  max_path: i32) -> nav_recast.Status {
+                  path: []nav_recast.Poly_Ref, max_path: i32) -> (status: nav_recast.Status,
+                                                                   hit: Raycast_Hit,
+                                                                   path_count: i32) {
 
-    path_count^ = 0
+    path_count = 0
     hit.t = math.F32_MAX
     hit.path_cost = 0
     hit.hit_edge_index = -1
 
     if !is_valid_poly_ref(query.nav_mesh, start_ref) {
-        return {.Invalid_Param}
+        return {.Invalid_Param}, hit, 0
     }
 
     cur_ref := start_ref
@@ -147,7 +148,7 @@ raycast :: proc(query: ^Nav_Mesh_Query, start_ref: nav_recast.Poly_Ref, start_po
     ray_len := linalg.length(dir)
 
     if ray_len < 1e-6 {
-        return {.Success}
+        return {.Success}, hit, path_count
     }
 
     ray_dir := dir / ray_len
@@ -155,7 +156,7 @@ raycast :: proc(query: ^Nav_Mesh_Query, start_ref: nav_recast.Poly_Ref, start_po
     // Add start polygon to path
     if max_path > 0 {
         path[0] = start_ref
-        path_count^ = 1
+        path_count = 1
     }
 
     cur_t := f32(0)
@@ -209,7 +210,7 @@ raycast :: proc(query: ^Nav_Mesh_Query, start_ref: nav_recast.Poly_Ref, start_po
                     hit.hit_normal = {edge_dir.z, 0, -edge_dir.x} // Perpendicular in 2D
                     hit.hit_normal = linalg.normalize(hit.hit_normal)
 
-                    return {.Success}
+                    return {.Success}, hit, path_count
                 }
             }
         }
@@ -225,9 +226,9 @@ raycast :: proc(query: ^Nav_Mesh_Query, start_ref: nav_recast.Poly_Ref, start_po
         cur_pos = start_pos + ray_dir * cur_t
 
         // Add to path
-        if path_count^ < max_path {
-            path[path_count^] = cur_ref
-            path_count^ += 1
+        if path_count < max_path {
+            path[path_count] = cur_ref
+            path_count += 1
         }
 
         // Calculate cost if requested
@@ -245,7 +246,7 @@ raycast :: proc(query: ^Nav_Mesh_Query, start_ref: nav_recast.Poly_Ref, start_po
 
     // Ray completed without hitting walls
     hit.t = ray_len
-    return {.Success}
+    return {.Success}, hit, path_count
 }
 
 // Find random point on navigation mesh
@@ -305,7 +306,10 @@ find_random_point_around_circle :: proc(query: ^Nav_Mesh_Query, start_ref: nav_r
 
     // Find nearest polygon to target
     half_extents := [3]f32{max_radius, max_radius, max_radius}
-    return find_nearest_poly(query, target, half_extents, filter, random_ref, random_pt)
+    status, ref, pt := find_nearest_poly(query, target, half_extents, filter)
+    random_ref^ = ref
+    random_pt^ = pt
+    return status
 }
 
 // Helper functions

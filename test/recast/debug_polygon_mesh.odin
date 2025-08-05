@@ -42,8 +42,8 @@ test_debug_polygon_mesh :: proc(t: ^testing.T) {
     cfg.max_verts_per_poly = 6
     
     // Calculate bounds
-    nav_recast.calc_bounds(verts, 4, &cfg.bmin, &cfg.bmax)
-    nav_recast.calc_grid_size(&cfg.bmin, &cfg.bmax, cfg.cs, &cfg.width, &cfg.height)
+    cfg.bmin, cfg.bmax = nav_recast.calc_bounds(verts, 4)
+    cfg.width, cfg.height = nav_recast.calc_grid_size(cfg.bmin, cfg.bmax, cfg.cs)
     
     log.infof("Config: bmin=%v, bmax=%v, grid=%dx%d", cfg.bmin, cfg.bmax, cfg.width, cfg.height)
     

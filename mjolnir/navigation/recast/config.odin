@@ -3,15 +3,13 @@ package navigation_recast
 import "core:math"
 
 // Calculate bounds from vertices
-calc_bounds :: proc(verts: []f32, nverts: i32, bmin, bmax: ^[3]f32) {
+calc_bounds :: proc(verts: []f32, nverts: i32) -> (bmin, bmax: [3]f32) {
     if nverts == 0 || len(verts) < 3 {
-        bmin^ = {0, 0, 0}
-        bmax^ = {0, 0, 0}
         return
     }
 
-    bmin^ = {verts[0], verts[1], verts[2]}
-    bmax^ = bmin^
+    bmin = {verts[0], verts[1], verts[2]}
+    bmax = bmin
 
     for i in 1..<nverts {
         v := [3]f32{verts[i*3+0], verts[i*3+1], verts[i*3+2]}
@@ -22,12 +20,15 @@ calc_bounds :: proc(verts: []f32, nverts: i32, bmin, bmax: ^[3]f32) {
         bmax.y = max(bmax.y, v.y)
         bmax.z = max(bmax.z, v.z)
     }
+
+    return
 }
 
 // Calculate grid size from bounds and cell size
-calc_grid_size :: proc(bmin, bmax: ^[3]f32, cs: f32, w, h: ^i32) {
-    w^ = i32((bmax.x - bmin.x) / cs + 0.5)
-    h^ = i32((bmax.z - bmin.z) / cs + 0.5)
+calc_grid_size :: proc(bmin, bmax: [3]f32, cs: f32) -> (w, h: i32) {
+    w = i32((bmax.x - bmin.x) / cs + 0.5)
+    h = i32((bmax.z - bmin.z) / cs + 0.5)
+    return
 }
 
 // Calculate grid size from config

@@ -920,8 +920,8 @@ Triangle_Edge :: struct {
 }
 
 // Check if two triangles share an edge
-triangles_share_edge :: proc(tri1, tri2: []i32, shared_edge: ^[2]i32) -> bool {
-    if len(tri1) < 3 || len(tri2) < 3 do return false
+triangles_share_edge :: proc(tri1, tri2: []i32) -> (shares: bool, shared_edge: [2]i32) {
+    if len(tri1) < 3 || len(tri2) < 3 do return false, {}
 
     // Check all edge combinations
     for i in 0..<3 {
@@ -934,14 +934,12 @@ triangles_share_edge :: proc(tri1, tri2: []i32, shared_edge: ^[2]i32) -> bool {
 
             // Check if edges match (in either direction)
             if (v1a == v2a && v1b == v2b) || (v1a == v2b && v1b == v2a) {
-                shared_edge[0] = v1a
-                shared_edge[1] = v1b
-                return true
+                return true, {v1a, v1b}
             }
         }
     }
 
-    return false
+    return false, {}
 }
 
 // Get vertices of a polygon formed by merging triangles
@@ -1098,8 +1096,7 @@ merge_triangles_into_polygons :: proc(triangles: []i32, polys: ^[dynamic]Poly_Bu
                     tri1 := triangles[base1:base1 + 3]
                     tri2 := triangles[base2:base2 + 3]
 
-                    shared_edge: [2]i32
-                    if triangles_share_edge(tri1, tri2, &shared_edge) {
+                    if shares, _ := triangles_share_edge(tri1, tri2); shares {
                         can_merge = true
                         break
                     }

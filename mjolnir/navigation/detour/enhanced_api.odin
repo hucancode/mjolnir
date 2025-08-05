@@ -234,9 +234,7 @@ nav_find_path_enhanced :: proc(ctx: ^Enhanced_Nav_Context, start_pos: [3]f32, en
     }
     
     // Find start polygon
-    start_ref := nav_recast.Poly_Ref(0)
-    start_nearest := [3]f32{}
-    start_status := find_nearest_poly(&ctx.query, start_pos, search_extents, &ctx.filter, &start_ref, &start_nearest)
+    start_status, start_ref, start_nearest := find_nearest_poly(&ctx.query, start_pos, search_extents, &ctx.filter)
     
     if nav_recast.status_failed(start_status) {
         return Path_Result{
@@ -251,9 +249,7 @@ nav_find_path_enhanced :: proc(ctx: ^Enhanced_Nav_Context, start_pos: [3]f32, en
     }
     
     // Find end polygon
-    end_ref := nav_recast.Poly_Ref(0)
-    end_nearest := [3]f32{}
-    end_status := find_nearest_poly(&ctx.query, end_pos, search_extents, &ctx.filter, &end_ref, &end_nearest)
+    end_status, end_ref, end_nearest := find_nearest_poly(&ctx.query, end_pos, search_extents, &ctx.filter)
     
     if nav_recast.status_failed(end_status) {
         return Path_Result{
@@ -282,9 +278,8 @@ nav_find_path_enhanced :: proc(ctx: ^Enhanced_Nav_Context, start_pos: [3]f32, en
     path_refs := make([]nav_recast.Poly_Ref, max_waypoints)
     defer delete(path_refs)
     
-    path_count := i32(0)
-    path_status := find_path(&ctx.query, start_ref, end_ref, start_nearest, end_nearest,
-                               &ctx.filter, path_refs, &path_count, i32(max_waypoints))
+    path_status, path_count := find_path(&ctx.query, start_ref, end_ref, start_nearest, end_nearest,
+                                          &ctx.filter, path_refs, i32(max_waypoints))
     
     if nav_recast.status_failed(path_status) {
         return Path_Result{
@@ -318,11 +313,10 @@ nav_find_path_enhanced :: proc(ctx: ^Enhanced_Nav_Context, start_pos: [3]f32, en
     straight_path_refs := make([]nav_recast.Poly_Ref, max_waypoints)
     defer delete(straight_path_refs)
     
-    straight_path_count := i32(0)
-    straight_status := find_straight_path(&ctx.query, start_nearest, end_nearest,
-                                           path_refs[:path_count], path_count,
-                                           straight_path, straight_path_flags, straight_path_refs,
-                                           &straight_path_count, i32(max_waypoints), 0)
+    straight_status, straight_path_count := find_straight_path(&ctx.query, start_nearest, end_nearest,
+                                                                path_refs[:path_count], path_count,
+                                                                straight_path, straight_path_flags, straight_path_refs,
+                                                                i32(max_waypoints), 0)
     
     if nav_recast.status_failed(straight_status) && !nav_recast.status_in_progress(straight_status) {
         return Path_Result{
@@ -393,9 +387,7 @@ nav_is_position_valid_enhanced :: proc(ctx: ^Enhanced_Nav_Context, pos: [3]f32,
         search_extents = ctx.default_extents
     }
     
-    poly_ref := nav_recast.Poly_Ref(0)
-    nearest_pt := [3]f32{}
-    status := find_nearest_poly(&ctx.query, pos, search_extents, &ctx.filter, &poly_ref, &nearest_pt)
+    status, poly_ref, nearest_pt := find_nearest_poly(&ctx.query, pos, search_extents, &ctx.filter)
     
     if nav_recast.status_failed(status) {
         return nav_recast.nav_error_here(bool, nav_recast.Nav_Error_Category.Algorithm_Failed,
@@ -423,9 +415,7 @@ nav_get_distance_to_walkable :: proc(ctx: ^Enhanced_Nav_Context, pos: [3]f32,
         search_extents = ctx.default_extents
     }
     
-    poly_ref := nav_recast.Poly_Ref(0)
-    nearest_pt := [3]f32{}
-    status := find_nearest_poly(&ctx.query, pos, search_extents, &ctx.filter, &poly_ref, &nearest_pt)
+    status, poly_ref, nearest_pt := find_nearest_poly(&ctx.query, pos, search_extents, &ctx.filter)
     
     if nav_recast.status_failed(status) {
         return nav_recast.nav_error_here(f32, nav_recast.Nav_Error_Category.Algorithm_Failed,

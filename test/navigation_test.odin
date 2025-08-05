@@ -195,38 +195,32 @@ test_pathfinding :: proc(t: ^testing.T) {
     log.infof("Testing pathfinding from %v to %v", start_pos, end_pos)
     
     // Find nearest polygons
-    start_ref: nav_recast.Poly_Ref
-    start_nearest: [3]f32
-    find_status := nav_detour.find_nearest_poly(query, start_pos, half_extents, &filter, &start_ref, &start_nearest)
+    find_status, start_ref, start_nearest := nav_detour.find_nearest_poly(query, start_pos, half_extents, &filter)
     log.infof("Find start polygon status: %v, ref: %v, nearest: %v", find_status, start_ref, start_nearest)
     testing.expect(t, nav_recast.status_succeeded(find_status), "Failed to find start polygon")
     testing.expect(t, start_ref != nav_recast.INVALID_POLY_REF, "Start polygon should be valid")
     
     end_ref: nav_recast.Poly_Ref
     end_nearest: [3]f32
-    find_status = nav_detour.find_nearest_poly(query, end_pos, half_extents, &filter, &end_ref, &end_nearest)
+    find_status, end_ref, end_nearest = nav_detour.find_nearest_poly(query, end_pos, half_extents, &filter)
     testing.expect(t, nav_recast.status_succeeded(find_status), "Failed to find end polygon")
     testing.expect(t, end_ref != nav_recast.INVALID_POLY_REF, "End polygon should be valid")
     
     // Find path
     path := make([]nav_recast.Poly_Ref, 256)
     defer delete(path)
-    path_count: i32
-    
-    path_status := nav_detour.find_path(query, start_ref, end_ref, start_nearest, end_nearest,
-                                           &filter, path[:], &path_count, 256)
+    path_status, path_count := nav_detour.find_path(query, start_ref, end_ref, start_nearest, end_nearest,
+                                                      &filter, path[:], 256)
     testing.expect(t, nav_recast.status_succeeded(path_status), "Failed to find path")
     testing.expect(t, path_count > 0, "Path should have at least one polygon")
     
     // Convert to straight path
     straight_path := make([]nav_detour.Straight_Path_Point, 256)
     defer delete(straight_path)
-    straight_path_count: i32
-    
-    straight_status := nav_detour.find_straight_path(query, start_nearest, end_nearest,
-                                                       path[:path_count], path_count,
-                                                       straight_path[:], nil, nil, &straight_path_count,
-                                                       256, u32(nav_detour.Straight_Path_Options.All_Crossings))
+    straight_status, straight_path_count := nav_detour.find_straight_path(query, start_nearest, end_nearest,
+                                                                           path[:path_count], path_count,
+                                                                           straight_path[:], nil, nil,
+                                                                           256, u32(nav_detour.Straight_Path_Options.All_Crossings))
     testing.expect(t, nav_recast.status_succeeded(straight_status), "Failed to find straight path")
     testing.expect(t, straight_path_count > 0, "Straight path should have at least one point")
     
@@ -335,9 +329,7 @@ test_navigation_edge_cases :: proc(t: ^testing.T) {
         far_pos := [3]f32{100, 0, 100}
         half_extents := [3]f32{2, 4, 2}
         
-        ref: nav_recast.Poly_Ref
-        nearest: [3]f32
-        status := nav_detour.find_nearest_poly(query, far_pos, half_extents, &filter, &ref, &nearest)
+        status, ref, nearest := nav_detour.find_nearest_poly(query, far_pos, half_extents, &filter)
         
         // Should succeed but return invalid ref if no polygon found
         testing.expect(t, nav_recast.status_succeeded(status), "Query should succeed even if no polygon found")

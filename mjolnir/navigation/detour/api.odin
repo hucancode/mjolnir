@@ -58,17 +58,13 @@ find_path_points :: proc(query: ^Nav_Mesh_Query, start_pos: [3]f32, end_pos: [3]
     half_extents := [3]f32{2.0, 1.0, 2.0}
     
     // Find start polygon
-    start_ref := nav_recast.Poly_Ref(0)
-    start_nearest := [3]f32{}
-    start_status := find_nearest_poly(query, start_pos, half_extents, filter, &start_ref, &start_nearest)
+    start_status, start_ref, start_nearest := find_nearest_poly(query, start_pos, half_extents, filter)
     if nav_recast.status_failed(start_status) || start_ref == nav_recast.INVALID_POLY_REF {
         return 0, start_status
     }
     
     // Find end polygon
-    end_ref := nav_recast.Poly_Ref(0)
-    end_nearest := [3]f32{}
-    end_status := find_nearest_poly(query, end_pos, half_extents, filter, &end_ref, &end_nearest)
+    end_status, end_ref, end_nearest := find_nearest_poly(query, end_pos, half_extents, filter)
     if nav_recast.status_failed(end_status) || end_ref == nav_recast.INVALID_POLY_REF {
         return 0, end_status
     }
@@ -77,8 +73,7 @@ find_path_points :: proc(query: ^Nav_Mesh_Query, start_pos: [3]f32, end_pos: [3]
     poly_path := make([]nav_recast.Poly_Ref, len(path))
     defer delete(poly_path)
     
-    poly_path_count := i32(0)
-    path_status := find_path(query, start_ref, end_ref, start_nearest, end_nearest, filter, poly_path, &poly_path_count, i32(len(path)))
+    path_status, poly_path_count := find_path(query, start_ref, end_ref, start_nearest, end_nearest, filter, poly_path, i32(len(path)))
     if nav_recast.status_failed(path_status) || poly_path_count == 0 {
         return 0, path_status
     }
@@ -93,11 +88,9 @@ find_path_points :: proc(query: ^Nav_Mesh_Query, start_pos: [3]f32, end_pos: [3]
     straight_path_refs := make([]nav_recast.Poly_Ref, len(path))
     defer delete(straight_path_refs)
     
-    straight_path_count := i32(0)
-    
-    straight_status := find_straight_path(query, start_nearest, end_nearest, poly_path[:poly_path_count], poly_path_count,
-                                           straight_path, straight_path_flags, straight_path_refs,
-                                           &straight_path_count, i32(len(path)), 0)
+    straight_status, straight_path_count := find_straight_path(query, start_nearest, end_nearest, poly_path[:poly_path_count], poly_path_count,
+                                                                straight_path, straight_path_flags, straight_path_refs,
+                                                                i32(len(path)), 0)
     if nav_recast.status_failed(straight_status) {
         return 0, straight_status
     }

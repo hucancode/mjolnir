@@ -606,7 +606,7 @@ clear_unwalkable_triangles :: proc(walkable_slope_angle: f32,
         v1 := [3]f32{verts[tri[1]*3+0], verts[tri[1]*3+1], verts[tri[1]*3+2]}
         v2 := [3]f32{verts[tri[2]*3+0], verts[tri[2]*3+1], verts[tri[2]*3+2]}
 
-        calc_tri_normal(v0, v1, v2, &norm)
+        norm = calc_tri_normal(v0, v1, v2)
         // Check if the face is NOT walkable (steep slope)
         if norm.y <= walkable_thr {
             areas[i] = RC_NULL_AREA
@@ -628,7 +628,7 @@ mark_walkable_triangles :: proc(walkable_slope_angle: f32,
         v1 := [3]f32{verts[tri[1]*3+0], verts[tri[1]*3+1], verts[tri[1]*3+2]}
         v2 := [3]f32{verts[tri[2]*3+0], verts[tri[2]*3+1], verts[tri[2]*3+2]}
 
-        calc_tri_normal(v0, v1, v2, &norm)
+        norm = calc_tri_normal(v0, v1, v2)
         // Check if the face is walkable
         if norm.y > walkable_thr {
             areas[i] = RC_WALKABLE_AREA
@@ -638,11 +638,12 @@ mark_walkable_triangles :: proc(walkable_slope_angle: f32,
 
 // Calculate triangle normal
 @(private)
-calc_tri_normal :: proc(v0, v1, v2: [3]f32, norm: ^[3]f32) {
+calc_tri_normal :: proc(v0, v1, v2: [3]f32) -> (norm: [3]f32) {
     e0 := v1 - v0
     e1 := v2 - v0
-    norm^ = linalg.cross(e0, e1)
-    norm^ = linalg.normalize(norm^)
+    norm = linalg.cross(e0, e1)
+    norm = linalg.normalize(norm)
+    return
 }
 
 // Clear unwalkable triangles with 16-bit indices
@@ -659,7 +660,7 @@ rc_clear_unwalkable_triangles_u16 :: proc(walkable_slope_angle: f32,
         v1 := [3]f32{verts[tri[1]*3+0], verts[tri[1]*3+1], verts[tri[1]*3+2]}
         v2 := [3]f32{verts[tri[2]*3+0], verts[tri[2]*3+1], verts[tri[2]*3+2]}
 
-        calc_tri_normal(v0, v1, v2, &norm)
+        norm = calc_tri_normal(v0, v1, v2)
         // Check if the face is NOT walkable (steep slope)
         if norm.y <= walkable_thr {
             areas[i] = RC_NULL_AREA
@@ -681,7 +682,7 @@ rc_mark_walkable_triangles_u16 :: proc(walkable_slope_angle: f32,
         v1 := [3]f32{verts[tri[1]*3+0], verts[tri[1]*3+1], verts[tri[1]*3+2]}
         v2 := [3]f32{verts[tri[2]*3+0], verts[tri[2]*3+1], verts[tri[2]*3+2]}
 
-        calc_tri_normal(v0, v1, v2, &norm)
+        norm = calc_tri_normal(v0, v1, v2)
         // Check if the face is walkable
         if norm.y > walkable_thr {
             areas[i] = RC_WALKABLE_AREA

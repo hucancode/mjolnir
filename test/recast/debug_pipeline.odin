@@ -50,14 +50,14 @@ test_debug_pipeline :: proc(t: ^testing.T) {
     log.infof("  width = %d, height = %d", cfg.width, cfg.height)
     
     // Calculate bounds
-    nav_recast.calc_bounds(verts, 4, &cfg.bmin, &cfg.bmax)
+    cfg.bmin, cfg.bmax = nav_recast.calc_bounds(verts, 4)
     
     log.info("Config after bounds calculation:")
     log.infof("  bmin = %v", cfg.bmin)
     log.infof("  bmax = %v", cfg.bmax)
     
     // Calculate grid size
-    nav_recast.calc_grid_size(&cfg.bmin, &cfg.bmax, cfg.cs, &cfg.width, &cfg.height)
+    cfg.width, cfg.height = nav_recast.calc_grid_size(cfg.bmin, cfg.bmax, cfg.cs)
     
     log.infof("Grid size: %dx%d", cfg.width, cfg.height)
     
