@@ -40,17 +40,17 @@ test_scene_with_obstacle :: proc(t: ^testing.T) {
     config.width, config.height = nav_recast.calc_grid_size(config.bmin, config.bmax, config.cs)
 
     // Create input mesh: flat ground with a box obstacle in the middle
-    vertices := make([dynamic]f32)
+    vertices := make([dynamic][3]f32)
     defer delete(vertices)
     triangles := make([dynamic]i32)
     defer delete(triangles)
 
     // Ground plane (large square from -10 to 10 in X and Z)
     ground_y := f32(0.0)
-    append(&vertices, -10, ground_y, -10)  // 0
-    append(&vertices,  10, ground_y, -10)  // 1
-    append(&vertices,  10, ground_y,  10)  // 2
-    append(&vertices, -10, ground_y,  10)  // 3
+    append(&vertices, [3]f32{-10, ground_y, -10})  // 0
+    append(&vertices, [3]f32{ 10, ground_y, -10})  // 1
+    append(&vertices, [3]f32{ 10, ground_y,  10})  // 2
+    append(&vertices, [3]f32{-10, ground_y,  10})  // 3
 
     // Ground triangles
     append(&triangles, 0, 1, 2)
@@ -61,17 +61,17 @@ test_scene_with_obstacle :: proc(t: ^testing.T) {
     box_min_z, box_max_z := f32(-1), f32(1)
     box_min_y, box_max_y := f32(0), f32(3)
 
-    base_idx := i32(len(vertices) / 3)
+    base_idx := i32(len(vertices))
 
     // Box vertices (8 vertices)
-    append(&vertices, box_min_x, box_min_y, box_min_z)  // 4: bottom-front-left
-    append(&vertices, box_max_x, box_min_y, box_min_z)  // 5: bottom-front-right
-    append(&vertices, box_max_x, box_min_y, box_max_z)  // 6: bottom-back-right
-    append(&vertices, box_min_x, box_min_y, box_max_z)  // 7: bottom-back-left
-    append(&vertices, box_min_x, box_max_y, box_min_z)  // 8: top-front-left
-    append(&vertices, box_max_x, box_max_y, box_min_z)  // 9: top-front-right
-    append(&vertices, box_max_x, box_max_y, box_max_z)  // 10: top-back-right
-    append(&vertices, box_min_x, box_max_y, box_max_z)  // 11: top-back-left
+    append(&vertices, [3]f32{box_min_x, box_min_y, box_min_z})  // 4: bottom-front-left
+    append(&vertices, [3]f32{box_max_x, box_min_y, box_min_z})  // 5: bottom-front-right
+    append(&vertices, [3]f32{box_max_x, box_min_y, box_max_z})  // 6: bottom-back-right
+    append(&vertices, [3]f32{box_min_x, box_min_y, box_max_z})  // 7: bottom-back-left
+    append(&vertices, [3]f32{box_min_x, box_max_y, box_min_z})  // 8: top-front-left
+    append(&vertices, [3]f32{box_max_x, box_max_y, box_min_z})  // 9: top-front-right
+    append(&vertices, [3]f32{box_max_x, box_max_y, box_max_z})  // 10: top-back-right
+    append(&vertices, [3]f32{box_min_x, box_max_y, box_max_z})  // 11: top-back-left
 
     // Box faces (12 triangles, 2 per face)
     // Bottom face
@@ -119,8 +119,8 @@ test_scene_with_obstacle :: proc(t: ^testing.T) {
     }
 
     nav_recast.rasterize_triangles(
-        vertices[:], i32(len(vertices)/3),
-        triangles[:], areas[:], i32(len(triangles)/3),
+        vertices[:],
+        triangles[:], areas[:],
         solid, config.walkable_climb,
     )
 
@@ -289,7 +289,7 @@ test_contour_with_real_heightfield :: proc(t: ^testing.T) {
     testing.expect(t, ok, "Failed to create heightfield")
 
     // Add some terrain features
-    vertices := make([dynamic]f32)
+    vertices := make([dynamic][3]f32)
     defer delete(vertices)
     triangles := make([dynamic]i32)
     defer delete(triangles)
@@ -305,7 +305,7 @@ test_contour_with_real_heightfield :: proc(t: ^testing.T) {
             dist_from_center := math.sqrt((fx-8)*(fx-8) + (fz-8)*(fz-8))
             height := math.max(0, 2.0 - dist_from_center * 0.2)
 
-            append(&vertices, fx, height, fz)
+            append(&vertices, [3]f32{fx, height, fz})
         }
     }
 
@@ -330,8 +330,8 @@ test_contour_with_real_heightfield :: proc(t: ^testing.T) {
     }
 
     nav_recast.rasterize_triangles(
-        vertices[:], i32(len(vertices)/3),
-        triangles[:], areas[:], i32(len(triangles)/3),
+        vertices[:],
+        triangles[:], areas[:],
         solid, config.walkable_climb,
     )
 

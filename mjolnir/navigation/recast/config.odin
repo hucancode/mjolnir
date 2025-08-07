@@ -7,16 +7,15 @@ import geometry "../../geometry"
 point_in_polygon_2d :: geometry.point_in_polygon_2d
 
 // Calculate bounds from vertices
-calc_bounds :: proc(verts: []f32, nverts: i32) -> (bmin, bmax: [3]f32) {
-    if nverts == 0 || len(verts) < 3 {
+calc_bounds :: proc(verts: [][3]f32) -> (bmin, bmax: [3]f32) {
+    if len(verts) == 0 {
         return
     }
 
-    bmin = {verts[0], verts[1], verts[2]}
+    bmin = verts[0]
     bmax = bmin
 
-    for i in 1..<nverts {
-        v := [3]f32{verts[i*3+0], verts[i*3+1], verts[i*3+2]}
+    for v in verts[1:] {
         bmin.x = min(bmin.x, v.x)
         bmin.y = min(bmin.y, v.y)
         bmin.z = min(bmin.z, v.z)

@@ -453,30 +453,18 @@ rasterize_triangle :: proc(v0, v1, v2: [3]f32,
     return true
 }
 
-// Rasterize triangles with indexed vertices (32-bit indices)
-rasterize_triangles :: proc(verts: []f32, nv: i32,
-                              tris: []i32, tri_area_ids: []u8, num_tris: i32,
-                              hf: ^Heightfield, flag_merge_threshold: i32) -> bool {
+// Rasterize triangles
+rasterize_triangles :: proc(verts: [][3]f32, indices: []i32, tri_area_ids: []u8,
+                           hf: ^Heightfield, flag_merge_threshold: i32) -> bool {
     // Rasterize the triangles
     inverse_cell_size := 1.0 / hf.cs
     inverse_cell_height := 1.0 / hf.ch
+    num_tris := len(indices) / 3
 
     for tri_index in 0..<num_tris {
-        v0 := [3]f32{
-            verts[tris[tri_index * 3 + 0] * 3 + 0],
-            verts[tris[tri_index * 3 + 0] * 3 + 1],
-            verts[tris[tri_index * 3 + 0] * 3 + 2],
-        }
-        v1 := [3]f32{
-            verts[tris[tri_index * 3 + 1] * 3 + 0],
-            verts[tris[tri_index * 3 + 1] * 3 + 1],
-            verts[tris[tri_index * 3 + 1] * 3 + 2],
-        }
-        v2 := [3]f32{
-            verts[tris[tri_index * 3 + 2] * 3 + 0],
-            verts[tris[tri_index * 3 + 2] * 3 + 1],
-            verts[tris[tri_index * 3 + 2] * 3 + 2],
-        }
+        v0 := verts[indices[tri_index * 3 + 0]]
+        v1 := verts[indices[tri_index * 3 + 1]]
+        v2 := verts[indices[tri_index * 3 + 2]]
 
         if !rasterize_tri(v0, v1, v2, tri_area_ids[tri_index], hf, hf.bmin, hf.bmax,
                           hf.cs, inverse_cell_size, inverse_cell_height, flag_merge_threshold) {

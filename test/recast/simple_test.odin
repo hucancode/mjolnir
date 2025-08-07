@@ -11,11 +11,11 @@ test_basic_heightfield :: proc(t: ^testing.T) {
     
     
     // Create simple test geometry - a 10x10 flat square
-    verts := []f32{
-        0, 0, 0,    // vertex 0
-        10, 0, 0,   // vertex 1  
-        10, 0, 10,  // vertex 2
-        0, 0, 10,   // vertex 3
+    verts := [][3]f32{
+        {0, 0, 0},    // vertex 0
+        {10, 0, 0},   // vertex 1  
+        {10, 0, 10},  // vertex 2
+        {0, 0, 10},   // vertex 3
     }
     
     tris := []i32{
@@ -64,7 +64,7 @@ test_basic_heightfield :: proc(t: ^testing.T) {
     testing.expect_value(t, hf.ch, cfg.ch)
     
     // Rasterize triangles
-    ok = nav_recast.rasterize_triangles(verts, 4, tris, areas, 2, hf, cfg.walkable_climb)
+    ok = nav_recast.rasterize_triangles(verts, tris, areas, hf, cfg.walkable_climb)
     testing.expect(t, ok, "Triangle rasterization failed")
     
     // Count non-empty cells
@@ -87,11 +87,11 @@ test_simple_api :: proc(t: ^testing.T) {
     
     
     // Create simple test geometry
-    verts := []f32{
-        0, 0, 0,
-        10, 0, 0,
-        10, 0, 10,
-        0, 0, 10,
+    verts := [][3]f32{
+        {0, 0, 0},
+        {10, 0, 0},
+        {10, 0, 10},
+        {0, 0, 10},
     }
     
     tris := []i32{

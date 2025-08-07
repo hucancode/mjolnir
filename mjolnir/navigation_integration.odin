@@ -86,7 +86,7 @@ TileCoord :: struct {
 
 // Scene geometry collector for navigation mesh building
 SceneGeometryCollector :: struct {
-    vertices:         [dynamic]f32,
+    vertices:         [dynamic][3]f32,
     indices:          [dynamic]i32,
     area_types:       [dynamic]u8,
     mesh_count:       i32,
@@ -97,7 +97,7 @@ SceneGeometryCollector :: struct {
 
 // Initialize scene geometry collector
 scene_geometry_collector_init :: proc(collector: ^SceneGeometryCollector) {
-    collector.vertices = make([dynamic]f32, 0)
+    collector.vertices = make([dynamic][3]f32, 0)
     collector.indices = make([dynamic]i32, 0)
     collector.area_types = make([dynamic]u8, 0)
     collector.mesh_count = 0
@@ -161,7 +161,7 @@ add_mesh_to_collector :: proc(collector: ^SceneGeometryCollector, mesh: ^Mesh, t
     }
     
     // Calculate vertex offset for indices
-    vertex_offset := i32(len(collector.vertices) / 3)
+    vertex_offset := i32(len(collector.vertices))
     
     // Transform and add vertices
     vertex_count := int(mesh.vertices_len)
@@ -174,7 +174,7 @@ add_mesh_to_collector :: proc(collector: ^SceneGeometryCollector, mesh: ^Mesh, t
         world_pos := linalg.matrix_mul_vector(transform, [4]f32{pos.x, pos.y, pos.z, 1.0})
         
         // Add to vertices array
-        append(&collector.vertices, world_pos.x, world_pos.y, world_pos.z)
+        append(&collector.vertices, [3]f32{world_pos.x, world_pos.y, world_pos.z})
     }
     
     // Add indices with offset
@@ -208,7 +208,7 @@ build_navigation_mesh_from_scene :: proc(engine: ^Engine, config: recast.Config 
     }
     
     log.infof("Collected %d vertices, %d indices from %d meshes for navigation mesh", 
-              len(collector.vertices)/3, len(collector.indices), collector.mesh_count)
+              len(collector.vertices), len(collector.indices), collector.mesh_count)
     
     // Build navigation mesh using Recast
     pmesh, dmesh, ok := recast.build_navmesh(collector.vertices[:], collector.indices[:], collector.area_types[:], config)
@@ -321,7 +321,7 @@ build_navigation_mesh_from_scene_filtered :: proc(
     }
     
     log.infof("Collected %d vertices, %d indices from %d meshes for filtered navigation mesh", 
-              len(collector.vertices)/3, len(collector.indices), collector.mesh_count)
+              len(collector.vertices), len(collector.indices), collector.mesh_count)
     
     // Build navigation mesh using Recast
     pmesh, dmesh, ok := recast.build_navmesh(collector.vertices[:], collector.indices[:], collector.area_types[:], config)
@@ -406,18 +406,17 @@ build_navigation_mesh_from_scene_filtered :: proc(
 }
 
 // Helper function to calculate bounds from vertices
-calculate_bounds_from_vertices :: proc(vertices: []f32) -> geometry.Aabb {
-    if len(vertices) < 3 {
+calculate_bounds_from_vertices :: proc(vertices: [][3]f32) -> geometry.Aabb {
+    if len(vertices) == 0 {
         return {}
     }
     
-    min_pos := [3]f32{vertices[0], vertices[1], vertices[2]}  
-    max_pos := [3]f32{vertices[0], vertices[1], vertices[2]}
+    min_pos := vertices[0]
+    max_pos := vertices[0]
     
-    for i := 3; i < len(vertices); i += 3 {
-        pos := [3]f32{vertices[i], vertices[i+1], vertices[i+2]}
-        min_pos = linalg.min(min_pos, pos)
-        max_pos = linalg.max(max_pos, pos)
+    for v in vertices[1:] {
+        min_pos = linalg.min(min_pos, v)
+        max_pos = linalg.max(max_pos, v)
     }
     
     return geometry.Aabb{

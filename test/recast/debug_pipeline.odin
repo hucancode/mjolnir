@@ -11,11 +11,11 @@ test_debug_pipeline :: proc(t: ^testing.T) {
     
     
     // Create simple test geometry
-    verts := []f32{
-        0, 0, 0,    // vertex 0
-        10, 0, 0,   // vertex 1
-        10, 0, 10,  // vertex 2
-        0, 0, 10,   // vertex 3
+    verts := [][3]f32{
+        {0, 0, 0},    // vertex 0
+        {10, 0, 0},   // vertex 1
+        {10, 0, 10},  // vertex 2
+        {0, 0, 10},   // vertex 3
     }
     
     tris := []i32{
@@ -50,7 +50,7 @@ test_debug_pipeline :: proc(t: ^testing.T) {
     log.infof("  width = %d, height = %d", cfg.width, cfg.height)
     
     // Calculate bounds
-    cfg.bmin, cfg.bmax = nav_recast.calc_bounds(verts, 4)
+    cfg.bmin, cfg.bmax = nav_recast.calc_bounds(verts)
     
     log.info("Config after bounds calculation:")
     log.infof("  bmin = %v", cfg.bmin)

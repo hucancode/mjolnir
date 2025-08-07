@@ -29,11 +29,11 @@ test_complete_navmesh_generation_simple :: proc(t: ^testing.T) {
     // Test complete navigation mesh generation with a simple flat floor
 
     // Define a simple square floor
-    verts := []f32{
-        0, 0, 0,
-        20, 0, 0,
-        20, 0, 20,
-        0, 0, 20,
+    verts := [][3]f32{
+        {0, 0, 0},
+        {20, 0, 0},
+        {20, 0, 20},
+        {0, 0, 20},
     }
 
     tris := []i32{
@@ -50,7 +50,7 @@ test_complete_navmesh_generation_simple :: proc(t: ^testing.T) {
     cfg := create_test_config(0.3, 0.2)
 
     // Calculate bounds
-    cfg.bmin, cfg.bmax = recast.calc_bounds(verts, 4)
+    cfg.bmin, cfg.bmax = recast.calc_bounds(verts)
 
     // Calculate grid size
     cfg.width, cfg.height = recast.calc_grid_size(cfg.bmin, cfg.bmax, cfg.cs)
@@ -64,7 +64,7 @@ test_complete_navmesh_generation_simple :: proc(t: ^testing.T) {
     testing.expect(t, ok, "Failed to create heightfield")
 
     // Rasterize triangles
-    ok = recast.rasterize_triangles(verts, 4, tris, areas, 2, hf, cfg.walkable_climb)
+    ok = recast.rasterize_triangles(verts, tris, areas, hf, cfg.walkable_climb)
     testing.expect(t, ok, "Failed to rasterize triangles")
 
     // Apply filters
@@ -172,21 +172,21 @@ test_navmesh_with_obstacles :: proc(t: ^testing.T) {
     // Test navigation mesh generation with obstacles
 
     // Define a floor with a box obstacle in the middle
-    verts := []f32{
+    verts := [][3]f32{
         // Floor
-        0, 0, 0,
-        30, 0, 0,
-        30, 0, 30,
-        0, 0, 30,
+        {0, 0, 0},
+        {30, 0, 0},
+        {30, 0, 30},
+        {0, 0, 30},
         // Obstacle box (raised platform)
-        10, 0, 10,
-        20, 0, 10,
-        20, 0, 20,
-        10, 0, 20,
-        10, 5, 10,
-        20, 5, 10,
-        20, 5, 20,
-        10, 5, 20,
+        {10, 0, 10},
+        {20, 0, 10},
+        {20, 0, 20},
+        {10, 0, 20},
+        {10, 5, 10},
+        {20, 5, 10},
+        {20, 5, 20},
+        {10, 5, 20},
     }
 
     tris := []i32{
@@ -226,7 +226,7 @@ test_navmesh_with_obstacles :: proc(t: ^testing.T) {
     cfg := create_test_config(0.3, 0.2)
 
     // Calculate bounds
-    cfg.bmin, cfg.bmax = recast.calc_bounds(verts, 12)
+    cfg.bmin, cfg.bmax = recast.calc_bounds(verts)
 
     // Calculate grid size
     cfg.width, cfg.height = recast.calc_grid_size(cfg.bmin, cfg.bmax, cfg.cs)
@@ -240,7 +240,7 @@ test_navmesh_with_obstacles :: proc(t: ^testing.T) {
     testing.expect(t, ok, "Failed to create heightfield")
 
     // Rasterize triangles
-    ok = recast.rasterize_triangles(verts, 12, tris, areas, 12, hf, cfg.walkable_climb)
+    ok = recast.rasterize_triangles(verts, tris, areas, hf, cfg.walkable_climb)
     testing.expect(t, ok, "Failed to rasterize triangles")
 
     // Apply filters
@@ -380,11 +380,11 @@ test_navmesh_with_slopes :: proc(t: ^testing.T) {
     // Test navigation mesh generation with slopes
 
     // Define a sloped surface
-    verts := []f32{
-        0, 0, 0,
-        20, 0, 0,
-        20, 5, 20,  // Raised end
-        0, 5, 20,   // Raised end
+    verts := [][3]f32{
+        {0, 0, 0},
+        {20, 0, 0},
+        {20, 5, 20},  // Raised end
+        {0, 5, 20},   // Raised end
     }
 
     tris := []i32{
@@ -402,7 +402,7 @@ test_navmesh_with_slopes :: proc(t: ^testing.T) {
     cfg.walkable_slope_angle = 30.0  // Allow 30 degree slopes
 
     // Calculate bounds
-    cfg.bmin, cfg.bmax = recast.calc_bounds(verts, 4)
+    cfg.bmin, cfg.bmax = recast.calc_bounds(verts)
 
     // Calculate grid size
     cfg.width, cfg.height = recast.calc_grid_size(cfg.bmin, cfg.bmax, cfg.cs)
@@ -416,7 +416,7 @@ test_navmesh_with_slopes :: proc(t: ^testing.T) {
     testing.expect(t, ok, "Failed to create heightfield")
 
     // Rasterize triangles
-    ok = recast.rasterize_triangles(verts, 4, tris, areas, 2, hf, cfg.walkable_climb)
+    ok = recast.rasterize_triangles(verts, tris, areas, hf, cfg.walkable_climb)
     testing.expect(t, ok, "Failed to rasterize triangles")
 
     // Apply filters
@@ -449,11 +449,11 @@ test_navmesh_with_slopes :: proc(t: ^testing.T) {
 test_navmesh_area_marking :: proc(t: ^testing.T) {
 
     // Create a simple floor
-    verts := []f32{
-        0, 0, 0,
-        40, 0, 0,
-        40, 0, 40,
-        0, 0, 40,
+    verts := [][3]f32{
+        {0, 0, 0},
+        {40, 0, 0},
+        {40, 0, 40},
+        {0, 0, 40},
     }
 
     tris := []i32{
@@ -470,7 +470,7 @@ test_navmesh_area_marking :: proc(t: ^testing.T) {
     cfg := create_test_config(0.5, 0.2)
 
     // Calculate bounds and grid
-    cfg.bmin, cfg.bmax = recast.calc_bounds(verts, 4)
+    cfg.bmin, cfg.bmax = recast.calc_bounds(verts)
     cfg.width, cfg.height = recast.calc_grid_size(cfg.bmin, cfg.bmax, cfg.cs)
 
     // Create and build heightfield
@@ -481,7 +481,7 @@ test_navmesh_area_marking :: proc(t: ^testing.T) {
     ok := recast.create_heightfield(hf, cfg.width, cfg.height, cfg.bmin, cfg.bmax, cfg.cs, cfg.ch)
     testing.expect(t, ok, "Failed to create heightfield")
 
-    ok = recast.rasterize_triangles(verts, 4, tris, areas, 2, hf, cfg.walkable_climb)
+    ok = recast.rasterize_triangles(verts, tris, areas, hf, cfg.walkable_climb)
     testing.expect(t, ok, "Failed to rasterize triangles")
 
     // Build compact heightfield
@@ -539,17 +539,15 @@ test_navmesh_performance :: proc(t: ^testing.T) {
     cell_size := f32(5.0)
 
     vert_count := (grid_size + 1) * (grid_size + 1)
-    verts := make([]f32, vert_count * 3)
+    verts := make([][3]f32, vert_count)
     defer delete(verts)
 
     // Generate vertices
     idx := 0
     for y in 0..=grid_size {
         for x in 0..=grid_size {
-            verts[idx + 0] = f32(x) * cell_size
-            verts[idx + 1] = 0
-            verts[idx + 2] = f32(y) * cell_size
-            idx += 3
+            verts[idx] = {f32(x) * cell_size, 0, f32(y) * cell_size}
+            idx += 1
         }
     }
 
@@ -584,7 +582,7 @@ test_navmesh_performance :: proc(t: ^testing.T) {
     cfg := create_test_config(0.3, 0.2)
 
     // Calculate bounds
-    cfg.bmin, cfg.bmax = recast.calc_bounds(verts, i32(vert_count))
+    cfg.bmin, cfg.bmax = recast.calc_bounds(verts)
 
     // Calculate grid size
     cfg.width, cfg.height = recast.calc_grid_size(cfg.bmin, cfg.bmax, cfg.cs)
@@ -601,7 +599,7 @@ test_navmesh_performance :: proc(t: ^testing.T) {
     testing.expect(t, ok, "Failed to create heightfield")
 
     // Rasterize triangles
-    ok = recast.rasterize_triangles(verts, i32(vert_count), tris, areas, i32(tri_count), hf, cfg.walkable_climb)
+    ok = recast.rasterize_triangles(verts, tris, areas, hf, cfg.walkable_climb)
     testing.expect(t, ok, "Failed to rasterize triangles")
 
     // Apply filters

@@ -10,11 +10,11 @@ test_debug_helper :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
     
     // Create test geometry directly
-    verts := []f32{
-        0, 0, 0,    // vertex 0
-        10, 0, 0,   // vertex 1
-        10, 0, 10,  // vertex 2
-        0, 0, 10,   // vertex 3
+    verts := [][3]f32{
+        {0, 0, 0},    // vertex 0
+        {10, 0, 0},   // vertex 1
+        {10, 0, 10},  // vertex 2
+        {0, 0, 10},   // vertex 3
     }
     
     tris := []i32{
@@ -32,15 +32,15 @@ test_debug_helper :: proc(t: ^testing.T) {
     log.infof("areas length: %d", len(areas))
     
     // Print vertices
-    for i in 0..<4 {
-        log.infof("  v[%d] = (%.2f, %.2f, %.2f)", i, verts[i*3], verts[i*3+1], verts[i*3+2])
+    for v, i in verts {
+        log.infof("  v[%d] = (%.2f, %.2f, %.2f)", i, v.x, v.y, v.z)
     }
     
     // Test bounds calculation
     bmin: [3]f32
     bmax: [3]f32
     
-    bmin, bmax = nav_recast.calc_bounds(verts, 4)
+    bmin, bmax = nav_recast.calc_bounds(verts)
     
     log.infof("Bounds: min=%v, max=%v", bmin, bmax)
     

@@ -4,8 +4,8 @@ import "core:log"
 import "core:slice"
 import "../geometry"
 
-// Load OBJ file and extract raw data for navigation mesh input
-load_obj_to_navmesh_input :: proc(filename: string, scale: f32 = 1.0, default_area: u8 = 1) -> (vertices: []f32, indices: []i32, areas: []u8, ok: bool) {
+// Load OBJ file and extract data for navigation mesh input
+load_obj_to_navmesh_input :: proc(filename: string, scale: f32 = 1.0, default_area: u8 = 1) -> (vertices: [][3]f32, indices: []i32, areas: []u8, ok: bool) {
     geom, load_ok := geometry.load_obj(filename, scale)
     if !load_ok {
         return nil, nil, nil, false
@@ -14,11 +14,9 @@ load_obj_to_navmesh_input :: proc(filename: string, scale: f32 = 1.0, default_ar
 
     // Extract vertex positions
     vertex_count := len(geom.vertices)
-    vertices = make([]f32, vertex_count * 3)
+    vertices = make([][3]f32, vertex_count)
     for i in 0..<vertex_count {
-        vertices[i*3 + 0] = geom.vertices[i].position.x
-        vertices[i*3 + 1] = geom.vertices[i].position.y
-        vertices[i*3 + 2] = geom.vertices[i].position.z
+        vertices[i] = geom.vertices[i].position
     }
 
     // Convert indices from u32 to i32

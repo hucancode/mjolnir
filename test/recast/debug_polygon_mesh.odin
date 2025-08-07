@@ -11,11 +11,11 @@ test_debug_polygon_mesh :: proc(t: ^testing.T) {
     
     
     // Create simple test geometry
-    verts := make([]f32, 12)
-    verts[0] = 0; verts[1] = 0; verts[2] = 0     // vertex 0
-    verts[3] = 10; verts[4] = 0; verts[5] = 0    // vertex 1
-    verts[6] = 10; verts[7] = 0; verts[8] = 10   // vertex 2
-    verts[9] = 0; verts[10] = 0; verts[11] = 10  // vertex 3
+    verts := make([][3]f32, 4)
+    verts[0] = {0, 0, 0}     // vertex 0
+    verts[1] = {10, 0, 0}    // vertex 1
+    verts[2] = {10, 0, 10}   // vertex 2
+    verts[3] = {0, 0, 10}    // vertex 3
     defer delete(verts)
     
     tris := make([]i32, 6)
@@ -42,7 +42,7 @@ test_debug_polygon_mesh :: proc(t: ^testing.T) {
     cfg.max_verts_per_poly = 6
     
     // Calculate bounds
-    cfg.bmin, cfg.bmax = nav_recast.calc_bounds(verts, 4)
+    cfg.bmin, cfg.bmax = nav_recast.calc_bounds(verts)
     cfg.width, cfg.height = nav_recast.calc_grid_size(cfg.bmin, cfg.bmax, cfg.cs)
     
     log.infof("Config: bmin=%v, bmax=%v, grid=%dx%d", cfg.bmin, cfg.bmax, cfg.width, cfg.height)
@@ -52,7 +52,7 @@ test_debug_polygon_mesh :: proc(t: ^testing.T) {
     defer nav_recast.free_heightfield(hf)
     
     nav_recast.create_heightfield(hf, cfg.width, cfg.height, cfg.bmin, cfg.bmax, cfg.cs, cfg.ch)
-    nav_recast.rasterize_triangles(verts, 4, tris, areas, 2, hf, cfg.walkable_climb)
+    nav_recast.rasterize_triangles(verts, tris, areas, hf, cfg.walkable_climb)
     
     nav_recast.filter_low_hanging_walkable_obstacles(int(cfg.walkable_climb), hf)
     nav_recast.filter_ledge_spans(int(cfg.walkable_height), int(cfg.walkable_climb), hf)

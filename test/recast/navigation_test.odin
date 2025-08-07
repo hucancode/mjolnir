@@ -9,15 +9,15 @@ import "core:log"
 test_basic_navigation_mesh_generation :: proc(t: ^testing.T) {
     
     // Define some simple triangle data
-    verts := []f32{
+    verts := [][3]f32{
         // Triangle 1
-        0, 0, 0,
-        10, 0, 0,
-        10, 0, 10,
+        {0, 0, 0},
+        {10, 0, 0},
+        {10, 0, 10},
         // Triangle 2
-        0, 0, 0,
-        10, 0, 10,
-        0, 0, 10,
+        {0, 0, 0},
+        {10, 0, 10},
+        {0, 0, 10},
     }
     
     tris := []i32{
@@ -48,7 +48,7 @@ test_basic_navigation_mesh_generation :: proc(t: ^testing.T) {
     cfg.detail_sample_max_error = 1
     
     // Calculate bounds
-    cfg.bmin, cfg.bmax = recast.calc_bounds(verts, 6)
+    cfg.bmin, cfg.bmax = recast.calc_bounds(verts)
     
     // Calculate grid size
     cfg.width, cfg.height = recast.calc_grid_size(cfg.bmin, cfg.bmax, cfg.cs)
@@ -66,7 +66,7 @@ test_basic_navigation_mesh_generation :: proc(t: ^testing.T) {
     testing.expect(t, ok, "Failed to create heightfield")
     
     // Rasterize triangles
-    ok = recast.rasterize_triangles(verts, 6, tris, areas, 2, hf, 1)
+    ok = recast.rasterize_triangles(verts, tris, areas, hf, 1)
     testing.expect(t, ok, "Failed to rasterize triangles")
     
     // Filter walkable surfaces
@@ -121,19 +121,19 @@ test_basic_heightfield_creation :: proc(t: ^testing.T) {
 @(test)
 test_bounds_calculation :: proc(t: ^testing.T) {
     // Test with a simple cube
-    verts := []f32{
-        0, 0, 0,
-        1, 0, 0,
-        1, 1, 0,
-        0, 1, 0,
-        0, 0, 1,
-        1, 0, 1,
-        1, 1, 1,
-        0, 1, 1,
+    verts := [][3]f32{
+        {0, 0, 0},
+        {1, 0, 0},
+        {1, 1, 0},
+        {0, 1, 0},
+        {0, 0, 1},
+        {1, 0, 1},
+        {1, 1, 1},
+        {0, 1, 1},
     }
     
     bmin, bmax: [3]f32
-    bmin, bmax = recast.calc_bounds(verts, 8)
+    bmin, bmax = recast.calc_bounds(verts)
     
     testing.expect_value(t, bmin.x, 0.0)
     testing.expect_value(t, bmin.y, 0.0)

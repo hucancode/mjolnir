@@ -13,20 +13,20 @@ import "../../mjolnir/navigation/recast"
 test_demo_heightfield :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
     
-    vertices := [dynamic]f32{
-        -10, 0, -10,
-         10, 0, -10,
-         10, 0,  10,
-        -10, 0,  10,
+    vertices := [dynamic][3]f32{
+        {-10, 0, -10},
+         {10, 0, -10},
+         {10, 0,  10},
+        {-10, 0,  10},
         
-        -2, 0, -2,
-         2, 0, -2,
-         2, 0,  2,
-        -2, 0,  2,
-        -2, 3,  2,
-        -2, 3, -2,
-         2, 3, -2,
-         2, 3,  2,
+        {-2, 0, -2},
+         {2, 0, -2},
+         {2, 0,  2},
+        {-2, 0,  2},
+        {-2, 3,  2},
+        {-2, 3, -2},
+         {2, 3, -2},
+         {2, 3,  2},
     }
     defer delete(vertices)
     

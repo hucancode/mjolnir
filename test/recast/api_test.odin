@@ -14,11 +14,11 @@ test_api_simple_build :: proc(t: ^testing.T) {
     
     
     // Simple square floor geometry
-    vertices := []f32{
-        0, 0, 0,
-        10, 0, 0,
-        10, 0, 10,
-        0, 0, 10,
+    vertices := [][3]f32{
+        {0, 0, 0},
+        {10, 0, 0},
+        {10, 0, 10},
+        {0, 0, 10},
     }
     
     indices := []i32{
@@ -71,11 +71,11 @@ test_api_quick_build :: proc(t: ^testing.T) {
     
     
     // Test the convenience quick build function
-    vertices := []f32{
-        0, 0, 0,
-        20, 0, 0,
-        20, 0, 20,
-        0, 0, 20,
+    vertices := [][3]f32{
+        {0, 0, 0},
+        {20, 0, 0},
+        {20, 0, 20},
+        {0, 0, 20},
     }
     
     indices := []i32{
@@ -132,11 +132,11 @@ test_api_builder_pattern :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
     
     // Test step-by-step builder pattern
-    vertices := []f32{
-        0, 0, 0,
-        15, 0, 0,
-        15, 0, 15,
-        0, 0, 15,
+    vertices := [][3]f32{
+        {0, 0, 0},
+        {15, 0, 0},
+        {15, 0, 15},
+        {0, 0, 15},
     }
     
     indices := []i32{
@@ -194,11 +194,11 @@ test_api_builder_build_all :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
     
     // Test builder build_all convenience function
-    vertices := []f32{
-        0, 0, 0,
-        25, 0, 0,
-        25, 0, 25,
-        0, 0, 25,
+    vertices := [][3]f32{
+        {0, 0, 0},
+        {25, 0, 0},
+        {25, 0, 25},
+        {0, 0, 25},
     }
     
     indices := []i32{
@@ -277,11 +277,11 @@ test_api_validation_and_debugging :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
     
     // Create a mesh for validation testing
-    vertices := []f32{
-        0, 0, 0,
-        30, 0, 0,
-        30, 0, 30,
-        0, 0, 30,
+    vertices := [][3]f32{
+        {0, 0, 0},
+        {30, 0, 0},
+        {30, 0, 30},
+        {0, 0, 30},
     }
     
     indices := []i32{
@@ -329,7 +329,7 @@ test_api_error_handling :: proc(t: ^testing.T) {
     // Test error handling with invalid inputs
     
     // Empty geometry
-    empty_vertices := []f32{}
+    empty_vertices := [][3]f32{}
     empty_indices := []i32{}
     empty_areas := []u8{}
     
@@ -358,7 +358,7 @@ test_api_error_handling :: proc(t: ^testing.T) {
     bad_config := config
     bad_config.cs = -1.0  // Invalid cell size
     
-    good_vertices := []f32{0, 0, 0, 10, 0, 0, 10, 0, 10, 0, 0, 10}
+    good_vertices := [][3]f32{{0, 0, 0}, {10, 0, 0}, {10, 0, 10}, {0, 0, 10}}
     good_indices := []i32{0, 1, 2, 0, 2, 3}
     good_areas := []u8{nav_recast.RC_WALKABLE_AREA, nav_recast.RC_WALKABLE_AREA}
     
@@ -413,16 +413,16 @@ test_api_build_with_areas :: proc(t: ^testing.T) {
     
     
     // Test building with custom area types
-    vertices := []f32{
-        0, 0, 0,
-        40, 0, 0,
-        40, 0, 40,
-        0, 0, 40,
+    vertices := [][3]f32{
+        {0, 0, 0},
+        {40, 0, 0},
+        {40, 0, 40},
+        {0, 0, 40},
         // Another section
-        50, 0, 0,
-        90, 0, 0,
-        90, 0, 40,
-        50, 0, 40,
+        {50, 0, 0},
+        {90, 0, 0},
+        {90, 0, 40},
+        {50, 0, 40},
     }
     
     indices := []i32{
@@ -485,7 +485,7 @@ test_api_comprehensive_pipeline :: proc(t: ^testing.T) {
     
     // Comprehensive test with a more complex geometry
     // Create a simple maze-like structure
-    vertices := make([dynamic]f32)
+    vertices := make([dynamic][3]f32)
     indices := make([dynamic]i32)
     areas := make([dynamic]u8)
     defer {
@@ -510,10 +510,10 @@ test_api_comprehensive_pipeline :: proc(t: ^testing.T) {
             x1, z1 := x0 + cell_size, z0 + cell_size
             
             // Add 4 vertices for this cell
-            append(&vertices, x0, 0, z0)  // 0
-            append(&vertices, x1, 0, z0)  // 1
-            append(&vertices, x1, 0, z1)  // 2
-            append(&vertices, x0, 0, z1)  // 3
+            append(&vertices, [3]f32{x0, 0, z0})  // 0
+            append(&vertices, [3]f32{x1, 0, z0})  // 1
+            append(&vertices, [3]f32{x1, 0, z1})  // 2
+            append(&vertices, [3]f32{x0, 0, z1})  // 3
             
             // Add 2 triangles
             append(&indices, vert_idx+0, vert_idx+1, vert_idx+2)

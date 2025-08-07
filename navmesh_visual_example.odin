@@ -110,7 +110,7 @@ build_navmesh :: proc(engine: ^mjolnir.Engine) {
     if len(os.args) > 2 {
         obj_file = os.args[2]
     }
-    vertices: []f32
+    vertices: [][3]f32
     indices: []i32
     areas: []u8
     defer delete(vertices)
@@ -124,7 +124,7 @@ build_navmesh :: proc(engine: ^mjolnir.Engine) {
         vertices, indices, areas, load_ok = navigation.load_obj_to_navmesh_input(obj_file, 1.0, recast.RC_WALKABLE_AREA)
 
         if load_ok {
-            log.infof("Successfully loaded OBJ file with %d vertices and %d triangles", len(vertices)/3, len(indices)/3)
+            log.infof("Successfully loaded OBJ file with %d vertices and %d triangles", len(vertices), len(indices)/3)
 
             // Create mesh for OBJ visualization
             // TODO: Fix OBJ visualization - temporarily disabled due to crash
@@ -134,7 +134,85 @@ build_navmesh :: proc(engine: ^mjolnir.Engine) {
         }
     }
 
-    log.infof("Scene geometry: %d vertices, %d triangles", len(vertices)/3, len(indices)/3)
+    // If OBJ loading failed or file doesn't exist, create procedural geometry
+    if !load_ok {
+        log.info("Using procedural geometry for navigation mesh")
+
+        // Create a simple test scene with ground and obstacle
+        // Ground quad (10x10 units)
+        ground_verts := [][3]f32{
+            {-10, 0, -10},  // Bottom-left
+            { 10, 0, -10},  // Bottom-right
+            { 10, 0,  10},  // Top-right
+            {-10, 0,  10},  // Top-left
+        }
+
+        // Obstacle box (4x3x4 centered)
+        obstacle_verts := [][3]f32{
+            // Bottom face (y=0)
+            {-2, 0, -2}, { 2, 0, -2}, { 2, 0,  2}, {-2, 0,  2},
+            // Top face (y=3)
+            {-2, 3, -2}, { 2, 3, -2}, { 2, 3,  2}, {-2, 3,  2},
+        }
+
+        // Combine vertices
+        total_verts := len(ground_verts) + len(obstacle_verts)
+        vertices = make([][3]f32, total_verts)
+        copy(vertices[0:], ground_verts[:])
+        copy(vertices[len(ground_verts):], obstacle_verts[:])
+
+        // Create indices
+        // Ground indices (2 triangles)
+        ground_indices := []i32{
+            0, 1, 2,  // First triangle
+            0, 2, 3,  // Second triangle
+        }
+
+        // Obstacle indices (12 triangles for 6 faces)
+        obstacle_base := i32(len(ground_verts))
+        obstacle_indices := []i32{
+            // Bottom face
+            obstacle_base + 0, obstacle_base + 2, obstacle_base + 1,
+            obstacle_base + 0, obstacle_base + 3, obstacle_base + 2,
+            // Top face
+            obstacle_base + 4, obstacle_base + 5, obstacle_base + 6,
+            obstacle_base + 4, obstacle_base + 6, obstacle_base + 7,
+            // Front face
+            obstacle_base + 0, obstacle_base + 1, obstacle_base + 5,
+            obstacle_base + 0, obstacle_base + 5, obstacle_base + 4,
+            // Back face
+            obstacle_base + 2, obstacle_base + 3, obstacle_base + 7,
+            obstacle_base + 2, obstacle_base + 7, obstacle_base + 6,
+            // Left face
+            obstacle_base + 0, obstacle_base + 4, obstacle_base + 7,
+            obstacle_base + 0, obstacle_base + 7, obstacle_base + 3,
+            // Right face
+            obstacle_base + 1, obstacle_base + 2, obstacle_base + 6,
+            obstacle_base + 1, obstacle_base + 6, obstacle_base + 5,
+        }
+
+        // Combine indices
+        total_indices := len(ground_indices) + len(obstacle_indices)
+        indices = make([]i32, total_indices)
+        copy(indices[0:], ground_indices[:])
+        copy(indices[len(ground_indices):], obstacle_indices[:])
+
+        // Create areas
+        num_ground_tris := len(ground_indices) / 3
+        num_obstacle_tris := len(obstacle_indices) / 3
+        total_tris := num_ground_tris + num_obstacle_tris
+        areas = make([]u8, total_tris)
+        // Ground is walkable
+        for i in 0..<num_ground_tris {
+            areas[i] = recast.RC_WALKABLE_AREA
+        }
+        // Obstacle is not walkable
+        for i in num_ground_tris..<total_tris {
+            areas[i] = recast.RC_NULL_AREA
+        }
+    }
+
+    log.infof("Scene geometry: %d vertices, %d triangles", len(vertices), len(indices)/3)
     log.infof("Areas array length: %d", len(areas))
 
     // Configure Recast

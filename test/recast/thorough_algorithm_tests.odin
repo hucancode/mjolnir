@@ -192,10 +192,10 @@ test_triangle_rasterization_accuracy :: proc(t: ^testing.T) {
     // Triangle vertices: (1,0,1), (3,0,1), (2,0,3) 
     // This creates a triangle that should cover specific cells
     
-    verts := []f32{
-        1, 0, 1,  // Vertex 0
-        3, 0, 1,  // Vertex 1 
-        2, 0, 3,  // Vertex 2
+    verts := [][3]f32{
+        {1, 0, 1},  // Vertex 0
+        {3, 0, 1},  // Vertex 1 
+        {2, 0, 3},  // Vertex 2
     }
     
     tris := []i32{0, 1, 2}
@@ -210,7 +210,7 @@ test_triangle_rasterization_accuracy :: proc(t: ^testing.T) {
     testing.expect(t, ok, "Failed to create heightfield")
     
     // Rasterize the triangle
-    ok = recast.rasterize_triangles(verts, 3, tris, areas, 1, hf, 1)
+    ok = recast.rasterize_triangles(verts, tris, areas, hf, 1)
     testing.expect(t, ok, "Failed to rasterize triangle")
     
     // Validate specific cells that should be covered by the triangle

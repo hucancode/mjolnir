@@ -6,8 +6,8 @@ import "core:math"
 import "core:math/linalg"
 
 // Build navigation mesh from triangle mesh
-// This is the main entry point - follows C++ API closely
-build_navmesh :: proc(vertices: []f32, indices: []i32, areas: []u8, cfg: Config) -> (pmesh: ^Poly_Mesh, dmesh: ^Poly_Mesh_Detail, ok: bool) {
+// This is the main entry point
+build_navmesh :: proc(vertices: [][3]f32, indices: []i32, areas: []u8, cfg: Config) -> (pmesh: ^Poly_Mesh, dmesh: ^Poly_Mesh_Detail, ok: bool) {
     // Validate inputs
     if len(vertices) == 0 || len(indices) == 0 || cfg.cs <= 0 || cfg.ch <= 0 {
         return nil, nil, false
@@ -16,7 +16,7 @@ build_navmesh :: proc(vertices: []f32, indices: []i32, areas: []u8, cfg: Config)
     // Calculate bounds if needed
     config := cfg
     if config.bmin == {} && config.bmax == {} {
-        config.bmin, config.bmax = calc_bounds(vertices, i32(len(vertices)/3))
+        config.bmin, config.bmax = calc_bounds(vertices)
     }
     
     // Debug log bounds
@@ -55,9 +55,9 @@ build_navmesh :: proc(vertices: []f32, indices: []i32, areas: []u8, cfg: Config)
         
         // Check first triangle normal
         if len(indices) >= 3 {
-            v0 := [3]f32{vertices[indices[0]*3+0], vertices[indices[0]*3+1], vertices[indices[0]*3+2]}
-            v1 := [3]f32{vertices[indices[1]*3+0], vertices[indices[1]*3+1], vertices[indices[1]*3+2]}
-            v2 := [3]f32{vertices[indices[2]*3+0], vertices[indices[2]*3+1], vertices[indices[2]*3+2]}
+            v0 := vertices[indices[0]]
+            v1 := vertices[indices[1]]
+            v2 := vertices[indices[2]]
             
             e0 := v1 - v0
             e1 := v2 - v0
@@ -69,7 +69,7 @@ build_navmesh :: proc(vertices: []f32, indices: []i32, areas: []u8, cfg: Config)
         }
     }
     
-    if !rasterize_triangles(vertices, i32(len(vertices)/3), indices, areas, i32(len(indices)/3), hf, config.walkable_climb) {
+    if !rasterize_triangles(vertices, indices, areas, hf, config.walkable_climb) {
         return nil, nil, false
     }
     
