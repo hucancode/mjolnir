@@ -47,10 +47,8 @@ main :: proc() {
     case "navmesh-visual":
       navmesh_visual_main()
       return
-    case "navmesh-simple":
-      navmesh_simple_main()
-      return
-    case "demo":
+    case "navmesh-obj":
+      obj_navmesh_example()
       return
     }
   }

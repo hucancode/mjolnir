@@ -5,11 +5,12 @@ import "core:math"
 import "core:math/linalg"
 import "core:container/priority_queue"
 import "core:slice"
+import "core:log"
 import nav_recast "../recast"
 
 // Heuristic scale factor for A* pathfinding
 // Slightly higher than 1.0 to make the heuristic more aggressive
-H_SCALE :: 0.999
+H_SCALE :: 1.05
 
 // A* pathfinding node (full data)
 Node :: struct {
@@ -250,9 +251,13 @@ find_path :: proc(query: ^Nav_Mesh_Query,
 
     best_node := start_node
     best_dist := start_node.total
+    
+    iterations := 0
+    max_iterations := 1000
 
     // Search loop
-    for !node_queue_empty(&query.open_list) {
+    for !node_queue_empty(&query.open_list) && iterations < max_iterations {
+        iterations += 1
         // Get best node
         best_pathfinding_node := node_queue_pop(&query.open_list)
         if best_pathfinding_node.ref == nav_recast.INVALID_POLY_REF {
@@ -290,8 +295,23 @@ find_path :: proc(query: ^Nav_Mesh_Query,
                     if nav_recast.status_succeeded(neighbor_status) &&
                        query_filter_pass_filter(filter, neighbor_ref, neighbor_tile, neighbor_poly) {
 
-                        // Calculate neighbor position
-                        neighbor_pos := get_edge_mid_point(cur_tile, cur_poly, i, neighbor_tile, neighbor_poly)
+                        // Calculate neighbor position using proper portal points
+                        left, right := [3]f32{}, [3]f32{}
+                        portal_type := u8(0)
+                        portal_status := get_portal_points(query, current.id, neighbor_ref, &left, &right, &portal_type)
+                        
+                        neighbor_pos: [3]f32
+                        if nav_recast.status_succeeded(portal_status) {
+                            // Use midpoint of the actual shared edge
+                            neighbor_pos = {
+                                (left[0] + right[0]) * 0.5,
+                                (left[1] + right[1]) * 0.5,
+                                (left[2] + right[2]) * 0.5,
+                            }
+                        } else {
+                            // Fallback to simple edge midpoint
+                            neighbor_pos = get_edge_mid_point(cur_tile, cur_poly, i, neighbor_tile, neighbor_poly)
+                        }
 
                         // Calculate cost
                         cost := current.cost + query_filter_get_cost(filter,

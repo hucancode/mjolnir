@@ -1,5 +1,6 @@
 package navigation_detour
 
+import "core:math"
 import "core:math/linalg"
 import nav_recast "../recast"
 
@@ -23,7 +24,7 @@ create_navmesh :: proc(pmesh: ^nav_recast.Poly_Mesh, dmesh: ^nav_recast.Poly_Mes
     if nav_recast.status_failed(data_status) {
         return nil, false
     }
-    defer delete(nav_data)
+    // Don't delete nav_data here - DT_TILE_FREE_DATA flag means Detour will manage it
     
     // Create navigation mesh
     nav_mesh = new(Nav_Mesh)
@@ -90,15 +91,24 @@ find_path_points :: proc(query: ^Nav_Mesh_Query, start_pos: [3]f32, end_pos: [3]
     
     straight_status, straight_path_count := find_straight_path(query, start_nearest, end_nearest, poly_path[:poly_path_count], poly_path_count,
                                                                 straight_path, straight_path_flags, straight_path_refs,
-                                                                i32(len(path)), 0)
+                                                                i32(len(path)), u32(Straight_Path_Options.All_Crossings))
     if nav_recast.status_failed(straight_status) {
         return 0, straight_status
     }
     
-    // Extract positions
+    // Extract positions and filter duplicates
+    path_count = 0
+    last_pos := [3]f32{math.F32_MAX, math.F32_MAX, math.F32_MAX}
+    
     for i in 0..<int(straight_path_count) {
-        path[i] = straight_path[i].pos
+        pos := straight_path[i].pos
+        // Skip duplicate consecutive points
+        if linalg.length2(pos - last_pos) > 0.0001 { // 0.01 unit threshold squared
+            path[path_count] = pos
+            path_count += 1
+            last_pos = pos
+        }
     }
     
-    return int(straight_path_count), {.Success}
+    return path_count, {.Success}
 }

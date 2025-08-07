@@ -26,6 +26,12 @@ NavMeshRenderer :: struct {
     vertex_count:            u32,
     index_count:             u32,
 
+    // Path rendering data
+    path_vertex_buffer:      gpu.DataBuffer(NavMeshVertex),
+    path_vertex_count:       u32,
+    path_enabled:            bool,
+    path_color:              [4]f32,
+    
     // Rendering state
     enabled:                 bool,
     debug_mode:              bool,
@@ -77,6 +83,9 @@ NavMeshDebugPushConstants :: struct {
     padding:       [8]f32,          // 32 (pad to 128)
 }
 
+// Maximum path segments (line segments between waypoints)
+MAX_PATH_SEGMENTS :: 1000
+
 // Default area colors for different area types
 AREA_COLORS := [7][4]f32{
     0 = {0.0, 0.0, 0.0, 0.0},     // NULL_AREA - transparent
@@ -98,6 +107,11 @@ navmesh_renderer_init :: proc(renderer: ^NavMeshRenderer, gpu_context: ^gpu.GPUC
     renderer.color_mode = .Area_Colors
     renderer.debug_render_mode = .Wireframe
     renderer.base_color = {0.0, 0.8, 0.2}
+    
+    // Initialize path rendering defaults
+    renderer.path_enabled = false
+    renderer.path_color = {1.0, 1.0, 0.0, 1.0} // Yellow by default
+    renderer.path_vertex_count = 0
 
     // Create pipelines
     result := create_navmesh_pipelines(renderer, gpu_context, warehouse)
@@ -109,6 +123,9 @@ navmesh_renderer_init :: proc(renderer: ^NavMeshRenderer, gpu_context: ^gpu.GPUC
     // Initialize empty buffers with larger capacity for complex navigation meshes
     renderer.vertex_buffer = gpu.create_host_visible_buffer(gpu_context, NavMeshVertex, 16384, {.VERTEX_BUFFER}) or_return
     renderer.index_buffer = gpu.create_host_visible_buffer(gpu_context, u32, 32768, {.INDEX_BUFFER}) or_return
+    
+    // Pre-allocate path buffer for MAX_PATH_SEGMENTS line segments (2 vertices per segment)
+    renderer.path_vertex_buffer = gpu.create_host_visible_buffer(gpu_context, NavMeshVertex, MAX_PATH_SEGMENTS * 2, {.VERTEX_BUFFER}) or_return
 
     log.info("Navigation mesh renderer initialized successfully")
     return .SUCCESS
@@ -131,6 +148,7 @@ navmesh_renderer_deinit :: proc(renderer: ^NavMeshRenderer, gpu_context: ^gpu.GP
 
     gpu.data_buffer_deinit(gpu_context, &renderer.vertex_buffer)
     gpu.data_buffer_deinit(gpu_context, &renderer.index_buffer)
+    gpu.data_buffer_deinit(gpu_context, &renderer.path_vertex_buffer)
 }
 
 // Build vertex data from navigation mesh
@@ -502,6 +520,102 @@ get_area_color :: proc(area_id: u8, color_mode: NavMeshColorMode, base_color: [3
     return {base_color.x, base_color.y, base_color.z, alpha}
 }
 
+// Update path visualization
+navmesh_renderer_update_path :: proc(renderer: ^NavMeshRenderer, path_points: [][3]f32, path_color: [4]f32 = {1.0, 1.0, 0.0, 1.0}) {
+    if len(path_points) < 2 {
+        renderer.path_enabled = false
+        renderer.path_vertex_count = 0
+        return
+    }
+    
+    // Build triangulated line strips from path points
+    // For each line segment, create a quad (2 triangles) to simulate thick lines
+    vertices := make([dynamic]NavMeshVertex, context.temp_allocator)
+    defer delete(vertices)
+    
+    line_width: f32 = 0.15 // Width of the line in world units
+    
+    // For each pair of consecutive points, create a quad
+    for i in 0..<len(path_points)-1 {
+        start := path_points[i]
+        end := path_points[i+1]
+        
+        // Calculate line direction and perpendicular
+        dir := linalg.normalize(end - start)
+        // Use cross product with up vector to get perpendicular direction
+        perp := linalg.normalize(linalg.cross(dir, [3]f32{0, 1, 0})) * line_width
+        
+        // If line is vertical, use different perpendicular
+        if abs(dir.y) > 0.99 {
+            perp = linalg.normalize(linalg.cross(dir, [3]f32{1, 0, 0})) * line_width
+        }
+        
+        // Create quad vertices (two triangles)
+        // First triangle
+        append(&vertices, NavMeshVertex{
+            position = start - perp,
+            color = path_color,
+            normal = {0, 1, 0},
+        })
+        append(&vertices, NavMeshVertex{
+            position = start + perp,
+            color = path_color,
+            normal = {0, 1, 0},
+        })
+        append(&vertices, NavMeshVertex{
+            position = end - perp,
+            color = path_color,
+            normal = {0, 1, 0},
+        })
+        
+        // Second triangle
+        append(&vertices, NavMeshVertex{
+            position = start + perp,
+            color = path_color,
+            normal = {0, 1, 0},
+        })
+        append(&vertices, NavMeshVertex{
+            position = end + perp,
+            color = path_color,
+            normal = {0, 1, 0},
+        })
+        append(&vertices, NavMeshVertex{
+            position = end - perp,
+            color = path_color,
+            normal = {0, 1, 0},
+        })
+        
+        // Limit to maximum segments
+        if len(vertices) >= MAX_PATH_SEGMENTS * 6 {
+            log.warnf("Path exceeds maximum segments (%d), truncating", MAX_PATH_SEGMENTS)
+            break
+        }
+    }
+    
+    // Update GPU buffer
+    if len(vertices) > 0 {
+        result := gpu.data_buffer_write(&renderer.path_vertex_buffer, vertices[:])
+        if result != .SUCCESS {
+            log.error("Failed to upload path vertex data")
+            renderer.path_enabled = false
+            renderer.path_vertex_count = 0
+            return
+        }
+        renderer.path_vertex_count = u32(len(vertices))
+        renderer.path_enabled = true
+        renderer.path_color = path_color
+    } else {
+        renderer.path_enabled = false
+        renderer.path_vertex_count = 0
+    }
+}
+
+// Clear path visualization
+navmesh_renderer_clear_path :: proc(renderer: ^NavMeshRenderer) {
+    renderer.path_enabled = false
+    renderer.path_vertex_count = 0
+}
+
 // Render navigation mesh
 navmesh_renderer_render :: proc(renderer: ^NavMeshRenderer, command_buffer: vk.CommandBuffer,
                                world_matrix: matrix[4,4]f32, camera_index: u32) {
@@ -515,8 +629,6 @@ navmesh_renderer_render :: proc(renderer: ^NavMeshRenderer, command_buffer: vk.C
         return
     }
 
-    log.debugf("Rendering navigation mesh: %d vertices, %d indices, camera_index=%d",
-               renderer.vertex_count, renderer.index_count, camera_index)
 
     pipeline := renderer.debug_pipeline if renderer.debug_mode else renderer.pipeline
     pipeline_layout := renderer.debug_pipeline_layout if renderer.debug_mode else renderer.pipeline_layout
@@ -553,8 +665,32 @@ navmesh_renderer_render :: proc(renderer: ^NavMeshRenderer, command_buffer: vk.C
                            0, size_of(NavMeshPushConstants), &push_constants)
     }
 
-    // Draw
+    // Draw navmesh
     vk.CmdDrawIndexed(command_buffer, renderer.index_count, 1, 0, 0, 0)
+    
+    // Render path if enabled
+    if renderer.path_enabled && renderer.path_vertex_count >= 3 {
+        // Path is rendered as triangulated quads using the main pipeline
+        vk.CmdBindPipeline(command_buffer, .GRAPHICS, renderer.pipeline)
+        
+        // Bind path vertex buffer
+        path_vertex_buffers := []vk.Buffer{renderer.path_vertex_buffer.buffer}
+        vk.CmdBindVertexBuffers(command_buffer, 0, 1, raw_data(path_vertex_buffers), raw_data(offsets))
+        
+        // Set push constants for path rendering
+        path_push_constants := NavMeshPushConstants{
+            world = world_matrix,
+            camera_index = camera_index,
+            height_offset = renderer.height_offset + 0.15, // Slightly higher than navmesh
+            alpha = 1.0, // Fully opaque for path
+            color_mode = u32(NavMeshColorMode.Uniform), // Use uniform color from vertex data
+        }
+        vk.CmdPushConstants(command_buffer, renderer.pipeline_layout, {.VERTEX, .FRAGMENT},
+                           0, size_of(NavMeshPushConstants), &path_push_constants)
+        
+        // Draw path triangles
+        vk.CmdDraw(command_buffer, renderer.path_vertex_count, 1, 0, 0)
+    }
 }
 
 // Create rendering pipelines
