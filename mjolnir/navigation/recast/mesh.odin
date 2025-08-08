@@ -1129,23 +1129,19 @@ build_poly_mesh :: proc(cset: ^Contour_Set, nvp: i32, pmesh: ^Poly_Mesh) -> bool
         contour_verts := make([][3]u16, len(cont.verts))
         defer delete(contour_verts)
 
-        // Create sequential indices as expected by triangulate_polygon
+        // Create indices array - will be reused for vertex mapping after triangulation
         indices := make([]i32, len(cont.verts))
         defer delete(indices)
 
-        // Map from contour vertex index to global vertex index
-        vertex_map := make([]i32, len(cont.verts))
-        defer delete(vertex_map)
-
+        // Set up initial indices for triangulation (0, 1, 2, ...)
+        for j in 0..<len(cont.verts) {
+            indices[j] = i32(j)
+        }
+        
+        // Triangulate first, then add vertices (matching C++ approach)
         for j in 0..<len(cont.verts) {
             v := cont.verts[j]
-            // Add to global vertex list and store the mapping
-            vert_idx := add_vertex(u16(v.x), u16(v.y), u16(v.z), &verts, buckets)
-            vertex_map[j] = vert_idx
-
-            // Set up data for triangulation
             contour_verts[j] = {u16(v.x), u16(v.y), u16(v.z)}
-            indices[j] = i32(j)  // Sequential indices as expected by triangulate
         }
 
         // Triangulate the contour
@@ -1155,10 +1151,11 @@ build_poly_mesh :: proc(cset: ^Contour_Set, nvp: i32, pmesh: ^Poly_Mesh) -> bool
             continue
         }
 
-        // Map triangulated indices back to global vertex indices
-        // The triangles contain indices into contour_verts, we need to map them to global vertex indices
-        for i in 0..<len(triangles) {
-            triangles[i] = vertex_map[triangles[i]]
+        // Add vertices and merge duplicates AFTER triangulation (matching C++ approach)
+        // Reuse indices array to store global vertex indices
+        for j in 0..<len(cont.verts) {
+            v := cont.verts[j]
+            indices[j] = add_vertex(u16(v.x), u16(v.y), u16(v.z), &verts, buckets)
         }
 
         // Group triangles into convex polygons with max nvp vertices
@@ -1173,9 +1170,10 @@ build_poly_mesh :: proc(cset: ^Contour_Set, nvp: i32, pmesh: ^Poly_Mesh) -> bool
                 area = cont.area,
                 reg = cont.reg,
             }
-            poly.verts[0] = triangles[base + 0]
-            poly.verts[1] = triangles[base + 1]
-            poly.verts[2] = triangles[base + 2]
+            // Use triangles as lookup into indices array (matching C++ approach)
+            poly.verts[0] = indices[triangles[base + 0]]
+            poly.verts[1] = indices[triangles[base + 1]]
+            poly.verts[2] = indices[triangles[base + 2]]
             append(&region_polys, poly)
         }
 
