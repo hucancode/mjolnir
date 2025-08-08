@@ -17,18 +17,20 @@ import mu "vendor:microui"
 
 // Navigation mesh visual example - demonstrates rendering the navigation mesh
 navmesh_visual_main :: proc() {
-    log.info("=== Navigation Mesh Visual Example ===")
+    log.info("=== Navigation Mesh Visual Example with Mouse Picking ===")
 
     // Initialize and run the engine with our custom setup
-    mjolnir.init(&engine, 1280, 720, "Navigation Mesh Visualization")
+    mjolnir.init(&engine, 1280, 720, "Navigation Mesh Visualization - Click to Set Path")
     defer mjolnir.deinit(&engine)
 
     engine.setup_proc = navmesh_setup
     engine.update_proc = navmesh_update
     engine.render2d_proc = navmesh_render2d
     engine.key_press_proc = navmesh_key_pressed
+    engine.mouse_press_proc = navmesh_mouse_pressed
+    engine.mouse_move_proc = navmesh_mouse_moved
 
-    mjolnir.run(&engine, 1280, 720, "Navigation Mesh Visualization")
+    mjolnir.run(&engine, 1280, 720, "Navigation Mesh Visualization - Click to Set Path")
 }
 
 // Global state for navigation example
@@ -56,16 +58,42 @@ navmesh_state: struct {
     path_status: recast.Status,
 
     // Visualization handles
-    start_sphere_handle: mjolnir.Handle,
-    end_sphere_handle: mjolnir.Handle,
     path_waypoint_handles: [dynamic]mjolnir.Handle,
+
+    // Mouse picking state
+    picking_mode: PickingMode,
+    hover_pos: [3]f32,
+    hover_valid: bool,
+    last_mouse_pos: [2]f32,
+    mouse_move_threshold: f32,
+
+    // Camera control
+    camera_auto_rotate: bool,
+    camera_distance: f32,
+    camera_height: f32,
+    camera_angle: f32,
 } = {
     show_original_mesh = true,
+    camera_auto_rotate = false,
+    camera_distance = 40,
+    camera_height = 25,
+    camera_angle = 0,
+    mouse_move_threshold = 5.0,  // Only update hover when mouse moves more than 5 pixels
+}
+
+PickingMode :: enum {
+    None,
+    PickingStart,
+    PickingEnd,
 }
 
 navmesh_setup :: proc(engine: ^mjolnir.Engine) {
     using mjolnir, geometry
     log.info("Navigation mesh example setup")
+    
+    // Initialize dynamic arrays
+    navmesh_state.path_points = make([dynamic][3]f32)
+    navmesh_state.path_waypoint_handles = make([dynamic]Handle)
 
     // Add some lights
     spawn(&engine.scene, DirectionalLightAttachment{
@@ -79,19 +107,38 @@ navmesh_setup :: proc(engine: ^mjolnir.Engine) {
         cast_shadow = false,
     })
 
-    // Setup camera
+    // Setup camera - adjusted for larger scene
     main_camera := get_main_camera(engine)
     if main_camera != nil {
-        camera_look_at(main_camera, {15, 10, 15}, {0, 0, 0}, {0, 1, 0})
+        camera_look_at(main_camera, {35, 25, 35}, {0, 0, 0}, {0, 1, 0})
     }
 
     // Build navigation mesh
-    build_navmesh(engine)
+    use_procedural := build_navmesh(engine)
 
-    // Don't generate path automatically - wait for user to press P
+    // Start in picking mode
+    navmesh_state.picking_mode = .PickingStart
+    
+    // Only test pathfinding at startup if using procedural geometry
+    if use_procedural {
+        log.info("=== TESTING PATHFINDING AT STARTUP ===")
+        log.info("Testing path from corner to corner that should go around obstacles")
+        log.info("Note: Ground is 50x50 (-25 to 25), with 5 obstacles well-spaced")
+        navmesh_state.start_pos = {-20, 0, -20}
+        navmesh_state.end_pos = {20, 0, 20}
+        log.infof("Start: (%.2f, %.2f, %.2f), End: (%.2f, %.2f, %.2f)", 
+            navmesh_state.start_pos.x, navmesh_state.start_pos.y, navmesh_state.start_pos.z,
+            navmesh_state.end_pos.x, navmesh_state.end_pos.y, navmesh_state.end_pos.z)
+        
+        // Find and visualize the path
+        find_path(engine)
+        update_path_visualization(engine)
+        
+        log.info("=== END OF STARTUP PATHFINDING TEST ===")
+    }
 }
 
-build_navmesh :: proc(engine: ^mjolnir.Engine) {
+build_navmesh :: proc(engine: ^mjolnir.Engine) -> (use_procedural: bool) {
     using mjolnir, geometry
 
     // Clean up previous mesh if any
@@ -105,8 +152,9 @@ build_navmesh :: proc(engine: ^mjolnir.Engine) {
     }
 
     // Try to load from OBJ file first
-    // Default to smaller test file, or use command line argument if provided
-    obj_file := "assets/test_floor_13x13.obj"
+    // Default to procedural geometry unless a file is explicitly provided
+    // Use "procedural" as a special keyword to force procedural geometry
+    obj_file := ""
     if len(os.args) > 2 {
         obj_file = os.args[2]
     }
@@ -119,7 +167,10 @@ build_navmesh :: proc(engine: ^mjolnir.Engine) {
 
     load_ok := false
 
-    if os.exists(obj_file) {
+    // Check if we should use procedural geometry
+    use_procedural = obj_file == "" || obj_file == "procedural"
+    
+    if !use_procedural && os.exists(obj_file) {
         log.infof("Loading navigation mesh from OBJ file: %s", obj_file)
         vertices, indices, areas, load_ok = navigation.load_obj_to_navmesh_input(obj_file, 1.0, recast.RC_WALKABLE_AREA)
 
@@ -138,28 +189,76 @@ build_navmesh :: proc(engine: ^mjolnir.Engine) {
     if !load_ok {
         log.info("Using procedural geometry for navigation mesh")
 
-        // Create a simple test scene with ground and obstacle
-        // Ground quad (10x10 units)
+        // Create a larger test scene with ground and multiple well-spaced obstacles
+        // Ground quad (50x50 units) - much larger for better navigation
         ground_verts := [][3]f32{
-            {-10, 0, -10},  // Bottom-left
-            { 10, 0, -10},  // Bottom-right
-            { 10, 0,  10},  // Top-right
-            {-10, 0,  10},  // Top-left
+            {-25, 0, -25},  // Bottom-left
+            { 25, 0, -25},  // Bottom-right
+            { 25, 0,  25},  // Top-right
+            {-25, 0,  25},  // Top-left
         }
 
-        // Obstacle box (4x3x4 centered)
-        obstacle_verts := [][3]f32{
+        // Create multiple smaller obstacles well-spaced and away from edges
+        // Smaller obstacles for better connectivity
+        // Obstacle 1: Small box at (-10, 0, -10) - reduced from 4x4 to 2x2
+        obstacle1_verts := [][3]f32{
             // Bottom face (y=0)
-            {-2, 0, -2}, { 2, 0, -2}, { 2, 0,  2}, {-2, 0,  2},
+            {-11, 0, -11}, {-9, 0, -11}, {-9, 0, -9}, {-11, 0, -9},
             // Top face (y=3)
-            {-2, 3, -2}, { 2, 3, -2}, { 2, 3,  2}, {-2, 3,  2},
+            {-11, 3, -11}, {-9, 3, -11}, {-9, 3, -9}, {-11, 3, -9},
         }
+        
+        // Obstacle 2: Small box at (10, 0, -10) - reduced from 4x4 to 2x2
+        obstacle2_verts := [][3]f32{
+            // Bottom face (y=0)
+            {9, 0, -11}, {11, 0, -11}, {11, 0, -9}, {9, 0, -9},
+            // Top face (y=3)
+            {9, 3, -11}, {11, 3, -11}, {11, 3, -9}, {9, 3, -9},
+        }
+        
+        // Obstacle 3: Small box at (-10, 0, 10) - reduced from 4x4 to 2x2
+        obstacle3_verts := [][3]f32{
+            // Bottom face (y=0)
+            {-11, 0, 9}, {-9, 0, 9}, {-9, 0, 11}, {-11, 0, 11},
+            // Top face (y=3)
+            {-11, 3, 9}, {-9, 3, 9}, {-9, 3, 11}, {-11, 3, 11},
+        }
+        
+        // Obstacle 4: Small box at (10, 0, 10) - reduced from 4x4 to 2x2
+        obstacle4_verts := [][3]f32{
+            // Bottom face (y=0)
+            {9, 0, 9}, {11, 0, 9}, {11, 0, 11}, {9, 0, 11},
+            // Top face (y=3)
+            {9, 3, 9}, {11, 3, 9}, {11, 3, 11}, {9, 3, 11},
+        }
+        
+        // Obstacle 5: Central obstacle at (0, 0, 0) - reduced from 6x6 to 4x4
+        obstacle5_verts := [][3]f32{
+            // Bottom face (y=0)
+            {-2, 0, -2}, {2, 0, -2}, {2, 0, 2}, {-2, 0, 2},
+            // Top face (y=4)
+            {-2, 4, -2}, {2, 4, -2}, {2, 4, 2}, {-2, 4, 2},
+        }
+        
+        log.info("Created larger ground (50x50) with 5 well-spaced obstacles")
+        log.info("Obstacles at: (-10,-10), (10,-10), (-10,10), (10,10), and center")
 
         // Combine vertices
-        total_verts := len(ground_verts) + len(obstacle_verts)
+        total_verts := len(ground_verts) + len(obstacle1_verts) + len(obstacle2_verts) + 
+                      len(obstacle3_verts) + len(obstacle4_verts) + len(obstacle5_verts)
         vertices = make([][3]f32, total_verts)
-        copy(vertices[0:], ground_verts[:])
-        copy(vertices[len(ground_verts):], obstacle_verts[:])
+        offset := 0
+        copy(vertices[offset:], ground_verts[:])
+        offset += len(ground_verts)
+        copy(vertices[offset:], obstacle1_verts[:])
+        offset += len(obstacle1_verts)
+        copy(vertices[offset:], obstacle2_verts[:])
+        offset += len(obstacle2_verts)
+        copy(vertices[offset:], obstacle3_verts[:])
+        offset += len(obstacle3_verts)
+        copy(vertices[offset:], obstacle4_verts[:])
+        offset += len(obstacle4_verts)
+        copy(vertices[offset:], obstacle5_verts[:])
 
         // Create indices
         // Ground indices (2 triangles)
@@ -168,68 +267,107 @@ build_navmesh :: proc(engine: ^mjolnir.Engine) {
             0, 2, 3,  // Second triangle
         }
 
-        // Obstacle indices (12 triangles for 6 faces)
-        obstacle_base := i32(len(ground_verts))
-        obstacle_indices := []i32{
+        // Helper to create obstacle indices
+        create_box_indices :: proc(base: i32) -> []i32 {
+            indices := make([]i32, 36)  // 12 triangles * 3 vertices
             // Bottom face
-            obstacle_base + 0, obstacle_base + 2, obstacle_base + 1,
-            obstacle_base + 0, obstacle_base + 3, obstacle_base + 2,
+            indices[0] = base + 0; indices[1] = base + 2; indices[2] = base + 1;
+            indices[3] = base + 0; indices[4] = base + 3; indices[5] = base + 2;
             // Top face
-            obstacle_base + 4, obstacle_base + 5, obstacle_base + 6,
-            obstacle_base + 4, obstacle_base + 6, obstacle_base + 7,
+            indices[6] = base + 4; indices[7] = base + 5; indices[8] = base + 6;
+            indices[9] = base + 4; indices[10] = base + 6; indices[11] = base + 7;
             // Front face
-            obstacle_base + 0, obstacle_base + 1, obstacle_base + 5,
-            obstacle_base + 0, obstacle_base + 5, obstacle_base + 4,
+            indices[12] = base + 0; indices[13] = base + 1; indices[14] = base + 5;
+            indices[15] = base + 0; indices[16] = base + 5; indices[17] = base + 4;
             // Back face
-            obstacle_base + 2, obstacle_base + 3, obstacle_base + 7,
-            obstacle_base + 2, obstacle_base + 7, obstacle_base + 6,
+            indices[18] = base + 2; indices[19] = base + 3; indices[20] = base + 7;
+            indices[21] = base + 2; indices[22] = base + 7; indices[23] = base + 6;
             // Left face
-            obstacle_base + 0, obstacle_base + 4, obstacle_base + 7,
-            obstacle_base + 0, obstacle_base + 7, obstacle_base + 3,
+            indices[24] = base + 0; indices[25] = base + 4; indices[26] = base + 7;
+            indices[27] = base + 0; indices[28] = base + 7; indices[29] = base + 3;
             // Right face
-            obstacle_base + 1, obstacle_base + 2, obstacle_base + 6,
-            obstacle_base + 1, obstacle_base + 6, obstacle_base + 5,
+            indices[30] = base + 1; indices[31] = base + 2; indices[32] = base + 6;
+            indices[33] = base + 1; indices[34] = base + 6; indices[35] = base + 5;
+            return indices
         }
 
+        // Create indices for all obstacles
+        obstacle1_base := i32(len(ground_verts))
+        obstacle1_indices := create_box_indices(obstacle1_base)
+        defer delete(obstacle1_indices)
+        
+        obstacle2_base := obstacle1_base + i32(len(obstacle1_verts))
+        obstacle2_indices := create_box_indices(obstacle2_base)
+        defer delete(obstacle2_indices)
+        
+        obstacle3_base := obstacle2_base + i32(len(obstacle2_verts))
+        obstacle3_indices := create_box_indices(obstacle3_base)
+        defer delete(obstacle3_indices)
+        
+        obstacle4_base := obstacle3_base + i32(len(obstacle3_verts))
+        obstacle4_indices := create_box_indices(obstacle4_base)
+        defer delete(obstacle4_indices)
+        
+        obstacle5_base := obstacle4_base + i32(len(obstacle4_verts))
+        obstacle5_indices := create_box_indices(obstacle5_base)
+        defer delete(obstacle5_indices)
+
         // Combine indices
-        total_indices := len(ground_indices) + len(obstacle_indices)
+        total_indices := len(ground_indices) + len(obstacle1_indices) + len(obstacle2_indices) + 
+                        len(obstacle3_indices) + len(obstacle4_indices) + len(obstacle5_indices)
         indices = make([]i32, total_indices)
-        copy(indices[0:], ground_indices[:])
-        copy(indices[len(ground_indices):], obstacle_indices[:])
+        offset = 0
+        copy(indices[offset:], ground_indices[:])
+        offset += len(ground_indices)
+        copy(indices[offset:], obstacle1_indices[:])
+        offset += len(obstacle1_indices)
+        copy(indices[offset:], obstacle2_indices[:])
+        offset += len(obstacle2_indices)
+        copy(indices[offset:], obstacle3_indices[:])
+        offset += len(obstacle3_indices)
+        copy(indices[offset:], obstacle4_indices[:])
+        offset += len(obstacle4_indices)
+        copy(indices[offset:], obstacle5_indices[:])
 
         // Create areas
         num_ground_tris := len(ground_indices) / 3
-        num_obstacle_tris := len(obstacle_indices) / 3
+        num_obstacle_tris := (len(obstacle1_indices) + len(obstacle2_indices) + 
+                             len(obstacle3_indices) + len(obstacle4_indices) + 
+                             len(obstacle5_indices)) / 3
         total_tris := num_ground_tris + num_obstacle_tris
         areas = make([]u8, total_tris)
         // Ground is walkable
         for i in 0..<num_ground_tris {
             areas[i] = recast.RC_WALKABLE_AREA
         }
-        // Obstacle is not walkable
+        // All obstacles are not walkable
         for i in num_ground_tris..<total_tris {
             areas[i] = recast.RC_NULL_AREA
         }
+        
+        log.infof("Scene geometry: %d vertices, %d triangles", len(vertices), len(indices)/3)
+        log.infof("Areas array length: %d", len(areas))
+        log.infof("Walkable areas: %d, Non-walkable areas: %d", num_ground_tris, num_obstacle_tris)
+    } else {
+        log.infof("Scene geometry: %d vertices, %d triangles", len(vertices), len(indices)/3)
+        log.infof("Areas array length: %d", len(areas))
     }
-
-    log.infof("Scene geometry: %d vertices, %d triangles", len(vertices), len(indices)/3)
-    log.infof("Areas array length: %d", len(areas))
 
     // Configure Recast
     config := recast.Config{
-        cs = 0.15,                       // Cell size (very fine detail)
-        ch = 0.2,                        // Cell height
+        cs = 0.2,                        // Cell size - increased for better connectivity
+        ch = 0.2,                        // Cell height - increased to match
         walkable_slope_angle = 45,       // Max slope
-        walkable_height = 10,            // Min ceiling height
-        walkable_climb = 4,              // Max ledge height
-        walkable_radius = 3,             // Agent radius in cells (3 * 0.15 = 0.45 units)
-        max_edge_len = 2,                // Max edge length (reduced for smaller polygons)
-        max_simplification_error = 0.2,  // Simplification error (very low for precision)
-        min_region_area = 1,             // Min region area (smallest possible)
-        merge_region_area = 20,          // Merge region area
+        walkable_height = 10,            // Min ceiling height (in cells = 2.0 units)
+        walkable_climb = 4,              // Max ledge height (in cells = 0.8 units) - increased for steps
+        walkable_radius = 3,             // Agent radius in cells (3 * 0.2 = 0.6 units) - smaller agent
+        max_edge_len = 12,               // Max edge length in cells (12 * 0.2 = 2.4 units)
+        max_simplification_error = 1.3,  // Simplification error in cells
+        min_region_area = 8,             // Min region area in cells^2
+        merge_region_area = 20,          // Merge region area in cells^2
         max_verts_per_poly = 6,          // Max verts per polygon
-        detail_sample_dist = 2,          // Detail sample distance (more detail)
-        detail_sample_max_error = 0.3,   // Detail sample error (high accuracy)
+        detail_sample_dist = 6,          // Detail sample distance in cells
+        detail_sample_max_error = 1,     // Detail sample error in cells
         border_size = 0,                 // No border padding
     }
 
@@ -238,7 +376,7 @@ build_navmesh :: proc(engine: ^mjolnir.Engine) {
     pmesh, dmesh, ok := recast.build_navmesh(vertices, indices, areas, config)
     if !ok {
         log.error("Failed to build navigation mesh")
-        return
+        return use_procedural
     }
 
     navmesh_state.poly_mesh = pmesh
@@ -249,12 +387,30 @@ build_navmesh :: proc(engine: ^mjolnir.Engine) {
     log.infof("Poly mesh bounds: min=(%.2f, %.2f, %.2f) max=(%.2f, %.2f, %.2f)",
               pmesh.bmin.x, pmesh.bmin.y, pmesh.bmin.z,
               pmesh.bmax.x, pmesh.bmax.y, pmesh.bmax.z)
+    
+    // Check for region connectivity
+    if pmesh.npolys > 0 {
+        log.info("Checking polygon regions...")
+        regions := make(map[u16]int)
+        defer delete(regions)
+        for i in 0..<pmesh.npolys {
+            region_id := pmesh.regs[i]
+            regions[region_id] = regions[region_id] + 1
+        }
+        log.infof("Found %d distinct regions in navigation mesh:", len(regions))
+        for region_id, count in regions {
+            log.infof("  Region %d: %d polygons", region_id, count)
+        }
+        if len(regions) > 1 {
+            log.warn("Multiple disconnected regions detected! This will cause pathfinding failures between regions.")
+        }
+    }
 
     // Create visualization
     success := navmesh_renderer_build_from_recast(&engine.navmesh, &engine.gpu_context, pmesh, dmesh)
     if !success {
         log.error("Failed to build navigation mesh renderer")
-        return
+        return use_procedural
     }
 
     // Configure the renderer
@@ -262,8 +418,8 @@ build_navmesh :: proc(engine: ^mjolnir.Engine) {
     engine.navmesh.debug_mode = false  // Use filled polygons
     engine.navmesh.alpha = 0.6
     engine.navmesh.height_offset = 0.05  // Slightly above ground
-    engine.navmesh.color_mode = .Area_Colors  // Color by area type
-    engine.navmesh.base_color = {0.0, 0.8, 0.2}  // Green
+    engine.navmesh.color_mode = .Random_Colors  // Random color per polygon
+    engine.navmesh.base_color = {0.0, 0.8, 0.2}  // Green (not used in random mode)
 
     log.infof("Navigation mesh visualization created with %d triangles",
               navmesh_renderer_get_triangle_count(&engine.navmesh))
@@ -274,7 +430,7 @@ build_navmesh :: proc(engine: ^mjolnir.Engine) {
                                                f32(config.walkable_climb) * config.ch)
     if !nav_ok {
         log.error("Failed to create Detour navigation mesh")
-        return
+        return use_procedural
     }
     navmesh_state.nav_mesh = nav_mesh
 
@@ -286,12 +442,17 @@ build_navmesh :: proc(engine: ^mjolnir.Engine) {
     query_status := detour.nav_mesh_query_init(nav_query, nav_mesh, 2048)
     if recast.status_failed(query_status) {
         log.error("Failed to create navigation query")
-        return
+        return use_procedural
     }
     navmesh_state.nav_query = nav_query
 
     // Initialize filter
     detour.query_filter_init(&navmesh_state.filter)
+
+    // Start in picking mode
+    navmesh_state.picking_mode = .PickingStart
+    
+    return use_procedural
 }
 
 // Create visualization mesh for the loaded OBJ
@@ -382,6 +543,7 @@ find_path :: proc(engine: ^mjolnir.Engine) {
     // Clear previous path
     clear(&navmesh_state.path_points)
     navmesh_state.has_path = false
+    log.infof("Cleared previous path. path_points capacity: %d", cap(navmesh_state.path_points))
 
     // Allocate path buffer
     path_buffer := make([][3]f32, 512)
@@ -416,14 +578,35 @@ find_path :: proc(engine: ^mjolnir.Engine) {
         for i in 0..<poly_count {
             log.infof("  Poly %d: ref=%d", i, poly_path[i])
         }
+        
+        // Check if path is valid - if we only have 1 polygon but start and end are in different polygons, the path is invalid
+        if poly_count == 1 && start_ref != end_ref {
+            log.errorf("Invalid path: only 1 polygon in path but start (%d) and end (%d) are in different polygons!", start_ref, end_ref)
+            log.error("This indicates the navigation mesh has disconnected regions")
+            return
+        }
+    } else {
+        log.errorf("Failed to find polygon path! Status: %v", poly_status)
+        return
     }
 
     // Find path points (simplified wrapper)
+    // Use the nearest positions that were actually found on the navmesh
     path_count, status := detour.find_path_points(navmesh_state.nav_query,
-                                                   navmesh_state.start_pos,
-                                                   navmesh_state.end_pos,
+                                                   start_nearest,
+                                                   end_nearest,
                                                    &navmesh_state.filter,
                                                    path_buffer)
+    
+    // Also get the polygon centroids for comparison
+    log.info("Polygon path centroids (without funnel simplification):")
+    for i in 0..<poly_count {
+        tile, poly, _ := detour.get_tile_and_poly_by_ref(navmesh_state.nav_mesh, poly_path[i])
+        if tile != nil && poly != nil {
+            center := detour.calc_poly_center(tile, poly)
+            log.infof("  Poly %d center: (%.2f, %.2f, %.2f)", i, center.x, center.y, center.z)
+        }
+    }
 
     navmesh_state.path_status = status
 
@@ -439,6 +622,38 @@ find_path :: proc(engine: ^mjolnir.Engine) {
         log.info("Path waypoints:")
         for point, idx in navmesh_state.path_points {
             log.infof("  Waypoint %d: (%.2f, %.2f, %.2f)", idx, point.x, point.y, point.z)
+            // Check if this waypoint is inside any obstacle bounds
+            // We have 5 obstacles now (reduced sizes):
+            // Obstacle 1: (-11,-11) to (-9,-9)
+            // Obstacle 2: (9,-11) to (11,-9)
+            // Obstacle 3: (-11,9) to (-9,11)
+            // Obstacle 4: (9,9) to (11,11)
+            // Obstacle 5 (center): (-2,-2) to (2,2)
+            
+            inside_obstacle := false
+            obstacle_name := ""
+            
+            if point.x >= -11 && point.x <= -9 && point.z >= -11 && point.z <= -9 && point.y <= 3 {
+                inside_obstacle = true
+                obstacle_name = "Obstacle 1 (bottom-left)"
+            } else if point.x >= 9 && point.x <= 11 && point.z >= -11 && point.z <= -9 && point.y <= 3 {
+                inside_obstacle = true
+                obstacle_name = "Obstacle 2 (bottom-right)"
+            } else if point.x >= -11 && point.x <= -9 && point.z >= 9 && point.z <= 11 && point.y <= 3 {
+                inside_obstacle = true
+                obstacle_name = "Obstacle 3 (top-left)"
+            } else if point.x >= 9 && point.x <= 11 && point.z >= 9 && point.z <= 11 && point.y <= 3 {
+                inside_obstacle = true
+                obstacle_name = "Obstacle 4 (top-right)"
+            } else if point.x >= -2 && point.x <= 2 && point.z >= -2 && point.z <= 2 && point.y <= 4 {
+                inside_obstacle = true
+                obstacle_name = "Obstacle 5 (center)"
+            }
+            
+            if inside_obstacle {
+                log.warnf("    WARNING: Waypoint %d is INSIDE %s!", idx, obstacle_name)
+                log.warnf("    Point: (%.2f, %.2f, %.2f)", point.x, point.y, point.z)
+            }
         }
 
         // Calculate total path length
@@ -449,6 +664,17 @@ find_path :: proc(engine: ^mjolnir.Engine) {
             segment_length := linalg.distance(p0, p1)
             total_length += segment_length
             log.infof("  Segment %d->%d length: %.2f", i, i+1, segment_length)
+            
+            // Check if segment crosses any obstacle in X-Z plane
+            // Check center obstacle (-3,-3) to (3,3)
+            if ((p0.x < -3 && p1.x > 3) || (p0.x > 3 && p1.x < -3)) &&
+               ((p0.z >= -3 && p0.z <= 3) || (p1.z >= -3 && p1.z <= 3)) {
+                log.warnf("    WARNING: Segment crosses center obstacle in X direction!")
+            }
+            if ((p0.z < -3 && p1.z > 3) || (p0.z > 3 && p1.z < -3)) &&
+               ((p0.x >= -3 && p0.x <= 3) || (p1.x >= -3 && p1.x <= 3)) {
+                log.warnf("    WARNING: Segment crosses center obstacle in Z direction!")
+            }
         }
         log.infof("Total path length: %.2f", total_length)
 
@@ -457,7 +683,14 @@ find_path :: proc(engine: ^mjolnir.Engine) {
         log.infof("Straight line distance: %.2f (path is %.1f%% longer)",
                   straight_distance, (total_length/straight_distance - 1) * 100)
     } else {
-        log.error("Failed to find path")
+        log.errorf("Failed to find path. Status: %v, Path count: %d", status, path_count)
+        log.errorf("Start pos: (%.2f, %.2f, %.2f), End pos: (%.2f, %.2f, %.2f)", 
+            navmesh_state.start_pos.x, navmesh_state.start_pos.y, navmesh_state.start_pos.z,
+            navmesh_state.end_pos.x, navmesh_state.end_pos.y, navmesh_state.end_pos.z)
+        log.errorf("Start ref: %d, End ref: %d", start_ref, end_ref)
+        log.errorf("Start nearest: (%.2f, %.2f, %.2f), End nearest: (%.2f, %.2f, %.2f)",
+            start_nearest.x, start_nearest.y, start_nearest.z,
+            end_nearest.x, end_nearest.y, end_nearest.z)
     }
 }
 
@@ -486,20 +719,14 @@ update_path_visualization :: proc(engine: ^mjolnir.Engine) {
     // Update navigation mesh renderer with path data
     if navmesh_state.has_path && len(navmesh_state.path_points) >= 2 {
         // Update path in the navmesh renderer
+        log.infof("Updating path renderer with %d points", len(navmesh_state.path_points))
         navmesh_renderer_update_path(&engine.navmesh, navmesh_state.path_points[:], {1.0, 0.8, 0.0, 1.0}) // Orange/yellow path
+    } else if navmesh_state.has_path && len(navmesh_state.path_points) == 1 {
+        log.info("Path has only 1 point - need at least 2 points to draw a line")
+        navmesh_renderer_clear_path(&engine.navmesh)
     } else {
         // Clear path if no valid path
         navmesh_renderer_clear_path(&engine.navmesh)
-    }
-
-    // Remove old visualization
-    if navmesh_state.start_sphere_handle.generation != 0 {
-        despawn(engine, navmesh_state.start_sphere_handle)
-        navmesh_state.start_sphere_handle = {}
-    }
-    if navmesh_state.end_sphere_handle.generation != 0 {
-        despawn(engine, navmesh_state.end_sphere_handle)
-        navmesh_state.end_sphere_handle = {}
     }
 
     // Remove old path waypoints (no longer needed with line rendering)
@@ -509,50 +736,236 @@ update_path_visualization :: proc(engine: ^mjolnir.Engine) {
         }
     }
     clear(&navmesh_state.path_waypoint_handles)
+}
 
-    // Create sphere mesh
-    sphere_mesh_handle, _, _ := create_mesh(&engine.gpu_context, &engine.warehouse, make_sphere(8, 8))
+// Convert screen coordinates to world ray
+screen_to_world_ray :: proc(engine: ^mjolnir.Engine, screen_x, screen_y: f32) -> (ray_origin: [3]f32, ray_dir: [3]f32) {
+    using mjolnir, geometry
 
-    // Create materials
-    start_mat_handle, _, _ := create_material(&engine.warehouse, metallic_value = 0.0, roughness_value = 0.3, emissive_value = 0.8)
-    end_mat_handle, _, _ := create_material(&engine.warehouse, metallic_value = 0.0, roughness_value = 0.3, emissive_value = 0.8)
-    path_mat_handle, _, _ := create_material(&engine.warehouse, metallic_value = 0.2, roughness_value = 0.5, emissive_value = 0.4)
+    main_camera := get_main_camera(engine)
+    if main_camera == nil {
+        return {}, {}
+    }
 
-    // Create start sphere (green-ish)
-    start_handle, start_node := spawn(&engine.scene, MeshAttachment{
-        handle = sphere_mesh_handle,
-        material = start_mat_handle,
-        cast_shadow = false,
-    })
-    translate(&start_node.transform, navmesh_state.start_pos.x, navmesh_state.start_pos.y + 0.5, navmesh_state.start_pos.z)
-    scale(&start_node.transform, 0.4)
-    navmesh_state.start_sphere_handle = start_handle
+    // Get window dimensions
+    width, height := glfw.GetWindowSize(engine.window)
 
-    // Create end sphere (red-ish)
-    end_handle, end_node := spawn(&engine.scene, MeshAttachment{
-        handle = sphere_mesh_handle,
-        material = end_mat_handle,
-        cast_shadow = false,
-    })
-    translate(&end_node.transform, navmesh_state.end_pos.x, navmesh_state.end_pos.y + 0.5, navmesh_state.end_pos.z)
-    scale(&end_node.transform, 0.4)
-    navmesh_state.end_sphere_handle = end_handle
+    // Normalize screen coordinates to [-1, 1]
+    ndc_x := (2.0 * screen_x / f32(width)) - 1.0
+    ndc_y := 1.0 - (2.0 * screen_y / f32(height))  // Flip Y
 
+    // Get camera matrices
+    view, proj := camera_calculate_matrices(main_camera^)
+
+    // Compute inverse matrices
+    inv_view := linalg.matrix4x4_inverse(view)
+    inv_proj := linalg.matrix4x4_inverse(proj)
+
+    // Create ray in clip space
+    ray_clip := [4]f32{ndc_x, ndc_y, -1.0, 1.0}
+
+    // Transform to eye space
+    ray_eye := inv_proj * ray_clip
+    ray_eye = [4]f32{ray_eye.x, ray_eye.y, -1.0, 0.0}  // Point at infinity
+
+    // Transform to world space
+    ray_world_4 := inv_view * ray_eye
+    ray_world := [3]f32{ray_world_4.x, ray_world_4.y, ray_world_4.z}
+    ray_dir = linalg.normalize(ray_world)
+
+    // Ray origin is camera position
+    ray_origin = main_camera.position
+
+    return ray_origin, ray_dir
+}
+
+// Find intersection of ray with navmesh
+ray_navmesh_intersection :: proc(engine: ^mjolnir.Engine, ray_origin, ray_dir: [3]f32) -> (hit_pos: [3]f32, hit: bool) {
+    if navmesh_state.nav_query == nil || navmesh_state.nav_mesh == nil {
+        return {}, false
+    }
+    
+    // Cast ray far enough to hit any reasonable navmesh
+    ray_end := ray_origin + ray_dir * 1000.0
+    
+    // First, find the nearest polygon to the ray origin to start the raycast
+    search_extents := [3]f32{50.0, 50.0, 50.0}  // Large search area
+    status, start_ref, nearest_start := detour.find_nearest_poly(navmesh_state.nav_query, ray_origin, search_extents, &navmesh_state.filter)
+    
+    if !recast.status_succeeded(status) || start_ref == recast.INVALID_POLY_REF {
+        // If we can't find a starting polygon near the camera, try a ground-based approach
+        // Project ray origin to a reasonable height range and search again
+        y_offsets := [7]f32{0, -10, 10, -20, 20, -50, 50}
+        for y_offset in y_offsets {
+            test_origin := ray_origin
+            test_origin.y += y_offset
+            status, start_ref, nearest_start = detour.find_nearest_poly(navmesh_state.nav_query, test_origin, search_extents, &navmesh_state.filter)
+            if recast.status_succeeded(status) && start_ref != recast.INVALID_POLY_REF {
+                break
+            }
+        }
+        
+        if !recast.status_succeeded(status) || start_ref == recast.INVALID_POLY_REF {
+            return {}, false
+        }
+    }
+    
+    // Perform raycast on the navmesh
+    path_buffer := make([]recast.Poly_Ref, 256)
+    defer delete(path_buffer)
+    
+    raycast_status, hit_info, _ := detour.raycast(navmesh_state.nav_query, start_ref, nearest_start, ray_end, &navmesh_state.filter, 0, path_buffer[:], 256)
+    
+    if recast.status_succeeded(raycast_status) {
+        if hit_info.t < 1.0 {
+            // Hit something
+            hit_pos = nearest_start + (ray_end - nearest_start) * hit_info.t
+            return hit_pos, true
+        } else {
+            // Ray reached the end without hitting anything
+            // This means the navmesh is along the ray path
+            // Find the closest point on the navmesh to the ray
+            
+            // Simple approach: sample points along the ray and find nearest navmesh point
+            t_values := [9]f32{0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9}
+            for t in t_values {
+                sample_pos := ray_origin + ray_dir * (t * 100.0)  // Sample up to 100 units away
+                sample_status, poly_ref, nearest_pos := detour.find_nearest_poly(navmesh_state.nav_query, sample_pos, [3]f32{5, 20, 5}, &navmesh_state.filter)
+                if recast.status_succeeded(sample_status) && poly_ref != recast.INVALID_POLY_REF {
+                    return nearest_pos, true
+                }
+            }
+        }
+    }
+    
+    return {}, false
+}
+
+// Find nearest point on navmesh from mouse position
+find_navmesh_point_from_mouse :: proc(engine: ^mjolnir.Engine, mouse_x, mouse_y: f32) -> (pos: [3]f32, found: bool) {
+    if navmesh_state.nav_query == nil || navmesh_state.nav_mesh == nil {
+        return {}, false
+    }
+
+    // Get ray from camera through mouse position
+    ray_origin, ray_dir := screen_to_world_ray(engine, mouse_x, mouse_y)
+
+    // For now, use simple approach - cast ray to ground plane and find nearest navmesh
+    // The navmesh raycast is not working correctly yet
+    
+    // Try different Y planes to handle navmeshes at various heights
+    y_planes := [7]f32{0.0, 0.2, -0.2, 1.0, -1.0, 2.0, -2.0}
+    
+    for y_plane in y_planes {
+        if abs(ray_dir.y) > 0.001 {
+            t := (y_plane - ray_origin.y) / ray_dir.y
+            if t > 0 && t < 1000 { // Reasonable distance
+                ground_pos := ray_origin + ray_dir * t
+                // Find nearest navmesh point
+                search_extents := [3]f32{2.0, 5.0, 2.0}
+                status, poly_ref, nearest_pos := detour.find_nearest_poly(navmesh_state.nav_query, ground_pos, search_extents, &navmesh_state.filter)
+                if recast.status_succeeded(status) && poly_ref != recast.INVALID_POLY_REF {
+                    return nearest_pos, true
+                }
+            }
+        }
+    }
+    
+    return {}, false
+}
+
+navmesh_mouse_moved :: proc(engine: ^mjolnir.Engine, pos, delta: [2]f64) {
+    using mjolnir, geometry
+
+    if !navmesh_state.navmesh_built {
+        return
+    }
+
+    // Check if mouse moved significantly
+    mouse_delta := linalg.distance([2]f32{f32(pos.x), f32(pos.y)}, navmesh_state.last_mouse_pos)
+    if mouse_delta < navmesh_state.mouse_move_threshold {
+        return
+    }
+    
+    // Update last mouse position
+    navmesh_state.last_mouse_pos = {f32(pos.x), f32(pos.y)}
+
+    // Update hover position only when mouse moved significantly
+    hover_pos, valid := find_navmesh_point_from_mouse(engine, f32(pos.x), f32(pos.y))
+    navmesh_state.hover_pos = hover_pos
+    navmesh_state.hover_valid = valid
+}
+
+navmesh_mouse_pressed :: proc(engine: ^mjolnir.Engine, button, action, mods: int) {
+    using mjolnir, geometry
+
+    if !navmesh_state.navmesh_built {
+        return
+    }
+
+    if action != glfw.PRESS {
+        return
+    }
+
+    mouse_x, mouse_y := glfw.GetCursorPos(engine.window)
+
+    switch button {
+    case glfw.MOUSE_BUTTON_LEFT:
+        // Set start position
+        pos, valid := find_navmesh_point_from_mouse(engine, f32(mouse_x), f32(mouse_y))
+        if valid {
+            navmesh_state.start_pos = pos
+            navmesh_state.picking_mode = .PickingEnd
+            log.infof("Start position set to: (%.2f, %.2f, %.2f) - Now click RIGHT mouse button elsewhere to set end position",
+                navmesh_state.start_pos.x, navmesh_state.start_pos.y, navmesh_state.start_pos.z)
+
+            // Clear existing path
+            clear(&navmesh_state.path_points)
+            navmesh_state.has_path = false
+            update_path_visualization(engine)
+        } else {
+            log.warn("No valid navmesh position found at click location")
+        }
+
+    case glfw.MOUSE_BUTTON_RIGHT:
+        // Set end position and find path
+        if navmesh_state.picking_mode == .PickingEnd {
+            pos, valid := find_navmesh_point_from_mouse(engine, f32(mouse_x), f32(mouse_y))
+            if valid {
+                navmesh_state.end_pos = pos
+                navmesh_state.picking_mode = .PickingStart
+                log.infof("End position set to: (%.2f, %.2f, %.2f) - Finding path...",
+                    navmesh_state.end_pos.x, navmesh_state.end_pos.y, navmesh_state.end_pos.z)
+
+                // Find path
+                find_path(engine)
+                update_path_visualization(engine)
+            } else {
+                log.warn("No valid navmesh position found at right click location")
+            }
+        } else {
+            log.info("Please click LEFT mouse button first to set start position")
+        }
+
+    case glfw.MOUSE_BUTTON_MIDDLE:
+        // Toggle camera rotation
+        navmesh_state.camera_auto_rotate = !navmesh_state.camera_auto_rotate
+    }
 }
 
 navmesh_update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
     using mjolnir, geometry
 
-    // Simple camera orbit
+    // Camera control
     main_camera := get_main_camera(engine)
     if main_camera != nil {
-        t := time_since_app_start(engine) * 0.2
-        radius: f32 = 20
-        height: f32 = 12
+        if navmesh_state.camera_auto_rotate {
+            navmesh_state.camera_angle += delta_time * 0.2
+        }
 
-        camera_x := math.cos(t) * radius
-        camera_z := math.sin(t) * radius
-        camera_pos := [3]f32{camera_x, height, camera_z}
+        camera_x := math.cos(navmesh_state.camera_angle) * navmesh_state.camera_distance
+        camera_z := math.sin(navmesh_state.camera_angle) * navmesh_state.camera_distance
+        camera_pos := [3]f32{camera_x, navmesh_state.camera_height, camera_z}
 
         camera_look_at(main_camera, camera_pos, {0, 0, 0}, {0, 1, 0})
     }
@@ -561,21 +974,17 @@ navmesh_update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
 navmesh_render2d :: proc(engine: ^mjolnir.Engine, ctx: ^mu.Context) {
     using mjolnir
 
-    if mu.window(ctx, "Navigation Mesh", {40, 40, 350, 350}, {.NO_CLOSE}) {
-        mu.label(ctx, "Navigation Mesh Visualization")
+    if mu.window(ctx, "Navigation Mesh", {40, 40, 380, 500}, {.NO_CLOSE}) {
+        mu.label(ctx, "Navigation Mesh with Mouse Picking")
 
         if navmesh_state.navmesh_built {
             mu.label(ctx, "Status: Built")
             if navmesh_state.poly_mesh != nil {
                 mu.label(ctx, fmt.tprintf("Polygons: %d", navmesh_state.poly_mesh.npolys))
-                mu.label(ctx, fmt.tprintf("Vertices: %d", len(navmesh_state.poly_mesh.verts)))
             }
 
-            // Toggle original mesh visibility
-            mu.checkbox(ctx, "Show Original Mesh", &navmesh_state.show_original_mesh)
-            // Note: Node visibility control not implemented in current engine version
-
             // Navigation mesh settings
+            mu.label(ctx, "")
             mu.label(ctx, "NavMesh Settings:")
 
             // Toggle navmesh visibility
@@ -596,53 +1005,67 @@ navmesh_render2d :: proc(engine: ^mjolnir.Engine, ctx: ^mu.Context) {
             engine.navmesh.alpha = alpha
             mu.label(ctx, fmt.tprintf("Alpha: %.2f", alpha))
 
-            // Height offset slider
-            height := engine.navmesh.height_offset
-            mu.slider(ctx, &height, 0.0, 0.5)
-            engine.navmesh.height_offset = height
-            mu.label(ctx, fmt.tprintf("Height Offset: %.2f", height))
+            // Camera control
+            mu.label(ctx, "")
+            mu.label(ctx, "Camera:")
+            mu.checkbox(ctx, "Auto Rotate (Middle Mouse)", &navmesh_state.camera_auto_rotate)
 
-            // Color mode selection
-            if .SUBMIT in mu.button(ctx, "Next Color Mode") {
-                mode := int(engine.navmesh.color_mode)
-                mode = (mode + 1) % 4
-                engine.navmesh.color_mode = mjolnir.NavMeshColorMode(mode)
+            // Mouse picking section
+            mu.label(ctx, "")
+            mu.label(ctx, "Mouse Picking:")
+            mu.label(ctx, fmt.tprintf("Mode: %v", navmesh_state.picking_mode))
+
+            if navmesh_state.hover_valid {
+                mu.label(ctx, fmt.tprintf("Hover: (%.1f, %.1f, %.1f)",
+                    navmesh_state.hover_pos.x,
+                    navmesh_state.hover_pos.y,
+                    navmesh_state.hover_pos.z))
             }
-            mu.label(ctx, fmt.tprintf("Color Mode: %v", engine.navmesh.color_mode))
 
-            // Pathfinding section
+            // Pathfinding info
             mu.label(ctx, "")
             mu.label(ctx, "Pathfinding:")
-
-            if .SUBMIT in mu.button(ctx, "Generate Random Path (P)") {
-                generate_new_path(engine)
-            }
 
             if navmesh_state.has_path {
                 mu.label(ctx, fmt.tprintf("Path Points: %d", len(navmesh_state.path_points)))
                 mu.label(ctx, fmt.tprintf("Start: (%.1f, %.1f, %.1f)",
-                                         navmesh_state.start_pos.x,
-                                         navmesh_state.start_pos.y,
-                                         navmesh_state.start_pos.z))
+                    navmesh_state.start_pos.x,
+                    navmesh_state.start_pos.y,
+                    navmesh_state.start_pos.z))
                 mu.label(ctx, fmt.tprintf("End: (%.1f, %.1f, %.1f)",
-                                         navmesh_state.end_pos.x,
-                                         navmesh_state.end_pos.y,
-                                         navmesh_state.end_pos.z))
-            } else if navmesh_state.path_status != {} {
-                mu.label(ctx, "No path found")
+                    navmesh_state.end_pos.x,
+                    navmesh_state.end_pos.y,
+                    navmesh_state.end_pos.z))
             } else {
-                mu.label(ctx, "Press P to generate path")
+                mu.label(ctx, "No path set")
+            }
+
+            if .SUBMIT in mu.button(ctx, "Generate Random Path (P)") {
+                generate_new_path(engine)
+            }
+            
+            if navmesh_state.has_path {
+                if .SUBMIT in mu.button(ctx, "Clear Path (C)") {
+                    clear(&navmesh_state.path_points)
+                    navmesh_state.has_path = false
+                    navmesh_state.picking_mode = .PickingStart
+                    update_path_visualization(engine)
+                    navmesh_renderer_clear_path(&engine.navmesh)
+                    log.info("Path cleared")
+                }
             }
 
             // Controls help
             mu.label(ctx, "")
             mu.label(ctx, "Controls:")
-            mu.label(ctx, "P/Space - Generate Path")
+            mu.label(ctx, "Left Click - Set Start")
+            mu.label(ctx, "Right Click - Set End & Find Path")
+            mu.label(ctx, "Middle Click - Toggle Auto Rotate")
+            mu.label(ctx, "C - Clear Path")
+            mu.label(ctx, "P - Generate Random Path")
             mu.label(ctx, "R - Rebuild NavMesh")
             mu.label(ctx, "V - Toggle NavMesh")
             mu.label(ctx, "W - Toggle Wireframe")
-            mu.label(ctx, "M - Toggle OBJ Mesh")
-            mu.label(ctx, "C - Cycle Colors")
 
         } else {
             mu.label(ctx, "Status: Not Built")
@@ -685,11 +1108,13 @@ navmesh_key_pressed :: proc(engine: ^mjolnir.Engine, key, action, mods: int) {
         }
 
     case glfw.KEY_C:
-        // Cycle color modes
-        mode := int(engine.navmesh.color_mode)
-        mode = (mode + 1) % 4
-        engine.navmesh.color_mode = mjolnir.NavMeshColorMode(mode)
-        log.infof("NavMesh color mode: %v", engine.navmesh.color_mode)
+        // Clear path
+        clear(&navmesh_state.path_points)
+        navmesh_state.has_path = false
+        navmesh_state.picking_mode = .PickingStart
+        update_path_visualization(engine)
+        navmesh_renderer_clear_path(&engine.navmesh)
+        log.info("Path cleared")
 
     case glfw.KEY_P:
         // Generate new path

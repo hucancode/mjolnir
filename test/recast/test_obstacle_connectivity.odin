@@ -1,0 +1,207 @@
+package test_recast
+
+import "core:testing"
+import "core:log"
+import "core:time"
+import nav "../../mjolnir/navigation/recast"
+
+@(test)
+test_obstacle_connectivity :: proc(t: ^testing.T) {
+    testing.set_fail_timeout(t, 30 * time.Second)
+    
+    // Create a plane with an obstacle in the middle
+    // The plane is 10x10 units, obstacle is 2x2 units at center
+    vertices := [][3]f32{
+        // Ground plane (4 vertices)
+        {-5, 0, -5},  // 0
+        { 5, 0, -5},  // 1
+        { 5, 0,  5},  // 2
+        {-5, 0,  5},  // 3
+        
+        // Obstacle (box in center)
+        {-1, 0, -1},  // 4
+        { 1, 0, -1},  // 5
+        { 1, 2, -1},  // 6
+        {-1, 2, -1},  // 7
+        {-1, 0,  1},  // 8
+        { 1, 0,  1},  // 9
+        { 1, 2,  1},  // 10
+        {-1, 2,  1},  // 11
+    }
+    
+    // Ground triangles (excluding area where obstacle sits)
+    // Split the ground into triangles around the obstacle
+    indices := []i32{
+        // Bottom strip
+        0, 1, 4,
+        1, 5, 4,
+        
+        // Top strip  
+        8, 9, 3,
+        9, 2, 3,
+        
+        // Left strip
+        0, 4, 8,
+        0, 8, 3,
+        
+        // Right strip
+        5, 1, 2,
+        5, 2, 9,
+        
+        // Obstacle faces (marked as unwalkable)
+        // Front
+        4, 5, 6,
+        4, 6, 7,
+        // Back
+        9, 8, 11,
+        9, 11, 10,
+        // Left
+        8, 4, 7,
+        8, 7, 11,
+        // Right
+        5, 9, 10,
+        5, 10, 6,
+        // Top
+        7, 6, 10,
+        7, 10, 11,
+    }
+    
+    // Mark areas - ground is walkable, obstacle is not
+    areas := make([]u8, len(indices)/3)
+    for i in 0..<8 {
+        areas[i] = nav.RC_WALKABLE_AREA  // Ground triangles
+    }
+    for i in 8..<len(areas) {
+        areas[i] = nav.RC_NULL_AREA  // Obstacle triangles
+    }
+    
+    // Build configuration
+    cfg := nav.Config{
+        cs = 0.3,
+        ch = 0.2,
+        walkable_slope_angle = 45.0,
+        walkable_height = 10,
+        walkable_climb = 1,
+        walkable_radius = 1,
+        max_edge_len = 12,
+        max_simplification_error = 1.3,
+        min_region_area = 8,
+        merge_region_area = 20,
+        max_verts_per_poly = 6,
+        detail_sample_dist = 6.0,
+        detail_sample_max_error = 1.0,
+    }
+    
+    // Build navigation mesh
+    pmesh, dmesh, ok := nav.build_navmesh(vertices, indices, areas, cfg)
+    defer {
+        if pmesh != nil do nav.free_poly_mesh(pmesh)
+        if dmesh != nil do nav.free_poly_mesh_detail(dmesh)
+    }
+    
+    testing.expect(t, ok, "Navigation mesh build should succeed")
+    testing.expect(t, pmesh != nil, "Polygon mesh should not be nil")
+    
+    // Check polygon connectivity
+    disconnected_count := 0
+    for i in 0..<pmesh.npolys {
+        pi := int(i) * int(pmesh.nvp) * 2
+        
+        // Count neighbors
+        neighbor_count := 0
+        for j in 0..<pmesh.nvp {
+            if pmesh.polys[pi + int(pmesh.nvp) + int(j)] != nav.RC_MESH_NULL_IDX {
+                neighbor_count += 1
+            }
+        }
+        
+        // A polygon should have at least one neighbor unless it's isolated
+        if neighbor_count == 0 {
+            disconnected_count += 1
+            
+            // Get polygon vertices for debugging
+            verts := make([dynamic]u16, 0, pmesh.nvp)
+            defer delete(verts)
+            for j in 0..<pmesh.nvp {
+                v := pmesh.polys[pi + int(j)]
+                if v != nav.RC_MESH_NULL_IDX {
+                    append(&verts, v)
+                }
+            }
+            
+            log.warnf("Polygon %d has no neighbors! Vertices: %v", i, verts)
+        }
+    }
+    
+    // We expect all polygons to be connected (the ground around the obstacle should form a connected mesh)
+    testing.expect_value(t, disconnected_count, 0)
+    
+    log.infof("Navigation mesh has %d polygons, all properly connected!", pmesh.npolys)
+}
+
+@(test) 
+test_near_miss_edges :: proc(t: ^testing.T) {
+    testing.set_fail_timeout(t, 30 * time.Second)
+    
+    // Create two triangles that should share an edge but have slight vertex misalignment
+    vertices := [][3]f32{
+        // First triangle
+        {0, 0, 0},      // 0
+        {1, 0, 0},      // 1
+        {0.5, 0, 1},    // 2
+        
+        // Second triangle - edge 3-4 should match edge 1-0 but with slight offset
+        {1.0001, 0, 0.0001},   // 3 (should match vertex 1)
+        {0.0001, 0, -0.0001},  // 4 (should match vertex 0)
+        {0.5, 0, -1},          // 5
+    }
+    
+    indices := []i32{
+        0, 1, 2,    // First triangle
+        3, 4, 5,    // Second triangle
+    }
+    
+    areas := []u8{nav.RC_WALKABLE_AREA, nav.RC_WALKABLE_AREA}
+    
+    cfg := nav.Config{
+        cs = 0.1,
+        ch = 0.1,
+        walkable_slope_angle = 45.0,
+        walkable_height = 10,
+        walkable_climb = 1,
+        walkable_radius = 0,
+        max_edge_len = 12,
+        max_simplification_error = 0,
+        min_region_area = 1,
+        merge_region_area = 20,
+        max_verts_per_poly = 6,
+        detail_sample_dist = 6.0,
+        detail_sample_max_error = 1.0,
+    }
+    
+    pmesh, dmesh, ok := nav.build_navmesh(vertices, indices, areas, cfg)
+    defer {
+        if pmesh != nil do nav.free_poly_mesh(pmesh)
+        if dmesh != nil do nav.free_poly_mesh_detail(dmesh)
+    }
+    
+    testing.expect(t, ok, "Navigation mesh build should succeed")
+    testing.expect(t, pmesh != nil, "Polygon mesh should not be nil")
+    
+    // Check that the triangles are connected
+    connected := false
+    for i in 0..<pmesh.npolys {
+        pi := int(i) * int(pmesh.nvp) * 2
+        for j in 0..<pmesh.nvp {
+            if pmesh.polys[pi + int(pmesh.nvp) + int(j)] != nav.RC_MESH_NULL_IDX {
+                connected = true
+                break
+            }
+        }
+        if connected do break
+    }
+    
+    testing.expect(t, connected, "Triangles with near-miss edges should be connected after tolerance-based matching")
+    
+    log.infof("Near-miss edge test passed! Polygons are properly connected with tolerance.")
+}

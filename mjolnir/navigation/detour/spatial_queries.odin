@@ -23,7 +23,7 @@ find_nearest_poly :: proc(query: ^Nav_Mesh_Query, center: [3]f32, half_extents: 
     // Find tiles that overlap query region
     tx0, ty0 := calc_tile_loc_simple(query.nav_mesh, bmin)
     tx1, ty1 := calc_tile_loc_simple(query.nav_mesh, bmax)
-    log.infof("find_nearest_poly: Searching tiles (%d,%d) to (%d,%d) for position %v", tx0, ty0, tx1, ty1, center)
+    // log.infof("find_nearest_poly: Searching tiles (%d,%d) to (%d,%d) for position %v", tx0, ty0, tx1, ty1, center)
 
     nearest_dist_sqr := f32(math.F32_MAX)
 
@@ -32,15 +32,15 @@ find_nearest_poly :: proc(query: ^Nav_Mesh_Query, center: [3]f32, half_extents: 
         for tx in tx0..=tx1 {
             tile := get_tile_at(query.nav_mesh, tx, ty, 0)
             if tile == nil || tile.header == nil {
-                log.infof("  No tile at (%d,%d)", tx, ty)
+                // log.infof("  No tile at (%d,%d)", tx, ty)
                 continue
             }
-            log.infof("  Found tile at (%d,%d) with %d polygons", tx, ty, tile.header.poly_count)
+            // log.infof("  Found tile at (%d,%d) with %d polygons", tx, ty, tile.header.poly_count)
 
             // Query polygons in tile using temp allocator
             poly_refs := make([]nav_recast.Poly_Ref, 128, context.temp_allocator)
             poly_count := query_polygons_in_tile(query.nav_mesh, tile, bmin, bmax, poly_refs, 128)
-            log.infof("  Query returned %d polygons", poly_count)
+            // log.infof("  Query returned %d polygons", poly_count)
 
             for i in 0..<poly_count {
                 ref := poly_refs[i]
@@ -93,10 +93,10 @@ query_polygons :: proc(query: ^Nav_Mesh_Query, center: [3]f32, half_extents: [3]
         for tx in tx0..=tx1 {
             tile := get_tile_at(query.nav_mesh, tx, ty, 0)
             if tile == nil || tile.header == nil {
-                log.infof("  No tile at (%d,%d)", tx, ty)
+                // log.infof("  No tile at (%d,%d)", tx, ty)
                 continue
             }
-            log.infof("  Found tile at (%d,%d) with %d polygons", tx, ty, tile.header.poly_count)
+            // log.infof("  Found tile at (%d,%d) with %d polygons", tx, ty, tile.header.poly_count)
 
             // Query polygons in tile
             remaining := i32(len(polys)) - poly_count
@@ -319,7 +319,7 @@ query_polygons_in_tile :: proc(nav_mesh: ^Nav_Mesh, tile: ^Mesh_Tile, qmin: [3]f
                                  polys: []nav_recast.Poly_Ref, max_polys: i32) -> i32 {
 
     // For now, always use brute force to verify the BV tree issue
-    log.infof("    Using brute force for polygon query")
+    // log.infof("    Using brute force for polygon query")
 
     // Fallback: test all polygons
     count := i32(0)
@@ -348,10 +348,10 @@ query_polygons_in_tile :: proc(nav_mesh: ^Nav_Mesh, tile: ^Mesh_Tile, qmin: [3]f
 
         // Test overlap
         overlap := overlap_bounds(qmin, qmax, poly_min, poly_max)
-        if i < 5 { // Debug first few polygons
-            log.infof("    Polygon %d: bounds %v-%v, query %v-%v, overlap=%t", 
-                      i, poly_min, poly_max, qmin, qmax, overlap)
-        }
+        // if i < 5 { // Debug first few polygons
+        //     log.infof("    Polygon %d: bounds %v-%v, query %v-%v, overlap=%t", 
+        //               i, poly_min, poly_max, qmin, qmax, overlap)
+        // }
         if overlap {
             if count < max_polys {
                 polys[count] = base | nav_recast.Poly_Ref(i)

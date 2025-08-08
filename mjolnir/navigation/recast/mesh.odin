@@ -1286,79 +1286,6 @@ build_poly_mesh :: proc(cset: ^Contour_Set, nvp: i32, pmesh: ^Poly_Mesh) -> bool
     return true
 }
 
-// Weld nearby vertices together to reduce mesh complexity
-weld_poly_mesh_vertices :: proc(pmesh: ^Poly_Mesh, weld_tolerance: f32) -> bool {
-    if pmesh == nil || len(pmesh.verts) == 0 do return false
-    old_vert_count := len(pmesh.verts)
-    tolerance_sq := weld_tolerance * weld_tolerance
-    // Create vertex remapping table
-    remap := make([]i32, len(pmesh.verts))
-    defer delete(remap)
-
-    // Initialize remap to identity
-    for i in 0..<len(pmesh.verts) {
-        remap[i] = i32(i)
-    }
-
-    // Find vertices to weld
-    for i in 0..<len(pmesh.verts) {
-        if remap[i] != i32(i) do continue  // Already remapped
-        // Check all subsequent vertices for welding candidates
-        for j in i+1..<len(pmesh.verts) {
-            if remap[j] != i32(j) do continue  // Already remapped
-            delta := [3]f32{
-                f32(pmesh.verts[j].x - pmesh.verts[i].x),
-                f32(pmesh.verts[j].y - pmesh.verts[i].y),
-                f32(pmesh.verts[j].z - pmesh.verts[i].z),
-            }
-            dist_sq := linalg.length2(delta)
-            if dist_sq <= tolerance_sq {
-                remap[j] = i32(i)  // Weld vertex j to vertex i
-            }
-        }
-    }
-
-    // Compact vertex array and build final remapping
-    new_verts := make([dynamic][3]u16, 0, len(pmesh.verts))
-    defer delete(new_verts)
-
-    final_remap := make([]i32, len(pmesh.verts))
-    defer delete(final_remap)
-
-    new_vert_count := 0
-    for i in 0..<len(pmesh.verts) {
-        if remap[i] == i32(i) {
-            final_remap[i] = i32(new_vert_count)
-            append(&new_verts, pmesh.verts[i])
-            new_vert_count += 1
-        } else {
-            // This vertex is welded to another
-            final_remap[i] = final_remap[remap[i]]
-        }
-    }
-    if new_vert_count == len(pmesh.verts) {
-        // No vertices were welded
-        return true
-    }
-    // Update vertex array
-    delete(pmesh.verts)
-    pmesh.verts = make([][3]u16, len(new_verts))
-    copy(pmesh.verts, new_verts[:])
-
-    // Update polygon vertex indices
-    for i in 0..<pmesh.npolys {
-        pi := int(i) * int(pmesh.nvp) * 2
-
-        for j in 0..<pmesh.nvp {
-            if pmesh.polys[pi + int(j)] != RC_MESH_NULL_IDX {
-                old_idx := int(pmesh.polys[pi + int(j)])
-                pmesh.polys[pi + int(j)] = u16(final_remap[old_idx])
-            }
-        }
-    }
-
-    return true
-}
 
 // Remove degenerate polygons and unused vertices
 remove_degenerate_polys :: proc(pmesh: ^Poly_Mesh) -> bool {
@@ -1501,29 +1428,20 @@ remove_unused_vertices :: proc(pmesh: ^Poly_Mesh) -> bool {
 }
 
 // Comprehensive mesh optimization
-optimize_poly_mesh :: proc(pmesh: ^Poly_Mesh, weld_tolerance: f32) -> bool {
+optimize_poly_mesh :: proc(pmesh: ^Poly_Mesh) -> bool {
     if pmesh == nil do return false
-
-
 
     // Step 1: Remove degenerate polygons
     if !remove_degenerate_polys(pmesh) {
         log.warn("Failed to remove degenerate polygons")
     }
 
-    // Step 2: Weld nearby vertices
-    if weld_tolerance > 0.0 {
-        if !weld_poly_mesh_vertices(pmesh, weld_tolerance) {
-            log.warn("Failed to weld vertices")
-        }
-    }
-
-    // Step 3: Remove unused vertices
+    // Step 2: Remove unused vertices
     if !remove_unused_vertices(pmesh) {
         log.warn("Failed to remove unused vertices")
     }
 
-    // Step 4: Rebuild edges for connectivity
+    // Step 3: Rebuild edges for connectivity
     edges := make([dynamic]Mesh_Edge, 0, pmesh.npolys * 3)
     defer delete(edges)
 
@@ -1531,12 +1449,11 @@ optimize_poly_mesh :: proc(pmesh: ^Poly_Mesh, weld_tolerance: f32) -> bool {
         update_polygon_neighbors(pmesh, edges[:])
     }
 
-    // Step 5: Final validation
+    // Step 4: Final validation
     if !validate_poly_mesh(pmesh) {
         log.error("Mesh optimization resulted in invalid mesh")
         return false
     }
-
 
     return true
 }

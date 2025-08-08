@@ -47,9 +47,6 @@ main :: proc() {
     case "navmesh-visual":
       navmesh_visual_main()
       return
-    case "navmesh-obj":
-      obj_navmesh_example()
-      return
     }
   }
   mjolnir.init(&engine, 1280, 720, "Mjolnir Demo")

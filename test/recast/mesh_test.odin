@@ -330,45 +330,6 @@ test_mesh_copy :: proc(t: ^testing.T) {
     testing.expect(t, dst.areas[0] == src.areas[0], "Area data should match")
 }
 
-@(test)
-test_vertex_welding :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-
-    // Create mesh with duplicate vertices
-    pmesh := nav_recast.alloc_poly_mesh()
-    defer nav_recast.free_poly_mesh(pmesh)
-
-    pmesh.npolys = 2
-    pmesh.nvp = 3
-
-    pmesh.verts = make([][3]u16, 6)  // 6 vertices * 3 components
-    pmesh.polys = make([]u16, 12)  // 2 polygons * 3 verts * 2
-    pmesh.regs = make([]u16, 2)
-    pmesh.flags = make([]u16, 2)
-    pmesh.areas = make([]u8, 2)
-
-    // Create vertices where some are very close
-    pmesh.verts[0] = {0, 0, 0}     // Vertex 0
-    pmesh.verts[1] = {10, 0, 0}    // Vertex 1
-    pmesh.verts[2] = {5, 0, 10}    // Vertex 2
-    pmesh.verts[3] = {1, 0, 0}   // Vertex 3 (close to 0)
-    pmesh.verts[4] = {11, 0, 0} // Vertex 4 (close to 1)
-    pmesh.verts[5] = {6, 0, 10} // Vertex 5 (close to 2)
-
-    // Set up polygons
-    pmesh.polys[0], pmesh.polys[1], pmesh.polys[2] = 0, 1, 2
-    pmesh.polys[6], pmesh.polys[7], pmesh.polys[8] = 3, 4, 5
-
-    original_vert_count := len(pmesh.verts)
-
-    // Weld with tolerance that should merge close vertices
-    result := nav_recast.weld_poly_mesh_vertices(pmesh, 2.0)
-    testing.expect(t, result, "Vertex welding should succeed")
-    testing.expect(t, len(pmesh.verts) < original_vert_count, "Should have fewer vertices after welding")
-
-    // Validate mesh is still valid
-    testing.expect(t, nav_recast.validate_poly_mesh(pmesh), "Mesh should be valid after welding")
-}
 
 @(test)
 test_build_simple_contour_mesh :: proc(t: ^testing.T) {
@@ -470,7 +431,7 @@ test_mesh_optimization :: proc(t: ^testing.T) {
     original_poly_count := pmesh.npolys
 
     // Optimize mesh
-    result := nav_recast.optimize_poly_mesh(pmesh, 0.0)
+    result := nav_recast.optimize_poly_mesh(pmesh)
     testing.expect(t, result, "Mesh optimization should succeed")
     testing.expect(t, len(pmesh.verts) <= original_vert_count, "Should have same or fewer vertices")
     testing.expect(t, pmesh.npolys < original_poly_count, "Should have fewer polygons (degenerates removed)")
