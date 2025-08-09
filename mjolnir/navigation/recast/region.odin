@@ -1133,14 +1133,12 @@ build_regions :: proc(chf: ^Compact_Heightfield,
         paint_rect_region(0, w, h - bh, h, region_id | RC_BORDER_REG, chf, src_reg)
         region_id += 1
 
-        log.infof("Created %d border regions", region_id - 1)
     }
 
     chf.border_size = border_size
 
     sid := -1
 
-    log.infof("Starting watershed partitioning, starting level: %d", level)
 
     for level > 0 {
         level = level >= 2 ? level - 2 : 0
@@ -1173,21 +1171,14 @@ build_regions :: proc(chf: ^Compact_Heightfield,
             }
         }
 
-        if level <= 2 {
-            log.infof("Level %d: processed %d cells, created %d new regions, total regions: %d",
-                     level, len(lvl_stacks[sid]), new_regions_count, region_id - 1)
-        }
     }
 
-    log.infof("Watershed completed, total regions: %d", region_id - 1)
 
     // Expand current regions until no empty connected cells found
     expand_regions(expand_iters * 8, 0, chf, src_reg, src_dist, &stack, true)
 
     {
         // Merge regions and filter out small regions
-        log.infof("Starting region merge and filter: %d regions before merge, min_area=%d, merge_area=%d",
-                 region_id - 1, min_region_area, merge_region_area)
 
         overlaps := make([dynamic]i32, 0, 32)
         defer delete(overlaps)
@@ -1198,7 +1189,6 @@ build_regions :: proc(chf: ^Compact_Heightfield,
             return false
         }
 
-        log.infof("Region merge completed: %d regions after merge", chf.max_regions)
 
         // If overlapping regions were found during merging, split those regions
         if len(overlaps) > 0 {
@@ -1225,8 +1215,6 @@ build_regions :: proc(chf: ^Compact_Heightfield,
         }
     }
 
-    log.infof("Region building completed: %d assigned spans, %d border spans, %d unassigned spans",
-             assigned_spans, border_spans, unassigned_spans)
 
     if unassigned_spans > 0 {
         log.warnf("Warning: %d spans were not assigned to any region", unassigned_spans)

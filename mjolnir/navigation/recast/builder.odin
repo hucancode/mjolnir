@@ -466,8 +466,6 @@ build_contours :: proc(chf: ^Compact_Heightfield,
                         cont.area = area_id
                         cont.reg = region_id
                         
-                        log.infof("  Created contour: raw_verts=%d, simplified_verts=%d, region=%d", 
-                                 raw_vert_count, len(simplified), region_id)
 
                         // Allocate and copy vertex data
                         cont.verts = make([][4]i32, len(simplified))
@@ -1263,11 +1261,6 @@ simplify_contour :: proc(raw_verts: [][4]i32, simplified: ^[dynamic][4]i32, max_
         }
     }
     
-    // Debug: log first few vertices to see region info
-    if n_verts > 0 {
-        log.infof("    First vertex region info: r=%x (masked=%x), has_connections=%v", 
-                 raw_verts[0][3], raw_verts[0][3] & RC_CONTOUR_REG_MASK, has_connections)
-    }
     
     if has_connections {
         // Add a new point to every location where the region changes
@@ -1283,7 +1276,6 @@ simplify_contour :: proc(raw_verts: [][4]i32, simplified: ^[dynamic][4]i32, max_
                 seed_count += 1
             }
         }
-        log.infof("    Added %d seed points from region changes", seed_count)
     }
     
     // If no connections were found, use lower-left and upper-right as seed points

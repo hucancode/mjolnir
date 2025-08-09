@@ -1068,10 +1068,8 @@ build_poly_mesh :: proc(cset: ^Contour_Set, nvp: i32, pmesh: ^Poly_Mesh) -> bool
 
 
     // Process each contour
-    log.infof("build_poly_mesh: Processing %d contours", len(cset.conts))
     for i in 0..<len(cset.conts) {
         cont := &cset.conts[i]
-        log.infof("  Contour %d: nverts=%d, area=%d, reg=%d", i, len(cont.verts), cont.area, cont.reg)
         if len(cont.verts) < 3 {
             continue
         }
@@ -1100,7 +1098,6 @@ build_poly_mesh :: proc(cset: ^Contour_Set, nvp: i32, pmesh: ^Poly_Mesh) -> bool
             continue
         }
         
-        log.infof("  Contour %d triangulated: %d triangles from %d verts", i, len(triangles)/3, len(cont.verts))
 
         // NOW add vertices and merge duplicates AFTER triangulation
         // Reuse indices array to store global vertex indices
@@ -1111,7 +1108,6 @@ build_poly_mesh :: proc(cset: ^Contour_Set, nvp: i32, pmesh: ^Poly_Mesh) -> bool
         }
         verts_after := len(verts)
         new_verts := verts_after - verts_before
-        log.infof("    Contour %d: added %d vertices (%d new unique)", i, len(cont.verts), new_verts)
 
         // Group triangles into convex polygons with max nvp vertices
         // Based on C++ implementation from RecastMesh.cpp
@@ -1187,7 +1183,6 @@ build_poly_mesh :: proc(cset: ^Contour_Set, nvp: i32, pmesh: ^Poly_Mesh) -> bool
             copy(final_poly.verts[:], poly.verts[:])
             append(&polys, final_poly)
         }
-        log.infof("  Contour %d: %d triangles merged into %d polygons", i, len(triangles)/3, len(region_polys))
     }
 
     if len(polys) == 0 {

@@ -19,15 +19,8 @@ build_navmesh :: proc(vertices: [][3]f32, indices: []i32, areas: []u8, cfg: Conf
         config.bmin, config.bmax = calc_bounds(vertices)
     }
     
-    // Debug log bounds
-    log.infof("Navigation mesh bounds: min=(%.2f, %.2f, %.2f), max=(%.2f, %.2f, %.2f)",
-              config.bmin.x, config.bmin.y, config.bmin.z,
-              config.bmax.x, config.bmax.y, config.bmax.z)
-    
     // Calculate grid size
     config.width, config.height = calc_grid_size(config.bmin, config.bmax, config.cs)
-    
-    log.infof("Grid size: %d x %d (cell size=%.2f)", config.width, config.height, config.cs)
     
     // Validate grid size
     if config.width <= 0 || config.height <= 0 {
