@@ -22,11 +22,8 @@ uleft :: proc(a, b, c: [3]i16) -> bool {
 
 // Count vertices in a polygon (excluding null indices)
 count_poly_verts :: proc(poly: []i32) -> i32 {
-    // Find first -1 and return its index as count
-    idx, found := slice.linear_search(poly[:], i32(-1))
-    if found {
-        return i32(idx)
-    }
+    // This function is used on temporary i32 arrays during merging,
+    // which don't use RC_MESH_NULL_IDX but just have a specific length
     return i32(len(poly))
 }
 
@@ -1071,8 +1068,10 @@ build_poly_mesh :: proc(cset: ^Contour_Set, nvp: i32, pmesh: ^Poly_Mesh) -> bool
 
 
     // Process each contour
+    log.infof("build_poly_mesh: Processing %d contours", len(cset.conts))
     for i in 0..<len(cset.conts) {
         cont := &cset.conts[i]
+        log.infof("  Contour %d: nverts=%d, area=%d, reg=%d", i, len(cont.verts), cont.area, cont.reg)
         if len(cont.verts) < 3 {
             continue
         }
@@ -1100,13 +1099,19 @@ build_poly_mesh :: proc(cset: ^Contour_Set, nvp: i32, pmesh: ^Poly_Mesh) -> bool
             }
             continue
         }
+        
+        log.infof("  Contour %d triangulated: %d triangles from %d verts", i, len(triangles)/3, len(cont.verts))
 
         // NOW add vertices and merge duplicates AFTER triangulation
         // Reuse indices array to store global vertex indices
+        verts_before := len(verts)
         for j in 0..<len(cont.verts) {
             v := cont.verts[j]
             indices[j] = add_vertex(u16(v.x), u16(v.y), u16(v.z), &verts, buckets)
         }
+        verts_after := len(verts)
+        new_verts := verts_after - verts_before
+        log.infof("    Contour %d: added %d vertices (%d new unique)", i, len(cont.verts), new_verts)
 
         // Group triangles into convex polygons with max nvp vertices
         // Based on C++ implementation from RecastMesh.cpp
@@ -1129,6 +1134,7 @@ build_poly_mesh :: proc(cset: ^Contour_Set, nvp: i32, pmesh: ^Poly_Mesh) -> bool
 
         // Merge triangles into convex polygons
         if nvp > 3 {
+            merge_count := 0
             // Keep merging while possible
             for {
                 best_merge_value := i32(0)
@@ -1157,8 +1163,10 @@ build_poly_mesh :: proc(cset: ^Contour_Set, nvp: i32, pmesh: ^Poly_Mesh) -> bool
 
                 // No more merges possible
                 if best_pa == -1 || best_pb == -1 {
+                    log.debugf("    No more merges possible after %d merges", merge_count)
                     break
                 }
+                merge_count += 1
 
                 // Merge the polygons
                 merge_poly_verts(&region_polys[best_pa], &region_polys[best_pb], best_ea, best_eb, nvp, context.temp_allocator)
@@ -1179,6 +1187,7 @@ build_poly_mesh :: proc(cset: ^Contour_Set, nvp: i32, pmesh: ^Poly_Mesh) -> bool
             copy(final_poly.verts[:], poly.verts[:])
             append(&polys, final_poly)
         }
+        log.infof("  Contour %d: %d triangles merged into %d polygons", i, len(triangles)/3, len(region_polys))
     }
 
     if len(polys) == 0 {

@@ -248,8 +248,8 @@ create_nav_mesh_data :: proc(params: ^Create_Nav_Mesh_Data_Params) -> ([]u8, nav
             log.infof("  Vertex %d: [%d, %d, %d]", i, v[0], v[1], v[2])
         }
 
-        // Build BV tree for polygon access
-        build_bv_tree(pmesh, bv_tree, bv_node_count)
+        // Build BV tree for polygon access - pass detail mesh if available
+        build_bv_tree(pmesh, bv_tree, bv_node_count, dmesh)
         
         // Debug: Log the actual BV tree nodes after building
         log.infof("Built BV tree nodes:")
@@ -403,7 +403,7 @@ create_nav_mesh :: proc(params: ^Create_Nav_Mesh_Data_Params) -> (^Nav_Mesh, nav
 }
 
 // Build BV tree for efficient spatial queries with optimized hierarchical construction
-build_bv_tree :: proc(pmesh: ^nav_recast.Poly_Mesh, nodes: []BV_Node, node_count: i32) {
+build_bv_tree :: proc(pmesh: ^nav_recast.Poly_Mesh, nodes: []BV_Node, node_count: i32, dmesh: ^nav_recast.Poly_Mesh_Detail = nil) {
     if node_count <= 0 || pmesh.npolys <= 0 {
         return
     }
@@ -414,23 +414,31 @@ build_bv_tree :: proc(pmesh: ^nav_recast.Poly_Mesh, nodes: []BV_Node, node_count
     quant_factor := 1.0 / cs
 
     // For now, always use flat structure until hierarchical is fixed
-    build_bv_tree_flat(pmesh, nodes, node_count, quant_factor)
+    build_bv_tree_flat(pmesh, nodes, node_count, quant_factor, dmesh)
 }
 
 // Optimized flat BV tree construction for small meshes
 @(private)
-build_bv_tree_flat :: proc(pmesh: ^nav_recast.Poly_Mesh, nodes: []BV_Node, node_count: i32, quant_factor: f32) {
+build_bv_tree_flat :: proc(pmesh: ^nav_recast.Poly_Mesh, nodes: []BV_Node, node_count: i32, quant_factor: f32, dmesh: ^nav_recast.Poly_Mesh_Detail = nil) {
     nvp := pmesh.nvp
 
     for i in 0..<int(min(node_count, pmesh.npolys)) {
         node := &nodes[i]
-        poly_base := i32(i) * nvp
-
-        // Calculate polygon bounds efficiently
-        bounds := calc_polygon_bounds_fast(pmesh, poly_base, nvp, quant_factor)
-
-        node.bmin = bounds.min
-        node.bmax = bounds.max
+        
+        if dmesh != nil {
+            // Use detail mesh bounds if available (more accurate)
+            bounds := calc_detail_mesh_bounds(dmesh, i, pmesh.bmin, quant_factor)
+            node.bmin = bounds.min
+            node.bmax = bounds.max
+        } else {
+            // Use polygon bounds with Y remapping
+            // IMPORTANT: polygons are stored as nvp*2 values (vertices + neighbors)
+            poly_base := i32(i) * nvp * 2
+            bounds := calc_polygon_bounds_fast(pmesh, poly_base, nvp, quant_factor)
+            node.bmin = bounds.min
+            node.bmax = bounds.max
+        }
+        
         node.i = i32(i)  // Leaf node (positive index)
     }
 }
@@ -446,7 +454,8 @@ build_bv_tree_hierarchical :: proc(pmesh: ^nav_recast.Poly_Mesh, nodes: []BV_Nod
     for i in 0..<pmesh.npolys {
         info := &poly_info[i]
         info.index = i
-        poly_base := i * nvp
+        // IMPORTANT: polygons are stored as nvp*2 values (vertices + neighbors)
+        poly_base := i * nvp * 2
 
         // Calculate bounds and center efficiently
         bounds := calc_polygon_bounds_fast(pmesh, poly_base, nvp, quant_factor)
@@ -540,8 +549,49 @@ BV_Bounds_U16 :: struct {
     max: [3]u16,
 }
 
+// Calculate bounds from detail mesh vertices
+calc_detail_mesh_bounds :: proc(dmesh: ^nav_recast.Poly_Mesh_Detail, poly_idx: int, bmin: [3]f32, quant_factor: f32) -> BV_Bounds_U16 {
+    bounds: BV_Bounds_U16
+    
+    // Get detail mesh info for this polygon
+    mesh_info := dmesh.meshes[poly_idx]
+    vert_base := mesh_info[0]
+    vert_count := mesh_info[1]
+    
+    if vert_count == 0 {
+        bounds.min = {0, 0, 0}
+        bounds.max = {1, 1, 1}
+        return bounds
+    }
+    
+    // Initialize bounds with first vertex
+    first_vert := dmesh.verts[vert_base]
+    min_bounds := first_vert
+    max_bounds := first_vert
+    
+    // Process all detail vertices
+    for j in 1..<vert_count {
+        v := dmesh.verts[vert_base + j]
+        for k in 0..<3 {
+            min_bounds[k] = min(min_bounds[k], v[k])
+            max_bounds[k] = max(max_bounds[k], v[k])
+        }
+    }
+    
+    // Quantize bounds - BV tree uses cs for all dimensions
+    for k in 0..<3 {
+        quantized_min := i32((min_bounds[k] - bmin[k]) * quant_factor)
+        quantized_max := i32((max_bounds[k] - bmin[k]) * quant_factor)
+        
+        // Clamp to u16 range
+        bounds.min[k] = u16(clamp(quantized_min, 0, 0xffff))
+        bounds.max[k] = u16(clamp(quantized_max, 0, 0xffff))
+    }
+    
+    return bounds
+}
+
 // Fast polygon bounds calculation with reduced coordinate transformations
-@(private)
 calc_polygon_bounds_fast :: proc(pmesh: ^nav_recast.Poly_Mesh, poly_base: i32, nvp: i32, quant_factor: f32) -> BV_Bounds_U16 {
     // Initialize with invalid bounds
     bounds: BV_Bounds_U16
@@ -578,6 +628,13 @@ calc_polygon_bounds_fast :: proc(pmesh: ^nav_recast.Poly_Mesh, poly_base: i32, n
     if vertex_count == 0 {
         bounds.min = {0, 0, 0}
         bounds.max = {1, 1, 1}
+    } else {
+        // CRITICAL: Remap Y coordinate as C++ does (lines 230-231 in DetourNavMeshBuilder.cpp)
+        // This is necessary when no detail mesh is present to account for different
+        // vertical scaling between cell height (ch) and cell size (cs)
+        ch_cs_ratio := pmesh.ch / pmesh.cs
+        bounds.min[1] = u16(math.floor(f32(bounds.min[1]) * ch_cs_ratio))
+        bounds.max[1] = u16(math.ceil(f32(bounds.max[1]) * ch_cs_ratio))
     }
 
     return bounds

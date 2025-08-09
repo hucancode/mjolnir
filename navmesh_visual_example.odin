@@ -261,10 +261,10 @@ build_navmesh :: proc(engine: ^mjolnir.Engine) -> (use_procedural: bool) {
         copy(vertices[offset:], obstacle5_verts[:])
 
         // Create indices
-        // Ground indices (2 triangles)
+        // Ground indices (2 triangles) - CLOCKWISE winding for upward normal
         ground_indices := []i32{
-            0, 1, 2,  // First triangle
-            0, 2, 3,  // Second triangle
+            0, 2, 1,  // First triangle - CW when viewed from above
+            0, 3, 2,  // Second triangle - CW when viewed from above
         }
 
         // Helper to create obstacle indices

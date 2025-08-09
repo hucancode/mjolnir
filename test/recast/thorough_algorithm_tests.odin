@@ -98,29 +98,29 @@ test_distance_field_mathematical_correctness :: proc(t: ^testing.T) {
 test_watershed_region_connectivity :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
     
-    // Create two separate 2x2 platforms with a gap between them
+    // Create two separate 3x3 platforms with a gap between them
     // This should result in exactly 2 regions with no cross-connections
     
     hf := recast.alloc_heightfield()
     testing.expect(t, hf != nil, "Failed to allocate heightfield")
     defer recast.free_heightfield(hf)
     
-    ok := recast.create_heightfield(hf, 6, 3, {0,0,0}, {6,3,3}, 1.0, 0.2)
+    ok := recast.create_heightfield(hf, 8, 4, {0,0,0}, {8,3,4}, 1.0, 0.2)
     testing.expect(t, ok, "Failed to create heightfield")
     
-    // Platform 1: (0,0) to (1,1)
-    for x in 0..<2 {
-        for z in 0..<2 {
+    // Platform 1: (0,0) to (2,2) - 3x3 = 9 cells
+    for x in 0..<3 {
+        for z in 0..<3 {
             ok = recast.add_span(hf, i32(x), i32(z), 0, 10, nav_recast.RC_WALKABLE_AREA, 1)
             testing.expect(t, ok, "Failed to add span to platform 1")
         }
     }
     
-    // Gap at (2,*) - no spans added
+    // Gap at (3,*) and (4,*) - no spans added
     
-    // Platform 2: (3,0) to (4,1)  
-    for x in 3..<5 {
-        for z in 0..<2 {
+    // Platform 2: (5,0) to (7,2) - 3x3 = 9 cells
+    for x in 5..<8 {
+        for z in 0..<3 {
             ok = recast.add_span(hf, i32(x), i32(z), 0, 10, nav_recast.RC_WALKABLE_AREA, 1)
             testing.expect(t, ok, "Failed to add span to platform 2")
         }
@@ -136,8 +136,8 @@ test_watershed_region_connectivity :: proc(t: ^testing.T) {
     ok = recast.build_distance_field(chf)
     testing.expect(t, ok, "Failed to build distance field")
     
-    // Build regions
-    ok = recast.build_regions(chf, 0, 1, 10)
+    // Build regions with minRegionArea=4 (each platform has 9 cells)
+    ok = recast.build_regions(chf, 0, 4, 20)
     testing.expect(t, ok, "Failed to build regions")
     
     // Validate region connectivity correctness
@@ -157,8 +157,8 @@ test_watershed_region_connectivity :: proc(t: ^testing.T) {
     }
     
     // Get region IDs for both platforms
-    platform1_region := get_region_at(chf, 0, 0)
-    platform2_region := get_region_at(chf, 3, 0)
+    platform1_region := get_region_at(chf, 1, 1)  // Center of platform 1
+    platform2_region := get_region_at(chf, 6, 1)  // Center of platform 2
     
     // Validate region separation
     testing.expect(t, platform1_region != 0, "Platform 1 should be assigned to a region")
@@ -167,8 +167,8 @@ test_watershed_region_connectivity :: proc(t: ^testing.T) {
                   "Disconnected platforms should have different regions")
     
     // Validate internal platform connectivity
-    platform1_region_alt := get_region_at(chf, 1, 1)
-    platform2_region_alt := get_region_at(chf, 4, 1)
+    platform1_region_alt := get_region_at(chf, 0, 0)  // Corner of platform 1
+    platform2_region_alt := get_region_at(chf, 7, 2)  // Corner of platform 2
     
     testing.expect(t, platform1_region == platform1_region_alt, 
                   "All cells in platform 1 should have the same region")
@@ -176,7 +176,7 @@ test_watershed_region_connectivity :: proc(t: ^testing.T) {
                   "All cells in platform 2 should have the same region")
     
     // Validate gap has no region assignment
-    gap_region := get_region_at(chf, 2, 0)
+    gap_region := get_region_at(chf, 4, 1)  // Middle of gap
     testing.expect(t, gap_region == 0, "Gap should not be assigned to any region")
     
     log.infof("Region connectivity validation - Platform1: %d, Platform2: %d, Gap: %d, Total regions: %d", 

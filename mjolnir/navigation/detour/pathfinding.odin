@@ -285,89 +285,127 @@ find_path :: proc(query: ^Nav_Mesh_Query,
         }
 
         // Explore neighbors
-        for i in 0..<int(cur_poly.vert_count) {
-            link := get_first_link(cur_tile, i32(current.id & 0xffff))
-            for link != nav_recast.DT_NULL_LINK {
-                neighbor_ref := get_link_poly_ref(cur_tile, link)
+        // Iterate through all links from the current polygon
+        link := cur_poly.first_link
+        for link != nav_recast.DT_NULL_LINK {
+            neighbor_ref := get_link_poly_ref(cur_tile, link)
 
-                if neighbor_ref != nav_recast.INVALID_POLY_REF {
-                    neighbor_tile, neighbor_poly, neighbor_status := get_tile_and_poly_by_ref(query.nav_mesh, neighbor_ref)
-                    if nav_recast.status_succeeded(neighbor_status) &&
-                       query_filter_pass_filter(filter, neighbor_ref, neighbor_tile, neighbor_poly) {
+            // Skip invalid ids and do not expand back to where we came from
+            if neighbor_ref != nav_recast.INVALID_POLY_REF && neighbor_ref != current.parent_id {
+                neighbor_tile, neighbor_poly, neighbor_status := get_tile_and_poly_by_ref(query.nav_mesh, neighbor_ref)
+                if nav_recast.status_succeeded(neighbor_status) &&
+                   query_filter_pass_filter(filter, neighbor_ref, neighbor_tile, neighbor_poly) {
 
-                        // Calculate neighbor position using proper portal points
-                        left, right := [3]f32{}, [3]f32{}
-                        portal_type := u8(0)
-                        portal_status := get_portal_points(query, current.id, neighbor_ref, &left, &right, &portal_type)
-                        
-                        neighbor_pos: [3]f32
-                        if nav_recast.status_succeeded(portal_status) {
-                            // Use midpoint of the actual shared edge
-                            neighbor_pos = {
-                                (left[0] + right[0]) * 0.5,
-                                (left[1] + right[1]) * 0.5,
-                                (left[2] + right[2]) * 0.5,
-                            }
-                        } else {
-                            // Fallback to simple edge midpoint
-                            neighbor_pos = get_edge_mid_point(cur_tile, cur_poly, i, neighbor_tile, neighbor_poly)
+                    // Calculate neighbor position using proper portal points
+                    left, right := [3]f32{}, [3]f32{}
+                    portal_type := u8(0)
+                    portal_status := get_portal_points(query, current.id, neighbor_ref, &left, &right, &portal_type)
+                    
+                    neighbor_pos: [3]f32
+                    if nav_recast.status_succeeded(portal_status) {
+                        // Use midpoint of the actual shared edge
+                        neighbor_pos = {
+                            (left[0] + right[0]) * 0.5,
+                            (left[1] + right[1]) * 0.5,
+                            (left[2] + right[2]) * 0.5,
                         }
+                    } else {
+                        // Fallback to simple edge midpoint using link edge
+                        link_edge := get_link_edge(cur_tile, link)
+                        neighbor_pos = get_edge_mid_point(cur_tile, cur_poly, int(link_edge), neighbor_tile, neighbor_poly)
+                    }
 
-                        // Calculate cost
-                        cost := current.cost + query_filter_get_cost(filter,
+                    // Calculate cost and heuristic
+                    cost: f32
+                    heuristic: f32
+                    
+                    // Special case for last node
+                    if neighbor_ref == end_ref {
+                        // Cost
+                        cur_cost := query_filter_get_cost(filter,
                                                     current.pos, neighbor_pos,
                                                     current.parent_id, nil, nil,
                                                     current.id, cur_tile, cur_poly,
                                                     neighbor_ref, neighbor_tile, neighbor_poly)
+                        end_cost := query_filter_get_cost(filter,
+                                                    neighbor_pos, end_pos,
+                                                    current.id, cur_tile, cur_poly,
+                                                    neighbor_ref, neighbor_tile, neighbor_poly,
+                                                    nav_recast.INVALID_POLY_REF, nil, nil)
+                        cost = current.cost + cur_cost + end_cost
+                        heuristic = 0
+                    } else {
+                        // Normal cost
+                        cost = current.cost + query_filter_get_cost(filter,
+                                                    current.pos, neighbor_pos,
+                                                    current.parent_id, nil, nil,
+                                                    current.id, cur_tile, cur_poly,
+                                                    neighbor_ref, neighbor_tile, neighbor_poly)
+                        heuristic = linalg.distance(neighbor_pos, end_pos) * H_SCALE
+                    }
 
-                        // Check if this path to neighbor is better
-                        neighbor_node := node_pool_get_node(&query.node_pool, neighbor_ref)
+                    total := cost + heuristic
+
+                    // Check if this path to neighbor is better
+                    neighbor_node := node_pool_get_node(&query.node_pool, neighbor_ref)
+                    
+                    // The node is already in open list and the new result is worse, skip
+                    if neighbor_node != nil && .Open in neighbor_node.flags && total >= neighbor_node.total {
+                        link = get_next_link(cur_tile, link)
+                        continue
+                    }
+                    // The node is already visited and processed, and the new result is worse, skip
+                    if neighbor_node != nil && .Closed in neighbor_node.flags && total >= neighbor_node.total {
+                        link = get_next_link(cur_tile, link)
+                        continue
+                    }
+                    
+                    // Add or update the node
+                    if neighbor_node == nil {
+                        neighbor_node = node_pool_create_node(&query.node_pool, neighbor_ref)
                         if neighbor_node == nil {
-                            neighbor_node = node_pool_create_node(&query.node_pool, neighbor_ref)
-                            if neighbor_node == nil {
-                                // Out of nodes
-                                break
-                            }
-                            neighbor_node.id = neighbor_ref
-                        } else if cost >= neighbor_node.cost {
-                            // Existing path is better
-                            link = get_next_link(cur_tile, link)
-                            continue
-                        }
-
-                        // Update neighbor
-                        neighbor_node.parent_id = current.id
-                        neighbor_node.cost = cost
-                        neighbor_node.pos = neighbor_pos
-                        neighbor_node.total = neighbor_node.cost + linalg.distance(neighbor_pos, end_pos) * H_SCALE
-
-                        // Always add the updated node to the queue
-                        // The priority queue will handle ordering correctly
-                        was_open := .Open in neighbor_node.flags
-
-                        if .Closed in neighbor_node.flags {
-                            neighbor_node.flags &= ~{.Closed}
-                        }
-                        neighbor_node.flags |= {.Open}
-
-                        neighbor_pathfinding_node := Pathfinding_Node{
-                            ref = neighbor_ref,
-                            cost = neighbor_node.cost,
-                            total = neighbor_node.total,
-                        }
-                        node_queue_push(&query.open_list, neighbor_pathfinding_node)
-
-                        // Update best node if closer to goal
-                        heuristic := linalg.distance(neighbor_pos, end_pos)
-                        if heuristic < best_dist {
-                            best_dist = heuristic
-                            best_node = neighbor_node
+                            // Out of nodes
+                            break
                         }
                     }
-                }
 
-                link = get_next_link(cur_tile, link)
+                    // Update neighbor
+                    neighbor_node.id = neighbor_ref
+                    neighbor_node.parent_id = current.id
+                    neighbor_node.cost = cost
+                    neighbor_node.pos = neighbor_pos
+                    neighbor_node.total = total
+
+                    // Clear closed flag if set
+                    neighbor_node.flags &= ~{.Closed}
+                    
+                    // Check if already in open list
+                    if .Open in neighbor_node.flags {
+                        // Already in open, update node location
+                        // Note: In C++, this would call modify() on the heap
+                        // Our priority queue doesn't have modify, so we push again
+                        // The queue will handle duplicates by cost ordering
+                    } else {
+                        // Put the node in open list
+                        neighbor_node.flags |= {.Open}
+                    }
+
+                    neighbor_pathfinding_node := Pathfinding_Node{
+                        ref = neighbor_ref,
+                        cost = neighbor_node.cost,
+                        total = neighbor_node.total,
+                    }
+                    node_queue_push(&query.open_list, neighbor_pathfinding_node)
+
+                    // Update best node if closer to goal
+                    if heuristic < best_dist {
+                        best_dist = heuristic
+                        best_node = neighbor_node
+                    }
+                }
             }
+
+            link = get_next_link(cur_tile, link)
         }
     }
 
