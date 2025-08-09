@@ -245,6 +245,15 @@ decode_poly_id :: proc(nav_mesh: ^Nav_Mesh, ref: nav_recast.Poly_Ref) -> (salt: 
     return
 }
 
+// Helper to just get the polygon index from a reference
+get_poly_index :: proc(nav_mesh: ^Nav_Mesh, ref: nav_recast.Poly_Ref) -> u32 {
+    if nav_mesh == nil {
+        return 0
+    }
+    poly_mask := (u32(1) << nav_mesh.poly_bits) - 1
+    return u32(ref) & poly_mask
+}
+
 // Calculate tile location from world position with robust error handling
 calc_tile_loc :: proc(nav_mesh: ^Nav_Mesh, pos: [3]f32) -> (tx: i32, ty: i32, status: nav_recast.Status) {
     // Input validation

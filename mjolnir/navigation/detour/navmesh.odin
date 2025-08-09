@@ -34,16 +34,51 @@ nav_mesh_init :: proc(nav_mesh: ^Nav_Mesh, params: ^Nav_Mesh_Params) -> nav_reca
         nav_mesh.next_free = &nav_mesh.tiles[i]
     }
 
-    // Calculate ID encoding parameters
+    // Calculate ID encoding parameters (matching C++ dtNavMesh::init)
     tile_bits_needed := dt_ilog2(dt_next_pow2(u32(params.max_tiles)))
     poly_bits_needed := dt_ilog2(dt_next_pow2(u32(params.max_polys)))
 
-    // Use 32-bit references
-    nav_mesh.salt_bits = max(1, min(15, 32 - tile_bits_needed - poly_bits_needed))
-    nav_mesh.tile_bits = max(1, min(28, tile_bits_needed))
-    nav_mesh.poly_bits = max(1, 32 - nav_mesh.salt_bits - nav_mesh.tile_bits)
+    // Use 32-bit references (matching C++ logic)
+    nav_mesh.tile_bits = tile_bits_needed
+    nav_mesh.poly_bits = poly_bits_needed
+    
+    // Only allow 31 salt bits, since the salt mask is calculated using 32bit uint
+    nav_mesh.salt_bits = min(31, 32 - nav_mesh.tile_bits - nav_mesh.poly_bits)
+    
+    // Ensure minimum salt bits for security (matching C++ requirement)
+    if nav_mesh.salt_bits < 10 {
+        return {.Invalid_Param}
+    }
 
     return {.Success}
+}
+
+// Initialize navigation mesh from single tile data (mimics C++ dtNavMesh::init)
+nav_mesh_init_single :: proc(nav_mesh: ^Nav_Mesh, data: []u8, flags: i32) -> nav_recast.Status {
+    // Parse header to get bounds
+    header, parse_status := parse_mesh_header(data)
+    if nav_recast.status_failed(parse_status) {
+        return parse_status
+    }
+    
+    // Setup params for single tile
+    params := Nav_Mesh_Params{
+        orig = {header.bmin[0], header.bmin[1], header.bmin[2]},
+        tile_width = header.bmax[0] - header.bmin[0],
+        tile_height = header.bmax[2] - header.bmin[2],
+        max_tiles = 1,
+        max_polys = header.poly_count,
+    }
+    
+    // Initialize navmesh
+    init_status := nav_mesh_init(nav_mesh, &params)
+    if nav_recast.status_failed(init_status) {
+        return init_status
+    }
+    
+    // Add the single tile
+    _, add_status := nav_mesh_add_tile(nav_mesh, data, flags)
+    return add_status
 }
 
 // Clean up navigation mesh
@@ -763,11 +798,15 @@ unlink_tile :: proc(nav_mesh: ^Nav_Mesh, tile: ^Mesh_Tile) {
 }
 
 dt_ilog2 :: proc(v: u32) -> u32 {
+    // Return position of highest set bit (0-based)
+    // This matches C++ dtIlog2 which returns floor(log2(v))
+    if v == 0 do return 0
+    
     r := u32(0)
     val := v
-    for val != 0 {
-        r += 1
+    for val > 1 {
         val >>= 1
+        r += 1
     }
     return r
 }

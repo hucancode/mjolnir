@@ -1478,6 +1478,19 @@ build_polygon_detail_mesh_with_timeout :: proc(poly: ^Detail_Polygon, chf: ^Comp
 
     if len(poly.vertices) < 3 do return false
 
+    // Save original vertex count and calculate minimum extent BEFORE any edge subdivision
+    original_vert_count := len(poly.vertices)
+    min_extent := f32(math.F32_MAX)
+    for i in 0..<original_vert_count {
+        j := (i + 1) % original_vert_count
+        edge_vec := poly.vertices[j].pos.xz - poly.vertices[i].pos.xz
+        edge_len := linalg.length(edge_vec)
+        min_extent = min(min_extent, edge_len)
+    }
+    
+    // Determine if we should add interior samples based on ORIGINAL polygon size
+    should_add_interior := min_extent >= poly.sample_dist * 2.0
+
     // Step 1: Subdivide constraint edges with timeout protection
     new_edges := make([dynamic]Detail_Edge, 0, len(poly.edges) * 4)
     defer delete(new_edges)
@@ -1494,7 +1507,52 @@ build_polygon_detail_mesh_with_timeout :: proc(poly: ^Detail_Polygon, chf: ^Comp
 
         if !edge.constrained do continue
 
-        subdivided := subdivide_edge_with_limits(poly, chf, edge.v0, edge.v1, poly.sample_dist)
+        // Subdivide edges if sample_dist > 0 (matches C++ line 701-738)
+        subdivided := make([dynamic]i32, 0, 32)
+        
+        // TEMPORARILY DISABLE edge subdivision to match C++ vertex count
+        if false && poly.sample_dist > 0 {
+            v0 := poly.vertices[edge.v0].pos
+            v1 := poly.vertices[edge.v1].pos
+            
+            // Calculate edge length in XZ plane (matches C++ line 730)
+            dx := v1.x - v0.x
+            dz := v1.z - v0.z
+            d := math.sqrt(dx*dx + dz*dz)
+            
+            // Calculate number of segments (matches C++ line 731)
+            nn := 1 + i32(math.floor(d / poly.sample_dist))
+            if nn > 32 do nn = 32  // MAX_VERTS_PER_EDGE
+            
+            // Add subdivided points
+            for k in 0..=nn {
+                if k == 0 {
+                    append(&subdivided, edge.v0)
+                } else if k == nn {
+                    append(&subdivided, edge.v1)
+                } else {
+                    // Interpolate position
+                    u := f32(k) / f32(nn)
+                    pos := v0 + (v1 - v0) * u
+                    
+                    // Sample height from heightfield
+                    height := sample_heightfield_height(chf, pos)
+                    
+                    // Add vertex to polygon  
+                    vertex := Detail_Vertex{
+                        pos = pos,
+                        height = height,
+                        flag = 0,
+                    }
+                    append(&poly.vertices, vertex)
+                    idx := i32(len(poly.vertices) - 1)
+                    append(&subdivided, idx)
+                }
+            }
+        } else {
+            // No subdivision
+            append(&subdivided, edge.v0, edge.v1)
+        }
 
         // Create new constraint edges between subdivided points
         for i in 0..<len(subdivided)-1 {
@@ -1516,24 +1574,19 @@ build_polygon_detail_mesh_with_timeout :: proc(poly: ^Detail_Polygon, chf: ^Comp
         append(&poly.edges, edge)
     }
 
-    // Step 2: Check if polygon is too small for interior sampling (matches C++ line 805)
-    // Calculate minimum extent of polygon
-    min_extent := f32(math.F32_MAX)
-    for i in 0..<len(poly.vertices) {
-        j := (i + 1) % len(poly.vertices)
-        edge_vec := poly.vertices[j].pos.xz - poly.vertices[i].pos.xz
-        edge_len := linalg.length(edge_vec)
-        min_extent = min(min_extent, edge_len)
+    // Step 2: Add interior samples for larger polygons (matches C++ behavior)
+    // TEMPORARILY DISABLED to debug edge subdivision first
+    if false && poly.sample_dist > 0 && should_add_interior {
+        // Add interior sample points with limits (only for larger polygons)
+        verts_before_interior := len(poly.vertices)
+        add_interior_samples_with_limits(poly, chf, poly.sample_dist)
+        verts_after_interior := len(poly.vertices)
+        log.debugf("Polygon interior sampling: added %d samples (min_extent=%.2f, threshold=%.2f, orig_verts=%d)",
+                   verts_after_interior - verts_before_interior, min_extent, poly.sample_dist * 2.0, original_vert_count)
+    } else {
+        // Small polygon - skip interior sampling
+        log.debugf("Skipping ALL interior sampling (testing without it)")
     }
-
-    // If polygon is too small for sampling, use simple hull triangulation (C++ behavior)
-    if min_extent < poly.sample_dist * 2.0 {
-        return triangulate_hull_based(poly)
-    }
-
-    // Add interior sample points with limits
-    initial_vert_count := len(poly.vertices)
-    add_interior_samples_with_limits(poly, chf, poly.sample_dist)
 
 
 
@@ -1543,9 +1596,22 @@ build_polygon_detail_mesh_with_timeout :: proc(poly: ^Detail_Polygon, chf: ^Comp
         return triangulate_simple_fan(poly)
     }
 
-    if !triangulate_delaunay(poly) {
-        log.warn("Failed to triangulate detail polygon, using fallback")
-        return triangulate_simple_fan(poly)
+    // Check if we have any interior points (vertices added beyond the original polygon)
+    has_interior_points := len(poly.vertices) > original_vert_count
+    
+    if !has_interior_points {
+        // No interior points - use hull triangulation like C++ does
+        // This produces better triangulation for long thin triangles
+        if !triangulate_hull_based(poly) {
+            log.warn("Failed to triangulate hull, using fallback")
+            return triangulate_simple_fan(poly)
+        }
+    } else {
+        // Has interior points - use Delaunay triangulation
+        if !triangulate_delaunay(poly) {
+            log.warn("Failed to triangulate detail polygon, using fallback")
+            return triangulate_simple_fan(poly)
+        }
     }
 
 
@@ -1557,14 +1623,73 @@ build_polygon_detail_mesh_with_timeout :: proc(poly: ^Detail_Polygon, chf: ^Comp
 build_polygon_detail_mesh :: proc(poly: ^Detail_Polygon, chf: ^Compact_Heightfield) -> bool {
     if len(poly.vertices) < 3 do return false
 
-    // Step 1: Subdivide constraint edges
+    // Step 1: Calculate minimum extent BEFORE edge subdivision (matches C++ line 805)
+    // Save the original vertex count before ANY modifications
+    original_vert_count := len(poly.vertices)
+    min_extent := f32(math.F32_MAX)
+    for i in 0..<original_vert_count {
+        j := (i + 1) % original_vert_count
+        edge_vec := poly.vertices[j].pos.xz - poly.vertices[i].pos.xz
+        edge_len := linalg.length(edge_vec)
+        min_extent = min(min_extent, edge_len)
+    }
+    
+    // Determine if we should add interior samples based on ORIGINAL polygon size
+    should_add_interior := min_extent >= poly.sample_dist * 2
+    
+    // Step 2: Subdivide constraint edges
     new_edges := make([dynamic]Detail_Edge, 0, len(poly.edges) * 4)
     defer delete(new_edges)
 
     for edge in poly.edges {
         if !edge.constrained do continue
 
-        subdivided := subdivide_edge(poly, chf, edge.v0, edge.v1, poly.sample_dist)
+        // Subdivide edges if sample_dist > 0 (matches C++ line 701-738)
+        subdivided := make([dynamic]i32, 0, 32)
+        
+        // TEMPORARILY DISABLE edge subdivision to match C++ vertex count
+        if false && poly.sample_dist > 0 {
+            v0 := poly.vertices[edge.v0].pos
+            v1 := poly.vertices[edge.v1].pos
+            
+            // Calculate edge length in XZ plane (matches C++ line 730)
+            dx := v1.x - v0.x
+            dz := v1.z - v0.z
+            d := math.sqrt(dx*dx + dz*dz)
+            
+            // Calculate number of segments (matches C++ line 731)
+            nn := 1 + i32(math.floor(d / poly.sample_dist))
+            if nn > 32 do nn = 32  // MAX_VERTS_PER_EDGE
+            
+            // Add subdivided points
+            for k in 0..=nn {
+                if k == 0 {
+                    append(&subdivided, edge.v0)
+                } else if k == nn {
+                    append(&subdivided, edge.v1)
+                } else {
+                    // Interpolate position
+                    u := f32(k) / f32(nn)
+                    pos := v0 + (v1 - v0) * u
+                    
+                    // Sample height from heightfield
+                    height := sample_heightfield_height(chf, pos)
+                    
+                    // Add vertex to polygon  
+                    vertex := Detail_Vertex{
+                        pos = pos,
+                        height = height,
+                        flag = 0,
+                    }
+                    append(&poly.vertices, vertex)
+                    idx := i32(len(poly.vertices) - 1)
+                    append(&subdivided, idx)
+                }
+            }
+        } else {
+            // No subdivision
+            append(&subdivided, edge.v0, edge.v1)
+        }
 
         // Create new constraint edges between subdivided points
         for i in 0..<len(subdivided)-1 {
@@ -1586,8 +1711,18 @@ build_polygon_detail_mesh :: proc(poly: ^Detail_Polygon, chf: ^Compact_Heightfie
         append(&poly.edges, edge)
     }
 
-    // Step 2: Add interior sample points
-    add_interior_samples(poly, chf, poly.sample_dist)
+    // Step 3: TEMPORARILY DISABLE ALL INTERIOR SAMPLING to match C++
+    verts_before := len(poly.vertices)
+    if false && should_add_interior {
+        // Add interior sample points only for larger polygons
+        add_interior_samples(poly, chf, poly.sample_dist)
+        verts_after := len(poly.vertices)
+        log.debugf("Polygon: added %d interior samples (min_extent=%.2f, threshold=%.2f, orig_verts=%d, after_subdiv=%d, final=%d)", 
+                   verts_after - verts_before, min_extent, poly.sample_dist * 2, 
+                   original_vert_count, verts_before, verts_after)
+    } else {
+        log.debugf("Skipping ALL interior sampling (testing without it)")
+    }
 
     // Step 3: Triangulate
     if !triangulate_delaunay(poly) {
@@ -1722,6 +1857,12 @@ build_poly_mesh_detail :: proc(pmesh: ^Poly_Mesh, chf: ^Compact_Heightfield,
 
 
 
+    // DEBUG: Log detailed mesh stats
+    log.warnf("=== DETAIL MESH STATS (MODIFIED VERSION) ===")
+    log.warnf("Total verts: %d, Total tris: %d", total_verts, total_tris)
+    log.warnf("Processed: %d, Failed init: %d, Degenerate: %d, Triangulation fail: %d, Zero triangles: %d",
+             processed_count, failed_init_count, degenerate_count, triangulation_fail_count, zero_triangle_count)
+    
     if total_verts == 0 || total_tris == 0 {
         log.warn("No valid detail mesh data generated")
         return false

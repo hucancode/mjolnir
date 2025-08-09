@@ -61,6 +61,15 @@ find_nearest_poly :: proc(query: ^Nav_Mesh_Query, center: [3]f32, half_extents: 
                 // Calculate distance
                 dist_sqr := linalg.length2(center - closest_pt)
 
+                // Debug logging for start position case
+                when ODIN_DEBUG {
+                    if math.abs(center[0] - (-3.0)) < 0.1 && math.abs(center[2] - (-3.0)) < 0.1 {
+                        _, _, poly_idx := decode_poly_id(query.nav_mesh, ref)
+                        log.infof("  Poly %d (ref=0x%x): closest_pt=(%.2f,%.2f,%.2f) dist_sqr=%.2f inside=%v", 
+                                 poly_idx, ref, closest_pt[0], closest_pt[1], closest_pt[2], dist_sqr, inside)
+                    }
+                }
+
                 // Check if this is the nearest so far
                 if dist_sqr < nearest_dist_sqr {
                     nearest_dist_sqr = dist_sqr
@@ -183,7 +192,8 @@ raycast :: proc(query: ^Nav_Mesh_Query, start_ref: nav_recast.Poly_Ref, start_po
 
             if intersects && edge_t > cur_t && edge_t < next_t {
                 // Check if there's a neighbor across this edge
-                link := get_first_link(tile, i32(cur_ref & 0xffff))
+                poly_idx := get_poly_index(query.nav_mesh, cur_ref)
+                link := get_first_link(tile, i32(poly_idx))
                 neighbor_found := false
 
                 for link != nav_recast.DT_NULL_LINK {
@@ -606,7 +616,8 @@ find_distance_to_wall :: proc(query: ^Nav_Mesh_Query, start_ref: nav_recast.Poly
             
             // Check if this edge is a wall (no neighbor)
             is_wall := true
-            link := get_first_link(tile, i32(cur_ref & 0xffff))
+            poly_idx := get_poly_index(query.nav_mesh, cur_ref)
+            link := get_first_link(tile, i32(poly_idx))
             
             for link != nav_recast.DT_NULL_LINK {
                 if get_link_edge(tile, link) == u8(i) {
@@ -696,7 +707,8 @@ find_local_neighbourhood :: proc(query: ^Nav_Mesh_Query, start_ref: nav_recast.P
         
         // Check all neighbors
         for i in 0..<int(poly.vert_count) {
-            link := get_first_link(tile, i32(cur.ref & 0xffff))
+            poly_idx := get_poly_index(query.nav_mesh, cur.ref)
+            link := get_first_link(tile, i32(poly_idx))
             
             for link != nav_recast.DT_NULL_LINK {
                 if get_link_edge(tile, link) == u8(i) {

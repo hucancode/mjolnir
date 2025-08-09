@@ -181,7 +181,8 @@ create_nav_mesh_data :: proc(params: ^Create_Nav_Mesh_Data_Params) -> ([]u8, nav
                 // External edge
                 poly.neis[poly.vert_count] = 0
             } else if pmesh.polys[poly_base + nvp + j] != nav_recast.RC_MESH_NULL_IDX {
-                // Internal edge
+                // Internal edge - store Recast polygon index + 1 (0 means no neighbor)
+                // This will be converted to Detour polygon index in connect_int_links
                 poly.neis[poly.vert_count] = pmesh.polys[poly_base + nvp + j] + 1
             } else {
                 // Boundary edge

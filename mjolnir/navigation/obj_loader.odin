@@ -2,10 +2,14 @@ package navigation
 
 import "core:log"
 import "core:slice"
+import "core:math"
+import "core:math/linalg"
 import "../geometry"
+import "./recast"
 
 // Load OBJ file and extract data for navigation mesh input
-load_obj_to_navmesh_input :: proc(filename: string, scale: f32 = 1.0, default_area: u8 = 1) -> (vertices: [][3]f32, indices: []i32, areas: []u8, ok: bool) {
+// Note: areas are initialized to 0 (RC_NULL_AREA) and must be marked by calling mark_walkable_triangles
+load_obj_to_navmesh_input :: proc(filename: string, scale: f32 = 1.0, walkable_slope_angle: f32 = 45.0) -> (vertices: [][3]f32, indices: []i32, areas: []u8, ok: bool) {
     geom, load_ok := geometry.load_obj(filename, scale)
     if !load_ok {
         return nil, nil, nil, false
@@ -26,10 +30,30 @@ load_obj_to_navmesh_input :: proc(filename: string, scale: f32 = 1.0, default_ar
         indices[i] = i32(geom.indices[i])
     }
 
-    // Create area array
+    // Create area array - start with RC_NULL_AREA (0)
     triangle_count := index_count / 3
     areas = make([]u8, triangle_count)
-    slice.fill(areas, default_area)
+    // Areas start at 0 (RC_NULL_AREA)
+    
+    // Mark walkable triangles based on slope
+    walkable_thr := math.cos(walkable_slope_angle * math.PI / 180.0)
+    
+    for i in 0..<triangle_count {
+        idx := i * 3
+        v0 := vertices[indices[idx + 0]]
+        v1 := vertices[indices[idx + 1]]
+        v2 := vertices[indices[idx + 2]]
+        
+        // Calculate triangle normal
+        e0 := v1 - v0
+        e1 := v2 - v0
+        norm := linalg.normalize(linalg.cross(e0, e1))
+        
+        // Check if the face is walkable (normal.y > threshold)
+        if norm.y > walkable_thr {
+            areas[i] = recast.RC_WALKABLE_AREA
+        }
+    }
 
     return vertices, indices, areas, true
 }

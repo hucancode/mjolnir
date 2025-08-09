@@ -268,13 +268,30 @@ find_path :: proc(query: ^Nav_Mesh_Query,
             continue
         }
 
+        // Skip if already closed (duplicate entry that was processed)
+        if .Closed in current.flags {
+            continue
+        }
+        
+        // Skip if this is a stale entry (cost doesn't match current best)
+        if best_pathfinding_node.total != current.total {
+            continue
+        }
+
         // Mark as closed
         current.flags &= ~{.Open}
         current.flags |= {.Closed}
 
+        // Debug logging
+        if iterations <= 20 {
+            log.debugf("Iter %d: Processing poly 0x%x (cost=%.2f, total=%.2f)", 
+                      iterations, current.id, current.cost, current.total)
+        }
+
         // Reached goal?
         if current.id == end_ref {
             best_node = current
+            log.debugf("Goal reached at poly 0x%x after %d iterations", current.id, iterations)
             break
         }
 
@@ -349,6 +366,17 @@ find_path :: proc(query: ^Nav_Mesh_Query,
                     // Check if this path to neighbor is better
                     neighbor_node := node_pool_get_node(&query.node_pool, neighbor_ref)
                     
+                    // Debug logging
+                    if iterations <= 20 && neighbor_ref == end_ref {
+                        log.debugf("  Considering goal poly 0x%x: cost=%.2f, total=%.2f", 
+                                  neighbor_ref, cost, total)
+                        if neighbor_node != nil {
+                            log.debugf("    Existing node: cost=%.2f, total=%.2f, open=%v, closed=%v",
+                                      neighbor_node.cost, neighbor_node.total, 
+                                      .Open in neighbor_node.flags, .Closed in neighbor_node.flags)
+                        }
+                    }
+                    
                     // The node is already in open list and the new result is worse, skip
                     if neighbor_node != nil && .Open in neighbor_node.flags && total >= neighbor_node.total {
                         link = get_next_link(cur_tile, link)
@@ -369,27 +397,22 @@ find_path :: proc(query: ^Nav_Mesh_Query,
                         }
                     }
 
+                    // If node was closed but we found a better path, reopen it
+                    if .Closed in neighbor_node.flags {
+                        neighbor_node.flags &= ~{.Closed}
+                    }
+
                     // Update neighbor
                     neighbor_node.id = neighbor_ref
                     neighbor_node.parent_id = current.id
                     neighbor_node.cost = cost
                     neighbor_node.pos = neighbor_pos
                     neighbor_node.total = total
-
-                    // Clear closed flag if set
-                    neighbor_node.flags &= ~{.Closed}
                     
-                    // Check if already in open list
-                    if .Open in neighbor_node.flags {
-                        // Already in open, update node location
-                        // Note: In C++, this would call modify() on the heap
-                        // Our priority queue doesn't have modify, so we push again
-                        // The queue will handle duplicates by cost ordering
-                    } else {
-                        // Put the node in open list
-                        neighbor_node.flags |= {.Open}
-                    }
-
+                    // Mark as open (if not already)
+                    neighbor_node.flags |= {.Open}
+                    
+                    // Always push to queue (duplicates will be filtered when popped)
                     neighbor_pathfinding_node := Pathfinding_Node{
                         ref = neighbor_ref,
                         cost = neighbor_node.cost,
@@ -612,7 +635,8 @@ update_sliced_find_path :: proc(state: ^Sliced_Find_Path_State, max_iter: i32) -
         }
 
         // Explore neighbors
-        for link := get_first_link(cur_tile, i32(current_ref & 0xffff));link != nav_recast.DT_NULL_LINK;link = get_next_link(cur_tile, link) {
+        poly_index := get_poly_index(state.query.nav_mesh, current_ref)
+        for link := get_first_link(cur_tile, i32(poly_index));link != nav_recast.DT_NULL_LINK;link = get_next_link(cur_tile, link) {
             neighbor_ref := get_link_poly_ref(cur_tile, link)
             if neighbor_ref == nav_recast.INVALID_POLY_REF {
                 continue

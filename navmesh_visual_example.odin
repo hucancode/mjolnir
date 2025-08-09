@@ -353,22 +353,22 @@ build_navmesh :: proc(engine: ^mjolnir.Engine) -> (use_procedural: bool) {
         log.infof("Areas array length: %d", len(areas))
     }
 
-    // Configure Recast
+    // Configure Recast - Use EXACT RecastDemo default values for consistency
     config := recast.Config{
-        cs = 0.2,                        // Cell size - increased for better connectivity
-        ch = 0.2,                        // Cell height - increased to match
-        walkable_slope_angle = 45,       // Max slope
-        walkable_height = 10,            // Min ceiling height (in cells = 2.0 units)
-        walkable_climb = 4,              // Max ledge height (in cells = 0.8 units) - increased for steps
-        walkable_radius = 3,             // Agent radius in cells (3 * 0.2 = 0.6 units) - smaller agent
-        max_edge_len = 12,               // Max edge length in cells (12 * 0.2 = 2.4 units)
-        max_simplification_error = 1.3,  // Simplification error in cells
-        min_region_area = 8,             // Min region area in cells^2
-        merge_region_area = 20,          // Merge region area in cells^2
-        max_verts_per_poly = 6,          // Max verts per polygon
-        detail_sample_dist = 6,          // Detail sample distance in cells
-        detail_sample_max_error = 1,     // Detail sample error in cells
-        border_size = 0,                 // No border padding
+        cs = 0.3,                                        // Cell size (RecastDemo default)
+        ch = 0.2,                                        // Cell height (RecastDemo default)
+        walkable_slope_angle = 45,                      // Max slope (RecastDemo default)
+        walkable_height = i32(math.ceil_f32(2.0 / 0.2)),    // Agent height = 2.0m -> 10 cells
+        walkable_climb = i32(math.floor_f32(0.9 / 0.2)),    // Agent max climb = 0.9m -> 4 cells
+        walkable_radius = i32(math.ceil_f32(0.6 / 0.3)),    // Agent radius = 0.6m -> 2 cells
+        max_edge_len = i32(12.0 / 0.3),                 // Max edge length = 12m -> 40 cells
+        max_simplification_error = 1.3,                 // RecastDemo default
+        min_region_area = 64,                           // RecastDemo default (8*8)
+        merge_region_area = 400,                        // RecastDemo default (20*20)
+        max_verts_per_poly = 6,                         // RecastDemo default
+        detail_sample_dist = 0.3 * 6.0,                 // RecastDemo default (cs * 6)
+        detail_sample_max_error = 0.2 * 1.0,            // RecastDemo default (ch * 1)
+        border_size = 0,                                 // No border padding
     }
 
     // Build navigation mesh

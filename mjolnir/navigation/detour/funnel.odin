@@ -100,8 +100,30 @@ find_straight_path :: proc(query: ^Nav_Mesh_Query,
             // Get portal between path[i] and path[i+1]
             portal_status := get_portal_points(query, path[i], path[i+1], &left, &right, &from_type)
             if nav_recast.status_failed(portal_status) {
-                // Failed to get portal
-                if i + 1 == path_count - 1 {
+                // Failed to get portal - this is a problem that needs fixing
+                log.warnf("Failed to get portal between poly 0x%x and 0x%x (indices %d->%d)", 
+                         path[i], path[i+1], i, i+1)
+                
+                // Try to use polygon centroids as fallback
+                from_tile, from_poly, _ := get_tile_and_poly_by_ref(query.nav_mesh, path[i])
+                to_tile, to_poly, _ := get_tile_and_poly_by_ref(query.nav_mesh, path[i+1])
+                
+                if from_tile != nil && from_poly != nil && to_tile != nil && to_poly != nil {
+                    // Use centroids as a fallback portal
+                    from_center := calc_poly_center(from_tile, from_poly)
+                    to_center := calc_poly_center(to_tile, to_poly)
+                    
+                    // Create a perpendicular portal at the midpoint
+                    mid := (from_center + to_center) * 0.5
+                    dir := linalg.normalize(to_center - from_center)
+                    perp := [3]f32{-dir.z, dir.y, dir.x} * 0.5
+                    
+                    left = mid - perp
+                    right = mid + perp
+                    from_type = 0
+                    
+                    log.warnf("Using fallback portal: left=%v, right=%v", left, right)
+                } else if i + 1 == path_count - 1 {
                     // If this is the last portal, use end position
                     left = end_pos
                     right = end_pos
@@ -258,13 +280,16 @@ get_portal_points :: proc(query: ^Nav_Mesh_Query, from: nav_recast.Poly_Ref, to:
     }
 
     // Find the shared edge between the polygons
+    // Get the polygon index from the reference
+    _, _, to_poly_index := decode_poly_id(query.nav_mesh, to)
+    
     for i in 0..<int(from_poly.vert_count) {
         // Check if this edge connects to target polygon
         nei := from_poly.neis[i]
-        // log.infof("  Edge %d: nei=%d", i, nei)
+        // log.infof("  Edge %d: nei=%d, to_poly_index=%d", i, nei, to_poly_index)
         
-        // Check direct neighbor reference (1-based index)
-        if nei > 0 && i32(nei - 1) == i32(to & 0xffff) {
+        // Check direct neighbor reference (1-based index, so nei-1 is the polygon index)
+        if nei > 0 && u32(nei - 1) == to_poly_index {
             // Found the connection through neighbor reference
             va := from_tile.verts[from_poly.verts[i]]
             vb := from_tile.verts[from_poly.verts[(i + 1) % int(from_poly.vert_count)]]
@@ -278,22 +303,22 @@ get_portal_points :: proc(query: ^Nav_Mesh_Query, from: nav_recast.Poly_Ref, to:
         }
         
         // Also check via links
-        link := get_first_link(from_tile, i32(from & 0xffff))
+        _, _, from_poly_index := decode_poly_id(query.nav_mesh, from)
+        link := get_first_link(from_tile, i32(from_poly_index))
         for link != nav_recast.DT_NULL_LINK {
             link_ref := get_link_poly_ref(from_tile, link)
             // log.infof("    Link to: 0x%x", link_ref)
             if link_ref == to {
-                // For linked connections without direct neighbor info,
-                // fall back to using polygon centers
-                from_center := calc_poly_center(from_tile, from_poly)
+                // Found the link! Extract the edge vertices
+                link_edge := get_link_edge(from_tile, link)
+                v0 := from_poly.verts[link_edge]
+                v1 := from_poly.verts[(link_edge + 1) % u8(from_poly.vert_count)]
                 
-                // For now, just return the center point twice to avoid crash
-                // This is not ideal but prevents array access issues
-                left^ = from_center
-                right^ = from_center
+                left^ = from_tile.verts[v0]
+                right^ = from_tile.verts[v1]
                 portal_type^ = 0
 
-                // log.infof("  Found portal via link (center fallback): left=%v right=%v", left^, right^)
+                // log.infof("  Found portal via link: edge=%d, left=%v right=%v", link_edge, left^, right^)
                 return {.Success}
             }
             link = get_next_link(from_tile, link)
@@ -469,7 +494,8 @@ find_neighbor_across_edge :: proc(query: ^Nav_Mesh_Query, ref: nav_recast.Poly_R
         // Check if movement ray intersects this edge
         if dt_intersect_segment_edge_2d(start_pos, end_pos, va, vb) {
             // Find neighbor across this edge
-            link := get_first_link(tile, i32(ref & 0xffff))
+            poly_idx := get_poly_index(query.nav_mesh, ref)
+            link := get_first_link(tile, i32(poly_idx))
             for link != nav_recast.DT_NULL_LINK {
                 neighbor_ref := get_link_poly_ref(tile, link)
                 if neighbor_ref != nav_recast.INVALID_POLY_REF {
