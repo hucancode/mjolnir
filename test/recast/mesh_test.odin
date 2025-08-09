@@ -75,7 +75,7 @@ test_triangulate_polygon :: proc(t: ^testing.T) {
     triangles := make([dynamic]i32)
     defer delete(triangles)
 
-    result := nav_recast.triangulate_polygon(verts, indices, &triangles)
+    result := nav_recast.triangulate_polygon_u16(verts, indices, &triangles)
     testing.expect(t, result, "Triangulation should succeed")
     testing.expect(t, len(triangles) == 6, "Quad should produce 2 triangles (6 indices)")
 
@@ -106,7 +106,7 @@ test_triangulate_concave_polygon :: proc(t: ^testing.T) {
     triangles := make([dynamic]i32)
     defer delete(triangles)
 
-    result := nav_recast.triangulate_polygon(verts, indices, &triangles)
+    result := nav_recast.triangulate_polygon_u16(verts, indices, &triangles)
     testing.expect(t, result, "Concave polygon triangulation should succeed")
     testing.expect(t, len(triangles) == 12, "6-vertex polygon should produce 4 triangles (12 indices)")
 
@@ -149,7 +149,7 @@ test_triangulate_star_polygon :: proc(t: ^testing.T) {
     triangles := make([dynamic]i32)
     defer delete(triangles)
 
-    result := nav_recast.triangulate_polygon(verts, indices, &triangles)
+    result := nav_recast.triangulate_polygon_u16(verts, indices, &triangles)
     testing.expect(t, result, "Star polygon triangulation should succeed")
     testing.expect(t, len(triangles) == 18, "8-vertex polygon should produce 6 triangles (18 indices)")
 
@@ -224,7 +224,7 @@ test_degenerate_polygon_handling :: proc(t: ^testing.T) {
     triangles := make([dynamic]i32)
     defer delete(triangles)
 
-    result := nav_recast.triangulate_polygon(verts, indices, &triangles)
+    result := nav_recast.triangulate_polygon_u16(verts, indices, &triangles)
     testing.expect(t, result, "Degenerate polygon triangulation should succeed")
     testing.expect(t, len(triangles) > 0, "Should produce some triangles")
     testing.expect(t, len(triangles) % 3 == 0, "Should have complete triangles")
@@ -367,11 +367,11 @@ test_build_simple_contour_mesh :: proc(t: ^testing.T) {
     cont.area = nav_recast.RC_WALKABLE_AREA
     cont.reg = 1
 
-    // Define square vertices (in contour coordinates)
+    // Define square vertices (in contour coordinates) - counter-clockwise
     cont.verts[0] = {0, 5, 0, 0}    // Bottom-left
-    cont.verts[1] = {10, 5, 0, 0}   // Bottom-right
+    cont.verts[1] = {0, 5, 10, 0}   // Top-left
     cont.verts[2] = {10, 5, 10, 0}  // Top-right
-    cont.verts[3] = {0, 5, 10, 0}   // Top-left
+    cont.verts[3] = {10, 5, 0, 0}   // Bottom-right
 
     // Build polygon mesh
     pmesh := nav_recast.alloc_poly_mesh()

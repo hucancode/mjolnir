@@ -125,7 +125,7 @@ calculate_distance_field :: proc(chf: ^Compact_Heightfield, src: []u16) -> (max_
                     ay := y + get_dir_offset_y(0)
                     if ax >= 0 && ay >= 0 && ax < w && ay < h {
                         ai := u32(chf.cells[ax + ay * w].index) + u32(get_con(s, 0))
-                        if ai < u32(len(src)) && src[ai] != 0xffff && src[ai] < 0xffff - 2 && src[ai] + 2 < src[i] {
+                        if ai < u32(len(src)) && src[ai] + 2 < src[i] {
                             src[i] = src[ai] + 2
                         }
 
@@ -137,7 +137,7 @@ calculate_distance_field :: proc(chf: ^Compact_Heightfield, src: []u16) -> (max_
                                 aay := ay + get_dir_offset_y(3)
                                 if aax >= 0 && aay >= 0 && aax < w && aay < h {
                                     aai := u32(chf.cells[aax + aay * w].index) + u32(get_con(as, 3))
-                                    if aai < u32(len(src)) && src[aai] != 0xffff && src[aai] < 0xffff - 3 && src[aai] + 3 < src[i] {
+                                    if aai < u32(len(src)) && src[aai] + 3 < src[i] {
                                         src[i] = src[aai] + 3
                                     }
                                 }
@@ -152,7 +152,7 @@ calculate_distance_field :: proc(chf: ^Compact_Heightfield, src: []u16) -> (max_
                     ay := y + get_dir_offset_y(3)
                     if ax >= 0 && ay >= 0 && ax < w && ay < h {
                         ai := u32(chf.cells[ax + ay * w].index) + u32(get_con(s, 3))
-                        if ai < u32(len(src)) && src[ai] != 0xffff && src[ai] < 0xffff - 2 && src[ai] + 2 < src[i] {
+                        if ai < u32(len(src)) && src[ai] + 2 < src[i] {
                             src[i] = src[ai] + 2
                         }
 
@@ -164,7 +164,7 @@ calculate_distance_field :: proc(chf: ^Compact_Heightfield, src: []u16) -> (max_
                                 aay := ay + get_dir_offset_y(2)
                                 if aax >= 0 && aay >= 0 && aax < w && aay < h {
                                     aai := u32(chf.cells[aax + aay * w].index) + u32(get_con(as, 2))
-                                    if aai < u32(len(src)) && src[aai] != 0xffff && src[aai] < 0xffff - 3 && src[aai] + 3 < src[i] {
+                                    if aai < u32(len(src)) && src[aai] + 3 < src[i] {
                                         src[i] = src[aai] + 3
                                     }
                                 }
@@ -195,7 +195,7 @@ calculate_distance_field :: proc(chf: ^Compact_Heightfield, src: []u16) -> (max_
                     ay := y + get_dir_offset_y(2)
                     if ax >= 0 && ay >= 0 && ax < w && ay < h {
                         ai := u32(chf.cells[ax + ay * w].index) + u32(get_con(s, 2))
-                        if ai < u32(len(src)) && src[ai] != 0xffff && src[ai] < 0xffff - 2 && src[ai] + 2 < src[i] {
+                        if ai < u32(len(src)) && src[ai] + 2 < src[i] {
                             src[i] = src[ai] + 2
                         }
 
@@ -207,7 +207,7 @@ calculate_distance_field :: proc(chf: ^Compact_Heightfield, src: []u16) -> (max_
                                 aay := ay + get_dir_offset_y(1)
                                 if aax >= 0 && aay >= 0 && aax < w && aay < h {
                                     aai := u32(chf.cells[aax + aay * w].index) + u32(get_con(as, 1))
-                                    if aai < u32(len(src)) && src[aai] != 0xffff && src[aai] < 0xffff - 3 && src[aai] + 3 < src[i] {
+                                    if aai < u32(len(src)) && src[aai] + 3 < src[i] {
                                         src[i] = src[aai] + 3
                                     }
                                 }
@@ -222,7 +222,7 @@ calculate_distance_field :: proc(chf: ^Compact_Heightfield, src: []u16) -> (max_
                     ay := y + get_dir_offset_y(1)
                     if ax >= 0 && ay >= 0 && ax < w && ay < h {
                         ai := u32(chf.cells[ax + ay * w].index) + u32(get_con(s, 1))
-                        if ai < u32(len(src)) && src[ai] != 0xffff && src[ai] < 0xffff - 2 && src[ai] + 2 < src[i] {
+                        if ai < u32(len(src)) && src[ai] + 2 < src[i] {
                             src[i] = src[ai] + 2
                         }
 
@@ -234,7 +234,7 @@ calculate_distance_field :: proc(chf: ^Compact_Heightfield, src: []u16) -> (max_
                                 aay := ay + get_dir_offset_y(0)
                                 if aax >= 0 && aay >= 0 && aax < w && aay < h {
                                     aai := u32(chf.cells[aax + aay * w].index) + u32(get_con(as, 0))
-                                    if aai < u32(len(src)) && src[aai] != 0xffff && src[aai] < 0xffff - 3 && src[aai] + 3 < src[i] {
+                                    if aai < u32(len(src)) && src[aai] + 3 < src[i] {
                                         src[i] = src[aai] + 3
                                     }
                                 }
@@ -311,13 +311,7 @@ flood_region :: proc(x, y, i: i32, level, r: u16, chf: ^Compact_Heightfield,
     lev := level >= 2 ? level - 2 : 0
     count := 0
 
-    // Bounded iteration with reasonable limit (40000 cells max)
-    max_iterations := 40000
-    iterations := 0
-
-    for len(stack) > 0 && iterations < max_iterations {
-        iterations += 1
-
+    for len(stack) > 0 {
         back := pop(stack)
         cx := back.x
         cy := back.y
@@ -494,10 +488,11 @@ expand_regions :: proc(max_iter: i32, level: u16, chf: ^Compact_Heightfield,
             break
         }
 
-        // Always increment iteration counter to prevent infinite loops
-        iter += 1
-        if iter >= max_iter {
-            break
+        if level > 0 {
+            iter += 1
+            if iter >= max_iter {
+                break
+            }
         }
     }
 }
@@ -963,11 +958,7 @@ merge_and_filter_regions :: proc(min_region_area, merge_region_size: i32,
 
     // Merge too small regions to neighbour regions
     merge_count := 0
-    max_merge_iterations := 100 // Prevent infinite loops
-    merge_iterations := 0
-
-    for merge_iterations < max_merge_iterations {
-        merge_iterations += 1
+    for {
         merge_count = 0
         for i in 0..<nreg {
             reg := &regions[i]
@@ -1068,7 +1059,7 @@ merge_and_filter_regions :: proc(min_region_area, merge_region_size: i32,
 
     // Remap regions
     for i in 0..<chf.span_count {
-        if (src_reg[i] & RC_BORDER_REG) == 0 && src_reg[i] < u16(nreg) {
+        if (src_reg[i] & RC_BORDER_REG) == 0 {
             src_reg[i] = regions[src_reg[i]].id
         }
     }
@@ -1092,9 +1083,9 @@ build_regions :: proc(chf: ^Compact_Heightfield,
     h := chf.height
 
     allocator := context.allocator
-    buf := make([]u16, chf.span_count * 3, allocator)  // Need 3 buffers: reg, dist, and temp
+    buf := make([]u16, chf.span_count * 2, allocator)  // Need 2 buffers: reg and dist
     if buf == nil {
-        log.errorf("rcBuildRegions: Out of memory 'tmp' (%d).", chf.span_count * 6)
+        log.errorf("rcBuildRegions: Out of memory 'tmp' (%d).", chf.span_count * 4)
         return false
     }
     defer delete(buf)
@@ -1116,7 +1107,10 @@ build_regions :: proc(chf: ^Compact_Heightfield,
 
     src_reg := buf[:chf.span_count]
     src_dist := buf[chf.span_count:chf.span_count*2]
-    temp_buf := buf[chf.span_count*2:chf.span_count*3]
+    
+    // Initialize to 0
+    slice.fill(src_reg, 0)
+    slice.fill(src_dist, 0)
 
     region_id: u16 = 1
     level := (chf.max_distance + 1) & (~u16(1))
@@ -1148,35 +1142,8 @@ build_regions :: proc(chf: ^Compact_Heightfield,
 
     log.infof("Starting watershed partitioning, starting level: %d", level)
 
-    // Handle the case where level starts at 0 (max_distance is 0)
-    if level == 0 {
-        // For level 0, we need to sort all cells directly
-        sort_cells_by_level(0, chf, src_reg, NB_STACKS, lvl_stacks[:], 1)
-        sid = 0
-        // Flood fill regions at level 0
-        new_regions_count := 0
-        for current in lvl_stacks[sid] {
-            x := current.x
-            y := current.y
-            i := current.index
-            if i >= 0 && src_reg[i] == 0 {
-                if flood_region(x, y, i, 0, region_id, chf, src_reg, src_dist, &stack) {
-                    if region_id == 0xFFFF {
-                        log.error("rcBuildRegions: Region ID overflow")
-                        return false
-                    }
-                    new_regions_count += 1
-                    region_id += 1
-                }
-            }
-        }
-
-        log.infof("Level 0: processed %d cells, created %d new regions, total regions: %d",
-                 len(lvl_stacks[sid]), new_regions_count, region_id - 1)
-    }
-
     for level > 0 {
-        level -= min(level, 2)
+        level = level >= 2 ? level - 2 : 0
         sid = (sid + 1) & (NB_STACKS - 1)
 
         if sid == 0 {
@@ -1624,13 +1591,14 @@ merge_and_filter_layer_regions :: proc(min_region_area: i32,
 
     // Remap regions
     for i in 0..<chf.span_count {
-        if (src_reg[i] & RC_BORDER_REG) == 0 && src_reg[i] < u16(nreg) {
+        if (src_reg[i] & RC_BORDER_REG) == 0 {
             src_reg[i] = regions[src_reg[i]].id
         }
     }
 
     return true
 }
+
 
 // Build layer regions for multi-story environments
 build_layer_regions :: proc(chf: ^Compact_Heightfield,

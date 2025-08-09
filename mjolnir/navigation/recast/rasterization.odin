@@ -88,13 +88,14 @@ add_span :: proc(hf: ^Heightfield,
         }
         merge_end = current_span
 
-        // Update merged span bounds
+        // Update merged span bounds FIRST (matches C++ lines 147-150)
         new_span.smin = min(new_span.smin, current_span.smin)
         new_span.smax = max(new_span.smax, current_span.smax)
 
-        // Merge area flags
-        // Check difference between the updated new_span.smax and current_span.smax
-        // This matches the C++ implementation: rcAbs((int)newSpan->smax - (int)currentSpan->smax)
+        // Merge area flags AFTER updating bounds (matches C++ lines 153-157)
+        // Check difference between the UPDATED new_span.smax and current_span.smax
+        // Note: After the max operation above, if current_span.smax was larger,
+        // then new_span.smax == current_span.smax, making the difference 0
         if abs(i32(new_span.smax) - i32(current_span.smax)) <= flag_merge_threshold {
             // If within threshold, take max area
             new_span.area = max(new_span.area, current_span.area)
@@ -302,6 +303,9 @@ rasterize_tri :: proc(v0, v1, v2: [3]f32, area_id: u8,
             log.infof("Triangle %d: BB=(%.2f,%.2f,%.2f)-(%.2f,%.2f,%.2f), Grid Z=%d-%d, area=%d",
                      debug_count, tri_bb_min.x, tri_bb_min.y, tri_bb_min.z,
                      tri_bb_max.x, tri_bb_max.y, tri_bb_max.z, z0, z1, area_id)
+            log.infof("  Heightfield: BB=(%.2f,%.2f,%.2f)-(%.2f,%.2f,%.2f), size=%dx%d",
+                     hf_bb_min.x, hf_bb_min.y, hf_bb_min.z,
+                     hf_bb_max.x, hf_bb_max.y, hf_bb_max.z, w, h)
             debug_count += 1
         }
     }

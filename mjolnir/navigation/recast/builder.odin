@@ -45,7 +45,9 @@ build_compact_heightfield :: proc(walkable_height, walkable_climb: i32,
     chf.bmax.y += f32(walkable_height) * hf.ch  // Adjust max height
     chf.cs = hf.cs
     chf.ch = hf.ch
-    chf.border_size = hf.border_size
+    // Note: C++ doesn't set border_size in rcBuildCompactHeightfield
+    // It's set later during contour building or other operations
+    chf.border_size = 0
 
     chf.cells = make([]Compact_Cell, w * h)
     chf.spans = nil
@@ -80,6 +82,11 @@ build_compact_heightfield :: proc(walkable_height, walkable_climb: i32,
     chf.span_count = i32(span_count)
     chf.spans = make([]Compact_Span, span_count)
     chf.areas = make([]u8, span_count)
+    
+    // Initialize areas to RC_NULL_AREA to match C++ behavior
+    for i in 0..<span_count {
+        chf.areas[i] = RC_NULL_AREA
+    }
 
     // Fill in cells and spans
     idx := 0
@@ -353,6 +360,12 @@ build_contours :: proc(chf: ^Compact_Heightfield,
             for i in span_idx..<span_idx + u32(span_count) {
                 s := &chf.spans[i]
                 res: u8 = 0
+                
+                // Skip spans with no region or border regions
+                if s.reg == 0 || (s.reg & RC_BORDER_REG) != 0 {
+                    flags[i] = 0
+                    continue
+                }
 
                 // Check all 4 directions for region boundaries
                 for dir in 0..<4 {
@@ -371,7 +384,6 @@ build_contours :: proc(chf: ^Compact_Heightfield,
 
                 // Invert flags - we want boundaries where regions differ
                 flags[i] = res ~ 0xf  // Inverse, mark non-connected edges
-                if flags[i] != 0 do boundary_spans += 1
             }
         }
     }
@@ -461,6 +473,18 @@ build_contours :: proc(chf: ^Compact_Heightfield,
                             for j in 0..<len(cont.verts) {
                                 cont.verts[j][0] -= border_size
                                 cont.verts[j][2] -= border_size
+                            }
+                        }
+
+                        // Store raw vertices (matching C++ behavior)
+                        cont.rverts = make([][4]i32, len(verts))
+                        copy(cont.rverts, verts[:])
+                        
+                        // Adjust raw vertices for border size
+                        if border_size > 0 {
+                            for j in 0..<len(cont.rverts) {
+                                cont.rverts[j][0] -= border_size
+                                cont.rverts[j][2] -= border_size
                             }
                         }
 
@@ -602,6 +626,7 @@ walk_contour_boundary :: proc(x, y, i: i32, chf: ^Compact_Heightfield,
         if (flags[curr_i] & (1 << dir)) != 0 {
             // We can step in this direction - create vertex at edge corner
             is_border_vertex := false
+            is_area_border := false
             px := curr_x
             py := get_corner_height_for_contour(curr_x, curr_y, curr_i, i32(dir), chf, &is_border_vertex)
             pz := curr_y
@@ -627,9 +652,9 @@ walk_contour_boundary :: proc(x, y, i: i32, chf: ^Compact_Heightfield,
                     if ai >= 0 && ai < i32(len(chf.spans)) {
                         r = i32(chf.spans[ai].reg)
 
-                        // Check if this is an area border
+                        // Check if this is an area border (match C++ logic)
                         if ai < i32(len(chf.areas)) && area != chf.areas[ai] {
-                            r |= RC_AREA_BORDER
+                            is_area_border = true
                         }
                     }
                 }
@@ -637,6 +662,9 @@ walk_contour_boundary :: proc(x, y, i: i32, chf: ^Compact_Heightfield,
 
             if is_border_vertex {
                 r |= RC_BORDER_VERTEX
+            }
+            if is_area_border {
+                r |= RC_AREA_BORDER
             }
 
             append(points, [4]i32{px, py, pz, r})
@@ -697,12 +725,9 @@ get_corner_height_for_contour :: proc(x, y, i, dir: i32, chf: ^Compact_Heightfie
 
     regs: [4]u32
 
-    // Combine region and area codes with bounds checking
-    if i < i32(len(chf.areas)) {
-        regs[0] = u32(s.reg) | (u32(chf.areas[i]) << 16)
-    } else {
-        regs[0] = u32(s.reg)
-    }
+    // Combine region and area codes in order to prevent
+    // border vertices which are in between two areas to be removed.
+    regs[0] = u32(s.reg) | (u32(chf.areas[i]) << 16)
 
     // Check primary direction
     if get_con(s, int(dir)) != RC_NOT_CONNECTED {
@@ -716,11 +741,7 @@ get_corner_height_for_contour :: proc(x, y, i, dir: i32, chf: ^Compact_Heightfie
             if ai >= 0 && ai < i32(len(chf.spans)) {
                 as := &chf.spans[ai]
                 ch = max(ch, i32(as.y))
-                if ai < i32(len(chf.areas)) {
-                    regs[1] = u32(as.reg) | (u32(chf.areas[ai]) << 16)
-                } else {
-                    regs[1] = u32(as.reg)
-                }
+                regs[1] = u32(as.reg) | (u32(chf.areas[ai]) << 16)
 
                 // Check diagonal
                 if get_con(as, int(dirp)) != RC_NOT_CONNECTED {
@@ -733,11 +754,7 @@ get_corner_height_for_contour :: proc(x, y, i, dir: i32, chf: ^Compact_Heightfie
                         if ai2 >= 0 && ai2 < i32(len(chf.spans)) {
                             as2 := &chf.spans[ai2]
                             ch = max(ch, i32(as2.y))
-                            if ai2 < i32(len(chf.areas)) {
-                                regs[2] = u32(as2.reg) | (u32(chf.areas[ai2]) << 16)
-                            } else {
-                                regs[2] = u32(as2.reg)
-                            }
+                            regs[2] = u32(as2.reg) | (u32(chf.areas[ai2]) << 16)
                         }
                     }
                 }
@@ -757,11 +774,7 @@ get_corner_height_for_contour :: proc(x, y, i, dir: i32, chf: ^Compact_Heightfie
             if ai >= 0 && ai < i32(len(chf.spans)) {
                 as := &chf.spans[ai]
                 ch = max(ch, i32(as.y))
-                if ai < i32(len(chf.areas)) {
-                    regs[3] = u32(as.reg) | (u32(chf.areas[ai]) << 16)
-                } else {
-                    regs[3] = u32(as.reg)
-                }
+                regs[3] = u32(as.reg) | (u32(chf.areas[ai]) << 16)
 
                 // Check diagonal
                 if get_con(as, int(dir)) != RC_NOT_CONNECTED {
@@ -774,11 +787,7 @@ get_corner_height_for_contour :: proc(x, y, i, dir: i32, chf: ^Compact_Heightfie
                         if ai2 >= 0 && ai2 < i32(len(chf.spans)) {
                             as2 := &chf.spans[ai2]
                             ch = max(ch, i32(as2.y))
-                            if ai2 < i32(len(chf.areas)) {
-                                regs[2] = u32(as2.reg) | (u32(chf.areas[ai2]) << 16)
-                            } else {
-                                regs[2] = u32(as2.reg)
-                            }
+                            regs[2] = u32(as2.reg) | (u32(chf.areas[ai2]) << 16)
                         }
                     }
                 }

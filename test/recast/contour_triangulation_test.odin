@@ -196,7 +196,7 @@ test_triangulation_complex_polygon :: proc(t: ^testing.T) {
     triangles := make([dynamic]i32)
     defer delete(triangles)
 
-    result := nav_recast.triangulate_polygon(verts, indices, &triangles)
+    result := nav_recast.triangulate_polygon_u16(verts, indices, &triangles)
     testing.expect(t, result, "Octagon triangulation should succeed")
     testing.expect(t, len(triangles) == 18, "Octagon should produce 6 triangles (18 indices)")
 
@@ -224,7 +224,7 @@ test_triangulation_edge_cases :: proc(t: ^testing.T) {
         triangles := make([dynamic]i32)
         defer delete(triangles)
 
-        result := nav_recast.triangulate_polygon(verts, indices, &triangles)
+        result := nav_recast.triangulate_polygon_u16(verts, indices, &triangles)
         testing.expect(t, result, "Triangle triangulation should succeed")
         testing.expect(t, len(triangles) == 3, "Triangle should produce 1 triangle (3 indices)")
     }
@@ -236,7 +236,7 @@ test_triangulation_edge_cases :: proc(t: ^testing.T) {
         triangles := make([dynamic]i32)
         defer delete(triangles)
 
-        result := nav_recast.triangulate_polygon(verts[:], indices, &triangles)
+        result := nav_recast.triangulate_polygon_u16(verts[:], indices, &triangles)
         testing.expect(t, !result, "Triangulation with 2 vertices should fail")
     }
 
@@ -247,7 +247,7 @@ test_triangulation_edge_cases :: proc(t: ^testing.T) {
         triangles := make([dynamic]i32)
         defer delete(triangles)
 
-        result := nav_recast.triangulate_polygon(verts[:], indices, &triangles)
+        result := nav_recast.triangulate_polygon_u16(verts[:], indices, &triangles)
         // Should either succeed with some triangulation or fail gracefully
         if result {
             testing.expect(t, len(triangles) > 0, "If successful, should produce triangles")
@@ -324,11 +324,11 @@ test_simple_square_mesh :: proc(t: ^testing.T) {
     cont.area = nav_recast.RC_WALKABLE_AREA
     cont.reg = 1
 
-    // Define square vertices (clockwise)
+    // Define square vertices (counter-clockwise for Recast)
     cont.verts[0] = {0, 5, 0, 0}      // Bottom-left
-    cont.verts[1] = {10, 5, 0, 0}     // Bottom-right
+    cont.verts[1] = {0, 5, 10, 0}     // Top-left
     cont.verts[2] = {10, 5, 10, 0}    // Top-right
-    cont.verts[3] = {0, 5, 10, 0}     // Top-left
+    cont.verts[3] = {10, 5, 0, 0}     // Bottom-right
 
     // Build polygon mesh
     pmesh := nav_recast.alloc_poly_mesh()
@@ -366,13 +366,14 @@ test_simple_l_shape_mesh :: proc(t: ^testing.T) {
     cont.area = nav_recast.RC_WALKABLE_AREA
     cont.reg = 1
 
-    // Define L-shape vertices (clockwise) - using integer coordinates
-    cont.verts[0] = {0, 0, 0, 0}      // Bottom-left
-    cont.verts[1] = {2, 0, 0, 0}      // Bottom-right
-    cont.verts[2] = {2, 0, 1, 0}      // Mid-right
-    cont.verts[3] = {1, 0, 1, 0}      // Mid-inner
-    cont.verts[4] = {1, 0, 2, 0}      // Top-right
-    cont.verts[5] = {0, 0, 2, 0}      // Top-left
+    // Define L-shape vertices (counter-clockwise) - using integer coordinates
+    // Note: Y coordinate represents height in Recast
+    cont.verts[0] = {0, 5, 0, 0}      // Bottom-left
+    cont.verts[1] = {0, 5, 2, 0}      // Top-left
+    cont.verts[2] = {1, 5, 2, 0}      // Top-inner
+    cont.verts[3] = {1, 5, 1, 0}      // Mid-inner
+    cont.verts[4] = {2, 5, 1, 0}      // Mid-right
+    cont.verts[5] = {2, 5, 0, 0}      // Bottom-right
 
     // Debug: Print input vertices
     log.info("L-shape input vertices:")
@@ -417,13 +418,13 @@ test_contour_to_mesh_pipeline :: proc(t: ^testing.T) {
     cont.area = nav_recast.RC_WALKABLE_AREA
     cont.reg = 1
 
-    // Define L-shape vertices (clockwise)
+    // Define L-shape vertices (counter-clockwise)
     cont.verts[0] = {0, 5, 0, 0}      // Bottom-left
-    cont.verts[1] = {20, 5, 0, 0}     // Bottom-right
-    cont.verts[2] = {20, 5, 10, 0}    // Mid-right
+    cont.verts[1] = {0, 5, 20, 0}     // Top-left
+    cont.verts[2] = {10, 5, 20, 0}    // Top-inner
     cont.verts[3] = {10, 5, 10, 0}    // Mid-inner
-    cont.verts[4] = {10, 5, 20, 0}    // Top-right
-    cont.verts[5] = {0, 5, 20, 0}     // Top-left
+    cont.verts[4] = {20, 5, 10, 0}    // Mid-right
+    cont.verts[5] = {20, 5, 0, 0}     // Bottom-right
 
     // Debug: Print input contour vertices
     log.info("Input contour vertices:")

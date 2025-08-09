@@ -357,7 +357,7 @@ process_contour_chunk :: proc(build_ctx: ^Mesh_Build_Context, work_item: Contour
 
         // Triangulate the contour
         clear(&triangles)
-        if triangulate_polygon(vert_coords[:], contour_indices[:], &triangles) {
+        if triangulate_polygon_u16(vert_coords[:], contour_indices[:], &triangles) {
             // Merge triangles into polygons
             merge_triangles_into_polygons(triangles[:], &result.polygons, nvp, cont.area, cont.reg)
             processed_count += 1

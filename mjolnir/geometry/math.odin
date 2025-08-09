@@ -277,8 +277,9 @@ prev_dir :: proc "contextless" (dir: int) -> int {
 
 // Integer geometry operations (for exact arithmetic)
 
-// Calculate signed area of triangle formed by three 2D points
+// Calculate signed area of triangle formed by three 2D points in XZ plane
 // Positive area = counter-clockwise, negative = clockwise
+// NOTE: Uses XZ plane (indices 0 and 2) to match C++ Recast implementation
 area2 :: proc "contextless" (a, b, c: [2]i32) -> i32 {
     return (b.x - a.x) * (c.y - a.y) - (c.x - a.x) * (b.y - a.y)
 }
@@ -298,11 +299,11 @@ left_on :: proc "contextless" (a, b, c: [2]i32) -> bool {
 in_cone :: proc "contextless" (a0, a1, a2, p: [2]i32) -> bool {
     // If a1 is a convex vertex (a2 is left or on the line from a0 to a1)
     if left_on(a0, a1, a2) {
-        // p must be left of a1->a0 AND left of p->a1->a2
+        // p must be left of a1->p->a0 AND left of p->a1->a2
         return left(a1, p, a0) && left(p, a1, a2)
     }
     // else a1 is reflex
-    // p must NOT be (left of a1->p->a2 AND left of p->a1->a0)
+    // p must NOT be (left-or-on a1->p->a2 AND left-or-on p->a1->a0)
     return !(left_on(a1, p, a2) && left_on(p, a1, a0))
 }
 
