@@ -45,8 +45,70 @@ erode_walkable_area :: proc(radius: i32, chf: ^Compact_Heightfield) -> bool {
             }
         }
     }
+    
     nd: u8
-    // Pass 2
+    
+    // Pass 1 - Forward pass
+    for y in 0..<h {
+        for x in 0..<w {
+            c := &chf.cells[x + y * w]
+            for i in c.index..<c.index + u32(c.count) {
+                s := &chf.spans[i]
+                
+                if get_con(s, 0) != RC_NOT_CONNECTED {
+                    // (-1,0)
+                    ax := int(x) + int(get_dir_offset_x(0))
+                    ay := int(y) + int(get_dir_offset_y(0))
+                    ac := &chf.cells[ax + ay * int(w)]
+                    ai := ac.index + u32(get_con(s, 0))
+                    as := &chf.spans[ai]
+                    nd = min(dist[ai] + 2, 250)
+                    if nd < dist[i] {
+                        dist[i] = nd
+                    }
+                    
+                    // (-1,-1)
+                    if get_con(as, 3) != RC_NOT_CONNECTED {
+                        aax := ax + int(get_dir_offset_x(3))
+                        aay := ay + int(get_dir_offset_y(3))
+                        aac := &chf.cells[aax + aay * int(w)]
+                        aai := aac.index + u32(get_con(as, 3))
+                        nd = min(dist[aai] + 3, 250)
+                        if nd < dist[i] {
+                            dist[i] = nd
+                        }
+                    }
+                }
+                
+                if get_con(s, 3) != RC_NOT_CONNECTED {
+                    // (0,-1)
+                    ax := int(x) + int(get_dir_offset_x(3))
+                    ay := int(y) + int(get_dir_offset_y(3))
+                    ac := &chf.cells[ax + ay * int(w)]
+                    ai := ac.index + u32(get_con(s, 3))
+                    as := &chf.spans[ai]
+                    nd = min(dist[ai] + 2, 250)
+                    if nd < dist[i] {
+                        dist[i] = nd
+                    }
+                    
+                    // (1,-1)
+                    if get_con(as, 2) != RC_NOT_CONNECTED {
+                        aax := ax + int(get_dir_offset_x(2))
+                        aay := ay + int(get_dir_offset_y(2))
+                        aac := &chf.cells[aax + aay * int(w)]
+                        aai := aac.index + u32(get_con(as, 2))
+                        nd = min(dist[aai] + 3, 250)
+                        if nd < dist[i] {
+                            dist[i] = nd
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    // Pass 2 - Backward pass
     for y := h - 1; y >= 0; y -= 1 {
         for x := w - 1; x >= 0; x -= 1 {
             c := &chf.cells[x + y * w]
