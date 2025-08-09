@@ -9,8 +9,9 @@ import "core:log"
 import nav_recast "../recast"
 
 // Heuristic scale factor for A* pathfinding
-// Slightly higher than 1.0 to make the heuristic more aggressive
-H_SCALE :: 1.05
+// Slightly less than 1.0 to keep the heuristic admissible and guarantee optimal paths
+// Matching C++ implementation's value for consistent behavior
+H_SCALE :: 0.999
 
 // A* pathfinding node (full data)
 Node :: struct {
@@ -108,14 +109,7 @@ node_pool_create_node :: proc(pool: ^Node_Pool, id: nav_recast.Poly_Ref) -> ^Nod
 pathfinding_node_compare :: proc(a, b: Pathfinding_Node) -> bool {
     // For min-heap: return true if 'a' should come before 'b'
     // We want lower costs to have higher priority (come first)
-    if a.total == b.total {
-        // If total costs are equal, prefer lower individual cost
-        if a.cost == b.cost {
-            // If costs are also equal, use reference as tiebreaker for deterministic ordering
-            return a.ref < b.ref
-        }
-        return a.cost < b.cost
-    }
+    // Just use total cost for comparison (matching C++ implementation)
     return a.total < b.total
 }
 
@@ -313,23 +307,32 @@ find_path :: proc(query: ^Nav_Mesh_Query,
                 if nav_recast.status_succeeded(neighbor_status) &&
                    query_filter_pass_filter(filter, neighbor_ref, neighbor_tile, neighbor_poly) {
 
-                    // Calculate neighbor position using proper portal points
-                    left, right := [3]f32{}, [3]f32{}
-                    portal_type := u8(0)
-                    portal_status := get_portal_points(query, current.id, neighbor_ref, &left, &right, &portal_type)
+                    // Check if neighbor node already exists
+                    neighbor_node := node_pool_get_node(&query.node_pool, neighbor_ref)
                     
+                    // Calculate neighbor position ONLY for new nodes
                     neighbor_pos: [3]f32
-                    if nav_recast.status_succeeded(portal_status) {
-                        // Use midpoint of the actual shared edge
-                        neighbor_pos = {
-                            (left[0] + right[0]) * 0.5,
-                            (left[1] + right[1]) * 0.5,
-                            (left[2] + right[2]) * 0.5,
+                    if neighbor_node == nil {
+                        // Node doesn't exist yet, calculate position
+                        left, right := [3]f32{}, [3]f32{}
+                        portal_type := u8(0)
+                        portal_status := get_portal_points(query, current.id, neighbor_ref, &left, &right, &portal_type)
+                        
+                        if nav_recast.status_succeeded(portal_status) {
+                            // Use midpoint of the actual shared edge
+                            neighbor_pos = {
+                                (left[0] + right[0]) * 0.5,
+                                (left[1] + right[1]) * 0.5,
+                                (left[2] + right[2]) * 0.5,
+                            }
+                        } else {
+                            // Fallback to simple edge midpoint using link edge
+                            link_edge := get_link_edge(cur_tile, link)
+                            neighbor_pos = get_edge_mid_point(cur_tile, cur_poly, int(link_edge), neighbor_tile, neighbor_poly)
                         }
                     } else {
-                        // Fallback to simple edge midpoint using link edge
-                        link_edge := get_link_edge(cur_tile, link)
-                        neighbor_pos = get_edge_mid_point(cur_tile, cur_poly, int(link_edge), neighbor_tile, neighbor_poly)
+                        // Node already exists, always use cached position
+                        neighbor_pos = neighbor_node.pos
                     }
 
                     // Calculate cost and heuristic
@@ -362,9 +365,6 @@ find_path :: proc(query: ^Nav_Mesh_Query,
                     }
 
                     total := cost + heuristic
-
-                    // Check if this path to neighbor is better
-                    neighbor_node := node_pool_get_node(&query.node_pool, neighbor_ref)
                     
                     // Debug logging
                     if iterations <= 20 && neighbor_ref == end_ref {
@@ -395,6 +395,8 @@ find_path :: proc(query: ^Nav_Mesh_Query,
                             // Out of nodes
                             break
                         }
+                        // Set position only for new nodes
+                        neighbor_node.pos = neighbor_pos
                     }
 
                     // If node was closed but we found a better path, reopen it
@@ -402,11 +404,10 @@ find_path :: proc(query: ^Nav_Mesh_Query,
                         neighbor_node.flags &= ~{.Closed}
                     }
 
-                    // Update neighbor
+                    // Update neighbor (but don't overwrite position of existing nodes)
                     neighbor_node.id = neighbor_ref
                     neighbor_node.parent_id = current.id
                     neighbor_node.cost = cost
-                    neighbor_node.pos = neighbor_pos
                     neighbor_node.total = total
                     
                     // Mark as open (if not already)

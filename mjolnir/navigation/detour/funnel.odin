@@ -144,16 +144,6 @@ find_straight_path :: proc(query: ^Nav_Mesh_Query,
             }
         }
         
-        // Update funnel
-        if i == 0 {
-            // First portal, initialize funnel
-            portal_left = left
-            portal_right = right
-            left_poly_type = from_type
-            right_poly_type = from_type
-            continue
-        }
-        
         // Check right vertex
         tri_area_right := geometry.vec2f_perp(portal_apex, portal_right, right)
         
@@ -265,7 +255,7 @@ find_straight_path :: proc(query: ^Nav_Mesh_Query,
 get_portal_points :: proc(query: ^Nav_Mesh_Query, from: nav_recast.Poly_Ref, to: nav_recast.Poly_Ref,
                             left: ^[3]f32, right: ^[3]f32, portal_type: ^u8) -> nav_recast.Status {
 
-    // log.infof("get_portal_points: from=0x%x to=0x%x", from, to)
+    // log.debugf("get_portal_points: from=0x%x to=0x%x", from, to)
 
     from_tile, from_poly, from_status := get_tile_and_poly_by_ref(query.nav_mesh, from)
     if nav_recast.status_failed(from_status) {
@@ -279,49 +269,62 @@ get_portal_points :: proc(query: ^Nav_Mesh_Query, from: nav_recast.Poly_Ref, to:
         return to_status
     }
 
-    // Find the shared edge between the polygons
-    // Get the polygon index from the reference
-    _, _, to_poly_index := decode_poly_id(query.nav_mesh, to)
-    
-    for i in 0..<int(from_poly.vert_count) {
-        // Check if this edge connects to target polygon
-        nei := from_poly.neis[i]
-        // log.infof("  Edge %d: nei=%d, to_poly_index=%d", i, nei, to_poly_index)
+    // First try to find via links (most reliable method)
+    link := from_poly.first_link
+    link_count := 0
+    for link != nav_recast.DT_NULL_LINK {
+        link_ref := get_link_poly_ref(from_tile, link)
+        link_count += 1
+        // log.debugf("  Checking link %d: ref=0x%x (looking for 0x%x)", link_count, link_ref, to)
         
-        // Check direct neighbor reference (1-based index, so nei-1 is the polygon index)
-        if nei > 0 && u32(nei - 1) == to_poly_index {
-            // Found the connection through neighbor reference
-            va := from_tile.verts[from_poly.verts[i]]
-            vb := from_tile.verts[from_poly.verts[(i + 1) % int(from_poly.vert_count)]]
-
-            left^ = va
-            right^ = vb
+        if link_ref == to {
+            // Found the link! Extract the edge vertices
+            link_edge := get_link_edge(from_tile, link)
+            v0 := from_poly.verts[link_edge]
+            v1 := from_poly.verts[(link_edge + 1) % u8(from_poly.vert_count)]
+            
+            // Note: The order matters! In a right-handed system with Y-up,
+            // when traversing from 'from' to 'to', left should be on the left side
+            // For now, swap them to match C++ behavior
+            left^ = from_tile.verts[v1]
+            right^ = from_tile.verts[v0]
             portal_type^ = 0
 
-            // log.infof("  Found portal via neighbor: left=%v right=%v", va, vb)
+            // log.infof("  Found portal via link: edge=%d, left=%v right=%v", link_edge, left^, right^)
             return {.Success}
         }
-        
-        // Also check via links
-        _, _, from_poly_index := decode_poly_id(query.nav_mesh, from)
-        link := get_first_link(from_tile, i32(from_poly_index))
-        for link != nav_recast.DT_NULL_LINK {
-            link_ref := get_link_poly_ref(from_tile, link)
-            // log.infof("    Link to: 0x%x", link_ref)
-            if link_ref == to {
-                // Found the link! Extract the edge vertices
-                link_edge := get_link_edge(from_tile, link)
-                v0 := from_poly.verts[link_edge]
-                v1 := from_poly.verts[(link_edge + 1) % u8(from_poly.vert_count)]
-                
-                left^ = from_tile.verts[v0]
-                right^ = from_tile.verts[v1]
-                portal_type^ = 0
+        link = get_next_link(from_tile, link)
+    }
+    
+    // log.debugf("  Checked %d links, none matched", link_count)
+    
+    // Fallback: check neighbor references
+    // Get the polygon indices from references
+    from_salt, from_it, from_ip := decode_poly_id(query.nav_mesh, from)
+    to_salt, to_it, to_ip := decode_poly_id(query.nav_mesh, to)
+    
+    // Check if they're in the same tile (neighbor references only work within tile)
+    if from_it == to_it {
+        for i in 0..<int(from_poly.vert_count) {
+            nei := from_poly.neis[i]
+            
+            // Check internal edge connection (1-based index)
+            if nei > 0 && nei <= 0x3f {  // Internal edge marker
+                nei_idx := u32(nei - 1)  // Convert to 0-based index
+                if nei_idx == to_ip {
+                    // Found the connection through neighbor reference
+                    va := from_tile.verts[from_poly.verts[i]]
+                    vb := from_tile.verts[from_poly.verts[(i + 1) % int(from_poly.vert_count)]]
 
-                // log.infof("  Found portal via link: edge=%d, left=%v right=%v", link_edge, left^, right^)
-                return {.Success}
+                    // Swap to match C++ behavior
+                    left^ = vb
+                    right^ = va
+                    portal_type^ = 0
+
+                    // log.infof("  Found portal via neighbor: left=%v right=%v", va, vb)
+                    return {.Success}
+                }
             }
-            link = get_next_link(from_tile, link)
         }
     }
 
