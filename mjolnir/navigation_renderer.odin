@@ -54,6 +54,7 @@ NavMeshColorMode :: enum u32 {
     Uniform = 1,      // Single color
     Height_Based = 2, // Color by height
     Random_Colors = 3, // Random color per polygon
+    Region_Colors = 4, // Color by connectivity region
 }
 
 NavMeshDebugMode :: enum u32 {
@@ -260,7 +261,8 @@ navmesh_renderer_build_from_recast :: proc(renderer: ^NavMeshRenderer, gpu_conte
             num_verts := mesh_info[3]
 
             area_id := poly_mesh.areas[i] if len(poly_mesh.areas) > int(i) else 1
-            area_color := get_area_color(area_id, renderer.color_mode, renderer.base_color, renderer.alpha, u32(i))
+            region_id := poly_mesh.regs[i] if len(poly_mesh.regs) > int(i) else 0
+            area_color := get_area_color(area_id, renderer.color_mode, renderer.base_color, renderer.alpha, u32(i), region_id)
 
             // Add triangles from detail mesh
             for j in 0..<int(num_tris) {
@@ -360,8 +362,11 @@ navmesh_renderer_build_from_recast :: proc(renderer: ^NavMeshRenderer, gpu_conte
                 }
             }        }
 
-        // Get area color (pass polygon index for random colors)
-        area_color := get_area_color(area_id, renderer.color_mode, renderer.base_color, renderer.alpha, u32(i))
+        // Get region for connectivity coloring
+        region_id := poly_mesh.regs[i] if len(poly_mesh.regs) > int(i) else 0
+        
+        // Get area color (pass polygon index for random colors and region for connectivity)
+        area_color := get_area_color(area_id, renderer.color_mode, renderer.base_color, renderer.alpha, u32(i), region_id)
 
         // Debug: Show polygon position for debugging
         if i == 0 {
@@ -493,7 +498,7 @@ generate_random_color :: proc(seed: u32, alpha: f32) -> [4]f32 {
 }
 
 // Get color for area type
-get_area_color :: proc(area_id: u8, color_mode: NavMeshColorMode, base_color: [3]f32, alpha: f32, poly_id: u32 = 0) -> [4]f32 {
+get_area_color :: proc(area_id: u8, color_mode: NavMeshColorMode, base_color: [3]f32, alpha: f32, poly_id: u32 = 0, region_id: u16 = 0) -> [4]f32 {
     switch color_mode {
     case .Area_Colors:
         if int(area_id) < len(AREA_COLORS) {
@@ -515,6 +520,11 @@ get_area_color :: proc(area_id: u8, color_mode: NavMeshColorMode, base_color: [3
     case .Random_Colors:
         // Generate deterministic random color based on polygon ID
         return generate_random_color(poly_id, alpha)
+        
+    case .Region_Colors:
+        // Generate distinct colors for different regions
+        // Use region_id to generate a unique color for each connected region
+        return generate_random_color(u32(region_id), alpha)
     }
 
     return {base_color.x, base_color.y, base_color.z, alpha}

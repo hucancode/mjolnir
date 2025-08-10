@@ -45,22 +45,35 @@ create_nav_mesh_data :: proc(params: ^Create_Nav_Mesh_Data_Params) -> ([]u8, nav
     total_poly_count += pmesh.npolys
 
     // Calculate maximum link count per polygon
+    edge_count := i32(0)
+    portal_count := i32(0)
+    
     for i in 0..<pmesh.npolys {
         poly_base := i * nvp * 2
         for j in 0..<nvp {
             if pmesh.polys[poly_base + j] == nav_recast.RC_MESH_NULL_IDX {
                 break
             }
+            edge_count += 1  // Count all edges for internal connections
+            
+            // Count portal edges (external connections)
             if pmesh.polys[poly_base + nvp + j] & 0x8000 != 0 {
-                max_link_count += 1
+                dir := pmesh.polys[poly_base + nvp + j] & 0xf
+                if dir != 0xf {
+                    portal_count += 1
+                }
             }
         }
     }
+    
+    // maxLinkCount = all edges + portal edges*2 (bidirectional)
+    max_link_count = edge_count + portal_count * 2
 
     // Off-mesh connections
+    off_mesh_con_link_count := params.off_mesh_con_count * 2
     total_vert_count += params.off_mesh_con_count * 2
     total_poly_count += params.off_mesh_con_count
-    max_link_count += params.off_mesh_con_count * 2
+    max_link_count += off_mesh_con_link_count
 
     // Detail mesh triangles and vertices
     detail_mesh_count := i32(0)

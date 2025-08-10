@@ -90,7 +90,7 @@ PickingMode :: enum {
 navmesh_setup :: proc(engine: ^mjolnir.Engine) {
     using mjolnir, geometry
     log.info("Navigation mesh example setup")
-    
+
     // Initialize dynamic arrays
     navmesh_state.path_points = make([dynamic][3]f32)
     navmesh_state.path_waypoint_handles = make([dynamic]Handle)
@@ -118,7 +118,7 @@ navmesh_setup :: proc(engine: ^mjolnir.Engine) {
 
     // Start in picking mode
     navmesh_state.picking_mode = .PickingStart
-    
+
     // Only test pathfinding at startup if using procedural geometry
     if use_procedural {
         log.info("=== TESTING PATHFINDING AT STARTUP ===")
@@ -126,14 +126,14 @@ navmesh_setup :: proc(engine: ^mjolnir.Engine) {
         log.info("Note: Ground is 50x50 (-25 to 25), with 5 obstacles well-spaced")
         navmesh_state.start_pos = {-20, 0, -20}
         navmesh_state.end_pos = {20, 0, 20}
-        log.infof("Start: (%.2f, %.2f, %.2f), End: (%.2f, %.2f, %.2f)", 
+        log.infof("Start: (%.2f, %.2f, %.2f), End: (%.2f, %.2f, %.2f)",
             navmesh_state.start_pos.x, navmesh_state.start_pos.y, navmesh_state.start_pos.z,
             navmesh_state.end_pos.x, navmesh_state.end_pos.y, navmesh_state.end_pos.z)
-        
+
         // Find and visualize the path
         find_path(engine)
         update_path_visualization(engine)
-        
+
         log.info("=== END OF STARTUP PATHFINDING TEST ===")
     }
 }
@@ -169,7 +169,7 @@ build_navmesh :: proc(engine: ^mjolnir.Engine) -> (use_procedural: bool) {
 
     // Check if we should use procedural geometry
     use_procedural = obj_file == "" || obj_file == "procedural"
-    
+
     if !use_procedural && os.exists(obj_file) {
         log.infof("Loading navigation mesh from OBJ file: %s", obj_file)
         vertices, indices, areas, load_ok = navigation.load_obj_to_navmesh_input(obj_file, 1.0, recast.RC_WALKABLE_AREA)
@@ -207,7 +207,7 @@ build_navmesh :: proc(engine: ^mjolnir.Engine) -> (use_procedural: bool) {
             // Top face (y=3)
             {-11, 3, -11}, {-9, 3, -11}, {-9, 3, -9}, {-11, 3, -9},
         }
-        
+
         // Obstacle 2: Small box at (10, 0, -10) - reduced from 4x4 to 2x2
         obstacle2_verts := [][3]f32{
             // Bottom face (y=0)
@@ -215,7 +215,7 @@ build_navmesh :: proc(engine: ^mjolnir.Engine) -> (use_procedural: bool) {
             // Top face (y=3)
             {9, 3, -11}, {11, 3, -11}, {11, 3, -9}, {9, 3, -9},
         }
-        
+
         // Obstacle 3: Small box at (-10, 0, 10) - reduced from 4x4 to 2x2
         obstacle3_verts := [][3]f32{
             // Bottom face (y=0)
@@ -223,7 +223,7 @@ build_navmesh :: proc(engine: ^mjolnir.Engine) -> (use_procedural: bool) {
             // Top face (y=3)
             {-11, 3, 9}, {-9, 3, 9}, {-9, 3, 11}, {-11, 3, 11},
         }
-        
+
         // Obstacle 4: Small box at (10, 0, 10) - reduced from 4x4 to 2x2
         obstacle4_verts := [][3]f32{
             // Bottom face (y=0)
@@ -231,7 +231,7 @@ build_navmesh :: proc(engine: ^mjolnir.Engine) -> (use_procedural: bool) {
             // Top face (y=3)
             {9, 3, 9}, {11, 3, 9}, {11, 3, 11}, {9, 3, 11},
         }
-        
+
         // Obstacle 5: Central obstacle at (0, 0, 0) - reduced from 6x6 to 4x4
         obstacle5_verts := [][3]f32{
             // Bottom face (y=0)
@@ -239,12 +239,12 @@ build_navmesh :: proc(engine: ^mjolnir.Engine) -> (use_procedural: bool) {
             // Top face (y=4)
             {-2, 4, -2}, {2, 4, -2}, {2, 4, 2}, {-2, 4, 2},
         }
-        
+
         log.info("Created larger ground (50x50) with 5 well-spaced obstacles")
         log.info("Obstacles at: (-10,-10), (10,-10), (-10,10), (10,10), and center")
 
         // Combine vertices
-        total_verts := len(ground_verts) + len(obstacle1_verts) + len(obstacle2_verts) + 
+        total_verts := len(ground_verts) + len(obstacle1_verts) + len(obstacle2_verts) +
                       len(obstacle3_verts) + len(obstacle4_verts) + len(obstacle5_verts)
         vertices = make([][3]f32, total_verts)
         offset := 0
@@ -295,25 +295,25 @@ build_navmesh :: proc(engine: ^mjolnir.Engine) -> (use_procedural: bool) {
         obstacle1_base := i32(len(ground_verts))
         obstacle1_indices := create_box_indices(obstacle1_base)
         defer delete(obstacle1_indices)
-        
+
         obstacle2_base := obstacle1_base + i32(len(obstacle1_verts))
         obstacle2_indices := create_box_indices(obstacle2_base)
         defer delete(obstacle2_indices)
-        
+
         obstacle3_base := obstacle2_base + i32(len(obstacle2_verts))
         obstacle3_indices := create_box_indices(obstacle3_base)
         defer delete(obstacle3_indices)
-        
+
         obstacle4_base := obstacle3_base + i32(len(obstacle3_verts))
         obstacle4_indices := create_box_indices(obstacle4_base)
         defer delete(obstacle4_indices)
-        
+
         obstacle5_base := obstacle4_base + i32(len(obstacle4_verts))
         obstacle5_indices := create_box_indices(obstacle5_base)
         defer delete(obstacle5_indices)
 
         // Combine indices
-        total_indices := len(ground_indices) + len(obstacle1_indices) + len(obstacle2_indices) + 
+        total_indices := len(ground_indices) + len(obstacle1_indices) + len(obstacle2_indices) +
                         len(obstacle3_indices) + len(obstacle4_indices) + len(obstacle5_indices)
         indices = make([]i32, total_indices)
         offset = 0
@@ -331,8 +331,8 @@ build_navmesh :: proc(engine: ^mjolnir.Engine) -> (use_procedural: bool) {
 
         // Create areas
         num_ground_tris := len(ground_indices) / 3
-        num_obstacle_tris := (len(obstacle1_indices) + len(obstacle2_indices) + 
-                             len(obstacle3_indices) + len(obstacle4_indices) + 
+        num_obstacle_tris := (len(obstacle1_indices) + len(obstacle2_indices) +
+                             len(obstacle3_indices) + len(obstacle4_indices) +
                              len(obstacle5_indices)) / 3
         total_tris := num_ground_tris + num_obstacle_tris
         areas = make([]u8, total_tris)
@@ -344,7 +344,7 @@ build_navmesh :: proc(engine: ^mjolnir.Engine) -> (use_procedural: bool) {
         for i in num_ground_tris..<total_tris {
             areas[i] = recast.RC_NULL_AREA
         }
-        
+
         log.infof("Scene geometry: %d vertices, %d triangles", len(vertices), len(indices)/3)
         log.infof("Areas array length: %d", len(areas))
         log.infof("Walkable areas: %d, Non-walkable areas: %d", num_ground_tris, num_obstacle_tris)
@@ -360,14 +360,14 @@ build_navmesh :: proc(engine: ^mjolnir.Engine) -> (use_procedural: bool) {
         walkable_slope_angle = 45,                      // Max slope (RecastDemo default)
         walkable_height = i32(math.ceil_f32(2.0 / 0.2)),    // Agent height = 2.0m -> 10 cells
         walkable_climb = i32(math.floor_f32(0.9 / 0.2)),    // Agent max climb = 0.9m -> 4 cells
-        walkable_radius = i32(math.ceil_f32(0.6 / 0.3)),    // Agent radius = 0.6m -> 2 cells
+        walkable_radius = i32(math.ceil_f32(0.6 / 0.3)),    // Agent radius = 0.6m -> 2 cells (RecastDemo default)
         max_edge_len = i32(12.0 / 0.3),                 // Max edge length = 12m -> 40 cells
         max_simplification_error = 1.3,                 // RecastDemo default
-        min_region_area = 64,                           // RecastDemo default (8*8)
-        merge_region_area = 400,                        // RecastDemo default (20*20)
+        min_region_area = 8 * 8,                        // RecastDemo default (m_regionMinSize=8)
+        merge_region_area = 20 * 20,                    // RecastDemo default (m_regionMergeSize=20)
         max_verts_per_poly = 6,                         // RecastDemo default
-        detail_sample_dist = 0.3 * 6.0,                 // RecastDemo default (cs * 6)
-        detail_sample_max_error = 0.2 * 1.0,            // RecastDemo default (ch * 1)
+        detail_sample_dist = 6.0 * 0.3,                 // RecastDemo default (m_detailSampleDist=6 * cs)
+        detail_sample_max_error = 1.0 * 0.2,            // RecastDemo default (m_detailSampleMaxError=1 * ch)
         border_size = 0,                                 // No border padding
     }
 
@@ -387,7 +387,7 @@ build_navmesh :: proc(engine: ^mjolnir.Engine) -> (use_procedural: bool) {
     log.infof("Poly mesh bounds: min=(%.2f, %.2f, %.2f) max=(%.2f, %.2f, %.2f)",
               pmesh.bmin.x, pmesh.bmin.y, pmesh.bmin.z,
               pmesh.bmax.x, pmesh.bmax.y, pmesh.bmax.z)
-    
+
     // Check for region connectivity
     if pmesh.npolys > 0 {
         log.info("Checking polygon regions...")
@@ -403,6 +403,23 @@ build_navmesh :: proc(engine: ^mjolnir.Engine) -> (use_procedural: bool) {
         }
         if len(regions) > 1 {
             log.warn("Multiple disconnected regions detected! This will cause pathfinding failures between regions.")
+        }
+
+        // Write region information to file for comparison with C++
+        if file, err := os.open("odin_regions_output.txt", os.O_CREATE | os.O_WRONLY | os.O_TRUNC); err == 0 {
+            defer os.close(file)
+            os.write_string(file, fmt.tprintf("=== ODIN REGION ANALYSIS ===\n"))
+            os.write_string(file, fmt.tprintf("Navigation mesh has %d polygons\n", pmesh.npolys))
+            os.write_string(file, fmt.tprintf("Found %d distinct regions in Recast PolyMesh:\n", len(regions)))
+            for region_id, count in regions {
+                os.write_string(file, fmt.tprintf("  Region %d: %d polygons\n", region_id, count))
+            }
+            os.write_string(file, fmt.tprintf("\nDetailed polygon info:\n"))
+            for i in 0..<min(10, pmesh.npolys) {  // First 10 polygons
+                os.write_string(file, fmt.tprintf("  Poly %d: region=%d, area=%d\n",
+                    i, pmesh.regs[i], pmesh.areas[i]))
+            }
+            log.info("Wrote region analysis to odin_regions_output.txt")
         }
     }
 
@@ -437,6 +454,10 @@ build_navmesh :: proc(engine: ^mjolnir.Engine) -> (use_procedural: bool) {
     // Log nav mesh info
     log.infof("Detour nav mesh created successfully")
 
+    // Analyze connectivity from Detour perspective
+    analyze_detour_connectivity(nav_mesh)
+    analyze_detailed_connections(nav_mesh)
+
     // Create navigation query
     nav_query := new(detour.Nav_Mesh_Query)
     query_status := detour.nav_mesh_query_init(nav_query, nav_mesh, 2048)
@@ -451,7 +472,7 @@ build_navmesh :: proc(engine: ^mjolnir.Engine) -> (use_procedural: bool) {
 
     // Start in picking mode
     navmesh_state.picking_mode = .PickingStart
-    
+
     return use_procedural
 }
 
@@ -578,7 +599,7 @@ find_path :: proc(engine: ^mjolnir.Engine) {
         for i in 0..<poly_count {
             log.infof("  Poly %d: ref=%d", i, poly_path[i])
         }
-        
+
         // Check if path is valid - if we only have 1 polygon but start and end are in different polygons, the path is invalid
         if poly_count == 1 && start_ref != end_ref {
             log.errorf("Invalid path: only 1 polygon in path but start (%d) and end (%d) are in different polygons!", start_ref, end_ref)
@@ -597,7 +618,7 @@ find_path :: proc(engine: ^mjolnir.Engine) {
                                                    end_nearest,
                                                    &navmesh_state.filter,
                                                    path_buffer)
-    
+
     // Also get the polygon centroids for comparison
     log.info("Polygon path centroids (without funnel simplification):")
     for i in 0..<poly_count {
@@ -629,10 +650,10 @@ find_path :: proc(engine: ^mjolnir.Engine) {
             // Obstacle 3: (-11,9) to (-9,11)
             // Obstacle 4: (9,9) to (11,11)
             // Obstacle 5 (center): (-2,-2) to (2,2)
-            
+
             inside_obstacle := false
             obstacle_name := ""
-            
+
             if point.x >= -11 && point.x <= -9 && point.z >= -11 && point.z <= -9 && point.y <= 3 {
                 inside_obstacle = true
                 obstacle_name = "Obstacle 1 (bottom-left)"
@@ -649,7 +670,7 @@ find_path :: proc(engine: ^mjolnir.Engine) {
                 inside_obstacle = true
                 obstacle_name = "Obstacle 5 (center)"
             }
-            
+
             if inside_obstacle {
                 log.warnf("    WARNING: Waypoint %d is INSIDE %s!", idx, obstacle_name)
                 log.warnf("    Point: (%.2f, %.2f, %.2f)", point.x, point.y, point.z)
@@ -664,7 +685,7 @@ find_path :: proc(engine: ^mjolnir.Engine) {
             segment_length := linalg.distance(p0, p1)
             total_length += segment_length
             log.infof("  Segment %d->%d length: %.2f", i, i+1, segment_length)
-            
+
             // Check if segment crosses any obstacle in X-Z plane
             // Check center obstacle (-3,-3) to (3,3)
             if ((p0.x < -3 && p1.x > 3) || (p0.x > 3 && p1.x < -3)) &&
@@ -684,7 +705,7 @@ find_path :: proc(engine: ^mjolnir.Engine) {
                   straight_distance, (total_length/straight_distance - 1) * 100)
     } else {
         log.errorf("Failed to find path. Status: %v, Path count: %d", status, path_count)
-        log.errorf("Start pos: (%.2f, %.2f, %.2f), End pos: (%.2f, %.2f, %.2f)", 
+        log.errorf("Start pos: (%.2f, %.2f, %.2f), End pos: (%.2f, %.2f, %.2f)",
             navmesh_state.start_pos.x, navmesh_state.start_pos.y, navmesh_state.start_pos.z,
             navmesh_state.end_pos.x, navmesh_state.end_pos.y, navmesh_state.end_pos.z)
         log.errorf("Start ref: %d, End ref: %d", start_ref, end_ref)
@@ -784,14 +805,14 @@ ray_navmesh_intersection :: proc(engine: ^mjolnir.Engine, ray_origin, ray_dir: [
     if navmesh_state.nav_query == nil || navmesh_state.nav_mesh == nil {
         return {}, false
     }
-    
+
     // Cast ray far enough to hit any reasonable navmesh
     ray_end := ray_origin + ray_dir * 1000.0
-    
+
     // First, find the nearest polygon to the ray origin to start the raycast
     search_extents := [3]f32{50.0, 50.0, 50.0}  // Large search area
     status, start_ref, nearest_start := detour.find_nearest_poly(navmesh_state.nav_query, ray_origin, search_extents, &navmesh_state.filter)
-    
+
     if !recast.status_succeeded(status) || start_ref == recast.INVALID_POLY_REF {
         // If we can't find a starting polygon near the camera, try a ground-based approach
         // Project ray origin to a reasonable height range and search again
@@ -804,18 +825,18 @@ ray_navmesh_intersection :: proc(engine: ^mjolnir.Engine, ray_origin, ray_dir: [
                 break
             }
         }
-        
+
         if !recast.status_succeeded(status) || start_ref == recast.INVALID_POLY_REF {
             return {}, false
         }
     }
-    
+
     // Perform raycast on the navmesh
     path_buffer := make([]recast.Poly_Ref, 256)
     defer delete(path_buffer)
-    
+
     raycast_status, hit_info, _ := detour.raycast(navmesh_state.nav_query, start_ref, nearest_start, ray_end, &navmesh_state.filter, 0, path_buffer[:], 256)
-    
+
     if recast.status_succeeded(raycast_status) {
         if hit_info.t < 1.0 {
             // Hit something
@@ -825,7 +846,7 @@ ray_navmesh_intersection :: proc(engine: ^mjolnir.Engine, ray_origin, ray_dir: [
             // Ray reached the end without hitting anything
             // This means the navmesh is along the ray path
             // Find the closest point on the navmesh to the ray
-            
+
             // Simple approach: sample points along the ray and find nearest navmesh point
             t_values := [9]f32{0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9}
             for t in t_values {
@@ -837,7 +858,7 @@ ray_navmesh_intersection :: proc(engine: ^mjolnir.Engine, ray_origin, ray_dir: [
             }
         }
     }
-    
+
     return {}, false
 }
 
@@ -852,10 +873,10 @@ find_navmesh_point_from_mouse :: proc(engine: ^mjolnir.Engine, mouse_x, mouse_y:
 
     // For now, use simple approach - cast ray to ground plane and find nearest navmesh
     // The navmesh raycast is not working correctly yet
-    
+
     // Try different Y planes to handle navmeshes at various heights
     y_planes := [7]f32{0.0, 0.2, -0.2, 1.0, -1.0, 2.0, -2.0}
-    
+
     for y_plane in y_planes {
         if abs(ray_dir.y) > 0.001 {
             t := (y_plane - ray_origin.y) / ray_dir.y
@@ -870,7 +891,7 @@ find_navmesh_point_from_mouse :: proc(engine: ^mjolnir.Engine, mouse_x, mouse_y:
             }
         }
     }
-    
+
     return {}, false
 }
 
@@ -886,7 +907,7 @@ navmesh_mouse_moved :: proc(engine: ^mjolnir.Engine, pos, delta: [2]f64) {
     if mouse_delta < navmesh_state.mouse_move_threshold {
         return
     }
-    
+
     // Update last mouse position
     navmesh_state.last_mouse_pos = {f32(pos.x), f32(pos.y)}
 
@@ -1005,6 +1026,28 @@ navmesh_render2d :: proc(engine: ^mjolnir.Engine, ctx: ^mu.Context) {
             engine.navmesh.alpha = alpha
             mu.label(ctx, fmt.tprintf("Alpha: %.2f", alpha))
 
+            // Color mode selection
+            mu.label(ctx, "")
+            mu.label(ctx, "Color Mode:")
+            color_mode_names := [?]string{
+                "Area Colors",
+                "Uniform",
+                "Height Based",
+                "Random Colors",
+                "Region Colors",
+            }
+            current_mode := int(engine.navmesh.color_mode)
+            for name, i in color_mode_names {
+                if i == current_mode {
+                    mu.label(ctx, fmt.tprintf("> %s", name))
+                } else {
+                    if .SUBMIT in mu.button(ctx, name) {
+                        engine.navmesh.color_mode = mjolnir.NavMeshColorMode(i)
+                        log.infof("Changed navmesh color mode to: %s", name)
+                    }
+                }
+            }
+
             // Camera control
             mu.label(ctx, "")
             mu.label(ctx, "Camera:")
@@ -1043,7 +1086,7 @@ navmesh_render2d :: proc(engine: ^mjolnir.Engine, ctx: ^mu.Context) {
             if .SUBMIT in mu.button(ctx, "Generate Random Path (P)") {
                 generate_new_path(engine)
             }
-            
+
             if navmesh_state.has_path {
                 if .SUBMIT in mu.button(ctx, "Clear Path (C)") {
                     clear(&navmesh_state.path_points)
@@ -1062,6 +1105,7 @@ navmesh_render2d :: proc(engine: ^mjolnir.Engine, ctx: ^mu.Context) {
             mu.label(ctx, "Right Click - Set End & Find Path")
             mu.label(ctx, "Middle Click - Toggle Auto Rotate")
             mu.label(ctx, "C - Clear Path")
+            mu.label(ctx, "D - Cycle Color Modes")
             mu.label(ctx, "P - Generate Random Path")
             mu.label(ctx, "R - Rebuild NavMesh")
             mu.label(ctx, "V - Toggle NavMesh")
@@ -1116,6 +1160,14 @@ navmesh_key_pressed :: proc(engine: ^mjolnir.Engine, key, action, mods: int) {
         navmesh_renderer_clear_path(&engine.navmesh)
         log.info("Path cleared")
 
+    case glfw.KEY_D:
+        // Cycle through color modes with D key (Debug colors)
+        current_mode := int(engine.navmesh.color_mode)
+        current_mode = (current_mode + 1) % 5  // We have 5 color modes now
+        engine.navmesh.color_mode = mjolnir.NavMeshColorMode(current_mode)
+        mode_names := [5]string{"Area Colors", "Uniform", "Height Based", "Random Colors", "Region Colors"}
+        log.infof("NavMesh color mode changed to: %s", mode_names[current_mode])
+
     case glfw.KEY_P:
         // Generate new path
         if navmesh_state.navmesh_built {
@@ -1133,5 +1185,259 @@ navmesh_key_pressed :: proc(engine: ^mjolnir.Engine, key, action, mods: int) {
         } else {
             log.warn("Build navigation mesh first (press R)")
         }
+    }
+}
+
+// Analyze connectivity from Detour's perspective
+analyze_detour_connectivity :: proc(nav_mesh: ^detour.Nav_Mesh) {
+    using detour
+
+    // Get the first tile (solo mesh)
+    tile := get_tile_at(nav_mesh, 0, 0, 0)
+    if tile == nil || tile.header == nil {
+        log.error("Failed to get nav mesh tile")
+        return
+    }
+
+    log.infof("Detour tile has %d polygons", tile.header.poly_count)
+
+    // Build connectivity graph using BFS
+    visited := make([]bool, tile.header.poly_count)
+    defer delete(visited)
+    components := make([dynamic]int)
+    defer delete(components)
+
+    for start_poly in 0..<tile.header.poly_count {
+        if visited[start_poly] do continue
+
+        // Start a new component
+        component_size := 0
+        stack := make([dynamic]int)
+        defer delete(stack)
+        append(&stack, int(start_poly))
+
+        for len(stack) > 0 {
+            current := pop(&stack)
+            if visited[current] do continue
+            visited[current] = true
+            component_size += 1
+
+            // Check all neighbors
+            poly := &tile.polys[current]
+            for i in 0..<poly.vert_count {
+                // Check neighbor through edge
+                if poly.neis[i] != 0 {
+                    // Internal edge - neighbor within same tile
+                    if poly.neis[i] < 0x8000 {
+                        neighbor_idx := int(poly.neis[i] - 1)  // Convert to 0-based
+                        if neighbor_idx >= 0 && neighbor_idx < int(tile.header.poly_count) && !visited[neighbor_idx] {
+                            append(&stack, neighbor_idx)
+                        }
+                    }
+                }
+
+                // Also check through links
+                link_idx := poly.first_link
+                for link_idx != recast.DT_NULL_LINK {
+                    link := &tile.links[link_idx]
+                    if link.ref != 0 {
+                        // Extract polygon index from reference
+                        poly_idx := int(link.ref & 0xFFFF)  // Mask to get poly ID
+                        if poly_idx < int(tile.header.poly_count) && !visited[poly_idx] {
+                            append(&stack, poly_idx)
+                        }
+                    }
+                    link_idx = link.next
+                }
+            }
+        }
+
+        append(&components, component_size)
+    }
+
+    log.infof("Found %d connected components in Detour NavMesh:", len(components))
+    for i, size in components {
+        log.infof("  Component %d: %d polygons", i, size)
+    }
+
+    // Test pathfinding between corners
+    test_corner_connectivity(nav_mesh)
+
+    // Write to file
+    if file, err := os.open("odin_detour_connectivity.txt", os.O_CREATE | os.O_WRONLY | os.O_TRUNC); err == 0 {
+        defer os.close(file)
+        os.write_string(file, fmt.tprintf("=== ODIN DETOUR CONNECTIVITY ===\n"))
+        os.write_string(file, fmt.tprintf("Tile has %d polygons\n", tile.header.poly_count))
+        os.write_string(file, fmt.tprintf("Found %d connected components:\n", len(components)))
+        for i, size in components {
+            os.write_string(file, fmt.tprintf("  Component %d: %d polygons\n", i, size))
+        }
+        log.info("Wrote Detour connectivity analysis to odin_detour_connectivity.txt")
+    }
+}
+
+// Test pathfinding between corners to check connectivity
+test_corner_connectivity :: proc(nav_mesh: ^detour.Nav_Mesh) {
+    using detour
+
+    // Create navigation query
+    nav_query := new(Nav_Mesh_Query)
+    defer free(nav_query)
+
+    query_status := nav_mesh_query_init(nav_query, nav_mesh, 2048)
+    if recast.status_failed(query_status) {
+        log.error("Failed to create navigation query for corner test")
+        return
+    }
+
+    // Initialize filter
+    filter: Query_Filter
+    query_filter_init(&filter)
+
+    // Test corners
+    test_points := [][3]f32{
+        {-20.0, 0.0, -20.0},  // Bottom-left
+        {20.0, 0.0, -20.0},   // Bottom-right
+        {-20.0, 0.0, 20.0},   // Top-left
+        {20.0, 0.0, 20.0},    // Top-right
+    }
+
+    names := []string{"Bottom-left", "Bottom-right", "Top-left", "Top-right"}
+
+    extents := [3]f32{5.0, 5.0, 5.0}
+    refs: [4]recast.Poly_Ref
+    nearest: [4][3]f32
+
+    // Find nearest polygons for each test point
+    for i in 0..<4 {
+        status, ref, pt := find_nearest_poly(nav_query, test_points[i], extents, &filter)
+        refs[i] = ref
+        nearest[i] = pt
+        if recast.status_succeeded(status) && refs[i] != 0 {
+            log.infof("%s: Found poly 0x%x at (%.1f, %.1f, %.1f)",
+                names[i], refs[i], nearest[i][0], nearest[i][1], nearest[i][2])
+        } else {
+            log.warnf("%s: Failed to find nearest poly", names[i])
+            refs[i] = 0
+        }
+    }
+
+    // Test paths between all pairs
+    log.info("Path connectivity matrix:")
+    log.info("        BL    BR    TL    TR")
+    for i in 0..<4 {
+        fmt.printf("%s: ", names[i])
+        for j in 0..<4 {
+            if i == j {
+                fmt.printf("  -   ")
+            } else if refs[i] != 0 && refs[j] != 0 {
+                path: [256]recast.Poly_Ref
+                status, pc := find_path(nav_query, refs[i], refs[j], nearest[i], nearest[j],
+                                  &filter, path[:], 256)
+                if recast.status_succeeded(status) && pc > 1 {
+                    fmt.printf(" YES  ")
+                } else {
+                    fmt.printf(" NO   ")
+                }
+            } else {
+                fmt.printf(" N/A  ")
+            }
+        }
+        fmt.println()
+    }
+}
+
+// Analyze detailed polygon connections
+analyze_detailed_connections :: proc(nav_mesh: ^detour.Nav_Mesh) {
+    using detour
+
+    log.info("=== DETAILED CONNECTION ANALYSIS ===")
+
+    // Get the first tile (solo mesh)
+    tile := get_tile_at(nav_mesh, 0, 0, 0)
+    if tile == nil || tile.header == nil {
+        log.error("Failed to get nav mesh tile")
+        return
+    }
+
+    log.infof("Analyzing connections for %d polygons", tile.header.poly_count)
+
+    // Analyze first 10 polygons in detail
+    for i in 0..<min(10, int(tile.header.poly_count)) {
+        poly := &tile.polys[i]
+        log.infof("\nPolygon %d (ref=0x%x):", i, get_poly_ref_base(nav_mesh, tile) | recast.Poly_Ref(i))
+        log.infof("  Vertex count: %d", poly.vert_count)
+
+        // Show vertices
+        fmt.printf("  Vertices: ")
+        for v in 0..<poly.vert_count {
+            fmt.printf("%d ", poly.verts[v])
+        }
+        fmt.println()
+
+        // Show edge neighbors
+        fmt.printf("  Edge neighbors: ")
+        for e in 0..<poly.vert_count {
+            if poly.neis[e] != 0 {
+                if poly.neis[e] & 0x8000 != 0 {
+                    // External link
+                    fmt.printf("[%d]=EXT(0x%x) ", e, poly.neis[e])
+                } else {
+                    // Internal neighbor
+                    neighbor_idx := int(poly.neis[e] - 1)
+                    fmt.printf("[%d]=%d ", e, neighbor_idx)
+                }
+            } else {
+                fmt.printf("[%d]=WALL ", e)
+            }
+        }
+        fmt.println()
+
+        // Count links
+        link_count := 0
+        link_idx := poly.first_link
+        for link_idx != recast.DT_NULL_LINK {
+            link_count += 1
+            link := &tile.links[link_idx]
+            link_idx = link.next
+        }
+        log.infof("  Link count: %d", link_count)
+
+        if link_count > 0 {
+            fmt.printf("  Links: ")
+            link_idx = poly.first_link
+            for link_idx != recast.DT_NULL_LINK {
+                link := &tile.links[link_idx]
+                fmt.printf("(edge=%d,ref=0x%x) ", link.edge, link.ref)
+                link_idx = link.next
+            }
+            fmt.println()
+        }
+    }
+
+    // Write to file for comparison
+    if file, err := os.open("odin_connections.txt", os.O_CREATE | os.O_WRONLY | os.O_TRUNC); err == 0 {
+        defer os.close(file)
+        os.write_string(file, "=== ODIN POLYGON CONNECTIONS ===\n")
+        os.write_string(file, fmt.tprintf("Total polygons: %d\n\n", tile.header.poly_count))
+
+        for i in 0..<tile.header.poly_count {
+            poly := &tile.polys[i]
+            os.write_string(file, fmt.tprintf("Poly %d: verts=%d, neis=[", i, poly.vert_count))
+
+            for e in 0..<poly.vert_count {
+                if e > 0 do os.write_string(file, ",")
+                if poly.neis[e] == 0 {
+                    os.write_string(file, "WALL")
+                } else if poly.neis[e] & 0x8000 != 0 {
+                    os.write_string(file, "EXT")
+                } else {
+                    os.write_string(file, fmt.tprintf("%d", poly.neis[e] - 1))
+                }
+            }
+            os.write_string(file, fmt.tprintf("], firstLink=%d\n", poly.first_link))
+        }
+
+        log.info("Wrote connection details to odin_connections.txt")
     }
 }
