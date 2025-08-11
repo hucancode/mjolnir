@@ -403,23 +403,6 @@ build_navmesh :: proc(engine: ^mjolnir.Engine) -> (use_procedural: bool) {
         if len(regions) > 1 {
             log.warn("Multiple disconnected regions detected! This will cause pathfinding failures between regions.")
         }
-
-        // Write region information to file for comparison with C++
-        if file, err := os.open("odin_regions_output.txt", os.O_CREATE | os.O_WRONLY | os.O_TRUNC); err == 0 {
-            defer os.close(file)
-            os.write_string(file, fmt.tprintf("=== ODIN REGION ANALYSIS ===\n"))
-            os.write_string(file, fmt.tprintf("Navigation mesh has %d polygons\n", pmesh.npolys))
-            os.write_string(file, fmt.tprintf("Found %d distinct regions in Recast PolyMesh:\n", len(regions)))
-            for region_id, count in regions {
-                os.write_string(file, fmt.tprintf("  Region %d: %d polygons\n", region_id, count))
-            }
-            os.write_string(file, fmt.tprintf("\nDetailed polygon info:\n"))
-            for i in 0..<min(10, pmesh.npolys) {  // First 10 polygons
-                os.write_string(file, fmt.tprintf("  Poly %d: region=%d, area=%d\n",
-                    i, pmesh.regs[i], pmesh.areas[i]))
-            }
-            log.info("Wrote region analysis to odin_regions_output.txt")
-        }
     }
 
     // Create visualization
@@ -1270,18 +1253,6 @@ analyze_detour_connectivity :: proc(nav_mesh: ^detour.Nav_Mesh) {
 
     // Test pathfinding between corners
     test_corner_connectivity(nav_mesh)
-
-    // Write to file
-    if file, err := os.open("odin_detour_connectivity.txt", os.O_CREATE | os.O_WRONLY | os.O_TRUNC); err == 0 {
-        defer os.close(file)
-        os.write_string(file, fmt.tprintf("=== ODIN DETOUR CONNECTIVITY ===\n"))
-        os.write_string(file, fmt.tprintf("Tile has %d polygons\n", tile.header.poly_count))
-        os.write_string(file, fmt.tprintf("Found %d connected components:\n", len(components)))
-        for i, size in components {
-            os.write_string(file, fmt.tprintf("  Component %d: %d polygons\n", i, size))
-        }
-        log.info("Wrote Detour connectivity analysis to odin_detour_connectivity.txt")
-    }
 }
 
 // Test pathfinding between corners to check connectivity
@@ -1421,31 +1392,5 @@ analyze_detailed_connections :: proc(nav_mesh: ^detour.Nav_Mesh) {
             }
             fmt.println()
         }
-    }
-
-    // Write to file for comparison
-    if file, err := os.open("odin_connections.txt", os.O_CREATE | os.O_WRONLY | os.O_TRUNC); err == 0 {
-        defer os.close(file)
-        os.write_string(file, "=== ODIN POLYGON CONNECTIONS ===\n")
-        os.write_string(file, fmt.tprintf("Total polygons: %d\n\n", tile.header.poly_count))
-
-        for i in 0..<tile.header.poly_count {
-            poly := &tile.polys[i]
-            os.write_string(file, fmt.tprintf("Poly %d: verts=%d, neis=[", i, poly.vert_count))
-
-            for e in 0..<poly.vert_count {
-                if e > 0 do os.write_string(file, ",")
-                if poly.neis[e] == 0 {
-                    os.write_string(file, "WALL")
-                } else if poly.neis[e] & 0x8000 != 0 {
-                    os.write_string(file, "EXT")
-                } else {
-                    os.write_string(file, fmt.tprintf("%d", poly.neis[e] - 1))
-                }
-            }
-            os.write_string(file, fmt.tprintf("], firstLink=%d\n", poly.first_link))
-        }
-
-        log.info("Wrote connection details to odin_connections.txt")
     }
 }
