@@ -49,8 +49,6 @@ main :: proc() {
       return
     }
   }
-  mjolnir.init(&engine, 1280, 720, "Mjolnir Demo")
-  defer mjolnir.deinit(&engine)
   engine.setup_proc = setup
   engine.update_proc = update
   engine.render2d_proc = render_2d
