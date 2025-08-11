@@ -356,6 +356,9 @@ flood_region :: proc(x, y, i: i32, level, r: u16, chf: ^Compact_Heightfield,
                 continue
             }
             ai2 := i32(chf.cells[ax2 + ay2 * w].index) + i32(get_con(as, dir2))
+            if ai2 < 0 || ai2 >= chf.span_count {
+                continue
+            }
             if chf.areas[ai2] != area {
                 continue
             }
@@ -460,6 +463,9 @@ expand_regions :: proc(max_iter: i32, level: u16, chf: ^Compact_Heightfield,
                     continue
                 }
                 ai := i32(u32(chf.cells[ax + ay * w].index)) + i32(get_con(s, dir))
+                if ai < 0 || ai >= chf.span_count {
+                    continue
+                }
                 if chf.areas[ai] != area {
                     continue
                 }
@@ -706,7 +712,9 @@ is_solid_edge :: proc(chf: ^Compact_Heightfield, src_reg: []u16,
         ay := y + get_dir_offset_y(dir)
         if ax >= 0 && ay >= 0 && ax < chf.width && ay < chf.height {
             ai := i32(chf.cells[ax + ay * chf.width].index) + i32(get_con(s, dir))
-            r = src_reg[ai]
+            if ai >= 0 && ai < i32(len(src_reg)) {
+                r = src_reg[ai]
+            }
         }
     }
     if r == src_reg[i] {
@@ -731,7 +739,9 @@ walk_contour_for_region :: proc(x_in, y_in, i_in: i32, dir_in: int, chf: ^Compac
         ay := y + get_dir_offset_y(dir)
         if ax >= 0 && ay >= 0 && ax < chf.width && ay < chf.height {
             ai := i32(chf.cells[ax + ay * chf.width].index) + i32(get_con(ss, dir))
-            cur_reg = src_reg[ai]
+            if ai >= 0 && ai < i32(len(src_reg)) {
+                cur_reg = src_reg[ai]
+            }
         }
     }
     append(cont, i32(cur_reg))
@@ -750,7 +760,9 @@ walk_contour_for_region :: proc(x_in, y_in, i_in: i32, dir_in: int, chf: ^Compac
                 ay := y + get_dir_offset_y(dir)
                 if ax >= 0 && ay >= 0 && ax < chf.width && ay < chf.height {
                     ai := i32(chf.cells[ax + ay * chf.width].index) + i32(get_con(s, dir))
-                    r = src_reg[ai]
+                    if ai >= 0 && ai < i32(len(src_reg)) {
+                        r = src_reg[ai]
+                    }
                 }
             }
             if r != cur_reg {

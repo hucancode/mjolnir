@@ -366,8 +366,12 @@ build_contours :: proc(chf: ^Compact_Heightfield,
                     if get_con(s, dir) != RC_NOT_CONNECTED {
                         ax := x + get_dir_offset_x(dir)
                         ay := y + get_dir_offset_y(dir)
-                        ai := chf.cells[ax + ay * w].index + u32(get_con(s, dir))
-                        r = chf.spans[ai].reg
+                        if ax >= 0 && ay >= 0 && ax < w && ay < h {
+                            ai := chf.cells[ax + ay * w].index + u32(get_con(s, dir))
+                            if ai < u32(chf.span_count) {
+                                r = chf.spans[ai].reg
+                            }
+                        }
                     }
 
                     if r == s.reg {
@@ -619,6 +623,12 @@ walk_contour_boundary :: proc(x, y, i: i32, chf: ^Compact_Heightfield,
     for iter < 40000 {
         iter += 1
 
+        // Bounds check for current index
+        if curr_i < 0 || curr_i >= i32(chf.span_count) {
+            log.errorf("walk_contour_boundary: curr_i %d out of bounds [0, %d)", curr_i, chf.span_count)
+            return false
+        }
+
         if (flags[curr_i] & (1 << dir)) != 0 {
             // We can step in this direction - create vertex at edge corner
             is_border_vertex := false
@@ -684,6 +694,12 @@ walk_contour_boundary :: proc(x, y, i: i32, chf: ^Compact_Heightfield,
 
             if ni == -1 {
                 // Should not happen in valid heightfield - matches C++ behavior
+                return false
+            }
+            
+            // Bounds check the new index
+            if ni < 0 || ni >= i32(chf.span_count) {
+                log.errorf("walk_contour_boundary: ni %d out of bounds [0, %d)", ni, chf.span_count)
                 return false
             }
 
@@ -1237,6 +1253,14 @@ simplify_contour :: proc(raw_verts: [][4]i32, simplified: ^[dynamic][4]i32, max_
 
     if len(raw_verts) < 3 { // Need at least 3 vertices
         // Too few vertices to simplify
+        for v in raw_verts {
+            append(simplified, v)
+        }
+        return
+    }
+
+    // If no simplification requested, copy all vertices
+    if max_error <= 0.0 {
         for v in raw_verts {
             append(simplified, v)
         }
