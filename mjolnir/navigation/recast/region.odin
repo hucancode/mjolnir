@@ -786,18 +786,13 @@ walk_contour_for_region :: proc(x_in, y_in, i_in: i32, dir_in: int, chf: ^Compac
             break
         }
     }
-
-    // Remove adjacent duplicates
-    if len(cont) > 1 {
-        j := 0
-        for j < len(cont) {
-            nj := (j + 1) % len(cont)
-            if cont[j] == cont[nj] {
-                ordered_remove(cont, j)
-            } else {
-                j += 1
-            }
-        }
+    // remove consecutive duplicates
+    arr := slice.unique(cont[:])
+    // Check wrap-around: if last element equals first element (circular case)
+    if len(arr) > 1 && arr[len(arr)-1] == arr[0] {
+        resize(cont, len(arr)-1)
+    } else {
+        resize(cont, len(arr))
     }
 }
 
