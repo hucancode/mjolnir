@@ -28,15 +28,24 @@ erode_walkable_area :: proc(radius: i32, chf: ^Compact_Heightfield) -> bool {
                 s := &chf.spans[i]
                 nc := 0
                 for dir in 0..<4 {
-                    if get_con(s, dir) != RC_NOT_CONNECTED {
-                        nx := x + get_dir_offset_x(dir)
-                        ny := y + get_dir_offset_y(dir)
-                        nc_cell := &chf.cells[nx + ny * w]
-                        ni := nc_cell.index + u32(get_con(s, dir))
-                        if chf.areas[ni] != RC_NULL_AREA {
-                            nc += 1
-                        }
+                    neighbor_con := get_con(s, dir)
+                    if neighbor_con == RC_NOT_CONNECTED {
+                        break // Early exit on disconnected neighbor
                     }
+                    
+                    nx := x + get_dir_offset_x(dir)
+                    ny := y + get_dir_offset_y(dir)
+                    // In a valid compact heightfield, if connection exists, neighbor must exist
+                    // But add bounds check for safety
+                    if nx < 0 || ny < 0 || nx >= w || ny >= h {
+                        break // Invalid neighbor position
+                    }
+                    nc_cell := &chf.cells[nx + ny * w]
+                    ni := nc_cell.index + u32(neighbor_con)
+                    if chf.areas[ni] == RC_NULL_AREA {
+                        break // Early exit on null area neighbor
+                    }
+                    nc += 1
                 }
                 // If not all 4 neighbors are walkable, this is a boundary cell
                 if nc != 4 {
@@ -55,52 +64,60 @@ erode_walkable_area :: proc(radius: i32, chf: ^Compact_Heightfield) -> bool {
             for i in c.index..<c.index + u32(c.count) {
                 s := &chf.spans[i]
                 
+                // Process direction 0: (-1,0)
                 if get_con(s, 0) != RC_NOT_CONNECTED {
-                    // (-1,0)
                     ax := int(x) + int(get_dir_offset_x(0))
                     ay := int(y) + int(get_dir_offset_y(0))
-                    ac := &chf.cells[ax + ay * int(w)]
-                    ai := ac.index + u32(get_con(s, 0))
-                    as := &chf.spans[ai]
-                    nd = min(dist[ai] + 2, 250)
-                    if nd < dist[i] {
-                        dist[i] = nd
-                    }
-                    
-                    // (-1,-1)
-                    if get_con(as, 3) != RC_NOT_CONNECTED {
-                        aax := ax + int(get_dir_offset_x(3))
-                        aay := ay + int(get_dir_offset_y(3))
-                        aac := &chf.cells[aax + aay * int(w)]
-                        aai := aac.index + u32(get_con(as, 3))
-                        nd = min(dist[aai] + 3, 250)
-                        if nd < dist[i] {
-                            dist[i] = nd
+                    if ax >= 0 && ay >= 0 && ax < int(w) && ay < int(h) {
+                        ac := &chf.cells[ax + ay * int(w)]
+                        ai := ac.index + u32(get_con(s, 0))
+                        if ai < u32(chf.span_count) {
+                            as := &chf.spans[ai]
+                            nd = min(dist[ai] + 2, 250)
+                            if nd < dist[i] do dist[i] = nd
+                            
+                            // Process diagonal (-1,-1)
+                            if get_con(as, 3) != RC_NOT_CONNECTED {
+                                aax := ax + int(get_dir_offset_x(3))
+                                aay := ay + int(get_dir_offset_y(3))
+                                if aax >= 0 && aay >= 0 && aax < int(w) && aay < int(h) {
+                                    aac := &chf.cells[aax + aay * int(w)]
+                                    aai := aac.index + u32(get_con(as, 3))
+                                    if aai < u32(chf.span_count) {
+                                        nd = min(dist[aai] + 3, 250)
+                                        if nd < dist[i] do dist[i] = nd
+                                    }
+                                }
+                            }
                         }
                     }
                 }
                 
+                // Process direction 3: (0,-1) - reuse variables
                 if get_con(s, 3) != RC_NOT_CONNECTED {
-                    // (0,-1)
                     ax := int(x) + int(get_dir_offset_x(3))
                     ay := int(y) + int(get_dir_offset_y(3))
-                    ac := &chf.cells[ax + ay * int(w)]
-                    ai := ac.index + u32(get_con(s, 3))
-                    as := &chf.spans[ai]
-                    nd = min(dist[ai] + 2, 250)
-                    if nd < dist[i] {
-                        dist[i] = nd
-                    }
-                    
-                    // (1,-1)
-                    if get_con(as, 2) != RC_NOT_CONNECTED {
-                        aax := ax + int(get_dir_offset_x(2))
-                        aay := ay + int(get_dir_offset_y(2))
-                        aac := &chf.cells[aax + aay * int(w)]
-                        aai := aac.index + u32(get_con(as, 2))
-                        nd = min(dist[aai] + 3, 250)
-                        if nd < dist[i] {
-                            dist[i] = nd
+                    if ax >= 0 && ay >= 0 && ax < int(w) && ay < int(h) {
+                        ac := &chf.cells[ax + ay * int(w)]
+                        ai := ac.index + u32(get_con(s, 3))
+                        if ai < u32(chf.span_count) {
+                            as := &chf.spans[ai]
+                            nd = min(dist[ai] + 2, 250)
+                            if nd < dist[i] do dist[i] = nd
+                            
+                            // Process diagonal (1,-1)
+                            if get_con(as, 2) != RC_NOT_CONNECTED {
+                                aax := ax + int(get_dir_offset_x(2))
+                                aay := ay + int(get_dir_offset_y(2))
+                                if aax >= 0 && aay >= 0 && aax < int(w) && aay < int(h) {
+                                    aac := &chf.cells[aax + aay * int(w)]
+                                    aai := aac.index + u32(get_con(as, 2))
+                                    if aai < u32(chf.span_count) {
+                                        nd = min(dist[aai] + 3, 250)
+                                        if nd < dist[i] do dist[i] = nd
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -114,49 +131,61 @@ erode_walkable_area :: proc(radius: i32, chf: ^Compact_Heightfield) -> bool {
             c := &chf.cells[x + y * w]
             for i in c.index..<c.index + u32(c.count) {
                 s := &chf.spans[i]
+                
+                // Process direction 2: (1,0)
                 if get_con(s, 2) != RC_NOT_CONNECTED {
-                    // (1,0)
                     ax := int(x) + int(get_dir_offset_x(2))
                     ay := int(y) + int(get_dir_offset_y(2))
-                    ac := &chf.cells[ax + ay * int(w)]
-                    ai := ac.index + u32(get_con(s, 2))
-                    as := &chf.spans[ai]
-                    nd = min(dist[ai] + 2, 250)
-                    if nd < dist[i] {
-                        dist[i] = nd
-                    }
-                    // (1,1)
-                    if get_con(as, 1) != RC_NOT_CONNECTED {
-                        aax := ax + int(get_dir_offset_x(1))
-                        aay := ay + int(get_dir_offset_y(1))
-                        aac := &chf.cells[aax + aay * int(w)]
-                        aai := aac.index + u32(get_con(as, 1))
-                        nd = min(dist[aai] + 3, 250)
-                        if nd < dist[i] {
-                            dist[i] = nd
+                    if ax >= 0 && ay >= 0 && ax < int(w) && ay < int(h) {
+                        ac := &chf.cells[ax + ay * int(w)]
+                        ai := ac.index + u32(get_con(s, 2))
+                        if ai < u32(chf.span_count) {
+                            as := &chf.spans[ai]
+                            nd = min(dist[ai] + 2, 250)
+                            if nd < dist[i] do dist[i] = nd
+                            
+                            // Process diagonal (1,1)
+                            if get_con(as, 1) != RC_NOT_CONNECTED {
+                                aax := ax + int(get_dir_offset_x(1))
+                                aay := ay + int(get_dir_offset_y(1))
+                                if aax >= 0 && aay >= 0 && aax < int(w) && aay < int(h) {
+                                    aac := &chf.cells[aax + aay * int(w)]
+                                    aai := aac.index + u32(get_con(as, 1))
+                                    if aai < u32(chf.span_count) {
+                                        nd = min(dist[aai] + 3, 250)
+                                        if nd < dist[i] do dist[i] = nd
+                                    }
+                                }
+                            }
                         }
                     }
                 }
+                
+                // Process direction 1: (0,1) - reuse variables
                 if get_con(s, 1) != RC_NOT_CONNECTED {
-                    // (0,1)
                     ax := int(x) + int(get_dir_offset_x(1))
                     ay := int(y) + int(get_dir_offset_y(1))
-                    ac := &chf.cells[ax + ay * int(w)]
-                    ai := ac.index + u32(get_con(s, 1))
-                    as := &chf.spans[ai]
-                    nd = min(dist[ai] + 2, 250)
-                    if nd < dist[i] {
-                        dist[i] = nd
-                    }
-                    // (-1,1)
-                    if get_con(as, 0) != RC_NOT_CONNECTED {
-                        aax := ax + int(get_dir_offset_x(0))
-                        aay := ay + int(get_dir_offset_y(0))
-                        aac := &chf.cells[aax + aay * int(w)]
-                        aai := aac.index + u32(get_con(as, 0))
-                        nd = min(dist[aai] + 3, 250)
-                        if nd < dist[i] {
-                            dist[i] = nd
+                    if ax >= 0 && ay >= 0 && ax < int(w) && ay < int(h) {
+                        ac := &chf.cells[ax + ay * int(w)]
+                        ai := ac.index + u32(get_con(s, 1))
+                        if ai < u32(chf.span_count) {
+                            as := &chf.spans[ai]
+                            nd = min(dist[ai] + 2, 250)
+                            if nd < dist[i] do dist[i] = nd
+                            
+                            // Process diagonal (-1,1)
+                            if get_con(as, 0) != RC_NOT_CONNECTED {
+                                aax := ax + int(get_dir_offset_x(0))
+                                aay := ay + int(get_dir_offset_y(0))
+                                if aax >= 0 && aay >= 0 && aax < int(w) && aay < int(h) {
+                                    aac := &chf.cells[aax + aay * int(w)]
+                                    aai := aac.index + u32(get_con(as, 0))
+                                    if aai < u32(chf.span_count) {
+                                        nd = min(dist[aai] + 3, 250)
+                                        if nd < dist[i] do dist[i] = nd
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -176,12 +205,12 @@ erode_walkable_area :: proc(radius: i32, chf: ^Compact_Heightfield) -> bool {
 // If magnitude is zero, vector is unchanged
 safe_normalize :: proc(v: ^[3]f32) {
     sq_mag := v.x * v.x + v.y * v.y + v.z * v.z
-    if sq_mag > EPSILON {
-        inv_mag := 1.0 / math.sqrt(sq_mag)
-        v.x *= inv_mag
-        v.y *= inv_mag
-        v.z *= inv_mag
-    }
+    if sq_mag <= EPSILON do return
+    
+    inv_mag := 1.0 / math.sqrt(sq_mag)
+    v.x *= inv_mag
+    v.y *= inv_mag
+    v.z *= inv_mag
 }
 
 // Offset polygon - creates an inset/outset polygon with proper miter/bevel handling
@@ -192,9 +221,7 @@ offset_poly :: proc(verts: [][3]f32, offset: f32, allocator := context.allocator
     MITER_LIMIT :: 1.20
 
     num_verts := len(verts)
-    if num_verts < 3 {
-        return nil, false
-    }
+    if num_verts < 3 do return nil, false
 
     // First pass: calculate how many vertices we'll need
     estimated_verts := num_verts * 2  // Conservative estimate for beveling
