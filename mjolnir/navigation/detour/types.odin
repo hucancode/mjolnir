@@ -291,8 +291,9 @@ calc_tile_loc :: proc(nav_mesh: ^Nav_Mesh, pos: [3]f32) -> (tx: i32, ty: i32, st
     }
     
     // Calculate offset from origin
-    offset_x := pos[0] - nav_mesh.orig[0]
-    offset_z := pos[2] - nav_mesh.orig[2]
+    offset := pos - nav_mesh.orig
+    offset_x := offset.x
+    offset_z := offset.z
     
     // Check for infinite or NaN offset values (could happen if origin is invalid)
     if offset_x != offset_x || offset_z != offset_z ||  // NaN check

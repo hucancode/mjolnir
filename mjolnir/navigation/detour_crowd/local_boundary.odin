@@ -1,6 +1,7 @@
 package navigation_detour_crowd
 
 import "core:math"
+import "core:math/linalg"
 import "core:slice"
 import nav_recast "../recast"
 import detour "../detour"
@@ -144,7 +145,7 @@ local_boundary_get_closest_point :: proc(boundary: ^Local_Boundary, pos: [3]f32)
         seg_end := [3]f32{segment[3], segment[4], segment[5]}
         
         point := dt_closest_point_on_segment_2d(pos, seg_start, seg_end)
-        dist := nav_recast.sqr(point[0] - pos[0]) + nav_recast.sqr(point[2] - pos[2])
+        dist := linalg.length2((point - pos).xz)
         
         if dist < min_dist {
             min_dist = dist

@@ -89,11 +89,7 @@ find_nearest_poly :: proc(query: ^Nav_Mesh_Query, center: [3]f32, half_extents: 
     log.infof("find_nearest_poly: Checked %d tiles, %d polygons total. nearest_ref=0x%x, dist_sqr=%f", 
               total_tiles_checked, total_polys_checked, nearest_ref, nearest_dist_sqr)
 
-    // Return failure if no polygon was found
-    if nearest_ref == nav_recast.INVALID_POLY_REF {
-        return {.Invalid_Param}, nearest_ref, nearest_pt
-    }
-
+    // Return success even if no polygon was found - caller can check if nearest_ref is valid
     return {.Success}, nearest_ref, nearest_pt
 }
 

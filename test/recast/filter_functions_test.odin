@@ -25,7 +25,7 @@ test_filter_low_hanging_obstacles_basic :: proc(t: ^testing.T) {
     testing.expect(t, ok, "Failed to add walkable span")
     
     // Add non-walkable span just above it (obstacle)
-    ok = recast.add_span(hf, 2, 2, 3, 5, recast.RC_NULL_AREA, 1)
+    ok = recast.add_span(hf, 2, 2, 3, 4, recast.RC_NULL_AREA, 1)
     testing.expect(t, ok, "Failed to add obstacle span")
     
     // Apply filter with walkable_climb = 2

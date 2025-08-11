@@ -503,11 +503,11 @@ test_navmesh_area_marking :: proc(t: ^testing.T) {
     recast.mark_cylinder_area(cylinder_pos, 5.0, 10.0, 20, chf)
 
     // Mark a convex polygon area
-    poly_verts := []f32{
-        20, -1, 5,
-        25, -1, 5,
-        25, -1, 10,
-        20, -1, 10,
+    poly_verts := [][3]f32{
+        {20, -1, 5},
+        {25, -1, 5},
+        {25, -1, 10},
+        {20, -1, 10},
     }
     recast.mark_convex_poly_area(poly_verts, 4, -1, 10, 30, chf)
 

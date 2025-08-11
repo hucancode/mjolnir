@@ -153,7 +153,7 @@ find_straight_path :: proc(query: ^Nav_Mesh_Query,
                     to_center := calc_poly_center(to_tile, to_poly)
                     
                     // Create a wider portal perpendicular to the direction
-                    mid := (from_center + to_center) * 0.5
+                    mid := linalg.mix(from_center, to_center, 0.5)
                     dir := to_center - from_center
                     dir_len := linalg.length(dir)
                     if dir_len > 0.001 {

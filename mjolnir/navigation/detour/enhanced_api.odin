@@ -111,8 +111,8 @@ nav_init_enhanced :: proc(ctx: ^Enhanced_Nav_Context, pmesh: ^nav_recast.Poly_Me
     
     mesh_params := Nav_Mesh_Params{
         orig = pmesh.bmin,
-        tile_width = pmesh.bmax[0] - pmesh.bmin[0],
-        tile_height = pmesh.bmax[2] - pmesh.bmin[2],
+        tile_width = (pmesh.bmax - pmesh.bmin).x,
+        tile_height = (pmesh.bmax - pmesh.bmin).z,
         max_tiles = 1,
         max_polys = 1024,
     }

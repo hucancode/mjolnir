@@ -198,16 +198,16 @@ validate_span_list :: proc(first_span: ^Span, x, z: i32) {
 
 // Divides a convex polygon of max 12 vertices into two convex polygons
 // across a separating axis.
-divide_poly :: proc(in_verts: []f32, in_verts_count: i32,
-                   out_verts1: []f32, out_verts1_count: ^i32,
-                   out_verts2: []f32, out_verts2_count: ^i32,
+divide_poly :: proc(in_verts: [][3]f32, in_verts_count: i32,
+                   out_verts1: [][3]f32, out_verts1_count: ^i32,
+                   out_verts2: [][3]f32, out_verts2_count: ^i32,
                    axis_offset: f32, axis: Axis) {
     assert(in_verts_count <= 12)
 
     // How far positive or negative away from the separating axis is each vertex
     in_vert_axis_delta: [12]f32
     for in_vert in 0..<in_verts_count {
-        in_vert_axis_delta[in_vert] = axis_offset - in_verts[int(in_vert) * 3 + int(axis)]
+        in_vert_axis_delta[in_vert] = axis_offset - in_verts[in_vert][axis]
     }
 
     poly1_vert := i32(0)
@@ -223,36 +223,34 @@ divide_poly :: proc(in_verts: []f32, in_verts_count: i32,
         if !same_side {
             s := in_vert_axis_delta[in_vert_b] / (in_vert_axis_delta[in_vert_b] - in_vert_axis_delta[in_vert_a])
             // Interpolate between vertices
-            vert_a := [3]f32{in_verts[in_vert_a * 3 + 0], in_verts[in_vert_a * 3 + 1], in_verts[in_vert_a * 3 + 2]}
-            vert_b := [3]f32{in_verts[in_vert_b * 3 + 0], in_verts[in_vert_b * 3 + 1], in_verts[in_vert_b * 3 + 2]}
+            vert_a := in_verts[in_vert_a]
+            vert_b := in_verts[in_vert_b]
             interpolated := linalg.mix(vert_b, vert_a, s)
-            out_verts1[poly1_vert * 3 + 0] = interpolated.x
-            out_verts1[poly1_vert * 3 + 1] = interpolated.y
-            out_verts1[poly1_vert * 3 + 2] = interpolated.z
+            out_verts1[poly1_vert] = interpolated
 
             // Copy to second polygon
-            copy(out_verts2[poly2_vert * 3:poly2_vert * 3 + 3], out_verts1[poly1_vert * 3:poly1_vert * 3 + 3])
+            out_verts2[poly2_vert] = interpolated
             poly1_vert += 1
             poly2_vert += 1
 
             // Add the in_vert_a point to the right polygon
             if in_vert_axis_delta[in_vert_a] > 0 {
-                copy(out_verts1[poly1_vert * 3:poly1_vert * 3 + 3], in_verts[in_vert_a * 3:in_vert_a * 3 + 3])
+                out_verts1[poly1_vert] = in_verts[in_vert_a]
                 poly1_vert += 1
             } else if in_vert_axis_delta[in_vert_a] < 0 {
-                copy(out_verts2[poly2_vert * 3:poly2_vert * 3 + 3], in_verts[in_vert_a * 3:in_vert_a * 3 + 3])
+                out_verts2[poly2_vert] = in_verts[in_vert_a]
                 poly2_vert += 1
             }
         } else {
             // Add the in_vert_a point to the right polygon
             if in_vert_axis_delta[in_vert_a] >= 0 {
-                copy(out_verts1[poly1_vert * 3:poly1_vert * 3 + 3], in_verts[in_vert_a * 3:in_vert_a * 3 + 3])
+                out_verts1[poly1_vert] = in_verts[in_vert_a]
                 poly1_vert += 1
                 if in_vert_axis_delta[in_vert_a] != 0 {
                     continue
                 }
             }
-            copy(out_verts2[poly2_vert * 3:poly2_vert * 3 + 3], in_verts[in_vert_a * 3:in_vert_a * 3 + 3])
+            out_verts2[poly2_vert] = in_verts[in_vert_a]
             poly2_vert += 1
         }
     }
@@ -313,28 +311,22 @@ rasterize_tri :: proc(v0, v1, v2: [3]f32, area_id: u8,
     z1 = math.clamp(z1, 0, h - 1)
 
     // Clip the triangle into all grid cells it touches
-    buf: [7 * 3 * 4]f32
-    in_buf := buf[0:7*3]
-    in_row := buf[7*3:14*3]
-    p1 := buf[14*3:21*3]
-    p2 := buf[21*3:28*3]
+    buf: [7 * 4][3]f32
+    in_buf := buf[0:7]
+    in_row := buf[7:14]
+    p1 := buf[14:21]
+    p2 := buf[21:28]
 
-    in_buf[0] = v0.x
-    in_buf[1] = v0.y
-    in_buf[2] = v0.z
-    in_buf[3] = v1.x
-    in_buf[4] = v1.y
-    in_buf[5] = v1.z
-    in_buf[6] = v2.x
-    in_buf[7] = v2.y
-    in_buf[8] = v2.z
+    in_buf[0] = v0
+    in_buf[1] = v1
+    in_buf[2] = v2
     nv_row: i32
     nv_in := i32(3)
 
     for z := z0; z <= z1; z += 1 {
         // Clip polygon to row. Store the remaining polygon as well
         cell_z := hf_bb_min.z + f32(z) * cell_size
-        divide_poly(in_buf, nv_in, in_row, &nv_row, p1, &nv_in, cell_z + cell_size, .Z)
+        divide_poly(in_buf[:nv_in], nv_in, in_row[:7], &nv_row, p1[:7], &nv_in, cell_z + cell_size, .Z)
         in_buf, p1 = p1, in_buf
 
         if nv_row < 3 {
@@ -345,14 +337,14 @@ rasterize_tri :: proc(v0, v1, v2: [3]f32, area_id: u8,
         }
 
         // find X-axis bounds of the row
-        min_x := in_row[0]
-        max_x := in_row[0]
+        min_x := in_row[0].x
+        max_x := in_row[0].x
         for vert in 1..<nv_row {
-            if min_x > in_row[vert * 3] {
-                min_x = in_row[vert * 3]
+            if min_x > in_row[vert].x {
+                min_x = in_row[vert].x
             }
-            if max_x < in_row[vert * 3] {
-                max_x = in_row[vert * 3]
+            if max_x < in_row[vert].x {
+                max_x = in_row[vert].x
             }
         }
         x0 := i32((min_x - hf_bb_min.x) * inverse_cell_size)
@@ -380,7 +372,7 @@ rasterize_tri :: proc(v0, v1, v2: [3]f32, area_id: u8,
         for x := x0; x <= x1; x += 1 {
             // Clip polygon to column. store the remaining polygon as well
             cx := hf_bb_min.x + f32(x) * cell_size
-            divide_poly(in_row, nv2, p1, &nv, p2, &nv2, cx + cell_size, .X)
+            divide_poly(in_row[:nv2], nv2, p1[:7], &nv, p2[:7], &nv2, cx + cell_size, .X)
             in_row, p2 = p2, in_row
 
             if nv < 3 {
@@ -391,11 +383,11 @@ rasterize_tri :: proc(v0, v1, v2: [3]f32, area_id: u8,
             }
 
             // Calculate min and max of the span
-            span_min := p1[1]
-            span_max := p1[1]
+            span_min := p1[0].y
+            span_max := p1[0].y
             for vert in 1..<nv {
-                span_min = min(span_min, p1[vert * 3 + 1])
-                span_max = max(span_max, p1[vert * 3 + 1])
+                span_min = min(span_min, p1[vert].y)
+                span_max = max(span_max, p1[vert].y)
             }
             span_min -= hf_bb_min.y
             span_max -= hf_bb_min.y

@@ -147,9 +147,7 @@ create_nav_mesh_data :: proc(params: ^Create_Nav_Mesh_Data_Params) -> ([]u8, nav
     
     for v, i in pmesh.verts {
         vert := &verts[i]
-        vert[0] = pmesh.bmin[0] + f32(v[0]) * cs
-        vert[1] = pmesh.bmin[1] + f32(v[1]) * ch
-        vert[2] = pmesh.bmin[2] + f32(v[2]) * cs
+        vert^ = pmesh.bmin + [3]f32{f32(v[0]) * cs, f32(v[1]) * ch, f32(v[2]) * cs}
     }
 
     // Add off-mesh connection vertices

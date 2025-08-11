@@ -324,11 +324,7 @@ find_path :: proc(query: ^Nav_Mesh_Query,
                         
                         if nav_recast.status_succeeded(portal_status) {
                             // Use midpoint of the actual shared edge
-                            neighbor_pos = {
-                                (left[0] + right[0]) * 0.5,
-                                (left[1] + right[1]) * 0.5,
-                                (left[2] + right[2]) * 0.5,
-                            }
+                            neighbor_pos = linalg.mix(left, right, 0.5)
                         } else {
                             // Fallback to simple edge midpoint using link edge
                             link_edge := get_link_edge(cur_tile, link)
@@ -514,11 +510,7 @@ get_edge_mid_point :: proc(tile_a: ^Mesh_Tile, poly_a: ^Poly, edge: int,
     va1 := tile_a.verts[poly_a.verts[(edge + 1) % int(poly_a.vert_count)]]
 
     // Return midpoint
-    return {
-        (va0[0] + va1[0]) * 0.5,
-        (va0[1] + va1[1]) * 0.5,
-        (va0[2] + va1[2]) * 0.5,
-    }
+    return linalg.mix(va0, va1, 0.5)
 }
 
 // Sliced pathfinding functions (matching C++ API)

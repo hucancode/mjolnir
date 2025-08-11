@@ -292,8 +292,7 @@ crowd_plan_velocity :: proc(crowd: ^Crowd, dt: f32, debug_data: ^Crowd_Agent_Deb
         // Add separation force
         if .Separation in agent.params.update_flags {
             separation := calculate_separation_force(&agent, crowd.active_agents[:])
-            agent.new_velocity[0] += separation[0] * agent.params.separation_weight
-            agent.new_velocity[2] += separation[2] * agent.params.separation_weight
+            agent.new_velocity += separation * agent.params.separation_weight
         }
 
         // Limit velocity
@@ -328,11 +327,7 @@ crowd_integrate :: proc(crowd: ^Crowd, dt: f32) {
 
         // Integrate position
         if agent.state == .Walking {
-            new_pos := [3]f32{
-                agent.position[0] + agent.velocity[0] * dt,
-                agent.position[1] + agent.velocity[1] * dt,
-                agent.position[2] + agent.velocity[2] * dt,
-            }
+            new_pos := agent.position + agent.velocity * dt
 
             // Move along navigation mesh surface
             moved, _ := path_corridor_move_position(&agent.corridor, new_pos, crowd.nav_query,
@@ -374,11 +369,9 @@ crowd_handle_collisions :: proc(crowd: ^Crowd) {
                 // Move agents apart (half distance each)
                 move_dist := overlap * 0.5
 
-                agent_a.position[0] -= sep_x * move_dist
-                agent_a.position[2] -= sep_z * move_dist
-
-                agent_b.position[0] += sep_x * move_dist
-                agent_b.position[2] += sep_z * move_dist
+                sep_vec := [3]f32{sep_x, 0, sep_z} * move_dist
+                agent_a.position -= sep_vec
+                agent_b.position += sep_vec
             }
         }
     }
@@ -397,26 +390,23 @@ calculate_separation_force :: proc(agent: ^Crowd_Agent, agents: []^Crowd_Agent) 
             neighbor := agents[neighbor_idx]
             if !neighbor.active do continue
 
-            dx := agent.position[0] - neighbor.position[0]
-            dz := agent.position[2] - neighbor.position[2]
-
-            dist_sqr := dx*dx + dz*dz
+            diff := agent.position - neighbor.position
+            dist_sqr := linalg.length2(diff.xz)
             min_dist := agent.params.radius + neighbor.params.radius + 0.1  // Small buffer
 
             if dist_sqr < min_dist * min_dist && dist_sqr > 1e-6 {
                 dist := math.sqrt(dist_sqr)
                 force := (min_dist - dist) / min_dist
 
-                separation[0] += (dx / dist) * force
-                separation[2] += (dz / dist) * force
+                sep_dir := diff.xz / dist
+                separation.xz += sep_dir * force
                 neighbor_count += 1
             }
         }
     }
 
     if neighbor_count > 0 {
-        separation[0] /= f32(neighbor_count)
-        separation[2] /= f32(neighbor_count)
+        separation /= f32(neighbor_count)
     }
 
     return separation

@@ -63,9 +63,9 @@ nav_mesh_init_single :: proc(nav_mesh: ^Nav_Mesh, data: []u8, flags: i32) -> nav
     
     // Setup params for single tile
     params := Nav_Mesh_Params{
-        orig = {header.bmin[0], header.bmin[1], header.bmin[2]},
-        tile_width = header.bmax[0] - header.bmin[0],
-        tile_height = header.bmax[2] - header.bmin[2],
+        orig = header.bmin,
+        tile_width = (header.bmax - header.bmin).x,
+        tile_height = (header.bmax - header.bmin).z,
         max_tiles = 1,
         max_polys = header.poly_count,
     }

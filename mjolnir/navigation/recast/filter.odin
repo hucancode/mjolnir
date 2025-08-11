@@ -2,6 +2,7 @@ package navigation_recast
 
 
 import "core:math"
+import "core:math/linalg"
 import "core:slice"
 import "core:mem"
 import "core:log"
@@ -43,11 +44,12 @@ filter_low_hanging_walkable_obstacles :: proc(walkable_climb: int, heightfield: 
                 walkable := span.area != RC_NULL_AREA
 
                 // If current span is not walkable, but there is walkable span just below it
-                // and the gap between them is small enough for the agent to climb over,
+                // and the height difference is small enough for the agent to climb over,
                 // mark the current span as walkable too
                 if !walkable && previous_was_walkable && previous_span != nil {
-                    gap := int(span.smin) - int(previous_span.smax)
-                    if gap <= walkable_climb {
+                    // Check if agent can climb from top of previous span to top of current span
+                    climb_height := int(span.smax) - int(previous_span.smax)
+                    if climb_height <= walkable_climb {
                         span.area = u32(previous_area_id)
                     }
                 }
@@ -233,10 +235,14 @@ median_filter_walkable_area :: proc(chf: ^Compact_Heightfield) -> bool {
                     if neighbor_connection2 != RC_NOT_CONNECTED {
                         bx := ax + int(get_dir_offset_x(dir2))
                         bz := az + int(get_dir_offset_y(dir2))
-                        bi := int(chf.cells[bx + bz * int(z_stride)].index) + neighbor_connection2
-
-                        if chf.areas[bi] != RC_NULL_AREA {
-                            neighbor_areas[dir * 2 + 1] = chf.areas[bi]
+                        
+                        // Bounds check for diagonal neighbors
+                        if bx >= 0 && bx < int(x_size) && bz >= 0 && bz < int(z_size) {
+                            bi := int(chf.cells[bx + bz * int(z_stride)].index) + neighbor_connection2
+                            
+                            if chf.areas[bi] != RC_NULL_AREA {
+                                neighbor_areas[dir * 2 + 1] = chf.areas[bi]
+                            }
                         }
                     }
                 }
@@ -264,12 +270,14 @@ mark_box_area :: proc(box_min_bounds, box_max_bounds: [3]f32,
     z_stride := x_size
 
     // Find the footprint of the box area in grid cell coordinates
-    min_x := int((box_min_bounds[0] - chf.bmin[0]) / chf.cs)
-    min_y := int((box_min_bounds[1] - chf.bmin[1]) / chf.ch)
-    min_z := int((box_min_bounds[2] - chf.bmin[2]) / chf.cs)
-    max_x := int((box_max_bounds[0] - chf.bmin[0]) / chf.cs)
-    max_y := int((box_max_bounds[1] - chf.bmin[1]) / chf.ch)
-    max_z := int((box_max_bounds[2] - chf.bmin[2]) / chf.cs)
+    min_offset := (box_min_bounds - chf.bmin)
+    max_offset := (box_max_bounds - chf.bmin)
+    min_x := int(min_offset.x / chf.cs)
+    min_y := int(min_offset.y / chf.ch)
+    min_z := int(min_offset.z / chf.cs)
+    max_x := int(max_offset.x / chf.cs)
+    max_y := int(max_offset.y / chf.ch)
+    max_z := int(max_offset.z / chf.cs)
 
     // Early-out if the box is outside the bounds of the grid
     if max_x < 0 do return
@@ -310,20 +318,20 @@ mark_box_area :: proc(box_min_bounds, box_max_bounds: [3]f32,
 }
 
 // Check if a point is inside a polygon (2D test on XZ plane)
-point_in_poly :: proc(num_verts: int, verts: []f32, point: [3]f32) -> bool {
+point_in_poly :: proc(num_verts: int, verts: [][3]f32, point: [3]f32) -> bool {
     in_poly := false
 
     j := num_verts - 1
     for i in 0..<num_verts {
-        vi := verts[i * 3:]
-        vj := verts[j * 3:]
+        vi := verts[i]
+        vj := verts[j]
 
-        if (vi[2] > point[2]) == (vj[2] > point[2]) {
+        if (vi.z > point.z) == (vj.z > point.z) {
             j = i
             continue
         }
 
-        if point[0] >= (vj[0] - vi[0]) * (point[2] - vi[2]) / (vj[2] - vi[2]) + vi[0] {
+        if point.x >= (vj.x - vi.x) * (point.z - vi.z) / (vj.z - vi.z) + vi.x {
             j = i
             continue
         }
@@ -337,7 +345,7 @@ point_in_poly :: proc(num_verts: int, verts: []f32, point: [3]f32) -> bool {
 
 // Mark convex polygon area
 // Mark all spans within a convex polygon with the specified area id
-mark_convex_poly_area :: proc(verts: []f32, num_verts: int,
+mark_convex_poly_area :: proc(verts: [][3]f32, num_verts: int,
                                 min_y, max_y: f32, area_id: u8, chf: ^Compact_Heightfield) {
     // Removed timer code for simplicity
 
@@ -346,26 +354,26 @@ mark_convex_poly_area :: proc(verts: []f32, num_verts: int,
     z_stride := x_size
 
     // Compute the bounding box of the polygon
-    bmin := [3]f32{verts[0], verts[1], verts[2]}
-    bmax := [3]f32{verts[0], verts[1], verts[2]}
+    bmin := verts[0]
+    bmax := verts[0]
 
     for i in 1..<num_verts {
-        v := verts[i * 3:]
-        bmin[0] = min(bmin[0], v[0])
-        bmin[2] = min(bmin[2], v[2])
-        bmax[0] = max(bmax[0], v[0])
-        bmax[2] = max(bmax[2], v[2])
+        v := verts[i]
+        bmin.x = min(bmin.x, v.x)
+        bmin.z = min(bmin.z, v.z)
+        bmax.x = max(bmax.x, v.x)
+        bmax.z = max(bmax.z, v.z)
     }
-    bmin[1] = min_y
-    bmax[1] = max_y
+    bmin.y = min_y
+    bmax.y = max_y
 
     // Compute the grid footprint of the polygon
-    minx := int((bmin[0] - chf.bmin[0]) / chf.cs)
-    miny := int((bmin[1] - chf.bmin[1]) / chf.ch)
-    minz := int((bmin[2] - chf.bmin[2]) / chf.cs)
-    maxx := int((bmax[0] - chf.bmin[0]) / chf.cs)
-    maxy := int((bmax[1] - chf.bmin[1]) / chf.ch)
-    maxz := int((bmax[2] - chf.bmin[2]) / chf.cs)
+    minx := int((bmin.x - chf.bmin.x) / chf.cs)
+    miny := int((bmin.y - chf.bmin.y) / chf.ch)
+    minz := int((bmin.z - chf.bmin.z) / chf.cs)
+    maxx := int((bmax.x - chf.bmin.x) / chf.cs)
+    maxy := int((bmax.y - chf.bmin.y) / chf.ch)
+    maxz := int((bmax.z - chf.bmin.z) / chf.cs)
 
     // Early-out if the polygon lies entirely outside the grid
     if maxx < 0 do return
@@ -399,11 +407,7 @@ mark_convex_poly_area :: proc(verts: []f32, num_verts: int,
                 }
 
                 // Test if cell center is inside the polygon
-                point := [3]f32{
-                    chf.bmin[0] + (f32(x) + 0.5) * chf.cs,
-                    0,
-                    chf.bmin[2] + (f32(z) + 0.5) * chf.cs,
-                }
+                point := chf.bmin + [3]f32{(f32(x) + 0.5) * chf.cs, 0, (f32(z) + 0.5) * chf.cs}
 
                 if point_in_poly(num_verts, verts, point) {
                     chf.areas[span_index] = area_id
@@ -424,24 +428,18 @@ mark_cylinder_area :: proc(position: [3]f32, radius, height: f32,
     z_stride := x_size
 
     // Compute the bounding box of the cylinder
-    cylinder_bb_min := [3]f32{
-        position[0] - radius,
-        position[1],
-        position[2] - radius,
-    }
-    cylinder_bb_max := [3]f32{
-        position[0] + radius,
-        position[1] + height,
-        position[2] + radius,
-    }
+    cylinder_bb_min := position - [3]f32{radius, 0, radius}
+    cylinder_bb_max := position + [3]f32{radius, height, radius}
 
     // Compute the grid footprint of the cylinder
-    minx := int((cylinder_bb_min[0] - chf.bmin[0]) / chf.cs)
-    miny := int((cylinder_bb_min[1] - chf.bmin[1]) / chf.ch)
-    minz := int((cylinder_bb_min[2] - chf.bmin[2]) / chf.cs)
-    maxx := int((cylinder_bb_max[0] - chf.bmin[0]) / chf.cs)
-    maxy := int((cylinder_bb_max[1] - chf.bmin[1]) / chf.ch)
-    maxz := int((cylinder_bb_max[2] - chf.bmin[2]) / chf.cs)
+    min_offset := (cylinder_bb_min - chf.bmin)
+    max_offset := (cylinder_bb_max - chf.bmin)
+    minx := int(min_offset.x / chf.cs)
+    miny := int(min_offset.y / chf.ch)
+    minz := int(min_offset.z / chf.cs)
+    maxx := int(max_offset.x / chf.cs)
+    maxy := int(max_offset.y / chf.ch)
+    maxz := int(max_offset.z / chf.cs)
 
     // Early-out if the cylinder is completely outside the grid bounds
     if maxx < 0 do return
@@ -463,13 +461,11 @@ mark_cylinder_area :: proc(position: [3]f32, radius, height: f32,
             max_span_index := int(cell.index + u32(cell.count))
 
             // Calculate cell center position
-            cell_x := chf.bmin[0] + (f32(x) + 0.5) * chf.cs
-            cell_z := chf.bmin[2] + (f32(z) + 0.5) * chf.cs
-            delta_x := cell_x - position[0]
-            delta_z := cell_z - position[2]
+            cell_center := chf.bmin + [3]f32{(f32(x) + 0.5) * chf.cs, 0, (f32(z) + 0.5) * chf.cs}
+            delta := cell_center - position
 
             // Skip this column if it's too far from the center point of the cylinder
-            if delta_x * delta_x + delta_z * delta_z >= radius_sq {
+            if linalg.length2(delta.xz) >= radius_sq {
                 continue
             }
 

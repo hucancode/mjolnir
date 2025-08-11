@@ -3,12 +3,11 @@ package navigation_recast
 
 import "core:slice"
 import "core:log"
-import geometry "../../geometry"
-
 import "core:mem"
 import "core:math"
 import "core:math/linalg"
 import "core:fmt"
+import geometry "../../geometry"
 
 // Check if three vertices form a left turn (counter-clockwise)
 // Based on the C++ uleft function from RecastMesh.cpp
@@ -221,18 +220,18 @@ add_vertex :: proc(x, y, z: u16, verts: ^[dynamic]Mesh_Vertex, buckets: []Vertex
 diagonalie :: proc "contextless" (verts: [][4]i32, indices: []u32, n: i32, a, c: i32) -> bool {
     a_idx := i32(indices[a] & 0x0fffffff)
     c_idx := i32(indices[c] & 0x0fffffff)
-    
+
     // log.infof("diagonalie: checking diagonal from %d to %d", a, c)
 
     for i in i32(0)..<n {
         i1 := (i + 1) % n
-        
+
         // Skip edges incident to a or c (matching C++ logic)
         if i == a || i1 == a || i == c || i1 == c {
             // log.infof("  Skipping edge %d-%d (incident to diagonal)", i, i1)
             continue
         }
-        
+
         b1_idx := i32(indices[i] & 0x0fffffff)
         b2_idx := i32(indices[i1] & 0x0fffffff)
 
@@ -266,7 +265,7 @@ in_cone_indexed :: proc "contextless" (verts: [][4]i32, indices: []u32, n: i32, 
     va2 := verts[a2_idx]
     vb := verts[b_idx]
 
-    return in_cone(va0.xz, va1.xz, va2.xz, vb.xz)
+    return geometry.in_cone(va0.xz, va1.xz, va2.xz, vb.xz)
 }
 
 // Check if diagonal from a to b is valid
@@ -284,12 +283,12 @@ diagonalie_loose :: proc "contextless" (verts: [][4]i32, indices: []u32, n: i32,
 
     for i in i32(0)..<n {
         i1 := (i + 1) % n
-        
+
         // Skip edges incident to a or c (matching C++ logic)
         if i == a || i1 == a || i == c || i1 == c {
             continue
         }
-        
+
         b1_idx := i32(indices[i] & 0x0fffffff)
         b2_idx := i32(indices[i1] & 0x0fffffff)
 
@@ -342,7 +341,7 @@ prev :: proc "contextless" (i, n: i32) -> i32 {
     return i - 1 >= 0 ? i - 1 : n - 1
 }
 
-// Internal triangulation using u16 vertices  
+// Internal triangulation using u16 vertices
 triangulate_polygon_u16 :: proc(verts: [][3]u16, indices: []i32, triangles: ^[dynamic]i32) -> bool {
     // Convert to [4]i32 format for triangulation
     int_verts := make([][4]i32, len(verts))
@@ -387,7 +386,7 @@ triangulate_polygon :: proc(verts: [][4]i32, indices: []i32, triangles: ^[dynami
     for i in 0..<n {
         i1 := next(i, n)
         i2 := next(i1, n)
-        
+
         diag_result := diagonal(verts, work_indices, n, i, i2)
         if diag_result {
             work_indices[i1] |= 0x80000000  // Mark middle vertex as removable ear
@@ -1078,7 +1077,7 @@ build_poly_mesh :: proc(cset: ^Contour_Set, nvp: i32, pmesh: ^Poly_Mesh) -> bool
         // Create indices array for triangulation (0, 1, 2, ...)
         indices := make([]i32, len(cont.verts))
         defer delete(indices)
-        
+
         for j in 0..<len(cont.verts) {
             indices[j] = i32(j)
         }
@@ -1086,7 +1085,7 @@ build_poly_mesh :: proc(cset: ^Contour_Set, nvp: i32, pmesh: ^Poly_Mesh) -> bool
         // Triangulate the contour FIRST (matching C++ approach)
         // Pass cont.verts directly - they're already [4]i32 with x, y, z, flags
         clear(&triangles)
-        
+
         if !triangulate_polygon(cont.verts[:], indices, &triangles) {
             // Bad triangulation, should not happen.
             log.warnf("build_poly_mesh: Bad triangulation Contour %d. Verts: %d", i, len(cont.verts))
@@ -1097,7 +1096,7 @@ build_poly_mesh :: proc(cset: ^Contour_Set, nvp: i32, pmesh: ^Poly_Mesh) -> bool
             }
             continue
         }
-        
+
 
         // NOW add vertices and merge duplicates AFTER triangulation
         // Reuse indices array to store global vertex indices

@@ -336,18 +336,10 @@ process_sample :: proc(query: ^Obstacle_Avoidance_Query, pos: [3]f32, radius: f3
     // Check against circle obstacles
     for &circle in query.circle_obstacles {
         // Relative velocity
-        rel_vel := [3]f32{
-            sample_vel[0] - circle.velocity[0],
-            sample_vel[1] - circle.velocity[1],
-            sample_vel[2] - circle.velocity[2],
-        }
+        rel_vel := sample_vel - circle.velocity
         
         // Relative position
-        rel_pos := [3]f32{
-            pos[0] - circle.position[0],
-            pos[1] - circle.position[1],
-            pos[2] - circle.position[2],
-        }
+        rel_pos := pos - circle.position
         
         // Combined radius
         combined_radius := radius + circle.radius
@@ -399,14 +391,14 @@ process_sample :: proc(query: ^Obstacle_Avoidance_Query, pos: [3]f32, radius: f3
 // Ray-circle intersection test
 ray_circle_intersect :: proc(pos, vel: [3]f32, radius: f32) -> f32 {
     // 2D intersection in XZ plane
-    px, pz := pos[0], pos[2]
-    vx, vz := vel[0], vel[2]
+    pxz := pos.xz
+    vxz := vel.xz
     
-    a := vx*vx + vz*vz
+    a := linalg.dot(vxz, vxz)
     if a < 1e-6 do return -1  // No movement
     
-    b := 2.0 * (px*vx + pz*vz)
-    c := px*px + pz*pz - radius*radius
+    b := 2.0 * linalg.dot(pxz, vxz)
+    c := linalg.dot(pxz, pxz) - radius*radius
     
     discriminant := b*b - 4*a*c
     if discriminant < 0 do return -1  // No intersection
