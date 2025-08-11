@@ -13,7 +13,9 @@ import geometry "../../geometry"
 // Based on the C++ uleft function from RecastMesh.cpp
 uleft :: proc(a, b, c: [3]i16) -> bool {
     // 2D cross product in XZ plane: (b-a) × (c-a)
-    return linalg.vector_cross2(b.xz - a.xz, c.xz - a.xz) < 0
+    // return linalg.vector_cross2(b.xz - a.xz, c.xz - a.xz) < 0
+    return (i32(b.x) - i32(a.x)) * (i32(c.z) - i32(a.z)) -
+           (i32(c.x) - i32(a.x)) * (i32(b.z) - i32(a.z)) < 0
 }
 
 // These indexed versions were removed to eliminate indirection.
