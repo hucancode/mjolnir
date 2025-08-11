@@ -4,6 +4,7 @@ import geometry "../mjolnir/geometry"
 import "core:testing"
 import "core:math"
 import "core:fmt"
+import "core:math/linalg"
 
 // Test constants
 EPSILON :: 1e-6
@@ -463,4 +464,385 @@ test_align :: proc(t: ^testing.T) {
     testing.expect_value(t, geometry.align(5, 4), 8)
     testing.expect_value(t, geometry.align(15, 8), 16)
     testing.expect_value(t, geometry.align(16, 8), 16)
+}
+
+@(test)
+test_barycentric_2d :: proc(t: ^testing.T) {
+    // Test barycentric coordinates for triangle vertices
+    a := [3]f32{0, 0, 0}
+    b := [3]f32{10, 0, 0}
+    c := [3]f32{0, 0, 10}
+
+    // Point at vertex A should have coordinates (1, 0, 0)
+    bary_a := geometry.barycentric_2d(a, a, b, c)
+    testing.expect(t, approx_equal(bary_a.x, 1.0), "Point A should have u=1")
+    testing.expect(t, approx_equal(bary_a.y, 0.0), "Point A should have v=0")
+    testing.expect(t, approx_equal(bary_a.z, 0.0), "Point A should have w=0")
+
+    // Point at vertex B should have coordinates (0, 1, 0)
+    bary_b := geometry.barycentric_2d(b, a, b, c)
+    testing.expect(t, approx_equal(bary_b.x, 0.0), "Point B should have u=0")
+    testing.expect(t, approx_equal(bary_b.y, 1.0), "Point B should have v=1")
+    testing.expect(t, approx_equal(bary_b.z, 0.0), "Point B should have w=0")
+
+    // Point at vertex C should have coordinates (0, 0, 1)
+    bary_c := geometry.barycentric_2d(c, a, b, c)
+    testing.expect(t, approx_equal(bary_c.x, 0.0), "Point C should have u=0")
+    testing.expect(t, approx_equal(bary_c.y, 0.0), "Point C should have v=0")
+    testing.expect(t, approx_equal(bary_c.z, 1.0), "Point C should have w=1")
+
+    // Point at triangle center should have coordinates (1/3, 1/3, 1/3)
+    center := [3]f32{10.0/3.0, 0, 10.0/3.0}
+    bary_center := geometry.barycentric_2d(center, a, b, c)
+    testing.expect(t, approx_equal(bary_center.x, 1.0/3.0, 0.01), "Center should have u≈1/3")
+    testing.expect(t, approx_equal(bary_center.y, 1.0/3.0, 0.01), "Center should have v≈1/3")
+    testing.expect(t, approx_equal(bary_center.z, 1.0/3.0, 0.01), "Center should have w≈1/3")
+
+    // Test degenerate triangle (collinear points)
+    d := [3]f32{0, 0, 0}
+    e := [3]f32{5, 0, 0}
+    f := [3]f32{10, 0, 0}
+    p := [3]f32{3, 0, 0}
+
+    bary_degen := geometry.barycentric_2d(p, d, e, f)
+    // Should return fallback coordinates (1/3, 1/3, 1/3)
+    testing.expect(t, approx_equal(bary_degen.x, 1.0/3.0), "Degenerate triangle should return fallback u")
+    testing.expect(t, approx_equal(bary_degen.y, 1.0/3.0), "Degenerate triangle should return fallback v")
+    testing.expect(t, approx_equal(bary_degen.z, 1.0/3.0), "Degenerate triangle should return fallback w")
+}
+
+@(test)
+test_closest_point_on_segment_2d :: proc(t: ^testing.T) {
+    // Test point on segment
+    p1 := [3]f32{5, 2, 0}
+    a := [3]f32{0, 2, 0}
+    b := [3]f32{10, 2, 0}
+
+    closest1 := geometry.closest_point_on_segment_2d(p1, a, b)
+    testing.expect(t, vec3_approx_equal(closest1, p1), "Point on segment should project to itself")
+
+    // Test point perpendicular to segment middle
+    p2 := [3]f32{5, 5, 5}
+    closest2 := geometry.closest_point_on_segment_2d(p2, a, b)
+    expected2 := [3]f32{5, 2, 0}
+    testing.expect(t, vec3_approx_equal(closest2, expected2), "Point should project to segment middle")
+
+    // Test point beyond segment start
+    p3 := [3]f32{-5, 2, 0}
+    closest3 := geometry.closest_point_on_segment_2d(p3, a, b)
+    testing.expect(t, vec3_approx_equal(closest3, a), "Point beyond start should project to start")
+
+    // Test point beyond segment end
+    p4 := [3]f32{15, 2, 0}
+    closest4 := geometry.closest_point_on_segment_2d(p4, a, b)
+    testing.expect(t, vec3_approx_equal(closest4, b), "Point beyond end should project to end")
+
+    // Test degenerate segment (point)
+    p5 := [3]f32{3, 4, 5}
+    closest5 := geometry.closest_point_on_segment_2d(p5, a, a)
+    testing.expect(t, vec3_approx_equal(closest5, a), "Degenerate segment should return the point")
+
+    // Test with Y interpolation
+    a_y := [3]f32{0, 0, 0}
+    b_y := [3]f32{10, 10, 0}
+    p_y := [3]f32{5, 0, 5}
+    closest_y := geometry.closest_point_on_segment_2d(p_y, a_y, b_y)
+    expected_y := [3]f32{5, 5, 0}  // Y should be interpolated
+    testing.expect(t, vec3_approx_equal(closest_y, expected_y), "Y coordinate should be interpolated")
+}
+
+@(test)
+test_overlap_bounds_2d :: proc(t: ^testing.T) {
+    // Test overlapping bounds in 2D (XZ plane)
+    amin1 := [3]f32{0, 5, 0}
+    amax1 := [3]f32{10, 15, 10}
+    bmin1 := [3]f32{5, 20, 5}  // Y doesn't matter for 2D test
+    bmax1 := [3]f32{15, 25, 15}
+
+    testing.expect(t, geometry.overlap_bounds_2d(amin1, amax1, bmin1, bmax1), "2D bounds should overlap")
+
+    // Test non-overlapping bounds in X
+    bmin2 := [3]f32{15, 0, 5}
+    bmax2 := [3]f32{20, 10, 15}
+    testing.expect(t, !geometry.overlap_bounds_2d(amin1, amax1, bmin2, bmax2), "2D bounds should not overlap in X")
+
+    // Test non-overlapping bounds in Z
+    bmin3 := [3]f32{5, 0, 15}
+    bmax3 := [3]f32{15, 10, 20}
+    testing.expect(t, !geometry.overlap_bounds_2d(amin1, amax1, bmin3, bmax3), "2D bounds should not overlap in Z")
+
+    // Test touching bounds (edge case)
+    bmin4 := [3]f32{10, 0, 10}
+    bmax4 := [3]f32{20, 10, 20}
+    testing.expect(t, geometry.overlap_bounds_2d(amin1, amax1, bmin4, bmax4), "Touching 2D bounds should overlap")
+
+    // Test Y axis ignored (overlapping in XZ but different in Y)
+    bmin5 := [3]f32{5, 100, 5}  // Very different Y
+    bmax5 := [3]f32{15, 200, 15}
+    testing.expect(t, geometry.overlap_bounds_2d(amin1, amax1, bmin5, bmax5), "Y axis should be ignored in 2D overlap")
+}
+
+@(test)
+test_calc_tri_normal :: proc(t: ^testing.T) {
+    // Test triangle in XY plane (normal should point in +Z direction)
+    v0 := [3]f32{0, 0, 0}
+    v1 := [3]f32{1, 0, 0}
+    v2 := [3]f32{0, 1, 0}
+
+    normal1 := geometry.calc_tri_normal(v0, v1, v2)
+    expected1 := [3]f32{0, 0, 1}
+    testing.expect(t, vec3_approx_equal(normal1, expected1), "XY triangle normal should point +Z")
+
+    // Test triangle in XZ plane (normal should point in -Y direction due to winding)
+    v3 := [3]f32{0, 0, 0}
+    v4 := [3]f32{1, 0, 0}
+    v5 := [3]f32{0, 0, 1}
+
+    normal2 := geometry.calc_tri_normal(v3, v4, v5)
+    expected2 := [3]f32{0, -1, 0}  // Right-hand rule: (1,0,0) × (0,0,1) = (0,-1,0)
+    testing.expect(t, vec3_approx_equal(normal2, expected2), "XZ triangle normal should point -Y")
+
+    // Test triangle in YZ plane (normal should point in +X direction)
+    v6 := [3]f32{0, 0, 0}
+    v7 := [3]f32{0, 1, 0}
+    v8 := [3]f32{0, 0, 1}
+
+    normal3 := geometry.calc_tri_normal(v6, v7, v8)
+    expected3 := [3]f32{1, 0, 0}
+    testing.expect(t, vec3_approx_equal(normal3, expected3), "YZ triangle normal should point +X")
+
+    // Test winding order (reversed triangle should have opposite normal)
+    normal4 := geometry.calc_tri_normal(v0, v2, v1)  // Reversed v1 and v2
+    expected4 := [3]f32{0, 0, -1}
+    testing.expect(t, vec3_approx_equal(normal4, expected4), "Reversed triangle normal should point -Z")
+
+    // Test arbitrary non-degenerate triangle
+    v9 := [3]f32{0, 0, 0}
+    v10 := [3]f32{2, 0, 0}
+    v11 := [3]f32{1, 2, 0}
+
+    normal5 := geometry.calc_tri_normal(v9, v10, v11)
+    // This should be a normalized vector, so check length ≈ 1
+    length := math.sqrt(normal5.x*normal5.x + normal5.y*normal5.y + normal5.z*normal5.z)
+    testing.expect(t, approx_equal(length, 1.0), "Triangle normal should be normalized")
+
+    // Test degenerate triangle (collinear points) - normalize may produce NaN
+    v12 := [3]f32{0, 0, 0}
+    v13 := [3]f32{1, 1, 1}
+    v14 := [3]f32{2, 2, 2}  // All collinear
+
+    // Degenerate triangle cross product is zero, normalize(zero) may be undefined
+    // Just check it doesn't crash - the result may be NaN
+    geometry.calc_tri_normal(v12, v13, v14)
+}
+
+@(test)
+test_area2 :: proc(t: ^testing.T) {
+    // Test counter-clockwise triangle (positive area)
+    a := [2]i32{0, 0}
+    b := [2]i32{10, 0}
+    c := [2]i32{0, 10}
+
+    area_ccw := geometry.area2(a, b, c)
+    testing.expect(t, area_ccw > 0, "Counter-clockwise triangle should have positive area")
+    testing.expect_value(t, area_ccw, i32(100))
+
+    // Test clockwise triangle (negative area)
+    area_cw := geometry.area2(a, c, b)  // Reversed c and b
+    testing.expect(t, area_cw < 0, "Clockwise triangle should have negative area")
+    testing.expect_value(t, area_cw, i32(-100))
+
+    // Test collinear points (zero area)
+    d := [2]i32{20, 0}
+    area_collinear := geometry.area2(a, b, d)
+    testing.expect_value(t, area_collinear, i32(0))
+}
+
+@(test)
+test_left_left_on :: proc(t: ^testing.T) {
+    // Test with area2 function: (b.x-a.x)*(c.y-a.y) - (c.x-a.x)*(b.y-a.y)
+    // For a=(0,0), b=(10,0), c=(5,5): (10-0)*(5-0) - (5-0)*(0-0) = 10*5 - 5*0 = 50 > 0
+    // So area2 > 0, left() returns false (since left checks area2 < 0)
+    a := [2]i32{0, 0}
+    b := [2]i32{10, 0}
+    c := [2]i32{5, 5}  // Point above line ab
+
+    testing.expect(t, !geometry.left(a, b, c), "Point above line should NOT be left (area2 > 0)")
+    testing.expect(t, !geometry.left_on(a, b, c), "Point above line should NOT be left_on (area2 > 0)")
+
+    // Test right turn - point below line
+    // For a=(0,0), b=(10,0), d=(5,-5): (10-0)*(-5-0) - (5-0)*(0-0) = 10*(-5) - 5*0 = -50 < 0
+    // So area2 < 0, left() returns true
+    d := [2]i32{5, -5}  // Point below line ab
+    testing.expect(t, geometry.left(a, b, d), "Point below line should be left (area2 < 0)")
+    testing.expect(t, geometry.left_on(a, b, d), "Point below line should be left_on (area2 < 0)")
+
+    // Test collinear point
+    // For a=(0,0), b=(10,0), e=(5,0): (10-0)*(0-0) - (5-0)*(0-0) = 10*0 - 5*0 = 0
+    // So area2 = 0, left() returns false, left_on() returns true
+    e := [2]i32{5, 0}  // Point on line ab
+    testing.expect(t, !geometry.left(a, b, e), "Collinear point should not be left (area2 = 0)")
+    testing.expect(t, geometry.left_on(a, b, e), "Collinear point should be left_on (area2 = 0)")
+}
+
+@(test)
+test_between :: proc(t: ^testing.T) {
+    // Test point between two points on horizontal line
+    a := [2]i32{0, 0}
+    b := [2]i32{10, 0}
+    c := [2]i32{5, 0}
+
+    testing.expect(t, geometry.between(a, b, c), "Point should be between endpoints")
+    testing.expect(t, geometry.between(b, a, c), "Order shouldn't matter for between")
+
+    // Test point not between (but collinear)
+    d := [2]i32{15, 0}
+    testing.expect(t, !geometry.between(a, b, d), "Point beyond segment should not be between")
+
+    e := [2]i32{-5, 0}
+    testing.expect(t, !geometry.between(a, b, e), "Point before segment should not be between")
+
+    // Test endpoints
+    testing.expect(t, geometry.between(a, b, a), "Endpoint should be between")
+    testing.expect(t, geometry.between(a, b, b), "Endpoint should be between")
+
+    // Test vertical line
+    f := [2]i32{0, 0}
+    g := [2]i32{0, 10}
+    h := [2]i32{0, 5}
+
+    testing.expect(t, geometry.between(f, g, h), "Point should be between on vertical line")
+
+    // Test non-collinear point
+    i := [2]i32{5, 5}
+    testing.expect(t, !geometry.between(a, b, i), "Non-collinear point should not be between")
+}
+
+@(test)
+test_intersect_prop :: proc(t: ^testing.T) {
+    // Test proper intersection (X crossing)
+    a := [2]i32{0, 0}
+    b := [2]i32{10, 10}
+    c := [2]i32{0, 10}
+    d := [2]i32{10, 0}
+
+    testing.expect(t, geometry.intersect_prop(a, b, c, d), "X-crossing segments should intersect properly")
+
+    // Test parallel segments (no intersection)
+    e := [2]i32{0, 0}
+    f := [2]i32{10, 0}
+    g := [2]i32{0, 5}
+    h := [2]i32{10, 5}
+
+    testing.expect(t, !geometry.intersect_prop(e, f, g, h), "Parallel segments should not intersect")
+
+    // Test segments sharing an endpoint (improper intersection)
+    i := [2]i32{0, 0}
+    j := [2]i32{10, 0}
+    k := [2]i32{0, 0}  // Same as i
+    l := [2]i32{0, 10}
+
+    testing.expect(t, !geometry.intersect_prop(i, j, k, l), "Segments sharing endpoint should not intersect properly")
+
+    // Test T-junction (improper intersection)
+    m := [2]i32{0, 0}
+    n := [2]i32{10, 0}
+    o := [2]i32{5, -5}
+    p := [2]i32{5, 0}  // Endpoint on segment mn
+
+    testing.expect(t, !geometry.intersect_prop(m, n, o, p), "T-junction should not be proper intersection")
+}
+
+@(test)
+test_intersect :: proc(t: ^testing.T) {
+    // Test proper intersection
+    a := [2]i32{0, 0}
+    b := [2]i32{10, 10}
+    c := [2]i32{0, 10}
+    d := [2]i32{10, 0}
+
+    testing.expect(t, geometry.intersect(a, b, c, d), "X-crossing segments should intersect")
+
+    // Test segments sharing an endpoint (improper but still intersection)
+    e := [2]i32{0, 0}
+    f := [2]i32{10, 0}
+    g := [2]i32{0, 0}  // Same as e
+    h := [2]i32{0, 10}
+
+    testing.expect(t, geometry.intersect(e, f, g, h), "Segments sharing endpoint should intersect")
+
+    // Test T-junction (improper but still intersection)
+    i := [2]i32{0, 0}
+    j := [2]i32{10, 0}
+    k := [2]i32{5, -5}
+    l := [2]i32{5, 0}  // Endpoint on segment ij
+
+    testing.expect(t, geometry.intersect(i, j, k, l), "T-junction should intersect")
+
+    // Test overlapping collinear segments
+    m := [2]i32{0, 0}
+    n := [2]i32{10, 0}
+    o := [2]i32{5, 0}
+    p := [2]i32{15, 0}
+
+    testing.expect(t, geometry.intersect(m, n, o, p), "Overlapping collinear segments should intersect")
+
+    // Test non-intersecting segments
+    q := [2]i32{0, 0}
+    r := [2]i32{5, 0}
+    s := [2]i32{10, 0}
+    u := [2]i32{15, 0}
+
+    testing.expect(t, !geometry.intersect(q, r, s, u), "Non-overlapping segments should not intersect")
+}
+
+@(test)
+test_in_cone :: proc(t: ^testing.T) {
+    // The in_cone function is complex and depends on whether the vertex is convex or reflex
+    // Let me test with a simpler, more predictable configuration
+    
+    // Test simple convex case: right angle cone
+    a0 := [2]i32{0, 0}   // Previous vertex
+    a1 := [2]i32{0, 5}   // Apex of cone (current vertex) 
+    a2 := [2]i32{5, 5}   // Next vertex
+    
+    // This should create a convex vertex (90 degree angle)
+    // Check if a2 is left_on of line a0->a1: area2(a0,a1,a2) = area2((0,0),(0,5),(5,5))
+    // = (0-0)*(5-0) - (5-0)*(5-0) = 0*5 - 5*5 = -25 <= 0, so it's convex
+    
+    p_inside := [2]i32{2, 3}  // Point that should be inside the cone
+    testing.expect(t, geometry.in_cone(a0, a1, a2, p_inside), "Point should be inside convex cone")
+
+    // Point clearly outside the cone
+    p_outside := [2]i32{-2, 3}  // Point to the left, outside cone
+    testing.expect(t, !geometry.in_cone(a0, a1, a2, p_outside), "Point should be outside convex cone")
+
+    // Test reflex vertex cone (vertex angle > 180 degrees)
+    // Create a reflex angle by making the turn > 180 degrees
+    a0_r := [2]i32{0, 0}
+    a1_r := [2]i32{5, 0}   // Apex 
+    a2_r := [2]i32{0, 5}   // This creates a reflex angle at a1_r
+    
+    // Point that should be inside reflex cone (in the "excluded" region of convex)
+    p_reflex_inside := [2]i32{2, -1}
+    testing.expect(t, geometry.in_cone(a0_r, a1_r, a2_r, p_reflex_inside), "Point should be inside reflex cone")
+}
+
+@(test)
+test_clamp_usage :: proc(t: ^testing.T) {
+    // Test that clamp works correctly in our closest_point_on_segment_2d function
+    // This tests the integration rather than the clamp function itself
+    p := [3]f32{5, 0, 0}
+    a := [3]f32{0, 0, 0}
+    b := [3]f32{10, 0, 0}
+
+    // Point that would give t > 1 without clamping
+    p_beyond := [3]f32{15, 0, 0}
+    closest_beyond := geometry.closest_point_on_segment_2d(p_beyond, a, b)
+    testing.expect(t, vec3_approx_equal(closest_beyond, b), "Point beyond segment should clamp to endpoint")
+
+    // Point that would give t < 0 without clamping
+    p_before := [3]f32{-5, 0, 0}
+    closest_before := geometry.closest_point_on_segment_2d(p_before, a, b)
+    testing.expect(t, vec3_approx_equal(closest_before, a), "Point before segment should clamp to endpoint")
 }

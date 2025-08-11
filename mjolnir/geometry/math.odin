@@ -277,11 +277,11 @@ prev_dir :: proc "contextless" (dir: int) -> int {
 
 // Integer geometry operations (for exact arithmetic)
 
-// Calculate signed area of triangle formed by three 2D points in XZ plane
+// Calculate signed area of triangle formed by three 2D points
 // Positive area = counter-clockwise, negative = clockwise
-// NOTE: Uses XZ plane (indices 0 and 2) to match C++ Recast implementation
+// This is the 2D cross product of vectors (b-a) and (c-a)
 area2 :: proc "contextless" (a, b, c: [2]i32) -> i32 {
-    return (b.x - a.x) * (c.y - a.y) - (c.x - a.x) * (b.y - a.y)
+    return linalg.vector_cross2(b - a, c - a)
 }
 
 // Check if point c is to the left of the directed line from a to b
