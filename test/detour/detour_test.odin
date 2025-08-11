@@ -92,32 +92,32 @@ test_detour_reference_encoding :: proc(t: ^testing.T) {
 }
 
 @(test)
-test_detour_node_pool :: proc(t: ^testing.T) {
+test_detour_pathfinding_context :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
 
-    pool := nav_detour.Node_Pool{}
-    defer nav_detour.node_pool_destroy(&pool)
+    ctx := nav_detour.Pathfinding_Context{}
+    defer nav_detour.pathfinding_context_destroy(&ctx)
 
-    status := nav_detour.node_pool_init(&pool, 16)
-    testing.expect(t, nav_recast.status_succeeded(status), "Node pool initialization should succeed")
+    status := nav_detour.pathfinding_context_init(&ctx, 16)
+    testing.expect(t, nav_recast.status_succeeded(status), "Pathfinding context initialization should succeed")
 
     // Test node creation
     ref1 := nav_recast.Poly_Ref(100)
-    node1 := nav_detour.node_pool_create_node(&pool, ref1)
+    node1 := nav_detour.create_node(&ctx, ref1)
     testing.expect(t, node1 != nil, "Node creation should succeed")
     testing.expect_value(t, node1.id, ref1)
 
     // Test node retrieval
-    retrieved := nav_detour.node_pool_get_node(&pool, ref1)
+    retrieved := nav_detour.get_node(&ctx, ref1)
     testing.expect(t, retrieved == node1, "Retrieved node should match created node")
 
     // Test duplicate creation (should return existing)
-    node1_dup := nav_detour.node_pool_create_node(&pool, ref1)
+    node1_dup := nav_detour.create_node(&ctx, ref1)
     testing.expect(t, node1_dup != nil, "Duplicate node creation should not fail")
 
-    // Test pool clearing
-    nav_detour.node_pool_clear(&pool)
-    cleared := nav_detour.node_pool_get_node(&pool, ref1)
+    // Test context clearing
+    nav_detour.pathfinding_context_clear(&ctx)
+    cleared := nav_detour.get_node(&ctx, ref1)
     testing.expect(t, cleared == nil, "Node should not exist after clearing")
 }
 
@@ -125,23 +125,23 @@ test_detour_node_pool :: proc(t: ^testing.T) {
 test_detour_node_queue :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
 
-    pool := nav_detour.Node_Pool{}
-    defer nav_detour.node_pool_destroy(&pool)
+    ctx := nav_detour.Pathfinding_Context{}
+    defer nav_detour.pathfinding_context_destroy(&ctx)
 
     queue := nav_detour.Node_Queue{}
     defer nav_detour.node_queue_destroy(&queue)
 
-    nav_detour.node_pool_init(&pool, 16)
-    nav_detour.node_queue_init(&queue, &pool, 16)
+    nav_detour.pathfinding_context_init(&ctx, 16)
+    nav_detour.node_queue_init(&queue, 16)
 
     // Create nodes with different costs
     ref1 := nav_recast.Poly_Ref(100)
     ref2 := nav_recast.Poly_Ref(200)
     ref3 := nav_recast.Poly_Ref(300)
 
-    node1 := nav_detour.node_pool_create_node(&pool, ref1)
-    node2 := nav_detour.node_pool_create_node(&pool, ref2)
-    node3 := nav_detour.node_pool_create_node(&pool, ref3)
+    node1 := nav_detour.create_node(&ctx, ref1)
+    node2 := nav_detour.create_node(&ctx, ref2)
+    node3 := nav_detour.create_node(&ctx, ref3)
 
     node1.total = 10.0
     node2.total = 5.0
@@ -172,14 +172,14 @@ test_detour_node_queue_comprehensive :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
 
     // Test multiple scenarios to ensure priority queue works correctly
-    pool := nav_detour.Node_Pool{}
-    defer nav_detour.node_pool_destroy(&pool)
+    ctx := nav_detour.Pathfinding_Context{}
+    defer nav_detour.pathfinding_context_destroy(&ctx)
 
     queue := nav_detour.Node_Queue{}
     defer nav_detour.node_queue_destroy(&queue)
 
-    nav_detour.node_pool_init(&pool, 32)
-    nav_detour.node_queue_init(&queue, &pool, 32)
+    nav_detour.pathfinding_context_init(&ctx, 32)
+    nav_detour.node_queue_init(&queue, 32)
 
     // Test 1: Insert in ascending order, should pop in same order
     {
@@ -187,7 +187,7 @@ test_detour_node_queue_comprehensive :: proc(t: ^testing.T) {
         costs := []f32{1.0, 2.0, 3.0, 4.0, 5.0}
 
         for i in 0..<len(refs) {
-            node := nav_detour.node_pool_create_node(&pool, refs[i])
+            node := nav_detour.create_node(&ctx, refs[i])
             node.total = costs[i]
             nav_detour.node_queue_push(&queue, {refs[i], node.cost, node.total})
         }
@@ -197,7 +197,7 @@ test_detour_node_queue_comprehensive :: proc(t: ^testing.T) {
             testing.expect_value(t, popped.ref, refs[i])
         }
 
-        nav_detour.node_pool_clear(&pool)
+        nav_detour.pathfinding_context_clear(&ctx)
     }
 
     // Test 2: Insert in descending order, should pop in ascending cost order
@@ -207,7 +207,7 @@ test_detour_node_queue_comprehensive :: proc(t: ^testing.T) {
         expected_order := []nav_recast.Poly_Ref{14, 13, 12, 11, 10}
 
         for i in 0..<len(refs) {
-            node := nav_detour.node_pool_create_node(&pool, refs[i])
+            node := nav_detour.create_node(&ctx, refs[i])
             node.total = costs[i]
             nav_detour.node_queue_push(&queue, {refs[i], node.cost, node.total})
         }
@@ -217,7 +217,7 @@ test_detour_node_queue_comprehensive :: proc(t: ^testing.T) {
             testing.expect_value(t, popped.ref, expected_order[i])
         }
 
-        nav_detour.node_pool_clear(&pool)
+        nav_detour.pathfinding_context_clear(&ctx)
     }
 
     // Test 3: Insert in random order, should pop in cost order
@@ -227,7 +227,7 @@ test_detour_node_queue_comprehensive :: proc(t: ^testing.T) {
         expected_order := []nav_recast.Poly_Ref{21, 23, 20, 24, 22} // sorted by cost: 1.2, 2.1, 3.5, 3.9, 4.8
 
         for i in 0..<len(refs) {
-            node := nav_detour.node_pool_create_node(&pool, refs[i])
+            node := nav_detour.create_node(&ctx, refs[i])
             node.total = costs[i]
             nav_detour.node_queue_push(&queue, {refs[i], node.cost, node.total})
         }
@@ -244,23 +244,23 @@ test_detour_node_queue_exact_problem :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
 
     // Test the exact scenario described in the issue
-    pool := nav_detour.Node_Pool{}
-    defer nav_detour.node_pool_destroy(&pool)
+    ctx := nav_detour.Pathfinding_Context{}
+    defer nav_detour.pathfinding_context_destroy(&ctx)
 
     queue := nav_detour.Node_Queue{}
     defer nav_detour.node_queue_destroy(&queue)
 
-    nav_detour.node_pool_init(&pool, 16)
-    nav_detour.node_queue_init(&queue, &pool, 16)
+    nav_detour.pathfinding_context_init(&ctx, 16)
+    nav_detour.node_queue_init(&queue, 16)
 
     // Create nodes with the exact same configuration as the original failing test
     node1_ref := nav_recast.Poly_Ref(100)
     node2_ref := nav_recast.Poly_Ref(200)
     node3_ref := nav_recast.Poly_Ref(300)
 
-    node1 := nav_detour.node_pool_create_node(&pool, node1_ref)
-    node2 := nav_detour.node_pool_create_node(&pool, node2_ref)
-    node3 := nav_detour.node_pool_create_node(&pool, node3_ref)
+    node1 := nav_detour.create_node(&ctx, node1_ref)
+    node2 := nav_detour.create_node(&ctx, node2_ref)
+    node3 := nav_detour.create_node(&ctx, node3_ref)
 
     // Set the exact same costs as described
     node1.total = 10.0

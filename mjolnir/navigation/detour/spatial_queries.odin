@@ -768,11 +768,11 @@ find_polys_around_circle :: proc(query: ^Nav_Mesh_Query, start_ref: nav_recast.P
     radius_sqr := radius * radius
     
     // Clear node pool for search
-    node_pool_clear(&query.node_pool)
+    pathfinding_context_clear(&query.pf_context)
     node_queue_clear(&query.open_list)
     
     // Initialize start node
-    start_node := node_pool_create_node(&query.node_pool, start_ref)
+    start_node := create_node(&query.pf_context, start_ref)
     if start_node == nil {
         return 0, {.Out_Of_Nodes}
     }
@@ -805,7 +805,7 @@ find_polys_around_circle :: proc(query: ^Nav_Mesh_Query, start_ref: nav_recast.P
             break
         }
         
-        current := node_pool_get_node(&query.node_pool, best.ref)
+        current := get_node(&query.pf_context, best.ref)
         if current == nil || .Closed in current.flags {
             continue
         }
@@ -840,9 +840,9 @@ find_polys_around_circle :: proc(query: ^Nav_Mesh_Query, start_ref: nav_recast.P
                 if nav_recast.status_succeeded(neighbor_status) &&
                    query_filter_pass_filter(filter, neighbor_ref, neighbor_tile, neighbor_poly) {
                     
-                    neighbor_node := node_pool_get_node(&query.node_pool, neighbor_ref)
+                    neighbor_node := get_node(&query.pf_context, neighbor_ref)
                     if neighbor_node == nil {
-                        neighbor_node = node_pool_create_node(&query.node_pool, neighbor_ref)
+                        neighbor_node = create_node(&query.pf_context, neighbor_ref)
                         if neighbor_node == nil {
                             break
                         }
@@ -899,11 +899,11 @@ find_polys_around_shape :: proc(query: ^Nav_Mesh_Query, start_ref: nav_recast.Po
     center /= f32(len(verts))
     
     // Clear node pool for search
-    node_pool_clear(&query.node_pool)
+    pathfinding_context_clear(&query.pf_context)
     node_queue_clear(&query.open_list)
     
     // Initialize start node
-    start_node := node_pool_create_node(&query.node_pool, start_ref)
+    start_node := create_node(&query.pf_context, start_ref)
     if start_node == nil {
         return 0, {.Out_Of_Nodes}
     }
@@ -928,7 +928,7 @@ find_polys_around_shape :: proc(query: ^Nav_Mesh_Query, start_ref: nav_recast.Po
             break
         }
         
-        current := node_pool_get_node(&query.node_pool, best.ref)
+        current := get_node(&query.pf_context, best.ref)
         if current == nil || .Closed in current.flags {
             continue
         }
@@ -962,9 +962,9 @@ find_polys_around_shape :: proc(query: ^Nav_Mesh_Query, start_ref: nav_recast.Po
                 if nav_recast.status_succeeded(neighbor_status) &&
                    query_filter_pass_filter(filter, neighbor_ref, neighbor_tile, neighbor_poly) {
                     
-                    neighbor_node := node_pool_get_node(&query.node_pool, neighbor_ref)
+                    neighbor_node := get_node(&query.pf_context, neighbor_ref)
                     if neighbor_node == nil {
-                        neighbor_node = node_pool_create_node(&query.node_pool, neighbor_ref)
+                        neighbor_node = create_node(&query.pf_context, neighbor_ref)
                         if neighbor_node == nil {
                             break
                         }
@@ -1008,7 +1008,7 @@ get_path_from_dijkstra_search :: proc(query: ^Nav_Mesh_Query, end_ref: nav_recas
         return 0, {.Invalid_Param}
     }
     
-    end_node := node_pool_get_node(&query.node_pool, end_ref)
+    end_node := get_node(&query.pf_context, end_ref)
     if end_node == nil || .Closed not_in end_node.flags {
         return 0, {.Invalid_Param}
     }
@@ -1081,7 +1081,7 @@ is_in_closed_list :: proc(query: ^Nav_Mesh_Query, ref: nav_recast.Poly_Ref) -> b
         return false
     }
     
-    node := node_pool_get_node(&query.node_pool, ref)
+    node := get_node(&query.pf_context, ref)
     if node == nil {
         return false
     }
