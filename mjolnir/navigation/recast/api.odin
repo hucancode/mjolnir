@@ -164,9 +164,12 @@ build_navmesh :: proc(vertices: [][3]f32, indices: []i32, areas: []u8, cfg: Conf
         return nil, nil, false
     }
     
+    log.infof("Building regions with min_area=%d, merge_area=%d", config.min_region_area, config.merge_region_area)
     if !build_regions(chf, 0, config.min_region_area, config.merge_region_area) {
+        log.error("Failed to build regions")
         return nil, nil, false
     }
+    log.info("Regions built successfully")
     
 
     

@@ -16,6 +16,8 @@ find_nearest_poly :: proc(query: ^Nav_Mesh_Query, center: [3]f32, half_extents: 
     nearest_ref = nav_recast.INVALID_POLY_REF
     nearest_pt = center
 
+    log.infof("find_nearest_poly: center=%v, half_extents=%v", center, half_extents)
+
     // Calculate query bounds
     bmin := center - half_extents
     bmax := center + half_extents
@@ -23,24 +25,28 @@ find_nearest_poly :: proc(query: ^Nav_Mesh_Query, center: [3]f32, half_extents: 
     // Find tiles that overlap query region
     tx0, ty0 := calc_tile_loc_simple(query.nav_mesh, bmin)
     tx1, ty1 := calc_tile_loc_simple(query.nav_mesh, bmax)
-    // log.infof("find_nearest_poly: Searching tiles (%d,%d) to (%d,%d) for position %v", tx0, ty0, tx1, ty1, center)
+    log.infof("find_nearest_poly: Searching tiles (%d,%d) to (%d,%d) for position %v", tx0, ty0, tx1, ty1, center)
 
     nearest_dist_sqr := f32(math.F32_MAX)
+    total_tiles_checked := 0
+    total_polys_checked := 0
 
     // Search tiles
     for ty in ty0..=ty1 {
         for tx in tx0..=tx1 {
             tile := get_tile_at(query.nav_mesh, tx, ty, 0)
+            total_tiles_checked += 1
             if tile == nil || tile.header == nil {
-                // log.infof("  No tile at (%d,%d)", tx, ty)
+                log.infof("  No tile at (%d,%d)", tx, ty)
                 continue
             }
-            // log.infof("  Found tile at (%d,%d) with %d polygons", tx, ty, tile.header.poly_count)
+            log.infof("  Found tile at (%d,%d) with %d polygons", tx, ty, tile.header.poly_count)
 
             // Query polygons in tile using temp allocator
             poly_refs := make([]nav_recast.Poly_Ref, 128, context.temp_allocator)
             poly_count := query_polygons_in_tile(query.nav_mesh, tile, bmin, bmax, poly_refs, 128)
-            // log.infof("  Query returned %d polygons", poly_count)
+            log.infof("  Query returned %d polygons", poly_count)
+            total_polys_checked += int(poly_count)
 
             for i in 0..<poly_count {
                 ref := poly_refs[i]
@@ -78,6 +84,14 @@ find_nearest_poly :: proc(query: ^Nav_Mesh_Query, center: [3]f32, half_extents: 
                 }
             }
         }
+    }
+
+    log.infof("find_nearest_poly: Checked %d tiles, %d polygons total. nearest_ref=0x%x, dist_sqr=%f", 
+              total_tiles_checked, total_polys_checked, nearest_ref, nearest_dist_sqr)
+
+    // Return failure if no polygon was found
+    if nearest_ref == nav_recast.INVALID_POLY_REF {
+        return {.Invalid_Param}, nearest_ref, nearest_pt
     }
 
     return {.Success}, nearest_ref, nearest_pt

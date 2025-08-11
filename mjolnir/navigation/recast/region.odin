@@ -1202,6 +1202,8 @@ build_regions :: proc(chf: ^Compact_Heightfield,
     assigned_spans := 0
     unassigned_spans := 0
     border_spans := 0
+    unique_regions := make(map[u16]bool)
+    defer delete(unique_regions)
 
     for i in 0..<chf.span_count {
         chf.spans[i].reg = src_reg[i]
@@ -1212,10 +1214,18 @@ build_regions :: proc(chf: ^Compact_Heightfield,
             border_spans += 1
         } else {
             assigned_spans += 1
+            unique_regions[src_reg[i]] = true
         }
     }
 
 
+    log.infof("Region building complete: %d unique regions, %d assigned spans, %d border spans, %d unassigned spans",
+              len(unique_regions), assigned_spans, border_spans, unassigned_spans)
+    
+    if len(unique_regions) > 10 {
+        log.warnf("WARNING: Found %d disconnected regions - this may cause pathfinding failures!", len(unique_regions))
+    }
+    
     if unassigned_spans > 0 {
         log.warnf("Warning: %d spans were not assigned to any region", unassigned_spans)
     }

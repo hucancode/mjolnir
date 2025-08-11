@@ -1,5 +1,6 @@
 package navigation_detour
 
+import "core:log"
 import "core:math"
 import "core:math/linalg"
 import nav_recast "../recast"
@@ -56,17 +57,22 @@ create_navmesh :: proc(pmesh: ^nav_recast.Poly_Mesh, dmesh: ^nav_recast.Poly_Mes
 
 // Find path between two points
 find_path_points :: proc(query: ^Nav_Mesh_Query, start_pos: [3]f32, end_pos: [3]f32, filter: ^Query_Filter, path: [][3]f32) -> (path_count: int, status: nav_recast.Status) {
-    half_extents := [3]f32{2.0, 1.0, 2.0}
+    log.infof("=== find_path_points called: start=%v, end=%v, path_buffer_len=%d", start_pos, end_pos, len(path))
+    half_extents := [3]f32{5.0, 5.0, 5.0}  // Use larger search radius to ensure we find polygons
     
     // Find start polygon
     start_status, start_ref, start_nearest := find_nearest_poly(query, start_pos, half_extents, filter)
+    log.infof("find_path_points: find_nearest_poly for start returned status=%v, ref=0x%x, nearest=%v", start_status, start_ref, start_nearest)
     if nav_recast.status_failed(start_status) || start_ref == nav_recast.INVALID_POLY_REF {
+        log.errorf("find_path_points: Failed to find start polygon, returning early")
         return 0, start_status
     }
     
     // Find end polygon
     end_status, end_ref, end_nearest := find_nearest_poly(query, end_pos, half_extents, filter)
+    log.infof("find_path_points: find_nearest_poly for end returned status=%v, ref=0x%x, nearest=%v", end_status, end_ref, end_nearest)
     if nav_recast.status_failed(end_status) || end_ref == nav_recast.INVALID_POLY_REF {
+        log.errorf("find_path_points: Failed to find end polygon, returning early")
         return 0, end_status
     }
     
@@ -75,7 +81,9 @@ find_path_points :: proc(query: ^Nav_Mesh_Query, start_pos: [3]f32, end_pos: [3]
     defer delete(poly_path)
     
     path_status, poly_path_count := find_path(query, start_ref, end_ref, start_nearest, end_nearest, filter, poly_path, i32(len(path)))
+    log.infof("find_path_points: find_path returned status=%v, poly_path_count=%d", path_status, poly_path_count)
     if nav_recast.status_failed(path_status) || poly_path_count == 0 {
+        log.errorf("find_path_points: Failed to find polygon path or path empty, returning early")
         return 0, path_status
     }
     
@@ -89,10 +97,36 @@ find_path_points :: proc(query: ^Nav_Mesh_Query, start_pos: [3]f32, end_pos: [3]
     straight_path_refs := make([]nav_recast.Poly_Ref, len(path))
     defer delete(straight_path_refs)
     
+    // Special case: if path has only 1 polygon, just return start and end points
+    log.infof("find_path_points: poly_path_count = %d", poly_path_count)
+    if poly_path_count == 1 {
+        log.info("find_path_points: Single polygon path - returning direct line")
+        path[0] = start_nearest
+        if linalg.length2(end_nearest - start_nearest) > 0.0001 {  // Not the same point
+            path[1] = end_nearest
+            log.infof("Returning 2 points: start=%v, end=%v", start_nearest, end_nearest)
+            return 2, {.Success}
+        }
+        log.info("Start and end are same point, returning 1")
+        return 1, {.Success}
+    }
+    
+    log.infof("find_path_points: About to call find_straight_path with %d polygons", poly_path_count)
+    log.infof("  poly_path_count=%d, len(poly_path)=%d", poly_path_count, len(poly_path))
+    log.infof("  len(straight_path)=%d, max=%d", len(straight_path), len(path))
+    log.infof("  start_nearest=%v, end_nearest=%v", start_nearest, end_nearest)
+    
+    // Log the polygon path
+    for i in 0..<poly_path_count {
+        log.infof("  poly_path[%d] = 0x%x", i, poly_path[i])
+    }
+    
     straight_status, straight_path_count := find_straight_path(query, start_nearest, end_nearest, poly_path[:poly_path_count], poly_path_count,
                                                                 straight_path, straight_path_flags, straight_path_refs,
                                                                 i32(len(path)), u32(Straight_Path_Options.All_Crossings))
+    log.infof("find_path_points: find_straight_path returned status=%v, count=%d", straight_status, straight_path_count)
     if nav_recast.status_failed(straight_status) {
+        log.errorf("find_path_points: find_straight_path failed with status %v", straight_status)
         return 0, straight_status
     }
     

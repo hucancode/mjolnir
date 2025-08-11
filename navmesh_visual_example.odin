@@ -119,8 +119,8 @@ navmesh_setup :: proc(engine: ^mjolnir.Engine) {
     // Start in picking mode
     navmesh_state.picking_mode = .PickingStart
 
-    // Only test pathfinding at startup if using procedural geometry
-    if use_procedural {
+    // Test pathfinding at startup for both procedural and obj geometry
+    if use_procedural || true {
         log.info("=== TESTING PATHFINDING AT STARTUP ===")
         log.info("Testing path from corner to corner that should go around obstacles")
         log.info("Note: Ground is 50x50 (-25 to 25), with 5 obstacles well-spaced")
@@ -360,7 +360,7 @@ build_navmesh :: proc(engine: ^mjolnir.Engine) -> (use_procedural: bool) {
         walkable_slope_angle = 45,                      // Max slope (RecastDemo default)
         walkable_height = i32(math.ceil_f32(2.0 / 0.2)),    // Agent height = 2.0m -> 10 cells
         walkable_climb = i32(math.floor_f32(0.9 / 0.2)),    // Agent max climb = 0.9m -> 4 cells
-        walkable_radius = i32(math.ceil_f32(0.6 / 0.3)),    // Agent radius = 0.6m -> 2 cells (RecastDemo default)
+        walkable_radius = i32(math.ceil_f32(0.6 / 0.3)),    // Agent radius = 0.6m / cs=0.3 -> 2 cells (RecastDemo default)
         max_edge_len = i32(12.0 / 0.3),                 // Max edge length = 12m -> 40 cells
         max_simplification_error = 1.3,                 // RecastDemo default
         min_region_area = 8 * 8,                        // RecastDemo default (m_regionMinSize=8)
@@ -373,6 +373,8 @@ build_navmesh :: proc(engine: ^mjolnir.Engine) -> (use_procedural: bool) {
 
     // Build navigation mesh
     log.info("Building navigation mesh...")
+    log.infof("Config: cs=%.2f, ch=%.2f, walkable_radius=%d, min_region=%d, merge_region=%d",
+              config.cs, config.ch, config.walkable_radius, config.min_region_area, config.merge_region_area)
     pmesh, dmesh, ok := recast.build_navmesh(vertices, indices, areas, config)
     if !ok {
         log.error("Failed to build navigation mesh")
@@ -600,11 +602,18 @@ find_path :: proc(engine: ^mjolnir.Engine) {
             log.infof("  Poly %d: ref=%d", i, poly_path[i])
         }
 
-        // Check if path is valid - if we only have 1 polygon but start and end are in different polygons, the path is invalid
-        if poly_count == 1 && start_ref != end_ref {
-            log.errorf("Invalid path: only 1 polygon in path but start (%d) and end (%d) are in different polygons!", start_ref, end_ref)
-            log.error("This indicates the navigation mesh has disconnected regions")
-            return
+        // Check if path actually reaches the destination
+        if poly_path[poly_count-1] != end_ref {
+            log.errorf("PARTIAL PATH: Path doesn't reach destination! Last poly in path: %d, requested end: %d", 
+                      poly_path[poly_count-1], end_ref)
+            log.errorf("This indicates the navigation mesh has disconnected regions - start and end are not connected!")
+            // For now, still try to process the partial path
+            // Adjust end_nearest to be in the last polygon of the partial path
+            last_tile, last_poly, _ := detour.get_tile_and_poly_by_ref(navmesh_state.nav_mesh, poly_path[poly_count-1])
+            if last_tile != nil && last_poly != nil {
+                end_nearest = detour.calc_poly_center(last_tile, last_poly)
+                log.infof("Adjusted end position to last reachable polygon center: %v", end_nearest)
+            }
         }
     } else {
         log.errorf("Failed to find polygon path! Status: %v", poly_status)
@@ -613,11 +622,13 @@ find_path :: proc(engine: ^mjolnir.Engine) {
 
     // Find path points (simplified wrapper)
     // Use the nearest positions that were actually found on the navmesh
+    log.infof("About to call find_path_points with poly_count=%d", poly_count)
     path_count, status := detour.find_path_points(navmesh_state.nav_query,
                                                    start_nearest,
                                                    end_nearest,
                                                    &navmesh_state.filter,
                                                    path_buffer)
+    log.infof("find_path_points returned: path_count=%d, status=%v", path_count, status)
 
     // Also get the polygon centroids for comparison
     log.info("Polygon path centroids (without funnel simplification):")
