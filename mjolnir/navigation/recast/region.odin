@@ -607,29 +607,20 @@ can_merge_with_region :: proc(rega, regb: ^Region) -> bool {
     if rega.area_type != regb.area_type {
         return false
     }
-    n := 0
-    for i in 0..<len(rega.connections) {
-        if rega.connections[i] == i32(regb.id) {
-            n += 1
-        }
-    }
+    n := slice.count(rega.connections[:], i32(regb.id))
     if n > 1 {
         return false
     }
-    for i in 0..<len(rega.floors) {
-        if rega.floors[i] == i32(regb.id) {
-            return false
-        }
+    if slice.contains(rega.floors[:], i32(regb.id)) {
+        return false
     }
     return true
 }
 
 // Add unique floor region
 add_unique_floor_region :: proc(reg: ^Region, n: i32) {
-    for i in 0..<len(reg.floors) {
-        if reg.floors[i] == n {
-            return
-        }
+    if slice.contains(reg.floors[:], n) {
+        return
     }
     append(&reg.floors, n)
 }
@@ -647,8 +638,8 @@ merge_regions :: proc(rega, regb: ^Region) -> bool {
 
     // Find insertion point on A
     insa := -1
-    for i in 0..<len(acon) {
-        if acon[i] == i32(bid) {
+    for val, i in acon {
+        if val == i32(bid) {
             insa = i
             break
         }
@@ -659,8 +650,8 @@ merge_regions :: proc(rega, regb: ^Region) -> bool {
 
     // Find insertion point on B
     insb := -1
-    for i in 0..<len(bcon) {
-        if bcon[i] == i32(aid) {
+    for val, i in bcon {
+        if val == i32(aid) {
             insb = i
             break
         }
@@ -812,10 +803,8 @@ walk_contour_for_region :: proc(x_in, y_in, i_in: i32, dir_in: int, chf: ^Compac
 
 // Add unique connection
 add_unique_connection :: proc(reg: ^Region, n: i32) {
-    for i in 0..<len(reg.connections) {
-        if reg.connections[i] == n {
-            return
-        }
+    if slice.contains(reg.connections[:], n) {
+        return
     }
     append(&reg.connections, n)
 }
@@ -906,8 +895,7 @@ merge_and_filter_regions :: proc(min_region_area, merge_region_size: i32,
     trace := make([dynamic]i32, 0, 32)
     defer delete(trace)
 
-    for i in 0..<nreg {
-        reg := &regions[i]
+    for &reg, i in regions {
         if reg.id == 0 || (reg.id & RC_BORDER_REG) != 0 {
             continue
         }
@@ -1041,15 +1029,15 @@ merge_and_filter_regions :: proc(min_region_area, merge_region_size: i32,
     }
 
     // Compress region Ids
-    for i in 0..<nreg {
-        regions[i].remap = false
-        if regions[i].id == 0 {
+    for &reg in regions {
+        reg.remap = false
+        if reg.id == 0 {
             continue // Skip nil regions
         }
-        if (regions[i].id & RC_BORDER_REG) != 0 {
+        if (reg.id & RC_BORDER_REG) != 0 {
             continue // Skip external regions
         }
-        regions[i].remap = true
+        reg.remap = true
     }
 
     reg_id_gen: u16 = 0
@@ -1124,7 +1112,7 @@ build_regions :: proc(chf: ^Compact_Heightfield,
 
     src_reg := buf[:chf.span_count]
     src_dist := buf[chf.span_count:chf.span_count*2]
-    
+
     // Initialize to 0
     slice.fill(src_reg, 0)
     slice.fill(src_dist, 0)
@@ -1238,11 +1226,11 @@ build_regions :: proc(chf: ^Compact_Heightfield,
 
     log.infof("Region building complete: %d unique regions, %d assigned spans, %d border spans, %d unassigned spans",
               len(unique_regions), assigned_spans, border_spans, unassigned_spans)
-    
+
     if len(unique_regions) > 10 {
         log.warnf("WARNING: Found %d disconnected regions - this may cause pathfinding failures!", len(unique_regions))
     }
-    
+
     if unassigned_spans > 0 {
         log.warnf("Warning: %d spans were not assigned to any region", unassigned_spans)
     }
@@ -1532,14 +1520,7 @@ merge_and_filter_layer_regions :: proc(min_region_area: i32,
                     continue
                 }
                 // Skip if the neighbour is overlapping root region
-                overlap := false
-                for k in 0..<len(root.floors) {
-                    if root.floors[k] == nei {
-                        overlap = true
-                        break
-                    }
-                }
-                if overlap {
+                if slice.contains(root.floors[:], nei) {
                     continue
                 }
 
@@ -1745,12 +1726,10 @@ build_layer_regions :: proc(chf: ^Compact_Heightfield,
         }
     }
 
-    {
-        // Merge monotone regions to layers and remove small regions
-        chf.max_regions = id
-        if !merge_and_filter_layer_regions(min_region_area, &chf.max_regions, chf, src_reg) {
-            return false
-        }
+    // Merge monotone regions to layers and remove small regions
+    chf.max_regions = id
+    if !merge_and_filter_layer_regions(min_region_area, &chf.max_regions, chf, src_reg) {
+        return false
     }
 
     // Store the result out
