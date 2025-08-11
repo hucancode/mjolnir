@@ -172,6 +172,8 @@ raycast :: proc(query: ^Nav_Mesh_Query, start_ref: nav_recast.Poly_Ref, start_po
     ray_len := linalg.length(dir)
 
     if ray_len < 1e-6 {
+        // Zero-length ray should have t=0
+        hit.t = 0.0
         return {.Success}, hit, path_count
     }
 
@@ -206,20 +208,25 @@ raycast :: proc(query: ^Nav_Mesh_Query, start_ref: nav_recast.Poly_Ref, start_po
 
             if intersects && edge_t > cur_t && edge_t < next_t {
                 // Check if there's a neighbor across this edge
-                poly_idx := get_poly_index(query.nav_mesh, cur_ref)
-                link := get_first_link(tile, i32(poly_idx))
+                link := poly.first_link
                 neighbor_found := false
+                link_iterations := 0
+                max_link_iterations := 32  // Safety limit to prevent infinite loops
 
-                for link != nav_recast.DT_NULL_LINK {
-                    neighbor_ref := get_link_poly_ref(tile, link)
-                    if neighbor_ref != nav_recast.INVALID_POLY_REF {
-                        neighbor_tile, neighbor_poly, neighbor_status := get_tile_and_poly_by_ref(query.nav_mesh, neighbor_ref)
-                        if nav_recast.status_succeeded(neighbor_status) &&
-                           query_filter_pass_filter(filter, neighbor_ref, neighbor_tile, neighbor_poly) {
-                            next_ref = neighbor_ref
-                            next_t = edge_t
-                            neighbor_found = true
-                            break
+                for link != nav_recast.DT_NULL_LINK && link_iterations < max_link_iterations {
+                    link_iterations += 1
+                    
+                    if get_link_edge(tile, link) == u8(i) {
+                        neighbor_ref := get_link_poly_ref(tile, link)
+                        if neighbor_ref != nav_recast.INVALID_POLY_REF {
+                            neighbor_tile, neighbor_poly, neighbor_status := get_tile_and_poly_by_ref(query.nav_mesh, neighbor_ref)
+                            if nav_recast.status_succeeded(neighbor_status) &&
+                               query_filter_pass_filter(filter, neighbor_ref, neighbor_tile, neighbor_poly) {
+                                next_ref = neighbor_ref
+                                next_t = edge_t
+                                neighbor_found = true
+                                break
+                            }
                         }
                     }
                     link = get_next_link(tile, link)
@@ -749,6 +756,327 @@ find_local_neighbourhood :: proc(query: ^Nav_Mesh_Query, start_ref: nav_recast.P
     }
     
     return result_count, {.Success}
+}
+
+// Find polygons within circular area using Dijkstra search
+find_polys_around_circle :: proc(query: ^Nav_Mesh_Query, start_ref: nav_recast.Poly_Ref, center_pos: [3]f32,
+                                   radius: f32, filter: ^Query_Filter, result_ref: []nav_recast.Poly_Ref,
+                                   result_parent: []nav_recast.Poly_Ref, result_cost: []f32, 
+                                   max_result: i32) -> (result_count: i32, status: nav_recast.Status) {
+    
+    if !is_valid_poly_ref(query.nav_mesh, start_ref) || max_result <= 0 {
+        return 0, {.Invalid_Param}
+    }
+    
+    result_count = 0
+    radius_sqr := radius * radius
+    
+    // Clear node pool for search
+    node_pool_clear(&query.node_pool)
+    node_queue_clear(&query.open_list)
+    
+    // Initialize start node
+    start_node := node_pool_create_node(&query.node_pool, start_ref)
+    if start_node == nil {
+        return 0, {.Out_Of_Nodes}
+    }
+    
+    start_tile, start_poly, poly_status := get_tile_and_poly_by_ref(query.nav_mesh, start_ref)
+    if nav_recast.status_failed(poly_status) {
+        return 0, poly_status
+    }
+    
+    start_node.pos, _ = closest_point_on_polygon(start_tile, start_poly, center_pos)
+    start_node.cost = 0
+    start_node.total = linalg.length2(start_node.pos - center_pos)
+    start_node.flags = {.Open}
+    start_node.parent_id = nav_recast.INVALID_POLY_REF
+    
+    node_queue_push(&query.open_list, {start_ref, start_node.cost, start_node.total})
+    
+    // Dijkstra search with iteration limit to prevent hanging
+    max_dijkstra_iterations := 100  // Much smaller limit for circle search
+    dijkstra_iterations := 0
+    
+    for !node_queue_empty(&query.open_list) && dijkstra_iterations < max_dijkstra_iterations {
+        dijkstra_iterations += 1
+        
+        if result_count >= max_result {
+            break  // Found enough results
+        }
+        best := node_queue_pop(&query.open_list)
+        if best.ref == nav_recast.INVALID_POLY_REF {
+            break
+        }
+        
+        current := node_pool_get_node(&query.node_pool, best.ref)
+        if current == nil || .Closed in current.flags {
+            continue
+        }
+        
+        current.flags |= {.Closed}
+        current.flags &= ~{.Open}
+        
+        // Check if within radius
+        dist_sqr := linalg.length2(current.pos - center_pos)
+        if dist_sqr <= radius_sqr {
+            if result_count < max_result {
+                result_ref[result_count] = current.id
+                result_parent[result_count] = current.parent_id
+                result_cost[result_count] = current.cost
+                result_count += 1
+            }
+        }
+        
+        // Expand neighbors
+        cur_tile, cur_poly, cur_status := get_tile_and_poly_by_ref(query.nav_mesh, current.id)
+        if nav_recast.status_failed(cur_status) {
+            continue
+        }
+        
+        poly_idx := get_poly_index(query.nav_mesh, current.id)
+        link := get_first_link(cur_tile, i32(poly_idx))
+        
+        for link != nav_recast.DT_NULL_LINK {
+            neighbor_ref := get_link_poly_ref(cur_tile, link)
+            if neighbor_ref != nav_recast.INVALID_POLY_REF {
+                neighbor_tile, neighbor_poly, neighbor_status := get_tile_and_poly_by_ref(query.nav_mesh, neighbor_ref)
+                if nav_recast.status_succeeded(neighbor_status) &&
+                   query_filter_pass_filter(filter, neighbor_ref, neighbor_tile, neighbor_poly) {
+                    
+                    neighbor_node := node_pool_get_node(&query.node_pool, neighbor_ref)
+                    if neighbor_node == nil {
+                        neighbor_node = node_pool_create_node(&query.node_pool, neighbor_ref)
+                        if neighbor_node == nil {
+                            break
+                        }
+                        neighbor_node.pos = calc_poly_center(neighbor_tile, neighbor_poly)
+                    }
+                    
+                    if .Closed in neighbor_node.flags {
+                        link = get_next_link(cur_tile, link)
+                        continue
+                    }
+                    
+                    step_cost := linalg.length(current.pos - neighbor_node.pos)
+                    new_cost := current.cost + step_cost
+                    new_dist_sqr := linalg.length2(neighbor_node.pos - center_pos)
+                    new_total := new_cost + math.sqrt(new_dist_sqr)
+                    
+                    if .Open in neighbor_node.flags && new_cost >= neighbor_node.cost {
+                        link = get_next_link(cur_tile, link)
+                        continue
+                    }
+                    
+                    neighbor_node.cost = new_cost
+                    neighbor_node.total = new_total
+                    neighbor_node.parent_id = current.id
+                    neighbor_node.flags |= {.Open}
+                    
+                    node_queue_push(&query.open_list, {neighbor_ref, neighbor_node.cost, neighbor_node.total})
+                }
+            }
+            link = get_next_link(cur_tile, link)
+        }
+    }
+    
+    return result_count, {.Success}
+}
+
+// Find polygons within convex shape using Dijkstra search
+find_polys_around_shape :: proc(query: ^Nav_Mesh_Query, start_ref: nav_recast.Poly_Ref, verts: [][3]f32,
+                                  filter: ^Query_Filter, result_ref: []nav_recast.Poly_Ref,
+                                  result_parent: []nav_recast.Poly_Ref, result_cost: []f32,
+                                  max_result: i32) -> (result_count: i32, status: nav_recast.Status) {
+    
+    if !is_valid_poly_ref(query.nav_mesh, start_ref) || len(verts) < 3 || max_result <= 0 {
+        return 0, {.Invalid_Param}
+    }
+    
+    result_count = 0
+    
+    // Calculate shape center
+    center := [3]f32{}
+    for vert in verts {
+        center += vert
+    }
+    center /= f32(len(verts))
+    
+    // Clear node pool for search
+    node_pool_clear(&query.node_pool)
+    node_queue_clear(&query.open_list)
+    
+    // Initialize start node
+    start_node := node_pool_create_node(&query.node_pool, start_ref)
+    if start_node == nil {
+        return 0, {.Out_Of_Nodes}
+    }
+    
+    start_tile, start_poly, poly_status := get_tile_and_poly_by_ref(query.nav_mesh, start_ref)
+    if nav_recast.status_failed(poly_status) {
+        return 0, poly_status
+    }
+    
+    start_node.pos, _ = closest_point_on_polygon(start_tile, start_poly, center)
+    start_node.cost = 0
+    start_node.total = linalg.length(start_node.pos - center)
+    start_node.flags = {.Open}
+    start_node.parent_id = nav_recast.INVALID_POLY_REF
+    
+    node_queue_push(&query.open_list, {start_ref, start_node.cost, start_node.total})
+    
+    // Dijkstra search
+    for !node_queue_empty(&query.open_list) {
+        best := node_queue_pop(&query.open_list)
+        if best.ref == nav_recast.INVALID_POLY_REF {
+            break
+        }
+        
+        current := node_pool_get_node(&query.node_pool, best.ref)
+        if current == nil || .Closed in current.flags {
+            continue
+        }
+        
+        current.flags |= {.Closed}
+        current.flags &= ~{.Open}
+        
+        // Check if within shape
+        if geometry.point_in_polygon_2d(current.pos, verts) {
+            if result_count < max_result {
+                result_ref[result_count] = current.id
+                result_parent[result_count] = current.parent_id
+                result_cost[result_count] = current.cost
+                result_count += 1
+            }
+        }
+        
+        // Expand neighbors
+        cur_tile, cur_poly, cur_status := get_tile_and_poly_by_ref(query.nav_mesh, current.id)
+        if nav_recast.status_failed(cur_status) {
+            continue
+        }
+        
+        poly_idx := get_poly_index(query.nav_mesh, current.id)
+        link := get_first_link(cur_tile, i32(poly_idx))
+        
+        for link != nav_recast.DT_NULL_LINK {
+            neighbor_ref := get_link_poly_ref(cur_tile, link)
+            if neighbor_ref != nav_recast.INVALID_POLY_REF {
+                neighbor_tile, neighbor_poly, neighbor_status := get_tile_and_poly_by_ref(query.nav_mesh, neighbor_ref)
+                if nav_recast.status_succeeded(neighbor_status) &&
+                   query_filter_pass_filter(filter, neighbor_ref, neighbor_tile, neighbor_poly) {
+                    
+                    neighbor_node := node_pool_get_node(&query.node_pool, neighbor_ref)
+                    if neighbor_node == nil {
+                        neighbor_node = node_pool_create_node(&query.node_pool, neighbor_ref)
+                        if neighbor_node == nil {
+                            break
+                        }
+                        neighbor_node.pos = calc_poly_center(neighbor_tile, neighbor_poly)
+                    }
+                    
+                    if .Closed in neighbor_node.flags {
+                        link = get_next_link(cur_tile, link)
+                        continue
+                    }
+                    
+                    step_cost := linalg.length(current.pos - neighbor_node.pos)
+                    new_cost := current.cost + step_cost
+                    new_total := new_cost + linalg.length(neighbor_node.pos - center)
+                    
+                    if .Open in neighbor_node.flags && new_cost >= neighbor_node.cost {
+                        link = get_next_link(cur_tile, link)
+                        continue
+                    }
+                    
+                    neighbor_node.cost = new_cost
+                    neighbor_node.total = new_total
+                    neighbor_node.parent_id = current.id
+                    neighbor_node.flags |= {.Open}
+                    
+                    node_queue_push(&query.open_list, {neighbor_ref, neighbor_node.cost, neighbor_node.total})
+                }
+            }
+            link = get_next_link(cur_tile, link)
+        }
+    }
+    
+    return result_count, {.Success}
+}
+
+// Get path from Dijkstra search results
+get_path_from_dijkstra_search :: proc(query: ^Nav_Mesh_Query, end_ref: nav_recast.Poly_Ref, 
+                                        path: []nav_recast.Poly_Ref, max_path: i32) -> (path_count: i32, status: nav_recast.Status) {
+    
+    if !is_valid_poly_ref(query.nav_mesh, end_ref) || max_path <= 0 {
+        return 0, {.Invalid_Param}
+    }
+    
+    end_node := node_pool_get_node(&query.node_pool, end_ref)
+    if end_node == nil || .Closed not_in end_node.flags {
+        return 0, {.Invalid_Param}
+    }
+    
+    result_status, result_path_count := get_path_to_node(query, end_node, path, max_path)
+    return result_path_count, result_status
+}
+
+// Get wall segments for polygon
+get_poly_wall_segments :: proc(query: ^Nav_Mesh_Query, ref: nav_recast.Poly_Ref, filter: ^Query_Filter,
+                                segment_verts: [][6]f32, segment_refs: []nav_recast.Poly_Ref,
+                                max_segments: i32) -> (segment_count: i32, status: nav_recast.Status) {
+    
+    if !is_valid_poly_ref(query.nav_mesh, ref) || max_segments <= 0 {
+        return 0, {.Invalid_Param}
+    }
+    
+    segment_count = 0
+    
+    tile, poly, poly_status := get_tile_and_poly_by_ref(query.nav_mesh, ref)
+    if nav_recast.status_failed(poly_status) {
+        return 0, poly_status
+    }
+    
+    poly_idx := get_poly_index(query.nav_mesh, ref)
+    
+    for i in 0..<int(poly.vert_count) {
+        if segment_count >= max_segments {
+            break
+        }
+        
+        va := tile.verts[poly.verts[i]]
+        vb := tile.verts[poly.verts[(i+1) % int(poly.vert_count)]]
+        
+        // Find neighbor across this edge
+        neighbor_ref := nav_recast.INVALID_POLY_REF
+        link := poly.first_link
+        link_iterations := 0
+        max_link_iterations := 32  // Safety limit to prevent infinite loops
+        
+        for link != nav_recast.DT_NULL_LINK && link_iterations < max_link_iterations {
+            link_iterations += 1
+            
+            if get_link_edge(tile, link) == u8(i) {
+                potential_neighbor := get_link_poly_ref(tile, link)
+                if potential_neighbor != nav_recast.INVALID_POLY_REF {
+                    neighbor_tile, neighbor_poly, neighbor_status := get_tile_and_poly_by_ref(query.nav_mesh, potential_neighbor)
+                    if nav_recast.status_succeeded(neighbor_status) &&
+                       query_filter_pass_filter(filter, potential_neighbor, neighbor_tile, neighbor_poly) {
+                        neighbor_ref = potential_neighbor
+                        break
+                    }
+                }
+            }
+            link = get_next_link(tile, link)
+        }
+        
+        // Store segment
+        segment_verts[segment_count] = {va.x, va.y, va.z, vb.x, vb.y, vb.z}
+        segment_refs[segment_count] = neighbor_ref
+        segment_count += 1
+    }
+    
+    return segment_count, {.Success}
 }
 
 // Check if polygon is in closed list during pathfinding

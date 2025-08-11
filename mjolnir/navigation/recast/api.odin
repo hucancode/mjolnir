@@ -43,7 +43,7 @@ build_navmesh :: proc(vertices: [][3]f32, indices: []i32, areas: []u8, cfg: Conf
         }
         
         // Also check if we're marking triangles as unwalkable due to slope
-        walkable_thr := math.cos(config.walkable_slope_angle * math.PI / 180.0)
+        walkable_thr := math.cos(math.to_radians(config.walkable_slope_angle))
         log.infof("Walkable slope threshold: %.3f (angle=%.1f degrees)", walkable_thr, config.walkable_slope_angle)
         
         // Check first triangle normal

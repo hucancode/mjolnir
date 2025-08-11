@@ -20,9 +20,6 @@ navmesh_visual_main :: proc() {
     log.info("=== Navigation Mesh Visual Example with Mouse Picking ===")
 
     // Initialize and run the engine with our custom setup
-    mjolnir.init(&engine, 1280, 720, "Navigation Mesh Visualization - Click to Set Path")
-    defer mjolnir.deinit(&engine)
-
     engine.setup_proc = navmesh_setup
     engine.update_proc = navmesh_update
     engine.render2d_proc = navmesh_render2d
@@ -604,7 +601,7 @@ find_path :: proc(engine: ^mjolnir.Engine) {
 
         // Check if path actually reaches the destination
         if poly_path[poly_count-1] != end_ref {
-            log.errorf("PARTIAL PATH: Path doesn't reach destination! Last poly in path: %d, requested end: %d", 
+            log.errorf("PARTIAL PATH: Path doesn't reach destination! Last poly in path: %d, requested end: %d",
                       poly_path[poly_count-1], end_ref)
             log.errorf("This indicates the navigation mesh has disconnected regions - start and end are not connected!")
             // For now, still try to process the partial path

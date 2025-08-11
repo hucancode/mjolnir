@@ -1082,6 +1082,11 @@ build_regions :: proc(chf: ^Compact_Heightfield,
     w := chf.width
     h := chf.height
 
+    // Handle empty compact heightfield
+    if chf.span_count == 0 {
+        return true
+    }
+
     allocator := context.allocator
     buf := make([]u16, chf.span_count * 2, allocator)  // Need 2 buffers: reg and dist
     if buf == nil {

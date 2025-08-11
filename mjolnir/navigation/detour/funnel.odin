@@ -823,15 +823,21 @@ find_neighbor_across_edge :: proc(query: ^Nav_Mesh_Query, ref: nav_recast.Poly_R
         // Check if movement ray intersects this edge
         if dt_intersect_segment_edge_2d(start_pos, end_pos, va, vb) {
             // Find neighbor across this edge
-            poly_idx := get_poly_index(query.nav_mesh, ref)
-            link := get_first_link(tile, i32(poly_idx))
-            for link != nav_recast.DT_NULL_LINK {
-                neighbor_ref := get_link_poly_ref(tile, link)
-                if neighbor_ref != nav_recast.INVALID_POLY_REF {
-                    neighbor_tile, neighbor_poly, neighbor_status := get_tile_and_poly_by_ref(query.nav_mesh, neighbor_ref)
-                    if nav_recast.status_succeeded(neighbor_status) &&
-                       query_filter_pass_filter(filter, neighbor_ref, neighbor_tile, neighbor_poly) {
-                        return neighbor_ref, false
+            link := poly.first_link
+            link_iterations := 0
+            max_link_iterations := 32  // Safety limit to prevent infinite loops
+            
+            for link != nav_recast.DT_NULL_LINK && link_iterations < max_link_iterations {
+                link_iterations += 1
+                
+                if get_link_edge(tile, link) == u8(i) {
+                    neighbor_ref := get_link_poly_ref(tile, link)
+                    if neighbor_ref != nav_recast.INVALID_POLY_REF {
+                        neighbor_tile, neighbor_poly, neighbor_status := get_tile_and_poly_by_ref(query.nav_mesh, neighbor_ref)
+                        if nav_recast.status_succeeded(neighbor_status) &&
+                           query_filter_pass_filter(filter, neighbor_ref, neighbor_tile, neighbor_poly) {
+                            return neighbor_ref, false
+                        }
                     }
                 }
                 link = get_next_link(tile, link)

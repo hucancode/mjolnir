@@ -478,56 +478,20 @@ rasterize_triangles :: proc(verts: [][3]f32, indices: []i32, tri_area_ids: []u8,
     return true
 }
 
-// Rasterize triangles with indexed vertices (16-bit indices)
-rc_rasterize_triangles_u16 :: proc(verts: []f32, nv: i32,
-                                  tris: []u16, tri_area_ids: []u8, num_tris: i32,
-                                  hf: ^Heightfield, flag_merge_threshold: i32) -> bool {
-    // Removed timer code for simplicity
-
-    // Rasterize the triangles
-    inverse_cell_size := 1.0 / hf.cs
-    inverse_cell_height := 1.0 / hf.ch
-
-    for tri_index in 0..<num_tris {
-        v0 := [3]f32{
-            verts[tris[tri_index * 3 + 0] * 3 + 0],
-            verts[tris[tri_index * 3 + 0] * 3 + 1],
-            verts[tris[tri_index * 3 + 0] * 3 + 2],
-        }
-        v1 := [3]f32{
-            verts[tris[tri_index * 3 + 1] * 3 + 0],
-            verts[tris[tri_index * 3 + 1] * 3 + 1],
-            verts[tris[tri_index * 3 + 1] * 3 + 2],
-        }
-        v2 := [3]f32{
-            verts[tris[tri_index * 3 + 2] * 3 + 0],
-            verts[tris[tri_index * 3 + 2] * 3 + 1],
-            verts[tris[tri_index * 3 + 2] * 3 + 2],
-        }
-
-        if !rasterize_tri(v0, v1, v2, tri_area_ids[tri_index], hf, hf.bmin, hf.bmax,
-                          hf.cs, inverse_cell_size, inverse_cell_height, flag_merge_threshold) {
-            log.error("rcRasterizeTriangles: Out of memory.")
-            return false
-        }
-    }
-
-    return true
-}
-
 // Clear unwalkable triangles (mark steep slopes as non-walkable)
 clear_unwalkable_triangles :: proc(walkable_slope_angle: f32,
-                                     verts: []f32, nv: i32,
-                                     tris: []i32, num_tris: i32,
+                                     verts: [][3]f32,
+                                     tris: []i32,
                                      areas: []u8) {
-    walkable_thr := math.cos(walkable_slope_angle * math.PI / 180.0)
+    walkable_thr := math.cos(math.to_radians(walkable_slope_angle))
     norm: [3]f32
+    num_tris := len(tris) / 3
 
     for i in 0..<num_tris {
         tri := tris[i*3:]
-        v0 := [3]f32{verts[tri[0]*3+0], verts[tri[0]*3+1], verts[tri[0]*3+2]}
-        v1 := [3]f32{verts[tri[1]*3+0], verts[tri[1]*3+1], verts[tri[1]*3+2]}
-        v2 := [3]f32{verts[tri[2]*3+0], verts[tri[2]*3+1], verts[tri[2]*3+2]}
+        v0 := verts[tri[0]]
+        v1 := verts[tri[1]]
+        v2 := verts[tri[2]]
 
         norm = geometry.calc_tri_normal(v0, v1, v2)
         // Check if the face is NOT walkable (steep slope)
@@ -539,65 +503,22 @@ clear_unwalkable_triangles :: proc(walkable_slope_angle: f32,
 
 // Mark triangles by their walkable slope
 mark_walkable_triangles :: proc(walkable_slope_angle: f32,
-                                  verts: []f32, nv: i32,
-                                  tris: []i32, num_tris: i32,
+                                  verts: [][3]f32,
+                                  tris: []i32,
                                   areas: []u8) {
-    walkable_thr := math.cos(walkable_slope_angle * math.PI / 180.0)
+    walkable_thr := math.cos(math.to_radians(walkable_slope_angle))
     norm: [3]f32
+    num_tris := len(tris) / 3
 
     for i in 0..<num_tris {
         tri := tris[i*3:]
-        v0 := [3]f32{verts[tri[0]*3+0], verts[tri[0]*3+1], verts[tri[0]*3+2]}
-        v1 := [3]f32{verts[tri[1]*3+0], verts[tri[1]*3+1], verts[tri[1]*3+2]}
-        v2 := [3]f32{verts[tri[2]*3+0], verts[tri[2]*3+1], verts[tri[2]*3+2]}
+        v0 := verts[tri[0]]
+        v1 := verts[tri[1]]
+        v2 := verts[tri[2]]
 
         norm = geometry.calc_tri_normal(v0, v1, v2)
-        // Check if the face is walkable
-        if norm.y > walkable_thr {
-            areas[i] = RC_WALKABLE_AREA
-        }
-    }
-}
-
-// Clear unwalkable triangles with 16-bit indices
-rc_clear_unwalkable_triangles_u16 :: proc(walkable_slope_angle: f32,
-                                          verts: []f32, nv: i32,
-                                          tris: []u16, num_tris: i32,
-                                          areas: []u8) {
-    walkable_thr := math.cos(walkable_slope_angle * math.PI / 180.0)
-    norm: [3]f32
-
-    for i in 0..<num_tris {
-        tri := tris[i*3:]
-        v0 := [3]f32{verts[tri[0]*3+0], verts[tri[0]*3+1], verts[tri[0]*3+2]}
-        v1 := [3]f32{verts[tri[1]*3+0], verts[tri[1]*3+1], verts[tri[1]*3+2]}
-        v2 := [3]f32{verts[tri[2]*3+0], verts[tri[2]*3+1], verts[tri[2]*3+2]}
-
-        norm = geometry.calc_tri_normal(v0, v1, v2)
-        // Check if the face is NOT walkable (steep slope)
-        if norm.y <= walkable_thr {
-            areas[i] = RC_NULL_AREA
-        }
-    }
-}
-
-// Mark walkable triangles with 16-bit indices
-rc_mark_walkable_triangles_u16 :: proc(walkable_slope_angle: f32,
-                                       verts: []f32, nv: i32,
-                                       tris: []u16, num_tris: i32,
-                                       areas: []u8) {
-    walkable_thr := math.cos(walkable_slope_angle * math.PI / 180.0)
-    norm: [3]f32
-
-    for i in 0..<num_tris {
-        tri := tris[i*3:]
-        v0 := [3]f32{verts[tri[0]*3+0], verts[tri[0]*3+1], verts[tri[0]*3+2]}
-        v1 := [3]f32{verts[tri[1]*3+0], verts[tri[1]*3+1], verts[tri[1]*3+2]}
-        v2 := [3]f32{verts[tri[2]*3+0], verts[tri[2]*3+1], verts[tri[2]*3+2]}
-
-        norm = geometry.calc_tri_normal(v0, v1, v2)
-        // Check if the face is walkable
-        if norm.y > walkable_thr {
+        // Check if the face is walkable (only mark NULL areas)
+        if norm.y > walkable_thr && areas[i] == RC_NULL_AREA {
             areas[i] = RC_WALKABLE_AREA
         }
     }

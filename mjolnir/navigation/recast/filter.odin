@@ -43,11 +43,11 @@ filter_low_hanging_walkable_obstacles :: proc(walkable_climb: int, heightfield: 
                 walkable := span.area != RC_NULL_AREA
 
                 // If current span is not walkable, but there is walkable span just below it
-                // and the height difference is small enough for the agent to walk over,
+                // and the gap between them is small enough for the agent to climb over,
                 // mark the current span as walkable too
                 if !walkable && previous_was_walkable && previous_span != nil {
-                    smax_diff := int(span.smax) - int(previous_span.smax)
-                    if smax_diff <= walkable_climb {
+                    gap := int(span.smin) - int(previous_span.smax)
+                    if gap <= walkable_climb {
                         span.area = u32(previous_area_id)
                     }
                 }
