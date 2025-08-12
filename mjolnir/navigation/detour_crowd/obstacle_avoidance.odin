@@ -2,10 +2,10 @@ package navigation_detour_crowd
 
 import "core:math"
 import "core:slice"
-import nav_recast "../recast"
+import recast "../recast"
 
 // Initialize obstacle avoidance debug data
-obstacle_avoidance_debug_data_init :: proc(debug_data: ^Obstacle_Avoidance_Debug_Data, max_samples: i32) -> nav_recast.Status {
+obstacle_avoidance_debug_data_init :: proc(debug_data: ^Obstacle_Avoidance_Debug_Data, max_samples: i32) -> recast.Status {
     if debug_data == nil || max_samples <= 0 {
         return {.Invalid_Param}
     }
@@ -52,7 +52,7 @@ obstacle_avoidance_debug_data_reset :: proc(debug_data: ^Obstacle_Avoidance_Debu
 // Add debug sample
 obstacle_avoidance_debug_data_add_sample :: proc(debug_data: ^Obstacle_Avoidance_Debug_Data,
                                                    vel: [3]f32, size, penalty, vel_penalty,
-                                                   cur_vel_penalty, side_penalty, toi_penalty: f32) -> nav_recast.Status {
+                                                   cur_vel_penalty, side_penalty, toi_penalty: f32) -> recast.Status {
     if debug_data == nil {
         return {.Invalid_Param}
     }
@@ -104,7 +104,7 @@ obstacle_avoidance_debug_data_normalize_samples :: proc(debug_data: ^Obstacle_Av
 }
 
 // Initialize obstacle avoidance query
-obstacle_avoidance_query_init :: proc(query: ^Obstacle_Avoidance_Query, max_circles, max_segments: i32) -> nav_recast.Status {
+obstacle_avoidance_query_init :: proc(query: ^Obstacle_Avoidance_Query, max_circles, max_segments: i32) -> recast.Status {
     if query == nil || max_circles <= 0 || max_segments <= 0 {
         return {.Invalid_Param}
     }
@@ -144,7 +144,7 @@ obstacle_avoidance_query_reset :: proc(query: ^Obstacle_Avoidance_Query) {
 
 // Add circle obstacle
 obstacle_avoidance_query_add_circle :: proc(query: ^Obstacle_Avoidance_Query, pos, vel, dvel: [3]f32,
-                                              radius: f32, dp, np: [3]f32) -> nav_recast.Status {
+                                              radius: f32, dp, np: [3]f32) -> recast.Status {
     if query == nil {
         return {.Invalid_Param}
     }
@@ -167,7 +167,7 @@ obstacle_avoidance_query_add_circle :: proc(query: ^Obstacle_Avoidance_Query, po
 }
 
 // Add segment obstacle
-obstacle_avoidance_query_add_segment :: proc(query: ^Obstacle_Avoidance_Query, p, q: [3]f32, touch: bool) -> nav_recast.Status {
+obstacle_avoidance_query_add_segment :: proc(query: ^Obstacle_Avoidance_Query, p, q: [3]f32, touch: bool) -> recast.Status {
     if query == nil {
         return {.Invalid_Param}
     }
@@ -437,7 +437,7 @@ ray_segment_intersect :: proc(pos, vel, seg_start, seg_end: [3]f32, radius: f32)
 
     // Project onto segment
     proj := to_start_x*dx + to_start_z*dz
-    proj = nav_recast.clamp(proj, 0, seg_len)
+    proj = recast.clamp(proj, 0, seg_len)
 
     // Closest point on segment
     closest_x := sx + proj*dx
@@ -466,7 +466,7 @@ obstacle_avoidance_query_get_params :: proc(query: ^Obstacle_Avoidance_Query, in
 }
 
 // Set obstacle avoidance parameters
-obstacle_avoidance_query_set_params :: proc(query: ^Obstacle_Avoidance_Query, index: i32, params: Obstacle_Avoidance_Params) -> nav_recast.Status {
+obstacle_avoidance_query_set_params :: proc(query: ^Obstacle_Avoidance_Query, index: i32, params: Obstacle_Avoidance_Params) -> recast.Status {
     if query == nil || index < 0 || index >= DT_CROWD_MAX_OBSTAVOIDANCE_PARAMS {
         return {.Invalid_Param}
     }

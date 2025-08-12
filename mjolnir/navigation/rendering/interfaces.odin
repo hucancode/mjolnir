@@ -1,8 +1,8 @@
 package navigation_rendering
 
 import "core:log"
-import nav_recast "../recast"
-import nav_recast "../recast"
+import recast "../recast"
+import recast "../recast"
 
 // ========================================
 // ABSTRACT RENDERING INTERFACES
@@ -12,16 +12,16 @@ import nav_recast "../recast"
 // Implement this interface to integrate with any graphics API (Vulkan, OpenGL, D3D12, etc.)
 GPU_Context_Interface :: struct {
     // Function pointers for GPU operations
-    create_buffer:    proc(ctx: rawptr, size: int, usage: Buffer_Usage_Flags) -> (Buffer_Handle, nav_recast.Nav_Result(bool)),
+    create_buffer:    proc(ctx: rawptr, size: int, usage: Buffer_Usage_Flags) -> (Buffer_Handle, recast.Nav_Result(bool)),
     destroy_buffer:   proc(ctx: rawptr, buffer: Buffer_Handle),
-    write_buffer:     proc(ctx: rawptr, buffer: Buffer_Handle, data: []u8, offset: int) -> nav_recast.Nav_Result(bool),
-    
-    create_shader:    proc(ctx: rawptr, code: []u8, stage: Shader_Stage) -> (Shader_Handle, nav_recast.Nav_Result(bool)),
+    write_buffer:     proc(ctx: rawptr, buffer: Buffer_Handle, data: []u8, offset: int) -> recast.Nav_Result(bool),
+
+    create_shader:    proc(ctx: rawptr, code: []u8, stage: Shader_Stage) -> (Shader_Handle, recast.Nav_Result(bool)),
     destroy_shader:   proc(ctx: rawptr, shader: Shader_Handle),
-    
-    create_pipeline:  proc(ctx: rawptr, desc: ^Pipeline_Descriptor) -> (Pipeline_Handle, nav_recast.Nav_Result(bool)),
+
+    create_pipeline:  proc(ctx: rawptr, desc: ^Pipeline_Descriptor) -> (Pipeline_Handle, recast.Nav_Result(bool)),
     destroy_pipeline: proc(ctx: rawptr, pipeline: Pipeline_Handle),
-    
+
     // Opaque pointer to implementation-specific context
     impl_data:        rawptr,
 }
@@ -33,7 +33,7 @@ Command_Buffer_Interface :: struct {
     bind_index_buffer:  proc(cmd: rawptr, buffer: Buffer_Handle, offset: int, index_type: Index_Type),
     set_constants:      proc(cmd: rawptr, data: []u8, offset: int),
     draw_indexed:       proc(cmd: rawptr, index_count: u32, instance_count: u32, first_index: u32, vertex_offset: i32, first_instance: u32),
-    
+
     // Opaque pointer to implementation-specific command buffer
     impl_data:          rawptr,
 }
@@ -43,7 +43,7 @@ Camera_Interface :: struct {
     get_view_matrix:       proc(camera: rawptr) -> matrix[4,4]f32,
     get_projection_matrix: proc(camera: rawptr) -> matrix[4,4]f32,
     get_viewport_size:     proc(camera: rawptr) -> [2]f32,
-    
+
     // Opaque pointer to implementation-specific camera
     impl_data:             rawptr,
 }
@@ -211,7 +211,7 @@ DEFAULT_RENDER_CONFIG := Nav_Mesh_Render_Config{
 DEFAULT_AREA_COLORS := [7][4]f32{
     0 = {0.0, 0.0, 0.0, 0.0},     // NULL_AREA - transparent
     1 = {0.0, 0.8, 0.2, 0.6},     // WALKABLE_AREA - green
-    2 = {0.8, 0.4, 0.0, 0.6},     // JUMP_AREA - orange  
+    2 = {0.8, 0.4, 0.0, 0.6},     // JUMP_AREA - orange
     3 = {0.2, 0.4, 0.8, 0.6},     // WATER_AREA - blue
     4 = {0.8, 0.2, 0.2, 0.6},     // DOOR_AREA - red
     5 = {0.6, 0.6, 0.6, 0.6},     // ELEVATOR_AREA - gray
@@ -232,26 +232,26 @@ nav_mesh_get_area_color :: proc(area_id: u8, color_mode: Nav_Mesh_Color_Mode, ba
             return color
         }
         return {0.5, 0.5, 0.5, alpha}  // Default gray
-        
+
     case .Uniform:
         return {base_color.x, base_color.y, base_color.z, alpha}
-        
+
     case .Height_Based:
         // Height-based coloring would require height information
         // For now, use a gradient based on area_id as a proxy
         hue := f32(area_id) / 8.0
         return {hue, 1.0 - hue, 0.5, alpha}
     }
-    
+
     return {base_color.x, base_color.y, base_color.z, alpha}
 }
 
 // Validation for rendering interfaces
-nav_validate_gpu_interface :: proc(gpu_interface: ^GPU_Context_Interface) -> nav_recast.Nav_Result(bool) {
+nav_validate_gpu_interface :: proc(gpu_interface: ^GPU_Context_Interface) -> recast.Nav_Result(bool) {
     if gpu_interface == nil {
-        return nav_recast.nav_error(bool, .Invalid_Parameter, "GPU interface cannot be nil")
+        return recast.nav_error(bool, .Invalid_Parameter, "GPU interface cannot be nil")
     }
-    
+
     if gpu_interface.create_buffer == nil ||
        gpu_interface.destroy_buffer == nil ||
        gpu_interface.write_buffer == nil ||
@@ -259,38 +259,38 @@ nav_validate_gpu_interface :: proc(gpu_interface: ^GPU_Context_Interface) -> nav
        gpu_interface.destroy_shader == nil ||
        gpu_interface.create_pipeline == nil ||
        gpu_interface.destroy_pipeline == nil {
-        return nav_recast.nav_error(bool, .Invalid_Parameter, "GPU interface has nil function pointers")
+        return recast.nav_error(bool, .Invalid_Parameter, "GPU interface has nil function pointers")
     }
-    
-    return nav_recast.nav_success()
+
+    return recast.nav_success()
 }
 
-nav_validate_command_buffer_interface :: proc(cmd_interface: ^Command_Buffer_Interface) -> nav_recast.Nav_Result(bool) {
+nav_validate_command_buffer_interface :: proc(cmd_interface: ^Command_Buffer_Interface) -> recast.Nav_Result(bool) {
     if cmd_interface == nil {
-        return nav_recast.nav_error(bool, .Invalid_Parameter, "Command buffer interface cannot be nil")
+        return recast.nav_error(bool, .Invalid_Parameter, "Command buffer interface cannot be nil")
     }
-    
+
     if cmd_interface.bind_pipeline == nil ||
        cmd_interface.bind_vertex_buffer == nil ||
        cmd_interface.bind_index_buffer == nil ||
        cmd_interface.set_constants == nil ||
        cmd_interface.draw_indexed == nil {
-        return nav_recast.nav_error(bool, .Invalid_Parameter, "Command buffer interface has nil function pointers")
+        return recast.nav_error(bool, .Invalid_Parameter, "Command buffer interface has nil function pointers")
     }
-    
-    return nav_recast.nav_success()
+
+    return recast.nav_success()
 }
 
-nav_validate_camera_interface :: proc(camera_interface: ^Camera_Interface) -> nav_recast.Nav_Result(bool) {
+nav_validate_camera_interface :: proc(camera_interface: ^Camera_Interface) -> recast.Nav_Result(bool) {
     if camera_interface == nil {
-        return nav_recast.nav_error(bool, .Invalid_Parameter, "Camera interface cannot be nil")
+        return recast.nav_error(bool, .Invalid_Parameter, "Camera interface cannot be nil")
     }
-    
+
     if camera_interface.get_view_matrix == nil ||
        camera_interface.get_projection_matrix == nil ||
        camera_interface.get_viewport_size == nil {
-        return nav_recast.nav_error(bool, .Invalid_Parameter, "Camera interface has nil function pointers")
+        return recast.nav_error(bool, .Invalid_Parameter, "Camera interface has nil function pointers")
     }
-    
-    return nav_recast.nav_success()
+
+    return recast.nav_success()
 }

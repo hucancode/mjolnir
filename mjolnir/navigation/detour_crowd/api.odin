@@ -1,59 +1,59 @@
 package navigation_detour_crowd
 
-import nav_recast "../recast"
+import recast "../recast"
 import detour "../detour"
 
 // Public API for DetourCrowd functionality
 // This file provides a clean interface to the crowd simulation system
 
 // Create and initialize a new crowd manager
-crowd_create :: proc(max_agents: i32, max_agent_radius: f32, nav_query: ^detour.Nav_Mesh_Query) -> (^Crowd, nav_recast.Status) {
+crowd_create :: proc(max_agents: i32, max_agent_radius: f32, nav_query: ^detour.Nav_Mesh_Query) -> (^Crowd, recast.Status) {
     crowd := new(Crowd)
     status := crowd_init(crowd, max_agents, max_agent_radius, nav_query)
-    
-    if nav_recast.status_failed(status) {
+
+    if recast.status_failed(status) {
         free(crowd)
         return nil, status
     }
-    
+
     return crowd, {.Success}
 }
 
 // Destroy crowd manager and free resources
 crowd_destroy :: proc(crowd: ^Crowd) {
     if crowd == nil do return
-    
+
     crowd_destroy(crowd)
     free(crowd)
 }
 
 // Add agent to crowd
-crowd_add_agent :: proc(crowd: ^Crowd, pos: [3]f32, params: ^Crowd_Agent_Params) -> (nav_recast.Agent_Id, nav_recast.Status) {
+crowd_add_agent :: proc(crowd: ^Crowd, pos: [3]f32, params: ^Crowd_Agent_Params) -> (recast.Agent_Id, recast.Status) {
     return crowd_add_agent(crowd, pos, params)
 }
 
 // Remove agent from crowd
-crowd_remove_agent :: proc(crowd: ^Crowd, agent_id: nav_recast.Agent_Id) -> nav_recast.Status {
+crowd_remove_agent :: proc(crowd: ^Crowd, agent_id: recast.Agent_Id) -> recast.Status {
     return crowd_remove_agent(crowd, agent_id)
 }
 
 // Update crowd simulation
-crowd_update :: proc(crowd: ^Crowd, dt: f32, debug_data: ^Crowd_Agent_Debug_Info = nil) -> nav_recast.Status {
+crowd_update :: proc(crowd: ^Crowd, dt: f32, debug_data: ^Crowd_Agent_Debug_Info = nil) -> recast.Status {
     return crowd_update(crowd, dt, debug_data)
 }
 
 // Request agent to move to target position
-crowd_request_move_target :: proc(crowd: ^Crowd, agent_id: nav_recast.Agent_Id, ref: nav_recast.Poly_Ref, pos: [3]f32) -> nav_recast.Status {
+crowd_request_move_target :: proc(crowd: ^Crowd, agent_id: recast.Agent_Id, ref: recast.Poly_Ref, pos: [3]f32) -> recast.Status {
     return crowd_request_move_target(crowd, agent_id, ref, pos)
 }
 
 // Request agent to move with specified velocity
-crowd_request_move_velocity :: proc(crowd: ^Crowd, agent_id: nav_recast.Agent_Id, vel: [3]f32) -> nav_recast.Status {
+crowd_request_move_velocity :: proc(crowd: ^Crowd, agent_id: recast.Agent_Id, vel: [3]f32) -> recast.Status {
     return crowd_request_move_velocity(crowd, agent_id, vel)
 }
 
 // Get agent by ID
-crowd_get_agent :: proc(crowd: ^Crowd, agent_id: nav_recast.Agent_Id) -> ^Crowd_Agent {
+crowd_get_agent :: proc(crowd: ^Crowd, agent_id: recast.Agent_Id) -> ^Crowd_Agent {
     return crowd_get_agent(crowd, agent_id)
 }
 
@@ -73,7 +73,7 @@ crowd_get_editable_filter :: proc(crowd: ^Crowd, filter_type: i32) -> ^detour.Qu
 }
 
 // Set obstacle avoidance parameters
-crowd_set_obstacle_avoidance_params :: proc(crowd: ^Crowd, index: i32, params: ^Obstacle_Avoidance_Params) -> nav_recast.Status {
+crowd_set_obstacle_avoidance_params :: proc(crowd: ^Crowd, index: i32, params: ^Obstacle_Avoidance_Params) -> recast.Status {
     return crowd_set_obstacle_avoidance_params(crowd, index, params)
 }
 
@@ -128,11 +128,11 @@ agent_get_corner_count :: proc(agent: ^Crowd_Agent) -> i32 {
     return agent.corner_count
 }
 
-agent_get_corner :: proc(agent: ^Crowd_Agent, index: i32) -> ([3]f32, u8, nav_recast.Poly_Ref, bool) {
+agent_get_corner :: proc(agent: ^Crowd_Agent, index: i32) -> ([3]f32, u8, recast.Poly_Ref, bool) {
     if agent == nil || index < 0 || index >= agent.corner_count {
-        return {}, 0, nav_recast.INVALID_POLY_REF, false
+        return {}, 0, recast.INVALID_POLY_REF, false
     }
-    
+
     return agent.corner_verts[index], agent.corner_flags[index], agent.corner_polys[index], true
 }
 
@@ -145,12 +145,12 @@ agent_get_neighbor :: proc(agent: ^Crowd_Agent, index: i32) -> (Crowd_Neighbor, 
     if agent == nil || index < 0 || index >= agent.neighbor_count {
         return {}, false
     }
-    
+
     return agent.neighbors[index], true
 }
 
 // Path corridor helpers
-agent_get_path :: proc(agent: ^Crowd_Agent) -> []nav_recast.Poly_Ref {
+agent_get_path :: proc(agent: ^Crowd_Agent) -> []recast.Poly_Ref {
     if agent == nil do return nil
     return agent.corridor.path[:]
 }
@@ -174,26 +174,26 @@ agent_get_boundary_segment :: proc(agent: ^Crowd_Agent, index: i32) -> ([6]f32, 
 // Utility functions for common operations
 
 // Find nearest position on navigation mesh
-crowd_find_nearest_position :: proc(crowd: ^Crowd, pos: [3]f32, filter_type: i32 = 0) -> (nav_recast.Poly_Ref, [3]f32, nav_recast.Status) {
+crowd_find_nearest_position :: proc(crowd: ^Crowd, pos: [3]f32, filter_type: i32 = 0) -> (recast.Poly_Ref, [3]f32, recast.Status) {
     if crowd == nil || crowd.nav_query == nil {
-        return nav_recast.INVALID_POLY_REF, {}, {.Invalid_Param}
+        return recast.INVALID_POLY_REF, {}, {.Invalid_Param}
     }
-    
+
     filter := crowd_get_filter(crowd, filter_type)
     if filter == nil {
-        return nav_recast.INVALID_POLY_REF, {}, {.Invalid_Param}
+        return recast.INVALID_POLY_REF, {}, {.Invalid_Param}
     }
-    
+
     return detour.find_nearest_poly(crowd.nav_query, pos, crowd.agent_placement_half_extents, filter)
 }
 
 // Check if position is valid for agent placement
 crowd_is_valid_position :: proc(crowd: ^Crowd, pos: [3]f32, radius: f32, filter_type: i32 = 0) -> bool {
     ref, _, status := crowd_find_nearest_position(crowd, pos, filter_type)
-    if nav_recast.status_failed(status) || ref == nav_recast.INVALID_POLY_REF {
+    if recast.status_failed(status) || ref == recast.INVALID_POLY_REF {
         return false
     }
-    
+
     // Additional checks could be added here (e.g., slope, clearance)
     return true
 }
@@ -215,15 +215,15 @@ crowd_get_statistics :: proc(crowd: ^Crowd) -> struct {
         pending_path_requests: i32,
         completed_path_requests: i32,
     }{}
-    
+
     if crowd == nil do return stats
-    
+
     stats.active_agents = crowd_get_agent_count(crowd)
     stats.max_agents = crowd.max_agents
     stats.queue_size, stats.max_queue_size = path_queue_get_stats(&crowd.path_queue)
     stats.pending_path_requests = path_queue_get_pending_count(&crowd.path_queue)
     stats.completed_path_requests = path_queue_get_completed_count(&crowd.path_queue)
-    
+
     return stats
 }
 

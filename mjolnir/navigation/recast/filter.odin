@@ -235,11 +235,11 @@ median_filter_walkable_area :: proc(chf: ^Compact_Heightfield) -> bool {
                     if neighbor_connection2 != RC_NOT_CONNECTED {
                         bx := ax + int(get_dir_offset_x(dir2))
                         bz := az + int(get_dir_offset_y(dir2))
-                        
+
                         // Bounds check for diagonal neighbors
                         if bx >= 0 && bx < int(x_size) && bz >= 0 && bz < int(z_size) {
                             bi := int(chf.cells[bx + bz * int(z_stride)].index) + neighbor_connection2
-                            
+
                             if chf.areas[bi] != RC_NULL_AREA {
                                 neighbor_areas[dir * 2 + 1] = chf.areas[bi]
                             }
@@ -318,11 +318,11 @@ mark_box_area :: proc(box_min_bounds, box_max_bounds: [3]f32,
 }
 
 // Check if a point is inside a polygon (2D test on XZ plane)
-point_in_poly :: proc(num_verts: int, verts: [][3]f32, point: [3]f32) -> bool {
+point_in_poly :: proc(verts: [][3]f32, point: [3]f32) -> bool {
     in_poly := false
 
-    j := num_verts - 1
-    for i in 0..<num_verts {
+    j := len(verts) - 1
+    for i in 0..<len(verts) {
         vi := verts[i]
         vj := verts[j]
 
@@ -345,7 +345,7 @@ point_in_poly :: proc(num_verts: int, verts: [][3]f32, point: [3]f32) -> bool {
 
 // Mark convex polygon area
 // Mark all spans within a convex polygon with the specified area id
-mark_convex_poly_area :: proc(verts: [][3]f32, num_verts: int,
+mark_convex_poly_area :: proc(verts: [][3]f32,
                                 min_y, max_y: f32, area_id: u8, chf: ^Compact_Heightfield) {
     // Removed timer code for simplicity
 
@@ -357,12 +357,9 @@ mark_convex_poly_area :: proc(verts: [][3]f32, num_verts: int,
     bmin := verts[0]
     bmax := verts[0]
 
-    for i in 1..<num_verts {
-        v := verts[i]
-        bmin.x = min(bmin.x, v.x)
-        bmin.z = min(bmin.z, v.z)
-        bmax.x = max(bmax.x, v.x)
-        bmax.z = max(bmax.z, v.z)
+    for v in verts[1:] {
+        bmin = linalg.min(bmin, v)
+        bmax = linalg.max(bmax, v)
     }
     bmin.y = min_y
     bmax.y = max_y
@@ -409,7 +406,7 @@ mark_convex_poly_area :: proc(verts: [][3]f32, num_verts: int,
                 // Test if cell center is inside the polygon
                 point := chf.bmin + [3]f32{(f32(x) + 0.5) * chf.cs, 0, (f32(z) + 0.5) * chf.cs}
 
-                if point_in_poly(num_verts, verts, point) {
+                if point_in_poly(verts, point) {
                     chf.areas[span_index] = area_id
                 }
             }

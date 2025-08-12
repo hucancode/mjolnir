@@ -508,7 +508,7 @@ test_navmesh_area_marking :: proc(t: ^testing.T) {
         {25, -1, 10},
         {20, -1, 10},
     }
-    recast.mark_convex_poly_area(poly_verts, 4, -1, 10, 30, chf)
+    recast.mark_convex_poly_area(poly_verts, -1, 10, 30, chf)
 
     // Verify areas were marked
     marked_areas := map[u8]int{}

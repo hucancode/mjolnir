@@ -3,7 +3,7 @@ package navigation_detour_crowd
 import "core:math"
 import "core:math/linalg"
 import "core:slice"
-import nav_recast "../recast"
+import recast "../recast"
 import detour "../detour"
 
 // Build proximity grid for spatial queries
@@ -111,7 +111,7 @@ crowd_find_corners :: proc(crowd: ^Crowd) {
         defer delete(corner_verts)
         corner_flags := make([]u8, DT_CROWD_MAX_CORNERS)
         defer delete(corner_flags)
-        corner_polys := make([]nav_recast.Poly_Ref, DT_CROWD_MAX_CORNERS)
+        corner_polys := make([]recast.Poly_Ref, DT_CROWD_MAX_CORNERS)
         defer delete(corner_polys)
 
         corner_count, status := path_corridor_find_corners(&agent.corridor,
@@ -119,7 +119,7 @@ crowd_find_corners :: proc(crowd: ^Crowd) {
                                                              DT_CROWD_MAX_CORNERS, crowd.nav_query,
                                                              &crowd.filters[agent.params.query_filter_type])
 
-        if nav_recast.status_succeeded(status) {
+        if recast.status_succeeded(status) {
             agent.corner_count = corner_count
 
             // Copy corner data

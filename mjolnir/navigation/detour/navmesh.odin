@@ -5,10 +5,10 @@ import "core:math"
 import "core:math/linalg"
 import "core:slice"
 import "core:log"
-import nav_recast "../recast"
+import recast "../recast"
 
 // Initialize navigation mesh with parameters
-nav_mesh_init :: proc(nav_mesh: ^Nav_Mesh, params: ^Nav_Mesh_Params) -> nav_recast.Status {
+nav_mesh_init :: proc(nav_mesh: ^Nav_Mesh, params: ^Nav_Mesh_Params) -> recast.Status {
     nav_mesh.params = params^
     nav_mesh.orig = params.orig
     nav_mesh.tile_width = params.tile_width
@@ -41,10 +41,10 @@ nav_mesh_init :: proc(nav_mesh: ^Nav_Mesh, params: ^Nav_Mesh_Params) -> nav_reca
     // Use 32-bit references (matching C++ logic)
     nav_mesh.tile_bits = tile_bits_needed
     nav_mesh.poly_bits = poly_bits_needed
-    
+
     // Only allow 31 salt bits, since the salt mask is calculated using 32bit uint
     nav_mesh.salt_bits = min(31, 32 - nav_mesh.tile_bits - nav_mesh.poly_bits)
-    
+
     // Ensure minimum salt bits for security (matching C++ requirement)
     if nav_mesh.salt_bits < 10 {
         return {.Invalid_Param}
@@ -54,13 +54,13 @@ nav_mesh_init :: proc(nav_mesh: ^Nav_Mesh, params: ^Nav_Mesh_Params) -> nav_reca
 }
 
 // Initialize navigation mesh from single tile data (mimics C++ dtNavMesh::init)
-nav_mesh_init_single :: proc(nav_mesh: ^Nav_Mesh, data: []u8, flags: i32) -> nav_recast.Status {
+nav_mesh_init_single :: proc(nav_mesh: ^Nav_Mesh, data: []u8, flags: i32) -> recast.Status {
     // Parse header to get bounds
     header, parse_status := parse_mesh_header(data)
-    if nav_recast.status_failed(parse_status) {
+    if recast.status_failed(parse_status) {
         return parse_status
     }
-    
+
     // Setup params for single tile
     params := Nav_Mesh_Params{
         orig = header.bmin,
@@ -69,13 +69,13 @@ nav_mesh_init_single :: proc(nav_mesh: ^Nav_Mesh, data: []u8, flags: i32) -> nav
         max_tiles = 1,
         max_polys = header.poly_count,
     }
-    
+
     // Initialize navmesh
     init_status := nav_mesh_init(nav_mesh, &params)
-    if nav_recast.status_failed(init_status) {
+    if recast.status_failed(init_status) {
         return init_status
     }
-    
+
     // Add the single tile
     _, add_status := nav_mesh_add_tile(nav_mesh, data, flags)
     return add_status
@@ -96,16 +96,16 @@ nav_mesh_destroy :: proc(nav_mesh: ^Nav_Mesh) {
 }
 
 // Add tile to navigation mesh
-nav_mesh_add_tile :: proc(nav_mesh: ^Nav_Mesh, data: []u8, flags: i32, last_ref: nav_recast.Tile_Ref = nav_recast.INVALID_TILE_REF) -> (tile_ref: nav_recast.Tile_Ref, status: nav_recast.Status) {
+nav_mesh_add_tile :: proc(nav_mesh: ^Nav_Mesh, data: []u8, flags: i32, last_ref: recast.Tile_Ref = recast.INVALID_TILE_REF) -> (tile_ref: recast.Tile_Ref, status: recast.Status) {
     // Parse tile data
     header, parse_status := parse_mesh_header(data)
-    if nav_recast.status_failed(parse_status) {
-        return nav_recast.INVALID_TILE_REF, parse_status
+    if recast.status_failed(parse_status) {
+        return recast.INVALID_TILE_REF, parse_status
     }
 
     // Get free tile
     tile: ^Mesh_Tile
-    if last_ref != nav_recast.INVALID_TILE_REF {
+    if last_ref != recast.INVALID_TILE_REF {
         // Try to reuse the specified tile reference
         tile_index := decode_tile_ref(nav_mesh, last_ref)
         if tile_index < u32(nav_mesh.max_tiles) {
@@ -121,7 +121,7 @@ nav_mesh_add_tile :: proc(nav_mesh: ^Nav_Mesh, data: []u8, flags: i32, last_ref:
 
     if tile == nil {
         if nav_mesh.next_free == nil {
-            return nav_recast.INVALID_TILE_REF, {.Out_Of_Memory}
+            return recast.INVALID_TILE_REF, {.Out_Of_Memory}
         }
         tile = nav_mesh.next_free
         nav_mesh.next_free = tile.next
@@ -130,8 +130,8 @@ nav_mesh_add_tile :: proc(nav_mesh: ^Nav_Mesh, data: []u8, flags: i32, last_ref:
 
     // Parse and setup tile data
     result := setup_tile_data(tile, data, header, flags)
-    if nav_recast.status_failed(result) {
-        return nav_recast.INVALID_TILE_REF, result
+    if recast.status_failed(result) {
+        return recast.INVALID_TILE_REF, result
     }
 
     // Insert into tile grid
@@ -149,9 +149,9 @@ nav_mesh_add_tile :: proc(nav_mesh: ^Nav_Mesh, data: []u8, flags: i32, last_ref:
 }
 
 // Remove tile from navigation mesh
-nav_mesh_remove_tile :: proc(nav_mesh: ^Nav_Mesh, ref: nav_recast.Tile_Ref) -> nav_recast.Status {
+nav_mesh_remove_tile :: proc(nav_mesh: ^Nav_Mesh, ref: recast.Tile_Ref) -> recast.Status {
     tile, get_status := get_tile_by_ref(nav_mesh, ref)
-    if nav_recast.status_failed(get_status) {
+    if recast.status_failed(get_status) {
         return get_status
     }
 
@@ -191,8 +191,8 @@ nav_mesh_remove_tile :: proc(nav_mesh: ^Nav_Mesh, ref: nav_recast.Tile_Ref) -> n
 }
 
 // Get tile by reference
-get_tile_by_ref :: proc(nav_mesh: ^Nav_Mesh, ref: nav_recast.Tile_Ref) -> (^Mesh_Tile, nav_recast.Status) {
-    if ref == nav_recast.INVALID_TILE_REF {
+get_tile_by_ref :: proc(nav_mesh: ^Nav_Mesh, ref: recast.Tile_Ref) -> (^Mesh_Tile, recast.Status) {
+    if ref == recast.INVALID_TILE_REF {
         return nil, {.Invalid_Param}
     }
 
@@ -228,23 +228,23 @@ get_tile_at :: proc(nav_mesh: ^Nav_Mesh, x: i32, y: i32, layer: i32) -> ^Mesh_Ti
 }
 
 // Get tile reference
-get_tile_ref :: proc(nav_mesh: ^Nav_Mesh, tile: ^Mesh_Tile) -> nav_recast.Tile_Ref {
+get_tile_ref :: proc(nav_mesh: ^Nav_Mesh, tile: ^Mesh_Tile) -> recast.Tile_Ref {
     if tile == nil {
-        return nav_recast.INVALID_TILE_REF
+        return recast.INVALID_TILE_REF
     }
 
     // Calculate tile index
     tile_index := u32(uintptr(tile) - uintptr(&nav_mesh.tiles[0])) / size_of(Mesh_Tile)
-    return nav_recast.Tile_Ref(encode_tile_ref(nav_mesh, tile.salt, tile_index))
+    return recast.Tile_Ref(encode_tile_ref(nav_mesh, tile.salt, tile_index))
 }
 
 // Get polygon by reference
-get_tile_and_poly_by_ref :: proc(nav_mesh: ^Nav_Mesh, ref: nav_recast.Poly_Ref) -> (^Mesh_Tile, ^Poly, nav_recast.Status) {
+get_tile_and_poly_by_ref :: proc(nav_mesh: ^Nav_Mesh, ref: recast.Poly_Ref) -> (^Mesh_Tile, ^Poly, recast.Status) {
     if nav_mesh == nil {
         return nil, nil, {.Invalid_Param}
     }
 
-    if ref == nav_recast.INVALID_POLY_REF {
+    if ref == recast.INVALID_POLY_REF {
         return nil, nil, {.Invalid_Param}
     }
 
@@ -268,8 +268,8 @@ get_tile_and_poly_by_ref :: proc(nav_mesh: ^Nav_Mesh, ref: nav_recast.Poly_Ref) 
 }
 
 // Validate polygon reference
-is_valid_poly_ref :: proc(nav_mesh: ^Nav_Mesh, ref: nav_recast.Poly_Ref) -> bool {
-    if ref == nav_recast.INVALID_POLY_REF {
+is_valid_poly_ref :: proc(nav_mesh: ^Nav_Mesh, ref: recast.Poly_Ref) -> bool {
+    if ref == recast.INVALID_POLY_REF {
         return false
     }
 
@@ -293,7 +293,7 @@ is_valid_poly_ref :: proc(nav_mesh: ^Nav_Mesh, ref: nav_recast.Poly_Ref) -> bool
 
 // Helper functions
 
-parse_mesh_header :: proc(data: []u8) -> (^Mesh_Header, nav_recast.Status) {
+parse_mesh_header :: proc(data: []u8) -> (^Mesh_Header, recast.Status) {
     if len(data) < size_of(Mesh_Header) {
         return nil, {.Invalid_Param}
     }
@@ -313,14 +313,14 @@ parse_mesh_header :: proc(data: []u8) -> (^Mesh_Header, nav_recast.Status) {
 
     // Enhanced header validation with detailed error reporting
     header_status := validate_navmesh_header(header)
-    if nav_recast.status_failed(header_status) {
+    if recast.status_failed(header_status) {
         return nil, header_status
     }
 
     return header, {.Success}
 }
 
-setup_tile_data :: proc(tile: ^Mesh_Tile, data: []u8, header: ^Mesh_Header, flags: i32) -> nav_recast.Status {
+setup_tile_data :: proc(tile: ^Mesh_Tile, data: []u8, header: ^Mesh_Header, flags: i32) -> recast.Status {
     // Validate data layout before proceeding
     if !verify_data_layout(data, header) {
         log.errorf("Data layout verification failed")
@@ -454,14 +454,14 @@ setup_tile_data :: proc(tile: ^Mesh_Tile, data: []u8, header: ^Mesh_Header, flag
     }
 
     // Initialize links free list
-    tile.links_free_list = nav_recast.DT_NULL_LINK
+    tile.links_free_list = recast.DT_NULL_LINK
     if len(tile.links) > 0 {
         for i in 0..<len(tile.links) - 1 {
             tile.links[i].next = u32(i + 1)
-            tile.links[i].ref = nav_recast.INVALID_POLY_REF
+            tile.links[i].ref = recast.INVALID_POLY_REF
         }
-        tile.links[len(tile.links) - 1].next = nav_recast.DT_NULL_LINK
-        tile.links[len(tile.links) - 1].ref = nav_recast.INVALID_POLY_REF
+        tile.links[len(tile.links) - 1].next = recast.DT_NULL_LINK
+        tile.links[len(tile.links) - 1].ref = recast.INVALID_POLY_REF
         tile.links_free_list = 0
     }
 
@@ -480,7 +480,7 @@ free_tile_data :: proc(tile: ^Mesh_Tile) {
     tile.off_mesh_cons = nil
 
     // Free data if owned by tile
-    if (tile.flags & nav_recast.DT_TILE_FREE_DATA) != 0 {
+    if (tile.flags & recast.DT_TILE_FREE_DATA) != 0 {
         delete(tile.data)
     }
     tile.data = nil
@@ -495,16 +495,16 @@ connect_int_links :: proc(nav_mesh: ^Nav_Mesh, tile: ^Mesh_Tile) {
 
     for i in 0..<int(tile.header.poly_count) {
         poly := &tile.polys[i]
-        poly.first_link = nav_recast.DT_NULL_LINK
+        poly.first_link = recast.DT_NULL_LINK
 
-        if poly_get_type(poly) == nav_recast.DT_POLYTYPE_OFFMESH_CONNECTION {
+        if poly_get_type(poly) == recast.DT_POLYTYPE_OFFMESH_CONNECTION {
             continue
         }
 
         // Validate polygon vertex count
-        if poly.vert_count > nav_recast.DT_VERTS_PER_POLYGON {
+        if poly.vert_count > recast.DT_VERTS_PER_POLYGON {
             log.errorf("Polygon %d has invalid vert_count %d (max %d), skipping polygon",
-                      i, poly.vert_count, nav_recast.DT_VERTS_PER_POLYGON)
+                      i, poly.vert_count, recast.DT_VERTS_PER_POLYGON)
             continue
         }
 
@@ -521,7 +521,7 @@ connect_int_links :: proc(nav_mesh: ^Nav_Mesh, tile: ^Mesh_Tile) {
 
                 if link_idx, ok := allocate_link(tile, u32(i)); ok {
                     link := &tile.links[link_idx]
-                    link.ref = base | nav_recast.Poly_Ref(neighbor_id)
+                    link.ref = base | recast.Poly_Ref(neighbor_id)
                     link.edge = u8(j)
                     link.side = 0xff
                     link.bmin = 0
@@ -572,7 +572,7 @@ connect_ext_links_side :: proc(nav_mesh: ^Nav_Mesh, tile: ^Mesh_Tile, side: int)
     // Find border segments on this tile's side
     MAX_VERTS :: 64
     verts: [MAX_VERTS * 2][3]f32
-    nei: [MAX_VERTS * 2]nav_recast.Poly_Ref
+    nei: [MAX_VERTS * 2]recast.Poly_Ref
     nnei := 0
 
     // Collect border vertices from this tile
@@ -595,7 +595,7 @@ connect_ext_links_side :: proc(nav_mesh: ^Nav_Mesh, tile: ^Mesh_Tile, side: int)
 
             verts[nnei] = va
             verts[nnei + 1] = vb
-            nei[nnei] = get_poly_ref_base(nav_mesh, tile) | nav_recast.Poly_Ref(i)
+            nei[nnei] = get_poly_ref_base(nav_mesh, tile) | recast.Poly_Ref(i)
             nei[nnei + 1] = nei[nnei]
             nnei += 2
         }
@@ -608,7 +608,7 @@ connect_ext_links_side :: proc(nav_mesh: ^Nav_Mesh, tile: ^Mesh_Tile, side: int)
         poly := &neighbor.polys[i]
 
         // Validate neighbor polygon vertex count
-        if poly.vert_count > nav_recast.DT_VERTS_PER_POLYGON {
+        if poly.vert_count > recast.DT_VERTS_PER_POLYGON {
             log.warnf("Neighbor polygon %d has invalid vert_count %d, skipping", i, poly.vert_count)
             continue
         }
@@ -638,10 +638,10 @@ connect_ext_links_side :: proc(nav_mesh: ^Nav_Mesh, tile: ^Mesh_Tile, side: int)
             for k in 0..<nnei-1 {
                 if segment_intersects(verts[k], verts[k+1], va, vb) {
                     // Create bidirectional link
-                    poly_ref := get_poly_ref_base(nav_mesh, neighbor) | nav_recast.Poly_Ref(i)
+                    poly_ref := get_poly_ref_base(nav_mesh, neighbor) | recast.Poly_Ref(i)
 
                     // Validate polygon index
-                    poly_idx := u32(nei[k] & nav_recast.Poly_Ref(tile.header.poly_count - 1))
+                    poly_idx := u32(nei[k] & recast.Poly_Ref(tile.header.poly_count - 1))
                     if poly_idx >= u32(tile.header.poly_count) {
                         log.warnf("Invalid polygon index %d for external link", poly_idx)
                         continue
@@ -711,10 +711,10 @@ disconnect_ext_links :: proc(nav_mesh: ^Nav_Mesh, tile: ^Mesh_Tile) {
             poly := &neighbor.polys[i]
 
             // Traverse link list and remove links to this tile
-            prev_link: u32 = nav_recast.DT_NULL_LINK
+            prev_link: u32 = recast.DT_NULL_LINK
             link_idx := poly.first_link
 
-            for link_idx != nav_recast.DT_NULL_LINK {
+            for link_idx != recast.DT_NULL_LINK {
                 link := &neighbor.links[link_idx]
                 next_link := link.next
 
@@ -724,7 +724,7 @@ disconnect_ext_links :: proc(nav_mesh: ^Nav_Mesh, tile: ^Mesh_Tile) {
 
                 if link_tile_ref == this_tile_ref {
                     // Remove this link
-                    if prev_link == nav_recast.DT_NULL_LINK {
+                    if prev_link == recast.DT_NULL_LINK {
                         poly.first_link = next_link
                     } else {
                         neighbor.links[prev_link].next = next_link
@@ -744,12 +744,12 @@ disconnect_ext_links :: proc(nav_mesh: ^Nav_Mesh, tile: ^Mesh_Tile) {
 }
 
 allocate_link :: proc(tile: ^Mesh_Tile, poly: u32) -> (u32, bool) {
-    if tile.links_free_list == nav_recast.DT_NULL_LINK {
-        return nav_recast.DT_NULL_LINK, false
+    if tile.links_free_list == recast.DT_NULL_LINK {
+        return recast.DT_NULL_LINK, false
     }
 
     if tile.links_free_list >= u32(len(tile.links)) {
-        return nav_recast.DT_NULL_LINK, false
+        return recast.DT_NULL_LINK, false
     }
 
     link_idx := tile.links_free_list
@@ -757,9 +757,9 @@ allocate_link :: proc(tile: ^Mesh_Tile, poly: u32) -> (u32, bool) {
     return link_idx, true
 }
 
-get_poly_ref_base :: proc(nav_mesh: ^Nav_Mesh, tile: ^Mesh_Tile) -> nav_recast.Poly_Ref {
+get_poly_ref_base :: proc(nav_mesh: ^Nav_Mesh, tile: ^Mesh_Tile) -> recast.Poly_Ref {
     if tile == nil {
-        return nav_recast.Poly_Ref(0)
+        return recast.Poly_Ref(0)
     }
 
     // Calculate tile index
@@ -767,7 +767,7 @@ get_poly_ref_base :: proc(nav_mesh: ^Nav_Mesh, tile: ^Mesh_Tile) -> nav_recast.P
 
     // Encode reference with salt, tile index, and zero polygon index
     salt := tile.salt & ((1 << nav_mesh.salt_bits) - 1)
-    return nav_recast.Poly_Ref((salt << (nav_mesh.tile_bits + nav_mesh.poly_bits)) |
+    return recast.Poly_Ref((salt << (nav_mesh.tile_bits + nav_mesh.poly_bits)) |
                              (tile_index << nav_mesh.poly_bits))
 }
 
@@ -801,7 +801,7 @@ dt_ilog2 :: proc(v: u32) -> u32 {
     // Return position of highest set bit (0-based)
     // This matches C++ dtIlog2 which returns floor(log2(v))
     if v == 0 do return 0
-    
+
     r := u32(0)
     val := v
     for val > 1 {
@@ -826,12 +826,12 @@ encode_tile_ref :: proc(nav_mesh: ^Nav_Mesh, salt: u32, tile_index: u32) -> u32 
     return (salt << nav_mesh.tile_bits) | tile_index
 }
 
-decode_tile_ref :: proc(nav_mesh: ^Nav_Mesh, ref: nav_recast.Tile_Ref) -> u32 {
+decode_tile_ref :: proc(nav_mesh: ^Nav_Mesh, ref: recast.Tile_Ref) -> u32 {
     tile_mask := (u32(1) << nav_mesh.tile_bits) - 1
     return u32(ref) & tile_mask
 }
 
-decode_tile_ref_salt :: proc(nav_mesh: ^Nav_Mesh, ref: nav_recast.Tile_Ref) -> u32 {
+decode_tile_ref_salt :: proc(nav_mesh: ^Nav_Mesh, ref: recast.Tile_Ref) -> u32 {
     salt_mask := (u32(1) << nav_mesh.salt_bits) - 1
     return (u32(ref) >> nav_mesh.tile_bits) & salt_mask
 }

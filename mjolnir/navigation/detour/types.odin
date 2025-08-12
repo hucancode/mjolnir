@@ -3,13 +3,13 @@ package navigation_detour
 import "core:math"
 import "core:math/linalg"
 import "core:slice"
-import nav_recast "../recast"
+import recast "../recast"
 
 // Detour navigation mesh polygon
 Poly :: struct {
     first_link:   u32,                                    // Index to first link in linked list (DT_NULL_LINK if no link)
-    verts:        [nav_recast.DT_VERTS_PER_POLYGON]u16,     // Indices of polygon vertices
-    neis:         [nav_recast.DT_VERTS_PER_POLYGON]u16,     // Neighbor data for each edge
+    verts:        [recast.DT_VERTS_PER_POLYGON]u16,     // Indices of polygon vertices
+    neis:         [recast.DT_VERTS_PER_POLYGON]u16,     // Neighbor data for each edge
     flags:        u16,                                    // User defined polygon flags
     vert_count:   u8,                                     // Number of vertices in polygon
     area_and_type: u8,                                   // Packed area id and polygon type
@@ -42,7 +42,7 @@ Poly_Detail :: struct {
 
 // Link between polygons
 Link :: struct {
-    ref:   nav_recast.Poly_Ref,  // Neighbor reference (linked polygon)
+    ref:   recast.Poly_Ref,  // Neighbor reference (linked polygon)
     next:  u32,                // Index of next link
     edge:  u8,                 // Index of polygon edge that owns this link
     side:  u8,                 // If boundary link, defines which side
@@ -132,16 +132,16 @@ Nav_Mesh :: struct {
     pos_lookup:     []^Mesh_Tile,      // Tile hash lookup
     next_free:      ^Mesh_Tile,        // Free tile list
     tiles:          []Mesh_Tile,       // All tiles
-    
+
     // Reference encoding parameters
     salt_bits:      u32,                  // Number of salt bits
-    tile_bits:      u32,                  // Number of tile bits  
+    tile_bits:      u32,                  // Number of tile bits
     poly_bits:      u32,                  // Number of polygon bits
 }
 
 // Query filter for pathfinding constraints
 Query_Filter :: struct {
-    area_cost:     [nav_recast.DT_MAX_AREAS]f32,  // Cost per area type
+    area_cost:     [recast.DT_MAX_AREAS]f32,  // Cost per area type
     include_flags: u16,                         // Flags for traversable polygons
     exclude_flags: u16,                         // Flags for non-traversable polygons
 }
@@ -151,7 +151,7 @@ Raycast_Hit :: struct {
     t:              f32,                           // Hit parameter (FLT_MAX if no hit)
     hit_normal:     [3]f32,                        // Normal of nearest wall hit
     hit_edge_index: i32,                           // Edge index on final polygon
-    path:           []nav_recast.Poly_Ref,           // Array of visited polygon refs
+    path:           []recast.Poly_Ref,           // Array of visited polygon refs
     path_count:     i32,                           // Number of visited polygons
     path_cost:      f32,                           // Cost of path until hit
 }
@@ -160,7 +160,7 @@ Raycast_Hit :: struct {
 Straight_Path_Point :: struct {
     pos:   [3]f32,             // Point position
     flags: u8,                 // Point flags (start, end, off-mesh)
-    ref:   nav_recast.Poly_Ref,  // Polygon reference
+    ref:   recast.Poly_Ref,  // Polygon reference
 }
 
 // Straight path flags
@@ -188,7 +188,7 @@ Straight_Path_Options :: enum u8 {
 
 // Polygon query interface
 Poly_Query :: struct {
-    process: proc(ref: nav_recast.Poly_Ref, tile: ^Mesh_Tile, poly: ^Poly, user_data: rawptr),
+    process: proc(ref: recast.Poly_Ref, tile: ^Mesh_Tile, poly: ^Poly, user_data: rawptr),
     user_data: rawptr,
 }
 
@@ -199,54 +199,54 @@ query_filter_init :: proc(filter: ^Query_Filter) {
     slice.fill(filter.area_cost[:], 1.0)
 }
 
-query_filter_pass_filter :: proc(filter: ^Query_Filter, ref: nav_recast.Poly_Ref, tile: ^Mesh_Tile, poly: ^Poly) -> bool {
+query_filter_pass_filter :: proc(filter: ^Query_Filter, ref: recast.Poly_Ref, tile: ^Mesh_Tile, poly: ^Poly) -> bool {
     return (poly.flags & filter.include_flags) != 0 && (poly.flags & filter.exclude_flags) == 0
 }
 
-query_filter_get_cost :: proc(filter: ^Query_Filter, 
+query_filter_get_cost :: proc(filter: ^Query_Filter,
                                 pa: [3]f32, pb: [3]f32,
-                                prev_ref: nav_recast.Poly_Ref, prev_tile: ^Mesh_Tile, prev_poly: ^Poly,
-                                cur_ref: nav_recast.Poly_Ref, cur_tile: ^Mesh_Tile, cur_poly: ^Poly,
-                                next_ref: nav_recast.Poly_Ref, next_tile: ^Mesh_Tile, next_poly: ^Poly) -> f32 {
+                                prev_ref: recast.Poly_Ref, prev_tile: ^Mesh_Tile, prev_poly: ^Poly,
+                                cur_ref: recast.Poly_Ref, cur_tile: ^Mesh_Tile, cur_poly: ^Poly,
+                                next_ref: recast.Poly_Ref, next_tile: ^Mesh_Tile, next_poly: ^Poly) -> f32 {
     // Base cost is distance
     diff := pb - pa
     cost := linalg.length(diff)
-    
+
     // Apply area-specific multiplier
     area := poly_get_area(cur_poly)
-    if area < nav_recast.DT_MAX_AREAS {
+    if area < recast.DT_MAX_AREAS {
         cost *= filter.area_cost[area]
     }
-    
+
     return cost
 }
 
 
 // Reference encoding/decoding helpers
-encode_poly_id :: proc(nav_mesh: ^Nav_Mesh, salt: u32, tile_index: u32, poly_index: u32) -> nav_recast.Poly_Ref {
-    return nav_recast.Poly_Ref((salt << (nav_mesh.poly_bits + nav_mesh.tile_bits)) | 
-                            (tile_index << nav_mesh.poly_bits) | 
+encode_poly_id :: proc(nav_mesh: ^Nav_Mesh, salt: u32, tile_index: u32, poly_index: u32) -> recast.Poly_Ref {
+    return recast.Poly_Ref((salt << (nav_mesh.poly_bits + nav_mesh.tile_bits)) |
+                            (tile_index << nav_mesh.poly_bits) |
                             poly_index)
 }
 
-decode_poly_id :: proc(nav_mesh: ^Nav_Mesh, ref: nav_recast.Poly_Ref) -> (salt: u32, tile_index: u32, poly_index: u32) {
+decode_poly_id :: proc(nav_mesh: ^Nav_Mesh, ref: recast.Poly_Ref) -> (salt: u32, tile_index: u32, poly_index: u32) {
     if nav_mesh == nil {
         return 0, 0, 0
     }
-    
+
     salt_mask := (u32(1) << nav_mesh.salt_bits) - 1
     tile_mask := (u32(1) << nav_mesh.tile_bits) - 1
     poly_mask := (u32(1) << nav_mesh.poly_bits) - 1
-    
+
     salt = (u32(ref) >> (nav_mesh.poly_bits + nav_mesh.tile_bits)) & salt_mask
     tile_index = (u32(ref) >> nav_mesh.poly_bits) & tile_mask
     poly_index = u32(ref) & poly_mask
-    
+
     return
 }
 
 // Helper to just get the polygon index from a reference
-get_poly_index :: proc(nav_mesh: ^Nav_Mesh, ref: nav_recast.Poly_Ref) -> u32 {
+get_poly_index :: proc(nav_mesh: ^Nav_Mesh, ref: recast.Poly_Ref) -> u32 {
     if nav_mesh == nil {
         return 0
     }
@@ -255,23 +255,23 @@ get_poly_index :: proc(nav_mesh: ^Nav_Mesh, ref: nav_recast.Poly_Ref) -> u32 {
 }
 
 // Calculate tile location from world position with robust error handling
-calc_tile_loc :: proc(nav_mesh: ^Nav_Mesh, pos: [3]f32) -> (tx: i32, ty: i32, status: nav_recast.Status) {
+calc_tile_loc :: proc(nav_mesh: ^Nav_Mesh, pos: [3]f32) -> (tx: i32, ty: i32, status: recast.Status) {
     // Input validation
     if nav_mesh == nil {
         return 0, 0, {.Invalid_Param}
     }
-    
+
     // Check for invalid tile dimensions (zero, negative, or extremely small values)
     if nav_mesh.tile_width <= 0 || nav_mesh.tile_height <= 0 {
         return 0, 0, {.Invalid_Param}
     }
-    
+
     // Check for extremely small tile dimensions that could cause precision issues
     MIN_TILE_DIMENSION :: 1e-6
     if nav_mesh.tile_width < MIN_TILE_DIMENSION || nav_mesh.tile_height < MIN_TILE_DIMENSION {
         return 0, 0, {.Invalid_Param}
     }
-    
+
     // Check for infinite or NaN position values
     for i in 0..<3 {
         // Check for NaN: NaN != NaN is always true
@@ -289,12 +289,12 @@ calc_tile_loc :: proc(nav_mesh: ^Nav_Mesh, pos: [3]f32) -> (tx: i32, ty: i32, st
             return 0, 0, {.Invalid_Param}
         }
     }
-    
+
     // Calculate offset from origin
     offset := pos - nav_mesh.orig
     offset_x := offset.x
     offset_z := offset.z
-    
+
     // Check for infinite or NaN offset values (could happen if origin is invalid)
     if offset_x != offset_x || offset_z != offset_z ||  // NaN check
        offset_x == math.F32_MAX || offset_x == -math.F32_MAX ||  // Infinity check
@@ -302,26 +302,26 @@ calc_tile_loc :: proc(nav_mesh: ^Nav_Mesh, pos: [3]f32) -> (tx: i32, ty: i32, st
        math.abs(offset_x) > 1e20 || math.abs(offset_z) > 1e20 {  // Extremely large values
         return 0, 0, {.Invalid_Param}
     }
-    
+
     // Calculate floating-point tile coordinates
     tile_f_x := offset_x / nav_mesh.tile_width
     tile_f_z := offset_z / nav_mesh.tile_height
-    
+
     // Check for overflow - ensure coordinates won't overflow i32
     // Use conservative bounds to account for negative values
     MAX_SAFE_TILE_COORD :: f32(0x7FFF_FF00) // Leave some headroom before i32 max
     MIN_SAFE_TILE_COORD :: f32(-0x7FFF_FF00)
-    
+
     if tile_f_x > MAX_SAFE_TILE_COORD || tile_f_x < MIN_SAFE_TILE_COORD ||
        tile_f_z > MAX_SAFE_TILE_COORD || tile_f_z < MIN_SAFE_TILE_COORD {
         return 0, 0, {.Invalid_Param}
     }
-    
+
     // Handle negative coordinates properly - floor division for correct tile assignment
     // For negative coordinates, we want floor behavior, not truncation toward zero
     tx = i32(math.floor(tile_f_x))
     ty = i32(math.floor(tile_f_z))
-    
+
     // Additional bounds checking - ensure tile coordinates are reasonable for the system
     // This prevents accessing extremely large tile indices that could cause memory issues
     MAX_REASONABLE_TILE_INDEX :: i32(1_000_000) // 1 million tiles in each direction
@@ -329,7 +329,7 @@ calc_tile_loc :: proc(nav_mesh: ^Nav_Mesh, pos: [3]f32) -> (tx: i32, ty: i32, st
        ty < -MAX_REASONABLE_TILE_INDEX || ty > MAX_REASONABLE_TILE_INDEX {
         return 0, 0, {.Invalid_Param}
     }
-    
+
     return tx, ty, {.Success}
 }
 
@@ -337,7 +337,7 @@ calc_tile_loc :: proc(nav_mesh: ^Nav_Mesh, pos: [3]f32) -> (tx: i32, ty: i32, st
 // Returns (0, 0) for invalid inputs - use calc_tile_loc for full error handling
 calc_tile_loc_simple :: proc(nav_mesh: ^Nav_Mesh, pos: [3]f32) -> (tx: i32, ty: i32) {
     result_tx, result_ty, status := calc_tile_loc(nav_mesh, pos)
-    if nav_recast.status_failed(status) {
+    if recast.status_failed(status) {
         return 0, 0
     }
     return result_tx, result_ty

@@ -1,6 +1,5 @@
 package test_recast
 
-import nav_recast "../../mjolnir/navigation/recast"
 import recast "../../mjolnir/navigation/recast"
 import "core:testing"
 import "core:log"
@@ -153,69 +152,69 @@ test_heightfield_edge_cases :: proc(t: ^testing.T) {
 @(test)
 test_distance_field_mathematical_correctness :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-    
+
     // Create a 5x5 heightfield with a single center obstacle
     // This creates a known pattern where distances should form concentric rings
-    
+
     hf := recast.alloc_heightfield()
     testing.expect(t, hf != nil, "Failed to allocate heightfield")
     defer recast.free_heightfield(hf)
-    
+
     ok := recast.create_heightfield(hf, 5, 5, {0,0,0}, {5,5,5}, 1.0, 0.2)
     testing.expect(t, ok, "Failed to create heightfield")
-    
+
     // Add spans everywhere except center (2,2) to create a hole
     for x in 0..<5 {
         for z in 0..<5 {
             if x == 2 && z == 2 {
                 continue // Leave center empty (obstacle)
             }
-            ok = recast.add_span(hf, i32(x), i32(z), 0, 10, nav_recast.RC_WALKABLE_AREA, 1)
+            ok = recast.add_span(hf, i32(x), i32(z), 0, 10, recast.RC_WALKABLE_AREA, 1)
             testing.expect(t, ok, "Failed to add span")
         }
     }
-    
+
     // Build compact heightfield
     chf := recast.alloc_compact_heightfield()
     defer recast.free_compact_heightfield(chf)
-    
+
     ok = recast.build_compact_heightfield(2, 1, hf, chf)
     testing.expect(t, ok, "Failed to build compact heightfield")
-    
+
     // Build distance field
     log.info("Building distance field...")
     ok = recast.build_distance_field(chf)
     log.info("Distance field build completed")
     testing.expect(t, ok, "Failed to build distance field")
-    
+
     // Validate distance field basic properties
     // Distance field should be built successfully and contain valid values
-    
+
     // Function to get distance at grid position
     get_distance_at :: proc(chf: ^recast.Compact_Heightfield, x, z: i32) -> u16 {
         if x < 0 || x >= chf.width || z < 0 || z >= chf.height {
             return 0
         }
-        
+
         cell := &chf.cells[x + z * chf.width]
         span_idx := cell.index
         span_count := cell.count
-        
+
         if span_count > 0 && span_idx < u32(len(chf.spans)) {
             return chf.dist[span_idx]
         }
         return 0
     }
-    
+
     // Check various positions to ensure distance field has reasonable values
     corner_dist := get_distance_at(chf, 0, 0)      // Corner
-    edge_dist := get_distance_at(chf, 2, 0)        // North edge  
+    edge_dist := get_distance_at(chf, 2, 0)        // North edge
     adjacent_dist := get_distance_at(chf, 1, 2)    // West of center
     center_neighbor := get_distance_at(chf, 1, 1)  // Next to missing center
-    
+
     // Basic validation - distance field should have been computed
     testing.expect(t, chf.max_distance > 0, "Distance field should have max_distance > 0")
-    
+
     // At least some cells should have distance values
     non_zero_distances := 0
     total_spans := 0
@@ -225,12 +224,12 @@ test_distance_field_mathematical_correctness :: proc(t: ^testing.T) {
         }
         total_spans += 1
     }
-    
+
     testing.expect(t, non_zero_distances > 0, "Some cells should have non-zero distances")
     testing.expect(t, total_spans > 0, "Should have spans to test")
-    
-    log.infof("Distance field validation - Corner: %d, Edge: %d, Adjacent: %d, Center neighbor: %d", 
+
+    log.infof("Distance field validation - Corner: %d, Edge: %d, Adjacent: %d, Center neighbor: %d",
               corner_dist, edge_dist, adjacent_dist, center_neighbor)
-    log.infof("Distance field stats - Max distance: %d, Non-zero distances: %d/%d", 
+    log.infof("Distance field stats - Max distance: %d, Non-zero distances: %d/%d",
               chf.max_distance, non_zero_distances, total_spans)
 }

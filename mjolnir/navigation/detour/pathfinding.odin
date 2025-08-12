@@ -7,7 +7,7 @@ import "core:math/linalg"
 import "core:container/priority_queue"
 import "core:slice"
 import "core:log"
-import nav_recast "../recast"
+import recast "../recast"
 
 // Heuristic scale factor for A* pathfinding
 // Slightly less than 1.0 to keep the heuristic admissible and guarantee optimal paths
@@ -19,14 +19,14 @@ Node :: struct {
     pos:       [3]f32,             // Node position
     cost:      f32,                // Cost from start to this node
     total:     f32,                // Cost + heuristic
-    id:        nav_recast.Poly_Ref,  // Polygon reference
+    id:        recast.Poly_Ref,  // Polygon reference
     flags:     Node_Flags,      // Node state flags
-    parent_id: nav_recast.Poly_Ref,  // Parent node reference
+    parent_id: recast.Poly_Ref,  // Parent node reference
 }
 
 // Self-contained pathfinding queue element (no external context needed)
 Pathfinding_Node :: struct {
-    ref:   nav_recast.Poly_Ref,  // Polygon reference
+    ref:   recast.Poly_Ref,  // Polygon reference
     cost:  f32,                // Cost from start to this node
     total: f32,                // Cost + heuristic (f-score)
 }
@@ -42,7 +42,7 @@ Node_Flags :: bit_set[Node_Flag; u8]
 
 // Arena-based pathfinding context for temporary allocations
 Pathfinding_Context :: struct {
-    nodes:     map[nav_recast.Poly_Ref]^Node,  // Hash map for fast lookup
+    nodes:     map[recast.Poly_Ref]^Node,  // Hash map for fast lookup
     arena:     virtual.Arena,                   // Virtual arena - no manual buffer needed!
 }
 
@@ -52,14 +52,14 @@ Node_Queue :: struct {
 }
 
 // Initialize pathfinding context with virtual arena
-pathfinding_context_init :: proc(ctx: ^Pathfinding_Context, max_nodes: i32) -> nav_recast.Status {
+pathfinding_context_init :: proc(ctx: ^Pathfinding_Context, max_nodes: i32) -> recast.Status {
     // Initialize virtual arena - it will grow as needed!
     if err := virtual.arena_init_growing(&ctx.arena); err != .None {
         return {.Out_Of_Memory}
     }
 
     // Pre-size the map (uses regular allocator, not arena)
-    ctx.nodes = make(map[nav_recast.Poly_Ref]^Node, max_nodes)
+    ctx.nodes = make(map[recast.Poly_Ref]^Node, max_nodes)
     return {.Success}
 }
 
@@ -77,7 +77,7 @@ pathfinding_context_destroy :: proc(ctx: ^Pathfinding_Context) {
 }
 
 // Get node from pathfinding context
-get_node :: proc(ctx: ^Pathfinding_Context, id: nav_recast.Poly_Ref) -> ^Node {
+get_node :: proc(ctx: ^Pathfinding_Context, id: recast.Poly_Ref) -> ^Node {
     if node, exists := ctx.nodes[id]; exists {
         return node
     }
@@ -85,7 +85,7 @@ get_node :: proc(ctx: ^Pathfinding_Context, id: nav_recast.Poly_Ref) -> ^Node {
 }
 
 // Create or get node from pathfinding context
-create_node :: proc(ctx: ^Pathfinding_Context, id: nav_recast.Poly_Ref) -> ^Node {
+create_node :: proc(ctx: ^Pathfinding_Context, id: recast.Poly_Ref) -> ^Node {
     // Check if already exists
     if existing, ok := ctx.nodes[id]; ok {
         return existing
@@ -104,7 +104,7 @@ create_node :: proc(ctx: ^Pathfinding_Context, id: nav_recast.Poly_Ref) -> ^Node
     node.flags = {}
     node.cost = 0
     node.total = 0
-    node.parent_id = nav_recast.INVALID_POLY_REF
+    node.parent_id = recast.INVALID_POLY_REF
 
     // Store in map
     ctx.nodes[id] = node
@@ -122,7 +122,7 @@ pathfinding_node_compare :: proc(a, b: Pathfinding_Node) -> bool {
     return a.total < b.total
 }
 
-node_queue_init :: proc(queue: ^Node_Queue, capacity: i32) -> nav_recast.Status {
+node_queue_init :: proc(queue: ^Node_Queue, capacity: i32) -> recast.Status {
     // Initialize priority queue with self-contained comparison function
     queue.heap = priority_queue.Priority_Queue(Pathfinding_Node){}
 
@@ -149,7 +149,7 @@ node_queue_push :: proc(queue: ^Node_Queue, node: Pathfinding_Node) {
 
 node_queue_pop :: proc(queue: ^Node_Queue) -> Pathfinding_Node {
     if priority_queue.len(queue.heap) == 0 {
-        return {nav_recast.INVALID_POLY_REF, 0, 0}
+        return {recast.INVALID_POLY_REF, 0, 0}
     }
 
     return priority_queue.pop(&queue.heap)
@@ -169,10 +169,10 @@ Nav_Mesh_Query :: struct {
 
 // Query working data
 Query_Data :: struct {
-    status:      nav_recast.Status,
+    status:      recast.Status,
     last_best:   ^Node,
-    start_ref:   nav_recast.Poly_Ref,
-    end_ref:     nav_recast.Poly_Ref,
+    start_ref:   recast.Poly_Ref,
+    end_ref:     recast.Poly_Ref,
     start_pos:   [3]f32,
     end_pos:     [3]f32,
     filter:      ^Query_Filter,
@@ -181,16 +181,16 @@ Query_Data :: struct {
 }
 
 // Initialize query object
-nav_mesh_query_init :: proc(query: ^Nav_Mesh_Query, nav_mesh: ^Nav_Mesh, max_nodes: i32) -> nav_recast.Status {
+nav_mesh_query_init :: proc(query: ^Nav_Mesh_Query, nav_mesh: ^Nav_Mesh, max_nodes: i32) -> recast.Status {
     query.nav_mesh = nav_mesh
 
     status := pathfinding_context_init(&query.pf_context, max_nodes)
-    if nav_recast.status_failed(status) {
+    if recast.status_failed(status) {
         return status
     }
 
     status = node_queue_init(&query.open_list, max_nodes)
-    if nav_recast.status_failed(status) {
+    if recast.status_failed(status) {
         pathfinding_context_destroy(&query.pf_context)
         return status
     }
@@ -207,11 +207,11 @@ nav_mesh_query_destroy :: proc(query: ^Nav_Mesh_Query) {
 
 // Find path using A* algorithm
 find_path :: proc(query: ^Nav_Mesh_Query,
-                    start_ref: nav_recast.Poly_Ref, end_ref: nav_recast.Poly_Ref,
+                    start_ref: recast.Poly_Ref, end_ref: recast.Poly_Ref,
                     start_pos: [3]f32, end_pos: [3]f32,
                     filter: ^Query_Filter,
-                    path: []nav_recast.Poly_Ref,
-                    max_path: i32) -> (status: nav_recast.Status, path_count: i32) {
+                    path: []recast.Poly_Ref,
+                    max_path: i32) -> (status: recast.Status, path_count: i32) {
 
     path_count = 0
 
@@ -245,7 +245,7 @@ find_path :: proc(query: ^Nav_Mesh_Query,
     start_node.total = linalg.distance(start_pos, end_pos) * H_SCALE
     start_node.id = start_ref
     start_node.flags = {.Open}
-    start_node.parent_id = nav_recast.INVALID_POLY_REF
+    start_node.parent_id = recast.INVALID_POLY_REF
 
     start_pathfinding_node := Pathfinding_Node{
         ref = start_ref,
@@ -265,7 +265,7 @@ find_path :: proc(query: ^Nav_Mesh_Query,
         iterations += 1
         // Get best node
         best_pathfinding_node := node_queue_pop(&query.open_list)
-        if best_pathfinding_node.ref == nav_recast.INVALID_POLY_REF {
+        if best_pathfinding_node.ref == recast.INVALID_POLY_REF {
             break
         }
         current := get_node(&query.pf_context, best_pathfinding_node.ref)
@@ -302,20 +302,20 @@ find_path :: proc(query: ^Nav_Mesh_Query,
 
         // Get current polygon
         cur_tile, cur_poly, status := get_tile_and_poly_by_ref(query.nav_mesh, current.id)
-        if nav_recast.status_failed(status) {
+        if recast.status_failed(status) {
             continue
         }
 
         // Explore neighbors
         // Iterate through all links from the current polygon
         link := cur_poly.first_link
-        for link != nav_recast.DT_NULL_LINK {
+        for link != recast.DT_NULL_LINK {
             neighbor_ref := get_link_poly_ref(cur_tile, link)
 
             // Skip invalid ids and do not expand back to where we came from
-            if neighbor_ref != nav_recast.INVALID_POLY_REF && neighbor_ref != current.parent_id {
+            if neighbor_ref != recast.INVALID_POLY_REF && neighbor_ref != current.parent_id {
                 neighbor_tile, neighbor_poly, neighbor_status := get_tile_and_poly_by_ref(query.nav_mesh, neighbor_ref)
-                if nav_recast.status_succeeded(neighbor_status) &&
+                if recast.status_succeeded(neighbor_status) &&
                    query_filter_pass_filter(filter, neighbor_ref, neighbor_tile, neighbor_poly) {
 
                     // Check if neighbor node already exists
@@ -329,7 +329,7 @@ find_path :: proc(query: ^Nav_Mesh_Query,
                         portal_type := u8(0)
                         portal_status := get_portal_points(query, current.id, neighbor_ref, &left, &right, &portal_type)
 
-                        if nav_recast.status_succeeded(portal_status) {
+                        if recast.status_succeeded(portal_status) {
                             // Use midpoint of the actual shared edge
                             neighbor_pos = linalg.mix(left, right, 0.5)
                         } else {
@@ -358,7 +358,7 @@ find_path :: proc(query: ^Nav_Mesh_Query,
                                                     neighbor_pos, end_pos,
                                                     current.id, cur_tile, cur_poly,
                                                     neighbor_ref, neighbor_tile, neighbor_poly,
-                                                    nav_recast.INVALID_POLY_REF, nil, nil)
+                                                    recast.INVALID_POLY_REF, nil, nil)
                         cost = current.cost + cur_cost + end_cost
                         heuristic = 0
                     } else {
@@ -450,14 +450,14 @@ find_path :: proc(query: ^Nav_Mesh_Query,
 
 // Get path from node back to start
 get_path_to_node :: proc(query: ^Nav_Mesh_Query, end_node: ^Node,
-                           path: []nav_recast.Poly_Ref, max_path: i32) -> (status: nav_recast.Status, path_count: i32) {
+                           path: []recast.Poly_Ref, max_path: i32) -> (status: recast.Status, path_count: i32) {
 
     // Count path length
     node := end_node
     length := i32(0)
     for node != nil {
         length += 1
-        if node.parent_id == nav_recast.INVALID_POLY_REF {
+        if node.parent_id == recast.INVALID_POLY_REF {
             break
         }
         node = get_node(&query.pf_context, node.parent_id)
@@ -471,7 +471,7 @@ get_path_to_node :: proc(query: ^Nav_Mesh_Query, end_node: ^Node,
     node = end_node
     for i := length - 1; i >= 0; i -= 1 {
         path[i] = node.id
-        if node.parent_id == nav_recast.INVALID_POLY_REF {
+        if node.parent_id == recast.INVALID_POLY_REF {
             break
         }
         node = get_node(&query.pf_context, node.parent_id)
@@ -484,27 +484,27 @@ get_path_to_node :: proc(query: ^Nav_Mesh_Query, end_node: ^Node,
 
 get_first_link :: proc(tile: ^Mesh_Tile, poly: i32) -> u32 {
     if poly < 0 || poly >= i32(len(tile.polys)) {
-        return nav_recast.DT_NULL_LINK
+        return recast.DT_NULL_LINK
     }
     return tile.polys[poly].first_link
 }
 
 get_next_link :: proc(tile: ^Mesh_Tile, link: u32) -> u32 {
-    if link == nav_recast.DT_NULL_LINK || int(link) >= len(tile.links) {
-        return nav_recast.DT_NULL_LINK
+    if link == recast.DT_NULL_LINK || int(link) >= len(tile.links) {
+        return recast.DT_NULL_LINK
     }
     return tile.links[link].next
 }
 
-get_link_poly_ref :: proc(tile: ^Mesh_Tile, link: u32) -> nav_recast.Poly_Ref {
-    if link == nav_recast.DT_NULL_LINK || int(link) >= len(tile.links) {
-        return nav_recast.INVALID_POLY_REF
+get_link_poly_ref :: proc(tile: ^Mesh_Tile, link: u32) -> recast.Poly_Ref {
+    if link == recast.DT_NULL_LINK || int(link) >= len(tile.links) {
+        return recast.INVALID_POLY_REF
     }
     return tile.links[link].ref
 }
 
 get_link_edge :: proc(tile: ^Mesh_Tile, link: u32) -> u8 {
-    if link == nav_recast.DT_NULL_LINK || int(link) >= len(tile.links) {
+    if link == recast.DT_NULL_LINK || int(link) >= len(tile.links) {
         return 0xff
     }
     return tile.links[link].edge
@@ -521,9 +521,9 @@ get_edge_mid_point :: proc(tile_a: ^Mesh_Tile, poly_a: ^Poly, edge: int,
 }
 
 // Sliced pathfinding functions (matching C++ API)
-init_sliced_find_path :: proc(query: ^Nav_Mesh_Query, start_ref: nav_recast.Poly_Ref,
-                               end_ref: nav_recast.Poly_Ref, start_pos: [3]f32, end_pos: [3]f32,
-                               filter: ^Query_Filter, options: u32) -> nav_recast.Status {
+init_sliced_find_path :: proc(query: ^Nav_Mesh_Query, start_ref: recast.Poly_Ref,
+                               end_ref: recast.Poly_Ref, start_pos: [3]f32, end_pos: [3]f32,
+                               filter: ^Query_Filter, options: u32) -> recast.Status {
 
     // Validate input
     if !is_valid_poly_ref(query.nav_mesh, start_ref) || !is_valid_poly_ref(query.nav_mesh, end_ref) {
@@ -554,7 +554,7 @@ init_sliced_find_path :: proc(query: ^Nav_Mesh_Query, start_ref: nav_recast.Poly
     start_node.cost = 0
     start_node.total = linalg.distance(start_pos, end_pos) * H_SCALE
     start_node.flags = {.Open}
-    start_node.parent_id = nav_recast.INVALID_POLY_REF
+    start_node.parent_id = recast.INVALID_POLY_REF
 
     node_queue_push(&query.open_list, {start_ref, start_node.cost, start_node.total})
     query.query_data.last_best = start_node
@@ -563,7 +563,7 @@ init_sliced_find_path :: proc(query: ^Nav_Mesh_Query, start_ref: nav_recast.Poly
 }
 
 // Update sliced pathfinding
-update_sliced_find_path :: proc(query: ^Nav_Mesh_Query, max_iter: i32, done_iters: ^i32) -> nav_recast.Status {
+update_sliced_find_path :: proc(query: ^Nav_Mesh_Query, max_iter: i32, done_iters: ^i32) -> recast.Status {
     if query.query_data.status != {.In_Progress} {
         if done_iters != nil {
             done_iters^ = 0
@@ -578,7 +578,7 @@ update_sliced_find_path :: proc(query: ^Nav_Mesh_Query, max_iter: i32, done_iter
 
         // Get best node
         best := node_queue_pop(&query.open_list)
-        if best.ref == nav_recast.INVALID_POLY_REF {
+        if best.ref == recast.INVALID_POLY_REF {
             break
         }
 
@@ -608,17 +608,17 @@ update_sliced_find_path :: proc(query: ^Nav_Mesh_Query, max_iter: i32, done_iter
 
         // Expand neighbors (similar to find_path but simplified)
         cur_tile, cur_poly, status := get_tile_and_poly_by_ref(query.nav_mesh, current.id)
-        if nav_recast.status_failed(status) {
+        if recast.status_failed(status) {
             continue
         }
 
         link := cur_poly.first_link
-        for link != nav_recast.DT_NULL_LINK {
+        for link != recast.DT_NULL_LINK {
             neighbor_ref := get_link_poly_ref(cur_tile, link)
 
-            if neighbor_ref != nav_recast.INVALID_POLY_REF && neighbor_ref != current.parent_id {
+            if neighbor_ref != recast.INVALID_POLY_REF && neighbor_ref != current.parent_id {
                 neighbor_tile, neighbor_poly, neighbor_status := get_tile_and_poly_by_ref(query.nav_mesh, neighbor_ref)
-                if nav_recast.status_succeeded(neighbor_status) &&
+                if recast.status_succeeded(neighbor_status) &&
                    query_filter_pass_filter(query.query_data.filter, neighbor_ref, neighbor_tile, neighbor_poly) {
 
                     neighbor_node := get_node(&query.pf_context, neighbor_ref)
@@ -690,7 +690,7 @@ update_sliced_find_path :: proc(query: ^Nav_Mesh_Query, max_iter: i32, done_iter
 }
 
 // Finalize sliced pathfinding
-finalize_sliced_find_path :: proc(query: ^Nav_Mesh_Query, path: []nav_recast.Poly_Ref, max_path: i32) -> (status: nav_recast.Status, path_count: i32) {
+finalize_sliced_find_path :: proc(query: ^Nav_Mesh_Query, path: []recast.Poly_Ref, max_path: i32) -> (status: recast.Status, path_count: i32) {
 
     if query.query_data.status != {.Success} {
         return query.query_data.status, 0
@@ -704,8 +704,8 @@ finalize_sliced_find_path :: proc(query: ^Nav_Mesh_Query, path: []nav_recast.Pol
 }
 
 // Finalize partial sliced pathfinding
-finalize_sliced_find_path_partial :: proc(query: ^Nav_Mesh_Query, existing: []nav_recast.Poly_Ref,
-                                           path: []nav_recast.Poly_Ref, max_path: i32) -> (status: nav_recast.Status, path_count: i32) {
+finalize_sliced_find_path_partial :: proc(query: ^Nav_Mesh_Query, existing: []recast.Poly_Ref,
+                                           path: []recast.Poly_Ref, max_path: i32) -> (status: recast.Status, path_count: i32) {
 
     if query.query_data.last_best == nil {
         return {.Invalid_Param}, 0
@@ -720,13 +720,13 @@ finalize_sliced_find_path_partial :: proc(query: ^Nav_Mesh_Query, existing: []na
 }
 
 // Convenience function: find path with slicing but complete it in one call
-find_path_sliced :: proc(query: ^Nav_Mesh_Query, start_ref: nav_recast.Poly_Ref,
-                           end_ref: nav_recast.Poly_Ref, start_pos: [3]f32, end_pos: [3]f32,
-                           filter: ^Query_Filter, path: []nav_recast.Poly_Ref,
-                           max_path: i32, max_iterations_per_slice: i32 = 50) -> (status: nav_recast.Status, path_count: i32) {
+find_path_sliced :: proc(query: ^Nav_Mesh_Query, start_ref: recast.Poly_Ref,
+                           end_ref: recast.Poly_Ref, start_pos: [3]f32, end_pos: [3]f32,
+                           filter: ^Query_Filter, path: []recast.Poly_Ref,
+                           max_path: i32, max_iterations_per_slice: i32 = 50) -> (status: recast.Status, path_count: i32) {
     // Initialize
     init_status := init_sliced_find_path(query, start_ref, end_ref, start_pos, end_pos, filter, 0)
-    if nav_recast.status_failed(init_status) {
+    if recast.status_failed(init_status) {
         return init_status, 0
     }
 

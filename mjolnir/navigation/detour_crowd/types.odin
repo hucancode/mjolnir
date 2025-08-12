@@ -1,12 +1,12 @@
 package navigation_detour_crowd
 
-import nav_recast "../recast"
+import recast "../recast"
 import detour "../detour"
 
 // Maximum number of neighbors considered for steering
 DT_CROWD_MAX_NEIGHBORS :: 6
 
-// Maximum number of corners in path lookahead  
+// Maximum number of corners in path lookahead
 DT_CROWD_MAX_CORNERS :: 4
 
 // Maximum obstacle avoidance parameter sets
@@ -71,7 +71,7 @@ Crowd_Agent_Params :: struct {
 Path_Corridor :: struct {
     position:     [3]f32,                      // Current corridor position
     target:       [3]f32,                      // Target position
-    path:         [dynamic]nav_recast.Poly_Ref,  // Polygon path
+    path:         [dynamic]recast.Poly_Ref,  // Polygon path
     max_path:     i32,                         // Maximum path length
 }
 
@@ -79,7 +79,7 @@ Path_Corridor :: struct {
 Local_Boundary :: struct {
     center:       [3]f32,              // Center of boundary area
     segments:     [dynamic][6]f32,     // Boundary segments [p0x,p0y,p0z,p1x,p1y,p1z]
-    polys:        [dynamic]nav_recast.Poly_Ref,  // Boundary polygons
+    polys:        [dynamic]recast.Poly_Ref,  // Boundary polygons
     max_segs:     i32,                 // Maximum segments
 }
 
@@ -158,11 +158,11 @@ Path_Queue_Ref :: distinct u32
 // Path query state
 Path_Query :: struct {
     ref:         Path_Queue_Ref,       // Queue reference
-    start_ref:   nav_recast.Poly_Ref,       // Start polygon
-    end_ref:     nav_recast.Poly_Ref,       // End polygon
+    start_ref:   recast.Poly_Ref,       // Start polygon
+    end_ref:     recast.Poly_Ref,       // End polygon
     start_pos:   [3]f32,                  // Start position
     end_pos:     [3]f32,                  // End position
-    status:      nav_recast.Status,         // Query status
+    status:      recast.Status,         // Query status
     keep_alive:  i32,                     // Keep alive counter
     filter:      ^detour.Query_Filter, // Query filter
 }
@@ -183,7 +183,7 @@ Crowd_Agent_Animation :: struct {
     init_pos:   [3]f32,               // Initial position
     start_pos:  [3]f32,               // Start position
     end_pos:    [3]f32,               // End position
-    poly_ref:   nav_recast.Poly_Ref,    // Polygon reference
+    poly_ref:   recast.Poly_Ref,    // Polygon reference
     t:          f32,                  // Current time [0-1]
     t_max:      f32,                  // Maximum time
 }
@@ -203,16 +203,16 @@ Crowd_Agent :: struct {
     state:        Crowd_Agent_State,                     // Current state
     partial:      bool,                                     // Partial path flag
     params:       Crowd_Agent_Params,                    // Agent parameters
-    
+
     // Path and navigation
     corridor:     Path_Corridor,                         // Path corridor
     boundary:     Local_Boundary,                        // Local boundary
     topology_opt_time: f32,                                 // Time since topology optimization
-    
+
     // Neighbors
     neighbors:    [DT_CROWD_MAX_NEIGHBORS]Crowd_Neighbor, // Known neighbors
     neighbor_count: i32,                                    // Number of neighbors
-    
+
     // Motion state
     position:     [3]f32,                                   // Current position
     displacement: [3]f32,                                   // Displacement accumulator
@@ -220,16 +220,16 @@ Crowd_Agent :: struct {
     new_velocity: [3]f32,                                   // Obstacle-adjusted velocity
     velocity:     [3]f32,                                   // Actual velocity
     desired_speed: f32,                                     // Desired speed
-    
+
     // Path corners
     corner_verts: [DT_CROWD_MAX_CORNERS][3]f32,             // Corner positions
     corner_flags: [DT_CROWD_MAX_CORNERS]u8,                 // Corner flags
-    corner_polys: [DT_CROWD_MAX_CORNERS]nav_recast.Poly_Ref,  // Corner polygons
+    corner_polys: [DT_CROWD_MAX_CORNERS]recast.Poly_Ref,  // Corner polygons
     corner_count: i32,                                      // Number of corners
-    
+
     // Target state
     target_state:     Move_Request_State,                // Target request state
-    target_ref:       nav_recast.Poly_Ref,                    // Target polygon
+    target_ref:       recast.Poly_Ref,                    // Target polygon
     target_pos:       [3]f32,                               // Target position (or velocity)
     target_path_ref:  Path_Queue_Ref,                    // Path queue reference
     target_replan:    bool,                                 // Replanning flag
@@ -241,30 +241,30 @@ Crowd :: struct {
     // Core configuration
     max_agents:        i32,                                 // Maximum agents
     max_agent_radius:  f32,                                 // Maximum agent radius
-    
+
     // Agent management
     agents:            []Crowd_Agent,                    // Agent pool
     active_agents:     [dynamic]^Crowd_Agent,            // Active agent pointers
     agent_animations:  []Crowd_Agent_Animation,          // Agent animations
-    
+
     // Path management
     path_queue:        Path_Queue,                       // Asynchronous pathfinding
-    path_result:       [dynamic]nav_recast.Poly_Ref,          // Temporary path buffer
+    path_result:       [dynamic]recast.Poly_Ref,          // Temporary path buffer
     max_path_result:   i32,                                 // Maximum path result size
-    
+
     // Obstacle avoidance
     obstacle_query:    ^Obstacle_Avoidance_Query,        // Obstacle avoidance system
     obstacle_params:   [DT_CROWD_MAX_OBSTAVOIDANCE_PARAMS]Obstacle_Avoidance_Params,
-    
+
     // Spatial queries
     proximity_grid:    ^Proximity_Grid,                  // Spatial partitioning
-    
+
     // Query filters
     filters:           [DT_CROWD_MAX_QUERY_FILTER_TYPE]detour.Query_Filter,
-    
+
     // Navigation mesh
     nav_query:         ^detour.Nav_Mesh_Query,           // Navigation queries
-    
+
     // Configuration
     agent_placement_half_extents: [3]f32,                   // Agent placement bounds
     velocity_sample_count: i32,                             // Velocity samples
