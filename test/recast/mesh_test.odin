@@ -3,6 +3,7 @@ package test_recast
 import "core:testing"
 import "core:log"
 import "core:time"
+import "core:slice"
 import recast "../../mjolnir/navigation/recast"
 import geometry "../../mjolnir/geometry"
 
@@ -80,9 +81,10 @@ test_triangulate_polygon :: proc(t: ^testing.T) {
     testing.expect(t, len(triangles) == 6, "Quad should produce 2 triangles (6 indices)")
 
     // Check that all triangle indices are valid
-    for i := 0; i < len(triangles); i += 1 {
-        testing.expect(t, triangles[i] >= 0 && triangles[i] < 4, "Triangle indices should be valid")
-    }
+    all_valid := slice.all_of_proc(triangles[:], proc(idx: i32) -> bool {
+        return idx >= 0 && idx < 4
+    })
+    testing.expect(t, all_valid, "All triangle indices should be valid (0-3)")
 }
 
 @(test)
@@ -111,9 +113,10 @@ test_triangulate_concave_polygon :: proc(t: ^testing.T) {
     testing.expect(t, len(triangles) == 12, "6-vertex polygon should produce 4 triangles (12 indices)")
 
     // Check that all triangle indices are valid
-    for i := 0; i < len(triangles); i += 1 {
-        testing.expect(t, triangles[i] >= 0 && triangles[i] < 6, "Triangle indices should be valid")
-    }
+    all_valid := slice.all_of_proc(triangles[:], proc(idx: i32) -> bool {
+        return idx >= 0 && idx < 6
+    })
+    testing.expect(t, all_valid, "All triangle indices should be valid (0-5)")
 
     // Verify we have complete triangles
     testing.expect(t, len(triangles) % 3 == 0, "Should have complete triangles")
@@ -154,9 +157,10 @@ test_triangulate_star_polygon :: proc(t: ^testing.T) {
     testing.expect(t, len(triangles) == 18, "8-vertex polygon should produce 6 triangles (18 indices)")
 
     // Check that all triangle indices are valid
-    for i := 0; i < len(triangles); i += 1 {
-        testing.expect(t, triangles[i] >= 0 && triangles[i] < 8, "Triangle indices should be valid")
-    }
+    all_valid := slice.all_of_proc(triangles[:], proc(idx: i32) -> bool {
+        return idx >= 0 && idx < 8
+    })
+    testing.expect(t, all_valid, "All triangle indices should be valid (0-7)")
 
     // Verify we have complete triangles
     testing.expect(t, len(triangles) % 3 == 0, "Should have complete triangles")
@@ -230,9 +234,10 @@ test_degenerate_polygon_handling :: proc(t: ^testing.T) {
     testing.expect(t, len(triangles) % 3 == 0, "Should have complete triangles")
 
     // Check that all triangle indices are valid
-    for i := 0; i < len(triangles); i += 1 {
-        testing.expect(t, triangles[i] >= 0 && triangles[i] < 4, "Triangle indices should be valid")
-    }
+    all_valid := slice.all_of_proc(triangles[:], proc(idx: i32) -> bool {
+        return idx >= 0 && idx < 4
+    })
+    testing.expect(t, all_valid, "All triangle indices should be valid (0-3)")
 
     log.infof("Thin polygon triangulated into %d triangles", len(triangles)/3)
 }

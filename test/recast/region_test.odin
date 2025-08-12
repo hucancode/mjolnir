@@ -6,6 +6,7 @@ import "core:log"
 import "core:fmt"
 import "core:strings"
 import "core:time"
+import "core:slice"
 
 @(test)
 test_compact_heightfield_building :: proc(t: ^testing.T) {
@@ -47,9 +48,7 @@ test_compact_heightfield_building :: proc(t: ^testing.T) {
     testing.expect_value(t, len(chf.areas), 100)
 
     // Verify all areas are walkable
-    for i in 0..<100 {
-        testing.expect_value(t, chf.areas[i], recast.RC_WALKABLE_AREA)
-    }
+    testing.expect(t, slice.all_of(chf.areas, recast.RC_WALKABLE_AREA))
 }
 
 @(test)
