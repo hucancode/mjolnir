@@ -571,15 +571,18 @@ append_stacks :: proc(src_stack: [dynamic]Level_Stack_Entry, dst_stack: ^[dynami
 // Remove adjacent duplicate neighbours
 remove_adjacent_neighbours :: proc(reg: ^Region) {
     // Remove adjacent duplicates
-    i := 0
-    for i < len(reg.connections) && len(reg.connections) > 1 {
-        ni := (i + 1) % len(reg.connections)
-        if reg.connections[i] == reg.connections[ni] {
-            // Remove duplicate
-            ordered_remove(&reg.connections, i)
-        } else {
-            i += 1
-        }
+    if len(reg.connections) <= 1 {
+        return
+    }
+    
+    // Use slice.unique to remove consecutive duplicates
+    unique_slice := slice.unique(reg.connections[:])
+    
+    // Check wrap-around: if last element equals first element (circular case)
+    if len(unique_slice) > 1 && unique_slice[len(unique_slice)-1] == unique_slice[0] {
+        resize(&reg.connections, len(unique_slice)-1)
+    } else {
+        resize(&reg.connections, len(unique_slice))
     }
 }
 

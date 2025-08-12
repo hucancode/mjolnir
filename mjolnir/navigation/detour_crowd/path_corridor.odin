@@ -245,11 +245,9 @@ path_corridor_move_position :: proc(corridor: ^Path_Corridor, new_pos: [3]f32,
         start_idx := 1
         if visited_count > 0 {
             // Find where the visited path connects to the existing path
-            for i in 1..<len(corridor.path) {
-                if corridor.path[i] == visited[visited_count-1] {
-                    start_idx = i + 1
-                    break
-                }
+            // Note: we search from index 1, not 0
+            if idx, found := slice.linear_search(corridor.path[1:], visited[visited_count-1]); found {
+                start_idx = idx + 2  // +1 for skipping index 0, +1 to get next element
             }
         }
         

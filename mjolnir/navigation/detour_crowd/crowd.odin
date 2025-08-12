@@ -109,8 +109,8 @@ crowd_add_agent :: proc(crowd: ^Crowd, pos: [3]f32, params: ^Crowd_Agent_Params)
     
     // Find free agent slot
     agent_idx := -1
-    for i in 0..<len(crowd.agents) {
-        if !crowd.agents[i].active {
+    for &agent, i in crowd.agents {
+        if !agent.active {
             agent_idx = i
             break
         }
@@ -198,11 +198,8 @@ crowd_remove_agent :: proc(crowd: ^Crowd, agent_id: nav_recast.Agent_Id) -> nav_
     agent.active = false
     
     // Remove from active agents list
-    for i, active_agent in crowd.active_agents {
-        if active_agent == agent {
-            ordered_remove(&crowd.active_agents, i)
-            break
-        }
+    if idx, found := slice.linear_search(crowd.active_agents[:], agent); found {
+        ordered_remove(&crowd.active_agents, idx)
     }
     
     return {.Success}

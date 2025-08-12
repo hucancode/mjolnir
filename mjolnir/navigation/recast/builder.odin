@@ -1098,21 +1098,23 @@ split_long_edges :: proc(simplified: ^[dynamic]i32, points: []i32, max_edge_len:
 remove_degenerate_contour_segments :: proc(simplified: ^[dynamic][4]i32) {
     // Remove adjacent vertices which are equal on xz-plane,
     // or else the triangulator will get confused.
-    npts := len(simplified)
-    i := 0
-    for i < npts {
-        ni := (i + 1) % npts
-
-        // Check if vertices are equal on xz-plane
-        if simplified[i][0] == simplified[ni][0] && simplified[i][2] == simplified[ni][2] {
-            // Degenerate segment, remove vertex ni
-            ordered_remove(simplified, ni)
-            npts -= 1
-            // Don't increment i, check the same position again
-        } else {
-            i += 1
+    if len(simplified) <= 1 {
+        return
+    }
+    
+    // Use two-pointer technique to remove vertices with same xz coordinates
+    write_idx := 0
+    for read_idx in 0..<len(simplified) {
+        next_idx := (read_idx + 1) % len(simplified)
+        // Keep vertex if it differs from next in xz-plane
+        if simplified[read_idx][0] != simplified[next_idx][0] || 
+           simplified[read_idx][2] != simplified[next_idx][2] {
+            simplified[write_idx] = simplified[read_idx]
+            write_idx += 1
         }
     }
+    
+    resize(simplified, write_idx)
 }
 
 // Check if two vertices are equal (comparing only x and z coordinates)
