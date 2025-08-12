@@ -44,6 +44,9 @@ BVHTraversal :: struct {
 }
 
 bvh_build :: proc(bvh: ^BVH($T), items: []T, max_leaf_size: i32 = 4) {
+  if bvh == nil do return
+  if bvh.bounds_func == nil do return
+  
   clear(&bvh.nodes)
   clear(&bvh.primitives)
 
@@ -203,7 +206,7 @@ split_sah :: proc(
   }
 
   // Re-sort by best axis if needed
-  if best_axis >= 0 && best_axis != 2 {
+  if best_axis >= 0 {
     if best_axis == 0 {
       slice.sort_by(prims, proc(a, b: BVHPrimitive) -> bool {
         return a.centroid[0] < b.centroid[0]
@@ -211,6 +214,10 @@ split_sah :: proc(
     } else if best_axis == 1 {
       slice.sort_by(prims, proc(a, b: BVHPrimitive) -> bool {
         return a.centroid[1] < b.centroid[1]
+      })
+    } else if best_axis == 2 {
+      slice.sort_by(prims, proc(a, b: BVHPrimitive) -> bool {
+        return a.centroid[2] < b.centroid[2]
       })
     }
   }
@@ -335,18 +342,17 @@ bvh_query_aabb :: proc(
   query_bounds: Aabb,
   results: ^[dynamic]T,
 ) {
+  if bvh == nil || results == nil do return
   clear(results)
   if len(bvh.nodes) == 0 do return
+  if bvh.bounds_func == nil do return
 
-  // Use fixed-size stack for better performance
-  stack: [64]i32
-  stack_top := 0
-  stack[stack_top] = 0
-  stack_top += 1
+  // Use dynamic stack to prevent overflow on deep trees
+  stack := make([dynamic]i32, 0, 64, context.temp_allocator)
+  append(&stack, 0)
 
-  for stack_top > 0 {
-    stack_top -= 1
-    node_idx := stack[stack_top]
+  for len(stack) > 0 {
+    node_idx := pop(&stack)
     node := &bvh.nodes[node_idx]
 
     if !aabb_intersects(node.bounds, query_bounds) do continue
@@ -361,13 +367,9 @@ bvh_query_aabb :: proc(
         }
       }
     } else {
-      // Add children to stack - check bounds first to avoid unnecessary traversal
-      if stack_top < len(stack) - 1 {
-        stack[stack_top] = node.right_child
-        stack_top += 1
-        stack[stack_top] = node.left_child
-        stack_top += 1
-      }
+      // Add children to stack
+      append(&stack, node.right_child)
+      append(&stack, node.left_child)
     }
   }
 }

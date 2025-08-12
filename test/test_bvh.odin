@@ -589,22 +589,22 @@ bvh_build_benchmark :: proc(t: ^testing.T) {
     options: ^time.Benchmark_Options,
     allocator := context.allocator,
   ) -> time.Benchmark_Error {
-    items_ptr := cast(^[]TestItem)raw_data(options.input)
+    items_ptr := cast(^[]BVHTestItem)raw_data(options.input)
     items := items_ptr^
 
     for _ in 0 ..< options.rounds {
-      bvh: geometry.BVH(TestItem)
-      bvh.bounds_func = test_item_bounds
+      bvh: geometry.BVH(BVHTestItem)
+      bvh.bounds_func = test_bvh_item_bounds
       defer geometry.bvh_deinit(&bvh)
 
       geometry.bvh_build(&bvh, items)
-      options.processed += len(items) * size_of(TestItem)
+      options.processed += len(items) * size_of(BVHTestItem)
     }
     return nil
   }
 
   item_count := 100000
-  items := make([]TestItem, item_count)
+  items := make([]BVHTestItem, item_count)
   defer delete(items)
 
   // Generate items in a large cube for realistic distribution
@@ -614,17 +614,13 @@ bvh_build_benchmark :: proc(t: ^testing.T) {
     y := f32((i / cube_size) % cube_size - cube_size/2) * 2
     z := f32((i / (cube_size * cube_size)) % cube_size - cube_size/2) * 2
 
-    items[i] = TestItem {
-      id   = i32(i),
-      pos  = {x, y, z},
-      size = 1.5,
-    }
+    items[i] = make_test_item(i32(i), {x, y, z}, 1.5)
   }
 
   options := &time.Benchmark_Options {
     rounds = 3,
-    bytes = item_count * size_of(TestItem) * 3,
-    input = slice.bytes_from_ptr(&items, size_of([]TestItem)),
+    bytes = item_count * size_of(BVHTestItem) * 3,
+    input = slice.bytes_from_ptr(&items, size_of([]BVHTestItem)),
     bench = bench_proc,
   }
 
@@ -646,28 +642,25 @@ bvh_query_benchmark :: proc(t: ^testing.T) {
     options: ^time.Benchmark_Options,
     allocator := context.allocator,
   ) -> time.Benchmark_Error {
-    bvh_ptr := new(geometry.BVH(TestItem))
-    bvh_ptr.bounds_func = test_item_bounds
+    bvh_ptr := new(geometry.BVH(BVHTestItem))
+    bvh_ptr.bounds_func = test_bvh_item_bounds
 
     item_count := 50000
-    items := make([]TestItem, item_count)
+    items := make([]BVHTestItem, item_count)
 
     for i in 0 ..< item_count {
       x := f32(i % 200 - 100) * 1.8
       y := f32((i / 200) % 200 - 100) * 1.8
       z := f32((i / 40000) % 200 - 100) * 1.8
 
-      items[i] = TestItem {
-        id   = i32(i),
-        pos  = {x, y, z},
-        size = 1.2,
-      }
+      items[i] = make_test_item(i32(i), {x, y, z}, 1.2,
+)
     }
 
     geometry.bvh_build(bvh_ptr, items)
     delete(items)
 
-    options.input = slice.bytes_from_ptr(bvh_ptr, size_of(^geometry.BVH(TestItem)))
+    options.input = slice.bytes_from_ptr(bvh_ptr, size_of(^geometry.BVH(BVHTestItem)))
     return nil
   }
 
@@ -675,8 +668,8 @@ bvh_query_benchmark :: proc(t: ^testing.T) {
     options: ^time.Benchmark_Options,
     allocator := context.allocator,
   ) -> time.Benchmark_Error {
-    bvh_ptr := cast(^geometry.BVH(TestItem))raw_data(options.input)
-    results := make([dynamic]TestItem, 0, 100)
+    bvh_ptr := cast(^geometry.BVH(BVHTestItem))raw_data(options.input)
+    results := make([dynamic]BVHTestItem, 0, 100)
     defer delete(results)
 
     for i in 0 ..< options.rounds {
@@ -686,7 +679,7 @@ bvh_query_benchmark :: proc(t: ^testing.T) {
         max = {8 + offset, 8 + offset, 8 + offset},
       }
       geometry.bvh_query_aabb(bvh_ptr, query_bounds, &results)
-      options.processed += len(results) * size_of(TestItem)
+      options.processed += len(results) * size_of(BVHTestItem)
     }
     return nil
   }
@@ -695,7 +688,7 @@ bvh_query_benchmark :: proc(t: ^testing.T) {
     options: ^time.Benchmark_Options,
     allocator := context.allocator,
   ) -> time.Benchmark_Error {
-    bvh_ptr := cast(^geometry.BVH(TestItem))raw_data(options.input)
+    bvh_ptr := cast(^geometry.BVH(BVHTestItem))raw_data(options.input)
     geometry.bvh_deinit(bvh_ptr)
     free(bvh_ptr)
     return nil
@@ -703,7 +696,7 @@ bvh_query_benchmark :: proc(t: ^testing.T) {
 
   options := &time.Benchmark_Options {
     rounds = 10000,
-    bytes = size_of(TestItem) * 50 * 10000,
+    bytes = size_of(BVHTestItem) * 50 * 10000,
     setup = setup_proc,
     bench = bench_proc,
     teardown = teardown_proc,
@@ -726,28 +719,25 @@ bvh_ray_benchmark :: proc(t: ^testing.T) {
     options: ^time.Benchmark_Options,
     allocator := context.allocator,
   ) -> time.Benchmark_Error {
-    bvh_ptr := new(geometry.BVH(TestItem))
-    bvh_ptr.bounds_func = test_item_bounds
+    bvh_ptr := new(geometry.BVH(BVHTestItem))
+    bvh_ptr.bounds_func = test_bvh_item_bounds
 
     item_count := 50000
-    items := make([]TestItem, item_count)
+    items := make([]BVHTestItem, item_count)
 
     for i in 0 ..< item_count {
       x := f32(i % 60 - 30) * 2.5
       y := f32((i / 60) % 60 - 30) * 2.5
       z := f32((i / 3600) % 60 - 30) * 2.5
 
-      items[i] = TestItem {
-        id   = i32(i),
-        pos  = {x, y, z},
-        size = 1.8,
-      }
+      items[i] = make_test_item(i32(i), {x, y, z}, 1.8,
+)
     }
 
     geometry.bvh_build(bvh_ptr, items)
     delete(items)
 
-    options.input = slice.bytes_from_ptr(bvh_ptr, size_of(^geometry.BVH(TestItem)))
+    options.input = slice.bytes_from_ptr(bvh_ptr, size_of(^geometry.BVH(BVHTestItem)))
     return nil
   }
 
@@ -755,8 +745,8 @@ bvh_ray_benchmark :: proc(t: ^testing.T) {
     options: ^time.Benchmark_Options,
     allocator := context.allocator,
   ) -> time.Benchmark_Error {
-    bvh_ptr := cast(^geometry.BVH(TestItem))raw_data(options.input)
-    results := make([dynamic]TestItem, 0, 50)
+    bvh_ptr := cast(^geometry.BVH(BVHTestItem))raw_data(options.input)
+    results := make([dynamic]BVHTestItem, 0, 50)
     defer delete(results)
 
     for i in 0 ..< options.rounds {
@@ -766,7 +756,7 @@ bvh_ray_benchmark :: proc(t: ^testing.T) {
         direction = {math.cos(angle), math.sin(angle), 0.8},
       }
       geometry.bvh_query_ray(bvh_ptr, ray, 200, &results)
-      options.processed += len(results) * size_of(TestItem)
+      options.processed += len(results) * size_of(BVHTestItem)
     }
     return nil
   }
@@ -775,7 +765,7 @@ bvh_ray_benchmark :: proc(t: ^testing.T) {
     options: ^time.Benchmark_Options,
     allocator := context.allocator,
   ) -> time.Benchmark_Error {
-    bvh_ptr := cast(^geometry.BVH(TestItem))raw_data(options.input)
+    bvh_ptr := cast(^geometry.BVH(BVHTestItem))raw_data(options.input)
     geometry.bvh_deinit(bvh_ptr)
     free(bvh_ptr)
     return nil
@@ -783,7 +773,7 @@ bvh_ray_benchmark :: proc(t: ^testing.T) {
 
   options := &time.Benchmark_Options {
     rounds = 10000,
-    bytes = size_of(TestItem) * 30 * 10000,
+    bytes = size_of(BVHTestItem) * 30 * 10000,
     setup = setup_proc,
     bench = bench_proc,
     teardown = teardown_proc,
@@ -805,28 +795,25 @@ bvh_nearest_benchmark :: proc(t: ^testing.T) {
     options: ^time.Benchmark_Options,
     allocator := context.allocator,
   ) -> time.Benchmark_Error {
-    bvh_ptr := new(geometry.BVH(TestItem))
-    bvh_ptr.bounds_func = test_item_bounds
+    bvh_ptr := new(geometry.BVH(BVHTestItem))
+    bvh_ptr.bounds_func = test_bvh_item_bounds
 
     item_count := 8000
-    items := make([]TestItem, item_count)
+    items := make([]BVHTestItem, item_count)
 
     for i in 0 ..< item_count {
       x := f32(i % 40 - 20) * 3
       y := f32((i / 40) % 40 - 20) * 3
       z := f32((i / 1600) % 40 - 20) * 3
 
-      items[i] = TestItem {
-        id   = i32(i),
-        pos  = {x, y, z},
-        size = 2,
-      }
+      items[i] = make_test_item(i32(i), {x, y, z}, 2,
+)
     }
 
     geometry.bvh_build(bvh_ptr, items)
     delete(items)
 
-    options.input = slice.bytes_from_ptr(bvh_ptr, size_of(^geometry.BVH(TestItem)))
+    options.input = slice.bytes_from_ptr(bvh_ptr, size_of(^geometry.BVH(BVHTestItem)))
     return nil
   }
 
@@ -834,7 +821,7 @@ bvh_nearest_benchmark :: proc(t: ^testing.T) {
     options: ^time.Benchmark_Options,
     allocator := context.allocator,
   ) -> time.Benchmark_Error {
-    bvh_ptr := cast(^geometry.BVH(TestItem))raw_data(options.input)
+    bvh_ptr := cast(^geometry.BVH(BVHTestItem))raw_data(options.input)
 
     for i in 0 ..< options.rounds {
       query_point := [3]f32{
@@ -844,7 +831,7 @@ bvh_nearest_benchmark :: proc(t: ^testing.T) {
       }
       _, _, found := geometry.bvh_query_nearest(bvh_ptr, query_point)
       if found {
-        options.processed += size_of(TestItem)
+        options.processed += size_of(BVHTestItem)
       }
     }
     return nil
@@ -854,7 +841,7 @@ bvh_nearest_benchmark :: proc(t: ^testing.T) {
     options: ^time.Benchmark_Options,
     allocator := context.allocator,
   ) -> time.Benchmark_Error {
-    bvh_ptr := cast(^geometry.BVH(TestItem))raw_data(options.input)
+    bvh_ptr := cast(^geometry.BVH(BVHTestItem))raw_data(options.input)
     geometry.bvh_deinit(bvh_ptr)
     free(bvh_ptr)
     return nil
@@ -862,7 +849,7 @@ bvh_nearest_benchmark :: proc(t: ^testing.T) {
 
   options := &time.Benchmark_Options {
     rounds = 1000,
-    bytes = size_of(TestItem) * 1000,
+    bytes = size_of(BVHTestItem) * 1000,
     setup = setup_proc,
     bench = bench_proc,
     teardown = teardown_proc,
@@ -884,28 +871,25 @@ bvh_empty_query_benchmark :: proc(t: ^testing.T) {
     options: ^time.Benchmark_Options,
     allocator := context.allocator,
   ) -> time.Benchmark_Error {
-    bvh_ptr := new(geometry.BVH(TestItem))
-    bvh_ptr.bounds_func = test_item_bounds
+    bvh_ptr := new(geometry.BVH(BVHTestItem))
+    bvh_ptr.bounds_func = test_bvh_item_bounds
 
     item_count := 5000
-    items := make([]TestItem, item_count)
+    items := make([]BVHTestItem, item_count)
 
     for i in 0 ..< item_count {
       x := f32(i % 50 - 75) * 1.5
       y := f32((i / 50) % 50 - 75) * 1.5
       z := f32((i / 2500) % 50 - 75) * 1.5
 
-      items[i] = TestItem {
-        id   = i32(i),
-        pos  = {x, y, z},
-        size = 1,
-      }
+      items[i] = make_test_item(i32(i), {x, y, z}, 1,
+)
     }
 
     geometry.bvh_build(bvh_ptr, items)
     delete(items)
 
-    options.input = slice.bytes_from_ptr(bvh_ptr, size_of(^geometry.BVH(TestItem)))
+    options.input = slice.bytes_from_ptr(bvh_ptr, size_of(^geometry.BVH(BVHTestItem)))
     return nil
   }
 
@@ -913,8 +897,8 @@ bvh_empty_query_benchmark :: proc(t: ^testing.T) {
     options: ^time.Benchmark_Options,
     allocator := context.allocator,
   ) -> time.Benchmark_Error {
-    bvh_ptr := cast(^geometry.BVH(TestItem))raw_data(options.input)
-    results := make([dynamic]TestItem, 0, 50)
+    bvh_ptr := cast(^geometry.BVH(BVHTestItem))raw_data(options.input)
+    results := make([dynamic]BVHTestItem, 0, 50)
     defer delete(results)
 
     for i in 0 ..< options.rounds {
@@ -924,7 +908,7 @@ bvh_empty_query_benchmark :: proc(t: ^testing.T) {
         max = {80 + offset, 80 + offset, 80 + offset},
       }
       geometry.bvh_query_aabb(bvh_ptr, empty_query_bounds, &results)
-      options.processed += len(results) * size_of(TestItem)
+      options.processed += len(results) * size_of(BVHTestItem)
     }
     return nil
   }
@@ -933,7 +917,7 @@ bvh_empty_query_benchmark :: proc(t: ^testing.T) {
     options: ^time.Benchmark_Options,
     allocator := context.allocator,
   ) -> time.Benchmark_Error {
-    bvh_ptr := cast(^geometry.BVH(TestItem))raw_data(options.input)
+    bvh_ptr := cast(^geometry.BVH(BVHTestItem))raw_data(options.input)
     geometry.bvh_deinit(bvh_ptr)
     free(bvh_ptr)
     return nil
@@ -941,7 +925,7 @@ bvh_empty_query_benchmark :: proc(t: ^testing.T) {
 
   options := &time.Benchmark_Options {
     rounds = 1500,
-    bytes = size_of(TestItem) * 0 * 1500,
+    bytes = size_of(BVHTestItem) * 0 * 1500,
     setup = setup_proc,
     bench = bench_proc,
     teardown = teardown_proc,
@@ -963,28 +947,25 @@ bvh_refit_benchmark :: proc(t: ^testing.T) {
     options: ^time.Benchmark_Options,
     allocator := context.allocator,
   ) -> time.Benchmark_Error {
-    bvh_ptr := new(geometry.BVH(TestItem))
-    bvh_ptr.bounds_func = test_item_bounds
+    bvh_ptr := new(geometry.BVH(BVHTestItem))
+    bvh_ptr.bounds_func = test_bvh_item_bounds
 
     item_count := 3000
-    items := make([]TestItem, item_count)
+    items := make([]BVHTestItem, item_count)
 
     for i in 0 ..< item_count {
       x := f32(i % 30 - 15) * 4
       y := f32((i / 30) % 30 - 15) * 4
       z := f32((i / 900) % 30 - 15) * 4
 
-      items[i] = TestItem {
-        id   = i32(i),
-        pos  = {x, y, z},
-        size = 2.5,
-      }
+      items[i] = make_test_item(i32(i), {x, y, z}, 2.5,
+)
     }
 
     geometry.bvh_build(bvh_ptr, items)
     delete(items)
 
-    options.input = slice.bytes_from_ptr(bvh_ptr, size_of(^geometry.BVH(TestItem)))
+    options.input = slice.bytes_from_ptr(bvh_ptr, size_of(^geometry.BVH(BVHTestItem)))
     return nil
   }
 
@@ -992,17 +973,19 @@ bvh_refit_benchmark :: proc(t: ^testing.T) {
     options: ^time.Benchmark_Options,
     allocator := context.allocator,
   ) -> time.Benchmark_Error {
-    bvh_ptr := cast(^geometry.BVH(TestItem))raw_data(options.input)
+    bvh_ptr := cast(^geometry.BVH(BVHTestItem))raw_data(options.input)
 
     for i in 0 ..< options.rounds {
       random_offset := f32(i % 100 - 50) * 0.1
       for j in 0 ..< min(len(bvh_ptr.primitives), 100) {
-        bvh_ptr.primitives[j].pos.x += random_offset
-        bvh_ptr.primitives[j].pos.y += random_offset
+        bvh_ptr.primitives[j].bounds.min.x += random_offset
+        bvh_ptr.primitives[j].bounds.min.y += random_offset
+        bvh_ptr.primitives[j].bounds.max.x += random_offset
+        bvh_ptr.primitives[j].bounds.max.y += random_offset
       }
 
       geometry.bvh_refit(bvh_ptr)
-      options.processed += len(bvh_ptr.primitives) * size_of(TestItem)
+      options.processed += len(bvh_ptr.primitives) * size_of(BVHTestItem)
     }
     return nil
   }
@@ -1011,7 +994,7 @@ bvh_refit_benchmark :: proc(t: ^testing.T) {
     options: ^time.Benchmark_Options,
     allocator := context.allocator,
   ) -> time.Benchmark_Error {
-    bvh_ptr := cast(^geometry.BVH(TestItem))raw_data(options.input)
+    bvh_ptr := cast(^geometry.BVH(BVHTestItem))raw_data(options.input)
     geometry.bvh_deinit(bvh_ptr)
     free(bvh_ptr)
     return nil
@@ -1019,7 +1002,7 @@ bvh_refit_benchmark :: proc(t: ^testing.T) {
 
   options := &time.Benchmark_Options {
     rounds = 1000,
-    bytes = size_of(TestItem) * 3000 * 1000,
+    bytes = size_of(BVHTestItem) * 3000 * 1000,
     setup = setup_proc,
     bench = bench_proc,
     teardown = teardown_proc,
