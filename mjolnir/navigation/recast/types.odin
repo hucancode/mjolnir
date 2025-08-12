@@ -167,8 +167,19 @@ RC_BORDER_VERTEX :: 0x10000
 RC_AREA_BORDER :: 0x20000
 RC_CONTOUR_REG_MASK :: 0xffff
 RC_MESH_NULL_IDX :: 0xffff
-RC_CONTOUR_TESS_WALL_EDGES :: 0x01
-RC_CONTOUR_TESS_AREA_EDGES :: 0x02
+// Contour tessellation flags
+Contour_Tess_Flag :: enum {
+	WALL_EDGES = 0,  // Tessellate solid (impassable) edges during contour simplification
+	AREA_EDGES = 1,  // Tessellate edges between areas during contour simplification  
+}
+Contour_Tess_Flags :: bit_set[Contour_Tess_Flag; u32]
+
+// Vertex flags for contour points
+Vertex_Flag :: enum {
+	BORDER_VERTEX = 16, // RC_BORDER_VERTEX (0x10000)
+	AREA_BORDER = 17,   // RC_AREA_BORDER (0x20000)  
+}
+Vertex_Flags :: bit_set[Vertex_Flag; u32]
 
 // Invalid references
 DT_NULL_LINK :: 0xffffffff

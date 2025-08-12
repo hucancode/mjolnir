@@ -49,7 +49,7 @@ test_build_detail_mesh_simple :: proc(t: ^testing.T) {
     testing.expect(t, contour_set != nil, "Failed to allocate contour set")
     defer recast.free_contour_set(contour_set)
     
-    ok = recast.build_contours(chf, 1.0, 1, contour_set, recast.RC_CONTOUR_TESS_WALL_EDGES)
+    ok = recast.build_contours(chf, 1.0, 1, contour_set, {.WALL_EDGES})
     testing.expect(t, ok, "Failed to build contours")
     
     // Build polygon mesh
@@ -137,7 +137,7 @@ test_detail_mesh_sample_distance_variations :: proc(t: ^testing.T) {
     
     contour_set := recast.alloc_contour_set()
     defer recast.free_contour_set(contour_set)
-    ok = recast.build_contours(chf, 1.0, 1, contour_set, recast.RC_CONTOUR_TESS_WALL_EDGES)
+    ok = recast.build_contours(chf, 1.0, 1, contour_set, {.WALL_EDGES})
     
     poly_mesh := recast.alloc_poly_mesh()
     defer recast.free_poly_mesh(poly_mesh)
@@ -195,7 +195,7 @@ test_detail_mesh_max_edge_error_variations :: proc(t: ^testing.T) {
     
     contour_set := recast.alloc_contour_set()
     defer recast.free_contour_set(contour_set)
-    ok = recast.build_contours(chf, 1.0, 1, contour_set, recast.RC_CONTOUR_TESS_WALL_EDGES)
+    ok = recast.build_contours(chf, 1.0, 1, contour_set, {.WALL_EDGES})
     
     poly_mesh := recast.alloc_poly_mesh()
     defer recast.free_poly_mesh(poly_mesh)
@@ -254,7 +254,7 @@ test_detail_mesh_small_polygons :: proc(t: ^testing.T) {
     
     contour_set := recast.alloc_contour_set()
     defer recast.free_contour_set(contour_set)
-    ok = recast.build_contours(chf, 1.0, 1, contour_set, recast.RC_CONTOUR_TESS_WALL_EDGES)
+    ok = recast.build_contours(chf, 1.0, 1, contour_set, {.WALL_EDGES})
     
     poly_mesh := recast.alloc_poly_mesh()
     defer recast.free_poly_mesh(poly_mesh)
@@ -298,7 +298,7 @@ test_detail_mesh_extreme_parameters :: proc(t: ^testing.T) {
     
     contour_set := recast.alloc_contour_set()
     defer recast.free_contour_set(contour_set)
-    ok = recast.build_contours(chf, 1.0, 1, contour_set, recast.RC_CONTOUR_TESS_WALL_EDGES)
+    ok = recast.build_contours(chf, 1.0, 1, contour_set, {.WALL_EDGES})
     
     poly_mesh := recast.alloc_poly_mesh()
     defer recast.free_poly_mesh(poly_mesh)
@@ -363,7 +363,7 @@ test_detail_mesh_data_consistency :: proc(t: ^testing.T) {
     
     contour_set := recast.alloc_contour_set()
     defer recast.free_contour_set(contour_set)
-    ok = recast.build_contours(chf, 1.0, 1, contour_set, recast.RC_CONTOUR_TESS_WALL_EDGES)
+    ok = recast.build_contours(chf, 1.0, 1, contour_set, {.WALL_EDGES})
     
     poly_mesh := recast.alloc_poly_mesh()
     defer recast.free_poly_mesh(poly_mesh)
@@ -447,7 +447,7 @@ test_detail_mesh_performance :: proc(t: ^testing.T) {
     
     contour_set := recast.alloc_contour_set()
     defer recast.free_contour_set(contour_set)
-    ok = recast.build_contours(chf, 1.0, 1, contour_set, recast.RC_CONTOUR_TESS_WALL_EDGES)
+    ok = recast.build_contours(chf, 1.0, 1, contour_set, {.WALL_EDGES})
     
     poly_mesh := recast.alloc_poly_mesh()
     defer recast.free_poly_mesh(poly_mesh)

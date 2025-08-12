@@ -5,9 +5,6 @@ import "core:log"
 import "core:math"
 import geometry "../../geometry"
 
-// Import commonly used constants
-EPSILON :: geometry.EPSILON
-
 // Erode walkable area by radius
 erode_walkable_area :: proc(radius: i32, chf: ^Compact_Heightfield) -> bool {
     w := chf.width
@@ -32,7 +29,6 @@ erode_walkable_area :: proc(radius: i32, chf: ^Compact_Heightfield) -> bool {
                     if neighbor_con == RC_NOT_CONNECTED {
                         break // Early exit on disconnected neighbor
                     }
-                    
                     nx := x + get_dir_offset_x(dir)
                     ny := y + get_dir_offset_y(dir)
                     // In a valid compact heightfield, if connection exists, neighbor must exist
@@ -54,16 +50,16 @@ erode_walkable_area :: proc(radius: i32, chf: ^Compact_Heightfield) -> bool {
             }
         }
     }
-    
+
     nd: u8
-    
+
     // Pass 1 - Forward pass
     for y in 0..<h {
         for x in 0..<w {
             c := &chf.cells[x + y * w]
             for i in c.index..<c.index + u32(c.count) {
                 s := &chf.spans[i]
-                
+
                 // Process direction 0: (-1,0)
                 if get_con(s, 0) != RC_NOT_CONNECTED {
                     ax := int(x) + int(get_dir_offset_x(0))
@@ -75,7 +71,7 @@ erode_walkable_area :: proc(radius: i32, chf: ^Compact_Heightfield) -> bool {
                             as := &chf.spans[ai]
                             nd = min(dist[ai] + 2, 250)
                             if nd < dist[i] do dist[i] = nd
-                            
+
                             // Process diagonal (-1,-1)
                             if get_con(as, 3) != RC_NOT_CONNECTED {
                                 aax := ax + int(get_dir_offset_x(3))
@@ -92,7 +88,7 @@ erode_walkable_area :: proc(radius: i32, chf: ^Compact_Heightfield) -> bool {
                         }
                     }
                 }
-                
+
                 // Process direction 3: (0,-1) - reuse variables
                 if get_con(s, 3) != RC_NOT_CONNECTED {
                     ax := int(x) + int(get_dir_offset_x(3))
@@ -104,7 +100,7 @@ erode_walkable_area :: proc(radius: i32, chf: ^Compact_Heightfield) -> bool {
                             as := &chf.spans[ai]
                             nd = min(dist[ai] + 2, 250)
                             if nd < dist[i] do dist[i] = nd
-                            
+
                             // Process diagonal (1,-1)
                             if get_con(as, 2) != RC_NOT_CONNECTED {
                                 aax := ax + int(get_dir_offset_x(2))
@@ -124,14 +120,14 @@ erode_walkable_area :: proc(radius: i32, chf: ^Compact_Heightfield) -> bool {
             }
         }
     }
-    
+
     // Pass 2 - Backward pass
     for y := h - 1; y >= 0; y -= 1 {
         for x := w - 1; x >= 0; x -= 1 {
             c := &chf.cells[x + y * w]
             for i in c.index..<c.index + u32(c.count) {
                 s := &chf.spans[i]
-                
+
                 // Process direction 2: (1,0)
                 if get_con(s, 2) != RC_NOT_CONNECTED {
                     ax := int(x) + int(get_dir_offset_x(2))
@@ -143,7 +139,7 @@ erode_walkable_area :: proc(radius: i32, chf: ^Compact_Heightfield) -> bool {
                             as := &chf.spans[ai]
                             nd = min(dist[ai] + 2, 250)
                             if nd < dist[i] do dist[i] = nd
-                            
+
                             // Process diagonal (1,1)
                             if get_con(as, 1) != RC_NOT_CONNECTED {
                                 aax := ax + int(get_dir_offset_x(1))
@@ -160,7 +156,7 @@ erode_walkable_area :: proc(radius: i32, chf: ^Compact_Heightfield) -> bool {
                         }
                     }
                 }
-                
+
                 // Process direction 1: (0,1) - reuse variables
                 if get_con(s, 1) != RC_NOT_CONNECTED {
                     ax := int(x) + int(get_dir_offset_x(1))
@@ -172,7 +168,7 @@ erode_walkable_area :: proc(radius: i32, chf: ^Compact_Heightfield) -> bool {
                             as := &chf.spans[ai]
                             nd = min(dist[ai] + 2, 250)
                             if nd < dist[i] do dist[i] = nd
-                            
+
                             // Process diagonal (-1,1)
                             if get_con(as, 0) != RC_NOT_CONNECTED {
                                 aax := ax + int(get_dir_offset_x(0))
@@ -205,8 +201,8 @@ erode_walkable_area :: proc(radius: i32, chf: ^Compact_Heightfield) -> bool {
 // If magnitude is zero, vector is unchanged
 safe_normalize :: proc(v: ^[3]f32) {
     sq_mag := v.x * v.x + v.y * v.y + v.z * v.z
-    if sq_mag <= EPSILON do return
-    
+    if sq_mag <= geometry.EPSILON do return
+
     inv_mag := 1.0 / math.sqrt(sq_mag)
     v.x *= inv_mag
     v.y *= inv_mag
@@ -276,7 +272,7 @@ offset_poly :: proc(verts: [][3]f32, offset: f32, allocator := context.allocator
         bevel := corner_miter_sq_mag * MITER_LIMIT * MITER_LIMIT < 1.0
 
         // Scale the corner miter so it's proportional to how much the corner should be offset compared to the edges
-        if corner_miter_sq_mag > EPSILON {
+        if corner_miter_sq_mag > geometry.EPSILON {
             scale := 1.0 / corner_miter_sq_mag
             corner_miter_x *= scale
             corner_miter_z *= scale
@@ -324,14 +320,14 @@ build_distance_field :: proc(chf: ^Compact_Heightfield) -> bool {
         delete(chf.dist)
         chf.dist = nil
     }
-    
+
     // Handle empty compact heightfield
     if chf.span_count == 0 {
         chf.dist = make([]u16, 0)
         chf.max_distance = 0
         return true
     }
-    
+
     src := make([]u16, chf.span_count)
     if src == nil {
         log.errorf("build_distance_field: Out of memory 'src' (%d)", chf.span_count)

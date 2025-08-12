@@ -52,7 +52,7 @@ test_build_contours_simple_region :: proc(t: ^testing.T) {
     testing.expect(t, contour_set != nil, "Failed to allocate contour set")
     defer recast.free_contour_set(contour_set)
 
-    ok = recast.build_contours(chf, 1.0, 1, contour_set, recast.RC_CONTOUR_TESS_WALL_EDGES)
+    ok = recast.build_contours(chf, 1.0, 1, contour_set, {.WALL_EDGES})
     testing.expect(t, ok, "Failed to build contours")
 
     // Verify contours were generated
@@ -113,7 +113,7 @@ test_build_contours_multiple_regions :: proc(t: ^testing.T) {
     testing.expect(t, contour_set != nil, "Failed to allocate contour set")
     defer recast.free_contour_set(contour_set)
 
-    ok = recast.build_contours(chf, 1.0, 1, contour_set, recast.RC_CONTOUR_TESS_WALL_EDGES)
+    ok = recast.build_contours(chf, 1.0, 1, contour_set, {.WALL_EDGES})
     testing.expect(t, ok, "Failed to build contours")
 
     // Should have contours for both regions
@@ -171,7 +171,7 @@ test_build_contours_with_holes :: proc(t: ^testing.T) {
     testing.expect(t, contour_set != nil, "Failed to allocate contour set")
     defer recast.free_contour_set(contour_set)
 
-    ok = recast.build_contours(chf, 1.0, 1, contour_set, recast.RC_CONTOUR_TESS_WALL_EDGES)
+    ok = recast.build_contours(chf, 1.0, 1, contour_set, {.WALL_EDGES})
     testing.expect(t, ok, "Failed to build contours with holes")
 
     // Should generate contours including hole boundaries
@@ -216,7 +216,7 @@ test_contour_simplification_accuracy :: proc(t: ^testing.T) {
         contour_set := recast.alloc_contour_set()
         defer recast.free_contour_set(contour_set)
 
-        ok = recast.build_contours(chf, level, 1, contour_set, recast.RC_CONTOUR_TESS_WALL_EDGES)
+        ok = recast.build_contours(chf, level, 1, contour_set, {.WALL_EDGES})
         testing.expect(t, ok, "Failed to build contours with simplification")
 
         if len(contour_set.conts) > 0 {
@@ -260,7 +260,7 @@ test_contour_edge_length_constraints :: proc(t: ^testing.T) {
         contour_set := recast.alloc_contour_set()
         defer recast.free_contour_set(contour_set)
 
-        ok = recast.build_contours(chf, 1.0, max_edge_len, contour_set, recast.RC_CONTOUR_TESS_WALL_EDGES)
+        ok = recast.build_contours(chf, 1.0, max_edge_len, contour_set, {.WALL_EDGES})
         testing.expect(t, ok, "Failed to build contours with edge length constraint")
 
         if len(contour_set.conts) > 0 {
@@ -315,7 +315,7 @@ test_contour_tessellation_wall_edges :: proc(t: ^testing.T) {
     contour_set_wall := recast.alloc_contour_set()
     defer recast.free_contour_set(contour_set_wall)
 
-    ok = recast.build_contours(chf, 1.0, 3, contour_set_wall, recast.RC_CONTOUR_TESS_WALL_EDGES)
+    ok = recast.build_contours(chf, 1.0, 3, contour_set_wall, {.WALL_EDGES})
     testing.expect(t, ok, "Failed to build contours with wall edge tessellation")
 
     wall_edge_verts := 0
@@ -353,7 +353,7 @@ test_contour_tessellation_area_edges :: proc(t: ^testing.T) {
     contour_set_area := recast.alloc_contour_set()
     defer recast.free_contour_set(contour_set_area)
 
-    ok = recast.build_contours(chf, 1.0, 3, contour_set_area, recast.RC_CONTOUR_TESS_AREA_EDGES)
+    ok = recast.build_contours(chf, 1.0, 3, contour_set_area, {.AREA_EDGES})
     testing.expect(t, ok, "Failed to build contours with area edge tessellation")
 
     area_edge_verts := 0
@@ -396,7 +396,7 @@ test_contour_boundary_vertices :: proc(t: ^testing.T) {
     contour_set := recast.alloc_contour_set()
     defer recast.free_contour_set(contour_set)
 
-    ok = recast.build_contours(chf, 1.0, 1, contour_set, recast.RC_CONTOUR_TESS_WALL_EDGES)
+    ok = recast.build_contours(chf, 1.0, 1, contour_set, {.WALL_EDGES})
     testing.expect(t, ok, "Failed to build contours touching boundaries")
 
     testing.expect(t, len(contour_set.conts) > 0, "Should generate boundary contours")
@@ -450,7 +450,7 @@ test_contour_l_shaped_region :: proc(t: ^testing.T) {
     contour_set := recast.alloc_contour_set()
     defer recast.free_contour_set(contour_set)
 
-    ok = recast.build_contours(chf, 1.0, 2, contour_set, recast.RC_CONTOUR_TESS_WALL_EDGES)
+    ok = recast.build_contours(chf, 1.0, 2, contour_set, {.WALL_EDGES})
     testing.expect(t, ok, "Failed to build L-shaped contours")
 
     testing.expect(t, len(contour_set.conts) > 0, "Should generate L-shaped contours")
@@ -492,7 +492,7 @@ test_contour_generation_empty_input :: proc(t: ^testing.T) {
     contour_set := recast.alloc_contour_set()
     defer recast.free_contour_set(contour_set)
 
-    ok = recast.build_contours(chf, 1.0, 1, contour_set, recast.RC_CONTOUR_TESS_WALL_EDGES)
+    ok = recast.build_contours(chf, 1.0, 1, contour_set, {.WALL_EDGES})
     testing.expect(t, ok, "Should succeed even with no walkable areas")
 
     // Should have no contours

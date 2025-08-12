@@ -3,9 +3,6 @@ package navigation_recast
 import "core:math"
 import geometry "../../geometry"
 
-// Import commonly used functions
-point_in_polygon_2d :: geometry.point_in_polygon_2d
-
 // Calculate bounds from vertices
 calc_bounds :: proc(verts: [][3]f32) -> (bmin, bmax: [3]f32) {
     if len(verts) == 0 {
@@ -165,5 +162,5 @@ point_in_convex_volume :: proc(pt: [3]f32, vol: ^Convex_Volume) -> bool {
     if pt.y < vol.hmin || pt.y > vol.hmax {
         return false
     }
-    return point_in_polygon_2d(pt, vol.verts)
+    return geometry.point_in_polygon_2d(pt, vol.verts)
 }
