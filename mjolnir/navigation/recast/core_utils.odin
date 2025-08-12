@@ -67,82 +67,12 @@ calc_dist_field_value :: proc "contextless" (distance: f32, max_dist: f32) -> u1
 
 // Inject element at specific index in dynamic array
 inject_at :: proc(arr: ^[dynamic]$T, index: int, value: T) {
-    append(arr, value) // Add element at end first
+    resize(arr, len(arr)+1)
     // Shift elements to the right
     for i := len(arr) - 1; i > index; i -= 1 {
         arr[i] = arr[i-1]
     }
     arr[index] = value
-}
-
-// Vertex hash for deduplication
-Vertex_Hash :: struct {
-    buckets: []int,
-    chain:   [dynamic]int,
-    values:  [dynamic][3]f32,
-    count:   int,
-}
-
-vertex_hash_create :: proc(hash: ^Vertex_Hash, bucket_count: int, allocator := context.allocator) {
-    hash.buckets = make([]int, bucket_count, allocator)
-    slice.fill(hash.buckets, -1)
-    hash.chain = make([dynamic]int, 0, allocator)
-    hash.values = make([dynamic][3]f32, 0, allocator)
-    hash.count = 0
-}
-
-vertex_hash_destroy :: proc(hash: ^Vertex_Hash) {
-    delete(hash.buckets)
-    delete(hash.chain)
-    delete(hash.values)
-}
-
-vertex_hash_add :: proc(hash: ^Vertex_Hash, vertex: [3]f32, tolerance: f32) -> int {
-    bucket := int(math.abs(i32(vertex.x*tolerance) + i32(vertex.y*tolerance)*73856093 + i32(vertex.z*tolerance)*19349663)) % len(hash.buckets)
-
-    // Check if vertex already exists
-    i := hash.buckets[bucket]
-    for i != -1 {
-        v := hash.values[i]
-        if math.abs(v.x - vertex.x) < tolerance &&
-           math.abs(v.y - vertex.y) < tolerance &&
-           math.abs(v.z - vertex.z) < tolerance {
-            return i
-        }
-        i = hash.chain[i]
-    }
-
-    // Add new vertex
-    idx := hash.count
-    hash.count += 1
-    append(&hash.values, vertex)
-    append(&hash.chain, hash.buckets[bucket])
-    hash.buckets[bucket] = idx
-
-    return idx
-}
-
-// Int pair for edge representation
-Int_Pair :: struct {
-    a, b: i32,
-}
-
-make_int_pair :: proc "contextless" (a, b: i32) -> Int_Pair {
-    if a < b {
-        return Int_Pair{a, b}
-    }
-    return Int_Pair{b, a}
-}
-
-int_pair_hash :: proc "contextless" (pair: Int_Pair) -> u32 {
-    n := u32(pair.a) + u32(pair.b) << 16
-    n = n ~ (n >> 2)
-    n = n ~ (n >> 8)
-    n = n + (n << 10)
-    n = n ~ (n >> 5)
-    n = n + (n << 8)
-    n = n ~ (n >> 3)
-    return n
 }
 
 // Get direction offsets for 4-connected grid

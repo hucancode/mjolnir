@@ -1049,14 +1049,13 @@ split_long_edges :: proc(simplified: ^[dynamic][4]i32, points: [][4]i32, max_edg
                (points[ci].w & RC_CONTOUR_REG_MASK) == 0 {
                 should_tessellate = true
             }
-            if .AREA_EDGES in build_flags &&
-               .AREA_BORDER in vertex_flags {
+            if .AREA_EDGES in build_flags && .AREA_BORDER in vertex_flags {
                 should_tessellate = true
             }
 
             if should_tessellate {
-                edge := [2]f32{f32(bx - ax), f32(bz - az)}
-                if linalg.length2(edge) > f32(max_edge_len*max_edge_len) {
+                edge := [2]i32{bx - ax, bz - az}
+                if linalg.length2(edge) > max_edge_len*max_edge_len {
                     // Calculate split point
                     n := bi - ai if bi > ai else bi + i32(len(points)) - ai
                     if n > 1 {
