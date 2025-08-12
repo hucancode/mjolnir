@@ -10,7 +10,7 @@ import "core:time"
 test_heightfield_allocation :: proc(t: ^testing.T) {
 
     // Test allocation
-    hf := recast.alloc_heightfield()
+    hf := new(recast.Heightfield)
     testing.expect(t, hf != nil, "Heightfield allocation should succeed")
     defer recast.free_heightfield(hf)
 
@@ -25,7 +25,7 @@ test_heightfield_allocation :: proc(t: ^testing.T) {
 @(test)
 test_heightfield_creation :: proc(t: ^testing.T) {
 
-    hf := recast.alloc_heightfield()
+    hf := new(recast.Heightfield)
     testing.expect(t, hf != nil, "Heightfield allocation should succeed")
     defer recast.free_heightfield(hf)
 
@@ -66,7 +66,7 @@ test_heightfield_creation :: proc(t: ^testing.T) {
 test_compact_heightfield_allocation :: proc(t: ^testing.T) {
 
     // Test allocation
-    chf := recast.alloc_compact_heightfield()
+    chf := new(recast.Compact_Heightfield)
     testing.expect(t, chf != nil, "Compact heightfield allocation should succeed")
     defer recast.free_compact_heightfield(chf)
 
@@ -83,7 +83,7 @@ test_compact_heightfield_allocation :: proc(t: ^testing.T) {
 @(test)
 test_heightfield_bounds :: proc(t: ^testing.T) {
 
-    hf := recast.alloc_heightfield()
+    hf := new(recast.Heightfield)
     testing.expect(t, hf != nil, "Heightfield allocation should succeed")
     defer recast.free_heightfield(hf)
 
@@ -126,7 +126,7 @@ test_heightfield_bounds :: proc(t: ^testing.T) {
 @(test)
 test_heightfield_edge_cases :: proc(t: ^testing.T) {
 
-    hf := recast.alloc_heightfield()
+    hf := new(recast.Heightfield)
     testing.expect(t, hf != nil, "Heightfield allocation should succeed")
     defer recast.free_heightfield(hf)
 
@@ -156,7 +156,7 @@ test_distance_field_mathematical_correctness :: proc(t: ^testing.T) {
     // Create a 5x5 heightfield with a single center obstacle
     // This creates a known pattern where distances should form concentric rings
 
-    hf := recast.alloc_heightfield()
+    hf := new(recast.Heightfield)
     testing.expect(t, hf != nil, "Failed to allocate heightfield")
     defer recast.free_heightfield(hf)
 
@@ -175,7 +175,7 @@ test_distance_field_mathematical_correctness :: proc(t: ^testing.T) {
     }
 
     // Build compact heightfield
-    chf := recast.alloc_compact_heightfield()
+    chf := new(recast.Compact_Heightfield)
     defer recast.free_compact_heightfield(chf)
 
     ok = recast.build_compact_heightfield(2, 1, hf, chf)

@@ -36,8 +36,6 @@ Heightfield :: struct {
 
 // Provides information on the content of a cell column in a compact heightfield.
 Compact_Cell :: bit_field u32 {
-  // In C++: unsigned int index : 24 (24 bits)
-  // unsigned int count : 8 (8 bits)
   index: u32 | 24,
   count: u8  | 8,
 }
@@ -72,16 +70,8 @@ Compact_Heightfield :: struct {
   areas:           []u8, // Array containing area id data [Size: span_count]
 }
 
-// Allocation helpers
-
-alloc_heightfield :: proc() -> ^Heightfield {
-  hf := new(Heightfield)
-  return hf
-}
-
 free_heightfield :: proc(hf: ^Heightfield) {
   if hf == nil do return
-
   // Free all span pools
   pool := hf.pools
   for pool != nil {
@@ -89,19 +79,8 @@ free_heightfield :: proc(hf: ^Heightfield) {
     free(pool)
     pool = next
   }
-
-  // Free the spans array
-  if hf.spans != nil {
-    delete(hf.spans)
-  }
-
-  // Free the heightfield itself
+  delete(hf.spans)
   free(hf)
-}
-
-alloc_compact_heightfield :: proc() -> ^Compact_Heightfield {
-  chf := new(Compact_Heightfield)
-  return chf
 }
 
 free_compact_heightfield :: proc(chf: ^Compact_Heightfield) {
@@ -220,7 +199,7 @@ create_heightfield_from_config :: proc(
   hf: ^Heightfield,
   success: bool,
 ) {
-  hf = alloc_heightfield()
+  hf = new(Heightfield)
   if hf == nil do return nil, false
 
   success = create_heightfield(
@@ -248,7 +227,7 @@ build_compact_heightfield_from_hf :: proc(
   chf: ^Compact_Heightfield,
   success: bool,
 ) {
-  chf = alloc_compact_heightfield()
+  chf = new(Compact_Heightfield)
   if chf == nil do return nil, false
 
   // Need to import the builder module

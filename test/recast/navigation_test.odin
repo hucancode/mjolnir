@@ -54,7 +54,7 @@ test_grid_size_calculation :: proc(t: ^testing.T) {
 @(test)
 test_compact_heightfield_spans :: proc(t: ^testing.T) {
     // Create a simple heightfield with one span
-    hf := recast.alloc_heightfield()
+    hf := new(recast.Heightfield)
     testing.expect(t, hf != nil, "Failed to allocate heightfield")
     defer recast.free_heightfield(hf)
 
@@ -68,7 +68,7 @@ test_compact_heightfield_spans :: proc(t: ^testing.T) {
     testing.expect(t, ok, "Failed to add span")
 
     // Build compact heightfield
-    chf := recast.alloc_compact_heightfield()
+    chf := new(recast.Compact_Heightfield)
     defer recast.free_compact_heightfield(chf)
 
     ok = recast.build_compact_heightfield(2, 1, hf, chf)

@@ -12,60 +12,60 @@ build_navmesh :: proc(vertices: [][3]f32, indices: []i32, areas: []u8, cfg: Conf
     if len(vertices) == 0 || len(indices) == 0 || cfg.cs <= 0 || cfg.ch <= 0 {
         return nil, nil, false
     }
-    
+
     // Calculate bounds if needed
     config := cfg
     if config.bmin == {} && config.bmax == {} {
         config.bmin, config.bmax = calc_bounds(vertices)
     }
-    
+
     // Calculate grid size
     config.width, config.height = calc_grid_size(config.bmin, config.bmax, config.cs)
-    
+
     // Validate grid size
     if config.width <= 0 || config.height <= 0 {
         return nil, nil, false
     }
-    
+
     // Build heightfield
-    hf := alloc_heightfield()
+    hf := new(Heightfield)
     defer free_heightfield(hf)
-    
+
     if !create_heightfield(hf, config.width, config.height, config.bmin, config.bmax, config.cs, config.ch) {
         return nil, nil, false
     }
-    
+
     // Debug: Check areas before rasterization
     when ODIN_DEBUG {
         log.infof("Rasterizing %d triangles with areas:", len(indices)/3)
         for i in 0..<min(10, len(areas)) {
             log.infof("  Triangle %d: area=%d", i, areas[i])
         }
-        
+
         // Also check if we're marking triangles as unwalkable due to slope
         walkable_thr := math.cos(math.to_radians(config.walkable_slope_angle))
         log.infof("Walkable slope threshold: %.3f (angle=%.1f degrees)", walkable_thr, config.walkable_slope_angle)
-        
+
         // Check first triangle normal
         if len(indices) >= 3 {
             v0 := vertices[indices[0]]
             v1 := vertices[indices[1]]
             v2 := vertices[indices[2]]
-            
+
             e0 := v1 - v0
             e1 := v2 - v0
             norm := linalg.normalize(linalg.cross(e0, e1))
-            
-            log.infof("First triangle normal: (%.3f, %.3f, %.3f), Y=%.3f %s threshold %.3f", 
-                      norm.x, norm.y, norm.z, norm.y, 
+
+            log.infof("First triangle normal: (%.3f, %.3f, %.3f), Y=%.3f %s threshold %.3f",
+                      norm.x, norm.y, norm.z, norm.y,
                       norm.y > walkable_thr ? ">" : "<=", walkable_thr)
         }
     }
-    
+
     if !rasterize_triangles(vertices, indices, areas, hf, config.walkable_climb) {
         return nil, nil, false
     }
-    
+
     // Debug: Count spans in heightfield
     when ODIN_DEBUG {
         span_count := 0
@@ -91,7 +91,7 @@ build_navmesh :: proc(vertices: [][3]f32, indices: []i32, areas: []u8, cfg: Conf
         }
         log.infof("Heightfield after rasterization: %d total spans in %d non-empty cells", total_spans, non_empty_cells)
         log.infof("  %d walkable spans, %d null area spans", span_count, null_area_count)
-        
+
         // Check span distribution
         quadrants := [4]int{0, 0, 0, 0}  // NE, NW, SW, SE
         mid_x := hf.width / 2
@@ -109,15 +109,15 @@ build_navmesh :: proc(vertices: [][3]f32, indices: []i32, areas: []u8, cfg: Conf
                 }
             }
         }
-        log.infof("Span distribution by quadrant: NE=%d, NW=%d, SW=%d, SE=%d", 
+        log.infof("Span distribution by quadrant: NE=%d, NW=%d, SW=%d, SE=%d",
                   quadrants[0], quadrants[1], quadrants[2], quadrants[3])
     }
-    
+
     // Filter walkable surfaces
     filter_low_hanging_walkable_obstacles(int(config.walkable_climb), hf)
     filter_ledge_spans(int(config.walkable_height), int(config.walkable_climb), hf)
     filter_walkable_low_height_spans(int(config.walkable_height), hf)
-    
+
     // Debug: Count spans after filtering
     when ODIN_DEBUG {
         span_count2 := 0
@@ -142,54 +142,54 @@ build_navmesh :: proc(vertices: [][3]f32, indices: []i32, areas: []u8, cfg: Conf
             }
         }
         log.infof("Heightfield after filtering: %d walkable spans", span_count2)
-        log.infof("After filtering distribution: NE=%d, NW=%d, SW=%d, SE=%d", 
+        log.infof("After filtering distribution: NE=%d, NW=%d, SW=%d, SE=%d",
                   quadrants2[0], quadrants2[1], quadrants2[2], quadrants2[3])
     }
-    
+
     // Build compact heightfield
-    chf := alloc_compact_heightfield()
+    chf := new(Compact_Heightfield)
     defer free_compact_heightfield(chf)
-    
+
     if !build_compact_heightfield(config.walkable_height, config.walkable_climb, hf, chf) {
         return nil, nil, false
     }
-    
+
     if !erode_walkable_area(config.walkable_radius, chf) {
         return nil, nil, false
     }
-    
 
-    
+
+
     if !build_distance_field(chf) {
         return nil, nil, false
     }
-    
+
     log.infof("Building regions with min_area=%d, merge_area=%d", config.min_region_area, config.merge_region_area)
     if !build_regions(chf, 0, config.min_region_area, config.merge_region_area) {
         log.error("Failed to build regions")
         return nil, nil, false
     }
     log.info("Regions built successfully")
-    
 
-    
+
+
     // Build contours
     cset := alloc_contour_set()
     defer free_contour_set(cset)
-    
+
     if !build_contours(chf, config.max_simplification_error, config.max_edge_len, cset) {
         return nil, nil, false
     }
-    
 
-    
+
+
     // Build polygon mesh
     pmesh = alloc_poly_mesh()
     if !build_poly_mesh(cset, config.max_verts_per_poly, pmesh) {
         free_poly_mesh(pmesh)
         return nil, nil, false
     }
-    
+
     // Build detail mesh
     dmesh = alloc_poly_mesh_detail()
     if !build_poly_mesh_detail(pmesh, chf, config.detail_sample_dist, config.detail_sample_max_error, dmesh) {
@@ -197,6 +197,6 @@ build_navmesh :: proc(vertices: [][3]f32, indices: []i32, areas: []u8, cfg: Conf
         free_poly_mesh_detail(dmesh)
         return nil, nil, false
     }
-    
+
     return pmesh, dmesh, true
 }

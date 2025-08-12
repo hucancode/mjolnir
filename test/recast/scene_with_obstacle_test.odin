@@ -101,7 +101,7 @@ test_scene_with_obstacle :: proc(t: ^testing.T) {
     log.infof("Created scene mesh: %d vertices, %d triangles", len(vertices)/3, len(triangles)/3)
 
     // Step 1: Create solid heightfield
-    solid := recast.alloc_heightfield()
+    solid := new(recast.Heightfield)
     defer recast.free_heightfield(solid)
 
     ok := recast.create_heightfield(solid, config.width, config.height,
@@ -130,7 +130,7 @@ test_scene_with_obstacle :: proc(t: ^testing.T) {
     recast.filter_walkable_low_height_spans(int(config.walkable_height), solid)
 
     // Step 4: Create compact heightfield
-    chf := recast.alloc_compact_heightfield()
+    chf := new(recast.Compact_Heightfield)
     defer recast.free_compact_heightfield(chf)
 
     ok = recast.build_compact_heightfield(config.walkable_height, config.walkable_climb, solid, chf)
@@ -280,7 +280,7 @@ test_contour_with_real_heightfield :: proc(t: ^testing.T) {
     }
 
     // Create heightfield
-    solid := recast.alloc_heightfield()
+    solid := new(recast.Heightfield)
     defer recast.free_heightfield(solid)
 
     ok := recast.create_heightfield(solid, config.width, config.height,
@@ -336,7 +336,7 @@ test_contour_with_real_heightfield :: proc(t: ^testing.T) {
     )
 
     // Build compact heightfield
-    chf := recast.alloc_compact_heightfield()
+    chf := new(recast.Compact_Heightfield)
     defer recast.free_compact_heightfield(chf)
 
     ok = recast.build_compact_heightfield(config.walkable_height, config.walkable_climb, solid, chf)

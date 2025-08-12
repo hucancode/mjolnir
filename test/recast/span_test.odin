@@ -102,7 +102,7 @@ test_compact_span_bit_operations :: proc(t: ^testing.T) {
 // Unit Test: Basic span allocation
 @(test)
 test_span_allocation :: proc(t: ^testing.T) {
-    hf := recast.alloc_heightfield()
+    hf := new(recast.Heightfield)
     testing.expect(t, hf != nil, "Heightfield allocation should succeed")
     defer recast.free_heightfield(hf)
 
@@ -129,7 +129,7 @@ test_span_allocation :: proc(t: ^testing.T) {
 test_span_invalid_inputs :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
 
-    hf := recast.alloc_heightfield()
+    hf := new(recast.Heightfield)
     testing.expect(t, hf != nil, "Failed to create heightfield")
     defer recast.free_heightfield(hf)
 
@@ -159,7 +159,7 @@ test_span_invalid_inputs :: proc(t: ^testing.T) {
 test_span_edge_cases :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
 
-    hf := recast.alloc_heightfield()
+    hf := new(recast.Heightfield)
     testing.expect(t, hf != nil, "Failed to create heightfield")
     defer recast.free_heightfield(hf)
 
@@ -193,7 +193,7 @@ test_span_edge_cases :: proc(t: ^testing.T) {
 
 // Helper to create a heightfield for testing
 create_test_heightfield :: proc(width, height: i32) -> ^recast.Heightfield {
-    hf := recast.alloc_heightfield()
+    hf := new(recast.Heightfield)
     if hf == nil do return nil
 
     bmin := [3]f32{0, 0, 0}
@@ -232,7 +232,7 @@ verify_span_list :: proc(t: ^testing.T, hf: ^recast.Heightfield, x, z: i32, expe
 // Integration Test: Basic span merging
 @(test)
 test_span_merging :: proc(t: ^testing.T) {
-    hf := recast.alloc_heightfield()
+    hf := new(recast.Heightfield)
     testing.expect(t, hf != nil, "Heightfield allocation should succeed")
     defer recast.free_heightfield(hf)
 
@@ -461,7 +461,7 @@ test_span_merge_algorithm_correctness :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
 
     // Create a small heightfield
-    hf := recast.alloc_heightfield()
+    hf := new(recast.Heightfield)
     testing.expect(t, hf != nil, "Heightfield allocation should succeed")
     defer recast.free_heightfield(hf)
 
@@ -508,7 +508,7 @@ test_span_merge_out_of_order :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
 
     // Test adding spans out of order
-    hf := recast.alloc_heightfield()
+    hf := new(recast.Heightfield)
     testing.expect(t, hf != nil, "Heightfield allocation should succeed")
     defer recast.free_heightfield(hf)
 
@@ -556,7 +556,7 @@ test_span_partial_merge :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
 
     // Test partial merging scenarios
-    hf := recast.alloc_heightfield()
+    hf := new(recast.Heightfield)
     testing.expect(t, hf != nil, "Heightfield allocation should succeed")
     defer recast.free_heightfield(hf)
 
@@ -600,7 +600,7 @@ test_span_partial_merge :: proc(t: ^testing.T) {
 // End-to-End Test: Multiple columns with spans
 @(test)
 test_span_multiple_columns :: proc(t: ^testing.T) {
-    hf := recast.alloc_heightfield()
+    hf := new(recast.Heightfield)
     testing.expect(t, hf != nil, "Heightfield allocation should succeed")
     defer recast.free_heightfield(hf)
 
@@ -630,7 +630,7 @@ test_span_multiple_columns :: proc(t: ^testing.T) {
 // End-to-End Test: Complex merging scenario
 @(test)
 test_span_complex_merging :: proc(t: ^testing.T) {
-    hf := recast.alloc_heightfield()
+    hf := new(recast.Heightfield)
     testing.expect(t, hf != nil, "Heightfield allocation should succeed")
     defer recast.free_heightfield(hf)
 
@@ -728,70 +728,70 @@ test_span_merging_with_flag_threshold :: proc(t: ^testing.T) {
 @(test)
 test_span_merging_complex_scenarios :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-    
+
     // Test complex span merging with multiple overlapping spans at different heights
     // This validates the correctness of the span merging algorithm
-    
-    hf := recast.alloc_heightfield()
+
+    hf := new(recast.Heightfield)
     testing.expect(t, hf != nil, "Failed to allocate heightfield")
     defer recast.free_heightfield(hf)
-    
+
     ok := recast.create_heightfield(hf, 3, 3, {0,0,0}, {3,3,3}, 1.0, 0.2)
     testing.expect(t, ok, "Failed to create heightfield")
-    
+
     // Add multiple overlapping spans at the same cell (1,1) with different height ranges
     x, z := i32(1), i32(1)
-    
+
     // Span 1: height 0-10 (floor)
     ok = recast.add_span(hf, x, z, 0, 10, recast.RC_WALKABLE_AREA, 1)
     testing.expect(t, ok, "Failed to add span 1")
-    
+
     // Span 2: height 15-25 (platform above floor)
     ok = recast.add_span(hf, x, z, 15, 25, recast.RC_WALKABLE_AREA, 1)
     testing.expect(t, ok, "Failed to add span 2")
-    
+
     // Span 3: height 5-20 (overlapping span that should merge/clip)
     ok = recast.add_span(hf, x, z, 5, 20, recast.RC_WALKABLE_AREA, 1)
     testing.expect(t, ok, "Failed to add span 3")
-    
+
     // Validate the resulting span structure
     // The merging algorithm should handle overlaps correctly
-    
+
     spans := hf.spans[x + z * hf.width]
     testing.expect(t, spans != nil, "Cell should have spans after merging")
-    
+
     // Count spans and validate heights
     span_count := 0
     current_span := spans
     min_smin := u32(999999)
     max_smax := u32(0)
-    
+
     for current_span != nil {
         span_count += 1
         smin := current_span.smin
         smax := current_span.smax
-        
+
         // Validate span integrity
         testing.expect(t, smax > smin, "Span max should be greater than min")
-        
+
         min_smin = min(min_smin, smin)
         max_smax = max(max_smax, smax)
-        
+
         current_span = current_span.next
-        
+
         // Prevent infinite loops
         if span_count > 10 {
             testing.expect(t, false, "Too many spans - possible infinite loop")
             break
         }
     }
-    
+
     // Validate span merging results
-    testing.expect(t, span_count >= 1 && span_count <= 3, 
+    testing.expect(t, span_count >= 1 && span_count <= 3,
                   "Merged spans should result in 1-3 final spans")
     testing.expect(t, min_smin <= 5, "Minimum span should start near original minimum")
     testing.expect(t, max_smax >= 20, "Maximum span should extend to original maximum")
-    
-    log.infof("Span merging validation - %d final spans, height range: %d to %d", 
+
+    log.infof("Span merging validation - %d final spans, height range: %d to %d",
               span_count, min_smin, max_smax)
 }

@@ -17,7 +17,7 @@ test_multiple_spans_per_cell :: proc(t: ^testing.T) {
     bmin := [3]f32{0, 0, 0}
     bmax := [3]f32{f32(field_size), 50, f32(field_size)}
 
-    hf := recast.alloc_heightfield()
+    hf := new(recast.Heightfield)
     testing.expect(t, hf != nil, "Heightfield allocation should succeed")
     defer recast.free_heightfield(hf)
 
@@ -87,7 +87,7 @@ test_many_thin_spans :: proc(t: ^testing.T) {
     bmin := [3]f32{0, 0, 0}
     bmax := [3]f32{f32(field_size), 100, f32(field_size)}
 
-    hf := recast.alloc_heightfield()
+    hf := new(recast.Heightfield)
     testing.expect(t, hf != nil, "Heightfield allocation should succeed")
     defer recast.free_heightfield(hf)
 

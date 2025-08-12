@@ -16,7 +16,7 @@ test_build_contours_simple_region :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
 
     // Create a simple scenario for contour building
-    hf := recast.alloc_heightfield()
+    hf := new(recast.Heightfield)
     testing.expect(t, hf != nil, "Failed to allocate heightfield")
     defer recast.free_heightfield(hf)
 
@@ -33,7 +33,7 @@ test_build_contours_simple_region :: proc(t: ^testing.T) {
     }
 
     // Build compact heightfield
-    chf := recast.alloc_compact_heightfield()
+    chf := new(recast.Compact_Heightfield)
     testing.expect(t, chf != nil, "Failed to allocate compact heightfield")
     defer recast.free_compact_heightfield(chf)
 
@@ -44,7 +44,7 @@ test_build_contours_simple_region :: proc(t: ^testing.T) {
     ok = recast.build_distance_field(chf)
     testing.expect(t, ok, "Failed to build distance field")
 
-    ok = recast.build_regions(chf, 2, 8, 20)  // Reduced border size to allow interior spans  
+    ok = recast.build_regions(chf, 2, 8, 20)  // Reduced border size to allow interior spans
     testing.expect(t, ok, "Failed to build regions")
 
     // Build contours
@@ -70,7 +70,7 @@ test_build_contours_simple_region :: proc(t: ^testing.T) {
 test_build_contours_multiple_regions :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
 
-    hf := recast.alloc_heightfield()
+    hf := new(recast.Heightfield)
     testing.expect(t, hf != nil, "Failed to allocate heightfield")
     defer recast.free_heightfield(hf)
 
@@ -95,7 +95,7 @@ test_build_contours_multiple_regions :: proc(t: ^testing.T) {
     }
 
     // Build compact heightfield and regions
-    chf := recast.alloc_compact_heightfield()
+    chf := new(recast.Compact_Heightfield)
     testing.expect(t, chf != nil, "Failed to allocate compact heightfield")
     defer recast.free_compact_heightfield(chf)
 
@@ -126,7 +126,7 @@ test_build_contours_multiple_regions :: proc(t: ^testing.T) {
 test_build_contours_with_holes :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
 
-    hf := recast.alloc_heightfield()
+    hf := new(recast.Heightfield)
     testing.expect(t, hf != nil, "Failed to allocate heightfield")
     defer recast.free_heightfield(hf)
 
@@ -153,7 +153,7 @@ test_build_contours_with_holes :: proc(t: ^testing.T) {
         }
     }
 
-    chf := recast.alloc_compact_heightfield()
+    chf := new(recast.Compact_Heightfield)
     testing.expect(t, chf != nil, "Failed to allocate compact heightfield")
     defer recast.free_compact_heightfield(chf)
 
@@ -188,7 +188,7 @@ test_build_contours_with_holes :: proc(t: ^testing.T) {
 test_contour_simplification_accuracy :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
 
-    hf := recast.alloc_heightfield()
+    hf := new(recast.Heightfield)
     testing.expect(t, hf != nil, "Failed to allocate heightfield")
     defer recast.free_heightfield(hf)
 
@@ -203,7 +203,7 @@ test_contour_simplification_accuracy :: proc(t: ^testing.T) {
         }
     }
 
-    chf := recast.alloc_compact_heightfield()
+    chf := new(recast.Compact_Heightfield)
     defer recast.free_compact_heightfield(chf)
     ok = recast.build_compact_heightfield(2, 1, hf, chf)
     ok = recast.build_distance_field(chf)
@@ -236,7 +236,7 @@ test_contour_simplification_accuracy :: proc(t: ^testing.T) {
 test_contour_edge_length_constraints :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
 
-    hf := recast.alloc_heightfield()
+    hf := new(recast.Heightfield)
     defer recast.free_heightfield(hf)
     ok := recast.create_heightfield(hf, 8, 8, {0,0,0}, {8,8,8}, 1.0, 0.5)
 
@@ -247,7 +247,7 @@ test_contour_edge_length_constraints :: proc(t: ^testing.T) {
         }
     }
 
-    chf := recast.alloc_compact_heightfield()
+    chf := new(recast.Compact_Heightfield)
     defer recast.free_compact_heightfield(chf)
     ok = recast.build_compact_heightfield(2, 1, hf, chf)
     ok = recast.build_distance_field(chf)
@@ -294,7 +294,7 @@ test_contour_edge_length_constraints :: proc(t: ^testing.T) {
 test_contour_tessellation_wall_edges :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
 
-    hf := recast.alloc_heightfield()
+    hf := new(recast.Heightfield)
     defer recast.free_heightfield(hf)
     ok := recast.create_heightfield(hf, 6, 6, {0,0,0}, {6,6,6}, 1.0, 0.5)
 
@@ -305,7 +305,7 @@ test_contour_tessellation_wall_edges :: proc(t: ^testing.T) {
         }
     }
 
-    chf := recast.alloc_compact_heightfield()
+    chf := new(recast.Compact_Heightfield)
     defer recast.free_compact_heightfield(chf)
     ok = recast.build_compact_heightfield(2, 1, hf, chf)
     ok = recast.build_distance_field(chf)
@@ -332,7 +332,7 @@ test_contour_tessellation_wall_edges :: proc(t: ^testing.T) {
 test_contour_tessellation_area_edges :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
 
-    hf := recast.alloc_heightfield()
+    hf := new(recast.Heightfield)
     defer recast.free_heightfield(hf)
     ok := recast.create_heightfield(hf, 6, 6, {0,0,0}, {6,6,6}, 1.0, 0.5)
 
@@ -343,7 +343,7 @@ test_contour_tessellation_area_edges :: proc(t: ^testing.T) {
         }
     }
 
-    chf := recast.alloc_compact_heightfield()
+    chf := new(recast.Compact_Heightfield)
     defer recast.free_compact_heightfield(chf)
     ok = recast.build_compact_heightfield(2, 1, hf, chf)
     ok = recast.build_distance_field(chf)
@@ -374,7 +374,7 @@ test_contour_tessellation_area_edges :: proc(t: ^testing.T) {
 test_contour_boundary_vertices :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
 
-    hf := recast.alloc_heightfield()
+    hf := new(recast.Heightfield)
     defer recast.free_heightfield(hf)
 
     // Create area that touches heightfield boundaries
@@ -387,7 +387,7 @@ test_contour_boundary_vertices :: proc(t: ^testing.T) {
         }
     }
 
-    chf := recast.alloc_compact_heightfield()
+    chf := new(recast.Compact_Heightfield)
     defer recast.free_compact_heightfield(chf)
     ok = recast.build_compact_heightfield(2, 1, hf, chf)
     ok = recast.build_distance_field(chf)
@@ -423,7 +423,7 @@ test_contour_boundary_vertices :: proc(t: ^testing.T) {
 test_contour_l_shaped_region :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
 
-    hf := recast.alloc_heightfield()
+    hf := new(recast.Heightfield)
     defer recast.free_heightfield(hf)
     ok := recast.create_heightfield(hf, 8, 8, {0,0,0}, {8,8,8}, 1.0, 0.5)
 
@@ -441,7 +441,7 @@ test_contour_l_shaped_region :: proc(t: ^testing.T) {
         }
     }
 
-    chf := recast.alloc_compact_heightfield()
+    chf := new(recast.Compact_Heightfield)
     defer recast.free_compact_heightfield(chf)
     ok = recast.build_compact_heightfield(2, 1, hf, chf)
     ok = recast.build_distance_field(chf)
@@ -472,13 +472,13 @@ test_contour_generation_empty_input :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
 
     // Test contour generation with no walkable areas
-    hf := recast.alloc_heightfield()
+    hf := new(recast.Heightfield)
     defer recast.free_heightfield(hf)
     ok := recast.create_heightfield(hf, 5, 5, {0,0,0}, {5,5,5}, 1.0, 0.5)
 
     // Don't add any walkable spans - all will be null area
 
-    chf := recast.alloc_compact_heightfield()
+    chf := new(recast.Compact_Heightfield)
     defer recast.free_compact_heightfield(chf)
     ok = recast.build_compact_heightfield(2, 1, hf, chf)
     testing.expect(t, ok, "Should build compact heightfield even with no walkable area")

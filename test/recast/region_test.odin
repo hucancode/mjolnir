@@ -11,7 +11,7 @@ import "core:time"
 test_compact_heightfield_building :: proc(t: ^testing.T) {
 
     // Create a regular heightfield
-    hf := recast.alloc_heightfield()
+    hf := new(recast.Heightfield)
     testing.expect(t, hf != nil, "Heightfield allocation should succeed")
     defer recast.free_heightfield(hf)
 
@@ -27,7 +27,7 @@ test_compact_heightfield_building :: proc(t: ^testing.T) {
     }
 
     // Build compact heightfield
-    chf := recast.alloc_compact_heightfield()
+    chf := new(recast.Compact_Heightfield)
     defer recast.free_compact_heightfield(chf)
 
     ok = recast.build_compact_heightfield(2, 1, hf, chf)
@@ -56,7 +56,7 @@ test_compact_heightfield_building :: proc(t: ^testing.T) {
 test_erode_walkable_area :: proc(t: ^testing.T) {
 
     // Create a heightfield with a 10x10 floor
-    hf := recast.alloc_heightfield()
+    hf := new(recast.Heightfield)
     testing.expect(t, hf != nil, "Heightfield allocation should succeed")
     defer recast.free_heightfield(hf)
 
@@ -72,7 +72,7 @@ test_erode_walkable_area :: proc(t: ^testing.T) {
     }
 
     // Build compact heightfield
-    chf := recast.alloc_compact_heightfield()
+    chf := new(recast.Compact_Heightfield)
     defer recast.free_compact_heightfield(chf)
 
     ok = recast.build_compact_heightfield(2, 1, hf, chf)
@@ -108,7 +108,7 @@ test_erode_walkable_area :: proc(t: ^testing.T) {
 test_build_distance_field :: proc(t: ^testing.T) {
 
     // Create a simple heightfield
-    hf := recast.alloc_heightfield()
+    hf := new(recast.Heightfield)
     testing.expect(t, hf != nil, "Heightfield allocation should succeed")
     defer recast.free_heightfield(hf)
 
@@ -133,7 +133,7 @@ test_build_distance_field :: proc(t: ^testing.T) {
     log.infof("Heightfield debug: width=%d, height=%d", hf.width, hf.height)
 
     // Build compact heightfield
-    chf := recast.alloc_compact_heightfield()
+    chf := new(recast.Compact_Heightfield)
     defer recast.free_compact_heightfield(chf)
 
     ok = recast.build_compact_heightfield(2, 1, hf, chf)
@@ -280,7 +280,7 @@ test_build_distance_field :: proc(t: ^testing.T) {
 test_build_regions_watershed :: proc(t: ^testing.T) {
 
     // Create a simple heightfield
-    hf := recast.alloc_heightfield()
+    hf := new(recast.Heightfield)
     testing.expect(t, hf != nil, "Heightfield allocation should succeed")
     defer recast.free_heightfield(hf)
 
@@ -305,7 +305,7 @@ test_build_regions_watershed :: proc(t: ^testing.T) {
     }
 
     // Build compact heightfield
-    chf := recast.alloc_compact_heightfield()
+    chf := new(recast.Compact_Heightfield)
     defer recast.free_compact_heightfield(chf)
 
     ok = recast.build_compact_heightfield(2, 1, hf, chf)
@@ -349,7 +349,7 @@ test_build_regions_watershed :: proc(t: ^testing.T) {
 test_region_merging :: proc(t: ^testing.T) {
 
     // Create a heightfield with small adjacent areas
-    hf := recast.alloc_heightfield()
+    hf := new(recast.Heightfield)
     testing.expect(t, hf != nil, "Heightfield allocation should succeed")
     defer recast.free_heightfield(hf)
 
@@ -369,7 +369,7 @@ test_region_merging :: proc(t: ^testing.T) {
     }
 
     // Build compact heightfield
-    chf := recast.alloc_compact_heightfield()
+    chf := new(recast.Compact_Heightfield)
     defer recast.free_compact_heightfield(chf)
 
     ok = recast.build_compact_heightfield(2, 4, hf, chf)
@@ -405,7 +405,7 @@ test_region_merging :: proc(t: ^testing.T) {
 test_border_regions :: proc(t: ^testing.T) {
 
     // Create a heightfield with borders
-    hf := recast.alloc_heightfield()
+    hf := new(recast.Heightfield)
     testing.expect(t, hf != nil, "Heightfield allocation should succeed")
     defer recast.free_heightfield(hf)
 
@@ -424,7 +424,7 @@ test_border_regions :: proc(t: ^testing.T) {
     }
 
     // Build compact heightfield
-    chf := recast.alloc_compact_heightfield()
+    chf := new(recast.Compact_Heightfield)
     defer recast.free_compact_heightfield(chf)
 
     ok = recast.build_compact_heightfield(2, 1, hf, chf)
@@ -468,7 +468,7 @@ test_watershed_region_connectivity :: proc(t: ^testing.T) {
     // Create two separate 3x3 platforms with a gap between them
     // This should result in exactly 2 regions with no cross-connections
 
-    hf := recast.alloc_heightfield()
+    hf := new(recast.Heightfield)
     testing.expect(t, hf != nil, "Failed to allocate heightfield")
     defer recast.free_heightfield(hf)
 
@@ -494,7 +494,7 @@ test_watershed_region_connectivity :: proc(t: ^testing.T) {
     }
 
     // Build compact heightfield
-    chf := recast.alloc_compact_heightfield()
+    chf := new(recast.Compact_Heightfield)
     defer recast.free_compact_heightfield(chf)
 
     ok = recast.build_compact_heightfield(2, 1, hf, chf)

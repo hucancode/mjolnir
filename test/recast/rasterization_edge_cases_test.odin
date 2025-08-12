@@ -13,27 +13,27 @@ import "core:math"
 @(test)
 test_rasterize_degenerate_triangles :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-    
-    hf := recast.alloc_heightfield()
+
+    hf := new(recast.Heightfield)
     testing.expect(t, hf != nil, "Failed to allocate heightfield")
     defer recast.free_heightfield(hf)
-    
+
     ok := recast.create_heightfield(hf, 10, 10, {0,0,0}, {10,10,10}, 1.0, 0.5)
     testing.expect(t, ok, "Failed to create heightfield")
-    
+
     // Test 1: Zero area triangle (collinear points)
     vertices_collinear := [][3]f32{
         {0, 0, 0},    // 0
-        {1, 0, 0},    // 1  
+        {1, 0, 0},    // 1
         {2, 0, 0},    // 2 - all on same line
     }
     indices_collinear := []i32{0, 1, 2}
     areas_collinear := []u8{recast.RC_WALKABLE_AREA}
-    
+
     // Should handle collinear points gracefully without crashing
     ok = recast.rasterize_triangles(vertices_collinear, indices_collinear, areas_collinear, hf, 1)
     testing.expect(t, ok, "Rasterization should succeed with collinear points")
-    
+
     // Test 2: Identical vertices triangle
     vertices_identical := [][3]f32{
         {5, 1, 5},    // 0
@@ -42,25 +42,25 @@ test_rasterize_degenerate_triangles :: proc(t: ^testing.T) {
     }
     indices_identical := []i32{0, 1, 2}
     areas_identical := []u8{recast.RC_WALKABLE_AREA}
-    
+
     // Should handle identical vertices without crashing
     ok = recast.rasterize_triangles(vertices_identical, indices_identical, areas_identical, hf, 1)
     testing.expect(t, ok, "Rasterization should succeed with identical vertices")
-    
+
     log.info("✓ Degenerate triangle rasterization test passed")
 }
 
 @(test)
 test_rasterize_nearly_degenerate_triangles :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-    
-    hf := recast.alloc_heightfield()
+
+    hf := new(recast.Heightfield)
     testing.expect(t, hf != nil, "Failed to allocate heightfield")
     defer recast.free_heightfield(hf)
-    
+
     ok := recast.create_heightfield(hf, 10, 10, {0,0,0}, {10,10,10}, 1.0, 0.5)
     testing.expect(t, ok, "Failed to create heightfield")
-    
+
     // Nearly collinear points (very thin triangle)
     epsilon := f32(1e-6)
     vertices := [][3]f32{
@@ -70,17 +70,17 @@ test_rasterize_nearly_degenerate_triangles :: proc(t: ^testing.T) {
     }
     indices := []i32{0, 1, 2}
     areas := []u8{recast.RC_WALKABLE_AREA}
-    
+
     // Should handle nearly degenerate triangles
     ok = recast.rasterize_triangles(vertices, indices, areas, hf, 1)
     testing.expect(t, ok, "Rasterization should succeed with nearly degenerate triangle")
-    
+
     // Check that at least the center cell got a span
     center_x, center_z := i32(2), i32(2)
     column_index := center_x + center_z * hf.width
     span := hf.spans[column_index]
     // Span might be nil due to very small triangle, but shouldn't crash
-    
+
     log.info("✓ Nearly degenerate triangle rasterization test passed")
 }
 
@@ -91,17 +91,17 @@ test_rasterize_nearly_degenerate_triangles :: proc(t: ^testing.T) {
 @(test)
 test_rasterize_sub_pixel_triangles :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-    
+
     // Use high resolution heightfield to test sub-pixel triangles
-    hf := recast.alloc_heightfield()
+    hf := new(recast.Heightfield)
     testing.expect(t, hf != nil, "Failed to allocate heightfield")
     defer recast.free_heightfield(hf)
-    
+
     // Small cell size to create sub-pixel scenarios
     cell_size := f32(0.1)
     ok := recast.create_heightfield(hf, 50, 50, {0,0,0}, {5,5,5}, cell_size, 0.05)
     testing.expect(t, ok, "Failed to create high-res heightfield")
-    
+
     // Triangle smaller than one cell
     triangle_size := cell_size * 0.8
     vertices := [][3]f32{
@@ -111,10 +111,10 @@ test_rasterize_sub_pixel_triangles :: proc(t: ^testing.T) {
     }
     indices := []i32{0, 1, 2}
     areas := []u8{recast.RC_WALKABLE_AREA}
-    
+
     ok = recast.rasterize_triangles(vertices, indices, areas, hf, 1)
     testing.expect(t, ok, "Sub-pixel triangle rasterization should succeed")
-    
+
     // Check that the triangle affected at least one cell
     affected_cells := 0
     for i in 0..<(hf.width * hf.height) {
@@ -123,23 +123,23 @@ test_rasterize_sub_pixel_triangles :: proc(t: ^testing.T) {
         }
     }
     testing.expect(t, affected_cells > 0, "Sub-pixel triangle should affect at least one cell")
-    
+
     log.info("✓ Sub-pixel triangle rasterization test passed")
 }
 
 @(test)
 test_rasterize_tiny_triangles_various_positions :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-    
-    hf := recast.alloc_heightfield()
+
+    hf := new(recast.Heightfield)
     testing.expect(t, hf != nil, "Failed to allocate heightfield")
     defer recast.free_heightfield(hf)
-    
+
     ok := recast.create_heightfield(hf, 20, 20, {0,0,0}, {10,10,10}, 0.5, 0.1)
     testing.expect(t, ok, "Failed to create heightfield")
-    
+
     tiny_size := f32(0.01)
-    
+
     // Test tiny triangles at various positions
     test_positions := [][2]f32{
         {1.0, 1.0},    // Cell center
@@ -148,7 +148,7 @@ test_rasterize_tiny_triangles_various_positions :: proc(t: ^testing.T) {
         {0.01, 0.01},  // Near origin
         {8.99, 8.99},  // Near boundary
     }
-    
+
     for pos, i in test_positions {
         vertices := [][3]f32{
             {pos.x, 1, pos.y},
@@ -157,11 +157,11 @@ test_rasterize_tiny_triangles_various_positions :: proc(t: ^testing.T) {
         }
         indices := []i32{0, 1, 2}
         areas := []u8{recast.RC_WALKABLE_AREA}
-        
+
         ok = recast.rasterize_triangles(vertices, indices, areas, hf, 1)
         testing.expect(t, ok, "Tiny triangle rasterization should succeed")
     }
-    
+
     log.info("✓ Tiny triangles at various positions test passed")
 }
 
@@ -172,14 +172,14 @@ test_rasterize_tiny_triangles_various_positions :: proc(t: ^testing.T) {
 @(test)
 test_rasterize_large_triangle_spanning_cells :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-    
-    hf := recast.alloc_heightfield()
+
+    hf := new(recast.Heightfield)
     testing.expect(t, hf != nil, "Failed to allocate heightfield")
     defer recast.free_heightfield(hf)
-    
+
     ok := recast.create_heightfield(hf, 10, 10, {0,0,0}, {10,10,10}, 1.0, 0.5)
     testing.expect(t, ok, "Failed to create heightfield")
-    
+
     // Large triangle spanning many cells
     vertices := [][3]f32{
         {1, 1, 1},    // 0
@@ -188,10 +188,10 @@ test_rasterize_large_triangle_spanning_cells :: proc(t: ^testing.T) {
     }
     indices := []i32{0, 1, 2}
     areas := []u8{recast.RC_WALKABLE_AREA}
-    
+
     ok = recast.rasterize_triangles(vertices, indices, areas, hf, 1)
     testing.expect(t, ok, "Large triangle rasterization should succeed")
-    
+
     // Count affected cells
     affected_cells := 0
     for i in 0..<(hf.width * hf.height) {
@@ -199,25 +199,25 @@ test_rasterize_large_triangle_spanning_cells :: proc(t: ^testing.T) {
             affected_cells += 1
         }
     }
-    
+
     // Large triangle should affect multiple cells
     testing.expect(t, affected_cells > 10, "Large triangle should affect many cells")
     log.infof("Large triangle affected %d cells", affected_cells)
-    
+
     log.info("✓ Large triangle spanning cells test passed")
 }
 
 @(test)
 test_rasterize_triangle_partial_cell_coverage :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-    
-    hf := recast.alloc_heightfield()
+
+    hf := new(recast.Heightfield)
     testing.expect(t, hf != nil, "Failed to allocate heightfield")
     defer recast.free_heightfield(hf)
-    
+
     ok := recast.create_heightfield(hf, 10, 10, {0,0,0}, {10,10,10}, 1.0, 0.5)
     testing.expect(t, ok, "Failed to create heightfield")
-    
+
     // Triangle that partially covers several cells
     vertices := [][3]f32{
         {2.2, 1, 2.3},    // 0 - offset from cell centers
@@ -226,10 +226,10 @@ test_rasterize_triangle_partial_cell_coverage :: proc(t: ^testing.T) {
     }
     indices := []i32{0, 1, 2}
     areas := []u8{recast.RC_WALKABLE_AREA}
-    
+
     ok = recast.rasterize_triangles(vertices, indices, areas, hf, 1)
     testing.expect(t, ok, "Partial coverage triangle rasterization should succeed")
-    
+
     // Check that boundary cells are handled correctly
     affected_cells := 0
     for z in 2..=4 {
@@ -240,10 +240,10 @@ test_rasterize_triangle_partial_cell_coverage :: proc(t: ^testing.T) {
             }
         }
     }
-    
+
     testing.expect(t, affected_cells > 0, "Partial coverage should affect some cells")
     log.infof("Partial coverage triangle affected %d cells", affected_cells)
-    
+
     log.info("✓ Partial cell coverage triangle test passed")
 }
 
@@ -254,14 +254,14 @@ test_rasterize_triangle_partial_cell_coverage :: proc(t: ^testing.T) {
 @(test)
 test_rasterize_floating_point_precision :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-    
-    hf := recast.alloc_heightfield()
+
+    hf := new(recast.Heightfield)
     testing.expect(t, hf != nil, "Failed to allocate heightfield")
     defer recast.free_heightfield(hf)
-    
+
     ok := recast.create_heightfield(hf, 10, 10, {0,0,0}, {10,10,10}, 1.0, 0.5)
     testing.expect(t, ok, "Failed to create heightfield")
-    
+
     // Triangle with coordinates that might cause precision issues
     vertices := [][3]f32{
         {2.0000001, 1, 2.0000001},    // 0 - tiny offset from grid
@@ -270,10 +270,10 @@ test_rasterize_floating_point_precision :: proc(t: ^testing.T) {
     }
     indices := []i32{0, 1, 2}
     areas := []u8{recast.RC_WALKABLE_AREA}
-    
+
     ok = recast.rasterize_triangles(vertices, indices, areas, hf, 1)
     testing.expect(t, ok, "Precision edge case rasterization should succeed")
-    
+
     // Should produce consistent results despite precision issues
     affected_cells := 0
     for i in 0..<(hf.width * hf.height) {
@@ -282,26 +282,26 @@ test_rasterize_floating_point_precision :: proc(t: ^testing.T) {
         }
     }
     testing.expect(t, affected_cells > 0, "Precision edge case should still affect cells")
-    
+
     log.info("✓ Floating-point precision test passed")
 }
 
 @(test)
 test_rasterize_extreme_coordinates :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-    
+
     // Test with heightfield bounds that have extreme coordinates
-    hf := recast.alloc_heightfield()
+    hf := new(recast.Heightfield)
     testing.expect(t, hf != nil, "Failed to allocate heightfield")
     defer recast.free_heightfield(hf)
-    
+
     large_offset := f32(100000.0)
-    ok := recast.create_heightfield(hf, 10, 10, 
-                                   {large_offset, 0, large_offset}, 
-                                   {large_offset + 10, 10, large_offset + 10}, 
+    ok := recast.create_heightfield(hf, 10, 10,
+                                   {large_offset, 0, large_offset},
+                                   {large_offset + 10, 10, large_offset + 10},
                                    1.0, 0.5)
     testing.expect(t, ok, "Failed to create heightfield with extreme coordinates")
-    
+
     // Triangle within the extreme coordinate space
     vertices := [][3]f32{
         {large_offset + 2, 1, large_offset + 2},
@@ -310,15 +310,15 @@ test_rasterize_extreme_coordinates :: proc(t: ^testing.T) {
     }
     indices := []i32{0, 1, 2}
     areas := []u8{recast.RC_WALKABLE_AREA}
-    
+
     ok = recast.rasterize_triangles(vertices, indices, areas, hf, 1)
     testing.expect(t, ok, "Extreme coordinates rasterization should succeed")
-    
+
     // Check that the triangle was rasterized correctly
     center_column := 3 + 3 * hf.width
     span := hf.spans[center_column]
     testing.expect(t, span != nil, "Extreme coordinates triangle should create spans")
-    
+
     log.info("✓ Extreme coordinates test passed")
 }
 
@@ -329,26 +329,26 @@ test_rasterize_extreme_coordinates :: proc(t: ^testing.T) {
 @(test)
 test_rasterize_sloped_triangles :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-    
-    hf := recast.alloc_heightfield()
+
+    hf := new(recast.Heightfield)
     testing.expect(t, hf != nil, "Failed to allocate heightfield")
     defer recast.free_heightfield(hf)
-    
+
     ok := recast.create_heightfield(hf, 10, 10, {0,0,0}, {10,10,10}, 1.0, 0.2)
     testing.expect(t, ok, "Failed to create heightfield")
-    
+
     // Sloped triangle with height variation
     vertices := [][3]f32{
         {2, 1, 2},    // 0 - low
-        {4, 3, 2},    // 1 - high  
+        {4, 3, 2},    // 1 - high
         {3, 2, 4},    // 2 - medium
     }
     indices := []i32{0, 1, 2}
     areas := []u8{recast.RC_WALKABLE_AREA}
-    
+
     ok = recast.rasterize_triangles(vertices, indices, areas, hf, 1)
     testing.expect(t, ok, "Sloped triangle rasterization should succeed")
-    
+
     // Check that spans were created with appropriate heights
     affected_spans := 0
     height_sum := f32(0)
@@ -360,25 +360,25 @@ test_rasterize_sloped_triangles :: proc(t: ^testing.T) {
             height_sum += span_height
         }
     }
-    
+
     testing.expect(t, affected_spans > 0, "Sloped triangle should create spans")
     avg_span_height := height_sum / f32(affected_spans)
     log.infof("Sloped triangle: %d spans, average height: %.2f", affected_spans, avg_span_height)
-    
+
     log.info("✓ Sloped triangle rasterization test passed")
 }
 
 @(test)
 test_rasterize_vertical_triangles :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-    
-    hf := recast.alloc_heightfield()
+
+    hf := new(recast.Heightfield)
     testing.expect(t, hf != nil, "Failed to allocate heightfield")
     defer recast.free_heightfield(hf)
-    
+
     ok := recast.create_heightfield(hf, 10, 10, {0,0,0}, {10,10,10}, 1.0, 0.5)
     testing.expect(t, ok, "Failed to create heightfield")
-    
+
     // Vertical triangle (wall)
     vertices := [][3]f32{
         {3, 0, 3},    // 0 - bottom
@@ -387,10 +387,10 @@ test_rasterize_vertical_triangles :: proc(t: ^testing.T) {
     }
     indices := []i32{0, 1, 2}
     areas := []u8{recast.RC_WALKABLE_AREA}
-    
+
     ok = recast.rasterize_triangles(vertices, indices, areas, hf, 1)
     testing.expect(t, ok, "Vertical triangle rasterization should succeed")
-    
+
     // Vertical triangles might not create spans in XZ plane
     // but should not crash the system
     log.info("✓ Vertical triangle rasterization test passed")
@@ -403,44 +403,44 @@ test_rasterize_vertical_triangles :: proc(t: ^testing.T) {
 @(test)
 test_rasterize_many_tiny_triangles :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 60 * time.Second) // Longer timeout for stress test
-    
-    hf := recast.alloc_heightfield()
+
+    hf := new(recast.Heightfield)
     testing.expect(t, hf != nil, "Failed to allocate heightfield")
     defer recast.free_heightfield(hf)
-    
+
     ok := recast.create_heightfield(hf, 20, 20, {0,0,0}, {20,20,20}, 1.0, 0.2)
     testing.expect(t, ok, "Failed to create heightfield")
-    
+
     // Generate many small triangles
     triangle_count := 100
     vertices := make([][3]f32, triangle_count * 3)
     indices := make([]i32, triangle_count * 3)
     areas := make([]u8, triangle_count)
-    
+
     defer delete(vertices)
     defer delete(indices)
     defer delete(areas)
-    
+
     triangle_size := f32(0.2)
     for i in 0..<triangle_count {
         base_x := f32(i % 18) + 1.0
         base_z := f32(i / 18) + 1.0
-        
+
         base_idx := i * 3
         vertices[base_idx + 0] = {base_x, 1, base_z}
         vertices[base_idx + 1] = {base_x + triangle_size, 1, base_z}
         vertices[base_idx + 2] = {base_x + triangle_size/2, 1, base_z + triangle_size}
-        
+
         indices[base_idx + 0] = i32(base_idx + 0)
         indices[base_idx + 1] = i32(base_idx + 1)
         indices[base_idx + 2] = i32(base_idx + 2)
-        
+
         areas[i] = recast.RC_WALKABLE_AREA
     }
-    
+
     ok = recast.rasterize_triangles(vertices, indices, areas, hf, 1)
     testing.expect(t, ok, "Many tiny triangles rasterization should succeed")
-    
+
     // Count total spans created
     total_spans := 0
     for i in 0..<(hf.width * hf.height) {
@@ -448,7 +448,7 @@ test_rasterize_many_tiny_triangles :: proc(t: ^testing.T) {
             total_spans += 1
         }
     }
-    
+
     testing.expect(t, total_spans > 0, "Many tiny triangles should create spans")
     log.infof("✓ Many tiny triangles stress test passed: %d spans created", total_spans)
 }
@@ -457,43 +457,43 @@ test_rasterize_many_tiny_triangles :: proc(t: ^testing.T) {
 @(test)
 test_triangle_rasterization_accuracy :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-    
+
     // Test rasterization of a specific triangle with known coverage
-    // Triangle vertices: (1,0,1), (3,0,1), (2,0,3) 
+    // Triangle vertices: (1,0,1), (3,0,1), (2,0,3)
     // This creates a triangle that should cover specific cells
-    
+
     verts := [][3]f32{
         {1, 0, 1},  // Vertex 0
-        {3, 0, 1},  // Vertex 1 
+        {3, 0, 1},  // Vertex 1
         {2, 0, 3},  // Vertex 2
     }
-    
+
     tris := []i32{0, 1, 2}
     areas := []u8{recast.RC_WALKABLE_AREA}
-    
+
     // Create heightfield
-    hf := recast.alloc_heightfield()
+    hf := new(recast.Heightfield)
     testing.expect(t, hf != nil, "Failed to allocate heightfield")
     defer recast.free_heightfield(hf)
-    
+
     ok := recast.create_heightfield(hf, 5, 5, {0,0,0}, {5,0,5}, 1.0, 0.2)
     testing.expect(t, ok, "Failed to create heightfield")
-    
+
     // Rasterize the triangle
     ok = recast.rasterize_triangles(verts, tris, areas, hf, 1)
     testing.expect(t, ok, "Failed to rasterize triangle")
-    
+
     // Validate specific cells that should be covered by the triangle
     // The triangle should cover cells at grid positions based on its geometry
-    
+
     check_cell_coverage :: proc(hf: ^recast.Heightfield, x, z: i32, should_be_covered: bool, test_name: string) -> bool {
         if x < 0 || x >= hf.width || z < 0 || z >= hf.height {
             return false
         }
-        
+
         spans := hf.spans[x + z * hf.width]
         has_span := spans != nil
-        
+
         if should_be_covered && !has_span {
             log.errorf("Cell (%d,%d) should be covered but has no spans - %s", x, z, test_name)
             return false
@@ -502,24 +502,24 @@ test_triangle_rasterization_accuracy :: proc(t: ^testing.T) {
             log.errorf("Cell (%d,%d) should not be covered but has spans - %s", x, z, test_name)
             return false
         }
-        
+
         return true
     }
-    
+
     // Test specific cells based on triangle geometry
     // Center of triangle should definitely be covered
     all_correct := true
     all_correct &= check_cell_coverage(hf, 2, 2, true, "triangle center")
-    
+
     // Cells clearly outside triangle should not be covered
     all_correct &= check_cell_coverage(hf, 0, 0, false, "outside triangle")
     all_correct &= check_cell_coverage(hf, 4, 4, false, "outside triangle")
-    
+
     // Note: Edge cells (1,1) and (3,1) are not tested as they depend on the specific
     // rasterization algorithm and tie-breaking rules, which can vary between implementations
-    
+
     testing.expect(t, all_correct, "Triangle rasterization should match basic geometric expectations")
-    
+
     // Count total covered cells and validate reasonable coverage
     covered_cells := 0
     for x in 0..<hf.width {
@@ -530,10 +530,10 @@ test_triangle_rasterization_accuracy :: proc(t: ^testing.T) {
             }
         }
     }
-    
+
     // Triangle should cover a reasonable number of cells (not 0, not all)
-    testing.expect(t, covered_cells >= 3 && covered_cells <= 12, 
+    testing.expect(t, covered_cells >= 3 && covered_cells <= 12,
                   "Triangle should cover reasonable number of cells (3-12)")
-    
+
     log.infof("Triangle rasterization - Covered %d cells in 5x5 grid", covered_cells)
 }

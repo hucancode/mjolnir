@@ -14,7 +14,7 @@ test_contour_generation_simple :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
 
     // Create a simple 5x5 heightfield with one region
-    chf := recast.alloc_compact_heightfield()
+    chf := new(recast.Compact_Heightfield)
     defer recast.free_compact_heightfield(chf)
 
     chf.width = 5
@@ -90,7 +90,7 @@ test_contour_generation_multiple_regions :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
 
     // Create a 10x10 heightfield with two separate regions
-    chf := recast.alloc_compact_heightfield()
+    chf := new(recast.Compact_Heightfield)
     defer recast.free_compact_heightfield(chf)
 
     chf.width = 10

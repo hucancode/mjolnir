@@ -19,7 +19,7 @@ test_heightfield_with_central_obstacle :: proc(t: ^testing.T) {
     bmax := [3]f32{f32(field_size), 10, f32(field_size)}
 
     // Create heightfield
-    hf := recast.alloc_heightfield()
+    hf := new(recast.Heightfield)
     testing.expect(t, hf != nil, "Heightfield allocation should succeed")
     defer recast.free_heightfield(hf)
 
@@ -141,7 +141,7 @@ test_heightfield_elevation_profile :: proc(t: ^testing.T) {
     bmin := [3]f32{0, 0, 0}
     bmax := [3]f32{f32(field_size), 10, f32(field_size)}
 
-    hf := recast.alloc_heightfield()
+    hf := new(recast.Heightfield)
     testing.expect(t, hf != nil, "Heightfield allocation should succeed")
     defer recast.free_heightfield(hf)
 
@@ -217,7 +217,7 @@ test_heightfield_sharp_elevation_changes :: proc(t: ^testing.T) {
     bmin := [3]f32{0, 0, 0}
     bmax := [3]f32{f32(field_size) * cell_size, 10, f32(field_size) * cell_size}
 
-    hf := recast.alloc_heightfield()
+    hf := new(recast.Heightfield)
     testing.expect(t, hf != nil, "Heightfield allocation should succeed")
     defer recast.free_heightfield(hf)
 

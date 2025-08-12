@@ -55,7 +55,7 @@ test_complete_navmesh_generation_simple :: proc(t: ^testing.T) {
     cfg.width, cfg.height = recast.calc_grid_size(cfg.bmin, cfg.bmax, cfg.cs)
 
     // Create heightfield
-    hf := recast.alloc_heightfield()
+    hf := new(recast.Heightfield)
     testing.expect(t, hf != nil, "Failed to allocate heightfield")
     defer recast.free_heightfield(hf)
 
@@ -72,7 +72,7 @@ test_complete_navmesh_generation_simple :: proc(t: ^testing.T) {
     recast.filter_walkable_low_height_spans(int(cfg.walkable_height), hf)
 
     // Build compact heightfield
-    chf := recast.alloc_compact_heightfield()
+    chf := new(recast.Compact_Heightfield)
     defer recast.free_compact_heightfield(chf)
 
     ok = recast.build_compact_heightfield(cfg.walkable_height, cfg.walkable_climb, hf, chf)
@@ -231,7 +231,7 @@ test_navmesh_with_obstacles :: proc(t: ^testing.T) {
     cfg.width, cfg.height = recast.calc_grid_size(cfg.bmin, cfg.bmax, cfg.cs)
 
     // Create heightfield
-    hf := recast.alloc_heightfield()
+    hf := new(recast.Heightfield)
     testing.expect(t, hf != nil, "Failed to allocate heightfield")
     defer recast.free_heightfield(hf)
 
@@ -248,7 +248,7 @@ test_navmesh_with_obstacles :: proc(t: ^testing.T) {
     recast.filter_walkable_low_height_spans(int(cfg.walkable_height), hf)
 
     // Build compact heightfield
-    chf := recast.alloc_compact_heightfield()
+    chf := new(recast.Compact_Heightfield)
     defer recast.free_compact_heightfield(chf)
 
     ok = recast.build_compact_heightfield(cfg.walkable_height, cfg.walkable_climb, hf, chf)
@@ -407,7 +407,7 @@ test_navmesh_with_slopes :: proc(t: ^testing.T) {
     cfg.width, cfg.height = recast.calc_grid_size(cfg.bmin, cfg.bmax, cfg.cs)
 
     // Create heightfield
-    hf := recast.alloc_heightfield()
+    hf := new(recast.Heightfield)
     testing.expect(t, hf != nil, "Failed to allocate heightfield")
     defer recast.free_heightfield(hf)
 
@@ -424,7 +424,7 @@ test_navmesh_with_slopes :: proc(t: ^testing.T) {
     recast.filter_walkable_low_height_spans(int(cfg.walkable_height), hf)
 
     // Build compact heightfield
-    chf := recast.alloc_compact_heightfield()
+    chf := new(recast.Compact_Heightfield)
     defer recast.free_compact_heightfield(chf)
 
     ok = recast.build_compact_heightfield(cfg.walkable_height, cfg.walkable_climb, hf, chf)
@@ -473,7 +473,7 @@ test_navmesh_area_marking :: proc(t: ^testing.T) {
     cfg.width, cfg.height = recast.calc_grid_size(cfg.bmin, cfg.bmax, cfg.cs)
 
     // Create and build heightfield
-    hf := recast.alloc_heightfield()
+    hf := new(recast.Heightfield)
     testing.expect(t, hf != nil, "Failed to allocate heightfield")
     defer recast.free_heightfield(hf)
 
@@ -484,7 +484,7 @@ test_navmesh_area_marking :: proc(t: ^testing.T) {
     testing.expect(t, ok, "Failed to rasterize triangles")
 
     // Build compact heightfield
-    chf := recast.alloc_compact_heightfield()
+    chf := new(recast.Compact_Heightfield)
     defer recast.free_compact_heightfield(chf)
 
     ok = recast.build_compact_heightfield(cfg.walkable_height, cfg.walkable_climb, hf, chf)
@@ -590,7 +590,7 @@ test_navmesh_performance :: proc(t: ^testing.T) {
               vert_count, tri_count, cfg.width, cfg.height)
 
     // Create heightfield
-    hf := recast.alloc_heightfield()
+    hf := new(recast.Heightfield)
     testing.expect(t, hf != nil, "Failed to allocate heightfield")
     defer recast.free_heightfield(hf)
 
@@ -607,7 +607,7 @@ test_navmesh_performance :: proc(t: ^testing.T) {
     recast.filter_walkable_low_height_spans(int(cfg.walkable_height), hf)
 
     // Build compact heightfield
-    chf := recast.alloc_compact_heightfield()
+    chf := new(recast.Compact_Heightfield)
     defer recast.free_compact_heightfield(chf)
 
     ok = recast.build_compact_heightfield(cfg.walkable_height, cfg.walkable_climb, hf, chf)

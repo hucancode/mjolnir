@@ -1,6 +1,7 @@
 package navigation_recast
 
 import "core:math"
+import "core:math/linalg"
 import geometry "../../geometry"
 
 // Calculate bounds from vertices
@@ -8,19 +9,12 @@ calc_bounds :: proc(verts: [][3]f32) -> (bmin, bmax: [3]f32) {
     if len(verts) == 0 {
         return
     }
-
     bmin = verts[0]
     bmax = bmin
-
     for v in verts[1:] {
-        bmin.x = min(bmin.x, v.x)
-        bmin.y = min(bmin.y, v.y)
-        bmin.z = min(bmin.z, v.z)
-        bmax.x = max(bmax.x, v.x)
-        bmax.y = max(bmax.y, v.y)
-        bmax.z = max(bmax.z, v.z)
+        bmin = linalg.min(bmin, v)
+        bmax = linalg.max(bmax, v)
     }
-
     return
 }
 

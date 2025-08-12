@@ -37,7 +37,7 @@ test_simple_detail_mesh_build :: proc(t: ^testing.T) {
     pmesh := recast.alloc_poly_mesh()
     defer recast.free_poly_mesh(pmesh)
 
-    chf := recast.alloc_compact_heightfield()
+    chf := new(recast.Compact_Heightfield)
     defer recast.free_compact_heightfield(chf)
 
     dmesh := recast.alloc_poly_mesh_detail()
