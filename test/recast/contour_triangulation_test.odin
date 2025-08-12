@@ -6,7 +6,7 @@ import "core:time"
 import "core:math"
 import "core:fmt"
 import "core:strings"
-import nav_recast "../../mjolnir/navigation/recast"
+import recast "../../mjolnir/navigation/recast"
 
 // Test contour generation with simple heightfield
 @(test)
@@ -14,8 +14,8 @@ test_contour_generation_simple :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
 
     // Create a simple 5x5 heightfield with one region
-    chf := nav_recast.alloc_compact_heightfield()
-    defer nav_recast.free_compact_heightfield(chf)
+    chf := recast.alloc_compact_heightfield()
+    defer recast.free_compact_heightfield(chf)
 
     chf.width = 5
     chf.height = 5
@@ -26,8 +26,8 @@ test_contour_generation_simple :: proc(t: ^testing.T) {
     chf.bmax = {1.5, 1.0, 1.5}
 
     // Allocate cells and spans
-    chf.cells = make([]nav_recast.Compact_Cell, 25)
-    chf.spans = make([]nav_recast.Compact_Span, 25)
+    chf.cells = make([]recast.Compact_Cell, 25)
+    chf.spans = make([]recast.Compact_Span, 25)
     chf.areas = make([]u8, 25)
 
     // Create a simple square region in the center (3x3)
@@ -41,10 +41,10 @@ test_contour_generation_simple :: proc(t: ^testing.T) {
             // Set region for center 3x3 area
             if x >= 1 && x <= 3 && y >= 1 && y <= 3 {
                 chf.spans[span_idx].reg = 1
-                chf.areas[span_idx] = nav_recast.RC_WALKABLE_AREA
+                chf.areas[span_idx] = recast.RC_WALKABLE_AREA
             } else {
                 chf.spans[span_idx].reg = 0
-                chf.areas[span_idx] = nav_recast.RC_NULL_AREA
+                chf.areas[span_idx] = recast.RC_NULL_AREA
             }
 
             chf.spans[span_idx].y = 10
@@ -52,13 +52,13 @@ test_contour_generation_simple :: proc(t: ^testing.T) {
 
             // Set connections (4-connected)
             for dir in 0..<4 {
-                nx := x + int(nav_recast.get_dir_offset_x(dir))
-                ny := y + int(nav_recast.get_dir_offset_y(dir))
+                nx := x + int(recast.get_dir_offset_x(dir))
+                ny := y + int(recast.get_dir_offset_y(dir))
 
                 if nx >= 0 && nx < 5 && ny >= 0 && ny < 5 {
-                    nav_recast.set_con(&chf.spans[span_idx], dir, 0)
+                    recast.set_con(&chf.spans[span_idx], dir, 0)
                 } else {
-                    nav_recast.set_con(&chf.spans[span_idx], dir, nav_recast.RC_NOT_CONNECTED)
+                    recast.set_con(&chf.spans[span_idx], dir, recast.RC_NOT_CONNECTED)
                 }
             }
 
@@ -67,10 +67,10 @@ test_contour_generation_simple :: proc(t: ^testing.T) {
     }
 
     // Build contours
-    cset := nav_recast.alloc_contour_set()
-    defer nav_recast.free_contour_set(cset)
+    cset := recast.alloc_contour_set()
+    defer recast.free_contour_set(cset)
 
-    result := nav_recast.build_contours(chf, 1.0, 10, cset)
+    result := recast.build_contours(chf, 1.0, 10, cset)
     testing.expect(t, result, "Contour building should succeed")
     testing.expect(t, len(cset.conts) == 1, "Should have exactly one contour for the square region")
 
@@ -78,7 +78,7 @@ test_contour_generation_simple :: proc(t: ^testing.T) {
         cont := &cset.conts[0]
         testing.expect(t, len(cont.verts) >= 4, "Square contour should have at least 4 vertices")
         testing.expect(t, cont.reg == 1, "Contour should have correct region ID")
-        testing.expect(t, cont.area == nav_recast.RC_WALKABLE_AREA, "Contour should have walkable area")
+        testing.expect(t, cont.area == recast.RC_WALKABLE_AREA, "Contour should have walkable area")
 
         log.infof("Generated contour with %d vertices for region %d", len(cont.verts), cont.reg)
     }
@@ -90,8 +90,8 @@ test_contour_generation_multiple_regions :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
 
     // Create a 10x10 heightfield with two separate regions
-    chf := nav_recast.alloc_compact_heightfield()
-    defer nav_recast.free_compact_heightfield(chf)
+    chf := recast.alloc_compact_heightfield()
+    defer recast.free_compact_heightfield(chf)
 
     chf.width = 10
     chf.height = 10
@@ -102,8 +102,8 @@ test_contour_generation_multiple_regions :: proc(t: ^testing.T) {
     chf.bmax = {3.0, 1.0, 3.0}
 
     // Allocate cells and spans
-    chf.cells = make([]nav_recast.Compact_Cell, 100)
-    chf.spans = make([]nav_recast.Compact_Span, 100)
+    chf.cells = make([]recast.Compact_Cell, 100)
+    chf.spans = make([]recast.Compact_Span, 100)
     chf.areas = make([]u8, 100)
 
     // Create two separate square regions
@@ -117,14 +117,14 @@ test_contour_generation_multiple_regions :: proc(t: ^testing.T) {
             if x >= 1 && x <= 3 && y >= 1 && y <= 3 {
                 // Region 1: top-left 3x3
                 chf.spans[span_idx].reg = 1
-                chf.areas[span_idx] = nav_recast.RC_WALKABLE_AREA
+                chf.areas[span_idx] = recast.RC_WALKABLE_AREA
             } else if x >= 6 && x <= 8 && y >= 6 && y <= 8 {
                 // Region 2: bottom-right 3x3
                 chf.spans[span_idx].reg = 2
-                chf.areas[span_idx] = nav_recast.RC_WALKABLE_AREA
+                chf.areas[span_idx] = recast.RC_WALKABLE_AREA
             } else {
                 chf.spans[span_idx].reg = 0
-                chf.areas[span_idx] = nav_recast.RC_NULL_AREA
+                chf.areas[span_idx] = recast.RC_NULL_AREA
             }
 
             chf.spans[span_idx].y = 10
@@ -132,13 +132,13 @@ test_contour_generation_multiple_regions :: proc(t: ^testing.T) {
 
             // Set connections
             for dir in 0..<4 {
-                nx := x + int(nav_recast.get_dir_offset_x(dir))
-                ny := y + int(nav_recast.get_dir_offset_y(dir))
+                nx := x + int(recast.get_dir_offset_x(dir))
+                ny := y + int(recast.get_dir_offset_y(dir))
 
                 if nx >= 0 && nx < 10 && ny >= 0 && ny < 10 {
-                    nav_recast.set_con(&chf.spans[span_idx], dir, 0)
+                    recast.set_con(&chf.spans[span_idx], dir, 0)
                 } else {
-                    nav_recast.set_con(&chf.spans[span_idx], dir, nav_recast.RC_NOT_CONNECTED)
+                    recast.set_con(&chf.spans[span_idx], dir, recast.RC_NOT_CONNECTED)
                 }
             }
 
@@ -147,10 +147,10 @@ test_contour_generation_multiple_regions :: proc(t: ^testing.T) {
     }
 
     // Build contours
-    cset := nav_recast.alloc_contour_set()
-    defer nav_recast.free_contour_set(cset)
+    cset := recast.alloc_contour_set()
+    defer recast.free_contour_set(cset)
 
-    result := nav_recast.build_contours(chf, 1.0, 10, cset)
+    result := recast.build_contours(chf, 1.0, 10, cset)
     testing.expect(t, result, "Contour building should succeed")
     testing.expect(t, len(cset.conts) == 2, "Should have exactly two contours for two regions")
 
@@ -196,7 +196,7 @@ test_triangulation_complex_polygon :: proc(t: ^testing.T) {
     triangles := make([dynamic]i32)
     defer delete(triangles)
 
-    result := nav_recast.triangulate_polygon_u16(verts, indices, &triangles)
+    result := recast.triangulate_polygon_u16(verts, indices, &triangles)
     testing.expect(t, result, "Octagon triangulation should succeed")
     testing.expect(t, len(triangles) == 18, "Octagon should produce 6 triangles (18 indices)")
 
@@ -224,7 +224,7 @@ test_triangulation_edge_cases :: proc(t: ^testing.T) {
         triangles := make([dynamic]i32)
         defer delete(triangles)
 
-        result := nav_recast.triangulate_polygon_u16(verts, indices, &triangles)
+        result := recast.triangulate_polygon_u16(verts, indices, &triangles)
         testing.expect(t, result, "Triangle triangulation should succeed")
         testing.expect(t, len(triangles) == 3, "Triangle should produce 1 triangle (3 indices)")
     }
@@ -236,7 +236,7 @@ test_triangulation_edge_cases :: proc(t: ^testing.T) {
         triangles := make([dynamic]i32)
         defer delete(triangles)
 
-        result := nav_recast.triangulate_polygon_u16(verts[:], indices, &triangles)
+        result := recast.triangulate_polygon_u16(verts[:], indices, &triangles)
         testing.expect(t, !result, "Triangulation with 2 vertices should fail")
     }
 
@@ -247,7 +247,7 @@ test_triangulation_edge_cases :: proc(t: ^testing.T) {
         triangles := make([dynamic]i32)
         defer delete(triangles)
 
-        result := nav_recast.triangulate_polygon_u16(verts[:], indices, &triangles)
+        result := recast.triangulate_polygon_u16(verts[:], indices, &triangles)
         // Should either succeed with some triangulation or fail gracefully
         if result {
             testing.expect(t, len(triangles) > 0, "If successful, should produce triangles")
@@ -293,7 +293,7 @@ test_contour_simplification :: proc(t: ^testing.T) {
 
     // Simplify with reasonable error tolerance
     // max_error = 1.0, cell_size is not used here (pass 1.0), max_edge_len = 0 to disable edge splitting
-    nav_recast.simplify_contour(raw_verts[:], &simplified, 1.0, 1.0, 0)
+    recast.simplify_contour(raw_verts[:], &simplified, 1.0, 1.0, 0)
 
     // Should have fewer vertices after simplification - collinear points should be removed
     // NOTE: The algorithm may not simplify if the tolerance is too strict
@@ -314,12 +314,12 @@ test_simple_square_mesh :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
 
     // Create a contour set with a simple square
-    cset := nav_recast.alloc_contour_set()
-    defer nav_recast.free_contour_set(cset)
+    cset := recast.alloc_contour_set()
+    defer recast.free_contour_set(cset)
 
     // Set up contours with append instead
-    cset.conts = make([dynamic]nav_recast.Contour, 0)
-    append(&cset.conts, nav_recast.Contour{})
+    cset.conts = make([dynamic]recast.Contour, 0)
+    append(&cset.conts, recast.Contour{})
     cset.bmin = {0, 0, 0}
     cset.bmax = {30, 10, 30}
     cset.cs = 0.3
@@ -328,7 +328,7 @@ test_simple_square_mesh :: proc(t: ^testing.T) {
     // Create square contour
     cont := &cset.conts[0]
     cont.verts = make([][4]i32, 4)  // 4 vertices
-    cont.area = nav_recast.RC_WALKABLE_AREA
+    cont.area = recast.RC_WALKABLE_AREA
     cont.reg = 1
 
     // Define square vertices (counter-clockwise for Recast)
@@ -338,10 +338,10 @@ test_simple_square_mesh :: proc(t: ^testing.T) {
     cont.verts[3] = {10, 5, 0, 0}     // Bottom-right
 
     // Build polygon mesh
-    pmesh := nav_recast.alloc_poly_mesh()
-    defer nav_recast.free_poly_mesh(pmesh)
+    pmesh := recast.alloc_poly_mesh()
+    defer recast.free_poly_mesh(pmesh)
 
-    result := nav_recast.build_poly_mesh(cset, 6, pmesh)
+    result := recast.build_poly_mesh(cset, 6, pmesh)
     testing.expect(t, result, "Mesh building from square contour should succeed")
     testing.expect(t, len(pmesh.verts) == 4, "Square should have exactly 4 vertices")
     testing.expect(t, pmesh.npolys >= 1, "Square should have at least 1 polygon")
@@ -356,12 +356,12 @@ test_simple_l_shape_mesh :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
 
     // Create a contour set with a simple L-shape
-    cset := nav_recast.alloc_contour_set()
-    defer nav_recast.free_contour_set(cset)
+    cset := recast.alloc_contour_set()
+    defer recast.free_contour_set(cset)
 
     // Set up contours with append instead
-    cset.conts = make([dynamic]nav_recast.Contour, 0)
-    append(&cset.conts, nav_recast.Contour{})
+    cset.conts = make([dynamic]recast.Contour, 0)
+    append(&cset.conts, recast.Contour{})
     cset.bmin = {0, 0, 0}
     cset.bmax = {30, 10, 30}
     cset.cs = 1.0
@@ -370,7 +370,7 @@ test_simple_l_shape_mesh :: proc(t: ^testing.T) {
     // Create L-shaped contour
     cont := &cset.conts[0]
     cont.verts = make([][4]i32, 6)  // 6 vertices
-    cont.area = nav_recast.RC_WALKABLE_AREA
+    cont.area = recast.RC_WALKABLE_AREA
     cont.reg = 1
 
     // Define L-shape vertices (counter-clockwise) - using integer coordinates
@@ -390,10 +390,10 @@ test_simple_l_shape_mesh :: proc(t: ^testing.T) {
     }
 
     // Build polygon mesh
-    pmesh := nav_recast.alloc_poly_mesh()
-    defer nav_recast.free_poly_mesh(pmesh)
+    pmesh := recast.alloc_poly_mesh()
+    defer recast.free_poly_mesh(pmesh)
 
-    result := nav_recast.build_poly_mesh(cset, 6, pmesh)
+    result := recast.build_poly_mesh(cset, 6, pmesh)
     testing.expect(t, result, "Mesh building from L-shaped contour should succeed")
     testing.expect(t, len(pmesh.verts) == 6, "L-shape should have exactly 6 vertices")
     testing.expect(t, pmesh.npolys >= 2, "L-shape should have at least 2 polygons")
@@ -408,12 +408,12 @@ test_contour_to_mesh_pipeline :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
 
     // Create a contour set with an L-shaped region
-    cset := nav_recast.alloc_contour_set()
-    defer nav_recast.free_contour_set(cset)
+    cset := recast.alloc_contour_set()
+    defer recast.free_contour_set(cset)
 
     // Set up contours with append instead
-    cset.conts = make([dynamic]nav_recast.Contour, 0)
-    append(&cset.conts, nav_recast.Contour{})
+    cset.conts = make([dynamic]recast.Contour, 0)
+    append(&cset.conts, recast.Contour{})
     cset.bmin = {0, 0, 0}
     cset.bmax = {30, 10, 30}
     cset.cs = 0.3
@@ -422,7 +422,7 @@ test_contour_to_mesh_pipeline :: proc(t: ^testing.T) {
     // Create L-shaped contour
     cont := &cset.conts[0]
     cont.verts = make([][4]i32, 6)  // 6 vertices
-    cont.area = nav_recast.RC_WALKABLE_AREA
+    cont.area = recast.RC_WALKABLE_AREA
     cont.reg = 1
 
     // Define L-shape vertices (counter-clockwise)
@@ -441,10 +441,10 @@ test_contour_to_mesh_pipeline :: proc(t: ^testing.T) {
     }
 
     // Build polygon mesh
-    pmesh := nav_recast.alloc_poly_mesh()
-    defer nav_recast.free_poly_mesh(pmesh)
+    pmesh := recast.alloc_poly_mesh()
+    defer recast.free_poly_mesh(pmesh)
 
-    result := nav_recast.build_poly_mesh(cset, 6, pmesh)
+    result := recast.build_poly_mesh(cset, 6, pmesh)
     testing.expect(t, result, "Mesh building from L-shaped contour should succeed")
     testing.expect(t, len(pmesh.verts) >= 6, "Should have at least 6 vertices")
     testing.expect(t, pmesh.npolys >= 1, "Should have at least 1 polygon")
@@ -467,10 +467,10 @@ test_contour_to_mesh_pipeline :: proc(t: ^testing.T) {
         verts_str_builder: strings.Builder
         strings.builder_init(&verts_str_builder)
         defer strings.builder_destroy(&verts_str_builder)
-        
+
         strings.write_string(&verts_str_builder, "    vertices: ")
         for j in 0..<pmesh.nvp {
-            if pmesh.polys[poly_idx + int(j)] != nav_recast.RC_MESH_NULL_IDX {
+            if pmesh.polys[poly_idx + int(j)] != recast.RC_MESH_NULL_IDX {
                 fmt.sbprintf(&verts_str_builder, "%d ", pmesh.polys[poly_idx + int(j)])
                 vert_count += 1
             }
@@ -482,7 +482,7 @@ test_contour_to_mesh_pipeline :: proc(t: ^testing.T) {
     }
 
     // Validate the mesh
-    testing.expect(t, nav_recast.validate_poly_mesh(pmesh), "Generated mesh should be valid")
+    testing.expect(t, recast.validate_poly_mesh(pmesh), "Generated mesh should be valid")
 
     // Check that polygons cover the L-shape properly
     total_poly_verts := 0
@@ -492,7 +492,7 @@ test_contour_to_mesh_pipeline :: proc(t: ^testing.T) {
     for i in 0..<pmesh.npolys {
         poly_idx := int(i) * int(pmesh.nvp) * 2
         for j in 0..<pmesh.nvp {
-            if pmesh.polys[poly_idx + int(j)] != nav_recast.RC_MESH_NULL_IDX {
+            if pmesh.polys[poly_idx + int(j)] != recast.RC_MESH_NULL_IDX {
                 total_poly_verts += 1
                 unique_verts[pmesh.polys[poly_idx + int(j)]] = true
             }

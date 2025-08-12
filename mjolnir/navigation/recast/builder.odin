@@ -696,7 +696,7 @@ walk_contour_boundary :: proc(x, y, i: i32, chf: ^Compact_Heightfield,
                 // Should not happen in valid heightfield - matches C++ behavior
                 return false
             }
-            
+
             // Bounds check the new index
             if ni < 0 || ni >= i32(chf.span_count) {
                 log.errorf("walk_contour_boundary: ni %d out of bounds [0, %d)", ni, chf.span_count)
@@ -1101,19 +1101,19 @@ remove_degenerate_contour_segments :: proc(simplified: ^[dynamic][4]i32) {
     if len(simplified) <= 1 {
         return
     }
-    
+
     // Use two-pointer technique to remove vertices with same xz coordinates
     write_idx := 0
     for read_idx in 0..<len(simplified) {
         next_idx := (read_idx + 1) % len(simplified)
         // Keep vertex if it differs from next in xz-plane
-        if simplified[read_idx][0] != simplified[next_idx][0] || 
+        if simplified[read_idx][0] != simplified[next_idx][0] ||
            simplified[read_idx][2] != simplified[next_idx][2] {
             simplified[write_idx] = simplified[read_idx]
             write_idx += 1
         }
     }
-    
+
     resize(simplified, write_idx)
 }
 
@@ -1192,20 +1192,11 @@ alloc_contour_set :: proc() -> ^Contour_Set {
 // Free contour set
 free_contour_set :: proc(cset: ^Contour_Set) {
     if cset == nil do return
-    for i in 0..<len(cset.conts) {
-        cont := &cset.conts[i]
-        if cont.verts != nil {
-            delete(cont.verts)
-        }
-        if cont.rverts != nil {
-            delete(cont.rverts)
-        }
+    for cont in cset.conts {
+        delete(cont.verts)
+        delete(cont.rverts)
     }
-
-    if cset.conts != nil {
-        delete(cset.conts)
-    }
-
+    delete(cset.conts)
     free(cset)
 }
 

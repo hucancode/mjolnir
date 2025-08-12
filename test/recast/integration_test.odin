@@ -1,13 +1,12 @@
 package test_recast
 
-import nav_recast "../../mjolnir/navigation/recast"  
 import recast "../../mjolnir/navigation/recast"
 import "core:testing"
 import "core:log"
 
 // Helper to create test configuration
-create_test_config :: proc(cs, ch: f32) -> nav_recast.Config {
-    cfg := nav_recast.Config{}
+create_test_config :: proc(cs, ch: f32) -> recast.Config {
+    cfg := recast.Config{}
     cfg.cs = cs
     cfg.ch = ch
     cfg.walkable_slope_angle = 45.0
@@ -42,8 +41,8 @@ test_complete_navmesh_generation_simple :: proc(t: ^testing.T) {
     }
 
     areas := []u8{
-        nav_recast.RC_WALKABLE_AREA,
-        nav_recast.RC_WALKABLE_AREA,
+        recast.RC_WALKABLE_AREA,
+        recast.RC_WALKABLE_AREA,
     }
 
     // Create config
@@ -113,36 +112,36 @@ test_complete_navmesh_generation_simple :: proc(t: ^testing.T) {
             }
         }
     }
-    testing.expect(t, total_rasterized_cells > 0, 
+    testing.expect(t, total_rasterized_cells > 0,
                   "Heightfield should contain rasterized geometry")
-    
+
     // 2. Validate compact heightfield preserved walkable spans
     walkable_spans := 0
     for i in 0..<chf.span_count {
-        if chf.areas[i] == nav_recast.RC_WALKABLE_AREA {
+        if chf.areas[i] == recast.RC_WALKABLE_AREA {
             walkable_spans += 1
         }
     }
-    testing.expect(t, walkable_spans > 0, 
+    testing.expect(t, walkable_spans > 0,
                   "Compact heightfield should preserve walkable spans")
-    
+
     // 3. Validate region building created proper connectivity
     // Each region should have reasonable size for the input geometry
     region_sizes := map[u16]int{}
     defer delete(region_sizes)
     for i in 0..<chf.span_count {
-        if chf.areas[i] != nav_recast.RC_NULL_AREA {
+        if chf.areas[i] != recast.RC_NULL_AREA {
             reg := chf.spans[i].reg
             if reg != 0 {
                 region_sizes[reg] = region_sizes[reg] + 1
             }
         }
     }
-    
+
     // For a simple 20x20 floor, expect reasonable region sizes
-    testing.expect(t, len(region_sizes) > 0, 
+    testing.expect(t, len(region_sizes) > 0,
                   "Should create at least one region")
-    
+
     // Validate largest region represents most of the walkable area
     largest_region_size := 0
     for _, size in region_sizes {
@@ -150,9 +149,9 @@ test_complete_navmesh_generation_simple :: proc(t: ^testing.T) {
             largest_region_size = size
         }
     }
-    testing.expect(t, largest_region_size >= walkable_spans / 2, 
+    testing.expect(t, largest_region_size >= walkable_spans / 2,
                   "Largest region should represent significant portion of walkable area")
-    
+
     // 4. Validate contour generation produced reasonable boundary representation
     total_contour_verts := 0
     for i in 0..<len(cset.conts) {
@@ -160,7 +159,7 @@ test_complete_navmesh_generation_simple :: proc(t: ^testing.T) {
             total_contour_verts += len(cset.conts[i].verts)
         }
     }
-    testing.expect(t, total_contour_verts >= 4, 
+    testing.expect(t, total_contour_verts >= 4,
                   "Should generate contours with at least 4 vertices for rectangular geometry")
 
     log.infof("Navigation mesh validation: %d regions, %d walkable spans, %d contour vertices, grid %dx%d",
@@ -208,18 +207,18 @@ test_navmesh_with_obstacles :: proc(t: ^testing.T) {
     }
 
     areas := []u8{
-        nav_recast.RC_WALKABLE_AREA,
-        nav_recast.RC_WALKABLE_AREA,
-        nav_recast.RC_NULL_AREA,  // Side walls are not walkable
-        nav_recast.RC_NULL_AREA,
-        nav_recast.RC_NULL_AREA,
-        nav_recast.RC_NULL_AREA,
-        nav_recast.RC_NULL_AREA,
-        nav_recast.RC_NULL_AREA,
-        nav_recast.RC_NULL_AREA,
-        nav_recast.RC_NULL_AREA,
-        nav_recast.RC_WALKABLE_AREA,  // Top is walkable
-        nav_recast.RC_WALKABLE_AREA,
+        recast.RC_WALKABLE_AREA,
+        recast.RC_WALKABLE_AREA,
+        recast.RC_NULL_AREA,  // Side walls are not walkable
+        recast.RC_NULL_AREA,
+        recast.RC_NULL_AREA,
+        recast.RC_NULL_AREA,
+        recast.RC_NULL_AREA,
+        recast.RC_NULL_AREA,
+        recast.RC_NULL_AREA,
+        recast.RC_NULL_AREA,
+        recast.RC_WALKABLE_AREA,  // Top is walkable
+        recast.RC_WALKABLE_AREA,
     }
 
     // Create config
@@ -275,12 +274,12 @@ test_navmesh_with_obstacles :: proc(t: ^testing.T) {
     // 1. Count regions by height level to validate separation
     ground_level_spans := 0
     elevated_level_spans := 0
-    
+
     for i in 0..<chf.span_count {
-        if chf.areas[i] != nav_recast.RC_NULL_AREA {
+        if chf.areas[i] != recast.RC_NULL_AREA {
             span := &chf.spans[i]
             span_height := span.y
-            
+
             // Ground level spans should be at low height
             if span_height <= 5 {
                 ground_level_spans += 1
@@ -289,13 +288,13 @@ test_navmesh_with_obstacles :: proc(t: ^testing.T) {
             }
         }
     }
-    
+
     // Should have both ground and elevated areas
-    testing.expect(t, ground_level_spans > 0, 
+    testing.expect(t, ground_level_spans > 0,
                   "Should have ground level walkable areas")
-    testing.expect(t, elevated_level_spans > 0, 
+    testing.expect(t, elevated_level_spans > 0,
                   "Should have elevated walkable areas on obstacle")
-    
+
     // 2. Validate region separation - floor and obstacle should be different regions
     region_heights := map[u16][dynamic]int{}
     defer {
@@ -304,9 +303,9 @@ test_navmesh_with_obstacles :: proc(t: ^testing.T) {
         }
         delete(region_heights)
     }
-    
+
     for i in 0..<chf.span_count {
-        if chf.areas[i] != nav_recast.RC_NULL_AREA {
+        if chf.areas[i] != recast.RC_NULL_AREA {
             reg := chf.spans[i].reg
             if reg != 0 {
                 span := &chf.spans[i]
@@ -317,34 +316,34 @@ test_navmesh_with_obstacles :: proc(t: ^testing.T) {
             }
         }
     }
-    
+
     // Should have separate regions for different height levels
-    testing.expect(t, len(region_heights) >= 2, 
+    testing.expect(t, len(region_heights) >= 2,
                   "Should have at least 2 regions (ground + obstacle)")
-    
+
     // Validate height separation between regions
     found_ground_region := false
     found_elevated_region := false
-    
+
     for reg, heights in region_heights {
         avg_height := 0
         for h in heights {
             avg_height += h
         }
         avg_height /= len(heights)
-        
+
         if avg_height <= 3 {
             found_ground_region = true
         } else if avg_height >= 15 {
             found_elevated_region = true
         }
     }
-    
-    testing.expect(t, found_ground_region, 
+
+    testing.expect(t, found_ground_region,
                   "Should have a region representing ground level")
-    testing.expect(t, found_elevated_region, 
+    testing.expect(t, found_elevated_region,
                   "Should have a region representing elevated obstacle")
-    
+
     // 3. Validate obstacle area isolation
     // Count walkable cells in obstacle area (x[10-20], z[10-20])
     obstacle_area_spans := 0
@@ -353,13 +352,13 @@ test_navmesh_with_obstacles :: proc(t: ^testing.T) {
             // Convert grid coordinates back to world coordinates
             world_x := f32(x) * cfg.cs + cfg.bmin.x
             world_z := f32(y) * cfg.cs + cfg.bmin.z
-            
+
             if world_x >= 10 && world_x <= 20 && world_z >= 10 && world_z <= 20 {
                 c := &chf.cells[x + y * chf.width]
                 if c.count > 0 && c.index < u32(len(chf.spans)) {
                     end_idx := min(c.index + u32(c.count), u32(len(chf.spans)))
                     for i in c.index..<end_idx {
-                        if i < u32(len(chf.areas)) && chf.areas[i] != nav_recast.RC_NULL_AREA {
+                        if i < u32(len(chf.areas)) && chf.areas[i] != recast.RC_NULL_AREA {
                             obstacle_area_spans += 1
                         }
                     }
@@ -367,8 +366,8 @@ test_navmesh_with_obstacles :: proc(t: ^testing.T) {
             }
         }
     }
-    
-    testing.expect(t, obstacle_area_spans > 0, 
+
+    testing.expect(t, obstacle_area_spans > 0,
                   "Obstacle area should contain walkable spans on top surface")
 
     log.infof("Obstacle validation: %d regions, %d ground spans, %d elevated spans",
@@ -393,8 +392,8 @@ test_navmesh_with_slopes :: proc(t: ^testing.T) {
     }
 
     areas := []u8{
-        nav_recast.RC_WALKABLE_AREA,
-        nav_recast.RC_WALKABLE_AREA,
+        recast.RC_WALKABLE_AREA,
+        recast.RC_WALKABLE_AREA,
     }
 
     // Create config with specific slope angle
@@ -462,8 +461,8 @@ test_navmesh_area_marking :: proc(t: ^testing.T) {
     }
 
     areas := []u8{
-        nav_recast.RC_WALKABLE_AREA,
-        nav_recast.RC_WALKABLE_AREA,
+        recast.RC_WALKABLE_AREA,
+        recast.RC_WALKABLE_AREA,
     }
 
     // Create config
@@ -516,7 +515,7 @@ test_navmesh_area_marking :: proc(t: ^testing.T) {
     defer delete(marked_areas)
     for i in 0..<chf.span_count {
         area := chf.areas[i]
-        if area != nav_recast.RC_NULL_AREA {
+        if area != recast.RC_NULL_AREA {
             marked_areas[area] = marked_areas[area] + 1
         }
     }
@@ -571,8 +570,8 @@ test_navmesh_performance :: proc(t: ^testing.T) {
             tris[idx + 4] = i32((y + 1) * (grid_size + 1) + x + 1)
             tris[idx + 5] = i32(y * (grid_size + 1) + x + 1)
 
-            areas[idx/3] = nav_recast.RC_WALKABLE_AREA
-            areas[idx/3 + 1] = nav_recast.RC_WALKABLE_AREA
+            areas[idx/3] = recast.RC_WALKABLE_AREA
+            areas[idx/3 + 1] = recast.RC_WALKABLE_AREA
 
             idx += 6
         }
@@ -624,4 +623,3 @@ test_navmesh_performance :: proc(t: ^testing.T) {
 
     log.infof("Performance test complete: %d spans, %d regions", chf.span_count, chf.max_regions)
 }
-

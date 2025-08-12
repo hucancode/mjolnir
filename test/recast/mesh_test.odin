@@ -3,7 +3,7 @@ package test_recast
 import "core:testing"
 import "core:log"
 import "core:time"
-import nav_recast "../../mjolnir/navigation/recast"
+import recast "../../mjolnir/navigation/recast"
 import geometry "../../mjolnir/geometry"
 
 @(test)
@@ -11,43 +11,43 @@ test_mesh_vertex_hash :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
 
     // Test vertex hashing function
-    h1 := nav_recast.vertex_hash(0, 0, 0)
-    h2 := nav_recast.vertex_hash(1, 1, 1)
-    h3 := nav_recast.vertex_hash(0, 0, 0) // Same as h1
+    h1 := recast.vertex_hash(0, 0, 0)
+    h2 := recast.vertex_hash(1, 1, 1)
+    h3 := recast.vertex_hash(0, 0, 0) // Same as h1
 
     testing.expect(t, h1 == h3, "Same vertices should have same hash")
     testing.expect(t, h1 != h2, "Different vertices should have different hash (usually)")
 
     // Hash should be within bucket range
-    testing.expect(t, h1 < nav_recast.RC_VERTEX_BUCKET_COUNT, "Hash should be within bucket range")
-    testing.expect(t, h2 < nav_recast.RC_VERTEX_BUCKET_COUNT, "Hash should be within bucket range")
+    testing.expect(t, h1 < recast.RC_VERTEX_BUCKET_COUNT, "Hash should be within bucket range")
+    testing.expect(t, h2 < recast.RC_VERTEX_BUCKET_COUNT, "Hash should be within bucket range")
 }
 
 @(test)
 test_add_vertex :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
 
-    verts := make([dynamic]nav_recast.Mesh_Vertex)
+    verts := make([dynamic]recast.Mesh_Vertex)
     defer delete(verts)
 
-    buckets := make([]nav_recast.Vertex_Bucket, nav_recast.RC_VERTEX_BUCKET_COUNT)
+    buckets := make([]recast.Vertex_Bucket, recast.RC_VERTEX_BUCKET_COUNT)
     defer delete(buckets)
     for &bucket in buckets {
         bucket.first = -1
     }
 
     // Add first vertex
-    idx1 := nav_recast.add_vertex(10, 20, 30, &verts, buckets)
+    idx1 := recast.add_vertex(10, 20, 30, &verts, buckets)
     testing.expect(t, idx1 == 0, "First vertex should have index 0")
     testing.expect(t, len(verts) == 1, "Should have 1 vertex")
 
     // Add same vertex - should get same index
-    idx2 := nav_recast.add_vertex(10, 20, 30, &verts, buckets)
+    idx2 := recast.add_vertex(10, 20, 30, &verts, buckets)
     testing.expect(t, idx2 == 0, "Same vertex should return same index")
     testing.expect(t, len(verts) == 1, "Should still have 1 vertex")
 
     // Add different vertex
-    idx3 := nav_recast.add_vertex(40, 50, 60, &verts, buckets)
+    idx3 := recast.add_vertex(40, 50, 60, &verts, buckets)
     testing.expect(t, idx3 == 1, "Different vertex should have index 1")
     testing.expect(t, len(verts) == 2, "Should have 2 vertices")
 
@@ -75,7 +75,7 @@ test_triangulate_polygon :: proc(t: ^testing.T) {
     triangles := make([dynamic]i32)
     defer delete(triangles)
 
-    result := nav_recast.triangulate_polygon_u16(verts, indices, &triangles)
+    result := recast.triangulate_polygon_u16(verts, indices, &triangles)
     testing.expect(t, result, "Triangulation should succeed")
     testing.expect(t, len(triangles) == 6, "Quad should produce 2 triangles (6 indices)")
 
@@ -106,7 +106,7 @@ test_triangulate_concave_polygon :: proc(t: ^testing.T) {
     triangles := make([dynamic]i32)
     defer delete(triangles)
 
-    result := nav_recast.triangulate_polygon_u16(verts, indices, &triangles)
+    result := recast.triangulate_polygon_u16(verts, indices, &triangles)
     testing.expect(t, result, "Concave polygon triangulation should succeed")
     testing.expect(t, len(triangles) == 12, "6-vertex polygon should produce 4 triangles (12 indices)")
 
@@ -149,7 +149,7 @@ test_triangulate_star_polygon :: proc(t: ^testing.T) {
     triangles := make([dynamic]i32)
     defer delete(triangles)
 
-    result := nav_recast.triangulate_polygon_u16(verts, indices, &triangles)
+    result := recast.triangulate_polygon_u16(verts, indices, &triangles)
     testing.expect(t, result, "Star polygon triangulation should succeed")
     testing.expect(t, len(triangles) == 18, "8-vertex polygon should produce 6 triangles (18 indices)")
 
@@ -224,7 +224,7 @@ test_degenerate_polygon_handling :: proc(t: ^testing.T) {
     triangles := make([dynamic]i32)
     defer delete(triangles)
 
-    result := nav_recast.triangulate_polygon_u16(verts, indices, &triangles)
+    result := recast.triangulate_polygon_u16(verts, indices, &triangles)
     testing.expect(t, result, "Degenerate polygon triangulation should succeed")
     testing.expect(t, len(triangles) > 0, "Should produce some triangles")
     testing.expect(t, len(triangles) % 3 == 0, "Should have complete triangles")
@@ -242,11 +242,11 @@ test_validate_poly_mesh :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
 
     // Test with nil mesh
-    testing.expect(t, !nav_recast.validate_poly_mesh(nil), "Nil mesh should be invalid")
+    testing.expect(t, !recast.validate_poly_mesh(nil), "Nil mesh should be invalid")
 
     // Create a valid simple mesh
-    pmesh := nav_recast.alloc_poly_mesh()
-    defer nav_recast.free_poly_mesh(pmesh)
+    pmesh := recast.alloc_poly_mesh()
+    defer recast.free_poly_mesh(pmesh)
 
     pmesh.npolys = 1
     pmesh.nvp = 3
@@ -264,13 +264,13 @@ test_validate_poly_mesh :: proc(t: ^testing.T) {
 
     // Set up triangle
     pmesh.polys[0], pmesh.polys[1], pmesh.polys[2] = 0, 1, 2
-    pmesh.polys[3], pmesh.polys[4], pmesh.polys[5] = nav_recast.RC_MESH_NULL_IDX, nav_recast.RC_MESH_NULL_IDX, nav_recast.RC_MESH_NULL_IDX
+    pmesh.polys[3], pmesh.polys[4], pmesh.polys[5] = recast.RC_MESH_NULL_IDX, recast.RC_MESH_NULL_IDX, recast.RC_MESH_NULL_IDX
 
-    testing.expect(t, nav_recast.validate_poly_mesh(pmesh), "Valid mesh should pass validation")
+    testing.expect(t, recast.validate_poly_mesh(pmesh), "Valid mesh should pass validation")
 
     // Test invalid vertex reference
     pmesh.polys[0] = 10  // Invalid vertex index
-    testing.expect(t, !nav_recast.validate_poly_mesh(pmesh), "Invalid vertex reference should fail validation")
+    testing.expect(t, !recast.validate_poly_mesh(pmesh), "Invalid vertex reference should fail validation")
 }
 
 @(test)
@@ -278,8 +278,8 @@ test_mesh_copy :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
 
     // Create source mesh
-    src := nav_recast.alloc_poly_mesh()
-    defer nav_recast.free_poly_mesh(src)
+    src := recast.alloc_poly_mesh()
+    defer recast.free_poly_mesh(src)
 
     src.npolys = 1
     src.nvp = 3
@@ -304,11 +304,11 @@ test_mesh_copy :: proc(t: ^testing.T) {
     src.areas[0] = 63
 
     // Create destination mesh
-    dst := nav_recast.alloc_poly_mesh()
-    defer nav_recast.free_poly_mesh(dst)
+    dst := recast.alloc_poly_mesh()
+    defer recast.free_poly_mesh(dst)
 
     // Copy mesh
-    result := nav_recast.copy_poly_mesh(src, dst)
+    result := recast.copy_poly_mesh(src, dst)
     testing.expect(t, result, "Mesh copy should succeed")
 
     // Verify copied data
@@ -336,7 +336,7 @@ test_build_simple_contour_mesh :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
 
     // Create a simple contour set with one square contour
-    cset := new(nav_recast.Contour_Set)
+    cset := new(recast.Contour_Set)
     defer {
         if cset.conts != nil {
             // Clean up individual contour verts
@@ -353,8 +353,8 @@ test_build_simple_contour_mesh :: proc(t: ^testing.T) {
         free(cset)
     }
 
-    cset.conts = make([dynamic]nav_recast.Contour, 0)
-    append(&cset.conts, nav_recast.Contour{})
+    cset.conts = make([dynamic]recast.Contour, 0)
+    append(&cset.conts, recast.Contour{})
     cset.bmin = {0, 0, 0}
     cset.bmax = {10, 2, 10}
     cset.cs = 0.3
@@ -364,7 +364,7 @@ test_build_simple_contour_mesh :: proc(t: ^testing.T) {
     // Create a simple square contour (4 vertices)
     cont := &cset.conts[0]
     cont.verts = make([][4]i32, 4)  // 4 vertices
-    cont.area = nav_recast.RC_WALKABLE_AREA
+    cont.area = recast.RC_WALKABLE_AREA
     cont.reg = 1
 
     // Define square vertices (in contour coordinates) - counter-clockwise
@@ -374,17 +374,17 @@ test_build_simple_contour_mesh :: proc(t: ^testing.T) {
     cont.verts[3] = {10, 5, 0, 0}   // Bottom-right
 
     // Build polygon mesh
-    pmesh := nav_recast.alloc_poly_mesh()
-    defer nav_recast.free_poly_mesh(pmesh)
+    pmesh := recast.alloc_poly_mesh()
+    defer recast.free_poly_mesh(pmesh)
 
-    result := nav_recast.build_poly_mesh(cset, 6, pmesh)
+    result := recast.build_poly_mesh(cset, 6, pmesh)
     testing.expect(t, result, "Mesh building should succeed")
     testing.expect(t, len(pmesh.verts) > 0, "Should have vertices")
     testing.expect(t, pmesh.npolys > 0, "Should have polygons")
     testing.expect(t, pmesh.nvp == 6, "Max vertices per polygon should be set")
 
     // Validate final mesh
-    testing.expect(t, nav_recast.validate_poly_mesh(pmesh), "Generated mesh should be valid")
+    testing.expect(t, recast.validate_poly_mesh(pmesh), "Generated mesh should be valid")
 
     log.infof("Generated mesh: %d vertices, %d polygons", len(pmesh.verts), pmesh.npolys)
 }
@@ -394,8 +394,8 @@ test_mesh_optimization :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
 
     // Create mesh with degeneracies
-    pmesh := nav_recast.alloc_poly_mesh()
-    defer nav_recast.free_poly_mesh(pmesh)
+    pmesh := recast.alloc_poly_mesh()
+    defer recast.free_poly_mesh(pmesh)
 
     pmesh.npolys = 3
     pmesh.nvp = 3
@@ -417,27 +417,27 @@ test_mesh_optimization :: proc(t: ^testing.T) {
     // Set up polygons (including degenerate ones)
     // Valid triangle
     pmesh.polys[0], pmesh.polys[1], pmesh.polys[2] = 0, 1, 2
-    pmesh.polys[3], pmesh.polys[4], pmesh.polys[5] = nav_recast.RC_MESH_NULL_IDX, nav_recast.RC_MESH_NULL_IDX, nav_recast.RC_MESH_NULL_IDX
+    pmesh.polys[3], pmesh.polys[4], pmesh.polys[5] = recast.RC_MESH_NULL_IDX, recast.RC_MESH_NULL_IDX, recast.RC_MESH_NULL_IDX
 
     // Degenerate triangle (duplicate vertex)
     pmesh.polys[6], pmesh.polys[7], pmesh.polys[8] = 0, 0, 1
-    pmesh.polys[9], pmesh.polys[10], pmesh.polys[11] = nav_recast.RC_MESH_NULL_IDX, nav_recast.RC_MESH_NULL_IDX, nav_recast.RC_MESH_NULL_IDX
+    pmesh.polys[9], pmesh.polys[10], pmesh.polys[11] = recast.RC_MESH_NULL_IDX, recast.RC_MESH_NULL_IDX, recast.RC_MESH_NULL_IDX
 
     // Triangle with only 2 vertices
-    pmesh.polys[12], pmesh.polys[13], pmesh.polys[14] = 1, 2, nav_recast.RC_MESH_NULL_IDX
-    pmesh.polys[15], pmesh.polys[16], pmesh.polys[17] = nav_recast.RC_MESH_NULL_IDX, nav_recast.RC_MESH_NULL_IDX, nav_recast.RC_MESH_NULL_IDX
+    pmesh.polys[12], pmesh.polys[13], pmesh.polys[14] = 1, 2, recast.RC_MESH_NULL_IDX
+    pmesh.polys[15], pmesh.polys[16], pmesh.polys[17] = recast.RC_MESH_NULL_IDX, recast.RC_MESH_NULL_IDX, recast.RC_MESH_NULL_IDX
 
     original_vert_count := len(pmesh.verts)
     original_poly_count := pmesh.npolys
 
     // Optimize mesh
-    result := nav_recast.optimize_poly_mesh(pmesh)
+    result := recast.optimize_poly_mesh(pmesh)
     testing.expect(t, result, "Mesh optimization should succeed")
     testing.expect(t, len(pmesh.verts) <= original_vert_count, "Should have same or fewer vertices")
     testing.expect(t, pmesh.npolys < original_poly_count, "Should have fewer polygons (degenerates removed)")
 
     // Validate optimized mesh
-    testing.expect(t, nav_recast.validate_poly_mesh(pmesh), "Optimized mesh should be valid")
+    testing.expect(t, recast.validate_poly_mesh(pmesh), "Optimized mesh should be valid")
 
     log.infof("Mesh optimization: %d->%d vertices, %d->%d polygons",
              original_vert_count, len(pmesh.verts), original_poly_count, pmesh.npolys)

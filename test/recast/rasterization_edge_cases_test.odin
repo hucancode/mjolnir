@@ -452,3 +452,88 @@ test_rasterize_many_tiny_triangles :: proc(t: ^testing.T) {
     testing.expect(t, total_spans > 0, "Many tiny triangles should create spans")
     log.infof("✓ Many tiny triangles stress test passed: %d spans created", total_spans)
 }
+
+// Thorough triangle rasterization validation - tests geometric accuracy
+@(test)
+test_triangle_rasterization_accuracy :: proc(t: ^testing.T) {
+    testing.set_fail_timeout(t, 30 * time.Second)
+    
+    // Test rasterization of a specific triangle with known coverage
+    // Triangle vertices: (1,0,1), (3,0,1), (2,0,3) 
+    // This creates a triangle that should cover specific cells
+    
+    verts := [][3]f32{
+        {1, 0, 1},  // Vertex 0
+        {3, 0, 1},  // Vertex 1 
+        {2, 0, 3},  // Vertex 2
+    }
+    
+    tris := []i32{0, 1, 2}
+    areas := []u8{recast.RC_WALKABLE_AREA}
+    
+    // Create heightfield
+    hf := recast.alloc_heightfield()
+    testing.expect(t, hf != nil, "Failed to allocate heightfield")
+    defer recast.free_heightfield(hf)
+    
+    ok := recast.create_heightfield(hf, 5, 5, {0,0,0}, {5,0,5}, 1.0, 0.2)
+    testing.expect(t, ok, "Failed to create heightfield")
+    
+    // Rasterize the triangle
+    ok = recast.rasterize_triangles(verts, tris, areas, hf, 1)
+    testing.expect(t, ok, "Failed to rasterize triangle")
+    
+    // Validate specific cells that should be covered by the triangle
+    // The triangle should cover cells at grid positions based on its geometry
+    
+    check_cell_coverage :: proc(hf: ^recast.Heightfield, x, z: i32, should_be_covered: bool, test_name: string) -> bool {
+        if x < 0 || x >= hf.width || z < 0 || z >= hf.height {
+            return false
+        }
+        
+        spans := hf.spans[x + z * hf.width]
+        has_span := spans != nil
+        
+        if should_be_covered && !has_span {
+            log.errorf("Cell (%d,%d) should be covered but has no spans - %s", x, z, test_name)
+            return false
+        }
+        if !should_be_covered && has_span {
+            log.errorf("Cell (%d,%d) should not be covered but has spans - %s", x, z, test_name)
+            return false
+        }
+        
+        return true
+    }
+    
+    // Test specific cells based on triangle geometry
+    // Center of triangle should definitely be covered
+    all_correct := true
+    all_correct &= check_cell_coverage(hf, 2, 2, true, "triangle center")
+    
+    // Cells clearly outside triangle should not be covered
+    all_correct &= check_cell_coverage(hf, 0, 0, false, "outside triangle")
+    all_correct &= check_cell_coverage(hf, 4, 4, false, "outside triangle")
+    
+    // Note: Edge cells (1,1) and (3,1) are not tested as they depend on the specific
+    // rasterization algorithm and tie-breaking rules, which can vary between implementations
+    
+    testing.expect(t, all_correct, "Triangle rasterization should match basic geometric expectations")
+    
+    // Count total covered cells and validate reasonable coverage
+    covered_cells := 0
+    for x in 0..<hf.width {
+        for z in 0..<hf.height {
+            spans := hf.spans[x + z * hf.width]
+            if spans != nil {
+                covered_cells += 1
+            }
+        }
+    }
+    
+    // Triangle should cover a reasonable number of cells (not 0, not all)
+    testing.expect(t, covered_cells >= 3 && covered_cells <= 12, 
+                  "Triangle should cover reasonable number of cells (3-12)")
+    
+    log.infof("Triangle rasterization - Covered %d cells in 5x5 grid", covered_cells)
+}

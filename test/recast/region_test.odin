@@ -6,6 +6,7 @@ import "core:testing"
 import "core:log"
 import "core:fmt"
 import "core:strings"
+import "core:time"
 
 @(test)
 test_compact_heightfield_building :: proc(t: ^testing.T) {
@@ -458,4 +459,94 @@ test_border_regions :: proc(t: ^testing.T) {
             }
         }
     }
+}
+
+// Thorough watershed region validation - tests region connectivity correctness
+@(test)
+test_watershed_region_connectivity :: proc(t: ^testing.T) {
+    testing.set_fail_timeout(t, 30 * time.Second)
+    
+    // Create two separate 3x3 platforms with a gap between them
+    // This should result in exactly 2 regions with no cross-connections
+    
+    hf := recast.alloc_heightfield()
+    testing.expect(t, hf != nil, "Failed to allocate heightfield")
+    defer recast.free_heightfield(hf)
+    
+    ok := recast.create_heightfield(hf, 8, 4, {0,0,0}, {8,3,4}, 1.0, 0.2)
+    testing.expect(t, ok, "Failed to create heightfield")
+    
+    // Platform 1: (0,0) to (2,2) - 3x3 = 9 cells
+    for x in 0..<3 {
+        for z in 0..<3 {
+            ok = recast.add_span(hf, i32(x), i32(z), 0, 10, nav_recast.RC_WALKABLE_AREA, 1)
+            testing.expect(t, ok, "Failed to add span to platform 1")
+        }
+    }
+    
+    // Gap at (3,*) and (4,*) - no spans added
+    
+    // Platform 2: (5,0) to (7,2) - 3x3 = 9 cells
+    for x in 5..<8 {
+        for z in 0..<3 {
+            ok = recast.add_span(hf, i32(x), i32(z), 0, 10, nav_recast.RC_WALKABLE_AREA, 1)
+            testing.expect(t, ok, "Failed to add span to platform 2")
+        }
+    }
+    
+    // Build compact heightfield
+    chf := recast.alloc_compact_heightfield()
+    defer recast.free_compact_heightfield(chf)
+    
+    ok = recast.build_compact_heightfield(2, 1, hf, chf)
+    testing.expect(t, ok, "Failed to build compact heightfield")
+    
+    ok = recast.build_distance_field(chf)
+    testing.expect(t, ok, "Failed to build distance field")
+    
+    // Build regions with minRegionArea=4 (each platform has 9 cells)
+    ok = recast.build_regions(chf, 0, 4, 20)
+    testing.expect(t, ok, "Failed to build regions")
+    
+    // Validate region connectivity correctness
+    get_region_at :: proc(chf: ^recast.Compact_Heightfield, x, z: i32) -> u16 {
+        if x < 0 || x >= chf.width || z < 0 || z >= chf.height {
+            return 0
+        }
+        
+        cell := &chf.cells[x + z * chf.width]
+        span_idx := cell.index
+        span_count := cell.count
+        
+        if span_count > 0 && span_idx < u32(len(chf.spans)) {
+            return chf.spans[span_idx].reg
+        }
+        return 0
+    }
+    
+    // Get region IDs for both platforms
+    platform1_region := get_region_at(chf, 1, 1)  // Center of platform 1
+    platform2_region := get_region_at(chf, 6, 1)  // Center of platform 2
+    
+    // Validate region separation
+    testing.expect(t, platform1_region != 0, "Platform 1 should be assigned to a region")
+    testing.expect(t, platform2_region != 0, "Platform 2 should be assigned to a region")
+    testing.expect(t, platform1_region != platform2_region, 
+                  "Disconnected platforms should have different regions")
+    
+    // Validate internal platform connectivity
+    platform1_region_alt := get_region_at(chf, 0, 0)  // Corner of platform 1
+    platform2_region_alt := get_region_at(chf, 7, 2)  // Corner of platform 2
+    
+    testing.expect(t, platform1_region == platform1_region_alt, 
+                  "All cells in platform 1 should have the same region")
+    testing.expect(t, platform2_region == platform2_region_alt, 
+                  "All cells in platform 2 should have the same region")
+    
+    // Validate gap has no region assignment
+    gap_region := get_region_at(chf, 4, 1)  // Middle of gap
+    testing.expect(t, gap_region == 0, "Gap should not be assigned to any region")
+    
+    log.infof("Region connectivity validation - Platform1: %d, Platform2: %d, Gap: %d, Total regions: %d", 
+              platform1_region, platform2_region, gap_region, chf.max_regions)
 }
