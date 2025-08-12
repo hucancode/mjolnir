@@ -150,8 +150,6 @@ free_poly_mesh_detail :: proc(dmesh: ^Poly_Mesh_Detail) {
 }
 
 
-RC_PI :: 3.14159265
-
 // Span constants
 RC_SPAN_HEIGHT_BITS :: 13
 RC_SPAN_MAX_HEIGHT :: (1 << RC_SPAN_HEIGHT_BITS) - 1
