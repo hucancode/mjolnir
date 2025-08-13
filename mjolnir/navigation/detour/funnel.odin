@@ -7,20 +7,6 @@ import recast "../recast"
 import geometry "../../geometry"
 
 
-// Helper function to calculate squared distance from point to line segment in 2D
-dt_distance_pt_seg_sqr_2d :: proc(pt, p0, p1: [3]f32) -> (dist_sqr: f32, t: f32) {
-    dir := p1.xz - p0.xz
-    d := linalg.length2(dir)
-    t = f32(0)
-
-    if d > 0 {
-        t = linalg.dot(pt.xz - p0.xz, dir) / d
-        t = clamp(t, 0.0, 1.0)
-    }
-
-    closest := p0.xz + t * dir - pt.xz
-    return linalg.length2(closest), t
-}
 
 // Find straight path using funnel algorithm for path smoothing
 find_straight_path :: proc(query: ^Nav_Mesh_Query,
@@ -47,7 +33,7 @@ find_straight_path :: proc(query: ^Nav_Mesh_Query,
         return {.Invalid_Param}, straight_path_count
     }
 
-    stat := recast.Status{}
+    stat :recast.Status
 
     // Portal vertices for funnel algorithm
     portal_apex := start_pos
@@ -107,8 +93,8 @@ find_straight_path :: proc(query: ^Nav_Mesh_Query,
         }
 
         // Get portal points
-        left := [3]f32{}
-        right := [3]f32{}
+        left :[3]f32
+        right :[3]f32
         from_type := u8(0)
         to_type := u8(0)
 
@@ -120,7 +106,8 @@ find_straight_path :: proc(query: ^Nav_Mesh_Query,
             to_type = u8(Straight_Path_Flags.End)
         } else {
             // Get portal between path[i] and path[i+1]
-            portal_status := get_portal_points(query, path[i], path[i+1], &left, &right, &from_type)
+            portal_status : recast.Status
+            left, right, from_type, portal_status = get_portal_points(query, path[i], path[i+1])
 
             // Check if portal is degenerate
             if geometry.vector_equal(left, right) && i > 0 {
@@ -177,8 +164,8 @@ find_straight_path :: proc(query: ^Nav_Mesh_Query,
 
         // If starting really close to portal, advance (matches C++)
         if i == 0 {
-            dist_sqr, _ := dt_distance_pt_seg_sqr_2d(portal_apex, left, right)
-            if dist_sqr < 0.001 * 0.001 {
+            dist_sqr := geometry.dist_point_segment_sq_2d(portal_apex, left, right)
+            if dist_sqr < 1e-6 {
                 continue
             }
         }
@@ -340,21 +327,20 @@ find_straight_path :: proc(query: ^Nav_Mesh_Query,
 }
 
 // Get portal points between two adjacent polygons
-get_portal_points :: proc(query: ^Nav_Mesh_Query, from: recast.Poly_Ref, to: recast.Poly_Ref,
-                            left: ^[3]f32, right: ^[3]f32, portal_type: ^u8) -> recast.Status {
+get_portal_points :: proc(query: ^Nav_Mesh_Query, from: recast.Poly_Ref, to: recast.Poly_Ref) -> (left: [3]f32, right: [3]f32, portal_type: u8, status: recast.Status) {
 
     // log.debugf("get_portal_points: from=0x%x to=0x%x", from, to)
 
     from_tile, from_poly, from_status := get_tile_and_poly_by_ref(query.nav_mesh, from)
     if recast.status_failed(from_status) {
         log.errorf("  FAILED: Could not get from polygon 0x%x, status=%v", from, from_status)
-        return from_status
+        return {}, {}, 0, from_status
     }
 
     to_tile, to_poly, to_status := get_tile_and_poly_by_ref(query.nav_mesh, to)
     if recast.status_failed(to_status) {
         log.errorf("  FAILED: Could not get to polygon 0x%x, status=%v", to, to_status)
-        return to_status
+        return {}, {}, 0, to_status
     }
 
     // Decode polygon references for detailed logging
@@ -440,12 +426,12 @@ get_portal_points :: proc(query: ^Nav_Mesh_Query, from: recast.Poly_Ref, to: rec
             // Note: The order matters! In a right-handed system with Y-up,
             // when traversing from 'from' to 'to', left should be on the left side
             // For now, swap them to match C++ behavior
-            left^ = v1_pos
-            right^ = v0_pos
-            portal_type^ = 0
+            left = v1_pos
+            right = v0_pos
+            portal_type = 0
 
-            // log.debugf("      SUCCESS: Portal found via link - left=%v, right=%v", left^, right^)
-            return {.Success}
+            // log.debugf("      SUCCESS: Portal found via link - left=%v, right=%v", left, right)
+            return left, right, portal_type, {.Success}
         }
 
         link = link_info.next
@@ -492,12 +478,12 @@ get_portal_points :: proc(query: ^Nav_Mesh_Query, from: recast.Poly_Ref, to: rec
                     log.infof("        va=%v, vb=%v", va, vb)
 
                     // Swap to match C++ behavior
-                    left^ = vb
-                    right^ = va
-                    portal_type^ = 0
+                    left = vb
+                    right = va
+                    portal_type = 0
 
-                    log.infof("        SUCCESS: Portal found via neighbor - left=%v, right=%v", left^, right^)
-                    return {.Success}
+                    log.infof("        SUCCESS: Portal found via neighbor - left=%v, right=%v", left, right)
+                    return left, right, portal_type, {.Success}
                 }
             } else if nei == 0 {
                 log.infof("        Border edge (no neighbor)")
@@ -513,7 +499,7 @@ get_portal_points :: proc(query: ^Nav_Mesh_Query, from: recast.Poly_Ref, to: rec
 
     log.errorf("  FAILURE: No portal found between polygons 0x%x and 0x%x", from, to)
     log.errorf("    Tried %d links, checked neighbor references", link_count)
-    return {.Invalid_Param}
+    return {}, {}, 0, {.Invalid_Param}
 }
 
 // Analyze navmesh structure for debugging portal finding issues
@@ -666,30 +652,30 @@ calc_poly_center :: proc(tile: ^Mesh_Tile, poly: ^Poly) -> [3]f32 {
 move_along_surface :: proc(query: ^Nav_Mesh_Query,
                              start_ref: recast.Poly_Ref, start_pos: [3]f32,
                              end_pos: [3]f32, filter: ^Query_Filter,
-                             result_pos: ^[3]f32, visited: []recast.Poly_Ref,
-                             visited_count: ^i32, max_visited: i32) -> recast.Status {
+                             visited: []recast.Poly_Ref,
+                             max_visited: i32) -> (result_pos: [3]f32, visited_count: i32, status: recast.Status) {
 
-    visited_count^ = 0
-    result_pos^ = start_pos
+    visited_count = 0
+    result_pos = start_pos
 
     if !is_valid_poly_ref(query.nav_mesh, start_ref) {
-        return {.Invalid_Param}
+        return result_pos, visited_count, {.Invalid_Param}
     }
 
-    tile, poly, status := get_tile_and_poly_by_ref(query.nav_mesh, start_ref)
-    if recast.status_failed(status) {
-        return status
+    tile, poly, tile_status := get_tile_and_poly_by_ref(query.nav_mesh, start_ref)
+    if recast.status_failed(tile_status) {
+        return result_pos, visited_count, tile_status
     }
 
     if max_visited > 0 {
         visited[0] = start_ref
-        visited_count^ = 1
+        visited_count = 1
     }
 
     // If start equals end, we're done
     dir := end_pos - start_pos
     if linalg.length(dir) < 1e-6 {
-        return {.Success}
+        return result_pos, visited_count, {.Success}
     }
 
     cur_pos := start_pos
@@ -743,9 +729,9 @@ move_along_surface :: proc(query: ^Nav_Mesh_Query,
                 cur_ref = neighbor_ref
 
                 // Add to visited list
-                if visited_count^ < max_visited {
-                    visited[visited_count^] = cur_ref
-                    visited_count^ += 1
+                if visited_count < max_visited {
+                    visited[visited_count] = cur_ref
+                    visited_count += 1
                 }
             } else if wall_hit {
                 // Hit a wall, stop movement
@@ -762,8 +748,8 @@ move_along_surface :: proc(query: ^Nav_Mesh_Query,
         log.debugf("Surface walk stopped %f units from goal after %d steps", final_distance, max_safe_steps)
     }
 
-    result_pos^ = cur_pos
-    return {.Success}
+    result_pos = cur_pos
+    return result_pos, visited_count, {.Success}
 }
 
 // Helper functions for surface movement

@@ -66,7 +66,7 @@ filter_low_hanging_walkable_obstacles :: proc(walkable_climb: int, heightfield: 
 
 // Filter ledge spans
 // Mark spans that are ledges as unwalkable
-filter_ledge_spans :: proc(walkable_height: int, walkable_climb: int, heightfield: ^Heightfield) {
+filter_ledge_spans :: proc(walkable_height, walkable_climb: int, heightfield: ^Heightfield) {
     // Removed timer code for simplicity
 
     x_size := heightfield.width
@@ -259,7 +259,6 @@ median_filter_walkable_area :: proc(chf: ^Compact_Heightfield) -> bool {
     return true
 }
 
-// Mark box area
 // Mark all spans within an axis-aligned box with the specified area id
 mark_box_area :: proc(box_min_bounds, box_max_bounds: [3]f32,
                         area_id: u8, chf: ^Compact_Heightfield) {
@@ -406,15 +405,11 @@ mark_convex_poly_area :: proc(verts: [][3]f32,
     }
 }
 
-// Mark cylinder area
 // Mark all spans within a cylinder with the specified area id
 mark_cylinder_area :: proc(position: [3]f32, radius, height: f32,
                              area_id: u8, chf: ^Compact_Heightfield) {
-    // Removed timer code for simplicity
-
     x_size := chf.width
     z_size := chf.height
-    z_stride := x_size
 
     // Compute the bounding box of the cylinder
     cylinder_bb_min := position - [3]f32{radius, 0, radius}
@@ -439,9 +434,9 @@ mark_cylinder_area :: proc(position: [3]f32, radius, height: f32,
 
     radius_sq := radius * radius
 
-    for z := minz; z <= maxz; z += 1 {
-        for x := minx; x <= maxx; x += 1 {
-            cell := &chf.cells[int(x) + int(z) * int(z_stride)]
+    for z in minz..=maxz {
+        for x in minx..=maxx {
+            cell := &chf.cells[int(x) + int(z) * int(x_size)]
             max_span_index := int(cell.index + u32(cell.count))
 
             // Calculate cell center position
@@ -454,7 +449,7 @@ mark_cylinder_area :: proc(position: [3]f32, radius, height: f32,
             }
 
             // Mark all overlapping spans
-            for span_index := int(cell.index); span_index < max_span_index; span_index += 1 {
+            for span_index in int(cell.index)..<max_span_index {
                 span := &chf.spans[span_index]
 
                 // Skip if span is removed

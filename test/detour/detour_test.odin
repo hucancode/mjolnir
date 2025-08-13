@@ -819,14 +819,10 @@ test_detour_move_along_surface_comprehensive :: proc(t: ^testing.T) {
     start_status, start_ref, start_nearest := nav_detour.find_nearest_poly(&query, start_pos, half_extents, &filter)
     testing.expect(t, recast.status_succeeded(start_status), "Should find start polygon")
 
-    result_pos := [3]f32{}
     visited := make([]recast.Poly_Ref, 16)
     defer delete(visited)
 
-    visited_count := i32(0)
-
-    move_status := nav_detour.move_along_surface(&query, start_ref, start_nearest, end_pos, &filter,
-                                                 &result_pos, visited, &visited_count, 16)
+    result_pos, visited_count, move_status := nav_detour.move_along_surface(&query, start_ref, start_nearest, end_pos, &filter, visited, 16)
     testing.expect(t, recast.status_succeeded(move_status), "Move along surface should succeed")
     testing.expect(t, visited_count > 0, "Should visit at least one polygon")
 
@@ -859,14 +855,10 @@ test_detour_move_along_surface_cross_polygons :: proc(t: ^testing.T) {
     start_status, start_ref, start_nearest := nav_detour.find_nearest_poly(&query, start_pos, half_extents, &filter)
     testing.expect(t, recast.status_succeeded(start_status), "Should find start polygon")
 
-    result_pos := [3]f32{}
     visited := make([]recast.Poly_Ref, 16)
     defer delete(visited)
 
-    visited_count := i32(0)
-
-    move_status := nav_detour.move_along_surface(&query, start_ref, start_nearest, end_pos, &filter,
-                                                 &result_pos, visited, &visited_count, 16)
+    result_pos, visited_count, move_status := nav_detour.move_along_surface(&query, start_ref, start_nearest, end_pos, &filter, visited, 16)
     testing.expect(t, recast.status_succeeded(move_status), "Cross-polygon move should succeed")
     testing.expect(t, visited_count >= 1, "Should visit at least start polygon")
 
@@ -900,14 +892,10 @@ test_detour_move_along_surface_blocked :: proc(t: ^testing.T) {
     start_status, start_ref, start_nearest := nav_detour.find_nearest_poly(&query, start_pos, half_extents, &filter)
     testing.expect(t, recast.status_succeeded(start_status), "Should find start polygon")
 
-    result_pos := [3]f32{}
     visited := make([]recast.Poly_Ref, 16)
     defer delete(visited)
 
-    visited_count := i32(0)
-
-    move_status := nav_detour.move_along_surface(&query, start_ref, start_nearest, end_pos, &filter,
-                                                 &result_pos, visited, &visited_count, 16)
+    result_pos, visited_count, move_status := nav_detour.move_along_surface(&query, start_ref, start_nearest, end_pos, &filter, visited, 16)
     testing.expect(t, recast.status_succeeded(move_status), "Blocked move should still succeed")
 
     // Result should not reach the impossible target
@@ -935,14 +923,10 @@ test_detour_move_along_surface_errors :: proc(t: ^testing.T) {
     invalid_ref := recast.INVALID_POLY_REF
     pos := [3]f32{1.0, 0.0, 1.0}
 
-    result_pos := [3]f32{}
     visited := make([]recast.Poly_Ref, 16)
     defer delete(visited)
 
-    visited_count := i32(0)
-
-    invalid_status := nav_detour.move_along_surface(&query, invalid_ref, pos, pos, &filter,
-                                                    &result_pos, visited, &visited_count, 16)
+    result_pos, visited_count, invalid_status := nav_detour.move_along_surface(&query, invalid_ref, pos, pos, &filter, visited, 16)
     testing.expect(t, recast.status_failed(invalid_status), "Move with invalid ref should fail")
 }
 

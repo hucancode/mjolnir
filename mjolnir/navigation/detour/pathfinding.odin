@@ -207,8 +207,8 @@ nav_mesh_query_destroy :: proc(query: ^Nav_Mesh_Query) {
 
 // Find path using A* algorithm
 find_path :: proc(query: ^Nav_Mesh_Query,
-                    start_ref: recast.Poly_Ref, end_ref: recast.Poly_Ref,
-                    start_pos: [3]f32, end_pos: [3]f32,
+                    start_ref, end_ref: recast.Poly_Ref,
+                    start_pos, end_pos: [3]f32,
                     filter: ^Query_Filter,
                     path: []recast.Poly_Ref,
                     max_path: i32) -> (status: recast.Status, path_count: i32) {
@@ -325,9 +325,7 @@ find_path :: proc(query: ^Nav_Mesh_Query,
                     neighbor_pos: [3]f32
                     if neighbor_node == nil {
                         // Node doesn't exist yet, calculate position
-                        left, right := [3]f32{}, [3]f32{}
-                        portal_type := u8(0)
-                        portal_status := get_portal_points(query, current.id, neighbor_ref, &left, &right, &portal_type)
+                        left, right, portal_type, portal_status := get_portal_points(query, current.id, neighbor_ref)
 
                         if recast.status_succeeded(portal_status) {
                             // Use midpoint of the actual shared edge
@@ -335,7 +333,7 @@ find_path :: proc(query: ^Nav_Mesh_Query,
                         } else {
                             // Fallback to simple edge midpoint using link edge
                             link_edge := get_link_edge(cur_tile, link)
-                            neighbor_pos = get_edge_mid_point(cur_tile, cur_poly, int(link_edge), neighbor_tile, neighbor_poly)
+                            neighbor_pos = get_edge_mid_point(cur_tile, neighbor_tile, cur_poly, neighbor_poly, link_edge)
                         }
                     } else {
                         // Node already exists, always use cached position
@@ -510,13 +508,9 @@ get_link_edge :: proc(tile: ^Mesh_Tile, link: u32) -> u8 {
     return tile.links[link].edge
 }
 
-get_edge_mid_point :: proc(tile_a: ^Mesh_Tile, poly_a: ^Poly, edge: int,
-                             tile_b: ^Mesh_Tile, poly_b: ^Poly) -> [3]f32 {
-    // Get edge vertices
+get_edge_mid_point :: proc(tile_a, tile_b: ^Mesh_Tile, poly_a, poly_b: ^Poly, edge: u8) -> [3]f32 {
     va0 := tile_a.verts[poly_a.verts[edge]]
-    va1 := tile_a.verts[poly_a.verts[(edge + 1) % int(poly_a.vert_count)]]
-
-    // Return midpoint
+    va1 := tile_a.verts[poly_a.verts[(edge + 1) % poly_a.vert_count]]
     return linalg.mix(va0, va1, 0.5)
 }
 
