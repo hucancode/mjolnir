@@ -2,7 +2,9 @@ package navigation_detour_crowd
 
 import "core:math"
 import "core:slice"
+import "core:math/linalg"
 import recast "../recast"
+import geometry "../../geometry"
 
 // Initialize obstacle avoidance debug data
 obstacle_avoidance_debug_data_init :: proc(debug_data: ^Obstacle_Avoidance_Debug_Data, max_samples: i32) -> recast.Status {
@@ -345,7 +347,7 @@ process_sample :: proc(query: ^Obstacle_Avoidance_Query, pos: [3]f32, radius: f3
         combined_radius := radius + circle.radius
 
         // Calculate time to collision
-        collision_time := ray_circle_intersect(rel_pos, rel_vel, combined_radius)
+        collision_time := geometry.ray_circle_intersect(rel_pos, rel_vel, combined_radius)
 
         if collision_time >= 0 && collision_time < min_toi {
             min_toi = collision_time
@@ -361,7 +363,7 @@ process_sample :: proc(query: ^Obstacle_Avoidance_Query, pos: [3]f32, radius: f3
 
     // Check against segment obstacles
     for &segment in query.segment_obstacles {
-        collision_time := ray_segment_intersect(pos, sample_vel, segment.start_pos, segment.end_pos, radius)
+        collision_time := geometry.ray_segment_intersect(pos, sample_vel, segment.start_pos, segment.end_pos, radius)
 
         if collision_time >= 0 && collision_time < min_toi {
             min_toi = collision_time
@@ -388,74 +390,6 @@ process_sample :: proc(query: ^Obstacle_Avoidance_Query, pos: [3]f32, radius: f3
     return penalty, toi
 }
 
-// Ray-circle intersection test
-ray_circle_intersect :: proc(pos, vel: [3]f32, radius: f32) -> f32 {
-    // 2D intersection in XZ plane
-    pxz := pos.xz
-    vxz := vel.xz
-
-    a := linalg.dot(vxz, vxz)
-    if a < 1e-6 do return -1  // No movement
-
-    b := 2.0 * linalg.dot(pxz, vxz)
-    c := linalg.dot(pxz, pxz) - radius*radius
-
-    discriminant := b*b - 4*a*c
-    if discriminant < 0 do return -1  // No intersection
-
-    sqrt_disc := math.sqrt(discriminant)
-    t1 := (-b - sqrt_disc) / (2*a)
-    t2 := (-b + sqrt_disc) / (2*a)
-
-    if t1 >= 0 do return t1
-    if t2 >= 0 do return t2
-    return -1
-}
-
-// Ray-segment intersection test
-ray_segment_intersect :: proc(pos, vel, seg_start, seg_end: [3]f32, radius: f32) -> f32 {
-    // Simplified 2D test in XZ plane
-    px, pz := pos[0], pos[2]
-    vx, vz := vel[0], vel[2]
-    sx, sz := seg_start[0], seg_start[2]
-    ex, ez := seg_end[0], seg_end[2]
-
-    // Segment direction
-    seg_dir := [2]f32{ex - sx, ez - sz}
-    seg_len := linalg.length(seg_dir)
-
-    if seg_len < 1e-6 do return -1
-
-    // Normalize segment direction
-    seg_dir_norm := seg_dir / seg_len
-    dx := seg_dir_norm.x
-    dz := seg_dir_norm.y
-
-    // Distance from point to line
-    to_start_x := px - sx
-    to_start_z := pz - sz
-
-    // Project onto segment
-    proj := to_start_x*dx + to_start_z*dz
-    proj = recast.clamp(proj, 0, seg_len)
-
-    // Closest point on segment
-    closest_x := sx + proj*dx
-    closest_z := sz + proj*dz
-
-    // Distance to closest point
-    dist_vec := [2]f32{px - closest_x, pz - closest_z}
-    dist := linalg.length(dist_vec)
-
-    if dist > radius do return -1
-
-    // Simple time calculation (could be more sophisticated)
-    vel := [2]f32{vx, vz}
-    speed := linalg.length(vel)
-    if speed < 1e-6 do return -1
-
-    return (dist - radius) / speed
-}
 
 // Get obstacle avoidance parameters
 obstacle_avoidance_query_get_params :: proc(query: ^Obstacle_Avoidance_Query, index: i32) -> ^Obstacle_Avoidance_Params {

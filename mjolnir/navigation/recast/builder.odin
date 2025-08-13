@@ -999,22 +999,23 @@ simplify_contour_vertices :: proc(points: ^[dynamic][4]i32, simplified: ^[dynami
 
 // Calculate squared distance from point to line segment
 distance_point_to_segment_sq :: proc(x, z, px, pz, qx, qz: i32) -> f32 {
-    pqx := f32(qx - px)
-    pqz := f32(qz - pz)
-    dx := f32(x - px)
-    dz := f32(z - pz)
-    d := pqx * pqx + pqz * pqz
-    t := pqx * dx + pqz * dz
-
-    if d > 0 {
-        t /= d
+    p := [2]f32{f32(px), f32(pz)}
+    q := [2]f32{f32(qx), f32(qz)}
+    pt := [2]f32{f32(x), f32(z)}
+    
+    seg := q - p
+    seg_len_sq := linalg.length2(seg)
+    t: f32 = 0
+    
+    if seg_len_sq > 0 {
+        t = linalg.dot(pt - p, seg) / seg_len_sq
     }
     t = math.clamp(t, 0, 1)
-
-    dx = f32(px) + t * pqx - f32(x)
-    dz = f32(pz) + t * pqz - f32(z)
-
-    return dx * dx + dz * dz
+    
+    closest := p + t * seg
+    diff := closest - pt
+    
+    return linalg.length2(diff)
 }
 
 // Split long edges based on max_edge_len parameter

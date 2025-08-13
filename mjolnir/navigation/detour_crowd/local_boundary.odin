@@ -5,6 +5,7 @@ import "core:math/linalg"
 import "core:slice"
 import recast "../recast"
 import detour "../detour"
+import geometry "../../geometry"
 
 // Initialize local boundary
 local_boundary_init :: proc(boundary: ^Local_Boundary, max_segs: i32) -> recast.Status {
@@ -99,7 +100,7 @@ local_boundary_update :: proc(boundary: ^Local_Boundary, ref: recast.Poly_Ref, p
             vb := tile.verts[vb_idx]
 
             // Check if edge is within collision range
-            dist_to_seg := dt_distance_point_to_segment_2d(pos, va, vb)
+            dist_to_seg := geometry.distance_point_to_segment_2d(pos, va, vb)
             if dist_to_seg > collision_query_range do continue
 
             // Add boundary segment
@@ -121,7 +122,7 @@ local_boundary_is_valid :: proc(boundary: ^Local_Boundary, pos: [3]f32, radius: 
         seg_start := [3]f32{segment[0], segment[1], segment[2]}
         seg_end := [3]f32{segment[3], segment[4], segment[5]}
 
-        dist := dt_distance_point_to_segment_2d(pos, seg_start, seg_end)
+        dist := geometry.distance_point_to_segment_2d(pos, seg_start, seg_end)
         if dist < radius {
             return false
         }
@@ -144,7 +145,7 @@ local_boundary_get_closest_point :: proc(boundary: ^Local_Boundary, pos: [3]f32)
         seg_start := [3]f32{segment[0], segment[1], segment[2]}
         seg_end := [3]f32{segment[3], segment[4], segment[5]}
 
-        point := dt_closest_point_on_segment_2d(pos, seg_start, seg_end)
+        point := geometry.closest_point_on_segment_2d(pos, seg_start, seg_end)
         dist := linalg.length2((point - pos).xz)
 
         if dist < min_dist {
@@ -157,53 +158,6 @@ local_boundary_get_closest_point :: proc(boundary: ^Local_Boundary, pos: [3]f32)
     return closest_point, found
 }
 
-// Distance from point to line segment in 2D (XZ plane)
-dt_distance_point_to_segment_2d :: proc(point, seg_start, seg_end: [3]f32) -> f32 {
-    // Use XZ plane for 2D calculations
-    p := point.xz
-    a := seg_start.xz
-    b := seg_end.xz
-
-    seg := b - a
-    seg_len_sq := linalg.length2(seg)
-
-    diff: [2]f32
-    if seg_len_sq > 1e-6 {
-        t := linalg.dot(p - a, seg) / seg_len_sq
-
-        if t > 1.0 {
-            diff = p - b
-        } else if t > 0.0 {
-            diff = p - (a + t*seg)
-        } else {
-            diff = p - a
-        }
-    } else {
-        diff = p - a
-    }
-
-    return linalg.length(diff)
-}
-
-// Find closest point on line segment in 2D (XZ plane)
-dt_closest_point_on_segment_2d :: proc(point, seg_start, seg_end: [3]f32) -> [3]f32 {
-    // Use XZ plane for 2D calculations
-    px, pz := point[0], point[2]
-    ax, az := seg_start[0], seg_start[2]
-    bx, bz := seg_end[0], seg_end[2]
-
-    dx := bx - ax
-    dz := bz - az
-
-    if dx*dx + dz*dz > 1e-6 {
-        t := ((px - ax) * dx + (pz - az) * dz) / (dx*dx + dz*dz)
-        t = recast.clamp(t, 0.0, 1.0)
-
-        return linalg.mix(seg_start, seg_end, t)
-    }
-
-    return seg_start
-}
 
 // Get number of boundary segments
 local_boundary_get_segment_count :: proc(boundary: ^Local_Boundary) -> i32 {
@@ -236,7 +190,7 @@ local_boundary_contains_point :: proc(boundary: ^Local_Boundary, pos: [3]f32, ra
         seg_start := [3]f32{segment[0], segment[1], segment[2]}
         seg_end := [3]f32{segment[3], segment[4], segment[5]}
 
-        dist := dt_distance_point_to_segment_2d(pos, seg_start, seg_end)
+        dist := geometry.distance_point_to_segment_2d(pos, seg_start, seg_end)
         if dist < radius {
             return false
         }
@@ -258,11 +212,11 @@ local_boundary_project_point :: proc(boundary: ^Local_Boundary, pos: [3]f32, rad
         seg_start := [3]f32{segment[0], segment[1], segment[2]}
         seg_end := [3]f32{segment[3], segment[4], segment[5]}
 
-        dist := dt_distance_point_to_segment_2d(result, seg_start, seg_end)
+        dist := geometry.distance_point_to_segment_2d(result, seg_start, seg_end)
 
         if dist < radius {
             // Find closest point on segment and push away
-            closest := dt_closest_point_on_segment_2d(result, seg_start, seg_end)
+            closest := geometry.closest_point_on_segment_2d(result, seg_start, seg_end)
 
             // Calculate direction away from boundary
             dir := result.xz - closest.xz

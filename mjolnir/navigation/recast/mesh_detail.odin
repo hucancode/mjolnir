@@ -1514,9 +1514,8 @@ build_polygon_detail_mesh_with_timeout :: proc(poly: ^Detail_Polygon, chf: ^Comp
             v1 := poly.vertices[edge.v1].pos
 
             // Calculate edge length in XZ plane (matches C++ line 730)
-            dx := v1.x - v0.x
-            dz := v1.z - v0.z
-            d := math.sqrt(dx*dx + dz*dz)
+            edge_vec := v1.xz - v0.xz
+            d := linalg.length(edge_vec)
 
             // Calculate number of segments (matches C++ line 731)
             nn := 1 + i32(math.floor(d / poly.sample_dist))
@@ -1651,9 +1650,8 @@ build_polygon_detail_mesh :: proc(poly: ^Detail_Polygon, chf: ^Compact_Heightfie
             v1 := poly.vertices[edge.v1].pos
 
             // Calculate edge length in XZ plane (matches C++ line 730)
-            dx := v1.x - v0.x
-            dz := v1.z - v0.z
-            d := math.sqrt(dx*dx + dz*dz)
+            edge_vec := v1.xz - v0.xz
+            d := linalg.length(edge_vec)
 
             // Calculate number of segments (matches C++ line 731)
             nn := 1 + i32(math.floor(d / poly.sample_dist))
