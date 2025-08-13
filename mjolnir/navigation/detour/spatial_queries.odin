@@ -764,6 +764,11 @@ find_polys_around_circle :: proc(query: ^Nav_Mesh_Query, start_ref: recast.Poly_
         return 0, {.Invalid_Param}
     }
 
+    // Check if result arrays have sufficient capacity
+    if i32(len(result_ref)) < max_result || i32(len(result_parent)) < max_result || i32(len(result_cost)) < max_result {
+        return 0, {.Invalid_Param}
+    }
+
     result_count = 0
     radius_sqr := radius * radius
 

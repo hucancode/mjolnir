@@ -12,10 +12,11 @@ crowd_build_proximity_grid :: proc(crowd: ^Crowd) {
 
     proximity_grid_clear(crowd.proximity_grid)
 
-    for i, &agent in crowd.active_agents {
+    for agent in crowd.active_agents {
         if !agent.active do continue
 
-        agent_id := u16(i)
+        agent_idx := crowd_get_agent_index(crowd, agent)
+        agent_id := u16(agent_idx)
         pos := agent.position
         radius := agent.params.radius
 
@@ -30,7 +31,7 @@ crowd_build_proximity_grid :: proc(crowd: ^Crowd) {
 crowd_find_neighbors :: proc(crowd: ^Crowd) {
     if crowd == nil || crowd.proximity_grid == nil do return
 
-    for i, &agent in crowd.active_agents {
+    for agent, agent_idx in crowd.active_agents {
         if !agent.active do continue
 
         agent.neighbor_count = 0
@@ -57,7 +58,7 @@ crowd_find_neighbors :: proc(crowd: ^Crowd) {
 
         for j in 0..<neighbor_count {
             neighbor_idx := int(neighbors[j])
-            if neighbor_idx == i do continue  // Skip self
+            if neighbor_idx == agent_idx do continue  // Skip self
             if neighbor_idx >= len(crowd.active_agents) do continue
 
             neighbor_agent := crowd.active_agents[neighbor_idx]
@@ -145,8 +146,8 @@ crowd_trigger_off_mesh_connections :: proc(crowd: ^Crowd) {
 
         // Check if agent should trigger off-mesh connection
         if agent.corner_count > 0 {
-            corner_flags := detour.Straight_Path_Flags(agent.corner_flags[0])
-            if .Off_Mesh_Connection in corner_flags {
+            corner_flags := agent.corner_flags[0]
+            if corner_flags & u8(detour.Straight_Path_Flags.Off_Mesh_Connection) != 0 {
                 // Trigger off-mesh connection
                 agent.state = .Off_Mesh
                 // In a full implementation, you'd handle the animation here
@@ -172,17 +173,36 @@ crowd_calculate_steering :: proc(crowd: ^Crowd, dt: f32) {
 
         } else if agent.target_state == .Valid && agent.corner_count > 0 {
             // Path following
-            target_pos := agent.corner_verts[0]
+            // Skip the first corner if it's too close to the current position (it's the start point)
+            corner_idx := i32(0)
+            for corner_idx < agent.corner_count {
+                corner_pos := agent.corner_verts[corner_idx]
+                dist_to_corner := linalg.length(corner_pos - agent.position)
+                if dist_to_corner > agent.params.radius {
+                    break  // Found a corner that's far enough
+                }
+                corner_idx += 1
+            }
+            
+            if corner_idx >= agent.corner_count {
+                // No valid corners, we've reached the end
+                agent.desired_velocity = {}
+                agent.desired_speed = 0
+                return
+            }
+            
+            target_pos := agent.corner_verts[corner_idx]
 
             // Calculate direction to next corner
-            dir := target_pos.xz - agent.position.xz
+            dir := target_pos - agent.position
+            dir.y = 0  // Zero out vertical component
             distance := linalg.length(dir)
 
             if distance > 0.01 {
                 // Normalize direction
-                dir_norm := dir / distance
+                dir_norm := linalg.normalize(dir)
                 dx := dir_norm.x
-                dz := dir_norm.y
+                dz := dir_norm.z
 
                 // Set desired velocity toward target
                 agent.desired_speed = agent.params.max_speed
@@ -231,7 +251,7 @@ crowd_calculate_steering :: proc(crowd: ^Crowd, dt: f32) {
 crowd_plan_velocity :: proc(crowd: ^Crowd, dt: f32, debug_data: ^Crowd_Agent_Debug_Info) {
     if crowd == nil do return
 
-    for i, &agent in crowd.active_agents {
+    for agent in crowd.active_agents {
         if !agent.active do continue
 
         agent.new_velocity = agent.desired_velocity
@@ -291,7 +311,7 @@ crowd_plan_velocity :: proc(crowd: ^Crowd, dt: f32, debug_data: ^Crowd_Agent_Deb
 
         // Add separation force
         if .Separation in agent.params.update_flags {
-            separation := calculate_separation_force(&agent, crowd.active_agents[:])
+            separation := calculate_separation_force(agent, crowd.active_agents[:])
             agent.new_velocity += separation * agent.params.separation_weight
         }
 
@@ -335,6 +355,9 @@ crowd_integrate :: proc(crowd: ^Crowd, dt: f32) {
             if moved {
                 agent.position = path_corridor_get_pos(&agent.corridor)
             }
+        } else if agent.state == .Invalid {
+            // For agents without valid navmesh position, just integrate directly
+            agent.position += agent.velocity * dt
         }
     }
 }
@@ -344,7 +367,7 @@ crowd_handle_collisions :: proc(crowd: ^Crowd) {
     if crowd == nil do return
 
     // Simple collision resolution - separate overlapping agents
-    for i, &agent_a in crowd.active_agents {
+    for &agent_a, i in crowd.active_agents {
         if !agent_a.active do continue
 
         for j in i+1..<len(crowd.active_agents) {

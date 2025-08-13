@@ -47,7 +47,7 @@ path_queue_request :: proc(queue: ^Path_Queue, start_ref, end_ref: recast.Poly_R
     }
 
     // Check if queue is full
-    if len(queue.queue) >= queue.max_queue {
+    if i32(len(queue.queue)) >= queue.max_queue {
         return Path_Queue_Ref(0), {.Buffer_Too_Small}
     }
 
@@ -105,9 +105,9 @@ path_queue_update :: proc(queue: ^Path_Queue, max_iter: i32) -> recast.Status {
         path_result := make([]recast.Poly_Ref, queue.max_path_size)
         defer delete(path_result)
 
-        path_count, find_status := detour.find_path(
+        find_status, path_count := detour.find_path(
             queue.nav_query, query.start_ref, query.end_ref,
-            query.start_pos, query.end_pos, query.filter, path_result
+            query.start_pos, query.end_pos, query.filter, path_result, queue.max_path_size
         )
 
         // Update query status
@@ -169,9 +169,9 @@ path_queue_get_path_result :: proc(queue: ^Path_Queue, ref: Path_Queue_Ref,
             path_result := make([]recast.Poly_Ref, queue.max_path_size)
             defer delete(path_result)
 
-            path_count, find_status := detour.find_path(
+            find_status, path_count := detour.find_path(
                 queue.nav_query, query.start_ref, query.end_ref,
-                query.start_pos, query.end_pos, query.filter, path_result
+                query.start_pos, query.end_pos, query.filter, path_result, queue.max_path_size
             )
 
             if recast.status_failed(find_status) {
@@ -202,7 +202,7 @@ path_queue_cancel_request :: proc(queue: ^Path_Queue, ref: Path_Queue_Ref) -> re
     }
 
     // Find and remove query
-    for i, &query in queue.queue {
+    for &query, i in queue.queue {
         if query.ref == ref {
             ordered_remove(&queue.queue, i)
             return {.Success}
@@ -224,7 +224,7 @@ path_queue_get_stats :: proc(queue: ^Path_Queue) -> (queue_size: i32, max_queue_
 // Check if queue is full
 path_queue_is_full :: proc(queue: ^Path_Queue) -> bool {
     if queue == nil do return true
-    return len(queue.queue) >= queue.max_queue
+    return i32(len(queue.queue)) >= queue.max_queue
 }
 
 // Check if queue is empty
@@ -276,7 +276,7 @@ path_queue_resize :: proc(queue: ^Path_Queue, new_max_queue: i32) -> recast.Stat
     queue.max_queue = new_max_queue
 
     // If current queue is larger than new max, truncate it
-    if len(queue.queue) > new_max_queue {
+    if i32(len(queue.queue)) > new_max_queue {
         resize(&queue.queue, new_max_queue)
     }
 
@@ -331,9 +331,9 @@ path_queue_force_complete :: proc(queue: ^Path_Queue, ref: Path_Queue_Ref) -> re
             path_result := make([]recast.Poly_Ref, queue.max_path_size)
             defer delete(path_result)
 
-            path_count, find_status := detour.find_path(
+            find_status, path_count := detour.find_path(
                 queue.nav_query, query.start_ref, query.end_ref,
-                query.start_pos, query.end_pos, query.filter, path_result
+                query.start_pos, query.end_pos, query.filter, path_result, queue.max_path_size
             )
 
             // Update query status

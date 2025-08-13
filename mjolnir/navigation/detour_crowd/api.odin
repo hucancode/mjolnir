@@ -19,68 +19,8 @@ crowd_create :: proc(max_agents: i32, max_agent_radius: f32, nav_query: ^detour.
     return crowd, {.Success}
 }
 
-// Destroy crowd manager and free resources
-crowd_destroy :: proc(crowd: ^Crowd) {
-    if crowd == nil do return
-
-    crowd_destroy(crowd)
-    free(crowd)
-}
-
-// Add agent to crowd
-crowd_add_agent :: proc(crowd: ^Crowd, pos: [3]f32, params: ^Crowd_Agent_Params) -> (recast.Agent_Id, recast.Status) {
-    return crowd_add_agent(crowd, pos, params)
-}
-
-// Remove agent from crowd
-crowd_remove_agent :: proc(crowd: ^Crowd, agent_id: recast.Agent_Id) -> recast.Status {
-    return crowd_remove_agent(crowd, agent_id)
-}
-
-// Update crowd simulation
-crowd_update :: proc(crowd: ^Crowd, dt: f32, debug_data: ^Crowd_Agent_Debug_Info = nil) -> recast.Status {
-    return crowd_update(crowd, dt, debug_data)
-}
-
-// Request agent to move to target position
-crowd_request_move_target :: proc(crowd: ^Crowd, agent_id: recast.Agent_Id, ref: recast.Poly_Ref, pos: [3]f32) -> recast.Status {
-    return crowd_request_move_target(crowd, agent_id, ref, pos)
-}
-
-// Request agent to move with specified velocity
-crowd_request_move_velocity :: proc(crowd: ^Crowd, agent_id: recast.Agent_Id, vel: [3]f32) -> recast.Status {
-    return crowd_request_move_velocity(crowd, agent_id, vel)
-}
-
-// Get agent by ID
-crowd_get_agent :: proc(crowd: ^Crowd, agent_id: recast.Agent_Id) -> ^Crowd_Agent {
-    return crowd_get_agent(crowd, agent_id)
-}
-
-// Get number of active agents
-crowd_get_agent_count :: proc(crowd: ^Crowd) -> i32 {
-    return crowd_get_agent_count(crowd)
-}
-
-// Get query filter for specified type
-crowd_get_filter :: proc(crowd: ^Crowd, filter_type: i32) -> ^detour.Query_Filter {
-    return crowd_get_filter(crowd, filter_type)
-}
-
-// Get editable query filter for specified type
-crowd_get_editable_filter :: proc(crowd: ^Crowd, filter_type: i32) -> ^detour.Query_Filter {
-    return crowd_get_editable_filter(crowd, filter_type)
-}
-
-// Set obstacle avoidance parameters
-crowd_set_obstacle_avoidance_params :: proc(crowd: ^Crowd, index: i32, params: ^Obstacle_Avoidance_Params) -> recast.Status {
-    return crowd_set_obstacle_avoidance_params(crowd, index, params)
-}
-
-// Get obstacle avoidance parameters
-crowd_get_obstacle_avoidance_params :: proc(crowd: ^Crowd, index: i32) -> ^Obstacle_Avoidance_Params {
-    return crowd_get_obstacle_avoidance_params(crowd, index)
-}
+// Note: The following functions are already implemented in crowd.odin
+// and are exported from the package there
 
 // Agent parameter helpers
 agent_params_create_default :: proc() -> Crowd_Agent_Params {
@@ -184,7 +124,8 @@ crowd_find_nearest_position :: proc(crowd: ^Crowd, pos: [3]f32, filter_type: i32
         return recast.INVALID_POLY_REF, {}, {.Invalid_Param}
     }
 
-    return detour.find_nearest_poly(crowd.nav_query, pos, crowd.agent_placement_half_extents, filter)
+    status, ref, nearest_pos := detour.find_nearest_poly(crowd.nav_query, pos, crowd.agent_placement_half_extents, filter)
+    return ref, nearest_pos, status
 }
 
 // Check if position is valid for agent placement
@@ -218,7 +159,7 @@ crowd_get_statistics :: proc(crowd: ^Crowd) -> struct {
 
     if crowd == nil do return stats
 
-    stats.active_agents = crowd_get_agent_count(crowd)
+    stats.active_agents = crowd_get_active_agent_count(crowd)
     stats.max_agents = crowd.max_agents
     stats.queue_size, stats.max_queue_size = path_queue_get_stats(&crowd.path_queue)
     stats.pending_path_requests = path_queue_get_pending_count(&crowd.path_queue)

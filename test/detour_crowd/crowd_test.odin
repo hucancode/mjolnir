@@ -280,10 +280,9 @@ test_crowd_agent_management :: proc(t: ^testing.T) {
     testing.expect(t, recast.status_succeeded(status), "Failed to create crowd")
     defer crowd.crowd_destroy(crowd_system)
 
-    if crowd_system == nil do return
-
-    // Test initial state
-    testing.expect(t, crowd.crowd_get_agent_count(crowd_system) == 0, "Should have no agents initially")
+    // Test initial state  
+    testing.expect(t, crowd.crowd_get_agent_count(crowd_system) == 5, "Should have 5 total agent slots")
+    testing.expect(t, crowd.crowd_get_active_agent_count(crowd_system) == 0, "Should have no active agents initially")
 
     // Test agent parameter creation
     params := crowd.agent_params_create_default()

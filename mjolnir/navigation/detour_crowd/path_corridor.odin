@@ -64,14 +64,19 @@ path_corridor_find_corners :: proc(corridor: ^Path_Corridor,
     // Convert dynamic slice to regular slice for the query
     path_slice := corridor.path[:]
 
+    // Early return if no path is available
+    if len(path_slice) == 0 {
+        return 0, {.Success}
+    }
+
     // Create buffers for straight path results
     straight_path := make([]detour.Straight_Path_Point, max_straight)
     defer delete(straight_path)
 
     // Find straight path from current position to target
-    straight_count, status := detour.find_straight_path(
-        nav_query, corridor.position, corridor.target, path_slice,
-        straight_path, detour.Straight_Path_Options{},
+    status, straight_count := detour.find_straight_path(
+        nav_query, corridor.position, corridor.target, path_slice, i32(len(path_slice)),
+        straight_path, corner_flags, corner_polys, max_straight, 0
     )
 
     if recast.status_failed(status) {
@@ -81,18 +86,10 @@ path_corridor_find_corners :: proc(corridor: ^Path_Corridor,
     // Convert results to output format
     corner_count := min(straight_count, max_corners)
     for i in 0..<corner_count {
-        if i*3+2 < len(corner_verts) {
+        if i*3+2 < i32(len(corner_verts)) {
             corner_verts[i*3+0] = straight_path[i].pos[0]
             corner_verts[i*3+1] = straight_path[i].pos[1]
             corner_verts[i*3+2] = straight_path[i].pos[2]
-        }
-
-        if i < len(corner_flags) {
-            corner_flags[i] = u8(straight_path[i].flags)
-        }
-
-        if i < len(corner_polys) {
-            corner_polys[i] = straight_path[i].ref
         }
     }
 
@@ -125,7 +122,7 @@ path_corridor_optimize_path_visibility :: proc(corridor: ^Path_Corridor, next: [
     // If we didn't hit anything, we can optimize toward the target
     if hit.t >= 1.0 {
         // Find the polygon containing the next position
-        next_ref, _, query_status := detour.find_nearest_poly(nav_query, next, {2,2,2}, filter)
+        query_status, next_ref, _ := detour.find_nearest_poly(nav_query, next, {2,2,2}, filter)
         if recast.status_succeeded(query_status) && next_ref != recast.INVALID_POLY_REF {
             // Replace the path up to this point
             clear(&corridor.path)
@@ -162,9 +159,9 @@ path_corridor_optimize_path_topology :: proc(corridor: ^Path_Corridor, nav_query
         polys := make([]recast.Poly_Ref, MAX_RES)
         defer delete(polys)
 
-        poly_count, status := detour.dt_find_polys_around_circle(
+        poly_count, status := detour.find_polys_around_circle(
             nav_query, corridor.path[0], corridor.position,
-            8.0, filter, polys
+            8.0, filter, polys, nil, nil, MAX_RES
         )
 
         if recast.status_failed(status) do break
@@ -222,13 +219,15 @@ path_corridor_move_position :: proc(corridor: ^Path_Corridor, new_pos: [3]f32,
     visited := make([]recast.Poly_Ref, MAX_VISITED)
     defer delete(visited)
 
-    visited_count, status := detour.move_along_surface(
-        nav_query, corridor.path[0], corridor.position, new_pos, filter, visited
+    result_pos, visited_count, status := detour.move_along_surface(
+        nav_query, corridor.path[0], corridor.position, new_pos, filter, visited, MAX_VISITED
     )
 
     if recast.status_failed(status) {
         return false, status
     }
+
+    corridor.position = result_pos
 
     // Update the corridor path with visited polygons
     if visited_count > 0 {
@@ -275,7 +274,7 @@ path_corridor_move_target :: proc(corridor: ^Path_Corridor, new_target: [3]f32,
     }
 
     // Find the polygon containing the new target
-    target_ref, _, status := detour.find_nearest_poly(nav_query, new_target, {2,2,2}, filter)
+    status, target_ref, _ := detour.find_nearest_poly(nav_query, new_target, {2,2,2}, filter)
     if recast.status_failed(status) {
         return status
     }
@@ -299,14 +298,14 @@ path_corridor_move_target :: proc(corridor: ^Path_Corridor, new_target: [3]f32,
 
         // Find path from current end to new target
         last_poly := corridor.path[len(corridor.path)-1]
-        path_count, find_status := detour.find_path(
-            nav_query, last_poly, target_ref, corridor.target, new_target, filter, path_result
+        find_status, path_count := detour.find_path(
+            nav_query, last_poly, target_ref, corridor.target, new_target, filter, path_result, corridor.max_path
         )
 
         if recast.status_succeeded(find_status) && path_count > 1 {
             // Append new path (skip first polygon as it's already in corridor)
             for i in 1..<path_count {
-                if len(corridor.path) < corridor.max_path {
+                if i32(len(corridor.path)) < corridor.max_path {
                     append(&corridor.path, path_result[i])
                 }
             }
@@ -385,15 +384,8 @@ path_corridor_trim_invalid_path :: proc(corridor: ^Path_Corridor, safe_ref: reca
     }
 
     // Find the safe polygon in the current path
-    safe_index := -1
-    for i, poly in corridor.path {
-        if poly == safe_ref {
-            safe_index = i
-            break
-        }
-    }
-
-    if safe_index == -1 {
+    safe_index, found := slice.linear_search(corridor.path[:], safe_ref)
+    if !found {
         // Safe polygon not in path, replace entire path
         clear(&corridor.path)
         append(&corridor.path, safe_ref)

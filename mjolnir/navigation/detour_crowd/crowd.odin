@@ -123,22 +123,33 @@ crowd_add_agent :: proc(crowd: ^Crowd, pos: [3]f32, params: ^Crowd_Agent_Params)
     agent := &crowd.agents[agent_idx]
 
     // Find nearest polygon for starting position
-    nearest_ref, nearest_pos, status := detour.find_nearest_poly(
+    status, nearest_ref, nearest_pos := detour.find_nearest_poly(
         crowd.nav_query, pos, crowd.agent_placement_half_extents, &crowd.filters[params.query_filter_type]
     )
 
+    // Copy position, using original if findNearestPoly failed
+    final_pos := nearest_pos
+    final_ref := nearest_ref
+    
     if recast.status_failed(status) || nearest_ref == recast.INVALID_POLY_REF {
-        return recast.Agent_Id(0), {.Invalid_Param}
+        final_pos = pos
+        final_ref = recast.INVALID_POLY_REF
     }
 
     // Initialize agent
     agent.active = true
-    agent.state = .Walking
     agent.partial = false
     agent.params = params^
 
+    // Set state based on whether we found a valid polygon
+    if final_ref != recast.INVALID_POLY_REF {
+        agent.state = .Walking
+    } else {
+        agent.state = .Invalid
+    }
+
     // Set initial position and state
-    agent.position = nearest_pos
+    agent.position = final_pos
     agent.displacement = {}
     agent.desired_velocity = {}
     agent.new_velocity = {}
@@ -146,7 +157,7 @@ crowd_add_agent :: proc(crowd: ^Crowd, pos: [3]f32, params: ^Crowd_Agent_Params)
     agent.desired_speed = 0
 
     // Reset path corridor to starting position
-    path_corridor_reset(&agent.corridor, nearest_ref, nearest_pos)
+    path_corridor_reset(&agent.corridor, final_ref, final_pos)
 
     // Reset boundary
     local_boundary_reset(&agent.boundary)
@@ -283,9 +294,12 @@ crowd_request_move_target :: proc(crowd: ^Crowd, agent_id: recast.Agent_Id,
         agent.target_path_ref = Path_Queue_Ref(0)
     }
 
-    // If target is close, set directly
+    // If target is on the same polygon, create a simple path
     if path_corridor_get_first_poly(&agent.corridor) == ref {
         agent.target_state = .Valid
+        // Reset corridor with just the current polygon
+        path_corridor_reset(&agent.corridor, ref, agent.position)
+        // Move target to the desired position
         path_corridor_move_target(&agent.corridor, pos, crowd.nav_query, &crowd.filters[agent.params.query_filter_type])
     } else {
         // Request path computation
@@ -357,7 +371,7 @@ crowd_get_agent :: proc(crowd: ^Crowd, agent_id: recast.Agent_Id) -> ^Crowd_Agen
 // Get agent count
 crowd_get_agent_count :: proc(crowd: ^Crowd) -> i32 {
     if crowd == nil do return 0
-    return i32(len(crowd.active_agents))
+    return crowd.max_agents
 }
 
 // Get query filter
@@ -396,7 +410,7 @@ crowd_update_move_request :: proc(crowd: ^Crowd, dt: f32) {
     if crowd == nil do return
 
     for &agent in crowd.active_agents {
-        switch agent.target_state {
+        #partial switch agent.target_state {
         case .Requesting:
             // Check if path is ready
             status := path_queue_get_request_status(&crowd.path_queue, agent.target_path_ref)
@@ -461,6 +475,96 @@ crowd_update_topology_optimization :: proc(crowd: ^Crowd, dt: f32) {
             }
         }
     }
+}
+
+// Update agent parameters after creation
+crowd_update_agent_parameters :: proc(crowd: ^Crowd, agent_id: recast.Agent_Id, params: ^Crowd_Agent_Params) -> recast.Status {
+    if crowd == nil || params == nil {
+        return {.Invalid_Param}
+    }
+    
+    agent_idx := int(agent_id) - 1  // Convert to 0-based index
+    if agent_idx < 0 || agent_idx >= len(crowd.agents) {
+        return {.Invalid_Param}
+    }
+    
+    agent := &crowd.agents[agent_idx]
+    if !agent.active {
+        return {.Invalid_Param}
+    }
+    
+    // Update agent parameters
+    agent.params = params^
+    
+    return {.Success}
+}
+
+// Reset agent's movement target
+crowd_reset_move_target :: proc(crowd: ^Crowd, agent_id: recast.Agent_Id) -> recast.Status {
+    if crowd == nil {
+        return {.Invalid_Param}
+    }
+    
+    agent_idx := int(agent_id) - 1  // Convert to 0-based index
+    if agent_idx < 0 || agent_idx >= len(crowd.agents) {
+        return {.Invalid_Param}
+    }
+    
+    agent := &crowd.agents[agent_idx]
+    if !agent.active {
+        return {.Invalid_Param}
+    }
+    
+    // Cancel any pending path request
+    if agent.target_path_ref != Path_Queue_Ref(0) {
+        path_queue_cancel_request(&crowd.path_queue, agent.target_path_ref)
+        agent.target_path_ref = Path_Queue_Ref(0)
+    }
+    
+    // Reset target state
+    agent.target_state = .None
+    agent.target_ref = recast.INVALID_POLY_REF
+    agent.target_pos = {}
+    agent.target_replan = false
+    agent.target_replan_time = 0
+    
+    // Clear velocity for velocity-based movement
+    agent.desired_velocity = {}
+    agent.desired_speed = 0
+    
+    return {.Success}
+}
+
+// Get array of active agents  
+crowd_get_active_agents :: proc(crowd: ^Crowd) -> []^Crowd_Agent {
+    if crowd == nil do return nil
+    return crowd.active_agents[:]
+}
+
+// Get count of active agents
+crowd_get_active_agent_count :: proc(crowd: ^Crowd) -> i32 {
+    if crowd == nil do return 0
+    return i32(len(crowd.active_agents))
+}
+
+// Get agent index from pointer
+crowd_get_agent_index :: proc(crowd: ^Crowd, agent: ^Crowd_Agent) -> i32 {
+    if crowd == nil || agent == nil do return -1
+    
+    // Calculate index from pointer arithmetic
+    agent_ptr := uintptr(agent)
+    base_ptr := uintptr(&crowd.agents[0])
+    
+    if agent_ptr < base_ptr do return -1
+    
+    offset := agent_ptr - base_ptr
+    index := i32(offset / size_of(Crowd_Agent))
+    
+    if index >= 0 && index < crowd.max_agents {
+        return index
+    }
+    
+    return -1
 }
 
 // Helper function: Check path validity

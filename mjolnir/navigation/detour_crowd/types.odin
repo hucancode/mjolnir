@@ -38,13 +38,15 @@ Move_Request_State :: enum u8 {
 }
 
 // Agent update flags
-Update_Flags :: enum u8 {
-    Anticipate_Turns      = 1,
-    Obstacle_Avoidance    = 2,
-    Separation           = 4,
-    Optimize_Vis         = 8,
-    Optimize_Topo        = 16,
+Update_Flag :: enum u8 {
+    Anticipate_Turns      = 0,
+    Obstacle_Avoidance    = 1,
+    Separation           = 2,
+    Optimize_Vis         = 3,
+    Optimize_Topo        = 4,
 }
+
+Update_Flags :: bit_set[Update_Flag; u8]
 
 // Crowd neighbor information
 Crowd_Neighbor :: struct {

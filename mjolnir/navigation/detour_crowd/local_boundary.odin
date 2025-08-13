@@ -64,8 +64,8 @@ local_boundary_update :: proc(boundary: ^Local_Boundary, ref: recast.Poly_Ref, p
     polys := make([]recast.Poly_Ref, MAX_LOCAL_POLYS)
     defer delete(polys)
 
-    poly_count, status := detour.dt_find_polys_around_circle(
-        nav_query, ref, pos, collision_query_range, filter, polys
+    poly_count, status := detour.find_polys_around_circle(
+        nav_query, ref, pos, collision_query_range, filter, polys, nil, nil, MAX_LOCAL_POLYS
     )
 
     if recast.status_failed(status) {
@@ -74,7 +74,7 @@ local_boundary_update :: proc(boundary: ^Local_Boundary, ref: recast.Poly_Ref, p
 
     // Extract boundary segments from the polygons
     for i in 0..<poly_count {
-        if len(boundary.segments) >= boundary.max_segs do break
+        if i32(len(boundary.segments)) >= boundary.max_segs do break
 
         poly_ref := polys[i]
 
@@ -84,7 +84,7 @@ local_boundary_update :: proc(boundary: ^Local_Boundary, ref: recast.Poly_Ref, p
 
         // Check each edge of the polygon
         for j in 0..<poly.vert_count {
-            if len(boundary.segments) >= boundary.max_segs do break
+            if i32(len(boundary.segments)) >= boundary.max_segs do break
 
             // Check if this edge is a boundary (no neighbor)
             neighbor := poly.neis[j]
@@ -138,7 +138,7 @@ local_boundary_get_closest_point :: proc(boundary: ^Local_Boundary, pos: [3]f32)
     }
 
     closest_point := pos
-    min_dist := math.F32_MAX
+    min_dist := f32(math.F32_MAX)
     found := false
 
     for segment in boundary.segments {
@@ -158,6 +158,53 @@ local_boundary_get_closest_point :: proc(boundary: ^Local_Boundary, pos: [3]f32)
     return closest_point, found
 }
 
+// Distance from point to line segment in 2D (XZ plane)
+dt_distance_point_to_segment_2d :: proc(point, seg_start, seg_end: [3]f32) -> f32 {
+    // Use XZ plane for 2D calculations
+    p := point.xz
+    a := seg_start.xz
+    b := seg_end.xz
+
+    seg := b - a
+    seg_len_sq := linalg.length2(seg)
+
+    diff: [2]f32
+    if seg_len_sq > 1e-6 {
+        t := linalg.dot(p - a, seg) / seg_len_sq
+
+        if t > 1.0 {
+            diff = p - b
+        } else if t > 0.0 {
+            diff = p - (a + t*seg)
+        } else {
+            diff = p - a
+        }
+    } else {
+        diff = p - a
+    }
+
+    return linalg.length(diff)
+}
+
+// Find closest point on line segment in 2D (XZ plane)
+dt_closest_point_on_segment_2d :: proc(point, seg_start, seg_end: [3]f32) -> [3]f32 {
+    // Use XZ plane for 2D calculations
+    px, pz := point[0], point[2]
+    ax, az := seg_start[0], seg_start[2]
+    bx, bz := seg_end[0], seg_end[2]
+
+    dx := bx - ax
+    dz := bz - az
+
+    if dx*dx + dz*dz > 1e-6 {
+        t := ((px - ax) * dx + (pz - az) * dz) / (dx*dx + dz*dz)
+        t = clamp(t, 0.0, 1.0)
+
+        return linalg.mix(seg_start, seg_end, t)
+    }
+
+    return seg_start
+}
 
 // Get number of boundary segments
 local_boundary_get_segment_count :: proc(boundary: ^Local_Boundary) -> i32 {

@@ -68,7 +68,7 @@ proximity_grid_add_item :: proc(grid: ^Proximity_Grid, item_id: u16, min_x, min_
         return {.Invalid_Param}
     }
 
-    if len(grid.pool) + 4 >= grid.max_items * 2 {
+    if i32(len(grid.pool)) + 4 >= grid.max_items * 2 {
         return {.Out_Of_Memory}
     }
 

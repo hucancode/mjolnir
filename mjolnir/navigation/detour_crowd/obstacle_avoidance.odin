@@ -59,7 +59,7 @@ obstacle_avoidance_debug_data_add_sample :: proc(debug_data: ^Obstacle_Avoidance
         return {.Invalid_Param}
     }
 
-    if len(debug_data.sample_velocities) >= debug_data.max_samples {
+    if i32(len(debug_data.sample_velocities)) >= debug_data.max_samples {
         return {.Buffer_Too_Small}
     }
 
@@ -151,7 +151,7 @@ obstacle_avoidance_query_add_circle :: proc(query: ^Obstacle_Avoidance_Query, po
         return {.Invalid_Param}
     }
 
-    if len(query.circle_obstacles) >= query.max_circles {
+    if i32(len(query.circle_obstacles)) >= query.max_circles {
         return {.Buffer_Too_Small}
     }
 
@@ -174,7 +174,7 @@ obstacle_avoidance_query_add_segment :: proc(query: ^Obstacle_Avoidance_Query, p
         return {.Invalid_Param}
     }
 
-    if len(query.segment_obstacles) >= query.max_segments {
+    if i32(len(query.segment_obstacles)) >= query.max_segments {
         return {.Buffer_Too_Small}
     }
 
@@ -201,7 +201,7 @@ obstacle_avoidance_query_sample_velocity_grid :: proc(query: ^Obstacle_Avoidance
 
     // Generate velocity samples on a grid
     best_vel := dvel
-    best_score := math.F32_MAX
+    best_score := f32(math.F32_MAX)
     best_time := f32(0)
 
     grid_size := int(params.grid_size)
@@ -261,7 +261,7 @@ obstacle_avoidance_query_sample_velocity_adaptive :: proc(query: ^Obstacle_Avoid
 
     // Start with desired velocity
     best_vel := dvel
-    best_score := math.F32_MAX
+    best_score := f32(math.F32_MAX)
 
     // Sample in rings around desired velocity
     ring_count := int(params.adaptive_rings)
