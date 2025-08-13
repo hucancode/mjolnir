@@ -184,11 +184,11 @@ find_straight_path :: proc(query: ^Nav_Mesh_Query,
         }
 
         // Check right vertex
-        tri_area_right := geometry.vec2f_perp(portal_apex, portal_right, right)
+        tri_area_right := geometry.perpendicular_cross_2d(portal_apex, portal_right, right)
 
         if tri_area_right <= 0.0 {
             // Check if apex equals portal_right or if right is on correct side of left edge
-            if geometry.vector_equal(portal_apex, portal_right) || geometry.vec2f_perp(portal_apex, portal_left, right) > 0.0 {
+            if geometry.vector_equal(portal_apex, portal_right) || geometry.perpendicular_cross_2d(portal_apex, portal_left, right) > 0.0 {
                 // Tighten the funnel
                 portal_right = right
                 right_poly_type = (i + 1 == path_count) ? to_type : 0
@@ -249,11 +249,11 @@ find_straight_path :: proc(query: ^Nav_Mesh_Query,
         }
 
         // Check left vertex
-        tri_area_left := geometry.vec2f_perp(portal_apex, portal_left, left)
+        tri_area_left := geometry.perpendicular_cross_2d(portal_apex, portal_left, left)
 
         if tri_area_left >= 0.0 {
             // Check if apex equals portal_left or if left is on correct side of right edge
-            if geometry.vector_equal(portal_apex, portal_left) || geometry.vec2f_perp(portal_apex, portal_right, left) < 0.0 {
+            if geometry.vector_equal(portal_apex, portal_left) || geometry.perpendicular_cross_2d(portal_apex, portal_right, left) < 0.0 {
                 // Tighten the funnel
                 portal_left = left
                 left_poly_type = (i + 1 == path_count) ? to_type : 0

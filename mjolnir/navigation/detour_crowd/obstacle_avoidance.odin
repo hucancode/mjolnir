@@ -347,7 +347,7 @@ process_sample :: proc(query: ^Obstacle_Avoidance_Query, pos: [3]f32, radius: f3
         combined_radius := radius + circle.radius
 
         // Calculate time to collision
-        collision_time := geometry.ray_circle_intersect(rel_pos, rel_vel, combined_radius)
+        collision_time := geometry.ray_circle_intersect_2d(rel_pos, rel_vel, combined_radius)
 
         if collision_time >= 0 && collision_time < min_toi {
             min_toi = collision_time
@@ -363,7 +363,7 @@ process_sample :: proc(query: ^Obstacle_Avoidance_Query, pos: [3]f32, radius: f3
 
     // Check against segment obstacles
     for &segment in query.segment_obstacles {
-        collision_time := geometry.ray_segment_intersect(pos, sample_vel, segment.start_pos, segment.end_pos, radius)
+        collision_time := geometry.ray_segment_intersect_2d(pos, sample_vel, segment.start_pos, segment.end_pos, radius)
 
         if collision_time >= 0 && collision_time < min_toi {
             min_toi = collision_time

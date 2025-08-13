@@ -22,15 +22,15 @@ vec3_approx_equal :: proc(a, b: [3]f32, epsilon: f32 = math.F32_EPSILON) -> bool
 @(test)
 test_vec2f_perp :: proc(t: ^testing.T) {
     // Test perpendicular vectors: a=(0,0), b=(1,0), c=(0,1) -> cross product = 1
-    result := geometry.vec2f_perp({0,0,0}, {1,0, 0}, {0, 0, 1})
+    result := geometry.perpendicular_cross_2d({0,0,0}, {1,0, 0}, {0, 0, 1})
     testing.expect_value(t, result, f32(1))
 
     // Test parallel vectors: a=(0,0), b=(1,0), c=(1,0) -> cross product = 0
-    result = geometry.vec2f_perp({0, 0, 0}, {1, 0, 0}, {1, 0, 0})
+    result = geometry.perpendicular_cross_2d({0, 0, 0}, {1, 0, 0}, {1, 0, 0})
     testing.expect_value(t, result, f32(0))
 
     // Test arbitrary vectors: a=(0,0), b=(3,4), c=(1,2) -> (3-0)*(2-0) - (4-0)*(1-0) = 6-4 = 2
-    result = geometry.vec2f_perp({0, 0, 0}, {3, 0, 4}, {1, 0, 2})
+    result = geometry.perpendicular_cross_2d({0, 0, 0}, {3, 0, 4}, {1, 0, 2})
     testing.expect_value(t, result, f32(2))
 }
 

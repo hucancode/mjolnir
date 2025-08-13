@@ -750,7 +750,7 @@ closest_point_on_segment_2d :: proc "contextless" (p: [3]f32, a: [3]f32, b: [3]f
 }
 
 // Ray-circle intersection test (2D XZ plane)
-ray_circle_intersect :: proc "contextless" (pos, vel: [3]f32, radius: f32) -> f32 {
+ray_circle_intersect_2d :: proc "contextless" (pos, vel: [3]f32, radius: f32) -> f32 {
     // 2D intersection in XZ plane
     pxz := pos.xz
     vxz := vel.xz
@@ -774,7 +774,7 @@ ray_circle_intersect :: proc "contextless" (pos, vel: [3]f32, radius: f32) -> f3
 }
 
 // Ray-segment intersection test (2D XZ plane)
-ray_segment_intersect :: proc "contextless" (pos, vel, seg_start, seg_end: [3]f32, radius: f32) -> f32 {
+ray_segment_intersect_2d :: proc "contextless" (pos, vel, seg_start, seg_end: [3]f32, radius: f32) -> f32 {
     // Work in XZ plane
     pos_2d := pos.xz
     vel_2d := vel.xz
@@ -812,7 +812,7 @@ ray_segment_intersect :: proc "contextless" (pos, vel, seg_start, seg_end: [3]f3
 // 2D Vector operations (working in XZ plane for navigation)
 
 // Calculate perpendicular cross product in 2D (XZ plane)
-vec2f_perp :: proc "contextless" (a, b, c: [3]f32) -> f32 {
+perpendicular_cross_2d :: proc "contextless" (a, b, c: [3]f32) -> f32 {
     return linalg.cross(b.xz - a.xz, c.xz - a.xz)
 }
 
