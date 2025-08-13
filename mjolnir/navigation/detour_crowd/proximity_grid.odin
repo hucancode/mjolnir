@@ -1,6 +1,7 @@
 package navigation_detour_crowd
 
 import "core:math"
+import "core:math/linalg"
 import recast "../recast"
 
 // Invalid grid item identifier
@@ -78,14 +79,12 @@ proximity_grid_add_item :: proc(grid: ^Proximity_Grid, item_id: u16, min_x, min_
     grid.bounds[3] = max(grid.bounds[3], max_z)
 
     // Calculate grid coordinates
-    min_gx := i32(math.floor(min_x * grid.inv_cell_size))
-    min_gz := i32(math.floor(min_z * grid.inv_cell_size))
-    max_gx := i32(math.floor(max_x * grid.inv_cell_size))
-    max_gz := i32(math.floor(max_z * grid.inv_cell_size))
+    min_grid := linalg.floor([2]f32{min_x, min_z} * grid.inv_cell_size)
+    max_grid := linalg.floor([2]f32{max_x, max_z} * grid.inv_cell_size)
 
     // Add to all cells that the item overlaps
-    for gz in min_gz..=max_gz {
-        for gx in min_gx..=max_gx {
+    for gz in i32(min_grid.y)..=i32(max_grid.y) {
+        for gx in i32(min_grid.x)..=i32(max_grid.x) {
             hash := hash_pos(gx, gz, grid.hash_size)
 
             // Add item to this cell's linked list
@@ -110,19 +109,12 @@ proximity_grid_query_items :: proc(grid: ^Proximity_Grid, center_x, center_z, ra
     count := i32(0)
 
     // Calculate grid bounds for the query circle
-    min_x := center_x - radius
-    min_z := center_z - radius
-    max_x := center_x + radius
-    max_z := center_z + radius
-
-    min_gx := i32(math.floor(min_x * grid.inv_cell_size))
-    min_gz := i32(math.floor(min_z * grid.inv_cell_size))
-    max_gx := i32(math.floor(max_x * grid.inv_cell_size))
-    max_gz := i32(math.floor(max_z * grid.inv_cell_size))
+    min_grid := linalg.floor([2]f32{center_x - radius, center_z - radius} * grid.inv_cell_size)
+    max_grid := linalg.floor([2]f32{center_x + radius, center_z + radius} * grid.inv_cell_size)
 
     // Visit all cells in the query area
-    for gz in min_gz..=max_gz {
-        for gx in min_gx..=max_gx {
+    for gz in i32(min_grid.y)..=i32(max_grid.y) {
+        for gx in i32(min_grid.x)..=i32(max_grid.x) {
             hash := hash_pos(gx, gz, grid.hash_size)
 
             // Walk through linked list for this cell
@@ -163,11 +155,9 @@ proximity_grid_query_items_at :: proc(grid: ^Proximity_Grid, x, z: f32, ids: []u
 
     count := i32(0)
 
-    // Calculate grid coordinates
-    gx := i32(math.floor(x * grid.inv_cell_size))
-    gz := i32(math.floor(z * grid.inv_cell_size))
-
-    hash := hash_pos(gx, gz, grid.hash_size)
+    // Calculate grid coordinates  
+    grid_pos := linalg.floor([2]f32{x, z} * grid.inv_cell_size)
+    hash := hash_pos(i32(grid_pos.x), i32(grid_pos.y), grid.hash_size)
 
     // Walk through linked list for this cell
     item_idx := grid.buckets[hash]
@@ -196,14 +186,12 @@ proximity_grid_query_items_in_rect :: proc(grid: ^Proximity_Grid, min_x, min_z, 
     count := i32(0)
 
     // Calculate grid bounds
-    min_gx := i32(math.floor(min_x * grid.inv_cell_size))
-    min_gz := i32(math.floor(min_z * grid.inv_cell_size))
-    max_gx := i32(math.floor(max_x * grid.inv_cell_size))
-    max_gz := i32(math.floor(max_z * grid.inv_cell_size))
+    min_grid := linalg.floor([2]f32{min_x, min_z} * grid.inv_cell_size)
+    max_grid := linalg.floor([2]f32{max_x, max_z} * grid.inv_cell_size)
 
     // Visit all cells in the rectangle
-    for gz in min_gz..=max_gz {
-        for gx in min_gx..=max_gx {
+    for gz in i32(min_grid.y)..=i32(max_grid.y) {
+        for gx in i32(min_grid.x)..=i32(max_grid.x) {
             hash := hash_pos(gx, gz, grid.hash_size)
 
             // Walk through linked list for this cell

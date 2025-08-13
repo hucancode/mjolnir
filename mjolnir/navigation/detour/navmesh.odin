@@ -840,25 +840,21 @@ decode_tile_ref_salt :: proc(nav_mesh: ^Nav_Mesh, ref: recast.Tile_Ref) -> u32 {
 
 // Check if an edge is on a specific border of a tile
 is_edge_on_tile_border :: proc(va, vb: [3]f32, bmin, bmax: [3]f32, side: int) -> bool {
-    EPSILON :: 0.01
-
     switch side {
     case 0:  // East border (max X)
-        return math.abs(va.x - bmax.x) < EPSILON && math.abs(vb.x - bmax.x) < EPSILON
+        return math.abs(va.x - bmax.x) < math.F32_EPSILON && math.abs(vb.x - bmax.x) < math.F32_EPSILON
     case 1:  // North border (max Z)
-        return math.abs(va.z - bmax.z) < EPSILON && math.abs(vb.z - bmax.z) < EPSILON
+        return math.abs(va.z - bmax.z) < math.F32_EPSILON && math.abs(vb.z - bmax.z) < math.F32_EPSILON
     case 2:  // West border (min X)
-        return math.abs(va.x - bmin.x) < EPSILON && math.abs(vb.x - bmin.x) < EPSILON
+        return math.abs(va.x - bmin.x) < math.F32_EPSILON && math.abs(vb.x - bmin.x) < math.F32_EPSILON
     case 3:  // South border (min Z)
-        return math.abs(va.z - bmin.z) < EPSILON && math.abs(vb.z - bmin.z) < EPSILON
+        return math.abs(va.z - bmin.z) < math.F32_EPSILON && math.abs(vb.z - bmin.z) < math.F32_EPSILON
     }
     return false
 }
 
 // Check if two line segments intersect in 2D (XZ plane)
 segment_intersects :: proc(a1, a2, b1, b2: [3]f32) -> bool {
-    EPSILON :: 0.01
-
     // Extract 2D coordinates (X, Z)
     ax1, az1 := a1.x, a1.z
     ax2, az2 := a2.x, a2.z
@@ -872,8 +868,8 @@ segment_intersects :: proc(a1, a2, b1, b2: [3]f32) -> bool {
     min_bz, max_bz := min(bz1, bz2), max(bz1, bz2)
 
     // Check if bounding boxes overlap
-    if max_ax < min_bx - EPSILON || min_ax > max_bx + EPSILON ||
-       max_az < min_bz - EPSILON || min_az > max_bz + EPSILON {
+    if max_ax < min_bx - math.F32_EPSILON || min_ax > max_bx + math.F32_EPSILON ||
+       max_az < min_bz - math.F32_EPSILON || min_az > max_bz + math.F32_EPSILON {
         return false
     }
 
@@ -886,7 +882,7 @@ segment_intersects :: proc(a1, a2, b1, b2: [3]f32) -> bool {
 
     // Cross product to check if lines are parallel
     cross := dx1 * dz2 - dz1 * dx2
-    if math.abs(cross) > EPSILON {
+    if math.abs(cross) > math.F32_EPSILON {
         return false  // Not parallel
     }
 
@@ -894,7 +890,7 @@ segment_intersects :: proc(a1, a2, b1, b2: [3]f32) -> bool {
     dx3 := bx1 - ax1
     dz3 := bz1 - az1
     cross2 := dx1 * dz3 - dz1 * dx3
-    if math.abs(cross2) > EPSILON {
+    if math.abs(cross2) > math.F32_EPSILON {
         return false  // Parallel but not collinear
     }
 

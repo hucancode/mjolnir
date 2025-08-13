@@ -6,32 +6,20 @@ import "core:log"
 import recast "../recast"
 import geometry "../../geometry"
 
-// Helper function to check if two positions are equal within epsilon (matches C++ dtVequal)
-dt_vequal :: proc(a, b: [3]f32) -> bool {
-    EPSILON :: 0.0001
-    return abs(a.x - b.x) < EPSILON && abs(a.y - b.y) < EPSILON && abs(a.z - b.z) < EPSILON
-}
 
 // Helper function to calculate squared distance from point to line segment in 2D
 dt_distance_pt_seg_sqr_2d :: proc(pt, p0, p1: [3]f32) -> (dist_sqr: f32, t: f32) {
-    dx := p1.x - p0.x
-    dz := p1.z - p0.z
-    d := dx*dx + dz*dz
+    dir := p1.xz - p0.xz
+    d := linalg.length2(dir)
     t = f32(0)
 
     if d > 0 {
-        t = ((pt.x - p0.x)*dx + (pt.z - p0.z)*dz) / d
-        if t < 0 {
-            t = 0
-        } else if t > 1 {
-            t = 1
-        }
+        t = linalg.dot(pt.xz - p0.xz, dir) / d
+        t = clamp(t, 0.0, 1.0)
     }
 
-    dx = p0.x + t*dx - pt.x
-    dz = p0.z + t*dz - pt.z
-
-    return dx*dx + dz*dz, t
+    closest := p0.xz + t * dir - pt.xz
+    return linalg.length2(closest), t
 }
 
 // Find straight path using funnel algorithm for path smoothing
@@ -135,7 +123,7 @@ find_straight_path :: proc(query: ^Nav_Mesh_Query,
             portal_status := get_portal_points(query, path[i], path[i+1], &left, &right, &from_type)
 
             // Check if portal is degenerate
-            if dt_vequal(left, right) && i > 0 {
+            if geometry.vector_equal(left, right) && i > 0 {
                 log.debugf("WARNING: Degenerate portal at i=%d, left==right=%v", i, left)
             }
             if recast.status_failed(portal_status) {
@@ -200,7 +188,7 @@ find_straight_path :: proc(query: ^Nav_Mesh_Query,
 
         if tri_area_right <= 0.0 {
             // Check if apex equals portal_right or if right is on correct side of left edge
-            if dt_vequal(portal_apex, portal_right) || geometry.vec2f_perp(portal_apex, portal_left, right) > 0.0 {
+            if geometry.vector_equal(portal_apex, portal_right) || geometry.vec2f_perp(portal_apex, portal_left, right) > 0.0 {
                 // Tighten the funnel
                 portal_right = right
                 right_poly_type = (i + 1 == path_count) ? to_type : 0
@@ -214,7 +202,7 @@ find_straight_path :: proc(query: ^Nav_Mesh_Query,
                 add_point := true
                 if n_straight_path > 0 {
                     last_pos := straight_path[n_straight_path-1].pos
-                    if dt_vequal(last_pos, portal_left) {
+                    if geometry.vector_equal(last_pos, portal_left) {
                         log.debugf("Skipping duplicate point at position %v", portal_left)
                         add_point = false
                     }
@@ -265,7 +253,7 @@ find_straight_path :: proc(query: ^Nav_Mesh_Query,
 
         if tri_area_left >= 0.0 {
             // Check if apex equals portal_left or if left is on correct side of right edge
-            if dt_vequal(portal_apex, portal_left) || geometry.vec2f_perp(portal_apex, portal_right, left) < 0.0 {
+            if geometry.vector_equal(portal_apex, portal_left) || geometry.vec2f_perp(portal_apex, portal_right, left) < 0.0 {
                 // Tighten the funnel
                 portal_left = left
                 left_poly_type = (i + 1 == path_count) ? to_type : 0
@@ -279,7 +267,7 @@ find_straight_path :: proc(query: ^Nav_Mesh_Query,
                 add_point := true
                 if n_straight_path > 0 {
                     last_pos := straight_path[n_straight_path-1].pos
-                    if dt_vequal(last_pos, portal_right) {
+                    if geometry.vector_equal(last_pos, portal_right) {
                         log.debugf("Skipping duplicate point at position %v", portal_right)
                         add_point = false
                     }

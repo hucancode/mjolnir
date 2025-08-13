@@ -7,15 +7,13 @@ import "core:fmt"
 import "core:math/linalg"
 
 // Test constants
-EPSILON :: 1e-6
-
 // Helper to compare floats with epsilon
-approx_equal :: proc(a, b: f32, epsilon: f32 = EPSILON) -> bool {
+approx_equal :: proc(a, b: f32, epsilon: f32 = math.F32_EPSILON) -> bool {
     return math.abs(a - b) < epsilon
 }
 
 // Helper to compare vectors with epsilon
-vec3_approx_equal :: proc(a, b: [3]f32, epsilon: f32 = EPSILON) -> bool {
+vec3_approx_equal :: proc(a, b: [3]f32, epsilon: f32 = math.F32_EPSILON) -> bool {
     return approx_equal(a.x, b.x, epsilon) &&
            approx_equal(a.y, b.y, epsilon) &&
            approx_equal(a.z, b.z, epsilon)
@@ -262,7 +260,7 @@ test_closest_point_on_triangle :: proc(t: ^testing.T) {
     // Test point inside triangle (projects to itself)
     p5 := [3]f32{2, 0, 2}
     closest5 := geometry.closest_point_on_triangle(p5, a, b, c)
-    testing.expect(t, vec3_approx_equal(closest5, p5), "Point inside triangle should project to itself")
+    testing.expect(t, vec3_approx_equal(closest5, p5, 1e-6), "Point inside triangle should project to itself")
 }
 
 @(test)
@@ -494,9 +492,9 @@ test_barycentric_2d :: proc(t: ^testing.T) {
     // Point at triangle center should have coordinates (1/3, 1/3, 1/3)
     center := [3]f32{10.0/3.0, 0, 10.0/3.0}
     bary_center := geometry.barycentric_2d(center, a, b, c)
-    testing.expect(t, approx_equal(bary_center.x, 1.0/3.0, 0.01), "Center should have u≈1/3")
-    testing.expect(t, approx_equal(bary_center.y, 1.0/3.0, 0.01), "Center should have v≈1/3")
-    testing.expect(t, approx_equal(bary_center.z, 1.0/3.0, 0.01), "Center should have w≈1/3")
+    testing.expect(t, approx_equal(bary_center.x, 1.0/3.0), "Center should have u≈1/3")
+    testing.expect(t, approx_equal(bary_center.y, 1.0/3.0), "Center should have v≈1/3")
+    testing.expect(t, approx_equal(bary_center.z, 1.0/3.0), "Center should have w≈1/3")
 
     // Test degenerate triangle (collinear points)
     d := [3]f32{0, 0, 0}
@@ -800,16 +798,16 @@ test_intersect :: proc(t: ^testing.T) {
 test_in_cone :: proc(t: ^testing.T) {
     // The in_cone function is complex and depends on whether the vertex is convex or reflex
     // Let me test with a simpler, more predictable configuration
-    
+
     // Test simple convex case: right angle cone
     a0 := [2]i32{0, 0}   // Previous vertex
-    a1 := [2]i32{0, 5}   // Apex of cone (current vertex) 
+    a1 := [2]i32{0, 5}   // Apex of cone (current vertex)
     a2 := [2]i32{5, 5}   // Next vertex
-    
+
     // This should create a convex vertex (90 degree angle)
     // Check if a2 is left_on of line a0->a1: area2(a0,a1,a2) = area2((0,0),(0,5),(5,5))
     // = (0-0)*(5-0) - (5-0)*(5-0) = 0*5 - 5*5 = -25 <= 0, so it's convex
-    
+
     p_inside := [2]i32{2, 3}  // Point that should be inside the cone
     testing.expect(t, geometry.in_cone(a0, a1, a2, p_inside), "Point should be inside convex cone")
 
@@ -820,9 +818,9 @@ test_in_cone :: proc(t: ^testing.T) {
     // Test reflex vertex cone (vertex angle > 180 degrees)
     // Create a reflex angle by making the turn > 180 degrees
     a0_r := [2]i32{0, 0}
-    a1_r := [2]i32{5, 0}   // Apex 
+    a1_r := [2]i32{5, 0}   // Apex
     a2_r := [2]i32{0, 5}   // This creates a reflex angle at a1_r
-    
+
     // Point that should be inside reflex cone (in the "excluded" region of convex)
     p_reflex_inside := [2]i32{2, -1}
     testing.expect(t, geometry.in_cone(a0_r, a1_r, a2_r, p_reflex_inside), "Point should be inside reflex cone")

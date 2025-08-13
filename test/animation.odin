@@ -114,10 +114,10 @@ test_position_sampling :: proc(t: ^testing.T) {
 
 almost_equal_quaternion :: proc(a, b: quaternion128) -> bool {
   return(
-    a.x - b.x <= linalg.F32_EPSILON &&
-    a.y - b.y <= linalg.F32_EPSILON &&
-    a.z - b.z <= linalg.F32_EPSILON &&
-    a.w - b.w <= linalg.F32_EPSILON \
+    a.x - b.x <= math.F32_EPSILON &&
+    a.y - b.y <= math.F32_EPSILON &&
+    a.z - b.z <= math.F32_EPSILON &&
+    a.w - b.w <= math.F32_EPSILON \
   )
 }
 

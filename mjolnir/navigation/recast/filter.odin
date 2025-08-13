@@ -270,26 +270,21 @@ mark_box_area :: proc(box_min_bounds, box_max_bounds: [3]f32,
     z_stride := x_size
 
     // Find the footprint of the box area in grid cell coordinates
-    min_offset := (box_min_bounds - chf.bmin)
-    max_offset := (box_max_bounds - chf.bmin)
-    min_x := int(min_offset.x / chf.cs)
-    min_y := int(min_offset.y / chf.ch)
-    min_z := int(min_offset.z / chf.cs)
-    max_x := int(max_offset.x / chf.cs)
-    max_y := int(max_offset.y / chf.ch)
-    max_z := int(max_offset.z / chf.cs)
+    cell_scale := [3]f32{chf.cs, chf.ch, chf.cs}
+    min_grid := linalg.floor((box_min_bounds - chf.bmin) / cell_scale)
+    max_grid := linalg.floor((box_max_bounds - chf.bmin) / cell_scale)
 
     // Early-out if the box is outside the bounds of the grid
-    if max_x < 0 do return
-    if min_x >= int(x_size) do return
-    if max_z < 0 do return
-    if min_z >= int(z_size) do return
+    if max_grid.x < 0 do return
+    if min_grid.x >= f32(x_size) do return
+    if max_grid.z < 0 do return
+    if min_grid.z >= f32(z_size) do return
 
     // Clamp relevant bound coordinates to the grid
-    if min_x < 0 do min_x = 0
-    if max_x >= int(x_size) do max_x = int(x_size) - 1
-    if min_z < 0 do min_z = 0
-    if max_z >= int(z_size) do max_z = int(z_size) - 1
+    min_x := int(clamp(min_grid.x, 0, f32(x_size) - 1))
+    max_x := int(clamp(max_grid.x, 0, f32(x_size) - 1))
+    min_z := int(clamp(min_grid.z, 0, f32(z_size) - 1))
+    max_z := int(clamp(max_grid.z, 0, f32(z_size) - 1))
 
     // Mark relevant cells
     for z := min_z; z <= max_z; z += 1 {
@@ -301,7 +296,7 @@ mark_box_area :: proc(box_min_bounds, box_max_bounds: [3]f32,
                 span := &chf.spans[span_index]
 
                 // Skip if the span is outside the box extents
-                if int(span.y) < min_y || int(span.y) > max_y {
+                if f32(span.y) < min_grid.y || f32(span.y) > max_grid.y {
                     continue
                 }
 
@@ -365,24 +360,21 @@ mark_convex_poly_area :: proc(verts: [][3]f32,
     bmax.y = max_y
 
     // Compute the grid footprint of the polygon
-    minx := int((bmin.x - chf.bmin.x) / chf.cs)
-    miny := int((bmin.y - chf.bmin.y) / chf.ch)
-    minz := int((bmin.z - chf.bmin.z) / chf.cs)
-    maxx := int((bmax.x - chf.bmin.x) / chf.cs)
-    maxy := int((bmax.y - chf.bmin.y) / chf.ch)
-    maxz := int((bmax.z - chf.bmin.z) / chf.cs)
+    cell_scale := [3]f32{chf.cs, chf.ch, chf.cs}
+    min_grid := linalg.floor((bmin - chf.bmin) / cell_scale)
+    max_grid := linalg.floor((bmax - chf.bmin) / cell_scale)
 
     // Early-out if the polygon lies entirely outside the grid
-    if maxx < 0 do return
-    if minx >= int(x_size) do return
-    if maxz < 0 do return
-    if minz >= int(z_size) do return
+    if max_grid.x < 0 do return
+    if min_grid.x >= f32(x_size) do return
+    if max_grid.z < 0 do return
+    if min_grid.z >= f32(z_size) do return
 
     // Clamp the polygon footprint to the grid
-    if minx < 0 do minx = 0
-    if maxx >= int(x_size) do maxx = int(x_size) - 1
-    if minz < 0 do minz = 0
-    if maxz >= int(z_size) do maxz = int(z_size) - 1
+    minx := int(clamp(min_grid.x, 0, f32(x_size) - 1))
+    maxx := int(clamp(max_grid.x, 0, f32(x_size) - 1))
+    minz := int(clamp(min_grid.z, 0, f32(z_size) - 1))
+    maxz := int(clamp(max_grid.z, 0, f32(z_size) - 1))
 
     // Check each cell in the footprint
     for z := minz; z <= maxz; z += 1 {
@@ -399,7 +391,7 @@ mark_convex_poly_area :: proc(verts: [][3]f32,
                 }
 
                 // Skip if y extents don't overlap
-                if int(span.y) < miny || int(span.y) > maxy {
+                if f32(span.y) < min_grid.y || f32(span.y) > max_grid.y {
                     continue
                 }
 
@@ -429,26 +421,21 @@ mark_cylinder_area :: proc(position: [3]f32, radius, height: f32,
     cylinder_bb_max := position + [3]f32{radius, height, radius}
 
     // Compute the grid footprint of the cylinder
-    min_offset := (cylinder_bb_min - chf.bmin)
-    max_offset := (cylinder_bb_max - chf.bmin)
-    minx := int(min_offset.x / chf.cs)
-    miny := int(min_offset.y / chf.ch)
-    minz := int(min_offset.z / chf.cs)
-    maxx := int(max_offset.x / chf.cs)
-    maxy := int(max_offset.y / chf.ch)
-    maxz := int(max_offset.z / chf.cs)
+    cell_scale := [3]f32{chf.cs, chf.ch, chf.cs}
+    min_grid := linalg.floor((cylinder_bb_min - chf.bmin) / cell_scale)
+    max_grid := linalg.floor((cylinder_bb_max - chf.bmin) / cell_scale)
 
     // Early-out if the cylinder is completely outside the grid bounds
-    if maxx < 0 do return
-    if minx >= int(x_size) do return
-    if maxz < 0 do return
-    if minz >= int(z_size) do return
+    if max_grid.x < 0 do return
+    if min_grid.x >= f32(x_size) do return
+    if max_grid.z < 0 do return
+    if min_grid.z >= f32(z_size) do return
 
     // Clamp the cylinder bounds to the grid
-    if minx < 0 do minx = 0
-    if maxx >= int(x_size) do maxx = int(x_size) - 1
-    if minz < 0 do minz = 0
-    if maxz >= int(z_size) do maxz = int(z_size) - 1
+    minx := int(clamp(min_grid.x, 0, f32(x_size) - 1))
+    maxx := int(clamp(max_grid.x, 0, f32(x_size) - 1))
+    minz := int(clamp(min_grid.z, 0, f32(z_size) - 1))
+    maxz := int(clamp(max_grid.z, 0, f32(z_size) - 1))
 
     radius_sq := radius * radius
 
@@ -476,7 +463,7 @@ mark_cylinder_area :: proc(position: [3]f32, radius, height: f32,
                 }
 
                 // Mark if y extents overlap
-                if int(span.y) >= miny && int(span.y) <= maxy {
+                if f32(span.y) >= min_grid.y && f32(span.y) <= max_grid.y {
                     chf.areas[span_index] = area_id
                 }
             }

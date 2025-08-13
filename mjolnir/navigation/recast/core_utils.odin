@@ -2,6 +2,7 @@ package navigation_recast
 
 import "core:slice"
 import "core:math"
+import "core:math/linalg"
 
 // Get offset of a tile in the tile grid
 calc_tile_loc :: proc "contextless" (x, y: i32) -> u32 {
@@ -10,9 +11,8 @@ calc_tile_loc :: proc "contextless" (x, y: i32) -> u32 {
 
 // Calculate grid location from position
 calc_grid_location :: proc "contextless" (pos: [3]f32, cell_size: f32) -> (x, y: i32) {
-    x = i32(math.floor(pos.x / cell_size))
-    y = i32(math.floor(pos.z / cell_size))
-    return
+    grid_pos := linalg.floor(pos.xz / cell_size)
+    return i32(grid_pos.x), i32(grid_pos.y)
 }
 
 // Encode a polygon reference
@@ -67,12 +67,9 @@ calc_dist_field_value :: proc "contextless" (distance: f32, max_dist: f32) -> u1
 
 // Inject element at specific index in dynamic array
 inject_at :: proc(arr: ^[dynamic]$T, index: int, value: T) {
-    resize(arr, len(arr)+1)
-    // Shift elements to the right
-    for i := len(arr) - 1; i > index; i -= 1 {
-        arr[i] = arr[i-1]
-    }
-    arr[index] = value
+    resize(arr, len(arr) + 1)  // Expand slice
+    copy(arr[index+1:], arr[index:len(arr)-1])  // Shift elements right
+    arr[index] = value  // Insert new value
 }
 
 // Get direction offsets for 4-connected grid

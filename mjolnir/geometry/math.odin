@@ -3,9 +3,6 @@ package geometry
 import "core:math"
 import "core:math/linalg"
 
-// Math constants
-EPSILON :: 1e-6
-
 // 2D Vector operations (working in XZ plane for navigation)
 
 // Calculate perpendicular cross product in 2D (XZ plane)
@@ -49,7 +46,7 @@ barycentric_2d :: proc "contextless" (p: [3]f32, a: [3]f32, b: [3]f32, c: [3]f32
     d21 := v2x * v1x + v2z * v1z
 
     denom := d00 * d11 - d01 * d01
-    if math.abs(denom) < EPSILON {
+    if math.abs(denom) < math.F32_EPSILON {
         return {1.0/3.0, 1.0/3.0, 1.0/3.0}
     }
 
@@ -70,7 +67,7 @@ closest_point_on_segment_2d :: proc "contextless" (p: [3]f32, a: [3]f32, b: [3]f
     dx := bx - ax
     dz := bz - az
 
-    if math.abs(dx) < EPSILON && math.abs(dz) < EPSILON {
+    if math.abs(dx) < math.F32_EPSILON && math.abs(dz) < math.F32_EPSILON {
         return a
     }
 
@@ -125,7 +122,7 @@ intersect_segments_2d :: proc "contextless" (ap, aq, bp, bq: [3]f32) -> (hit: bo
     b_dir := bq.xz - bp.xz
     diff  := bp.xz - ap.xz
     cross := linalg.cross(a_dir, b_dir)
-    if math.abs(cross) < EPSILON {
+    if math.abs(cross) < math.F32_EPSILON {
         return false, 0, 0
     }
     s = linalg.cross(diff, b_dir) / cross
@@ -146,7 +143,7 @@ intersect_segment_triangle :: proc "contextless" (sp, sq: [3]f32, a, b, c: [3]f3
 
     // Compute denominator
     d := linalg.dot(qp, norm)
-    if math.abs(d) < EPSILON {
+    if math.abs(d) < math.F32_EPSILON {
         return false, 0
     }
 
@@ -372,7 +369,7 @@ calc_poly_normal :: proc "contextless" (verts: [][3]f32) -> [3]f32 {
 
     // Normalize the result
     length := math.sqrt(normal.x * normal.x + normal.y * normal.y + normal.z * normal.z)
-    if length > EPSILON {
+    if length > math.F32_EPSILON {
         normal /= length
     }
 

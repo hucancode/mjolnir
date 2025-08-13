@@ -201,7 +201,7 @@ erode_walkable_area :: proc(radius: i32, chf: ^Compact_Heightfield) -> bool {
 // If magnitude is zero, vector is unchanged
 safe_normalize :: proc(v: ^[3]f32) {
     sq_mag := v.x * v.x + v.y * v.y + v.z * v.z
-    if sq_mag <= geometry.EPSILON do return
+    if sq_mag <= math.F32_EPSILON do return
 
     inv_mag := 1.0 / math.sqrt(sq_mag)
     v.x *= inv_mag
@@ -272,7 +272,7 @@ offset_poly :: proc(verts: [][3]f32, offset: f32, allocator := context.allocator
         bevel := corner_miter_sq_mag * MITER_LIMIT * MITER_LIMIT < 1.0
 
         // Scale the corner miter so it's proportional to how much the corner should be offset compared to the edges
-        if corner_miter_sq_mag > geometry.EPSILON {
+        if corner_miter_sq_mag > math.F32_EPSILON {
             scale := 1.0 / corner_miter_sq_mag
             corner_miter_x *= scale
             corner_miter_z *= scale
