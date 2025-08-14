@@ -275,6 +275,13 @@ obstacle_avoidance_query_sample_velocity_adaptive :: proc(query: ^Obstacle_Avoid
             // Center sample (desired velocity)
             penalty, _ := process_sample(query, pos, radius, vel, dvel, dvel,
                                           params.horiz_time, params)
+            
+            // Track debug data if requested
+            if debug_data != nil {
+                obstacle_avoidance_debug_data_add_sample(debug_data, dvel, 0.0, penalty,
+                                                         0, 0, 0, 0)  // Detailed penalties would need calculation
+            }
+            
             if penalty < best_score {
                 best_score = penalty
                 best_vel = dvel
@@ -302,6 +309,12 @@ obstacle_avoidance_query_sample_velocity_adaptive :: proc(query: ^Obstacle_Avoid
 
                 penalty, _ := process_sample(query, pos, radius, vel, sample_vel, dvel,
                                               params.horiz_time, params)
+
+                // Track debug data if requested
+                if debug_data != nil {
+                    obstacle_avoidance_debug_data_add_sample(debug_data, sample_vel, ring_radius, penalty,
+                                                             0, 0, 0, 0)  // Detailed penalties would need calculation
+                }
 
                 if penalty < best_score {
                     best_score = penalty

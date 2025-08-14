@@ -1,6 +1,7 @@
 package navigation_detour_crowd
 
 import "core:math"
+import "core:log"
 import recast "../recast"
 import detour "../detour"
 
@@ -14,7 +15,9 @@ path_queue_init :: proc(queue: ^Path_Queue, max_path_size: i32, max_search_nodes
     queue.max_path_size = max_path_size
     queue.max_search_nodes = max_search_nodes
     queue.next_handle = 1  // Start from 1, 0 is invalid
-    queue.max_queue = 8    // Default queue size
+    // Increase queue size to handle more concurrent path requests
+    // C++ default is MAX_QUEUE=8 but we need more for stress tests
+    queue.max_queue = 64    // Increased from 8 to handle more agents
     queue.queue = make([dynamic]Path_Query, 0, queue.max_queue)
     queue.nav_query = nav_query
 
@@ -24,6 +27,11 @@ path_queue_init :: proc(queue: ^Path_Queue, max_path_size: i32, max_search_nodes
 // Destroy path queue
 path_queue_destroy :: proc(queue: ^Path_Queue) {
     if queue == nil do return
+
+    // Clean up path memory in all queries
+    for &query in queue.queue {
+        delete(query.path)
+    }
 
     delete(queue.queue)
     queue.queue = nil
@@ -59,8 +67,10 @@ path_queue_request :: proc(queue: ^Path_Queue, start_ref, end_ref: recast.Poly_R
         start_pos = start_pos,
         end_pos = end_pos,
         status = {.In_Progress},
-        keep_alive = 2,  // Keep alive for 2 updates
+        keep_alive = 10,  // Keep alive for 10 updates
         filter = filter,
+        path = make([dynamic]recast.Poly_Ref, 0, queue.max_path_size),
+        path_count = 0,
     }
 
     append(&queue.queue, query)
@@ -81,7 +91,7 @@ path_queue_update :: proc(queue: ^Path_Queue, max_iter: i32) -> recast.Status {
         return {.Invalid_Param}
     }
 
-    MAX_KEEP_ALIVE :: 2
+    MAX_KEEP_ALIVE :: 10  // Increased from 2 to give agents more time to retrieve paths
     iter_count := i32(0)
 
     // Process queries in the queue
@@ -92,6 +102,8 @@ path_queue_update :: proc(queue: ^Path_Queue, max_iter: i32) -> recast.Status {
         if recast.status_succeeded(query.status) {
             query.keep_alive -= 1
             if query.keep_alive <= 0 {
+                // Clean up path memory before removing
+                delete(query.path)
                 // Remove completed query
                 ordered_remove(&queue.queue, i)
             }
@@ -110,6 +122,15 @@ path_queue_update :: proc(queue: ^Path_Queue, max_iter: i32) -> recast.Status {
             query.start_pos, query.end_pos, query.filter, path_result, queue.max_path_size
         )
 
+        // Debug: Log pathfinding results
+        if path_count == 0 || recast.status_failed(find_status) {
+            log.warnf("Path queue: find_path from 0x%x to 0x%x FAILED! returned %d polys, status=%v", 
+                     query.start_ref, query.end_ref, path_count, find_status)
+        } else {
+            log.debugf("Path queue: find_path from 0x%x to 0x%x returned %d polys, status=%v", 
+                      query.start_ref, query.end_ref, path_count, find_status)
+        }
+
         // Update query status
         if recast.status_failed(find_status) {
             query.status = find_status
@@ -118,6 +139,14 @@ path_queue_update :: proc(queue: ^Path_Queue, max_iter: i32) -> recast.Status {
             if .Partial_Result in find_status {
                 query.status |= {.Partial_Result}
             }
+            
+            // Store the path result in the query
+            clear(&query.path)
+            resize(&query.path, int(path_count))
+            for i in 0..<path_count {
+                query.path[i] = path_result[i]
+            }
+            query.path_count = path_count
         }
 
         query.keep_alive = MAX_KEEP_ALIVE
@@ -165,23 +194,10 @@ path_queue_get_path_result :: proc(queue: ^Path_Queue, ref: Path_Queue_Ref,
                 return 0, query.status
             }
 
-            // Get path from navigation query
-            path_result := make([]recast.Poly_Ref, queue.max_path_size)
-            defer delete(path_result)
-
-            find_status, path_count := detour.find_path(
-                queue.nav_query, query.start_ref, query.end_ref,
-                query.start_pos, query.end_pos, query.filter, path_result, queue.max_path_size
-            )
-
-            if recast.status_failed(find_status) {
-                return 0, find_status
-            }
-
-            // Copy result to output buffer
-            copy_count := min(path_count, i32(len(path)))
+            // Copy stored path result to output buffer
+            copy_count := min(query.path_count, i32(len(path)))
             for i in 0..<copy_count {
-                path[i] = path_result[i]
+                path[i] = query.path[i]
             }
 
             return copy_count, query.status
@@ -202,8 +218,9 @@ path_queue_cancel_request :: proc(queue: ^Path_Queue, ref: Path_Queue_Ref) -> re
     }
 
     // Find and remove query
-    for &query, i in queue.queue {
-        if query.ref == ref {
+    for i := len(queue.queue) - 1; i >= 0; i -= 1 {
+        if queue.queue[i].ref == ref {
+            delete(queue.queue[i].path)
             ordered_remove(&queue.queue, i)
             return {.Success}
         }
@@ -344,9 +361,17 @@ path_queue_force_complete :: proc(queue: ^Path_Queue, ref: Path_Queue_Ref) -> re
                 if .Partial_Result in find_status {
                     query.status |= {.Partial_Result}
                 }
+                
+                // Store the path result in the query
+                clear(&query.path)
+                resize(&query.path, int(path_count))
+                for i in 0..<path_count {
+                    query.path[i] = path_result[i]
+                }
+                query.path_count = path_count
             }
 
-            query.keep_alive = 2
+            query.keep_alive = 10
             return query.status
         }
     }

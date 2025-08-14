@@ -1,5 +1,7 @@
 package navigation_detour_crowd
 
+import "core:fmt"
+import "core:log"
 import "core:math"
 import "core:math/linalg"
 import "core:slice"
@@ -12,10 +14,11 @@ crowd_build_proximity_grid :: proc(crowd: ^Crowd) {
 
     proximity_grid_clear(crowd.proximity_grid)
 
-    for agent in crowd.active_agents {
+    for agent, active_idx in crowd.active_agents {
         if !agent.active do continue
 
         agent_idx := crowd_get_agent_index(crowd, agent)
+        // Use the actual agent index from the main agents array, not the active agents index
         agent_id := u16(agent_idx)
         pos := agent.position
         radius := agent.params.radius
@@ -31,7 +34,7 @@ crowd_build_proximity_grid :: proc(crowd: ^Crowd) {
 crowd_find_neighbors :: proc(crowd: ^Crowd) {
     if crowd == nil || crowd.proximity_grid == nil do return
 
-    for agent, agent_idx in crowd.active_agents {
+    for &agent in crowd.active_agents {  // Need mutable reference to update neighbor_count
         if !agent.active do continue
 
         agent.neighbor_count = 0
@@ -39,6 +42,9 @@ crowd_find_neighbors :: proc(crowd: ^Crowd) {
         if .Separation not_in agent.params.update_flags && .Obstacle_Avoidance not_in agent.params.update_flags {
             continue
         }
+
+        // Get the actual agent index
+        agent_idx := crowd_get_agent_index(crowd, agent)
 
         // Query nearby agents
         query_range := agent.params.collision_query_range
@@ -58,19 +64,18 @@ crowd_find_neighbors :: proc(crowd: ^Crowd) {
 
         for j in 0..<neighbor_count {
             neighbor_idx := int(neighbors[j])
-            if neighbor_idx == agent_idx do continue  // Skip self
-            if neighbor_idx >= len(crowd.active_agents) do continue
+            if neighbor_idx == int(agent_idx) do continue  // Skip self
+            if neighbor_idx >= len(crowd.agents) do continue
 
-            neighbor_agent := crowd.active_agents[neighbor_idx]
+            neighbor_agent := &crowd.agents[neighbor_idx]
             if !neighbor_agent.active do continue
 
-            // Calculate distance
-            diff := neighbor_agent.position - agent.position
-            dist_sqr := linalg.length2(diff)
-
-            // Check if within range
-            combined_radius := agent.params.radius + neighbor_agent.params.radius
-            if dist_sqr < (query_range + combined_radius) * (query_range + combined_radius) {
+            // Calculate distance using only XZ components (2D distance for navigation)
+            diff_2d := [2]f32{neighbor_agent.position.x - agent.position.x, neighbor_agent.position.z - agent.position.z}
+            dist_sqr := linalg.length2(diff_2d)
+            
+            // Check if within the collision query range
+            if dist_sqr <= query_range * query_range {
                 if valid_count < DT_CROWD_MAX_NEIGHBORS {
                     valid_neighbors[valid_count] = {i32(neighbor_idx), dist_sqr}
                     valid_count += 1
@@ -106,7 +111,21 @@ crowd_find_corners :: proc(crowd: ^Crowd) {
         if agent.target_state != .Valid && agent.target_state != .Velocity {
             continue
         }
+        
+        // For single-polygon paths, ensure we have a proper target
+        if agent.target_state == .Valid && len(agent.corridor.path) == 1 {
+            // Make sure target is set properly for single-polygon case
+            dist_to_target := linalg.distance(agent.corridor.target, agent.position)
+            if dist_to_target < 0.1 {
+                // Target is too close to current position, might be incorrectly set
+                continue
+            }
+            // Single polygon path should still create a corner at the target
+        }
 
+        // Ensure corridor position is synchronized with agent position
+        agent.corridor.position = agent.position
+        
         // Find corners in path corridor
         corner_verts := make([]f32, DT_CROWD_MAX_CORNERS * 3)
         defer delete(corner_verts)
@@ -133,8 +152,28 @@ crowd_find_corners :: proc(crowd: ^Crowd) {
                 agent.corner_flags[i] = corner_flags[i]
                 agent.corner_polys[i] = corner_polys[i]
             }
+            
         }
     }
+}
+
+// Get distance to goal (matching C++ getDistanceToGoal)
+get_distance_to_goal :: proc(agent: ^Crowd_Agent, default_range: f32) -> f32 {
+    if agent == nil || agent.corner_count == 0 {
+        return default_range
+    }
+    
+    // Check if last corner is the end of path
+    is_end_of_path := (agent.corner_flags[agent.corner_count - 1] & u8(detour.Straight_Path_Flags.End)) != 0
+    if is_end_of_path {
+        // Calculate 2D distance to last corner
+        dx := agent.corner_verts[agent.corner_count - 1].x - agent.position.x
+        dz := agent.corner_verts[agent.corner_count - 1].z - agent.position.z
+        dist_2d := math.sqrt(dx*dx + dz*dz)
+        return min(dist_2d, default_range)
+    }
+    
+    return default_range
 }
 
 // Trigger off-mesh connections
@@ -171,76 +210,33 @@ crowd_calculate_steering :: proc(crowd: ^Crowd, dt: f32) {
             agent.desired_velocity = agent.target_pos  // target_pos stores velocity
             agent.desired_speed = linalg.length(agent.desired_velocity.xz)
 
-        } else if agent.target_state == .Valid && agent.corner_count > 0 {
-            // Path following
-            // Skip the first corner if it's too close to the current position (it's the start point)
-            corner_idx := i32(0)
-            for corner_idx < agent.corner_count {
-                corner_pos := agent.corner_verts[corner_idx]
-                dist_to_corner := linalg.length(corner_pos - agent.position)
-                if dist_to_corner > agent.params.radius {
-                    break  // Found a corner that's far enough
-                }
-                corner_idx += 1
-            }
-            
-            if corner_idx >= agent.corner_count {
-                // No valid corners, we've reached the end
+        } else if agent.target_state == .Valid {
+            // Path following - matching C++ implementation
+            if agent.corner_count == 0 {
+                // No corners - set velocity to zero (matching C++ calcStraightSteerDirection)
                 agent.desired_velocity = {}
                 agent.desired_speed = 0
-                return
-            }
-            
-            target_pos := agent.corner_verts[corner_idx]
-
-            // Calculate direction to next corner
-            dir := target_pos - agent.position
-            dir.y = 0  // Zero out vertical component
-            distance := linalg.length(dir)
-
-            if distance > 0.01 {
-                // Normalize direction
-                dir_norm := linalg.normalize(dir)
-                dx := dir_norm.x
-                dz := dir_norm.z
-
-                // Set desired velocity toward target
-                agent.desired_speed = agent.params.max_speed
-
-                // Slow down when approaching target
-                slowdown_distance := agent.params.radius * 4.0
-                if distance < slowdown_distance {
-                    agent.desired_speed *= distance / slowdown_distance
-                    agent.desired_speed = max(agent.desired_speed, agent.params.max_speed * 0.1)
-                }
-
-                agent.desired_velocity = {
-                    dx * agent.desired_speed,
-                    0,
-                    dz * agent.desired_speed,
-                }
-
-                // Anticipate turns
-                if .Anticipate_Turns in agent.params.update_flags && agent.corner_count > 1 {
-                    next_corner := agent.corner_verts[1]
-
-                    // Calculate turn direction
-                    turn_dir := next_corner.xz - target_pos.xz
-                    turn_distance := linalg.length(turn_dir)
-
-                    if turn_distance > 0.01 {
-                        turn_dir_norm := turn_dir / turn_distance
-                        turn_dx := turn_dir_norm.x
-                        turn_dz := turn_dir_norm.y
-
-                        // Blend with turn direction based on distance to corner
-                        blend_distance := agent.params.radius * 2.0
-                        if distance < blend_distance {
-                            blend_factor := 1.0 - (distance / blend_distance)
-                            agent.desired_velocity.x = linalg.mix(turn_dx * agent.desired_speed, dx, blend_factor)
-                            agent.desired_velocity.z = linalg.mix(turn_dz * agent.desired_speed, dz, blend_factor)
-                        }
-                    }
+            } else {
+                // Calculate direction to first corner (matching C++ calcStraightSteerDirection)
+                dir := agent.corner_verts[0] - agent.position
+                dir.y = 0  // Ignore Y for 2D navigation
+                dir_len := linalg.length(dir)
+                
+                if dir_len > 0.001 {
+                    // Normalize direction
+                    dir = linalg.normalize(dir)
+                    
+                    // Calculate speed scale for slowing down near goal
+                    slow_down_radius := agent.params.radius * 2.0
+                    distance_to_goal := get_distance_to_goal(agent, slow_down_radius)
+                    speed_scale := min(distance_to_goal / slow_down_radius, 1.0)
+                    
+                    // Set desired velocity with speed scaling
+                    agent.desired_speed = agent.params.max_speed
+                    agent.desired_velocity = dir * (agent.desired_speed * speed_scale)
+                } else {
+                    agent.desired_velocity = {}
+                    agent.desired_speed = 0
                 }
             }
         }
@@ -251,7 +247,7 @@ crowd_calculate_steering :: proc(crowd: ^Crowd, dt: f32) {
 crowd_plan_velocity :: proc(crowd: ^Crowd, dt: f32, debug_data: ^Crowd_Agent_Debug_Info) {
     if crowd == nil do return
 
-    for agent in crowd.active_agents {
+    for &agent in crowd.active_agents {  // Need mutable reference to update new_velocity
         if !agent.active do continue
 
         agent.new_velocity = agent.desired_velocity
@@ -271,8 +267,8 @@ crowd_plan_velocity :: proc(crowd: ^Crowd, dt: f32, debug_data: ^Crowd_Agent_Deb
         // Add other agents as circle obstacles
         for j in 0..<agent.neighbor_count {
             neighbor_idx := agent.neighbors[j].agent_index
-            if neighbor_idx >= 0 && neighbor_idx < i32(len(crowd.active_agents)) {
-                neighbor := crowd.active_agents[neighbor_idx]
+            if neighbor_idx >= 0 && neighbor_idx < i32(len(crowd.agents)) {
+                neighbor := &crowd.agents[neighbor_idx]
                 if !neighbor.active do continue
 
                 // Calculate relative position and velocity
@@ -311,7 +307,7 @@ crowd_plan_velocity :: proc(crowd: ^Crowd, dt: f32, debug_data: ^Crowd_Agent_Deb
 
         // Add separation force
         if .Separation in agent.params.update_flags {
-            separation := calculate_separation_force(agent, crowd.active_agents[:])
+            separation := calculate_separation_force(agent, crowd)
             agent.new_velocity += separation * agent.params.separation_weight
         }
 
@@ -342,7 +338,7 @@ crowd_integrate :: proc(crowd: ^Crowd, dt: f32) {
         if dv_len > max_delta_v {
             dv = linalg.normalize(dv) * max_delta_v
         }
-
+        
         agent.velocity += dv
 
         // Integrate position
@@ -350,10 +346,16 @@ crowd_integrate :: proc(crowd: ^Crowd, dt: f32) {
             new_pos := agent.position + agent.velocity * dt
 
             // Move along navigation mesh surface
-            moved, _ := path_corridor_move_position(&agent.corridor, new_pos, crowd.nav_query,
+            moved, move_status := path_corridor_move_position(&agent.corridor, new_pos, crowd.nav_query,
                                                      &crowd.filters[agent.params.query_filter_type])
             if moved {
+                // Update agent position from corridor
                 agent.position = path_corridor_get_pos(&agent.corridor)
+            } else {
+                // If move along surface failed, just update position directly
+                // This ensures agents can still move even if navmesh queries fail
+                agent.position = new_pos
+                agent.corridor.position = new_pos
             }
         } else if agent.state == .Invalid {
             // For agents without valid navmesh position, just integrate directly
@@ -371,7 +373,7 @@ crowd_handle_collisions :: proc(crowd: ^Crowd) {
         if !agent_a.active do continue
 
         for j in i+1..<len(crowd.active_agents) {
-            agent_b := crowd.active_agents[j]
+            agent_b := crowd.active_agents[j]  // Already a pointer
             if !agent_b.active do continue
 
             diff := agent_b.position - agent_a.position
@@ -401,16 +403,16 @@ crowd_handle_collisions :: proc(crowd: ^Crowd) {
 }
 
 // Calculate separation force for an agent
-calculate_separation_force :: proc(agent: ^Crowd_Agent, agents: []^Crowd_Agent) -> [3]f32 {
-    if agent == nil do return {}
+calculate_separation_force :: proc(agent: ^Crowd_Agent, crowd: ^Crowd) -> [3]f32 {
+    if agent == nil || crowd == nil do return {}
 
     separation := [3]f32{}
     neighbor_count := 0
 
     for i in 0..<agent.neighbor_count {
         neighbor_idx := agent.neighbors[i].agent_index
-        if neighbor_idx >= 0 && neighbor_idx < i32(len(agents)) {
-            neighbor := agents[neighbor_idx]
+        if neighbor_idx >= 0 && neighbor_idx < i32(len(crowd.agents)) {
+            neighbor := &crowd.agents[neighbor_idx]
             if !neighbor.active do continue
 
             diff := agent.position - neighbor.position

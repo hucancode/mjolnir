@@ -76,10 +76,15 @@ test_single_agent_pathfinding :: proc(t: ^testing.T) {
         
         // Log progress every 10 frames
         if frame % 10 == 0 {
-            fmt.printf( "Frame %d: pos=(%.2f,%.2f,%.2f), vel=(%.2f,%.2f,%.2f), state=%v, targetState=%v",
+            fmt.printf( "Frame %d: pos=(%.2f,%.2f,%.2f), vel=(%.2f,%.2f,%.2f), state=%v, targetState=%v, corners=%d",
                         frame, agent.position.x, agent.position.y, agent.position.z,
                         agent.velocity.x, agent.velocity.y, agent.velocity.z,
-                        agent.state, agent.target_state)
+                        agent.state, agent.target_state, agent.corner_count)
+            if agent.corner_count > 0 {
+                fmt.printf(" next_corner=(%.2f,%.2f,%.2f)", 
+                          agent.corner_verts[0].x, agent.corner_verts[0].y, agent.corner_verts[0].z)
+            }
+            fmt.printf("\n")
         }
     }
     

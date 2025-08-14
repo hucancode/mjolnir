@@ -7,7 +7,7 @@ import detour "../detour"
 DT_CROWD_MAX_NEIGHBORS :: 6
 
 // Maximum number of corners in path lookahead
-DT_CROWD_MAX_CORNERS :: 4
+DT_CROWD_MAX_CORNERS :: 8  // Increased to handle longer paths
 
 // Maximum obstacle avoidance parameter sets
 DT_CROWD_MAX_OBSTAVOIDANCE_PARAMS :: 8
@@ -152,6 +152,9 @@ Proximity_Grid :: struct {
     pool:        [dynamic]u16,            // Item pool
     buckets:     [dynamic]u16,            // Grid buckets (hash table)
     hash_size:   i32,                     // Hash table size
+    item_count:  i32,                     // Count of unique items added
+    item_bounds: [dynamic][4]f32,         // Item bounding boxes [minx, minz, maxx, maxz]
+    item_ids:    [dynamic]u16,            // Item IDs corresponding to bounds
 }
 
 // Path queue reference
@@ -167,6 +170,8 @@ Path_Query :: struct {
     status:      recast.Status,         // Query status
     keep_alive:  i32,                     // Keep alive counter
     filter:      ^detour.Query_Filter, // Query filter
+    path:        [dynamic]recast.Poly_Ref, // Path result
+    path_count:  i32,                     // Number of polygons in path
 }
 
 // Path queue for asynchronous pathfinding

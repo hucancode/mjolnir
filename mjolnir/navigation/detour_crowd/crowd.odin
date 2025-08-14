@@ -1,6 +1,8 @@
 package navigation_detour_crowd
 
+import "core:log"
 import "core:math"
+import "core:math/linalg"
 import "core:slice"
 import recast "../recast"
 import detour "../detour"
@@ -106,6 +108,14 @@ crowd_add_agent :: proc(crowd: ^Crowd, pos: [3]f32, params: ^Crowd_Agent_Params)
     if crowd == nil || params == nil {
         return recast.Agent_Id(0), {.Invalid_Param}
     }
+    
+    // Validate agent parameters
+    if params.radius <= 0 || params.height <= 0 || 
+       params.max_acceleration < 0 || params.max_speed < 0 ||
+       params.collision_query_range <= 0 || params.path_optimization_range < 0 ||
+       params.separation_weight < 0 {
+        return recast.Agent_Id(0), {.Invalid_Param}
+    }
 
     // Find free agent slot
     agent_idx := -1
@@ -127,12 +137,12 @@ crowd_add_agent :: proc(crowd: ^Crowd, pos: [3]f32, params: ^Crowd_Agent_Params)
         crowd.nav_query, pos, crowd.agent_placement_half_extents, &crowd.filters[params.query_filter_type]
     )
 
-    // Copy position, using original if findNearestPoly failed
-    final_pos := nearest_pos
+    // Use nearest position on navmesh (matches C++ behavior)
+    final_pos := nearest_pos  // Use the nearest position on the navmesh
     final_ref := nearest_ref
     
     if recast.status_failed(status) || nearest_ref == recast.INVALID_POLY_REF {
-        final_pos = pos
+        final_pos = pos  // Fall back to original position if no navmesh found
         final_ref = recast.INVALID_POLY_REF
     }
 
@@ -157,6 +167,8 @@ crowd_add_agent :: proc(crowd: ^Crowd, pos: [3]f32, params: ^Crowd_Agent_Params)
     agent.desired_speed = 0
 
     // Reset path corridor to starting position
+    log.debugf("crowd_add_agent: Resetting corridor with ref=0x%x, pos=(%.2f, %.2f, %.2f)", 
+              final_ref, final_pos.x, final_pos.y, final_pos.z)
     path_corridor_reset(&agent.corridor, final_ref, final_pos)
 
     // Reset boundary
@@ -222,8 +234,8 @@ crowd_update :: proc(crowd: ^Crowd, dt: f32, debug_data: ^Crowd_Agent_Debug_Info
         return {.Invalid_Param}
     }
 
-    // Update path queue
-    path_queue_update(&crowd.path_queue, 8)
+    // Update path queue (increased iterations to handle more agents)
+    path_queue_update(&crowd.path_queue, 64)
 
     // Update movement requests
     crowd_update_move_request(crowd, dt)
@@ -234,12 +246,6 @@ crowd_update :: proc(crowd: ^Crowd, dt: f32, debug_data: ^Crowd_Agent_Debug_Info
     // Check path validity
     crowd_check_path_validity(crowd, dt)
 
-    // Build proximity grid
-    crowd_build_proximity_grid(crowd)
-
-    // Find neighbors
-    crowd_find_neighbors(crowd)
-
     // Find next corner for each agent
     crowd_find_corners(crowd)
 
@@ -249,6 +255,12 @@ crowd_update :: proc(crowd: ^Crowd, dt: f32, debug_data: ^Crowd_Agent_Debug_Info
     // Calculate steering
     crowd_calculate_steering(crowd, dt)
 
+    // Build proximity grid for obstacle avoidance (using current positions)
+    crowd_build_proximity_grid(crowd)
+
+    // Find neighbors for obstacle avoidance (using current positions)
+    crowd_find_neighbors(crowd)
+
     // Velocity planning (obstacle avoidance)
     crowd_plan_velocity(crowd, dt, debug_data)
 
@@ -257,6 +269,10 @@ crowd_update :: proc(crowd: ^Crowd, dt: f32, debug_data: ^Crowd_Agent_Debug_Info
 
     // Handle collisions
     crowd_handle_collisions(crowd)
+
+    // Update neighbor distances after integration for accurate reporting
+    crowd_build_proximity_grid(crowd)
+    crowd_find_neighbors(crowd)
 
     return {.Success}
 }
@@ -294,8 +310,17 @@ crowd_request_move_target :: proc(crowd: ^Crowd, agent_id: recast.Agent_Id,
         agent.target_path_ref = Path_Queue_Ref(0)
     }
 
-    // If target is on the same polygon, create a simple path
-    if path_corridor_get_first_poly(&agent.corridor) == ref {
+    // Only use single-polygon path if start and target are very close AND on same polygon
+    start_poly := path_corridor_get_first_poly(&agent.corridor)
+    same_poly := start_poly == ref
+    close_distance := linalg.distance(agent.position, pos) < agent.params.radius * 2.0
+    
+    log.debugf("crowd_request_move_target: agent_pos=(%.1f,%.1f,%.1f) target_pos=(%.1f,%.1f,%.1f) start_poly=0x%x, target_poly=0x%x, same=%v, close=%v", 
+              agent.position.x, agent.position.y, agent.position.z,
+              pos.x, pos.y, pos.z,
+              start_poly, ref, same_poly, close_distance)
+    
+    if same_poly && close_distance {
         agent.target_state = .Valid
         // Reset corridor with just the current polygon
         path_corridor_reset(&agent.corridor, ref, agent.position)
@@ -304,6 +329,8 @@ crowd_request_move_target :: proc(crowd: ^Crowd, agent_id: recast.Agent_Id,
     } else {
         // Request path computation
         start_ref := path_corridor_get_first_poly(&agent.corridor)
+        
+        log.debugf("Requesting path from 0x%x to 0x%x", start_ref, ref)
 
         path_ref, request_status := path_queue_request(&crowd.path_queue, start_ref, ref,
                                                          agent.position, pos, &crowd.filters[agent.params.query_filter_type])
@@ -421,17 +448,21 @@ crowd_update_move_request :: proc(crowd: ^Crowd, dt: f32) {
 
                 path_count, get_status := path_queue_get_path_result(&crowd.path_queue, agent.target_path_ref, crowd.path_result[:])
                 if recast.status_succeeded(get_status) && path_count > 0 {
-                    // Set new path
-                    agent.target_state = .Valid
-                    path_corridor_reset(&agent.corridor, crowd.path_result[0], agent.position)
-
-                    // Add remaining path
-                    for i in 1..<path_count {
-                        append(&agent.corridor.path, crowd.path_result[i])
+                    // Debug: Log path for first few agents
+                    // Note: agent doesn't have id, just disable for now
+                    if false {  // Disabled debug output
+                        log.debugf("Agent: Got path with %d polygons", path_count)
+                        for i in 0..<min(5, path_count) {
+                            log.debugf("  Path[%d]: 0x%x", i, crowd.path_result[i])
+                        }
                     }
-
-                    path_corridor_move_target(&agent.corridor, agent.target_pos, crowd.nav_query,
-                                               &crowd.filters[agent.params.query_filter_type])
+                    
+                    // Set new path using setCorridor approach
+                    agent.target_state = .Valid
+                    path_corridor_set_corridor(&agent.corridor, agent.target_pos, crowd.path_result[:path_count])
+                    
+                    // Update position to match current agent position
+                    agent.corridor.position = agent.position
 
                     agent.partial = .Partial_Result in status
                 } else {

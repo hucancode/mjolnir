@@ -270,22 +270,22 @@ test_dist_point_segment_sq_2d :: proc(t: ^testing.T) {
     p := [3]f32{0, 0, 0}
     q := [3]f32{10, 0, 0}
 
-    dist1 := geometry.dist_point_segment_sq_2d(pt1, p, q)
+    dist1, _ := geometry.point_segment_distance2_2d(pt1, p, q)
     testing.expect(t, approx_equal(dist1, 0.0), "Distance to point on segment should be 0")
 
     // Test point perpendicular to segment
     pt2 := [3]f32{5, 0, 5}
-    dist2 := geometry.dist_point_segment_sq_2d(pt2, p, q)
+    dist2, _ := geometry.point_segment_distance2_2d(pt2, p, q)
     testing.expect(t, approx_equal(dist2, 25.0), "Squared distance should be 25")
 
     // Test point beyond segment end
     pt3 := [3]f32{15, 0, 0}
-    dist3 := geometry.dist_point_segment_sq_2d(pt3, p, q)
+    dist3, _ := geometry.point_segment_distance2_2d(pt3, p, q)
     testing.expect(t, approx_equal(dist3, 25.0), "Squared distance to segment end should be 25")
 
     // Test degenerate segment (point)
     pt4 := [3]f32{3, 0, 4}
-    dist4 := geometry.dist_point_segment_sq_2d(pt4, p, p)
+    dist4, _ := geometry.point_segment_distance2_2d(pt4, p, p)
     testing.expect(t, approx_equal(dist4, 25.0), "Squared distance to degenerate segment should be 25")
 }
 
@@ -296,13 +296,17 @@ test_dist_point_segment_sq :: proc(t: ^testing.T) {
     p := [3]f32{0, 0, 0}
     q := [3]f32{10, 0, 0}
 
-    dist1 := geometry.dist_point_segment_sq_2d(pt1, p, q)
-    testing.expect(t, approx_equal(dist1, 25.0), "3D squared distance should be 25")
+    dist1, _ := geometry.point_segment_distance2_2d(pt1, p, q)
+    // In 2D (XZ plane), pt1={5,5,0} projects to {5,0} and segment is {0,0} to {10,0}
+    // Closest point on segment is {5,0}, distance in XZ is 0
+    testing.expect(t, approx_equal(dist1, 0.0), "2D squared distance in XZ plane should be 0")
 
     // Test point with Y component
     pt2 := [3]f32{5, 3, 4}
-    dist2 := geometry.dist_point_segment_sq_2d(pt2, p, q)
-    testing.expect(t, approx_equal(dist2, 25.0), "3D squared distance should be 25")
+    dist2, _ := geometry.point_segment_distance2_2d(pt2, p, q)
+    // In 2D (XZ plane), pt2={5,3,4} projects to {5,4} and segment is {0,0} to {10,0}
+    // Closest point on segment is {5,0}, distance in XZ is 4^2 = 16
+    testing.expect(t, approx_equal(dist2, 16.0), "2D squared distance in XZ plane should be 16")
 }
 
 @(test)

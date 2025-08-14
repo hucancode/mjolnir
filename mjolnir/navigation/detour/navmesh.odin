@@ -490,8 +490,13 @@ connect_int_links :: proc(nav_mesh: ^Nav_Mesh, tile: ^Mesh_Tile) {
     if tile.header == nil {
         return
     }
+    
+    // log.debugf("connect_int_links: Processing tile with %d polygons, %d links available", 
+    //           tile.header.poly_count, len(tile.links))
 
     base := get_poly_ref_base(nav_mesh, tile)
+    
+    links_created := 0
 
     for i in 0..<int(tile.header.poly_count) {
         poly := &tile.polys[i]
@@ -511,8 +516,18 @@ connect_int_links :: proc(nav_mesh: ^Nav_Mesh, tile: ^Mesh_Tile) {
         // Build internal connections
         for j in 0..<int(poly.vert_count) {
             if poly.neis[j] != 0 {
+                neighbor_id: u16
+                
+                // Check if this is marked with the 0x8000 flag (internal link in same tile)
+                if poly.neis[j] & 0x8000 != 0 {
+                    // Internal link within same tile - extract polygon index
+                    neighbor_id = poly.neis[j] & 0x7fff  // Remove the 0x8000 flag
+                } else {
+                    // Regular neighbor reference (1-based index)
+                    neighbor_id = poly.neis[j] - 1
+                }
+                
                 // Validate neighbor reference
-                neighbor_id := poly.neis[j] - 1
                 if neighbor_id >= u16(tile.header.poly_count) {
                     log.warnf("Polygon %d edge %d has invalid neighbor %d (max %d)",
                              i, j, neighbor_id, tile.header.poly_count - 1)
@@ -530,10 +545,18 @@ connect_int_links :: proc(nav_mesh: ^Nav_Mesh, tile: ^Mesh_Tile) {
                     // Add to polygon's link list
                     link.next = poly.first_link
                     poly.first_link = link_idx
+                    
+                    links_created += 1
+                    // Debug: log link creation
+                    // log.infof("Created link: poly %d edge %d -> poly %d (ref=0x%x)", i, j, neighbor_id, link.ref)
+                } else {
+                    log.warnf("Failed to allocate link for poly %d edge %d -> poly %d", i, j, neighbor_id)
                 }
             }
         }
     }
+    
+    // log.debugf("connect_int_links: Created %d links", links_created)
 }
 
 connect_ext_links :: proc(nav_mesh: ^Nav_Mesh, tile: ^Mesh_Tile) {

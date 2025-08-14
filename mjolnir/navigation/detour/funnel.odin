@@ -19,26 +19,32 @@ find_straight_path :: proc(query: ^Nav_Mesh_Query,
 
     straight_path_count = 0
 
-    log.infof("find_straight_path: ENTERED - start_pos=%v, end_pos=%v, path_count=%d", start_pos, end_pos, path_count)
-    log.infof("  len(path)=%d, len(straight_path)=%d, max_straight_path=%d", len(path), len(straight_path), max_straight_path)
-
     // Validate input parameters
     if query == nil || query.nav_mesh == nil {
-        log.errorf("find_straight_path: Invalid query or navmesh")
         return {.Invalid_Param}, straight_path_count
     }
 
-    if path_count == 0 {
-        log.errorf("find_straight_path: Empty path")
+    if path_count == 0 || path[0] == recast.INVALID_POLY_REF || max_straight_path <= 0 {
         return {.Invalid_Param}, straight_path_count
     }
 
     stat :recast.Status
 
+    // Clamp start and end positions to polygon boundaries (matches C++)
+    closest_start_pos, start_status := closest_point_on_poly_boundary_nav(query, path[0], start_pos)
+    if recast.status_failed(start_status) {
+        return {.Invalid_Param}, straight_path_count
+    }
+
+    closest_end_pos, end_status := closest_point_on_poly_boundary_nav(query, path[path_count-1], end_pos)
+    if recast.status_failed(end_status) {
+        return {.Invalid_Param}, straight_path_count
+    }
+
     // Portal vertices for funnel algorithm
-    portal_apex := start_pos
-    portal_left := start_pos
-    portal_right := start_pos
+    portal_apex := closest_start_pos
+    portal_left := closest_start_pos
+    portal_right := closest_start_pos
 
     apex_index := i32(0)
     left_index := i32(0)
@@ -52,166 +58,161 @@ find_straight_path :: proc(query: ^Nav_Mesh_Query,
     // Add start point
     if n_straight_path < max_straight_path {
         straight_path[n_straight_path] = {
-            pos = start_pos,
+            pos = closest_start_pos,
             flags = u8(Straight_Path_Flags.Start),
             ref = path[0],
         }
         n_straight_path += 1
-        log.infof("find_straight_path: Added start point %v", start_pos)
     } else {
         stat |= {.Buffer_Too_Small}
     }
 
-    log.infof("find_straight_path: Starting portal loop for %d polygons", path_count)
 
     // Special case for single polygon path
     if path_count == 1 {
-        log.info("find_straight_path: Single polygon path detected, skipping funnel algorithm")
         // For a single polygon, the path is just start -> end
-        // Skip the portal processing
-    } else {
-
-    // Process path corridors
-    MAX_ITERATIONS :: 10000
-    iteration_count := i32(0)
-
-    for i := i32(0); i < path_count; i += 1 {  // C++ style: increment in for statement
-        iteration_count += 1
-        if iteration_count > MAX_ITERATIONS {
-            log.errorf("find_straight_path: Infinite loop detected after %d iterations! i=%d, apex_index=%d, path_count=%d",
-                      iteration_count, i, apex_index, path_count)
-            break
-        }
-
-        if iteration_count % 1000 == 0 {
-            log.warnf("find_straight_path: High iteration count %d, i=%d, apex=%d", iteration_count, i, apex_index)
-        }
-
-        if iteration_count > 9990 {  // Log details near the end
-            log.debugf("Iteration %d: i=%d, apex=%d, left=%d, right=%d",
-                      iteration_count, i, apex_index, left_index, right_index)
-        }
-
-        // Get portal points
-        left :[3]f32
-        right :[3]f32
-        from_type := u8(0)
-        to_type := u8(0)
-
-        if i + 1 == path_count {
-            // End of path
-            left = end_pos
-            right = end_pos
-            from_type = 0
-            to_type = u8(Straight_Path_Flags.End)
-        } else {
-            // Get portal between path[i] and path[i+1]
-            portal_status : recast.Status
-            left, right, from_type, portal_status = get_portal_points(query, path[i], path[i+1])
-
-            // Check if portal is degenerate
-            if geometry.vector_equal(left, right) && i > 0 {
-                log.debugf("WARNING: Degenerate portal at i=%d, left==right=%v", i, left)
+        // Add end point
+        if n_straight_path < max_straight_path {
+            straight_path[n_straight_path] = {
+                pos = closest_end_pos,
+                flags = u8(Straight_Path_Flags.End),
+                ref = path[0],
             }
-            if recast.status_failed(portal_status) {
-                // Failed to get portal - use fallback
-                log.warnf("Failed to get portal between poly 0x%x and 0x%x (indices %d->%d), using fallback",
-                          path[i], path[i+1], i, i+1)
+            n_straight_path += 1
+        } else {
+            stat |= {.Buffer_Too_Small}
+        }
+        straight_path_count = n_straight_path
+        return stat | {.Success}, straight_path_count
+    }
 
-                // Always use polygon centroids as fallback
-                from_tile, from_poly, _ := get_tile_and_poly_by_ref(query.nav_mesh, path[i])
-                to_tile, to_poly, _ := get_tile_and_poly_by_ref(query.nav_mesh, path[i+1])
+    // Path has more than one polygon - run funnel algorithm
+    if path_count > 1 {
+        // Debug: log the path
+        // log.debugf("find_straight_path: Processing path with %d polygons:", path_count)
+        // for i in 0..<path_count {
+        //     log.debugf("  Path[%d] = 0x%x", i, path[i])
+        // }
 
-                if from_tile != nil && from_poly != nil && to_tile != nil && to_poly != nil {
-                    // Use centroids as a fallback portal
-                    from_center := calc_poly_center(from_tile, from_poly)
-                    to_center := calc_poly_center(to_tile, to_poly)
+        // Process portals using funnel algorithm
+        // Need higher limit for complex paths with many resets
+        MAX_ITERATIONS :: 1000
+        iteration_count := i32(0)
+        last_progress_i := i32(-1)
+        stuck_count := i32(0)
 
-                    // Create a wider portal perpendicular to the direction
-                    mid := linalg.mix(from_center, to_center, 0.5)
-                    dir := to_center - from_center
-                    dir_len := linalg.length(dir)
-                    if dir_len > 0.001 {
-                        dir = dir / dir_len
-                        perp := [3]f32{-dir.z, dir.y, dir.x} * 2.0  // Wider portal
-                        left = mid + perp
-                        right = mid - perp
-                    } else {
-                        // Polygons are at same position, use small offset
-                        left = mid + [3]f32{0.1, 0, 0.1}
-                        right = mid - [3]f32{0.1, 0, 0.1}
+        for i := i32(0); i < path_count; i += 1 {
+            iteration_count += 1
+            if iteration_count > MAX_ITERATIONS {
+                log.errorf("find_straight_path: Infinite loop detected after %d iterations! i=%d, path_count=%d, apex=%d, left=%d, right=%d",
+                          iteration_count, i, path_count, apex_index, left_index, right_index)
+                // Force termination with partial result
+                break
+            }
+
+            // Track progress to detect getting stuck
+            if i == last_progress_i {
+                stuck_count += 1
+                if stuck_count > 10 {
+                    log.warnf("find_straight_path: Stuck at i=%d for %d iterations, forcing progress", i, stuck_count)
+                    i += 1
+                    stuck_count = 0
+                    last_progress_i = i
+                    continue
+                }
+            } else {
+                last_progress_i = i
+                stuck_count = 0
+            }
+
+            left: [3]f32
+            right: [3]f32
+            to_type := u8(0)
+
+            if i + 1 < path_count {
+                // Get portal between path[i] and path[i+1]
+                from_type: u8
+                portal_status: recast.Status
+                left, right, from_type, portal_status = get_portal_points(query, path[i], path[i+1])
+
+                // Debug logging for stuck case
+                if iteration_count > 50 && i == 2 {
+                    log.debugf("Portal at i=%d: left=%v, right=%v, status=%v", i, left, right, portal_status)
+                    log.debugf("  Apex=%v, Portal_left=%v, Portal_right=%v", portal_apex, portal_left, portal_right)
+                }
+
+                if recast.status_failed(portal_status) {
+                    // Failed to get portal points - clamp end point to current polygon
+                    // This matches the C++ behavior
+                    closest_on_poly, _ := closest_point_on_poly_boundary_nav(query, path[i], closest_end_pos)
+
+                    // Add the end point and return partial result
+                    if n_straight_path < max_straight_path {
+                        straight_path[n_straight_path] = {
+                            pos = closest_on_poly,
+                            flags = 0,
+                            ref = path[i],
+                        }
+                        n_straight_path += 1
                     }
-                    from_type = 0
 
-                    log.infof("Using centroid-based fallback portal: left=%v, right=%v", left, right)
-                } else {
-                    // Can't get polygon info, use simple interpolation
-                    if i > 0 {
-                        // Interpolate from previous position toward end
-                        t := f32(i) / f32(path_count - 1)
-                        mid := portal_apex + (end_pos - portal_apex) * t
-                        left = mid + [3]f32{0.5, 0, 0.5}
-                        right = mid - [3]f32{0.5, 0, 0.5}
-                        from_type = 0
-                        log.warnf("Using interpolated fallback portal at t=%.2f", t)
-                    } else {
-                        // First portal, skip
+                    if n_straight_path < max_straight_path {
+                        straight_path[n_straight_path] = {
+                            pos = closest_on_poly,
+                            flags = u8(Straight_Path_Flags.End),
+                            ref = path[i],
+                        }
+                        n_straight_path += 1
+                    }
+
+                    straight_path_count = n_straight_path
+                    return stat | {.Success, .Partial_Result}, straight_path_count
+                }
+
+                // If starting really close to the portal, advance (matches C++)
+                if i == 0 {
+                    dist_sqr, _ := geometry.point_segment_distance2_2d(portal_apex, left, right)
+                    if dist_sqr < 0.001 * 0.001 {  // dtSqr(0.001f) in C++
+                        i += 1  // Manually increment and continue
                         continue
                     }
                 }
-            }
-        }
-
-        // If starting really close to portal, advance (matches C++)
-        if i == 0 {
-            dist_sqr := geometry.dist_point_segment_sq_2d(portal_apex, left, right)
-            if dist_sqr < 1e-6 {
-                continue
-            }
-        }
-
-        // Check right vertex
-        tri_area_right := geometry.perpendicular_cross_2d(portal_apex, portal_right, right)
-
-        if tri_area_right <= 0.0 {
-            // Check if apex equals portal_right or if right is on correct side of left edge
-            if geometry.vector_equal(portal_apex, portal_right) || geometry.perpendicular_cross_2d(portal_apex, portal_left, right) > 0.0 {
-                // Tighten the funnel
-                portal_right = right
-                right_poly_type = (i + 1 == path_count) ? to_type : 0
-                right_index = i
-                log.debugf("Updated right_index to %d at i=%d", right_index, i)
             } else {
-                // Right vertex crossed left edge, add left vertex and restart scan
-                log.debugf("Right crossed left at i=%d: adding left vertex, left_index=%d", i, left_index)
+                // End of path
+                left = closest_end_pos
+                right = closest_end_pos
+                to_type = u8(Straight_Path_Flags.End)
+            }
 
-                // Check if we're about to add a duplicate point
-                add_point := true
-                if n_straight_path > 0 {
-                    last_pos := straight_path[n_straight_path-1].pos
-                    if geometry.vector_equal(last_pos, portal_left) {
-                        log.debugf("Skipping duplicate point at position %v", portal_left)
-                        add_point = false
+            // Update right vertex (matches C++ dtTriArea2D check)
+            if geometry.perpendicular_cross_2d(portal_apex, portal_right, right) <= 0.0 {
+                if geometry.vector_equal(portal_apex, portal_right) || geometry.perpendicular_cross_2d(portal_apex, portal_left, right) > 0.0 {
+                    // Tighten the funnel
+                    portal_right = right
+                    if i + 1 < path_count {
+                        right_poly_type = to_type
                     }
-                }
-
-                if add_point && n_straight_path < max_straight_path {
-                    // Append vertex
-                    straight_path[n_straight_path] = {
-                        pos = portal_left,
-                        flags = left_poly_type,
-                        ref = path[left_index],
+                    right_index = i
+                } else {
+                    // Right vertex crossed left edge, add left vertex and restart scan
+                    // Avoid adding duplicate points
+                    if n_straight_path == 0 || !geometry.vector_equal(portal_left, straight_path[n_straight_path-1].pos) {
+                        if n_straight_path < max_straight_path {
+                            // Append vertex
+                            straight_path[n_straight_path] = {
+                                pos = portal_left,
+                                flags = left_poly_type,
+                                ref = path[left_index],
+                            }
+                            n_straight_path += 1
+                        } else {
+                            stat |= {.Buffer_Too_Small}
+                        }
                     }
-                    n_straight_path += 1
-                    log.debugf("Added point %d at position %v", n_straight_path-1, portal_left)
-                } else if add_point {
-                    stat |= {.Buffer_Too_Small}
-                }
 
-                // Only restart if we actually added a point (made progress)
-                if add_point {
                     // Advance apex
                     portal_apex = portal_left
+                    prev_apex_index := apex_index
                     apex_index = left_index
 
                     // Reset funnel
@@ -223,60 +224,41 @@ find_straight_path :: proc(query: ^Nav_Mesh_Query,
                     right_poly_type = 0
 
                     // Restart scan from new apex
-                    // Set to apex_index - 1 because the loop will increment it
-                    log.debugf("Restarting from apex: apex_index=%d (was at i=%d), setting i=%d",
-                              apex_index, i, apex_index - 1)
-                    i = apex_index - 1  // Will be incremented to apex_index by the for loop
-                    continue  // Continue from the top of the loop with new i value
-                } else {
-                    // Skip this portal and continue to next
-                    log.debugf("Not restarting - no progress made, continuing to next portal")
+                    // IMPORTANT: In C++, i = apexIndex sets i to apex, but the for loop's ++i
+                    // increments it before the next iteration. We need to emulate this.
+                    i = apex_index
+                    continue
                 }
             }
-        }
 
-        // Check left vertex
-        tri_area_left := geometry.perpendicular_cross_2d(portal_apex, portal_left, left)
 
-        if tri_area_left >= 0.0 {
-            // Check if apex equals portal_left or if left is on correct side of right edge
-            if geometry.vector_equal(portal_apex, portal_left) || geometry.perpendicular_cross_2d(portal_apex, portal_right, left) < 0.0 {
-                // Tighten the funnel
-                portal_left = left
-                left_poly_type = (i + 1 == path_count) ? to_type : 0
-                left_index = i
-                log.debugf("Updated left_index to %d at i=%d", left_index, i)
-            } else {
-                // Left vertex crossed right edge, add right vertex and restart scan
-                log.debugf("Left crossed right at i=%d: adding right vertex, right_index=%d", i, right_index)
-
-                // Check if we're about to add a duplicate point
-                add_point := true
-                if n_straight_path > 0 {
-                    last_pos := straight_path[n_straight_path-1].pos
-                    if geometry.vector_equal(last_pos, portal_right) {
-                        log.debugf("Skipping duplicate point at position %v", portal_right)
-                        add_point = false
+            // Update left vertex (matches C++ dtTriArea2D check)
+            if geometry.perpendicular_cross_2d(portal_apex, portal_left, left) >= 0.0 {
+                if geometry.vector_equal(portal_apex, portal_left) || geometry.perpendicular_cross_2d(portal_apex, portal_right, left) < 0.0 {
+                    // Tighten the funnel
+                    portal_left = left
+                    if i + 1 < path_count {
+                        left_poly_type = to_type
                     }
-                }
+                    left_index = i
+                } else {
+                    // Left vertex crossed right edge, add right vertex and restart scan
 
-                if add_point && n_straight_path < max_straight_path {
-                    // Append vertex
-                    straight_path[n_straight_path] = {
-                        pos = portal_right,
-                        flags = right_poly_type,
-                        ref = path[right_index],
+                    if n_straight_path < max_straight_path {
+                        // Append vertex
+                        straight_path[n_straight_path] = {
+                            pos = portal_right,
+                            flags = right_poly_type,
+                            ref = path[right_index],
+                        }
+                        n_straight_path += 1
+                    } else {
+                        stat |= {.Buffer_Too_Small}
                     }
-                    n_straight_path += 1
-                    log.debugf("Added point %d at position %v", n_straight_path-1, portal_right)
-                } else if add_point {
-                    stat |= {.Buffer_Too_Small}
-                }
 
-                // Only restart if we actually added a point (made progress)
-                if add_point {
                     // Advance apex
                     portal_apex = portal_right
+                    prev_apex_index := apex_index
                     apex_index = right_index
 
                     // Reset funnel
@@ -288,26 +270,21 @@ find_straight_path :: proc(query: ^Nav_Mesh_Query,
                     right_poly_type = 0
 
                     // Restart scan from new apex
-                    // Set to apex_index - 1 because the loop will increment it
-                    log.debugf("Restarting from apex: apex_index=%d (was at i=%d), setting i=%d",
-                              apex_index, i, apex_index - 1)
-                    i = apex_index - 1  // Will be incremented to apex_index by the for loop
-                    continue  // Continue from the top of the loop with new i value
-                } else {
-                    // Skip this portal and continue to next
-                    log.debugf("Not restarting - no progress made, continuing to next portal")
+                    // IMPORTANT: In C++, i = apexIndex sets i to apex, but the for loop's ++i
+                    // increments it before the next iteration. We need to emulate this.
+                    i = apex_index
+                    continue
                 }
             }
         }
     }
-    }  // End of else block for single polygon special case
 
-    // Add end point
+    // Add end point (always use clamped end position)
     if n_straight_path < max_straight_path {
         straight_path[n_straight_path] = {
-            pos = end_pos,
+            pos = closest_end_pos,
             flags = u8(Straight_Path_Flags.End),
-            ref = path[path_count - 1],
+            ref = 0,  // C++ uses 0 for end point
         }
         n_straight_path += 1
     } else {
@@ -316,7 +293,23 @@ find_straight_path :: proc(query: ^Nav_Mesh_Query,
 
     straight_path_count = n_straight_path
 
-    log.infof("find_straight_path: result count=%d, status=%v", straight_path_count, stat)
+    // Copy flags and polygon refs to output arrays if provided
+    if straight_path_flags != nil {
+        for i in 0..<n_straight_path {
+            if int(i) < len(straight_path_flags) {
+                straight_path_flags[i] = straight_path[i].flags
+            }
+        }
+    }
+
+    if straight_path_refs != nil {
+        for i in 0..<n_straight_path {
+            if int(i) < len(straight_path_refs) {
+                straight_path_refs[i] = straight_path[i].ref
+            }
+        }
+    }
+
 
     // Return success if no errors
     if stat == {} {
@@ -376,7 +369,8 @@ get_portal_points :: proc(query: ^Nav_Mesh_Query, from: recast.Poly_Ref, to: rec
     // }
 
     // First try to find via links (most reliable method)
-    // log.debugf("  METHOD 1: Searching via links...")
+    // log.debugf("  METHOD 1: Searching via links from poly 0x%x (first_link=%d) to find 0x%x",
+    //           from, from_poly.first_link, to)
     link := from_poly.first_link
     link_count := 0
     max_links_to_check := 20  // Safety limit
@@ -441,27 +435,42 @@ get_portal_points :: proc(query: ^Nav_Mesh_Query, from: recast.Poly_Ref, to: rec
         log.errorf("    Hit link traversal safety limit (%d), possible infinite loop", max_links_to_check)
     }
 
-    log.infof("    Links checked: %d, no match found", link_count)
+    // log.infof("    Links checked: %d, no match found", link_count)
 
     // Fallback: check neighbor references
-    log.infof("  METHOD 2: Checking neighbor references...")
-    log.infof("    Same tile check: from_tile=%d, to_tile=%d", from_tile_idx, to_tile_idx)
+    // log.infof("  METHOD 2: Checking neighbor references...")
+    // log.infof("    Same tile check: from_tile=%d, to_tile=%d", from_tile_idx, to_tile_idx)
 
     // Check if they're in the same tile (neighbor references only work within tile)
     if from_tile_idx == to_tile_idx {
-        log.infof("    Polygons are in same tile, checking neighbor array...")
+        // log.infof("    Polygons are in same tile, checking neighbor array...")
 
         for i in 0..<int(from_poly.vert_count) {
             nei := from_poly.neis[i]
-            log.infof("      Edge %d: neighbor=0x%x", i, nei)
+            // log.infof("      Edge %d: neighbor=0x%x", i, nei)
 
-            // Check internal edge connection (1-based index)
-            if nei > 0 && nei <= 0x3f {  // Internal edge marker
-                nei_idx := u32(nei - 1)  // Convert to 0-based index
-                log.infof("        Internal neighbor index: %d (looking for %d)", nei_idx, to_poly_idx)
+            nei_idx: u32
 
-                if nei_idx == to_poly_idx {
-                    log.infof("        MATCH FOUND! Extracting edge vertices...")
+            // Check if this is an external link (0x8000 flag set)
+            if nei & 0x8000 != 0 {
+                // External link - the lower bits contain the neighbor index
+                nei_idx = u32(nei & 0x7fff)
+                // log.infof("        External link to index: %d (looking for %d)", nei_idx, to_poly_idx)
+            } else if nei > 0 && nei <= 0x3f {  // Internal edge marker
+                nei_idx = u32(nei - 1)  // Convert to 0-based index
+                // log.infof("        Internal neighbor index: %d (looking for %d)", nei_idx, to_poly_idx)
+            } else {
+                // 0 means no neighbor, skip
+                // if nei == 0 {
+                //     log.infof("        Border edge (no neighbor)")
+                // } else {
+                //     log.infof("        Unknown neighbor type: 0x%x", nei)
+                // }
+                continue
+            }
+
+            if nei_idx == to_poly_idx {
+                    // log.debugf("        MATCH FOUND! Extracting edge vertices...")
 
                     v0_idx := from_poly.verts[i]
                     v1_idx := from_poly.verts[(i + 1) % int(from_poly.vert_count)]
@@ -475,24 +484,19 @@ get_portal_points :: proc(query: ^Nav_Mesh_Query, from: recast.Poly_Ref, to: rec
                     va := from_tile.verts[v0_idx]
                     vb := from_tile.verts[v1_idx]
 
-                    log.infof("        va=%v, vb=%v", va, vb)
+                    // log.debugf("        va=%v, vb=%v", va, vb)
 
                     // Swap to match C++ behavior
                     left = vb
                     right = va
                     portal_type = 0
 
-                    log.infof("        SUCCESS: Portal found via neighbor - left=%v, right=%v", left, right)
+                    // log.debugf("        SUCCESS: Portal found via neighbor - left=%v, right=%v", left, right)
                     return left, right, portal_type, {.Success}
                 }
-            } else if nei == 0 {
-                log.infof("        Border edge (no neighbor)")
-            } else {
-                log.infof("        External neighbor or special case: 0x%x", nei)
-            }
         }
 
-        log.infof("    No matching neighbors found in neighbor array")
+        // log.debugf("    No matching neighbors found in neighbor array")
     } else {
         log.infof("    Polygons in different tiles, neighbor references won't work")
     }
@@ -705,9 +709,11 @@ move_along_surface :: proc(query: ^Nav_Mesh_Query,
             expected_min_progress := f32(iter) * STEP_SIZE * 0.1  // At least 10% of expected progress
 
             if step_progress < expected_min_progress {
-                log.warnf("Surface walk making insufficient progress after %d steps (%.3f < %.3f)", iter, step_progress, expected_min_progress)
-                // This indicates we're stuck or hitting walls repeatedly
-                break
+                // log.warnf("Surface walk making insufficient progress after %d steps (%.3f < %.3f)", iter, step_progress, expected_min_progress)
+                // Don't break immediately - try to continue
+                if iter > 10 {  // Give it more chances
+                    break
+                }
             }
         }
 
@@ -754,15 +760,127 @@ move_along_surface :: proc(query: ^Nav_Mesh_Query,
 
 // Helper functions for surface movement
 
+// Find closest point on polygon boundary (matches C++ closestPointOnPolyBoundary)
+closest_point_on_poly_boundary_nav :: proc(query: ^Nav_Mesh_Query, ref: recast.Poly_Ref, pos: [3]f32) -> ([3]f32, recast.Status) {
+    tile, poly, status := get_tile_and_poly_by_ref(query.nav_mesh, ref)
+    if recast.status_failed(status) || tile == nil || poly == nil {
+        return pos, status
+    }
+
+    // Collect vertices
+    verts := make([][3]f32, poly.vert_count, context.temp_allocator)
+    for i in 0..<int(poly.vert_count) {
+        verts[i] = tile.verts[poly.verts[i]]
+    }
+
+    // Calculate edge distances and find closest point
+    edge_dist := make([]f32, poly.vert_count, context.temp_allocator)
+    edge_t := make([]f32, poly.vert_count, context.temp_allocator)
+
+    // Check distance to each edge
+    for i in 0..<int(poly.vert_count) {
+        j := (i + 1) % int(poly.vert_count)
+        va := verts[i]
+        vb := verts[j]
+
+        // Calculate distance to edge
+        dist_sqr, t := geometry.point_segment_distance2_2d(pos, va, vb)
+        edge_dist[i] = dist_sqr
+        edge_t[i] = t
+    }
+
+    // Check if point is inside polygon (using 2D test)
+    inside := geometry.point_in_polygon_2d(pos, verts)
+
+    if inside {
+        // Point is inside, return the point itself
+        return pos, {.Success}
+    } else {
+        // Point is outside, clamp to nearest edge
+        min_dist := edge_dist[0]
+        min_idx := 0
+        for i in 1..<int(poly.vert_count) {
+            if edge_dist[i] < min_dist {
+                min_dist = edge_dist[i]
+                min_idx = i
+            }
+        }
+
+        // Interpolate along the closest edge
+        j := (min_idx + 1) % int(poly.vert_count)
+        va := verts[min_idx]
+        vb := verts[j]
+        result := linalg.lerp(va, vb, edge_t[min_idx])
+        return result, {.Success}
+    }
+}
+
 closest_point_on_poly :: proc(query: ^Nav_Mesh_Query, ref: recast.Poly_Ref, pos: [3]f32) -> [3]f32 {
     tile, poly, status := get_tile_and_poly_by_ref(query.nav_mesh, ref)
     if recast.status_failed(status) {
         return pos
     }
 
-    // For simplicity, project to polygon center
-    // A full implementation would project to polygon surface
-    return calc_poly_center(tile, poly)
+    // Check if point is inside polygon first
+    verts := make([][3]f32, poly.vert_count, context.temp_allocator)
+    for i in 0..<int(poly.vert_count) {
+        verts[i] = tile.verts[poly.verts[i]]
+    }
+
+    if geometry.point_in_polygon_2d(pos, verts) {
+        // Point is inside, return it with proper Y height
+        avg_y := f32(0)
+        for v in verts {
+            avg_y += v.y
+        }
+        avg_y /= f32(len(verts))
+        return {pos.x, avg_y, pos.z}
+    }
+
+    // Point is outside, find closest point on polygon edges
+    closest := pos
+    closest_dist_sqr := f32(math.F32_MAX)
+
+    for i in 0..<int(poly.vert_count) {
+        va := verts[i]
+        vb := verts[(i + 1) % int(poly.vert_count)]
+
+        // Find closest point on edge
+        edge_closest := closest_point_on_segment_2d_funnel(pos, va, vb)
+
+        dx := edge_closest.x - pos.x
+        dz := edge_closest.z - pos.z
+        dist_sqr := dx * dx + dz * dz
+
+        if dist_sqr < closest_dist_sqr {
+            closest_dist_sqr = dist_sqr
+            closest = edge_closest
+        }
+    }
+
+    return closest
+}
+
+// Helper for closest point on segment (local to funnel.odin)
+closest_point_on_segment_2d_funnel :: proc(pos: [3]f32, a: [3]f32, b: [3]f32) -> [3]f32 {
+    dx := b.x - a.x
+    dz := b.z - a.z
+
+    edge_len_sqr := dx * dx + dz * dz
+    if edge_len_sqr < 1e-6 {
+        return a
+    }
+
+    px := pos.x - a.x
+    pz := pos.z - a.z
+    t := (px * dx + pz * dz) / edge_len_sqr
+    t = clamp(t, 0.0, 1.0)
+
+    return {
+        a.x + t * dx,
+        a.y + t * (b.y - a.y),
+        a.z + t * dz,
+    }
 }
 
 point_in_polygon :: proc(query: ^Nav_Mesh_Query, ref: recast.Poly_Ref, pos: [3]f32) -> bool {

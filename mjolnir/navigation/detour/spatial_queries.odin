@@ -482,22 +482,77 @@ query_polygons_in_tile_bv :: proc(nav_mesh: ^Nav_Mesh, tile: ^Mesh_Tile, qmin: [
 }
 
 closest_point_on_polygon :: proc(tile: ^Mesh_Tile, poly: ^Poly, pos: [3]f32) -> ([3]f32, bool) {
-    // For simplicity, use polygon center
-    // A full implementation would project to the actual polygon surface
-    center := calc_poly_center(tile, poly)
-
-    // Check if point is inside using 2D test
+    // Build polygon vertices
     verts := make([][3]f32, poly.vert_count, context.temp_allocator)
     for i in 0..<int(poly.vert_count) {
         verts[i] = tile.verts[poly.verts[i]]
     }
 
+    // Check if point is inside using 2D test
     inside := geometry.point_in_polygon_2d(pos, verts)
 
     if inside {
-        return pos, true
-    } else {
-        return center, false
+        // Point is inside polygon, use it directly but with polygon's Y height
+        // Find the Y height at this XZ position (simplified: use average of vertices)
+        avg_y := f32(0)
+        for v in verts {
+            avg_y += v.y
+        }
+        avg_y /= f32(len(verts))
+        return {pos.x, avg_y, pos.z}, true
+    }
+    
+    // Point is outside, find closest point on polygon edges
+    closest := pos
+    closest_dist_sqr := f32(math.F32_MAX)
+    
+    for i in 0..<int(poly.vert_count) {
+        va := verts[i]
+        vb := verts[(i + 1) % int(poly.vert_count)]
+        
+        // Find closest point on edge in 2D (XZ plane)
+        edge_closest := closest_point_on_segment_2d(pos, va, vb)
+        
+        // Calculate distance in 2D
+        dx := edge_closest.x - pos.x
+        dz := edge_closest.z - pos.z
+        dist_sqr := dx * dx + dz * dz
+        
+        if dist_sqr < closest_dist_sqr {
+            closest_dist_sqr = dist_sqr
+            closest = edge_closest
+        }
+    }
+    
+    return closest, false
+}
+
+// Helper function to find closest point on a line segment in 2D (XZ plane)
+closest_point_on_segment_2d :: proc(pos: [3]f32, a: [3]f32, b: [3]f32) -> [3]f32 {
+    dx := b.x - a.x
+    dz := b.z - a.z
+    
+    // Edge vector length squared
+    edge_len_sqr := dx * dx + dz * dz
+    
+    if edge_len_sqr < 1e-6 {
+        // Degenerate edge, return first vertex
+        return a
+    }
+    
+    // Project point onto edge direction
+    px := pos.x - a.x
+    pz := pos.z - a.z
+    t := (px * dx + pz * dz) / edge_len_sqr
+    
+    // Clamp to edge bounds
+    t = clamp(t, 0.0, 1.0)
+    
+    // Interpolate position along edge
+    return {
+        a.x + t * dx,
+        a.y + t * (b.y - a.y),  // Interpolate Y height too
+        a.z + t * dz,
     }
 }
 

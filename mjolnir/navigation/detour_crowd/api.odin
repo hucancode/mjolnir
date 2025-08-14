@@ -205,23 +205,19 @@ agent_params_create_vehicle :: proc() -> Crowd_Agent_Params {
 
 // Preset obstacle avoidance configurations
 obstacle_avoidance_params_create_low_quality :: proc() -> Obstacle_Avoidance_Params {
-    params := obstacle_avoidance_params_default()
-    params.grid_size = 15
-    params.adaptive_divs = 5
-    params.adaptive_rings = 1
-    params.adaptive_depth = 3
-    return params
+    return obstacle_avoidance_params_default()  // C++ reference: low quality = default
 }
 
 obstacle_avoidance_params_create_medium_quality :: proc() -> Obstacle_Avoidance_Params {
-    return obstacle_avoidance_params_default()
+    return obstacle_avoidance_params_default()  // C++ reference: medium quality = default
 }
 
 obstacle_avoidance_params_create_high_quality :: proc() -> Obstacle_Avoidance_Params {
     params := obstacle_avoidance_params_default()
-    params.grid_size = 65
-    params.adaptive_divs = 9
+    // C++ reference values for high quality
+    params.grid_size = 45
+    params.adaptive_divs = 7
     params.adaptive_rings = 3
-    params.adaptive_depth = 7
+    params.adaptive_depth = 5
     return params
 }

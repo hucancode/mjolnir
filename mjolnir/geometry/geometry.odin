@@ -699,32 +699,27 @@ vector_equal :: proc(a, b: [3]f32, epsilon: f32 = 0.0001) -> bool {
     return diff.x < epsilon && diff.y < epsilon && diff.z < epsilon
 }
 
-// Distance from point to line segment in 2D (XZ plane)
-distance_point_to_segment_2d :: proc(point, seg_start, seg_end: [3]f32) -> f32 {
-    // Use XZ plane for 2D calculations
-    p := point.xz
-    a := seg_start.xz
-    b := seg_end.xz
+// Calculate squared distance from point to line segment in 2D (XZ plane) with parameter t
+point_segment_distance2_2d :: proc(pt: [3]f32, a: [3]f32, b: [3]f32) -> (dist_sqr: f32, t: f32) {
+    dx := b.x - a.x
+    dz := b.z - a.z
+    d := dx*dx + dz*dz
 
-    seg := b - a
-    seg_len_sq := linalg.length2(seg)
-
-    diff: [2]f32
-    if seg_len_sq > 1e-6 {
-        t := linalg.dot(p - a, seg) / seg_len_sq
-
-        if t > 1.0 {
-            diff = p - b
-        } else if t > 0.0 {
-            diff = p - (a + t*seg)
-        } else {
-            diff = p - a
-        }
+    if d > 0 {
+        t = ((pt.x - a.x) * dx + (pt.z - a.z) * dz) / d
+        t = clamp(t, 0, 1)
     } else {
-        diff = p - a
+        t = 0
     }
 
-    return linalg.length(diff)
+    px := a.x + t * dx
+    pz := a.z + t * dz
+
+    dx_pt := pt.x - px
+    dz_pt := pt.z - pz
+    dist_sqr = dx_pt*dx_pt + dz_pt*dz_pt
+
+    return dist_sqr, t
 }
 
 // Helper function for clamping values
@@ -1081,11 +1076,6 @@ closest_point_on_triangle :: proc "contextless" (p, a, b, c: [3]f32) -> [3]f32 {
     return a + ab * v + ac * w
 }
 
-// Calculate squared distance from point to line segment in 2D (XZ plane)
-dist_point_segment_sq_2d :: proc "contextless" (p, s0, s1: [3]f32) -> f32 {
-    closest := closest_point_on_segment_2d(p, s0, s1)
-    return linalg.length2(p - closest)
-}
 
 // Calculate polygon normal using Newell's method
 calc_poly_normal :: proc "contextless" (verts: [][3]f32) -> [3]f32 {
@@ -1134,8 +1124,9 @@ intersect_segments_2d :: proc "contextless" (ap, aq, bp, bq: [3]f32) -> (hit: bo
 }
 
 // Check if circle overlaps with line segment (2D XZ plane)
-overlap_circle_segment :: proc "contextless" (center: [3]f32, radius: f32, p, q: [3]f32) -> bool {
-    return dist_point_segment_sq_2d(center, p, q) <= radius*radius
+overlap_circle_segment :: proc(center: [3]f32, radius: f32, p, q: [3]f32) -> bool {
+    dist_sqr, _ := point_segment_distance2_2d(center, p, q)
+    return dist_sqr <= radius*radius
 }
 
 // Next power of two
