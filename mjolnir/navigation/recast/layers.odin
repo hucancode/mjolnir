@@ -24,11 +24,11 @@ Heightfield_Layer_Region :: struct {
 }
 
 
-// Modernized Sweep Span for layer building (distinct from region.odin Sweep_Span)
+// Layer Sweep Span - matches C++ rcLayerSweepSpan exactly
 Layer_Sweep_Span :: struct {
-    sample_count: u16,        // Number of samples/connections
-    region_id: u8,           // Final region ID
-    neighbor_id: Maybe(u8),  // Neighbor region ID (None if invalid)
+    sample_count: u16,  // ns - number samples
+    region_id: u8,      // id - region id (set in second phase)
+    neighbor_id: u8,    // nei - neighbour id (0xff = invalid)
 }
 
 // Utility function: add unique value to dynamic slice
@@ -100,7 +100,7 @@ build_heightfield_layers :: proc(
     defer delete(src_reg)
 
     if !partition_monotone_regions(chf, border_size, src_reg) {
-        log.error("build_heightfield_layers: Could not partition monotone regions")
+        log.warn("build_heightfield_layers: Could not partition monotone regions (likely >255 regions)")
         return {}, false
     }
 
@@ -159,7 +159,7 @@ build_heightfield_layers :: proc(
     return lset, true
 }
 
-// Phase 1: Monotone region partitioning (Odin-idiomatic)
+// Phase 1: Monotone region partitioning (Matches C++ implementation exactly)
 partition_monotone_regions :: proc(
     chf: ^Compact_Heightfield,
     border_size: i32,
@@ -168,27 +168,24 @@ partition_monotone_regions :: proc(
     w := chf.width
     h := chf.height
 
-    // Initialize all regions as unassigned
-    slice.fill(src_reg, RC_NULL_LAYER)
+    // Initialize all regions as unassigned (C++ uses 0xff)
+    slice.fill(src_reg, 0xff)
 
-    // Create sweep spans (dynamic for growth)
+    // Allocate sweeps array - C++ uses fixed size based on nsweeps
+    // We'll use dynamic but the logic must match exactly
     sweeps := make([dynamic]Layer_Sweep_Span)
     defer delete(sweeps)
 
-    // Previous count tracking
-    prev_count := make([dynamic]u16, 256)
-    defer delete(prev_count)
-
+    // Previous count tracking (C++ uses prevCount[256])
+    prev_count: [256]i32
     reg_id: u8 = 0
 
     // Process each row from border to h-border
     for y in border_size ..< (h - border_size) {
-        // Reset previous count
-        clear(&prev_count)
-        resize(&prev_count, int(reg_id))
-        slice.fill(prev_count[:], 0)
-
-        clear(&sweeps)
+        // Reset previous count for this row (C++ memset)
+        slice.fill(prev_count[:reg_id], 0)
+        sweep_id: u8 = 0  // C++ sweepId counter
+        clear(&sweeps)     // Start fresh for each row
 
         // Process each column from border to w-border
         for x in border_size ..< (w - border_size) {
@@ -204,98 +201,100 @@ partition_monotone_regions :: proc(
                     continue
                 }
 
-                sid: Maybe(int) = nil
+                sid: u8 = 0xff  // C++ uses 0xff as invalid marker
 
-                // Check connection in -X direction (west)
+                // Check connection in -X direction (direction 0)
                 s := &chf.spans[i]
                 if get_con(s, 0) != RC_NOT_CONNECTED {
                     ax := x + get_dir_offset_x(0)
                     ay := y + get_dir_offset_y(0)
-                    if ax >= 0 && ax < w && ay >= 0 && ay < h {
-                        ai := chf.cells[ax + ay * w].index + u32(get_con(s, 0))
-                        if ai < u32(len(src_reg)) && src_reg[ai] != RC_NULL_LAYER {
-                            // Find existing sweep with this region ID
-                            for sweep_idx in 0..< len(sweeps) {
-                                if sweeps[sweep_idx].region_id == src_reg[ai] {
-                                    sid = sweep_idx
-                                    break
-                                }
-                            }
-                        }
+                    ai := chf.cells[ax + ay * w].index + u32(get_con(s, 0))
+                    
+                    // C++ logic: if (chf.areas[ai] != RC_NULL_AREA && srcReg[ai] != 0xff)
+                    if ai < u32(len(chf.areas)) && ai < u32(len(src_reg)) &&
+                       chf.areas[ai] != RC_NULL_AREA && src_reg[ai] != 0xff {
+                        sid = src_reg[ai]  // Reuse existing sweep ID
                     }
                 }
 
-                // Assign sweep ID
-                if sid == nil {
-                    sid = len(sweeps)
-                    append(&sweeps, Layer_Sweep_Span{
-                        sample_count = 0,
-                        region_id = 0,
-                        neighbor_id = nil,
-                    })
+                // If no existing sweep found, create new one
+                if sid == 0xff {
+                    sid = sweep_id
+                    sweep_id += 1
+                    
+                    // Extend sweeps array if needed
+                    for len(sweeps) <= int(sid) {
+                        append(&sweeps, Layer_Sweep_Span{
+                            sample_count = 0,
+                            region_id = 0,      // Will be set in second phase
+                            neighbor_id = 0xff, // C++ uses 0xff for invalid
+                        })
+                    }
+                    
+                    sweeps[sid].neighbor_id = 0xff
+                    sweeps[sid].sample_count = 0
                 }
 
-                // Store span's sweep ID temporarily in src_reg
-                src_reg[i] = u8(sid.?)
-
-                // Check connection in -Y direction (south)
+                // Check connection in -Y direction (direction 3)
                 if get_con(s, 3) != RC_NOT_CONNECTED {
                     ax := x + get_dir_offset_x(3)
                     ay := y + get_dir_offset_y(3)
-                    if ax >= 0 && ax < w && ay >= 0 && ay < h {
-                        ai := chf.cells[ax + ay * w].index + u32(get_con(s, 3))
-                        if ai < u32(len(src_reg)) && src_reg[ai] != RC_NULL_LAYER {
-                            nr := src_reg[ai]
-                            sweep := &sweeps[sid.?]
-
-                            nei_val, has_nei := sweep.neighbor_id.?
-                            if !has_nei {
-                                // First neighbor
+                    ai := chf.cells[ax + ay * w].index + u32(get_con(s, 3))
+                    
+                    if ai < u32(len(src_reg)) {
+                        nr := src_reg[ai]
+                        if nr != 0xff {
+                            sweep := &sweeps[sid]
+                            
+                            // Set neighbour when first valid neighbour is encountered
+                            if sweep.sample_count == 0 {
                                 sweep.neighbor_id = nr
-                                sweep.sample_count = 1
-                            } else if nei_val == nr {
-                                // Same neighbor
-                                sweep.sample_count += 1
-                            } else {
-                                // Different neighbor - invalidate
-                                sweep.neighbor_id = nil
                             }
-
-                            if int(nr) < len(prev_count) {
+                            
+                            if sweep.neighbor_id == nr {
+                                // Update existing neighbour
+                                sweep.sample_count += 1
                                 prev_count[nr] += 1
+                            } else {
+                                // More than one neighbour - invalidate
+                                sweep.neighbor_id = 0xff
                             }
                         }
                     }
                 }
+
+                // Store sweep ID in srcReg (first pass)
+                src_reg[i] = sid
             }
         }
 
-        // Create region IDs for current row
-        for &sweep in sweeps {
-            if nei_val, has_nei := sweep.neighbor_id.?; has_nei &&
-               int(nei_val) < len(prev_count) &&
-               prev_count[nei_val] == sweep.sample_count {
-                // Can merge with previous region
-                sweep.region_id = nei_val
+        // Create unique region IDs (C++ "Create unique ID" section)
+        for i in 0..< int(sweep_id) {
+            sweep := &sweeps[i]
+            
+            // If neighbour is set and there is only one continuous connection,
+            // merge with previous region, else create new region
+            if sweep.neighbor_id != 0xff && 
+               prev_count[sweep.neighbor_id] == i32(sweep.sample_count) {
+                sweep.region_id = sweep.neighbor_id
             } else {
-                // Create new region
-                sweep.region_id = reg_id
-                reg_id += 1
-                if reg_id == RC_NULL_LAYER {
-                    log.error("build_heightfield_layers: Region ID overflow")
+                if reg_id == 255 {
+                    log.warn("build_heightfield_layers: Region ID overflow (>255 regions not supported in layer system)")
                     return false
                 }
+                sweep.region_id = reg_id
+                reg_id += 1
             }
         }
 
-        // Remap sweep IDs to final region IDs
+        // Remap local sweep IDs to region IDs (second pass)
         for x in border_size ..< (w - border_size) {
             c := &chf.cells[x + y * w]
             for i in c.index ..< c.index + u32(c.count) {
                 if i >= u32(len(src_reg)) {
                     continue
                 }
-                if src_reg[i] != RC_NULL_LAYER && int(src_reg[i]) < len(sweeps) {
+                if src_reg[i] != 0xff {
                     src_reg[i] = sweeps[src_reg[i]].region_id
                 }
             }
@@ -318,7 +317,7 @@ analyze_regions :: proc(
     for &reg in regions {
         reg.overlapping_layers = make([dynamic]u8)
         reg.neighbors = make([dynamic]u8)
-        reg.height_bounds = {0xffff, 0}  // [ymin, ymax]
+        reg.height_bounds = {0xffff, 0}  // [ymin=max_value, ymax=0] for proper min/max tracking
         reg.layer_id = RC_NULL_LAYER
         reg.is_base = false
     }
@@ -352,8 +351,11 @@ analyze_regions :: proc(
 
                 // Update region bounds using modernized approach
                 reg := &regions[ri]
+                
+                // Match C++ behavior: only use s.y for both min and max!
+                // This tracks where spans START, not their full extent
                 expand_bounds(&reg.height_bounds, s.y)
-                expand_bounds(&reg.height_bounds, u16(s.y) + u16(s.h))
+                expand_bounds(&reg.height_bounds, s.y)  // Yes, s.y for both!
 
                 // Add to local regions list
                 add_unique(&local_regions, ri)
@@ -413,6 +415,8 @@ assign_layers_dfs :: proc(regions: []Heightfield_Layer_Region) -> int {
         // Start new layer with this region as root
         root.layer_id = layer_id
         root.is_base = true
+        
+        // Start new layer with this region as root
 
         // Initialize stack with root
         clear(&stack)
@@ -436,7 +440,7 @@ assign_layers_dfs :: proc(regions: []Heightfield_Layer_Region) -> int {
                 }
 
                 // Check if neighbor overlaps with root region
-                if slice.contains(root.overlapping_layers[:], nei_id) {
+                if slice.contains(root.overlapping_layers[:], u8(nei_id)) {
                     continue  // Skip overlapping regions
                 }
 
@@ -466,7 +470,7 @@ assign_layers_dfs :: proc(regions: []Heightfield_Layer_Region) -> int {
 
         layer_id += 1
         if layer_id == RC_NULL_LAYER {
-            log.error("build_heightfield_layers: Layer ID overflow")
+            log.warn("build_heightfield_layers: Layer ID overflow (>255 layers not supported)")
             break
         }
     }
@@ -479,6 +483,8 @@ merge_layers :: proc(regions: []Heightfield_Layer_Region, walkable_height: i32) 
     merge_height := u16(walkable_height * 4)
     max_iterations := len(regions) * 2  // Reasonable upper bound
     iteration := 0
+
+    // Start merging process
 
     // Keep merging until no more merges are possible
     for iteration < max_iterations {
@@ -503,6 +509,8 @@ merge_layers :: proc(regions: []Heightfield_Layer_Region, walkable_height: i32) 
                     continue  // Already same layer
                 }
 
+                // Check if layers can be merged
+
                 // Check height overlap using modernized bounds arrays
                 ri_extended := [2]u16{ri.height_bounds.x, ri.height_bounds.y + merge_height}
                 rj_extended := [2]u16{rj.height_bounds.x, rj.height_bounds.y + merge_height}
@@ -518,17 +526,35 @@ merge_layers :: proc(regions: []Heightfield_Layer_Region, walkable_height: i32) 
                 }
 
                 // Check for overlapping regions
+                // We need to check if any region in layer i overlaps with any region in layer j
                 can_merge := true
-                for overlap_id in ri.overlapping_layers {
-                    if slice.contains(rj.overlapping_layers[:], overlap_id) {
-                        can_merge = false
-                        break
+                
+                // Check if ri overlaps with rj directly
+                if slice.contains(ri.overlapping_layers[:], u8(j)) {
+                    can_merge = false
+                }
+                
+                // Also check all regions that have been assigned to these layers
+                if can_merge {
+                    for k in 0 ..< len(regions) {
+                        if regions[k].layer_id == ri.layer_id {
+                            for overlap_id in regions[k].overlapping_layers {
+                                // Check if this overlapping region belongs to rj's layer
+                                if int(overlap_id) < len(regions) && regions[overlap_id].layer_id == rj.layer_id {
+                                    can_merge = false
+                                    break
+                                }
+                            }
+                            if !can_merge do break
+                        }
                     }
                 }
 
                 if !can_merge {
                     continue
                 }
+
+                // Merge rj into ri
 
                 // Merge rj into ri
                 old_id := rj.layer_id
@@ -630,15 +656,26 @@ build_single_layer :: proc(
     w := chf.width
     h := chf.height
 
-    // Find spans belonging to this layer
-    minx := i32(w)
-    maxx := i32(0)
-    miny := i32(h)
-    maxy := i32(0)
+    // C++ style: All layers have the same full size (minus border)
+    // This prevents fragmentation into many small layers
+    layer_width := w - border_size * 2
+    layer_height := h - border_size * 2
+    
+    if layer_width <= 0 || layer_height <= 0 {
+        return false
+    }
+
+    // Find height bounds for this layer
     hmin := i32(0xffff)
     hmax := i32(0)
-
     span_count := 0
+    
+    // Also track actual data bounds for minx/maxx/miny/maxy
+    // (these are stored in the layer but don't affect the layer size)
+    data_minx := i32(w)
+    data_maxx := i32(0)
+    data_miny := i32(h)
+    data_maxy := i32(0)
 
     for y in 0 ..< h {
         for x in 0 ..< w {
@@ -663,11 +700,14 @@ build_single_layer :: proc(
                 }
 
                 s := &chf.spans[i]
-
-                minx = min(minx, i32(x))
-                maxx = max(maxx, i32(x))
-                miny = min(miny, i32(y))
-                maxy = max(maxy, i32(y))
+                
+                // Track actual data bounds
+                data_minx = min(data_minx, i32(x))
+                data_maxx = max(data_maxx, i32(x))
+                data_miny = min(data_miny, i32(y))
+                data_maxy = max(data_maxy, i32(y))
+                
+                // Track height bounds
                 hmin = min(hmin, i32(s.y))
                 hmax = max(hmax, i32(s.y) + i32(s.h))
                 span_count += 1
@@ -678,32 +718,33 @@ build_single_layer :: proc(
     if span_count == 0 {
         return false
     }
+    
+    // The actual layer origin is offset by border_size
+    layer_minx := border_size
+    layer_miny := border_size
 
-    // Expand bounds by border size
-    minx = max(0, minx - border_size)
-    maxx = min(i32(w) - 1, maxx + border_size)
-    miny = max(0, miny - border_size)
-    maxy = min(i32(h) - 1, maxy + border_size)
-
-    layer_width := maxx - minx + 1
-    layer_height := maxy - miny + 1
-
-    if layer_width <= 0 || layer_height <= 0 {
-        return false
-    }
-
-    // Create layer
+    // Create layer with full size (like C++)
+    // Adjust bounding box to fit the layer (accounting for border)
+    layer_bmin := chf.bmin
+    layer_bmax := chf.bmax
+    layer_bmin.x += f32(border_size) * chf.cs
+    layer_bmin.z += f32(border_size) * chf.cs
+    layer_bmax.x -= f32(border_size) * chf.cs
+    layer_bmax.z -= f32(border_size) * chf.cs
+    layer_bmin.y = chf.bmin.y + f32(hmin) * chf.ch
+    layer_bmax.y = chf.bmin.y + f32(hmax) * chf.ch
+    
     layer := Heightfield_Layer {
-        bmin = chf.bmin,
-        bmax = chf.bmax,
+        bmin = layer_bmin,
+        bmax = layer_bmax,
         cs = chf.cs,
         ch = chf.ch,
         width = layer_width,
         height = layer_height,
-        minx = minx,
-        maxx = maxx,
-        miny = miny,
-        maxy = maxy,
+        minx = data_minx,  // Store actual data bounds for reference
+        maxx = data_maxx,
+        miny = data_miny,
+        maxy = data_maxy,
         hmin = hmin,
         hmax = hmax,
         heights = make([]u8, int(layer_width * layer_height)),
@@ -716,9 +757,9 @@ build_single_layer :: proc(
     slice.fill(layer.areas, RC_NULL_AREA)
     slice.fill(layer.cons, 0)
 
-    // Fill layer data
-    for y in miny ..= maxy {
-        for x in minx ..= maxx {
+    // Fill layer data - scan the full grid
+    for y in 0 ..< h {
+        for x in 0 ..< w {
             c := &chf.cells[x + y * w]
 
             for i in c.index ..< c.index + u32(c.count) {
@@ -740,8 +781,15 @@ build_single_layer :: proc(
                 }
 
                 s := &chf.spans[i]
-                lx := x - minx
-                ly := y - miny
+                // Convert to layer coordinates (offset by border_size)
+                lx := x - border_size
+                ly := y - border_size
+                
+                // Skip if outside layer bounds
+                if lx < 0 || lx >= layer_width || ly < 0 || ly >= layer_height {
+                    continue
+                }
+                
                 lidx := lx + ly * layer_width
 
                 if lidx < 0 || lidx >= i32(len(layer.heights)) {
@@ -770,12 +818,17 @@ build_single_layer :: proc(
                                     // Check if connected span is in same layer
                                     if regions[rai].layer_id == layer_id {
                                         // Connection within same layer
-                                        if ax >= minx && ax <= maxx && ay >= miny && ay <= maxy {
+                                        // Check if neighbor is within layer bounds
+                                        alx := ax - border_size
+                                        aly := ay - border_size
+                                        if alx >= 0 && alx < layer_width && aly >= 0 && aly < layer_height {
                                             cons |= u8(1 << u8(dir))
                                         }
                                     } else {
                                         // Portal connection to different layer
-                                        if ax >= minx && ax <= maxx && ay >= miny && ay <= maxy {
+                                        alx := ax - border_size
+                                        aly := ay - border_size
+                                        if alx >= 0 && alx < layer_width && aly >= 0 && aly < layer_height {
                                             cons |= u8(1 << u8(dir))
                                         }
                                     }
