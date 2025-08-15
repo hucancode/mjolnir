@@ -1,3 +1,5 @@
 **/*.spv
 /bin
 test.bin
+# C++ test binaries
+test_cpp/bin/
