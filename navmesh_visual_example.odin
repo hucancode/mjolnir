@@ -56,6 +56,8 @@ navmesh_state: struct {
 
     // Visualization handles
     path_waypoint_handles: [dynamic]mjolnir.Handle,
+    start_marker_handle: mjolnir.Handle,
+    end_marker_handle: mjolnir.Handle,
 
     // Mouse picking state
     picking_mode: PickingMode,
@@ -127,6 +129,10 @@ navmesh_setup :: proc(engine: ^mjolnir.Engine) {
             navmesh_state.start_pos.x, navmesh_state.start_pos.y, navmesh_state.start_pos.z,
             navmesh_state.end_pos.x, navmesh_state.end_pos.y, navmesh_state.end_pos.z)
 
+        // Create visual markers for start and end positions
+        update_position_marker(engine, &navmesh_state.start_marker_handle, navmesh_state.start_pos, {0, 1, 0, 1})
+        update_position_marker(engine, &navmesh_state.end_marker_handle, navmesh_state.end_pos, {1, 0, 0, 1})
+
         // Find and visualize the path
         find_path(engine)
         update_path_visualization(engine)
@@ -149,7 +155,6 @@ build_navmesh :: proc(engine: ^mjolnir.Engine) -> (use_procedural: bool) {
     }
 
     // Try to load from OBJ file first
-    // Default to procedural geometry unless a file is explicitly provided
     // Use "procedural" as a special keyword to force procedural geometry
     obj_file := ""
     if len(os.args) > 2 {
@@ -169,14 +174,13 @@ build_navmesh :: proc(engine: ^mjolnir.Engine) -> (use_procedural: bool) {
 
     if !use_procedural && os.exists(obj_file) {
         log.infof("Loading navigation mesh from OBJ file: %s", obj_file)
-        vertices, indices, areas, load_ok = navigation.load_obj_to_navmesh_input(obj_file, 1.0, recast.RC_WALKABLE_AREA)
+        vertices, indices, areas, load_ok = navigation.load_obj_to_navmesh_input(obj_file, 1.0, 45.0)
 
         if load_ok {
             log.infof("Successfully loaded OBJ file with %d vertices and %d triangles", len(vertices), len(indices)/3)
 
             // Create mesh for OBJ visualization
-            // TODO: Fix OBJ visualization - temporarily disabled due to crash
-            // create_obj_visualization_mesh(engine, obj_file)
+            create_obj_visualization_mesh(engine, obj_file)
         } else {
             log.warn("Failed to load OBJ file, falling back to procedural geometry")
         }
@@ -470,6 +474,8 @@ create_obj_visualization_mesh :: proc(engine: ^mjolnir.Engine, obj_file: string)
         log.error("Failed to load OBJ file as geometry")
         return
     }
+    // NOTE: Don't delete geometry here - create_mesh takes ownership of the data
+    // The mesh will manage the geometry lifetime
 
     // Create mesh
     navmesh_state.obj_mesh_handle, _, _ = create_mesh(
@@ -750,6 +756,50 @@ update_path_visualization :: proc(engine: ^mjolnir.Engine) {
     clear(&navmesh_state.path_waypoint_handles)
 }
 
+// Create or update visual marker for start/end position
+update_position_marker :: proc(engine: ^mjolnir.Engine, handle: ^mjolnir.Handle, pos: [3]f32, color: [4]f32) {
+    using mjolnir, geometry
+
+    // Remove old marker if exists
+    if handle.generation != 0 {
+        despawn(engine, handle^)
+    }
+
+    // Create new marker
+    marker_geom := make_sphere(12, 6, 0.3, color)  // Small sphere with color
+    // NOTE: Don't delete geometry here - create_mesh takes ownership
+    
+    marker_mesh_handle, _, _ := create_mesh(
+        &engine.gpu_context,
+        &engine.warehouse,
+        marker_geom,
+    )
+
+    // Create colored material for the marker
+    marker_material_handle, _, _ := create_material(
+        &engine.warehouse,
+        metallic_value = 0.2,
+        roughness_value = 0.8,
+        emissive_value = 0.5,  // Make it glow a bit
+    )
+
+    // Spawn the marker
+    node: ^Node
+    handle^, node = spawn(
+        &engine.scene,
+        MeshAttachment{
+            handle = marker_mesh_handle,
+            material = marker_material_handle,
+            cast_shadow = false,
+        },
+    )
+
+    // Position the marker slightly above the ground
+    if node != nil {
+        node.transform.position = pos + {0, 0.2, 0}  // Slightly above ground
+    }
+}
+
 // Convert screen coordinates to world ray
 screen_to_world_ray :: proc(engine: ^mjolnir.Engine, screen_x, screen_y: f32) -> (ray_origin: [3]f32, ray_dir: [3]f32) {
     using mjolnir, geometry
@@ -862,19 +912,55 @@ find_navmesh_point_from_mouse :: proc(engine: ^mjolnir.Engine, mouse_x, mouse_y:
     // Get ray from camera through mouse position
     ray_origin, ray_dir := screen_to_world_ray(engine, mouse_x, mouse_y)
 
-    // For now, use simple approach - cast ray to ground plane and find nearest navmesh
-    // The navmesh raycast is not working correctly yet
-
-    // Try different Y planes to handle navmeshes at various heights
-    y_planes := [7]f32{0.0, 0.2, -0.2, 1.0, -1.0, 2.0, -2.0}
-
+    // Use multiple strategies to find the best navmesh point
+    
+    // Strategy 1: Sample along the ray at various distances
+    sample_distances := [15]f32{5, 10, 15, 20, 25, 30, 35, 40, 50, 60, 70, 80, 90, 100, 150}
+    best_pos: [3]f32
+    best_found := false
+    best_distance := f32(1e9)
+    
+    for dist in sample_distances {
+        sample_pos := ray_origin + ray_dir * dist
+        
+        // Use larger search extents for better hit detection
+        search_extents := [3]f32{5.0, 10.0, 5.0}
+        status, poly_ref, nearest_pos := detour.find_nearest_poly(navmesh_state.nav_query, sample_pos, search_extents, &navmesh_state.filter)
+        
+        if recast.status_succeeded(status) && poly_ref != recast.INVALID_POLY_REF {
+            // Check if this point is actually closer to the ray
+            // Project nearest_pos onto the ray to get closest point on ray
+            to_point := nearest_pos - ray_origin
+            proj_dist := linalg.dot(to_point, ray_dir)
+            if proj_dist > 0 {
+                closest_on_ray := ray_origin + ray_dir * proj_dist
+                dist_to_ray := linalg.distance(nearest_pos, closest_on_ray)
+                
+                // Prefer points that are closer to the ray and closer to the camera
+                score := dist_to_ray + proj_dist * 0.01  // Small bias for closer points
+                if score < best_distance {
+                    best_distance = score
+                    best_pos = nearest_pos
+                    best_found = true
+                }
+            }
+        }
+    }
+    
+    if best_found {
+        return best_pos, true
+    }
+    
+    // Strategy 2: If no hit along ray, try plane intersections at various heights
+    y_planes := [9]f32{0.0, 0.1, -0.1, 0.5, -0.5, 1.0, -1.0, 2.0, -2.0}
+    
     for y_plane in y_planes {
         if abs(ray_dir.y) > 0.001 {
             t := (y_plane - ray_origin.y) / ray_dir.y
-            if t > 0 && t < 1000 { // Reasonable distance
+            if t > 0 && t < 200 { // Reasonable distance
                 ground_pos := ray_origin + ray_dir * t
-                // Find nearest navmesh point
-                search_extents := [3]f32{2.0, 5.0, 2.0}
+                // Find nearest navmesh point with larger search area
+                search_extents := [3]f32{5.0, 10.0, 5.0}
                 status, poly_ref, nearest_pos := detour.find_nearest_poly(navmesh_state.nav_query, ground_pos, search_extents, &navmesh_state.filter)
                 if recast.status_succeeded(status) && poly_ref != recast.INVALID_POLY_REF {
                     return nearest_pos, true
@@ -931,6 +1017,9 @@ navmesh_mouse_pressed :: proc(engine: ^mjolnir.Engine, button, action, mods: int
             log.infof("Start position set to: (%.2f, %.2f, %.2f) - Now click RIGHT mouse button elsewhere to set end position",
                 navmesh_state.start_pos.x, navmesh_state.start_pos.y, navmesh_state.start_pos.z)
 
+            // Update start marker (green)
+            update_position_marker(engine, &navmesh_state.start_marker_handle, pos, {0, 1, 0, 1})
+
             // Clear existing path
             clear(&navmesh_state.path_points)
             navmesh_state.has_path = false
@@ -948,6 +1037,9 @@ navmesh_mouse_pressed :: proc(engine: ^mjolnir.Engine, button, action, mods: int
                 navmesh_state.picking_mode = .PickingStart
                 log.infof("End position set to: (%.2f, %.2f, %.2f) - Finding path...",
                     navmesh_state.end_pos.x, navmesh_state.end_pos.y, navmesh_state.end_pos.z)
+
+                // Update end marker (red)
+                update_position_marker(engine, &navmesh_state.end_marker_handle, pos, {1, 0, 0, 1})
 
                 // Find path
                 find_path(engine)
