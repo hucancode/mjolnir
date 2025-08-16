@@ -263,8 +263,8 @@ merge_region_holes :: proc(reg: ^Contour_Region) {
 
             for j in 0..<len(reg.outline.verts) {
                 if in_cone_hole(i32(j), reg.outline.verts, corner) {
-                    diff := reg.outline.verts[j] - corner
-                    append(&diags, Potential_Diagonal{vert = i32(j), dist = linalg.length2(diff.xz)})
+                    diff_xz := reg.outline.verts[j].xz - corner.xz
+                    append(&diags, Potential_Diagonal{vert = i32(j), dist = linalg.length2(diff_xz)})
                 }
             }
 
@@ -939,7 +939,10 @@ simplify_contour_vertices :: proc(points: ^[dynamic][4]i32, simplified: ^[dynami
 
             if should_tessellate {
                 for ci != endi {
-                    d := distance_point_to_segment_sq(points[ci].x, points[ci].z, ax, az, bx, bz)
+                    pt := [3]f32{f32(points[ci].x), 0, f32(points[ci].z)}
+                    seg_start := [3]f32{f32(ax), 0, f32(az)}
+                    seg_end := [3]f32{f32(bx), 0, f32(bz)}
+                    d, _ := geometry.point_segment_distance2_2d(pt, seg_start, seg_end)
                     if d > maxd {
                         maxd = d
                         maxi = i32(ci)
@@ -997,26 +1000,6 @@ simplify_contour_vertices :: proc(points: ^[dynamic][4]i32, simplified: ^[dynami
     }
 }
 
-// Calculate squared distance from point to line segment
-distance_point_to_segment_sq :: proc(x, z, px, pz, qx, qz: i32) -> f32 {
-    p := [2]f32{f32(px), f32(pz)}
-    q := [2]f32{f32(qx), f32(qz)}
-    pt := [2]f32{f32(x), f32(z)}
-    
-    seg := q - p
-    seg_len_sq := linalg.length2(seg)
-    t: f32 = 0
-    
-    if seg_len_sq > 0 {
-        t = linalg.dot(pt - p, seg) / seg_len_sq
-    }
-    t = math.clamp(t, 0, 1)
-    
-    closest := p + t * seg
-    diff := closest - pt
-    
-    return linalg.length2(diff)
-}
 
 // Split long edges based on max_edge_len parameter
 // Returns true if splitting completed successfully, false if convergence failed
@@ -1055,8 +1038,8 @@ split_long_edges :: proc(simplified: ^[dynamic][4]i32, points: [][4]i32, max_edg
             }
 
             if should_tessellate {
-                edge := [2]i32{bx - ax, bz - az}
-                if linalg.length2(edge) > max_edge_len*max_edge_len {
+                edge_xz := [2]f32{f32(bx - ax), f32(bz - az)}
+                if linalg.length2(edge_xz) > f32(max_edge_len*max_edge_len) {
                     // Calculate split point
                     n := bi - ai if bi > ai else bi + i32(len(points)) - ai
                     if n > 1 {
@@ -1127,11 +1110,6 @@ remove_degenerate_contour_segments :: proc(simplified: ^[dynamic][4]i32) {
     }
 
     resize(simplified, write_idx)
-}
-
-// Check if two vertices are equal (comparing only x and z coordinates)
-vertices_equal :: proc(a, b: []i32) -> bool {
-    return len(a) >= 4 && len(b) >= 4 && a[0] == b[0] && a[2] == b[2]
 }
 
 // Remove vertex at given index from simplified contour
@@ -1231,27 +1209,6 @@ insert_at :: proc(arr: ^[dynamic]i32, pos: int, v1, v2, v3, v4: i32) {
     arr[pos + 3] = v4
 }
 
-// Calculate distance from point to line segment
-distance_pt_seg :: proc(px, pz, ax, az, bx, bz: i32) -> f32 {
-    dx := f32(bx - ax)
-    dz := f32(bz - az)
-
-    if abs(dx) < 0.0001 && abs(dz) < 0.0001 {
-        // Degenerate segment
-        return (f32(px - ax) * f32(px - ax)) + (f32(pz - az) * f32(pz - az))
-    }
-
-    t := ((f32(px - ax) * dx) + (f32(pz - az) * dz)) / (dx*dx + dz*dz)
-    t = clamp(t, 0.0, 1.0)
-
-    nearx := f32(ax) + t * dx
-    nearz := f32(az) + t * dz
-
-    dx_near := f32(px) - nearx
-    dz_near := f32(pz) - nearz
-
-    return dx_near*dx_near + dz_near*dz_near
-}
 
 simplify_contour :: proc(raw_verts: [][4]i32, simplified: ^[dynamic][4]i32, max_error: f32, cell_size: f32, max_edge_len: i32 = 12, build_flags: Contour_Tess_Flags = {.WALL_EDGES}) {
     clear(simplified)
@@ -1360,7 +1317,10 @@ simplify_contour :: proc(raw_verts: [][4]i32, simplified: ^[dynamic][4]i32, max_
         if (raw_verts[ci].w & RC_CONTOUR_REG_MASK) == 0 || (raw_verts[ci].w & RC_AREA_BORDER) != 0 {
             for ci != bi {
                 v := raw_verts[ci]
-                d := distance_pt_seg(v[0], v[2], ax, az, bx, bz)
+                pt := [3]f32{f32(v[0]), 0, f32(v[2])}
+                seg_start := [3]f32{f32(ax), 0, f32(az)}
+                seg_end := [3]f32{f32(bx), 0, f32(bz)}
+                d, _ := geometry.point_segment_distance2_2d(pt, seg_start, seg_end)
                 if d > max_d {
                     max_d = d
                     max_i = int(ci)
@@ -1384,17 +1344,12 @@ simplify_contour :: proc(raw_verts: [][4]i32, simplified: ^[dynamic][4]i32, max_
         i := 0
         for i < len(simplified) {
             ii := (i + 1) % len(simplified)
-
-            ax := simplified[i].x
-            az := simplified[i].z
-            ai := simplified[i].w
-
-            bx := simplified[ii].x
-            bz := simplified[ii].z
-            bi := simplified[ii].w
+            a := simplified[i]
+            b := simplified[ii]
+            ab := b - a
 
             // Check if we should tessellate this edge
-            ci := (ai + 1) % i32(n_verts)
+            ci := (a.w + 1) % i32(n_verts)
             tess := false
 
             // Wall edges (region == 0)
@@ -1409,17 +1364,16 @@ simplify_contour :: proc(raw_verts: [][4]i32, simplified: ^[dynamic][4]i32, max_
 
             max_i := -1
             if tess {
-                dx := bx - ax
-                dz := bz - az
-                if dx*dx + dz*dz > max_edge_len*max_edge_len {
+                edge_len_sq := linalg.length2([2]f32{f32(ab.x), f32(ab.z)})
+                if edge_len_sq > f32(max_edge_len*max_edge_len) {
                     // Edge is too long, split it
                     // Round based on lexicographical order for consistency
-                    n := bi - ai if bi > ai else bi + i32(n_verts) - ai
+                    n := ab.w if ab.w > 0 else ab.w + i32(n_verts)
                     if n > 1 {
-                        if bx > ax || (bx == ax && bz > az) {
-                            max_i = int((ai + n/2) % i32(n_verts))
+                        if b.x > a.x || (b.x == a.x && b.z > a.z) {
+                            max_i = int((a.w + n/2) % i32(n_verts))
                         } else {
-                            max_i = int((ai + (n+1)/2) % i32(n_verts))
+                            max_i = int((a.w + (n+1)/2) % i32(n_verts))
                         }
                     }
                 }
@@ -1428,7 +1382,7 @@ simplify_contour :: proc(raw_verts: [][4]i32, simplified: ^[dynamic][4]i32, max_
             // If we found a point to add, insert it
             if max_i != -1 {
                 v := raw_verts[max_i]
-                inject_at(simplified, i+1, [4]i32{v[0], v[1], v[2], i32(max_i)})
+                inject_at(simplified, i+1, [4]i32{v.x, v.y, v.z, i32(max_i)})
             } else {
                 i += 1
             }

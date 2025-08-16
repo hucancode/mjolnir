@@ -722,11 +722,6 @@ point_segment_distance2_2d :: proc(pt: [3]f32, a: [3]f32, b: [3]f32) -> (dist_sq
     return dist_sqr, t
 }
 
-// Helper function for clamping values
-clamp :: proc "contextless" (val, min_val, max_val: f32) -> f32 {
-    return math.min(math.max(val, min_val), max_val)
-}
-
 // Find closest point on line segment in 2D (XZ plane)
 closest_point_on_segment_2d :: proc "contextless" (p: [3]f32, a: [3]f32, b: [3]f32) -> [3]f32 {
     // Work in XZ plane
