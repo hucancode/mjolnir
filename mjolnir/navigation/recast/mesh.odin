@@ -332,14 +332,6 @@ diagonal_loose :: proc "contextless" (verts: [][4]i32, indices: []u32, n: i32, a
 }
 
 
-// Helper functions matching C++ Recast implementation
-next :: proc "contextless" (i, n: i32) -> i32 {
-    return i + 1 < n ? i + 1 : 0
-}
-
-prev :: proc "contextless" (i, n: i32) -> i32 {
-    return i - 1 >= 0 ? i - 1 : n - 1
-}
 
 // Internal triangulation using u16 vertices
 triangulate_polygon_u16 :: proc(verts: [][3]u16, indices: []i32, triangles: ^[dynamic]i32) -> bool {
@@ -384,8 +376,8 @@ triangulate_polygon :: proc(verts: [][4]i32, indices: []i32, triangles: ^[dynami
     // Pre-mark all ears using bit flags
     // The last bit of the index is used to indicate if the vertex can be removed
     for i in 0..<n {
-        i1 := next(i, n)
-        i2 := next(i1, n)
+        i1 := (i + 1) % n
+        i2 := (i1 + 1) % n
 
         diag_result := diagonal(verts, work_indices, n, i, i2)
         if diag_result {
@@ -409,10 +401,10 @@ triangulate_polygon :: proc(verts: [][4]i32, indices: []i32, triangles: ^[dynami
 
         // Find ear with shortest diagonal (C++ algorithm)
         for i in 0..<n {
-            i1 := next(i, n)
+            i1 := (i + 1) % n
             if work_indices[i1] & 0x80000000 != 0 {
                 // This is a marked ear, calculate diagonal length
-                i2 := next(i1, n)
+                i2 := (i1 + 1) % n
                 p0_idx := i32(work_indices[i] & 0x0fffffff)
                 p2_idx := i32(work_indices[i2] & 0x0fffffff)
 
@@ -433,11 +425,11 @@ triangulate_polygon :: proc(verts: [][4]i32, indices: []i32, triangles: ^[dynami
             // Try to recover by loosening up the inCone test
             min_len = -1
             for i in i32(0)..<n {
-                i1 := next(i, n)
-                i2 := next(i1, n)
+                i1 := (i + 1) % n
+                i2 := (i1 + 1) % n
                 if diagonal_loose(verts, work_indices, n, i, i2) {
                     p0_idx := i32(work_indices[i] & 0x0fffffff)
-                    p2_idx := i32(work_indices[next(i2, n)] & 0x0fffffff)  // Match C++ exactly
+                    p2_idx := i32(work_indices[(i2 + 1) % n] & 0x0fffffff)  // Match C++ exactly
 
                     // Calculate squared distance in XZ plane
                     p0 := verts[p0_idx]
@@ -461,8 +453,8 @@ triangulate_polygon :: proc(verts: [][4]i32, indices: []i32, triangles: ^[dynami
 
         // Remove the selected ear
         i := mini
-        i1 := next(i, n)
-        i2 := next(i1, n)
+        i1 := (i + 1) % n
+        i2 := (i1 + 1) % n
 
         // Add triangle (unmask indices)
         append(triangles, i32(work_indices[i] & 0x0fffffff), i32(work_indices[i1] & 0x0fffffff), i32(work_indices[i2] & 0x0fffffff))
@@ -475,11 +467,11 @@ triangulate_polygon :: proc(verts: [][4]i32, indices: []i32, triangles: ^[dynami
 
         // Update indices after removal
         if i1 >= n do i1 = 0
-        i = prev(i1, n)
+        i = i1 - 1 >= 0 ? i1 - 1 : n - 1
 
         // Update diagonal flags for adjacent vertices (matching C++)
-        prev_i := prev(i, n)
-        next_i1 := next(i1, n)
+        prev_i := i - 1 >= 0 ? i - 1 : n - 1
+        next_i1 := (i1 + 1) % n
 
         // Only check strict diagonal (not loose) for flag updates
         if diagonal(verts, work_indices, n, prev_i, i1) {
@@ -741,271 +733,27 @@ update_polygon_neighbors :: proc(pmesh: ^Poly_Mesh, edges: []Mesh_Edge) {
     }
 }
 
-// Edge structure for triangle merging
-Triangle_Edge :: struct {
-    v0, v1: i32,           // Vertex indices (ordered: v0 < v1)
-    tri: i32,              // Triangle index that owns this edge
-    edge_idx: i32,         // Edge index within triangle (0, 1, or 2)
-}
 
-// Check if two triangles share an edge
-triangles_share_edge :: proc(tri1, tri2: []i32) -> (shares: bool, shared_edge: [2]i32) {
-    if len(tri1) < 3 || len(tri2) < 3 do return false, {}
-
-    // Check all edge combinations
-    for i in 0..<3 {
-        v1a := tri1[i]
-        v1b := tri1[(i + 1) % 3]
-
-        for j in 0..<3 {
-            v2a := tri2[j]
-            v2b := tri2[(j + 1) % 3]
-
-            // Check if edges match (in either direction)
-            if (v1a == v2a && v1b == v2b) || (v1a == v2b && v1b == v2a) {
-                return true, {v1a, v1b}
-            }
-        }
-    }
-
-    return false, {}
-}
-
-// Get vertices of a polygon formed by merging triangles
-get_merged_polygon_vertices :: proc(triangle_indices: []i32, triangles: []i32, verts: ^[dynamic]i32) {
-    clear(verts)
-    if len(triangle_indices) == 0 do return
-
-    // Start with first triangle
-    first_tri := triangle_indices[0] * 3
-    append(verts, triangles[first_tri], triangles[first_tri + 1], triangles[first_tri + 2])
-
-    // For each additional triangle, find the shared edge and insert the non-shared vertex
-    for i in 1..<len(triangle_indices) {
-        tri_idx := triangle_indices[i] * 3
-        new_tri := triangles[tri_idx:tri_idx + 3]
-
-        shared_edge: [2]i32
-        shared_found := false
-
-        // Find shared edge with existing polygon
-        for j in 0..<len(verts) {
-            v1 := verts[j]
-            v2 := verts[(j + 1) % len(verts)]
-
-            // Check if this edge matches any edge in the new triangle
-            for k in 0..<3 {
-                tv1 := new_tri[k]
-                tv2 := new_tri[(k + 1) % 3]
-
-                if (v1 == tv1 && v2 == tv2) || (v1 == tv2 && v2 == tv1) {
-                    shared_edge[0] = v1
-                    shared_edge[1] = v2
-                    shared_found = true
-
-                    // Find the non-shared vertex in the triangle
-                    non_shared_vert := new_tri[(k + 2) % 3]
-
-                    // Insert the non-shared vertex after the shared edge
-                    inject_at(verts, (j + 1) % len(verts), non_shared_vert)
-                    break
-                }
-            }
-            if shared_found do break
-        }
-
-        if !shared_found {
-            log.warnf("Could not find shared edge when merging triangle %d", triangle_indices[i])
-        }
-    }
-}
-
-// Check if polygon is convex and valid
-is_valid_polygon :: proc(verts: []i32, max_verts: i32) -> bool {
-    if len(verts) < 3 || len(verts) > int(max_verts) do return false
-
-    // Check for duplicate vertices
-    for i in 0..<len(verts) {
-        for j in i + 1..<len(verts) {
-            if verts[i] == verts[j] {
-                return false
-            }
-        }
-    }
-
-    // Check convexity - navigation meshes require convex polygons
-    // Use the "left turn" test for all vertices
-    n := len(verts)
-    for i in 0..<n {
-        v0 := verts[i]
-        v1 := verts[(i + 1) % n]
-        v2 := verts[(i + 2) % n]
-
-        // NOTE: Cannot check convexity here without access to actual vertex positions
-        // This check would require the mesh vertex array, not just indices
-    }
-
-    return true
-}
-
-// Merge triangles into polygons with maximum vertex count
+// Simple triangle merging - just converts triangles to polygons without complex merging
 merge_triangles_into_polygons :: proc(triangles: []i32, polys: ^[dynamic]Poly_Build, max_verts: i32, area: u8, reg: u16) {
     if len(triangles) % 3 != 0 {
         log.warn("Invalid triangle array length for merging")
         return
     }
 
-    num_triangles := len(triangles) / 3
-    if num_triangles == 0 do return
-
-    used := make([]bool, num_triangles)
-    defer delete(used)
-
-    // Build edge adjacency map
-    edges := make([dynamic]Triangle_Edge, 0, num_triangles * 3)
-    defer delete(edges)
-
-    for tri_idx in 0..<num_triangles {
-        base := tri_idx * 3
-        for edge_idx in 0..<3 {
-            v0 := triangles[base + edge_idx]
-            v1 := triangles[base + (edge_idx + 1) % 3]
-
-            // Ensure consistent edge ordering (smaller vertex first)
-            if v0 > v1 {
-                v0, v1 = v1, v0
-            }
-
-            append(&edges, Triangle_Edge{
-                v0 = v0,
-                v1 = v1,
-                tri = i32(tri_idx),
-                edge_idx = i32(edge_idx),
-            })
+    // For now, just convert each triangle to a polygon
+    // The more complex merging in build_poly_mesh handles actual polygon merging
+    for i := 0; i < len(triangles); i += 3 {
+        poly := Poly_Build{
+            verts = make([]i32, 3),
+            area = area,
+            reg = reg,
         }
+        poly.verts[0] = triangles[i]
+        poly.verts[1] = triangles[i + 1]
+        poly.verts[2] = triangles[i + 2]
+        append(polys, poly)
     }
-
-    // Sort edges for adjacency finding
-    slice.sort_by(edges[:], proc(a, b: Triangle_Edge) -> bool {
-        if a.v0 != b.v0 do return a.v0 < b.v0
-        if a.v1 != b.v1 do return a.v1 < b.v1
-        return a.tri < b.tri
-    })
-
-
-
-    merged_polys := 0
-    total_triangles_used := 0
-
-    // Greedy merging: start from each unused triangle and try to grow polygons
-    for start_tri in 0..<num_triangles {
-        if used[start_tri] do continue
-
-        // Start a new polygon with this triangle
-        current_group := make([dynamic]i32, 0, max_verts)
-
-        append(&current_group, i32(start_tri))
-        used[start_tri] = true
-
-        // Try to merge adjacent triangles
-        MAX_MERGE_ITERATIONS :: 20 // Safety limit
-        for iter in 0..<MAX_MERGE_ITERATIONS {
-            found_merge := false
-
-            // Try to find a triangle that shares an edge with the current group
-            for candidate_tri in 0..<num_triangles {
-                if used[candidate_tri] do continue
-
-                // Check if this triangle shares an edge with any triangle in current group
-                can_merge := false
-                for group_tri_idx in current_group {
-                    base1 := group_tri_idx * 3
-                    base2 := candidate_tri * 3
-
-                    tri1 := triangles[base1:base1 + 3]
-                    tri2 := triangles[base2:base2 + 3]
-
-                    if shares, _ := triangles_share_edge(tri1, tri2); shares {
-                        can_merge = true
-                        break
-                    }
-                }
-
-                if can_merge {
-                    // Try merging and check if resulting polygon is valid
-                    test_group := make([dynamic]i32, len(current_group) + 1)
-                    defer delete(test_group)
-                    copy(test_group[:len(current_group)], current_group[:])
-                    test_group[len(current_group)] = i32(candidate_tri)
-
-                    test_verts := make([dynamic]i32, 0, max_verts)
-                    defer delete(test_verts)
-                    get_merged_polygon_vertices(test_group[:], triangles, &test_verts)
-
-                    if is_valid_polygon(test_verts[:], max_verts) {
-                        // Valid merge - add triangle to group
-                        append(&current_group, i32(candidate_tri))
-                        used[candidate_tri] = true
-                        found_merge = true
-
-                        break
-                    }
-                }
-            }
-
-            if !found_merge do break
-        }
-
-        // Create polygon from the merged triangles
-        final_verts := make([dynamic]i32, 0, max_verts)
-        get_merged_polygon_vertices(current_group[:], triangles, &final_verts)
-
-        if len(final_verts) >= 3 && len(final_verts) <= int(max_verts) {
-            // Verify polygon is within limits
-            assert(len(final_verts) <= int(max_verts),
-                   fmt.tprintf("Generated polygon exceeds vertex limit: %d > %d", len(final_verts), max_verts))
-
-            poly := Poly_Build{
-                verts = make([]i32, len(final_verts)),
-                area = area,
-                reg = reg,
-            }
-
-            copy(poly.verts, final_verts[:])
-            append(polys, poly)
-            merged_polys += 1
-            total_triangles_used += len(current_group)
-
-
-        } else {
-            // Fallback: create individual triangles
-            for tri_idx in current_group {
-                base := tri_idx * 3
-
-                // Verify triangle is within limits (should always be true)
-                assert(3 <= int(max_verts),
-                       fmt.tprintf("Triangle cannot fit in polygon limit: 3 > %d", max_verts))
-
-                poly := Poly_Build{
-                    verts = make([]i32, 3),
-                    area = area,
-                    reg = reg,
-                }
-
-                poly.verts[0] = triangles[base + 0]
-                poly.verts[1] = triangles[base + 1]
-                poly.verts[2] = triangles[base + 2]
-
-                append(polys, poly)
-                merged_polys += 1
-            }
-        }
-
-        delete(final_verts)
-        delete(current_group)
-    }
-
-
 }
 
 // Main function to build polygon mesh from contour set
@@ -1382,31 +1130,18 @@ remove_unused_vertices :: proc(pmesh: ^Poly_Mesh) -> bool {
 optimize_poly_mesh :: proc(pmesh: ^Poly_Mesh) -> bool {
     if pmesh == nil do return false
 
-    // Step 1: Remove degenerate polygons
-    if !remove_degenerate_polys(pmesh) {
-        log.warn("Failed to remove degenerate polygons")
-    }
+    // Remove degenerate polygons and unused vertices
+    remove_degenerate_polys(pmesh)
+    remove_unused_vertices(pmesh)
 
-    // Step 2: Remove unused vertices
-    if !remove_unused_vertices(pmesh) {
-        log.warn("Failed to remove unused vertices")
-    }
-
-    // Step 3: Rebuild edges for connectivity
+    // Rebuild edges for connectivity
     edges := make([dynamic]Mesh_Edge, 0, pmesh.npolys * 3)
     defer delete(edges)
-
     if build_mesh_edges(pmesh, &edges, pmesh.npolys * 3) {
         update_polygon_neighbors(pmesh, edges[:])
     }
 
-    // Step 4: Final validation
-    if !validate_poly_mesh(pmesh) {
-        log.error("Mesh optimization resulted in invalid mesh")
-        return false
-    }
-
-    return true
+    return validate_poly_mesh(pmesh)
 }
 
 // Check if a vertex can be removed from the mesh
@@ -1679,15 +1414,11 @@ remove_vertex :: proc(pmesh: ^Poly_Mesh, rem: u16, maxTris: i32) -> bool {
 
     pmesh.npolys = i32(next_free)
 
-    // Remove unused vertices (optional but recommended)
-    if !remove_unused_vertices(pmesh) {
-        log.warn("Failed to remove unused vertices after vertex removal")
-    }
-
-    // Rebuild adjacency
+    // Remove unused vertices and rebuild adjacency
+    remove_unused_vertices(pmesh)
+    
     edges := make([dynamic]Mesh_Edge, 0, pmesh.npolys * 3)
     defer delete(edges)
-
     if build_mesh_edges(pmesh, &edges, pmesh.npolys * 3) {
         update_polygon_neighbors(pmesh, edges[:])
     }
