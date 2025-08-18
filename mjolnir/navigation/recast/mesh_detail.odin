@@ -1764,9 +1764,9 @@ build_poly_mesh_detail :: proc(pmesh: ^Poly_Mesh, chf: ^Compact_Heightfield,
 
     // Handle empty poly mesh gracefully - initialize empty detail mesh and return success
     if pmesh.npolys <= 0 {
-        if dmesh.meshes != nil do delete(dmesh.meshes)
-        if dmesh.verts != nil do delete(dmesh.verts)
-        if dmesh.tris != nil do delete(dmesh.tris)
+        delete(dmesh.meshes)
+        delete(dmesh.verts)
+        delete(dmesh.tris)
         dmesh.meshes = make([][4]u32, 0)
         dmesh.verts = make([][3]f32, 0)
         dmesh.tris = make([][4]u8, 0)

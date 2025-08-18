@@ -52,14 +52,10 @@ SwapchainSupport :: struct {
 }
 
 swapchain_support_deinit :: proc(support: ^SwapchainSupport) {
-  if support.formats != nil {
-    delete(support.formats)
-    support.formats = nil
-  }
-  if support.present_modes != nil {
-    delete(support.present_modes)
-    support.present_modes = nil
-  }
+  delete(support.formats)
+  support.formats = nil
+  delete(support.present_modes)
+  support.present_modes = nil
 }
 
 FoundQueueFamilyIndices :: struct {
