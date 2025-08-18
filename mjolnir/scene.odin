@@ -316,7 +316,8 @@ scene_traverse :: proc(
       if !callback(current_node, cb_context) do continue
     }
     // Copy children array to avoid race conditions during iteration
-    children_copy := make([]Handle, len(current_node.children), context.temp_allocator)
+    children_copy := make([]Handle, len(current_node.children))
+    defer delete(children_copy)
     copy(children_copy, current_node.children[:])
     for child_handle in children_copy {
       append(

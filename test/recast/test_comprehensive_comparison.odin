@@ -111,7 +111,12 @@ test_complete_pipeline :: proc(t: ^testing.T) {
     log.info("=== COMPREHENSIVE ODIN RECAST PIPELINE TEST ===")
     
     results := make([dynamic]Test_Result)
-    defer delete(results)
+    defer {
+        for &result in results {
+            delete(result.values)
+        }
+        delete(results)
+    }
     
     // Step 1: Create simple test geometry (matching C++)
     vertices := [][3]f32{

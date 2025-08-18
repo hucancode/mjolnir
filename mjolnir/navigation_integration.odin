@@ -490,8 +490,7 @@ nav_find_path :: proc(engine: ^Engine, context_handle: Handle, start: [3]f32, en
     }
 
     // Find path between polygons
-    poly_path := make([]recast.Poly_Ref, max_path_length)
-    defer delete(poly_path)
+    poly_path := make([]recast.Poly_Ref, max_path_length, context.temp_allocator)
     path_status, path_count := detour.find_path(&nav_context.nav_mesh_query, start_ref, end_ref, start_pos, end_pos,
                                            &nav_context.query_filter, poly_path[:], max_path_length)
 
@@ -501,8 +500,7 @@ nav_find_path :: proc(engine: ^Engine, context_handle: Handle, start: [3]f32, en
     }
 
     // Convert polygon path to straight path (string pulling)
-    straight_path := make([]detour.Straight_Path_Point, max_path_length)
-    defer delete(straight_path)
+    straight_path := make([]detour.Straight_Path_Point, max_path_length, context.temp_allocator)
     straight_status, straight_path_count := detour.find_straight_path(&nav_context.nav_mesh_query, start_pos, end_pos,
                                                               poly_path[:path_count], path_count,
                                                               straight_path[:], nil, nil,

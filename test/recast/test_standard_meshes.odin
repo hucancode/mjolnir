@@ -434,7 +434,7 @@ test_floor_with_obstacles :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
     fmt.println("Testing with floor_with_5_obstacles.obj...")
     
-    mesh_path := "docs/recastnavigation/RecastDemo/Bin/Meshes/floor_with_5_obstacles.obj"
+    mesh_path := "assets/floor_with_5_obstacles.obj"
     vertices, indices, areas, ok := nav.load_obj_to_navmesh_input(mesh_path, 1.0, 45.0)
     if !ok {
         fmt.println("  Skipping floor_with_5_obstacles.obj test - file not found")

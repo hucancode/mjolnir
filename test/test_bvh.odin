@@ -379,6 +379,7 @@ test_bvh_large_dataset :: proc(t: ^testing.T) {
   // Create a large dataset
   item_count := 1000
   items := make([]BVHTestItem, item_count)
+  defer delete(items)
 
   for i in 0..<item_count {
     x := f32(i % 10) * 2 - 10

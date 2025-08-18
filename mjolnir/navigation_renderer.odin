@@ -539,7 +539,7 @@ navmesh_renderer_update_path :: proc(renderer: ^NavMeshRenderer, path_points: []
 
     // Build triangulated line strips from path points
     // For each line segment, create a quad (2 triangles) to simulate thick lines
-    vertices := make([dynamic]NavMeshVertex, context.temp_allocator)
+    vertices := make([dynamic]NavMeshVertex)
     defer delete(vertices)
 
     line_width: f32 = 0.15 // Width of the line in world units

@@ -43,7 +43,8 @@ find_nearest_poly :: proc(query: ^Nav_Mesh_Query, center: [3]f32, half_extents: 
             log.infof("  Found tile at (%d,%d) with %d polygons", tx, ty, tile.header.poly_count)
 
             // Query polygons in tile using temp allocator
-            poly_refs := make([]recast.Poly_Ref, 128, context.temp_allocator)
+            poly_refs := make([]recast.Poly_Ref, 128)
+            defer delete(poly_refs)
             poly_count := query_polygons_in_tile(query.nav_mesh, tile, bmin, bmax, poly_refs, 128)
             log.infof("  Query returned %d polygons", poly_count)
             total_polys_checked += int(poly_count)
@@ -416,7 +417,8 @@ query_polygons_in_tile_bv :: proc(nav_mesh: ^Nav_Mesh, tile: ^Mesh_Tile, qmin: [
     }
 
     // Traverse BV tree
-    stack := make([]i32, 32, context.temp_allocator)
+    stack := make([]i32, 32)
+    defer delete(stack)
     stack_size := 0
 
     if len(tile.bv_tree) > 0 {
@@ -483,7 +485,8 @@ query_polygons_in_tile_bv :: proc(nav_mesh: ^Nav_Mesh, tile: ^Mesh_Tile, qmin: [
 
 closest_point_on_polygon :: proc(tile: ^Mesh_Tile, poly: ^Poly, pos: [3]f32) -> ([3]f32, bool) {
     // Build polygon vertices
-    verts := make([][3]f32, poly.vert_count, context.temp_allocator)
+    verts := make([][3]f32, poly.vert_count)
+    defer delete(verts)
     for i in 0..<int(poly.vert_count) {
         verts[i] = tile.verts[poly.verts[i]]
     }
@@ -664,11 +667,13 @@ find_distance_to_wall :: proc(query: ^Nav_Mesh_Query, start_ref: recast.Poly_Ref
     hit_normal = {0, 0, 0}
 
     // Use visited flags to avoid cycles
-    visited := make(map[recast.Poly_Ref]bool, context.temp_allocator)
+    visited := make(map[recast.Poly_Ref]bool)
+    defer delete(visited)
     visited[start_ref] = true
 
     // Stack for traversal
-    stack := make([]recast.Poly_Ref, 256, context.temp_allocator)
+    stack := make([]recast.Poly_Ref, 256)
+    defer delete(stack)
     stack_size := 1
     stack[0] = start_ref
 
@@ -748,10 +753,12 @@ find_local_neighbourhood :: proc(query: ^Nav_Mesh_Query, start_ref: recast.Poly_
     result_count = 0
 
     // Use a simple flood fill within radius
-    visited := make(map[recast.Poly_Ref]bool, context.temp_allocator)
+    visited := make(map[recast.Poly_Ref]bool)
+    defer delete(visited)
 
     // Queue for BFS
-    queue := make([]struct{ref: recast.Poly_Ref, parent: recast.Poly_Ref}, 256, context.temp_allocator)
+    queue := make([]struct{ref: recast.Poly_Ref, parent: recast.Poly_Ref}, 256)
+    defer delete(queue)
     queue_head, queue_tail := 0, 1
     queue[0] = {start_ref, recast.INVALID_POLY_REF}
 
@@ -1170,7 +1177,8 @@ closest_point_on_poly_boundary :: proc(tile: ^Mesh_Tile, poly: ^Poly, pos: [3]f3
     }
 
     // Check if original point was inside
-    verts := make([][3]f32, poly.vert_count, context.temp_allocator)
+    verts := make([][3]f32, poly.vert_count)
+    defer delete(verts)
     for i in 0..<int(poly.vert_count) {
         verts[i] = tile.verts[poly.verts[i]]
     }

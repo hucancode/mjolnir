@@ -961,8 +961,9 @@ generate_render_input :: proc(
   }
   ret.batches = make(
     map[BatchKey][dynamic]BatchData,
-    allocator = context.temp_allocator,
+    context.temp_allocator,
   )
+  // Note: Caller is responsible for cleaning up ret.batches
   // Find the correct camera slot for this camera handle
   camera_slot: u32 = 0
   camera_slot_found: bool = false
@@ -1008,7 +1009,7 @@ generate_render_input :: proc(
       }
       batch_group, group_found := &ret.batches[batch_key]
       if !group_found {
-        ret.batches[batch_key] = make([dynamic]BatchData, allocator = context.temp_allocator)
+        ret.batches[batch_key] = make([dynamic]BatchData)
         batch_group = &ret.batches[batch_key]
       }
       batch_data: ^BatchData
@@ -1021,7 +1022,7 @@ generate_render_input :: proc(
       if batch_data == nil {
         new_batch := BatchData {
           material_handle = data.material,
-          nodes           = make([dynamic]^Node, allocator = context.temp_allocator),
+          nodes           = make([dynamic]^Node),
         }
         append(batch_group, new_batch)
         batch_data = &batch_group[len(batch_group) - 1]
@@ -1400,8 +1401,8 @@ render :: proc(self: ^Engine) -> vk.Result {
       [dynamic]vk.ImageMemoryBarrier,
       0,
       MAX_SHADOW_MAPS * 2,
-      context.temp_allocator,
     )
+    defer delete(image_barriers)
 
     // Add 2D shadow map barriers
     for i in 0 ..< shadow_map_count {
@@ -1585,8 +1586,8 @@ render :: proc(self: ^Engine) -> vk.Result {
       [dynamic]vk.ImageMemoryBarrier,
       0,
       MAX_SHADOW_MAPS * 2,
-      context.temp_allocator,
     )
+    defer delete(image_barriers)
 
     // Add 2D shadow map barriers
     for i in 0 ..< shadow_map_count {

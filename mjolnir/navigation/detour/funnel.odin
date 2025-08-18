@@ -768,14 +768,17 @@ closest_point_on_poly_boundary_nav :: proc(query: ^Nav_Mesh_Query, ref: recast.P
     }
 
     // Collect vertices
-    verts := make([][3]f32, poly.vert_count, context.temp_allocator)
+    verts := make([][3]f32, poly.vert_count)
+    defer delete(verts)
     for i in 0..<int(poly.vert_count) {
         verts[i] = tile.verts[poly.verts[i]]
     }
 
     // Calculate edge distances and find closest point
-    edge_dist := make([]f32, poly.vert_count, context.temp_allocator)
-    edge_t := make([]f32, poly.vert_count, context.temp_allocator)
+    edge_dist := make([]f32, poly.vert_count)
+    defer delete(edge_dist)
+    edge_t := make([]f32, poly.vert_count)
+    defer delete(edge_t)
 
     // Check distance to each edge
     for i in 0..<int(poly.vert_count) {
@@ -822,7 +825,8 @@ closest_point_on_poly :: proc(query: ^Nav_Mesh_Query, ref: recast.Poly_Ref, pos:
     }
 
     // Check if point is inside polygon first
-    verts := make([][3]f32, poly.vert_count, context.temp_allocator)
+    verts := make([][3]f32, poly.vert_count)
+    defer delete(verts)
     for i in 0..<int(poly.vert_count) {
         verts[i] = tile.verts[poly.verts[i]]
     }
@@ -890,7 +894,8 @@ point_in_polygon :: proc(query: ^Nav_Mesh_Query, ref: recast.Poly_Ref, pos: [3]f
     }
 
     // Build polygon vertices
-    verts := make([][3]f32, poly.vert_count, context.temp_allocator)
+    verts := make([][3]f32, poly.vert_count)
+    defer delete(verts)
     for i in 0..<int(poly.vert_count) {
         verts[i] = tile.verts[poly.verts[i]]
     }

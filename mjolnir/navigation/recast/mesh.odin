@@ -111,13 +111,13 @@ get_poly_merge_value :: proc(pa, pb: []i32, verts: []Mesh_Vertex, nvp: i32) -> (
 
 // Merge two polygons along shared edge
 // Based on C++ mergePolyVerts from RecastMesh.cpp
+// Now uses temp_allocator for temporary array - no manual cleanup needed!
 merge_poly_verts :: proc(pa, pb: ^Poly_Build, ea, eb: i32, nvp: i32, allocator := context.allocator) {
     na := count_poly_verts(pa.verts[:])
     nb := count_poly_verts(pb.verts[:])
 
-    // Create temporary merged polygon
-    tmp := make([]i32, nvp)
-    defer delete(tmp)
+    // Create temporary merged polygon using temp allocator - auto cleanup!
+    tmp := make([]i32, nvp, allocator)
     for i in 0..<nvp do tmp[i] = -1
 
     n := 0
@@ -137,9 +137,11 @@ merge_poly_verts :: proc(pa, pb: ^Poly_Build, ea, eb: i32, nvp: i32, allocator :
     old_verts := pa.verts
     pa.verts = make([]i32, n, allocator)
     copy(pa.verts[:], tmp[:n])
-
-    // Note: old_verts will be cleaned up by the allocator that created it
-    // (either temp_allocator automatically or regular allocator later)
+    
+    // Free the old vertex array to prevent memory leak
+    delete(old_verts, allocator)
+    // Free the temporary array
+    delete(tmp, allocator)
 }
 
 // Mesh building constants
@@ -860,11 +862,17 @@ build_poly_mesh :: proc(cset: ^Contour_Set, nvp: i32, pmesh: ^Poly_Mesh) -> bool
         // Based on C++ implementation from RecastMesh.cpp
 
         // Start with triangles as initial polygons
-        region_polys := make([dynamic]Poly_Build, context.temp_allocator)
+        region_polys := make([dynamic]Poly_Build)
+        defer {
+            for &poly in region_polys {
+                delete(poly.verts)
+            }
+            delete(region_polys)
+        }
         for tri_idx in 0..<len(triangles)/3 {
             base := tri_idx * 3
             poly := Poly_Build{
-                verts = make([]i32, 3, context.temp_allocator),
+                verts = make([]i32, 3),
                 area = cont.area,
                 reg = cont.reg,
             }
@@ -912,8 +920,10 @@ build_poly_mesh :: proc(cset: ^Contour_Set, nvp: i32, pmesh: ^Poly_Mesh) -> bool
                 merge_count += 1
 
                 // Merge the polygons
-                merge_poly_verts(&region_polys[best_pa], &region_polys[best_pb], best_ea, best_eb, nvp, context.temp_allocator)
+                merge_poly_verts(&region_polys[best_pa], &region_polys[best_pb], best_ea, best_eb, nvp)
 
+                // Free the verts of the polygon being removed before removing it
+                delete(region_polys[best_pb].verts)
                 // Remove the merged polygon
                 ordered_remove(&region_polys, best_pb)
             }

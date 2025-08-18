@@ -269,8 +269,8 @@ build_navmesh :: proc(engine: ^mjolnir.Engine) -> (use_procedural: bool) {
         }
 
         // Helper to create obstacle indices
-        create_box_indices :: proc(base: i32) -> []i32 {
-            indices := make([]i32, 36)  // 12 triangles * 3 vertices
+        create_box_indices :: proc(base: i32, allocator := context.allocator) -> []i32 {
+            indices := make([]i32, 36, allocator)  // 12 triangles * 3 vertices
             // Bottom face
             indices[0] = base + 0; indices[1] = base + 2; indices[2] = base + 1;
             indices[3] = base + 0; indices[4] = base + 3; indices[5] = base + 2;
@@ -294,24 +294,19 @@ build_navmesh :: proc(engine: ^mjolnir.Engine) -> (use_procedural: bool) {
 
         // Create indices for all obstacles
         obstacle1_base := i32(len(ground_verts))
-        obstacle1_indices := create_box_indices(obstacle1_base)
-        defer delete(obstacle1_indices)
+        obstacle1_indices := create_box_indices(obstacle1_base, context.temp_allocator)
 
         obstacle2_base := obstacle1_base + i32(len(obstacle1_verts))
-        obstacle2_indices := create_box_indices(obstacle2_base)
-        defer delete(obstacle2_indices)
+        obstacle2_indices := create_box_indices(obstacle2_base, context.temp_allocator)
 
         obstacle3_base := obstacle2_base + i32(len(obstacle2_verts))
-        obstacle3_indices := create_box_indices(obstacle3_base)
-        defer delete(obstacle3_indices)
+        obstacle3_indices := create_box_indices(obstacle3_base, context.temp_allocator)
 
         obstacle4_base := obstacle3_base + i32(len(obstacle3_verts))
-        obstacle4_indices := create_box_indices(obstacle4_base)
-        defer delete(obstacle4_indices)
+        obstacle4_indices := create_box_indices(obstacle4_base, context.temp_allocator)
 
         obstacle5_base := obstacle4_base + i32(len(obstacle4_verts))
-        obstacle5_indices := create_box_indices(obstacle5_base)
-        defer delete(obstacle5_indices)
+        obstacle5_indices := create_box_indices(obstacle5_base, context.temp_allocator)
 
         // Combine indices
         total_indices := len(ground_indices) + len(obstacle1_indices) + len(obstacle2_indices) +
@@ -394,8 +389,7 @@ build_navmesh :: proc(engine: ^mjolnir.Engine) -> (use_procedural: bool) {
     // Check for region connectivity
     if pmesh.npolys > 0 {
         log.info("Checking polygon regions...")
-        regions := make(map[u16]int)
-        defer delete(regions)
+        regions := make(map[u16]int, 0, context.temp_allocator)
         for i in 0..<pmesh.npolys {
             region_id := pmesh.regs[i]
             regions[region_id] = regions[region_id] + 1
@@ -555,8 +549,7 @@ find_path :: proc(engine: ^mjolnir.Engine) {
     log.infof("Cleared previous path. path_points capacity: %d", cap(navmesh_state.path_points))
 
     // Allocate path buffer
-    path_buffer := make([][3]f32, 512)
-    defer delete(path_buffer)
+    path_buffer := make([][3]f32, 512, context.temp_allocator)
 
     // Find nearest polygons first
     half_extents := [3]f32{2.0, 4.0, 2.0}
@@ -573,8 +566,7 @@ find_path :: proc(engine: ^mjolnir.Engine) {
     log.infof("End poly ref: %d, nearest: (%.2f, %.2f, %.2f)", end_ref, end_nearest.x, end_nearest.y, end_nearest.z)
 
     // Find polygon path first
-    poly_path := make([]recast.Poly_Ref, 256)
-    defer delete(poly_path)
+    poly_path := make([]recast.Poly_Ref, 256, context.temp_allocator)
 
     poly_status, poly_count := detour.find_path(navmesh_state.nav_query, start_ref, end_ref,
                                                  start_nearest, end_nearest,
@@ -873,8 +865,7 @@ ray_navmesh_intersection :: proc(engine: ^mjolnir.Engine, ray_origin, ray_dir: [
     }
 
     // Perform raycast on the navmesh
-    path_buffer := make([]recast.Poly_Ref, 256)
-    defer delete(path_buffer)
+    path_buffer := make([]recast.Poly_Ref, 256, context.temp_allocator)
 
     raycast_status, hit_info, _ := detour.raycast(navmesh_state.nav_query, start_ref, nearest_start, ray_end, &navmesh_state.filter, 0, path_buffer[:], 256)
 
@@ -1285,18 +1276,15 @@ analyze_detour_connectivity :: proc(nav_mesh: ^detour.Nav_Mesh) {
     log.infof("Detour tile has %d polygons", tile.header.poly_count)
 
     // Build connectivity graph using BFS
-    visited := make([]bool, tile.header.poly_count)
-    defer delete(visited)
-    components := make([dynamic]int)
-    defer delete(components)
+    visited := make([]bool, tile.header.poly_count, context.temp_allocator)
+    components := make([dynamic]int, context.temp_allocator)
 
     for start_poly in 0..<tile.header.poly_count {
         if visited[start_poly] do continue
 
         // Start a new component
         component_size := 0
-        stack := make([dynamic]int)
-        defer delete(stack)
+        stack := make([dynamic]int, context.temp_allocator)
         append(&stack, int(start_poly))
 
         for len(stack) > 0 {

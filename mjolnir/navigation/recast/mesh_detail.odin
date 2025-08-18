@@ -1,6 +1,5 @@
 package navigation_recast
 
-
 import "core:slice"
 import "core:log"
 import "core:mem"
@@ -713,7 +712,7 @@ triangulate_delaunay :: proc(poly: ^Detail_Polygon) -> bool {
 
     // Perform Delaunay triangulation
     tris, valid := delaunay_hull(verts, hull[:])
-    defer delete(tris)
+    // tris will be handled by its own allocator, only delete if allocated
 
     if valid {
         // Convert triangle indices to Detail_Triangle structures
@@ -2033,11 +2032,9 @@ delaunay_hull :: proc(verts: [][3]f32, hull: []i32) -> (tris: [dynamic][3]i32, v
         pt := verts[i]
 
         // Remove triangles that contain the point in their circumcircle
-        removed_edges := make([dynamic][2]i32, 0, 64)
-        defer delete(removed_edges)
+        removed_edges := make([dynamic][2]i32, 0, 64, context.temp_allocator)
 
-        new_tris := make([dynamic][3]i32, 0, cap(tris))
-        defer delete(new_tris)
+        new_tris := make([dynamic][3]i32, 0, cap(tris), context.temp_allocator)
 
         for tri in tris {
             t0, t1, t2 := tri[0], tri[1], tri[2]
@@ -2060,8 +2057,7 @@ delaunay_hull :: proc(verts: [][3]f32, hull: []i32) -> (tris: [dynamic][3]i32, v
         }
 
         // Find boundary of removed triangles
-        boundary := make([dynamic][2]i32, 0, 32)
-        defer delete(boundary)
+        boundary := make([dynamic][2]i32, 0, 32, context.temp_allocator)
 
         for j in 0..<len(removed_edges) {
             e0, e1 := removed_edges[j][0], removed_edges[j][1]

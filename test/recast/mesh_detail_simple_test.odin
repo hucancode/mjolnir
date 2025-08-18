@@ -52,19 +52,24 @@ test_simple_detail_mesh_build :: proc(t: ^testing.T) {
     pmesh.ch = 0.1
 
     pmesh.verts = make([][3]u16, 3)
+    defer delete(pmesh.verts)
     pmesh.verts[0] = {0, 0, 0}
     pmesh.verts[1] = {10, 0, 0}
     pmesh.verts[2] = {5, 0, 10}
 
     pmesh.polys = make([]u16, 6)  // 1 poly * 3 verts * 2 (verts + neighbors)
+    defer delete(pmesh.polys)
     pmesh.polys[0] = 0; pmesh.polys[1] = 1; pmesh.polys[2] = 2
     pmesh.polys[3] = recast.RC_MESH_NULL_IDX
     pmesh.polys[4] = recast.RC_MESH_NULL_IDX
     pmesh.polys[5] = recast.RC_MESH_NULL_IDX
 
     pmesh.regs = make([]u16, 1)
+    defer delete(pmesh.regs)
     pmesh.flags = make([]u16, 1)
+    defer delete(pmesh.flags)
     pmesh.areas = make([]u8, 1)
+    defer delete(pmesh.areas)
     pmesh.areas[0] = recast.RC_WALKABLE_AREA
 
     // Set up minimal compact heightfield
@@ -77,7 +82,9 @@ test_simple_detail_mesh_build :: proc(t: ^testing.T) {
     chf.ch = pmesh.ch
 
     chf.cells = make([]recast.Compact_Cell, 4)
+    defer delete(chf.cells)
     chf.spans = make([]recast.Compact_Span, 4)
+    defer delete(chf.spans)
 
     for i in 0..<4 {
         cell := &chf.cells[i]

@@ -30,7 +30,8 @@ create_nav_mesh_data :: proc(params: ^Create_Nav_Mesh_Data_Params) -> ([]u8, rec
     ch := pmesh.ch
 
     // Classify off-mesh connection points
-    off_mesh_con_class := make([]u8, params.off_mesh_con_count * 2, context.temp_allocator)
+    off_mesh_con_class := make([]u8, params.off_mesh_con_count * 2)
+    defer delete(off_mesh_con_class)
     if params.off_mesh_con_count > 0 {
         classify_off_mesh_connections(pmesh, params, off_mesh_con_class)
     }
@@ -461,7 +462,8 @@ build_bv_tree_hierarchical :: proc(pmesh: ^recast.Poly_Mesh, nodes: []BV_Node, n
     nvp := pmesh.nvp
 
     // Pre-calculate polygon centers and bounds for sorting
-    poly_info := make([]BV_Poly_Info, pmesh.npolys, context.temp_allocator)
+    poly_info := make([]BV_Poly_Info, pmesh.npolys)
+    defer delete(poly_info)
 
     for i in 0..<pmesh.npolys {
         info := &poly_info[i]

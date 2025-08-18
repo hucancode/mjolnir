@@ -68,6 +68,7 @@ test_obstacle_connectivity :: proc(t: ^testing.T) {
     
     // Mark areas - ground is walkable, obstacle is not
     areas := make([]u8, len(indices)/3)
+    defer delete(areas)
     for i in 0..<8 {
         areas[i] = nav.RC_WALKABLE_AREA  // Ground triangles
     }
@@ -192,6 +193,7 @@ test_single_obstacle_connectivity :: proc(t: ^testing.T) {
     
     // Mark areas
     areas := make([]u8, len(indices)/3)
+    defer delete(areas)
     for i in 0..<2 {
         areas[i] = nav.RC_WALKABLE_AREA  // Ground (2 triangles)
     }

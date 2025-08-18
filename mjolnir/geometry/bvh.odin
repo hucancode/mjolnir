@@ -4,6 +4,8 @@ import "core:log"
 import "core:math"
 import "core:math/linalg"
 import "core:slice"
+import "core:mem"
+import "core:mem/virtual"
 
 BVHNode :: struct {
   bounds:          Aabb,
@@ -56,8 +58,16 @@ bvh_build :: proc(bvh: ^BVH($T), items: []T, max_leaf_size: i32 = 4) {
   reserve(&bvh.primitives, len(items))
   append(&bvh.primitives, ..items)
 
-  build_prims := make([]BVHPrimitive, len(items))
-  defer delete(build_prims)
+  // Use virtual arena allocator for build operations - grows as needed
+  arena: virtual.Arena
+  if err := virtual.arena_init_growing(&arena); err != nil {
+    log.error("Failed to init arena:", err)
+    return
+  }
+  defer virtual.arena_free_all(&arena)
+  arena_allocator := virtual.arena_allocator(&arena)
+
+  build_prims := make([]BVHPrimitive, len(items), arena_allocator)
   for i in 0 ..< len(items) {
     item := items[i]
     bounds := bvh.bounds_func(item)
@@ -68,7 +78,7 @@ bvh_build :: proc(bvh: ^BVH($T), items: []T, max_leaf_size: i32 = 4) {
     }
   }
 
-  root := build_recursive(build_prims[:], 0, i32(len(items)), max_leaf_size)
+  root := build_recursive(build_prims[:], 0, i32(len(items)), max_leaf_size, arena_allocator)
 
   // Reorder the primitives array to match the build_prims order
   for i in 0 ..< len(build_prims) {
@@ -77,7 +87,7 @@ bvh_build :: proc(bvh: ^BVH($T), items: []T, max_leaf_size: i32 = 4) {
 
   flatten_bvh_tree(bvh, root)
 
-  free_build_nodes(root)
+  // No need to free build nodes - arena will clean up
 }
 
 @(private)
@@ -85,8 +95,9 @@ build_recursive :: proc(
   prims: []BVHPrimitive,
   start, end: i32,
   max_leaf_size: i32,
+  allocator: mem.Allocator,
 ) -> ^BVHBuildNode {
-  node := new(BVHBuildNode)
+  node := new(BVHBuildNode, allocator)
 
   node.bounds = AABB_UNDEFINED
   for i in start ..< end {
@@ -106,7 +117,7 @@ build_recursive :: proc(
     return node
   }
 
-  axis, split_pos := split_sah(prims[start:end], node.bounds)
+  axis, split_pos := split_sah(prims[start:end], node.bounds, allocator)
 
   if axis < 0 || split_pos <= 0 || split_pos >= prim_count {
     node.prim_start = start
@@ -121,8 +132,8 @@ build_recursive :: proc(
 
   mid := start + split_pos
 
-  node.left = build_recursive(prims, start, mid, max_leaf_size)
-  node.right = build_recursive(prims, mid, end, max_leaf_size)
+  node.left = build_recursive(prims, start, mid, max_leaf_size, allocator)
+  node.right = build_recursive(prims, mid, end, max_leaf_size, allocator)
   node.prim_start = -1
   node.prim_count = 0
 
@@ -136,6 +147,7 @@ build_recursive :: proc(
 split_sah :: proc(
   prims: []BVHPrimitive,
   node_bounds: Aabb,
+  allocator: mem.Allocator,
 ) -> (
   axis: i32,
   split_pos: i32,
@@ -149,9 +161,9 @@ split_sah :: proc(
     return split_median(prims, node_bounds)
   }
 
-  // Pre-allocate arrays for prefix/suffix bounds computation
-  left_bounds := make([]Aabb, len(prims), context.temp_allocator)
-  right_bounds := make([]Aabb, len(prims), context.temp_allocator)
+  // Use the arena allocator for prefix/suffix bounds computation
+  left_bounds := make([]Aabb, len(prims), allocator)
+  right_bounds := make([]Aabb, len(prims), allocator)
 
   // Sample fewer split positions for better performance
   num_samples := min(len(prims), 32)
@@ -328,14 +340,15 @@ flatten_node :: proc(
   return node_idx
 }
 
-@(private)
-free_build_nodes :: proc(node: ^BVHBuildNode) {
-  if node == nil do return
-
-  free_build_nodes(node.left)
-  free_build_nodes(node.right)
-  free(node)
-}
+// No longer needed - arena allocator handles cleanup
+// @(private)
+// free_build_nodes :: proc(node: ^BVHBuildNode) {
+//   if node == nil do return
+//
+//   free_build_nodes(node.left)
+//   free_build_nodes(node.right)
+//   free(node)
+// }
 
 bvh_query_aabb :: proc(
   bvh: ^BVH($T),
