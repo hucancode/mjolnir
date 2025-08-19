@@ -7,6 +7,10 @@ import "core:simd"
 import "core:slice"
 import "core:testing"
 import "core:time"
+import "core:thread"
+import "core:sync"
+import "core:math"
+import "base:runtime"
 
 // This test file demonstrates various features of Odin
 // It does not test any functionality
@@ -243,4 +247,58 @@ matrix_extract_decompose :: proc(t: ^testing.T) {
   testing.expect_value(t, sx, 2)
   testing.expect_value(t, sy, 3)
   testing.expect_value(t, sz, 4)
+}
+
+@(test)
+test_temp_allocator_real_thread_race_condition :: proc(t: ^testing.T) {
+    testing.set_fail_timeout(t, 3 * time.Second)
+    ThreadData :: struct {
+        test_t: ^testing.T,
+        sum: f32,
+    }
+    thread_data := ThreadData{
+        test_t = t,
+    }
+    // Thread 1: Allocates 100 floats, waits 1s, then reads them
+    t1 := thread.create_and_start_with_poly_data(&thread_data, proc(td: ^ThreadData) {
+        data := make([]f32, 100, context.temp_allocator)
+        defer free_all(context.temp_allocator)
+        slice.fill(data, 1.0)
+        log.info("Thread 1: Allocated 100 floats set to 1.0, waiting 0.5 second...")
+        time.sleep(500 * time.Millisecond)
+        sum := slice.reduce(data, f32(0.0), proc(acc:f32, x:f32) -> f32 {
+            return acc + x
+        })
+        td.sum = sum
+    })
+    defer free(t1)
+    // Thread 2: Allocates 100 floats, waits 0.5s, then frees all
+    t2 := thread.create_and_start_with_poly_data(&thread_data, proc(td: ^ThreadData) {
+        data := make([]f32, 100, context.temp_allocator)
+        defer free_all(context.temp_allocator)
+        slice.fill(data, 2.0)
+        log.info("Thread 2: Allocated 100 floats, waiting 0.2 seconds...")
+        time.sleep(200 * time.Millisecond)
+    })
+    defer free(t2)
+    log.info("Waiting for both threads...")
+    thread.join_multiple(t1, t2)
+    testing.expectf(t, math.abs(thread_data.sum - 100.0) < math.F32_EPSILON,
+        "sum (%v) must be 100.0, release data in 1 thread must not affect the other",
+        thread_data.sum)
+}
+
+@(test)
+test_temp_allocator_overflow :: proc(t: ^testing.T) {
+    data1 := make([]u8, runtime.DEFAULT_TEMP_ALLOCATOR_BACKING_SIZE, context.temp_allocator)
+    testing.expect(t, data1 != nil, "First allocation should succeed")
+    slice.fill(data1, 0xAA)
+    data2 := make([]u8, runtime.DEFAULT_TEMP_ALLOCATOR_BACKING_SIZE, context.temp_allocator)
+    testing.expect(t, data2 != nil, "Second allocation should succeed")
+    slice.fill(data2, 0x55)
+    all_aa := slice.all_of(data1, 0xAA)
+    testing.expect(t, all_aa, "First allocation should still contain 0xAA pattern")
+    all_55 := slice.all_of(data2, 0x55)
+    testing.expect(t, all_55, "Second allocation should contain 0x55 pattern")
+    free_all(context.temp_allocator)
 }
