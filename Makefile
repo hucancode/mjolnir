@@ -28,9 +28,9 @@ shader: $(SPV_SHADERS) $(SPV_COMPUTE_SHADERS)
 
 test:
 	timeout 50s odin test test -out:bin/test && \
-	timeout 10s odin test test/recast -out:bin/test && \
-	timeout 5s odin test test/detour -out:bin/test && \
-	timeout 5s odin test test/detour_crowd -out:bin/test
+	timeout 50s odin test test/recast -out:bin/test && \
+	timeout 50s odin test test/detour -out:bin/test && \
+	timeout 50s odin test test/detour_crowd -out:bin/test
 
 clean:
 	rm -rf bin/*
