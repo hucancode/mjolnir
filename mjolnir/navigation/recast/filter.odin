@@ -5,6 +5,7 @@ import "core:math/linalg"
 import "core:slice"
 import "core:mem"
 import "core:log"
+import "../../geometry"
 
 // Maximum heightfield height constant
 MAX_HEIGHTFIELD_HEIGHT :: 0xffff
@@ -24,8 +25,6 @@ set_con :: proc "contextless" (span: ^Compact_Span, dir: int, i: int) {
 // Filter low hanging walkable obstacles
 // Remove walkable spans that are below obstacles where the agent could walk over
 filter_low_hanging_walkable_obstacles :: proc(walkable_climb: int, heightfield: ^Heightfield) {
-    // Removed timer code for simplicity
-
     x_size := heightfield.width
     z_size := heightfield.height
 
@@ -64,8 +63,6 @@ filter_low_hanging_walkable_obstacles :: proc(walkable_climb: int, heightfield: 
 // Filter ledge spans
 // Mark spans that are ledges as unwalkable
 filter_ledge_spans :: proc(walkable_height, walkable_climb: int, heightfield: ^Heightfield) {
-    // Removed timer code for simplicity
-
     x_size := heightfield.width
     z_size := heightfield.height
 
@@ -153,11 +150,8 @@ filter_ledge_spans :: proc(walkable_height, walkable_climb: int, heightfield: ^H
 // Filter walkable low height spans
 // Remove walkable spans without enough clearance
 filter_walkable_low_height_spans :: proc(walkable_height: int, heightfield: ^Heightfield) {
-    // Removed timer code for simplicity
-
     x_size := heightfield.width
     z_size := heightfield.height
-
     // Remove walkable flag from spans which do not have enough
     // space above them for the agent to stand there
     for z in 0..<z_size {
@@ -165,7 +159,6 @@ filter_walkable_low_height_spans :: proc(walkable_height: int, heightfield: ^Hei
             for span := heightfield.spans[x + z * x_size]; span != nil; span = span.next {
                 floor := int(span.smax)
                 ceiling := span.next != nil ? int(span.next.smin) : MAX_HEIGHTFIELD_HEIGHT
-
                 if ceiling - floor < walkable_height {
                     span.area = RC_NULL_AREA
                 }
@@ -177,93 +170,64 @@ filter_walkable_low_height_spans :: proc(walkable_height: int, heightfield: ^Hei
 // Apply median filter to walkable area
 // Smooths out small inconsistencies in area assignments
 median_filter_walkable_area :: proc(chf: ^Compact_Heightfield) -> bool {
-    // Removed timer code for simplicity
-
     x_size := chf.width
     z_size := chf.height
-    z_stride := x_size
-
-    // Allocate temporary areas array
     areas := make([]u8, chf.span_count)
-    if areas == nil {
-        log.errorf("medianFilterWalkableArea: Out of memory 'areas' (%d).", chf.span_count)
-        return false
-    }
     defer delete(areas)
     slice.fill(areas, 0xff)
-
     for z in 0..<z_size {
         for x in 0..<x_size {
-            cell := &chf.cells[int(x) + int(z) * int(z_stride)]
+            cell := &chf.cells[x + z * x_size]
             max_span_index := int(cell.index + u32(cell.count))
-
             for span_index := int(cell.index); span_index < max_span_index; span_index += 1 {
                 span := &chf.spans[span_index]
-
                 if chf.areas[span_index] == RC_NULL_AREA {
                     areas[span_index] = chf.areas[span_index]
                     continue
                 }
-
                 // Collect neighbor areas
                 neighbor_areas: [9]u8
-                for neighbor_index in 0..<9 {
-                    neighbor_areas[neighbor_index] = chf.areas[span_index]
-                }
-
+                slice.fill(neighbor_areas[:], chf.areas[span_index])
                 // Check all 4 directions
                 for dir in 0..<4 {
                     if get_con(span, dir) == RC_NOT_CONNECTED {
                         continue
                     }
-
-                    ax := int(x) + int(get_dir_offset_x(dir))
-                    az := int(z) + int(get_dir_offset_y(dir))
-                    ai := int(chf.cells[ax + az * int(z_stride)].index) + get_con(span, dir)
-
+                    ax := x + get_dir_offset_x(dir)
+                    az := z + get_dir_offset_y(dir)
+                    ai := int(chf.cells[ax + az * x_size].index) + get_con(span, dir)
                     if chf.areas[ai] != RC_NULL_AREA {
                         neighbor_areas[dir * 2 + 0] = chf.areas[ai]
                     }
-
                     a_span := &chf.spans[ai]
                     dir2 := (dir + 1) & 0x3
                     neighbor_connection2 := get_con(a_span, dir2)
-
                     if neighbor_connection2 != RC_NOT_CONNECTED {
-                        bx := ax + int(get_dir_offset_x(dir2))
-                        bz := az + int(get_dir_offset_y(dir2))
-
-                        // Bounds check for diagonal neighbors
-                        if bx >= 0 && bx < int(x_size) && bz >= 0 && bz < int(z_size) {
-                            bi := int(chf.cells[bx + bz * int(z_stride)].index) + neighbor_connection2
-
+                        bx := ax + get_dir_offset_x(dir2)
+                        bz := az + get_dir_offset_y(dir2)
+                        if bx >= 0 && bx < x_size && bz >= 0 && bz < z_size {
+                            bi := int(chf.cells[bx + bz * x_size].index) + neighbor_connection2
                             if chf.areas[bi] != RC_NULL_AREA {
                                 neighbor_areas[dir * 2 + 1] = chf.areas[bi]
                             }
                         }
                     }
                 }
-                // Sort and pick median
+                // sort and get median
                 slice.sort(neighbor_areas[:])
                 areas[span_index] = neighbor_areas[4]
             }
         }
     }
-
-    // Copy filtered areas back
     copy(chf.areas, areas)
-
     return true
 }
 
 // Mark all spans within an axis-aligned box with the specified area id
 mark_box_area :: proc(box_min_bounds, box_max_bounds: [3]f32,
                         area_id: u8, chf: ^Compact_Heightfield) {
-    // Removed timer code for simplicity
-
     x_size := chf.width
     z_size := chf.height
-    z_stride := x_size
 
     // Find the footprint of the box area in grid cell coordinates
     cell_scale := [3]f32{chf.cs, chf.ch, chf.cs}
@@ -277,30 +241,26 @@ mark_box_area :: proc(box_min_bounds, box_max_bounds: [3]f32,
     if min_grid.z >= f32(z_size) do return
 
     // Clamp relevant bound coordinates to the grid
-    min_x := int(clamp(min_grid.x, 0, f32(x_size) - 1))
-    max_x := int(clamp(max_grid.x, 0, f32(x_size) - 1))
-    min_z := int(clamp(min_grid.z, 0, f32(z_size) - 1))
-    max_z := int(clamp(max_grid.z, 0, f32(z_size) - 1))
+    min_x := i32(clamp(min_grid.x, 0, f32(x_size) - 1))
+    max_x := i32(clamp(max_grid.x, 0, f32(x_size) - 1))
+    min_z := i32(clamp(min_grid.z, 0, f32(z_size) - 1))
+    max_z := i32(clamp(max_grid.z, 0, f32(z_size) - 1))
 
     // Mark relevant cells
     for z := min_z; z <= max_z; z += 1 {
         for x := min_x; x <= max_x; x += 1 {
-            cell := &chf.cells[int(x) + int(z) * int(z_stride)]
+            cell := &chf.cells[x + z * x_size]
             max_span_index := int(cell.index + u32(cell.count))
-
             for span_index := int(cell.index); span_index < max_span_index; span_index += 1 {
                 span := &chf.spans[span_index]
-
                 // Skip if the span is outside the box extents
                 if f32(span.y) < min_grid.y || f32(span.y) > max_grid.y {
                     continue
                 }
-
                 // Skip if the span has been removed
                 if chf.areas[span_index] == RC_NULL_AREA {
                     continue
                 }
-
                 // Mark the span
                 chf.areas[span_index] = area_id
             }
@@ -308,41 +268,12 @@ mark_box_area :: proc(box_min_bounds, box_max_bounds: [3]f32,
     }
 }
 
-// Check if a point is inside a polygon (2D test on XZ plane)
-point_in_poly :: proc(verts: [][3]f32, point: [3]f32) -> bool {
-    in_poly := false
-
-    j := len(verts) - 1
-    for i in 0..<len(verts) {
-        vi := verts[i]
-        vj := verts[j]
-
-        if (vi.z > point.z) == (vj.z > point.z) {
-            j = i
-            continue
-        }
-
-        if point.x >= (vj.x - vi.x) * (point.z - vi.z) / (vj.z - vi.z) + vi.x {
-            j = i
-            continue
-        }
-
-        in_poly = !in_poly
-        j = i
-    }
-
-    return in_poly
-}
-
 // Mark convex polygon area
 // Mark all spans within a convex polygon with the specified area id
 mark_convex_poly_area :: proc(verts: [][3]f32,
                                 min_y, max_y: f32, area_id: u8, chf: ^Compact_Heightfield) {
-    // Removed timer code for simplicity
-
     x_size := chf.width
     z_size := chf.height
-    z_stride := x_size
 
     // Compute the bounding box of the polygon
     bmin := verts[0]
@@ -367,34 +298,30 @@ mark_convex_poly_area :: proc(verts: [][3]f32,
     if min_grid.z >= f32(z_size) do return
 
     // Clamp the polygon footprint to the grid
-    minx := int(clamp(min_grid.x, 0, f32(x_size) - 1))
-    maxx := int(clamp(max_grid.x, 0, f32(x_size) - 1))
-    minz := int(clamp(min_grid.z, 0, f32(z_size) - 1))
-    maxz := int(clamp(max_grid.z, 0, f32(z_size) - 1))
+    minx := i32(clamp(min_grid.x, 0, f32(x_size) - 1))
+    maxx := i32(clamp(max_grid.x, 0, f32(x_size) - 1))
+    minz := i32(clamp(min_grid.z, 0, f32(z_size) - 1))
+    maxz := i32(clamp(max_grid.z, 0, f32(z_size) - 1))
 
     // Check each cell in the footprint
     for z := minz; z <= maxz; z += 1 {
         for x := minx; x <= maxx; x += 1 {
-            cell := &chf.cells[int(x) + int(z) * int(z_stride)]
+            cell := &chf.cells[x + z * x]
             max_span_index := int(cell.index + u32(cell.count))
 
             for span_index := int(cell.index); span_index < max_span_index; span_index += 1 {
                 span := &chf.spans[span_index]
-
                 // Skip if span is removed
                 if chf.areas[span_index] == RC_NULL_AREA {
                     continue
                 }
-
                 // Skip if y extents don't overlap
                 if f32(span.y) < min_grid.y || f32(span.y) > max_grid.y {
                     continue
                 }
-
                 // Test if cell center is inside the polygon
                 point := chf.bmin + [3]f32{(f32(x) + 0.5) * chf.cs, 0, (f32(z) + 0.5) * chf.cs}
-
-                if point_in_poly(verts, point) {
+                if geometry.point_in_polygon_2d(point, verts) {
                     chf.areas[span_index] = area_id
                 }
             }
@@ -424,16 +351,16 @@ mark_cylinder_area :: proc(position: [3]f32, radius, height: f32,
     if min_grid.z >= f32(z_size) do return
 
     // Clamp the cylinder bounds to the grid
-    minx := int(clamp(min_grid.x, 0, f32(x_size) - 1))
-    maxx := int(clamp(max_grid.x, 0, f32(x_size) - 1))
-    minz := int(clamp(min_grid.z, 0, f32(z_size) - 1))
-    maxz := int(clamp(max_grid.z, 0, f32(z_size) - 1))
+    minx := i32(clamp(min_grid.x, 0, f32(x_size) - 1))
+    maxx := i32(clamp(max_grid.x, 0, f32(x_size) - 1))
+    minz := i32(clamp(min_grid.z, 0, f32(z_size) - 1))
+    maxz := i32(clamp(max_grid.z, 0, f32(z_size) - 1))
 
     radius_sq := radius * radius
 
     for z in minz..=maxz {
         for x in minx..=maxx {
-            cell := &chf.cells[int(x) + int(z) * int(x_size)]
+            cell := &chf.cells[x + z * x_size]
             max_span_index := int(cell.index + u32(cell.count))
 
             // Calculate cell center position

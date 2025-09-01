@@ -701,70 +701,46 @@ vector_equal :: proc(a, b: [3]f32, epsilon: f32 = 0.0001) -> bool {
 
 // Calculate squared distance from point to line segment in 2D (XZ plane)
 point_segment_distance2_2d :: proc(p, a, b: [3]f32) -> (dist_sqr: f32, t: f32) {
-    dx := b.x - a.x
-    dz := b.z - a.z
-    d := dx*dx + dz*dz
-
-    if d > 0 {
-        t = ((p.x - a.x) * dx + (p.z - a.z) * dz) / d
-        t = clamp(t, 0, 1)
-    } else {
-        t = 0
+    ab := b - a
+    ap := p - a
+    segment_length_sqr := linalg.length2(ab.xz)
+    if segment_length_sqr > math.F32_EPSILON {
+        t = linalg.saturate(linalg.dot(ap.xz, ab.xz) / segment_length_sqr)
     }
-
-    px := a.x + t * dx
-    pz := a.z + t * dz
-
-    dx_p := p.x - px
-    dz_p := p.z - pz
-    dist_sqr = dx_p*dx_p + dz_p*dz_p
-    return dist_sqr, t
+    pt := linalg.mix(a, b, t)
+    return linalg.length2((p - pt).xz), t
 }
 
 // Find closest point on line segment in 2D (XZ plane)
 closest_point_on_segment_2d :: proc "contextless" (p, a, b: [3]f32) -> [3]f32 {
-    // Work in XZ plane
-    seg_xz := b.xz - a.xz
-    to_point_xz := p.xz - a.xz
-
-    seg_len_sq := linalg.length2(seg_xz)
-    if seg_len_sq < math.F32_EPSILON {
+    ab := b - a
+    ap := p - a
+    segment_length_sqr := linalg.length2(ab.xz)
+    if segment_length_sqr  < math.F32_EPSILON {
         return a
     }
-
-    t := linalg.dot(to_point_xz, seg_xz) / seg_len_sq
-    t = clamp(t, 0.0, 1.0)
-
+    t := linalg.saturate(linalg.dot(ap.xz, ab.xz) / segment_length_sqr)
     return linalg.mix(a, b, t)
 }
 
 // Ray-circle intersection test (2D XZ plane)
-ray_circle_intersect_2d :: proc "contextless" (pos, vel: [3]f32, radius: f32) -> f32 {
-    // 2D intersection in XZ plane
-    pxz := pos.xz
-    vxz := vel.xz
-
-    a := linalg.dot(vxz, vxz)
-    if a < 1e-6 do return -1  // No movement
-
-    b := 2.0 * linalg.dot(pxz, vxz)
-    c := linalg.dot(pxz, pxz) - radius*radius
-
+ray_circle_intersect_2d :: proc "contextless" (pos, vel: [3]f32, radius: f32) -> (t: f32, intersect: bool) {
+    a := linalg.length2(vel.xz)
+    if a < 1e-6 do return  // No movement
+    b := 2.0 * linalg.dot(pos.xz, vel.xz)
+    c := linalg.length2(pos.xz) - radius*radius
     discriminant := b*b - 4*a*c
-    if discriminant < 0 do return -1  // No intersection
-
+    if discriminant < 0 do return  // No intersection
     sqrt_disc := math.sqrt(discriminant)
     t1 := (-b - sqrt_disc) / (2*a)
     t2 := (-b + sqrt_disc) / (2*a)
-
-    if t1 >= 0 do return t1
-    if t2 >= 0 do return t2
-    return -1
+    if t1 >= 0 do return t1, true
+    if t2 >= 0 do return t2, true
+    return
 }
 
 // Ray-segment intersection test (2D XZ plane)
 ray_segment_intersect_2d :: proc "contextless" (ray_start, ray_dir, seg_start, seg_end: [3]f32) -> (t: f32, intersect: bool) {
-    // 2D ray-segment intersection in XZ plane
     d := seg_end - seg_start
     denominator := linalg.vector_cross2(ray_dir.xz, d.xz)
     if math.abs(denominator) < 1e-6 {
@@ -776,8 +752,6 @@ ray_segment_intersect_2d :: proc "contextless" (ray_start, ray_dir, seg_start, s
     intersect = t >= 0 && u >= 0 && u <= 1
     return
 }
-
-// 2D Vector operations (working in XZ plane for navigation)
 
 // Calculate perpendicular cross product in 2D (XZ plane)
 perpendicular_cross_2d :: proc "contextless" (a, b, c: [3]f32) -> f32 {
@@ -797,7 +771,6 @@ point_in_triangle_2d :: proc "contextless" (p, a, b, c: [3]f32, epsilon: f32 = 0
 
 // Calculate barycentric coordinates for a point in a triangle (2D XZ plane)
 barycentric_2d :: proc "contextless" (p, a, b, c: [3]f32) -> [3]f32 {
-    // Convert to 2D coordinates (XZ plane)
     v0 := b.xz - a.xz
     v1 := c.xz - a.xz
     v2 := p.xz - a.xz
@@ -811,11 +784,9 @@ barycentric_2d :: proc "contextless" (p, a, b, c: [3]f32) -> [3]f32 {
     if math.abs(denom) < math.F32_EPSILON {
         return {1.0/3.0, 1.0/3.0, 1.0/3.0}
     }
-
     v := (d11 * d20 - d01 * d21) / denom
     w := (d00 * d21 - d01 * d20) / denom
     u := 1.0 - v - w
-
     return {u, v, w}
 }
 
@@ -865,8 +836,6 @@ calc_tri_normal :: proc(v0, v1, v2: [3]f32) -> (norm: [3]f32) {
     return
 }
 
-// Integer geometry operations (for exact arithmetic)
-
 // Calculate signed area of triangle formed by three 2D points
 // Positive area = counter-clockwise, negative = clockwise
 // This is the 2D cross product of vectors (b-a) and (c-a)
@@ -897,16 +866,16 @@ left :: proc "contextless" (a, b, c: [2]i32) -> bool {
     return area2(a, b, c) < 0
 }
 
-// Check if point c lies on the line segment from a to b
-between :: proc "contextless" (a, b, c: [2]i32) -> bool {
-    if area2(a, b, c) != 0 {
+// Check if point p lies on the line segment from a to b
+between :: proc "contextless" (a, b, p: [2]i32) -> bool {
+    if area2(a, b, p) != 0 {
         return false // Not collinear
     }
     // If ab not vertical, check betweenness on x; else on y
     if a.x != b.x {
-        return ((a.x <= c.x) && (c.x <= b.x)) || ((a.x >= c.x) && (c.x >= b.x))
+        return ((a.x <= p.x) && (p.x <= b.x)) || ((a.x >= p.x) && (p.x >= b.x))
     } else {
-        return ((a.y <= c.y) && (c.y <= b.y)) || ((a.y >= c.y) && (c.y >= b.y))
+        return ((a.y <= p.y) && (p.y <= b.y)) || ((a.y >= p.y) && (p.y >= b.y))
     }
 }
 
@@ -919,7 +888,6 @@ intersect_prop :: proc "contextless" (a, b, c, d: [2]i32) -> bool {
        area2(c, d, b) == 0 {
         return false
     }
-
     // Check if c and d are on opposite sides of ab, and a and b are on opposite sides of cd
     return (left(a, b, c) != left(a, b, d)) &&
            (left(c, d, a) != left(c, d, b))
@@ -951,7 +919,7 @@ prev_dir :: proc "contextless" (dir: int) -> int {
 
 // Calculate area of triangle in 2D (XZ plane)
 signed_triangle_area_2d :: proc "contextless" (a, b, c: [3]f32) -> f32 {
-    return math.abs(linalg.cross(b.xz - a.xz, c.xz - a.xz) * 0.5)
+    return linalg.cross(b.xz - a.xz, c.xz - a.xz) * 0.5
 }
 
 // Calculate area of triangle in 2D (XZ plane)

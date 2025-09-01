@@ -1074,8 +1074,6 @@ merge_and_filter_regions :: proc(min_region_area, merge_region_size: i32,
 // Build regions using watershed partitioning
 build_regions :: proc(chf: ^Compact_Heightfield,
                         border_size, min_region_area, merge_region_area: i32) -> bool {
-    // Removed timer code for simplicity
-
     w := chf.width
     h := chf.height
 
@@ -1234,8 +1232,6 @@ build_regions :: proc(chf: ^Compact_Heightfield,
 // Build regions using monotone partitioning
 build_regions_monotone :: proc(chf: ^Compact_Heightfield,
                                  border_size, min_region_area, merge_region_area: i32) -> bool {
-    // Removed timer code for simplicity
-
     w := chf.width
     h := chf.height
     id: u16 = 1
