@@ -1150,7 +1150,6 @@ circum_circle :: proc "contextless" (a, b, c: [3]f32) -> (center: [2]f32, r_sq: 
 
 // Check if a point is inside the circumcircle of a triangle
 in_circumcircle :: proc "contextless" (p, a, b, c: [3]f32) -> bool {
-    center, r_sq, valid := circum_circle(a, b, c)
-    if !valid do return false
+    center, r_sq := circum_circle(a, b, c) or_return
     return linalg.length2(p.xz - center) <= r_sq
 }

@@ -351,6 +351,7 @@ triangulate_polygon :: proc(verts: [][4]i32, indices: []i32, triangles: ^[dynami
     }
     // Copy indices for manipulation and add ear marking bits
     // Use u32 to support the 0x80000000 flag bit
+    MIDDLE_VERTEX_MASK :: 1 << 31
     work_indices := make([]u32, len(indices))
     defer delete(work_indices)
     for i in 0..<len(indices) {
@@ -365,14 +366,14 @@ triangulate_polygon :: proc(verts: [][4]i32, indices: []i32, triangles: ^[dynami
 
         diag_result := diagonal(verts, work_indices, i, i2)
         if diag_result {
-            work_indices[i1] |= 0x80000000  // Mark middle vertex as removable ear
+            work_indices[i1] |= MIDDLE_VERTEX_MASK  // Mark middle vertex as removable ear
         }
     }
 
     // Check if we found any ears for debugging purposes
     ear_count := 0
     for i in 0..<n {
-        if work_indices[i] & 0x80000000 != 0 {
+        if work_indices[i] & MIDDLE_VERTEX_MASK != 0 {
             ear_count += 1
         }
     }
@@ -386,7 +387,7 @@ triangulate_polygon :: proc(verts: [][4]i32, indices: []i32, triangles: ^[dynami
         // Find ear with shortest diagonal (C++ algorithm)
         for i in 0..<n {
             i1 := (i + 1) % n
-            if work_indices[i1] & 0x80000000 != 0 {
+            if work_indices[i1] & MIDDLE_VERTEX_MASK != 0 {
                 // This is a marked ear, calculate diagonal length
                 i2 := (i1 + 1) % n
                 p0_idx := i32(work_indices[i] & 0x0fffffff)
@@ -459,13 +460,13 @@ triangulate_polygon :: proc(verts: [][4]i32, indices: []i32, triangles: ^[dynami
 
         // Only check strict diagonal (not loose) for flag updates
         if diagonal(verts, work_indices, prev_i, i1) {
-            work_indices[i] |= 0x80000000
+            work_indices[i] |= MIDDLE_VERTEX_MASK
         } else {
             work_indices[i] &= 0x0fffffff
         }
 
         if diagonal(verts, work_indices, i, next_i1) {
-            work_indices[i1] |= 0x80000000
+            work_indices[i1] |= MIDDLE_VERTEX_MASK
         } else {
             work_indices[i1] &= 0x0fffffff
         }
