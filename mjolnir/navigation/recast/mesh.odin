@@ -13,7 +13,7 @@ import geometry "../../geometry"
 uleft :: proc(a, b, c: [3]i16) -> bool {
     // 2D cross product in XZ plane: (b-a) × (c-a)
     // return linalg.vector_cross2(b.xz - a.xz, c.xz - a.xz) < 0
-    // we can optimize it further if needed: bxcz + bzax + cxaz - czax - bxaz - cxbz
+    // the code above will cause integer overflow, we must use i32 to avoid it
     return (i32(b.x) - i32(a.x)) * (i32(c.z) - i32(a.z)) -
            (i32(c.x) - i32(a.x)) * (i32(b.z) - i32(a.z)) < 0
 }
@@ -28,7 +28,7 @@ count_poly_verts :: proc(poly: []i32) -> i32 {
 // Get merge value for two polygons
 // Returns shared edge indices and merge value (edge length squared)
 // Based on C++ getPolyMergeValue from RecastMesh.cpp
-get_poly_merge_value :: proc(pa, pb: []i32, verts: []Mesh_Vertex, nvp: i32) -> (ea: i32, eb: i32, value: i32) {
+get_poly_merge_value :: proc(pa, pb: []i32, verts: []Mesh_Vertex, nvp: i32) -> (ea, eb, value: i32) {
     na := count_poly_verts(pa)
     nb := count_poly_verts(pb)
 
@@ -213,14 +213,14 @@ add_vertex :: proc(x, y, z: u16, verts: ^[dynamic]Mesh_Vertex, buckets: []Vertex
 }
 
 // Check if diagonal from vertex a to vertex c is internal to polygon
-diagonalie :: proc "contextless" (verts: [][4]i32, indices: []u32, n: i32, a, c: i32) -> bool {
-    a_idx := i32(indices[a] & 0x0fffffff)
-    c_idx := i32(indices[c] & 0x0fffffff)
+diagonalie :: proc "contextless" (verts: [][4]i32, indices: []u32, a, c: int) -> bool {
+    a_idx := indices[a] & 0x0fffffff
+    c_idx := indices[c] & 0x0fffffff
 
     // log.infof("diagonalie: checking diagonal from %d to %d", a, c)
 
-    for i in i32(0)..<n {
-        i1 := (i + 1) % n
+    for i in 0..<len(indices) {
+        i1 := (i + 1) % len(indices)
 
         // Skip edges incident to a or c (matching C++ logic)
         if i == a || i1 == a || i == c || i1 == c {
@@ -228,8 +228,8 @@ diagonalie :: proc "contextless" (verts: [][4]i32, indices: []u32, n: i32, a, c:
             continue
         }
 
-        b1_idx := i32(indices[i] & 0x0fffffff)
-        b2_idx := i32(indices[i1] & 0x0fffffff)
+        b1_idx := indices[i] & 0x0fffffff
+        b2_idx := indices[i1] & 0x0fffffff
 
         // Also skip if vertices are equal (additional check from C++)
         va := verts[a_idx]
@@ -250,7 +250,8 @@ diagonalie :: proc "contextless" (verts: [][4]i32, indices: []u32, n: i32, a, c:
 }
 
 // Check if diagonal is in cone of vertex a
-in_cone_indexed :: proc "contextless" (verts: [][4]i32, indices: []u32, n: i32, a, b: i32) -> bool {
+in_cone_indexed :: proc "contextless" (verts: [][4]i32, indices: []u32, a, b: int) -> bool {
+    n := len(indices)
     a0_idx := i32(indices[(a + n - 1) % n] & 0x0fffffff)
     a1_idx := i32(indices[a] & 0x0fffffff)
     a2_idx := i32(indices[(a + 1) % n] & 0x0fffffff)
@@ -265,37 +266,32 @@ in_cone_indexed :: proc "contextless" (verts: [][4]i32, indices: []u32, n: i32, 
 }
 
 // Check if diagonal from a to b is valid
-diagonal :: proc "contextless" (verts: [][4]i32, indices: []u32, n: i32, a, b: i32) -> bool {
-    cone_check := in_cone_indexed(verts, indices, n, a, b)
-    diag_check := diagonalie(verts, indices, n, a, b)
+diagonal :: proc "contextless" (verts: [][4]i32, indices: []u32, a, b: int) -> bool {
+    cone_check := in_cone_indexed(verts, indices, a, b)
+    diag_check := diagonalie(verts, indices, a, b)
     return cone_check && diag_check
 }
 
 // Loose versions for degenerate cases (more permissive)
-diagonalie_loose :: proc "contextless" (verts: [][4]i32, indices: []u32, n: i32, a, c: i32) -> bool {
-    a_idx := i32(indices[a] & 0x0fffffff)
-    c_idx := i32(indices[c] & 0x0fffffff)
+diagonalie_loose :: proc "contextless" (verts: [][4]i32, indices: []u32, a, c: int) -> bool {
+    a_idx := indices[a] & 0x0fffffff
+    c_idx := indices[c] & 0x0fffffff
 
-    for i in i32(0)..<n {
-        i1 := (i + 1) % n
-
+    for i in 0..<len(indices) {
+        i1 := (i + 1) % len(indices)
         // Skip edges incident to a or c (matching C++ logic)
         if i == a || i1 == a || i == c || i1 == c {
             continue
         }
-
-        b1_idx := i32(indices[i] & 0x0fffffff)
-        b2_idx := i32(indices[i1] & 0x0fffffff)
-
+        b1_idx := indices[i] & 0x0fffffff
+        b2_idx := indices[i1] & 0x0fffffff
         va := verts[a_idx]
         vc := verts[c_idx]
         vb1 := verts[b1_idx]
         vb2 := verts[b2_idx]
-
         if va.xz == vb1.xz || vc.xz == vb1.xz || va.xz == vb2.xz || vc.xz == vb2.xz {
             continue
         }
-
         if geometry.intersect_prop(va.xz, vc.xz, vb1.xz, vb2.xz) {
             return false
         }
@@ -303,11 +299,12 @@ diagonalie_loose :: proc "contextless" (verts: [][4]i32, indices: []u32, n: i32,
     return true
 }
 
-in_cone_loose :: proc "contextless" (verts: [][4]i32, indices: []u32, n: i32, a, b: i32) -> bool {
-    a0_idx := i32(indices[(a + n - 1) % n] & 0x0fffffff)
-    a1_idx := i32(indices[a] & 0x0fffffff)
-    a2_idx := i32(indices[(a + 1) % n] & 0x0fffffff)
-    b_idx := i32(indices[b] & 0x0fffffff)
+in_cone_loose :: proc "contextless" (verts: [][4]i32, indices: []u32, a, b: int) -> bool {
+    n := len(indices)
+    a0_idx := indices[(a + n - 1) % n] & 0x0fffffff
+    a1_idx := indices[a] & 0x0fffffff
+    a2_idx := indices[(a + 1) % n] & 0x0fffffff
+    b_idx := indices[b] & 0x0fffffff
 
     va0 := verts[a0_idx]
     va1 := verts[a1_idx]
@@ -321,9 +318,8 @@ in_cone_loose :: proc "contextless" (verts: [][4]i32, indices: []u32, n: i32, a,
     }
 }
 
-diagonal_loose :: proc "contextless" (verts: [][4]i32, indices: []u32, n: i32, a, b: i32) -> bool {
-    return in_cone_loose(verts, indices, n, a, b) &&
-           diagonalie_loose(verts, indices, n, a, b)
+diagonal_loose :: proc "contextless" (verts: [][4]i32, indices: []u32, a, b: int) -> bool {
+    return in_cone_loose(verts, indices, a, b) && diagonalie_loose(verts, indices, a, b)
 }
 
 // Internal triangulation using u16 vertices
@@ -353,7 +349,6 @@ triangulate_polygon :: proc(verts: [][4]i32, indices: []i32, triangles: ^[dynami
         log.debugf("triangulate_polygon: Too few indices: %d", len(indices))
         return false
     }
-
     // Copy indices for manipulation and add ear marking bits
     // Use u32 to support the 0x80000000 flag bit
     work_indices := make([]u32, len(indices))
@@ -361,18 +356,14 @@ triangulate_polygon :: proc(verts: [][4]i32, indices: []i32, triangles: ^[dynami
     for i in 0..<len(indices) {
         work_indices[i] = u32(indices[i])
     }
-    // Verts already in C++ format: [4]i32 with x, y, z, flags
-    // No conversion needed - use directly
-
-    n := i32(len(indices))
-
+    n := len(indices)
     // Pre-mark all ears using bit flags
     // The last bit of the index is used to indicate if the vertex can be removed
     for i in 0..<n {
         i1 := (i + 1) % n
         i2 := (i1 + 1) % n
 
-        diag_result := diagonal(verts, work_indices, n, i, i2)
+        diag_result := diagonal(verts, work_indices, i, i2)
         if diag_result {
             work_indices[i1] |= 0x80000000  // Mark middle vertex as removable ear
         }
@@ -389,8 +380,8 @@ triangulate_polygon :: proc(verts: [][4]i32, indices: []i32, triangles: ^[dynami
 
     // Remove ears until only triangle remains
     for n > 3 {
-        min_len := i32(-1)
-        mini := i32(-1)
+        min_len := -1
+        mini := -1
 
         // Find ear with shortest diagonal (C++ algorithm)
         for i in 0..<n {
@@ -406,8 +397,8 @@ triangulate_polygon :: proc(verts: [][4]i32, indices: []i32, triangles: ^[dynami
                 p2 := verts[p2_idx]
                 length := linalg.length2(p2.xz - p0.xz)
 
-                if min_len < 0 || length < min_len {
-                    min_len = length
+                if min_len < 0 || int(length) < min_len {
+                    min_len = int(length)
                     mini = i
                 }
             }
@@ -417,20 +408,20 @@ triangulate_polygon :: proc(verts: [][4]i32, indices: []i32, triangles: ^[dynami
             // We might get here because the contour has overlapping segments
             // Try to recover by loosening up the inCone test
             min_len = -1
-            for i in i32(0)..<n {
+            for i in 0..<n {
                 i1 := (i + 1) % n
                 i2 := (i1 + 1) % n
-                if diagonal_loose(verts, work_indices, n, i, i2) {
-                    p0_idx := i32(work_indices[i] & 0x0fffffff)
-                    p2_idx := i32(work_indices[(i2 + 1) % n] & 0x0fffffff)  // Match C++ exactly
+                if diagonal_loose(verts, work_indices, i, i2) {
+                    p0_idx := work_indices[i] & 0x0fffffff
+                    p2_idx := work_indices[(i2 + 1) % n] & 0x0fffffff
 
                     // Calculate squared distance in XZ plane
                     p0 := verts[p0_idx]
                     p2 := verts[p2_idx]
                     length := linalg.length2(p2.xz - p0.xz)
 
-                    if min_len < 0 || length < min_len {
-                        min_len = length
+                    if min_len < 0 || int(length) < min_len {
+                        min_len = int(length)
                         mini = i
                     }
                 }
@@ -439,7 +430,7 @@ triangulate_polygon :: proc(verts: [][4]i32, indices: []i32, triangles: ^[dynami
             if mini == -1 {
                 // The contour is messed up. This sometimes happens
                 // if the contour simplification is too aggressive.
-                // Return negative triangle count to signal error (matching C++)
+                // Return negative triangle count to signal error
                 return false
             }
         }
@@ -467,22 +458,20 @@ triangulate_polygon :: proc(verts: [][4]i32, indices: []i32, triangles: ^[dynami
         next_i1 := (i1 + 1) % n
 
         // Only check strict diagonal (not loose) for flag updates
-        if diagonal(verts, work_indices, n, prev_i, i1) {
+        if diagonal(verts, work_indices, prev_i, i1) {
             work_indices[i] |= 0x80000000
         } else {
             work_indices[i] &= 0x0fffffff
         }
 
-        if diagonal(verts, work_indices, n, i, next_i1) {
+        if diagonal(verts, work_indices, i, next_i1) {
             work_indices[i1] |= 0x80000000
         } else {
             work_indices[i1] &= 0x0fffffff
         }
     }
-
     // Append the remaining triangle (unmask indices)
     append(triangles, i32(work_indices[0] & 0x0fffffff), i32(work_indices[1] & 0x0fffffff), i32(work_indices[2] & 0x0fffffff))
-
     return true
 }
 
