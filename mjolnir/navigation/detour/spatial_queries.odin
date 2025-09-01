@@ -8,29 +8,21 @@ import recast "../recast"
 import geometry "../../geometry"
 
 // Find nearest polygon to given position
-find_nearest_poly :: proc(query: ^Nav_Mesh_Query, center: [3]f32, half_extents: [3]f32,
-                            filter: ^Query_Filter) -> (status: recast.Status,
-                                                      nearest_ref: recast.Poly_Ref,
-                                                      nearest_pt: [3]f32) {
-
+find_nearest_poly :: proc(query: ^Nav_Mesh_Query, center: [3]f32, half_extents: [3]f32, filter: ^Query_Filter) ->
+    (status: recast.Status, nearest_ref: recast.Poly_Ref, nearest_pt: [3]f32) {
     nearest_ref = recast.INVALID_POLY_REF
     nearest_pt = center
-
     log.infof("find_nearest_poly: center=%v, half_extents=%v", center, half_extents)
-
     // Calculate query bounds
     bmin := center - half_extents
     bmax := center + half_extents
-
     // Find tiles that overlap query region
     tx0, ty0 := calc_tile_loc_simple(query.nav_mesh, bmin)
     tx1, ty1 := calc_tile_loc_simple(query.nav_mesh, bmax)
     log.infof("find_nearest_poly: Searching tiles (%d,%d) to (%d,%d) for position %v", tx0, ty0, tx1, ty1, center)
-
     nearest_dist_sqr := f32(math.F32_MAX)
     total_tiles_checked := 0
     total_polys_checked := 0
-
     // Search tiles
     for ty in ty0..=ty1 {
         for tx in tx0..=tx1 {
@@ -89,7 +81,6 @@ find_nearest_poly :: proc(query: ^Nav_Mesh_Query, center: [3]f32, half_extents: 
 
     log.infof("find_nearest_poly: Checked %d tiles, %d polygons total. nearest_ref=0x%x, dist_sqr=%f",
               total_tiles_checked, total_polys_checked, nearest_ref, nearest_dist_sqr)
-
     // Return success even if no polygon was found - caller can check if nearest_ref is valid
     return {.Success}, nearest_ref, nearest_pt
 }
@@ -148,8 +139,7 @@ query_polygons :: proc(query: ^Nav_Mesh_Query, center: [3]f32, half_extents: [3]
 }
 
 // Raycast along navigation mesh surface
-raycast :: proc(query: ^Nav_Mesh_Query, start_ref: recast.Poly_Ref, start_pos: [3]f32,
-                  end_pos: [3]f32, filter: ^Query_Filter, options: u32,
+raycast :: proc(query: ^Nav_Mesh_Query, start_ref: recast.Poly_Ref, start_pos, end_pos: [3]f32, filter: ^Query_Filter, options: u32,
                   path: []recast.Poly_Ref, max_path: i32) -> (status: recast.Status,
                                                                    hit: Raycast_Hit,
                                                                    path_count: i32) {
@@ -201,7 +191,7 @@ raycast :: proc(query: ^Nav_Mesh_Query, start_ref: recast.Poly_Ref, start_pos: [
             vb := tile.verts[poly.verts[(i + 1) % int(poly.vert_count)]]
 
             // Test ray intersection with edge
-            edge_t, intersects := dt_intersect_ray_segment_2d(cur_pos, ray_dir, va, vb)
+            edge_t, intersects := geometry.ray_segment_intersect_2d(cur_pos, ray_dir, va, vb)
 
             if intersects && edge_t > cur_t && edge_t < next_t {
                 // Check if there's a neighbor across this edge
@@ -279,15 +269,10 @@ raycast :: proc(query: ^Nav_Mesh_Query, start_ref: recast.Poly_Ref, start_pos: [
 }
 
 // Find random point on navigation mesh
-find_random_point :: proc(query: ^Nav_Mesh_Query, filter: ^Query_Filter,
-                            random_ref: ^recast.Poly_Ref, random_pt: ^[3]f32) -> recast.Status {
-
-    random_ref^ = recast.INVALID_POLY_REF
-    random_pt^ = {0, 0, 0}
-
+find_random_point :: proc(query: ^Nav_Mesh_Query, filter: ^Query_Filter) -> (ref: recast.Poly_Ref, pt: [3]f32, ret: recast.Status) {
+    ref = recast.INVALID_POLY_REF
     // For simplicity, find first walkable polygon
     // A full implementation would properly sample based on polygon areas
-
     for i in 0..<query.nav_mesh.max_tiles {
         tile := &query.nav_mesh.tiles[i]
         if tile.header == nil {
@@ -297,28 +282,28 @@ find_random_point :: proc(query: ^Nav_Mesh_Query, filter: ^Query_Filter,
         for j in 0..<int(tile.header.poly_count) {
             poly := &tile.polys[j]
             ref := encode_poly_id(query.nav_mesh, tile.salt, u32(i), u32(j))
-
             if query_filter_pass_filter(filter, ref, tile, poly) {
-                random_ref^ = ref
-                random_pt^ = calc_poly_center(tile, poly)
-                return {.Success}
+                ref = ref
+                pt = calc_poly_center(tile, poly)
+                ret = {.Success}
+                return
             }
         }
     }
-
-    return {.Invalid_Param}
+    ret = {.Invalid_Param}
+    return
 }
 
 // Find random point around given position
 find_random_point_around_circle :: proc(query: ^Nav_Mesh_Query, start_ref: recast.Poly_Ref,
-                                          start_pos: [3]f32, max_radius: f32, filter: ^Query_Filter,
-                                          random_ref: ^recast.Poly_Ref, random_pt: ^[3]f32) -> recast.Status {
+                                          start_pos: [3]f32, max_radius: f32, filter: ^Query_Filter) -> (ref: recast.Poly_Ref, pt: [3]f32, ret: recast.Status) {
 
-    random_ref^ = recast.INVALID_POLY_REF
-    random_pt^ = start_pos
+    ref = recast.INVALID_POLY_REF
+    pt = start_pos
 
     if !is_valid_poly_ref(query.nav_mesh, start_ref) {
-        return {.Invalid_Param}
+        ret = {.Invalid_Param}
+        return
     }
 
     // Simple implementation: sample random point in circle and project to mesh
@@ -335,15 +320,13 @@ find_random_point_around_circle :: proc(query: ^Nav_Mesh_Query, start_ref: recas
 
     // Find nearest polygon to target
     half_extents := [3]f32{max_radius, max_radius, max_radius}
-    status, ref, pt := find_nearest_poly(query, target, half_extents, filter)
-    random_ref^ = ref
-    random_pt^ = pt
-    return status
+    ret, ref, pt = find_nearest_poly(query, target, half_extents, filter)
+    return
 }
 
 // Helper functions
 
-query_polygons_in_tile :: proc(nav_mesh: ^Nav_Mesh, tile: ^Mesh_Tile, qmin: [3]f32, qmax: [3]f32,
+query_polygons_in_tile :: proc(nav_mesh: ^Nav_Mesh, tile: ^Mesh_Tile, qmin, qmax: [3]f32,
                                  polys: []recast.Poly_Ref, max_polys: i32) -> i32 {
 
     // For now, always use brute force to verify the BV tree issue
@@ -375,12 +358,11 @@ query_polygons_in_tile :: proc(nav_mesh: ^Nav_Mesh, tile: ^Mesh_Tile, qmin: [3]f
         }
 
         // Test overlap
-        overlap := overlap_bounds(qmin, qmax, poly_min, poly_max)
         // if i < 5 { // Debug first few polygons
         //     log.infof("    Polygon %d: bounds %v-%v, query %v-%v, overlap=%t",
         //               i, poly_min, poly_max, qmin, qmax, overlap)
         // }
-        if overlap {
+        if geometry.overlap_bounds(qmin, qmax, poly_min, poly_max) {
             if count < max_polys {
                 polys[count] = base | recast.Poly_Ref(i)
                 count += 1
@@ -391,7 +373,7 @@ query_polygons_in_tile :: proc(nav_mesh: ^Nav_Mesh, tile: ^Mesh_Tile, qmin: [3]f
     return count
 }
 
-query_polygons_in_tile_bv :: proc(nav_mesh: ^Nav_Mesh, tile: ^Mesh_Tile, qmin: [3]f32, qmax: [3]f32,
+query_polygons_in_tile_bv :: proc(nav_mesh: ^Nav_Mesh, tile: ^Mesh_Tile, qmin, qmax: [3]f32,
                                     polys: []recast.Poly_Ref, max_polys: i32) -> i32 {
     // BV tree traversal for spatial queries
     count := i32(0)
@@ -490,10 +472,8 @@ closest_point_on_polygon :: proc(tile: ^Mesh_Tile, poly: ^Poly, pos: [3]f32) -> 
     for i in 0..<int(poly.vert_count) {
         verts[i] = tile.verts[poly.verts[i]]
     }
-
     // Check if point is inside using 2D test
     inside := geometry.point_in_polygon_2d(pos, verts)
-
     if inside {
         // Point is inside polygon, use it directly but with polygon's Y height
         // Find the Y height at this XZ position (simplified: use average of vertices)
@@ -504,88 +484,21 @@ closest_point_on_polygon :: proc(tile: ^Mesh_Tile, poly: ^Poly, pos: [3]f32) -> 
         avg_y /= f32(len(verts))
         return {pos.x, avg_y, pos.z}, true
     }
-    
     // Point is outside, find closest point on polygon edges
     closest := pos
     closest_dist_sqr := f32(math.F32_MAX)
-    
     for i in 0..<int(poly.vert_count) {
         va := verts[i]
         vb := verts[(i + 1) % int(poly.vert_count)]
-        
-        // Find closest point on edge in 2D (XZ plane)
-        edge_closest := closest_point_on_segment_2d(pos, va, vb)
-        
-        // Calculate distance in 2D
-        dx := edge_closest.x - pos.x
-        dz := edge_closest.z - pos.z
-        dist_sqr := dx * dx + dz * dz
-        
+        edge_closest := geometry.closest_point_on_segment_2d(pos, va, vb)
+        d := edge_closest - pos
+        dist_sqr := linalg.length2(d.xz)
         if dist_sqr < closest_dist_sqr {
             closest_dist_sqr = dist_sqr
             closest = edge_closest
         }
     }
-    
     return closest, false
-}
-
-// Helper function to find closest point on a line segment in 2D (XZ plane)
-closest_point_on_segment_2d :: proc(pos: [3]f32, a: [3]f32, b: [3]f32) -> [3]f32 {
-    dx := b.x - a.x
-    dz := b.z - a.z
-    
-    // Edge vector length squared
-    edge_len_sqr := dx * dx + dz * dz
-    
-    if edge_len_sqr < 1e-6 {
-        // Degenerate edge, return first vertex
-        return a
-    }
-    
-    // Project point onto edge direction
-    px := pos.x - a.x
-    pz := pos.z - a.z
-    t := (px * dx + pz * dz) / edge_len_sqr
-    
-    // Clamp to edge bounds
-    t = clamp(t, 0.0, 1.0)
-    
-    // Interpolate position along edge
-    return {
-        a.x + t * dx,
-        a.y + t * (b.y - a.y),  // Interpolate Y height too
-        a.z + t * dz,
-    }
-}
-
-overlap_bounds :: proc(amin: [3]f32, amax: [3]f32, bmin: [3]f32, bmax: [3]f32) -> bool {
-    return amin[0] <= bmax[0] && amax[0] >= bmin[0] &&
-           amin[1] <= bmax[1] && amax[1] >= bmin[1] &&
-           amin[2] <= bmax[2] && amax[2] >= bmin[2]
-}
-
-dt_intersect_ray_segment_2d :: proc(ray_start: [3]f32, ray_dir: [3]f32, seg_a: [3]f32, seg_b: [3]f32) -> (f32, bool) {
-    // 2D ray-segment intersection in XZ plane
-    dx := seg_b.x - seg_a.x
-    dz := seg_b.z - seg_a.z
-
-    denominator := ray_dir.x * dz - ray_dir.z * dx
-    if math.abs(denominator) < 1e-6 {
-        return 0, false // Parallel
-    }
-
-    sx := ray_start.x - seg_a.x
-    sz := ray_start.z - seg_a.z
-
-    t := (dx * sz - dz * sx) / denominator
-    u := (ray_dir.x * sz - ray_dir.z * sx) / denominator
-
-    if t >= 0 && u >= 0 && u <= 1 {
-        return t, true
-    }
-
-    return 0, false
 }
 
 // Get height of polygon at given position using detail mesh
@@ -593,12 +506,10 @@ get_poly_height :: proc(query: ^Nav_Mesh_Query, ref: recast.Poly_Ref, pos: [3]f3
     if !is_valid_poly_ref(query.nav_mesh, ref) {
         return 0, {.Invalid_Param}
     }
-
     tile, poly, poly_status := get_tile_and_poly_by_ref(query.nav_mesh, ref)
     if recast.status_failed(poly_status) {
         return 0, poly_status
     }
-
     // If no detail mesh, use polygon vertices for height calculation
     if tile.detail_meshes == nil || len(tile.detail_meshes) == 0 {
         // Calculate average height of polygon vertices
@@ -608,24 +519,19 @@ get_poly_height :: proc(query: ^Nav_Mesh_Query, ref: recast.Poly_Ref, pos: [3]f3
         }
         return avg_height / f32(poly.vert_count), {.Success}
     }
-
     // Get detail mesh for this polygon
     poly_index := u32(ref) & u32(tile.header.poly_count - 1)
     if poly_index >= u32(len(tile.detail_meshes)) {
         return 0, {.Invalid_Param}
     }
-
     detail := &tile.detail_meshes[poly_index]
-
     // Find which detail triangle contains the position
     for i in 0..<int(detail.tri_count) {
         tri_idx := detail.tri_base + u32(i)
         if tri_idx >= u32(len(tile.detail_tris)) {
             continue
         }
-
         tri := &tile.detail_tris[tri_idx]
-
         // Get vertices of detail triangle
         verts: [3][3]f32
         for j in 0..<3 {
@@ -640,7 +546,6 @@ get_poly_height :: proc(query: ^Nav_Mesh_Query, ref: recast.Poly_Ref, pos: [3]f3
                 }
             }
         }
-
         // Check if point is inside triangle (2D test in XZ plane)
         if geometry.point_in_triangle_2d(pos, verts[0], verts[1], verts[2]) {
             // Calculate barycentric coordinates and interpolate height
@@ -649,7 +554,6 @@ get_poly_height :: proc(query: ^Nav_Mesh_Query, ref: recast.Poly_Ref, pos: [3]f3
             return height, {.Success}
         }
     }
-
     // Fallback: use polygon center height
     center := calc_poly_center(tile, poly)
     return center.y, {.Success}

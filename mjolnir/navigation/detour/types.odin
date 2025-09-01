@@ -204,7 +204,7 @@ query_filter_pass_filter :: proc(filter: ^Query_Filter, ref: recast.Poly_Ref, ti
 }
 
 query_filter_get_cost :: proc(filter: ^Query_Filter,
-                                pa: [3]f32, pb: [3]f32,
+                                pa, pb: [3]f32,
                                 prev_ref: recast.Poly_Ref, prev_tile: ^Mesh_Tile, prev_poly: ^Poly,
                                 cur_ref: recast.Poly_Ref, cur_tile: ^Mesh_Tile, cur_poly: ^Poly,
                                 next_ref: recast.Poly_Ref, next_tile: ^Mesh_Tile, next_poly: ^Poly) -> f32 {
@@ -292,20 +292,17 @@ calc_tile_loc :: proc(nav_mesh: ^Nav_Mesh, pos: [3]f32) -> (tx: i32, ty: i32, st
 
     // Calculate offset from origin
     offset := pos - nav_mesh.orig
-    offset_x := offset.x
-    offset_z := offset.z
-
     // Check for infinite or NaN offset values (could happen if origin is invalid)
-    if offset_x != offset_x || offset_z != offset_z ||  // NaN check
-       offset_x == math.F32_MAX || offset_x == -math.F32_MAX ||  // Infinity check
-       offset_z == math.F32_MAX || offset_z == -math.F32_MAX ||
-       math.abs(offset_x) > 1e20 || math.abs(offset_z) > 1e20 {  // Extremely large values
+    if offset.x != offset.x || offset.z != offset.z ||  // NaN check
+       offset.x == math.F32_MAX || offset.x == -math.F32_MAX ||  // Infinity check
+       offset.z == math.F32_MAX || offset.z == -math.F32_MAX ||
+       math.abs(offset.x) > 1e20 || math.abs(offset.z) > 1e20 {  // Extremely large values
         return 0, 0, {.Invalid_Param}
     }
 
     // Calculate floating-point tile coordinates
-    tile_f_x := offset_x / nav_mesh.tile_width
-    tile_f_z := offset_z / nav_mesh.tile_height
+    tile_f_x := offset.x / nav_mesh.tile_width
+    tile_f_z := offset.z / nav_mesh.tile_height
 
     // Check for overflow - ensure coordinates won't overflow i32
     // Use conservative bounds to account for negative values

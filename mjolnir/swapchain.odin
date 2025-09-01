@@ -53,12 +53,12 @@ swapchain_init :: proc(
       return capabilities.currentExtent
     }
     return {
-      math.clamp(
+      clamp(
         actual_width,
         capabilities.minImageExtent.width,
         capabilities.maxImageExtent.width,
       ),
-      math.clamp(
+      clamp(
         actual_height,
         capabilities.minImageExtent.height,
         capabilities.maxImageExtent.height,

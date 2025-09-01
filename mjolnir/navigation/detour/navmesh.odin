@@ -5,7 +5,8 @@ import "core:math"
 import "core:math/linalg"
 import "core:slice"
 import "core:log"
-import recast "../recast"
+import "../recast"
+import "../../geometry"
 
 // Initialize navigation mesh with parameters
 nav_mesh_init :: proc(nav_mesh: ^Nav_Mesh, params: ^Nav_Mesh_Params) -> recast.Status {
@@ -35,8 +36,8 @@ nav_mesh_init :: proc(nav_mesh: ^Nav_Mesh, params: ^Nav_Mesh_Params) -> recast.S
     }
 
     // Calculate ID encoding parameters (matching C++ dtNavMesh::init)
-    tile_bits_needed := dt_ilog2(dt_next_pow2(u32(params.max_tiles)))
-    poly_bits_needed := dt_ilog2(dt_next_pow2(u32(params.max_polys)))
+    tile_bits_needed := geometry.ilog2(geometry.next_pow2(u32(params.max_tiles)))
+    poly_bits_needed := geometry.ilog2(geometry.next_pow2(u32(params.max_polys)))
 
     // Use 32-bit references (matching C++ logic)
     nav_mesh.tile_bits = tile_bits_needed
@@ -212,7 +213,7 @@ get_tile_by_ref :: proc(nav_mesh: ^Nav_Mesh, ref: recast.Tile_Ref) -> (^Mesh_Til
 }
 
 // Get tile at grid position
-get_tile_at :: proc(nav_mesh: ^Nav_Mesh, x: i32, y: i32, layer: i32) -> ^Mesh_Tile {
+get_tile_at :: proc(nav_mesh: ^Nav_Mesh, x, y: i32, layer: i32) -> ^Mesh_Tile {
     h := compute_tile_hash(x, y, nav_mesh.tile_lut_mask)
     tile := nav_mesh.pos_lookup[h]
     for tile != nil {
@@ -490,12 +491,12 @@ connect_int_links :: proc(nav_mesh: ^Nav_Mesh, tile: ^Mesh_Tile) {
     if tile.header == nil {
         return
     }
-    
-    // log.debugf("connect_int_links: Processing tile with %d polygons, %d links available", 
+
+    // log.debugf("connect_int_links: Processing tile with %d polygons, %d links available",
     //           tile.header.poly_count, len(tile.links))
 
     base := get_poly_ref_base(nav_mesh, tile)
-    
+
     links_created := 0
 
     for i in 0..<int(tile.header.poly_count) {
@@ -517,7 +518,7 @@ connect_int_links :: proc(nav_mesh: ^Nav_Mesh, tile: ^Mesh_Tile) {
         for j in 0..<int(poly.vert_count) {
             if poly.neis[j] != 0 {
                 neighbor_id: u16
-                
+
                 // Check if this is marked with the 0x8000 flag (internal link in same tile)
                 if poly.neis[j] & 0x8000 != 0 {
                     // Internal link within same tile - extract polygon index
@@ -526,7 +527,7 @@ connect_int_links :: proc(nav_mesh: ^Nav_Mesh, tile: ^Mesh_Tile) {
                     // Regular neighbor reference (1-based index)
                     neighbor_id = poly.neis[j] - 1
                 }
-                
+
                 // Validate neighbor reference
                 if neighbor_id >= u16(tile.header.poly_count) {
                     log.warnf("Polygon %d edge %d has invalid neighbor %d (max %d)",
@@ -545,7 +546,7 @@ connect_int_links :: proc(nav_mesh: ^Nav_Mesh, tile: ^Mesh_Tile) {
                     // Add to polygon's link list
                     link.next = poly.first_link
                     poly.first_link = link_idx
-                    
+
                     links_created += 1
                     // Debug: log link creation
                     // log.infof("Created link: poly %d edge %d -> poly %d (ref=0x%x)", i, j, neighbor_id, link.ref)
@@ -555,7 +556,7 @@ connect_int_links :: proc(nav_mesh: ^Nav_Mesh, tile: ^Mesh_Tile) {
             }
         }
     }
-    
+
     // log.debugf("connect_int_links: Created %d links", links_created)
 }
 
@@ -818,30 +819,6 @@ unlink_tile :: proc(nav_mesh: ^Nav_Mesh, tile: ^Mesh_Tile) {
     if prev != nil {
         prev.next = tile.next
     }
-}
-
-dt_ilog2 :: proc(v: u32) -> u32 {
-    // Return position of highest set bit (0-based)
-    // This matches C++ dtIlog2 which returns floor(log2(v))
-    if v == 0 do return 0
-
-    r := u32(0)
-    val := v
-    for val > 1 {
-        val >>= 1
-        r += 1
-    }
-    return r
-}
-
-dt_next_pow2 :: proc(v: u32) -> u32 {
-    val := v - 1
-    val |= val >> 1
-    val |= val >> 2
-    val |= val >> 4
-    val |= val >> 8
-    val |= val >> 16
-    return val + 1
 }
 
 // Tile reference encoding

@@ -6,6 +6,7 @@ import "core:mem"
 import "core:math"
 import "core:math/linalg"
 import "core:time"
+import "../../geometry"
 
 // Detail mesh building constants
 RC_UNSET_HEIGHT :: 0xffff
@@ -78,31 +79,6 @@ Timeout_Context :: struct {
     last_progress:     time.Time,    // Last progress update
     polygons_processed: i32,         // Number of polygons completed
     current_polygon:   i32,          // Currently processing polygon
-}
-
-// Calculate barycentric coordinates for point p in triangle (a, b, c)
-calculate_barycentric :: proc "contextless" (p, a, b, c: [3]f32) -> Barycentric {
-    v0 := c - a
-    v1 := b - a
-    v2 := p - a
-
-    dot00 := linalg.dot(v0.xz, v0.xz)
-    dot01 := linalg.dot(v0.xz, v1.xz)
-    dot02 := linalg.dot(v0.xz, v2.xz)
-    dot11 := linalg.dot(v1.xz, v1.xz)
-    dot12 := linalg.dot(v1.xz, v2.xz)
-
-    inv_denom := 1.0 / (dot00 * dot11 - dot01 * dot01)
-    u := (dot11 * dot02 - dot01 * dot12) * inv_denom
-    v := (dot00 * dot12 - dot01 * dot02) * inv_denom
-    w := 1.0 - u - v
-
-    return Barycentric{u, v, w}
-}
-
-// Check if point is inside triangle using barycentric coordinates
-point_in_triangle_bary :: proc "contextless" (bary: Barycentric) -> bool {
-    return bary.u >= 0.0 && bary.v >= 0.0 && bary.w >= 0.0
 }
 
 // Sample height from heightfield at given world position
@@ -209,7 +185,7 @@ calculate_polygon_min_extent :: proc(poly: ^Detail_Polygon) -> f32 {
             if j == i || j == ni do continue
 
             // Distance from point to line segment (2D)
-            d := distance_to_edge(poly.vertices[j].pos, p1, p2)
+            d, _ := geometry.point_segment_distance2_2d(poly.vertices[j].pos, p1, p2)
             max_edge_dist = max(max_edge_dist, d)
         }
         min_dist = min(min_dist, max_edge_dist)
@@ -222,8 +198,7 @@ calculate_polygon_min_extent :: proc(poly: ^Detail_Polygon) -> f32 {
 
 // Check if triangle is degenerate
 is_triangle_degenerate :: proc "contextless" (a, b, c: [3]f32) -> bool {
-    area := triangle_area_2d_detail(a, b, c)
-    return area < math.F32_EPSILON
+    return geometry.signed_triangle_area_2d(a, b, c) < math.F32_EPSILON
 }
 
 // Validate a triangle using multiple criteria
@@ -253,31 +228,11 @@ validate_triangle :: proc "contextless" (a, b, c: [3]f32) -> bool {
 
     // Check angle at vertex A
     dot_a := linalg.dot(ab.xz, ac.xz)
-    angle_a := math.acos(math.clamp(dot_a, -1.0, 1.0)) * 180.0 / math.PI
+    angle_a := math.acos(clamp(dot_a, -1.0, 1.0)) * 180.0 / math.PI
 
     if angle_a < MIN_ANGLE_DEGREES || angle_a > MAX_ANGLE_DEGREES do return false
 
     return true
-}
-
-// Find the closest point on an edge to a given point
-closest_point_on_edge :: proc "contextless" (p, a, b: [3]f32) -> [3]f32 {
-    ab := b - a
-    ap := p - a
-
-    ab_len_sq := linalg.dot(ab, ab)
-    if ab_len_sq <= 0.0 do return a
-
-    t := linalg.dot(ap, ab) / ab_len_sq
-    t = math.clamp(t, 0.0, 1.0)
-
-    return linalg.mix(a, b, t)
-}
-
-// Calculate distance from point to edge
-distance_to_edge :: proc "contextless" (p, a, b: [3]f32) -> f32 {
-    closest := closest_point_on_edge(p, a, b)
-    return linalg.distance(p, closest)
 }
 
 // Add a vertex to the detail polygon, ensuring uniqueness
@@ -657,7 +612,7 @@ triangulate_delaunay :: proc(poly: ^Detail_Polygon) -> bool {
         c := poly.vertices[2].pos
 
         // Check triangle orientation - must be counter-clockwise
-        area := triangle_area_2d_detail(a, b, c)
+        area := geometry.signed_triangle_area_2d(a, b, c)
         if area > MIN_POLYGON_AREA {
             triangle := Detail_Triangle{
                 v = {0, 1, 2},
@@ -727,7 +682,7 @@ triangulate_delaunay :: proc(poly: ^Detail_Polygon) -> bool {
                 b := verts[t1]
                 c := verts[t2]
 
-                area := triangle_area_2d_detail(a, b, c)
+                area := geometry.signed_triangle_area_2d(a, b, c)
                 if abs(area) > MIN_POLYGON_AREA {
                     triangle := Detail_Triangle{
                         v = {t0, t1, t2},
@@ -783,7 +738,7 @@ triangulate_hull_based :: proc(poly: ^Detail_Polygon) -> bool {
         c := poly.vertices[2].pos
 
         // Check triangle orientation and area
-        area := triangle_area_2d_detail(a, b, c)
+        area := geometry.signed_triangle_area_2d(a, b, c)
         abs_area := abs(area)
 
         // For hull triangulation, we accept triangles regardless of winding
@@ -857,7 +812,7 @@ triangulate_hull_based :: proc(poly: ^Detail_Polygon) -> bool {
     c := poly.vertices[hull[right]].pos
 
     // Ensure triangle has positive area (counter-clockwise)
-    area := triangle_area_2d_detail(a, b, c)
+    area := geometry.signed_triangle_area_2d(a, b, c)
 
     // C++ behavior: Always add triangle in hull triangulation, even if degenerate
     // The area check is less strict for hull triangulation
@@ -887,7 +842,7 @@ triangulate_hull_based :: proc(poly: ^Detail_Polygon) -> bool {
             b := poly.vertices[hull[nleft]].pos
             c := poly.vertices[hull[right]].pos
 
-            area := triangle_area_2d_detail(a, b, c)
+            area := geometry.signed_triangle_area_2d(a, b, c)
             // C++ behavior: Always add triangle in hull triangulation
             triangle := Detail_Triangle{
                 v = {hull[left], hull[nleft], hull[right]},
@@ -902,7 +857,7 @@ triangulate_hull_based :: proc(poly: ^Detail_Polygon) -> bool {
             b := poly.vertices[hull[nright]].pos
             c := poly.vertices[hull[right]].pos
 
-            area := triangle_area_2d_detail(a, b, c)
+            area := geometry.signed_triangle_area_2d(a, b, c)
             // C++ behavior: Always add triangle in hull triangulation
             triangle := Detail_Triangle{
                 v = {hull[left], hull[nright], hull[right]},
@@ -940,7 +895,7 @@ triangulate_simple_convex :: proc(poly: ^Detail_Polygon) -> bool {
             triangle := Detail_Triangle{
                 v = {0, 1, 2},
                 quality = calculate_triangle_quality(a, b, c),
-                area = triangle_area_2d_detail(a, b, c),
+                area = geometry.signed_triangle_area_2d(a, b, c),
             }
             append(&poly.triangles, triangle)
         }
@@ -968,7 +923,7 @@ triangulate_simple_convex :: proc(poly: ^Detail_Polygon) -> bool {
                 triangle1 := Detail_Triangle{
                     v = {0, 1, 2},
                     quality = q1a,
-                    area = triangle_area_2d_detail(a, b, c),
+                    area = geometry.signed_triangle_area_2d(a, b, c),
                 }
                 append(&poly.triangles, triangle1)
             }
@@ -976,7 +931,7 @@ triangulate_simple_convex :: proc(poly: ^Detail_Polygon) -> bool {
                 triangle2 := Detail_Triangle{
                     v = {0, 2, 3},
                     quality = q1b,
-                    area = triangle_area_2d_detail(a, c, d),
+                    area = geometry.signed_triangle_area_2d(a, c, d),
                 }
                 append(&poly.triangles, triangle2)
             }
@@ -986,7 +941,7 @@ triangulate_simple_convex :: proc(poly: ^Detail_Polygon) -> bool {
                 triangle1 := Detail_Triangle{
                     v = {0, 1, 3},
                     quality = q2a,
-                    area = triangle_area_2d_detail(a, b, d),
+                    area = geometry.signed_triangle_area_2d(a, b, d),
                 }
                 append(&poly.triangles, triangle1)
             }
@@ -994,7 +949,7 @@ triangulate_simple_convex :: proc(poly: ^Detail_Polygon) -> bool {
                 triangle2 := Detail_Triangle{
                     v = {1, 2, 3},
                     quality = q2b,
-                    area = triangle_area_2d_detail(b, c, d),
+                    area = geometry.signed_triangle_area_2d(b, c, d),
                 }
                 append(&poly.triangles, triangle2)
             }
@@ -1100,7 +1055,7 @@ triangulate_ear_clipping_robust :: proc(poly: ^Detail_Polygon) -> bool {
                 c := poly.vertices[indices[next]].pos
 
                 // Very basic convexity test - just check signed area is positive
-                area := triangle_area_2d_detail(a, b, c)
+                area := geometry.signed_triangle_area_2d(a, b, c)
                 if area > 1e-12 {
                     best_ear = curr
                     found_ear = true
@@ -1131,7 +1086,7 @@ triangulate_ear_clipping_robust :: proc(poly: ^Detail_Polygon) -> bool {
         triangle := Detail_Triangle{
             v = {indices[prev], indices[curr], indices[next]},
             quality = calculate_triangle_quality(a, b, c),
-            area = triangle_area_2d_detail(a, b, c),
+            area = geometry.signed_triangle_area_2d(a, b, c),
         }
         append(&poly.triangles, triangle)
 
@@ -1153,7 +1108,7 @@ triangulate_ear_clipping_robust :: proc(poly: ^Detail_Polygon) -> bool {
             triangle := Detail_Triangle{
                 v = {indices[0], indices[1], indices[2]},
                 quality = calculate_triangle_quality(a, b, c),
-                area = triangle_area_2d_detail(a, b, c),
+                area = geometry.signed_triangle_area_2d(a, b, c),
             }
             append(&poly.triangles, triangle)
         }
@@ -1189,7 +1144,7 @@ triangulate_simple_fan :: proc(poly: ^Detail_Polygon) -> bool {
             triangle := Detail_Triangle{
                 v = {0, i32(i), i32(i+1)},
                 quality = 0.3, // Lower quality but guaranteed to work
-                area = triangle_area_2d_detail(a, b, c),
+                area = geometry.signed_triangle_area_2d(a, b, c),
             }
             append(&poly.triangles, triangle)
         }
@@ -1210,7 +1165,7 @@ triangulate_remaining_as_fan :: proc(poly: ^Detail_Polygon, indices: []i32) -> b
         c := poly.vertices[indices[i+1]].pos
 
         // Use much more lenient area threshold for fallback triangulation
-        area := triangle_area_2d_detail(a, b, c)
+        area := geometry.signed_triangle_area_2d(a, b, c)
 
         if area > 1e-12 {  // Very small but not zero
             triangle := Detail_Triangle{
@@ -1273,7 +1228,7 @@ is_ear :: proc(poly: ^Detail_Polygon, indices: []i32, prev, curr, next: int) -> 
     c := poly.vertices[v_next].pos
 
     // Check if triangle is degenerate using signed area
-    area := triangle_area_2d_detail(a, b, c)
+    area := geometry.signed_triangle_area_2d(a, b, c)
     if area <= 1e-9 do return false  // Must be counter-clockwise (positive area)
 
     // Check that no other vertices lie inside this triangle
@@ -1286,54 +1241,12 @@ is_ear :: proc(poly: ^Detail_Polygon, indices: []i32, prev, curr, next: int) -> 
         p := poly.vertices[test_v].pos
 
         // Use improved point-in-triangle test
-        if point_in_triangle_2d_robust(p, a, b, c) {
+        if geometry.point_in_triangle_2d(p, a, b, c, math.F32_EPSILON) {
             return false  // Point inside triangle, not a valid ear
         }
     }
 
     return true
-}
-
-// Simple point in triangle test using cross products
-point_in_triangle_2d :: proc "contextless" (p, a, b, c: [3]f32) -> bool {
-    // Use edge testing method - point is inside if it's on the same side of all edges
-
-    // Vector from a to b
-    cross1 := linalg.cross(b.xz - a.xz, p.xz - a.xz)
-
-    // Vector from b to c
-    cross2 := linalg.cross(c.xz - b.xz, p.xz - b.xz)
-
-    // Vector from c to a
-    cross3 := linalg.cross(a.xz - c.xz, p.xz - c.xz)
-
-    // Point is inside if all crosses have the same sign (all positive or all negative)
-    return (cross1 >= 0 && cross2 >= 0 && cross3 >= 0) || (cross1 <= 0 && cross2 <= 0 && cross3 <= 0)
-}
-
-// Robust point-in-triangle test using edge method with proper epsilon handling
-point_in_triangle_2d_robust :: proc "contextless" (p, a, b, c: [3]f32) -> bool {
-    // Use edge testing method with consistent winding
-    // For counter-clockwise triangles, point is inside if all edge tests are positive
-
-    // Edge AB
-    cross1 := linalg.cross(b.xz - a.xz, p.xz - a.xz)
-
-    // Edge BC
-    cross2 := linalg.cross(c.xz - b.xz, p.xz - b.xz)
-
-    // Edge CA
-    cross3 := linalg.cross(a.xz - c.xz, p.xz - c.xz)
-
-    // Point is strictly inside if all crosses have the same sign as the triangle orientation
-    // For counter-clockwise triangles, all should be positive
-    // Use epsilon to avoid boundary cases being considered "inside"
-    return cross1 > math.F32_EPSILON && cross2 > math.F32_EPSILON && cross3 > math.F32_EPSILON
-}
-
-// Calculate 2D triangle area (signed)
-triangle_area_2d_detail :: proc "contextless" (a, b, c: [3]f32) -> f32 {
-    return 0.5 * linalg.cross(b.xz - a.xz, c.xz - a.xz)
 }
 
 // Add interior samples with limits to prevent excessive point generation
@@ -1752,8 +1665,6 @@ check_timeout :: proc(ctx: ^Timeout_Context, operation: string) -> bool {
 update_progress :: proc(ctx: ^Timeout_Context, polygon_idx: i32) {
     ctx.last_progress = time.now()
     ctx.current_polygon = polygon_idx
-
-
 }
 
 // Main function to build poly mesh detail with timeout protection
@@ -1831,7 +1742,7 @@ build_poly_mesh_detail :: proc(pmesh: ^Poly_Mesh, chf: ^Compact_Heightfield,
 
         // Calculate polygon area and skip if degenerate
         if len(poly.vertices) >= 3 {
-            area := triangle_area_2d_detail(poly.vertices[0].pos, poly.vertices[1].pos, poly.vertices[2].pos)
+            area := geometry.signed_triangle_area_2d(poly.vertices[0].pos, poly.vertices[1].pos, poly.vertices[2].pos)
             abs_area := abs(area)  // Use absolute value to handle both winding directions
             if abs_area < MIN_POLYGON_AREA {
 
@@ -1933,64 +1844,6 @@ build_poly_mesh_detail :: proc(pmesh: ^Poly_Mesh, chf: ^Compact_Heightfield,
     return true
 }
 
-// Calculate circumcircle of a triangle
-// Returns center and radius squared
-// Based on C++ circumCircle from RecastMeshDetail.cpp
-circum_circle :: proc "contextless" (p1, p2, p3: [3]f32) -> (center: [2]f32, r_sq: f32, valid: bool) {
-    EPS :: 1e-6
-
-    // Convert to 2D (using x,z coordinates)
-    ax := p1.x
-    ay := p1.z
-    bx := p2.x
-    by := p2.z
-    cx := p3.x
-    cy := p3.z
-
-    // Calculate differences
-    abx := bx - ax
-    aby := by - ay
-    acx := cx - ax
-    acy := cy - ay
-
-    // Calculate cross product (2D)
-    cross := abx * acy - aby * acx
-
-    // Check if points are collinear
-    if abs(cross) < EPS {
-        return {}, 0, false
-    }
-
-    // Calculate squared lengths
-    len_ab_sq := abx * abx + aby * aby
-    len_ac_sq := acx * acx + acy * acy
-
-    // Calculate circumcenter
-    inv_cross := 1.0 / (2.0 * cross)
-
-    ux := (acy * len_ab_sq - aby * len_ac_sq) * inv_cross
-    uy := (abx * len_ac_sq - acx * len_ab_sq) * inv_cross
-
-    center.x = ax + ux
-    center.y = ay + uy
-
-    // Calculate radius squared
-    r_sq = ux * ux + uy * uy
-
-    return center, r_sq, true
-}
-
-// Check if a point is inside the circumcircle of a triangle
-in_circumcircle :: proc "contextless" (p: [3]f32, p1, p2, p3: [3]f32) -> bool {
-    center, r_sq, valid := circum_circle(p1, p2, p3)
-    if !valid do return false
-
-    dx := p.x - center.x
-    dy := p.z - center.y
-
-    return dx * dx + dy * dy <= r_sq
-}
-
 // Delaunay triangulation with hull constraint
 // Based on C++ delaunayHull from RecastMeshDetail.cpp
 delaunay_hull :: proc(verts: [][3]f32, hull: []i32) -> (tris: [dynamic][3]i32, valid: bool) {
@@ -2011,7 +1864,7 @@ delaunay_hull :: proc(verts: [][3]f32, hull: []i32) -> (tris: [dynamic][3]i32, v
             continue
         }
 
-        area := triangle_area_2d_detail(verts[i1], verts[i2], verts[i3])
+        area := geometry.signed_triangle_area_2d(verts[i1], verts[i2], verts[i3])
         if abs(area) > 1e-6 {
             // Add first triangle
             append(&tris, [3]i32{i1, i2, i3})
@@ -2039,7 +1892,7 @@ delaunay_hull :: proc(verts: [][3]f32, hull: []i32) -> (tris: [dynamic][3]i32, v
         for tri in tris {
             t0, t1, t2 := tri[0], tri[1], tri[2]
 
-            if in_circumcircle(pt, verts[t0], verts[t1], verts[t2]) {
+            if geometry.in_circumcircle(pt, verts[t0], verts[t1], verts[t2]) {
                 // Remove this triangle - add its edges to removed list
                 append(&removed_edges, [2]i32{t0, t1})
                 append(&removed_edges, [2]i32{t1, t2})

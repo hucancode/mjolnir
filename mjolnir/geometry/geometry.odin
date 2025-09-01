@@ -699,14 +699,14 @@ vector_equal :: proc(a, b: [3]f32, epsilon: f32 = 0.0001) -> bool {
     return diff.x < epsilon && diff.y < epsilon && diff.z < epsilon
 }
 
-// Calculate squared distance from point to line segment in 2D (XZ plane) with parameter t
-point_segment_distance2_2d :: proc(pt: [3]f32, a: [3]f32, b: [3]f32) -> (dist_sqr: f32, t: f32) {
+// Calculate squared distance from point to line segment in 2D (XZ plane)
+point_segment_distance2_2d :: proc(p, a, b: [3]f32) -> (dist_sqr: f32, t: f32) {
     dx := b.x - a.x
     dz := b.z - a.z
     d := dx*dx + dz*dz
 
     if d > 0 {
-        t = ((pt.x - a.x) * dx + (pt.z - a.z) * dz) / d
+        t = ((p.x - a.x) * dx + (p.z - a.z) * dz) / d
         t = clamp(t, 0, 1)
     } else {
         t = 0
@@ -715,15 +715,14 @@ point_segment_distance2_2d :: proc(pt: [3]f32, a: [3]f32, b: [3]f32) -> (dist_sq
     px := a.x + t * dx
     pz := a.z + t * dz
 
-    dx_pt := pt.x - px
-    dz_pt := pt.z - pz
-    dist_sqr = dx_pt*dx_pt + dz_pt*dz_pt
-
+    dx_p := p.x - px
+    dz_p := p.z - pz
+    dist_sqr = dx_p*dx_p + dz_p*dz_p
     return dist_sqr, t
 }
 
 // Find closest point on line segment in 2D (XZ plane)
-closest_point_on_segment_2d :: proc "contextless" (p: [3]f32, a: [3]f32, b: [3]f32) -> [3]f32 {
+closest_point_on_segment_2d :: proc "contextless" (p, a, b: [3]f32) -> [3]f32 {
     // Work in XZ plane
     seg_xz := b.xz - a.xz
     to_point_xz := p.xz - a.xz
@@ -764,39 +763,18 @@ ray_circle_intersect_2d :: proc "contextless" (pos, vel: [3]f32, radius: f32) ->
 }
 
 // Ray-segment intersection test (2D XZ plane)
-ray_segment_intersect_2d :: proc "contextless" (pos, vel, seg_start, seg_end: [3]f32, radius: f32) -> f32 {
-    // Work in XZ plane
-    pos_2d := pos.xz
-    vel_2d := vel.xz
-    seg_start_2d := seg_start.xz
-    seg_end_2d := seg_end.xz
-
-    seg_dir := seg_end_2d - seg_start_2d
-    seg_len := linalg.length(seg_dir)
-
-    if seg_len < 1e-6 do return -1
-
-    // Normalize segment direction
-    seg_dir_norm := seg_dir / seg_len
-    to_start := pos_2d - seg_start_2d
-
-    // Project onto segment
-    proj := linalg.dot(to_start, seg_dir_norm)
-    proj = clamp(proj, 0, seg_len)
-
-    // Closest point on segment
-    closest_2d := seg_start_2d + proj * seg_dir_norm
-
-    // Distance to closest point
-    dist := linalg.length(pos_2d - closest_2d)
-
-    if dist > radius do return -1
-
-    // Simple time calculation
-    speed := linalg.length(vel_2d)
-    if speed < 1e-6 do return -1
-
-    return (dist - radius) / speed
+ray_segment_intersect_2d :: proc "contextless" (ray_start, ray_dir, seg_start, seg_end: [3]f32) -> (t: f32, intersect: bool) {
+    // 2D ray-segment intersection in XZ plane
+    d := seg_end - seg_start
+    denominator := linalg.vector_cross2(ray_dir.xz, d.xz)
+    if math.abs(denominator) < 1e-6 {
+        return
+    }
+    s := ray_start - seg_start
+    t = linalg.vector_cross2(d.xz, s.xz) / denominator
+    u := linalg.vector_cross2(ray_dir.xz, s.xz) / denominator
+    intersect = t >= 0 && u >= 0 && u <= 1
+    return
 }
 
 // 2D Vector operations (working in XZ plane for navigation)
@@ -807,24 +785,22 @@ perpendicular_cross_2d :: proc "contextless" (a, b, c: [3]f32) -> f32 {
 }
 
 // Check if point is inside triangle in 2D (XZ plane)
-point_in_triangle_2d :: proc "contextless" (p, a, b, c: [3]f32) -> bool {
+point_in_triangle_2d :: proc "contextless" (p, a, b, c: [3]f32, epsilon: f32 = 0.0) -> bool {
     // Use edge testing method - point is inside if it's on the same side of all edges
     cross1 := linalg.cross(b.xz - a.xz, p.xz - a.xz)
     cross2 := linalg.cross(c.xz - b.xz, p.xz - b.xz)
     cross3 := linalg.cross(a.xz - c.xz, p.xz - c.xz)
-
     // Check if all cross products have the same sign
-    return (cross1 >= 0 && cross2 >= 0 && cross3 >= 0) ||
-           (cross1 <= 0 && cross2 <= 0 && cross3 <= 0)
+    return (cross1 >= -epsilon && cross2 >= -epsilon && cross3 >= -epsilon) ||
+           (cross1 <= epsilon && cross2 <= epsilon && cross3 <= epsilon)
 }
 
 // Calculate barycentric coordinates for a point in a triangle (2D XZ plane)
-barycentric_2d :: proc "contextless" (p: [3]f32, a: [3]f32, b: [3]f32, c: [3]f32) -> [3]f32 {
+barycentric_2d :: proc "contextless" (p, a, b, c: [3]f32) -> [3]f32 {
     // Convert to 2D coordinates (XZ plane)
     v0 := b.xz - a.xz
     v1 := c.xz - a.xz
     v2 := p.xz - a.xz
-
     d00 := linalg.dot(v0, v0)
     d01 := linalg.dot(v0, v1)
     d11 := linalg.dot(v1, v1)
@@ -974,8 +950,13 @@ prev_dir :: proc "contextless" (dir: int) -> int {
 }
 
 // Calculate area of triangle in 2D (XZ plane)
-triangle_area_2d :: proc "contextless" (a, b, c: [3]f32) -> f32 {
+signed_triangle_area_2d :: proc "contextless" (a, b, c: [3]f32) -> f32 {
     return math.abs(linalg.cross(b.xz - a.xz, c.xz - a.xz) * 0.5)
+}
+
+// Calculate area of triangle in 2D (XZ plane)
+triangle_area_2d :: proc "contextless" (a, b, c: [3]f32) -> f32 {
+    return math.abs(signed_triangle_area_2d(a, b, c))
 }
 
 // Intersection test between ray/segment and triangle
@@ -1172,4 +1153,37 @@ align :: proc "contextless" (value, alignment: int) -> int {
 overlap_bounds_2d :: proc "contextless" (amin, amax, bmin, bmax: [3]f32) -> bool {
     return amin.x <= bmax.x && amax.x >= bmin.x &&
            amin.z <= bmax.z && amax.z >= bmin.z
+}
+
+// Calculate circumcircle of a triangle
+// Returns center and radius squared
+// Based on C++ circumCircle from RecastMeshDetail.cpp
+circum_circle :: proc "contextless" (a, b, c: [3]f32) -> (center: [2]f32, r_sq: f32, valid: bool) {
+    EPS :: 1e-6
+    ab := b - a
+    ac := c - a
+    cross := linalg.vector_cross2(ac.xz, ab.xz)
+    if abs(cross) < EPS {
+        valid = false
+        return
+    }
+    len_ab_sq := linalg.length2(ab.xz)
+    len_ac_sq := linalg.length2(ac.xz)
+    inv_cross := 1.0 / (2.0 * cross)
+
+    ux := (ac.z * len_ab_sq - ab.z * len_ac_sq) * inv_cross
+    uy := (ab.x * len_ac_sq - ac.x * len_ab_sq) * inv_cross
+
+    center.x = a.x + ux
+    center.y = a.z + uy
+    r_sq = ux * ux + uy * uy
+    valid = true
+    return
+}
+
+// Check if a point is inside the circumcircle of a triangle
+in_circumcircle :: proc "contextless" (p, a, b, c: [3]f32) -> bool {
+    center, r_sq, valid := circum_circle(a, b, c)
+    if !valid do return false
+    return linalg.length2(p.xz - center) <= r_sq
 }

@@ -559,12 +559,12 @@ sort_cells_by_level :: proc(start_level: u16, chf: ^Compact_Heightfield, src_reg
 // Append stacks for level processing
 append_stacks :: proc(src_stack: [dynamic]Level_Stack_Entry, dst_stack: ^[dynamic]Level_Stack_Entry,
                      src_reg: []u16) {
-    for j in 0..<len(src_stack) {
-        i := src_stack[j].index
+    for entry in src_stack {
+        i := entry.index
         if i < 0 || src_reg[i] != 0 {
             continue
         }
-        append(dst_stack, src_stack[j])
+        append(dst_stack, entry)
     }
 }
 
@@ -574,10 +574,10 @@ remove_adjacent_neighbours :: proc(reg: ^Region) {
     if len(reg.connections) <= 1 {
         return
     }
-    
+
     // Use slice.unique to remove consecutive duplicates
     unique_slice := slice.unique(reg.connections[:])
-    
+
     // Check wrap-around: if last element equals first element (circular case)
     if len(unique_slice) > 1 && unique_slice[len(unique_slice)-1] == unique_slice[0] {
         resize(&reg.connections, len(unique_slice)-1)
@@ -1597,8 +1597,6 @@ merge_and_filter_layer_regions :: proc(min_region_area: i32,
 // Build layer regions for multi-story environments
 build_layer_regions :: proc(chf: ^Compact_Heightfield,
                               border_size, min_region_area: i32) -> bool {
-    // Removed timer code for simplicity
-
     w := chf.width
     h := chf.height
     id: u16 = 1

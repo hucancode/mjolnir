@@ -209,7 +209,7 @@ partition_monotone_regions :: proc(
                     ax := x + get_dir_offset_x(0)
                     ay := y + get_dir_offset_y(0)
                     ai := chf.cells[ax + ay * w].index + u32(get_con(s, 0))
-                    
+
                     // C++ logic: if (chf.areas[ai] != RC_NULL_AREA && srcReg[ai] != 0xff)
                     if ai < u32(len(chf.areas)) && ai < u32(len(src_reg)) &&
                        chf.areas[ai] != RC_NULL_AREA && src_reg[ai] != 0xff {
@@ -221,7 +221,7 @@ partition_monotone_regions :: proc(
                 if sid == 0xff {
                     sid = sweep_id
                     sweep_id += 1
-                    
+
                     // Extend sweeps array if needed
                     for len(sweeps) <= int(sid) {
                         append(&sweeps, Layer_Sweep_Span{
@@ -230,7 +230,7 @@ partition_monotone_regions :: proc(
                             neighbor_id = 0xff, // C++ uses 0xff for invalid
                         })
                     }
-                    
+
                     sweeps[sid].neighbor_id = 0xff
                     sweeps[sid].sample_count = 0
                 }
@@ -240,17 +240,17 @@ partition_monotone_regions :: proc(
                     ax := x + get_dir_offset_x(3)
                     ay := y + get_dir_offset_y(3)
                     ai := chf.cells[ax + ay * w].index + u32(get_con(s, 3))
-                    
+
                     if ai < u32(len(src_reg)) {
                         nr := src_reg[ai]
                         if nr != 0xff {
                             sweep := &sweeps[sid]
-                            
+
                             // Set neighbour when first valid neighbour is encountered
                             if sweep.sample_count == 0 {
                                 sweep.neighbor_id = nr
                             }
-                            
+
                             if sweep.neighbor_id == nr {
                                 // Update existing neighbour
                                 sweep.sample_count += 1
@@ -271,10 +271,10 @@ partition_monotone_regions :: proc(
         // Create unique region IDs (C++ "Create unique ID" section)
         for i in 0..< int(sweep_id) {
             sweep := &sweeps[i]
-            
+
             // If neighbour is set and there is only one continuous connection,
             // merge with previous region, else create new region
-            if sweep.neighbor_id != 0xff && 
+            if sweep.neighbor_id != 0xff &&
                prev_count[sweep.neighbor_id] == i32(sweep.sample_count) {
                 sweep.region_id = sweep.neighbor_id
             } else {
@@ -351,7 +351,7 @@ analyze_regions :: proc(
 
                 // Update region bounds using modernized approach
                 reg := &regions[ri]
-                
+
                 // Match C++ behavior: only use s.y for both min and max!
                 // This tracks where spans START, not their full extent
                 expand_bounds(&reg.height_bounds, s.y)
@@ -415,7 +415,7 @@ assign_layers_dfs :: proc(regions: []Heightfield_Layer_Region) -> int {
         // Start new layer with this region as root
         root.layer_id = layer_id
         root.is_base = true
-        
+
         // Start new layer with this region as root
 
         // Initialize stack with root
@@ -528,12 +528,12 @@ merge_layers :: proc(regions: []Heightfield_Layer_Region, walkable_height: i32) 
                 // Check for overlapping regions
                 // We need to check if any region in layer i overlaps with any region in layer j
                 can_merge := true
-                
+
                 // Check if ri overlaps with rj directly
                 if slice.contains(ri.overlapping_layers[:], u8(j)) {
                     can_merge = false
                 }
-                
+
                 // Also check all regions that have been assigned to these layers
                 if can_merge {
                     for k in 0 ..< len(regions) {
@@ -660,7 +660,7 @@ build_single_layer :: proc(
     // This prevents fragmentation into many small layers
     layer_width := w - border_size * 2
     layer_height := h - border_size * 2
-    
+
     if layer_width <= 0 || layer_height <= 0 {
         return false
     }
@@ -669,7 +669,7 @@ build_single_layer :: proc(
     hmin := i32(0xffff)
     hmax := i32(0)
     span_count := 0
-    
+
     // Also track actual data bounds for minx/maxx/miny/maxy
     // (these are stored in the layer but don't affect the layer size)
     data_minx := i32(w)
@@ -700,13 +700,13 @@ build_single_layer :: proc(
                 }
 
                 s := &chf.spans[i]
-                
+
                 // Track actual data bounds
                 data_minx = min(data_minx, i32(x))
                 data_maxx = max(data_maxx, i32(x))
                 data_miny = min(data_miny, i32(y))
                 data_maxy = max(data_maxy, i32(y))
-                
+
                 // Track height bounds
                 hmin = min(hmin, i32(s.y))
                 hmax = max(hmax, i32(s.y) + i32(s.h))
@@ -718,7 +718,7 @@ build_single_layer :: proc(
     if span_count == 0 {
         return false
     }
-    
+
     // The actual layer origin is offset by border_size
     layer_minx := border_size
     layer_miny := border_size
@@ -733,7 +733,7 @@ build_single_layer :: proc(
     layer_bmax.z -= f32(border_size) * chf.cs
     layer_bmin.y = chf.bmin.y + f32(hmin) * chf.ch
     layer_bmax.y = chf.bmin.y + f32(hmax) * chf.ch
-    
+
     layer := Heightfield_Layer {
         bmin = layer_bmin,
         bmax = layer_bmax,
@@ -784,12 +784,12 @@ build_single_layer :: proc(
                 // Convert to layer coordinates (offset by border_size)
                 lx := x - border_size
                 ly := y - border_size
-                
+
                 // Skip if outside layer bounds
                 if lx < 0 || lx >= layer_width || ly < 0 || ly >= layer_height {
                     continue
                 }
-                
+
                 lidx := lx + ly * layer_width
 
                 if lidx < 0 || lidx >= i32(len(layer.heights)) {
@@ -798,7 +798,7 @@ build_single_layer :: proc(
 
                 // Store height relative to layer minimum
                 relative_height := i32(s.y) - hmin
-                layer.heights[lidx] = u8(math.clamp(int(relative_height), 0, 255))
+                layer.heights[lidx] = u8(clamp(int(relative_height), 0, 255))
                 layer.areas[lidx] = chf.areas[i]
 
                 // Build connections with portal handling

@@ -10,8 +10,6 @@ import "core:log"
 // Maximum heightfield height constant
 MAX_HEIGHTFIELD_HEIGHT :: 0xffff
 
-// Direction offset helpers are provided by core_utils.odin
-
 // Get connection from compact span in given direction
 get_con :: proc "contextless" (span: ^Compact_Span, dir: int) -> int {
     shift := u32(dir * 6)

@@ -137,7 +137,7 @@ merge_poly_verts :: proc(pa, pb: ^Poly_Build, ea, eb: i32, nvp: i32, allocator :
     old_verts := pa.verts
     pa.verts = make([]i32, n, allocator)
     copy(pa.verts[:], tmp[:n])
-    
+
     // Free the old vertex array to prevent memory leak
     delete(old_verts, allocator)
     // Free the temporary array
@@ -212,11 +212,6 @@ add_vertex :: proc(x, y, z: u16, verts: ^[dynamic]Mesh_Vertex, buckets: []Vertex
     buckets[bucket].first = i
     return i
 }
-
-
-// Geometric primitive functions for triangulation
-
-
 
 // Check if diagonal from vertex a to vertex c is internal to polygon
 diagonalie :: proc "contextless" (verts: [][4]i32, indices: []u32, n: i32, a, c: i32) -> bool {
@@ -1426,7 +1421,7 @@ remove_vertex :: proc(pmesh: ^Poly_Mesh, rem: u16, maxTris: i32) -> bool {
 
     // Remove unused vertices and rebuild adjacency
     remove_unused_vertices(pmesh)
-    
+
     edges := make([dynamic]Mesh_Edge, 0, pmesh.npolys * 3)
     defer delete(edges)
     if build_mesh_edges(pmesh, &edges, pmesh.npolys * 3) {

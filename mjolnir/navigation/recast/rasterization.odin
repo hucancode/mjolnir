@@ -198,23 +198,18 @@ validate_span_list :: proc(first_span: ^Span, x, z: i32) {
 
 // Divides a convex polygon of max 12 vertices into two convex polygons
 // across a separating axis.
-divide_poly :: proc(in_verts: [][3]f32, in_verts_count: i32,
-                   out_verts1: [][3]f32, out_verts1_count: ^i32,
-                   out_verts2: [][3]f32, out_verts2_count: ^i32,
-                   axis_offset: f32, axis: Axis) {
-    assert(in_verts_count <= 12)
+divide_poly :: proc(in_verts, out_verts1, out_verts2: [][3]f32,
+                   axis_offset: f32, axis: Axis) -> (poly1_vert_count: i32, poly2_vert_count: i32) {
+    assert(len(in_verts) <= 12)
 
     // How far positive or negative away from the separating axis is each vertex
     in_vert_axis_delta: [12]f32
-    for in_vert in 0..<in_verts_count {
+    for in_vert in 0..<len(in_verts) {
         in_vert_axis_delta[in_vert] = axis_offset - in_verts[in_vert][axis]
     }
 
-    poly1_vert := i32(0)
-    poly2_vert := i32(0)
-
-    for in_vert_a, in_vert_b := i32(0), in_verts_count - 1;
-        in_vert_a < in_verts_count;
+    for in_vert_a, in_vert_b := 0, len(in_verts) - 1;
+        in_vert_a < len(in_verts);
         in_vert_b, in_vert_a = in_vert_a, in_vert_a + 1 {
 
         // If the two vertices are on the same side of the separating axis
@@ -226,37 +221,35 @@ divide_poly :: proc(in_verts: [][3]f32, in_verts_count: i32,
             vert_a := in_verts[in_vert_a]
             vert_b := in_verts[in_vert_b]
             interpolated := linalg.mix(vert_b, vert_a, s)
-            out_verts1[poly1_vert] = interpolated
+            out_verts1[poly1_vert_count] = interpolated
 
             // Copy to second polygon
-            out_verts2[poly2_vert] = interpolated
-            poly1_vert += 1
-            poly2_vert += 1
+            out_verts2[poly2_vert_count] = interpolated
+            poly1_vert_count += 1
+            poly2_vert_count += 1
 
             // Add the in_vert_a point to the right polygon
             if in_vert_axis_delta[in_vert_a] > 0 {
-                out_verts1[poly1_vert] = in_verts[in_vert_a]
-                poly1_vert += 1
+                out_verts1[poly1_vert_count] = in_verts[in_vert_a]
+                poly1_vert_count += 1
             } else if in_vert_axis_delta[in_vert_a] < 0 {
-                out_verts2[poly2_vert] = in_verts[in_vert_a]
-                poly2_vert += 1
+                out_verts2[poly2_vert_count] = in_verts[in_vert_a]
+                poly2_vert_count += 1
             }
         } else {
             // Add the in_vert_a point to the right polygon
             if in_vert_axis_delta[in_vert_a] >= 0 {
-                out_verts1[poly1_vert] = in_verts[in_vert_a]
-                poly1_vert += 1
+                out_verts1[poly1_vert_count] = in_verts[in_vert_a]
+                poly1_vert_count += 1
                 if in_vert_axis_delta[in_vert_a] != 0 {
                     continue
                 }
             }
-            out_verts2[poly2_vert] = in_verts[in_vert_a]
-            poly2_vert += 1
+            out_verts2[poly2_vert_count] = in_verts[in_vert_a]
+            poly2_vert_count += 1
         }
     }
-
-    out_verts1_count^ = poly1_vert
-    out_verts2_count^ = poly2_vert
+    return
 }
 
 // Rasterize a single triangle to the heightfield.
@@ -268,17 +261,8 @@ rasterize_tri :: proc(v0, v1, v2: [3]f32, area_id: u8,
                      cell_size, inverse_cell_size, inverse_cell_height: f32,
                      flag_merge_threshold: i32) -> bool {
     // Calculate the bounding box of the triangle
-    tri_bb_min := [3]f32{
-        min(v0.x, v1.x, v2.x),
-        min(v0.y, v1.y, v2.y),
-        min(v0.z, v1.z, v2.z),
-    }
-    tri_bb_max := [3]f32{
-        max(v0.x, v1.x, v2.x),
-        max(v0.y, v1.y, v2.y),
-        max(v0.z, v1.z, v2.z),
-    }
-
+    tri_bb_min := linalg.min(v0, v1, v2)
+    tri_bb_max := linalg.max(v0, v1, v2)
     // If the triangle does not touch the bounding box of the heightfield, skip the triangle
     if !geometry.overlap_bounds(tri_bb_min, tri_bb_max, hf_bb_min, hf_bb_max) {
         return true
@@ -307,8 +291,8 @@ rasterize_tri :: proc(v0, v1, v2: [3]f32, area_id: u8,
     }
 
     // use -1 rather than 0 to cut the polygon properly at the start of the tile
-    z0 = math.clamp(z0, -1, h - 1)
-    z1 = math.clamp(z1, 0, h - 1)
+    z0 = clamp(z0, -1, h - 1)
+    z1 = clamp(z1, 0, h - 1)
 
     // Clip the triangle into all grid cells it touches
     buf: [7 * 4][3]f32
@@ -326,7 +310,7 @@ rasterize_tri :: proc(v0, v1, v2: [3]f32, area_id: u8,
     for z := z0; z <= z1; z += 1 {
         // Clip polygon to row. Store the remaining polygon as well
         cell_z := hf_bb_min.z + f32(z) * cell_size
-        divide_poly(in_buf[:nv_in], nv_in, in_row[:7], &nv_row, p1[:7], &nv_in, cell_z + cell_size, .Z)
+        nv_row, nv_in = divide_poly(in_buf[:nv_in], in_row[:], p1[:], cell_z + cell_size, .Z)
         in_buf, p1 = p1, in_buf
 
         if nv_row < 3 {
@@ -363,8 +347,8 @@ rasterize_tri :: proc(v0, v1, v2: [3]f32, area_id: u8,
         if x1 < 0 || x0 >= w {
             continue
         }
-        x0 = math.clamp(x0, -1, w - 1)
-        x1 = math.clamp(x1, 0, w - 1)
+        x0 = clamp(x0, -1, w - 1)
+        x1 = clamp(x1, 0, w - 1)
 
         nv: i32
         nv2 := nv_row
@@ -372,7 +356,7 @@ rasterize_tri :: proc(v0, v1, v2: [3]f32, area_id: u8,
         for x := x0; x <= x1; x += 1 {
             // Clip polygon to column. store the remaining polygon as well
             cx := hf_bb_min.x + f32(x) * cell_size
-            divide_poly(in_row[:nv2], nv2, p1[:7], &nv, p2[:7], &nv2, cx + cell_size, .X)
+            nv, nv2 = divide_poly(in_row[:nv2], p1[:], p2[:], cx + cell_size, .X)
             in_row, p2 = p2, in_row
 
             if nv < 3 {
@@ -409,8 +393,8 @@ rasterize_tri :: proc(v0, v1, v2: [3]f32, area_id: u8,
             }
 
             // Snap the span to the heightfield height grid
-            span_min_cell_index := u16(math.clamp(i32(math.floor(span_min * inverse_cell_height)), 0, RC_SPAN_MAX_HEIGHT))
-            span_max_cell_index := u16(math.clamp(i32(math.ceil(span_max * inverse_cell_height)), i32(span_min_cell_index) + 1, RC_SPAN_MAX_HEIGHT))
+            span_min_cell_index := u16(clamp(i32(math.floor(span_min * inverse_cell_height)), 0, RC_SPAN_MAX_HEIGHT))
+            span_max_cell_index := u16(clamp(i32(math.ceil(span_max * inverse_cell_height)), i32(span_min_cell_index) + 1, RC_SPAN_MAX_HEIGHT))
 
             // Debug logging for spans
             when ODIN_DEBUG {

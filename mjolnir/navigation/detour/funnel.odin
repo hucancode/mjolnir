@@ -850,7 +850,7 @@ closest_point_on_poly :: proc(query: ^Nav_Mesh_Query, ref: recast.Poly_Ref, pos:
         vb := verts[(i + 1) % int(poly.vert_count)]
 
         // Find closest point on edge
-        edge_closest := closest_point_on_segment_2d_funnel(pos, va, vb)
+        edge_closest := geometry.closest_point_on_segment_2d(pos, va, vb)
 
         dx := edge_closest.x - pos.x
         dz := edge_closest.z - pos.z
@@ -863,28 +863,6 @@ closest_point_on_poly :: proc(query: ^Nav_Mesh_Query, ref: recast.Poly_Ref, pos:
     }
 
     return closest
-}
-
-// Helper for closest point on segment (local to funnel.odin)
-closest_point_on_segment_2d_funnel :: proc(pos: [3]f32, a: [3]f32, b: [3]f32) -> [3]f32 {
-    dx := b.x - a.x
-    dz := b.z - a.z
-
-    edge_len_sqr := dx * dx + dz * dz
-    if edge_len_sqr < 1e-6 {
-        return a
-    }
-
-    px := pos.x - a.x
-    pz := pos.z - a.z
-    t := (px * dx + pz * dz) / edge_len_sqr
-    t = clamp(t, 0.0, 1.0)
-
-    return {
-        a.x + t * dx,
-        a.y + t * (b.y - a.y),
-        a.z + t * dz,
-    }
 }
 
 point_in_polygon :: proc(query: ^Nav_Mesh_Query, ref: recast.Poly_Ref, pos: [3]f32) -> bool {

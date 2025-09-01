@@ -96,35 +96,6 @@ free_compact_heightfield :: proc(chf: ^Compact_Heightfield) {
   free(chf)
 }
 
-// Initialize a heightfield with the given dimensions
-init_heightfield :: proc(
-  hf: ^Heightfield,
-  width, height: i32,
-  bmin, bmax: [3]f32,
-  cs, ch: f32,
-) -> bool {
-  hf.width = width
-  hf.height = height
-  hf.bmin = bmin
-  hf.bmax = bmax
-  hf.cs = cs
-  hf.ch = ch
-
-  // Allocate spans array
-  span_count := int(width * height)
-  hf.spans = make([]^Span, span_count)
-  if hf.spans == nil {
-    return false
-  }
-
-  // Initialize all spans to nil
-  for i in 0 ..< span_count {
-    hf.spans[i] = nil
-  }
-
-  return true
-}
-
 // Allocate a new span from the pool
 allocate_span :: proc(hf: ^Heightfield) -> ^Span {
   // If necessary, allocate new page and update the freelist
@@ -189,7 +160,21 @@ create_heightfield :: proc(
   bmin, bmax: [3]f32,
   cs, ch: f32,
 ) -> bool {
-  return init_heightfield(hf, width, height, bmin, bmax, cs, ch)
+  hf.width = width
+  hf.height = height
+  hf.bmin = bmin
+  hf.bmax = bmax
+  hf.cs = cs
+  hf.ch = ch
+  span_count := int(width * height)
+  hf.spans = make([]^Span, span_count)
+  if hf.spans == nil {
+    return false
+  }
+  for i in 0 ..< span_count {
+    hf.spans[i] = nil
+  }
+  return true
 }
 
 // Create heightfield from configuration - returns heightfield and success status

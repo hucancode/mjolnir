@@ -3,6 +3,7 @@ package navigation_recast
 import "core:slice"
 import "core:log"
 import "core:math"
+import "core:math/linalg"
 import geometry "../../geometry"
 
 // Erode walkable area by radius
@@ -211,7 +212,7 @@ safe_normalize :: proc(v: ^[3]f32) {
 
 // Offset polygon - creates an inset/outset polygon with proper miter/bevel handling
 // Returns the offset vertices and success status
-offset_poly :: proc(verts: [][3]f32, offset: f32, allocator := context.allocator) -> (out_verts: [dynamic][3]f32, ok: bool) {
+offset_poly :: proc(verts: [][3]f32, offset: f32) -> (out_verts: [dynamic][3]f32, ok: bool) {
     // Defines the limit at which a miter becomes a bevel
     // Similar in behavior to https://developer.mozilla.org/en-US/docs/Web/SVG/Attribute/stroke-miterlimit
     MITER_LIMIT :: 1.20
@@ -250,7 +251,7 @@ offset_poly :: proc(verts: [][3]f32, offset: f32, allocator := context.allocator
         // The y component of the cross product of the two normalized segment directions
         // The X and Z components of the cross product are both zero because the two
         // segment direction vectors fall within the x/z plane
-        cross := curr_segment_dir.x * prev_segment_dir.z - prev_segment_dir.x * curr_segment_dir.z
+        cross := linalg.vector_cross2(curr_segment_dir.xz, prev_segment_dir.xz)
 
         // CCW perpendicular vector to AB. The segment normal
         prev_segment_norm_x := -prev_segment_dir.z

@@ -61,8 +61,6 @@ build_compact_heightfield :: proc(walkable_height, walkable_climb: i32,
                 if s.area != RC_NULL_AREA {
                     span_count += 1
                     span_num += 1
-
-
                 }
                 s = s.next
             }
@@ -97,8 +95,8 @@ build_compact_heightfield :: proc(walkable_height, walkable_climb: i32,
                     next := s.next
                     top := next != nil ? i32(next.smin) : RC_SPAN_MAX_HEIGHT
                     cs := &chf.spans[idx]
-                    cs.y = u16(math.clamp(bottom, 0, 0xffff))
-                    cs.h = u8(math.clamp(top - bottom, 0, 0xff))
+                    cs.y = u16(clamp(bottom, 0, 0xffff))
+                    cs.h = u8(clamp(top - bottom, 0, 0xff))
                     chf.areas[idx] = u8(s.area)
                     idx += 1
                     c.count = c.count + 1
@@ -230,23 +228,15 @@ merge_contours :: proc(ca, cb: ^Contour, ia, ib: int) -> bool {
     return true
 }
 
-// Compare holes by x coordinate for sorting
-compare_holes :: proc(a, b: Contour_Hole) -> bool {
-    if a.minx == b.minx {
-        return a.minz < b.minz
-    }
-    return a.minx < b.minx
-}
-
-// Compare diagonals by distance
-compare_diag_dist :: proc(a, b: Potential_Diagonal) -> bool {
-    return a.dist < b.dist
-}
-
 // Merge region holes into outline
 merge_region_holes :: proc(reg: ^Contour_Region) {
     // Sort holes from left to right
-    slice.sort_by(reg.holes[:reg.nholes], compare_holes)
+    slice.sort_by(reg.holes[:reg.nholes], proc(a, b: Contour_Hole) -> bool {
+        if a.minx == b.minx {
+            return a.minz < b.minz
+        }
+        return a.minx < b.minx
+    })
 
     for i in 0..<reg.nholes {
         hole := &reg.holes[i]
@@ -269,7 +259,9 @@ merge_region_holes :: proc(reg: ^Contour_Region) {
             }
 
             // Sort by distance
-            slice.sort_by(diags[:], compare_diag_dist)
+            slice.sort_by(diags[:], proc(a, b: Potential_Diagonal) -> bool {
+                return a.dist < b.dist
+            })
 
             // Find a diagonal that doesn't intersect the outline or other holes
             for j in 0..<len(diags) {
@@ -631,10 +623,9 @@ walk_contour_boundary :: proc(x, y, i: i32, chf: ^Compact_Heightfield,
 
         if (flags[curr_i] & (1 << dir)) != 0 {
             // We can step in this direction - create vertex at edge corner
-            is_border_vertex := false
             is_area_border := false
             px := curr_x
-            py := get_corner_height_for_contour(curr_x, curr_y, curr_i, i32(dir), chf, &is_border_vertex)
+            py, is_border_vertex := get_corner_height_for_contour(curr_x, curr_y, curr_i, i32(dir), chf)
             pz := curr_y
 
             // Adjust vertex position based on direction (matching C++ exactly)
@@ -723,12 +714,11 @@ walk_contour_boundary :: proc(x, y, i: i32, chf: ^Compact_Heightfield,
 }
 
 // Get height at corner, considering neighboring spans
-get_corner_height_for_contour :: proc(x, y, i, dir: i32, chf: ^Compact_Heightfield,
-                                     is_border_vertex: ^bool) -> i32 {
+get_corner_height_for_contour :: proc(x, y, i, dir: i32, chf: ^Compact_Heightfield) -> (ret: i32, is_border_vertex: bool) {
     // Input validation
     if i < 0 || i >= i32(len(chf.spans)) {
         log.errorf("Invalid span index %d in get_corner_height_for_contour", i)
-        return 0
+        return 0, false
     }
 
     s := &chf.spans[i]
@@ -808,7 +798,6 @@ get_corner_height_for_contour :: proc(x, y, i, dir: i32, chf: ^Compact_Heightfie
     }
 
     // Check if vertex is on border between regions
-    is_border_vertex^ = false
     for j in 0..<4 {
         a := j
         b := (j + 1) & 0x3
@@ -822,271 +811,11 @@ get_corner_height_for_contour :: proc(x, y, i, dir: i32, chf: ^Compact_Heightfie
         no_zeros := regs[a] != 0 && regs[b] != 0 && regs[c] != 0 && regs[d] != 0
 
         if two_same_exts && two_ints && ints_same_area && no_zeros {
-            is_border_vertex^ = true
-            break
+            return ch, true
         }
     }
 
-    return ch
-}
-
-// Simplify contour using Douglas-Peucker style algorithm
-simplify_contour_vertices :: proc(points: ^[dynamic][4]i32, simplified: ^[dynamic][4]i32,
-                                 max_error: f32, max_edge_len: i32, build_flags: Contour_Tess_Flags) {
-    clear(simplified)
-
-    if len(points) < 3 do return // Need at least 3 vertices
-
-    nverts := len(points)
-
-    // Check if contour has connections to other regions
-    has_connections := false
-    for i := 0; i < nverts; i += 1 {
-        vertex_flags := transmute(Vertex_Flags)points[i].w
-        if (points[i].w & RC_CONTOUR_REG_MASK) != 0 {
-            has_connections = true
-            break
-        }
-    }
-
-    if has_connections {
-        // Add vertices at region boundaries
-        for i := 0; i < nverts; i += 1 {
-            ii := (i + 1) % nverts
-            vertex_flags_i := transmute(Vertex_Flags)points[i].w
-            vertex_flags_ii := transmute(Vertex_Flags)points[ii].w
-
-            different_regs := (points[i].w & RC_CONTOUR_REG_MASK) != (points[ii][3] & RC_CONTOUR_REG_MASK)
-            area_borders := (.AREA_BORDER in vertex_flags_i) != (.AREA_BORDER in vertex_flags_ii)
-
-            if different_regs || area_borders {
-                append(simplified, [4]i32{points[i].x, points[i].y, points[i].z, i32(i)})
-            }
-        }
-    }
-
-    if len(simplified) == 0 {
-        // Add corner vertices (lower-left and upper-right)
-        llx, lly, llz := points[0].x, points[0].y, points[0].z
-        lli := 0
-        urx, ury, urz := points[0].x, points[0].y, points[0].z
-        uri := 0
-
-        for i := 0; i < nverts; i += 1 {
-            x, y, z := points[i].x, points[i].y, points[i].z
-            if x < llx || (x == llx && z < llz) {
-                llx, lly, llz = x, y, z
-                lli = i
-            }
-            if x > urx || (x == urx && z > urz) {
-                urx, ury, urz = x, y, z
-                uri = i
-            }
-        }
-
-        append(simplified, [4]i32{llx, lly, llz, i32(lli)})
-        if uri != lli {
-            append(simplified, [4]i32{urx, ury, urz, i32(uri)})
-        }
-    }
-
-    // Iteratively add points until all raw points are within error tolerance
-    max_error_sq := max_error * max_error
-    max_iterations := nverts * 2 // Safety limit
-
-    for iter := 0; iter < max_iterations; iter += 1 {
-        nsimp := len(simplified)
-        if nsimp == 0 do break
-
-        found_point := false
-
-        for i := 0; i < nsimp; i += 1 {
-            ii := (i + 1) % nsimp
-
-            ax, az := simplified[i].x, simplified[i].z
-            ai := simplified[i].w
-            bx, bz := simplified[ii].x, simplified[ii].z
-            bi := simplified[ii].w
-
-            // Find maximum deviation from segment
-            maxd: f32 = 0
-            maxi: i32 = -1
-
-            // Traverse segment in lexicographical order
-            cinc: i32
-            ci, endi: i32
-            if bx > ax || (bx == ax && bz > az) {
-                cinc = 1
-                ci = (ai + cinc) % i32(nverts)
-                endi = bi
-            } else {
-                cinc = i32(nverts) - 1
-                ci = (bi + cinc) % i32(nverts)
-                endi = ai
-                ax, bx = bx, ax
-                az, bz = bz, az
-            }
-
-            // Only tessellate outer edges or edges between areas
-            should_tessellate := false
-            if ci != endi {
-                vertex_flags := transmute(Vertex_Flags)points[ci].w
-                if (points[ci].w & RC_CONTOUR_REG_MASK) == 0 ||
-                   .AREA_BORDER in vertex_flags {
-                    should_tessellate = true
-                }
-            }
-
-            if should_tessellate {
-                for ci != endi {
-                    pt := [3]f32{f32(points[ci].x), 0, f32(points[ci].z)}
-                    seg_start := [3]f32{f32(ax), 0, f32(az)}
-                    seg_end := [3]f32{f32(bx), 0, f32(bz)}
-                    d, _ := geometry.point_segment_distance2_2d(pt, seg_start, seg_end)
-                    if d > maxd {
-                        maxd = d
-                        maxi = i32(ci)
-                    }
-                    ci = (ci + cinc) % i32(nverts)
-                }
-            }
-
-            // If max deviation is larger than accepted error, add new point
-            if maxi != -1 && maxd > max_error_sq {
-                // Insert new point at position i+1
-                insert_pos := i + 1
-                new_vertex := [4]i32{points[maxi].x, points[maxi].y, points[maxi].z, maxi}
-                inject_at(simplified, insert_pos, new_vertex)
-
-                found_point = true
-                break
-            }
-        }
-
-        if !found_point do break
-    }
-
-    // Split long edges if max_edge_len is specified
-    if max_edge_len > 0 && (Contour_Tess_Flag.WALL_EDGES in build_flags || Contour_Tess_Flag.AREA_EDGES in build_flags) {
-        if !split_long_edges(simplified, points[:], max_edge_len, build_flags) {
-            log.warnf("Failed to split long edges")
-        }
-    }
-
-    // Fix up region and vertex flags
-    nsimp := len(simplified)
-    for i := 0; i < nsimp; i += 1 {
-        ai := (simplified[i].w + 1) % i32(nverts)
-        bi := simplified[i].w
-        vertex_flags_ai := transmute(Vertex_Flags)points[ai].w
-        vertex_flags_bi := transmute(Vertex_Flags)points[bi][3]
-
-        // Create vertex flags using bit set operations
-        result_vertex_flags := Vertex_Flags{}
-
-        // Copy area border flag from ai
-        if .AREA_BORDER in vertex_flags_ai {
-            result_vertex_flags += {.AREA_BORDER}
-        }
-
-        // Copy border vertex flag from bi
-        if .BORDER_VERTEX in vertex_flags_bi {
-            result_vertex_flags += {.BORDER_VERTEX}
-        }
-
-        // Combine region ID (lower 16 bits) with vertex flags
-        region_id := points[ai].w & RC_CONTOUR_REG_MASK
-        simplified[i].w = region_id | i32(transmute(u32)result_vertex_flags)
-    }
-}
-
-
-// Split long edges based on max_edge_len parameter
-// Returns true if splitting completed successfully, false if convergence failed
-split_long_edges :: proc(simplified: ^[dynamic][4]i32, points: [][4]i32, max_edge_len: i32,
-                        build_flags: Contour_Tess_Flags) -> bool {
-
-    initial_edge_count := len(simplified)
-    splits_performed := 0
-
-    for iter := 0; ; iter += 1 {
-        nsimp := len(simplified)
-        if nsimp == 0 do break
-
-        edges_split_this_iteration := 0
-
-        for i := 0; i < nsimp; i += 1 {
-            ii := (i + 1) % nsimp
-
-            ax, az := simplified[i].x, simplified[i].z
-            ai := simplified[i].w
-            bx, bz := simplified[ii].x, simplified[ii].z
-            bi := simplified[ii].w
-
-            maxi: i32 = -1
-            ci := (ai + 1) % i32(len(points))
-
-            // Check if edge should be tessellated
-            vertex_flags := transmute(Vertex_Flags)points[ci].w
-            should_tessellate := false
-            if Contour_Tess_Flag.WALL_EDGES in build_flags &&
-               (points[ci].w & RC_CONTOUR_REG_MASK) == 0 {
-                should_tessellate = true
-            }
-            if .AREA_EDGES in build_flags && .AREA_BORDER in vertex_flags {
-                should_tessellate = true
-            }
-
-            if should_tessellate {
-                edge_xz := [2]f32{f32(bx - ax), f32(bz - az)}
-                if linalg.length2(edge_xz) > f32(max_edge_len*max_edge_len) {
-                    // Calculate split point
-                    n := bi - ai if bi > ai else bi + i32(len(points)) - ai
-                    if n > 1 {
-                        if bx > ax || (bx == ax && bz > az) {
-                            maxi = (ai + n/2) % i32(len(points))
-                        } else {
-                            maxi = (ai + (n+1)/2) % i32(len(points))
-                        }
-                    }
-                }
-            }
-
-            if maxi != -1 {
-                // Insert new point at position i+1
-                insert_pos := i + 1
-                new_vertex := [4]i32{points[maxi].x, points[maxi].y, points[maxi].z, maxi}
-                inject_at(simplified, insert_pos, new_vertex)
-
-                edges_split_this_iteration += 1
-                splits_performed += 1
-                break
-            }
-        }
-
-        // Natural termination: no more edges to split
-        if edges_split_this_iteration == 0 {
-
-            return true
-        }
-
-        // Safety check: detect potential infinite loops
-        // Each original edge can be split at most O(len(points)) times in pathological cases
-        max_safe_iterations := max(initial_edge_count * 2, 50)
-        if iter >= max_safe_iterations {
-            log.errorf("Edge splitting failed to converge after %d iterations (%d splits). Contour data may be corrupted.", iter, splits_performed)
-            return false
-        }
-
-        // Additional safety: if we're making too many splits, something is wrong
-        if splits_performed > len(points) * 2 {
-            log.errorf("Edge splitting performed excessive splits (%d), expected at most %d. Algorithm may be unstable.", splits_performed, len(points) * 2)
-            return false
-        }
-    }
-
-    // Should never reach here
-    return false
+    return ch, false
 }
 
 // Remove degenerate segments from contour
@@ -1112,43 +841,6 @@ remove_degenerate_contour_segments :: proc(simplified: ^[dynamic][4]i32) {
     resize(simplified, write_idx)
 }
 
-// Remove vertex at given index from simplified contour
-remove_vertex_at :: proc(simplified: ^[dynamic]i32, index: int) {
-    if index < 0 || index*4 >= len(simplified) do return
-
-    // Remove 4 consecutive elements (x, y, z, flags)
-    start := index * 4
-
-    // Shift all elements after the removed vertex
-    for i := start; i < len(simplified) - 4; i += 1 {
-        simplified[i] = simplified[i + 4]
-    }
-
-    // Resize to remove the last 4 elements
-    resize(simplified, len(simplified) - 4)
-}
-
-// Validate vertex data integrity
-validate_vertex_data :: proc(verts: [][4]i32) -> bool {
-    if len(verts) < 3 do return false // Need at least 3 vertices
-
-    nverts := len(verts)
-
-    // Check for reasonable coordinate values and no invalid flags
-    for i in 0..<nverts {
-        v := verts[i]
-        x, y, z := v[0], v[1], v[2]
-
-        // Check for extremely large coordinates that might indicate corruption
-        if abs(x) > 1000000 || abs(y) > 1000000 || abs(z) > 1000000 {
-
-            return false
-        }
-    }
-
-    return true
-}
-
 // Calculate signed area of 2D contour (positive = counter-clockwise, negative = clockwise)
 calculate_contour_area :: proc(verts: [][4]i32) -> i32 {
     if len(verts) < 3 do return 0 // Need at least 3 vertices
@@ -1160,12 +852,7 @@ calculate_contour_area :: proc(verts: [][4]i32) -> i32 {
     for i in 0..<nverts {
         vi := verts[i]
         vj := verts[j]
-        vi_x := vi[0]
-        vi_z := vi[2]
-        vj_x := vj[0]
-        vj_z := vj[2]
-
-        area += vi_x * vj_z - vj_x * vi_z
+        area += vi.x * vj.z - vj.x * vi.z
         j = i
     }
 
@@ -1189,26 +876,6 @@ free_contour_set :: proc(cset: ^Contour_Set) {
     delete(cset.conts)
     free(cset)
 }
-
-// Simplify contour by removing unnecessary vertices using Douglas-Peucker algorithm
-// Insert values at a specific position in a dynamic array
-insert_at :: proc(arr: ^[dynamic]i32, pos: int, v1, v2, v3, v4: i32) {
-    // Resize array
-    old_len := len(arr)
-    resize(arr, old_len + 4)
-
-    // Shift elements to make room
-    for i := old_len - 1; i >= pos; i -= 1 {
-        arr[i + 4] = arr[i]
-    }
-
-    // Insert new values
-    arr[pos] = v1
-    arr[pos + 1] = v2
-    arr[pos + 2] = v3
-    arr[pos + 3] = v4
-}
-
 
 simplify_contour :: proc(raw_verts: [][4]i32, simplified: ^[dynamic][4]i32, max_error: f32, cell_size: f32, max_edge_len: i32 = 12, build_flags: Contour_Tess_Flags = {.WALL_EDGES}) {
     clear(simplified)
