@@ -156,7 +156,6 @@ test_bvh_query_ray :: proc(t: ^testing.T) {
 
   geometry.bvh_build(&bvh, items)
 
-
   // Ray along X axis
   ray := geometry.Ray{
     origin = {-10, 0, 0},
@@ -177,7 +176,6 @@ test_bvh_query_ray :: proc(t: ^testing.T) {
 
   clear(&results)
   geometry.bvh_query_ray(&bvh, ray, 20, &results)
-
 
   testing.expect(t, len(results) == 2, "Should find 2 items along Y axis")
 

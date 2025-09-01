@@ -221,7 +221,6 @@ query_filter_get_cost :: proc(filter: ^Query_Filter,
     return cost
 }
 
-
 // Reference encoding/decoding helpers
 encode_poly_id :: proc(nav_mesh: ^Nav_Mesh, salt: u32, tile_index: u32, poly_index: u32) -> recast.Poly_Ref {
     return recast.Poly_Ref((salt << (nav_mesh.poly_bits + nav_mesh.tile_bits)) |

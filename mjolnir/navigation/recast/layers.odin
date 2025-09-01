@@ -23,7 +23,6 @@ Heightfield_Layer_Region :: struct {
     is_base: bool,                      // Flag: true if base region, false if merged
 }
 
-
 // Layer Sweep Span - matches C++ rcLayerSweepSpan exactly
 Layer_Sweep_Span :: struct {
     sample_count: u16,  // ns - number samples
@@ -845,8 +844,6 @@ build_single_layer :: proc(
     append(layers, layer)
     return true
 }
-
-
 
 // Get height value from layer at given coordinates
 get_layer_height :: proc(layer: ^Heightfield_Layer, x, y: i32) -> u8 {

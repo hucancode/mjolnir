@@ -693,7 +693,6 @@ get_main_camera :: proc(engine: ^Engine) -> ^geometry.Camera {
   return resource.get(engine.warehouse.cameras, main_render_target.camera)
 }
 
-
 @(private = "file")
 update_force_fields :: proc(self: ^Engine) {
   params := gpu.data_buffer_get(&self.particle.params_buffer)
@@ -1034,7 +1033,6 @@ generate_render_input :: proc(
   //           camera_slot, camera_slot_found, visible_count, total_count)
   return
 }
-
 
 render :: proc(self: ^Engine) -> vk.Result {
   // log.debug("============ acquiring image...============ ")

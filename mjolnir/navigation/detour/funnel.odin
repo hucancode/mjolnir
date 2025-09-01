@@ -6,8 +6,6 @@ import "core:log"
 import recast "../recast"
 import geometry "../../geometry"
 
-
-
 // Find straight path using funnel algorithm for path smoothing
 find_straight_path :: proc(query: ^Nav_Mesh_Query,
                              start_pos: [3]f32, end_pos: [3]f32,
@@ -66,7 +64,6 @@ find_straight_path :: proc(query: ^Nav_Mesh_Query,
     } else {
         stat |= {.Buffer_Too_Small}
     }
-
 
     // Special case for single polygon path
     if path_count == 1 {
@@ -231,7 +228,6 @@ find_straight_path :: proc(query: ^Nav_Mesh_Query,
                 }
             }
 
-
             // Update left vertex (matches C++ dtTriArea2D check)
             if geometry.perpendicular_cross_2d(portal_apex, portal_left, left) >= 0.0 {
                 if geometry.vector_equal(portal_apex, portal_left) || geometry.perpendicular_cross_2d(portal_apex, portal_right, left) < 0.0 {
@@ -309,7 +305,6 @@ find_straight_path :: proc(query: ^Nav_Mesh_Query,
             }
         }
     }
-
 
     // Return success if no errors
     if stat == {} {

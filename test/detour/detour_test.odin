@@ -8,7 +8,6 @@ import "core:log"
 import recast "../../mjolnir/navigation/recast"
 import nav_detour "../../mjolnir/navigation/detour"
 
-
 @(test)
 test_detour_basic_types :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
@@ -434,7 +433,6 @@ test_detour_sliced_pathfinding_errors :: proc(t: ^testing.T) {
 test_detour_end_to_end_pathfinding :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
 
-
     // Test the complete pipeline: create nav mesh -> find path -> verify priority queue behavior
     nav_mesh := create_test_nav_mesh(t)
     defer destroy_test_nav_mesh(nav_mesh)
@@ -554,7 +552,6 @@ test_detour_spatial_queries :: proc(t: ^testing.T) {
 test_detour_pathfinding :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
 
-
     // Create a simple test navigation mesh
     nav_mesh := create_test_nav_mesh(t)
     defer destroy_test_nav_mesh(nav_mesh)
@@ -600,7 +597,6 @@ test_detour_pathfinding :: proc(t: ^testing.T) {
 test_detour_straight_path :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
 
-
     // Create a simple test navigation mesh
     nav_mesh := create_test_nav_mesh(t)
     defer destroy_test_nav_mesh(nav_mesh)
@@ -639,7 +635,6 @@ test_detour_straight_path :: proc(t: ^testing.T) {
     straight_status, straight_path_count := nav_detour.find_straight_path(&query, start_nearest, end_pos, path, i32(len(path)),
                                                                   straight_path, straight_path_flags, straight_path_refs,
                                                                   16, 0)
-
 
     testing.expect(t, recast.status_succeeded(straight_status), "Straight path should succeed")
     testing.expect(t, straight_path_count >= 1, "Should have at least start point")

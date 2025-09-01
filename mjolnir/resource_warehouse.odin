@@ -25,7 +25,7 @@ ResourceWarehouse :: struct {
   image_cube_buffers:           resource.Pool(gpu.CubeImageBuffer),
   cameras:                      resource.Pool(geometry.Camera),
   render_targets:               resource.Pool(RenderTarget),
-  
+
   // Navigation system resources
   nav_meshes:                   resource.Pool(NavMesh),
   nav_contexts:                 resource.Pool(NavContext),
@@ -49,7 +49,6 @@ ResourceWarehouse :: struct {
   textures_set_layout:          vk.DescriptorSetLayout,
   textures_descriptor_set:      vk.DescriptorSet,
 }
-
 
 resource_init :: proc(
   warehouse: ^ResourceWarehouse,
@@ -199,7 +198,7 @@ resource_deinit :: proc(
   delete(warehouse.materials.free_indices)
   delete(warehouse.cameras.entries)
   delete(warehouse.cameras.free_indices)
-  
+
   // Navigation system cleanup
   for &entry in warehouse.nav_meshes.entries {
     if entry.generation > 0 && entry.active {
@@ -209,7 +208,7 @@ resource_deinit :: proc(
   }
   delete(warehouse.nav_meshes.entries)
   delete(warehouse.nav_meshes.free_indices)
-  
+
   for &entry in warehouse.nav_contexts.entries {
     if entry.generation > 0 && entry.active {
       // Clean up navigation contexts
@@ -218,7 +217,7 @@ resource_deinit :: proc(
   }
   delete(warehouse.nav_contexts.entries)
   delete(warehouse.nav_contexts.free_indices)
-  
+
   // Clean up navigation system
   delete(warehouse.navigation_system.geometry_cache)
   delete(warehouse.navigation_system.dirty_tiles)

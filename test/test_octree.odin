@@ -404,9 +404,6 @@ test_octree_subdivision :: proc(t: ^testing.T) {
   geometry.octree_deinit(&octree)
 }
 
-
-
-
 @(test)
 test_octree_edge_cases :: proc(t: ^testing.T) {
   testing.set_fail_timeout(t, 5 * time.Second)
@@ -577,7 +574,6 @@ octree_single_insert_benchmark :: proc(t: ^testing.T) {
     f64(options.duration) / 1000 / f64(options.rounds),
   )
 }
-
 
 @(test)
 octree_single_remove_benchmark :: proc(t: ^testing.T) {
@@ -765,8 +761,6 @@ octree_optimized_query_benchmark :: proc(t: ^testing.T) {
     f64(options.duration) / 1000 / f64(options.rounds),
   )
 }
-
-
 
 @(test)
 octree_realistic_insert_benchmark :: proc(t: ^testing.T) {

@@ -1,6 +1,5 @@
 package navigation_recast
 
-
 import "core:sync"
 import "core:thread"
 import "core:slice"

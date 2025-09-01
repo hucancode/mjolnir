@@ -194,8 +194,6 @@ calculate_polygon_min_extent :: proc(poly: ^Detail_Polygon) -> f32 {
     return math.sqrt(min_dist)
 }
 
-
-
 // Check if triangle is degenerate
 is_triangle_degenerate :: proc "contextless" (a, b, c: [3]f32) -> bool {
     return geometry.signed_triangle_area_2d(a, b, c) < math.F32_EPSILON
@@ -1180,7 +1178,6 @@ triangulate_remaining_as_fan :: proc(poly: ^Detail_Polygon, indices: []i32) -> b
     return len(poly.triangles) > 0
 }
 
-
 // Relaxed ear test for fallback cases
 is_ear_relaxed :: proc(poly: ^Detail_Polygon, indices: []i32, prev, curr, next: int) -> bool {
     if prev < 0 || curr < 0 || next < 0 do return false
@@ -1277,7 +1274,6 @@ add_interior_samples_with_limits :: proc(poly: ^Detail_Polygon, chf: ^Compact_He
         nx = i32(math.ceil((max_pos.x - min_pos.x) / adjusted_dist))
         nz = i32(math.ceil((max_pos.z - min_pos.z) / adjusted_dist))
 
-
     }
 
     samples_added := 0
@@ -1306,7 +1302,6 @@ add_interior_samples_with_limits :: proc(poly: ^Detail_Polygon, chf: ^Compact_He
             }
         }
     }
-
 
 }
 
@@ -1497,8 +1492,6 @@ build_polygon_detail_mesh_with_timeout :: proc(poly: ^Detail_Polygon, chf: ^Comp
         log.debugf("Skipping ALL interior sampling (testing without it)")
     }
 
-
-
     // Step 3: Triangulate with timeout check
     if check_timeout(timeout_ctx, "triangulation") {
         log.warn("Timeout before triangulation, using simple fallback")
@@ -1522,8 +1515,6 @@ build_polygon_detail_mesh_with_timeout :: proc(poly: ^Detail_Polygon, chf: ^Comp
             return triangulate_simple_fan(poly)
         }
     }
-
-
 
     return true
 }
@@ -1638,7 +1629,6 @@ build_polygon_detail_mesh :: proc(poly: ^Detail_Polygon, chf: ^Compact_Heightfie
         return false
     }
 
-
     return true
 }
 
@@ -1693,8 +1683,6 @@ build_poly_mesh_detail :: proc(pmesh: ^Poly_Mesh, chf: ^Compact_Heightfield,
         polygons_processed = pmesh.npolys,
         current_polygon = 0,
     }
-
-
 
     // Initialize detail mesh
 
@@ -1770,9 +1758,6 @@ build_poly_mesh_detail :: proc(pmesh: ^Poly_Mesh, chf: ^Compact_Heightfield,
         total_tris += len(poly.triangles)
     }
 
-
-
-
     // DEBUG: Log detailed mesh stats
     log.warnf("=== DETAIL MESH STATS (MODIFIED VERSION) ===")
     log.warnf("Total verts: %d, Total tris: %d", total_verts, total_tris)
@@ -1838,8 +1823,6 @@ build_poly_mesh_detail :: proc(pmesh: ^Poly_Mesh, chf: ^Compact_Heightfield,
         log.error("Generated invalid detail mesh")
         return false
     }
-
-
 
     return true
 }

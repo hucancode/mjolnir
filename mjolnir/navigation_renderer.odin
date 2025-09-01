@@ -372,8 +372,6 @@ navmesh_renderer_build_from_recast :: proc(renderer: ^NavMeshRenderer, gpu_conte
             log.debugf("First polygon center: [%.1f, %.1f]", poly_center.x, poly_center.z)
         }
 
-
-
         // Count valid vertices in this polygon
         poly_verts: [dynamic]u32
         defer delete(poly_verts)
@@ -471,7 +469,6 @@ generate_random_color :: proc(seed: u32, alpha: f32) -> [4]f32 {
     hue := f32((seed * 137) % 360)  // Golden angle approximation for better distribution
     saturation := 0.8 + f32((seed * 17) % 20) / 100.0  // 0.8 to 1.0 (higher saturation)
     value := 0.7 + f32((seed * 43) % 30) / 100.0       // 0.7 to 1.0 (brighter)
-
 
     // Convert HSV to RGB
     c := value * saturation
@@ -637,7 +634,6 @@ navmesh_renderer_render :: proc(renderer: ^NavMeshRenderer, command_buffer: vk.C
                   renderer.vertex_count, renderer.index_count)
         return
     }
-
 
     pipeline := renderer.debug_pipeline if renderer.debug_mode else renderer.pipeline
     pipeline_layout := renderer.debug_pipeline_layout if renderer.debug_mode else renderer.pipeline_layout
@@ -947,7 +943,6 @@ create_navmesh_pipelines :: proc(renderer: ^NavMeshRenderer, gpu_context: ^gpu.G
 // ========================================
 // PUBLIC API
 // ========================================
-
 
 // Get current configuration
 navmesh_renderer_get_enabled :: proc(renderer: ^NavMeshRenderer) -> bool {

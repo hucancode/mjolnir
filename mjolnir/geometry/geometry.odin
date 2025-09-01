@@ -1052,7 +1052,6 @@ closest_point_on_triangle :: proc "contextless" (p, a, b, c: [3]f32) -> [3]f32 {
     return a + ab * v + ac * w
 }
 
-
 // Calculate polygon normal using Newell's method
 calc_poly_normal :: proc "contextless" (verts: [][3]f32) -> [3]f32 {
     normal := [3]f32{0, 0, 0}

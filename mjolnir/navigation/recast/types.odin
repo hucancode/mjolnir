@@ -1,6 +1,5 @@
 package navigation_recast
 
-
 // Build types for region partitioning
 Partition_Type :: enum {
     Watershed,
@@ -149,7 +148,6 @@ free_poly_mesh_detail :: proc(dmesh: ^Poly_Mesh_Detail) {
     free(dmesh)
 }
 
-
 // Span constants
 RC_SPAN_HEIGHT_BITS :: 13
 RC_SPAN_MAX_HEIGHT :: (1 << RC_SPAN_HEIGHT_BITS) - 1
@@ -170,14 +168,14 @@ RC_MESH_NULL_IDX :: 0xffff
 // Contour tessellation flags
 Contour_Tess_Flag :: enum {
 	WALL_EDGES = 0,  // Tessellate solid (impassable) edges during contour simplification
-	AREA_EDGES = 1,  // Tessellate edges between areas during contour simplification  
+	AREA_EDGES = 1,  // Tessellate edges between areas during contour simplification
 }
 Contour_Tess_Flags :: bit_set[Contour_Tess_Flag; u32]
 
 // Vertex flags for contour points
 Vertex_Flag :: enum {
 	BORDER_VERTEX = 16, // RC_BORDER_VERTEX (0x10000)
-	AREA_BORDER = 17,   // RC_AREA_BORDER (0x20000)  
+	AREA_BORDER = 17,   // RC_AREA_BORDER (0x20000)
 }
 Vertex_Flags :: bit_set[Vertex_Flag; u32]
 

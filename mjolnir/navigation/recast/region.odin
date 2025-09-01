@@ -1,6 +1,5 @@
 package navigation_recast
 
-
 import "core:slice"
 import "core:mem"
 import "core:math"
@@ -1142,7 +1141,6 @@ build_regions :: proc(chf: ^Compact_Heightfield,
 
     sid := -1
 
-
     for level > 0 {
         level = level >= 2 ? level - 2 : 0
         sid = (sid + 1) & (NB_STACKS - 1)
@@ -1176,7 +1174,6 @@ build_regions :: proc(chf: ^Compact_Heightfield,
 
     }
 
-
     // Expand current regions until no empty connected cells found
     expand_regions(expand_iters * 8, 0, chf, src_reg, src_dist, &stack, true)
 
@@ -1191,7 +1188,6 @@ build_regions :: proc(chf: ^Compact_Heightfield,
             log.error("rcBuildRegions: Failed to merge and filter regions")
             return false
         }
-
 
         // If overlapping regions were found during merging, split those regions
         if len(overlaps) > 0 {
@@ -1220,7 +1216,6 @@ build_regions :: proc(chf: ^Compact_Heightfield,
             unique_regions[src_reg[i]] = true
         }
     }
-
 
     log.infof("Region building complete: %d unique regions, %d assigned spans, %d border spans, %d unassigned spans",
               len(unique_regions), assigned_spans, border_spans, unassigned_spans)
@@ -1592,7 +1587,6 @@ merge_and_filter_layer_regions :: proc(min_region_area: i32,
 
     return true
 }
-
 
 // Build layer regions for multi-story environments
 build_layer_regions :: proc(chf: ^Compact_Heightfield,

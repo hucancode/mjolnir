@@ -335,7 +335,6 @@ test_mesh_copy :: proc(t: ^testing.T) {
     testing.expect(t, dst.areas[0] == src.areas[0], "Area data should match")
 }
 
-
 @(test)
 test_build_simple_contour_mesh :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)

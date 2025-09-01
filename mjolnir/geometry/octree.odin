@@ -444,7 +444,6 @@ octree_node_query_ray :: proc(
   }
 }
 
-
 octree_raycast :: proc(
   octree: ^Octree($T),
   ray: Ray,
@@ -452,21 +451,21 @@ octree_raycast :: proc(
   intersection_func: proc(ray: Ray, primitive: T, max_t: f32) -> (hit: bool, t: f32),
 ) -> RayHit(T) {
   if octree.root == nil do return {}
-  
+
   best_hit: RayHit(T)
   best_hit.t = max_dist
-  
+
   inv_dir := [3]f32 {
     1.0 / ray.direction.x,
     1.0 / ray.direction.y,
     1.0 / ray.direction.z,
   }
-  
+
   t_min, t_max := ray_aabb_intersection(ray.origin, inv_dir, octree.root.bounds)
   if t_min > max_dist || t_max < 0 do return best_hit
-  
+
   octree_node_raycast(octree, octree.root, ray, inv_dir, max_f32(t_min, 0), min_f32(t_max, max_dist), &best_hit, intersection_func)
-  
+
   return best_hit
 }
 
@@ -477,16 +476,16 @@ octree_raycast_single :: proc(
   intersection_func: proc(ray: Ray, primitive: T, max_t: f32) -> (hit: bool, t: f32),
 ) -> RayHit(T) {
   if octree.root == nil do return {}
-  
+
   inv_dir := [3]f32 {
     1.0 / ray.direction.x,
     1.0 / ray.direction.y,
     1.0 / ray.direction.z,
   }
-  
+
   t_min, t_max := ray_aabb_intersection(ray.origin, inv_dir, octree.root.bounds)
   if t_min > max_dist || t_max < 0 do return {}
-  
+
   return octree_node_raycast_single(octree, octree.root, ray, inv_dir, max_f32(t_min, 0), min_f32(t_max, max_dist), max_dist, intersection_func)
 }
 
@@ -499,18 +498,18 @@ octree_raycast_multi :: proc(
 ) {
   clear(results)
   if octree.root == nil do return
-  
+
   inv_dir := [3]f32 {
     1.0 / ray.direction.x,
     1.0 / ray.direction.y,
     1.0 / ray.direction.z,
   }
-  
+
   t_min, t_max := ray_aabb_intersection(ray.origin, inv_dir, octree.root.bounds)
   if t_min > max_dist || t_max < 0 do return
-  
+
   octree_node_raycast_multi(octree, octree.root, ray, inv_dir, max_f32(t_min, 0), min_f32(t_max, max_dist), max_dist, intersection_func, results)
-  
+
   // Sort results by distance
   if len(results^) > 1 {
     slice.sort_by(results[:], proc(a, b: RayHit(T)) -> bool {
@@ -530,7 +529,7 @@ octree_node_raycast :: proc(
   intersection_func: proc(ray: Ray, primitive: T, max_t: f32) -> (hit: bool, t: f32),
 ) {
   if t_min > best_hit.t do return
-  
+
   for item in node.items {
     hit, t := intersection_func(ray, item, best_hit.t)
     if hit && t < best_hit.t {
@@ -539,15 +538,15 @@ octree_node_raycast :: proc(
       best_hit.hit = true
     }
   }
-  
+
   if node.children[0] == nil do return
-  
+
   child_intersections: [8]struct {
     idx:   i32,
     t_min: f32,
   }
   valid_count := 0
-  
+
   for i in 0 ..< 8 {
     child_t_min, child_t_max := ray_aabb_intersection(
       ray.origin,
@@ -562,19 +561,19 @@ octree_node_raycast :: proc(
       valid_count += 1
     }
   }
-  
+
   slice.sort_by(child_intersections[:valid_count], proc(a, b: struct {
       idx:   i32,
       t_min: f32,
     }) -> bool {
     return a.t_min < b.t_min
   })
-  
+
   for i in 0 ..< valid_count {
     child_idx := child_intersections[i].idx
     child_t_min := child_intersections[i].t_min
     if child_t_min > best_hit.t do break
-    
+
     child_t_max := min_f32(
       best_hit.t,
       ray_aabb_intersection_far(
@@ -617,16 +616,16 @@ octree_node_raycast_single :: proc(
       }
     }
   }
-  
+
   if node.children[0] == nil do return {}
-  
+
   // Sort children by distance for early termination
   child_intersections: [8]struct {
     idx:   i32,
     t_min: f32,
   }
   valid_count := 0
-  
+
   for i in 0 ..< 8 {
     child_t_min, child_t_max := ray_aabb_intersection(
       ray.origin,
@@ -641,14 +640,14 @@ octree_node_raycast_single :: proc(
       valid_count += 1
     }
   }
-  
+
   slice.sort_by(child_intersections[:valid_count], proc(a, b: struct {
       idx:   i32,
       t_min: f32,
     }) -> bool {
     return a.t_min < b.t_min
   })
-  
+
   for i in 0 ..< valid_count {
     child_idx := child_intersections[i].idx
     child_t_min := child_intersections[i].t_min
@@ -660,7 +659,7 @@ octree_node_raycast_single :: proc(
         node.children[child_idx].bounds,
       ),
     )
-    
+
     result := octree_node_raycast_single(
       octree,
       node.children[child_idx],
@@ -671,12 +670,12 @@ octree_node_raycast_single :: proc(
       max_dist,
       intersection_func,
     )
-    
+
     if result.hit {
       return result
     }
   }
-  
+
   return {}
 }
 
@@ -702,9 +701,9 @@ octree_node_raycast_multi :: proc(
       })
     }
   }
-  
+
   if node.children[0] == nil do return
-  
+
   // Check all children
   for i in 0 ..< 8 {
     child_t_min, child_t_max := ray_aabb_intersection(
@@ -748,13 +747,13 @@ octree_node_query_sphere_primitives :: proc(
   intersection_func: proc(sphere: Sphere, primitive: T) -> bool,
 ) {
   if !aabb_sphere_intersects(node.bounds, sphere.center, sphere.radius) do return
-  
+
   for item in node.items {
     if intersection_func(sphere, item) {
       append(results, item)
     }
   }
-  
+
   if node.children[0] != nil {
     for i in 0 ..< 8 {
       octree_node_query_sphere_primitives(octree, node.children[i], sphere, results, intersection_func)

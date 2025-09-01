@@ -1,6 +1,5 @@
 package navigation_recast
 
-
 // Represents a span in a heightfield.
 Span :: struct {
   // Bit field for packed data matching C++ layout
@@ -11,7 +10,6 @@ Span :: struct {
   },
   next:       ^Span, // The next span higher up in column
 }
-
 
 // A memory pool used for quick allocation of spans within a heightfield.
 Span_Pool :: struct {
@@ -151,7 +149,6 @@ Span_Column_Cache :: struct {
     span_count: i32,
     last_access: u32,
 }
-
 
 // Create heightfield
 create_heightfield :: proc(

@@ -1,6 +1,5 @@
 package navigation_recast
 
-
 import "core:slice"
 import "core:log"
 import geometry "../../geometry"
@@ -331,8 +330,6 @@ build_contours :: proc(chf: ^Compact_Heightfield,
     flags := make([]u8, chf.span_count)
     defer delete(flags)
 
-
-
     // Mark region boundaries - spans that have different region neighbors
     boundary_spans := 0
     for y in 0..<h {
@@ -376,8 +373,6 @@ build_contours :: proc(chf: ^Compact_Heightfield,
             }
         }
     }
-
-
 
     // Create temporary arrays for contour vertices
     verts := make([dynamic][4]i32, 0)
@@ -424,7 +419,6 @@ build_contours :: proc(chf: ^Compact_Heightfield,
                 // Extract contour for this region
                 boundary_spans_found += 1
 
-
                 // Clear arrays for this contour
                 clear(&verts)
                 clear(&simplified)
@@ -455,7 +449,6 @@ build_contours :: proc(chf: ^Compact_Heightfield,
                         cont.area = area_id
                         cont.reg = region_id
 
-
                         // Allocate and copy vertex data
                         cont.verts = make([][4]i32, len(simplified))
                         copy(cont.verts, simplified[:])
@@ -482,8 +475,6 @@ build_contours :: proc(chf: ^Compact_Heightfield,
 
                         contours_created += 1
                         total_verts_processed += len(verts)
-
-
 
                         }                }
             }
@@ -608,8 +599,6 @@ walk_contour_boundary :: proc(x, y, i: i32, chf: ^Compact_Heightfield,
     // Use the same variable names as C++ for clarity - these are the current position
     curr_x, curr_y, curr_i := x, y, i
     iter: i32 = 0
-
-
 
     // Walk boundary following the C++ reference algorithm exactly
     for iter < 40000 {
@@ -906,7 +895,6 @@ simplify_contour :: proc(raw_verts: [][4]i32, simplified: ^[dynamic][4]i32, max_
             break
         }
     }
-
 
     if has_connections {
         // Add a new point to every location where the region changes

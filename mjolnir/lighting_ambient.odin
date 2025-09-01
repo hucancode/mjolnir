@@ -278,7 +278,6 @@ ambient_init :: proc(
   return .SUCCESS
 }
 
-
 ambient_deinit :: proc(
   self: ^RendererAmbient,
   gpu_context: ^gpu.GPUContext,

@@ -43,7 +43,6 @@ ActiveCameraData :: struct {
   padding:        [3]u32,
 }
 
-
 VISIBILITY_BUFFER_COUNT :: 3 // Ring buffer for 1-2 frame latency
 
 // Visibility culler

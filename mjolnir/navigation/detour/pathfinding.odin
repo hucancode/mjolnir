@@ -111,7 +111,6 @@ create_node :: proc(ctx: ^Pathfinding_Context, id: recast.Poly_Ref) -> ^Node {
     return node
 }
 
-
 // Self-contained comparison function for pathfinding nodes
 // Returns true if 'a' has higher priority than 'b' (should come first)
 // For A* pathfinding, lower total cost = higher priority (min-heap behavior)
@@ -474,7 +473,7 @@ get_path_to_node :: proc(query: ^Nav_Mesh_Query, end_node: ^Node,
         }
         node = get_node(&query.pf_context, node.parent_id)
     }
-    
+
     // Debug: log the final path
     // log.debugf("get_path_to_node: Generated path with %d nodes:", length)
     // for i in 0..<length {

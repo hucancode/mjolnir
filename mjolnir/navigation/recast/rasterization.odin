@@ -107,9 +107,6 @@ add_span :: proc(hf: ^Heightfield,
     if merge_start != nil {
         // Save the next pointer after merge_end before modifying the list
         next_after_merge := merge_end.next
-
-
-
         // Free merged spans - be careful not to free past merge_end
         current := merge_start
         for current != nil {
@@ -194,7 +191,6 @@ validate_span_list :: proc(first_span: ^Span, x, z: i32) {
         span = span.next
     }
 }
-
 
 // Divides a convex polygon of max 12 vertices into two convex polygons
 // across a separating axis.

@@ -1,6 +1,5 @@
 package navigation_recast
 
-
 import "core:slice"
 import "core:log"
 import "core:mem"
@@ -272,7 +271,6 @@ diagonal :: proc "contextless" (verts: [][4]i32, indices: []u32, n: i32, a, b: i
     return cone_check && diag_check
 }
 
-
 // Loose versions for degenerate cases (more permissive)
 diagonalie_loose :: proc "contextless" (verts: [][4]i32, indices: []u32, n: i32, a, c: i32) -> bool {
     a_idx := i32(indices[a] & 0x0fffffff)
@@ -327,8 +325,6 @@ diagonal_loose :: proc "contextless" (verts: [][4]i32, indices: []u32, n: i32, a
     return in_cone_loose(verts, indices, n, a, b) &&
            diagonalie_loose(verts, indices, n, a, b)
 }
-
-
 
 // Internal triangulation using u16 vertices
 triangulate_polygon_u16 :: proc(verts: [][3]u16, indices: []i32, triangles: ^[dynamic]i32) -> bool {
@@ -730,7 +726,6 @@ update_polygon_neighbors :: proc(pmesh: ^Poly_Mesh, edges: []Mesh_Edge) {
     }
 }
 
-
 // Simple triangle merging - just converts triangles to polygons without complex merging
 merge_triangles_into_polygons :: proc(triangles: []i32, polys: ^[dynamic]Poly_Build, max_verts: i32, area: u8, reg: u16) {
     if len(triangles) % 3 != 0 {
@@ -758,8 +753,6 @@ build_poly_mesh :: proc(cset: ^Contour_Set, nvp: i32, pmesh: ^Poly_Mesh) -> bool
     if cset == nil || pmesh == nil do return false
     if len(cset.conts) == 0 do return false
     if nvp < 3 do return false
-
-
 
     // Initialize mesh
     pmesh.npolys = 0
@@ -809,8 +802,6 @@ build_poly_mesh :: proc(cset: ^Contour_Set, nvp: i32, pmesh: ^Poly_Mesh) -> bool
     indices := make([]i32, nvp)  // Working buffer for polygon indices
     defer delete(indices)
 
-
-
     // Process each contour
     for i in 0..<len(cset.conts) {
         cont := &cset.conts[i]
@@ -841,7 +832,6 @@ build_poly_mesh :: proc(cset: ^Contour_Set, nvp: i32, pmesh: ^Poly_Mesh) -> bool
             }
             continue
         }
-
 
         // NOW add vertices and merge duplicates AFTER triangulation
         // Reuse indices array to store global vertex indices
@@ -990,12 +980,9 @@ build_poly_mesh :: proc(cset: ^Contour_Set, nvp: i32, pmesh: ^Poly_Mesh) -> bool
     return true
 }
 
-
 // Remove degenerate polygons and unused vertices
 remove_degenerate_polys :: proc(pmesh: ^Poly_Mesh) -> bool {
     if pmesh == nil || pmesh.npolys == 0 do return false
-
-
 
     old_poly_count := pmesh.npolys
     kept_polys := 0
@@ -1053,7 +1040,6 @@ remove_degenerate_polys :: proc(pmesh: ^Poly_Mesh) -> bool {
 
     pmesh.npolys = i32(kept_polys)
 
-
     return true
 }
 
@@ -1095,8 +1081,6 @@ remove_unused_vertices :: proc(pmesh: ^Poly_Mesh) -> bool {
         // All vertices are used
         return true
     }
-
-
 
     // Compact vertex array
     new_verts := make([][3]u16, new_vert_count)
