@@ -6,7 +6,7 @@ import "core:math/linalg"
 import "core:slice"
 import "core:log"
 import "core:fmt"
-import recast "../recast"
+import "../recast"
 
 // Create navigation mesh data from Recast polygon mesh
 create_nav_mesh_data :: proc(params: ^Create_Nav_Mesh_Data_Params) -> ([]u8, recast.Status) {
@@ -147,8 +147,7 @@ create_nav_mesh_data :: proc(params: ^Create_Nav_Mesh_Data_Params) -> ([]u8, rec
     offset += verts_size
 
     for v, i in pmesh.verts {
-        vert := &verts[i]
-        vert^ = pmesh.bmin + [3]f32{f32(v[0]) * cs, f32(v[1]) * ch, f32(v[2]) * cs}
+        verts[i] = pmesh.bmin + [3]f32{f32(v[0]) * cs, f32(v[1]) * ch, f32(v[2]) * cs}
     }
 
     // Add off-mesh connection vertices
@@ -182,12 +181,10 @@ create_nav_mesh_data :: proc(params: ^Create_Nav_Mesh_Data_Params) -> ([]u8, rec
             if pmesh.polys[poly_base + j] == recast.RC_MESH_NULL_IDX {
                 break
             }
-
             // Verify polygon is within vertex limits (should never trigger with proper generation)
             assert(poly.vert_count < recast.DT_VERTS_PER_POLYGON,
                    fmt.tprintf("Polygon %d exceeds vertex limit: %d > %d",
                               i, poly.vert_count + 1, recast.DT_VERTS_PER_POLYGON))
-
             poly.verts[poly.vert_count] = pmesh.polys[poly_base + j]
             if pmesh.polys[poly_base + nvp + j] & 0x8000 != 0 {
                 // External edge
@@ -223,7 +220,6 @@ create_nav_mesh_data :: proc(params: ^Create_Nav_Mesh_Data_Params) -> ([]u8, rec
     if dmesh != nil {
         detail_meshes := slice.from_ptr(cast(^Poly_Detail)(raw_data(data)[offset:]), int(detail_mesh_count))
         offset += detail_meshes_size
-
         for i in 0..<pmesh.npolys {
             detail := &detail_meshes[i]
             mesh_info := dmesh.meshes[i]
@@ -232,19 +228,15 @@ create_nav_mesh_data :: proc(params: ^Create_Nav_Mesh_Data_Params) -> ([]u8, rec
             detail.vert_count = u8(mesh_info[1])
             detail.tri_count = u8(mesh_info[3])
         }
-
         // Copy detail vertices (skip shared vertices)
         detail_verts := slice.from_ptr(cast(^[3]f32)(raw_data(data)[offset:]), int(detail_vert_count))
         offset += detail_verts_size
-
         for i in 0..<detail_vert_count {
             detail_verts[i] = dmesh.verts[len(pmesh.verts) + int(i)]
         }
-
         // Copy detail triangles
         detail_tris := slice.from_ptr(cast(^[4]u8)(raw_data(data)[offset:]), int(detail_tri_count))
         offset += detail_tris_size
-
         for i in 0..<detail_tri_count {
             detail_tris[i] = dmesh.tris[i]
         }
@@ -253,17 +245,14 @@ create_nav_mesh_data :: proc(params: ^Create_Nav_Mesh_Data_Params) -> ([]u8, rec
     // Build BV tree if nodes exist
     if bv_node_count > 0 {
         bv_tree := slice.from_ptr(cast(^BV_Node)(raw_data(data)[offset:]), int(bv_node_count))
-
         // Debug: Check first few vertices
         log.infof("Building BV tree: First few vertices from pmesh:")
         for i in 0..<min(5, len(pmesh.verts)) {
             v := pmesh.verts[i]
             log.infof("  Vertex %d: [%d, %d, %d]", i, v[0], v[1], v[2])
         }
-
         // Build BV tree for polygon access - pass detail mesh if available
         build_bv_tree(pmesh, bv_tree, bv_node_count, dmesh)
-
         // Debug: Log the actual BV tree nodes after building
         log.infof("Built BV tree nodes:")
         for i in 0..<min(5, int(bv_node_count)) {
@@ -272,7 +261,6 @@ create_nav_mesh_data :: proc(params: ^Create_Nav_Mesh_Data_Params) -> ([]u8, rec
                       i, node.bmin[0], node.bmin[1], node.bmin[2],
                       node.bmax[0], node.bmax[1], node.bmax[2], node.i)
         }
-
         offset += bv_tree_size
     } else {
         // Skip BV tree section if no nodes
@@ -282,16 +270,13 @@ create_nav_mesh_data :: proc(params: ^Create_Nav_Mesh_Data_Params) -> ([]u8, rec
     // Copy off-mesh connections
     if params.off_mesh_con_count > 0 {
         off_mesh_cons := slice.from_ptr(cast(^Off_Mesh_Connection)(raw_data(data)[offset:]), int(params.off_mesh_con_count))
-
         for i in 0..<params.off_mesh_con_count {
             con := &off_mesh_cons[i]
             con.poly = u16(pmesh.npolys + i)
-
             // Copy connection endpoints
             conn := params.off_mesh_con_verts[i]
             con.start = conn.start
             con.end = conn.end
-
             con.rad = params.off_mesh_con_rad[i]
             if params.off_mesh_con_dir[i] != 0 {
                 con.flags = recast.DT_OFFMESH_CON_BIDIR
@@ -334,7 +319,6 @@ create_nav_mesh_data :: proc(params: ^Create_Nav_Mesh_Data_Params) -> ([]u8, rec
     // Calculate and log data integrity checksum
     checksum := calculate_data_checksum(data)
     log.infof("Navigation mesh tile created successfully (size: %d bytes, checksum: 0x%08x)", len(data), checksum)
-
     return data, {.Success}
 }
 
@@ -384,11 +368,7 @@ create_nav_mesh :: proc(params: ^Create_Nav_Mesh_Data_Params) -> (^Nav_Mesh, rec
     if recast.status_failed(status) {
         return nil, status
     }
-
-    // Create navigation mesh
     nav_mesh := new(Nav_Mesh)
-
-    // Initialize with single tile
     nav_params := Nav_Mesh_Params{
         orig = params.poly_mesh.bmin,
         tile_width = params.poly_mesh.bmax[0] - params.poly_mesh.bmin[0],
@@ -396,14 +376,12 @@ create_nav_mesh :: proc(params: ^Create_Nav_Mesh_Data_Params) -> (^Nav_Mesh, rec
         max_tiles = 1,
         max_polys = 1024,
     }
-
     status = nav_mesh_init(nav_mesh, &nav_params)
     if recast.status_failed(status) {
         free(nav_mesh)
         delete(data)
         return nil, status
     }
-
     // Add the tile
     _, status = nav_mesh_add_tile(nav_mesh, data, recast.DT_TILE_FREE_DATA)
     if recast.status_failed(status) {
@@ -411,7 +389,6 @@ create_nav_mesh :: proc(params: ^Create_Nav_Mesh_Data_Params) -> (^Nav_Mesh, rec
         free(nav_mesh)
         return nil, status
     }
-
     return nav_mesh, {.Success}
 }
 
@@ -420,12 +397,10 @@ build_bv_tree :: proc(pmesh: ^recast.Poly_Mesh, nodes: []BV_Node, node_count: i3
     if node_count <= 0 || pmesh.npolys <= 0 {
         return
     }
-
     cs := pmesh.cs
     ch := pmesh.ch
     nvp := pmesh.nvp
     quant_factor := 1.0 / cs
-
     // For now, always use flat structure until hierarchical is fixed
     build_bv_tree_flat(pmesh, nodes, node_count, quant_factor, dmesh)
 }
@@ -437,7 +412,6 @@ build_bv_tree_flat :: proc(pmesh: ^recast.Poly_Mesh, nodes: []BV_Node, node_coun
 
     for i in 0..<int(min(node_count, pmesh.npolys)) {
         node := &nodes[i]
-
         if dmesh != nil {
             // Use detail mesh bounds if available (more accurate)
             bounds := calc_detail_mesh_bounds(dmesh, i, pmesh.bmin, quant_factor)
@@ -451,7 +425,6 @@ build_bv_tree_flat :: proc(pmesh: ^recast.Poly_Mesh, nodes: []BV_Node, node_coun
             node.bmin = bounds.min
             node.bmax = bounds.max
         }
-
         node.i = i32(i)  // Leaf node (positive index)
     }
 }
@@ -491,14 +464,11 @@ build_bv_tree_hierarchical :: proc(pmesh: ^recast.Poly_Mesh, nodes: []BV_Node, n
 build_bv_node_recursive :: proc(poly_info: []BV_Poly_Info, nodes: []BV_Node, next_idx: ^i32, start: i32, end: i32) -> i32 {
     node_idx := next_idx^
     next_idx^ += 1
-
     if node_idx >= i32(len(nodes)) {
         return -1  // Out of space
     }
-
     node := &nodes[node_idx]
     poly_count := end - start
-
     // Calculate combined bounds for this group
     if poly_count > 0 {
         node.bmin = poly_info[start].bounds.min

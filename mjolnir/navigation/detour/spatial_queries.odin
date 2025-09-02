@@ -4,8 +4,8 @@ import "core:math"
 import "core:math/linalg"
 import "core:slice"
 import "core:log"
-import recast "../recast"
-import geometry "../../geometry"
+import "../recast"
+import "../../geometry"
 
 // Find nearest polygon to given position
 find_nearest_poly :: proc(query: ^Nav_Mesh_Query, center: [3]f32, half_extents: [3]f32, filter: ^Query_Filter) ->

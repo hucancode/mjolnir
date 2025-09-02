@@ -794,7 +794,7 @@ barycentric_2d :: proc "contextless" (p, a, b, c: [3]f32) -> [3]f32 {
 point_in_polygon_2d :: proc "contextless" (pt: [3]f32, verts: [][3]f32) -> bool {
     c := false
     j := len(verts) - 1
-    for i := 0; i < len(verts); i += 1 {
+    for i in 0..<len(verts) {
         vi := verts[i]
         vj := verts[j]
         // Use >= for one endpoint to handle edge case where ray passes through vertex
@@ -1024,7 +1024,7 @@ closest_point_on_triangle :: proc "contextless" (p, a, b, c: [3]f32) -> [3]f32 {
 calc_poly_normal :: proc "contextless" (verts: [][3]f32) -> [3]f32 {
     normal := [3]f32{0, 0, 0}
 
-    for i := 0; i < len(verts); i += 1 {
+    for i in 0..<len(verts) {
         v0 := verts[i]
         v1 := verts[(i + 1) % len(verts)]
 
@@ -1044,7 +1044,7 @@ calc_poly_normal :: proc "contextless" (verts: [][3]f32) -> [3]f32 {
 // Calculate polygon area using cross products (2D XZ plane)
 poly_area_2d :: proc "contextless" (verts: [][3]f32) -> f32 {
     area: f32 = 0
-    for i := 0; i < len(verts); i += 1 {
+    for i in 0..<len(verts) {
         a := verts[i].xz
         b := verts[(i + 1) % len(verts)].xz
         area += linalg.cross(a, b)

@@ -10,10 +10,7 @@ import "./recast"
 // Load OBJ file and extract data for navigation mesh input
 // Note: areas are initialized to 0 (RC_NULL_AREA) and must be marked by calling mark_walkable_triangles
 load_obj_to_navmesh_input :: proc(filename: string, scale: f32 = 1.0, walkable_slope_angle: f32 = 45.0) -> (vertices: [][3]f32, indices: []i32, areas: []u8, ok: bool) {
-    geom, load_ok := geometry.load_obj(filename, scale)
-    if !load_ok {
-        return nil, nil, nil, false
-    }
+    geom := geometry.load_obj(filename, scale) or_return
     defer geometry.delete_geometry(geom)
 
     // Extract vertex positions

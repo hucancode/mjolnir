@@ -809,12 +809,12 @@ add_unique_connection :: proc(reg: ^Region, n: i32) {
 // Merge and filter regions
 @(optimization_mode="none")
 merge_and_filter_regions :: proc(min_region_area, merge_region_size: i32,
-                               max_region_id: ^u16, chf: ^Compact_Heightfield,
-                               src_reg: []u16, overlaps: ^[dynamic]i32) -> bool {
+                               initial_max_region_id: u16, chf: ^Compact_Heightfield,
+                               src_reg: []u16, overlaps: ^[dynamic]i32) -> (max_region_id: u16, success: bool) {
     w := chf.width
     h := chf.height
 
-    nreg := i32(max_region_id^) + 1
+    nreg := i32(initial_max_region_id) + 1
     regions := make([dynamic]Region, nreg)
     defer {
         for i in 0..<len(regions) {
@@ -1052,7 +1052,7 @@ merge_and_filter_regions :: proc(min_region_area, merge_region_size: i32,
             }
         }
     }
-    max_region_id^ = reg_id_gen
+    max_region_id = reg_id_gen
 
     // Remap regions
     for i in 0..<chf.span_count {
@@ -1068,7 +1068,7 @@ merge_and_filter_regions :: proc(min_region_area, merge_region_size: i32,
         }
     }
 
-    return true
+    return max_region_id, true
 }
 
 // Build regions using watershed partitioning
@@ -1182,10 +1182,7 @@ build_regions :: proc(chf: ^Compact_Heightfield,
         defer delete(overlaps)
         chf.max_regions = region_id
 
-        if !merge_and_filter_regions(min_region_area, merge_region_area, &chf.max_regions, chf, src_reg, &overlaps) {
-            log.error("rcBuildRegions: Failed to merge and filter regions")
-            return false
-        }
+        chf.max_regions = merge_and_filter_regions(min_region_area, merge_region_area, chf.max_regions, chf, src_reg, &overlaps) or_return
 
         // If overlapping regions were found during merging, split those regions
         if len(overlaps) > 0 {
@@ -1362,9 +1359,7 @@ build_regions_monotone :: proc(chf: ^Compact_Heightfield,
         overlaps := make([dynamic]i32)
         defer delete(overlaps)
         chf.max_regions = id
-        if !merge_and_filter_regions(min_region_area, merge_region_area, &chf.max_regions, chf, src_reg, &overlaps) {
-            return false
-        }
+        chf.max_regions = merge_and_filter_regions(min_region_area, merge_region_area, chf.max_regions, chf, src_reg, &overlaps) or_return
 
         // Monotone partitioning does not generate overlapping regions
     }
@@ -1379,12 +1374,12 @@ build_regions_monotone :: proc(chf: ^Compact_Heightfield,
 
 // Merge and filter layer regions
 merge_and_filter_layer_regions :: proc(min_region_area: i32,
-                                      max_region_id: ^u16, chf: ^Compact_Heightfield,
-                                      src_reg: []u16) -> bool {
+                                      initial_max_region_id: u16, chf: ^Compact_Heightfield,
+                                      src_reg: []u16) -> (max_region_id: u16, success: bool) {
     w := chf.width
     h := chf.height
 
-    nreg := i32(max_region_id^) + 1
+    nreg := i32(initial_max_region_id) + 1
     regions := make([dynamic]Region, nreg)
     defer {
         for i in 0..<len(regions) {
@@ -1572,7 +1567,7 @@ merge_and_filter_layer_regions :: proc(min_region_area: i32,
             }
         }
     }
-    max_region_id^ = reg_id_gen
+    max_region_id = reg_id_gen
 
     // Remap regions
     for i in 0..<chf.span_count {
@@ -1581,7 +1576,7 @@ merge_and_filter_layer_regions :: proc(min_region_area: i32,
         }
     }
 
-    return true
+    return max_region_id, true
 }
 
 // Build layer regions for multi-story environments
@@ -1714,9 +1709,7 @@ build_layer_regions :: proc(chf: ^Compact_Heightfield,
 
     // Merge monotone regions to layers and remove small regions
     chf.max_regions = id
-    if !merge_and_filter_layer_regions(min_region_area, &chf.max_regions, chf, src_reg) {
-        return false
-    }
+    chf.max_regions = merge_and_filter_layer_regions(min_region_area, chf.max_regions, chf, src_reg) or_return
 
     // Store the result out
     for i in 0..<chf.span_count {

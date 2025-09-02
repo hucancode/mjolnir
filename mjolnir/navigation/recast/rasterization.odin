@@ -3,7 +3,7 @@ package navigation_recast
 import "core:log"
 import "core:math"
 import "core:fmt"
-import geometry "../../geometry"
+import "../../geometry"
 import "core:math/linalg"
 import "base:runtime"
 
@@ -25,16 +25,13 @@ add_span :: proc(hf: ^Heightfield,
         }
         return false
     }
-
     if smin > smax {
         when ODIN_DEBUG {
             log.warnf("add_span: Invalid span range [%d, %d] - min must be <= max", smin, smax)
         }
         return false
     }
-
     column_index := x + z * hf.width
-
     // Fast path: empty column
     if hf.spans[column_index] == nil {
         new_span := allocate_span(hf)
@@ -47,32 +44,25 @@ add_span :: proc(hf: ^Heightfield,
         hf.spans[column_index] = new_span
         return true
     }
-
     // Optimized merge with single pass
     // Pre-allocate span to avoid allocation in critical path
     new_span := allocate_span(hf)
     if new_span == nil do return false
-
     new_span.smin = u32(smin)
     new_span.smax = u32(smax)
     new_span.area = u32(area_id)
-    new_span.next = nil
-
     // Track merge state
-    merge_start: ^Span = nil
-    merge_end: ^Span = nil
-    insert_after: ^Span = nil
-
-    previous_span: ^Span = nil
+    merge_start: ^Span
+    merge_end: ^Span
+    insert_after: ^Span
+    previous_span: ^Span
     current_span := hf.spans[column_index]
-
     // Single pass to find merge range and insertion point
     for current_span != nil {
         if current_span.smin > new_span.smax {
             // Found insertion point
             break
         }
-
         if current_span.smax < new_span.smin {
             // No overlap yet, update insertion point
             insert_after = current_span
@@ -80,29 +70,24 @@ add_span :: proc(hf: ^Heightfield,
             current_span = current_span.next
             continue
         }
-
         // Found overlap - mark merge range
         if merge_start == nil {
             merge_start = current_span
             insert_after = previous_span
         }
         merge_end = current_span
-
         // Update merged span bounds (matches C++ lines 143-150)
         new_span.smin = min(new_span.smin, current_span.smin)
         new_span.smax = max(new_span.smax, current_span.smax)
-
         // Merge area flags (matches C++ lines 153-157)
         // The C++ checks the difference between the MERGED newSpan->smax and currentSpan->smax
         if abs(i32(new_span.smax) - i32(current_span.smax)) <= flag_merge_threshold {
             // If within threshold, take max area
             new_span.area = max(new_span.area, current_span.area)
         }
-
         // Don't update previous_span when merging
         current_span = current_span.next
     }
-
     // Apply merges if any
     if merge_start != nil {
         // Save the next pointer after merge_end before modifying the list
@@ -112,12 +97,9 @@ add_span :: proc(hf: ^Heightfield,
         for current != nil {
             next := current.next
             free_span(hf, current)
-            if current == merge_end {
-                break
-            }
+            if current == merge_end do break
             current = next
         }
-
         // Insert new merged span
         new_span.next = next_after_merge
         if insert_after != nil {
@@ -135,12 +117,10 @@ add_span :: proc(hf: ^Heightfield,
             hf.spans[column_index] = new_span
         }
     }
-
     // Validate in debug mode
     when ODIN_DEBUG {
         validate_span_list(hf.spans[column_index], x, z)
     }
-
     return true
 }
 

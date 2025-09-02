@@ -6,7 +6,7 @@ import "core:mem"
 import "core:math"
 import "core:math/linalg"
 import "core:fmt"
-import geometry "../../geometry"
+import "../../geometry"
 
 // Check if three vertices form a left turn (counter-clockwise)
 // Based on the C++ uleft function from RecastMesh.cpp

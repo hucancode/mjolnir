@@ -3,8 +3,8 @@ package navigation_detour
 import "core:math"
 import "core:math/linalg"
 import "core:log"
-import recast "../recast"
-import geometry "../../geometry"
+import "../recast"
+import "../../geometry"
 
 // Find straight path using funnel algorithm for path smoothing
 find_straight_path :: proc(query: ^Nav_Mesh_Query,

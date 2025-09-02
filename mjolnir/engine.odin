@@ -16,7 +16,7 @@ import "core:unicode/utf8"
 import "geometry"
 import "gpu"
 import "resource"
-import recast "navigation/recast"
+import "navigation/recast"
 import "vendor:glfw"
 import mu "vendor:microui"
 import vk "vendor:vulkan"
@@ -1008,7 +1008,7 @@ generate_render_input :: proc(
       }
       batch_group, group_found := &ret.batches[batch_key]
       if !group_found {
-        ret.batches[batch_key] = make([dynamic]BatchData)
+        ret.batches[batch_key] = make([dynamic]BatchData, context.temp_allocator)
         batch_group = &ret.batches[batch_key]
       }
       batch_data: ^BatchData
@@ -1021,7 +1021,7 @@ generate_render_input :: proc(
       if batch_data == nil {
         new_batch := BatchData {
           material_handle = data.material,
-          nodes           = make([dynamic]^Node),
+          nodes           = make([dynamic]^Node, context.temp_allocator),
         }
         append(batch_group, new_batch)
         batch_data = &batch_group[len(batch_group) - 1]

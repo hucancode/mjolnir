@@ -2,7 +2,7 @@ package navigation_recast
 
 import "core:math"
 import "core:math/linalg"
-import geometry "../../geometry"
+import "../../geometry"
 
 // Calculate bounds from vertices
 calc_bounds :: proc(verts: [][3]f32) -> (bmin, bmax: [3]f32) {

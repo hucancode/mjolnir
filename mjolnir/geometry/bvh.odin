@@ -48,7 +48,7 @@ BVHTraversal :: struct {
 bvh_build :: proc(bvh: ^BVH($T), items: []T, max_leaf_size: i32 = 4) {
   if bvh == nil do return
   if bvh.bounds_func == nil do return
-  
+
   clear(&bvh.nodes)
   clear(&bvh.primitives)
 
@@ -66,10 +66,8 @@ bvh_build :: proc(bvh: ^BVH($T), items: []T, max_leaf_size: i32 = 4) {
   }
   defer virtual.arena_free_all(&arena)
   arena_allocator := virtual.arena_allocator(&arena)
-
   build_prims := make([]BVHPrimitive, len(items), arena_allocator)
-  for i in 0 ..< len(items) {
-    item := items[i]
+  for item, i in items {
     bounds := bvh.bounds_func(item)
     build_prims[i] = BVHPrimitive {
       index    = i32(i),
@@ -81,8 +79,8 @@ bvh_build :: proc(bvh: ^BVH($T), items: []T, max_leaf_size: i32 = 4) {
   root := build_recursive(build_prims[:], 0, i32(len(items)), max_leaf_size, arena_allocator)
 
   // Reorder the primitives array to match the build_prims order
-  for i in 0 ..< len(build_prims) {
-    bvh.primitives[i] = items[build_prims[i].index]
+  for prim, i in build_prims {
+    bvh.primitives[i] = items[prim.index]
   }
 
   flatten_bvh_tree(bvh, root)
@@ -200,7 +198,7 @@ split_sah :: proc(
     // Sample split positions instead of testing all
     for i := step; i < len(prims); i += step {
       if i >= len(prims) - 1 do break
-      
+
       cost := sah_cost(
         left_bounds[i-1],
         i32(i),
@@ -481,24 +479,24 @@ bvh_raycast :: proc(
   intersection_func: proc(ray: Ray, primitive: T, max_t: f32) -> (hit: bool, t: f32),
 ) -> RayHit(T) {
   if len(bvh.nodes) == 0 do return {}
-  
+
   best_hit: RayHit(T)
   best_hit.t = max_dist
-  
+
   stack := make([dynamic]i32, 0, 64, context.temp_allocator)
   append(&stack, 0)
-  
+
   for len(stack) > 0 {
     node_idx := pop(&stack)
     node := &bvh.nodes[node_idx]
-    
+
     t_near, t_far := ray_aabb_intersection_safe(
       ray.origin,
       ray.direction,
       node.bounds,
     )
     if t_near > best_hit.t || t_far < 0 do continue
-    
+
     if node.primitive_count > 0 {
       for i in node.primitive_start ..< node.primitive_start + node.primitive_count {
         prim := bvh.primitives[i]
@@ -512,7 +510,7 @@ bvh_raycast :: proc(
     } else {
       left_node := &bvh.nodes[node.left_child]
       right_node := &bvh.nodes[node.right_child]
-      
+
       left_t_near, _ := ray_aabb_intersection_safe(
         ray.origin,
         ray.direction,
@@ -523,7 +521,7 @@ bvh_raycast :: proc(
         ray.direction,
         right_node.bounds,
       )
-      
+
       if left_t_near < right_t_near {
         append(&stack, node.right_child)
         append(&stack, node.left_child)
@@ -533,7 +531,7 @@ bvh_raycast :: proc(
       }
     }
   }
-  
+
   return best_hit
 }
 
@@ -544,21 +542,21 @@ bvh_raycast_single :: proc(
   intersection_func: proc(ray: Ray, primitive: T, max_t: f32) -> (hit: bool, t: f32),
 ) -> RayHit(T) {
   if len(bvh.nodes) == 0 do return {}
-  
+
   stack := make([dynamic]i32, 0, 64, context.temp_allocator)
   append(&stack, 0)
-  
+
   for len(stack) > 0 {
     node_idx := pop(&stack)
     node := &bvh.nodes[node_idx]
-    
+
     t_near, t_far := ray_aabb_intersection_safe(
       ray.origin,
       ray.direction,
       node.bounds,
     )
     if t_near > max_dist || t_far < 0 do continue
-    
+
     if node.primitive_count > 0 {
       for i in node.primitive_start ..< node.primitive_start + node.primitive_count {
         prim := bvh.primitives[i]
@@ -576,7 +574,7 @@ bvh_raycast_single :: proc(
       append(&stack, node.right_child)
     }
   }
-  
+
   return {}
 }
 
@@ -589,21 +587,21 @@ bvh_raycast_multi :: proc(
 ) {
   clear(results)
   if len(bvh.nodes) == 0 do return
-  
+
   stack := make([dynamic]i32, 0, 64, context.temp_allocator)
   append(&stack, 0)
-  
+
   for len(stack) > 0 {
     node_idx := pop(&stack)
     node := &bvh.nodes[node_idx]
-    
+
     t_near, t_far := ray_aabb_intersection_safe(
       ray.origin,
       ray.direction,
       node.bounds,
     )
     if t_near > max_dist || t_far < 0 do continue
-    
+
     if node.primitive_count > 0 {
       for i in node.primitive_start ..< node.primitive_start + node.primitive_count {
         prim := bvh.primitives[i]
@@ -621,7 +619,7 @@ bvh_raycast_multi :: proc(
       append(&stack, node.right_child)
     }
   }
-  
+
   // Sort results by distance
   if len(results^) > 1 {
     slice.sort_by(results[:], proc(a, b: RayHit(T)) -> bool {
@@ -638,18 +636,18 @@ bvh_query_sphere_primitives :: proc(
 ) {
   clear(results)
   if len(bvh.nodes) == 0 do return
-  
+
   sphere_bounds := sphere_bounds(sphere)
-  
+
   stack := make([dynamic]i32, 0, 64, context.temp_allocator)
   append(&stack, 0)
-  
+
   for len(stack) > 0 {
     node_idx := pop(&stack)
     node := &bvh.nodes[node_idx]
-    
+
     if !aabb_sphere_intersects(node.bounds, sphere.center, sphere.radius) do continue
-    
+
     if node.primitive_count > 0 {
       for i in node.primitive_start ..< node.primitive_start + node.primitive_count {
         prim := bvh.primitives[i]
@@ -859,19 +857,19 @@ bvh_insert_incremental :: proc(bvh: ^BVH($T), item: T) {
     bvh_build(bvh, items)
     return
   }
-  
+
   // Find best leaf node to insert into
   item_bounds := bvh.bounds_func(item)
   best_node_idx := find_best_insert_node(bvh, item_bounds)
-  
+
   // Insert into primitives array
   append(&bvh.primitives, item)
-  
+
   // Update leaf node to include new primitive
   leaf_node := &bvh.nodes[best_node_idx]
   leaf_node.primitive_count += 1
   leaf_node.bounds = aabb_union(leaf_node.bounds, item_bounds)
-  
+
   // Refit bounds up the tree
   bvh_refit_from_node(bvh, best_node_idx)
 }
@@ -879,31 +877,31 @@ bvh_insert_incremental :: proc(bvh: ^BVH($T), item: T) {
 @(private)
 find_best_insert_node :: proc(bvh: ^BVH($T), item_bounds: Aabb) -> int {
   if len(bvh.nodes) == 0 do return -1
-  
+
   current_idx := 0
-  
+
   for {
     node := &bvh.nodes[current_idx]
-    
+
     // If leaf node, return it
     if node.primitive_count > 0 {
       return current_idx
     }
-    
+
     // Choose child with minimum cost increase
     left_node := &bvh.nodes[node.left_child]
     right_node := &bvh.nodes[node.right_child]
-    
+
     left_cost := aabb_surface_area(aabb_union(left_node.bounds, item_bounds)) - aabb_surface_area(left_node.bounds)
     right_cost := aabb_surface_area(aabb_union(right_node.bounds, item_bounds)) - aabb_surface_area(right_node.bounds)
-    
+
     if left_cost < right_cost {
       current_idx = node.left_child
     } else {
       current_idx = node.right_child
     }
   }
-  
+
   return current_idx
 }
 

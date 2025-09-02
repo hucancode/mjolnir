@@ -6,7 +6,7 @@ import "core:slice"
 import "core:time"
 import "core:math"
 import "core:math/linalg"
-import recast "../recast"
+import "../recast"
 
 // Create navigation mesh from Recast polygon mesh
 create_navmesh :: proc(pmesh: ^recast.Poly_Mesh, dmesh: ^recast.Poly_Mesh_Detail, walkable_height: f32, walkable_radius: f32, walkable_climb: f32) -> (nav_mesh: ^Nav_Mesh, ok: bool) {

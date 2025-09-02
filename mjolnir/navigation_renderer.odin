@@ -8,7 +8,7 @@ import "core:slice"
 import "geometry"
 import "gpu"
 import "resource"
-import recast "navigation/recast"
+import "navigation/recast"
 import vk "vendor:vulkan"
 
 // Navigation mesh rendering component

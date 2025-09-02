@@ -5,8 +5,8 @@ import "core:math/linalg"
 import "core:slice"
 import "geometry"
 import "resource"
-import recast "navigation/recast"
-import detour "navigation/detour"
+import "navigation/recast"
+import "navigation/detour"
 
 // Navigation integration for Mjolnir engine
 // Uses types defined in other mjolnir package files

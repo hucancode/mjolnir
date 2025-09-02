@@ -2,7 +2,7 @@ package navigation_recast
 
 import "core:slice"
 import "core:log"
-import geometry "../../geometry"
+import "../../geometry"
 import "core:time"
 import "core:math"
 import "core:math/linalg"
@@ -18,6 +18,13 @@ Contour_Region :: struct {
     outline: ^Contour,
     holes: []Contour_Hole,
     nholes: i32,
+}
+
+// Inject element at specific index in dynamic array
+inject_at :: proc(arr: ^[dynamic]$T, index: int, value: T) {
+    resize(arr, len(arr) + 1)  // Expand slice
+    copy(arr[index+1:], arr[index:len(arr)-1])  // Shift elements right
+    arr[index] = value  // Insert new value
 }
 
 // Build compact heightfield from regular heightfield

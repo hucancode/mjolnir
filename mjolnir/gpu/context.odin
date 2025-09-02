@@ -291,7 +291,7 @@ score_physical_device :: proc(
   }
   log.infof("vulkan: device supports all required extensions")
   support := query_swapchain_support(device, self.surface) or_return
-  defer swapchain_support_deinit(&support) // Clean up since we're not transferring ownership
+  defer swapchain_support_deinit(&support)
   if len(support.formats) == 0 || len(support.present_modes) == 0 {
     log.infof("Device %s: inadequate swapchain support.", device_name_cstring)
     return 0, .SUCCESS

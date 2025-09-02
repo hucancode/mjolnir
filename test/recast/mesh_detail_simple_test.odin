@@ -4,7 +4,7 @@ import "core:testing"
 import "core:log"
 import "core:time"
 import "core:math"
-import recast "../../mjolnir/navigation/recast"
+import "../../mjolnir/navigation/recast"
 
 @(test)
 test_recast_detail_compilation :: proc(t: ^testing.T) {

@@ -4,8 +4,8 @@ import "core:testing"
 import "core:log"
 import "core:time"
 import "core:slice"
-import recast "../../mjolnir/navigation/recast"
-import geometry "../../mjolnir/geometry"
+import "../../mjolnir/navigation/recast"
+import "../../mjolnir/geometry"
 
 @(test)
 test_mesh_vertex_hash :: proc(t: ^testing.T) {

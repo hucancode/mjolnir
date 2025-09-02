@@ -203,7 +203,7 @@ resource_deinit :: proc(
   for &entry in warehouse.nav_meshes.entries {
     if entry.generation > 0 && entry.active {
       // Clean up navigation mesh
-      // Note: detour mesh cleanup would be added here if needed
+      // TODO: detour mesh cleanup would be added here if needed
     }
   }
   delete(warehouse.nav_meshes.entries)
@@ -212,7 +212,7 @@ resource_deinit :: proc(
   for &entry in warehouse.nav_contexts.entries {
     if entry.generation > 0 && entry.active {
       // Clean up navigation contexts
-      // Note: context cleanup would be added here if needed
+      // TODO: context cleanup would be added here if needed
     }
   }
   delete(warehouse.nav_contexts.entries)

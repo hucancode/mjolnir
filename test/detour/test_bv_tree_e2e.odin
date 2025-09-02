@@ -4,8 +4,8 @@ import "core:testing"
 import "core:log"
 import "core:math"
 import "core:time"
-import nav_detour "../../mjolnir/navigation/detour"
-import recast "../../mjolnir/navigation/recast"
+import "../../mjolnir/navigation/detour"
+import "../../mjolnir/navigation/recast"
 
 @(test)
 test_bv_tree_e2e :: proc(t: ^testing.T) {
@@ -57,7 +57,7 @@ test_bv_tree_e2e :: proc(t: ^testing.T) {
     mesh.flags = flags
 
     // Create navmesh data
-    params: nav_detour.Create_Nav_Mesh_Data_Params
+    params: detour.Create_Nav_Mesh_Data_Params
     params.poly_mesh = &mesh
     params.poly_mesh_detail = nil
     params.walkable_height = 2.0
@@ -67,7 +67,7 @@ test_bv_tree_e2e :: proc(t: ^testing.T) {
     params.tile_y = 0
     params.tile_layer = 0
 
-    nav_data, create_status := nav_detour.create_nav_mesh_data(&params)
+    nav_data, create_status := detour.create_nav_mesh_data(&params)
     if !recast.status_succeeded(create_status) {
         log.errorf("Failed to create nav mesh data: %v", create_status)
         testing.fail(t)
@@ -78,7 +78,7 @@ test_bv_tree_e2e :: proc(t: ^testing.T) {
     log.infof("Created navmesh data: %d bytes", len(nav_data))
 
     // Parse the header to verify BV tree
-    header := cast(^nav_detour.Mesh_Header)raw_data(nav_data)
+    header := cast(^detour.Mesh_Header)raw_data(nav_data)
     log.infof("Navmesh header: polys=%d, verts=%d, bv_nodes=%d",
               header.poly_count, header.vert_count, header.bv_node_count)
 
@@ -89,11 +89,11 @@ test_bv_tree_e2e :: proc(t: ^testing.T) {
     }
 
     // Calculate offsets to find BV tree
-    header_size := size_of(nav_detour.Mesh_Header)
+    header_size := size_of(detour.Mesh_Header)
     verts_size := size_of([3]f32) * int(header.vert_count)
-    polys_size := size_of(nav_detour.Poly) * int(header.poly_count)
-    links_size := size_of(nav_detour.Link) * int(header.max_link_count)
-    detail_meshes_size := size_of(nav_detour.Poly_Detail) * int(header.detail_mesh_count)
+    polys_size := size_of(detour.Poly) * int(header.poly_count)
+    links_size := size_of(detour.Link) * int(header.max_link_count)
+    detail_meshes_size := size_of(detour.Poly_Detail) * int(header.detail_mesh_count)
     detail_verts_size := size_of([3]f32) * int(header.detail_vert_count)
     detail_tris_size := size_of(u8) * int(header.detail_tri_count) * 4
 
@@ -101,11 +101,11 @@ test_bv_tree_e2e :: proc(t: ^testing.T) {
                  detail_meshes_size + detail_verts_size + detail_tris_size
 
     // Get BV tree nodes
-    bv_nodes := cast(^nav_detour.BV_Node)(raw_data(nav_data)[bv_offset:])
+    bv_nodes := cast(^detour.BV_Node)(raw_data(nav_data)[bv_offset:])
 
     log.info("BV Tree nodes from navmesh data:")
     for i in 0..<int(header.bv_node_count) {
-        node := cast(^nav_detour.BV_Node)(uintptr(bv_nodes) + uintptr(i * size_of(nav_detour.BV_Node)))
+        node := cast(^detour.BV_Node)(uintptr(bv_nodes) + uintptr(i * size_of(detour.BV_Node)))
         log.infof("  Node %d: bmin=[%d,%d,%d], bmax=[%d,%d,%d], i=%d",
                   i, node.bmin[0], node.bmin[1], node.bmin[2],
                   node.bmax[0], node.bmax[1], node.bmax[2], node.i)
@@ -118,24 +118,24 @@ test_bv_tree_e2e :: proc(t: ^testing.T) {
     }
 
     // Now create a navigation mesh and add the tile
-    nav_mesh_params: nav_detour.Nav_Mesh_Params
+    nav_mesh_params: detour.Nav_Mesh_Params
     nav_mesh_params.orig = mesh.bmin
     nav_mesh_params.tile_width = mesh.bmax[0] - mesh.bmin[0]
     nav_mesh_params.tile_height = mesh.bmax[2] - mesh.bmin[2]
     nav_mesh_params.max_tiles = 1
     nav_mesh_params.max_polys = 1024
 
-    nav_mesh: nav_detour.Nav_Mesh
-    init_status := nav_detour.nav_mesh_init(&nav_mesh, &nav_mesh_params)
+    nav_mesh: detour.Nav_Mesh
+    init_status := detour.nav_mesh_init(&nav_mesh, &nav_mesh_params)
     if !recast.status_succeeded(init_status) {
         log.errorf("Failed to init nav mesh: %v", init_status)
         testing.fail(t)
         return
     }
-    defer nav_detour.nav_mesh_destroy(&nav_mesh)
+    defer detour.nav_mesh_destroy(&nav_mesh)
 
     // Add the tile
-    tile_ref, add_status := nav_detour.nav_mesh_add_tile(&nav_mesh, nav_data, 0)
+    tile_ref, add_status := detour.nav_mesh_add_tile(&nav_mesh, nav_data, 0)
     if !recast.status_succeeded(add_status) {
         log.errorf("Failed to add tile: %v", add_status)
         testing.fail(t)
@@ -148,19 +148,19 @@ test_bv_tree_e2e :: proc(t: ^testing.T) {
     test_point := [3]f32{5.0, 0.0, 5.0}  // Center of floor
     extent := [3]f32{1.0, 2.0, 1.0}
 
-    query: nav_detour.Nav_Mesh_Query
-    query_status := nav_detour.nav_mesh_query_init(&query, &nav_mesh, 512)
+    query: detour.Nav_Mesh_Query
+    query_status := detour.nav_mesh_query_init(&query, &nav_mesh, 512)
     if !recast.status_succeeded(query_status) {
         log.errorf("Failed to init query: %v", query_status)
         testing.fail(t)
         return
     }
-    defer nav_detour.nav_mesh_query_destroy(&query)
+    defer detour.nav_mesh_query_destroy(&query)
 
-    filter: nav_detour.Query_Filter
-    nav_detour.query_filter_init(&filter)
+    filter: detour.Query_Filter
+    detour.query_filter_init(&filter)
 
-    find_status, nearest_poly, nearest_point := nav_detour.find_nearest_poly(&query, test_point, extent, &filter)
+    find_status, nearest_poly, nearest_point := detour.find_nearest_poly(&query, test_point, extent, &filter)
     if !recast.status_succeeded(find_status) {
         log.errorf("Failed to find nearest poly: %v", find_status)
         testing.fail(t)

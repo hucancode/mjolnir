@@ -4,7 +4,7 @@ import "core:log"
 import "core:testing"
 import "core:time"
 import "core:math"
-import recast "../../mjolnir/navigation/recast"
+import "../../mjolnir/navigation/recast"
 
 // Final integration test: Complete navmesh generation for a scene with walkable field and obstacle
 @(test)

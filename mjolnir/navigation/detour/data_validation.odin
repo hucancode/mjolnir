@@ -1,7 +1,7 @@
 package navigation_detour
 
 import "core:log"
-import recast "../recast"
+import "../recast"
 
 // Data format validation for navigation mesh structures
 // This replaces "hope it matches C++" with explicit verification

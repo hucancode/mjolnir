@@ -213,13 +213,13 @@ build_compact_heightfield_from_hf :: proc(
   if chf == nil do return nil, false
 
   // Need to import the builder module
-  success = build_compact_heightfield(
+  ok := build_compact_heightfield(
     walkable_height,
     walkable_climb,
     hf,
     chf,
   )
-  if !success {
+  if !ok {
     free_compact_heightfield(chf)
     return nil, false
   }

@@ -4,8 +4,8 @@ import "core:testing"
 import "core:log"
 import "core:math"
 import "core:time"
-import nav_detour "../../mjolnir/navigation/detour"
-import recast "../../mjolnir/navigation/recast"
+import "../../mjolnir/navigation/detour"
+import "../../mjolnir/navigation/recast"
 
 @(test)
 test_bv_tree_construction :: proc(t: ^testing.T) {
@@ -91,8 +91,8 @@ test_bv_tree_construction :: proc(t: ^testing.T) {
     }
 
     // Build BV tree
-    nodes := make([]nav_detour.BV_Node, 4)
-    nav_detour.build_bv_tree(&mesh, nodes, 4, nil)
+    nodes := make([]detour.BV_Node, 4)
+    detour.build_bv_tree(&mesh, nodes, 4, nil)
 
     log.info("\nOdin BV Tree Nodes:")
     for node, i in nodes {

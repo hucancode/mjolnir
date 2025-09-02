@@ -7,7 +7,7 @@ import "core:math/linalg"
 import "core:container/priority_queue"
 import "core:slice"
 import "core:log"
-import recast "../recast"
+import "../recast"
 
 // Heuristic scale factor for A* pathfinding
 // Slightly less than 1.0 to keep the heuristic admissible and guarantee optimal paths
@@ -562,12 +562,9 @@ init_sliced_find_path :: proc(query: ^Nav_Mesh_Query, start_ref: recast.Poly_Ref
 }
 
 // Update sliced pathfinding
-update_sliced_find_path :: proc(query: ^Nav_Mesh_Query, max_iter: i32, done_iters: ^i32) -> recast.Status {
+update_sliced_find_path :: proc(query: ^Nav_Mesh_Query, max_iter: i32) -> (done_iters: i32, status: recast.Status) {
     if query.query_data.status != {.In_Progress} {
-        if done_iters != nil {
-            done_iters^ = 0
-        }
-        return query.query_data.status
+        return 0, query.query_data.status
     }
 
     iterations := i32(0)
@@ -599,10 +596,7 @@ update_sliced_find_path :: proc(query: ^Nav_Mesh_Query, max_iter: i32, done_iter
         if current.id == query.query_data.end_ref {
             query.query_data.last_best = current
             query.query_data.status = {.Success}
-            if done_iters != nil {
-                done_iters^ = iterations
-            }
-            return query.query_data.status
+            return iterations, query.query_data.status
         }
 
         // Expand neighbors (similar to find_path but simplified)
@@ -676,16 +670,12 @@ update_sliced_find_path :: proc(query: ^Nav_Mesh_Query, max_iter: i32, done_iter
         }
     }
 
-    if done_iters != nil {
-        done_iters^ = iterations
-    }
-
     // Check if search is exhausted
     if node_queue_empty(&query.open_list) {
         query.query_data.status = {.Success} // Partial success - return best found
     }
 
-    return query.query_data.status
+    return iterations, query.query_data.status
 }
 
 // Finalize sliced pathfinding
@@ -732,8 +722,7 @@ find_path_sliced :: proc(query: ^Nav_Mesh_Query, start_ref: recast.Poly_Ref,
     // Run until completion
     iter_count := 0
     for iter_count < 10000 {
-        done_iters := i32(0)
-        update_status := update_sliced_find_path(query, max_iterations_per_slice, &done_iters)
+        done_iters, update_status := update_sliced_find_path(query, max_iterations_per_slice)
         iter_count += int(done_iters)
 
         if update_status != {.In_Progress} {

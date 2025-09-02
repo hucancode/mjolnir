@@ -49,13 +49,10 @@ octree_deinit :: proc(octree: ^Octree($T)) {
 @(private)
 octree_node_deinit :: proc(node: ^OctreeNode($T)) {
   if node == nil do return
-  for i in 0 ..< 8 {
-    if node.children[i] != nil {
-      octree_node_deinit(node.children[i])
-      free(node.children[i])
-    }
+  for child in node.children {
+    octree_node_deinit(child)
+    free(child)
   }
-
   delete(node.items)
 }
 
@@ -71,11 +68,9 @@ get_octant :: proc(center: [3]f32, point: [3]f32) -> i32 {
 @(private)
 get_octant_for_aabb :: proc(node_center: [3]f32, aabb: Aabb) -> i32 {
   aabb_center := aabb_center(aabb)
-
   if aabb.min.x < node_center.x && aabb.max.x > node_center.x do return -1
   if aabb.min.y < node_center.y && aabb.max.y > node_center.y do return -1
   if aabb.min.z < node_center.z && aabb.max.z > node_center.z do return -1
-
   return get_octant(node_center, aabb_center)
 }
 
@@ -83,11 +78,9 @@ get_octant_for_aabb :: proc(node_center: [3]f32, aabb: Aabb) -> i32 {
 get_child_bounds :: proc(parent: ^OctreeNode($T), octant: i32) -> Aabb {
   size := (parent.bounds.max - parent.bounds.min) * 0.5
   min := parent.bounds.min
-
   if octant & 1 != 0 do min.x += size.x
   if octant & 2 != 0 do min.y += size.y
   if octant & 4 != 0 do min.z += size.z
-
   return Aabb{min = min, max = min + size}
 }
 
@@ -137,12 +130,9 @@ octree_subdivide :: proc(node: ^OctreeNode($T)) {
 @(private)
 should_subdivide :: proc(octree: ^Octree($T), node: ^OctreeNode(T)) -> bool {
   if node.depth >= octree.max_depth do return false
-
   size := min_vec3(node.bounds.max - node.bounds.min)
   if size <= octree.min_size do return false
-
   if i32(len(node.items)) <= octree.max_items do return false
-
   octant_counts: [8]i32
   for item in node.items {
     bounds := octree.bounds_func(item)
@@ -150,20 +140,12 @@ should_subdivide :: proc(octree: ^Octree($T), node: ^OctreeNode(T)) -> bool {
     if octant >= 0 do octant_counts[octant] += 1
     else do return true
   }
-
-  non_empty := 0
-  for count in octant_counts {
-    if count > 0 do non_empty += 1
-  }
-
-  return non_empty > 1
+  return slice.count_proc(octant_counts[:], proc(x:i32) -> bool { return x > 0 }) > 1
 }
 
 octree_insert :: proc(octree: ^Octree($T), item: T) -> bool {
   bounds := octree.bounds_func(item)
-
   if !aabb_contains(octree.root.bounds, bounds) do return false
-
   return octree_node_insert(octree, octree.root, item, bounds)
 }
 
@@ -177,20 +159,16 @@ octree_node_insert :: proc(
   if node.children[0] == nil {
     append(&node.items, item)
     node.total_items += 1
-
     if should_subdivide(octree, node) {
       octree_subdivide(node)
-
       old_items := node.items[:]
       clear(&node.items)
       node.total_items = i32(len(node.items))
-
       for old_item in old_items {
         old_bounds := octree.bounds_func(old_item)
         octree_node_insert_to_children(octree, node, old_item, old_bounds)
       }
     }
-
     return true
   }
 

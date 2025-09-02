@@ -1,10 +1,194 @@
 package navigation_recast
 
 import "core:mem"
+import "core:fmt"
 import "core:log"
 import "core:math"
 import "core:math/linalg"
 
+// ========================================
+// STANDARDIZED ERROR HANDLING SYSTEM
+// ========================================
+
+// Navigation error categories for structured error handling
+Nav_Error_Category :: enum u8 {
+    None = 0,
+
+    // Input validation errors
+    Invalid_Parameter,
+    Invalid_Geometry,
+    Invalid_Configuration,
+
+    // Resource errors
+    Out_Of_Memory,
+    Buffer_Too_Small,
+    Resource_Exhausted,
+
+    // Algorithm errors
+    Algorithm_Failed,
+    Convergence_Failed,
+    Numerical_Instability,
+
+    // I/O errors
+    File_Not_Found,
+    File_Corrupted,
+    Serialization_Failed,
+
+    // System errors
+    Thread_Error,
+    Timeout,
+    Internal_Error,
+}
+
+// Navigation error with detailed context
+Nav_Error :: struct {
+    category:    Nav_Error_Category,
+    code:        u32,                // Specific error code within category
+    message:     string,             // Human-readable error message
+    ctx:         string,             // Additional context (function name, file, etc.)
+    inner_error: ^Nav_Error,         // Nested error for error chains
+}
+
+// Result type for operations that can fail
+Nav_Result :: struct($T: typeid) {
+    value:   T,
+    error:   Nav_Error,
+    success: bool,
+}
+
+
+// Get direction offsets for 4-connected grid
+get_dir_offset_x :: proc "contextless" (dir: int) -> i32 {
+    offset := [4]i32{-1, 0, 1, 0}
+    return offset[dir & 0x03]
+}
+
+get_dir_offset_y :: proc "contextless" (dir: int) -> i32 {
+    offset := [4]i32{0, 1, 0, -1}
+    return offset[dir & 0x03]
+}
+// ========================================
+// ERROR CREATION HELPERS
+// ========================================
+
+// Create a successful result
+nav_ok :: proc($T: typeid, value: T) -> Nav_Result(T) {
+    return Nav_Result(T){
+        value = value,
+        error = {},
+        success = true,
+    }
+}
+
+// Create a simple success result for bool
+nav_success :: proc() -> Nav_Result(bool) {
+    return nav_ok(bool, true)
+}
+
+// Create an error result
+nav_error :: proc($T: typeid, category: Nav_Error_Category, message: string,
+                 ctx: string = "", code: u32 = 0) -> Nav_Result(T) {
+    return Nav_Result(T){
+        value = {},
+        error = Nav_Error{
+            category = category,
+            code = code,
+            message = message,
+            ctx = ctx,
+        },
+        success = false,
+    }
+}
+
+// Create error with context automatically captured
+nav_error_here :: proc($T: typeid, category: Nav_Error_Category, message: string,
+                      code: u32 = 0, loc := #caller_location) -> Nav_Result(T) {
+    ctx := fmt.tprintf("%s:%d", loc.procedure, loc.line)
+    return nav_error(T, category, message, ctx, code)
+}
+
+// Chain errors for error propagation
+nav_error_chain :: proc($T: typeid, category: Nav_Error_Category, message: string,
+                       inner: Nav_Error, ctx: string = "", code: u32 = 0) -> Nav_Result(T) {
+    inner_copy := new(Nav_Error)
+    inner_copy^ = inner
+
+    return Nav_Result(T){
+        value = {},
+        error = Nav_Error{
+            category = category,
+            code = code,
+            message = message,
+            ctx = ctx,
+            inner_error = inner_copy,
+        },
+        success = false,
+    }
+}
+
+// ========================================
+// VALIDATION HELPERS
+// ========================================
+
+// Check if result is successful
+nav_is_ok :: proc(result: Nav_Result($T)) -> bool {
+    return result.success
+}
+
+// Check if result is an error
+nav_is_error :: proc(result: Nav_Result($T)) -> bool {
+    return !result.success
+}
+
+// Convert Status to Nav_Result
+nav_from_status :: proc(status: Status) -> Nav_Result(Status) {
+    if status_succeeded(status) {
+        return nav_ok(Status, status)
+    }
+
+    // Map status flags to error categories
+    category := Nav_Error_Category.Algorithm_Failed
+    message := "Unknown error"
+
+    if .Invalid_Param in status {
+        category = .Invalid_Parameter
+        message = "Invalid parameter"
+    } else if .Out_Of_Memory in status {
+        category = .Out_Of_Memory
+        message = "Out of memory"
+    } else if .Buffer_Too_Small in status {
+        category = .Buffer_Too_Small
+        message = "Buffer too small"
+    } else if .Out_Of_Nodes in status {
+        category = .Resource_Exhausted
+        message = "Out of pathfinding nodes"
+    } else if .Wrong_Magic in status {
+        category = .File_Corrupted
+        message = "Invalid file format (wrong magic number)"
+    } else if .Wrong_Version in status {
+        category = .File_Corrupted
+        message = "Unsupported file version"
+    }
+
+    return nav_error(Status, category, message)
+}
+
+// Validate pointer is not nil
+nav_require_non_nil :: proc(ptr: rawptr, name: string, loc := #caller_location) -> Nav_Result(bool) {
+    if ptr == nil {
+        return nav_error_here(bool, .Invalid_Parameter, fmt.tprintf("Parameter '%s' cannot be nil", name))
+    }
+    return nav_success()
+}
+
+// Validate positive value
+nav_require_positive :: proc(value: $T, name: string, loc := #caller_location) -> Nav_Result(bool) {
+    if value <= 0 {
+        return nav_error_here(bool, .Invalid_Parameter,
+                             fmt.tprintf("Parameter '%s' (%v) must be positive", name, value))
+    }
+    return nav_success()
+}
 // Build types for region partitioning
 Partition_Type :: enum {
     Watershed,

@@ -2,8 +2,8 @@ package test_detour
 
 import "core:testing"
 import "core:log"
-import recast "../../mjolnir/navigation/recast"
-import nav_detour "../../mjolnir/navigation/detour"
+import "../../mjolnir/navigation/recast"
+import "../../mjolnir/navigation/detour"
 import "core:math"
 
 @(test)
@@ -45,7 +45,7 @@ test_bv_tree_y_remapping :: proc(t: ^testing.T) {
     poly_base := i32(0)
     quant_factor := 1.0 / pmesh.cs
 
-    bounds := nav_detour.calc_polygon_bounds_fast(&pmesh, poly_base, pmesh.nvp, quant_factor)
+    bounds := detour.calc_polygon_bounds_fast(&pmesh, poly_base, pmesh.nvp, quant_factor)
 
     // Calculate expected Y remapping as C++ does
     ch_cs_ratio := pmesh.ch / pmesh.cs  // 0.2 / 0.3 = 0.667

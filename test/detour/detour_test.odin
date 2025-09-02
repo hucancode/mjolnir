@@ -5,28 +5,28 @@ import "core:time"
 import "core:math"
 import "core:math/linalg"
 import "core:log"
-import recast "../../mjolnir/navigation/recast"
-import nav_detour "../../mjolnir/navigation/detour"
+import "../../mjolnir/navigation/recast"
+import "../../mjolnir/navigation/detour"
 
 @(test)
 test_detour_basic_types :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
 
     // Test polygon creation and manipulation
-    poly := nav_detour.Poly{}
+    poly := detour.Poly{}
 
-    nav_detour.poly_set_area(&poly, 5)
-    testing.expect_value(t, nav_detour.poly_get_area(&poly), 5)
+    detour.poly_set_area(&poly, 5)
+    testing.expect_value(t, detour.poly_get_area(&poly), 5)
 
-    nav_detour.poly_set_type(&poly, recast.DT_POLYTYPE_GROUND)
-    testing.expect_value(t, nav_detour.poly_get_type(&poly), recast.DT_POLYTYPE_GROUND)
+    detour.poly_set_type(&poly, recast.DT_POLYTYPE_GROUND)
+    testing.expect_value(t, detour.poly_get_type(&poly), recast.DT_POLYTYPE_GROUND)
 
-    nav_detour.poly_set_type(&poly, recast.DT_POLYTYPE_OFFMESH_CONNECTION)
-    testing.expect_value(t, nav_detour.poly_get_type(&poly), recast.DT_POLYTYPE_OFFMESH_CONNECTION)
+    detour.poly_set_type(&poly, recast.DT_POLYTYPE_OFFMESH_CONNECTION)
+    testing.expect_value(t, detour.poly_get_type(&poly), recast.DT_POLYTYPE_OFFMESH_CONNECTION)
 
     // Test query filter
-    filter := nav_detour.Query_Filter{}
-    nav_detour.query_filter_init(&filter)
+    filter := detour.Query_Filter{}
+    detour.query_filter_init(&filter)
 
     testing.expect_value(t, filter.include_flags, 0xffff)
     testing.expect_value(t, filter.exclude_flags, 0)
@@ -38,10 +38,10 @@ test_detour_basic_types :: proc(t: ^testing.T) {
 test_detour_navmesh_init :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
 
-    nav_mesh := nav_detour.Nav_Mesh{}
-    defer nav_detour.nav_mesh_destroy(&nav_mesh)
+    nav_mesh := detour.Nav_Mesh{}
+    defer detour.nav_mesh_destroy(&nav_mesh)
 
-    params := nav_detour.Nav_Mesh_Params{
+    params := detour.Nav_Mesh_Params{
         orig = {0, 0, 0},
         tile_width = 10.0,
         tile_height = 10.0,
@@ -49,7 +49,7 @@ test_detour_navmesh_init :: proc(t: ^testing.T) {
         max_polys = 256,
     }
 
-    status := nav_detour.nav_mesh_init(&nav_mesh, &params)
+    status := detour.nav_mesh_init(&nav_mesh, &params)
     testing.expect(t, recast.status_succeeded(status), "NavMesh initialization should succeed")
 
     testing.expect_value(t, nav_mesh.max_tiles, 64)
@@ -63,10 +63,10 @@ test_detour_navmesh_init :: proc(t: ^testing.T) {
 test_detour_reference_encoding :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
 
-    nav_mesh := nav_detour.Nav_Mesh{}
-    defer nav_detour.nav_mesh_destroy(&nav_mesh)
+    nav_mesh := detour.Nav_Mesh{}
+    defer detour.nav_mesh_destroy(&nav_mesh)
 
-    params := nav_detour.Nav_Mesh_Params{
+    params := detour.Nav_Mesh_Params{
         orig = {0, 0, 0},
         tile_width = 10.0,
         tile_height = 10.0,
@@ -74,7 +74,7 @@ test_detour_reference_encoding :: proc(t: ^testing.T) {
         max_polys = 256,
     }
 
-    status := nav_detour.nav_mesh_init(&nav_mesh, &params)
+    status := detour.nav_mesh_init(&nav_mesh, &params)
     testing.expect(t, recast.status_succeeded(status), "NavMesh initialization should succeed")
 
     // Test polygon reference encoding/decoding
@@ -82,8 +82,8 @@ test_detour_reference_encoding :: proc(t: ^testing.T) {
     tile_index := u32(12)
     poly_index := u32(35)
 
-    ref := nav_detour.encode_poly_id(&nav_mesh, salt, tile_index, poly_index)
-    decoded_salt, decoded_tile, decoded_poly := nav_detour.decode_poly_id(&nav_mesh, ref)
+    ref := detour.encode_poly_id(&nav_mesh, salt, tile_index, poly_index)
+    decoded_salt, decoded_tile, decoded_poly := detour.decode_poly_id(&nav_mesh, ref)
 
     testing.expect_value(t, decoded_salt, salt)
     testing.expect_value(t, decoded_tile, tile_index)
@@ -94,29 +94,29 @@ test_detour_reference_encoding :: proc(t: ^testing.T) {
 test_detour_pathfinding_context :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
 
-    ctx := nav_detour.Pathfinding_Context{}
-    defer nav_detour.pathfinding_context_destroy(&ctx)
+    ctx := detour.Pathfinding_Context{}
+    defer detour.pathfinding_context_destroy(&ctx)
 
-    status := nav_detour.pathfinding_context_init(&ctx, 16)
+    status := detour.pathfinding_context_init(&ctx, 16)
     testing.expect(t, recast.status_succeeded(status), "Pathfinding context initialization should succeed")
 
     // Test node creation
     ref1 := recast.Poly_Ref(100)
-    node1 := nav_detour.create_node(&ctx, ref1)
+    node1 := detour.create_node(&ctx, ref1)
     testing.expect(t, node1 != nil, "Node creation should succeed")
     testing.expect_value(t, node1.id, ref1)
 
     // Test node retrieval
-    retrieved := nav_detour.get_node(&ctx, ref1)
+    retrieved := detour.get_node(&ctx, ref1)
     testing.expect(t, retrieved == node1, "Retrieved node should match created node")
 
     // Test duplicate creation (should return existing)
-    node1_dup := nav_detour.create_node(&ctx, ref1)
+    node1_dup := detour.create_node(&ctx, ref1)
     testing.expect(t, node1_dup != nil, "Duplicate node creation should not fail")
 
     // Test context clearing
-    nav_detour.pathfinding_context_clear(&ctx)
-    cleared := nav_detour.get_node(&ctx, ref1)
+    detour.pathfinding_context_clear(&ctx)
+    cleared := detour.get_node(&ctx, ref1)
     testing.expect(t, cleared == nil, "Node should not exist after clearing")
 }
 
@@ -124,45 +124,45 @@ test_detour_pathfinding_context :: proc(t: ^testing.T) {
 test_detour_node_queue :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
 
-    ctx := nav_detour.Pathfinding_Context{}
-    defer nav_detour.pathfinding_context_destroy(&ctx)
+    ctx := detour.Pathfinding_Context{}
+    defer detour.pathfinding_context_destroy(&ctx)
 
-    queue := nav_detour.Node_Queue{}
-    defer nav_detour.node_queue_destroy(&queue)
+    queue := detour.Node_Queue{}
+    defer detour.node_queue_destroy(&queue)
 
-    nav_detour.pathfinding_context_init(&ctx, 16)
-    nav_detour.node_queue_init(&queue, 16)
+    detour.pathfinding_context_init(&ctx, 16)
+    detour.node_queue_init(&queue, 16)
 
     // Create nodes with different costs
     ref1 := recast.Poly_Ref(100)
     ref2 := recast.Poly_Ref(200)
     ref3 := recast.Poly_Ref(300)
 
-    node1 := nav_detour.create_node(&ctx, ref1)
-    node2 := nav_detour.create_node(&ctx, ref2)
-    node3 := nav_detour.create_node(&ctx, ref3)
+    node1 := detour.create_node(&ctx, ref1)
+    node2 := detour.create_node(&ctx, ref2)
+    node3 := detour.create_node(&ctx, ref3)
 
     node1.total = 10.0
     node2.total = 5.0
     node3.total = 15.0
 
     // Test queue operations
-    testing.expect(t, nav_detour.node_queue_empty(&queue), "Queue should start empty")
+    testing.expect(t, detour.node_queue_empty(&queue), "Queue should start empty")
 
-    nav_detour.node_queue_push(&queue, {ref1, node1.cost, node1.total})
-    nav_detour.node_queue_push(&queue, {ref2, node2.cost, node2.total})
-    nav_detour.node_queue_push(&queue, {ref3, node3.cost, node3.total})
+    detour.node_queue_push(&queue, {ref1, node1.cost, node1.total})
+    detour.node_queue_push(&queue, {ref2, node2.cost, node2.total})
+    detour.node_queue_push(&queue, {ref3, node3.cost, node3.total})
 
-    testing.expect(t, !nav_detour.node_queue_empty(&queue), "Queue should not be empty")
+    testing.expect(t, !detour.node_queue_empty(&queue), "Queue should not be empty")
 
     // Should pop in order of lowest total cost first
-    first := nav_detour.node_queue_pop(&queue)
+    first := detour.node_queue_pop(&queue)
     testing.expect_value(t, first.ref, ref2) // node2 has lowest total (5.0)
 
-    second := nav_detour.node_queue_pop(&queue)
+    second := detour.node_queue_pop(&queue)
     testing.expect_value(t, second.ref, ref1) // node1 has second lowest total (10.0)
 
-    third := nav_detour.node_queue_pop(&queue)
+    third := detour.node_queue_pop(&queue)
     testing.expect_value(t, third.ref, ref3) // node3 has highest total (15.0)
 }
 
@@ -171,14 +171,14 @@ test_detour_node_queue_comprehensive :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
 
     // Test multiple scenarios to ensure priority queue works correctly
-    ctx := nav_detour.Pathfinding_Context{}
-    defer nav_detour.pathfinding_context_destroy(&ctx)
+    ctx := detour.Pathfinding_Context{}
+    defer detour.pathfinding_context_destroy(&ctx)
 
-    queue := nav_detour.Node_Queue{}
-    defer nav_detour.node_queue_destroy(&queue)
+    queue := detour.Node_Queue{}
+    defer detour.node_queue_destroy(&queue)
 
-    nav_detour.pathfinding_context_init(&ctx, 32)
-    nav_detour.node_queue_init(&queue, 32)
+    detour.pathfinding_context_init(&ctx, 32)
+    detour.node_queue_init(&queue, 32)
 
     // Test 1: Insert in ascending order, should pop in same order
     {
@@ -186,17 +186,17 @@ test_detour_node_queue_comprehensive :: proc(t: ^testing.T) {
         costs := []f32{1.0, 2.0, 3.0, 4.0, 5.0}
 
         for i in 0..<len(refs) {
-            node := nav_detour.create_node(&ctx, refs[i])
+            node := detour.create_node(&ctx, refs[i])
             node.total = costs[i]
-            nav_detour.node_queue_push(&queue, {refs[i], node.cost, node.total})
+            detour.node_queue_push(&queue, {refs[i], node.cost, node.total})
         }
 
         for i in 0..<len(refs) {
-            popped := nav_detour.node_queue_pop(&queue)
+            popped := detour.node_queue_pop(&queue)
             testing.expect_value(t, popped.ref, refs[i])
         }
 
-        nav_detour.pathfinding_context_clear(&ctx)
+        detour.pathfinding_context_clear(&ctx)
     }
 
     // Test 2: Insert in descending order, should pop in ascending cost order
@@ -206,17 +206,17 @@ test_detour_node_queue_comprehensive :: proc(t: ^testing.T) {
         expected_order := []recast.Poly_Ref{14, 13, 12, 11, 10}
 
         for i in 0..<len(refs) {
-            node := nav_detour.create_node(&ctx, refs[i])
+            node := detour.create_node(&ctx, refs[i])
             node.total = costs[i]
-            nav_detour.node_queue_push(&queue, {refs[i], node.cost, node.total})
+            detour.node_queue_push(&queue, {refs[i], node.cost, node.total})
         }
 
         for i in 0..<len(expected_order) {
-            popped := nav_detour.node_queue_pop(&queue)
+            popped := detour.node_queue_pop(&queue)
             testing.expect_value(t, popped.ref, expected_order[i])
         }
 
-        nav_detour.pathfinding_context_clear(&ctx)
+        detour.pathfinding_context_clear(&ctx)
     }
 
     // Test 3: Insert in random order, should pop in cost order
@@ -226,13 +226,13 @@ test_detour_node_queue_comprehensive :: proc(t: ^testing.T) {
         expected_order := []recast.Poly_Ref{21, 23, 20, 24, 22} // sorted by cost: 1.2, 2.1, 3.5, 3.9, 4.8
 
         for i in 0..<len(refs) {
-            node := nav_detour.create_node(&ctx, refs[i])
+            node := detour.create_node(&ctx, refs[i])
             node.total = costs[i]
-            nav_detour.node_queue_push(&queue, {refs[i], node.cost, node.total})
+            detour.node_queue_push(&queue, {refs[i], node.cost, node.total})
         }
 
         for i in 0..<len(expected_order) {
-            popped := nav_detour.node_queue_pop(&queue)
+            popped := detour.node_queue_pop(&queue)
             testing.expect_value(t, popped.ref, expected_order[i])
         }
     }
@@ -243,23 +243,23 @@ test_detour_node_queue_exact_problem :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
 
     // Test the exact scenario described in the issue
-    ctx := nav_detour.Pathfinding_Context{}
-    defer nav_detour.pathfinding_context_destroy(&ctx)
+    ctx := detour.Pathfinding_Context{}
+    defer detour.pathfinding_context_destroy(&ctx)
 
-    queue := nav_detour.Node_Queue{}
-    defer nav_detour.node_queue_destroy(&queue)
+    queue := detour.Node_Queue{}
+    defer detour.node_queue_destroy(&queue)
 
-    nav_detour.pathfinding_context_init(&ctx, 16)
-    nav_detour.node_queue_init(&queue, 16)
+    detour.pathfinding_context_init(&ctx, 16)
+    detour.node_queue_init(&queue, 16)
 
     // Create nodes with the exact same configuration as the original failing test
     node1_ref := recast.Poly_Ref(100)
     node2_ref := recast.Poly_Ref(200)
     node3_ref := recast.Poly_Ref(300)
 
-    node1 := nav_detour.create_node(&ctx, node1_ref)
-    node2 := nav_detour.create_node(&ctx, node2_ref)
-    node3 := nav_detour.create_node(&ctx, node3_ref)
+    node1 := detour.create_node(&ctx, node1_ref)
+    node2 := detour.create_node(&ctx, node2_ref)
+    node3 := detour.create_node(&ctx, node3_ref)
 
     // Set the exact same costs as described
     node1.total = 10.0
@@ -267,12 +267,12 @@ test_detour_node_queue_exact_problem :: proc(t: ^testing.T) {
     node3.total = 15.0
 
     // Push in the same order as the original test
-    nav_detour.node_queue_push(&queue, {node1_ref, node1.cost, node1.total})
-    nav_detour.node_queue_push(&queue, {node2_ref, node2.cost, node2.total})
-    nav_detour.node_queue_push(&queue, {node3_ref, node3.cost, node3.total})
+    detour.node_queue_push(&queue, {node1_ref, node1.cost, node1.total})
+    detour.node_queue_push(&queue, {node2_ref, node2.cost, node2.total})
+    detour.node_queue_push(&queue, {node3_ref, node3.cost, node3.total})
 
     // The first popped should be node2 (ref=200) with cost 5.0
-    first := nav_detour.node_queue_pop(&queue)
+    first := detour.node_queue_pop(&queue)
     if first.ref != node2_ref {
         testing.fail_now(t, "Priority queue test failed - expected node2 (200) first but got node1 (100)")
     }
@@ -288,39 +288,38 @@ test_detour_sliced_pathfinding_basic :: proc(t: ^testing.T) {
     nav_mesh := create_test_nav_mesh(t)
     defer destroy_test_nav_mesh(nav_mesh)
 
-    query := nav_detour.Nav_Mesh_Query{}
-    defer nav_detour.nav_mesh_query_destroy(&query)
+    query := detour.Nav_Mesh_Query{}
+    defer detour.nav_mesh_query_destroy(&query)
 
-    status := nav_detour.nav_mesh_query_init(&query, nav_mesh, 512)
+    status := detour.nav_mesh_query_init(&query, nav_mesh, 512)
     testing.expect(t, recast.status_succeeded(status), "Query initialization should succeed")
 
-    filter := nav_detour.Query_Filter{}
-    nav_detour.query_filter_init(&filter)
+    filter := detour.Query_Filter{}
+    detour.query_filter_init(&filter)
 
     // Find start and end polygons
     start_pos := [3]f32{1.0, 0.0, 1.0}
     end_pos := [3]f32{9.0, 0.0, 9.0}
     half_extents := [3]f32{1.0, 1.0, 1.0}
 
-    start_status, start_ref, start_nearest := nav_detour.find_nearest_poly(&query, start_pos, half_extents, &filter)
+    start_status, start_ref, start_nearest := detour.find_nearest_poly(&query, start_pos, half_extents, &filter)
     testing.expect(t, recast.status_succeeded(start_status), "Should find start polygon")
 
-    end_status, end_ref, end_nearest := nav_detour.find_nearest_poly(&query, end_pos, half_extents, &filter)
+    end_status, end_ref, end_nearest := detour.find_nearest_poly(&query, end_pos, half_extents, &filter)
     testing.expect(t, recast.status_succeeded(end_status), "Should find end polygon")
 
     // Test sliced pathfinding workflow
-    init_status := nav_detour.init_sliced_find_path(&query, start_ref, end_ref, start_nearest, end_nearest, &filter, 0)
+    init_status := detour.init_sliced_find_path(&query, start_ref, end_ref, start_nearest, end_nearest, &filter, 0)
     testing.expect(t, recast.status_succeeded(init_status), "Sliced pathfinding init should succeed")
 
     // Update until complete
     max_iterations := 10  // Reduced from 100
     total_iterations := 0
     for total_iterations < max_iterations {
-        done_iters := i32(0)
-        update_status := nav_detour.update_sliced_find_path(&query, 5, &done_iters)  // Reduced from 10
+        done_iters, update_status := detour.update_sliced_find_path(&query, 5)
         total_iterations += int(done_iters)
 
-        if update_status == {.In_Progress} {
+        if recast.status_in_progress(update_status) {
             continue
         } else if recast.status_succeeded(update_status) {
             break
@@ -341,7 +340,7 @@ test_detour_sliced_pathfinding_basic :: proc(t: ^testing.T) {
     path := make([]recast.Poly_Ref, 64)
     defer delete(path)
 
-    finalize_status, path_count := nav_detour.finalize_sliced_find_path(&query, path, 64)
+    finalize_status, path_count := detour.finalize_sliced_find_path(&query, path, 64)
     testing.expect(t, recast.status_succeeded(finalize_status), "Finalize should succeed")
     testing.expect(t, path_count > 0, "Should have found a path")
     testing.expect_value(t, path[0], start_ref)
@@ -354,32 +353,31 @@ test_detour_sliced_pathfinding_partial :: proc(t: ^testing.T) {
     nav_mesh := create_test_nav_mesh(t)
     defer destroy_test_nav_mesh(nav_mesh)
 
-    query := nav_detour.Nav_Mesh_Query{}
-    defer nav_detour.nav_mesh_query_destroy(&query)
+    query := detour.Nav_Mesh_Query{}
+    defer detour.nav_mesh_query_destroy(&query)
 
-    status := nav_detour.nav_mesh_query_init(&query, nav_mesh, 512)
+    status := detour.nav_mesh_query_init(&query, nav_mesh, 512)
     testing.expect(t, recast.status_succeeded(status), "Query initialization should succeed")
 
-    filter := nav_detour.Query_Filter{}
-    nav_detour.query_filter_init(&filter)
+    filter := detour.Query_Filter{}
+    detour.query_filter_init(&filter)
 
     start_pos := [3]f32{1.0, 0.0, 1.0}
     end_pos := [3]f32{9.0, 0.0, 9.0}
     half_extents := [3]f32{1.0, 1.0, 1.0}
 
-    start_status, start_ref, start_nearest := nav_detour.find_nearest_poly(&query, start_pos, half_extents, &filter)
+    start_status, start_ref, start_nearest := detour.find_nearest_poly(&query, start_pos, half_extents, &filter)
     testing.expect(t, recast.status_succeeded(start_status), "Should find start polygon")
 
-    end_status, end_ref, end_nearest := nav_detour.find_nearest_poly(&query, end_pos, half_extents, &filter)
+    end_status, end_ref, end_nearest := detour.find_nearest_poly(&query, end_pos, half_extents, &filter)
     testing.expect(t, recast.status_succeeded(end_status), "Should find end polygon")
 
     // Initialize sliced pathfinding
-    init_status := nav_detour.init_sliced_find_path(&query, start_ref, end_ref, start_nearest, end_nearest, &filter, 0)
+    init_status := detour.init_sliced_find_path(&query, start_ref, end_ref, start_nearest, end_nearest, &filter, 0)
     testing.expect(t, recast.status_succeeded(init_status), "Sliced pathfinding init should succeed")
 
     // Run only a few iterations to leave it incomplete
-    done_iters := i32(0)
-    update_status := nav_detour.update_sliced_find_path(&query, 2, &done_iters)
+    done_iters, update_status := detour.update_sliced_find_path(&query, 2)
     testing.expect(t, done_iters > 0, "Should have done some iterations")
 
     // Test partial finalization
@@ -387,7 +385,7 @@ test_detour_sliced_pathfinding_partial :: proc(t: ^testing.T) {
     path := make([]recast.Poly_Ref, 64)
     defer delete(path)
 
-    partial_status, path_count := nav_detour.finalize_sliced_find_path_partial(&query, existing, path, 64)
+    partial_status, path_count := detour.finalize_sliced_find_path_partial(&query, existing, path, 64)
     testing.expect(t, recast.status_succeeded(partial_status), "Partial finalize should succeed")
     testing.expect(t, path_count > 0, "Should have partial path")
 }
@@ -399,32 +397,31 @@ test_detour_sliced_pathfinding_errors :: proc(t: ^testing.T) {
     nav_mesh := create_test_nav_mesh(t)
     defer destroy_test_nav_mesh(nav_mesh)
 
-    query := nav_detour.Nav_Mesh_Query{}
-    defer nav_detour.nav_mesh_query_destroy(&query)
+    query := detour.Nav_Mesh_Query{}
+    defer detour.nav_mesh_query_destroy(&query)
 
-    status := nav_detour.nav_mesh_query_init(&query, nav_mesh, 512)
+    status := detour.nav_mesh_query_init(&query, nav_mesh, 512)
     testing.expect(t, recast.status_succeeded(status), "Query initialization should succeed")
 
-    filter := nav_detour.Query_Filter{}
-    nav_detour.query_filter_init(&filter)
+    filter := detour.Query_Filter{}
+    detour.query_filter_init(&filter)
 
     // Test with invalid references
     invalid_ref := recast.INVALID_POLY_REF
     pos := [3]f32{1.0, 0.0, 1.0}
 
-    init_status := nav_detour.init_sliced_find_path(&query, invalid_ref, invalid_ref, pos, pos, &filter, 0)
+    init_status := detour.init_sliced_find_path(&query, invalid_ref, invalid_ref, pos, pos, &filter, 0)
     testing.expect(t, recast.status_failed(init_status), "Init with invalid refs should fail")
 
     // Test update without init
-    done_iters := i32(0)
-    update_status := nav_detour.update_sliced_find_path(&query, 10, &done_iters)
+    done_iters, update_status := detour.update_sliced_find_path(&query, 10)
     testing.expect(t, recast.status_failed(update_status), "Update without init should fail")
 
     // Test finalize without proper setup
     path := make([]recast.Poly_Ref, 64)
     defer delete(path)
 
-    finalize_status, _ := nav_detour.finalize_sliced_find_path(&query, path, 64)
+    finalize_status, _ := detour.finalize_sliced_find_path(&query, path, 64)
     testing.expect(t, recast.status_failed(finalize_status), "Finalize without setup should fail")
 }
 
@@ -437,14 +434,14 @@ test_detour_end_to_end_pathfinding :: proc(t: ^testing.T) {
     nav_mesh := create_test_nav_mesh(t)
     defer destroy_test_nav_mesh(nav_mesh)
 
-    query := nav_detour.Nav_Mesh_Query{}
-    defer nav_detour.nav_mesh_query_destroy(&query)
+    query := detour.Nav_Mesh_Query{}
+    defer detour.nav_mesh_query_destroy(&query)
 
-    status := nav_detour.nav_mesh_query_init(&query, nav_mesh, 512)
+    status := detour.nav_mesh_query_init(&query, nav_mesh, 512)
     testing.expect(t, recast.status_succeeded(status), "Query initialization should succeed")
 
-    filter := nav_detour.Query_Filter{}
-    nav_detour.query_filter_init(&filter)
+    filter := detour.Query_Filter{}
+    detour.query_filter_init(&filter)
 
     // Test multiple paths to verify consistent priority queue behavior
     test_cases := []struct {
@@ -464,12 +461,12 @@ test_detour_end_to_end_pathfinding :: proc(t: ^testing.T) {
         // For each test case, verify pathfinding works correctly
         start_ref := recast.Poly_Ref(0)
         start_nearest := [3]f32{}
-        status, start_ref, start_nearest = nav_detour.find_nearest_poly(&query, test_case.start_pos, half_extents, &filter)
+        status, start_ref, start_nearest = detour.find_nearest_poly(&query, test_case.start_pos, half_extents, &filter)
         testing.expect(t, recast.status_succeeded(status), "Should find start polygon")
 
         end_ref := recast.Poly_Ref(0)
         end_nearest := [3]f32{}
-        status, end_ref, end_nearest = nav_detour.find_nearest_poly(&query, test_case.end_pos, half_extents, &filter)
+        status, end_ref, end_nearest = detour.find_nearest_poly(&query, test_case.end_pos, half_extents, &filter)
         testing.expect(t, recast.status_succeeded(status), "Should find end polygon")
 
         if start_ref == recast.INVALID_POLY_REF || end_ref == recast.INVALID_POLY_REF {
@@ -480,7 +477,7 @@ test_detour_end_to_end_pathfinding :: proc(t: ^testing.T) {
         path := make([]recast.Poly_Ref, 128)
         defer delete(path)
 
-        status, path_count := nav_detour.find_path(&query, start_ref, end_ref, start_nearest, end_nearest,
+        status, path_count := detour.find_path(&query, start_ref, end_ref, start_nearest, end_nearest,
                                                     &filter, path, 128)
         testing.expect(t, recast.status_succeeded(status), "Pathfinding should succeed")
         testing.expect(t, path_count > 0, "Path should contain at least one polygon")
@@ -489,7 +486,7 @@ test_detour_end_to_end_pathfinding :: proc(t: ^testing.T) {
         testing.expect_value(t, path[0], start_ref)
 
         // Generate straight path to further test the system
-        straight_path := make([]nav_detour.Straight_Path_Point, 32)
+        straight_path := make([]detour.Straight_Path_Point, 32)
         defer delete(straight_path)
 
         straight_path_flags := make([]u8, 32)
@@ -498,7 +495,7 @@ test_detour_end_to_end_pathfinding :: proc(t: ^testing.T) {
         straight_path_refs := make([]recast.Poly_Ref, 32)
         defer delete(straight_path_refs)
 
-        straight_status, straight_path_count := nav_detour.find_straight_path(&query, start_nearest, end_nearest, path, path_count,
+        straight_status, straight_path_count := detour.find_straight_path(&query, start_nearest, end_nearest, path, path_count,
                                                                       straight_path, straight_path_flags, straight_path_refs,
                                                                       32, 0)
         testing.expect(t, recast.status_succeeded(straight_status), "Straight path should succeed")
@@ -520,14 +517,14 @@ test_detour_spatial_queries :: proc(t: ^testing.T) {
     nav_mesh := create_test_nav_mesh(t)
     defer destroy_test_nav_mesh(nav_mesh)
 
-    query := nav_detour.Nav_Mesh_Query{}
-    defer nav_detour.nav_mesh_query_destroy(&query)
+    query := detour.Nav_Mesh_Query{}
+    defer detour.nav_mesh_query_destroy(&query)
 
-    status := nav_detour.nav_mesh_query_init(&query, nav_mesh, 256)
+    status := detour.nav_mesh_query_init(&query, nav_mesh, 256)
     testing.expect(t, recast.status_succeeded(status), "Query initialization should succeed")
 
-    filter := nav_detour.Query_Filter{}
-    nav_detour.query_filter_init(&filter)
+    filter := detour.Query_Filter{}
+    detour.query_filter_init(&filter)
 
     // Test find nearest polygon
     center := [3]f32{5.0, 0.0, 5.0}
@@ -536,7 +533,7 @@ test_detour_spatial_queries :: proc(t: ^testing.T) {
     nearest_ref := recast.Poly_Ref(0)
     nearest_pt := [3]f32{}
 
-    status, nearest_ref, nearest_pt = nav_detour.find_nearest_poly(&query, center, half_extents, &filter)
+    status, nearest_ref, nearest_pt = detour.find_nearest_poly(&query, center, half_extents, &filter)
     testing.expect(t, recast.status_succeeded(status), "Find nearest poly should succeed")
 
     // Test query polygons
@@ -544,7 +541,7 @@ test_detour_spatial_queries :: proc(t: ^testing.T) {
     defer delete(polys)
 
     poly_count :i32
-    status, poly_count = nav_detour.query_polygons(&query, center, half_extents, &filter, polys)
+    status, poly_count = detour.query_polygons(&query, center, half_extents, &filter, polys)
     testing.expect(t, recast.status_succeeded(status), "Query polygons should succeed")
 }
 
@@ -556,14 +553,14 @@ test_detour_pathfinding :: proc(t: ^testing.T) {
     nav_mesh := create_test_nav_mesh(t)
     defer destroy_test_nav_mesh(nav_mesh)
 
-    query := nav_detour.Nav_Mesh_Query{}
-    defer nav_detour.nav_mesh_query_destroy(&query)
+    query := detour.Nav_Mesh_Query{}
+    defer detour.nav_mesh_query_destroy(&query)
 
-    status := nav_detour.nav_mesh_query_init(&query, nav_mesh, 256)
+    status := detour.nav_mesh_query_init(&query, nav_mesh, 256)
     testing.expect(t, recast.status_succeeded(status), "Query initialization should succeed")
 
-    filter := nav_detour.Query_Filter{}
-    nav_detour.query_filter_init(&filter)
+    filter := detour.Query_Filter{}
+    detour.query_filter_init(&filter)
 
     // Find start and end polygons
     start_pos := [3]f32{1.0, 0.0, 1.0}
@@ -572,13 +569,13 @@ test_detour_pathfinding :: proc(t: ^testing.T) {
 
     start_ref := recast.Poly_Ref(0)
     start_nearest := [3]f32{}
-    status, start_ref, start_nearest = nav_detour.find_nearest_poly(&query, start_pos, half_extents, &filter)
+    status, start_ref, start_nearest = detour.find_nearest_poly(&query, start_pos, half_extents, &filter)
     testing.expect(t, recast.status_succeeded(status), "Should find start polygon")
     testing.expect(t, start_ref != recast.INVALID_POLY_REF, "Start reference should be valid")
 
     end_ref := recast.Poly_Ref(0)
     end_nearest := [3]f32{}
-    status, end_ref, end_nearest = nav_detour.find_nearest_poly(&query, end_pos, half_extents, &filter)
+    status, end_ref, end_nearest = detour.find_nearest_poly(&query, end_pos, half_extents, &filter)
     testing.expect(t, recast.status_succeeded(status), "Should find end polygon")
     testing.expect(t, end_ref != recast.INVALID_POLY_REF, "End reference should be valid")
 
@@ -586,7 +583,7 @@ test_detour_pathfinding :: proc(t: ^testing.T) {
     path := make([]recast.Poly_Ref, 64)
     defer delete(path)
 
-    path_status, path_count := nav_detour.find_path(&query, start_ref, end_ref, start_nearest, end_nearest,
+    path_status, path_count := detour.find_path(&query, start_ref, end_ref, start_nearest, end_nearest,
                                                 &filter, path, 64)
     testing.expect(t, recast.status_succeeded(path_status), "Pathfinding should succeed")
     testing.expect(t, path_count > 0, "Path should contain at least one polygon")
@@ -601,14 +598,14 @@ test_detour_straight_path :: proc(t: ^testing.T) {
     nav_mesh := create_test_nav_mesh(t)
     defer destroy_test_nav_mesh(nav_mesh)
 
-    query := nav_detour.Nav_Mesh_Query{}
-    defer nav_detour.nav_mesh_query_destroy(&query)
+    query := detour.Nav_Mesh_Query{}
+    defer detour.nav_mesh_query_destroy(&query)
 
-    status := nav_detour.nav_mesh_query_init(&query, nav_mesh, 256)
+    status := detour.nav_mesh_query_init(&query, nav_mesh, 256)
     testing.expect(t, recast.status_succeeded(status), "Query initialization should succeed")
 
-    filter := nav_detour.Query_Filter{}
-    nav_detour.query_filter_init(&filter)
+    filter := detour.Query_Filter{}
+    detour.query_filter_init(&filter)
 
     // Find valid polygon references first
     start_pos := [3]f32{5.0, 0.0, 5.0}  // Center of the test quad
@@ -616,14 +613,14 @@ test_detour_straight_path :: proc(t: ^testing.T) {
 
     extents := [3]f32{1.0, 1.0, 1.0}
 
-    start_status, start_ref, start_nearest := nav_detour.find_nearest_poly(&query, start_pos, extents, &filter)
+    start_status, start_ref, start_nearest := detour.find_nearest_poly(&query, start_pos, extents, &filter)
     testing.expect(t, recast.status_succeeded(start_status), "Should find start polygon")
     testing.expect(t, start_ref != recast.INVALID_POLY_REF, "Should have valid start reference")
 
     // Use a simple single-polygon path for testing straight path
     path := []recast.Poly_Ref{start_ref}
 
-    straight_path := make([]nav_detour.Straight_Path_Point, 16)
+    straight_path := make([]detour.Straight_Path_Point, 16)
     defer delete(straight_path)
 
     straight_path_flags := make([]u8, 16)
@@ -632,7 +629,7 @@ test_detour_straight_path :: proc(t: ^testing.T) {
     straight_path_refs := make([]recast.Poly_Ref, 16)
     defer delete(straight_path_refs)
 
-    straight_status, straight_path_count := nav_detour.find_straight_path(&query, start_nearest, end_pos, path, i32(len(path)),
+    straight_status, straight_path_count := detour.find_straight_path(&query, start_nearest, end_pos, path, i32(len(path)),
                                                                   straight_path, straight_path_flags, straight_path_refs,
                                                                   16, 0)
 
@@ -647,14 +644,14 @@ test_detour_raycast_basic :: proc(t: ^testing.T) {
     nav_mesh := create_test_nav_mesh(t)
     defer destroy_test_nav_mesh(nav_mesh)
 
-    query := nav_detour.Nav_Mesh_Query{}
-    defer nav_detour.nav_mesh_query_destroy(&query)
+    query := detour.Nav_Mesh_Query{}
+    defer detour.nav_mesh_query_destroy(&query)
 
-    status := nav_detour.nav_mesh_query_init(&query, nav_mesh, 256)
+    status := detour.nav_mesh_query_init(&query, nav_mesh, 256)
     testing.expect(t, recast.status_succeeded(status), "Query initialization should succeed")
 
-    filter := nav_detour.Query_Filter{}
-    nav_detour.query_filter_init(&filter)
+    filter := detour.Query_Filter{}
+    detour.query_filter_init(&filter)
 
     start_pos := [3]f32{1.0, 0.0, 1.0}
     end_pos := [3]f32{9.0, 0.0, 9.0}
@@ -662,16 +659,16 @@ test_detour_raycast_basic :: proc(t: ^testing.T) {
 
     start_ref := recast.Poly_Ref(0)
     start_nearest := [3]f32{}
-    status, start_ref, start_nearest = nav_detour.find_nearest_poly(&query, start_pos, half_extents, &filter)
+    status, start_ref, start_nearest = detour.find_nearest_poly(&query, start_pos, half_extents, &filter)
     testing.expect(t, recast.status_succeeded(status), "Should find start polygon")
 
-    hit := nav_detour.Raycast_Hit{}
+    hit := detour.Raycast_Hit{}
     path := make([]recast.Poly_Ref, 32)
     defer delete(path)
 
     path_count := i32(0)
 
-    status, hit, path_count = nav_detour.raycast(&query, start_ref, start_nearest, end_pos, &filter, 0, path, 32)
+    status, hit, path_count = detour.raycast(&query, start_ref, start_nearest, end_pos, &filter, 0, path, 32)
     testing.expect(t, recast.status_succeeded(status), "Raycast should succeed")
     testing.expect(t, hit.t >= 0.0, "Hit parameter should be non-negative")
     testing.expect(t, path_count > 0, "Should have visited some polygons")
@@ -684,28 +681,28 @@ test_detour_raycast_wall_hit :: proc(t: ^testing.T) {
     nav_mesh := create_test_nav_mesh(t)
     defer destroy_test_nav_mesh(nav_mesh)
 
-    query := nav_detour.Nav_Mesh_Query{}
-    defer nav_detour.nav_mesh_query_destroy(&query)
+    query := detour.Nav_Mesh_Query{}
+    defer detour.nav_mesh_query_destroy(&query)
 
-    status := nav_detour.nav_mesh_query_init(&query, nav_mesh, 256)
+    status := detour.nav_mesh_query_init(&query, nav_mesh, 256)
     testing.expect(t, recast.status_succeeded(status), "Query initialization should succeed")
 
-    filter := nav_detour.Query_Filter{}
-    nav_detour.query_filter_init(&filter)
+    filter := detour.Query_Filter{}
+    detour.query_filter_init(&filter)
 
     // Cast ray towards mesh boundary (should hit wall)
     start_pos := [3]f32{5.0, 0.0, 5.0}
     end_pos := [3]f32{15.0, 0.0, 5.0} // Outside mesh bounds
     half_extents := [3]f32{1.0, 1.0, 1.0}
 
-    start_status, start_ref, start_nearest := nav_detour.find_nearest_poly(&query, start_pos, half_extents, &filter)
+    start_status, start_ref, start_nearest := detour.find_nearest_poly(&query, start_pos, half_extents, &filter)
     testing.expect(t, recast.status_succeeded(start_status), "Should find start polygon")
 
-    hit := nav_detour.Raycast_Hit{}
+    hit := detour.Raycast_Hit{}
     path := make([]recast.Poly_Ref, 32)
     defer delete(path)
 
-    raycast_status, hit_result, path_count := nav_detour.raycast(&query, start_ref, start_nearest, end_pos, &filter, 0, path, 32)
+    raycast_status, hit_result, path_count := detour.raycast(&query, start_ref, start_nearest, end_pos, &filter, 0, path, 32)
     hit = hit_result
     testing.expect(t, recast.status_succeeded(raycast_status), "Raycast should succeed")
 
@@ -728,27 +725,27 @@ test_detour_raycast_with_costs :: proc(t: ^testing.T) {
     nav_mesh := create_test_nav_mesh(t)
     defer destroy_test_nav_mesh(nav_mesh)
 
-    query := nav_detour.Nav_Mesh_Query{}
-    defer nav_detour.nav_mesh_query_destroy(&query)
+    query := detour.Nav_Mesh_Query{}
+    defer detour.nav_mesh_query_destroy(&query)
 
-    status := nav_detour.nav_mesh_query_init(&query, nav_mesh, 256)
+    status := detour.nav_mesh_query_init(&query, nav_mesh, 256)
     testing.expect(t, recast.status_succeeded(status), "Query initialization should succeed")
 
-    filter := nav_detour.Query_Filter{}
-    nav_detour.query_filter_init(&filter)
+    filter := detour.Query_Filter{}
+    detour.query_filter_init(&filter)
 
     start_pos := [3]f32{3.0, 0.0, 3.0}
     end_pos := [3]f32{7.0, 0.0, 7.0}
     half_extents := [3]f32{1.0, 1.0, 1.0}
 
-    start_status, start_ref, start_nearest := nav_detour.find_nearest_poly(&query, start_pos, half_extents, &filter)
+    start_status, start_ref, start_nearest := detour.find_nearest_poly(&query, start_pos, half_extents, &filter)
     testing.expect(t, recast.status_succeeded(start_status), "Should find start polygon")
 
     path := make([]recast.Poly_Ref, 32)
     defer delete(path)
 
     // Test with cost calculation enabled
-    raycast_status, hit, path_count := nav_detour.raycast(&query, start_ref, start_nearest, end_pos, &filter,
+    raycast_status, hit, path_count := detour.raycast(&query, start_ref, start_nearest, end_pos, &filter,
                                                           recast.DT_RAYCAST_USE_COSTS, path, 32)
     testing.expect(t, recast.status_succeeded(raycast_status), "Raycast with costs should succeed")
     testing.expect(t, hit.path_cost >= 0.0, "Path cost should be non-negative")
@@ -761,31 +758,31 @@ test_detour_raycast_errors :: proc(t: ^testing.T) {
     nav_mesh := create_test_nav_mesh(t)
     defer destroy_test_nav_mesh(nav_mesh)
 
-    query := nav_detour.Nav_Mesh_Query{}
-    defer nav_detour.nav_mesh_query_destroy(&query)
+    query := detour.Nav_Mesh_Query{}
+    defer detour.nav_mesh_query_destroy(&query)
 
-    status := nav_detour.nav_mesh_query_init(&query, nav_mesh, 256)
+    status := detour.nav_mesh_query_init(&query, nav_mesh, 256)
     testing.expect(t, recast.status_succeeded(status), "Query initialization should succeed")
 
-    filter := nav_detour.Query_Filter{}
-    nav_detour.query_filter_init(&filter)
+    filter := detour.Query_Filter{}
+    detour.query_filter_init(&filter)
 
     // Test invalid polygon reference
     invalid_ref := recast.INVALID_POLY_REF
     pos := [3]f32{1.0, 0.0, 1.0}
 
-    hit := nav_detour.Raycast_Hit{}
+    hit := detour.Raycast_Hit{}
     path := make([]recast.Poly_Ref, 32)
     defer delete(path)
 
-    invalid_status, _, _ := nav_detour.raycast(&query, invalid_ref, pos, pos, &filter, 0, path, 32)
+    invalid_status, _, _ := detour.raycast(&query, invalid_ref, pos, pos, &filter, 0, path, 32)
     testing.expect(t, recast.status_failed(invalid_status), "Raycast with invalid ref should fail")
 
     // Test zero-length ray
-    valid_status, valid_ref, valid_pos := nav_detour.find_nearest_poly(&query, pos, [3]f32{1,1,1}, &filter)
+    valid_status, valid_ref, valid_pos := detour.find_nearest_poly(&query, pos, [3]f32{1,1,1}, &filter)
     testing.expect(t, recast.status_succeeded(valid_status), "Should find valid polygon")
 
-    zero_status, zero_hit, _ := nav_detour.raycast(&query, valid_ref, valid_pos, valid_pos, &filter, 0, path, 32)
+    zero_status, zero_hit, _ := detour.raycast(&query, valid_ref, valid_pos, valid_pos, &filter, 0, path, 32)
     testing.expect(t, recast.status_succeeded(zero_status), "Zero-length ray should succeed")
     testing.expect(t, zero_hit.t == 0.0, "Zero-length ray should have t=0")
 }
@@ -797,27 +794,27 @@ test_detour_move_along_surface_comprehensive :: proc(t: ^testing.T) {
     nav_mesh := create_test_nav_mesh(t)
     defer destroy_test_nav_mesh(nav_mesh)
 
-    query := nav_detour.Nav_Mesh_Query{}
-    defer nav_detour.nav_mesh_query_destroy(&query)
+    query := detour.Nav_Mesh_Query{}
+    defer detour.nav_mesh_query_destroy(&query)
 
-    status := nav_detour.nav_mesh_query_init(&query, nav_mesh, 256)
+    status := detour.nav_mesh_query_init(&query, nav_mesh, 256)
     testing.expect(t, recast.status_succeeded(status), "Query initialization should succeed")
 
-    filter := nav_detour.Query_Filter{}
-    nav_detour.query_filter_init(&filter)
+    filter := detour.Query_Filter{}
+    detour.query_filter_init(&filter)
 
     // Test case 1: Movement within single polygon
     start_pos := [3]f32{5.0, 0.0, 5.0}
     end_pos := [3]f32{6.0, 0.0, 6.0}
     half_extents := [3]f32{1.0, 1.0, 1.0}
 
-    start_status, start_ref, start_nearest := nav_detour.find_nearest_poly(&query, start_pos, half_extents, &filter)
+    start_status, start_ref, start_nearest := detour.find_nearest_poly(&query, start_pos, half_extents, &filter)
     testing.expect(t, recast.status_succeeded(start_status), "Should find start polygon")
 
     visited := make([]recast.Poly_Ref, 16)
     defer delete(visited)
 
-    result_pos, visited_count, move_status := nav_detour.move_along_surface(&query, start_ref, start_nearest, end_pos, &filter, visited, 16)
+    result_pos, visited_count, move_status := detour.move_along_surface(&query, start_ref, start_nearest, end_pos, &filter, visited, 16)
     testing.expect(t, recast.status_succeeded(move_status), "Move along surface should succeed")
     testing.expect(t, visited_count > 0, "Should visit at least one polygon")
 
@@ -833,27 +830,27 @@ test_detour_move_along_surface_cross_polygons :: proc(t: ^testing.T) {
     nav_mesh := create_test_nav_mesh(t)
     defer destroy_test_nav_mesh(nav_mesh)
 
-    query := nav_detour.Nav_Mesh_Query{}
-    defer nav_detour.nav_mesh_query_destroy(&query)
+    query := detour.Nav_Mesh_Query{}
+    defer detour.nav_mesh_query_destroy(&query)
 
-    status := nav_detour.nav_mesh_query_init(&query, nav_mesh, 256)
+    status := detour.nav_mesh_query_init(&query, nav_mesh, 256)
     testing.expect(t, recast.status_succeeded(status), "Query initialization should succeed")
 
-    filter := nav_detour.Query_Filter{}
-    nav_detour.query_filter_init(&filter)
+    filter := detour.Query_Filter{}
+    detour.query_filter_init(&filter)
 
     // Test case 2: Movement across multiple polygons (if mesh supports it)
     start_pos := [3]f32{2.0, 0.0, 2.0}
     end_pos := [3]f32{8.0, 0.0, 8.0}
     half_extents := [3]f32{1.0, 1.0, 1.0}
 
-    start_status, start_ref, start_nearest := nav_detour.find_nearest_poly(&query, start_pos, half_extents, &filter)
+    start_status, start_ref, start_nearest := detour.find_nearest_poly(&query, start_pos, half_extents, &filter)
     testing.expect(t, recast.status_succeeded(start_status), "Should find start polygon")
 
     visited := make([]recast.Poly_Ref, 16)
     defer delete(visited)
 
-    result_pos, visited_count, move_status := nav_detour.move_along_surface(&query, start_ref, start_nearest, end_pos, &filter, visited, 16)
+    result_pos, visited_count, move_status := detour.move_along_surface(&query, start_ref, start_nearest, end_pos, &filter, visited, 16)
     testing.expect(t, recast.status_succeeded(move_status), "Cross-polygon move should succeed")
     testing.expect(t, visited_count >= 1, "Should visit at least start polygon")
 
@@ -870,27 +867,27 @@ test_detour_move_along_surface_blocked :: proc(t: ^testing.T) {
     nav_mesh := create_test_nav_mesh(t)
     defer destroy_test_nav_mesh(nav_mesh)
 
-    query := nav_detour.Nav_Mesh_Query{}
-    defer nav_detour.nav_mesh_query_destroy(&query)
+    query := detour.Nav_Mesh_Query{}
+    defer detour.nav_mesh_query_destroy(&query)
 
-    status := nav_detour.nav_mesh_query_init(&query, nav_mesh, 256)
+    status := detour.nav_mesh_query_init(&query, nav_mesh, 256)
     testing.expect(t, recast.status_succeeded(status), "Query initialization should succeed")
 
-    filter := nav_detour.Query_Filter{}
-    nav_detour.query_filter_init(&filter)
+    filter := detour.Query_Filter{}
+    detour.query_filter_init(&filter)
 
     // Test case 3: Movement blocked by walls (move outside mesh)
     start_pos := [3]f32{5.0, 0.0, 5.0}
     end_pos := [3]f32{15.0, 0.0, 15.0} // Outside mesh bounds
     half_extents := [3]f32{1.0, 1.0, 1.0}
 
-    start_status, start_ref, start_nearest := nav_detour.find_nearest_poly(&query, start_pos, half_extents, &filter)
+    start_status, start_ref, start_nearest := detour.find_nearest_poly(&query, start_pos, half_extents, &filter)
     testing.expect(t, recast.status_succeeded(start_status), "Should find start polygon")
 
     visited := make([]recast.Poly_Ref, 16)
     defer delete(visited)
 
-    result_pos, visited_count, move_status := nav_detour.move_along_surface(&query, start_ref, start_nearest, end_pos, &filter, visited, 16)
+    result_pos, visited_count, move_status := detour.move_along_surface(&query, start_ref, start_nearest, end_pos, &filter, visited, 16)
     testing.expect(t, recast.status_succeeded(move_status), "Blocked move should still succeed")
 
     // Result should not reach the impossible target
@@ -905,14 +902,14 @@ test_detour_move_along_surface_errors :: proc(t: ^testing.T) {
     nav_mesh := create_test_nav_mesh(t)
     defer destroy_test_nav_mesh(nav_mesh)
 
-    query := nav_detour.Nav_Mesh_Query{}
-    defer nav_detour.nav_mesh_query_destroy(&query)
+    query := detour.Nav_Mesh_Query{}
+    defer detour.nav_mesh_query_destroy(&query)
 
-    status := nav_detour.nav_mesh_query_init(&query, nav_mesh, 256)
+    status := detour.nav_mesh_query_init(&query, nav_mesh, 256)
     testing.expect(t, recast.status_succeeded(status), "Query initialization should succeed")
 
-    filter := nav_detour.Query_Filter{}
-    nav_detour.query_filter_init(&filter)
+    filter := detour.Query_Filter{}
+    detour.query_filter_init(&filter)
 
     // Test with invalid polygon reference
     invalid_ref := recast.INVALID_POLY_REF
@@ -921,7 +918,7 @@ test_detour_move_along_surface_errors :: proc(t: ^testing.T) {
     visited := make([]recast.Poly_Ref, 16)
     defer delete(visited)
 
-    result_pos, visited_count, invalid_status := nav_detour.move_along_surface(&query, invalid_ref, pos, pos, &filter, visited, 16)
+    result_pos, visited_count, invalid_status := detour.move_along_surface(&query, invalid_ref, pos, pos, &filter, visited, 16)
     testing.expect(t, recast.status_failed(invalid_status), "Move with invalid ref should fail")
 }
 
@@ -933,14 +930,14 @@ test_detour_error_handling_pathfinding :: proc(t: ^testing.T) {
     nav_mesh := create_test_nav_mesh(t)
     defer destroy_test_nav_mesh(nav_mesh)
 
-    query := nav_detour.Nav_Mesh_Query{}
-    defer nav_detour.nav_mesh_query_destroy(&query)
+    query := detour.Nav_Mesh_Query{}
+    defer detour.nav_mesh_query_destroy(&query)
 
-    status := nav_detour.nav_mesh_query_init(&query, nav_mesh, 256)
+    status := detour.nav_mesh_query_init(&query, nav_mesh, 256)
     testing.expect(t, recast.status_succeeded(status), "Query initialization should succeed")
 
-    filter := nav_detour.Query_Filter{}
-    nav_detour.query_filter_init(&filter)
+    filter := detour.Query_Filter{}
+    detour.query_filter_init(&filter)
 
     // Test 1: Invalid start/end references
     invalid_ref := recast.INVALID_POLY_REF
@@ -948,19 +945,19 @@ test_detour_error_handling_pathfinding :: proc(t: ^testing.T) {
     path := make([]recast.Poly_Ref, 64)
     defer delete(path)
 
-    invalid_status, _ := nav_detour.find_path(&query, invalid_ref, invalid_ref, pos, pos, &filter, path, 64)
+    invalid_status, _ := detour.find_path(&query, invalid_ref, invalid_ref, pos, pos, &filter, path, 64)
     testing.expect(t, recast.status_failed(invalid_status), "Path with invalid refs should fail")
 
     // Test 2: Zero-size path buffer
-    valid_status, valid_ref, _ := nav_detour.find_nearest_poly(&query, pos, [3]f32{1,1,1}, &filter)
+    valid_status, valid_ref, _ := detour.find_nearest_poly(&query, pos, [3]f32{1,1,1}, &filter)
     testing.expect(t, recast.status_succeeded(valid_status), "Should find valid polygon")
 
-    zero_path_status, _ := nav_detour.find_path(&query, valid_ref, valid_ref, pos, pos, &filter, path[:0], 0)
+    zero_path_status, _ := detour.find_path(&query, valid_ref, valid_ref, pos, pos, &filter, path[:0], 0)
     testing.expect(t, recast.status_failed(zero_path_status), "Zero-size path buffer should fail")
 
     // Test 3: Mismatched positions and references (position far from polygon)
     far_pos := [3]f32{100.0, 0.0, 100.0}
-    far_status, _ := nav_detour.find_path(&query, valid_ref, valid_ref, far_pos, far_pos, &filter, path, 64)
+    far_status, _ := detour.find_path(&query, valid_ref, valid_ref, far_pos, far_pos, &filter, path, 64)
     testing.expect(t, recast.status_succeeded(far_status) || recast.status_failed(far_status), "Should handle mismatched pos/ref gracefully")
 }
 
@@ -971,20 +968,20 @@ test_detour_error_handling_spatial_queries :: proc(t: ^testing.T) {
     nav_mesh := create_test_nav_mesh(t)
     defer destroy_test_nav_mesh(nav_mesh)
 
-    query := nav_detour.Nav_Mesh_Query{}
-    defer nav_detour.nav_mesh_query_destroy(&query)
+    query := detour.Nav_Mesh_Query{}
+    defer detour.nav_mesh_query_destroy(&query)
 
-    status := nav_detour.nav_mesh_query_init(&query, nav_mesh, 256)
+    status := detour.nav_mesh_query_init(&query, nav_mesh, 256)
     testing.expect(t, recast.status_succeeded(status), "Query initialization should succeed")
 
-    filter := nav_detour.Query_Filter{}
-    nav_detour.query_filter_init(&filter)
+    filter := detour.Query_Filter{}
+    detour.query_filter_init(&filter)
 
     // Test 1: find_nearest_poly with zero extents
     pos := [3]f32{5.0, 0.0, 5.0}
     zero_extents := [3]f32{0.0, 0.0, 0.0}
 
-    zero_status, zero_ref, _ := nav_detour.find_nearest_poly(&query, pos, zero_extents, &filter)
+    zero_status, zero_ref, _ := detour.find_nearest_poly(&query, pos, zero_extents, &filter)
     // Should either succeed with limited search or fail gracefully
     testing.expect(t, zero_ref == recast.INVALID_POLY_REF || recast.status_succeeded(zero_status),
                    "Zero extents should be handled gracefully")
@@ -993,13 +990,13 @@ test_detour_error_handling_spatial_queries :: proc(t: ^testing.T) {
     polys := make([]recast.Poly_Ref, 0)
     defer delete(polys)
 
-    query_status, poly_count := nav_detour.query_polygons(&query, pos, [3]f32{1,1,1}, &filter, polys)
+    query_status, poly_count := detour.query_polygons(&query, pos, [3]f32{1,1,1}, &filter, polys)
     testing.expect(t, recast.status_succeeded(query_status), "Query with zero buffer should succeed")
     testing.expect_value(t, poly_count, 0)
 
     // Test 3: Extreme positions (very large coordinates)
     extreme_pos := [3]f32{1e6, 1e6, 1e6}
-    extreme_status, extreme_ref, _ := nav_detour.find_nearest_poly(&query, extreme_pos, [3]f32{1,1,1}, &filter)
+    extreme_status, extreme_ref, _ := detour.find_nearest_poly(&query, extreme_pos, [3]f32{1,1,1}, &filter)
     testing.expect(t, extreme_ref == recast.INVALID_POLY_REF, "Extreme positions should return invalid ref")
 }
 
@@ -1010,30 +1007,30 @@ test_detour_error_handling_filter_edge_cases :: proc(t: ^testing.T) {
     nav_mesh := create_test_nav_mesh(t)
     defer destroy_test_nav_mesh(nav_mesh)
 
-    query := nav_detour.Nav_Mesh_Query{}
-    defer nav_detour.nav_mesh_query_destroy(&query)
+    query := detour.Nav_Mesh_Query{}
+    defer detour.nav_mesh_query_destroy(&query)
 
-    status := nav_detour.nav_mesh_query_init(&query, nav_mesh, 256)
+    status := detour.nav_mesh_query_init(&query, nav_mesh, 256)
     testing.expect(t, recast.status_succeeded(status), "Query initialization should succeed")
 
     // Test with restrictive filter that excludes everything
-    restrictive_filter := nav_detour.Query_Filter{}
-    nav_detour.query_filter_init(&restrictive_filter)
+    restrictive_filter := detour.Query_Filter{}
+    detour.query_filter_init(&restrictive_filter)
     restrictive_filter.exclude_flags = 0xffff // Exclude all
     restrictive_filter.include_flags = 0x0000 // Include none
 
     pos := [3]f32{5.0, 0.0, 5.0}
 
-    restrict_status, restrict_ref, _ := nav_detour.find_nearest_poly(&query, pos, [3]f32{5,5,5}, &restrictive_filter)
+    restrict_status, restrict_ref, _ := detour.find_nearest_poly(&query, pos, [3]f32{5,5,5}, &restrictive_filter)
     testing.expect(t, restrict_ref == recast.INVALID_POLY_REF, "Restrictive filter should find no polygons")
 
     // Test with permissive filter
-    permissive_filter := nav_detour.Query_Filter{}
-    nav_detour.query_filter_init(&permissive_filter)
+    permissive_filter := detour.Query_Filter{}
+    detour.query_filter_init(&permissive_filter)
     permissive_filter.include_flags = 0xffff // Include all
     permissive_filter.exclude_flags = 0x0000 // Exclude none
 
-    permissive_status, permissive_ref, _ := nav_detour.find_nearest_poly(&query, pos, [3]f32{5,5,5}, &permissive_filter)
+    permissive_status, permissive_ref, _ := detour.find_nearest_poly(&query, pos, [3]f32{5,5,5}, &permissive_filter)
     testing.expect(t, recast.status_succeeded(permissive_status), "Permissive filter should succeed")
     testing.expect(t, permissive_ref != recast.INVALID_POLY_REF, "Should find valid polygon")
 }
@@ -1045,14 +1042,14 @@ test_detour_edge_cases_boundary_conditions :: proc(t: ^testing.T) {
     nav_mesh := create_test_nav_mesh(t)
     defer destroy_test_nav_mesh(nav_mesh)
 
-    query := nav_detour.Nav_Mesh_Query{}
-    defer nav_detour.nav_mesh_query_destroy(&query)
+    query := detour.Nav_Mesh_Query{}
+    defer detour.nav_mesh_query_destroy(&query)
 
-    status := nav_detour.nav_mesh_query_init(&query, nav_mesh, 256)
+    status := detour.nav_mesh_query_init(&query, nav_mesh, 256)
     testing.expect(t, recast.status_succeeded(status), "Query initialization should succeed")
 
-    filter := nav_detour.Query_Filter{}
-    nav_detour.query_filter_init(&filter)
+    filter := detour.Query_Filter{}
+    detour.query_filter_init(&filter)
 
     // Test 1: Position exactly on mesh boundary
     boundary_positions := [][3]f32{
@@ -1063,20 +1060,20 @@ test_detour_edge_cases_boundary_conditions :: proc(t: ^testing.T) {
     }
 
     for boundary_pos, i in boundary_positions {
-        boundary_status, boundary_ref, _ := nav_detour.find_nearest_poly(&query, boundary_pos, [3]f32{0.5, 0.5, 0.5}, &filter)
+        boundary_status, boundary_ref, _ := detour.find_nearest_poly(&query, boundary_pos, [3]f32{0.5, 0.5, 0.5}, &filter)
         testing.expect(t, recast.status_succeeded(boundary_status) || boundary_ref == recast.INVALID_POLY_REF,
                        "Boundary positions should be handled gracefully")
     }
 
     // Test 2: Same start and end position pathfinding
     center_pos := [3]f32{5.0, 0.0, 5.0}
-    same_status, same_ref, same_nearest := nav_detour.find_nearest_poly(&query, center_pos, [3]f32{1,1,1}, &filter)
+    same_status, same_ref, same_nearest := detour.find_nearest_poly(&query, center_pos, [3]f32{1,1,1}, &filter)
     testing.expect(t, recast.status_succeeded(same_status), "Should find center polygon")
 
     path := make([]recast.Poly_Ref, 64)
     defer delete(path)
 
-    same_path_status, same_path_count := nav_detour.find_path(&query, same_ref, same_ref, same_nearest, same_nearest, &filter, path, 64)
+    same_path_status, same_path_count := detour.find_path(&query, same_ref, same_ref, same_nearest, same_nearest, &filter, path, 64)
     testing.expect(t, recast.status_succeeded(same_path_status), "Same start/end path should succeed")
     testing.expect(t, same_path_count >= 1, "Should have at least one polygon in path")
     testing.expect_value(t, path[0], same_ref)
@@ -1090,20 +1087,20 @@ test_detour_dijkstra_circle_search :: proc(t: ^testing.T) {
     nav_mesh := create_test_nav_mesh(t)
     defer destroy_test_nav_mesh(nav_mesh)
 
-    query := nav_detour.Nav_Mesh_Query{}
-    defer nav_detour.nav_mesh_query_destroy(&query)
+    query := detour.Nav_Mesh_Query{}
+    defer detour.nav_mesh_query_destroy(&query)
 
-    status := nav_detour.nav_mesh_query_init(&query, nav_mesh, 256)
+    status := detour.nav_mesh_query_init(&query, nav_mesh, 256)
     testing.expect(t, recast.status_succeeded(status), "Query initialization should succeed")
 
-    filter := nav_detour.Query_Filter{}
-    nav_detour.query_filter_init(&filter)
+    filter := detour.Query_Filter{}
+    detour.query_filter_init(&filter)
 
     // Find start polygon
     center_pos := [3]f32{5.0, 0.0, 5.0}
     half_extents := [3]f32{1.0, 1.0, 1.0}
 
-    start_status, start_ref, _ := nav_detour.find_nearest_poly(&query, center_pos, half_extents, &filter)
+    start_status, start_ref, _ := detour.find_nearest_poly(&query, center_pos, half_extents, &filter)
     testing.expect(t, recast.status_succeeded(start_status), "Should find start polygon")
 
     // Test Dijkstra circle search (small radius)
@@ -1117,7 +1114,7 @@ test_detour_dijkstra_circle_search :: proc(t: ^testing.T) {
     result_cost := make([]f32, 4)
     defer delete(result_cost)
 
-    search_count, search_status := nav_detour.find_polys_around_circle(&query, start_ref, center_pos, radius,
+    search_count, search_status := detour.find_polys_around_circle(&query, start_ref, center_pos, radius,
                                                                          &filter, result_ref, result_parent, result_cost, 4)
 
     testing.expect(t, recast.status_succeeded(search_status), "Circle search should succeed")
@@ -1134,20 +1131,20 @@ test_detour_dijkstra_shape_search :: proc(t: ^testing.T) {
     nav_mesh := create_test_nav_mesh(t)
     defer destroy_test_nav_mesh(nav_mesh)
 
-    query := nav_detour.Nav_Mesh_Query{}
-    defer nav_detour.nav_mesh_query_destroy(&query)
+    query := detour.Nav_Mesh_Query{}
+    defer detour.nav_mesh_query_destroy(&query)
 
-    status := nav_detour.nav_mesh_query_init(&query, nav_mesh, 256)
+    status := detour.nav_mesh_query_init(&query, nav_mesh, 256)
     testing.expect(t, recast.status_succeeded(status), "Query initialization should succeed")
 
-    filter := nav_detour.Query_Filter{}
-    nav_detour.query_filter_init(&filter)
+    filter := detour.Query_Filter{}
+    detour.query_filter_init(&filter)
 
     // Find start polygon
     center_pos := [3]f32{5.0, 0.0, 5.0}
     half_extents := [3]f32{1.0, 1.0, 1.0}
 
-    start_status, start_ref, _ := nav_detour.find_nearest_poly(&query, center_pos, half_extents, &filter)
+    start_status, start_ref, _ := detour.find_nearest_poly(&query, center_pos, half_extents, &filter)
     testing.expect(t, recast.status_succeeded(start_status), "Should find start polygon")
 
     // Define a square shape around the center
@@ -1167,7 +1164,7 @@ test_detour_dijkstra_shape_search :: proc(t: ^testing.T) {
     result_cost := make([]f32, 16)
     defer delete(result_cost)
 
-    search_count, search_status := nav_detour.find_polys_around_shape(&query, start_ref, shape_verts, &filter,
+    search_count, search_status := detour.find_polys_around_shape(&query, start_ref, shape_verts, &filter,
                                                                        result_ref, result_parent, result_cost, 16)
 
     testing.expect(t, recast.status_succeeded(search_status), "Shape search should succeed")
@@ -1182,20 +1179,20 @@ test_detour_dijkstra_path_extraction :: proc(t: ^testing.T) {
     nav_mesh := create_test_nav_mesh(t)
     defer destroy_test_nav_mesh(nav_mesh)
 
-    query := nav_detour.Nav_Mesh_Query{}
-    defer nav_detour.nav_mesh_query_destroy(&query)
+    query := detour.Nav_Mesh_Query{}
+    defer detour.nav_mesh_query_destroy(&query)
 
-    status := nav_detour.nav_mesh_query_init(&query, nav_mesh, 256)
+    status := detour.nav_mesh_query_init(&query, nav_mesh, 256)
     testing.expect(t, recast.status_succeeded(status), "Query initialization should succeed")
 
-    filter := nav_detour.Query_Filter{}
-    nav_detour.query_filter_init(&filter)
+    filter := detour.Query_Filter{}
+    detour.query_filter_init(&filter)
 
     // Find start polygon
     center_pos := [3]f32{5.0, 0.0, 5.0}
     half_extents := [3]f32{1.0, 1.0, 1.0}
 
-    start_status, start_ref, _ := nav_detour.find_nearest_poly(&query, center_pos, half_extents, &filter)
+    start_status, start_ref, _ := detour.find_nearest_poly(&query, center_pos, half_extents, &filter)
     testing.expect(t, recast.status_succeeded(start_status), "Should find start polygon")
 
     // Perform circle search first
@@ -1209,7 +1206,7 @@ test_detour_dijkstra_path_extraction :: proc(t: ^testing.T) {
     result_cost := make([]f32, 16)
     defer delete(result_cost)
 
-    search_count, search_status := nav_detour.find_polys_around_circle(&query, start_ref, center_pos, radius,
+    search_count, search_status := detour.find_polys_around_circle(&query, start_ref, center_pos, radius,
                                                                          &filter, result_ref, result_parent, result_cost, 16)
 
     testing.expect(t, recast.status_succeeded(search_status), "Circle search should succeed")
@@ -1222,7 +1219,7 @@ test_detour_dijkstra_path_extraction :: proc(t: ^testing.T) {
         path := make([]recast.Poly_Ref, 16)
         defer delete(path)
 
-        path_count, path_status := nav_detour.get_path_from_dijkstra_search(&query, target_ref, path, 16)
+        path_count, path_status := detour.get_path_from_dijkstra_search(&query, target_ref, path, 16)
         testing.expect(t, recast.status_succeeded(path_status), "Path extraction should succeed")
         testing.expect(t, path_count > 0, "Should have path")
         testing.expect_value(t, path[0], start_ref) // Path should start from start polygon
@@ -1236,20 +1233,20 @@ test_detour_poly_wall_segments :: proc(t: ^testing.T) {
     nav_mesh := create_test_nav_mesh(t)
     defer destroy_test_nav_mesh(nav_mesh)
 
-    query := nav_detour.Nav_Mesh_Query{}
-    defer nav_detour.nav_mesh_query_destroy(&query)
+    query := detour.Nav_Mesh_Query{}
+    defer detour.nav_mesh_query_destroy(&query)
 
-    status := nav_detour.nav_mesh_query_init(&query, nav_mesh, 256)
+    status := detour.nav_mesh_query_init(&query, nav_mesh, 256)
     testing.expect(t, recast.status_succeeded(status), "Query initialization should succeed")
 
-    filter := nav_detour.Query_Filter{}
-    nav_detour.query_filter_init(&filter)
+    filter := detour.Query_Filter{}
+    detour.query_filter_init(&filter)
 
     // Find a polygon
     center_pos := [3]f32{5.0, 0.0, 5.0}
     half_extents := [3]f32{1.0, 1.0, 1.0}
 
-    poly_status, poly_ref, _ := nav_detour.find_nearest_poly(&query, center_pos, half_extents, &filter)
+    poly_status, poly_ref, _ := detour.find_nearest_poly(&query, center_pos, half_extents, &filter)
     testing.expect(t, recast.status_succeeded(poly_status), "Should find polygon")
 
     // Get wall segments
@@ -1259,7 +1256,7 @@ test_detour_poly_wall_segments :: proc(t: ^testing.T) {
     segment_refs := make([]recast.Poly_Ref, 16)
     defer delete(segment_refs)
 
-    seg_count, seg_status := nav_detour.get_poly_wall_segments(&query, poly_ref, &filter,
+    seg_count, seg_status := detour.get_poly_wall_segments(&query, poly_ref, &filter,
                                                                 segment_verts, segment_refs, 16)
 
     testing.expect(t, recast.status_succeeded(seg_status), "Wall segments query should succeed")
@@ -1282,14 +1279,14 @@ test_detour_performance_pathfinding :: proc(t: ^testing.T) {
     nav_mesh := create_test_nav_mesh(t)
     defer destroy_test_nav_mesh(nav_mesh)
 
-    query := nav_detour.Nav_Mesh_Query{}
-    defer nav_detour.nav_mesh_query_destroy(&query)
+    query := detour.Nav_Mesh_Query{}
+    defer detour.nav_mesh_query_destroy(&query)
 
-    status := nav_detour.nav_mesh_query_init(&query, nav_mesh, 256)  // Reduced node pool
+    status := detour.nav_mesh_query_init(&query, nav_mesh, 256)  // Reduced node pool
     testing.expect(t, recast.status_succeeded(status), "Query initialization should succeed")
 
-    filter := nav_detour.Query_Filter{}
-    nav_detour.query_filter_init(&filter)
+    filter := detour.Query_Filter{}
+    detour.query_filter_init(&filter)
 
     // Test multiple pathfinding operations for performance
     path := make([]recast.Poly_Ref, 32)  // Smaller path buffer
@@ -1306,17 +1303,17 @@ test_detour_performance_pathfinding :: proc(t: ^testing.T) {
         end_pos := [3]f32{8.0 - offset, 0.0, 8.0 - offset}
         half_extents := [3]f32{1.0, 1.0, 1.0}
 
-        start_status, start_ref, start_nearest := nav_detour.find_nearest_poly(&query, start_pos, half_extents, &filter)
+        start_status, start_ref, start_nearest := detour.find_nearest_poly(&query, start_pos, half_extents, &filter)
         if recast.status_failed(start_status) {
             continue
         }
 
-        end_status, end_ref, end_nearest := nav_detour.find_nearest_poly(&query, end_pos, half_extents, &filter)
+        end_status, end_ref, end_nearest := detour.find_nearest_poly(&query, end_pos, half_extents, &filter)
         if recast.status_failed(end_status) {
             continue
         }
 
-        path_status, path_count := nav_detour.find_path(&query, start_ref, end_ref, start_nearest, end_nearest,
+        path_status, path_count := detour.find_path(&query, start_ref, end_ref, start_nearest, end_nearest,
                                                         &filter, path, 32)
         if recast.status_succeeded(path_status) && path_count > 0 {
             successful_paths += 1
@@ -1340,14 +1337,14 @@ test_detour_stress_large_searches :: proc(t: ^testing.T) {
     nav_mesh := create_test_nav_mesh(t)
     defer destroy_test_nav_mesh(nav_mesh)
 
-    query := nav_detour.Nav_Mesh_Query{}
-    defer nav_detour.nav_mesh_query_destroy(&query)
+    query := detour.Nav_Mesh_Query{}
+    defer detour.nav_mesh_query_destroy(&query)
 
-    status := nav_detour.nav_mesh_query_init(&query, nav_mesh, 1024)
+    status := detour.nav_mesh_query_init(&query, nav_mesh, 1024)
     testing.expect(t, recast.status_succeeded(status), "Query initialization should succeed")
 
-    filter := nav_detour.Query_Filter{}
-    nav_detour.query_filter_init(&filter)
+    filter := detour.Query_Filter{}
+    detour.query_filter_init(&filter)
 
     // Test large polygon queries
     center_pos := [3]f32{5.0, 0.0, 5.0}
@@ -1356,11 +1353,11 @@ test_detour_stress_large_searches :: proc(t: ^testing.T) {
     polys := make([]recast.Poly_Ref, 256)
     defer delete(polys)
 
-    query_status, poly_count := nav_detour.query_polygons(&query, center_pos, large_extents, &filter, polys)
+    query_status, poly_count := detour.query_polygons(&query, center_pos, large_extents, &filter, polys)
     testing.expect(t, recast.status_succeeded(query_status), "Large polygon query should succeed")
 
     // Test large circle searches
-    start_status, start_ref, _ := nav_detour.find_nearest_poly(&query, center_pos, [3]f32{1,1,1}, &filter)
+    start_status, start_ref, _ := detour.find_nearest_poly(&query, center_pos, [3]f32{1,1,1}, &filter)
     testing.expect(t, recast.status_succeeded(start_status), "Should find start polygon")
 
     result_ref := make([]recast.Poly_Ref, 64)
@@ -1372,7 +1369,7 @@ test_detour_stress_large_searches :: proc(t: ^testing.T) {
     result_cost := make([]f32, 64)
     defer delete(result_cost)
 
-    search_count, search_status := nav_detour.find_polys_around_circle(&query, start_ref, center_pos, 10.0,
+    search_count, search_status := detour.find_polys_around_circle(&query, start_ref, center_pos, 10.0,
                                                                          &filter, result_ref, result_parent, result_cost, 64)
     testing.expect(t, recast.status_succeeded(search_status), "Large circle search should succeed")
 
@@ -1386,23 +1383,23 @@ test_detour_stress_many_raycasts :: proc(t: ^testing.T) {
     nav_mesh := create_test_nav_mesh(t)
     defer destroy_test_nav_mesh(nav_mesh)
 
-    query := nav_detour.Nav_Mesh_Query{}
-    defer nav_detour.nav_mesh_query_destroy(&query)
+    query := detour.Nav_Mesh_Query{}
+    defer detour.nav_mesh_query_destroy(&query)
 
-    status := nav_detour.nav_mesh_query_init(&query, nav_mesh, 256)
+    status := detour.nav_mesh_query_init(&query, nav_mesh, 256)
     testing.expect(t, recast.status_succeeded(status), "Query initialization should succeed")
 
-    filter := nav_detour.Query_Filter{}
-    nav_detour.query_filter_init(&filter)
+    filter := detour.Query_Filter{}
+    detour.query_filter_init(&filter)
 
     // Get a starting polygon
     center_pos := [3]f32{5.0, 0.0, 5.0}
     half_extents := [3]f32{1.0, 1.0, 1.0}
 
-    start_status, start_ref, start_nearest := nav_detour.find_nearest_poly(&query, center_pos, half_extents, &filter)
+    start_status, start_ref, start_nearest := detour.find_nearest_poly(&query, center_pos, half_extents, &filter)
     testing.expect(t, recast.status_succeeded(start_status), "Should find start polygon")
 
-    hit := nav_detour.Raycast_Hit{}
+    hit := detour.Raycast_Hit{}
     path := make([]recast.Poly_Ref, 32)
     defer delete(path)
 
@@ -1421,7 +1418,7 @@ test_detour_stress_many_raycasts :: proc(t: ^testing.T) {
         }
         end_pos := start_nearest + direction
 
-        raycast_status, hit, path_count := nav_detour.raycast(&query, start_ref, start_nearest, end_pos, &filter, 0, path, 32)
+        raycast_status, hit, path_count := detour.raycast(&query, start_ref, start_nearest, end_pos, &filter, 0, path, 32)
         if recast.status_succeeded(raycast_status) {
             successful_raycasts += 1
         }
@@ -1447,22 +1444,22 @@ test_detour_memory_stress :: proc(t: ^testing.T) {
     for i in 0..<iterations {
         nav_mesh := create_test_nav_mesh(t)
 
-        query := nav_detour.Nav_Mesh_Query{}
-        status := nav_detour.nav_mesh_query_init(&query, nav_mesh, 512)
+        query := detour.Nav_Mesh_Query{}
+        status := detour.nav_mesh_query_init(&query, nav_mesh, 512)
         testing.expect(t, recast.status_succeeded(status), "Query initialization should succeed")
 
-        filter := nav_detour.Query_Filter{}
-        nav_detour.query_filter_init(&filter)
+        filter := detour.Query_Filter{}
+        detour.query_filter_init(&filter)
 
         // Do some operations
         center_pos := [3]f32{5.0, 0.0, 5.0}
         half_extents := [3]f32{1.0, 1.0, 1.0}
 
-        poly_status, poly_ref, _ := nav_detour.find_nearest_poly(&query, center_pos, half_extents, &filter)
+        poly_status, poly_ref, _ := detour.find_nearest_poly(&query, center_pos, half_extents, &filter)
         testing.expect(t, recast.status_succeeded(poly_status), "Should find polygon")
 
         // Clean up
-        nav_detour.nav_mesh_query_destroy(&query)
+        detour.nav_mesh_query_destroy(&query)
         destroy_test_nav_mesh(nav_mesh)
     }
 
@@ -1476,31 +1473,31 @@ test_detour_edge_case_very_small_extents :: proc(t: ^testing.T) {
     nav_mesh := create_test_nav_mesh(t)
     defer destroy_test_nav_mesh(nav_mesh)
 
-    query := nav_detour.Nav_Mesh_Query{}
-    defer nav_detour.nav_mesh_query_destroy(&query)
+    query := detour.Nav_Mesh_Query{}
+    defer detour.nav_mesh_query_destroy(&query)
 
-    status := nav_detour.nav_mesh_query_init(&query, nav_mesh, 256)
+    status := detour.nav_mesh_query_init(&query, nav_mesh, 256)
     testing.expect(t, recast.status_succeeded(status), "Query initialization should succeed")
 
-    filter := nav_detour.Query_Filter{}
-    nav_detour.query_filter_init(&filter)
+    filter := detour.Query_Filter{}
+    detour.query_filter_init(&filter)
 
     // Test with very small search extents
     center_pos := [3]f32{5.0, 0.0, 5.0}
     tiny_extents := [3]f32{0.001, 0.001, 0.001}
 
-    tiny_status, tiny_ref, _ := nav_detour.find_nearest_poly(&query, center_pos, tiny_extents, &filter)
+    tiny_status, tiny_ref, _ := detour.find_nearest_poly(&query, center_pos, tiny_extents, &filter)
     // Should either find something or gracefully return invalid reference
     testing.expect(t, recast.status_succeeded(tiny_status) || tiny_ref == recast.INVALID_POLY_REF,
                    "Tiny extents should be handled gracefully")
 }
 
 // Helper function to create a simple test navigation mesh
-create_test_nav_mesh :: proc(t: ^testing.T) -> ^nav_detour.Nav_Mesh {
+create_test_nav_mesh :: proc(t: ^testing.T) -> ^detour.Nav_Mesh {
     // Create a simple 10x10 quad navigation mesh for testing
-    nav_mesh := new(nav_detour.Nav_Mesh)
+    nav_mesh := new(detour.Nav_Mesh)
 
-    params := nav_detour.Nav_Mesh_Params{
+    params := detour.Nav_Mesh_Params{
         orig = {0, 0, 0},
         tile_width = 10.0,
         tile_height = 10.0,
@@ -1508,7 +1505,7 @@ create_test_nav_mesh :: proc(t: ^testing.T) -> ^nav_detour.Nav_Mesh {
         max_polys = 64,
     }
 
-    status := nav_detour.nav_mesh_init(nav_mesh, &params)
+    status := detour.nav_mesh_init(nav_mesh, &params)
     if recast.status_failed(status) {
         testing.fail_now(t, "Failed to initialize test navigation mesh")
     }
@@ -1516,7 +1513,7 @@ create_test_nav_mesh :: proc(t: ^testing.T) -> ^nav_detour.Nav_Mesh {
     // Create simple test tile data
     data := create_simple_tile_data()
 
-    _, add_status := nav_detour.nav_mesh_add_tile(nav_mesh, data, recast.DT_TILE_FREE_DATA)
+    _, add_status := detour.nav_mesh_add_tile(nav_mesh, data, recast.DT_TILE_FREE_DATA)
     if recast.status_failed(add_status) {
         testing.fail_now(t, "Failed to add test tile to navigation mesh")
     }
@@ -1524,8 +1521,8 @@ create_test_nav_mesh :: proc(t: ^testing.T) -> ^nav_detour.Nav_Mesh {
     return nav_mesh
 }
 
-destroy_test_nav_mesh :: proc(nav_mesh: ^nav_detour.Nav_Mesh) {
-    nav_detour.nav_mesh_destroy(nav_mesh)
+destroy_test_nav_mesh :: proc(nav_mesh: ^detour.Nav_Mesh) {
+    detour.nav_mesh_destroy(nav_mesh)
     free(nav_mesh)
 }
 
@@ -1533,17 +1530,17 @@ create_simple_tile_data :: proc() -> []u8 {
     // Create minimal tile data for testing
     // This would normally come from Recast mesh processing
 
-    header_size := size_of(nav_detour.Mesh_Header)
-    poly_size := size_of(nav_detour.Poly) * 1  // 1 polygon
+    header_size := size_of(detour.Mesh_Header)
+    poly_size := size_of(detour.Poly) * 1  // 1 polygon
     vertex_size := size_of([3]f32) * 4  // 4 vertices
-    link_size := size_of(nav_detour.Link) * 4  // 4 links for max_link_count
+    link_size := size_of(detour.Link) * 4  // 4 links for max_link_count
 
     // Memory layout must match C++ reference: Header -> Vertices -> Polygons -> Links
     total_size := header_size + vertex_size + poly_size + link_size
     data := make([]u8, total_size)
 
     // Setup header
-    header := cast(^nav_detour.Mesh_Header)raw_data(data)
+    header := cast(^detour.Mesh_Header)raw_data(data)
     header.magic = recast.DT_NAVMESH_MAGIC
     header.version = recast.DT_NAVMESH_VERSION
     header.x = 0
@@ -1567,20 +1564,20 @@ create_simple_tile_data :: proc() -> []u8 {
     verts[3] = [3]f32{0, 0, 10}
 
     // Setup polygon (must come after vertices to match C++ reference)
-    poly := cast(^nav_detour.Poly)(uintptr(raw_data(data)) + uintptr(header_size) + uintptr(vertex_size))
+    poly := cast(^detour.Poly)(uintptr(raw_data(data)) + uintptr(header_size) + uintptr(vertex_size))
     poly.verts[0] = 0
     poly.verts[1] = 1
     poly.verts[2] = 2
     poly.verts[3] = 3
     poly.vert_count = 4
     poly.flags = 1
-    nav_detour.poly_set_area(poly, recast.RC_WALKABLE_AREA)
-    nav_detour.poly_set_type(poly, recast.DT_POLYTYPE_GROUND)
+    detour.poly_set_area(poly, recast.RC_WALKABLE_AREA)
+    detour.poly_set_type(poly, recast.DT_POLYTYPE_GROUND)
 
     // Setup links (initialize to zero - will be connected during tile addition)
-    links := cast(^[4]nav_detour.Link)(uintptr(raw_data(data)) + uintptr(header_size) + uintptr(vertex_size) + uintptr(poly_size))
+    links := cast(^[4]detour.Link)(uintptr(raw_data(data)) + uintptr(header_size) + uintptr(vertex_size) + uintptr(poly_size))
     for i in 0..<4 {
-        links[i] = nav_detour.Link{}
+        links[i] = detour.Link{}
     }
 
     return data

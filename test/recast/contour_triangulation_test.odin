@@ -6,7 +6,7 @@ import "core:time"
 import "core:math"
 import "core:fmt"
 import "core:strings"
-import recast "../../mjolnir/navigation/recast"
+import "../../mjolnir/navigation/recast"
 
 // Test contour generation with simple heightfield
 @(test)

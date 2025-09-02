@@ -1,6 +1,6 @@
 package tests
 
-import geometry "../mjolnir/geometry"
+import "../mjolnir/geometry"
 import "core:testing"
 import "core:math"
 import "core:fmt"

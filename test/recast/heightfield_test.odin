@@ -1,6 +1,6 @@
 package test_recast
 
-import recast "../../mjolnir/navigation/recast"
+import "../../mjolnir/navigation/recast"
 import "core:testing"
 import "core:log"
 import "core:math"
