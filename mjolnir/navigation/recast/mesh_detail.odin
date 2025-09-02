@@ -168,6 +168,7 @@ calculate_triangle_quality :: proc "contextless" (a, b, c: [3]f32) -> f32 {
     return 2.0 * inradius / circumradius
 }
 
+
 // Calculate minimum extent of polygon (C++ polyMinExtent)
 calculate_polygon_min_extent :: proc(poly: ^Detail_Polygon) -> f32 {
     nverts := len(poly.vertices)
@@ -1415,43 +1416,118 @@ build_polygon_detail_mesh_with_timeout :: proc(poly: ^Detail_Polygon, chf: ^Comp
         // Subdivide edges if sample_dist > 0 (matches C++ line 701-738)
         subdivided := make([dynamic]i32, 0, 32)
 
-        // TEMPORARILY DISABLE edge subdivision to match C++ vertex count
-        if false && poly.sample_dist > 0 {
-            v0 := poly.vertices[edge.v0].pos
-            v1 := poly.vertices[edge.v1].pos
+        // Edge subdivision with error-based simplification (C++ lines 701-802)
+        if poly.sample_dist > 0 {
+            v0_pos := poly.vertices[edge.v0].pos
+            v1_pos := poly.vertices[edge.v1].pos
+            
+            // Ensure consistent edge ordering (C++ lines 707-725)
+            vj := v0_pos
+            vi := v1_pos
+            swapped := false
+            
+            if abs(vj.x - vi.x) < 1e-6 {
+                if vj.z > vi.z {
+                    vj, vi = vi, vj
+                    swapped = true
+                }
+            } else {
+                if vj.x > vi.x {
+                    vj, vi = vi, vj  
+                    swapped = true
+                }
+            }
 
-            // Calculate edge length in XZ plane (matches C++ line 730)
-            edge_vec := v1.xz - v0.xz
-            d := linalg.length(edge_vec)
-
-            // Calculate number of segments (matches C++ line 731)
+            // Calculate edge vector and distance (C++ lines 727-730)
+            dx := vi.x - vj.x
+            dy := vi.y - vj.y 
+            dz := vi.z - vj.z
+            d := math.sqrt(dx*dx + dz*dz)
+            
+            // Calculate number of segments (C++ lines 731-734)
             nn := 1 + i32(math.floor(d / poly.sample_dist))
-            if nn > 32 do nn = 32  // MAX_VERTS_PER_EDGE
-
-            // Add subdivided points
+            if nn >= 32 do nn = 31  // MAX_VERTS_PER_EDGE-1
+            
+            // Create sample points along edge
+            MAX_VERTS_PER_EDGE :: 32
+            edge_samples: [MAX_VERTS_PER_EDGE][3]f32
+            
             for k in 0..=nn {
-                if k == 0 {
-                    append(&subdivided, edge.v0)
-                } else if k == nn {
-                    append(&subdivided, edge.v1)
+                u := f32(k) / f32(nn)
+                pos := [3]f32{
+                    vj.x + dx * u,
+                    vj.y + dy * u, 
+                    vj.z + dz * u
+                }
+                // Sample height from heightfield (C++ line 743)
+                pos.y = sample_heightfield_height(chf, {pos.x, pos.y, pos.z})
+                edge_samples[k] = pos
+            }
+            
+            // Simplify samples based on error (C++ lines 745-779)
+            idx: [MAX_VERTS_PER_EDGE]i32
+            idx[0] = 0
+            idx[1] = nn
+            nidx := 2
+            
+            for k := 0; k < nidx - 1; {
+                a := idx[k]
+                b := idx[k+1]  
+                va := edge_samples[a]
+                vb := edge_samples[b]
+                
+                // Find maximum deviation along segment
+                max_dev: f32 = 0
+                max_i := i32(-1)
+                
+                for m in a+1..<b {
+                    dev := geometry.point_segment_distance_sq(edge_samples[m], va, vb)
+                    if dev > max_dev {
+                        max_dev = dev
+                        max_i = i32(m)
+                    }
+                }
+                
+                // Add point if deviation exceeds threshold (C++ lines 768-778)
+                if max_i != i32(-1) && max_dev > poly.max_error * poly.max_error {
+                    // Insert new point
+                    for m := nidx; m > k; m -= 1 {
+                        idx[m] = idx[m-1]
+                    }
+                    idx[k+1] = max_i
+                    nidx += 1
                 } else {
-                    // Interpolate position
-                    u := f32(k) / f32(nn)
-                    pos := v0 + (v1 - v0) * u
-
-                    // Sample height from heightfield
-                    height := sample_heightfield_height(chf, pos)
-
-                    // Add vertex to polygon
+                    k += 1
+                }
+            }
+            
+            // Add vertices to polygon and build subdivision indices (C++ lines 782-800)
+            if swapped {
+                append(&subdivided, edge.v0)
+                for k := nidx-2; k > 0; k -= 1 {
+                    pos := edge_samples[idx[k]]
                     vertex := Detail_Vertex{
-                        pos = pos,
-                        height = height,
+                        pos = {pos.x, pos.y, pos.z},
+                        height = pos.y,
                         flag = 0,
                     }
                     append(&poly.vertices, vertex)
-                    idx := i32(len(poly.vertices) - 1)
-                    append(&subdivided, idx)
+                    append(&subdivided, i32(len(poly.vertices) - 1))
                 }
+                append(&subdivided, edge.v1)
+            } else {
+                append(&subdivided, edge.v0)
+                for k in 1..<nidx-1 {
+                    pos := edge_samples[idx[k]]
+                    vertex := Detail_Vertex{
+                        pos = {pos.x, pos.y, pos.z}, 
+                        height = pos.y,
+                        flag = 0,
+                    }
+                    append(&poly.vertices, vertex)
+                    append(&subdivided, i32(len(poly.vertices) - 1))
+                }
+                append(&subdivided, edge.v1)
             }
         } else {
             // No subdivision
@@ -1479,8 +1555,8 @@ build_polygon_detail_mesh_with_timeout :: proc(poly: ^Detail_Polygon, chf: ^Comp
     }
 
     // Step 2: Add interior samples for larger polygons (matches C++ behavior)
-    // TEMPORARILY DISABLED to debug edge subdivision first
-    if false && poly.sample_dist > 0 && should_add_interior {
+    // Interior sampling implementation matching C++ lines 825-905
+    if poly.sample_dist > 0 && should_add_interior {
         // Add interior sample points with limits (only for larger polygons)
         verts_before_interior := len(poly.vertices)
         add_interior_samples_with_limits(poly, chf, poly.sample_dist)
@@ -1547,43 +1623,118 @@ build_polygon_detail_mesh :: proc(poly: ^Detail_Polygon, chf: ^Compact_Heightfie
         // Subdivide edges if sample_dist > 0 (matches C++ line 701-738)
         subdivided := make([dynamic]i32, 0, 32)
 
-        // TEMPORARILY DISABLE edge subdivision to match C++ vertex count
-        if false && poly.sample_dist > 0 {
-            v0 := poly.vertices[edge.v0].pos
-            v1 := poly.vertices[edge.v1].pos
+        // Edge subdivision with error-based simplification (C++ lines 701-802)
+        if poly.sample_dist > 0 {
+            v0_pos := poly.vertices[edge.v0].pos
+            v1_pos := poly.vertices[edge.v1].pos
+            
+            // Ensure consistent edge ordering (C++ lines 707-725)
+            vj := v0_pos
+            vi := v1_pos
+            swapped := false
+            
+            if abs(vj.x - vi.x) < 1e-6 {
+                if vj.z > vi.z {
+                    vj, vi = vi, vj
+                    swapped = true
+                }
+            } else {
+                if vj.x > vi.x {
+                    vj, vi = vi, vj  
+                    swapped = true
+                }
+            }
 
-            // Calculate edge length in XZ plane (matches C++ line 730)
-            edge_vec := v1.xz - v0.xz
-            d := linalg.length(edge_vec)
-
-            // Calculate number of segments (matches C++ line 731)
+            // Calculate edge vector and distance (C++ lines 727-730)
+            dx := vi.x - vj.x
+            dy := vi.y - vj.y 
+            dz := vi.z - vj.z
+            d := math.sqrt(dx*dx + dz*dz)
+            
+            // Calculate number of segments (C++ lines 731-734)
             nn := 1 + i32(math.floor(d / poly.sample_dist))
-            if nn > 32 do nn = 32  // MAX_VERTS_PER_EDGE
-
-            // Add subdivided points
+            if nn >= 32 do nn = 31  // MAX_VERTS_PER_EDGE-1
+            
+            // Create sample points along edge
+            MAX_VERTS_PER_EDGE :: 32
+            edge_samples: [MAX_VERTS_PER_EDGE][3]f32
+            
             for k in 0..=nn {
-                if k == 0 {
-                    append(&subdivided, edge.v0)
-                } else if k == nn {
-                    append(&subdivided, edge.v1)
+                u := f32(k) / f32(nn)
+                pos := [3]f32{
+                    vj.x + dx * u,
+                    vj.y + dy * u, 
+                    vj.z + dz * u
+                }
+                // Sample height from heightfield (C++ line 743)
+                pos.y = sample_heightfield_height(chf, {pos.x, pos.y, pos.z})
+                edge_samples[k] = pos
+            }
+            
+            // Simplify samples based on error (C++ lines 745-779)
+            idx: [MAX_VERTS_PER_EDGE]i32
+            idx[0] = 0
+            idx[1] = nn
+            nidx := 2
+            
+            for k := 0; k < nidx - 1; {
+                a := idx[k]
+                b := idx[k+1]  
+                va := edge_samples[a]
+                vb := edge_samples[b]
+                
+                // Find maximum deviation along segment
+                max_dev: f32 = 0
+                max_i := i32(-1)
+                
+                for m in a+1..<b {
+                    dev := geometry.point_segment_distance_sq(edge_samples[m], va, vb)
+                    if dev > max_dev {
+                        max_dev = dev
+                        max_i = i32(m)
+                    }
+                }
+                
+                // Add point if deviation exceeds threshold (C++ lines 768-778)
+                if max_i != i32(-1) && max_dev > poly.max_error * poly.max_error {
+                    // Insert new point
+                    for m := nidx; m > k; m -= 1 {
+                        idx[m] = idx[m-1]
+                    }
+                    idx[k+1] = max_i
+                    nidx += 1
                 } else {
-                    // Interpolate position
-                    u := f32(k) / f32(nn)
-                    pos := v0 + (v1 - v0) * u
-
-                    // Sample height from heightfield
-                    height := sample_heightfield_height(chf, pos)
-
-                    // Add vertex to polygon
+                    k += 1
+                }
+            }
+            
+            // Add vertices to polygon and build subdivision indices (C++ lines 782-800)
+            if swapped {
+                append(&subdivided, edge.v0)
+                for k := nidx-2; k > 0; k -= 1 {
+                    pos := edge_samples[idx[k]]
                     vertex := Detail_Vertex{
-                        pos = pos,
-                        height = height,
+                        pos = {pos.x, pos.y, pos.z},
+                        height = pos.y,
                         flag = 0,
                     }
                     append(&poly.vertices, vertex)
-                    idx := i32(len(poly.vertices) - 1)
-                    append(&subdivided, idx)
+                    append(&subdivided, i32(len(poly.vertices) - 1))
                 }
+                append(&subdivided, edge.v1)
+            } else {
+                append(&subdivided, edge.v0)
+                for k in 1..<nidx-1 {
+                    pos := edge_samples[idx[k]]
+                    vertex := Detail_Vertex{
+                        pos = {pos.x, pos.y, pos.z}, 
+                        height = pos.y,
+                        flag = 0,
+                    }
+                    append(&poly.vertices, vertex)
+                    append(&subdivided, i32(len(poly.vertices) - 1))
+                }
+                append(&subdivided, edge.v1)
             }
         } else {
             // No subdivision
@@ -1610,9 +1761,9 @@ build_polygon_detail_mesh :: proc(poly: ^Detail_Polygon, chf: ^Compact_Heightfie
         append(&poly.edges, edge)
     }
 
-    // Step 3: TEMPORARILY DISABLE ALL INTERIOR SAMPLING to match C++
+    // Step 3: Interior sampling implementation matching C++ lines 825-905
     verts_before := len(poly.vertices)
-    if false && should_add_interior {
+    if should_add_interior {
         // Add interior sample points only for larger polygons
         add_interior_samples(poly, chf, poly.sample_dist)
         verts_after := len(poly.vertices)
@@ -2150,3 +2301,6 @@ get_jitter_y :: proc(i: i32) -> f32 {
     h: u32 = 0xd8163841
     return (f32((u32(i) * h) & 0xffff) / 65535.0 * 2.0) - 1.0
 }
+
+
+

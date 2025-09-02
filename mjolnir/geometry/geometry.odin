@@ -1153,3 +1153,106 @@ in_circumcircle :: proc "contextless" (p, a, b, c: [3]f32) -> bool {
     center, r_sq := circum_circle(a, b, c) or_return
     return linalg.length2(p.xz - center) <= r_sq
 }
+
+// Distance squared from point to line segment in 3D
+// Returns the squared distance for performance
+point_segment_distance_sq :: proc "contextless" (pt, va, vb: [3]f32) -> f32 {
+    segment := vb - va
+    to_pt := pt - va
+    
+    segment_length_sq := linalg.length2(segment)
+    if segment_length_sq < math.F32_EPSILON {
+        return linalg.length2(to_pt)
+    }
+    
+    // Project point onto segment
+    t := linalg.saturate(linalg.dot(to_pt, segment) / segment_length_sq)
+    closest := va + segment * t
+    
+    return linalg.length2(pt - closest)
+}
+
+// Distance from point to line segment in 3D
+point_segment_distance :: proc "contextless" (pt, va, vb: [3]f32) -> f32 {
+    return math.sqrt(point_segment_distance_sq(pt, va, vb))
+}
+
+// Distance from point to polygon boundary with inside/outside test
+// Returns negative distance if point is inside, positive if outside
+// Based on C++ distToPoly from RecastMeshDetail.cpp
+point_polygon_distance :: proc(pt: [3]f32, vertices: [][3]f32) -> f32 {
+    if len(vertices) < 3 do return math.F32_MAX
+    
+    min_dist_sq := f32(math.F32_MAX)
+    inside := false
+    
+    for i in 0..<len(vertices) {
+        j := (i + len(vertices) - 1) % len(vertices)
+        vi := vertices[i]
+        vj := vertices[j]
+        
+        // Point-in-polygon test using ray casting (XZ plane)
+        if ((vi.z > pt.z) != (vj.z > pt.z)) &&
+           (pt.x < (vj.x - vi.x) * (pt.z - vi.z) / (vj.z - vi.z) + vi.x) {
+            inside = !inside
+        }
+        
+        // Find minimum distance to edge
+        dist_sq, _ := point_segment_distance2_2d(pt, vi, vj)
+        min_dist_sq = min(min_dist_sq, dist_sq)
+    }
+    
+    min_dist := math.sqrt(min_dist_sq)
+    return inside ? -min_dist : min_dist
+}
+
+// Distance from point to triangle mesh
+// Based on C++ distToTriMesh from RecastMeshDetail.cpp
+point_triangle_mesh_distance :: proc(p: [3]f32, verts: [][3]f32, tris: [][3]u8) -> f32 {
+    min_dist := f32(math.F32_MAX)
+    
+    for tri in tris {
+        va := verts[tri[0]]
+        vb := verts[tri[1]]  
+        vc := verts[tri[2]]
+        
+        // Project point onto triangle plane
+        n := linalg.cross(vb - va, vc - va)
+        if linalg.length2(n) < math.F32_EPSILON do continue
+        n = linalg.normalize(n)
+        
+        plane_dist := linalg.dot(p - va, n)
+        projected := p - n * plane_dist
+        
+        // Check if projected point is inside triangle using barycentric coordinates
+        v0 := vc - va
+        v1 := vb - va  
+        v2 := projected - va
+        
+        dot00 := linalg.dot(v0, v0)
+        dot01 := linalg.dot(v0, v1)
+        dot02 := linalg.dot(v0, v2)
+        dot11 := linalg.dot(v1, v1)
+        dot12 := linalg.dot(v1, v2)
+        
+        denom := dot00 * dot11 - dot01 * dot01
+        if abs(denom) < math.F32_EPSILON do continue
+        
+        inv_denom := 1.0 / denom
+        u := (dot11 * dot02 - dot01 * dot12) * inv_denom
+        v := (dot00 * dot12 - dot01 * dot02) * inv_denom
+        
+        if (u >= 0) && (v >= 0) && (u + v <= 1) {
+            return abs(plane_dist)
+        }
+        
+        // Point is outside triangle, find distance to edges
+        d0 := point_segment_distance(p, va, vb)
+        d1 := point_segment_distance(p, vb, vc)
+        d2 := point_segment_distance(p, vc, va)
+        
+        min_dist = min(min_dist, d0, d1, d2)
+    }
+    
+    return min_dist
+}
