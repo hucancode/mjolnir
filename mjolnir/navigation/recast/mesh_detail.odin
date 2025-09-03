@@ -596,8 +596,6 @@ subdivide_edge :: proc(poly: ^Detail_Polygon, chf: ^Compact_Heightfield,
     return result
 }
 
-// Triangulate polygon using C++ Recast approach
-// This matches the exact logic from buildPolyDetail in C++ Recast
 triangulate_delaunay :: proc(poly: ^Detail_Polygon) -> bool {
     if len(poly.vertices) < 3 do return false
 
@@ -622,12 +620,9 @@ triangulate_delaunay :: proc(poly: ^Detail_Polygon) -> bool {
         }
         return len(poly.triangles) > 0
     }
-
-    // C++ logic: check if polygon is small enough to skip interior sampling
     min_extent := calculate_polygon_min_extent(poly)
     sample_threshold := poly.sample_dist * 2.0
-
-    // For small polygons, use simple hull triangulation only (C++ path)
+    // For small polygons, use simple hull triangulation only
     if min_extent < sample_threshold {
         success := triangulate_hull_based(poly)
         if success && len(poly.triangles) > 0 {
@@ -741,7 +736,6 @@ triangulate_hull_based :: proc(poly: ^Detail_Polygon) -> bool {
         abs_area := abs(area)
 
         // For hull triangulation, we accept triangles regardless of winding
-        // The C++ version uses absolute area for hull triangulation
         if abs_area > MIN_POLYGON_AREA {
             triangle := Detail_Triangle{
                 v = {0, 1, 2},
@@ -778,15 +772,13 @@ triangulate_hull_based :: proc(poly: ^Detail_Polygon) -> bool {
             hull[i], hull[nverts-1-i] = hull[nverts-1-i], hull[i]
         }
     }
-
-    // Find starting ear with shortest perimeter (C++ logic)
+    // Find starting ear with shortest perimeter
     start := 0
     left := 1
     right := nhull - 1
     dmin := f32(1e30)
 
     for i in 0..<nhull {
-        // C++ logic: prefer original vertices for ears (skip non-original in C++)
         if hull[i] >= i32(nin) do continue
 
         pi := (i + nhull - 1) % nhull
@@ -813,7 +805,7 @@ triangulate_hull_based :: proc(poly: ^Detail_Polygon) -> bool {
     // Ensure triangle has positive area (counter-clockwise)
     area := geometry.signed_triangle_area_2d(a, b, c)
 
-    // C++ behavior: Always add triangle in hull triangulation, even if degenerate
+    // Always add triangle in hull triangulation, even if degenerate
     // The area check is less strict for hull triangulation
     triangle := Detail_Triangle{
         v = {hull[start], hull[left], hull[right]},
@@ -822,7 +814,7 @@ triangulate_hull_based :: proc(poly: ^Detail_Polygon) -> bool {
     }
     append(&poly.triangles, triangle)
 
-    // Triangulate remaining polygon by moving left or right (C++ logic)
+    // Triangulate remaining polygon by moving left or right
     for next_index(left, nhull) != right {
         nleft := next_index(left, nhull)
         nright := prev_index(right, nhull)
@@ -842,7 +834,7 @@ triangulate_hull_based :: proc(poly: ^Detail_Polygon) -> bool {
             c := poly.vertices[hull[right]].pos
 
             area := geometry.signed_triangle_area_2d(a, b, c)
-            // C++ behavior: Always add triangle in hull triangulation
+            // Always add triangle in hull triangulation
             triangle := Detail_Triangle{
                 v = {hull[left], hull[nleft], hull[right]},
                 quality = abs(area) > MIN_POLYGON_AREA ? calculate_triangle_quality(a, b, c) : 0.1,
@@ -857,7 +849,7 @@ triangulate_hull_based :: proc(poly: ^Detail_Polygon) -> bool {
             c := poly.vertices[hull[right]].pos
 
             area := geometry.signed_triangle_area_2d(a, b, c)
-            // C++ behavior: Always add triangle in hull triangulation
+            // Always add triangle in hull triangulation
             triangle := Detail_Triangle{
                 v = {hull[left], hull[nright], hull[right]},
                 quality = abs(area) > MIN_POLYGON_AREA ? calculate_triangle_quality(a, b, c) : 0.1,
@@ -1381,9 +1373,7 @@ build_polygon_detail_mesh_with_timeout :: proc(poly: ^Detail_Polygon, chf: ^Comp
     if check_timeout(timeout_ctx, "polygon mesh building") {
         return false
     }
-
     if len(poly.vertices) < 3 do return false
-
     // Save original vertex count and calculate minimum extent BEFORE any edge subdivision
     original_vert_count := len(poly.vertices)
     min_extent := f32(math.F32_MAX)
@@ -1404,28 +1394,20 @@ build_polygon_detail_mesh_with_timeout :: proc(poly: ^Detail_Polygon, chf: ^Comp
     edge_count := 0
     for edge in poly.edges {
         edge_count += 1
-
         // Check timeout every 10 edges
         if edge_count % 10 == 0 && check_timeout(timeout_ctx, "edge subdivision") {
             log.warnf("Timeout during edge subdivision at edge %d", edge_count)
             return false
         }
-
         if !edge.constrained do continue
-
-        // Subdivide edges if sample_dist > 0 (matches C++ line 701-738)
+        // Subdivide edges if sample_dist > 0
         subdivided := make([dynamic]i32, 0, 32)
-
-        // Edge subdivision with error-based simplification (C++ lines 701-802)
+        // Edge subdivision with error-based simplification
         if poly.sample_dist > 0 {
-            v0_pos := poly.vertices[edge.v0].pos
-            v1_pos := poly.vertices[edge.v1].pos
-            
-            // Ensure consistent edge ordering (C++ lines 707-725)
-            vj := v0_pos
-            vi := v1_pos
+            vj := poly.vertices[edge.v0].pos
+            vi := poly.vertices[edge.v1].pos
             swapped := false
-            
+
             if abs(vj.x - vi.x) < 1e-6 {
                 if vj.z > vi.z {
                     vj, vi = vi, vj
@@ -1433,53 +1415,39 @@ build_polygon_detail_mesh_with_timeout :: proc(poly: ^Detail_Polygon, chf: ^Comp
                 }
             } else {
                 if vj.x > vi.x {
-                    vj, vi = vi, vj  
+                    vj, vi = vi, vj
                     swapped = true
                 }
             }
-
-            // Calculate edge vector and distance (C++ lines 727-730)
-            dx := vi.x - vj.x
-            dy := vi.y - vj.y 
-            dz := vi.z - vj.z
-            d := math.sqrt(dx*dx + dz*dz)
-            
-            // Calculate number of segments (C++ lines 731-734)
-            nn := 1 + i32(math.floor(d / poly.sample_dist))
+            // Calculate edge vector and distance
+            d := vi - vj
+            // Calculate number of segments
+            nn := 1 + i32(math.floor(linalg.length2(vi.xz - vj.xz) / poly.sample_dist))
             if nn >= 32 do nn = 31  // MAX_VERTS_PER_EDGE-1
-            
             // Create sample points along edge
             MAX_VERTS_PER_EDGE :: 32
             edge_samples: [MAX_VERTS_PER_EDGE][3]f32
-            
             for k in 0..=nn {
                 u := f32(k) / f32(nn)
-                pos := [3]f32{
-                    vj.x + dx * u,
-                    vj.y + dy * u, 
-                    vj.z + dz * u
-                }
-                // Sample height from heightfield (C++ line 743)
+                pos := vj + d*u
                 pos.y = sample_heightfield_height(chf, {pos.x, pos.y, pos.z})
                 edge_samples[k] = pos
             }
-            
-            // Simplify samples based on error (C++ lines 745-779)
+
+            // Simplify samples based on error
             idx: [MAX_VERTS_PER_EDGE]i32
             idx[0] = 0
             idx[1] = nn
             nidx := 2
-            
+
             for k := 0; k < nidx - 1; {
                 a := idx[k]
-                b := idx[k+1]  
+                b := idx[k+1]
                 va := edge_samples[a]
                 vb := edge_samples[b]
-                
                 // Find maximum deviation along segment
                 max_dev: f32 = 0
                 max_i := i32(-1)
-                
                 for m in a+1..<b {
                     dev := geometry.point_segment_distance_sq(edge_samples[m], va, vb)
                     if dev > max_dev {
@@ -1487,10 +1455,8 @@ build_polygon_detail_mesh_with_timeout :: proc(poly: ^Detail_Polygon, chf: ^Comp
                         max_i = i32(m)
                     }
                 }
-                
-                // Add point if deviation exceeds threshold (C++ lines 768-778)
+                // Add point if deviation exceeds threshold
                 if max_i != i32(-1) && max_dev > poly.max_error * poly.max_error {
-                    // Insert new point
                     for m := nidx; m > k; m -= 1 {
                         idx[m] = idx[m-1]
                     }
@@ -1500,8 +1466,7 @@ build_polygon_detail_mesh_with_timeout :: proc(poly: ^Detail_Polygon, chf: ^Comp
                     k += 1
                 }
             }
-            
-            // Add vertices to polygon and build subdivision indices (C++ lines 782-800)
+            // Add vertices to polygon and build subdivision indices
             if swapped {
                 append(&subdivided, edge.v0)
                 for k := nidx-2; k > 0; k -= 1 {
@@ -1520,7 +1485,7 @@ build_polygon_detail_mesh_with_timeout :: proc(poly: ^Detail_Polygon, chf: ^Comp
                 for k in 1..<nidx-1 {
                     pos := edge_samples[idx[k]]
                     vertex := Detail_Vertex{
-                        pos = {pos.x, pos.y, pos.z}, 
+                        pos = {pos.x, pos.y, pos.z},
                         height = pos.y,
                         flag = 0,
                     }
@@ -1533,7 +1498,6 @@ build_polygon_detail_mesh_with_timeout :: proc(poly: ^Detail_Polygon, chf: ^Comp
             // No subdivision
             append(&subdivided, edge.v0, edge.v1)
         }
-
         // Create new constraint edges between subdivided points
         for i in 0..<len(subdivided)-1 {
             new_edge := Detail_Edge{
@@ -1544,18 +1508,15 @@ build_polygon_detail_mesh_with_timeout :: proc(poly: ^Detail_Polygon, chf: ^Comp
             }
             append(&new_edges, new_edge)
         }
-
         delete(subdivided)
     }
-
     // Replace old edges with subdivided ones
     clear(&poly.edges)
     for edge in new_edges {
         append(&poly.edges, edge)
     }
 
-    // Step 2: Add interior samples for larger polygons (matches C++ behavior)
-    // Interior sampling implementation matching C++ lines 825-905
+    // Step 2: Add interior samples for larger polygons
     if poly.sample_dist > 0 && should_add_interior {
         // Add interior sample points with limits (only for larger polygons)
         verts_before_interior := len(poly.vertices)
@@ -1578,7 +1539,7 @@ build_polygon_detail_mesh_with_timeout :: proc(poly: ^Detail_Polygon, chf: ^Comp
     has_interior_points := len(poly.vertices) > original_vert_count
 
     if !has_interior_points {
-        // No interior points - use hull triangulation like C++ does
+        // No interior points - use hull triangulation
         // This produces better triangulation for long thin triangles
         if !triangulate_hull_based(poly) {
             log.warn("Failed to triangulate hull, using fallback")
@@ -1591,7 +1552,6 @@ build_polygon_detail_mesh_with_timeout :: proc(poly: ^Detail_Polygon, chf: ^Comp
             return triangulate_simple_fan(poly)
         }
     }
-
     return true
 }
 
@@ -1599,7 +1559,7 @@ build_polygon_detail_mesh_with_timeout :: proc(poly: ^Detail_Polygon, chf: ^Comp
 build_polygon_detail_mesh :: proc(poly: ^Detail_Polygon, chf: ^Compact_Heightfield) -> bool {
     if len(poly.vertices) < 3 do return false
 
-    // Step 1: Calculate minimum extent BEFORE edge subdivision (matches C++ line 805)
+    // Step 1: Calculate minimum extent BEFORE edge subdivision
     // Save the original vertex count before ANY modifications
     original_vert_count := len(poly.vertices)
     min_extent := f32(math.F32_MAX)
@@ -1620,19 +1580,15 @@ build_polygon_detail_mesh :: proc(poly: ^Detail_Polygon, chf: ^Compact_Heightfie
     for edge in poly.edges {
         if !edge.constrained do continue
 
-        // Subdivide edges if sample_dist > 0 (matches C++ line 701-738)
+        // Subdivide edges if sample_dist > 0
         subdivided := make([dynamic]i32, 0, 32)
 
-        // Edge subdivision with error-based simplification (C++ lines 701-802)
+        // Edge subdivision with error-based simplification
         if poly.sample_dist > 0 {
-            v0_pos := poly.vertices[edge.v0].pos
-            v1_pos := poly.vertices[edge.v1].pos
-            
-            // Ensure consistent edge ordering (C++ lines 707-725)
-            vj := v0_pos
-            vi := v1_pos
+            vj := poly.vertices[edge.v0].pos
+            vi := poly.vertices[edge.v1].pos
             swapped := false
-            
+
             if abs(vj.x - vi.x) < 1e-6 {
                 if vj.z > vi.z {
                     vj, vi = vi, vj
@@ -1640,53 +1596,37 @@ build_polygon_detail_mesh :: proc(poly: ^Detail_Polygon, chf: ^Compact_Heightfie
                 }
             } else {
                 if vj.x > vi.x {
-                    vj, vi = vi, vj  
+                    vj, vi = vi, vj
                     swapped = true
                 }
             }
-
-            // Calculate edge vector and distance (C++ lines 727-730)
-            dx := vi.x - vj.x
-            dy := vi.y - vj.y 
-            dz := vi.z - vj.z
-            d := math.sqrt(dx*dx + dz*dz)
-            
-            // Calculate number of segments (C++ lines 731-734)
-            nn := 1 + i32(math.floor(d / poly.sample_dist))
+            // Calculate edge vector and distance
+            d := vi - vj
+            // Calculate number of segments
+            nn := 1 + i32(math.floor(linalg.length2(d) / poly.sample_dist))
             if nn >= 32 do nn = 31  // MAX_VERTS_PER_EDGE-1
-            
             // Create sample points along edge
             MAX_VERTS_PER_EDGE :: 32
             edge_samples: [MAX_VERTS_PER_EDGE][3]f32
-            
             for k in 0..=nn {
                 u := f32(k) / f32(nn)
-                pos := [3]f32{
-                    vj.x + dx * u,
-                    vj.y + dy * u, 
-                    vj.z + dz * u
-                }
-                // Sample height from heightfield (C++ line 743)
+                pos := vj - d*u
                 pos.y = sample_heightfield_height(chf, {pos.x, pos.y, pos.z})
                 edge_samples[k] = pos
             }
-            
-            // Simplify samples based on error (C++ lines 745-779)
+            // Simplify samples based on error
             idx: [MAX_VERTS_PER_EDGE]i32
             idx[0] = 0
             idx[1] = nn
             nidx := 2
-            
             for k := 0; k < nidx - 1; {
                 a := idx[k]
-                b := idx[k+1]  
+                b := idx[k+1]
                 va := edge_samples[a]
                 vb := edge_samples[b]
-                
                 // Find maximum deviation along segment
                 max_dev: f32 = 0
                 max_i := i32(-1)
-                
                 for m in a+1..<b {
                     dev := geometry.point_segment_distance_sq(edge_samples[m], va, vb)
                     if dev > max_dev {
@@ -1694,8 +1634,7 @@ build_polygon_detail_mesh :: proc(poly: ^Detail_Polygon, chf: ^Compact_Heightfie
                         max_i = i32(m)
                     }
                 }
-                
-                // Add point if deviation exceeds threshold (C++ lines 768-778)
+                // Add point if deviation exceeds threshold
                 if max_i != i32(-1) && max_dev > poly.max_error * poly.max_error {
                     // Insert new point
                     for m := nidx; m > k; m -= 1 {
@@ -1707,8 +1646,7 @@ build_polygon_detail_mesh :: proc(poly: ^Detail_Polygon, chf: ^Compact_Heightfie
                     k += 1
                 }
             }
-            
-            // Add vertices to polygon and build subdivision indices (C++ lines 782-800)
+            // Add vertices to polygon and build subdivision indices
             if swapped {
                 append(&subdivided, edge.v0)
                 for k := nidx-2; k > 0; k -= 1 {
@@ -1727,7 +1665,7 @@ build_polygon_detail_mesh :: proc(poly: ^Detail_Polygon, chf: ^Compact_Heightfie
                 for k in 1..<nidx-1 {
                     pos := edge_samples[idx[k]]
                     vertex := Detail_Vertex{
-                        pos = {pos.x, pos.y, pos.z}, 
+                        pos = {pos.x, pos.y, pos.z},
                         height = pos.y,
                         flag = 0,
                     }
@@ -2301,6 +2239,3 @@ get_jitter_y :: proc(i: i32) -> f32 {
     h: u32 = 0xd8163841
     return (f32((u32(i) * h) & 0xffff) / 65535.0 * 2.0) - 1.0
 }
-
-
-

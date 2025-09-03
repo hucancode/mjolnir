@@ -38,15 +38,11 @@ nav_mesh_init :: proc(nav_mesh: ^Nav_Mesh, params: ^Nav_Mesh_Params) -> recast.S
     // Calculate ID encoding parameters (matching C++ dtNavMesh::init)
     tile_bits_needed := geometry.ilog2(geometry.next_pow2(u32(params.max_tiles)))
     poly_bits_needed := geometry.ilog2(geometry.next_pow2(u32(params.max_polys)))
-
-    // Use 32-bit references (matching C++ logic)
     nav_mesh.tile_bits = tile_bits_needed
     nav_mesh.poly_bits = poly_bits_needed
 
     // Only allow 31 salt bits, since the salt mask is calculated using 32bit uint
     nav_mesh.salt_bits = min(31, 32 - nav_mesh.tile_bits - nav_mesh.poly_bits)
-
-    // Ensure minimum salt bits for security (matching C++ requirement)
     if nav_mesh.salt_bits < 10 {
         return {.Invalid_Param}
     }

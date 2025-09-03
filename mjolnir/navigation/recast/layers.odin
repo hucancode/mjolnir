@@ -6,7 +6,6 @@ import "core:math/linalg"
 import "core:slice"
 import "core:mem"
 
-// Layer constants from C++ implementation
 RC_MAX_LAYER_ID :: 255
 RC_NULL_LAYER_ID :: 255
 RC_MAX_LAYERS_DEF :: 63  // Must be ≤ 255
@@ -23,7 +22,6 @@ Heightfield_Layer_Region :: struct {
     is_base: bool,                      // Flag: true if base region, false if merged
 }
 
-// Layer Sweep Span - matches C++ rcLayerSweepSpan exactly
 Layer_Sweep_Span :: struct {
     sample_count: u16,  // ns - number samples
     region_id: u8,      // id - region id (set in second phase)
@@ -158,7 +156,7 @@ build_heightfield_layers :: proc(
     return lset, true
 }
 
-// Phase 1: Monotone region partitioning (Matches C++ implementation exactly)
+// Phase 1: Monotone region partitioning
 partition_monotone_regions :: proc(
     chf: ^Compact_Heightfield,
     border_size: i32,
@@ -167,23 +165,18 @@ partition_monotone_regions :: proc(
     w := chf.width
     h := chf.height
 
-    // Initialize all regions as unassigned (C++ uses 0xff)
+    // Initialize all regions as unassigned
     slice.fill(src_reg, 0xff)
-
-    // Allocate sweeps array - C++ uses fixed size based on nsweeps
-    // We'll use dynamic but the logic must match exactly
     sweeps := make([dynamic]Layer_Sweep_Span)
     defer delete(sweeps)
-
-    // Previous count tracking (C++ uses prevCount[256])
     prev_count: [256]i32
     reg_id: u8 = 0
 
     // Process each row from border to h-border
     for y in border_size ..< (h - border_size) {
-        // Reset previous count for this row (C++ memset)
+        // Reset previous count for this row
         slice.fill(prev_count[:reg_id], 0)
-        sweep_id: u8 = 0  // C++ sweepId counter
+        sweep_id: u8 = 0
         clear(&sweeps)     // Start fresh for each row
 
         // Process each column from border to w-border
@@ -200,7 +193,7 @@ partition_monotone_regions :: proc(
                     continue
                 }
 
-                sid: u8 = 0xff  // C++ uses 0xff as invalid marker
+                sid: u8 = 0xff  // 0xff as invalid marker
 
                 // Check connection in -X direction (direction 0)
                 s := &chf.spans[i]
@@ -208,8 +201,6 @@ partition_monotone_regions :: proc(
                     ax := x + get_dir_offset_x(0)
                     ay := y + get_dir_offset_y(0)
                     ai := chf.cells[ax + ay * w].index + u32(get_con(s, 0))
-
-                    // C++ logic: if (chf.areas[ai] != RC_NULL_AREA && srcReg[ai] != 0xff)
                     if ai < u32(len(chf.areas)) && ai < u32(len(src_reg)) &&
                        chf.areas[ai] != RC_NULL_AREA && src_reg[ai] != 0xff {
                         sid = src_reg[ai]  // Reuse existing sweep ID
@@ -226,7 +217,7 @@ partition_monotone_regions :: proc(
                         append(&sweeps, Layer_Sweep_Span{
                             sample_count = 0,
                             region_id = 0,      // Will be set in second phase
-                            neighbor_id = 0xff, // C++ uses 0xff for invalid
+                            neighbor_id = 0xff, // uses 0xff for invalid
                         })
                     }
 
@@ -267,7 +258,7 @@ partition_monotone_regions :: proc(
             }
         }
 
-        // Create unique region IDs (C++ "Create unique ID" section)
+        // Create unique region IDs
         for i in 0..< int(sweep_id) {
             sweep := &sweeps[i]
 
@@ -350,8 +341,6 @@ analyze_regions :: proc(
 
                 // Update region bounds using modernized approach
                 reg := &regions[ri]
-
-                // Match C++ behavior: only use s.y for both min and max!
                 // This tracks where spans START, not their full extent
                 expand_bounds(&reg.height_bounds, s.y)
                 expand_bounds(&reg.height_bounds, s.y)  // Yes, s.y for both!
@@ -655,7 +644,7 @@ build_single_layer :: proc(
     w := chf.width
     h := chf.height
 
-    // C++ style: All layers have the same full size (minus border)
+    // All layers have the same full size (minus border)
     // This prevents fragmentation into many small layers
     layer_width := w - border_size * 2
     layer_height := h - border_size * 2
@@ -722,7 +711,7 @@ build_single_layer :: proc(
     layer_minx := border_size
     layer_miny := border_size
 
-    // Create layer with full size (like C++)
+    // Create layer with full size
     // Adjust bounding box to fit the layer (accounting for border)
     layer_bmin := chf.bmin
     layer_bmax := chf.bmax

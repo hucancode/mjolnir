@@ -454,7 +454,6 @@ test_floor_with_obstacles :: proc(t: ^testing.T) {
     cfg.bmin = bmin
     cfg.bmax = bmax
 
-    // Standard parameters matching C++
     cfg.cs = 0.3
     cfg.ch = 0.2
     cfg.walkable_slope_angle = 45.0

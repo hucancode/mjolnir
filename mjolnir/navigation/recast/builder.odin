@@ -82,12 +82,7 @@ build_compact_heightfield :: proc(walkable_height, walkable_climb: i32,
     chf.span_count = i32(span_count)
     chf.spans = make([]Compact_Span, span_count)
     chf.areas = make([]u8, span_count)
-
-    // Initialize areas to RC_NULL_AREA to match C++ behavior
-    for i in 0..<span_count {
-        chf.areas[i] = RC_NULL_AREA
-    }
-
+    slice.fill(chf.areas, RC_NULL_AREA)
     // Fill in cells and spans
     idx := 0
     for y in 0..<h {
@@ -467,8 +462,6 @@ build_contours :: proc(chf: ^Compact_Heightfield,
                                 cont.verts[j][2] -= border_size
                             }
                         }
-
-                        // Store raw vertices (matching C++ behavior)
                         cont.rverts = make([][4]i32, len(verts))
                         copy(cont.rverts, verts[:])
 
@@ -603,11 +596,9 @@ walk_contour_boundary :: proc(x, y, i: i32, chf: ^Compact_Heightfield,
     start_i := i
     area := chf.areas[i]
 
-    // Use the same variable names as C++ for clarity - these are the current position
     curr_x, curr_y, curr_i := x, y, i
     iter: i32 = 0
 
-    // Walk boundary following the C++ reference algorithm exactly
     for iter < 40000 {
         iter += 1
 
@@ -624,7 +615,6 @@ walk_contour_boundary :: proc(x, y, i: i32, chf: ^Compact_Heightfield,
             py, is_border_vertex := get_corner_height_for_contour(curr_x, curr_y, curr_i, i32(dir), chf)
             pz := curr_y
 
-            // Adjust vertex position based on direction (matching C++ exactly)
             switch dir {
             case 0: pz += 1      // North: increment Z
             case 1: px += 1; pz += 1  // Northeast: increment both X and Z
@@ -645,7 +635,7 @@ walk_contour_boundary :: proc(x, y, i: i32, chf: ^Compact_Heightfield,
                     if ai >= 0 && ai < i32(len(chf.spans)) {
                         r = i32(chf.spans[ai].reg)
 
-                        // Check if this is an area border (match C++ logic)
+                        // Check if this is an area border
                         if ai < i32(len(chf.areas)) && area != chf.areas[ai] {
                             is_area_border = true
                         }
@@ -680,7 +670,7 @@ walk_contour_boundary :: proc(x, y, i: i32, chf: ^Compact_Heightfield,
             }
 
             if ni == -1 {
-                // Should not happen in valid heightfield - matches C++ behavior
+                // Should not happen in valid heightfield
                 return false
             }
 
@@ -690,14 +680,14 @@ walk_contour_boundary :: proc(x, y, i: i32, chf: ^Compact_Heightfield,
                 return false
             }
 
-            // Update position to neighbor (matches C++ exactly)
+            // Update position to neighbor
             curr_x = nx
             curr_y = ny
             curr_i = ni
             dir = (dir + 3) & 0x3  // Rotate CCW
         }
 
-        // Check termination condition - must match C++ exactly
+        // Check termination condition
         if start_i == curr_i && start_dir == dir {
 
             return true
@@ -894,7 +884,7 @@ simplify_contour :: proc(raw_verts: [][4]i32, simplified: ^[dynamic][4]i32, max_
 
     n_verts := len(raw_verts)
 
-    // Check if contour has connections (region changes) - matching C++ logic
+    // Check if contour has connections (region changes)
     has_connections := false
     for i := 0; i < n_verts; i += 1 {
         if (raw_verts[i].w & RC_CONTOUR_REG_MASK) != 0 {
@@ -975,7 +965,7 @@ simplify_contour :: proc(raw_verts: [][4]i32, simplified: ^[dynamic][4]i32, max_
         // Traverse vertices between a and b
         ci := (ai + 1) % i32(n_verts)
 
-        // Tessellate only outer edges or edges between areas (matching C++ logic)
+        // Tessellate only outer edges or edges between areas
         if (raw_verts[ci].w & RC_CONTOUR_REG_MASK) == 0 || (raw_verts[ci].w & RC_AREA_BORDER) != 0 {
             for ci != bi {
                 v := raw_verts[ci]
@@ -1001,7 +991,7 @@ simplify_contour :: proc(raw_verts: [][4]i32, simplified: ^[dynamic][4]i32, max_
         }
     }
 
-    // Split too long edges (matching C++ edge tessellation)
+    // Split too long edges
     if max_edge_len > 0 && (Contour_Tess_Flag.WALL_EDGES in build_flags || Contour_Tess_Flag.AREA_EDGES in build_flags) {
         i := 0
         for i < len(simplified) {
@@ -1051,7 +1041,7 @@ simplify_contour :: proc(raw_verts: [][4]i32, simplified: ^[dynamic][4]i32, max_
         }
     }
 
-    // Update the vertex flags after simplification (matching C++ logic)
+    // Update the vertex flags after simplification
     // The edge vertex flag is taken from the current raw point,
     // and the neighbour region is taken from the next raw point.
     for i in 0..<len(simplified) {

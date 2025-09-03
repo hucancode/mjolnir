@@ -11,7 +11,6 @@ import "../recast"
 
 // Heuristic scale factor for A* pathfinding
 // Slightly less than 1.0 to keep the heuristic admissible and guarantee optimal paths
-// Matching C++ implementation's value for consistent behavior
 H_SCALE :: 0.999
 
 // A* pathfinding node (full data)
@@ -117,7 +116,6 @@ create_node :: proc(ctx: ^Pathfinding_Context, id: recast.Poly_Ref) -> ^Node {
 pathfinding_node_compare :: proc(a, b: Pathfinding_Node) -> bool {
     // For min-heap: return true if 'a' should come before 'b'
     // We want lower costs to have higher priority (come first)
-    // Just use total cost for comparison (matching C++ implementation)
     return a.total < b.total
 }
 
@@ -519,7 +517,7 @@ get_edge_mid_point :: proc(tile_a, tile_b: ^Mesh_Tile, poly_a, poly_b: ^Poly, ed
     return linalg.mix(va0, va1, 0.5)
 }
 
-// Sliced pathfinding functions (matching C++ API)
+// Sliced pathfinding functions
 init_sliced_find_path :: proc(query: ^Nav_Mesh_Query, start_ref: recast.Poly_Ref,
                                end_ref: recast.Poly_Ref, start_pos: [3]f32, end_pos: [3]f32,
                                filter: ^Query_Filter, options: u32) -> recast.Status {

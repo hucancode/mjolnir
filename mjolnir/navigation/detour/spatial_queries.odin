@@ -37,22 +37,20 @@ find_nearest_poly :: proc(query: ^Nav_Mesh_Query, center: [3]f32, half_extents: 
             // Query polygons in tile using temp allocator
             poly_refs := make([]recast.Poly_Ref, 128)
             defer delete(poly_refs)
-            poly_count := query_polygons_in_tile(query.nav_mesh, tile, bmin, bmax, poly_refs, 128)
+            poly_count := query_polygons_in_tile(query.nav_mesh, tile, bmin, bmax, poly_refs, 128, filter)
             log.infof("  Query returned %d polygons", poly_count)
             total_polys_checked += int(poly_count)
 
             for i in 0..<poly_count {
                 ref := poly_refs[i]
 
-                // Check filter
+                // Get tile and poly for closest point calculation
                 tile_poly, poly, poly_status := get_tile_and_poly_by_ref(query.nav_mesh, ref)
                 if recast.status_failed(poly_status) {
                     continue
                 }
 
-                if !query_filter_pass_filter(filter, ref, tile_poly, poly) {
-                    continue
-                }
+                // Filter already applied in query_polygons_in_tile
 
                 // Find closest point on polygon
                 closest_pt, inside := closest_point_on_polygon(tile_poly, poly, center)
@@ -115,20 +113,9 @@ query_polygons :: proc(query: ^Nav_Mesh_Query, center: [3]f32, half_extents: [3]
                 break
             }
             tile_poly_count := query_polygons_in_tile(query.nav_mesh, tile, bmin, bmax,
-                                                        polys[poly_count:], remaining)
-            // Apply filter
-            filtered_count := i32(0)
-            for i in 0..<tile_poly_count {
-                ref := polys[poly_count + i]
-                tile_poly, poly, poly_status := get_tile_and_poly_by_ref(query.nav_mesh, ref)
-                if recast.status_succeeded(poly_status) &&
-                   query_filter_pass_filter(filter, ref, tile_poly, poly) {
-                    polys[poly_count + filtered_count] = ref
-                    filtered_count += 1
-                }
-            }
-
-            poly_count += filtered_count
+                                                        polys[poly_count:], remaining, filter)
+            // Filter already applied in query_polygons_in_tile, no post-processing needed
+            poly_count += tile_poly_count
         }
     }
 
@@ -324,7 +311,8 @@ find_random_point_around_circle :: proc(query: ^Nav_Mesh_Query, start_ref: recas
 // Helper functions
 
 query_polygons_in_tile :: proc(nav_mesh: ^Nav_Mesh, tile: ^Mesh_Tile, qmin, qmax: [3]f32,
-                                 polys: []recast.Poly_Ref, max_polys: i32) -> i32 {
+                                 polys: []recast.Poly_Ref, max_polys: i32,
+                                 filter: ^Query_Filter) -> i32 {
 
     // For now, always use brute force to verify the BV tree issue
     // log.infof("    Using brute force for polygon query")
@@ -334,7 +322,14 @@ query_polygons_in_tile :: proc(nav_mesh: ^Nav_Mesh, tile: ^Mesh_Tile, qmin, qmax
     base := get_poly_ref_base(nav_mesh, tile)
 
     for i in 0..<int(tile.header.poly_count) {
+        if count >= max_polys do break
+
         poly := &tile.polys[i]
+        ref := base | recast.Poly_Ref(i)
+
+        if filter != nil && !query_filter_pass_filter(filter, ref, tile, poly) {
+            continue
+        }
 
         // Calculate polygon bounds
         poly_min := [3]f32{math.F32_MAX, math.F32_MAX, math.F32_MAX}
@@ -354,16 +349,10 @@ query_polygons_in_tile :: proc(nav_mesh: ^Nav_Mesh, tile: ^Mesh_Tile, qmin, qmax
             poly_max = linalg.max(poly_max, vert)
         }
 
-        // Test overlap
-        // if i < 5 { // Debug first few polygons
-        //     log.infof("    Polygon %d: bounds %v-%v, query %v-%v, overlap=%t",
-        //               i, poly_min, poly_max, qmin, qmax, overlap)
-        // }
+        // Test spatial overlap AFTER filter passes
         if geometry.overlap_bounds(qmin, qmax, poly_min, poly_max) {
-            if count < max_polys {
-                polys[count] = base | recast.Poly_Ref(i)
-                count += 1
-            }
+            polys[count] = ref  // Direct assignment, no overlap possible
+            count += 1
         }
     }
 

@@ -272,5 +272,3 @@ test_detail_mesh_edge_cases :: proc(t: ^testing.T) {
 
     log.info("✓ Detail mesh edge cases test passed")
 }
-
-// Removed C++ comparison test - comparisons are for debugging only, not test assertions

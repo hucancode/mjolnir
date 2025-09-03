@@ -94,10 +94,6 @@ get_poly_merge_value :: proc(pa, pb: []i32, verts: []Mesh_Vertex, nvp: i32) -> (
     if !uleft(av2, bv2, cv2) {
         return -1, -1, -1
     }
-
-    // C++ only checks connection points, not full convexity
-    // This matches the original Recast behavior
-
     // Calculate merge value (edge length squared)
     va = pa[ea]
     vb = pa[(ea+1) % na]
@@ -181,7 +177,7 @@ vertex_hash :: proc "contextless" (x, y, z: u16) -> u32 {
 
 // Add vertex to hash table, return index (existing or new)
 add_vertex :: proc(x, y, z: u16, verts: ^[dynamic]Mesh_Vertex, buckets: []Vertex_Bucket) -> i32 {
-    bucket := vertex_hash(x, 0, z)  // Hash only uses x and z (matching C++)
+    bucket := vertex_hash(x, 0, z)  // Hash only uses x and z
 
     // Search for existing vertex with cycle protection
     i := buckets[bucket].first
@@ -193,7 +189,7 @@ add_vertex :: proc(x, y, z: u16, verts: ^[dynamic]Mesh_Vertex, buckets: []Vertex
             break
         }
         v := &verts[i]
-        // Match C++ behavior: exact x,z match and y within tolerance of 2
+        // exact x,z match and y within tolerance of 2
         if v.x == x && v.z == z && abs(i32(v.y) - i32(y)) <= 2 {
             return i
         }
@@ -222,7 +218,7 @@ diagonalie :: proc "contextless" (verts: [][4]i32, indices: []u32, a, c: int) ->
     for i in 0..<len(indices) {
         i1 := (i + 1) % len(indices)
 
-        // Skip edges incident to a or c (matching C++ logic)
+        // Skip edges incident to a or c
         if i == a || i1 == a || i == c || i1 == c {
             // log.infof("  Skipping edge %d-%d (incident to diagonal)", i, i1)
             continue
@@ -230,8 +226,7 @@ diagonalie :: proc "contextless" (verts: [][4]i32, indices: []u32, a, c: int) ->
 
         b1_idx := indices[i] & 0x0fffffff
         b2_idx := indices[i1] & 0x0fffffff
-
-        // Also skip if vertices are equal (additional check from C++)
+        // Also skip if vertices are equal
         va := verts[a_idx]
         vc := verts[c_idx]
         vb1 := verts[b1_idx]
@@ -279,7 +274,7 @@ diagonalie_loose :: proc "contextless" (verts: [][4]i32, indices: []u32, a, c: i
 
     for i in 0..<len(indices) {
         i1 := (i + 1) % len(indices)
-        // Skip edges incident to a or c (matching C++ logic)
+        // Skip edges incident to a or c
         if i == a || i1 == a || i == c || i1 == c {
             continue
         }
@@ -383,8 +378,7 @@ triangulate_polygon :: proc(verts: [][4]i32, indices: []i32, triangles: ^[dynami
     for n > 3 {
         min_len := -1
         mini := -1
-
-        // Find ear with shortest diagonal (C++ algorithm)
+        // Find ear with shortest diagonal
         for i in 0..<n {
             i1 := (i + 1) % n
             if work_indices[i1] & MIDDLE_VERTEX_MASK != 0 {
@@ -454,7 +448,7 @@ triangulate_polygon :: proc(verts: [][4]i32, indices: []i32, triangles: ^[dynami
         if i1 >= n do i1 = 0
         i = i1 - 1 >= 0 ? i1 - 1 : n - 1
 
-        // Update diagonal flags for adjacent vertices (matching C++)
+        // Update diagonal flags for adjacent vertices
         prev_i := i - 1 >= 0 ? i - 1 : n - 1
         next_i1 := (i1 + 1) % n
 
@@ -799,7 +793,6 @@ build_poly_mesh :: proc(cset: ^Contour_Set, nvp: i32, pmesh: ^Poly_Mesh) -> bool
             continue
         }
 
-        // Build arrays for triangulation (matching C++ implementation)
         // Create indices array for triangulation (0, 1, 2, ...)
         indices := make([]i32, len(cont.verts))
         defer delete(indices)
@@ -808,7 +801,7 @@ build_poly_mesh :: proc(cset: ^Contour_Set, nvp: i32, pmesh: ^Poly_Mesh) -> bool
             indices[j] = i32(j)
         }
 
-        // Triangulate the contour FIRST (matching C++ approach)
+        // Triangulate the contour FIRST
         // Pass cont.verts directly - they're already [4]i32 with x, y, z, flags
         clear(&triangles)
 
@@ -833,9 +826,6 @@ build_poly_mesh :: proc(cset: ^Contour_Set, nvp: i32, pmesh: ^Poly_Mesh) -> bool
         verts_after := len(verts)
         new_verts := verts_after - verts_before
 
-        // Group triangles into convex polygons with max nvp vertices
-        // Based on C++ implementation from RecastMesh.cpp
-
         // Start with triangles as initial polygons
         region_polys := make([dynamic]Poly_Build)
         defer {
@@ -851,7 +841,7 @@ build_poly_mesh :: proc(cset: ^Contour_Set, nvp: i32, pmesh: ^Poly_Mesh) -> bool
                 area = cont.area,
                 reg = cont.reg,
             }
-            // Use triangles as lookup into indices array (matching C++ approach)
+            // Use triangles as lookup into indices array
             poly.verts[0] = indices[triangles[base + 0]]
             poly.verts[1] = indices[triangles[base + 1]]
             poly.verts[2] = indices[triangles[base + 2]]

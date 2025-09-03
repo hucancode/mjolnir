@@ -2,7 +2,6 @@ package navigation_recast
 
 // Represents a span in a heightfield.
 Span :: struct {
-  // Bit field for packed data matching C++ layout
   using data: bit_field u32 {
     smin: u32 | 13, // The lower extent of the span
     smax: u32 | 13, // The upper extent of the span

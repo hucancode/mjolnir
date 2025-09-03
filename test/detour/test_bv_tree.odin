@@ -103,8 +103,7 @@ test_bv_tree_construction :: proc(t: ^testing.T) {
 
     // Expected values from C++ (with Y remapping)
     expected := []struct{
-        bmin: [3]u16,
-        bmax: [3]u16,
+        bmin, bmax: [3]u16,
         i: i32,
     }{
         {{0,0,0}, {10,0,10}, 0},   // Bottom triangle 1

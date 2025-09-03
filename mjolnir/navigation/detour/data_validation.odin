@@ -111,12 +111,12 @@ detect_data_endianness :: proc(data: []u8) -> (Endianness, bool) {
 
 // Expected struct sizes based on actual Odin implementation
 // These are the actual sizes that Odin produces with its padding/alignment
-EXPECTED_DT_MESH_HEADER_SIZE :: 100  // Actual Odin size with padding
-EXPECTED_DT_POLY_SIZE :: 32          // Actual Odin size with padding
-EXPECTED_DT_LINK_SIZE :: 12          // Actual Odin size (matches C++)
-EXPECTED_DT_POLY_DETAIL_SIZE :: 12   // Actual Odin size with padding (C++ would be 10)
-EXPECTED_DT_BV_NODE_SIZE :: 16       // Actual Odin size (matches C++)
-EXPECTED_DT_OFF_MESH_CONNECTION_SIZE :: 36  // Actual Odin size (matches C++)
+EXPECTED_DT_MESH_HEADER_SIZE :: 100
+EXPECTED_DT_POLY_SIZE :: 32
+EXPECTED_DT_LINK_SIZE :: 12
+EXPECTED_DT_POLY_DETAIL_SIZE :: 12
+EXPECTED_DT_BV_NODE_SIZE :: 16
+EXPECTED_DT_OFF_MESH_CONNECTION_SIZE :: 36
 
 // Data format version constants
 NAVMESH_DATA_FORMAT_VERSION :: 7

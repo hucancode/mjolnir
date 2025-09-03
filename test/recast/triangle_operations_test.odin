@@ -296,7 +296,7 @@ test_triangle_operations_zero_area :: proc(t: ^testing.T) {
     areas := []u8{recast.RC_WALKABLE_AREA}
 
     // Zero-area triangle produces NaN normal, so NaN comparisons return false
-    // This means clear_unwalkable_triangles will NOT clear it (matches C++ behavior)
+    // This means clear_unwalkable_triangles will NOT clear it
     recast.clear_unwalkable_triangles(45.0, vertices, indices, areas)
     testing.expect_value(t, areas[0], recast.RC_WALKABLE_AREA) // Should remain unchanged
 

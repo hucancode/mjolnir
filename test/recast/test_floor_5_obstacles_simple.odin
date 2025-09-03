@@ -10,7 +10,7 @@ import nav_loader "../../mjolnir/navigation"
 @(test)
 test_floor_5_obstacles_simple :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-    
+
     // Load the floor_with_5_obstacles.obj mesh
     vertices, indices, areas, ok := nav_loader.load_obj_to_navmesh_input("assets/floor_with_5_obstacles.obj")
     if !ok {
@@ -23,11 +23,10 @@ test_floor_5_obstacles_simple :: proc(t: ^testing.T) {
         delete(indices)
         delete(areas)
     }
-    
-    log.infof("Loaded mesh: %d verts, %d indices", 
+
+    log.infof("Loaded mesh: %d verts, %d indices",
              len(vertices), len(indices))
-    
-    // Create config matching C++ test
+
     cfg := nav.Config{}
     cfg.cs = 0.3
     cfg.ch = 0.2
@@ -42,7 +41,7 @@ test_floor_5_obstacles_simple :: proc(t: ^testing.T) {
     cfg.max_verts_per_poly = 6
     cfg.detail_sample_dist = 6.0
     cfg.detail_sample_max_error = 1.0
-    
+
     // Build navigation mesh
     log.info("=== Building navigation mesh ===")
     pmesh, dmesh, build_ok := nav.build_navmesh(vertices, indices, areas, cfg)
@@ -55,18 +54,18 @@ test_floor_5_obstacles_simple :: proc(t: ^testing.T) {
         if pmesh != nil do nav.free_poly_mesh(pmesh)
         if dmesh != nil do nav.free_poly_mesh_detail(dmesh)
     }
-    
+
     log.infof("\n=== PolyMesh Result ===")
     log.infof("nverts: %d, npolys: %d, maxpolys: %d, nvp: %d",
              len(pmesh.verts), pmesh.npolys, pmesh.maxpolys, pmesh.nvp)
-    
+
     // Print first 10 vertices
     log.info("First vertices (x,y,z):")
     for i in 0..<min(10, len(pmesh.verts)) {
         v := pmesh.verts[i]
         log.infof("  [%d]: %d, %d, %d", i, v.x, v.y, v.z)
     }
-    
+
     // Print first 5 polygons
     log.info("First polygons:")
     for i in 0..<min(5, int(pmesh.npolys)) {
@@ -78,10 +77,10 @@ test_floor_5_obstacles_simple :: proc(t: ^testing.T) {
         }
         fmt.printf("(area: %d, reg: %d)\n", pmesh.areas[i], pmesh.regs[i])
     }
-    
+
     // Verify mesh was built successfully
     testing.expect(t, pmesh.npolys > 0, "Should generate polygons")
     testing.expect(t, len(pmesh.verts) > 0, "Should generate vertices")
-    
+
     log.info("✓ Navigation mesh built successfully")
 }

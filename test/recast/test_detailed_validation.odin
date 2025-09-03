@@ -10,7 +10,7 @@ import "core:time"
 import "core:math"
 import nav "../../mjolnir/navigation/recast"
 
-// Detailed test comparing specific Recast functions with expected C++ outputs
+// Detailed test comparing specific Recast functions
 @(test)
 test_basic_span_merging :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)

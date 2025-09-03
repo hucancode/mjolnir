@@ -28,7 +28,7 @@ find_straight_path :: proc(query: ^Nav_Mesh_Query,
 
     stat :recast.Status
 
-    // Clamp start and end positions to polygon boundaries (matches C++)
+    // Clamp start and end positions to polygon boundaries
     closest_start_pos, start_status := closest_point_on_poly_boundary_nav(query, path[0], start_pos)
     if recast.status_failed(start_status) {
         return {.Invalid_Param}, straight_path_count
@@ -140,7 +140,6 @@ find_straight_path :: proc(query: ^Nav_Mesh_Query,
 
                 if recast.status_failed(portal_status) {
                     // Failed to get portal points - clamp end point to current polygon
-                    // This matches the C++ behavior
                     closest_on_poly, _ := closest_point_on_poly_boundary_nav(query, path[i], closest_end_pos)
 
                     // Add the end point and return partial result
@@ -166,11 +165,11 @@ find_straight_path :: proc(query: ^Nav_Mesh_Query,
                     return stat | {.Success, .Partial_Result}, straight_path_count
                 }
 
-                // If starting really close to the portal, advance (matches C++)
+                // If starting really close to the portal, advance
                 if i == 0 {
                     dist_sqr, _ := geometry.point_segment_distance2_2d(portal_apex, left, right)
-                    if dist_sqr < 0.001 * 0.001 {  // dtSqr(0.001f) in C++
-                        i += 1  // Manually increment and continue
+                    if dist_sqr < 0.001 * 0.001 {
+                        i += 1
                         continue
                     }
                 }
@@ -280,7 +279,7 @@ find_straight_path :: proc(query: ^Nav_Mesh_Query,
         straight_path[n_straight_path] = {
             pos = closest_end_pos,
             flags = u8(Straight_Path_Flags.End),
-            ref = 0,  // C++ uses 0 for end point
+            ref = 0,
         }
         n_straight_path += 1
     } else {
