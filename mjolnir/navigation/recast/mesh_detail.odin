@@ -1193,7 +1193,7 @@ is_ear_relaxed :: proc(poly: ^Detail_Polygon, indices: []i32, prev, curr, next: 
     if is_triangle_degenerate(a, b, c) do return false
 
     // Relaxed convexity check - just ensure we have some positive area
-    if linalg.vector_cross2(b.xz - a.xz, c.xz - b.xz) <= 0 do return false  // Still need convexity
+    if linalg.cross(b.xz - a.xz, c.xz - b.xz) <= 0 do return false  // Still need convexity
 
     // Skip the expensive point-in-triangle test for relaxed mode
     return true

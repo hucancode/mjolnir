@@ -251,7 +251,7 @@ offset_poly :: proc(verts: [][3]f32, offset: f32) -> (out_verts: [dynamic][3]f32
         // The y component of the cross product of the two normalized segment directions
         // The X and Z components of the cross product are both zero because the two
         // segment direction vectors fall within the x/z plane
-        cross := linalg.vector_cross2(curr_segment_dir.xz, prev_segment_dir.xz)
+        cross := linalg.cross(curr_segment_dir.xz, prev_segment_dir.xz)
 
         // CCW perpendicular vector to AB. The segment normal
         prev_segment_norm_x := -prev_segment_dir.z
