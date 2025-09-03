@@ -114,10 +114,8 @@ query_polygons :: proc(query: ^Nav_Mesh_Query, center: [3]f32, half_extents: [3]
             if remaining <= 0 {
                 break
             }
-
             tile_poly_count := query_polygons_in_tile(query.nav_mesh, tile, bmin, bmax,
                                                         polys[poly_count:], remaining)
-
             // Apply filter
             filtered_count := i32(0)
             for i in 0..<tile_poly_count {
@@ -125,7 +123,6 @@ query_polygons :: proc(query: ^Nav_Mesh_Query, center: [3]f32, half_extents: [3]
                 tile_poly, poly, poly_status := get_tile_and_poly_by_ref(query.nav_mesh, ref)
                 if recast.status_succeeded(poly_status) &&
                    query_filter_pass_filter(filter, ref, tile_poly, poly) {
-
                     polys[poly_count + filtered_count] = ref
                     filtered_count += 1
                 }

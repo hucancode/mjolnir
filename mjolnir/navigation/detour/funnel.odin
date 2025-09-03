@@ -843,14 +843,9 @@ closest_point_on_poly :: proc(query: ^Nav_Mesh_Query, ref: recast.Poly_Ref, pos:
     for i in 0..<int(poly.vert_count) {
         va := verts[i]
         vb := verts[(i + 1) % int(poly.vert_count)]
-
         // Find closest point on edge
         edge_closest := geometry.closest_point_on_segment_2d(pos, va, vb)
-
-        dx := edge_closest.x - pos.x
-        dz := edge_closest.z - pos.z
-        dist_sqr := dx * dx + dz * dz
-
+        dist_sqr := linalg.length2(edge_closest.xz - pos.xz)
         if dist_sqr < closest_dist_sqr {
             closest_dist_sqr = dist_sqr
             closest = edge_closest
