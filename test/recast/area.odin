@@ -4,7 +4,7 @@ import "core:testing"
 import "core:math"
 import "core:slice"
 import "core:time"
-import nav "../../mjolnir/navigation/recast"
+import "../../mjolnir/navigation/recast"
 
 @(test)
 test_offset_poly :: proc(t: ^testing.T) {
@@ -21,7 +21,7 @@ test_offset_poly :: proc(t: ^testing.T) {
         }
 
         // Test inset by 0.5 (positive offset creates inset for clockwise polygons)
-        out_verts, ok := nav.offset_poly(verts, 0.5)
+        out_verts, ok := recast.offset_poly(verts, 0.5)
         defer delete(out_verts)
 
         testing.expect(t, ok, "Expected offset_poly to succeed")
@@ -50,7 +50,7 @@ test_offset_poly :: proc(t: ^testing.T) {
         }
 
         // Test outset (positive offset)
-        out_verts, ok := nav.offset_poly(verts, 0.5)
+        out_verts, ok := recast.offset_poly(verts, 0.5)
         defer delete(out_verts)
 
         testing.expect(t, ok, "Expected offset_poly to succeed")
@@ -70,7 +70,7 @@ test_offset_poly :: proc(t: ^testing.T) {
             verts[i].z = math.sin(angle) * 2
         }
 
-        out_verts, ok := nav.offset_poly(verts[:], 0.5)
+        out_verts, ok := recast.offset_poly(verts[:], 0.5)
         defer delete(out_verts)
 
         testing.expect(t, ok, "Expected offset_poly to succeed")
@@ -87,7 +87,7 @@ test_offset_poly :: proc(t: ^testing.T) {
         }
 
         // Try to offset by more than the polygon can handle
-        out_verts, ok := nav.offset_poly(verts, 5.0)
+        out_verts, ok := recast.offset_poly(verts, 5.0)
         defer delete(out_verts)
 
         // Function should still work, producing some result
@@ -98,7 +98,7 @@ test_offset_poly :: proc(t: ^testing.T) {
     {
         verts: [][3]f32
 
-        out_verts, ok := nav.offset_poly(verts, 0.1)
+        out_verts, ok := recast.offset_poly(verts, 0.1)
         defer delete(out_verts)
 
         testing.expect(t, !ok, "Should return false for zero vertices")
@@ -113,7 +113,7 @@ test_safe_normalize :: proc(t: ^testing.T) {
     // Test 1: Normal vector
     {
         v := [3]f32{3, 4, 0}
-        nav.safe_normalize(&v)
+        recast.safe_normalize(&v)
 
         expected_len := math.sqrt(v.x*v.x + v.y*v.y + v.z*v.z)
         testing.expect(t, math.abs(expected_len - 1.0) < 0.001, "Normalized vector should have length 1")
@@ -124,7 +124,7 @@ test_safe_normalize :: proc(t: ^testing.T) {
     // Test 2: Zero vector (should remain unchanged)
     {
         v := [3]f32{0, 0, 0}
-        nav.safe_normalize(&v)
+        recast.safe_normalize(&v)
 
         testing.expect(t, v.x == 0.0, "Zero vector X should remain 0")
         testing.expect(t, v.y == 0.0, "Zero vector Y should remain 0")
@@ -135,7 +135,7 @@ test_safe_normalize :: proc(t: ^testing.T) {
     {
         v := [3]f32{1e-7, 1e-7, 1e-7}
         v_copy := v
-        nav.safe_normalize(&v)
+        recast.safe_normalize(&v)
 
         // Should remain unchanged if below epsilon threshold
         testing.expect(t, v.x == v_copy.x && v.y == v_copy.y && v.z == v_copy.z,

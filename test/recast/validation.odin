@@ -8,7 +8,7 @@ import "core:os"
 import "core:strings"
 import "core:time"
 import "core:math"
-import nav "../../mjolnir/navigation/recast"
+import "../../mjolnir/navigation/recast"
 
 // Detailed test comparing specific Recast functions
 @(test)
@@ -18,17 +18,17 @@ test_basic_span_merging :: proc(t: ^testing.T) {
     log.info("=== Testing Span Merging ===")
 
     // Create a small heightfield for testing
-    hf := new(nav.Heightfield)
-    defer nav.free_heightfield(hf)
+    hf := new(recast.Heightfield)
+    defer recast.free_heightfield(hf)
 
-    if !nav.create_heightfield(hf, 10, 10, {0, 0, 0}, {10, 10, 10}, 1.0, 0.5) {
+    if !recast.create_heightfield(hf, 10, 10, {0, 0, 0}, {10, 10, 10}, 1.0, 0.5) {
         testing.fail(t)
         return
     }
 
     // Test 1: Add non-overlapping spans
-    ok1 := nav.add_span(hf, 5, 5, 10, 20, nav.RC_WALKABLE_AREA, 1)
-    ok2 := nav.add_span(hf, 5, 5, 30, 40, nav.RC_WALKABLE_AREA, 1)
+    ok1 := recast.add_span(hf, 5, 5, 10, 20, recast.RC_WALKABLE_AREA, 1)
+    ok2 := recast.add_span(hf, 5, 5, 30, 40, recast.RC_WALKABLE_AREA, 1)
 
     testing.expect(t, ok1, "Failed to add first span")
     testing.expect(t, ok2, "Failed to add second span")
@@ -44,16 +44,16 @@ test_basic_span_merging :: proc(t: ^testing.T) {
     testing.expect_value(t, count, 2)
 
     // Test 2: Add overlapping spans that should merge
-    hf2 := new(nav.Heightfield)
-    defer nav.free_heightfield(hf2)
+    hf2 := new(recast.Heightfield)
+    defer recast.free_heightfield(hf2)
 
-    if !nav.create_heightfield(hf2, 10, 10, {0, 0, 0}, {10, 10, 10}, 1.0, 0.5) {
+    if !recast.create_heightfield(hf2, 10, 10, {0, 0, 0}, {10, 10, 10}, 1.0, 0.5) {
         testing.fail(t)
         return
     }
 
-    ok3 := nav.add_span(hf2, 3, 3, 10, 25, nav.RC_WALKABLE_AREA, 1)
-    ok4 := nav.add_span(hf2, 3, 3, 20, 30, nav.RC_WALKABLE_AREA, 1)
+    ok3 := recast.add_span(hf2, 3, 3, 10, 25, recast.RC_WALKABLE_AREA, 1)
+    ok4 := recast.add_span(hf2, 3, 3, 20, 30, recast.RC_WALKABLE_AREA, 1)
 
     testing.expect(t, ok3, "Failed to add overlapping span 1")
     testing.expect(t, ok4, "Failed to add overlapping span 2")
@@ -77,10 +77,10 @@ test_triangle_rasterization :: proc(t: ^testing.T) {
 
     log.info("=== Testing Triangle Rasterization ===")
 
-    hf := new(nav.Heightfield)
-    defer nav.free_heightfield(hf)
+    hf := new(recast.Heightfield)
+    defer recast.free_heightfield(hf)
 
-    if !nav.create_heightfield(hf, 10, 10, {0, 0, 0}, {10, 10, 10}, 1.0, 0.5) {
+    if !recast.create_heightfield(hf, 10, 10, {0, 0, 0}, {10, 10, 10}, 1.0, 0.5) {
         testing.fail(t)
         return
     }
@@ -90,7 +90,7 @@ test_triangle_rasterization :: proc(t: ^testing.T) {
     v1 := [3]f32{8, 1, 2}
     v2 := [3]f32{5, 1, 8}
 
-    ok := nav.rasterize_triangle(v0, v1, v2, nav.RC_WALKABLE_AREA, hf, 1)
+    ok := recast.rasterize_triangle(v0, v1, v2, recast.RC_WALKABLE_AREA, hf, 1)
     testing.expect(t, ok, "Failed to rasterize triangle")
 
     // Count total spans created
@@ -113,7 +113,7 @@ test_triangle_rasterization :: proc(t: ^testing.T) {
     v4 := [3]f32{1, 0, 0}
     v5 := [3]f32{2, 0, 0}  // Collinear points
 
-    ok2 := nav.rasterize_triangle(v3, v4, v5, nav.RC_WALKABLE_AREA, hf, 1)
+    ok2 := recast.rasterize_triangle(v3, v4, v5, recast.RC_WALKABLE_AREA, hf, 1)
     testing.expect(t, ok2, "Failed to handle degenerate triangle")
 
     log.info("✓ Triangle rasterization test passed")
@@ -151,10 +151,10 @@ test_region_generation :: proc(t: ^testing.T) {
     areas := make([]u8, 10)
     defer delete(areas)
     for i in 0..<10 {
-        areas[i] = nav.RC_WALKABLE_AREA
+        areas[i] = recast.RC_WALKABLE_AREA
     }
 
-    cfg := nav.Config{
+    cfg := recast.Config{
         cs = 0.5,
         ch = 0.2,
         walkable_slope_angle = 45.0,
@@ -165,53 +165,53 @@ test_region_generation :: proc(t: ^testing.T) {
         merge_region_area = 40,
     }
 
-    cfg.bmin, cfg.bmax = nav.calc_bounds(vertices)
-    cfg.width, cfg.height = nav.calc_grid_size(cfg.bmin, cfg.bmax, cfg.cs)
+    cfg.bmin, cfg.bmax = recast.calc_bounds(vertices)
+    cfg.width, cfg.height = recast.calc_grid_size(cfg.bmin, cfg.bmax, cfg.cs)
 
     // Build heightfield
-    hf := new(nav.Heightfield)
-    defer nav.free_heightfield(hf)
+    hf := new(recast.Heightfield)
+    defer recast.free_heightfield(hf)
 
-    if !nav.create_heightfield(hf, cfg.width, cfg.height, cfg.bmin, cfg.bmax, cfg.cs, cfg.ch) {
+    if !recast.create_heightfield(hf, cfg.width, cfg.height, cfg.bmin, cfg.bmax, cfg.cs, cfg.ch) {
         testing.fail(t)
         return
     }
 
     // Mark and rasterize
-    nav.mark_walkable_triangles(cfg.walkable_slope_angle, vertices, indices, areas)
+    recast.mark_walkable_triangles(cfg.walkable_slope_angle, vertices, indices, areas)
 
-    if !nav.rasterize_triangles(vertices, indices, areas, hf, cfg.walkable_climb) {
+    if !recast.rasterize_triangles(vertices, indices, areas, hf, cfg.walkable_climb) {
         testing.fail(t)
         return
     }
 
     // Filter
-    nav.filter_low_hanging_walkable_obstacles(int(cfg.walkable_climb), hf)
-    nav.filter_ledge_spans(int(cfg.walkable_height), int(cfg.walkable_climb), hf)
-    nav.filter_walkable_low_height_spans(int(cfg.walkable_height), hf)
+    recast.filter_low_hanging_walkable_obstacles(int(cfg.walkable_climb), hf)
+    recast.filter_ledge_spans(int(cfg.walkable_height), int(cfg.walkable_climb), hf)
+    recast.filter_walkable_low_height_spans(int(cfg.walkable_height), hf)
 
     // Build compact heightfield
-    chf := new(nav.Compact_Heightfield)
-    defer nav.free_compact_heightfield(chf)
+    chf := new(recast.Compact_Heightfield)
+    defer recast.free_compact_heightfield(chf)
 
-    if !nav.build_compact_heightfield(cfg.walkable_height, cfg.walkable_climb, hf, chf) {
+    if !recast.build_compact_heightfield(cfg.walkable_height, cfg.walkable_climb, hf, chf) {
         testing.fail(t)
         return
     }
 
     // Erode and build distance field
-    if !nav.erode_walkable_area(cfg.walkable_radius, chf) {
+    if !recast.erode_walkable_area(cfg.walkable_radius, chf) {
         testing.fail(t)
         return
     }
 
-    if !nav.build_distance_field(chf) {
+    if !recast.build_distance_field(chf) {
         testing.fail(t)
         return
     }
 
     // Build regions
-    if !nav.build_regions(chf, 0, cfg.min_region_area, cfg.merge_region_area) {
+    if !recast.build_regions(chf, 0, cfg.min_region_area, cfg.merge_region_area) {
         log.error("Failed to build regions")
         testing.fail(t)
         return
@@ -262,7 +262,7 @@ test_basic_contour_simplification :: proc(t: ^testing.T) {
     defer delete(simplified)
 
     // Simplify with different error tolerances
-    nav.simplify_contour(raw_verts, &simplified, 0.5, 1.0, 12)
+    recast.simplify_contour(raw_verts, &simplified, 0.5, 1.0, 12)
 
     log.infof("Original vertices: %d", len(raw_verts))
     log.infof("Simplified vertices: %d", len(simplified))
@@ -279,7 +279,7 @@ test_basic_contour_simplification :: proc(t: ^testing.T) {
     no_simp := make([dynamic][4]i32)
     defer delete(no_simp)
 
-    nav.simplify_contour(raw_verts, &no_simp, 0.0, 1.0, 12)
+    recast.simplify_contour(raw_verts, &no_simp, 0.0, 1.0, 12)
     testing.expect_value(t, len(no_simp), len(raw_verts))
 
     log.info("✓ Contour simplification test passed")
@@ -297,17 +297,17 @@ test_edge_cases :: proc(t: ^testing.T) {
         indices := []i32{}
         areas := []u8{}
 
-        cfg := nav.Config{
+        cfg := recast.Config{
             cs = 0.3,
             ch = 0.2,
             walkable_slope_angle = 45.0,
         }
 
-        pmesh, dmesh, ok := nav.build_navmesh(vertices, indices, areas, cfg)
+        pmesh, dmesh, ok := recast.build_navmesh(vertices, indices, areas, cfg)
         testing.expect(t, !ok, "Empty mesh should fail gracefully")
 
-        if pmesh != nil do nav.free_poly_mesh(pmesh)
-        if dmesh != nil do nav.free_poly_mesh_detail(dmesh)
+        if pmesh != nil do recast.free_poly_mesh(pmesh)
+        if dmesh != nil do recast.free_poly_mesh_detail(dmesh)
     }
 
     // Test 2: Single triangle
@@ -318,9 +318,9 @@ test_edge_cases :: proc(t: ^testing.T) {
             {0.5, 0, 1},
         }
         indices := []i32{0, 1, 2}
-        areas := []u8{nav.RC_WALKABLE_AREA}
+        areas := []u8{recast.RC_WALKABLE_AREA}
 
-        cfg := nav.Config{
+        cfg := recast.Config{
             cs = 0.1,
             ch = 0.1,
             walkable_slope_angle = 45.0,
@@ -334,15 +334,15 @@ test_edge_cases :: proc(t: ^testing.T) {
             detail_sample_max_error = 0.1,
         }
 
-        pmesh, dmesh, ok := nav.build_navmesh(vertices, indices, areas, cfg)
+        pmesh, dmesh, ok := recast.build_navmesh(vertices, indices, areas, cfg)
 
         if ok {
             log.infof("Single triangle produced %d polygons", pmesh.npolys)
             testing.expect(t, pmesh.npolys > 0, "Single triangle should produce at least one polygon")
         }
 
-        if pmesh != nil do nav.free_poly_mesh(pmesh)
-        if dmesh != nil do nav.free_poly_mesh_detail(dmesh)
+        if pmesh != nil do recast.free_poly_mesh(pmesh)
+        if dmesh != nil do recast.free_poly_mesh_detail(dmesh)
     }
 
     // Test 3: Very large mesh bounds
@@ -354,9 +354,9 @@ test_edge_cases :: proc(t: ^testing.T) {
             {-1000, 0, 1000},
         }
         indices := []i32{0, 1, 2, 0, 2, 3}
-        areas := []u8{nav.RC_WALKABLE_AREA, nav.RC_WALKABLE_AREA}
+        areas := []u8{recast.RC_WALKABLE_AREA, recast.RC_WALKABLE_AREA}
 
-        cfg := nav.Config{
+        cfg := recast.Config{
             cs = 10.0,  // Large cell size for huge mesh
             ch = 1.0,
             walkable_slope_angle = 45.0,
@@ -370,15 +370,15 @@ test_edge_cases :: proc(t: ^testing.T) {
             detail_sample_max_error = 5.0,
         }
 
-        pmesh, dmesh, ok := nav.build_navmesh(vertices, indices, areas, cfg)
+        pmesh, dmesh, ok := recast.build_navmesh(vertices, indices, areas, cfg)
 
         if ok {
             log.infof("Large mesh produced %d polygons", pmesh.npolys)
             testing.expect(t, pmesh.npolys > 0, "Large mesh should produce polygons")
         }
 
-        if pmesh != nil do nav.free_poly_mesh(pmesh)
-        if dmesh != nil do nav.free_poly_mesh_detail(dmesh)
+        if pmesh != nil do recast.free_poly_mesh(pmesh)
+        if dmesh != nil do recast.free_poly_mesh_detail(dmesh)
     }
 
     log.info("✓ Edge cases test passed")
@@ -390,30 +390,30 @@ test_filter_operations :: proc(t: ^testing.T) {
 
     log.info("=== Testing Filter Operations ===")
 
-    hf := new(nav.Heightfield)
-    defer nav.free_heightfield(hf)
+    hf := new(recast.Heightfield)
+    defer recast.free_heightfield(hf)
 
-    if !nav.create_heightfield(hf, 10, 10, {0, 0, 0}, {10, 10, 10}, 1.0, 0.5) {
+    if !recast.create_heightfield(hf, 10, 10, {0, 0, 0}, {10, 10, 10}, 1.0, 0.5) {
         testing.fail(t)
         return
     }
 
     // Create a test scenario with various spans
     // Column with multiple spans at different heights
-    nav.add_span(hf, 5, 5, 0, 10, nav.RC_WALKABLE_AREA, 1)   // Ground
-    nav.add_span(hf, 5, 5, 12, 14, nav.RC_WALKABLE_AREA, 1)  // Low overhang
-    nav.add_span(hf, 5, 5, 20, 30, nav.RC_WALKABLE_AREA, 1)  // Platform
+    recast.add_span(hf, 5, 5, 0, 10, recast.RC_WALKABLE_AREA, 1)   // Ground
+    recast.add_span(hf, 5, 5, 12, 14, recast.RC_WALKABLE_AREA, 1)  // Low overhang
+    recast.add_span(hf, 5, 5, 20, 30, recast.RC_WALKABLE_AREA, 1)  // Platform
 
     // Column with ledge
-    nav.add_span(hf, 6, 5, 0, 10, nav.RC_WALKABLE_AREA, 1)
-    nav.add_span(hf, 6, 5, 11, 12, nav.RC_WALKABLE_AREA, 1)  // Thin ledge
+    recast.add_span(hf, 6, 5, 0, 10, recast.RC_WALKABLE_AREA, 1)
+    recast.add_span(hf, 6, 5, 11, 12, recast.RC_WALKABLE_AREA, 1)  // Thin ledge
 
     initial_count := 0
     for z in 0..<hf.height {
         for x in 0..<hf.width {
             s := hf.spans[x + z * hf.width]
             for s != nil {
-                if s.area != nav.RC_NULL_AREA {
+                if s.area != recast.RC_NULL_AREA {
                     initial_count += 1
                 }
                 s = s.next
@@ -424,16 +424,16 @@ test_filter_operations :: proc(t: ^testing.T) {
     log.infof("Initial walkable spans: %d", initial_count)
 
     // Apply filters
-    nav.filter_low_hanging_walkable_obstacles(4, hf)
-    nav.filter_ledge_spans(10, 4, hf)
-    nav.filter_walkable_low_height_spans(10, hf)
+    recast.filter_low_hanging_walkable_obstacles(4, hf)
+    recast.filter_ledge_spans(10, 4, hf)
+    recast.filter_walkable_low_height_spans(10, hf)
 
     filtered_count := 0
     for z in 0..<hf.height {
         for x in 0..<hf.width {
             s := hf.spans[x + z * hf.width]
             for s != nil {
-                if s.area != nav.RC_NULL_AREA {
+                if s.area != recast.RC_NULL_AREA {
                     filtered_count += 1
                 }
                 s = s.next

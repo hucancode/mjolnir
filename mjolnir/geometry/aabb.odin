@@ -14,13 +14,13 @@ AABB_UNDEFINED := Aabb {
 }
 
 aabb_from_vertices :: proc(vertices: []Vertex) -> (ret: Aabb) {
+  if len(vertices) == 0 {
+    return
+  }
   ret = AABB_UNDEFINED
   for vertex in vertices {
     ret.min = linalg.min(ret.min, vertex.position)
     ret.max = linalg.max(ret.max, vertex.position)
-  }
-  if len(vertices) == 0 {
-    ret.min, ret.max = {0, 0, 0}, {0, 0, 0}
   }
   return ret
 }
