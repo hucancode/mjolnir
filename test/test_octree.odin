@@ -57,6 +57,7 @@ test_octree_insert :: proc(t: ^testing.T) {
 
   octree: geometry.Octree(TestItem)
   geometry.octree_init(&octree, bounds, 5, 2)
+  defer geometry.octree_deinit(&octree)
   octree.bounds_func = test_item_bounds
   octree.point_func = test_item_point
 
@@ -106,8 +107,6 @@ test_octree_insert :: proc(t: ^testing.T) {
   stats := geometry.octree_get_stats(&octree)
   testing.expect(t, stats.total_items == 4, "Should have 4 items total")
   testing.expect(t, stats.total_nodes > 1, "Should have subdivided")
-
-  geometry.octree_deinit(&octree)
 }
 
 @(test)
@@ -120,6 +119,7 @@ test_octree_query_aabb :: proc(t: ^testing.T) {
 
   octree: geometry.Octree(TestItem)
   geometry.octree_init(&octree, bounds, 5, 2)
+  defer geometry.octree_deinit(&octree)
   octree.bounds_func = test_item_bounds
   octree.point_func = test_item_point
 
@@ -161,8 +161,6 @@ test_octree_query_aabb :: proc(t: ^testing.T) {
     len(results) >= 3,
     "Should find at least 3 items in larger area",
   )
-
-  geometry.octree_deinit(&octree)
 }
 
 @(test)
@@ -175,6 +173,7 @@ test_octree_query_sphere :: proc(t: ^testing.T) {
 
   octree: geometry.Octree(TestItem)
   geometry.octree_init(&octree, bounds, 5, 2)
+  defer geometry.octree_deinit(&octree)
   octree.bounds_func = test_item_bounds
   octree.point_func = test_item_point
 
@@ -211,8 +210,6 @@ test_octree_query_sphere :: proc(t: ^testing.T) {
     "Should find 1 item within smaller radius",
   )
   testing.expect(t, results[0].id == 1, "Should find item at origin")
-
-  geometry.octree_deinit(&octree)
 }
 
 @(test)
@@ -225,6 +222,7 @@ test_octree_query_ray :: proc(t: ^testing.T) {
 
   octree: geometry.Octree(TestItem)
   geometry.octree_init(&octree, bounds, 5, 2)
+  defer geometry.octree_deinit(&octree)
   octree.bounds_func = test_item_bounds
   octree.point_func = test_item_point
 
@@ -261,8 +259,6 @@ test_octree_query_ray :: proc(t: ^testing.T) {
   geometry.octree_query_ray(&octree, ray, 10, &results)
 
   testing.expect(t, len(results) == 2, "Should find 2 items along Y axis")
-
-  geometry.octree_deinit(&octree)
 }
 
 @(test)
@@ -275,6 +271,7 @@ test_octree_remove :: proc(t: ^testing.T) {
 
   octree: geometry.Octree(TestItem)
   geometry.octree_init(&octree, bounds, 5, 2)
+  defer geometry.octree_deinit(&octree)
   octree.bounds_func = test_item_bounds
   octree.point_func = test_item_point
 
@@ -317,8 +314,6 @@ test_octree_remove :: proc(t: ^testing.T) {
 
   stats = geometry.octree_get_stats(&octree)
   testing.expect(t, stats.total_items == 2, "Should still have 2 items")
-
-  geometry.octree_deinit(&octree)
 }
 
 @(test)
@@ -331,6 +326,7 @@ test_octree_update :: proc(t: ^testing.T) {
 
   octree: geometry.Octree(TestItem)
   geometry.octree_init(&octree, bounds, 5, 2)
+  defer geometry.octree_deinit(&octree)
   octree.bounds_func = test_item_bounds
   octree.point_func = test_item_point
 
@@ -367,7 +363,6 @@ test_octree_update :: proc(t: ^testing.T) {
     len(results) == 1 && results[0].id == 1,
     "Should find item 1 at new position",
   )
-  geometry.octree_deinit(&octree)
 }
 
 @(test)
@@ -380,6 +375,7 @@ test_octree_subdivision :: proc(t: ^testing.T) {
 
   octree: geometry.Octree(TestItem)
   geometry.octree_init(&octree, bounds, 5, 2)
+  defer geometry.octree_deinit(&octree)
   octree.bounds_func = test_item_bounds
   octree.point_func = test_item_point
 
@@ -400,8 +396,6 @@ test_octree_subdivision :: proc(t: ^testing.T) {
   testing.expect(t, stats.total_nodes > 1, "Should have subdivided")
   testing.expect(t, stats.total_items == 5, "Should have all 5 items")
   testing.expect(t, stats.leaf_nodes > 0, "Should have leaf nodes")
-
-  geometry.octree_deinit(&octree)
 }
 
 @(test)
@@ -414,6 +408,7 @@ test_octree_edge_cases :: proc(t: ^testing.T) {
 
   octree: geometry.Octree(TestItem)
   geometry.octree_init(&octree, bounds, 2, 1)
+  defer geometry.octree_deinit(&octree)
   octree.bounds_func = test_item_bounds
   octree.point_func = test_item_point
 
@@ -445,8 +440,6 @@ test_octree_edge_cases :: proc(t: ^testing.T) {
   defer delete(results)
   geometry.octree_query_aabb(&octree, query_bounds, &results)
   testing.expect(t, len(results) == 0, "Should find no items in empty region")
-
-  geometry.octree_deinit(&octree)
 }
 
 @(test)
@@ -459,6 +452,7 @@ test_octree_stats :: proc(t: ^testing.T) {
 
   octree: geometry.Octree(TestItem)
   geometry.octree_init(&octree, bounds, 3, 2)
+  defer geometry.octree_deinit(&octree)
   octree.bounds_func = test_item_bounds
   octree.point_func = test_item_point
 
@@ -482,8 +476,6 @@ test_octree_stats :: proc(t: ^testing.T) {
   testing.expect(t, stats.total_items == 10, "Should have 10 items")
   testing.expect(t, stats.total_nodes > 1, "Should have more than 1 node")
   testing.expect(t, stats.max_depth >= 0, "Max depth should be non-negative")
-
-  geometry.octree_deinit(&octree)
 }
 
 @(test)

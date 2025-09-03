@@ -661,7 +661,7 @@ triangulate_delaunay :: proc(poly: ^Detail_Polygon) -> bool {
 
     // Perform Delaunay triangulation
     tris, valid := delaunay_hull(verts, hull[:])
-    // tris will be handled by its own allocator, only delete if allocated
+    defer delete(tris)  // Clean up dynamic array returned by delaunay_hull
 
     if valid {
         // Convert triangle indices to Detail_Triangle structures
