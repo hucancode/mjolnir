@@ -76,10 +76,10 @@ add_span :: proc(hf: ^Heightfield,
             insert_after = previous_span
         }
         merge_end = current_span
-        // Update merged span bounds (matches C++ lines 143-150)
+        // Update merged span bounds
         new_span.smin = min(new_span.smin, current_span.smin)
         new_span.smax = max(new_span.smax, current_span.smax)
-        // Merge area flags (matches C++ lines 153-157)
+        // Merge area flags
         // The C++ checks the difference between the MERGED newSpan->smax and currentSpan->smax
         if abs(i32(new_span.smax) - i32(current_span.smax)) <= flag_merge_threshold {
             // If within threshold, take max area

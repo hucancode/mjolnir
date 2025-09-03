@@ -282,99 +282,6 @@ add_constrained_edge :: proc(poly: ^Detail_Polygon, v0, v1: i32) {
     append(&poly.edges, edge)
 }
 
-// Initialize detail polygon from polygon mesh polygon
-init_detail_polygon :: proc(poly: ^Detail_Polygon, pmesh: ^Poly_Mesh, chf: ^Compact_Heightfield,
-                          poly_idx: i32, sample_dist, max_error: f32) -> bool {
-
-    clear(&poly.vertices)
-    clear(&poly.edges)
-    clear(&poly.triangles)
-
-    poly.sample_dist = sample_dist
-    poly.max_error = max_error
-
-    if pmesh == nil || chf == nil do return false
-    if poly_idx < 0 || poly_idx >= pmesh.npolys do return false
-
-    // Get polygon data
-    pi := int(poly_idx) * int(pmesh.nvp) * 2
-
-    // Find actual number of vertices in this polygon
-    nverts := 0
-    for j in 0..<pmesh.nvp {
-        if pmesh.polys[pi + int(j)] != RC_MESH_NULL_IDX {
-            nverts += 1
-        } else {
-            break
-        }
-    }
-
-    if nverts < 3 do return false
-
-    // Add polygon vertices
-    for i in 0..<nverts {
-        vert_idx := int(pmesh.polys[pi + i])
-        if vert_idx >= len(pmesh.verts) do return false
-
-        v := pmesh.verts[vert_idx]
-        pos := [3]f32{
-            pmesh.bmin.x + f32(v[0]) * pmesh.cs,
-            pmesh.bmin.y + f32(v[1]) * pmesh.ch,
-            pmesh.bmin.z + f32(v[2]) * pmesh.cs,
-        }
-
-        // Sample height from heightfield
-        height := sample_heightfield_height(chf, pos)
-        pos.y = height  // Use sampled height
-
-        // Mark border vertices
-        flag := u32(0)
-        if is_border_vertex(pmesh, vert_idx) {
-            flag |= RC_BORDER_VERTEX
-        }
-
-        add_detail_vertex(poly, pos, height, flag)
-    }
-
-    // Add constrained edges between consecutive vertices
-    for i in 0..<nverts {
-        v0 := i32(i)
-        v1 := i32((i + 1) % nverts)
-        add_constrained_edge(poly, v0, v1)
-    }
-
-    return true
-}
-
-// Check if a vertex is on the border of the mesh
-is_border_vertex :: proc(pmesh: ^Poly_Mesh, vert_idx: int) -> bool {
-    // A vertex is on the border if it's used by a polygon edge that has no neighbor
-    for i in 0..<pmesh.npolys {
-        pi := int(i) * int(pmesh.nvp) * 2
-
-        // Check each edge of this polygon
-        nverts, found := slice.linear_search(pmesh.polys[pi:pi + int(pmesh.nvp)], RC_MESH_NULL_IDX)
-        if !found {
-            nverts = int(pmesh.nvp)
-        }
-
-        for j in 0..<nverts {
-            k := (j + 1) % nverts
-            v0 := int(pmesh.polys[pi + j])
-            v1 := int(pmesh.polys[pi + k])
-
-            if v0 == vert_idx || v1 == vert_idx {
-                // Check if this edge has a neighbor
-                neighbor := pmesh.polys[pi + int(pmesh.nvp) + j]
-                if neighbor == RC_MESH_NULL_IDX {
-                    return true  // No neighbor means border edge
-                }
-            }
-        }
-    }
-    return false
-}
-
 // Free detail polygon memory
 free_detail_polygon :: proc(poly: ^Detail_Polygon) {
     delete(poly.vertices)
@@ -495,223 +402,6 @@ merge_poly_mesh_details :: proc(meshes: []^Poly_Mesh_Detail,
     }
 
     return true
-}
-
-// Subdivide edge with limits to prevent excessive subdivision
-subdivide_edge_with_limits :: proc(poly: ^Detail_Polygon, chf: ^Compact_Heightfield,
-                                  v0, v1: i32, sample_dist: f32) -> [dynamic]i32 {
-    result := make([dynamic]i32, 0, 8)
-
-    if v0 >= i32(len(poly.vertices)) || v1 >= i32(len(poly.vertices)) {
-        append(&result, v0, v1)
-        return result
-    }
-
-    p0 := poly.vertices[v0].pos
-    p1 := poly.vertices[v1].pos
-
-    // Calculate edge vector and length
-    edge := p1 - p0
-    length := linalg.length(edge)
-
-    if length <= sample_dist {
-        // Edge is short enough, no subdivision needed
-        append(&result, v0, v1)
-        return result
-    }
-
-    // Calculate number of subdivisions with strict limits
-    nsubdivs := i32(math.ceil(length / sample_dist))
-    if nsubdivs > MAX_EDGE_SUBDIVISIONS do nsubdivs = MAX_EDGE_SUBDIVISIONS
-
-    // Additional safety: don't subdivide very short edges excessively
-    if length < MIN_EDGE_LENGTH * 2.0 && nsubdivs > 2 {
-        nsubdivs = 2
-    }
-
-    append(&result, v0)
-
-    // Add intermediate points
-    for i in 1..<nsubdivs {
-        t := f32(i) / f32(nsubdivs)
-        pos := linalg.mix(p0, p1, t)
-
-        // Sample height from heightfield (this can be slow, so we limit subdivisions)
-        height := sample_heightfield_height(chf, pos)
-        pos.y = height
-
-        vert_idx := add_detail_vertex(poly, pos, height)
-        append(&result, vert_idx)
-    }
-
-    append(&result, v1)
-    return result
-}
-
-// Subdivide edge by adding sample points along its length (original version)
-subdivide_edge :: proc(poly: ^Detail_Polygon, chf: ^Compact_Heightfield,
-                      v0, v1: i32, sample_dist: f32) -> [dynamic]i32 {
-
-    result := make([dynamic]i32, 0, 8)
-    defer if len(result) == 0 do delete(result)
-
-    if v0 >= i32(len(poly.vertices)) || v1 >= i32(len(poly.vertices)) {
-        append(&result, v0, v1)
-        return result
-    }
-
-    p0 := poly.vertices[v0].pos
-    p1 := poly.vertices[v1].pos
-
-    // Calculate edge vector and length
-    edge := p1 - p0
-    length := linalg.length(edge)
-
-    if length <= sample_dist {
-        // Edge is short enough, no subdivision needed
-        append(&result, v0, v1)
-        return result
-    }
-
-    // Calculate number of subdivisions
-    nsubdivs := i32(math.ceil(length / sample_dist))
-    if nsubdivs > MAX_EDGE_SUBDIVISIONS do nsubdivs = MAX_EDGE_SUBDIVISIONS
-
-    append(&result, v0)
-
-    // Add intermediate points
-    for i in 1..<nsubdivs {
-        t := f32(i) / f32(nsubdivs)
-        pos := linalg.mix(p0, p1, t)
-
-        // Sample height from heightfield
-        height := sample_heightfield_height(chf, pos)
-        pos.y = height
-
-        vert_idx := add_detail_vertex(poly, pos, height)
-        append(&result, vert_idx)
-    }
-
-    append(&result, v1)
-    return result
-}
-
-triangulate_delaunay :: proc(poly: ^Detail_Polygon) -> bool {
-    if len(poly.vertices) < 3 do return false
-
-    clear(&poly.triangles)
-
-    nverts := len(poly.vertices)
-    if nverts == 3 {
-        // Simple triangle case
-        a := poly.vertices[0].pos
-        b := poly.vertices[1].pos
-        c := poly.vertices[2].pos
-
-        // Check triangle orientation - must be counter-clockwise
-        area := geometry.signed_triangle_area_2d(a, b, c)
-        if area > MIN_POLYGON_AREA {
-            triangle := Detail_Triangle{
-                v = {0, 1, 2},
-                quality = calculate_triangle_quality(a, b, c),
-                area = area,
-            }
-            append(&poly.triangles, triangle)
-        }
-        return len(poly.triangles) > 0
-    }
-    min_extent := calculate_polygon_min_extent(poly)
-    sample_threshold := poly.sample_dist * 2.0
-    // For small polygons, use simple hull triangulation only
-    if min_extent < sample_threshold {
-        success := triangulate_hull_based(poly)
-        if success && len(poly.triangles) > 0 {
-            return true
-        }
-        // Fallback for small polygons that hull fails on
-        return triangulate_simple_fan(poly)
-    }
-
-    // For larger polygons with interior samples, use Delaunay triangulation
-    // Prepare vertex array
-    verts := make([][3]f32, len(poly.vertices))
-    defer delete(verts)
-
-    for i in 0..<len(poly.vertices) {
-        verts[i] = poly.vertices[i].pos
-    }
-
-    // Create hull indices (outer polygon vertices)
-    hull := make([dynamic]i32, 0, nverts)
-    defer delete(hull)
-
-    // Find vertices that form the outer boundary
-    for i in 0..<nverts {
-        if poly.vertices[i].flag & RC_BORDER_VERTEX != 0 {
-            append(&hull, i32(i))
-        }
-    }
-
-    // If no border vertices marked, use all original polygon vertices as hull
-    if len(hull) == 0 {
-        for i in 0..<nverts {
-            append(&hull, i32(i))
-        }
-    }
-
-    // Perform Delaunay triangulation
-    tris, valid := delaunay_hull(verts, hull[:])
-    defer delete(tris)  // Clean up dynamic array returned by delaunay_hull
-
-    if valid {
-        // Convert triangle indices to Detail_Triangle structures
-        for tri in tris {
-            t0, t1, t2 := tri[0], tri[1], tri[2]
-
-            if t0 >= 0 && t0 < i32(len(verts)) &&
-               t1 >= 0 && t1 < i32(len(verts)) &&
-               t2 >= 0 && t2 < i32(len(verts)) {
-
-                a := verts[t0]
-                b := verts[t1]
-                c := verts[t2]
-
-                area := geometry.signed_triangle_area_2d(a, b, c)
-                if abs(area) > MIN_POLYGON_AREA {
-                    triangle := Detail_Triangle{
-                        v = {t0, t1, t2},
-                        quality = calculate_triangle_quality(a, b, c),
-                        area = abs(area),
-                    }
-                    append(&poly.triangles, triangle)
-                }
-            }
-        }
-
-        if len(poly.triangles) > 0 {
-            return true
-        }
-    }
-
-    // Delaunay failed, try hull triangulation
-    clear(&poly.triangles)
-    success := triangulate_hull_based(poly)
-
-    if success && len(poly.triangles) > 0 {
-        return true
-    }
-
-    // Hull failed, try ear clipping
-    clear(&poly.triangles)
-    success = triangulate_ear_clipping_robust(poly)
-
-    if success && len(poly.triangles) > 0 {
-        return true
-    }
-
-    // All methods failed, use simple fan as last resort
-    clear(&poly.triangles) // Clear partial results
-    return triangulate_simple_fan(poly)
 }
 
 // Hull-based triangulation that matches C++ triangulateHull exactly
@@ -872,477 +562,6 @@ prev_index :: proc "contextless" (i, n: int) -> int {
     return (i + n - 1) % n
 }
 
-// Simple triangulation for convex polygons (triangles and quads)
-triangulate_simple_convex :: proc(poly: ^Detail_Polygon) -> bool {
-    nverts := len(poly.vertices)
-    if nverts < 3 do return false
-
-    if nverts == 3 {
-        a := poly.vertices[0].pos
-        b := poly.vertices[1].pos
-        c := poly.vertices[2].pos
-
-        if !is_triangle_degenerate(a, b, c) {
-            triangle := Detail_Triangle{
-                v = {0, 1, 2},
-                quality = calculate_triangle_quality(a, b, c),
-                area = geometry.signed_triangle_area_2d(a, b, c),
-            }
-            append(&poly.triangles, triangle)
-        }
-    } else if nverts == 4 {
-        // For quads, choose better diagonal
-        // Test both possible triangulations and pick the one with better quality
-        a := poly.vertices[0].pos
-        b := poly.vertices[1].pos
-        c := poly.vertices[2].pos
-        d := poly.vertices[3].pos
-
-        // Option 1: triangles (0,1,2) and (0,2,3)
-        q1a := calculate_triangle_quality(a, b, c)
-        q1b := calculate_triangle_quality(a, c, d)
-        quality1 := min(q1a, q1b)
-
-        // Option 2: triangles (0,1,3) and (1,2,3)
-        q2a := calculate_triangle_quality(a, b, d)
-        q2b := calculate_triangle_quality(b, c, d)
-        quality2 := min(q2a, q2b)
-
-        if quality1 >= quality2 {
-            // Use diagonal 0-2
-            if !is_triangle_degenerate(a, b, c) {
-                triangle1 := Detail_Triangle{
-                    v = {0, 1, 2},
-                    quality = q1a,
-                    area = geometry.signed_triangle_area_2d(a, b, c),
-                }
-                append(&poly.triangles, triangle1)
-            }
-            if !is_triangle_degenerate(a, c, d) {
-                triangle2 := Detail_Triangle{
-                    v = {0, 2, 3},
-                    quality = q1b,
-                    area = geometry.signed_triangle_area_2d(a, c, d),
-                }
-                append(&poly.triangles, triangle2)
-            }
-        } else {
-            // Use diagonal 1-3
-            if !is_triangle_degenerate(a, b, d) {
-                triangle1 := Detail_Triangle{
-                    v = {0, 1, 3},
-                    quality = q2a,
-                    area = geometry.signed_triangle_area_2d(a, b, d),
-                }
-                append(&poly.triangles, triangle1)
-            }
-            if !is_triangle_degenerate(b, c, d) {
-                triangle2 := Detail_Triangle{
-                    v = {1, 2, 3},
-                    quality = q2b,
-                    area = geometry.signed_triangle_area_2d(b, c, d),
-                }
-                append(&poly.triangles, triangle2)
-            }
-        }
-    }
-
-    return len(poly.triangles) > 0
-}
-
-// Robust ear clipping with improved ear detection
-// Returns true if triangulation completed successfully
-triangulate_ear_clipping_robust :: proc(poly: ^Detail_Polygon) -> bool {
-    nverts := len(poly.vertices)
-    if nverts < 3 do return false
-
-    // Create working list of vertex indices
-    indices := make([dynamic]i32, nverts)
-    defer delete(indices)
-
-    for i in 0..<nverts {
-        append(&indices, i32(i))
-    }
-
-    remaining := nverts
-    iterations := 0
-
-    // Ear clipping should complete in exactly (n-2) ears for n vertices
-    // We track progress to detect degenerate cases
-    last_remaining := remaining
-    stalled_iterations := 0
-
-    for remaining > 3 {
-        iterations += 1
-        found_ear := false
-        best_ear := -1
-        best_quality := f32(0.0)
-
-        // Check for progress stalling (indicates degenerate polygon)
-        if remaining == last_remaining {
-            stalled_iterations += 1
-            // Much more lenient stalling detection - allow more attempts
-            if stalled_iterations > 3 || iterations > remaining * 6 {
-
-                // Use fallback triangulation
-                return triangulate_remaining_as_fan(poly, indices[:remaining])
-            }
-        } else {
-            stalled_iterations = 0
-            last_remaining = remaining
-        }
-
-        // Additional safety check: prevent runaway iterations (more lenient)
-        if iterations > remaining * 10 {
-            return triangulate_remaining_as_fan(poly, indices[:remaining])
-        }
-
-        // Find the best quality ear
-        for i in 0..<remaining {
-            curr := i
-            prev := (i + remaining - 1) % remaining
-            next := (i + 1) % remaining
-            if !is_ear(poly, indices[:remaining], prev, curr, next) do continue
-            // Calculate triangle quality
-            a := poly.vertices[indices[prev]].pos
-            b := poly.vertices[indices[curr]].pos
-            c := poly.vertices[indices[next]].pos
-
-            if !validate_triangle(a, b, c) do continue
-
-            quality := calculate_triangle_quality(a, b, c)
-            if quality > best_quality {
-                best_quality = quality
-                best_ear = curr
-                found_ear = true
-            }
-        }
-
-        if !found_ear {
-            // Fallback: try relaxed ear test for difficult cases
-            for i in 0..<remaining {
-                curr := i
-                prev := (i + remaining - 1) % remaining
-                next := (i + 1) % remaining
-
-                if is_ear_relaxed(poly, indices[:remaining], prev, curr, next) {
-                    best_ear = curr
-                    found_ear = true
-                    best_quality = 0.3  // Lower quality but still valid
-                    break
-                }
-            }
-        }
-
-        if !found_ear {
-            // Try one more time with even more relaxed constraints
-            for i in 0..<remaining {
-                curr := i
-                prev := (i + remaining - 1) % remaining
-                next := (i + 1) % remaining
-
-                a := poly.vertices[indices[prev]].pos
-                b := poly.vertices[indices[curr]].pos
-                c := poly.vertices[indices[next]].pos
-
-                // Very basic convexity test - just check signed area is positive
-                area := geometry.signed_triangle_area_2d(a, b, c)
-                if area > 1e-12 {
-                    best_ear = curr
-                    found_ear = true
-                    best_quality = 0.1  // Very low quality but still valid
-                    break
-                }
-            }
-        }
-
-        if !found_ear {
-            // Only warn if this happens early - for complex polygons it's more normal
-            if iterations <= 2 {
-
-            }
-            // This indicates a degenerate polygon that cannot be properly triangulated
-            return triangulate_remaining_as_fan(poly, indices[:remaining])
-        }
-
-        // Create triangle from the best ear
-        curr := best_ear
-        prev := (best_ear + remaining - 1) % remaining
-        next := (best_ear + 1) % remaining
-
-        a := poly.vertices[indices[prev]].pos
-        b := poly.vertices[indices[curr]].pos
-        c := poly.vertices[indices[next]].pos
-
-        triangle := Detail_Triangle{
-            v = {indices[prev], indices[curr], indices[next]},
-            quality = calculate_triangle_quality(a, b, c),
-            area = geometry.signed_triangle_area_2d(a, b, c),
-        }
-        append(&poly.triangles, triangle)
-
-        // Remove the ear vertex
-        for j in best_ear..<remaining-1 {
-            indices[j] = indices[j+1]
-        }
-        remaining -= 1
-    }
-
-    // Final triangle case
-    if remaining == 3 {
-        // Create the final triangle
-        a := poly.vertices[indices[0]].pos
-        b := poly.vertices[indices[1]].pos
-        c := poly.vertices[indices[2]].pos
-
-        if !is_triangle_degenerate(a, b, c) {
-            triangle := Detail_Triangle{
-                v = {indices[0], indices[1], indices[2]},
-                quality = calculate_triangle_quality(a, b, c),
-                area = geometry.signed_triangle_area_2d(a, b, c),
-            }
-            append(&poly.triangles, triangle)
-        }
-    } else if remaining > 3 {
-        // Shouldn't happen, but handle as fallback
-        log.warnf("Triangulation ended with %d vertices remaining, using fan triangulation", remaining)
-        return triangulate_remaining_as_fan(poly, indices[:remaining])
-    }
-
-    // Verify we created the expected number of triangles
-    expected_triangles := nverts - 2
-    if len(poly.triangles) != expected_triangles {
-        log.warnf("Triangulation created %d triangles, expected %d", len(poly.triangles), expected_triangles)
-    }
-
-    return len(poly.triangles) > 0
-}
-
-// Simple fan triangulation as fallback
-triangulate_simple_fan :: proc(poly: ^Detail_Polygon) -> bool {
-    nverts := len(poly.vertices)
-    if nverts < 3 do return false
-
-    clear(&poly.triangles)
-
-    // Create fan from first vertex
-    for i in 1..<nverts-1 {
-        a := poly.vertices[0].pos
-        b := poly.vertices[i].pos
-        c := poly.vertices[i+1].pos
-
-        if !is_triangle_degenerate(a, b, c) {
-            triangle := Detail_Triangle{
-                v = {0, i32(i), i32(i+1)},
-                quality = 0.3, // Lower quality but guaranteed to work
-                area = geometry.signed_triangle_area_2d(a, b, c),
-            }
-            append(&poly.triangles, triangle)
-        }
-    }
-
-    return len(poly.triangles) > 0
-}
-
-// Triangulate remaining vertices as a fan
-triangulate_remaining_as_fan :: proc(poly: ^Detail_Polygon, indices: []i32) -> bool {
-    remaining := len(indices)
-    if remaining < 3 do return len(poly.triangles) > 0
-
-    // Create fan from first vertex with more lenient area check
-    for i in 1..<remaining-1 {
-        a := poly.vertices[indices[0]].pos
-        b := poly.vertices[indices[i]].pos
-        c := poly.vertices[indices[i+1]].pos
-
-        // Use much more lenient area threshold for fallback triangulation
-        area := geometry.signed_triangle_area_2d(a, b, c)
-
-        if area > 1e-12 {  // Very small but not zero
-            triangle := Detail_Triangle{
-                v = {indices[0], indices[i], indices[i+1]},
-                quality = 0.3, // Lower quality but guaranteed to work
-                area = area,
-            }
-            append(&poly.triangles, triangle)
-        }
-    }
-
-    return len(poly.triangles) > 0
-}
-
-// Relaxed ear test for fallback cases
-is_ear_relaxed :: proc(poly: ^Detail_Polygon, indices: []i32, prev, curr, next: int) -> bool {
-    if prev < 0 || curr < 0 || next < 0 do return false
-    if prev >= len(indices) || curr >= len(indices) || next >= len(indices) do return false
-
-    v_prev := indices[prev]
-    v_curr := indices[curr]
-    v_next := indices[next]
-
-    if v_prev >= i32(len(poly.vertices)) || v_curr >= i32(len(poly.vertices)) || v_next >= i32(len(poly.vertices)) {
-        return false
-    }
-    if v_prev < 0 || v_curr < 0 || v_next < 0 do return false
-
-    a := poly.vertices[v_prev].pos
-    b := poly.vertices[v_curr].pos
-    c := poly.vertices[v_next].pos
-
-    // Very lenient degeneracy check
-    if is_triangle_degenerate(a, b, c) do return false
-
-    // Relaxed convexity check - just ensure we have some positive area
-    if linalg.cross(b.xz - a.xz, c.xz - b.xz) <= 0 do return false  // Still need convexity
-
-    // Skip the expensive point-in-triangle test for relaxed mode
-    return true
-}
-
-// Check if a vertex forms a valid ear (improved algorithm)
-is_ear :: proc(poly: ^Detail_Polygon, indices: []i32, prev, curr, next: int) -> bool {
-    if prev < 0 || curr < 0 || next < 0 do return false
-    if prev >= len(indices) || curr >= len(indices) || next >= len(indices) do return false
-
-    v_prev := indices[prev]
-    v_curr := indices[curr]
-    v_next := indices[next]
-
-    if v_prev >= i32(len(poly.vertices)) || v_curr >= i32(len(poly.vertices)) || v_next >= i32(len(poly.vertices)) {
-        return false
-    }
-    if v_prev < 0 || v_curr < 0 || v_next < 0 do return false
-
-    a := poly.vertices[v_prev].pos
-    b := poly.vertices[v_curr].pos
-    c := poly.vertices[v_next].pos
-
-    // Check if triangle is degenerate using signed area
-    area := geometry.signed_triangle_area_2d(a, b, c)
-    if area <= 1e-9 do return false  // Must be counter-clockwise (positive area)
-
-    // Check that no other vertices lie inside this triangle
-    for i in 0..<len(indices) {
-        if i == prev || i == curr || i == next do continue
-
-        test_v := indices[i]
-        if test_v >= i32(len(poly.vertices)) || test_v < 0 do continue
-
-        p := poly.vertices[test_v].pos
-
-        // Use improved point-in-triangle test
-        if geometry.point_in_triangle_2d(p, a, b, c, math.F32_EPSILON) {
-            return false  // Point inside triangle, not a valid ear
-        }
-    }
-
-    return true
-}
-
-// Add interior samples with limits to prevent excessive point generation
-add_interior_samples_with_limits :: proc(poly: ^Detail_Polygon, chf: ^Compact_Heightfield, sample_dist: f32) {
-    if len(poly.vertices) < 3 do return
-
-    // Calculate polygon bounds
-    min_pos := poly.vertices[0].pos
-    max_pos := poly.vertices[0].pos
-
-    for v in poly.vertices[1:] {
-        min_pos.x = min(min_pos.x, v.pos.x)
-        min_pos.z = min(min_pos.z, v.pos.z)
-        max_pos.x = max(max_pos.x, v.pos.x)
-        max_pos.z = max(max_pos.z, v.pos.z)
-    }
-
-    // Calculate potential sample count and limit it
-    nx := i32(math.ceil((max_pos.x - min_pos.x) / sample_dist))
-    nz := i32(math.ceil((max_pos.z - min_pos.z) / sample_dist))
-
-    total_samples := nx * nz
-    adjusted_dist := sample_dist
-    if total_samples > MAX_INTERIOR_SAMPLES {
-        // Adjust sample distance to stay within limits
-        scale_factor := math.sqrt(f32(total_samples) / f32(MAX_INTERIOR_SAMPLES))
-        adjusted_dist *= scale_factor
-        nx = i32(math.ceil((max_pos.x - min_pos.x) / adjusted_dist))
-        nz = i32(math.ceil((max_pos.z - min_pos.z) / adjusted_dist))
-
-    }
-
-    samples_added := 0
-    for i in 1..<nx {
-        for j in 1..<nz {
-            x := min_pos.x + f32(i) * adjusted_dist
-            z := min_pos.z + f32(j) * adjusted_dist
-
-            pos := [3]f32{x, 0, z}
-
-            // Check if point is inside polygon (2D test)
-            inside := point_in_polygon_detail(pos, poly)
-            if !inside do continue
-
-            // Sample height from heightfield
-            height := sample_heightfield_height(chf, pos)
-            pos.y = height
-
-            add_detail_vertex(poly, pos, height)
-            samples_added += 1
-
-            // Safety limit on samples added
-            if samples_added >= MAX_INTERIOR_SAMPLES / 2 {
-
-                return
-            }
-        }
-    }
-
-}
-
-// Add sample points inside polygon for better triangulation (original version)
-add_interior_samples :: proc(poly: ^Detail_Polygon, chf: ^Compact_Heightfield, sample_dist: f32) {
-    if len(poly.vertices) < 3 do return
-
-    // Calculate polygon bounds
-    min_pos := poly.vertices[0].pos
-    max_pos := poly.vertices[0].pos
-
-    for v in poly.vertices[1:] {
-        min_pos.x = min(min_pos.x, v.pos.x)
-        min_pos.z = min(min_pos.z, v.pos.z)
-        max_pos.x = max(max_pos.x, v.pos.x)
-        max_pos.z = max(max_pos.z, v.pos.z)
-    }
-
-    // Sample points in grid pattern with jittering
-    nx := i32(math.ceil((max_pos.x - min_pos.x) / sample_dist))
-    nz := i32(math.ceil((max_pos.z - min_pos.z) / sample_dist))
-
-    sample_idx := i32(0)
-    for i in 1..<nx {
-        for j in 1..<nz {
-            // Add jitter to avoid regular grid artifacts
-            jx := get_jitter_x(sample_idx) * 0.5
-            jz := get_jitter_y(sample_idx) * 0.5
-            sample_idx += 1
-
-            x := min_pos.x + (f32(i) + jx) * sample_dist
-            z := min_pos.z + (f32(j) + jz) * sample_dist
-
-            pos := [3]f32{x, 0, z}
-
-            // Check if point is inside polygon (2D test)
-            inside := point_in_polygon_detail(pos, poly)
-            if !inside do continue
-
-            // Sample height from heightfield
-            height := sample_heightfield_height(chf, pos)
-            pos.y = height
-
-            add_detail_vertex(poly, pos, height)
-        }
-    }
-}
-
 // Point in polygon test for detail vertices
 point_in_polygon_detail :: proc(pt: [3]f32, poly: ^Detail_Polygon) -> bool {
     if len(poly.vertices) < 3 do return false
@@ -1362,172 +581,6 @@ point_in_polygon_detail :: proc(pt: [3]f32, poly: ^Detail_Polygon) -> bool {
     }
 
     return inside
-}
-
-// Main function to build detailed mesh for a single polygon (legacy version)
-build_polygon_detail_mesh :: proc(poly: ^Detail_Polygon, chf: ^Compact_Heightfield) -> bool {
-    if len(poly.vertices) < 3 do return false
-
-    // Step 1: Calculate minimum extent BEFORE edge subdivision
-    // Save the original vertex count before ANY modifications
-    original_vert_count := len(poly.vertices)
-    min_extent := f32(math.F32_MAX)
-    for i in 0..<original_vert_count {
-        j := (i + 1) % original_vert_count
-        edge_vec := poly.vertices[j].pos.xz - poly.vertices[i].pos.xz
-        edge_len := linalg.length(edge_vec)
-        min_extent = min(min_extent, edge_len)
-    }
-
-    // Determine if we should add interior samples based on ORIGINAL polygon size
-    should_add_interior := min_extent >= poly.sample_dist * 2
-
-    // Step 2: Subdivide constraint edges
-    new_edges := make([dynamic]Detail_Edge, 0, len(poly.edges) * 4)
-    defer delete(new_edges)
-
-    for edge in poly.edges {
-        if !edge.constrained do continue
-
-        // Subdivide edges if sample_dist > 0
-        subdivided := make([dynamic]i32, 0, 32)
-
-        // Edge subdivision with error-based simplification
-        if poly.sample_dist > 0 {
-            vj := poly.vertices[edge.v0].pos
-            vi := poly.vertices[edge.v1].pos
-            swapped := false
-
-            if abs(vj.x - vi.x) < 1e-6 {
-                if vj.z > vi.z {
-                    vj, vi = vi, vj
-                    swapped = true
-                }
-            } else {
-                if vj.x > vi.x {
-                    vj, vi = vi, vj
-                    swapped = true
-                }
-            }
-            // Calculate edge vector and distance
-            d := vi - vj
-            // Calculate number of segments
-            nn := 1 + i32(math.floor(linalg.length2(d) / poly.sample_dist))
-            if nn >= 32 do nn = 31  // MAX_VERTS_PER_EDGE-1
-            // Create sample points along edge
-            MAX_VERTS_PER_EDGE :: 32
-            edge_samples: [MAX_VERTS_PER_EDGE][3]f32
-            for k in 0..=nn {
-                u := f32(k) / f32(nn)
-                pos := vj - d*u
-                pos.y = sample_heightfield_height(chf, {pos.x, pos.y, pos.z})
-                edge_samples[k] = pos
-            }
-            // Simplify samples based on error
-            idx: [MAX_VERTS_PER_EDGE]i32
-            idx[0] = 0
-            idx[1] = nn
-            nidx := 2
-            for k := 0; k < nidx - 1; {
-                a := idx[k]
-                b := idx[k+1]
-                va := edge_samples[a]
-                vb := edge_samples[b]
-                // Find maximum deviation along segment
-                max_dev: f32 = 0
-                max_i := i32(-1)
-                for m in a+1..<b {
-                    dev := geometry.point_segment_distance_sq(edge_samples[m], va, vb)
-                    if dev > max_dev {
-                        max_dev = dev
-                        max_i = i32(m)
-                    }
-                }
-                // Add point if deviation exceeds threshold
-                if max_i != i32(-1) && max_dev > poly.max_error * poly.max_error {
-                    // Insert new point
-                    for m := nidx; m > k; m -= 1 {
-                        idx[m] = idx[m-1]
-                    }
-                    idx[k+1] = max_i
-                    nidx += 1
-                } else {
-                    k += 1
-                }
-            }
-            // Add vertices to polygon and build subdivision indices
-            if swapped {
-                append(&subdivided, edge.v0)
-                for k := nidx-2; k > 0; k -= 1 {
-                    pos := edge_samples[idx[k]]
-                    vertex := Detail_Vertex{
-                        pos = {pos.x, pos.y, pos.z},
-                        height = pos.y,
-                        flag = 0,
-                    }
-                    append(&poly.vertices, vertex)
-                    append(&subdivided, i32(len(poly.vertices) - 1))
-                }
-                append(&subdivided, edge.v1)
-            } else {
-                append(&subdivided, edge.v0)
-                for k in 1..<nidx-1 {
-                    pos := edge_samples[idx[k]]
-                    vertex := Detail_Vertex{
-                        pos = {pos.x, pos.y, pos.z},
-                        height = pos.y,
-                        flag = 0,
-                    }
-                    append(&poly.vertices, vertex)
-                    append(&subdivided, i32(len(poly.vertices) - 1))
-                }
-                append(&subdivided, edge.v1)
-            }
-        } else {
-            // No subdivision
-            append(&subdivided, edge.v0, edge.v1)
-        }
-
-        // Create new constraint edges between subdivided points
-        for i in 0..<len(subdivided)-1 {
-            new_edge := Detail_Edge{
-                v0 = subdivided[i],
-                v1 = subdivided[i+1],
-                constrained = true,
-                length = 0, // Will be calculated later if needed
-            }
-            append(&new_edges, new_edge)
-        }
-
-        delete(subdivided)
-    }
-
-    // Replace old edges with subdivided ones
-    clear(&poly.edges)
-    for edge in new_edges {
-        append(&poly.edges, edge)
-    }
-
-    // Step 3: Interior sampling implementation matching C++ lines 825-905
-    verts_before := len(poly.vertices)
-    if should_add_interior {
-        // Add interior sample points only for larger polygons
-        add_interior_samples(poly, chf, poly.sample_dist)
-        verts_after := len(poly.vertices)
-        log.debugf("Polygon: added %d interior samples (min_extent=%.2f, threshold=%.2f, orig_verts=%d, after_subdiv=%d, final=%d)",
-                   verts_after - verts_before, min_extent, poly.sample_dist * 2,
-                   original_vert_count, verts_before, verts_after)
-    } else {
-        log.debugf("Skipping ALL interior sampling (testing without it)")
-    }
-
-    // Step 3: Triangulate
-    if !triangulate_delaunay(poly) {
-        log.warn("Failed to triangulate detail polygon")
-        return false
-    }
-
-    return true
 }
 
 // Check if timeout has been exceeded
@@ -1579,7 +632,7 @@ build_poly_mesh_detail :: proc(pmesh: ^Poly_Mesh, chf: ^Compact_Heightfield,
     border_size := pmesh.border_size
     height_search_radius := max(1, i32(math.ceil(pmesh.max_edge_error)))
 
-    // Calculate bounds for each polygon (matching C++ lines 1223-1251)
+    // Calculate bounds for each polygon
     bounds := make([][4]i32, pmesh.npolys)
     defer delete(bounds)
 
@@ -1644,11 +697,11 @@ build_poly_mesh_detail :: proc(pmesh: ^Poly_Mesh, chf: ^Compact_Heightfield,
     samples := make([dynamic][4]i32, 0, 512)
     defer delete(samples)
 
-    // Process each polygon (matching C++ lines 1288-1395)
+    // Process each polygon
     for i in 0..<pmesh.npolys {
         p := pmesh.polys[i*nvp*2:]
 
-        // Store polygon vertices in workspace (C++ lines 1292-1302)
+        // Store polygon vertices in workspace
         npoly := 0
         for j in 0..<nvp {
             if p[j] == RC_MESH_NULL_IDX do break
@@ -1663,7 +716,7 @@ build_poly_mesh_detail :: proc(pmesh: ^Poly_Mesh, chf: ^Compact_Heightfield,
 
         if npoly < 3 do continue
 
-        // Get height data from area of polygon (C++ lines 1304-1309)
+        // Get height data from area of polygon
         hp.xmin = bounds[i].x
         hp.ymin = bounds[i].z
         hp.width = bounds[i].y - bounds[i].x
@@ -1684,18 +737,18 @@ build_poly_mesh_detail :: proc(pmesh: ^Poly_Mesh, chf: ^Compact_Heightfield,
             continue
         }
 
-        // Move detail verts to world space (C++ lines 1323-1328)
+        // Move detail verts to world space
         for &vert in detail_verts {
             vert += orig
             vert.y += ch  // Height offset
         }
 
-        // Offset poly for flag checking (C++ lines 1330-1335)
+        // Offset poly for flag checking
         for j in 0..<npoly {
             poly_workspace[j] += orig
         }
 
-        // Store detail submesh (C++ lines 1337-1343)
+        // Store detail submesh
         ntris := len(tris)
 
         dmesh.meshes[i] = [4]u32{
@@ -1705,12 +758,12 @@ build_poly_mesh_detail :: proc(pmesh: ^Poly_Mesh, chf: ^Compact_Heightfield,
             u32(ntris),               // Triangle count
         }
 
-        // Store vertices (C++ lines 1345-1368)
+        // Store vertices
         for vert in detail_verts {
             append(&temp_verts, vert)
         }
 
-        // Store triangles (C++ lines 1370-1394)
+        // Store triangles
         for tri in tris {
             append(&temp_tris, [4]u8{u8(tri.x), u8(tri.y), u8(tri.z), u8(tri.w)})
         }
@@ -1744,7 +797,7 @@ build_poly_detail :: proc(poly_verts: [][3]f32, sample_dist, sample_max_error: f
     cs := chf.cs
     ics := 1.0 / cs
 
-    // Initialize vertices with input polygon (C++ lines 684-687)
+    // Initialize vertices with input polygon
     clear(verts)
     for v in poly_verts {
         append(verts, v)
@@ -1753,14 +806,14 @@ build_poly_detail :: proc(poly_verts: [][3]f32, sample_dist, sample_max_error: f
     clear(edges)
     clear(tris)
 
-    // Calculate minimum extent (C++ line 696)
+    // Calculate minimum extent
     min_extent := calculate_polygon_min_extent_from_verts(verts[:])
 
     // Hull tracking array
     hull := make([dynamic]i32, 0, MAX_VERTS)
     defer delete(hull)
 
-    // Tessellate outlines (C++ lines 698-802)
+    // Tessellate outlines
     if sample_dist > 0 {
         for i in 0..<nin {
             j := (nin - 1 + i) % nin  // Previous vertex
@@ -1769,7 +822,7 @@ build_poly_detail :: proc(poly_verts: [][3]f32, sample_dist, sample_max_error: f
             vi := poly_verts[i]
             swapped := false
 
-            // Ensure consistent ordering (C++ lines 707-725)
+            // Ensure consistent ordering
             if abs(vj.x - vi.x) < 1e-6 {
                 if vj.z > vi.z {
                     vj, vi = vi, vj
@@ -1782,7 +835,7 @@ build_poly_detail :: proc(poly_verts: [][3]f32, sample_dist, sample_max_error: f
                 }
             }
 
-            // Create samples along edge (C++ lines 726-744)
+            // Create samples along edge
             d := vi - vj
             edge_len := linalg.length(d.xz)
             nn := 1 + i32(math.floor(edge_len / sample_dist))
@@ -1799,7 +852,7 @@ build_poly_detail :: proc(poly_verts: [][3]f32, sample_dist, sample_max_error: f
                 edge_samples[k] = pos
             }
 
-            // Simplify samples based on error (C++ lines 745-779)
+            // Simplify samples based on error
             idx := make([dynamic]i32, 0, MAX_VERTS_PER_EDGE)
             defer delete(idx)
             append(&idx, 0, nn)
@@ -1832,7 +885,7 @@ build_poly_detail :: proc(poly_verts: [][3]f32, sample_dist, sample_max_error: f
 
             append(&hull, i32(j))
 
-            // Add new vertices (C++ lines 782-800)
+            // Add new vertices
             if swapped {
                 for k := len(idx) - 2; k > 0; k -= 1 {
                     append(verts, edge_samples[idx[k]])
@@ -1847,14 +900,14 @@ build_poly_detail :: proc(poly_verts: [][3]f32, sample_dist, sample_max_error: f
         }
     }
 
-    // If polygon is small, just triangulate hull (C++ lines 804-810)
+    // If polygon is small, just triangulate hull
     if min_extent < sample_dist * 2 {
         triangulate_hull_simple(len(verts), verts[:], len(hull), hull[:], nin, tris)
         set_triangle_flags(tris[:], len(hull), hull[:])
         return true
     }
 
-    // Triangulate hull for base mesh (C++ lines 812-823)
+    // Triangulate hull for base mesh
     triangulate_hull_simple(len(verts), verts[:], len(hull), hull[:], nin, tris)
 
     if len(tris) == 0 {
@@ -1862,11 +915,10 @@ build_poly_detail :: proc(poly_verts: [][3]f32, sample_dist, sample_max_error: f
         return true
     }
 
-    // Add interior samples if needed (C++ lines 825-900)
+    // Add interior samples if needed
     if sample_dist > 0 {
         add_interior_samples_grid(poly_verts, sample_dist, verts, samples, cs, ics, chf.ch, height_search_radius, hp)
-
-        // Add samples with highest error first (C++ lines 858-900)
+        // Add samples with highest error first
         add_samples_by_error(verts, tris[:], samples[:], sample_max_error, MAX_VERTS)
     }
 
@@ -1943,21 +995,11 @@ set_triangle_flags :: proc(tris: [][4]i32, nhull: int, hull: []i32) {
 add_interior_samples_grid :: proc(poly_verts: [][3]f32, sample_dist: f32,
                                  verts: ^[dynamic][3]f32, samples: ^[dynamic][4]i32,
                                  cs, ics, ch: f32, height_search_radius: i32, hp: ^Height_Patch) {
-
     clear(samples)
-
     if len(poly_verts) == 0 do return
-
-    // Calculate bounding box (C++ lines 828-835)
-    bmin := poly_verts[0]
-    bmax := poly_verts[0]
-
-    for v in poly_verts[1:] {
-        bmin = linalg.min(bmin, v)
-        bmax = linalg.max(bmax, v)
-    }
-
-    // Create grid samples (C++ lines 836-856)
+    // Calculate bounding box
+    bmin, bmax := calc_bounds(poly_verts)
+    // Create grid samples
     x0 := i32(math.floor(bmin.x / sample_dist))
     x1 := i32(math.ceil(bmax.x / sample_dist))
     z0 := i32(math.floor(bmin.z / sample_dist))
@@ -1970,9 +1012,8 @@ add_interior_samples_grid :: proc(poly_verts: [][3]f32, sample_dist: f32,
                 (bmax.y + bmin.y) * 0.5,
                 f32(z) * sample_dist,
             }
-
-            // Check if point is inside polygon (simplified version)
-            if point_inside_polygon_simple(pt, poly_verts) {
+            // Check if point is inside polygon using geometry library
+            if geometry.point_in_polygon_2d(pt, poly_verts) {
                 height := get_height_from_patch(pt, cs, ics, ch, height_search_radius, hp)
                 append(samples, [4]i32{x, i32(height), z, 0})  // 0 = not added yet
             }
@@ -1993,117 +1034,6 @@ add_samples_by_error :: proc(verts: ^[dynamic][3]f32, tris: [][4]i32, samples: [
         append(verts, pt)
         samples_added += 1
     }
-}
-
-// Simple point-in-polygon test
-point_inside_polygon_simple :: proc(pt: [3]f32, poly: [][3]f32) -> bool {
-    inside := false
-    j := len(poly) - 1
-
-    for i in 0..<len(poly) {
-        if ((poly[i].z > pt.z) != (poly[j].z >= pt.z)) &&
-           (pt.x < (poly[j].x - poly[i].x) * (pt.z - poly[i].z) / (poly[j].z - poly[i].z) + poly[i].x) {
-            inside = !inside
-        }
-        j = i
-    }
-    return inside
-}
-
-// Delaunay triangulation with hull constraint
-// Based on C++ delaunayHull from RecastMeshDetail.cpp
-delaunay_hull :: proc(verts: [][3]f32, hull: []i32) -> (tris: [dynamic][3]i32, valid: bool) {
-
-    if len(verts) < 3 do return nil, false
-
-    max_tris := len(verts) * 2 - 2 - len(hull)  // Max triangles for a planar triangulation
-
-    tris = make([dynamic][3]i32, 0, max_tris)
-
-    // Start with first triangle
-    for i in 0..<len(hull) {
-        i1 := hull[i]
-        i2 := hull[(i + 1) % len(hull)]
-        i3 := hull[(i + 2) % len(hull)]
-
-        if i1 < 0 || i1 >= i32(len(verts)) || i2 < 0 || i2 >= i32(len(verts)) || i3 < 0 || i3 >= i32(len(verts)) {
-            continue
-        }
-
-        area := geometry.signed_triangle_area_2d(verts[i1], verts[i2], verts[i3])
-        if abs(area) > 1e-6 {
-            // Add first triangle
-            append(&tris, [3]i32{i1, i2, i3})
-            break
-        }
-    }
-
-    if len(tris) == 0 {
-        delete(tris)
-        return nil, false
-    }
-
-    // Add points one by one
-    for i in 0..<len(verts) {
-        // Skip if point is already in hull
-        if slice.contains(hull, i32(i)) do continue
-
-        pt := verts[i]
-
-        // Remove triangles that contain the point in their circumcircle
-        removed_edges := make([dynamic][2]i32, 0, 64, context.temp_allocator)
-
-        new_tris := make([dynamic][3]i32, 0, cap(tris), context.temp_allocator)
-
-        for tri in tris {
-            t0, t1, t2 := tri[0], tri[1], tri[2]
-
-            if geometry.in_circumcircle(pt, verts[t0], verts[t1], verts[t2]) {
-                // Remove this triangle - add its edges to removed list
-                append(&removed_edges, [2]i32{t0, t1})
-                append(&removed_edges, [2]i32{t1, t2})
-                append(&removed_edges, [2]i32{t2, t0})
-            } else {
-                // Keep this triangle
-                append(&new_tris, tri)
-            }
-        }
-
-        // Replace triangles with kept ones
-        clear(&tris)
-        for tri in new_tris {
-            append(&tris, tri)
-        }
-
-        // Find boundary of removed triangles
-        boundary := make([dynamic][2]i32, 0, 32, context.temp_allocator)
-
-        for j in 0..<len(removed_edges) {
-            e0, e1 := removed_edges[j][0], removed_edges[j][1]
-
-            // Check if edge appears twice (internal edge)
-            is_boundary := true
-            for k in j+1..<len(removed_edges) {
-                if (removed_edges[k][0] == e1 && removed_edges[k][1] == e0) ||
-                   (removed_edges[k][0] == e0 && removed_edges[k][1] == e1) {
-                    is_boundary = false
-                    break
-                }
-            }
-
-            if is_boundary {
-                append(&boundary, [2]i32{e0, e1})
-            }
-        }
-
-        // Create new triangles from boundary edges to new point
-        for edge in boundary {
-            append(&tris, [3]i32{edge[0], edge[1], i32(i)})
-        }
-    }
-
-    valid = len(tris) > 0
-    return
 }
 
 // Flood fill algorithm for height data collection
