@@ -723,7 +723,7 @@ add_unique_connection :: proc(reg: ^Region, n: i32) {
 // Merge and filter regions
 merge_and_filter_regions :: proc(min_region_area, merge_region_size: i32,
                                initial_max_region_id: u16, chf: ^Compact_Heightfield,
-                               src_reg: []u16, overlaps: ^[dynamic]i32) -> (max_region_id: u16, success: bool) {
+                               src_reg: []u16) -> (max_region_id: u16, overlaps: []Region, success: bool) {
     w := chf.width
     h := chf.height
 
@@ -969,19 +969,14 @@ merge_and_filter_regions :: proc(min_region_area, merge_region_size: i32,
 
     // Remap regions
     for i in 0..<chf.span_count {
-        if (src_reg[i] & RC_BORDER_REG) == 0 {
+        if (src_reg[i] & RC_BORDER_REG) == 0 && src_reg[i] < u16(nreg) {
             src_reg[i] = regions[src_reg[i]].id
         }
     }
-
-    // Return regions that we found to be overlapping
-    for i in 0..<nreg {
-        if regions[i].overlap {
-            append(overlaps, i32(regions[i].id))
-        }
-    }
-
-    return max_region_id, true
+    overlaps = slice.filter(regions[:nreg], proc(reg: Region) -> bool {
+        return reg.overlap
+    })
+    return max_region_id, overlaps, true
 }
 
 // Build regions using watershed partitioning
@@ -1091,11 +1086,10 @@ build_regions :: proc(chf: ^Compact_Heightfield,
     {
         // Merge regions and filter out small regions
 
-        overlaps := make([dynamic]i32, 0, 32)
+        overlaps :[]Region
         defer delete(overlaps)
         chf.max_regions = region_id
-
-        chf.max_regions = merge_and_filter_regions(min_region_area, merge_region_area, chf.max_regions, chf, src_reg, &overlaps) or_return
+        chf.max_regions, overlaps = merge_and_filter_regions(min_region_area, merge_region_area, chf.max_regions, chf, src_reg) or_return
 
         // If overlapping regions were found during merging, split those regions
         if len(overlaps) > 0 {
@@ -1105,23 +1099,28 @@ build_regions :: proc(chf: ^Compact_Heightfield,
         }
     }
 
-    // Write the result out and validate
-    assigned_spans := 0
-    unassigned_spans := 0
-    border_spans := 0
+    // Write the result out and validate using slice operations
+    for i in 0..<chf.span_count {
+        chf.spans[i].reg = src_reg[i]
+    }
+
+    // Use slice.count and slice.count_proc for efficient span categorization
+    span_regions := src_reg[:chf.span_count]
+
+    unassigned_spans := slice.count(span_regions, 0)
+    border_spans := slice.count_proc(span_regions, proc(reg: u16) -> bool {
+        return (reg & RC_BORDER_REG) != 0
+    })
+
+    // Get unique assigned regions - only create slice when we need the actual values
     unique_regions := make(map[u16]bool)
     defer delete(unique_regions)
 
-    for i in 0..<chf.span_count {
-        chf.spans[i].reg = src_reg[i]
-
-        if src_reg[i] == 0 {
-            unassigned_spans += 1
-        } else if (src_reg[i] & RC_BORDER_REG) != 0 {
-            border_spans += 1
-        } else {
+    assigned_spans := 0
+    for reg in span_regions {
+        if reg != 0 && (reg & RC_BORDER_REG) == 0 {
+            unique_regions[reg] = true
             assigned_spans += 1
-            unique_regions[src_reg[i]] = true
         }
     }
 
@@ -1269,19 +1268,15 @@ build_regions_monotone :: proc(chf: ^Compact_Heightfield,
 
     {
         // Merge regions and filter out small regions
-        overlaps := make([dynamic]i32)
+        overlaps :[]Region
         defer delete(overlaps)
         chf.max_regions = id
-        chf.max_regions = merge_and_filter_regions(min_region_area, merge_region_area, chf.max_regions, chf, src_reg, &overlaps) or_return
-
-        // Monotone partitioning does not generate overlapping regions
+        chf.max_regions, overlaps = merge_and_filter_regions(min_region_area, merge_region_area, chf.max_regions, chf, src_reg) or_return
     }
-
     // Store the result out
     for i in 0..<chf.span_count {
         chf.spans[i].reg = src_reg[i]
     }
-
     return true
 }
 
@@ -1295,9 +1290,9 @@ merge_and_filter_layer_regions :: proc(min_region_area: i32,
     nreg := i32(initial_max_region_id) + 1
     regions := make([dynamic]Region, nreg)
     defer {
-        for i in 0..<len(regions) {
-            delete(regions[i].connections)
-            delete(regions[i].floors)
+        for r in regions {
+            delete(r.connections)
+            delete(r.floors)
         }
         delete(regions)
     }
@@ -1344,20 +1339,17 @@ merge_and_filter_layer_regions :: proc(min_region_area: i32,
                     if get_con(s, dir) != RC_NOT_CONNECTED {
                         ax := x + get_dir_offset_x(dir)
                         ay := y + get_dir_offset_y(dir)
-                        if ax >= 0 && ay >= 0 && ax < w && ay < h {
-                            ai := u32(chf.cells[ax + ay * w].index) + u32(get_con(s, dir))
-                            rai := src_reg[ai]
-                            if rai > 0 && rai < u16(nreg) && rai != ri {
-                                add_unique_connection(reg, i32(rai))
-                            }
-                            if (rai & RC_BORDER_REG) != 0 {
-                                reg.connects_to_border = true
-                            }
+                        ai := u32(chf.cells[ax + ay * w].index) + u32(get_con(s, dir))
+                        rai := src_reg[ai]
+                        if rai > 0 && rai < u16(nreg) && rai != ri {
+                            add_unique_connection(reg, i32(rai))
+                        }
+                        if (rai & RC_BORDER_REG) != 0 {
+                            reg.connects_to_border = true
                         }
                     }
                 }
             }
-
             // Update overlapping regions
             for i in 0..<len(lregs) - 1 {
                 for j in i + 1..<len(lregs) {
@@ -1371,39 +1363,27 @@ merge_and_filter_layer_regions :: proc(min_region_area: i32,
             }
         }
     }
-
     // Create 2D layers from regions
     layer_id: u16 = 1
-
     for i in 0..<nreg {
         regions[i].id = 0
     }
-
     // Merge monotone regions to create non-overlapping areas
-    stack := make([dynamic]i32, 0, 32)
-    defer delete(stack)
-
+    queue := make([dynamic]i32, 0, 32)  // BFS queue for region merging
+    defer delete(queue)
     for i in 1..<nreg {
         root := &regions[i]
         // Skip already visited
         if root.id != 0 {
             continue
         }
-
         // Start search
         root.id = layer_id
-
-        clear(&stack)
-        append(&stack, i32(i))
-
-        for len(stack) > 0 {
-            // Pop front
-            reg := &regions[stack[0]]
-            for j in 0..<len(stack) - 1 {
-                stack[j] = stack[j + 1]
-            }
-            resize(&stack, len(stack) - 1)
-
+        clear(&queue)
+        append(&queue, i32(i))
+        for len(queue) > 0 {
+            region_id := pop_front(&queue)
+            reg := &regions[region_id]
             ncons := len(reg.connections)
             for j in 0..<ncons {
                 nei := reg.connections[j]
@@ -1420,10 +1400,8 @@ merge_and_filter_layer_regions :: proc(min_region_area: i32,
                 if slice.contains(root.floors[:], nei) {
                     continue
                 }
-
-                // Deepen
-                append(&stack, nei)
-
+                // Add to BFS queue
+                append(&queue, nei)
                 // Mark layer id
                 regn.id = layer_id
                 // Merge current layers to root
@@ -1437,18 +1415,24 @@ merge_and_filter_layer_regions :: proc(min_region_area: i32,
                 root.connects_to_border = root.connects_to_border || regn.connects_to_border
             }
         }
-
         layer_id += 1
     }
+    // Remove small regions using slice.filter approach
+    small_region_ids := make([dynamic]u16, 0, 32)
+    defer delete(small_region_ids)
 
-    // Remove small regions
+    // Collect IDs of small regions to remove
     for i in 0..<nreg {
         if regions[i].span_count > 0 && regions[i].span_count < min_region_area && !regions[i].connects_to_border {
-            reg := regions[i].id
-            for j in 0..<nreg {
-                if regions[j].id == reg {
-                    regions[j].id = 0
-                }
+            append(&small_region_ids, regions[i].id)
+        }
+    }
+
+    // Mark all regions with these IDs as removed
+    for reg_id in small_region_ids {
+        for j in 0..<nreg {
+            if regions[j].id == reg_id {
+                regions[j].id = 0
             }
         }
     }
