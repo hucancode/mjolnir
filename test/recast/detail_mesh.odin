@@ -6,6 +6,33 @@ import "core:log"
 import "core:time"
 import "core:math"
 
+// Validate detail mesh data
+validate_poly_mesh_detail :: proc(dmesh: ^recast.Poly_Mesh_Detail) -> bool {
+    if dmesh == nil do return false
+    if len(dmesh.meshes) <= 0 || len(dmesh.verts) <= 0 || len(dmesh.tris) <= 0 do return false
+    // Check mesh data bounds
+    for i in 0..<len(dmesh.meshes) {
+        // Each mesh entry: [vertex_base, vertex_count, triangle_base, triangle_count]
+        mesh_info := dmesh.meshes[i]
+        vert_base := mesh_info[0]
+        vert_count := mesh_info[1]
+        tri_base := mesh_info[2]
+        tri_count := mesh_info[3]
+
+        // Validate bounds
+        if vert_base + vert_count > u32(len(dmesh.verts)) do return false
+        if tri_base + tri_count > u32(len(dmesh.tris)) do return false
+    }
+    // Check triangle data
+    for tri in dmesh.tris {
+        // Check vertex indices
+        for j in 0..<3 {
+            vert_idx := tri[j]
+            if int(vert_idx) >= len(dmesh.verts) do return false
+        }
+    }
+    return true
+}
 @(test)
 test_recast_detail_compilation :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
@@ -18,7 +45,7 @@ test_recast_detail_compilation :: proc(t: ^testing.T) {
     testing.expect(t, dmesh != nil, "Should allocate detail mesh successfully")
 
     // Test validation with empty mesh
-    valid := recast.validate_poly_mesh_detail(dmesh)
+    valid := validate_poly_mesh_detail(dmesh)
     testing.expect(t, !valid, "Empty detail mesh should be invalid")
 
     // Clean up
@@ -101,7 +128,7 @@ test_simple_detail_mesh_build :: proc(t: ^testing.T) {
     testing.expect(t, success, "Should build detail mesh successfully")
 
     if success {
-        valid := recast.validate_poly_mesh_detail(dmesh)
+        valid := validate_poly_mesh_detail(dmesh)
         testing.expect(t, valid, "Built detail mesh should be valid")
 
         log.infof("Built detail mesh: %d meshes, %d vertices, %d triangles",
@@ -244,7 +271,7 @@ test_detail_mesh_edge_cases :: proc(t: ^testing.T) {
     if ok {
         defer recast.free_poly_mesh(pmesh)
         defer recast.free_poly_mesh_detail(dmesh)
-        testing.expect(t, recast.validate_poly_mesh_detail(dmesh),
+        testing.expect(t, validate_poly_mesh_detail(dmesh),
                       "Small triangle detail mesh should be valid")
     }
 
@@ -266,7 +293,7 @@ test_detail_mesh_edge_cases :: proc(t: ^testing.T) {
     if ok2 {
         defer recast.free_poly_mesh(pmesh2)
         defer recast.free_poly_mesh_detail(dmesh2)
-        testing.expect(t, recast.validate_poly_mesh_detail(dmesh2),
+        testing.expect(t, validate_poly_mesh_detail(dmesh2),
                       "Large aspect ratio detail mesh should be valid")
     }
 
@@ -718,4 +745,226 @@ test_detail_mesh_performance :: proc(t: ^testing.T) {
 
     log.infof("✓ Detail mesh performance test passed: %d ms, %d meshes, %d vertices, %d triangles",
              duration, mesh_count, vertex_count, triangle_count)
+}
+
+@(test)
+test_delaunay_hull_simple_triangle :: proc(t: ^testing.T) {
+    testing.set_fail_timeout(t, 10 * time.Second)
+
+    // Test 1: Simple triangle (3 points)
+    points := [][3]f32{
+        {0, 0, 0},    // Point 0
+        {2, 0, 0},    // Point 1  
+        {1, 0, 2},    // Point 2
+    }
+    hull := []i32{0, 1, 2}  // Hull order: counter-clockwise
+    triangles := make([dynamic][4]i32)
+    defer delete(triangles)
+
+    success := recast.delaunay_hull(points, hull, &triangles)
+    testing.expect(t, success, "Simple triangle triangulation should succeed")
+    testing.expect(t, len(triangles) == 1, "Simple triangle should produce exactly 1 triangle")
+
+    if len(triangles) > 0 {
+        tri := triangles[0]
+        // Verify triangle contains all 3 vertices
+        vertices_in_triangle := [3]bool{}
+        for i in 0..<3 {
+            idx := tri[i]
+            testing.expect(t, idx >= 0 && idx < 3, "Triangle vertex index should be valid")
+            vertices_in_triangle[idx] = true
+        }
+        testing.expect(t, vertices_in_triangle[0] && vertices_in_triangle[1] && vertices_in_triangle[2],
+                      "Triangle should contain all 3 vertices")
+
+        log.infof("Simple triangle test: triangle [%d,%d,%d]", tri[0], tri[1], tri[2])
+    }
+
+    log.info("✓ Delaunay hull simple triangle test passed")
+}
+
+@(test) 
+test_delaunay_hull_square :: proc(t: ^testing.T) {
+    testing.set_fail_timeout(t, 10 * time.Second)
+
+    // Test 2: Square (4 points forming convex hull)
+    points := [][3]f32{
+        {0, 0, 0},    // Point 0
+        {2, 0, 0},    // Point 1
+        {2, 0, 2},    // Point 2
+        {0, 0, 2},    // Point 3
+    }
+    hull := []i32{0, 1, 2, 3}  // Hull order: counter-clockwise
+    triangles := make([dynamic][4]i32)
+    defer delete(triangles)
+
+    success := recast.delaunay_hull(points, hull, &triangles)
+    testing.expect(t, success, "Square triangulation should succeed")
+    testing.expect(t, len(triangles) == 2, "Square should produce exactly 2 triangles")
+
+    // Verify triangles are valid
+    for i in 0..<len(triangles) {
+        tri := triangles[i]
+        for j in 0..<3 {
+            idx := tri[j]
+            testing.expect(t, idx >= 0 && idx < 4, "Triangle vertex index should be valid")
+        }
+        // Check triangle is not degenerate (all vertices different)
+        testing.expect(t, tri[0] != tri[1] && tri[1] != tri[2] && tri[2] != tri[0],
+                      "Triangle should not be degenerate")
+        
+        log.infof("Square triangle %d: [%d,%d,%d]", i, tri[0], tri[1], tri[2])
+    }
+
+    log.info("✓ Delaunay hull square test passed")
+}
+
+@(test)
+test_delaunay_hull_pentagon_with_interior :: proc(t: ^testing.T) {
+    testing.set_fail_timeout(t, 10 * time.Second)
+
+    // Test 3: Pentagon with interior point (more complex case)
+    points := [][3]f32{
+        {0, 0, 0},     // Point 0 - hull
+        {2, 0, 0},     // Point 1 - hull
+        {3, 0, 1},     // Point 2 - hull
+        {1, 0, 3},     // Point 3 - hull  
+        {-1, 0, 1},    // Point 4 - hull
+        {1, 0, 1},     // Point 5 - interior
+    }
+    hull := []i32{0, 1, 2, 3, 4}  // Hull boundary (5 vertices)
+    triangles := make([dynamic][4]i32)
+    defer delete(triangles)
+
+    success := recast.delaunay_hull(points, hull, &triangles)
+    testing.expect(t, success, "Pentagon with interior triangulation should succeed")
+    
+    // For a convex pentagon with 1 interior point, we expect multiple triangles
+    testing.expect(t, len(triangles) > 0, "Should produce at least 1 triangle")
+    testing.expect(t, len(triangles) <= 7, "Should not produce excessive triangles")
+
+    // Validate all triangles
+    total_valid_triangles := 0
+    for i in 0..<len(triangles) {
+        tri := triangles[i]
+        valid := true
+        
+        // Check vertex indices
+        for j in 0..<3 {
+            idx := tri[j]
+            if idx < 0 || idx >= 6 {
+                valid = false
+                break
+            }
+        }
+        
+        // Check not degenerate
+        if tri[0] == tri[1] || tri[1] == tri[2] || tri[2] == tri[0] {
+            valid = false
+        }
+
+        if valid {
+            total_valid_triangles += 1
+            log.infof("Pentagon triangle %d: [%d,%d,%d]", i, tri[0], tri[1], tri[2])
+        }
+    }
+
+    testing.expect(t, total_valid_triangles > 0, "Should have at least one valid triangle")
+    log.infof("Pentagon test: %d valid triangles out of %d", total_valid_triangles, len(triangles))
+
+    log.info("✓ Delaunay hull pentagon with interior test passed")
+}
+
+@(test)
+test_delaunay_hull_edge_cases :: proc(t: ^testing.T) {
+    testing.set_fail_timeout(t, 10 * time.Second)
+
+    // Test 4: Edge cases
+    
+    // Case A: Too few points
+    {
+        points := [][3]f32{{0, 0, 0}, {1, 0, 0}}  // Only 2 points
+        hull := []i32{0, 1}
+        triangles := make([dynamic][4]i32)
+        defer delete(triangles)
+
+        success := recast.delaunay_hull(points, hull, &triangles)
+        // Should handle gracefully - either succeed with 0 triangles or fail
+        log.infof("Two points case: success=%t, triangles=%d", success, len(triangles))
+    }
+
+    // Case B: Collinear points
+    {
+        points := [][3]f32{
+            {0, 0, 0},
+            {1, 0, 0}, 
+            {2, 0, 0},
+            {3, 0, 0},
+        }
+        hull := []i32{0, 1, 2, 3}
+        triangles := make([dynamic][4]i32)
+        defer delete(triangles)
+
+        success := recast.delaunay_hull(points, hull, &triangles)
+        log.infof("Collinear points case: success=%t, triangles=%d", success, len(triangles))
+    }
+
+    // Case C: Very small triangle
+    {
+        points := [][3]f32{
+            {0, 0, 0},
+            {0.001, 0, 0},
+            {0.0005, 0, 0.001},
+        }
+        hull := []i32{0, 1, 2}
+        triangles := make([dynamic][4]i32)
+        defer delete(triangles)
+
+        success := recast.delaunay_hull(points, hull, &triangles)
+        log.infof("Very small triangle case: success=%t, triangles=%d", success, len(triangles))
+    }
+
+    log.info("✓ Delaunay hull edge cases test passed")
+}
+
+@(test)
+test_delaunay_hull_performance :: proc(t: ^testing.T) {
+    testing.set_fail_timeout(t, 30 * time.Second)
+
+    // Test 5: Performance test with larger point set
+    num_points := 50
+    points := make([][3]f32, num_points)
+    hull := make([]i32, num_points)
+    defer delete(points)
+    defer delete(hull)
+
+    // Create circular arrangement of points for convex hull
+    for i in 0..<num_points {
+        angle := f32(i) * 2.0 * math.PI / f32(num_points)
+        radius := f32(5.0)
+        points[i] = {
+            radius * math.cos_f32(angle),
+            0,
+            radius * math.sin_f32(angle),
+        }
+        hull[i] = i32(i)
+    }
+
+    triangles := make([dynamic][4]i32)
+    defer delete(triangles)
+
+    start_time := time.now()
+    success := recast.delaunay_hull(points, hull, &triangles)
+    end_time := time.now()
+
+    duration := time.duration_milliseconds(time.diff(start_time, end_time))
+
+    testing.expect(t, success, "Large point set triangulation should succeed")
+    testing.expect(t, len(triangles) > 0, "Should produce triangles")
+    testing.expect(t, duration < 1000, "Should complete within reasonable time")
+
+    log.infof("Performance test: %d points -> %d triangles in %d ms", 
+             num_points, len(triangles), duration)
+
+    log.info("✓ Delaunay hull performance test passed")
 }

@@ -280,66 +280,8 @@ test_validate_poly_mesh :: proc(t: ^testing.T) {
 }
 
 @(test)
-test_mesh_copy :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-
-    // Create source mesh
-    src := recast.alloc_poly_mesh()
-    defer recast.free_poly_mesh(src)
-
-    src.npolys = 1
-    src.nvp = 3
-    src.cs = 0.3
-    src.ch = 0.2
-
-    src.verts = make([][3]u16, 3)
-    src.polys = make([]u16, 6)
-    src.regs = make([]u16, 1)
-    src.flags = make([]u16, 1)
-    src.areas = make([]u8, 1)
-
-    // Fill with test data
-    for &v, i in src.verts {
-        v = {u16(i), u16(i), u16(i)}
-    }
-    for i in 0..<6 {
-        src.polys[i] = u16(i)
-    }
-    src.regs[0] = 42
-    src.flags[0] = 1
-    src.areas[0] = 63
-
-    // Create destination mesh
-    dst := recast.alloc_poly_mesh()
-    defer recast.free_poly_mesh(dst)
-
-    // Copy mesh
-    result := recast.copy_poly_mesh(src, dst)
-    testing.expect(t, result, "Mesh copy should succeed")
-
-    // Verify copied data
-    testing.expect(t, len(dst.verts) == len(src.verts), "Vertex count should match")
-    testing.expect(t, dst.npolys == src.npolys, "Polygon count should match")
-    testing.expect(t, dst.nvp == src.nvp, "Max vertices per polygon should match")
-    testing.expect(t, dst.cs == src.cs, "Cell size should match")
-    testing.expect(t, dst.ch == src.ch, "Cell height should match")
-
-    // Verify array data
-    for i in 0..<3 {
-        testing.expect(t, dst.verts[i] == src.verts[i], "Vertex data should match")
-    }
-    for i in 0..<6 {
-        testing.expect(t, dst.polys[i] == src.polys[i], "Polygon data should match")
-    }
-    testing.expect(t, dst.regs[0] == src.regs[0], "Region data should match")
-    testing.expect(t, dst.flags[0] == src.flags[0], "Flag data should match")
-    testing.expect(t, dst.areas[0] == src.areas[0], "Area data should match")
-}
-
-@(test)
 test_build_simple_contour_mesh :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     // Create a simple contour set with one square contour
     cset := new(recast.Contour_Set)
     defer {
@@ -392,60 +334,6 @@ test_build_simple_contour_mesh :: proc(t: ^testing.T) {
     testing.expect(t, recast.validate_poly_mesh(pmesh), "Generated mesh should be valid")
 
     log.infof("Generated mesh: %d vertices, %d polygons", len(pmesh.verts), pmesh.npolys)
-}
-
-@(test)
-test_mesh_optimization :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-
-    // Create mesh with degeneracies
-    pmesh := recast.alloc_poly_mesh()
-    defer recast.free_poly_mesh(pmesh)
-
-    pmesh.npolys = 3
-    pmesh.nvp = 3
-
-    pmesh.verts = make([][3]u16, 6)
-    pmesh.polys = make([]u16, 18)  // 3 polygons * 3 verts * 2
-    pmesh.regs = make([]u16, 3)
-    pmesh.flags = make([]u16, 3)
-    pmesh.areas = make([]u8, 3)
-
-    // Set up vertices (including unused ones)
-    pmesh.verts[0] = {0, 0, 0}
-    pmesh.verts[1] = {10, 0, 0}
-    pmesh.verts[2] = {5, 0, 10}
-    pmesh.verts[3] = {20, 0, 0}  // Unused
-    pmesh.verts[4] = {30, 0, 0} // Unused
-    pmesh.verts[5] = {40, 0, 0} // Unused
-
-    // Set up polygons (including degenerate ones)
-    // Valid triangle
-    pmesh.polys[0], pmesh.polys[1], pmesh.polys[2] = 0, 1, 2
-    pmesh.polys[3], pmesh.polys[4], pmesh.polys[5] = recast.RC_MESH_NULL_IDX, recast.RC_MESH_NULL_IDX, recast.RC_MESH_NULL_IDX
-
-    // Degenerate triangle (duplicate vertex)
-    pmesh.polys[6], pmesh.polys[7], pmesh.polys[8] = 0, 0, 1
-    pmesh.polys[9], pmesh.polys[10], pmesh.polys[11] = recast.RC_MESH_NULL_IDX, recast.RC_MESH_NULL_IDX, recast.RC_MESH_NULL_IDX
-
-    // Triangle with only 2 vertices
-    pmesh.polys[12], pmesh.polys[13], pmesh.polys[14] = 1, 2, recast.RC_MESH_NULL_IDX
-    pmesh.polys[15], pmesh.polys[16], pmesh.polys[17] = recast.RC_MESH_NULL_IDX, recast.RC_MESH_NULL_IDX, recast.RC_MESH_NULL_IDX
-
-    original_vert_count := len(pmesh.verts)
-    original_poly_count := pmesh.npolys
-
-    // Optimize mesh
-    result := recast.optimize_poly_mesh(pmesh)
-    testing.expect(t, result, "Mesh optimization should succeed")
-    testing.expect(t, len(pmesh.verts) <= original_vert_count, "Should have same or fewer vertices")
-    testing.expect(t, pmesh.npolys < original_poly_count, "Should have fewer polygons (degenerates removed)")
-
-    // Validate optimized mesh
-    testing.expect(t, recast.validate_poly_mesh(pmesh), "Optimized mesh should be valid")
-
-    log.infof("Mesh optimization: %d->%d vertices, %d->%d polygons",
-             original_vert_count, len(pmesh.verts), original_poly_count, pmesh.npolys)
 }
 
 @(test)

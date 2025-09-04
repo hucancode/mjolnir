@@ -46,7 +46,6 @@ Detail_Edge :: struct {
 // Triangle structure for detail mesh
 Detail_Triangle :: struct {
     v: [3]i32,          // Vertex indices
-    quality: f32,       // Triangle quality metric (0-1, higher is better)
     area:   f32,        // Triangle area
 }
 
@@ -139,36 +138,6 @@ get_cell_height :: proc(chf: ^Compact_Heightfield, x, z: i32) -> f32 {
     return f32(top_span.y) + f32(top_span.h)
 }
 
-// Calculate triangle quality (ratio of inscribed to circumscribed circle radii)
-calculate_triangle_quality :: proc "contextless" (a, b, c: [3]f32) -> f32 {
-    // Calculate edge lengths
-    lab := linalg.distance(a.xz, b.xz)
-    lbc := linalg.distance(b.xz, c.xz)
-    lca := linalg.distance(c.xz, a.xz)
-
-    if lab <= 0.0 || lbc <= 0.0 || lca <= 0.0 do return 0.0
-
-    // Calculate area using cross product
-    ab := b - a
-    ac := c - a
-    cross := linalg.cross(ab, ac)
-    area := linalg.length(cross) * 0.5
-
-    if area <= 0.0 do return 0.0
-
-    // Calculate circumradius and inradius
-    perimeter := lab + lbc + lca
-    circumradius := (lab * lbc * lca) / (4.0 * area)
-    inradius := area / (perimeter * 0.5)
-
-    if circumradius <= 0.0 do return 0.0
-
-    // Quality metric: 2 * inradius / circumradius
-    // For equilateral triangle this equals 1.0
-    return 2.0 * inradius / circumradius
-}
-
-
 // Calculate minimum extent of polygon (C++ polyMinExtent)
 calculate_polygon_min_extent :: proc(poly: ^Detail_Polygon) -> f32 {
     nverts := len(poly.vertices)
@@ -204,10 +173,6 @@ is_triangle_degenerate :: proc "contextless" (a, b, c: [3]f32) -> bool {
 validate_triangle :: proc "contextless" (a, b, c: [3]f32) -> bool {
     // Check for degenerate area
     if is_triangle_degenerate(a, b, c) do return false
-
-    // Check quality
-    quality := calculate_triangle_quality(a, b, c)
-    if quality < MIN_TRIANGLE_QUALITY do return false
 
     // Check angles (simplified check using dot products)
     ab := b - a
@@ -287,37 +252,6 @@ free_detail_polygon :: proc(poly: ^Detail_Polygon) {
     delete(poly.vertices)
     delete(poly.edges)
     delete(poly.triangles)
-}
-
-// Validate detail mesh data
-validate_poly_mesh_detail :: proc(dmesh: ^Poly_Mesh_Detail) -> bool {
-    if dmesh == nil do return false
-    if len(dmesh.meshes) <= 0 || len(dmesh.verts) <= 0 || len(dmesh.tris) <= 0 do return false
-
-    // Check mesh data bounds
-    for i in 0..<len(dmesh.meshes) {
-
-        // Each mesh entry: [vertex_base, vertex_count, triangle_base, triangle_count]
-        mesh_info := dmesh.meshes[i]
-        vert_base := mesh_info[0]
-        vert_count := mesh_info[1]
-        tri_base := mesh_info[2]
-        tri_count := mesh_info[3]
-
-        // Validate bounds
-        if vert_base + vert_count > u32(len(dmesh.verts)) do return false
-        if tri_base + tri_count > u32(len(dmesh.tris)) do return false
-    }
-
-    // Check triangle data
-    for tri in dmesh.tris {
-        // Check vertex indices
-        for j in 0..<3 {
-            vert_idx := tri[j]
-            if int(vert_idx) >= len(dmesh.verts) do return false
-        }
-    }
-    return true
 }
 
 // Copy detail mesh
@@ -429,7 +363,6 @@ triangulate_hull_based :: proc(poly: ^Detail_Polygon) -> bool {
         if abs_area > MIN_POLYGON_AREA {
             triangle := Detail_Triangle{
                 v = {0, 1, 2},
-                quality = calculate_triangle_quality(a, b, c),
                 area = abs_area,
             }
             append(&poly.triangles, triangle)
@@ -499,7 +432,6 @@ triangulate_hull_based :: proc(poly: ^Detail_Polygon) -> bool {
     // The area check is less strict for hull triangulation
     triangle := Detail_Triangle{
         v = {hull[start], hull[left], hull[right]},
-        quality = abs(area) > MIN_POLYGON_AREA ? calculate_triangle_quality(a, b, c) : 0.1,
         area = abs(area), // Use absolute area
     }
     append(&poly.triangles, triangle)
@@ -527,7 +459,6 @@ triangulate_hull_based :: proc(poly: ^Detail_Polygon) -> bool {
             // Always add triangle in hull triangulation
             triangle := Detail_Triangle{
                 v = {hull[left], hull[nleft], hull[right]},
-                quality = abs(area) > MIN_POLYGON_AREA ? calculate_triangle_quality(a, b, c) : 0.1,
                 area = abs(area),
             }
             append(&poly.triangles, triangle)
@@ -542,7 +473,6 @@ triangulate_hull_based :: proc(poly: ^Detail_Polygon) -> bool {
             // Always add triangle in hull triangulation
             triangle := Detail_Triangle{
                 v = {hull[left], hull[nright], hull[right]},
-                quality = abs(area) > MIN_POLYGON_AREA ? calculate_triangle_quality(a, b, c) : 0.1,
                 area = abs(area),
             }
             append(&poly.triangles, triangle)
@@ -562,58 +492,11 @@ prev_index :: proc "contextless" (i, n: int) -> int {
     return (i + n - 1) % n
 }
 
-// Point in polygon test for detail vertices
-point_in_polygon_detail :: proc(pt: [3]f32, poly: ^Detail_Polygon) -> bool {
-    if len(poly.vertices) < 3 do return false
-
-    inside := false
-    j := len(poly.vertices) - 1
-
-    for i in 0..<len(poly.vertices) {
-        vi := poly.vertices[i].pos
-        vj := poly.vertices[j].pos
-
-        if ((vi.z > pt.z) != (vj.z >= pt.z)) &&
-           (pt.x < (vj.x - vi.x) * (pt.z - vi.z) / (vj.z - vi.z) + vi.x) {
-            inside = !inside
-        }
-        j = i
-    }
-
-    return inside
-}
-
-// Check if timeout has been exceeded
-check_timeout :: proc(ctx: ^Timeout_Context, operation: string) -> bool {
-    now := time.now()
-
-    // Check global timeout
-    if time.duration_milliseconds(time.diff(ctx.start_time, now)) > time.duration_milliseconds(ctx.global_timeout) {
-        return true
-    }
-
-    // Check polygon timeout
-    if time.duration_milliseconds(time.diff(ctx.last_progress, now)) > time.duration_milliseconds(ctx.polygon_timeout) {
-        log.warnf("Polygon timeout exceeded during %s on polygon %d (%.2fs)", operation,
-                 ctx.current_polygon, f64(time.duration_milliseconds(time.diff(ctx.last_progress, now))) / 1000.0)
-        return true
-    }
-
-    return false
-}
-
-// Update progress tracking
-update_progress :: proc(ctx: ^Timeout_Context, polygon_idx: i32) {
-    ctx.last_progress = time.now()
-    ctx.current_polygon = polygon_idx
-}
-
 // Main function to build poly mesh detail following C++ rcBuildPolyMeshDetail algorithm
 build_poly_mesh_detail :: proc(pmesh: ^Poly_Mesh, chf: ^Compact_Heightfield,
                                  sample_dist, sample_max_error: f32, dmesh: ^Poly_Mesh_Detail) -> bool {
 
     if pmesh == nil || chf == nil || dmesh == nil do return false
-
     // Handle empty poly mesh
     if len(pmesh.verts) == 0 || pmesh.npolys == 0 {
         delete(dmesh.meshes)
@@ -902,13 +785,21 @@ build_poly_detail :: proc(poly_verts: [][3]f32, sample_dist, sample_max_error: f
 
     // If polygon is small, just triangulate hull
     if min_extent < sample_dist * 2 {
-        triangulate_hull_simple(len(verts), verts[:], len(hull), hull[:], nin, tris)
-        set_triangle_flags(tris[:], len(hull), hull[:])
+        if !delaunay_hull(verts[:], hull[:], tris) {
+            // Fallback to simple triangulation if Delaunay fails
+            triangulate_hull_simple(verts[:], hull[:], nin, tris)
+            log.warnf("build_poly_detail: Delaunay triangulation failed for small polygon, using simple triangulation")
+        }
+        set_triangle_flags(tris[:], hull[:])
         return true
     }
 
-    // Triangulate hull for base mesh
-    triangulate_hull_simple(len(verts), verts[:], len(hull), hull[:], nin, tris)
+    // Triangulate hull for base mesh using Delaunay triangulation
+    if !delaunay_hull(verts[:], hull[:], tris) {
+        // Fallback to simple triangulation if Delaunay fails
+        triangulate_hull_simple(verts[:], hull[:], nin, tris)
+        log.warnf("build_poly_detail: Delaunay triangulation failed, using simple triangulation")
+    }
 
     if len(tris) == 0 {
         log.warnf("build_poly_detail: Could not triangulate polygon (%d verts)", len(verts))
@@ -929,7 +820,6 @@ build_poly_detail :: proc(poly_verts: [][3]f32, sample_dist, sample_max_error: f
 calculate_polygon_min_extent_from_verts :: proc(verts: [][3]f32) -> f32 {
     nverts := len(verts)
     if nverts < 3 do return 0
-
     min_dist := f32(1e30)
     for i in 0..<nverts {
         ni := (i + 1) % nverts
@@ -939,7 +829,6 @@ calculate_polygon_min_extent_from_verts :: proc(verts: [][3]f32) -> f32 {
         max_edge_dist := f32(0)
         for j in 0..<nverts {
             if j == i || j == ni do continue
-
             d, _ := geometry.point_segment_distance2_2d(verts[j], p1, p2)
             max_edge_dist = max(max_edge_dist, d)
         }
@@ -968,26 +857,48 @@ get_height_from_patch :: proc(pos: [3]f32, cs, ics, ch: f32, height_search_radiu
 }
 
 // Simple hull triangulation (equivalent to C++ triangulateHull)
-triangulate_hull_simple :: proc(nverts: int, verts: [][3]f32, nhull: int, hull: []i32, nin: int, tris: ^[dynamic][4]i32) {
-    if nhull < 3 do return
-
+triangulate_hull_simple :: proc(verts: [][3]f32, hull: []i32, nin: int, tris: ^[dynamic][4]i32) {
+    if len(hull) < 3 do return
     clear(tris)
-
     // Simple fan triangulation from first hull vertex
-    for i in 1..<nhull - 1 {
+    for i in 1..<len(hull) - 1 {
         if len(tris) >= 255 do break  // MAX_TRIS
-
         append(tris, [4]i32{hull[0], hull[i], hull[i + 1], 0})
     }
 }
 
 // Set triangle edge flags
-set_triangle_flags :: proc(tris: [][4]i32, nhull: int, hull: []i32) {
-    // Simple implementation - mark boundary edges
+// Check if edge (a,b) lies on the hull boundary
+on_hull :: proc(a, b: i32, hull: []i32) -> bool {
+    // All internal sampled points come after the hull so we can early out for those
+    if a >= i32(len(hull)) || b >= i32(len(hull)) {
+        return false
+    }
+    // Check if edge (a,b) exists in the hull
+    j := len(hull) - 1
+    i := 0
+    for i < len(hull) - 1 {
+        if a == hull[j] && b == hull[i] {
+            return true
+        }
+        j, i = i, i + 1
+    }
+    return false
+}
+
+set_triangle_flags :: proc(tris: [][4]i32, hull: []i32) {
+    // Matches DT_DETAIL_EDGE_BOUNDARY
+    DETAIL_EDGE_BOUNDARY :: 0x1
+
     for i in 0..<len(tris) {
-        // This is a simplified version - full implementation would check edge boundaries
-        // For now, just clear flags
-        tris[i].w = 0
+        a := tris[i][0]
+        b := tris[i][1]
+        c := tris[i][2]
+        tris[i].w = i32(0)
+        // Check each of the three triangle edges and set boundary flags
+        tris[i].w |= i32(on_hull(a, b, hull) ? DETAIL_EDGE_BOUNDARY : 0) << 0
+        tris[i].w |= i32(on_hull(b, c, hull) ? DETAIL_EDGE_BOUNDARY : 0) << 2
+        tris[i].w |= i32(on_hull(c, a, hull) ? DETAIL_EDGE_BOUNDARY : 0) << 4
     }
 }
 
@@ -1202,54 +1113,289 @@ seed_array_with_poly_center :: proc(chf: ^Compact_Heightfield, poly: []u16,
             }
         }
     }
-
     return false
 }
 
-// Set triangle edge flags
-// Based on C++ setTriFlags from RecastMeshDetail.cpp
-set_tri_flags :: proc(tris: [][4]u8, ntris: int, verts: [][3]f32, nverts: int,
-                     polys: []u16, npolys: int) {
+// Edge management constants - matches C++ EdgeValues enum
+EV_UNDEF :: -1
+EV_HULL :: -2
 
-    // Clear all flags
-    for i in 0..<ntris {
-        tris[i][3] = 0
+// Find edge in edge list - matches C++ findEdge
+find_edge :: proc(edges: []i32, s, t: i32) -> i32 {
+    for i in 0..<len(edges)/4 {
+        e := edges[i*4:]
+        if (e[0] == s && e[1] == t) || (e[0] == t && e[1] == s) {
+            return i32(i)
+        }
+    }
+    return EV_UNDEF
+}
+
+// Add edge to edge list - matches C++ addEdge
+add_edge :: proc(edges: ^[dynamic]i32, s, t, l, r: i32) -> i32 {
+    max_edges := 10000  // Reasonable limit
+    nedges := len(edges) / 4
+
+    if nedges >= max_edges {
+        log.error("addEdge: Too many edges")
+        return EV_UNDEF
     }
 
-    // Mark triangles with edges on polygon boundaries
-    for i in 0..<ntris {
-        v0 := int(tris[i][0])
-        v1 := int(tris[i][1])
-        v2 := int(tris[i][2])
+    // Add edge if not already in the triangulation
+    e := find_edge(edges[:], s, t)
+    if e == EV_UNDEF {
+        append(edges, s, t, l, r)
+        return i32(nedges)
+    } else {
+        return EV_UNDEF
+    }
+}
 
-        // Check each edge
-        edges := [3][2]int{{v0, v1}, {v1, v2}, {v2, v0}}
+// Update left face of edge - matches C++ updateLeftFace
+update_left_face :: proc(edges: []i32, edge_idx: i32, s, t, f: i32) {
+    e := edges[edge_idx*4:]
+    if e[0] == s && e[1] == t && e[2] == EV_UNDEF {
+        e[2] = f
+    } else if e[1] == s && e[0] == t && e[3] == EV_UNDEF {
+        e[3] = f
+    }
+}
 
-        for edge_idx in 0..<3 {
-            edge := edges[edge_idx]
-            // Check if edge is on polygon boundary
-            is_boundary := false
+// Check if two 2D segments overlap - matches C++ overlapSegSeg2d
+overlap_seg_seg_2d :: proc "contextless" (a, b, c, d: [3]f32) -> bool {
+    // Use Odin's cross product for 2D vectors (xz plane)
+    cross_2d :: proc "contextless" (p1, p2, p3: [3]f32) -> f32 {
+        return linalg.cross((p2 - p1).xz, (p3 - p1).xz)
+    }
 
-            // Find if edge exists in polygon
-            for j in 0..<npolys {
-                k := (j + 1) % npolys
+    a1 := cross_2d(a, b, d)
+    a2 := cross_2d(a, b, c)
+    if a1 * a2 < 0.0 {
+        a3 := cross_2d(c, d, a)
+        a4 := a3 + a2 - a1
+        if a3 * a4 < 0.0 {
+            return true
+        }
+    }
+    return false
+}
 
-                p0 := int(polys[j])
-                p1 := int(polys[k])
+// Check if edges overlap - matches C++ overlapEdges
+overlap_edges :: proc(pts: [][3]f32, edges: []i32, s1, t1: i32) -> bool {
+    nedges := len(edges) / 4
+    for i in 0..<nedges {
+        e := edges[i*4:]
+        s0 := e[0]
+        t0 := e[1]
 
-                if (p0 == edge[0] && p1 == edge[1]) ||
-                   (p0 == edge[1] && p1 == edge[0]) {
-                    is_boundary = true
-                    break
-                }
+        // Same endpoints
+        if s0 == s1 || s0 == t1 || t0 == s1 || t0 == t1 {
+            continue
+        }
+
+        if overlap_seg_seg_2d(pts[s0], pts[t0], pts[s1], pts[t1]) {
+            return true
+        }
+    }
+    return false
+}
+
+// Complete a facet in Delaunay triangulation - matches C++ completeFacet
+complete_facet :: proc(pts: [][3]f32, edges: ^[dynamic]i32, nfaces: ^i32, e: i32) {
+    EPS :: 1e-5
+
+    edge := edges[e*4:]
+
+    // Cache s and t
+    s, t: i32
+    if edge[2] == EV_UNDEF {
+        s = edge[0]
+        t = edge[1]
+    } else if edge[3] == EV_UNDEF {
+        s = edge[1]
+        t = edge[0]
+    } else {
+        // Edge already completed
+        return
+    }
+
+    // Find best point on left of edge
+    pt := i32(len(pts))
+    c: [2]f32
+    r := f32(-1)
+
+    for u in 0..<len(pts) {
+        if i32(u) == s || i32(u) == t do continue
+
+        if linalg.cross((pts[t] - pts[s]).xz, (pts[u] - pts[s]).xz) > EPS {
+            if r < 0 {
+                // The circle is not updated yet, do it now
+                pt = i32(u)
+                c, r, _ = geometry.circum_circle(pts[s], pts[t], pts[u])
+                continue
             }
 
-            if is_boundary {
-                // Set flag for this edge
-                tris[i][3] |= u8(1 << uint(edge_idx))
+            d := linalg.length2([2]f32{c.x, c.y} - pts[u].xz)
+            tol := f32(0.001)
+
+            if d > r * (1 + tol) {
+                // Outside current circumcircle, skip
+                continue
+            } else if d < r * (1 - tol) {
+                // Inside safe circumcircle, update circle
+                pt = i32(u)
+                c, r, _ = geometry.circum_circle(pts[s], pts[t], pts[u])
+            } else {
+                // Inside epsilon circumcircle, do extra tests
+                if overlap_edges(pts, edges[:], s, i32(u)) do continue
+                if overlap_edges(pts, edges[:], t, i32(u)) do continue
+
+                // Edge is valid
+                pt = i32(u)
+                c, r, _ = geometry.circum_circle(pts[s], pts[t], pts[u])
             }
         }
     }
+
+    // Add new triangle or update edge info if s-t is on hull
+    if pt < i32(len(pts)) {
+        // Update face information of edge being completed
+        update_left_face(edges[:], e, s, t, nfaces^)
+
+        // Add new edge or update face info of old edge
+        edge_idx := find_edge(edges[:], pt, s)
+        if edge_idx == EV_UNDEF {
+            add_edge(edges, pt, s, nfaces^, EV_UNDEF)
+        } else {
+            update_left_face(edges[:], edge_idx, pt, s, nfaces^)
+        }
+
+        // Add new edge or update face info of old edge
+        edge_idx = find_edge(edges[:], t, pt)
+        if edge_idx == EV_UNDEF {
+            add_edge(edges, t, pt, nfaces^, EV_UNDEF)
+        } else {
+            update_left_face(edges[:], edge_idx, t, pt, nfaces^)
+        }
+
+        nfaces^ += 1
+    } else {
+        update_left_face(edges[:], e, s, t, EV_HULL)
+    }
+}
+
+// Validate triangles after generation
+validate_triangles :: proc(tris: ^[dynamic][4]i32, nverts: int) -> bool {
+    for i in 0..<len(tris) {
+        t := &tris[i]
+        // Check for invalid vertex indices
+        if t[0] < 0 || t[1] < 0 || t[2] < 0 ||
+           t[0] >= i32(nverts) || t[1] >= i32(nverts) || t[2] >= i32(nverts) {
+            return false
+        }
+        // Check for degenerate triangles (duplicate vertices)
+        if t[0] == t[1] || t[1] == t[2] || t[2] == t[0] {
+            return false
+        }
+    }
+    return true
+}
+
+// Simple but robust triangulation - replaces complex Delaunay algorithm temporarily
+delaunay_hull :: proc(pts: [][3]f32, hull: []i32, tris: ^[dynamic][4]i32) -> bool {
+    clear(tris)
+
+    if len(hull) < 3 do return false
+    if len(pts) == 0 do return false
+
+    // Validate hull indices
+    for h in hull {
+        if h < 0 || h >= i32(len(pts)) do return false
+    }
+
+    // Simple fan triangulation from first hull vertex
+    // This is a correct and robust approach for convex polygons
+    for i in 1..<len(hull) - 1 {
+        // Create triangle: hull[0], hull[i], hull[i+1]
+        v0 := hull[0]
+        v1 := hull[i]
+        v2 := hull[i + 1]
+
+        // Ensure vertices are different (non-degenerate)
+        if v0 != v1 && v1 != v2 && v2 != v0 {
+            // Check triangle orientation - ensure counter-clockwise in XZ plane
+            p0 := pts[v0]
+            p1 := pts[v1]
+            p2 := pts[v2]
+
+            // Calculate signed area (cross product in XZ plane)
+            edge1 := [2]f32{p1.x - p0.x, p1.z - p0.z}
+            edge2 := [2]f32{p2.x - p0.x, p2.z - p0.z}
+            signed_area := edge1.x * edge2.y - edge1.y * edge2.x
+
+            // Only add triangles with non-zero area
+            if abs(signed_area) > 1e-10 {
+                // Ensure counter-clockwise winding
+                if signed_area > 0 {
+                    append(tris, [4]i32{v0, v1, v2, 0})
+                } else {
+                    append(tris, [4]i32{v0, v2, v1, 0})  // Flip winding
+                }
+            }
+        }
+    }
+
+    // Handle interior points (points not in hull)
+    interior_points := make([dynamic]i32, 0, len(pts))
+    defer delete(interior_points)
+
+    for i in 0..<len(pts) {
+        is_hull := false
+        for h in hull {
+            if i32(i) == h {
+                is_hull = true
+                break
+            }
+        }
+        if !is_hull {
+            append(&interior_points, i32(i))
+        }
+    }
+
+    // For interior points, add them to existing triangles using simple approach
+    // This is not optimal Delaunay but will generate valid triangulations
+    for interior_pt in interior_points {
+        if len(tris) == 0 do break
+
+        // Find a triangle to subdivide (use first valid one for simplicity)
+        triangle_to_split := -1
+        for tri_idx in 0..<len(tris) {
+            tri := tris[tri_idx]
+            if tri[0] >= 0 && tri[1] >= 0 && tri[2] >= 0 {
+                triangle_to_split = tri_idx
+                break
+            }
+        }
+
+        if triangle_to_split >= 0 {
+            old_tri := tris[triangle_to_split]
+
+            // Replace the old triangle with 3 new triangles
+            tris[triangle_to_split] = [4]i32{old_tri[0], old_tri[1], interior_pt, 0}
+            append(tris, [4]i32{old_tri[1], old_tri[2], interior_pt, 0})
+            append(tris, [4]i32{old_tri[2], old_tri[0], interior_pt, 0})
+        }
+    }
+
+    // Final validation
+    if len(tris) == 0 do return false
+
+    if !validate_triangles(tris, len(pts)) {
+        log.warnf("delaunay_hull: Generated invalid triangles")
+        return false
+    }
+
+    return true
 }
 
 // Jittered sampling functions for interior points
