@@ -89,15 +89,9 @@ create_node :: proc(ctx: ^Pathfinding_Context, id: recast.Poly_Ref) -> ^Node {
     if existing, ok := ctx.nodes[id]; ok {
         return existing
     }
-
     // Allocate new node from virtual arena
     node_mem, err := virtual.arena_alloc(&ctx.arena, size_of(Node), align_of(Node))
-    if err != nil {
-        return nil  // Allocation failed
-    }
-
     node := cast(^Node)raw_data(node_mem)
-
     // Initialize
     node.id = id
     node.flags = {}
@@ -365,20 +359,7 @@ find_path :: proc(query: ^Nav_Mesh_Query,
                                                     neighbor_ref, neighbor_tile, neighbor_poly)
                         heuristic = linalg.distance(neighbor_pos, end_pos) * H_SCALE
                     }
-
                     total := cost + heuristic
-
-                    // Debug logging
-                    if iterations <= 20 && neighbor_ref == end_ref {
-                        log.debugf("  Considering goal poly 0x%x: cost=%.2f, total=%.2f",
-                                  neighbor_ref, cost, total)
-                        if neighbor_node != nil {
-                            log.debugf("    Existing node: cost=%.2f, total=%.2f, open=%v, closed=%v",
-                                      neighbor_node.cost, neighbor_node.total,
-                                      .Open in neighbor_node.flags, .Closed in neighbor_node.flags)
-                        }
-                    }
-
                     // The node is already in open list and the new result is worse, skip
                     if neighbor_node != nil && .Open in neighbor_node.flags && total >= neighbor_node.total {
                         link = get_next_link(cur_tile, link)

@@ -14,10 +14,8 @@ Bone :: struct {
 }
 
 bone_deinit :: proc(bone: ^Bone) {
-  if bone.children != nil {
-    delete(bone.children)
-    bone.children = nil
-  }
+  delete(bone.children)
+  bone.children = nil
 }
 
 Skinning :: struct {

@@ -230,8 +230,7 @@ divide_poly :: proc(in_verts, out_verts1, out_verts2: [][3]f32,
 
 // Rasterize a single triangle to the heightfield.
 // This code is extremely hot, so much care should be given to maintaining maximum perf here.
-
-rasterize_tri :: proc(v0, v1, v2: [3]f32, area_id: u8,
+rasterize_triangle_with_inverse_cs :: proc(v0, v1, v2: [3]f32, area_id: u8,
                      hf: ^Heightfield,
                      hf_bb_min, hf_bb_max: [3]f32,
                      cell_size, inverse_cell_size, inverse_cell_height: f32,
@@ -251,20 +250,6 @@ rasterize_tri :: proc(v0, v1, v2: [3]f32, area_id: u8,
     // Calculate the footprint of the triangle on the grid's z-axis
     z0 := i32((tri_bb_min.z - hf_bb_min.z) * inverse_cell_size)
     z1 := i32((tri_bb_max.z - hf_bb_min.z) * inverse_cell_size)
-
-    // Debug logging for first few triangles
-    when ODIN_DEBUG {
-        @(static) debug_count := 0
-        if debug_count < 10 {
-            log.infof("Triangle %d: BB=(%.2f,%.2f,%.2f)-(%.2f,%.2f,%.2f), Grid Z=%d-%d, area=%d",
-                     debug_count, tri_bb_min.x, tri_bb_min.y, tri_bb_min.z,
-                     tri_bb_max.x, tri_bb_max.y, tri_bb_max.z, z0, z1, area_id)
-            log.infof("  Heightfield: BB=(%.2f,%.2f,%.2f)-(%.2f,%.2f,%.2f), size=%dx%d",
-                     hf_bb_min.x, hf_bb_min.y, hf_bb_min.z,
-                     hf_bb_max.x, hf_bb_max.y, hf_bb_max.z, w, h)
-            debug_count += 1
-        }
-    }
 
     // use -1 rather than 0 to cut the polygon properly at the start of the tile
     z0 = clamp(z0, -1, h - 1)
@@ -288,37 +273,21 @@ rasterize_tri :: proc(v0, v1, v2: [3]f32, area_id: u8,
         cell_z := hf_bb_min.z + f32(z) * cell_size
         nv_row, nv_in = divide_poly(in_buf[:nv_in], in_row[:], p1[:], cell_z + cell_size, .Z)
         in_buf, p1 = p1, in_buf
-
         if nv_row < 3 {
             continue
         }
         if z < 0 {
             continue
         }
-
         // find X-axis bounds of the row
         min_x := in_row[0].x
         max_x := in_row[0].x
-        for vert in 1..<nv_row {
-            if min_x > in_row[vert].x {
-                min_x = in_row[vert].x
-            }
-            if max_x < in_row[vert].x {
-                max_x = in_row[vert].x
-            }
+        for vert in in_row[1:] {
+            min_x = min(min_x, vert.x)
+            max_x = max(max_x, vert.x)
         }
         x0 := i32((min_x - hf_bb_min.x) * inverse_cell_size)
         x1 := i32((max_x - hf_bb_min.x) * inverse_cell_size)
-
-        // Debug logging for X coordinates
-        when ODIN_DEBUG {
-            @(static) x_debug_count := 0
-            if x_debug_count < 10 && z >= 0 && z < h {
-                log.infof("  Row Z=%d: X range %.2f-%.2f -> Grid X=%d-%d (w=%d)",
-                         z, min_x, max_x, x0, x1, w)
-                x_debug_count += 1
-            }
-        }
 
         if x1 < 0 || x0 >= w {
             continue
@@ -341,7 +310,6 @@ rasterize_tri :: proc(v0, v1, v2: [3]f32, area_id: u8,
             if x < 0 {
                 continue
             }
-
             // Calculate min and max of the span
             span_min := p1[0].y
             span_max := p1[0].y
@@ -351,7 +319,6 @@ rasterize_tri :: proc(v0, v1, v2: [3]f32, area_id: u8,
             }
             span_min -= hf_bb_min.y
             span_max -= hf_bb_min.y
-
             // Skip the span if it's completely outside the heightfield bounding box
             if span_max < 0.0 {
                 continue
@@ -359,7 +326,6 @@ rasterize_tri :: proc(v0, v1, v2: [3]f32, area_id: u8,
             if span_min > by {
                 continue
             }
-
             // Clamp the span to the heightfield bounding box
             if span_min < 0.0 {
                 span_min = 0
@@ -367,64 +333,39 @@ rasterize_tri :: proc(v0, v1, v2: [3]f32, area_id: u8,
             if span_max > by {
                 span_max = by
             }
-
             // Snap the span to the heightfield height grid
             span_min_cell_index := u16(clamp(i32(math.floor(span_min * inverse_cell_height)), 0, RC_SPAN_MAX_HEIGHT))
             span_max_cell_index := u16(clamp(i32(math.ceil(span_max * inverse_cell_height)), i32(span_min_cell_index) + 1, RC_SPAN_MAX_HEIGHT))
-
-            // Debug logging for spans
-            when ODIN_DEBUG {
-                @(static) span_debug_count := 0
-                if span_debug_count < 20 {
-                    log.infof("    Adding span at (%d,%d): height %d-%d, area=%d",
-                             x, z, span_min_cell_index, span_max_cell_index, area_id)
-                    span_debug_count += 1
-                }
-            }
-
-            if !add_span(hf, x, z, span_min_cell_index, span_max_cell_index, area_id, flag_merge_threshold) {
-                return false
-            }
+            add_span(hf, x, z, span_min_cell_index, span_max_cell_index, area_id, flag_merge_threshold) or_return
         }
     }
 
     return true
 }
 
-// Rasterize a single triangle (public API)
+// Rasterize a single triangle
 rasterize_triangle :: proc(v0, v1, v2: [3]f32,
                              area_id: u8, hf: ^Heightfield,
                              flag_merge_threshold: i32) -> bool {
     // Rasterize the single triangle
     inverse_cell_size := 1.0 / hf.cs
     inverse_cell_height := 1.0 / hf.ch
-    if !rasterize_tri(v0, v1, v2, area_id, hf, hf.bmin, hf.bmax,
-                      hf.cs, inverse_cell_size, inverse_cell_height, flag_merge_threshold) {
-        log.error("rcRasterizeTriangle: Out of memory.")
-        return false
-    }
-
-    return true
+    return rasterize_triangle_with_inverse_cs(v0, v1, v2, area_id, hf, hf.bmin, hf.bmax,
+                hf.cs, inverse_cell_size, inverse_cell_height, flag_merge_threshold)
 }
 
 // Rasterize triangles
 rasterize_triangles :: proc(verts: [][3]f32, indices: []i32, tri_area_ids: []u8,
                            hf: ^Heightfield, flag_merge_threshold: i32) -> bool {
-    // Rasterize the triangles
     inverse_cell_size := 1.0 / hf.cs
     inverse_cell_height := 1.0 / hf.ch
     num_tris := len(indices) / 3
-
     for tri_index in 0..<num_tris {
         v0 := verts[indices[tri_index * 3 + 0]]
         v1 := verts[indices[tri_index * 3 + 1]]
         v2 := verts[indices[tri_index * 3 + 2]]
-
-        if !rasterize_tri(v0, v1, v2, tri_area_ids[tri_index], hf, hf.bmin, hf.bmax,
-                          hf.cs, inverse_cell_size, inverse_cell_height, flag_merge_threshold) {
-            log.error("rcRasterizeTriangles: Out of memory.")
-            return false
-        }
+        rasterize_triangle_with_inverse_cs(v0, v1, v2, tri_area_ids[tri_index], hf, hf.bmin, hf.bmax,
+            hf.cs, inverse_cell_size, inverse_cell_height, flag_merge_threshold) or_return
     }
 
     return true

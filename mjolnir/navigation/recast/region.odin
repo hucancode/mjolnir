@@ -434,42 +434,6 @@ paint_rect_region :: proc(minx, maxx, miny, maxy: i32, reg_id: u16,
     }
 }
 
-// Sort cells by level for level-set processing
-sort_cells_by_level :: proc(start_level: u16, chf: ^Compact_Heightfield, src_reg: []u16,
-                           nb_stacks: u32, stacks: [][dynamic]Level_Stack_Entry,
-                           log_levels_per_stack: u32) {
-    w := chf.width
-    h := chf.height
-    start_level := start_level >> log_levels_per_stack
-
-    for j in 0..<nb_stacks {
-        clear(&stacks[j])
-    }
-
-    // Put all cells in the level range into the appropriate stacks
-    for y in 0..<h {
-        for x in 0..<w {
-            c := &chf.cells[x + y * w]
-            for i in u32(c.index)..<u32(c.index) + u32(c.count) {
-                if chf.areas[i] == RC_NULL_AREA || src_reg[i] != 0 {
-                    continue
-                }
-
-                level := u16(chf.dist[i]) >> log_levels_per_stack
-                sid := i32(start_level) - i32(level)
-                if sid >= i32(nb_stacks) {
-                    continue
-                }
-                if sid < 0 {
-                    sid = 0
-                }
-
-                append(&stacks[sid], Level_Stack_Entry{x, y, i32(i)})
-            }
-        }
-    }
-}
-
 // Remove adjacent duplicate neighbours
 remove_adjacent_neighbours :: proc(reg: ^Region) {
     // Remove adjacent duplicates
@@ -970,6 +934,36 @@ merge_and_filter_regions :: proc(min_region_area, merge_region_size: i32,
 // Build regions using watershed partitioning
 build_regions :: proc(chf: ^Compact_Heightfield,
                         border_size, min_region_area, merge_region_area: i32) -> bool {
+    sort_cells_by_level :: proc(start_level: u16, chf: ^Compact_Heightfield, src_reg: []u16,
+                                nb_stacks: u32, stacks: [][dynamic]Level_Stack_Entry,
+                                log_levels_per_stack: u32) {
+        w := chf.width
+        h := chf.height
+        start_level := start_level >> log_levels_per_stack
+        for j in 0..<nb_stacks {
+            clear(&stacks[j])
+        }
+        // Put all cells in the level range into the appropriate stacks
+        for y in 0..<h {
+            for x in 0..<w {
+                c := &chf.cells[x + y * w]
+                for i in u32(c.index)..<u32(c.index) + u32(c.count) {
+                    if chf.areas[i] == RC_NULL_AREA || src_reg[i] != 0 {
+                        continue
+                    }
+                    level := u16(chf.dist[i]) >> log_levels_per_stack
+                    sid := i32(start_level) - i32(level)
+                    if sid >= i32(nb_stacks) {
+                        continue
+                    }
+                    if sid < 0 {
+                        sid = 0
+                    }
+                    append(&stacks[sid], Level_Stack_Entry{x, y, i32(i)})
+                }
+            }
+        }
+    }
     w := chf.width
     h := chf.height
     if chf.span_count == 0 {
@@ -1029,10 +1023,8 @@ build_regions :: proc(chf: ^Compact_Heightfield,
                 append(&lvl_stacks[sid], entry)
             }
         }
-
         // Expand current regions until no empty connected cells found
         expand_regions(expand_iters, level, chf, src_reg, src_dist, &lvl_stacks[sid], false)
-
         // Mark new regions with IDs
         new_regions_count := 0
         for current in lvl_stacks[sid] {

@@ -1256,3 +1256,116 @@ point_triangle_mesh_distance :: proc(p: [3]f32, verts: [][3]f32, tris: [][3]u8) 
 
     return min_dist
 }
+
+safe_normalize :: proc(v: ^[3]f32) {
+    sq_mag := v.x * v.x + v.y * v.y + v.z * v.z
+    if sq_mag <= math.F32_EPSILON do return
+    inv_mag := 1.0 / math.sqrt(sq_mag)
+    v.x *= inv_mag
+    v.y *= inv_mag
+    v.z *= inv_mag
+}
+
+// Offset polygon - creates an inset/outset polygon with proper miter/bevel handling
+// Returns the offset vertices and success status
+offset_poly_2d :: proc(verts: [][3]f32, offset: f32) -> (out_verts: [dynamic][3]f32, ok: bool) {
+    // Defines the limit at which a miter becomes a bevel
+    // Similar in behavior to https://developer.mozilla.org/en-US/docs/Web/SVG/Attribute/stroke-miterlimit
+    MITER_LIMIT :: 1.20
+
+    num_verts := len(verts)
+    if num_verts < 3 do return nil, false
+
+    // First pass: calculate how many vertices we'll need
+    estimated_verts := num_verts * 2  // Conservative estimate for beveling
+    out_verts = make([dynamic][3]f32, 0, estimated_verts)
+
+    for vert_index in 0..<num_verts {
+        // Grab three vertices of the polygon
+        vert_index_a := (vert_index + num_verts - 1) % num_verts
+        vert_index_b := vert_index
+        vert_index_c := (vert_index + 1) % num_verts
+
+        vert_a := verts[vert_index_a]
+        vert_b := verts[vert_index_b]
+        vert_c := verts[vert_index_c]
+
+        // From A to B on the x/z plane
+        prev_segment_dir: [3]f32
+        prev_segment_dir.x = vert_b.x - vert_a.x
+        prev_segment_dir.y = 0 // Squash onto x/z plane
+        prev_segment_dir.z = vert_b.z - vert_a.z
+        safe_normalize(&prev_segment_dir)
+
+        // From B to C on the x/z plane
+        curr_segment_dir: [3]f32
+        curr_segment_dir.x = vert_c.x - vert_b.x
+        curr_segment_dir.y = 0 // Squash onto x/z plane
+        curr_segment_dir.z = vert_c.z - vert_b.z
+        safe_normalize(&curr_segment_dir)
+
+        // The y component of the cross product of the two normalized segment directions
+        // The X and Z components of the cross product are both zero because the two
+        // segment direction vectors fall within the x/z plane
+        cross := linalg.cross(curr_segment_dir.xz, prev_segment_dir.xz)
+
+        // CCW perpendicular vector to AB. The segment normal
+        prev_segment_norm_x := -prev_segment_dir.z
+        prev_segment_norm_z := prev_segment_dir.x
+
+        // CCW perpendicular vector to BC. The segment normal
+        curr_segment_norm_x := -curr_segment_dir.z
+        curr_segment_norm_z := curr_segment_dir.x
+
+        // Average the two segment normals to get the proportional miter offset for B
+        // This isn't normalized because it's defining the distance and direction the corner will need to be
+        // adjusted proportionally to the edge offsets to properly miter the adjoining edges
+        corner_miter_x := (prev_segment_norm_x + curr_segment_norm_x) * 0.5
+        corner_miter_z := (prev_segment_norm_z + curr_segment_norm_z) * 0.5
+        corner_miter_sq_mag := corner_miter_x * corner_miter_x + corner_miter_z * corner_miter_z
+
+        // If the magnitude of the segment normal average is less than about .69444,
+        // the corner is an acute enough angle that the result should be beveled
+        bevel := corner_miter_sq_mag * MITER_LIMIT * MITER_LIMIT < 1.0
+
+        // Scale the corner miter so it's proportional to how much the corner should be offset compared to the edges
+        if corner_miter_sq_mag > math.F32_EPSILON {
+            scale := 1.0 / corner_miter_sq_mag
+            corner_miter_x *= scale
+            corner_miter_z *= scale
+        }
+
+        if bevel && cross < 0.0 { // If the corner is convex and an acute enough angle, generate a bevel
+            // Generate two bevel vertices at distances from B proportional to the angle between the two segments
+            // Move each bevel vertex out proportional to the given offset
+            d := (1.0 - (prev_segment_dir.x * curr_segment_dir.x + prev_segment_dir.z * curr_segment_dir.z)) * 0.5
+
+            append(&out_verts, [3]f32{
+                vert_b.x + (-prev_segment_norm_x + prev_segment_dir.x * d) * offset,
+                vert_b.y,
+                vert_b.z + (-prev_segment_norm_z + prev_segment_dir.z * d) * offset,
+            })
+
+            append(&out_verts, [3]f32{
+                vert_b.x + (-curr_segment_norm_x - curr_segment_dir.x * d) * offset,
+                vert_b.y,
+                vert_b.z + (-curr_segment_norm_z - curr_segment_dir.z * d) * offset,
+            })
+        } else {
+            // Move B along the miter direction by the specified offset
+            append(&out_verts, [3]f32{
+                vert_b.x - corner_miter_x * offset,
+                vert_b.y,
+                vert_b.z - corner_miter_z * offset,
+            })
+        }
+    }
+
+    // Allocate final output with the exact size needed
+    if len(out_verts) == 0 {
+        delete(out_verts)
+        return nil, false
+    }
+
+    return out_verts, true
+}
