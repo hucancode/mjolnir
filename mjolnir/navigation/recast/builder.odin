@@ -20,13 +20,6 @@ Contour_Region :: struct {
     nholes: i32,
 }
 
-// Inject element at specific index in dynamic array
-inject_at :: proc(arr: ^[dynamic]$T, index: int, value: T) {
-    resize(arr, len(arr) + 1)  // Expand slice
-    copy(arr[index+1:], arr[index:len(arr)-1])  // Shift elements right
-    arr[index] = value  // Insert new value
-}
-
 // Build compact heightfield from regular heightfield
 build_compact_heightfield :: proc(walkable_height, walkable_climb: i32,
                                     hf: ^Heightfield, chf: ^Compact_Heightfield) -> bool {
@@ -457,9 +450,9 @@ build_contours :: proc(chf: ^Compact_Heightfield,
 
                         // Adjust vertices for border size
                         if border_size > 0 {
-                            for j in 0..<len(cont.verts) {
-                                cont.verts[j][0] -= border_size
-                                cont.verts[j][2] -= border_size
+                            for &v in cont.verts {
+                                v.x -= border_size
+                                v.z -= border_size
                             }
                         }
                         cont.rverts = make([][4]i32, len(verts))
@@ -467,9 +460,9 @@ build_contours :: proc(chf: ^Compact_Heightfield,
 
                         // Adjust raw vertices for border size
                         if border_size > 0 {
-                            for j in 0..<len(cont.rverts) {
-                                cont.rverts[j][0] -= border_size
-                                cont.rverts[j][2] -= border_size
+                            for &v in cont.rverts {
+                                v.x -= border_size
+                                v.z -= border_size
                             }
                         }
 
@@ -487,16 +480,15 @@ build_contours :: proc(chf: ^Compact_Heightfield,
         winding := make([]i8, len(cset.conts))
         defer delete(winding)
 
-        nholes := 0
         for i in 0..<len(cset.conts) {
             cont := &cset.conts[i]
             // If the contour is wound backwards, it is a hole
             area := calculate_contour_area(cont.verts)
             winding[i] = area < 0 ? -1 : 1
-            if winding[i] < 0 {
-                nholes += 1
-            }
         }
+
+        // Count holes using slice.count_proc
+        nholes := slice.count_proc(winding, proc(w: i8) -> bool { return w < 0 })
 
         if nholes > 0 {
             // Collect outline and hole contours per region
