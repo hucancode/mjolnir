@@ -470,18 +470,6 @@ sort_cells_by_level :: proc(start_level: u16, chf: ^Compact_Heightfield, src_reg
     }
 }
 
-// Append stacks for level processing
-append_stacks :: proc(src_stack: [dynamic]Level_Stack_Entry, dst_stack: ^[dynamic]Level_Stack_Entry,
-                     src_reg: []u16) {
-    for entry in src_stack {
-        i := entry.index
-        if i < 0 || src_reg[i] != 0 {
-            continue
-        }
-        append(dst_stack, entry)
-    }
-}
-
 // Remove adjacent duplicate neighbours
 remove_adjacent_neighbours :: proc(reg: ^Region) {
     // Remove adjacent duplicates
@@ -493,7 +481,7 @@ remove_adjacent_neighbours :: proc(reg: ^Region) {
     unique_slice := slice.unique(reg.connections[:])
 
     // Check wrap-around: if last element equals first element (circular case)
-    if len(unique_slice) > 1 && unique_slice[len(unique_slice)-1] == unique_slice[0] {
+    if len(unique_slice) > 1 && slice.last(unique_slice) == slice.first(unique_slice) {
         resize(&reg.connections, len(unique_slice)-1)
     } else {
         resize(&reg.connections, len(unique_slice))
@@ -705,7 +693,7 @@ walk_contour_for_region :: proc(x_in, y_in, i_in: i32, dir_in: int, chf: ^Compac
     // remove consecutive duplicates
     arr := slice.unique(cont[:])
     // Check wrap-around: if last element equals first element (circular case)
-    if len(arr) > 1 && arr[len(arr)-1] == arr[0] {
+    if len(arr) > 1 && slice.last(arr) == slice.first(arr) {
         resize(cont, len(arr)-1)
     } else {
         resize(cont, len(arr))
@@ -984,20 +972,11 @@ build_regions :: proc(chf: ^Compact_Heightfield,
                         border_size, min_region_area, merge_region_area: i32) -> bool {
     w := chf.width
     h := chf.height
-
-    // Handle empty compact heightfield
     if chf.span_count == 0 {
         return true
     }
-
-    allocator := context.allocator
-    buf := make([]u16, chf.span_count * 2, allocator)  // Need 2 buffers: reg and dist
-    if buf == nil {
-        log.errorf("rcBuildRegions: Out of memory 'tmp' (%d).", chf.span_count * 4)
-        return false
-    }
+    buf := make([]u16, chf.span_count * 2)  // Need 2 buffers: reg and dist
     defer delete(buf)
-
     LOG_NB_STACKS :: 3
     NB_STACKS :: 1 << LOG_NB_STACKS
     lvl_stacks: [NB_STACKS][dynamic]Level_Stack_Entry
@@ -1009,20 +988,12 @@ build_regions :: proc(chf: ^Compact_Heightfield,
             delete(lvl_stacks[i])
         }
     }
-
     stack := make([dynamic]Level_Stack_Entry, 0, 256)
     defer delete(stack)
-
     src_reg := buf[:chf.span_count]
     src_dist := buf[chf.span_count:chf.span_count*2]
-
-    // Initialize to 0
-    slice.fill(src_reg, 0)
-    slice.fill(src_dist, 0)
-
     region_id: u16 = 1
     level := (chf.max_distance + 1) & (~u16(1))
-
     // Calculate expand iterations based on distance field
     // More iterations for larger distance fields to ensure proper region expansion
     expand_iters := i32(8)
@@ -1030,7 +1001,6 @@ build_regions :: proc(chf: ^Compact_Heightfield,
         // Make sure border will not overflow
         bw := min(w, border_size)
         bh := min(h, border_size)
-
         // Paint regions
         paint_rect_region(0, bw, 0, h, region_id | RC_BORDER_REG, chf, src_reg)
         region_id += 1
@@ -1044,17 +1014,20 @@ build_regions :: proc(chf: ^Compact_Heightfield,
     }
 
     chf.border_size = border_size
-
     sid := -1
-
     for level > 0 {
         level = level >= 2 ? level - 2 : 0
         sid = (sid + 1) & (NB_STACKS - 1)
-
         if sid == 0 {
             sort_cells_by_level(level, chf, src_reg, NB_STACKS, lvl_stacks[:], 1)
         } else {
-            append_stacks(lvl_stacks[sid - 1], &lvl_stacks[sid], src_reg)
+            for entry in lvl_stacks[sid - 1] {
+                i := entry.index
+                if i < 0 || src_reg[i] != 0 {
+                    continue
+                }
+                append(&lvl_stacks[sid], entry)
+            }
         }
 
         // Expand current regions until no empty connected cells found
@@ -1145,21 +1118,12 @@ build_regions_monotone :: proc(chf: ^Compact_Heightfield,
     h := chf.height
     id: u16 = 1
 
-    allocator := context.allocator
-    src_reg := make([]u16, chf.span_count, allocator)
-    if src_reg == nil {
-        log.errorf("rcBuildRegionsMonotone: Out of memory 'src' (%d).", chf.span_count)
-        return false
-    }
+    src_reg := make([]u16, chf.span_count)
     defer delete(src_reg)
-    // slice.fill(src_reg, 0) // unnecessary
 
     nsweeps := max(chf.width, chf.height)
-    sweeps := make([]Sweep_Span, nsweeps, allocator)
-    if sweeps == nil {
-        log.errorf("rcBuildRegionsMonotone: Out of memory 'sweeps' (%d).", nsweeps)
-        return false
-    }
+    sweeps := make([]Sweep_Span, nsweeps)
+
     defer delete(sweeps)
 
     // Mark border regions
@@ -1482,22 +1446,11 @@ build_layer_regions :: proc(chf: ^Compact_Heightfield,
     w := chf.width
     h := chf.height
     id: u16 = 1
-
-    allocator := context.allocator
-    src_reg := make([]u16, chf.span_count, allocator)
-    if src_reg == nil {
-        log.errorf("rcBuildLayerRegions: Out of memory 'src' (%d).", chf.span_count)
-        return false
-    }
+    src_reg := make([]u16, chf.span_count)
     defer delete(src_reg)
     slice.fill(src_reg, 0)
-
     nsweeps := max(chf.width, chf.height)
-    sweeps := make([]Sweep_Span, nsweeps, allocator)
-    if sweeps == nil {
-        log.errorf("rcBuildLayerRegions: Out of memory 'sweeps' (%d).", nsweeps)
-        return false
-    }
+    sweeps := make([]Sweep_Span, nsweeps)
     defer delete(sweeps)
 
     // Mark border regions

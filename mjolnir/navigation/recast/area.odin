@@ -330,17 +330,11 @@ build_distance_field :: proc(chf: ^Compact_Heightfield) -> bool {
     }
 
     src := make([]u16, chf.span_count)
-    if src == nil {
-        log.errorf("build_distance_field: Out of memory 'src' (%d)", chf.span_count)
-        return false
-    }
+
     defer delete(src)
 
     dst := make([]u16, chf.span_count)
-    if dst == nil {
-        log.errorf("build_distance_field: Out of memory 'dst' (%d)", chf.span_count)
-        return false
-    }
+
 
     w := chf.width
     h := chf.height

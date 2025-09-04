@@ -447,7 +447,7 @@ build_contours :: proc(chf: ^Compact_Heightfield,
                     if len(simplified) >= 3 { // Need at least 3 vertices for a valid contour
                         // Allocate new contour
                         append(&cset.conts, Contour{})
-                        cont := &cset.conts[len(cset.conts)-1]
+                        cont := slice.last_ptr(cset.conts[:])
                         cont.area = area_id
                         cont.reg = region_id
 
