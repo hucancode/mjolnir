@@ -1,127 +1,100 @@
 package navigation_detour
 
-import "core:mem"
 import "core:mem/virtual"
 import "core:math"
 import "core:math/linalg"
 import "core:container/priority_queue"
-import "core:slice"
-import "core:log"
 import "../recast"
 
-// Heuristic scale factor for A* pathfinding
-// Slightly less than 1.0 to keep the heuristic admissible and guarantee optimal paths
 H_SCALE :: 0.999
 
-// A* pathfinding node (full data)
+// A* node with position, cost, and parent info
 Node :: struct {
-    pos:       [3]f32,             // Node position
-    cost:      f32,                // Cost from start to this node
-    total:     f32,                // Cost + heuristic
-    id:        recast.Poly_Ref,  // Polygon reference
-    flags:     Node_Flags,      // Node state flags
-    parent_id: recast.Poly_Ref,  // Parent node reference
+    pos:       [3]f32,
+    cost:      f32,
+    total:     f32,
+    id:        recast.Poly_Ref,
+    flags:     Node_Flags,
+    parent_id: recast.Poly_Ref,
 }
 
-// Self-contained pathfinding queue element (no external context needed)
+// Queue node for priority queue (minimal data)
 Pathfinding_Node :: struct {
-    ref:   recast.Poly_Ref,  // Polygon reference
-    cost:  f32,                // Cost from start to this node
-    total: f32,                // Cost + heuristic (f-score)
+    ref:   recast.Poly_Ref,
+    cost:  f32,
+    total: f32,
 }
 
-// Node flags
 Node_Flag :: enum u8 {
     Open   = 0,
     Closed = 1,
     Parent_Detached = 2,
 }
-
 Node_Flags :: bit_set[Node_Flag; u8]
 
-// Arena-based pathfinding context for temporary allocations
+// Arena-based pathfinding context
 Pathfinding_Context :: struct {
-    nodes:     map[recast.Poly_Ref]^Node,  // Hash map for fast lookup
-    arena:     virtual.Arena,                   // Virtual arena - no manual buffer needed!
+    nodes: map[recast.Poly_Ref]^Node,
+    arena: virtual.Arena,
 }
 
-// Node queue for A* open list (self-contained)
 Node_Queue :: struct {
     heap: priority_queue.Priority_Queue(Pathfinding_Node),
 }
 
-// Initialize pathfinding context with virtual arena
+// Initialize pathfinding context
 pathfinding_context_init :: proc(ctx: ^Pathfinding_Context, max_nodes: i32) -> recast.Status {
-    // Initialize virtual arena - it will grow as needed!
     if err := virtual.arena_init_growing(&ctx.arena); err != .None {
         return {.Out_Of_Memory}
     }
-
-    // Pre-size the map (uses regular allocator, not arena)
+    
     ctx.nodes = make(map[recast.Poly_Ref]^Node, max_nodes)
     return {.Success}
 }
 
-// Clear pathfinding context (reset arena)
 pathfinding_context_clear :: proc(ctx: ^Pathfinding_Context) {
-    clear(&ctx.nodes)  // Clear map but keep capacity
-    free_all(virtual.arena_allocator(&ctx.arena))  // O(1) reset of all arena allocations
+    clear(&ctx.nodes)
+    free_all(virtual.arena_allocator(&ctx.arena))
 }
 
-// Destroy pathfinding context
 pathfinding_context_destroy :: proc(ctx: ^Pathfinding_Context) {
     delete(ctx.nodes)
-    virtual.arena_destroy(&ctx.arena)  // Properly cleanup virtual arena
+    virtual.arena_destroy(&ctx.arena)
     ctx^ = {}
 }
 
-// Get node from pathfinding context
 get_node :: proc(ctx: ^Pathfinding_Context, id: recast.Poly_Ref) -> ^Node {
-    if node, exists := ctx.nodes[id]; exists {
-        return node
-    }
+    if node, exists := ctx.nodes[id]; exists do return node
     return nil
 }
 
-// Create or get node from pathfinding context
 create_node :: proc(ctx: ^Pathfinding_Context, id: recast.Poly_Ref) -> ^Node {
-    // Check if already exists
-    if existing, ok := ctx.nodes[id]; ok {
-        return existing
-    }
-    // Allocate new node from virtual arena
+    if existing, ok := ctx.nodes[id]; ok do return existing
+    
     node_mem, err := virtual.arena_alloc(&ctx.arena, size_of(Node), align_of(Node))
+    if err != .None do return nil
+    
     node := cast(^Node)raw_data(node_mem)
-    // Initialize
     node.id = id
     node.flags = {}
     node.cost = 0
     node.total = 0
     node.parent_id = recast.INVALID_POLY_REF
-
-    // Store in map
+    
     ctx.nodes[id] = node
     return node
 }
 
-// Self-contained comparison function for pathfinding nodes
-// Returns true if 'a' has higher priority than 'b' (should come first)
-// For A* pathfinding, lower total cost = higher priority (min-heap behavior)
+// Priority queue comparison (min-heap for A*)
 pathfinding_node_compare :: proc(a, b: Pathfinding_Node) -> bool {
-    // For min-heap: return true if 'a' should come before 'b'
-    // We want lower costs to have higher priority (come first)
     return a.total < b.total
 }
 
+// Node queue operations
 node_queue_init :: proc(queue: ^Node_Queue, capacity: i32) -> recast.Status {
-    // Initialize priority queue with self-contained comparison function
     queue.heap = priority_queue.Priority_Queue(Pathfinding_Node){}
-
-    priority_queue.init(&queue.heap,
-                        pathfinding_node_compare,
-                        priority_queue.default_swap_proc(Pathfinding_Node),
-                        int(capacity))
-
+    priority_queue.init(&queue.heap, pathfinding_node_compare, 
+                       priority_queue.default_swap_proc(Pathfinding_Node), int(capacity))
     return {.Success}
 }
 
@@ -139,10 +112,7 @@ node_queue_push :: proc(queue: ^Node_Queue, node: Pathfinding_Node) {
 }
 
 node_queue_pop :: proc(queue: ^Node_Queue) -> Pathfinding_Node {
-    if priority_queue.len(queue.heap) == 0 {
-        return {recast.INVALID_POLY_REF, 0, 0}
-    }
-
+    if priority_queue.len(queue.heap) == 0 do return {recast.INVALID_POLY_REF, 0, 0}
     return priority_queue.pop(&queue.heap)
 }
 
@@ -153,12 +123,11 @@ node_queue_empty :: proc(queue: ^Node_Queue) -> bool {
 // Navigation mesh query system
 Nav_Mesh_Query :: struct {
     nav_mesh:   ^Nav_Mesh,
-    pf_context: Pathfinding_Context,  // Pathfinding context with arena
+    pf_context: Pathfinding_Context,
     open_list:  Node_Queue,
     query_data: Query_Data,
 }
 
-// Query working data
 Query_Data :: struct {
     status:      recast.Status,
     last_best:   ^Node,
@@ -171,55 +140,44 @@ Query_Data :: struct {
     raycast_limit_squared: f32,
 }
 
-// Initialize query object
 nav_mesh_query_init :: proc(query: ^Nav_Mesh_Query, nav_mesh: ^Nav_Mesh, max_nodes: i32) -> recast.Status {
     query.nav_mesh = nav_mesh
-
+    
     status := pathfinding_context_init(&query.pf_context, max_nodes)
-    if recast.status_failed(status) {
-        return status
-    }
-
+    if recast.status_failed(status) do return status
+    
     status = node_queue_init(&query.open_list, max_nodes)
     if recast.status_failed(status) {
         pathfinding_context_destroy(&query.pf_context)
         return status
     }
-
+    
     return {.Success}
 }
 
-// Destroy query object
 nav_mesh_query_destroy :: proc(query: ^Nav_Mesh_Query) {
     node_queue_destroy(&query.open_list)
     pathfinding_context_destroy(&query.pf_context)
     query^ = {}
 }
 
-// Find path using A* algorithm
-find_path :: proc(query: ^Nav_Mesh_Query,
-                    start_ref, end_ref: recast.Poly_Ref,
-                    start_pos, end_pos: [3]f32,
-                    filter: ^Query_Filter,
-                    path: []recast.Poly_Ref,
-                    max_path: i32) -> (status: recast.Status, path_count: i32) {
+// A* pathfinding algorithm
+find_path :: proc(query: ^Nav_Mesh_Query, start_ref, end_ref: recast.Poly_Ref,
+                 start_pos, end_pos: [3]f32, filter: ^Query_Filter,
+                 path: []recast.Poly_Ref, max_path: i32) -> (status: recast.Status, path_count: i32) {
 
     path_count = 0
 
-    // Validate input
-    if !is_valid_poly_ref(query.nav_mesh, start_ref) ||
-       !is_valid_poly_ref(query.nav_mesh, end_ref) {
+    if !is_valid_poly_ref(query.nav_mesh, start_ref) || !is_valid_poly_ref(query.nav_mesh, end_ref) {
         return {.Invalid_Param}, 0
     }
 
     if start_ref == end_ref {
         if max_path > 0 {
             path[0] = start_ref
-            path_count = 1
             return {.Success}, 1
-        } else {
-            return {.Buffer_Too_Small}, 0
         }
+        return {.Buffer_Too_Small}, 0
     }
 
     // Initialize search
@@ -227,182 +185,126 @@ find_path :: proc(query: ^Nav_Mesh_Query,
     node_queue_clear(&query.open_list)
 
     start_node := create_node(&query.pf_context, start_ref)
-    if start_node == nil {
-        return {.Out_Of_Nodes}, 0
-    }
+    if start_node == nil do return {.Out_Of_Nodes}, 0
 
     start_node.pos = start_pos
     start_node.cost = 0
     start_node.total = linalg.distance(start_pos, end_pos) * H_SCALE
-    start_node.id = start_ref
     start_node.flags = {.Open}
     start_node.parent_id = recast.INVALID_POLY_REF
 
-    start_pathfinding_node := Pathfinding_Node{
-        ref = start_ref,
-        cost = start_node.cost,
-        total = start_node.total,
-    }
-    node_queue_push(&query.open_list, start_pathfinding_node)
+    node_queue_push(&query.open_list, {start_ref, start_node.cost, start_node.total})
 
     best_node := start_node
     best_dist := start_node.total
-
     iterations := 0
-    max_iterations := 1000
 
-    // Search loop
-    for !node_queue_empty(&query.open_list) && iterations < max_iterations {
+    // A* search loop
+    for !node_queue_empty(&query.open_list) && iterations < 1000 {
         iterations += 1
-        // Get best node
+        
         best_pathfinding_node := node_queue_pop(&query.open_list)
-        if best_pathfinding_node.ref == recast.INVALID_POLY_REF {
-            break
-        }
+        if best_pathfinding_node.ref == recast.INVALID_POLY_REF do break
+
         current := get_node(&query.pf_context, best_pathfinding_node.ref)
-        if current == nil {
-            continue
-        }
+        if current == nil || .Closed in current.flags do continue
+        
+        // Skip stale entries
+        if best_pathfinding_node.total != current.total do continue
 
-        // Skip if already closed (duplicate entry that was processed)
-        if .Closed in current.flags {
-            continue
-        }
-
-        // Skip if this is a stale entry (cost doesn't match current best)
-        if best_pathfinding_node.total != current.total {
-            continue
-        }
-
-        // Mark as closed
         current.flags &= ~{.Open}
         current.flags |= {.Closed}
 
-        // Debug logging
-        if iterations <= 20 {
-            log.debugf("Iter %d: Processing poly 0x%x (cost=%.2f, total=%.2f)",
-                      iterations, current.id, current.cost, current.total)
-        }
-
-        // Reached goal?
+        // Goal reached?
         if current.id == end_ref {
             best_node = current
-            log.debugf("Goal reached at poly 0x%x after %d iterations", current.id, iterations)
             break
         }
 
-        // Get current polygon
-        cur_tile, cur_poly, status := get_tile_and_poly_by_ref(query.nav_mesh, current.id)
-        if recast.status_failed(status) {
-            continue
-        }
+        // Expand neighbors
+        cur_tile, cur_poly, tile_status := get_tile_and_poly_by_ref(query.nav_mesh, current.id)
+        if recast.status_failed(tile_status) do continue
 
-        // Explore neighbors
-        // Iterate through all links from the current polygon
+        // Iterate through polygon links
         link := cur_poly.first_link
         for link != recast.DT_NULL_LINK {
             neighbor_ref := get_link_poly_ref(cur_tile, link)
 
-            // Skip invalid ids and do not expand back to where we came from
             if neighbor_ref != recast.INVALID_POLY_REF && neighbor_ref != current.parent_id {
                 neighbor_tile, neighbor_poly, neighbor_status := get_tile_and_poly_by_ref(query.nav_mesh, neighbor_ref)
-                if recast.status_succeeded(neighbor_status) &&
+                if recast.status_succeeded(neighbor_status) && 
                    query_filter_pass_filter(filter, neighbor_ref, neighbor_tile, neighbor_poly) {
 
-                    // Check if neighbor node already exists
                     neighbor_node := get_node(&query.pf_context, neighbor_ref)
-
-                    // Calculate neighbor position ONLY for new nodes
+                    
+                    // Calculate neighbor position
                     neighbor_pos: [3]f32
                     if neighbor_node == nil {
-                        // Node doesn't exist yet, calculate position
-                        left, right, portal_type, portal_status := get_portal_points(query, current.id, neighbor_ref)
-
+                        left, right, _, portal_status := get_portal_points(query, current.id, neighbor_ref)
                         if recast.status_succeeded(portal_status) {
-                            // Use midpoint of the actual shared edge
                             neighbor_pos = linalg.mix(left, right, 0.5)
                         } else {
-                            // Fallback to simple edge midpoint using link edge
                             link_edge := get_link_edge(cur_tile, link)
                             neighbor_pos = get_edge_mid_point(cur_tile, neighbor_tile, cur_poly, neighbor_poly, link_edge)
                         }
                     } else {
-                        // Node already exists, always use cached position
                         neighbor_pos = neighbor_node.pos
                     }
 
-                    // Calculate cost and heuristic
+                    // Calculate costs
                     cost: f32
                     heuristic: f32
 
-                    // Special case for last node
                     if neighbor_ref == end_ref {
-                        // Cost
-                        cur_cost := query_filter_get_cost(filter,
-                                                    current.pos, neighbor_pos,
-                                                    current.parent_id, nil, nil,
-                                                    current.id, cur_tile, cur_poly,
-                                                    neighbor_ref, neighbor_tile, neighbor_poly)
-                        end_cost := query_filter_get_cost(filter,
-                                                    neighbor_pos, end_pos,
-                                                    current.id, cur_tile, cur_poly,
-                                                    neighbor_ref, neighbor_tile, neighbor_poly,
-                                                    recast.INVALID_POLY_REF, nil, nil)
+                        // Special case for goal
+                        cur_cost := query_filter_get_cost(filter, current.pos, neighbor_pos,
+                                                        current.parent_id, nil, nil,
+                                                        current.id, cur_tile, cur_poly,
+                                                        neighbor_ref, neighbor_tile, neighbor_poly)
+                        end_cost := query_filter_get_cost(filter, neighbor_pos, end_pos,
+                                                        current.id, cur_tile, cur_poly,
+                                                        neighbor_ref, neighbor_tile, neighbor_poly,
+                                                        recast.INVALID_POLY_REF, nil, nil)
                         cost = current.cost + cur_cost + end_cost
                         heuristic = 0
                     } else {
-                        // Normal cost
-                        cost = current.cost + query_filter_get_cost(filter,
-                                                    current.pos, neighbor_pos,
-                                                    current.parent_id, nil, nil,
-                                                    current.id, cur_tile, cur_poly,
-                                                    neighbor_ref, neighbor_tile, neighbor_poly)
+                        cost = current.cost + query_filter_get_cost(filter, current.pos, neighbor_pos,
+                                                                  current.parent_id, nil, nil,
+                                                                  current.id, cur_tile, cur_poly,
+                                                                  neighbor_ref, neighbor_tile, neighbor_poly)
                         heuristic = linalg.distance(neighbor_pos, end_pos) * H_SCALE
                     }
+                    
                     total := cost + heuristic
-                    // The node is already in open list and the new result is worse, skip
+
+                    // Skip if worse than existing
                     if neighbor_node != nil && .Open in neighbor_node.flags && total >= neighbor_node.total {
                         link = get_next_link(cur_tile, link)
                         continue
                     }
-                    // The node is already visited and processed, and the new result is worse, skip
                     if neighbor_node != nil && .Closed in neighbor_node.flags && total >= neighbor_node.total {
                         link = get_next_link(cur_tile, link)
                         continue
                     }
 
-                    // Add or update the node
+                    // Create or update node
                     if neighbor_node == nil {
                         neighbor_node = create_node(&query.pf_context, neighbor_ref)
-                        if neighbor_node == nil {
-                            // Out of nodes
-                            break
-                        }
-                        // Set position only for new nodes
+                        if neighbor_node == nil do break
                         neighbor_node.pos = neighbor_pos
                     }
 
-                    // If node was closed but we found a better path, reopen it
                     if .Closed in neighbor_node.flags {
                         neighbor_node.flags &= ~{.Closed}
                     }
 
-                    // Update neighbor (but don't overwrite position of existing nodes)
                     neighbor_node.id = neighbor_ref
                     neighbor_node.parent_id = current.id
                     neighbor_node.cost = cost
                     neighbor_node.total = total
-
-                    // Mark as open (if not already)
                     neighbor_node.flags |= {.Open}
 
-                    // Always push to queue (duplicates will be filtered when popped)
-                    neighbor_pathfinding_node := Pathfinding_Node{
-                        ref = neighbor_ref,
-                        cost = neighbor_node.cost,
-                        total = neighbor_node.total,
-                    }
-                    node_queue_push(&query.open_list, neighbor_pathfinding_node)
+                    node_queue_push(&query.open_list, {neighbor_ref, neighbor_node.cost, neighbor_node.total})
 
                     // Update best node if closer to goal
                     if heuristic < best_dist {
@@ -416,79 +318,54 @@ find_path :: proc(query: ^Nav_Mesh_Query,
         }
     }
 
-    // Reconstruct path
-    if best_node == nil {
-        return {.Invalid_Param}, 0
-    }
-
+    if best_node == nil do return {.Invalid_Param}, 0
     return get_path_to_node(query, best_node, path, max_path)
 }
 
-// Get path from node back to start
+// Reconstruct path from end node back to start
 get_path_to_node :: proc(query: ^Nav_Mesh_Query, end_node: ^Node,
-                           path: []recast.Poly_Ref, max_path: i32) -> (status: recast.Status, path_count: i32) {
+                        path: []recast.Poly_Ref, max_path: i32) -> (status: recast.Status, path_count: i32) {
 
     // Count path length
     node := end_node
     length := i32(0)
     for node != nil {
         length += 1
-        if node.parent_id == recast.INVALID_POLY_REF {
-            break
-        }
+        if node.parent_id == recast.INVALID_POLY_REF do break
         node = get_node(&query.pf_context, node.parent_id)
     }
 
-    if length > max_path {
-        return {.Buffer_Too_Small}, 0
-    }
+    if length > max_path do return {.Buffer_Too_Small}, 0
 
     // Build path in reverse
     node = end_node
     for i := length - 1; i >= 0; i -= 1 {
         path[i] = node.id
-        if node.parent_id == recast.INVALID_POLY_REF {
-            break
-        }
+        if node.parent_id == recast.INVALID_POLY_REF do break
         node = get_node(&query.pf_context, node.parent_id)
     }
-
-    // Debug: log the final path
-    // log.debugf("get_path_to_node: Generated path with %d nodes:", length)
-    // for i in 0..<length {
-    //     log.debugf("  Path[%d] = 0x%x", i, path[i])
-    // }
 
     return {.Success}, length
 }
 
-// Helper functions for link traversal and edge calculations
-
+// Link traversal helpers
 get_first_link :: proc(tile: ^Mesh_Tile, poly: i32) -> u32 {
-    if poly < 0 || poly >= i32(len(tile.polys)) {
-        return recast.DT_NULL_LINK
-    }
+    if poly < 0 || poly >= i32(len(tile.polys)) do return recast.DT_NULL_LINK
     return tile.polys[poly].first_link
 }
 
 get_next_link :: proc(tile: ^Mesh_Tile, link: u32) -> u32 {
-    if link == recast.DT_NULL_LINK || int(link) >= len(tile.links) {
-        return recast.DT_NULL_LINK
-    }
+    if link == recast.DT_NULL_LINK || int(link) >= len(tile.links) do return recast.DT_NULL_LINK
     return tile.links[link].next
 }
 
 get_link_poly_ref :: proc(tile: ^Mesh_Tile, link: u32) -> recast.Poly_Ref {
-    if link == recast.DT_NULL_LINK || int(link) >= len(tile.links) {
-        return recast.INVALID_POLY_REF
-    }
+    if link == recast.DT_NULL_LINK || int(link) >= len(tile.links) do return recast.INVALID_POLY_REF
     return tile.links[link].ref
 }
 
 get_link_edge :: proc(tile: ^Mesh_Tile, link: u32) -> u8 {
-    if link == recast.DT_NULL_LINK || int(link) >= len(tile.links) {
-        return 0xff
-    }
+    if link == recast.DT_NULL_LINK || int(link) >= len(tile.links) do return 0xff
     return tile.links[link].edge
 }
 
@@ -498,17 +375,15 @@ get_edge_mid_point :: proc(tile_a, tile_b: ^Mesh_Tile, poly_a, poly_b: ^Poly, ed
     return linalg.mix(va0, va1, 0.5)
 }
 
-// Sliced pathfinding functions
+// Sliced pathfinding for large searches
 init_sliced_find_path :: proc(query: ^Nav_Mesh_Query, start_ref: recast.Poly_Ref,
-                               end_ref: recast.Poly_Ref, start_pos: [3]f32, end_pos: [3]f32,
-                               filter: ^Query_Filter, options: u32) -> recast.Status {
+                             end_ref: recast.Poly_Ref, start_pos: [3]f32, end_pos: [3]f32,
+                             filter: ^Query_Filter, options: u32) -> recast.Status {
 
-    // Validate input
     if !is_valid_poly_ref(query.nav_mesh, start_ref) || !is_valid_poly_ref(query.nav_mesh, end_ref) {
         return {.Invalid_Param}
     }
 
-    // Initialize search state
     query.query_data.status = {.In_Progress}
     query.query_data.start_ref = start_ref
     query.query_data.end_ref = end_ref
@@ -518,15 +393,11 @@ init_sliced_find_path :: proc(query: ^Nav_Mesh_Query, start_ref: recast.Poly_Ref
     query.query_data.options = options
     query.query_data.raycast_limit_squared = math.F32_MAX
 
-    // Clear storage
     pathfinding_context_clear(&query.pf_context)
     node_queue_clear(&query.open_list)
 
-    // Create start node
     start_node := create_node(&query.pf_context, start_ref)
-    if start_node == nil {
-        return {.Out_Of_Nodes}
-    }
+    if start_node == nil do return {.Out_Of_Nodes}
 
     start_node.pos = start_pos
     start_node.cost = 0
@@ -540,49 +411,36 @@ init_sliced_find_path :: proc(query: ^Nav_Mesh_Query, start_ref: recast.Poly_Ref
     return {.Success}
 }
 
-// Update sliced pathfinding
 update_sliced_find_path :: proc(query: ^Nav_Mesh_Query, max_iter: i32) -> (done_iters: i32, status: recast.Status) {
-    if query.query_data.status != {.In_Progress} {
-        return 0, query.query_data.status
-    }
+    if query.query_data.status != {.In_Progress} do return 0, query.query_data.status
 
     iterations := i32(0)
 
     for !node_queue_empty(&query.open_list) && iterations < max_iter {
         iterations += 1
 
-        // Get best node
         best := node_queue_pop(&query.open_list)
-        if best.ref == recast.INVALID_POLY_REF {
-            break
-        }
+        if best.ref == recast.INVALID_POLY_REF do break
 
         current := get_node(&query.pf_context, best.ref)
-        if current == nil || .Closed in current.flags {
-            continue
-        }
+        if current == nil || .Closed in current.flags do continue
 
-        // Mark as closed
         current.flags |= {.Closed}
         current.flags &= ~{.Open}
 
-        // Update best node
         if current.total < query.query_data.last_best.total {
             query.query_data.last_best = current
         }
 
-        // Check if reached goal
         if current.id == query.query_data.end_ref {
             query.query_data.last_best = current
             query.query_data.status = {.Success}
             return iterations, query.query_data.status
         }
 
-        // Expand neighbors (similar to find_path but simplified)
-        cur_tile, cur_poly, status := get_tile_and_poly_by_ref(query.nav_mesh, current.id)
-        if recast.status_failed(status) {
-            continue
-        }
+        // Expand neighbors (simplified version)
+        cur_tile, cur_poly, tile_status := get_tile_and_poly_by_ref(query.nav_mesh, current.id)
+        if recast.status_failed(tile_status) do continue
 
         link := cur_poly.first_link
         for link != recast.DT_NULL_LINK {
@@ -594,8 +452,7 @@ update_sliced_find_path :: proc(query: ^Nav_Mesh_Query, max_iter: i32) -> (done_
                    query_filter_pass_filter(query.query_data.filter, neighbor_ref, neighbor_tile, neighbor_poly) {
 
                     neighbor_node := get_node(&query.pf_context, neighbor_ref)
-
-                    // Calculate position and cost
+                    
                     neighbor_pos: [3]f32
                     if neighbor_node == nil {
                         neighbor_pos = calc_poly_center(neighbor_tile, neighbor_poly)
@@ -604,15 +461,14 @@ update_sliced_find_path :: proc(query: ^Nav_Mesh_Query, max_iter: i32) -> (done_
                     }
 
                     cost := current.cost + query_filter_get_cost(query.query_data.filter,
-                                                current.pos, neighbor_pos,
-                                                current.parent_id, nil, nil,
-                                                current.id, cur_tile, cur_poly,
-                                                neighbor_ref, neighbor_tile, neighbor_poly)
+                                                               current.pos, neighbor_pos,
+                                                               current.parent_id, nil, nil,
+                                                               current.id, cur_tile, cur_poly,
+                                                               neighbor_ref, neighbor_tile, neighbor_poly)
 
                     heuristic := linalg.distance(neighbor_pos, query.query_data.end_pos) * H_SCALE
                     total := cost + heuristic
 
-                    // Skip if worse
                     if neighbor_node != nil && .Open in neighbor_node.flags && total >= neighbor_node.total {
                         link = get_next_link(cur_tile, link)
                         continue
@@ -622,12 +478,9 @@ update_sliced_find_path :: proc(query: ^Nav_Mesh_Query, max_iter: i32) -> (done_
                         continue
                     }
 
-                    // Add or update node
                     if neighbor_node == nil {
                         neighbor_node = create_node(&query.pf_context, neighbor_ref)
-                        if neighbor_node == nil {
-                            break
-                        }
+                        if neighbor_node == nil do break
                         neighbor_node.pos = neighbor_pos
                     }
 
@@ -649,64 +502,40 @@ update_sliced_find_path :: proc(query: ^Nav_Mesh_Query, max_iter: i32) -> (done_
         }
     }
 
-    // Check if search is exhausted
     if node_queue_empty(&query.open_list) {
-        query.query_data.status = {.Success} // Partial success - return best found
+        query.query_data.status = {.Success}
     }
 
     return iterations, query.query_data.status
 }
 
-// Finalize sliced pathfinding
 finalize_sliced_find_path :: proc(query: ^Nav_Mesh_Query, path: []recast.Poly_Ref, max_path: i32) -> (status: recast.Status, path_count: i32) {
-
-    if query.query_data.status != {.Success} {
-        return query.query_data.status, 0
-    }
-
-    if query.query_data.last_best == nil {
-        return {.Invalid_Param}, 0
-    }
-
+    if query.query_data.status != {.Success} do return query.query_data.status, 0
+    if query.query_data.last_best == nil do return {.Invalid_Param}, 0
     return get_path_to_node(query, query.query_data.last_best, path, max_path)
 }
 
-// Finalize partial sliced pathfinding
 finalize_sliced_find_path_partial :: proc(query: ^Nav_Mesh_Query, existing: []recast.Poly_Ref,
-                                           path: []recast.Poly_Ref, max_path: i32) -> (status: recast.Status, path_count: i32) {
-
-    if query.query_data.last_best == nil {
-        return {.Invalid_Param}, 0
-    }
-
-    // Find the best polygon that was also visited in the existing path
-    best_node := query.query_data.last_best
-
-    // For simplicity, just return the best node found so far
-    // A full implementation would find the closest node to the existing path
-    return get_path_to_node(query, best_node, path, max_path)
+                                         path: []recast.Poly_Ref, max_path: i32) -> (status: recast.Status, path_count: i32) {
+    if query.query_data.last_best == nil do return {.Invalid_Param}, 0
+    return get_path_to_node(query, query.query_data.last_best, path, max_path)
 }
 
-// Convenience function: find path with slicing but complete it in one call
+// Convenience function for complete sliced pathfinding
 find_path_sliced :: proc(query: ^Nav_Mesh_Query, start_ref: recast.Poly_Ref,
-                           end_ref: recast.Poly_Ref, start_pos: [3]f32, end_pos: [3]f32,
-                           filter: ^Query_Filter, path: []recast.Poly_Ref,
-                           max_path: i32, max_iterations_per_slice: i32 = 50) -> (status: recast.Status, path_count: i32) {
-    // Initialize
+                        end_ref: recast.Poly_Ref, start_pos: [3]f32, end_pos: [3]f32,
+                        filter: ^Query_Filter, path: []recast.Poly_Ref,
+                        max_path: i32, max_iterations_per_slice: i32 = 50) -> (status: recast.Status, path_count: i32) {
+    
     init_status := init_sliced_find_path(query, start_ref, end_ref, start_pos, end_pos, filter, 0)
-    if recast.status_failed(init_status) {
-        return init_status, 0
-    }
+    if recast.status_failed(init_status) do return init_status, 0
 
-    // Run until completion
     iter_count := 0
     for iter_count < 10000 {
         done_iters, update_status := update_sliced_find_path(query, max_iterations_per_slice)
         iter_count += int(done_iters)
 
-        if update_status != {.In_Progress} {
-            return finalize_sliced_find_path(query, path, max_path)
-        }
+        if update_status != {.In_Progress} do return finalize_sliced_find_path(query, path, max_path)
     }
 
     return {.Out_Of_Nodes}, 0

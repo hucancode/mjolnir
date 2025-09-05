@@ -17,8 +17,8 @@ find_nearest_poly :: proc(query: ^Nav_Mesh_Query, center: [3]f32, half_extents: 
     bmin := center - half_extents
     bmax := center + half_extents
     // Find tiles that overlap query region
-    tx0, ty0 := calc_tile_loc_simple(query.nav_mesh, bmin)
-    tx1, ty1 := calc_tile_loc_simple(query.nav_mesh, bmax)
+    tx0, ty0, _ := calc_tile_loc(query.nav_mesh, bmin)
+    tx1, ty1, _ := calc_tile_loc(query.nav_mesh, bmax)
     log.infof("find_nearest_poly: Searching tiles (%d,%d) to (%d,%d) for position %v", tx0, ty0, tx1, ty1, center)
     nearest_dist_sqr := f32(math.F32_MAX)
     total_tiles_checked := 0
@@ -94,8 +94,8 @@ query_polygons :: proc(query: ^Nav_Mesh_Query, center: [3]f32, half_extents: [3]
     bmax := center + half_extents
 
     // Find tiles that overlap query region
-    tx0, ty0 := calc_tile_loc_simple(query.nav_mesh, bmin)
-    tx1, ty1 := calc_tile_loc_simple(query.nav_mesh, bmax)
+    tx0, ty0, _ := calc_tile_loc(query.nav_mesh, bmin)
+    tx1, ty1, _ := calc_tile_loc(query.nav_mesh, bmax)
 
     // Search tiles
     for ty in ty0..=ty1 {

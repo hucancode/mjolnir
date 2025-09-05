@@ -753,6 +753,17 @@ ray_segment_intersect_2d :: proc "contextless" (ray_start, ray_dir, seg_start, s
     return
 }
 
+segment_segment_intersect_2d :: proc(p0, p1, a, b: [3]f32) -> bool {
+    segment := p1 - p0
+    edge := b - a
+    denominator := linalg.cross(segment.xz, edge.xz)
+    if abs(denominator) < 1e-6 do return false
+    ap := p0 - a
+    t1 := linalg.cross(edge.xz, ap.xz) / denominator
+    t2 := linalg.cross(segment.xz, ap.xz) / denominator
+    return t1 >= 0.0 && t1 <= 1.0 && t2 >= 0.0 && t2 <= 1.0
+}
+
 // Calculate perpendicular cross product in 2D (XZ plane)
 perpendicular_cross_2d :: proc "contextless" (a, b, c: [3]f32) -> f32 {
     return linalg.cross(b.xz - a.xz, c.xz - a.xz)
