@@ -6,55 +6,6 @@ import "core:log"
 import "core:math"
 import "core:math/linalg"
 
-// ========================================
-// STANDARDIZED ERROR HANDLING SYSTEM
-// ========================================
-
-// Navigation error categories for structured error handling
-Nav_Error_Category :: enum u8 {
-    None = 0,
-
-    // Input validation errors
-    Invalid_Parameter,
-    Invalid_Geometry,
-    Invalid_Configuration,
-
-    // Resource errors
-    Out_Of_Memory,
-    Buffer_Too_Small,
-    Resource_Exhausted,
-
-    // Algorithm errors
-    Algorithm_Failed,
-    Convergence_Failed,
-    Numerical_Instability,
-
-    // I/O errors
-    File_Not_Found,
-    File_Corrupted,
-    Serialization_Failed,
-
-    // System errors
-    Thread_Error,
-    Timeout,
-    Internal_Error,
-}
-
-// Navigation error with detailed context
-Nav_Error :: struct {
-    category:    Nav_Error_Category,
-    code:        u32,                // Specific error code within category
-    message:     string,             // Human-readable error message
-    ctx:         string,             // Additional context (function name, file, etc.)
-    inner_error: ^Nav_Error,         // Nested error for error chains
-}
-
-// Result type for operations that can fail
-Nav_Result :: struct($T: typeid) {
-    value:   T,
-    error:   Nav_Error,
-    success: bool,
-}
 
 
 // Get direction offsets for 4-connected grid
@@ -66,128 +17,6 @@ get_dir_offset_x :: proc "contextless" (dir: int) -> i32 {
 get_dir_offset_y :: proc "contextless" (dir: int) -> i32 {
     offset := [4]i32{0, 1, 0, -1}
     return offset[dir & 0x03]
-}
-// ========================================
-// ERROR CREATION HELPERS
-// ========================================
-
-// Create a successful result
-nav_ok :: proc($T: typeid, value: T) -> Nav_Result(T) {
-    return Nav_Result(T){
-        value = value,
-        error = {},
-        success = true,
-    }
-}
-
-// Create a simple success result for bool
-nav_success :: proc() -> Nav_Result(bool) {
-    return nav_ok(bool, true)
-}
-
-// Create an error result
-nav_error :: proc($T: typeid, category: Nav_Error_Category, message: string,
-                 ctx: string = "", code: u32 = 0) -> Nav_Result(T) {
-    return Nav_Result(T){
-        value = {},
-        error = Nav_Error{
-            category = category,
-            code = code,
-            message = message,
-            ctx = ctx,
-        },
-        success = false,
-    }
-}
-
-// Create error with context automatically captured
-nav_error_here :: proc($T: typeid, category: Nav_Error_Category, message: string,
-                      code: u32 = 0, loc := #caller_location) -> Nav_Result(T) {
-    ctx := fmt.tprintf("%s:%d", loc.procedure, loc.line)
-    return nav_error(T, category, message, ctx, code)
-}
-
-// Chain errors for error propagation
-nav_error_chain :: proc($T: typeid, category: Nav_Error_Category, message: string,
-                       inner: Nav_Error, ctx: string = "", code: u32 = 0) -> Nav_Result(T) {
-    inner_copy := new(Nav_Error)
-    inner_copy^ = inner
-
-    return Nav_Result(T){
-        value = {},
-        error = Nav_Error{
-            category = category,
-            code = code,
-            message = message,
-            ctx = ctx,
-            inner_error = inner_copy,
-        },
-        success = false,
-    }
-}
-
-// ========================================
-// VALIDATION HELPERS
-// ========================================
-
-// Check if result is successful
-nav_is_ok :: proc(result: Nav_Result($T)) -> bool {
-    return result.success
-}
-
-// Check if result is an error
-nav_is_error :: proc(result: Nav_Result($T)) -> bool {
-    return !result.success
-}
-
-// Convert Status to Nav_Result
-nav_from_status :: proc(status: Status) -> Nav_Result(Status) {
-    if status_succeeded(status) {
-        return nav_ok(Status, status)
-    }
-
-    // Map status flags to error categories
-    category := Nav_Error_Category.Algorithm_Failed
-    message := "Unknown error"
-
-    if .Invalid_Param in status {
-        category = .Invalid_Parameter
-        message = "Invalid parameter"
-    } else if .Out_Of_Memory in status {
-        category = .Out_Of_Memory
-        message = "Out of memory"
-    } else if .Buffer_Too_Small in status {
-        category = .Buffer_Too_Small
-        message = "Buffer too small"
-    } else if .Out_Of_Nodes in status {
-        category = .Resource_Exhausted
-        message = "Out of pathfinding nodes"
-    } else if .Wrong_Magic in status {
-        category = .File_Corrupted
-        message = "Invalid file format (wrong magic number)"
-    } else if .Wrong_Version in status {
-        category = .File_Corrupted
-        message = "Unsupported file version"
-    }
-
-    return nav_error(Status, category, message)
-}
-
-// Validate pointer is not nil
-nav_require_non_nil :: proc(ptr: rawptr, name: string, loc := #caller_location) -> Nav_Result(bool) {
-    if ptr == nil {
-        return nav_error_here(bool, .Invalid_Parameter, fmt.tprintf("Parameter '%s' cannot be nil", name))
-    }
-    return nav_success()
-}
-
-// Validate positive value
-nav_require_positive :: proc(value: $T, name: string, loc := #caller_location) -> Nav_Result(bool) {
-    if value <= 0 {
-        return nav_error_here(bool, .Invalid_Parameter,
-                             fmt.tprintf("Parameter '%s' (%v) must be positive", name, value))
-    }
-    return nav_success()
 }
 // Build types for region partitioning
 Partition_Type :: enum {
@@ -557,103 +386,13 @@ build_navmesh :: proc(vertices: [][3]f32, indices: []i32, areas: []u8, cfg: Conf
     defer free_heightfield(hf)
 
     create_heightfield(hf, config.width, config.height, config.bmin, config.bmax, config.cs, config.ch) or_return
-    // Debug: Check areas before rasterization
-    when ODIN_DEBUG {
-        log.infof("Rasterizing %d triangles with areas:", len(indices)/3)
-        for i in 0..<min(10, len(areas)) {
-            log.infof("  Triangle %d: area=%d", i, areas[i])
-        }
-        // Also check if we're marking triangles as unwalkable due to slope
-        walkable_thr := math.cos(math.to_radians(config.walkable_slope_angle))
-        log.infof("Walkable slope threshold: %.3f (angle=%.1f degrees)", walkable_thr, config.walkable_slope_angle)
-
-        // Check first triangle normal
-        if len(indices) >= 3 {
-            v0 := vertices[indices[0]]
-            v1 := vertices[indices[1]]
-            v2 := vertices[indices[2]]
-            norm := linalg.normalize(linalg.cross(v1 - v0, v2 - v0))
-            log.infof("First triangle normal: (%.3f, %.3f, %.3f), Y=%.3f %s threshold %.3f",
-                      norm.x, norm.y, norm.z, norm.y,
-                      norm.y > walkable_thr ? ">" : "<=", walkable_thr)
-        }
-    }
     rasterize_triangles(vertices, indices, areas, hf, config.walkable_climb) or_return
-    // Debug: Count spans in heightfield
-    when ODIN_DEBUG {
-        span_count := 0
-        null_area_count := 0
-        total_spans := 0
-        non_empty_cells := 0
-        for y in 0..<hf.height {
-            for x in 0..<hf.width {
-                s := hf.spans[x + y * hf.width]
-                if s != nil {
-                    non_empty_cells += 1
-                }
-                for s != nil {
-                    total_spans += 1
-                    if s.area != RC_NULL_AREA {
-                        span_count += 1
-                    } else {
-                        null_area_count += 1
-                    }
-                    s = s.next
-                }
-            }
-        }
-        log.infof("Heightfield after rasterization: %d total spans in %d non-empty cells", total_spans, non_empty_cells)
-        log.infof("  %d walkable spans, %d null area spans", span_count, null_area_count)
-
-        // Check span distribution
-        quadrants := [4]int{0, 0, 0, 0}  // NE, NW, SW, SE
-        mid_x := hf.width / 2
-        mid_z := hf.height / 2
-        for y in 0..<hf.height {
-            for x in 0..<hf.width {
-                s := hf.spans[x + y * hf.width]
-                if s != nil && s.area != RC_NULL_AREA {
-                    quad := 0
-                    if x < mid_x && y < mid_z do quad = 2  // SW
-                    else if x >= mid_x && y < mid_z do quad = 3  // SE
-                    else if x < mid_x && y >= mid_z do quad = 1  // NW
-                    else do quad = 0  // NE
-                    quadrants[quad] += 1
-                }
-            }
-        }
-        log.infof("Span distribution by quadrant: NE=%d, NW=%d, SW=%d, SE=%d",
-                  quadrants[0], quadrants[1], quadrants[2], quadrants[3])
-    }
 
     // Filter walkable surfaces
     filter_low_hanging_walkable_obstacles(int(config.walkable_climb), hf)
     filter_ledge_spans(int(config.walkable_height), int(config.walkable_climb), hf)
     filter_walkable_low_height_spans(int(config.walkable_height), hf)
 
-    // Debug: Count spans after filtering
-    when ODIN_DEBUG {
-        span_count2 := 0
-        quadrants2 := [4]int{0, 0, 0, 0}  // NE, NW, SW, SE
-        mid_x2 := hf.width / 2
-        mid_z2 := hf.height / 2
-        for y in 0..<hf.height {
-            for x in 0..<hf.width {
-                for s := hf.spans[x + y * hf.width]; s != nil;s = s.next do if s.area != RC_NULL_AREA {
-                    span_count2 += 1
-                    quad := 0
-                    if x < mid_x2 && y < mid_z2 do quad = 2  // SW
-                    else if x >= mid_x2 && y < mid_z2 do quad = 3  // SE
-                    else if x < mid_x2 && y >= mid_z2 do quad = 1  // NW
-                    else do quad = 0  // NE
-                    quadrants2[quad] += 1
-                }
-            }
-        }
-        log.infof("Heightfield after filtering: %d walkable spans", span_count2)
-        log.infof("After filtering distribution: NE=%d, NW=%d, SW=%d, SE=%d",
-                  quadrants2[0], quadrants2[1], quadrants2[2], quadrants2[3])
-    }
 
     // Build compact heightfield
     chf := new(Compact_Heightfield)
@@ -661,9 +400,7 @@ build_navmesh :: proc(vertices: [][3]f32, indices: []i32, areas: []u8, cfg: Conf
     build_compact_heightfield(config.walkable_height, config.walkable_climb, hf, chf) or_return
     erode_walkable_area(config.walkable_radius, chf) or_return
     build_distance_field(chf) or_return
-    log.infof("Building regions with min_area=%d, merge_area=%d", config.min_region_area, config.merge_region_area)
     build_regions(chf, 0, config.min_region_area, config.merge_region_area) or_return
-    log.info("Regions built successfully")
     cset := alloc_contour_set()
     defer free_contour_set(cset)
     build_contours(chf, config.max_simplification_error, config.max_edge_len, cset) or_return

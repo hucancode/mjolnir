@@ -616,7 +616,7 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
     rx := math.sin(t)
     ry := (math.sin(t) + 1.0) * 0.5 * 1.5 + 1.0
     rz := math.cos(t)
-    v := linalg.vector_normalize([3]f32{rx, ry, rz})
+    v := linalg.normalize([3]f32{rx, ry, rz})
     radius: f32 = 6
     v = v * radius + linalg.VECTOR3F32_Y_AXIS * -1.0
     translate(&light_ptr.transform, v.x, v.y, v.z)

@@ -70,10 +70,7 @@ filter_ledge_spans :: proc(walkable_height, walkable_climb: int, heightfield: ^H
     for z in 0..<z_size {
         for x in 0..<x_size {
             for span := heightfield.spans[x + z * x_size]; span != nil; span = span.next {
-                // Skip non-walkable spans
-                if span.area == RC_NULL_AREA {
-                    continue
-                }
+                if span.area == RC_NULL_AREA do continue
 
                 floor := int(span.smax)
                 ceiling := span.next != nil ? int(span.next.smin) : MAX_HEIGHTFIELD_HEIGHT

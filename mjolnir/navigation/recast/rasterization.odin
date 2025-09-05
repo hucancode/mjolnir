@@ -14,23 +14,8 @@ Axis :: enum {
     Z = 2,
 }
 
-// Adds a span to the heightfield with optimized merging
-add_span :: proc(hf: ^Heightfield,
-                 x, z: i32, smin, smax: u16, area_id: u8,
-                 flag_merge_threshold: i32) -> bool {
-    // Input validation with early exit
-    if x < 0 || x >= hf.width || z < 0 || z >= hf.height {
-        when ODIN_DEBUG {
-            log.warnf("add_span: Invalid coordinates (%d, %d) for heightfield size %dx%d", x, z, hf.width, hf.height)
-        }
-        return false
-    }
-    if smin > smax {
-        when ODIN_DEBUG {
-            log.warnf("add_span: Invalid span range [%d, %d] - min must be <= max", smin, smax)
-        }
-        return false
-    }
+add_span :: proc(hf: ^Heightfield, x, z: i32, smin, smax: u16, area_id: u8, flag_merge_threshold: i32) -> bool {
+    if x < 0 || x >= hf.width || z < 0 || z >= hf.height || smin > smax do return false
     column_index := x + z * hf.width
     // Fast path: empty column
     if hf.spans[column_index] == nil {
@@ -117,71 +102,16 @@ add_span :: proc(hf: ^Heightfield,
             hf.spans[column_index] = new_span
         }
     }
-    // Validate in debug mode
-    when ODIN_DEBUG {
-        validate_span_list(hf.spans[column_index], x, z)
-    }
     return true
 }
 
-// Validate span list integrity (debug helper)
-validate_span_list :: proc(first_span: ^Span, x, z: i32) {
-    if first_span == nil do return
 
-    // Use Floyd's cycle detection algorithm
-    slow := first_span
-    fast := first_span
-    count := 0
-
-    for fast != nil && fast.next != nil {
-        slow = slow.next
-        fast = fast.next.next
-        count += 1
-
-        if slow == fast {
-            log.errorf("validate_span_list: Cycle detected in span list at column (%d, %d) after %d steps", x, z, count)
-            panic("Span list has a cycle!")
-        }
-
-        if count > 1000 {
-            log.errorf("validate_span_list: Too many spans in column (%d, %d)", x, z)
-            break
-        }
-    }
-
-    // Also validate ordering
-    span := first_span
-    prev_smax: u32 = 0
-
-    for span != nil {
-        smin := span.smin
-        smax := span.smax
-
-        // Check basic span validity
-        if smin > smax {
-            log.errorf("validate_span_list: Invalid span [%d, %d] in column (%d, %d)", smin, smax, x, z)
-        }
-
-        // Check ordering
-        if count > 1 && smin < prev_smax {
-            log.errorf("validate_span_list: Spans out of order in column (%d, %d): prev_smax=%d, curr_smin=%d", x, z, prev_smax, smin)
-        }
-
-        prev_smax = smax
-        span = span.next
-    }
-}
-
-// Divides a convex polygon of max 12 vertices into two convex polygons
-// across a separating axis.
-divide_poly :: proc(in_verts, out_verts1, out_verts2: [][3]f32,
-                   axis_offset: f32, axis: Axis) -> (poly1_vert_count: i32, poly2_vert_count: i32) {
+divide_poly :: proc(in_verts, out_verts1, out_verts2: [][3]f32, axis_offset: f32, axis: Axis) -> (poly1_vert_count: i32, poly2_vert_count: i32) {
     assert(len(in_verts) <= 12)
 
-    // How far positive or negative away from the separating axis is each vertex
     in_vert_axis_delta: [12]f32
-    for in_vert in 0..<len(in_verts) {
-        in_vert_axis_delta[in_vert] = axis_offset - in_verts[in_vert][axis]
+    for vert, i in in_verts {
+        in_vert_axis_delta[i] = axis_offset - vert[axis]
     }
 
     for in_vert_a, in_vert_b := 0, len(in_verts) - 1;
@@ -273,25 +203,17 @@ rasterize_triangle_with_inverse_cs :: proc(v0, v1, v2: [3]f32, area_id: u8,
         cell_z := hf_bb_min.z + f32(z) * cell_size
         nv_row, nv_in = divide_poly(in_buf[:nv_in], in_row[:], p1[:], cell_z + cell_size, .Z)
         in_buf, p1 = p1, in_buf
-        if nv_row < 3 {
-            continue
-        }
-        if z < 0 {
-            continue
-        }
-        // find X-axis bounds of the row
+        if nv_row < 3 || z < 0 do continue
         min_x := in_row[0].x
         max_x := in_row[0].x
-        for vert in in_row[1:] {
+        for vert in in_row[1:nv_row] {
             min_x = min(min_x, vert.x)
             max_x = max(max_x, vert.x)
         }
         x0 := i32((min_x - hf_bb_min.x) * inverse_cell_size)
         x1 := i32((max_x - hf_bb_min.x) * inverse_cell_size)
 
-        if x1 < 0 || x0 >= w {
-            continue
-        }
+        if x1 < 0 || x0 >= w do continue
         x0 = clamp(x0, -1, w - 1)
         x1 = clamp(x1, 0, w - 1)
 
@@ -304,35 +226,17 @@ rasterize_triangle_with_inverse_cs :: proc(v0, v1, v2: [3]f32, area_id: u8,
             nv, nv2 = divide_poly(in_row[:nv2], p1[:], p2[:], cx + cell_size, .X)
             in_row, p2 = p2, in_row
 
-            if nv < 3 {
-                continue
-            }
-            if x < 0 {
-                continue
-            }
-            // Calculate min and max of the span
+            if nv < 3 || x < 0 do continue
             span_min := p1[0].y
             span_max := p1[0].y
-            for vert in 1..<nv {
-                span_min = min(span_min, p1[vert].y)
-                span_max = max(span_max, p1[vert].y)
+            for vert in p1[1:nv] {
+                span_min = min(span_min, vert.y)
+                span_max = max(span_max, vert.y)
             }
             span_min -= hf_bb_min.y
             span_max -= hf_bb_min.y
-            // Skip the span if it's completely outside the heightfield bounding box
-            if span_max < 0.0 {
-                continue
-            }
-            if span_min > by {
-                continue
-            }
-            // Clamp the span to the heightfield bounding box
-            if span_min < 0.0 {
-                span_min = 0
-            }
-            if span_max > by {
-                span_max = by
-            }
+            if span_max < 0.0 || span_min > by do continue
+            span_min, span_max = max(span_min, 0.0), min(span_max, by)
             // Snap the span to the heightfield height grid
             span_min_cell_index := u16(clamp(i32(math.floor(span_min * inverse_cell_height)), 0, RC_SPAN_MAX_HEIGHT))
             span_max_cell_index := u16(clamp(i32(math.ceil(span_max * inverse_cell_height)), i32(span_min_cell_index) + 1, RC_SPAN_MAX_HEIGHT))
@@ -355,17 +259,16 @@ rasterize_triangle :: proc(v0, v1, v2: [3]f32,
 }
 
 // Rasterize triangles
-rasterize_triangles :: proc(verts: [][3]f32, indices: []i32, tri_area_ids: []u8,
-                           hf: ^Heightfield, flag_merge_threshold: i32) -> bool {
-    inverse_cell_size := 1.0 / hf.cs
-    inverse_cell_height := 1.0 / hf.ch
-    num_tris := len(indices) / 3
-    for tri_index in 0..<num_tris {
-        v0 := verts[indices[tri_index * 3 + 0]]
-        v1 := verts[indices[tri_index * 3 + 1]]
-        v2 := verts[indices[tri_index * 3 + 2]]
-        rasterize_triangle_with_inverse_cs(v0, v1, v2, tri_area_ids[tri_index], hf, hf.bmin, hf.bmax,
-            hf.cs, inverse_cell_size, inverse_cell_height, flag_merge_threshold) or_return
+rasterize_triangles :: proc(verts: [][3]f32, indices: []i32, tri_area_ids: []u8, hf: ^Heightfield, flag_merge_threshold: i32) -> bool {
+    inverse_cs := 1.0 / hf.cs
+    inverse_ch := 1.0 / hf.ch
+
+    for i := 0; i < len(indices); i += 3 {
+        v0 := verts[indices[i]]
+        v1 := verts[indices[i+1]]
+        v2 := verts[indices[i+2]]
+        area := tri_area_ids[i/3]
+        rasterize_triangle_with_inverse_cs(v0, v1, v2, area, hf, hf.bmin, hf.bmax, hf.cs, inverse_cs, inverse_ch, flag_merge_threshold) or_return
     }
 
     return true

@@ -244,9 +244,7 @@ flood_region :: proc(x, y, i: i32, level, r: u16, chf: ^Compact_Heightfield,
             }
             ax := cx + get_dir_offset_x(dir)
             ay := cy + get_dir_offset_y(dir)
-            if ax < 0 || ay < 0 || ax >= w || ay >= h {
-                continue
-            }
+            if ax < 0 || ay < 0 || ax >= w || ay >= h do continue
             ai := i32(u32(chf.cells[ax + ay * w].index)) + i32(get_con(cs, dir))
             if chf.areas[ai] != area {
                 continue
@@ -298,9 +296,7 @@ flood_region :: proc(x, y, i: i32, level, r: u16, chf: ^Compact_Heightfield,
             }
             ax := cx + get_dir_offset_x(dir)
             ay := cy + get_dir_offset_y(dir)
-            if ax < 0 || ay < 0 || ax >= w || ay >= h {
-                continue
-            }
+            if ax < 0 || ay < 0 || ax >= w || ay >= h do continue
             ai := i32(u32(chf.cells[ax + ay * w].index)) + i32(get_con(cs, dir))
             if chf.areas[ai] != area {
                 continue
@@ -577,10 +573,7 @@ is_solid_edge :: proc(chf: ^Compact_Heightfield, src_reg: []u16,
             }
         }
     }
-    if r == src_reg[i] {
-        return false
-    }
-    return true
+    return r != src_reg[i]
 }
 
 // Walk contour to find region connections - renamed to avoid conflict with contour.odin
@@ -892,14 +885,7 @@ merge_and_filter_regions :: proc(min_region_area, merge_region_size: i32,
 
     // Compress region Ids
     for &reg in regions {
-        reg.remap = false
-        if reg.id == 0 {
-            continue // Skip nil regions
-        }
-        if (reg.id & RC_BORDER_REG) != 0 {
-            continue // Skip external regions
-        }
-        reg.remap = true
+        reg.remap = reg.id != 0 && (reg.id & RC_BORDER_REG) == 0
     }
 
     reg_id_gen: u16 = 0

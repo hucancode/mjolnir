@@ -8,7 +8,6 @@ import "core:log"
 import "../recast"
 import "../../geometry"
 
-// Initialize navigation mesh with parameters
 nav_mesh_init :: proc(nav_mesh: ^Nav_Mesh, params: ^Nav_Mesh_Params) -> recast.Status {
     nav_mesh.params = params^
     nav_mesh.orig = params.orig
@@ -16,18 +15,15 @@ nav_mesh_init :: proc(nav_mesh: ^Nav_Mesh, params: ^Nav_Mesh_Params) -> recast.S
     nav_mesh.tile_height = params.tile_height
     nav_mesh.max_tiles = params.max_tiles
 
-    // Calculate tile lookup size (next power of 2)
     nav_mesh.tile_lut_size = 1
     for nav_mesh.tile_lut_size < nav_mesh.max_tiles {
         nav_mesh.tile_lut_size *= 2
     }
     nav_mesh.tile_lut_mask = nav_mesh.tile_lut_size - 1
 
-    // Allocate tiles
     nav_mesh.tiles = make([]Mesh_Tile, nav_mesh.max_tiles)
     nav_mesh.pos_lookup = make([]^Mesh_Tile, nav_mesh.tile_lut_size)
 
-    // Initialize free list
     nav_mesh.next_free = nil
     for i := nav_mesh.max_tiles - 1; i >= 0; i -= 1 {
         nav_mesh.tiles[i].salt = 1
@@ -35,30 +31,21 @@ nav_mesh_init :: proc(nav_mesh: ^Nav_Mesh, params: ^Nav_Mesh_Params) -> recast.S
         nav_mesh.next_free = &nav_mesh.tiles[i]
     }
 
-    // Calculate ID encoding parameters (matching C++ dtNavMesh::init)
     tile_bits_needed := geometry.ilog2(geometry.next_pow2(u32(params.max_tiles)))
     poly_bits_needed := geometry.ilog2(geometry.next_pow2(u32(params.max_polys)))
     nav_mesh.tile_bits = tile_bits_needed
     nav_mesh.poly_bits = poly_bits_needed
 
-    // Only allow 31 salt bits, since the salt mask is calculated using 32bit uint
     nav_mesh.salt_bits = min(31, 32 - nav_mesh.tile_bits - nav_mesh.poly_bits)
-    if nav_mesh.salt_bits < 10 {
-        return {.Invalid_Param}
-    }
+    if nav_mesh.salt_bits < 10 do return {.Invalid_Param}
 
     return {.Success}
 }
 
-// Initialize navigation mesh from single tile data (mimics C++ dtNavMesh::init)
 nav_mesh_init_single :: proc(nav_mesh: ^Nav_Mesh, data: []u8, flags: i32) -> recast.Status {
-    // Parse header to get bounds
     header, parse_status := parse_mesh_header(data)
-    if recast.status_failed(parse_status) {
-        return parse_status
-    }
+    if recast.status_failed(parse_status) do return parse_status
 
-    // Setup params for single tile
     params := Nav_Mesh_Params{
         orig = header.bmin,
         tile_width = (header.bmax - header.bmin).x,
@@ -67,20 +54,14 @@ nav_mesh_init_single :: proc(nav_mesh: ^Nav_Mesh, data: []u8, flags: i32) -> rec
         max_polys = header.poly_count,
     }
 
-    // Initialize navmesh
     init_status := nav_mesh_init(nav_mesh, &params)
-    if recast.status_failed(init_status) {
-        return init_status
-    }
+    if recast.status_failed(init_status) do return init_status
 
-    // Add the single tile
     _, add_status := nav_mesh_add_tile(nav_mesh, data, flags)
     return add_status
 }
 
-// Clean up navigation mesh
 nav_mesh_destroy :: proc(nav_mesh: ^Nav_Mesh) {
-    // Clean up all tiles first
     for i in 0..<nav_mesh.max_tiles {
         if nav_mesh.tiles[i].header != nil {
             nav_mesh_remove_tile(nav_mesh, get_tile_ref(nav_mesh, &nav_mesh.tiles[i]))
@@ -92,23 +73,16 @@ nav_mesh_destroy :: proc(nav_mesh: ^Nav_Mesh) {
     nav_mesh^ = {}
 }
 
-// Add tile to navigation mesh
 nav_mesh_add_tile :: proc(nav_mesh: ^Nav_Mesh, data: []u8, flags: i32, last_ref: recast.Tile_Ref = recast.INVALID_TILE_REF) -> (tile_ref: recast.Tile_Ref, status: recast.Status) {
-    // Parse tile data
     header, parse_status := parse_mesh_header(data)
-    if recast.status_failed(parse_status) {
-        return recast.INVALID_TILE_REF, parse_status
-    }
+    if recast.status_failed(parse_status) do return recast.INVALID_TILE_REF, parse_status
 
-    // Get free tile
     tile: ^Mesh_Tile
     if last_ref != recast.INVALID_TILE_REF {
-        // Try to reuse the specified tile reference
         tile_index := decode_tile_ref(nav_mesh, last_ref)
         if tile_index < u32(nav_mesh.max_tiles) {
             tile = &nav_mesh.tiles[tile_index]
             if tile.salt == decode_tile_ref_salt(nav_mesh, last_ref) {
-                // Remove from free list if it's there
                 unlink_tile(nav_mesh, tile)
             } else {
                 tile = nil
@@ -117,45 +91,32 @@ nav_mesh_add_tile :: proc(nav_mesh: ^Nav_Mesh, data: []u8, flags: i32, last_ref:
     }
 
     if tile == nil {
-        if nav_mesh.next_free == nil {
-            return recast.INVALID_TILE_REF, {.Out_Of_Memory}
-        }
+        if nav_mesh.next_free == nil do return recast.INVALID_TILE_REF, {.Out_Of_Memory}
         tile = nav_mesh.next_free
         nav_mesh.next_free = tile.next
         tile.next = nil
     }
 
-    // Parse and setup tile data
     result := setup_tile_data(tile, data, header, flags)
-    if recast.status_failed(result) {
-        return recast.INVALID_TILE_REF, result
-    }
+    if recast.status_failed(result) do return recast.INVALID_TILE_REF, result
 
-    // Insert into tile grid
     h := compute_tile_hash(header.x, header.y, nav_mesh.tile_lut_mask)
     tile.next = nav_mesh.pos_lookup[h]
     nav_mesh.pos_lookup[h] = tile
 
-    // Connect internal links
     connect_int_links(nav_mesh, tile)
 
-    // Connect external links to neighbors
     connect_ext_links(nav_mesh, tile)
 
     return get_tile_ref(nav_mesh, tile), {.Success}
 }
 
-// Remove tile from navigation mesh
 nav_mesh_remove_tile :: proc(nav_mesh: ^Nav_Mesh, ref: recast.Tile_Ref) -> recast.Status {
     tile, get_status := get_tile_by_ref(nav_mesh, ref)
-    if recast.status_failed(get_status) {
-        return get_status
-    }
+    if recast.status_failed(get_status) do return get_status
 
-    // Disconnect external links from neighbors
     disconnect_ext_links(nav_mesh, tile)
 
-    // Remove from tile grid
     h := compute_tile_hash(tile.header.x, tile.header.y, nav_mesh.tile_lut_mask)
     prev: ^Mesh_Tile = nil
     cur := nav_mesh.pos_lookup[h]
@@ -172,43 +133,32 @@ nav_mesh_remove_tile :: proc(nav_mesh: ^Nav_Mesh, ref: recast.Tile_Ref) -> recas
         cur = cur.next
     }
 
-    // Free tile data
     free_tile_data(tile)
 
-    // Reset tile
     tile.salt = (tile.salt + 1) & ((1 << nav_mesh.salt_bits) - 1)
     tile.header = nil
     tile.flags = 0
 
-    // Add back to free list
     tile.next = nav_mesh.next_free
     nav_mesh.next_free = tile
 
     return {.Success}
 }
 
-// Get tile by reference
 get_tile_by_ref :: proc(nav_mesh: ^Nav_Mesh, ref: recast.Tile_Ref) -> (^Mesh_Tile, recast.Status) {
-    if ref == recast.INVALID_TILE_REF {
-        return nil, {.Invalid_Param}
-    }
+    if ref == recast.INVALID_TILE_REF do return nil, {.Invalid_Param}
 
     tile_index := decode_tile_ref(nav_mesh, ref)
     salt := decode_tile_ref_salt(nav_mesh, ref)
 
-    if tile_index >= u32(nav_mesh.max_tiles) {
-        return nil, {.Invalid_Param}
-    }
+    if tile_index >= u32(nav_mesh.max_tiles) do return nil, {.Invalid_Param}
 
     tile := &nav_mesh.tiles[tile_index]
-    if tile.salt != salt || tile.header == nil {
-        return nil, {.Invalid_Param}
-    }
+    if tile.salt != salt || tile.header == nil do return nil, {.Invalid_Param}
 
     return tile, {.Success}
 }
 
-// Get tile at grid position
 get_tile_at :: proc(nav_mesh: ^Nav_Mesh, x, y: i32, layer: i32) -> ^Mesh_Tile {
     h := compute_tile_hash(x, y, nav_mesh.tile_lut_mask)
     tile := nav_mesh.pos_lookup[h]
@@ -224,11 +174,8 @@ get_tile_at :: proc(nav_mesh: ^Nav_Mesh, x, y: i32, layer: i32) -> ^Mesh_Tile {
     return nil
 }
 
-// Get tile reference
 get_tile_ref :: proc(nav_mesh: ^Nav_Mesh, tile: ^Mesh_Tile) -> recast.Tile_Ref {
-    if tile == nil {
-        return recast.INVALID_TILE_REF
-    }
+    if tile == nil do return recast.INVALID_TILE_REF
 
     // Calculate tile index
     tile_index := u32(uintptr(tile) - uintptr(&nav_mesh.tiles[0])) / size_of(Mesh_Tile)
@@ -288,169 +235,91 @@ is_valid_poly_ref :: proc(nav_mesh: ^Nav_Mesh, ref: recast.Poly_Ref) -> bool {
     return true
 }
 
-// Helper functions
-
 parse_mesh_header :: proc(data: []u8) -> (^Mesh_Header, recast.Status) {
-    if len(data) < size_of(Mesh_Header) {
-        return nil, {.Invalid_Param}
-    }
+    if len(data) < size_of(Mesh_Header) do return nil, {.Invalid_Param}
 
-    // Validate raw tile data before parsing
     validation_result := validate_tile_data(data)
-    if !validation_result.valid {
-        log.errorf("Tile data validation failed:")
-        for i in 0..<validation_result.error_count {
-            log.errorf("  - %s", validation_result.errors[i])
-        }
-        return nil, {.Invalid_Param}
-    }
+    if !validation_result.valid do return nil, {.Invalid_Param}
 
-    // Cast first part of data to header
     header := cast(^Mesh_Header)raw_data(data)
-
-    // Enhanced header validation with detailed error reporting
     header_status := validate_navmesh_header(header)
-    if recast.status_failed(header_status) {
-        return nil, header_status
-    }
+    if recast.status_failed(header_status) do return nil, header_status
 
     return header, {.Success}
 }
 
 setup_tile_data :: proc(tile: ^Mesh_Tile, data: []u8, header: ^Mesh_Header, flags: i32) -> recast.Status {
-    // Validate data layout before proceeding
-    if !verify_data_layout(data, header) {
-        log.errorf("Data layout verification failed")
-        return {.Invalid_Param}
-    }
+    if !verify_data_layout(data, header) do return {.Invalid_Param}
 
-    // Store data
     tile.data = data
     tile.header = header
     tile.flags = flags
 
-    // Calculate data layout offsets using validated format specification
-    // Data format: [Header][Vertices][Polygons][Links][DetailMeshes][DetailVerts][DetailTris][BVTree][OffMeshConnections]
     offset := size_of(Mesh_Header)
 
-    // Vertices - first data section per navmesh format specification
     if header.vert_count > 0 {
-        // Verify alignment requirements
         vert_ptr := uintptr(raw_data(data)) + uintptr(offset)
-        if vert_ptr % uintptr(align_of([3]f32)) != 0 {
-            log.errorf("Vertex data alignment error: ptr=0x%x, required_align=%d", vert_ptr, align_of([3]f32))
-            return {.Invalid_Param}
-        }
-
+        if vert_ptr % uintptr(align_of([3]f32)) != 0 do return {.Invalid_Param}
         verts_ptr := cast(^[3]f32)(vert_ptr)
         tile.verts = slice.from_ptr(verts_ptr, int(header.vert_count))
         offset += size_of([3]f32) * int(header.vert_count)
     }
 
-    // Polygons - second data section per navmesh format specification
     if header.poly_count > 0 {
-        // Verify alignment requirements
         poly_ptr_addr := uintptr(raw_data(data)) + uintptr(offset)
-        if poly_ptr_addr % uintptr(align_of(Poly)) != 0 {
-            log.errorf("Polygon data alignment error: ptr=0x%x, required_align=%d", poly_ptr_addr, align_of(Poly))
-            return {.Invalid_Param}
-        }
-
+        if poly_ptr_addr % uintptr(align_of(Poly)) != 0 do return {.Invalid_Param}
         poly_ptr := cast(^Poly)(poly_ptr_addr)
         tile.polys = slice.from_ptr(poly_ptr, int(header.poly_count))
         offset += size_of(Poly) * int(header.poly_count)
     }
 
-    // Links - third data section per navmesh format specification
     if header.max_link_count > 0 {
         link_ptr_addr := uintptr(raw_data(data)) + uintptr(offset)
-        if link_ptr_addr % uintptr(align_of(Link)) != 0 {
-            log.errorf("Link data alignment error: ptr=0x%x, required_align=%d", link_ptr_addr, align_of(Link))
-            return {.Invalid_Param}
-        }
-
+        if link_ptr_addr % uintptr(align_of(Link)) != 0 do return {.Invalid_Param}
         link_ptr := cast(^Link)(link_ptr_addr)
         tile.links = slice.from_ptr(link_ptr, int(header.max_link_count))
         offset += size_of(Link) * int(header.max_link_count)
     }
 
-    // Detail meshes - fourth data section per navmesh format specification
     if header.detail_mesh_count > 0 {
         detail_mesh_ptr_addr := uintptr(raw_data(data)) + uintptr(offset)
-        if detail_mesh_ptr_addr % uintptr(align_of(Poly_Detail)) != 0 {
-            log.errorf("Detail mesh data alignment error: ptr=0x%x, required_align=%d", detail_mesh_ptr_addr, align_of(Poly_Detail))
-            return {.Invalid_Param}
-        }
-
+        if detail_mesh_ptr_addr % uintptr(align_of(Poly_Detail)) != 0 do return {.Invalid_Param}
         detail_mesh_ptr := cast(^Poly_Detail)(detail_mesh_ptr_addr)
         tile.detail_meshes = slice.from_ptr(detail_mesh_ptr, int(header.detail_mesh_count))
         offset += size_of(Poly_Detail) * int(header.detail_mesh_count)
     }
 
-    // Detail vertices - fifth data section per navmesh format specification
     if header.detail_vert_count > 0 {
         detail_verts_ptr_addr := uintptr(raw_data(data)) + uintptr(offset)
-        if detail_verts_ptr_addr % uintptr(align_of([3]f32)) != 0 {
-            log.errorf("Detail vertex data alignment error: ptr=0x%x, required_align=%d", detail_verts_ptr_addr, align_of([3]f32))
-            return {.Invalid_Param}
-        }
-
+        if detail_verts_ptr_addr % uintptr(align_of([3]f32)) != 0 do return {.Invalid_Param}
         detail_verts_ptr := cast(^[3]f32)(detail_verts_ptr_addr)
         tile.detail_verts = slice.from_ptr(detail_verts_ptr, int(header.detail_vert_count))
         offset += size_of([3]f32) * int(header.detail_vert_count)
     }
 
-    // Detail triangles - sixth data section per navmesh format specification
     if header.detail_tri_count > 0 {
-        // Detail triangles are [4]u8 arrays, so we need to cast properly
         detail_tri_ptr := cast(^[4]u8)(uintptr(raw_data(data)) + uintptr(offset))
         tile.detail_tris = slice.from_ptr(detail_tri_ptr, int(header.detail_tri_count))
         offset += size_of([4]u8) * int(header.detail_tri_count)
     }
 
-    // BV tree - seventh data section per navmesh format specification
     if header.bv_node_count > 0 {
         bv_node_ptr_addr := uintptr(raw_data(data)) + uintptr(offset)
-        if bv_node_ptr_addr % uintptr(align_of(BV_Node)) != 0 {
-            log.errorf("BV node data alignment error: ptr=0x%x, required_align=%d", bv_node_ptr_addr, align_of(BV_Node))
-            return {.Invalid_Param}
-        }
-
+        if bv_node_ptr_addr % uintptr(align_of(BV_Node)) != 0 do return {.Invalid_Param}
         bv_node_ptr := cast(^BV_Node)(bv_node_ptr_addr)
         tile.bv_tree = slice.from_ptr(bv_node_ptr, int(header.bv_node_count))
         offset += size_of(BV_Node) * int(header.bv_node_count)
-
-        // Debug: Log first few BV tree nodes
-        log.infof("Parsed BV tree with %d nodes", header.bv_node_count)
-        for i in 0..<min(5, int(header.bv_node_count)) {
-            node := &tile.bv_tree[i]
-            log.infof("  BV node %d: bmin=[%d,%d,%d], bmax=[%d,%d,%d], i=%d",
-                      i, node.bmin[0], node.bmin[1], node.bmin[2],
-                      node.bmax[0], node.bmax[1], node.bmax[2], node.i)
-        }
     }
 
-    // Off-mesh connections - eighth data section per navmesh format specification
     if header.off_mesh_con_count > 0 {
         off_mesh_ptr_addr := uintptr(raw_data(data)) + uintptr(offset)
-        if off_mesh_ptr_addr % uintptr(align_of(Off_Mesh_Connection)) != 0 {
-            log.errorf("Off-mesh connection data alignment error: ptr=0x%x, required_align=%d", off_mesh_ptr_addr, align_of(Off_Mesh_Connection))
-            return {.Invalid_Param}
-        }
-
+        if off_mesh_ptr_addr % uintptr(align_of(Off_Mesh_Connection)) != 0 do return {.Invalid_Param}
         off_mesh_ptr := cast(^Off_Mesh_Connection)(off_mesh_ptr_addr)
         tile.off_mesh_cons = slice.from_ptr(off_mesh_ptr, int(header.off_mesh_con_count))
         offset += size_of(Off_Mesh_Connection) * int(header.off_mesh_con_count)
     }
 
-    // Verify that we've consumed the expected amount of data
-    expected_size := calculate_expected_tile_size(header)
-    if offset != expected_size {
-        log.warnf("Data layout size mismatch: consumed %d bytes, expected %d bytes", offset, expected_size)
-        // This is a warning rather than an error as some versions may have padding
-    }
 
-    // Initialize links free list
     tile.links_free_list = recast.DT_NULL_LINK
     if len(tile.links) > 0 {
         for i in 0..<len(tile.links) - 1 {
@@ -484,52 +353,22 @@ free_tile_data :: proc(tile: ^Mesh_Tile) {
 }
 
 connect_int_links :: proc(nav_mesh: ^Nav_Mesh, tile: ^Mesh_Tile) {
-    if tile.header == nil {
-        return
-    }
-
-    // log.debugf("connect_int_links: Processing tile with %d polygons, %d links available",
-    //           tile.header.poly_count, len(tile.links))
-
+    if tile.header == nil do return
     base := get_poly_ref_base(nav_mesh, tile)
-
-    links_created := 0
 
     for i in 0..<int(tile.header.poly_count) {
         poly := &tile.polys[i]
         poly.first_link = recast.DT_NULL_LINK
 
-        if poly_get_type(poly) == recast.DT_POLYTYPE_OFFMESH_CONNECTION {
-            continue
-        }
+        if poly_get_type(poly) == recast.DT_POLYTYPE_OFFMESH_CONNECTION do continue
 
-        // Validate polygon vertex count
-        if poly.vert_count > recast.DT_VERTS_PER_POLYGON {
-            log.errorf("Polygon %d has invalid vert_count %d (max %d), skipping polygon",
-                      i, poly.vert_count, recast.DT_VERTS_PER_POLYGON)
-            continue
-        }
+        if poly.vert_count > recast.DT_VERTS_PER_POLYGON do continue
 
-        // Build internal connections
         for j in 0..<int(poly.vert_count) {
             if poly.neis[j] != 0 {
-                neighbor_id: u16
+                neighbor_id := poly.neis[j] & 0x8000 != 0 ? poly.neis[j] & 0x7fff : poly.neis[j] - 1
 
-                // Check if this is marked with the 0x8000 flag (internal link in same tile)
-                if poly.neis[j] & 0x8000 != 0 {
-                    // Internal link within same tile - extract polygon index
-                    neighbor_id = poly.neis[j] & 0x7fff  // Remove the 0x8000 flag
-                } else {
-                    // Regular neighbor reference (1-based index)
-                    neighbor_id = poly.neis[j] - 1
-                }
-
-                // Validate neighbor reference
-                if neighbor_id >= u16(tile.header.poly_count) {
-                    log.warnf("Polygon %d edge %d has invalid neighbor %d (max %d)",
-                             i, j, neighbor_id, tile.header.poly_count - 1)
-                    continue
-                }
+                if neighbor_id >= u16(tile.header.poly_count) do continue
 
                 if link_idx, ok := allocate_link(tile, u32(i)); ok {
                     link := &tile.links[link_idx]
@@ -543,59 +382,38 @@ connect_int_links :: proc(nav_mesh: ^Nav_Mesh, tile: ^Mesh_Tile) {
                     link.next = poly.first_link
                     poly.first_link = link_idx
 
-                    links_created += 1
-                    // Debug: log link creation
-                    // log.infof("Created link: poly %d edge %d -> poly %d (ref=0x%x)", i, j, neighbor_id, link.ref)
-                } else {
-                    log.warnf("Failed to allocate link for poly %d edge %d -> poly %d", i, j, neighbor_id)
                 }
             }
         }
     }
-
-    // log.debugf("connect_int_links: Created %d links", links_created)
 }
 
 connect_ext_links :: proc(nav_mesh: ^Nav_Mesh, tile: ^Mesh_Tile) {
-    if tile.header == nil {
-        return
-    }
-
-    // Connect with neighbors in all 4 directions
-    for i in 0..<4 {
-        connect_ext_links_side(nav_mesh, tile, i)
-    }
+    if tile.header == nil do return
+    for i in 0..<4 do connect_ext_links_side(nav_mesh, tile, i)
 }
 
 connect_ext_links_side :: proc(nav_mesh: ^Nav_Mesh, tile: ^Mesh_Tile, side: int) {
-    if tile.header == nil {
-        return
-    }
+    if tile.header == nil do return
 
-    // Calculate neighbor tile coordinates based on side
     nx := tile.header.x
     ny := tile.header.y
 
     switch side {
-    case 0: nx += 1  // East
-    case 1: ny += 1  // North
-    case 2: nx -= 1  // West
-    case 3: ny -= 1  // South
+    case 0: nx += 1
+    case 1: ny += 1
+    case 2: nx -= 1
+    case 3: ny -= 1
     }
 
-    // Find neighbor tile
     neighbor := get_tile_at(nav_mesh, nx, ny, 0)
-    if neighbor == nil {
-        return
-    }
+    if neighbor == nil do return
 
-    // Find border segments on this tile's side
     MAX_VERTS :: 64
     verts: [MAX_VERTS * 2][3]f32
     nei: [MAX_VERTS * 2]recast.Poly_Ref
     nnei := 0
 
-    // Collect border vertices from this tile
     for i in 0..<tile.header.poly_count {
         poly := &tile.polys[i]
         nv := int(poly.vert_count)
@@ -622,52 +440,32 @@ connect_ext_links_side :: proc(nav_mesh: ^Nav_Mesh, tile: ^Mesh_Tile, side: int)
     }
 
     if nnei == 0 do return
-
-    // Find matching segments in neighbor tile
     for i in 0..<neighbor.header.poly_count {
         poly := &neighbor.polys[i]
 
-        // Validate neighbor polygon vertex count
-        if poly.vert_count > recast.DT_VERTS_PER_POLYGON {
-            log.warnf("Neighbor polygon %d has invalid vert_count %d, skipping", i, poly.vert_count)
-            continue
-        }
+        if poly.vert_count > recast.DT_VERTS_PER_POLYGON do continue
 
         nv := int(poly.vert_count)
 
         for j in 0..<nv {
             if poly.neis[j] != 0 do continue  // Not a border edge
 
-            // Validate vertex indices
-            if poly.verts[j] >= u16(neighbor.header.vert_count) ||
-               poly.verts[(j+1) % nv] >= u16(neighbor.header.vert_count) {
-                log.warnf("Neighbor polygon %d has invalid vertex indices", i)
-                continue
-            }
+            if poly.verts[j] >= u16(neighbor.header.vert_count) || poly.verts[(j+1) % nv] >= u16(neighbor.header.vert_count) do continue
 
-            // Check if this edge is on the opposite side
             va := neighbor.verts[poly.verts[j]]
             vb := neighbor.verts[poly.verts[(j+1) % nv]]
 
             opposite_side := (side + 2) % 4
-            if !is_edge_on_tile_border(va, vb, neighbor.header.bmin, neighbor.header.bmax, opposite_side) {
-                continue
-            }
+            if !is_edge_on_tile_border(va, vb, neighbor.header.bmin, neighbor.header.bmax, opposite_side) do continue
 
-            // Find matching segments
             for k in 0..<nnei-1 {
                 if segment_intersects(verts[k], verts[k+1], va, vb) {
                     // Create bidirectional link
                     poly_ref := get_poly_ref_base(nav_mesh, neighbor) | recast.Poly_Ref(i)
 
-                    // Validate polygon index
                     poly_idx := u32(nei[k] & recast.Poly_Ref(tile.header.poly_count - 1))
-                    if poly_idx >= u32(tile.header.poly_count) {
-                        log.warnf("Invalid polygon index %d for external link", poly_idx)
-                        continue
-                    }
+                    if poly_idx >= u32(tile.header.poly_count) do continue
 
-                    // Add link from this tile to neighbor
                     if link_idx, ok := allocate_link(tile, poly_idx); ok {
                         link := &tile.links[link_idx]
                         link.ref = poly_ref
@@ -676,11 +474,9 @@ connect_ext_links_side :: proc(nav_mesh: ^Nav_Mesh, tile: ^Mesh_Tile, side: int)
                         link.bmin = 0
                         link.bmax = 255
 
-                        // Add to polygon's link list
                         link.next = tile.polys[poly_idx].first_link
                         tile.polys[poly_idx].first_link = link_idx
 
-                        // Add reverse link from neighbor to this tile
                         if rev_link_idx, rev_ok := allocate_link(neighbor, u32(i)); rev_ok {
                             rev_link := &neighbor.links[rev_link_idx]
                             rev_link.ref = nei[k]

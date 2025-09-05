@@ -45,8 +45,6 @@ build_compact_heightfield :: proc(walkable_height, walkable_climb: i32,
     chf.border_size = 0
 
     chf.cells = make([]Compact_Cell, w * h)
-    chf.spans = nil
-    chf.areas = nil
 
     // Count spans and find max bottom
     max_spans := 0
@@ -67,9 +65,7 @@ build_compact_heightfield :: proc(walkable_height, walkable_climb: i32,
         }
     }
 
-    if span_count == 0 {
-        return true
-    }
+    if span_count == 0 do return true
 
     // Allocate spans
     chf.span_count = i32(span_count)
@@ -111,9 +107,7 @@ build_compact_heightfield :: proc(walkable_height, walkable_climb: i32,
                     set_con(s, dir, RC_NOT_CONNECTED)
                     nx := int(x) + int(get_dir_offset_x(dir))
                     ny := int(y) + int(get_dir_offset_y(dir))
-                    if nx < 0 || ny < 0 || nx >= int(w) || ny >= int(h) {
-                        continue
-                    }
+                    if nx < 0 || ny < 0 || nx >= int(w) || ny >= int(h) do continue
                     nc := &chf.cells[nx + ny * int(w)]
                     // Find connection
                     for k in nc.index..<nc.index + u32(nc.count) {

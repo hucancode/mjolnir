@@ -12,62 +12,29 @@ find_nearest_poly :: proc(query: ^Nav_Mesh_Query, center: [3]f32, half_extents: 
     (status: recast.Status, nearest_ref: recast.Poly_Ref, nearest_pt: [3]f32) {
     nearest_ref = recast.INVALID_POLY_REF
     nearest_pt = center
-    log.infof("find_nearest_poly: center=%v, half_extents=%v", center, half_extents)
-    // Calculate query bounds
     bmin := center - half_extents
     bmax := center + half_extents
-    // Find tiles that overlap query region
     tx0, ty0, _ := calc_tile_loc(query.nav_mesh, bmin)
     tx1, ty1, _ := calc_tile_loc(query.nav_mesh, bmax)
-    log.infof("find_nearest_poly: Searching tiles (%d,%d) to (%d,%d) for position %v", tx0, ty0, tx1, ty1, center)
     nearest_dist_sqr := f32(math.F32_MAX)
-    total_tiles_checked := 0
-    total_polys_checked := 0
-    // Search tiles
     for ty in ty0..=ty1 {
         for tx in tx0..=tx1 {
             tile := get_tile_at(query.nav_mesh, tx, ty, 0)
-            total_tiles_checked += 1
-            if tile == nil || tile.header == nil {
-                log.infof("  No tile at (%d,%d)", tx, ty)
-                continue
-            }
-            log.infof("  Found tile at (%d,%d) with %d polygons", tx, ty, tile.header.poly_count)
+            if tile == nil || tile.header == nil do continue
 
-            // Query polygons in tile using temp allocator
             poly_refs := make([]recast.Poly_Ref, 128)
             defer delete(poly_refs)
             poly_count := query_polygons_in_tile(query.nav_mesh, tile, bmin, bmax, poly_refs, 128, filter)
-            log.infof("  Query returned %d polygons", poly_count)
-            total_polys_checked += int(poly_count)
 
             for i in 0..<poly_count {
                 ref := poly_refs[i]
 
-                // Get tile and poly for closest point calculation
                 tile_poly, poly, poly_status := get_tile_and_poly_by_ref(query.nav_mesh, ref)
-                if recast.status_failed(poly_status) {
-                    continue
-                }
+                if recast.status_failed(poly_status) do continue
 
-                // Filter already applied in query_polygons_in_tile
-
-                // Find closest point on polygon
                 closest_pt, inside := closest_point_on_polygon(tile_poly, poly, center)
-
-                // Calculate distance
                 dist_sqr := linalg.length2(center - closest_pt)
 
-                // Debug logging for start position case
-                when ODIN_DEBUG {
-                    if math.abs(center[0] - (-3.0)) < 0.1 && math.abs(center[2] - (-3.0)) < 0.1 {
-                        _, _, poly_idx := decode_poly_id(query.nav_mesh, ref)
-                        log.infof("  Poly %d (ref=0x%x): closest_pt=(%.2f,%.2f,%.2f) dist_sqr=%.2f inside=%v",
-                                 poly_idx, ref, closest_pt[0], closest_pt[1], closest_pt[2], dist_sqr, inside)
-                    }
-                }
-
-                // Check if this is the nearest so far
                 if dist_sqr < nearest_dist_sqr {
                     nearest_dist_sqr = dist_sqr
                     nearest_ref = ref
@@ -77,44 +44,24 @@ find_nearest_poly :: proc(query: ^Nav_Mesh_Query, center: [3]f32, half_extents: 
         }
     }
 
-    log.infof("find_nearest_poly: Checked %d tiles, %d polygons total. nearest_ref=0x%x, dist_sqr=%f",
-              total_tiles_checked, total_polys_checked, nearest_ref, nearest_dist_sqr)
-    // Return success even if no polygon was found - caller can check if nearest_ref is valid
     return {.Success}, nearest_ref, nearest_pt
 }
 
-// Query polygons within bounding box
 query_polygons :: proc(query: ^Nav_Mesh_Query, center: [3]f32, half_extents: [3]f32,
                          filter: ^Query_Filter, polys: []recast.Poly_Ref) -> (status: recast.Status, poly_count: i32) {
-
     poly_count = 0
-
-    // Calculate query bounds
     bmin := center - half_extents
     bmax := center + half_extents
-
-    // Find tiles that overlap query region
     tx0, ty0, _ := calc_tile_loc(query.nav_mesh, bmin)
     tx1, ty1, _ := calc_tile_loc(query.nav_mesh, bmax)
-
-    // Search tiles
     for ty in ty0..=ty1 {
         for tx in tx0..=tx1 {
             tile := get_tile_at(query.nav_mesh, tx, ty, 0)
-            if tile == nil || tile.header == nil {
-                // log.infof("  No tile at (%d,%d)", tx, ty)
-                continue
-            }
-            // log.infof("  Found tile at (%d,%d) with %d polygons", tx, ty, tile.header.poly_count)
+            if tile == nil || tile.header == nil do continue
 
-            // Query polygons in tile
             remaining := i32(len(polys)) - poly_count
-            if remaining <= 0 {
-                break
-            }
-            tile_poly_count := query_polygons_in_tile(query.nav_mesh, tile, bmin, bmax,
-                                                        polys[poly_count:], remaining, filter)
-            // Filter already applied in query_polygons_in_tile, no post-processing needed
+            if remaining <= 0 do break
+            tile_poly_count := query_polygons_in_tile(query.nav_mesh, tile, bmin, bmax, polys[poly_count:], remaining, filter)
             poly_count += tile_poly_count
         }
     }
@@ -122,20 +69,14 @@ query_polygons :: proc(query: ^Nav_Mesh_Query, center: [3]f32, half_extents: [3]
     return {.Success}, poly_count
 }
 
-// Raycast along navigation mesh surface
 raycast :: proc(query: ^Nav_Mesh_Query, start_ref: recast.Poly_Ref, start_pos, end_pos: [3]f32, filter: ^Query_Filter, options: u32,
-                  path: []recast.Poly_Ref, max_path: i32) -> (status: recast.Status,
-                                                                   hit: Raycast_Hit,
-                                                                   path_count: i32) {
-
+                  path: []recast.Poly_Ref, max_path: i32) -> (status: recast.Status, hit: Raycast_Hit, path_count: i32) {
     path_count = 0
     hit.t = math.F32_MAX
     hit.path_cost = 0
     hit.hit_edge_index = -1
 
-    if !is_valid_poly_ref(query.nav_mesh, start_ref) {
-        return {.Invalid_Param}, hit, 0
-    }
+    if !is_valid_poly_ref(query.nav_mesh, start_ref) do return {.Invalid_Param}, hit, 0
 
     cur_ref := start_ref
     cur_pos := start_pos
@@ -143,14 +84,12 @@ raycast :: proc(query: ^Nav_Mesh_Query, start_ref: recast.Poly_Ref, start_pos, e
     ray_len := linalg.length(dir)
 
     if ray_len < 1e-6 {
-        // Zero-length ray should have t=0
         hit.t = 0.0
         return {.Success}, hit, path_count
     }
 
     ray_dir := dir / ray_len
 
-    // Add start polygon to path
     if max_path > 0 {
         path[0] = start_ref
         path_count = 1
@@ -159,13 +98,9 @@ raycast :: proc(query: ^Nav_Mesh_Query, start_ref: recast.Poly_Ref, start_pos, e
     cur_t := f32(0)
 
     for cur_t < ray_len {
-        // Get current polygon
         tile, poly, poly_status := get_tile_and_poly_by_ref(query.nav_mesh, cur_ref)
-        if recast.status_failed(poly_status) {
-            break
-        }
+        if recast.status_failed(poly_status) do break
 
-        // Find intersection with polygon edges
         next_ref := recast.INVALID_POLY_REF
         next_t := ray_len
         hit_edge := -1
@@ -174,15 +109,13 @@ raycast :: proc(query: ^Nav_Mesh_Query, start_ref: recast.Poly_Ref, start_pos, e
             va := tile.verts[poly.verts[i]]
             vb := tile.verts[poly.verts[(i + 1) % int(poly.vert_count)]]
 
-            // Test ray intersection with edge
             edge_t, intersects := geometry.ray_segment_intersect_2d(cur_pos, ray_dir, va, vb)
 
             if intersects && edge_t > cur_t && edge_t < next_t {
-                // Check if there's a neighbor across this edge
                 link := poly.first_link
                 neighbor_found := false
                 link_iterations := 0
-                max_link_iterations := 32  // Safety limit to prevent infinite loops
+                max_link_iterations := 32
 
                 for link != recast.DT_NULL_LINK && link_iterations < max_link_iterations {
                     link_iterations += 1
@@ -204,37 +137,26 @@ raycast :: proc(query: ^Nav_Mesh_Query, start_ref: recast.Poly_Ref, start_pos, e
                 }
 
                 if !neighbor_found {
-                    // Hit a wall
                     hit.t = edge_t
                     hit.hit_edge_index = i32(i)
-
-                    // Calculate hit normal
                     edge_dir := vb - va
-                    hit.hit_normal = {edge_dir.z, 0, -edge_dir.x} // Perpendicular in 2D
-                    hit.hit_normal = linalg.normalize(hit.hit_normal)
-
+                    hit.hit_normal = linalg.normalize([3]f32{edge_dir.z, 0, -edge_dir.x})
                     return {.Success}, hit, path_count
                 }
             }
         }
 
-        if next_ref == recast.INVALID_POLY_REF {
-            // No more intersections, ray ends in current polygon
-            break
-        }
+        if next_ref == recast.INVALID_POLY_REF do break
 
-        // Move to next polygon
         cur_ref = next_ref
         cur_t = next_t
         cur_pos = start_pos + ray_dir * cur_t
 
-        // Add to path
         if path_count < max_path {
             path[path_count] = cur_ref
             path_count += 1
         }
 
-        // Calculate cost if requested
         if (options & recast.DT_RAYCAST_USE_COSTS) != 0 {
             prev_cost := hit.path_cost
             segment_cost := query_filter_get_cost(filter,
@@ -247,7 +169,6 @@ raycast :: proc(query: ^Nav_Mesh_Query, start_ref: recast.Poly_Ref, start_pos, e
         }
     }
 
-    // Ray completed without hitting walls
     hit.t = ray_len
     return {.Success}, hit, path_count
 }
@@ -308,50 +229,30 @@ find_random_point_around_circle :: proc(query: ^Nav_Mesh_Query, start_ref: recas
     return
 }
 
-// Helper functions
-
 query_polygons_in_tile :: proc(nav_mesh: ^Nav_Mesh, tile: ^Mesh_Tile, qmin, qmax: [3]f32,
-                                 polys: []recast.Poly_Ref, max_polys: i32,
-                                 filter: ^Query_Filter) -> i32 {
-
-    // For now, always use brute force to verify the BV tree issue
-    // log.infof("    Using brute force for polygon query")
-
-    // Fallback: test all polygons
+                                 polys: []recast.Poly_Ref, max_polys: i32, filter: ^Query_Filter) -> i32 {
     count := i32(0)
     base := get_poly_ref_base(nav_mesh, tile)
 
     for i in 0..<int(tile.header.poly_count) {
         if count >= max_polys do break
-
         poly := &tile.polys[i]
         ref := base | recast.Poly_Ref(i)
+        if filter != nil && !query_filter_pass_filter(filter, ref, tile, poly) do continue
 
-        if filter != nil && !query_filter_pass_filter(filter, ref, tile, poly) {
-            continue
-        }
-
-        // Calculate polygon bounds
         poly_min := [3]f32{math.F32_MAX, math.F32_MAX, math.F32_MAX}
         poly_max := [3]f32{-math.F32_MAX, -math.F32_MAX, -math.F32_MAX}
 
         for j in 0..<int(poly.vert_count) {
-            // Validate vertex index to prevent array bounds errors
             vertex_idx := poly.verts[j]
-            if vertex_idx >= u16(len(tile.verts)) {
-                log.warnf("Polygon %d vertex %d has invalid index %d (max %d), skipping polygon",
-                         i, j, vertex_idx, len(tile.verts) - 1)
-                break
-            }
-
+            if vertex_idx >= u16(len(tile.verts)) do break
             vert := tile.verts[vertex_idx]
             poly_min = linalg.min(poly_min, vert)
             poly_max = linalg.max(poly_max, vert)
         }
 
-        // Test spatial overlap AFTER filter passes
         if geometry.overlap_bounds(qmin, qmax, poly_min, poly_max) {
-            polys[count] = ref  // Direct assignment, no overlap possible
+            polys[count] = ref
             count += 1
         }
     }
@@ -361,30 +262,13 @@ query_polygons_in_tile :: proc(nav_mesh: ^Nav_Mesh, tile: ^Mesh_Tile, qmin, qmax
 
 query_polygons_in_tile_bv :: proc(nav_mesh: ^Nav_Mesh, tile: ^Mesh_Tile, qmin, qmax: [3]f32,
                                     polys: []recast.Poly_Ref, max_polys: i32) -> i32 {
-    // BV tree traversal for spatial queries
     count := i32(0)
     base := get_poly_ref_base(nav_mesh, tile)
-
-    // Convert query bounds to quantized space
     factor := tile.header.bv_quant_factor
     iqmin := geometry.quantize_float(qmin - tile.header.bmin, factor)
     iqmax := geometry.quantize_float(qmax - tile.header.bmin, factor)
-    log.infof("    BV tree: qmin=%v qmax=%v, tile.bmin=%v, bmax=%v, factor=%v", qmin, qmax, tile.header.bmin, tile.header.bmax, factor)
-    log.infof("    BV tree: iqmin=%v iqmax=%v", iqmin, iqmax)
 
-    // Debug: Show some polygon vertices
-    if len(tile.verts) > 0 && len(tile.polys) > 0 {
-        log.infof("    First polygon has %d verts, showing first vertex:", tile.polys[0].vert_count)
-        if tile.polys[0].vert_count > 0 {
-            vert_idx := tile.polys[0].verts[0]
-            if int(vert_idx) < len(tile.verts) {
-                v := tile.verts[vert_idx]
-                log.infof("      Vertex %d: world pos %v", vert_idx, v)
-            }
-        }
-    }
 
-    // Traverse BV tree
     stack := make([]i32, 32)
     defer delete(stack)
     stack_size := 0
@@ -398,48 +282,27 @@ query_polygons_in_tile_bv :: proc(nav_mesh: ^Nav_Mesh, tile: ^Mesh_Tile, qmin, q
         node_index := stack[stack_size - 1]
         stack_size -= 1
 
-        if node_index < 0 || node_index >= i32(len(tile.bv_tree)) {
-            continue
-        }
+        if node_index < 0 || node_index >= i32(len(tile.bv_tree)) do continue
 
         node := &tile.bv_tree[node_index]
 
-        // Convert node bounds to i32
         node_min := [3]i32{i32(node.bmin[0]), i32(node.bmin[1]), i32(node.bmin[2])}
         node_max := [3]i32{i32(node.bmax[0]), i32(node.bmax[1]), i32(node.bmax[2])}
-
         overlap := geometry.overlap_quantized_bounds(iqmin, iqmax, node_min, node_max)
-        if node_index < 10 {
-            log.infof("      BV node %d: bounds %v-%v, overlap=%t, leaf=%t",
-                      node_index, node_min, node_max, overlap, node.i >= 0)
-        }
 
-        if !overlap {
-            continue
-        }
+        if !overlap do continue
 
         if node.i >= 0 {
-            // Leaf node, add polygon
             if count < max_polys {
                 polys[count] = base | recast.Poly_Ref(node.i)
                 count += 1
-                if node_index < 5 {
-                    log.infof("      Added polygon %d from leaf node %d", node.i, node_index)
-                }
             }
         } else {
-            // Internal node, add children to stack
             child1 := (-node.i) - 1
             child2 := child1 + 1
-
-            if node_index < 5 {
-                log.infof("      Internal node %d: children %d, %d", node_index, child1, child2)
-            }
-
             if stack_size < 30 && child1 >= 0 && child1 < i32(len(tile.bv_tree)) {
                 stack[stack_size] = child1
                 stack_size += 1
-
                 if stack_size < 30 && child2 >= 0 && child2 < i32(len(tile.bv_tree)) {
                     stack[stack_size] = child2
                     stack_size += 1
@@ -452,33 +315,24 @@ query_polygons_in_tile_bv :: proc(nav_mesh: ^Nav_Mesh, tile: ^Mesh_Tile, qmin, q
 }
 
 closest_point_on_polygon :: proc(tile: ^Mesh_Tile, poly: ^Poly, pos: [3]f32) -> ([3]f32, bool) {
-    // Build polygon vertices
     verts := make([][3]f32, poly.vert_count)
     defer delete(verts)
     for i in 0..<int(poly.vert_count) {
         verts[i] = tile.verts[poly.verts[i]]
     }
-    // Check if point is inside using 2D test
     inside := geometry.point_in_polygon_2d(pos, verts)
     if inside {
-        // Point is inside polygon, use it directly but with polygon's Y height
-        // Find the Y height at this XZ position (simplified: use average of vertices)
         avg_y := f32(0)
-        for v in verts {
-            avg_y += v.y
-        }
+        for v in verts do avg_y += v.y
         avg_y /= f32(len(verts))
         return {pos.x, avg_y, pos.z}, true
     }
-    // Point is outside, find closest point on polygon edges
     closest := pos
     closest_dist_sqr := f32(math.F32_MAX)
     for i in 0..<int(poly.vert_count) {
-        va := verts[i]
-        vb := verts[(i + 1) % int(poly.vert_count)]
+        va, vb := verts[i], verts[(i + 1) % int(poly.vert_count)]
         edge_closest := geometry.closest_point_on_segment_2d(pos, va, vb)
-        d := edge_closest - pos
-        dist_sqr := linalg.length2(d.xz)
+        dist_sqr := linalg.length2((edge_closest - pos).xz)
         if dist_sqr < closest_dist_sqr {
             closest_dist_sqr = dist_sqr
             closest = edge_closest
@@ -487,81 +341,51 @@ closest_point_on_polygon :: proc(tile: ^Mesh_Tile, poly: ^Poly, pos: [3]f32) -> 
     return closest, false
 }
 
-// Get height of polygon at given position using detail mesh
 get_poly_height :: proc(query: ^Nav_Mesh_Query, ref: recast.Poly_Ref, pos: [3]f32) -> (height: f32, status: recast.Status) {
-    if !is_valid_poly_ref(query.nav_mesh, ref) {
-        return 0, {.Invalid_Param}
-    }
+    if !is_valid_poly_ref(query.nav_mesh, ref) do return 0, {.Invalid_Param}
     tile, poly, poly_status := get_tile_and_poly_by_ref(query.nav_mesh, ref)
-    if recast.status_failed(poly_status) {
-        return 0, poly_status
-    }
-    // If no detail mesh, use polygon vertices for height calculation
+    if recast.status_failed(poly_status) do return 0, poly_status
     if tile.detail_meshes == nil || len(tile.detail_meshes) == 0 {
-        // Calculate average height of polygon vertices
         avg_height := f32(0)
-        for i in 0..<int(poly.vert_count) {
-            avg_height += tile.verts[poly.verts[i]].y
-        }
+        for i in 0..<int(poly.vert_count) do avg_height += tile.verts[poly.verts[i]].y
         return avg_height / f32(poly.vert_count), {.Success}
     }
-    // Get detail mesh for this polygon
     poly_index := u32(ref) & u32(tile.header.poly_count - 1)
-    if poly_index >= u32(len(tile.detail_meshes)) {
-        return 0, {.Invalid_Param}
-    }
+    if poly_index >= u32(len(tile.detail_meshes)) do return 0, {.Invalid_Param}
     detail := &tile.detail_meshes[poly_index]
-    // Find which detail triangle contains the position
     for i in 0..<int(detail.tri_count) {
         tri_idx := detail.tri_base + u32(i)
-        if tri_idx >= u32(len(tile.detail_tris)) {
-            continue
-        }
+        if tri_idx >= u32(len(tile.detail_tris)) do continue
         tri := &tile.detail_tris[tri_idx]
-        // Get vertices of detail triangle
         verts: [3][3]f32
         for j in 0..<3 {
             if tri[j] < poly.vert_count {
-                // Use polygon vertex
                 verts[j] = tile.verts[poly.verts[tri[j]]]
             } else {
-                // Use detail vertex
                 detail_vert_idx := detail.vert_base + u32(tri[j] - poly.vert_count)
                 if detail_vert_idx < u32(len(tile.detail_verts)) {
                     verts[j] = tile.detail_verts[detail_vert_idx]
                 }
             }
         }
-        // Check if point is inside triangle (2D test in XZ plane)
         if geometry.point_in_triangle_2d(pos, verts[0], verts[1], verts[2]) {
-            // Calculate barycentric coordinates and interpolate height
             bary := geometry.barycentric_2d(pos, verts[0], verts[1], verts[2])
-            height = verts[0].y * bary[0] + verts[1].y * bary[1] + verts[2].y * bary[2]
+            height = linalg.vector_dot(bary, [3]f32{verts[0].y, verts[1].y, verts[2].y})
             return height, {.Success}
         }
     }
-    // Fallback: use polygon center height
     center := calc_poly_center(tile, poly)
     return center.y, {.Success}
 }
 
-// Find distance from position to nearest wall
 find_distance_to_wall :: proc(query: ^Nav_Mesh_Query, start_ref: recast.Poly_Ref, center_pos: [3]f32,
                                max_radius: f32, filter: ^Query_Filter) -> (hit_dist: f32, hit_pos: [3]f32, hit_normal: [3]f32, status: recast.Status) {
-
-    if !is_valid_poly_ref(query.nav_mesh, start_ref) {
-        return 0, {}, {}, {.Invalid_Param}
-    }
+    if !is_valid_poly_ref(query.nav_mesh, start_ref) do return 0, {}, {}, {.Invalid_Param}
 
     hit_dist = max_radius
-    hit_normal = {0, 0, 0}
-
-    // Use visited flags to avoid cycles
     visited := make(map[recast.Poly_Ref]bool)
     defer delete(visited)
     visited[start_ref] = true
-
-    // Stack for traversal
     stack := make([]recast.Poly_Ref, 256)
     defer delete(stack)
     stack_size := 1
@@ -570,18 +394,11 @@ find_distance_to_wall :: proc(query: ^Nav_Mesh_Query, start_ref: recast.Poly_Ref
     for stack_size > 0 {
         stack_size -= 1
         cur_ref := stack[stack_size]
-
         tile, poly, poly_status := get_tile_and_poly_by_ref(query.nav_mesh, cur_ref)
-        if recast.status_failed(poly_status) {
-            continue
-        }
+        if recast.status_failed(poly_status) do continue
 
-        // Check all edges of current polygon
         for i in 0..<int(poly.vert_count) {
-            va := tile.verts[poly.verts[i]]
-            vb := tile.verts[poly.verts[(i+1) % int(poly.vert_count)]]
-
-            // Check if this edge is a wall (no neighbor)
+            va, vb := tile.verts[poly.verts[i]], tile.verts[poly.verts[(i+1) % int(poly.vert_count)]]
             is_wall := true
             poly_idx := get_poly_index(query.nav_mesh, cur_ref)
             link := get_first_link(tile, i32(poly_idx))
@@ -592,7 +409,6 @@ find_distance_to_wall :: proc(query: ^Nav_Mesh_Query, start_ref: recast.Poly_Ref
                     if query_filter_pass_filter(filter, neighbor_ref, nil, nil) {
                         is_wall = false
 
-                        // Add neighbor to stack if not visited
                         if _, exists := visited[neighbor_ref]; !exists && stack_size < 255 {
                             visited[neighbor_ref] = true
                             stack[stack_size] = neighbor_ref
@@ -605,27 +421,19 @@ find_distance_to_wall :: proc(query: ^Nav_Mesh_Query, start_ref: recast.Poly_Ref
             }
 
             if is_wall {
-                // Calculate distance to edge
                 closest := geometry.closest_point_on_segment_2d(center_pos, va, vb)
                 dist := linalg.length(center_pos - closest)
-
                 if dist < hit_dist {
                     hit_dist = dist
                     hit_pos = closest
-
-                    // Calculate normal (perpendicular to edge)
                     edge := vb - va
-                    hit_normal = {edge.z, 0, -edge.x}
-                    hit_normal = linalg.normalize(hit_normal)
+                    hit_normal = linalg.normalize([3]f32{edge.z, 0, -edge.x})
                 }
             }
         }
 
-        // Early exit if we've searched far enough
         center := calc_poly_center(tile, poly)
-        if linalg.length(center - center_pos) > max_radius {
-            break
-        }
+        if linalg.length(center - center_pos) > max_radius do break
     }
 
     return hit_dist, hit_pos, hit_normal, {.Success}
