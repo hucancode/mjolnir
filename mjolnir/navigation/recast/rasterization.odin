@@ -65,19 +65,13 @@ add_span :: proc(hf: ^Heightfield, x, z: i32, smin, smax: u16, area_id: u8, flag
         new_span.smin = min(new_span.smin, current_span.smin)
         new_span.smax = max(new_span.smax, current_span.smax)
         // Merge area flags
-        // The C++ checks the difference between the MERGED newSpan->smax and currentSpan->smax
         if abs(i32(new_span.smax) - i32(current_span.smax)) <= flag_merge_threshold {
-            // If within threshold, take max area
             new_span.area = max(new_span.area, current_span.area)
         }
-        // Don't update previous_span when merging
         current_span = current_span.next
     }
-    // Apply merges if any
     if merge_start != nil {
-        // Save the next pointer after merge_end before modifying the list
         next_after_merge := merge_end.next
-        // Free merged spans - be careful not to free past merge_end
         current := merge_start
         for current != nil {
             next := current.next
@@ -85,7 +79,6 @@ add_span :: proc(hf: ^Heightfield, x, z: i32, smin, smax: u16, area_id: u8, flag
             if current == merge_end do break
             current = next
         }
-        // Insert new merged span
         new_span.next = next_after_merge
         if insert_after != nil {
             insert_after.next = new_span
@@ -93,7 +86,6 @@ add_span :: proc(hf: ^Heightfield, x, z: i32, smin, smax: u16, area_id: u8, flag
             hf.spans[column_index] = new_span
         }
     } else {
-        // No merge - just insert new span
         if insert_after != nil {
             new_span.next = insert_after.next
             insert_after.next = new_span
@@ -123,18 +115,13 @@ divide_poly :: proc(in_verts, out_verts1, out_verts2: [][3]f32, axis_offset: f32
 
         if !same_side {
             s := in_vert_axis_delta[in_vert_b] / (in_vert_axis_delta[in_vert_b] - in_vert_axis_delta[in_vert_a])
-            // Interpolate between vertices
             vert_a := in_verts[in_vert_a]
             vert_b := in_verts[in_vert_b]
             interpolated := linalg.mix(vert_b, vert_a, s)
             out_verts1[poly1_vert_count] = interpolated
-
-            // Copy to second polygon
             out_verts2[poly2_vert_count] = interpolated
             poly1_vert_count += 1
             poly2_vert_count += 1
-
-            // Add the in_vert_a point to the right polygon
             if in_vert_axis_delta[in_vert_a] > 0 {
                 out_verts1[poly1_vert_count] = in_verts[in_vert_a]
                 poly1_vert_count += 1
@@ -143,13 +130,10 @@ divide_poly :: proc(in_verts, out_verts1, out_verts2: [][3]f32, axis_offset: f32
                 poly2_vert_count += 1
             }
         } else {
-            // Add the in_vert_a point to the right polygon
             if in_vert_axis_delta[in_vert_a] >= 0 {
                 out_verts1[poly1_vert_count] = in_verts[in_vert_a]
                 poly1_vert_count += 1
-                if in_vert_axis_delta[in_vert_a] != 0 {
-                    continue
-                }
+                if in_vert_axis_delta[in_vert_a] != 0 do continue
             }
             out_verts2[poly2_vert_count] = in_verts[in_vert_a]
             poly2_vert_count += 1
@@ -158,28 +142,23 @@ divide_poly :: proc(in_verts, out_verts1, out_verts2: [][3]f32, axis_offset: f32
     return
 }
 
-// Rasterize a single triangle to the heightfield.
-// This code is extremely hot, so much care should be given to maintaining maximum perf here.
 rasterize_triangle_with_inverse_cs :: proc(v0, v1, v2: [3]f32, area_id: u8,
                      hf: ^Heightfield,
                      hf_bb_min, hf_bb_max: [3]f32,
                      cell_size, inverse_cell_size, inverse_cell_height: f32,
                      flag_merge_threshold: i32) -> bool {
-    // Calculate the bounding box of the triangle
     tri_bb_min := linalg.min(v0, v1, v2)
     tri_bb_max := linalg.max(v0, v1, v2)
-    // If the triangle does not touch the bounding box of the heightfield, skip the triangle
-    if !geometry.overlap_bounds(tri_bb_min, tri_bb_max, hf_bb_min, hf_bb_max) {
-        return true
-    }
+    if !geometry.overlap_bounds(tri_bb_min, tri_bb_max, hf_bb_min, hf_bb_max) do return true
 
     w := hf.width
     h := hf.height
     by := hf_bb_max.y - hf_bb_min.y
 
-    // Calculate the footprint of the triangle on the grid's z-axis
-    z0 := i32((tri_bb_min.z - hf_bb_min.z) * inverse_cell_size)
-    z1 := i32((tri_bb_max.z - hf_bb_min.z) * inverse_cell_size)
+    tri_rel_min := tri_bb_min - hf_bb_min
+    tri_rel_max := tri_bb_max - hf_bb_min
+    z0 := i32(tri_rel_min.z * inverse_cell_size)
+    z1 := i32(tri_rel_max.z * inverse_cell_size)
 
     // use -1 rather than 0 to cut the polygon properly at the start of the tile
     z0 = clamp(z0, -1, h - 1)

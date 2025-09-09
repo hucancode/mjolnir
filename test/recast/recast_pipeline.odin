@@ -60,16 +60,14 @@ test_nav_test_mesh :: proc(t: ^testing.T) {
     fmt.printf("  Grid size: %d x %d\n", cfg.width, cfg.height)
 
     // Build heightfield
-    hf := new(recast.Heightfield)
-    defer recast.free_heightfield(hf)
-
-    ok = recast.create_heightfield(hf, cfg.width, cfg.height,
+    hf := recast.create_heightfield(cfg.width, cfg.height,
                                cfg.bmin, cfg.bmax, cfg.cs, cfg.ch)
-    testing.expect(t, ok, "Failed to create heightfield")
+    defer recast.free_heightfield(hf)
+    testing.expect(t, hf != nil, "Failed to create heightfield")
 
     // Rasterize (areas already marked by load_obj_to_navmesh_input)
     ok = recast.rasterize_triangles(vertices, indices, areas, hf, cfg.walkable_climb)
-    testing.expect(t, ok, "Failed to rasterize triangles")
+    testing.expect(t, hf != nil, "Failed to rasterize triangles")
 
     // Filter
     recast.filter_low_hanging_walkable_obstacles(int(cfg.walkable_climb), hf)
@@ -77,11 +75,9 @@ test_nav_test_mesh :: proc(t: ^testing.T) {
     recast.filter_walkable_low_height_spans(int(cfg.walkable_height), hf)
 
     // Build compact heightfield
-    chf := new(recast.Compact_Heightfield)
+    chf := recast.create_compact_heightfield(cfg.walkable_height, cfg.walkable_climb, hf)
     defer recast.free_compact_heightfield(chf)
-
-    ok = recast.build_compact_heightfield(cfg.walkable_height, cfg.walkable_climb, hf, chf)
-    testing.expect(t, ok, "Failed to build compact heightfield")
+    testing.expect(t, chf != nil, "Failed to build compact heightfield")
 
     // Check for multiple levels
     max_layers := 0
@@ -152,11 +148,9 @@ test_nav_test_mesh :: proc(t: ^testing.T) {
     fmt.printf("    Large regions (>200 spans): %d\n", large_regions)
 
     // Build contours
-    cset := new(recast.Contour_Set)
+    cset := recast.create_contour_set(chf, cfg.max_simplification_error, cfg.max_edge_len)
     defer recast.free_contour_set(cset)
-
-    ok = recast.build_contours(chf, cfg.max_simplification_error, cfg.max_edge_len, cset)
-    testing.expect(t, ok, "Failed to build contours")
+    testing.expect(t, cset != nil, "Failed to build contours")
 
     // Analyze contours
     min_verts, max_verts := i32(999999), i32(0)
@@ -168,11 +162,9 @@ test_nav_test_mesh :: proc(t: ^testing.T) {
         total_verts += int(verts)
     }
     // Build polygon mesh
-    pmesh := new(recast.Poly_Mesh)
+    pmesh := recast.create_poly_mesh(cset, cfg.max_verts_per_poly)
     defer recast.free_poly_mesh(pmesh)
-
-    ok = recast.build_poly_mesh(cset, cfg.max_verts_per_poly, pmesh)
-    testing.expect(t, ok, "Failed to build poly mesh")
+    testing.expect(t, pmesh != nil, "Failed to build poly mesh")
 
     // Analyze polygon mesh regions
     poly_regions := make([]int, 256)
@@ -269,11 +261,9 @@ test_nav_test_mesh :: proc(t: ^testing.T) {
         }
     }
     testing.expectf(t, island_count > 0, "island count should be > 0")
-    dmesh := new(recast.Poly_Mesh_Detail)
+    dmesh := recast.create_poly_mesh_detail(pmesh, chf, cfg.detail_sample_dist, cfg.detail_sample_max_error)
     defer recast.free_poly_mesh_detail(dmesh)
-    ok = recast.build_poly_mesh_detail(pmesh, chf, cfg.detail_sample_dist,
-                                   cfg.detail_sample_max_error, dmesh)
-    testing.expectf(t, ok, "failed to build poly mesh detail")
+    testing.expectf(t, dmesh != nil, "failed to build poly mesh detail")
 }
 
 // Test with dungeon.obj - complex indoor environment
@@ -307,44 +297,40 @@ test_dungeon_mesh :: proc(t: ^testing.T) {
     cfg.width, cfg.height = recast.calc_grid_size(cfg.bmin, cfg.bmax, cfg.cs)
     testing.expectf(t, cfg.width > 0 && cfg.height > 0, "Grid size should be > 0: %d x %d\n", cfg.width, cfg.height)
     // Step 1: Build heightfield
-    hf := new(recast.Heightfield)
+    hf := recast.create_heightfield(cfg.width, cfg.height, cfg.bmin, cfg.bmax, cfg.cs, cfg.ch)
     defer recast.free_heightfield(hf)
-    ok = recast.create_heightfield(hf, cfg.width, cfg.height, cfg.bmin, cfg.bmax, cfg.cs, cfg.ch)
-    testing.expect(t, ok, "Failed to create heightfield")
+    testing.expect(t, hf != nil, "Failed to create heightfield")
     // Step 2: Rasterize triangles
     ok = recast.rasterize_triangles(vertices, indices, areas, hf, cfg.walkable_climb)
-    testing.expect(t, ok, "Failed to rasterize triangles")
+    testing.expect(t, hf != nil, "Failed to rasterize triangles")
     // Step 3: Filter walkable surfaces
     recast.filter_low_hanging_walkable_obstacles(int(cfg.walkable_climb), hf)
     recast.filter_ledge_spans(int(cfg.walkable_height), int(cfg.walkable_climb), hf)
     recast.filter_walkable_low_height_spans(int(cfg.walkable_height), hf)
     // Step 4: Build compact heightfield
-    chf := new(recast.Compact_Heightfield)
+    chf := recast.create_compact_heightfield(cfg.walkable_height, cfg.walkable_climb, hf)
     defer recast.free_compact_heightfield(chf)
-    ok = recast.build_compact_heightfield(cfg.walkable_height, cfg.walkable_climb, hf, chf)
-    testing.expect(t, ok, "Failed to build compact heightfield")
+    testing.expect(t, chf != nil, "Failed to build compact heightfield")
     // Step 5: Erode walkable area
     recast.erode_walkable_area(cfg.walkable_radius, chf)
     // Step 6: Build distance field and regions (standard approach, NOT layers)
     recast.build_distance_field(chf)
     recast.build_regions(chf, 0, cfg.min_region_area, cfg.merge_region_area)
     // Count regions created
-    max_region := 0
-    for i in 0..<chf.span_count {
-        if int(chf.spans[i].reg) > max_region {
-            max_region = int(chf.spans[i].reg)
+    max_region := chf.spans[0].reg
+    for i in 1..<chf.span_count {
+        if chf.spans[i].reg > max_region {
+            max_region = chf.spans[i].reg
         }
     }
     // Step 7: Build contours
-    cset := new(recast.Contour_Set)
+    cset := recast.create_contour_set(chf, cfg.max_simplification_error, cfg.max_edge_len)
     defer recast.free_contour_set(cset)
-    ok = recast.build_contours(chf, cfg.max_simplification_error, cfg.max_edge_len, cset)
-    testing.expect(t, ok, "Failed to build contours")
+    testing.expect(t, cset != nil, "Failed to build contours")
     // Step 8: Build polygon mesh
-    pmesh := new(recast.Poly_Mesh)
+    pmesh := recast.create_poly_mesh(cset, cfg.max_verts_per_poly)
     defer recast.free_poly_mesh(pmesh)
-    ok = recast.build_poly_mesh(cset, cfg.max_verts_per_poly, pmesh)
-    testing.expect(t, ok, "Failed to build poly mesh")
+    testing.expect(t, pmesh != nil, "Failed to build poly mesh")
 }
 
 // Test with floor_with_5_obstacles.obj
@@ -376,25 +362,21 @@ test_floor_with_obstacles :: proc(t: ^testing.T) {
     cfg.detail_sample_max_error = 1.0
     cfg.width, cfg.height = recast.calc_grid_size(cfg.bmin, cfg.bmax, cfg.cs)
     // Full pipeline
-    hf := new(recast.Heightfield)
+    hf := recast.create_heightfield(cfg.width, cfg.height, cfg.bmin, cfg.bmax, cfg.cs, cfg.ch)
     defer recast.free_heightfield(hf)
-    recast.create_heightfield(hf, cfg.width, cfg.height, cfg.bmin, cfg.bmax, cfg.cs, cfg.ch)
     recast.rasterize_triangles(vertices, indices, areas, hf, cfg.walkable_climb)
     recast.filter_low_hanging_walkable_obstacles(int(cfg.walkable_climb), hf)
     recast.filter_ledge_spans(int(cfg.walkable_height), int(cfg.walkable_climb), hf)
     recast.filter_walkable_low_height_spans(int(cfg.walkable_height), hf)
-    chf := new(recast.Compact_Heightfield)
+    chf := recast.create_compact_heightfield(cfg.walkable_height, cfg.walkable_climb, hf)
     defer recast.free_compact_heightfield(chf)
-    recast.build_compact_heightfield(cfg.walkable_height, cfg.walkable_climb, hf, chf)
     recast.erode_walkable_area(cfg.walkable_radius, chf)
     recast.build_distance_field(chf)
     recast.build_regions(chf, 0, cfg.min_region_area, cfg.merge_region_area)
-    cset := new(recast.Contour_Set)
+    cset := recast.create_contour_set(chf, cfg.max_simplification_error, cfg.max_edge_len)
     defer recast.free_contour_set(cset)
-    recast.build_contours(chf, cfg.max_simplification_error, cfg.max_edge_len, cset)
-    pmesh := new(recast.Poly_Mesh)
+    pmesh := recast.create_poly_mesh(cset, cfg.max_verts_per_poly)
     defer recast.free_poly_mesh(pmesh)
-    recast.build_poly_mesh(cset, cfg.max_verts_per_poly, pmesh)
     region_count := slice.max(pmesh.regs[:pmesh.npolys])
     log.infof("Regions created (obstacles should separate walkable areas): %d\n", region_count)
     testing.expect(t, region_count > 0)
@@ -428,8 +410,8 @@ test_floor_5_obstacles_simple :: proc(t: ^testing.T) {
     // Build navigation mesh
     pmesh, dmesh, build_ok := recast.build_navmesh(vertices, indices, areas, cfg)
     defer {
-        if pmesh != nil do recast.free_poly_mesh(pmesh)
-        if dmesh != nil do recast.free_poly_mesh_detail(dmesh)
+        recast.free_poly_mesh(pmesh)
+        recast.free_poly_mesh_detail(dmesh)
     }
     testing.expectf(t, build_ok, "Failed to build navigation mesh")
     testing.expect(t, pmesh.npolys > 0, "Should generate polygons")

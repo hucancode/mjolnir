@@ -110,8 +110,8 @@ test_api_quick_build :: proc(t: ^testing.T) {
     testing.expect(t, dmesh != nil, "No detail mesh from quick build")
 
     defer {
-        if pmesh != nil do recast.free_poly_mesh(pmesh)
-        if dmesh != nil do recast.free_poly_mesh_detail(dmesh)
+        recast.free_poly_mesh(pmesh)
+        recast.free_poly_mesh_detail(dmesh)
     }
 
     // Check result
@@ -178,8 +178,8 @@ test_api_validation_and_debugging :: proc(t: ^testing.T) {
     testing.expect(t, ok, "Failed to build test mesh")
 
     defer {
-        if pmesh != nil do recast.free_poly_mesh(pmesh)
-        if dmesh != nil do recast.free_poly_mesh_detail(dmesh)
+        recast.free_poly_mesh(pmesh)
+        recast.free_poly_mesh_detail(dmesh)
     }
 
     // Test validation

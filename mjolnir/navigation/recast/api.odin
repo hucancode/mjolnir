@@ -135,14 +135,17 @@ Heightfield_Layer :: struct {
     cons:        []u8,           // Packed neighbor connection information [Size: width * height]
 }
 
-// Helper to allocate poly mesh
-alloc_poly_mesh :: proc() -> ^Poly_Mesh {
+create_poly_mesh :: proc(cset: ^Contour_Set, nvp: i32) -> ^Poly_Mesh {
     pmesh := new(Poly_Mesh)
+    if !build_poly_mesh(cset, nvp, pmesh) {
+        free_poly_mesh(pmesh)
+        return nil
+    }
     return pmesh
 }
 
-// Helper to free poly mesh
 free_poly_mesh :: proc(pmesh: ^Poly_Mesh) {
+    if pmesh == nil do return
     delete(pmesh.verts)
     delete(pmesh.polys)
     delete(pmesh.regs)
@@ -151,13 +154,15 @@ free_poly_mesh :: proc(pmesh: ^Poly_Mesh) {
     free(pmesh)
 }
 
-// Helper to allocate poly mesh detail
-alloc_poly_mesh_detail :: proc() -> ^Poly_Mesh_Detail {
+create_poly_mesh_detail :: proc(pmesh: ^Poly_Mesh, chf: ^Compact_Heightfield, sample_dist, sample_max_error: f32) -> ^Poly_Mesh_Detail {
     dmesh := new(Poly_Mesh_Detail)
+    if !build_poly_mesh_detail(pmesh, chf, sample_dist, sample_max_error, dmesh) {
+        free_poly_mesh_detail(dmesh)
+        return nil
+    }
     return dmesh
 }
 
-// Helper to free poly mesh detail
 free_poly_mesh_detail :: proc(dmesh: ^Poly_Mesh_Detail) {
     if dmesh == nil do return
     delete(dmesh.meshes)
@@ -165,6 +170,7 @@ free_poly_mesh_detail :: proc(dmesh: ^Poly_Mesh_Detail) {
     delete(dmesh.tris)
     free(dmesh)
 }
+
 // Build time configuration constants
 RC_COMPRESSION :: true  // Enable compression for tile cache
 RC_LARGE_WORLDS :: true // Enable 64-bit tile/poly references
@@ -382,10 +388,8 @@ build_navmesh :: proc(vertices: [][3]f32, indices: []i32, areas: []u8, cfg: Conf
     }
 
     // Build heightfield
-    hf := new(Heightfield)
+    hf := create_heightfield(config.width, config.height, config.bmin, config.bmax, config.cs, config.ch)
     defer free_heightfield(hf)
-
-    create_heightfield(hf, config.width, config.height, config.bmin, config.bmax, config.cs, config.ch) or_return
     rasterize_triangles(vertices, indices, areas, hf, config.walkable_climb) or_return
 
     // Filter walkable surfaces
@@ -395,26 +399,24 @@ build_navmesh :: proc(vertices: [][3]f32, indices: []i32, areas: []u8, cfg: Conf
 
 
     // Build compact heightfield
-    chf := new(Compact_Heightfield)
+    chf := create_compact_heightfield(config.walkable_height, config.walkable_climb, hf)
+    if chf == nil do return
     defer free_compact_heightfield(chf)
-    build_compact_heightfield(config.walkable_height, config.walkable_climb, hf, chf) or_return
     erode_walkable_area(config.walkable_radius, chf) or_return
     build_distance_field(chf) or_return
     build_regions(chf, 0, config.min_region_area, config.merge_region_area) or_return
-    cset := alloc_contour_set()
+    cset := create_contour_set(chf, config.max_simplification_error, config.max_edge_len)
+    if cset == nil do return
     defer free_contour_set(cset)
-    build_contours(chf, config.max_simplification_error, config.max_edge_len, cset) or_return
     // Build polygon mesh
-    pmesh = alloc_poly_mesh()
-    if !build_poly_mesh(cset, config.max_verts_per_poly, pmesh) {
-        free_poly_mesh(pmesh)
+    pmesh = create_poly_mesh(cset, config.max_verts_per_poly)
+    if pmesh == nil {
         return
     }
     // Build detail mesh
-    dmesh = alloc_poly_mesh_detail()
-    if !build_poly_mesh_detail(pmesh, chf, config.detail_sample_dist, config.detail_sample_max_error, dmesh) {
+    dmesh = create_poly_mesh_detail(pmesh, chf, config.detail_sample_dist, config.detail_sample_max_error)
+    if dmesh == nil {
         free_poly_mesh(pmesh)
-        free_poly_mesh_detail(dmesh)
         return
     }
     return pmesh, dmesh, true

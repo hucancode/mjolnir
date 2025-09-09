@@ -216,8 +216,8 @@ build_navigation_mesh_from_scene :: proc(engine: ^Engine, config: recast.Config 
         return {}, false
     }
     defer {
-        if pmesh != nil do recast.free_poly_mesh(pmesh)
-        if dmesh != nil do recast.free_poly_mesh_detail(dmesh)
+        recast.free_poly_mesh(pmesh)
+        recast.free_poly_mesh_detail(dmesh)
     }
 
     // Create NavMesh resource
@@ -329,8 +329,8 @@ build_navigation_mesh_from_scene_filtered :: proc(
         return {}, false
     }
     defer {
-        if pmesh != nil do recast.free_poly_mesh(pmesh)
-        if dmesh != nil do recast.free_poly_mesh_detail(dmesh)
+        recast.free_poly_mesh(pmesh)
+        recast.free_poly_mesh_detail(dmesh)
     }
 
     // Create and initialize NavMesh resource (same as basic version)

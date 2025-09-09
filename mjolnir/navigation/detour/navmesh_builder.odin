@@ -136,10 +136,8 @@ create_nav_mesh_data :: proc(params: ^Create_Nav_Mesh_Data_Params) -> ([]u8, rec
     header.bv_quant_factor = 1.0 / cs
 
     // Copy vertices - first data section per navmesh format specification
-    // Validate alignment before casting
     verts_ptr_addr := uintptr(raw_data(data)) + uintptr(offset)
     if verts_ptr_addr % uintptr(align_of([3]f32)) != 0 {
-        log.errorf("Vertex data alignment error during build: ptr=0x%x, required_align=%d", verts_ptr_addr, align_of([3]f32))
         return nil, {.Invalid_Param}
     }
 

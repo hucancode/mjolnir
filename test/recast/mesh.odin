@@ -251,7 +251,7 @@ test_validate_poly_mesh :: proc(t: ^testing.T) {
     testing.expect(t, !recast.validate_poly_mesh(nil), "Nil mesh should be invalid")
 
     // Create a valid simple mesh
-    pmesh := recast.alloc_poly_mesh()
+    pmesh := new(recast.Poly_Mesh)
     defer recast.free_poly_mesh(pmesh)
 
     pmesh.npolys = 1
@@ -284,22 +284,7 @@ test_build_simple_contour_mesh :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
     // Create a simple contour set with one square contour
     cset := new(recast.Contour_Set)
-    defer {
-        if cset.conts != nil {
-            // Clean up individual contour verts
-            for i in 0..<len(cset.conts) {
-                if cset.conts[i].verts != nil {
-                    delete(cset.conts[i].verts)
-                }
-                if cset.conts[i].rverts != nil {
-                    delete(cset.conts[i].rverts)
-                }
-            }
-            delete(cset.conts)
-        }
-        free(cset)
-    }
-
+    defer recast.free_contour_set(cset)
     cset.conts = make([dynamic]recast.Contour, 0)
     append(&cset.conts, recast.Contour{})
     cset.bmin = {0, 0, 0}
@@ -321,19 +306,14 @@ test_build_simple_contour_mesh :: proc(t: ^testing.T) {
     cont.verts[3] = {10, 5, 0, 0}   // Bottom-right
 
     // Build polygon mesh
-    pmesh := recast.alloc_poly_mesh()
+    pmesh := recast.create_poly_mesh(cset, 6)
     defer recast.free_poly_mesh(pmesh)
-
-    result := recast.build_poly_mesh(cset, 6, pmesh)
-    testing.expect(t, result, "Mesh building should succeed")
+    testing.expect(t, pmesh != nil, "Mesh building should succeed")
     testing.expect(t, len(pmesh.verts) > 0, "Should have vertices")
     testing.expect(t, pmesh.npolys > 0, "Should have polygons")
     testing.expect(t, pmesh.nvp == 6, "Max vertices per polygon should be set")
-
     // Validate final mesh
     testing.expect(t, recast.validate_poly_mesh(pmesh), "Generated mesh should be valid")
-
-    log.infof("Generated mesh: %d vertices, %d polygons", len(pmesh.verts), pmesh.npolys)
 }
 
 @(test)

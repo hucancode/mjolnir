@@ -130,7 +130,7 @@ build_compact_heightfield :: proc(walkable_height, walkable_climb: i32,
     }
 
     if too_high_neighbor > max_layers {
-        log.errorf("rcBuildCompactHeightfield: Heightfield has too many layers %d (max %d)", too_high_neighbor, max_layers)
+        return false
     }
 
     return true
@@ -831,12 +831,17 @@ calculate_contour_area :: proc(verts: [][4]i32) -> i32 {
     return (area + 1) / 2  // Round and return signed area
 }
 
-// Allocate contour set
-alloc_contour_set :: proc() -> ^Contour_Set {
+create_contour_set :: proc(chf: ^Compact_Heightfield, max_error: f32, max_edge_len: i32,
+                          build_flags: Contour_Tess_Flags = {.WALL_EDGES}) -> ^Contour_Set {
     cset := new(Contour_Set)
     cset.conts = make([dynamic]Contour, 0)
+    if !build_contours(chf, max_error, max_edge_len, cset, build_flags) {
+        free_contour_set(cset)
+        return nil
+    }
     return cset
 }
+
 
 // Free contour set
 free_contour_set :: proc(cset: ^Contour_Set) {

@@ -60,10 +60,8 @@ bounds_size :: proc(bounds: [2]u16) -> u16 {
     return bounds.y - bounds.x
 }
 
-// Allocate heightfield layer set
-alloc_heightfield_layer_set :: proc() -> [dynamic]Heightfield_Layer {
-  lset := make([dynamic]Heightfield_Layer)
-  return lset
+create_heightfield_layer_set :: proc() -> [dynamic]Heightfield_Layer {
+  return make([dynamic]Heightfield_Layer)
 }
 
 // Free heightfield layer set

@@ -116,7 +116,8 @@ Version_Features :: struct {
     supports_large_worlds:    bool,
 }
 
-@(init)
+// TODO: allow this to run contextless
+// @(init)
 validate_struct_sizes :: proc() {
     header_size := size_of(Mesh_Header)
     if header_size != EXPECTED_DT_MESH_HEADER_SIZE {
@@ -147,7 +148,6 @@ validate_struct_sizes :: proc() {
     if offmesh_size != EXPECTED_DT_OFF_MESH_CONNECTION_SIZE {
         log.fatalf("Off_Mesh_Connection size mismatch: got %d, expected %d", offmesh_size, EXPECTED_DT_OFF_MESH_CONNECTION_SIZE)
     }
-
 }
 
 Data_Validation_Result :: struct {

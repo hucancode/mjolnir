@@ -183,8 +183,8 @@ test_navigation_mesh_creation :: proc(t: ^testing.T) {
     pmesh, dmesh, ok := recast.build_navmesh(vertices[:], indices[:], area_types[:], config)
     testing.expect(t, ok, "Failed to build Recast navigation mesh")
     defer {
-        if pmesh != nil do recast.free_poly_mesh(pmesh)
-        if dmesh != nil do recast.free_poly_mesh_detail(dmesh)
+        recast.free_poly_mesh(pmesh)
+        recast.free_poly_mesh_detail(dmesh)
     }
 
     testing.expect(t, pmesh != nil, "Polygon mesh should not be nil")
@@ -283,8 +283,8 @@ test_pathfinding :: proc(t: ^testing.T) {
     pmesh, dmesh, ok := recast.build_navmesh(vertices[:], indices[:], area_types[:], config)
     testing.expect(t, ok, "Failed to build navigation mesh for pathfinding test")
     defer {
-        if pmesh != nil do recast.free_poly_mesh(pmesh)
-        if dmesh != nil do recast.free_poly_mesh_detail(dmesh)
+        recast.free_poly_mesh(pmesh)
+        recast.free_poly_mesh_detail(dmesh)
     }
 
     // Create Detour navigation mesh
@@ -386,8 +386,8 @@ test_navigation_edge_cases :: proc(t: ^testing.T) {
         pmesh, dmesh, ok := recast.build_navmesh(vertices[:], indices[:], area_types[:], config)
         testing.expect(t, !ok, "Should fail to build navmesh with empty geometry")
 
-        if pmesh != nil do recast.free_poly_mesh(pmesh)
-        if dmesh != nil do recast.free_poly_mesh_detail(dmesh)
+        recast.free_poly_mesh(pmesh)
+        recast.free_poly_mesh_detail(dmesh)
     }
 
     // Test 2: Invalid query positions
@@ -426,8 +426,8 @@ test_navigation_edge_cases :: proc(t: ^testing.T) {
         pmesh, dmesh, ok := recast.build_navmesh(vertices[:], indices[:], area_types[:], config)
         testing.expect(t, ok, "Should build valid navmesh")
         defer {
-            if pmesh != nil do recast.free_poly_mesh(pmesh)
-            if dmesh != nil do recast.free_poly_mesh_detail(dmesh)
+            recast.free_poly_mesh(pmesh)
+            recast.free_poly_mesh_detail(dmesh)
         }
 
         nav_mesh, nav_status := detour.create_nav_mesh(&detour.Create_Nav_Mesh_Data_Params{
