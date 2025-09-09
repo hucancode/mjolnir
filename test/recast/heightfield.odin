@@ -45,7 +45,7 @@ test_compact_heightfield_spans :: proc(t: ^testing.T) {
     chf := recast.create_compact_heightfield(2, 1, hf)
     defer recast.free_compact_heightfield(chf)
     testing.expect(t, chf != nil, "Failed to build compact heightfield")
-    testing.expect_value(t, chf.span_count, i32(1))
+    testing.expect_value(t, len(chf.spans), 1)
 }
 @(test)
 test_heightfield_allocation :: proc(t: ^testing.T) {

@@ -156,7 +156,7 @@ test_region_generation :: proc(t: ^testing.T) {
     region_counts := make([]int, chf.max_regions + 1)
     defer delete(region_counts)
 
-    for i in 0..<chf.span_count {
+    for i in 0..<len(chf.spans) {
         reg := chf.spans[i].reg
         if reg > 0 && reg < u16(len(region_counts)) {
             region_counts[reg] += 1

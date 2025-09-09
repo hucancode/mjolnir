@@ -117,7 +117,7 @@ test_nav_test_mesh :: proc(t: ^testing.T) {
     defer delete(region_counts)
     total_region_spans := 0
 
-    for i in 0..<chf.span_count {
+    for i in 0..<len(chf.spans) {
         reg := int(chf.spans[i].reg)
         if reg > 0 && reg < 256 {
             region_counts[reg] += 1
@@ -318,7 +318,7 @@ test_dungeon_mesh :: proc(t: ^testing.T) {
     recast.build_regions(chf, 0, cfg.min_region_area, cfg.merge_region_area)
     // Count regions created
     max_region := chf.spans[0].reg
-    for i in 1..<chf.span_count {
+    for i in 1..<len(chf.spans) {
         if chf.spans[i].reg > max_region {
             max_region = chf.spans[i].reg
         }

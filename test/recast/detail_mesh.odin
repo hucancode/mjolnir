@@ -96,7 +96,6 @@ test_simple_detail_mesh_build :: proc(t: ^testing.T) {
     // Set up minimal compact heightfield
     chf.width = 2
     chf.height = 2
-    chf.span_count = 4
     chf.bmin = pmesh.bmin
     chf.bmax = pmesh.bmax
     chf.cs = pmesh.cs

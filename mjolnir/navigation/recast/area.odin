@@ -10,7 +10,7 @@ import "../../geometry"
 erode_walkable_area :: proc(radius: i32, chf: ^Compact_Heightfield) -> bool {
     w := chf.width
     h := chf.height
-    dist := make([]u8, chf.span_count)
+    dist := make([]u8, len(chf.spans))
     defer delete(dist)
     // Init distance
     slice.fill(dist, 0xff)
@@ -143,7 +143,7 @@ erode_walkable_area :: proc(radius: i32, chf: ^Compact_Heightfield) -> bool {
         }
     }
     thr := u8(radius * 2)
-    for i in 0..<chf.span_count {
+    for i in 0..<len(chf.spans) {
         if dist[i] < thr {
             chf.areas[i] = RC_NULL_AREA
         }
@@ -158,14 +158,14 @@ build_distance_field :: proc(chf: ^Compact_Heightfield) -> bool {
     chf.dist = nil
 
     // Handle empty compact heightfield
-    if chf.span_count == 0 {
+    if len(chf.spans) == 0 {
         chf.dist = make([]u16, 0)
         chf.max_distance = 0
         return true
     }
 
-    src := make([]u16, chf.span_count)
-    dst := make([]u16, chf.span_count)
+    src := make([]u16, len(chf.spans))
+    dst := make([]u16, len(chf.spans))
 
     chf.max_distance = calculate_distance_field(chf, src)
 

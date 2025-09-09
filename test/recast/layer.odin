@@ -104,7 +104,7 @@ test_region_overflow_handling :: proc(t: ^testing.T) {
 
     // Count unique regions
     max_region := 0
-    for i in 0..<chf.span_count {
+    for i in 0..<len(chf.spans) {
         if int(chf.spans[i].reg) > max_region {
             max_region = int(chf.spans[i].reg)
         }
@@ -172,7 +172,7 @@ test_navtest_layers :: proc(t: ^testing.T) {
 
     // Count regions
     max_region := 0
-    for i in 0..<chf.span_count {
+    for i in 0..<len(chf.spans) {
         if int(chf.spans[i].reg) > max_region {
             max_region = int(chf.spans[i].reg)
         }

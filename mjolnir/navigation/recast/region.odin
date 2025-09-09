@@ -49,7 +49,7 @@ Region :: struct {
 calculate_distance_field :: proc(chf: ^Compact_Heightfield, src: []u16) -> (max_dist: u16) {
     w := chf.width
     h := chf.height
-    span_count := chf.span_count
+    span_count := i32(len(chf.spans))
     slice.fill(src[:span_count], 0xffff)
     // Mark boundary cells (spans that are not fully connected)
     for y in 0..<h {
@@ -164,7 +164,7 @@ calculate_distance_field :: proc(chf: ^Compact_Heightfield, src: []u16) -> (max_
             }
         }
     }
-    return slice.max(src[0:chf.span_count])
+    return slice.max(src[0:len(chf.spans)])
 }
 
 // Box blur for distance field smoothing
@@ -270,7 +270,7 @@ flood_region :: proc(x, y, i: i32, level, r: u16, chf: ^Compact_Heightfield,
                 continue
             }
             ai2 := i32(chf.cells[ax2 + ay2 * w].index) + i32(get_con(as, dir2))
-            if ai2 < 0 || ai2 >= chf.span_count {
+            if ai2 < 0 || ai2 >= i32(len(chf.spans)) {
                 continue
             }
             if chf.areas[ai2] != area {
@@ -374,7 +374,7 @@ expand_regions :: proc(max_iter: i32, level: u16, chf: ^Compact_Heightfield,
                     continue
                 }
                 ai := i32(u32(chf.cells[ax + ay * w].index)) + i32(get_con(s, dir))
-                if ai < 0 || ai >= chf.span_count {
+                if ai < 0 || ai >= i32(len(chf.spans)) {
                     continue
                 }
                 if chf.areas[ai] != area {
@@ -906,7 +906,7 @@ merge_and_filter_regions :: proc(min_region_area, merge_region_size: i32,
     max_region_id = reg_id_gen
 
     // Remap regions
-    for i in 0..<chf.span_count {
+    for i in 0..<len(chf.spans) {
         if (src_reg[i] & RC_BORDER_REG) == 0 && src_reg[i] < u16(nreg) {
             src_reg[i] = regions[src_reg[i]].id
         }
@@ -952,10 +952,10 @@ build_regions :: proc(chf: ^Compact_Heightfield,
     }
     w := chf.width
     h := chf.height
-    if chf.span_count == 0 {
+    if len(chf.spans) == 0 {
         return true
     }
-    buf := make([]u16, chf.span_count * 2)  // Need 2 buffers: reg and dist
+    buf := make([]u16, len(chf.spans) * 2)  // Need 2 buffers: reg and dist
     defer delete(buf)
     LOG_NB_STACKS :: 3
     NB_STACKS :: 1 << LOG_NB_STACKS
@@ -970,8 +970,8 @@ build_regions :: proc(chf: ^Compact_Heightfield,
     }
     stack := make([dynamic]Level_Stack_Entry, 0, 256)
     defer delete(stack)
-    src_reg := buf[:chf.span_count]
-    src_dist := buf[chf.span_count:chf.span_count*2]
+    src_reg := buf[:len(chf.spans)]
+    src_dist := buf[len(chf.spans):len(chf.spans)*2]
     region_id: u16 = 1
     level := (chf.max_distance + 1) & (~u16(1))
     // Calculate expand iterations based on distance field
@@ -1051,12 +1051,12 @@ build_regions :: proc(chf: ^Compact_Heightfield,
     }
 
     // Write the result out and validate using slice operations
-    for i in 0..<chf.span_count {
+    for i in 0..<len(chf.spans) {
         chf.spans[i].reg = src_reg[i]
     }
 
     // Use slice.count and slice.count_proc for efficient span categorization
-    span_regions := src_reg[:chf.span_count]
+    span_regions := src_reg[:len(chf.spans)]
 
     unassigned_spans := slice.count(span_regions, 0)
     border_spans := slice.count_proc(span_regions, proc(reg: u16) -> bool {
@@ -1096,7 +1096,7 @@ build_regions_monotone :: proc(chf: ^Compact_Heightfield,
     h := chf.height
     id: u16 = 1
 
-    src_reg := make([]u16, chf.span_count)
+    src_reg := make([]u16, len(chf.spans))
     defer delete(src_reg)
 
     nsweeps := max(chf.width, chf.height)
@@ -1216,7 +1216,7 @@ build_regions_monotone :: proc(chf: ^Compact_Heightfield,
         chf.max_regions, overlaps = merge_and_filter_regions(min_region_area, merge_region_area, chf.max_regions, chf, src_reg) or_return
     }
     // Store the result out
-    for i in 0..<chf.span_count {
+    for i in 0..<len(chf.spans) {
         chf.spans[i].reg = src_reg[i]
     }
     return true
@@ -1409,7 +1409,7 @@ merge_and_filter_layer_regions :: proc(min_region_area: i32,
     max_region_id = reg_id_gen
 
     // Remap regions
-    for i in 0..<chf.span_count {
+    for i in 0..<len(chf.spans) {
         if (src_reg[i] & RC_BORDER_REG) == 0 {
             src_reg[i] = regions[src_reg[i]].id
         }
@@ -1424,7 +1424,7 @@ build_layer_regions :: proc(chf: ^Compact_Heightfield,
     w := chf.width
     h := chf.height
     id: u16 = 1
-    src_reg := make([]u16, chf.span_count)
+    src_reg := make([]u16, len(chf.spans))
     defer delete(src_reg)
     slice.fill(src_reg, 0)
     nsweeps := max(chf.width, chf.height)
@@ -1540,7 +1540,7 @@ build_layer_regions :: proc(chf: ^Compact_Heightfield,
     chf.max_regions = merge_and_filter_layer_regions(min_region_area, chf.max_regions, chf, src_reg) or_return
 
     // Store the result out
-    for i in 0..<chf.span_count {
+    for i in 0..<len(chf.spans) {
         chf.spans[i].reg = src_reg[i]
     }
 

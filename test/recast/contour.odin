@@ -318,7 +318,6 @@ test_contour_generation_simple :: proc(t: ^testing.T) {
 
     chf.width = 5
     chf.height = 5
-    chf.span_count = 25
     chf.cs = 0.3
     chf.ch = 0.2
     chf.bmin = {0, 0, 0}
@@ -392,7 +391,6 @@ test_contour_generation_multiple_regions :: proc(t: ^testing.T) {
 
     chf.width = 10
     chf.height = 10
-    chf.span_count = 100
     chf.cs = 0.3
     chf.ch = 0.2
     chf.bmin = {0, 0, 0}

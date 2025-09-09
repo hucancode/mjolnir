@@ -25,7 +25,7 @@ test_compact_heightfield_building :: proc(t: ^testing.T) {
     testing.expect(t, chf != nil, "Building compact heightfield should succeed")
     testing.expect_value(t, chf.width, i32(10))
     testing.expect_value(t, chf.height, i32(10))
-    testing.expect_value(t, chf.span_count, i32(100))
+    testing.expect_value(t, len(chf.spans), 100)
     testing.expect_value(t, chf.walkable_height, i32(2))
     testing.expect_value(t, chf.walkable_climb, i32(1))
     testing.expect(t, chf.spans != nil, "Spans should be allocated")
@@ -107,7 +107,7 @@ test_build_distance_field :: proc(t: ^testing.T) {
 
     // Check that distance field was created
     testing.expect(t, chf.dist != nil, "Distance field should be allocated")
-    testing.expect_value(t, len(chf.dist), int(chf.span_count))
+    testing.expect_value(t, len(chf.dist), int(len(chf.spans)))
     testing.expect(t, chf.max_distance > 0, "Max distance should be greater than 0")
 
     // THOROUGH VALIDATION: Check distance field mathematical correctness
@@ -304,7 +304,7 @@ test_region_merging :: proc(t: ^testing.T) {
     // Count unique regions
     unique_regions := map[u16]bool{}
     defer delete(unique_regions)
-    for i in 0..<chf.span_count {
+    for i in 0..<len(chf.spans) {
         if chf.areas[i] != recast.RC_NULL_AREA {
             reg := chf.spans[i].reg
             if reg != 0 {

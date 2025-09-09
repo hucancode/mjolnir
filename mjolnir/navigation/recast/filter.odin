@@ -169,7 +169,7 @@ filter_walkable_low_height_spans :: proc(walkable_height: int, heightfield: ^Hei
 median_filter_walkable_area :: proc(chf: ^Compact_Heightfield) -> bool {
     x_size := chf.width
     z_size := chf.height
-    areas := make([]u8, chf.span_count)
+    areas := make([]u8, len(chf.spans))
     defer delete(areas)
     slice.fill(areas, 0xff)
     for z in 0..<z_size {

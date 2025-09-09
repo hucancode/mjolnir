@@ -427,7 +427,7 @@ test_all_filters :: proc(t: ^testing.T) {
     // Test 4: Median filter with compact heightfield
     {
         chf := recast.Compact_Heightfield{
-            width = 3, height = 3, span_count = 9,
+            width = 3, height = 3,
         }
         defer {
             delete(chf.cells)

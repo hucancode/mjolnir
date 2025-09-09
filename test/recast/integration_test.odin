@@ -74,7 +74,7 @@ test_complete_navmesh_generation_simple :: proc(t: ^testing.T) {
     chf := recast.create_compact_heightfield(cfg.walkable_height, cfg.walkable_climb, hf)
     defer recast.free_compact_heightfield(chf)
     testing.expect(t, chf != nil, "Failed to build compact heightfield")
-    testing.expect(t, chf.span_count > 0, "No spans in compact heightfield")
+    testing.expect(t, len(chf.spans) > 0, "No spans in compact heightfield")
 
     // Erode walkable area
     ok = recast.erode_walkable_area(cfg.walkable_radius, chf)
@@ -111,7 +111,7 @@ test_complete_navmesh_generation_simple :: proc(t: ^testing.T) {
 
     // 2. Validate compact heightfield preserved walkable spans
     walkable_spans := 0
-    for i in 0..<chf.span_count {
+    for i in 0..<len(chf.spans) {
         if chf.areas[i] == recast.RC_WALKABLE_AREA {
             walkable_spans += 1
         }
@@ -123,7 +123,7 @@ test_complete_navmesh_generation_simple :: proc(t: ^testing.T) {
     // Each region should have reasonable size for the input geometry
     region_sizes := map[u16]int{}
     defer delete(region_sizes)
-    for i in 0..<chf.span_count {
+    for i in 0..<len(chf.spans) {
         if chf.areas[i] != recast.RC_NULL_AREA {
             reg := chf.spans[i].reg
             if reg != 0 {
@@ -254,7 +254,7 @@ test_navmesh_with_obstacles :: proc(t: ^testing.T) {
     ground_level_spans := 0
     elevated_level_spans := 0
 
-    for i in 0..<chf.span_count {
+    for i in 0..<len(chf.spans) {
         if chf.areas[i] != recast.RC_NULL_AREA {
             span := &chf.spans[i]
             span_height := span.y
@@ -283,7 +283,7 @@ test_navmesh_with_obstacles :: proc(t: ^testing.T) {
         delete(region_heights)
     }
 
-    for i in 0..<chf.span_count {
+    for i in 0..<len(chf.spans) {
         if chf.areas[i] != recast.RC_NULL_AREA {
             reg := chf.spans[i].reg
             if reg != 0 {
@@ -482,7 +482,7 @@ test_navmesh_area_marking :: proc(t: ^testing.T) {
     // Verify areas were marked
     marked_areas := map[u8]int{}
     defer delete(marked_areas)
-    for i in 0..<chf.span_count {
+    for i in 0..<len(chf.spans) {
         area := chf.areas[i]
         if area != recast.RC_NULL_AREA {
             marked_areas[area] = marked_areas[area] + 1
@@ -586,5 +586,5 @@ test_navmesh_performance :: proc(t: ^testing.T) {
     ok = recast.build_regions(chf, 0, cfg.min_region_area, cfg.merge_region_area)
     testing.expect(t, ok, "Failed to build regions")
 
-    log.infof("Performance test complete: %d spans, %d regions", chf.span_count, chf.max_regions)
+    log.infof("Performance test complete: %d spans, %d regions", len(chf.spans), chf.max_regions)
 }

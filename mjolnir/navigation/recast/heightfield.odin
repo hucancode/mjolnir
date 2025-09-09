@@ -44,7 +44,6 @@ Compact_Span :: struct {
 Compact_Heightfield :: struct {
   width:           i32,
   height:          i32,
-  span_count:      i32,
   walkable_height: i32,
   walkable_climb:  i32,
   border_size:     i32,

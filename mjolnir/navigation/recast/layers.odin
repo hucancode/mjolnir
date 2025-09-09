@@ -86,7 +86,7 @@ build_heightfield_layers :: proc(
     }
 
     dimensions := [2]i32{chf.width, chf.height}  // Using array for dimensions
-    span_count := chf.span_count
+    span_count := i32(len(chf.spans))
 
     log.infof("build_heightfield_layers: %v cells, %d spans", dimensions, span_count)
 

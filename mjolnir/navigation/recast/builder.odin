@@ -30,7 +30,6 @@ build_compact_heightfield :: proc(walkable_height, walkable_climb: i32,
     // Fill in header
     chf.width = w
     chf.height = h
-    chf.span_count = 0
     chf.walkable_height = walkable_height
     chf.walkable_climb = walkable_climb
     chf.max_distance = 0
@@ -68,7 +67,6 @@ build_compact_heightfield :: proc(walkable_height, walkable_climb: i32,
     if span_count == 0 do return true
 
     // Allocate spans
-    chf.span_count = i32(span_count)
     chf.spans = make([]Compact_Span, span_count)
     chf.areas = make([]u8, span_count)
     slice.fill(chf.areas, RC_NULL_AREA)
@@ -316,7 +314,7 @@ build_contours :: proc(chf: ^Compact_Heightfield,
     // defer delete(cset.conts) // Will be freed by free_contour_set
 
     // Create flags array to mark region boundaries
-    flags := make([]u8, chf.span_count)
+    flags := make([]u8, len(chf.spans))
     defer delete(flags)
 
     // Mark region boundaries - spans that have different region neighbors
@@ -346,7 +344,7 @@ build_contours :: proc(chf: ^Compact_Heightfield,
                         ay := y + get_dir_offset_y(dir)
                         if ax >= 0 && ay >= 0 && ax < w && ay < h {
                             ai := chf.cells[ax + ay * w].index + u32(get_con(s, dir))
-                            if ai < u32(chf.span_count) {
+                            if ai < u32(len(chf.spans)) {
                                 r = chf.spans[ai].reg
                             }
                         }
@@ -589,8 +587,8 @@ walk_contour_boundary :: proc(x, y, i: i32, chf: ^Compact_Heightfield,
         iter += 1
 
         // Bounds check for current index
-        if curr_i < 0 || curr_i >= i32(chf.span_count) {
-            log.errorf("walk_contour_boundary: curr_i %d out of bounds [0, %d)", curr_i, chf.span_count)
+        if curr_i < 0 || curr_i >= i32(len(chf.spans)) {
+            log.errorf("walk_contour_boundary: curr_i %d out of bounds [0, %d)", curr_i, len(chf.spans))
             return false
         }
 
@@ -661,8 +659,8 @@ walk_contour_boundary :: proc(x, y, i: i32, chf: ^Compact_Heightfield,
             }
 
             // Bounds check the new index
-            if ni < 0 || ni >= i32(chf.span_count) {
-                log.errorf("walk_contour_boundary: ni %d out of bounds [0, %d)", ni, chf.span_count)
+            if ni < 0 || ni >= i32(len(chf.spans)) {
+                log.errorf("walk_contour_boundary: ni %d out of bounds [0, %d)", ni, len(chf.spans))
                 return false
             }
 
