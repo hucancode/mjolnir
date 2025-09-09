@@ -342,8 +342,6 @@ test_mark_walkable_triangles_flat_ground :: proc(t: ^testing.T) {
     // Both triangles should be marked walkable (0 degrees < 45 degrees)
     testing.expect_value(t, areas[0], recast.RC_WALKABLE_AREA)
     testing.expect_value(t, areas[1], recast.RC_WALKABLE_AREA)
-
-    log.info("✓ Flat ground triangle marking test passed")
 }
 
 @(test)
@@ -370,8 +368,6 @@ test_mark_walkable_triangles_steep_slope :: proc(t: ^testing.T) {
     areas[0] = recast.RC_NULL_AREA // Reset
     recast.mark_walkable_triangles(70.0, vertices, indices, areas)
     testing.expect_value(t, areas[0], recast.RC_WALKABLE_AREA)
-
-    log.info("✓ Steep slope triangle marking test passed")
 }
 
 @(test)
@@ -401,8 +397,6 @@ test_mark_walkable_triangles_exact_threshold :: proc(t: ^testing.T) {
     areas[0] = recast.RC_NULL_AREA
     recast.mark_walkable_triangles(44.0, vertices, indices, areas)
     testing.expect_value(t, areas[0], recast.RC_NULL_AREA)
-
-    log.info("✓ Exact threshold triangle marking test passed")
 }
 
 @(test)
@@ -422,8 +416,6 @@ test_mark_walkable_triangles_vertical_wall :: proc(t: ^testing.T) {
     // Even with high threshold, vertical wall should not be walkable
     recast.mark_walkable_triangles(89.0, vertices, indices, areas)
     testing.expect_value(t, areas[0], recast.RC_NULL_AREA)
-
-    log.info("✓ Vertical wall triangle marking test passed")
 }
 
 @(test)
@@ -443,8 +435,6 @@ test_mark_walkable_triangles_degenerate :: proc(t: ^testing.T) {
     // Degenerate triangle should remain non-walkable regardless of threshold
     recast.mark_walkable_triangles(45.0, vertices, indices, areas)
     testing.expect_value(t, areas[0], recast.RC_NULL_AREA)
-
-    log.info("✓ Degenerate triangle marking test passed")
 }
 
 @(test)
@@ -476,8 +466,6 @@ test_mark_walkable_triangles_mixed_slopes :: proc(t: ^testing.T) {
     testing.expect_value(t, areas[0], recast.RC_WALKABLE_AREA) // Flat
     testing.expect_value(t, areas[1], recast.RC_WALKABLE_AREA) // 30°
     testing.expect_value(t, areas[2], recast.RC_NULL_AREA)     // 60°
-
-    log.info("✓ Mixed slopes triangle marking test passed")
 }
 
 // ================================
@@ -508,8 +496,6 @@ test_clear_unwalkable_triangles_basic :: proc(t: ^testing.T) {
     // Flat should remain walkable, steep should be cleared to non-walkable
     testing.expect_value(t, areas[0], recast.RC_WALKABLE_AREA)
     testing.expect_value(t, areas[1], recast.RC_NULL_AREA)
-
-    log.info("✓ Basic clear unwalkable triangles test passed")
 }
 
 @(test)
@@ -536,8 +522,6 @@ test_clear_unwalkable_triangles_preserve_non_walkable :: proc(t: ^testing.T) {
     // Both should remain non-walkable
     testing.expect_value(t, areas[0], recast.RC_NULL_AREA)
     testing.expect_value(t, areas[1], recast.RC_NULL_AREA)
-
-    log.info("✓ Preserve non-walkable triangles test passed")
 }
 
 // ================================
@@ -579,8 +563,6 @@ test_triangle_normal_calculation_accuracy :: proc(t: ^testing.T) {
     // Should not be walkable even with high threshold
     recast.mark_walkable_triangles(80.0, vertices_vertical, indices_vertical, areas_vertical)
     testing.expect_value(t, areas_vertical[0], recast.RC_NULL_AREA)
-
-    log.info("✓ Triangle normal calculation accuracy test passed")
 }
 
 // ================================
@@ -605,8 +587,6 @@ test_triangle_operations_zero_area :: proc(t: ^testing.T) {
     // This means clear_unwalkable_triangles will NOT clear it
     recast.clear_unwalkable_triangles(45.0, vertices, indices, areas)
     testing.expect_value(t, areas[0], recast.RC_WALKABLE_AREA) // Should remain unchanged
-
-    log.info("✓ Zero area triangle test passed")
 }
 
 @(test)
@@ -627,8 +607,6 @@ test_triangle_operations_tiny_triangle :: proc(t: ^testing.T) {
     // Tiny but flat triangle should be marked walkable
     recast.mark_walkable_triangles(45.0, vertices, indices, areas)
     testing.expect_value(t, areas[0], recast.RC_WALKABLE_AREA)
-
-    log.info("✓ Tiny triangle test passed")
 }
 
 @(test)
@@ -649,8 +627,6 @@ test_triangle_operations_large_coordinates :: proc(t: ^testing.T) {
     // Large coordinates should not affect slope calculation
     recast.mark_walkable_triangles(45.0, vertices, indices, areas)
     testing.expect_value(t, areas[0], recast.RC_WALKABLE_AREA)
-
-    log.info("✓ Large coordinates triangle test passed")
 }
 
 @(test)
@@ -665,8 +641,6 @@ test_triangle_operations_empty_input :: proc(t: ^testing.T) {
     // Should handle empty input gracefully
     recast.mark_walkable_triangles(45.0, vertices, indices, areas)
     recast.clear_unwalkable_triangles(45.0, vertices, indices, areas)
-
-    log.info("✓ Empty input triangle operations test passed")
 }
 
 // ================================
@@ -701,6 +675,4 @@ test_triangle_operations_preserve_area_types :: proc(t: ^testing.T) {
 
     recast.clear_unwalkable_triangles(30.0, vertices_steep, indices, areas_steep)
     testing.expect_value(t, areas_steep[0], recast.RC_NULL_AREA) // Should be cleared
-
-    log.info("✓ Area type preservation test passed")
 }

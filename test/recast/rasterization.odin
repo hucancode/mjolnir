@@ -44,8 +44,6 @@ test_rasterize_degenerate_triangles :: proc(t: ^testing.T) {
     // Should handle identical vertices without crashing
     ok = recast.rasterize_triangles(vertices_identical, indices_identical, areas_identical, hf, 1)
     testing.expect(t, hf != nil, "Rasterization should succeed with identical vertices")
-
-    log.info("✓ Degenerate triangle rasterization test passed")
 }
 
 @(test)
@@ -76,8 +74,6 @@ test_rasterize_nearly_degenerate_triangles :: proc(t: ^testing.T) {
     column_index := center_x + center_z * hf.width
     span := hf.spans[column_index]
     // Span might be nil due to very small triangle, but shouldn't crash
-
-    log.info("✓ Nearly degenerate triangle rasterization test passed")
 }
 
 // ================================
@@ -117,8 +113,6 @@ test_rasterize_sub_pixel_triangles :: proc(t: ^testing.T) {
         }
     }
     testing.expect(t, affected_cells > 0, "Sub-pixel triangle should affect at least one cell")
-
-    log.info("✓ Sub-pixel triangle rasterization test passed")
 }
 
 @(test)
@@ -153,8 +147,6 @@ test_rasterize_tiny_triangles_various_positions :: proc(t: ^testing.T) {
         ok := recast.rasterize_triangles(vertices, indices, areas, hf, 1)
         testing.expect(t, hf != nil, "Tiny triangle rasterization should succeed")
     }
-
-    log.info("✓ Tiny triangles at various positions test passed")
 }
 
 // ================================
@@ -193,15 +185,11 @@ test_rasterize_large_triangle_spanning_cells :: proc(t: ^testing.T) {
     // Large triangle should affect multiple cells
     testing.expect(t, affected_cells > 10, "Large triangle should affect many cells")
     log.infof("Large triangle affected %d cells", affected_cells)
-
-    log.info("✓ Large triangle spanning cells test passed")
 }
 
 @(test)
 test_rasterize_triangle_partial_cell_coverage :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
-
     hf := recast.create_heightfield(10, 10, {0,0,0}, {10,10,10}, 1.0, 0.5)
     testing.expect(t, hf != nil, "Failed to create heightfield")
     defer recast.free_heightfield(hf)
@@ -228,11 +216,7 @@ test_rasterize_triangle_partial_cell_coverage :: proc(t: ^testing.T) {
             }
         }
     }
-
     testing.expect(t, affected_cells > 0, "Partial coverage should affect some cells")
-    log.infof("Partial coverage triangle affected %d cells", affected_cells)
-
-    log.info("✓ Partial cell coverage triangle test passed")
 }
 
 // ================================
@@ -268,8 +252,6 @@ test_rasterize_floating_point_precision :: proc(t: ^testing.T) {
         }
     }
     testing.expect(t, affected_cells > 0, "Precision edge case should still affect cells")
-
-    log.info("✓ Floating-point precision test passed")
 }
 
 @(test)
@@ -299,8 +281,6 @@ test_rasterize_extreme_coordinates :: proc(t: ^testing.T) {
     center_column := 3 + 3 * hf.width
     span := hf.spans[center_column]
     testing.expect(t, span != nil, "Extreme coordinates triangle should create spans")
-
-    log.info("✓ Extreme coordinates test passed")
 }
 
 // ================================
@@ -343,8 +323,6 @@ test_rasterize_sloped_triangles :: proc(t: ^testing.T) {
     testing.expect(t, affected_spans > 0, "Sloped triangle should create spans")
     avg_span_height := height_sum / f32(affected_spans)
     log.infof("Sloped triangle: %d spans, average height: %.2f", affected_spans, avg_span_height)
-
-    log.info("✓ Sloped triangle rasterization test passed")
 }
 
 @(test)
@@ -370,7 +348,6 @@ test_rasterize_vertical_triangles :: proc(t: ^testing.T) {
 
     // Vertical triangles might not create spans in XZ plane
     // but should not crash the system
-    log.info("✓ Vertical triangle rasterization test passed")
 }
 
 // ================================
@@ -425,7 +402,6 @@ test_rasterize_many_tiny_triangles :: proc(t: ^testing.T) {
     }
 
     testing.expect(t, total_spans > 0, "Many tiny triangles should create spans")
-    log.infof("✓ Many tiny triangles stress test passed: %d spans created", total_spans)
 }
 
 // Thorough triangle rasterization validation - tests geometric accuracy

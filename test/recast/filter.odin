@@ -39,8 +39,6 @@ test_filter_low_hanging_obstacles_basic :: proc(t: ^testing.T) {
         testing.expect(t, obstacle_span.area == recast.RC_WALKABLE_AREA,
                       "Obstacle should be marked walkable after filter")
     }
-
-    log.info("✓ Basic low hanging obstacles filter test passed")
 }
 
 @(test)
@@ -71,8 +69,6 @@ test_filter_low_hanging_obstacles_too_high :: proc(t: ^testing.T) {
         testing.expect(t, obstacle_span.area == recast.RC_NULL_AREA,
                       "High obstacle should remain non-walkable")
     }
-
-    log.info("✓ Too high obstacles filter test passed")
 }
 
 @(test)
@@ -108,20 +104,18 @@ test_filter_low_hanging_obstacles_multiple_spans :: proc(t: ^testing.T) {
 
     // Low obstacle (should be converted to walkable)
     span = span.next
-    testing.expect(t, span != nil && span.area == recast.RC_WALKABLE_AREA,
+    testing.expect(t, span.area == recast.RC_WALKABLE_AREA,
                   "Low obstacle should be walkable")
 
     // Upper walkable (should remain walkable)
     span = span.next
-    testing.expect(t, span != nil && span.area == recast.RC_WALKABLE_AREA,
+    testing.expect(t, span.area == recast.RC_WALKABLE_AREA,
                   "Upper walkable should remain walkable")
 
     // High obstacle (should remain non-walkable because gap from upper walkable is too big)
     span = span.next
-    testing.expect(t, span != nil && span.area == recast.RC_NULL_AREA,
+    testing.expect(t, span.area == recast.RC_NULL_AREA,
                   "High obstacle should remain non-walkable")
-
-    log.info("✓ Multiple spans low hanging obstacles filter test passed")
 }
 
 // ================================
@@ -151,7 +145,7 @@ test_filter_ledge_spans_basic :: proc(t: ^testing.T) {
     // Missing right (3,2) and top (2,3) neighbors - this creates a ledge
 
     // Build compact heightfield
-    chf := recast.create_compact_heightfield(2, 1, hf) 
+    chf := recast.create_compact_heightfield(2, 1, hf)
     defer recast.free_compact_heightfield(chf)
     testing.expect(t, chf != nil, "Failed to build compact heightfield")
 
@@ -166,8 +160,6 @@ test_filter_ledge_spans_basic :: proc(t: ^testing.T) {
         // Area should be set to RC_NULL_AREA if it's a dangerous ledge
         log.infof("Center span area after ledge filter: %d", span.area)
     }
-
-    log.info("✓ Basic ledge spans filter test completed")
 }
 
 @(test)
@@ -186,7 +178,7 @@ test_filter_ledge_spans_safe_area :: proc(t: ^testing.T) {
         }
     }
 
-    chf := recast.create_compact_heightfield(2, 1, hf) 
+    chf := recast.create_compact_heightfield(2, 1, hf)
     defer recast.free_compact_heightfield(chf)
     testing.expect(t, chf != nil, "Failed to build compact heightfield")
 
@@ -201,8 +193,6 @@ test_filter_ledge_spans_safe_area :: proc(t: ^testing.T) {
         testing.expect(t, span.area == recast.RC_WALKABLE_AREA,
                       "Safe area should remain walkable")
     }
-
-    log.info("✓ Safe area ledge filter test passed")
 }
 
 // ================================
@@ -237,8 +227,6 @@ test_filter_walkable_low_height_spans_basic :: proc(t: ^testing.T) {
         testing.expect(t, span.area == recast.RC_NULL_AREA,
                       "Span with low clearance should be filtered")
     }
-
-    log.info("✓ Basic low height filter test passed")
 }
 
 @(test)
@@ -268,8 +256,6 @@ test_filter_walkable_low_height_spans_sufficient_height :: proc(t: ^testing.T) {
         testing.expect(t, span.area == recast.RC_WALKABLE_AREA,
                       "Span with sufficient clearance should remain walkable")
     }
-
-    log.info("✓ Sufficient height clearance test passed")
 }
 
 @(test)
@@ -295,8 +281,6 @@ test_filter_walkable_low_height_no_ceiling :: proc(t: ^testing.T) {
         testing.expect(t, span.area == recast.RC_WALKABLE_AREA,
                       "Span with no ceiling should remain walkable")
     }
-
-    log.info("✓ No ceiling constraint test passed")
 }
 
 // ================================
@@ -334,7 +318,7 @@ test_filter_interactions_combined :: proc(t: ^testing.T) {
     recast.filter_walkable_low_height_spans(4, hf)
 
     // Build compact heightfield for ledge filtering
-    chf := recast.create_compact_heightfield(2, 1, hf) 
+    chf := recast.create_compact_heightfield(2, 1, hf)
     defer recast.free_compact_heightfield(chf)
     testing.expect(t, chf != nil, "Failed to build compact heightfield")
 

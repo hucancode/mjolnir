@@ -495,7 +495,6 @@ prev_index :: proc "contextless" (i, n: int) -> int {
 // Main function to build poly mesh detail following C++ rcBuildPolyMeshDetail algorithm
 build_poly_mesh_detail :: proc(pmesh: ^Poly_Mesh, chf: ^Compact_Heightfield,
                                  sample_dist, sample_max_error: f32, dmesh: ^Poly_Mesh_Detail) -> bool {
-
     if pmesh == nil || chf == nil || dmesh == nil do return false
     // Handle empty poly mesh
     if len(pmesh.verts) == 0 || pmesh.npolys == 0 {
@@ -559,31 +558,23 @@ build_poly_mesh_detail :: proc(pmesh: ^Poly_Mesh, chf: ^Compact_Heightfield,
         height = i32(max_hh),
     }
     defer delete(hp.data)
-
-    // Pre-allocate detail mesh arrays with capacity estimates (C++ style but using dynamic arrays)
     vcap := n_poly_verts + n_poly_verts/2
     tcap := vcap * 2
-
     dmesh.meshes = make([][4]u32, pmesh.npolys)
-
-    // Use temporary dynamic arrays, then convert to slices
     temp_verts := make([dynamic][3]f32, 0, vcap)
-    defer delete(temp_verts)
     temp_tris := make([dynamic][4]u8, 0, tcap)
-    defer delete(temp_tris)
-
-    // Temporary work arrays for each polygon
     edges := make([dynamic]i32, 0, 64)
     defer delete(edges)
     tris := make([dynamic][4]i32, 0, 512)
     defer delete(tris)
     samples := make([dynamic][4]i32, 0, 512)
     defer delete(samples)
+    detail_verts := make([dynamic][3]f32, 0, 256)
+    defer delete(detail_verts)
 
     // Process each polygon
     for i in 0..<pmesh.npolys {
         p := pmesh.polys[i*nvp*2:]
-
         // Store polygon vertices in workspace
         npoly := 0
         for j in 0..<nvp {
@@ -606,19 +597,12 @@ build_poly_mesh_detail :: proc(pmesh: ^Poly_Mesh, chf: ^Compact_Heightfield,
         hp.height = bounds[i].w - bounds[i].z
 
         // Get height data using flood fill (equivalent to C++ getHeightData)
-        if !get_height_data(chf, slice.reinterpret([]u16, p[:npoly]), npoly,
-                           slice.reinterpret([][3]u16, pmesh.verts), border_size, &hp) {
-            continue
-        }
+        get_height_data(chf, slice.reinterpret([]u16, p[:npoly]), npoly,
+            slice.reinterpret([][3]u16, pmesh.verts), border_size, &hp) or_continue
 
         // Build detail mesh for this polygon (equivalent to C++ buildPolyDetail)
-        detail_verts := make([dynamic][3]f32, 0, 256)
-        defer delete(detail_verts)
-
-        if !build_poly_detail(poly_workspace[:npoly], sample_dist, sample_max_error,
-                              height_search_radius, chf, &hp, &detail_verts, &tris, &edges, &samples) {
-            continue
-        }
+        build_poly_detail(poly_workspace[:npoly], sample_dist, sample_max_error,
+            height_search_radius, chf, &hp, &detail_verts, &tris, &edges, &samples) or_continue
 
         // Move detail verts to world space
         for &vert in detail_verts {
@@ -627,18 +611,16 @@ build_poly_mesh_detail :: proc(pmesh: ^Poly_Mesh, chf: ^Compact_Heightfield,
         }
 
         // Offset poly for flag checking
-        for j in 0..<npoly {
-            poly_workspace[j] += orig
+        for &poly in poly_workspace[:npoly] {
+            poly += orig
         }
 
         // Store detail submesh
-        ntris := len(tris)
-
         dmesh.meshes[i] = [4]u32{
             u32(len(temp_verts)),     // Vertex base
             u32(len(detail_verts)),   // Vertex count
             u32(len(temp_tris)),      // Triangle base
-            u32(ntris),               // Triangle count
+            u32(len(tris)),               // Triangle count
         }
 
         // Store vertices
@@ -650,17 +632,17 @@ build_poly_mesh_detail :: proc(pmesh: ^Poly_Mesh, chf: ^Compact_Heightfield,
         for tri in tris {
             append(&temp_tris, [4]u8{u8(tri.x), u8(tri.y), u8(tri.z), u8(tri.w)})
         }
-
         // Clear work arrays for next polygon
         clear(&tris)
         clear(&edges)
         clear(&samples)
+        clear(&detail_verts)
     }
 
-    // Convert dynamic arrays to slices for final output
-    dmesh.verts = slice.clone(temp_verts[:])
-    dmesh.tris = slice.clone(temp_tris[:])
-
+    delete(dmesh.verts)
+    delete(dmesh.tris)
+    dmesh.verts = temp_verts[:]
+    dmesh.tris = temp_tris[:]
     return true
 }
 
@@ -669,27 +651,19 @@ build_poly_detail :: proc(poly_verts: [][3]f32, sample_dist, sample_max_error: f
                           height_search_radius: i32, chf: ^Compact_Heightfield, hp: ^Height_Patch,
                           verts: ^[dynamic][3]f32, tris: ^[dynamic][4]i32,
                           edges: ^[dynamic]i32, samples: ^[dynamic][4]i32) -> bool {
-
     MAX_VERTS :: 127
     MAX_TRIS :: 255
     MAX_VERTS_PER_EDGE :: 32
-
     nin := len(poly_verts)
     if nin < 3 do return false
-
     cs := chf.cs
     ics := 1.0 / cs
-
-    // Initialize vertices with input polygon
     clear(verts)
     for v in poly_verts {
         append(verts, v)
     }
-
     clear(edges)
     clear(tris)
-
-    // Calculate minimum extent
     min_extent := calculate_polygon_min_extent_from_verts(verts[:])
 
     // Hull tracking array
@@ -782,13 +756,10 @@ build_poly_detail :: proc(poly_verts: [][3]f32, sample_dist, sample_max_error: f
             }
         }
     }
-
-    // If polygon is small, just triangulate hull
     if min_extent < sample_dist * 2 {
         if !delaunay_hull(verts[:], hull[:], tris) {
-            // Fallback to simple triangulation if Delaunay fails
-            triangulate_hull_simple(verts[:], hull[:], nin, tris)
             log.warnf("build_poly_detail: Delaunay triangulation failed for small polygon, using simple triangulation")
+            triangulate_hull_simple(verts[:], hull[:], nin, tris)
         }
         set_triangle_flags(tris[:], hull[:])
         return true

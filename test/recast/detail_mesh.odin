@@ -50,8 +50,6 @@ test_recast_detail_compilation :: proc(t: ^testing.T) {
 
     // Clean up
     recast.free_poly_mesh_detail(dmesh)
-
-    log.info("✓ Recast detail mesh compilation test passed")
 }
 
 @(test)
@@ -272,8 +270,6 @@ test_detail_mesh_edge_cases :: proc(t: ^testing.T) {
         testing.expect(t, validate_poly_mesh_detail(dmesh2),
                       "Large aspect ratio detail mesh should be valid")
     }
-
-    log.info("✓ Detail mesh edge cases test passed")
 }
 
 @(test)
@@ -323,8 +319,6 @@ test_build_detail_mesh_simple :: proc(t: ^testing.T) {
     testing.expect(t, len(detail_mesh.meshes) > 0, "Detail mesh should have mesh data")
     testing.expect(t, len(detail_mesh.verts) > 0, "Detail mesh should have vertices")
     testing.expect(t, len(detail_mesh.tris) > 0, "Detail mesh should have triangles")
-
-    log.infof("✓ Simple detail mesh test passed - %d vertices, %d triangles", len(detail_mesh.verts), len(detail_mesh.tris)/4)
 }
 
 @(test)
@@ -352,8 +346,6 @@ test_build_detail_mesh_empty_input :: proc(t: ^testing.T) {
     testing.expect_value(t, len(detail_mesh.meshes), 0)
     testing.expect_value(t, len(detail_mesh.verts), 0)
     testing.expect_value(t, len(detail_mesh.tris), 0)
-
-    log.info("✓ Empty input detail mesh test passed")
 }
 
 @(test)
@@ -402,8 +394,6 @@ test_detail_mesh_sample_distance_variations :: proc(t: ^testing.T) {
         testing.expect(t, vertex_count >= 0, "Should have valid vertex count")
         testing.expect(t, triangle_count >= 0, "Should have valid triangle count")
     }
-
-    log.info("✓ Detail mesh sample distance variations test passed")
 }
 
 @(test)
@@ -454,8 +444,6 @@ test_detail_mesh_max_edge_error_variations :: proc(t: ^testing.T) {
         testing.expect(t, vertex_count >= 0, "Should have valid vertex count")
         testing.expect(t, triangle_count >= 0, "Should have valid triangle count")
     }
-
-    log.info("✓ Detail mesh max edge error variations test passed")
 }
 
 @(test)
@@ -470,33 +458,15 @@ test_detail_mesh_small_polygons :: proc(t: ^testing.T) {
         ok := recast.add_span(hf, area[0], area[1], 0, 2, recast.RC_WALKABLE_AREA, 1)
         testing.expect(t, ok, "Failed to add tiny walkable area")
     }
-
     chf := recast.create_compact_heightfield(2, 1, hf)
     defer recast.free_compact_heightfield(chf)
     ok := recast.build_distance_field(chf)
     ok = recast.build_regions(chf, 1, 1, 1) // Very small regions to accommodate tiny areas
-
     contour_set := recast.create_contour_set(chf, 1.0, 1, {.WALL_EDGES})
     defer recast.free_contour_set(contour_set)
-
     poly_mesh := recast.create_poly_mesh(contour_set, 6)
-    defer if poly_mesh != nil { recast.free_poly_mesh(poly_mesh) }
-
-    if poly_mesh == nil {
-        log.info("Small polygons test: No polygons created from tiny areas (expected with very small regions)")
-        log.info("✓ Detail mesh small polygons test passed")
-        return
-    }
-
-    detail_mesh := new(recast.Poly_Mesh_Detail)
-    defer recast.free_poly_mesh_detail(detail_mesh)
-
-    // Should handle small polygons without issues
-    ok = recast.build_poly_mesh_detail(poly_mesh, chf, 1.0, 0.5, detail_mesh)
-    testing.expect(t, ok, "Should build detail mesh for small polygons")
-
-    log.infof("Small polygons: %d vertices, %d triangles", len(detail_mesh.verts), len(detail_mesh.tris)/4)
-    log.info("✓ Detail mesh small polygons test passed")
+    defer recast.free_poly_mesh(poly_mesh)
+    testing.expect(t, poly_mesh == nil, "no polygon should be created")
 }
 
 @(test)
@@ -538,45 +508,32 @@ test_detail_mesh_extreme_parameters :: proc(t: ^testing.T) {
     for extreme_case in extreme_cases {
         detail_mesh := new(recast.Poly_Mesh_Detail)
         defer recast.free_poly_mesh_detail(detail_mesh)
-
         ok = recast.build_poly_mesh_detail(poly_mesh, chf, extreme_case.sample_dist, extreme_case.max_edge_error, detail_mesh)
-
-        // Should handle extreme parameters gracefully
-        log.infof("Extreme params (%.1f, %.1f): success=%t", extreme_case.sample_dist, extreme_case.max_edge_error, ok)
-
-        if ok {
-            vertex_count := len(detail_mesh.verts)
-            triangle_count := len(detail_mesh.tris)
-            testing.expect(t, vertex_count >= 0, "Should have valid vertex count")
-            testing.expect(t, triangle_count >= 0, "Should have valid triangle count")
-        }
+        testing.expect(t, ok)
+        vertex_count := len(detail_mesh.verts)
+        triangle_count := len(detail_mesh.tris)
+        testing.expect(t, vertex_count >= 0, "Should have valid vertex count")
+        testing.expect(t, triangle_count >= 0, "Should have valid triangle count")
     }
-
-    log.info("✓ Detail mesh extreme parameters test passed")
 }
 
 @(test)
 test_detail_mesh_data_consistency :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     // Create scenario for detail mesh validation
-
     hf := recast.create_heightfield(8, 8, {0,0,0}, {8,8,8}, 1.0, 0.5)
     testing.expect(t, hf != nil, "Failed to create heightfield")
     defer recast.free_heightfield(hf)
-
     // Add walkable area
     for x in 2..=5 {
         for z in 2..=5 {
             recast.add_span(hf, i32(x), i32(z), 0, 2, recast.RC_WALKABLE_AREA, 1)
         }
     }
-
     chf := recast.create_compact_heightfield(2, 1, hf)
     defer recast.free_compact_heightfield(chf)
     ok := recast.build_distance_field(chf)
     ok = recast.build_regions(chf, 2, 8, 20)
-
     contour_set := recast.create_contour_set(chf, 1.0, 1, {.WALL_EDGES})
     defer recast.free_contour_set(contour_set)
 
@@ -622,12 +579,7 @@ test_detail_mesh_data_consistency :: proc(t: ^testing.T) {
                 }
             }
         }
-
-        log.infof("Detail mesh validation passed: %d meshes, %d vertices, %d triangles",
-                 len(detail_mesh.meshes), len(detail_mesh.verts), len(detail_mesh.tris))
     }
-
-    log.info("✓ Detail mesh data consistency test passed")
 }
 
 @(test)
@@ -710,8 +662,6 @@ test_delaunay_hull_simple_triangle :: proc(t: ^testing.T) {
 
         log.infof("Simple triangle test: triangle [%d,%d,%d]", tri[0], tri[1], tri[2])
     }
-
-    log.info("✓ Delaunay hull simple triangle test passed")
 }
 
 @(test)
@@ -746,8 +696,6 @@ test_delaunay_hull_square :: proc(t: ^testing.T) {
 
         log.infof("Square triangle %d: [%d,%d,%d]", i, tri[0], tri[1], tri[2])
     }
-
-    log.info("✓ Delaunay hull square test passed")
 }
 
 @(test)
@@ -796,14 +744,9 @@ test_delaunay_hull_pentagon_with_interior :: proc(t: ^testing.T) {
 
         if valid {
             total_valid_triangles += 1
-            log.infof("Pentagon triangle %d: [%d,%d,%d]", i, tri[0], tri[1], tri[2])
         }
     }
-
     testing.expect(t, total_valid_triangles > 0, "Should have at least one valid triangle")
-    log.infof("Pentagon test: %d valid triangles out of %d", total_valid_triangles, len(triangles))
-
-    log.info("✓ Delaunay hull pentagon with interior test passed")
 }
 
 @(test)
@@ -854,8 +797,6 @@ test_delaunay_hull_edge_cases :: proc(t: ^testing.T) {
         success := recast.delaunay_hull(points, hull, &triangles)
         log.infof("Very small triangle case: success=%t, triangles=%d", success, len(triangles))
     }
-
-    log.info("✓ Delaunay hull edge cases test passed")
 }
 
 @(test)
@@ -889,13 +830,9 @@ test_delaunay_hull_performance :: proc(t: ^testing.T) {
     end_time := time.now()
 
     duration := time.duration_milliseconds(time.diff(start_time, end_time))
-
     testing.expect(t, success, "Large point set triangulation should succeed")
     testing.expect(t, len(triangles) > 0, "Should produce triangles")
     testing.expect(t, duration < 1000, "Should complete within reasonable time")
-
     log.infof("Performance test: %d points -> %d triangles in %d ms",
              num_points, len(triangles), duration)
-
-    log.info("✓ Delaunay hull performance test passed")
 }
