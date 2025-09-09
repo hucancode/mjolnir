@@ -42,24 +42,6 @@ nav_mesh_init :: proc(nav_mesh: ^Nav_Mesh, params: ^Nav_Mesh_Params) -> recast.S
     return {.Success}
 }
 
-nav_mesh_init_single :: proc(nav_mesh: ^Nav_Mesh, data: []u8, flags: i32) -> recast.Status {
-    header, parse_status := parse_mesh_header(data)
-    if recast.status_failed(parse_status) do return parse_status
-
-    params := Nav_Mesh_Params{
-        orig = header.bmin,
-        tile_width = (header.bmax - header.bmin).x,
-        tile_height = (header.bmax - header.bmin).z,
-        max_tiles = 1,
-        max_polys = header.poly_count,
-    }
-
-    init_status := nav_mesh_init(nav_mesh, &params)
-    if recast.status_failed(init_status) do return init_status
-
-    _, add_status := nav_mesh_add_tile(nav_mesh, data, flags)
-    return add_status
-}
 
 nav_mesh_destroy :: proc(nav_mesh: ^Nav_Mesh) {
     for i in 0..<nav_mesh.max_tiles {

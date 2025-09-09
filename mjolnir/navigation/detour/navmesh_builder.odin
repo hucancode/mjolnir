@@ -314,9 +314,8 @@ create_nav_mesh_data :: proc(params: ^Create_Nav_Mesh_Data_Params) -> ([]u8, rec
         return nil, {.Invalid_Param}
     }
 
-    // Calculate and log data integrity checksum
-    checksum := calculate_data_checksum(data)
-    log.infof("Navigation mesh tile created successfully (size: %d bytes, checksum: 0x%08x)", len(data), checksum)
+    // Navigation mesh tile created successfully
+    log.infof("Navigation mesh tile created successfully (size: %d bytes)", len(data))
     return data, {.Success}
 }
 

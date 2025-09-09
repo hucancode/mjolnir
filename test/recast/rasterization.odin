@@ -477,3 +477,35 @@ test_triangle_rasterization_accuracy :: proc(t: ^testing.T) {
     testing.expect(t, covered_cells >= 3 && covered_cells <= 12,
                   "Triangle should cover reasonable number of cells (3-12)")
 }
+
+@(test)
+test_triangle_rasterization :: proc(t: ^testing.T) {
+    testing.set_fail_timeout(t, 30 * time.Second)
+    hf := recast.create_heightfield(10, 10, {0, 0, 0}, {10, 10, 10}, 1.0, 0.5)
+    defer recast.free_heightfield(hf)
+    testing.expect(t, hf != nil, "Failed to create heightfield")
+    // Test single triangle rasterization
+    v0 := [3]f32{2, 1, 2}
+    v1 := [3]f32{8, 1, 2}
+    v2 := [3]f32{5, 1, 8}
+    ok := recast.rasterize_triangle(v0, v1, v2, recast.RC_WALKABLE_AREA, hf, 1)
+    testing.expect(t, ok, "Failed to rasterize triangle")
+    // Count total spans created
+    total_spans := 0
+    for z in 0..<hf.height {
+        for x in 0..<hf.width {
+            s := hf.spans[x + z * hf.width]
+            for s != nil {
+                total_spans += 1
+                s = s.next
+            }
+        }
+    }
+    testing.expect(t, total_spans > 0, "No spans created from triangle")
+    // Test degenerate triangle (should handle gracefully)
+    v3 := [3]f32{0, 0, 0}
+    v4 := [3]f32{1, 0, 0}
+    v5 := [3]f32{2, 0, 0}  // Collinear points
+    ok2 := recast.rasterize_triangle(v3, v4, v5, recast.RC_WALKABLE_AREA, hf, 1)
+    testing.expect(t, ok2, "Failed to handle degenerate triangle")
+}

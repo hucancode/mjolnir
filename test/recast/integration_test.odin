@@ -3,6 +3,7 @@ package test_recast
 import "../../mjolnir/navigation/recast"
 import "core:testing"
 import "core:log"
+import "core:time"
 
 // Helper to create test configuration
 create_test_config :: proc(cs, ch: f32) -> recast.Config {
@@ -587,4 +588,93 @@ test_navmesh_performance :: proc(t: ^testing.T) {
     testing.expect(t, ok, "Failed to build regions")
 
     log.infof("Performance test complete: %d spans, %d regions", len(chf.spans), chf.max_regions)
+}
+
+@(test)
+test_edge_cases :: proc(t: ^testing.T) {
+    testing.set_fail_timeout(t, 30 * time.Second)
+    // Test 1: Empty mesh
+    {
+        vertices := [][3]f32{}
+        indices := []i32{}
+        areas := []u8{}
+
+        cfg := recast.Config{
+            cs = 0.3,
+            ch = 0.2,
+            walkable_slope_angle = 45.0,
+        }
+
+        pmesh, dmesh, ok := recast.build_navmesh(vertices, indices, areas, cfg)
+        testing.expect(t, !ok, "Empty mesh should fail gracefully")
+
+        recast.free_poly_mesh(pmesh)
+        recast.free_poly_mesh_detail(dmesh)
+    }
+
+    // Test 2: Single triangle
+    {
+        vertices := [][3]f32{
+            {0, 0, 0},
+            {1, 0, 0},
+            {0.5, 0, 1},
+        }
+        indices := []i32{0, 1, 2}
+        areas := []u8{recast.RC_WALKABLE_AREA}
+
+        cfg := recast.Config{
+            cs = 0.1,
+            ch = 0.1,
+            walkable_slope_angle = 45.0,
+            walkable_height = 10,
+            walkable_climb = 4,
+            walkable_radius = 0,
+            min_region_area = 1,
+            merge_region_area = 2,
+            max_verts_per_poly = 6,
+            detail_sample_dist = 1.0,
+            detail_sample_max_error = 0.1,
+        }
+
+        pmesh, dmesh, ok := recast.build_navmesh(vertices, indices, areas, cfg)
+
+        if ok {
+            testing.expect(t, pmesh.npolys > 0, "Single triangle should produce at least one polygon")
+        }
+
+        recast.free_poly_mesh(pmesh)
+        recast.free_poly_mesh_detail(dmesh)
+    }
+
+    // Test 3: Very large mesh bounds
+    {
+        vertices := [][3]f32{
+            {-1000, 0, -1000},
+            {1000, 0, -1000},
+            {1000, 0, 1000},
+            {-1000, 0, 1000},
+        }
+        indices := []i32{0, 1, 2, 0, 2, 3}
+        areas := []u8{recast.RC_WALKABLE_AREA, recast.RC_WALKABLE_AREA}
+
+        cfg := recast.Config{
+            cs = 10.0,  // Large cell size for huge mesh
+            ch = 1.0,
+            walkable_slope_angle = 45.0,
+            walkable_height = 10,
+            walkable_climb = 4,
+            walkable_radius = 2,
+            min_region_area = 8,
+            merge_region_area = 20,
+            max_verts_per_poly = 6,
+            detail_sample_dist = 50.0,
+            detail_sample_max_error = 5.0,
+        }
+        pmesh, dmesh, ok := recast.build_navmesh(vertices, indices, areas, cfg)
+        defer recast.free_poly_mesh(pmesh)
+        defer recast.free_poly_mesh_detail(dmesh)
+        if ok {
+            testing.expect(t, pmesh.npolys > 0, "Large mesh should produce polygons")
+        }
+    }
 }

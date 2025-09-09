@@ -770,3 +770,47 @@ test_walkable_low_height_filter :: proc(t: ^testing.T) {
 
     log.info("Walkable low height filter test passed")
 }
+
+@(test)
+test_filter_operations :: proc(t: ^testing.T) {
+    testing.set_fail_timeout(t, 30 * time.Second)
+    hf := recast.create_heightfield(10, 10, {0, 0, 0}, {10, 10, 10}, 1.0, 0.5)
+    defer recast.free_heightfield(hf)
+    testing.expect(t, hf != nil, "Heightfield should be created")
+    // Create a test scenario with various spans
+    // Column with multiple spans at different heights
+    recast.add_span(hf, 5, 5, 0, 10, recast.RC_WALKABLE_AREA, 1)   // Ground
+    recast.add_span(hf, 5, 5, 12, 14, recast.RC_WALKABLE_AREA, 1)  // Low overhang
+    recast.add_span(hf, 5, 5, 20, 30, recast.RC_WALKABLE_AREA, 1)  // Platform
+    // Column with ledge
+    recast.add_span(hf, 6, 5, 0, 10, recast.RC_WALKABLE_AREA, 1)
+    recast.add_span(hf, 6, 5, 11, 12, recast.RC_WALKABLE_AREA, 1)  // Thin ledge
+    initial_count := 0
+    for z in 0..<hf.height {
+        for x in 0..<hf.width {
+            s := hf.spans[x + z * hf.width]
+            for s != nil {
+                if s.area != recast.RC_NULL_AREA {
+                    initial_count += 1
+                }
+                s = s.next
+            }
+        }
+    }
+    recast.filter_low_hanging_walkable_obstacles(4, hf)
+    recast.filter_ledge_spans(10, 4, hf)
+    recast.filter_walkable_low_height_spans(10, hf)
+    filtered_count := 0
+    for z in 0..<hf.height {
+        for x in 0..<hf.width {
+            s := hf.spans[x + z * hf.width]
+            for s != nil {
+                if s.area != recast.RC_NULL_AREA {
+                    filtered_count += 1
+                }
+                s = s.next
+            }
+        }
+    }
+    testing.expect(t, filtered_count <= initial_count, "Filtering should not increase span count")
+}

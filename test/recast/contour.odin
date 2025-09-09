@@ -788,6 +788,33 @@ test_simplify_contour_distance :: proc(t: ^testing.T) {
     }
 }
 
+@(test)
+test_basic_contour_simplification :: proc(t: ^testing.T) {
+    testing.set_fail_timeout(t, 30 * time.Second)
+    // Create a raw contour for simplification
+    raw_verts := [][4]i32{
+        {0, 0, 0, 0},
+        {10, 0, 0, 0},
+        {10, 0, 1, 0},  // Small deviation
+        {10, 0, 10, 0},
+        {9, 0, 10, 0},  // Small deviation
+        {0, 0, 10, 0},
+        {0, 0, 5, 0},   // Mid-point
+    }
+    simplified := make([dynamic][4]i32)
+    defer delete(simplified)
+    // Simplify with different error tolerances
+    recast.simplify_contour(raw_verts, &simplified, 0.5, 1.0, 12)
+    // Should have removed small deviations
+    testing.expect(t, len(simplified) < len(raw_verts), "Simplification should reduce vertex count")
+    testing.expect(t, len(simplified) >= 3, "Simplified contour should have at least 3 vertices")
+    // Test with no simplification (max_error = 0)
+    no_simp := make([dynamic][4]i32)
+    defer delete(no_simp)
+    recast.simplify_contour(raw_verts, &no_simp, 0.0, 1.0, 12)
+    testing.expect_value(t, len(no_simp), len(raw_verts))
+}
+
 // TODO: this test is incomplete, it does not expect anything
 @(test)
 test_simplify_contour_algorithm :: proc(t: ^testing.T) {

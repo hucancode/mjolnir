@@ -5,10 +5,6 @@ import "core:testing"
 import "core:log"
 import "core:time"
 
-// ================================
-// SECTION 1: UNIT TESTS - BIT OPERATIONS
-// ================================
-
 // Unit Test: Verify span bit packing/unpacking with hard-coded inputs
 @(test)
 test_span_bit_operations :: proc(t: ^testing.T) {
@@ -571,10 +567,6 @@ test_span_partial_merge :: proc(t: ^testing.T) {
     testing.expect(t, span.next == nil, "Should be no more spans")
 }
 
-// ================================
-// SECTION 4: END-TO-END TESTS - COMPLEX SCENARIOS
-// ================================
-
 // End-to-End Test: Multiple columns with spans
 @(test)
 test_span_multiple_columns :: proc(t: ^testing.T) {
@@ -882,4 +874,48 @@ test_many_thin_spans :: proc(t: ^testing.T) {
 
     log.infof("Cell contains %d spans", span_count)
     testing.expect(t, span_count == spans_added, "All spans should be preserved (no merging due to gaps)")
+}
+
+// Detailed test comparing specific Recast functions
+@(test)
+test_basic_span_merging :: proc(t: ^testing.T) {
+    testing.set_fail_timeout(t, 30 * time.Second)
+    // Create a small heightfield for testing
+    hf := recast.create_heightfield(10, 10, {0, 0, 0}, {10, 10, 10}, 1.0, 0.5)
+    defer recast.free_heightfield(hf)
+    testing.expect(t, hf != nil, "Failed to create heightfield")
+    // Test 1: Add non-overlapping spans
+    ok1 := recast.add_span(hf, 5, 5, 10, 20, recast.RC_WALKABLE_AREA, 1)
+    ok2 := recast.add_span(hf, 5, 5, 30, 40, recast.RC_WALKABLE_AREA, 1)
+    testing.expect(t, ok1, "Failed to add first span")
+    testing.expect(t, ok2, "Failed to add second span")
+    // Count spans in column
+    count := 0
+    s := hf.spans[5 + 5 * hf.width]
+    for s != nil {
+        count += 1
+        log.infof("  Span %d: [%d, %d] area=%d", count, s.smin, s.smax, s.area)
+        s = s.next
+    }
+    testing.expect_value(t, count, 2)
+
+    // Test 2: Add overlapping spans that should merge
+    hf2 := recast.create_heightfield(10, 10, {0, 0, 0}, {10, 10, 10}, 1.0, 0.5)
+    defer recast.free_heightfield(hf2)
+    testing.expect(t, hf2 != nil, "Failed to create heightfield")
+
+    ok3 := recast.add_span(hf2, 3, 3, 10, 25, recast.RC_WALKABLE_AREA, 1)
+    ok4 := recast.add_span(hf2, 3, 3, 20, 30, recast.RC_WALKABLE_AREA, 1)
+
+    testing.expect(t, ok3, "Failed to add overlapping span 1")
+    testing.expect(t, ok4, "Failed to add overlapping span 2")
+
+    // Should have merged into one span
+    count2 := 0
+    s2 := hf2.spans[3 + 3 * hf2.width]
+    for s2 != nil {
+        count2 += 1
+        s2 = s2.next
+    }
+    testing.expect_value(t, count2, 1)
 }
