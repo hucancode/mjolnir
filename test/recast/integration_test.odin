@@ -26,8 +26,6 @@ create_test_config :: proc(cs, ch: f32) -> recast.Config {
 
 @(test)
 test_complete_navmesh_generation_simple :: proc(t: ^testing.T) {
-    // Test complete navigation mesh generation with a simple flat floor
-
     // Define a simple square floor
     verts := [][3]f32{
         {0, 0, 0},
@@ -59,7 +57,6 @@ test_complete_navmesh_generation_simple :: proc(t: ^testing.T) {
 
     hf := recast.create_heightfield(cfg.width, cfg.height, cfg.bmin, cfg.bmax, cfg.cs, cfg.ch)
     testing.expect(t, hf != nil, "Failed to create heightfield")
-    defer recast.free_heightfield(hf)
     defer recast.free_heightfield(hf)
 
     // Rasterize triangles

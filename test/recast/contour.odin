@@ -327,12 +327,6 @@ test_contour_generation_simple :: proc(t: ^testing.T) {
     chf.cells = make([]recast.Compact_Cell, 25)
     chf.spans = make([]recast.Compact_Span, 25)
     chf.areas = make([]u8, 25)
-    defer {
-        delete(chf.cells)
-        delete(chf.spans)
-        delete(chf.areas)
-    }
-
     // Create a simple square region in the center (3x3)
     span_idx := u32(0)
     for y in 0..<5 {
@@ -395,17 +389,10 @@ test_contour_generation_multiple_regions :: proc(t: ^testing.T) {
     chf.ch = 0.2
     chf.bmin = {0, 0, 0}
     chf.bmax = {3.0, 1.0, 3.0}
-
     // Allocate cells and spans
     chf.cells = make([]recast.Compact_Cell, 100)
     chf.spans = make([]recast.Compact_Span, 100)
     chf.areas = make([]u8, 100)
-    defer {
-        delete(chf.cells)
-        delete(chf.spans)
-        delete(chf.areas)
-    }
-
     // Create two separate square regions
     span_idx := u32(0)
     for y in 0..<10 {
