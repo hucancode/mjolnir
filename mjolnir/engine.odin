@@ -216,7 +216,7 @@ Engine :: struct {
   transparent:                 RendererTransparent,
   postprocess:                 RendererPostProcess,
   ui:                          RendererUI,
-  navmesh:                     NavMeshRenderer,
+  navmesh:                     RendererNavMesh,
   command_buffers:             [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
   // Parallel shadow command buffers
   shadow_command_buffers:      [MAX_FRAMES_IN_FLIGHT][MAX_SHADOW_MAPS]vk.CommandBuffer,
@@ -487,7 +487,7 @@ init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
     &self.warehouse,
   ) or_return
   log.debugf("initializing navigation mesh renderer")
-  navmesh_renderer_init(&self.navmesh, &self.gpu_context, &self.warehouse) or_return
+  navmesh_init(&self.navmesh, &self.gpu_context, &self.warehouse) or_return
   ui_init(
     &self.ui,
     &self.gpu_context,
@@ -681,7 +681,6 @@ update_emitters :: proc(self: ^Engine, delta_time: f32) {
   params.emitter_count = u32(emitter_idx)
 }
 
-// Get main camera from the main render target for the current frame
 get_main_camera :: proc(engine: ^Engine) -> ^geometry.Camera {
   main_render_target := resource.get(
     engine.warehouse.render_targets,
@@ -737,7 +736,6 @@ update_input :: proc(self: ^Engine) -> bool {
   return true
 }
 
-// Update thread - no GLFW operations
 update :: proc(self: ^Engine) -> bool {
   delta_time := get_delta_time(self)
   if delta_time < UPDATE_FRAME_TIME {
@@ -810,7 +808,7 @@ deinit :: proc(self: ^Engine) {
   vk.DestroyFence(self.gpu_context.device, self.frame_fence, nil)
 
   ui_deinit(&self.ui, &self.gpu_context)
-  navmesh_renderer_deinit(&self.navmesh, &self.gpu_context)
+  navmesh_deinit(&self.navmesh, &self.gpu_context)
   scene_deinit(&self.scene, &self.warehouse)
   lighting_deinit(&self.lighting, &self.gpu_context)
   ambient_deinit(&self.ambient, &self.gpu_context, &self.warehouse)
@@ -829,33 +827,6 @@ deinit :: proc(self: ^Engine) {
   glfw.DestroyWindow(self.window)
   glfw.Terminate()
   log.infof("Engine deinitialized")
-}
-
-// ========================================
-// NAVIGATION MESH INTEGRATION
-// ========================================
-
-// Load navigation mesh from Recast data
-engine_set_navigation_mesh :: proc(engine: ^Engine, poly_mesh: ^recast.Poly_Mesh, detail_mesh: ^recast.Poly_Mesh_Detail) -> bool {
-    return navmesh_renderer_build_from_recast(&engine.navmesh, &engine.gpu_context, poly_mesh, detail_mesh)
-}
-
-engine_navmesh_clear :: proc(engine: ^Engine) {
-    navmesh_renderer_clear(&engine.navmesh)
-}
-
-// Navigation mesh info
-engine_navmesh_get_triangle_count :: proc(engine: ^Engine) -> u32 {
-    return navmesh_renderer_get_triangle_count(&engine.navmesh)
-}
-
-engine_navmesh_has_data :: proc(engine: ^Engine) -> bool {
-    return navmesh_renderer_has_data(&engine.navmesh)
-}
-
-// Set navigation mesh color mode
-engine_navmesh_set_color_mode :: proc(engine: ^Engine, color_mode: NavMeshColorMode) {
-    engine.navmesh.color_mode = color_mode
 }
 
 @(private = "file")
@@ -1785,7 +1756,7 @@ render :: proc(self: ^Engine) -> vk.Result {
   )
 
   // Navigation mesh pass (render inside transparent pass)
-  navmesh_renderer_render(
+  navmesh_render(
     &self.navmesh,
     command_buffer,
     linalg.MATRIX4F32_IDENTITY,

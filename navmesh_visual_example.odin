@@ -487,7 +487,7 @@ build_navmesh :: proc(engine_ptr: ^mjolnir.Engine) -> (use_procedural: bool) {
     }
 
     // Create visualization
-    success := navmesh_renderer_build_from_recast(&engine_ptr.navmesh, &engine_ptr.gpu_context, pmesh, dmesh)
+    success := navmesh_build_from_recast(&engine_ptr.navmesh, &engine_ptr.gpu_context, pmesh, dmesh)
     if !success {
         log.error("Failed to build navigation mesh renderer")
         return use_procedural
@@ -502,7 +502,7 @@ build_navmesh :: proc(engine_ptr: ^mjolnir.Engine) -> (use_procedural: bool) {
     engine_ptr.navmesh.base_color = {0.0, 0.8, 0.2}  // Green (not used in random mode)
 
     log.infof("Navigation mesh visualization created with %d triangles",
-              navmesh_renderer_get_triangle_count(&engine_ptr.navmesh))
+              navmesh_get_triangle_count(&engine_ptr.navmesh))
 
     log.info("=== RUNTIME PHASE: Creating Detour Navigation Mesh ===")
 
@@ -839,13 +839,13 @@ update_path_visualization :: proc(engine_ptr: ^mjolnir.Engine) {
     if navmesh_state.has_path && len(navmesh_state.path_points) >= 2 {
         // Update path in the navmesh renderer
         log.infof("Updating path renderer with %d points", len(navmesh_state.path_points))
-        navmesh_renderer_update_path(&engine_ptr.navmesh, navmesh_state.path_points[:], {1.0, 0.8, 0.0, 1.0}) // Orange/yellow path
+        navmesh_update_path(&engine_ptr.navmesh, navmesh_state.path_points[:], {1.0, 0.8, 0.0, 1.0}) // Orange/yellow path
     } else if navmesh_state.has_path && len(navmesh_state.path_points) == 1 {
         log.info("Path has only 1 point - need at least 2 points to draw a line")
-        navmesh_renderer_clear_path(&engine_ptr.navmesh)
+        navmesh_clear_path(&engine_ptr.navmesh)
     } else {
         // Clear path if no valid path
-        navmesh_renderer_clear_path(&engine_ptr.navmesh)
+        navmesh_clear_path(&engine_ptr.navmesh)
     }
 
     // Remove old path waypoints (no longer needed with line rendering)
@@ -1280,7 +1280,7 @@ navmesh_render2d :: proc(engine_ptr: ^mjolnir.Engine, ctx: ^mu.Context) {
                     navmesh_state.has_path = false
                     navmesh_state.picking_mode = .PickingStart
                     update_path_visualization(&global_navmesh_engine)
-                    navmesh_renderer_clear_path(&engine_ptr.navmesh)
+                    navmesh_clear_path(&engine_ptr.navmesh)
                     log.info("Path cleared")
                 }
             }
@@ -1370,7 +1370,7 @@ navmesh_key_pressed :: proc(engine_ptr: ^mjolnir.Engine, key, action, mods: int)
         navmesh_state.has_path = false
         navmesh_state.picking_mode = .PickingStart
         update_path_visualization(&global_navmesh_engine)
-        navmesh_renderer_clear_path(&engine_ptr.navmesh)
+        navmesh_clear_path(&engine_ptr.navmesh)
         log.info("Path cleared")
 
     case glfw.KEY_D:

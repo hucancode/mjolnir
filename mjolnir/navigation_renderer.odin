@@ -11,8 +11,7 @@ import "resource"
 import "navigation/recast"
 import vk "vendor:vulkan"
 
-// Navigation mesh rendering component
-NavMeshRenderer :: struct {
+RendererNavMesh :: struct {
     // Vulkan resources
     pipeline:                vk.Pipeline,
     pipeline_layout:         vk.PipelineLayout,
@@ -62,25 +61,23 @@ NavMeshDebugMode :: enum u32 {
     Connectivity = 2, // Show polygon connectivity
 }
 
-// Push constants for navigation mesh rendering
 NavMeshPushConstants :: struct {
-    world:         matrix[4,4]f32,  // 64 bytes
-    camera_index:  u32,             // 4
-    height_offset: f32,             // 4
-    alpha:         f32,             // 4
-    color_mode:    u32,             // 4
-    padding:       [11]f32,         // 44 (pad to 128)
+    world:         matrix[4,4]f32,
+    camera_index:  u32,
+    height_offset: f32,
+    alpha:         f32,
+    color_mode:    u32,
+    padding:       [11]u32,
 }
 
-// Push constants for debug rendering
 NavMeshDebugPushConstants :: struct {
-    world:         matrix[4,4]f32,  // 64 bytes
-    camera_index:  u32,             // 4
-    height_offset: f32,             // 4
-    line_width:    f32,             // 4
-    debug_mode:    u32,             // 4
-    debug_color:   [3]f32,          // 12
-    padding:       [8]f32,          // 32 (pad to 128)
+    world:         matrix[4,4]f32,
+    camera_index:  u32,
+    height_offset: f32,
+    line_width:    f32,
+    debug_mode:    u32,
+    debug_color:   [3]f32,
+    padding:       [8]u32,
 }
 
 // Maximum path segments (line segments between waypoints)
@@ -97,8 +94,7 @@ AREA_COLORS := [7][4]f32{
     6 = {0.8, 0.8, 0.0, 0.6},     // LADDER_AREA - yellow
 }
 
-// Initialize navigation mesh renderer
-navmesh_renderer_init :: proc(renderer: ^NavMeshRenderer, gpu_context: ^gpu.GPUContext, warehouse: ^ResourceWarehouse) -> vk.Result {
+navmesh_init :: proc(renderer: ^RendererNavMesh, gpu_context: ^gpu.GPUContext, warehouse: ^ResourceWarehouse) -> vk.Result {
     // Initialize default values
     renderer.enabled = true
     renderer.debug_mode = false
@@ -131,8 +127,7 @@ navmesh_renderer_init :: proc(renderer: ^NavMeshRenderer, gpu_context: ^gpu.GPUC
     return .SUCCESS
 }
 
-// Clean up navigation mesh renderer
-navmesh_renderer_deinit :: proc(renderer: ^NavMeshRenderer, gpu_context: ^gpu.GPUContext) {
+navmesh_deinit :: proc(renderer: ^RendererNavMesh, gpu_context: ^gpu.GPUContext) {
     if renderer.pipeline != 0 {
         vk.DestroyPipeline(gpu_context.device, renderer.pipeline, nil)
     }
@@ -151,30 +146,20 @@ navmesh_renderer_deinit :: proc(renderer: ^NavMeshRenderer, gpu_context: ^gpu.GP
     gpu.data_buffer_deinit(gpu_context, &renderer.path_vertex_buffer)
 }
 
-// Build vertex data from navigation mesh
-navmesh_renderer_build_from_recast :: proc(renderer: ^NavMeshRenderer, gpu_context: ^gpu.GPUContext,
-                                          poly_mesh: ^recast.Poly_Mesh, detail_mesh: ^recast.Poly_Mesh_Detail) -> bool {
+navmesh_build_from_recast :: proc(renderer: ^RendererNavMesh, gpu_context: ^gpu.GPUContext,
+                                  poly_mesh: ^recast.Poly_Mesh, detail_mesh: ^recast.Poly_Mesh_Detail) -> bool {
     if poly_mesh == nil {
         log.error("Cannot build navigation mesh renderer: polygon mesh is nil")
         return false
     }
 
-    // For now, don't use detail mesh due to coordinate issues
-    use_detail_mesh := false
-    if detail_mesh != nil && len(detail_mesh.verts) > 0 {
-        log.infof("Detail mesh available but not used: %d vertices, %d triangles", len(detail_mesh.verts), len(detail_mesh.tris))
-    }
+    use_detail_mesh := detail_mesh != nil && len(detail_mesh.verts) > 0
 
     vertices := make([dynamic]NavMeshVertex, 0, len(poly_mesh.verts))
     indices := make([dynamic]u32, 0, poly_mesh.npolys * 6)  // Estimate
     defer delete(vertices)
     defer delete(indices)
 
-    // Debug: Log mesh parameters
-    log.infof("NavMesh build params: bmin=(%.2f,%.2f,%.2f) bmax=(%.2f,%.2f,%.2f) cs=%.3f ch=%.3f",
-              poly_mesh.bmin[0], poly_mesh.bmin[1], poly_mesh.bmin[2],
-              poly_mesh.bmax[0], poly_mesh.bmax[1], poly_mesh.bmax[2],
-              poly_mesh.cs, poly_mesh.ch)
 
     if use_detail_mesh && len(detail_mesh.verts) > 0 {
         // Use detail mesh vertices (already in world space)
@@ -202,9 +187,6 @@ navmesh_renderer_build_from_recast :: proc(renderer: ^NavMeshRenderer, gpu_conte
 
             pos := detail_mesh.verts[i]
 
-            if i < 10 {
-                log.debugf("Detail vertex %d: (%.2f,%.2f,%.2f)", i, pos.x, pos.y, pos.z)
-            }
 
             append(&vertices, NavMeshVertex{
                 position = pos,
@@ -223,14 +205,6 @@ navmesh_renderer_build_from_recast :: proc(renderer: ^NavMeshRenderer, gpu_conte
                 f32(v.z) * poly_mesh.cs + poly_mesh.bmin.z,
             }
 
-        // Debug: Log first few vertices to check Y coordinates
-        if i < 10 {
-            raw_y := v[1]
-            y_world := f32(raw_y) * poly_mesh.ch + poly_mesh.bmin[1]
-            log.debugf("NavMesh vertex %d: raw_y=%d, ch=%.3f, bmin.y=%.3f => y_world=%.3f (full pos: %.2f,%.2f,%.2f)",
-                      i, raw_y, poly_mesh.ch, poly_mesh.bmin[1], y_world,
-                      pos.x, pos.y, pos.z)
-        }
             // Default normal pointing up
             normal := [3]f32{0, 1, 0}
 
@@ -304,62 +278,9 @@ navmesh_renderer_build_from_recast :: proc(renderer: ^NavMeshRenderer, gpu_conte
     } else {
         // Original polygon mesh triangulation
         for i in 0..<poly_mesh.npolys {
-        // Note: polys array stores both vertices and neighbors, hence * 2
         poly_base := int(i) * int(poly_mesh.nvp) * 2
         area_id := poly_mesh.areas[i] if len(poly_mesh.areas) > int(i) else 1
 
-        // Check polygon bounds and center
-        poly_center := [3]f32{0, 0, 0}
-        poly_min := [2]f32{999999, 999999}
-        poly_max := [2]f32{-999999, -999999}
-        poly_vert_count := 0
-
-        for j in 0..<poly_mesh.nvp {
-            vert_idx := poly_mesh.polys[poly_base + int(j)]
-            if vert_idx == recast.RC_MESH_NULL_IDX do break
-
-            v := poly_mesh.verts[vert_idx]
-            world_x := f32(v[0]) * poly_mesh.cs + poly_mesh.bmin[0]
-            world_z := f32(v[2]) * poly_mesh.cs + poly_mesh.bmin[2]
-
-            poly_center.x += world_x
-            poly_center.z += world_z
-            poly_min.x = min(poly_min.x, world_x)
-            poly_min.y = min(poly_min.y, world_z)
-            poly_max.x = max(poly_max.x, world_x)
-            poly_max.y = max(poly_max.y, world_z)
-            poly_vert_count += 1
-        }
-
-        if poly_vert_count > 0 {
-            poly_center.x /= f32(poly_vert_count)
-            poly_center.z /= f32(poly_vert_count)
-
-            // Check if polygon overlaps with obstacle (6x6 centered at 0,0)
-            obstacle_min := [2]f32{-3, -3}
-            obstacle_max := [2]f32{3, 3}
-
-            overlaps := poly_max.x > obstacle_min.x && poly_min.x < obstacle_max.x &&
-                       poly_max.y > obstacle_min.y && poly_min.y < obstacle_max.y
-
-            if overlaps {
-                log.warnf("Polygon %d OVERLAPS obstacle! Bounds: X=[%.1f,%.1f] Z=[%.1f,%.1f], Center:[%.1f,%.1f]",
-                          i, poly_min.x, poly_max.x, poly_min.y, poly_max.y, poly_center.x, poly_center.z)
-            }
-
-            // Debug: Check Y values for this polygon
-            if i < 5 {
-                log.debugf("Polygon %d Y values:", i)
-                for j in 0..<poly_mesh.nvp {
-                    vert_idx := poly_mesh.polys[poly_base + int(j)]
-                    if vert_idx == recast.RC_MESH_NULL_IDX do break
-
-                    v := poly_mesh.verts[vert_idx]
-                    y_raw := v[1]
-                    y_world := f32(y_raw) * poly_mesh.ch + poly_mesh.bmin[1]
-                    log.debugf("  Vertex %d (idx %d): raw_y=%d, world_y=%.3f", j, vert_idx, y_raw, y_world)
-                }
-            }        }
 
         // Get region for connectivity coloring
         region_id := poly_mesh.regs[i] if len(poly_mesh.regs) > int(i) else 0
@@ -367,10 +288,6 @@ navmesh_renderer_build_from_recast :: proc(renderer: ^NavMeshRenderer, gpu_conte
         // Get area color (pass polygon index for random colors and region for connectivity)
         area_color := get_area_color(area_id, renderer.color_mode, renderer.base_color, renderer.alpha, u32(i), region_id)
 
-        // Debug: Show polygon position for debugging
-        if i == 0 {
-            log.debugf("First polygon center: [%.1f, %.1f]", poly_center.x, poly_center.z)
-        }
 
         // Count valid vertices in this polygon
         poly_verts: [dynamic]u32
@@ -387,28 +304,7 @@ navmesh_renderer_build_from_recast :: proc(renderer: ^NavMeshRenderer, gpu_conte
             }
         }
 
-        // Check if polygon is mostly horizontal before adding it
-        y_min := f32(999999)
-        y_max := f32(-999999)
-        for vert_idx in poly_verts {
-            if int(vert_idx) < len(vertices) {
-                y := vertices[vert_idx].position.y
-                y_min = min(y_min, y)
-                y_max = max(y_max, y)
-            }
-        }
 
-        // Filter out non-flat polygons (Y variation > 0.1)
-        y_variation := y_max - y_min
-        if y_variation > 0.1 {
-            continue
-        }
-
-        // Log remaining issue with missing quadrants
-        if i == 0 {
-            log.warn("KNOWN ISSUE: Recast heightfield only generates navigation mesh for negative coordinates (SW quadrant)")
-            log.warn("This appears to be a bug in the heightfield rasterization process")
-        }
 
         // Triangulate polygon (simple fan triangulation)
         if len(poly_verts) >= 3 {
@@ -460,36 +356,23 @@ navmesh_renderer_build_from_recast :: proc(renderer: ^NavMeshRenderer, gpu_conte
     return true
 }
 
-// Generate random color with good saturation and brightness
 generate_random_color :: proc(seed: u32, alpha: f32) -> [4]f32 {
-    // Simple deterministic color generation using the seed
-    // This avoids random API complexity while still giving different colors per polygon
-
-    // Use seed to generate more distinct hues (spread across color wheel)
-    hue := f32((seed * 137) % 360)  // Golden angle approximation for better distribution
-    saturation := 0.8 + f32((seed * 17) % 20) / 100.0  // 0.8 to 1.0 (higher saturation)
-    value := 0.7 + f32((seed * 43) % 30) / 100.0       // 0.7 to 1.0 (brighter)
-
-    // Convert HSV to RGB
-    c := value * saturation
-    x := c * (1.0 - math.abs(math.mod(hue / 60.0, 2.0) - 1.0))
-    m := value - c
-
+    h := f32((seed * 137) % 360) / 360.0
+    s: f32 = 0.8
+    v: f32 = 0.8
+    
+    c := v * s
+    x := c * f32(1.0 - math.abs(math.mod(f64(h) * 6.0, 2.0) - 1.0))
+    m := v - c
+    
     rgb: [3]f32
-    if hue < 60.0 {
-        rgb = {c, x, 0}
-    } else if hue < 120.0 {
-        rgb = {x, c, 0}
-    } else if hue < 180.0 {
-        rgb = {0, c, x}
-    } else if hue < 240.0 {
-        rgb = {0, x, c}
-    } else if hue < 300.0 {
-        rgb = {x, 0, c}
-    } else {
-        rgb = {c, 0, x}
-    }
-
+    if h < 1.0/6.0      do rgb = {c, x, 0}
+    else if h < 2.0/6.0 do rgb = {x, c, 0}
+    else if h < 3.0/6.0 do rgb = {0, c, x}
+    else if h < 4.0/6.0 do rgb = {0, x, c}
+    else if h < 5.0/6.0 do rgb = {x, 0, c}
+    else                do rgb = {c, 0, x}
+    
     return {rgb.x + m, rgb.y + m, rgb.z + m, alpha}
 }
 
@@ -526,8 +409,7 @@ get_area_color :: proc(area_id: u8, color_mode: NavMeshColorMode, base_color: [3
     return {base_color.x, base_color.y, base_color.z, alpha}
 }
 
-// Update path visualization
-navmesh_renderer_update_path :: proc(renderer: ^NavMeshRenderer, path_points: [][3]f32, path_color: [4]f32 = {1.0, 1.0, 0.0, 1.0}) {
+navmesh_update_path :: proc(renderer: ^RendererNavMesh, path_points: [][3]f32, path_color: [4]f32 = {1.0, 1.0, 0.0, 1.0}) {
     if len(path_points) < 2 {
         renderer.path_enabled = false
         renderer.path_vertex_count = 0
@@ -616,24 +498,14 @@ navmesh_renderer_update_path :: proc(renderer: ^NavMeshRenderer, path_points: []
     }
 }
 
-// Clear path visualization
-navmesh_renderer_clear_path :: proc(renderer: ^NavMeshRenderer) {
+navmesh_clear_path :: proc(renderer: ^RendererNavMesh) {
     renderer.path_enabled = false
     renderer.path_vertex_count = 0
 }
 
-// Render navigation mesh
-navmesh_renderer_render :: proc(renderer: ^NavMeshRenderer, command_buffer: vk.CommandBuffer,
-                               world_matrix: matrix[4,4]f32, camera_index: u32) {
-    if !renderer.enabled {
-        log.warn("Navigation mesh renderer is disabled")
-        return
-    }
-    if renderer.vertex_count == 0 || renderer.index_count == 0 {
-        log.warnf("Navigation mesh renderer has no data: vertices=%d, indices=%d",
-                  renderer.vertex_count, renderer.index_count)
-        return
-    }
+navmesh_render :: proc(renderer: ^RendererNavMesh, command_buffer: vk.CommandBuffer,
+                      world_matrix: matrix[4,4]f32, camera_index: u32) {
+    if !renderer.enabled || renderer.vertex_count == 0 || renderer.index_count == 0 do return
 
     pipeline := renderer.debug_pipeline if renderer.debug_mode else renderer.pipeline
     pipeline_layout := renderer.debug_pipeline_layout if renderer.debug_mode else renderer.pipeline_layout
@@ -698,8 +570,7 @@ navmesh_renderer_render :: proc(renderer: ^NavMeshRenderer, command_buffer: vk.C
     }
 }
 
-// Create rendering pipelines
-create_navmesh_pipelines :: proc(renderer: ^NavMeshRenderer, gpu_context: ^gpu.GPUContext, warehouse: ^ResourceWarehouse) -> vk.Result {
+create_navmesh_pipelines :: proc(renderer: ^RendererNavMesh, gpu_context: ^gpu.GPUContext, warehouse: ^ResourceWarehouse) -> vk.Result {
     // Load shaders
     navmesh_vert_code := #load("shader/navmesh/vert.spv")
     navmesh_vert := gpu.create_shader_module(gpu_context, navmesh_vert_code) or_return
@@ -944,49 +815,19 @@ create_navmesh_pipelines :: proc(renderer: ^NavMeshRenderer, gpu_context: ^gpu.G
 // PUBLIC API
 // ========================================
 
-// Get current configuration
-navmesh_renderer_get_enabled :: proc(renderer: ^NavMeshRenderer) -> bool {
-    return renderer.enabled
-}
+navmesh_get_enabled :: proc(renderer: ^RendererNavMesh) -> bool { return renderer.enabled }
+navmesh_get_debug_mode :: proc(renderer: ^RendererNavMesh) -> bool { return renderer.debug_mode }
+navmesh_get_alpha :: proc(renderer: ^RendererNavMesh) -> f32 { return renderer.alpha }
+navmesh_get_height_offset :: proc(renderer: ^RendererNavMesh) -> f32 { return renderer.height_offset }
+navmesh_get_color_mode :: proc(renderer: ^RendererNavMesh) -> NavMeshColorMode { return renderer.color_mode }
+navmesh_get_base_color :: proc(renderer: ^RendererNavMesh) -> [3]f32 { return renderer.base_color }
+navmesh_get_debug_render_mode :: proc(renderer: ^RendererNavMesh) -> NavMeshDebugMode { return renderer.debug_render_mode }
 
-navmesh_renderer_get_debug_mode :: proc(renderer: ^NavMeshRenderer) -> bool {
-    return renderer.debug_mode
-}
-
-navmesh_renderer_get_alpha :: proc(renderer: ^NavMeshRenderer) -> f32 {
-    return renderer.alpha
-}
-
-navmesh_renderer_get_height_offset :: proc(renderer: ^NavMeshRenderer) -> f32 {
-    return renderer.height_offset
-}
-
-navmesh_renderer_get_color_mode :: proc(renderer: ^NavMeshRenderer) -> NavMeshColorMode {
-    return renderer.color_mode
-}
-
-navmesh_renderer_get_base_color :: proc(renderer: ^NavMeshRenderer) -> [3]f32 {
-    return renderer.base_color
-}
-
-navmesh_renderer_get_debug_render_mode :: proc(renderer: ^NavMeshRenderer) -> NavMeshDebugMode {
-    return renderer.debug_render_mode
-}
-
-// Navigation mesh data management
-navmesh_renderer_clear :: proc(renderer: ^NavMeshRenderer) {
+navmesh_clear :: proc(renderer: ^RendererNavMesh) {
     renderer.vertex_count = 0
     renderer.index_count = 0
 }
 
-navmesh_renderer_get_triangle_count :: proc(renderer: ^NavMeshRenderer) -> u32 {
-    return renderer.index_count / 3
-}
-
-navmesh_renderer_get_vertex_count :: proc(renderer: ^NavMeshRenderer) -> u32 {
-    return renderer.vertex_count
-}
-
-navmesh_renderer_has_data :: proc(renderer: ^NavMeshRenderer) -> bool {
-    return renderer.vertex_count > 0 && renderer.index_count > 0
-}
+navmesh_get_triangle_count :: proc(renderer: ^RendererNavMesh) -> u32 { return renderer.index_count / 3 }
+navmesh_get_vertex_count :: proc(renderer: ^RendererNavMesh) -> u32 { return renderer.vertex_count }
+navmesh_has_data :: proc(renderer: ^RendererNavMesh) -> bool { return renderer.vertex_count > 0 && renderer.index_count > 0 }
