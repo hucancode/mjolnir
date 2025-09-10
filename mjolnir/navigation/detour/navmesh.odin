@@ -25,73 +25,72 @@ Navmesh_Memory_Map :: struct {
 // Create memory map from raw data - replaces all pointer arithmetic
 navmesh_create_memory_map :: proc(data: []u8) -> (Navmesh_Memory_Map, recast.Status) {
     if len(data) < size_of(Mesh_Header) do return {}, {.Invalid_Param}
-    
+
     memory_map: Navmesh_Memory_Map
     memory_map.data = data
     memory_map.header = cast(^Mesh_Header)raw_data(data)
-    
+
     // Use slice syntax to avoid pointer arithmetic
     offset := size_of(Mesh_Header)
-    
+
     if memory_map.header.vert_count > 0 {
         vert_bytes := offset + size_of([3]f32) * int(memory_map.header.vert_count)
         if vert_bytes > len(data) do return {}, {.Invalid_Param}
         memory_map.vertices = slice.from_ptr(cast(^[3]f32)&data[offset], int(memory_map.header.vert_count))
         offset = vert_bytes
     }
-    
+
     if memory_map.header.poly_count > 0 {
         poly_bytes := offset + size_of(Poly) * int(memory_map.header.poly_count)
         if poly_bytes > len(data) do return {}, {.Invalid_Param}
         memory_map.polygons = slice.from_ptr(cast(^Poly)&data[offset], int(memory_map.header.poly_count))
         offset = poly_bytes
     }
-    
+
     if memory_map.header.max_link_count > 0 {
         link_bytes := offset + size_of(Link) * int(memory_map.header.max_link_count)
         if link_bytes > len(data) do return {}, {.Invalid_Param}
         memory_map.links = slice.from_ptr(cast(^Link)&data[offset], int(memory_map.header.max_link_count))
         offset = link_bytes
     }
-    
+
     if memory_map.header.detail_mesh_count > 0 {
         detail_mesh_bytes := offset + size_of(Poly_Detail) * int(memory_map.header.detail_mesh_count)
         if detail_mesh_bytes > len(data) do return {}, {.Invalid_Param}
         memory_map.detail_meshes = slice.from_ptr(cast(^Poly_Detail)&data[offset], int(memory_map.header.detail_mesh_count))
         offset = detail_mesh_bytes
     }
-    
+
     if memory_map.header.detail_vert_count > 0 {
         detail_vert_bytes := offset + size_of([3]f32) * int(memory_map.header.detail_vert_count)
         if detail_vert_bytes > len(data) do return {}, {.Invalid_Param}
         memory_map.detail_vertices = slice.from_ptr(cast(^[3]f32)&data[offset], int(memory_map.header.detail_vert_count))
         offset = detail_vert_bytes
     }
-    
+
     if memory_map.header.detail_tri_count > 0 {
         detail_tri_bytes := offset + size_of([4]u8) * int(memory_map.header.detail_tri_count)
         if detail_tri_bytes > len(data) do return {}, {.Invalid_Param}
         memory_map.detail_triangles = slice.from_ptr(cast(^[4]u8)&data[offset], int(memory_map.header.detail_tri_count))
         offset = detail_tri_bytes
     }
-    
+
     if memory_map.header.bv_node_count > 0 {
         bv_bytes := offset + size_of(BV_Node) * int(memory_map.header.bv_node_count)
         if bv_bytes > len(data) do return {}, {.Invalid_Param}
         memory_map.bv_nodes = slice.from_ptr(cast(^BV_Node)&data[offset], int(memory_map.header.bv_node_count))
         offset = bv_bytes
     }
-    
+
     if memory_map.header.off_mesh_con_count > 0 {
         off_mesh_bytes := offset + size_of(Off_Mesh_Connection) * int(memory_map.header.off_mesh_con_count)
         if off_mesh_bytes > len(data) do return {}, {.Invalid_Param}
         memory_map.off_mesh_conns = slice.from_ptr(cast(^Off_Mesh_Connection)&data[offset], int(memory_map.header.off_mesh_con_count))
         offset = off_mesh_bytes
     }
-    
+
     return memory_map, {.Success}
 }
-
 
 // Calculate tile index using slice indexing
 get_tile_index :: proc(nav_mesh: ^Nav_Mesh, tile: ^Mesh_Tile) -> u32 {
@@ -137,7 +136,6 @@ nav_mesh_init :: proc(nav_mesh: ^Nav_Mesh, params: ^Nav_Mesh_Params) -> recast.S
 
     return {.Success}
 }
-
 
 nav_mesh_destroy :: proc(nav_mesh: ^Nav_Mesh) {
     for i in 0..<nav_mesh.max_tiles {
@@ -345,7 +343,6 @@ setup_tile_data :: proc(tile: ^Mesh_Tile, data: []u8, header: ^Mesh_Header, flag
     tile.detail_tris = memory_map.detail_triangles
     tile.bv_tree = memory_map.bv_nodes
     tile.off_mesh_cons = memory_map.off_mesh_conns
-
 
     tile.links_free_list = recast.DT_NULL_LINK
     if len(tile.links) > 0 {

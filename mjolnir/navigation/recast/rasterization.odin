@@ -97,7 +97,6 @@ add_span :: proc(hf: ^Heightfield, x, z: i32, smin, smax: u16, area_id: u8, flag
     return true
 }
 
-
 divide_poly :: proc(in_verts, out_verts1, out_verts2: [][3]f32, axis_offset: f32, axis: Axis) -> (poly1_vert_count: i32, poly2_vert_count: i32) {
     assert(len(in_verts) <= 12)
 

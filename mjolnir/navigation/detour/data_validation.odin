@@ -27,7 +27,6 @@ validate_tile_data :: proc(data: []u8) -> (result: Data_Validation_Result) {
 
     header := cast(^Mesh_Header)raw_data(data)
 
-
     if header.poly_count < 0 || header.vert_count < 0 ||
        header.max_link_count < 0 || header.detail_mesh_count < 0 ||
        header.detail_vert_count < 0 || header.detail_tri_count < 0 ||
@@ -81,13 +80,11 @@ calculate_expected_tile_size :: proc(header: ^Mesh_Header) -> int {
     return size
 }
 
-
 validate_navmesh_header :: proc(header: ^Mesh_Header) -> recast.Status {
     if header == nil do return {.Invalid_Param}
     if header.poly_count < 0 || header.vert_count < 0 do return {.Invalid_Param}
     return {.Success}
 }
-
 
 verify_data_layout :: proc(data: []u8, header: ^Mesh_Header) -> bool {
     _, map_status := navmesh_create_memory_map(data)

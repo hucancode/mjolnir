@@ -11,7 +11,6 @@ import "../../mjolnir/navigation/detour"
 @(test)
 test_detour_basic_types :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     // Test polygon creation and manipulation
     poly := detour.Poly{}
 
@@ -37,7 +36,6 @@ test_detour_basic_types :: proc(t: ^testing.T) {
 @(test)
 test_detour_navmesh_init :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     nav_mesh := detour.Nav_Mesh{}
     defer detour.nav_mesh_destroy(&nav_mesh)
 
@@ -62,7 +60,6 @@ test_detour_navmesh_init :: proc(t: ^testing.T) {
 @(test)
 test_detour_reference_encoding :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     nav_mesh := detour.Nav_Mesh{}
     defer detour.nav_mesh_destroy(&nav_mesh)
 
@@ -93,7 +90,6 @@ test_detour_reference_encoding :: proc(t: ^testing.T) {
 @(test)
 test_detour_pathfinding_context :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     ctx := detour.Pathfinding_Context{}
     defer detour.pathfinding_context_destroy(&ctx)
 
@@ -123,7 +119,6 @@ test_detour_pathfinding_context :: proc(t: ^testing.T) {
 @(test)
 test_detour_node_queue :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     ctx := detour.Pathfinding_Context{}
     defer detour.pathfinding_context_destroy(&ctx)
 
@@ -169,7 +164,6 @@ test_detour_node_queue :: proc(t: ^testing.T) {
 @(test)
 test_detour_node_queue_comprehensive :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     // Test multiple scenarios to ensure priority queue works correctly
     ctx := detour.Pathfinding_Context{}
     defer detour.pathfinding_context_destroy(&ctx)
@@ -241,7 +235,6 @@ test_detour_node_queue_comprehensive :: proc(t: ^testing.T) {
 @(test)
 test_detour_node_queue_exact_problem :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     // Test the exact scenario described in the issue
     ctx := detour.Pathfinding_Context{}
     defer detour.pathfinding_context_destroy(&ctx)
@@ -284,7 +277,6 @@ test_detour_node_queue_exact_problem :: proc(t: ^testing.T) {
 @(test)
 test_detour_sliced_pathfinding_basic :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     nav_mesh := create_test_nav_mesh(t)
     defer destroy_test_nav_mesh(nav_mesh)
 
@@ -349,7 +341,6 @@ test_detour_sliced_pathfinding_basic :: proc(t: ^testing.T) {
 @(test)
 test_detour_sliced_pathfinding_partial :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     nav_mesh := create_test_nav_mesh(t)
     defer destroy_test_nav_mesh(nav_mesh)
 
@@ -393,7 +384,6 @@ test_detour_sliced_pathfinding_partial :: proc(t: ^testing.T) {
 @(test)
 test_detour_sliced_pathfinding_errors :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     nav_mesh := create_test_nav_mesh(t)
     defer destroy_test_nav_mesh(nav_mesh)
 
@@ -429,7 +419,6 @@ test_detour_sliced_pathfinding_errors :: proc(t: ^testing.T) {
 @(test)
 test_detour_end_to_end_pathfinding :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     // Test the complete pipeline: create nav mesh -> find path -> verify priority queue behavior
     nav_mesh := create_test_nav_mesh(t)
     defer destroy_test_nav_mesh(nav_mesh)
@@ -512,7 +501,6 @@ test_detour_end_to_end_pathfinding :: proc(t: ^testing.T) {
 @(test)
 test_detour_spatial_queries :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     // Create a simple test navigation mesh
     nav_mesh := create_test_nav_mesh(t)
     defer destroy_test_nav_mesh(nav_mesh)
@@ -548,7 +536,6 @@ test_detour_spatial_queries :: proc(t: ^testing.T) {
 @(test)
 test_detour_pathfinding :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     // Create a simple test navigation mesh
     nav_mesh := create_test_nav_mesh(t)
     defer destroy_test_nav_mesh(nav_mesh)
@@ -593,7 +580,6 @@ test_detour_pathfinding :: proc(t: ^testing.T) {
 @(test)
 test_detour_straight_path :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     // Create a simple test navigation mesh
     nav_mesh := create_test_nav_mesh(t)
     defer destroy_test_nav_mesh(nav_mesh)
@@ -640,7 +626,6 @@ test_detour_straight_path :: proc(t: ^testing.T) {
 @(test)
 test_detour_raycast_basic :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     nav_mesh := create_test_nav_mesh(t)
     defer destroy_test_nav_mesh(nav_mesh)
 
@@ -677,7 +662,6 @@ test_detour_raycast_basic :: proc(t: ^testing.T) {
 @(test)
 test_detour_raycast_wall_hit :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     nav_mesh := create_test_nav_mesh(t)
     defer destroy_test_nav_mesh(nav_mesh)
 
@@ -721,7 +705,6 @@ test_detour_raycast_wall_hit :: proc(t: ^testing.T) {
 @(test)
 test_detour_raycast_with_costs :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     nav_mesh := create_test_nav_mesh(t)
     defer destroy_test_nav_mesh(nav_mesh)
 
@@ -754,7 +737,6 @@ test_detour_raycast_with_costs :: proc(t: ^testing.T) {
 @(test)
 test_detour_raycast_errors :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     nav_mesh := create_test_nav_mesh(t)
     defer destroy_test_nav_mesh(nav_mesh)
 
@@ -790,7 +772,6 @@ test_detour_raycast_errors :: proc(t: ^testing.T) {
 @(test)
 test_detour_move_along_surface_comprehensive :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     nav_mesh := create_test_nav_mesh(t)
     defer destroy_test_nav_mesh(nav_mesh)
 
@@ -826,7 +807,6 @@ test_detour_move_along_surface_comprehensive :: proc(t: ^testing.T) {
 @(test)
 test_detour_move_along_surface_cross_polygons :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     nav_mesh := create_test_nav_mesh(t)
     defer destroy_test_nav_mesh(nav_mesh)
 
@@ -863,7 +843,6 @@ test_detour_move_along_surface_cross_polygons :: proc(t: ^testing.T) {
 @(test)
 test_detour_move_along_surface_blocked :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     nav_mesh := create_test_nav_mesh(t)
     defer destroy_test_nav_mesh(nav_mesh)
 
@@ -898,7 +877,6 @@ test_detour_move_along_surface_blocked :: proc(t: ^testing.T) {
 @(test)
 test_detour_move_along_surface_errors :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     nav_mesh := create_test_nav_mesh(t)
     defer destroy_test_nav_mesh(nav_mesh)
 
@@ -926,7 +904,6 @@ test_detour_move_along_surface_errors :: proc(t: ^testing.T) {
 @(test)
 test_detour_error_handling_pathfinding :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     nav_mesh := create_test_nav_mesh(t)
     defer destroy_test_nav_mesh(nav_mesh)
 
@@ -964,7 +941,6 @@ test_detour_error_handling_pathfinding :: proc(t: ^testing.T) {
 @(test)
 test_detour_error_handling_spatial_queries :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     nav_mesh := create_test_nav_mesh(t)
     defer destroy_test_nav_mesh(nav_mesh)
 
@@ -1003,7 +979,6 @@ test_detour_error_handling_spatial_queries :: proc(t: ^testing.T) {
 @(test)
 test_detour_error_handling_filter_edge_cases :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     nav_mesh := create_test_nav_mesh(t)
     defer destroy_test_nav_mesh(nav_mesh)
 
@@ -1038,7 +1013,6 @@ test_detour_error_handling_filter_edge_cases :: proc(t: ^testing.T) {
 @(test)
 test_detour_edge_cases_boundary_conditions :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     nav_mesh := create_test_nav_mesh(t)
     defer destroy_test_nav_mesh(nav_mesh)
 
@@ -1083,7 +1057,6 @@ test_detour_edge_cases_boundary_conditions :: proc(t: ^testing.T) {
 @(test)
 test_detour_dijkstra_circle_search :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     nav_mesh := create_test_nav_mesh(t)
     defer destroy_test_nav_mesh(nav_mesh)
 
@@ -1127,7 +1100,6 @@ test_detour_dijkstra_circle_search :: proc(t: ^testing.T) {
 @(test)
 test_detour_dijkstra_shape_search :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     nav_mesh := create_test_nav_mesh(t)
     defer destroy_test_nav_mesh(nav_mesh)
 
@@ -1175,7 +1147,6 @@ test_detour_dijkstra_shape_search :: proc(t: ^testing.T) {
 @(test)
 test_detour_dijkstra_path_extraction :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     nav_mesh := create_test_nav_mesh(t)
     defer destroy_test_nav_mesh(nav_mesh)
 
@@ -1229,7 +1200,6 @@ test_detour_dijkstra_path_extraction :: proc(t: ^testing.T) {
 @(test)
 test_detour_poly_wall_segments :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     nav_mesh := create_test_nav_mesh(t)
     defer destroy_test_nav_mesh(nav_mesh)
 
@@ -1275,7 +1245,6 @@ test_detour_poly_wall_segments :: proc(t: ^testing.T) {
 @(test)
 test_detour_performance_pathfinding :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     nav_mesh := create_test_nav_mesh(t)
     defer destroy_test_nav_mesh(nav_mesh)
 
@@ -1333,7 +1302,6 @@ test_detour_performance_pathfinding :: proc(t: ^testing.T) {
 @(test)
 test_detour_stress_large_searches :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 60 * time.Second)
-
     nav_mesh := create_test_nav_mesh(t)
     defer destroy_test_nav_mesh(nav_mesh)
 
@@ -1379,7 +1347,6 @@ test_detour_stress_large_searches :: proc(t: ^testing.T) {
 @(test)
 test_detour_stress_many_raycasts :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 60 * time.Second)
-
     nav_mesh := create_test_nav_mesh(t)
     defer destroy_test_nav_mesh(nav_mesh)
 
@@ -1437,7 +1404,6 @@ test_detour_stress_many_raycasts :: proc(t: ^testing.T) {
 @(test)
 test_detour_memory_stress :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 60 * time.Second)
-
     // Test creating and destroying many queries
     iterations := 5  // Much smaller number
 
@@ -1469,7 +1435,6 @@ test_detour_memory_stress :: proc(t: ^testing.T) {
 @(test)
 test_detour_edge_case_very_small_extents :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     nav_mesh := create_test_nav_mesh(t)
     defer destroy_test_nav_mesh(nav_mesh)
 

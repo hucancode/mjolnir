@@ -153,7 +153,6 @@ test_contour_simplification_accuracy :: proc(t: ^testing.T) {
 @(test)
 test_contour_edge_length_constraints :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     hf := recast.create_heightfield(8, 8, {0,0,0}, {8,8,8}, 1.0, 0.5)
     testing.expect(t, hf != nil, "Failed to create heightfield")
     defer recast.free_heightfield(hf)
@@ -202,7 +201,6 @@ test_contour_tessellation_wall_edges :: proc(t: ^testing.T) {
 @(test)
 test_contour_tessellation_area_edges :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     hf := recast.create_heightfield(6, 6, {0,0,0}, {6,6,6}, 1.0, 0.5)
     testing.expect(t, hf != nil, "Failed to create heightfield")
     defer recast.free_heightfield(hf)
@@ -492,7 +490,6 @@ test_triangulation_complex_polygon :: proc(t: ^testing.T) {
 @(test)
 test_triangulation_edge_cases :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     // Test 1: Triangle (minimum polygon)
     {
         verts := [][3]u16{{0, 0, 0}, {10, 0, 0}, {5, 0, 10}}
@@ -536,7 +533,6 @@ test_triangulation_edge_cases :: proc(t: ^testing.T) {
 @(test)
 test_contour_simplification :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     // Create a contour with many collinear points
     raw_verts := make([dynamic][4]i32)
     defer delete(raw_verts)
@@ -584,7 +580,6 @@ test_contour_simplification :: proc(t: ^testing.T) {
 @(test)
 test_simple_square_mesh :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     // Create a contour set with a simple square
     cset := new(recast.Contour_Set)
     defer recast.free_contour_set(cset)
@@ -621,7 +616,6 @@ test_simple_square_mesh :: proc(t: ^testing.T) {
 @(test)
 test_simple_l_shape_mesh :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     // Create a contour set with a simple L-shape
     cset := new(recast.Contour_Set)
     defer recast.free_contour_set(cset)
@@ -668,7 +662,6 @@ test_simple_l_shape_mesh :: proc(t: ^testing.T) {
 @(test)
 test_contour_to_mesh_pipeline :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     // Create a contour set with an L-shaped region
     cset := new(recast.Contour_Set)
     defer recast.free_contour_set(cset)

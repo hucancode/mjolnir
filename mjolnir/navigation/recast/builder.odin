@@ -840,7 +840,6 @@ create_contour_set :: proc(chf: ^Compact_Heightfield, max_error: f32, max_edge_l
     return cset
 }
 
-
 // Free contour set
 free_contour_set :: proc(cset: ^Contour_Set) {
     if cset == nil do return

@@ -7,7 +7,6 @@ import "core:math"
 import "core:math/linalg"
 
 
-
 // Get direction offsets for 4-connected grid
 get_dir_offset_x :: proc "contextless" (dir: int) -> i32 {
     offset := [4]i32{-1, 0, 1, 0}
@@ -396,7 +395,6 @@ build_navmesh :: proc(vertices: [][3]f32, indices: []i32, areas: []u8, cfg: Conf
     filter_low_hanging_walkable_obstacles(int(config.walkable_climb), hf)
     filter_ledge_spans(int(config.walkable_height), int(config.walkable_climb), hf)
     filter_walkable_low_height_spans(int(config.walkable_height), hf)
-
 
     // Build compact heightfield
     chf := create_compact_heightfield(config.walkable_height, config.walkable_climb, hf)

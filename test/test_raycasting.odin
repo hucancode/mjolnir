@@ -879,7 +879,6 @@ test_large_scene_raycasting :: proc(t: ^testing.T) {
 @(test)
 benchmark_bvh_ray_single :: proc(t: ^testing.T) {
   testing.set_fail_timeout(t, 60 * time.Second)
-
   setup_proc :: proc(
     options: ^time.Benchmark_Options,
     allocator := context.allocator,
@@ -977,7 +976,6 @@ BVH_Ray_Single_State :: struct {
 @(test)
 benchmark_bvh_ray_multi :: proc(t: ^testing.T) {
   testing.set_fail_timeout(t, 60 * time.Second)
-
   setup_proc :: proc(
     options: ^time.Benchmark_Options,
     allocator := context.allocator,
@@ -1077,7 +1075,6 @@ BVH_Ray_Multi_State :: struct {
 @(test)
 benchmark_bvh_sphere :: proc(t: ^testing.T) {
   testing.set_fail_timeout(t, 60 * time.Second)
-
   setup_proc :: proc(
     options: ^time.Benchmark_Options,
     allocator := context.allocator,
@@ -1177,7 +1174,6 @@ BVH_Sphere_State :: struct {
 @(test)
 benchmark_bvh_aabb :: proc(t: ^testing.T) {
   testing.set_fail_timeout(t, 60 * time.Second)
-
   setup_proc :: proc(
     options: ^time.Benchmark_Options,
     allocator := context.allocator,
@@ -1296,7 +1292,6 @@ BVH_AABB_State :: struct {
 @(test)
 benchmark_octree_ray_single :: proc(t: ^testing.T) {
   testing.set_fail_timeout(t, 60 * time.Second)
-
   setup_proc :: proc(
     options: ^time.Benchmark_Options,
     allocator := context.allocator,
@@ -1403,7 +1398,6 @@ Octree_Ray_Single_State :: struct {
 @(test)
 benchmark_octree_ray_multi :: proc(t: ^testing.T) {
   testing.set_fail_timeout(t, 60 * time.Second)
-
   setup_proc :: proc(
     options: ^time.Benchmark_Options,
     allocator := context.allocator,
@@ -1516,7 +1510,6 @@ Octree_Ray_Multi_State :: struct {
 @(test)
 benchmark_octree_sphere :: proc(t: ^testing.T) {
   testing.set_fail_timeout(t, 60 * time.Second)
-
   setup_proc :: proc(
     options: ^time.Benchmark_Options,
     allocator := context.allocator,
@@ -1629,7 +1622,6 @@ Octree_Sphere_State :: struct {
 @(test)
 benchmark_bvh_build :: proc(t: ^testing.T) {
   testing.set_fail_timeout(t, 60 * time.Second)
-
   setup_proc :: proc(
     options: ^time.Benchmark_Options,
     allocator := context.allocator,
@@ -1706,7 +1698,6 @@ BVH_Build_State :: struct {
 @(test)
 benchmark_octree_build :: proc(t: ^testing.T) {
   testing.set_fail_timeout(t, 60 * time.Second)
-
   setup_proc :: proc(
     options: ^time.Benchmark_Options,
     allocator := context.allocator,

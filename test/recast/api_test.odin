@@ -10,7 +10,6 @@ import "core:fmt"
 @(test)
 test_api_simple_build :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     // Simple square floor geometry
     vertices := [][3]f32{
         {0, 0, 0},
@@ -66,7 +65,6 @@ test_api_simple_build :: proc(t: ^testing.T) {
 @(test)
 test_api_quick_build :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     // Test the convenience quick build function
     vertices := [][3]f32{
         {0, 0, 0},
@@ -125,7 +123,6 @@ test_api_quick_build :: proc(t: ^testing.T) {
 @(test)
 test_api_configuration :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     // Test different configurations
     configs := []struct{name: string, cs: f32, ch: f32}{
         {"Fast", 0.5, 0.5},
@@ -160,7 +157,6 @@ test_api_configuration :: proc(t: ^testing.T) {
 @(test)
 test_api_validation_and_debugging :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     // Create a mesh for validation testing
     vertices := [][3]f32{
         {0, 0, 0},
@@ -209,7 +205,6 @@ test_api_validation_and_debugging :: proc(t: ^testing.T) {
 @(test)
 test_api_error_handling :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     // Test error handling with invalid inputs
 
     // Empty geometry
@@ -260,7 +255,6 @@ test_api_error_handling :: proc(t: ^testing.T) {
 @(test)
 test_api_memory_estimation :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     // Test memory estimation functions
     config := recast.create_config_from_preset(.Balanced)
     config.base.bmin = {0, 0, 0}
@@ -294,7 +288,6 @@ test_api_memory_estimation :: proc(t: ^testing.T) {
 @(test)
 test_api_build_with_areas :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     // Test building with custom area types
     vertices := [][3]f32{
         {0, 0, 0},
@@ -362,7 +355,6 @@ test_api_build_with_areas :: proc(t: ^testing.T) {
 @(test)
 test_api_comprehensive_pipeline :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     log.infof("TEST DEBUG: Starting comprehensive pipeline test")
 
     // Comprehensive test with a more complex geometry

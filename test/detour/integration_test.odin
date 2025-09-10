@@ -11,7 +11,6 @@ import "../../mjolnir/navigation/detour"
 @(test)
 test_integration_pathfinding_priority_queue :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     // Create a test navigation mesh
     nav_mesh := create_test_nav_mesh(t)
     defer destroy_test_nav_mesh(nav_mesh)
@@ -61,7 +60,6 @@ test_integration_pathfinding_priority_queue :: proc(t: ^testing.T) {
 @(test)
 test_integration_multiple_pathfinding_operations :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     // Create multiple test navigation meshes to simulate concurrent usage
     nav_mesh1 := create_test_nav_mesh(t)
     defer destroy_test_nav_mesh(nav_mesh1)
@@ -145,7 +143,6 @@ test_integration_multiple_pathfinding_operations :: proc(t: ^testing.T) {
 @(test)
 test_navigation_mesh_creation :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     // Unit test: Create simple box geometry for navigation mesh
     vertices := [][3]f32{
         // Floor quad
@@ -235,7 +232,6 @@ test_navigation_mesh_creation :: proc(t: ^testing.T) {
 @(test)
 test_pathfinding :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     // Integration test: Create more complex geometry
     vertices := [][3]f32{
         // Floor with obstacle
@@ -366,7 +362,6 @@ test_pathfinding :: proc(t: ^testing.T) {
 @(test)
 test_navigation_edge_cases :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     // End-to-end test: Handle edge cases
 
     // Test 1: Empty geometry

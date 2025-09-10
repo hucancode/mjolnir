@@ -268,7 +268,6 @@ query_polygons_in_tile_bv :: proc(nav_mesh: ^Nav_Mesh, tile: ^Mesh_Tile, qmin, q
     iqmin := geometry.quantize_float(qmin - tile.header.bmin, factor)
     iqmax := geometry.quantize_float(qmax - tile.header.bmin, factor)
 
-
     stack := make([]i32, 32)
     defer delete(stack)
     stack_size := 0

@@ -13,8 +13,6 @@ import "core:math"
 @(test)
 test_rasterize_degenerate_triangles :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
-
     hf := recast.create_heightfield(10, 10, {0,0,0}, {10,10,10}, 1.0, 0.5)
     testing.expect(t, hf != nil, "Failed to create heightfield")
     defer recast.free_heightfield(hf)
@@ -49,8 +47,6 @@ test_rasterize_degenerate_triangles :: proc(t: ^testing.T) {
 @(test)
 test_rasterize_nearly_degenerate_triangles :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
-
     hf := recast.create_heightfield(10, 10, {0,0,0}, {10,10,10}, 1.0, 0.5)
     testing.expect(t, hf != nil, "Failed to create heightfield")
     defer recast.free_heightfield(hf)
@@ -83,7 +79,6 @@ test_rasterize_nearly_degenerate_triangles :: proc(t: ^testing.T) {
 @(test)
 test_rasterize_sub_pixel_triangles :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     // Use high resolution heightfield to test sub-pixel triangles
 
     // Small cell size to create sub-pixel scenarios
@@ -118,8 +113,6 @@ test_rasterize_sub_pixel_triangles :: proc(t: ^testing.T) {
 @(test)
 test_rasterize_tiny_triangles_various_positions :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
-
     hf := recast.create_heightfield(20, 20, {0,0,0}, {10,10,10}, 0.5, 0.1)
     testing.expect(t, hf != nil, "Failed to create heightfield")
     defer recast.free_heightfield(hf)
@@ -156,8 +149,6 @@ test_rasterize_tiny_triangles_various_positions :: proc(t: ^testing.T) {
 @(test)
 test_rasterize_large_triangle_spanning_cells :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
-
     hf := recast.create_heightfield(10, 10, {0,0,0}, {10,10,10}, 1.0, 0.5)
     testing.expect(t, hf != nil, "Failed to create heightfield")
     defer recast.free_heightfield(hf)
@@ -226,8 +217,6 @@ test_rasterize_triangle_partial_cell_coverage :: proc(t: ^testing.T) {
 @(test)
 test_rasterize_floating_point_precision :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
-
     hf := recast.create_heightfield(10, 10, {0,0,0}, {10,10,10}, 1.0, 0.5)
     testing.expect(t, hf != nil, "Failed to create heightfield")
     defer recast.free_heightfield(hf)
@@ -290,8 +279,6 @@ test_rasterize_extreme_coordinates :: proc(t: ^testing.T) {
 @(test)
 test_rasterize_sloped_triangles :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
-
     hf := recast.create_heightfield(10, 10, {0,0,0}, {10,10,10}, 1.0, 0.2)
     testing.expect(t, hf != nil, "Failed to create heightfield")
     defer recast.free_heightfield(hf)
@@ -328,8 +315,6 @@ test_rasterize_sloped_triangles :: proc(t: ^testing.T) {
 @(test)
 test_rasterize_vertical_triangles :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
-
     hf := recast.create_heightfield(10, 10, {0,0,0}, {10,10,10}, 1.0, 0.5)
     testing.expect(t, hf != nil, "Failed to create heightfield")
     defer recast.free_heightfield(hf)
@@ -357,7 +342,6 @@ test_rasterize_vertical_triangles :: proc(t: ^testing.T) {
 @(test)
 test_rasterize_many_tiny_triangles :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 60 * time.Second) // Longer timeout for stress test
-
 
     hf := recast.create_heightfield(20, 20, {0,0,0}, {20,20,20}, 1.0, 0.2)
     testing.expect(t, hf != nil, "Failed to create heightfield")

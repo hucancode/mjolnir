@@ -12,7 +12,6 @@ import "core:time"
 @(test)
 test_filter_low_hanging_obstacles_basic :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     hf := recast.create_heightfield(5, 5, {0,0,0}, {5,5,5}, 1.0, 0.5)
     testing.expect(t, hf != nil, "Failed to create heightfield")
     defer recast.free_heightfield(hf)
@@ -44,7 +43,6 @@ test_filter_low_hanging_obstacles_basic :: proc(t: ^testing.T) {
 @(test)
 test_filter_low_hanging_obstacles_too_high :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     hf := recast.create_heightfield(5, 5, {0,0,0}, {5,5,5}, 1.0, 0.5)
     testing.expect(t, hf != nil, "Failed to create heightfield")
     defer recast.free_heightfield(hf)
@@ -74,7 +72,6 @@ test_filter_low_hanging_obstacles_too_high :: proc(t: ^testing.T) {
 @(test)
 test_filter_low_hanging_obstacles_multiple_spans :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     hf := recast.create_heightfield(5, 5, {0,0,0}, {5,5,5}, 1.0, 0.5)
     testing.expect(t, hf != nil, "Failed to create heightfield")
     defer recast.free_heightfield(hf)
@@ -125,7 +122,6 @@ test_filter_low_hanging_obstacles_multiple_spans :: proc(t: ^testing.T) {
 @(test)
 test_filter_ledge_spans_basic :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     // Create heightfield and compact heightfield for ledge filtering
     hf := recast.create_heightfield(5, 5, {0,0,0}, {5,5,5}, 1.0, 0.5)
     testing.expect(t, hf != nil, "Failed to create heightfield")
@@ -165,7 +161,6 @@ test_filter_ledge_spans_basic :: proc(t: ^testing.T) {
 @(test)
 test_filter_ledge_spans_safe_area :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     hf := recast.create_heightfield(5, 5, {0,0,0}, {5,5,5}, 1.0, 0.5)
     testing.expect(t, hf != nil, "Failed to create heightfield")
     defer recast.free_heightfield(hf)
@@ -202,7 +197,6 @@ test_filter_ledge_spans_safe_area :: proc(t: ^testing.T) {
 @(test)
 test_filter_walkable_low_height_spans_basic :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     hf := recast.create_heightfield(5, 5, {0,0,0}, {5,5,5}, 1.0, 0.5)
     testing.expect(t, hf != nil, "Failed to create heightfield")
     defer recast.free_heightfield(hf)
@@ -232,7 +226,6 @@ test_filter_walkable_low_height_spans_basic :: proc(t: ^testing.T) {
 @(test)
 test_filter_walkable_low_height_spans_sufficient_height :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     hf := recast.create_heightfield(5, 5, {0,0,0}, {5,5,5}, 1.0, 0.5)
     testing.expect(t, hf != nil, "Failed to create heightfield")
     defer recast.free_heightfield(hf)
@@ -261,7 +254,6 @@ test_filter_walkable_low_height_spans_sufficient_height :: proc(t: ^testing.T) {
 @(test)
 test_filter_walkable_low_height_no_ceiling :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     hf := recast.create_heightfield(5, 5, {0,0,0}, {5,5,5}, 1.0, 0.5)
     testing.expect(t, hf != nil, "Failed to create heightfield")
     defer recast.free_heightfield(hf)
@@ -290,7 +282,6 @@ test_filter_walkable_low_height_no_ceiling :: proc(t: ^testing.T) {
 @(test)
 test_filter_interactions_combined :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     // Test applying multiple filters in sequence to ensure they work together
     hf := recast.create_heightfield(10, 10, {0,0,0}, {10,10,10}, 1.0, 0.5)
     testing.expect(t, hf != nil, "Failed to create heightfield")
@@ -341,7 +332,6 @@ test_filter_interactions_combined :: proc(t: ^testing.T) {
 @(test)
 test_all_filters :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     // Test 1: Low hanging obstacle (smax-smax check)
     {
         hf := recast.Heightfield{width = 1, height = 1, spans = make([]^recast.Span, 1)}
@@ -407,7 +397,6 @@ test_all_filters :: proc(t: ^testing.T) {
         for i in 0..<3 do free(hf.spans[i])
     }
 
-
     // Test 4: Median filter with compact heightfield
     {
         chf := recast.Compact_Heightfield{
@@ -452,7 +441,6 @@ test_all_filters :: proc(t: ^testing.T) {
 @(test)
 test_low_hanging_obstacle_filter_edge_cases :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     // Test 1: Height-based climbing (correct approach - agent climbs from smax to smax)
     {
         // Create heightfield with specific spans
@@ -643,7 +631,6 @@ test_low_hanging_obstacle_filter_edge_cases :: proc(t: ^testing.T) {
 @(test)
 test_ledge_filter_steep_slope :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     // Test steep slope detection
     {
         hf := recast.Heightfield{
@@ -702,7 +689,6 @@ test_ledge_filter_steep_slope :: proc(t: ^testing.T) {
 @(test)
 test_walkable_low_height_filter :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     // Test filtering spans without enough clearance
     {
         hf := recast.Heightfield{

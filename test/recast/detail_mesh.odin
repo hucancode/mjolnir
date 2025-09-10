@@ -36,7 +36,6 @@ validate_poly_mesh_detail :: proc(dmesh: ^recast.Poly_Mesh_Detail) -> bool {
 @(test)
 test_recast_detail_compilation :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     // Simple compilation test to ensure all functions are accessible
     log.info("Testing Recast detail mesh compilation...")
 
@@ -115,7 +114,6 @@ test_simple_detail_mesh_build :: proc(t: ^testing.T) {
 @(test)
 test_detail_mesh_sampling_quality :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     // Test detail mesh sampling with different quality settings
     vertices := [][3]f32{
         {0, 0, 0}, {20, 0, 0}, {20, 1, 20}, {0, 2, 20},  // Sloped quad
@@ -165,7 +163,6 @@ test_detail_mesh_sampling_quality :: proc(t: ^testing.T) {
 @(test)
 test_detail_mesh_height_accuracy :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     // Test that detail mesh accurately represents height variations
     vertices := [][3]f32{
         // Create a surface with height variation
@@ -215,7 +212,6 @@ test_detail_mesh_height_accuracy :: proc(t: ^testing.T) {
 @(test)
 test_detail_mesh_edge_cases :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     // Test edge cases: very small triangles, degenerate cases
 
     // Case 1: Very small triangle
@@ -275,7 +271,6 @@ test_detail_mesh_edge_cases :: proc(t: ^testing.T) {
 @(test)
 test_build_detail_mesh_simple :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     // Create simple scenario for detail mesh building
 
     hf := recast.create_heightfield(8, 8, {0,0,0}, {8,8,8}, 1.0, 0.5)
@@ -324,7 +319,6 @@ test_build_detail_mesh_simple :: proc(t: ^testing.T) {
 @(test)
 test_build_detail_mesh_empty_input :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     // Test detail mesh building with empty polygon mesh
     poly_mesh := new(recast.Poly_Mesh)
     testing.expect(t, poly_mesh != nil, "Failed to allocate poly mesh")
@@ -351,7 +345,6 @@ test_build_detail_mesh_empty_input :: proc(t: ^testing.T) {
 @(test)
 test_detail_mesh_sample_distance_variations :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 45 * time.Second)
-
     // Create base scenario
 
     hf := recast.create_heightfield(10, 10, {0,0,0}, {10,10,10}, 1.0, 0.5)
@@ -399,7 +392,6 @@ test_detail_mesh_sample_distance_variations :: proc(t: ^testing.T) {
 @(test)
 test_detail_mesh_max_edge_error_variations :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 45 * time.Second)
-
     // Create base scenario with sloped surface for edge error testing
 
     hf := recast.create_heightfield(10, 10, {0,0,0}, {10,10,10}, 1.0, 0.2)
@@ -472,7 +464,6 @@ test_detail_mesh_small_polygons :: proc(t: ^testing.T) {
 @(test)
 test_detail_mesh_extreme_parameters :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     // Create base scenario
 
     hf := recast.create_heightfield(8, 8, {0,0,0}, {8,8,8}, 1.0, 0.5)
@@ -633,7 +624,6 @@ test_detail_mesh_performance :: proc(t: ^testing.T) {
 @(test)
 test_delaunay_hull_simple_triangle :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 10 * time.Second)
-
     // Test 1: Simple triangle (3 points)
     points := [][3]f32{
         {0, 0, 0},    // Point 0
@@ -667,7 +657,6 @@ test_delaunay_hull_simple_triangle :: proc(t: ^testing.T) {
 @(test)
 test_delaunay_hull_square :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 10 * time.Second)
-
     // Test 2: Square (4 points forming convex hull)
     points := [][3]f32{
         {0, 0, 0},    // Point 0
@@ -701,7 +690,6 @@ test_delaunay_hull_square :: proc(t: ^testing.T) {
 @(test)
 test_delaunay_hull_pentagon_with_interior :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 10 * time.Second)
-
     // Test 3: Pentagon with interior point (more complex case)
     points := [][3]f32{
         {0, 0, 0},     // Point 0 - hull
@@ -752,7 +740,6 @@ test_delaunay_hull_pentagon_with_interior :: proc(t: ^testing.T) {
 @(test)
 test_delaunay_hull_edge_cases :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 10 * time.Second)
-
     // Test 4: Edge cases
 
     // Case A: Too few points
@@ -802,7 +789,6 @@ test_delaunay_hull_edge_cases :: proc(t: ^testing.T) {
 @(test)
 test_delaunay_hull_performance :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     // Test 5: Performance test with larger point set
     num_points := 50
     points := make([][3]f32, num_points)

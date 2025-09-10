@@ -1633,17 +1633,15 @@ save_current_navmesh :: proc(engine_ptr: ^mjolnir.Engine) {
 build_visualization_from_detour_mesh :: proc(engine_ptr: ^mjolnir.Engine, nav_mesh: ^detour.Nav_Mesh) -> bool {
     using mjolnir
 
-
     tile := detour.get_tile_at(nav_mesh, 0, 0, 0)
     if tile == nil || tile.header == nil {
         log.error("Failed to get navigation mesh tile for visualization")
         return false
     }
-
-
     navmesh_vertices := make([dynamic]mjolnir.NavMeshVertex, 0, int(tile.header.vert_count))
     indices := make([dynamic]u32, 0, int(tile.header.poly_count) * 3)
-
+    defer delete(navmesh_vertices)
+    defer delete(indices)
     for i in 0..<tile.header.vert_count {
         pos := tile.verts[i]
         append(&navmesh_vertices, mjolnir.NavMeshVertex{
@@ -1655,9 +1653,7 @@ build_visualization_from_detour_mesh :: proc(engine_ptr: ^mjolnir.Engine, nav_me
     for i in 0..<tile.header.poly_count {
         poly := &tile.polys[i]
         vert_count := int(poly.vert_count)
-
         if vert_count < 3 do continue
-
         poly_seed := u32(i * 17 + 23)
         hue := f32((poly_seed * 137) % 360)
         poly_color := [4]f32{
@@ -1677,19 +1673,13 @@ build_visualization_from_detour_mesh :: proc(engine_ptr: ^mjolnir.Engine, nav_me
             append(&indices, u32(poly.verts[j+1]))
         }
     }
-
-    defer delete(navmesh_vertices)
-    defer delete(indices)
-
     renderer := &engine_ptr.navmesh
     renderer.vertex_count = u32(len(navmesh_vertices))
     renderer.index_count = u32(len(indices))
-
     if renderer.vertex_count == 0 || renderer.index_count == 0 {
         log.warn("Navigation mesh has no renderable geometry")
         return false
     }
-
     if renderer.vertex_count > 16384 {
         log.errorf("Too many vertices (%d) for buffer size (16384)", renderer.vertex_count)
         return false
@@ -1698,13 +1688,11 @@ build_visualization_from_detour_mesh :: proc(engine_ptr: ^mjolnir.Engine, nav_me
         log.errorf("Too many indices (%d) for buffer size (32768)", renderer.index_count)
         return false
     }
-
     vertex_result := gpu.data_buffer_write(&renderer.vertex_buffer, navmesh_vertices[:])
     if vertex_result != .SUCCESS {
         log.error("Failed to upload navigation mesh vertex data")
         return false
     }
-
     index_result := gpu.data_buffer_write(&renderer.index_buffer, indices[:])
     if index_result != .SUCCESS {
         log.error("Failed to upload navigation mesh index data")
@@ -1715,40 +1703,30 @@ build_visualization_from_detour_mesh :: proc(engine_ptr: ^mjolnir.Engine, nav_me
     renderer.alpha = 0.6
     renderer.height_offset = 0.05
     renderer.color_mode = .Random_Colors
-
-
     return true
 }
 
 // Analyze detailed polygon connections
 analyze_detailed_connections :: proc(nav_mesh: ^detour.Nav_Mesh) {
     using detour
-
     log.info("=== DETAILED CONNECTION ANALYSIS ===")
-
     // Get the first tile (solo mesh)
     tile := get_tile_at(nav_mesh, 0, 0, 0)
     if tile == nil || tile.header == nil {
         log.error("Failed to get nav mesh tile")
         return
     }
-
     log.infof("Analyzing connections for %d polygons", tile.header.poly_count)
-
     // Analyze first 10 polygons in detail
     for i in 0..<min(10, int(tile.header.poly_count)) {
         poly := &tile.polys[i]
         log.infof("\nPolygon %d (ref=0x%x):", i, get_poly_ref_base(nav_mesh, tile) | recast.Poly_Ref(i))
         log.infof("  Vertex count: %d", poly.vert_count)
-
-        // Show vertices
         fmt.printf("  Vertices: ")
         for v in 0..<poly.vert_count {
             fmt.printf("%d ", poly.verts[v])
         }
         fmt.println()
-
-        // Show edge neighbors
         fmt.printf("  Edge neighbors: ")
         for e in 0..<poly.vert_count {
             if poly.neis[e] != 0 {
@@ -1765,8 +1743,6 @@ analyze_detailed_connections :: proc(nav_mesh: ^detour.Nav_Mesh) {
             }
         }
         fmt.println()
-
-        // Count links
         link_count := 0
         link_idx := poly.first_link
         for link_idx != recast.DT_NULL_LINK {
@@ -1775,7 +1751,6 @@ analyze_detailed_connections :: proc(nav_mesh: ^detour.Nav_Mesh) {
             link_idx = link.next
         }
         log.infof("  Link count: %d", link_count)
-
         if link_count > 0 {
             fmt.printf("  Links: ")
             link_idx = poly.first_link

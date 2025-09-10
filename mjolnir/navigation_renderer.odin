@@ -160,7 +160,6 @@ navmesh_build_from_recast :: proc(renderer: ^RendererNavMesh, gpu_context: ^gpu.
     defer delete(vertices)
     defer delete(indices)
 
-
     if use_detail_mesh && len(detail_mesh.verts) > 0 {
         // Use detail mesh vertices (already in world space)
         base_vert_count := len(poly_mesh.verts)
@@ -186,7 +185,6 @@ navmesh_build_from_recast :: proc(renderer: ^RendererNavMesh, gpu_context: ^gpu.
         for i in 0..<len(detail_mesh.verts) {
 
             pos := detail_mesh.verts[i]
-
 
             append(&vertices, NavMeshVertex{
                 position = pos,
@@ -281,13 +279,11 @@ navmesh_build_from_recast :: proc(renderer: ^RendererNavMesh, gpu_context: ^gpu.
         poly_base := int(i) * int(poly_mesh.nvp) * 2
         area_id := poly_mesh.areas[i] if len(poly_mesh.areas) > int(i) else 1
 
-
         // Get region for connectivity coloring
         region_id := poly_mesh.regs[i] if len(poly_mesh.regs) > int(i) else 0
 
         // Get area color (pass polygon index for random colors and region for connectivity)
         area_color := get_area_color(area_id, renderer.color_mode, renderer.base_color, renderer.alpha, u32(i), region_id)
-
 
         // Count valid vertices in this polygon
         poly_verts: [dynamic]u32
@@ -303,7 +299,6 @@ navmesh_build_from_recast :: proc(renderer: ^RendererNavMesh, gpu_context: ^gpu.
                 vertices[vert_idx].color = area_color
             }
         }
-
 
 
         // Triangulate polygon (simple fan triangulation)
@@ -360,11 +355,11 @@ generate_random_color :: proc(seed: u32, alpha: f32) -> [4]f32 {
     h := f32((seed * 137) % 360) / 360.0
     s: f32 = 0.8
     v: f32 = 0.8
-    
+
     c := v * s
     x := c * f32(1.0 - math.abs(math.mod(f64(h) * 6.0, 2.0) - 1.0))
     m := v - c
-    
+
     rgb: [3]f32
     if h < 1.0/6.0      do rgb = {c, x, 0}
     else if h < 2.0/6.0 do rgb = {x, c, 0}
@@ -372,7 +367,7 @@ generate_random_color :: proc(seed: u32, alpha: f32) -> [4]f32 {
     else if h < 4.0/6.0 do rgb = {0, x, c}
     else if h < 5.0/6.0 do rgb = {x, 0, c}
     else                do rgb = {c, 0, x}
-    
+
     return {rgb.x + m, rgb.y + m, rgb.z + m, alpha}
 }
 

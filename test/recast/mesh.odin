@@ -11,7 +11,6 @@ import "../../mjolnir/geometry"
 @(test)
 test_mesh_vertex_hash :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     // Test vertex hashing function
     h1 := recast.vertex_hash(0, 0, 0)
     h2 := recast.vertex_hash(1, 1, 1)
@@ -28,7 +27,6 @@ test_mesh_vertex_hash :: proc(t: ^testing.T) {
 @(test)
 test_add_vertex :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     verts := make([dynamic]recast.Mesh_Vertex)
     defer delete(verts)
 
@@ -61,7 +59,6 @@ test_add_vertex :: proc(t: ^testing.T) {
 @(test)
 test_triangulate_polygon :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     // Test triangulation of a simple quad
     verts := make([][3]u16, 4)
     defer delete(verts)
@@ -91,7 +88,6 @@ test_triangulate_polygon :: proc(t: ^testing.T) {
 @(test)
 test_triangulate_concave_polygon :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     // Test triangulation of a concave L-shaped polygon
     verts := make([][3]u16, 6)
     defer delete(verts)
@@ -128,7 +124,6 @@ test_triangulate_concave_polygon :: proc(t: ^testing.T) {
 @(test)
 test_triangulate_star_polygon :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     // Test triangulation of a star-shaped (highly concave) polygon
     verts := make([][3]u16, 8)
     defer delete(verts)
@@ -172,7 +167,6 @@ test_triangulate_star_polygon :: proc(t: ^testing.T) {
 @(test)
 test_geometric_primitives :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     // Test geometric primitive functions - now using i32 vertices with 4 components
     verts := make([][4]i32, 4)  // 4 vertices * 4 components (x,y,z,pad)
     defer delete(verts)
@@ -213,7 +207,6 @@ test_geometric_primitives :: proc(t: ^testing.T) {
 @(test)
 test_degenerate_polygon_handling :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     // Test handling of degenerate cases
     verts := make([][3]u16, 4)
     defer delete(verts)
@@ -246,7 +239,6 @@ test_degenerate_polygon_handling :: proc(t: ^testing.T) {
 @(test)
 test_validate_poly_mesh :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     // Test with nil mesh
     testing.expect(t, !recast.validate_poly_mesh(nil), "Nil mesh should be invalid")
 
@@ -319,7 +311,6 @@ test_build_simple_contour_mesh :: proc(t: ^testing.T) {
 @(test)
 test_mark_walkable_triangles_flat_ground :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     // Create flat ground triangles (slope = 0 degrees) with correct winding
     vertices := [][3]f32{
         {0, 0, 0},    // 0
@@ -347,7 +338,6 @@ test_mark_walkable_triangles_flat_ground :: proc(t: ^testing.T) {
 @(test)
 test_mark_walkable_triangles_steep_slope :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     // Create steep slope triangle (60 degrees)
     // For a slope, we need height change over horizontal distance
     height := f32(math.sqrt_f32(3)) // tan(60°) = √3, rise/run = height/1
@@ -373,7 +363,6 @@ test_mark_walkable_triangles_steep_slope :: proc(t: ^testing.T) {
 @(test)
 test_mark_walkable_triangles_exact_threshold :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     // Create triangle with 44-degree slope (slightly more walkable than 45-degree threshold)
     vertices := [][3]f32{
         {0, 0, 0},          // 0
@@ -402,7 +391,6 @@ test_mark_walkable_triangles_exact_threshold :: proc(t: ^testing.T) {
 @(test)
 test_mark_walkable_triangles_vertical_wall :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     // Create vertical wall triangle (90 degrees)
     vertices := [][3]f32{
         {0, 0, 0},    // 0
@@ -421,7 +409,6 @@ test_mark_walkable_triangles_vertical_wall :: proc(t: ^testing.T) {
 @(test)
 test_mark_walkable_triangles_degenerate :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     // Create degenerate triangle (all points collinear)
     vertices := [][3]f32{
         {0, 0, 0},    // 0
@@ -440,7 +427,6 @@ test_mark_walkable_triangles_degenerate :: proc(t: ^testing.T) {
 @(test)
 test_mark_walkable_triangles_mixed_slopes :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     // Create multiple triangles with different slopes
     vertices := [][3]f32{
         // Flat triangle
@@ -475,7 +461,6 @@ test_mark_walkable_triangles_mixed_slopes :: proc(t: ^testing.T) {
 @(test)
 test_clear_unwalkable_triangles_basic :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     // Create mix of walkable and non-walkable triangles
     vertices := [][3]f32{
         {0, 0, 0}, {1, 0, 0}, {0.5, 0, 1},        // Flat - walkable
@@ -501,7 +486,6 @@ test_clear_unwalkable_triangles_basic :: proc(t: ^testing.T) {
 @(test)
 test_clear_unwalkable_triangles_preserve_non_walkable :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     // Create triangles already marked as non-walkable
     vertices := [][3]f32{
         {0, 0, 0}, {1, 0, 0}, {0.5, 0, 1},        // Flat but already non-walkable
@@ -531,7 +515,6 @@ test_clear_unwalkable_triangles_preserve_non_walkable :: proc(t: ^testing.T) {
 @(test)
 test_triangle_normal_calculation_accuracy :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     // Test that slope calculation is based on accurate normal computation
     // Create triangle with known normal vector
     vertices := [][3]f32{
@@ -572,7 +555,6 @@ test_triangle_normal_calculation_accuracy :: proc(t: ^testing.T) {
 @(test)
 test_triangle_operations_zero_area :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     // Create triangle with zero area (two identical vertices)
     vertices := [][3]f32{
         {0, 0, 0},    // 0
@@ -592,7 +574,6 @@ test_triangle_operations_zero_area :: proc(t: ^testing.T) {
 @(test)
 test_triangle_operations_tiny_triangle :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     // Create very small but valid triangle
     epsilon := f32(1e-6)
     vertices := [][3]f32{
@@ -612,7 +593,6 @@ test_triangle_operations_tiny_triangle :: proc(t: ^testing.T) {
 @(test)
 test_triangle_operations_large_coordinates :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     // Create triangle with large coordinate values
     large_val := f32(10000.0)
     vertices := [][3]f32{
@@ -632,7 +612,6 @@ test_triangle_operations_large_coordinates :: proc(t: ^testing.T) {
 @(test)
 test_triangle_operations_empty_input :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     // Test with empty arrays - should not crash
     vertices := [][3]f32{}
     indices := []i32{}
@@ -650,7 +629,6 @@ test_triangle_operations_empty_input :: proc(t: ^testing.T) {
 @(test)
 test_triangle_operations_preserve_area_types :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     // Test that walkable triangle marking preserves different area types
     vertices := [][3]f32{
         {0, 0, 0}, {1, 0, 0}, {0.5, 0, 1},  // Flat triangle

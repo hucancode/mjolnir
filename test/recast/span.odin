@@ -122,8 +122,6 @@ test_span_allocation :: proc(t: ^testing.T) {
 @(test)
 test_span_invalid_inputs :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
-
     hf := recast.create_heightfield(10, 10, {0,0,0}, {10,10,10}, 1.0, 0.5)
     testing.expect(t, hf != nil, "Heightfield creation should succeed")
     defer recast.free_heightfield(hf)
@@ -150,8 +148,6 @@ test_span_invalid_inputs :: proc(t: ^testing.T) {
 @(test)
 test_span_edge_cases :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
-
     hf := recast.create_heightfield(10, 10, {0,0,0}, {10,10,10}, 1.0, 0.5)
     testing.expect(t, hf != nil, "Heightfield creation should succeed")
     defer recast.free_heightfield(hf)
@@ -243,7 +239,6 @@ test_span_merging :: proc(t: ^testing.T) {
 @(test)
 test_span_non_overlapping :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     hf := create_test_heightfield(10, 10)
     testing.expect(t, hf != nil, "Failed to create heightfield")
     defer recast.free_heightfield(hf)
@@ -267,7 +262,6 @@ test_span_non_overlapping :: proc(t: ^testing.T) {
 @(test)
 test_span_merge_exact_overlap :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     hf := create_test_heightfield(10, 10)
     testing.expect(t, hf != nil, "Failed to create heightfield")
     defer recast.free_heightfield(hf)
@@ -290,7 +284,6 @@ test_span_merge_exact_overlap :: proc(t: ^testing.T) {
 @(test)
 test_span_merge_partial_overlap :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     hf := create_test_heightfield(10, 10)
     testing.expect(t, hf != nil, "Failed to create heightfield")
     defer recast.free_heightfield(hf)
@@ -313,7 +306,6 @@ test_span_merge_partial_overlap :: proc(t: ^testing.T) {
 @(test)
 test_span_merge_touching :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     hf := create_test_heightfield(10, 10)
     testing.expect(t, hf != nil, "Failed to create heightfield")
     defer recast.free_heightfield(hf)
@@ -336,7 +328,6 @@ test_span_merge_touching :: proc(t: ^testing.T) {
 @(test)
 test_span_merge_multiple_overlaps :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     hf := create_test_heightfield(10, 10)
     testing.expect(t, hf != nil, "Failed to create heightfield")
     defer recast.free_heightfield(hf)
@@ -366,7 +357,6 @@ test_span_merge_multiple_overlaps :: proc(t: ^testing.T) {
 @(test)
 test_span_area_priority :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     hf := create_test_heightfield(10, 10)
     testing.expect(t, hf != nil, "Failed to create heightfield")
     defer recast.free_heightfield(hf)
@@ -389,7 +379,6 @@ test_span_area_priority :: proc(t: ^testing.T) {
 @(test)
 test_span_merge_threshold :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     hf := create_test_heightfield(10, 10)
     testing.expect(t, hf != nil, "Failed to create heightfield")
     defer recast.free_heightfield(hf)
@@ -414,7 +403,6 @@ test_span_merge_threshold :: proc(t: ^testing.T) {
 @(test)
 test_span_insertion_order :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     hf := create_test_heightfield(10, 10)
     testing.expect(t, hf != nil, "Failed to create heightfield")
     defer recast.free_heightfield(hf)
@@ -484,7 +472,6 @@ test_span_merge_algorithm_correctness :: proc(t: ^testing.T) {
 @(test)
 test_span_merge_out_of_order :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     // Test adding spans out of order
 
     hf := recast.create_heightfield(10, 10, {0,0,0}, {10,10,10}, 1.0, 0.5)
@@ -530,7 +517,6 @@ test_span_merge_out_of_order :: proc(t: ^testing.T) {
 @(test)
 test_span_partial_merge :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     // Test partial merging scenarios
 
     hf := recast.create_heightfield(10, 10, {0,0,0}, {10,10,10}, 1.0, 0.5)
@@ -636,7 +622,6 @@ test_span_complex_merging :: proc(t: ^testing.T) {
 @(test)
 test_span_merging_with_flag_threshold :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     hf := recast.create_heightfield(10, 10, {0, 0, 0}, {10, 10, 10}, 1.0, 0.2)
     testing.expect(t, hf != nil, "Failed to create heightfield")
     defer recast.free_heightfield(hf)
@@ -693,10 +678,8 @@ test_span_merging_with_flag_threshold :: proc(t: ^testing.T) {
 @(test)
 test_span_merging_complex_scenarios :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     // Test complex span merging with multiple overlapping spans at different heights
     // This validates the correctness of the span merging algorithm
-
 
     hf := recast.create_heightfield(3, 3, {0,0,0}, {3,3,3}, 1.0, 0.2)
     testing.expect(t, hf != nil, "Failed to create heightfield")
@@ -762,7 +745,6 @@ test_span_merging_complex_scenarios :: proc(t: ^testing.T) {
 @(test)
 test_multiple_spans_per_cell :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     // Create a small heightfield
     field_size := i32(5)
     cell_size := f32(1.0)
@@ -770,7 +752,6 @@ test_multiple_spans_per_cell :: proc(t: ^testing.T) {
 
     bmin := [3]f32{0, 0, 0}
     bmax := [3]f32{f32(field_size), 50, f32(field_size)}
-
 
     hf := recast.create_heightfield(field_size, field_size, bmin, bmax, cell_size, cell_height)
     testing.expect(t, hf != nil, "Heightfield creation should succeed")
@@ -830,7 +811,6 @@ test_multiple_spans_per_cell :: proc(t: ^testing.T) {
 @(test)
 test_many_thin_spans :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-
     // Test with many thin non-overlapping spans
     field_size := i32(3)
     cell_size := f32(1.0)
@@ -838,7 +818,6 @@ test_many_thin_spans :: proc(t: ^testing.T) {
 
     bmin := [3]f32{0, 0, 0}
     bmax := [3]f32{f32(field_size), 100, f32(field_size)}
-
 
     hf := recast.create_heightfield(field_size, field_size, bmin, bmax, cell_size, cell_height)
     testing.expect(t, hf != nil, "Heightfield creation should succeed")
