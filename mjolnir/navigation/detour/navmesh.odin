@@ -8,6 +8,102 @@ import "core:log"
 import "../recast"
 import "../../geometry"
 
+// Memory-mapped navmesh data that eliminates manual pointer arithmetic
+Navmesh_Memory_Map :: struct {
+    data:              []u8,
+    header:            ^Mesh_Header,
+    vertices:          [][3]f32,
+    polygons:          []Poly,
+    links:             []Link,
+    detail_meshes:     []Poly_Detail,
+    detail_vertices:   [][3]f32,
+    detail_triangles:  [][4]u8,
+    bv_nodes:          []BV_Node,
+    off_mesh_conns:    []Off_Mesh_Connection,
+}
+
+// Create memory map from raw data - replaces all pointer arithmetic
+navmesh_create_memory_map :: proc(data: []u8) -> (Navmesh_Memory_Map, recast.Status) {
+    if len(data) < size_of(Mesh_Header) do return {}, {.Invalid_Param}
+    
+    memory_map: Navmesh_Memory_Map
+    memory_map.data = data
+    memory_map.header = cast(^Mesh_Header)raw_data(data)
+    
+    // Use slice syntax to avoid pointer arithmetic
+    offset := size_of(Mesh_Header)
+    
+    if memory_map.header.vert_count > 0 {
+        vert_bytes := offset + size_of([3]f32) * int(memory_map.header.vert_count)
+        if vert_bytes > len(data) do return {}, {.Invalid_Param}
+        memory_map.vertices = slice.from_ptr(cast(^[3]f32)&data[offset], int(memory_map.header.vert_count))
+        offset = vert_bytes
+    }
+    
+    if memory_map.header.poly_count > 0 {
+        poly_bytes := offset + size_of(Poly) * int(memory_map.header.poly_count)
+        if poly_bytes > len(data) do return {}, {.Invalid_Param}
+        memory_map.polygons = slice.from_ptr(cast(^Poly)&data[offset], int(memory_map.header.poly_count))
+        offset = poly_bytes
+    }
+    
+    if memory_map.header.max_link_count > 0 {
+        link_bytes := offset + size_of(Link) * int(memory_map.header.max_link_count)
+        if link_bytes > len(data) do return {}, {.Invalid_Param}
+        memory_map.links = slice.from_ptr(cast(^Link)&data[offset], int(memory_map.header.max_link_count))
+        offset = link_bytes
+    }
+    
+    if memory_map.header.detail_mesh_count > 0 {
+        detail_mesh_bytes := offset + size_of(Poly_Detail) * int(memory_map.header.detail_mesh_count)
+        if detail_mesh_bytes > len(data) do return {}, {.Invalid_Param}
+        memory_map.detail_meshes = slice.from_ptr(cast(^Poly_Detail)&data[offset], int(memory_map.header.detail_mesh_count))
+        offset = detail_mesh_bytes
+    }
+    
+    if memory_map.header.detail_vert_count > 0 {
+        detail_vert_bytes := offset + size_of([3]f32) * int(memory_map.header.detail_vert_count)
+        if detail_vert_bytes > len(data) do return {}, {.Invalid_Param}
+        memory_map.detail_vertices = slice.from_ptr(cast(^[3]f32)&data[offset], int(memory_map.header.detail_vert_count))
+        offset = detail_vert_bytes
+    }
+    
+    if memory_map.header.detail_tri_count > 0 {
+        detail_tri_bytes := offset + size_of([4]u8) * int(memory_map.header.detail_tri_count)
+        if detail_tri_bytes > len(data) do return {}, {.Invalid_Param}
+        memory_map.detail_triangles = slice.from_ptr(cast(^[4]u8)&data[offset], int(memory_map.header.detail_tri_count))
+        offset = detail_tri_bytes
+    }
+    
+    if memory_map.header.bv_node_count > 0 {
+        bv_bytes := offset + size_of(BV_Node) * int(memory_map.header.bv_node_count)
+        if bv_bytes > len(data) do return {}, {.Invalid_Param}
+        memory_map.bv_nodes = slice.from_ptr(cast(^BV_Node)&data[offset], int(memory_map.header.bv_node_count))
+        offset = bv_bytes
+    }
+    
+    if memory_map.header.off_mesh_con_count > 0 {
+        off_mesh_bytes := offset + size_of(Off_Mesh_Connection) * int(memory_map.header.off_mesh_con_count)
+        if off_mesh_bytes > len(data) do return {}, {.Invalid_Param}
+        memory_map.off_mesh_conns = slice.from_ptr(cast(^Off_Mesh_Connection)&data[offset], int(memory_map.header.off_mesh_con_count))
+        offset = off_mesh_bytes
+    }
+    
+    return memory_map, {.Success}
+}
+
+
+// Calculate tile index using slice indexing
+get_tile_index :: proc(nav_mesh: ^Nav_Mesh, tile: ^Mesh_Tile) -> u32 {
+    if tile == nil do return 0
+
+    // Use slice offset calculation (much more efficient than loop)
+    base_ptr := raw_data(nav_mesh.tiles)
+    tile_ptr := rawptr(tile)
+    offset := int(uintptr(tile_ptr) - uintptr(base_ptr))
+    return u32(offset / size_of(Mesh_Tile))
+}
+
 nav_mesh_init :: proc(nav_mesh: ^Nav_Mesh, params: ^Nav_Mesh_Params) -> recast.Status {
     nav_mesh.params = params^
     nav_mesh.orig = params.orig
@@ -160,7 +256,7 @@ get_tile_ref :: proc(nav_mesh: ^Nav_Mesh, tile: ^Mesh_Tile) -> recast.Tile_Ref {
     if tile == nil do return recast.INVALID_TILE_REF
 
     // Calculate tile index
-    tile_index := u32(uintptr(tile) - uintptr(&nav_mesh.tiles[0])) / size_of(Mesh_Tile)
+    tile_index := get_tile_index(nav_mesh, tile)
     return recast.Tile_Ref(encode_tile_ref(nav_mesh, tile.salt, tile_index))
 }
 
@@ -237,69 +333,18 @@ setup_tile_data :: proc(tile: ^Mesh_Tile, data: []u8, header: ^Mesh_Header, flag
     tile.header = header
     tile.flags = flags
 
-    offset := size_of(Mesh_Header)
+    // Use memory map instead of manual pointer arithmetic
+    memory_map, map_status := navmesh_create_memory_map(data)
+    if recast.status_failed(map_status) do return map_status
 
-    if header.vert_count > 0 {
-        vert_ptr := uintptr(raw_data(data)) + uintptr(offset)
-        if vert_ptr % uintptr(align_of([3]f32)) != 0 do return {.Invalid_Param}
-        verts_ptr := cast(^[3]f32)(vert_ptr)
-        tile.verts = slice.from_ptr(verts_ptr, int(header.vert_count))
-        offset += size_of([3]f32) * int(header.vert_count)
-    }
-
-    if header.poly_count > 0 {
-        poly_ptr_addr := uintptr(raw_data(data)) + uintptr(offset)
-        if poly_ptr_addr % uintptr(align_of(Poly)) != 0 do return {.Invalid_Param}
-        poly_ptr := cast(^Poly)(poly_ptr_addr)
-        tile.polys = slice.from_ptr(poly_ptr, int(header.poly_count))
-        offset += size_of(Poly) * int(header.poly_count)
-    }
-
-    if header.max_link_count > 0 {
-        link_ptr_addr := uintptr(raw_data(data)) + uintptr(offset)
-        if link_ptr_addr % uintptr(align_of(Link)) != 0 do return {.Invalid_Param}
-        link_ptr := cast(^Link)(link_ptr_addr)
-        tile.links = slice.from_ptr(link_ptr, int(header.max_link_count))
-        offset += size_of(Link) * int(header.max_link_count)
-    }
-
-    if header.detail_mesh_count > 0 {
-        detail_mesh_ptr_addr := uintptr(raw_data(data)) + uintptr(offset)
-        if detail_mesh_ptr_addr % uintptr(align_of(Poly_Detail)) != 0 do return {.Invalid_Param}
-        detail_mesh_ptr := cast(^Poly_Detail)(detail_mesh_ptr_addr)
-        tile.detail_meshes = slice.from_ptr(detail_mesh_ptr, int(header.detail_mesh_count))
-        offset += size_of(Poly_Detail) * int(header.detail_mesh_count)
-    }
-
-    if header.detail_vert_count > 0 {
-        detail_verts_ptr_addr := uintptr(raw_data(data)) + uintptr(offset)
-        if detail_verts_ptr_addr % uintptr(align_of([3]f32)) != 0 do return {.Invalid_Param}
-        detail_verts_ptr := cast(^[3]f32)(detail_verts_ptr_addr)
-        tile.detail_verts = slice.from_ptr(detail_verts_ptr, int(header.detail_vert_count))
-        offset += size_of([3]f32) * int(header.detail_vert_count)
-    }
-
-    if header.detail_tri_count > 0 {
-        detail_tri_ptr := cast(^[4]u8)(uintptr(raw_data(data)) + uintptr(offset))
-        tile.detail_tris = slice.from_ptr(detail_tri_ptr, int(header.detail_tri_count))
-        offset += size_of([4]u8) * int(header.detail_tri_count)
-    }
-
-    if header.bv_node_count > 0 {
-        bv_node_ptr_addr := uintptr(raw_data(data)) + uintptr(offset)
-        if bv_node_ptr_addr % uintptr(align_of(BV_Node)) != 0 do return {.Invalid_Param}
-        bv_node_ptr := cast(^BV_Node)(bv_node_ptr_addr)
-        tile.bv_tree = slice.from_ptr(bv_node_ptr, int(header.bv_node_count))
-        offset += size_of(BV_Node) * int(header.bv_node_count)
-    }
-
-    if header.off_mesh_con_count > 0 {
-        off_mesh_ptr_addr := uintptr(raw_data(data)) + uintptr(offset)
-        if off_mesh_ptr_addr % uintptr(align_of(Off_Mesh_Connection)) != 0 do return {.Invalid_Param}
-        off_mesh_ptr := cast(^Off_Mesh_Connection)(off_mesh_ptr_addr)
-        tile.off_mesh_cons = slice.from_ptr(off_mesh_ptr, int(header.off_mesh_con_count))
-        offset += size_of(Off_Mesh_Connection) * int(header.off_mesh_con_count)
-    }
+    tile.verts = memory_map.vertices
+    tile.polys = memory_map.polygons
+    tile.links = memory_map.links
+    tile.detail_meshes = memory_map.detail_meshes
+    tile.detail_verts = memory_map.detail_vertices
+    tile.detail_tris = memory_map.detail_triangles
+    tile.bv_tree = memory_map.bv_nodes
+    tile.off_mesh_cons = memory_map.off_mesh_conns
 
 
     tile.links_free_list = recast.DT_NULL_LINK
@@ -561,7 +606,7 @@ get_poly_ref_base :: proc(nav_mesh: ^Nav_Mesh, tile: ^Mesh_Tile) -> recast.Poly_
     }
 
     // Calculate tile index
-    tile_index := u32(uintptr(tile) - uintptr(&nav_mesh.tiles[0])) / size_of(Mesh_Tile)
+    tile_index := get_tile_index(nav_mesh, tile)
 
     // Encode reference with salt, tile index, and zero polygon index
     salt := tile.salt & ((1 << nav_mesh.salt_bits) - 1)

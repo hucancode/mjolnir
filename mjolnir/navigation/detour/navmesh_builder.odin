@@ -136,12 +136,7 @@ create_nav_mesh_data :: proc(params: ^Create_Nav_Mesh_Data_Params) -> ([]u8, rec
     header.bv_quant_factor = 1.0 / cs
 
     // Copy vertices - first data section per navmesh format specification
-    verts_ptr_addr := uintptr(raw_data(data)) + uintptr(offset)
-    if verts_ptr_addr % uintptr(align_of([3]f32)) != 0 {
-        return nil, {.Invalid_Param}
-    }
-
-    verts := slice.from_ptr(cast(^[3]f32)(verts_ptr_addr), int(total_vert_count))
+    verts := slice.from_ptr(cast(^[3]f32)(raw_data(data)[offset:]), int(total_vert_count))
     offset += verts_size
 
     for v, i in pmesh.verts {
@@ -157,14 +152,8 @@ create_nav_mesh_data :: proc(params: ^Create_Nav_Mesh_Data_Params) -> ([]u8, rec
     }
 
     // Copy polygons - second data section per navmesh format specification
-    // Validate alignment before casting
-    polys_ptr_addr := uintptr(raw_data(data)) + uintptr(offset)
-    if polys_ptr_addr % uintptr(align_of(Poly)) != 0 {
-        log.errorf("Polygon data alignment error during build: ptr=0x%x, required_align=%d", polys_ptr_addr, align_of(Poly))
-        return nil, {.Invalid_Param}
-    }
 
-    polys := slice.from_ptr(cast(^Poly)(polys_ptr_addr), int(total_poly_count))
+    polys := slice.from_ptr(cast(^Poly)(raw_data(data)[offset:]), int(total_poly_count))
     offset += polys_size
 
     for i in 0..<pmesh.npolys {

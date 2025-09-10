@@ -5,7 +5,6 @@ import "core:math/linalg"
 import "../recast"
 import "../../geometry"
 
-// Funnel algorithm for path straightening
 find_straight_path :: proc(query: ^Nav_Mesh_Query, start_pos, end_pos: [3]f32,
                           path: []recast.Poly_Ref, path_count: i32,
                           straight_path: []Straight_Path_Point,

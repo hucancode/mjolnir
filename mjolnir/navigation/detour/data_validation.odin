@@ -3,9 +3,6 @@ package navigation_detour
 import "core:log"
 import "../recast"
 
-
-
-
 Data_Validation_Result :: struct {
     valid:        bool,
     error_count:  int,
@@ -93,17 +90,6 @@ validate_navmesh_header :: proc(header: ^Mesh_Header) -> recast.Status {
 
 
 verify_data_layout :: proc(data: []u8, header: ^Mesh_Header) -> bool {
-    if len(data) < size_of(Mesh_Header) do return false
-    offset := size_of(Mesh_Header)
-    if header.vert_count > 0 {
-        vert_ptr := uintptr(raw_data(data)) + uintptr(offset)
-        if vert_ptr % uintptr(align_of([3]f32)) != 0 do return false
-        offset += size_of([3]f32) * int(header.vert_count)
-    }
-    if header.poly_count > 0 {
-        poly_ptr := uintptr(raw_data(data)) + uintptr(offset)
-        if poly_ptr % uintptr(align_of(Poly)) != 0 do return false
-    }
-    return true
+    _, map_status := navmesh_create_memory_map(data)
+    return !recast.status_failed(map_status)
 }
-
