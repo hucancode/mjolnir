@@ -29,11 +29,25 @@ create_nav_mesh_data :: proc(params: ^Create_Nav_Mesh_Data_Params) -> ([]u8, rec
     cs := pmesh.cs
     ch := pmesh.ch
 
-    // Classify off-mesh connection points
+    // Classify off-mesh connection points and count how many we'll store
     off_mesh_con_class := make([]u8, params.off_mesh_con_count * 2)
     defer delete(off_mesh_con_class)
+    stored_off_mesh_con_count := i32(0)
+    off_mesh_con_link_count := i32(0)
+
     if params.off_mesh_con_count > 0 {
         classify_off_mesh_connections(pmesh, params, off_mesh_con_class)
+
+        // Count connections that start from this tile and links needed
+        for i in 0..<params.off_mesh_con_count {
+            if off_mesh_con_class[i * 2 + 0] == 0xff {
+                stored_off_mesh_con_count += 1
+                off_mesh_con_link_count += 1  // Start endpoint link
+            }
+            if off_mesh_con_class[i * 2 + 1] == 0xff {
+                off_mesh_con_link_count += 1  // End endpoint link
+            }
+        }
     }
 
     // Count vertices and polygons
@@ -70,10 +84,9 @@ create_nav_mesh_data :: proc(params: ^Create_Nav_Mesh_Data_Params) -> ([]u8, rec
     // maxLinkCount = all edges + portal edges*2 (bidirectional)
     max_link_count = edge_count + portal_count * 2
 
-    // Off-mesh connections
-    off_mesh_con_link_count := params.off_mesh_con_count * 2
-    total_vert_count += params.off_mesh_con_count * 2
-    total_poly_count += params.off_mesh_con_count
+    // Off-mesh connections (only those that start from this tile)
+    total_vert_count += stored_off_mesh_con_count * 2
+    total_poly_count += stored_off_mesh_con_count
     max_link_count += off_mesh_con_link_count
 
     // Detail mesh triangles and vertices
@@ -99,7 +112,7 @@ create_nav_mesh_data :: proc(params: ^Create_Nav_Mesh_Data_Params) -> ([]u8, rec
     // Calculate BV tree size - simple implementation creates one node per polygon
     bv_node_count := total_poly_count
     bv_tree_size := size_of(BV_Node) * int(bv_node_count)
-    off_mesh_cons_size := size_of(Off_Mesh_Connection) * int(params.off_mesh_con_count)
+    off_mesh_cons_size := size_of(Off_Mesh_Connection) * int(stored_off_mesh_con_count)
 
     total_size := header_size + verts_size + polys_size + links_size +
                   detail_meshes_size + detail_verts_size + detail_tris_size +
@@ -126,7 +139,7 @@ create_nav_mesh_data :: proc(params: ^Create_Nav_Mesh_Data_Params) -> ([]u8, rec
     header.detail_vert_count = detail_vert_count
     header.detail_tri_count = detail_tri_count
     header.bv_node_count = bv_node_count
-    header.off_mesh_con_count = params.off_mesh_con_count
+    header.off_mesh_con_count = stored_off_mesh_con_count
     header.off_mesh_base = pmesh.npolys
     header.walkable_height = params.walkable_height
     header.walkable_radius = params.walkable_radius
@@ -143,12 +156,15 @@ create_nav_mesh_data :: proc(params: ^Create_Nav_Mesh_Data_Params) -> ([]u8, rec
         verts[i] = pmesh.bmin + [3]f32{f32(v[0]) * cs, f32(v[1]) * ch, f32(v[2]) * cs}
     }
 
-    // Add off-mesh connection vertices
+    // Add off-mesh connection vertices (only for connections starting from this tile)
+    vert_idx := len(pmesh.verts)
     for i in 0..<params.off_mesh_con_count {
-        base := len(pmesh.verts) + int(i) * 2
-        conn := params.off_mesh_con_verts[i]
-        verts[base + 0] = conn.start
-        verts[base + 1] = conn.end
+        if off_mesh_con_class[i * 2 + 0] == 0xff {
+            conn := params.off_mesh_con_verts[i]
+            verts[vert_idx + 0] = conn.start
+            verts[vert_idx + 1] = conn.end
+            vert_idx += 2
+        }
     }
 
     // Copy polygons - second data section per navmesh format specification
@@ -188,16 +204,22 @@ create_nav_mesh_data :: proc(params: ^Create_Nav_Mesh_Data_Params) -> ([]u8, rec
         }
     }
 
-    // Add off-mesh connection polygons
+    // Add off-mesh connection polygons (only for connections starting from this tile)
+    poly_idx := pmesh.npolys
+    vert_base := len(pmesh.verts)
     for i in 0..<params.off_mesh_con_count {
-        poly := &polys[pmesh.npolys + i]
-        poly.vert_count = 2
-        poly.verts[0] = u16(len(pmesh.verts) + int(i) * 2 + 0)
-        poly.verts[1] = u16(len(pmesh.verts) + int(i) * 2 + 1)
-        poly.flags = params.off_mesh_con_flags[i]
-        poly_set_area(poly, params.off_mesh_con_areas[i])
-        poly_set_type(poly, recast.DT_POLYTYPE_OFFMESH_CONNECTION)
-        poly.first_link = recast.DT_NULL_LINK
+        if off_mesh_con_class[i * 2 + 0] == 0xff {
+            poly := &polys[poly_idx]
+            poly.vert_count = 2
+            poly.verts[0] = u16(vert_base + 0)
+            poly.verts[1] = u16(vert_base + 1)
+            poly.flags = params.off_mesh_con_flags[i]
+            poly_set_area(poly, params.off_mesh_con_areas[i])
+            poly_set_type(poly, recast.DT_POLYTYPE_OFFMESH_CONNECTION)
+            poly.first_link = recast.DT_NULL_LINK
+            poly_idx += 1
+            vert_base += 2
+        }
     }
 
     // Skip links for now (will be allocated at runtime)
@@ -254,24 +276,28 @@ create_nav_mesh_data :: proc(params: ^Create_Nav_Mesh_Data_Params) -> ([]u8, rec
         offset += bv_tree_size
     }
 
-    // Copy off-mesh connections
-    if params.off_mesh_con_count > 0 {
-        off_mesh_cons := slice.from_ptr(cast(^Off_Mesh_Connection)(raw_data(data)[offset:]), int(params.off_mesh_con_count))
+    // Copy off-mesh connections (only those starting from this tile)
+    if stored_off_mesh_con_count > 0 {
+        off_mesh_cons := slice.from_ptr(cast(^Off_Mesh_Connection)(raw_data(data)[offset:]), int(stored_off_mesh_con_count))
+        con_idx := 0
         for i in 0..<params.off_mesh_con_count {
-            con := &off_mesh_cons[i]
-            con.poly = u16(pmesh.npolys + i)
-            // Copy connection endpoints
-            conn := params.off_mesh_con_verts[i]
-            con.start = conn.start
-            con.end = conn.end
-            con.rad = params.off_mesh_con_rad[i]
-            if params.off_mesh_con_dir[i] != 0 {
-                con.flags = recast.DT_OFFMESH_CON_BIDIR
-            } else {
-                con.flags = 0
+            if off_mesh_con_class[i * 2 + 0] == 0xff {
+                con := &off_mesh_cons[con_idx]
+                con.poly = u16(pmesh.npolys + i32(con_idx))
+                // Copy connection endpoints
+                conn := params.off_mesh_con_verts[i]
+                con.start = conn.start
+                con.end = conn.end
+                con.rad = params.off_mesh_con_rad[i]
+                if params.off_mesh_con_dir[i] != 0 {
+                    con.flags = recast.DT_OFFMESH_CON_BIDIR
+                } else {
+                    con.flags = 0
+                }
+                con.side = off_mesh_con_class[i * 2 + 1]
+                con.user_id = params.off_mesh_con_user_id[i]
+                con_idx += 1
             }
-            con.side = off_mesh_con_class[i * 2]
-            con.user_id = params.off_mesh_con_user_id[i]
         }
     }
 
@@ -335,16 +361,78 @@ Create_Nav_Mesh_Data_Params :: struct {
     walkable_climb: f32,
 }
 
-// Classify off-mesh connection endpoints
+// Classify off-mesh connection endpoints to determine which side of tile boundary they're on
 classify_off_mesh_connections :: proc(pmesh: ^recast.Poly_Mesh, params: ^Create_Nav_Mesh_Data_Params, class: []u8) {
-    // This function classifies off-mesh connection endpoints to determine
-    // which side of the tile edge they connect to
-    // Implementation details depend on tile connectivity requirements
-
-    for i in 0..<params.off_mesh_con_count {
-        class[i * 2 + 0] = 0xff // Side classification for point A
-        class[i * 2 + 1] = 0xff // Side classification for point B
+    if params.off_mesh_con_count == 0 {
+        return
     }
+    // Find tight height bounds for culling off-mesh connections
+    hmin := f32(math.F32_MAX)
+    hmax := f32(-math.F32_MAX)
+    // Calculate height bounds from polygon mesh vertices
+    for v in pmesh.verts {
+        h := pmesh.bmin[1] + f32(v[1]) * pmesh.ch
+        hmin = min(hmin, h)
+        hmax = max(hmax, h)
+    }
+
+    // Expand bounds by walkable climb to account for connection tolerance
+    hmin -= params.walkable_climb
+    hmax += params.walkable_climb
+
+    // Create bounds for classification (copy tile bounds but use expanded height)
+    bmin := [3]f32{pmesh.bmin[0], hmin, pmesh.bmin[2]}
+    bmax := [3]f32{pmesh.bmax[0], hmax, pmesh.bmax[2]}
+
+    // Classify each off-mesh connection endpoint
+    for i in 0..<params.off_mesh_con_count {
+        conn := params.off_mesh_con_verts[i]
+
+        // Classify both endpoints
+        class[i * 2 + 0] = classify_off_mesh_point(conn.start, bmin, bmax)
+        class[i * 2 + 1] = classify_off_mesh_point(conn.end, bmin, bmax)
+
+        // Zero out off-mesh start positions that are outside height bounds
+        // This prevents connections that can never be reached due to height constraints
+        if class[i * 2 + 0] == 0xff {
+            if conn.start[1] < bmin[1] || conn.start[1] > bmax[1] {
+                class[i * 2 + 0] = 0
+            }
+        }
+    }
+}
+
+// Classify a single off-mesh point relative to tile boundaries
+// Returns 0-7 for the 8 directions around tile edges, or 0xff if inside tile
+classify_off_mesh_point :: proc(pt: [3]f32, bmin: [3]f32, bmax: [3]f32) -> u8 {
+    // Bit flags for boundary classification
+    XP :: u8(1 << 0)  // Beyond positive X boundary (East)
+    ZP :: u8(1 << 1)  // Beyond positive Z boundary (North)
+    XM :: u8(1 << 2)  // Beyond negative X boundary (West)
+    ZM :: u8(1 << 3)  // Beyond negative Z boundary (South)
+
+    // Determine which boundaries the point crosses
+    outcode := u8(0)
+    if pt[0] >= bmax[0] do outcode |= XP  // East of tile
+    if pt[2] >= bmax[2] do outcode |= ZP  // North of tile
+    if pt[0] < bmin[0]  do outcode |= XM  // West of tile
+    if pt[2] < bmin[2]  do outcode |= ZM  // South of tile
+
+    // Map boundary combinations to specific side values (0-7)
+    // This creates an 8-directional classification around the tile
+    switch outcode {
+    case XP:        return 0  // East
+    case XP | ZP:   return 1  // Northeast
+    case ZP:        return 2  // North
+    case XM | ZP:   return 3  // Northwest
+    case XM:        return 4  // West
+    case XM | ZM:   return 5  // Southwest
+    case ZM:        return 6  // South
+    case XP | ZM:   return 7  // Southeast
+    }
+
+    // Point is inside tile boundaries
+    return 0xff
 }
 
 // Create navigation mesh from single tile
