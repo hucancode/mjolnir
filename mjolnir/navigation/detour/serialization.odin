@@ -191,24 +191,9 @@ save_navmesh_data_to_file :: proc(data: []u8, filepath: string) -> bool {
 load_navmesh_data_from_file :: proc(filepath: string, allocator := context.allocator) -> ([]u8, bool) {
     context.allocator = allocator
 
-    file, err := os.open(filepath, os.O_RDONLY)
-    if err != os.ERROR_NONE {
-        log.errorf("Failed to open navmesh data file: %s", filepath)
-        return nil, false
-    }
-    defer os.close(file)
-
-    file_info, stat_err := os.fstat(file)
-    if stat_err != os.ERROR_NONE {
-        log.error("Failed to get file stats")
-        return nil, false
-    }
-
-    data := make([]u8, file_info.size, allocator)
-    _, err = os.read(file, data)
-    if err != os.ERROR_NONE {
-        log.error("Failed to read navmesh data")
-        delete(data, allocator)
+    data, read_ok := os.read_entire_file(filepath, allocator)
+    if !read_ok {
+        log.errorf("Failed to read navmesh data file: %s", filepath)
         return nil, false
     }
 
