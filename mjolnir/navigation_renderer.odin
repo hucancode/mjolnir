@@ -12,35 +12,30 @@ import "navigation/recast"
 import vk "vendor:vulkan"
 
 RendererNavMesh :: struct {
-    // Vulkan resources
     pipeline:                vk.Pipeline,
     pipeline_layout:         vk.PipelineLayout,
     debug_pipeline:          vk.Pipeline,
     debug_pipeline_layout:   vk.PipelineLayout,
 
-    // Vertex data for navigation mesh
     vertex_buffer:           gpu.DataBuffer(NavMeshVertex),
     index_buffer:            gpu.DataBuffer(u32),
     vertex_count:            u32,
     index_count:             u32,
 
-    // Path rendering data
     path_vertex_buffer:      gpu.DataBuffer(NavMeshVertex),
     path_vertex_count:       u32,
     path_enabled:            bool,
     path_color:              [4]f32,
 
-    // Rendering state
     enabled:                 bool,
     debug_mode:              bool,
-    height_offset:           f32,  // Offset above ground
-    alpha:                   f32,  // Transparency
+    height_offset:           f32,
+    alpha:                   f32,
     color_mode:              NavMeshColorMode,
     debug_render_mode:       NavMeshDebugMode,
     base_color:              [3]f32,
 }
 
-// Vertex structure for navigation mesh rendering
 NavMeshVertex :: struct {
     position: [3]f32,
     color:    [4]f32,
@@ -48,17 +43,17 @@ NavMeshVertex :: struct {
 }
 
 NavMeshColorMode :: enum u32 {
-    Area_Colors = 0,  // Color by area type
-    Uniform = 1,      // Single color
-    Height_Based = 2, // Color by height
-    Random_Colors = 3, // Random color per polygon
-    Region_Colors = 4, // Color by connectivity region
+    Area_Colors = 0,
+    Uniform = 1,
+    Height_Based = 2,
+    Random_Colors = 3,
+    Region_Colors = 4,
 }
 
 NavMeshDebugMode :: enum u32 {
-    Wireframe = 0,    // Show wireframe
-    Normals = 1,      // Show normals as colors
-    Connectivity = 2, // Show polygon connectivity
+    Wireframe = 0,
+    Normals = 1,
+    Connectivity = 2,
 }
 
 NavMeshPushConstants :: struct {
@@ -80,67 +75,38 @@ NavMeshDebugPushConstants :: struct {
     padding:       [8]u32,
 }
 
-// Maximum path segments (line segments between waypoints)
 MAX_PATH_SEGMENTS :: 1000
 
-// Default area colors for different area types
 AREA_COLORS := [7][4]f32{
-    0 = {0.0, 0.0, 0.0, 0.0},     // NULL_AREA - transparent
-    1 = {0.0, 0.8, 0.2, 0.6},     // WALKABLE_AREA - green
-    2 = {0.8, 0.4, 0.0, 0.6},     // JUMP_AREA - orange
-    3 = {0.2, 0.4, 0.8, 0.6},     // WATER_AREA - blue
-    4 = {0.8, 0.2, 0.2, 0.6},     // DOOR_AREA - red
-    5 = {0.6, 0.6, 0.6, 0.6},     // ELEVATOR_AREA - gray
-    6 = {0.8, 0.8, 0.0, 0.6},     // LADDER_AREA - yellow
+    0 = {0.0, 0.0, 0.0, 0.0},
+    1 = {0.0, 0.8, 0.2, 0.6},
+    2 = {0.8, 0.4, 0.0, 0.6},
+    3 = {0.2, 0.4, 0.8, 0.6},
+    4 = {0.8, 0.2, 0.2, 0.6},
+    5 = {0.6, 0.6, 0.6, 0.6},
+    6 = {0.8, 0.8, 0.0, 0.6},
 }
 
 navmesh_init :: proc(renderer: ^RendererNavMesh, gpu_context: ^gpu.GPUContext, warehouse: ^ResourceWarehouse) -> vk.Result {
-    // Initialize default values
     renderer.enabled = true
-    renderer.debug_mode = false
     renderer.height_offset = 0.01
     renderer.alpha = 0.6
     renderer.color_mode = .Area_Colors
     renderer.debug_render_mode = .Wireframe
     renderer.base_color = {0.0, 0.8, 0.2}
-
-    // Initialize path rendering defaults
-    renderer.path_enabled = false
-    renderer.path_color = {1.0, 1.0, 0.0, 1.0} // Yellow by default
-    renderer.path_vertex_count = 0
-
-    // Create pipelines
-    result := create_navmesh_pipelines(renderer, gpu_context, warehouse)
-    if result != .SUCCESS {
-        log.errorf("Failed to create navigation mesh pipelines: %v", result)
-        return result
-    }
-
-    // Initialize empty buffers with larger capacity for complex navigation meshes
+    renderer.path_color = {1.0, 1.0, 0.0, 1.0}
+    create_navmesh_pipelines(renderer, gpu_context, warehouse) or_return
     renderer.vertex_buffer = gpu.create_host_visible_buffer(gpu_context, NavMeshVertex, 16384, {.VERTEX_BUFFER}) or_return
     renderer.index_buffer = gpu.create_host_visible_buffer(gpu_context, u32, 32768, {.INDEX_BUFFER}) or_return
-
-    // Pre-allocate path buffer for MAX_PATH_SEGMENTS line segments (2 vertices per segment)
     renderer.path_vertex_buffer = gpu.create_host_visible_buffer(gpu_context, NavMeshVertex, MAX_PATH_SEGMENTS * 2, {.VERTEX_BUFFER}) or_return
-
-    log.info("Navigation mesh renderer initialized successfully")
     return .SUCCESS
 }
 
 navmesh_deinit :: proc(renderer: ^RendererNavMesh, gpu_context: ^gpu.GPUContext) {
-    if renderer.pipeline != 0 {
-        vk.DestroyPipeline(gpu_context.device, renderer.pipeline, nil)
-    }
-    if renderer.pipeline_layout != 0 {
-        vk.DestroyPipelineLayout(gpu_context.device, renderer.pipeline_layout, nil)
-    }
-    if renderer.debug_pipeline != 0 {
-        vk.DestroyPipeline(gpu_context.device, renderer.debug_pipeline, nil)
-    }
-    if renderer.debug_pipeline_layout != 0 {
-        vk.DestroyPipelineLayout(gpu_context.device, renderer.debug_pipeline_layout, nil)
-    }
-
+    vk.DestroyPipeline(gpu_context.device, renderer.pipeline, nil)
+    vk.DestroyPipelineLayout(gpu_context.device, renderer.pipeline_layout, nil)
+    vk.DestroyPipeline(gpu_context.device, renderer.debug_pipeline, nil)
+    vk.DestroyPipelineLayout(gpu_context.device, renderer.debug_pipeline_layout, nil)
     gpu.data_buffer_deinit(gpu_context, &renderer.vertex_buffer)
     gpu.data_buffer_deinit(gpu_context, &renderer.index_buffer)
     gpu.data_buffer_deinit(gpu_context, &renderer.path_vertex_buffer)
@@ -149,24 +115,20 @@ navmesh_deinit :: proc(renderer: ^RendererNavMesh, gpu_context: ^gpu.GPUContext)
 navmesh_build_from_recast :: proc(renderer: ^RendererNavMesh, gpu_context: ^gpu.GPUContext,
                                   poly_mesh: ^recast.Poly_Mesh, detail_mesh: ^recast.Poly_Mesh_Detail) -> bool {
     if poly_mesh == nil {
-        log.error("Cannot build navigation mesh renderer: polygon mesh is nil")
         return false
     }
 
     use_detail_mesh := detail_mesh != nil && len(detail_mesh.verts) > 0
 
     vertices := make([dynamic]NavMeshVertex, 0, len(poly_mesh.verts))
-    indices := make([dynamic]u32, 0, poly_mesh.npolys * 6)  // Estimate
+    indices := make([dynamic]u32, 0, poly_mesh.npolys * 6)
     defer delete(vertices)
     defer delete(indices)
 
     if use_detail_mesh && len(detail_mesh.verts) > 0 {
-        // Use detail mesh vertices (already in world space)
         base_vert_count := len(poly_mesh.verts)
 
-        // First add the base poly mesh vertices
         for i in 0..<len(poly_mesh.verts) {
-
             v := poly_mesh.verts[i]
             pos := [3]f32{
                 f32(v.x) * poly_mesh.cs + poly_mesh.bmin[0],
@@ -181,9 +143,7 @@ navmesh_build_from_recast :: proc(renderer: ^RendererNavMesh, gpu_context: ^gpu.
             })
         }
 
-        // Then add detail vertices
         for i in 0..<len(detail_mesh.verts) {
-
             pos := detail_mesh.verts[i]
 
             append(&vertices, NavMeshVertex{
@@ -193,9 +153,7 @@ navmesh_build_from_recast :: proc(renderer: ^RendererNavMesh, gpu_context: ^gpu.
             })
         }
     } else {
-        // Convert polygon mesh vertices
         for i in 0..<len(poly_mesh.verts) {
-
             v := poly_mesh.verts[i]
             pos := [3]f32{
                 f32(v.x) * poly_mesh.cs + poly_mesh.bmin.x,
@@ -203,10 +161,7 @@ navmesh_build_from_recast :: proc(renderer: ^RendererNavMesh, gpu_context: ^gpu.
                 f32(v.z) * poly_mesh.cs + poly_mesh.bmin.z,
             }
 
-            // Default normal pointing up
             normal := [3]f32{0, 1, 0}
-
-            // Default color (will be overridden based on color mode)
             color := [4]f32{0.0, 0.8, 0.2, renderer.alpha}
 
             append(&vertices, NavMeshVertex{
@@ -217,13 +172,9 @@ navmesh_build_from_recast :: proc(renderer: ^RendererNavMesh, gpu_context: ^gpu.
         }
     }
 
-    // Convert polygon indices
     if use_detail_mesh && len(detail_mesh.meshes) > 0 {
-        // Use detail mesh triangles
         for i in 0..<len(detail_mesh.meshes) {
             if int(i) >= int(poly_mesh.npolys) do break
-
-            // Get mesh info from detail mesh
 
             mesh_info := detail_mesh.meshes[i]
             base_tri := mesh_info[0]
@@ -235,18 +186,15 @@ navmesh_build_from_recast :: proc(renderer: ^RendererNavMesh, gpu_context: ^gpu.
             region_id := poly_mesh.regs[i] if len(poly_mesh.regs) > int(i) else 0
             area_color := get_area_color(area_id, renderer.color_mode, renderer.base_color, renderer.alpha, u32(i), region_id)
 
-            // Add triangles from detail mesh
             for j in 0..<int(num_tris) {
                 tri_idx := int(base_tri) + j
                 if tri_idx >= len(detail_mesh.tris) do continue
 
                 tri := detail_mesh.tris[tri_idx]
-                // Detail mesh triangle indices are relative to base vertex
                 v0 := u32(tri[0])
                 v1 := u32(tri[1])
                 v2 := u32(tri[2])
 
-                // If vertex is 0xff, it refers to polygon mesh vertex
                 if v0 < 0xff {
                     v0 += base_vert + u32(len(poly_mesh.verts))
                 } else {
@@ -267,87 +215,63 @@ navmesh_build_from_recast :: proc(renderer: ^RendererNavMesh, gpu_context: ^gpu.
 
                 append(&indices, v0, v1, v2)
 
-                // Update vertex colors
                 if int(v0) < len(vertices) do vertices[v0].color = area_color
                 if int(v1) < len(vertices) do vertices[v1].color = area_color
                 if int(v2) < len(vertices) do vertices[v2].color = area_color
             }
         }
     } else {
-        // Original polygon mesh triangulation
         for i in 0..<poly_mesh.npolys {
-        poly_base := int(i) * int(poly_mesh.nvp) * 2
-        area_id := poly_mesh.areas[i] if len(poly_mesh.areas) > int(i) else 1
+            poly_base := int(i) * int(poly_mesh.nvp) * 2
+            area_id := poly_mesh.areas[i] if len(poly_mesh.areas) > int(i) else 1
+            region_id := poly_mesh.regs[i] if len(poly_mesh.regs) > int(i) else 0
+            area_color := get_area_color(area_id, renderer.color_mode, renderer.base_color, renderer.alpha, u32(i), region_id)
 
-        // Get region for connectivity coloring
-        region_id := poly_mesh.regs[i] if len(poly_mesh.regs) > int(i) else 0
+            poly_verts: [dynamic]u32
+            defer delete(poly_verts)
 
-        // Get area color (pass polygon index for random colors and region for connectivity)
-        area_color := get_area_color(area_id, renderer.color_mode, renderer.base_color, renderer.alpha, u32(i), region_id)
+            for j in 0..<poly_mesh.nvp {
+                vert_idx := poly_mesh.polys[poly_base + int(j)]
+                if vert_idx == recast.RC_MESH_NULL_IDX do break
+                append(&poly_verts, u32(vert_idx))
 
-        // Count valid vertices in this polygon
-        poly_verts: [dynamic]u32
-        defer delete(poly_verts)
-
-        for j in 0..<poly_mesh.nvp {
-            vert_idx := poly_mesh.polys[poly_base + int(j)]
-            if vert_idx == recast.RC_MESH_NULL_IDX do break
-            append(&poly_verts, u32(vert_idx))
-
-            // Update vertex color
-            if int(vert_idx) < len(vertices) {
-                vertices[vert_idx].color = area_color
+                if int(vert_idx) < len(vertices) {
+                    vertices[vert_idx].color = area_color
+                }
             }
-        }
 
-
-        // Triangulate polygon (simple fan triangulation)
-        if len(poly_verts) >= 3 {
-            for j in 1..<len(poly_verts) - 1 {
-                append(&indices, poly_verts[0])
-                append(&indices, poly_verts[j])
-                append(&indices, poly_verts[j + 1])
+            if len(poly_verts) >= 3 {
+                for j in 1..<len(poly_verts) - 1 {
+                    append(&indices, poly_verts[0], poly_verts[j], poly_verts[j + 1])
+                }
             }
         }
     }
-    } // Close the else block for detail mesh
 
-    // Update vertex and index counts
     renderer.vertex_count = u32(len(vertices))
     renderer.index_count = u32(len(indices))
 
-    log.infof("Navigation mesh data: %d vertices, %d indices", renderer.vertex_count, renderer.index_count)
-
     if renderer.vertex_count == 0 || renderer.index_count == 0 {
-        log.warn("Navigation mesh has no renderable geometry")
         return true
     }
 
-    // Check buffer capacity
     if renderer.vertex_count > 16384 {
-        log.errorf("Too many vertices (%d) for buffer size (16384)", renderer.vertex_count)
         return false
     }
     if renderer.index_count > 32768 {
-        log.errorf("Too many indices (%d) for buffer size (32768)", renderer.index_count)
         return false
     }
 
-    // Upload to GPU buffers
     vertex_result := gpu.data_buffer_write(&renderer.vertex_buffer, vertices[:])
     if vertex_result != .SUCCESS {
-        log.error("Failed to upload navigation mesh vertex data")
         return false
     }
 
     index_result := gpu.data_buffer_write(&renderer.index_buffer, indices[:])
     if index_result != .SUCCESS {
-        log.error("Failed to upload navigation mesh index data")
         return false
     }
 
-    log.infof("Built navigation mesh renderer: %d vertices, %d indices (%d triangles)",
-              renderer.vertex_count, renderer.index_count, renderer.index_count / 3)
     return true
 }
 
@@ -371,33 +295,27 @@ generate_random_color :: proc(seed: u32, alpha: f32) -> [4]f32 {
     return {rgb.x + m, rgb.y + m, rgb.z + m, alpha}
 }
 
-// Get color for area type
 get_area_color :: proc(area_id: u8, color_mode: NavMeshColorMode, base_color: [3]f32, alpha: f32, poly_id: u32 = 0, region_id: u16 = 0) -> [4]f32 {
     switch color_mode {
     case .Area_Colors:
         if int(area_id) < len(AREA_COLORS) {
             color := AREA_COLORS[area_id]
-            color.a = alpha  // Override alpha
+            color.a = alpha
             return color
         }
-        return {0.5, 0.5, 0.5, alpha}  // Default gray
+        return {0.5, 0.5, 0.5, alpha}
 
     case .Uniform:
         return {base_color.x, base_color.y, base_color.z, alpha}
 
     case .Height_Based:
-        // Height-based coloring would require height information
-        // For now, use a gradient based on area_id as a proxy
         hue := f32(area_id) / 8.0
         return {hue, 1.0 - hue, 0.5, alpha}
 
     case .Random_Colors:
-        // Generate deterministic random color based on polygon ID
         return generate_random_color(poly_id, alpha)
 
     case .Region_Colors:
-        // Generate distinct colors for different regions
-        // Use region_id to generate a unique color for each connected region
         return generate_random_color(u32(region_id), alpha)
     }
 
@@ -411,30 +329,22 @@ navmesh_update_path :: proc(renderer: ^RendererNavMesh, path_points: [][3]f32, p
         return
     }
 
-    // Build triangulated line strips from path points
-    // For each line segment, create a quad (2 triangles) to simulate thick lines
     vertices := make([dynamic]NavMeshVertex)
     defer delete(vertices)
 
-    line_width: f32 = 0.15 // Width of the line in world units
+    line_width: f32 = 0.15
 
-    // For each pair of consecutive points, create a quad
     for i in 0..<len(path_points)-1 {
         start := path_points[i]
         end := path_points[i+1]
 
-        // Calculate line direction and perpendicular
         dir := linalg.normalize(end - start)
-        // Use cross product with up vector to get perpendicular direction
         perp := linalg.normalize(linalg.cross(dir, [3]f32{0, 1, 0})) * line_width
 
-        // If line is vertical, use different perpendicular
         if abs(dir.y) > 0.99 {
             perp = linalg.normalize(linalg.cross(dir, [3]f32{1, 0, 0})) * line_width
         }
 
-        // Create quad vertices (two triangles)
-        // First triangle
         append(&vertices, NavMeshVertex{
             position = start - perp,
             color = path_color,
@@ -451,7 +361,6 @@ navmesh_update_path :: proc(renderer: ^RendererNavMesh, path_points: [][3]f32, p
             normal = {0, 1, 0},
         })
 
-        // Second triangle
         append(&vertices, NavMeshVertex{
             position = start + perp,
             color = path_color,
@@ -468,18 +377,14 @@ navmesh_update_path :: proc(renderer: ^RendererNavMesh, path_points: [][3]f32, p
             normal = {0, 1, 0},
         })
 
-        // Limit to maximum segments
         if len(vertices) >= MAX_PATH_SEGMENTS * 6 {
-            log.warnf("Path exceeds maximum segments (%d), truncating", MAX_PATH_SEGMENTS)
             break
         }
     }
 
-    // Update GPU buffer
     if len(vertices) > 0 {
         result := gpu.data_buffer_write(&renderer.path_vertex_buffer, vertices[:])
         if result != .SUCCESS {
-            log.error("Failed to upload path vertex data")
             renderer.path_enabled = false
             renderer.path_vertex_count = 0
             return

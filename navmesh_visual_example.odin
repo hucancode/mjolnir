@@ -1668,9 +1668,7 @@ build_visualization_from_detour_mesh :: proc(engine_ptr: ^mjolnir.Engine, nav_me
             }
         }
         for j in 1..<vert_count-1 {
-            append(&indices, u32(poly.verts[0]))
-            append(&indices, u32(poly.verts[j]))
-            append(&indices, u32(poly.verts[j+1]))
+            append(&indices, u32(poly.verts[0]), u32(poly.verts[j]), u32(poly.verts[j+1]))
         }
     }
     renderer := &engine_ptr.navmesh

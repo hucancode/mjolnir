@@ -8,64 +8,55 @@ import "resource"
 import "navigation/recast"
 import "navigation/detour"
 
-// Navigation integration for Mjolnir engine
-// Uses types defined in other mjolnir package files
-
-// Navigation mesh component for scene nodes
 NavMeshAttachment :: struct {
-    nav_mesh_handle: Handle,           // Handle to NavMesh resource
-    tile_x:          i32,              // For tiled nav meshes
+    nav_mesh_handle: Handle,
+    tile_x:          i32,
     tile_y:          i32,
-    area_type:       u8,               // Area type for pathfinding costs
-    enabled:         bool,             // Can disable for dynamic obstacles
+    area_type:       u8,
+    enabled:         bool,
 }
 
-// Navigation agent component for moving entities
 NavMeshAgentAttachment :: struct {
-    target_position:     [3]f32,       // Current pathfinding target
-    current_path:        [][3]f32,     // Current path points
-    path_index:          i32,          // Current point in path
-    agent_radius:        f32,          // Agent collision radius
-    agent_height:        f32,          // Agent height for clearance
-    max_speed:           f32,          // Maximum movement speed
-    max_acceleration:    f32,          // For smooth movement
-    arrival_distance:    f32,          // How close to consider "arrived"
-    auto_update_path:    bool,         // Automatically recalculate path
-    pathfinding_enabled: bool,         // Can disable pathfinding
+    target_position:     [3]f32,
+    current_path:        [][3]f32,
+    path_index:          i32,
+    agent_radius:        f32,
+    agent_height:        f32,
+    max_speed:           f32,
+    max_acceleration:    f32,
+    arrival_distance:    f32,
+    auto_update_path:    bool,
+    pathfinding_enabled: bool,
 }
 
-// Navigation obstacle component for dynamic obstacles
 NavMeshObstacleAttachment :: struct {
-    obstacle_bounds: geometry.Aabb,    // Obstacle dimensions
-    affects_pathfinding: bool,         // Whether to rebuild nav mesh
-    obstacle_type: NavObstacleType,    // Static vs dynamic
+    obstacle_bounds: geometry.Aabb,
+    affects_pathfinding: bool,
+    obstacle_type: NavObstacleType,
 }
 
 NavObstacleType :: enum {
-    Static,   // Permanent obstacle, requires nav mesh rebuild
-    Dynamic,  // Temporary obstacle, use dynamic avoidance
+    Static,
+    Dynamic,
 }
 
-// Navigation mesh resource
 NavMesh :: struct {
     detour_mesh:     detour.Nav_Mesh,
     bounds:          geometry.Aabb,
     cell_size:       f32,
     tile_size:       i32,
     is_tiled:        bool,
-    area_costs:      [64]f32,  // Cost multiplier per area type
+    area_costs:      [64]f32,
 }
 
-// Navigation context for queries
 NavContext :: struct {
     nav_mesh_query:  detour.Nav_Mesh_Query,
-    associated_mesh: Handle,    // Handle to NavMesh
+    associated_mesh: Handle,
     query_filter:    detour.Query_Filter,
 }
 
-// Navigation system state
 NavigationSystem :: struct {
-    default_context_handle: Handle,     // Default navigation context
+    default_context_handle: Handle,
     geometry_cache:         [dynamic]NavigationGeometry,
     dirty_tiles:           map[TileCoord]bool,
     rebuild_queued:        bool,
@@ -83,69 +74,58 @@ TileCoord :: struct {
     x, y: i32,
 }
 
-// Scene geometry collector for navigation mesh building
 SceneGeometryCollector :: struct {
     vertices:         [dynamic][3]f32,
     indices:          [dynamic]i32,
     area_types:       [dynamic]u8,
     mesh_count:       i32,
-    include_filter:   proc(node: ^Node) -> bool,  // Optional filter function
-    area_type_mapper: proc(node: ^Node) -> u8,    // Maps nodes to area types
-    engine:           ^Engine,                     // Reference to engine for mesh access
+    include_filter:   proc(node: ^Node) -> bool,
+    area_type_mapper: proc(node: ^Node) -> u8,
+    engine:           ^Engine,
 }
 
-// Initialize scene geometry collector
 scene_geometry_collector_init :: proc(collector: ^SceneGeometryCollector) {
     collector.vertices = make([dynamic][3]f32, 0)
     collector.indices = make([dynamic]i32, 0)
     collector.area_types = make([dynamic]u8, 0)
     collector.mesh_count = 0
 
-    // Default filter: include all mesh nodes
     collector.include_filter = proc(node: ^Node) -> bool {
         _, is_mesh := node.attachment.(MeshAttachment)
         return is_mesh
     }
 
-    // Default area type mapper: walkable area for all
     collector.area_type_mapper = proc(node: ^Node) -> u8 {
         return u8(recast.RC_WALKABLE_AREA)
     }
 }
 
-// Clean up scene geometry collector
 scene_geometry_collector_deinit :: proc(collector: ^SceneGeometryCollector) {
     delete(collector.vertices)
     delete(collector.indices)
     delete(collector.area_types)
 }
 
-// Collect geometry from scene nodes
 scene_geometry_collector_traverse :: proc(node: ^Node, ctx: rawptr) -> bool {
     collector := cast(^SceneGeometryCollector)ctx
 
-    // Skip if filter rejects this node
     if collector.include_filter != nil && !collector.include_filter(node) {
         return true
     }
 
-    // Process mesh attachments
     if mesh_attachment, is_mesh := node.attachment.(MeshAttachment); is_mesh {
         mesh := resource.get(collector.engine.warehouse.meshes, mesh_attachment.handle)
         if mesh == nil {
             return true
         }
 
-        // Get world transform
         world_matrix := geometry.transform_get_world_matrix(&node.transform)
 
-        // Get area type for this node
         area_type := u8(recast.RC_WALKABLE_AREA)
         if collector.area_type_mapper != nil {
             area_type = collector.area_type_mapper(node)
         }
 
-        // Extract mesh data and transform vertices
         add_mesh_to_collector(collector, mesh, world_matrix, area_type)
         collector.mesh_count += 1
     }
@@ -153,66 +133,47 @@ scene_geometry_collector_traverse :: proc(node: ^Node, ctx: rawptr) -> bool {
     return true
 }
 
-// Add a mesh to the geometry collector with transformation
 add_mesh_to_collector :: proc(collector: ^SceneGeometryCollector, mesh: ^Mesh, transform: matrix[4,4]f32, area_type: u8) {
     if mesh.vertex_buffer.mapped == nil || mesh.index_buffer.mapped == nil {
         return
     }
 
-    // Calculate vertex offset for indices
     vertex_offset := i32(len(collector.vertices))
 
-    // Transform and add vertices
     vertex_count := int(mesh.vertices_len)
     for i in 0..<vertex_count {
-        // Extract position from vertex buffer (Vertex struct has position as first field)
         vertex := mesh.vertex_buffer.mapped[i]
         pos := vertex.position
-
-        // Transform position to world space
         world_pos := linalg.matrix_mul_vector(transform, [4]f32{pos.x, pos.y, pos.z, 1.0})
-
-        // Add to vertices array
         append(&collector.vertices, [3]f32{world_pos.x, world_pos.y, world_pos.z})
     }
 
-    // Add indices with offset
     index_count := int(mesh.indices_len)
     for i in 0..<index_count {
         index := mesh.index_buffer.mapped[i]
         append(&collector.indices, i32(index) + vertex_offset)
     }
 
-    // Add area types for each triangle
     triangle_count := index_count / 3
     for i in 0..<triangle_count {
         append(&collector.area_types, area_type)
     }
 }
 
-// Build navigation mesh from scene geometry
 build_navigation_mesh_from_scene :: proc(engine: ^Engine, config: recast.Config = {}) -> (Handle, bool) {
-    // Initialize geometry collector
     collector: SceneGeometryCollector
     scene_geometry_collector_init(&collector)
     collector.engine = engine
     defer scene_geometry_collector_deinit(&collector)
 
-    // Collect geometry from scene
     scene_traverse(&engine.scene, &collector, scene_geometry_collector_traverse)
 
     if len(collector.vertices) == 0 || len(collector.indices) == 0 {
-        log.error("No geometry found in scene for navigation mesh building")
         return {}, false
     }
 
-    log.infof("Collected %d vertices, %d indices from %d meshes for navigation mesh",
-              len(collector.vertices), len(collector.indices), collector.mesh_count)
-
-    // Build navigation mesh using Recast
     pmesh, dmesh, ok := recast.build_navmesh(collector.vertices[:], collector.indices[:], collector.area_types[:], config)
     if !ok {
-        log.error("Failed to build navigation mesh")
         return {}, false
     }
     defer {
@@ -220,42 +181,29 @@ build_navigation_mesh_from_scene :: proc(engine: ^Engine, config: recast.Config 
         recast.free_poly_mesh_detail(dmesh)
     }
 
-    // Create NavMesh resource
     nav_mesh_handle, nav_mesh := resource.alloc(&engine.warehouse.nav_meshes)
     if nav_mesh == nil {
-        log.error("Failed to allocate navigation mesh resource")
         return nav_mesh_handle, false
     }
 
-    // Create navigation mesh data from Recast polygon mesh
     nav_params := detour.Create_Nav_Mesh_Data_Params{
         poly_mesh = pmesh,
         poly_mesh_detail = dmesh,
-
-        // Agent parameters (convert from cells to world units)
         walkable_height = f32(config.walkable_height) * config.ch,
         walkable_radius = f32(config.walkable_radius) * config.cs,
         walkable_climb = f32(config.walkable_climb) * config.ch,
-
-        // Tile parameters (for single tile mesh)
         tile_x = 0,
         tile_y = 0,
         tile_layer = 0,
         user_id = 0,
-
-        // Off-mesh connections (none for now)
         off_mesh_con_count = 0,
     }
 
-    // Create navigation mesh data
     nav_data, create_status := detour.create_nav_mesh_data(&nav_params)
     if recast.status_failed(create_status) {
-        log.errorf("Failed to create navigation mesh data: %v", create_status)
         return nav_mesh_handle, false
     }
-    // Don't delete nav_data - ownership is transferred to nav mesh with DT_TILE_FREE_DATA flag
 
-    // Initialize navigation mesh with parameters
     mesh_params := detour.Nav_Mesh_Params{
         orig = pmesh.bmin,
         tile_width = pmesh.bmax[0] - pmesh.bmin[0],
@@ -266,30 +214,24 @@ build_navigation_mesh_from_scene :: proc(engine: ^Engine, config: recast.Config 
 
     init_status := detour.nav_mesh_init(&nav_mesh.detour_mesh, &mesh_params)
     if recast.status_failed(init_status) {
-        log.errorf("Failed to initialize navigation mesh: %v", init_status)
         return nav_mesh_handle, false
     }
 
-    // Add the tile to the navigation mesh with DT_TILE_FREE_DATA flag
     _, add_status := detour.nav_mesh_add_tile(&nav_mesh.detour_mesh, nav_data, recast.DT_TILE_FREE_DATA)
     if recast.status_failed(add_status) {
-        log.errorf("Failed to add tile to navigation mesh: %v", add_status)
         detour.nav_mesh_destroy(&nav_mesh.detour_mesh)
         return nav_mesh_handle, false
     }
 
-    // Set navigation mesh properties
     nav_mesh.bounds = calculate_bounds_from_vertices(collector.vertices[:])
     nav_mesh.cell_size = config.cs
     nav_mesh.tile_size = config.tile_size
     nav_mesh.is_tiled = config.tile_size > 0
 
-    // Initialize default area costs
     for i in 0..<64 {
         nav_mesh.area_costs[i] = 1.0
     }
 
-    log.infof("Successfully built navigation mesh with handle %v", nav_mesh_handle)
     return nav_mesh_handle, true
 }
 

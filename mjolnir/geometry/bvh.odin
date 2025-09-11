@@ -379,8 +379,7 @@ bvh_query_aabb :: proc(
       }
     } else {
       // Add children to stack
-      append(&stack, node.right_child)
-      append(&stack, node.left_child)
+      append(&stack, node.right_child, node.left_child)
     }
   }
 }
@@ -460,8 +459,7 @@ bvh_query_ray :: proc(
         }
       }
     } else {
-      append(&stack, node.left_child)
-      append(&stack, node.right_child)
+      append(&stack, node.left_child, node.right_child)
     }
   }
 }
@@ -523,11 +521,9 @@ bvh_raycast :: proc(
       )
 
       if left_t_near < right_t_near {
-        append(&stack, node.right_child)
-        append(&stack, node.left_child)
+        append(&stack, node.right_child, node.left_child)
       } else {
-        append(&stack, node.left_child)
-        append(&stack, node.right_child)
+        append(&stack, node.left_child, node.right_child)
       }
     }
   }
@@ -570,8 +566,7 @@ bvh_raycast_single :: proc(
         }
       }
     } else {
-      append(&stack, node.left_child)
-      append(&stack, node.right_child)
+      append(&stack, node.left_child, node.right_child)
     }
   }
 
@@ -615,8 +610,7 @@ bvh_raycast_multi :: proc(
         }
       }
     } else {
-      append(&stack, node.left_child)
-      append(&stack, node.right_child)
+      append(&stack, node.left_child, node.right_child)
     }
   }
 
@@ -656,8 +650,7 @@ bvh_query_sphere_primitives :: proc(
         }
       }
     } else {
-      append(&stack, node.left_child)
-      append(&stack, node.right_child)
+      append(&stack, node.left_child, node.right_child)
     }
   }
 }

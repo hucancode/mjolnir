@@ -4,7 +4,6 @@ import "core:math"
 import "core:math/linalg"
 import "../recast"
 
-// Core navigation mesh creation
 create_navmesh :: proc(pmesh: ^recast.Poly_Mesh, dmesh: ^recast.Poly_Mesh_Detail,
                       walkable_height: f32, walkable_radius: f32, walkable_climb: f32) -> (nav_mesh: ^Nav_Mesh, ok: bool) {
 
@@ -44,7 +43,6 @@ create_navmesh :: proc(pmesh: ^recast.Poly_Mesh, dmesh: ^recast.Poly_Mesh_Detail
     return nav_mesh, true
 }
 
-// Simple pathfinding between two points
 find_path_points :: proc(query: ^Nav_Mesh_Query, start_pos: [3]f32, end_pos: [3]f32,
                         filter: ^Query_Filter, path: [][3]f32) -> (path_count: int, status: recast.Status) {
 
@@ -52,14 +50,12 @@ find_path_points :: proc(query: ^Nav_Mesh_Query, start_pos: [3]f32, end_pos: [3]
 
     half_extents := [3]f32{5.0, 5.0, 5.0}
 
-    // Find polygons
     start_status, start_ref, start_nearest := find_nearest_poly(query, start_pos, half_extents, filter)
     if recast.status_failed(start_status) || start_ref == recast.INVALID_POLY_REF do return 0, start_status
 
     end_status, end_ref, end_nearest := find_nearest_poly(query, end_pos, half_extents, filter)
     if recast.status_failed(end_status) || end_ref == recast.INVALID_POLY_REF do return 0, end_status
 
-    // Single polygon path
     if start_ref == end_ref {
         path[0] = start_nearest
         if linalg.length2(end_nearest - start_nearest) > 0.0001 {
@@ -69,7 +65,6 @@ find_path_points :: proc(query: ^Nav_Mesh_Query, start_pos: [3]f32, end_pos: [3]
         return 1, {.Success}
     }
 
-    // Find polygon path
     poly_path := make([]recast.Poly_Ref, len(path))
     defer delete(poly_path)
 
@@ -77,7 +72,6 @@ find_path_points :: proc(query: ^Nav_Mesh_Query, start_pos: [3]f32, end_pos: [3]
                                              filter, poly_path, i32(len(path)))
     if recast.status_failed(path_status) || poly_path_count == 0 do return 0, path_status
 
-    // Generate straight path
     straight_path := make([]Straight_Path_Point, len(path))
     defer delete(straight_path)
 
@@ -93,7 +87,6 @@ find_path_points :: proc(query: ^Nav_Mesh_Query, start_pos: [3]f32, end_pos: [3]
                                                               i32(len(path)), 0)
     if recast.status_failed(straight_status) do return 0, straight_status
 
-    // Extract positions, filtering duplicates
     path_count = 0
     last_pos := [3]f32{math.F32_MAX, math.F32_MAX, math.F32_MAX}
 
@@ -108,8 +101,6 @@ find_path_points :: proc(query: ^Nav_Mesh_Query, start_pos: [3]f32, end_pos: [3]
 
     return path_count, {.Success}
 }
-
-// Core data structures
 
 Poly :: struct {
     first_link:   u32,
@@ -262,7 +253,6 @@ Poly_Query :: struct {
     user_data: rawptr,
 }
 
-// Polygon area and type helpers
 poly_set_area :: proc(poly: ^Poly, area: u8) {
     poly.area_and_type = (poly.area_and_type & 0xc0) | (area & 0x3f)
 }
@@ -279,7 +269,6 @@ poly_get_type :: proc(poly: ^Poly) -> u8 {
     return poly.area_and_type >> 6
 }
 
-// Query filter helpers
 query_filter_init :: proc(filter: ^Query_Filter) {
     filter.include_flags = 0xffff
     filter.exclude_flags = 0
@@ -300,7 +289,6 @@ query_filter_get_cost :: proc(filter: ^Query_Filter, pa, pb: [3]f32,
     return cost
 }
 
-// Reference encoding/decoding
 encode_poly_id :: proc(nav_mesh: ^Nav_Mesh, salt: u32, tile_index: u32, poly_index: u32) -> recast.Poly_Ref {
     return recast.Poly_Ref((salt << (nav_mesh.poly_bits + nav_mesh.tile_bits)) |
                            (tile_index << nav_mesh.poly_bits) | poly_index)
@@ -325,7 +313,6 @@ get_poly_index :: proc(nav_mesh: ^Nav_Mesh, ref: recast.Poly_Ref) -> u32 {
     return u32(ref) & ((u32(1) << nav_mesh.poly_bits) - 1)
 }
 
-// Tile location calculation
 calc_tile_loc :: proc(nav_mesh: ^Nav_Mesh, pos: [3]f32) -> (tx: i32, ty: i32, status: recast.Status) {
     if nav_mesh == nil do return 0, 0, {.Invalid_Param}
     if nav_mesh.tile_width <= 0 || nav_mesh.tile_height <= 0 do return 0, 0, {.Invalid_Param}
