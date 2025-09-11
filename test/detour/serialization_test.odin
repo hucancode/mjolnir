@@ -133,7 +133,7 @@ test_bake_and_save_workflow :: proc(t: ^testing.T) {
     testing.expect(t, runtime_ok, "Failed to load navigation mesh for runtime")
     testing.expect(t, nav_mesh != nil && query != nil, "Navigation mesh and query should not be nil")
     defer {
-        detour.pathfinding_context_destroy(&query.pf_context)
+        detour.nav_mesh_query_destroy(query)
         free(query)
         detour.nav_mesh_destroy(nav_mesh)
         free(nav_mesh)
