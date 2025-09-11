@@ -710,15 +710,22 @@ update_polygon_neighbors :: proc(pmesh: ^Poly_Mesh, edges: []Mesh_Edge) {
     }
 }
 
-// Simple triangle merging - just converts triangles to polygons without complex merging
+// Optimized triangle merging - attempts to merge adjacent triangles into larger polygons
 merge_triangles_into_polygons :: proc(triangles: []i32, polys: ^[dynamic]Poly_Build, max_verts: i32, area: u8, reg: u16) {
     if len(triangles) % 3 != 0 {
         log.warn("Invalid triangle array length for merging")
         return
     }
 
-    // For now, just convert each triangle to a polygon
-    // The more complex merging in build_poly_mesh handles actual polygon merging
+    if len(triangles) == 0 do return
+
+    // First, create all triangles as initial polygons
+    temp_polys := make([dynamic]Poly_Build, 0, len(triangles) / 3)
+    defer {
+        for poly in temp_polys do delete(poly.verts)
+        delete(temp_polys)
+    }
+
     for i := 0; i < len(triangles); i += 3 {
         poly := Poly_Build{
             verts = make([]i32, 3),
@@ -728,8 +735,179 @@ merge_triangles_into_polygons :: proc(triangles: []i32, polys: ^[dynamic]Poly_Bu
         poly.verts[0] = triangles[i]
         poly.verts[1] = triangles[i + 1]
         poly.verts[2] = triangles[i + 2]
-        append(polys, poly)
+        append(&temp_polys, poly)
     }
+
+    // Build adjacency information for merging
+    Triangle_Edge :: struct {
+        v0, v1: i32,
+        tri_idx: int,
+        edge_idx: int,
+    }
+
+    edges := make([dynamic]Triangle_Edge, 0, len(temp_polys) * 3)
+    defer delete(edges)
+
+    // Collect all edges
+    for tri, tri_idx in temp_polys {
+        for edge_idx in 0..<3 {
+            v0 := tri.verts[edge_idx]
+            v1 := tri.verts[(edge_idx + 1) % 3]
+            // Store edges in consistent order for matching
+            if v0 > v1 do v0, v1 = v1, v0
+            append(&edges, Triangle_Edge{v0, v1, tri_idx, edge_idx})
+        }
+    }
+
+    // Sort edges to find adjacent triangles
+    slice.sort_by(edges[:], proc(a, b: Triangle_Edge) -> bool {
+        if a.v0 != b.v0 do return a.v0 < b.v0
+        return a.v1 < b.v1
+    })
+
+    // Merge adjacent triangles into quads where beneficial
+    merged := make([]bool, len(temp_polys))
+    defer delete(merged)
+
+    for i in 0..<len(edges) - 1 {
+        edge1 := edges[i]
+        edge2 := edges[i + 1]
+
+        // Check if edges match (same vertices)
+        if edge1.v0 == edge2.v0 && edge1.v1 == edge2.v1 {
+            tri1_idx := edge1.tri_idx
+            tri2_idx := edge2.tri_idx
+
+            // Skip if already merged
+            if merged[tri1_idx] || merged[tri2_idx] do continue
+
+            tri1 := &temp_polys[tri1_idx]
+            tri2 := &temp_polys[tri2_idx]
+
+            // Check if merge would create a valid quad
+            if can_merge_triangles_to_quad(tri1.verts[:], tri2.verts[:]) && max_verts >= 4 {
+                // Merge tri2 into tri1
+                merged_verts := merge_triangles_to_quad(tri1.verts[:], tri2.verts[:])
+                if len(merged_verts) == 4 {
+                    // Replace tri1 with merged quad
+                    delete(tri1.verts)
+                    tri1.verts = merged_verts
+                    merged[tri2_idx] = true
+                }
+            }
+        }
+    }
+
+    // Add non-merged polygons to result
+    for poly, idx in temp_polys {
+        if !merged[idx] {
+            final_poly := Poly_Build{
+                verts = make([]i32, len(poly.verts)),
+                area = area,
+                reg = reg,
+            }
+            copy(final_poly.verts, poly.verts)
+            append(polys, final_poly)
+        }
+    }
+}
+
+// Check if two triangles can be merged into a valid quad
+can_merge_triangles_to_quad :: proc(tri1, tri2: []i32) -> bool {
+    if len(tri1) != 3 || len(tri2) != 3 do return false
+    
+    // Find shared edge
+    shared_count := 0
+    for v1 in tri1 {
+        for v2 in tri2 {
+            if v1 == v2 do shared_count += 1
+        }
+    }
+    
+    // Must share exactly 2 vertices (one edge)
+    return shared_count == 2
+}
+
+// Merge two triangles into a quad
+merge_triangles_to_quad :: proc(tri1, tri2: []i32) -> []i32 {
+    if len(tri1) != 3 || len(tri2) != 3 do return nil
+    
+    // Find shared vertices
+    shared := make([dynamic]i32, 0, 2)
+    defer delete(shared)
+    
+    for v1 in tri1 {
+        for v2 in tri2 {
+            if v1 == v2 do append(&shared, v1)
+        }
+    }
+    
+    if len(shared) != 2 do return nil
+    
+    // Find unique vertices
+    unique1: i32 = -1
+    unique2: i32 = -1
+    
+    for v in tri1 {
+        is_shared := false
+        for s in shared {
+            if v == s {
+                is_shared = true
+                break
+            }
+        }
+        if !is_shared {
+            unique1 = v
+            break
+        }
+    }
+    
+    for v in tri2 {
+        is_shared := false
+        for s in shared {
+            if v == s {
+                is_shared = true
+                break
+            }
+        }
+        if !is_shared {
+            unique2 = v
+            break
+        }
+    }
+    
+    if unique1 == -1 || unique2 == -1 do return nil
+    
+    // Create quad in proper winding order
+    // Find the order of shared vertices in tri1 to maintain winding
+    quad := make([]i32, 4)
+    
+    // Find indices of shared vertices in tri1
+    shared0 := shared[:][0]
+    shared1 := shared[:][1]
+    
+    shared_idx1, shared_idx2 := i32(-1), i32(-1)
+    for i in 0..<len(tri1) {
+        if tri1[i] == shared0 do shared_idx1 = i32(i)
+        if tri1[i] == shared1 do shared_idx2 = i32(i)
+    }
+    
+    // Determine winding order
+    if (shared_idx1 + 1) % 3 == shared_idx2 {
+        // shared[0] -> shared[1] in tri1
+        quad[0] = unique1
+        quad[1] = shared0
+        quad[2] = shared1 
+        quad[3] = unique2
+    } else {
+        // shared[1] -> shared[0] in tri1
+        quad[0] = unique1
+        quad[1] = shared1
+        quad[2] = shared0
+        quad[3] = unique2
+    }
+    
+    return quad
 }
 
 // Main function to build polygon mesh from contour set

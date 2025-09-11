@@ -475,8 +475,15 @@ build_bv_tree :: proc(pmesh: ^recast.Poly_Mesh, nodes: []BV_Node, node_count: i3
     ch := pmesh.ch
     nvp := pmesh.nvp
     quant_factor := 1.0 / cs
-    // For now, always use flat structure until hierarchical is fixed
-    build_bv_tree_flat(pmesh, nodes, node_count, quant_factor, dmesh)
+    
+    // Use hierarchical structure for larger meshes, flat for smaller ones
+    if pmesh.npolys <= 32 {
+        // Small meshes: flat structure is more efficient
+        build_bv_tree_flat(pmesh, nodes, node_count, quant_factor, dmesh)
+    } else {
+        // Large meshes: hierarchical structure for better query performance
+        build_bv_tree_hierarchical(pmesh, nodes, node_count, quant_factor)
+    }
 }
 
 // Optimized flat BV tree construction for small meshes

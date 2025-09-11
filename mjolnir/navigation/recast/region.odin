@@ -917,6 +917,152 @@ merge_and_filter_regions :: proc(min_region_area, merge_region_size: i32,
     return max_region_id, overlaps, true
 }
 
+resolve_region_overlaps :: proc(chf: ^Compact_Heightfield, src_reg: []u16, overlaps: []Region, min_region_area: i32) -> bool {
+    if len(overlaps) == 0 do return true
+
+    w := chf.width
+    h := chf.height
+    resolved_count := 0
+
+    // For each overlapping region, attempt to split overlapping spans
+    for overlap in overlaps {
+        overlap_id := overlap.id
+        log.debugf("Resolving overlap in region %d with %d spans", overlap_id, overlap.span_count)
+        // Find all spans belonging to this overlapping region
+        overlap_spans := make([dynamic]i32, 0, overlap.span_count)
+        defer delete(overlap_spans)
+        for y in 0..<h {
+            for x in 0..<w {
+                c := &chf.cells[x + y * w]
+                for i in u32(c.index)..<u32(c.index) + u32(c.count) {
+                    if src_reg[i] == overlap_id {
+                        append(&overlap_spans, i32(i))
+                    }
+                }
+            }
+        }
+
+        if len(overlap_spans) == 0 do continue
+        // Group overlapping spans by connectivity
+        span_groups := group_connected_spans(chf, overlap_spans[:], overlap_id, src_reg)
+        defer {
+            for group in span_groups do delete(group)
+            delete(span_groups)
+        }
+        // If we have multiple groups, assign them to separate regions
+        if len(span_groups) > 1 {
+            log.debugf("Split region %d into %d connected groups", overlap_id, len(span_groups))
+            // Keep the largest group in the original region
+            largest_group_idx := 0
+            for i in 1..<len(span_groups) {
+                if len(span_groups[i]) > len(span_groups[largest_group_idx]) {
+                    largest_group_idx = i
+                }
+            }
+
+            // Assign smaller groups to new regions
+            new_region_id := u16(chf.max_regions + 1)
+            for i in 0..<len(span_groups) {
+                if i == largest_group_idx do continue
+
+                // Only create new regions for groups large enough
+                if i32(len(span_groups[i])) >= min_region_area {
+                    for span_idx in span_groups[i] {
+                        src_reg[span_idx] = new_region_id
+                    }
+                    chf.max_regions = new_region_id
+                    new_region_id += 1
+                    resolved_count += 1
+                } else {
+                    // Too small, assign to border or null region
+                    for span_idx in span_groups[i] {
+                        src_reg[span_idx] = 0  // Mark as unassigned
+                    }
+                }
+            }
+        }
+    }
+
+    log.debugf("Resolved %d overlapping region groups", resolved_count)
+    return resolved_count > 0
+}
+
+// Group connected spans within an overlapping region
+group_connected_spans :: proc(chf: ^Compact_Heightfield, span_indices: []i32, region_id: u16, src_reg: []u16) -> [][dynamic]i32 {
+    w := chf.width
+    h := chf.height
+
+    visited := make([]bool, len(span_indices))
+    defer delete(visited)
+
+    groups := make([dynamic][dynamic]i32, 0, 4)
+
+    for i, span_idx in span_indices {
+        if visited[i] do continue
+
+        // Start new group with flood fill
+        group := make([dynamic]i32, 0, 16)
+        stack := make([dynamic]i32, 0, 16)
+        defer delete(stack)
+
+        append(&stack, i32(i))  // Index in span_indices array, not span index itself
+        visited[i] = true
+
+        for len(stack) > 0 {
+            current_idx := pop(&stack)
+            current_span := span_indices[current_idx]
+            append(&group, current_span)
+
+            // Find neighbors of current span
+            for j, other_span in span_indices {
+                if visited[j] do continue
+
+                if are_spans_connected(chf, current_span, i32(other_span), w, h) {
+                    visited[j] = true
+                    append(&stack, i32(j))
+                }
+            }
+        }
+
+        append(&groups, group)
+    }
+
+    return groups[:]
+}
+
+// Check if two spans are connected (adjacent in 2D grid)
+are_spans_connected :: proc(chf: ^Compact_Heightfield, span1, span2: i32, w, h: i32) -> bool {
+    // Find cell coordinates for each span
+    x1, y1 := find_span_coordinates(chf, span1, w, h)
+    x2, y2 := find_span_coordinates(chf, span2, w, h)
+
+    if x1 == -1 || x2 == -1 do return false  // Invalid spans
+
+    // Check if spans are in adjacent cells (4-connected)
+    dx := abs(x1 - x2)
+    dy := abs(y1 - y2)
+
+    return (dx == 1 && dy == 0) || (dx == 0 && dy == 1)
+}
+
+// Find the cell coordinates for a given span index
+find_span_coordinates :: proc(chf: ^Compact_Heightfield, span_idx: i32, w, h: i32) -> (x, y: i32) {
+    // Search through all cells to find which one contains this span
+    for y_search in 0..<h {
+        for x_search in 0..<w {
+            c := &chf.cells[x_search + y_search * w]
+            start := c.index
+            end := u32(c.index) + u32(c.count)
+
+            if span_idx >= i32(start) && span_idx < i32(end) {
+                return x_search, y_search
+            }
+        }
+    }
+
+    return -1, -1  // Not found
+}
+
 // Build regions using watershed partitioning
 build_regions :: proc(chf: ^Compact_Heightfield,
                         border_size, min_region_area, merge_region_area: i32) -> bool {
@@ -1044,9 +1190,14 @@ build_regions :: proc(chf: ^Compact_Heightfield,
 
         // If overlapping regions were found during merging, split those regions
         if len(overlaps) > 0 {
-            log.errorf("rcBuildRegions: %d overlapping regions found during merge", len(overlaps))
-            // In a complete implementation, we would handle overlapping regions here
-            // For now, we log the issue but continue
+            log.infof("rcBuildRegions: %d overlapping regions found during merge, attempting to resolve", len(overlaps))
+
+            // Attempt to resolve overlaps by splitting and reassigning spans
+            if !resolve_region_overlaps(chf, src_reg, overlaps, min_region_area) {
+                log.warnf("rcBuildRegions: Failed to fully resolve %d region overlaps", len(overlaps))
+            } else {
+                log.infof("rcBuildRegions: Successfully resolved region overlaps")
+            }
         }
     }
 

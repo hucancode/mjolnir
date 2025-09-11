@@ -903,19 +903,125 @@ add_interior_samples_grid :: proc(poly_verts: [][3]f32, sample_dist: f32,
     }
 }
 
-// Add samples by error priority
+// Add samples by error priority using proper distance-to-surface calculation
 add_samples_by_error :: proc(verts: ^[dynamic][3]f32, tris: [][4]i32, samples: [][4]i32, sample_max_error: f32, max_verts: int) {
-    // Simplified implementation - would need full Delaunay triangulation for proper error calculation
-    // For now, just add samples up to limit
-    samples_added := 0
-    for sample in samples {
-        if len(verts) >= max_verts do break
-        if samples_added >= len(samples) / 4 do break  // Arbitrary limit
-
-        pt := [3]f32{f32(sample.x), f32(sample.y), f32(sample.z)}
-        append(verts, pt)
-        samples_added += 1
+    if len(samples) == 0 || len(tris) == 0 do return
+    
+    // Create error priority list
+    Sample_Error :: struct {
+        index: int,
+        error: f32,
+        point: [3]f32,
     }
+    
+    errors := make([dynamic]Sample_Error, 0, len(samples))
+    defer delete(errors)
+    
+    // Calculate error for each sample point
+    for sample, i in samples {
+        pt := [3]f32{f32(sample.x), f32(sample.y), f32(sample.z)}
+        
+        // Find closest triangle and calculate distance
+        min_dist_sq := f32(math.F32_MAX)
+        
+        for tri in tris {
+            if tri[0] >= i32(len(verts)) || tri[1] >= i32(len(verts)) || tri[2] >= i32(len(verts)) do continue
+            
+            v0 := verts[tri[0]]
+            v1 := verts[tri[1]]
+            v2 := verts[tri[2]]
+            
+            // Calculate point-to-triangle distance
+            dist_sq := point_to_triangle_distance_sq(pt, v0, v1, v2)
+            min_dist_sq = min(min_dist_sq, dist_sq)
+        }
+        
+        error := math.sqrt(min_dist_sq)
+        
+        // Only consider samples with significant error
+        if error > sample_max_error * 0.1 {
+            append(&errors, Sample_Error{
+                index = i,
+                error = error,
+                point = pt,
+            })
+        }
+    }
+    
+    // Sort by error (highest first)
+    slice.sort_by(errors[:], proc(a, b: Sample_Error) -> bool {
+        return a.error > b.error
+    })
+    
+    // Add highest error samples up to limit
+    samples_added := 0
+    for err in errors {
+        if len(verts) >= max_verts do break
+        if err.error < sample_max_error do break
+        
+        append(verts, err.point)
+        samples_added += 1
+        
+        // Stop after adding reasonable number of samples
+        if samples_added >= len(samples) / 3 do break
+    }
+}
+
+// Calculate squared distance from point to triangle
+point_to_triangle_distance_sq :: proc(p: [3]f32, a: [3]f32, b: [3]f32, c: [3]f32) -> f32 {
+    // Project point onto triangle plane
+    ab := b - a
+    ac := c - a
+    ap := p - a
+    
+    // Calculate barycentric coordinates
+    d00 := linalg.dot(ab, ab)
+    d01 := linalg.dot(ab, ac)
+    d11 := linalg.dot(ac, ac)
+    d20 := linalg.dot(ap, ab)
+    d21 := linalg.dot(ap, ac)
+    
+    denom := d00 * d11 - d01 * d01
+    if abs(denom) < 1e-10 {
+        // Degenerate triangle, return distance to closest vertex
+        dist_a := linalg.length2(p - a)
+        dist_b := linalg.length2(p - b)
+        dist_c := linalg.length2(p - c)
+        return min(dist_a, min(dist_b, dist_c))
+    }
+    
+    inv_denom := 1.0 / denom
+    u := (d11 * d20 - d01 * d21) * inv_denom
+    v := (d00 * d21 - d01 * d20) * inv_denom
+    
+    // Check if point is inside triangle
+    if u >= 0 && v >= 0 && (u + v) <= 1 {
+        // Point projects inside triangle
+        closest := a + u * ab + v * ac
+        return linalg.length2(p - closest)
+    }
+    
+    // Point projects outside triangle, find closest point on edges
+    min_dist_sq := f32(math.F32_MAX)
+    
+    // Edge AB
+    t := clamp(linalg.dot(ap, ab) / d00, 0, 1)
+    closest := a + t * ab
+    min_dist_sq = min(min_dist_sq, linalg.length2(p - closest))
+    
+    // Edge AC
+    t = clamp(linalg.dot(ap, ac) / d11, 0, 1)
+    closest = a + t * ac
+    min_dist_sq = min(min_dist_sq, linalg.length2(p - closest))
+    
+    // Edge BC
+    bc := c - b
+    bp := p - b
+    t = clamp(linalg.dot(bp, bc) / linalg.dot(bc, bc), 0, 1)
+    closest = b + t * bc
+    min_dist_sq = min(min_dist_sq, linalg.length2(p - closest))
+    
+    return min_dist_sq
 }
 
 // Flood fill algorithm for height data collection
