@@ -168,7 +168,7 @@ test_filter_ledge_spans_safe_area :: proc(t: ^testing.T) {
     // Create a safe area with all neighbors present
     for x in 1..=3 {
         for z in 1..=3 {
-            _ = recast.add_span(hf, i32(x), i32(z), 0, 2, recast.RC_WALKABLE_AREA, 1)
+            recast.add_span(hf, i32(x), i32(z), 0, 2, recast.RC_WALKABLE_AREA, 1)
             // testing.expect(t, ok, "Failed to add safe area span")
         }
     }
@@ -202,11 +202,11 @@ test_filter_walkable_low_height_spans_basic :: proc(t: ^testing.T) {
     defer recast.free_heightfield(hf)
 
     // Add walkable span with low ceiling (insufficient height clearance)
-    _ = recast.add_span(hf, 2, 2, 0, 2, recast.RC_WALKABLE_AREA, 1)
+    recast.add_span(hf, 2, 2, 0, 2, recast.RC_WALKABLE_AREA, 1)
     // testing.expect(t, ok, "Failed to add ground span")
 
     // Add ceiling span very close above (height = 2 units)
-    _ = recast.add_span(hf, 2, 2, 4, 6, recast.RC_NULL_AREA, 1)
+    recast.add_span(hf, 2, 2, 4, 6, recast.RC_NULL_AREA, 1)
     // testing.expect(t, ok, "Failed to add ceiling span")
 
     // Apply filter with walkable_height = 4 (requires 4 units clearance)
@@ -231,11 +231,11 @@ test_filter_walkable_low_height_spans_sufficient_height :: proc(t: ^testing.T) {
     defer recast.free_heightfield(hf)
 
     // Add walkable span with sufficient ceiling height
-    _ = recast.add_span(hf, 2, 2, 0, 2, recast.RC_WALKABLE_AREA, 1)
+    recast.add_span(hf, 2, 2, 0, 2, recast.RC_WALKABLE_AREA, 1)
     // testing.expect(t, ok, "Failed to add ground span")
 
     // Add ceiling span with sufficient clearance (6 units above ground span max)
-    _ = recast.add_span(hf, 2, 2, 8, 10, recast.RC_NULL_AREA, 1)
+    recast.add_span(hf, 2, 2, 8, 10, recast.RC_NULL_AREA, 1)
     // testing.expect(t, ok, "Failed to add ceiling span")
 
     // Apply filter with walkable_height = 4
@@ -259,7 +259,7 @@ test_filter_walkable_low_height_no_ceiling :: proc(t: ^testing.T) {
     defer recast.free_heightfield(hf)
 
     // Add walkable span with no ceiling (open sky)
-    _ = recast.add_span(hf, 2, 2, 0, 2, recast.RC_WALKABLE_AREA, 1)
+    recast.add_span(hf, 2, 2, 0, 2, recast.RC_WALKABLE_AREA, 1)
     // testing.expect(t, ok, "Failed to add ground span")
 
     // Apply filter with walkable_height = 4
@@ -291,42 +291,46 @@ test_filter_interactions_combined :: proc(t: ^testing.T) {
     // Ground level walkable area
     for x in 2..=7 {
         for z in 2..=7 {
-            _ = recast.add_span(hf, i32(x), i32(z), 0, 2, recast.RC_WALKABLE_AREA, 1)
+            recast.add_span(hf, i32(x), i32(z), 0, 2, recast.RC_WALKABLE_AREA, 1)
             // testing.expect(t, ok, "Failed to add ground span")
         }
     }
-
     // Add some low hanging obstacles
-    _ = recast.add_span(hf, 4, 4, 3, 4, recast.RC_NULL_AREA, 1) // Low obstacle
+    recast.add_span(hf, 4, 4, 3, 4, recast.RC_NULL_AREA, 1) // Low obstacle
     // testing.expect(t, ok, "Failed to add low obstacle")
-
     // Add low ceiling in one area
-    _ = recast.add_span(hf, 6, 6, 3, 5, recast.RC_NULL_AREA, 1) // Low ceiling
+    recast.add_span(hf, 6, 6, 3, 5, recast.RC_NULL_AREA, 1) // Low ceiling
     // testing.expect(t, ok, "Failed to add low ceiling")
-
     // Apply filters in sequence
     recast.filter_low_hanging_walkable_obstacles(2, hf)
     recast.filter_walkable_low_height_spans(4, hf)
-
     // Build compact heightfield for ledge filtering
     chf := recast.create_compact_heightfield(2, 1, hf)
     defer recast.free_compact_heightfield(chf)
     testing.expect(t, chf != nil, "Failed to build compact heightfield")
-
     recast.filter_ledge_spans(4, 2, hf)
-
     // Verify that combined filters worked correctly
-    // Check that we have reasonable walkable area left
+    // Check that we have reasonable walkable area left after filtering
     walkable_count := 0
+    total_spans := 0
     for i in 0..<(hf.width * hf.height) {
         if span := hf.spans[i]; span != nil {
-            if span.area == recast.RC_WALKABLE_AREA {
-                walkable_count += 1
+            s := span
+            for s != nil {
+                total_spans += 1
+                if s.area == recast.RC_WALKABLE_AREA {
+                    walkable_count += 1
+                }
+                s = s.next
             }
         }
     }
-
-    testing.expect(t, walkable_count > 0, "Should have some walkable area after all filters")
+    // Basic validation - filters should not remove all walkable area
+    testing.expect(t, walkable_count > 0, "Should have walkable area after filtering")
+    testing.expect(t, total_spans > 0, "Should have spans after filtering")
+    // The filters should have processed the heightfield without crashing
+    // We originally had a 6x6=36 ground spans, but filters may modify/remove some
+    testing.expectf(t, walkable_count <= 36, "Should not exceed original ground spans, walkable spans %d/%d", walkable_count, total_spans)
 }
 
 @(test)

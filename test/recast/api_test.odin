@@ -301,10 +301,8 @@ test_api_build_with_areas :: proc(t: ^testing.T) {
 @(test)
 test_api_comprehensive_pipeline :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-    log.infof("TEST DEBUG: Starting comprehensive pipeline test")
-
-    // Comprehensive test with a more complex geometry
-    // Create a simple maze-like structure
+    
+    // Test complex geometry generation and navigation mesh building
     vertices := make([dynamic][3]f32)
     indices := make([dynamic]i32)
     areas := make([dynamic]u8)
@@ -314,42 +312,37 @@ test_api_comprehensive_pipeline :: proc(t: ^testing.T) {
         delete(areas)
     }
 
-    // Add floor tiles - REDUCED COMPLEXITY to prevent hanging
-    grid_size := 3  // Reduced from 5 to 3
+    // Generate 3x3 grid with gaps to test complex topology
+    grid_size := 3
     cell_size := f32(2.0)
-
-    log.infof("TEST DEBUG: Starting vertex generation")
 
     vert_idx: i32 = 0
     for y in 0..<grid_size {
         for x in 0..<grid_size {
-            // Skip some cells to create gaps - SIMPLIFIED pattern
-            if (x + y) % 4 == 0 do continue  // Less aggressive skipping
+            // Skip some cells to create gaps
+            if (x + y) % 4 == 0 do continue
 
             x0, z0 := f32(x) * cell_size, f32(y) * cell_size
             x1, z1 := x0 + cell_size, z0 + cell_size
 
-            // Add 4 vertices for this cell
-            append(&vertices, [3]f32{x0, 0, z0})  // 0
-            append(&vertices, [3]f32{x1, 0, z0})  // 1
-            append(&vertices, [3]f32{x1, 0, z1})  // 2
-            append(&vertices, [3]f32{x0, 0, z1})  // 3
+            // Add quad vertices and triangles
+            append(&vertices, [3]f32{x0, 0, z0})
+            append(&vertices, [3]f32{x1, 0, z0})
+            append(&vertices, [3]f32{x1, 0, z1})
+            append(&vertices, [3]f32{x0, 0, z1})
 
-            // Add 2 triangles
             append(&indices, vert_idx+0, vert_idx+1, vert_idx+2)
             append(&indices, vert_idx+0, vert_idx+2, vert_idx+3)
-
             append(&areas, recast.RC_WALKABLE_AREA, recast.RC_WALKABLE_AREA)
 
             vert_idx += 4
         }
     }
 
-    testing.expect(t, len(vertices) > 0, "Should have generated vertices")
-    testing.expect(t, len(indices) > 0, "Should have generated indices")
+    testing.expect(t, len(vertices) > 0, "Should generate vertices")
+    testing.expect(t, len(indices) > 0, "Should generate indices")
+    testing.expect(t, len(indices) % 3 == 0, "Should have complete triangles")
 
-    // Test with fast settings to prevent hanging
-    log.infof("TEST DEBUG: Creating config")
     config := recast.Config{
         cs = 0.5,
         ch = 0.5,
@@ -366,17 +359,36 @@ test_api_comprehensive_pipeline :: proc(t: ^testing.T) {
         detail_sample_max_error = 1,
     }
 
-    log.infof("TEST DEBUG: Starting navmesh build")
     pmesh, dmesh, ok := recast.build_navmesh(vertices[:], indices[:], areas[:], config)
-    testing.expect(t, ok, "Complex build failed")
-
+    testing.expect(t, ok, "Complex geometry build should succeed")
+    
     defer recast.free_poly_mesh(pmesh)
     defer recast.free_poly_mesh_detail(dmesh)
 
-    // Check the result
-    testing.expect(t, pmesh != nil, "No polygon mesh generated")
-    testing.expect(t, pmesh.npolys > 0, "No polygons generated")
-
-    log.infof("API Comprehensive Test: Built complex maze with %d input vertices, generated %d polygons",
-              len(vertices)/3, pmesh.npolys)
+    // Validate comprehensive results
+    testing.expect(t, pmesh != nil, "Should generate polygon mesh")
+    testing.expect(t, dmesh != nil, "Should generate detail mesh")
+    testing.expect(t, pmesh.npolys > 0, "Should generate polygons")
+    testing.expect(t, len(pmesh.verts) > 0, "Should generate vertices")
+    testing.expect(t, len(dmesh.verts) > 0, "Should generate detail vertices")
+    
+    // Validate mesh connectivity for complex topology
+    connected_polys := 0
+    for i in 0..<pmesh.npolys {
+        poly_base := int(i) * int(pmesh.nvp) * 2
+        has_neighbors := false
+        for j in 0..<pmesh.nvp {
+            if pmesh.polys[poly_base + int(pmesh.nvp) + int(j)] != recast.RC_MESH_NULL_IDX {
+                has_neighbors = true
+                break
+            }
+        }
+        if has_neighbors do connected_polys += 1
+    }
+    
+    // Most polygons should be connected for walkable areas
+    if pmesh.npolys > 1 {
+        connection_ratio := f32(connected_polys) / f32(pmesh.npolys)
+        testing.expect(t, connection_ratio >= 0.5, "Most polygons should be connected")
+    }
 }

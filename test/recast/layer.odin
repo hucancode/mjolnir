@@ -64,22 +64,18 @@ test_simple_layers :: proc(t: ^testing.T) {
 @(test)
 test_region_overflow_handling :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-    fmt.println("\nTesting region overflow handling (expecting controlled failure)...")
-
     // Create a heightfield with many small disconnected regions
     bmin := [3]f32{0, 0, 0}
     bmax := [3]f32{100, 10, 100}
     hf := recast.create_heightfield(200, 200, bmin, bmax, 0.5, 0.5)
     defer recast.free_heightfield(hf)
     testing.expect(t, hf != nil, "Failed to create heightfield")
-
     // Create a grid of small platforms (16x16 = 256 platforms)
     for row in 0..<16 {
         for col in 0..<16 {
             x := f32(col * 6 + 1)
             z := f32(row * 6 + 1)
             y := f32((row + col) % 3) // Vary heights
-
             verts := [][3]f32{
                 {x, y, z},
                 {x + 2, y, z},
@@ -88,30 +84,18 @@ test_region_overflow_handling :: proc(t: ^testing.T) {
             }
             tris := []i32{0, 1, 2, 0, 2, 3}
             areas := []u8{recast.RC_WALKABLE_AREA, recast.RC_WALKABLE_AREA}
-
             recast.rasterize_triangles(verts, tris, areas, hf, 1)
         }
     }
-
-    // Build compact heightfield
     chf := recast.create_compact_heightfield(2, 1, hf)
     defer recast.free_compact_heightfield(chf)
     testing.expect(t, chf != nil, "Failed to build compact heightfield")
-
-    // Build regions
     recast.build_distance_field(chf)
     recast.build_regions(chf, 0, 1, 1) // Min area = 1 to keep all small regions
-
     // Count unique regions
-    max_region := 0
-    for i in 0..<len(chf.spans) {
-        if int(chf.spans[i].reg) > max_region {
-            max_region = int(chf.spans[i].reg)
-        }
-    }
-
-    fmt.printf("  Created %d regions\n", max_region)
-
+    max_region :u16 = 0
+    for s in chf.spans do max_region = max(s.reg, max_region)
+    log.infof("Created %d regions\n", max_region)
     // Try to build layers - this SHOULD fail with >255 regions
     // The error messages are expected and correct behavior!
     lset, layer_ok := recast.build_heightfield_layers(chf, 0, 2)
