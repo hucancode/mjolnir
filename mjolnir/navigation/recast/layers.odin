@@ -60,10 +60,6 @@ bounds_size :: proc(bounds: [2]u16) -> u16 {
     return bounds.y - bounds.x
 }
 
-create_heightfield_layer_set :: proc() -> [dynamic]Heightfield_Layer {
-  return make([dynamic]Heightfield_Layer)
-}
-
 // Free heightfield layer set
 free_heightfield_layer_set :: proc(lset: [dynamic]Heightfield_Layer) {
   for layer in lset {
@@ -74,28 +70,22 @@ free_heightfield_layer_set :: proc(lset: [dynamic]Heightfield_Layer) {
   delete(lset)
 }
 
-// Modernized layer building with better error handling
 build_heightfield_layers :: proc(
     chf: ^Compact_Heightfield,
     border_size: i32,
     walkable_height: i32,
 ) -> (result: [dynamic]Heightfield_Layer, success: bool) {
-    if chf == nil {
-        log.error("build_heightfield_layers: nil compact heightfield")
-        return {}, false
-    }
-
     dimensions := [2]i32{chf.width, chf.height}  // Using array for dimensions
     span_count := i32(len(chf.spans))
 
-    log.infof("build_heightfield_layers: %v cells, %d spans", dimensions, span_count)
+    log.infof("%v cells, %d spans", dimensions, span_count)
 
     // Phase 1: Monotone region partitioning
     src_reg := make([]u8, span_count)
     defer delete(src_reg)
 
     if !partition_monotone_regions(chf, border_size, src_reg) {
-        log.warn("build_heightfield_layers: Could not partition monotone regions (likely >255 regions)")
+        log.warn("Could not partition monotone regions (likely >255 regions)")
         return {}, false
     }
 
@@ -108,11 +98,11 @@ build_heightfield_layers :: proc(
     }
 
     if nregs == 0 {
-        log.warn("build_heightfield_layers: No regions found")
+        log.warn("No regions found")
         return {}, true  // Empty result is valid
     }
 
-    log.infof("build_heightfield_layers: %d regions", nregs)
+    log.infof("%d regions", nregs)
 
     // Phase 2: Region analysis
     regions := make([]Heightfield_Layer_Region, nregs)
@@ -125,21 +115,21 @@ build_heightfield_layers :: proc(
     }
 
     if !analyze_regions(chf, src_reg, regions) {
-        log.error("build_heightfield_layers: Could not analyze regions")
+        log.error("Could not analyze regions")
         return {}, false
     }
 
     // Phase 3: Layer assignment
     nlayers := assign_layers_dfs(regions)
-    log.infof("build_heightfield_layers: %d layers", nlayers)
+    log.infof("%d layers", nlayers)
 
     // Phase 4: Layer merging
     nlayers = merge_layers(regions, walkable_height)
-    log.infof("build_heightfield_layers: %d layers after merging", nlayers)
+    log.infof("%d layers after merging", nlayers)
 
     // Phase 5: Layer compaction
     nlayers = compact_layer_ids(regions)
-    log.infof("build_heightfield_layers: %d layers after compaction", nlayers)
+    log.infof("%d layers after compaction", nlayers)
 
     // Phase 6: Build layer data
     lset := make([dynamic]Heightfield_Layer, 0, nlayers)
@@ -150,7 +140,7 @@ build_heightfield_layers :: proc(
         }
     }
 
-    log.infof("build_heightfield_layers: Built %d layers", len(lset))
+    log.infof("Built %d layers", len(lset))
     return lset, true
 }
 
@@ -267,7 +257,7 @@ partition_monotone_regions :: proc(
                 sweep.region_id = sweep.neighbor_id
             } else {
                 if reg_id == 255 {
-                    log.warn("build_heightfield_layers: Region ID overflow (>255 regions not supported in layer system)")
+                    log.warn("Region ID overflow (>255 regions not supported in layer system)")
                     return false
                 }
                 sweep.region_id = reg_id
@@ -385,141 +375,105 @@ analyze_regions :: proc(
     return true
 }
 
-// Phase 3: Layer assignment via DFS (Odin-idiomatic)
+// Phase 3: Layer assignment via DFS
 assign_layers_dfs :: proc(regions: []Heightfield_Layer_Region) -> int {
     stack := make([dynamic]int)
     defer delete(stack)
-
     layer_id: u8 = 0
-
     for i in 0 ..< len(regions) {
         root := &regions[i]
         if root.layer_id != RC_NULL_LAYER {
             continue
         }
-
-        // Start new layer with this region as root
         root.layer_id = layer_id
         root.is_base = true
-
-        // Start new layer with this region as root
-
-        // Initialize stack with root
         clear(&stack)
         append(&stack, i)
-
-        // Process stack using DFS
         for len(stack) > 0 {
-            // Pop from stack
             reg_idx := pop(&stack)
             reg := &regions[reg_idx]
-
-            // Check all neighbors
             for nei_id in reg.neighbors {
                 if int(nei_id) >= len(regions) {
                     continue
                 }
-
                 nei := &regions[nei_id]
                 if nei.layer_id != RC_NULL_LAYER {
                     continue  // Already visited
                 }
-
                 // Check if neighbor overlaps with root region
                 if slice.contains(root.overlapping_layers[:], u8(nei_id)) {
                     continue  // Skip overlapping regions
                 }
-
                 // Check if combined height range would exceed 255
                 ymin := min(root.height_bounds.x, nei.height_bounds.x)
                 ymax := max(root.height_bounds.y, nei.height_bounds.y)
                 if ymax - ymin >= 255 {
                     continue  // Skip if height range too large
                 }
-
                 // Add neighbor to same layer
                 nei.layer_id = layer_id
-
-                // Add to stack
                 append(&stack, int(nei_id))
-
                 // Merge neighbor's overlapping layers into root
                 for overlap_id in nei.overlapping_layers {
                     add_unique(&root.overlapping_layers, overlap_id)
                 }
-
                 // Update root's height bounds
                 root.height_bounds.x = ymin
                 root.height_bounds.y = ymax
             }
         }
-
         layer_id += 1
         if layer_id == RC_NULL_LAYER {
-            log.warn("build_heightfield_layers: Layer ID overflow (>255 layers not supported)")
+            log.warn("Layer ID overflow (>255 layers not supported)")
             break
         }
     }
-
     return int(layer_id)
 }
 
-// Phase 4: Height-based layer merging (Odin-idiomatic)
+// Phase 4: Height-based layer merging
 merge_layers :: proc(regions: []Heightfield_Layer_Region, walkable_height: i32) -> int {
     merge_height := u16(walkable_height * 4)
     max_iterations := len(regions) * 2  // Reasonable upper bound
     iteration := 0
-
-    // Start merging process
-
     // Keep merging until no more merges are possible
     for iteration < max_iterations {
         merged := false
         iteration += 1
-
         // Find regions to merge
         for i in 0 ..< len(regions) {
             ri := &regions[i]
             if !ri.is_base || ri.layer_id == RC_NULL_LAYER {
                 continue  // Skip non-base or unassigned regions
             }
-
             for j in i + 1 ..< len(regions) {
                 rj := &regions[j]
                 if !rj.is_base || rj.layer_id == RC_NULL_LAYER {
                     continue  // Skip non-base or unassigned regions
                 }
-
                 // Check if layers can be merged
                 if ri.layer_id == rj.layer_id {
                     continue  // Already same layer
                 }
-
-                // Check if layers can be merged
-
                 // Check height overlap using modernized bounds arrays
                 ri_extended := [2]u16{ri.height_bounds.x, ri.height_bounds.y + merge_height}
                 rj_extended := [2]u16{rj.height_bounds.x, rj.height_bounds.y + merge_height}
                 if !ranges_overlap(ri_extended, rj_extended) {
                     continue  // No height overlap
                 }
-
                 // Check if combined height range would exceed 255
                 ymin := min(ri.height_bounds.x, rj.height_bounds.x)
                 ymax := max(ri.height_bounds.y, rj.height_bounds.y)
                 if ymax - ymin >= 255 {
                     continue  // Combined range too large
                 }
-
                 // Check for overlapping regions
                 // We need to check if any region in layer i overlaps with any region in layer j
                 can_merge := true
-
                 // Check if ri overlaps with rj directly
                 if slice.contains(ri.overlapping_layers[:], u8(j)) {
                     can_merge = false
                 }
-
                 // Also check all regions that have been assigned to these layers
                 if can_merge {
                     for k in 0 ..< len(regions) {
@@ -535,17 +489,12 @@ merge_layers :: proc(regions: []Heightfield_Layer_Region, walkable_height: i32) 
                         }
                     }
                 }
-
                 if !can_merge {
                     continue
                 }
-
-                // Merge rj into ri
-
                 // Merge rj into ri
                 old_id := rj.layer_id
                 new_id := ri.layer_id
-
                 // Update all regions with old_id to new_id
                 for &reg in regions {
                     if reg.layer_id == old_id {
@@ -553,34 +502,27 @@ merge_layers :: proc(regions: []Heightfield_Layer_Region, walkable_height: i32) 
                         reg.is_base = false  // No longer base
                     }
                 }
-
                 // Merge overlapping layers
                 for overlap_id in rj.overlapping_layers {
                     add_unique(&ri.overlapping_layers, overlap_id)
                 }
-
                 // Update combined height bounds
                 ri.height_bounds.x = ymin
                 ri.height_bounds.y = ymax
-
                 merged = true
                 break
             }
-
             if merged {
                 break
             }
         }
-
         if !merged {
             break  // No more merges possible
         }
     }
-
     if iteration >= max_iterations {
         log.warnf("Layer merging reached maximum iterations (%d), stopping to prevent infinite loop", max_iterations)
     }
-
     // Count final number of layers
     layer_count := 0
     for reg in regions {
@@ -588,28 +530,23 @@ merge_layers :: proc(regions: []Heightfield_Layer_Region, walkable_height: i32) 
             layer_count = max(layer_count, int(reg.layer_id) + 1)
         }
     }
-
     return layer_count
 }
 
-// Phase 5: Layer compaction (Odin-idiomatic)
+// Phase 5: Layer compaction
 compact_layer_ids :: proc(regions: []Heightfield_Layer_Region) -> int {
     // Find which layer IDs are actually used
     used_layers := make([dynamic]bool, 256)
     defer delete(used_layers)
-
     slice.fill(used_layers[:], false)
-
     for reg in regions {
         if reg.layer_id != RC_NULL_LAYER {
             used_layers[reg.layer_id] = true
         }
     }
-
     // Create sequential remapping
     remap := make([]u8, 256)
     defer delete(remap)
-
     layer_id: u8 = 0
     for i in 0 ..< len(used_layers) {
         if used_layers[i] {
@@ -619,14 +556,12 @@ compact_layer_ids :: proc(regions: []Heightfield_Layer_Region) -> int {
             remap[i] = RC_NULL_LAYER
         }
     }
-
     // Apply remapping to all regions
     for &reg in regions {
         if reg.layer_id != RC_NULL_LAYER {
             reg.layer_id = remap[reg.layer_id]
         }
     }
-
     return int(layer_id)
 }
 
@@ -641,58 +576,46 @@ build_single_layer :: proc(
 ) -> bool {
     w := chf.width
     h := chf.height
-
     // All layers have the same full size (minus border)
     // This prevents fragmentation into many small layers
     layer_width := w - border_size * 2
     layer_height := h - border_size * 2
-
     if layer_width <= 0 || layer_height <= 0 {
         return false
     }
-
     // Find height bounds for this layer
     hmin := i32(0xffff)
     hmax := i32(0)
     span_count := 0
-
     // Also track actual data bounds for minx/maxx/miny/maxy
     // (these are stored in the layer but don't affect the layer size)
     data_minx := i32(w)
     data_maxx := i32(0)
     data_miny := i32(h)
     data_maxy := i32(0)
-
     for y in 0 ..< h {
         for x in 0 ..< w {
             c := &chf.cells[x + y * w]
-
             for i in c.index ..< c.index + u32(c.count) {
                 if i >= u32(len(src_reg)) {
                     continue
                 }
-
                 ri := src_reg[i]
                 if ri == RC_NULL_LAYER || int(ri) >= len(regions) {
                     continue
                 }
-
                 if regions[ri].layer_id != layer_id {
                     continue
                 }
-
                 if i >= u32(len(chf.spans)) {
                     continue
                 }
-
                 s := &chf.spans[i]
-
                 // Track actual data bounds
                 data_minx = min(data_minx, i32(x))
                 data_maxx = max(data_maxx, i32(x))
                 data_miny = min(data_miny, i32(y))
                 data_maxy = max(data_maxy, i32(y))
-
                 // Track height bounds
                 hmin = min(hmin, i32(s.y))
                 hmax = max(hmax, i32(s.y) + i32(s.h))
@@ -700,15 +623,12 @@ build_single_layer :: proc(
             }
         }
     }
-
     if span_count == 0 {
         return false
     }
-
     // The actual layer origin is offset by border_size
     layer_minx := border_size
     layer_miny := border_size
-
     // Create layer with full size
     // Adjust bounding box to fit the layer (accounting for border)
     layer_bmin := chf.bmin
@@ -719,7 +639,6 @@ build_single_layer :: proc(
     layer_bmax.z -= f32(border_size) * chf.cs
     layer_bmin.y = chf.bmin.y + f32(hmin) * chf.ch
     layer_bmax.y = chf.bmin.y + f32(hmax) * chf.ch
-
     layer := Heightfield_Layer {
         bmin = layer_bmin,
         bmax = layer_bmax,
@@ -737,12 +656,10 @@ build_single_layer :: proc(
         areas = make([]u8, int(layer_width * layer_height)),
         cons = make([]u8, int(layer_width * layer_height)),
     }
-
     // Initialize arrays
     slice.fill(layer.heights, 0xff)
     slice.fill(layer.areas, RC_NULL_AREA)
     slice.fill(layer.cons, 0)
-
     // Fill layer data - scan the full grid
     for y in 0 ..< h {
         for x in 0 ..< w {
@@ -752,52 +669,42 @@ build_single_layer :: proc(
                 if i >= u32(len(src_reg)) {
                     continue
                 }
-
                 ri := src_reg[i]
                 if ri == RC_NULL_LAYER || int(ri) >= len(regions) {
                     continue
                 }
-
                 if regions[ri].layer_id != layer_id {
                     continue
                 }
-
                 if i >= u32(len(chf.spans)) || i >= u32(len(chf.areas)) {
                     continue
                 }
-
                 s := &chf.spans[i]
                 // Convert to layer coordinates (offset by border_size)
                 lx := x - border_size
                 ly := y - border_size
-
                 // Skip if outside layer bounds
                 if lx < 0 || lx >= layer_width || ly < 0 || ly >= layer_height {
                     continue
                 }
-
                 lidx := lx + ly * layer_width
 
                 if lidx < 0 || lidx >= i32(len(layer.heights)) {
                     continue
                 }
-
                 // Store height relative to layer minimum
                 relative_height := i32(s.y) - hmin
                 layer.heights[lidx] = u8(clamp(int(relative_height), 0, 255))
                 layer.areas[lidx] = chf.areas[i]
-
                 // Build connections with portal handling
                 cons: u8 = 0
                 for dir in 0 ..< 4 {
                     if get_con(s, dir) != RC_NOT_CONNECTED {
                         ax := x + get_dir_offset_x(dir)
                         ay := y + get_dir_offset_y(dir)
-
                         if ax >= 0 && ax < w && ay >= 0 && ay < h {
                             ac := &chf.cells[ax + ay * w]
                             ai := ac.index + u32(get_con(s, dir))
-
                             if ai < u32(len(src_reg)) {
                                 rai := src_reg[ai]
                                 if rai != RC_NULL_LAYER && int(rai) < len(regions) {
@@ -827,86 +734,59 @@ build_single_layer :: proc(
             }
         }
     }
-
     append(layers, layer)
     return true
 }
 
-// Get height value from layer at given coordinates
 get_layer_height :: proc(layer: ^Heightfield_Layer, x, y: i32) -> u8 {
   if x < 0 || x >= layer.width || y < 0 || y >= layer.height {
     return 0xff
   }
-
   idx := x + y * layer.width
   if idx < 0 || idx >= i32(len(layer.heights)) {
     return 0xff
   }
-
   return layer.heights[idx]
 }
 
-// Get area ID from layer at given coordinates
 get_layer_area :: proc(layer: ^Heightfield_Layer, x, y: i32) -> u8 {
   if x < 0 || x >= layer.width || y < 0 || y >= layer.height {
     return RC_NULL_AREA
   }
-
   idx := x + y * layer.width
   if idx < 0 || idx >= i32(len(layer.areas)) {
     return RC_NULL_AREA
   }
-
   return layer.areas[idx]
 }
 
-// Get connection info from layer at given coordinates
-get_layer_connection :: proc(
-  layer: ^Heightfield_Layer,
-  x, y: i32,
-) -> u8 {
+get_layer_connection :: proc( layer: ^Heightfield_Layer, x, y: i32) -> u8 {
   if x < 0 || x >= layer.width || y < 0 || y >= layer.height {
     return 0
   }
-
   idx := x + y * layer.width
   if idx < 0 || idx >= i32(len(layer.cons)) {
     return 0
   }
-
   return layer.cons[idx]
 }
 
-// Validate layer set integrity
 validate_layer_set :: proc(lset: [dynamic]Heightfield_Layer) -> bool {
   if len(lset) == 0 do return false
-
-  for layer, i in lset {
-    // Check bounds
+  layer_ok :: proc(layer: Heightfield_Layer) -> bool {
     if layer.width <= 0 || layer.height <= 0 {
-      log.errorf(
-        "Layer %d has invalid dimensions: %dx%d",
-        i,
-        layer.width,
-        layer.height,
-      )
       return false
     }
-
     expected_size := int(layer.width * layer.height)
     if len(layer.heights) != expected_size ||
        len(layer.areas) != expected_size ||
        len(layer.cons) != expected_size {
-      log.errorf("Layer %d has mismatched array sizes", i)
       return false
     }
-
-    // Check coordinate bounds
     if layer.minx > layer.maxx || layer.miny > layer.maxy {
-      log.errorf("Layer %d has invalid coordinate bounds", i)
       return false
     }
+    return true
   }
-
-  return true
+  return slice.all_of_proc(lset[:], layer_ok)
 }
