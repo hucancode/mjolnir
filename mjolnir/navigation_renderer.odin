@@ -704,30 +704,15 @@ create_navmesh_pipelines :: proc(renderer: ^RendererNavMesh, gpu_context: ^gpu.G
         layout = renderer.debug_pipeline_layout,
         pNext = &rendering_info,
     }
-
     vk.CreateGraphicsPipelines(gpu_context.device, 0, 1, &debug_pipeline_info, nil, &renderer.debug_pipeline) or_return
-
     log.info("Navigation mesh pipelines created successfully")
     return .SUCCESS
 }
 
-// ========================================
-// PUBLIC API
-// ========================================
-
-navmesh_get_enabled :: proc(renderer: ^RendererNavMesh) -> bool { return renderer.enabled }
-navmesh_get_debug_mode :: proc(renderer: ^RendererNavMesh) -> bool { return renderer.debug_mode }
-navmesh_get_alpha :: proc(renderer: ^RendererNavMesh) -> f32 { return renderer.alpha }
-navmesh_get_height_offset :: proc(renderer: ^RendererNavMesh) -> f32 { return renderer.height_offset }
-navmesh_get_color_mode :: proc(renderer: ^RendererNavMesh) -> NavMeshColorMode { return renderer.color_mode }
-navmesh_get_base_color :: proc(renderer: ^RendererNavMesh) -> [3]f32 { return renderer.base_color }
-navmesh_get_debug_render_mode :: proc(renderer: ^RendererNavMesh) -> NavMeshDebugMode { return renderer.debug_render_mode }
-
-navmesh_clear :: proc(renderer: ^RendererNavMesh) {
-    renderer.vertex_count = 0
-    renderer.index_count = 0
+navmesh_get_triangle_count :: proc(renderer: ^RendererNavMesh) -> u32 {
+    return renderer.index_count / 3
 }
 
-navmesh_get_triangle_count :: proc(renderer: ^RendererNavMesh) -> u32 { return renderer.index_count / 3 }
-navmesh_get_vertex_count :: proc(renderer: ^RendererNavMesh) -> u32 { return renderer.vertex_count }
-navmesh_has_data :: proc(renderer: ^RendererNavMesh) -> bool { return renderer.vertex_count > 0 && renderer.index_count > 0 }
+navmesh_has_data :: proc(renderer: ^RendererNavMesh) -> bool {
+    return renderer.vertex_count > 0 && renderer.index_count > 0
+}

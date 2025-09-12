@@ -689,9 +689,7 @@ merge_triangles_into_polygons :: proc(triangles: []i32, polys: ^[dynamic]Poly_Bu
         log.warn("Invalid triangle array length for merging")
         return
     }
-
     if len(triangles) == 0 do return
-
     // First, create all triangles as initial polygons
     temp_polys := make([dynamic]Poly_Build, 0, len(triangles) / 3)
     defer {
@@ -741,32 +739,24 @@ merge_triangles_into_polygons :: proc(triangles: []i32, polys: ^[dynamic]Poly_Bu
     // Merge adjacent triangles into quads where beneficial
     merged := make([]bool, len(temp_polys))
     defer delete(merged)
-
-    for i in 0..<len(edges) - 1 {
-        edge1 := edges[i]
-        edge2 := edges[i + 1]
-
-        // Check if edges match (same vertices)
-        if edge1.v0 == edge2.v0 && edge1.v1 == edge2.v1 {
-            tri1_idx := edge1.tri_idx
-            tri2_idx := edge2.tri_idx
-
-            // Skip if already merged
-            if merged[tri1_idx] || merged[tri2_idx] do continue
-
-            tri1 := &temp_polys[tri1_idx]
-            tri2 := &temp_polys[tri2_idx]
-
-            // Check if merge would create a valid quad
-            if can_merge_triangles_to_quad(tri1.verts[:], tri2.verts[:]) && max_verts >= 4 {
+    if max_verts >= 4 {
+        for i in 0..<len(edges) - 1 {
+            edge1 := edges[i]
+            edge2 := edges[i + 1]
+            // Check if edges match (same vertices)
+            if edge1.v0 == edge2.v0 && edge1.v1 == edge2.v1 {
+                tri1_idx := edge1.tri_idx
+                tri2_idx := edge2.tri_idx
+                // Skip if already merged
+                if merged[tri1_idx] || merged[tri2_idx] do continue
+                tri1 := &temp_polys[tri1_idx]
+                tri2 := &temp_polys[tri2_idx]
                 // Merge tri2 into tri1
-                merged_verts := merge_triangles_to_quad(tri1.verts[:], tri2.verts[:])
-                if len(merged_verts) == 4 {
-                    // Replace tri1 with merged quad
-                    delete(tri1.verts)
-                    tri1.verts = merged_verts
-                    merged[tri2_idx] = true
-                }
+                merged_verts := merge_triangles_to_quad(tri1.verts[:], tri2.verts[:]) or_continue
+                // Replace tri1 with merged quad
+                delete(tri1.verts)
+                tri1.verts = merged_verts
+                merged[tri2_idx] = true
             }
         }
     }
@@ -785,102 +775,59 @@ merge_triangles_into_polygons :: proc(triangles: []i32, polys: ^[dynamic]Poly_Bu
     }
 }
 
-// Check if two triangles can be merged into a valid quad
-can_merge_triangles_to_quad :: proc(tri1, tri2: []i32) -> bool {
-    if len(tri1) != 3 || len(tri2) != 3 do return false
-
-    // Find shared edge
-    shared_count := 0
-    for v1 in tri1 {
-        for v2 in tri2 {
-            if v1 == v2 do shared_count += 1
-        }
-    }
-
-    // Must share exactly 2 vertices (one edge)
-    return shared_count == 2
-}
-
-// Merge two triangles into a quad
-merge_triangles_to_quad :: proc(tri1, tri2: []i32) -> []i32 {
-    if len(tri1) != 3 || len(tri2) != 3 do return nil
-
-    // Find shared vertices
+merge_triangles_to_quad :: proc(tri1, tri2: []i32) -> (quad: []i32, ok: bool) {
     shared := make([dynamic]i32, 0, 2)
     defer delete(shared)
-
     for v1 in tri1 {
-        for v2 in tri2 {
-            if v1 == v2 do append(&shared, v1)
+        if slice.contains(tri2, v1) {
+            append(&shared, v1)
         }
     }
-
-    if len(shared) != 2 do return nil
-
-    // Find unique vertices
+    if len(shared) != 2 {
+        return
+    }
     unique1: i32 = -1
     unique2: i32 = -1
-
     for v in tri1 {
-        is_shared := false
-        for s in shared {
-            if v == s {
-                is_shared = true
-                break
-            }
-        }
-        if !is_shared {
+        if !slice.contains(shared[:], v) {
             unique1 = v
             break
         }
     }
-
     for v in tri2 {
-        is_shared := false
-        for s in shared {
-            if v == s {
-                is_shared = true
-                break
-            }
-        }
-        if !is_shared {
+        if !slice.contains(shared[:], v) {
             unique2 = v
             break
         }
     }
-
-    if unique1 == -1 || unique2 == -1 do return nil
-
+    if unique1 == -1 || unique2 == -1 {
+        return
+    }
     // Create quad in proper winding order
     // Find the order of shared vertices in tri1 to maintain winding
-    quad := make([]i32, 4)
-
     // Find indices of shared vertices in tri1
-    shared0 := shared[:][0]
-    shared1 := shared[:][1]
-
     shared_idx1, shared_idx2 := i32(-1), i32(-1)
     for i in 0..<len(tri1) {
-        if tri1[i] == shared0 do shared_idx1 = i32(i)
-        if tri1[i] == shared1 do shared_idx2 = i32(i)
+        if tri1[i] == shared[0] do shared_idx1 = i32(i)
+        if tri1[i] == shared[1] do shared_idx2 = i32(i)
     }
-
+    quad = make([]i32, 4)
     // Determine winding order
     if (shared_idx1 + 1) % 3 == shared_idx2 {
         // shared[0] -> shared[1] in tri1
         quad[0] = unique1
-        quad[1] = shared0
-        quad[2] = shared1
+        quad[1] = shared[0]
+        quad[2] = shared[1]
         quad[3] = unique2
     } else {
         // shared[1] -> shared[0] in tri1
         quad[0] = unique1
-        quad[1] = shared1
-        quad[2] = shared0
+        quad[1] = shared[1]
+        quad[2] = shared[0]
         quad[3] = unique2
     }
-
-    return quad
+    ok = true
+    return
 }
 
 // Main function to build polygon mesh from contour set
