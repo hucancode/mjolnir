@@ -483,7 +483,7 @@ connect_ext_links_side :: proc(nav_mesh: ^Nav_Mesh, tile: ^Mesh_Tile, side: int)
             if !is_edge_on_tile_border(va, vb, neighbor.header.bmin, neighbor.header.bmax, opposite_side) do continue
 
             for k in 0..<nnei-1 {
-                if segment_intersects(verts[k], verts[k+1], va, vb) {
+                if geometry.segment_segment_intersect_2d(verts[k], verts[k+1], va, vb) {
                     // Create bidirectional link
                     poly_ref := get_poly_ref_base(nav_mesh, neighbor) | recast.Poly_Ref(i)
 
@@ -667,49 +667,4 @@ is_edge_on_tile_border :: proc(va, vb: [3]f32, bmin, bmax: [3]f32, side: int) ->
         return math.abs(va.z - bmin.z) < math.F32_EPSILON && math.abs(vb.z - bmin.z) < math.F32_EPSILON
     }
     return false
-}
-
-// Check if two line segments intersect in 2D (XZ plane)
-segment_intersects :: proc(a1, a2, b1, b2: [3]f32) -> bool {
-    // Extract 2D coordinates (X, Z)
-    ax1, az1 := a1.x, a1.z
-    ax2, az2 := a2.x, a2.z
-    bx1, bz1 := b1.x, b1.z
-    bx2, bz2 := b2.x, b2.z
-
-    // Check for overlap in segment bounds
-    min_ax, max_ax := min(ax1, ax2), max(ax1, ax2)
-    min_az, max_az := min(az1, az2), max(az1, az2)
-    min_bx, max_bx := min(bx1, bx2), max(bx1, bx2)
-    min_bz, max_bz := min(bz1, bz2), max(bz1, bz2)
-
-    // Check if bounding boxes overlap
-    if max_ax < min_bx - math.F32_EPSILON || min_ax > max_bx + math.F32_EPSILON ||
-       max_az < min_bz - math.F32_EPSILON || min_az > max_bz + math.F32_EPSILON {
-        return false
-    }
-
-    // For border segments, they should overlap if they're on the same line
-    // Check if segments are collinear and overlapping
-    dx1 := ax2 - ax1
-    dz1 := az2 - az1
-    dx2 := bx2 - bx1
-    dz2 := bz2 - bz1
-
-    // Cross product to check if lines are parallel
-    cross := dx1 * dz2 - dz1 * dx2
-    if math.abs(cross) > math.F32_EPSILON {
-        return false  // Not parallel
-    }
-
-    // Lines are parallel, check if they're on the same line
-    dx3 := bx1 - ax1
-    dz3 := bz1 - az1
-    cross2 := dx1 * dz3 - dz1 * dx3
-    if math.abs(cross2) > math.F32_EPSILON {
-        return false  // Parallel but not collinear
-    }
-
-    // Segments are collinear, check if they overlap
-    return true
 }
