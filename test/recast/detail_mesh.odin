@@ -576,9 +576,7 @@ test_detail_mesh_data_consistency :: proc(t: ^testing.T) {
 @(test)
 test_detail_mesh_performance :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 60 * time.Second) // Longer timeout for performance test
-
     // Create larger scenario for performance testing
-
     hf := recast.create_heightfield(20, 20, {0,0,0}, {20,20,20}, 1.0, 0.5)
     testing.expect(t, hf != nil, "Failed to create heightfield")
     defer recast.free_heightfield(hf)
@@ -624,7 +622,7 @@ test_detail_mesh_performance :: proc(t: ^testing.T) {
 @(test)
 test_delaunay_hull_simple_triangle :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 10 * time.Second)
-    // Test 1: Simple triangle (3 points)
+    // Simple triangle (3 points)
     points := [][3]f32{
         {0, 0, 0},    // Point 0
         {2, 0, 0},    // Point 1
@@ -633,7 +631,6 @@ test_delaunay_hull_simple_triangle :: proc(t: ^testing.T) {
     hull := []i32{0, 1, 2}  // Hull order: counter-clockwise
     triangles := make([dynamic][4]i32)
     defer delete(triangles)
-
     success := recast.delaunay_hull(points, hull, &triangles)
     testing.expect(t, success, "Simple triangle triangulation should succeed")
     testing.expect(t, len(triangles) == 1, "Simple triangle should produce exactly 1 triangle")
@@ -657,7 +654,7 @@ test_delaunay_hull_simple_triangle :: proc(t: ^testing.T) {
 @(test)
 test_delaunay_hull_square :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 10 * time.Second)
-    // Test 2: Square (4 points forming convex hull)
+    // Square (4 points forming convex hull)
     points := [][3]f32{
         {0, 0, 0},    // Point 0
         {2, 0, 0},    // Point 1
@@ -667,7 +664,6 @@ test_delaunay_hull_square :: proc(t: ^testing.T) {
     hull := []i32{0, 1, 2, 3}  // Hull order: counter-clockwise
     triangles := make([dynamic][4]i32)
     defer delete(triangles)
-
     success := recast.delaunay_hull(points, hull, &triangles)
     testing.expect(t, success, "Square triangulation should succeed")
     testing.expect(t, len(triangles) == 2, "Square should produce exactly 2 triangles")
@@ -690,7 +686,7 @@ test_delaunay_hull_square :: proc(t: ^testing.T) {
 @(test)
 test_delaunay_hull_pentagon_with_interior :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 10 * time.Second)
-    // Test 3: Pentagon with interior point (more complex case)
+    // Pentagon with interior point (more complex case)
     points := [][3]f32{
         {0, 0, 0},     // Point 0 - hull
         {2, 0, 0},     // Point 1 - hull
@@ -702,7 +698,6 @@ test_delaunay_hull_pentagon_with_interior :: proc(t: ^testing.T) {
     hull := []i32{0, 1, 2, 3, 4}  // Hull boundary (5 vertices)
     triangles := make([dynamic][4]i32)
     defer delete(triangles)
-
     success := recast.delaunay_hull(points, hull, &triangles)
     testing.expect(t, success, "Pentagon with interior triangulation should succeed")
 
@@ -740,20 +735,15 @@ test_delaunay_hull_pentagon_with_interior :: proc(t: ^testing.T) {
 @(test)
 test_delaunay_hull_edge_cases :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 10 * time.Second)
-    // Test 4: Edge cases
-
     // Case A: Too few points
     {
         points := [][3]f32{{0, 0, 0}, {1, 0, 0}}  // Only 2 points
         hull := []i32{0, 1}
         triangles := make([dynamic][4]i32)
         defer delete(triangles)
-
         success := recast.delaunay_hull(points, hull, &triangles)
-        // Should handle gracefully - either succeed with 0 triangles or fail
-        log.infof("Two points case: success=%t, triangles=%d", success, len(triangles))
+        testing.expect(t, !success, "Should fail with 0 triangles")
     }
-
     // Case B: Collinear points
     {
         points := [][3]f32{
@@ -765,11 +755,9 @@ test_delaunay_hull_edge_cases :: proc(t: ^testing.T) {
         hull := []i32{0, 1, 2, 3}
         triangles := make([dynamic][4]i32)
         defer delete(triangles)
-
         success := recast.delaunay_hull(points, hull, &triangles)
-        log.infof("Collinear points case: success=%t, triangles=%d", success, len(triangles))
+        testing.expect(t, !success, "Should fail with collinear points")
     }
-
     // Case C: Very small triangle
     {
         points := [][3]f32{
@@ -780,22 +768,19 @@ test_delaunay_hull_edge_cases :: proc(t: ^testing.T) {
         hull := []i32{0, 1, 2}
         triangles := make([dynamic][4]i32)
         defer delete(triangles)
-
         success := recast.delaunay_hull(points, hull, &triangles)
-        log.infof("Very small triangle case: success=%t, triangles=%d", success, len(triangles))
+        testing.expect(t, success, "Should succeed with very small triangle")
     }
 }
 
 @(test)
 test_delaunay_hull_performance :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-    // Test 5: Performance test with larger point set
     num_points := 50
     points := make([][3]f32, num_points)
     hull := make([]i32, num_points)
     defer delete(points)
     defer delete(hull)
-
     // Create circular arrangement of points for convex hull
     for i in 0..<num_points {
         angle := f32(i) * 2.0 * math.PI / f32(num_points)
@@ -807,14 +792,11 @@ test_delaunay_hull_performance :: proc(t: ^testing.T) {
         }
         hull[i] = i32(i)
     }
-
     triangles := make([dynamic][4]i32)
     defer delete(triangles)
-
     start_time := time.now()
     success := recast.delaunay_hull(points, hull, &triangles)
     end_time := time.now()
-
     duration := time.duration_milliseconds(time.diff(start_time, end_time))
     testing.expect(t, success, "Large point set triangulation should succeed")
     testing.expect(t, len(triangles) > 0, "Should produce triangles")

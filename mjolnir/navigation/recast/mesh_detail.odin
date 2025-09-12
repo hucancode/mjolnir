@@ -138,7 +138,7 @@ get_cell_height :: proc(chf: ^Compact_Heightfield, x, z: i32) -> f32 {
     return f32(top_span.y) + f32(top_span.h)
 }
 
-// Calculate minimum extent of polygon (C++ polyMinExtent)
+// Calculate minimum extent of polygon
 calculate_polygon_min_extent :: proc(poly: ^Detail_Polygon) -> f32 {
     nverts := len(poly.vertices)
     if nverts < 3 do return 0.0
@@ -338,7 +338,7 @@ merge_poly_mesh_details :: proc(meshes: []^Poly_Mesh_Detail,
     return true
 }
 
-// Hull-based triangulation that matches C++ triangulateHull exactly
+// Hull-based triangulation
 // This is more robust than ear clipping for simple polygons
 triangulate_hull_based :: proc(poly: ^Detail_Polygon) -> bool {
     nverts := len(poly.vertices)
@@ -492,7 +492,7 @@ prev_index :: proc "contextless" (i, n: int) -> int {
     return (i + n - 1) % n
 }
 
-// Main function to build poly mesh detail following C++ rcBuildPolyMeshDetail algorithm
+// Main function to build poly mesh detail
 build_poly_mesh_detail :: proc(pmesh: ^Poly_Mesh, chf: ^Compact_Heightfield,
                                  sample_dist, sample_max_error: f32, dmesh: ^Poly_Mesh_Detail) -> bool {
     if pmesh == nil || chf == nil || dmesh == nil do return false
@@ -551,7 +551,7 @@ build_poly_mesh_detail :: proc(pmesh: ^Poly_Mesh, chf: ^Compact_Heightfield,
         max_hh = max(max_hh, int(bounds[i].w - bounds[i].z))
     }
 
-    // Allocate height patch (matches C++ line 1253)
+    // Allocate height patch
     hp := Height_Patch{
         data = make([dynamic]u16, max_hw * max_hh),
         width = i32(max_hw),
@@ -596,7 +596,7 @@ build_poly_mesh_detail :: proc(pmesh: ^Poly_Mesh, chf: ^Compact_Heightfield,
         hp.width = bounds[i].y - bounds[i].x
         hp.height = bounds[i].w - bounds[i].z
 
-        // Get height data using flood fill (equivalent to C++ getHeightData)
+        // Get height data using flood fill
         get_height_data(chf, slice.reinterpret([]u16, p[:npoly]), npoly,
             slice.reinterpret([][3]u16, pmesh.verts), border_size, &hp) or_continue
 
@@ -646,7 +646,7 @@ build_poly_mesh_detail :: proc(pmesh: ^Poly_Mesh, chf: ^Compact_Heightfield,
     return true
 }
 
-// Build detail mesh for a single polygon (equivalent to C++ buildPolyDetail)
+// Build detail mesh for a single polygon
 build_poly_detail :: proc(poly_verts: [][3]f32, sample_dist, sample_max_error: f32,
                           height_search_radius: i32, chf: ^Compact_Heightfield, hp: ^Height_Patch,
                           verts: ^[dynamic][3]f32, tris: ^[dynamic][4]i32,
@@ -674,11 +674,9 @@ build_poly_detail :: proc(poly_verts: [][3]f32, sample_dist, sample_max_error: f
     if sample_dist > 0 {
         for i in 0..<nin {
             j := (nin - 1 + i) % nin  // Previous vertex
-
             vj := poly_verts[j]
             vi := poly_verts[i]
             swapped := false
-
             // Ensure consistent ordering
             if abs(vj.x - vi.x) < 1e-6 {
                 if vj.z > vi.z {
@@ -691,35 +689,29 @@ build_poly_detail :: proc(poly_verts: [][3]f32, sample_dist, sample_max_error: f
                     swapped = true
                 }
             }
-
             // Create samples along edge
             d := vi - vj
             edge_len := linalg.length(d.xz)
             nn := 1 + i32(math.floor(edge_len / sample_dist))
             if nn >= MAX_VERTS_PER_EDGE do nn = MAX_VERTS_PER_EDGE - 1
             if len(verts) + int(nn) >= MAX_VERTS do nn = i32(MAX_VERTS - 1 - len(verts))
-
             edge_samples := make([][3]f32, nn + 1)
             defer delete(edge_samples)
-
             for k in 0..=nn {
                 u := f32(k) / f32(nn)
                 pos := vj + d * u
                 pos.y = get_height_from_patch(pos, cs, ics, chf.ch, height_search_radius, hp) * chf.ch
                 edge_samples[k] = pos
             }
-
             // Simplify samples based on error
             idx := make([dynamic]i32, 0, MAX_VERTS_PER_EDGE)
             defer delete(idx)
             append(&idx, 0, nn)
-
             for k := 0; k < len(idx) - 1; {
                 a := idx[k]
                 b := idx[k + 1]
                 va := edge_samples[a]
                 vb := edge_samples[b]
-
                 // Find maximum deviation
                 max_dev := f32(0)
                 max_i := i32(-1)
@@ -730,18 +722,14 @@ build_poly_detail :: proc(poly_verts: [][3]f32, sample_dist, sample_max_error: f
                         max_i = m
                     }
                 }
-
                 // Add point if deviation exceeds threshold
                 if max_i != -1 && max_dev > sample_max_error * sample_max_error {
-                    // Insert new point
                     inject_at(&idx, k + 1, max_i)
                 } else {
                     k += 1
                 }
             }
-
             append(&hull, i32(j))
-
             // Add new vertices
             if swapped {
                 for k := len(idx) - 2; k > 0; k -= 1 {
@@ -756,34 +744,25 @@ build_poly_detail :: proc(poly_verts: [][3]f32, sample_dist, sample_max_error: f
             }
         }
     }
+    ok := delaunay_hull(verts[:], hull[:], tris)
+    if !ok {
+        log.warnf("Delaunay triangulation failed for small polygon, using simple triangulation")
+        triangulate_hull_simple(verts[:], hull[:], nin, tris)
+    }
     if min_extent < sample_dist * 2 {
-        if !delaunay_hull(verts[:], hull[:], tris) {
-            log.warnf("build_poly_detail: Delaunay triangulation failed for small polygon, using simple triangulation")
-            triangulate_hull_simple(verts[:], hull[:], nin, tris)
-        }
         set_triangle_flags(tris[:], hull[:])
         return true
     }
-
-    // Triangulate hull for base mesh using Delaunay triangulation
-    if !delaunay_hull(verts[:], hull[:], tris) {
-        // Fallback to simple triangulation if Delaunay fails
-        triangulate_hull_simple(verts[:], hull[:], nin, tris)
-        log.warnf("build_poly_detail: Delaunay triangulation failed, using simple triangulation")
-    }
-
     if len(tris) == 0 {
-        log.warnf("build_poly_detail: Could not triangulate polygon (%d verts)", len(verts))
+        log.warnf("Could not triangulate polygon (%d verts)", len(verts))
         return true
     }
-
     // Add interior samples if needed
     if sample_dist > 0 {
         add_interior_samples_grid(poly_verts, sample_dist, verts, samples, cs, ics, chf.ch, height_search_radius, hp)
         // Add samples with highest error first
         add_samples_by_error(verts, tris[:], samples[:], sample_max_error, MAX_VERTS)
     }
-
     return true
 }
 
@@ -809,7 +788,7 @@ calculate_polygon_min_extent_from_verts :: proc(verts: [][3]f32) -> f32 {
     return math.sqrt(min_dist)
 }
 
-// Get height from height patch (equivalent to C++ getHeight)
+// Get height from height patch
 get_height_from_patch :: proc(pos: [3]f32, cs, ics, ch: f32, height_search_radius: i32, hp: ^Height_Patch) -> f32 {
     // Convert to heightfield coordinates
     ix := i32((pos.x * ics) + 0.01)
@@ -906,38 +885,38 @@ add_interior_samples_grid :: proc(poly_verts: [][3]f32, sample_dist: f32,
 // Add samples by error priority using proper distance-to-surface calculation
 add_samples_by_error :: proc(verts: ^[dynamic][3]f32, tris: [][4]i32, samples: [][4]i32, sample_max_error: f32, max_verts: int) {
     if len(samples) == 0 || len(tris) == 0 do return
-    
+
     // Create error priority list
     Sample_Error :: struct {
         index: int,
         error: f32,
         point: [3]f32,
     }
-    
+
     errors := make([dynamic]Sample_Error, 0, len(samples))
     defer delete(errors)
-    
+
     // Calculate error for each sample point
     for sample, i in samples {
         pt := [3]f32{f32(sample.x), f32(sample.y), f32(sample.z)}
-        
+
         // Find closest triangle and calculate distance
         min_dist_sq := f32(math.F32_MAX)
-        
+
         for tri in tris {
             if tri[0] >= i32(len(verts)) || tri[1] >= i32(len(verts)) || tri[2] >= i32(len(verts)) do continue
-            
+
             v0 := verts[tri[0]]
             v1 := verts[tri[1]]
             v2 := verts[tri[2]]
-            
+
             // Calculate point-to-triangle distance
             dist_sq := point_to_triangle_distance_sq(pt, v0, v1, v2)
             min_dist_sq = min(min_dist_sq, dist_sq)
         }
-        
+
         error := math.sqrt(min_dist_sq)
-        
+
         // Only consider samples with significant error
         if error > sample_max_error * 0.1 {
             append(&errors, Sample_Error{
@@ -947,21 +926,21 @@ add_samples_by_error :: proc(verts: ^[dynamic][3]f32, tris: [][4]i32, samples: [
             })
         }
     }
-    
+
     // Sort by error (highest first)
     slice.sort_by(errors[:], proc(a, b: Sample_Error) -> bool {
         return a.error > b.error
     })
-    
+
     // Add highest error samples up to limit
     samples_added := 0
     for err in errors {
         if len(verts) >= max_verts do break
         if err.error < sample_max_error do break
-        
+
         append(verts, err.point)
         samples_added += 1
-        
+
         // Stop after adding reasonable number of samples
         if samples_added >= len(samples) / 3 do break
     }
@@ -973,14 +952,14 @@ point_to_triangle_distance_sq :: proc(p: [3]f32, a: [3]f32, b: [3]f32, c: [3]f32
     ab := b - a
     ac := c - a
     ap := p - a
-    
+
     // Calculate barycentric coordinates
     d00 := linalg.dot(ab, ab)
     d01 := linalg.dot(ab, ac)
     d11 := linalg.dot(ac, ac)
     d20 := linalg.dot(ap, ab)
     d21 := linalg.dot(ap, ac)
-    
+
     denom := d00 * d11 - d01 * d01
     if abs(denom) < 1e-10 {
         // Degenerate triangle, return distance to closest vertex
@@ -989,43 +968,42 @@ point_to_triangle_distance_sq :: proc(p: [3]f32, a: [3]f32, b: [3]f32, c: [3]f32
         dist_c := linalg.length2(p - c)
         return min(dist_a, min(dist_b, dist_c))
     }
-    
+
     inv_denom := 1.0 / denom
     u := (d11 * d20 - d01 * d21) * inv_denom
     v := (d00 * d21 - d01 * d20) * inv_denom
-    
+
     // Check if point is inside triangle
     if u >= 0 && v >= 0 && (u + v) <= 1 {
         // Point projects inside triangle
         closest := a + u * ab + v * ac
         return linalg.length2(p - closest)
     }
-    
+
     // Point projects outside triangle, find closest point on edges
     min_dist_sq := f32(math.F32_MAX)
-    
+
     // Edge AB
     t := clamp(linalg.dot(ap, ab) / d00, 0, 1)
     closest := a + t * ab
     min_dist_sq = min(min_dist_sq, linalg.length2(p - closest))
-    
+
     // Edge AC
     t = clamp(linalg.dot(ap, ac) / d11, 0, 1)
     closest = a + t * ac
     min_dist_sq = min(min_dist_sq, linalg.length2(p - closest))
-    
+
     // Edge BC
     bc := c - b
     bp := p - b
     t = clamp(linalg.dot(bp, bc) / linalg.dot(bc, bc), 0, 1)
     closest = b + t * bc
     min_dist_sq = min(min_dist_sq, linalg.length2(p - closest))
-    
+
     return min_dist_sq
 }
 
 // Flood fill algorithm for height data collection
-// Based on C++ getHeightData from RecastMeshDetail.cpp
 get_height_data :: proc(chf: ^Compact_Heightfield, poly: []u16, npoly: int,
                        verts: [][3]u16, borderSize: i32, hp: ^Height_Patch) -> bool {
 
@@ -1148,7 +1126,6 @@ Height_Patch :: struct {
 }
 
 // Seed height patch with polygon center
-// Based on C++ seedArrayWithPolyCenter from RecastMeshDetail.cpp
 seed_array_with_poly_center :: proc(chf: ^Compact_Heightfield, poly: []u16,
                                     verts: [][3]u16, minx, minz: i32, hp: ^Height_Patch) -> bool {
 
@@ -1193,11 +1170,11 @@ seed_array_with_poly_center :: proc(chf: ^Compact_Heightfield, poly: []u16,
     return false
 }
 
-// Edge management constants - matches C++ EdgeValues enum
+// Edge management constants
 EV_UNDEF :: -1
 EV_HULL :: -2
 
-// Find edge in edge list - matches C++ findEdge
+// Find edge in edge list
 find_edge :: proc(edges: []i32, s, t: i32) -> i32 {
     for i in 0..<len(edges)/4 {
         e := edges[i*4:]
@@ -1208,7 +1185,7 @@ find_edge :: proc(edges: []i32, s, t: i32) -> i32 {
     return EV_UNDEF
 }
 
-// Add edge to edge list - matches C++ addEdge
+// Add edge to edge list
 add_edge :: proc(edges: ^[dynamic]i32, s, t, l, r: i32) -> i32 {
     max_edges := 10000  // Reasonable limit
     nedges := len(edges) / 4
@@ -1228,7 +1205,7 @@ add_edge :: proc(edges: ^[dynamic]i32, s, t, l, r: i32) -> i32 {
     }
 }
 
-// Update left face of edge - matches C++ updateLeftFace
+// Update left face of edge
 update_left_face :: proc(edges: []i32, edge_idx: i32, s, t, f: i32) {
     e := edges[edge_idx*4:]
     if e[0] == s && e[1] == t && e[2] == EV_UNDEF {
@@ -1238,26 +1215,8 @@ update_left_face :: proc(edges: []i32, edge_idx: i32, s, t, f: i32) {
     }
 }
 
-// Check if two 2D segments overlap - matches C++ overlapSegSeg2d
-overlap_seg_seg_2d :: proc "contextless" (a, b, c, d: [3]f32) -> bool {
-    // Use Odin's cross product for 2D vectors (xz plane)
-    cross_2d :: proc "contextless" (p1, p2, p3: [3]f32) -> f32 {
-        return linalg.cross((p2 - p1).xz, (p3 - p1).xz)
-    }
 
-    a1 := cross_2d(a, b, d)
-    a2 := cross_2d(a, b, c)
-    if a1 * a2 < 0.0 {
-        a3 := cross_2d(c, d, a)
-        a4 := a3 + a2 - a1
-        if a3 * a4 < 0.0 {
-            return true
-        }
-    }
-    return false
-}
-
-// Check if edges overlap - matches C++ overlapEdges
+// Check if edges overlap
 overlap_edges :: proc(pts: [][3]f32, edges: []i32, s1, t1: i32) -> bool {
     nedges := len(edges) / 4
     for i in 0..<nedges {
@@ -1270,15 +1229,15 @@ overlap_edges :: proc(pts: [][3]f32, edges: []i32, s1, t1: i32) -> bool {
             continue
         }
 
-        if overlap_seg_seg_2d(pts[s0], pts[t0], pts[s1], pts[t1]) {
+        if geometry.segment_segment_intersect_2d(pts[s0], pts[t0], pts[s1], pts[t1]) {
             return true
         }
     }
     return false
 }
 
-// Complete a facet in Delaunay triangulation - matches C++ completeFacet
-complete_facet :: proc(pts: [][3]f32, edges: ^[dynamic]i32, nfaces: ^i32, e: i32) {
+// Complete a facet in Delaunay triangulation
+complete_facet :: proc(pts: [][3]f32, edges: ^[dynamic]i32, nfaces: i32, e: i32) -> i32 {
     EPS :: 1e-5
 
     edge := edges[e*4:]
@@ -1293,7 +1252,7 @@ complete_facet :: proc(pts: [][3]f32, edges: ^[dynamic]i32, nfaces: ^i32, e: i32
         t = edge[0]
     } else {
         // Edge already completed
-        return
+        return nfaces
     }
 
     // Find best point on left of edge
@@ -1337,27 +1296,28 @@ complete_facet :: proc(pts: [][3]f32, edges: ^[dynamic]i32, nfaces: ^i32, e: i32
     // Add new triangle or update edge info if s-t is on hull
     if pt < i32(len(pts)) {
         // Update face information of edge being completed
-        update_left_face(edges[:], e, s, t, nfaces^)
+        update_left_face(edges[:], e, s, t, nfaces)
 
         // Add new edge or update face info of old edge
         edge_idx := find_edge(edges[:], pt, s)
         if edge_idx == EV_UNDEF {
-            add_edge(edges, pt, s, nfaces^, EV_UNDEF)
+            add_edge(edges, pt, s, nfaces, EV_UNDEF)
         } else {
-            update_left_face(edges[:], edge_idx, pt, s, nfaces^)
+            update_left_face(edges[:], edge_idx, pt, s, nfaces)
         }
 
         // Add new edge or update face info of old edge
         edge_idx = find_edge(edges[:], t, pt)
         if edge_idx == EV_UNDEF {
-            add_edge(edges, t, pt, nfaces^, EV_UNDEF)
+            add_edge(edges, t, pt, nfaces, EV_UNDEF)
         } else {
-            update_left_face(edges[:], edge_idx, t, pt, nfaces^)
+            update_left_face(edges[:], edge_idx, t, pt, nfaces)
         }
 
-        nfaces^ += 1
+        return nfaces + 1
     } else {
         update_left_face(edges[:], e, s, t, EV_HULL)
+        return nfaces
     }
 }
 
@@ -1381,7 +1341,6 @@ validate_triangles :: proc(tris: ^[dynamic][4]i32, nverts: int) -> bool {
 // Simple but robust triangulation - replaces complex Delaunay algorithm temporarily
 delaunay_hull :: proc(pts: [][3]f32, hull: []i32, tris: ^[dynamic][4]i32) -> bool {
     clear(tris)
-
     if len(hull) < 3 do return false
     if len(pts) == 0 do return false
 
@@ -1456,27 +1415,17 @@ delaunay_hull :: proc(pts: [][3]f32, hull: []i32, tris: ^[dynamic][4]i32) -> boo
 
         if triangle_to_split >= 0 {
             old_tri := tris[triangle_to_split]
-
             // Replace the old triangle with 3 new triangles
             tris[triangle_to_split] = [4]i32{old_tri[0], old_tri[1], interior_pt, 0}
             append(tris, [4]i32{old_tri[1], old_tri[2], interior_pt, 0})
             append(tris, [4]i32{old_tri[2], old_tri[0], interior_pt, 0})
         }
     }
-
-    // Final validation
     if len(tris) == 0 do return false
-
-    if !validate_triangles(tris, len(pts)) {
-        log.warnf("delaunay_hull: Generated invalid triangles")
-        return false
-    }
-
-    return true
+    return validate_triangles(tris, len(pts))
 }
 
 // Jittered sampling functions for interior points
-// Based on C++ getJitterX/Y from RecastMeshDetail.cpp
 get_jitter_x :: proc(i: i32) -> f32 {
     h: u32 = 0x8da6b343
     return (f32((u32(i) * h) & 0xffff) / 65535.0 * 2.0) - 1.0

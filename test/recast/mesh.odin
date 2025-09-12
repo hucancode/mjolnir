@@ -60,21 +60,21 @@ test_add_vertex :: proc(t: ^testing.T) {
 test_triangulate_polygon :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
     // Test triangulation of a simple quad
-    verts := make([][3]u16, 4)
+    verts := make([][4]i32, 4)
     defer delete(verts)
 
     // Define a simple quad
-    verts[0] = {0, 0, 0}    // Vertex 0
-    verts[1] = {10, 0, 0}   // Vertex 1
-    verts[2] = {10, 0, 10}  // Vertex 2
-    verts[3] = {0, 0, 10}   // Vertex 3
+    verts[0] = {0, 0, 0, 0}    // Vertex 0
+    verts[1] = {10, 0, 0, 0}   // Vertex 1
+    verts[2] = {10, 0, 10, 0}  // Vertex 2
+    verts[3] = {0, 0, 10, 0}   // Vertex 3
 
     // Use clockwise winding as expected by Recast algorithm
     indices := []i32{0, 3, 2, 1}
     triangles := make([dynamic]i32)
     defer delete(triangles)
 
-    result := recast.triangulate_polygon_u16(verts, indices, &triangles)
+    result := recast.triangulate_polygon(verts, indices, &triangles)
     testing.expect(t, result, "Triangulation should succeed")
     testing.expect(t, len(triangles) == 6, "Quad should produce 2 triangles (6 indices)")
 
@@ -89,23 +89,22 @@ test_triangulate_polygon :: proc(t: ^testing.T) {
 test_triangulate_concave_polygon :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
     // Test triangulation of a concave L-shaped polygon
-    verts := make([][3]u16, 6)
+    verts := make([][4]i32, 6)
     defer delete(verts)
 
     // Define L-shaped polygon vertices (concave)
-    verts[0] = {0, 0, 0}     // 0: Bottom-left
-    verts[1] = {20, 0, 0}    // 1: Bottom-right
-    verts[2] = {20, 0, 10}   // 2: Mid-right
-    verts[3] = {10, 0, 10}   // 3: Mid-top
-    verts[4] = {10, 0, 20}   // 4: Top-right
-    verts[5] = {0, 0, 20}    // 5: Top-left
+    verts[0] = {0, 0, 0, 0}     // 0: Bottom-left
+    verts[1] = {20, 0, 0, 0}    // 1: Bottom-right
+    verts[2] = {20, 0, 10, 0}   // 2: Mid-right
+    verts[3] = {10, 0, 10, 0}   // 3: Mid-top
+    verts[4] = {10, 0, 20, 0}   // 4: Top-right
+    verts[5] = {0, 0, 20, 0}    // 5: Top-left
 
     // Use clockwise winding for L-shaped polygon
     indices := []i32{0, 5, 4, 3, 2, 1}
     triangles := make([dynamic]i32)
     defer delete(triangles)
-
-    result := recast.triangulate_polygon_u16(verts, indices, &triangles)
+    result := recast.triangulate_polygon(verts, indices, &triangles)
     testing.expect(t, result, "Concave polygon triangulation should succeed")
     testing.expect(t, len(triangles) == 12, "6-vertex polygon should produce 4 triangles (12 indices)")
 
@@ -125,30 +124,30 @@ test_triangulate_concave_polygon :: proc(t: ^testing.T) {
 test_triangulate_star_polygon :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
     // Test triangulation of a star-shaped (highly concave) polygon
-    verts := make([][3]u16, 8)
+    verts := make([][4]i32, 8)
     defer delete(verts)
 
     // Define 4-pointed star polygon
-    center_x, center_z := u16(50), u16(50)
-    outer_radius, inner_radius := u16(40), u16(20)
+    center_x, center_z := i32(50), i32(50)
+    outer_radius, inner_radius := i32(40), i32(20)
 
     // Outer points: 0, 2, 4, 6
     // Inner points: 1, 3, 5, 7
-    verts[0] = {center_x, 0, center_z - outer_radius}    // 0: Top
-    verts[1] = {center_x + inner_radius, 0, center_z - inner_radius}  // 1: Top-right inner
-    verts[2] = {center_x + outer_radius, 0, center_z}    // 2: Right
-    verts[3] = {center_x + inner_radius, 0, center_z + inner_radius}  // 3: Bottom-right inner
-    verts[4] = {center_x, 0, center_z + outer_radius}  // 4: Bottom
-    verts[5] = {center_x - inner_radius, 0, center_z + inner_radius}  // 5: Bottom-left inner
-    verts[6] = {center_x - outer_radius, 0, center_z}  // 6: Left
-    verts[7] = {center_x - inner_radius, 0, center_z - inner_radius}  // 7: Top-left inner
+    verts[0] = {center_x, 0, center_z - outer_radius, 0}    // 0: Top
+    verts[1] = {center_x + inner_radius, 0, center_z - inner_radius, 0}  // 1: Top-right inner
+    verts[2] = {center_x + outer_radius, 0, center_z, 0}    // 2: Right
+    verts[3] = {center_x + inner_radius, 0, center_z + inner_radius, 0}  // 3: Bottom-right inner
+    verts[4] = {center_x, 0, center_z + outer_radius, 0}  // 4: Bottom
+    verts[5] = {center_x - inner_radius, 0, center_z + inner_radius, 0}  // 5: Bottom-left inner
+    verts[6] = {center_x - outer_radius, 0, center_z, 0}  // 6: Left
+    verts[7] = {center_x - inner_radius, 0, center_z - inner_radius, 0}  // 7: Top-left inner
 
     // Use clockwise winding for star polygon
     indices := []i32{0, 7, 6, 5, 4, 3, 2, 1}
     triangles := make([dynamic]i32)
     defer delete(triangles)
 
-    result := recast.triangulate_polygon_u16(verts, indices, &triangles)
+    result := recast.triangulate_polygon(verts, indices, &triangles)
     testing.expect(t, result, "Star polygon triangulation should succeed")
     testing.expect(t, len(triangles) == 18, "8-vertex polygon should produce 6 triangles (18 indices)")
 
@@ -208,21 +207,21 @@ test_geometric_primitives :: proc(t: ^testing.T) {
 test_degenerate_polygon_handling :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
     // Test handling of degenerate cases
-    verts := make([][3]u16, 4)
+    verts := make([][4]i32, 4)
     defer delete(verts)
 
     // Define a very thin polygon that might be challenging
-    verts[0] = {0, 0, 0}      // A
-    verts[1] = {100, 0, 0}    // B: Far right
-    verts[2] = {100, 0, 1}    // C: Slightly up
-    verts[3] = {0, 0, 1}      // D: Back to left
+    verts[0] = {0, 0, 0, 0}      // A
+    verts[1] = {100, 0, 0, 0}    // B: Far right
+    verts[2] = {100, 0, 1, 0}    // C: Slightly up
+    verts[3] = {0, 0, 1, 0}      // D: Back to left
 
     // Use clockwise winding for degenerate polygon
     indices := []i32{0, 3, 2, 1}
     triangles := make([dynamic]i32)
     defer delete(triangles)
 
-    result := recast.triangulate_polygon_u16(verts, indices, &triangles)
+    result := recast.triangulate_polygon(verts, indices, &triangles)
     testing.expect(t, result, "Degenerate polygon triangulation should succeed")
     testing.expect(t, len(triangles) > 0, "Should produce some triangles")
     testing.expect(t, len(triangles) % 3 == 0, "Should have complete triangles")

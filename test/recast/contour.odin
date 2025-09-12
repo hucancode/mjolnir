@@ -457,23 +457,23 @@ test_contour_generation_multiple_regions :: proc(t: ^testing.T) {
 test_triangulation_complex_polygon :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
     // Test with a more complex polygon (octagon)
-    verts := make([][3]u16, 8)
+    verts := make([][4]i32, 8)
     defer delete(verts)
     // Define octagon vertices
-    center_x, center_z := u16(50), u16(50)
-    radius := u16(30)
+    center_x, center_z := i32(50), i32(50)
+    radius := i32(30)
 
     for i in 0..<8 {
         angle := f32(i) * math.TAU / 8.0
-        x := center_x + u16(f32(radius) * math.cos(angle))
-        z := center_z + u16(f32(radius) * math.sin(angle))
-        verts[i] = {x, 0, z}
+        x := center_x + i32(f32(radius) * math.cos(angle))
+        z := center_z + i32(f32(radius) * math.sin(angle))
+        verts[i] = {x, 0, z, 0}
     }
     // Create indices in clockwise order
     indices := []i32{0, 7, 6, 5, 4, 3, 2, 1}
     triangles := make([dynamic]i32)
     defer delete(triangles)
-    result := recast.triangulate_polygon_u16(verts, indices, &triangles)
+    result := recast.triangulate_polygon(verts, indices, &triangles)
     testing.expect(t, result, "Octagon triangulation should succeed")
     testing.expect(t, len(triangles) == 18, "Octagon should produce 6 triangles (18 indices)")
     // Verify all triangles are valid
@@ -492,35 +492,35 @@ test_triangulation_edge_cases :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
     // Test 1: Triangle (minimum polygon)
     {
-        verts := [][3]u16{{0, 0, 0}, {10, 0, 0}, {5, 0, 10}}
+        verts := [][4]i32{{0, 0, 0, 0}, {10, 0, 0, 0}, {5, 0, 10, 0}}
         indices := []i32{0, 2, 1}
         triangles := make([dynamic]i32)
         defer delete(triangles)
 
-        ok := recast.triangulate_polygon_u16(verts, indices, &triangles)
+        ok := recast.triangulate_polygon(verts, indices, &triangles)
         testing.expect(t, ok, "Triangle triangulation should succeed")
         testing.expect(t, len(triangles) == 3, "Triangle should produce 1 triangle (3 indices)")
     }
 
     // Test 2: Degenerate case - less than 3 vertices
     {
-        verts := [][3]u16{{0, 0, 0}, {10, 0, 0}}
+        verts := [][4]i32{{0, 0, 0, 0}, {10, 0, 0, 0}}
         indices := []i32{0, 1}
         triangles := make([dynamic]i32)
         defer delete(triangles)
 
-        ok := recast.triangulate_polygon_u16(verts[:], indices, &triangles)
+        ok := recast.triangulate_polygon(verts[:], indices, &triangles)
         testing.expect(t, !ok, "Triangulation with 2 vertices should fail")
     }
 
     // Test 3: Self-intersecting polygon (bowtie)
     {
-        verts := [][3]u16{{0, 0, 0}, {10, 0, 10}, {10, 0, 0}, {0, 0, 10}}
+        verts := [][4]i32{{0, 0, 0, 0}, {10, 0, 10, 0}, {10, 0, 0, 0}, {0, 0, 10, 0}}
         indices := []i32{0, 1, 2, 3}
         triangles := make([dynamic]i32)
         defer delete(triangles)
 
-        ok := recast.triangulate_polygon_u16(verts[:], indices, &triangles)
+        ok := recast.triangulate_polygon(verts[:], indices, &triangles)
         // Should either succeed with some triangulation or fail gracefully
         if ok {
             testing.expect(t, len(triangles) > 0, "If successful, should produce triangles")

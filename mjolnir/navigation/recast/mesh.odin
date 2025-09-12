@@ -9,7 +9,6 @@ import "core:fmt"
 import "../../geometry"
 
 // Check if three vertices form a left turn (counter-clockwise)
-// Based on the C++ uleft function from RecastMesh.cpp
 uleft :: proc(a, b, c: [3]i16) -> bool {
     // 2D cross product in XZ plane: (b-a) × (c-a)
     // return linalg.vector_cross2(b.xz - a.xz, c.xz - a.xz) < 0
@@ -27,7 +26,6 @@ count_poly_verts :: proc(poly: []i32) -> i32 {
 
 // Get merge value for two polygons
 // Returns shared edge indices and merge value (edge length squared)
-// Based on C++ getPolyMergeValue from RecastMesh.cpp
 get_poly_merge_value :: proc(pa, pb: []i32, verts: []Mesh_Vertex, nvp: i32) -> (ea, eb, value: i32) {
     na := count_poly_verts(pa)
     nb := count_poly_verts(pb)
@@ -105,7 +103,6 @@ get_poly_merge_value :: proc(pa, pb: []i32, verts: []Mesh_Vertex, nvp: i32) -> (
 }
 
 // Merge two polygons along shared edge
-// Based on C++ mergePolyVerts from RecastMesh.cpp
 // Now uses temp_allocator for temporary array - no manual cleanup needed!
 merge_poly_verts :: proc(pa, pb: ^Poly_Build, ea, eb: i32, nvp: i32, allocator := context.allocator) {
     na := count_poly_verts(pa.verts[:])
@@ -317,35 +314,14 @@ diagonal_loose :: proc "contextless" (verts: [][4]i32, indices: []u32, a, b: int
     return in_cone_loose(verts, indices, a, b) && diagonalie_loose(verts, indices, a, b)
 }
 
-// Internal triangulation using u16 vertices
-triangulate_polygon_u16 :: proc(verts: [][3]u16, indices: []i32, triangles: ^[dynamic]i32) -> bool {
-    // Convert to [4]i32 format for triangulation
-    int_verts := make([][4]i32, len(verts))
-    defer delete(int_verts)
-    for i in 0..<len(verts) {
-        v := verts[i]
-        int_verts[i] = {i32(v.x), i32(v.y), i32(v.z), 0}
-    }
-    return triangulate_polygon(int_verts, indices, triangles)
-}
-
-// Triangulate polygon using C++ Recast ear clipping algorithm
-// Matches C++ triangulate(int n, const int* verts, int* indices, int* tris)
+// Triangulate polygon using ear clipping algorithm
 triangulate_polygon :: proc(verts: [][4]i32, indices: []i32, triangles: ^[dynamic]i32) -> bool {
-    if len(verts) < 3 {
-        log.debugf("triangulate_polygon: Too few verts: %d", len(verts))
-        return false
-    }
-    if len(verts) == 3 {
+    if len(verts) < 3 || len(indices) < 3 do return false
+    if len(indices) == 3 {
         append(triangles, indices[0], indices[1], indices[2])
         return true
     }
-    if len(indices) < 3 {
-        log.debugf("triangulate_polygon: Too few indices: %d", len(indices))
-        return false
-    }
     // Copy indices for manipulation and add ear marking bits
-    // Use u32 to support the 0x80000000 flag bit
     MIDDLE_VERTEX_MASK :: 1 << 31
     work_indices := make([]u32, len(indices))
     defer delete(work_indices)
@@ -358,13 +334,11 @@ triangulate_polygon :: proc(verts: [][4]i32, indices: []i32, triangles: ^[dynami
     for i in 0..<n {
         i1 := (i + 1) % n
         i2 := (i1 + 1) % n
-
         diag_result := diagonal(verts, work_indices, i, i2)
         if diag_result {
             work_indices[i1] |= MIDDLE_VERTEX_MASK  // Mark middle vertex as removable ear
         }
     }
-
     // Check if we found any ears for debugging purposes
     ear_count := 0
     for i in 0..<n {
@@ -373,7 +347,6 @@ triangulate_polygon :: proc(verts: [][4]i32, indices: []i32, triangles: ^[dynami
         }
     }
     log.debugf("Initial ear count: %d out of %d vertices", ear_count, n)
-
     // Remove ears until only triangle remains
     for n > 3 {
         min_len := -1
@@ -815,7 +788,7 @@ merge_triangles_into_polygons :: proc(triangles: []i32, polys: ^[dynamic]Poly_Bu
 // Check if two triangles can be merged into a valid quad
 can_merge_triangles_to_quad :: proc(tri1, tri2: []i32) -> bool {
     if len(tri1) != 3 || len(tri2) != 3 do return false
-    
+
     // Find shared edge
     shared_count := 0
     for v1 in tri1 {
@@ -823,7 +796,7 @@ can_merge_triangles_to_quad :: proc(tri1, tri2: []i32) -> bool {
             if v1 == v2 do shared_count += 1
         }
     }
-    
+
     // Must share exactly 2 vertices (one edge)
     return shared_count == 2
 }
@@ -831,23 +804,23 @@ can_merge_triangles_to_quad :: proc(tri1, tri2: []i32) -> bool {
 // Merge two triangles into a quad
 merge_triangles_to_quad :: proc(tri1, tri2: []i32) -> []i32 {
     if len(tri1) != 3 || len(tri2) != 3 do return nil
-    
+
     // Find shared vertices
     shared := make([dynamic]i32, 0, 2)
     defer delete(shared)
-    
+
     for v1 in tri1 {
         for v2 in tri2 {
             if v1 == v2 do append(&shared, v1)
         }
     }
-    
+
     if len(shared) != 2 do return nil
-    
+
     // Find unique vertices
     unique1: i32 = -1
     unique2: i32 = -1
-    
+
     for v in tri1 {
         is_shared := false
         for s in shared {
@@ -861,7 +834,7 @@ merge_triangles_to_quad :: proc(tri1, tri2: []i32) -> []i32 {
             break
         }
     }
-    
+
     for v in tri2 {
         is_shared := false
         for s in shared {
@@ -875,29 +848,29 @@ merge_triangles_to_quad :: proc(tri1, tri2: []i32) -> []i32 {
             break
         }
     }
-    
+
     if unique1 == -1 || unique2 == -1 do return nil
-    
+
     // Create quad in proper winding order
     // Find the order of shared vertices in tri1 to maintain winding
     quad := make([]i32, 4)
-    
+
     // Find indices of shared vertices in tri1
     shared0 := shared[:][0]
     shared1 := shared[:][1]
-    
+
     shared_idx1, shared_idx2 := i32(-1), i32(-1)
     for i in 0..<len(tri1) {
         if tri1[i] == shared0 do shared_idx1 = i32(i)
         if tri1[i] == shared1 do shared_idx2 = i32(i)
     }
-    
+
     // Determine winding order
     if (shared_idx1 + 1) % 3 == shared_idx2 {
         // shared[0] -> shared[1] in tri1
         quad[0] = unique1
         quad[1] = shared0
-        quad[2] = shared1 
+        quad[2] = shared1
         quad[3] = unique2
     } else {
         // shared[1] -> shared[0] in tri1
@@ -906,7 +879,7 @@ merge_triangles_to_quad :: proc(tri1, tri2: []i32) -> []i32 {
         quad[2] = shared0
         quad[3] = unique2
     }
-    
+
     return quad
 }
 
@@ -985,7 +958,7 @@ build_poly_mesh :: proc(cset: ^Contour_Set, nvp: i32, pmesh: ^Poly_Mesh) -> bool
 
         if !triangulate_polygon(cont.verts[:], indices, &triangles) {
             // Bad triangulation, should not happen.
-            log.warnf("build_poly_mesh: Bad triangulation Contour %d. Verts: %d", i, len(cont.verts))
+            log.warnf("Bad triangulation Contour %d. Verts: %d", i, len(cont.verts))
             // Debug: print vertices
             for j in 0..<min(5, len(cont.verts)) {
                 v := cont.verts[j]
@@ -1292,7 +1265,6 @@ optimize_poly_mesh :: proc(pmesh: ^Poly_Mesh) -> bool {
 }
 
 // Check if a vertex can be removed from the mesh
-// Based on C++ canRemoveVertex from RecastMesh.cpp
 can_remove_vertex :: proc(pmesh: ^Poly_Mesh, rem: u16) -> bool {
     if pmesh == nil do return false
 
@@ -1375,7 +1347,6 @@ can_remove_vertex :: proc(pmesh: ^Poly_Mesh, rem: u16) -> bool {
 }
 
 // Remove a vertex from the polygon mesh and re-triangulate the hole
-// Based on C++ removeVertex from RecastMesh.cpp
 remove_vertex :: proc(pmesh: ^Poly_Mesh, rem: u16, maxTris: i32) -> bool {
     if pmesh == nil do return false
 
@@ -1447,28 +1418,23 @@ remove_vertex :: proc(pmesh: ^Poly_Mesh, rem: u16, maxTris: i32) -> bool {
             }
         }
     }
-
     // Generate triangle indices for hole triangulation
     triangles := make([dynamic]i32, 0, maxTris * 3)
     defer delete(triangles)
-
     // Create vertex array for triangulation
-    tverts := make([][3]u16, len(hole))
+    tverts := make([][4]i32, len(hole))
     defer delete(tverts)
-
     tindices := make([]i32, len(hole))
     defer delete(tindices)
-
     for i in 0..<len(hole) {
         vert_idx := int(hole[i])
         if vert_idx < len(pmesh.verts) {
-            tverts[i] = pmesh.verts[vert_idx]
+            tverts[i] = {i32(pmesh.verts[vert_idx][0]), i32(pmesh.verts[vert_idx][1]), i32(pmesh.verts[vert_idx][2]), 0}
             tindices[i] = i32(i)
         }
     }
-
     // Triangulate the hole
-    if !triangulate_polygon_u16(tverts[:], tindices[:], &triangles) {
+    if !triangulate_polygon(tverts[:], tindices[:], &triangles) {
         return false
     }
 
@@ -1569,45 +1535,34 @@ remove_vertex :: proc(pmesh: ^Poly_Mesh, rem: u16, maxTris: i32) -> bool {
     if build_mesh_edges(pmesh, &edges, pmesh.npolys * 3) {
         update_polygon_neighbors(pmesh, edges[:])
     }
-
     return true
 }
 
 // Build portal edges between tile boundaries
-// Based on C++ implementation from RecastMesh.cpp
 build_mesh_portal_edges :: proc(pmesh: ^Poly_Mesh) -> bool {
     if pmesh == nil do return false
-
     nvp := int(pmesh.nvp)
-
     // Mark portal edges (edges on tile boundaries)
     for i in 0..<pmesh.npolys {
         pi := int(i) * nvp * 2
-
         for j in 0..<nvp {
             if pmesh.polys[pi + j] == RC_MESH_NULL_IDX do break
-
             // Check if edge has no neighbor (boundary edge)
             if pmesh.polys[pi + nvp + j] == RC_MESH_NULL_IDX {
                 k := (j + 1) % nvp
                 if pmesh.polys[pi + k] == RC_MESH_NULL_IDX do continue
-
                 va := pmesh.polys[pi + j]
                 vb := pmesh.polys[pi + k]
-
                 // Check if edge is on tile boundary by comparing vertex positions
                 if va < u16(len(pmesh.verts)) && vb < u16(len(pmesh.verts)) {
                     ax := pmesh.verts[va].x
                     az := pmesh.verts[va].z
                     bx := pmesh.verts[vb].x
                     bz := pmesh.verts[vb].z
-
                     // Check if edge aligns with tile boundary
                     // Vertices on boundary have x or z == 0 or borderSize*2
                     border := u16(pmesh.border_size * 2)
-
                     is_portal := false
-
                     // Check X boundaries
                     if (ax == 0 || ax == border) && (bx == 0 || bx == border) && ax == bx {
                         is_portal = true
@@ -1616,7 +1571,6 @@ build_mesh_portal_edges :: proc(pmesh: ^Poly_Mesh) -> bool {
                     if (az == 0 || az == border) && (bz == 0 || bz == border) && az == bz {
                         is_portal = true
                     }
-
                     if is_portal {
                         // Mark as portal edge using upper bits of neighbor value
                         // Set portal direction based on which boundary
@@ -1625,7 +1579,6 @@ build_mesh_portal_edges :: proc(pmesh: ^Poly_Mesh) -> bool {
                         else if ax == border { dir = 1 }  // +X
                         else if az == 0 { dir = 2 }      // -Z
                         else if az == border { dir = 3 }  // +Z
-
                         // Store portal info in upper bits
                         pmesh.polys[pi + nvp + j] = 0x8000 | (dir << 13)
                     }
@@ -1633,6 +1586,5 @@ build_mesh_portal_edges :: proc(pmesh: ^Poly_Mesh) -> bool {
             }
         }
     }
-
     return true
 }
