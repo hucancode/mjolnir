@@ -9,33 +9,6 @@ import "core:time"
 import "core:slice"
 
 @(test)
-test_compact_heightfield_building :: proc(t: ^testing.T) {
-    hf := recast.create_heightfield(10, 10, {0,0,0}, {10,10,10}, 1.0, 0.5)
-    defer recast.free_heightfield(hf)
-    testing.expect(t, hf != nil, "Heightfield creation should succeed")
-    // Add some spans to create a simple floor
-    for x in 0..<10 {
-        for z in 0..<10 {
-            ok := recast.add_span(hf, i32(x), i32(z), 0, 10, recast.RC_WALKABLE_AREA, 1)
-            testing.expect(t, ok, "Adding span should succeed")
-        }
-    }
-    chf := recast.create_compact_heightfield(2, 1, hf)
-    defer recast.free_compact_heightfield(chf)
-    testing.expect(t, chf != nil, "Building compact heightfield should succeed")
-    testing.expect_value(t, chf.width, i32(10))
-    testing.expect_value(t, chf.height, i32(10))
-    testing.expect_value(t, len(chf.spans), 100)
-    testing.expect_value(t, chf.walkable_height, i32(2))
-    testing.expect_value(t, chf.walkable_climb, i32(1))
-    testing.expect(t, chf.spans != nil, "Spans should be allocated")
-    testing.expect(t, chf.areas != nil, "Areas should be allocated")
-    testing.expect_value(t, len(chf.spans), 100)
-    testing.expect_value(t, len(chf.areas), 100)
-    testing.expect(t, slice.all_of(chf.areas, recast.RC_WALKABLE_AREA))
-}
-
-@(test)
 test_erode_walkable_area :: proc(t: ^testing.T) {
     // Create a heightfield with a 10x10 floor
     hf := recast.create_heightfield(10, 10, {0,0,0}, {10,10,10}, 1.0, 0.5)

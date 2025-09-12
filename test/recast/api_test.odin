@@ -123,7 +123,24 @@ test_api_quick_build :: proc(t: ^testing.T) {
 @(test)
 test_api_configuration :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
-    // Test different configurations
+    // Test that different configurations produce valid results
+    vertices := [][3]f32{
+        {0, 0, 0},
+        {10, 0, 0},
+        {10, 0, 10},
+        {0, 0, 10},
+    }
+
+    indices := []i32{
+        0, 1, 2,
+        0, 2, 3,
+    }
+
+    areas := []u8{
+        recast.RC_WALKABLE_AREA,
+        recast.RC_WALKABLE_AREA,
+    }
+
     configs := []struct{name: string, cs: f32, ch: f32}{
         {"Fast", 0.5, 0.5},
         {"Balanced", 0.3, 0.2},
@@ -147,60 +164,24 @@ test_api_configuration :: proc(t: ^testing.T) {
             detail_sample_max_error = 1,
         }
 
-        log.infof("Config %s: cs=%.2f, ch=%.2f, min_region=%d",
-                  cfg.name, config.cs, config.ch, config.min_region_area)
-    }
-}
+        // Test that configuration produces valid navmesh
+        pmesh, dmesh, ok := recast.build_navmesh(vertices, indices, areas, config)
+        testing.expect(t, ok, "Configuration should produce valid navmesh")
+        testing.expect(t, pmesh != nil, "Should generate polygon mesh")
+        testing.expect(t, dmesh != nil, "Should generate detail mesh")
+        
+        if pmesh != nil {
+            testing.expect(t, pmesh.npolys > 0, "Should generate at least one polygon")
+            testing.expect(t, len(pmesh.verts) > 0, "Should generate vertices")
+        }
 
-// Removed validation test - over-engineered
-/*
-@(test)
-test_api_validation_and_debugging :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    // Create a mesh for validation testing
-    vertices := [][3]f32{
-        {0, 0, 0},
-        {30, 0, 0},
-        {30, 0, 30},
-        {0, 0, 30},
-    }
-
-    indices := []i32{
-        0, 1, 2,
-        0, 2, 3,
-    }
-
-    pmesh, dmesh, ok := recast.quick_build_navmesh(vertices, indices, 0.3)
-    testing.expect(t, ok, "Failed to build test mesh")
-
-    defer {
         recast.free_poly_mesh(pmesh)
         recast.free_poly_mesh_detail(dmesh)
+
+        log.infof("Config %s: cs=%.2f, ch=%.2f -> %d polygons",
+                  cfg.name, config.cs, config.ch, pmesh != nil ? pmesh.npolys : 0)
     }
-
-    // Test validation
-    validation := recast.validate_navmesh(pmesh, dmesh)
-    defer recast.free_validation_report(&validation)
-
-    testing.expect(t, validation.is_valid, "Validation should pass for good mesh")
-    testing.expect(t, validation.polygon_count > 0, "Should have polygons")
-    testing.expect(t, validation.vertex_count > 0, "Should have vertices")
-    testing.expect(t, validation.total_memory_bytes > 0, "Should calculate memory usage")
-
-    // Test statistics
-    stats := recast.get_mesh_stats(pmesh, dmesh)
-    defer delete(stats)
-
-    testing.expect(t, stats["polygons"] > 0, "Should have polygon count in stats")
-    testing.expect(t, stats["polygon_vertices"] > 0, "Should have vertex count in stats")
-
-    // Test validation report printing (just ensure it doesn't crash)
-    recast.print_validation_report(&validation)
-
-    log.infof("API Validation Test: %d polygons, %.2f KB memory",
-              validation.polygon_count, f32(validation.total_memory_bytes) / 1024.0)
 }
-*/
 
 @(test)
 test_api_error_handling :: proc(t: ^testing.T) {
@@ -249,41 +230,6 @@ test_api_error_handling :: proc(t: ^testing.T) {
 
     log.infof("API Error Handling Test: Correctly handled invalid inputs")
 }
-
-// Removed memory estimation test - over-engineered
-/*
-@(test)
-test_api_memory_estimation :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    // Test memory estimation functions
-    config := recast.create_config_from_preset(.Balanced)
-    config.base.bmin = {0, 0, 0}
-    config.base.bmax = {100, 10, 100}
-    config.base.cs = 1.0
-    config.base.ch = 0.5
-
-    // Calculate grid dimensions for estimation functions
-    config.base.width = i32((config.base.bmax.x - config.base.bmin.x) / config.base.cs + 0.5)
-    config.base.height = i32((config.base.bmax.z - config.base.bmin.z) / config.base.cs + 0.5)
-
-    vert_count: i32 = 1000
-    tri_count: i32 = 2000
-
-    bytes, breakdown := recast.estimate_memory_usage(&config, vert_count, tri_count)
-    defer delete(breakdown)
-
-    testing.expect(t, bytes > 0, "Should estimate positive memory usage")
-    testing.expect(t, len(breakdown) > 0, "Should provide memory breakdown")
-    testing.expect(t, "heightfield" in breakdown, "Should include heightfield memory")
-    testing.expect(t, "compact_heightfield" in breakdown, "Should include compact heightfield memory")
-
-    // Test build time estimation
-    estimated_time := recast.estimate_build_time(vert_count, tri_count, &config)
-    testing.expect(t, estimated_time > 0, "Should estimate positive build time")
-
-    log.infof("API Memory Estimation Test: %d bytes, %.2f ms estimated", bytes, estimated_time)
-}
-*/
 
 @(test)
 test_api_build_with_areas :: proc(t: ^testing.T) {

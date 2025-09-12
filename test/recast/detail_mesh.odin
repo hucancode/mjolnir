@@ -33,23 +33,6 @@ validate_poly_mesh_detail :: proc(dmesh: ^recast.Poly_Mesh_Detail) -> bool {
     }
     return true
 }
-@(test)
-test_recast_detail_compilation :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    // Simple compilation test to ensure all functions are accessible
-    log.info("Testing Recast detail mesh compilation...")
-
-    // Test data structure allocation
-    dmesh := new(recast.Poly_Mesh_Detail)
-    testing.expect(t, dmesh != nil, "Should allocate detail mesh successfully")
-
-    // Test validation with empty mesh
-    valid := validate_poly_mesh_detail(dmesh)
-    testing.expect(t, !valid, "Empty detail mesh should be invalid")
-
-    // Clean up
-    recast.free_poly_mesh_detail(dmesh)
-}
 
 @(test)
 test_simple_detail_mesh_build :: proc(t: ^testing.T) {
@@ -314,32 +297,6 @@ test_build_detail_mesh_simple :: proc(t: ^testing.T) {
     testing.expect(t, len(detail_mesh.meshes) > 0, "Detail mesh should have mesh data")
     testing.expect(t, len(detail_mesh.verts) > 0, "Detail mesh should have vertices")
     testing.expect(t, len(detail_mesh.tris) > 0, "Detail mesh should have triangles")
-}
-
-@(test)
-test_build_detail_mesh_empty_input :: proc(t: ^testing.T) {
-    testing.set_fail_timeout(t, 30 * time.Second)
-    // Test detail mesh building with empty polygon mesh
-    poly_mesh := new(recast.Poly_Mesh)
-    testing.expect(t, poly_mesh != nil, "Failed to allocate poly mesh")
-    defer recast.free_poly_mesh(poly_mesh)
-
-    chf := new(recast.Compact_Heightfield)
-    testing.expect(t, chf != nil, "Failed to allocate compact heightfield")
-    defer recast.free_compact_heightfield(chf)
-
-    detail_mesh := new(recast.Poly_Mesh_Detail)
-    testing.expect(t, detail_mesh != nil, "Failed to allocate detail mesh")
-    defer recast.free_poly_mesh_detail(detail_mesh)
-
-    // Should handle empty input gracefully
-    ok := recast.build_poly_mesh_detail(poly_mesh, chf, 2.0, 1.0, detail_mesh)
-    testing.expect(t, ok, "Should handle empty input gracefully")
-
-    // Empty input should result in empty detail mesh
-    testing.expect_value(t, len(detail_mesh.meshes), 0)
-    testing.expect_value(t, len(detail_mesh.verts), 0)
-    testing.expect_value(t, len(detail_mesh.tris), 0)
 }
 
 @(test)

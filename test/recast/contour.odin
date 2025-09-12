@@ -795,7 +795,6 @@ test_basic_contour_simplification :: proc(t: ^testing.T) {
     testing.expect_value(t, len(no_simp), len(raw_verts))
 }
 
-// TODO: this test is incomplete, it does not expect anything
 @(test)
 test_simplify_contour_algorithm :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)
@@ -814,15 +813,26 @@ test_simplify_contour_algorithm :: proc(t: ^testing.T) {
         // Left edge (with extra points)
         {0, 0, 5, 0},
     }
-    // Test different error tolerances
+    // Test different error tolerances - higher error should produce fewer vertices
     max_errors := []f32{0.01, 0.5, 1.0, 2.0}
     max_edge_len: i32 = 12
+    prev_length := len(raw_verts) + 1 // Initialize to larger than original
     for max_error in max_errors {
         simplified := make([dynamic][4]i32, 0)
         defer delete(simplified)
         recast.simplify_contour(raw_verts, &simplified, max_error, 1.0, max_edge_len)
+        // Validate simplification results
+        testing.expect(t, len(simplified) > 0, "Simplification should produce vertices")
+        testing.expect(t, len(simplified) <= len(raw_verts), "Simplified contour should have fewer or equal vertices")
+        testing.expect(t, len(simplified) >= 4, "Square contour should have at least 4 vertices")
+        // Higher error tolerance should generally produce fewer vertices (or same)
+        if max_error > 0.01 {
+            testing.expect(t, len(simplified) <= prev_length, "Higher error tolerance should produce fewer/equal vertices")
+        }
+        prev_length = len(simplified)
     }
-    // Test with region connections
+
+    // Test with region connections - region boundaries should be preserved
     {
         raw_verts_with_regions := [][4]i32{
             {0, 0, 0, 0},
@@ -835,5 +845,16 @@ test_simplify_contour_algorithm :: proc(t: ^testing.T) {
         simplified := make([dynamic][4]i32, 0)
         defer delete(simplified)
         recast.simplify_contour(raw_verts_with_regions, &simplified, 1.0, 1.0, 12)
+        // Should preserve region boundary vertices
+        testing.expect(t, len(simplified) > 0, "Region contour simplification should produce vertices")
+        testing.expect(t, len(simplified) >= 4, "Region contour should have at least 4 vertices")
+        // Check that region information is preserved in simplified contour
+        region_changes := 0
+        for i in 1..<len(simplified) {
+            if simplified[i][3] != simplified[i-1][3] {
+                region_changes += 1
+            }
+        }
+        testing.expect(t, region_changes >= 2, "Should preserve region boundaries")
     }
 }
