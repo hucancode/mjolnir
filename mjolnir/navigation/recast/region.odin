@@ -957,7 +957,7 @@ group_connected_spans :: proc(chf: ^Compact_Heightfield, span_indices: []i32, re
     visited := make([]bool, len(span_indices))
     defer delete(visited)
     groups := make([dynamic][dynamic]i32, 0, 4)
-    for i, span_idx in span_indices {
+    for span_idx, i in span_indices {
         if visited[i] do continue
         // Start new group with flood fill
         group := make([dynamic]i32, 0, 16)

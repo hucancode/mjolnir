@@ -1323,6 +1323,7 @@ complete_facet :: proc(pts: [][3]f32, edges: ^[dynamic]i32, nfaces: i32, e: i32)
 
 // Validate triangles after generation
 validate_triangles :: proc(tris: ^[dynamic][4]i32, nverts: int) -> bool {
+    if len(tris) == 0 do  return false
     for i in 0..<len(tris) {
         t := &tris[i]
         // Check for invalid vertex indices
@@ -1343,12 +1344,10 @@ delaunay_hull :: proc(pts: [][3]f32, hull: []i32, tris: ^[dynamic][4]i32) -> boo
     clear(tris)
     if len(hull) < 3 do return false
     if len(pts) == 0 do return false
-
     // Validate hull indices
     for h in hull {
         if h < 0 || h >= i32(len(pts)) do return false
     }
-
     // Simple fan triangulation from first hull vertex
     // This is a correct and robust approach for convex polygons
     for i in 1..<len(hull) - 1 {
@@ -1356,19 +1355,16 @@ delaunay_hull :: proc(pts: [][3]f32, hull: []i32, tris: ^[dynamic][4]i32) -> boo
         v0 := hull[0]
         v1 := hull[i]
         v2 := hull[i + 1]
-
         // Ensure vertices are different (non-degenerate)
         if v0 != v1 && v1 != v2 && v2 != v0 {
             // Check triangle orientation - ensure counter-clockwise in XZ plane
             p0 := pts[v0]
             p1 := pts[v1]
             p2 := pts[v2]
-
             // Calculate signed area (cross product in XZ plane)
             edge1 := [2]f32{p1.x - p0.x, p1.z - p0.z}
             edge2 := [2]f32{p2.x - p0.x, p2.z - p0.z}
             signed_area := edge1.x * edge2.y - edge1.y * edge2.x
-
             // Only add triangles with non-zero area
             if abs(signed_area) > 1e-10 {
                 // Ensure counter-clockwise winding
@@ -1380,11 +1376,9 @@ delaunay_hull :: proc(pts: [][3]f32, hull: []i32, tris: ^[dynamic][4]i32) -> boo
             }
         }
     }
-
     // Handle interior points (points not in hull)
     interior_points := make([dynamic]i32, 0, len(pts))
     defer delete(interior_points)
-
     for i in 0..<len(pts) {
         is_hull := false
         for h in hull {
@@ -1397,12 +1391,10 @@ delaunay_hull :: proc(pts: [][3]f32, hull: []i32, tris: ^[dynamic][4]i32) -> boo
             append(&interior_points, i32(i))
         }
     }
-
     // For interior points, add them to existing triangles using simple approach
     // This is not optimal Delaunay but will generate valid triangulations
     for interior_pt in interior_points {
         if len(tris) == 0 do break
-
         // Find a triangle to subdivide (use first valid one for simplicity)
         triangle_to_split := -1
         for tri_idx in 0..<len(tris) {
@@ -1421,7 +1413,6 @@ delaunay_hull :: proc(pts: [][3]f32, hull: []i32, tris: ^[dynamic][4]i32) -> boo
             append(tris, [4]i32{old_tri[2], old_tri[0], interior_pt, 0})
         }
     }
-    if len(tris) == 0 do return false
     return validate_triangles(tris, len(pts))
 }
 

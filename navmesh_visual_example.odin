@@ -1478,9 +1478,8 @@ analyze_detour_connectivity :: proc(nav_mesh: ^detour.Nav_Mesh) {
 
         append(&components, component_size)
     }
-
     log.infof("Found %d connected components in Detour NavMesh:", len(components))
-    for i, size in components {
+    for size, i in components {
         log.infof("  Component %d: %d polygons", i, size)
     }
 
