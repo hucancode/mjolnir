@@ -117,9 +117,8 @@ navmesh_build_from_recast :: proc(renderer: ^RendererNavMesh, gpu_context: ^gpu.
     if poly_mesh == nil {
         return false
     }
-
-    use_detail_mesh := detail_mesh != nil && len(detail_mesh.verts) > 0
-
+    use_detail_mesh := false//detail_mesh != nil && len(detail_mesh.verts) > 0
+    // TODO: need to investigate why we cannot use detail mesh to render
     vertices := make([dynamic]NavMeshVertex, 0, len(poly_mesh.verts))
     indices := make([dynamic]u32, 0, poly_mesh.npolys * 6)
     defer delete(vertices)
