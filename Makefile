@@ -27,7 +27,9 @@ shader: $(SPV_SHADERS) $(SPV_COMPUTE_SHADERS)
 	@echo "Shader compilation complete."
 
 test:
-	timeout 150s odin test test -out:bin/test
+	timeout 50s odin test test -out:bin/test && \
+	timeout 50s odin test test/recast -out:bin/test && \
+	timeout 50s odin test test/detour -out:bin/test
 
 clean:
 	rm -rf bin/*

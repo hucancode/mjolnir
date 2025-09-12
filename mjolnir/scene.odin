@@ -75,6 +75,9 @@ NodeAttachment :: union {
   ParticleSystemAttachment,
   EmitterAttachment,
   ForceFieldAttachment,
+  NavMeshAttachment,
+  NavMeshAgentAttachment,
+  NavMeshObstacleAttachment,
 }
 
 Node :: struct {
@@ -84,6 +87,8 @@ Node :: struct {
   name:            string,
   attachment:      NodeAttachment,
   culling_enabled: bool,
+  visible:         bool,              // Node's own visibility state
+  parent_visible:  bool,              // Visibility inherited from parent chain
   pending_deletion: bool, // Atomic flag for safe deletion
 }
 
@@ -94,6 +99,8 @@ init_node :: proc(self: ^Node, name: string = "") {
   self.transform = geometry.TRANSFORM_IDENTITY
   self.name = name
   self.culling_enabled = true
+  self.visible = true
+  self.parent_visible = true
 }
 
 deinit_node :: proc(self: ^Node, warehouse: ^ResourceWarehouse) {
@@ -239,6 +246,7 @@ SceneTraverseEntry :: struct {
   handle:           Handle,
   parent_transform: matrix[4, 4]f32,
   parent_is_dirty:  bool,
+  parent_is_visible: bool,
 }
 
 Scene :: struct {
@@ -281,7 +289,7 @@ scene_traverse :: proc(
   using geometry
   append(
     &self.traversal_stack,
-    SceneTraverseEntry{self.root, linalg.MATRIX4F32_IDENTITY, false},
+    SceneTraverseEntry{self.root, linalg.MATRIX4F32_IDENTITY, false, true},
   )
   for len(self.traversal_stack) > 0 {
     entry := pop(&self.traversal_stack)
@@ -295,13 +303,21 @@ scene_traverse :: proc(
     }
     // Skip nodes that are pending deletion
     if current_node.pending_deletion do continue
+    
+    // Update parent_visible from parent chain only
+    current_node.parent_visible = entry.parent_is_visible
+    
     is_dirty := transform_update_local(&current_node.transform)
     if entry.parent_is_dirty || is_dirty {
       transform_update_world(&current_node.transform, entry.parent_transform)
     }
-    if callback != nil && !callback(current_node, cb_context) do continue
+    // Only call the callback if the node is effectively visible
+    if callback != nil && current_node.parent_visible && current_node.visible {
+      if !callback(current_node, cb_context) do continue
+    }
     // Copy children array to avoid race conditions during iteration
-    children_copy := make([]Handle, len(current_node.children), context.temp_allocator)
+    children_copy := make([]Handle, len(current_node.children))
+    defer delete(children_copy)
     copy(children_copy, current_node.children[:])
     for child_handle in children_copy {
       append(
@@ -310,6 +326,7 @@ scene_traverse :: proc(
           child_handle,
           geometry.transform_get_world_matrix(&current_node.transform),
           is_dirty || entry.parent_is_dirty,
+          current_node.parent_visible && current_node.visible, // Pass combined visibility to children
         },
       )
     }
@@ -322,7 +339,7 @@ scene_traverse_linear :: proc(
   cb_context: rawptr,
   callback: SceneTraversalCallback,
 ) -> bool {
-  for &entry in self.nodes.entries do if entry.active {
+  for &entry in self.nodes.entries do if entry.active && entry.item.parent_visible && entry.item.visible && !entry.item.pending_deletion {
     callback(&entry.item, cb_context)
   }
   return true

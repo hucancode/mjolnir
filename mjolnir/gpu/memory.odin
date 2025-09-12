@@ -913,8 +913,7 @@ transition_vk_images :: proc(
   dst_stage: vk.PipelineStageFlags,
   dst_access_mask: vk.AccessFlags,
 ) {
-  barriers := make([]vk.ImageMemoryBarrier, len(images))
-  defer delete(barriers)
+  barriers := make([]vk.ImageMemoryBarrier, len(images), context.temp_allocator)
   for image, i in images {
     barriers[i] = vk.ImageMemoryBarrier {
       sType = .IMAGE_MEMORY_BARRIER,
@@ -1002,8 +1001,7 @@ transition_2d_images :: proc(
   dst_stage: vk.PipelineStageFlags,
   dst_access_mask: vk.AccessFlags,
 ) {
-  barriers := make([]vk.ImageMemoryBarrier, len(images))
-  defer delete(barriers)
+  barriers := make([]vk.ImageMemoryBarrier, len(images), context.temp_allocator)
   for texture, i in images {
     barriers[i] = vk.ImageMemoryBarrier {
       sType = .IMAGE_MEMORY_BARRIER,
@@ -1045,8 +1043,7 @@ transition_cube_images :: proc(
   dst_stage: vk.PipelineStageFlags,
   dst_access_mask: vk.AccessFlags,
 ) {
-  barriers := make([]vk.ImageMemoryBarrier, len(images))
-  defer delete(barriers)
+  barriers := make([]vk.ImageMemoryBarrier, len(images), context.temp_allocator)
   for texture, i in images {
     barriers[i] = vk.ImageMemoryBarrier {
       sType = .IMAGE_MEMORY_BARRIER,

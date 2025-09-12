@@ -24,8 +24,7 @@ load_gltf :: proc(
   nodes: [dynamic]Handle,
   ret: cgltf.result,
 ) {
-  gltf_path_cstr := strings.clone_to_cstring(path)
-  defer delete(gltf_path_cstr)
+  gltf_path_cstr := strings.clone_to_cstring(path, context.temp_allocator)
   options: cgltf.options
   gltf_data := cgltf.parse_file(options, gltf_path_cstr) or_return
   defer cgltf.free(gltf_data)
@@ -37,29 +36,23 @@ load_gltf :: proc(
     return nodes, .success
   }
   // Track bone matrix buffer mapping (1 skin = 1 bone matrix buffer)
-  skin_to_bone_offset := make(map[^cgltf.skin]u32)
-  defer delete(skin_to_bone_offset)
+  skin_to_bone_offset := make(map[^cgltf.skin]u32, context.temp_allocator)
   // Track which mesh gets animation
-  skin_to_first_mesh := make(map[^cgltf.skin]resource.Handle)
-  defer delete(skin_to_first_mesh)
+  skin_to_first_mesh := make(map[^cgltf.skin]resource.Handle, context.temp_allocator)
   // Track texture deduplication
-  texture_to_handle := make(map[^cgltf.texture]resource.Handle)
-  defer delete(texture_to_handle)
+  texture_to_handle := make(map[^cgltf.texture]resource.Handle, context.temp_allocator)
   // Track material deduplication
-  material_to_handle := make(map[^cgltf.material]resource.Handle)
-  defer delete(material_to_handle)
+  material_to_handle := make(map[^cgltf.material]resource.Handle, context.temp_allocator)
   TraverseEntry :: struct {
     idx:    u32,
     parent: Handle,
   }
-  stack := make([dynamic]TraverseEntry, 0)
-  defer delete(stack)
+  stack := make([dynamic]TraverseEntry, 0, context.temp_allocator)
   is_gltf_child_node: bit_set[0 ..< 128] // Assuming max 128 nodes, TODO: fix this
-  node_ptr_to_idx_map := make(map[^cgltf.node]u32)
+  node_ptr_to_idx_map := make(map[^cgltf.node]u32, context.temp_allocator)
   for &node, i in gltf_data.nodes {
     node_ptr_to_idx_map[&node] = u32(i)
   }
-  defer delete(node_ptr_to_idx_map)
   for &node in gltf_data.nodes {
     for child_ptr in node.children {
       child_idx := node_ptr_to_idx_map[child_ptr]

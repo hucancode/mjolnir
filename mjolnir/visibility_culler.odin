@@ -43,7 +43,6 @@ ActiveCameraData :: struct {
   padding:        [3]u32,
 }
 
-
 VISIBILITY_BUFFER_COUNT :: 3 // Ring buffer for 1-2 frame latency
 
 // Visibility culler
@@ -153,8 +152,7 @@ visibility_culler_init :: proc(
   ) or_return
 
   // Allocate multi-camera descriptor sets
-  layouts := make([]vk.DescriptorSetLayout, MAX_FRAMES_IN_FLIGHT)
-  defer delete(layouts)
+  layouts := make([]vk.DescriptorSetLayout, MAX_FRAMES_IN_FLIGHT, context.temp_allocator)
   for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
     layouts[i] = self.descriptor_set_layout
   }

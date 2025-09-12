@@ -1,8 +1,8 @@
 package tests
 
-import mjolnir "../mjolnir"
-import geometry "../mjolnir/geometry"
-import resource "../mjolnir/resource"
+import "../mjolnir"
+import "../mjolnir/geometry"
+import "../mjolnir/resource"
 import "core:fmt"
 import "core:log"
 import "core:math"

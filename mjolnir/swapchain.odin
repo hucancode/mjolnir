@@ -53,12 +53,12 @@ swapchain_init :: proc(
       return capabilities.currentExtent
     }
     return {
-      math.clamp(
+      clamp(
         actual_width,
         capabilities.minImageExtent.width,
         capabilities.maxImageExtent.width,
       ),
-      math.clamp(
+      clamp(
         actual_height,
         capabilities.minImageExtent.height,
         capabilities.maxImageExtent.height,
@@ -71,7 +71,7 @@ swapchain_init :: proc(
     gpu_context.physical_device,
     gpu_context.surface,
   ) or_return
-  defer gpu.swapchain_support_deinit(&support)
+  defer gpu.swapchain_support_deinit(&support) // Clean up since we're not transferring ownership
   self.format = pick_swapchain_format(support.formats)
   self.extent = pick_swapchain_extent(
     support.capabilities,

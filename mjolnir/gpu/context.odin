@@ -51,6 +51,13 @@ SwapchainSupport :: struct {
   present_modes: []vk.PresentModeKHR, // Owned by this struct if allocated by it
 }
 
+swapchain_support_deinit :: proc(support: ^SwapchainSupport) {
+  delete(support.formats)
+  support.formats = nil
+  delete(support.present_modes)
+  support.present_modes = nil
+}
+
 FoundQueueFamilyIndices :: struct {
   graphics_family: u32,
   present_family:  u32,
@@ -136,8 +143,7 @@ debug_callback :: proc "system" (
 
 @(private = "file")
 vulkan_instance_init :: proc(self: ^GPUContext) -> vk.Result {
-  extensions := slice.clone_to_dynamic(glfw.GetRequiredInstanceExtensions())
-  defer delete(extensions)
+  extensions := slice.clone_to_dynamic(glfw.GetRequiredInstanceExtensions(), context.temp_allocator)
   app_info := vk.ApplicationInfo {
     sType              = .APPLICATION_INFO,
     pApplicationName   = TITLE,
@@ -239,13 +245,6 @@ query_swapchain_support :: proc(
   return support, .SUCCESS
 }
 
-swapchain_support_deinit :: proc(self: ^SwapchainSupport) {
-  delete(self.formats)
-  delete(self.present_modes)
-  self.formats = nil
-  self.present_modes = nil
-}
-
 @(private = "file")
 score_physical_device :: proc(
   self: ^GPUContext,
@@ -268,8 +267,7 @@ score_physical_device :: proc(
   }
   ext_count: u32
   vk.EnumerateDeviceExtensionProperties(device, nil, &ext_count, nil) or_return
-  available_extensions := make([]vk.ExtensionProperties, ext_count)
-  defer delete(available_extensions)
+  available_extensions := make([]vk.ExtensionProperties, ext_count, context.temp_allocator)
   vk.EnumerateDeviceExtensionProperties(
     device,
     nil,
@@ -328,8 +326,7 @@ physical_device_init :: proc(self: ^GPUContext) -> vk.Result {
     return .ERROR_INITIALIZATION_FAILED
   }
   log.infof("Found %d physical device(s)", count)
-  devices_slice := make([]vk.PhysicalDevice, count)
-  defer delete(devices_slice)
+  devices_slice := make([]vk.PhysicalDevice, count, context.temp_allocator)
   vk.EnumeratePhysicalDevices(
     self.instance,
     &count,
@@ -367,8 +364,7 @@ find_queue_families :: proc(
 ) {
   count: u32
   vk.GetPhysicalDeviceQueueFamilyProperties(physical_device, &count, nil)
-  queue_families_slice := make([]vk.QueueFamilyProperties, count)
-  defer delete(queue_families_slice)
+  queue_families_slice := make([]vk.QueueFamilyProperties, count, context.temp_allocator)
   vk.GetPhysicalDeviceQueueFamilyProperties(
     physical_device,
     &count,
@@ -416,11 +412,9 @@ logical_device_init :: proc(self: ^GPUContext) -> vk.Result {
   self.surface_capabilities = support_details.capabilities
   self.surface_formats = support_details.formats
   self.present_modes = support_details.present_modes
-  queue_create_infos_list := make([dynamic]vk.DeviceQueueCreateInfo, 0, 2)
-  defer delete(queue_create_infos_list)
+  queue_create_infos_list := make([dynamic]vk.DeviceQueueCreateInfo, 0, 2, context.temp_allocator)
   unique_queue_families := make(map[u32]struct {
-    }, 2)
-  defer delete(unique_queue_families)
+    }, 2, context.temp_allocator)
   unique_queue_families[self.graphics_family] = {}
   unique_queue_families[self.present_family] = {}
   queue_priority: f32 = 1.0

@@ -14,10 +14,8 @@ Bone :: struct {
 }
 
 bone_deinit :: proc(bone: ^Bone) {
-  if bone.children != nil {
-    delete(bone.children)
-    bone.children = nil
-  }
+  delete(bone.children)
+  bone.children = nil
 }
 
 Skinning :: struct {
@@ -133,8 +131,7 @@ sample_clip :: proc(
     transform: matrix[4, 4]f32,
     bone:      u32,
   }
-  stack := make([dynamic]TraverseEntry, 0, len(skin.bones))
-  defer delete(stack)
+  stack := make([dynamic]TraverseEntry, 0, len(skin.bones), context.temp_allocator)
   append(
     &stack,
     TraverseEntry{linalg.MATRIX4F32_IDENTITY, skin.root_bone_index},

@@ -16,6 +16,7 @@ import "core:unicode/utf8"
 import "geometry"
 import "gpu"
 import "resource"
+import "navigation/recast"
 import "vendor:glfw"
 import mu "vendor:microui"
 import vk "vendor:vulkan"
@@ -215,6 +216,7 @@ Engine :: struct {
   transparent:                 RendererTransparent,
   postprocess:                 RendererPostProcess,
   ui:                          RendererUI,
+  navmesh:                     RendererNavMesh,
   command_buffers:             [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
   // Parallel shadow command buffers
   shadow_command_buffers:      [MAX_FRAMES_IN_FLIGHT][MAX_SHADOW_MAPS]vk.CommandBuffer,
@@ -484,6 +486,8 @@ init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
     self.swapchain.extent.height,
     &self.warehouse,
   ) or_return
+  log.debugf("initializing navigation mesh renderer")
+  navmesh_init(&self.navmesh, &self.gpu_context, &self.warehouse) or_return
   ui_init(
     &self.ui,
     &self.gpu_context,
@@ -677,7 +681,6 @@ update_emitters :: proc(self: ^Engine, delta_time: f32) {
   params.emitter_count = u32(emitter_idx)
 }
 
-// Get main camera from the main render target for the current frame
 get_main_camera :: proc(engine: ^Engine) -> ^geometry.Camera {
   main_render_target := resource.get(
     engine.warehouse.render_targets,
@@ -688,7 +691,6 @@ get_main_camera :: proc(engine: ^Engine) -> ^geometry.Camera {
   }
   return resource.get(engine.warehouse.cameras, main_render_target.camera)
 }
-
 
 @(private = "file")
 update_force_fields :: proc(self: ^Engine) {
@@ -734,7 +736,6 @@ update_input :: proc(self: ^Engine) -> bool {
   return true
 }
 
-// Update thread - no GLFW operations
 update :: proc(self: ^Engine) -> bool {
   delta_time := get_delta_time(self)
   if delta_time < UPDATE_FRAME_TIME {
@@ -807,6 +808,7 @@ deinit :: proc(self: ^Engine) {
   vk.DestroyFence(self.gpu_context.device, self.frame_fence, nil)
 
   ui_deinit(&self.ui, &self.gpu_context)
+  navmesh_deinit(&self.navmesh, &self.gpu_context)
   scene_deinit(&self.scene, &self.warehouse)
   lighting_deinit(&self.lighting, &self.gpu_context)
   ambient_deinit(&self.ambient, &self.gpu_context, &self.warehouse)
@@ -929,8 +931,9 @@ generate_render_input :: proc(
   }
   ret.batches = make(
     map[BatchKey][dynamic]BatchData,
-    allocator = context.temp_allocator,
+    context.temp_allocator,
   )
+  // Note: Caller is responsible for cleaning up ret.batches
   // Find the correct camera slot for this camera handle
   camera_slot: u32 = 0
   camera_slot_found: bool = false
@@ -976,7 +979,7 @@ generate_render_input :: proc(
       }
       batch_group, group_found := &ret.batches[batch_key]
       if !group_found {
-        ret.batches[batch_key] = make([dynamic]BatchData, allocator = context.temp_allocator)
+        ret.batches[batch_key] = make([dynamic]BatchData, context.temp_allocator)
         batch_group = &ret.batches[batch_key]
       }
       batch_data: ^BatchData
@@ -989,7 +992,7 @@ generate_render_input :: proc(
       if batch_data == nil {
         new_batch := BatchData {
           material_handle = data.material,
-          nodes           = make([dynamic]^Node, allocator = context.temp_allocator),
+          nodes           = make([dynamic]^Node, context.temp_allocator),
         }
         append(batch_group, new_batch)
         batch_data = &batch_group[len(batch_group) - 1]
@@ -1001,7 +1004,6 @@ generate_render_input :: proc(
   //           camera_slot, camera_slot_found, visible_count, total_count)
   return
 }
-
 
 render :: proc(self: ^Engine) -> vk.Result {
   // log.debug("============ acquiring image...============ ")
@@ -1368,8 +1370,8 @@ render :: proc(self: ^Engine) -> vk.Result {
       [dynamic]vk.ImageMemoryBarrier,
       0,
       MAX_SHADOW_MAPS * 2,
-      context.temp_allocator,
     )
+    defer delete(image_barriers)
 
     // Add 2D shadow map barriers
     for i in 0 ..< shadow_map_count {
@@ -1553,8 +1555,8 @@ render :: proc(self: ^Engine) -> vk.Result {
       [dynamic]vk.ImageMemoryBarrier,
       0,
       MAX_SHADOW_MAPS * 2,
-      context.temp_allocator,
     )
+    defer delete(image_barriers)
 
     // Add 2D shadow map barriers
     for i in 0 ..< shadow_map_count {
@@ -1751,6 +1753,14 @@ render :: proc(self: ^Engine) -> vk.Result {
     command_buffer,
     &self.warehouse,
     self.frame_index,
+  )
+
+  // Navigation mesh pass (render inside transparent pass)
+  navmesh_render(
+    &self.navmesh,
+    command_buffer,
+    linalg.MATRIX4F32_IDENTITY,
+    main_render_target.camera.index,
   )
   transparent_render(
     &self.transparent,
@@ -1961,14 +1971,6 @@ process_pending_deletions :: proc(engine: ^Engine) {
     }
   }
   clear(&engine.pending_node_deletions)
-}
-
-// Safe scene functions that copy dynamic arrays
-safe_get_node_children :: proc(engine: ^Engine, handle: Handle) -> []Handle {
-  node := resource.get(engine.scene.nodes, handle)
-  children_copy := make([]Handle, len(node.children), context.temp_allocator)
-  copy(children_copy, node.children[:])
-  return children_copy
 }
 
 // Swap transform buffers for all nodes (call at end of update)

@@ -4,6 +4,7 @@ import "core:fmt"
 import "core:log"
 import "core:math"
 import "core:math/linalg"
+import "core:os"
 import "mjolnir"
 import "mjolnir/geometry"
 import "mjolnir/gpu"
@@ -35,7 +36,19 @@ current_controller: ^geometry.CameraController
 tab_was_pressed: bool
 
 main :: proc() {
+  // Initialize logging
   context.logger = log.create_console_logger()
+  args := os.args
+  log.infof("Starting with %d arguments", len(args))
+  // Check command line arguments
+  if len(args) > 1 {
+    log.infof("Running mode: %s", args[1])
+    switch args[1] {
+    case "navmesh-visual":
+      navmesh_visual_main()
+      return
+    }
+  }
   engine.setup_proc = setup
   engine.update_proc = update
   engine.render2d_proc = render_2d
@@ -603,7 +616,7 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
     rx := math.sin(t)
     ry := (math.sin(t) + 1.0) * 0.5 * 1.5 + 1.0
     rz := math.cos(t)
-    v := linalg.vector_normalize([3]f32{rx, ry, rz})
+    v := linalg.normalize([3]f32{rx, ry, rz})
     radius: f32 = 6
     v = v * radius + linalg.VECTOR3F32_Y_AXIS * -1.0
     translate(&light_ptr.transform, v.x, v.y, v.z)
