@@ -197,9 +197,6 @@ spawn_at :: proc(
   node: ^Node,
 ) {
   handle, node = resource.alloc(&self.nodes)
-  if node == nil {
-    return
-  }
   init_node(node)
   node.attachment = attachment
   geometry.translate(&node.transform, position.x, position.y, position.z)
@@ -215,9 +212,6 @@ spawn :: proc(
   node: ^Node,
 ) {
   handle, node = resource.alloc(&self.nodes)
-  if node == nil {
-    return
-  }
   init_node(node)
   node.attachment = attachment
   attach(self.nodes, self.root, handle)
@@ -233,9 +227,6 @@ spawn_child :: proc(
   node: ^Node,
 ) {
   handle, node = resource.alloc(&self.nodes)
-  if node == nil {
-    return
-  }
   init_node(node)
   node.attachment = attachment
   attach(self.nodes, parent, handle)
@@ -303,10 +294,10 @@ scene_traverse :: proc(
     }
     // Skip nodes that are pending deletion
     if current_node.pending_deletion do continue
-    
+
     // Update parent_visible from parent chain only
     current_node.parent_visible = entry.parent_is_visible
-    
+
     is_dirty := transform_update_local(&current_node.transform)
     if entry.parent_is_dirty || is_dirty {
       transform_update_world(&current_node.transform, entry.parent_transform)

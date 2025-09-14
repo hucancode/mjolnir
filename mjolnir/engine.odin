@@ -260,20 +260,20 @@ engine_init_shadow_maps :: proc(engine: ^Engine) -> vk.Result {
   for f in 0 ..< MAX_FRAMES_IN_FLIGHT {
     for i in 0 ..< MAX_SHADOW_MAPS {
       // Create shadow maps
-      engine.shadow_maps[f][i], _, _ = create_empty_texture_2d(
+      engine.shadow_maps[f][i], _, _ = create_texture(
         &engine.gpu_context,
         &engine.warehouse,
         SHADOW_MAP_SIZE,
         SHADOW_MAP_SIZE,
-        .D32_SFLOAT,
-        {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
+        vk.Format.D32_SFLOAT,
+        vk.ImageUsageFlags{.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
       )
-      engine.cube_shadow_maps[f][i], _, _ = create_empty_texture_cube(
+      engine.cube_shadow_maps[f][i], _, _ = create_cube_texture(
         &engine.gpu_context,
         &engine.warehouse,
         SHADOW_MAP_SIZE,
-        .D32_SFLOAT,
-        {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
+        vk.Format.D32_SFLOAT,
+        vk.ImageUsageFlags{.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
       )
     }
     log.debugf("Created new 2D shadow maps %v", engine.shadow_maps[f])
@@ -1870,7 +1870,6 @@ render :: proc(self: ^Engine) -> vk.Result {
     self.frame_index,
   ) or_return
   self.frame_index = (self.frame_index + 1) % MAX_FRAMES_IN_FLIGHT
-
   // Process pending deletions at end of frame
   process_pending_deletions(self)
   self.last_render_timestamp = time.now()
@@ -1882,9 +1881,7 @@ run :: proc(self: ^Engine, width, height: u32, title: string) {
     return
   }
   defer deinit(self)
-
   when USE_PARALLEL_UPDATE {
-    // Start update thread
     self.update_active = true
     update_data := UpdateThreadData{engine = self}
     update_thread := thread.create(update_thread_proc)
@@ -1893,18 +1890,15 @@ run :: proc(self: ^Engine, width, height: u32, title: string) {
     thread.start(update_thread)
     self.update_thread = update_thread
     defer {
-      // Stop update thread
       self.update_active = false
       thread.join(update_thread)
       thread.destroy(update_thread)
     }
   }
-
   frame := 0
   for !glfw.WindowShouldClose(self.window) {
-    // Handle input and GLFW events on main thread
+    // Handle input and GLFW events on main thread, GLFW cannot run on subthreads
     update_input(self)
-
     when USE_PARALLEL_UPDATE {
       // Always flush any staged transforms from logic to render buffers
       flush_transforms_to_render(self)
@@ -1915,13 +1909,10 @@ run :: proc(self: ^Engine, width, height: u32, title: string) {
       // Single threaded mode - run update directly
       update(self)
     }
-
-    // Check update timing
     if time.duration_milliseconds(time.since(self.last_frame_timestamp)) <
        FRAME_TIME_MILIS {
       continue
     }
-
     res := render(self)
     if res == .ERROR_OUT_OF_DATE_KHR || res == .SUBOPTIMAL_KHR {
       recreate_swapchain(self) or_continue
@@ -1942,7 +1933,6 @@ run :: proc(self: ^Engine, width, height: u32, title: string) {
   }
 }
 
-// Update thread procedure that runs continuously
 update_thread_proc :: proc(thread: ^thread.Thread) {
   data := cast(^UpdateThreadData)thread.data
   engine := data.engine
@@ -1973,9 +1963,25 @@ process_pending_deletions :: proc(engine: ^Engine) {
   clear(&engine.pending_node_deletions)
 }
 
-// Swap transform buffers for all nodes (call at end of update)
 flush_transforms_to_render :: proc(engine: ^Engine) {
   for &entry in engine.scene.nodes.entries do if entry.active {
     geometry.transform_flush_to_render(&entry.item.transform)
   }
+}
+
+screen_to_world_ray :: proc(engine: ^Engine, screen_x, screen_y: f32) -> (ray_origin: [3]f32, ray_dir: [3]f32) {
+    main_camera := get_main_camera(engine)
+    if main_camera == nil do return
+    width, height := glfw.GetWindowSize(engine.window)
+    // Normalize screen coordinates to [-1, 1]
+    ndc_x := (2.0 * screen_x / f32(width)) - 1.0
+    ndc_y := 1.0 - (2.0 * screen_y / f32(height))  // Flip Y
+    view, proj := geometry.camera_calculate_matrices(main_camera^)
+    ray_clip := [4]f32{ndc_x, ndc_y, -1.0, 1.0}
+    ray_eye := linalg.matrix4x4_inverse(proj) * ray_clip
+    ray_eye = [4]f32{ray_eye.x, ray_eye.y, -1.0, 0.0}  // Point at infinity
+    ray_world := linalg.matrix4x4_inverse(view) * ray_eye
+    ray_dir = linalg.normalize(ray_world.xyz)
+    ray_origin = main_camera.position
+    return ray_origin, ray_dir
 }

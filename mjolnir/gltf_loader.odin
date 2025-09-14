@@ -287,7 +287,7 @@ load_gltf_texture :: proc(
     return
   }
   log.infof("Creating new texture from %d bytes", len(pixel_data))
-  tex_handle, texture = create_texture_from_data(
+  tex_handle, texture = create_texture(
     &engine.gpu_context,
     &engine.warehouse,
     pixel_data,
@@ -358,7 +358,7 @@ load_gltf_pbr_textures :: proc(
           ret = .ERROR_UNKNOWN
           return
         }
-        metallic_roughness_handle, _ = create_texture_from_data(
+        metallic_roughness_handle, _ = create_texture(
           &engine.gpu_context,
           &engine.warehouse,
           pixel_data,
@@ -425,6 +425,7 @@ load_gltf_primitive :: proc(
     material_handle, _ = create_material(
       &engine.warehouse,
       features,
+      .PBR,
       albedo_handle,
       metallic_roughness_handle,
       normal_handle,
@@ -540,6 +541,7 @@ load_gltf_skinned_primitive :: proc(
     mat_handle, _ = create_material(
       &engine.warehouse,
       features | {.SKINNING},
+      .PBR,
       albedo_handle,
       metallic_roughness_handle,
       normal_handle,

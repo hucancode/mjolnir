@@ -653,9 +653,19 @@ create_mesh :: proc(
   return
 }
 
-create_material :: proc(
+create_mesh_handle :: proc(
+  gpu_context: ^gpu.GPUContext,
+  warehouse: ^ResourceWarehouse,
+  data: geometry.Geometry,
+) -> (handle: Handle, ok: bool) #optional_ok {
+  h, _, ret := create_mesh(gpu_context, warehouse, data)
+  return h, ret == .SUCCESS
+}
+
+create_material_pbr :: proc(
   warehouse: ^ResourceWarehouse,
   features: ShaderFeatureSet = {},
+  type: MaterialType = .PBR,
   albedo_handle: Handle = {},
   metallic_roughness_handle: Handle = {},
   normal_handle: Handle = {},
@@ -669,7 +679,7 @@ create_material :: proc(
   res: vk.Result,
 ) {
   ret, mat = resource.alloc(&warehouse.materials)
-  mat.type = .PBR
+  mat.type = type
   mat.features = features
   mat.albedo = albedo_handle
   mat.metallic_roughness = metallic_roughness_handle
@@ -689,53 +699,39 @@ create_material :: proc(
   return
 }
 
-create_unlit_material :: proc(
+create_material_handle :: proc(
   warehouse: ^ResourceWarehouse,
   features: ShaderFeatureSet = {},
+  type: MaterialType = .PBR,
   albedo_handle: Handle = {},
+  metallic_roughness_handle: Handle = {},
+  normal_handle: Handle = {},
+  emissive_handle: Handle = {},
+  metallic_value: f32 = 0.0,
+  roughness_value: f32 = 1.0,
   emissive_value: f32 = 0.0,
-) -> (
-  ret: Handle,
-  mat: ^Material,
-  res: vk.Result,
-) {
-  ret, mat = resource.alloc(&warehouse.materials)
-  mat.type = .UNLIT
-  mat.features = features
-  mat.albedo = albedo_handle
-  mat.emissive_value = emissive_value
-  res = .SUCCESS
-  return
+) -> (handle: Handle, ok: bool) #optional_ok {
+  h, _, ret := create_material_pbr(
+    warehouse, features, type, albedo_handle, metallic_roughness_handle,
+    normal_handle, emissive_handle, metallic_value, roughness_value, emissive_value,
+  )
+  return h, ret == .SUCCESS
 }
 
-create_transparent_material :: proc(
-  warehouse: ^ResourceWarehouse,
-  features: ShaderFeatureSet = {},
-) -> (
-  ret: Handle,
-  mat: ^Material,
-  res: vk.Result,
-) {
-  ret, mat = resource.alloc(&warehouse.materials)
-  mat.type = .TRANSPARENT
-  mat.features = features
-  res = .SUCCESS
-  return
+create_material :: proc {
+  create_material_pbr,
 }
 
-create_wireframe_material :: proc(
-  warehouse: ^ResourceWarehouse,
-  features: ShaderFeatureSet = {},
-) -> (
-  ret: Handle,
-  mat: ^Material,
-  res: vk.Result,
-) {
-  ret, mat = resource.alloc(&warehouse.materials)
-  mat.type = .WIREFRAME
-  mat.features = features
-  res = .SUCCESS
-  return
+create_texture :: proc {
+  create_empty_texture_2d,
+  create_texture_from_path,
+  create_texture_from_data,
+  create_texture_from_pixels,
+}
+
+// Grouped cube texture creation procedures
+create_cube_texture :: proc {
+  create_empty_texture_cube,
 }
 
 create_texture_from_path :: proc(
@@ -1008,6 +1004,56 @@ create_hdr_texture_from_path_with_mips :: proc(
   set_texture_2d_descriptor(gpu_context, warehouse, handle.index, texture.view)
   ret = .SUCCESS
   return handle, texture, ret
+}
+
+// Handle-only variants for texture creation procedures
+create_texture_handle :: proc {
+  create_empty_texture_2d_handle,
+  create_texture_from_path_handle,
+  create_texture_from_data_handle,
+  create_texture_from_pixels_handle,
+}
+
+create_empty_texture_2d_handle :: proc(
+  gpu_context: ^gpu.GPUContext,
+  warehouse: ^ResourceWarehouse,
+  width, height: u32,
+  format: vk.Format,
+  usage: vk.ImageUsageFlags = {.COLOR_ATTACHMENT, .SAMPLED},
+) -> (handle: Handle, ok: bool) #optional_ok {
+  h, _, ret := create_empty_texture_2d(gpu_context, warehouse, width, height, format, usage)
+  return h, ret == .SUCCESS
+}
+
+create_texture_from_path_handle :: proc(
+  gpu_context: ^gpu.GPUContext,
+  warehouse: ^ResourceWarehouse,
+  path: string,
+) -> (handle: Handle, ok: bool) #optional_ok {
+  h, _, ret := create_texture_from_path(gpu_context, warehouse, path)
+  return h, ret == .SUCCESS
+}
+
+create_texture_from_data_handle :: proc(
+  gpu_context: ^gpu.GPUContext,
+  warehouse: ^ResourceWarehouse,
+  data: []u8,
+) -> (handle: Handle, ok: bool) #optional_ok {
+  h, _, ret := create_texture_from_data(gpu_context, warehouse, data)
+  return h, ret == .SUCCESS
+}
+
+create_texture_from_pixels_handle :: proc(
+  gpu_context: ^gpu.GPUContext,
+  warehouse: ^ResourceWarehouse,
+  pixels: []u8,
+  width: int,
+  height: int,
+  channel: int,
+  format: vk.Format = .R8G8B8A8_SRGB,
+) -> (handle: Handle, ok: bool) #optional_ok {
+  h, _, ret := create_texture_from_pixels(gpu_context, warehouse, pixels, width, height, channel, format)
+  return h, ret == .SUCCESS
 }
 
 get_frame_bone_matrix_offset :: proc(

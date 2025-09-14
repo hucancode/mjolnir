@@ -834,7 +834,7 @@ particle_init_render_pipeline :: proc(
     nil,
     &self.render_pipeline_layout,
   ) or_return
-  default_texture_handle, _ := create_texture_from_data(
+  default_texture_handle, _ := create_texture(
     gpu_context,
     warehouse,
     #load("assets/black-circle.png"),

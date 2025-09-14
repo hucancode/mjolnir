@@ -60,46 +60,41 @@ main :: proc() {
 setup :: proc(engine: ^mjolnir.Engine) {
   using mjolnir, geometry
   log.info("Setup function called!")
-  goldstar_texture_handle, _, _ := mjolnir.create_texture_from_path(
+  goldstar_texture_handle, _, _ := create_texture(
     &engine.gpu_context,
     &engine.warehouse,
     "assets/gold-star.png",
   )
-  plain_material_handle, _, _ := create_material(&engine.warehouse)
-  wireframe_material_handle, _, _ := create_wireframe_material(
-    &engine.warehouse,
-  )
-  goldstar_material_handle, goldstar_material, _ :=
-    create_transparent_material(&engine.warehouse, {.ALBEDO_TEXTURE})
-  goldstar_material.albedo = goldstar_texture_handle
+  plain_material_handle := create_material_handle(&engine.warehouse)
+  wireframe_material_handle := create_material_handle(&engine.warehouse, type = .WIREFRAME)
+  goldstar_material_handle := create_material_handle(&engine.warehouse, {.ALBEDO_TEXTURE}, type = .TRANSPARENT,
+    albedo_handle = goldstar_texture_handle)
   cube_geom := make_cube()
-  cube_mesh_handle, _, _ := create_mesh(
+  cube_mesh_handle := create_mesh_handle(
     &engine.gpu_context,
     &engine.warehouse,
     cube_geom,
   )
-  sphere_mesh_handle, _, _ := create_mesh(
+  sphere_mesh_handle := create_mesh_handle(
     &engine.gpu_context,
     &engine.warehouse,
     make_sphere(),
   )
   // Create ground plane
-  ground_albedo_handle, _, _ := create_texture_from_path(
-    &engine.gpu_context,
-    &engine.warehouse,
-    "assets/t_brick_floor_002_diffuse_1k.jpg",
-  )
-  ground_mat_handle, _, _ = create_material(
+  ground_mat_handle = create_material_handle(
     &engine.warehouse,
     {.ALBEDO_TEXTURE},
-    ground_albedo_handle,
-  )
-  ground_mesh_handle, _, _ := create_mesh(
+    albedo_handle = create_texture_handle(
+      &engine.gpu_context,
+      &engine.warehouse,
+      "assets/t_brick_floor_002_diffuse_1k.jpg",
+    ))
+  ground_mesh_handle := create_mesh_handle(
     &engine.gpu_context,
     &engine.warehouse,
     make_quad(),
   )
-  cone_mesh_handle, _, _ := create_mesh(
+  cone_mesh_handle := create_mesh_handle(
     &engine.gpu_context,
     &engine.warehouse,
     make_cone(),
@@ -117,11 +112,11 @@ setup :: proc(engine: ^mjolnir.Engine) {
           world_x := (f32(x) - f32(nx) * 0.5) * space
           world_y := (f32(y) - f32(ny) * 0.5) * space + 0.5
           world_z := (f32(z) - f32(nz) * 0.5) * space
-          mat_handle, _ := create_material(
+          mat_handle := create_material_handle(
             &engine.warehouse,
             metallic_value = f32(x - 1) / f32(nx - 1),
             roughness_value = f32(z - 1) / f32(nz - 1),
-          ) or_continue
+          )
           node: ^Node
           if x % 3 == 0 {
             _, node = spawn(
@@ -320,15 +315,14 @@ setup :: proc(engine: ^mjolnir.Engine) {
   if false {
     // effect_add_bloom(&engine.postprocess, 0.8, 0.5, 16.0)
     // Create a bright white ball to test bloom effect
-    bright_material_handle, _, _ := create_material(
-      &engine.warehouse,
-      emissive_value = 30.0,
-    )
     _, bright_ball_node := spawn(
       &engine.scene,
       MeshAttachment {
         handle      = sphere_mesh_handle,
-        material    = bright_material_handle,
+        material    = create_material_handle(
+          &engine.warehouse,
+          emissive_value = 30.0,
+        ),
         cast_shadow = false, // Emissive objects don't need shadows
       },
     )
@@ -337,7 +331,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   }
 
   if true {
-    black_circle_texture_handle, _, _ := mjolnir.create_texture_from_path(
+    black_circle_texture_handle := create_texture_handle(
       &engine.gpu_context,
       &engine.warehouse,
       "assets/black-circle.png",
@@ -345,8 +339,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
     psys_handle1, _ := spawn_at(
       &engine.scene,
       {-2.0, 1.9, 0.3},
-      mjolnir.ParticleSystemAttachment {
-        bounding_box = geometry.Aabb{min = {-1, -1, -1}, max = {1, 1, 1}},
+      ParticleSystemAttachment {
+        bounding_box = Aabb{min = {-1, -1, -1}, max = {1, 1, 1}},
         texture_handle = goldstar_texture_handle,
       },
     )
@@ -367,14 +361,14 @@ setup :: proc(engine: ^mjolnir.Engine) {
         weight_spread = 0.05,
         texture_handle = goldstar_texture_handle,
         enabled = true,
-        bounding_box = geometry.Aabb{min = {-2, -2, -2}, max = {2, 2, 2}},
+        bounding_box = Aabb{min = {-2, -2, -2}, max = {2, 2, 2}},
       },
     )
     psys_handle2, _ := spawn_at(
       &engine.scene,
       {2.0, 1.9, 0.3},
-      mjolnir.ParticleSystemAttachment {
-        bounding_box = geometry.Aabb{min = {-1, -1, -1}, max = {1, 1, 1}},
+      ParticleSystemAttachment {
+        bounding_box = Aabb{min = {-1, -1, -1}, max = {1, 1, 1}},
         texture_handle = black_circle_texture_handle,
       },
     )
@@ -396,20 +390,20 @@ setup :: proc(engine: ^mjolnir.Engine) {
         weight_spread = 0.3,
         texture_handle = black_circle_texture_handle,
         enabled = true,
-        bounding_box = geometry.Aabb{min = {-1, -1, -1}, max = {1, 1, 1}},
+        bounding_box = Aabb{min = {-1, -1, -1}, max = {1, 1, 1}},
       },
     )
     // Create a force field that affects both particle systems
     forcefield_handle, forcefield_node = spawn_child(
       &engine.scene,
       psys_handle1, // Attach to first particle system
-      mjolnir.ForceFieldAttachment {
+      ForceFieldAttachment {
         tangent_strength = 2.0,
         strength = 20.0,
         area_of_effect = 5.0,
       },
     )
-    geometry.translate(&forcefield_node.transform, x = 5.0, y = 4.0, z = 0.0)
+    translate(&forcefield_node.transform, x = 5.0, y = 4.0, z = 0.0)
     _, forcefield_visual := spawn_child(
       &engine.scene,
       forcefield_handle,
@@ -419,7 +413,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
         cast_shadow = false,
       },
     )
-    geometry.scale(&forcefield_visual.transform, 0.2)
+    scale(&forcefield_visual.transform, 0.2)
   }
   effect_add_fog(&engine.postprocess, {0.4, 0.0, 0.8}, 0.02, 5.0, 20.0)
   // effect_add_bloom(&engine.postprocess)
@@ -430,9 +424,9 @@ setup :: proc(engine: ^mjolnir.Engine) {
   // effect_add_grayscale(&engine.postprocess, 0.9)
   // effect_add_outline(&engine.postprocess, 2.0, {1.0, 0.0, 0.0})
   // Initialize camera controllers
-  geometry.setup_camera_controller_callbacks(engine.window)
-  main_camera := mjolnir.get_main_camera(engine)
-  orbit_controller = geometry.camera_controller_orbit_init(
+  setup_camera_controller_callbacks(engine.window)
+  main_camera := get_main_camera(engine)
+  orbit_controller = camera_controller_orbit_init(
     engine.window,
     {0, 0, 0}, // dummy target
     1.0, // dummy distance
@@ -440,14 +434,14 @@ setup :: proc(engine: ^mjolnir.Engine) {
     0, // dummy pitch
   )
   // Initialize free controller
-  free_controller = geometry.camera_controller_free_init(
+  free_controller = camera_controller_free_init(
     engine.window,
     5.0,
     2.0,
   )
   if main_camera != nil {
-    geometry.camera_controller_sync(&orbit_controller, main_camera)
-    geometry.camera_controller_sync(&free_controller, main_camera)
+    camera_controller_sync(&orbit_controller, main_camera)
+    camera_controller_sync(&free_controller, main_camera)
   }
   current_controller = &orbit_controller
   // Portal setup
@@ -455,7 +449,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     log.info("Setting up portal...")
 
     // Create portal render target via global pool
-    portal_render_target: ^mjolnir.RenderTarget
+    portal_render_target: ^RenderTarget
     portal_render_target_handle, portal_render_target = resource.alloc(
       &engine.warehouse.render_targets,
     )
@@ -473,35 +467,29 @@ setup :: proc(engine: ^mjolnir.Engine) {
       portal_render_target_handle,
       portal_render_target.extent,
     )
-
     // Configure the portal camera to look down from above at a steep angle
     portal_camera := render_target_get_camera(
       &engine.warehouse,
       portal_render_target,
     )
-    geometry.camera_look_at(portal_camera, {5, 15, 7}, {0, 0, 0}, {0, 1, 0})
-    // Create portal material (albedo only)
-    portal_material: ^mjolnir.Material
-    portal_material_handle, portal_material, _ = create_material(
+    camera_look_at(portal_camera, {5, 15, 7}, {0, 0, 0}, {0, 1, 0})
+    portal_material_handle = create_material_handle(
       &engine.warehouse,
       {.ALBEDO_TEXTURE},
     )
-    // We'll set the texture handle after first render
     log.infof(
       "Portal material created with handle: %v",
       portal_material_handle,
     )
     // Create portal quad mesh and spawn it
-    portal_quad_geom := make_quad()
-    portal_quad_mesh_handle, _, _ := create_mesh(
-      &engine.gpu_context,
-      &engine.warehouse,
-      portal_quad_geom,
-    )
     _, portal_node := spawn(
       &engine.scene,
       MeshAttachment {
-        handle = portal_quad_mesh_handle,
+        handle = create_mesh_handle(
+            &engine.gpu_context,
+            &engine.warehouse,
+            make_quad(),
+        ),
         material = portal_material_handle,
         cast_shadow = false,
       },
@@ -543,26 +531,16 @@ render_2d :: proc(engine: ^mjolnir.Engine, ctx: ^mu.Context) {
 
       total_nodes := len(engine.scene.nodes.entries) - len(engine.scene.nodes.free_indices)
       mu.label(ctx, fmt.tprintf("Active Nodes: %d", total_nodes))
-
-      // Memory usage calculation
-      visibility_buffer_mb := f32(mjolnir.MAX_ACTIVE_CAMERAS * mjolnir.MAX_NODES_IN_SCENE * size_of(b32) * mjolnir.VISIBILITY_BUFFER_COUNT) / (1024 * 1024)
-      node_data_mb := f32(mjolnir.MAX_NODES_IN_SCENE * size_of(mjolnir.NodeCullingData) * mjolnir.MAX_FRAMES_IN_FLIGHT) / (1024 * 1024)
-      total_mb := visibility_buffer_mb + node_data_mb
-
-      mu.label(ctx, fmt.tprintf("Memory: %.1f MB", total_mb))
-      mu.label(ctx, fmt.tprintf("Visibility: %.1f MB", visibility_buffer_mb))
-      mu.label(ctx, fmt.tprintf("Node Data: %.1f MB", node_data_mb))
     }
   }
 }
 
 update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
   using mjolnir, geometry
-
   // Handle camera controller switching with Tab key
   tab_pressed := glfw.GetKey(engine.window, glfw.KEY_TAB) == glfw.PRESS
   if tab_pressed && !tab_was_pressed {
-    main_camera_for_sync := mjolnir.get_main_camera(engine)
+    main_camera_for_sync := get_main_camera(engine)
     if current_controller == &orbit_controller {
       current_controller = &free_controller
       log.info("Switched to free camera")
@@ -572,21 +550,21 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
     }
     // Sync new controller with current camera state to prevent jumps
     if main_camera_for_sync != nil {
-      geometry.camera_controller_sync(current_controller, main_camera_for_sync)
+      camera_controller_sync(current_controller, main_camera_for_sync)
     }
   }
   tab_was_pressed = tab_pressed
 
-  main_camera := mjolnir.get_main_camera(engine)
+  main_camera := get_main_camera(engine)
   if main_camera != nil {
     if current_controller == &orbit_controller {
-      geometry.camera_controller_orbit_update(
+      camera_controller_orbit_update(
         current_controller,
         main_camera,
         delta_time,
       )
     } else {
-      geometry.camera_controller_free_update(
+      camera_controller_free_update(
         current_controller,
         main_camera,
         delta_time,
@@ -596,7 +574,7 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
 
   t := time_since_app_start(engine) * 0.5
   if forcefield_node != nil {
-    geometry.translate(
+    translate(
       &forcefield_node.transform,
       math.cos(t) * 2.0,
       2.0,
@@ -675,7 +653,7 @@ custom_render :: proc(
   )
   if portal_camera == nil do return
 
-  t := mjolnir.time_since_app_start(engine) * 0.3 // Slow orbit speed
+  t := time_since_app_start(engine) * 0.3 // Slow orbit speed
   radius: f32 = 12.0
   height: f32 = 8.0
 
@@ -686,7 +664,7 @@ custom_render :: proc(
   target := [3]f32{0, 0, 0} // Always look at scene center
 
   // Update camera position and orientation
-  geometry.camera_look_at(portal_camera, camera_pos, target, {0, 1, 0})
+  camera_look_at(portal_camera, camera_pos, target, {0, 1, 0})
 
   // Update portal camera uniform
   render_target_update_camera_uniform(&engine.warehouse, portal_render_target)
@@ -695,7 +673,7 @@ custom_render :: proc(
     &engine.warehouse,
     portal_render_target.camera.index,
   )
-  frustum := geometry.make_frustum(
+  frustum := make_frustum(
     camera_uniform.projection * camera_uniform.view,
   )
   portal_render_input := generate_render_input(

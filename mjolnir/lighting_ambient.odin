@@ -267,7 +267,7 @@ ambient_init :: proc(
       calculate_mip_levels(environment_map.width, environment_map.height) - 1.0
   }
   brdf_lut: ^gpu.ImageBuffer
-  self.brdf_lut, brdf_lut = create_texture_from_data(
+  self.brdf_lut, brdf_lut = create_texture(
     gpu_context,
     warehouse,
     #load("assets/lut_ggx.png"),

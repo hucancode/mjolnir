@@ -565,18 +565,10 @@ create_obj_visualization_mesh :: proc(engine_ptr: ^mjolnir.Engine, obj_file: str
     // The mesh will manage the geometry lifetime
 
     // Create mesh
-    navmesh_state.obj_mesh_handle, _, _ = create_mesh(
+    navmesh_state.obj_mesh_handle = create_mesh_handle(
         &engine_ptr.gpu_context,
         &engine_ptr.warehouse,
         geom,
-    )
-
-    // Create a semi-transparent material
-    obj_material_handle, _, _ := create_material(
-        &engine_ptr.warehouse,
-        metallic_value = 0.1,
-        roughness_value = 0.8,
-        emissive_value = 0.02,  // Very slight emissive
     )
 
     // Spawn the mesh in the scene
@@ -584,7 +576,12 @@ create_obj_visualization_mesh :: proc(engine_ptr: ^mjolnir.Engine, obj_file: str
         &engine_ptr.scene,
         MeshAttachment{
             handle = navmesh_state.obj_mesh_handle,
-            material = obj_material_handle,
+            material = create_material_handle(
+                &engine_ptr.warehouse,
+                metallic_value = 0.1,
+                roughness_value = 0.8,
+                emissive_value = 0.02,
+            ),
             cast_shadow = false,
         },
     )
@@ -870,14 +867,14 @@ update_position_marker :: proc(engine_ptr: ^mjolnir.Engine, handle: ^mjolnir.Han
     marker_geom := make_sphere(12, 6, 0.3, color)  // Small sphere with color
     // NOTE: Don't delete geometry here - create_mesh takes ownership
 
-    marker_mesh_handle, _, _ := create_mesh(
+    marker_mesh_handle := create_mesh_handle(
         &engine_ptr.gpu_context,
         &engine_ptr.warehouse,
         marker_geom,
     )
 
     // Create colored material for the marker
-    marker_material_handle, _, _ := create_material(
+    marker_material_handle := create_material_handle(
         &engine_ptr.warehouse,
         metallic_value = 0.2,
         roughness_value = 0.8,
@@ -899,47 +896,6 @@ update_position_marker :: proc(engine_ptr: ^mjolnir.Engine, handle: ^mjolnir.Han
     if node != nil {
         node.transform.position = pos + {0, 0.2, 0}  // Slightly above ground
     }
-}
-
-// Convert screen coordinates to world ray
-screen_to_world_ray :: proc(engine_ptr: ^mjolnir.Engine, screen_x, screen_y: f32) -> (ray_origin: [3]f32, ray_dir: [3]f32) {
-    using mjolnir, geometry
-
-    main_camera := get_main_camera(engine_ptr)
-    if main_camera == nil {
-        return {}, {}
-    }
-
-    // Get window dimensions
-    width, height := glfw.GetWindowSize(engine_ptr.window)
-
-    // Normalize screen coordinates to [-1, 1]
-    ndc_x := (2.0 * screen_x / f32(width)) - 1.0
-    ndc_y := 1.0 - (2.0 * screen_y / f32(height))  // Flip Y
-
-    // Get camera matrices
-    view, proj := camera_calculate_matrices(main_camera^)
-
-    // Compute inverse matrices
-    inv_view := linalg.matrix4x4_inverse(view)
-    inv_proj := linalg.matrix4x4_inverse(proj)
-
-    // Create ray in clip space
-    ray_clip := [4]f32{ndc_x, ndc_y, -1.0, 1.0}
-
-    // Transform to eye space
-    ray_eye := inv_proj * ray_clip
-    ray_eye = [4]f32{ray_eye.x, ray_eye.y, -1.0, 0.0}  // Point at infinity
-
-    // Transform to world space
-    ray_world_4 := inv_view * ray_eye
-    ray_world := [3]f32{ray_world_4.x, ray_world_4.y, ray_world_4.z}
-    ray_dir = linalg.normalize(ray_world)
-
-    // Ray origin is camera position
-    ray_origin = main_camera.position
-
-    return ray_origin, ray_dir
 }
 
 // Find intersection of ray with navmesh
@@ -1014,7 +970,7 @@ find_navmesh_point_from_mouse :: proc(engine_ptr: ^mjolnir.Engine, mouse_x, mous
     log.debugf("find_navmesh_point_from_mouse: nav_query=%p, nav_mesh=%p", navmesh_state.nav_query, navmesh_state.nav_mesh)
 
     // Get ray from camera through mouse position
-    ray_origin, ray_dir := screen_to_world_ray(engine_ptr, mouse_x, mouse_y)
+    ray_origin, ray_dir := mjolnir.screen_to_world_ray(engine_ptr, mouse_x, mouse_y)
 
     // Use multiple strategies to find the best navmesh point
 
