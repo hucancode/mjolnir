@@ -422,10 +422,10 @@ process_skins :: proc(
         read := cgltf.accessor_read_float(gltf_skin.inverse_bind_matrices, uint(i), raw_data(ibm_floats[:]), 16)
         if read {
           bones[i].inverse_bind_matrix = geometry.matrix_from_arr(ibm_floats)
+          continue
         }
-      } else {
-        bones[i].inverse_bind_matrix = linalg.MATRIX4F32_IDENTITY
       }
+      bones[i].inverse_bind_matrix = linalg.MATRIX4F32_IDENTITY
     }
     for joint_node, i in gltf_skin.joints {
       bones[i].children = make([]u32, len(joint_node.children))
@@ -589,7 +589,6 @@ load_animations :: proc(
       clip.name = fmt.tprintf("animation_%d", i)
     }
     clip.channels = make([]animation.Channel, len(skinning.bones))
-    max_time: f32 = 0.0
     for gltf_channel in gltf_anim.channels {
       if gltf_channel.target_node == nil || gltf_channel.sampler == nil {
         continue
@@ -603,8 +602,7 @@ load_animations :: proc(
         for i in 0 ..< int(n) {
           time_val: [1]f32
           cgltf.accessor_read_float(gltf_channel.sampler.input, uint(i), raw_data(time_val[:]), 1) or_continue
-          max_time = max(max_time, time_val[0])
-
+          clip.duration = max(clip.duration, time_val[0])
           position: [3]f32
           cgltf.accessor_read_float(gltf_channel.sampler.output, uint(i), raw_data(position[:]), 3) or_continue
           engine_channel.positions[i] = {
@@ -617,8 +615,7 @@ load_animations :: proc(
         for i in 0 ..< int(n) {
           time_val: [1]f32
           cgltf.accessor_read_float(gltf_channel.sampler.input, uint(i), raw_data(time_val[:]), 1) or_continue
-          max_time = max(max_time, time_val[0])
-
+          clip.duration = max(clip.duration, time_val[0])
           rotation: [4]f32
           cgltf.accessor_read_float(gltf_channel.sampler.output, uint(i), raw_data(rotation[:]), 4) or_continue
           engine_channel.rotations[i] = {
@@ -636,7 +633,7 @@ load_animations :: proc(
         for i in 0 ..< int(n) {
           time_val: [1]f32
           cgltf.accessor_read_float(gltf_channel.sampler.input, uint(i), raw_data(time_val[:]), 1) or_continue
-          max_time = max(max_time, time_val[0])
+          clip.duration = max(clip.duration, time_val[0])
           scale: [3]f32
           cgltf.accessor_read_float(gltf_channel.sampler.output, uint(i), raw_data(scale[:]), 3) or_continue
           engine_channel.scales[i] = {
@@ -646,7 +643,6 @@ load_animations :: proc(
         }
       }
     }
-    clip.duration = max_time
   }
   return true
 }
