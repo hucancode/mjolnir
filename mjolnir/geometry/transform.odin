@@ -11,7 +11,6 @@ Transform :: struct {
   is_staging:     bool,   // World matrix is in logic buffer and not sent to render yet
   local_matrix:   matrix[4,4]f32,
   world_matrix:   [2]matrix[4,4]f32, // [0] = logic/update, [1] = render
-  matrix_index:   u32, // Which buffer is currently active (0 or 1)
 }
 
 TRANSFORM_IDENTITY :: Transform {
@@ -22,7 +21,6 @@ TRANSFORM_IDENTITY :: Transform {
   is_staging   = false,  // Start with both buffers synchronized
   local_matrix = linalg.MATRIX4F32_IDENTITY,
   world_matrix = {linalg.MATRIX4F32_IDENTITY, linalg.MATRIX4F32_IDENTITY},
-  matrix_index = 0,
 }
 
 decompose_matrix :: proc(m: matrix[4,4]f32) -> (ret: Transform) {
@@ -151,10 +149,6 @@ transform_flush_to_render :: proc(t: ^Transform) {
     t.world_matrix[1] = t.world_matrix[0]
     t.is_staging = false
   }
-}
-
-transform_swap_buffers :: proc(t: ^Transform) {
-  t.matrix_index = (t.matrix_index + 1) % 2
 }
 
 transform_update_world :: proc(
