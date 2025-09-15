@@ -1022,12 +1022,8 @@ render :: proc(self: ^Engine) -> vk.Result {
     mesh := mesh(self, data.handle) or_continue
     mesh_skin, mesh_has_skin := mesh.skinning.?
     if !mesh_has_skin do continue
-    l, r :=
-      skinning.bone_matrix_offset +
-      self.frame_index * self.warehouse.bone_matrix_slab.capacity,
-      skinning.bone_matrix_offset +
-      self.frame_index * self.warehouse.bone_matrix_slab.capacity +
-      u32(len(mesh_skin.bones))
+    l := skinning.bone_matrix_offset + self.frame_index * self.warehouse.bone_matrix_slab.capacity
+    r := l + u32(len(mesh_skin.bones))
     bone_matrices := self.warehouse.bone_buffer.mapped[l:r]
     sample_clip(mesh, anim_inst.clip_handle, anim_inst.time, bone_matrices)
   }
