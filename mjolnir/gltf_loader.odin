@@ -596,49 +596,137 @@ load_animations :: proc(
       n := gltf_channel.sampler.input.count
       bone_idx := slice.linear_search(gltf_skin.joints, gltf_channel.target_node) or_continue
       engine_channel := &clip.channels[bone_idx]
+
+      interpolation_mode := animation.InterpolationMode.LINEAR
+      #partial switch gltf_channel.sampler.interpolation {
+      case .step: interpolation_mode = .STEP
+      case .linear: interpolation_mode = .LINEAR
+      case .cubic_spline: interpolation_mode = .CUBICSPLINE
+      }
       #partial switch gltf_channel.target_path {
       case .translation:
-        engine_channel.positions = make(type_of(engine_channel.positions), n)
-        for i in 0 ..< int(n) {
-          time_val: [1]f32
-          cgltf.accessor_read_float(gltf_channel.sampler.input, uint(i), raw_data(time_val[:]), 1) or_continue
-          clip.duration = max(clip.duration, time_val[0])
-          position: [3]f32
-          cgltf.accessor_read_float(gltf_channel.sampler.output, uint(i), raw_data(position[:]), 3) or_continue
-          engine_channel.positions[i] = {
-            time = time_val[0],
-            value = position,
+        engine_channel.position_interpolation = interpolation_mode
+        if interpolation_mode == .CUBICSPLINE {
+          engine_channel.cubic_positions = make(type_of(engine_channel.cubic_positions), n)
+          for i in 0 ..< int(n) {
+            time_val: [1]f32
+            cgltf.accessor_read_float(gltf_channel.sampler.input, uint(i), raw_data(time_val[:]), 1) or_continue
+            clip.duration = max(clip.duration, time_val[0])
+            in_tangent: [3]f32
+            value: [3]f32
+            out_tangent: [3]f32
+            cgltf.accessor_read_float(gltf_channel.sampler.output, uint(i * 3 + 0), raw_data(in_tangent[:]), 3) or_continue
+            cgltf.accessor_read_float(gltf_channel.sampler.output, uint(i * 3 + 1), raw_data(value[:]), 3) or_continue
+            cgltf.accessor_read_float(gltf_channel.sampler.output, uint(i * 3 + 2), raw_data(out_tangent[:]), 3) or_continue
+            engine_channel.cubic_positions[i] = {
+              time = time_val[0],
+              in_tangent = in_tangent,
+              value = value,
+              out_tangent = out_tangent,
+            }
+          }
+        } else {
+          engine_channel.positions = make(type_of(engine_channel.positions), n)
+          for i in 0 ..< int(n) {
+            time_val: [1]f32
+            cgltf.accessor_read_float(gltf_channel.sampler.input, uint(i), raw_data(time_val[:]), 1) or_continue
+            clip.duration = max(clip.duration, time_val[0])
+            position: [3]f32
+            cgltf.accessor_read_float(gltf_channel.sampler.output, uint(i), raw_data(position[:]), 3) or_continue
+            engine_channel.positions[i] = {
+              time = time_val[0],
+              value = position,
+            }
           }
         }
       case .rotation:
-        engine_channel.rotations = make(type_of(engine_channel.rotations), n)
-        for i in 0 ..< int(n) {
-          time_val: [1]f32
-          cgltf.accessor_read_float(gltf_channel.sampler.input, uint(i), raw_data(time_val[:]), 1) or_continue
-          clip.duration = max(clip.duration, time_val[0])
-          rotation: [4]f32
-          cgltf.accessor_read_float(gltf_channel.sampler.output, uint(i), raw_data(rotation[:]), 4) or_continue
-          engine_channel.rotations[i] = {
-            time = time_val[0],
-            value = quaternion(
-              x = rotation[0],
-              y = rotation[1],
-              z = rotation[2],
-              w = rotation[3],
-            ),
+        engine_channel.rotation_interpolation = interpolation_mode
+        if interpolation_mode == .CUBICSPLINE {
+          engine_channel.cubic_rotations = make(type_of(engine_channel.cubic_rotations), n)
+          for i in 0 ..< int(n) {
+            time_val: [1]f32
+            cgltf.accessor_read_float(gltf_channel.sampler.input, uint(i), raw_data(time_val[:]), 1) or_continue
+            clip.duration = max(clip.duration, time_val[0])
+            in_tangent: [4]f32
+            value: [4]f32
+            out_tangent: [4]f32
+            cgltf.accessor_read_float(gltf_channel.sampler.output, uint(i * 3 + 0), raw_data(in_tangent[:]), 4) or_continue
+            cgltf.accessor_read_float(gltf_channel.sampler.output, uint(i * 3 + 1), raw_data(value[:]), 4) or_continue
+            cgltf.accessor_read_float(gltf_channel.sampler.output, uint(i * 3 + 2), raw_data(out_tangent[:]), 4) or_continue
+            engine_channel.cubic_rotations[i] = {
+              time = time_val[0],
+              in_tangent = quaternion(
+                x = in_tangent[0],
+                y = in_tangent[1],
+                z = in_tangent[2],
+                w = in_tangent[3],
+              ),
+              value = quaternion(
+                x = value[0],
+                y = value[1],
+                z = value[2],
+                w = value[3],
+              ),
+              out_tangent = quaternion(
+                x = out_tangent[0],
+                y = out_tangent[1],
+                z = out_tangent[2],
+                w = out_tangent[3],
+              ),
+            }
+          }
+        } else {
+          engine_channel.rotations = make(type_of(engine_channel.rotations), n)
+          for i in 0 ..< int(n) {
+            time_val: [1]f32
+            cgltf.accessor_read_float(gltf_channel.sampler.input, uint(i), raw_data(time_val[:]), 1) or_continue
+            clip.duration = max(clip.duration, time_val[0])
+            rotation: [4]f32
+            cgltf.accessor_read_float(gltf_channel.sampler.output, uint(i), raw_data(rotation[:]), 4) or_continue
+            engine_channel.rotations[i] = {
+              time = time_val[0],
+              value = quaternion(
+                x = rotation[0],
+                y = rotation[1],
+                z = rotation[2],
+                w = rotation[3],
+              ),
+            }
           }
         }
       case .scale:
-        engine_channel.scales = make(type_of(engine_channel.scales), n)
-        for i in 0 ..< int(n) {
-          time_val: [1]f32
-          cgltf.accessor_read_float(gltf_channel.sampler.input, uint(i), raw_data(time_val[:]), 1) or_continue
-          clip.duration = max(clip.duration, time_val[0])
-          scale: [3]f32
-          cgltf.accessor_read_float(gltf_channel.sampler.output, uint(i), raw_data(scale[:]), 3) or_continue
-          engine_channel.scales[i] = {
-            time = time_val[0],
-            value = scale,
+        engine_channel.scale_interpolation = interpolation_mode
+        if interpolation_mode == .CUBICSPLINE {
+          engine_channel.cubic_scales = make(type_of(engine_channel.cubic_scales), n)
+          for i in 0 ..< int(n) {
+            time_val: [1]f32
+            cgltf.accessor_read_float(gltf_channel.sampler.input, uint(i), raw_data(time_val[:]), 1) or_continue
+            clip.duration = max(clip.duration, time_val[0])
+            in_tangent: [3]f32
+            value: [3]f32
+            out_tangent: [3]f32
+            cgltf.accessor_read_float(gltf_channel.sampler.output, uint(i * 3 + 0), raw_data(in_tangent[:]), 3) or_continue
+            cgltf.accessor_read_float(gltf_channel.sampler.output, uint(i * 3 + 1), raw_data(value[:]), 3) or_continue
+            cgltf.accessor_read_float(gltf_channel.sampler.output, uint(i * 3 + 2), raw_data(out_tangent[:]), 3) or_continue
+            engine_channel.cubic_scales[i] = {
+              time = time_val[0],
+              in_tangent = in_tangent,
+              value = value,
+              out_tangent = out_tangent,
+            }
+          }
+        } else {
+          engine_channel.scales = make(type_of(engine_channel.scales), n)
+          for i in 0 ..< int(n) {
+            time_val: [1]f32
+            cgltf.accessor_read_float(gltf_channel.sampler.input, uint(i), raw_data(time_val[:]), 1) or_continue
+            clip.duration = max(clip.duration, time_val[0])
+            scale: [3]f32
+            cgltf.accessor_read_float(gltf_channel.sampler.output, uint(i), raw_data(scale[:]), 3) or_continue
+            engine_channel.scales[i] = {
+              time = time_val[0],
+              value = scale,
+            }
           }
         }
       }
