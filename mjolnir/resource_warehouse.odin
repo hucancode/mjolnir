@@ -501,7 +501,7 @@ set_texture_2d_descriptor :: proc(
   image_view: vk.ImageView,
 ) {
   if index >= MAX_TEXTURES {
-    log.infof("Error: Index %d out of bounds for bindless textures", index)
+    log.errorf("Index %d out of bounds for bindless textures", index)
     return
   }
   write := vk.WriteDescriptorSet {
@@ -526,10 +526,7 @@ set_texture_cube_descriptor :: proc(
   image_view: vk.ImageView,
 ) {
   if index >= MAX_CUBE_TEXTURES {
-    log.infof(
-      "Error: Index %d out of bounds for bindless cube textures",
-      index,
-    )
+    log.errorf("Index %d out of bounds for bindless cube textures", index)
     return
   }
   write := vk.WriteDescriptorSet {
@@ -719,7 +716,7 @@ create_material_handle :: proc(
 ) -> (handle: Handle, ok: bool) #optional_ok {
   h, _, ret := create_material(
     warehouse, features, type, albedo_handle, metallic_roughness_handle,
-    normal_handle, emissive_handle, occlusion_handle, metallic_value, 
+    normal_handle, emissive_handle, occlusion_handle, metallic_value,
     roughness_value, emissive_value, base_color_factor,
   )
   return h, ret == .SUCCESS

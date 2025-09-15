@@ -322,7 +322,7 @@ physical_device_init :: proc(self: ^GPUContext) -> vk.Result {
   count: u32
   vk.EnumeratePhysicalDevices(self.instance, &count, nil) or_return
   if count == 0 {
-    log.infof("Error: No physical devices found!")
+    log.error("No physical devices found!")
     return .ERROR_INITIALIZATION_FAILED
   }
   log.infof("Found %d physical device(s)", count)
@@ -342,7 +342,7 @@ physical_device_init :: proc(self: ^GPUContext) -> vk.Result {
     }
   }
   if best_score == 0 {
-    log.infof("Error: No suitable physical device found!")
+    log.error("No suitable physical device found!")
     return .ERROR_INITIALIZATION_FAILED
   }
   vk.GetPhysicalDeviceProperties(self.physical_device, &self.device_properties)
