@@ -347,36 +347,3 @@ despawn :: proc(engine: ^Engine, handle: Handle) {
   // Queue for deletion at end of frame
   queue_node_deletion(engine, handle)
 }
-
-// Safe spawn functions that ensure frame-boundary safety
-safe_spawn :: proc(
-  engine: ^Engine,
-  attachment: NodeAttachment = nil,
-) -> (
-  handle: Handle,
-  node: ^Node,
-) {
-  return spawn(&engine.scene, attachment)
-}
-
-safe_spawn_at :: proc(
-  engine: ^Engine,
-  position: [3]f32,
-  attachment: NodeAttachment = nil,
-) -> (
-  handle: Handle,
-  node: ^Node,
-) {
-  return spawn_at(&engine.scene, position, attachment)
-}
-
-safe_spawn_child :: proc(
-  engine: ^Engine,
-  parent: Handle,
-  attachment: NodeAttachment = nil,
-) -> (
-  handle: Handle,
-  node: ^Node,
-) {
-  return spawn_child(&engine.scene, parent, attachment)
-}

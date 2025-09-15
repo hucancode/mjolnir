@@ -31,10 +31,9 @@ lighting_init :: proc(
   warehouse: ^ResourceWarehouse,
 ) -> vk.Result {
   log.debugf("renderer main init %d x %d", width, height)
-  // g_textures_set_layout (set 1) must be created and managed globally, not here
   pipeline_set_layouts := [?]vk.DescriptorSetLayout {
-    warehouse.camera_buffer_set_layout, // set = 0 (camera)
-    warehouse.textures_set_layout, // set = 1 (bindless textures)
+    warehouse.camera_buffer_set_layout,
+    warehouse.textures_set_layout,
   }
   push_constant_range := vk.PushConstantRange {
     stageFlags = {.VERTEX, .FRAGMENT},
@@ -162,7 +161,6 @@ lighting_init :: proc(
     &self.lighting_pipeline,
   ) or_return
   log.info("Lighting pipeline initialized successfully")
-
   // Create second pipeline for spot lights with LESS_OR_EQUAL depth test
   spot_depth_stencil := vk.PipelineDepthStencilStateCreateInfo {
     sType           = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
@@ -193,7 +191,7 @@ lighting_init :: proc(
     &self.spot_light_pipeline,
   ) or_return
   log.info("Spot light pipeline initialized successfully")
-  // Initialize light volume meshes
+  // light volume meshes
   self.sphere_mesh, _, _ = create_mesh(
     gpu_context,
     warehouse,
@@ -210,7 +208,6 @@ lighting_init :: proc(
     geometry.make_fullscreen_triangle(),
   )
   log.info("Light volume meshes initialized")
-
   return .SUCCESS
 }
 
