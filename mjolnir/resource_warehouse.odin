@@ -662,7 +662,7 @@ create_mesh_handle :: proc(
   return h, ret == .SUCCESS
 }
 
-create_material_pbr :: proc(
+create_material :: proc(
   warehouse: ^ResourceWarehouse,
   features: ShaderFeatureSet = {},
   type: MaterialType = .PBR,
@@ -711,15 +711,11 @@ create_material_handle :: proc(
   roughness_value: f32 = 1.0,
   emissive_value: f32 = 0.0,
 ) -> (handle: Handle, ok: bool) #optional_ok {
-  h, _, ret := create_material_pbr(
+  h, _, ret := create_material(
     warehouse, features, type, albedo_handle, metallic_roughness_handle,
     normal_handle, emissive_handle, metallic_value, roughness_value, emissive_value,
   )
   return h, ret == .SUCCESS
-}
-
-create_material :: proc {
-  create_material_pbr,
 }
 
 create_texture :: proc {
@@ -1063,4 +1059,124 @@ get_frame_bone_matrix_offset :: proc(
 ) -> u32 {
   frame_capacity := warehouse.bone_matrix_slab.capacity
   return base_offset + frame_index * frame_capacity
+}
+
+engine_get_render_target :: proc(engine: ^Engine, handle: Handle) -> (ret: ^RenderTarget, ok: bool) #optional_ok {
+    ret, ok = resource.get(engine.warehouse.render_targets, handle)
+    return
+}
+
+warehouse_get_render_target :: proc(warehouse: ^ResourceWarehouse, handle: Handle) -> (ret: ^RenderTarget, ok: bool) #optional_ok {
+    ret, ok = resource.get(warehouse.render_targets, handle)
+    return
+}
+
+render_target :: proc {
+    engine_get_render_target,
+    warehouse_get_render_target,
+}
+
+engine_get_mesh :: proc(engine: ^Engine, handle: Handle) -> (ret: ^Mesh, ok: bool) #optional_ok {
+    ret, ok = resource.get(engine.warehouse.meshes, handle)
+    return
+}
+
+warehouse_get_mesh :: proc(warehouse: ^ResourceWarehouse, handle: Handle) -> (ret: ^Mesh, ok: bool) #optional_ok {
+    ret, ok = resource.get(warehouse.meshes, handle)
+    return
+}
+
+mesh :: proc {
+    engine_get_mesh,
+    warehouse_get_mesh,
+}
+
+engine_get_material :: proc(engine: ^Engine, handle: Handle) -> (ret: ^Material, ok: bool) #optional_ok {
+    ret, ok = resource.get(engine.warehouse.materials, handle)
+    return
+}
+
+warehouse_get_material :: proc(warehouse: ^ResourceWarehouse, handle: Handle) -> (ret: ^Material, ok: bool) #optional_ok {
+    ret, ok = resource.get(warehouse.materials, handle)
+    return
+}
+
+material :: proc {
+    engine_get_material,
+    warehouse_get_material,
+}
+
+engine_get_image_2d :: proc(engine: ^Engine, handle: Handle) -> (ret: ^gpu.ImageBuffer, ok: bool) #optional_ok {
+    ret, ok = resource.get(engine.warehouse.image_2d_buffers, handle)
+    return
+}
+
+warehouse_get_image_2d :: proc(warehouse: ^ResourceWarehouse, handle: Handle) -> (ret: ^gpu.ImageBuffer, ok: bool) #optional_ok {
+    ret, ok = resource.get(warehouse.image_2d_buffers, handle)
+    return
+}
+
+image_2d :: proc {
+    engine_get_image_2d,
+    warehouse_get_image_2d,
+}
+
+engine_get_image_cube :: proc(engine: ^Engine, handle: Handle) -> (ret: ^gpu.CubeImageBuffer, ok: bool) #optional_ok {
+    ret, ok = resource.get(engine.warehouse.image_cube_buffers, handle)
+    return
+}
+
+warehouse_get_image_cube :: proc(warehouse: ^ResourceWarehouse, handle: Handle) -> (ret: ^gpu.CubeImageBuffer, ok: bool) #optional_ok {
+    ret, ok = resource.get(warehouse.image_cube_buffers, handle)
+    return
+}
+
+image_cube :: proc {
+    engine_get_image_cube,
+    warehouse_get_image_cube,
+}
+
+engine_get_camera :: proc(engine: ^Engine, handle: Handle) -> (ret: ^geometry.Camera, ok: bool) #optional_ok {
+    ret, ok = resource.get(engine.warehouse.cameras, handle)
+    return
+}
+
+warehouse_get_camera :: proc(warehouse: ^ResourceWarehouse, handle: Handle) -> (ret: ^geometry.Camera, ok: bool) #optional_ok {
+    ret, ok = resource.get(warehouse.cameras, handle)
+    return
+}
+
+camera :: proc {
+    engine_get_camera,
+    warehouse_get_camera,
+}
+
+engine_get_navmesh :: proc(engine: ^Engine, handle: Handle) -> (ret: ^NavMesh, ok: bool) #optional_ok {
+    ret, ok = resource.get(engine.warehouse.nav_meshes, handle)
+    return
+}
+
+warehouse_get_navmesh :: proc(warehouse: ^ResourceWarehouse, handle: Handle) -> (ret: ^NavMesh, ok: bool) #optional_ok {
+    ret, ok = resource.get(warehouse.nav_meshes, handle)
+    return
+}
+
+navmesh :: proc {
+    engine_get_navmesh,
+    warehouse_get_navmesh,
+}
+
+engine_get_nav_context :: proc(engine: ^Engine, handle: Handle) -> (ret: ^NavContext, ok: bool) #optional_ok {
+    ret, ok = resource.get(engine.warehouse.nav_contexts, handle)
+    return
+}
+
+warehouse_get_nav_context :: proc(warehouse: ^ResourceWarehouse, handle: Handle) -> (ret: ^NavContext, ok: bool) #optional_ok {
+    ret, ok = resource.get(warehouse.nav_contexts, handle)
+    return
+}
+
+nav_context :: proc {
+    engine_get_nav_context,
+    warehouse_get_nav_context,
 }

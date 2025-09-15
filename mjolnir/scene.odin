@@ -175,7 +175,7 @@ play_animation :: proc(
   if !ok {
     return false
   }
-  mesh := resource.get(engine.warehouse.meshes, data.handle)
+  mesh := mesh(engine, data.handle)
   skinning, has_skin := &data.skinning.?
   if mesh == nil || !has_skin {
     return false

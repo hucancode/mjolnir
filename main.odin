@@ -66,9 +66,16 @@ setup :: proc(engine: ^mjolnir.Engine) {
     "assets/gold-star.png",
   )
   plain_material_handle := create_material_handle(&engine.warehouse)
-  wireframe_material_handle := create_material_handle(&engine.warehouse, type = .WIREFRAME)
-  goldstar_material_handle := create_material_handle(&engine.warehouse, {.ALBEDO_TEXTURE}, type = .TRANSPARENT,
-    albedo_handle = goldstar_texture_handle)
+  wireframe_material_handle := create_material_handle(
+    &engine.warehouse,
+    type = .WIREFRAME,
+  )
+  goldstar_material_handle := create_material_handle(
+    &engine.warehouse,
+    {.ALBEDO_TEXTURE},
+    type = .TRANSPARENT,
+    albedo_handle = goldstar_texture_handle,
+  )
   cube_geom := make_cube()
   cube_mesh_handle := create_mesh_handle(
     &engine.gpu_context,
@@ -88,7 +95,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
       &engine.gpu_context,
       &engine.warehouse,
       "assets/t_brick_floor_002_diffuse_1k.jpg",
-    ))
+    ),
+  )
   ground_mesh_handle := create_mesh_handle(
     &engine.gpu_context,
     &engine.warehouse,
@@ -316,15 +324,15 @@ setup :: proc(engine: ^mjolnir.Engine) {
     // effect_add_bloom(&engine.postprocess, 0.8, 0.5, 16.0)
     // Create a bright white ball to test bloom effect
     _, bright_ball_node := spawn(
-      &engine.scene,
-      MeshAttachment {
-        handle      = sphere_mesh_handle,
-        material    = create_material_handle(
-          &engine.warehouse,
-          emissive_value = 30.0,
-        ),
-        cast_shadow = false, // Emissive objects don't need shadows
-      },
+    &engine.scene,
+    MeshAttachment {
+      handle      = sphere_mesh_handle,
+      material    = create_material_handle(
+        &engine.warehouse,
+        emissive_value = 30.0,
+      ),
+      cast_shadow = false, // Emissive objects don't need shadows
+    },
     )
     translate(&bright_ball_node.transform, x = 1.0) // Position it above the ground
     scale(&bright_ball_node.transform, 0.2) // Make it a reasonable size
@@ -434,11 +442,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     0, // dummy pitch
   )
   // Initialize free controller
-  free_controller = camera_controller_free_init(
-    engine.window,
-    5.0,
-    2.0,
-  )
+  free_controller = camera_controller_free_init(engine.window, 5.0, 2.0)
   if main_camera != nil {
     camera_controller_sync(&orbit_controller, main_camera)
     camera_controller_sync(&free_controller, main_camera)
@@ -486,9 +490,9 @@ setup :: proc(engine: ^mjolnir.Engine) {
       &engine.scene,
       MeshAttachment {
         handle = create_mesh_handle(
-            &engine.gpu_context,
-            &engine.warehouse,
-            make_quad(),
+          &engine.gpu_context,
+          &engine.warehouse,
+          make_quad(),
         ),
         material = portal_material_handle,
         cast_shadow = false,
@@ -529,7 +533,8 @@ render_2d :: proc(engine: ^mjolnir.Engine, ctx: ^mu.Context) {
       mu.label(ctx, fmt.tprintf("Max Nodes: %d", mjolnir.MAX_NODES_IN_SCENE))
       mu.label(ctx, fmt.tprintf("Max Cameras: %d", mjolnir.MAX_ACTIVE_CAMERAS))
 
-      total_nodes := len(engine.scene.nodes.entries) - len(engine.scene.nodes.free_indices)
+      total_nodes :=
+        len(engine.scene.nodes.entries) - len(engine.scene.nodes.free_indices)
       mu.label(ctx, fmt.tprintf("Active Nodes: %d", total_nodes))
     }
   }
@@ -637,53 +642,44 @@ custom_render :: proc(
   command_buffer: vk.CommandBuffer,
 ) {
   using mjolnir, geometry
-  // Portal rendering - render scene from top-down view
-  portal_render_target := resource.get(
+  portal_rt : ^RenderTarget
+  ok: bool
+  portal_rt, ok = resource.get(
     engine.warehouse.render_targets,
     portal_render_target_handle,
   )
-  if portal_render_target == nil {
-    log.errorf("Portal render target not found!")
-    return
-  }
+  if !ok do return
+  portal_camera : ^Camera
   // Animate portal camera - orbit around the scene center
-  portal_camera := resource.get(
+  portal_camera, ok = resource.get(
     engine.warehouse.cameras,
-    portal_render_target.camera,
+    portal_rt.camera,
   )
-  if portal_camera == nil do return
-
+  if !ok do return
   t := time_since_app_start(engine) * 0.3 // Slow orbit speed
   radius: f32 = 12.0
   height: f32 = 8.0
-
   // Calculate circular orbit position
   camera_x := math.cos(t) * radius
   camera_z := math.sin(t) * radius
   camera_pos := [3]f32{camera_x, height, camera_z}
   target := [3]f32{0, 0, 0} // Always look at scene center
-
   // Update camera position and orientation
   camera_look_at(portal_camera, camera_pos, target, {0, 1, 0})
-
   // Update portal camera uniform
-  render_target_update_camera_uniform(&engine.warehouse, portal_render_target)
-
+  render_target_update_camera_uniform(&engine.warehouse, portal_rt)
   camera_uniform := get_camera_uniform(
     &engine.warehouse,
-    portal_render_target.camera.index,
-  )
-  frustum := make_frustum(
-    camera_uniform.projection * camera_uniform.view,
+    portal_rt.camera.index,
   )
   portal_render_input := generate_render_input(
     engine,
-    frustum,
-    portal_render_target.camera,
+    make_frustum(camera_uniform.projection * camera_uniform.view),
+    portal_rt.camera,
   )
   // Render G-buffer pass with self-managed depth
   gbuffer_begin(
-    portal_render_target,
+    portal_rt,
     command_buffer,
     &engine.warehouse,
     engine.frame_index,
@@ -692,30 +688,26 @@ custom_render :: proc(
   gbuffer_render(
     &engine.gbuffer,
     &portal_render_input,
-    portal_render_target,
+    portal_rt,
     command_buffer,
     &engine.warehouse,
     engine.frame_index,
   )
   gbuffer_end(
-    portal_render_target,
+    portal_rt,
     command_buffer,
     &engine.warehouse,
     engine.frame_index,
   )
   // Update portal material to use the rendered texture (from current frame)
-  if portal_material := resource.get(
+  portal_mat : ^Material
+  portal_mat, ok = resource.get(
     engine.warehouse.materials,
     portal_material_handle,
-  ); portal_material != nil {
-    old_texture := portal_material.albedo
-    new_texture := render_target_albedo_texture(
-      portal_render_target,
-      engine.frame_index,
-    )
-    portal_material.albedo = new_texture
-    // log.infof("Portal material updated: old_texture=%v, new_texture=%v", old_texture, new_texture)
-  } else {
-    log.errorf("Portal material not found!")
-  }
+  )
+  if !ok do return
+  portal_mat.albedo = render_target_albedo_texture(
+    portal_rt,
+    engine.frame_index,
+  )
 }

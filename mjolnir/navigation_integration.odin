@@ -114,7 +114,7 @@ scene_geometry_collector_traverse :: proc(node: ^Node, ctx: rawptr) -> bool {
     }
 
     if mesh_attachment, is_mesh := node.attachment.(MeshAttachment); is_mesh {
-        mesh := resource.get(collector.engine.warehouse.meshes, mesh_attachment.handle)
+        mesh := mesh(collector.engine, mesh_attachment.handle)
         if mesh == nil {
             return true
         }
@@ -368,7 +368,7 @@ calculate_bounds_from_vertices :: proc(vertices: [][3]f32) -> geometry.Aabb {
 
 // Create navigation context for queries
 create_navigation_context :: proc(engine: ^Engine, nav_mesh_handle: Handle) -> (Handle, bool) {
-    nav_mesh := resource.get(engine.warehouse.nav_meshes, nav_mesh_handle)
+    nav_mesh := navmesh(engine, nav_mesh_handle)
     if nav_mesh == nil {
         log.error("Invalid navigation mesh handle for context creation")
         return {}, false
@@ -400,14 +400,14 @@ create_navigation_context :: proc(engine: ^Engine, nav_mesh_handle: Handle) -> (
 
 // Find path between two points
 nav_find_path :: proc(engine: ^Engine, context_handle: Handle, start: [3]f32, end: [3]f32, max_path_length: i32 = 256) -> (path: [][3]f32, success: bool) {
-    nav_context := resource.get(engine.warehouse.nav_contexts, context_handle)
+    nav_context := nav_context(engine, context_handle)
     if nav_context == nil {
         log.error("Invalid navigation context handle")
         return nil, false
     }
 
     // Get navigation mesh from context
-    nav_mesh := resource.get(engine.warehouse.nav_meshes, nav_context.associated_mesh)
+    nav_mesh := navmesh(engine, nav_context.associated_mesh)
     if nav_mesh == nil {
         log.error("Invalid navigation mesh associated with context")
         return nil, false
@@ -465,7 +465,7 @@ nav_find_path :: proc(engine: ^Engine, context_handle: Handle, start: [3]f32, en
 
 // Check if a position is walkable
 nav_is_position_walkable :: proc(engine: ^Engine, context_handle: Handle, position: [3]f32) -> bool {
-    nav_context := resource.get(engine.warehouse.nav_contexts, context_handle)
+    nav_context := nav_context(engine, context_handle)
     if nav_context == nil {
         return false
     }

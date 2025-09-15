@@ -157,7 +157,7 @@ depth_prepass_render :: proc(
       for node in batch_data.nodes {
         #partial switch data in node.attachment {
         case MeshAttachment:
-          mesh := resource.get(warehouse.meshes, data.handle) or_continue
+          mesh := mesh(warehouse, data.handle) or_continue
           mesh_skinning, mesh_has_skin := &mesh.skinning.?
           node_skinning, node_has_skin := data.skinning.?
           pipeline := depth_prepass_get_pipeline(self, material, mesh, data)

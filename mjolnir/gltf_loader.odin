@@ -722,7 +722,7 @@ load_gltf_animations :: proc(
   gltf_skin: ^cgltf.skin,
   engine_mesh_handle: resource.Handle,
 ) -> bool {
-  mesh := resource.get(engine.warehouse.meshes, engine_mesh_handle)
+  mesh := mesh(engine, engine_mesh_handle)
   skinning := &mesh.skinning.?
   skinning.animations = make([]animation.Clip, len(gltf_data.animations))
   for gltf_anim, i in gltf_data.animations {

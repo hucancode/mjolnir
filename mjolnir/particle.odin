@@ -1015,14 +1015,14 @@ particle_begin :: proc(
   )
   color_attachment := vk.RenderingAttachmentInfoKHR {
     sType       = .RENDERING_ATTACHMENT_INFO_KHR,
-    imageView   = resource.get(warehouse.image_2d_buffers, render_target_final_image(render_target, frame_index)).view,
+    imageView   = image_2d(warehouse, render_target_final_image(render_target, frame_index)).view,
     imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
     loadOp      = .LOAD, // preserve previous contents
     storeOp     = .STORE,
   }
   depth_attachment := vk.RenderingAttachmentInfoKHR {
     sType       = .RENDERING_ATTACHMENT_INFO_KHR,
-    imageView   = resource.get(warehouse.image_2d_buffers, render_target_depth_texture(render_target, frame_index)).view,
+    imageView   = image_2d(warehouse, render_target_depth_texture(render_target, frame_index)).view,
     imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
     loadOp      = .LOAD,
     storeOp     = .STORE,

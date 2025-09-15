@@ -215,7 +215,7 @@ render_target_update_camera_uniform :: proc(
   warehouse: ^ResourceWarehouse,
   target: ^RenderTarget,
 ) {
-  camera := resource.get(warehouse.cameras, target.camera)
+  camera := camera(warehouse, target.camera)
   uniform := get_camera_uniform(warehouse, target.camera.index)
   if camera == nil || uniform == nil {
     log.errorf("Camera %v or uniform %v not found", target.camera, uniform)
@@ -257,7 +257,7 @@ render_target_get_camera :: proc(
   warehouse: ^ResourceWarehouse,
   target: ^RenderTarget,
 ) -> ^geometry.Camera {
-  return resource.get(warehouse.cameras, target.camera)
+  return camera(warehouse, target.camera)
 }
 
 // Get specific texture for current frame

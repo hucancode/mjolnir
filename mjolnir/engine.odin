@@ -171,8 +171,6 @@ ShadowResources :: struct {
   // Spot/Directional light resources
   render_target:       Handle,
   camera:              Handle,
-  // Cached across frames
-  allocated:           bool,
 }
 
 // Unified light structure with embedded GPU data
@@ -689,7 +687,7 @@ get_main_camera :: proc(engine: ^Engine) -> ^geometry.Camera {
   if main_render_target == nil {
     return nil
   }
-  return resource.get(engine.warehouse.cameras, main_render_target.camera)
+  return camera(engine, main_render_target.camera)
 }
 
 @(private = "file")
@@ -922,12 +920,10 @@ generate_render_input :: proc(
   ret: RenderInput,
 ) {
   // Convert frame active render target handles to render targets for consistent camera slot mapping
-  targets := make([dynamic]RenderTarget, 0, context.temp_allocator)
+  targets := make([dynamic]^RenderTarget, 0, context.temp_allocator)
   for handle in self.frame_active_render_targets {
-    if target := resource.get(self.warehouse.render_targets, handle);
-       target != nil {
-      append(&targets, target^)
-    }
+    target := render_target(self, handle) or_continue
+    append(&targets, target)
   }
   ret.batches = make(
     map[BatchKey][dynamic]BatchData,
@@ -952,10 +948,8 @@ generate_render_input :: proc(
     case MeshAttachment:
       // Skip nodes that don't cast shadows when rendering shadow pass
       if shadow_pass && !data.cast_shadow do continue
-      mesh := resource.get(self.warehouse.meshes, data.handle)
-      if mesh == nil do continue
-      material := resource.get(self.warehouse.materials, data.material)
-      if material == nil do continue
+      mesh := mesh(self, data.handle) or_continue
+      material := material(self, data.material) or_continue
       total_count += 1
       // Use GPU culling results if available, otherwise fall back to CPU culling
       visible := true
@@ -1025,7 +1019,7 @@ render :: proc(self: ^Engine) -> vk.Result {
     anim_inst, has_animation := &skinning.animation.?
     if !has_animation do continue
     animation.instance_update(anim_inst, render_delta_time)
-    mesh := resource.get(self.warehouse.meshes, data.handle) or_continue
+    mesh := mesh(self, data.handle) or_continue
     mesh_skin, mesh_has_skin := mesh.skinning.?
     if !mesh_has_skin do continue
     l, r :=
@@ -1087,9 +1081,6 @@ render :: proc(self: ^Engine) -> vk.Result {
       case .DIRECTIONAL:
       // TODO: Add when directional shadows are implemented
       }
-
-      // Clear allocated flag for next frame
-      light_info.shadow_resources.allocated = false
     }
   }
   for &entry in self.scene.nodes.entries do if entry.active {
@@ -1195,7 +1186,7 @@ render :: proc(self: ^Engine) -> vk.Result {
 
         // Use persistent render target and create temporary camera
         light_info.render_target = self.shadow_render_targets[shadow_map_count - 1]
-        render_target := resource.get(self.warehouse.render_targets, light_info.render_target)
+        render_target := render_target(self, light_info.render_target)
 
         // Allocate camera for spot light
         camera: ^geometry.Camera
@@ -1234,19 +1225,12 @@ render :: proc(self: ^Engine) -> vk.Result {
       switch light_info.light_kind {
       case .POINT:
         for target_handle in light_info.cube_render_targets {
-          if resource.get(self.warehouse.render_targets, target_handle) !=
-             nil {
-            append(&self.frame_active_render_targets, target_handle)
-          }
+          render_target(self, target_handle) or_continue
+          append(&self.frame_active_render_targets, target_handle)
         }
       case .SPOT:
-        if resource.get(
-             self.warehouse.render_targets,
-             light_info.render_target,
-           ) !=
-           nil {
-          append(&self.frame_active_render_targets, light_info.render_target)
-        }
+        render_target(self, light_info.render_target) or_continue
+        append(&self.frame_active_render_targets, light_info.render_target)
       case .DIRECTIONAL:
       // TODO: Add when directional shadows are implemented
       }
@@ -1271,14 +1255,11 @@ render :: proc(self: ^Engine) -> vk.Result {
       append(&self.frame_active_render_targets, handle)
       user_targets_added += 1
     }
-    active_targets := make([dynamic]RenderTarget, 0, context.temp_allocator)
+    active_targets := make([dynamic]^RenderTarget, 0, context.temp_allocator)
     for handle in self.frame_active_render_targets {
-      if target := resource.get(self.warehouse.render_targets, handle);
-         target != nil {
-        append(&active_targets, target^)
-      }
+      target := render_target(self, handle) or_continue
+      append(&active_targets, target)
     }
-
     // Update and perform GPU scene culling
     visibility_culler_update(
       &self.visibility_culler,

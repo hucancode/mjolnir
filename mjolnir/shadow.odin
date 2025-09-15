@@ -324,7 +324,7 @@ render_single_shadow_node :: proc(
   frame_index: u32,
 ) {
   mesh_attachment := node.attachment.(MeshAttachment)
-  mesh, found_mesh := resource.get(warehouse.meshes, mesh_attachment.handle)
+  mesh, found_mesh := mesh(warehouse, mesh_attachment.handle)
   if !found_mesh do return
   mesh_skinning, mesh_has_skin := &mesh.skinning.?
   node_skinning, node_has_skin := mesh_attachment.skinning.?

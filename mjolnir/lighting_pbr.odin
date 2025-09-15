@@ -323,7 +323,7 @@ lighting_render :: proc(
     command_buffer: vk.CommandBuffer,
     warehouse: ^ResourceWarehouse,
   ) {
-    mesh := resource.get(warehouse.meshes, mesh_handle)
+    mesh := mesh(warehouse, mesh_handle)
     offset: vk.DeviceSize = 0
     vk.CmdBindVertexBuffers(
       command_buffer,

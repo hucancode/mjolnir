@@ -304,7 +304,7 @@ visibility_culler_deinit :: proc(
 visibility_culler_update :: proc(
   self: ^VisibilityCuller,
   scene: ^Scene,
-  render_targets: []RenderTarget,
+  render_targets: []^RenderTarget,
   warehouse: ^ResourceWarehouse,
   frame_index: u32,
 ) {
@@ -345,7 +345,7 @@ visibility_culler_update :: proc(
   for &target in render_targets {
     if camera_count >= MAX_ACTIVE_CAMERAS do break
 
-    camera := resource.get(warehouse.cameras, target.camera)
+    camera := camera(warehouse, target.camera)
     if camera == nil do continue
 
     // Calculate frustum for this camera
@@ -543,7 +543,7 @@ calculate_node_aabb :: proc(
   // Otherwise, calculate based on attachment type
   #partial switch data in node.attachment {
   case MeshAttachment:
-    mesh := resource.get(warehouse.meshes, data.handle)
+    mesh := mesh(warehouse, data.handle)
     if mesh != nil {
       return mesh.aabb
     }
