@@ -562,13 +562,13 @@ postprocess_create_images :: proc(
   format: vk.Format,
 ) -> vk.Result {
   for &handle in self.images {
-    handle, _ = create_empty_texture_2d(
+    handle, _ = create_texture(
       gpu_context,
       warehouse,
       width,
       height,
       format,
-      {.COLOR_ATTACHMENT, .SAMPLED, .TRANSFER_SRC, .TRANSFER_DST},
+      vk.ImageUsageFlags{.COLOR_ATTACHMENT, .SAMPLED, .TRANSFER_SRC, .TRANSFER_DST},
     ) or_return
   }
   log.debugf("created post-process image")
@@ -689,8 +689,7 @@ postprocess_render :: proc(
     dst_image_idx: u32
 
     if is_first {
-      input_image_index =
-        render_target_final_image(render_target, frame_index).index // Use original input
+      input_image_index = get_final_image(render_target, frame_index).index // Use original input
       dst_image_idx = 0 // Write to image[0]
     } else {
       prev_dst_image_idx := (i - 1) % 2
@@ -706,10 +705,7 @@ postprocess_render :: proc(
 
     dst_view := output_view
     if !is_last {
-      dst_texture := resource.get(
-        warehouse.image_2d_buffers,
-        self.images[dst_image_idx],
-      )
+      dst_texture := image_2d(warehouse, self.images[dst_image_idx])
       gpu.transition_image(
         command_buffer,
         dst_texture.image,
@@ -768,17 +764,17 @@ postprocess_render :: proc(
     )
     base: BasePushConstant
     base.position_texture_index =
-      render_target_position_texture(render_target, frame_index).index
+      get_position_texture(render_target, frame_index).index
     base.normal_texture_index =
-      render_target_normal_texture(render_target, frame_index).index
+      get_normal_texture(render_target, frame_index).index
     base.albedo_texture_index =
-      render_target_albedo_texture(render_target, frame_index).index
+      get_albedo_texture(render_target, frame_index).index
     base.metallic_texture_index =
-      render_target_metallic_roughness_texture(render_target, frame_index).index
+      get_metallic_roughness_texture(render_target, frame_index).index
     base.emissive_texture_index =
-      render_target_emissive_texture(render_target, frame_index).index
+      get_emissive_texture(render_target, frame_index).index
     base.depth_texture_index =
-      render_target_depth_texture(render_target, frame_index).index
+      get_depth_texture(render_target, frame_index).index
     base.input_image_index = input_image_index
     // Create and push combined push constants based on effect type
     switch &e in effect {

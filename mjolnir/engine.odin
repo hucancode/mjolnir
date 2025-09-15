@@ -1132,7 +1132,7 @@ render :: proc(self: ^Engine) -> vk.Result {
           // Allocate camera for this cube face
           camera: ^geometry.Camera
           light_info.cube_cameras[i], camera = resource.alloc(&self.warehouse.cameras)
-          camera^ = geometry.make_camera_perspective(math.PI * 0.5, 1.0, 0.1, light_info.light_radius)
+          geometry.camera_perspective(camera, math.PI * 0.5, 1.0, 0.1, light_info.light_radius)
 
           // Associate camera with render target BEFORE updating uniform
           render_target.camera = light_info.cube_cameras[i]
@@ -1145,8 +1145,6 @@ render :: proc(self: ^Engine) -> vk.Result {
 
         // Use first cube camera for light_camera_idx
         light_info.light_camera_idx = light_info.cube_cameras[0].index
-      } else {
-        light_info.light_camera_idx = 0 // No shadow camera for this light
       }
 
       self.active_light_count += 1
@@ -1160,8 +1158,6 @@ render :: proc(self: ^Engine) -> vk.Result {
       light_info.light_color = attachment.color.xyz
       light_info.light_direction = direction.xyz
       light_info.light_cast_shadow = b32(attachment.cast_shadow)
-      light_info.light_camera_idx = 0 // Directional lights don't need a specific camera
-
       self.active_light_count += 1
 
     case SpotLightAttachment:
@@ -1183,29 +1179,18 @@ render :: proc(self: ^Engine) -> vk.Result {
         light_info.shadow_map_id = self.shadow_maps[self.frame_index][shadow_map_count].index
         light_info.shadow_map = self.shadow_maps[self.frame_index][shadow_map_count]
         shadow_map_count += 1
-
-        // Use persistent render target and create temporary camera
         light_info.render_target = self.shadow_render_targets[shadow_map_count - 1]
         render_target := render_target(self, light_info.render_target)
-
-        // Allocate camera for spot light
         camera: ^geometry.Camera
         light_info.camera, camera = resource.alloc(&self.warehouse.cameras)
-        camera^ = geometry.make_camera_perspective(light_info.light_angle * 2.0, 1.0, 0.1, light_info.light_radius)
-
-        // Associate camera with render target BEFORE updating uniform
+        geometry.camera_perspective(camera, light_info.light_angle * 2.0, 1.0, 0.1, light_info.light_radius)
         render_target.camera = light_info.camera
-
         // Set camera to look in the direction of the light
         target_pos := position.xyz + direction.xyz
         geometry.camera_look_at(camera, position.xyz, target_pos)
         render_target_update_camera_uniform(&self.warehouse, render_target)
-
         light_info.light_camera_idx = light_info.camera.index
-      } else {
-        light_info.light_camera_idx = 0 // No shadow camera for this light
       }
-
       self.active_light_count += 1
     }
   }
@@ -1598,13 +1583,13 @@ render :: proc(self: ^Engine) -> vk.Result {
   }
   final_image := resource.get(
     self.warehouse.image_2d_buffers,
-    render_target_final_image(main_render_target, self.frame_index),
+    get_final_image(main_render_target, self.frame_index),
   )
   // Final image transition is now handled by gbuffer_begin
   // Get depth texture for transitions
   gbuffer_depth := resource.get(
     self.warehouse.image_2d_buffers,
-    render_target_depth_texture(main_render_target, self.frame_index),
+    get_depth_texture(main_render_target, self.frame_index),
   )
   // Transition depth texture to DEPTH_STENCIL_ATTACHMENT_OPTIMAL for depth prepass
   gpu.transition_image(

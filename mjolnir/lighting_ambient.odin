@@ -39,7 +39,7 @@ ambient_begin :: proc(
 ) {
   color_texture := resource.get(
     warehouse.image_2d_buffers,
-    render_target_final_image(target, frame_index),
+    get_final_image(target, frame_index),
   )
   color_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
@@ -98,12 +98,12 @@ ambient_render :: proc(
     camera_index           = render_target.camera.index,
     environment_index      = self.environment_map.index,
     brdf_lut_index         = self.brdf_lut.index,
-    position_texture_index = render_target_position_texture(render_target, frame_index).index,
-    normal_texture_index   = render_target_normal_texture(render_target, frame_index).index,
-    albedo_texture_index   = render_target_albedo_texture(render_target, frame_index).index,
-    metallic_texture_index = render_target_metallic_roughness_texture(render_target, frame_index).index,
-    emissive_texture_index = render_target_emissive_texture(render_target, frame_index).index,
-    depth_texture_index    = render_target_depth_texture(render_target, frame_index).index,
+    position_texture_index = get_position_texture(render_target, frame_index).index,
+    normal_texture_index   = get_normal_texture(render_target, frame_index).index,
+    albedo_texture_index   = get_albedo_texture(render_target, frame_index).index,
+    metallic_texture_index = get_metallic_roughness_texture(render_target, frame_index).index,
+    emissive_texture_index = get_emissive_texture(render_target, frame_index).index,
+    depth_texture_index    = get_depth_texture(render_target, frame_index).index,
     environment_max_lod    = self.environment_max_lod,
     ibl_intensity          = self.ibl_intensity,
   }

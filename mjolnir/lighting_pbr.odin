@@ -243,7 +243,7 @@ lighting_begin :: proc(
 ) {
   final_image := resource.get(
     warehouse.image_2d_buffers,
-    render_target_final_image(target, frame_index),
+    get_final_image(target, frame_index),
   )
   color_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
@@ -255,7 +255,7 @@ lighting_begin :: proc(
   }
   depth_texture := resource.get(
     warehouse.image_2d_buffers,
-    render_target_depth_texture(target, frame_index),
+    get_depth_texture(target, frame_index),
   )
   depth_attachment := vk.RenderingAttachmentInfoKHR {
     sType       = .RENDERING_ATTACHMENT_INFO_KHR,
@@ -338,19 +338,19 @@ lighting_render :: proc(
     // Fill in the common G-buffer indices that are always the same
     light_info.scene_camera_idx = render_target.camera.index
     light_info.position_texture_index =
-      render_target_position_texture(render_target, frame_index).index
+      get_position_texture(render_target, frame_index).index
     light_info.normal_texture_index =
-      render_target_normal_texture(render_target, frame_index).index
+      get_normal_texture(render_target, frame_index).index
     light_info.albedo_texture_index =
-      render_target_albedo_texture(render_target, frame_index).index
+      get_albedo_texture(render_target, frame_index).index
     light_info.metallic_texture_index =
-      render_target_metallic_roughness_texture(render_target, frame_index).index
+      get_metallic_roughness_texture(render_target, frame_index).index
     light_info.emissive_texture_index =
-      render_target_emissive_texture(render_target, frame_index).index
+      get_emissive_texture(render_target, frame_index).index
     light_info.depth_texture_index =
-      render_target_depth_texture(render_target, frame_index).index
+      get_depth_texture(render_target, frame_index).index
     light_info.input_image_index =
-      render_target_final_image(render_target, frame_index).index
+      get_final_image(render_target, frame_index).index
 
     // Render based on light type
     switch light_info.light_kind {

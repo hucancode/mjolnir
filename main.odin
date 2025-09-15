@@ -44,7 +44,7 @@ main :: proc() {
   if len(args) > 1 {
     log.infof("Running mode: %s", args[1])
     switch args[1] {
-    case "navmesh-visual":
+    case "navmesh":
       navmesh_visual_main()
       return
     }
@@ -203,7 +203,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
       MeshAttachment {
         handle = ground_mesh_handle,
         material = ground_mat_handle,
-        cast_shadow = true,
+        cast_shadow = false,
       },
     )
     translate(&back_wall.transform, y = size, z = -size)
@@ -472,7 +472,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
       portal_render_target.extent,
     )
     // Configure the portal camera to look down from above at a steep angle
-    portal_camera := render_target_get_camera(
+    portal_camera := get_camera(
       &engine.warehouse,
       portal_render_target,
     )
@@ -516,7 +516,6 @@ render_2d :: proc(engine: ^mjolnir.Engine, ctx: ^mu.Context) {
     efficiency := f32(rendered) / f32(max_particles) * 100.0
     mu.label(ctx, fmt.tprintf("Efficiency %.1f%%", efficiency))
   }
-
   if mu.window(ctx, "Shadow Debug", {990, 40, 280, 150}, {.NO_CLOSE}) {
     mu.label(ctx, "Shadow Map Information:")
     mu.label(
@@ -527,12 +526,10 @@ render_2d :: proc(engine: ^mjolnir.Engine, ctx: ^mu.Context) {
     mu.text(ctx, "Check console for detailed")
     mu.text(ctx, "shadow rendering debug info")
   }
-
   when mjolnir.USE_GPU_CULLING {
     if mu.window(ctx, "GPU Culling", {990, 200, 280, 240}, {.NO_CLOSE}) {
       mu.label(ctx, fmt.tprintf("Max Nodes: %d", mjolnir.MAX_NODES_IN_SCENE))
       mu.label(ctx, fmt.tprintf("Max Cameras: %d", mjolnir.MAX_ACTIVE_CAMERAS))
-
       total_nodes :=
         len(engine.scene.nodes.entries) - len(engine.scene.nodes.free_indices)
       mu.label(ctx, fmt.tprintf("Active Nodes: %d", total_nodes))
@@ -588,10 +585,7 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
   }
   // Animate lights
   for handle, i in light_handles {
-    if i == 0 {
-      // manual control light #0
-      continue
-    }
+    if i == 0 do continue // manual control light #0
     offset := f32(i) / f32(LIGHT_COUNT) * math.PI * 2.0
     t := time_since_app_start(engine) + offset
     // log.infof("getting light %d %v", i, light_handles[i])
@@ -604,9 +598,9 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
     v = v * radius + linalg.VECTOR3F32_Y_AXIS * -1.0
     translate(&light_ptr.transform, v.x, v.y, v.z)
     // log.infof("Light %d position: %v", i, light_ptr.transform.position)
-    light_cube_ptr := resource.get(engine.scene.nodes, light_cube_handles[i])
+    cube_ptr := resource.get(engine.scene.nodes, light_cube_handles[i])
     rotate(
-      &light_cube_ptr.transform,
+      &cube_ptr.transform,
       math.PI * time_since_app_start(engine) * 0.5,
     )
     // log.infof( "Light cube %d rotation: %v", i, light_cube_ptr.transform.rotation,)
@@ -706,7 +700,7 @@ custom_render :: proc(
     portal_material_handle,
   )
   if !ok do return
-  portal_mat.albedo = render_target_albedo_texture(
+  portal_mat.albedo = get_albedo_texture(
     portal_rt,
     engine.frame_index,
   )

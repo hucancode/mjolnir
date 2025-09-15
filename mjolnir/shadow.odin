@@ -187,12 +187,12 @@ shadow_begin :: proc(
   if has_face {
     cube_texture := resource.get(
       warehouse.image_cube_buffers,
-      render_target_depth_texture(shadow_target, frame_index),
+      get_depth_texture(shadow_target, frame_index),
     )
     if cube_texture == nil {
       log.errorf(
         "Invalid cube shadow map handle: %v",
-        render_target_depth_texture(shadow_target, frame_index),
+        get_depth_texture(shadow_target, frame_index),
       )
       return
     }
@@ -200,12 +200,12 @@ shadow_begin :: proc(
   } else {
     texture_2d := resource.get(
       warehouse.image_2d_buffers,
-      render_target_depth_texture(shadow_target, frame_index),
+      get_depth_texture(shadow_target, frame_index),
     )
     if texture_2d == nil {
       log.errorf(
         "Invalid 2D shadow map handle: %v",
-        render_target_depth_texture(shadow_target, frame_index),
+        get_depth_texture(shadow_target, frame_index),
       )
       return
     }

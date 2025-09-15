@@ -44,6 +44,22 @@ make_camera_perspective :: proc(
   }
 }
 
+camera_perspective :: proc(
+  self: ^Camera,
+  fov: f32,
+  aspect_ratio: f32,
+  near: f32,
+  far: f32,
+) {
+  self.rotation = linalg.QUATERNIONF32_IDENTITY
+  self.projection = PerspectiveProjection {
+    fov = fov,
+    aspect_ratio = aspect_ratio,
+    near = near,
+    far = far,
+  }
+}
+
 make_camera_ortho :: proc(
   width: f32,
   height: f32,
@@ -58,6 +74,22 @@ make_camera_ortho :: proc(
       near = near,
       far = far,
     },
+  }
+}
+
+camera_ortho :: proc(
+  self: ^Camera,
+  width: f32,
+  height: f32,
+  near: f32,
+  far: f32,
+) {
+  self.rotation = linalg.QUATERNIONF32_IDENTITY
+  self.projection = OrthographicProjection {
+    width = width,
+    height = height,
+    near = near,
+    far = far,
   }
 }
 

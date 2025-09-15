@@ -244,27 +244,27 @@ gbuffer_begin :: proc(
   // Transition all G-buffer textures to COLOR_ATTACHMENT_OPTIMAL
   position_texture := resource.get(
     warehouse.image_2d_buffers,
-    render_target_position_texture(render_target, frame_index),
+    get_position_texture(render_target, frame_index),
   )
   normal_texture := resource.get(
     warehouse.image_2d_buffers,
-    render_target_normal_texture(render_target, frame_index),
+    get_normal_texture(render_target, frame_index),
   )
   albedo_texture := resource.get(
     warehouse.image_2d_buffers,
-    render_target_albedo_texture(render_target, frame_index),
+    get_albedo_texture(render_target, frame_index),
   )
   metallic_roughness_texture := resource.get(
     warehouse.image_2d_buffers,
-    render_target_metallic_roughness_texture(render_target, frame_index),
+    get_metallic_roughness_texture(render_target, frame_index),
   )
   emissive_texture := resource.get(
     warehouse.image_2d_buffers,
-    render_target_emissive_texture(render_target, frame_index),
+    get_emissive_texture(render_target, frame_index),
   )
   final_texture := resource.get(
     warehouse.image_2d_buffers,
-    render_target_final_image(render_target, frame_index),
+    get_final_image(render_target, frame_index),
   )
 
   // Collect all G-buffer images for batch transition
@@ -294,7 +294,7 @@ gbuffer_begin :: proc(
   if self_manage_depth {
     depth_texture := resource.get(
       warehouse.image_2d_buffers,
-      render_target_depth_texture(render_target, frame_index),
+      get_depth_texture(render_target, frame_index),
     )
     gpu.transition_image(
       command_buffer,
@@ -350,7 +350,7 @@ gbuffer_begin :: proc(
   }
   depth_texture := resource.get(
     warehouse.image_2d_buffers,
-    render_target_depth_texture(render_target, frame_index),
+    get_depth_texture(render_target, frame_index),
   )
   depth_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
@@ -402,23 +402,23 @@ gbuffer_end :: proc(
   // Transition all G-buffer textures to SHADER_READ_ONLY_OPTIMAL for use by lighting
   position_texture := resource.get(
     warehouse.image_2d_buffers,
-    render_target_position_texture(render_target, frame_index),
+    get_position_texture(render_target, frame_index),
   )
   normal_texture := resource.get(
     warehouse.image_2d_buffers,
-    render_target_normal_texture(render_target, frame_index),
+    get_normal_texture(render_target, frame_index),
   )
   albedo_texture := resource.get(
     warehouse.image_2d_buffers,
-    render_target_albedo_texture(render_target, frame_index),
+    get_albedo_texture(render_target, frame_index),
   )
   metallic_roughness_texture := resource.get(
     warehouse.image_2d_buffers,
-    render_target_metallic_roughness_texture(render_target, frame_index),
+    get_metallic_roughness_texture(render_target, frame_index),
   )
   emissive_texture := resource.get(
     warehouse.image_2d_buffers,
-    render_target_emissive_texture(render_target, frame_index),
+    get_emissive_texture(render_target, frame_index),
   )
 
   // Collect G-buffer images for batch transition (excluding final image which stays as attachment)
