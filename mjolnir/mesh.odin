@@ -21,7 +21,6 @@ bone_deinit :: proc(bone: ^Bone) {
 Skinning :: struct {
   root_bone_index: u32,
   bones:           []Bone,
-  animations:      []animation.Clip,
   skin_buffer:     gpu.DataBuffer(geometry.SkinningData),
 }
 
@@ -42,8 +41,6 @@ mesh_deinit :: proc(self: ^Mesh, gpu_context: ^gpu.GPUContext) {
   gpu.data_buffer_deinit(gpu_context, &skin.skin_buffer)
   for &bone in skin.bones do bone_deinit(&bone)
   delete(skin.bones)
-  for &clip in skin.animations do animation.clip_deinit(&clip)
-  delete(skin.animations)
 }
 
 mesh_init :: proc(
@@ -82,14 +79,13 @@ mesh_init :: proc(
   ) or_return
   self.skinning = Skinning {
     bones       = make([]Bone, 0),
-    animations  = make([]animation.Clip, 0),
     skin_buffer = skin_buffer,
   }
   return .SUCCESS
 }
 
 make_animation_instance :: proc(
-  self: ^Mesh,
+  warehouse: ^ResourceWarehouse,
   animation_name: string,
   mode: animation.PlayMode,
   speed: f32 = 1.0,
@@ -97,36 +93,39 @@ make_animation_instance :: proc(
   instance: animation.Instance,
   ok: bool,
 ) #optional_ok {
-  skin, has_skin := &self.skinning.?
-  if !has_skin do return
-  for clip, i in skin.animations {
+  // TODO: use linear search as a first working implementation
+  // later we need to do better than this linear search
+  for &entry in warehouse.animation_clips.entries {
+    if !entry.active do continue
+    clip := &entry.item
     if clip.name != animation_name do continue
     instance = {
-      clip_handle = u32(i),
-      mode        = mode,
-      status      = .PLAYING,
-      time        = 0.0,
-      duration    = clip.duration,
-      speed       = speed,
+      clip     = clip,
+      mode     = mode,
+      status   = .PLAYING,
+      time     = 0.0,
+      duration = clip.duration,
+      speed    = speed,
     }
     ok = true
-    return
+    break
   }
   return
 }
 
 sample_clip :: proc(
   self: ^Mesh,
-  clip_idx: u32,
+  clip: ^animation.Clip,
   t: f32,
   out_bone_matrices: []matrix[4, 4]f32,
 ) {
   skin, has_skin := &self.skinning.?
-  if !has_skin do  return
-  if len(out_bone_matrices) < len(skin.bones) ||
-     clip_idx >= u32(len(skin.animations)) {
+  if !has_skin do return
+  if len(out_bone_matrices) < len(skin.bones) {
     return
   }
+  if clip == nil do return
+
   TraverseEntry :: struct {
     transform: matrix[4, 4]f32,
     bone:      u32,
@@ -136,7 +135,6 @@ sample_clip :: proc(
     &stack,
     TraverseEntry{linalg.MATRIX4F32_IDENTITY, skin.root_bone_index},
   )
-  clip := &skin.animations[clip_idx]
   for len(stack) > 0 {
     entry := pop(&stack)
     bone := &skin.bones[entry.bone]

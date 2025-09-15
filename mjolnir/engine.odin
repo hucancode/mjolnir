@@ -1025,7 +1025,7 @@ render :: proc(self: ^Engine) -> vk.Result {
     l := skinning.bone_matrix_offset + self.frame_index * self.warehouse.bone_matrix_slab.capacity
     r := l + u32(len(mesh_skin.bones))
     bone_matrices := self.warehouse.bone_buffer.mapped[l:r]
-    sample_clip(mesh, anim_inst.clip_handle, anim_inst.time, bone_matrices)
+    sample_clip(mesh, anim_inst.clip, anim_inst.time, bone_matrices)
   }
   // log.debug("============ setup main camera...============ ")
   // Update camera uniform for main render target

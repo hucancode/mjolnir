@@ -1,5 +1,6 @@
 package mjolnir
 
+import "animation"
 import "core:c"
 import "core:log"
 import "core:math/linalg"
@@ -25,6 +26,7 @@ ResourceWarehouse :: struct {
   image_cube_buffers:           resource.Pool(gpu.CubeImageBuffer),
   cameras:                      resource.Pool(geometry.Camera),
   render_targets:               resource.Pool(RenderTarget),
+  animation_clips:              resource.Pool(animation.Clip),
 
   // Navigation system resources
   nav_meshes:                   resource.Pool(NavMesh),
@@ -66,6 +68,8 @@ resource_init :: proc(
   resource.pool_init(&warehouse.cameras)
   log.infof("Initializing render target pool... ")
   resource.pool_init(&warehouse.render_targets)
+  log.infof("Initializing animation clips pool... ")
+  resource.pool_init(&warehouse.animation_clips)
   log.infof("Initializing navigation mesh pool... ")
   resource.pool_init(&warehouse.nav_meshes)
   log.infof("Initializing navigation context pool... ")
@@ -198,7 +202,13 @@ resource_deinit :: proc(
   delete(warehouse.materials.free_indices)
   delete(warehouse.cameras.entries)
   delete(warehouse.cameras.free_indices)
-
+  for &entry in warehouse.animation_clips.entries {
+    if entry.generation > 0 && entry.active {
+      animation.clip_deinit(&entry.item)
+    }
+  }
+  delete(warehouse.animation_clips.entries)
+  delete(warehouse.animation_clips.free_indices)
   // Navigation system cleanup
   for &entry in warehouse.nav_meshes.entries {
     if entry.generation > 0 && entry.active {
@@ -1183,4 +1193,47 @@ warehouse_get_nav_context :: proc(warehouse: ^ResourceWarehouse, handle: Handle)
 nav_context :: proc {
     engine_get_nav_context,
     warehouse_get_nav_context,
+}
+
+engine_get_animation_clip :: proc(engine: ^Engine, handle: Handle) -> (ret: ^animation.Clip, ok: bool) #optional_ok {
+    ret, ok = resource.get(engine.warehouse.animation_clips, handle)
+    return
+}
+
+warehouse_get_animation_clip :: proc(warehouse: ^ResourceWarehouse, handle: Handle) -> (ret: ^animation.Clip, ok: bool) #optional_ok {
+    ret, ok = resource.get(warehouse.animation_clips, handle)
+    return
+}
+
+animation_clip :: proc {
+    engine_get_animation_clip,
+    warehouse_get_animation_clip,
+}
+
+create_animation_clip :: proc(
+    warehouse: ^ResourceWarehouse,
+    name: string,
+    duration: f32,
+    channels: []animation.Channel,
+) -> (
+    handle: Handle,
+    clip: ^animation.Clip,
+    ret: vk.Result,
+) {
+    handle, clip = resource.alloc(&warehouse.animation_clips)
+    clip.name = name
+    clip.duration = duration
+    clip.channels = channels
+    ret = .SUCCESS
+    return
+}
+
+create_animation_clip_handle :: proc(
+    warehouse: ^ResourceWarehouse,
+    name: string,
+    duration: f32,
+    channels: []animation.Channel,
+) -> (handle: Handle, ok: bool) #optional_ok {
+    h, _, ret := create_animation_clip(warehouse, name, duration, channels)
+    return h, ret == .SUCCESS
 }

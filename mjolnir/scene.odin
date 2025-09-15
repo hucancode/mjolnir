@@ -86,6 +86,7 @@ Node :: struct {
   transform:       geometry.Transform,
   name:            string,
   attachment:      NodeAttachment,
+  animation:       Maybe(animation.Instance), // For node transform animation
   culling_enabled: bool,
   visible:         bool,              // Node's own visibility state
   parent_visible:  bool,              // Visibility inherited from parent chain
@@ -180,7 +181,7 @@ play_animation :: proc(
   if mesh == nil || !has_skin {
     return false
   }
-  anim_inst, found := make_animation_instance(mesh, name, mode)
+  anim_inst, found := make_animation_instance(&engine.warehouse, name, mode)
   if !found {
     return false
   }

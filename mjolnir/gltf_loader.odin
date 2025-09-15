@@ -580,9 +580,9 @@ load_animations :: proc(
 ) -> bool {
   mesh := mesh(engine, mesh_handle)
   skinning := &mesh.skinning.?
-  skinning.animations = make([]animation.Clip, len(gltf_data.animations))
+
   for gltf_anim, i in gltf_data.animations {
-    clip := &skinning.animations[i]
+    clip_handle, clip := resource.alloc(&engine.warehouse.animation_clips)
     if gltf_anim.name != nil {
       clip.name = strings.clone_from_cstring(gltf_anim.name)
     } else {

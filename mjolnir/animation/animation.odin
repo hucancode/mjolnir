@@ -170,19 +170,20 @@ PlayMode :: enum {
 }
 
 Instance :: struct {
-  clip_handle: u32,
-  mode:        PlayMode,
-  status:      Status,
-  time:        f32,
-  duration:    f32,
-  speed:       f32,
+  clip:     ^Clip,
+  mode:     PlayMode,
+  status:   Status,
+  time:     f32,
+  duration: f32,
+  speed:    f32,
 }
 
-instance_init :: proc(self: ^Instance, clip: u32) {
-  self.clip_handle = clip
+instance_init :: proc(self: ^Instance, clip: ^Clip) {
+  self.clip = clip
   self.mode = .LOOP
   self.status = .STOPPED
   self.time = 0.0
+  self.duration = clip.duration if clip != nil else 0.0
   self.speed = 1.0
 }
 
@@ -281,7 +282,6 @@ channel_sample :: proc(
   case .CUBICSPLINE:
     position = keyframe_sample_cubic(channel.cubic_positions, t)
   }
-
   switch channel.rotation_interpolation {
   case .LINEAR:
     rotation = keyframe_sample_or_linear(
@@ -302,7 +302,6 @@ channel_sample :: proc(
       linalg.QUATERNIONF32_IDENTITY,
     )
   }
-
   switch channel.scale_interpolation {
   case .LINEAR:
     scale = keyframe_sample_or_linear(channel.scales, t, [3]f32{1, 1, 1})
@@ -311,7 +310,6 @@ channel_sample :: proc(
   case .CUBICSPLINE:
     scale = keyframe_sample_or_cubic(channel.cubic_scales, t, [3]f32{1, 1, 1})
   }
-
   return
 }
 
@@ -323,7 +321,6 @@ Clip :: struct {
 
 clip_deinit :: proc(clip: ^Clip) {
   for &channel in clip.channels do channel_deinit(&channel)
-
   delete(clip.channels)
   clip.channels = nil
 }
