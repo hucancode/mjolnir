@@ -670,9 +670,11 @@ create_material :: proc(
   metallic_roughness_handle: Handle = {},
   normal_handle: Handle = {},
   emissive_handle: Handle = {},
+  occlusion_handle: Handle = {},
   metallic_value: f32 = 0.0,
   roughness_value: f32 = 1.0,
   emissive_value: f32 = 0.0,
+  base_color_factor: [4]f32 = {1.0, 1.0, 1.0, 1.0},
 ) -> (
   ret: Handle,
   mat: ^Material,
@@ -685,9 +687,11 @@ create_material :: proc(
   mat.metallic_roughness = metallic_roughness_handle
   mat.normal = normal_handle
   mat.emissive = emissive_handle
+  mat.occlusion = occlusion_handle
   mat.metallic_value = metallic_value
   mat.roughness_value = roughness_value
   mat.emissive_value = emissive_value
+  mat.base_color_factor = base_color_factor
   log.infof(
     "Material created: albedo=%d metallic_roughness=%d normal=%d emissive=%d",
     mat.albedo.index,
@@ -707,13 +711,16 @@ create_material_handle :: proc(
   metallic_roughness_handle: Handle = {},
   normal_handle: Handle = {},
   emissive_handle: Handle = {},
+  occlusion_handle: Handle = {},
   metallic_value: f32 = 0.0,
   roughness_value: f32 = 1.0,
   emissive_value: f32 = 0.0,
+  base_color_factor: [4]f32 = {1.0, 1.0, 1.0, 1.0},
 ) -> (handle: Handle, ok: bool) #optional_ok {
   h, _, ret := create_material(
     warehouse, features, type, albedo_handle, metallic_roughness_handle,
-    normal_handle, emissive_handle, metallic_value, roughness_value, emissive_value,
+    normal_handle, emissive_handle, occlusion_handle, metallic_value, 
+    roughness_value, emissive_value, base_color_factor,
   )
   return h, ret == .SUCCESS
 }

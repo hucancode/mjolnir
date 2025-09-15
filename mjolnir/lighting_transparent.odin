@@ -163,6 +163,7 @@ create_transparent_pipelines :: proc(
       has_metallic_roughness_texture = .METALLIC_ROUGHNESS_TEXTURE in features,
       has_normal_texture             = .NORMAL_TEXTURE in features,
       has_emissive_texture           = .EMISSIVE_TEXTURE in features,
+      has_occlusion_texture          = .OCCLUSION_TEXTURE in features,
     }
     entries[mask] = [SHADER_OPTION_COUNT]vk.SpecializationMapEntry {
       {
@@ -188,6 +189,11 @@ create_transparent_pipelines :: proc(
       {
         constantID = 4,
         offset = u32(offset_of(ShaderConfig, has_emissive_texture)),
+        size = size_of(b32),
+      },
+      {
+        constantID = 5,
+        offset = u32(offset_of(ShaderConfig, has_occlusion_texture)),
         size = size_of(b32),
       },
     }

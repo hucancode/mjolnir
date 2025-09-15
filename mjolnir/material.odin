@@ -15,6 +15,7 @@ ShaderFeatures :: enum {
   METALLIC_ROUGHNESS_TEXTURE = 2,
   NORMAL_TEXTURE             = 3,
   EMISSIVE_TEXTURE           = 4,
+  OCCLUSION_TEXTURE          = 5,
 }
 
 ShaderFeatureSet :: bit_set[ShaderFeatures;u32]
@@ -27,6 +28,7 @@ ShaderConfig :: struct {
   has_metallic_roughness_texture: b32,
   has_normal_texture:             b32,
   has_emissive_texture:           b32,
+  has_occlusion_texture:          b32,
 }
 
 MaterialType :: enum {
@@ -43,7 +45,9 @@ Material :: struct {
   metallic_roughness: Handle,
   normal:             Handle,
   emissive:           Handle,
+  occlusion:          Handle,
   metallic_value:     f32,
   roughness_value:    f32,
   emissive_value:     f32,
+  base_color_factor:  [4]f32,
 }

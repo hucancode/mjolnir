@@ -48,7 +48,7 @@ load_gltf :: proc(
     parent: Handle,
   }
   stack := make([dynamic]TraverseEntry, 0, context.temp_allocator)
-  is_gltf_child_node: bit_set[0 ..< 128] // Assuming max 128 nodes, TODO: fix this
+  child_node_indices := make([dynamic]u32, 0, context.temp_allocator)
   node_ptr_to_idx_map := make(map[^cgltf.node]u32, context.temp_allocator)
   for &node, i in gltf_data.nodes {
     node_ptr_to_idx_map[&node] = u32(i)
@@ -56,11 +56,11 @@ load_gltf :: proc(
   for &node in gltf_data.nodes {
     for child_ptr in node.children {
       child_idx := node_ptr_to_idx_map[child_ptr]
-      is_gltf_child_node += {int(child_idx)}
+      append(&child_node_indices, child_idx)
     }
   }
   for i in 0 ..< len(gltf_data.nodes) {
-    if i not_in is_gltf_child_node {
+    if !slice.contains(child_node_indices[:], u32(i)) {
       append(&stack, TraverseEntry{idx = u32(i), parent = engine.scene.root})
     }
   }
@@ -409,6 +409,12 @@ load_gltf_primitive :: proc(
     ret = .ERROR_UNKNOWN
     return
   }
+
+  // Combine all primitives into a single mesh
+  combined_vertices := make([dynamic]geometry.Vertex, 0, context.temp_allocator)
+  combined_indices := make([dynamic]u32, 0, context.temp_allocator)
+
+  // Use first primitive's material (could be enhanced to support multiple materials)
   primitive := &primitives[0]
   if existing_handle, found := material_cache[primitive.material]; found {
     material_handle = existing_handle
@@ -430,77 +436,91 @@ load_gltf_primitive :: proc(
       metallic_roughness_handle,
       normal_handle,
       emissive_handle,
+      {}, // occlusion_handle
+      0.0, // metallic_value
+      1.0, // roughness_value
+      0.0, // emissive_value
+      {1.0, 1.0, 1.0, 1.0}, // base_color_factor
     ) or_return
     material_cache[primitive.material] = material_handle
     log.infof("Created new material %v", material_handle)
   }
-  vertices_num := primitive.attributes[0].data.count
-  vertices := make([]geometry.Vertex, vertices_num)
-  for attribute in primitive.attributes {
-    accessor := attribute.data
-    if accessor.count != vertices_num {
-      log.errorf(
-        "Warning: Attribute '%v' count (%d) does not match position count (%d)\n",
-        attribute.type,
-        accessor.count,
-        vertices_num,
-      )
-    }
-    floats_data := unpack_accessor_floats_flat(accessor)
-    #partial switch attribute.type {
-    case .position:
-      for i in 0 ..< min(int(accessor.count), len(vertices)) {
-        vertices[i].position = {
-          floats_data[i * 3 + 0],
-          floats_data[i * 3 + 1],
-          floats_data[i * 3 + 2],
-        }
-      }
-    case .normal:
-      for i in 0 ..< min(int(accessor.count), len(vertices)) {
-        vertices[i].normal = {
-          floats_data[i * 3 + 0],
-          floats_data[i * 3 + 1],
-          floats_data[i * 3 + 2],
-        }
-      }
-    case .texcoord:
-      if attribute.index == 0 {
+
+  // Process each primitive
+  for prim in primitives {
+    vertex_offset := u32(len(combined_vertices))
+    vertices_num := prim.attributes[0].data.count
+    vertices := make([]geometry.Vertex, vertices_num, context.temp_allocator)
+
+    for attribute in prim.attributes {
+      accessor := attribute.data
+      floats_data := unpack_accessor_floats_flat(accessor)
+      defer delete(floats_data)
+
+      #partial switch attribute.type {
+      case .position:
         for i in 0 ..< min(int(accessor.count), len(vertices)) {
-          vertices[i].uv = {floats_data[i * 2 + 0], floats_data[i * 2 + 1]}
+          vertices[i].position = {
+            floats_data[i * 3 + 0],
+            floats_data[i * 3 + 1],
+            floats_data[i * 3 + 2],
+          }
         }
-      }
-    case .tangent:
-      for i in 0 ..< min(int(accessor.count), len(vertices)) {
-        vertices[i].tangent = {
-          floats_data[i * 4 + 0],
-          floats_data[i * 4 + 1],
-          floats_data[i * 4 + 2],
-          floats_data[i * 4 + 3],
+      case .normal:
+        for i in 0 ..< min(int(accessor.count), len(vertices)) {
+          vertices[i].normal = {
+            floats_data[i * 3 + 0],
+            floats_data[i * 3 + 1],
+            floats_data[i * 3 + 2],
+          }
+        }
+      case .texcoord:
+        if attribute.index == 0 {
+          for i in 0 ..< min(int(accessor.count), len(vertices)) {
+            vertices[i].uv = {floats_data[i * 2 + 0], floats_data[i * 2 + 1]}
+          }
+        }
+      case .tangent:
+        for i in 0 ..< min(int(accessor.count), len(vertices)) {
+          vertices[i].tangent = {
+            floats_data[i * 4 + 0],
+            floats_data[i * 4 + 1],
+            floats_data[i * 4 + 2],
+            floats_data[i * 4 + 3],
+          }
         }
       }
     }
-  }
-  indices: []u32
-  if primitive.indices != nil {
-    indices = make([]u32, primitive.indices.count)
-    read := cgltf.accessor_unpack_indices(
-      primitive.indices,
-      raw_data(indices),
-      size_of(u32),
-      primitive.indices.count,
-    )
-    if read != primitive.indices.count {
-      log.errorf(
-        "Failed to read indices from GLTF primitive. read %d, need %d\n",
-        read,
-        primitive.indices.count,
+
+    // Add vertices to combined mesh
+    append(&combined_vertices, ..vertices[:])
+
+    // Process indices
+    if prim.indices != nil {
+      indices := make([]u32, prim.indices.count, context.temp_allocator)
+      _ = cgltf.accessor_unpack_indices(
+        prim.indices,
+        raw_data(indices),
+        size_of(u32),
+        prim.indices.count,
       )
-      ret = .ERROR_UNKNOWN
-      return
+
+      // Apply vertex offset and add to combined indices
+      for &index in indices {
+        index += vertex_offset
+      }
+      append(&combined_indices, ..indices[:])
     }
   }
-  mesh_data = geometry.make_geometry(vertices, indices)
+
+  // Create final geometry from combined data
+  final_vertices := slice.clone(combined_vertices[:])
+  final_indices := slice.clone(combined_indices[:])
+  mesh_data = geometry.make_geometry(final_vertices, final_indices)
+
+  log.infof("Combined %d primitives into mesh with %d vertices, %d indices",
+    len(primitives), len(final_vertices), len(final_indices))
+
   return mesh_data, material_handle, .SUCCESS
 }
 
@@ -563,14 +583,6 @@ load_gltf_skinned_primitive :: proc(
   attributes := primitive.attributes
   for attribute in attributes {
     accessor := attribute.data
-    if accessor.count != num_vertices {
-      log.errorf(
-        "Warning: Skinned attribute '%v' count (%d) does not match position count (%d)\n",
-        attribute.type,
-        accessor.count,
-        num_vertices,
-      )
-    }
     data := unpack_accessor_floats_flat(accessor)
     #partial switch attribute.type {
     case .position:
@@ -609,15 +621,12 @@ load_gltf_skinned_primitive :: proc(
       if attribute.index == 0 {
         n := accessor.count
         for i in 0 ..< min(int(n), len(vertices)) {
-          read := cgltf.accessor_read_uint(
+          _ = cgltf.accessor_read_uint(
             accessor,
             uint(i),
             raw_data(skinnings[i].joints[:]),
             len(skinnings[i].joints),
           )
-          if !read {
-            log.errorf("Failed to read joints from GLTF primitive.\n")
-          }
         }
       }
     case .weights:
@@ -637,21 +646,12 @@ load_gltf_skinned_primitive :: proc(
   indices: []u32
   if primitive.indices != nil {
     indices = make([]u32, primitive.indices.count)
-    read := cgltf.accessor_unpack_indices(
+    _ = cgltf.accessor_unpack_indices(
       primitive.indices,
       raw_data(indices),
       size_of(u32),
       primitive.indices.count,
     )
-    if read != primitive.indices.count {
-      log.errorf(
-        "Failed to read indices from GLTF primitive. read %d, need %d\n",
-        read,
-        primitive.indices.count,
-      )
-      ret = .ERROR_UNKNOWN
-      return
-    }
   }
   geometry_data = geometry.make_geometry(vertices, indices, skinnings)
   engine_bones = make([]Bone, len(gltf_skin.joints))
@@ -682,15 +682,13 @@ load_gltf_skinned_primitive :: proc(
       }
     }
   }
-  is_child_bone: bit_set[0 ..< 128]
+  child_bone_indices := make([dynamic]u32, 0, context.temp_allocator)
   for bone in engine_bones {
-    for child_idx in bone.children {
-      is_child_bone += {int(child_idx)}
-    }
+    append(&child_bone_indices, ..bone.children[:])
   }
   found_root := false
   for i in 0 ..< len(engine_bones) {
-    if i not_in is_child_bone {
+    if !slice.contains(child_bone_indices[:], u32(i)) {
       root_bone_idx = u32(i)
       found_root = true
       break
@@ -707,9 +705,7 @@ load_gltf_skinned_primitive :: proc(
 
 // Helper to unpack accessor data into a flat []f32. Caller must free the returned slice.
 unpack_accessor_floats_flat :: proc(accessor: ^cgltf.accessor) -> []f32 {
-  if accessor == nil {
-    return nil
-  }
+  if accessor == nil do return nil
   n := accessor.count * cgltf.num_components(accessor.type)
   ret := make([]f32, n)
   _ = cgltf.accessor_unpack_floats(accessor, raw_data(ret), n)
@@ -732,10 +728,7 @@ load_gltf_animations :: proc(
     } else {
       clip.name = fmt.tprintf("animation_%d", i)
     }
-    log.infof(
-      "\nAllocating animation channels for %d bones",
-      len(skinning.bones),
-    )
+    log.infof("Allocating animation channels for %d bones", len(skinning.bones))
     clip.channels = make([]animation.Channel, len(skinning.bones))
     max_time: f32 = 0.0
     for gltf_channel in gltf_anim.channels {
