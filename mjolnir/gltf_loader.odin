@@ -17,6 +17,27 @@ import "geometry"
 import "gpu"
 import "resource"
 
+@(private = "file")
+AssetManifest :: struct {
+  unique_textures: [dynamic]^cgltf.texture,
+  unique_materials: [dynamic]^cgltf.material,
+  meshes: [dynamic]^cgltf.mesh,
+  skins: [dynamic]^cgltf.skin,
+}
+
+@(private = "file")
+GeometryData :: struct {
+  geometry: geometry.Geometry,
+  material_handle: resource.Handle,
+}
+
+@(private = "file")
+SkinData :: struct {
+  bones: []Bone,
+  root_bone_idx: u32,
+  matrix_buffer_offset: u32,
+}
+
 load_gltf :: proc(
   engine: ^Engine,
   path: string,
@@ -24,6 +45,7 @@ load_gltf :: proc(
   nodes: [dynamic]Handle,
   ret: cgltf.result,
 ) {
+  // step 0: cgltf
   gltf_path_cstr := strings.clone_to_cstring(path, context.temp_allocator)
   options: cgltf.options
   gltf_data := cgltf.parse_file(options, gltf_path_cstr) or_return
@@ -35,21 +57,427 @@ load_gltf :: proc(
   if len(gltf_data.nodes) == 0 {
     return nodes, .success
   }
-  // Track bone matrix buffer mapping (1 skin = 1 bone matrix buffer)
-  skin_to_bone_offset := make(map[^cgltf.skin]u32, context.temp_allocator)
-  // Track which mesh gets animation
-  skin_to_first_mesh := make(map[^cgltf.skin]resource.Handle, context.temp_allocator)
-  // Track texture deduplication
-  texture_to_handle := make(map[^cgltf.texture]resource.Handle, context.temp_allocator)
-  // Track material deduplication
-  material_to_handle := make(map[^cgltf.material]resource.Handle, context.temp_allocator)
+  // step 1: Asset Discovery
+  manifest, skinned_materials := discover_assets(gltf_data)
+  defer {
+    delete(manifest.unique_textures)
+    delete(manifest.unique_materials)
+    delete(manifest.meshes)
+    delete(manifest.skins)
+  }
+  // step 2: Resource Loading
+  texture_cache := make(map[^cgltf.texture]resource.Handle, context.temp_allocator)
+  material_cache := make(map[^cgltf.material]resource.Handle, context.temp_allocator)
+  load_textures_batch(engine, path, gltf_data, manifest.unique_textures[:], &texture_cache) or_return
+  load_materials_batch(engine, path, gltf_data, manifest.unique_materials[:], &texture_cache, &material_cache, skinned_materials) or_return
+  // step 3: Geometry Processing
+  geometry_cache := make(map[^cgltf.mesh]GeometryData, context.temp_allocator)
+  mesh_skinning_map := make(map[^cgltf.mesh]bool, context.temp_allocator)
+  for &node in gltf_data.nodes {
+    if node.mesh != nil && node.skin != nil {
+      mesh_skinning_map[node.mesh] = true
+    }
+  }
+  process_geometries(engine, path, gltf_data, manifest.meshes[:], &texture_cache, &material_cache, &geometry_cache, mesh_skinning_map) or_return
+  // step 4: Skinning Processing
+  skin_cache := make(map[^cgltf.skin]SkinData, context.temp_allocator)
+  process_skins(engine, gltf_data, manifest.skins[:], &skin_cache)
+  // step 5: Scene Construction
+  construct_scene(engine, gltf_data, &geometry_cache, &skin_cache, &nodes) or_return
+  log.infof("GLTF loading complete:")
+  log.infof("  - Unique textures: %d", len(texture_cache))
+  log.infof("  - Unique materials: %d", len(material_cache))
+  log.infof("  - Meshes: %d", len(geometry_cache))
+  log.infof("  - Skins: %d", len(skin_cache))
+  return nodes, .success
+}
+
+@(private = "file")
+discover_assets :: proc(gltf_data: ^cgltf.data) -> (AssetManifest, map[^cgltf.material]bool) {
+  manifest: AssetManifest
+  manifest.unique_textures = make([dynamic]^cgltf.texture, 0)
+  manifest.unique_materials = make([dynamic]^cgltf.material, 0)
+  manifest.meshes = make([dynamic]^cgltf.mesh, 0)
+  manifest.skins = make([dynamic]^cgltf.skin, 0)
+  texture_set := make(map[^cgltf.texture]bool, context.temp_allocator)
+  material_set := make(map[^cgltf.material]bool, context.temp_allocator)
+  mesh_set := make(map[^cgltf.mesh]bool, context.temp_allocator)
+  skin_set := make(map[^cgltf.skin]bool, context.temp_allocator)
+  skinned_materials := make(map[^cgltf.material]bool, context.temp_allocator)
+  for &node in gltf_data.nodes {
+    if node.mesh != nil && node.mesh not_in mesh_set {
+      append(&manifest.meshes, node.mesh)
+      mesh_set[node.mesh] = true
+      is_skinned := node.skin != nil
+      for &primitive in node.mesh.primitives {
+        if primitive.material != nil && primitive.material not_in material_set {
+          append(&manifest.unique_materials, primitive.material)
+          material_set[primitive.material] = true
+          if is_skinned {
+            skinned_materials[primitive.material] = true
+          }
+          material := primitive.material
+          if material.pbr_metallic_roughness.base_color_texture.texture != nil {
+            tex := material.pbr_metallic_roughness.base_color_texture.texture
+            if tex not_in texture_set {
+              append(&manifest.unique_textures, tex)
+              texture_set[tex] = true
+            }
+          }
+          if material.has_pbr_metallic_roughness && material.pbr_metallic_roughness.metallic_roughness_texture.texture != nil {
+            tex := material.pbr_metallic_roughness.metallic_roughness_texture.texture
+            if tex not_in texture_set {
+              append(&manifest.unique_textures, tex)
+              texture_set[tex] = true
+            }
+          }
+          if material.normal_texture.texture != nil {
+            tex := material.normal_texture.texture
+            if tex not_in texture_set {
+              append(&manifest.unique_textures, tex)
+              texture_set[tex] = true
+            }
+          }
+          if material.emissive_texture.texture != nil {
+            tex := material.emissive_texture.texture
+            if tex not_in texture_set {
+              append(&manifest.unique_textures, tex)
+              texture_set[tex] = true
+            }
+          }
+        }
+      }
+    }
+    if node.skin != nil && node.skin not_in skin_set {
+      append(&manifest.skins, node.skin)
+      skin_set[node.skin] = true
+    }
+  }
+  log.infof("Asset Discovery Complete:")
+  log.infof("  - Unique textures: %d", len(manifest.unique_textures))
+  log.infof("  - Unique materials: %d", len(manifest.unique_materials))
+  log.infof("  - Meshes: %d", len(manifest.meshes))
+  log.infof("  - Skins: %d", len(manifest.skins))
+  return manifest, skinned_materials
+}
+
+@(private = "file")
+load_textures_batch :: proc(
+  engine: ^Engine,
+  gltf_path: string,
+  gltf_data: ^cgltf.data,
+  textures: []^cgltf.texture,
+  texture_cache: ^map[^cgltf.texture]resource.Handle,
+) -> cgltf.result {
+  for gltf_texture in textures {
+    if gltf_texture == nil || gltf_texture.image_ == nil {
+      continue
+    }
+    gltf_image := gltf_texture.image_
+    pixel_data: []u8
+    if gltf_image.uri != nil {
+      texture_path_str := path.join({path.dir(gltf_path), string(gltf_image.uri)})
+      ok: bool
+      pixel_data, ok = os.read_entire_file(texture_path_str)
+      if !ok {
+        log.errorf("Failed to read texture file '%s'", texture_path_str)
+        return .file_not_found
+      }
+    } else if gltf_image.buffer_view != nil {
+      view := gltf_image.buffer_view
+      buffer := view.buffer
+      src_data_ptr := mem.ptr_offset(cast(^u8)buffer.data, view.offset)
+      pixel_data = slice.from_ptr(src_data_ptr, int(view.size))
+      pixel_data = slice.clone(pixel_data)
+    } else {
+      continue
+    }
+    tex_handle, _, texture_result := create_texture(&engine.gpu_context, &engine.warehouse, pixel_data)
+    if texture_result != .SUCCESS {
+      return .io_error
+    }
+    delete(pixel_data)
+    texture_cache[gltf_texture] = tex_handle
+    log.infof("Created texture %v", tex_handle)
+  }
+  return .success
+}
+
+@(private = "file")
+load_materials_batch :: proc(
+  engine: ^Engine,
+  gltf_path: string,
+  gltf_data: ^cgltf.data,
+  materials: []^cgltf.material,
+  texture_cache: ^map[^cgltf.texture]resource.Handle,
+  material_cache: ^map[^cgltf.material]resource.Handle,
+  skinned_materials: map[^cgltf.material]bool,
+) -> cgltf.result {
+  for gltf_material in materials {
+    if gltf_material == nil do continue
+    albedo, metallic_roughness, normal, emissive, occlusion, features := load_material_textures(
+      gltf_material, texture_cache,
+    )
+    if gltf_material in skinned_materials do features |= {.SKINNING}
+    material_handle, _, material_result := create_material(
+      &engine.warehouse,
+      features,
+      .PBR,
+      albedo,
+      metallic_roughness,
+      normal,
+      emissive,
+      occlusion,
+    )
+    if material_result != .SUCCESS do return .invalid_gltf
+    material_cache[gltf_material] = material_handle
+    log.infof("Created material %v", material_handle)
+  }
+  return .success
+}
+
+@(private = "file")
+load_material_textures :: proc(
+  gltf_material: ^cgltf.material,
+  texture_cache: ^map[^cgltf.texture]resource.Handle,
+) -> (albedo: resource.Handle, metallic_roughness: resource.Handle, normal: resource.Handle, emissive: resource.Handle, occlusion: resource.Handle, features: ShaderFeatureSet) {
+  if gltf_material.has_pbr_metallic_roughness && gltf_material.pbr_metallic_roughness.metallic_roughness_texture.texture != nil {
+    if handle, found := texture_cache[gltf_material.pbr_metallic_roughness.metallic_roughness_texture.texture]; found {
+      metallic_roughness = handle
+      features |= {.METALLIC_ROUGHNESS_TEXTURE}
+    }
+  }
+  if gltf_material.pbr_metallic_roughness.base_color_texture.texture != nil {
+    if handle, found := texture_cache[gltf_material.pbr_metallic_roughness.base_color_texture.texture]; found {
+      albedo = handle
+      features |= {.ALBEDO_TEXTURE}
+    }
+  }
+  if gltf_material.normal_texture.texture != nil {
+    if handle, found := texture_cache[gltf_material.normal_texture.texture]; found {
+      normal = handle
+      features |= {.NORMAL_TEXTURE}
+    }
+  }
+  if gltf_material.emissive_texture.texture != nil {
+    if handle, found := texture_cache[gltf_material.emissive_texture.texture]; found {
+      emissive = handle
+      features |= {.EMISSIVE_TEXTURE}
+    }
+  }
+  if gltf_material.occlusion_texture.texture != nil {
+    if handle, found := texture_cache[gltf_material.occlusion_texture.texture]; found {
+      occlusion = handle
+      features |= {.OCCLUSION_TEXTURE}
+    }
+  }
+  return
+}
+
+@(private = "file")
+process_geometries :: proc(
+  engine: ^Engine,
+  gltf_path: string,
+  gltf_data: ^cgltf.data,
+  meshes: []^cgltf.mesh,
+  texture_cache: ^map[^cgltf.texture]resource.Handle,
+  material_cache: ^map[^cgltf.material]resource.Handle,
+  geometry_cache: ^map[^cgltf.mesh]GeometryData,
+  mesh_skinning_map: map[^cgltf.mesh]bool,
+) -> cgltf.result {
+  for mesh in meshes {
+    is_skinned := mesh in mesh_skinning_map
+    geometry_data := process_mesh_primitives(mesh, material_cache, is_skinned) or_return
+    geometry_cache[mesh] = geometry_data
+    log.infof("Processed mesh with %d vertices, %d indices",
+      len(geometry_data.geometry.vertices), len(geometry_data.geometry.indices))
+  }
+  return .success
+}
+
+@(private = "file")
+process_mesh_primitives :: proc(
+  mesh: ^cgltf.mesh,
+  material_cache: ^map[^cgltf.material]resource.Handle,
+  include_skinning: bool,
+) -> (GeometryData, cgltf.result) {
+  primitives := mesh.primitives
+  if len(primitives) == 0 {
+    return {}, .invalid_gltf
+  }
+
+  material_handle: resource.Handle
+  if primitives[0].material != nil {
+    if handle, found := material_cache[primitives[0].material]; found {
+      material_handle = handle
+    }
+  }
+
+  combined_vertices := make([dynamic]geometry.Vertex, 0, context.temp_allocator)
+  combined_indices := make([dynamic]u32, 0, context.temp_allocator)
+  combined_skinnings: [dynamic]geometry.SkinningData
+
+  if include_skinning {
+    combined_skinnings = make([dynamic]geometry.SkinningData, 0, context.temp_allocator)
+  }
+
+  for &prim in primitives {
+    vertex_offset := u32(len(combined_vertices))
+    vertices_num := prim.attributes[0].data.count
+    vertices := make([]geometry.Vertex, vertices_num, context.temp_allocator)
+
+    skinnings: []geometry.SkinningData
+    if include_skinning {
+      skinnings = make([]geometry.SkinningData, vertices_num, context.temp_allocator)
+    }
+
+    process_vertex_attributes(&prim, vertices, skinnings)
+
+    append(&combined_vertices, ..vertices[:])
+    if include_skinning {
+      append(&combined_skinnings, ..skinnings[:])
+    }
+
+    if prim.indices != nil {
+      indices := make([]u32, prim.indices.count, context.temp_allocator)
+      _ = cgltf.accessor_unpack_indices(prim.indices, raw_data(indices), size_of(u32), prim.indices.count)
+
+      for &index in indices {
+        index += vertex_offset
+      }
+      append(&combined_indices, ..indices[:])
+    }
+  }
+
+  final_vertices := slice.clone(combined_vertices[:])
+  final_indices := slice.clone(combined_indices[:])
+
+  geometry_data: geometry.Geometry
+  if include_skinning {
+    final_skinnings := slice.clone(combined_skinnings[:])
+    geometry_data = geometry.make_geometry(final_vertices, final_indices, final_skinnings)
+  } else {
+    geometry_data = geometry.make_geometry(final_vertices, final_indices)
+  }
+
+  return GeometryData{geometry = geometry_data, material_handle = material_handle}, .success
+}
+
+@(private = "file")
+process_vertex_attributes :: proc(
+  primitive: ^cgltf.primitive,
+  vertices: []geometry.Vertex,
+  skinnings: []geometry.SkinningData = nil,
+) {
+  for attribute in primitive.attributes {
+    accessor := attribute.data
+    #partial switch attribute.type {
+    case .position:
+      for i in 0 ..< min(int(accessor.count), len(vertices)) {
+        cgltf.accessor_read_float(accessor, uint(i), raw_data(vertices[i].position[:]), 3) or_continue
+      }
+    case .normal:
+      for i in 0 ..< min(int(accessor.count), len(vertices)) {
+        cgltf.accessor_read_float(accessor, uint(i), raw_data(vertices[i].normal[:]), 3) or_continue
+      }
+    case .texcoord:
+      if attribute.index == 0 {
+        for i in 0 ..< min(int(accessor.count), len(vertices)) {
+          cgltf.accessor_read_float(accessor, uint(i), raw_data(vertices[i].uv[:]), 2) or_continue
+        }
+      }
+    case .tangent:
+      for i in 0 ..< min(int(accessor.count), len(vertices)) {
+        cgltf.accessor_read_float(accessor, uint(i), raw_data(vertices[i].tangent[:]), 4) or_continue
+      }
+    case .joints:
+      if attribute.index == 0 && skinnings != nil {
+        for i in 0 ..< min(int(accessor.count), len(skinnings)) {
+          cgltf.accessor_read_uint(accessor, uint(i), raw_data(skinnings[i].joints[:]), len(skinnings[i].joints)) or_continue
+        }
+      }
+    case .weights:
+      if attribute.index == 0 && skinnings != nil {
+        for i in 0 ..< min(int(accessor.count), len(skinnings)) {
+          cgltf.accessor_read_float(accessor, uint(i), raw_data(skinnings[i].weights[:]), 4) or_continue
+        }
+      }
+    }
+  }
+}
+
+@(private = "file")
+process_skins :: proc(
+  engine: ^Engine,
+  gltf_data: ^cgltf.data,
+  skins: []^cgltf.skin,
+  skin_cache: ^map[^cgltf.skin]SkinData,
+) {
+  for gltf_skin in skins {
+    bones := make([]Bone, len(gltf_skin.joints))
+    for joint_node, i in gltf_skin.joints {
+      bones[i].name = string(joint_node.name)
+      if gltf_skin.inverse_bind_matrices != nil {
+        ibm_floats: [16]f32
+        read := cgltf.accessor_read_float(gltf_skin.inverse_bind_matrices, uint(i), raw_data(ibm_floats[:]), 16)
+        if read {
+          bones[i].inverse_bind_matrix = geometry.matrix_from_arr(ibm_floats)
+        }
+      } else {
+        bones[i].inverse_bind_matrix = linalg.MATRIX4F32_IDENTITY
+      }
+    }
+    for joint_node, i in gltf_skin.joints {
+      bones[i].children = make([]u32, len(joint_node.children))
+      for child, j in joint_node.children {
+        if idx, found := slice.linear_search(gltf_skin.joints, child); found {
+          bones[i].children[j] = u32(idx)
+        }
+      }
+    }
+    child_bone_indices := make([dynamic]u32, 0, context.temp_allocator)
+    for bone in bones {
+      append(&child_bone_indices, ..bone.children[:])
+    }
+    root_bone_idx: u32 = 0
+    for i in 0 ..< len(bones) {
+      if !slice.contains(child_bone_indices[:], u32(i)) {
+        root_bone_idx = u32(i)
+        break
+      }
+    }
+    matrix_buffer_offset := resource.slab_alloc(&engine.warehouse.bone_matrix_slab, u32(len(bones)))
+    for frame_idx in 0 ..< MAX_FRAMES_IN_FLIGHT {
+      l := matrix_buffer_offset + u32(frame_idx) * engine.warehouse.bone_matrix_slab.capacity
+      r := l + u32(len(bones))
+      bone_matrices := engine.warehouse.bone_buffer.mapped[l:r]
+      slice.fill(bone_matrices, linalg.MATRIX4F32_IDENTITY)
+    }
+    skin_cache[gltf_skin] = SkinData{
+      bones = bones,
+      root_bone_idx = root_bone_idx,
+      matrix_buffer_offset = matrix_buffer_offset,
+    }
+    log.infof("Processed skin with %d bones, root bone %d", len(bones), root_bone_idx)
+  }
+}
+
+@(private = "file")
+construct_scene :: proc(
+  engine: ^Engine,
+  gltf_data: ^cgltf.data,
+  geometry_cache: ^map[^cgltf.mesh]GeometryData,
+  skin_cache: ^map[^cgltf.skin]SkinData,
+  nodes: ^[dynamic]Handle,
+) -> cgltf.result {
   TraverseEntry :: struct {
-    idx:    u32,
+    idx: u32,
     parent: Handle,
   }
   stack := make([dynamic]TraverseEntry, 0, context.temp_allocator)
   child_node_indices := make([dynamic]u32, 0, context.temp_allocator)
   node_ptr_to_idx_map := make(map[^cgltf.node]u32, context.temp_allocator)
+  skin_to_first_mesh := make(map[^cgltf.skin]resource.Handle, context.temp_allocator)
   for &node, i in gltf_data.nodes {
     node_ptr_to_idx_map[&node] = u32(i)
   }
@@ -72,9 +500,7 @@ load_gltf :: proc(
     node.name = string(gltf_node.name)
     node.transform = geometry.TRANSFORM_IDENTITY
     if gltf_node.has_matrix {
-      node.transform = geometry.decompose_matrix(
-        geometry.matrix_from_arr(gltf_node.matrix_),
-      )
+      node.transform = geometry.decompose_matrix(geometry.matrix_from_arr(gltf_node.matrix_))
     } else {
       if gltf_node.has_translation {
         node.transform.position = gltf_node.translation
@@ -94,132 +520,47 @@ load_gltf :: proc(
     }
     node.parent = entry.parent
     node.children = make([dynamic]Handle, 0)
-    // Attach mesh if present
     if gltf_node.mesh != nil {
-      if gltf_node.skin != nil {
-        log.infof("Loading skinned mesh %s", string(gltf_node.name))
-        mesh_handle, mesh := resource.alloc(&engine.warehouse.meshes)
-        data, bones, material, root_bone_idx, res :=
-          load_gltf_skinned_primitive(
-            engine,
-            path,
-            gltf_data,
-            gltf_node.mesh,
-            gltf_node.skin,
-            &texture_to_handle,
-            &material_to_handle,
-          )
-        if res == .SUCCESS {
-          mesh_init(mesh, &engine.gpu_context, data)
-          skinning, _ := &mesh.skinning.?
-          skinning.bones = bones
-          skinning.root_bone_index = root_bone_idx
-          bone_matrix_id: u32
-          if existing_offset, found := skin_to_bone_offset[gltf_node.skin];
-             found {
-            bone_matrix_id = existing_offset
-            log.infof(
-              "Reusing bone matrix buffer for skin at offset %d",
-              bone_matrix_id,
-            )
-          } else {
-            bone_matrix_id = resource.slab_alloc(
-              &engine.warehouse.bone_matrix_slab,
-              u32(len(bones)),
-            )
-            skin_to_bone_offset[gltf_node.skin] = bone_matrix_id
-            log.infof(
-              "Allocated new bone matrix buffer for skin at offset %d with %d bones",
-              bone_matrix_id,
-              len(bones),
-            )
-            // Set bind pose for all frames (otherwise zeroed out matrices will cause model to be invisible)
-            for frame_idx in 0 ..< MAX_FRAMES_IN_FLIGHT {
-              l :=
-                bone_matrix_id +
-                u32(frame_idx) * engine.warehouse.bone_matrix_slab.capacity
-              r := l + u32(len(bones))
-              bone_matrices := engine.warehouse.bone_buffer.mapped[l:r]
-              slice.fill(bone_matrices, linalg.MATRIX4F32_IDENTITY)
+      if geometry_data, found := geometry_cache[gltf_node.mesh]; found {
+        if gltf_node.skin != nil {
+          if skin_data, skin_found := skin_cache[gltf_node.skin]; skin_found {
+            mesh_handle, mesh := resource.alloc(&engine.warehouse.meshes)
+            mesh_init(mesh, &engine.gpu_context, geometry_data.geometry)
+            skinning, _ := &mesh.skinning.?
+            // Deep clone bones including their children slices
+            skinning.bones = make([]Bone, len(skin_data.bones))
+            for src_bone, i in skin_data.bones {
+              skinning.bones[i] = src_bone
+              skinning.bones[i].children = slice.clone(src_bone.children)
+              skinning.bones[i].name = strings.clone(src_bone.name)
+            }
+            skinning.root_bone_index = skin_data.root_bone_idx
+            node.attachment = MeshAttachment{
+              handle = mesh_handle,
+              material = geometry_data.material_handle,
+              cast_shadow = true,
+              skinning = NodeSkinning{bone_matrix_offset = skin_data.matrix_buffer_offset},
+            }
+            if _, has_first_mesh := skin_to_first_mesh[gltf_node.skin]; !has_first_mesh {
+              skin_to_first_mesh[gltf_node.skin] = mesh_handle
+              load_animations(engine, gltf_data, gltf_node.skin, mesh_handle)
             }
           }
-          node.attachment = MeshAttachment {
-            handle = mesh_handle,
-            material = material,
-            cast_shadow = true,
-            skinning = NodeSkinning{bone_matrix_offset = bone_matrix_id},
-          }
-          if _, has_first_mesh := skin_to_first_mesh[gltf_node.skin];
-             !has_first_mesh {
-            skin_to_first_mesh[gltf_node.skin] = mesh_handle
-            load_gltf_animations(
-              engine,
-              gltf_data,
-              gltf_node.skin,
-              mesh_handle,
-            )
-            log.infof(
-              "Loaded animations for skin on mesh %v (first mesh for this skin)",
-              mesh_handle,
-            )
-          } else {
-            log.infof(
-              "Skipped animations for mesh %v (skin already has animations on another mesh)",
-              mesh_handle,
-            )
-          }
         } else {
-          // Clean up the allocated mesh if skinned primitive loading failed
-          if mesh, freed := resource.free(
-            &engine.warehouse.meshes,
-            mesh_handle,
-          ); freed {
-            mesh_deinit(mesh, &engine.gpu_context)
+          mesh_handle, _, ret := create_mesh(&engine.gpu_context, &engine.warehouse, geometry_data.geometry)
+          if ret == .SUCCESS {
+            node.attachment = MeshAttachment{
+              handle = mesh_handle,
+              material = geometry_data.material_handle,
+              cast_shadow = true,
+            }
           }
         }
-      } else {
-        log.infof("Loading static mesh %s", string(gltf_node.name))
-        mesh_data, mat_handle, res := load_gltf_primitive(
-          engine,
-          path,
-          gltf_data,
-          gltf_node.mesh,
-          &texture_to_handle,
-          &material_to_handle,
-        )
-        if res != .SUCCESS {
-          log.errorf("Failed to process GLTF primitive:", res)
-          continue
-        }
-        log.infof(
-          "Initializing static mesh with %d vertices, %d indices %v",
-          len(mesh_data.vertices),
-          len(mesh_data.indices),
-          mesh_data.skinnings,
-        )
-        mesh_handle, _, ret := create_mesh(
-          &engine.gpu_context,
-          &engine.warehouse,
-          mesh_data,
-        )
-        if ret != .SUCCESS {
-          log.error("Failed to create static mesh ", ret)
-          continue
-        }
-        node.attachment = MeshAttachment {
-          handle      = mesh_handle,
-          material    = mat_handle,
-          cast_shadow = true,
-        }
-        log.infof(
-          "Static mesh loaded successfully with material %v",
-          mat_handle,
-        )
       }
     }
     attach(engine.scene.nodes, entry.parent, node_handle)
     if entry.parent == engine.scene.root {
-      append(&nodes, node_handle)
+      append(nodes, node_handle)
     }
     for child_ptr in gltf_node.children {
       if child_idx, found := node_ptr_to_idx_map[child_ptr]; found {
@@ -227,498 +568,17 @@ load_gltf :: proc(
       }
     }
   }
-  log.infof("GLTF loading complete:")
-  log.infof("  - Unique skins: %d", len(skin_to_bone_offset))
-  log.infof("  - Skins with animations: %d", len(skin_to_first_mesh))
-  log.infof("  - Unique textures: %d", len(texture_to_handle))
-  log.infof("  - Unique materials: %d", len(material_to_handle))
-  return nodes, .success
+  return .success
 }
 
-load_gltf_texture :: proc(
-  engine: ^Engine,
-  gltf_path: string,
-  gltf_data: ^cgltf.data,
-  gltf_texture: ^cgltf.texture,
-  texture_cache: ^map[^cgltf.texture]resource.Handle,
-) -> (
-  tex_handle: Handle,
-  texture: ^gpu.ImageBuffer,
-  ret: vk.Result,
-) {
-  if gltf_texture == nil {
-    ret = .ERROR_UNKNOWN
-    return
-  }
-
-  // Check if texture already loaded
-  if existing_handle, found := texture_cache[gltf_texture]; found {
-    tex_handle = existing_handle
-    ret = .SUCCESS
-    log.infof("Reusing texture %v", tex_handle)
-    return
-  }
-
-  if gltf_texture.image_ == nil {
-    ret = .ERROR_UNKNOWN
-    return
-  }
-  gltf_image := gltf_texture.image_
-  pixel_data: []u8
-  if gltf_image.uri != nil {
-    texture_path_str := path.join(
-      {path.dir(gltf_path), string(gltf_image.uri)},
-    )
-    ok: bool
-    pixel_data, ok = os.read_entire_file(texture_path_str)
-    if !ok {
-      log.errorf("Failed to read texture file '%s'\n", texture_path_str)
-      ret = .ERROR_UNKNOWN
-      return
-    }
-  } else if gltf_image.buffer_view != nil {
-    view := gltf_image.buffer_view
-    buffer := view.buffer
-    src_data_ptr := mem.ptr_offset(cast(^u8)buffer.data, view.offset)
-    pixel_data = slice.from_ptr(src_data_ptr, int(view.size))
-    pixel_data = slice.clone(pixel_data)
-  } else {
-    ret = .ERROR_UNKNOWN
-    return
-  }
-  log.infof("Creating new texture from %d bytes", len(pixel_data))
-  tex_handle, texture = create_texture(
-    &engine.gpu_context,
-    &engine.warehouse,
-    pixel_data,
-  ) or_return
-  delete(pixel_data)
-  // Cache the texture
-  texture_cache[gltf_texture] = tex_handle
-  ret = .SUCCESS
-  return
-}
-
-load_gltf_pbr_textures :: proc(
-  engine: ^Engine,
-  gltf_path: string,
-  gltf_data: ^cgltf.data,
-  gltf_material: ^cgltf.material,
-  texture_cache: ^map[^cgltf.texture]resource.Handle,
-) -> (
-  albedo_handle: Handle,
-  metallic_roughness_handle: Handle,
-  normal_handle: Handle,
-  emissive_handle: Handle,
-  features: ShaderFeatureSet,
-  ret: vk.Result,
-) {
-  if gltf_material == nil {
-    ret = .ERROR_UNKNOWN
-    return
-  }
-  log.info("loading pbr textures")
-  albedo_handle, _ = load_gltf_texture(
-    engine,
-    gltf_path,
-    gltf_data,
-    gltf_material.pbr_metallic_roughness.base_color_texture.texture,
-    texture_cache,
-  ) or_return
-  features |= {.ALBEDO_TEXTURE}
-
-  if gltf_material.has_pbr_metallic_roughness {
-    pbr_info := gltf_material.pbr_metallic_roughness
-    if pbr_info.metallic_roughness_texture.texture != nil {
-      gltf_texture := pbr_info.metallic_roughness_texture.texture
-      if gltf_texture.image_ != nil {
-        gltf_image := gltf_texture.image_
-        pixel_data: []u8
-        if gltf_image.uri != nil {
-          texture_path_str := path.join(
-            {path.dir(gltf_path), string(gltf_image.uri)},
-          )
-          ok: bool
-          pixel_data, ok = os.read_entire_file(texture_path_str)
-          if !ok {
-            log.errorf(
-              "Failed to read metallic-roughness texture file '%s'\n",
-              texture_path_str,
-            )
-            ret = .ERROR_UNKNOWN
-            return
-          }
-        } else if gltf_image.buffer_view != nil {
-          view := gltf_image.buffer_view
-          buffer := view.buffer
-          src_data_ptr := mem.ptr_offset(cast(^u8)buffer.data, view.offset)
-          pixel_data = slice.from_ptr((^u8)(src_data_ptr), int(view.size))
-          pixel_data = slice.clone(pixel_data)
-        } else {
-          ret = .ERROR_UNKNOWN
-          return
-        }
-        metallic_roughness_handle, _ = create_texture(
-          &engine.gpu_context,
-          &engine.warehouse,
-          pixel_data,
-        ) or_return
-        features |= {.METALLIC_ROUGHNESS_TEXTURE}
-        delete(pixel_data)
-      }
-    }
-  }
-  if gltf_material.normal_texture.texture != nil {
-    normal_handle, _ = load_gltf_texture(
-      engine,
-      gltf_path,
-      gltf_data,
-      gltf_material.normal_texture.texture,
-      texture_cache,
-    ) or_return
-    features |= {.NORMAL_TEXTURE}
-  }
-  if gltf_material.emissive_texture.texture != nil {
-    emissive_handle, _ = load_gltf_texture(
-      engine,
-      gltf_path,
-      gltf_data,
-      gltf_material.emissive_texture.texture,
-      texture_cache,
-    ) or_return
-    features |= {.EMISSIVE_TEXTURE}
-  }
-  ret = .SUCCESS
-  return
-}
-
-load_gltf_primitive :: proc(
-  engine: ^Engine,
-  path: string,
-  gltf_data: ^cgltf.data,
-  gltf_mesh: ^cgltf.mesh,
-  texture_cache: ^map[^cgltf.texture]resource.Handle,
-  material_cache: ^map[^cgltf.material]resource.Handle,
-) -> (
-  mesh_data: geometry.Geometry,
-  material_handle: resource.Handle,
-  ret: vk.Result,
-) {
-  primitives := gltf_mesh.primitives
-  if len(primitives) == 0 {
-    ret = .ERROR_UNKNOWN
-    return
-  }
-
-  // Combine all primitives into a single mesh
-  combined_vertices := make([dynamic]geometry.Vertex, 0, context.temp_allocator)
-  combined_indices := make([dynamic]u32, 0, context.temp_allocator)
-
-  // Use first primitive's material (could be enhanced to support multiple materials)
-  primitive := &primitives[0]
-  if existing_handle, found := material_cache[primitive.material]; found {
-    material_handle = existing_handle
-    log.infof("Reusing material %v", material_handle)
-  } else {
-    albedo_handle, metallic_roughness_handle, normal_handle, emissive_handle, features :=
-      load_gltf_pbr_textures(
-        engine,
-        path,
-        gltf_data,
-        primitive.material,
-        texture_cache,
-      ) or_return
-    material_handle, _ = create_material(
-      &engine.warehouse,
-      features,
-      .PBR,
-      albedo_handle,
-      metallic_roughness_handle,
-      normal_handle,
-      emissive_handle,
-      {}, // occlusion_handle
-      0.0, // metallic_value
-      1.0, // roughness_value
-      0.0, // emissive_value
-      {1.0, 1.0, 1.0, 1.0}, // base_color_factor
-    ) or_return
-    material_cache[primitive.material] = material_handle
-    log.infof("Created new material %v", material_handle)
-  }
-
-  // Process each primitive
-  for prim in primitives {
-    vertex_offset := u32(len(combined_vertices))
-    vertices_num := prim.attributes[0].data.count
-    vertices := make([]geometry.Vertex, vertices_num, context.temp_allocator)
-
-    for attribute in prim.attributes {
-      accessor := attribute.data
-      floats_data := unpack_accessor_floats_flat(accessor)
-      defer delete(floats_data)
-
-      #partial switch attribute.type {
-      case .position:
-        for i in 0 ..< min(int(accessor.count), len(vertices)) {
-          vertices[i].position = {
-            floats_data[i * 3 + 0],
-            floats_data[i * 3 + 1],
-            floats_data[i * 3 + 2],
-          }
-        }
-      case .normal:
-        for i in 0 ..< min(int(accessor.count), len(vertices)) {
-          vertices[i].normal = {
-            floats_data[i * 3 + 0],
-            floats_data[i * 3 + 1],
-            floats_data[i * 3 + 2],
-          }
-        }
-      case .texcoord:
-        if attribute.index == 0 {
-          for i in 0 ..< min(int(accessor.count), len(vertices)) {
-            vertices[i].uv = {floats_data[i * 2 + 0], floats_data[i * 2 + 1]}
-          }
-        }
-      case .tangent:
-        for i in 0 ..< min(int(accessor.count), len(vertices)) {
-          vertices[i].tangent = {
-            floats_data[i * 4 + 0],
-            floats_data[i * 4 + 1],
-            floats_data[i * 4 + 2],
-            floats_data[i * 4 + 3],
-          }
-        }
-      }
-    }
-
-    // Add vertices to combined mesh
-    append(&combined_vertices, ..vertices[:])
-
-    // Process indices
-    if prim.indices != nil {
-      indices := make([]u32, prim.indices.count, context.temp_allocator)
-      _ = cgltf.accessor_unpack_indices(
-        prim.indices,
-        raw_data(indices),
-        size_of(u32),
-        prim.indices.count,
-      )
-
-      // Apply vertex offset and add to combined indices
-      for &index in indices {
-        index += vertex_offset
-      }
-      append(&combined_indices, ..indices[:])
-    }
-  }
-
-  // Create final geometry from combined data
-  final_vertices := slice.clone(combined_vertices[:])
-  final_indices := slice.clone(combined_indices[:])
-  mesh_data = geometry.make_geometry(final_vertices, final_indices)
-
-  log.infof("Combined %d primitives into mesh with %d vertices, %d indices",
-    len(primitives), len(final_vertices), len(final_indices))
-
-  return mesh_data, material_handle, .SUCCESS
-}
-
-load_gltf_skinned_primitive :: proc(
-  engine: ^Engine,
-  path: string,
-  gltf_data: ^cgltf.data,
-  gltf_mesh: ^cgltf.mesh,
-  gltf_skin: ^cgltf.skin,
-  texture_cache: ^map[^cgltf.texture]resource.Handle,
-  material_cache: ^map[^cgltf.material]resource.Handle,
-) -> (
-  geometry_data: geometry.Geometry,
-  engine_bones: []Bone,
-  mat_handle: resource.Handle,
-  root_bone_idx: u32,
-  ret: vk.Result, // TODO: too many return values, consider refactor this
-) {
-  primitives := gltf_mesh.primitives
-  if len(primitives) == 0 {
-    ret = .ERROR_UNKNOWN
-    return
-  }
-  primitive := &primitives[0]
-  log.infof("Creating texture for skinned material...")
-  if existing_handle, found := material_cache[primitive.material]; found {
-    mat_handle = existing_handle
-    log.infof("Reusing skinned material %v", mat_handle)
-  } else {
-    albedo_handle, metallic_roughness_handle, normal_handle, emissive_handle, features :=
-      load_gltf_pbr_textures(
-        engine,
-        path,
-        gltf_data,
-        primitive.material,
-        texture_cache,
-      ) or_return
-    mat_handle, _ = create_material(
-      &engine.warehouse,
-      features | {.SKINNING},
-      .PBR,
-      albedo_handle,
-      metallic_roughness_handle,
-      normal_handle,
-      emissive_handle,
-    ) or_return
-    material_cache[primitive.material] = mat_handle
-    log.infof(
-      "Creating skinned material with PBR textures %v/%v/%v/%v/%v -> %v",
-      albedo_handle,
-      metallic_roughness_handle,
-      normal_handle,
-      emissive_handle,
-      mat_handle,
-    )
-  }
-  num_vertices := primitive.attributes[0].data.count
-  vertices := make([]geometry.Vertex, num_vertices)
-  skinnings := make([]geometry.SkinningData, num_vertices)
-  attributes := primitive.attributes
-  for attribute in attributes {
-    accessor := attribute.data
-    data := unpack_accessor_floats_flat(accessor)
-    #partial switch attribute.type {
-    case .position:
-      for i in 0 ..< min(int(accessor.count), len(vertices)) {
-        vertices[i].position = {
-          data[i * 3 + 0],
-          data[i * 3 + 1],
-          data[i * 3 + 2],
-        }
-      }
-    case .normal:
-      for i in 0 ..< min(int(accessor.count), len(vertices)) {
-        vertices[i].normal = {
-          data[i * 3 + 0],
-          data[i * 3 + 1],
-          data[i * 3 + 2],
-        }
-      }
-    case .texcoord:
-      if attribute.index == 0 {
-        for i in 0 ..< min(int(accessor.count), len(vertices)) {
-          vertices[i].uv = {data[i * 2 + 0], data[i * 2 + 1]}
-        }
-      }
-    case .tangent:
-      for i in 0 ..< min(int(accessor.count), len(vertices)) {
-        vertices[i].tangent = {
-          data[i * 4 + 0],
-          data[i * 4 + 1],
-          data[i * 4 + 2],
-          data[i * 4 + 3],
-        }
-      }
-    case .joints:
-      // log.infof("Loading joints with accessor %v", accessor)
-      if attribute.index == 0 {
-        n := accessor.count
-        for i in 0 ..< min(int(n), len(vertices)) {
-          _ = cgltf.accessor_read_uint(
-            accessor,
-            uint(i),
-            raw_data(skinnings[i].joints[:]),
-            len(skinnings[i].joints),
-          )
-        }
-      }
-    case .weights:
-      if attribute.index == 0 {
-        for i in 0 ..< min(int(accessor.count), len(vertices)) {
-          skinnings[i].weights = {
-            data[i * 4 + 0],
-            data[i * 4 + 1],
-            data[i * 4 + 2],
-            data[i * 4 + 3],
-          }
-        }
-      }
-    }
-  }
-  // log.infof("Joints %v", vertices[len(vertices)-20:])
-  indices: []u32
-  if primitive.indices != nil {
-    indices = make([]u32, primitive.indices.count)
-    _ = cgltf.accessor_unpack_indices(
-      primitive.indices,
-      raw_data(indices),
-      size_of(u32),
-      primitive.indices.count,
-    )
-  }
-  geometry_data = geometry.make_geometry(vertices, indices, skinnings)
-  engine_bones = make([]Bone, len(gltf_skin.joints))
-  for joint_node, i in gltf_skin.joints {
-    engine_bones[i].name = string(joint_node.name)
-    if gltf_skin.inverse_bind_matrices != nil {
-      ibm_floats: [16]f32
-      read := cgltf.accessor_read_float(
-        gltf_skin.inverse_bind_matrices,
-        uint(i),
-        raw_data(ibm_floats[:]),
-        16,
-      )
-      if read {
-        engine_bones[i].inverse_bind_matrix = geometry.matrix_from_arr(
-          ibm_floats,
-        )
-      }
-    } else {
-      engine_bones[i].inverse_bind_matrix = linalg.MATRIX4F32_IDENTITY
-    }
-  }
-  for joint_node, i in gltf_skin.joints {
-    engine_bones[i].children = make([]u32, len(joint_node.children))
-    for child, j in joint_node.children {
-      if idx, found := slice.linear_search(gltf_skin.joints, child); found {
-        engine_bones[i].children[j] = u32(idx)
-      }
-    }
-  }
-  child_bone_indices := make([dynamic]u32, 0, context.temp_allocator)
-  for bone in engine_bones {
-    append(&child_bone_indices, ..bone.children[:])
-  }
-  found_root := false
-  for i in 0 ..< len(engine_bones) {
-    if !slice.contains(child_bone_indices[:], u32(i)) {
-      root_bone_idx = u32(i)
-      found_root = true
-      break
-    }
-  }
-  if !found_root && len(engine_bones) > 0 {
-    log.errorf(
-      "Warning: Could not determine unique root bone for skin, using index 0.\n",
-    )
-  }
-  ret = .SUCCESS
-  return
-}
-
-// Helper to unpack accessor data into a flat []f32. Caller must free the returned slice.
-unpack_accessor_floats_flat :: proc(accessor: ^cgltf.accessor) -> []f32 {
-  if accessor == nil do return nil
-  n := accessor.count * cgltf.num_components(accessor.type)
-  ret := make([]f32, n)
-  _ = cgltf.accessor_unpack_floats(accessor, raw_data(ret), n)
-  return ret
-}
-
-load_gltf_animations :: proc(
+@(private = "file")
+load_animations :: proc(
   engine: ^Engine,
   gltf_data: ^cgltf.data,
   gltf_skin: ^cgltf.skin,
-  engine_mesh_handle: resource.Handle,
+  mesh_handle: resource.Handle,
 ) -> bool {
-  mesh := mesh(engine, engine_mesh_handle)
+  mesh := mesh(engine, mesh_handle)
   skinning := &mesh.skinning.?
   skinning.animations = make([]animation.Clip, len(gltf_data.animations))
   for gltf_anim, i in gltf_data.animations {
@@ -728,7 +588,6 @@ load_gltf_animations :: proc(
     } else {
       clip.name = fmt.tprintf("animation_%d", i)
     }
-    log.infof("Allocating animation channels for %d bones", len(skinning.bones))
     clip.channels = make([]animation.Channel, len(skinning.bones))
     max_time: f32 = 0.0
     for gltf_channel in gltf_anim.channels {
@@ -736,65 +595,58 @@ load_gltf_animations :: proc(
         continue
       }
       n := gltf_channel.sampler.input.count
-      // note: if this get slow, consider using a hash map
-      bone_idx := slice.linear_search(
-        gltf_skin.joints,
-        gltf_channel.target_node,
-      ) or_continue
+      bone_idx := slice.linear_search(gltf_skin.joints, gltf_channel.target_node) or_continue
       engine_channel := &clip.channels[bone_idx]
-      time_data := unpack_accessor_floats_flat(gltf_channel.sampler.input)
-      // defer free(time_data)
-      max_time = max(max_time, slice.max(time_data))
-      // log.infof(
-      //   "Bone animation %s %v: keyframe count %d",
-      //   string(gltf_channel.target_node.name),
-      //   gltf_channel.target_path,
-      //   n,
-      // )
-      switch gltf_channel.target_path {
+      #partial switch gltf_channel.target_path {
       case .translation:
         engine_channel.positions = make(type_of(engine_channel.positions), n)
-        values := unpack_accessor_floats_flat(gltf_channel.sampler.output)
-        // defer free(values)
-        for i in 0 ..< len(time_data) {
+        for i in 0 ..< int(n) {
+          time_val: [1]f32
+          cgltf.accessor_read_float(gltf_channel.sampler.input, uint(i), raw_data(time_val[:]), 1) or_continue
+          max_time = max(max_time, time_val[0])
+
+          position: [3]f32
+          cgltf.accessor_read_float(gltf_channel.sampler.output, uint(i), raw_data(position[:]), 3) or_continue
           engine_channel.positions[i] = {
-            time  = time_data[i],
-            value = {values[i * 3 + 0], values[i * 3 + 1], values[i * 3 + 2]},
+            time = time_val[0],
+            value = position,
           }
         }
       case .rotation:
         engine_channel.rotations = make(type_of(engine_channel.rotations), n)
-        values := unpack_accessor_floats_flat(gltf_channel.sampler.output)
-        // defer free(values)
-        for i in 0 ..< len(time_data) {
+        for i in 0 ..< int(n) {
+          time_val: [1]f32
+          cgltf.accessor_read_float(gltf_channel.sampler.input, uint(i), raw_data(time_val[:]), 1) or_continue
+          max_time = max(max_time, time_val[0])
+
+          rotation: [4]f32
+          cgltf.accessor_read_float(gltf_channel.sampler.output, uint(i), raw_data(rotation[:]), 4) or_continue
           engine_channel.rotations[i] = {
-            time  = time_data[i],
+            time = time_val[0],
             value = quaternion(
-              x = values[i * 4 + 0],
-              y = values[i * 4 + 1],
-              z = values[i * 4 + 2],
-              w = values[i * 4 + 3],
+              x = rotation[0],
+              y = rotation[1],
+              z = rotation[2],
+              w = rotation[3],
             ),
           }
         }
       case .scale:
         engine_channel.scales = make(type_of(engine_channel.scales), n)
-        values := unpack_accessor_floats_flat(gltf_channel.sampler.output)
-        // defer free(values)
-        for i in 0 ..< len(time_data) {
+        for i in 0 ..< int(n) {
+          time_val: [1]f32
+          cgltf.accessor_read_float(gltf_channel.sampler.input, uint(i), raw_data(time_val[:]), 1) or_continue
+          max_time = max(max_time, time_val[0])
+          scale: [3]f32
+          cgltf.accessor_read_float(gltf_channel.sampler.output, uint(i), raw_data(scale[:]), 3) or_continue
           engine_channel.scales[i] = {
-            time  = time_data[i],
-            value = {values[i * 3 + 0], values[i * 3 + 1], values[i * 3 + 2]},
+            time = time_val[0],
+            value = scale,
           }
         }
-      case .weights:
-        log.infof("Weights not handled for bone animation here")
-      case .invalid:
-        log.infof("Invalid animation channel type")
       }
     }
     clip.duration = max_time
-    // log.infof("Animation %s duration: %f", clip.name, clip.duration, clip.channels)
   }
   return true
 }
