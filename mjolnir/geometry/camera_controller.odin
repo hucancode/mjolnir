@@ -83,8 +83,8 @@ get_scroll_delta_for_window :: proc(window: glfw.WindowHandle) -> f32 {
 // Orbit controller initialization
 camera_controller_orbit_init :: proc(
   window: glfw.WindowHandle,
-  target: [3]f32,
-  distance: f32,
+  target: [3]f32 = {0, 0, 0},
+  distance: f32 = 5.0,
   yaw :f32 = 0,
   pitch :f32 = 0,
 ) -> CameraController {

@@ -430,15 +430,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
   // Initialize camera controllers
   setup_camera_controller_callbacks(engine.window)
   main_camera := get_main_camera(engine)
-  orbit_controller = camera_controller_orbit_init(
-    engine.window,
-    {0, 0, 0}, // dummy target
-    1.0, // dummy distance
-    0, // dummy yaw
-    0, // dummy pitch
-  )
-  // Initialize free controller
-  free_controller = camera_controller_free_init(engine.window, 5.0, 2.0)
+  orbit_controller = camera_controller_orbit_init(engine.window)
+  free_controller = camera_controller_free_init(engine.window)
   if main_camera != nil {
     camera_controller_sync(&orbit_controller, main_camera)
     camera_controller_sync(&free_controller, main_camera)
@@ -446,7 +439,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
   current_controller = &orbit_controller
   when true {
     log.info("Setting up portal...")
-
     // Create portal render target via global pool
     portal_render_target: ^RenderTarget
     portal_render_target_handle, portal_render_target = resource.alloc(
@@ -467,10 +459,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
       portal_render_target.extent,
     )
     // Configure the portal camera to look down from above at a steep angle
-    portal_camera := get_camera(
-      &engine.warehouse,
-      portal_render_target,
-    )
+    portal_camera := get_camera(&engine.warehouse, portal_render_target)
     camera_look_at(portal_camera, {5, 15, 7}, {0, 0, 0}, {0, 1, 0})
     portal_material_handle = create_material_handle(
       &engine.warehouse,
@@ -517,8 +506,6 @@ render_2d :: proc(engine: ^mjolnir.Engine, ctx: ^mu.Context) {
       fmt.tprintf("Shadow Map Size: %dx%d", SHADOW_MAP_SIZE, SHADOW_MAP_SIZE),
     )
     mu.label(ctx, fmt.tprintf("Max Shadow Maps: %d", MAX_SHADOW_MAPS))
-    mu.text(ctx, "Check console for detailed")
-    mu.text(ctx, "shadow rendering debug info")
   }
   when mjolnir.USE_GPU_CULLING {
     if mu.window(ctx, "GPU Culling", {990, 200, 280, 240}, {.NO_CLOSE}) {
@@ -569,27 +556,31 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
     radius: f32 = 6
     v = v * radius + linalg.VECTOR3F32_Y_AXIS * -1.0
     translate(&engine.scene, handle, v.x, v.y, v.z)
-    rotate(&engine.scene, light_cube_handles[i], math.PI * time_since_app_start(engine) * 0.5)
+    rotate(
+      &engine.scene,
+      light_cube_handles[i],
+      math.PI * time_since_app_start(engine) * 0.5,
+    )
   }
 }
 
 on_key_pressed :: proc(engine: ^mjolnir.Engine, key, action, mods: int) {
   using mjolnir, geometry
   log.infof("key pressed key %d action %d mods %x", key, action, mods)
-  if key == glfw.KEY_LEFT && action == glfw.PRESS {
+  if action != glfw.PRESS do return
+  if key == glfw.KEY_LEFT {
     translate_by(&engine.scene, light_handles[0], x = 0.1)
-  } else if key == glfw.KEY_RIGHT && action == glfw.PRESS {
+  } else if key == glfw.KEY_RIGHT {
     translate_by(&engine.scene, light_handles[0], x = -0.1)
-  } else if key == glfw.KEY_UP && action == glfw.PRESS {
+  } else if key == glfw.KEY_UP {
     translate_by(&engine.scene, light_handles[0], z = 0.1)
-  } else if key == glfw.KEY_DOWN && action == glfw.PRESS {
+  } else if key == glfw.KEY_DOWN {
     translate_by(&engine.scene, light_handles[0], z = -0.1)
-  } else if key == glfw.KEY_Z && action == glfw.PRESS {
+  } else if key == glfw.KEY_Z {
     translate_by(&engine.scene, light_handles[0], y = 0.1)
-  } else if key == glfw.KEY_X && action == glfw.PRESS {
+  } else if key == glfw.KEY_X {
     translate_by(&engine.scene, light_handles[0], y = -0.1)
-  }
-  if key == glfw.KEY_TAB && action == glfw.PRESS {
+  } else if key == glfw.KEY_TAB {
     main_camera_for_sync := get_main_camera(engine)
     if current_controller == &orbit_controller {
       current_controller = &free_controller
@@ -610,19 +601,16 @@ custom_render :: proc(
   command_buffer: vk.CommandBuffer,
 ) {
   using mjolnir, geometry
-  portal_rt : ^RenderTarget
+  portal_rt: ^RenderTarget
   ok: bool
   portal_rt, ok = resource.get(
     engine.warehouse.render_targets,
     portal_render_target_handle,
   )
   if !ok do return
-  portal_camera : ^Camera
+  portal_camera: ^Camera
   // Animate portal camera - orbit around the scene center
-  portal_camera, ok = resource.get(
-    engine.warehouse.cameras,
-    portal_rt.camera,
-  )
+  portal_camera, ok = resource.get(engine.warehouse.cameras, portal_rt.camera)
   if !ok do return
   t := time_since_app_start(engine) * 0.3 // Slow orbit speed
   radius: f32 = 12.0
@@ -661,21 +649,13 @@ custom_render :: proc(
     &engine.warehouse,
     engine.frame_index,
   )
-  gbuffer_end(
-    portal_rt,
-    command_buffer,
-    &engine.warehouse,
-    engine.frame_index,
-  )
+  gbuffer_end(portal_rt, command_buffer, &engine.warehouse, engine.frame_index)
   // Update portal material to use the rendered texture (from current frame)
-  portal_mat : ^Material
+  portal_mat: ^Material
   portal_mat, ok = resource.get(
     engine.warehouse.materials,
     portal_material_handle,
   )
   if !ok do return
-  portal_mat.albedo = get_albedo_texture(
-    portal_rt,
-    engine.frame_index,
-  )
+  portal_mat.albedo = get_albedo_texture(portal_rt, engine.frame_index)
 }
