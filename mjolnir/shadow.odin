@@ -183,6 +183,7 @@ shadow_begin :: proc(
   face: Maybe(u32) = nil,
 ) {
   depth_image_view: vk.ImageView
+  depth_image: vk.Image
   face_index, has_face := face.?
   if has_face {
     cube_texture := resource.get(
@@ -197,6 +198,7 @@ shadow_begin :: proc(
       return
     }
     depth_image_view = cube_texture.face_views[face_index]
+    depth_image = cube_texture.image
   } else {
     texture_2d := resource.get(
       warehouse.image_2d_buffers,
@@ -210,7 +212,24 @@ shadow_begin :: proc(
       return
     }
     depth_image_view = texture_2d.view
+    depth_image = texture_2d.image
   }
+
+  // Transition shadow map to depth attachment optimal in this command buffer
+  // This eliminates the race condition with main command buffer transitions
+  layer_count: u32 = 1 if !has_face else 6
+  gpu.transition_image(
+    command_buffer,
+    depth_image,
+    .UNDEFINED,
+    .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+    {.DEPTH},
+    {.TOP_OF_PIPE},
+    {.EARLY_FRAGMENT_TESTS},
+    {},
+    {.DEPTH_STENCIL_ATTACHMENT_WRITE},
+    layer_count,
+  )
 
   depth_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
@@ -298,8 +317,59 @@ shadow_render :: proc(
   }
 }
 
-shadow_end :: proc(command_buffer: vk.CommandBuffer) {
+shadow_end :: proc(
+  command_buffer: vk.CommandBuffer,
+  shadow_target: ^RenderTarget,
+  warehouse: ^ResourceWarehouse,
+  frame_index: u32,
+  face: Maybe(u32) = nil,
+) {
   vk.CmdEndRenderingKHR(command_buffer)
+
+  // Transition shadow map to shader read optimal after rendering
+  depth_image: vk.Image
+  face_index, has_face := face.?
+  if has_face {
+    cube_texture := resource.get(
+      warehouse.image_cube_buffers,
+      get_depth_texture(shadow_target, frame_index),
+    )
+    if cube_texture == nil {
+      log.errorf(
+        "Invalid cube shadow map handle: %v",
+        get_depth_texture(shadow_target, frame_index),
+      )
+      return
+    }
+    depth_image = cube_texture.image
+  } else {
+    texture_2d := resource.get(
+      warehouse.image_2d_buffers,
+      get_depth_texture(shadow_target, frame_index),
+    )
+    if texture_2d == nil {
+      log.errorf(
+        "Invalid 2D shadow map handle: %v",
+        get_depth_texture(shadow_target, frame_index),
+      )
+      return
+    }
+    depth_image = texture_2d.image
+  }
+
+  layer_count: u32 = 1 if !has_face else 6
+  gpu.transition_image(
+    command_buffer,
+    depth_image,
+    .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+    .SHADER_READ_ONLY_OPTIMAL,
+    {.DEPTH},
+    {.LATE_FRAGMENT_TESTS},
+    {.FRAGMENT_SHADER},
+    {.DEPTH_STENCIL_ATTACHMENT_WRITE},
+    {.SHADER_READ},
+    layer_count,
+  )
 }
 
 shadow_get_pipeline :: proc(
