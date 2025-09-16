@@ -20,26 +20,14 @@ test_node_translate :: proc(t: ^testing.T) {
   defer scene_deinit(&scene, &warehouse)
   parent_handle, _ := spawn_at(&scene, {1, 2, 3})
   _, child := spawn_child(&scene, parent_handle)
-  geometry.translate(&child.transform, 4, 5, 6)
+  translate(child, 4, 5, 6)
   scene_traverse(&scene)
   actual := geometry.transform_get_world_matrix(&child.transform)
-  expected := matrix[4,4]f32 {
-    1.0,
-    0.0,
-    0.0,
-    5.0,
-    0.0,
-    1.0,
-    0.0,
-    7.0,
-    0.0,
-    0.0,
-    1.0,
-    9.0,
-    0.0,
-    0.0,
-    0.0,
-    1.0,
+  expected := matrix[4, 4]f32{
+    1.0, 0.0, 0.0, 5.0,
+    0.0, 1.0, 0.0, 7.0,
+    0.0, 0.0, 1.0, 9.0,
+    0.0, 0.0, 0.0, 1.0,
   }
   matrix4_almost_equal(t, actual, expected)
 }
@@ -52,31 +40,15 @@ test_node_rotate :: proc(t: ^testing.T) {
   warehouse: ResourceWarehouse
   defer scene_deinit(&scene, &warehouse)
   _, child := spawn(&scene)
-  geometry.rotate_angle(
-    &child.transform,
-    math.PI / 2,
-    linalg.VECTOR3F32_Y_AXIS,
-  )
-  geometry.translate(&child.transform, 1, 0, 0)
+  rotate(child, math.PI / 2, linalg.VECTOR3F32_Y_AXIS)
+  translate(child, 1, 0, 0)
   scene_traverse(&scene)
   actual := geometry.transform_get_world_matrix(&child.transform)
-  expected := matrix[4,4]f32 {
-    0.0,
-    0.0,
-    1.0,
-    1.0,
-    0.0,
-    1.0,
-    0.0,
-    0.0,
-    -1.0,
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    1.0,
+  expected := matrix[4, 4]f32{
+    0.0, 0.0, 1.0, 1.0,
+    0.0, 1.0, 0.0, 0.0,
+    -1.0, 0.0, 0.0, 0.0,
+    0.0, 0.0, 0.0, 1.0,
   }
   matrix4_almost_equal(t, actual, expected)
 }
@@ -90,27 +62,15 @@ test_node_scale :: proc(t: ^testing.T) {
   defer scene_deinit(&scene, &warehouse)
   parent_handle, _ := spawn_at(&scene, {1, 2, 3})
   _, child := spawn_child(&scene, parent_handle)
-  geometry.translate(&child.transform, 1, 1, 1)
-  geometry.scale_xyz(&child.transform, 2, 3, 4)
+  translate(child, 1, 1, 1)
+  scale_xyz(child, 2, 3, 4)
   scene_traverse(&scene)
   actual := geometry.transform_get_world_matrix(&child.transform)
-  expected := matrix[4,4]f32 {
-    2.0,
-    0.0,
-    0.0,
-    2.0,
-    0.0,
-    3.0,
-    0.0,
-    3.0,
-    0.0,
-    0.0,
-    4.0,
-    4.0,
-    0.0,
-    0.0,
-    0.0,
-    1.0,
+  expected := matrix[4, 4]f32{
+    2.0, 0.0, 0.0, 2.0,
+    0.0, 3.0, 0.0, 3.0,
+    0.0, 0.0, 4.0, 4.0,
+    0.0, 0.0, 0.0, 1.0,
   }
   matrix4_almost_equal(t, actual, expected)
 }
@@ -123,30 +83,18 @@ test_node_combined_transform :: proc(t: ^testing.T) {
   warehouse: ResourceWarehouse
   defer scene_deinit(&scene, &warehouse)
   _, node := spawn(&scene)
-  geometry.scale(&node.transform, 2)
-  geometry.rotate(&node.transform, math.PI / 2, linalg.VECTOR3F32_Y_AXIS)
-  geometry.translate(&node.transform, 3, 4, 5)
+  scale(node, 2)
+  rotate(node, math.PI / 2, linalg.VECTOR3F32_Y_AXIS)
+  translate(node, 3, 4, 5)
   scene_traverse(&scene)
   actual := geometry.transform_get_world_matrix(&node.transform)
   // Expected matrix after applying scale, rotation, and translation
   // Scale by 2, then rotate 90 degree around Y, then translate by (3,4,5)
-  expected := matrix[4,4]f32 {
-    0.0,
-    0.0,
-    2.0,
-    3.0,
-    0.0,
-    2.0,
-    0.0,
-    4.0,
-    -2.0,
-    0.0,
-    0.0,
-    5.0,
-    0.0,
-    0.0,
-    0.0,
-    1.0,
+  expected := matrix[4, 4]f32{
+    0.0, 0.0, 2.0, 3.0,
+    0.0, 2.0, 0.0, 4.0,
+    -2.0, 0.0, 0.0, 5.0,
+    0.0, 0.0, 0.0, 1.0,
   }
   matrix4_almost_equal(t, actual, expected)
 }
@@ -162,13 +110,9 @@ test_node_chain_transform :: proc(t: ^testing.T) {
   node1_handle, node1 := spawn(&scene)
   node2_handle, node2 := spawn_child(&scene, node1_handle)
   node3_handle, node3 := spawn_child(&scene, node2_handle)
-  geometry.translate(&node1.transform, x = 1)
-  geometry.rotate_angle(
-    &node2.transform,
-    math.PI / 2,
-    linalg.VECTOR3F32_Y_AXIS,
-  )
-  geometry.scale(&node3.transform, 2)
+  translate(node1, x = 1)
+  rotate(node2, math.PI / 2, linalg.VECTOR3F32_Y_AXIS)
+  scale(node3, 2)
   scene_traverse(&scene)
   // The transforms should cascade:
   // node1: translate(1,0,0)
@@ -180,28 +124,17 @@ test_node_chain_transform :: proc(t: ^testing.T) {
   // 2. Translate by (1,0,0)
   // 3. Rotate 90° around Y axis (makes Z become X, and X become -Z)
   // 4. Scale by 2 in all dimensions
-  expected := matrix[4,4]f32 {
-    0.0,
-    0.0,
-    2.0,
-    1.0,
-    0.0,
-    2.0,
-    0.0,
-    0.0,
-    -2.0,
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    1.0,
+  expected := matrix[4, 4]f32{
+    0.0, 0.0, 2.0, 1.0,
+    0.0, 2.0, 0.0, 0.0,
+    -2.0, 0.0, 0.0, 0.0,
+    0.0, 0.0, 0.0, 1.0,
   }
   matrix4_almost_equal(t, actual, expected)
 }
 
 create_scene :: proc(scene: ^mjolnir.Scene, max_node: int, max_depth: int) {
+  using mjolnir
   if max_depth <= 0 || max_node <= 0 do return
   QueueEntry :: struct {
     handle: resource.Handle,
@@ -215,22 +148,14 @@ create_scene :: proc(scene: ^mjolnir.Scene, max_node: int, max_depth: int) {
   for len(queue) > 0 && len(scene.nodes.entries) < max_node {
     current := pop_front(&queue)
     if current.depth < max_depth {
-      child_handle, child := mjolnir.spawn_child(scene, current.handle)
-      geometry.translate(&child.transform, f32(n % 10) * 0.1, 0, 0)
-      geometry.rotate_angle(
-        &child.transform,
-        f32(n) * 0.01,
-        linalg.VECTOR3F32_Y_AXIS,
-      )
+      child_handle, child := spawn_child(scene, current.handle)
+      translate(child, f32(n % 10) * 0.1, 0, 0)
+      rotate(child, f32(n) * 0.01, linalg.VECTOR3F32_Y_AXIS)
       append(&queue, QueueEntry{child_handle, current.depth + 1})
     } else {
-      child_handle, child := mjolnir.spawn(scene)
-      geometry.translate(&child.transform, f32(n % 10) * 0.1, 0, 0)
-      geometry.rotate_angle(
-        &child.transform,
-        f32(n) * 0.01,
-        linalg.VECTOR3F32_Y_AXIS,
-      )
+      child_handle, child := spawn(scene)
+      translate(child, f32(n % 10) * 0.1, 0, 0)
+      rotate(child, f32(n) * 0.01, linalg.VECTOR3F32_Y_AXIS)
       append(&queue, QueueEntry{child_handle, 1})
     }
     n += 1
@@ -246,28 +171,30 @@ traverse_scene_benchmark :: proc(
   options: ^time.Benchmark_Options,
   allocator := context.allocator,
 ) -> time.Benchmark_Error {
-  scene := cast(^mjolnir.Scene)(raw_data(options.input))
+  using mjolnir
+  scene := cast(^Scene)(raw_data(options.input))
   // simulate an use case that traverse the scene and count the number of lights and meshes
   Context :: struct {
     light_count: u32,
     mesh_count:  u32,
   }
   callback :: proc(node: ^mjolnir.Node, cb_context: rawptr) -> bool {
+    using mjolnir
     ctx := (^Context)(cb_context)
     #partial switch inner in node.attachment {
-    case mjolnir.MeshAttachment:
+    case MeshAttachment:
       ctx.mesh_count += 1
-    case mjolnir.DirectionalLightAttachment,
-         mjolnir.PointLightAttachment,
-         mjolnir.SpotLightAttachment:
+    case DirectionalLightAttachment,
+         PointLightAttachment,
+         SpotLightAttachment:
       ctx.light_count += 1
     }
     return true
   }
   for _ in 0 ..< options.rounds {
     ctx: Context
-    mjolnir.scene_traverse(scene, &ctx, callback)
-    options.processed += size_of(mjolnir.Node) * len(scene.nodes.entries)
+    scene_traverse(scene, &ctx, callback)
+    options.processed += size_of(Node) * len(scene.nodes.entries)
   }
   return nil
 }
@@ -276,9 +203,10 @@ teardown_scene :: proc(
   options: ^time.Benchmark_Options,
   allocator := context.allocator,
 ) -> time.Benchmark_Error {
-  scene := cast(^mjolnir.Scene)(raw_data(options.input))
-  warehouse: mjolnir.ResourceWarehouse
-  mjolnir.scene_deinit(scene, &warehouse)
+  using mjolnir
+  scene := cast(^Scene)(raw_data(options.input))
+  warehouse: ResourceWarehouse
+  scene_deinit(scene, &warehouse)
   free(scene, allocator)
   return nil
 }
@@ -294,10 +222,11 @@ benchmark_deep_scene_traversal :: proc(t: ^testing.T) {
       options: ^time.Benchmark_Options,
       allocator := context.allocator,
     ) -> time.Benchmark_Error {
-      scene := new(mjolnir.Scene)
-      mjolnir.scene_init(scene)
+      using mjolnir
+      scene := new(Scene)
+      scene_init(scene)
       create_scene(scene, N, N)
-      options.input = slice.bytes_from_ptr(scene, size_of(^mjolnir.Scene))
+      options.input = slice.bytes_from_ptr(scene, size_of(^Scene))
       return nil
     },
     bench = traverse_scene_benchmark,
@@ -324,10 +253,11 @@ benchmark_flat_scene_traversal :: proc(t: ^testing.T) {
       options: ^time.Benchmark_Options,
       allocator := context.allocator,
     ) -> time.Benchmark_Error {
-      scene := new(mjolnir.Scene)
-      mjolnir.scene_init(scene)
+      using mjolnir
+      scene := new(Scene)
+      scene_init(scene)
       create_scene(scene, N, 1)
-      options.input = slice.bytes_from_ptr(scene, size_of(^mjolnir.Scene))
+      options.input = slice.bytes_from_ptr(scene, size_of(^Scene))
       return nil
     },
     bench = traverse_scene_benchmark,
@@ -354,10 +284,11 @@ benchmark_balanced_scene_traversal :: proc(t: ^testing.T) {
       options: ^time.Benchmark_Options,
       allocator := context.allocator,
     ) -> time.Benchmark_Error {
-      scene := new(mjolnir.Scene)
-      mjolnir.scene_init(scene)
+      using mjolnir
+      scene := new(Scene)
+      scene_init(scene)
       create_scene(scene, N, MAX_DEPTH)
-      options.input = slice.bytes_from_ptr(scene, size_of(^mjolnir.Scene))
+      options.input = slice.bytes_from_ptr(scene, size_of(^Scene))
       return nil
     },
     bench = traverse_scene_benchmark,
@@ -375,46 +306,52 @@ benchmark_balanced_scene_traversal :: proc(t: ^testing.T) {
 
 @(test)
 test_scene_memory_cleanup :: proc(t: ^testing.T) {
-    scene: mjolnir.Scene
-    mjolnir.scene_init(&scene)
-    warehouse: mjolnir.ResourceWarehouse
-    defer mjolnir.scene_deinit(&scene, &warehouse)
-    for i in 0..<1000 {
-        mjolnir.spawn(&scene)
-    }
+  scene: mjolnir.Scene
+  mjolnir.scene_init(&scene)
+  warehouse: mjolnir.ResourceWarehouse
+  defer mjolnir.scene_deinit(&scene, &warehouse)
+  for i in 0 ..< 1000 {
+    mjolnir.spawn(&scene)
+  }
 }
 
 @(test)
 test_scene_with_multiple_attachments :: proc(t: ^testing.T) {
-    scene: mjolnir.Scene
-    mjolnir.scene_init(&scene)
-    warehouse: mjolnir.ResourceWarehouse
-    defer mjolnir.scene_deinit(&scene, &warehouse)
-    mjolnir.spawn(&scene, mjolnir.PointLightAttachment{
-        // In reality we would need valid light
-    })
-    mjolnir.spawn(&scene, mjolnir.MeshAttachment{
-        // In reality we would need valid mesh handle
-    })
-    Context :: struct {
-        light_count: int,
-        mesh_count: int
+  scene: mjolnir.Scene
+  mjolnir.scene_init(&scene)
+  warehouse: mjolnir.ResourceWarehouse
+  defer mjolnir.scene_deinit(&scene, &warehouse)
+  mjolnir.spawn(
+    &scene,
+    mjolnir.PointLightAttachment {
+      // In reality we would need valid light
+    },
+  )
+  mjolnir.spawn(
+    &scene,
+    mjolnir.MeshAttachment {
+      // In reality we would need valid mesh handle
+    },
+  )
+  Context :: struct {
+    light_count: int,
+    mesh_count:  int,
+  }
+  callback :: proc(node: ^mjolnir.Node, ctx: rawptr) -> bool {
+    counter := (^Context)(ctx)
+    #partial switch attachment in node.attachment {
+    case mjolnir.PointLightAttachment:
+      counter.light_count += 1
+    case mjolnir.MeshAttachment:
+      counter.mesh_count += 1
     }
-    callback :: proc(node: ^mjolnir.Node, ctx: rawptr) -> bool {
-        counter := (^Context)(ctx)
-        #partial switch attachment in node.attachment {
-        case mjolnir.PointLightAttachment:
-            counter.light_count += 1
-        case mjolnir.MeshAttachment:
-            counter.mesh_count += 1
-        }
-        return true
-    }
-    ctx := Context{
-        light_count = 0,
-        mesh_count = 0,
-    }
-    mjolnir.scene_traverse(&scene, &ctx, callback)
-    testing.expect_value(t, ctx.light_count, 1)
-    testing.expect_value(t, ctx.mesh_count, 1)
+    return true
+  }
+  ctx := Context {
+    light_count = 0,
+    mesh_count  = 0,
+  }
+  mjolnir.scene_traverse(&scene, &ctx, callback)
+  testing.expect_value(t, ctx.light_count, 1)
+  testing.expect_value(t, ctx.mesh_count, 1)
 }

@@ -200,7 +200,7 @@ spawn_at :: proc(
   handle, node = resource.alloc(&self.nodes)
   init_node(node)
   node.attachment = attachment
-  geometry.translate(&node.transform, position.x, position.y, position.z)
+  geometry.transform_translate(&node.transform, position.x, position.y, position.z)
   attach(self.nodes, self.root, handle)
   return
 }
@@ -335,6 +335,201 @@ scene_traverse_linear :: proc(
     callback(&entry.item, cb_context)
   }
   return true
+}
+
+// Node transform manipulation functions
+node_translate_by :: proc(node: ^Node, x: f32 = 0, y: f32 = 0, z: f32 = 0) {
+  geometry.transform_translate_by(&node.transform, x, y, z)
+}
+
+node_translate :: proc(node: ^Node, x: f32 = 0, y: f32 = 0, z: f32 = 0) {
+  geometry.transform_translate(&node.transform, x, y, z)
+}
+
+node_rotate_by :: proc {
+  node_rotate_by_quaternion,
+  node_rotate_by_angle,
+}
+
+node_rotate_by_quaternion :: proc(node: ^Node, q: quaternion128) {
+  geometry.transform_rotate_by_quaternion(&node.transform, q)
+}
+
+node_rotate_by_angle :: proc(
+  node: ^Node,
+  angle: f32,
+  axis: [3]f32 = linalg.VECTOR3F32_Y_AXIS,
+) {
+  geometry.transform_rotate_by_angle(&node.transform, angle, axis)
+}
+
+node_rotate :: proc {
+  node_rotate_quaternion,
+  node_rotate_angle,
+}
+
+node_rotate_quaternion :: proc(node: ^Node, q: quaternion128) {
+  geometry.transform_rotate_quaternion(&node.transform, q)
+}
+
+node_rotate_angle :: proc(
+  node: ^Node,
+  angle: f32,
+  axis: [3]f32 = linalg.VECTOR3F32_Y_AXIS,
+) {
+  geometry.transform_rotate_angle(&node.transform, angle, axis)
+}
+
+node_scale_xyz_by :: proc(node: ^Node, x: f32 = 1, y: f32 = 1, z: f32 = 1) {
+  geometry.transform_scale_xyz_by(&node.transform, x, y, z)
+}
+
+node_scale_by :: proc(node: ^Node, s: f32) {
+  geometry.transform_scale_by(&node.transform, s)
+}
+
+node_scale_xyz :: proc(node: ^Node, x: f32 = 1, y: f32 = 1, z: f32 = 1) {
+  geometry.transform_scale_xyz(&node.transform, x, y, z)
+}
+
+node_scale :: proc(node: ^Node, s: f32) {
+  geometry.transform_scale(&node.transform, s)
+}
+
+// Node handle transform manipulation functions
+node_handle_translate_by :: proc(scene: ^Scene, handle: Handle, x: f32 = 0, y: f32 = 0, z: f32 = 0) {
+  if node := resource.get(scene.nodes, handle); node != nil {
+    geometry.transform_translate_by(&node.transform, x, y, z)
+  }
+}
+
+node_handle_translate :: proc(scene: ^Scene, handle: Handle, x: f32 = 0, y: f32 = 0, z: f32 = 0) {
+  if node := resource.get(scene.nodes, handle); node != nil {
+    geometry.transform_translate(&node.transform, x, y, z)
+  }
+}
+
+node_handle_rotate_by :: proc {
+  node_handle_rotate_by_quaternion,
+  node_handle_rotate_by_angle,
+}
+
+node_handle_rotate_by_quaternion :: proc(scene: ^Scene, handle: Handle, q: quaternion128) {
+  if node := resource.get(scene.nodes, handle); node != nil {
+    geometry.transform_rotate_by_quaternion(&node.transform, q)
+  }
+}
+
+node_handle_rotate_by_angle :: proc(
+  scene: ^Scene,
+  handle: Handle,
+  angle: f32,
+  axis: [3]f32 = linalg.VECTOR3F32_Y_AXIS,
+) {
+  if node := resource.get(scene.nodes, handle); node != nil {
+    geometry.transform_rotate_by_angle(&node.transform, angle, axis)
+  }
+}
+
+node_handle_rotate :: proc {
+  node_handle_rotate_quaternion,
+  node_handle_rotate_angle,
+}
+
+node_handle_rotate_quaternion :: proc(scene: ^Scene, handle: Handle, q: quaternion128) {
+  if node := resource.get(scene.nodes, handle); node != nil {
+    geometry.transform_rotate_quaternion(&node.transform, q)
+  }
+}
+
+node_handle_rotate_angle :: proc(
+  scene: ^Scene,
+  handle: Handle,
+  angle: f32,
+  axis: [3]f32 = linalg.VECTOR3F32_Y_AXIS,
+) {
+  if node := resource.get(scene.nodes, handle); node != nil {
+    geometry.transform_rotate_angle(&node.transform, angle, axis)
+  }
+}
+
+node_handle_scale_xyz_by :: proc(scene: ^Scene, handle: Handle, x: f32 = 1, y: f32 = 1, z: f32 = 1) {
+  if node := resource.get(scene.nodes, handle); node != nil {
+    geometry.transform_scale_xyz_by(&node.transform, x, y, z)
+  }
+}
+
+node_handle_scale_by :: proc(scene: ^Scene, handle: Handle, s: f32) {
+  if node := resource.get(scene.nodes, handle); node != nil {
+    geometry.transform_scale_by(&node.transform, s)
+  }
+}
+
+node_handle_scale_xyz :: proc(scene: ^Scene, handle: Handle, x: f32 = 1, y: f32 = 1, z: f32 = 1) {
+  if node := resource.get(scene.nodes, handle); node != nil {
+    geometry.transform_scale_xyz(&node.transform, x, y, z)
+  }
+}
+
+node_handle_scale :: proc(scene: ^Scene, handle: Handle, s: f32) {
+  if node := resource.get(scene.nodes, handle); node != nil {
+    geometry.transform_scale(&node.transform, s)
+  }
+}
+
+// Overloaded procedure groups that work with Transform, Node pointers, and Node handles
+translate_by :: proc {
+  geometry.transform_translate_by,
+  node_translate_by,
+  node_handle_translate_by,
+}
+
+translate :: proc {
+  geometry.transform_translate,
+  node_translate,
+  node_handle_translate,
+}
+
+rotate_by :: proc {
+  geometry.transform_rotate_by_quaternion,
+  geometry.transform_rotate_by_angle,
+  node_rotate_by_quaternion,
+  node_rotate_by_angle,
+  node_handle_rotate_by_quaternion,
+  node_handle_rotate_by_angle,
+}
+
+rotate :: proc {
+  geometry.transform_rotate_quaternion,
+  geometry.transform_rotate_angle,
+  node_rotate_quaternion,
+  node_rotate_angle,
+  node_handle_rotate_quaternion,
+  node_handle_rotate_angle,
+}
+
+scale_xyz_by :: proc {
+  geometry.transform_scale_xyz_by,
+  node_scale_xyz_by,
+  node_handle_scale_xyz_by,
+}
+
+scale_by :: proc {
+  geometry.transform_scale_by,
+  node_scale_by,
+  node_handle_scale_by,
+}
+
+scale_xyz :: proc {
+  geometry.transform_scale_xyz,
+  node_scale_xyz,
+  node_handle_scale_xyz,
+}
+
+scale :: proc {
+  geometry.transform_scale,
+  node_scale,
+  node_handle_scale,
 }
 
 // Safe despawn function that uses deferred cleanup

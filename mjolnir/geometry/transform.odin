@@ -50,27 +50,27 @@ matrix_from_arr :: proc(a: [16]f32) -> (m: matrix[4,4]f32) {
   return
 }
 
-translate_by :: proc(t: ^Transform, x: f32 = 0, y: f32 = 0, z: f32 = 0) {
+transform_translate_by :: proc(t: ^Transform, x: f32 = 0, y: f32 = 0, z: f32 = 0) {
   t.position += {x, y, z}
   t.is_dirty = true
 }
 
-translate :: proc(t: ^Transform, x: f32 = 0, y: f32 = 0, z: f32 = 0) {
+transform_translate :: proc(t: ^Transform, x: f32 = 0, y: f32 = 0, z: f32 = 0) {
   t.position = {x, y, z}
   t.is_dirty = true
 }
 
-rotate_by :: proc {
-    rotate_by_quaternion,
-    rotate_by_angle,
+transform_rotate_by :: proc {
+    transform_rotate_by_quaternion,
+    transform_rotate_by_angle,
 }
 
-rotate_by_quaternion :: proc(t: ^Transform, q: quaternion128) {
+transform_rotate_by_quaternion :: proc(t: ^Transform, q: quaternion128) {
   t.rotation *= q
   t.is_dirty = true
 }
 
-rotate_by_angle :: proc(
+transform_rotate_by_angle :: proc(
   t: ^Transform,
   angle: f32,
   axis: [3]f32 = linalg.VECTOR3F32_Y_AXIS,
@@ -79,17 +79,17 @@ rotate_by_angle :: proc(
   t.is_dirty = true
 }
 
-rotate :: proc {
-  rotate_quaternion,
-  rotate_angle,
+transform_rotate :: proc {
+  transform_rotate_quaternion,
+  transform_rotate_angle,
 }
 
-rotate_quaternion :: proc(t: ^Transform, q: quaternion128) {
+transform_rotate_quaternion :: proc(t: ^Transform, q: quaternion128) {
   t.rotation = q
   t.is_dirty = true
 }
 
-rotate_angle :: proc(
+transform_rotate_angle :: proc(
   t: ^Transform,
   angle: f32,
   axis: [3]f32 = linalg.VECTOR3F32_Y_AXIS,
@@ -98,22 +98,22 @@ rotate_angle :: proc(
   t.is_dirty = true
 }
 
-scale_xyz_by :: proc(t: ^Transform, x: f32 = 1, y: f32 = 1, z: f32 = 1) {
+transform_scale_xyz_by :: proc(t: ^Transform, x: f32 = 1, y: f32 = 1, z: f32 = 1) {
   t.scale *= {x, y, z}
   t.is_dirty = true
 }
 
-scale_by :: proc(t: ^Transform, s: f32) {
+transform_scale_by :: proc(t: ^Transform, s: f32) {
   t.scale *= {s, s, s}
   t.is_dirty = true
 }
 
-scale_xyz :: proc(t: ^Transform, x: f32 = 1, y: f32 = 1, z: f32 = 1) {
+transform_scale_xyz :: proc(t: ^Transform, x: f32 = 1, y: f32 = 1, z: f32 = 1) {
   t.scale = {x, y, z}
   t.is_dirty = true
 }
 
-scale :: proc(t: ^Transform, s: f32) {
+transform_scale :: proc(t: ^Transform, s: f32) {
   t.scale = {s, s, s}
   t.is_dirty = true
 }
