@@ -337,10 +337,12 @@ init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
     return .ERROR_INITIALIZATION_FAILED
   }
   glfw.WindowHint(glfw.CLIENT_API, glfw.NO_API)
+  title_cstr := strings.clone_to_cstring(title)
+  defer delete(title_cstr)
   self.window = glfw.CreateWindow(
     c.int(width),
     c.int(height),
-    strings.clone_to_cstring(title),
+    title_cstr,
     nil,
     nil,
   )
