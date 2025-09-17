@@ -495,9 +495,7 @@ gbuffer_render :: proc(
           mesh_attachment.handle,
         ) or_continue
         push_constants := PushConstant {
-          world                    = geometry.transform_get_world_matrix_for_render(
-            &node.transform,
-          ),
+          world                    = get_world_matrix_for_render(node),
           camera_index             = render_target.camera.index,
           albedo_index             = min(
             MAX_TEXTURES - 1,

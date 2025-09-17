@@ -129,13 +129,7 @@ transform_update_local :: proc(t: ^Transform) -> bool {
 
 // Helper functions for double-buffered world matrix
 transform_get_world_matrix :: proc(t: ^Transform) -> matrix[4,4]f32 {
-  // Always return the logic buffer for update thread
   return t.world_matrix[0]
-}
-
-transform_get_world_matrix_for_update :: proc(t: ^Transform) -> ^matrix[4,4]f32 {
-  // Update thread always works with logic buffer (index 0)
-  return &t.world_matrix[0]
 }
 
 transform_get_world_matrix_for_render :: proc(t: ^Transform) -> matrix[4,4]f32 {

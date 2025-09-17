@@ -659,7 +659,7 @@ update_emitters :: proc(self: ^Engine, delta_time: f32) {
         visible = is_node_visible(&self.visibility_culler, 0, u32(entry_index), self.frame_index)
       }
     }
-    emitters[emitter_idx].transform = geometry.transform_get_world_matrix(&entry.item.transform)
+    emitters[emitter_idx].transform = get_world_matrix(&entry.item)
     emitters[emitter_idx].initial_velocity = e.initial_velocity
     emitters[emitter_idx].color_start = e.color_start
     emitters[emitter_idx].color_end = e.color_end
@@ -702,7 +702,7 @@ update_force_fields :: proc(self: ^Engine) {
   for &entry in self.scene.nodes.entries do if entry.active {
     ff, is_ff := &entry.item.attachment.(ForceFieldAttachment)
     if !is_ff do continue
-    forcefields[params.forcefield_count].position = geometry.transform_get_world_matrix(&entry.item.transform) * [4]f32{0, 0, 0, 1}
+    forcefields[params.forcefield_count].position = get_world_matrix(&entry.item) * [4]f32{0, 0, 0, 1}
     forcefields[params.forcefield_count].tangent_strength = ff.tangent_strength
     forcefields[params.forcefield_count].strength = ff.strength
     forcefields[params.forcefield_count].area_of_effect = ff.area_of_effect
@@ -959,11 +959,11 @@ generate_render_input :: proc(
           visible = is_node_visible(&self.visibility_culler, camera_slot, u32(i), self.frame_index)
         } else {
           // Fall back to CPU culling if camera slot not found
-          world_aabb := geometry.aabb_transform(mesh.aabb, geometry.transform_get_world_matrix_for_render(&node.transform))
+          world_aabb := geometry.aabb_transform(mesh.aabb, get_world_matrix_for_render(node))
           visible = geometry.frustum_test_aabb(frustum, world_aabb)
         }
       } else {
-        world_aabb := geometry.aabb_transform(mesh.aabb, geometry.transform_get_world_matrix_for_render(&node.transform))
+        world_aabb := geometry.aabb_transform(mesh.aabb, get_world_matrix_for_render(node))
         visible = geometry.frustum_test_aabb(frustum, world_aabb)
       }
       if !visible do continue
@@ -1089,7 +1089,7 @@ render :: proc(self: ^Engine) -> vk.Result {
     case PointLightAttachment:
       light_info := &self.lights[self.active_light_count]
       // Fill GPU data directly via embedded struct
-      position := geometry.transform_get_world_matrix_for_render(&node.transform) * [4]f32{0, 0, 0, 1}
+      position := get_world_matrix_for_render(node) * [4]f32{0, 0, 0, 1}
       light_info.light_kind = .POINT
       light_info.light_color = attachment.color.xyz
       light_info.light_position = position.xyz
@@ -1150,7 +1150,7 @@ render :: proc(self: ^Engine) -> vk.Result {
       light_info := &self.lights[self.active_light_count]
 
       // Fill GPU data directly
-      direction := geometry.transform_get_world_matrix_for_render(&node.transform) * [4]f32{0, 0, -1, 0}
+      direction := get_world_matrix_for_render(node) * [4]f32{0, 0, -1, 0}
       light_info.light_kind = .DIRECTIONAL
       light_info.light_color = attachment.color.xyz
       light_info.light_direction = direction.xyz
@@ -1161,8 +1161,8 @@ render :: proc(self: ^Engine) -> vk.Result {
       light_info := &self.lights[self.active_light_count]
 
       // Fill GPU data directly
-      position := geometry.transform_get_world_matrix_for_render(&node.transform) * [4]f32{0, 0, 0, 1}
-      direction := geometry.transform_get_world_matrix_for_render(&node.transform) * [4]f32{0, -1, 0, 0}
+      position := get_world_matrix_for_render(node) * [4]f32{0, 0, 0, 1}
+      direction := get_world_matrix_for_render(node) * [4]f32{0, -1, 0, 0}
       light_info.light_kind = .SPOT
       light_info.light_color = attachment.color.xyz
       light_info.light_position = position.xyz

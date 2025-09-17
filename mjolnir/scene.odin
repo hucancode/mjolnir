@@ -316,7 +316,7 @@ scene_traverse :: proc(
         &self.traversal_stack,
         SceneTraverseEntry {
           child_handle,
-          geometry.transform_get_world_matrix(&current_node.transform),
+          get_world_matrix(current_node),
           is_dirty || entry.parent_is_dirty,
           current_node.parent_visible && current_node.visible, // Pass combined visibility to children
         },
@@ -532,14 +532,28 @@ scale :: proc {
   node_handle_scale,
 }
 
-// Safe despawn function that uses deferred cleanup
 despawn :: proc(engine: ^Engine, handle: Handle) {
-  // Mark node as pending deletion to prevent processing
   if node := resource.get(engine.scene.nodes, handle); node != nil {
     node.pending_deletion = true
-    // Detach from parent first to prevent traversal issues
     detach(engine.scene.nodes, handle)
   }
-  // Queue for deletion at end of frame
   queue_node_deletion(engine, handle)
+}
+
+node_get_world_matrix :: proc(node: ^Node) -> matrix[4,4]f32 {
+    return geometry.transform_get_world_matrix(&node.transform)
+}
+
+node_get_world_matrix_for_render :: proc(node: ^Node) -> matrix[4,4]f32 {
+  return geometry.transform_get_world_matrix_for_render(&node.transform)
+}
+
+get_world_matrix :: proc {
+    node_get_world_matrix,
+    geometry.transform_get_world_matrix,
+}
+
+get_world_matrix_for_render :: proc {
+    node_get_world_matrix_for_render,
+    geometry.transform_get_world_matrix_for_render,
 }
