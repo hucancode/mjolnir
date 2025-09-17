@@ -190,23 +190,22 @@ lighting_init :: proc(
     nil,
     &self.spot_light_pipeline,
   ) or_return
-  log.info("Spot light pipeline initialized successfully")
   // light volume meshes
-  self.sphere_mesh, _, _ = create_mesh(
+  self.sphere_mesh, _ = create_mesh(
     gpu_context,
     warehouse,
-    geometry.make_sphere(segments = 128, rings = 128),
-  )
-  self.cone_mesh, _, _ = create_mesh(
+    geometry.make_sphere(segments = 64, rings = 64),
+  ) or_return
+  self.cone_mesh, _ = create_mesh(
     gpu_context,
     warehouse,
     geometry.make_cone(segments = 128, height = 1, radius = 0.5),
-  )
-  self.fullscreen_triangle_mesh, _, _ = create_mesh(
+  ) or_return
+  self.fullscreen_triangle_mesh, _ = create_mesh(
     gpu_context,
     warehouse,
     geometry.make_fullscreen_triangle(),
-  )
+  ) or_return
   log.info("Light volume meshes initialized")
   return .SUCCESS
 }
@@ -287,8 +286,8 @@ lighting_begin :: proc(
   vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
   vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
   descriptor_sets := [?]vk.DescriptorSet {
-    warehouse.camera_buffer_descriptor_set, // set = 0 (bindless camera buffer)
-    warehouse.textures_descriptor_set, // set = 1 (bindless textures)
+    warehouse.camera_buffer_descriptor_set,
+    warehouse.textures_descriptor_set,
   }
   vk.CmdBindDescriptorSets(
     command_buffer,
@@ -320,22 +319,39 @@ lighting_render :: proc(
     command_buffer: vk.CommandBuffer,
     warehouse: ^ResourceWarehouse,
   ) {
-    mesh := mesh(warehouse, mesh_handle)
-    offset: vk.DeviceSize = 0
+    mesh_ptr, ok := mesh(warehouse, mesh_handle)
+    if !ok || mesh_ptr == nil {
+      log.error("Failed to get mesh for handle", mesh_handle)
+      return
+    }
+    vertex_offset := vk.DeviceSize(
+      mesh_ptr.vertex_allocation.offset * size_of(geometry.Vertex),
+    )
     vk.CmdBindVertexBuffers(
       command_buffer,
       0,
       1,
-      &mesh.vertex_buffer.buffer,
-      &offset,
+      &warehouse.vertex_buffer.buffer,
+      &vertex_offset,
     )
-    vk.CmdBindIndexBuffer(command_buffer, mesh.index_buffer.buffer, 0, .UINT32)
-    vk.CmdDrawIndexed(command_buffer, mesh.indices_len, 1, 0, 0, 0)
+    vk.CmdBindIndexBuffer(
+      command_buffer,
+      warehouse.index_buffer.buffer,
+      vk.DeviceSize(mesh_ptr.index_allocation.offset * size_of(u32)),
+      .UINT32,
+    )
+    vk.CmdDrawIndexed(
+      command_buffer,
+      mesh_ptr.index_allocation.count,
+      1,
+      0,
+      0,
+      0,
+    )
   }
 
   for &light_info in input {
     node_count += 1
-    // Fill in the common G-buffer indices that are always the same
     light_info.scene_camera_idx = render_target.camera.index
     light_info.position_texture_index =
       get_position_texture(render_target, frame_index).index
@@ -352,7 +368,6 @@ lighting_render :: proc(
     light_info.input_image_index =
       get_final_image(render_target, frame_index).index
 
-    // Render based on light type
     switch light_info.light_kind {
     case .POINT:
       vk.CmdBindPipeline(command_buffer, .GRAPHICS, self.lighting_pipeline)

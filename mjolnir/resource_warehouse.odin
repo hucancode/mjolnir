@@ -12,6 +12,11 @@ import "resource"
 import stbi "vendor:stb/image"
 import vk "vendor:vulkan"
 
+BufferAllocation :: struct {
+  offset: u32,
+  count:  u32,
+}
+
 ResourceWarehouse :: struct {
   // Global samplers
   linear_repeat_sampler:        vk.Sampler,
@@ -50,6 +55,14 @@ ResourceWarehouse :: struct {
   // Bindless texture system
   textures_set_layout:          vk.DescriptorSetLayout,
   textures_descriptor_set:      vk.DescriptorSet,
+
+  // Bindless vertex/index buffer system
+  vertex_buffer:                gpu.DataBuffer(geometry.Vertex),
+  index_buffer:                 gpu.DataBuffer(u32),
+  vertex_slab:                  resource.SlabAllocator,
+  index_slab:                   resource.SlabAllocator,
+  vertex_data:                  []geometry.Vertex,
+  index_data:                   []u32,
 }
 
 resource_init :: proc(
@@ -80,6 +93,7 @@ resource_init :: proc(
   init_global_samplers(gpu_context, warehouse)
   init_bone_matrix_allocator(gpu_context, warehouse) or_return
   init_camera_buffer(gpu_context, warehouse) or_return
+  init_bindless_buffers(gpu_context, warehouse) or_return
   // Textuwarehouse+samplers descriptor set
   textures_bindings := [?]vk.DescriptorSetLayoutBinding {
     {
@@ -192,7 +206,7 @@ resource_deinit :: proc(
 
   for &entry in warehouse.meshes.entries {
     if entry.generation > 0 && entry.active {
-      mesh_deinit(&entry.item, gpu_context)
+      mesh_deinit(&entry.item, gpu_context, warehouse)
     }
   }
   delete(warehouse.meshes.entries)
@@ -234,6 +248,7 @@ resource_deinit :: proc(
   deinit_global_samplers(gpu_context, warehouse)
   deinit_bone_matrix_allocator(gpu_context, warehouse)
   deinit_camera_buffer(gpu_context, warehouse)
+  deinit_bindless_buffers(gpu_context, warehouse)
   vk.DestroyDescriptorSetLayout(
     gpu_context.device,
     warehouse.textures_set_layout,
@@ -645,6 +660,158 @@ deinit_bone_matrix_allocator :: proc(
   resource.slab_allocator_deinit(&warehouse.bone_matrix_slab)
 }
 
+BINDLESS_VERTEX_BUFFER_SIZE :: 128 * 1024 * 1024 // 128MB
+BINDLESS_INDEX_BUFFER_SIZE :: 64 * 1024 * 1024 // 64MB
+
+// Configuration for different allocation sizes
+// Total capacity: 256*512 + 1024*256 + 4096*128 + 16384*64 + 65536*16 + 262144*4 + 1048576*1 + 0*0 = 2,097,152 vertices
+VERTEX_SLAB_CONFIG :: [resource.MAX_SLAB_CLASSES]struct {
+  block_size, block_count: u32,
+} {
+  {block_size = 256, block_count = 512}, // Small meshes: 131,072 vertices
+  {block_size = 1024, block_count = 256}, // Medium meshes: 262,144 vertices
+  {block_size = 4096, block_count = 128}, // Large meshes: 524,288 vertices
+  {block_size = 16384, block_count = 64}, // Very large meshes: 1,048,576 vertices
+  {block_size = 65536, block_count = 16}, // Huge meshes: 1,048,576 vertices
+  {block_size = 262144, block_count = 4}, // Massive meshes: 1,048,576 vertices
+  {block_size = 1048576, block_count = 1}, // Giant meshes: 1,048,576 vertices
+  {block_size = 0, block_count = 0}, // Unused - disabled to fit within buffer
+}
+
+// Total capacity: 128*2048 + 512*1024 + 2048*512 + 8192*256 + 32768*128 + 131072*32 + 524288*8 + 2097152*4 = 16,777,216 indices
+INDEX_SLAB_CONFIG :: [resource.MAX_SLAB_CLASSES]struct {
+  block_size, block_count: u32,
+} {
+  {block_size = 128, block_count = 2048}, // Small index counts: 262,144 indices
+  {block_size = 512, block_count = 1024}, // Medium index counts: 524,288 indices
+  {block_size = 2048, block_count = 512}, // Large index counts: 1,048,576 indices
+  {block_size = 8192, block_count = 256}, // Very large index counts: 2,097,152 indices
+  {block_size = 32768, block_count = 128}, // Huge index counts: 4,194,304 indices
+  {block_size = 131072, block_count = 32}, // Massive index counts: 4,194,304 indices
+  {block_size = 524288, block_count = 8}, // Giant index counts: 4,194,304 indices
+  {block_size = 2097152, block_count = 4}, // Enormous index counts: 8,388,608 indices
+}
+
+init_bindless_buffers :: proc(
+  gpu_context: ^gpu.GPUContext,
+  warehouse: ^ResourceWarehouse,
+) -> vk.Result {
+  vertex_count := BINDLESS_VERTEX_BUFFER_SIZE / size_of(geometry.Vertex)
+  index_count := BINDLESS_INDEX_BUFFER_SIZE / size_of(u32)
+  warehouse.vertex_buffer = gpu.malloc_host_visible_buffer(
+    gpu_context,
+    geometry.Vertex,
+    vertex_count,
+    {.VERTEX_BUFFER},
+  ) or_return
+  warehouse.index_buffer = gpu.malloc_host_visible_buffer(
+    gpu_context,
+    u32,
+    index_count,
+    {.INDEX_BUFFER},
+  ) or_return
+  vertex_data_ptr: rawptr
+  vk.MapMemory(
+    gpu_context.device,
+    warehouse.vertex_buffer.memory,
+    0,
+    vk.DeviceSize(vk.WHOLE_SIZE),
+    {},
+    &vertex_data_ptr,
+  ) or_return
+  warehouse.vertex_data = ([^]geometry.Vertex)(vertex_data_ptr)[:vertex_count]
+  index_data_ptr: rawptr
+  vk.MapMemory(
+    gpu_context.device,
+    warehouse.index_buffer.memory,
+    0,
+    vk.DeviceSize(vk.WHOLE_SIZE),
+    {},
+    &index_data_ptr,
+  ) or_return
+  warehouse.index_data = ([^]u32)(index_data_ptr)[:index_count]
+  resource.slab_allocator_init(&warehouse.vertex_slab, VERTEX_SLAB_CONFIG)
+  resource.slab_allocator_init(&warehouse.index_slab, INDEX_SLAB_CONFIG)
+  log.info("Bindless buffer system initialized")
+  log.info("Vertex buffer capacity:", vertex_count, "vertices")
+  log.info("Index buffer capacity:", index_count, "indices")
+  return .SUCCESS
+}
+
+deinit_bindless_buffers :: proc(
+  gpu_context: ^gpu.GPUContext,
+  warehouse: ^ResourceWarehouse,
+) {
+  if warehouse.vertex_buffer.memory != 0 {
+    vk.UnmapMemory(gpu_context.device, warehouse.vertex_buffer.memory)
+  }
+  if warehouse.index_buffer.memory != 0 {
+    vk.UnmapMemory(gpu_context.device, warehouse.index_buffer.memory)
+  }
+  gpu.data_buffer_deinit(gpu_context, &warehouse.vertex_buffer)
+  gpu.data_buffer_deinit(gpu_context, &warehouse.index_buffer)
+  resource.slab_allocator_deinit(&warehouse.vertex_slab)
+  resource.slab_allocator_deinit(&warehouse.index_slab)
+}
+
+warehouse_allocate_vertices :: proc(
+  warehouse: ^ResourceWarehouse,
+  vertices: []geometry.Vertex,
+) -> (
+  allocation: BufferAllocation,
+  ret: vk.Result,
+) {
+  vertex_count := u32(len(vertices))
+  offset, ok := resource.slab_alloc(&warehouse.vertex_slab, vertex_count)
+  if !ok {
+    log.error("Failed to allocate vertices from slab allocator")
+    return {}, .ERROR_OUT_OF_DEVICE_MEMORY
+  }
+  if offset + vertex_count > u32(len(warehouse.vertex_data)) {
+    log.error("Vertex buffer overflow")
+    return {}, .ERROR_OUT_OF_DEVICE_MEMORY
+  }
+  copy(warehouse.vertex_data[offset:offset + vertex_count], vertices)
+  return BufferAllocation{offset = offset, count = vertex_count}, .SUCCESS
+}
+
+warehouse_allocate_indices :: proc(
+  warehouse: ^ResourceWarehouse,
+  indices: []u32,
+) -> (
+  allocation: BufferAllocation,
+  ret: vk.Result,
+) {
+  index_count := u32(len(indices))
+  offset, ok := resource.slab_alloc(&warehouse.index_slab, index_count)
+  if !ok {
+    log.error("Failed to allocate indices from slab allocator")
+    return {}, .ERROR_OUT_OF_DEVICE_MEMORY
+  }
+
+  if offset + index_count > u32(len(warehouse.index_data)) {
+    log.error("Index buffer overflow")
+    return {}, .ERROR_OUT_OF_DEVICE_MEMORY
+  }
+
+  copy(warehouse.index_data[offset:offset + index_count], indices)
+  return BufferAllocation{offset = offset, count = index_count}, .SUCCESS
+}
+
+warehouse_free_vertices :: proc(
+  warehouse: ^ResourceWarehouse,
+  allocation: BufferAllocation,
+) {
+  resource.slab_free(&warehouse.vertex_slab, allocation.offset)
+}
+
+warehouse_free_indices :: proc(
+  warehouse: ^ResourceWarehouse,
+  allocation: BufferAllocation,
+) {
+  resource.slab_free(&warehouse.index_slab, allocation.offset)
+}
+
 create_mesh :: proc(
   gpu_context: ^gpu.GPUContext,
   warehouse: ^ResourceWarehouse,
@@ -655,8 +822,7 @@ create_mesh :: proc(
   ret: vk.Result,
 ) {
   handle, mesh = resource.alloc(&warehouse.meshes)
-  mesh_init(mesh, gpu_context, data)
-  ret = .SUCCESS
+  ret = mesh_init(mesh, gpu_context, warehouse, data)
   return
 }
 
@@ -664,7 +830,10 @@ create_mesh_handle :: proc(
   gpu_context: ^gpu.GPUContext,
   warehouse: ^ResourceWarehouse,
   data: geometry.Geometry,
-) -> (handle: Handle, ok: bool) #optional_ok {
+) -> (
+  handle: Handle,
+  ok: bool,
+) #optional_ok {
   h, _, ret := create_mesh(gpu_context, warehouse, data)
   return h, ret == .SUCCESS
 }
@@ -723,11 +892,23 @@ create_material_handle :: proc(
   roughness_value: f32 = 1.0,
   emissive_value: f32 = 0.0,
   base_color_factor: [4]f32 = {1.0, 1.0, 1.0, 1.0},
-) -> (handle: Handle, ok: bool) #optional_ok {
+) -> (
+  handle: Handle,
+  ok: bool,
+) #optional_ok {
   h, _, ret := create_material(
-    warehouse, features, type, albedo_handle, metallic_roughness_handle,
-    normal_handle, emissive_handle, occlusion_handle, metallic_value,
-    roughness_value, emissive_value, base_color_factor,
+    warehouse,
+    features,
+    type,
+    albedo_handle,
+    metallic_roughness_handle,
+    normal_handle,
+    emissive_handle,
+    occlusion_handle,
+    metallic_value,
+    roughness_value,
+    emissive_value,
+    base_color_factor,
   )
   return h, ret == .SUCCESS
 }
@@ -756,7 +937,7 @@ create_texture_from_path :: proc(
   handle, texture = resource.alloc(&warehouse.image_2d_buffers)
   width, height, c_in_file: c.int
   path_cstr := strings.clone_to_cstring(path)
-  pixels := stbi.load(path_cstr, &width, &height, &c_in_file, 4) // force RGBA
+  pixels := stbi.load(path_cstr, &width, &height, &c_in_file, 4)
   if pixels == nil {
     log.errorf(
       "Failed to load texture from path '%s': %s\n",
@@ -1030,8 +1211,18 @@ create_empty_texture_2d_handle :: proc(
   width, height: u32,
   format: vk.Format,
   usage: vk.ImageUsageFlags = {.COLOR_ATTACHMENT, .SAMPLED},
-) -> (handle: Handle, ok: bool) #optional_ok {
-  h, _, ret := create_empty_texture_2d(gpu_context, warehouse, width, height, format, usage)
+) -> (
+  handle: Handle,
+  ok: bool,
+) #optional_ok {
+  h, _, ret := create_empty_texture_2d(
+    gpu_context,
+    warehouse,
+    width,
+    height,
+    format,
+    usage,
+  )
   return h, ret == .SUCCESS
 }
 
@@ -1039,7 +1230,10 @@ create_texture_from_path_handle :: proc(
   gpu_context: ^gpu.GPUContext,
   warehouse: ^ResourceWarehouse,
   path: string,
-) -> (handle: Handle, ok: bool) #optional_ok {
+) -> (
+  handle: Handle,
+  ok: bool,
+) #optional_ok {
   h, _, ret := create_texture_from_path(gpu_context, warehouse, path)
   return h, ret == .SUCCESS
 }
@@ -1048,7 +1242,10 @@ create_texture_from_data_handle :: proc(
   gpu_context: ^gpu.GPUContext,
   warehouse: ^ResourceWarehouse,
   data: []u8,
-) -> (handle: Handle, ok: bool) #optional_ok {
+) -> (
+  handle: Handle,
+  ok: bool,
+) #optional_ok {
   h, _, ret := create_texture_from_data(gpu_context, warehouse, data)
   return h, ret == .SUCCESS
 }
@@ -1061,8 +1258,19 @@ create_texture_from_pixels_handle :: proc(
   height: int,
   channel: int,
   format: vk.Format = .R8G8B8A8_SRGB,
-) -> (handle: Handle, ok: bool) #optional_ok {
-  h, _, ret := create_texture_from_pixels(gpu_context, warehouse, pixels, width, height, channel, format)
+) -> (
+  handle: Handle,
+  ok: bool,
+) #optional_ok {
+  h, _, ret := create_texture_from_pixels(
+    gpu_context,
+    warehouse,
+    pixels,
+    width,
+    height,
+    channel,
+    format,
+  )
   return h, ret == .SUCCESS
 }
 
@@ -1075,165 +1283,276 @@ get_frame_bone_matrix_offset :: proc(
   return base_offset + frame_index * frame_capacity
 }
 
-engine_get_render_target :: proc(engine: ^Engine, handle: Handle) -> (ret: ^RenderTarget, ok: bool) #optional_ok {
-    ret, ok = resource.get(engine.warehouse.render_targets, handle)
-    return
+engine_get_render_target :: proc(
+  engine: ^Engine,
+  handle: Handle,
+) -> (
+  ret: ^RenderTarget,
+  ok: bool,
+) #optional_ok {
+  ret, ok = resource.get(engine.warehouse.render_targets, handle)
+  return
 }
 
-warehouse_get_render_target :: proc(warehouse: ^ResourceWarehouse, handle: Handle) -> (ret: ^RenderTarget, ok: bool) #optional_ok {
-    ret, ok = resource.get(warehouse.render_targets, handle)
-    return
+warehouse_get_render_target :: proc(
+  warehouse: ^ResourceWarehouse,
+  handle: Handle,
+) -> (
+  ret: ^RenderTarget,
+  ok: bool,
+) #optional_ok {
+  ret, ok = resource.get(warehouse.render_targets, handle)
+  return
 }
 
 render_target :: proc {
-    engine_get_render_target,
-    warehouse_get_render_target,
+  engine_get_render_target,
+  warehouse_get_render_target,
 }
 
-engine_get_mesh :: proc(engine: ^Engine, handle: Handle) -> (ret: ^Mesh, ok: bool) #optional_ok {
-    ret, ok = resource.get(engine.warehouse.meshes, handle)
-    return
+engine_get_mesh :: proc(
+  engine: ^Engine,
+  handle: Handle,
+) -> (
+  ret: ^Mesh,
+  ok: bool,
+) #optional_ok {
+  ret, ok = resource.get(engine.warehouse.meshes, handle)
+  return
 }
 
-warehouse_get_mesh :: proc(warehouse: ^ResourceWarehouse, handle: Handle) -> (ret: ^Mesh, ok: bool) #optional_ok {
-    ret, ok = resource.get(warehouse.meshes, handle)
-    return
+warehouse_get_mesh :: proc(
+  warehouse: ^ResourceWarehouse,
+  handle: Handle,
+) -> (
+  ret: ^Mesh,
+  ok: bool,
+) #optional_ok {
+  ret, ok = resource.get(warehouse.meshes, handle)
+  return
 }
 
 mesh :: proc {
-    engine_get_mesh,
-    warehouse_get_mesh,
+  engine_get_mesh,
+  warehouse_get_mesh,
 }
 
-engine_get_material :: proc(engine: ^Engine, handle: Handle) -> (ret: ^Material, ok: bool) #optional_ok {
-    ret, ok = resource.get(engine.warehouse.materials, handle)
-    return
+engine_get_material :: proc(
+  engine: ^Engine,
+  handle: Handle,
+) -> (
+  ret: ^Material,
+  ok: bool,
+) #optional_ok {
+  ret, ok = resource.get(engine.warehouse.materials, handle)
+  return
 }
 
-warehouse_get_material :: proc(warehouse: ^ResourceWarehouse, handle: Handle) -> (ret: ^Material, ok: bool) #optional_ok {
-    ret, ok = resource.get(warehouse.materials, handle)
-    return
+warehouse_get_material :: proc(
+  warehouse: ^ResourceWarehouse,
+  handle: Handle,
+) -> (
+  ret: ^Material,
+  ok: bool,
+) #optional_ok {
+  ret, ok = resource.get(warehouse.materials, handle)
+  return
 }
 
 material :: proc {
-    engine_get_material,
-    warehouse_get_material,
+  engine_get_material,
+  warehouse_get_material,
 }
 
-engine_get_image_2d :: proc(engine: ^Engine, handle: Handle) -> (ret: ^gpu.ImageBuffer, ok: bool) #optional_ok {
-    ret, ok = resource.get(engine.warehouse.image_2d_buffers, handle)
-    return
+engine_get_image_2d :: proc(
+  engine: ^Engine,
+  handle: Handle,
+) -> (
+  ret: ^gpu.ImageBuffer,
+  ok: bool,
+) #optional_ok {
+  ret, ok = resource.get(engine.warehouse.image_2d_buffers, handle)
+  return
 }
 
-warehouse_get_image_2d :: proc(warehouse: ^ResourceWarehouse, handle: Handle) -> (ret: ^gpu.ImageBuffer, ok: bool) #optional_ok {
-    ret, ok = resource.get(warehouse.image_2d_buffers, handle)
-    return
+warehouse_get_image_2d :: proc(
+  warehouse: ^ResourceWarehouse,
+  handle: Handle,
+) -> (
+  ret: ^gpu.ImageBuffer,
+  ok: bool,
+) #optional_ok {
+  ret, ok = resource.get(warehouse.image_2d_buffers, handle)
+  return
 }
 
 image_2d :: proc {
-    engine_get_image_2d,
-    warehouse_get_image_2d,
+  engine_get_image_2d,
+  warehouse_get_image_2d,
 }
 
-engine_get_image_cube :: proc(engine: ^Engine, handle: Handle) -> (ret: ^gpu.CubeImageBuffer, ok: bool) #optional_ok {
-    ret, ok = resource.get(engine.warehouse.image_cube_buffers, handle)
-    return
+engine_get_image_cube :: proc(
+  engine: ^Engine,
+  handle: Handle,
+) -> (
+  ret: ^gpu.CubeImageBuffer,
+  ok: bool,
+) #optional_ok {
+  ret, ok = resource.get(engine.warehouse.image_cube_buffers, handle)
+  return
 }
 
-warehouse_get_image_cube :: proc(warehouse: ^ResourceWarehouse, handle: Handle) -> (ret: ^gpu.CubeImageBuffer, ok: bool) #optional_ok {
-    ret, ok = resource.get(warehouse.image_cube_buffers, handle)
-    return
+warehouse_get_image_cube :: proc(
+  warehouse: ^ResourceWarehouse,
+  handle: Handle,
+) -> (
+  ret: ^gpu.CubeImageBuffer,
+  ok: bool,
+) #optional_ok {
+  ret, ok = resource.get(warehouse.image_cube_buffers, handle)
+  return
 }
 
 image_cube :: proc {
-    engine_get_image_cube,
-    warehouse_get_image_cube,
+  engine_get_image_cube,
+  warehouse_get_image_cube,
 }
 
-engine_get_camera :: proc(engine: ^Engine, handle: Handle) -> (ret: ^geometry.Camera, ok: bool) #optional_ok {
-    ret, ok = resource.get(engine.warehouse.cameras, handle)
-    return
+engine_get_camera :: proc(
+  engine: ^Engine,
+  handle: Handle,
+) -> (
+  ret: ^geometry.Camera,
+  ok: bool,
+) #optional_ok {
+  ret, ok = resource.get(engine.warehouse.cameras, handle)
+  return
 }
 
-warehouse_get_camera :: proc(warehouse: ^ResourceWarehouse, handle: Handle) -> (ret: ^geometry.Camera, ok: bool) #optional_ok {
-    ret, ok = resource.get(warehouse.cameras, handle)
-    return
+warehouse_get_camera :: proc(
+  warehouse: ^ResourceWarehouse,
+  handle: Handle,
+) -> (
+  ret: ^geometry.Camera,
+  ok: bool,
+) #optional_ok {
+  ret, ok = resource.get(warehouse.cameras, handle)
+  return
 }
 
 camera :: proc {
-    engine_get_camera,
-    warehouse_get_camera,
+  engine_get_camera,
+  warehouse_get_camera,
 }
 
-engine_get_navmesh :: proc(engine: ^Engine, handle: Handle) -> (ret: ^NavMesh, ok: bool) #optional_ok {
-    ret, ok = resource.get(engine.warehouse.nav_meshes, handle)
-    return
+engine_get_navmesh :: proc(
+  engine: ^Engine,
+  handle: Handle,
+) -> (
+  ret: ^NavMesh,
+  ok: bool,
+) #optional_ok {
+  ret, ok = resource.get(engine.warehouse.nav_meshes, handle)
+  return
 }
 
-warehouse_get_navmesh :: proc(warehouse: ^ResourceWarehouse, handle: Handle) -> (ret: ^NavMesh, ok: bool) #optional_ok {
-    ret, ok = resource.get(warehouse.nav_meshes, handle)
-    return
+warehouse_get_navmesh :: proc(
+  warehouse: ^ResourceWarehouse,
+  handle: Handle,
+) -> (
+  ret: ^NavMesh,
+  ok: bool,
+) #optional_ok {
+  ret, ok = resource.get(warehouse.nav_meshes, handle)
+  return
 }
 
 navmesh :: proc {
-    engine_get_navmesh,
-    warehouse_get_navmesh,
+  engine_get_navmesh,
+  warehouse_get_navmesh,
 }
 
-engine_get_nav_context :: proc(engine: ^Engine, handle: Handle) -> (ret: ^NavContext, ok: bool) #optional_ok {
-    ret, ok = resource.get(engine.warehouse.nav_contexts, handle)
-    return
+engine_get_nav_context :: proc(
+  engine: ^Engine,
+  handle: Handle,
+) -> (
+  ret: ^NavContext,
+  ok: bool,
+) #optional_ok {
+  ret, ok = resource.get(engine.warehouse.nav_contexts, handle)
+  return
 }
 
-warehouse_get_nav_context :: proc(warehouse: ^ResourceWarehouse, handle: Handle) -> (ret: ^NavContext, ok: bool) #optional_ok {
-    ret, ok = resource.get(warehouse.nav_contexts, handle)
-    return
+warehouse_get_nav_context :: proc(
+  warehouse: ^ResourceWarehouse,
+  handle: Handle,
+) -> (
+  ret: ^NavContext,
+  ok: bool,
+) #optional_ok {
+  ret, ok = resource.get(warehouse.nav_contexts, handle)
+  return
 }
 
 nav_context :: proc {
-    engine_get_nav_context,
-    warehouse_get_nav_context,
+  engine_get_nav_context,
+  warehouse_get_nav_context,
 }
 
-engine_get_animation_clip :: proc(engine: ^Engine, handle: Handle) -> (ret: ^animation.Clip, ok: bool) #optional_ok {
-    ret, ok = resource.get(engine.warehouse.animation_clips, handle)
-    return
+engine_get_animation_clip :: proc(
+  engine: ^Engine,
+  handle: Handle,
+) -> (
+  ret: ^animation.Clip,
+  ok: bool,
+) #optional_ok {
+  ret, ok = resource.get(engine.warehouse.animation_clips, handle)
+  return
 }
 
-warehouse_get_animation_clip :: proc(warehouse: ^ResourceWarehouse, handle: Handle) -> (ret: ^animation.Clip, ok: bool) #optional_ok {
-    ret, ok = resource.get(warehouse.animation_clips, handle)
-    return
+warehouse_get_animation_clip :: proc(
+  warehouse: ^ResourceWarehouse,
+  handle: Handle,
+) -> (
+  ret: ^animation.Clip,
+  ok: bool,
+) #optional_ok {
+  ret, ok = resource.get(warehouse.animation_clips, handle)
+  return
 }
 
 animation_clip :: proc {
-    engine_get_animation_clip,
-    warehouse_get_animation_clip,
+  engine_get_animation_clip,
+  warehouse_get_animation_clip,
 }
 
 create_animation_clip :: proc(
-    warehouse: ^ResourceWarehouse,
-    name: string,
-    duration: f32,
-    channels: []animation.Channel,
+  warehouse: ^ResourceWarehouse,
+  name: string,
+  duration: f32,
+  channels: []animation.Channel,
 ) -> (
-    handle: Handle,
-    clip: ^animation.Clip,
-    ret: vk.Result,
+  handle: Handle,
+  clip: ^animation.Clip,
+  ret: vk.Result,
 ) {
-    handle, clip = resource.alloc(&warehouse.animation_clips)
-    clip.name = name
-    clip.duration = duration
-    clip.channels = channels
-    ret = .SUCCESS
-    return
+  handle, clip = resource.alloc(&warehouse.animation_clips)
+  clip.name = name
+  clip.duration = duration
+  clip.channels = channels
+  ret = .SUCCESS
+  return
 }
 
 create_animation_clip_handle :: proc(
-    warehouse: ^ResourceWarehouse,
-    name: string,
-    duration: f32,
-    channels: []animation.Channel,
-) -> (handle: Handle, ok: bool) #optional_ok {
-    h, _, ret := create_animation_clip(warehouse, name, duration, channels)
-    return h, ret == .SUCCESS
+  warehouse: ^ResourceWarehouse,
+  name: string,
+  duration: f32,
+  channels: []animation.Channel,
+) -> (
+  handle: Handle,
+  ok: bool,
+) #optional_ok {
+  h, _, ret := create_animation_clip(warehouse, name, duration, channels)
+  return h, ret == .SUCCESS
 }

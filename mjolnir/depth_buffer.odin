@@ -31,8 +31,8 @@ depth_prepass_init :: proc(
     size       = size_of(PushConstant),
   }
   set_layouts := [?]vk.DescriptorSetLayout {
-    warehouse.camera_buffer_set_layout, // set = 0 (bindless camera buffer)
-    warehouse.bone_buffer_set_layout, // set = 1 (for skinning)
+    warehouse.camera_buffer_set_layout,
+    warehouse.bone_buffer_set_layout,
   }
   pipeline_layout_info := vk.PipelineLayoutCreateInfo {
     sType                  = .PIPELINE_LAYOUT_CREATE_INFO,
@@ -130,8 +130,8 @@ depth_prepass_render :: proc(
 ) -> int {
   rendered_count := 0
   descriptor_sets := [?]vk.DescriptorSet {
-    warehouse.camera_buffer_descriptor_set, // set 0
-    warehouse.bone_buffer_descriptor_set, // set 1
+    warehouse.camera_buffer_descriptor_set,
+    warehouse.bone_buffer_descriptor_set,
   }
   vk.CmdBindDescriptorSets(
     command_buffer,
@@ -182,14 +182,14 @@ depth_prepass_render :: proc(
             size_of(PushConstant),
             &push_constant,
           )
-          // Always bind both vertex buffer and skinning buffer (real or dummy)
           skin_buffer := warehouse.dummy_skinning_buffer.buffer
           if mesh_has_skin {
             skin_buffer = mesh_skinning.skin_buffer.buffer
           }
 
-          buffers := [2]vk.Buffer{mesh.vertex_buffer.buffer, skin_buffer}
-          offsets := [2]vk.DeviceSize{0, 0}
+          buffers := [2]vk.Buffer{warehouse.vertex_buffer.buffer, skin_buffer}
+          vertex_offset := vk.DeviceSize(mesh.vertex_allocation.offset * size_of(geometry.Vertex))
+          offsets := [2]vk.DeviceSize{vertex_offset, 0}
           vk.CmdBindVertexBuffers(
             command_buffer,
             0,
@@ -199,11 +199,11 @@ depth_prepass_render :: proc(
           )
           vk.CmdBindIndexBuffer(
             command_buffer,
-            mesh.index_buffer.buffer,
-            0,
+            warehouse.index_buffer.buffer,
+            vk.DeviceSize(mesh.index_allocation.offset * size_of(u32)),
             .UINT32,
           )
-          vk.CmdDrawIndexed(command_buffer, mesh.indices_len, 1, 0, 0, 0)
+          vk.CmdDrawIndexed(command_buffer, mesh.index_allocation.count, 1, 0, 0, 0)
           rendered_count += 1
         }
       }

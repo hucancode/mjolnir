@@ -25,17 +25,19 @@ Skinning :: struct {
 }
 
 Mesh :: struct {
-  vertices_len:  u32,
-  indices_len:   u32,
-  vertex_buffer: gpu.DataBuffer(geometry.Vertex),
-  index_buffer:  gpu.DataBuffer(u32),
-  aabb:          geometry.Aabb,
-  skinning:      Maybe(Skinning),
+  vertex_allocation: BufferAllocation,
+  index_allocation:  BufferAllocation,
+  aabb:              geometry.Aabb,
+  skinning:          Maybe(Skinning),
 }
 
-mesh_deinit :: proc(self: ^Mesh, gpu_context: ^gpu.GPUContext) {
-  gpu.data_buffer_deinit(gpu_context, &self.vertex_buffer)
-  gpu.data_buffer_deinit(gpu_context, &self.index_buffer)
+mesh_deinit :: proc(
+  self: ^Mesh,
+  gpu_context: ^gpu.GPUContext,
+  warehouse: ^ResourceWarehouse,
+) {
+  warehouse_free_vertices(warehouse, self.vertex_allocation)
+  warehouse_free_indices(warehouse, self.index_allocation)
   skin, has_skin := &self.skinning.?
   if !has_skin do return
   gpu.data_buffer_deinit(gpu_context, &skin.skin_buffer)
@@ -46,25 +48,18 @@ mesh_deinit :: proc(self: ^Mesh, gpu_context: ^gpu.GPUContext) {
 mesh_init :: proc(
   self: ^Mesh,
   gpu_context: ^gpu.GPUContext,
+  warehouse: ^ResourceWarehouse,
   data: geometry.Geometry,
 ) -> vk.Result {
   defer geometry.delete_geometry(data)
-  self.vertices_len = u32(len(data.vertices))
-  self.indices_len = u32(len(data.indices))
   self.aabb = data.aabb
-  self.vertex_buffer = gpu.create_local_buffer(
-    gpu_context,
-    geometry.Vertex,
-    len(data.vertices),
-    {.VERTEX_BUFFER},
-    raw_data(data.vertices),
+  self.vertex_allocation = warehouse_allocate_vertices(
+    warehouse,
+    data.vertices,
   ) or_return
-  self.index_buffer = gpu.create_local_buffer(
-    gpu_context,
-    u32,
-    len(data.indices),
-    {.INDEX_BUFFER},
-    raw_data(data.indices),
+  self.index_allocation = warehouse_allocate_indices(
+    warehouse,
+    data.indices,
   ) or_return
   if len(data.skinnings) <= 0 {
     return .SUCCESS
@@ -130,7 +125,12 @@ sample_clip :: proc(
     transform: matrix[4, 4]f32,
     bone:      u32,
   }
-  stack := make([dynamic]TraverseEntry, 0, len(skin.bones), context.temp_allocator)
+  stack := make(
+    [dynamic]TraverseEntry,
+    0,
+    len(skin.bones),
+    context.temp_allocator,
+  )
   append(
     &stack,
     TraverseEntry{linalg.MATRIX4F32_IDENTITY, skin.root_bone_index},

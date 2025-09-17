@@ -19,22 +19,22 @@ import "resource"
 
 @(private = "file")
 AssetManifest :: struct {
-  unique_textures: [dynamic]^cgltf.texture,
+  unique_textures:  [dynamic]^cgltf.texture,
   unique_materials: [dynamic]^cgltf.material,
-  meshes: [dynamic]^cgltf.mesh,
-  skins: [dynamic]^cgltf.skin,
+  meshes:           [dynamic]^cgltf.mesh,
+  skins:            [dynamic]^cgltf.skin,
 }
 
 @(private = "file")
 GeometryData :: struct {
-  geometry: geometry.Geometry,
+  geometry:        geometry.Geometry,
   material_handle: resource.Handle,
 }
 
 @(private = "file")
 SkinData :: struct {
-  bones: []Bone,
-  root_bone_idx: u32,
+  bones:                []Bone,
+  root_bone_idx:        u32,
   matrix_buffer_offset: u32,
 }
 
@@ -66,10 +66,30 @@ load_gltf :: proc(
     delete(manifest.skins)
   }
   // step 2: Resource Loading
-  texture_cache := make(map[^cgltf.texture]resource.Handle, context.temp_allocator)
-  material_cache := make(map[^cgltf.material]resource.Handle, context.temp_allocator)
-  load_textures_batch(engine, path, gltf_data, manifest.unique_textures[:], &texture_cache) or_return
-  load_materials_batch(engine, path, gltf_data, manifest.unique_materials[:], &texture_cache, &material_cache, skinned_materials) or_return
+  texture_cache := make(
+    map[^cgltf.texture]resource.Handle,
+    context.temp_allocator,
+  )
+  material_cache := make(
+    map[^cgltf.material]resource.Handle,
+    context.temp_allocator,
+  )
+  load_textures_batch(
+    engine,
+    path,
+    gltf_data,
+    manifest.unique_textures[:],
+    &texture_cache,
+  ) or_return
+  load_materials_batch(
+    engine,
+    path,
+    gltf_data,
+    manifest.unique_materials[:],
+    &texture_cache,
+    &material_cache,
+    skinned_materials,
+  ) or_return
   // step 3: Geometry Processing
   geometry_cache := make(map[^cgltf.mesh]GeometryData, context.temp_allocator)
   mesh_skinning_map := make(map[^cgltf.mesh]bool, context.temp_allocator)
@@ -78,12 +98,27 @@ load_gltf :: proc(
       mesh_skinning_map[node.mesh] = true
     }
   }
-  process_geometries(engine, path, gltf_data, manifest.meshes[:], &texture_cache, &material_cache, &geometry_cache, mesh_skinning_map) or_return
+  process_geometries(
+    engine,
+    path,
+    gltf_data,
+    manifest.meshes[:],
+    &texture_cache,
+    &material_cache,
+    &geometry_cache,
+    mesh_skinning_map,
+  ) or_return
   // step 4: Skinning Processing
   skin_cache := make(map[^cgltf.skin]SkinData, context.temp_allocator)
   process_skins(engine, gltf_data, manifest.skins[:], &skin_cache)
   // step 5: Scene Construction
-  construct_scene(engine, gltf_data, &geometry_cache, &skin_cache, &nodes) or_return
+  construct_scene(
+    engine,
+    gltf_data,
+    &geometry_cache,
+    &skin_cache,
+    &nodes,
+  ) or_return
   log.infof("GLTF loading complete:")
   log.infof("  - Unique textures: %d", len(texture_cache))
   log.infof("  - Unique materials: %d", len(material_cache))
@@ -93,7 +128,12 @@ load_gltf :: proc(
 }
 
 @(private = "file")
-discover_assets :: proc(gltf_data: ^cgltf.data) -> (AssetManifest, map[^cgltf.material]bool) {
+discover_assets :: proc(
+  gltf_data: ^cgltf.data,
+) -> (
+  AssetManifest,
+  map[^cgltf.material]bool,
+) {
   manifest: AssetManifest
   manifest.unique_textures = make([dynamic]^cgltf.texture, 0)
   manifest.unique_materials = make([dynamic]^cgltf.material, 0)
@@ -110,22 +150,27 @@ discover_assets :: proc(gltf_data: ^cgltf.data) -> (AssetManifest, map[^cgltf.ma
       mesh_set[node.mesh] = true
       is_skinned := node.skin != nil
       for &primitive in node.mesh.primitives {
-        if primitive.material != nil && primitive.material not_in material_set {
+        if primitive.material != nil &&
+           primitive.material not_in material_set {
           append(&manifest.unique_materials, primitive.material)
           material_set[primitive.material] = true
           if is_skinned {
             skinned_materials[primitive.material] = true
           }
           material := primitive.material
-          if material.pbr_metallic_roughness.base_color_texture.texture != nil {
+          if material.pbr_metallic_roughness.base_color_texture.texture !=
+             nil {
             tex := material.pbr_metallic_roughness.base_color_texture.texture
             if tex not_in texture_set {
               append(&manifest.unique_textures, tex)
               texture_set[tex] = true
             }
           }
-          if material.has_pbr_metallic_roughness && material.pbr_metallic_roughness.metallic_roughness_texture.texture != nil {
-            tex := material.pbr_metallic_roughness.metallic_roughness_texture.texture
+          if material.has_pbr_metallic_roughness &&
+             material.pbr_metallic_roughness.metallic_roughness_texture.texture !=
+               nil {
+            tex :=
+              material.pbr_metallic_roughness.metallic_roughness_texture.texture
             if tex not_in texture_set {
               append(&manifest.unique_textures, tex)
               texture_set[tex] = true
@@ -176,7 +221,9 @@ load_textures_batch :: proc(
     gltf_image := gltf_texture.image_
     pixel_data: []u8
     if gltf_image.uri != nil {
-      texture_path_str := path.join({path.dir(gltf_path), string(gltf_image.uri)})
+      texture_path_str := path.join(
+        {path.dir(gltf_path), string(gltf_image.uri)},
+      )
       ok: bool
       pixel_data, ok = os.read_entire_file(texture_path_str)
       if !ok {
@@ -192,7 +239,11 @@ load_textures_batch :: proc(
     } else {
       continue
     }
-    tex_handle, _, texture_result := create_texture(&engine.gpu_context, &engine.warehouse, pixel_data)
+    tex_handle, _, texture_result := create_texture(
+      &engine.gpu_context,
+      &engine.warehouse,
+      pixel_data,
+    )
     if texture_result != .SUCCESS {
       return .io_error
     }
@@ -215,9 +266,8 @@ load_materials_batch :: proc(
 ) -> cgltf.result {
   for gltf_material in materials {
     if gltf_material == nil do continue
-    albedo, metallic_roughness, normal, emissive, occlusion, features := load_material_textures(
-      gltf_material, texture_cache,
-    )
+    albedo, metallic_roughness, normal, emissive, occlusion, features :=
+      load_material_textures(gltf_material, texture_cache)
     if gltf_material in skinned_materials do features |= {.SKINNING}
     material_handle, _, material_result := create_material(
       &engine.warehouse,
@@ -240,33 +290,49 @@ load_materials_batch :: proc(
 load_material_textures :: proc(
   gltf_material: ^cgltf.material,
   texture_cache: ^map[^cgltf.texture]resource.Handle,
-) -> (albedo: resource.Handle, metallic_roughness: resource.Handle, normal: resource.Handle, emissive: resource.Handle, occlusion: resource.Handle, features: ShaderFeatureSet) {
-  if gltf_material.has_pbr_metallic_roughness && gltf_material.pbr_metallic_roughness.metallic_roughness_texture.texture != nil {
-    if handle, found := texture_cache[gltf_material.pbr_metallic_roughness.metallic_roughness_texture.texture]; found {
+) -> (
+  albedo: resource.Handle,
+  metallic_roughness: resource.Handle,
+  normal: resource.Handle,
+  emissive: resource.Handle,
+  occlusion: resource.Handle,
+  features: ShaderFeatureSet,
+) {
+  if gltf_material.has_pbr_metallic_roughness &&
+     gltf_material.pbr_metallic_roughness.metallic_roughness_texture.texture !=
+       nil {
+    if handle, found :=
+         texture_cache[gltf_material.pbr_metallic_roughness.metallic_roughness_texture.texture];
+       found {
       metallic_roughness = handle
       features |= {.METALLIC_ROUGHNESS_TEXTURE}
     }
   }
   if gltf_material.pbr_metallic_roughness.base_color_texture.texture != nil {
-    if handle, found := texture_cache[gltf_material.pbr_metallic_roughness.base_color_texture.texture]; found {
+    if handle, found :=
+         texture_cache[gltf_material.pbr_metallic_roughness.base_color_texture.texture];
+       found {
       albedo = handle
       features |= {.ALBEDO_TEXTURE}
     }
   }
   if gltf_material.normal_texture.texture != nil {
-    if handle, found := texture_cache[gltf_material.normal_texture.texture]; found {
+    if handle, found := texture_cache[gltf_material.normal_texture.texture];
+       found {
       normal = handle
       features |= {.NORMAL_TEXTURE}
     }
   }
   if gltf_material.emissive_texture.texture != nil {
-    if handle, found := texture_cache[gltf_material.emissive_texture.texture]; found {
+    if handle, found := texture_cache[gltf_material.emissive_texture.texture];
+       found {
       emissive = handle
       features |= {.EMISSIVE_TEXTURE}
     }
   }
   if gltf_material.occlusion_texture.texture != nil {
-    if handle, found := texture_cache[gltf_material.occlusion_texture.texture]; found {
+    if handle, found := texture_cache[gltf_material.occlusion_texture.texture];
+       found {
       occlusion = handle
       features |= {.OCCLUSION_TEXTURE}
     }
@@ -287,10 +353,17 @@ process_geometries :: proc(
 ) -> cgltf.result {
   for mesh in meshes {
     is_skinned := mesh in mesh_skinning_map
-    geometry_data := process_mesh_primitives(mesh, material_cache, is_skinned) or_return
+    geometry_data := process_mesh_primitives(
+      mesh,
+      material_cache,
+      is_skinned,
+    ) or_return
     geometry_cache[mesh] = geometry_data
-    log.infof("Processed mesh with %d vertices, %d indices",
-      len(geometry_data.geometry.vertices), len(geometry_data.geometry.indices))
+    log.infof(
+      "Processed mesh with %d vertices, %d indices",
+      len(geometry_data.geometry.vertices),
+      len(geometry_data.geometry.indices),
+    )
   }
   return .success
 }
@@ -300,7 +373,10 @@ process_mesh_primitives :: proc(
   mesh: ^cgltf.mesh,
   material_cache: ^map[^cgltf.material]resource.Handle,
   include_skinning: bool,
-) -> (GeometryData, cgltf.result) {
+) -> (
+  GeometryData,
+  cgltf.result,
+) {
   primitives := mesh.primitives
   if len(primitives) == 0 {
     return {}, .invalid_gltf
@@ -313,12 +389,20 @@ process_mesh_primitives :: proc(
     }
   }
 
-  combined_vertices := make([dynamic]geometry.Vertex, 0, context.temp_allocator)
+  combined_vertices := make(
+    [dynamic]geometry.Vertex,
+    0,
+    context.temp_allocator,
+  )
   combined_indices := make([dynamic]u32, 0, context.temp_allocator)
   combined_skinnings: [dynamic]geometry.SkinningData
 
   if include_skinning {
-    combined_skinnings = make([dynamic]geometry.SkinningData, 0, context.temp_allocator)
+    combined_skinnings = make(
+      [dynamic]geometry.SkinningData,
+      0,
+      context.temp_allocator,
+    )
   }
 
   for &prim in primitives {
@@ -328,7 +412,11 @@ process_mesh_primitives :: proc(
 
     skinnings: []geometry.SkinningData
     if include_skinning {
-      skinnings = make([]geometry.SkinningData, vertices_num, context.temp_allocator)
+      skinnings = make(
+        []geometry.SkinningData,
+        vertices_num,
+        context.temp_allocator,
+      )
     }
 
     process_vertex_attributes(&prim, vertices, skinnings)
@@ -340,7 +428,12 @@ process_mesh_primitives :: proc(
 
     if prim.indices != nil {
       indices := make([]u32, prim.indices.count, context.temp_allocator)
-      _ = cgltf.accessor_unpack_indices(prim.indices, raw_data(indices), size_of(u32), prim.indices.count)
+      _ = cgltf.accessor_unpack_indices(
+        prim.indices,
+        raw_data(indices),
+        size_of(u32),
+        prim.indices.count,
+      )
 
       for &index in indices {
         index += vertex_offset
@@ -355,12 +448,20 @@ process_mesh_primitives :: proc(
   geometry_data: geometry.Geometry
   if include_skinning {
     final_skinnings := slice.clone(combined_skinnings[:])
-    geometry_data = geometry.make_geometry(final_vertices, final_indices, final_skinnings)
+    geometry_data = geometry.make_geometry(
+      final_vertices,
+      final_indices,
+      final_skinnings,
+    )
   } else {
     geometry_data = geometry.make_geometry(final_vertices, final_indices)
   }
 
-  return GeometryData{geometry = geometry_data, material_handle = material_handle}, .success
+  return GeometryData {
+      geometry = geometry_data,
+      material_handle = material_handle,
+    },
+    .success
 }
 
 @(private = "file")
@@ -374,32 +475,62 @@ process_vertex_attributes :: proc(
     #partial switch attribute.type {
     case .position:
       for i in 0 ..< min(int(accessor.count), len(vertices)) {
-        cgltf.accessor_read_float(accessor, uint(i), raw_data(vertices[i].position[:]), 3) or_continue
+        cgltf.accessor_read_float(
+          accessor,
+          uint(i),
+          raw_data(vertices[i].position[:]),
+          3,
+        ) or_continue
       }
     case .normal:
       for i in 0 ..< min(int(accessor.count), len(vertices)) {
-        cgltf.accessor_read_float(accessor, uint(i), raw_data(vertices[i].normal[:]), 3) or_continue
+        cgltf.accessor_read_float(
+          accessor,
+          uint(i),
+          raw_data(vertices[i].normal[:]),
+          3,
+        ) or_continue
       }
     case .texcoord:
       if attribute.index == 0 {
         for i in 0 ..< min(int(accessor.count), len(vertices)) {
-          cgltf.accessor_read_float(accessor, uint(i), raw_data(vertices[i].uv[:]), 2) or_continue
+          cgltf.accessor_read_float(
+            accessor,
+            uint(i),
+            raw_data(vertices[i].uv[:]),
+            2,
+          ) or_continue
         }
       }
     case .tangent:
       for i in 0 ..< min(int(accessor.count), len(vertices)) {
-        cgltf.accessor_read_float(accessor, uint(i), raw_data(vertices[i].tangent[:]), 4) or_continue
+        cgltf.accessor_read_float(
+          accessor,
+          uint(i),
+          raw_data(vertices[i].tangent[:]),
+          4,
+        ) or_continue
       }
     case .joints:
       if attribute.index == 0 && skinnings != nil {
         for i in 0 ..< min(int(accessor.count), len(skinnings)) {
-          cgltf.accessor_read_uint(accessor, uint(i), raw_data(skinnings[i].joints[:]), len(skinnings[i].joints)) or_continue
+          cgltf.accessor_read_uint(
+            accessor,
+            uint(i),
+            raw_data(skinnings[i].joints[:]),
+            len(skinnings[i].joints),
+          ) or_continue
         }
       }
     case .weights:
       if attribute.index == 0 && skinnings != nil {
         for i in 0 ..< min(int(accessor.count), len(skinnings)) {
-          cgltf.accessor_read_float(accessor, uint(i), raw_data(skinnings[i].weights[:]), 4) or_continue
+          cgltf.accessor_read_float(
+            accessor,
+            uint(i),
+            raw_data(skinnings[i].weights[:]),
+            4,
+          ) or_continue
         }
       }
     }
@@ -419,7 +550,12 @@ process_skins :: proc(
       bones[i].name = string(joint_node.name)
       if gltf_skin.inverse_bind_matrices != nil {
         ibm_floats: [16]f32
-        read := cgltf.accessor_read_float(gltf_skin.inverse_bind_matrices, uint(i), raw_data(ibm_floats[:]), 16)
+        read := cgltf.accessor_read_float(
+          gltf_skin.inverse_bind_matrices,
+          uint(i),
+          raw_data(ibm_floats[:]),
+          16,
+        )
         if read {
           bones[i].inverse_bind_matrix = geometry.matrix_from_arr(ibm_floats)
           continue
@@ -446,19 +582,28 @@ process_skins :: proc(
         break
       }
     }
-    matrix_buffer_offset := resource.slab_alloc(&engine.warehouse.bone_matrix_slab, u32(len(bones)))
+    matrix_buffer_offset := resource.slab_alloc(
+      &engine.warehouse.bone_matrix_slab,
+      u32(len(bones)),
+    )
     for frame_idx in 0 ..< MAX_FRAMES_IN_FLIGHT {
-      l := matrix_buffer_offset + u32(frame_idx) * engine.warehouse.bone_matrix_slab.capacity
+      l :=
+        matrix_buffer_offset +
+        u32(frame_idx) * engine.warehouse.bone_matrix_slab.capacity
       r := l + u32(len(bones))
       bone_matrices := engine.warehouse.bone_buffer.mapped[l:r]
       slice.fill(bone_matrices, linalg.MATRIX4F32_IDENTITY)
     }
-    skin_cache[gltf_skin] = SkinData{
-      bones = bones,
-      root_bone_idx = root_bone_idx,
+    skin_cache[gltf_skin] = SkinData {
+      bones                = bones,
+      root_bone_idx        = root_bone_idx,
       matrix_buffer_offset = matrix_buffer_offset,
     }
-    log.infof("Processed skin with %d bones, root bone %d", len(bones), root_bone_idx)
+    log.infof(
+      "Processed skin with %d bones, root bone %d",
+      len(bones),
+      root_bone_idx,
+    )
   }
 }
 
@@ -471,13 +616,16 @@ construct_scene :: proc(
   nodes: ^[dynamic]Handle,
 ) -> cgltf.result {
   TraverseEntry :: struct {
-    idx: u32,
+    idx:    u32,
     parent: Handle,
   }
   stack := make([dynamic]TraverseEntry, 0, context.temp_allocator)
   child_node_indices := make([dynamic]u32, 0, context.temp_allocator)
   node_ptr_to_idx_map := make(map[^cgltf.node]u32, context.temp_allocator)
-  skin_to_first_mesh := make(map[^cgltf.skin]resource.Handle, context.temp_allocator)
+  skin_to_first_mesh := make(
+    map[^cgltf.skin]resource.Handle,
+    context.temp_allocator,
+  )
   for &node, i in gltf_data.nodes {
     node_ptr_to_idx_map[&node] = u32(i)
   }
@@ -500,7 +648,9 @@ construct_scene :: proc(
     node.name = string(gltf_node.name)
     node.transform = geometry.TRANSFORM_IDENTITY
     if gltf_node.has_matrix {
-      node.transform = geometry.decompose_matrix(geometry.matrix_from_arr(gltf_node.matrix_))
+      node.transform = geometry.decompose_matrix(
+        geometry.matrix_from_arr(gltf_node.matrix_),
+      )
     } else {
       if gltf_node.has_translation {
         node.transform.position = gltf_node.translation
@@ -525,7 +675,12 @@ construct_scene :: proc(
         if gltf_node.skin != nil {
           if skin_data, skin_found := skin_cache[gltf_node.skin]; skin_found {
             mesh_handle, mesh := resource.alloc(&engine.warehouse.meshes)
-            mesh_init(mesh, &engine.gpu_context, geometry_data.geometry)
+            mesh_init(
+              mesh,
+              &engine.gpu_context,
+              &engine.warehouse,
+              geometry_data.geometry,
+            )
             skinning, _ := &mesh.skinning.?
             // Deep clone bones including their children slices
             skinning.bones = make([]Bone, len(skin_data.bones))
@@ -535,23 +690,30 @@ construct_scene :: proc(
               skinning.bones[i].name = strings.clone(src_bone.name)
             }
             skinning.root_bone_index = skin_data.root_bone_idx
-            node.attachment = MeshAttachment{
+            node.attachment = MeshAttachment {
               handle = mesh_handle,
               material = geometry_data.material_handle,
               cast_shadow = true,
-              skinning = NodeSkinning{bone_matrix_offset = skin_data.matrix_buffer_offset},
+              skinning = NodeSkinning {
+                bone_matrix_offset = skin_data.matrix_buffer_offset,
+              },
             }
-            if _, has_first_mesh := skin_to_first_mesh[gltf_node.skin]; !has_first_mesh {
+            if _, has_first_mesh := skin_to_first_mesh[gltf_node.skin];
+               !has_first_mesh {
               skin_to_first_mesh[gltf_node.skin] = mesh_handle
               load_animations(engine, gltf_data, gltf_node.skin, mesh_handle)
             }
           }
         } else {
-          mesh_handle, _, ret := create_mesh(&engine.gpu_context, &engine.warehouse, geometry_data.geometry)
+          mesh_handle, _, ret := create_mesh(
+            &engine.gpu_context,
+            &engine.warehouse,
+            geometry_data.geometry,
+          )
           if ret == .SUCCESS {
-            node.attachment = MeshAttachment{
-              handle = mesh_handle,
-              material = geometry_data.material_handle,
+            node.attachment = MeshAttachment {
+              handle      = mesh_handle,
+              material    = geometry_data.material_handle,
               cast_shadow = true,
             }
           }
@@ -594,34 +756,63 @@ load_animations :: proc(
         continue
       }
       n := gltf_channel.sampler.input.count
-      bone_idx := slice.linear_search(gltf_skin.joints, gltf_channel.target_node) or_continue
+      bone_idx := slice.linear_search(
+        gltf_skin.joints,
+        gltf_channel.target_node,
+      ) or_continue
       engine_channel := &clip.channels[bone_idx]
 
       interpolation_mode := animation.InterpolationMode.LINEAR
       #partial switch gltf_channel.sampler.interpolation {
-      case .step: interpolation_mode = .STEP
-      case .linear: interpolation_mode = .LINEAR
-      case .cubic_spline: interpolation_mode = .CUBICSPLINE
+      case .step:
+        interpolation_mode = .STEP
+      case .linear:
+        interpolation_mode = .LINEAR
+      case .cubic_spline:
+        interpolation_mode = .CUBICSPLINE
       }
       #partial switch gltf_channel.target_path {
       case .translation:
         engine_channel.position_interpolation = interpolation_mode
         if interpolation_mode == .CUBICSPLINE {
-          engine_channel.cubic_positions = make(type_of(engine_channel.cubic_positions), n)
+          engine_channel.cubic_positions = make(
+            type_of(engine_channel.cubic_positions),
+            n,
+          )
           for i in 0 ..< int(n) {
             time_val: [1]f32
-            cgltf.accessor_read_float(gltf_channel.sampler.input, uint(i), raw_data(time_val[:]), 1) or_continue
+            cgltf.accessor_read_float(
+              gltf_channel.sampler.input,
+              uint(i),
+              raw_data(time_val[:]),
+              1,
+            ) or_continue
             clip.duration = max(clip.duration, time_val[0])
             in_tangent: [3]f32
             value: [3]f32
             out_tangent: [3]f32
-            cgltf.accessor_read_float(gltf_channel.sampler.output, uint(i * 3 + 0), raw_data(in_tangent[:]), 3) or_continue
-            cgltf.accessor_read_float(gltf_channel.sampler.output, uint(i * 3 + 1), raw_data(value[:]), 3) or_continue
-            cgltf.accessor_read_float(gltf_channel.sampler.output, uint(i * 3 + 2), raw_data(out_tangent[:]), 3) or_continue
+            cgltf.accessor_read_float(
+              gltf_channel.sampler.output,
+              uint(i * 3 + 0),
+              raw_data(in_tangent[:]),
+              3,
+            ) or_continue
+            cgltf.accessor_read_float(
+              gltf_channel.sampler.output,
+              uint(i * 3 + 1),
+              raw_data(value[:]),
+              3,
+            ) or_continue
+            cgltf.accessor_read_float(
+              gltf_channel.sampler.output,
+              uint(i * 3 + 2),
+              raw_data(out_tangent[:]),
+              3,
+            ) or_continue
             engine_channel.cubic_positions[i] = {
-              time = time_val[0],
-              in_tangent = in_tangent,
-              value = value,
+              time        = time_val[0],
+              in_tangent  = in_tangent,
+              value       = value,
               out_tangent = out_tangent,
             }
           }
@@ -629,12 +820,22 @@ load_animations :: proc(
           engine_channel.positions = make(type_of(engine_channel.positions), n)
           for i in 0 ..< int(n) {
             time_val: [1]f32
-            cgltf.accessor_read_float(gltf_channel.sampler.input, uint(i), raw_data(time_val[:]), 1) or_continue
+            cgltf.accessor_read_float(
+              gltf_channel.sampler.input,
+              uint(i),
+              raw_data(time_val[:]),
+              1,
+            ) or_continue
             clip.duration = max(clip.duration, time_val[0])
             position: [3]f32
-            cgltf.accessor_read_float(gltf_channel.sampler.output, uint(i), raw_data(position[:]), 3) or_continue
+            cgltf.accessor_read_float(
+              gltf_channel.sampler.output,
+              uint(i),
+              raw_data(position[:]),
+              3,
+            ) or_continue
             engine_channel.positions[i] = {
-              time = time_val[0],
+              time  = time_val[0],
               value = position,
             }
           }
@@ -642,26 +843,49 @@ load_animations :: proc(
       case .rotation:
         engine_channel.rotation_interpolation = interpolation_mode
         if interpolation_mode == .CUBICSPLINE {
-          engine_channel.cubic_rotations = make(type_of(engine_channel.cubic_rotations), n)
+          engine_channel.cubic_rotations = make(
+            type_of(engine_channel.cubic_rotations),
+            n,
+          )
           for i in 0 ..< int(n) {
             time_val: [1]f32
-            cgltf.accessor_read_float(gltf_channel.sampler.input, uint(i), raw_data(time_val[:]), 1) or_continue
+            cgltf.accessor_read_float(
+              gltf_channel.sampler.input,
+              uint(i),
+              raw_data(time_val[:]),
+              1,
+            ) or_continue
             clip.duration = max(clip.duration, time_val[0])
             in_tangent: [4]f32
             value: [4]f32
             out_tangent: [4]f32
-            cgltf.accessor_read_float(gltf_channel.sampler.output, uint(i * 3 + 0), raw_data(in_tangent[:]), 4) or_continue
-            cgltf.accessor_read_float(gltf_channel.sampler.output, uint(i * 3 + 1), raw_data(value[:]), 4) or_continue
-            cgltf.accessor_read_float(gltf_channel.sampler.output, uint(i * 3 + 2), raw_data(out_tangent[:]), 4) or_continue
+            cgltf.accessor_read_float(
+              gltf_channel.sampler.output,
+              uint(i * 3 + 0),
+              raw_data(in_tangent[:]),
+              4,
+            ) or_continue
+            cgltf.accessor_read_float(
+              gltf_channel.sampler.output,
+              uint(i * 3 + 1),
+              raw_data(value[:]),
+              4,
+            ) or_continue
+            cgltf.accessor_read_float(
+              gltf_channel.sampler.output,
+              uint(i * 3 + 2),
+              raw_data(out_tangent[:]),
+              4,
+            ) or_continue
             engine_channel.cubic_rotations[i] = {
-              time = time_val[0],
-              in_tangent = quaternion(
+              time        = time_val[0],
+              in_tangent  = quaternion(
                 x = in_tangent[0],
                 y = in_tangent[1],
                 z = in_tangent[2],
                 w = in_tangent[3],
               ),
-              value = quaternion(
+              value       = quaternion(
                 x = value[0],
                 y = value[1],
                 z = value[2],
@@ -679,12 +903,22 @@ load_animations :: proc(
           engine_channel.rotations = make(type_of(engine_channel.rotations), n)
           for i in 0 ..< int(n) {
             time_val: [1]f32
-            cgltf.accessor_read_float(gltf_channel.sampler.input, uint(i), raw_data(time_val[:]), 1) or_continue
+            cgltf.accessor_read_float(
+              gltf_channel.sampler.input,
+              uint(i),
+              raw_data(time_val[:]),
+              1,
+            ) or_continue
             clip.duration = max(clip.duration, time_val[0])
             rotation: [4]f32
-            cgltf.accessor_read_float(gltf_channel.sampler.output, uint(i), raw_data(rotation[:]), 4) or_continue
+            cgltf.accessor_read_float(
+              gltf_channel.sampler.output,
+              uint(i),
+              raw_data(rotation[:]),
+              4,
+            ) or_continue
             engine_channel.rotations[i] = {
-              time = time_val[0],
+              time  = time_val[0],
               value = quaternion(
                 x = rotation[0],
                 y = rotation[1],
@@ -697,21 +931,44 @@ load_animations :: proc(
       case .scale:
         engine_channel.scale_interpolation = interpolation_mode
         if interpolation_mode == .CUBICSPLINE {
-          engine_channel.cubic_scales = make(type_of(engine_channel.cubic_scales), n)
+          engine_channel.cubic_scales = make(
+            type_of(engine_channel.cubic_scales),
+            n,
+          )
           for i in 0 ..< int(n) {
             time_val: [1]f32
-            cgltf.accessor_read_float(gltf_channel.sampler.input, uint(i), raw_data(time_val[:]), 1) or_continue
+            cgltf.accessor_read_float(
+              gltf_channel.sampler.input,
+              uint(i),
+              raw_data(time_val[:]),
+              1,
+            ) or_continue
             clip.duration = max(clip.duration, time_val[0])
             in_tangent: [3]f32
             value: [3]f32
             out_tangent: [3]f32
-            cgltf.accessor_read_float(gltf_channel.sampler.output, uint(i * 3 + 0), raw_data(in_tangent[:]), 3) or_continue
-            cgltf.accessor_read_float(gltf_channel.sampler.output, uint(i * 3 + 1), raw_data(value[:]), 3) or_continue
-            cgltf.accessor_read_float(gltf_channel.sampler.output, uint(i * 3 + 2), raw_data(out_tangent[:]), 3) or_continue
+            cgltf.accessor_read_float(
+              gltf_channel.sampler.output,
+              uint(i * 3 + 0),
+              raw_data(in_tangent[:]),
+              3,
+            ) or_continue
+            cgltf.accessor_read_float(
+              gltf_channel.sampler.output,
+              uint(i * 3 + 1),
+              raw_data(value[:]),
+              3,
+            ) or_continue
+            cgltf.accessor_read_float(
+              gltf_channel.sampler.output,
+              uint(i * 3 + 2),
+              raw_data(out_tangent[:]),
+              3,
+            ) or_continue
             engine_channel.cubic_scales[i] = {
-              time = time_val[0],
-              in_tangent = in_tangent,
-              value = value,
+              time        = time_val[0],
+              in_tangent  = in_tangent,
+              value       = value,
               out_tangent = out_tangent,
             }
           }
@@ -719,12 +976,22 @@ load_animations :: proc(
           engine_channel.scales = make(type_of(engine_channel.scales), n)
           for i in 0 ..< int(n) {
             time_val: [1]f32
-            cgltf.accessor_read_float(gltf_channel.sampler.input, uint(i), raw_data(time_val[:]), 1) or_continue
+            cgltf.accessor_read_float(
+              gltf_channel.sampler.input,
+              uint(i),
+              raw_data(time_val[:]),
+              1,
+            ) or_continue
             clip.duration = max(clip.duration, time_val[0])
             scale: [3]f32
-            cgltf.accessor_read_float(gltf_channel.sampler.output, uint(i), raw_data(scale[:]), 3) or_continue
+            cgltf.accessor_read_float(
+              gltf_channel.sampler.output,
+              uint(i),
+              raw_data(scale[:]),
+              3,
+            ) or_continue
             engine_channel.scales[i] = {
-              time = time_val[0],
+              time  = time_val[0],
               value = scale,
             }
           }

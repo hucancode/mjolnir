@@ -289,7 +289,6 @@ shadow_render :: proc(
   )
   rendered_count := 0
   for batch_key, batch_group in render_input.batches {
-    // Only care about skinning for shadow pipeline
     shadow_features: ShaderFeatureSet
     is_skinned := .SKINNING in batch_key.features
     if is_skinned {
@@ -399,7 +398,9 @@ render_single_shadow_node :: proc(
   mesh_skinning, mesh_has_skin := &mesh.skinning.?
   node_skinning, node_has_skin := mesh_attachment.skinning.?
   push_constant := PushConstant {
-    world        = geometry.transform_get_world_matrix_for_render(&node.transform),
+    world        = geometry.transform_get_world_matrix_for_render(
+      &node.transform,
+    ),
     camera_index = camera_index,
   }
   if is_skinned && node_has_skin {
@@ -415,14 +416,15 @@ render_single_shadow_node :: proc(
     size_of(PushConstant),
     &push_constant,
   )
-  // Always bind both vertex buffer and skinning buffer (real or dummy)
   skin_buffer := warehouse.dummy_skinning_buffer.buffer
   if is_skinned && mesh_has_skin && node_has_skin {
     skin_buffer = mesh_skinning.skin_buffer.buffer
   }
-
-  buffers := [2]vk.Buffer{mesh.vertex_buffer.buffer, skin_buffer}
-  offsets := [2]vk.DeviceSize{0, 0}
+  buffers := [2]vk.Buffer{warehouse.vertex_buffer.buffer, skin_buffer}
+  vertex_offset := vk.DeviceSize(
+    mesh.vertex_allocation.offset * size_of(geometry.Vertex),
+  )
+  offsets := [2]vk.DeviceSize{vertex_offset, 0}
   vk.CmdBindVertexBuffers(
     command_buffer,
     0,
@@ -430,6 +432,11 @@ render_single_shadow_node :: proc(
     raw_data(buffers[:]),
     raw_data(offsets[:]),
   )
-  vk.CmdBindIndexBuffer(command_buffer, mesh.index_buffer.buffer, 0, .UINT32)
-  vk.CmdDrawIndexed(command_buffer, mesh.indices_len, 1, 0, 0, 0)
+  vk.CmdBindIndexBuffer(
+    command_buffer,
+    warehouse.index_buffer.buffer,
+    vk.DeviceSize(mesh.index_allocation.offset * size_of(u32)),
+    .UINT32,
+  )
+  vk.CmdDrawIndexed(command_buffer, mesh.index_allocation.count, 1, 0, 0, 0)
 }

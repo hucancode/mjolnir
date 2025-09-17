@@ -34,9 +34,9 @@ gbuffer_init :: proc(
 ) -> vk.Result {
   depth_format: vk.Format = .D32_SFLOAT
   set_layouts := [?]vk.DescriptorSetLayout {
-    warehouse.camera_buffer_set_layout, // set = 0 (bindless camera buffer)
-    warehouse.textures_set_layout, // set = 1 (bindless textures)
-    warehouse.bone_buffer_set_layout, // set = 2 (bone matrices)
+    warehouse.camera_buffer_set_layout,
+    warehouse.textures_set_layout,
+    warehouse.bone_buffer_set_layout,
   }
   push_constant_range := vk.PushConstantRange {
     stageFlags = {.VERTEX, .FRAGMENT},
@@ -495,7 +495,9 @@ gbuffer_render :: proc(
           mesh_attachment.handle,
         ) or_continue
         push_constants := PushConstant {
-          world                    = geometry.transform_get_world_matrix_for_render(&node.transform),
+          world                    = geometry.transform_get_world_matrix_for_render(
+            &node.transform,
+          ),
           camera_index             = render_target.camera.index,
           albedo_index             = min(
             MAX_TEXTURES - 1,
@@ -530,14 +532,16 @@ gbuffer_render :: proc(
           size_of(PushConstant),
           &push_constants,
         )
-        // Always bind both vertex buffer and skinning buffer (real or dummy)
         skin_buffer := warehouse.dummy_skinning_buffer.buffer
         if mesh_skin, mesh_has_skin := mesh.skinning.?; mesh_has_skin {
           skin_buffer = mesh_skin.skin_buffer.buffer
         }
 
-        buffers := [2]vk.Buffer{mesh.vertex_buffer.buffer, skin_buffer}
-        offsets := [2]vk.DeviceSize{0, 0}
+        buffers := [2]vk.Buffer{warehouse.vertex_buffer.buffer, skin_buffer}
+        vertex_offset := vk.DeviceSize(
+          mesh.vertex_allocation.offset * size_of(geometry.Vertex),
+        )
+        offsets := [2]vk.DeviceSize{vertex_offset, 0}
         vk.CmdBindVertexBuffers(
           command_buffer,
           0,
@@ -547,11 +551,18 @@ gbuffer_render :: proc(
         )
         vk.CmdBindIndexBuffer(
           command_buffer,
-          mesh.index_buffer.buffer,
-          0,
+          warehouse.index_buffer.buffer,
+          vk.DeviceSize(mesh.index_allocation.offset * size_of(u32)),
           .UINT32,
         )
-        vk.CmdDrawIndexed(command_buffer, mesh.indices_len, 1, 0, 0, 0)
+        vk.CmdDrawIndexed(
+          command_buffer,
+          mesh.index_allocation.count,
+          1,
+          0,
+          0,
+          0,
+        )
         rendered += 1
       }
     }
