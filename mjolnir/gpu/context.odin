@@ -443,14 +443,18 @@ logical_device_init :: proc(self: ^GPUContext) -> vk.Result {
       dynamicRendering = true,
       pNext            = &descriptor_indexing_features,
     }
+  basic_features := vk.PhysicalDeviceFeatures {
+    multiDrawIndirect          = true,  // Required for vk.CmdDrawIndexedIndirect with drawCount > 1
+    drawIndirectFirstInstance  = true,  // Required for using firstInstance field in indirect commands
+  }
   device_create_info := vk.DeviceCreateInfo {
       sType                   = .DEVICE_CREATE_INFO,
       queueCreateInfoCount    = u32(len(queue_create_infos_list)),
       pQueueCreateInfos       = raw_data(queue_create_infos_list),
       ppEnabledExtensionNames = raw_data(DEVICE_EXTENSIONS),
       enabledExtensionCount   = u32(len(DEVICE_EXTENSIONS)),
+      pEnabledFeatures        = &basic_features,
       pNext                   = &dynamic_rendering_feature,
-      // pEnabledFeatures = &vk.PhysicalDeviceFeatures{}, // Set if specific base features needed
     }
   when ENABLE_VALIDATION_LAYERS {
     device_create_info.enabledLayerCount = u32(len(VALIDATION_LAYERS))
