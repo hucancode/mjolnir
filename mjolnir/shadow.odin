@@ -14,6 +14,12 @@ RendererShadow :: struct {
   pipelines:       [SHADOW_SHADER_VARIANT_COUNT]vk.Pipeline,
 }
 
+PushConstant :: struct {
+  node_index:   u32,
+  camera_index: u32,
+  padding:      [2]u32,
+}
+
 shadow_init :: proc(
   self: ^RendererShadow,
   gpu_context: ^gpu.GPUContext,
@@ -23,6 +29,7 @@ shadow_init :: proc(
   set_layouts := [?]vk.DescriptorSetLayout {
     warehouse.camera_buffer_set_layout,
     warehouse.bone_buffer_set_layout,
+    warehouse.scene_buffer_set_layout,
   }
   push_constant_range := [?]vk.PushConstantRange {
     {stageFlags = {.FRAGMENT, .VERTEX}, size = size_of(PushConstant)},
@@ -276,6 +283,7 @@ shadow_render :: proc(
   descriptor_sets := [?]vk.DescriptorSet {
     warehouse.camera_buffer_descriptor_set,
     warehouse.bone_buffer_descriptor_set,
+    warehouse.scene_buffer_descriptor_sets[frame_index],
   }
   vk.CmdBindDescriptorSets(
     command_buffer,
@@ -300,15 +308,22 @@ shadow_render :: proc(
       current_pipeline = pipeline
     }
     for batch_data in batch_group {
-      for node in batch_data.nodes {
+      for node_handle in batch_data.nodes {
+        node_index := node_handle.index
+        if node_index >= u32(len(warehouse.node_gpu_data[frame_index])) {
+          continue
+        }
+        node_gpu := warehouse.node_gpu_data[frame_index][node_index]
+        if !(.ACTIVE in node_gpu.flags) || !(.HAS_MESH in node_gpu.flags) || !(.CAST_SHADOW in node_gpu.flags) {
+          continue
+        }
         render_single_shadow_node(
           command_buffer,
           self.pipeline_layout,
-          node,
-          is_skinned,
+          node_index,
+          node_gpu,
           shadow_target.camera.index,
           warehouse,
-          frame_index,
         )
         rendered_count += 1
       }
@@ -386,27 +401,17 @@ shadow_get_pipeline :: proc(
 render_single_shadow_node :: proc(
   command_buffer: vk.CommandBuffer,
   layout: vk.PipelineLayout,
-  node: ^Node,
-  is_skinned: bool,
+  node_index: u32,
+  node_gpu: NodeGPUData,
   camera_index: u32,
   warehouse: ^ResourceWarehouse,
-  frame_index: u32,
 ) {
-  mesh_attachment := node.attachment.(MeshAttachment)
-  mesh, found_mesh := mesh(warehouse, mesh_attachment.handle)
-  if !found_mesh do return
-  mesh_skinning, mesh_has_skin := &mesh.skinning.?
-  node_skinning, node_has_skin := mesh_attachment.skinning.?
-  push_constant := PushConstant {
-    world        = geometry.transform_get_world_matrix_for_render(
-      &node.transform,
-    ),
-    camera_index = camera_index,
+  if node_gpu.index_count == 0 {
+    return
   }
-  if is_skinned && node_has_skin {
-    push_constant.bone_matrix_offset =
-      node_skinning.bone_matrix_offset +
-      frame_index * warehouse.bone_matrix_slab.capacity
+  push_constant := PushConstant {
+    node_index   = node_index,
+    camera_index = camera_index,
   }
   vk.CmdPushConstants(
     command_buffer,
@@ -417,14 +422,18 @@ render_single_shadow_node :: proc(
     &push_constant,
   )
   skin_buffer := warehouse.dummy_skinning_buffer.buffer
-  if is_skinned && mesh_has_skin && node_has_skin {
-    skin_buffer = mesh_skinning.skin_buffer.buffer
+  skin_offset := vk.DeviceSize(0)
+  if .SKINNED in node_gpu.flags {
+    skin_buffer = warehouse.skin_buffer.buffer
+    skin_offset = vk.DeviceSize(
+      node_gpu.skin_vertex_offset * size_of(geometry.SkinningData),
+    )
   }
   buffers := [2]vk.Buffer{warehouse.vertex_buffer.buffer, skin_buffer}
   vertex_offset := vk.DeviceSize(
-    mesh.vertex_allocation.offset * size_of(geometry.Vertex),
+    node_gpu.vertex_offset * size_of(geometry.Vertex),
   )
-  offsets := [2]vk.DeviceSize{vertex_offset, 0}
+  offsets := [2]vk.DeviceSize{vertex_offset, skin_offset}
   vk.CmdBindVertexBuffers(
     command_buffer,
     0,
@@ -435,8 +444,8 @@ render_single_shadow_node :: proc(
   vk.CmdBindIndexBuffer(
     command_buffer,
     warehouse.index_buffer.buffer,
-    vk.DeviceSize(mesh.index_allocation.offset * size_of(u32)),
+    vk.DeviceSize(node_gpu.index_offset * size_of(u32)),
     .UINT32,
   )
-  vk.CmdDrawIndexed(command_buffer, mesh.index_allocation.count, 1, 0, 0, 0)
+  vk.CmdDrawIndexed(command_buffer, node_gpu.index_count, 1, 0, 0, 0)
 }

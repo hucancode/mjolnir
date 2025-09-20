@@ -18,7 +18,7 @@ MAX_ACTIVE_CAMERAS :: 128
 // Memory usage: 128 cameras * 65536 nodes * 1 byte * 3 buffers = ~25MB for visibility results
 // Additional: 65536 nodes * 32 bytes * 2 frames = ~4MB for node data
 // Total GPU memory for culling: ~29MB
-MAX_NODES_IN_SCENE :: 65536
+// The value is shared with the rest of the engine via constants.odin.
 
 // Structure passed to GPU for culling
 NodeCullingData :: struct {

@@ -44,6 +44,19 @@ ResourceWarehouse :: struct {
   bone_buffer:                  gpu.DataBuffer(matrix[4, 4]f32),
   bone_matrix_slab:             resource.SlabAllocator,
 
+  // Scene bindless data
+  scene_buffer_set_layout:      vk.DescriptorSetLayout,
+  scene_buffer_descriptor_sets: [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
+  world_matrix_buffers:         [MAX_FRAMES_IN_FLIGHT]gpu.DataBuffer(matrix[4, 4]f32),
+  node_data_buffers:            [MAX_FRAMES_IN_FLIGHT]gpu.DataBuffer(NodeGPUData),
+  material_buffer:              gpu.DataBuffer(MaterialGPUData),
+  material_data:                []MaterialGPUData,
+  skin_buffer:                  gpu.DataBuffer(geometry.SkinningData),
+  world_matrix_data:            [MAX_FRAMES_IN_FLIGHT][]matrix[4, 4]f32,
+  node_gpu_data:                [MAX_FRAMES_IN_FLIGHT][]NodeGPUData,
+  skin_data:                    []geometry.SkinningData,
+  skin_slab:                    resource.SlabAllocator,
+
   // Bindless camera buffer system
   camera_buffer_set_layout:     vk.DescriptorSetLayout,
   camera_buffer_descriptor_set: vk.DescriptorSet,
@@ -94,6 +107,7 @@ resource_init :: proc(
   init_bone_matrix_allocator(gpu_context, warehouse) or_return
   init_camera_buffer(gpu_context, warehouse) or_return
   init_bindless_buffers(gpu_context, warehouse) or_return
+  init_scene_buffers(gpu_context, warehouse) or_return
   // Textuwarehouse+samplers descriptor set
   textures_bindings := [?]vk.DescriptorSetLayoutBinding {
     {
@@ -186,6 +200,7 @@ resource_deinit :: proc(
   warehouse: ^ResourceWarehouse,
   gpu_context: ^gpu.GPUContext,
 ) {
+  deinit_scene_buffers(gpu_context, warehouse)
   gpu.data_buffer_deinit(gpu_context, &warehouse.dummy_skinning_buffer)
   // Manually clean up each pool since callbacks can't capture gpu_context
   for &entry in warehouse.image_2d_buffers.entries {
@@ -662,6 +677,9 @@ deinit_bone_matrix_allocator :: proc(
 
 BINDLESS_VERTEX_BUFFER_SIZE :: 128 * 1024 * 1024 // 128MB
 BINDLESS_INDEX_BUFFER_SIZE :: 64 * 1024 * 1024 // 64MB
+BINDLESS_SKIN_BUFFER_SIZE :: 64 * 1024 * 1024 // 64MB
+BINDLESS_WORLD_MATRIX_COUNT :: MAX_NODES_IN_SCENE
+BINDLESS_NODE_DATA_COUNT :: MAX_NODES_IN_SCENE
 
 // Configuration for different allocation sizes
 // Total capacity: 256*512 + 1024*256 + 4096*128 + 16384*64 + 65536*16 + 262144*4 + 1048576*1 + 0*0 = 2,097,152 vertices
@@ -690,6 +708,19 @@ INDEX_SLAB_CONFIG :: [resource.MAX_SLAB_CLASSES]struct {
   {block_size = 131072, block_count = 32}, // Massive index counts: 4,194,304 indices
   {block_size = 524288, block_count = 8}, // Giant index counts: 4,194,304 indices
   {block_size = 2097152, block_count = 4}, // Enormous index counts: 8,388,608 indices
+}
+
+SKIN_SLAB_CONFIG :: [resource.MAX_SLAB_CLASSES]struct {
+  block_size, block_count: u32,
+} {
+  {block_size = 256, block_count = 512},
+  {block_size = 1024, block_count = 256},
+  {block_size = 4096, block_count = 128},
+  {block_size = 16384, block_count = 64},
+  {block_size = 65536, block_count = 16},
+  {block_size = 262144, block_count = 4},
+  {block_size = 1048576, block_count = 1},
+  {block_size = 0, block_count = 0},
 }
 
 init_bindless_buffers :: proc(
@@ -738,6 +769,178 @@ init_bindless_buffers :: proc(
   return .SUCCESS
 }
 
+init_scene_buffers :: proc(
+  gpu_context: ^gpu.GPUContext,
+  warehouse: ^ResourceWarehouse,
+) -> vk.Result {
+  for frame in 0 ..< MAX_FRAMES_IN_FLIGHT {
+    warehouse.world_matrix_buffers[frame] = gpu.create_host_visible_buffer(
+      gpu_context,
+      matrix[4, 4]f32,
+      BINDLESS_WORLD_MATRIX_COUNT,
+      {.STORAGE_BUFFER},
+    ) or_return
+    warehouse.node_data_buffers[frame] = gpu.create_host_visible_buffer(
+      gpu_context,
+      NodeGPUData,
+      BINDLESS_NODE_DATA_COUNT,
+      {.STORAGE_BUFFER},
+    ) or_return
+    warehouse.world_matrix_data[frame] = gpu.data_buffer_get_all(
+      &warehouse.world_matrix_buffers[frame],
+    )
+    warehouse.node_gpu_data[frame] = gpu.data_buffer_get_all(
+      &warehouse.node_data_buffers[frame],
+    )
+    for idx in 0 ..< len(warehouse.world_matrix_data[frame]) {
+      warehouse.world_matrix_data[frame][idx] = linalg.MATRIX4F32_IDENTITY
+    }
+    for idx in 0 ..< len(warehouse.node_gpu_data[frame]) {
+      warehouse.node_gpu_data[frame][idx] = {}
+    }
+  }
+
+  warehouse.material_buffer = gpu.create_host_visible_buffer(
+    gpu_context,
+    MaterialGPUData,
+    gpu.ACTIVE_MATERIAL_COUNT,
+    {.STORAGE_BUFFER},
+  ) or_return
+  warehouse.material_data = gpu.data_buffer_get_all(&warehouse.material_buffer)
+
+  skin_count := BINDLESS_SKIN_BUFFER_SIZE / size_of(geometry.SkinningData)
+  warehouse.skin_buffer = gpu.create_host_visible_buffer(
+    gpu_context,
+    geometry.SkinningData,
+    skin_count,
+    {.VERTEX_BUFFER},
+  ) or_return
+  warehouse.skin_data = gpu.data_buffer_get_all(&warehouse.skin_buffer)
+  resource.slab_allocator_init(&warehouse.skin_slab, SKIN_SLAB_CONFIG)
+
+  scene_bindings := [?]vk.DescriptorSetLayoutBinding {
+    {
+      binding = 0,
+      descriptorType = .STORAGE_BUFFER,
+      descriptorCount = 1,
+      stageFlags = {.VERTEX},
+    },
+    {
+      binding = 1,
+      descriptorType = .STORAGE_BUFFER,
+      descriptorCount = 1,
+      stageFlags = {.VERTEX, .FRAGMENT},
+    },
+    {
+      binding = 2,
+      descriptorType = .STORAGE_BUFFER,
+      descriptorCount = 1,
+      stageFlags = {.VERTEX, .FRAGMENT},
+    },
+    {
+      binding = 3,
+      descriptorType = .STORAGE_BUFFER,
+      descriptorCount = 1,
+      stageFlags = {.VERTEX},
+    },
+  }
+
+  vk.CreateDescriptorSetLayout(
+    gpu_context.device,
+    &vk.DescriptorSetLayoutCreateInfo {
+      sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+      bindingCount = len(scene_bindings),
+      pBindings = raw_data(scene_bindings[:]),
+    },
+    nil,
+    &warehouse.scene_buffer_set_layout,
+  ) or_return
+
+  layouts: [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSetLayout
+  for frame in 0 ..< MAX_FRAMES_IN_FLIGHT {
+    layouts[frame] = warehouse.scene_buffer_set_layout
+  }
+  vk.AllocateDescriptorSets(
+    gpu_context.device,
+    &vk.DescriptorSetAllocateInfo {
+      sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
+      descriptorPool = gpu_context.descriptor_pool,
+      descriptorSetCount = MAX_FRAMES_IN_FLIGHT,
+      pSetLayouts = raw_data(layouts[:]),
+    },
+    raw_data(warehouse.scene_buffer_descriptor_sets[:]),
+  ) or_return
+
+  for frame in 0 ..< MAX_FRAMES_IN_FLIGHT {
+    buffer_infos := [?]vk.DescriptorBufferInfo {
+      {
+        buffer = warehouse.world_matrix_buffers[frame].buffer,
+        offset = 0,
+        range = vk.DeviceSize(vk.WHOLE_SIZE),
+      },
+      {
+        buffer = warehouse.node_data_buffers[frame].buffer,
+        offset = 0,
+        range = vk.DeviceSize(vk.WHOLE_SIZE),
+      },
+      {
+        buffer = warehouse.material_buffer.buffer,
+        offset = 0,
+        range = vk.DeviceSize(vk.WHOLE_SIZE),
+      },
+      {
+        buffer = warehouse.skin_buffer.buffer,
+        offset = 0,
+        range = vk.DeviceSize(vk.WHOLE_SIZE),
+      },
+    }
+
+    writes := [?]vk.WriteDescriptorSet {
+      {
+        sType = .WRITE_DESCRIPTOR_SET,
+        dstSet = warehouse.scene_buffer_descriptor_sets[frame],
+        dstBinding = 0,
+        descriptorType = .STORAGE_BUFFER,
+        descriptorCount = 1,
+        pBufferInfo = &buffer_infos[0],
+      },
+      {
+        sType = .WRITE_DESCRIPTOR_SET,
+        dstSet = warehouse.scene_buffer_descriptor_sets[frame],
+        dstBinding = 1,
+        descriptorType = .STORAGE_BUFFER,
+        descriptorCount = 1,
+        pBufferInfo = &buffer_infos[1],
+      },
+      {
+        sType = .WRITE_DESCRIPTOR_SET,
+        dstSet = warehouse.scene_buffer_descriptor_sets[frame],
+        dstBinding = 2,
+        descriptorType = .STORAGE_BUFFER,
+        descriptorCount = 1,
+        pBufferInfo = &buffer_infos[2],
+      },
+      {
+        sType = .WRITE_DESCRIPTOR_SET,
+        dstSet = warehouse.scene_buffer_descriptor_sets[frame],
+        dstBinding = 3,
+        descriptorType = .STORAGE_BUFFER,
+        descriptorCount = 1,
+        pBufferInfo = &buffer_infos[3],
+      },
+    }
+    vk.UpdateDescriptorSets(
+      gpu_context.device,
+      len(writes),
+      raw_data(writes[:]),
+      0,
+      nil,
+    )
+  }
+
+  return .SUCCESS
+}
+
 deinit_bindless_buffers :: proc(
   gpu_context: ^gpu.GPUContext,
   warehouse: ^ResourceWarehouse,
@@ -752,6 +955,31 @@ deinit_bindless_buffers :: proc(
   gpu.data_buffer_deinit(gpu_context, &warehouse.index_buffer)
   resource.slab_allocator_deinit(&warehouse.vertex_slab)
   resource.slab_allocator_deinit(&warehouse.index_slab)
+}
+
+deinit_scene_buffers :: proc(
+  gpu_context: ^gpu.GPUContext,
+  warehouse: ^ResourceWarehouse,
+) {
+  for frame in 0 ..< MAX_FRAMES_IN_FLIGHT {
+    gpu.data_buffer_deinit(gpu_context, &warehouse.world_matrix_buffers[frame])
+    gpu.data_buffer_deinit(gpu_context, &warehouse.node_data_buffers[frame])
+    warehouse.world_matrix_data[frame] = nil
+    warehouse.node_gpu_data[frame] = nil
+  }
+  gpu.data_buffer_deinit(gpu_context, &warehouse.material_buffer)
+  gpu.data_buffer_deinit(gpu_context, &warehouse.skin_buffer)
+  warehouse.material_data = nil
+  warehouse.skin_data = nil
+  resource.slab_allocator_deinit(&warehouse.skin_slab)
+  if warehouse.scene_buffer_set_layout != 0 {
+    vk.DestroyDescriptorSetLayout(
+      gpu_context.device,
+      warehouse.scene_buffer_set_layout,
+      nil,
+    )
+    warehouse.scene_buffer_set_layout = 0
+  }
 }
 
 warehouse_allocate_vertices :: proc(
@@ -812,6 +1040,68 @@ warehouse_free_indices :: proc(
   resource.slab_free(&warehouse.index_slab, allocation.offset)
 }
 
+warehouse_allocate_skinning :: proc(
+  warehouse: ^ResourceWarehouse,
+  skinnings: []geometry.SkinningData,
+) -> (
+  allocation: BufferAllocation,
+  ret: vk.Result,
+) {
+  if len(skinnings) == 0 {
+    return {}, .SUCCESS
+  }
+  skin_count := u32(len(skinnings))
+  offset, ok := resource.slab_alloc(&warehouse.skin_slab, skin_count)
+  if !ok {
+    log.error("Failed to allocate skinning data from slab allocator")
+    return {}, .ERROR_OUT_OF_DEVICE_MEMORY
+  }
+  if offset + skin_count > u32(len(warehouse.skin_data)) {
+    log.error("Skin buffer overflow")
+    return {}, .ERROR_OUT_OF_DEVICE_MEMORY
+  }
+  copy(warehouse.skin_data[offset:offset + skin_count], skinnings)
+  return BufferAllocation{offset = offset, count = skin_count}, .SUCCESS
+}
+
+warehouse_free_skinning :: proc(
+  warehouse: ^ResourceWarehouse,
+  allocation: BufferAllocation,
+) {
+  if allocation.count == 0 {
+    return
+  }
+  resource.slab_free(&warehouse.skin_slab, allocation.offset)
+}
+
+update_material_gpu_data :: proc(
+  warehouse: ^ResourceWarehouse,
+  handle: Handle,
+  material: ^Material,
+) {
+  if len(warehouse.material_data) == 0 {
+    return
+  }
+  if handle.index >= u32(len(warehouse.material_data)) {
+    return
+  }
+  data := &warehouse.material_data[handle.index]
+  mask := transmute(u32)material.features
+  data^ = MaterialGPUData {
+    base_color_factor       = material.base_color_factor,
+    albedo_texture_index    = min(MAX_TEXTURES - 1, material.albedo.index),
+    metallic_texture_index  = min(MAX_TEXTURES - 1, material.metallic_roughness.index),
+    normal_texture_index    = min(MAX_TEXTURES - 1, material.normal.index),
+    emissive_texture_index  = min(MAX_TEXTURES - 1, material.emissive.index),
+    occlusion_texture_index = min(MAX_TEXTURES - 1, material.occlusion.index),
+    material_type           = u32(material.type),
+    features_mask           = mask,
+    metallic_value          = material.metallic_value,
+    roughness_value         = material.roughness_value,
+    emissive_value          = material.emissive_value,
+  }
+}
+
 create_mesh :: proc(
   gpu_context: ^gpu.GPUContext,
   warehouse: ^ResourceWarehouse,
@@ -868,6 +1158,7 @@ create_material :: proc(
   mat.roughness_value = roughness_value
   mat.emissive_value = emissive_value
   mat.base_color_factor = base_color_factor
+  update_material_gpu_data(warehouse, ret, mat)
   log.infof(
     "Material created: albedo=%d metallic_roughness=%d normal=%d emissive=%d",
     mat.albedo.index,

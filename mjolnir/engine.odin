@@ -117,12 +117,58 @@ BatchKey :: struct {
 // Batch data containing material and nodes
 BatchData :: struct {
   material_handle: Handle,
-  nodes:           [dynamic]^Node,
+  nodes:           [dynamic]Handle,
 }
 
 // RenderInput groups render batches and other per-frame data for the renderer.
 RenderInput :: struct {
   batches: map[BatchKey][dynamic]BatchData,
+}
+
+update_scene_gpu_buffers :: proc(self: ^Engine, frame_index: u32) {
+  if frame_index >= MAX_FRAMES_IN_FLIGHT {
+    return
+  }
+  world_buffer := self.warehouse.world_matrix_data[frame_index]
+  node_buffer := self.warehouse.node_gpu_data[frame_index]
+  if len(world_buffer) == 0 || len(node_buffer) == 0 {
+    return
+  }
+  for i in 0 ..< len(world_buffer) {
+    world_buffer[i] = linalg.MATRIX4F32_IDENTITY
+    node_buffer[i] = {}
+  }
+  for &entry, idx in self.scene.nodes.entries {
+    if idx >= len(world_buffer) do continue
+    world_buffer[idx] = geometry.transform_get_world_matrix_for_render(&entry.item.transform)
+    if !entry.active do continue
+    node_gpu := NodeGPUData{bone_matrix_offset = 0xFFFFFFFF}
+    node_gpu.flags |= NodeGPUFlags{.ACTIVE}
+    if mesh_attachment, has_mesh := &entry.item.attachment.(MeshAttachment); has_mesh {
+      mesh := mesh(self, mesh_attachment.handle) or_continue
+      _, material_found := material(self, mesh_attachment.material)
+      if !material_found {
+        continue
+      }
+      node_gpu.flags |= NodeGPUFlags{.HAS_MESH}
+      node_gpu.vertex_offset = mesh.vertex_allocation.offset
+      node_gpu.index_offset = mesh.index_allocation.offset
+      node_gpu.index_count = mesh.index_allocation.count
+      node_gpu.material_index = mesh_attachment.material.index
+      if mesh_attachment.cast_shadow {
+        node_gpu.flags |= NodeGPUFlags{.CAST_SHADOW}
+      }
+      if mesh_skin, mesh_has_skin := mesh.skinning.?; mesh_has_skin && mesh_skin.skin_allocation.count > 0 {
+        node_gpu.skin_vertex_offset = mesh_skin.skin_allocation.offset
+      }
+      if node_skin, node_has_skin := mesh_attachment.skinning.?; node_has_skin {
+        node_gpu.flags |= NodeGPUFlags{.SKINNED}
+        node_gpu.bone_matrix_offset = node_skin.bone_matrix_offset +
+          frame_index * self.warehouse.bone_matrix_slab.capacity
+      }
+    }
+    node_buffer[idx] = node_gpu
+  }
 }
 
 InputState :: struct {
@@ -987,12 +1033,13 @@ generate_render_input :: proc(
       if batch_data == nil {
         new_batch := BatchData {
           material_handle = data.material,
-          nodes           = make([dynamic]^Node, context.temp_allocator),
+          nodes           = make([dynamic]Handle, context.temp_allocator),
         }
         append(batch_group, new_batch)
         batch_data = &batch_group[len(batch_group) - 1]
       }
-      append(&batch_data.nodes, node)
+      node_handle := Handle{index = u32(i), generation = entry.generation}
+      append(&batch_data.nodes, node_handle)
     }
   }
   // log.infof("generate_render_input: camera_slot=%d found=%v, visible=%d/%d objects",
@@ -1011,6 +1058,9 @@ render :: proc(self: ^Engine) -> vk.Result {
   command_buffer := self.command_buffers[self.frame_index]
   vk.ResetCommandBuffer(command_buffer, {}) or_return
   render_delta_time := f32(time.duration_seconds(time.since(self.last_render_timestamp)))
+  // Ensure staged transforms are visible to the render buffers before uploading
+  flush_transforms_to_render(self)
+  update_scene_gpu_buffers(self, self.frame_index)
   for &entry in self.scene.nodes.entries {
     if !entry.active do continue
     data, is_mesh := &entry.item.attachment.(MeshAttachment)

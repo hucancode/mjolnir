@@ -18,6 +18,12 @@ RendererDepthPrepass :: struct {
   pipelines:       [DEPTH_PREPASS_VARIANT_COUNT]vk.Pipeline,
 }
 
+PushConstant :: struct {
+  node_index:   u32,
+  camera_index: u32,
+  padding:      [2]u32,
+}
+
 depth_prepass_init :: proc(
   self: ^RendererDepthPrepass,
   gpu_context: ^gpu.GPUContext,
@@ -33,6 +39,7 @@ depth_prepass_init :: proc(
   set_layouts := [?]vk.DescriptorSetLayout {
     warehouse.camera_buffer_set_layout,
     warehouse.bone_buffer_set_layout,
+    warehouse.scene_buffer_set_layout,
   }
   pipeline_layout_info := vk.PipelineLayoutCreateInfo {
     sType                  = .PIPELINE_LAYOUT_CREATE_INFO,
@@ -132,6 +139,7 @@ depth_prepass_render :: proc(
   descriptor_sets := [?]vk.DescriptorSet {
     warehouse.camera_buffer_descriptor_set,
     warehouse.bone_buffer_descriptor_set,
+    warehouse.scene_buffer_descriptor_sets[frame_index],
   }
   vk.CmdBindDescriptorSets(
     command_buffer,
@@ -154,58 +162,59 @@ depth_prepass_render :: proc(
         warehouse.materials,
         batch_data.material_handle,
       ) or_continue
-      for node in batch_data.nodes {
-        #partial switch data in node.attachment {
-        case MeshAttachment:
-          mesh := mesh(warehouse, data.handle) or_continue
-          mesh_skinning, mesh_has_skin := &mesh.skinning.?
-          node_skinning, node_has_skin := data.skinning.?
-          pipeline := depth_prepass_get_pipeline(self, material, mesh, data)
-          if pipeline != current_pipeline {
-            vk.CmdBindPipeline(command_buffer, .GRAPHICS, pipeline)
-            current_pipeline = pipeline
-          }
-          push_constant := PushConstant {
-            world        = get_world_matrix_for_render(node),
-            camera_index = camera_index,
-          }
-          if node_has_skin {
-            push_constant.bone_matrix_offset =
-              node_skinning.bone_matrix_offset +
-              frame_index * warehouse.bone_matrix_slab.capacity
-          }
-          vk.CmdPushConstants(
-            command_buffer,
-            self.pipeline_layout,
-            {.VERTEX},
-            0,
-            size_of(PushConstant),
-            &push_constant,
-          )
-          skin_buffer := warehouse.dummy_skinning_buffer.buffer
-          if mesh_has_skin {
-            skin_buffer = mesh_skinning.skin_buffer.buffer
-          }
-
-          buffers := [2]vk.Buffer{warehouse.vertex_buffer.buffer, skin_buffer}
-          vertex_offset := vk.DeviceSize(mesh.vertex_allocation.offset * size_of(geometry.Vertex))
-          offsets := [2]vk.DeviceSize{vertex_offset, 0}
-          vk.CmdBindVertexBuffers(
-            command_buffer,
-            0,
-            2,
-            raw_data(buffers[:]),
-            raw_data(offsets[:]),
-          )
-          vk.CmdBindIndexBuffer(
-            command_buffer,
-            warehouse.index_buffer.buffer,
-            vk.DeviceSize(mesh.index_allocation.offset * size_of(u32)),
-            .UINT32,
-          )
-          vk.CmdDrawIndexed(command_buffer, mesh.index_allocation.count, 1, 0, 0, 0)
-          rendered_count += 1
+      pipeline := depth_prepass_get_pipeline(self, material)
+      if pipeline != current_pipeline {
+        vk.CmdBindPipeline(command_buffer, .GRAPHICS, pipeline)
+        current_pipeline = pipeline
+      }
+      for node_handle in batch_data.nodes {
+        node_index := node_handle.index
+        if node_index >= u32(len(warehouse.node_gpu_data[frame_index])) {
+          continue
         }
+        node_gpu := warehouse.node_gpu_data[frame_index][node_index]
+        if !(.ACTIVE in node_gpu.flags) || !(.HAS_MESH in node_gpu.flags) {
+          continue
+        }
+        push_constant := PushConstant {
+          node_index   = node_index,
+          camera_index = camera_index,
+        }
+        vk.CmdPushConstants(
+          command_buffer,
+          self.pipeline_layout,
+          {.VERTEX},
+          0,
+          size_of(PushConstant),
+          &push_constant,
+        )
+        skin_buffer := warehouse.dummy_skinning_buffer.buffer
+        skin_offset := vk.DeviceSize(0)
+        if .SKINNED in node_gpu.flags {
+          skin_buffer = warehouse.skin_buffer.buffer
+          skin_offset = vk.DeviceSize(
+            node_gpu.skin_vertex_offset * size_of(geometry.SkinningData),
+          )
+        }
+
+        buffers := [2]vk.Buffer{warehouse.vertex_buffer.buffer, skin_buffer}
+        vertex_offset := vk.DeviceSize(node_gpu.vertex_offset * size_of(geometry.Vertex))
+        offsets := [2]vk.DeviceSize{vertex_offset, skin_offset}
+        vk.CmdBindVertexBuffers(
+          command_buffer,
+          0,
+          2,
+          raw_data(buffers[:]),
+          raw_data(offsets[:]),
+        )
+        vk.CmdBindIndexBuffer(
+          command_buffer,
+          warehouse.index_buffer.buffer,
+          vk.DeviceSize(node_gpu.index_offset * size_of(u32)),
+          .UINT32,
+        )
+        vk.CmdDrawIndexed(command_buffer, node_gpu.index_count, 1, 0, 0, 0)
+        rendered_count += 1
       }
     }
   }
@@ -215,8 +224,6 @@ depth_prepass_render :: proc(
 depth_prepass_get_pipeline :: proc(
   self: ^RendererDepthPrepass,
   material: ^Material,
-  mesh: ^Mesh,
-  data: MeshAttachment,
 ) -> vk.Pipeline {
   features := material.features & ShaderFeatureSet{.SKINNING}
   return self.pipelines[transmute(u32)features]

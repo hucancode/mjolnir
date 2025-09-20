@@ -21,7 +21,7 @@ bone_deinit :: proc(bone: ^Bone) {
 Skinning :: struct {
   root_bone_index: u32,
   bones:           []Bone,
-  skin_buffer:     gpu.DataBuffer(geometry.SkinningData),
+  skin_allocation: BufferAllocation,
 }
 
 Mesh :: struct {
@@ -40,7 +40,7 @@ mesh_deinit :: proc(
   warehouse_free_indices(warehouse, self.index_allocation)
   skin, has_skin := &self.skinning.?
   if !has_skin do return
-  gpu.data_buffer_deinit(gpu_context, &skin.skin_buffer)
+  warehouse_free_skinning(warehouse, skin.skin_allocation)
   for &bone in skin.bones do bone_deinit(&bone)
   delete(skin.bones)
 }
@@ -64,17 +64,13 @@ mesh_init :: proc(
   if len(data.skinnings) <= 0 {
     return .SUCCESS
   }
-  log.info("creating skin buffer", len(data.skinnings))
-  skin_buffer := gpu.create_local_buffer(
-    gpu_context,
-    geometry.SkinningData,
-    len(data.skinnings),
-    {.VERTEX_BUFFER},
-    raw_data(data.skinnings),
-  ) or_return
+  allocation, alloc_res := warehouse_allocate_skinning(warehouse, data.skinnings)
+  if alloc_res != .SUCCESS {
+    return alloc_res
+  }
   self.skinning = Skinning {
-    bones       = make([]Bone, 0),
-    skin_buffer = skin_buffer,
+    bones           = make([]Bone, 0),
+    skin_allocation = allocation,
   }
   return .SUCCESS
 }
