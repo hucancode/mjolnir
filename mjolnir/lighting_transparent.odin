@@ -13,6 +13,12 @@ RendererTransparent :: struct {
   wireframe_pipelines:   [2]vk.Pipeline,
 }
 
+PushConstant :: struct {
+  node_index:   u32,
+  camera_index: u32,
+  padding:      [2]u32,
+}
+
 transparent_init :: proc(
   self: ^RendererTransparent,
   gpu_context: ^gpu.GPUContext,
@@ -24,6 +30,7 @@ transparent_init :: proc(
     warehouse.camera_buffer_set_layout,
     warehouse.textures_set_layout,
     warehouse.bone_buffer_set_layout,
+    warehouse.scene_buffer_set_layout,
   }
   push_constant_range := vk.PushConstantRange {
     stageFlags = {.VERTEX, .FRAGMENT},
@@ -515,6 +522,7 @@ transparent_render :: proc(
     warehouse.camera_buffer_descriptor_set,
     warehouse.textures_descriptor_set,
     warehouse.bone_buffer_descriptor_set,
+    warehouse.scene_buffer_descriptor_sets[frame_index],
   }
   vk.CmdBindDescriptorSets(
     command_buffer,
@@ -543,47 +551,22 @@ transparent_render :: proc(
           warehouse.materials,
           batch_data.material_handle,
         ) or_continue
+        _ = material
 
         // Render all nodes in this batch
-        for node in batch_data.nodes {
-          mesh_attachment, ok := node.attachment.(MeshAttachment)
-          if !ok do continue
-
-          mesh := resource.get(
-            warehouse.meshes,
-            mesh_attachment.handle,
-          ) or_continue
+        for node_handle in batch_data.nodes {
+          node_index := node_handle.index
+          if node_index >= u32(len(warehouse.node_gpu_data[frame_index])) {
+            continue
+          }
+          node_gpu := warehouse.node_gpu_data[frame_index][node_index]
+          if !(.ACTIVE in node_gpu.flags) || !(.HAS_MESH in node_gpu.flags) {
+            continue
+          }
 
           push_constants := PushConstant {
-            world                    = get_world_matrix_for_render(node),
-            bone_matrix_offset       = 0,
-            camera_index             = render_target.camera.index,
-            albedo_index             = min(
-              MAX_TEXTURES - 1,
-              material.albedo.index,
-            ),
-            metallic_roughness_index = min(
-              MAX_TEXTURES - 1,
-              material.metallic_roughness.index,
-            ),
-            normal_index             = min(
-              MAX_TEXTURES - 1,
-              material.normal.index,
-            ),
-            emissive_index           = min(
-              MAX_TEXTURES - 1,
-              material.emissive.index,
-            ),
-            metallic_value           = material.metallic_value,
-            roughness_value          = material.roughness_value,
-            emissive_value           = material.emissive_value,
-          }
-          // Set bone matrix offset if skinning is available
-          if skinning, has_skinning := mesh_attachment.skinning.?;
-             has_skinning {
-            push_constants.bone_matrix_offset =
-              skinning.bone_matrix_offset +
-              frame_index * warehouse.bone_matrix_slab.capacity
+            node_index   = node_index,
+            camera_index = render_target.camera.index,
           }
           // Push constants
           vk.CmdPushConstants(
@@ -596,14 +579,18 @@ transparent_render :: proc(
           )
           // Draw mesh
           skin_buffer := warehouse.dummy_skinning_buffer.buffer
-          if mesh_skin, mesh_has_skin := mesh.skinning.?; mesh_has_skin {
-            skin_buffer = mesh_skin.skin_buffer.buffer
+          skin_offset := vk.DeviceSize(0)
+          if .SKINNED in node_gpu.flags {
+            skin_buffer = warehouse.skin_buffer.buffer
+            skin_offset = vk.DeviceSize(
+              node_gpu.skin_vertex_offset * size_of(geometry.SkinningData),
+            )
           }
           buffers := [2]vk.Buffer{warehouse.vertex_buffer.buffer, skin_buffer}
           vertex_offset := vk.DeviceSize(
-            mesh.vertex_allocation.offset * size_of(geometry.Vertex),
+            node_gpu.vertex_offset * size_of(geometry.Vertex),
           )
-          offsets := [2]vk.DeviceSize{vertex_offset, 0}
+          offsets := [2]vk.DeviceSize{vertex_offset, skin_offset}
           vk.CmdBindVertexBuffers(
             command_buffer,
             0,
@@ -614,12 +601,12 @@ transparent_render :: proc(
           vk.CmdBindIndexBuffer(
             command_buffer,
             warehouse.index_buffer.buffer,
-            vk.DeviceSize(mesh.index_allocation.offset * size_of(u32)),
+            vk.DeviceSize(node_gpu.index_offset * size_of(u32)),
             .UINT32,
           )
           vk.CmdDrawIndexed(
             command_buffer,
-            mesh.index_allocation.count,
+            node_gpu.index_count,
             1,
             0,
             0,
@@ -630,13 +617,15 @@ transparent_render :: proc(
     } else if batch_key.material_type == .WIREFRAME {
       for batch_data in batch_group {
         // Render all nodes in this batch
-        for node in batch_data.nodes {
-          mesh_attachment, ok := node.attachment.(MeshAttachment)
-          if !ok do continue
-          mesh := resource.get(
-            warehouse.meshes,
-            mesh_attachment.handle,
-          ) or_continue
+        for node_handle in batch_data.nodes {
+          node_index := node_handle.index
+          if node_index >= u32(len(warehouse.node_gpu_data[frame_index])) {
+            continue
+          }
+          node_gpu := warehouse.node_gpu_data[frame_index][node_index]
+          if !(.ACTIVE in node_gpu.flags) || !(.HAS_MESH in node_gpu.flags) {
+            continue
+          }
           // Check if skinning feature is enabled
           is_skinned := .SKINNING in batch_key.features
           pipeline_idx := is_skinned ? 1 : 0
@@ -647,15 +636,8 @@ transparent_render :: proc(
             self.wireframe_pipelines[pipeline_idx],
           )
           push_constant := PushConstant {
-            world        = get_world_matrix_for_render(node),
+            node_index   = node_index,
             camera_index = render_target.camera.index,
-          }
-          // Set bone matrix offset if skinning is available
-          if skinning, has_skinning := mesh_attachment.skinning.?;
-             has_skinning {
-            push_constant.bone_matrix_offset =
-              skinning.bone_matrix_offset +
-              frame_index * warehouse.bone_matrix_slab.capacity
           }
 
           // Push constants
@@ -670,15 +652,19 @@ transparent_render :: proc(
 
           // Draw mesh
           skin_buffer := warehouse.dummy_skinning_buffer.buffer
-          if mesh_skin, mesh_has_skin := mesh.skinning.?; mesh_has_skin {
-            skin_buffer = mesh_skin.skin_buffer.buffer
+          skin_offset := vk.DeviceSize(0)
+          if .SKINNED in node_gpu.flags {
+            skin_buffer = warehouse.skin_buffer.buffer
+            skin_offset = vk.DeviceSize(
+              node_gpu.skin_vertex_offset * size_of(geometry.SkinningData),
+            )
           }
 
           buffers := [2]vk.Buffer{warehouse.vertex_buffer.buffer, skin_buffer}
           vertex_offset := vk.DeviceSize(
-            mesh.vertex_allocation.offset * size_of(geometry.Vertex),
+            node_gpu.vertex_offset * size_of(geometry.Vertex),
           )
-          offsets := [2]vk.DeviceSize{vertex_offset, 0}
+          offsets := [2]vk.DeviceSize{vertex_offset, skin_offset}
           vk.CmdBindVertexBuffers(
             command_buffer,
             0,
@@ -689,12 +675,12 @@ transparent_render :: proc(
           vk.CmdBindIndexBuffer(
             command_buffer,
             warehouse.index_buffer.buffer,
-            vk.DeviceSize(mesh.index_allocation.offset * size_of(u32)),
+            vk.DeviceSize(node_gpu.index_offset * size_of(u32)),
             .UINT32,
           )
           vk.CmdDrawIndexed(
             command_buffer,
-            mesh.index_allocation.count,
+            node_gpu.index_count,
             1,
             0,
             0,

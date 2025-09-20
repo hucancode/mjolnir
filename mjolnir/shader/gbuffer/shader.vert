@@ -20,24 +20,35 @@ struct Camera {
     float padding[9]; // Align to 192-byte
 };
 
+struct NodeData {
+    uint vertex_offset;
+    uint index_offset;
+    uint index_count;
+    uint material_index;
+    uint skin_vertex_offset;
+    uint bone_matrix_offset;
+    uint flags;
+    uint padding;
+};
+
 layout(set = 0, binding = 0) readonly buffer CameraBuffer {
     Camera cameras[];
 };
-// set 1 (textures), not available in vertex shader
+
 layout(set = 2, binding = 0) readonly buffer BoneMatrices {
     mat4 bones[];
 };
 
+layout(set = 3, binding = 0) readonly buffer WorldMatrices {
+    mat4 world_matrices[];
+};
+
+layout(set = 3, binding = 1) readonly buffer NodeBuffer {
+    NodeData nodes[];
+};
+
 layout(push_constant) uniform PushConstants {
-    mat4 world;
-    uint bone_matrix_offset;
-    uint albedo_index;
-    uint metallic_roughness_index;
-    uint normal_index;
-    uint emissive_index;
-    float metallic_value;
-    float roughness_value;
-    float emissive_value;
+    uint node_index;
     uint camera_index;
 };
 
@@ -48,13 +59,15 @@ layout(location = 3) out vec2 outUV;
 layout(location = 4) out vec4 outTangent;
 
 void main() {
+    NodeData node = nodes[node_index];
     Camera camera = cameras[camera_index];
+    mat4 world = world_matrices[node_index];
 
     vec4 modelPosition;
     vec3 modelNormal;
     vec4 modelTangent;
     if (SKINNED) {
-        uvec4 indices = inJoints + uvec4(bone_matrix_offset);
+        uvec4 indices = inJoints + uvec4(node.bone_matrix_offset);
         mat4 skinMatrix =
             inWeights.x * bones[indices.x] +
             inWeights.y * bones[indices.y] +

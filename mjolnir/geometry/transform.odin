@@ -149,11 +149,10 @@ transform_update_world :: proc(
   t: ^Transform,
   parent: matrix[4,4]f32,
 ) -> bool {
-  // Update both buffers immediately for smooth motion
+  // Update logic buffer and stage for render
   new_world_matrix := parent * t.local_matrix
-  t.world_matrix[0] = new_world_matrix  // Logic buffer
-  t.world_matrix[1] = new_world_matrix  // Render buffer
+  t.world_matrix[0] = new_world_matrix  // Logic buffer receives newest value
   t.is_dirty = false
-  t.is_staging = false  // Already synchronized
+  t.is_staging = true   // Mark that render buffer needs refreshing
   return true
 }

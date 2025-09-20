@@ -34,30 +34,41 @@ layout(set = 2, binding = 0) readonly buffer BoneMatrices {
     mat4 matrices[];
 } boneMatrices;
 
-// Push constant budget: 128 bytes
+struct NodeData {
+    uint vertex_offset;
+    uint index_offset;
+    uint index_count;
+    uint material_index;
+    uint skin_vertex_offset;
+    uint bone_matrix_offset;
+    uint flags;
+    uint padding;
+};
+
+layout(set = 3, binding = 0) readonly buffer WorldMatrices {
+    mat4 world_matrices[];
+};
+
+layout(set = 3, binding = 1) readonly buffer NodeBuffer {
+    NodeData nodes[];
+};
+
 layout(push_constant) uniform PushConstants {
-    mat4 world;            // 64 bytes
-    uint bone_matrix_offset; // 4
-    uint albedo_index;     // 4
-    uint metallic_roughness_index; // 4
-    uint normal_index;     // 4
-    uint emissive_index;   // 4
-    float metallic_value;  // 4
-    float roughness_value; // 4
-    float emissive_value;  // 4
-    uint camera_index;     // 4
-    float padding[3];        // 12 (pad to 128)
+    uint node_index;
+    uint camera_index;
 };
 
 
 void main() {
     // Get camera from bindless buffer
+    NodeData node = nodes[node_index];
     Camera camera = camera_buffer.cameras[camera_index];
+    mat4 world = world_matrices[node_index];
 
     // Calculate position based on skinning
     vec4 modelPosition;
     if (SKINNED) {
-        uint baseOffset = bone_matrix_offset;
+        uint baseOffset = node.bone_matrix_offset;
         mat4 skinMatrix =
             inJointWeights.x * boneMatrices.matrices[baseOffset + inJointIndices.x] +
             inJointWeights.y * boneMatrices.matrices[baseOffset + inJointIndices.y] +
