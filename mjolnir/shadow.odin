@@ -21,8 +21,14 @@ shadow_init :: proc(
   depth_format: vk.Format = .D32_SFLOAT,
 ) -> vk.Result {
   set_layouts := [?]vk.DescriptorSetLayout {
-    warehouse.camera_buffer_set_layout,
-    warehouse.bone_buffer_set_layout,
+    warehouse.camera_buffer_set_layout,          // set 0
+    warehouse.textures_set_layout,               // set 1 (not used in shadow vertex shader)
+    warehouse.bone_buffer_set_layout,            // set 2
+    warehouse.material_buffer_set_layout,        // set 3 (not used in shadow shader)
+    warehouse.world_matrix_buffer_set_layout,    // set 4
+    warehouse.node_data_buffer_set_layout,       // set 5
+    warehouse.mesh_data_buffer_set_layout,       // set 6
+    warehouse.vertex_skinning_buffer_set_layout, // set 7
   }
   push_constant_range := [?]vk.PushConstantRange {
     {stageFlags = {.FRAGMENT, .VERTEX}, size = size_of(PushConstant)},
@@ -274,8 +280,14 @@ shadow_render :: proc(
 ) {
   current_pipeline: vk.Pipeline = 0
   descriptor_sets := [?]vk.DescriptorSet {
-    warehouse.camera_buffer_descriptor_set,
-    warehouse.bone_buffer_descriptor_set,
+    warehouse.camera_buffer_descriptor_set,        // set 0
+    warehouse.textures_descriptor_set,            // set 1 (not used in shadow vertex shader)
+    warehouse.bone_buffer_descriptor_set,         // set 2
+    warehouse.material_buffer_descriptor_set,     // set 3 (not used in shadow shader)
+    warehouse.world_matrix_buffer_descriptor_set, // set 4
+    warehouse.node_data_buffer_descriptor_set,    // set 5
+    warehouse.mesh_data_buffer_descriptor_set,    // set 6
+    warehouse.vertex_skinning_buffer_descriptor_set, // set 7
   }
   vk.CmdBindDescriptorSets(
     command_buffer,
@@ -299,19 +311,62 @@ shadow_render :: proc(
       vk.CmdBindPipeline(command_buffer, .GRAPHICS, pipeline)
       current_pipeline = pipeline
     }
-    for batch_data in batch_group {
-      for node in batch_data.nodes {
-        render_single_shadow_node(
-          command_buffer,
-          self.pipeline_layout,
-          node,
-          is_skinned,
-          shadow_target.camera.index,
-          warehouse,
-          frame_index,
-        )
-        rendered_count += 1
+    // Bind global vertex/index buffers once for this pipeline
+    vertex_buffers := [1]vk.Buffer{warehouse.vertex_buffer.buffer}
+    vertex_offsets := [1]vk.DeviceSize{0}
+    vk.CmdBindVertexBuffers(command_buffer, 0, 1, raw_data(vertex_buffers[:]), raw_data(vertex_offsets[:]))
+    vk.CmdBindIndexBuffer(command_buffer, warehouse.index_buffer.buffer, 0, .UINT32)
+
+    // Set camera index in push constants
+    push_constants := PushConstant {
+      camera_index = shadow_target.camera.index,
+    }
+    vk.CmdPushConstants(
+      command_buffer,
+      self.pipeline_layout,
+      {.VERTEX},
+      0,
+      size_of(PushConstant),
+      &push_constants,
+    )
+
+    // Generate draw commands directly from batch data using the new bindless system
+    total_draw_count: u32 = 0
+    draw_commands_offset: u32 = 0
+
+    for &batch_data in batch_group {
+      // Generate indirect draw commands for this batch
+      draw_commands, draw_count := generate_indirect_draw_commands(warehouse, &batch_data)
+
+      // Write draw commands to the buffer
+      for cmd, i in draw_commands {
+        warehouse.draw_commands_buffer.mapped[draw_commands_offset + u32(i)] = cmd
       }
+
+      total_draw_count += draw_count
+      draw_commands_offset += draw_count
+
+      if total_draw_count >= warehouse.max_draws_per_batch {
+        break // Prevent buffer overflow
+      }
+    }
+
+    // Execute indirect draws if we have any
+    if total_draw_count > 0 {
+      if total_draw_count <= warehouse.max_draws_per_batch {
+        // Single batch
+        vk.CmdDrawIndexedIndirect(
+          command_buffer,
+          warehouse.draw_commands_buffer.buffer,
+          0,
+          total_draw_count,
+          size_of(vk.DrawIndexedIndirectCommand),
+        )
+      } else {
+        // Multiple batches
+        render_in_batches(command_buffer, warehouse, total_draw_count)
+      }
+      rendered_count += int(total_draw_count)
     }
   }
 }
@@ -395,18 +450,13 @@ render_single_shadow_node :: proc(
   mesh_attachment := node.attachment.(MeshAttachment)
   mesh, found_mesh := mesh(warehouse, mesh_attachment.handle)
   if !found_mesh do return
-  mesh_skinning, mesh_has_skin := &mesh.skinning.?
   node_skinning, node_has_skin := mesh_attachment.skinning.?
   push_constant := PushConstant {
-    world        = geometry.transform_get_world_matrix_for_render(
-      &node.transform,
-    ),
     camera_index = camera_index,
   }
+  // Note: bone_matrix_offset now handled in NodeData buffer for indirect drawing
   if is_skinned && node_has_skin {
-    push_constant.bone_matrix_offset =
-      node_skinning.bone_matrix_offset +
-      frame_index * warehouse.bone_matrix_slab.capacity
+    // Skinning data now managed through NodeData buffer
   }
   vk.CmdPushConstants(
     command_buffer,
@@ -416,10 +466,8 @@ render_single_shadow_node :: proc(
     size_of(PushConstant),
     &push_constant,
   )
+  // Note: skinning now handled through global vertex skinning buffer
   skin_buffer := warehouse.dummy_skinning_buffer.buffer
-  if is_skinned && mesh_has_skin && node_has_skin {
-    skin_buffer = mesh_skinning.skin_buffer.buffer
-  }
   buffers := [2]vk.Buffer{warehouse.vertex_buffer.buffer, skin_buffer}
   vertex_offset := vk.DeviceSize(
     mesh.vertex_allocation.offset * size_of(geometry.Vertex),

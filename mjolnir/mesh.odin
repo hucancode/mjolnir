@@ -5,6 +5,7 @@ import "core:log"
 import "core:math/linalg"
 import "geometry"
 import "gpu"
+import "resource"
 import vk "vendor:vulkan"
 
 Bone :: struct {
@@ -18,17 +19,30 @@ bone_deinit :: proc(bone: ^Bone) {
   bone.children = nil
 }
 
-Skinning :: struct {
+// Skeleton metadata (bone hierarchy) - CPU-only, for animation system
+Skeleton :: struct {
   root_bone_index: u32,
-  bones:           []Bone,
-  skin_buffer:     gpu.DataBuffer(geometry.SkinningData),
+  bones:           []Bone,  // Bone hierarchy and names
 }
 
+skeleton_deinit :: proc(skeleton: ^Skeleton) {
+  for &bone in skeleton.bones do bone_deinit(&bone)
+  delete(skeleton.bones)
+}
+
+// Updated mesh structure for bindless/indirect rendering
 Mesh :: struct {
-  vertex_allocation: BufferAllocation,
-  index_allocation:  BufferAllocation,
-  aabb:              geometry.Aabb,
-  skinning:          Maybe(Skinning),
+  // Buffer allocations for rendering
+  vertex_allocation:           BufferAllocation,  // Offset+count in global vertex buffer
+  index_allocation:            BufferAllocation,  // Offset+count in global index buffer
+  vertex_skinning_allocation:  BufferAllocation,  // Offset+count in global vertex skinning buffer (if skinned)
+
+  // Cached metadata for CPU operations (avoid GPU buffer reads)
+  aabb:                        geometry.Aabb,     // Local copy for CPU culling/queries
+  is_skinned:                  b32,               // Quick check without GPU buffer access
+
+  // Animation system reference (CPU-only)
+  skeleton_handle:             Handle, // Reference to bone hierarchy (if skinned)
 }
 
 mesh_deinit :: proc(
@@ -38,11 +52,9 @@ mesh_deinit :: proc(
 ) {
   warehouse_free_vertices(warehouse, self.vertex_allocation)
   warehouse_free_indices(warehouse, self.index_allocation)
-  skin, has_skin := &self.skinning.?
-  if !has_skin do return
-  gpu.data_buffer_deinit(gpu_context, &skin.skin_buffer)
-  for &bone in skin.bones do bone_deinit(&bone)
-  delete(skin.bones)
+  if self.is_skinned {
+    warehouse_free_vertex_skinning_data(warehouse, self.vertex_skinning_allocation)
+  }
 }
 
 mesh_init :: proc(
@@ -50,6 +62,7 @@ mesh_init :: proc(
   gpu_context: ^gpu.GPUContext,
   warehouse: ^ResourceWarehouse,
   data: geometry.Geometry,
+  mesh_id: u32,
 ) -> vk.Result {
   defer geometry.delete_geometry(data)
   self.aabb = data.aabb
@@ -61,21 +74,17 @@ mesh_init :: proc(
     warehouse,
     data.indices,
   ) or_return
-  if len(data.skinnings) <= 0 {
-    return .SUCCESS
+  if len(data.skinnings) > 0 {
+    self.vertex_skinning_allocation = warehouse_allocate_vertex_skinning_data(
+      warehouse,
+      data.skinnings,
+    ) or_return
+    self.is_skinned = true
+  } else {
+    self.is_skinned = false
   }
-  log.info("creating skin buffer", len(data.skinnings))
-  skin_buffer := gpu.create_local_buffer(
-    gpu_context,
-    geometry.SkinningData,
-    len(data.skinnings),
-    {.VERTEX_BUFFER},
-    raw_data(data.skinnings),
-  ) or_return
-  self.skinning = Skinning {
-    bones       = make([]Bone, 0),
-    skin_buffer = skin_buffer,
-  }
+
+
   return .SUCCESS
 }
 
@@ -109,14 +118,15 @@ make_animation_instance :: proc(
 }
 
 sample_clip :: proc(
-  self: ^Mesh,
+  warehouse: ^ResourceWarehouse,
+  skeleton_handle: Handle,
   clip: ^animation.Clip,
   t: f32,
   out_bone_matrices: []matrix[4, 4]f32,
 ) {
-  skin, has_skin := &self.skinning.?
-  if !has_skin do return
-  if len(out_bone_matrices) < len(skin.bones) {
+  skeleton := resource.get(warehouse.skeletons, skeleton_handle)
+  if skeleton == nil do return
+  if len(out_bone_matrices) < len(skeleton.bones) {
     return
   }
   if clip == nil do return
@@ -125,19 +135,14 @@ sample_clip :: proc(
     transform: matrix[4, 4]f32,
     bone:      u32,
   }
-  stack := make(
-    [dynamic]TraverseEntry,
-    0,
-    len(skin.bones),
-    context.temp_allocator,
-  )
+  stack := make([dynamic]TraverseEntry, context.temp_allocator)
   append(
     &stack,
-    TraverseEntry{linalg.MATRIX4F32_IDENTITY, skin.root_bone_index},
+    TraverseEntry{linalg.MATRIX4F32_IDENTITY, skeleton.root_bone_index},
   )
   for len(stack) > 0 {
     entry := pop(&stack)
-    bone := &skin.bones[entry.bone]
+    bone := &skeleton.bones[entry.bone]
     local_transform: geometry.Transform
     if entry.bone < u32(len(clip.channels)) {
       local_transform.position, local_transform.rotation, local_transform.scale =

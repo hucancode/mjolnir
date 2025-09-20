@@ -21,9 +21,14 @@ transparent_init :: proc(
 ) -> vk.Result {
   log.info("Initializing transparent renderer")
   set_layouts := [?]vk.DescriptorSetLayout {
-    warehouse.camera_buffer_set_layout,
-    warehouse.textures_set_layout,
-    warehouse.bone_buffer_set_layout,
+    warehouse.camera_buffer_set_layout,          // set 0
+    warehouse.textures_set_layout,               // set 1
+    warehouse.bone_buffer_set_layout,            // set 2
+    warehouse.material_buffer_set_layout,        // set 3
+    warehouse.world_matrix_buffer_set_layout,    // set 4
+    warehouse.node_data_buffer_set_layout,       // set 5
+    warehouse.mesh_data_buffer_set_layout,       // set 6
+    warehouse.vertex_skinning_buffer_set_layout, // set 7
   }
   push_constant_range := vk.PushConstantRange {
     stageFlags = {.VERTEX, .FRAGMENT},
@@ -512,9 +517,14 @@ transparent_render :: proc(
   frame_index: u32,
 ) {
   descriptor_sets := [?]vk.DescriptorSet {
-    warehouse.camera_buffer_descriptor_set,
-    warehouse.textures_descriptor_set,
-    warehouse.bone_buffer_descriptor_set,
+    warehouse.camera_buffer_descriptor_set,        // set 0
+    warehouse.textures_descriptor_set,             // set 1
+    warehouse.bone_buffer_descriptor_set,          // set 2
+    warehouse.material_buffer_descriptor_set,      // set 3
+    warehouse.world_matrix_buffer_descriptor_set, // set 4
+    warehouse.node_data_buffer_descriptor_set,     // set 5
+    warehouse.mesh_data_buffer_descriptor_set,     // set 6
+    warehouse.vertex_skinning_buffer_descriptor_set, // set 7
   }
   vk.CmdBindDescriptorSets(
     command_buffer,
@@ -545,46 +555,32 @@ transparent_render :: proc(
         ) or_continue
 
         // Render all nodes in this batch
-        for node in batch_data.nodes {
-          mesh_attachment, ok := node.attachment.(MeshAttachment)
-          if !ok do continue
+        for node_handle in batch_data.node_handles {
+          // Get node data from engine scene (passed via context or global access)
+          // For now, we'll use a simpler approach accessing node data directly
+          if node_handle.index >= warehouse.max_nodes do continue
+          node_data := &warehouse.node_data[node_handle.index]
 
-          mesh := resource.get(
-            warehouse.meshes,
-            mesh_attachment.handle,
-          ) or_continue
+          // Get mesh from node data
+          if node_data.mesh_id >= u32(len(warehouse.meshes.entries)) do continue
+          mesh_entry := &warehouse.meshes.entries[node_data.mesh_id]
+          if !mesh_entry.active do continue
+          mesh := &mesh_entry.item
+
+          // Create a mesh attachment from the node data for compatibility
+          mesh_attachment := MeshAttachment{
+            handle = Handle{0, node_data.mesh_id},
+            material = Handle{0, node_data.material_id},
+            cast_shadow = true, // Default value
+            node_id = node_handle.index,
+          }
+
+          // mesh already retrieved above
 
           push_constants := PushConstant {
-            world                    = get_world_matrix_for_render(node),
-            bone_matrix_offset       = 0,
             camera_index             = render_target.camera.index,
-            albedo_index             = min(
-              MAX_TEXTURES - 1,
-              material.albedo.index,
-            ),
-            metallic_roughness_index = min(
-              MAX_TEXTURES - 1,
-              material.metallic_roughness.index,
-            ),
-            normal_index             = min(
-              MAX_TEXTURES - 1,
-              material.normal.index,
-            ),
-            emissive_index           = min(
-              MAX_TEXTURES - 1,
-              material.emissive.index,
-            ),
-            metallic_value           = material.metallic_value,
-            roughness_value          = material.roughness_value,
-            emissive_value           = material.emissive_value,
           }
-          // Set bone matrix offset if skinning is available
-          if skinning, has_skinning := mesh_attachment.skinning.?;
-             has_skinning {
-            push_constants.bone_matrix_offset =
-              skinning.bone_matrix_offset +
-              frame_index * warehouse.bone_matrix_slab.capacity
-          }
+          // Note: node_id, material_id, bone_matrix_offset now handled in NodeData buffer
           // Push constants
           vk.CmdPushConstants(
             command_buffer,
@@ -595,10 +591,8 @@ transparent_render :: proc(
             &push_constants,
           )
           // Draw mesh
+          // Note: skinning data now accessed through global vertex skinning buffer
           skin_buffer := warehouse.dummy_skinning_buffer.buffer
-          if mesh_skin, mesh_has_skin := mesh.skinning.?; mesh_has_skin {
-            skin_buffer = mesh_skin.skin_buffer.buffer
-          }
           buffers := [2]vk.Buffer{warehouse.vertex_buffer.buffer, skin_buffer}
           vertex_offset := vk.DeviceSize(
             mesh.vertex_allocation.offset * size_of(geometry.Vertex),
@@ -630,13 +624,25 @@ transparent_render :: proc(
     } else if batch_key.material_type == .WIREFRAME {
       for batch_data in batch_group {
         // Render all nodes in this batch
-        for node in batch_data.nodes {
-          mesh_attachment, ok := node.attachment.(MeshAttachment)
-          if !ok do continue
-          mesh := resource.get(
-            warehouse.meshes,
-            mesh_attachment.handle,
-          ) or_continue
+        for node_handle in batch_data.node_handles {
+          // Get node data from engine scene (passed via context or global access)
+          // For now, we'll use a simpler approach accessing node data directly
+          if node_handle.index >= warehouse.max_nodes do continue
+          node_data := &warehouse.node_data[node_handle.index]
+
+          // Get mesh from node data
+          if node_data.mesh_id >= u32(len(warehouse.meshes.entries)) do continue
+          mesh_entry := &warehouse.meshes.entries[node_data.mesh_id]
+          if !mesh_entry.active do continue
+          mesh := &mesh_entry.item
+
+          // Create a mesh attachment from the node data for compatibility
+          mesh_attachment := MeshAttachment{
+            handle = Handle{0, node_data.mesh_id},
+            material = Handle{0, node_data.material_id},
+            cast_shadow = true, // Default value
+            node_id = node_handle.index,
+          }
           // Check if skinning feature is enabled
           is_skinned := .SKINNING in batch_key.features
           pipeline_idx := is_skinned ? 1 : 0
@@ -647,16 +653,9 @@ transparent_render :: proc(
             self.wireframe_pipelines[pipeline_idx],
           )
           push_constant := PushConstant {
-            world        = get_world_matrix_for_render(node),
             camera_index = render_target.camera.index,
           }
-          // Set bone matrix offset if skinning is available
-          if skinning, has_skinning := mesh_attachment.skinning.?;
-             has_skinning {
-            push_constant.bone_matrix_offset =
-              skinning.bone_matrix_offset +
-              frame_index * warehouse.bone_matrix_slab.capacity
-          }
+          // Note: node_id, material_id, bone_matrix_offset now handled in NodeData buffer
 
           // Push constants
           vk.CmdPushConstants(
@@ -669,10 +668,8 @@ transparent_render :: proc(
           )
 
           // Draw mesh
+          // Note: skinning data now accessed through global vertex skinning buffer
           skin_buffer := warehouse.dummy_skinning_buffer.buffer
-          if mesh_skin, mesh_has_skin := mesh.skinning.?; mesh_has_skin {
-            skin_buffer = mesh_skin.skin_buffer.buffer
-          }
 
           buffers := [2]vk.Buffer{warehouse.vertex_buffer.buffer, skin_buffer}
           vertex_offset := vk.DeviceSize(

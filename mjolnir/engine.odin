@@ -114,10 +114,10 @@ BatchKey :: struct {
   material_type: MaterialType,
 }
 
-// Batch data containing material and nodes
+// Batch data containing material and nodes for bindless rendering
 BatchData :: struct {
   material_handle: Handle,
-  nodes:           [dynamic]^Node,
+  node_handles:    [dynamic]Handle,  // Store handles instead of pointers for bindless compatibility
 }
 
 // RenderInput groups render batches and other per-frame data for the renderer.
@@ -356,7 +356,7 @@ init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
   self.start_timestamp = time.now()
   self.last_frame_timestamp = self.start_timestamp
   self.last_update_timestamp = self.start_timestamp
-  scene_init(&self.scene)
+  scene_init(&self.scene, &self.warehouse)
   swapchain_init(&self.swapchain, &self.gpu_context, self.window) or_return
 
   // Initialize frame active render targets
@@ -374,9 +374,12 @@ init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
   ) or_return
 
   // Initialize engine shadow map pools
+  log.info("Initializing engine shadow maps...")
   engine_init_shadow_maps(self) or_return
+  log.info("Shadow maps initialized successfully")
 
   // Initialize main render target with default camera settings
+  log.info("Creating main render target...")
   main_render_target: ^RenderTarget
   self.main_render_target, main_render_target = resource.alloc(
     &self.warehouse.render_targets,
@@ -401,6 +404,7 @@ init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
     {5, 8, 5}, // Camera slightly above and diagonal to origin
     {0, 0, 0}, // Looking at origin
   ) or_return
+  log.info("Main render target created successfully")
   vk.AllocateCommandBuffers(
     self.gpu_context.device,
     &{
@@ -434,6 +438,7 @@ init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
     vk.Format.D32_SFLOAT,
     &self.warehouse,
   ) or_return
+  log.info("Starting ambient_init...")
   ambient_init(
     &self.ambient,
     &self.gpu_context,
@@ -442,7 +447,9 @@ init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
     self.swapchain.extent.height,
     self.swapchain.format.format,
   ) or_return
-  // Environment resources will be moved to ambient pass
+  log.info("ambient_init completed successfully")
+
+  log.info("Starting gbuffer_init...")
   gbuffer_init(
     &self.gbuffer,
     &self.gpu_context,
@@ -450,19 +457,29 @@ init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
     self.swapchain.extent.height,
     &self.warehouse,
   ) or_return
+  log.info("gbuffer_init completed successfully")
+
+  log.info("Starting depth_prepass_init...")
   depth_prepass_init(
     &self.depth_prepass,
     &self.gpu_context,
     self.swapchain.extent,
     &self.warehouse,
   ) or_return
+  log.info("depth_prepass_init completed successfully")
+
+  log.info("Starting particle_init...")
   particle_init(&self.particle, &self.gpu_context, &self.warehouse) or_return
+  log.info("particle_init completed successfully")
   when USE_GPU_CULLING {
+    log.info("Starting visibility_culler_init...")
     visibility_culler_init(
       &self.visibility_culler,
       &self.gpu_context,
     ) or_return
+    log.info("visibility_culler_init completed successfully")
   }
+  log.info("Starting transparent_init...")
   transparent_init(
     &self.transparent,
     &self.gpu_context,
@@ -470,13 +487,17 @@ init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
     self.swapchain.extent.height,
     &self.warehouse,
   ) or_return
-  log.debugf("initializing shadow pipeline")
+  log.info("transparent_init completed successfully")
+
+  log.info("Starting shadow_init...")
   shadow_init(
     &self.shadow,
     &self.gpu_context,
     &self.warehouse,
   ) or_return
-  log.debugf("initializing post process pipeline")
+  log.info("shadow_init completed successfully")
+
+  log.info("Starting post process initialization...")
   postprocess_init(
     &self.postprocess,
     &self.gpu_context,
@@ -485,8 +506,12 @@ init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
     self.swapchain.extent.height,
     &self.warehouse,
   ) or_return
-  log.debugf("initializing navigation mesh renderer")
+  log.info("postprocess_init completed successfully")
+
+  log.info("Starting navmesh_init...")
   navmesh_init(&self.navmesh, &self.gpu_context, &self.warehouse) or_return
+  log.info("navmesh_init completed successfully")
+  log.info("Starting ui_init...")
   ui_init(
     &self.ui,
     &self.gpu_context,
@@ -496,6 +521,8 @@ init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
     get_window_dpi(self.window),
     &self.warehouse,
   )
+  log.info("ui_init completed successfully")
+  log.info("All initialization steps completed successfully - setting up callbacks...")
   glfw.SetKeyCallback(
     self.window,
     proc "c" (window: glfw.WindowHandle, key, scancode, action, mods: c.int) {
@@ -987,17 +1014,67 @@ generate_render_input :: proc(
       if batch_data == nil {
         new_batch := BatchData {
           material_handle = data.material,
-          nodes           = make([dynamic]^Node, context.temp_allocator),
+          node_handles    = make([dynamic]Handle, context.temp_allocator),
         }
         append(batch_group, new_batch)
         batch_data = &batch_group[len(batch_group) - 1]
       }
-      append(&batch_data.nodes, node)
+      // Store node handle instead of pointer for bindless compatibility
+      // The handle index should be the actual array index, not the loop iteration
+      node_handle := Handle{index = u32(i), generation = entry.generation}
+      append(&batch_data.node_handles, node_handle)
     }
   }
   // log.infof("generate_render_input: camera_slot=%d found=%v, visible=%d/%d objects",
   //           camera_slot, camera_slot_found, visible_count, total_count)
   return
+}
+
+// Generate indirect draw commands from batch data for bindless rendering
+generate_indirect_draw_commands :: proc(
+  warehouse: ^ResourceWarehouse,
+  batch_data: ^BatchData,
+) -> (
+  draw_commands: []vk.DrawIndexedIndirectCommand,
+  draw_count: u32,
+) {
+  draw_commands = make([]vk.DrawIndexedIndirectCommand, len(batch_data.node_handles), context.temp_allocator)
+  draw_count = 0
+
+  for node_handle, i in batch_data.node_handles {
+    // Get node data from bindless buffer
+    if node_handle.index >= warehouse.max_nodes do continue
+    node_data := &warehouse.node_data[node_handle.index]
+
+    // Get mesh data from mesh buffer
+    if node_data.mesh_id >= u32(len(warehouse.mesh_data)) do continue
+    mesh_data := &warehouse.mesh_data[node_data.mesh_id]
+
+    // Get mesh using the handle index stored in node_data
+    if node_data.mesh_id >= u32(len(warehouse.meshes.entries)) do continue
+    mesh_entry := &warehouse.meshes.entries[node_data.mesh_id]
+    if !mesh_entry.active do continue
+    mesh := &mesh_entry.item
+
+    // Create draw command for this node
+    draw_commands[draw_count] = vk.DrawIndexedIndirectCommand{
+      indexCount = mesh.index_allocation.count,
+      instanceCount = 1,
+      firstIndex = mesh.index_allocation.offset,
+      vertexOffset = i32(mesh.vertex_allocation.offset),
+      firstInstance = node_handle.index, // Use node handle index for bindless buffer access
+    }
+
+    // Debug: Log first few draw commands to see node indices
+    if draw_count < 5 {
+      log.infof("Draw cmd %d: node_index=%d, mesh_id=%d, vertex_offset=%d, index_count=%d",
+                draw_count, node_handle.index, node_data.mesh_id, mesh.vertex_allocation.offset, mesh.index_allocation.count)
+    }
+
+    draw_count += 1
+  }
+
+  return draw_commands[:draw_count], draw_count
 }
 
 render :: proc(self: ^Engine) -> vk.Result {
@@ -1021,12 +1098,17 @@ render :: proc(self: ^Engine) -> vk.Result {
     if !has_animation do continue
     animation.instance_update(anim_inst, render_delta_time)
     mesh := mesh(self, data.handle) or_continue
-    mesh_skin, mesh_has_skin := mesh.skinning.?
-    if !mesh_has_skin do continue
+    // Get skeleton from skeleton handle (if available)
+    if mesh.skeleton_handle.index == 0 do continue
+    skeleton := resource.get(self.warehouse.skeletons, mesh.skeleton_handle)
+    if skeleton == nil {
+      log.errorf("Invalid skeleton handle %v for mesh %v", mesh.skeleton_handle, data.handle)
+      continue
+    }
     l := skinning.bone_matrix_offset + self.frame_index * self.warehouse.bone_matrix_slab.capacity
-    r := l + u32(len(mesh_skin.bones))
+    r := l + u32(len(skeleton.bones))
     bone_matrices := self.warehouse.bone_buffer.mapped[l:r]
-    sample_clip(mesh, anim_inst.clip, anim_inst.time, bone_matrices)
+    sample_clip(&self.warehouse, mesh.skeleton_handle, anim_inst.clip, anim_inst.time, bone_matrices)
   }
   // log.debug("============ setup main camera...============ ")
   // Update camera uniform for main render target
@@ -1196,6 +1278,14 @@ render :: proc(self: ^Engine) -> vk.Result {
     command_buffer,
     &{sType = .COMMAND_BUFFER_BEGIN_INFO, flags = {.ONE_TIME_SUBMIT}},
   ) or_return
+
+  // Update dirty matrices to the next frame buffer to avoid GPU race conditions
+  update_frame_index := (self.frame_index + 1) % MAX_FRAMES_IN_FLIGHT
+  update_dirty_world_matrices(&self.scene, &self.warehouse, update_frame_index)
+
+  // Update descriptor set to point to current frame's world matrix buffer for rendering
+  update_world_matrix_descriptor_set(&self.gpu_context, &self.warehouse, self.frame_index)
+
   when USE_GPU_CULLING {
     // Collect all active render targets for multi-camera culling
     clear(&self.frame_active_render_targets)
@@ -1255,6 +1345,7 @@ render :: proc(self: ^Engine) -> vk.Result {
       &self.gpu_context,
       command_buffer,
       self.frame_index,
+      &self.warehouse,
     )
 
     // write_idx := self.visibility_culler.visibility_write_idx
@@ -1701,6 +1792,11 @@ render :: proc(self: ^Engine) -> vk.Result {
     &command_buffer,
     self.frame_index,
   ) or_return
+
+  // Copy updated world matrices from next frame buffer to current frame buffer
+  copy_world_matrices_to_next_frame(&self.warehouse, self.frame_index)
+
+  // Advance frame index for double buffering
   self.frame_index = (self.frame_index + 1) % MAX_FRAMES_IN_FLIGHT
   // Process pending deletions at end of frame
   process_pending_deletions(self)

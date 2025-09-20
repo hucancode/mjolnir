@@ -106,75 +106,14 @@ setup :: proc(engine: ^mjolnir.Engine) {
     &engine.warehouse,
     make_cone(),
   )
-  if true {
-    log.info("spawning cubes in a grid")
-    space: f32 = 2.1
-    size: f32 = 0.3
-    nx, ny, nz := 30, 2, 30
 
-    for x in 1 ..< nx {
-      for y in 1 ..< ny {
-        for z in 1 ..< nz {
-          // Calculate world position
-          world_x := (f32(x) - f32(nx) * 0.5) * space
-          world_y := (f32(y) - f32(ny) * 0.5) * space + 0.5
-          world_z := (f32(z) - f32(nz) * 0.5) * space
-          mat_handle := create_material_handle(
-            &engine.warehouse,
-            metallic_value = f32(x - 1) / f32(nx - 1),
-            roughness_value = f32(z - 1) / f32(nz - 1),
-          )
-          node: ^Node
-          if x % 3 == 0 {
-            _, node = spawn(
-              &engine.scene,
-              MeshAttachment {
-                handle = cube_mesh_handle,
-                material = mat_handle,
-                cast_shadow = true,
-              },
-            )
-          } else if x % 3 == 1 {
-            _, node = spawn(
-              &engine.scene,
-              MeshAttachment {
-                handle = cone_mesh_handle,
-                material = mat_handle,
-                cast_shadow = true,
-              },
-            )
-          } else {
-            _, node = spawn(
-              &engine.scene,
-              MeshAttachment {
-                handle = sphere_mesh_handle,
-                material = mat_handle,
-                cast_shadow = true,
-              },
-            )
-          }
-          translate(node, world_x, world_y, world_z)
-          scale(node, size)
-        }
-      }
-    }
-  }
   when true {
     log.info("spawning ground and walls")
-    // Ground node
     size: f32 = 15.0
-    _, ground_node := spawn(
-      &engine.scene,
-      MeshAttachment {
-        handle = ground_mesh_handle,
-        material = ground_mat_handle,
-        cast_shadow = true,
-      },
-    )
-    scale(ground_node, size)
     // Left wall
     _, left_wall := spawn(
       &engine.scene,
+      &engine.warehouse,
       MeshAttachment {
         handle = ground_mesh_handle,
         material = ground_mat_handle,
@@ -184,9 +123,21 @@ setup :: proc(engine: ^mjolnir.Engine) {
     translate(left_wall, x = size)
     rotate(left_wall, math.PI * 0.5, linalg.VECTOR3F32_Z_AXIS)
     scale(left_wall, size)
+    // Ground node
+    _, ground_node := spawn(
+      &engine.scene,
+      &engine.warehouse,
+      MeshAttachment {
+        handle = ground_mesh_handle,
+        material = ground_mat_handle,
+        cast_shadow = true,
+      },
+    )
+    scale(ground_node, size)
     // Right wall
     _, right_wall := spawn(
       &engine.scene,
+      &engine.warehouse,
       MeshAttachment {
         handle = ground_mesh_handle,
         material = ground_mat_handle,
@@ -199,6 +150,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     // Back wall
     _, back_wall := spawn(
       &engine.scene,
+      &engine.warehouse,
       MeshAttachment {
         handle = ground_mesh_handle,
         material = ground_mat_handle,
@@ -260,6 +212,62 @@ setup :: proc(engine: ^mjolnir.Engine) {
       translate(armature_ptr, 0, 0, 1)
     }
   }
+  if true {
+    log.info("spawning cubes in a grid")
+    space: f32 = 2.1
+    size: f32 = 0.3
+    nx, ny, nz := 10, 2, 10
+
+    for x in 1 ..< nx {
+      for y in 1 ..< ny {
+        for z in 1 ..< nz {
+          // Calculate world position
+          world_x := (f32(x) - f32(nx) * 0.5) * space
+          world_y := (f32(y) - f32(ny) * 0.5) * space + 0.5
+          world_z := (f32(z) - f32(nz) * 0.5) * space
+          mat_handle := create_material_handle(
+            &engine.warehouse,
+            metallic_value = f32(x - 1) / f32(nx - 1),
+            roughness_value = f32(z - 1) / f32(nz - 1),
+          )
+          node: ^Node
+          if x % 3 == 0 {
+            _, node = spawn(
+              &engine.scene,
+              &engine.warehouse,
+              MeshAttachment {
+                handle = cube_mesh_handle,
+                material = mat_handle,
+                cast_shadow = true,
+              },
+            )
+          } else if x % 3 == 1 {
+            _, node = spawn(
+              &engine.scene,
+              &engine.warehouse,
+              MeshAttachment {
+                handle = cone_mesh_handle,
+                material = mat_handle,
+                cast_shadow = true,
+              },
+            )
+          } else {
+            _, node = spawn(
+              &engine.scene,
+              &engine.warehouse,
+              MeshAttachment {
+                handle = sphere_mesh_handle,
+                material = mat_handle,
+                cast_shadow = true,
+              },
+            )
+          }
+          translate(node, world_x, world_y, world_z)
+          scale(node, size)
+        }
+      }
+    }
+  }
   when true {
     log.infof("creating %d lights", LIGHT_COUNT)
     // Create lights and light cubes
@@ -280,6 +288,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
       if should_make_spot_light {
         light_handles[i], light = spawn(
           &engine.scene,
+          &engine.warehouse,
           SpotLightAttachment {
             color = color,
             angle = math.PI * 0.4,
@@ -291,6 +300,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
       } else {
         light_handles[i], light = spawn(
           &engine.scene,
+          &engine.warehouse,
           PointLightAttachment{color = color, radius = 10, cast_shadow = true},
         )
       }
@@ -298,6 +308,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
       cube_node: ^Node
       light_cube_handles[i], cube_node = spawn_child(
         &engine.scene,
+        &engine.warehouse,
         light_handles[i],
         MeshAttachment {
           handle = cube_mesh_handle,
@@ -321,6 +332,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     // Create a bright white ball to test bloom effect
     _, bright_ball_node := spawn(
     &engine.scene,
+    &engine.warehouse,
     MeshAttachment {
       handle      = sphere_mesh_handle,
       material    = create_material_handle(
@@ -342,6 +354,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     )
     psys_handle1, _ := spawn_at(
       &engine.scene,
+      &engine.warehouse,
       {-2.0, 1.9, 0.3},
       ParticleSystemAttachment {
         bounding_box = Aabb{min = {-1, -1, -1}, max = {1, 1, 1}},
@@ -350,6 +363,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     )
     spawn_child(
       &engine.scene,
+      &engine.warehouse,
       psys_handle1,
       EmitterAttachment {
         emission_rate = 7,
@@ -370,6 +384,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     )
     psys_handle2, _ := spawn_at(
       &engine.scene,
+      &engine.warehouse,
       {2.0, 1.9, 0.3},
       ParticleSystemAttachment {
         bounding_box = Aabb{min = {-1, -1, -1}, max = {1, 1, 1}},
@@ -379,6 +394,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     // Create an emitter for the second particle system
     spawn_child(
       &engine.scene,
+      &engine.warehouse,
       psys_handle2,
       EmitterAttachment {
         emission_rate = 7,
@@ -400,6 +416,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     // Create a force field that affects both particle systems
     forcefield_handle, _ = spawn_child(
       &engine.scene,
+      &engine.warehouse,
       psys_handle1, // Attach to first particle system
       ForceFieldAttachment {
         tangent_strength = 2.0,
@@ -410,6 +427,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     translate(&engine.scene, forcefield_handle, x = 5.0, y = 4.0, z = 0.0)
     _, forcefield_visual := spawn_child(
       &engine.scene,
+      &engine.warehouse,
       forcefield_handle,
       MeshAttachment {
         handle = sphere_mesh_handle,
@@ -421,7 +439,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   }
   effect_add_fog(&engine.postprocess, {0.4, 0.0, 0.8}, 0.02, 5.0, 20.0)
   // effect_add_bloom(&engine.postprocess)
-  effect_add_crosshatch(&engine.postprocess, {1280, 720})
+  // effect_add_crosshatch(&engine.postprocess, {1280, 720})
   // effect_add_blur(&engine.postprocess, 18.0)
   // effect_add_tonemap(&engine.postprocess, 1.5, 1.3)
   // effect_add_dof(&engine.postprocess)
@@ -472,6 +490,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     // Create portal quad mesh and spawn it
     _, portal_node := spawn(
       &engine.scene,
+      &engine.warehouse,
       MeshAttachment {
         handle = create_mesh_handle(
           &engine.gpu_context,

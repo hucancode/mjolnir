@@ -45,19 +45,32 @@ layout(set = 1, binding = 0) uniform texture2D textures[];
 layout(set = 1, binding = 1) uniform sampler samplers[];
 layout(set = 1, binding = 2) uniform textureCube cube_textures[];
 
+// Material buffer set = 3
+struct MaterialData {
+    uint albedo_index;
+    uint metallic_roughness_index;
+    uint normal_index;
+    uint emissive_index;
+    float metallic_value;
+    float roughness_value;
+    float emissive_value;
+    uint material_type;
+    uint features;
+    vec4 base_color_factor;
+    uint padding[2];
+};
+
+layout(set = 3, binding = 0) readonly buffer MaterialBuffer {
+    MaterialData materials[];
+};
+
 // Push constant budget: 128 bytes
 layout(push_constant) uniform PushConstants {
     mat4 world;            // 64 bytes
     uint bone_matrix_offset; // 4
-    uint albedo_index;     // 4
-    uint metallic_roughness_index; // 4
-    uint normal_index;     // 4
-    uint emissive_index;   // 4
-    float metallic_value;  // 4
-    float roughness_value; // 4
-    float emissive_value;  // 4
+    uint material_id;      // 4
     uint camera_index;     // 4
-    float padding[3];        // 12 (pad to 128)
+    uint padding[3];       // 12
 };
 
 // Constants
@@ -105,12 +118,15 @@ vec3 fresnelSchlickRoughness(float cosTheta, vec3 F0, float roughness) {
 }
 
 void main() {
+    MaterialData material = materials[material_id];
+
     // Sample material textures
     vec4 albedo;
     if (ALBEDO_TEXTURE) {
-        albedo = texture(sampler2D(textures[albedo_index], samplers[SAMPLER_LINEAR_REPEAT]), inTexCoord);
+        albedo = texture(sampler2D(textures[material.albedo_index], samplers[SAMPLER_LINEAR_REPEAT]), inTexCoord);
+        albedo *= material.base_color_factor;
     } else {
-        albedo = inColor;
+        albedo = inColor * material.base_color_factor;
     }
     if (albedo.a < 0.001) {
         discard;
@@ -119,26 +135,26 @@ void main() {
     float metallic;
     float roughness;
     if (METALLIC_ROUGHNESS_TEXTURE) {
-        vec4 mr = texture(sampler2D(textures[metallic_roughness_index], samplers[SAMPLER_LINEAR_REPEAT]), inTexCoord);
-        metallic = mr.b * metallic_value;
-        roughness = mr.g * roughness_value;
+        vec4 mr = texture(sampler2D(textures[material.metallic_roughness_index], samplers[SAMPLER_LINEAR_REPEAT]), inTexCoord);
+        metallic = mr.b * material.metallic_value;
+        roughness = mr.g * material.roughness_value;
     } else {
-        metallic = metallic_value;
-        roughness = roughness_value;
+        metallic = material.metallic_value;
+        roughness = material.roughness_value;
     }
 
     vec3 emissive;
     if (EMISSIVE_TEXTURE) {
-        emissive = texture(sampler2D(textures[emissive_index], samplers[SAMPLER_LINEAR_REPEAT]), inTexCoord).rgb * emissive_value;
+        emissive = texture(sampler2D(textures[material.emissive_index], samplers[SAMPLER_LINEAR_REPEAT]), inTexCoord).rgb * material.emissive_value;
     } else {
-        emissive = vec3(emissive_value);
+        emissive = vec3(material.emissive_value);
     }
 
     // Calculate normal
     vec3 N;
     if (NORMAL_TEXTURE) {
         // Sample tangent-space normal from normal map
-        vec2 n_xy = texture(sampler2D(textures[normal_index], samplers[SAMPLER_LINEAR_REPEAT]), inTexCoord).xy * 2.0 - 1.0;
+        vec2 n_xy = texture(sampler2D(textures[material.normal_index], samplers[SAMPLER_LINEAR_REPEAT]), inTexCoord).xy * 2.0 - 1.0;
         float n_z = sqrt(clamp(1.0 - dot(n_xy, n_xy), 0.0, 1.0));
         vec3 normalSample = vec3(n_xy, n_z);
         N = normalize(inTBN * normalSample);

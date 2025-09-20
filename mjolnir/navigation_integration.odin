@@ -614,7 +614,7 @@ spawn_nav_agent_at :: proc(
     auto_update_path    = true,
     pathfinding_enabled = true,
   }
-  return spawn_at(&engine.scene, position, attachment)
+  return spawn_at(&engine.scene, &engine.warehouse, position, attachment)
 }
 
 // Set navigation agent target

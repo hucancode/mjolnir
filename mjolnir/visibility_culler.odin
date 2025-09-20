@@ -7,25 +7,14 @@ import "gpu"
 import "resource"
 import vk "vendor:vulkan"
 
-// Maximum number of cameras that can be culled simultaneously.
-// Includes main camera + shadow cameras (point lights need 6 cameras each).
-// Example: 1 main + 20 point lights = 1 + (20 * 6) = 121 cameras
-// Keep some headroom for spot lights and user-defined cameras.
-MAX_ACTIVE_CAMERAS :: 128
-
-// Maximum number of scene nodes that can be processed for culling.
-// Each node (mesh, light, particle system, etc.) gets tested against all active cameras.
-// Memory usage: 128 cameras * 65536 nodes * 1 byte * 3 buffers = ~25MB for visibility results
-// Additional: 65536 nodes * 32 bytes * 2 frames = ~4MB for node data
-// Total GPU memory for culling: ~29MB
-MAX_NODES_IN_SCENE :: 65536
+// Note: MAX_ACTIVE_CAMERAS and MAX_NODES_IN_SCENE are now defined in bindless_constants.odin
 
 // Structure passed to GPU for culling
 NodeCullingData :: struct {
-  aabb_min:        [3]f32,
+  local_aabb_min:  [3]f32,
   culling_enabled: b32,
-  aabb_max:        [3]f32,
-  padding:         f32,
+  local_aabb_max:  [3]f32,
+  node_id:         u32, // Index into world matrix buffer
 }
 
 // Multi-camera GPU culling parameters
@@ -138,6 +127,12 @@ visibility_culler_init :: proc(
       descriptorCount = 1,
       stageFlags      = {.COMPUTE},
     },
+    {
+      binding         = 4,
+      descriptorType  = .STORAGE_BUFFER, // World matrix buffer
+      descriptorCount = 1,
+      stageFlags      = {.COMPUTE},
+    },
   }
 
   vk.CreateDescriptorSetLayout(
@@ -197,7 +192,6 @@ visibility_culler_init :: proc(
       buffer = self.visibility_buffer[0].buffer,
       range  = vk.DeviceSize(self.visibility_buffer[0].bytes_count),
     }
-
     culling_writes := [?]vk.WriteDescriptorSet {
       {
         sType = .WRITE_DESCRIPTOR_SET,
@@ -322,11 +316,11 @@ visibility_culler_update :: proc(
     if !node.culling_enabled do continue
     aabb := calculate_node_aabb(node, warehouse)
     if aabb == geometry.AABB_UNDEFINED do continue
-    world_aabb := geometry.aabb_transform(aabb, geometry.transform_get_world_matrix(&node.transform))
     node_data_slice[entry_index] = {
-      aabb_min        = world_aabb.min,
-      aabb_max        = world_aabb.max,
+      local_aabb_min  = aabb.min,
+      local_aabb_max  = aabb.max,
       culling_enabled = true,
+      node_id         = u32(entry_index),
     }
   }
 
@@ -375,6 +369,7 @@ visibility_culler_execute :: proc(
   gpu_context: ^gpu.GPUContext,
   command_buffer: vk.CommandBuffer,
   frame_index: u32,
+  warehouse: ^ResourceWarehouse,
 ) {
   params := gpu.data_buffer_get(&self.params_buffer[frame_index])
   if self.node_count == 0 || params.active_camera_count == 0 {

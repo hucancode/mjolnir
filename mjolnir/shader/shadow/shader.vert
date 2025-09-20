@@ -3,8 +3,6 @@
 layout(constant_id = 0) const bool SKINNED = false;
 
 layout(location = 0) in vec3 inPosition;
-layout(location = 5) in uvec4 inJoints;
-layout(location = 6) in vec4 inWeights;
 
 layout(location = 0) out vec3 worldPos;
 
@@ -26,35 +24,88 @@ layout(set = 1, binding = 0) readonly buffer BoneMatrices {
     mat4 bones[];
 };
 
-// TODO: recheck this push constant
-layout(push_constant) uniform PushConstants {
-    mat4 world;
+layout(set = 2, binding = 0) readonly buffer WorldMatrixBuffer {
+    mat4 world_matrices[];
+};
+
+// NodeData structure (must match Odin struct)
+struct NodeData {
+    uint material_id;
+    uint mesh_id;
     uint bone_matrix_offset;
-    uint albedo_index;
-    uint metallic_roughness_index;
-    uint normal_index;
-    uint emissive_index;
-    float metallic_value;
-    float roughness_value;
-    float emissive_value;
+    uint _padding;
+};
+
+struct MeshData {
+    vec3 aabb_min;
+    uint is_skinned;
+    vec3 aabb_max;
+    uint vertex_skinning_offset;
+    uint vertex_skinning_count;
+    uint _padding[3];
+};
+
+struct VertexSkinningData {
+    uvec4 joints;
+    vec4 weights;
+};
+
+// NEW: NodeData buffer (set 3)
+layout(set = 3, binding = 0) readonly buffer NodeDataBuffer {
+    NodeData node_data[];
+};
+
+// NEW: MeshData buffer (set 4)
+layout(set = 4, binding = 0) readonly buffer MeshDataBuffer {
+    MeshData mesh_data_array[];
+};
+
+// NEW: Vertex skinning buffer (set 5)
+layout(set = 5, binding = 0) readonly buffer VertexSkinningBuffer {
+    VertexSkinningData vertex_skinning_data[];
+};
+
+layout(push_constant) uniform PushConstants {
     uint camera_index;
+    uint padding[31];
 };
 
 void main() {
+    // In Vulkan indirect draws with instanceCount=1:
+    // gl_InstanceIndex = instanceIndex + firstInstance = 0 + firstInstance = firstInstance
+    // Since firstInstance = node_id, gl_InstanceIndex correctly gives us node_id
+    uint node_id = uint(gl_InstanceIndex);
+    NodeData node = node_data[node_id];
+    MeshData mesh_info = mesh_data_array[node.mesh_id];
+
     Camera camera = cameras[camera_index];
-    vec4 modelPosition;
-    if (SKINNED) {
-        uvec4 indices = inJoints + uvec4(bone_matrix_offset);
+
+    // Calculate skinned position if needed
+    vec4 modelPosition = vec4(inPosition, 1.0);
+
+    if (SKINNED && mesh_info.is_skinned != 0) {
+        // Manual lookup using mesh offset + vertex index
+        uint skinning_index = mesh_info.vertex_skinning_offset + gl_VertexIndex;
+        VertexSkinningData skinning_data = vertex_skinning_data[skinning_index];
+        uvec4 joints = skinning_data.joints;
+        vec4 weights = skinning_data.weights;
+
+        // Add bone matrix offset to joint indices
+        uvec4 bone_indices = joints + uvec4(node.bone_matrix_offset);
+
         mat4 skinMatrix =
-            inWeights.x * bones[indices.x] +
-            inWeights.y * bones[indices.y] +
-            inWeights.z * bones[indices.z] +
-            inWeights.w * bones[indices.w];
+            weights.x * bones[bone_indices.x] +
+            weights.y * bones[bone_indices.y] +
+            weights.z * bones[bone_indices.z] +
+            weights.w * bones[bone_indices.w];
+
         modelPosition = skinMatrix * vec4(inPosition, 1.0);
-    } else {
-        modelPosition = vec4(inPosition, 1.0);
     }
+
+    // Transform to world space
+    mat4 world = world_matrices[node_id];
     vec4 worldPosition = world * modelPosition;
     worldPos = worldPosition.xyz;
+
     gl_Position = camera.projection * camera.view * worldPosition;
 }

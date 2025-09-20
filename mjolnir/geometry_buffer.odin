@@ -6,19 +6,10 @@ import "gpu"
 import "resource"
 import vk "vendor:vulkan"
 
-// 128 byte push constant budget
+// Simplified push constant for indirect drawing - camera index only
 PushConstant :: struct {
-  world:                    matrix[4, 4]f32, // 64 bytes
-  bone_matrix_offset:       u32, // 4
-  albedo_index:             u32, // 4
-  metallic_roughness_index: u32, // 4
-  normal_index:             u32, // 4
-  emissive_index:           u32, // 4
-  metallic_value:           f32, // 4
-  roughness_value:          f32, // 4
-  emissive_value:           f32, // 4
-  camera_index:             u32, // 4
-  padding:                  [3]u32,
+  camera_index:        u32, // 4 bytes - index into camera buffer
+  padding:             [31]u32, // 124 bytes - rest is unused
 }
 
 RendererGBuffer :: struct {
@@ -34,9 +25,14 @@ gbuffer_init :: proc(
 ) -> vk.Result {
   depth_format: vk.Format = .D32_SFLOAT
   set_layouts := [?]vk.DescriptorSetLayout {
-    warehouse.camera_buffer_set_layout,
-    warehouse.textures_set_layout,
-    warehouse.bone_buffer_set_layout,
+    warehouse.camera_buffer_set_layout,        // set 0
+    warehouse.textures_set_layout,            // set 1
+    warehouse.bone_buffer_set_layout,         // set 2
+    warehouse.material_buffer_set_layout,     // set 3
+    warehouse.world_matrix_buffer_set_layout, // set 4
+    warehouse.node_data_buffer_set_layout,    // set 5
+    warehouse.mesh_data_buffer_set_layout,    // set 6
+    warehouse.vertex_skinning_buffer_set_layout, // set 7
   }
   push_constant_range := vk.PushConstantRange {
     stageFlags = {.VERTEX, .FRAGMENT},
@@ -444,6 +440,7 @@ gbuffer_end :: proc(
   )
 }
 
+// NEW: Indirect drawing version
 gbuffer_render :: proc(
   self: ^RendererGBuffer,
   render_input: ^RenderInput,
@@ -452,10 +449,28 @@ gbuffer_render :: proc(
   warehouse: ^ResourceWarehouse,
   frame_index: u32,
 ) {
+  gbuffer_render_indirect(self, render_input, render_target, command_buffer, warehouse, frame_index)
+}
+
+// Indirect drawing implementation
+gbuffer_render_indirect :: proc(
+  self: ^RendererGBuffer,
+  render_input: ^RenderInput,
+  render_target: ^RenderTarget,
+  command_buffer: vk.CommandBuffer,
+  warehouse: ^ResourceWarehouse,
+  frame_index: u32,
+) {
+  // Bind global resources once
   descriptor_sets := [?]vk.DescriptorSet {
-    warehouse.camera_buffer_descriptor_set,
-    warehouse.textures_descriptor_set,
-    warehouse.bone_buffer_descriptor_set,
+    warehouse.camera_buffer_descriptor_set,        // set 0
+    warehouse.textures_descriptor_set,            // set 1
+    warehouse.bone_buffer_descriptor_set,         // set 2
+    warehouse.material_buffer_descriptor_set,     // set 3
+    warehouse.world_matrix_buffer_descriptor_set, // set 4
+    warehouse.node_data_buffer_descriptor_set,    // set 5
+    warehouse.mesh_data_buffer_descriptor_set,    // set 6
+    warehouse.vertex_skinning_buffer_descriptor_set, // set 7
   }
   vk.CmdBindDescriptorSets(
     command_buffer,
@@ -467,103 +482,104 @@ gbuffer_render :: proc(
     0,
     nil,
   )
+
+  // Bind global vertex/index buffers once
+  vertex_buffers := [1]vk.Buffer{warehouse.vertex_buffer.buffer}
+  vertex_offsets := [1]vk.DeviceSize{0}
+  vk.CmdBindVertexBuffers(command_buffer, 0, 1, raw_data(vertex_buffers[:]), raw_data(vertex_offsets[:]))
+  vk.CmdBindIndexBuffer(command_buffer, warehouse.index_buffer.buffer, 0, .UINT32)
+
+  // Set camera index in push constants (stays the same for the whole frame)
+  push_constants := PushConstant {
+    camera_index = render_target.camera.index,
+  }
+  vk.CmdPushConstants(
+    command_buffer,
+    self.pipeline_layout,
+    {.VERTEX, .FRAGMENT},
+    0,
+    size_of(PushConstant),
+    &push_constants,
+  )
+
   rendered := 0
   current_pipeline: vk.Pipeline = 0
+  global_draw_offset: u32 = 0
+
   for batch_key, batch_group in render_input.batches {
     if batch_key.material_type == .TRANSPARENT ||
        batch_key.material_type == .WIREFRAME {
       continue
     }
+
     sample_material := resource.get(
       warehouse.materials,
       batch_group[0].material_handle,
     ) or_continue
+
     pipeline := gbuffer_get_pipeline(self, sample_material.features)
     if pipeline != current_pipeline {
       vk.CmdBindPipeline(command_buffer, .GRAPHICS, pipeline)
       current_pipeline = pipeline
     }
-    for batch_data in batch_group {
-      material := resource.get(
-        warehouse.materials,
-        batch_data.material_handle,
-      ) or_continue
-      for node in batch_data.nodes {
-        mesh_attachment := node.attachment.(MeshAttachment)
-        mesh := resource.get(
-          warehouse.meshes,
-          mesh_attachment.handle,
-        ) or_continue
-        push_constants := PushConstant {
-          world                    = get_world_matrix_for_render(node),
-          camera_index             = render_target.camera.index,
-          albedo_index             = min(
-            MAX_TEXTURES - 1,
-            material.albedo.index,
-          ),
-          metallic_roughness_index = min(
-            MAX_TEXTURES - 1,
-            material.metallic_roughness.index,
-          ),
-          normal_index             = min(
-            MAX_TEXTURES - 1,
-            material.normal.index,
-          ),
-          emissive_index           = min(
-            MAX_TEXTURES - 1,
-            material.emissive.index,
-          ),
-          metallic_value           = material.metallic_value,
-          roughness_value          = material.roughness_value,
-          emissive_value           = material.emissive_value,
-        }
-        if skinning, has_skinning := mesh_attachment.skinning.?; has_skinning {
-          push_constants.bone_matrix_offset =
-            skinning.bone_matrix_offset +
-            frame_index * warehouse.bone_matrix_slab.capacity
-        }
-        vk.CmdPushConstants(
-          command_buffer,
-          self.pipeline_layout,
-          {.VERTEX, .FRAGMENT},
-          0,
-          size_of(PushConstant),
-          &push_constants,
-        )
-        skin_buffer := warehouse.dummy_skinning_buffer.buffer
-        if mesh_skin, mesh_has_skin := mesh.skinning.?; mesh_has_skin {
-          skin_buffer = mesh_skin.skin_buffer.buffer
-        }
 
-        buffers := [2]vk.Buffer{warehouse.vertex_buffer.buffer, skin_buffer}
-        vertex_offset := vk.DeviceSize(
-          mesh.vertex_allocation.offset * size_of(geometry.Vertex),
-        )
-        offsets := [2]vk.DeviceSize{vertex_offset, 0}
-        vk.CmdBindVertexBuffers(
-          command_buffer,
-          0,
-          2,
-          raw_data(buffers[:]),
-          raw_data(offsets[:]),
-        )
-        vk.CmdBindIndexBuffer(
-          command_buffer,
-          warehouse.index_buffer.buffer,
-          vk.DeviceSize(mesh.index_allocation.offset * size_of(u32)),
-          .UINT32,
-        )
-        vk.CmdDrawIndexed(
-          command_buffer,
-          mesh.index_allocation.count,
-          1,
-          0,
-          0,
-          0,
-        )
-        rendered += 1
+    // Generate draw commands for this pipeline group
+    pipeline_draw_count: u32 = 0
+
+    for &batch_data in batch_group {
+      // Generate indirect draw commands for this batch
+      draw_commands, draw_count := generate_indirect_draw_commands(warehouse, &batch_data)
+
+      // Write draw commands to the buffer at the correct offset
+      for cmd, i in draw_commands {
+        warehouse.draw_commands_buffer.mapped[global_draw_offset + pipeline_draw_count + u32(i)] = cmd
+      }
+
+      pipeline_draw_count += draw_count
+
+      if global_draw_offset + pipeline_draw_count >= warehouse.max_draws_per_batch {
+        break // Prevent buffer overflow
       }
     }
+
+    // Execute draws for this pipeline
+    if pipeline_draw_count > 0 {
+      // Draw all commands for this pipeline
+      vk.CmdDrawIndexedIndirect(
+        command_buffer,
+        warehouse.draw_commands_buffer.buffer,
+        vk.DeviceSize(global_draw_offset * size_of(vk.DrawIndexedIndirectCommand)),
+        pipeline_draw_count,
+        size_of(vk.DrawIndexedIndirectCommand),
+      )
+      rendered += int(pipeline_draw_count)
+      global_draw_offset += pipeline_draw_count
+    }
+  }
+
+  log.debugf("G-buffer rendered %d meshes using indirect drawing", rendered)
+}
+
+// This function has been replaced by generate_indirect_draw_commands in engine.odin
+// which uses the new bindless architecture with node handles instead of mesh attachments
+
+// Render large batches in multiple indirect draws
+render_in_batches :: proc(
+  command_buffer: vk.CommandBuffer,
+  warehouse: ^ResourceWarehouse,
+  total_draws: u32,
+) {
+  for batch_start := u32(0); batch_start < total_draws; batch_start += warehouse.max_draws_per_batch {
+    batch_size := min(warehouse.max_draws_per_batch, total_draws - batch_start)
+    offset := vk.DeviceSize(batch_start * size_of(vk.DrawIndexedIndirectCommand))
+
+    vk.CmdDrawIndexedIndirect(
+      command_buffer,
+      warehouse.draw_commands_buffer.buffer,
+      offset,
+      batch_size,
+      size_of(vk.DrawIndexedIndirectCommand),
+    )
   }
 }
 

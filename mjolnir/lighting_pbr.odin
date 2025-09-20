@@ -161,6 +161,8 @@ lighting_init :: proc(
     &self.lighting_pipeline,
   ) or_return
   log.info("Lighting pipeline initialized successfully")
+
+  log.info("Creating spot light pipeline...")
   // Create second pipeline for spot lights with LESS_OR_EQUAL depth test
   spot_depth_stencil := vk.PipelineDepthStencilStateCreateInfo {
     sType           = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
@@ -190,22 +192,34 @@ lighting_init :: proc(
     nil,
     &self.spot_light_pipeline,
   ) or_return
+  log.info("Spot light pipeline created successfully")
+
+  log.info("Creating light volume meshes...")
   // light volume meshes
+  log.info("Creating sphere mesh...")
   self.sphere_mesh, _ = create_mesh(
     gpu_context,
     warehouse,
     geometry.make_sphere(segments = 64, rings = 64),
   ) or_return
+  log.info("Sphere mesh created successfully")
+
+  log.info("Creating cone mesh...")
   self.cone_mesh, _ = create_mesh(
     gpu_context,
     warehouse,
     geometry.make_cone(segments = 128, height = 1, radius = 0.5),
   ) or_return
+  log.info("Cone mesh created successfully")
+
+  log.info("Creating fullscreen triangle mesh...")
   self.fullscreen_triangle_mesh, _ = create_mesh(
     gpu_context,
     warehouse,
     geometry.make_fullscreen_triangle(),
   ) or_return
+  log.info("Fullscreen triangle mesh created successfully")
+
   log.info("Light volume meshes initialized")
   return .SUCCESS
 }

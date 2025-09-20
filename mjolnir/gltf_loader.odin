@@ -282,7 +282,11 @@ load_materials_batch :: proc(
     if material_result != .SUCCESS do return .invalid_gltf
     material_cache[gltf_material] = material_handle
     log.infof("Created material %v", material_handle)
+
+    // Update this specific material in the GPU buffer
+    update_material_in_buffer(&engine.warehouse, material_handle)
   }
+
   return .success
 }
 
@@ -680,16 +684,15 @@ construct_scene :: proc(
               &engine.gpu_context,
               &engine.warehouse,
               geometry_data.geometry,
+              mesh_handle.index,
             )
-            skinning, _ := &mesh.skinning.?
-            // Deep clone bones including their children slices
-            skinning.bones = make([]Bone, len(skin_data.bones))
-            for src_bone, i in skin_data.bones {
-              skinning.bones[i] = src_bone
-              skinning.bones[i].children = slice.clone(src_bone.children)
-              skinning.bones[i].name = strings.clone(src_bone.name)
-            }
-            skinning.root_bone_index = skin_data.root_bone_idx
+            // Create skeleton and store in warehouse.skeletons
+            skeleton_handle, _ := warehouse_create_skeleton(
+              &engine.warehouse,
+              skin_data.bones,
+              skin_data.root_bone_idx,
+            )
+            mesh.skeleton_handle = skeleton_handle
             node.attachment = MeshAttachment {
               handle = mesh_handle,
               material = geometry_data.material_handle,
@@ -697,6 +700,10 @@ construct_scene :: proc(
               skinning = NodeSkinning {
                 bone_matrix_offset = skin_data.matrix_buffer_offset,
               },
+            }
+            // Populate NodeData for indirect drawing
+            if mesh_attachment, ok := &node.attachment.(MeshAttachment); ok {
+              populate_node_data(&engine.warehouse, node_handle, mesh_attachment)
             }
             if _, has_first_mesh := skin_to_first_mesh[gltf_node.skin];
                !has_first_mesh {
@@ -715,6 +722,10 @@ construct_scene :: proc(
               handle      = mesh_handle,
               material    = geometry_data.material_handle,
               cast_shadow = true,
+            }
+            // Populate NodeData for indirect drawing
+            if mesh_attachment, ok := &node.attachment.(MeshAttachment); ok {
+              populate_node_data(&engine.warehouse, node_handle, mesh_attachment)
             }
           }
         }
@@ -741,7 +752,16 @@ load_animations :: proc(
   mesh_handle: resource.Handle,
 ) -> bool {
   mesh := mesh(engine, mesh_handle)
-  skinning := &mesh.skinning.?
+  if mesh.skeleton_handle.index == 0 {
+    log.warn("No skeleton found for mesh, skipping animation loading")
+    return true
+  }
+
+  skeleton := warehouse_get_skeleton(&engine.warehouse, mesh.skeleton_handle)
+  if skeleton == nil {
+    log.error("Failed to get skeleton for animation loading")
+    return false
+  }
 
   for gltf_anim, i in gltf_data.animations {
     clip_handle, clip := resource.alloc(&engine.warehouse.animation_clips)
@@ -750,7 +770,7 @@ load_animations :: proc(
     } else {
       clip.name = fmt.tprintf("animation_%d", i)
     }
-    clip.channels = make([]animation.Channel, len(skinning.bones))
+    clip.channels = make([]animation.Channel, len(skeleton.bones))
     for gltf_channel in gltf_anim.channels {
       if gltf_channel.target_node == nil || gltf_channel.sampler == nil {
         continue

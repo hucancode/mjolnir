@@ -6,6 +6,7 @@ import "core:math"
 import "core:math/linalg"
 import "core:slice"
 import "geometry"
+import "gpu"
 import "resource"
 
 PointLightAttachment :: struct {
@@ -36,6 +37,7 @@ MeshAttachment :: struct {
   material:    Handle,
   skinning:    Maybe(NodeSkinning),
   cast_shadow: bool,
+  node_id:     u32,  // Node ID for indirect drawing - populated when node is created
 }
 
 ParticleSystemAttachment :: struct {
@@ -81,27 +83,73 @@ NodeAttachment :: union {
 }
 
 Node :: struct {
-  parent:          Handle,
-  children:        [dynamic]Handle,
-  transform:       geometry.Transform,
-  name:            string,
-  attachment:      NodeAttachment,
-  animation:       Maybe(animation.Instance), // For node transform animation
-  culling_enabled: bool,
-  visible:         bool,              // Node's own visibility state
-  parent_visible:  bool,              // Visibility inherited from parent chain
-  pending_deletion: bool, // Atomic flag for safe deletion
+  parent:            Handle,
+  children:          [dynamic]Handle,
+  transform:         geometry.Transform,
+  name:              string,
+  attachment:        NodeAttachment,
+  animation:         Maybe(animation.Instance), // For node transform animation
+  culling_enabled:   bool,
+  visible:           bool,              // Node's own visibility state
+  parent_visible:    bool,              // Visibility inherited from parent chain
+  pending_deletion:  bool, // Atomic flag for safe deletion
+  is_world_dirty:    bool, // World matrix needs to be updated in GPU buffer
 }
 
 SceneTraversalCallback :: #type proc(node: ^Node, ctx: rawptr) -> bool
 
-init_node :: proc(self: ^Node, name: string = "") {
+init_node :: proc(self: ^Node, warehouse: ^ResourceWarehouse, name: string = "", handle: Handle = {}) {
   self.children = make([dynamic]Handle, 0)
   self.transform = geometry.TRANSFORM_IDENTITY
   self.name = name
   self.culling_enabled = true
   self.visible = true
   self.parent_visible = true
+  self.is_world_dirty = true
+
+  // Initialize world matrix in both frame buffers for new nodes
+  if handle.index != 0 {
+    world_matrix := get_world_matrix(self)
+    init_world_matrix(warehouse, handle.index, &world_matrix)
+  }
+}
+
+// Populate NodeData for a mesh attachment after it's created
+populate_node_data :: proc(
+  warehouse: ^ResourceWarehouse,
+  handle: Handle,
+  mesh_attachment: ^MeshAttachment,
+) {
+  // Store node_id in mesh attachment for later use
+  mesh_attachment.node_id = handle.index
+
+  // Get mesh to find mesh_id and material_id
+  mesh := resource.get(warehouse.meshes, mesh_attachment.handle)
+  if mesh == nil {
+    log.errorf("Failed to get mesh for node %d", handle.index)
+    return
+  }
+
+  // Check bounds before accessing NodeData
+  if handle.index >= warehouse.max_nodes {
+    log.errorf("Node ID %d exceeds max nodes %d", handle.index, warehouse.max_nodes)
+    return
+  }
+
+  // Populate NodeData
+  node_data := &warehouse.node_data[handle.index]
+  node_data.material_id = mesh_attachment.material.index
+  node_data.mesh_id = mesh_attachment.handle.index
+
+  if skinning, has_skinning := mesh_attachment.skinning.?; has_skinning {
+    node_data.bone_matrix_offset = skinning.bone_matrix_offset
+  }
+
+  // Upload to GPU
+  gpu.data_buffer_write_single(&warehouse.node_data_buffer, node_data, int(handle.index))
+
+  log.debugf("Populated NodeData for node %d: material_id=%d, mesh_id=%d, bone_offset=%d",
+    handle.index, node_data.material_id, node_data.mesh_id, node_data.bone_matrix_offset)
 }
 
 deinit_node :: proc(self: ^Node, warehouse: ^ResourceWarehouse) {
@@ -191,6 +239,7 @@ play_animation :: proc(
 
 spawn_at :: proc(
   self: ^Scene,
+  warehouse: ^ResourceWarehouse,
   position: [3]f32,
   attachment: NodeAttachment = nil,
 ) -> (
@@ -198,29 +247,39 @@ spawn_at :: proc(
   node: ^Node,
 ) {
   handle, node = resource.alloc(&self.nodes)
-  init_node(node)
-  node.attachment = attachment
   geometry.transform_translate(&node.transform, position.x, position.y, position.z)
+  init_node(node, warehouse, "", handle)
+  node.attachment = attachment
+  // Populate node data for mesh attachments
+  if mesh_attachment, is_mesh := &node.attachment.(MeshAttachment); is_mesh {
+    populate_node_data(warehouse, handle, mesh_attachment)
+  }
   attach(self.nodes, self.root, handle)
   return
 }
 
 spawn :: proc(
   self: ^Scene,
+  warehouse: ^ResourceWarehouse,
   attachment: NodeAttachment = nil,
 ) -> (
   handle: Handle,
   node: ^Node,
 ) {
   handle, node = resource.alloc(&self.nodes)
-  init_node(node)
+  init_node(node, warehouse, "", handle)
   node.attachment = attachment
+  // Populate node data for mesh attachments
+  if mesh_attachment, is_mesh := &node.attachment.(MeshAttachment); is_mesh {
+    populate_node_data(warehouse, handle, mesh_attachment)
+  }
   attach(self.nodes, self.root, handle)
   return
 }
 
 spawn_child :: proc(
   self: ^Scene,
+  warehouse: ^ResourceWarehouse,
   parent: Handle,
   attachment: NodeAttachment = nil,
 ) -> (
@@ -228,8 +287,12 @@ spawn_child :: proc(
   node: ^Node,
 ) {
   handle, node = resource.alloc(&self.nodes)
-  init_node(node)
+  init_node(node, warehouse, "", handle)
   node.attachment = attachment
+  // Populate node data for mesh attachments
+  if mesh_attachment, is_mesh := &node.attachment.(MeshAttachment); is_mesh {
+    populate_node_data(warehouse, handle, mesh_attachment)
+  }
   attach(self.nodes, parent, handle)
   return
 }
@@ -247,13 +310,13 @@ Scene :: struct {
   traversal_stack: [dynamic]SceneTraverseEntry,
 }
 
-scene_init :: proc(self: ^Scene) {
+scene_init :: proc(self: ^Scene, warehouse: ^ResourceWarehouse) {
   // Camera is now owned by the main render target, not the scene
   // log.infof("Initializing nodes pool... ")
   resource.pool_init(&self.nodes)
   root: ^Node
   self.root, root = resource.alloc(&self.nodes)
-  init_node(root, "root")
+  init_node(root, warehouse, "root", self.root)
   root.parent = self.root
   self.traversal_stack = make([dynamic]SceneTraverseEntry, 0)
 }
@@ -302,6 +365,7 @@ scene_traverse :: proc(
     is_dirty := transform_update_local(&current_node.transform)
     if entry.parent_is_dirty || is_dirty {
       transform_update_world(&current_node.transform, entry.parent_transform)
+      current_node.is_world_dirty = true
     }
     // Only call the callback if the node is effectively visible
     if callback != nil && current_node.parent_visible && current_node.visible {
@@ -556,4 +620,25 @@ get_world_matrix :: proc {
 get_world_matrix_for_render :: proc {
     node_get_world_matrix_for_render,
     geometry.transform_get_world_matrix_for_render,
+}
+
+// Update all dirty world matrices in the specified frame buffer
+update_dirty_world_matrices :: proc(scene: ^Scene, warehouse: ^ResourceWarehouse, frame_index: u32) {
+  for &entry, i in scene.nodes.entries do if entry.active && entry.item.is_world_dirty {
+    node := &entry.item
+    world_matrix := get_world_matrix(node)
+    handle_index := u32(i)
+
+    // Write to the frame buffer for this frame index
+    update_world_matrix(warehouse, frame_index, handle_index, &world_matrix)
+
+    node.is_world_dirty = false
+
+    // Debug: Log matrix updates for verification
+    if handle_index < 10 || handle_index > 800 {
+      log.debugf("Matrix update: node=%d, frame_index=%d, pos=(%.2f,%.2f,%.2f)",
+        handle_index, frame_index,
+        world_matrix[3][0], world_matrix[3][1], world_matrix[3][2])
+    }
+  }
 }

@@ -165,12 +165,12 @@ navmesh_setup :: proc(engine_ptr: ^mjolnir.Engine) {
     navmesh_state.path_waypoint_handles = make([dynamic]Handle)
 
     // Add some lights
-    spawn(&engine_ptr.scene, DirectionalLightAttachment{
+    spawn(&engine_ptr.scene, &engine_ptr.warehouse, DirectionalLightAttachment{
         color = {0.8, 0.8, 0.8, 1.0},
         cast_shadow = true,
     })
 
-    spawn(&engine_ptr.scene, PointLightAttachment{
+    spawn(&engine_ptr.scene, &engine_ptr.warehouse, PointLightAttachment{
         color = {0.5, 0.5, 0.5, 1.0},
         radius = 20,
         cast_shadow = false,
@@ -574,6 +574,7 @@ create_obj_visualization_mesh :: proc(engine_ptr: ^mjolnir.Engine, obj_file: str
     // Spawn the mesh in the scene
     navmesh_state.obj_node_handle, navmesh_state.obj_mesh_node = spawn(
         &engine_ptr.scene,
+        &engine_ptr.warehouse,
         MeshAttachment{
             handle = navmesh_state.obj_mesh_handle,
             material = create_material_handle(
@@ -885,6 +886,7 @@ update_position_marker :: proc(engine_ptr: ^mjolnir.Engine, handle: ^mjolnir.Han
     node: ^Node
     handle^, node = spawn(
         &engine_ptr.scene,
+        &engine_ptr.warehouse,
         MeshAttachment{
             handle = marker_mesh_handle,
             material = marker_material_handle,
