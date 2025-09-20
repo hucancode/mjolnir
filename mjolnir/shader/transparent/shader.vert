@@ -1,7 +1,8 @@
 #version 450
 #extension GL_EXT_nonuniform_qualifier : require
 
-layout(constant_id = 0) const bool SKINNED = false;
+// Shader feature bit flags (must match Odin ShaderFeatures enum)
+// Note: Skinning is now handled as a mesh feature, not a material feature
 
 layout(location = 0) in vec3 inPosition;
 layout(location = 1) in vec3 inNormal;
@@ -52,7 +53,9 @@ void main() {
     vec4 modelPosition;
     vec3 modelNormal;
     vec4 modelTangent;
-    if (SKINNED) {
+    // TODO: Add material access for runtime feature checking
+    bool is_skinned = true; // Placeholder - need to add material access
+    if (is_skinned) {
         uint baseOffset = bone_matrix_offset;
         mat4 skinMatrix =
             inJointWeights.x * boneMatrices.matrices[baseOffset + inJointIndices.x] +

@@ -8,9 +8,9 @@ import "resource"
 import vk "vendor:vulkan"
 
 RendererTransparent :: struct {
-  pipeline_layout:       vk.PipelineLayout,
-  transparent_pipelines: [SHADER_VARIANT_COUNT]vk.Pipeline,
-  wireframe_pipelines:   [2]vk.Pipeline,
+  pipeline_layout:      vk.PipelineLayout,
+  transparent_pipeline: vk.Pipeline,
+  wireframe_pipeline:   vk.Pipeline,
 }
 
 transparent_init :: proc(
@@ -152,103 +152,47 @@ create_transparent_pipelines :: proc(
     depthAttachmentFormat   = depth_format,
   }
 
-  pipeline_infos: [SHADER_VARIANT_COUNT]vk.GraphicsPipelineCreateInfo
-  configs: [SHADER_VARIANT_COUNT]ShaderConfig
-  entries: [SHADER_VARIANT_COUNT][SHADER_OPTION_COUNT]vk.SpecializationMapEntry
-  spec_infos: [SHADER_VARIANT_COUNT]vk.SpecializationInfo
-  shader_stages: [SHADER_VARIANT_COUNT][2]vk.PipelineShaderStageCreateInfo
+  // Create single unified transparent pipeline without specialization constants
+  shader_stages := [?]vk.PipelineShaderStageCreateInfo {
+    {
+      sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
+      stage = {.VERTEX},
+      module = vert_module,
+      pName = "main",
+      // No specialization info - features handled at runtime
+    },
+    {
+      sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
+      stage = {.FRAGMENT},
+      module = frag_module,
+      pName = "main",
+      // No specialization info - features handled at runtime
+    },
+  }
 
-  for mask in 0 ..< SHADER_VARIANT_COUNT {
-    features := transmute(ShaderFeatureSet)mask
-    configs[mask] = {
-      is_skinned                     = .SKINNING in features,
-      has_albedo_texture             = .ALBEDO_TEXTURE in features,
-      has_metallic_roughness_texture = .METALLIC_ROUGHNESS_TEXTURE in features,
-      has_normal_texture             = .NORMAL_TEXTURE in features,
-      has_emissive_texture           = .EMISSIVE_TEXTURE in features,
-      has_occlusion_texture          = .OCCLUSION_TEXTURE in features,
-    }
-    entries[mask] = [SHADER_OPTION_COUNT]vk.SpecializationMapEntry {
-      {
-        constantID = 0,
-        offset = u32(offset_of(ShaderConfig, is_skinned)),
-        size = size_of(b32),
-      },
-      {
-        constantID = 1,
-        offset = u32(offset_of(ShaderConfig, has_albedo_texture)),
-        size = size_of(b32),
-      },
-      {
-        constantID = 2,
-        offset = u32(offset_of(ShaderConfig, has_metallic_roughness_texture)),
-        size = size_of(b32),
-      },
-      {
-        constantID = 3,
-        offset = u32(offset_of(ShaderConfig, has_normal_texture)),
-        size = size_of(b32),
-      },
-      {
-        constantID = 4,
-        offset = u32(offset_of(ShaderConfig, has_emissive_texture)),
-        size = size_of(b32),
-      },
-      {
-        constantID = 5,
-        offset = u32(offset_of(ShaderConfig, has_occlusion_texture)),
-        size = size_of(b32),
-      },
-    }
-
-    spec_infos[mask] = {
-      mapEntryCount = len(entries[mask]),
-      pMapEntries   = raw_data(entries[mask][:]),
-      dataSize      = size_of(ShaderConfig),
-      pData         = &configs[mask],
-    }
-
-    shader_stages[mask] = [?]vk.PipelineShaderStageCreateInfo {
-      {
-        sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
-        stage = {.VERTEX},
-        module = vert_module,
-        pName = "main",
-        pSpecializationInfo = &spec_infos[mask],
-      },
-      {
-        sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
-        stage = {.FRAGMENT},
-        module = frag_module,
-        pName = "main",
-        pSpecializationInfo = &spec_infos[mask],
-      },
-    }
-
-    pipeline_infos[mask] = {
-      sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
-      stageCount          = len(shader_stages[mask]),
-      pStages             = raw_data(shader_stages[mask][:]),
-      pVertexInputState   = &vertex_input_info,
-      pInputAssemblyState = &input_assembly,
-      pViewportState      = &viewport_state,
-      pRasterizationState = &rasterizer,
-      pMultisampleState   = &multisampling,
-      pDepthStencilState  = &depth_stencil,
-      pColorBlendState    = &color_blending,
-      pDynamicState       = &dynamic_state,
-      layout              = self.pipeline_layout,
-      pNext               = &rendering_info,
-    }
+  pipeline_info := vk.GraphicsPipelineCreateInfo {
+    sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
+    stageCount          = len(shader_stages),
+    pStages             = raw_data(shader_stages[:]),
+    pVertexInputState   = &vertex_input_info,
+    pInputAssemblyState = &input_assembly,
+    pViewportState      = &viewport_state,
+    pRasterizationState = &rasterizer,
+    pMultisampleState   = &multisampling,
+    pDepthStencilState  = &depth_stencil,
+    pColorBlendState    = &color_blending,
+    pDynamicState       = &dynamic_state,
+    layout              = self.pipeline_layout,
+    pNext               = &rendering_info,
   }
 
   vk.CreateGraphicsPipelines(
     gpu_context.device,
     0,
-    len(pipeline_infos),
-    raw_data(pipeline_infos[:]),
+    1,
+    &pipeline_info,
     nil,
-    raw_data(self.transparent_pipelines[:]),
+    &self.transparent_pipeline,
   ) or_return
 
   return .SUCCESS
@@ -355,40 +299,15 @@ create_wireframe_pipelines :: proc(
     depthAttachmentFormat   = depth_format,
   }
 
-  // Create two variants - with and without skinning
-  wireframe_configs := [2]ShaderConfig {
-    {is_skinned = false}, // Non-skinned variant
-    {is_skinned = true}, // Skinned variant
-  }
+  // Create single wireframe pipeline - skinning handled at runtime
 
-  wireframe_entries := [2]vk.SpecializationMapEntry {
-    {constantID = 0, offset = 0, size = size_of(b32)},
-    {constantID = 0, offset = 0, size = size_of(b32)},
-  }
-
-  wireframe_spec_infos := [2]vk.SpecializationInfo {
-    {
-      mapEntryCount = 1,
-      pMapEntries = &wireframe_entries[0],
-      dataSize = size_of(b32),
-      pData = &wireframe_configs[0].is_skinned,
-    },
-    {
-      mapEntryCount = 1,
-      pMapEntries = &wireframe_entries[1],
-      dataSize = size_of(b32),
-      pData = &wireframe_configs[1].is_skinned,
-    },
-  }
-
-  // First create the non-skinned wireframe pipeline
   shader_stages := [2]vk.PipelineShaderStageCreateInfo {
     {
       sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
       stage = {.VERTEX},
       module = vert_module,
       pName = "main",
-      pSpecializationInfo = &wireframe_spec_infos[0],
+      // No specialization info - features handled at runtime
     },
     {
       sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
@@ -420,20 +339,7 @@ create_wireframe_pipelines :: proc(
     1,
     &create_info,
     nil,
-    &self.wireframe_pipelines[0],
-  ) or_return
-
-  // Now create the skinned wireframe pipeline
-  // Update the specialization info to use skinned = true
-  shader_stages[0].pSpecializationInfo = &wireframe_spec_infos[1]
-
-  vk.CreateGraphicsPipelines(
-    gpu_context.device,
-    0,
-    1,
-    &create_info,
-    nil,
-    &self.wireframe_pipelines[1],
+    &self.wireframe_pipeline,
   ) or_return
 
   return .SUCCESS
@@ -443,17 +349,11 @@ transparent_deinit :: proc(
   self: ^RendererTransparent,
   gpu_context: ^gpu.GPUContext,
 ) {
-  // Destroy all transparent material pipelines
-  for i in 0 ..< SHADER_VARIANT_COUNT {
-    vk.DestroyPipeline(gpu_context.device, self.transparent_pipelines[i], nil)
-    self.transparent_pipelines[i] = 0
-  }
+  // Destroy single transparent pipeline
+  vk.DestroyPipeline(gpu_context.device, self.transparent_pipeline, nil)
 
-  // Destroy wireframe material pipelines
-  for i in 0 ..< 2 {
-    vk.DestroyPipeline(gpu_context.device, self.wireframe_pipelines[i], nil)
-    self.wireframe_pipelines[i] = 0
-  }
+  // Destroy single wireframe pipeline
+  vk.DestroyPipeline(gpu_context.device, self.wireframe_pipeline, nil)
 
   // Destroy pipeline layout
   vk.DestroyPipelineLayout(gpu_context.device, self.pipeline_layout, nil)
@@ -545,7 +445,7 @@ transparent_render :: proc(
       vk.CmdBindPipeline(
         command_buffer,
         .GRAPHICS,
-        self.transparent_pipelines[variant_idx],
+        self.transparent_pipeline,
       )
       for batch_data in batch_group {
         // Process each batch of transparent materials
@@ -643,14 +543,13 @@ transparent_render :: proc(
             cast_shadow = true, // Default value
             node_id = node_handle.index,
           }
-          // Check if skinning feature is enabled
-          is_skinned := .SKINNING in batch_key.features
-          pipeline_idx := is_skinned ? 1 : 0
+          // Skinning is now a mesh feature - just use pipeline 0
+          pipeline_idx := 0
           // Bind the appropriate wireframe pipeline
           vk.CmdBindPipeline(
             command_buffer,
             .GRAPHICS,
-            self.wireframe_pipelines[pipeline_idx],
+            self.wireframe_pipeline,
           )
           push_constant := PushConstant {
             camera_index = render_target.camera.index,

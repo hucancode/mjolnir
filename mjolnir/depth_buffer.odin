@@ -10,12 +10,9 @@ import vk "vendor:vulkan"
 
 SHADER_DEPTH_PREPASS_VERT :: #load("shader/depth_prepass/vert.spv")
 
-DEPTH_PREPASS_OPTION_COUNT :: 1
-DEPTH_PREPASS_VARIANT_COUNT: u32 : 1 << DEPTH_PREPASS_OPTION_COUNT
-
 RendererDepthPrepass :: struct {
   pipeline_layout: vk.PipelineLayout,
-  pipelines:       [DEPTH_PREPASS_VARIANT_COUNT]vk.Pipeline,
+  pipeline:        vk.Pipeline,
 }
 
 depth_prepass_init :: proc(
@@ -53,19 +50,13 @@ depth_prepass_init :: proc(
     nil,
     &self.pipeline_layout,
   ) or_return
-  for mask in 0 ..< DEPTH_PREPASS_VARIANT_COUNT {
-    features := transmute(ShaderFeatureSet)mask & ShaderFeatureSet{.SKINNING}
-    config := ShaderConfig {
-      is_skinned = .SKINNING in features,
-    }
-    depth_prepass_build_pipeline(
-      gpu_context,
-      self,
-      &config,
-      &self.pipelines[mask],
-      swapchain_extent,
-    ) or_return
-  }
+  // Create single unified pipeline - skinning handled at runtime
+  depth_prepass_build_pipeline(
+    gpu_context,
+    self,
+    &self.pipeline,
+    swapchain_extent,
+  ) or_return
   return .SUCCESS
 }
 
@@ -73,10 +64,7 @@ depth_prepass_deinit :: proc(
   self: ^RendererDepthPrepass,
   gpu_context: ^gpu.GPUContext,
 ) {
-  for &p in self.pipelines {
-    vk.DestroyPipeline(gpu_context.device, p, nil)
-    p = 0
-  }
+  vk.DestroyPipeline(gpu_context.device, self.pipeline, nil)
   vk.DestroyPipelineLayout(gpu_context.device, self.pipeline_layout, nil)
   self.pipeline_layout = 0
 }
@@ -232,43 +220,32 @@ depth_prepass_get_pipeline :: proc(
   mesh: ^Mesh,
   data: MeshAttachment,
 ) -> vk.Pipeline {
-  features := material.features & ShaderFeatureSet{.SKINNING}
-  return self.pipelines[transmute(u32)features]
+  // Features now handled at runtime in shaders, just return the single pipeline
+  return self.pipeline
 }
 
 depth_prepass_build_pipeline :: proc(
   gpu_context: ^gpu.GPUContext,
   self: ^RendererDepthPrepass,
-  config: ^ShaderConfig,
   pipeline: ^vk.Pipeline,
   swapchain_extent: vk.Extent2D,
 ) -> (
   res: vk.Result,
 ) {
-  log.debugf("Building depth prepass pipeline with config: %v", config)
+  log.debug("Building unified depth prepass pipeline")
   vert_shader_module := gpu.create_shader_module(
     gpu_context,
     SHADER_DEPTH_PREPASS_VERT,
   ) or_return
   defer vk.DestroyShaderModule(gpu_context.device, vert_shader_module, nil)
-  entry := vk.SpecializationMapEntry {
-    constantID = 0,
-    offset     = u32(offset_of(ShaderConfig, is_skinned)),
-    size       = size_of(b32),
-  }
-  spec_info := vk.SpecializationInfo {
-    mapEntryCount = 1,
-    pMapEntries   = &entry,
-    dataSize      = size_of(ShaderConfig),
-    pData         = config,
-  }
+
   shader_stages := [?]vk.PipelineShaderStageCreateInfo {
     {
       sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
       stage = {.VERTEX},
       module = vert_shader_module,
       pName = "main",
-      pSpecializationInfo = &spec_info,
+      // No specialization info - features handled at runtime
     },
   }
   vertex_input_info := vk.PipelineVertexInputStateCreateInfo {

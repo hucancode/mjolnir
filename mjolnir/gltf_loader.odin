@@ -268,7 +268,7 @@ load_materials_batch :: proc(
     if gltf_material == nil do continue
     albedo, metallic_roughness, normal, emissive, occlusion, features :=
       load_material_textures(gltf_material, texture_cache)
-    if gltf_material in skinned_materials do features |= {.SKINNING}
+    // Skinning is now a mesh feature, not a material feature
     material_handle, _, material_result := create_material(
       &engine.warehouse,
       features,

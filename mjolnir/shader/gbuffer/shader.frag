@@ -1,11 +1,12 @@
 #version 450
 #extension GL_EXT_nonuniform_qualifier : require
 
-layout(constant_id = 0) const bool SKINNED = false;
-layout(constant_id = 1) const bool ALBEDO_TEXTURE = false;
-layout(constant_id = 2) const bool METALLIC_ROUGHNESS_TEXTURE = false;
-layout(constant_id = 3) const bool NORMAL_TEXTURE = false;
-layout(constant_id = 4) const bool EMISSIVE_TEXTURE = false;
+// Shader feature bit flags (must match Odin ShaderFeatures enum)
+const uint FEATURE_ALBEDO_TEXTURE = 1u << 0u;
+const uint FEATURE_METALLIC_ROUGHNESS_TEXTURE = 1u << 1u;
+const uint FEATURE_NORMAL_TEXTURE = 1u << 2u;
+const uint FEATURE_EMISSIVE_TEXTURE = 1u << 3u;
+const uint FEATURE_OCCLUSION_TEXTURE = 1u << 4u;
 
 const uint SAMPLER_NEAREST_CLAMP = 0;
 const uint SAMPLER_LINEAR_CLAMP = 1;
@@ -87,9 +88,15 @@ void main() {
 
     MaterialData material = materials[node.material_id];
 
+    // Extract feature flags for runtime branching
+    bool has_albedo_texture = (material.features & FEATURE_ALBEDO_TEXTURE) != 0;
+    bool has_metallic_roughness_texture = (material.features & FEATURE_METALLIC_ROUGHNESS_TEXTURE) != 0;
+    bool has_normal_texture = (material.features & FEATURE_NORMAL_TEXTURE) != 0;
+    bool has_emissive_texture = (material.features & FEATURE_EMISSIVE_TEXTURE) != 0;
+
     outPosition = vec4(position, 1.0);
     vec3 N = normalize(normal);
-    if (NORMAL_TEXTURE) {
+    if (has_normal_texture) {
         // Sample tangent-space normal from normal map (BC5/XY: .xy, reconstruct z)
         vec2 n_xy = texture(sampler2D(textures[material.normal_index], samplers[SAMPLER_LINEAR_REPEAT]), uv).xy * 2.0 - 1.0;
         float n_z = sqrt(clamp(1.0 - dot(n_xy, n_xy), 0.0, 1.0));
@@ -104,7 +111,7 @@ void main() {
     outNormal = vec4(normal_encoded, 1.0);
 
     vec4 albedo;
-    if (ALBEDO_TEXTURE) {
+    if (has_albedo_texture) {
         albedo = texture(sampler2D(textures[material.albedo_index], samplers[SAMPLER_LINEAR_REPEAT]), uv);
         albedo *= material.base_color_factor;
     } else {
@@ -114,7 +121,7 @@ void main() {
 
     float metallic;
     float roughness;
-    if (METALLIC_ROUGHNESS_TEXTURE) {
+    if (has_metallic_roughness_texture) {
         vec4 mr = texture(sampler2D(textures[material.metallic_roughness_index], samplers[SAMPLER_LINEAR_REPEAT]), uv);
         metallic = mr.b * material.metallic_value;
         roughness = mr.g * material.roughness_value;
@@ -124,7 +131,7 @@ void main() {
     }
     outMetallicRoughness = vec4(metallic, roughness, 0.0, 1.0);
     vec3 emissive;
-    if (EMISSIVE_TEXTURE) {
+    if (has_emissive_texture) {
         emissive = texture(sampler2D(textures[material.emissive_index], samplers[SAMPLER_LINEAR_REPEAT]), uv).rgb * material.emissive_value;
     } else {
         emissive = vec3(material.emissive_value);

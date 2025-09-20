@@ -1,5 +1,7 @@
 #version 450
-layout(constant_id = 0) const bool SKINNED = false;
+
+// Shader feature bit flags (must match Odin ShaderFeatures enum)
+// Note: Skinning is now handled as a mesh feature, not a material feature
 
 // Vertex input attributes - same as uber shader
 layout(location = 0) in vec3 inPosition;
@@ -25,7 +27,25 @@ layout(set = 0, binding = 0) readonly buffer CameraBuffer {
 layout(set = 2, binding = 0) readonly buffer BoneMatrices {
     mat4 bones[];
 };
-// set 3 (materials), not available in vertex shader
+
+// Material buffer set = 3
+struct MaterialData {
+    uint albedo_index;
+    uint metallic_roughness_index;
+    uint normal_index;
+    uint emissive_index;
+    float metallic_value;
+    float roughness_value;
+    float emissive_value;
+    uint material_type;
+    uint features;
+    vec4 base_color_factor;
+    uint padding[2];
+};
+
+layout(set = 3, binding = 0) readonly buffer MaterialBuffer {
+    MaterialData materials[];
+};
 layout(set = 4, binding = 0) readonly buffer WorldMatrixBuffer {
     mat4 world_matrices[];
 };
@@ -89,12 +109,18 @@ void main() {
     }
 
     MeshData mesh_info = mesh_data_array[node.mesh_id];
+
+    // Get material data for other features (non-skinning)
+    MaterialData material = materials[node.material_id];
+    // Skinning is a mesh feature, not a material feature
+    bool is_skinned = mesh_info.is_skinned != 0;
+
     Camera camera = cameras[camera_index];
 
     // Calculate skinned position if needed
     vec4 modelPosition = vec4(inPosition, 1.0);
 
-    if (SKINNED && mesh_info.is_skinned != 0) {
+    if (is_skinned) {
         // Manual lookup using mesh offset + vertex index
         uint skinning_index = mesh_info.vertex_skinning_offset + gl_VertexIndex;
         VertexSkinningData skinning_data = vertex_skinning_data[skinning_index];
