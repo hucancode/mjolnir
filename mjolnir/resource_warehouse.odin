@@ -54,6 +54,11 @@ ResourceWarehouse :: struct {
   material_buffer_descriptor_set: vk.DescriptorSet,
   material_buffer:                gpu.DataBuffer(MaterialData),
 
+  // Bindless world matrix buffer system
+  world_matrix_buffer_set_layout:   vk.DescriptorSetLayout,
+  world_matrix_descriptor_sets:     [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
+  world_matrix_buffers:             [MAX_FRAMES_IN_FLIGHT]gpu.DataBuffer(matrix[4, 4]f32),
+
   // Dummy skinning buffer for static meshes
   dummy_skinning_buffer:        gpu.DataBuffer(geometry.SkinningData),
 
@@ -99,6 +104,7 @@ resource_init :: proc(
   init_bone_matrix_allocator(gpu_context, warehouse) or_return
   init_camera_buffer(gpu_context, warehouse) or_return
   init_material_buffer(gpu_context, warehouse) or_return
+  init_world_matrix_buffers(gpu_context, warehouse) or_return
   init_bindless_buffers(gpu_context, warehouse) or_return
   // Textuwarehouse+samplers descriptor set
   textures_bindings := [?]vk.DescriptorSetLayoutBinding {
@@ -194,6 +200,7 @@ resource_deinit :: proc(
 ) {
   gpu.data_buffer_deinit(gpu_context, &warehouse.dummy_skinning_buffer)
   deinit_material_buffer(gpu_context, warehouse)
+  deinit_world_matrix_buffers(gpu_context, warehouse)
   // Manually clean up each pool since callbacks can't capture gpu_context
   for &entry in warehouse.image_2d_buffers.entries {
     if entry.generation > 0 && entry.active {
@@ -549,6 +556,92 @@ deinit_material_buffer :: proc(
   warehouse.material_buffer_set_layout = 0
 }
 
+init_world_matrix_buffers :: proc(
+  gpu_context: ^gpu.GPUContext,
+  warehouse: ^ResourceWarehouse,
+) -> vk.Result {
+  log.infof(
+    "Creating world matrix buffers with capacity %d nodes...",
+    WORLD_MATRIX_CAPACITY,
+  )
+  for frame_idx in 0 ..< MAX_FRAMES_IN_FLIGHT {
+    warehouse.world_matrix_buffers[frame_idx] = gpu.create_host_visible_buffer(
+      gpu_context,
+      matrix[4, 4]f32,
+      WORLD_MATRIX_CAPACITY,
+      {.STORAGE_BUFFER},
+      nil,
+    ) or_return
+  }
+  bindings := [?]vk.DescriptorSetLayoutBinding {
+    {
+      binding = 0,
+      descriptorType = .STORAGE_BUFFER,
+      descriptorCount = 1,
+      stageFlags = {.VERTEX, .FRAGMENT},
+    },
+  }
+  vk.CreateDescriptorSetLayout(
+    gpu_context.device,
+    &vk.DescriptorSetLayoutCreateInfo {
+      sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+      bindingCount = len(bindings),
+      pBindings = raw_data(bindings[:]),
+    },
+    nil,
+    &warehouse.world_matrix_buffer_set_layout,
+  ) or_return
+  layouts := [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSetLayout{}
+  for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
+    layouts[i] = warehouse.world_matrix_buffer_set_layout
+  }
+  vk.AllocateDescriptorSets(
+    gpu_context.device,
+    &vk.DescriptorSetAllocateInfo {
+      sType              = .DESCRIPTOR_SET_ALLOCATE_INFO,
+      descriptorPool     = gpu_context.descriptor_pool,
+      descriptorSetCount = MAX_FRAMES_IN_FLIGHT,
+      pSetLayouts        = raw_data(layouts[:]),
+    },
+    raw_data(warehouse.world_matrix_descriptor_sets[:]),
+  ) or_return
+  for frame_idx in 0 ..< MAX_FRAMES_IN_FLIGHT {
+    buffer_info := vk.DescriptorBufferInfo {
+      buffer = warehouse.world_matrix_buffers[frame_idx].buffer,
+      offset = 0,
+      range  = vk.DeviceSize(vk.WHOLE_SIZE),
+    }
+    write := vk.WriteDescriptorSet {
+      sType           = .WRITE_DESCRIPTOR_SET,
+      dstSet          = warehouse.world_matrix_descriptor_sets[frame_idx],
+      dstBinding      = 0,
+      descriptorType  = .STORAGE_BUFFER,
+      descriptorCount = 1,
+      pBufferInfo     = &buffer_info,
+    }
+    vk.UpdateDescriptorSets(gpu_context.device, 1, &write, 0, nil)
+  }
+  return .SUCCESS
+}
+
+deinit_world_matrix_buffers :: proc(
+  gpu_context: ^gpu.GPUContext,
+  warehouse: ^ResourceWarehouse,
+) {
+  for frame_idx in 0 ..< MAX_FRAMES_IN_FLIGHT {
+    gpu.data_buffer_deinit(
+      gpu_context,
+      &warehouse.world_matrix_buffers[frame_idx],
+    )
+  }
+  vk.DestroyDescriptorSetLayout(
+    gpu_context.device,
+    warehouse.world_matrix_buffer_set_layout,
+    nil,
+  )
+  warehouse.world_matrix_buffer_set_layout = 0
+}
+
 // Get mutable reference to camera uniform in bindless buffer
 get_camera_uniform :: proc(
   warehouse: ^ResourceWarehouse,
@@ -739,6 +832,8 @@ deinit_bone_matrix_allocator :: proc(
   warehouse.bone_buffer_set_layout = 0
   resource.slab_allocator_deinit(&warehouse.bone_matrix_slab)
 }
+
+WORLD_MATRIX_CAPACITY :: MAX_NODES_IN_SCENE
 
 BINDLESS_VERTEX_BUFFER_SIZE :: 128 * 1024 * 1024 // 128MB
 BINDLESS_INDEX_BUFFER_SIZE :: 64 * 1024 * 1024 // 64MB

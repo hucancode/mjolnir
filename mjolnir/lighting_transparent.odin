@@ -25,6 +25,7 @@ transparent_init :: proc(
     warehouse.textures_set_layout,
     warehouse.bone_buffer_set_layout,
     warehouse.material_buffer_set_layout,
+    warehouse.world_matrix_buffer_set_layout,
   }
   push_constant_range := vk.PushConstantRange {
     stageFlags = {.VERTEX, .FRAGMENT},
@@ -517,6 +518,7 @@ transparent_render :: proc(
     warehouse.textures_descriptor_set,
     warehouse.bone_buffer_descriptor_set,
     warehouse.material_buffer_descriptor_set,
+    warehouse.world_matrix_descriptor_sets[frame_index],
   }
   vk.CmdBindDescriptorSets(
     command_buffer,
@@ -548,7 +550,8 @@ transparent_render :: proc(
         if !material_found do continue
 
         // Render all nodes in this batch
-        for node in batch_data.nodes {
+        for render_node in batch_data.nodes {
+          node := render_node.node
           mesh_attachment, ok := node.attachment.(MeshAttachment)
           if !ok do continue
 
@@ -558,7 +561,7 @@ transparent_render :: proc(
           ) or_continue
 
           push_constants := PushConstant {
-            world              = get_world_matrix_for_render(node),
+            node_id            = render_node.handle.index,
             bone_matrix_offset = 0,
             camera_index       = render_target.camera.index,
             material_id        = batch_data.material_handle.index,
@@ -614,7 +617,8 @@ transparent_render :: proc(
     } else if batch_key.material_type == .WIREFRAME {
       for batch_data in batch_group {
         // Render all nodes in this batch
-        for node in batch_data.nodes {
+        for render_node in batch_data.nodes {
+          node := render_node.node
           mesh_attachment, ok := node.attachment.(MeshAttachment)
           if !ok do continue
           mesh := resource.get(
@@ -631,7 +635,7 @@ transparent_render :: proc(
             self.wireframe_pipelines[pipeline_idx],
           )
           push_constant := PushConstant {
-            world        = get_world_matrix_for_render(node),
+            node_id      = render_node.handle.index,
             camera_index = render_target.camera.index,
             material_id  = batch_data.material_handle.index,
           }

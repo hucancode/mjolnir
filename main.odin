@@ -633,6 +633,7 @@ custom_render :: proc(
     make_frustum(camera_uniform.projection * camera_uniform.view),
     portal_rt.camera,
   )
+  upload_world_matrices(&engine.warehouse, &engine.scene, engine.frame_index)
   // Render G-buffer pass with self-managed depth
   gbuffer_begin(
     portal_rt,

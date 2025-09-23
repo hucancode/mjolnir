@@ -28,12 +28,15 @@ layout(set = 2, binding = 0) readonly buffer BoneMatrices {
     mat4 bones[];
 };
 
+layout(set = 4, binding = 0) readonly buffer WorldMatrices {
+    mat4 world_matrices[];
+};
+
 layout(push_constant) uniform PushConstants {
-    mat4 world;
+    uint node_id;
     uint bone_matrix_offset;
     uint material_id;
     uint camera_index;
-    uint padding;
 };
 
 layout(location = 0) out vec3 outPosition;
@@ -44,6 +47,7 @@ layout(location = 4) out vec4 outTangent;
 
 void main() {
     Camera camera = cameras[camera_index];
+    mat4 world = world_matrices[node_id];
 
     vec4 modelPosition;
     vec3 modelNormal;

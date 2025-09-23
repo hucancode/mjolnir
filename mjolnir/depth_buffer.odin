@@ -32,7 +32,10 @@ depth_prepass_init :: proc(
   }
   set_layouts := [?]vk.DescriptorSetLayout {
     warehouse.camera_buffer_set_layout,
+    warehouse.textures_set_layout,
     warehouse.bone_buffer_set_layout,
+    warehouse.material_buffer_set_layout,
+    warehouse.world_matrix_buffer_set_layout,
   }
   pipeline_layout_info := vk.PipelineLayoutCreateInfo {
     sType                  = .PIPELINE_LAYOUT_CREATE_INFO,
@@ -131,7 +134,10 @@ depth_prepass_render :: proc(
   rendered_count := 0
   descriptor_sets := [?]vk.DescriptorSet {
     warehouse.camera_buffer_descriptor_set,
+    warehouse.textures_descriptor_set,
     warehouse.bone_buffer_descriptor_set,
+    warehouse.material_buffer_descriptor_set,
+    warehouse.world_matrix_descriptor_sets[frame_index],
   }
   vk.CmdBindDescriptorSets(
     command_buffer,
@@ -154,7 +160,8 @@ depth_prepass_render :: proc(
         warehouse.materials,
         batch_data.material_handle,
       ) or_continue
-      for node in batch_data.nodes {
+      for render_node in batch_data.nodes {
+        node := render_node.node
         #partial switch data in node.attachment {
         case MeshAttachment:
           mesh := mesh(warehouse, data.handle) or_continue
@@ -166,7 +173,7 @@ depth_prepass_render :: proc(
             current_pipeline = pipeline
           }
           push_constant := PushConstant {
-            world        = get_world_matrix_for_render(node),
+            node_id      = render_node.handle.index,
             camera_index = camera_index,
             material_id  = batch_data.material_handle.index,
           }

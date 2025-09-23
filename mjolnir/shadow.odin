@@ -22,7 +22,10 @@ shadow_init :: proc(
 ) -> vk.Result {
   set_layouts := [?]vk.DescriptorSetLayout {
     warehouse.camera_buffer_set_layout,
+    warehouse.textures_set_layout,
     warehouse.bone_buffer_set_layout,
+    warehouse.material_buffer_set_layout,
+    warehouse.world_matrix_buffer_set_layout,
   }
   push_constant_range := [?]vk.PushConstantRange {
     {stageFlags = {.FRAGMENT, .VERTEX}, size = size_of(PushConstant)},
@@ -275,7 +278,10 @@ shadow_render :: proc(
   current_pipeline: vk.Pipeline = 0
   descriptor_sets := [?]vk.DescriptorSet {
     warehouse.camera_buffer_descriptor_set,
+    warehouse.textures_descriptor_set,
     warehouse.bone_buffer_descriptor_set,
+    warehouse.material_buffer_descriptor_set,
+    warehouse.world_matrix_descriptor_sets[frame_index],
   }
   vk.CmdBindDescriptorSets(
     command_buffer,
@@ -300,11 +306,12 @@ shadow_render :: proc(
       current_pipeline = pipeline
     }
     for batch_data in batch_group {
-      for node in batch_data.nodes {
+      for render_node in batch_data.nodes {
         render_single_shadow_node(
           command_buffer,
           self.pipeline_layout,
-          node,
+          render_node.node,
+          render_node.handle,
           is_skinned,
           shadow_target.camera.index,
           warehouse,
@@ -387,6 +394,7 @@ render_single_shadow_node :: proc(
   command_buffer: vk.CommandBuffer,
   layout: vk.PipelineLayout,
   node: ^Node,
+  node_handle: Handle,
   is_skinned: bool,
   camera_index: u32,
   warehouse: ^ResourceWarehouse,
@@ -398,9 +406,7 @@ render_single_shadow_node :: proc(
   mesh_skinning, mesh_has_skin := &mesh.skinning.?
   node_skinning, node_has_skin := mesh_attachment.skinning.?
   push_constant := PushConstant {
-    world        = geometry.transform_get_world_matrix_for_render(
-      &node.transform,
-    ),
+    node_id      = node_handle.index,
     camera_index = camera_index,
     material_id  = mesh_attachment.material.index,
   }

@@ -34,11 +34,10 @@ layout(set = 3, binding = 0) readonly buffer MaterialBuffer {
 
 // Push constant budget: 80 bytes
 layout(push_constant) uniform PushConstants {
-    mat4 world;
+    uint node_id;
     uint bone_matrix_offset;
     uint material_id;
     uint camera_index;
-    uint padding;
 };
 
 layout(location = 0) in vec3 position;

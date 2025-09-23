@@ -37,17 +37,21 @@ layout(set = 2, binding = 0) readonly buffer BoneMatrices {
     mat4 matrices[];
 } boneMatrices;
 
-// Push constant budget: 80 bytes
+layout(set = 4, binding = 0) readonly buffer WorldMatrices {
+    mat4 world_matrices[];
+};
+
+// Push constant budget: 64 bytes
 layout(push_constant) uniform PushConstants {
-    mat4 world;            // 64 bytes
+    uint node_id;            // 4
     uint bone_matrix_offset; // 4
-    uint material_id;     // 4
-    uint camera_index;     // 4
-    uint padding;          // 4 (pad to 80)
+    uint material_id;        // 4
+    uint camera_index;       // 4
 };
 
 void main() {
     Camera camera = camera_buffer.cameras[camera_index];
+    mat4 world = world_matrices[node_id];
     // Calculate position based on skinning
     vec4 modelPosition;
     vec3 modelNormal;

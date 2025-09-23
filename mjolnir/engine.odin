@@ -115,9 +115,14 @@ BatchKey :: struct {
 }
 
 // Batch data containing material and nodes
+RenderNodeRef :: struct {
+  handle: Handle,
+  node:   ^Node,
+}
+
 BatchData :: struct {
   material_handle: Handle,
-  nodes:           [dynamic]^Node,
+  nodes:           [dynamic]RenderNodeRef,
 }
 
 // RenderInput groups render batches and other per-frame data for the renderer.
@@ -945,6 +950,7 @@ generate_render_input :: proc(
   total_count: u32 = 0
   for &entry, i in self.scene.nodes.entries do if entry.active {
     node := &entry.item
+    node_handle := Handle{index = u32(i), generation = entry.generation}
     #partial switch data in node.attachment {
     case MeshAttachment:
       // Skip nodes that don't cast shadows when rendering shadow pass
@@ -987,12 +993,15 @@ generate_render_input :: proc(
       if batch_data == nil {
         new_batch := BatchData {
           material_handle = data.material,
-          nodes           = make([dynamic]^Node, context.temp_allocator),
+          nodes           = make([dynamic]RenderNodeRef, context.temp_allocator),
         }
         append(batch_group, new_batch)
         batch_data = &batch_group[len(batch_group) - 1]
       }
-      append(&batch_data.nodes, node)
+      append(&batch_data.nodes, RenderNodeRef{
+        handle = node_handle,
+        node   = node,
+      })
     }
   }
   // log.infof("generate_render_input: camera_slot=%d found=%v, visible=%d/%d objects",
@@ -1045,6 +1054,7 @@ render :: proc(self: ^Engine) -> vk.Result {
     log.errorf("Main camera not found")
     return .ERROR_UNKNOWN
   }
+  upload_world_matrices(&self.warehouse, &self.scene, self.frame_index)
   main_camera_index := main_render_target.camera.index
   camera_uniform := get_camera_uniform(&self.warehouse, main_camera_index)
   frustum := geometry.make_frustum(

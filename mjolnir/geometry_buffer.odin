@@ -6,13 +6,12 @@ import "gpu"
 import "resource"
 import vk "vendor:vulkan"
 
-// 128 byte push constant budget
+// 64 byte push constant budget
 PushConstant :: struct {
-  world:              matrix[4, 4]f32, // 64 bytes
-  bone_matrix_offset: u32, // 4
-  material_id:        u32, // 4
-  camera_index:       u32, // 4
-  padding:            u32, // 4
+  node_id:            u32,
+  bone_matrix_offset: u32,
+  material_id:        u32,
+  camera_index:       u32,
 }
 
 RendererGBuffer :: struct {
@@ -32,6 +31,7 @@ gbuffer_init :: proc(
     warehouse.textures_set_layout,
     warehouse.bone_buffer_set_layout,
     warehouse.material_buffer_set_layout,
+    warehouse.world_matrix_buffer_set_layout,
   }
   push_constant_range := vk.PushConstantRange {
     stageFlags = {.VERTEX, .FRAGMENT},
@@ -452,6 +452,7 @@ gbuffer_render :: proc(
     warehouse.textures_descriptor_set,
     warehouse.bone_buffer_descriptor_set,
     warehouse.material_buffer_descriptor_set,
+    warehouse.world_matrix_descriptor_sets[frame_index],
   }
   vk.CmdBindDescriptorSets(
     command_buffer,
@@ -485,14 +486,15 @@ gbuffer_render :: proc(
         batch_data.material_handle,
       )
       if !material_found do continue
-      for node in batch_data.nodes {
+      for render_node in batch_data.nodes {
+        node := render_node.node
         mesh_attachment := node.attachment.(MeshAttachment)
         mesh := resource.get(
           warehouse.meshes,
           mesh_attachment.handle,
         ) or_continue
         push_constants := PushConstant {
-          world        = get_world_matrix_for_render(node),
+          node_id      = render_node.handle.index,
           camera_index = render_target.camera.index,
           material_id  = batch_data.material_handle.index,
         }

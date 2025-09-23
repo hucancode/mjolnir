@@ -6,6 +6,7 @@ import "core:math"
 import "core:math/linalg"
 import "core:slice"
 import "geometry"
+import "gpu"
 import "resource"
 
 PointLightAttachment :: struct {
@@ -556,4 +557,26 @@ get_world_matrix :: proc {
 get_world_matrix_for_render :: proc {
     node_get_world_matrix_for_render,
     geometry.transform_get_world_matrix_for_render,
+}
+
+upload_world_matrices :: proc(
+  warehouse: ^ResourceWarehouse,
+  scene: ^Scene,
+  frame_index: u32,
+) {
+  if frame_index >= MAX_FRAMES_IN_FLIGHT {
+    return
+  }
+  matrices := gpu.data_buffer_get_all(&warehouse.world_matrix_buffers[frame_index])
+  if len(matrices) == 0 {
+    return
+  }
+  identity := linalg.MATRIX4F32_IDENTITY
+  for i in 0 ..< len(matrices) {
+    matrices[i] = identity
+  }
+  for &entry, idx in scene.nodes.entries do if entry.active {
+    if idx >= len(matrices) do continue
+    matrices[idx] = geometry.transform_get_world_matrix_for_render(&entry.item.transform)
+  }
 }
