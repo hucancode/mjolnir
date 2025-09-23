@@ -19,14 +19,9 @@ layout(set = 0, binding = 0) readonly buffer CameraBuffer {
 layout(push_constant) uniform PushConstants {
     mat4 world;
     uint bone_matrix_offset;
-    uint albedo_index;
-    uint metallic_roughness_index;
-    uint normal_index;
-    uint emissive_index;
-    float metallic_value;
-    float roughness_value;
-    float emissive_value;
+    uint material_id;
     uint camera_index;
+    uint padding;
 };
 
 void main() {

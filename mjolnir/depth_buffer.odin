@@ -168,6 +168,7 @@ depth_prepass_render :: proc(
           push_constant := PushConstant {
             world        = get_world_matrix_for_render(node),
             camera_index = camera_index,
+            material_id  = batch_data.material_handle.index,
           }
           if node_has_skin {
             push_constant.bone_matrix_offset =

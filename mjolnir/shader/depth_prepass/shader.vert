@@ -28,7 +28,9 @@ layout(set = 1, binding = 0) readonly buffer BoneBuffer {
 layout(push_constant) uniform PushConstant {
     mat4 world;
     uint bone_matrix_offset;
+    uint material_id;
     uint camera_index;
+    uint padding;
 };
 
 void main() {

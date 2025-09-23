@@ -658,4 +658,11 @@ custom_render :: proc(
   )
   if !ok do return
   portal_mat.albedo = get_albedo_texture(portal_rt, engine.frame_index)
+  sync_result := mjolnir.sync_material_gpu_data(
+    &engine.warehouse,
+    portal_material_handle,
+  )
+  if sync_result != .SUCCESS {
+    log.error("Failed to sync portal material GPU data", sync_result)
+  }
 }

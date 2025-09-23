@@ -38,6 +38,20 @@ MaterialType :: enum {
   TRANSPARENT,
 }
 
+MAX_MATERIALS :: 4096
+
+MaterialData :: struct {
+  albedo_index:             u32,
+  metallic_roughness_index: u32,
+  normal_index:             u32,
+  emissive_index:           u32,
+  metallic_value:           f32,
+  roughness_value:          f32,
+  emissive_value:           f32,
+  features:                 u32,
+  base_color_factor:        [4]f32,
+}
+
 Material :: struct {
   type:               MaterialType,
   features:           ShaderFeatureSet,

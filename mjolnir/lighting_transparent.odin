@@ -24,6 +24,7 @@ transparent_init :: proc(
     warehouse.camera_buffer_set_layout,
     warehouse.textures_set_layout,
     warehouse.bone_buffer_set_layout,
+    warehouse.material_buffer_set_layout,
   }
   push_constant_range := vk.PushConstantRange {
     stageFlags = {.VERTEX, .FRAGMENT},
@@ -515,6 +516,7 @@ transparent_render :: proc(
     warehouse.camera_buffer_descriptor_set,
     warehouse.textures_descriptor_set,
     warehouse.bone_buffer_descriptor_set,
+    warehouse.material_buffer_descriptor_set,
   }
   vk.CmdBindDescriptorSets(
     command_buffer,
@@ -539,10 +541,11 @@ transparent_render :: proc(
       )
       for batch_data in batch_group {
         // Process each batch of transparent materials
-        material := resource.get(
+        _, material_found := resource.get(
           warehouse.materials,
           batch_data.material_handle,
-        ) or_continue
+        )
+        if !material_found do continue
 
         // Render all nodes in this batch
         for node in batch_data.nodes {
@@ -555,30 +558,11 @@ transparent_render :: proc(
           ) or_continue
 
           push_constants := PushConstant {
-            world                    = get_world_matrix_for_render(node),
-            bone_matrix_offset       = 0,
-            camera_index             = render_target.camera.index,
-            albedo_index             = min(
-              MAX_TEXTURES - 1,
-              material.albedo.index,
-            ),
-            metallic_roughness_index = min(
-              MAX_TEXTURES - 1,
-              material.metallic_roughness.index,
-            ),
-            normal_index             = min(
-              MAX_TEXTURES - 1,
-              material.normal.index,
-            ),
-            emissive_index           = min(
-              MAX_TEXTURES - 1,
-              material.emissive.index,
-            ),
-            metallic_value           = material.metallic_value,
-            roughness_value          = material.roughness_value,
-            emissive_value           = material.emissive_value,
+            world              = get_world_matrix_for_render(node),
+            bone_matrix_offset = 0,
+            camera_index       = render_target.camera.index,
+            material_id        = batch_data.material_handle.index,
           }
-          // Set bone matrix offset if skinning is available
           if skinning, has_skinning := mesh_attachment.skinning.?;
              has_skinning {
             push_constants.bone_matrix_offset =
@@ -649,6 +633,7 @@ transparent_render :: proc(
           push_constant := PushConstant {
             world        = get_world_matrix_for_render(node),
             camera_index = render_target.camera.index,
+            material_id  = batch_data.material_handle.index,
           }
           // Set bone matrix offset if skinning is available
           if skinning, has_skinning := mesh_attachment.skinning.?;

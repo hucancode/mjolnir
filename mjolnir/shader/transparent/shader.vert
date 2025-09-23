@@ -37,19 +37,13 @@ layout(set = 2, binding = 0) readonly buffer BoneMatrices {
     mat4 matrices[];
 } boneMatrices;
 
-// Push constant budget: 128 bytes
+// Push constant budget: 80 bytes
 layout(push_constant) uniform PushConstants {
     mat4 world;            // 64 bytes
     uint bone_matrix_offset; // 4
-    uint albedo_index;     // 4
-    uint metallic_roughness_index; // 4
-    uint normal_index;     // 4
-    uint emissive_index;   // 4
-    float metallic_value;  // 4
-    float roughness_value; // 4
-    float emissive_value;  // 4
+    uint material_id;     // 4
     uint camera_index;     // 4
-    float padding[3];        // 12 (pad to 128)
+    uint padding;          // 4 (pad to 80)
 };
 
 void main() {

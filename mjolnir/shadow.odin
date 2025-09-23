@@ -402,6 +402,7 @@ render_single_shadow_node :: proc(
       &node.transform,
     ),
     camera_index = camera_index,
+    material_id  = mesh_attachment.material.index,
   }
   if is_skinned && node_has_skin {
     push_constant.bone_matrix_offset =

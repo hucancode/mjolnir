@@ -49,6 +49,11 @@ ResourceWarehouse :: struct {
   camera_buffer_descriptor_set: vk.DescriptorSet,
   camera_buffer:                gpu.DataBuffer(CameraUniform),
 
+  // Bindless material buffer system
+  material_buffer_set_layout:     vk.DescriptorSetLayout,
+  material_buffer_descriptor_set: vk.DescriptorSet,
+  material_buffer:                gpu.DataBuffer(MaterialData),
+
   // Dummy skinning buffer for static meshes
   dummy_skinning_buffer:        gpu.DataBuffer(geometry.SkinningData),
 
@@ -93,6 +98,7 @@ resource_init :: proc(
   init_global_samplers(gpu_context, warehouse)
   init_bone_matrix_allocator(gpu_context, warehouse) or_return
   init_camera_buffer(gpu_context, warehouse) or_return
+  init_material_buffer(gpu_context, warehouse) or_return
   init_bindless_buffers(gpu_context, warehouse) or_return
   // Textuwarehouse+samplers descriptor set
   textures_bindings := [?]vk.DescriptorSetLayoutBinding {
@@ -187,6 +193,7 @@ resource_deinit :: proc(
   gpu_context: ^gpu.GPUContext,
 ) {
   gpu.data_buffer_deinit(gpu_context, &warehouse.dummy_skinning_buffer)
+  deinit_material_buffer(gpu_context, warehouse)
   // Manually clean up each pool since callbacks can't capture gpu_context
   for &entry in warehouse.image_2d_buffers.entries {
     if entry.generation > 0 && entry.active {
@@ -467,6 +474,79 @@ init_camera_buffer :: proc(
 
   log.infof("Camera buffer initialized successfully")
   return .SUCCESS
+}
+
+init_material_buffer :: proc(
+  gpu_context: ^gpu.GPUContext,
+  warehouse: ^ResourceWarehouse,
+) -> vk.Result {
+  log.infof(
+    "Creating material buffer with capacity %d materials...",
+    MAX_MATERIALS,
+  )
+  warehouse.material_buffer = gpu.create_host_visible_buffer(
+    gpu_context,
+    MaterialData,
+    MAX_MATERIALS,
+    {.STORAGE_BUFFER},
+    nil,
+  ) or_return
+  material_bindings := [?]vk.DescriptorSetLayoutBinding {
+    {
+      binding = 0,
+      descriptorType = .STORAGE_BUFFER,
+      descriptorCount = 1,
+      stageFlags = {.VERTEX, .FRAGMENT},
+    },
+  }
+  vk.CreateDescriptorSetLayout(
+    gpu_context.device,
+    &vk.DescriptorSetLayoutCreateInfo {
+      sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+      bindingCount = len(material_bindings),
+      pBindings = raw_data(material_bindings[:]),
+    },
+    nil,
+    &warehouse.material_buffer_set_layout,
+  ) or_return
+  vk.AllocateDescriptorSets(
+    gpu_context.device,
+    &{
+      sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
+      descriptorPool = gpu_context.descriptor_pool,
+      descriptorSetCount = 1,
+      pSetLayouts = &warehouse.material_buffer_set_layout,
+    },
+    &warehouse.material_buffer_descriptor_set,
+  ) or_return
+  buffer_info := vk.DescriptorBufferInfo {
+    buffer = warehouse.material_buffer.buffer,
+    offset = 0,
+    range  = vk.DeviceSize(vk.WHOLE_SIZE),
+  }
+  write := vk.WriteDescriptorSet {
+    sType           = .WRITE_DESCRIPTOR_SET,
+    dstSet          = warehouse.material_buffer_descriptor_set,
+    dstBinding      = 0,
+    descriptorType  = .STORAGE_BUFFER,
+    descriptorCount = 1,
+    pBufferInfo     = &buffer_info,
+  }
+  vk.UpdateDescriptorSets(gpu_context.device, 1, &write, 0, nil)
+  return .SUCCESS
+}
+
+deinit_material_buffer :: proc(
+  gpu_context: ^gpu.GPUContext,
+  warehouse: ^ResourceWarehouse,
+) {
+  gpu.data_buffer_deinit(gpu_context, &warehouse.material_buffer)
+  vk.DestroyDescriptorSetLayout(
+    gpu_context.device,
+    warehouse.material_buffer_set_layout,
+    nil,
+  )
+  warehouse.material_buffer_set_layout = 0
 }
 
 // Get mutable reference to camera uniform in bindless buffer
@@ -838,6 +918,57 @@ create_mesh_handle :: proc(
   return h, ret == .SUCCESS
 }
 
+material_data_from_material :: proc(mat: ^Material) -> MaterialData {
+  return MaterialData {
+    albedo_index             = min(MAX_TEXTURES - 1, mat.albedo.index),
+    metallic_roughness_index = min(
+      MAX_TEXTURES - 1,
+      mat.metallic_roughness.index,
+    ),
+    normal_index             = min(MAX_TEXTURES - 1, mat.normal.index),
+    emissive_index           = min(MAX_TEXTURES - 1, mat.emissive.index),
+    metallic_value           = mat.metallic_value,
+    roughness_value          = mat.roughness_value,
+    emissive_value           = mat.emissive_value,
+    features                 = transmute(u32)mat.features,
+    base_color_factor        = mat.base_color_factor,
+  }
+}
+
+material_write_to_gpu :: proc(
+  warehouse: ^ResourceWarehouse,
+  handle: Handle,
+  mat: ^Material,
+) -> vk.Result {
+  if handle.index >= MAX_MATERIALS {
+    log.errorf(
+      "Material index %d exceeds capacity %d",
+      handle.index,
+      MAX_MATERIALS,
+    )
+    return .ERROR_OUT_OF_DEVICE_MEMORY
+  }
+  data := material_data_from_material(mat)
+  gpu.data_buffer_write_single(
+    &warehouse.material_buffer,
+    &data,
+    int(handle.index),
+  ) or_return
+  return .SUCCESS
+}
+
+sync_material_gpu_data :: proc(
+  warehouse: ^ResourceWarehouse,
+  handle: Handle,
+) -> vk.Result {
+  mat, ok := resource.get(warehouse.materials, handle)
+  if !ok {
+    log.errorf("Invalid material handle %v", handle)
+    return .ERROR_UNKNOWN
+  }
+  return material_write_to_gpu(warehouse, handle, mat)
+}
+
 create_material :: proc(
   warehouse: ^ResourceWarehouse,
   features: ShaderFeatureSet = {},
@@ -875,7 +1006,7 @@ create_material :: proc(
     mat.normal.index,
     mat.emissive.index,
   )
-  res = .SUCCESS
+  res = material_write_to_gpu(warehouse, ret, mat)
   return
 }
 
