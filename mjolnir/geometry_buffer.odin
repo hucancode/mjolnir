@@ -16,7 +16,7 @@ PushConstant :: struct {
 }
 
 RendererGBuffer :: struct {
-  pipelines:       [SHADER_VARIANT_COUNT]vk.Pipeline,
+  pipeline:        vk.Pipeline,
   pipeline_layout: vk.PipelineLayout,
 }
 
@@ -135,92 +135,42 @@ gbuffer_init :: proc(
     pColorAttachmentFormats = raw_data(color_formats[:]),
     depthAttachmentFormat   = depth_format,
   }
-  pipeline_infos: [SHADER_VARIANT_COUNT]vk.GraphicsPipelineCreateInfo
-  configs: [SHADER_VARIANT_COUNT]ShaderConfig
-  entries: [SHADER_VARIANT_COUNT][SHADER_OPTION_COUNT]vk.SpecializationMapEntry
-  spec_infos: [SHADER_VARIANT_COUNT]vk.SpecializationInfo
-  shader_stages: [SHADER_VARIANT_COUNT][2]vk.PipelineShaderStageCreateInfo
-  for mask in 0 ..< SHADER_VARIANT_COUNT {
-    features := transmute(ShaderFeatureSet)mask
-    configs[mask] = {
-      has_albedo_texture             = .ALBEDO_TEXTURE in features,
-      has_metallic_roughness_texture = .METALLIC_ROUGHNESS_TEXTURE in features,
-      has_normal_texture             = .NORMAL_TEXTURE in features,
-      has_emissive_texture           = .EMISSIVE_TEXTURE in features,
-      has_occlusion_texture          = .OCCLUSION_TEXTURE in features,
-    }
-    entries[mask] = [SHADER_OPTION_COUNT]vk.SpecializationMapEntry {
-      {
-        constantID = 0,
-        offset = u32(offset_of(ShaderConfig, has_albedo_texture)),
-        size = size_of(b32),
-      },
-      {
-        constantID = 1,
-        offset = u32(offset_of(ShaderConfig, has_metallic_roughness_texture)),
-        size = size_of(b32),
-      },
-      {
-        constantID = 2,
-        offset = u32(offset_of(ShaderConfig, has_normal_texture)),
-        size = size_of(b32),
-      },
-      {
-        constantID = 3,
-        offset = u32(offset_of(ShaderConfig, has_emissive_texture)),
-        size = size_of(b32),
-      },
-      {
-        constantID = 4,
-        offset = u32(offset_of(ShaderConfig, has_occlusion_texture)),
-        size = size_of(b32),
-      },
-    }
-    spec_infos[mask] = {
-      mapEntryCount = len(entries[mask]),
-      pMapEntries   = raw_data(entries[mask][:]),
-      dataSize      = size_of(ShaderConfig),
-      pData         = &configs[mask],
-    }
-    shader_stages[mask] = [?]vk.PipelineShaderStageCreateInfo {
-      {
-        sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
-        stage = {.VERTEX},
-        module = vert_module,
-        pName = "main",
-        pSpecializationInfo = &spec_infos[mask],
-      },
-      {
-        sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
-        stage = {.FRAGMENT},
-        module = frag_module,
-        pName = "main",
-        pSpecializationInfo = &spec_infos[mask],
-      },
-    }
-    pipeline_infos[mask] = {
-      sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
-      stageCount          = len(shader_stages[mask]),
-      pStages             = raw_data(shader_stages[mask][:]),
-      pVertexInputState   = &vertex_input_info,
-      pInputAssemblyState = &input_assembly,
-      pViewportState      = &viewport_state,
-      pRasterizationState = &rasterizer,
-      pMultisampleState   = &multisampling,
-      pDepthStencilState  = &depth_stencil,
-      pColorBlendState    = &color_blending,
-      pDynamicState       = &dynamic_state,
-      layout              = self.pipeline_layout,
-      pNext               = &rendering_info,
-    }
+  shader_stages := [?]vk.PipelineShaderStageCreateInfo {
+    {
+      sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
+      stage = {.VERTEX},
+      module = vert_module,
+      pName = "main",
+    },
+    {
+      sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
+      stage = {.FRAGMENT},
+      module = frag_module,
+      pName = "main",
+    },
+  }
+  pipeline_info := vk.GraphicsPipelineCreateInfo {
+    sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
+    stageCount          = len(shader_stages),
+    pStages             = raw_data(shader_stages[:]),
+    pVertexInputState   = &vertex_input_info,
+    pInputAssemblyState = &input_assembly,
+    pViewportState      = &viewport_state,
+    pRasterizationState = &rasterizer,
+    pMultisampleState   = &multisampling,
+    pDepthStencilState  = &depth_stencil,
+    pColorBlendState    = &color_blending,
+    pDynamicState       = &dynamic_state,
+    layout              = self.pipeline_layout,
+    pNext               = &rendering_info,
   }
   vk.CreateGraphicsPipelines(
     gpu_context.device,
     0,
-    len(pipeline_infos),
-    raw_data(pipeline_infos[:]),
+    1,
+    &pipeline_info,
     nil,
-    raw_data(self.pipelines[:]),
+    &self.pipeline,
   ) or_return
   log.info("G-buffer renderer initialized successfully")
   return .SUCCESS
@@ -463,21 +413,12 @@ gbuffer_render :: proc(
     0,
     nil,
   )
+  vk.CmdBindPipeline(command_buffer, .GRAPHICS, self.pipeline)
   rendered := 0
-  current_pipeline: vk.Pipeline = 0
   for batch_key, batch_group in render_input.batches {
     if batch_key.material_type == .TRANSPARENT ||
        batch_key.material_type == .WIREFRAME {
       continue
-    }
-    sample_material := resource.get(
-      warehouse.materials,
-      batch_group[0].material_handle,
-    ) or_continue
-    pipeline := gbuffer_get_pipeline(self, sample_material.features)
-    if pipeline != current_pipeline {
-      vk.CmdBindPipeline(command_buffer, .GRAPHICS, pipeline)
-      current_pipeline = pipeline
     }
     for batch_data in batch_group {
       _, material_found := resource.get(
@@ -543,16 +484,9 @@ gbuffer_render :: proc(
   }
 }
 
-gbuffer_get_pipeline :: proc(
-  self: ^RendererGBuffer,
-  features: ShaderFeatureSet = {},
-) -> vk.Pipeline {
-  return self.pipelines[transmute(u32)features]
-}
-
 gbuffer_deinit :: proc(self: ^RendererGBuffer, gpu_context: ^gpu.GPUContext) {
-  for pipeline in self.pipelines {
-    vk.DestroyPipeline(gpu_context.device, pipeline, nil)
+  if self.pipeline != 0 {
+    vk.DestroyPipeline(gpu_context.device, self.pipeline, nil)
   }
   vk.DestroyPipelineLayout(gpu_context.device, self.pipeline_layout, nil)
 }

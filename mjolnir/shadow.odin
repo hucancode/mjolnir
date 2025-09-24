@@ -11,7 +11,7 @@ SHADER_SHADOW_FRAG :: #load("shader/shadow/frag.spv")
 
 RendererShadow :: struct {
   pipeline_layout: vk.PipelineLayout,
-  pipelines:       [SHADOW_SHADER_VARIANT_COUNT]vk.Pipeline,
+  pipeline:        vk.Pipeline,
 }
 
 shadow_init :: proc(
@@ -141,15 +141,15 @@ shadow_init :: proc(
     1,
     &pipeline_info,
     nil,
-    &self.pipelines[0],
+    &self.pipeline,
   ) or_return
   return .SUCCESS
 }
 
 shadow_deinit :: proc(self: ^RendererShadow, gpu_context: ^gpu.GPUContext) {
-  for &p in self.pipelines {
-    vk.DestroyPipeline(gpu_context.device, p, nil)
-    p = 0
+  if self.pipeline != 0 {
+    vk.DestroyPipeline(gpu_context.device, self.pipeline, nil)
+    self.pipeline = 0
   }
   vk.DestroyPipelineLayout(gpu_context.device, self.pipeline_layout, nil)
   self.pipeline_layout = 0
@@ -355,7 +355,7 @@ shadow_get_pipeline :: proc(
   self: ^RendererShadow,
   _: ShaderFeatureSet = {},
 ) -> vk.Pipeline {
-  return self.pipelines[0]
+  return self.pipeline
 }
 
 render_single_shadow_node :: proc(

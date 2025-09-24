@@ -14,7 +14,7 @@ DEPTH_PREPASS_VARIANT_COUNT: u32 : 1 << DEPTH_PREPASS_OPTION_COUNT
 
 RendererDepthPrepass :: struct {
   pipeline_layout: vk.PipelineLayout,
-  pipelines:       [DEPTH_PREPASS_VARIANT_COUNT]vk.Pipeline,
+  pipeline:        vk.Pipeline,
 }
 
 depth_prepass_init :: proc(
@@ -54,7 +54,7 @@ depth_prepass_init :: proc(
   depth_prepass_build_pipeline(
     gpu_context,
     self,
-    &self.pipelines[0],
+    &self.pipeline,
     swapchain_extent,
   ) or_return
   return .SUCCESS
@@ -64,9 +64,9 @@ depth_prepass_deinit :: proc(
   self: ^RendererDepthPrepass,
   gpu_context: ^gpu.GPUContext,
 ) {
-  for &p in self.pipelines {
-    vk.DestroyPipeline(gpu_context.device, p, nil)
-    p = 0
+  if self.pipeline != 0 {
+    vk.DestroyPipeline(gpu_context.device, self.pipeline, nil)
+    self.pipeline = 0
   }
   vk.DestroyPipelineLayout(gpu_context.device, self.pipeline_layout, nil)
   self.pipeline_layout = 0
@@ -217,7 +217,7 @@ depth_prepass_get_pipeline :: proc(
   _: ^Mesh,
   _: MeshAttachment,
 ) -> vk.Pipeline {
-  return self.pipelines[0]
+  return self.pipeline
 }
 
 depth_prepass_build_pipeline :: proc(

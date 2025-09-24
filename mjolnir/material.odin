@@ -2,11 +2,6 @@ package mjolnir
 
 import "core:log"
 
-SHADOW_SHADER_OPTION_COUNT: u32 : 0
-SHADOW_SHADER_VARIANT_COUNT: u32 : 1 << SHADOW_SHADER_OPTION_COUNT
-
-ShadowShaderConfig :: struct {}
-
 ShaderFeatures :: enum {
   ALBEDO_TEXTURE             = 0,
   METALLIC_ROUGHNESS_TEXTURE = 1,
@@ -16,16 +11,6 @@ ShaderFeatures :: enum {
 }
 
 ShaderFeatureSet :: bit_set[ShaderFeatures;u32]
-SHADER_OPTION_COUNT: u32 : len(ShaderFeatures)
-SHADER_VARIANT_COUNT: u32 : 1 << SHADER_OPTION_COUNT
-
-ShaderConfig :: struct {
-  has_albedo_texture:             b32,
-  has_metallic_roughness_texture: b32,
-  has_normal_texture:             b32,
-  has_emissive_texture:           b32,
-  has_occlusion_texture:          b32,
-}
 
 MaterialType :: enum {
   PBR,
