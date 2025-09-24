@@ -45,12 +45,20 @@ layout(set = 3, binding = 0) readonly buffer MaterialBuffer {
     MaterialData materials[];
 };
 
+struct NodeData {
+    uint material_id;
+    uint mesh_id;
+    uint bone_matrix_offset;
+    uint _padding;
+};
+
+layout(set = 5, binding = 0) readonly buffer NodeBuffer {
+    NodeData nodes[];
+};
+
 // Push constant budget: 80 bytes
 layout(push_constant) uniform PushConstants {
     uint node_id;
-    uint bone_matrix_offset;
-    uint material_id;
-    uint mesh_id;
     uint camera_index;
 };
 
@@ -98,7 +106,8 @@ vec3 fresnelSchlickRoughness(float cosTheta, vec3 F0, float roughness) {
 }
 
 void main() {
-    MaterialData material = materials[material_id];
+    NodeData node = nodes[node_id];
+    MaterialData material = materials[node.material_id];
     bool has_albedo = (material.features & FEATURE_ALBEDO_TEXTURE) != 0u;
     bool has_mr = (material.features & FEATURE_METALLIC_ROUGHNESS_TEXTURE) != 0u;
     bool has_normal = (material.features & FEATURE_NORMAL_TEXTURE) != 0u;

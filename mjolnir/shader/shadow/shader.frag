@@ -18,9 +18,6 @@ layout(set = 0, binding = 0) readonly buffer CameraBuffer {
 
 layout(push_constant) uniform PushConstants {
     uint node_id;
-    uint bone_matrix_offset;
-    uint material_id;
-    uint mesh_id;
     uint camera_index;
 };
 

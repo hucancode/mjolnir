@@ -28,6 +28,17 @@ layout(set = 4, binding = 0) readonly buffer WorldMatrices {
     mat4 world_matrices[];
 };
 
+struct NodeData {
+    uint material_id;
+    uint mesh_id;
+    uint bone_matrix_offset;
+    uint _padding;
+};
+
+layout(set = 5, binding = 0) readonly buffer NodeBuffer {
+    NodeData nodes[];
+};
+
 struct MeshData {
     vec3 aabb_min;
     uint is_skinned;
@@ -35,7 +46,7 @@ struct MeshData {
     uint vertex_skinning_offset;
 };
 
-layout(set = 5, binding = 0) readonly buffer MeshBuffer {
+layout(set = 6, binding = 0) readonly buffer MeshBuffer {
     MeshData meshes[];
 };
 
@@ -44,15 +55,12 @@ struct VertexSkinningData {
     vec4 weights;
 };
 
-layout(set = 6, binding = 0) readonly buffer VertexSkinningBuffer {
+layout(set = 7, binding = 0) readonly buffer VertexSkinningBuffer {
     VertexSkinningData vertex_skinning[];
 };
 
 layout(push_constant) uniform PushConstants {
     uint node_id;
-    uint bone_matrix_offset;
-    uint material_id;
-    uint mesh_id;
     uint camera_index;
 };
 
@@ -65,15 +73,16 @@ layout(location = 4) out vec4 outTangent;
 void main() {
     Camera camera = cameras[camera_index];
     mat4 world = world_matrices[node_id];
-    MeshData mesh = meshes[mesh_id];
+    NodeData node = nodes[node_id];
+    MeshData mesh = meshes[node.mesh_id];
 
     vec4 modelPosition;
     vec3 modelNormal;
     vec4 modelTangent;
-    if (mesh.is_skinned != 0u) {
+    if (mesh.is_skinned != 0u && node.bone_matrix_offset != 0xFFFFFFFFu) {
         uint vertex_index = mesh.vertex_skinning_offset + gl_VertexIndex;
         VertexSkinningData skin = vertex_skinning[vertex_index];
-        uvec4 indices = skin.joints + uvec4(bone_matrix_offset);
+        uvec4 indices = skin.joints + uvec4(node.bone_matrix_offset);
         mat4 skinMatrix =
             skin.weights.x * bones[indices.x] +
             skin.weights.y * bones[indices.y] +

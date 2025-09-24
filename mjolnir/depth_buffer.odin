@@ -35,6 +35,7 @@ depth_prepass_init :: proc(
     warehouse.bone_buffer_set_layout,
     warehouse.material_buffer_set_layout,
     warehouse.world_matrix_buffer_set_layout,
+    warehouse.node_data_buffer_set_layout,
     warehouse.mesh_data_buffer_set_layout,
     warehouse.vertex_skinning_buffer_set_layout,
   }
@@ -132,6 +133,7 @@ depth_prepass_render :: proc(
     warehouse.bone_buffer_descriptor_set,
     warehouse.material_buffer_descriptor_set,
     warehouse.world_matrix_descriptor_sets[frame_index],
+    warehouse.node_data_descriptor_set,
     warehouse.mesh_data_descriptor_set,
     warehouse.vertex_skinning_descriptor_set,
   }
@@ -145,38 +147,26 @@ depth_prepass_render :: proc(
     0,
     nil,
   )
-  current_pipeline: vk.Pipeline = 0
+  vk.CmdBindPipeline(command_buffer, .GRAPHICS, self.pipeline)
   for batch_key, batch_group in render_input.batches {
     if batch_key.material_type == .WIREFRAME ||
        batch_key.material_type == .TRANSPARENT {
       continue
     }
     for batch_data in batch_group {
-      material := resource.get(
+      _, material_found := resource.get(
         warehouse.materials,
         batch_data.material_handle,
-      ) or_continue
+      )
+      if !material_found do continue
       for render_node in batch_data.nodes {
         node := render_node.node
         #partial switch data in node.attachment {
         case MeshAttachment:
           mesh := mesh(warehouse, data.handle) or_continue
-          node_skinning, node_has_skin := data.skinning.?
-          pipeline := depth_prepass_get_pipeline(self, material, mesh, data)
-          if pipeline != current_pipeline {
-            vk.CmdBindPipeline(command_buffer, .GRAPHICS, pipeline)
-            current_pipeline = pipeline
-          }
           push_constant := PushConstant {
             node_id      = render_node.handle.index,
             camera_index = camera_index,
-            material_id  = batch_data.material_handle.index,
-            mesh_id      = data.handle.index,
-          }
-          if node_has_skin {
-            push_constant.bone_matrix_offset =
-              node_skinning.bone_matrix_offset +
-              frame_index * warehouse.bone_matrix_slab.capacity
           }
           vk.CmdPushConstants(
             command_buffer,
@@ -209,15 +199,6 @@ depth_prepass_render :: proc(
     }
   }
   return rendered_count
-}
-
-depth_prepass_get_pipeline :: proc(
-  self: ^RendererDepthPrepass,
-  _: ^Material,
-  _: ^Mesh,
-  _: MeshAttachment,
-) -> vk.Pipeline {
-  return self.pipeline
 }
 
 depth_prepass_build_pipeline :: proc(

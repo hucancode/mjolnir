@@ -81,6 +81,13 @@ NodeAttachment :: union {
   NavMeshObstacleAttachment,
 }
 
+NodeData :: struct {
+  material_id:        u32,
+  mesh_id:            u32,
+  bone_matrix_offset: u32,
+  _padding:           u32,
+}
+
 Node :: struct {
   parent:          Handle,
   children:        [dynamic]Handle,
@@ -568,6 +575,7 @@ upload_world_matrices :: proc(
     return
   }
   matrices := gpu.data_buffer_get_all(&warehouse.world_matrix_buffers[frame_index])
+  node_datas := gpu.data_buffer_get_all(&warehouse.node_data_buffer)
   if len(matrices) == 0 {
     return
   }
@@ -575,8 +583,33 @@ upload_world_matrices :: proc(
   for i in 0 ..< len(matrices) {
     matrices[i] = identity
   }
+  default_node := NodeData {
+    material_id        = 0xFFFFFFFF,
+    mesh_id            = 0xFFFFFFFF,
+    bone_matrix_offset = 0xFFFFFFFF,
+  }
+  for i in 0 ..< len(node_datas) {
+    node_datas[i] = default_node
+  }
   for &entry, idx in scene.nodes.entries do if entry.active {
     if idx >= len(matrices) do continue
     matrices[idx] = geometry.transform_get_world_matrix_for_render(&entry.item.transform)
+    if idx >= len(node_datas) do continue
+    mesh_attachment, has_mesh := entry.item.attachment.(MeshAttachment)
+    if !has_mesh {
+      continue
+    }
+    node_data := &node_datas[idx]
+    node_data.material_id = mesh_attachment.material.index
+    node_data.mesh_id = mesh_attachment.handle.index
+    if skinning, has_skinning := mesh_attachment.skinning.?; has_skinning {
+      node_data.bone_matrix_offset = get_frame_bone_matrix_offset(
+        warehouse,
+        skinning.bone_matrix_offset,
+        frame_index,
+      )
+    } else {
+      node_data.bone_matrix_offset = 0xFFFFFFFF
+    }
   }
 }

@@ -26,6 +26,7 @@ shadow_init :: proc(
     warehouse.bone_buffer_set_layout,
     warehouse.material_buffer_set_layout,
     warehouse.world_matrix_buffer_set_layout,
+    warehouse.node_data_buffer_set_layout,
     warehouse.mesh_data_buffer_set_layout,
     warehouse.vertex_skinning_buffer_set_layout,
   }
@@ -252,13 +253,13 @@ shadow_render :: proc(
   warehouse: ^ResourceWarehouse,
   frame_index: u32,
 ) {
-  current_pipeline: vk.Pipeline = 0
   descriptor_sets := [?]vk.DescriptorSet {
     warehouse.camera_buffer_descriptor_set,
     warehouse.textures_descriptor_set,
     warehouse.bone_buffer_descriptor_set,
     warehouse.material_buffer_descriptor_set,
     warehouse.world_matrix_descriptor_sets[frame_index],
+    warehouse.node_data_descriptor_set,
     warehouse.mesh_data_descriptor_set,
     warehouse.vertex_skinning_descriptor_set,
   }
@@ -272,13 +273,9 @@ shadow_render :: proc(
     0,
     nil,
   )
+  vk.CmdBindPipeline(command_buffer, .GRAPHICS, self.pipeline)
   rendered_count := 0
   for _, batch_group in render_input.batches {
-    pipeline := shadow_get_pipeline(self)
-    if pipeline != current_pipeline {
-      vk.CmdBindPipeline(command_buffer, .GRAPHICS, pipeline)
-      current_pipeline = pipeline
-    }
     for batch_data in batch_group {
       for render_node in batch_data.nodes {
         render_single_shadow_node(
@@ -351,13 +348,6 @@ shadow_end :: proc(
   )
 }
 
-shadow_get_pipeline :: proc(
-  self: ^RendererShadow,
-  _: ShaderFeatureSet = {},
-) -> vk.Pipeline {
-  return self.pipeline
-}
-
 render_single_shadow_node :: proc(
   command_buffer: vk.CommandBuffer,
   layout: vk.PipelineLayout,
@@ -370,17 +360,9 @@ render_single_shadow_node :: proc(
   mesh_attachment := node.attachment.(MeshAttachment)
   mesh, found_mesh := mesh(warehouse, mesh_attachment.handle)
   if !found_mesh do return
-  node_skinning, node_has_skin := mesh_attachment.skinning.?
   push_constant := PushConstant {
     node_id      = node_handle.index,
     camera_index = camera_index,
-    material_id  = mesh_attachment.material.index,
-    mesh_id      = mesh_attachment.handle.index,
-  }
-  if node_has_skin {
-    push_constant.bone_matrix_offset =
-      node_skinning.bone_matrix_offset +
-      frame_index * warehouse.bone_matrix_slab.capacity
   }
   vk.CmdPushConstants(
     command_buffer,

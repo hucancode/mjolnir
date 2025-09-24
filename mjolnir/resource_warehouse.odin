@@ -59,6 +59,11 @@ ResourceWarehouse :: struct {
   world_matrix_descriptor_sets:     [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
   world_matrix_buffers:             [MAX_FRAMES_IN_FLIGHT]gpu.DataBuffer(matrix[4, 4]f32),
 
+  // Bindless node data buffer system
+  node_data_buffer_set_layout:    vk.DescriptorSetLayout,
+  node_data_descriptor_set:       vk.DescriptorSet,
+  node_data_buffer:               gpu.DataBuffer(NodeData),
+
   // Bindless mesh data buffer system
   mesh_data_buffer_set_layout:    vk.DescriptorSetLayout,
   mesh_data_descriptor_set:       vk.DescriptorSet,
@@ -114,6 +119,7 @@ resource_init :: proc(
   init_camera_buffer(gpu_context, warehouse) or_return
   init_material_buffer(gpu_context, warehouse) or_return
   init_world_matrix_buffers(gpu_context, warehouse) or_return
+  init_node_data_buffer(gpu_context, warehouse) or_return
   init_mesh_data_buffer(gpu_context, warehouse) or_return
   init_vertex_skinning_buffer(gpu_context, warehouse) or_return
   init_bindless_buffers(gpu_context, warehouse) or_return
@@ -272,6 +278,7 @@ resource_deinit :: proc(
   deinit_global_samplers(gpu_context, warehouse)
   deinit_bone_matrix_allocator(gpu_context, warehouse)
   deinit_camera_buffer(gpu_context, warehouse)
+  deinit_node_data_buffer(gpu_context, warehouse)
   deinit_mesh_data_buffer(gpu_context, warehouse)
   deinit_vertex_skinning_buffer(gpu_context, warehouse)
   deinit_bindless_buffers(gpu_context, warehouse)
@@ -646,6 +653,87 @@ deinit_world_matrix_buffers :: proc(
   warehouse.world_matrix_buffer_set_layout = 0
 }
 
+init_node_data_buffer :: proc(
+  gpu_context: ^gpu.GPUContext,
+  warehouse: ^ResourceWarehouse,
+) -> vk.Result {
+  log.infof(
+    "Creating node data buffer with capacity %d nodes...",
+    NODE_DATA_CAPACITY,
+  )
+  warehouse.node_data_buffer = gpu.create_host_visible_buffer(
+    gpu_context,
+    NodeData,
+    NODE_DATA_CAPACITY,
+    {.STORAGE_BUFFER},
+    nil,
+  ) or_return
+  node_slice := gpu.data_buffer_get_all(&warehouse.node_data_buffer)
+  default_node := NodeData {
+    material_id        = 0xFFFFFFFF,
+    mesh_id            = 0xFFFFFFFF,
+    bone_matrix_offset = 0xFFFFFFFF,
+  }
+  for &node in node_slice do node = default_node
+  bindings := [?]vk.DescriptorSetLayoutBinding {
+    {
+      binding = 0,
+      descriptorType = .STORAGE_BUFFER,
+      descriptorCount = 1,
+      stageFlags = {.VERTEX, .FRAGMENT},
+    },
+  }
+  vk.CreateDescriptorSetLayout(
+    gpu_context.device,
+    &vk.DescriptorSetLayoutCreateInfo {
+      sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+      bindingCount = len(bindings),
+      pBindings = raw_data(bindings[:]),
+    },
+    nil,
+    &warehouse.node_data_buffer_set_layout,
+  ) or_return
+  vk.AllocateDescriptorSets(
+    gpu_context.device,
+    &vk.DescriptorSetAllocateInfo {
+      sType              = .DESCRIPTOR_SET_ALLOCATE_INFO,
+      descriptorPool     = gpu_context.descriptor_pool,
+      descriptorSetCount = 1,
+      pSetLayouts        = &warehouse.node_data_buffer_set_layout,
+    },
+    &warehouse.node_data_descriptor_set,
+  ) or_return
+  buffer_info := vk.DescriptorBufferInfo {
+    buffer = warehouse.node_data_buffer.buffer,
+    offset = 0,
+    range  = vk.DeviceSize(vk.WHOLE_SIZE),
+  }
+  write := vk.WriteDescriptorSet {
+    sType           = .WRITE_DESCRIPTOR_SET,
+    dstSet          = warehouse.node_data_descriptor_set,
+    dstBinding      = 0,
+    descriptorType  = .STORAGE_BUFFER,
+    descriptorCount = 1,
+    pBufferInfo     = &buffer_info,
+  }
+  vk.UpdateDescriptorSets(gpu_context.device, 1, &write, 0, nil)
+  return .SUCCESS
+}
+
+deinit_node_data_buffer :: proc(
+  gpu_context: ^gpu.GPUContext,
+  warehouse: ^ResourceWarehouse,
+) {
+  gpu.data_buffer_deinit(gpu_context, &warehouse.node_data_buffer)
+  vk.DestroyDescriptorSetLayout(
+    gpu_context.device,
+    warehouse.node_data_buffer_set_layout,
+    nil,
+  )
+  warehouse.node_data_buffer_set_layout = 0
+  warehouse.node_data_descriptor_set = 0
+}
+
 init_mesh_data_buffer :: proc(
   gpu_context: ^gpu.GPUContext,
   warehouse: ^ResourceWarehouse,
@@ -992,6 +1080,7 @@ deinit_bone_matrix_allocator :: proc(
 }
 
 WORLD_MATRIX_CAPACITY :: MAX_NODES_IN_SCENE
+NODE_DATA_CAPACITY :: MAX_NODES_IN_SCENE
 
 BINDLESS_VERTEX_BUFFER_SIZE :: 128 * 1024 * 1024 // 128MB
 BINDLESS_INDEX_BUFFER_SIZE :: 64 * 1024 * 1024 // 64MB

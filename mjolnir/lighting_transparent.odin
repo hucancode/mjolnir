@@ -25,6 +25,7 @@ transparent_init :: proc(
     warehouse.bone_buffer_set_layout,
     warehouse.material_buffer_set_layout,
     warehouse.world_matrix_buffer_set_layout,
+    warehouse.node_data_buffer_set_layout,
     warehouse.mesh_data_buffer_set_layout,
     warehouse.vertex_skinning_buffer_set_layout,
   }
@@ -417,6 +418,7 @@ transparent_render :: proc(
     warehouse.bone_buffer_descriptor_set,
     warehouse.material_buffer_descriptor_set,
     warehouse.world_matrix_descriptor_sets[frame_index],
+    warehouse.node_data_descriptor_set,
     warehouse.mesh_data_descriptor_set,
     warehouse.vertex_skinning_descriptor_set,
   }
@@ -454,17 +456,8 @@ transparent_render :: proc(
           ) or_continue
 
           push_constants := PushConstant {
-            node_id            = render_node.handle.index,
-            bone_matrix_offset = 0,
-            camera_index       = render_target.camera.index,
-            material_id        = batch_data.material_handle.index,
-            mesh_id            = mesh_attachment.handle.index,
-          }
-          if skinning, has_skinning := mesh_attachment.skinning.?;
-             has_skinning {
-            push_constants.bone_matrix_offset =
-              skinning.bone_matrix_offset +
-              frame_index * warehouse.bone_matrix_slab.capacity
+            node_id      = render_node.handle.index,
+            camera_index = render_target.camera.index,
           }
           // Push constants
           vk.CmdPushConstants(
@@ -524,15 +517,6 @@ transparent_render :: proc(
           push_constant := PushConstant {
             node_id      = render_node.handle.index,
             camera_index = render_target.camera.index,
-            material_id  = batch_data.material_handle.index,
-            mesh_id      = mesh_attachment.handle.index,
-          }
-          // Set bone matrix offset if skinning is available
-          if skinning, has_skinning := mesh_attachment.skinning.?;
-             has_skinning {
-            push_constant.bone_matrix_offset =
-              skinning.bone_matrix_offset +
-              frame_index * warehouse.bone_matrix_slab.capacity
           }
 
           // Push constants

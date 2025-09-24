@@ -32,11 +32,19 @@ layout(set = 3, binding = 0) readonly buffer MaterialBuffer {
     MaterialData materials[];
 };
 
-layout(push_constant) uniform PushConstants {
-    uint node_id;
-    uint bone_matrix_offset;
+struct NodeData {
     uint material_id;
     uint mesh_id;
+    uint bone_matrix_offset;
+    uint _padding;
+};
+
+layout(set = 5, binding = 0) readonly buffer NodeBuffer {
+    NodeData nodes[];
+};
+
+layout(push_constant) uniform PushConstants {
+    uint node_id;
     uint camera_index;
 };
 
@@ -53,7 +61,8 @@ layout(location = 3) out vec4 outMetallicRoughness;
 layout(location = 4) out vec4 outEmissive;
 
 void main() {
-    MaterialData material = materials[material_id];
+    NodeData node = nodes[node_id];
+    MaterialData material = materials[node.material_id];
     bool has_normal = (material.features & FEATURE_NORMAL_TEXTURE) != 0u;
     bool has_albedo = (material.features & FEATURE_ALBEDO_TEXTURE) != 0u;
     bool has_mr = (material.features & FEATURE_METALLIC_ROUGHNESS_TEXTURE) != 0u;
