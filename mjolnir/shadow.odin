@@ -186,7 +186,6 @@ shadow_begin :: proc(
     {.DEPTH_STENCIL_ATTACHMENT_WRITE},
     layer_count,
   )
-
   depth_attachment := vk.RenderingAttachmentInfoKHR {
     sType = .RENDERING_ATTACHMENT_INFO_KHR,
     imageView = depth_image_view,

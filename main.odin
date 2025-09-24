@@ -168,7 +168,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
       MeshAttachment {
         handle = ground_mesh_handle,
         material = ground_mat_handle,
-        cast_shadow = true,
       },
     )
     scale(ground_node, size)
@@ -181,7 +180,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
         cast_shadow = true,
       },
     )
-    translate(left_wall, x = size)
+    translate(left_wall, x = size, y = size)
     rotate(left_wall, math.PI * 0.5, linalg.VECTOR3F32_Z_AXIS)
     scale(left_wall, size)
     // Right wall
@@ -193,7 +192,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
         cast_shadow = true,
       },
     )
-    translate(right_wall, x = -size)
+    translate(right_wall, x = -size, y = size)
     rotate(right_wall, -math.PI * 0.5, linalg.VECTOR3F32_Z_AXIS)
     scale(right_wall, size)
     // Back wall
@@ -202,24 +201,22 @@ setup :: proc(engine: ^mjolnir.Engine) {
       MeshAttachment {
         handle = ground_mesh_handle,
         material = ground_mat_handle,
-        cast_shadow = false,
       },
     )
     translate(back_wall, y = size, z = -size)
     rotate(back_wall, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
     scale(back_wall, size)
     // // Ceiling
-    // _, ceiling := spawn(
-    //   &engine.scene,
-    //   MeshAttachment {
-    //     handle = ground_mesh_handle,
-    //     material = ground_mat_handle,
-    //     cast_shadow = true,
-    //   },
-    // )
-    // translate(ceiling, y = size)
-    // rotate(ceiling, -math.PI, linalg.VECTOR3F32_X_AXIS)
-    // scale(ceiling, size)
+    _, ceiling := spawn(
+      &engine.scene,
+      MeshAttachment {
+        handle = ground_mesh_handle,
+        material = ground_mat_handle,
+      },
+    )
+    translate(ceiling, y = 2*size)
+    rotate(ceiling, -math.PI, linalg.VECTOR3F32_X_AXIS)
+    scale(ceiling, size)
   }
   if true {
     log.info("loading Hammer GLTF...")
@@ -628,19 +625,14 @@ custom_render :: proc(
     &engine.warehouse,
     portal_rt.camera.index,
   )
-  portal_include := mjolnir.NodeFlagSet{.VISIBLE}
-  portal_exclude := mjolnir.NodeFlagSet{
-    .MATERIAL_TRANSPARENT,
-    .MATERIAL_WIREFRAME,
-  }
   mjolnir.visibility_culler_dispatch(
     &engine.visibility_culler,
     &engine.gpu_context,
     command_buffer,
     engine.frame_index,
     portal_rt.camera.index,
-    portal_include,
-    portal_exclude,
+    {.VISIBLE},
+    {.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME},
   )
   portal_draw_buffer := mjolnir.visibility_culler_command_buffer(
     &engine.visibility_culler,

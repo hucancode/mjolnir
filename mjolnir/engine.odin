@@ -197,8 +197,11 @@ Engine :: struct {
   ui:                          RendererUI,
   navmesh:                     RendererNavMesh,
   command_buffers:             [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
-  // Parallel shadow command buffers
-  shadow_command_buffers:      [MAX_FRAMES_IN_FLIGHT][MAX_SHADOW_MAPS]vk.CommandBuffer,
+  depth_gbuffer_command_buffers: [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
+  shadow_pass_command_buffers:   [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
+  lighting_command_buffers:      [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
+  transparency_command_buffers:  [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
+  postprocess_command_buffers:   [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
   cursor_pos:                  [2]i32,
   // Main render target for primary rendering
   main_render_target:          Handle,
@@ -398,19 +401,56 @@ init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
     raw_data(self.command_buffers[:]),
   ) or_return
 
-  // Allocate shadow command buffers for parallel recording
-  for frame_idx in 0 ..< MAX_FRAMES_IN_FLIGHT {
-    vk.AllocateCommandBuffers(
-      self.gpu_context.device,
-      &{
-        sType = .COMMAND_BUFFER_ALLOCATE_INFO,
-        commandPool = self.gpu_context.command_pool,
-        level = .PRIMARY,
-        commandBufferCount = MAX_SHADOW_MAPS,
-      },
-      raw_data(self.shadow_command_buffers[frame_idx][:]),
-    ) or_return
-  }
+  vk.AllocateCommandBuffers(
+    self.gpu_context.device,
+    &{
+      sType = .COMMAND_BUFFER_ALLOCATE_INFO,
+      commandPool = self.gpu_context.command_pool,
+      level = .SECONDARY,
+      commandBufferCount = MAX_FRAMES_IN_FLIGHT,
+    },
+    raw_data(self.depth_gbuffer_command_buffers[:]),
+  ) or_return
+  vk.AllocateCommandBuffers(
+    self.gpu_context.device,
+    &{
+      sType = .COMMAND_BUFFER_ALLOCATE_INFO,
+      commandPool = self.gpu_context.command_pool,
+      level = .SECONDARY,
+      commandBufferCount = MAX_FRAMES_IN_FLIGHT,
+    },
+    raw_data(self.shadow_pass_command_buffers[:]),
+  ) or_return
+  vk.AllocateCommandBuffers(
+    self.gpu_context.device,
+    &{
+      sType = .COMMAND_BUFFER_ALLOCATE_INFO,
+      commandPool = self.gpu_context.command_pool,
+      level = .SECONDARY,
+      commandBufferCount = MAX_FRAMES_IN_FLIGHT,
+    },
+    raw_data(self.lighting_command_buffers[:]),
+  ) or_return
+  vk.AllocateCommandBuffers(
+    self.gpu_context.device,
+    &{
+      sType = .COMMAND_BUFFER_ALLOCATE_INFO,
+      commandPool = self.gpu_context.command_pool,
+      level = .SECONDARY,
+      commandBufferCount = MAX_FRAMES_IN_FLIGHT,
+    },
+    raw_data(self.transparency_command_buffers[:]),
+  ) or_return
+  vk.AllocateCommandBuffers(
+    self.gpu_context.device,
+    &{
+      sType = .COMMAND_BUFFER_ALLOCATE_INFO,
+      commandPool = self.gpu_context.command_pool,
+      level = .SECONDARY,
+      commandBufferCount = MAX_FRAMES_IN_FLIGHT,
+    },
+    raw_data(self.postprocess_command_buffers[:]),
+  ) or_return
   lighting_init(
     &self.lighting,
     &self.gpu_context,
@@ -742,16 +782,36 @@ deinit :: proc(self: ^Engine) {
     len(self.command_buffers),
     raw_data(self.command_buffers[:]),
   )
-
-  // Free shadow command buffers
-  for frame_idx in 0 ..< MAX_FRAMES_IN_FLIGHT {
-    vk.FreeCommandBuffers(
-      self.gpu_context.device,
-      self.gpu_context.command_pool,
-      len(self.shadow_command_buffers[frame_idx]),
-      raw_data(self.shadow_command_buffers[frame_idx][:]),
-    )
-  }
+  vk.FreeCommandBuffers(
+    self.gpu_context.device,
+    self.gpu_context.command_pool,
+    len(self.depth_gbuffer_command_buffers),
+    raw_data(self.depth_gbuffer_command_buffers[:]),
+  )
+  vk.FreeCommandBuffers(
+    self.gpu_context.device,
+    self.gpu_context.command_pool,
+    len(self.shadow_pass_command_buffers),
+    raw_data(self.shadow_pass_command_buffers[:]),
+  )
+  vk.FreeCommandBuffers(
+    self.gpu_context.device,
+    self.gpu_context.command_pool,
+    len(self.lighting_command_buffers),
+    raw_data(self.lighting_command_buffers[:]),
+  )
+  vk.FreeCommandBuffers(
+    self.gpu_context.device,
+    self.gpu_context.command_pool,
+    len(self.transparency_command_buffers),
+    raw_data(self.transparency_command_buffers[:]),
+  )
+  vk.FreeCommandBuffers(
+    self.gpu_context.device,
+    self.gpu_context.command_pool,
+    len(self.postprocess_command_buffers),
+    raw_data(self.postprocess_command_buffers[:]),
+  )
   // Clean up main render target
   if main_render_target := resource.get(
     self.warehouse.render_targets,
@@ -808,6 +868,539 @@ deinit :: proc(self: ^Engine) {
   glfw.DestroyWindow(self.window)
   glfw.Terminate()
   log.infof("Engine deinitialized")
+}
+
+@(private = "file")
+record_shadow_pass :: proc(
+  self: ^Engine,
+  command_buffer: vk.CommandBuffer,
+) -> vk.Result {
+  vk.ResetCommandBuffer(command_buffer, {}) or_return
+  rendering_info := vk.CommandBufferInheritanceRenderingInfoKHR {
+    sType = .COMMAND_BUFFER_INHERITANCE_RENDERING_INFO_KHR,
+    depthAttachmentFormat = .D32_SFLOAT,
+    stencilAttachmentFormat = .UNDEFINED,
+  }
+  inheritance := vk.CommandBufferInheritanceInfo {
+    sType = .COMMAND_BUFFER_INHERITANCE_INFO,
+    pNext = &rendering_info,
+  }
+  vk.BeginCommandBuffer(
+    command_buffer,
+    &{
+      sType = .COMMAND_BUFFER_BEGIN_INFO,
+      flags = {.ONE_TIME_SUBMIT},
+      pInheritanceInfo = &inheritance,
+    },
+  ) or_return
+
+  shadow_include := NodeFlagSet{.VISIBLE, .CASTS_SHADOW}
+  shadow_exclude := NodeFlagSet{
+    .MATERIAL_TRANSPARENT,
+    .MATERIAL_WIREFRAME,
+  }
+
+  for &light_info, light_index in self.lights[:self.active_light_count] {
+    if !light_info.light_cast_shadow do continue
+
+    switch light_info.light_kind {
+    case .POINT:
+      if light_info.shadow_map.generation == 0 {
+        log.errorf("Point light %d has invalid shadow map handle", light_index)
+        continue
+      }
+      for face in 0 ..< 6 {
+        camera_uniform := get_camera_uniform(
+          &self.warehouse,
+          light_info.cube_cameras[face].index,
+        )
+        _ = geometry.make_frustum(camera_uniform.projection * camera_uniform.view)
+        target := resource.get(
+          self.warehouse.render_targets,
+          light_info.cube_render_targets[face],
+        )
+        if target == nil do continue
+        visibility_culler_dispatch(
+          &self.visibility_culler,
+          &self.gpu_context,
+          command_buffer,
+          self.frame_index,
+          light_info.cube_cameras[face].index,
+          shadow_include,
+          shadow_exclude,
+        )
+        shadow_draw_buffer := visibility_culler_command_buffer(
+          &self.visibility_culler,
+          self.frame_index,
+        )
+        shadow_draw_count := visibility_culler_max_draw_count(
+          &self.visibility_culler,
+        )
+        shadow_begin(
+          target,
+          command_buffer,
+          &self.warehouse,
+          self.frame_index,
+          u32(face),
+        )
+        shadow_render(
+          &self.shadow,
+          target^,
+          command_buffer,
+          &self.warehouse,
+          self.frame_index,
+          shadow_draw_buffer,
+          shadow_draw_count,
+        )
+        shadow_end(
+          command_buffer,
+          target,
+          &self.warehouse,
+          self.frame_index,
+          u32(face),
+        )
+      }
+    case .SPOT:
+      if light_info.shadow_map.generation == 0 {
+        log.errorf("Spot light %d has invalid shadow map handle", light_index)
+        continue
+      }
+
+      camera_uniform := get_camera_uniform(
+        &self.warehouse,
+        light_info.camera.index,
+      )
+      _ = geometry.make_frustum(camera_uniform.projection * camera_uniform.view)
+      shadow_target := resource.get(
+        self.warehouse.render_targets,
+        light_info.render_target,
+      )
+      if shadow_target == nil do continue
+
+      visibility_culler_dispatch(
+        &self.visibility_culler,
+        &self.gpu_context,
+        command_buffer,
+        self.frame_index,
+        light_info.camera.index,
+        shadow_include,
+        shadow_exclude,
+      )
+      shadow_draw_buffer := visibility_culler_command_buffer(
+        &self.visibility_culler,
+        self.frame_index,
+      )
+      shadow_draw_count := visibility_culler_max_draw_count(
+        &self.visibility_culler,
+      )
+      shadow_begin(
+        shadow_target,
+        command_buffer,
+        &self.warehouse,
+        self.frame_index,
+      )
+      shadow_render(
+        &self.shadow,
+        shadow_target^,
+        command_buffer,
+        &self.warehouse,
+        self.frame_index,
+        shadow_draw_buffer,
+        shadow_draw_count,
+      )
+      shadow_end(
+        command_buffer,
+        shadow_target,
+        &self.warehouse,
+        self.frame_index,
+      )
+
+    case .DIRECTIONAL:
+      // Directional shadow rendering not yet implemented
+    }
+  }
+
+  vk.EndCommandBuffer(command_buffer) or_return
+  return .SUCCESS
+}
+
+@(private = "file")
+record_depth_gbuffer_pass :: proc(
+  self: ^Engine,
+  command_buffer: vk.CommandBuffer,
+  main_render_target: ^RenderTarget,
+) -> vk.Result {
+  vk.ResetCommandBuffer(command_buffer, {}) or_return
+
+  color_formats := [?]vk.Format {
+    .R32G32B32A32_SFLOAT,
+    .R8G8B8A8_UNORM,
+    .R8G8B8A8_UNORM,
+    .R8G8B8A8_UNORM,
+    .R8G8B8A8_UNORM,
+  }
+  rendering_info := vk.CommandBufferInheritanceRenderingInfoKHR {
+    sType = .COMMAND_BUFFER_INHERITANCE_RENDERING_INFO_KHR,
+    colorAttachmentCount = len(color_formats),
+    pColorAttachmentFormats = raw_data(color_formats[:]),
+    depthAttachmentFormat = .D32_SFLOAT,
+    stencilAttachmentFormat = .UNDEFINED,
+  }
+  inheritance := vk.CommandBufferInheritanceInfo {
+    sType = .COMMAND_BUFFER_INHERITANCE_INFO,
+    pNext = &rendering_info,
+  }
+  vk.BeginCommandBuffer(
+    command_buffer,
+    &{
+      sType = .COMMAND_BUFFER_BEGIN_INFO,
+      flags = {.ONE_TIME_SUBMIT},
+      pInheritanceInfo = &inheritance,
+    },
+  ) or_return
+
+  depth_texture := resource.get(
+    self.warehouse.image_2d_buffers,
+    get_depth_texture(main_render_target, self.frame_index),
+  )
+  if depth_texture != nil {
+    gpu.transition_image(
+      command_buffer,
+      depth_texture.image,
+      .UNDEFINED,
+      .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+      {.DEPTH},
+      {.TOP_OF_PIPE},
+      {.EARLY_FRAGMENT_TESTS},
+      {},
+      {.DEPTH_STENCIL_ATTACHMENT_WRITE},
+    )
+  }
+
+  opaque_include := NodeFlagSet{.VISIBLE}
+  opaque_exclude := NodeFlagSet{
+    .MATERIAL_TRANSPARENT,
+    .MATERIAL_WIREFRAME,
+  }
+  visibility_culler_dispatch(
+    &self.visibility_culler,
+    &self.gpu_context,
+    command_buffer,
+    self.frame_index,
+    main_render_target.camera.index,
+    opaque_include,
+    opaque_exclude,
+  )
+  draw_buffer := visibility_culler_command_buffer(
+    &self.visibility_culler,
+    self.frame_index,
+  )
+  draw_count := visibility_culler_max_draw_count(&self.visibility_culler)
+
+  depth_prepass_begin(
+    main_render_target,
+    command_buffer,
+    &self.warehouse,
+    self.frame_index,
+  )
+  depth_prepass_render(
+    &self.depth_prepass,
+    command_buffer,
+    main_render_target.camera.index,
+    &self.warehouse,
+    self.frame_index,
+    draw_buffer,
+    draw_count,
+  )
+  depth_prepass_end(command_buffer)
+
+  gbuffer_begin(
+    main_render_target,
+    command_buffer,
+    &self.warehouse,
+    self.frame_index,
+  )
+  gbuffer_render(
+    &self.gbuffer,
+    main_render_target,
+    command_buffer,
+    &self.warehouse,
+    self.frame_index,
+    draw_buffer,
+    draw_count,
+  )
+  gbuffer_end(
+    main_render_target,
+    command_buffer,
+    &self.warehouse,
+    self.frame_index,
+  )
+
+  if depth_texture != nil {
+    gpu.transition_image(
+      command_buffer,
+      depth_texture.image,
+      .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+      .SHADER_READ_ONLY_OPTIMAL,
+      {.DEPTH},
+      {.LATE_FRAGMENT_TESTS},
+      {.FRAGMENT_SHADER},
+      {.DEPTH_STENCIL_ATTACHMENT_WRITE},
+      {.SHADER_READ},
+    )
+  }
+
+  vk.EndCommandBuffer(command_buffer) or_return
+  return .SUCCESS
+}
+
+@(private = "file")
+record_lighting_pass :: proc(
+  self: ^Engine,
+  command_buffer: vk.CommandBuffer,
+  main_render_target: ^RenderTarget,
+) -> vk.Result {
+  vk.ResetCommandBuffer(command_buffer, {}) or_return
+
+  color_format := self.swapchain.format.format
+  rendering_info := vk.CommandBufferInheritanceRenderingInfoKHR {
+    sType = .COMMAND_BUFFER_INHERITANCE_RENDERING_INFO_KHR,
+    colorAttachmentCount = 1,
+    pColorAttachmentFormats = &color_format,
+    depthAttachmentFormat = .D32_SFLOAT,
+    stencilAttachmentFormat = .UNDEFINED,
+  }
+  inheritance := vk.CommandBufferInheritanceInfo {
+    sType = .COMMAND_BUFFER_INHERITANCE_INFO,
+    pNext = &rendering_info,
+  }
+  vk.BeginCommandBuffer(
+    command_buffer,
+    &{
+      sType = .COMMAND_BUFFER_BEGIN_INFO,
+      flags = {.ONE_TIME_SUBMIT},
+      pInheritanceInfo = &inheritance,
+    },
+  ) or_return
+
+  ambient_begin(
+    &self.ambient,
+    main_render_target,
+    command_buffer,
+    &self.warehouse,
+    self.frame_index,
+  )
+  ambient_render(
+    &self.ambient,
+    main_render_target,
+    command_buffer,
+    &self.warehouse,
+    self.frame_index,
+  )
+  ambient_end(command_buffer)
+
+  lighting_begin(
+    &self.lighting,
+    main_render_target,
+    command_buffer,
+    &self.warehouse,
+    self.frame_index,
+  )
+  lighting_render(
+    &self.lighting,
+    self.lights[:self.active_light_count],
+    main_render_target,
+    command_buffer,
+    &self.warehouse,
+    self.frame_index,
+  )
+  lighting_end(command_buffer)
+
+  particle_begin(
+    &self.particle,
+    command_buffer,
+    main_render_target,
+    &self.warehouse,
+    self.frame_index,
+  )
+  particle_render(
+    &self.particle,
+    command_buffer,
+    main_render_target.camera.index,
+    &self.warehouse,
+  )
+  particle_end(command_buffer)
+
+  vk.EndCommandBuffer(command_buffer) or_return
+  return .SUCCESS
+}
+
+@(private = "file")
+record_transparency_pass :: proc(
+  self: ^Engine,
+  command_buffer: vk.CommandBuffer,
+  main_render_target: ^RenderTarget,
+) -> vk.Result {
+  vk.ResetCommandBuffer(command_buffer, {}) or_return
+
+  color_format := self.swapchain.format.format
+  rendering_info := vk.CommandBufferInheritanceRenderingInfoKHR {
+    sType = .COMMAND_BUFFER_INHERITANCE_RENDERING_INFO_KHR,
+    colorAttachmentCount = 1,
+    pColorAttachmentFormats = &color_format,
+    depthAttachmentFormat = .D32_SFLOAT,
+    stencilAttachmentFormat = .UNDEFINED,
+  }
+  inheritance := vk.CommandBufferInheritanceInfo {
+    sType = .COMMAND_BUFFER_INHERITANCE_INFO,
+    pNext = &rendering_info,
+  }
+  vk.BeginCommandBuffer(
+    command_buffer,
+    &{
+      sType = .COMMAND_BUFFER_BEGIN_INFO,
+      flags = {.ONE_TIME_SUBMIT},
+      pInheritanceInfo = &inheritance,
+    },
+  ) or_return
+
+  transparent_begin(
+    &self.transparent,
+    main_render_target,
+    command_buffer,
+    &self.warehouse,
+    self.frame_index,
+  )
+
+  navmesh_render(
+    &self.navmesh,
+    command_buffer,
+    linalg.MATRIX4F32_IDENTITY,
+    main_render_target.camera.index,
+  )
+
+  transparent_include := NodeFlagSet{.VISIBLE, .MATERIAL_TRANSPARENT}
+  visibility_culler_dispatch(
+    &self.visibility_culler,
+    &self.gpu_context,
+    command_buffer,
+    self.frame_index,
+    main_render_target.camera.index,
+    transparent_include,
+  )
+  transparent_draw_buffer := visibility_culler_command_buffer(
+    &self.visibility_culler,
+    self.frame_index,
+  )
+  transparent_draw_count := visibility_culler_max_draw_count(
+    &self.visibility_culler,
+  )
+  transparent_render_pass(
+    &self.transparent,
+    self.transparent.transparent_pipeline,
+    main_render_target,
+    command_buffer,
+    &self.warehouse,
+    self.frame_index,
+    transparent_draw_buffer,
+    transparent_draw_count,
+  )
+
+  wireframe_include := NodeFlagSet{.VISIBLE, .MATERIAL_WIREFRAME}
+  visibility_culler_dispatch(
+    &self.visibility_culler,
+    &self.gpu_context,
+    command_buffer,
+    self.frame_index,
+    main_render_target.camera.index,
+    wireframe_include,
+  )
+  wireframe_draw_buffer := visibility_culler_command_buffer(
+    &self.visibility_culler,
+    self.frame_index,
+  )
+  wireframe_draw_count := visibility_culler_max_draw_count(
+    &self.visibility_culler,
+  )
+  transparent_render_pass(
+    &self.transparent,
+    self.transparent.wireframe_pipeline,
+    main_render_target,
+    command_buffer,
+    &self.warehouse,
+    self.frame_index,
+    wireframe_draw_buffer,
+    wireframe_draw_count,
+  )
+
+  transparent_end(&self.transparent, command_buffer)
+
+  vk.EndCommandBuffer(command_buffer) or_return
+  return .SUCCESS
+}
+
+@(private = "file")
+record_postprocess_pass :: proc(
+  self: ^Engine,
+  command_buffer: vk.CommandBuffer,
+  main_render_target: ^RenderTarget,
+) -> vk.Result {
+  vk.ResetCommandBuffer(command_buffer, {}) or_return
+
+  color_format := self.swapchain.format.format
+  rendering_info := vk.CommandBufferInheritanceRenderingInfoKHR {
+    sType = .COMMAND_BUFFER_INHERITANCE_RENDERING_INFO_KHR,
+    colorAttachmentCount = 1,
+    pColorAttachmentFormats = &color_format,
+    depthAttachmentFormat = .UNDEFINED,
+    stencilAttachmentFormat = .UNDEFINED,
+  }
+  inheritance := vk.CommandBufferInheritanceInfo {
+    sType = .COMMAND_BUFFER_INHERITANCE_INFO,
+    pNext = &rendering_info,
+  }
+  vk.BeginCommandBuffer(
+    command_buffer,
+    &{
+      sType = .COMMAND_BUFFER_BEGIN_INFO,
+      flags = {.ONE_TIME_SUBMIT},
+      pInheritanceInfo = &inheritance,
+    },
+  ) or_return
+
+  final_image := resource.get(
+    self.warehouse.image_2d_buffers,
+    get_final_image(main_render_target, self.frame_index),
+  )
+  if final_image != nil {
+    gpu.transition_image_to_shader_read(command_buffer, final_image.image)
+  }
+
+  postprocess_begin(&self.postprocess, command_buffer, self.swapchain.extent)
+  gpu.transition_image(
+    command_buffer,
+    self.swapchain.images[self.swapchain.image_index],
+    .UNDEFINED,
+    .COLOR_ATTACHMENT_OPTIMAL,
+    {.COLOR},
+    {.TOP_OF_PIPE},
+    {.COLOR_ATTACHMENT_OUTPUT},
+    {},
+    {.COLOR_ATTACHMENT_WRITE},
+  )
+  postprocess_render(
+    &self.postprocess,
+    command_buffer,
+    self.swapchain.extent,
+    self.swapchain.views[self.swapchain.image_index],
+    main_render_target,
+    &self.warehouse,
+    self.frame_index,
+  )
+  postprocess_end(&self.postprocess, command_buffer)
+
+  vk.EndCommandBuffer(command_buffer) or_return
+  return .SUCCESS
 }
 
 @(private = "file")
@@ -895,7 +1488,6 @@ recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
 
 // Generate render input for a given frustum (camera or light)
 render :: proc(self: ^Engine) -> vk.Result {
-  // log.debug("============ acquiring image...============ ")
   acquire_next_image(
     &self.gpu_context,
     &self.swapchain,
@@ -922,8 +1514,7 @@ render :: proc(self: ^Engine) -> vk.Result {
     bone_matrices := self.warehouse.bone_buffer.mapped[l:r]
     sample_clip(mesh, anim_inst.clip, anim_inst.time, bone_matrices)
   }
-  // log.debug("============ setup main camera...============ ")
-  // Update camera uniform for main render target
+
   main_render_target := resource.get(
     self.warehouse.render_targets,
     self.main_render_target,
@@ -933,7 +1524,6 @@ render :: proc(self: ^Engine) -> vk.Result {
     return .ERROR_UNKNOWN
   }
   render_target_update_camera_uniform(&self.warehouse, main_render_target)
-
   main_camera := get_main_camera(self)
   if main_camera == nil {
     log.errorf("Main camera not found")
@@ -942,15 +1532,11 @@ render :: proc(self: ^Engine) -> vk.Result {
   upload_world_matrices(&self.warehouse, &self.scene, self.frame_index)
   main_camera_index := main_render_target.camera.index
   camera_uniform := get_camera_uniform(&self.warehouse, main_camera_index)
-  frustum := geometry.make_frustum(
-    camera_uniform.projection * camera_uniform.view,
-  )
-  // log.debug("============ collecting lights ...============ ")
-  // Reset active light count for this frame
+  _ = geometry.make_frustum(camera_uniform.projection * camera_uniform.view)
+
   self.active_light_count = 0
   shadow_map_count := 0
   cube_shadow_map_count := 0
-  // Cleanup shadow camera resources at end of frame
   defer {
     for i in 0 ..< self.active_light_count {
       light_info := &self.lights[i]
@@ -971,71 +1557,71 @@ render :: proc(self: ^Engine) -> vk.Result {
           )
         }
       case .DIRECTIONAL:
-      // TODO: Add when directional shadows are implemented
       }
     }
   }
   for &entry in self.scene.nodes.entries do if entry.active {
     node := &entry.item
-    // Check if we have room for more lights
     if self.active_light_count >= len(self.lights) do continue
 
     #partial switch &attachment in &node.attachment {
     case PointLightAttachment:
       light_info := &self.lights[self.active_light_count]
-      // Fill GPU data directly via embedded struct
       position := get_world_matrix_for_render(node) * [4]f32{0, 0, 0, 1}
       light_info.light_kind = .POINT
       light_info.light_color = attachment.color.xyz
       light_info.light_position = position.xyz
       light_info.light_radius = attachment.radius
-      light_info.light_cast_shadow = b32(attachment.cast_shadow && cube_shadow_map_count < MAX_SHADOW_MAPS)
+      light_info.light_cast_shadow =
+        b32(attachment.cast_shadow && cube_shadow_map_count < MAX_SHADOW_MAPS)
 
-      // Set up shadow mapping if needed
       if light_info.light_cast_shadow {
-        light_info.shadow_map_id = self.cube_shadow_maps[self.frame_index][cube_shadow_map_count].index
-        light_info.shadow_map = self.cube_shadow_maps[self.frame_index][cube_shadow_map_count]
+        light_info.shadow_map_id =
+          self.cube_shadow_maps[self.frame_index][cube_shadow_map_count].index
+        light_info.shadow_map =
+          self.cube_shadow_maps[self.frame_index][cube_shadow_map_count]
         cube_shadow_map_count += 1
 
-        // Use persistent render targets and create temporary cameras
-        light_info.cube_render_targets = self.cube_shadow_render_targets[cube_shadow_map_count - 1]
+        light_info.cube_render_targets =
+          self.cube_shadow_render_targets[cube_shadow_map_count - 1]
 
         @(static) face_dirs := [6][3]f32 {
-          {1, 0, 0}, // +X (Right)
-          {-1, 0, 0}, // -X (Left)
-          {0, 1, 0}, // +Y (Top)
-          {0, -1, 0}, // -Y (Bottom)
-          {0, 0, 1}, // +Z (Front)
-          {0, 0, -1}, // -Z (Back)
+          {1, 0, 0},
+          {-1, 0, 0},
+          {0, 1, 0},
+          {0, -1, 0},
+          {0, 0, 1},
+          {0, 0, -1},
         }
         @(static) face_ups := [6][3]f32 {
-          {0, -1, 0}, // +X: Up is -Y
-          {0, -1, 0}, // -X: Up is -Y
-          {0, 0, 1}, // +Y: Up is +Z
-          {0, 0, -1}, // -Y: Up is -Z
-          {0, -1, 0}, // +Z: Up is -Y
-          {0, -1, 0}, // -Z: Up is -Y
+          {0, -1, 0},
+          {0, -1, 0},
+          {0, 0, 1},
+          {0, 0, -1},
+          {0, -1, 0},
+          {0, -1, 0},
         }
 
         for i in 0 ..< 6 {
-          // Get persistent render target for this cube face
-          render_target := resource.get(self.warehouse.render_targets, light_info.cube_render_targets[i])
-
-          // Allocate camera for this cube face
+          render_target := resource.get(
+            self.warehouse.render_targets,
+            light_info.cube_render_targets[i],
+          )
           camera: ^geometry.Camera
-          light_info.cube_cameras[i], camera = resource.alloc(&self.warehouse.cameras)
-          geometry.camera_perspective(camera, math.PI * 0.5, 1.0, 0.1, light_info.light_radius)
-
-          // Associate camera with render target BEFORE updating uniform
+          light_info.cube_cameras[i], camera =
+            resource.alloc(&self.warehouse.cameras)
+          geometry.camera_perspective(
+            camera,
+            math.PI * 0.5,
+            1.0,
+            0.1,
+            light_info.light_radius,
+          )
           render_target.camera = light_info.cube_cameras[i]
-
-          // Set camera position and orientation for this cube face
           target_pos := position.xyz + face_dirs[i]
           geometry.camera_look_at(camera, position.xyz, target_pos, face_ups[i])
           render_target_update_camera_uniform(&self.warehouse, render_target)
         }
-
-        // Use first cube camera for light_camera_idx
         light_info.light_camera_idx = light_info.cube_cameras[0].index
       }
 
@@ -1043,8 +1629,6 @@ render :: proc(self: ^Engine) -> vk.Result {
 
     case DirectionalLightAttachment:
       light_info := &self.lights[self.active_light_count]
-
-      // Fill GPU data directly
       direction := get_world_matrix_for_render(node) * [4]f32{0, 0, -1, 0}
       light_info.light_kind = .DIRECTIONAL
       light_info.light_color = attachment.color.xyz
@@ -1054,8 +1638,6 @@ render :: proc(self: ^Engine) -> vk.Result {
 
     case SpotLightAttachment:
       light_info := &self.lights[self.active_light_count]
-
-      // Fill GPU data directly
       position := get_world_matrix_for_render(node) * [4]f32{0, 0, 0, 1}
       direction := get_world_matrix_for_render(node) * [4]f32{0, -1, 0, 0}
       light_info.light_kind = .SPOT
@@ -1064,20 +1646,27 @@ render :: proc(self: ^Engine) -> vk.Result {
       light_info.light_direction = direction.xyz
       light_info.light_radius = attachment.radius
       light_info.light_angle = attachment.angle
-      light_info.light_cast_shadow = b32(attachment.cast_shadow) && shadow_map_count < MAX_SHADOW_MAPS
+      light_info.light_cast_shadow =
+        b32(attachment.cast_shadow) && shadow_map_count < MAX_SHADOW_MAPS
 
-      // Set up shadow mapping if needed
       if light_info.light_cast_shadow {
-        light_info.shadow_map_id = self.shadow_maps[self.frame_index][shadow_map_count].index
-        light_info.shadow_map = self.shadow_maps[self.frame_index][shadow_map_count]
+        light_info.shadow_map_id =
+          self.shadow_maps[self.frame_index][shadow_map_count].index
+        light_info.shadow_map =
+          self.shadow_maps[self.frame_index][shadow_map_count]
         shadow_map_count += 1
         light_info.render_target = self.shadow_render_targets[shadow_map_count - 1]
         render_target := render_target(self, light_info.render_target)
         camera: ^geometry.Camera
         light_info.camera, camera = resource.alloc(&self.warehouse.cameras)
-        geometry.camera_perspective(camera, light_info.light_angle * 2.0, 1.0, 0.1, light_info.light_radius)
+        geometry.camera_perspective(
+          camera,
+          light_info.light_angle * 2.0,
+          1.0,
+          0.1,
+          light_info.light_radius,
+        )
         render_target.camera = light_info.camera
-        // Set camera to look in the direction of the light
         target_pos := position.xyz + direction.xyz
         geometry.camera_look_at(camera, position.xyz, target_pos)
         render_target_update_camera_uniform(&self.warehouse, render_target)
@@ -1086,17 +1675,10 @@ render :: proc(self: ^Engine) -> vk.Result {
       self.active_light_count += 1
     }
   }
-  // log.debug("============ run visibility culling...============ ")
-  vk.BeginCommandBuffer(
-    command_buffer,
-    &{sType = .COMMAND_BUFFER_BEGIN_INFO, flags = {.ONE_TIME_SUBMIT}},
-  ) or_return
+
   when USE_GPU_CULLING {
-    // Collect all active render targets for multi-camera culling
     clear(&self.frame_active_render_targets)
-    // Add main render target
     append(&self.frame_active_render_targets, self.main_render_target)
-    // Add shadow map render targets from shadow-casting lights
     for light_info in self.lights[:self.active_light_count] {
       if !light_info.light_cast_shadow do continue
       switch light_info.light_kind {
@@ -1109,17 +1691,13 @@ render :: proc(self: ^Engine) -> vk.Result {
         render_target(self, light_info.render_target) or_continue
         append(&self.frame_active_render_targets, light_info.render_target)
       case .DIRECTIONAL:
-      // TODO: Add when directional shadows are implemented
       }
     }
-    // Look for render targets that aren't main or shadow targets
     user_targets_added := 0
     for &entry, i in self.warehouse.render_targets.entries {
       if !entry.active do continue
       handle := Handle{entry.generation, u32(i)}
-      // Skip if it's the main render target
       if handle.index == self.main_render_target.index do continue
-      // Skip if it's already added as a shadow render target
       is_shadow_target := false
       for existing_handle in self.frame_active_render_targets {
         if handle.index == existing_handle.index {
@@ -1128,475 +1706,66 @@ render :: proc(self: ^Engine) -> vk.Result {
         }
       }
       if is_shadow_target do continue
-      // This must be a user-defined render target - add it
       append(&self.frame_active_render_targets, handle)
       user_targets_added += 1
     }
-    // Update and perform GPU scene culling
     visibility_culler_update(
       &self.visibility_culler,
       &self.scene,
     )
-
-    // write_idx := self.visibility_culler.visibility_write_idx
-    // prev_write_idx :=
-    //   (write_idx + VISIBILITY_BUFFER_COUNT - 1) % VISIBILITY_BUFFER_COUNT
-    // visibility_buffer_barrier := vk.BufferMemoryBarrier {
-    //   sType               = .BUFFER_MEMORY_BARRIER,
-    //   srcAccessMask       = {.SHADER_WRITE},
-    //   dstAccessMask       = {.SHADER_READ},
-    //   srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-    //   dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-    //   buffer              = self.visibility_culler.visibility_buffer[prev_write_idx].buffer,
-    //   offset              = 0,
-    //   size                = vk.DeviceSize(
-    //     self.visibility_culler.visibility_buffer[prev_write_idx].bytes_count,
-    //   ),
-    // }
-    // vk.CmdPipelineBarrier(
-    //   command_buffer,
-    //   {.COMPUTE_SHADER},
-    //   {.VERTEX_SHADER, .VERTEX_INPUT}, // Only wait for vertex stage, not fragment
-    //   {},
-    //   0,
-    //   nil,
-    //   1,
-    //   &visibility_buffer_barrier,
-    //   0,
-    //   nil,
-    // )
-    // We rely on natural frame latency for synchronization
-    // The compute shader writes to the current frame's buffer while graphics reads from previous frames
-    // The code above ensures synchronization at the cost of performance
   } else {
-    // CPU culling mode placeholder - GPU culling disabled
     clear(&self.frame_active_render_targets)
   }
 
+  record_shadow_pass(
+    self,
+    self.shadow_pass_command_buffers[self.frame_index],
+  ) or_return
+  record_depth_gbuffer_pass(
+    self,
+    self.depth_gbuffer_command_buffers[self.frame_index],
+    main_render_target,
+  ) or_return
+  record_lighting_pass(
+    self,
+    self.lighting_command_buffers[self.frame_index],
+    main_render_target,
+  ) or_return
+  record_transparency_pass(
+    self,
+    self.transparency_command_buffers[self.frame_index],
+    main_render_target,
+  ) or_return
+  record_postprocess_pass(
+    self,
+    self.postprocess_command_buffers[self.frame_index],
+    main_render_target,
+  ) or_return
+
+  vk.BeginCommandBuffer(
+    command_buffer,
+    &{sType = .COMMAND_BUFFER_BEGIN_INFO, flags = {.ONE_TIME_SUBMIT}},
+  ) or_return
+
   compute_particles(&self.particle, command_buffer, main_camera^)
 
-  // Call custom render proc if provided (for user-defined render targets)
-  // This happens AFTER visibility culling so portal cameras have fresh visibility data
   if self.custom_render_proc != nil {
     self.custom_render_proc(self, command_buffer)
   }
 
-  // log.debug("============ rendering shadow pass...============ ")
-  // Transition all shadow maps to depth attachment optimal
-  shadow_2d_images: [MAX_SHADOW_MAPS]vk.Image
-  for i in 0 ..< shadow_map_count {
-    b, ok := resource.get(
-      self.warehouse.image_2d_buffers,
-      self.shadow_maps[self.frame_index][i],
-    )
-    if !ok {
-      continue
-    }
-    shadow_2d_images[i] = b.image
+  secondary_chain := [?]vk.CommandBuffer {
+    self.shadow_pass_command_buffers[self.frame_index],
+    self.depth_gbuffer_command_buffers[self.frame_index],
+    self.lighting_command_buffers[self.frame_index],
+    self.transparency_command_buffers[self.frame_index],
+    self.postprocess_command_buffers[self.frame_index],
   }
-  shadow_cube_images: [MAX_SHADOW_MAPS]vk.Image
-  for i in 0 ..< cube_shadow_map_count {
-    b, ok := resource.get(
-      self.warehouse.image_cube_buffers,
-      self.cube_shadow_maps[self.frame_index][i],
-    )
-    if !ok {
-      continue
-    }
-    shadow_cube_images[i] = b.image
-  }
-
-  // log.debugf("============ shadow casters (%d)...============ ", len(shadow_casters))
-  // Shadow rendering for shadow-casting lights using separate command buffers
-  shadow_cmd_count: u32 = 0
-  for light_info, i in self.lights[:self.active_light_count] {
-    if !light_info.light_cast_shadow do continue
-    if shadow_cmd_count >= MAX_SHADOW_MAPS do break
-
-    // Use separate command buffer for this shadow map
-    shadow_cmd := self.shadow_command_buffers[self.frame_index][shadow_cmd_count]
-    vk.ResetCommandBuffer(shadow_cmd, {}) or_continue
-    vk.BeginCommandBuffer(
-      shadow_cmd,
-      &{sType = .COMMAND_BUFFER_BEGIN_INFO, flags = {.ONE_TIME_SUBMIT}},
-    ) or_continue
-
-    switch light_info.light_kind {
-    case .POINT:
-      if light_info.shadow_map.generation == 0 {
-        log.errorf("Point light %d has invalid shadow map handle", i)
-        continue
-      }
-      for face in 0 ..< 6 {
-        camera_uniform := get_camera_uniform(
-          &self.warehouse,
-          light_info.cube_cameras[face].index,
-        )
-        frustum := geometry.make_frustum(
-          camera_uniform.projection * camera_uniform.view,
-        )
-        target := resource.get(
-          self.warehouse.render_targets,
-          light_info.cube_render_targets[face],
-        )
-        shadow_include := NodeFlagSet{.VISIBLE, .CASTS_SHADOW}
-        shadow_exclude := NodeFlagSet{
-          .MATERIAL_TRANSPARENT,
-          .MATERIAL_WIREFRAME,
-        }
-        visibility_culler_dispatch(
-          &self.visibility_culler,
-          &self.gpu_context,
-          shadow_cmd,
-          self.frame_index,
-          light_info.cube_cameras[face].index,
-          shadow_include,
-          shadow_exclude,
-        )
-        shadow_draw_buffer := visibility_culler_command_buffer(
-          &self.visibility_culler,
-          self.frame_index,
-        )
-        shadow_draw_count := visibility_culler_max_draw_count(
-          &self.visibility_culler,
-        )
-        shadow_begin(
-          target,
-          shadow_cmd,
-          &self.warehouse,
-          self.frame_index,
-          u32(face),
-        )
-        shadow_render(
-          &self.shadow,
-          target^,
-          shadow_cmd,
-          &self.warehouse,
-          self.frame_index,
-          shadow_draw_buffer,
-          shadow_draw_count,
-        )
-        shadow_end(shadow_cmd, target, &self.warehouse, self.frame_index, u32(face))
-      }
-    case .DIRECTIONAL:
-    // TODO: Implement directional light shadows
-    case .SPOT:
-      if light_info.shadow_map.generation == 0 {
-        log.errorf("Spot light %d has invalid shadow map handle", i)
-        continue
-      }
-      camera_uniform := get_camera_uniform(
-        &self.warehouse,
-        light_info.camera.index,
-      )
-      frustum := geometry.make_frustum(
-        camera_uniform.projection * camera_uniform.view,
-      )
-      shadow_target := resource.get(
-        self.warehouse.render_targets,
-        light_info.render_target,
-      )
-      shadow_include := NodeFlagSet{.VISIBLE, .CASTS_SHADOW}
-      shadow_exclude := NodeFlagSet{
-        .MATERIAL_TRANSPARENT,
-        .MATERIAL_WIREFRAME,
-      }
-      visibility_culler_dispatch(
-        &self.visibility_culler,
-        &self.gpu_context,
-        shadow_cmd,
-        self.frame_index,
-        light_info.camera.index,
-        shadow_include,
-        shadow_exclude,
-      )
-      shadow_draw_buffer := visibility_culler_command_buffer(
-        &self.visibility_culler,
-        self.frame_index,
-      )
-      shadow_draw_count := visibility_culler_max_draw_count(
-        &self.visibility_culler,
-      )
-      shadow_begin(
-        shadow_target,
-        shadow_cmd,
-        &self.warehouse,
-        self.frame_index,
-      )
-      shadow_render(
-        &self.shadow,
-        shadow_target^,
-        shadow_cmd,
-        &self.warehouse,
-        self.frame_index,
-        shadow_draw_buffer,
-        shadow_draw_count,
-      )
-      shadow_end(shadow_cmd, shadow_target, &self.warehouse, self.frame_index)
-    }
-
-    // End this shadow command buffer
-    vk.EndCommandBuffer(shadow_cmd) or_continue
-    shadow_cmd_count += 1
-  }
-
-  // Submit all shadow command buffers for parallel execution
-  if shadow_cmd_count > 0 {
-    shadow_submit_info := vk.SubmitInfo {
-      sType = .SUBMIT_INFO,
-      commandBufferCount = shadow_cmd_count,
-      pCommandBuffers = raw_data(self.shadow_command_buffers[self.frame_index][:shadow_cmd_count]),
-    }
-    vk.QueueSubmit(
-      self.gpu_context.graphics_queue,
-      1,
-      &shadow_submit_info,
-      0,
-    ) or_return
-  }
-
-  // Shadow map transitions to shader read are now handled in each shadow command buffer
-  // This eliminates race conditions and improves parallelism
-  final_image := resource.get(
-    self.warehouse.image_2d_buffers,
-    get_final_image(main_render_target, self.frame_index),
-  )
-  // Final image transition is now handled by gbuffer_begin
-  // Get depth texture for transitions
-  gbuffer_depth := resource.get(
-    self.warehouse.image_2d_buffers,
-    get_depth_texture(main_render_target, self.frame_index),
-  )
-  // Transition depth texture to DEPTH_STENCIL_ATTACHMENT_OPTIMAL for depth prepass
-  gpu.transition_image(
+  vk.CmdExecuteCommands(
     command_buffer,
-    gbuffer_depth.image,
-    .UNDEFINED,
-    .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-    {.DEPTH},
-    {.TOP_OF_PIPE},
-    {.EARLY_FRAGMENT_TESTS},
-    {},
-    {.DEPTH_STENCIL_ATTACHMENT_WRITE},
-  )
-  // log.debug("============ rendering depth pre-pass... =============")
-  opaque_include_flags := NodeFlagSet{.VISIBLE}
-  opaque_exclude_flags := NodeFlagSet{
-    .MATERIAL_TRANSPARENT,
-    .MATERIAL_WIREFRAME,
-  }
-  visibility_culler_dispatch(
-    &self.visibility_culler,
-    &self.gpu_context,
-    command_buffer,
-    self.frame_index,
-    main_render_target.camera.index,
-    opaque_include_flags,
-    opaque_exclude_flags,
-  )
-  draw_buffer := visibility_culler_command_buffer(
-    &self.visibility_culler,
-    self.frame_index,
-  )
-  draw_count := visibility_culler_max_draw_count(
-    &self.visibility_culler,
-  )
-  depth_prepass_begin(
-    main_render_target,
-    command_buffer,
-    &self.warehouse,
-    self.frame_index,
-  )
-  depth_prepass_render(
-    &self.depth_prepass,
-    command_buffer,
-    main_render_target.camera.index,
-    &self.warehouse,
-    self.frame_index,
-    draw_buffer,
-    draw_count,
-  )
-  depth_prepass_end(command_buffer)
-  // log.debug("============ rendering G-buffer pass... =============")
-  // G-buffer image transitions are now handled by gbuffer_begin/end
-  gbuffer_begin(
-    main_render_target,
-    command_buffer,
-    &self.warehouse,
-    self.frame_index,
-  )
-  gbuffer_render(
-    &self.gbuffer,
-    main_render_target,
-    command_buffer,
-    &self.warehouse,
-    self.frame_index,
-    draw_buffer,
-    draw_count,
-  )
-  gbuffer_end(
-    main_render_target,
-    command_buffer,
-    &self.warehouse,
-    self.frame_index,
-  )
-  // G-buffer to shader read transition is now handled by gbuffer_end
-  // Transition depth texture to SHADER_READ_ONLY_OPTIMAL for use in post-processing
-  gpu.transition_image(
-    command_buffer,
-    gbuffer_depth.image,
-    .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-    .SHADER_READ_ONLY_OPTIMAL,
-    {.DEPTH},
-    {.LATE_FRAGMENT_TESTS},
-    {.FRAGMENT_SHADER},
-    {.DEPTH_STENCIL_ATTACHMENT_WRITE},
-    {.SHADER_READ},
-  )
-  // log.debug("============ rendering main pass... =============")
-  // Prepare RenderTarget and RenderInput for decoupled renderer
-  // Ambient pass
-  ambient_begin(
-    &self.ambient,
-    main_render_target,
-    command_buffer,
-    &self.warehouse,
-    self.frame_index,
-  )
-  ambient_render(
-    &self.ambient,
-    main_render_target,
-    command_buffer,
-    &self.warehouse,
-    self.frame_index,
-  )
-  ambient_end(command_buffer)
-  // Per-light additive pass
-  lighting_begin(
-    &self.lighting,
-    main_render_target,
-    command_buffer,
-    &self.warehouse,
-    self.frame_index,
-  )
-  lighting_render(
-    &self.lighting,
-    self.lights[:self.active_light_count],
-    main_render_target,
-    command_buffer,
-    &self.warehouse,
-    self.frame_index,
-  )
-  lighting_end(command_buffer)
-  // log.debug("============ rendering particles... =============")
-  particle_begin(
-    &self.particle,
-    command_buffer,
-    main_render_target,
-    &self.warehouse,
-    self.frame_index,
-  )
-  particle_render(
-    &self.particle,
-    command_buffer,
-    main_render_target.camera.index,
-    &self.warehouse,
-  )
-  particle_end(command_buffer)
-  // Transparent & wireframe pass
-  transparent_begin(
-    &self.transparent,
-    main_render_target,
-    command_buffer,
-    &self.warehouse,
-    self.frame_index,
+    len(secondary_chain),
+    raw_data(secondary_chain[:]),
   )
 
-  // Navigation mesh pass (render inside transparent pass)
-  navmesh_render(
-    &self.navmesh,
-    command_buffer,
-    linalg.MATRIX4F32_IDENTITY,
-    main_render_target.camera.index,
-  )
-  transparent_include := NodeFlagSet{.VISIBLE, .MATERIAL_TRANSPARENT}
-  visibility_culler_dispatch(
-    &self.visibility_culler,
-    &self.gpu_context,
-    command_buffer,
-    self.frame_index,
-    main_render_target.camera.index,
-    transparent_include,
-  )
-  transparent_draw_buffer := visibility_culler_command_buffer(
-    &self.visibility_culler,
-    self.frame_index,
-  )
-  transparent_draw_count := visibility_culler_max_draw_count(
-    &self.visibility_culler,
-  )
-  transparent_render_pass(
-    &self.transparent,
-    self.transparent.transparent_pipeline,
-    main_render_target,
-    command_buffer,
-    &self.warehouse,
-    self.frame_index,
-    transparent_draw_buffer,
-    transparent_draw_count,
-  )
-
-  wireframe_include := NodeFlagSet{.VISIBLE, .MATERIAL_WIREFRAME}
-  visibility_culler_dispatch(
-    &self.visibility_culler,
-    &self.gpu_context,
-    command_buffer,
-    self.frame_index,
-    main_render_target.camera.index,
-    wireframe_include,
-  )
-  wireframe_draw_buffer := visibility_culler_command_buffer(
-    &self.visibility_culler,
-    self.frame_index,
-  )
-  wireframe_draw_count := visibility_culler_max_draw_count(
-    &self.visibility_culler,
-  )
-  transparent_render_pass(
-    &self.transparent,
-    self.transparent.wireframe_pipeline,
-    main_render_target,
-    command_buffer,
-    &self.warehouse,
-    self.frame_index,
-    wireframe_draw_buffer,
-    wireframe_draw_count,
-  )
-  transparent_end(&self.transparent, command_buffer)
-  // log.debug("============ rendering post processes... =============")
-  gpu.transition_image_to_shader_read(command_buffer, final_image.image)
-  postprocess_begin(&self.postprocess, command_buffer, self.swapchain.extent)
-  gpu.transition_image(
-    command_buffer,
-    self.swapchain.images[self.swapchain.image_index],
-    .UNDEFINED,
-    .COLOR_ATTACHMENT_OPTIMAL,
-    {.COLOR},
-    {.TOP_OF_PIPE},
-    {.COLOR_ATTACHMENT_OUTPUT},
-    {},
-    {.COLOR_ATTACHMENT_WRITE},
-  )
-  postprocess_render(
-    &self.postprocess,
-    command_buffer,
-    self.swapchain.extent,
-    self.swapchain.views[self.swapchain.image_index],
-    main_render_target,
-    &self.warehouse,
-    self.frame_index,
-  )
-  postprocess_end(&self.postprocess, command_buffer)
   if mu.window(&self.ui.ctx, "Engine", {40, 40, 300, 200}, {.NO_CLOSE}) {
     mu.label(
       &self.ui.ctx,
@@ -1644,7 +1813,7 @@ render :: proc(self: ^Engine) -> vk.Result {
     self.render2d_proc(self, &self.ui.ctx)
   }
   mu.end(&self.ui.ctx)
-  // log.debug("============ rendering UI... =============")
+
   ui_begin(
     &self.ui,
     command_buffer,
@@ -1653,13 +1822,13 @@ render :: proc(self: ^Engine) -> vk.Result {
   )
   ui_render(&self.ui, command_buffer)
   ui_end(&self.ui, command_buffer)
-  // log.debug("============ preparing image for present... =============")
+
   gpu.transition_image_to_present(
     command_buffer,
     self.swapchain.images[self.swapchain.image_index],
   )
   vk.EndCommandBuffer(command_buffer) or_return
-  // log.debug("============ submit queue... =============")
+
   submit_queue_and_present(
     &self.gpu_context,
     &self.swapchain,
@@ -1667,7 +1836,6 @@ render :: proc(self: ^Engine) -> vk.Result {
     self.frame_index,
   ) or_return
   self.frame_index = (self.frame_index + 1) % MAX_FRAMES_IN_FLIGHT
-  // Process pending deletions at end of frame
   process_pending_deletions(self)
   self.last_render_timestamp = time.now()
   return .SUCCESS
