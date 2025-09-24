@@ -28,11 +28,11 @@ struct Camera {
 // Bindless camera buffer (set 0, binding 0)
 layout(set = 0, binding = 0) readonly buffer CameraBuffer {
     Camera cameras[];
-} camera_buffer;
+};
 // Bone matrices
 layout(set = 2, binding = 0) readonly buffer BoneMatrices {
-    mat4 matrices[];
-} boneMatrices;
+    mat4 bones[];
+};
 
 layout(set = 4, binding = 0) readonly buffer WorldMatrices {
     mat4 world_matrices[];
@@ -75,7 +75,7 @@ layout(push_constant) uniform PushConstants {
 };
 
 void main() {
-    Camera camera = camera_buffer.cameras[camera_index];
+    Camera camera = cameras[camera_index];
     uint node_index = uint(gl_InstanceIndex);
     mat4 world = world_matrices[node_index];
     NodeData node = nodes[node_index];
@@ -84,15 +84,15 @@ void main() {
     vec4 modelPosition;
     vec3 modelNormal;
     vec4 modelTangent;
-    if (mesh.is_skinned != 0u && node.bone_matrix_offset < boneMatrices.matrices.length()) {
+    if (mesh.is_skinned != 0u && node.bone_matrix_offset < bones.length()) {
         uint vertex_index = mesh.vertex_skinning_offset + gl_VertexIndex;
         VertexSkinningData skin = vertex_skinning[vertex_index];
         uint baseOffset = node.bone_matrix_offset;
         mat4 skinMatrix =
-            skin.weights.x * boneMatrices.matrices[baseOffset + skin.joints.x] +
-            skin.weights.y * boneMatrices.matrices[baseOffset + skin.joints.y] +
-            skin.weights.z * boneMatrices.matrices[baseOffset + skin.joints.z] +
-            skin.weights.w * boneMatrices.matrices[baseOffset + skin.joints.w];
+            skin.weights.x * bones[baseOffset + skin.joints.x] +
+            skin.weights.y * bones[baseOffset + skin.joints.y] +
+            skin.weights.z * bones[baseOffset + skin.joints.z] +
+            skin.weights.w * bones[baseOffset + skin.joints.w];
 
         modelPosition = skinMatrix * vec4(inPosition, 1.0);
         modelNormal = mat3(skinMatrix) * inNormal;

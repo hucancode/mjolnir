@@ -17,7 +17,7 @@ layout(set = 0, binding = 0) readonly buffer CameraBuffer {
 };
 
 layout(set = 2, binding = 0) readonly buffer BoneBuffer {
-    mat4 bone_matrices[];
+    mat4 bones[];
 };
 
 layout(set = 4, binding = 0) readonly buffer WorldMatrices {
@@ -67,15 +67,15 @@ void main() {
     NodeData node = nodes[node_index];
     MeshData mesh = meshes[node.mesh_id];
     vec4 modelPos;
-    if (mesh.is_skinned != 0u && node.bone_matrix_offset != 0xFFFFFFFFu) {
+    if (mesh.is_skinned != 0u && node.bone_matrix_offset < bones.length()) {
         uint vertex_index = mesh.vertex_skinning_offset + gl_VertexIndex;
         VertexSkinningData skin = vertex_skinning[vertex_index];
         uvec4 indices = skin.joints + uvec4(node.bone_matrix_offset);
         mat4 skinMatrix =
-            skin.weights.x * bone_matrices[indices.x] +
-            skin.weights.y * bone_matrices[indices.y] +
-            skin.weights.z * bone_matrices[indices.z] +
-            skin.weights.w * bone_matrices[indices.w];
+            skin.weights.x * bones[indices.x] +
+            skin.weights.y * bones[indices.y] +
+            skin.weights.z * bones[indices.z] +
+            skin.weights.w * bones[indices.w];
         modelPos = skinMatrix * vec4(inPosition, 1.0);
     } else {
         modelPos = vec4(inPosition, 1.0);

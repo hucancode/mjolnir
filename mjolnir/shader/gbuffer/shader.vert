@@ -80,7 +80,7 @@ void main() {
     vec4 modelPosition;
     vec3 modelNormal;
     vec4 modelTangent;
-    if (mesh.is_skinned != 0u && node.bone_matrix_offset != 0xFFFFFFFFu) {
+    if (mesh.is_skinned != 0u && node.bone_matrix_offset < bones.length()) {
         uint vertex_index = mesh.vertex_skinning_offset + gl_VertexIndex;
         VertexSkinningData skin = vertex_skinning[vertex_index];
         uvec4 indices = skin.joints + uvec4(node.bone_matrix_offset);
