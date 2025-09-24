@@ -11,7 +11,7 @@ SHADER_SHADOW_FRAG :: #load("shader/shadow/frag.spv")
 
 RendererShadow :: struct {
   pipeline_layout: vk.PipelineLayout,
-  pipelines:       [SHADOW_SHADER_VARIANT_COUNT]vk.Pipeline,
+  pipeline:        vk.Pipeline,
 }
 
 shadow_init :: proc(
@@ -22,7 +22,13 @@ shadow_init :: proc(
 ) -> vk.Result {
   set_layouts := [?]vk.DescriptorSetLayout {
     warehouse.camera_buffer_set_layout,
+    warehouse.textures_set_layout,
     warehouse.bone_buffer_set_layout,
+    warehouse.material_buffer_set_layout,
+    warehouse.world_matrix_buffer_set_layout,
+    warehouse.node_data_buffer_set_layout,
+    warehouse.mesh_data_buffer_set_layout,
+    warehouse.vertex_skinning_buffer_set_layout,
   }
   push_constant_range := [?]vk.PushConstantRange {
     {stageFlags = {.FRAGMENT, .VERTEX}, size = size_of(PushConstant)},
@@ -102,75 +108,48 @@ shadow_init :: proc(
       geometry.VERTEX_ATTRIBUTE_DESCRIPTIONS[:],
     ),
   }
-  pipeline_infos: [SHADOW_SHADER_VARIANT_COUNT]vk.GraphicsPipelineCreateInfo
-  configs: [SHADOW_SHADER_VARIANT_COUNT]ShadowShaderConfig
-  entries: [SHADOW_SHADER_VARIANT_COUNT][SHADOW_SHADER_OPTION_COUNT]vk.SpecializationMapEntry
-  spec_infos: [SHADOW_SHADER_VARIANT_COUNT]vk.SpecializationInfo
-  shader_stages: [SHADOW_SHADER_VARIANT_COUNT][2]vk.PipelineShaderStageCreateInfo
-  for mask in 0 ..< SHADOW_SHADER_VARIANT_COUNT {
-    features := transmute(ShaderFeatureSet)mask & ShaderFeatureSet{.SKINNING}
-    configs[mask] = {
-      is_skinned = .SKINNING in features,
-    }
-    entries[mask] = [SHADOW_SHADER_OPTION_COUNT]vk.SpecializationMapEntry {
-      {
-        constantID = 0,
-        offset = u32(offset_of(ShadowShaderConfig, is_skinned)),
-        size = size_of(b32),
-      },
-    }
-    spec_infos[mask] = {
-      mapEntryCount = len(entries[mask]),
-      pMapEntries   = raw_data(entries[mask][:]),
-      dataSize      = size_of(ShadowShaderConfig),
-      pData         = &configs[mask],
-    }
-    shader_stages[mask] = [2]vk.PipelineShaderStageCreateInfo {
-      {
-        sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
-        stage = {.VERTEX},
-        module = vert_module,
-        pName = "main",
-        pSpecializationInfo = &spec_infos[mask],
-      },
-      {
-        sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
-        stage = {.FRAGMENT},
-        module = frag_module,
-        pName = "main",
-      },
-    }
-    pipeline_infos[mask] = {
-      sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
-      pNext               = &rendering_info_khr,
-      stageCount          = len(shader_stages[mask]),
-      pStages             = raw_data(shader_stages[mask][:]),
-      pVertexInputState   = &vertex_input_info,
-      pInputAssemblyState = &input_assembly,
-      pViewportState      = &viewport_state,
-      pRasterizationState = &rasterizer,
-      pMultisampleState   = &multisampling,
-      pDynamicState       = &dynamic_state_info,
-      pDepthStencilState  = &depth_stencil_state,
-      layout              = self.pipeline_layout,
-    }
+  shader_stages := [2]vk.PipelineShaderStageCreateInfo {
+    {
+      sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
+      stage = {.VERTEX},
+      module = vert_module,
+      pName = "main",
+    },
+    {
+      sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
+      stage = {.FRAGMENT},
+      module = frag_module,
+      pName = "main",
+    },
+  }
+  pipeline_info := vk.GraphicsPipelineCreateInfo {
+    sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
+    pNext               = &rendering_info_khr,
+    stageCount          = len(shader_stages),
+    pStages             = raw_data(shader_stages[:]),
+    pVertexInputState   = &vertex_input_info,
+    pInputAssemblyState = &input_assembly,
+    pViewportState      = &viewport_state,
+    pRasterizationState = &rasterizer,
+    pMultisampleState   = &multisampling,
+    pDynamicState       = &dynamic_state_info,
+    pDepthStencilState  = &depth_stencil_state,
+    layout              = self.pipeline_layout,
   }
   vk.CreateGraphicsPipelines(
     gpu_context.device,
     0,
-    len(pipeline_infos),
-    raw_data(pipeline_infos[:]),
+    1,
+    &pipeline_info,
     nil,
-    raw_data(self.pipelines[:]),
+    &self.pipeline,
   ) or_return
   return .SUCCESS
 }
 
 shadow_deinit :: proc(self: ^RendererShadow, gpu_context: ^gpu.GPUContext) {
-  for &p in self.pipelines {
-    vk.DestroyPipeline(gpu_context.device, p, nil)
-    p = 0
-  }
+  vk.DestroyPipeline(gpu_context.device, self.pipeline, nil)
+  self.pipeline = 0
   vk.DestroyPipelineLayout(gpu_context.device, self.pipeline_layout, nil)
   self.pipeline_layout = 0
 }
@@ -265,17 +244,25 @@ shadow_begin :: proc(
 // Render shadow for a single light
 shadow_render :: proc(
   self: ^RendererShadow,
-  render_input: RenderInput,
-  light_info: LightInfo,
   shadow_target: RenderTarget,
   command_buffer: vk.CommandBuffer,
   warehouse: ^ResourceWarehouse,
   frame_index: u32,
+  draw_buffer: vk.Buffer,
+  draw_count: u32,
 ) {
-  current_pipeline: vk.Pipeline = 0
+  if draw_count == 0 {
+    return
+  }
   descriptor_sets := [?]vk.DescriptorSet {
     warehouse.camera_buffer_descriptor_set,
+    warehouse.textures_descriptor_set,
     warehouse.bone_buffer_descriptor_set,
+    warehouse.material_buffer_descriptor_set,
+    warehouse.world_matrix_descriptor_sets[frame_index],
+    warehouse.node_data_descriptor_set,
+    warehouse.mesh_data_descriptor_set,
+    warehouse.vertex_skinning_descriptor_set,
   }
   vk.CmdBindDescriptorSets(
     command_buffer,
@@ -287,33 +274,42 @@ shadow_render :: proc(
     0,
     nil,
   )
-  rendered_count := 0
-  for batch_key, batch_group in render_input.batches {
-    shadow_features: ShaderFeatureSet
-    is_skinned := .SKINNING in batch_key.features
-    if is_skinned {
-      shadow_features += {.SKINNING}
-    }
-    pipeline := shadow_get_pipeline(self, shadow_features)
-    if pipeline != current_pipeline {
-      vk.CmdBindPipeline(command_buffer, .GRAPHICS, pipeline)
-      current_pipeline = pipeline
-    }
-    for batch_data in batch_group {
-      for node in batch_data.nodes {
-        render_single_shadow_node(
-          command_buffer,
-          self.pipeline_layout,
-          node,
-          is_skinned,
-          shadow_target.camera.index,
-          warehouse,
-          frame_index,
-        )
-        rendered_count += 1
-      }
-    }
+  vk.CmdBindPipeline(command_buffer, .GRAPHICS, self.pipeline)
+  push_constant := PushConstant {
+    camera_index = shadow_target.camera.index,
   }
+  vk.CmdPushConstants(
+    command_buffer,
+    self.pipeline_layout,
+    {.VERTEX, .FRAGMENT},
+    0,
+    size_of(PushConstant),
+    &push_constant,
+  )
+
+  vertex_buffers := [1]vk.Buffer{warehouse.vertex_buffer.buffer}
+  vertex_offsets := [1]vk.DeviceSize{0}
+  vk.CmdBindVertexBuffers(
+    command_buffer,
+    0,
+    1,
+    raw_data(vertex_buffers[:]),
+    raw_data(vertex_offsets[:]),
+  )
+  vk.CmdBindIndexBuffer(
+    command_buffer,
+    warehouse.index_buffer.buffer,
+    0,
+    .UINT32,
+  )
+
+  vk.CmdDrawIndexedIndirect(
+    command_buffer,
+    draw_buffer,
+    0,
+    draw_count,
+    visibility_culler_command_stride(),
+  )
 }
 
 shadow_end :: proc(
@@ -369,74 +365,4 @@ shadow_end :: proc(
     {.SHADER_READ},
     layer_count,
   )
-}
-
-shadow_get_pipeline :: proc(
-  self: ^RendererShadow,
-  features: ShaderFeatureSet = {},
-) -> vk.Pipeline {
-  // Extract only the SKINNING bit from features
-  mask: u32 = 0
-  if .SKINNING in features {
-    mask = 1
-  }
-  return self.pipelines[mask]
-}
-
-render_single_shadow_node :: proc(
-  command_buffer: vk.CommandBuffer,
-  layout: vk.PipelineLayout,
-  node: ^Node,
-  is_skinned: bool,
-  camera_index: u32,
-  warehouse: ^ResourceWarehouse,
-  frame_index: u32,
-) {
-  mesh_attachment := node.attachment.(MeshAttachment)
-  mesh, found_mesh := mesh(warehouse, mesh_attachment.handle)
-  if !found_mesh do return
-  mesh_skinning, mesh_has_skin := &mesh.skinning.?
-  node_skinning, node_has_skin := mesh_attachment.skinning.?
-  push_constant := PushConstant {
-    world        = geometry.transform_get_world_matrix_for_render(
-      &node.transform,
-    ),
-    camera_index = camera_index,
-  }
-  if is_skinned && node_has_skin {
-    push_constant.bone_matrix_offset =
-      node_skinning.bone_matrix_offset +
-      frame_index * warehouse.bone_matrix_slab.capacity
-  }
-  vk.CmdPushConstants(
-    command_buffer,
-    layout,
-    {.VERTEX, .FRAGMENT},
-    0,
-    size_of(PushConstant),
-    &push_constant,
-  )
-  skin_buffer := warehouse.dummy_skinning_buffer.buffer
-  if is_skinned && mesh_has_skin && node_has_skin {
-    skin_buffer = mesh_skinning.skin_buffer.buffer
-  }
-  buffers := [2]vk.Buffer{warehouse.vertex_buffer.buffer, skin_buffer}
-  vertex_offset := vk.DeviceSize(
-    mesh.vertex_allocation.offset * size_of(geometry.Vertex),
-  )
-  offsets := [2]vk.DeviceSize{vertex_offset, 0}
-  vk.CmdBindVertexBuffers(
-    command_buffer,
-    0,
-    2,
-    raw_data(buffers[:]),
-    raw_data(offsets[:]),
-  )
-  vk.CmdBindIndexBuffer(
-    command_buffer,
-    warehouse.index_buffer.buffer,
-    vk.DeviceSize(mesh.index_allocation.offset * size_of(u32)),
-    .UINT32,
-  )
-  vk.CmdDrawIndexed(command_buffer, mesh.index_allocation.count, 1, 0, 0, 0)
 }

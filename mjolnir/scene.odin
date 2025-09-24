@@ -6,6 +6,7 @@ import "core:math"
 import "core:math/linalg"
 import "core:slice"
 import "geometry"
+import "gpu"
 import "resource"
 
 PointLightAttachment :: struct {
@@ -78,6 +79,23 @@ NodeAttachment :: union {
   NavMeshAttachment,
   NavMeshAgentAttachment,
   NavMeshObstacleAttachment,
+}
+
+NodeFlag :: enum u32 {
+  VISIBLE,
+  CULLING_ENABLED,
+  MATERIAL_TRANSPARENT,
+  MATERIAL_WIREFRAME,
+  CASTS_SHADOW,
+}
+
+NodeFlagSet :: bit_set[NodeFlag; u32]
+
+NodeData :: struct {
+  material_id:        u32,
+  mesh_id:            u32,
+  bone_matrix_offset: u32,
+  flags:              NodeFlagSet,
 }
 
 Node :: struct {
@@ -556,4 +574,76 @@ get_world_matrix :: proc {
 get_world_matrix_for_render :: proc {
     node_get_world_matrix_for_render,
     geometry.transform_get_world_matrix_for_render,
+}
+
+upload_world_matrices :: proc(
+  warehouse: ^ResourceWarehouse,
+  scene: ^Scene,
+  frame_index: u32,
+) {
+  if frame_index >= MAX_FRAMES_IN_FLIGHT {
+    return
+  }
+  matrices := gpu.data_buffer_get_all(&warehouse.world_matrix_buffers[frame_index])
+  node_datas := gpu.data_buffer_get_all(&warehouse.node_data_buffer)
+  if len(matrices) == 0 {
+    return
+  }
+  identity := linalg.MATRIX4F32_IDENTITY
+  for i in 0 ..< len(matrices) {
+    matrices[i] = identity
+  }
+  default_node := NodeData {
+    material_id        = 0xFFFFFFFF,
+    mesh_id            = 0xFFFFFFFF,
+    bone_matrix_offset = 0xFFFFFFFF,
+    flags              = {},
+  }
+  for i in 0 ..< len(node_datas) {
+    node_datas[i] = default_node
+  }
+  for &entry, idx in scene.nodes.entries do if entry.active {
+    if idx >= len(matrices) do continue
+    matrices[idx] = geometry.transform_get_world_matrix_for_render(&entry.item.transform)
+    if idx >= len(node_datas) do continue
+    mesh_attachment, has_mesh := entry.item.attachment.(MeshAttachment)
+    if !has_mesh {
+      continue
+    }
+    node_data := &node_datas[idx]
+    node_data.material_id = mesh_attachment.material.index
+    node_data.mesh_id = mesh_attachment.handle.index
+    node_data.flags = {}
+    if entry.item.visible && entry.item.parent_visible {
+      node_data.flags |= {.VISIBLE}
+    }
+    if entry.item.culling_enabled {
+      node_data.flags |= {.CULLING_ENABLED}
+    }
+    if mesh_attachment.cast_shadow {
+      node_data.flags |= {.CASTS_SHADOW}
+    }
+    if material_entry, has_material := resource.get(
+      warehouse.materials,
+      mesh_attachment.material,
+    ); has_material {
+      switch material_entry.type {
+      case .TRANSPARENT:
+        node_data.flags |= {.MATERIAL_TRANSPARENT}
+      case .WIREFRAME:
+        node_data.flags |= {.MATERIAL_WIREFRAME}
+      case .PBR, .UNLIT:
+        // No additional flags needed
+      }
+    }
+    if skinning, has_skinning := mesh_attachment.skinning.?; has_skinning {
+      node_data.bone_matrix_offset = get_frame_bone_matrix_offset(
+        warehouse,
+        skinning.bone_matrix_offset,
+        frame_index,
+      )
+    } else {
+      node_data.bone_matrix_offset = 0xFFFFFFFF
+    }
+  }
 }

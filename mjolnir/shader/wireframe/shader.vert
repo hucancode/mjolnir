@@ -1,14 +1,10 @@
 #version 450
 
-layout(constant_id = 0) const bool SKINNED = false;
-
 layout(location = 0) in vec3 inPosition;
 layout(location = 1) in vec3 inNormal;
 layout(location = 2) in vec4 inTangent;
 layout(location = 3) in vec2 inTexCoord;
 layout(location = 4) in vec4 inColor;
-layout(location = 5) in uvec4 inJointIndices;
-layout(location = 6) in vec4 inJointWeights;
 
 // Output to fragment shader
 layout(location = 0) out vec4 outColor;
@@ -17,52 +13,90 @@ layout(location = 0) out vec4 outColor;
 struct Camera {
     mat4 view;
     mat4 projection;
-    vec2 viewport_size;
-    float camera_near;
-    float camera_far;
-    vec3 camera_position;
-    float padding[9]; // Align to 192-byte
+    vec4 viewport_params;
+    vec4 position;
+    vec4 frustum_planes[6];
 };
 
 // Bindless camera buffer set = 0
 layout(set = 0, binding = 0) readonly buffer CameraBuffer {
     Camera cameras[];
-} camera_buffer;
+};
 
 // Bone matrices
 layout(set = 2, binding = 0) readonly buffer BoneMatrices {
-    mat4 matrices[];
-} boneMatrices;
+    mat4 bones[];
+};
 
-// Push constant budget: 128 bytes
+layout(set = 4, binding = 0) readonly buffer WorldMatrices {
+    mat4 world_matrices[];
+};
+
+struct NodeData {
+    uint material_id;
+   uint mesh_id;
+   uint bone_matrix_offset;
+    uint flags;
+};
+
+layout(set = 5, binding = 0) readonly buffer NodeBuffer {
+    NodeData nodes[];
+};
+
+const uint MESH_FLAG_SKINNED = 1u << 0;
+
+struct MeshData {
+    vec3 aabb_min;
+    uint index_count;
+    vec3 aabb_max;
+    uint first_index;
+    int vertex_offset;
+    uint vertex_skinning_offset;
+    uint flags;
+    uint _padding;
+};
+
+layout(set = 6, binding = 0) readonly buffer MeshBuffer {
+    MeshData meshes[];
+};
+
+struct VertexSkinningData {
+    uvec4 joints;
+    vec4 weights;
+};
+
+layout(set = 7, binding = 0) readonly buffer VertexSkinningBuffer {
+    VertexSkinningData vertex_skinning[];
+};
+
+// Push constant budget: 64 bytes
 layout(push_constant) uniform PushConstants {
-    mat4 world;            // 64 bytes
-    uint bone_matrix_offset; // 4
-    uint albedo_index;     // 4
-    uint metallic_roughness_index; // 4
-    uint normal_index;     // 4
-    uint emissive_index;   // 4
-    float metallic_value;  // 4
-    float roughness_value; // 4
-    float emissive_value;  // 4
-    uint camera_index;     // 4
-    float padding[3];        // 12 (pad to 128)
+    uint camera_index;
 };
 
 
 void main() {
     // Get camera from bindless buffer
-    Camera camera = camera_buffer.cameras[camera_index];
+    Camera camera = cameras[camera_index];
+    uint node_index = uint(gl_InstanceIndex);
+    mat4 world = world_matrices[node_index];
+    NodeData node = nodes[node_index];
+    MeshData mesh = meshes[node.mesh_id];
 
     // Calculate position based on skinning
     vec4 modelPosition;
-    if (SKINNED) {
-        uint baseOffset = bone_matrix_offset;
+    bool is_skinned = (mesh.flags & MESH_FLAG_SKINNED) != 0u &&
+                      node.bone_matrix_offset < bones.length();
+    if (is_skinned) {
+        uint baseOffset = node.bone_matrix_offset;
+        int local_index = gl_VertexIndex - mesh.vertex_offset;
+        uint vertex_index = mesh.vertex_skinning_offset + uint(local_index);
+        VertexSkinningData skin = vertex_skinning[vertex_index];
         mat4 skinMatrix =
-            inJointWeights.x * boneMatrices.matrices[baseOffset + inJointIndices.x] +
-            inJointWeights.y * boneMatrices.matrices[baseOffset + inJointIndices.y] +
-            inJointWeights.z * boneMatrices.matrices[baseOffset + inJointIndices.z] +
-            inJointWeights.w * boneMatrices.matrices[baseOffset + inJointIndices.w];
+            skin.weights.x * bones[baseOffset + skin.joints.x] +
+            skin.weights.y * bones[baseOffset + skin.joints.y] +
+            skin.weights.z * bones[baseOffset + skin.joints.z] +
+            skin.weights.w * bones[baseOffset + skin.joints.w];
 
         modelPosition = skinMatrix * vec4(inPosition, 1.0);
     } else {

@@ -17,11 +17,9 @@ const int SPOT_LIGHT = 2;
 struct Camera {
     mat4 view;
     mat4 projection;
-    vec2 viewport_size;
-    float camera_near;
-    float camera_far;
-    vec3 camera_position;
-    float padding[9]; // Align to 192-byte
+    vec4 viewport_params;
+    vec4 position;
+    vec4 frustum_planes[6];
 };
 
 // Bindless camera buffer (set 0, binding 0)
@@ -149,7 +147,7 @@ vec3 colorBand(float x) {
 void main() {
     // Get cameras from bindless buffer
     Camera camera = camera_buffer.cameras[scene_camera_idx];
-    vec2 uv = (gl_FragCoord.xy / camera.viewport_size);
+    vec2 uv = (gl_FragCoord.xy / camera.viewport_params.xy);
     vec3 position = texture(sampler2D(textures[position_texture_index], samplers[SAMPLER_NEAREST_CLAMP]), uv).xyz;
     float depth = texture(sampler2D(textures[depth_texture_index], samplers[SAMPLER_NEAREST_CLAMP]), uv).r;
     vec3 normal = texture(sampler2D(textures[normal_texture_index], samplers[SAMPLER_NEAREST_CLAMP]), uv).xyz * 2.0 - 1.0;
@@ -158,7 +156,7 @@ void main() {
     float metallic = clamp(mr.r, 0.0, 1.0);
     float roughness = clamp(mr.g, 0.0, 1.0);
     roughness = max(roughness, 0.05);
-    vec3 V = normalize(camera.camera_position - position);
+    vec3 V = normalize(camera.position.xyz - position);
     Camera lightCamera = camera_buffer.cameras[light_camera_idx];
     float shadowFactor = calculateShadow(position, normal, lightCamera);
     vec3 direct = brdf(normal, V, albedo, roughness, metallic, position);

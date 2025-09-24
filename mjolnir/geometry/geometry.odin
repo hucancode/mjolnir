@@ -19,7 +19,6 @@ SkinningData :: struct {
 
 VERTEX_BINDING_DESCRIPTION := [?]vk.VertexInputBindingDescription {
   {binding = 0, stride = size_of(Vertex), inputRate = .VERTEX},
-  {binding = 1, stride = size_of(SkinningData), inputRate = .VERTEX},
 }
 
 VERTEX_ATTRIBUTE_DESCRIPTIONS := [?]vk.VertexInputAttributeDescription {
@@ -52,18 +51,6 @@ VERTEX_ATTRIBUTE_DESCRIPTIONS := [?]vk.VertexInputAttributeDescription {
     location = 4,
     format = .R32G32B32A32_SFLOAT,
     offset = u32(offset_of(Vertex, tangent)),
-  },
-  {
-    binding = 1,
-    location = 5,
-    format = .R32G32B32A32_UINT,
-    offset = u32(offset_of(SkinningData, joints)),
-  },
-  {
-    binding = 1,
-    location = 6,
-    format = .R32G32B32A32_SFLOAT,
-    offset = u32(offset_of(SkinningData, weights)),
   },
 }
 

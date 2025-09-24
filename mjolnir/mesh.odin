@@ -18,10 +18,29 @@ bone_deinit :: proc(bone: ^Bone) {
   bone.children = nil
 }
 
+MAX_MESHES :: 65536
+
+MeshFlag :: enum u32 {
+  SKINNED,
+}
+
+MeshFlagSet :: bit_set[MeshFlag; u32]
+
+MeshData :: struct {
+  aabb_min:              [3]f32,
+  index_count:           u32,
+  aabb_max:              [3]f32,
+  first_index:           u32,
+  vertex_offset:         i32,
+  vertex_skinning_offset: u32,
+  flags:                 MeshFlagSet,
+  _padding:              u32,
+}
+
 Skinning :: struct {
-  root_bone_index: u32,
-  bones:           []Bone,
-  skin_buffer:     gpu.DataBuffer(geometry.SkinningData),
+  root_bone_index:            u32,
+  bones:                      []Bone,
+  vertex_skinning_allocation: BufferAllocation,
 }
 
 Mesh :: struct {
@@ -40,7 +59,7 @@ mesh_deinit :: proc(
   warehouse_free_indices(warehouse, self.index_allocation)
   skin, has_skin := &self.skinning.?
   if !has_skin do return
-  gpu.data_buffer_deinit(gpu_context, &skin.skin_buffer)
+  warehouse_free_vertex_skinning(warehouse, skin.vertex_skinning_allocation)
   for &bone in skin.bones do bone_deinit(&bone)
   delete(skin.bones)
 }
@@ -64,17 +83,16 @@ mesh_init :: proc(
   if len(data.skinnings) <= 0 {
     return .SUCCESS
   }
-  log.info("creating skin buffer", len(data.skinnings))
-  skin_buffer := gpu.create_local_buffer(
-    gpu_context,
-    geometry.SkinningData,
-    len(data.skinnings),
-    {.VERTEX_BUFFER},
-    raw_data(data.skinnings),
-  ) or_return
+  allocation, ret := warehouse_allocate_vertex_skinning(
+    warehouse,
+    data.skinnings,
+  )
+  if ret != .SUCCESS {
+    return ret
+  }
   self.skinning = Skinning {
-    bones       = make([]Bone, 0),
-    skin_buffer = skin_buffer,
+    bones                      = make([]Bone, 0),
+    vertex_skinning_allocation = allocation,
   }
   return .SUCCESS
 }

@@ -1,6 +1,5 @@
 package mjolnir
 
-import "core:fmt"
 import "core:log"
 import "geometry"
 import "gpu"
@@ -10,12 +9,12 @@ import vk "vendor:vulkan"
 
 SHADER_DEPTH_PREPASS_VERT :: #load("shader/depth_prepass/vert.spv")
 
-DEPTH_PREPASS_OPTION_COUNT :: 1
+DEPTH_PREPASS_OPTION_COUNT :: 0
 DEPTH_PREPASS_VARIANT_COUNT: u32 : 1 << DEPTH_PREPASS_OPTION_COUNT
 
 RendererDepthPrepass :: struct {
   pipeline_layout: vk.PipelineLayout,
-  pipelines:       [DEPTH_PREPASS_VARIANT_COUNT]vk.Pipeline,
+  pipeline:        vk.Pipeline,
 }
 
 depth_prepass_init :: proc(
@@ -32,7 +31,13 @@ depth_prepass_init :: proc(
   }
   set_layouts := [?]vk.DescriptorSetLayout {
     warehouse.camera_buffer_set_layout,
+    warehouse.textures_set_layout,
     warehouse.bone_buffer_set_layout,
+    warehouse.material_buffer_set_layout,
+    warehouse.world_matrix_buffer_set_layout,
+    warehouse.node_data_buffer_set_layout,
+    warehouse.mesh_data_buffer_set_layout,
+    warehouse.vertex_skinning_buffer_set_layout,
   }
   pipeline_layout_info := vk.PipelineLayoutCreateInfo {
     sType                  = .PIPELINE_LAYOUT_CREATE_INFO,
@@ -47,19 +52,12 @@ depth_prepass_init :: proc(
     nil,
     &self.pipeline_layout,
   ) or_return
-  for mask in 0 ..< DEPTH_PREPASS_VARIANT_COUNT {
-    features := transmute(ShaderFeatureSet)mask & ShaderFeatureSet{.SKINNING}
-    config := ShaderConfig {
-      is_skinned = .SKINNING in features,
-    }
-    depth_prepass_build_pipeline(
-      gpu_context,
-      self,
-      &config,
-      &self.pipelines[mask],
-      swapchain_extent,
-    ) or_return
-  }
+  depth_prepass_build_pipeline(
+    gpu_context,
+    self,
+    &self.pipeline,
+    swapchain_extent,
+  ) or_return
   return .SUCCESS
 }
 
@@ -67,10 +65,8 @@ depth_prepass_deinit :: proc(
   self: ^RendererDepthPrepass,
   gpu_context: ^gpu.GPUContext,
 ) {
-  for &p in self.pipelines {
-    vk.DestroyPipeline(gpu_context.device, p, nil)
-    p = 0
-  }
+  vk.DestroyPipeline(gpu_context.device, self.pipeline, nil)
+  self.pipeline = 0
   vk.DestroyPipelineLayout(gpu_context.device, self.pipeline_layout, nil)
   self.pipeline_layout = 0
 }
@@ -122,16 +118,25 @@ depth_prepass_end :: proc(command_buffer: vk.CommandBuffer) {
 
 depth_prepass_render :: proc(
   self: ^RendererDepthPrepass,
-  render_input: ^RenderInput,
   command_buffer: vk.CommandBuffer,
   camera_index: u32,
   warehouse: ^ResourceWarehouse,
   frame_index: u32,
+  draw_buffer: vk.Buffer,
+  draw_count: u32,
 ) -> int {
-  rendered_count := 0
+  if draw_count == 0 {
+    return 0
+  }
   descriptor_sets := [?]vk.DescriptorSet {
     warehouse.camera_buffer_descriptor_set,
+    warehouse.textures_descriptor_set,
     warehouse.bone_buffer_descriptor_set,
+    warehouse.material_buffer_descriptor_set,
+    warehouse.world_matrix_descriptor_sets[frame_index],
+    warehouse.node_data_descriptor_set,
+    warehouse.mesh_data_descriptor_set,
+    warehouse.vertex_skinning_descriptor_set,
   }
   vk.CmdBindDescriptorSets(
     command_buffer,
@@ -143,118 +148,67 @@ depth_prepass_render :: proc(
     0,
     nil,
   )
-  current_pipeline: vk.Pipeline = 0
-  for batch_key, batch_group in render_input.batches {
-    if batch_key.material_type == .WIREFRAME ||
-       batch_key.material_type == .TRANSPARENT {
-      continue
-    }
-    for batch_data in batch_group {
-      material := resource.get(
-        warehouse.materials,
-        batch_data.material_handle,
-      ) or_continue
-      for node in batch_data.nodes {
-        #partial switch data in node.attachment {
-        case MeshAttachment:
-          mesh := mesh(warehouse, data.handle) or_continue
-          mesh_skinning, mesh_has_skin := &mesh.skinning.?
-          node_skinning, node_has_skin := data.skinning.?
-          pipeline := depth_prepass_get_pipeline(self, material, mesh, data)
-          if pipeline != current_pipeline {
-            vk.CmdBindPipeline(command_buffer, .GRAPHICS, pipeline)
-            current_pipeline = pipeline
-          }
-          push_constant := PushConstant {
-            world        = get_world_matrix_for_render(node),
-            camera_index = camera_index,
-          }
-          if node_has_skin {
-            push_constant.bone_matrix_offset =
-              node_skinning.bone_matrix_offset +
-              frame_index * warehouse.bone_matrix_slab.capacity
-          }
-          vk.CmdPushConstants(
-            command_buffer,
-            self.pipeline_layout,
-            {.VERTEX},
-            0,
-            size_of(PushConstant),
-            &push_constant,
-          )
-          skin_buffer := warehouse.dummy_skinning_buffer.buffer
-          if mesh_has_skin {
-            skin_buffer = mesh_skinning.skin_buffer.buffer
-          }
+  vk.CmdBindPipeline(command_buffer, .GRAPHICS, self.pipeline)
 
-          buffers := [2]vk.Buffer{warehouse.vertex_buffer.buffer, skin_buffer}
-          vertex_offset := vk.DeviceSize(mesh.vertex_allocation.offset * size_of(geometry.Vertex))
-          offsets := [2]vk.DeviceSize{vertex_offset, 0}
-          vk.CmdBindVertexBuffers(
-            command_buffer,
-            0,
-            2,
-            raw_data(buffers[:]),
-            raw_data(offsets[:]),
-          )
-          vk.CmdBindIndexBuffer(
-            command_buffer,
-            warehouse.index_buffer.buffer,
-            vk.DeviceSize(mesh.index_allocation.offset * size_of(u32)),
-            .UINT32,
-          )
-          vk.CmdDrawIndexed(command_buffer, mesh.index_allocation.count, 1, 0, 0, 0)
-          rendered_count += 1
-        }
-      }
-    }
+  push_constant := PushConstant {
+    camera_index = camera_index,
   }
-  return rendered_count
-}
+  vk.CmdPushConstants(
+    command_buffer,
+    self.pipeline_layout,
+    {.VERTEX},
+    0,
+    size_of(PushConstant),
+    &push_constant,
+  )
 
-depth_prepass_get_pipeline :: proc(
-  self: ^RendererDepthPrepass,
-  material: ^Material,
-  mesh: ^Mesh,
-  data: MeshAttachment,
-) -> vk.Pipeline {
-  features := material.features & ShaderFeatureSet{.SKINNING}
-  return self.pipelines[transmute(u32)features]
+  vertex_buffers := [1]vk.Buffer{warehouse.vertex_buffer.buffer}
+  vertex_offsets := [1]vk.DeviceSize{0}
+  vk.CmdBindVertexBuffers(
+    command_buffer,
+    0,
+    1,
+    raw_data(vertex_buffers[:]),
+    raw_data(vertex_offsets[:]),
+  )
+  vk.CmdBindIndexBuffer(
+    command_buffer,
+    warehouse.index_buffer.buffer,
+    0,
+    .UINT32,
+  )
+
+  vk.CmdDrawIndexedIndirect(
+    command_buffer,
+    draw_buffer,
+    0,
+    draw_count,
+    visibility_culler_command_stride(),
+  )
+
+  return int(draw_count)
 }
 
 depth_prepass_build_pipeline :: proc(
   gpu_context: ^gpu.GPUContext,
   self: ^RendererDepthPrepass,
-  config: ^ShaderConfig,
   pipeline: ^vk.Pipeline,
   swapchain_extent: vk.Extent2D,
 ) -> (
   res: vk.Result,
 ) {
-  log.debugf("Building depth prepass pipeline with config: %v", config)
+  log.debug("Building depth prepass pipeline")
   vert_shader_module := gpu.create_shader_module(
     gpu_context,
     SHADER_DEPTH_PREPASS_VERT,
   ) or_return
   defer vk.DestroyShaderModule(gpu_context.device, vert_shader_module, nil)
-  entry := vk.SpecializationMapEntry {
-    constantID = 0,
-    offset     = u32(offset_of(ShaderConfig, is_skinned)),
-    size       = size_of(b32),
-  }
-  spec_info := vk.SpecializationInfo {
-    mapEntryCount = 1,
-    pMapEntries   = &entry,
-    dataSize      = size_of(ShaderConfig),
-    pData         = config,
-  }
   shader_stages := [?]vk.PipelineShaderStageCreateInfo {
     {
       sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
       stage = {.VERTEX},
       module = vert_shader_module,
       pName = "main",
-      pSpecializationInfo = &spec_info,
     },
   }
   vertex_input_info := vk.PipelineVertexInputStateCreateInfo {

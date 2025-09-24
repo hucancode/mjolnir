@@ -628,11 +628,28 @@ custom_render :: proc(
     &engine.warehouse,
     portal_rt.camera.index,
   )
-  portal_render_input := generate_render_input(
-    engine,
-    make_frustum(camera_uniform.projection * camera_uniform.view),
-    portal_rt.camera,
+  portal_include := mjolnir.NodeFlagSet{.VISIBLE}
+  portal_exclude := mjolnir.NodeFlagSet{
+    .MATERIAL_TRANSPARENT,
+    .MATERIAL_WIREFRAME,
+  }
+  mjolnir.visibility_culler_dispatch(
+    &engine.visibility_culler,
+    &engine.gpu_context,
+    command_buffer,
+    engine.frame_index,
+    portal_rt.camera.index,
+    portal_include,
+    portal_exclude,
   )
+  portal_draw_buffer := mjolnir.visibility_culler_command_buffer(
+    &engine.visibility_culler,
+    engine.frame_index,
+  )
+  portal_draw_count := mjolnir.visibility_culler_max_draw_count(
+    &engine.visibility_culler,
+  )
+  upload_world_matrices(&engine.warehouse, &engine.scene, engine.frame_index)
   // Render G-buffer pass with self-managed depth
   gbuffer_begin(
     portal_rt,
@@ -643,11 +660,12 @@ custom_render :: proc(
   )
   gbuffer_render(
     &engine.gbuffer,
-    &portal_render_input,
     portal_rt,
     command_buffer,
     &engine.warehouse,
     engine.frame_index,
+    portal_draw_buffer,
+    portal_draw_count,
   )
   gbuffer_end(portal_rt, command_buffer, &engine.warehouse, engine.frame_index)
   // Update portal material to use the rendered texture (from current frame)
@@ -658,4 +676,11 @@ custom_render :: proc(
   )
   if !ok do return
   portal_mat.albedo = get_albedo_texture(portal_rt, engine.frame_index)
+  sync_result := mjolnir.sync_material_gpu_data(
+    &engine.warehouse,
+    portal_material_handle,
+  )
+  if sync_result != .SUCCESS {
+    log.error("Failed to sync portal material GPU data", sync_result)
+  }
 }

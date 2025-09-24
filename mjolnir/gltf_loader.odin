@@ -88,7 +88,6 @@ load_gltf :: proc(
     manifest.unique_materials[:],
     &texture_cache,
     &material_cache,
-    skinned_materials,
   ) or_return
   // step 3: Geometry Processing
   geometry_cache := make(map[^cgltf.mesh]GeometryData, context.temp_allocator)
@@ -262,13 +261,11 @@ load_materials_batch :: proc(
   materials: []^cgltf.material,
   texture_cache: ^map[^cgltf.texture]resource.Handle,
   material_cache: ^map[^cgltf.material]resource.Handle,
-  skinned_materials: map[^cgltf.material]bool,
 ) -> cgltf.result {
   for gltf_material in materials {
     if gltf_material == nil do continue
     albedo, metallic_roughness, normal, emissive, occlusion, features :=
       load_material_textures(gltf_material, texture_cache)
-    if gltf_material in skinned_materials do features |= {.SKINNING}
     material_handle, _, material_result := create_material(
       &engine.warehouse,
       features,
@@ -645,7 +642,7 @@ construct_scene :: proc(
     gltf_node := &gltf_data.nodes[entry.idx]
     node_handle, node := resource.alloc(&engine.scene.nodes)
     if node == nil do continue
-    node.name = string(gltf_node.name)
+    init_node(node, string(gltf_node.name))
     node.transform = geometry.TRANSFORM_IDENTITY
     if gltf_node.has_matrix {
       node.transform = geometry.decompose_matrix(
@@ -669,18 +666,23 @@ construct_scene :: proc(
       node.transform.is_dirty = true
     }
     node.parent = entry.parent
-    node.children = make([dynamic]Handle, 0)
     if gltf_node.mesh != nil {
       if geometry_data, found := geometry_cache[gltf_node.mesh]; found {
         if gltf_node.skin != nil {
           if skin_data, skin_found := skin_cache[gltf_node.skin]; skin_found {
             mesh_handle, mesh := resource.alloc(&engine.warehouse.meshes)
-            mesh_init(
+            init_result := mesh_init(
               mesh,
               &engine.gpu_context,
               &engine.warehouse,
               geometry_data.geometry,
             )
+            if init_result != .SUCCESS {
+              log.error("Failed to initialize skinned mesh")
+              mesh_deinit(mesh, &engine.gpu_context, &engine.warehouse)
+              resource.free(&engine.warehouse.meshes, mesh_handle)
+              continue
+            }
             skinning, _ := &mesh.skinning.?
             // Deep clone bones including their children slices
             skinning.bones = make([]Bone, len(skin_data.bones))
@@ -690,6 +692,13 @@ construct_scene :: proc(
               skinning.bones[i].name = strings.clone(src_bone.name)
             }
             skinning.root_bone_index = skin_data.root_bone_idx
+            gpu_result := mesh_write_to_gpu(&engine.warehouse, mesh_handle, mesh)
+            if gpu_result != .SUCCESS {
+              log.error("Failed to write skinned mesh data to GPU")
+              mesh_deinit(mesh, &engine.gpu_context, &engine.warehouse)
+              resource.free(&engine.warehouse.meshes, mesh_handle)
+              continue
+            }
             node.attachment = MeshAttachment {
               handle = mesh_handle,
               material = geometry_data.material_handle,

@@ -11,16 +11,14 @@ const uint SAMPLER_LINEAR_REPEAT = 3;
 layout(location = 0) in vec2 v_uv;
 layout(location = 0) out vec4 outColor;
 
-const float AMBIENT_STRENGTH = 0.5;
+const float AMBIENT_STRENGTH = 0.2;
 
 struct Camera {
     mat4 view;
     mat4 projection;
-    vec2 viewport_size;
-    float camera_near;
-    float camera_far;
-    vec3 camera_position;
-    float padding[9]; // Align to 192-byte
+    vec4 viewport_params;
+    vec4 position;
+    vec4 frustum_planes[6];
 };
 
 // Bindless camera buffer (set 0, binding 0)
@@ -69,7 +67,7 @@ void main() {
     float roughness = clamp(mr.g, 0.0, 1.0);
     vec3 emissive = texture(sampler2D(textures[emissive_texture_index], samplers[SAMPLER_NEAREST_CLAMP]), uv).rgb;
     // Camera position from bindless camera buffer
-    vec3 V = normalize(camera.camera_position - position);
+    vec3 V = normalize(camera.position.xyz - position);
     vec3 R = reflect(-V, normal);
     float NdotV = max(dot(normal, V), 0.0);
     // IBL using bindless textures
@@ -92,8 +90,7 @@ void main() {
     float fresnel_strength = mix(metallic, 0.5 * roughness, 0.5);
     float fresnel = 1.0 - pow(1.0 - NdotV, fresnel_strength);
     vec3 fresnelColor = (albedo + emissive) * fresnel * fresnel_strength;
-    vec3 final = albedo * ambient * AMBIENT_STRENGTH
-        + fresnelColor
+    vec3 final = (albedo * ambient + fresnelColor) * AMBIENT_STRENGTH
         + emissive;
     outColor = vec4(final, 1.0);
     // outColor = vec4(vec3(0.01), 1);

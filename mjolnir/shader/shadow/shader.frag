@@ -5,11 +5,9 @@ layout(location = 0) in vec3 worldPos;
 struct Camera {
     mat4 view;
     mat4 projection;
-    vec2 viewport_size;
-    float camera_near;
-    float camera_far;
-    vec3 camera_position;
-    float padding[9]; // Align to 192-byte
+    vec4 viewport_params;
+    vec4 position;
+    vec4 frustum_planes[6];
 };
 
 layout(set = 0, binding = 0) readonly buffer CameraBuffer {
@@ -17,25 +15,16 @@ layout(set = 0, binding = 0) readonly buffer CameraBuffer {
 };
 
 layout(push_constant) uniform PushConstants {
-    mat4 world;
-    uint bone_matrix_offset;
-    uint albedo_index;
-    uint metallic_roughness_index;
-    uint normal_index;
-    uint emissive_index;
-    float metallic_value;
-    float roughness_value;
-    float emissive_value;
     uint camera_index;
 };
 
 void main() {
     Camera camera = cameras[camera_index];
     // calculate distance from light center to fragment
-    vec3 lightPos = camera.camera_position;
+    vec3 lightPos = camera.position.xyz;
     float distance = length(worldPos - lightPos);
-    float near = camera.camera_near;
-    float far = camera.camera_far;
+    float near = camera.viewport_params.z;
+    float far = camera.viewport_params.w;
     // Write normalized linear distance directly to depth buffer
     gl_FragDepth = clamp((distance - near) / (far - near), 0.0, 1.0);
 }
