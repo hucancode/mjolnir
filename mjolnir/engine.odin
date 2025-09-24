@@ -222,7 +222,6 @@ Engine :: struct {
   frame_fence:                 vk.Fence,
   update_thread:               Maybe(^thread.Thread),
   update_active:               bool,
-  transforms_updated:          bool,
   last_render_timestamp:       time.Time,
 }
 
@@ -274,7 +273,6 @@ engine_init_shadow_maps :: proc(engine: ^Engine) -> vk.Result {
         engine.shadow_maps[frame_idx][i]
     }
     render_target.features = {.DEPTH_TEXTURE}
-
     // Create persistent render targets for point lights (6 cube faces)
     for face in 0 ..< 6 {
       cube_render_target: ^RenderTarget
@@ -770,7 +768,6 @@ update :: proc(self: ^Engine) -> bool {
     self.update_proc(self, delta_time)
   }
   self.last_update_timestamp = time.now()
-  self.transforms_updated = true
   return true
 }
 
