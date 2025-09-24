@@ -20,31 +20,10 @@ shadow_init :: proc(
   warehouse: ^ResourceWarehouse,
   depth_format: vk.Format = .D32_SFLOAT,
 ) -> vk.Result {
-  set_layouts := [?]vk.DescriptorSetLayout {
-    warehouse.camera_buffer_set_layout,
-    warehouse.textures_set_layout,
-    warehouse.bone_buffer_set_layout,
-    warehouse.material_buffer_set_layout,
-    warehouse.world_matrix_buffer_set_layout,
-    warehouse.node_data_buffer_set_layout,
-    warehouse.mesh_data_buffer_set_layout,
-    warehouse.vertex_skinning_buffer_set_layout,
+  self.pipeline_layout = warehouse.geometry_pipeline_layout
+  if self.pipeline_layout == 0 {
+    return .ERROR_INITIALIZATION_FAILED
   }
-  push_constant_range := [?]vk.PushConstantRange {
-    {stageFlags = {.FRAGMENT, .VERTEX}, size = size_of(PushConstant)},
-  }
-  vk.CreatePipelineLayout(
-    gpu_context.device,
-    &{
-      sType = .PIPELINE_LAYOUT_CREATE_INFO,
-      setLayoutCount = len(set_layouts),
-      pSetLayouts = raw_data(set_layouts[:]),
-      pushConstantRangeCount = len(push_constant_range),
-      pPushConstantRanges = raw_data(push_constant_range[:]),
-    },
-    nil,
-    &self.pipeline_layout,
-  ) or_return
   vert_module := gpu.create_shader_module(
     gpu_context,
     SHADER_SHADOW_VERT,
@@ -150,8 +129,6 @@ shadow_init :: proc(
 shadow_deinit :: proc(self: ^RendererShadow, gpu_context: ^gpu.GPUContext) {
   vk.DestroyPipeline(gpu_context.device, self.pipeline, nil)
   self.pipeline = 0
-  vk.DestroyPipelineLayout(gpu_context.device, self.pipeline_layout, nil)
-  self.pipeline_layout = 0
 }
 
 shadow_begin :: proc(

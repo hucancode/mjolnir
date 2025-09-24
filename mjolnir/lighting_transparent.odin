@@ -19,32 +19,10 @@ transparent_init :: proc(
   warehouse: ^ResourceWarehouse,
 ) -> vk.Result {
   log.info("Initializing transparent renderer")
-  set_layouts := [?]vk.DescriptorSetLayout {
-    warehouse.camera_buffer_set_layout,
-    warehouse.textures_set_layout,
-    warehouse.bone_buffer_set_layout,
-    warehouse.material_buffer_set_layout,
-    warehouse.world_matrix_buffer_set_layout,
-    warehouse.node_data_buffer_set_layout,
-    warehouse.mesh_data_buffer_set_layout,
-    warehouse.vertex_skinning_buffer_set_layout,
+  self.pipeline_layout = warehouse.geometry_pipeline_layout
+  if self.pipeline_layout == 0 {
+    return .ERROR_INITIALIZATION_FAILED
   }
-  push_constant_range := vk.PushConstantRange {
-    stageFlags = {.VERTEX, .FRAGMENT},
-    size       = size_of(PushConstant),
-  }
-  vk.CreatePipelineLayout(
-    gpu_context.device,
-    &{
-      sType = .PIPELINE_LAYOUT_CREATE_INFO,
-      setLayoutCount = len(set_layouts),
-      pSetLayouts = raw_data(set_layouts[:]),
-      pushConstantRangeCount = 1,
-      pPushConstantRanges = &push_constant_range,
-    },
-    nil,
-    &self.pipeline_layout,
-  ) or_return
 
   create_transparent_pipelines(gpu_context, self) or_return
   create_wireframe_pipelines(gpu_context, self) or_return
@@ -350,10 +328,6 @@ transparent_deinit :: proc(
     vk.DestroyPipeline(gpu_context.device, self.wireframe_pipeline, nil)
     self.wireframe_pipeline = 0
   }
-
-  // Destroy pipeline layout
-  vk.DestroyPipelineLayout(gpu_context.device, self.pipeline_layout, nil)
-  self.pipeline_layout = 0
 }
 
 transparent_begin :: proc(

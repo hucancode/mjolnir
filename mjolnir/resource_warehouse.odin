@@ -80,6 +80,9 @@ ResourceWarehouse :: struct {
   textures_set_layout:          vk.DescriptorSetLayout,
   textures_descriptor_set:      vk.DescriptorSet,
 
+  // Shared pipeline layout used by geometry-style renderers
+  geometry_pipeline_layout:     vk.PipelineLayout,
+
   // Bindless vertex/index buffer system
   vertex_buffer:                gpu.DataBuffer(geometry.Vertex),
   index_buffer:                 gpu.DataBuffer(u32),
@@ -123,7 +126,7 @@ resource_init :: proc(
   init_mesh_data_buffer(gpu_context, warehouse) or_return
   init_vertex_skinning_buffer(gpu_context, warehouse) or_return
   init_bindless_buffers(gpu_context, warehouse) or_return
-  // Textuwarehouse+samplers descriptor set
+  // Texture + samplers descriptor set
   textures_bindings := [?]vk.DescriptorSetLayoutBinding {
     {
       binding = 0,
@@ -154,6 +157,16 @@ resource_init :: proc(
     nil,
     &warehouse.textures_set_layout,
   ) or_return
+  layout_result := create_geometry_pipeline_layout(gpu_context, warehouse)
+  if layout_result != .SUCCESS {
+    vk.DestroyDescriptorSetLayout(
+      gpu_context.device,
+      warehouse.textures_set_layout,
+      nil,
+    )
+    warehouse.textures_set_layout = 0
+    return layout_result
+  }
   vk.AllocateDescriptorSets(
     gpu_context.device,
     &{
@@ -282,6 +295,12 @@ resource_deinit :: proc(
   deinit_mesh_data_buffer(gpu_context, warehouse)
   deinit_vertex_skinning_buffer(gpu_context, warehouse)
   deinit_bindless_buffers(gpu_context, warehouse)
+  vk.DestroyPipelineLayout(
+    gpu_context.device,
+    warehouse.geometry_pipeline_layout,
+    nil,
+  )
+  warehouse.geometry_pipeline_layout = 0
   vk.DestroyDescriptorSetLayout(
     gpu_context.device,
     warehouse.textures_set_layout,
@@ -289,6 +308,39 @@ resource_deinit :: proc(
   )
   warehouse.textures_set_layout = 0
   warehouse.textures_descriptor_set = 0
+}
+
+create_geometry_pipeline_layout :: proc(
+  gpu_context: ^gpu.GPUContext,
+  warehouse: ^ResourceWarehouse,
+) -> vk.Result {
+  push_constant_range := vk.PushConstantRange {
+    stageFlags = {.VERTEX, .FRAGMENT},
+    size       = size_of(PushConstant),
+  }
+  set_layouts := [?]vk.DescriptorSetLayout {
+    warehouse.camera_buffer_set_layout,
+    warehouse.textures_set_layout,
+    warehouse.bone_buffer_set_layout,
+    warehouse.material_buffer_set_layout,
+    warehouse.world_matrix_buffer_set_layout,
+    warehouse.node_data_buffer_set_layout,
+    warehouse.mesh_data_buffer_set_layout,
+    warehouse.vertex_skinning_buffer_set_layout,
+  }
+  vk.CreatePipelineLayout(
+    gpu_context.device,
+    &vk.PipelineLayoutCreateInfo {
+      sType                  = .PIPELINE_LAYOUT_CREATE_INFO,
+      setLayoutCount         = len(set_layouts),
+      pSetLayouts            = raw_data(set_layouts[:]),
+      pushConstantRangeCount = 1,
+      pPushConstantRanges    = &push_constant_range,
+    },
+    nil,
+    &warehouse.geometry_pipeline_layout,
+  ) or_return
+  return .SUCCESS
 }
 
 init_global_samplers :: proc(
