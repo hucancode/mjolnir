@@ -59,8 +59,17 @@ ResourceWarehouse :: struct {
   world_matrix_descriptor_sets:     [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
   world_matrix_buffers:             [MAX_FRAMES_IN_FLIGHT]gpu.DataBuffer(matrix[4, 4]f32),
 
-  // Dummy skinning buffer for static meshes
-  dummy_skinning_buffer:        gpu.DataBuffer(geometry.SkinningData),
+  // Bindless mesh data buffer system
+  mesh_data_buffer_set_layout:    vk.DescriptorSetLayout,
+  mesh_data_descriptor_set:       vk.DescriptorSet,
+  mesh_data_buffer:               gpu.DataBuffer(MeshData),
+
+  // Bindless vertex skinning buffer system
+  vertex_skinning_buffer_set_layout: vk.DescriptorSetLayout,
+  vertex_skinning_descriptor_set:    vk.DescriptorSet,
+  vertex_skinning_buffer:            gpu.DataBuffer(geometry.SkinningData),
+  vertex_skinning_slab:              resource.SlabAllocator,
+  vertex_skinning_data:              []geometry.SkinningData,
 
   // Bindless texture system
   textures_set_layout:          vk.DescriptorSetLayout,
@@ -105,6 +114,8 @@ resource_init :: proc(
   init_camera_buffer(gpu_context, warehouse) or_return
   init_material_buffer(gpu_context, warehouse) or_return
   init_world_matrix_buffers(gpu_context, warehouse) or_return
+  init_mesh_data_buffer(gpu_context, warehouse) or_return
+  init_vertex_skinning_buffer(gpu_context, warehouse) or_return
   init_bindless_buffers(gpu_context, warehouse) or_return
   // Textuwarehouse+samplers descriptor set
   textures_bindings := [?]vk.DescriptorSetLayoutBinding {
@@ -198,7 +209,6 @@ resource_deinit :: proc(
   warehouse: ^ResourceWarehouse,
   gpu_context: ^gpu.GPUContext,
 ) {
-  gpu.data_buffer_deinit(gpu_context, &warehouse.dummy_skinning_buffer)
   deinit_material_buffer(gpu_context, warehouse)
   deinit_world_matrix_buffers(gpu_context, warehouse)
   // Manually clean up each pool since callbacks can't capture gpu_context
@@ -262,6 +272,8 @@ resource_deinit :: proc(
   deinit_global_samplers(gpu_context, warehouse)
   deinit_bone_matrix_allocator(gpu_context, warehouse)
   deinit_camera_buffer(gpu_context, warehouse)
+  deinit_mesh_data_buffer(gpu_context, warehouse)
+  deinit_vertex_skinning_buffer(gpu_context, warehouse)
   deinit_bindless_buffers(gpu_context, warehouse)
   vk.DestroyDescriptorSetLayout(
     gpu_context.device,
@@ -398,14 +410,6 @@ init_bone_matrix_allocator :: proc(
     pBufferInfo     = &buffer_info,
   }
   vk.UpdateDescriptorSets(gpu_context.device, 1, &write, 0, nil)
-
-  // Initialize dummy skinning buffer for static meshes
-  warehouse.dummy_skinning_buffer = gpu.create_host_visible_buffer(
-  gpu_context,
-  geometry.SkinningData,
-  1, // Just one dummy element
-  {.VERTEX_BUFFER},
-  ) or_return
 
   return .SUCCESS
 }
@@ -642,6 +646,160 @@ deinit_world_matrix_buffers :: proc(
   warehouse.world_matrix_buffer_set_layout = 0
 }
 
+init_mesh_data_buffer :: proc(
+  gpu_context: ^gpu.GPUContext,
+  warehouse: ^ResourceWarehouse,
+) -> vk.Result {
+  log.infof(
+    "Creating mesh data buffer with capacity %d meshes...",
+    MAX_MESHES,
+  )
+  warehouse.mesh_data_buffer = gpu.create_host_visible_buffer(
+    gpu_context,
+    MeshData,
+    MAX_MESHES,
+    {.STORAGE_BUFFER},
+    nil,
+  ) or_return
+  bindings := [?]vk.DescriptorSetLayoutBinding {
+    {
+      binding = 0,
+      descriptorType = .STORAGE_BUFFER,
+      descriptorCount = 1,
+      stageFlags = {.VERTEX},
+    },
+  }
+  vk.CreateDescriptorSetLayout(
+    gpu_context.device,
+    &vk.DescriptorSetLayoutCreateInfo {
+      sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+      bindingCount = len(bindings),
+      pBindings = raw_data(bindings[:]),
+    },
+    nil,
+    &warehouse.mesh_data_buffer_set_layout,
+  ) or_return
+  vk.AllocateDescriptorSets(
+    gpu_context.device,
+    &vk.DescriptorSetAllocateInfo {
+      sType              = .DESCRIPTOR_SET_ALLOCATE_INFO,
+      descriptorPool     = gpu_context.descriptor_pool,
+      descriptorSetCount = 1,
+      pSetLayouts        = &warehouse.mesh_data_buffer_set_layout,
+    },
+    &warehouse.mesh_data_descriptor_set,
+  ) or_return
+  buffer_info := vk.DescriptorBufferInfo {
+    buffer = warehouse.mesh_data_buffer.buffer,
+    offset = 0,
+    range  = vk.DeviceSize(vk.WHOLE_SIZE),
+  }
+  write := vk.WriteDescriptorSet {
+    sType           = .WRITE_DESCRIPTOR_SET,
+    dstSet          = warehouse.mesh_data_descriptor_set,
+    dstBinding      = 0,
+    descriptorType  = .STORAGE_BUFFER,
+    descriptorCount = 1,
+    pBufferInfo     = &buffer_info,
+  }
+  vk.UpdateDescriptorSets(gpu_context.device, 1, &write, 0, nil)
+  return .SUCCESS
+}
+
+deinit_mesh_data_buffer :: proc(
+  gpu_context: ^gpu.GPUContext,
+  warehouse: ^ResourceWarehouse,
+) {
+  gpu.data_buffer_deinit(gpu_context, &warehouse.mesh_data_buffer)
+  vk.DestroyDescriptorSetLayout(
+    gpu_context.device,
+    warehouse.mesh_data_buffer_set_layout,
+    nil,
+  )
+  warehouse.mesh_data_buffer_set_layout = 0
+  warehouse.mesh_data_descriptor_set = 0
+}
+
+init_vertex_skinning_buffer :: proc(
+  gpu_context: ^gpu.GPUContext,
+  warehouse: ^ResourceWarehouse,
+) -> vk.Result {
+  skinning_count := BINDLESS_SKINNING_BUFFER_SIZE / size_of(geometry.SkinningData)
+  log.infof(
+    "Creating vertex skinning buffer with capacity %d entries...",
+    skinning_count,
+  )
+  warehouse.vertex_skinning_buffer = gpu.create_host_visible_buffer(
+    gpu_context,
+    geometry.SkinningData,
+    skinning_count,
+    {.STORAGE_BUFFER},
+    nil,
+  ) or_return
+  warehouse.vertex_skinning_data =
+    warehouse.vertex_skinning_buffer.mapped[:skinning_count]
+  resource.slab_allocator_init(&warehouse.vertex_skinning_slab, VERTEX_SLAB_CONFIG)
+  bindings := [?]vk.DescriptorSetLayoutBinding {
+    {
+      binding = 0,
+      descriptorType = .STORAGE_BUFFER,
+      descriptorCount = 1,
+      stageFlags = {.VERTEX},
+    },
+  }
+  vk.CreateDescriptorSetLayout(
+    gpu_context.device,
+    &vk.DescriptorSetLayoutCreateInfo {
+      sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+      bindingCount = len(bindings),
+      pBindings = raw_data(bindings[:]),
+    },
+    nil,
+    &warehouse.vertex_skinning_buffer_set_layout,
+  ) or_return
+  vk.AllocateDescriptorSets(
+    gpu_context.device,
+    &vk.DescriptorSetAllocateInfo {
+      sType              = .DESCRIPTOR_SET_ALLOCATE_INFO,
+      descriptorPool     = gpu_context.descriptor_pool,
+      descriptorSetCount = 1,
+      pSetLayouts        = &warehouse.vertex_skinning_buffer_set_layout,
+    },
+    &warehouse.vertex_skinning_descriptor_set,
+  ) or_return
+  buffer_info := vk.DescriptorBufferInfo {
+    buffer = warehouse.vertex_skinning_buffer.buffer,
+    offset = 0,
+    range  = vk.DeviceSize(vk.WHOLE_SIZE),
+  }
+  write := vk.WriteDescriptorSet {
+    sType           = .WRITE_DESCRIPTOR_SET,
+    dstSet          = warehouse.vertex_skinning_descriptor_set,
+    dstBinding      = 0,
+    descriptorType  = .STORAGE_BUFFER,
+    descriptorCount = 1,
+    pBufferInfo     = &buffer_info,
+  }
+  vk.UpdateDescriptorSets(gpu_context.device, 1, &write, 0, nil)
+  return .SUCCESS
+}
+
+deinit_vertex_skinning_buffer :: proc(
+  gpu_context: ^gpu.GPUContext,
+  warehouse: ^ResourceWarehouse,
+) {
+  warehouse.vertex_skinning_data = nil
+  resource.slab_allocator_deinit(&warehouse.vertex_skinning_slab)
+  gpu.data_buffer_deinit(gpu_context, &warehouse.vertex_skinning_buffer)
+  vk.DestroyDescriptorSetLayout(
+    gpu_context.device,
+    warehouse.vertex_skinning_buffer_set_layout,
+    nil,
+  )
+  warehouse.vertex_skinning_buffer_set_layout = 0
+  warehouse.vertex_skinning_descriptor_set = 0
+}
+
 // Get mutable reference to camera uniform in bindless buffer
 get_camera_uniform :: proc(
   warehouse: ^ResourceWarehouse,
@@ -837,6 +995,7 @@ WORLD_MATRIX_CAPACITY :: MAX_NODES_IN_SCENE
 
 BINDLESS_VERTEX_BUFFER_SIZE :: 128 * 1024 * 1024 // 128MB
 BINDLESS_INDEX_BUFFER_SIZE :: 64 * 1024 * 1024 // 64MB
+BINDLESS_SKINNING_BUFFER_SIZE :: 128 * 1024 * 1024 // 128MB
 
 // Configuration for different allocation sizes
 // Total capacity: 256*512 + 1024*256 + 4096*128 + 16384*64 + 65536*16 + 262144*4 + 1048576*1 + 0*0 = 2,097,152 vertices
@@ -973,6 +1132,43 @@ warehouse_allocate_indices :: proc(
   return BufferAllocation{offset = offset, count = index_count}, .SUCCESS
 }
 
+warehouse_allocate_vertex_skinning :: proc(
+  warehouse: ^ResourceWarehouse,
+  skinnings: []geometry.SkinningData,
+) -> (
+  allocation: BufferAllocation,
+  ret: vk.Result,
+) {
+  if len(skinnings) == 0 {
+    return {}, .SUCCESS
+  }
+  skinning_count := u32(len(skinnings))
+  offset, ok := resource.slab_alloc(&warehouse.vertex_skinning_slab, skinning_count)
+  if !ok {
+    log.error("Failed to allocate vertex skinning data from slab allocator")
+    return {}, .ERROR_OUT_OF_DEVICE_MEMORY
+  }
+  if offset + skinning_count > u32(len(warehouse.vertex_skinning_data)) {
+    log.error("Vertex skinning buffer overflow")
+    return {}, .ERROR_OUT_OF_DEVICE_MEMORY
+  }
+  copy(
+    warehouse.vertex_skinning_data[offset:offset + skinning_count],
+    skinnings,
+  )
+  return BufferAllocation{offset = offset, count = skinning_count}, .SUCCESS
+}
+
+warehouse_free_vertex_skinning :: proc(
+  warehouse: ^ResourceWarehouse,
+  allocation: BufferAllocation,
+) {
+  if allocation.count == 0 {
+    return
+  }
+  resource.slab_free(&warehouse.vertex_skinning_slab, allocation.offset)
+}
+
 warehouse_free_vertices :: proc(
   warehouse: ^ResourceWarehouse,
   allocation: BufferAllocation,
@@ -998,6 +1194,10 @@ create_mesh :: proc(
 ) {
   handle, mesh = resource.alloc(&warehouse.meshes)
   ret = mesh_init(mesh, gpu_context, warehouse, data)
+  if ret != .SUCCESS {
+    return
+  }
+  ret = mesh_write_to_gpu(warehouse, handle, mesh)
   return
 }
 
@@ -1011,6 +1211,39 @@ create_mesh_handle :: proc(
 ) #optional_ok {
   h, _, ret := create_mesh(gpu_context, warehouse, data)
   return h, ret == .SUCCESS
+}
+
+mesh_data_from_mesh :: proc(mesh: ^Mesh) -> MeshData {
+  skin_offset: u32
+  is_skinned: b32
+  skin, has_skin := mesh.skinning.?
+  if has_skin && skin.vertex_skinning_allocation.count > 0 {
+    is_skinned = true
+    skin_offset = skin.vertex_skinning_allocation.offset
+  }
+  return MeshData {
+    aabb_min             = mesh.aabb.min,
+    is_skinned           = is_skinned,
+    aabb_max             = mesh.aabb.max,
+    vertex_skinning_offset = skin_offset,
+  }
+}
+
+mesh_write_to_gpu :: proc(
+  warehouse: ^ResourceWarehouse,
+  handle: Handle,
+  mesh: ^Mesh,
+) -> vk.Result {
+  if handle.index >= MAX_MESHES {
+    log.errorf("Mesh index %d exceeds capacity %d", handle.index, MAX_MESHES)
+    return .ERROR_OUT_OF_DEVICE_MEMORY
+  }
+  data := mesh_data_from_mesh(mesh)
+  return gpu.data_buffer_write_single(
+    &warehouse.mesh_data_buffer,
+    &data,
+    int(handle.index),
+  )
 }
 
 material_data_from_material :: proc(mat: ^Material) -> MaterialData {
@@ -1044,7 +1277,7 @@ material_write_to_gpu :: proc(
     return .ERROR_OUT_OF_DEVICE_MEMORY
   }
   data := material_data_from_material(mat)
-  gpu.data_buffer_write_single(
+  gpu.data_buffer_write(
     &warehouse.material_buffer,
     &data,
     int(handle.index),

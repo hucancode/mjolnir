@@ -1,14 +1,10 @@
 #version 450
 
-layout(constant_id = 0) const bool SKINNED = false;
-
 layout(location = 0) in vec3 inPosition;
 layout(location = 1) in vec3 inNormal;
 layout(location = 2) in vec4 inColor;
 layout(location = 3) in vec2 inUV;
 layout(location = 4) in vec4 inTangent;
-layout(location = 5) in uvec4 inJoints;
-layout(location = 6) in vec4 inWeights;
 
 struct Camera {
     mat4 view;
@@ -32,10 +28,31 @@ layout(set = 4, binding = 0) readonly buffer WorldMatrices {
     mat4 world_matrices[];
 };
 
+struct MeshData {
+    vec3 aabb_min;
+    uint is_skinned;
+    vec3 aabb_max;
+    uint vertex_skinning_offset;
+};
+
+layout(set = 5, binding = 0) readonly buffer MeshBuffer {
+    MeshData meshes[];
+};
+
+struct VertexSkinningData {
+    uvec4 joints;
+    vec4 weights;
+};
+
+layout(set = 6, binding = 0) readonly buffer VertexSkinningBuffer {
+    VertexSkinningData vertex_skinning[];
+};
+
 layout(push_constant) uniform PushConstants {
     uint node_id;
     uint bone_matrix_offset;
     uint material_id;
+    uint mesh_id;
     uint camera_index;
 };
 
@@ -48,17 +65,20 @@ layout(location = 4) out vec4 outTangent;
 void main() {
     Camera camera = cameras[camera_index];
     mat4 world = world_matrices[node_id];
+    MeshData mesh = meshes[mesh_id];
 
     vec4 modelPosition;
     vec3 modelNormal;
     vec4 modelTangent;
-    if (SKINNED) {
-        uvec4 indices = inJoints + uvec4(bone_matrix_offset);
+    if (mesh.is_skinned != 0u) {
+        uint vertex_index = mesh.vertex_skinning_offset + gl_VertexIndex;
+        VertexSkinningData skin = vertex_skinning[vertex_index];
+        uvec4 indices = skin.joints + uvec4(bone_matrix_offset);
         mat4 skinMatrix =
-            inWeights.x * bones[indices.x] +
-            inWeights.y * bones[indices.y] +
-            inWeights.z * bones[indices.z] +
-            inWeights.w * bones[indices.w];
+            skin.weights.x * bones[indices.x] +
+            skin.weights.y * bones[indices.y] +
+            skin.weights.z * bones[indices.z] +
+            skin.weights.w * bones[indices.w];
         modelPosition = skinMatrix * vec4(inPosition, 1.0);
         modelNormal = mat3(skinMatrix) * inNormal;
         modelTangent = skinMatrix * inTangent;

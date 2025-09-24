@@ -2,20 +2,17 @@ package mjolnir
 
 import "core:log"
 
-SHADOW_SHADER_OPTION_COUNT: u32 : 1 // Only SKINNING
+SHADOW_SHADER_OPTION_COUNT: u32 : 0
 SHADOW_SHADER_VARIANT_COUNT: u32 : 1 << SHADOW_SHADER_OPTION_COUNT
 
-ShadowShaderConfig :: struct {
-  is_skinned: b32,
-}
+ShadowShaderConfig :: struct {}
 
 ShaderFeatures :: enum {
-  SKINNING                   = 0,
-  ALBEDO_TEXTURE             = 1,
-  METALLIC_ROUGHNESS_TEXTURE = 2,
-  NORMAL_TEXTURE             = 3,
-  EMISSIVE_TEXTURE           = 4,
-  OCCLUSION_TEXTURE          = 5,
+  ALBEDO_TEXTURE             = 0,
+  METALLIC_ROUGHNESS_TEXTURE = 1,
+  NORMAL_TEXTURE             = 2,
+  EMISSIVE_TEXTURE           = 3,
+  OCCLUSION_TEXTURE          = 4,
 }
 
 ShaderFeatureSet :: bit_set[ShaderFeatures;u32]
@@ -23,7 +20,6 @@ SHADER_OPTION_COUNT: u32 : len(ShaderFeatures)
 SHADER_VARIANT_COUNT: u32 : 1 << SHADER_OPTION_COUNT
 
 ShaderConfig :: struct {
-  is_skinned:                     b32,
   has_albedo_texture:             b32,
   has_metallic_roughness_texture: b32,
   has_normal_texture:             b32,

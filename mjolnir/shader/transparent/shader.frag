@@ -6,10 +6,10 @@ const uint SAMPLER_LINEAR_CLAMP = 1;
 const uint SAMPLER_NEAREST_REPEAT = 2;
 const uint SAMPLER_LINEAR_REPEAT = 3;
 
-const uint FEATURE_ALBEDO_TEXTURE = 1u << 1;
-const uint FEATURE_METALLIC_ROUGHNESS_TEXTURE = 1u << 2;
-const uint FEATURE_NORMAL_TEXTURE = 1u << 3;
-const uint FEATURE_EMISSIVE_TEXTURE = 1u << 4;
+const uint FEATURE_ALBEDO_TEXTURE = 1u << 0;
+const uint FEATURE_METALLIC_ROUGHNESS_TEXTURE = 1u << 1;
+const uint FEATURE_NORMAL_TEXTURE = 1u << 2;
+const uint FEATURE_EMISSIVE_TEXTURE = 1u << 3;
 
 struct Camera {
     mat4 view;
@@ -50,6 +50,7 @@ layout(push_constant) uniform PushConstants {
     uint node_id;
     uint bone_matrix_offset;
     uint material_id;
+    uint mesh_id;
     uint camera_index;
 };
 

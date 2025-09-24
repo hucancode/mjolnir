@@ -11,6 +11,7 @@ PushConstant :: struct {
   node_id:            u32,
   bone_matrix_offset: u32,
   material_id:        u32,
+  mesh_id:            u32,
   camera_index:       u32,
 }
 
@@ -32,6 +33,8 @@ gbuffer_init :: proc(
     warehouse.bone_buffer_set_layout,
     warehouse.material_buffer_set_layout,
     warehouse.world_matrix_buffer_set_layout,
+    warehouse.mesh_data_buffer_set_layout,
+    warehouse.vertex_skinning_buffer_set_layout,
   }
   push_constant_range := vk.PushConstantRange {
     stageFlags = {.VERTEX, .FRAGMENT},
@@ -140,7 +143,6 @@ gbuffer_init :: proc(
   for mask in 0 ..< SHADER_VARIANT_COUNT {
     features := transmute(ShaderFeatureSet)mask
     configs[mask] = {
-      is_skinned                     = .SKINNING in features,
       has_albedo_texture             = .ALBEDO_TEXTURE in features,
       has_metallic_roughness_texture = .METALLIC_ROUGHNESS_TEXTURE in features,
       has_normal_texture             = .NORMAL_TEXTURE in features,
@@ -150,31 +152,26 @@ gbuffer_init :: proc(
     entries[mask] = [SHADER_OPTION_COUNT]vk.SpecializationMapEntry {
       {
         constantID = 0,
-        offset = u32(offset_of(ShaderConfig, is_skinned)),
-        size = size_of(b32),
-      },
-      {
-        constantID = 1,
         offset = u32(offset_of(ShaderConfig, has_albedo_texture)),
         size = size_of(b32),
       },
       {
-        constantID = 2,
+        constantID = 1,
         offset = u32(offset_of(ShaderConfig, has_metallic_roughness_texture)),
         size = size_of(b32),
       },
       {
-        constantID = 3,
+        constantID = 2,
         offset = u32(offset_of(ShaderConfig, has_normal_texture)),
         size = size_of(b32),
       },
       {
-        constantID = 4,
+        constantID = 3,
         offset = u32(offset_of(ShaderConfig, has_emissive_texture)),
         size = size_of(b32),
       },
       {
-        constantID = 5,
+        constantID = 4,
         offset = u32(offset_of(ShaderConfig, has_occlusion_texture)),
         size = size_of(b32),
       },
@@ -453,6 +450,8 @@ gbuffer_render :: proc(
     warehouse.bone_buffer_descriptor_set,
     warehouse.material_buffer_descriptor_set,
     warehouse.world_matrix_descriptor_sets[frame_index],
+    warehouse.mesh_data_descriptor_set,
+    warehouse.vertex_skinning_descriptor_set,
   }
   vk.CmdBindDescriptorSets(
     command_buffer,
@@ -497,6 +496,7 @@ gbuffer_render :: proc(
           node_id      = render_node.handle.index,
           camera_index = render_target.camera.index,
           material_id  = batch_data.material_handle.index,
+          mesh_id      = mesh_attachment.handle.index,
         }
         if skinning, has_skinning := mesh_attachment.skinning.?; has_skinning {
           push_constants.bone_matrix_offset =
@@ -511,20 +511,15 @@ gbuffer_render :: proc(
           size_of(PushConstant),
           &push_constants,
         )
-        skin_buffer := warehouse.dummy_skinning_buffer.buffer
-        if mesh_skin, mesh_has_skin := mesh.skinning.?; mesh_has_skin {
-          skin_buffer = mesh_skin.skin_buffer.buffer
-        }
-
-        buffers := [2]vk.Buffer{warehouse.vertex_buffer.buffer, skin_buffer}
         vertex_offset := vk.DeviceSize(
           mesh.vertex_allocation.offset * size_of(geometry.Vertex),
         )
-        offsets := [2]vk.DeviceSize{vertex_offset, 0}
+        buffers := [1]vk.Buffer{warehouse.vertex_buffer.buffer}
+        offsets := [1]vk.DeviceSize{vertex_offset}
         vk.CmdBindVertexBuffers(
           command_buffer,
           0,
-          2,
+          1,
           raw_data(buffers[:]),
           raw_data(offsets[:]),
         )
