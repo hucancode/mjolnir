@@ -11,7 +11,7 @@ const uint SAMPLER_LINEAR_REPEAT = 3;
 layout(location = 0) in vec2 v_uv;
 layout(location = 0) out vec4 outColor;
 
-const float AMBIENT_STRENGTH = 0.5;
+const float AMBIENT_STRENGTH = 0.2;
 
 struct Camera {
     mat4 view;
@@ -92,8 +92,7 @@ void main() {
     float fresnel_strength = mix(metallic, 0.5 * roughness, 0.5);
     float fresnel = 1.0 - pow(1.0 - NdotV, fresnel_strength);
     vec3 fresnelColor = (albedo + emissive) * fresnel * fresnel_strength;
-    vec3 final = albedo * ambient * AMBIENT_STRENGTH
-        + fresnelColor
+    vec3 final = (albedo * ambient + fresnelColor) * AMBIENT_STRENGTH
         + emissive;
     outColor = vec4(final, 1.0);
     // outColor = vec4(vec3(0.01), 1);
