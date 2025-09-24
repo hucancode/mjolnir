@@ -148,10 +148,8 @@ shadow_init :: proc(
 }
 
 shadow_deinit :: proc(self: ^RendererShadow, gpu_context: ^gpu.GPUContext) {
-  if self.pipeline != 0 {
-    vk.DestroyPipeline(gpu_context.device, self.pipeline, nil)
-    self.pipeline = 0
-  }
+  vk.DestroyPipeline(gpu_context.device, self.pipeline, nil)
+  self.pipeline = 0
   vk.DestroyPipelineLayout(gpu_context.device, self.pipeline_layout, nil)
   self.pipeline_layout = 0
 }

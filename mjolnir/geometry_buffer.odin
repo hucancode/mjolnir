@@ -455,8 +455,7 @@ gbuffer_render :: proc(
 }
 
 gbuffer_deinit :: proc(self: ^RendererGBuffer, gpu_context: ^gpu.GPUContext) {
-  if self.pipeline != 0 {
-    vk.DestroyPipeline(gpu_context.device, self.pipeline, nil)
-  }
+  vk.DestroyPipeline(gpu_context.device, self.pipeline, nil)
+
   vk.DestroyPipelineLayout(gpu_context.device, self.pipeline_layout, nil)
 }
