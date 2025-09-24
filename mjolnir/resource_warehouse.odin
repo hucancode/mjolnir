@@ -1304,17 +1304,20 @@ create_mesh_handle :: proc(
 
 mesh_data_from_mesh :: proc(mesh: ^Mesh) -> MeshData {
   skin_offset: u32
-  is_skinned: b32
+  flags: u32
   skin, has_skin := mesh.skinning.?
   if has_skin && skin.vertex_skinning_allocation.count > 0 {
-    is_skinned = true
+    flags |= MESH_FLAG_SKINNED
     skin_offset = skin.vertex_skinning_allocation.offset
   }
   return MeshData {
-    aabb_min             = mesh.aabb.min,
-    is_skinned           = is_skinned,
-    aabb_max             = mesh.aabb.max,
+    aabb_min              = mesh.aabb.min,
+    index_count           = mesh.index_allocation.count,
+    aabb_max              = mesh.aabb.max,
+    first_index           = mesh.index_allocation.offset,
+    vertex_offset         = cast(i32)mesh.vertex_allocation.offset,
     vertex_skinning_offset = skin_offset,
+    flags                 = flags,
   }
 }
 

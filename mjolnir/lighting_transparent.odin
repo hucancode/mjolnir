@@ -404,14 +404,19 @@ transparent_begin :: proc(
   vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
 }
 
-transparent_render :: proc(
+transparent_render_pass :: proc(
   self: ^RendererTransparent,
-  render_input: RenderInput,
+  pipeline: vk.Pipeline,
   render_target: ^RenderTarget,
   command_buffer: vk.CommandBuffer,
   warehouse: ^ResourceWarehouse,
   frame_index: u32,
+  draw_buffer: vk.Buffer,
+  draw_count: u32,
 ) {
+  if draw_count == 0 {
+    return
+  }
   descriptor_sets := [?]vk.DescriptorSet {
     warehouse.camera_buffer_descriptor_set,
     warehouse.textures_descriptor_set,
@@ -432,132 +437,43 @@ transparent_render :: proc(
     0,
     nil,
   )
-  // First render transparent materials
-  for batch_key, batch_group in render_input.batches {
-    if batch_key.material_type == .TRANSPARENT {
-      vk.CmdBindPipeline(command_buffer, .GRAPHICS, self.transparent_pipeline)
-      for batch_data in batch_group {
-        // Process each batch of transparent materials
-        _, material_found := resource.get(
-          warehouse.materials,
-          batch_data.material_handle,
-        )
-        if !material_found do continue
+  vk.CmdBindPipeline(command_buffer, .GRAPHICS, pipeline)
 
-        // Render all nodes in this batch
-        for render_node in batch_data.nodes {
-          node := render_node.node
-          mesh_attachment, ok := node.attachment.(MeshAttachment)
-          if !ok do continue
-
-          mesh := resource.get(
-            warehouse.meshes,
-            mesh_attachment.handle,
-          ) or_continue
-
-          push_constants := PushConstant {
-            camera_index = render_target.camera.index,
-          }
-          // Push constants
-          vk.CmdPushConstants(
-            command_buffer,
-            self.pipeline_layout,
-            {.VERTEX, .FRAGMENT},
-            0,
-            size_of(PushConstant),
-            &push_constants,
-          )
-          // Draw mesh
-          buffers := [1]vk.Buffer{warehouse.vertex_buffer.buffer}
-          vertex_offset := vk.DeviceSize(
-            mesh.vertex_allocation.offset * size_of(geometry.Vertex),
-          )
-          offsets := [1]vk.DeviceSize{vertex_offset}
-          vk.CmdBindVertexBuffers(
-            command_buffer,
-            0,
-            1,
-            raw_data(buffers[:]),
-            raw_data(offsets[:]),
-          )
-          vk.CmdBindIndexBuffer(
-            command_buffer,
-            warehouse.index_buffer.buffer,
-            vk.DeviceSize(mesh.index_allocation.offset * size_of(u32)),
-            .UINT32,
-          )
-          vk.CmdDrawIndexed(
-            command_buffer,
-            mesh.index_allocation.count,
-            1,
-            0,
-            0,
-            render_node.handle.index,
-          )
-        }
-      }
-    } else if batch_key.material_type == .WIREFRAME {
-      for batch_data in batch_group {
-        // Render all nodes in this batch
-        for render_node in batch_data.nodes {
-          node := render_node.node
-          mesh_attachment, ok := node.attachment.(MeshAttachment)
-          if !ok do continue
-          mesh := resource.get(
-            warehouse.meshes,
-            mesh_attachment.handle,
-          ) or_continue
-          // Bind the wireframe pipeline
-          vk.CmdBindPipeline(
-            command_buffer,
-            .GRAPHICS,
-            self.wireframe_pipeline,
-          )
-          push_constant := PushConstant {
-            camera_index = render_target.camera.index,
-          }
-
-          // Push constants
-          vk.CmdPushConstants(
-            command_buffer,
-            self.pipeline_layout,
-            {.VERTEX, .FRAGMENT},
-            0,
-            size_of(PushConstant),
-            &push_constant,
-          )
-
-          // Draw mesh
-          buffers := [1]vk.Buffer{warehouse.vertex_buffer.buffer}
-          vertex_offset := vk.DeviceSize(
-            mesh.vertex_allocation.offset * size_of(geometry.Vertex),
-          )
-          offsets := [1]vk.DeviceSize{vertex_offset}
-          vk.CmdBindVertexBuffers(
-            command_buffer,
-            0,
-            1,
-            raw_data(buffers[:]),
-            raw_data(offsets[:]),
-          )
-          vk.CmdBindIndexBuffer(
-            command_buffer,
-            warehouse.index_buffer.buffer,
-            vk.DeviceSize(mesh.index_allocation.offset * size_of(u32)),
-            .UINT32,
-          )
-          vk.CmdDrawIndexed(
-            command_buffer,
-            mesh.index_allocation.count,
-            1,
-            0,
-            0,
-            render_node.handle.index,
-          )
-        }
-      }
-    }
+  push_constants := PushConstant {
+    camera_index = render_target.camera.index,
   }
+  vk.CmdPushConstants(
+    command_buffer,
+    self.pipeline_layout,
+    {.VERTEX, .FRAGMENT},
+    0,
+    size_of(PushConstant),
+    &push_constants,
+  )
+
+  vertex_buffers := [1]vk.Buffer{warehouse.vertex_buffer.buffer}
+  vertex_offsets := [1]vk.DeviceSize{0}
+  vk.CmdBindVertexBuffers(
+    command_buffer,
+    0,
+    1,
+    raw_data(vertex_buffers[:]),
+    raw_data(vertex_offsets[:]),
+  )
+  vk.CmdBindIndexBuffer(
+    command_buffer,
+    warehouse.index_buffer.buffer,
+    0,
+    .UINT32,
+  )
+
+  vk.CmdDrawIndexedIndirect(
+    command_buffer,
+    draw_buffer,
+    0,
+    draw_count,
+    visibility_culler_command_stride(),
+  )
 }
 
 transparent_end :: proc(

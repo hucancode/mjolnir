@@ -642,7 +642,7 @@ construct_scene :: proc(
     gltf_node := &gltf_data.nodes[entry.idx]
     node_handle, node := resource.alloc(&engine.scene.nodes)
     if node == nil do continue
-    node.name = string(gltf_node.name)
+    init_node(node, string(gltf_node.name))
     node.transform = geometry.TRANSFORM_IDENTITY
     if gltf_node.has_matrix {
       node.transform = geometry.decompose_matrix(
@@ -666,7 +666,6 @@ construct_scene :: proc(
       node.transform.is_dirty = true
     }
     node.parent = entry.parent
-    node.children = make([dynamic]Handle, 0)
     if gltf_node.mesh != nil {
       if geometry_data, found := geometry_cache[gltf_node.mesh]; found {
         if gltf_node.skin != nil {

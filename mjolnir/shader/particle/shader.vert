@@ -17,11 +17,9 @@ out gl_PerVertex {
 struct Camera {
     mat4 view;
     mat4 projection;
-    vec2 viewport_size;
-    float camera_near;
-    float camera_far;
-    vec3 camera_position;
-    float padding[9]; // Align to 192-byte
+    vec4 viewport_params;
+    vec4 position;
+    vec4 frustum_planes[6];
 };
 
 // Bindless camera buffer set = 0

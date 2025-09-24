@@ -7,11 +7,9 @@ layout(location = 0) out vec3 worldPos;
 struct Camera {
     mat4 view;
     mat4 projection;
-    vec2 viewport_size;
-    float camera_near;
-    float camera_far;
-    vec3 camera_position;
-    float padding[9]; // Align to 192-byte
+    vec4 viewport_params;
+    vec4 position;
+    vec4 frustum_planes[6];
 };
 
 layout(set = 0, binding = 0) readonly buffer CameraBuffer {
@@ -30,18 +28,24 @@ struct NodeData {
     uint material_id;
     uint mesh_id;
     uint bone_matrix_offset;
-    uint _padding;
+    uint flags;
 };
 
 layout(set = 5, binding = 0) readonly buffer NodeBuffer {
     NodeData nodes[];
 };
 
+const uint MESH_FLAG_SKINNED = 1u << 0;
+
 struct MeshData {
     vec3 aabb_min;
-    uint is_skinned;
+    uint index_count;
     vec3 aabb_max;
+    uint first_index;
+    int vertex_offset;
     uint vertex_skinning_offset;
+    uint flags;
+    uint _padding;
 };
 
 layout(set = 6, binding = 0) readonly buffer MeshBuffer {
@@ -68,8 +72,11 @@ void main() {
     NodeData node = nodes[node_index];
     MeshData mesh = meshes[node.mesh_id];
     vec4 modelPosition;
-    if (mesh.is_skinned != 0u && node.bone_matrix_offset < bones.length()) {
-        uint vertex_index = mesh.vertex_skinning_offset + gl_VertexIndex;
+    bool is_skinned = (mesh.flags & MESH_FLAG_SKINNED) != 0u &&
+                      node.bone_matrix_offset < bones.length();
+    if (is_skinned) {
+        int local_index = gl_VertexIndex - mesh.vertex_offset;
+        uint vertex_index = mesh.vertex_skinning_offset + uint(local_index);
         VertexSkinningData skin = vertex_skinning[vertex_index];
         uvec4 indices = skin.joints + uvec4(node.bone_matrix_offset);
         mat4 skinMatrix =

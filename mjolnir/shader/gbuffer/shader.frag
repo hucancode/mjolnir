@@ -36,7 +36,7 @@ struct NodeData {
     uint material_id;
     uint mesh_id;
     uint bone_matrix_offset;
-    uint _padding;
+    uint flags;
 };
 
 layout(set = 5, binding = 0) readonly buffer NodeBuffer {

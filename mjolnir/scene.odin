@@ -81,11 +81,17 @@ NodeAttachment :: union {
   NavMeshObstacleAttachment,
 }
 
+NODE_FLAG_VISIBLE : u32 = 1 << 0
+NODE_FLAG_CULLING_ENABLED : u32 = 1 << 1
+NODE_FLAG_MATERIAL_TRANSPARENT : u32 = 1 << 2
+NODE_FLAG_MATERIAL_WIREFRAME : u32 = 1 << 3
+NODE_FLAG_CASTS_SHADOW : u32 = 1 << 4
+
 NodeData :: struct {
   material_id:        u32,
   mesh_id:            u32,
   bone_matrix_offset: u32,
-  _padding:           u32,
+  flags:              u32,
 }
 
 Node :: struct {
@@ -587,6 +593,7 @@ upload_world_matrices :: proc(
     material_id        = 0xFFFFFFFF,
     mesh_id            = 0xFFFFFFFF,
     bone_matrix_offset = 0xFFFFFFFF,
+    flags              = 0,
   }
   for i in 0 ..< len(node_datas) {
     node_datas[i] = default_node
@@ -602,6 +609,29 @@ upload_world_matrices :: proc(
     node_data := &node_datas[idx]
     node_data.material_id = mesh_attachment.material.index
     node_data.mesh_id = mesh_attachment.handle.index
+    node_data.flags = 0
+    if entry.item.visible && entry.item.parent_visible {
+      node_data.flags |= NODE_FLAG_VISIBLE
+    }
+    if entry.item.culling_enabled {
+      node_data.flags |= NODE_FLAG_CULLING_ENABLED
+    }
+    if mesh_attachment.cast_shadow {
+      node_data.flags |= NODE_FLAG_CASTS_SHADOW
+    }
+    if material_entry, has_material := resource.get(
+      warehouse.materials,
+      mesh_attachment.material,
+    ); has_material {
+      switch material_entry.type {
+      case .TRANSPARENT:
+        node_data.flags |= NODE_FLAG_MATERIAL_TRANSPARENT
+      case .WIREFRAME:
+        node_data.flags |= NODE_FLAG_MATERIAL_WIREFRAME
+      case .PBR, .UNLIT:
+        // No additional flags needed
+      }
+    }
     if skinning, has_skinning := mesh_attachment.skinning.?; has_skinning {
       node_data.bone_matrix_offset = get_frame_bone_matrix_offset(
         warehouse,

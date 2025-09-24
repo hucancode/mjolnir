@@ -628,10 +628,24 @@ custom_render :: proc(
     &engine.warehouse,
     portal_rt.camera.index,
   )
-  portal_render_input := generate_render_input(
-    engine,
-    make_frustum(camera_uniform.projection * camera_uniform.view),
-    portal_rt.camera,
+  portal_include := mjolnir.NODE_FLAG_VISIBLE
+  portal_exclude := mjolnir.NODE_FLAG_MATERIAL_TRANSPARENT |
+    mjolnir.NODE_FLAG_MATERIAL_WIREFRAME
+  mjolnir.visibility_culler_dispatch(
+    &engine.visibility_culler,
+    &engine.gpu_context,
+    command_buffer,
+    engine.frame_index,
+    portal_rt.camera.index,
+    portal_include,
+    portal_exclude,
+  )
+  portal_draw_buffer := mjolnir.visibility_culler_command_buffer(
+    &engine.visibility_culler,
+    engine.frame_index,
+  )
+  portal_draw_count := mjolnir.visibility_culler_max_draw_count(
+    &engine.visibility_culler,
   )
   upload_world_matrices(&engine.warehouse, &engine.scene, engine.frame_index)
   // Render G-buffer pass with self-managed depth
@@ -644,11 +658,12 @@ custom_render :: proc(
   )
   gbuffer_render(
     &engine.gbuffer,
-    &portal_render_input,
     portal_rt,
     command_buffer,
     &engine.warehouse,
     engine.frame_index,
+    portal_draw_buffer,
+    portal_draw_count,
   )
   gbuffer_end(portal_rt, command_buffer, &engine.warehouse, engine.frame_index)
   // Update portal material to use the rendered texture (from current frame)

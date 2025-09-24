@@ -246,13 +246,16 @@ shadow_begin :: proc(
 // Render shadow for a single light
 shadow_render :: proc(
   self: ^RendererShadow,
-  render_input: RenderInput,
-  light_info: LightInfo,
   shadow_target: RenderTarget,
   command_buffer: vk.CommandBuffer,
   warehouse: ^ResourceWarehouse,
   frame_index: u32,
+  draw_buffer: vk.Buffer,
+  draw_count: u32,
 ) {
+  if draw_count == 0 {
+    return
+  }
   descriptor_sets := [?]vk.DescriptorSet {
     warehouse.camera_buffer_descriptor_set,
     warehouse.textures_descriptor_set,
@@ -274,23 +277,41 @@ shadow_render :: proc(
     nil,
   )
   vk.CmdBindPipeline(command_buffer, .GRAPHICS, self.pipeline)
-  rendered_count := 0
-  for _, batch_group in render_input.batches {
-    for batch_data in batch_group {
-      for render_node in batch_data.nodes {
-        render_single_shadow_node(
-          command_buffer,
-          self.pipeline_layout,
-          render_node.node,
-          render_node.handle,
-          shadow_target.camera.index,
-          warehouse,
-          frame_index,
-        )
-        rendered_count += 1
-      }
-    }
+  push_constant := PushConstant {
+    camera_index = shadow_target.camera.index,
   }
+  vk.CmdPushConstants(
+    command_buffer,
+    self.pipeline_layout,
+    {.VERTEX, .FRAGMENT},
+    0,
+    size_of(PushConstant),
+    &push_constant,
+  )
+
+  vertex_buffers := [1]vk.Buffer{warehouse.vertex_buffer.buffer}
+  vertex_offsets := [1]vk.DeviceSize{0}
+  vk.CmdBindVertexBuffers(
+    command_buffer,
+    0,
+    1,
+    raw_data(vertex_buffers[:]),
+    raw_data(vertex_offsets[:]),
+  )
+  vk.CmdBindIndexBuffer(
+    command_buffer,
+    warehouse.index_buffer.buffer,
+    0,
+    .UINT32,
+  )
+
+  vk.CmdDrawIndexedIndirect(
+    command_buffer,
+    draw_buffer,
+    0,
+    draw_count,
+    visibility_culler_command_stride(),
+  )
 }
 
 shadow_end :: proc(
@@ -345,56 +366,5 @@ shadow_end :: proc(
     {.DEPTH_STENCIL_ATTACHMENT_WRITE},
     {.SHADER_READ},
     layer_count,
-  )
-}
-
-render_single_shadow_node :: proc(
-  command_buffer: vk.CommandBuffer,
-  layout: vk.PipelineLayout,
-  node: ^Node,
-  node_handle: Handle,
-  camera_index: u32,
-  warehouse: ^ResourceWarehouse,
-  frame_index: u32,
-) {
-  mesh_attachment := node.attachment.(MeshAttachment)
-  mesh, found_mesh := mesh(warehouse, mesh_attachment.handle)
-  if !found_mesh do return
-  push_constant := PushConstant {
-    camera_index = camera_index,
-  }
-  vk.CmdPushConstants(
-    command_buffer,
-    layout,
-    {.VERTEX, .FRAGMENT},
-    0,
-    size_of(PushConstant),
-    &push_constant,
-  )
-  buffers := [1]vk.Buffer{warehouse.vertex_buffer.buffer}
-  vertex_offset := vk.DeviceSize(
-    mesh.vertex_allocation.offset * size_of(geometry.Vertex),
-  )
-  offsets := [1]vk.DeviceSize{vertex_offset}
-  vk.CmdBindVertexBuffers(
-    command_buffer,
-    0,
-    1,
-    raw_data(buffers[:]),
-    raw_data(offsets[:]),
-  )
-  vk.CmdBindIndexBuffer(
-    command_buffer,
-    warehouse.index_buffer.buffer,
-    vk.DeviceSize(mesh.index_allocation.offset * size_of(u32)),
-    .UINT32,
-  )
-  vk.CmdDrawIndexed(
-    command_buffer,
-    mesh.index_allocation.count,
-    1,
-    0,
-    0,
-    node_handle.index,
   )
 }

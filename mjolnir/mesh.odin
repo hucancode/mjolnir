@@ -20,11 +20,17 @@ bone_deinit :: proc(bone: ^Bone) {
 
 MAX_MESHES :: 65536
 
+MESH_FLAG_SKINNED : u32 = 1 << 0
+
 MeshData :: struct {
-  aabb_min:             [3]f32,
-  is_skinned:           b32,
-  aabb_max:             [3]f32,
+  aabb_min:              [3]f32,
+  index_count:           u32,
+  aabb_max:              [3]f32,
+  first_index:           u32,
+  vertex_offset:         i32,
   vertex_skinning_offset: u32,
+  flags:                 u32,
+  _padding:              u32,
 }
 
 Skinning :: struct {

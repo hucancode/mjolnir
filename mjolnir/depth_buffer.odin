@@ -120,13 +120,16 @@ depth_prepass_end :: proc(command_buffer: vk.CommandBuffer) {
 
 depth_prepass_render :: proc(
   self: ^RendererDepthPrepass,
-  render_input: ^RenderInput,
   command_buffer: vk.CommandBuffer,
   camera_index: u32,
   warehouse: ^ResourceWarehouse,
   frame_index: u32,
+  draw_buffer: vk.Buffer,
+  draw_count: u32,
 ) -> int {
-  rendered_count := 0
+  if draw_count == 0 {
+    return 0
+  }
   descriptor_sets := [?]vk.DescriptorSet {
     warehouse.camera_buffer_descriptor_set,
     warehouse.textures_descriptor_set,
@@ -148,63 +151,44 @@ depth_prepass_render :: proc(
     nil,
   )
   vk.CmdBindPipeline(command_buffer, .GRAPHICS, self.pipeline)
-  for batch_key, batch_group in render_input.batches {
-    if batch_key.material_type == .WIREFRAME ||
-       batch_key.material_type == .TRANSPARENT {
-      continue
-    }
-    for batch_data in batch_group {
-      _, material_found := resource.get(
-        warehouse.materials,
-        batch_data.material_handle,
-      )
-      if !material_found do continue
-      for render_node in batch_data.nodes {
-        node := render_node.node
-        #partial switch data in node.attachment {
-        case MeshAttachment:
-          mesh := mesh(warehouse, data.handle) or_continue
-          push_constant := PushConstant {
-            camera_index = camera_index,
-          }
-          vk.CmdPushConstants(
-            command_buffer,
-            self.pipeline_layout,
-            {.VERTEX},
-            0,
-            size_of(PushConstant),
-            &push_constant,
-          )
-          vertex_offset := vk.DeviceSize(mesh.vertex_allocation.offset * size_of(geometry.Vertex))
-          buffers := [1]vk.Buffer{warehouse.vertex_buffer.buffer}
-          offsets := [1]vk.DeviceSize{vertex_offset}
-          vk.CmdBindVertexBuffers(
-            command_buffer,
-            0,
-            1,
-            raw_data(buffers[:]),
-            raw_data(offsets[:]),
-          )
-          vk.CmdBindIndexBuffer(
-            command_buffer,
-            warehouse.index_buffer.buffer,
-            vk.DeviceSize(mesh.index_allocation.offset * size_of(u32)),
-            .UINT32,
-          )
-          vk.CmdDrawIndexed(
-            command_buffer,
-            mesh.index_allocation.count,
-            1,
-            0,
-            0,
-            render_node.handle.index,
-          )
-          rendered_count += 1
-        }
-      }
-    }
+
+  push_constant := PushConstant {
+    camera_index = camera_index,
   }
-  return rendered_count
+  vk.CmdPushConstants(
+    command_buffer,
+    self.pipeline_layout,
+    {.VERTEX},
+    0,
+    size_of(PushConstant),
+    &push_constant,
+  )
+
+  vertex_buffers := [1]vk.Buffer{warehouse.vertex_buffer.buffer}
+  vertex_offsets := [1]vk.DeviceSize{0}
+  vk.CmdBindVertexBuffers(
+    command_buffer,
+    0,
+    1,
+    raw_data(vertex_buffers[:]),
+    raw_data(vertex_offsets[:]),
+  )
+  vk.CmdBindIndexBuffer(
+    command_buffer,
+    warehouse.index_buffer.buffer,
+    0,
+    .UINT32,
+  )
+
+  vk.CmdDrawIndexedIndirect(
+    command_buffer,
+    draw_buffer,
+    0,
+    draw_count,
+    visibility_culler_command_stride(),
+  )
+
+  return int(draw_count)
 }
 
 depth_prepass_build_pipeline :: proc(

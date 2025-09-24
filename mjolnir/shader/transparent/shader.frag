@@ -14,11 +14,9 @@ const uint FEATURE_EMISSIVE_TEXTURE = 1u << 3;
 struct Camera {
     mat4 view;
     mat4 projection;
-    vec2 viewport_size;
-    float camera_near;
-    float camera_far;
-    vec3 camera_position;
-    float padding[9];
+    vec4 viewport_params;
+    vec4 position;
+    vec4 frustum_planes[6];
 };
 
 struct MaterialData {
@@ -49,7 +47,7 @@ struct NodeData {
     uint material_id;
     uint mesh_id;
     uint bone_matrix_offset;
-    uint _padding;
+    uint flags;
 };
 
 layout(set = 5, binding = 0) readonly buffer NodeBuffer {

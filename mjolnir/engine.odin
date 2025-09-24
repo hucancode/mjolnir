@@ -99,35 +99,11 @@ LightData :: union {
 }
 
 CameraUniform :: struct {
-  view:            matrix[4, 4]f32,
-  projection:      matrix[4, 4]f32,
-  viewport_size:   [2]f32,
-  camera_near:     f32,
-  camera_far:      f32,
-  camera_position: [3]f32,
-  padding:         [9]f32, // Align to 192-byte
-}
-
-// Batch key for grouping objects by material features
-BatchKey :: struct {
-  features:      ShaderFeatureSet,
-  material_type: MaterialType,
-}
-
-// Batch data containing material and nodes
-RenderNodeRef :: struct {
-  handle: Handle,
-  node:   ^Node,
-}
-
-BatchData :: struct {
-  material_handle: Handle,
-  nodes:           [dynamic]RenderNodeRef,
-}
-
-// RenderInput groups render batches and other per-frame data for the renderer.
-RenderInput :: struct {
-  batches: map[BatchKey][dynamic]BatchData,
+  view:             matrix[4, 4]f32,
+  projection:       matrix[4, 4]f32,
+  viewport_params:  [4]f32, // xy viewport size, z near, w far
+  position:         [4]f32,
+  frustum_planes:   [6][4]f32,
 }
 
 InputState :: struct {
@@ -322,11 +298,16 @@ camera_uniform_update :: proc(
   uniform.view, uniform.projection = geometry.camera_calculate_matrices(
     camera^,
   )
-  uniform.viewport_size = [2]f32{f32(viewport_width), f32(viewport_height)}
-  uniform.camera_position = camera.position
-  uniform.camera_near, uniform.camera_far = geometry.camera_get_near_far(
-    camera^,
-  )
+  camera_near, camera_far := geometry.camera_get_near_far(camera^)
+  uniform.viewport_params = [4]f32{
+    f32(viewport_width),
+    f32(viewport_height),
+    camera_near,
+    camera_far,
+  }
+  uniform.position = [4]f32{camera.position[0], camera.position[1], camera.position[2], 1.0}
+  frustum := geometry.make_frustum(uniform.projection * uniform.view)
+  uniform.frustum_planes = frustum.planes
 }
 
 init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
@@ -466,6 +447,7 @@ init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
     visibility_culler_init(
       &self.visibility_culler,
       &self.gpu_context,
+      &self.warehouse,
     ) or_return
   }
   transparent_init(
@@ -656,14 +638,9 @@ update_emitters :: proc(self: ^Engine, delta_time: f32) {
     if !e.enabled do continue
     if emitter_idx >= MAX_EMITTERS do break
 
-    // Check visibility for culling
+    // Visibility handled via GPU-generated draws; emitters update regardless
     visible := true
     culling_enabled := entry.item.culling_enabled
-    when USE_GPU_CULLING {
-      if culling_enabled {
-        visible = is_node_visible(&self.visibility_culler, 0, u32(entry_index), self.frame_index)
-      }
-    }
     emitters[emitter_idx].transform = get_world_matrix(&entry.item)
     emitters[emitter_idx].initial_velocity = e.initial_velocity
     emitters[emitter_idx].color_start = e.color_start
@@ -917,98 +894,6 @@ recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
 }
 
 // Generate render input for a given frustum (camera or light)
-generate_render_input :: proc(
-  self: ^Engine,
-  frustum: geometry.Frustum,
-  camera_handle: resource.Handle,
-  shadow_pass: bool = false,
-) -> (
-  ret: RenderInput,
-) {
-  // Convert frame active render target handles to render targets for consistent camera slot mapping
-  targets := make([dynamic]^RenderTarget, 0, context.temp_allocator)
-  for handle in self.frame_active_render_targets {
-    target := render_target(self, handle) or_continue
-    append(&targets, target)
-  }
-  ret.batches = make(
-    map[BatchKey][dynamic]BatchData,
-    context.temp_allocator,
-  )
-  // Note: Caller is responsible for cleaning up ret.batches
-  // Find the correct camera slot for this camera handle
-  camera_slot: u32 = 0
-  camera_slot_found: bool = false
-  for target, i in targets {
-    if target.camera.index == camera_handle.index {
-      camera_slot = u32(i)
-      camera_slot_found = true
-      break
-    }
-  }
-  visible_count: u32 = 0
-  total_count: u32 = 0
-  for &entry, i in self.scene.nodes.entries do if entry.active {
-    node := &entry.item
-    node_handle := Handle{index = u32(i), generation = entry.generation}
-    #partial switch data in node.attachment {
-    case MeshAttachment:
-      // Skip nodes that don't cast shadows when rendering shadow pass
-      if shadow_pass && !data.cast_shadow do continue
-      mesh := mesh(self, data.handle) or_continue
-      material := material(self, data.material) or_continue
-      total_count += 1
-      // Use GPU culling results if available, otherwise fall back to CPU culling
-      visible := true
-      when USE_GPU_CULLING {
-        if camera_slot_found {
-          visible = is_node_visible(&self.visibility_culler, camera_slot, u32(i), self.frame_index)
-        } else {
-          // Fall back to CPU culling if camera slot not found
-          world_aabb := geometry.aabb_transform(mesh.aabb, get_world_matrix_for_render(node))
-          visible = geometry.frustum_test_aabb(frustum, world_aabb)
-        }
-      } else {
-        world_aabb := geometry.aabb_transform(mesh.aabb, get_world_matrix_for_render(node))
-        visible = geometry.frustum_test_aabb(frustum, world_aabb)
-      }
-      if !visible do continue
-      visible_count += 1
-      batch_key := BatchKey {
-        features      = material.features,
-        material_type = material.type,
-      }
-      batch_group, group_found := &ret.batches[batch_key]
-      if !group_found {
-        ret.batches[batch_key] = make([dynamic]BatchData, context.temp_allocator)
-        batch_group = &ret.batches[batch_key]
-      }
-      batch_data: ^BatchData
-      for &batch in batch_group {
-        if batch.material_handle == data.material {
-          batch_data = &batch
-          break
-        }
-      }
-      if batch_data == nil {
-        new_batch := BatchData {
-          material_handle = data.material,
-          nodes           = make([dynamic]RenderNodeRef, context.temp_allocator),
-        }
-        append(batch_group, new_batch)
-        batch_data = &batch_group[len(batch_group) - 1]
-      }
-      append(&batch_data.nodes, RenderNodeRef{
-        handle = node_handle,
-        node   = node,
-      })
-    }
-  }
-  // log.infof("generate_render_input: camera_slot=%d found=%v, visible=%d/%d objects",
-  //           camera_slot, camera_slot_found, visible_count, total_count)
-  return
-}
-
 render :: proc(self: ^Engine) -> vk.Result {
   // log.debug("============ acquiring image...============ ")
   acquire_next_image(
@@ -1247,24 +1132,10 @@ render :: proc(self: ^Engine) -> vk.Result {
       append(&self.frame_active_render_targets, handle)
       user_targets_added += 1
     }
-    active_targets := make([dynamic]^RenderTarget, 0, context.temp_allocator)
-    for handle in self.frame_active_render_targets {
-      target := render_target(self, handle) or_continue
-      append(&active_targets, target)
-    }
     // Update and perform GPU scene culling
     visibility_culler_update(
       &self.visibility_culler,
       &self.scene,
-      active_targets[:],
-      &self.warehouse,
-      self.frame_index,
-    )
-    visibility_culler_execute(
-      &self.visibility_culler,
-      &self.gpu_context,
-      command_buffer,
-      self.frame_index,
     )
 
     // write_idx := self.visibility_culler.visibility_write_idx
@@ -1298,9 +1169,7 @@ render :: proc(self: ^Engine) -> vk.Result {
     // The compute shader writes to the current frame's buffer while graphics reads from previous frames
     // The code above ensures synchronization at the cost of performance
   } else {
-    // CPU culling mode - no visibility culler operations needed
-    // Culling will be done per-object in generate_render_input using CPU frustum tests
-    // Still need to provide an empty array for custom render procs
+    // CPU culling mode placeholder - GPU culling disabled
     clear(&self.frame_active_render_targets)
   }
 
@@ -1370,11 +1239,24 @@ render :: proc(self: ^Engine) -> vk.Result {
           self.warehouse.render_targets,
           light_info.cube_render_targets[face],
         )
-        shadow_render_input := generate_render_input(
-          self,
-          frustum,
-          light_info.cube_cameras[face],
-          shadow_pass = true,
+        shadow_include := NODE_FLAG_VISIBLE | NODE_FLAG_CASTS_SHADOW
+        shadow_exclude := NODE_FLAG_MATERIAL_TRANSPARENT |
+          NODE_FLAG_MATERIAL_WIREFRAME
+        visibility_culler_dispatch(
+          &self.visibility_culler,
+          &self.gpu_context,
+          shadow_cmd,
+          self.frame_index,
+          light_info.cube_cameras[face].index,
+          shadow_include,
+          shadow_exclude,
+        )
+        shadow_draw_buffer := visibility_culler_command_buffer(
+          &self.visibility_culler,
+          self.frame_index,
+        )
+        shadow_draw_count := visibility_culler_max_draw_count(
+          &self.visibility_culler,
         )
         shadow_begin(
           target,
@@ -1385,12 +1267,12 @@ render :: proc(self: ^Engine) -> vk.Result {
         )
         shadow_render(
           &self.shadow,
-          shadow_render_input,
-          light_info,
           target^,
           shadow_cmd,
           &self.warehouse,
           self.frame_index,
+          shadow_draw_buffer,
+          shadow_draw_count,
         )
         shadow_end(shadow_cmd, target, &self.warehouse, self.frame_index, u32(face))
       }
@@ -1412,11 +1294,24 @@ render :: proc(self: ^Engine) -> vk.Result {
         self.warehouse.render_targets,
         light_info.render_target,
       )
-      shadow_render_input := generate_render_input(
-        self,
-        frustum,
-        light_info.camera,
-        shadow_pass = true,
+      shadow_include := NODE_FLAG_VISIBLE | NODE_FLAG_CASTS_SHADOW
+      shadow_exclude := NODE_FLAG_MATERIAL_TRANSPARENT |
+        NODE_FLAG_MATERIAL_WIREFRAME
+      visibility_culler_dispatch(
+        &self.visibility_culler,
+        &self.gpu_context,
+        shadow_cmd,
+        self.frame_index,
+        light_info.camera.index,
+        shadow_include,
+        shadow_exclude,
+      )
+      shadow_draw_buffer := visibility_culler_command_buffer(
+        &self.visibility_culler,
+        self.frame_index,
+      )
+      shadow_draw_count := visibility_culler_max_draw_count(
+        &self.visibility_culler,
       )
       shadow_begin(
         shadow_target,
@@ -1426,12 +1321,12 @@ render :: proc(self: ^Engine) -> vk.Result {
       )
       shadow_render(
         &self.shadow,
-        shadow_render_input,
-        light_info,
         shadow_target^,
         shadow_cmd,
         &self.warehouse,
         self.frame_index,
+        shadow_draw_buffer,
+        shadow_draw_count,
       )
       shadow_end(shadow_cmd, shadow_target, &self.warehouse, self.frame_index)
     }
@@ -1481,11 +1376,24 @@ render :: proc(self: ^Engine) -> vk.Result {
     {.DEPTH_STENCIL_ATTACHMENT_WRITE},
   )
   // log.debug("============ rendering depth pre-pass... =============")
-  // For depth prepass, use frame active render targets for visibility culling
-  depth_input := generate_render_input(
-    self,
-    frustum,
-    main_render_target.camera,
+  opaque_include_flags := NODE_FLAG_VISIBLE
+  opaque_exclude_flags := NODE_FLAG_MATERIAL_TRANSPARENT |
+    NODE_FLAG_MATERIAL_WIREFRAME
+  visibility_culler_dispatch(
+    &self.visibility_culler,
+    &self.gpu_context,
+    command_buffer,
+    self.frame_index,
+    main_render_target.camera.index,
+    opaque_include_flags,
+    opaque_exclude_flags,
+  )
+  draw_buffer := visibility_culler_command_buffer(
+    &self.visibility_culler,
+    self.frame_index,
+  )
+  draw_count := visibility_culler_max_draw_count(
+    &self.visibility_culler,
   )
   depth_prepass_begin(
     main_render_target,
@@ -1495,16 +1403,16 @@ render :: proc(self: ^Engine) -> vk.Result {
   )
   depth_prepass_render(
     &self.depth_prepass,
-    &depth_input,
     command_buffer,
     main_render_target.camera.index,
     &self.warehouse,
     self.frame_index,
+    draw_buffer,
+    draw_count,
   )
   depth_prepass_end(command_buffer)
   // log.debug("============ rendering G-buffer pass... =============")
   // G-buffer image transitions are now handled by gbuffer_begin/end
-  gbuffer_input := depth_input
   gbuffer_begin(
     main_render_target,
     command_buffer,
@@ -1513,11 +1421,12 @@ render :: proc(self: ^Engine) -> vk.Result {
   )
   gbuffer_render(
     &self.gbuffer,
-    &gbuffer_input,
     main_render_target,
     command_buffer,
     &self.warehouse,
     self.frame_index,
+    draw_buffer,
+    draw_count,
   )
   gbuffer_end(
     main_render_target,
@@ -1604,13 +1513,60 @@ render :: proc(self: ^Engine) -> vk.Result {
     linalg.MATRIX4F32_IDENTITY,
     main_render_target.camera.index,
   )
-  transparent_render(
+  transparent_include := NODE_FLAG_VISIBLE | NODE_FLAG_MATERIAL_TRANSPARENT
+  visibility_culler_dispatch(
+    &self.visibility_culler,
+    &self.gpu_context,
+    command_buffer,
+    self.frame_index,
+    main_render_target.camera.index,
+    transparent_include,
+    0,
+  )
+  transparent_draw_buffer := visibility_culler_command_buffer(
+    &self.visibility_culler,
+    self.frame_index,
+  )
+  transparent_draw_count := visibility_culler_max_draw_count(
+    &self.visibility_culler,
+  )
+  transparent_render_pass(
     &self.transparent,
-    gbuffer_input,
+    self.transparent.transparent_pipeline,
     main_render_target,
     command_buffer,
     &self.warehouse,
     self.frame_index,
+    transparent_draw_buffer,
+    transparent_draw_count,
+  )
+
+  wireframe_include := NODE_FLAG_VISIBLE | NODE_FLAG_MATERIAL_WIREFRAME
+  visibility_culler_dispatch(
+    &self.visibility_culler,
+    &self.gpu_context,
+    command_buffer,
+    self.frame_index,
+    main_render_target.camera.index,
+    wireframe_include,
+    0,
+  )
+  wireframe_draw_buffer := visibility_culler_command_buffer(
+    &self.visibility_culler,
+    self.frame_index,
+  )
+  wireframe_draw_count := visibility_culler_max_draw_count(
+    &self.visibility_culler,
+  )
+  transparent_render_pass(
+    &self.transparent,
+    self.transparent.wireframe_pipeline,
+    main_render_target,
+    command_buffer,
+    &self.warehouse,
+    self.frame_index,
+    wireframe_draw_buffer,
+    wireframe_draw_count,
   )
   transparent_end(&self.transparent, command_buffer)
   // log.debug("============ rendering post processes... =============")
@@ -1669,20 +1625,15 @@ render :: proc(self: ^Engine) -> vk.Result {
         len(self.warehouse.meshes.free_indices),
       ),
     )
-    // Show visibility statistics for main camera
     when USE_GPU_CULLING {
-      disabled, visible, total := count_visible_objects(
-        &self.visibility_culler,
-        0,
-        self.frame_index,
-      )
       mu.label(
         &self.ui.ctx,
-        fmt.tprintf("Main Cam: %d/%d visible", visible, total),
+        fmt.tprintf(
+          "Visible nodes (max %d): %d",
+          self.visibility_culler.max_draws,
+          self.visibility_culler.node_count,
+        ),
       )
-      if disabled > 0 {
-        mu.label(&self.ui.ctx, fmt.tprintf("Culling disabled: %d", disabled))
-      }
     }
   }
   if self.render2d_proc != nil {
