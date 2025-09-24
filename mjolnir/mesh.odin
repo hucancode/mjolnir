@@ -20,7 +20,11 @@ bone_deinit :: proc(bone: ^Bone) {
 
 MAX_MESHES :: 65536
 
-MESH_FLAG_SKINNED : u32 = 1 << 0
+MeshFlag :: enum u32 {
+  SKINNED,
+}
+
+MeshFlagSet :: bit_set[MeshFlag; u32]
 
 MeshData :: struct {
   aabb_min:              [3]f32,
@@ -29,7 +33,7 @@ MeshData :: struct {
   first_index:           u32,
   vertex_offset:         i32,
   vertex_skinning_offset: u32,
-  flags:                 u32,
+  flags:                 MeshFlagSet,
   _padding:              u32,
 }
 

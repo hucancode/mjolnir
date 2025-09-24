@@ -1304,10 +1304,10 @@ create_mesh_handle :: proc(
 
 mesh_data_from_mesh :: proc(mesh: ^Mesh) -> MeshData {
   skin_offset: u32
-  flags: u32
+  flags: MeshFlagSet
   skin, has_skin := mesh.skinning.?
   if has_skin && skin.vertex_skinning_allocation.count > 0 {
-    flags |= MESH_FLAG_SKINNED
+    flags |= {.SKINNED}
     skin_offset = skin.vertex_skinning_allocation.offset
   }
   return MeshData {
@@ -1350,7 +1350,7 @@ material_data_from_material :: proc(mat: ^Material) -> MaterialData {
     metallic_value           = mat.metallic_value,
     roughness_value          = mat.roughness_value,
     emissive_value           = mat.emissive_value,
-    features                 = transmute(u32)mat.features,
+    features                 = mat.features,
     base_color_factor        = mat.base_color_factor,
   }
 }

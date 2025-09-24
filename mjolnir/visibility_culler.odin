@@ -11,8 +11,8 @@ VisibilityPushConstants :: struct {
   camera_index: u32,
   node_count:   u32,
   max_draws:    u32,
-  include_flags: u32,
-  exclude_flags: u32,
+  include_flags: NodeFlagSet,
+  exclude_flags: NodeFlagSet,
 }
 
 VisibilityCuller :: struct {
@@ -288,8 +288,8 @@ visibility_culler_dispatch :: proc(
   command_buffer: vk.CommandBuffer,
   frame_index: u32,
   camera_index: u32,
-  include_flags: u32,
-  exclude_flags: u32,
+  include_flags: NodeFlagSet = {.VISIBLE},
+  exclude_flags: NodeFlagSet = {},
 ) {
   if self.node_count == 0 {
     return

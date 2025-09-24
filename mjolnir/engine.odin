@@ -1239,9 +1239,11 @@ render :: proc(self: ^Engine) -> vk.Result {
           self.warehouse.render_targets,
           light_info.cube_render_targets[face],
         )
-        shadow_include := NODE_FLAG_VISIBLE | NODE_FLAG_CASTS_SHADOW
-        shadow_exclude := NODE_FLAG_MATERIAL_TRANSPARENT |
-          NODE_FLAG_MATERIAL_WIREFRAME
+        shadow_include := NodeFlagSet{.VISIBLE, .CASTS_SHADOW}
+        shadow_exclude := NodeFlagSet{
+          .MATERIAL_TRANSPARENT,
+          .MATERIAL_WIREFRAME,
+        }
         visibility_culler_dispatch(
           &self.visibility_culler,
           &self.gpu_context,
@@ -1294,9 +1296,11 @@ render :: proc(self: ^Engine) -> vk.Result {
         self.warehouse.render_targets,
         light_info.render_target,
       )
-      shadow_include := NODE_FLAG_VISIBLE | NODE_FLAG_CASTS_SHADOW
-      shadow_exclude := NODE_FLAG_MATERIAL_TRANSPARENT |
-        NODE_FLAG_MATERIAL_WIREFRAME
+      shadow_include := NodeFlagSet{.VISIBLE, .CASTS_SHADOW}
+      shadow_exclude := NodeFlagSet{
+        .MATERIAL_TRANSPARENT,
+        .MATERIAL_WIREFRAME,
+      }
       visibility_culler_dispatch(
         &self.visibility_culler,
         &self.gpu_context,
@@ -1376,9 +1380,11 @@ render :: proc(self: ^Engine) -> vk.Result {
     {.DEPTH_STENCIL_ATTACHMENT_WRITE},
   )
   // log.debug("============ rendering depth pre-pass... =============")
-  opaque_include_flags := NODE_FLAG_VISIBLE
-  opaque_exclude_flags := NODE_FLAG_MATERIAL_TRANSPARENT |
-    NODE_FLAG_MATERIAL_WIREFRAME
+  opaque_include_flags := NodeFlagSet{.VISIBLE}
+  opaque_exclude_flags := NodeFlagSet{
+    .MATERIAL_TRANSPARENT,
+    .MATERIAL_WIREFRAME,
+  }
   visibility_culler_dispatch(
     &self.visibility_culler,
     &self.gpu_context,
@@ -1513,7 +1519,7 @@ render :: proc(self: ^Engine) -> vk.Result {
     linalg.MATRIX4F32_IDENTITY,
     main_render_target.camera.index,
   )
-  transparent_include := NODE_FLAG_VISIBLE | NODE_FLAG_MATERIAL_TRANSPARENT
+  transparent_include := NodeFlagSet{.VISIBLE, .MATERIAL_TRANSPARENT}
   visibility_culler_dispatch(
     &self.visibility_culler,
     &self.gpu_context,
@@ -1521,7 +1527,6 @@ render :: proc(self: ^Engine) -> vk.Result {
     self.frame_index,
     main_render_target.camera.index,
     transparent_include,
-    0,
   )
   transparent_draw_buffer := visibility_culler_command_buffer(
     &self.visibility_culler,
@@ -1541,7 +1546,7 @@ render :: proc(self: ^Engine) -> vk.Result {
     transparent_draw_count,
   )
 
-  wireframe_include := NODE_FLAG_VISIBLE | NODE_FLAG_MATERIAL_WIREFRAME
+  wireframe_include := NodeFlagSet{.VISIBLE, .MATERIAL_WIREFRAME}
   visibility_culler_dispatch(
     &self.visibility_culler,
     &self.gpu_context,
@@ -1549,7 +1554,6 @@ render :: proc(self: ^Engine) -> vk.Result {
     self.frame_index,
     main_render_target.camera.index,
     wireframe_include,
-    0,
   )
   wireframe_draw_buffer := visibility_culler_command_buffer(
     &self.visibility_culler,

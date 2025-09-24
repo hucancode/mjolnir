@@ -628,9 +628,11 @@ custom_render :: proc(
     &engine.warehouse,
     portal_rt.camera.index,
   )
-  portal_include := mjolnir.NODE_FLAG_VISIBLE
-  portal_exclude := mjolnir.NODE_FLAG_MATERIAL_TRANSPARENT |
-    mjolnir.NODE_FLAG_MATERIAL_WIREFRAME
+  portal_include := mjolnir.NodeFlagSet{.VISIBLE}
+  portal_exclude := mjolnir.NodeFlagSet{
+    .MATERIAL_TRANSPARENT,
+    .MATERIAL_WIREFRAME,
+  }
   mjolnir.visibility_culler_dispatch(
     &engine.visibility_culler,
     &engine.gpu_context,

@@ -2,7 +2,7 @@ package mjolnir
 
 import "core:log"
 
-ShaderFeatures :: enum {
+ShaderFeature :: enum {
   ALBEDO_TEXTURE             = 0,
   METALLIC_ROUGHNESS_TEXTURE = 1,
   NORMAL_TEXTURE             = 2,
@@ -10,7 +10,7 @@ ShaderFeatures :: enum {
   OCCLUSION_TEXTURE          = 4,
 }
 
-ShaderFeatureSet :: bit_set[ShaderFeatures;u32]
+ShaderFeatureSet :: bit_set[ShaderFeature;u32]
 
 MaterialType :: enum {
   PBR,
@@ -29,7 +29,7 @@ MaterialData :: struct {
   metallic_value:           f32,
   roughness_value:          f32,
   emissive_value:           f32,
-  features:                 u32,
+  features:                 ShaderFeatureSet,
   base_color_factor:        [4]f32,
 }
 
