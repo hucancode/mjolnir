@@ -177,7 +177,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
       MeshAttachment {
         handle = ground_mesh_handle,
         material = ground_mat_handle,
-        cast_shadow = true,
       },
     )
     translate(left_wall, x = size, y = size)
@@ -189,7 +188,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
       MeshAttachment {
         handle = ground_mesh_handle,
         material = ground_mat_handle,
-        cast_shadow = true,
       },
     )
     translate(right_wall, x = -size, y = size)

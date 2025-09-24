@@ -1288,13 +1288,8 @@ record_transparency_pass :: proc(
     main_render_target.camera.index,
     transparent_include,
   )
-  transparent_draw_buffer := visibility_culler_command_buffer(
-    &self.visibility_culler,
-    self.frame_index,
-  )
-  transparent_draw_count := visibility_culler_max_draw_count(
-    &self.visibility_culler,
-  )
+  transparent_draw_buffer := visibility_culler_command_buffer(&self.visibility_culler, self.frame_index)
+  transparent_draw_count := visibility_culler_max_draw_count(&self.visibility_culler)
   transparent_render_pass(
     &self.transparent,
     self.transparent.transparent_pipeline,
@@ -1315,13 +1310,8 @@ record_transparency_pass :: proc(
     main_render_target.camera.index,
     wireframe_include,
   )
-  wireframe_draw_buffer := visibility_culler_command_buffer(
-    &self.visibility_culler,
-    self.frame_index,
-  )
-  wireframe_draw_count := visibility_culler_max_draw_count(
-    &self.visibility_culler,
-  )
+  wireframe_draw_buffer := visibility_culler_command_buffer(&self.visibility_culler, self.frame_index)
+  wireframe_draw_count := visibility_culler_max_draw_count(&self.visibility_culler)
   transparent_render_pass(
     &self.transparent,
     self.transparent.wireframe_pipeline,
@@ -1404,8 +1394,172 @@ record_postprocess_pass :: proc(
 }
 
 @(private = "file")
+update_skeletal_animations :: proc(self: ^Engine, render_delta_time: f32) {
+  for &entry in self.scene.nodes.entries {
+    if !entry.active do continue
+    data, is_mesh := &entry.item.attachment.(MeshAttachment)
+    if !is_mesh do continue
+    skinning, has_skin := &data.skinning.?
+    if !has_skin do continue
+    anim_inst, has_animation := &skinning.animation.?
+    if !has_animation do continue
+    animation.instance_update(anim_inst, render_delta_time)
+    mesh := mesh(self, data.handle) or_continue
+    mesh_skin, mesh_has_skin := mesh.skinning.?
+    if !mesh_has_skin do continue
+    l := skinning.bone_matrix_offset + self.frame_index * self.warehouse.bone_matrix_slab.capacity
+    r := l + u32(len(mesh_skin.bones))
+    bone_matrices := self.warehouse.bone_buffer.mapped[l:r]
+    sample_clip(mesh, anim_inst.clip, anim_inst.time, bone_matrices)
+  }
+}
+
+@(private = "file")
+setup_point_light_shadow_cameras :: proc(
+  self: ^Engine,
+  light_info: ^LightInfo,
+  position: [3]f32,
+  shadow_map_index: int,
+) {
+  @(static) face_dirs := [6][3]f32 {
+    {1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1},
+  }
+  @(static) face_ups := [6][3]f32 {
+    {0, -1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}, {0, -1, 0}, {0, -1, 0},
+  }
+
+  light_info.cube_render_targets = self.cube_shadow_render_targets[shadow_map_index]
+
+  for i in 0 ..< 6 {
+    render_target := resource.get(
+      self.warehouse.render_targets,
+      light_info.cube_render_targets[i],
+    )
+    camera: ^geometry.Camera
+    light_info.cube_cameras[i], camera = resource.alloc(&self.warehouse.cameras)
+    geometry.camera_perspective(camera, math.PI * 0.5, 1.0, 0.1, light_info.light_radius)
+    render_target.camera = light_info.cube_cameras[i]
+    target_pos := position + face_dirs[i]
+    geometry.camera_look_at(camera, position, target_pos, face_ups[i])
+    render_target_update_camera_uniform(&self.warehouse, render_target)
+  }
+}
+
+@(private = "file")
+process_point_light :: proc(
+  self: ^Engine,
+  node: ^Node,
+  attachment: ^PointLightAttachment,
+  cube_shadow_map_count: ^int,
+) {
+  light_info := &self.lights[self.active_light_count]
+  position := get_world_matrix_for_render(node) * [4]f32{0, 0, 0, 1}
+
+  light_info.light_kind = .POINT
+  light_info.light_color = attachment.color.xyz
+  light_info.light_position = position.xyz
+  light_info.light_radius = attachment.radius
+  light_info.light_cast_shadow = b32(attachment.cast_shadow && cube_shadow_map_count^ < MAX_SHADOW_MAPS)
+
+  if light_info.light_cast_shadow {
+    light_info.shadow_map_id = self.cube_shadow_maps[self.frame_index][cube_shadow_map_count^].index
+    light_info.shadow_map = self.cube_shadow_maps[self.frame_index][cube_shadow_map_count^]
+    cube_shadow_map_count^ += 1
+
+    setup_point_light_shadow_cameras(self, light_info, position.xyz, cube_shadow_map_count^ - 1)
+    light_info.light_camera_idx = light_info.cube_cameras[0].index
+  }
+
+  self.active_light_count += 1
+}
+
+@(private = "file")
+process_spot_light :: proc(
+  self: ^Engine,
+  node: ^Node,
+  attachment: ^SpotLightAttachment,
+  shadow_map_count: ^int,
+) {
+  light_info := &self.lights[self.active_light_count]
+  position := get_world_matrix_for_render(node) * [4]f32{0, 0, 0, 1}
+  direction := get_world_matrix_for_render(node) * [4]f32{0, -1, 0, 0}
+  light_info.light_kind = .SPOT
+  light_info.light_color = attachment.color.xyz
+  light_info.light_position = position.xyz
+  light_info.light_direction = direction.xyz
+  light_info.light_radius = attachment.radius
+  light_info.light_angle = attachment.angle
+  light_info.light_cast_shadow = b32(attachment.cast_shadow) && shadow_map_count^ < MAX_SHADOW_MAPS
+  if light_info.light_cast_shadow {
+    light_info.shadow_map_id = self.shadow_maps[self.frame_index][shadow_map_count^].index
+    light_info.shadow_map = self.shadow_maps[self.frame_index][shadow_map_count^]
+    shadow_map_count^ += 1
+    light_info.render_target = self.shadow_render_targets[shadow_map_count^ - 1]
+    render_target := render_target(self, light_info.render_target)
+    camera: ^geometry.Camera
+    light_info.camera, camera = resource.alloc(&self.warehouse.cameras)
+    geometry.camera_perspective(camera, light_info.light_angle * 2.0, 1.0, 0.1, light_info.light_radius)
+    render_target.camera = light_info.camera
+    target_pos := position.xyz + direction.xyz
+    geometry.camera_look_at(camera, position.xyz, target_pos)
+    render_target_update_camera_uniform(&self.warehouse, render_target)
+    light_info.light_camera_idx = light_info.camera.index
+  }
+
+  self.active_light_count += 1
+}
+
+@(private = "file")
+process_directional_light :: proc(
+  self: ^Engine,
+  node: ^Node,
+  attachment: ^DirectionalLightAttachment,
+) {
+  light_info := &self.lights[self.active_light_count]
+  direction := get_world_matrix_for_render(node) * [4]f32{0, 0, -1, 0}
+  light_info.light_kind = .DIRECTIONAL
+  light_info.light_color = attachment.color.xyz
+  light_info.light_direction = direction.xyz
+  light_info.light_cast_shadow = b32(attachment.cast_shadow)
+
+  self.active_light_count += 1
+}
+
+@(private = "file")
+process_scene_lights :: proc(self: ^Engine) {
+  self.active_light_count = 0
+  shadow_map_count := 0
+  cube_shadow_map_count := 0
+  for &entry in self.scene.nodes.entries do if entry.active {
+    node := &entry.item
+    if self.active_light_count >= len(self.lights) do continue
+    #partial switch &attachment in &node.attachment {
+    case PointLightAttachment:
+      process_point_light(self, node, &attachment, &cube_shadow_map_count)
+    case SpotLightAttachment:
+      process_spot_light(self, node, &attachment, &shadow_map_count)
+    case DirectionalLightAttachment:
+      process_directional_light(self, node, &attachment)
+    }
+  }
+}
+
+@(private = "file")
+render_debug_ui :: proc(self: ^Engine) {
+  if mu.window(&self.ui.ctx, "Engine", {40, 40, 300, 200}, {.NO_CLOSE}) {
+    mu.label(&self.ui.ctx, fmt.tprintf("Objects %d", len(self.scene.nodes.entries) - len(self.scene.nodes.free_indices)))
+    mu.label(&self.ui.ctx, fmt.tprintf("Textures %d", len(self.warehouse.image_2d_buffers.entries) - len(self.warehouse.image_2d_buffers.free_indices)))
+    mu.label(&self.ui.ctx, fmt.tprintf("Materials %d", len(self.warehouse.materials.entries) - len(self.warehouse.materials.free_indices)))
+    mu.label(&self.ui.ctx, fmt.tprintf("Meshes %d", len(self.warehouse.meshes.entries) - len(self.warehouse.meshes.free_indices)))
+    when USE_GPU_CULLING {
+      mu.label(&self.ui.ctx, fmt.tprintf("Visible nodes (max %d): %d", self.visibility_culler.max_draws, self.visibility_culler.node_count))
+    }
+  }
+}
+
+
+@(private = "file")
 recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
-  // vk.DeviceWaitIdle(engine.gpu_context.device)
   swapchain_recreate(
     &engine.gpu_context,
     &engine.swapchain,
@@ -1416,8 +1570,6 @@ recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
   if main_camera := get_main_camera(engine); main_camera != nil {
     geometry.camera_update_aspect_ratio(main_camera, new_aspect_ratio)
   }
-
-  // Recreate main render target with new dimensions
   if main_render_target := resource.get(
     engine.warehouse.render_targets,
     engine.main_render_target,
@@ -1457,9 +1609,6 @@ recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
       old_target, // Preserve camera target
     ) or_return
   }
-
-  // No need to update camera uniform descriptor sets with bindless cameras
-
   lighting_recreate_images(
     &engine.lighting,
     engine.swapchain.extent.width,
@@ -1486,39 +1635,16 @@ recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
   return .SUCCESS
 }
 
-// Generate render input for a given frustum (camera or light)
 render :: proc(self: ^Engine) -> vk.Result {
-  acquire_next_image(
-    &self.gpu_context,
-    &self.swapchain,
-    self.frame_index,
-  ) or_return
+  acquire_next_image(&self.gpu_context, &self.swapchain, self.frame_index) or_return
   mu.begin(&self.ui.ctx)
   command_buffer := self.command_buffers[self.frame_index]
   vk.ResetCommandBuffer(command_buffer, {}) or_return
-  render_delta_time := f32(time.duration_seconds(time.since(self.last_render_timestamp)))
-  for &entry in self.scene.nodes.entries {
-    if !entry.active do continue
-    data, is_mesh := &entry.item.attachment.(MeshAttachment)
-    if !is_mesh do continue
-    skinning, has_skin := &data.skinning.?
-    if !has_skin do continue
-    anim_inst, has_animation := &skinning.animation.?
-    if !has_animation do continue
-    animation.instance_update(anim_inst, render_delta_time)
-    mesh := mesh(self, data.handle) or_continue
-    mesh_skin, mesh_has_skin := mesh.skinning.?
-    if !mesh_has_skin do continue
-    l := skinning.bone_matrix_offset + self.frame_index * self.warehouse.bone_matrix_slab.capacity
-    r := l + u32(len(mesh_skin.bones))
-    bone_matrices := self.warehouse.bone_buffer.mapped[l:r]
-    sample_clip(mesh, anim_inst.clip, anim_inst.time, bone_matrices)
-  }
 
-  main_render_target := resource.get(
-    self.warehouse.render_targets,
-    self.main_render_target,
-  )
+  render_delta_time := f32(time.duration_seconds(time.since(self.last_render_timestamp)))
+  update_skeletal_animations(self, render_delta_time)
+
+  main_render_target := resource.get(self.warehouse.render_targets, self.main_render_target)
   if main_render_target == nil {
     log.errorf("Main render target not found")
     return .ERROR_UNKNOWN
@@ -1534,9 +1660,6 @@ render :: proc(self: ^Engine) -> vk.Result {
   camera_uniform := get_camera_uniform(&self.warehouse, main_camera_index)
   _ = geometry.make_frustum(camera_uniform.projection * camera_uniform.view)
 
-  self.active_light_count = 0
-  shadow_map_count := 0
-  cube_shadow_map_count := 0
   defer {
     for i in 0 ..< self.active_light_count {
       light_info := &self.lights[i]
@@ -1551,130 +1674,14 @@ render :: proc(self: ^Engine) -> vk.Result {
         }
       case .SPOT:
         if light_info.camera.generation != 0 {
-          resource.free(
-            &self.warehouse.cameras,
-            light_info.shadow_resources.camera,
-          )
+          resource.free(&self.warehouse.cameras, light_info.shadow_resources.camera)
         }
       case .DIRECTIONAL:
       }
     }
   }
-  for &entry in self.scene.nodes.entries do if entry.active {
-    node := &entry.item
-    if self.active_light_count >= len(self.lights) do continue
 
-    #partial switch &attachment in &node.attachment {
-    case PointLightAttachment:
-      light_info := &self.lights[self.active_light_count]
-      position := get_world_matrix_for_render(node) * [4]f32{0, 0, 0, 1}
-      light_info.light_kind = .POINT
-      light_info.light_color = attachment.color.xyz
-      light_info.light_position = position.xyz
-      light_info.light_radius = attachment.radius
-      light_info.light_cast_shadow =
-        b32(attachment.cast_shadow && cube_shadow_map_count < MAX_SHADOW_MAPS)
-
-      if light_info.light_cast_shadow {
-        light_info.shadow_map_id =
-          self.cube_shadow_maps[self.frame_index][cube_shadow_map_count].index
-        light_info.shadow_map =
-          self.cube_shadow_maps[self.frame_index][cube_shadow_map_count]
-        cube_shadow_map_count += 1
-
-        light_info.cube_render_targets =
-          self.cube_shadow_render_targets[cube_shadow_map_count - 1]
-
-        @(static) face_dirs := [6][3]f32 {
-          {1, 0, 0},
-          {-1, 0, 0},
-          {0, 1, 0},
-          {0, -1, 0},
-          {0, 0, 1},
-          {0, 0, -1},
-        }
-        @(static) face_ups := [6][3]f32 {
-          {0, -1, 0},
-          {0, -1, 0},
-          {0, 0, 1},
-          {0, 0, -1},
-          {0, -1, 0},
-          {0, -1, 0},
-        }
-
-        for i in 0 ..< 6 {
-          render_target := resource.get(
-            self.warehouse.render_targets,
-            light_info.cube_render_targets[i],
-          )
-          camera: ^geometry.Camera
-          light_info.cube_cameras[i], camera =
-            resource.alloc(&self.warehouse.cameras)
-          geometry.camera_perspective(
-            camera,
-            math.PI * 0.5,
-            1.0,
-            0.1,
-            light_info.light_radius,
-          )
-          render_target.camera = light_info.cube_cameras[i]
-          target_pos := position.xyz + face_dirs[i]
-          geometry.camera_look_at(camera, position.xyz, target_pos, face_ups[i])
-          render_target_update_camera_uniform(&self.warehouse, render_target)
-        }
-        light_info.light_camera_idx = light_info.cube_cameras[0].index
-      }
-
-      self.active_light_count += 1
-
-    case DirectionalLightAttachment:
-      light_info := &self.lights[self.active_light_count]
-      direction := get_world_matrix_for_render(node) * [4]f32{0, 0, -1, 0}
-      light_info.light_kind = .DIRECTIONAL
-      light_info.light_color = attachment.color.xyz
-      light_info.light_direction = direction.xyz
-      light_info.light_cast_shadow = b32(attachment.cast_shadow)
-      self.active_light_count += 1
-
-    case SpotLightAttachment:
-      light_info := &self.lights[self.active_light_count]
-      position := get_world_matrix_for_render(node) * [4]f32{0, 0, 0, 1}
-      direction := get_world_matrix_for_render(node) * [4]f32{0, -1, 0, 0}
-      light_info.light_kind = .SPOT
-      light_info.light_color = attachment.color.xyz
-      light_info.light_position = position.xyz
-      light_info.light_direction = direction.xyz
-      light_info.light_radius = attachment.radius
-      light_info.light_angle = attachment.angle
-      light_info.light_cast_shadow =
-        b32(attachment.cast_shadow) && shadow_map_count < MAX_SHADOW_MAPS
-
-      if light_info.light_cast_shadow {
-        light_info.shadow_map_id =
-          self.shadow_maps[self.frame_index][shadow_map_count].index
-        light_info.shadow_map =
-          self.shadow_maps[self.frame_index][shadow_map_count]
-        shadow_map_count += 1
-        light_info.render_target = self.shadow_render_targets[shadow_map_count - 1]
-        render_target := render_target(self, light_info.render_target)
-        camera: ^geometry.Camera
-        light_info.camera, camera = resource.alloc(&self.warehouse.cameras)
-        geometry.camera_perspective(
-          camera,
-          light_info.light_angle * 2.0,
-          1.0,
-          0.1,
-          light_info.light_radius,
-        )
-        render_target.camera = light_info.camera
-        target_pos := position.xyz + direction.xyz
-        geometry.camera_look_at(camera, position.xyz, target_pos)
-        render_target_update_camera_uniform(&self.warehouse, render_target)
-        light_info.light_camera_idx = light_info.camera.index
-      }
-      self.active_light_count += 1
-    }
-  }
+  process_scene_lights(self)
 
   when USE_GPU_CULLING {
     clear(&self.frame_active_render_targets)
@@ -1753,62 +1760,16 @@ render :: proc(self: ^Engine) -> vk.Result {
     self.custom_render_proc(self, command_buffer)
   }
 
-  secondary_chain := [?]vk.CommandBuffer {
+  secondary_commands := [?]vk.CommandBuffer{
     self.shadow_pass_command_buffers[self.frame_index],
     self.depth_gbuffer_command_buffers[self.frame_index],
     self.lighting_command_buffers[self.frame_index],
     self.transparency_command_buffers[self.frame_index],
     self.postprocess_command_buffers[self.frame_index],
   }
-  vk.CmdExecuteCommands(
-    command_buffer,
-    len(secondary_chain),
-    raw_data(secondary_chain[:]),
-  )
+  vk.CmdExecuteCommands(command_buffer, len(secondary_commands), raw_data(secondary_commands[:]))
 
-  if mu.window(&self.ui.ctx, "Engine", {40, 40, 300, 200}, {.NO_CLOSE}) {
-    mu.label(
-      &self.ui.ctx,
-      fmt.tprintf(
-        "Objects %d",
-        len(self.scene.nodes.entries) - len(self.scene.nodes.free_indices),
-      ),
-    )
-    mu.label(
-      &self.ui.ctx,
-      fmt.tprintf(
-        "Textures %d",
-        len(self.warehouse.image_2d_buffers.entries) -
-        len(self.warehouse.image_2d_buffers.free_indices),
-      ),
-    )
-    mu.label(
-      &self.ui.ctx,
-      fmt.tprintf(
-        "Materials %d",
-        len(self.warehouse.materials.entries) -
-        len(self.warehouse.materials.free_indices),
-      ),
-    )
-    mu.label(
-      &self.ui.ctx,
-      fmt.tprintf(
-        "Meshes %d",
-        len(self.warehouse.meshes.entries) -
-        len(self.warehouse.meshes.free_indices),
-      ),
-    )
-    when USE_GPU_CULLING {
-      mu.label(
-        &self.ui.ctx,
-        fmt.tprintf(
-          "Visible nodes (max %d): %d",
-          self.visibility_culler.max_draws,
-          self.visibility_culler.node_count,
-        ),
-      )
-    }
-  }
+  render_debug_ui(self)
   if self.render2d_proc != nil {
     self.render2d_proc(self, &self.ui.ctx)
   }
