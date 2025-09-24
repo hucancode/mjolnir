@@ -25,33 +25,10 @@ depth_prepass_init :: proc(
 ) -> (
   res: vk.Result,
 ) {
-  push_constant_range := vk.PushConstantRange {
-    stageFlags = {.VERTEX},
-    size       = size_of(PushConstant),
+  self.pipeline_layout = warehouse.geometry_pipeline_layout
+  if self.pipeline_layout == 0 {
+    return .ERROR_INITIALIZATION_FAILED
   }
-  set_layouts := [?]vk.DescriptorSetLayout {
-    warehouse.camera_buffer_set_layout,
-    warehouse.textures_set_layout,
-    warehouse.bone_buffer_set_layout,
-    warehouse.material_buffer_set_layout,
-    warehouse.world_matrix_buffer_set_layout,
-    warehouse.node_data_buffer_set_layout,
-    warehouse.mesh_data_buffer_set_layout,
-    warehouse.vertex_skinning_buffer_set_layout,
-  }
-  pipeline_layout_info := vk.PipelineLayoutCreateInfo {
-    sType                  = .PIPELINE_LAYOUT_CREATE_INFO,
-    setLayoutCount         = len(set_layouts),
-    pSetLayouts            = raw_data(set_layouts[:]),
-    pushConstantRangeCount = 1,
-    pPushConstantRanges    = &push_constant_range,
-  }
-  vk.CreatePipelineLayout(
-    gpu_context.device,
-    &pipeline_layout_info,
-    nil,
-    &self.pipeline_layout,
-  ) or_return
   depth_prepass_build_pipeline(
     gpu_context,
     self,
@@ -67,8 +44,6 @@ depth_prepass_deinit :: proc(
 ) {
   vk.DestroyPipeline(gpu_context.device, self.pipeline, nil)
   self.pipeline = 0
-  vk.DestroyPipelineLayout(gpu_context.device, self.pipeline_layout, nil)
-  self.pipeline_layout = 0
 }
 
 depth_prepass_begin :: proc(
