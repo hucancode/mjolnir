@@ -562,18 +562,9 @@ node_get_world_matrix :: proc(node: ^Node) -> matrix[4,4]f32 {
     return geometry.transform_get_world_matrix(&node.transform)
 }
 
-node_get_world_matrix_for_render :: proc(node: ^Node) -> matrix[4,4]f32 {
-  return geometry.transform_get_world_matrix_for_render(&node.transform)
-}
-
 get_world_matrix :: proc {
     node_get_world_matrix,
     geometry.transform_get_world_matrix,
-}
-
-get_world_matrix_for_render :: proc {
-    node_get_world_matrix_for_render,
-    geometry.transform_get_world_matrix_for_render,
 }
 
 upload_world_matrices :: proc(
@@ -604,7 +595,7 @@ upload_world_matrices :: proc(
   }
   for &entry, idx in scene.nodes.entries do if entry.active {
     if idx >= len(matrices) do continue
-    matrices[idx] = geometry.transform_get_world_matrix_for_render(&entry.item.transform)
+    matrices[idx] = get_world_matrix(&entry.item)
     if idx >= len(node_datas) do continue
     mesh_attachment, has_mesh := entry.item.attachment.(MeshAttachment)
     if !has_mesh {

@@ -1453,7 +1453,7 @@ process_point_light :: proc(
   cube_shadow_map_count: ^int,
 ) {
   light_info := &self.lights[self.active_light_count]
-  position := get_world_matrix_for_render(node) * [4]f32{0, 0, 0, 1}
+  position := get_world_matrix(node) * [4]f32{0, 0, 0, 1}
 
   light_info.light_kind = .POINT
   light_info.light_color = attachment.color.xyz
@@ -1481,8 +1481,8 @@ process_spot_light :: proc(
   shadow_map_count: ^int,
 ) {
   light_info := &self.lights[self.active_light_count]
-  position := get_world_matrix_for_render(node) * [4]f32{0, 0, 0, 1}
-  direction := get_world_matrix_for_render(node) * [4]f32{0, -1, 0, 0}
+  position := get_world_matrix(node) * [4]f32{0, 0, 0, 1}
+  direction := get_world_matrix(node) * [4]f32{0, -1, 0, 0}
   light_info.light_kind = .SPOT
   light_info.light_color = attachment.color.xyz
   light_info.light_position = position.xyz
@@ -1516,7 +1516,7 @@ process_directional_light :: proc(
   attachment: ^DirectionalLightAttachment,
 ) {
   light_info := &self.lights[self.active_light_count]
-  direction := get_world_matrix_for_render(node) * [4]f32{0, 0, -1, 0}
+  direction := get_world_matrix(node) * [4]f32{0, 0, -1, 0}
   light_info.light_kind = .DIRECTIONAL
   light_info.light_color = attachment.color.xyz
   light_info.light_direction = direction.xyz
@@ -1827,7 +1827,7 @@ run :: proc(self: ^Engine, width, height: u32, title: string) {
     update_input(self)
     when USE_PARALLEL_UPDATE {
       // Always flush any staged transforms from logic to render buffers
-      flush_transforms_to_render(self)
+      // flush_transforms_to_render(self)
       if self.transforms_updated {
         self.transforms_updated = false
       }
@@ -1887,12 +1887,6 @@ process_pending_deletions :: proc(engine: ^Engine) {
     }
   }
   clear(&engine.pending_node_deletions)
-}
-
-flush_transforms_to_render :: proc(engine: ^Engine) {
-  for &entry in engine.scene.nodes.entries do if entry.active {
-    geometry.transform_flush_to_render(&entry.item.transform)
-  }
 }
 
 screen_to_world_ray :: proc(engine: ^Engine, screen_x, screen_y: f32) -> (ray_origin: [3]f32, ray_dir: [3]f32) {

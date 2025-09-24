@@ -8,9 +8,8 @@ Transform :: struct {
   rotation:       quaternion128,
   scale:          [3]f32,
   is_dirty:       bool,   // Local matrix needs recalculation from position/rotation/scale
-  is_staging:     bool,   // World matrix is in logic buffer and not sent to render yet
   local_matrix:   matrix[4,4]f32,
-  world_matrix:   [2]matrix[4,4]f32, // [0] = logic/update, [1] = render
+  world_matrix:   matrix[4,4]f32,
 }
 
 TRANSFORM_IDENTITY :: Transform {
@@ -18,9 +17,8 @@ TRANSFORM_IDENTITY :: Transform {
   rotation     = linalg.QUATERNIONF32_IDENTITY,
   scale        = {1, 1, 1},
   is_dirty     = false,
-  is_staging   = false,  // Start with both buffers synchronized
   local_matrix = linalg.MATRIX4F32_IDENTITY,
-  world_matrix = {linalg.MATRIX4F32_IDENTITY, linalg.MATRIX4F32_IDENTITY},
+  world_matrix = linalg.MATRIX4F32_IDENTITY,
 }
 
 decompose_matrix :: proc(m: matrix[4,4]f32) -> (ret: Transform) {
@@ -129,31 +127,15 @@ transform_update_local :: proc(t: ^Transform) -> bool {
 
 // Helper functions for double-buffered world matrix
 transform_get_world_matrix :: proc(t: ^Transform) -> matrix[4,4]f32 {
-  return t.world_matrix[0]
-}
-
-transform_get_world_matrix_for_render :: proc(t: ^Transform) -> matrix[4,4]f32 {
-  // Render thread reads from render buffer (index 1)
-  return t.world_matrix[1]
-}
-
-// Copy logic buffer to render buffer when needed
-transform_flush_to_render :: proc(t: ^Transform) {
-  if t.is_staging {
-    t.world_matrix[1] = t.world_matrix[0]
-    t.is_staging = false
-  }
+  return t.world_matrix
 }
 
 transform_update_world :: proc(
   t: ^Transform,
   parent: matrix[4,4]f32,
 ) -> bool {
-  // Update both buffers immediately for smooth motion
   new_world_matrix := parent * t.local_matrix
-  t.world_matrix[0] = new_world_matrix  // Logic buffer
-  t.world_matrix[1] = new_world_matrix  // Render buffer
+  t.world_matrix = new_world_matrix
   t.is_dirty = false
-  t.is_staging = false  // Already synchronized
   return true
 }
