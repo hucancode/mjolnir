@@ -165,7 +165,6 @@ depth_prepass_render :: proc(
         case MeshAttachment:
           mesh := mesh(warehouse, data.handle) or_continue
           push_constant := PushConstant {
-            node_id      = render_node.handle.index,
             camera_index = camera_index,
           }
           vk.CmdPushConstants(
@@ -192,7 +191,14 @@ depth_prepass_render :: proc(
             vk.DeviceSize(mesh.index_allocation.offset * size_of(u32)),
             .UINT32,
           )
-          vk.CmdDrawIndexed(command_buffer, mesh.index_allocation.count, 1, 0, 0, 0)
+          vk.CmdDrawIndexed(
+            command_buffer,
+            mesh.index_allocation.count,
+            1,
+            0,
+            0,
+            render_node.handle.index,
+          )
           rendered_count += 1
         }
       }

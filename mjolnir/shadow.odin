@@ -361,7 +361,6 @@ render_single_shadow_node :: proc(
   mesh, found_mesh := mesh(warehouse, mesh_attachment.handle)
   if !found_mesh do return
   push_constant := PushConstant {
-    node_id      = node_handle.index,
     camera_index = camera_index,
   }
   vk.CmdPushConstants(
@@ -390,5 +389,12 @@ render_single_shadow_node :: proc(
     vk.DeviceSize(mesh.index_allocation.offset * size_of(u32)),
     .UINT32,
   )
-  vk.CmdDrawIndexed(command_buffer, mesh.index_allocation.count, 1, 0, 0, 0)
+  vk.CmdDrawIndexed(
+    command_buffer,
+    mesh.index_allocation.count,
+    1,
+    0,
+    0,
+    node_handle.index,
+  )
 }

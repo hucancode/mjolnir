@@ -67,7 +67,6 @@ layout(set = 7, binding = 0) readonly buffer VertexSkinningBuffer {
 
 // Push constant budget: 64 bytes
 layout(push_constant) uniform PushConstants {
-    uint node_id;
     uint camera_index;
 };
 
@@ -75,13 +74,14 @@ layout(push_constant) uniform PushConstants {
 void main() {
     // Get camera from bindless buffer
     Camera camera = camera_buffer.cameras[camera_index];
-    mat4 world = world_matrices[node_id];
-    NodeData node = nodes[node_id];
+    uint node_index = uint(gl_InstanceIndex);
+    mat4 world = world_matrices[node_index];
+    NodeData node = nodes[node_index];
     MeshData mesh = meshes[node.mesh_id];
 
     // Calculate position based on skinning
     vec4 modelPosition;
-    if (mesh.is_skinned != 0u && node.bone_matrix_offset < boneMatrices.matrices.length()) {
+    if (mesh.is_skinned != 0u && node.bone_matrix_offset != 0xFFFFFFFFu) {
         uint baseOffset = node.bone_matrix_offset;
         uint vertex_index = mesh.vertex_skinning_offset + gl_VertexIndex;
         VertexSkinningData skin = vertex_skinning[vertex_index];

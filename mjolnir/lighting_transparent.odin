@@ -456,7 +456,6 @@ transparent_render :: proc(
           ) or_continue
 
           push_constants := PushConstant {
-            node_id      = render_node.handle.index,
             camera_index = render_target.camera.index,
           }
           // Push constants
@@ -493,7 +492,7 @@ transparent_render :: proc(
             1,
             0,
             0,
-            0,
+            render_node.handle.index,
           )
         }
       }
@@ -515,7 +514,6 @@ transparent_render :: proc(
             self.wireframe_pipeline,
           )
           push_constant := PushConstant {
-            node_id      = render_node.handle.index,
             camera_index = render_target.camera.index,
           }
 
@@ -554,7 +552,7 @@ transparent_render :: proc(
             1,
             0,
             0,
-            0,
+            render_node.handle.index,
           )
         }
       }

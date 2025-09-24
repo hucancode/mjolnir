@@ -60,7 +60,6 @@ layout(set = 7, binding = 0) readonly buffer VertexSkinningBuffer {
 };
 
 layout(push_constant) uniform PushConstants {
-    uint node_id;
     uint camera_index;
 };
 
@@ -69,11 +68,13 @@ layout(location = 1) out vec4 outColor;
 layout(location = 2) out vec3 outNormal;
 layout(location = 3) out vec2 outUV;
 layout(location = 4) out vec4 outTangent;
+layout(location = 5) flat out uint outNodeIndex;
 
 void main() {
     Camera camera = cameras[camera_index];
-    mat4 world = world_matrices[node_id];
-    NodeData node = nodes[node_id];
+    uint node_index = uint(gl_InstanceIndex);
+    mat4 world = world_matrices[node_index];
+    NodeData node = nodes[node_index];
     MeshData mesh = meshes[node.mesh_id];
 
     vec4 modelPosition;
@@ -102,5 +103,6 @@ void main() {
     outUV = inUV;
     outColor = inColor;
     outPosition = worldPosition.xyz;
+    outNodeIndex = node_index;
     gl_Position = camera.projection * camera.view * worldPosition;
 }

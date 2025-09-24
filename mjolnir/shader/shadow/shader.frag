@@ -17,7 +17,6 @@ layout(set = 0, binding = 0) readonly buffer CameraBuffer {
 };
 
 layout(push_constant) uniform PushConstants {
-    uint node_id;
     uint camera_index;
 };
 

@@ -57,14 +57,14 @@ layout(set = 7, binding = 0) readonly buffer VertexSkinningBuffer {
 
 // Push constants for world matrix
 layout(push_constant) uniform PushConstant {
-    uint node_id;
     uint camera_index;
 };
 
 void main() {
     Camera camera = cameras[camera_index];
-    mat4 world = world_matrices[node_id];
-    NodeData node = nodes[node_id];
+    uint node_index = uint(gl_InstanceIndex);
+    mat4 world = world_matrices[node_index];
+    NodeData node = nodes[node_index];
     MeshData mesh = meshes[node.mesh_id];
     vec4 modelPos;
     if (mesh.is_skinned != 0u && node.bone_matrix_offset != 0xFFFFFFFFu) {

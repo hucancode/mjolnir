@@ -58,7 +58,6 @@ layout(set = 5, binding = 0) readonly buffer NodeBuffer {
 
 // Push constant budget: 80 bytes
 layout(push_constant) uniform PushConstants {
-    uint node_id;
     uint camera_index;
 };
 
@@ -67,6 +66,7 @@ layout(location = 1) in vec3 inNormal;
 layout(location = 2) in vec2 inTexCoord;
 layout(location = 3) in vec4 inColor;
 layout(location = 4) in mat3 inTBN;
+layout(location = 7) flat in uint node_index;
 
 layout(location = 0) out vec4 outColor;
 
@@ -106,7 +106,7 @@ vec3 fresnelSchlickRoughness(float cosTheta, vec3 F0, float roughness) {
 }
 
 void main() {
-    NodeData node = nodes[node_id];
+    NodeData node = nodes[node_index];
     MaterialData material = materials[node.material_id];
     bool has_albedo = (material.features & FEATURE_ALBEDO_TEXTURE) != 0u;
     bool has_mr = (material.features & FEATURE_METALLIC_ROUGHNESS_TEXTURE) != 0u;

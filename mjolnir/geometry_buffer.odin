@@ -8,7 +8,6 @@ import vk "vendor:vulkan"
 
 // 64 byte push constant budget
 PushConstant :: struct {
-  node_id:      u32,
   camera_index: u32,
 }
 
@@ -433,7 +432,6 @@ gbuffer_render :: proc(
           mesh_attachment.handle,
         ) or_continue
         push_constants := PushConstant {
-          node_id      = render_node.handle.index,
           camera_index = render_target.camera.index,
         }
         vk.CmdPushConstants(
@@ -468,7 +466,7 @@ gbuffer_render :: proc(
           1,
           0,
           0,
-          0,
+          render_node.handle.index,
         )
         rendered += 1
       }

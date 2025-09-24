@@ -13,6 +13,7 @@ layout(location = 1) out vec3 outNormal;
 layout(location = 2) out vec2 outTexCoord;
 layout(location = 3) out vec4 outColor;
 layout(location = 4) out mat3 outTBN;
+layout(location = 7) flat out uint outNodeIndex;
 
 struct Camera {
     mat4 view;
@@ -70,14 +71,14 @@ layout(set = 7, binding = 0) readonly buffer VertexSkinningBuffer {
 
 // Push constant budget: 64 bytes
 layout(push_constant) uniform PushConstants {
-    uint node_id;
     uint camera_index;
 };
 
 void main() {
     Camera camera = camera_buffer.cameras[camera_index];
-    mat4 world = world_matrices[node_id];
-    NodeData node = nodes[node_id];
+    uint node_index = uint(gl_InstanceIndex);
+    mat4 world = world_matrices[node_index];
+    NodeData node = nodes[node_index];
     MeshData mesh = meshes[node.mesh_id];
     // Calculate position based on skinning
     vec4 modelPosition;
@@ -114,6 +115,7 @@ void main() {
     T = normalize(T - dot(T, N) * N);
     vec3 B = normalize(cross(N, T)) * modelTangent.w;
     outTBN = mat3(T, B, N);
+    outNodeIndex = node_index;
     // Calculate final position
     gl_Position = camera.projection * camera.view * worldPos;
 }

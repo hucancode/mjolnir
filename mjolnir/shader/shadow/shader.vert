@@ -57,19 +57,18 @@ layout(set = 7, binding = 0) readonly buffer VertexSkinningBuffer {
     VertexSkinningData vertex_skinning[];
 };
 
-// TODO: recheck this push constant
 layout(push_constant) uniform PushConstants {
-    uint node_id;
     uint camera_index;
 };
 
 void main() {
     Camera camera = cameras[camera_index];
-    mat4 world = world_matrices[node_id];
-    NodeData node = nodes[node_id];
+    uint node_index = uint(gl_InstanceIndex);
+    mat4 world = world_matrices[node_index];
+    NodeData node = nodes[node_index];
     MeshData mesh = meshes[node.mesh_id];
     vec4 modelPosition;
-    if (mesh.is_skinned != 0u && node.bone_matrix_offset < bones.length()) {
+    if (mesh.is_skinned != 0u && node.bone_matrix_offset != 0xFFFFFFFFu) {
         uint vertex_index = mesh.vertex_skinning_offset + gl_VertexIndex;
         VertexSkinningData skin = vertex_skinning[vertex_index];
         uvec4 indices = skin.joints + uvec4(node.bone_matrix_offset);

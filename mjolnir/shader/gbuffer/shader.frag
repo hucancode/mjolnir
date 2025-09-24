@@ -44,7 +44,6 @@ layout(set = 5, binding = 0) readonly buffer NodeBuffer {
 };
 
 layout(push_constant) uniform PushConstants {
-    uint node_id;
     uint camera_index;
 };
 
@@ -53,6 +52,7 @@ layout(location = 1) in vec4 color;
 layout(location = 2) in vec3 normal;
 layout(location = 3) in vec2 uv;
 layout(location = 4) in vec4 tangent;
+layout(location = 5) flat in uint node_index;
 
 layout(location = 0) out vec4 outPosition;
 layout(location = 1) out vec4 outNormal;
@@ -61,7 +61,7 @@ layout(location = 3) out vec4 outMetallicRoughness;
 layout(location = 4) out vec4 outEmissive;
 
 void main() {
-    NodeData node = nodes[node_id];
+    NodeData node = nodes[node_index];
     MaterialData material = materials[node.material_id];
     bool has_normal = (material.features & FEATURE_NORMAL_TEXTURE) != 0u;
     bool has_albedo = (material.features & FEATURE_ALBEDO_TEXTURE) != 0u;
