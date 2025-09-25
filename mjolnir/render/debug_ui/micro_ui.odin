@@ -14,7 +14,7 @@ UI_MAX_QUAD :: 1000
 UI_MAX_VERTICES :: UI_MAX_QUAD * 4
 UI_MAX_INDICES :: UI_MAX_QUAD * 6
 
-RendererUI :: struct {
+Renderer :: struct {
   ctx:                       mu.Context,
   projection_layout:         vk.DescriptorSetLayout,
   projection_descriptor_set: vk.DescriptorSet,
@@ -43,7 +43,7 @@ Vertex2D :: struct {
 }
 
 init :: proc(
-  self: ^RendererUI,
+  self: ^Renderer,
   gpu_context: ^gpu.GPUContext,
   color_format: vk.Format,
   width, height: u32,
@@ -324,7 +324,7 @@ init :: proc(
   return .SUCCESS
 }
 
-ui_flush :: proc(self: ^RendererUI, cmd_buf: vk.CommandBuffer) -> vk.Result {
+ui_flush :: proc(self: ^Renderer, cmd_buf: vk.CommandBuffer) -> vk.Result {
   if self.vertex_count == 0 && self.index_count == 0 {
     return .SUCCESS
   }
@@ -379,7 +379,7 @@ ui_flush :: proc(self: ^RendererUI, cmd_buf: vk.CommandBuffer) -> vk.Result {
 }
 
 ui_push_quad :: proc(
-  self: ^RendererUI,
+  self: ^Renderer,
   cmd_buf: vk.CommandBuffer,
   dst, src: mu.Rect,
   color: mu.Color,
@@ -430,7 +430,7 @@ ui_push_quad :: proc(
 }
 
 ui_draw_rect :: proc(
-  self: ^RendererUI,
+  self: ^Renderer,
   cmd_buf: vk.CommandBuffer,
   rect: mu.Rect,
   color: mu.Color,
@@ -445,7 +445,7 @@ ui_draw_rect :: proc(
 }
 
 ui_draw_text :: proc(
-  self: ^RendererUI,
+  self: ^Renderer,
   cmd_buf: vk.CommandBuffer,
   text: string,
   pos: mu.Vec2,
@@ -465,7 +465,7 @@ ui_draw_text :: proc(
 }
 
 ui_draw_icon :: proc(
-  self: ^RendererUI,
+  self: ^Renderer,
   cmd_buf: vk.CommandBuffer,
   id: mu.Icon,
   rect: mu.Rect,
@@ -478,7 +478,7 @@ ui_draw_icon :: proc(
 }
 
 ui_set_clip_rect :: proc(
-  self: ^RendererUI,
+  self: ^Renderer,
   cmd_buf: vk.CommandBuffer,
   rect: mu.Rect,
 ) {
@@ -493,13 +493,13 @@ ui_set_clip_rect :: proc(
   vk.CmdSetScissor(cmd_buf, 0, 1, &self.current_scissor)
 }
 
-shutdown :: proc(self: ^RendererUI, gpu_context: ^gpu.GPUContext) {
+shutdown :: proc(self: ^Renderer, gpu_context: ^gpu.GPUContext) {
   if self == nil {
     return
   }
-  gpu.data_buffer_deinit(gpu_context, &self.vertex_buffer)
-  gpu.data_buffer_deinit(gpu_context, &self.index_buffer)
-  gpu.data_buffer_deinit(gpu_context, &self.proj_buffer)
+  gpu.data_buffer_destroy(gpu_context, &self.vertex_buffer)
+  gpu.data_buffer_destroy(gpu_context, &self.index_buffer)
+  gpu.data_buffer_destroy(gpu_context, &self.proj_buffer)
   vk.DestroyPipeline(gpu_context.device, self.pipeline, nil)
   self.pipeline = 0
   vk.DestroyPipelineLayout(gpu_context.device, self.pipeline_layout, nil)
@@ -515,7 +515,7 @@ shutdown :: proc(self: ^RendererUI, gpu_context: ^gpu.GPUContext) {
 }
 
 recreate_images :: proc(
-  self: ^RendererUI,
+  self: ^Renderer,
   color_format: vk.Format,
   width, height: u32,
   dpi_scale: f32,
@@ -540,7 +540,7 @@ recreate_images :: proc(
 
 // Modular UI renderer API
 begin_pass :: proc(
-  self: ^RendererUI,
+  self: ^Renderer,
   command_buffer: vk.CommandBuffer,
   color_view: vk.ImageView,
   extent: vk.Extent2D,
@@ -575,7 +575,7 @@ begin_pass :: proc(
   vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
 }
 
-render :: proc(self: ^RendererUI, command_buffer: vk.CommandBuffer) {
+render :: proc(self: ^Renderer, command_buffer: vk.CommandBuffer) {
   command_backing: ^mu.Command
   for variant in mu.next_command_iterator(&self.ctx, &command_backing) {
     // log.infof("executing UI command", variant)
@@ -595,6 +595,6 @@ render :: proc(self: ^RendererUI, command_buffer: vk.CommandBuffer) {
   ui_flush(self, command_buffer)
 }
 
-end_pass :: proc(self: ^RendererUI, command_buffer: vk.CommandBuffer) {
+end_pass :: proc(self: ^Renderer, command_buffer: vk.CommandBuffer) {
   vk.CmdEndRendering(command_buffer)
 }

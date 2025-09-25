@@ -32,7 +32,7 @@ make_test_item :: proc(id: i32, center: [3]f32, size: f32) -> BVHTestItem {
 test_bvh_build_empty :: proc(t: ^testing.T) {
   bvh: geometry.BVH(BVHTestItem)
   bvh.bounds_func = test_bvh_item_bounds
-  defer geometry.bvh_deinit(&bvh)
+  defer geometry.bvh_destroy(&bvh)
 
   empty_items: []BVHTestItem
   geometry.bvh_build(&bvh, empty_items)
@@ -45,7 +45,7 @@ test_bvh_build_empty :: proc(t: ^testing.T) {
 test_bvh_build_single_item :: proc(t: ^testing.T) {
   bvh: geometry.BVH(BVHTestItem)
   bvh.bounds_func = test_bvh_item_bounds
-  defer geometry.bvh_deinit(&bvh)
+  defer geometry.bvh_destroy(&bvh)
 
   items := []BVHTestItem{
     make_test_item(1, {0, 0, 0}, 2),
@@ -63,7 +63,7 @@ test_bvh_build_single_item :: proc(t: ^testing.T) {
 test_bvh_build_multiple_items :: proc(t: ^testing.T) {
   bvh: geometry.BVH(BVHTestItem)
   bvh.bounds_func = test_bvh_item_bounds
-  defer geometry.bvh_deinit(&bvh)
+  defer geometry.bvh_destroy(&bvh)
 
   items := []BVHTestItem{
     make_test_item(1, {-5, 0, 0}, 2),
@@ -93,7 +93,7 @@ test_bvh_build_multiple_items :: proc(t: ^testing.T) {
 test_bvh_query_aabb :: proc(t: ^testing.T) {
   bvh: geometry.BVH(BVHTestItem)
   bvh.bounds_func = test_bvh_item_bounds
-  defer geometry.bvh_deinit(&bvh)
+  defer geometry.bvh_destroy(&bvh)
 
   items := []BVHTestItem{
     make_test_item(1, {0, 0, 0}, 2),
@@ -144,7 +144,7 @@ test_bvh_query_ray :: proc(t: ^testing.T) {
   testing.set_fail_timeout(t, 5 * time.Second)
   bvh: geometry.BVH(BVHTestItem)
   bvh.bounds_func = test_bvh_item_bounds
-  defer geometry.bvh_deinit(&bvh)
+  defer geometry.bvh_destroy(&bvh)
 
   items := []BVHTestItem{
     make_test_item(1, {0, 0, 0}, 2),
@@ -195,7 +195,7 @@ test_bvh_query_ray :: proc(t: ^testing.T) {
 test_bvh_query_sphere :: proc(t: ^testing.T) {
   bvh: geometry.BVH(BVHTestItem)
   bvh.bounds_func = test_bvh_item_bounds
-  defer geometry.bvh_deinit(&bvh)
+  defer geometry.bvh_destroy(&bvh)
 
   items := []BVHTestItem{
     make_test_item(1, {0, 0, 0}, 2),
@@ -239,7 +239,7 @@ test_bvh_query_sphere :: proc(t: ^testing.T) {
 test_bvh_query_nearest :: proc(t: ^testing.T) {
   bvh: geometry.BVH(BVHTestItem)
   bvh.bounds_func = test_bvh_item_bounds
-  defer geometry.bvh_deinit(&bvh)
+  defer geometry.bvh_destroy(&bvh)
 
   items := []BVHTestItem{
     make_test_item(1, {0, 0, 0}, 2),
@@ -285,7 +285,7 @@ test_bvh_query_nearest :: proc(t: ^testing.T) {
 test_bvh_refit :: proc(t: ^testing.T) {
   bvh: geometry.BVH(BVHTestItem)
   bvh.bounds_func = test_bvh_item_bounds
-  defer geometry.bvh_deinit(&bvh)
+  defer geometry.bvh_destroy(&bvh)
 
   items := []BVHTestItem{
     make_test_item(1, {0, 0, 0}, 2),
@@ -318,7 +318,7 @@ test_bvh_refit :: proc(t: ^testing.T) {
 test_bvh_validate :: proc(t: ^testing.T) {
   bvh: geometry.BVH(BVHTestItem)
   bvh.bounds_func = test_bvh_item_bounds
-  defer geometry.bvh_deinit(&bvh)
+  defer geometry.bvh_destroy(&bvh)
 
   items := []BVHTestItem{
     make_test_item(1, {0, 0, 0}, 2),
@@ -346,7 +346,7 @@ test_bvh_validate :: proc(t: ^testing.T) {
 test_bvh_stats :: proc(t: ^testing.T) {
   bvh: geometry.BVH(BVHTestItem)
   bvh.bounds_func = test_bvh_item_bounds
-  defer geometry.bvh_deinit(&bvh)
+  defer geometry.bvh_destroy(&bvh)
 
   items := []BVHTestItem{
     make_test_item(1, {0, 0, 0}, 2),
@@ -372,7 +372,7 @@ test_bvh_stats :: proc(t: ^testing.T) {
 test_bvh_large_dataset :: proc(t: ^testing.T) {
   bvh: geometry.BVH(BVHTestItem)
   bvh.bounds_func = test_bvh_item_bounds
-  defer geometry.bvh_deinit(&bvh)
+  defer geometry.bvh_destroy(&bvh)
 
   // Create a large dataset
   item_count := 1000
@@ -422,7 +422,7 @@ test_bvh_large_dataset :: proc(t: ^testing.T) {
 test_bvh_sah_splitting :: proc(t: ^testing.T) {
   bvh: geometry.BVH(BVHTestItem)
   bvh.bounds_func = test_bvh_item_bounds
-  defer geometry.bvh_deinit(&bvh)
+  defer geometry.bvh_destroy(&bvh)
 
   // Create items that should benefit from SAH splitting
   items := []BVHTestItem{
@@ -469,7 +469,7 @@ test_bvh_sah_splitting :: proc(t: ^testing.T) {
 test_bvh_edge_cases :: proc(t: ^testing.T) {
   bvh: geometry.BVH(BVHTestItem)
   bvh.bounds_func = test_bvh_item_bounds
-  defer geometry.bvh_deinit(&bvh)
+  defer geometry.bvh_destroy(&bvh)
 
   // Test with identical positions
   items := []BVHTestItem{
@@ -500,7 +500,7 @@ test_bvh_edge_cases :: proc(t: ^testing.T) {
 test_bvh_degenerate_cases :: proc(t: ^testing.T) {
   bvh: geometry.BVH(BVHTestItem)
   bvh.bounds_func = test_bvh_item_bounds
-  defer geometry.bvh_deinit(&bvh)
+  defer geometry.bvh_destroy(&bvh)
 
   // Test with zero-volume items
   items := []BVHTestItem{
@@ -532,7 +532,7 @@ test_bvh_degenerate_cases :: proc(t: ^testing.T) {
 test_bvh_memory_management :: proc(t: ^testing.T) {
   bvh: geometry.BVH(BVHTestItem)
   bvh.bounds_func = test_bvh_item_bounds
-  defer geometry.bvh_deinit(&bvh)
+  defer geometry.bvh_destroy(&bvh)
 
   // Test multiple builds don't leak memory
   for iteration in 0..<3 {
@@ -553,7 +553,7 @@ test_bvh_memory_management :: proc(t: ^testing.T) {
 test_bvh_precision :: proc(t: ^testing.T) {
   bvh: geometry.BVH(BVHTestItem)
   bvh.bounds_func = test_bvh_item_bounds
-  defer geometry.bvh_deinit(&bvh)
+  defer geometry.bvh_destroy(&bvh)
 
   // Test with very small and very large coordinates
   items := []BVHTestItem{
@@ -594,7 +594,7 @@ bvh_build_benchmark :: proc(t: ^testing.T) {
     for _ in 0 ..< options.rounds {
       bvh: geometry.BVH(BVHTestItem)
       bvh.bounds_func = test_bvh_item_bounds
-      defer geometry.bvh_deinit(&bvh)
+      defer geometry.bvh_destroy(&bvh)
 
       geometry.bvh_build(&bvh, items)
       options.processed += len(items) * size_of(BVHTestItem)
@@ -688,7 +688,7 @@ bvh_query_benchmark :: proc(t: ^testing.T) {
     allocator := context.allocator,
   ) -> time.Benchmark_Error {
     bvh_ptr := cast(^geometry.BVH(BVHTestItem))raw_data(options.input)
-    geometry.bvh_deinit(bvh_ptr)
+    geometry.bvh_destroy(bvh_ptr)
     free(bvh_ptr)
     return nil
   }
@@ -765,7 +765,7 @@ bvh_ray_benchmark :: proc(t: ^testing.T) {
     allocator := context.allocator,
   ) -> time.Benchmark_Error {
     bvh_ptr := cast(^geometry.BVH(BVHTestItem))raw_data(options.input)
-    geometry.bvh_deinit(bvh_ptr)
+    geometry.bvh_destroy(bvh_ptr)
     free(bvh_ptr)
     return nil
   }
@@ -841,7 +841,7 @@ bvh_nearest_benchmark :: proc(t: ^testing.T) {
     allocator := context.allocator,
   ) -> time.Benchmark_Error {
     bvh_ptr := cast(^geometry.BVH(BVHTestItem))raw_data(options.input)
-    geometry.bvh_deinit(bvh_ptr)
+    geometry.bvh_destroy(bvh_ptr)
     free(bvh_ptr)
     return nil
   }
@@ -917,7 +917,7 @@ bvh_empty_query_benchmark :: proc(t: ^testing.T) {
     allocator := context.allocator,
   ) -> time.Benchmark_Error {
     bvh_ptr := cast(^geometry.BVH(BVHTestItem))raw_data(options.input)
-    geometry.bvh_deinit(bvh_ptr)
+    geometry.bvh_destroy(bvh_ptr)
     free(bvh_ptr)
     return nil
   }
@@ -994,7 +994,7 @@ bvh_refit_benchmark :: proc(t: ^testing.T) {
     allocator := context.allocator,
   ) -> time.Benchmark_Error {
     bvh_ptr := cast(^geometry.BVH(BVHTestItem))raw_data(options.input)
-    geometry.bvh_deinit(bvh_ptr)
+    geometry.bvh_destroy(bvh_ptr)
     free(bvh_ptr)
     return nil
   }

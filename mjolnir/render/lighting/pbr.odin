@@ -1,14 +1,55 @@
 package lighting
 
-import "core:fmt"
-import "core:log"
-import "core:slice"
 import geometry "../../geometry"
 import gpu "../../gpu"
 import resources "../../resources"
+import "core:fmt"
+import "core:log"
+import "core:slice"
 import mu "vendor:microui"
 import vk "vendor:vulkan"
 
+LightKind :: enum u32 {
+  POINT       = 0,
+  DIRECTIONAL = 1,
+  SPOT        = 2,
+}
+
+LightPushConstant :: struct {
+  scene_camera_idx:       u32,
+  light_camera_idx:       u32, // for shadow mapping
+  shadow_map_id:          u32,
+  light_kind:             LightKind,
+  light_color:            [3]f32,
+  light_angle:            f32,
+  light_position:         [3]f32,
+  light_radius:           f32,
+  light_direction:        [3]f32,
+  light_cast_shadow:      b32,
+  position_texture_index: u32,
+  normal_texture_index:   u32,
+  albedo_texture_index:   u32,
+  metallic_texture_index: u32,
+  emissive_texture_index: u32,
+  depth_texture_index:    u32,
+  input_image_index:      u32,
+}
+
+ShadowResources :: struct {
+  cube_render_targets: [6]resources.Handle,
+  cube_cameras:        [6]resources.Handle,
+  shadow_map:          resources.Handle,
+  render_target:       resources.Handle,
+  camera:              resources.Handle,
+}
+
+LightInfo :: struct {
+  using gpu_data:         LightPushConstant,
+  node_handle:            resources.Handle,
+  transform_generation:   u64,
+  using shadow_resources: ShadowResources,
+  dirty:                  bool,
+}
 AmbientPushConstant :: struct {
   camera_index:           u32,
   environment_index:      u32,
@@ -23,17 +64,8 @@ AmbientPushConstant :: struct {
   ibl_intensity:          f32,
 }
 
-RendererAmbient :: struct {
-  pipeline:            vk.Pipeline,
-  pipeline_layout:     vk.PipelineLayout,
-  environment_map:     resources.Handle,
-  brdf_lut:            resources.Handle,
-  environment_max_lod: f32,
-  ibl_intensity:       f32,
-}
-
 ambient_begin_pass :: proc(
-  self: ^RendererAmbient,
+  self: ^Renderer,
   target: ^resources.RenderTarget,
   command_buffer: vk.CommandBuffer,
   resources_manager: ^resources.Manager,
@@ -43,7 +75,7 @@ ambient_begin_pass :: proc(
     resources_manager.image_2d_buffers,
     resources.get_final_image(target, frame_index),
   )
-  color_attachment := vk.RenderingAttachmentInfo{
+  color_attachment := vk.RenderingAttachmentInfo {
     sType = .RENDERING_ATTACHMENT_INFO,
     imageView = color_texture.view,
     imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
@@ -51,7 +83,7 @@ ambient_begin_pass :: proc(
     storeOp = .STORE,
     clearValue = {color = {float32 = {0, 0, 0, 1}}},
   }
-  render_info := vk.RenderingInfo{
+  render_info := vk.RenderingInfo {
     sType = .RENDERING_INFO,
     renderArea = {extent = target.extent},
     layerCount = 1,
@@ -77,18 +109,18 @@ ambient_begin_pass :: proc(
   vk.CmdBindDescriptorSets(
     command_buffer,
     .GRAPHICS,
-    self.pipeline_layout,
+    self.ambient_pipeline_layout,
     0,
     len(descriptor_sets),
     raw_data(descriptor_sets[:]),
     0,
     nil,
   )
-  vk.CmdBindPipeline(command_buffer, .GRAPHICS, self.pipeline)
+  vk.CmdBindPipeline(command_buffer, .GRAPHICS, self.ambient_pipeline)
 }
 
 ambient_render :: proc(
-  self: ^RendererAmbient,
+  self: ^Renderer,
   render_target: ^resources.RenderTarget,
   command_buffer: vk.CommandBuffer,
   resources_manager: ^resources.Manager,
@@ -111,7 +143,7 @@ ambient_render :: proc(
   }
   vk.CmdPushConstants(
     command_buffer,
-    self.pipeline_layout,
+    self.ambient_pipeline_layout,
     {.FRAGMENT},
     0,
     size_of(AmbientPushConstant),
@@ -125,7 +157,7 @@ ambient_end_pass :: proc(command_buffer: vk.CommandBuffer) {
 }
 
 ambient_init :: proc(
-  self: ^RendererAmbient,
+  self: ^Renderer,
   gpu_context: ^gpu.GPUContext,
   resources_manager: ^resources.Manager,
   width, height: u32,
@@ -150,7 +182,7 @@ ambient_init :: proc(
       pPushConstantRanges = &push_constant_range,
     },
     nil,
-    &self.pipeline_layout,
+    &self.ambient_pipeline_layout,
   ) or_return
 
   vert_shader_code := #load("../../shader/lighting_ambient/vert.spv")
@@ -244,7 +276,7 @@ ambient_init :: proc(
     pColorBlendState    = &color_blending,
     pDynamicState       = &dynamic_state,
     pDepthStencilState  = &depth_stencil,
-    layout              = self.pipeline_layout,
+    layout              = self.ambient_pipeline_layout,
   }
   vk.CreateGraphicsPipelines(
     gpu_context.device,
@@ -252,12 +284,12 @@ ambient_init :: proc(
     1,
     &pipeline_info,
     nil,
-    &self.pipeline,
+    &self.ambient_pipeline,
   ) or_return
 
   // Initialize environment resources
   environment_map: ^gpu.ImageBuffer
- self.environment_map, environment_map =
+  self.environment_map, environment_map =
     resources.create_hdr_texture_from_path_with_mips(
       gpu_context,
       resources_manager,
@@ -266,7 +298,11 @@ ambient_init :: proc(
   self.environment_max_lod = 8.0 // default fallback
   if environment_map != nil {
     self.environment_max_lod =
-      resources.calculate_mip_levels(environment_map.width, environment_map.height) - 1.0
+      resources.calculate_mip_levels(
+        environment_map.width,
+        environment_map.height,
+      ) -
+      1.0
   }
   brdf_lut: ^gpu.ImageBuffer
   brdf_handle, _, brdf_ret := resources.create_texture_from_data(
@@ -285,24 +321,30 @@ ambient_init :: proc(
 }
 
 ambient_shutdown :: proc(
-  self: ^RendererAmbient,
+  self: ^Renderer,
   gpu_context: ^gpu.GPUContext,
   resources_manager: ^resources.Manager,
 ) {
-  vk.DestroyPipeline(gpu_context.device, self.pipeline, nil)
-  self.pipeline = 0
-  vk.DestroyPipelineLayout(gpu_context.device, self.pipeline_layout, nil)
-  self.pipeline_layout = 0
+  vk.DestroyPipeline(gpu_context.device, self.ambient_pipeline, nil)
+  self.ambient_pipeline = 0
+  vk.DestroyPipelineLayout(
+    gpu_context.device,
+    self.ambient_pipeline_layout,
+    nil,
+  )
+  self.ambient_pipeline_layout = 0
   // Clean up environment resources
   if item, freed := resources.free(
     &resources_manager.image_2d_buffers,
     self.environment_map,
   ); freed {
-    gpu.image_buffer_deinit(gpu_context, item)
+    gpu.image_buffer_detroy(gpu_context, item)
   }
-  if item, freed := resources.free(&resources_manager.image_2d_buffers, self.brdf_lut);
-     freed {
-    gpu.image_buffer_deinit(gpu_context, item)
+  if item, freed := resources.free(
+    &resources_manager.image_2d_buffers,
+    self.brdf_lut,
+  ); freed {
+    gpu.image_buffer_detroy(gpu_context, item)
   }
 }
 
@@ -310,7 +352,13 @@ BG_BLUE_GRAY :: [4]f32{0.0117, 0.0117, 0.0179, 1.0}
 BG_DARK_GRAY :: [4]f32{0.0117, 0.0117, 0.0117, 1.0}
 BG_ORANGE_GRAY :: [4]f32{0.0179, 0.0179, 0.0117, 1.0}
 
-RendererLighting :: struct {
+Renderer :: struct {
+  ambient_pipeline:         vk.Pipeline,
+  ambient_pipeline_layout:  vk.PipelineLayout,
+  environment_map:          resources.Handle,
+  brdf_lut:                 resources.Handle,
+  environment_max_lod:      f32,
+  ibl_intensity:            f32,
   lighting_pipeline:        vk.Pipeline,
   lighting_pipeline_layout: vk.PipelineLayout,
   // Light volume meshes
@@ -320,7 +368,7 @@ RendererLighting :: struct {
 }
 
 lighting_init :: proc(
-  self: ^RendererLighting,
+  self: ^Renderer,
   gpu_context: ^gpu.GPUContext,
   width, height: u32,
   color_format: vk.Format = .B8G8R8A8_SRGB,
@@ -479,10 +527,7 @@ lighting_init :: proc(
   return .SUCCESS
 }
 
-lighting_shutdown :: proc(
-  self: ^RendererLighting,
-  gpu_context: ^gpu.GPUContext,
-) {
+lighting_shutdown :: proc(self: ^Renderer, gpu_context: ^gpu.GPUContext) {
   vk.DestroyPipelineLayout(
     gpu_context.device,
     self.lighting_pipeline_layout,
@@ -492,7 +537,7 @@ lighting_shutdown :: proc(
 }
 
 lighting_recreate_images :: proc(
-  self: ^RendererLighting,
+  self: ^Renderer,
   width, height: u32,
   color_format: vk.Format,
   depth_format: vk.Format,
@@ -502,7 +547,7 @@ lighting_recreate_images :: proc(
 }
 
 lighting_begin_pass :: proc(
-  self: ^RendererLighting,
+  self: ^Renderer,
   target: ^resources.RenderTarget,
   command_buffer: vk.CommandBuffer,
   resources_manager: ^resources.Manager,
@@ -512,7 +557,7 @@ lighting_begin_pass :: proc(
     resources_manager.image_2d_buffers,
     resources.get_final_image(target, frame_index),
   )
-  color_attachment := vk.RenderingAttachmentInfo{
+  color_attachment := vk.RenderingAttachmentInfo {
     sType = .RENDERING_ATTACHMENT_INFO,
     imageView = final_image.view,
     imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
@@ -524,14 +569,14 @@ lighting_begin_pass :: proc(
     resources_manager.image_2d_buffers,
     resources.get_depth_texture(target, frame_index),
   )
-  depth_attachment := vk.RenderingAttachmentInfo{
+  depth_attachment := vk.RenderingAttachmentInfo {
     sType       = .RENDERING_ATTACHMENT_INFO,
     imageView   = depth_texture.view,
     imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
     loadOp      = .LOAD,
     storeOp     = .DONT_CARE,
   }
-  render_info := vk.RenderingInfo{
+  render_info := vk.RenderingInfo {
     sType = .RENDERING_INFO,
     renderArea = {extent = target.extent},
     layerCount = 1,
@@ -571,7 +616,7 @@ lighting_begin_pass :: proc(
 }
 
 lighting_render :: proc(
-  self: ^RendererLighting,
+  self: ^Renderer,
   input: []LightInfo,
   render_target: ^resources.RenderTarget,
   command_buffer: vk.CommandBuffer,

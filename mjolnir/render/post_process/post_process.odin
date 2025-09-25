@@ -176,7 +176,7 @@ PostprocessEffect :: union {
   DoFEffect,
 }
 
-RendererPostProcess :: struct {
+Renderer :: struct {
   pipelines:        [len(PostProcessEffectType)]vk.Pipeline,
   pipeline_layouts: [len(PostProcessEffectType)]vk.PipelineLayout,
   effect_stack:     [dynamic]PostprocessEffect,
@@ -212,7 +212,7 @@ get_effect_type :: proc(effect: PostprocessEffect) -> PostProcessEffectType {
 }
 
 effect_add_grayscale :: proc(
-  self: ^RendererPostProcess,
+  self: ^Renderer,
   strength: f32 = 1.0,
   weights: [3]f32 = {0.299, 0.587, 0.114},
 ) {
@@ -224,7 +224,7 @@ effect_add_grayscale :: proc(
 }
 
 effect_add_blur :: proc(
-  self: ^RendererPostProcess,
+  self: ^Renderer,
   radius: f32,
   gaussian: bool = true,
 ) {
@@ -243,7 +243,7 @@ effect_add_blur :: proc(
 }
 
 effect_add_directional_blur :: proc(
-  self: ^RendererPostProcess,
+  self: ^Renderer,
   radius: f32,
   direction: f32 = 0.0, // 0.0 = horizontal, 1.0 = vertical
   gaussian: bool = true,
@@ -257,7 +257,7 @@ effect_add_directional_blur :: proc(
 }
 
 effect_add_bloom :: proc(
-  self: ^RendererPostProcess,
+  self: ^Renderer,
   threshold: f32 = 0.2,
   intensity: f32 = 1.0,
   blur_radius: f32 = 4.0,
@@ -279,7 +279,7 @@ effect_add_bloom :: proc(
 }
 
 effect_add_tonemap :: proc(
-  self: ^RendererPostProcess,
+  self: ^Renderer,
   exposure: f32 = 1.0,
   gamma: f32 = 2.2,
 ) {
@@ -291,7 +291,7 @@ effect_add_tonemap :: proc(
 }
 
 effect_add_outline :: proc(
-  self: ^RendererPostProcess,
+  self: ^Renderer,
   thickness: f32,
   color: [3]f32,
 ) {
@@ -303,7 +303,7 @@ effect_add_outline :: proc(
 }
 
 effect_add_fog :: proc(
-  self: ^RendererPostProcess,
+  self: ^Renderer,
   color: [3]f32 = {0.7, 0.7, 0.8},
   density: f32 = 0.02,
   start: f32 = 10.0,
@@ -319,7 +319,7 @@ effect_add_fog :: proc(
 }
 
 effect_add_crosshatch :: proc(
-  self: ^RendererPostProcess,
+  self: ^Renderer,
   resolution: [2]f32,
   hatch_offset_y: f32 = 5.0,
   lum_threshold_01: f32 = 0.6,
@@ -339,7 +339,7 @@ effect_add_crosshatch :: proc(
 }
 
 effect_add_dof :: proc(
-  self: ^RendererPostProcess,
+  self: ^Renderer,
   focus_distance: f32 = 3.0,
   focus_range: f32 = 2.0,
   blur_strength: f32 = 20.0,
@@ -354,12 +354,12 @@ effect_add_dof :: proc(
   append(&self.effect_stack, effect)
 }
 
-effect_clear :: proc(self: ^RendererPostProcess) {
+effect_clear :: proc(self: ^Renderer) {
   resize(&self.effect_stack, 0)
 }
 
 init :: proc(
-  self: ^RendererPostProcess,
+  self: ^Renderer,
   gpu_context: ^gpu.GPUContext,
   color_format: vk.Format,
   width, height: u32,
@@ -560,7 +560,7 @@ init :: proc(
 
 create_images :: proc(
   gpu_context: ^gpu.GPUContext,
-  self: ^RendererPostProcess,
+  self: ^Renderer,
   resources_manager: ^resources.Manager,
   width, height: u32,
   format: vk.Format,
@@ -580,21 +580,21 @@ create_images :: proc(
 }
 
 destroy_images :: proc(
-  self: ^RendererPostProcess,
+  self: ^Renderer,
   gpu_context: ^gpu.GPUContext,
   resources_manager: ^resources.Manager,
 ) {
   for handle in self.images {
     if item, freed := resources.free(&resources_manager.image_2d_buffers, handle);
        freed {
-      gpu.image_buffer_deinit(gpu_context, item)
+      gpu.image_buffer_detroy(gpu_context, item)
     }
   }
 }
 
 recreate_images :: proc(
   gpu_context: ^gpu.GPUContext,
-  self: ^RendererPostProcess,
+  self: ^Renderer,
   width, height: u32,
   format: vk.Format,
   resources_manager: ^resources.Manager,
@@ -611,7 +611,7 @@ recreate_images :: proc(
 }
 
 shutdown :: proc(
-  self: ^RendererPostProcess,
+  self: ^Renderer,
   gpu_context: ^gpu.GPUContext,
   resources_manager: ^resources.Manager,
 ) {
@@ -648,7 +648,7 @@ shutdown :: proc(
 
 // Modular postprocess API
 begin_pass :: proc(
-  self: ^RendererPostProcess,
+  self: ^Renderer,
   command_buffer: vk.CommandBuffer,
   extent: vk.Extent2D,
 ) {
@@ -671,7 +671,7 @@ begin_pass :: proc(
 }
 
 render :: proc(
-  self: ^RendererPostProcess,
+  self: ^Renderer,
   command_buffer: vk.CommandBuffer,
   extent: vk.Extent2D,
   output_view: vk.ImageView,
@@ -929,7 +929,7 @@ render :: proc(
 }
 
 end_pass :: proc(
-  self: ^RendererPostProcess,
+  self: ^Renderer,
   command_buffer: vk.CommandBuffer,
 ) {
 

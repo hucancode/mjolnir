@@ -40,17 +40,17 @@ octree_init :: proc(
   octree.min_size = min_vec3(aabb_size(bounds)) / f32(shift_val)
 }
 
-octree_deinit :: proc(octree: ^Octree($T)) {
-  octree_node_deinit(octree.root)
+octree_destroy :: proc(octree: ^Octree($T)) {
+  octree_node_destroy(octree.root)
   free(octree.root)
   octree.root = nil
 }
 
 @(private)
-octree_node_deinit :: proc(node: ^OctreeNode($T)) {
+octree_node_destroy :: proc(node: ^OctreeNode($T)) {
   if node == nil do return
   for child in node.children {
-    octree_node_deinit(child)
+    octree_node_destroy(child)
     free(child)
   }
   delete(node.items)
@@ -819,7 +819,7 @@ octree_collapse :: proc(node: ^OctreeNode($T)) {
 
   // Clean up children
   for i in 0 ..< 8 {
-    octree_node_deinit(node.children[i])
+    octree_node_destroy(node.children[i])
     free(node.children[i])
     node.children[i] = nil
   }

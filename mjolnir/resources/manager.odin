@@ -288,13 +288,13 @@ shutdown :: proc(
   manager: ^Manager,
   gpu_context: ^gpu.GPUContext,
 ) {
-  deinit_material_buffer(gpu_context, manager)
-  deinit_world_matrix_buffers(gpu_context, manager)
-  deinit_emitter_buffer(gpu_context, manager)
+  destroy_material_buffer(gpu_context, manager)
+  destroy_world_matrix_buffers(gpu_context, manager)
+  destroy_emitter_buffer(gpu_context, manager)
   // Manually clean up each pool since callbacks can't capture gpu_context
   for &entry in manager.image_2d_buffers.entries {
     if entry.generation > 0 && entry.active {
-      gpu.image_buffer_deinit(gpu_context, &entry.item)
+      gpu.image_buffer_detroy(gpu_context, &entry.item)
     }
   }
   delete(manager.image_2d_buffers.entries)
@@ -302,7 +302,7 @@ shutdown :: proc(
 
   for &entry in manager.image_cube_buffers.entries {
     if entry.generation > 0 && entry.active {
-      gpu.cube_depth_texture_deinit(gpu_context, &entry.item)
+      gpu.cube_depth_texture_destroy(gpu_context, &entry.item)
     }
   }
   delete(manager.image_cube_buffers.entries)
@@ -310,7 +310,7 @@ shutdown :: proc(
 
   for &entry in manager.meshes.entries {
     if entry.generation > 0 && entry.active {
-      mesh_deinit(&entry.item, gpu_context, manager)
+      mesh_destroy(&entry.item, gpu_context, manager)
     }
   }
   delete(manager.meshes.entries)
@@ -324,7 +324,7 @@ shutdown :: proc(
   delete(manager.emitters.free_indices)
   for &entry in manager.animation_clips.entries {
     if entry.generation > 0 && entry.active {
-      animation.clip_deinit(&entry.item)
+      animation.clip_destroy(&entry.item)
     }
   }
   delete(manager.animation_clips.entries)
@@ -351,13 +351,13 @@ shutdown :: proc(
   // Clean up navigation system
   delete(manager.navigation_system.geometry_cache)
   delete(manager.navigation_system.dirty_tiles)
-  deinit_global_samplers(gpu_context, manager)
-  deinit_bone_matrix_allocator(gpu_context, manager)
-  deinit_camera_buffer(gpu_context, manager)
-  deinit_node_data_buffer(gpu_context, manager)
-  deinit_mesh_data_buffer(gpu_context, manager)
-  deinit_vertex_skinning_buffer(gpu_context, manager)
-  deinit_bindless_buffers(gpu_context, manager)
+  destroy_global_samplers(gpu_context, manager)
+  destroy_bone_matrix_allocator(gpu_context, manager)
+  destroy_camera_buffer(gpu_context, manager)
+  destroy_node_data_buffer(gpu_context, manager)
+  destroy_mesh_data_buffer(gpu_context, manager)
+  destroy_vertex_skinning_buffer(gpu_context, manager)
+  destroy_bindless_buffers(gpu_context, manager)
   vk.DestroyPipelineLayout(
     gpu_context.device,
     manager.geometry_pipeline_layout,
@@ -694,11 +694,11 @@ init_material_buffer :: proc(
   return .SUCCESS
 }
 
-deinit_material_buffer :: proc(
+destroy_material_buffer :: proc(
   gpu_context: ^gpu.GPUContext,
   manager: ^Manager,
 ) {
-  gpu.data_buffer_deinit(gpu_context, &manager.material_buffer)
+  gpu.data_buffer_destroy(gpu_context, &manager.material_buffer)
   vk.DestroyDescriptorSetLayout(
     gpu_context.device,
     manager.material_buffer_set_layout,
@@ -775,12 +775,12 @@ init_world_matrix_buffers :: proc(
   return .SUCCESS
 }
 
-deinit_world_matrix_buffers :: proc(
+destroy_world_matrix_buffers :: proc(
   gpu_context: ^gpu.GPUContext,
   manager: ^Manager,
 ) {
   for frame_idx in 0 ..< MAX_FRAMES_IN_FLIGHT {
-    gpu.data_buffer_deinit(
+    gpu.data_buffer_destroy(
       gpu_context,
       &manager.world_matrix_buffers[frame_idx],
     )
@@ -860,11 +860,11 @@ init_node_data_buffer :: proc(
   return .SUCCESS
 }
 
-deinit_node_data_buffer :: proc(
+destroy_node_data_buffer :: proc(
   gpu_context: ^gpu.GPUContext,
   manager: ^Manager,
 ) {
-  gpu.data_buffer_deinit(gpu_context, &manager.node_data_buffer)
+  gpu.data_buffer_destroy(gpu_context, &manager.node_data_buffer)
   vk.DestroyDescriptorSetLayout(
     gpu_context.device,
     manager.node_data_buffer_set_layout,
@@ -993,11 +993,11 @@ init_emitter_buffer :: proc(
   return .SUCCESS
 }
 
-deinit_emitter_buffer :: proc(
+destroy_emitter_buffer :: proc(
   gpu_context: ^gpu.GPUContext,
   manager: ^Manager,
 ) {
-  gpu.data_buffer_deinit(gpu_context, &manager.emitter_buffer)
+  gpu.data_buffer_destroy(gpu_context, &manager.emitter_buffer)
   if manager.emitter_buffer_set_layout != 0 {
     vk.DestroyDescriptorSetLayout(
       gpu_context.device,
@@ -1009,11 +1009,11 @@ deinit_emitter_buffer :: proc(
   manager.emitter_buffer_descriptor_set = 0
 }
 
-deinit_mesh_data_buffer :: proc(
+destroy_mesh_data_buffer :: proc(
   gpu_context: ^gpu.GPUContext,
   manager: ^Manager,
 ) {
-  gpu.data_buffer_deinit(gpu_context, &manager.mesh_data_buffer)
+  gpu.data_buffer_destroy(gpu_context, &manager.mesh_data_buffer)
   vk.DestroyDescriptorSetLayout(
     gpu_context.device,
     manager.mesh_data_buffer_set_layout,
@@ -1085,12 +1085,12 @@ init_vertex_skinning_buffer :: proc(
   return .SUCCESS
 }
 
-deinit_vertex_skinning_buffer :: proc(
+destroy_vertex_skinning_buffer :: proc(
   gpu_context: ^gpu.GPUContext,
   manager: ^Manager,
 ) {
-  slab_allocator_deinit(&manager.vertex_skinning_slab)
-  gpu.data_buffer_deinit(gpu_context, &manager.vertex_skinning_buffer)
+  slab_allocator_destroy(&manager.vertex_skinning_slab)
+  gpu.data_buffer_destroy(gpu_context, &manager.vertex_skinning_buffer)
   vk.DestroyDescriptorSetLayout(
     gpu_context.device,
     manager.vertex_skinning_buffer_set_layout,
@@ -1111,11 +1111,11 @@ get_camera_data :: proc(
   return gpu.data_buffer_get(&manager.camera_buffer, camera_index)
 }
 
-deinit_camera_buffer :: proc(
+destroy_camera_buffer :: proc(
   gpu_context: ^gpu.GPUContext,
   manager: ^Manager,
 ) {
-  gpu.data_buffer_deinit(gpu_context, &manager.camera_buffer)
+  gpu.data_buffer_destroy(gpu_context, &manager.camera_buffer)
   vk.DestroyDescriptorSetLayout(
     gpu_context.device,
     manager.camera_buffer_set_layout,
@@ -1124,7 +1124,7 @@ deinit_camera_buffer :: proc(
   manager.camera_buffer_set_layout = 0
 }
 
-deinit_global_samplers :: proc(
+destroy_global_samplers :: proc(
   gpu_context: ^gpu.GPUContext,
   manager: ^Manager,
 ) {
@@ -1277,12 +1277,12 @@ create_empty_texture_cube :: proc(
   return
 }
 
-deinit_bone_matrix_allocator :: proc(
+destroy_bone_matrix_allocator :: proc(
   gpu_context: ^gpu.GPUContext,
   manager: ^Manager,
 ) {
   for &b in manager.bone_buffers {
-      gpu.data_buffer_deinit(gpu_context, &b)
+      gpu.data_buffer_destroy(gpu_context, &b)
   }
   vk.DestroyDescriptorSetLayout(
     gpu_context.device,
@@ -1290,7 +1290,7 @@ deinit_bone_matrix_allocator :: proc(
     nil,
   )
   manager.bone_buffer_set_layout = 0
-  slab_allocator_deinit(&manager.bone_matrix_slab)
+  slab_allocator_destroy(&manager.bone_matrix_slab)
 }
 
 WORLD_MATRIX_CAPACITY :: MAX_NODES_IN_SCENE
@@ -1355,14 +1355,14 @@ init_bindless_buffers :: proc(
   return .SUCCESS
 }
 
-deinit_bindless_buffers :: proc(
+destroy_bindless_buffers :: proc(
   gpu_context: ^gpu.GPUContext,
   manager: ^Manager,
 ) {
-  gpu.data_buffer_deinit(gpu_context, &manager.vertex_buffer)
-  gpu.data_buffer_deinit(gpu_context, &manager.index_buffer)
-  slab_allocator_deinit(&manager.vertex_slab)
-  slab_allocator_deinit(&manager.index_slab)
+  gpu.data_buffer_destroy(gpu_context, &manager.vertex_buffer)
+  gpu.data_buffer_destroy(gpu_context, &manager.index_buffer)
+  slab_allocator_destroy(&manager.vertex_slab)
+  slab_allocator_destroy(&manager.index_slab)
 }
 
 manager_allocate_vertices :: proc(
@@ -1855,7 +1855,7 @@ create_image_buffer_with_mips :: proc(
     {.TRANSFER_SRC},
     data,
   ) or_return
-  defer gpu.data_buffer_deinit(gpu_context, &staging)
+  defer gpu.data_buffer_destroy(gpu_context, &staging)
 
   img = gpu.malloc_image_buffer_with_mips(
     gpu_context,

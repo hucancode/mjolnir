@@ -49,7 +49,7 @@ SwapchainSupport :: struct {
   present_modes: []vk.PresentModeKHR, // Owned by this struct if allocated by it
 }
 
-swapchain_support_deinit :: proc(support: ^SwapchainSupport) {
+swapchain_support_destroy :: proc(support: ^SwapchainSupport) {
   delete(support.formats)
   support.formats = nil
   delete(support.present_modes)
@@ -289,7 +289,7 @@ score_physical_device :: proc(
   }
   log.infof("vulkan: device supports all required extensions")
   support := query_swapchain_support(device, self.surface) or_return
-  defer swapchain_support_deinit(&support)
+  defer swapchain_support_destroy(&support)
   if len(support.formats) == 0 || len(support.present_modes) == 0 {
     log.infof("Device %s: inadequate swapchain support.", device_name_cstring)
     return 0, .SUCCESS
@@ -620,4 +620,30 @@ allocate_vulkan_memory :: proc(
   vk.AllocateMemory(self.device, &alloc_info, nil, &memory) or_return
   ret = .SUCCESS
   return
+}
+
+allocate_secondary_buffers :: proc(
+  device: vk.Device,
+  pool: vk.CommandPool,
+  buffers: []vk.CommandBuffer,
+) -> vk.Result {
+  vk.AllocateCommandBuffers(
+    device,
+    &vk.CommandBufferAllocateInfo{
+      sType              = .COMMAND_BUFFER_ALLOCATE_INFO,
+      commandPool        = pool,
+      level              = .SECONDARY,
+      commandBufferCount = u32(len(buffers)),
+    },
+    raw_data(buffers),
+  ) or_return
+  return .SUCCESS
+}
+
+free_command_buffers :: proc(
+  device: vk.Device,
+  pool: vk.CommandPool,
+  buffers: []vk.CommandBuffer,
+) {
+  vk.FreeCommandBuffers(device, pool, u32(len(buffers)), raw_data(buffers))
 }

@@ -21,7 +21,7 @@ pool_init :: proc(self: ^Pool($T)) {
   self.free_indices = make([dynamic]u32, 0, 0)
 }
 
-pool_deinit :: proc(pool: Pool($T), deinit_proc: proc(_: ^T)) {
+pool_destroy :: proc(pool: Pool($T), deinit_proc: proc(_: ^T)) {
   for &entry in pool.entries {
     // Only deinit entries that are still active
     if entry.generation > 0 && entry.active {

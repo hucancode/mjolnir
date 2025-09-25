@@ -14,7 +14,7 @@ test_slab_basic_allocation :: proc(t: ^testing.T) {
     &allocator,
     {{10, 10}, {20, 10}, {}, {}, {}, {}, {}, {}},
   )
-  defer resources.slab_allocator_deinit(&allocator)
+  defer resources.slab_allocator_destroy(&allocator)
   index, ok := resources.slab_alloc(&allocator, 10)
   testing.expect(t, ok)
   index, ok = resources.slab_alloc(&allocator, 20)
@@ -31,7 +31,7 @@ test_slab_reuse :: proc(t: ^testing.T) {
     {{10, 10}, {}, {}, {}, {}, {}, {}, {}},
   )
   indices: [10]u32
-  defer resources.slab_allocator_deinit(&allocator)
+  defer resources.slab_allocator_destroy(&allocator)
   for i in 0 ..< 10 do indices[i] = resources.slab_alloc(&allocator, 10)
   index, ok := resources.slab_alloc(&allocator, 10)
   testing.expect(t, !ok)
@@ -47,7 +47,7 @@ test_slab_invalid_free :: proc(t: ^testing.T) {
     &allocator,
     {{10, 10}, {}, {}, {}, {}, {}, {}, {}},
   )
-  defer resources.slab_allocator_deinit(&allocator)
+  defer resources.slab_allocator_destroy(&allocator)
   resources.slab_free(&allocator, 0)
 }
 
@@ -118,7 +118,7 @@ benchmark_slab_allocation :: proc(t: ^testing.T) {
       allocator := context.allocator,
     ) -> time.Benchmark_Error {
       my_test := cast(^SlabTest)(raw_data(options.input))
-      resources.slab_allocator_deinit(&my_test.allocator)
+      resources.slab_allocator_destroy(&my_test.allocator)
       delete(my_test.ops)
       free(my_test)
       return nil

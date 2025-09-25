@@ -110,7 +110,7 @@ init_node :: proc(self: ^Node, name: string = "") {
   self.parent_visible = true
 }
 
-deinit_node :: proc(self: ^Node, resources_manager: ^resources.Manager) {
+destroy_node :: proc(self: ^Node, resources_manager: ^resources.Manager) {
   delete(self.children)
   if resources_manager == nil {
     return
@@ -281,13 +281,13 @@ init :: proc(world: ^World) {
   world.traversal_stack = make([dynamic]TraverseEntry, 0)
 }
 
-deinit :: proc(world: ^World, resources_manager: ^resources.Manager) {
+destroy :: proc(world: ^World, resources_manager: ^resources.Manager) {
   for &entry in world.nodes.entries {
     if entry.active {
-      deinit_node(&entry.item, resources_manager)
+      destroy_node(&entry.item, resources_manager)
     }
   }
-  resources.pool_deinit(world.nodes, proc(node: ^Node) {})
+  resources.pool_destroy(world.nodes, proc(node: ^Node) {})
   delete(world.traversal_stack)
 }
 
@@ -297,13 +297,6 @@ init_gpu :: proc(
   resources_manager: ^resources.Manager,
 ) -> vk.Result {
   return visibility_system_init(&world.visibility, gpu_context, resources_manager)
-}
-
-deinit_gpu :: proc(
-  world: ^World,
-  gpu_context: ^gpu.GPUContext,
-) {
-  visibility_system_deinit(&world.visibility, gpu_context)
 }
 
 begin_frame :: proc(world: ^World, frame_ctx: ^FrameContext) {
@@ -343,8 +336,8 @@ query_visibility :: proc(
 }
 
 shutdown :: proc(world: ^World, gpu_context: ^gpu.GPUContext, resources_manager: ^resources.Manager) {
-  deinit_gpu(world, gpu_context)
-  deinit(world, resources_manager)
+  visibility_system_shutdown(&world.visibility, gpu_context)
+  destroy(world, resources_manager)
 }
 
 // Legacy compatibility functions for render subsystem
@@ -402,7 +395,7 @@ spawn_child_node :: proc(
   return
 }
 
-destroy_node :: proc(world: ^World, handle: Handle) -> bool {
+destroy_node_handle :: proc(world: ^World, handle: Handle) -> bool {
   node := resources.get(world.nodes, handle)
   if node == nil {
     return false
@@ -668,7 +661,7 @@ node_get_world_matrix :: proc(node: ^Node) -> matrix[4,4]f32 {
 // for transition period but delegate to the new structured API
 
 mark_for_despawn :: proc(world: ^World, handle: Handle) -> bool {
-  return destroy_node(world, handle)
+  return destroy_node_handle(world, handle)
 }
 
 mark_emitter_dirty :: proc(

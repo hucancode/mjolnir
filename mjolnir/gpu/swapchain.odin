@@ -72,7 +72,7 @@ swapchain_init :: proc(
     gpu_context.physical_device,
     gpu_context.surface,
   ) or_return
-  defer swapchain_support_deinit(&support) // Clean up since we're not transferring ownership
+  defer swapchain_support_destroy(&support) // Clean up since we're not transferring ownership
   self.format = pick_swapchain_format(support.formats)
   self.extent = pick_swapchain_extent(
     support.capabilities,
@@ -169,7 +169,7 @@ swapchain_init :: proc(
   return .SUCCESS
 }
 
-swapchain_deinit :: proc(self: ^Swapchain, gpu_context: ^GPUContext) {
+swapchain_destroy :: proc(self: ^Swapchain, gpu_context: ^GPUContext) {
   for view in self.views do vk.DestroyImageView(gpu_context.device, view, nil)
   delete(self.views)
   self.views = nil
@@ -200,7 +200,7 @@ swapchain_recreate :: proc(
   window: glfw.WindowHandle,
 ) -> vk.Result {
   vk.DeviceWaitIdle(gpu_context.device)
-  swapchain_deinit(self, gpu_context)
+  swapchain_destroy(self, gpu_context)
   swapchain_init(self, gpu_context, window) or_return
   return .SUCCESS
 }

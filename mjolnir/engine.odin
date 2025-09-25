@@ -96,7 +96,7 @@ spawn_world_child :: proc(
 }
 
 despawn :: proc(engine: ^Engine, handle: Handle) -> bool {
-  return world.destroy_node(&engine.world, handle)
+  return world.destroy_node_handle(&engine.world, handle)
 }
 
 // Add missing navmesh functions
@@ -647,17 +647,14 @@ update :: proc(self: ^Engine) -> bool {
   return true
 }
 
-deinit :: proc(self: ^Engine) {
+shutdown :: proc(self: ^Engine) {
   vk.DeviceWaitIdle(self.gpu_context.device)
-  free_command_buffers :: proc(device: vk.Device, pool: vk.CommandPool, buffers: []vk.CommandBuffer) {
-    vk.FreeCommandBuffers(device, pool, u32(len(buffers)), raw_data(buffers[:]))
-  }
-  free_command_buffers(self.gpu_context.device, self.gpu_context.command_pool, self.command_buffers[:])
-  if item, freed := resources.free(
+  gpu.free_command_buffers(self.gpu_context.device, self.gpu_context.command_pool, self.command_buffers[:])
+  if item, ok := resources.free(
     &self.resource_manager.render_targets,
     self.main_render_target,
-  ); freed {
-    resources.render_target_deinit(item, &self.gpu_context, &self.resource_manager)
+  ); ok {
+    resources.render_target_detroy(item, &self.gpu_context, &self.resource_manager)
   }
   for j in 0 ..< MAX_SHADOW_MAPS {
     resources.free(
@@ -674,10 +671,10 @@ deinit :: proc(self: ^Engine) {
   delete(self.pending_node_deletions)
   vk.DestroyFence(self.gpu_context.device, self.frame_fence, nil)
   renderer_shutdown(&self.render, &self.gpu_context, &self.resource_manager)
-  navmesh_renderer.navmesh_deinit(&self.navmesh, &self.gpu_context)
+  navmesh_renderer.navmesh_destroy(&self.navmesh, &self.gpu_context)
   world.shutdown(&self.world, &self.gpu_context, &self.resource_manager)
   resources.shutdown(&self.resource_manager, &self.gpu_context)
-  gpu.swapchain_deinit(&self.swapchain, &self.gpu_context)
+  gpu.swapchain_destroy(&self.swapchain, &self.gpu_context)
   gpu.shutdown(&self.gpu_context)
   glfw.DestroyWindow(self.window)
   glfw.Terminate()
@@ -967,7 +964,7 @@ recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
       old_camera.position if old_camera != nil else [3]f32{0, 0, 3}
     old_target := [3]f32{0, 0, 0} // Calculate from camera direction if needed
 
-    resources.render_target_deinit(
+    resources.render_target_detroy(
       main_render_target,
       &engine.gpu_context,
       &engine.resource_manager,
@@ -993,7 +990,7 @@ recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
       old_target, // Preserve camera target
     ) or_return
   }
-  renderer_set_main_target(&engine.render, engine.main_render_target)
+  engine.render.targets.main = engine.main_render_target
   render_subsystem_resize(
     &engine.render,
     &engine.gpu_context,
@@ -1052,7 +1049,7 @@ render :: proc(self: ^Engine) -> vk.Result {
   }
 
   process_world_lights(self)
-  renderer_set_main_target(&self.render, self.main_render_target)
+  self.render.targets.main = self.main_render_target
   renderer_prepare_targets(
     &self.render,
     &self.resource_manager,
@@ -1166,7 +1163,7 @@ run :: proc(self: ^Engine, width, height: u32, title: string) {
   if init(self, width, height, title) != .SUCCESS {
     return
   }
-  defer deinit(self)
+  defer shutdown(self)
   when USE_PARALLEL_UPDATE {
     self.update_active = true
     update_data := UpdateThreadData{engine = self}
@@ -1235,7 +1232,7 @@ queue_node_deletion :: proc(engine: ^Engine, handle: Handle) {
 
 process_pending_deletions :: proc(engine: ^Engine) {
   for handle in engine.pending_node_deletions {
-    world.destroy_node(&engine.world, handle)
+    world.destroy_node_handle(&engine.world, handle)
   }
   clear(&engine.pending_node_deletions)
 }

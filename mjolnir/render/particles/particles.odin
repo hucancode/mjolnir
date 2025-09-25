@@ -42,7 +42,7 @@ ParticleSystemParams :: struct {
   delta_time:       f32,
 }
 
-RendererParticle :: struct {
+Renderer :: struct {
   // Compute pipeline
   params_buffer:                 gpu.DataBuffer(ParticleSystemParams),
   particle_buffer:               gpu.DataBuffer(Particle),
@@ -72,7 +72,7 @@ RendererParticle :: struct {
 }
 
 simulate :: proc(
-  self: ^RendererParticle,
+  self: ^Renderer,
   command_buffer: vk.CommandBuffer,
   camera: geometry.Camera,
   world_matrix_set: vk.DescriptorSet,
@@ -194,7 +194,7 @@ simulate :: proc(
 }
 
 compact_particles :: proc(
-  self: ^RendererParticle,
+  self: ^Renderer,
   command_buffer: vk.CommandBuffer,
 ) {
   // Run compaction
@@ -218,7 +218,7 @@ compact_particles :: proc(
 }
 
 shutdown :: proc(
-  self: ^RendererParticle,
+  self: ^Renderer,
   gpu_context: ^gpu.GPUContext,
 ) {
   vk.DestroyPipeline(gpu_context.device, self.compute_pipeline, nil)
@@ -260,16 +260,16 @@ shutdown :: proc(
     self.render_pipeline_layout,
     nil,
   )
-  gpu.data_buffer_deinit(gpu_context, &self.params_buffer)
-  gpu.data_buffer_deinit(gpu_context, &self.particle_buffer)
-  gpu.data_buffer_deinit(gpu_context, &self.compact_particle_buffer)
-  gpu.data_buffer_deinit(gpu_context, &self.draw_command_buffer)
-  gpu.data_buffer_deinit(gpu_context, &self.force_field_buffer)
-  gpu.data_buffer_deinit(gpu_context, &self.particle_counter_buffer)
+  gpu.data_buffer_destroy(gpu_context, &self.params_buffer)
+  gpu.data_buffer_destroy(gpu_context, &self.particle_buffer)
+  gpu.data_buffer_destroy(gpu_context, &self.compact_particle_buffer)
+  gpu.data_buffer_destroy(gpu_context, &self.draw_command_buffer)
+  gpu.data_buffer_destroy(gpu_context, &self.force_field_buffer)
+  gpu.data_buffer_destroy(gpu_context, &self.particle_counter_buffer)
 }
 
 init :: proc(
-  self: ^RendererParticle,
+  self: ^Renderer,
   gpu_context: ^gpu.GPUContext,
   resources_manager: ^resources.Manager,
 ) -> vk.Result {
@@ -308,7 +308,7 @@ init :: proc(
 
 particle_init_emitter_pipeline :: proc(
   gpu_context: ^gpu.GPUContext,
-  self: ^RendererParticle,
+  self: ^Renderer,
   resources_manager: ^resources.Manager,
 ) -> vk.Result {
   emitter_bindings := [?]vk.DescriptorSetLayoutBinding {
@@ -439,7 +439,7 @@ particle_init_emitter_pipeline :: proc(
 
 particle_init_compute_pipeline :: proc(
   gpu_context: ^gpu.GPUContext,
-  self: ^RendererParticle,
+  self: ^Renderer,
 ) -> vk.Result {
   compute_bindings := [?]vk.DescriptorSetLayoutBinding {
     {
@@ -582,7 +582,7 @@ particle_init_compute_pipeline :: proc(
 
 particle_init_compact_pipeline :: proc(
   gpu_context: ^gpu.GPUContext,
-  self: ^RendererParticle,
+  self: ^Renderer,
 ) -> vk.Result {
   compact_bindings := [?]vk.DescriptorSetLayoutBinding {
     {
@@ -737,7 +737,7 @@ particle_init_compact_pipeline :: proc(
 
 particle_init_render_pipeline :: proc(
   gpu_context: ^gpu.GPUContext,
-  self: ^RendererParticle,
+  self: ^Renderer,
   resources_manager: ^resources.Manager,
 ) -> vk.Result {
   descriptor_set_layouts := [?]vk.DescriptorSetLayout {
@@ -914,7 +914,7 @@ particle_init_render_pipeline :: proc(
 }
 
 begin_pass :: proc(
-  self: ^RendererParticle,
+  self: ^Renderer,
   command_buffer: vk.CommandBuffer,
   render_target: ^resources.RenderTarget,
   resources_manager: ^resources.Manager,
@@ -997,7 +997,7 @@ begin_pass :: proc(
 }
 
 render :: proc(
-  self: ^RendererParticle,
+  self: ^Renderer,
   command_buffer: vk.CommandBuffer,
   camera_index: u32,
   resources_manager: ^resources.Manager,

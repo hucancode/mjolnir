@@ -24,7 +24,7 @@ test_item_point :: proc(item: TestItem) -> [3]f32 {
 }
 
 @(test)
-test_octree_init_deinit :: proc(t: ^testing.T) {
+test_octree_lifecycle :: proc(t: ^testing.T) {
   bounds := geometry.Aabb {
     min = {-10, -10, -10},
     max = {10, 10, 10},
@@ -43,8 +43,8 @@ test_octree_init_deinit :: proc(t: ^testing.T) {
     "Root should have no items initially",
   )
 
-  geometry.octree_deinit(&octree)
-  testing.expect(t, octree.root == nil, "Root should be nil after deinit")
+  geometry.octree_destroy(&octree)
+  testing.expect(t, octree.root == nil, "Root should be nil after destroy")
 }
 
 @(test)
@@ -57,7 +57,7 @@ test_octree_insert :: proc(t: ^testing.T) {
 
   octree: geometry.Octree(TestItem)
   geometry.octree_init(&octree, bounds, 5, 2)
-  defer geometry.octree_deinit(&octree)
+  defer geometry.octree_destroy(&octree)
   octree.bounds_func = test_item_bounds
   octree.point_func = test_item_point
 
@@ -119,7 +119,7 @@ test_octree_query_aabb :: proc(t: ^testing.T) {
 
   octree: geometry.Octree(TestItem)
   geometry.octree_init(&octree, bounds, 5, 2)
-  defer geometry.octree_deinit(&octree)
+  defer geometry.octree_destroy(&octree)
   octree.bounds_func = test_item_bounds
   octree.point_func = test_item_point
 
@@ -173,7 +173,7 @@ test_octree_query_sphere :: proc(t: ^testing.T) {
 
   octree: geometry.Octree(TestItem)
   geometry.octree_init(&octree, bounds, 5, 2)
-  defer geometry.octree_deinit(&octree)
+  defer geometry.octree_destroy(&octree)
   octree.bounds_func = test_item_bounds
   octree.point_func = test_item_point
 
@@ -222,7 +222,7 @@ test_octree_query_ray :: proc(t: ^testing.T) {
 
   octree: geometry.Octree(TestItem)
   geometry.octree_init(&octree, bounds, 5, 2)
-  defer geometry.octree_deinit(&octree)
+  defer geometry.octree_destroy(&octree)
   octree.bounds_func = test_item_bounds
   octree.point_func = test_item_point
 
@@ -271,7 +271,7 @@ test_octree_remove :: proc(t: ^testing.T) {
 
   octree: geometry.Octree(TestItem)
   geometry.octree_init(&octree, bounds, 5, 2)
-  defer geometry.octree_deinit(&octree)
+  defer geometry.octree_destroy(&octree)
   octree.bounds_func = test_item_bounds
   octree.point_func = test_item_point
 
@@ -326,7 +326,7 @@ test_octree_update :: proc(t: ^testing.T) {
 
   octree: geometry.Octree(TestItem)
   geometry.octree_init(&octree, bounds, 5, 2)
-  defer geometry.octree_deinit(&octree)
+  defer geometry.octree_destroy(&octree)
   octree.bounds_func = test_item_bounds
   octree.point_func = test_item_point
 
@@ -375,7 +375,7 @@ test_octree_subdivision :: proc(t: ^testing.T) {
 
   octree: geometry.Octree(TestItem)
   geometry.octree_init(&octree, bounds, 5, 2)
-  defer geometry.octree_deinit(&octree)
+  defer geometry.octree_destroy(&octree)
   octree.bounds_func = test_item_bounds
   octree.point_func = test_item_point
 
@@ -408,7 +408,7 @@ test_octree_edge_cases :: proc(t: ^testing.T) {
 
   octree: geometry.Octree(TestItem)
   geometry.octree_init(&octree, bounds, 2, 1)
-  defer geometry.octree_deinit(&octree)
+  defer geometry.octree_destroy(&octree)
   octree.bounds_func = test_item_bounds
   octree.point_func = test_item_point
 
@@ -452,7 +452,7 @@ test_octree_stats :: proc(t: ^testing.T) {
 
   octree: geometry.Octree(TestItem)
   geometry.octree_init(&octree, bounds, 3, 2)
-  defer geometry.octree_deinit(&octree)
+  defer geometry.octree_destroy(&octree)
   octree.bounds_func = test_item_bounds
   octree.point_func = test_item_point
 
@@ -544,7 +544,7 @@ octree_single_insert_benchmark :: proc(t: ^testing.T) {
     allocator := context.allocator,
   ) -> time.Benchmark_Error {
     octree_ptr := cast(^geometry.Octree(TestItem))raw_data(options.input)
-    geometry.octree_deinit(octree_ptr)
+    geometry.octree_destroy(octree_ptr)
     free(octree_ptr)
     return nil
   }
@@ -638,7 +638,7 @@ octree_single_remove_benchmark :: proc(t: ^testing.T) {
     allocator := context.allocator,
   ) -> time.Benchmark_Error {
     bench_data := cast(^BenchmarkData)raw_data(options.input)
-    geometry.octree_deinit(bench_data.octree_ptr)
+    geometry.octree_destroy(bench_data.octree_ptr)
     free(bench_data.octree_ptr)
     delete(bench_data.items)
     free(bench_data)
@@ -731,7 +731,7 @@ octree_optimized_query_benchmark :: proc(t: ^testing.T) {
     allocator := context.allocator,
   ) -> time.Benchmark_Error {
     octree_ptr := cast(^geometry.Octree(TestItem))raw_data(options.input)
-    geometry.octree_deinit(octree_ptr)
+    geometry.octree_destroy(octree_ptr)
     free(octree_ptr)
     return nil
   }
@@ -819,7 +819,7 @@ octree_realistic_insert_benchmark :: proc(t: ^testing.T) {
     allocator := context.allocator,
   ) -> time.Benchmark_Error {
     octree_ptr := cast(^geometry.Octree(TestItem))raw_data(options.input)
-    geometry.octree_deinit(octree_ptr)
+    geometry.octree_destroy(octree_ptr)
     free(octree_ptr)
     return nil
   }
@@ -915,7 +915,7 @@ octree_realistic_remove_benchmark :: proc(t: ^testing.T) {
     allocator := context.allocator,
   ) -> time.Benchmark_Error {
     bench_data := cast(^BenchmarkData)raw_data(options.input)
-    geometry.octree_deinit(bench_data.octree_ptr)
+    geometry.octree_destroy(bench_data.octree_ptr)
     free(bench_data.octree_ptr)
     delete(bench_data.items)
     free(bench_data)
@@ -1003,7 +1003,7 @@ octree_realistic_query_benchmark :: proc(t: ^testing.T) {
     allocator := context.allocator,
   ) -> time.Benchmark_Error {
     octree_ptr := cast(^geometry.Octree(TestItem))raw_data(options.input)
-    geometry.octree_deinit(octree_ptr)
+    geometry.octree_destroy(octree_ptr)
     free(octree_ptr)
     return nil
   }
@@ -1121,7 +1121,7 @@ octree_frame_simulation_benchmark :: proc(t: ^testing.T) {
     allocator := context.allocator,
   ) -> time.Benchmark_Error {
     bench_data := cast(^BenchmarkData)raw_data(options.input)
-    geometry.octree_deinit(bench_data.octree_ptr)
+    geometry.octree_destroy(bench_data.octree_ptr)
     free(bench_data.octree_ptr)
     delete(bench_data.items)
     free(bench_data)
@@ -1208,7 +1208,7 @@ octree_empty_query_benchmark :: proc(t: ^testing.T) {
     allocator := context.allocator,
   ) -> time.Benchmark_Error {
     octree_ptr := cast(^geometry.Octree(TestItem))raw_data(options.input)
-    geometry.octree_deinit(octree_ptr)
+    geometry.octree_destroy(octree_ptr)
     free(octree_ptr)
     return nil
   }

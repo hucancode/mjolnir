@@ -21,7 +21,7 @@ BVH :: struct($T: typeid) {
   bounds_func: proc(t: T) -> Aabb,
 }
 
-bvh_deinit :: proc(bvh: ^BVH($T)) {
+bvh_destroy :: proc(bvh: ^BVH($T)) {
   delete(bvh.nodes)
   delete(bvh.primitives)
 }

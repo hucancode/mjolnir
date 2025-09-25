@@ -102,14 +102,14 @@ navmesh_init :: proc(renderer: ^RendererNavMesh, gpu_context: ^gpu.GPUContext, r
     return .SUCCESS
 }
 
-navmesh_deinit :: proc(renderer: ^RendererNavMesh, gpu_context: ^gpu.GPUContext) {
+navmesh_destroy :: proc(renderer: ^RendererNavMesh, gpu_context: ^gpu.GPUContext) {
     vk.DestroyPipeline(gpu_context.device, renderer.pipeline, nil)
     vk.DestroyPipelineLayout(gpu_context.device, renderer.pipeline_layout, nil)
     vk.DestroyPipeline(gpu_context.device, renderer.debug_pipeline, nil)
     vk.DestroyPipelineLayout(gpu_context.device, renderer.debug_pipeline_layout, nil)
-    gpu.data_buffer_deinit(gpu_context, &renderer.vertex_buffer)
-    gpu.data_buffer_deinit(gpu_context, &renderer.index_buffer)
-    gpu.data_buffer_deinit(gpu_context, &renderer.path_vertex_buffer)
+    gpu.data_buffer_destroy(gpu_context, &renderer.vertex_buffer)
+    gpu.data_buffer_destroy(gpu_context, &renderer.index_buffer)
+    gpu.data_buffer_destroy(gpu_context, &renderer.path_vertex_buffer)
 }
 
 navmesh_build_from_recast :: proc(renderer: ^RendererNavMesh, gpu_context: ^gpu.GPUContext,

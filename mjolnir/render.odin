@@ -20,12 +20,11 @@ import vk "vendor:vulkan"
 Renderer :: struct {
   shadow:        shadow.Renderer,
   geometry:      geometry_pass.Renderer,
-  ambient:       lighting.RendererAmbient,
-  lighting:      lighting.RendererLighting,
+  lighting:      lighting.Renderer,
   transparency:  transparency.Renderer,
-  particles:     particles.RendererParticle,
-  post_process:  post_process.RendererPostProcess,
-  ui:            debug_ui.RendererUI,
+  particles:     particles.Renderer,
+  post_process:  post_process.Renderer,
+  ui:            debug_ui.Renderer,
   targets:       targets.Manager,
 
   shadow_commands:        [resources.MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
@@ -33,34 +32,6 @@ Renderer :: struct {
   lighting_commands:      [resources.MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
   transparency_commands:  [resources.MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
   post_process_commands:  [resources.MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
-}
-
-@(private = "file")
-allocate_secondary_buffers :: proc(
-  gpu_context: ^gpu.GPUContext,
-  buffers: []vk.CommandBuffer,
-) -> vk.Result {
-  vk.AllocateCommandBuffers(
-    gpu_context.device,
-    &vk.CommandBufferAllocateInfo{
-      sType              = .COMMAND_BUFFER_ALLOCATE_INFO,
-      commandPool        = gpu_context.command_pool,
-      level              = .SECONDARY,
-      commandBufferCount = u32(len(buffers)),
-    },
-    raw_data(buffers),
-  ) or_return
-  return .SUCCESS
-}
-
-@(private = "file")
-free_secondary_buffers :: proc(
-  device: vk.Device,
-  pool: vk.CommandPool,
-  buffers: []vk.CommandBuffer,
-) {
-  if len(buffers) == 0 do return
-  vk.FreeCommandBuffers(device, pool, u32(len(buffers)), raw_data(buffers))
 }
 
 renderer_init :: proc(
@@ -72,24 +43,29 @@ renderer_init :: proc(
   main_render_target: resources.Handle,
   dpi_scale: f32,
 ) -> vk.Result {
-  allocate_secondary_buffers(
-    gpu_context,
+  gpu.allocate_secondary_buffers(
+    gpu_context.device,
+    gpu_context.command_pool,
     self.shadow_commands[:],
   ) or_return
-  allocate_secondary_buffers(
-    gpu_context,
+  gpu.allocate_secondary_buffers(
+    gpu_context.device,
+    gpu_context.command_pool,
     self.geometry_commands[:],
   ) or_return
-  allocate_secondary_buffers(
-    gpu_context,
+  gpu.allocate_secondary_buffers(
+    gpu_context.device,
+    gpu_context.command_pool,
     self.lighting_commands[:],
   ) or_return
-  allocate_secondary_buffers(
-    gpu_context,
+  gpu.allocate_secondary_buffers(
+    gpu_context.device,
+    gpu_context.command_pool,
     self.transparency_commands[:],
   ) or_return
-  allocate_secondary_buffers(
-    gpu_context,
+  gpu.allocate_secondary_buffers(
+    gpu_context.device,
+    gpu_context.command_pool,
     self.post_process_commands[:],
   ) or_return
 
@@ -103,7 +79,7 @@ renderer_init :: proc(
     resources_manager,
   ) or_return
   lighting.ambient_init(
-    &self.ambient,
+    &self.lighting,
     gpu_context,
     resources_manager,
     swapchain_extent.width,
@@ -163,43 +139,35 @@ renderer_shutdown :: proc(
   particles.shutdown(&self.particles, gpu_context)
   transparency.shutdown(&self.transparency, gpu_context)
   lighting.lighting_shutdown(&self.lighting, gpu_context)
-  lighting.ambient_shutdown(&self.ambient, gpu_context, resources_manager)
+  lighting.ambient_shutdown(&self.lighting, gpu_context, resources_manager)
   geometry_pass.shutdown(&self.geometry, gpu_context)
   shadow.shutdown(&self.shadow, gpu_context)
   targets.shutdown(&self.targets)
-
-  free_secondary_buffers(
+  gpu.free_command_buffers(
     gpu_context.device,
     gpu_context.command_pool,
     self.shadow_commands[:],
   )
-  free_secondary_buffers(
+  gpu.free_command_buffers(
     gpu_context.device,
     gpu_context.command_pool,
     self.geometry_commands[:],
   )
-  free_secondary_buffers(
+  gpu.free_command_buffers(
     gpu_context.device,
     gpu_context.command_pool,
     self.lighting_commands[:],
   )
-  free_secondary_buffers(
+  gpu.free_command_buffers(
     gpu_context.device,
     gpu_context.command_pool,
     self.transparency_commands[:],
   )
-  free_secondary_buffers(
+  gpu.free_command_buffers(
     gpu_context.device,
     gpu_context.command_pool,
     self.post_process_commands[:],
   )
-}
-
-renderer_set_main_target :: proc(
-  self: ^Renderer,
-  handle: resources.Handle,
-) {
-  self.targets.main = handle
 }
 
 renderer_prepare_targets :: proc(
@@ -578,14 +546,14 @@ record_lighting_pass :: proc(
   ) or_return
 
   lighting.ambient_begin_pass(
-    &self.ambient,
+    &self.lighting,
     main_render_target,
     command_buffer,
     resources_manager,
     frame_index,
   )
   lighting.ambient_render(
-    &self.ambient,
+    &self.lighting,
     main_render_target,
     command_buffer,
     resources_manager,

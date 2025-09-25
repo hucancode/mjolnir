@@ -64,7 +64,7 @@ scene_geometry_collector_init :: proc(collector: ^SceneGeometryCollector) {
   }
 }
 
-scene_geometry_collector_deinit :: proc(collector: ^SceneGeometryCollector) {
+scene_geometry_collector_destroy :: proc(collector: ^SceneGeometryCollector) {
   delete(collector.vertices)
   delete(collector.indices)
   delete(collector.area_types)
@@ -153,7 +153,7 @@ build_navigation_mesh_from_scene :: proc(
   collector: SceneGeometryCollector
   scene_geometry_collector_init(&collector)
   collector.world, collector.resources_manager, collector.gpu_context = world, resources_manager, gpu_context
-  defer scene_geometry_collector_deinit(&collector)
+  defer scene_geometry_collector_destroy(&collector)
 
   traverse(collector.world, &collector, scene_geometry_collector_traverse)
 
@@ -247,7 +247,7 @@ build_navigation_mesh_from_scene_filtered :: proc(
   collector: SceneGeometryCollector
   scene_geometry_collector_init(&collector)
   collector.world, collector.resources_manager, collector.gpu_context = world, resources_manager, gpu_context
-  defer scene_geometry_collector_deinit(&collector)
+  defer scene_geometry_collector_destroy(&collector)
 
   collector.include_filter = include_filter
   if area_type_mapper != nil {

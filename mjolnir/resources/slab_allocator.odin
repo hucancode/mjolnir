@@ -34,7 +34,7 @@ slab_allocator_init :: proc(
   self.capacity = base
 }
 
-slab_allocator_deinit :: proc(self: ^SlabAllocator) {
+slab_allocator_destroy :: proc(self: ^SlabAllocator) {
   for &class in self.classes do delete(class.free_list)
 }
 

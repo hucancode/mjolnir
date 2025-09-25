@@ -143,7 +143,7 @@ render_target_init :: proc(
   return .SUCCESS
 }
 
-render_target_deinit :: proc(
+render_target_detroy :: proc(
   target: ^RenderTarget,
   gpu_context: ^gpu.GPUContext,
   manager: ^Manager,
@@ -155,7 +155,7 @@ render_target_deinit :: proc(
         &manager.image_2d_buffers,
         target.final_images[frame],
       ); freed {
-        gpu.image_buffer_deinit(gpu_context, item)
+        gpu.image_buffer_detroy(gpu_context, item)
       }
     }
     if .POSITION_TEXTURE in target.features {
@@ -163,7 +163,7 @@ render_target_deinit :: proc(
         &manager.image_2d_buffers,
         target.position_textures[frame],
       ); freed {
-        gpu.image_buffer_deinit(gpu_context, item)
+        gpu.image_buffer_detroy(gpu_context, item)
       }
     }
     if .NORMAL_TEXTURE in target.features {
@@ -171,7 +171,7 @@ render_target_deinit :: proc(
         &manager.image_2d_buffers,
         target.normal_textures[frame],
       ); freed {
-        gpu.image_buffer_deinit(gpu_context, item)
+        gpu.image_buffer_detroy(gpu_context, item)
       }
     }
     if .ALBEDO_TEXTURE in target.features {
@@ -179,7 +179,7 @@ render_target_deinit :: proc(
         &manager.image_2d_buffers,
         target.albedo_textures[frame],
       ); freed {
-        gpu.image_buffer_deinit(gpu_context, item)
+        gpu.image_buffer_detroy(gpu_context, item)
       }
     }
     if .METALLIC_ROUGHNESS in target.features {
@@ -187,7 +187,7 @@ render_target_deinit :: proc(
         &manager.image_2d_buffers,
         target.metallic_roughness_textures[frame],
       ); freed {
-        gpu.image_buffer_deinit(gpu_context, item)
+        gpu.image_buffer_detroy(gpu_context, item)
       }
     }
     if .EMISSIVE_TEXTURE in target.features {
@@ -195,7 +195,7 @@ render_target_deinit :: proc(
         &manager.image_2d_buffers,
         target.emissive_textures[frame],
       ); freed {
-        gpu.image_buffer_deinit(gpu_context, item)
+        gpu.image_buffer_detroy(gpu_context, item)
       }
     }
     if .DEPTH_TEXTURE in target.features {
@@ -203,7 +203,7 @@ render_target_deinit :: proc(
         &manager.image_2d_buffers,
         target.depth_textures[frame],
       ); freed {
-        gpu.image_buffer_deinit(gpu_context, item)
+        gpu.image_buffer_detroy(gpu_context, item)
       }
     }
   }

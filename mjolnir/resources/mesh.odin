@@ -13,7 +13,7 @@ Bone :: struct {
   name:                string,
 }
 
-bone_deinit :: proc(bone: ^Bone) {
+bone_destroy :: proc(bone: ^Bone) {
   delete(bone.children)
   bone.children = nil
 }
@@ -50,7 +50,7 @@ Mesh :: struct {
   skinning:          Maybe(Skinning),
 }
 
-mesh_deinit :: proc(
+mesh_destroy :: proc(
   self: ^Mesh,
   gpu_context: ^gpu.GPUContext,
   manager: ^Manager,
@@ -60,7 +60,7 @@ mesh_deinit :: proc(
   skin, has_skin := &self.skinning.?
   if !has_skin do return
   manager_free_vertex_skinning(manager, skin.vertex_skinning_allocation)
-  for &bone in skin.bones do bone_deinit(&bone)
+  for &bone in skin.bones do bone_destroy(&bone)
   delete(skin.bones)
 }
 

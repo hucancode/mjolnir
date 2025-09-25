@@ -300,7 +300,7 @@ visibility_system_init :: proc(
   return vk.Result.SUCCESS
 }
 
-visibility_system_deinit :: proc(
+visibility_system_shutdown :: proc(
   system: ^VisibilitySystem,
   gpu_context: ^gpu.GPUContext,
 ) {
@@ -322,8 +322,8 @@ visibility_system_deinit :: proc(
     frame := &system.frames[frame_idx]
     for task_idx in 0 ..< VISIBILITY_TASK_COUNT {
       buffers := &frame.tasks[task_idx]
-      gpu.data_buffer_deinit(gpu_context, &buffers.draw_count)
-      gpu.data_buffer_deinit(gpu_context, &buffers.draw_commands)
+      gpu.data_buffer_destroy(gpu_context, &buffers.draw_count)
+      gpu.data_buffer_destroy(gpu_context, &buffers.draw_commands)
       buffers.descriptor_set = 0
     }
   }

@@ -252,7 +252,7 @@ test_bvh_basic_raycasting :: proc(t: ^testing.T) {
   testing.expect(t, hit2.hit, "Ray should hit sphere in BVH")
   testing.expect_value(t, hit2.t, 4.0)
 
-  geometry.bvh_deinit(&bvh)
+  geometry.bvh_destroy(&bvh)
   delete(primitives)
 }
 
@@ -313,7 +313,7 @@ test_bvh_single_vs_multi_raycast :: proc(t: ^testing.T) {
   // Verify single matches first multi
   testing.expect_value(t, single_hit.t, multi_hits[0].t)
 
-  geometry.bvh_deinit(&bvh)
+  geometry.bvh_destroy(&bvh)
   delete(primitives)
   delete(multi_hits)
 }
@@ -365,7 +365,7 @@ test_bvh_max_distance :: proc(t: ^testing.T) {
   geometry.bvh_raycast_multi(&bvh, ray, 100.0, geometry.ray_primitive_intersection, &multi_hits)
   testing.expect_value(t, len(multi_hits), 2)
 
-  geometry.bvh_deinit(&bvh)
+  geometry.bvh_destroy(&bvh)
   delete(primitives)
   delete(multi_hits)
 }
@@ -415,7 +415,7 @@ test_bvh_sphere_query :: proc(t: ^testing.T) {
 
   testing.expect_value(t, len(results), 1)
 
-  geometry.bvh_deinit(&bvh)
+  geometry.bvh_destroy(&bvh)
   delete(primitives)
   delete(results)
 }
@@ -477,7 +477,7 @@ test_bvh_aabb_query :: proc(t: ^testing.T) {
   geometry.bvh_query_aabb(&bvh, small_query, &results)
   testing.expect_value(t, len(results), 0)
 
-  geometry.bvh_deinit(&bvh)
+  geometry.bvh_destroy(&bvh)
   delete(primitives)
   delete(results)
 }
@@ -500,7 +500,7 @@ test_bvh_empty :: proc(t: ^testing.T) {
   geometry.bvh_raycast_multi(&empty_bvh, ray, 100.0, geometry.ray_primitive_intersection, &multi_hits)
   testing.expect_value(t, len(multi_hits), 0)
 
-  geometry.bvh_deinit(&empty_bvh)
+  geometry.bvh_destroy(&empty_bvh)
   delete(multi_hits)
 }
 
@@ -569,7 +569,7 @@ test_octree_basic_raycasting :: proc(t: ^testing.T) {
   testing.expect(t, hit2.hit, "Ray should hit sphere in octree")
   testing.expect_value(t, hit2.t, 4.0)
 
-  geometry.octree_deinit(&octree)
+  geometry.octree_destroy(&octree)
   delete(primitives)
 }
 
@@ -645,7 +645,7 @@ test_octree_single_vs_multi_raycast :: proc(t: ^testing.T) {
   testing.expect(t, multi_hits[1].t > 2.0 && multi_hits[1].t < 3.0, "Sphere hit should be between 2 and 3")
   testing.expect_value(t, multi_hits[2].t, 5.0) // Second triangle
 
-  geometry.octree_deinit(&octree)
+  geometry.octree_destroy(&octree)
   delete(primitives)
   delete(multi_hits)
 }
@@ -713,7 +713,7 @@ test_octree_sphere_query :: proc(t: ^testing.T) {
 
   testing.expect_value(t, len(results), 1)
 
-  geometry.octree_deinit(&octree)
+  geometry.octree_destroy(&octree)
   delete(primitives)
   delete(results)
 }
@@ -771,7 +771,7 @@ test_octree_subdivision_with_raycast :: proc(t: ^testing.T) {
 
   testing.expect(t, len(multi_hits) > 0, "Should hit some spheres in cluster")
 
-  geometry.octree_deinit(&octree)
+  geometry.octree_destroy(&octree)
   delete(primitives)
   delete(multi_hits)
 }
@@ -804,7 +804,7 @@ test_octree_empty :: proc(t: ^testing.T) {
   oct_hit := geometry.octree_raycast_single(&empty_octree, ray, 100.0, geometry.ray_primitive_intersection)
   testing.expect(t, !oct_hit.hit, "Empty Octree should return no hit")
 
-  geometry.octree_deinit(&empty_octree)
+  geometry.octree_destroy(&empty_octree)
 }
 
 // ============================================================================
@@ -868,7 +868,7 @@ test_large_scene_raycasting :: proc(t: ^testing.T) {
   testing.expect(t, stats.total_primitives == i32(len(primitives)), "BVH should contain all primitives")
   testing.expect(t, stats.internal_nodes > 0, "BVH should have internal nodes for large scene")
 
-  geometry.bvh_deinit(&bvh)
+  geometry.bvh_destroy(&bvh)
   delete(primitives)
 }
 
@@ -932,7 +932,7 @@ benchmark_bvh_ray_single :: proc(t: ^testing.T) {
   ) -> time.Benchmark_Error {
     state := cast(^BVH_Ray_Single_State)raw_data(options.input)
 
-    geometry.bvh_deinit(&state.bvh)
+    geometry.bvh_destroy(&state.bvh)
     delete(state.primitives)
     delete(state.rays)
     free(state)
@@ -1028,7 +1028,7 @@ benchmark_bvh_ray_multi :: proc(t: ^testing.T) {
   ) -> time.Benchmark_Error {
     state := cast(^BVH_Ray_Multi_State)raw_data(options.input)
 
-    geometry.bvh_deinit(&state.bvh)
+    geometry.bvh_destroy(&state.bvh)
     delete(state.primitives)
     delete(state.rays)
     delete(state.multi_hits)
@@ -1127,7 +1127,7 @@ benchmark_bvh_sphere :: proc(t: ^testing.T) {
   ) -> time.Benchmark_Error {
     state := cast(^BVH_Sphere_State)raw_data(options.input)
 
-    geometry.bvh_deinit(&state.bvh)
+    geometry.bvh_destroy(&state.bvh)
     delete(state.primitives)
     delete(state.spheres)
     delete(state.results)
@@ -1245,7 +1245,7 @@ benchmark_bvh_aabb :: proc(t: ^testing.T) {
   ) -> time.Benchmark_Error {
     state := cast(^BVH_AABB_State)raw_data(options.input)
 
-    geometry.bvh_deinit(&state.bvh)
+    geometry.bvh_destroy(&state.bvh)
     delete(state.primitives)
     delete(state.aabbs)
     delete(state.results)
@@ -1354,7 +1354,7 @@ benchmark_octree_ray_single :: proc(t: ^testing.T) {
   ) -> time.Benchmark_Error {
     state := cast(^Octree_Ray_Single_State)raw_data(options.input)
 
-    geometry.octree_deinit(&state.octree)
+    geometry.octree_destroy(&state.octree)
     delete(state.primitives)
     delete(state.rays)
     free(state)
@@ -1463,7 +1463,7 @@ benchmark_octree_ray_multi :: proc(t: ^testing.T) {
   ) -> time.Benchmark_Error {
     state := cast(^Octree_Ray_Multi_State)raw_data(options.input)
 
-    geometry.octree_deinit(&state.octree)
+    geometry.octree_destroy(&state.octree)
     delete(state.primitives)
     delete(state.rays)
     delete(state.multi_hits)
@@ -1575,7 +1575,7 @@ benchmark_octree_sphere :: proc(t: ^testing.T) {
   ) -> time.Benchmark_Error {
     state := cast(^Octree_Sphere_State)raw_data(options.input)
 
-    geometry.octree_deinit(&state.octree)
+    geometry.octree_destroy(&state.octree)
     delete(state.primitives)
     delete(state.spheres)
     delete(state.results)
@@ -1648,7 +1648,7 @@ benchmark_bvh_build :: proc(t: ^testing.T) {
 
     for _ in 0..<options.rounds {
       geometry.bvh_build(&state.bvh, state.primitives)
-      geometry.bvh_deinit(&state.bvh)
+      geometry.bvh_destroy(&state.bvh)
       options.processed += len(state.primitives) * size_of(geometry.Primitive)
     }
 
@@ -1737,7 +1737,7 @@ benchmark_octree_build :: proc(t: ^testing.T) {
       for prim in state.primitives {
         geometry.octree_insert(&state.octree, prim)
       }
-      geometry.octree_deinit(&state.octree)
+      geometry.octree_destroy(&state.octree)
       options.processed += len(state.primitives) * size_of(geometry.Primitive)
     }
 

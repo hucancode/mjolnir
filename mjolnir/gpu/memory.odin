@@ -133,7 +133,7 @@ data_buffer_offset_of :: proc(self: ^DataBuffer($T), index: u32) -> u32 {
   return index * u32(self.element_size)
 }
 
-data_buffer_deinit :: proc(gpu_context: ^GPUContext, buffer: ^DataBuffer($T)) {
+data_buffer_destroy :: proc(gpu_context: ^GPUContext, buffer: ^DataBuffer($T)) {
   if buffer.mapped != nil {
     vk.UnmapMemory(gpu_context.device, buffer.memory)
     buffer.mapped = nil
@@ -196,7 +196,7 @@ create_local_buffer :: proc(
     {.TRANSFER_SRC},
     data,
   ) or_return
-  defer data_buffer_deinit(gpu_context, &staging)
+  defer data_buffer_destroy(gpu_context, &staging)
   copy_buffer(gpu_context, buffer, staging) or_return
   ret = .SUCCESS
   return
@@ -270,7 +270,7 @@ ImageBuffer :: struct {
   view:          vk.ImageView,
 }
 
-image_buffer_deinit :: proc(gpu_context: ^GPUContext, self: ^ImageBuffer) {
+image_buffer_detroy :: proc(gpu_context: ^GPUContext, self: ^ImageBuffer) {
   vk.DestroyImageView(gpu_context.device, self.view, nil)
   self.view = 0
   vk.DestroyImage(gpu_context.device, self.image, nil)
@@ -465,7 +465,7 @@ create_image_buffer :: proc(
     {.TRANSFER_SRC},
     data,
   ) or_return
-  defer data_buffer_deinit(gpu_context, &staging)
+  defer data_buffer_destroy(gpu_context, &staging)
   img = malloc_image_buffer(
     gpu_context,
     width,
@@ -657,7 +657,7 @@ cube_depth_texture_init :: proc(
   return .SUCCESS
 }
 
-cube_depth_texture_deinit :: proc(gpu_context: ^GPUContext, self: ^CubeImageBuffer) {
+cube_depth_texture_destroy :: proc(gpu_context: ^GPUContext, self: ^CubeImageBuffer) {
   if self == nil {
     return
   }
@@ -667,7 +667,7 @@ cube_depth_texture_deinit :: proc(gpu_context: ^GPUContext, self: ^CubeImageBuff
   }
   vk.DestroyImageView(gpu_context.device, self.view, nil)
   self.view = 0
-  image_buffer_deinit(gpu_context, &self.buffer)
+  image_buffer_detroy(gpu_context, &self.buffer)
 }
 
 // Create image buffer with custom mip levels
