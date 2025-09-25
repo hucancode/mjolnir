@@ -31,6 +31,7 @@ ResourceWarehouse :: struct {
   image_cube_buffers:           resource.Pool(gpu.CubeImageBuffer),
   cameras:                      resource.Pool(geometry.Camera),
   render_targets:               resource.Pool(RenderTarget),
+  emitters:                     resource.Pool(Emitter),
   animation_clips:              resource.Pool(animation.Clip),
 
   // Navigation system resources
@@ -68,6 +69,11 @@ ResourceWarehouse :: struct {
   mesh_data_buffer_set_layout:    vk.DescriptorSetLayout,
   mesh_data_descriptor_set:       vk.DescriptorSet,
   mesh_data_buffer:               gpu.DataBuffer(MeshData),
+
+  // Bindless emitter buffer system
+  emitter_buffer_set_layout:      vk.DescriptorSetLayout,
+  emitter_buffer_descriptor_set:  vk.DescriptorSet,
+  emitter_buffer:                 gpu.DataBuffer(EmitterData),
 
   // Bindless vertex skinning buffer system
   vertex_skinning_buffer_set_layout: vk.DescriptorSetLayout,
@@ -108,6 +114,8 @@ resource_init :: proc(
   resource.pool_init(&warehouse.cameras)
   log.infof("Initializing render target pool... ")
   resource.pool_init(&warehouse.render_targets)
+  log.infof("Initializing emitter pool... ")
+  resource.pool_init(&warehouse.emitters)
   log.infof("Initializing animation clips pool... ")
   resource.pool_init(&warehouse.animation_clips)
   log.infof("Initializing navigation mesh pool... ")
@@ -125,6 +133,7 @@ resource_init :: proc(
   init_node_data_buffer(gpu_context, warehouse) or_return
   init_mesh_data_buffer(gpu_context, warehouse) or_return
   init_vertex_skinning_buffer(gpu_context, warehouse) or_return
+  init_emitter_buffer(gpu_context, warehouse) or_return
   init_bindless_buffers(gpu_context, warehouse) or_return
   // Texture + samplers descriptor set
   textures_bindings := [?]vk.DescriptorSetLayoutBinding {
@@ -230,6 +239,7 @@ resource_deinit :: proc(
 ) {
   deinit_material_buffer(gpu_context, warehouse)
   deinit_world_matrix_buffers(gpu_context, warehouse)
+  deinit_emitter_buffer(gpu_context, warehouse)
   // Manually clean up each pool since callbacks can't capture gpu_context
   for &entry in warehouse.image_2d_buffers.entries {
     if entry.generation > 0 && entry.active {
@@ -259,6 +269,8 @@ resource_deinit :: proc(
   delete(warehouse.materials.free_indices)
   delete(warehouse.cameras.entries)
   delete(warehouse.cameras.free_indices)
+  delete(warehouse.emitters.entries)
+  delete(warehouse.emitters.free_indices)
   for &entry in warehouse.animation_clips.entries {
     if entry.generation > 0 && entry.active {
       animation.clip_deinit(&entry.item)
@@ -308,6 +320,24 @@ resource_deinit :: proc(
   )
   warehouse.textures_set_layout = 0
   warehouse.textures_descriptor_set = 0
+}
+
+create_emitter_handle :: proc(
+  warehouse: ^ResourceWarehouse,
+  config: Emitter,
+) -> Handle {
+  handle, emitter := resource.alloc(&warehouse.emitters)
+  emitter^ = config
+  emitter.dirty = true
+  return handle
+}
+
+destroy_emitter_handle :: proc(
+  warehouse: ^ResourceWarehouse,
+  handle: Handle,
+) -> bool {
+  _, freed := resource.free(&warehouse.emitters, handle)
+  return freed
 }
 
 create_geometry_pipeline_layout :: proc(
@@ -641,7 +671,7 @@ init_world_matrix_buffers :: proc(
       binding = 0,
       descriptorType = .STORAGE_BUFFER,
       descriptorCount = 1,
-      stageFlags = {.VERTEX, .FRAGMENT},
+      stageFlags = {.VERTEX, .FRAGMENT, .COMPUTE},
     },
   }
   vk.CreateDescriptorSetLayout(
@@ -844,6 +874,81 @@ init_mesh_data_buffer :: proc(
   }
   vk.UpdateDescriptorSets(gpu_context.device, 1, &write, 0, nil)
   return .SUCCESS
+}
+
+init_emitter_buffer :: proc(
+  gpu_context: ^gpu.GPUContext,
+  warehouse: ^ResourceWarehouse,
+) -> vk.Result {
+  log.info("Creating emitter buffer for bindless access")
+  warehouse.emitter_buffer = gpu.create_host_visible_buffer(
+    gpu_context,
+    EmitterData,
+    MAX_EMITTERS,
+    {.STORAGE_BUFFER},
+    nil,
+  ) or_return
+  emitters := gpu.data_buffer_get_all(&warehouse.emitter_buffer)
+  for &emitter in emitters do emitter = {}
+  bindings := [?]vk.DescriptorSetLayoutBinding {
+    {
+      binding = 0,
+      descriptorType = .STORAGE_BUFFER,
+      descriptorCount = 1,
+      stageFlags = {.COMPUTE},
+    },
+  }
+  vk.CreateDescriptorSetLayout(
+    gpu_context.device,
+    &vk.DescriptorSetLayoutCreateInfo {
+      sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+      bindingCount = len(bindings),
+      pBindings = raw_data(bindings[:]),
+    },
+    nil,
+    &warehouse.emitter_buffer_set_layout,
+  ) or_return
+  vk.AllocateDescriptorSets(
+    gpu_context.device,
+    &vk.DescriptorSetAllocateInfo {
+      sType              = .DESCRIPTOR_SET_ALLOCATE_INFO,
+      descriptorPool     = gpu_context.descriptor_pool,
+      descriptorSetCount = 1,
+      pSetLayouts        = &warehouse.emitter_buffer_set_layout,
+    },
+    &warehouse.emitter_buffer_descriptor_set,
+  ) or_return
+  buffer_info := vk.DescriptorBufferInfo {
+    buffer = warehouse.emitter_buffer.buffer,
+    offset = 0,
+    range  = vk.DeviceSize(vk.WHOLE_SIZE),
+  }
+  write := vk.WriteDescriptorSet {
+    sType           = .WRITE_DESCRIPTOR_SET,
+    dstSet          = warehouse.emitter_buffer_descriptor_set,
+    dstBinding      = 0,
+    descriptorType  = .STORAGE_BUFFER,
+    descriptorCount = 1,
+    pBufferInfo     = &buffer_info,
+  }
+  vk.UpdateDescriptorSets(gpu_context.device, 1, &write, 0, nil)
+  return .SUCCESS
+}
+
+deinit_emitter_buffer :: proc(
+  gpu_context: ^gpu.GPUContext,
+  warehouse: ^ResourceWarehouse,
+) {
+  gpu.data_buffer_deinit(gpu_context, &warehouse.emitter_buffer)
+  if warehouse.emitter_buffer_set_layout != 0 {
+    vk.DestroyDescriptorSetLayout(
+      gpu_context.device,
+      warehouse.emitter_buffer_set_layout,
+      nil,
+    )
+  }
+  warehouse.emitter_buffer_set_layout = 0
+  warehouse.emitter_buffer_descriptor_set = 0
 }
 
 deinit_mesh_data_buffer :: proc(

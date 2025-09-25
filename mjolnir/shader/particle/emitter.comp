@@ -19,7 +19,6 @@ struct Particle {
 };
 
 struct Emitter {
-  mat4 transform;
   vec4 initial_velocity;
   vec4 color_start;
   vec4 color_end;
@@ -33,30 +32,35 @@ struct Emitter {
   float weight;
   float weight_spread;
   uint texture_index;
+  uint node_index;
   uint visible;
-  uint padding[1];
   vec4 aabb_min;
   vec4 aabb_max;
 };
 
-layout(set = 0, binding = 0) buffer ParticleBuffer {
-    Particle particles[];
-};
-
-layout(set = 0, binding = 1) buffer EmitterBuffer {
+layout(set = 0, binding = 0) buffer EmitterBuffer {
     Emitter emitters[];
 };
 
-layout(set = 0, binding = 2) buffer ParticleCounter {
+layout(set = 1, binding = 0) buffer ParticleBuffer {
+    Particle particles[];
+};
+
+layout(set = 1, binding = 1) buffer ParticleCounter {
     uint particle_count;
 };
 
-layout(set = 0, binding = 3) uniform ParamsBuffer {
+layout(set = 1, binding = 2) uniform ParamsBuffer {
     uint max_particles;
     uint emitter_count;
     uint forcefield_count;
     float delta_time;
     vec4 frustum_planes[6];
+};
+
+
+layout(set = 2, binding = 0) buffer WorldMatrixBuffer {
+    mat4 world_matrices[];
 };
 
 
@@ -105,13 +109,20 @@ void main() {
         if (idx >= MAX_PARTICLES) break;
         // Random seed per particle
         vec2 seed = vec2(float(idx), float(emitter_idx) + float(i) * 0.123);
-        // Position: emitter position + random spread
-        vec4 base_pos = emitters[emitter_idx].transform[3];
+        uint node_index = emitters[emitter_idx].node_index;
+        if (node_index >= world_matrices.length()) {
+            break;
+        }
+        mat4 world = world_matrices[node_index];
+        mat3 world_rotation = mat3(world);
+        // Position: emitter position + random spread (local spread rotated into world space)
+        vec4 base_pos = world * vec4(0.0, 0.0, 0.0, 1.0);
         vec3 pos_spread = random_in_sphere(emitters[emitter_idx].position_spread, seed);
-        vec4 position = base_pos + vec4(pos_spread, 0.0);
-        // Velocity: initial_velocity + random spread
-        vec3 base_vel = emitters[emitter_idx].initial_velocity.xyz;
-        vec3 vel_spread = random_in_sphere(emitters[emitter_idx].velocity_spread, seed * 2.0);
+        vec3 world_offset = world_rotation * pos_spread;
+        vec4 position = base_pos + vec4(world_offset, 0.0);
+        // Velocity: initial_velocity + random spread (expressed in local space)
+        vec3 base_vel = world_rotation * emitters[emitter_idx].initial_velocity.xyz;
+        vec3 vel_spread = world_rotation * random_in_sphere(emitters[emitter_idx].velocity_spread, seed * 2.0);
         vec4 velocity = vec4(base_vel + vel_spread, 0.0);
         // Color
         vec4 color_start = emitters[emitter_idx].color_start;
