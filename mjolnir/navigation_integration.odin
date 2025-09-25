@@ -2,7 +2,6 @@ package mjolnir
 
 import "core:log"
 import "core:math/linalg"
-import "core:slice"
 import "geometry"
 import "navigation/detour"
 import "navigation/recast"
@@ -142,28 +141,34 @@ add_mesh_to_collector :: proc(
 ) {
   vertex_offset := i32(len(collector.vertices))
 
+  vertex_capacity := u32(
+    warehouse.vertex_buffer.bytes_count /
+    warehouse.vertex_buffer.element_size,
+  )
+  if warehouse.vertex_buffer.mapped == nil {
+    log.error("Vertex buffer is not mapped; cannot collect navigation geometry")
+    return
+  }
   vertex_count := int(mesh.vertex_allocation.count)
   for i in 0 ..< vertex_count {
     vertex_index := mesh.vertex_allocation.offset + u32(i)
-    if vertex_index >= u32(len(warehouse.vertex_data)) {
-      continue
-    }
-    vertex := warehouse.vertex_data[vertex_index]
-    pos := vertex.position
-    world_pos := linalg.matrix_mul_vector(
-      transform,
-      [4]f32{pos.x, pos.y, pos.z, 1.0},
-    )
-    append(&collector.vertices, [3]f32{world_pos.x, world_pos.y, world_pos.z})
+    if vertex_index >= vertex_capacity do continue
+    vertex := warehouse.vertex_buffer.mapped[int(vertex_index)]
+    append(&collector.vertices, transform[3,3] * vertex.position)
   }
-
+  index_capacity := u32(
+    warehouse.index_buffer.bytes_count /
+    warehouse.index_buffer.element_size,
+  )
+  if warehouse.index_buffer.mapped == nil {
+    log.error("Index buffer is not mapped; cannot collect navigation geometry")
+    return
+  }
   index_count := int(mesh.index_allocation.count)
   for i in 0 ..< index_count {
     index_index := mesh.index_allocation.offset + u32(i)
-    if index_index >= u32(len(warehouse.index_data)) {
-      continue
-    }
-    index := warehouse.index_data[index_index]
+    if index_index >= index_capacity do continue
+    index := warehouse.index_buffer.mapped[int(index_index)]
     append(&collector.indices, i32(index) + vertex_offset)
   }
 

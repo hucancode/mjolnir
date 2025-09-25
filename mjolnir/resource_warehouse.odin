@@ -80,7 +80,6 @@ ResourceWarehouse :: struct {
   vertex_skinning_descriptor_set:    vk.DescriptorSet,
   vertex_skinning_buffer:            gpu.DataBuffer(geometry.SkinningData),
   vertex_skinning_slab:              resource.SlabAllocator,
-  vertex_skinning_data:              []geometry.SkinningData,
 
   // Bindless texture system
   textures_set_layout:          vk.DescriptorSetLayout,
@@ -94,8 +93,6 @@ ResourceWarehouse :: struct {
   index_buffer:                 gpu.DataBuffer(u32),
   vertex_slab:                  resource.SlabAllocator,
   index_slab:                   resource.SlabAllocator,
-  vertex_data:                  []geometry.Vertex,
-  index_data:                   []u32,
 }
 
 resource_init :: proc(
@@ -986,8 +983,6 @@ init_vertex_skinning_buffer :: proc(
     {.STORAGE_BUFFER},
     nil,
   ) or_return
-  warehouse.vertex_skinning_data =
-    warehouse.vertex_skinning_buffer.mapped[:skinning_count]
   resource.slab_allocator_init(&warehouse.vertex_skinning_slab, VERTEX_SLAB_CONFIG)
   bindings := [?]vk.DescriptorSetLayoutBinding {
     {
@@ -1038,7 +1033,6 @@ deinit_vertex_skinning_buffer :: proc(
   gpu_context: ^gpu.GPUContext,
   warehouse: ^ResourceWarehouse,
 ) {
-  warehouse.vertex_skinning_data = nil
   resource.slab_allocator_deinit(&warehouse.vertex_skinning_slab)
   gpu.data_buffer_deinit(gpu_context, &warehouse.vertex_skinning_buffer)
   vk.DestroyDescriptorSetLayout(
@@ -1285,38 +1279,18 @@ init_bindless_buffers :: proc(
 ) -> vk.Result {
   vertex_count := BINDLESS_VERTEX_BUFFER_SIZE / size_of(geometry.Vertex)
   index_count := BINDLESS_INDEX_BUFFER_SIZE / size_of(u32)
-  warehouse.vertex_buffer = gpu.malloc_host_visible_buffer(
+  warehouse.vertex_buffer = gpu.create_host_visible_buffer(
     gpu_context,
     geometry.Vertex,
     vertex_count,
     {.VERTEX_BUFFER},
   ) or_return
-  warehouse.index_buffer = gpu.malloc_host_visible_buffer(
+  warehouse.index_buffer = gpu.create_host_visible_buffer(
     gpu_context,
     u32,
     index_count,
     {.INDEX_BUFFER},
   ) or_return
-  vertex_data_ptr: rawptr
-  vk.MapMemory(
-    gpu_context.device,
-    warehouse.vertex_buffer.memory,
-    0,
-    vk.DeviceSize(vk.WHOLE_SIZE),
-    {},
-    &vertex_data_ptr,
-  ) or_return
-  warehouse.vertex_data = ([^]geometry.Vertex)(vertex_data_ptr)[:vertex_count]
-  index_data_ptr: rawptr
-  vk.MapMemory(
-    gpu_context.device,
-    warehouse.index_buffer.memory,
-    0,
-    vk.DeviceSize(vk.WHOLE_SIZE),
-    {},
-    &index_data_ptr,
-  ) or_return
-  warehouse.index_data = ([^]u32)(index_data_ptr)[:index_count]
   resource.slab_allocator_init(&warehouse.vertex_slab, VERTEX_SLAB_CONFIG)
   resource.slab_allocator_init(&warehouse.index_slab, INDEX_SLAB_CONFIG)
   log.info("Bindless buffer system initialized")
@@ -1329,12 +1303,6 @@ deinit_bindless_buffers :: proc(
   gpu_context: ^gpu.GPUContext,
   warehouse: ^ResourceWarehouse,
 ) {
-  if warehouse.vertex_buffer.memory != 0 {
-    vk.UnmapMemory(gpu_context.device, warehouse.vertex_buffer.memory)
-  }
-  if warehouse.index_buffer.memory != 0 {
-    vk.UnmapMemory(gpu_context.device, warehouse.index_buffer.memory)
-  }
   gpu.data_buffer_deinit(gpu_context, &warehouse.vertex_buffer)
   gpu.data_buffer_deinit(gpu_context, &warehouse.index_buffer)
   resource.slab_allocator_deinit(&warehouse.vertex_slab)
@@ -1354,11 +1322,11 @@ warehouse_allocate_vertices :: proc(
     log.error("Failed to allocate vertices from slab allocator")
     return {}, .ERROR_OUT_OF_DEVICE_MEMORY
   }
-  if offset + vertex_count > u32(len(warehouse.vertex_data)) {
-    log.error("Vertex buffer overflow")
-    return {}, .ERROR_OUT_OF_DEVICE_MEMORY
+  ret = gpu.data_buffer_write(&warehouse.vertex_buffer, vertices, int(offset))
+  if ret != .SUCCESS {
+    log.error("Failed to write vertex data to GPU buffer")
+    return {}, ret
   }
-  copy(warehouse.vertex_data[offset:offset + vertex_count], vertices)
   return BufferAllocation{offset = offset, count = vertex_count}, .SUCCESS
 }
 
@@ -1375,13 +1343,11 @@ warehouse_allocate_indices :: proc(
     log.error("Failed to allocate indices from slab allocator")
     return {}, .ERROR_OUT_OF_DEVICE_MEMORY
   }
-
-  if offset + index_count > u32(len(warehouse.index_data)) {
-    log.error("Index buffer overflow")
-    return {}, .ERROR_OUT_OF_DEVICE_MEMORY
+  ret = gpu.data_buffer_write(&warehouse.index_buffer, indices, int(offset))
+  if ret != .SUCCESS {
+    log.error("Failed to write index data to GPU buffer")
+    return {}, ret
   }
-
-  copy(warehouse.index_data[offset:offset + index_count], indices)
   return BufferAllocation{offset = offset, count = index_count}, .SUCCESS
 }
 
@@ -1401,14 +1367,15 @@ warehouse_allocate_vertex_skinning :: proc(
     log.error("Failed to allocate vertex skinning data from slab allocator")
     return {}, .ERROR_OUT_OF_DEVICE_MEMORY
   }
-  if offset + skinning_count > u32(len(warehouse.vertex_skinning_data)) {
-    log.error("Vertex skinning buffer overflow")
-    return {}, .ERROR_OUT_OF_DEVICE_MEMORY
-  }
-  copy(
-    warehouse.vertex_skinning_data[offset:offset + skinning_count],
+  ret = gpu.data_buffer_write(
+    &warehouse.vertex_skinning_buffer,
     skinnings,
+    int(offset),
   )
+  if ret != .SUCCESS {
+    log.error("Failed to write vertex skinning data to GPU buffer")
+    return {}, ret
+  }
   return BufferAllocation{offset = offset, count = skinning_count}, .SUCCESS
 }
 
