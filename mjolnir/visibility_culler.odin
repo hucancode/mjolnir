@@ -3,16 +3,16 @@ package mjolnir
 import "core:log"
 import "gpu"
 import vk "vendor:vulkan"
+import "resources"
 
 MAX_ACTIVE_CAMERAS :: 128
-MAX_NODES_IN_SCENE :: 65536
 
 VisibilityPushConstants :: struct {
   camera_index: u32,
   node_count:   u32,
   max_draws:    u32,
-  include_flags: NodeFlagSet,
-  exclude_flags: NodeFlagSet,
+  include_flags: resources.NodeFlagSet,
+  exclude_flags: resources.NodeFlagSet,
 }
 
 VisibilityCuller :: struct {
@@ -31,11 +31,11 @@ VisibilityCuller :: struct {
 visibility_culler_init :: proc(
   self: ^VisibilityCuller,
   gpu_context: ^gpu.GPUContext,
-  warehouse: ^ResourceWarehouse,
+  resources_manager: ^resources.Manager,
 ) -> vk.Result {
   log.debugf("Initializing visibility culler")
 
-  self.max_draws = MAX_NODES_IN_SCENE
+  self.max_draws = resources.MAX_NODES_IN_SCENE
 
   for frame_idx in 0 ..< MAX_FRAMES_IN_FLIGHT {
     self.draw_count_buffer[frame_idx] = gpu.create_host_visible_buffer(
@@ -165,20 +165,20 @@ visibility_culler_init :: proc(
 
   for frame_idx in 0 ..< MAX_FRAMES_IN_FLIGHT {
     node_info := vk.DescriptorBufferInfo {
-      buffer = warehouse.node_data_buffer.buffer,
-      range  = vk.DeviceSize(warehouse.node_data_buffer.bytes_count),
+      buffer = resources_manager.node_data_buffer.buffer,
+      range  = vk.DeviceSize(resources_manager.node_data_buffer.bytes_count),
     }
     mesh_info := vk.DescriptorBufferInfo {
-      buffer = warehouse.mesh_data_buffer.buffer,
-      range  = vk.DeviceSize(warehouse.mesh_data_buffer.bytes_count),
+      buffer = resources_manager.mesh_data_buffer.buffer,
+      range  = vk.DeviceSize(resources_manager.mesh_data_buffer.bytes_count),
     }
     world_info := vk.DescriptorBufferInfo {
-      buffer = warehouse.world_matrix_buffers[frame_idx].buffer,
-      range  = vk.DeviceSize(warehouse.world_matrix_buffers[frame_idx].bytes_count),
+      buffer = resources_manager.world_matrix_buffers[frame_idx].buffer,
+      range  = vk.DeviceSize(resources_manager.world_matrix_buffers[frame_idx].bytes_count),
     }
     camera_info := vk.DescriptorBufferInfo {
-      buffer = warehouse.camera_buffer.buffer,
-      range  = vk.DeviceSize(warehouse.camera_buffer.bytes_count),
+      buffer = resources_manager.camera_buffer.buffer,
+      range  = vk.DeviceSize(resources_manager.camera_buffer.bytes_count),
     }
     count_info := vk.DescriptorBufferInfo {
       buffer = self.draw_count_buffer[frame_idx].buffer,
@@ -285,8 +285,8 @@ visibility_culler_dispatch :: proc(
   command_buffer: vk.CommandBuffer,
   frame_index: u32,
   camera_index: u32,
-  include_flags: NodeFlagSet = {.VISIBLE},
-  exclude_flags: NodeFlagSet = {},
+  include_flags: resources.NodeFlagSet = {.VISIBLE},
+  exclude_flags: resources.NodeFlagSet = {},
 ) {
   if self.node_count == 0 {
     return

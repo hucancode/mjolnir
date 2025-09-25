@@ -3,7 +3,7 @@ package mjolnir
 import "core:log"
 import "geometry"
 import "gpu"
-import "resource"
+import "resources"
 import vk "vendor:vulkan"
 
 RendererTransparent :: struct {
@@ -16,10 +16,10 @@ transparent_init :: proc(
   self: ^RendererTransparent,
   gpu_context: ^gpu.GPUContext,
   width, height: u32,
-  warehouse: ^ResourceWarehouse,
+  resources_manager: ^resources.Manager,
 ) -> vk.Result {
   log.info("Initializing transparent renderer")
-  self.pipeline_layout = warehouse.geometry_pipeline_layout
+  self.pipeline_layout = resources_manager.geometry_pipeline_layout
   if self.pipeline_layout == 0 {
     return .ERROR_INITIALIZATION_FAILED
   }
@@ -330,15 +330,31 @@ transparent_deinit :: proc(
 
 transparent_begin :: proc(
   self: ^RendererTransparent,
-  render_target: ^RenderTarget,
+  render_target: ^resources.RenderTarget,
   command_buffer: vk.CommandBuffer,
-  warehouse: ^ResourceWarehouse,
+  resources_manager: ^resources.Manager,
   frame_index: u32,
 ) {
   // Setup color attachment - load existing content
+  color_texture, ok := resources.get_image_2d(
+    resources_manager,
+    resources.get_final_image(render_target, frame_index),
+  )
+  if !ok {
+    log.error("Transparent lighting missing color attachment")
+    return
+  }
+  depth_texture, depth_found := resources.get_image_2d(
+    resources_manager,
+    resources.get_depth_texture(render_target, frame_index),
+  )
+  if !depth_found {
+    log.error("Transparent lighting missing depth attachment")
+    return
+  }
   color_attachment := vk.RenderingAttachmentInfo{
     sType       = .RENDERING_ATTACHMENT_INFO,
-    imageView   = image_2d(warehouse, get_final_image(render_target, frame_index)).view,
+    imageView   = color_texture.view,
     imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
     loadOp      = .LOAD,
     storeOp     = .STORE,
@@ -346,7 +362,7 @@ transparent_begin :: proc(
   // Setup depth attachment - load existing depth buffer
   depth_attachment := vk.RenderingAttachmentInfo{
     sType       = .RENDERING_ATTACHMENT_INFO,
-    imageView   = image_2d(warehouse, get_depth_texture(render_target, frame_index)).view,
+    imageView   = depth_texture.view,
     imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
     loadOp      = .LOAD,
     storeOp     = .STORE,
@@ -379,9 +395,9 @@ transparent_begin :: proc(
 transparent_render_pass :: proc(
   self: ^RendererTransparent,
   pipeline: vk.Pipeline,
-  render_target: ^RenderTarget,
+  render_target: ^resources.RenderTarget,
   command_buffer: vk.CommandBuffer,
-  warehouse: ^ResourceWarehouse,
+  resources_manager: ^resources.Manager,
   frame_index: u32,
   draw_buffer: vk.Buffer,
   draw_count: u32,
@@ -390,14 +406,14 @@ transparent_render_pass :: proc(
     return
   }
   descriptor_sets := [?]vk.DescriptorSet {
-    warehouse.camera_buffer_descriptor_set,
-    warehouse.textures_descriptor_set,
-    warehouse.bone_buffer_descriptor_sets[frame_index],
-    warehouse.material_buffer_descriptor_set,
-    warehouse.world_matrix_descriptor_sets[frame_index],
-    warehouse.node_data_descriptor_set,
-    warehouse.mesh_data_descriptor_set,
-    warehouse.vertex_skinning_descriptor_set,
+    resources_manager.camera_buffer_descriptor_set,
+    resources_manager.textures_descriptor_set,
+    resources_manager.bone_buffer_descriptor_sets[frame_index],
+    resources_manager.material_buffer_descriptor_set,
+    resources_manager.world_matrix_descriptor_sets[frame_index],
+    resources_manager.node_data_descriptor_set,
+    resources_manager.mesh_data_descriptor_set,
+    resources_manager.vertex_skinning_descriptor_set,
   }
   vk.CmdBindDescriptorSets(
     command_buffer,
@@ -423,7 +439,7 @@ transparent_render_pass :: proc(
     &push_constants,
   )
 
-  vertex_buffers := [1]vk.Buffer{warehouse.vertex_buffer.buffer}
+  vertex_buffers := [1]vk.Buffer{resources_manager.vertex_buffer.buffer}
   vertex_offsets := [1]vk.DeviceSize{0}
   vk.CmdBindVertexBuffers(
     command_buffer,
@@ -434,7 +450,7 @@ transparent_render_pass :: proc(
   )
   vk.CmdBindIndexBuffer(
     command_buffer,
-    warehouse.index_buffer.buffer,
+    resources_manager.index_buffer.buffer,
     0,
     .UINT32,
   )

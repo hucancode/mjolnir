@@ -15,7 +15,8 @@ import vk "vendor:vulkan"
 import "animation"
 import "geometry"
 import "gpu"
-import "resource"
+import "resources"
+
 
 @(private = "file")
 AssetManifest :: struct {
@@ -28,12 +29,12 @@ AssetManifest :: struct {
 @(private = "file")
 GeometryData :: struct {
   geometry:        geometry.Geometry,
-  material_handle: resource.Handle,
+  material_handle: resources.Handle,
 }
 
 @(private = "file")
 SkinData :: struct {
-  bones:                []Bone,
+  bones:                []resources.Bone,
   root_bone_idx:        u32,
   matrix_buffer_offset: u32,
 }
@@ -67,11 +68,11 @@ load_gltf :: proc(
   }
   // step 2: Resource Loading
   texture_cache := make(
-    map[^cgltf.texture]resource.Handle,
+    map[^cgltf.texture]resources.Handle,
     context.temp_allocator,
   )
   material_cache := make(
-    map[^cgltf.material]resource.Handle,
+    map[^cgltf.material]resources.Handle,
     context.temp_allocator,
   )
   load_textures_batch(
@@ -211,7 +212,7 @@ load_textures_batch :: proc(
   gltf_path: string,
   gltf_data: ^cgltf.data,
   textures: []^cgltf.texture,
-  texture_cache: ^map[^cgltf.texture]resource.Handle,
+  texture_cache: ^map[^cgltf.texture]resources.Handle,
 ) -> cgltf.result {
   for gltf_texture in textures {
     if gltf_texture == nil || gltf_texture.image_ == nil {
@@ -238,9 +239,9 @@ load_textures_batch :: proc(
     } else {
       continue
     }
-    tex_handle, _, texture_result := create_texture(
+    tex_handle, _, texture_result := resources.create_texture(
       &engine.gpu_context,
-      &engine.warehouse,
+      &engine.resource_manager,
       pixel_data,
     )
     if texture_result != .SUCCESS {
@@ -259,15 +260,15 @@ load_materials_batch :: proc(
   gltf_path: string,
   gltf_data: ^cgltf.data,
   materials: []^cgltf.material,
-  texture_cache: ^map[^cgltf.texture]resource.Handle,
-  material_cache: ^map[^cgltf.material]resource.Handle,
+  texture_cache: ^map[^cgltf.texture]resources.Handle,
+  material_cache: ^map[^cgltf.material]resources.Handle,
 ) -> cgltf.result {
   for gltf_material in materials {
     if gltf_material == nil do continue
     albedo, metallic_roughness, normal, emissive, occlusion, features :=
       load_material_textures(gltf_material, texture_cache)
-    material_handle, _, material_result := create_material(
-      &engine.warehouse,
+    material_handle, _, material_result := resources.create_material(
+      &engine.resource_manager,
       features,
       .PBR,
       albedo,
@@ -286,14 +287,14 @@ load_materials_batch :: proc(
 @(private = "file")
 load_material_textures :: proc(
   gltf_material: ^cgltf.material,
-  texture_cache: ^map[^cgltf.texture]resource.Handle,
+  texture_cache: ^map[^cgltf.texture]resources.Handle,
 ) -> (
-  albedo: resource.Handle,
-  metallic_roughness: resource.Handle,
-  normal: resource.Handle,
-  emissive: resource.Handle,
-  occlusion: resource.Handle,
-  features: ShaderFeatureSet,
+  albedo: resources.Handle,
+  metallic_roughness: resources.Handle,
+  normal: resources.Handle,
+  emissive: resources.Handle,
+  occlusion: resources.Handle,
+  features: resources.ShaderFeatureSet,
 ) {
   if gltf_material.has_pbr_metallic_roughness &&
      gltf_material.pbr_metallic_roughness.metallic_roughness_texture.texture !=
@@ -343,8 +344,8 @@ process_geometries :: proc(
   gltf_path: string,
   gltf_data: ^cgltf.data,
   meshes: []^cgltf.mesh,
-  texture_cache: ^map[^cgltf.texture]resource.Handle,
-  material_cache: ^map[^cgltf.material]resource.Handle,
+  texture_cache: ^map[^cgltf.texture]resources.Handle,
+  material_cache: ^map[^cgltf.material]resources.Handle,
   geometry_cache: ^map[^cgltf.mesh]GeometryData,
   mesh_skinning_map: map[^cgltf.mesh]bool,
 ) -> cgltf.result {
@@ -368,7 +369,7 @@ process_geometries :: proc(
 @(private = "file")
 process_mesh_primitives :: proc(
   mesh: ^cgltf.mesh,
-  material_cache: ^map[^cgltf.material]resource.Handle,
+  material_cache: ^map[^cgltf.material]resources.Handle,
   include_skinning: bool,
 ) -> (
   GeometryData,
@@ -379,7 +380,7 @@ process_mesh_primitives :: proc(
     return {}, .invalid_gltf
   }
 
-  material_handle: resource.Handle
+  material_handle: resources.Handle
   if primitives[0].material != nil {
     if handle, found := material_cache[primitives[0].material]; found {
       material_handle = handle
@@ -542,7 +543,7 @@ process_skins :: proc(
   skin_cache: ^map[^cgltf.skin]SkinData,
 ) {
   for gltf_skin in skins {
-    bones := make([]Bone, len(gltf_skin.joints))
+    bones := make([]resources.Bone, len(gltf_skin.joints))
     for joint_node, i in gltf_skin.joints {
       bones[i].name = string(joint_node.name)
       if gltf_skin.inverse_bind_matrices != nil {
@@ -579,14 +580,14 @@ process_skins :: proc(
         break
       }
     }
-    matrix_buffer_offset := resource.slab_alloc(
-      &engine.warehouse.bone_matrix_slab,
+    matrix_buffer_offset := resources.slab_alloc(
+      &engine.resource_manager.bone_matrix_slab,
       u32(len(bones)),
     )
     for frame_idx in 0 ..< MAX_FRAMES_IN_FLIGHT {
       l := matrix_buffer_offset
       r := l + u32(len(bones))
-      bone_matrices := engine.warehouse.bone_buffers[frame_idx].mapped[l:r]
+      bone_matrices := engine.resource_manager.bone_buffers[frame_idx].mapped[l:r]
       slice.fill(bone_matrices, linalg.MATRIX4F32_IDENTITY)
     }
     skin_cache[gltf_skin] = SkinData {
@@ -618,7 +619,7 @@ construct_scene :: proc(
   child_node_indices := make([dynamic]u32, 0, context.temp_allocator)
   node_ptr_to_idx_map := make(map[^cgltf.node]u32, context.temp_allocator)
   skin_to_first_mesh := make(
-    map[^cgltf.skin]resource.Handle,
+    map[^cgltf.skin]resources.Handle,
     context.temp_allocator,
   )
   for &node, i in gltf_data.nodes {
@@ -638,7 +639,7 @@ construct_scene :: proc(
   for len(stack) > 0 {
     entry := pop(&stack)
     gltf_node := &gltf_data.nodes[entry.idx]
-    node_handle, node := resource.alloc(&engine.scene.nodes)
+    node_handle, node := resources.alloc(&engine.scene.nodes)
     if node == nil do continue
     init_node(node, string(gltf_node.name))
     node.transform = geometry.TRANSFORM_IDENTITY
@@ -668,33 +669,33 @@ construct_scene :: proc(
       if geometry_data, found := geometry_cache[gltf_node.mesh]; found {
         if gltf_node.skin != nil {
           if skin_data, skin_found := skin_cache[gltf_node.skin]; skin_found {
-            mesh_handle, mesh := resource.alloc(&engine.warehouse.meshes)
-            init_result := mesh_init(
+            mesh_handle, mesh := resources.alloc(&engine.resource_manager.meshes)
+            init_result := resources.mesh_init(
               mesh,
               &engine.gpu_context,
-              &engine.warehouse,
+              &engine.resource_manager,
               geometry_data.geometry,
             )
-            if init_result != .SUCCESS {
+          if init_result != vk.Result.SUCCESS {
               log.error("Failed to initialize skinned mesh")
-              mesh_deinit(mesh, &engine.gpu_context, &engine.warehouse)
-              resource.free(&engine.warehouse.meshes, mesh_handle)
+              resources.mesh_deinit(mesh, &engine.gpu_context, &engine.resource_manager)
+              resources.free(&engine.resource_manager.meshes, mesh_handle)
               continue
             }
             skinning, _ := &mesh.skinning.?
             // Deep clone bones including their children slices
-            skinning.bones = make([]Bone, len(skin_data.bones))
+            skinning.bones = make([]resources.Bone, len(skin_data.bones))
             for src_bone, i in skin_data.bones {
               skinning.bones[i] = src_bone
               skinning.bones[i].children = slice.clone(src_bone.children)
               skinning.bones[i].name = strings.clone(src_bone.name)
             }
             skinning.root_bone_index = skin_data.root_bone_idx
-            gpu_result := mesh_write_to_gpu(&engine.warehouse, mesh_handle, mesh)
-            if gpu_result != .SUCCESS {
+            gpu_result := resources.mesh_write_to_gpu(&engine.resource_manager, mesh_handle, mesh)
+            if gpu_result != vk.Result.SUCCESS {
               log.error("Failed to write skinned mesh data to GPU")
-              mesh_deinit(mesh, &engine.gpu_context, &engine.warehouse)
-              resource.free(&engine.warehouse.meshes, mesh_handle)
+              resources.mesh_deinit(mesh, &engine.gpu_context, &engine.resource_manager)
+              resources.free(&engine.resource_manager.meshes, mesh_handle)
               continue
             }
             node.attachment = MeshAttachment {
@@ -712,9 +713,9 @@ construct_scene :: proc(
             }
           }
         } else {
-          mesh_handle, _, ret := create_mesh(
+          mesh_handle, _, ret := resources.create_mesh(
             &engine.gpu_context,
-            &engine.warehouse,
+            &engine.resource_manager,
             geometry_data.geometry,
           )
           if ret == .SUCCESS {
@@ -745,13 +746,16 @@ load_animations :: proc(
   engine: ^Engine,
   gltf_data: ^cgltf.data,
   gltf_skin: ^cgltf.skin,
-  mesh_handle: resource.Handle,
+  mesh_handle: resources.Handle,
 ) -> bool {
-  mesh := mesh(engine, mesh_handle)
+  mesh, ok := resources.get_mesh(&engine.resource_manager, mesh_handle)
+  if !ok {
+    return false
+  }
   skinning := &mesh.skinning.?
 
   for gltf_anim, i in gltf_data.animations {
-    clip_handle, clip := resource.alloc(&engine.warehouse.animation_clips)
+    clip_handle, clip := resources.alloc(&engine.resource_manager.animation_clips)
     if gltf_anim.name != nil {
       clip.name = strings.clone_from_cstring(gltf_anim.name)
     } else {

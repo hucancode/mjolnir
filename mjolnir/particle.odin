@@ -3,53 +3,14 @@ package mjolnir
 import "core:log"
 import "geometry"
 import "gpu"
-import "resource"
 import vk "vendor:vulkan"
+import "resources"
 
 MAX_PARTICLES :: 65536
 COMPUTE_PARTICLE_BATCH :: 256
 
 MAX_EMITTERS :: 64
 MAX_FORCE_FIELDS :: 32
-
-EmitterData :: struct {
-  initial_velocity:  [4]f32,
-  color_start:       [4]f32,
-  color_end:         [4]f32,
-  emission_rate:     f32,
-  particle_lifetime: f32,
-  position_spread:   f32,
-  velocity_spread:   f32,
-  time_accumulator:  f32,
-  size_start:        f32,
-  size_end:          f32,
-  weight:            f32,
-  weight_spread:     f32,
-  texture_index:     u32,
-  node_index:        u32,
-  visible:           b32,
-  aabb_min:          [4]f32, // xyz = min bounds, w = unused
-  aabb_max:          [4]f32, // xyz = max bounds, w = unused
-}
-
-Emitter :: struct {
-  initial_velocity:  [4]f32,
-  color_start:       [4]f32,
-  color_end:         [4]f32,
-  emission_rate:     f32,
-  particle_lifetime: f32,
-  position_spread:   f32,
-  velocity_spread:   f32,
-  size_start:        f32,
-  size_end:          f32,
-  enabled:           b32,
-  weight:            f32,
-  weight_spread:     f32,
-  texture_handle:    resource.Handle,
-  bounding_box:      geometry.Aabb,
-  node_handle:       resource.Handle,
-  is_dirty:          bool,
-}
 
 ForceField :: struct {
   tangent_strength: f32, // 0 = push/pull in straight line, 1 = push/pull in tangent line
@@ -310,7 +271,7 @@ particle_deinit :: proc(
 particle_init :: proc(
   self: ^RendererParticle,
   gpu_context: ^gpu.GPUContext,
-  warehouse: ^ResourceWarehouse,
+  resources_manager: ^resources.Manager,
 ) -> vk.Result {
   log.debugf("Initializing particle renderer")
   self.params_buffer = gpu.create_host_visible_buffer(
@@ -337,18 +298,18 @@ particle_init :: proc(
     1,
     {.STORAGE_BUFFER},
   ) or_return
-  self.emitter_bindless_descriptor_set = warehouse.emitter_buffer_descriptor_set
-  particle_init_emitter_pipeline(gpu_context, self, warehouse) or_return
+  self.emitter_bindless_descriptor_set = resources_manager.emitter_buffer_descriptor_set
+  particle_init_emitter_pipeline(gpu_context, self, resources_manager) or_return
   particle_init_compact_pipeline(gpu_context, self) or_return
   particle_init_compute_pipeline(gpu_context, self) or_return
-  particle_init_render_pipeline(gpu_context, self, warehouse) or_return
+  particle_init_render_pipeline(gpu_context, self, resources_manager) or_return
   return .SUCCESS
 }
 
 particle_init_emitter_pipeline :: proc(
   gpu_context: ^gpu.GPUContext,
   self: ^RendererParticle,
-  warehouse: ^ResourceWarehouse,
+  resources_manager: ^resources.Manager,
 ) -> vk.Result {
   emitter_bindings := [?]vk.DescriptorSetLayoutBinding {
     {
@@ -391,9 +352,9 @@ particle_init_emitter_pipeline :: proc(
     &self.emitter_descriptor_set,
   ) or_return
   descriptor_set_layouts := [?]vk.DescriptorSetLayout {
-    warehouse.emitter_buffer_set_layout,
+    resources_manager.emitter_buffer_set_layout,
     self.emitter_descriptor_set_layout,
-    warehouse.world_matrix_buffer_set_layout,
+    resources_manager.world_matrix_buffer_set_layout,
   }
   vk.CreatePipelineLayout(
     gpu_context.device,
@@ -777,11 +738,11 @@ particle_init_compact_pipeline :: proc(
 particle_init_render_pipeline :: proc(
   gpu_context: ^gpu.GPUContext,
   self: ^RendererParticle,
-  warehouse: ^ResourceWarehouse,
+  resources_manager: ^resources.Manager,
 ) -> vk.Result {
   descriptor_set_layouts := [?]vk.DescriptorSetLayout {
-    warehouse.camera_buffer_set_layout, // set = 0 for bindless camera buffer
-    warehouse.textures_set_layout, // set = 1 for textures
+    resources_manager.camera_buffer_set_layout, // set = 0 for bindless camera buffer
+    resources_manager.textures_set_layout, // set = 1 for textures
   }
   push_constant_range := vk.PushConstantRange {
     stageFlags = {.VERTEX},
@@ -799,9 +760,9 @@ particle_init_render_pipeline :: proc(
     nil,
     &self.render_pipeline_layout,
   ) or_return
-  default_texture_handle, _ := create_texture(
+  default_texture_handle, _ := resources.create_texture(
     gpu_context,
-    warehouse,
+    resources_manager,
     #load("assets/black-circle.png"),
   ) or_return
   self.default_texture_index = default_texture_handle.index
@@ -952,8 +913,8 @@ particle_init_render_pipeline :: proc(
 particle_begin :: proc(
   self: ^RendererParticle,
   command_buffer: vk.CommandBuffer,
-  render_target: ^RenderTarget,
-  warehouse: ^ResourceWarehouse,
+  render_target: ^resources.RenderTarget,
+  resources_manager: ^resources.Manager,
   frame_index: u32,
 ) {
   // Memory barrier to ensure compute results are visible before rendering
@@ -978,16 +939,32 @@ particle_begin :: proc(
     0,
     nil, // imageMemoryBarrierCount, pImageMemoryBarriers
   )
+  color_texture, ok := resources.get_image_2d(
+    resources_manager,
+    resources.get_final_image(render_target, frame_index),
+  )
+  if !ok {
+    log.error("Particle renderer missing color attachment")
+    return
+  }
+  depth_texture, depth_found := resources.get_image_2d(
+    resources_manager,
+    resources.get_depth_texture(render_target, frame_index),
+  )
+  if !depth_found {
+    log.error("Particle renderer missing depth attachment")
+    return
+  }
   color_attachment := vk.RenderingAttachmentInfo{
     sType       = .RENDERING_ATTACHMENT_INFO,
-    imageView   = image_2d(warehouse, get_final_image(render_target, frame_index)).view,
+    imageView   = color_texture.view,
     imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
     loadOp      = .LOAD, // preserve previous contents
     storeOp     = .STORE,
   }
   depth_attachment := vk.RenderingAttachmentInfo{
     sType       = .RENDERING_ATTACHMENT_INFO,
-    imageView   = image_2d(warehouse, get_depth_texture(render_target, frame_index)).view,
+    imageView   = depth_texture.view,
     imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
     loadOp      = .LOAD,
     storeOp     = .STORE,
@@ -1020,13 +997,13 @@ particle_render :: proc(
   self: ^RendererParticle,
   command_buffer: vk.CommandBuffer,
   camera_index: u32,
-  warehouse: ^ResourceWarehouse,
+  resources_manager: ^resources.Manager,
 ) {
   // Use indirect draw - GPU handles the count
   vk.CmdBindPipeline(command_buffer, .GRAPHICS, self.render_pipeline)
   descriptor_sets := [?]vk.DescriptorSet {
-    warehouse.camera_buffer_descriptor_set, // set 0 (bindless camera buffer)
-    warehouse.textures_descriptor_set, // set 1 (textures)
+    resources_manager.camera_buffer_descriptor_set, // set 0 (bindless camera buffer)
+    resources_manager.textures_descriptor_set, // set 1 (textures)
   }
   vk.CmdBindDescriptorSets(
     command_buffer,

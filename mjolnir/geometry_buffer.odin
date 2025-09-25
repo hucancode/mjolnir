@@ -3,7 +3,7 @@ package mjolnir
 import "core:log"
 import "geometry"
 import "gpu"
-import "resource"
+import "resources"
 import vk "vendor:vulkan"
 
 // 64 byte push constant budget
@@ -23,7 +23,7 @@ depth_prepass_init :: proc(
   self: ^RendererGBuffer,
   gpu_context: ^gpu.GPUContext,
   swapchain_extent: vk.Extent2D,
-  warehouse: ^ResourceWarehouse,
+  resources_manager: ^resources.Manager,
 ) -> (
   res: vk.Result,
 ) {
@@ -125,14 +125,14 @@ depth_prepass_init :: proc(
 }
 
 depth_prepass_begin :: proc(
-  render_target: ^RenderTarget,
+  render_target: ^resources.RenderTarget,
   command_buffer: vk.CommandBuffer,
-  warehouse: ^ResourceWarehouse,
+  resources_manager: ^resources.Manager,
   frame_index: u32,
 ) {
-  depth_texture := resource.get(
-    warehouse.image_2d_buffers,
-    get_depth_texture(render_target, frame_index),
+  depth_texture := resources.get(
+    resources_manager.image_2d_buffers,
+    resources.get_depth_texture(render_target, frame_index),
   )
   depth_attachment := vk.RenderingAttachmentInfo{
     sType = .RENDERING_ATTACHMENT_INFO,
@@ -173,7 +173,7 @@ depth_prepass_render :: proc(
   self: ^RendererGBuffer,
   command_buffer: vk.CommandBuffer,
   camera_index: u32,
-  warehouse: ^ResourceWarehouse,
+  resources_manager: ^resources.Manager,
   frame_index: u32,
   draw_buffer: vk.Buffer,
   draw_count: u32,
@@ -182,14 +182,14 @@ depth_prepass_render :: proc(
     return 0
   }
   descriptor_sets := [?]vk.DescriptorSet {
-    warehouse.camera_buffer_descriptor_set,
-    warehouse.textures_descriptor_set,
-    warehouse.bone_buffer_descriptor_sets[frame_index],
-    warehouse.material_buffer_descriptor_set,
-    warehouse.world_matrix_descriptor_sets[frame_index],
-    warehouse.node_data_descriptor_set,
-    warehouse.mesh_data_descriptor_set,
-    warehouse.vertex_skinning_descriptor_set,
+    resources_manager.camera_buffer_descriptor_set,
+    resources_manager.textures_descriptor_set,
+    resources_manager.bone_buffer_descriptor_sets[frame_index],
+    resources_manager.material_buffer_descriptor_set,
+    resources_manager.world_matrix_descriptor_sets[frame_index],
+    resources_manager.node_data_descriptor_set,
+    resources_manager.mesh_data_descriptor_set,
+    resources_manager.vertex_skinning_descriptor_set,
   }
   vk.CmdBindDescriptorSets(
     command_buffer,
@@ -213,7 +213,7 @@ depth_prepass_render :: proc(
     size_of(PushConstant),
     &push_constant,
   )
-  vertex_buffers := [1]vk.Buffer{warehouse.vertex_buffer.buffer}
+  vertex_buffers := [1]vk.Buffer{resources_manager.vertex_buffer.buffer}
   vertex_offsets := [1]vk.DeviceSize{0}
   vk.CmdBindVertexBuffers(
     command_buffer,
@@ -224,7 +224,7 @@ depth_prepass_render :: proc(
   )
   vk.CmdBindIndexBuffer(
     command_buffer,
-    warehouse.index_buffer.buffer,
+    resources_manager.index_buffer.buffer,
     0,
     .UINT32,
   )
@@ -242,10 +242,10 @@ gbuffer_init :: proc(
   self: ^RendererGBuffer,
   gpu_context: ^gpu.GPUContext,
   width, height: u32,
-  warehouse: ^ResourceWarehouse,
+  resources_manager: ^resources.Manager,
 ) -> vk.Result {
   depth_format: vk.Format = .D32_SFLOAT
-  self.pipeline_layout = warehouse.geometry_pipeline_layout
+  self.pipeline_layout = resources_manager.geometry_pipeline_layout
   if self.pipeline_layout == 0 {
     return .ERROR_INITIALIZATION_FAILED
   }
@@ -374,36 +374,36 @@ gbuffer_init :: proc(
 }
 
 gbuffer_begin :: proc(
-  render_target: ^RenderTarget,
+  render_target: ^resources.RenderTarget,
   command_buffer: vk.CommandBuffer,
-  warehouse: ^ResourceWarehouse,
+  resources_manager: ^resources.Manager,
   frame_index: u32,
   self_manage_depth: bool = false,
 ) {
   // Transition all G-buffer textures to COLOR_ATTACHMENT_OPTIMAL
-  position_texture := resource.get(
-    warehouse.image_2d_buffers,
-    get_position_texture(render_target, frame_index),
+  position_texture := resources.get(
+    resources_manager.image_2d_buffers,
+    resources.get_position_texture(render_target, frame_index),
   )
-  normal_texture := resource.get(
-    warehouse.image_2d_buffers,
-    get_normal_texture(render_target, frame_index),
+  normal_texture := resources.get(
+    resources_manager.image_2d_buffers,
+    resources.get_normal_texture(render_target, frame_index),
   )
-  albedo_texture := resource.get(
-    warehouse.image_2d_buffers,
-    get_albedo_texture(render_target, frame_index),
+  albedo_texture := resources.get(
+    resources_manager.image_2d_buffers,
+    resources.get_albedo_texture(render_target, frame_index),
   )
-  metallic_roughness_texture := resource.get(
-    warehouse.image_2d_buffers,
-    get_metallic_roughness_texture(render_target, frame_index),
+  metallic_roughness_texture := resources.get(
+    resources_manager.image_2d_buffers,
+    resources.get_metallic_roughness_texture(render_target, frame_index),
   )
-  emissive_texture := resource.get(
-    warehouse.image_2d_buffers,
-    get_emissive_texture(render_target, frame_index),
+  emissive_texture := resources.get(
+    resources_manager.image_2d_buffers,
+    resources.get_emissive_texture(render_target, frame_index),
   )
-  final_texture := resource.get(
-    warehouse.image_2d_buffers,
-    get_final_image(render_target, frame_index),
+  final_texture := resources.get(
+    resources_manager.image_2d_buffers,
+    resources.get_final_image(render_target, frame_index),
   )
 
   // Collect all G-buffer images for batch transition
@@ -431,9 +431,9 @@ gbuffer_begin :: proc(
 
   // Transition depth if self-managing
   if self_manage_depth {
-    depth_texture := resource.get(
-      warehouse.image_2d_buffers,
-      get_depth_texture(render_target, frame_index),
+    depth_texture := resources.get(
+      resources_manager.image_2d_buffers,
+      resources.get_depth_texture(render_target, frame_index),
     )
     gpu.transition_image(
       command_buffer,
@@ -487,9 +487,9 @@ gbuffer_begin :: proc(
     storeOp = .STORE,
     clearValue = {color = {float32 = {0.0, 0.0, 0.0, 1.0}}},
   }
-  depth_texture := resource.get(
-    warehouse.image_2d_buffers,
-    get_depth_texture(render_target, frame_index),
+  depth_texture := resources.get(
+    resources_manager.image_2d_buffers,
+    resources.get_depth_texture(render_target, frame_index),
   )
   depth_attachment := vk.RenderingAttachmentInfo{
     sType = .RENDERING_ATTACHMENT_INFO,
@@ -531,33 +531,33 @@ gbuffer_begin :: proc(
 }
 
 gbuffer_end :: proc(
-  render_target: ^RenderTarget,
+  render_target: ^resources.RenderTarget,
   command_buffer: vk.CommandBuffer,
-  warehouse: ^ResourceWarehouse,
+  resources_manager: ^resources.Manager,
   frame_index: u32,
 ) {
   vk.CmdEndRendering(command_buffer)
 
   // Transition all G-buffer textures to SHADER_READ_ONLY_OPTIMAL for use by lighting
-  position_texture := resource.get(
-    warehouse.image_2d_buffers,
-    get_position_texture(render_target, frame_index),
+  position_texture := resources.get(
+    resources_manager.image_2d_buffers,
+    resources.get_position_texture(render_target, frame_index),
   )
-  normal_texture := resource.get(
-    warehouse.image_2d_buffers,
-    get_normal_texture(render_target, frame_index),
+  normal_texture := resources.get(
+    resources_manager.image_2d_buffers,
+    resources.get_normal_texture(render_target, frame_index),
   )
-  albedo_texture := resource.get(
-    warehouse.image_2d_buffers,
-    get_albedo_texture(render_target, frame_index),
+  albedo_texture := resources.get(
+    resources_manager.image_2d_buffers,
+    resources.get_albedo_texture(render_target, frame_index),
   )
-  metallic_roughness_texture := resource.get(
-    warehouse.image_2d_buffers,
-    get_metallic_roughness_texture(render_target, frame_index),
+  metallic_roughness_texture := resources.get(
+    resources_manager.image_2d_buffers,
+    resources.get_metallic_roughness_texture(render_target, frame_index),
   )
-  emissive_texture := resource.get(
-    warehouse.image_2d_buffers,
-    get_emissive_texture(render_target, frame_index),
+  emissive_texture := resources.get(
+    resources_manager.image_2d_buffers,
+    resources.get_emissive_texture(render_target, frame_index),
   )
 
   // Collect G-buffer images for batch transition (excluding final image which stays as attachment)
@@ -585,9 +585,9 @@ gbuffer_end :: proc(
 
 gbuffer_render :: proc(
   self: ^RendererGBuffer,
-  render_target: ^RenderTarget,
+  render_target: ^resources.RenderTarget,
   command_buffer: vk.CommandBuffer,
-  warehouse: ^ResourceWarehouse,
+  resources_manager: ^resources.Manager,
   frame_index: u32,
   draw_buffer: vk.Buffer,
   draw_count: u32,
@@ -596,14 +596,14 @@ gbuffer_render :: proc(
     return
   }
   descriptor_sets := [?]vk.DescriptorSet {
-    warehouse.camera_buffer_descriptor_set,
-    warehouse.textures_descriptor_set,
-    warehouse.bone_buffer_descriptor_sets[frame_index],
-    warehouse.material_buffer_descriptor_set,
-    warehouse.world_matrix_descriptor_sets[frame_index],
-    warehouse.node_data_descriptor_set,
-    warehouse.mesh_data_descriptor_set,
-    warehouse.vertex_skinning_descriptor_set,
+    resources_manager.camera_buffer_descriptor_set,
+    resources_manager.textures_descriptor_set,
+    resources_manager.bone_buffer_descriptor_sets[frame_index],
+    resources_manager.material_buffer_descriptor_set,
+    resources_manager.world_matrix_descriptor_sets[frame_index],
+    resources_manager.node_data_descriptor_set,
+    resources_manager.mesh_data_descriptor_set,
+    resources_manager.vertex_skinning_descriptor_set,
   }
   vk.CmdBindDescriptorSets(
     command_buffer,
@@ -627,7 +627,7 @@ gbuffer_render :: proc(
     size_of(PushConstant),
     &push_constants,
   )
-  vertex_buffers := [1]vk.Buffer{warehouse.vertex_buffer.buffer}
+  vertex_buffers := [1]vk.Buffer{resources_manager.vertex_buffer.buffer}
   vertex_offsets := [1]vk.DeviceSize{0}
   vk.CmdBindVertexBuffers(
     command_buffer,
@@ -638,7 +638,7 @@ gbuffer_render :: proc(
   )
   vk.CmdBindIndexBuffer(
     command_buffer,
-    warehouse.index_buffer.buffer,
+    resources_manager.index_buffer.buffer,
     0,
     .UINT32,
   )

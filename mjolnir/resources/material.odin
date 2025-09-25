@@ -1,4 +1,4 @@
-package mjolnir
+package resources
 
 import "core:log"
 

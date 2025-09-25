@@ -5,6 +5,7 @@ import "core:math/linalg"
 import "gpu"
 import mu "vendor:microui"
 import vk "vendor:vulkan"
+import "resources"
 
 SHADER_MICROUI_VERT :: #load("shader/microui/vert.spv")
 SHADER_MICROUI_FRAG :: #load("shader/microui/frag.spv")
@@ -47,7 +48,7 @@ ui_init :: proc(
   color_format: vk.Format,
   width, height: u32,
   dpi_scale: f32 = 1.0,
-  warehouse: ^ResourceWarehouse,
+  resources_manager: ^resources.Manager,
 ) -> vk.Result {
   mu.init(&self.ctx)
   self.ctx.text_width = mu.default_atlas_text_width
@@ -252,9 +253,9 @@ ui_init :: proc(
     &self.pipeline,
   ) or_return
   log.infof("init UI texture...")
-  _, self.atlas = create_texture_from_pixels(
+  _, self.atlas = resources.create_texture_from_pixels(
     gpu_context,
-    warehouse,
+    resources_manager,
     mu.default_atlas_alpha[:],
     mu.DEFAULT_ATLAS_WIDTH,
     mu.DEFAULT_ATLAS_HEIGHT,
@@ -306,7 +307,7 @@ ui_init :: proc(
       descriptorCount = 1,
       descriptorType = .COMBINED_IMAGE_SAMPLER,
       pImageInfo = &{
-        sampler = warehouse.nearest_clamp_sampler,
+        sampler = resources_manager.nearest_clamp_sampler,
         imageView = self.atlas.view,
         imageLayout = .SHADER_READ_ONLY_OPTIMAL,
       },

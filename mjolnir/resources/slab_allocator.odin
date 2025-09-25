@@ -1,4 +1,4 @@
-package resource
+package resources
 
 MAX_SLAB_CLASSES :: 8
 

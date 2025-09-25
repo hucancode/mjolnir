@@ -5,7 +5,7 @@ import "core:log"
 import "core:slice"
 import "geometry"
 import "gpu"
-import "resource"
+import "resources"
 import mu "vendor:microui"
 import vk "vendor:vulkan"
 
@@ -34,14 +34,14 @@ RendererAmbient :: struct {
 
 ambient_begin :: proc(
   self: ^RendererAmbient,
-  target: ^RenderTarget,
+  target: ^resources.RenderTarget,
   command_buffer: vk.CommandBuffer,
-  warehouse: ^ResourceWarehouse,
+  resources_manager: ^resources.Manager,
   frame_index: u32,
 ) {
-  color_texture := resource.get(
-    warehouse.image_2d_buffers,
-    get_final_image(target, frame_index),
+  color_texture := resources.get(
+    resources_manager.image_2d_buffers,
+    resources.get_final_image(target, frame_index),
   )
   color_attachment := vk.RenderingAttachmentInfo{
     sType = .RENDERING_ATTACHMENT_INFO,
@@ -71,8 +71,8 @@ ambient_begin :: proc(
   vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
   vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
   descriptor_sets := [?]vk.DescriptorSet {
-    warehouse.camera_buffer_descriptor_set, // set = 0 (bindless camera buffer)
-    warehouse.textures_descriptor_set, // set = 1 (bindless textures)
+    resources_manager.camera_buffer_descriptor_set, // set = 0 (bindless camera buffer)
+    resources_manager.textures_descriptor_set, // set = 1 (bindless textures)
   }
   vk.CmdBindDescriptorSets(
     command_buffer,
@@ -89,9 +89,9 @@ ambient_begin :: proc(
 
 ambient_render :: proc(
   self: ^RendererAmbient,
-  render_target: ^RenderTarget,
+  render_target: ^resources.RenderTarget,
   command_buffer: vk.CommandBuffer,
-  warehouse: ^ResourceWarehouse,
+  resources_manager: ^resources.Manager,
   frame_index: u32,
 ) {
   // Use the same environment/IBL values as RendererMain (assume engine.ambient is initialized like main)
@@ -100,12 +100,12 @@ ambient_render :: proc(
     camera_index           = render_target.camera.index,
     environment_index      = self.environment_map.index,
     brdf_lut_index         = self.brdf_lut.index,
-    position_texture_index = get_position_texture(render_target, frame_index).index,
-    normal_texture_index   = get_normal_texture(render_target, frame_index).index,
-    albedo_texture_index   = get_albedo_texture(render_target, frame_index).index,
-    metallic_texture_index = get_metallic_roughness_texture(render_target, frame_index).index,
-    emissive_texture_index = get_emissive_texture(render_target, frame_index).index,
-    depth_texture_index    = get_depth_texture(render_target, frame_index).index,
+    position_texture_index = resources.get_position_texture(render_target, frame_index).index,
+    normal_texture_index   = resources.get_normal_texture(render_target, frame_index).index,
+    albedo_texture_index   = resources.get_albedo_texture(render_target, frame_index).index,
+    metallic_texture_index = resources.get_metallic_roughness_texture(render_target, frame_index).index,
+    emissive_texture_index = resources.get_emissive_texture(render_target, frame_index).index,
+    depth_texture_index    = resources.get_depth_texture(render_target, frame_index).index,
     environment_max_lod    = self.environment_max_lod,
     ibl_intensity          = self.ibl_intensity,
   }
@@ -127,14 +127,14 @@ ambient_end :: proc(command_buffer: vk.CommandBuffer) {
 ambient_init :: proc(
   self: ^RendererAmbient,
   gpu_context: ^gpu.GPUContext,
-  warehouse: ^ResourceWarehouse,
+  resources_manager: ^resources.Manager,
   width, height: u32,
   color_format: vk.Format = .B8G8R8A8_SRGB,
 ) -> vk.Result {
   log.debugf("renderer ambient init %d x %d", width, height)
   pipeline_set_layouts := [?]vk.DescriptorSetLayout {
-    warehouse.camera_buffer_set_layout, // set = 0 (bindless camera buffer)
-    warehouse.textures_set_layout, // set = 1 (bindless textures)
+    resources_manager.camera_buffer_set_layout, // set = 0 (bindless camera buffer)
+    resources_manager.textures_set_layout, // set = 1 (bindless textures)
   }
   push_constant_range := vk.PushConstantRange {
     stageFlags = {.FRAGMENT},
@@ -258,20 +258,20 @@ ambient_init :: proc(
   // Initialize environment resources
   environment_map: ^gpu.ImageBuffer
   self.environment_map, environment_map =
-    create_hdr_texture_from_path_with_mips(
+    resources.create_hdr_texture_from_path_with_mips(
       gpu_context,
-      warehouse,
+      resources_manager,
       "assets/Cannon_Exterior.hdr",
     ) or_return
   self.environment_max_lod = 8.0 // default fallback
   if environment_map != nil {
     self.environment_max_lod =
-      calculate_mip_levels(environment_map.width, environment_map.height) - 1.0
+      resources.calculate_mip_levels(environment_map.width, environment_map.height) - 1.0
   }
   brdf_lut: ^gpu.ImageBuffer
-  self.brdf_lut, brdf_lut = create_texture(
+  self.brdf_lut, brdf_lut = resources.create_texture(
     gpu_context,
-    warehouse,
+    resources_manager,
     #load("assets/lut_ggx.png"),
   ) or_return
   self.ibl_intensity = 1.0 // Default IBL intensity
@@ -283,20 +283,20 @@ ambient_init :: proc(
 ambient_deinit :: proc(
   self: ^RendererAmbient,
   gpu_context: ^gpu.GPUContext,
-  warehouse: ^ResourceWarehouse,
+  resources_manager: ^resources.Manager,
 ) {
   vk.DestroyPipeline(gpu_context.device, self.pipeline, nil)
   self.pipeline = 0
   vk.DestroyPipelineLayout(gpu_context.device, self.pipeline_layout, nil)
   self.pipeline_layout = 0
   // Clean up environment resources
-  if item, freed := resource.free(
-    &warehouse.image_2d_buffers,
+  if item, freed := resources.free(
+    &resources_manager.image_2d_buffers,
     self.environment_map,
   ); freed {
     gpu.image_buffer_deinit(gpu_context, item)
   }
-  if item, freed := resource.free(&warehouse.image_2d_buffers, self.brdf_lut);
+  if item, freed := resources.free(&resources_manager.image_2d_buffers, self.brdf_lut);
      freed {
     gpu.image_buffer_deinit(gpu_context, item)
   }
@@ -321,12 +321,12 @@ lighting_init :: proc(
   width, height: u32,
   color_format: vk.Format = .B8G8R8A8_SRGB,
   depth_format: vk.Format = .D32_SFLOAT,
-  warehouse: ^ResourceWarehouse,
+  resources_manager: ^resources.Manager,
 ) -> vk.Result {
   log.debugf("renderer main init %d x %d", width, height)
   pipeline_set_layouts := [?]vk.DescriptorSetLayout {
-    warehouse.camera_buffer_set_layout,
-    warehouse.textures_set_layout,
+    resources_manager.camera_buffer_set_layout,
+    resources_manager.textures_set_layout,
   }
   push_constant_range := vk.PushConstantRange {
     stageFlags = {.VERTEX, .FRAGMENT},
@@ -456,19 +456,19 @@ lighting_init :: proc(
   ) or_return
   log.info("Lighting pipeline initialized successfully")
   // light volume meshes
-  self.sphere_mesh, _ = create_mesh(
+  self.sphere_mesh, _ = resources.create_mesh(
     gpu_context,
-    warehouse,
+    resources_manager,
     geometry.make_sphere(segments = 64, rings = 64),
   ) or_return
-  self.cone_mesh, _ = create_mesh(
+  self.cone_mesh, _ = resources.create_mesh(
     gpu_context,
-    warehouse,
+    resources_manager,
     geometry.make_cone(segments = 128, height = 1, radius = 0.5),
   ) or_return
-  self.fullscreen_triangle_mesh, _ = create_mesh(
+  self.fullscreen_triangle_mesh, _ = resources.create_mesh(
     gpu_context,
-    warehouse,
+    resources_manager,
     geometry.make_fullscreen_triangle(),
   ) or_return
   log.info("Light volume meshes initialized")
@@ -499,14 +499,14 @@ lighting_recreate_images :: proc(
 
 lighting_begin :: proc(
   self: ^RendererLighting,
-  target: ^RenderTarget,
+  target: ^resources.RenderTarget,
   command_buffer: vk.CommandBuffer,
-  warehouse: ^ResourceWarehouse,
+  resources_manager: ^resources.Manager,
   frame_index: u32,
 ) {
-  final_image := resource.get(
-    warehouse.image_2d_buffers,
-    get_final_image(target, frame_index),
+  final_image := resources.get(
+    resources_manager.image_2d_buffers,
+    resources.get_final_image(target, frame_index),
   )
   color_attachment := vk.RenderingAttachmentInfo{
     sType = .RENDERING_ATTACHMENT_INFO,
@@ -516,9 +516,9 @@ lighting_begin :: proc(
     storeOp = .STORE,
     clearValue = {color = {float32 = BG_BLUE_GRAY}},
   }
-  depth_texture := resource.get(
-    warehouse.image_2d_buffers,
-    get_depth_texture(target, frame_index),
+  depth_texture := resources.get(
+    resources_manager.image_2d_buffers,
+    resources.get_depth_texture(target, frame_index),
   )
   depth_attachment := vk.RenderingAttachmentInfo{
     sType       = .RENDERING_ATTACHMENT_INFO,
@@ -550,8 +550,8 @@ lighting_begin :: proc(
   vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
   vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
   descriptor_sets := [?]vk.DescriptorSet {
-    warehouse.camera_buffer_descriptor_set,
-    warehouse.textures_descriptor_set,
+    resources_manager.camera_buffer_descriptor_set,
+    resources_manager.textures_descriptor_set,
   }
   vk.CmdBindDescriptorSets(
     command_buffer,
@@ -569,9 +569,9 @@ lighting_begin :: proc(
 lighting_render :: proc(
   self: ^RendererLighting,
   input: []LightInfo,
-  render_target: ^RenderTarget,
+  render_target: ^resources.RenderTarget,
   command_buffer: vk.CommandBuffer,
-  warehouse: ^ResourceWarehouse,
+  resources_manager: ^resources.Manager,
   frame_index: u32,
 ) -> int {
   rendered_count := 0
@@ -581,9 +581,9 @@ lighting_render :: proc(
   bind_and_draw_mesh :: proc(
     mesh_handle: Handle,
     command_buffer: vk.CommandBuffer,
-    warehouse: ^ResourceWarehouse,
+    resources_manager: ^resources.Manager,
   ) {
-    mesh_ptr, ok := mesh(warehouse, mesh_handle)
+    mesh_ptr, ok := resources.get_mesh(resources_manager, mesh_handle)
     if !ok || mesh_ptr == nil {
       log.error("Failed to get mesh for handle", mesh_handle)
       return
@@ -595,12 +595,12 @@ lighting_render :: proc(
       command_buffer,
       0,
       1,
-      &warehouse.vertex_buffer.buffer,
+      &resources_manager.vertex_buffer.buffer,
       &vertex_offset,
     )
     vk.CmdBindIndexBuffer(
       command_buffer,
-      warehouse.index_buffer.buffer,
+      resources_manager.index_buffer.buffer,
       vk.DeviceSize(mesh_ptr.index_allocation.offset * size_of(u32)),
       .UINT32,
     )
@@ -618,19 +618,19 @@ lighting_render :: proc(
     node_count += 1
     light_info.scene_camera_idx = render_target.camera.index
     light_info.position_texture_index =
-      get_position_texture(render_target, frame_index).index
+      resources.get_position_texture(render_target, frame_index).index
     light_info.normal_texture_index =
-      get_normal_texture(render_target, frame_index).index
+      resources.get_normal_texture(render_target, frame_index).index
     light_info.albedo_texture_index =
-      get_albedo_texture(render_target, frame_index).index
+      resources.get_albedo_texture(render_target, frame_index).index
     light_info.metallic_texture_index =
-      get_metallic_roughness_texture(render_target, frame_index).index
+      resources.get_metallic_roughness_texture(render_target, frame_index).index
     light_info.emissive_texture_index =
-      get_emissive_texture(render_target, frame_index).index
+      resources.get_emissive_texture(render_target, frame_index).index
     light_info.depth_texture_index =
-      get_depth_texture(render_target, frame_index).index
+      resources.get_depth_texture(render_target, frame_index).index
     light_info.input_image_index =
-      get_final_image(render_target, frame_index).index
+      resources.get_final_image(render_target, frame_index).index
 
     switch light_info.light_kind {
     case .POINT:
@@ -643,7 +643,7 @@ lighting_render :: proc(
         size_of(LightPushConstant),
         &light_info.gpu_data,
       )
-      bind_and_draw_mesh(self.sphere_mesh, command_buffer, warehouse)
+      bind_and_draw_mesh(self.sphere_mesh, command_buffer, resources_manager)
       rendered_count += 1
 
     case .DIRECTIONAL:
@@ -659,7 +659,7 @@ lighting_render :: proc(
       bind_and_draw_mesh(
         self.fullscreen_triangle_mesh,
         command_buffer,
-        warehouse,
+        resources_manager,
       )
       rendered_count += 1
 
@@ -673,7 +673,7 @@ lighting_render :: proc(
         size_of(LightPushConstant),
         &light_info.gpu_data,
       )
-      bind_and_draw_mesh(self.cone_mesh, command_buffer, warehouse)
+      bind_and_draw_mesh(self.cone_mesh, command_buffer, resources_manager)
       rendered_count += 1
     }
   }

@@ -1,6 +1,6 @@
 package tests
 
-import "../mjolnir/resource"
+import "../mjolnir/resources"
 import "core:log"
 import "core:math/rand"
 import "core:slice"
@@ -9,53 +9,53 @@ import "core:time"
 
 @(test)
 test_slab_basic_allocation :: proc(t: ^testing.T) {
-  allocator: resource.SlabAllocator
-  resource.slab_allocator_init(
+  allocator: resources.SlabAllocator
+  resources.slab_allocator_init(
     &allocator,
     {{10, 10}, {20, 10}, {}, {}, {}, {}, {}, {}},
   )
-  defer resource.slab_allocator_deinit(&allocator)
-  index, ok := resource.slab_alloc(&allocator, 10)
+  defer resources.slab_allocator_deinit(&allocator)
+  index, ok := resources.slab_alloc(&allocator, 10)
   testing.expect(t, ok)
-  index, ok = resource.slab_alloc(&allocator, 20)
+  index, ok = resources.slab_alloc(&allocator, 20)
   testing.expect(t, ok)
-  index, ok = resource.slab_alloc(&allocator, 30)
+  index, ok = resources.slab_alloc(&allocator, 30)
   testing.expect(t, !ok)
 }
 
 @(test)
 test_slab_reuse :: proc(t: ^testing.T) {
-  allocator: resource.SlabAllocator
-  resource.slab_allocator_init(
+  allocator: resources.SlabAllocator
+  resources.slab_allocator_init(
     &allocator,
     {{10, 10}, {}, {}, {}, {}, {}, {}, {}},
   )
   indices: [10]u32
-  defer resource.slab_allocator_deinit(&allocator)
-  for i in 0 ..< 10 do indices[i] = resource.slab_alloc(&allocator, 10)
-  index, ok := resource.slab_alloc(&allocator, 10)
+  defer resources.slab_allocator_deinit(&allocator)
+  for i in 0 ..< 10 do indices[i] = resources.slab_alloc(&allocator, 10)
+  index, ok := resources.slab_alloc(&allocator, 10)
   testing.expect(t, !ok)
-  resource.slab_free(&allocator, indices[0])
-  index, ok = resource.slab_alloc(&allocator, 10)
+  resources.slab_free(&allocator, indices[0])
+  index, ok = resources.slab_alloc(&allocator, 10)
   testing.expect(t, ok)
 }
 
 @(test)
 test_slab_invalid_free :: proc(t: ^testing.T) {
-  allocator: resource.SlabAllocator
-  resource.slab_allocator_init(
+  allocator: resources.SlabAllocator
+  resources.slab_allocator_init(
     &allocator,
     {{10, 10}, {}, {}, {}, {}, {}, {}, {}},
   )
-  defer resource.slab_allocator_deinit(&allocator)
-  resource.slab_free(&allocator, 0)
+  defer resources.slab_allocator_deinit(&allocator)
+  resources.slab_free(&allocator, 0)
 }
 
 @(test)
 benchmark_slab_allocation :: proc(t: ^testing.T) {
   n :: 1e7
   SlabTest :: struct {
-    allocator: resource.SlabAllocator,
+    allocator: resources.SlabAllocator,
     ops:       []u32,
   }
   options := &time.Benchmark_Options {
@@ -66,7 +66,7 @@ benchmark_slab_allocation :: proc(t: ^testing.T) {
       allocator := context.allocator,
     ) -> time.Benchmark_Error {
       my_test := new(SlabTest)
-      resource.slab_allocator_init(
+      resources.slab_allocator_init(
         &my_test.allocator,
         {
           {10, 10000},
@@ -98,7 +98,7 @@ benchmark_slab_allocation :: proc(t: ^testing.T) {
       defer delete(allocated)
       for op in my_test.ops {
         if op > 0 {
-          i, ok := resource.slab_alloc(&my_test.allocator, op)
+          i, ok := resources.slab_alloc(&my_test.allocator, op)
           if ok {
             options.processed += size_of(u32)
             append(&allocated, i)
@@ -106,7 +106,7 @@ benchmark_slab_allocation :: proc(t: ^testing.T) {
         } else {
           i, ok := pop_safe(&allocated)
           if ok {
-            resource.slab_free(&my_test.allocator, i)
+            resources.slab_free(&my_test.allocator, i)
             options.processed += size_of(u32)
           }
         }
@@ -118,7 +118,7 @@ benchmark_slab_allocation :: proc(t: ^testing.T) {
       allocator := context.allocator,
     ) -> time.Benchmark_Error {
       my_test := cast(^SlabTest)(raw_data(options.input))
-      resource.slab_allocator_deinit(&my_test.allocator)
+      resources.slab_allocator_deinit(&my_test.allocator)
       delete(my_test.ops)
       free(my_test)
       return nil

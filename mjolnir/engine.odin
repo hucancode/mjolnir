@@ -15,7 +15,7 @@ import "core:time"
 import "core:unicode/utf8"
 import "geometry"
 import "gpu"
-import "resource"
+import "resources"
 import "navigation/recast"
 import "vendor:glfw"
 import mu "vendor:microui"
@@ -38,7 +38,7 @@ MAX_TEXTURES :: 90
 MAX_CUBE_TEXTURES :: 20
 USE_PARALLEL_UPDATE :: true // Set to false to disable threading for debugging
 
-Handle :: resource.Handle
+Handle :: resources.Handle
 
 g_context: runtime.Context
 
@@ -97,13 +97,6 @@ LightData :: union {
   DirectionalLightData,
 }
 
-CameraUniform :: struct {
-  view:             matrix[4, 4]f32,
-  projection:       matrix[4, 4]f32,
-  viewport_params:  [4]f32, // xy viewport size, z near, w far
-  position:         [4]f32,
-  frustum_planes:   [6][4]f32,
-}
 
 InputState :: struct {
   mouse_pos:         [2]f64,
@@ -166,7 +159,7 @@ LightInfo :: struct {
 Engine :: struct {
   window:                      glfw.WindowHandle,
   gpu_context:                 gpu.GPUContext,
-  warehouse:                   ResourceWarehouse,
+  resource_manager:            resources.Manager,
   frame_index:                 u32,
   swapchain:                   Swapchain,
   scene:                       Scene,
@@ -238,17 +231,17 @@ engine_init_shadow_maps :: proc(engine: ^Engine) -> vk.Result {
   for f in 0 ..< MAX_FRAMES_IN_FLIGHT {
     for i in 0 ..< MAX_SHADOW_MAPS {
       // Create shadow maps
-      engine.shadow_maps[f][i], _, _ = create_texture(
+      engine.shadow_maps[f][i], _, _ = resources.create_texture(
         &engine.gpu_context,
-        &engine.warehouse,
+        &engine.resource_manager,
         SHADOW_MAP_SIZE,
         SHADOW_MAP_SIZE,
         vk.Format.D32_SFLOAT,
         vk.ImageUsageFlags{.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
       )
-      engine.cube_shadow_maps[f][i], _, _ = create_cube_texture(
+      engine.cube_shadow_maps[f][i], _, _ = resources.create_cube_texture(
         &engine.gpu_context,
-        &engine.warehouse,
+        &engine.resource_manager,
         SHADOW_MAP_SIZE,
         vk.Format.D32_SFLOAT,
         vk.ImageUsageFlags{.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
@@ -260,9 +253,9 @@ engine_init_shadow_maps :: proc(engine: ^Engine) -> vk.Result {
 
   for i in 0 ..< MAX_SHADOW_MAPS {
     // Create persistent render targets for spot/directional lights
-    render_target: ^RenderTarget
-    engine.shadow_render_targets[i], render_target = resource.alloc(
-      &engine.warehouse.render_targets,
+    render_target: ^resources.RenderTarget
+    engine.shadow_render_targets[i], render_target = resources.alloc(
+      &engine.resource_manager.render_targets,
     )
     render_target.extent = {SHADOW_MAP_SIZE, SHADOW_MAP_SIZE}
     // Set depth texture for all frames to the appropriate shadow map
@@ -273,9 +266,9 @@ engine_init_shadow_maps :: proc(engine: ^Engine) -> vk.Result {
     render_target.features = {.DEPTH_TEXTURE}
     // Create persistent render targets for point lights (6 cube faces)
     for face in 0 ..< 6 {
-      cube_render_target: ^RenderTarget
+      cube_render_target: ^resources.RenderTarget
       engine.cube_shadow_render_targets[i][face], cube_render_target =
-        resource.alloc(&engine.warehouse.render_targets)
+        resources.alloc(&engine.resource_manager.render_targets)
       cube_render_target.extent = {SHADOW_MAP_SIZE, SHADOW_MAP_SIZE}
       // Set depth texture for all frames to the appropriate cube shadow map
       for frame_idx in 0 ..< MAX_FRAMES_IN_FLIGHT {
@@ -286,27 +279,6 @@ engine_init_shadow_maps :: proc(engine: ^Engine) -> vk.Result {
     }
   }
   return .SUCCESS
-}
-
-// Helper to update camera uniform from camera data
-camera_uniform_update :: proc(
-  uniform: ^CameraUniform,
-  camera: ^geometry.Camera,
-  viewport_width, viewport_height: u32,
-) {
-  uniform.view, uniform.projection = geometry.camera_calculate_matrices(
-    camera^,
-  )
-  camera_near, camera_far := geometry.camera_get_near_far(camera^)
-  uniform.viewport_params = [4]f32{
-    f32(viewport_width),
-    f32(viewport_height),
-    camera_near,
-    camera_far,
-  }
-  uniform.position = [4]f32{camera.position[0], camera.position[1], camera.position[2], 1.0}
-  frustum := geometry.make_frustum(uniform.projection * uniform.view)
-  uniform.frustum_planes = frustum.planes
 }
 
 init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
@@ -337,7 +309,7 @@ init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
   }
   log.infof("Window created %v\n", self.window)
   gpu.gpu_context_init(&self.gpu_context, self.window) or_return
-  resource_init(&self.warehouse, &self.gpu_context) or_return
+  resources.init(&self.resource_manager, &self.gpu_context) or_return
   self.start_timestamp = time.now()
   self.last_frame_timestamp = self.start_timestamp
   self.last_update_timestamp = self.start_timestamp
@@ -362,14 +334,14 @@ init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
   engine_init_shadow_maps(self) or_return
 
   // Initialize main render target with default camera settings
-  main_render_target: ^RenderTarget
-  self.main_render_target, main_render_target = resource.alloc(
-    &self.warehouse.render_targets,
+  main_render_target: ^resources.RenderTarget
+  self.main_render_target, main_render_target = resources.alloc(
+    &self.resource_manager.render_targets,
   )
-  render_target_init(
+  resources.render_target_init(
     main_render_target,
     &self.gpu_context,
-    &self.warehouse,
+    &self.resource_manager,
     self.swapchain.extent.width,
     self.swapchain.extent.height,
     self.swapchain.format.format,
@@ -454,12 +426,12 @@ init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
     self.swapchain.extent.height,
     self.swapchain.format.format,
     vk.Format.D32_SFLOAT,
-    &self.warehouse,
+    &self.resource_manager,
   ) or_return
   ambient_init(
     &self.ambient,
     &self.gpu_context,
-    &self.warehouse,
+    &self.resource_manager,
     self.swapchain.extent.width,
     self.swapchain.extent.height,
     self.swapchain.format.format,
@@ -470,32 +442,32 @@ init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
     &self.gpu_context,
     self.swapchain.extent.width,
     self.swapchain.extent.height,
-    &self.warehouse,
+    &self.resource_manager,
   ) or_return
   depth_prepass_init(
     &self.gbuffer,
     &self.gpu_context,
     self.swapchain.extent,
-    &self.warehouse,
+    &self.resource_manager,
   ) or_return
-  particle_init(&self.particle, &self.gpu_context, &self.warehouse) or_return
+  particle_init(&self.particle, &self.gpu_context, &self.resource_manager) or_return
   visibility_culler_init(
     &self.visibility_culler,
     &self.gpu_context,
-    &self.warehouse,
+    &self.resource_manager,
   ) or_return
   transparent_init(
     &self.transparent,
     &self.gpu_context,
     self.swapchain.extent.width,
     self.swapchain.extent.height,
-    &self.warehouse,
+    &self.resource_manager,
   ) or_return
   log.debugf("initializing shadow pipeline")
   shadow_init(
     &self.shadow,
     &self.gpu_context,
-    &self.warehouse,
+    &self.resource_manager,
   ) or_return
   log.debugf("initializing post process pipeline")
   postprocess_init(
@@ -504,10 +476,10 @@ init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
     self.swapchain.format.format,
     self.swapchain.extent.width,
     self.swapchain.extent.height,
-    &self.warehouse,
+    &self.resource_manager,
   ) or_return
   log.debugf("initializing navigation mesh renderer")
-  navmesh_init(&self.navmesh, &self.gpu_context, &self.warehouse) or_return
+  navmesh_init(&self.navmesh, &self.gpu_context, &self.resource_manager) or_return
   ui_init(
     &self.ui,
     &self.gpu_context,
@@ -515,7 +487,7 @@ init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
     self.swapchain.extent.width,
     self.swapchain.extent.height,
     get_window_dpi(self.window),
-    &self.warehouse,
+    &self.resource_manager,
   )
   glfw.SetKeyCallback(
     self.window,
@@ -661,17 +633,22 @@ time_since_start :: proc(self: ^Engine) -> f32 {
 update_emitters :: proc(self: ^Engine, delta_time: f32) {
   params := gpu.data_buffer_get(&self.particle.params_buffer)
   params.delta_time = delta_time
-  emitters_ptr := gpu.data_buffer_get(&self.warehouse.emitter_buffer)
+  emitters_ptr := gpu.data_buffer_get(&self.resource_manager.emitter_buffer)
   emitters := slice.from_ptr(emitters_ptr, MAX_EMITTERS)
 
-  scene_emitters_sync(&self.scene, &self.warehouse, emitters, params)
+  scene_emitters_sync(&self.scene, &self.resource_manager, emitters, params)
 }
 
 get_main_camera :: proc(engine: ^Engine) -> ^geometry.Camera {
-  if target, ok := render_target(engine, engine.main_render_target); ok {
-      return camera(engine, target.camera)
+  target, ok := resources.get_render_target(&engine.resource_manager, engine.main_render_target)
+  if !ok {
+    return nil
   }
-  return nil
+  camera_ptr, camera_found := resources.get_camera(&engine.resource_manager, target.camera)
+  if !camera_found {
+    return nil
+  }
+  return camera_ptr
 }
 
 @(private = "file")
@@ -745,20 +722,20 @@ deinit :: proc(self: ^Engine) {
   free_command_buffers(self.gpu_context.device, self.gpu_context.command_pool, self.lighting_command_buffers[:])
   free_command_buffers(self.gpu_context.device, self.gpu_context.command_pool, self.transparency_command_buffers[:])
   free_command_buffers(self.gpu_context.device, self.gpu_context.command_pool, self.postprocess_command_buffers[:])
-  if item, freed := resource.free(
-    &self.warehouse.render_targets,
+  if item, freed := resources.free(
+    &self.resource_manager.render_targets,
     self.main_render_target,
   ); freed {
-    render_target_deinit(item, &self.gpu_context, &self.warehouse)
+    resources.render_target_deinit(item, &self.gpu_context, &self.resource_manager)
   }
   for j in 0 ..< MAX_SHADOW_MAPS {
-    resource.free(
-      &self.warehouse.render_targets,
+    resources.free(
+      &self.resource_manager.render_targets,
       self.shadow_render_targets[j],
     )
     for face in 0 ..< 6 {
-      resource.free(
-        &self.warehouse.render_targets,
+      resources.free(
+        &self.resource_manager.render_targets,
         self.cube_shadow_render_targets[j][face],
       )
     }
@@ -768,16 +745,16 @@ deinit :: proc(self: ^Engine) {
   vk.DestroyFence(self.gpu_context.device, self.frame_fence, nil)
   ui_deinit(&self.ui, &self.gpu_context)
   navmesh_deinit(&self.navmesh, &self.gpu_context)
-  scene_deinit(&self.scene, &self.warehouse)
+  scene_deinit(&self.scene, &self.resource_manager)
   lighting_deinit(&self.lighting, &self.gpu_context)
-  ambient_deinit(&self.ambient, &self.gpu_context, &self.warehouse)
+  ambient_deinit(&self.ambient, &self.gpu_context, &self.resource_manager)
   gbuffer_deinit(&self.gbuffer, &self.gpu_context)
   shadow_deinit(&self.shadow, &self.gpu_context)
-  postprocess_deinit(&self.postprocess, &self.gpu_context, &self.warehouse)
+  postprocess_deinit(&self.postprocess, &self.gpu_context, &self.resource_manager)
   particle_deinit(&self.particle, &self.gpu_context)
   visibility_culler_deinit(&self.visibility_culler, &self.gpu_context)
   transparent_deinit(&self.transparent, &self.gpu_context)
-  resource_deinit(&self.warehouse, &self.gpu_context)
+  resources.shutdown(&self.resource_manager, &self.gpu_context)
   swapchain_deinit(&self.swapchain, &self.gpu_context)
   gpu.gpu_context_deinit(&self.gpu_context)
   glfw.DestroyWindow(self.window)
@@ -808,8 +785,8 @@ record_shadow_pass :: proc(
     },
   ) or_return
 
-  shadow_include := NodeFlagSet{.VISIBLE, .CASTS_SHADOW}
-  shadow_exclude := NodeFlagSet{
+  shadow_include := resources.NodeFlagSet{.VISIBLE, .CASTS_SHADOW}
+  shadow_exclude := resources.NodeFlagSet{
     .MATERIAL_TRANSPARENT,
     .MATERIAL_WIREFRAME,
   }
@@ -824,13 +801,13 @@ record_shadow_pass :: proc(
         continue
       }
       for face in 0 ..< 6 {
-        camera_uniform := get_camera_uniform(
-          &self.warehouse,
+        camera_uniform := resources.get_camera_uniform(
+          &self.resource_manager,
           light_info.cube_cameras[face].index,
         )
         _ = geometry.make_frustum(camera_uniform.projection * camera_uniform.view)
-        target := resource.get(
-          self.warehouse.render_targets,
+        target := resources.get(
+          self.resource_manager.render_targets,
           light_info.cube_render_targets[face],
         )
         if target == nil do continue
@@ -853,7 +830,7 @@ record_shadow_pass :: proc(
         shadow_begin(
           target,
           command_buffer,
-          &self.warehouse,
+          &self.resource_manager,
           self.frame_index,
           u32(face),
         )
@@ -861,7 +838,7 @@ record_shadow_pass :: proc(
           &self.shadow,
           target^,
           command_buffer,
-          &self.warehouse,
+          &self.resource_manager,
           self.frame_index,
           shadow_draw_buffer,
           shadow_draw_count,
@@ -869,7 +846,7 @@ record_shadow_pass :: proc(
         shadow_end(
           command_buffer,
           target,
-          &self.warehouse,
+          &self.resource_manager,
           self.frame_index,
           u32(face),
         )
@@ -880,13 +857,13 @@ record_shadow_pass :: proc(
         continue
       }
 
-      camera_uniform := get_camera_uniform(
-        &self.warehouse,
+      camera_uniform := resources.get_camera_uniform(
+        &self.resource_manager,
         light_info.camera.index,
       )
       _ = geometry.make_frustum(camera_uniform.projection * camera_uniform.view)
-      shadow_target := resource.get(
-        self.warehouse.render_targets,
+      shadow_target := resources.get(
+        self.resource_manager.render_targets,
         light_info.render_target,
       )
       if shadow_target == nil do continue
@@ -910,14 +887,14 @@ record_shadow_pass :: proc(
       shadow_begin(
         shadow_target,
         command_buffer,
-        &self.warehouse,
+        &self.resource_manager,
         self.frame_index,
       )
       shadow_render(
         &self.shadow,
         shadow_target^,
         command_buffer,
-        &self.warehouse,
+        &self.resource_manager,
         self.frame_index,
         shadow_draw_buffer,
         shadow_draw_count,
@@ -925,7 +902,7 @@ record_shadow_pass :: proc(
       shadow_end(
         command_buffer,
         shadow_target,
-        &self.warehouse,
+        &self.resource_manager,
         self.frame_index,
       )
 
@@ -942,7 +919,7 @@ record_shadow_pass :: proc(
 record_depth_gbuffer_pass :: proc(
   self: ^Engine,
   command_buffer: vk.CommandBuffer,
-  main_render_target: ^RenderTarget,
+  main_render_target: ^resources.RenderTarget,
 ) -> vk.Result {
   vk.ResetCommandBuffer(command_buffer, {}) or_return
   color_formats := [?]vk.Format {
@@ -970,9 +947,9 @@ record_depth_gbuffer_pass :: proc(
       pInheritanceInfo = &inheritance,
     },
   ) or_return
-  depth_texture := resource.get(
-    self.warehouse.image_2d_buffers,
-    get_depth_texture(main_render_target, self.frame_index),
+  depth_texture := resources.get(
+    self.resource_manager.image_2d_buffers,
+    resources.get_depth_texture(main_render_target, self.frame_index),
   )
   if depth_texture != nil {
     gpu.transition_image(
@@ -1004,14 +981,14 @@ record_depth_gbuffer_pass :: proc(
   depth_prepass_begin(
     main_render_target,
     command_buffer,
-    &self.warehouse,
+    &self.resource_manager,
     self.frame_index,
   )
   depth_prepass_render(
     &self.gbuffer,
     command_buffer,
     main_render_target.camera.index,
-    &self.warehouse,
+    &self.resource_manager,
     self.frame_index,
     draw_buffer,
     draw_count,
@@ -1020,14 +997,14 @@ record_depth_gbuffer_pass :: proc(
   gbuffer_begin(
     main_render_target,
     command_buffer,
-    &self.warehouse,
+    &self.resource_manager,
     self.frame_index,
   )
   gbuffer_render(
     &self.gbuffer,
     main_render_target,
     command_buffer,
-    &self.warehouse,
+    &self.resource_manager,
     self.frame_index,
     draw_buffer,
     draw_count,
@@ -1035,7 +1012,7 @@ record_depth_gbuffer_pass :: proc(
   gbuffer_end(
     main_render_target,
     command_buffer,
-    &self.warehouse,
+    &self.resource_manager,
     self.frame_index,
   )
   if depth_texture != nil {
@@ -1059,7 +1036,7 @@ record_depth_gbuffer_pass :: proc(
 record_lighting_pass :: proc(
   self: ^Engine,
   command_buffer: vk.CommandBuffer,
-  main_render_target: ^RenderTarget,
+  main_render_target: ^resources.RenderTarget,
 ) -> vk.Result {
   vk.ResetCommandBuffer(command_buffer, {}) or_return
 
@@ -1087,14 +1064,14 @@ record_lighting_pass :: proc(
     &self.ambient,
     main_render_target,
     command_buffer,
-    &self.warehouse,
+    &self.resource_manager,
     self.frame_index,
   )
   ambient_render(
     &self.ambient,
     main_render_target,
     command_buffer,
-    &self.warehouse,
+    &self.resource_manager,
     self.frame_index,
   )
   ambient_end(command_buffer)
@@ -1103,7 +1080,7 @@ record_lighting_pass :: proc(
     &self.lighting,
     main_render_target,
     command_buffer,
-    &self.warehouse,
+    &self.resource_manager,
     self.frame_index,
   )
   lighting_render(
@@ -1111,7 +1088,7 @@ record_lighting_pass :: proc(
     self.lights[:self.active_light_count],
     main_render_target,
     command_buffer,
-    &self.warehouse,
+    &self.resource_manager,
     self.frame_index,
   )
   lighting_end(command_buffer)
@@ -1120,14 +1097,14 @@ record_lighting_pass :: proc(
     &self.particle,
     command_buffer,
     main_render_target,
-    &self.warehouse,
+    &self.resource_manager,
     self.frame_index,
   )
   particle_render(
     &self.particle,
     command_buffer,
     main_render_target.camera.index,
-    &self.warehouse,
+    &self.resource_manager,
   )
   particle_end(command_buffer)
   vk.EndCommandBuffer(command_buffer) or_return
@@ -1138,7 +1115,7 @@ record_lighting_pass :: proc(
 record_transparency_pass :: proc(
   self: ^Engine,
   command_buffer: vk.CommandBuffer,
-  main_render_target: ^RenderTarget,
+  main_render_target: ^resources.RenderTarget,
 ) -> vk.Result {
   vk.ResetCommandBuffer(command_buffer, {}) or_return
   color_format := self.swapchain.format.format
@@ -1165,7 +1142,7 @@ record_transparency_pass :: proc(
     &self.transparent,
     main_render_target,
     command_buffer,
-    &self.warehouse,
+    &self.resource_manager,
     self.frame_index,
   )
 
@@ -1190,7 +1167,7 @@ record_transparency_pass :: proc(
     self.transparent.transparent_pipeline,
     main_render_target,
     command_buffer,
-    &self.warehouse,
+    &self.resource_manager,
     self.frame_index,
     transparent_draw_buffer,
     transparent_draw_count,
@@ -1210,7 +1187,7 @@ record_transparency_pass :: proc(
     self.transparent.wireframe_pipeline,
     main_render_target,
     command_buffer,
-    &self.warehouse,
+    &self.resource_manager,
     self.frame_index,
     wireframe_draw_buffer,
     wireframe_draw_count,
@@ -1224,7 +1201,7 @@ record_transparency_pass :: proc(
 record_postprocess_pass :: proc(
   self: ^Engine,
   command_buffer: vk.CommandBuffer,
-  main_render_target: ^RenderTarget,
+  main_render_target: ^resources.RenderTarget,
 ) -> vk.Result {
   vk.ResetCommandBuffer(command_buffer, {}) or_return
 
@@ -1247,9 +1224,9 @@ record_postprocess_pass :: proc(
     },
   ) or_return
 
-  final_image := resource.get(
-    self.warehouse.image_2d_buffers,
-    get_final_image(main_render_target, self.frame_index),
+  final_image := resources.get(
+    self.resource_manager.image_2d_buffers,
+    resources.get_final_image(main_render_target, self.frame_index),
   )
   if final_image != nil {
     gpu.transition_image_to_shader_read(command_buffer, final_image.image)
@@ -1273,7 +1250,7 @@ record_postprocess_pass :: proc(
     self.swapchain.extent,
     self.swapchain.views[self.swapchain.image_index],
     main_render_target,
-    &self.warehouse,
+    &self.resource_manager,
     self.frame_index,
   )
   postprocess_end(&self.postprocess, command_buffer)
@@ -1292,13 +1269,13 @@ update_skeletal_animations :: proc(self: ^Engine, render_delta_time: f32) {
     anim_inst, has_animation := &skinning.animation.?
     if !has_animation do continue
     animation.instance_update(anim_inst, render_delta_time)
-    mesh := mesh(self, data.handle) or_continue
+    mesh := resources.get_mesh(&self.resource_manager, data.handle) or_continue
     mesh_skin, mesh_has_skin := mesh.skinning.?
     if !mesh_has_skin do continue
     l := skinning.bone_matrix_offset
     r := l + u32(len(mesh_skin.bones))
-    bone_matrices := self.warehouse.bone_buffers[self.frame_index].mapped[l:r]
-    sample_clip(mesh, anim_inst.clip, anim_inst.time, bone_matrices)
+    bone_matrices := self.resource_manager.bone_buffers[self.frame_index].mapped[l:r]
+    resources.sample_clip(mesh, anim_inst.clip, anim_inst.time, bone_matrices)
   }
 }
 
@@ -1319,17 +1296,17 @@ setup_point_light_shadow_cameras :: proc(
   light_info.cube_render_targets = self.cube_shadow_render_targets[shadow_map_index]
 
   for i in 0 ..< 6 {
-    render_target := resource.get(
-      self.warehouse.render_targets,
+    render_target := resources.get(
+      self.resource_manager.render_targets,
       light_info.cube_render_targets[i],
     )
     camera: ^geometry.Camera
-    light_info.cube_cameras[i], camera = resource.alloc(&self.warehouse.cameras)
+    light_info.cube_cameras[i], camera = resources.alloc(&self.resource_manager.cameras)
     geometry.camera_perspective(camera, math.PI * 0.5, 1.0, 0.1, light_info.light_radius)
     render_target.camera = light_info.cube_cameras[i]
     target_pos := position + face_dirs[i]
     geometry.camera_look_at(camera, position, target_pos, face_ups[i])
-    render_target_update_camera_uniform(&self.warehouse, render_target)
+    resources.render_target_update_camera_uniform(&self.resource_manager, render_target)
   }
 }
 
@@ -1383,14 +1360,14 @@ process_spot_light :: proc(
     light_info.shadow_map = self.shadow_maps[self.frame_index][shadow_map_count^]
     shadow_map_count^ += 1
     light_info.render_target = self.shadow_render_targets[shadow_map_count^ - 1]
-    render_target := render_target(self, light_info.render_target)
+    render_target := resources.get_render_target(&self.resource_manager, light_info.render_target)
     camera: ^geometry.Camera
-    light_info.camera, camera = resource.alloc(&self.warehouse.cameras)
+    light_info.camera, camera = resources.alloc(&self.resource_manager.cameras)
     geometry.camera_perspective(camera, light_info.light_angle * 2.0, 1.0, 0.1, light_info.light_radius)
     render_target.camera = light_info.camera
     target_pos := position.xyz + direction.xyz
     geometry.camera_look_at(camera, position.xyz, target_pos)
-    render_target_update_camera_uniform(&self.warehouse, render_target)
+    resources.render_target_update_camera_uniform(&self.resource_manager, render_target)
     light_info.light_camera_idx = light_info.camera.index
   }
 
@@ -1436,9 +1413,9 @@ process_scene_lights :: proc(self: ^Engine) {
 render_debug_ui :: proc(self: ^Engine) {
   if mu.window(&self.ui.ctx, "Engine", {40, 40, 300, 200}, {.NO_CLOSE}) {
     mu.label(&self.ui.ctx, fmt.tprintf("Objects %d", len(self.scene.nodes.entries) - len(self.scene.nodes.free_indices)))
-    mu.label(&self.ui.ctx, fmt.tprintf("Textures %d", len(self.warehouse.image_2d_buffers.entries) - len(self.warehouse.image_2d_buffers.free_indices)))
-    mu.label(&self.ui.ctx, fmt.tprintf("Materials %d", len(self.warehouse.materials.entries) - len(self.warehouse.materials.free_indices)))
-    mu.label(&self.ui.ctx, fmt.tprintf("Meshes %d", len(self.warehouse.meshes.entries) - len(self.warehouse.meshes.free_indices)))
+    mu.label(&self.ui.ctx, fmt.tprintf("Textures %d", len(self.resource_manager.image_2d_buffers.entries) - len(self.resource_manager.image_2d_buffers.free_indices)))
+    mu.label(&self.ui.ctx, fmt.tprintf("Materials %d", len(self.resource_manager.materials.entries) - len(self.resource_manager.materials.free_indices)))
+    mu.label(&self.ui.ctx, fmt.tprintf("Meshes %d", len(self.resource_manager.meshes.entries) - len(self.resource_manager.meshes.free_indices)))
     mu.label(&self.ui.ctx, fmt.tprintf("Visible nodes (max %d): %d", self.visibility_culler.max_draws, self.visibility_culler.node_count))
   }
 }
@@ -1456,25 +1433,25 @@ recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
   if main_camera := get_main_camera(engine); main_camera != nil {
     geometry.camera_update_aspect_ratio(main_camera, new_aspect_ratio)
   }
-  if main_render_target, ok := render_target(engine, engine.main_render_target); ok {
+  if main_render_target, ok := resources.get_render_target(&engine.resource_manager, engine.main_render_target); ok {
     // Save current camera state
-    old_camera := resource.get(
-      engine.warehouse.cameras,
+    old_camera := resources.get(
+      engine.resource_manager.cameras,
       main_render_target.camera,
     )
     old_position :=
       old_camera.position if old_camera != nil else [3]f32{0, 0, 3}
     old_target := [3]f32{0, 0, 0} // Calculate from camera direction if needed
 
-    render_target_deinit(
+    resources.render_target_deinit(
       main_render_target,
       &engine.gpu_context,
-      &engine.warehouse,
+      &engine.resource_manager,
     )
-    render_target_init(
+    resources.render_target_init(
       main_render_target,
       &engine.gpu_context,
-      &engine.warehouse,
+      &engine.resource_manager,
       engine.swapchain.extent.width,
       engine.swapchain.extent.height,
       engine.swapchain.format.format,
@@ -1506,7 +1483,7 @@ recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
     engine.swapchain.extent.width,
     engine.swapchain.extent.height,
     engine.swapchain.format.format,
-    &engine.warehouse,
+    &engine.resource_manager,
   ) or_return
   ui_recreate_images(
     &engine.ui,
@@ -1523,20 +1500,26 @@ render :: proc(self: ^Engine) -> vk.Result {
   mu.begin(&self.ui.ctx)
   command_buffer := self.command_buffers[self.frame_index]
   vk.ResetCommandBuffer(command_buffer, {}) or_return
+  resource_frame_ctx := resources.FrameContext {
+    frame_index = self.frame_index,
+    transfer_command_buffer = command_buffer,
+    upload_allocator = nil,
+  }
+  resources.begin_frame(&self.resource_manager, &resource_frame_ctx)
   render_delta_time := f32(time.duration_seconds(time.since(self.last_render_timestamp)))
   update_skeletal_animations(self, render_delta_time)
-  main_render_target, found_main_rt := render_target(self, self.main_render_target)
+  main_render_target, found_main_rt := resources.get_render_target(&self.resource_manager, self.main_render_target)
   if !found_main_rt {
     log.errorf("Main render target not found")
     return .ERROR_UNKNOWN
   }
-  main_camera, found_camera := camera(self, main_render_target.camera)
+  main_camera, found_camera := resources.get_camera(&self.resource_manager, main_render_target.camera)
   if !found_camera {
     log.errorf("Main camera not found")
     return .ERROR_UNKNOWN
   }
-  render_target_update_camera_uniform(&self.warehouse, main_render_target)
-  upload_world_matrices(&self.warehouse, &self.scene, self.frame_index)
+  resources.render_target_update_camera_uniform(&self.resource_manager, main_render_target)
+  upload_world_matrices(&self.resource_manager, &self.scene, self.frame_index)
   defer {
     for i in 0 ..< self.active_light_count {
       light_info := &self.lights[i]
@@ -1546,12 +1529,12 @@ render :: proc(self: ^Engine) -> vk.Result {
       case .POINT:
         for camera_handle in light_info.cube_cameras {
           if camera_handle.generation != 0 {
-            resource.free(&self.warehouse.cameras, camera_handle)
+            resources.free(&self.resource_manager.cameras, camera_handle)
           }
         }
       case .SPOT:
         if light_info.camera.generation != 0 {
-          resource.free(&self.warehouse.cameras, light_info.shadow_resources.camera)
+          resources.free(&self.resource_manager.cameras, light_info.shadow_resources.camera)
         }
       case .DIRECTIONAL:
       }
@@ -1566,16 +1549,16 @@ render :: proc(self: ^Engine) -> vk.Result {
     switch light_info.light_kind {
     case .POINT:
       for target_handle in light_info.cube_render_targets {
-        render_target(self, target_handle) or_continue
+      resources.get_render_target(&self.resource_manager, target_handle) or_continue
         append(&self.frame_active_render_targets, target_handle)
       }
     case .SPOT:
-      render_target(self, light_info.render_target) or_continue
+      resources.get_render_target(&self.resource_manager, light_info.render_target) or_continue
       append(&self.frame_active_render_targets, light_info.render_target)
     case .DIRECTIONAL:
     }
   }
-  for &entry, i in self.warehouse.render_targets.entries do if entry.active {
+  for &entry, i in self.resource_manager.render_targets.entries do if entry.active {
     handle := Handle{entry.generation, u32(i)}
     if handle.index == self.main_render_target.index do continue
     is_shadow_target := false
@@ -1616,6 +1599,7 @@ render :: proc(self: ^Engine) -> vk.Result {
     self.postprocess_command_buffers[self.frame_index],
     main_render_target,
   ) or_return
+  resources.commit(&self.resource_manager, &self.gpu_context, &resource_frame_ctx) or_return
   vk.BeginCommandBuffer(
     command_buffer,
     &{sType = .COMMAND_BUFFER_BEGIN_INFO, flags = {.ONE_TIME_SUBMIT}},
@@ -1624,7 +1608,7 @@ render :: proc(self: ^Engine) -> vk.Result {
     &self.particle,
     command_buffer,
     main_camera^,
-    self.warehouse.world_matrix_descriptor_sets[self.frame_index],
+    self.resource_manager.world_matrix_descriptor_sets[self.frame_index],
   )
   if self.custom_render_proc != nil {
     self.custom_render_proc(self, command_buffer)
@@ -1740,8 +1724,8 @@ queue_node_deletion :: proc(engine: ^Engine, handle: Handle) {
 
 process_pending_deletions :: proc(engine: ^Engine) {
   for handle in engine.pending_node_deletions {
-    if node, freed := resource.free(&engine.scene.nodes, handle); freed {
-      deinit_node(node, &engine.warehouse)
+    if node, freed := resources.free(&engine.scene.nodes, handle); freed {
+      deinit_node(node, &engine.resource_manager)
     }
   }
   clear(&engine.pending_node_deletions)

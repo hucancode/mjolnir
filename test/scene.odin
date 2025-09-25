@@ -2,7 +2,7 @@ package tests
 
 import "../mjolnir"
 import "../mjolnir/geometry"
-import "../mjolnir/resource"
+import "../mjolnir/resources"
 import "core:fmt"
 import "core:log"
 import "core:math"
@@ -16,8 +16,7 @@ test_node_translate :: proc(t: ^testing.T) {
   using mjolnir
   scene: Scene
   scene_init(&scene)
-  warehouse: ResourceWarehouse
-  defer scene_deinit(&scene, &warehouse)
+  defer scene_deinit(&scene, nil)
   parent_handle, _ := spawn_at(&scene, {1, 2, 3})
   _, child := spawn_child(&scene, parent_handle)
   translate(child, 4, 5, 6)
@@ -37,8 +36,7 @@ test_node_rotate :: proc(t: ^testing.T) {
   using mjolnir
   scene: Scene
   scene_init(&scene)
-  warehouse: ResourceWarehouse
-  defer scene_deinit(&scene, &warehouse)
+  defer scene_deinit(&scene, nil)
   _, child := spawn(&scene)
   rotate(child, math.PI / 2, linalg.VECTOR3F32_Y_AXIS)
   translate(child, 1, 0, 0)
@@ -58,8 +56,7 @@ test_node_scale :: proc(t: ^testing.T) {
   using mjolnir
   scene: Scene
   scene_init(&scene)
-  warehouse: ResourceWarehouse
-  defer scene_deinit(&scene, &warehouse)
+  defer scene_deinit(&scene, nil)
   parent_handle, _ := spawn_at(&scene, {1, 2, 3})
   _, child := spawn_child(&scene, parent_handle)
   translate(child, 1, 1, 1)
@@ -80,8 +77,7 @@ test_node_combined_transform :: proc(t: ^testing.T) {
   using mjolnir
   scene: Scene
   scene_init(&scene)
-  warehouse: ResourceWarehouse
-  defer scene_deinit(&scene, &warehouse)
+  defer scene_deinit(&scene, nil)
   _, node := spawn(&scene)
   scale(node, 2)
   rotate(node, math.PI / 2, linalg.VECTOR3F32_Y_AXIS)
@@ -104,8 +100,7 @@ test_node_chain_transform :: proc(t: ^testing.T) {
   using mjolnir
   scene: Scene
   scene_init(&scene)
-  warehouse: ResourceWarehouse
-  defer scene_deinit(&scene, &warehouse)
+  defer scene_deinit(&scene, nil)
   // Create a 4-node chain
   node1_handle, node1 := spawn(&scene)
   node2_handle, node2 := spawn_child(&scene, node1_handle)
@@ -137,7 +132,7 @@ create_scene :: proc(scene: ^mjolnir.Scene, max_node: int, max_depth: int) {
   using mjolnir
   if max_depth <= 0 || max_node <= 0 do return
   QueueEntry :: struct {
-    handle: resource.Handle,
+    handle: resources.Handle,
     depth:  int,
   }
   queue: [dynamic]QueueEntry
@@ -205,8 +200,7 @@ teardown_scene :: proc(
 ) -> time.Benchmark_Error {
   using mjolnir
   scene := cast(^Scene)(raw_data(options.input))
-  warehouse: ResourceWarehouse
-  scene_deinit(scene, &warehouse)
+  scene_deinit(scene, nil)
   free(scene, allocator)
   return nil
 }
@@ -308,8 +302,7 @@ benchmark_balanced_scene_traversal :: proc(t: ^testing.T) {
 test_scene_memory_cleanup :: proc(t: ^testing.T) {
   scene: mjolnir.Scene
   mjolnir.scene_init(&scene)
-  warehouse: mjolnir.ResourceWarehouse
-  defer mjolnir.scene_deinit(&scene, &warehouse)
+  defer mjolnir.scene_deinit(&scene, nil)
   for i in 0 ..< 1000 {
     mjolnir.spawn(&scene)
   }
@@ -319,8 +312,7 @@ test_scene_memory_cleanup :: proc(t: ^testing.T) {
 test_scene_with_multiple_attachments :: proc(t: ^testing.T) {
   scene: mjolnir.Scene
   mjolnir.scene_init(&scene)
-  warehouse: mjolnir.ResourceWarehouse
-  defer mjolnir.scene_deinit(&scene, &warehouse)
+  defer mjolnir.scene_deinit(&scene, nil)
   mjolnir.spawn(
     &scene,
     mjolnir.PointLightAttachment {

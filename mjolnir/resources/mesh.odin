@@ -1,10 +1,10 @@
-package mjolnir
+package resources
 
-import "animation"
+import "../animation"
 import "core:log"
 import "core:math/linalg"
-import "geometry"
-import "gpu"
+import "../geometry"
+import "../gpu"
 import vk "vendor:vulkan"
 
 Bone :: struct {
@@ -53,13 +53,13 @@ Mesh :: struct {
 mesh_deinit :: proc(
   self: ^Mesh,
   gpu_context: ^gpu.GPUContext,
-  warehouse: ^ResourceWarehouse,
+  manager: ^Manager,
 ) {
-  warehouse_free_vertices(warehouse, self.vertex_allocation)
-  warehouse_free_indices(warehouse, self.index_allocation)
+  manager_free_vertices(manager, self.vertex_allocation)
+  manager_free_indices(manager, self.index_allocation)
   skin, has_skin := &self.skinning.?
   if !has_skin do return
-  warehouse_free_vertex_skinning(warehouse, skin.vertex_skinning_allocation)
+  manager_free_vertex_skinning(manager, skin.vertex_skinning_allocation)
   for &bone in skin.bones do bone_deinit(&bone)
   delete(skin.bones)
 }
@@ -67,24 +67,24 @@ mesh_deinit :: proc(
 mesh_init :: proc(
   self: ^Mesh,
   gpu_context: ^gpu.GPUContext,
-  warehouse: ^ResourceWarehouse,
+  manager: ^Manager,
   data: geometry.Geometry,
 ) -> vk.Result {
   defer geometry.delete_geometry(data)
   self.aabb = data.aabb
-  self.vertex_allocation = warehouse_allocate_vertices(
-    warehouse,
+  self.vertex_allocation = manager_allocate_vertices(
+    manager,
     data.vertices,
   ) or_return
-  self.index_allocation = warehouse_allocate_indices(
-    warehouse,
+  self.index_allocation = manager_allocate_indices(
+    manager,
     data.indices,
   ) or_return
   if len(data.skinnings) <= 0 {
     return .SUCCESS
   }
-  allocation, ret := warehouse_allocate_vertex_skinning(
-    warehouse,
+  allocation, ret := manager_allocate_vertex_skinning(
+    manager,
     data.skinnings,
   )
   if ret != .SUCCESS {
@@ -98,7 +98,7 @@ mesh_init :: proc(
 }
 
 make_animation_instance :: proc(
-  warehouse: ^ResourceWarehouse,
+  manager: ^Manager,
   animation_name: string,
   mode: animation.PlayMode,
   speed: f32 = 1.0,
@@ -108,7 +108,7 @@ make_animation_instance :: proc(
 ) #optional_ok {
   // TODO: use linear search as a first working implementation
   // later we need to do better than this linear search
-  for &entry in warehouse.animation_clips.entries do if entry.active {
+  for &entry in manager.animation_clips.entries do if entry.active {
     clip := &entry.item
     if clip.name != animation_name do continue
     instance = {

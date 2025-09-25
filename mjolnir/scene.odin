@@ -7,7 +7,7 @@ import "core:math/linalg"
 import "core:slice"
 import "geometry"
 import "gpu"
-import "resource"
+import "resources"
 
 PointLightAttachment :: struct {
   color:       [4]f32,
@@ -62,23 +62,6 @@ NodeAttachment :: union {
   NavMeshObstacleAttachment,
 }
 
-NodeFlag :: enum u32 {
-  VISIBLE,
-  CULLING_ENABLED,
-  MATERIAL_TRANSPARENT,
-  MATERIAL_WIREFRAME,
-  CASTS_SHADOW,
-}
-
-NodeFlagSet :: bit_set[NodeFlag; u32]
-
-NodeData :: struct {
-  material_id:        u32,
-  mesh_id:            u32,
-  bone_matrix_offset: u32,
-  flags:              NodeFlagSet,
-}
-
 Node :: struct {
   parent:          Handle,
   children:        [dynamic]Handle,
@@ -103,10 +86,13 @@ init_node :: proc(self: ^Node, name: string = "") {
   self.parent_visible = true
 }
 
-deinit_node :: proc(self: ^Node, warehouse: ^ResourceWarehouse) {
+deinit_node :: proc(self: ^Node, resources_manager: ^resources.Manager) {
   delete(self.children)
+  if resources_manager == nil {
+    return
+  }
   if emitter_attachment, is_emitter := &self.attachment.(EmitterAttachment); is_emitter {
-    if destroy_emitter_handle(warehouse, emitter_attachment.handle) {
+    if resources.destroy_emitter_handle(resources_manager, emitter_attachment.handle) {
       emitter_attachment.handle = {}
     }
   }
@@ -118,12 +104,12 @@ deinit_node :: proc(self: ^Node, warehouse: ^ResourceWarehouse) {
   if !has_skin || skinning.bone_matrix_offset == 0xFFFFFFFF {
     return
   }
-  resource.slab_free(&warehouse.bone_matrix_slab, skinning.bone_matrix_offset)
+  resources.slab_free(&resources_manager.bone_matrix_slab, skinning.bone_matrix_offset)
   skinning.bone_matrix_offset = 0xFFFFFFFF
 }
 
-detach :: proc(nodes: resource.Pool(Node), child_handle: Handle) {
-  child_node := resource.get(nodes, child_handle)
+detach :: proc(nodes: resources.Pool(Node), child_handle: Handle) {
+  child_node := resources.get(nodes, child_handle)
   if child_node == nil {
     return
   }
@@ -131,7 +117,7 @@ detach :: proc(nodes: resource.Pool(Node), child_handle: Handle) {
   if parent_handle == child_handle {
     return
   }
-  parent_node := resource.get(nodes, parent_handle)
+  parent_node := resources.get(nodes, parent_handle)
   if parent_node == nil {
     return
   }
@@ -143,15 +129,15 @@ detach :: proc(nodes: resource.Pool(Node), child_handle: Handle) {
 }
 
 attach :: proc(
-  nodes: resource.Pool(Node),
+  nodes: resources.Pool(Node),
   parent_handle, child_handle: Handle,
 ) {
-  child_node := resource.get(nodes, child_handle)
-  parent_node := resource.get(nodes, parent_handle)
+  child_node := resources.get(nodes, child_handle)
+  parent_node := resources.get(nodes, parent_handle)
   if child_node == nil || parent_node == nil {
     return
   }
-  if old_parent_node, ok := resource.get(nodes, child_node.parent); ok {
+  if old_parent_node, ok := resources.get(nodes, child_node.parent); ok {
     idx, found := slice.linear_search(
       old_parent_node.children[:],
       child_handle,
@@ -172,7 +158,7 @@ play_animation :: proc(
   name: string,
   mode: animation.PlayMode = .LOOP,
 ) -> bool {
-  node := resource.get(engine.scene.nodes, node_handle)
+  node := resources.get(engine.scene.nodes, node_handle)
   if node == nil {
     return false
   }
@@ -180,12 +166,12 @@ play_animation :: proc(
   if !ok {
     return false
   }
-  mesh := mesh(engine, data.handle)
+  mesh := resources.get_mesh(&engine.resource_manager, data.handle)
   skinning, has_skin := &data.skinning.?
   if mesh == nil || !has_skin {
     return false
   }
-  anim_inst, found := make_animation_instance(&engine.warehouse, name, mode)
+  anim_inst, found := resources.make_animation_instance(&engine.resource_manager, name, mode)
   if !found {
     return false
   }
@@ -197,15 +183,15 @@ spawn_at :: proc(
   self: ^Scene,
   position: [3]f32,
   attachment: NodeAttachment = nil,
-  warehouse: ^ResourceWarehouse = nil,
+  resources_manager: ^resources.Manager = nil,
 ) -> (
   handle: Handle,
   node: ^Node,
 ) {
-  handle, node = resource.alloc(&self.nodes)
+  handle, node = resources.alloc(&self.nodes)
   init_node(node)
   node.attachment = attachment
-  assign_emitter_to_node(warehouse, handle, node)
+  assign_emitter_to_node(resources_manager, handle, node)
   geometry.transform_translate(&node.transform, position.x, position.y, position.z)
   attach(self.nodes, self.root, handle)
   return
@@ -214,15 +200,15 @@ spawn_at :: proc(
 spawn :: proc(
   self: ^Scene,
   attachment: NodeAttachment = nil,
-  warehouse: ^ResourceWarehouse = nil,
+  resources_manager: ^resources.Manager = nil,
 ) -> (
   handle: Handle,
   node: ^Node,
 ) {
-  handle, node = resource.alloc(&self.nodes)
+  handle, node = resources.alloc(&self.nodes)
   init_node(node)
   node.attachment = attachment
-  assign_emitter_to_node(warehouse, handle, node)
+  assign_emitter_to_node(resources_manager, handle, node)
   attach(self.nodes, self.root, handle)
   return
 }
@@ -231,15 +217,15 @@ spawn_child :: proc(
   self: ^Scene,
   parent: Handle,
   attachment: NodeAttachment = nil,
-  warehouse: ^ResourceWarehouse = nil,
+  resources_manager: ^resources.Manager = nil,
 ) -> (
   handle: Handle,
   node: ^Node,
 ) {
-  handle, node = resource.alloc(&self.nodes)
+  handle, node = resources.alloc(&self.nodes)
   init_node(node)
   node.attachment = attachment
-  assign_emitter_to_node(warehouse, handle, node)
+  assign_emitter_to_node(resources_manager, handle, node)
   attach(self.nodes, parent, handle)
   return
 }
@@ -253,44 +239,44 @@ SceneTraverseEntry :: struct {
 
 Scene :: struct {
   root:            Handle,
-  nodes:           resource.Pool(Node),
+  nodes:           resources.Pool(Node),
   traversal_stack: [dynamic]SceneTraverseEntry,
 }
 
 scene_init :: proc(self: ^Scene) {
   // Camera is now owned by the main render target, not the scene
   // log.infof("Initializing nodes pool... ")
-  resource.pool_init(&self.nodes)
+  resources.pool_init(&self.nodes)
   root: ^Node
-  self.root, root = resource.alloc(&self.nodes)
+  self.root, root = resources.alloc(&self.nodes)
   init_node(root, "root")
   root.parent = self.root
   self.traversal_stack = make([dynamic]SceneTraverseEntry, 0)
 }
 
-scene_deinit :: proc(self: ^Scene, warehouse: ^ResourceWarehouse) {
+scene_deinit :: proc(self: ^Scene, resources_manager: ^resources.Manager) {
   for &entry in self.nodes.entries {
     if entry.active {
-      deinit_node(&entry.item, warehouse)
+      deinit_node(&entry.item, resources_manager)
     }
   }
-  resource.pool_deinit(self.nodes, proc(node: ^Node) {})
+  resources.pool_deinit(self.nodes, proc(node: ^Node) {})
   delete(self.traversal_stack)
 }
 
 assign_emitter_to_node :: proc(
-  warehouse: ^ResourceWarehouse,
+  resources_manager: ^resources.Manager,
   node_handle: Handle,
   node: ^Node,
 ) {
-  if warehouse == nil {
+  if resources_manager == nil {
     return
   }
   attachment, is_emitter := &node.attachment.(EmitterAttachment)
   if !is_emitter {
     return
   }
-  emitter, ok := resource.get(warehouse.emitters, attachment.handle)
+  emitter, ok := resources.get(resources_manager.emitters, attachment.handle)
   if ok {
     emitter.node_handle = node_handle
     emitter.is_dirty = true
@@ -309,7 +295,7 @@ scene_traverse :: proc(
   )
   for len(self.traversal_stack) > 0 {
     entry := pop(&self.traversal_stack)
-    current_node, found := resource.get(self.nodes, entry.handle)
+    current_node, found := resources.get(self.nodes, entry.handle)
     if !found {
       log.errorf(
         "traverse_scene: Node with handle %v not found\n",
@@ -350,11 +336,11 @@ scene_traverse :: proc(
 
 scene_emitters_sync :: proc(
   self: ^Scene,
-  warehouse: ^ResourceWarehouse,
-  emitters: []EmitterData,
+  resources_manager: ^resources.Manager,
+  emitters: []resources.EmitterData,
   params: ^ParticleSystemParams,
 ) {
-  if warehouse == nil {
+  if resources_manager == nil {
     params.emitter_count = 0
     return
   }
@@ -371,7 +357,7 @@ scene_emitters_sync :: proc(
     emitters[i].visible = cast(b32)false
   }
 
-  for &entry, index in warehouse.emitters.entries {
+  for &entry, index in resources_manager.emitters.entries {
     if index >= emitter_capacity {
       log.warnf("Emitter index %d exceeds GPU buffer capacity %d", index, emitter_capacity)
       continue
@@ -381,7 +367,7 @@ scene_emitters_sync :: proc(
       preserved_time := gpu_emitter.time_accumulator
       entry.item.node_handle = {}
       entry.item.is_dirty = true
-      gpu_emitter^ = EmitterData{
+      gpu_emitter^ = resources.EmitterData{
         time_accumulator = preserved_time,
         visible = cast(b32)false,
       }
@@ -390,12 +376,12 @@ scene_emitters_sync :: proc(
 
     emitter := &entry.item
     node_handle := emitter.node_handle
-    node := resource.get(self.nodes, node_handle)
+    node := resources.get(self.nodes, node_handle)
 
     if node == nil || node.pending_deletion {
       emitter.is_dirty = true
       preserved_time := gpu_emitter.time_accumulator
-      gpu_emitter^ = EmitterData{
+      gpu_emitter^ = resources.EmitterData{
         time_accumulator = preserved_time,
         visible = cast(b32)false,
       }
@@ -405,7 +391,7 @@ scene_emitters_sync :: proc(
     visible := node.parent_visible && node.visible && emitter.enabled != b32(false)
     if emitter.is_dirty {
       preserved_time := gpu_emitter.time_accumulator
-      gpu_emitter^ = EmitterData {
+      gpu_emitter^ = resources.EmitterData {
         initial_velocity  = emitter.initial_velocity,
         color_start       = emitter.color_start,
         color_end         = emitter.color_end,
@@ -445,10 +431,10 @@ scene_emitters_sync :: proc(
 
 scene_mark_emitter_dirty :: proc(
   self: ^Scene,
-  warehouse: ^ResourceWarehouse,
+  resources_manager: ^resources.Manager,
   handle: Handle,
 ) {
-  node := resource.get(self.nodes, handle)
+  node := resources.get(self.nodes, handle)
   if node == nil {
     return
   }
@@ -456,7 +442,7 @@ scene_mark_emitter_dirty :: proc(
   if !is_emitter {
     return
   }
-  emitter, ok := resource.get(warehouse.emitters, attachment.handle)
+  emitter, ok := resources.get(resources_manager.emitters, attachment.handle)
   if ok {
     emitter.is_dirty = true
   }
@@ -523,13 +509,13 @@ node_scale :: proc(node: ^Node, s: f32) {
 
 // Node handle transform manipulation functions
 node_handle_translate_by :: proc(scene: ^Scene, handle: Handle, x: f32 = 0, y: f32 = 0, z: f32 = 0) {
-  if node := resource.get(scene.nodes, handle); node != nil {
+  if node := resources.get(scene.nodes, handle); node != nil {
     geometry.transform_translate_by(&node.transform, x, y, z)
   }
 }
 
 node_handle_translate :: proc(scene: ^Scene, handle: Handle, x: f32 = 0, y: f32 = 0, z: f32 = 0) {
-  if node := resource.get(scene.nodes, handle); node != nil {
+  if node := resources.get(scene.nodes, handle); node != nil {
     geometry.transform_translate(&node.transform, x, y, z)
   }
 }
@@ -540,7 +526,7 @@ node_handle_rotate_by :: proc {
 }
 
 node_handle_rotate_by_quaternion :: proc(scene: ^Scene, handle: Handle, q: quaternion128) {
-  if node := resource.get(scene.nodes, handle); node != nil {
+  if node := resources.get(scene.nodes, handle); node != nil {
     geometry.transform_rotate_by_quaternion(&node.transform, q)
   }
 }
@@ -551,7 +537,7 @@ node_handle_rotate_by_angle :: proc(
   angle: f32,
   axis: [3]f32 = linalg.VECTOR3F32_Y_AXIS,
 ) {
-  if node := resource.get(scene.nodes, handle); node != nil {
+  if node := resources.get(scene.nodes, handle); node != nil {
     geometry.transform_rotate_by_angle(&node.transform, angle, axis)
   }
 }
@@ -562,7 +548,7 @@ node_handle_rotate :: proc {
 }
 
 node_handle_rotate_quaternion :: proc(scene: ^Scene, handle: Handle, q: quaternion128) {
-  if node := resource.get(scene.nodes, handle); node != nil {
+  if node := resources.get(scene.nodes, handle); node != nil {
     geometry.transform_rotate_quaternion(&node.transform, q)
   }
 }
@@ -573,31 +559,31 @@ node_handle_rotate_angle :: proc(
   angle: f32,
   axis: [3]f32 = linalg.VECTOR3F32_Y_AXIS,
 ) {
-  if node := resource.get(scene.nodes, handle); node != nil {
+  if node := resources.get(scene.nodes, handle); node != nil {
     geometry.transform_rotate_angle(&node.transform, angle, axis)
   }
 }
 
 node_handle_scale_xyz_by :: proc(scene: ^Scene, handle: Handle, x: f32 = 1, y: f32 = 1, z: f32 = 1) {
-  if node := resource.get(scene.nodes, handle); node != nil {
+  if node := resources.get(scene.nodes, handle); node != nil {
     geometry.transform_scale_xyz_by(&node.transform, x, y, z)
   }
 }
 
 node_handle_scale_by :: proc(scene: ^Scene, handle: Handle, s: f32) {
-  if node := resource.get(scene.nodes, handle); node != nil {
+  if node := resources.get(scene.nodes, handle); node != nil {
     geometry.transform_scale_by(&node.transform, s)
   }
 }
 
 node_handle_scale_xyz :: proc(scene: ^Scene, handle: Handle, x: f32 = 1, y: f32 = 1, z: f32 = 1) {
-  if node := resource.get(scene.nodes, handle); node != nil {
+  if node := resources.get(scene.nodes, handle); node != nil {
     geometry.transform_scale_xyz(&node.transform, x, y, z)
   }
 }
 
 node_handle_scale :: proc(scene: ^Scene, handle: Handle, s: f32) {
-  if node := resource.get(scene.nodes, handle); node != nil {
+  if node := resources.get(scene.nodes, handle); node != nil {
     geometry.transform_scale(&node.transform, s)
   }
 }
@@ -658,7 +644,7 @@ scale :: proc {
 }
 
 despawn :: proc(engine: ^Engine, handle: Handle) {
-  if node := resource.get(engine.scene.nodes, handle); node != nil {
+  if node := resources.get(engine.scene.nodes, handle); node != nil {
     node.pending_deletion = true
     detach(engine.scene.nodes, handle)
   }
@@ -675,15 +661,15 @@ get_world_matrix :: proc {
 }
 
 upload_world_matrices :: proc(
-  warehouse: ^ResourceWarehouse,
+  resources_manager: ^resources.Manager,
   scene: ^Scene,
   frame_index: u32,
 ) {
   if frame_index >= MAX_FRAMES_IN_FLIGHT {
     return
   }
-  matrices := gpu.data_buffer_get_all(&warehouse.world_matrix_buffers[frame_index])
-  node_datas := gpu.data_buffer_get_all(&warehouse.node_data_buffer)
+  matrices := gpu.data_buffer_get_all(&resources_manager.world_matrix_buffers[frame_index])
+  node_datas := gpu.data_buffer_get_all(&resources_manager.node_data_buffer)
   if len(matrices) == 0 {
     return
   }
@@ -691,7 +677,7 @@ upload_world_matrices :: proc(
   for i in 0 ..< len(matrices) {
     matrices[i] = identity
   }
-  default_node := NodeData {
+  default_node := resources.NodeData {
     material_id        = 0xFFFFFFFF,
     mesh_id            = 0xFFFFFFFF,
     bone_matrix_offset = 0xFFFFFFFF,
@@ -721,8 +707,8 @@ upload_world_matrices :: proc(
     if mesh_attachment.cast_shadow {
       node_data.flags |= {.CASTS_SHADOW}
     }
-    if material_entry, has_material := resource.get(
-      warehouse.materials,
+    if material_entry, has_material := resources.get(
+      resources_manager.materials,
       mesh_attachment.material,
     ); has_material {
       switch material_entry.type {

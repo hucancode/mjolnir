@@ -2,8 +2,8 @@ package mjolnir
 
 import "core:log"
 import "gpu"
-import "resource"
 import vk "vendor:vulkan"
+import "resources"
 
 SHADER_POSTPROCESS_VERT :: #load("shader/postprocess/vert.spv")
 SHADER_POSTPROCESS_FRAG :: #load("shader/postprocess/frag.spv")
@@ -359,7 +359,7 @@ postprocess_init :: proc(
   gpu_context: ^gpu.GPUContext,
   color_format: vk.Format,
   width, height: u32,
-  warehouse: ^ResourceWarehouse,
+  resources_manager: ^resources.Manager,
 ) -> vk.Result {
   self.effect_stack = make([dynamic]PostprocessEffect)
   count :: len(PostProcessEffectType)
@@ -444,7 +444,7 @@ postprocess_init :: proc(
   postprocess_create_images(
     gpu_context,
     self,
-    warehouse,
+    resources_manager,
     width,
     height,
     color_format,
@@ -478,7 +478,7 @@ postprocess_init :: proc(
     }
 
     layout_sets := [?]vk.DescriptorSetLayout {
-      warehouse.textures_set_layout, // set = 0 (bindless textures)
+      resources_manager.textures_set_layout, // set = 0 (bindless textures)
     }
     vk.CreatePipelineLayout(
       gpu_context.device,
@@ -557,14 +557,14 @@ postprocess_init :: proc(
 postprocess_create_images :: proc(
   gpu_context: ^gpu.GPUContext,
   self: ^RendererPostProcess,
-  warehouse: ^ResourceWarehouse,
+  resources_manager: ^resources.Manager,
   width, height: u32,
   format: vk.Format,
 ) -> vk.Result {
   for &handle in self.images {
-    handle, _ = create_texture(
+    handle, _ = resources.create_texture(
       gpu_context,
-      warehouse,
+      resources_manager,
       width,
       height,
       format,
@@ -578,10 +578,10 @@ postprocess_create_images :: proc(
 postprocess_deinit_images :: proc(
   self: ^RendererPostProcess,
   gpu_context: ^gpu.GPUContext,
-  warehouse: ^ResourceWarehouse,
+  resources_manager: ^resources.Manager,
 ) {
   for handle in self.images {
-    if item, freed := resource.free(&warehouse.image_2d_buffers, handle);
+    if item, freed := resources.free(&resources_manager.image_2d_buffers, handle);
        freed {
       gpu.image_buffer_deinit(gpu_context, item)
     }
@@ -593,13 +593,13 @@ postprocess_recreate_images :: proc(
   self: ^RendererPostProcess,
   width, height: u32,
   format: vk.Format,
-  warehouse: ^ResourceWarehouse,
+  resources_manager: ^resources.Manager,
 ) -> vk.Result {
-  postprocess_deinit_images(self, gpu_context, warehouse)
+  postprocess_deinit_images(self, gpu_context, resources_manager)
   return postprocess_create_images(
     gpu_context,
     self,
-    warehouse,
+    resources_manager,
     width,
     height,
     format,
@@ -609,7 +609,7 @@ postprocess_recreate_images :: proc(
 postprocess_deinit :: proc(
   self: ^RendererPostProcess,
   gpu_context: ^gpu.GPUContext,
-  warehouse: ^ResourceWarehouse,
+  resources_manager: ^resources.Manager,
 ) {
   for &frame in self.frames {
     vk.DestroySemaphore(
@@ -639,7 +639,7 @@ postprocess_deinit :: proc(
     layout = 0
   }
   delete(self.effect_stack)
-  postprocess_deinit_images(self, gpu_context, warehouse)
+  postprocess_deinit_images(self, gpu_context, resources_manager)
 }
 
 // Modular postprocess API
@@ -671,8 +671,8 @@ postprocess_render :: proc(
   command_buffer: vk.CommandBuffer,
   extent: vk.Extent2D,
   output_view: vk.ImageView,
-  render_target: ^RenderTarget,
-  warehouse: ^ResourceWarehouse,
+  render_target: ^resources.RenderTarget,
+  resources_manager: ^resources.Manager,
   frame_index: u32,
 ) {
   for effect, i in self.effect_stack {
@@ -689,7 +689,7 @@ postprocess_render :: proc(
     dst_image_idx: u32
 
     if is_first {
-      input_image_index = get_final_image(render_target, frame_index).index // Use original input
+      input_image_index = resources.get_final_image(render_target, frame_index).index // Use original input
       dst_image_idx = 0 // Write to image[0]
     } else {
       prev_dst_image_idx := (i - 1) % 2
@@ -705,7 +705,11 @@ postprocess_render :: proc(
 
     dst_view := output_view
     if !is_last {
-      dst_texture := image_2d(warehouse, self.images[dst_image_idx])
+      dst_texture, ok := resources.get_image_2d(resources_manager, self.images[dst_image_idx])
+      if !ok {
+        log.errorf("Post-process image handle %v not found", self.images[dst_image_idx])
+        continue
+      }
       gpu.transition_image(
         command_buffer,
         dst_texture.image,
@@ -723,10 +727,14 @@ postprocess_render :: proc(
     }
     if !is_first {
       src_texture_idx := (i - 1) % 2 // Which ping-pong buffer the previous pass wrote to
-      src_texture := resource.get(
-        warehouse.image_2d_buffers,
+      src_texture, ok := resources.get_image_2d(
+        resources_manager,
         self.images[src_texture_idx],
       )
+      if !ok {
+        log.errorf("Post-process source image handle %v not found", self.images[src_texture_idx])
+        continue
+      }
       gpu.transition_image_to_shader_read(command_buffer, src_texture.image)
     }
     color_attachment := vk.RenderingAttachmentInfo{
@@ -750,7 +758,7 @@ postprocess_render :: proc(
 
     // Bind textures descriptor set
     descriptor_sets := [?]vk.DescriptorSet {
-      warehouse.textures_descriptor_set, // set = 0 (bindless textures)
+      resources_manager.textures_descriptor_set, // set = 0 (bindless textures)
     }
     vk.CmdBindDescriptorSets(
       command_buffer,
@@ -764,17 +772,17 @@ postprocess_render :: proc(
     )
     base: BasePushConstant
     base.position_texture_index =
-      get_position_texture(render_target, frame_index).index
+      resources.get_position_texture(render_target, frame_index).index
     base.normal_texture_index =
-      get_normal_texture(render_target, frame_index).index
+      resources.get_normal_texture(render_target, frame_index).index
     base.albedo_texture_index =
-      get_albedo_texture(render_target, frame_index).index
+      resources.get_albedo_texture(render_target, frame_index).index
     base.metallic_texture_index =
-      get_metallic_roughness_texture(render_target, frame_index).index
+      resources.get_metallic_roughness_texture(render_target, frame_index).index
     base.emissive_texture_index =
-      get_emissive_texture(render_target, frame_index).index
+      resources.get_emissive_texture(render_target, frame_index).index
     base.depth_texture_index =
-      get_depth_texture(render_target, frame_index).index
+      resources.get_depth_texture(render_target, frame_index).index
     base.input_image_index = input_image_index
     // Create and push combined push constants based on effect type
     switch &e in effect {

@@ -12,7 +12,7 @@ import "mjolnir/gpu"
 import "mjolnir/navigation"
 import "mjolnir/navigation/recast"
 import "mjolnir/navigation/detour"
-import "mjolnir/resource"
+import "mjolnir/resources"
 import "vendor:glfw"
 import mu "vendor:microui"
 
@@ -565,9 +565,9 @@ create_obj_visualization_mesh :: proc(engine_ptr: ^mjolnir.Engine, obj_file: str
     // The mesh will manage the geometry lifetime
 
     // Create mesh
-    navmesh_state.obj_mesh_handle = create_mesh_handle(
+    navmesh_state.obj_mesh_handle = resources.create_mesh_handle(
         &engine_ptr.gpu_context,
-        &engine_ptr.warehouse,
+        &engine_ptr.resource_manager,
         geom,
     )
 
@@ -576,8 +576,8 @@ create_obj_visualization_mesh :: proc(engine_ptr: ^mjolnir.Engine, obj_file: str
         &engine_ptr.scene,
         MeshAttachment{
             handle = navmesh_state.obj_mesh_handle,
-            material = create_material_handle(
-                &engine_ptr.warehouse,
+            material = resources.create_material_handle(
+                &engine_ptr.resource_manager,
                 metallic_value = 0.1,
                 roughness_value = 0.8,
                 emissive_value = 0.02,
@@ -867,15 +867,15 @@ update_position_marker :: proc(engine_ptr: ^mjolnir.Engine, handle: ^mjolnir.Han
     marker_geom := make_sphere(12, 6, 0.3, color)  // Small sphere with color
     // NOTE: Don't delete geometry here - create_mesh takes ownership
 
-    marker_mesh_handle := create_mesh_handle(
+    marker_mesh_handle := resources.create_mesh_handle(
         &engine_ptr.gpu_context,
-        &engine_ptr.warehouse,
+        &engine_ptr.resource_manager,
         marker_geom,
     )
 
     // Create colored material for the marker
-    marker_material_handle := create_material_handle(
-        &engine_ptr.warehouse,
+    marker_material_handle := resources.create_material_handle(
+        &engine_ptr.resource_manager,
         metallic_value = 0.2,
         roughness_value = 0.8,
         emissive_value = 0.5,  // Make it glow a bit

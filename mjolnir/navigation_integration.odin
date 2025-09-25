@@ -5,7 +5,7 @@ import "core:math/linalg"
 import "geometry"
 import "navigation/detour"
 import "navigation/recast"
-import "resource"
+import "resources"
 
 NavMeshAttachment :: struct {
   nav_mesh_handle: Handle,
@@ -31,46 +31,7 @@ NavMeshAgentAttachment :: struct {
 NavMeshObstacleAttachment :: struct {
   obstacle_bounds:     geometry.Aabb,
   affects_pathfinding: bool,
-  obstacle_type:       NavObstacleType,
-}
-
-NavObstacleType :: enum {
-  Static,
-  Dynamic,
-}
-
-NavMesh :: struct {
-  detour_mesh: detour.Nav_Mesh,
-  bounds:      geometry.Aabb,
-  cell_size:   f32,
-  tile_size:   i32,
-  is_tiled:    bool,
-  area_costs:  [64]f32,
-}
-
-NavContext :: struct {
-  nav_mesh_query:  detour.Nav_Mesh_Query,
-  associated_mesh: Handle,
-  query_filter:    detour.Query_Filter,
-}
-
-NavigationSystem :: struct {
-  default_context_handle: Handle,
-  geometry_cache:         [dynamic]NavigationGeometry,
-  dirty_tiles:            map[TileCoord]bool,
-  rebuild_queued:         bool,
-}
-
-NavigationGeometry :: struct {
-  vertices:   []f32,
-  indices:    []i32,
-  area_types: []u8,
-  transform:  matrix[4, 4]f32,
-  dirty:      bool,
-}
-
-TileCoord :: struct {
-  x, y: i32,
+  obstacle_type:       resources.NavObstacleType,
 }
 
 SceneGeometryCollector :: struct {
@@ -111,8 +72,8 @@ scene_geometry_collector_traverse :: proc(node: ^Node, ctx: rawptr) -> bool {
     return true
   }
   if mesh_attachment, is_mesh := node.attachment.(MeshAttachment); is_mesh {
-    mesh := mesh(collector.engine, mesh_attachment.handle)
-    if mesh == nil {
+    mesh, ok := resources.get_mesh(&collector.engine.resource_manager, mesh_attachment.handle)
+    if !ok {
       return true
     }
     world_matrix := get_world_matrix(node)
@@ -123,7 +84,7 @@ scene_geometry_collector_traverse :: proc(node: ^Node, ctx: rawptr) -> bool {
     add_mesh_to_collector(
       collector,
       mesh,
-      &collector.engine.warehouse,
+      &collector.engine.resource_manager,
       world_matrix,
       area_type,
     )
@@ -134,18 +95,18 @@ scene_geometry_collector_traverse :: proc(node: ^Node, ctx: rawptr) -> bool {
 
 add_mesh_to_collector :: proc(
   collector: ^SceneGeometryCollector,
-  mesh: ^Mesh,
-  warehouse: ^ResourceWarehouse,
+  mesh: ^resources.Mesh,
+  resources_manager: ^resources.Manager,
   transform: matrix[4, 4]f32,
   area_type: u8,
 ) {
   vertex_offset := i32(len(collector.vertices))
 
   vertex_capacity := u32(
-    warehouse.vertex_buffer.bytes_count /
-    warehouse.vertex_buffer.element_size,
+    resources_manager.vertex_buffer.bytes_count /
+    resources_manager.vertex_buffer.element_size,
   )
-  if warehouse.vertex_buffer.mapped == nil {
+  if resources_manager.vertex_buffer.mapped == nil {
     log.error("Vertex buffer is not mapped; cannot collect navigation geometry")
     return
   }
@@ -153,14 +114,14 @@ add_mesh_to_collector :: proc(
   for i in 0 ..< vertex_count {
     vertex_index := mesh.vertex_allocation.offset + u32(i)
     if vertex_index >= vertex_capacity do continue
-    vertex := warehouse.vertex_buffer.mapped[int(vertex_index)]
+    vertex := resources_manager.vertex_buffer.mapped[int(vertex_index)]
     append(&collector.vertices, transform[3,3] * vertex.position)
   }
   index_capacity := u32(
-    warehouse.index_buffer.bytes_count /
-    warehouse.index_buffer.element_size,
+    resources_manager.index_buffer.bytes_count /
+    resources_manager.index_buffer.element_size,
   )
-  if warehouse.index_buffer.mapped == nil {
+  if resources_manager.index_buffer.mapped == nil {
     log.error("Index buffer is not mapped; cannot collect navigation geometry")
     return
   }
@@ -168,7 +129,7 @@ add_mesh_to_collector :: proc(
   for i in 0 ..< index_count {
     index_index := mesh.index_allocation.offset + u32(i)
     if index_index >= index_capacity do continue
-    index := warehouse.index_buffer.mapped[int(index_index)]
+    index := resources_manager.index_buffer.mapped[int(index_index)]
     append(&collector.indices, i32(index) + vertex_offset)
   }
 
@@ -210,7 +171,7 @@ build_navigation_mesh_from_scene :: proc(
     recast.free_poly_mesh_detail(dmesh)
   }
 
-  nav_mesh_handle, nav_mesh := resource.alloc(&engine.warehouse.nav_meshes)
+  nav_mesh_handle, nav_mesh := resources.alloc(&engine.resource_manager.nav_meshes)
   if nav_mesh == nil {
     return nav_mesh_handle, false
   }
@@ -320,8 +281,8 @@ build_navigation_mesh_from_scene_filtered :: proc(
     recast.free_poly_mesh_detail(dmesh)
   }
 
-  // Create and initialize NavMesh resource (same as basic version)
-  nav_mesh_handle, nav_mesh := resource.alloc(&engine.warehouse.nav_meshes)
+  // Create and initialize resources.NavMesh resource (same as basic version)
+  nav_mesh_handle, nav_mesh := resources.alloc(&engine.resource_manager.nav_meshes)
   if nav_mesh == nil {
     log.error("Failed to allocate navigation mesh resource")
     return nav_mesh_handle, false
@@ -423,13 +384,13 @@ create_navigation_context :: proc(
   Handle,
   bool,
 ) {
-  nav_mesh := navmesh(engine, nav_mesh_handle)
-  if nav_mesh == nil {
+  nav_mesh, ok := resources.get_navmesh(&engine.resource_manager, nav_mesh_handle)
+  if !ok {
     log.error("Invalid navigation mesh handle for context creation")
     return {}, false
   }
 
-  context_handle, nav_context := resource.alloc(&engine.warehouse.nav_contexts)
+  context_handle, nav_context := resources.alloc(&engine.resource_manager.nav_contexts)
   if nav_context == nil {
     log.error("Failed to allocate navigation context")
     return context_handle, false
@@ -443,7 +404,7 @@ create_navigation_context :: proc(
   )
   if recast.status_failed(init_status) {
     log.errorf("Failed to initialize navigation mesh query: %v", init_status)
-    resource.free(&engine.warehouse.nav_contexts, context_handle)
+    resources.free(&engine.resource_manager.nav_contexts, context_handle)
     return context_handle, false
   }
 
@@ -468,15 +429,15 @@ nav_find_path :: proc(
   path: [][3]f32,
   success: bool,
 ) {
-  nav_context := nav_context(engine, context_handle)
-  if nav_context == nil {
+  nav_context, ok := resources.get_nav_context(&engine.resource_manager, context_handle)
+  if !ok {
     log.error("Invalid navigation context handle")
     return nil, false
   }
 
   // Get navigation mesh from context
-  nav_mesh := navmesh(engine, nav_context.associated_mesh)
-  if nav_mesh == nil {
+  nav_mesh, mesh_found := resources.get_navmesh(&engine.resource_manager, nav_context.associated_mesh)
+  if !mesh_found {
     log.error("Invalid navigation mesh associated with context")
     return nil, false
   }
@@ -583,8 +544,8 @@ nav_is_position_walkable :: proc(
   context_handle: Handle,
   position: [3]f32,
 ) -> bool {
-  nav_context := nav_context(engine, context_handle)
-  if nav_context == nil {
+  nav_context, ok := resources.get_nav_context(&engine.resource_manager, context_handle)
+  if !ok {
     return false
   }
 
@@ -629,15 +590,12 @@ nav_agent_set_target :: proc(
   target: [3]f32,
   context_handle: Handle = {},
 ) -> bool {
-  node := resource.get(engine.scene.nodes, agent_handle)
+  node := resources.get(engine.scene.nodes, agent_handle)
   if node == nil {
     return false
   }
 
-  agent, ok := &node.attachment.(NavMeshAgentAttachment)
-  if !ok {
-    return false
-  }
+  agent := &node.attachment.(NavMeshAgentAttachment)
 
   agent.target_position = target
 
@@ -647,7 +605,7 @@ nav_agent_set_target :: proc(
     nav_context_handle := context_handle
     if nav_context_handle == {} {
       nav_context_handle =
-        engine.warehouse.navigation_system.default_context_handle
+        engine.resource_manager.navigation_system.default_context_handle
     }
 
     current_pos := node.transform.position

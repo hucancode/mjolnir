@@ -1,4 +1,4 @@
-package resource
+package resources
 
 Handle :: struct {
   index:      u32,

@@ -1,6 +1,6 @@
 package tests
 
-import "../mjolnir/resource"
+import "../mjolnir/resources"
 import "core:log"
 import "core:math/rand"
 import "core:slice"
@@ -14,55 +14,55 @@ TestData :: struct {
 
 @(test)
 test_resource_pool_basic_allocation :: proc(t: ^testing.T) {
-  pool: resource.Pool(TestData)
-  resource.pool_init(&pool)
-  defer resource.pool_deinit(pool, proc(data: ^TestData) {})
+  pool: resources.Pool(TestData)
+  resources.pool_init(&pool)
+  defer resources.pool_deinit(pool, proc(data: ^TestData) {})
 
-  handle, data := resource.alloc(&pool)
+  handle, data := resources.alloc(&pool)
   testing.expect(t, data != nil)
   testing.expect_value(t, handle.generation, 1)
 
   data.value = 42
-  retrieved := resource.get(pool, handle)
+  retrieved := resources.get(pool, handle)
   testing.expect_value(t, retrieved.value, 42)
 }
 
 @(test)
 test_resource_pool_handle_invalidation :: proc(t: ^testing.T) {
-  pool: resource.Pool(TestData)
-  resource.pool_init(&pool)
-  defer resource.pool_deinit(pool, proc(data: ^TestData) {})
+  pool: resources.Pool(TestData)
+  resources.pool_init(&pool)
+  defer resources.pool_deinit(pool, proc(data: ^TestData) {})
 
-  handle, _ := resource.alloc(&pool)
-  resource.free(&pool, handle)
+  handle, _ := resources.alloc(&pool)
+  resources.free(&pool, handle)
 
-  retrieved, found := resource.get(pool, handle)
+  retrieved, found := resources.get(pool, handle)
   testing.expect(t, !found)
   testing.expect(t, retrieved == nil)
 }
 
 @(test)
 test_resource_pool_generation_increment :: proc(t: ^testing.T) {
-  pool: resource.Pool(TestData)
-  resource.pool_init(&pool)
-  defer resource.pool_deinit(pool, proc(data: ^TestData) {})
-  handle1, _ := resource.alloc(&pool)
-  resource.free(&pool, handle1)
-  handle2, _ := resource.alloc(&pool)
+  pool: resources.Pool(TestData)
+  resources.pool_init(&pool)
+  defer resources.pool_deinit(pool, proc(data: ^TestData) {})
+  handle1, _ := resources.alloc(&pool)
+  resources.free(&pool, handle1)
+  handle2, _ := resources.alloc(&pool)
   testing.expect_value(t, handle2.index, handle1.index) // same index reused
   testing.expect(t, handle2.generation > handle1.generation) // generation incremented
 }
 
 @(test)
 test_invalid_resource_handles :: proc(t: ^testing.T) {
-  pool: resource.Pool(int)
-  resource.pool_init(&pool)
-  defer resource.pool_deinit(pool, proc(data: ^int) {})
-  invalid_handle := resource.Handle {
+  pool: resources.Pool(int)
+  resources.pool_init(&pool)
+  defer resources.pool_deinit(pool, proc(data: ^int) {})
+  invalid_handle := resources.Handle {
     index      = 9999,
     generation = 1,
   }
-  data, found := resource.get(pool, invalid_handle)
+  data, found := resources.get(pool, invalid_handle)
   testing.expect(t, !found)
   testing.expect(t, data == nil)
 }
@@ -72,8 +72,8 @@ benchmark_resource_pool_read :: proc(t: ^testing.T) {
   COUNT :: 100_000
   READ_COUNT :: 100_000
   ResourcePoolTest :: struct {
-    pool:    resource.Pool(TestData),
-    handles: []resource.Handle,
+    pool:    resources.Pool(TestData),
+    handles: []resources.Handle,
   }
   resource_pool_opts := &time.Benchmark_Options {
     rounds = 1,
@@ -83,10 +83,10 @@ benchmark_resource_pool_read :: proc(t: ^testing.T) {
       allocator := context.allocator,
     ) -> time.Benchmark_Error {
       data := new(ResourcePoolTest)
-      data.handles = make([]resource.Handle, READ_COUNT)
-      resource.pool_init(&data.pool)
+      data.handles = make([]resources.Handle, READ_COUNT)
+      resources.pool_init(&data.pool)
       for i in 0 ..< COUNT {
-        handle, d := resource.alloc(&data.pool)
+        handle, d := resources.alloc(&data.pool)
         d.value = rand.int31()
         data.handles[i] = handle
       }
@@ -104,7 +104,7 @@ benchmark_resource_pool_read :: proc(t: ^testing.T) {
       sum: i32 = 0
       data := cast(^ResourcePoolTest)(raw_data(options.input))
       for h in data.handles {
-        d := resource.get(data.pool, h)
+        d := resources.get(data.pool, h)
         sum += d.value
         options.processed += size_of(TestData)
       }
@@ -115,7 +115,7 @@ benchmark_resource_pool_read :: proc(t: ^testing.T) {
       allocator := context.allocator,
     ) -> time.Benchmark_Error {
       data := cast(^ResourcePoolTest)(raw_data(options.input))
-      resource.pool_deinit(data.pool, proc(data: ^TestData) {})
+      resources.pool_deinit(data.pool, proc(data: ^TestData) {})
       delete(data.handles)
       free(data)
       return nil
@@ -186,7 +186,7 @@ benchmark_resource_pool_read :: proc(t: ^testing.T) {
 benchmark_resource_pool_write :: proc(t: ^testing.T) {
   OP_COUNT :: 100_000
   ResourcePoolTest :: struct {
-    pool:       resource.Pool(TestData),
+    pool:       resources.Pool(TestData),
     operations: []bool,
   }
   resource_pool_opts := &time.Benchmark_Options {
@@ -198,7 +198,7 @@ benchmark_resource_pool_write :: proc(t: ^testing.T) {
     ) -> time.Benchmark_Error {
       data := new(ResourcePoolTest)
       data.operations = make([]bool, OP_COUNT)
-      resource.pool_init(&data.pool)
+      resources.pool_init(&data.pool)
       for &op in data.operations {
         op = rand.float32() < 0.5
       }
@@ -210,17 +210,17 @@ benchmark_resource_pool_write :: proc(t: ^testing.T) {
       allocator := context.allocator,
     ) -> time.Benchmark_Error {
       data := cast(^ResourcePoolTest)(raw_data(options.input))
-      allocated := make([dynamic]resource.Handle, 0, len(data.operations))
+      allocated := make([dynamic]resources.Handle, 0, len(data.operations))
       defer delete(allocated)
       for should_alloc in data.operations {
         if should_alloc {
-          handle, d := resource.alloc(&data.pool)
+          handle, d := resources.alloc(&data.pool)
           d.value = rand.int31()
           append(&allocated, handle)
         } else {
           handle, ok := pop_safe(&allocated)
           if ok {
-            resource.free(&data.pool, handle)
+            resources.free(&data.pool, handle)
           }
         }
         options.processed += size_of(TestData)
@@ -232,7 +232,7 @@ benchmark_resource_pool_write :: proc(t: ^testing.T) {
       allocator := context.allocator,
     ) -> time.Benchmark_Error {
       data := cast(^ResourcePoolTest)(raw_data(options.input))
-      resource.pool_deinit(data.pool, proc(data: ^TestData) {})
+      resources.pool_deinit(data.pool, proc(data: ^TestData) {})
       delete(data.operations)
       free(data)
       return nil

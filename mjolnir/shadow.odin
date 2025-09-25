@@ -3,8 +3,8 @@ package mjolnir
 import "core:log"
 import "geometry"
 import "gpu"
-import "resource"
 import vk "vendor:vulkan"
+import "resources"
 
 SHADER_SHADOW_VERT :: #load("shader/shadow/vert.spv")
 SHADER_SHADOW_FRAG :: #load("shader/shadow/frag.spv")
@@ -17,10 +17,10 @@ RendererShadow :: struct {
 shadow_init :: proc(
   self: ^RendererShadow,
   gpu_context: ^gpu.GPUContext,
-  warehouse: ^ResourceWarehouse,
+  resources_manager: ^resources.Manager,
   depth_format: vk.Format = .D32_SFLOAT,
 ) -> vk.Result {
-  self.pipeline_layout = warehouse.geometry_pipeline_layout
+  self.pipeline_layout = resources_manager.geometry_pipeline_layout
   if self.pipeline_layout == 0 {
     return .ERROR_INITIALIZATION_FAILED
   }
@@ -132,9 +132,9 @@ shadow_deinit :: proc(self: ^RendererShadow, gpu_context: ^gpu.GPUContext) {
 }
 
 shadow_begin :: proc(
-  shadow_target: ^RenderTarget,
+  shadow_target: ^resources.RenderTarget,
   command_buffer: vk.CommandBuffer,
-  warehouse: ^ResourceWarehouse,
+  resources_manager: ^resources.Manager,
   frame_index: u32,
   face: Maybe(u32) = nil,
 ) {
@@ -142,28 +142,28 @@ shadow_begin :: proc(
   depth_image: vk.Image
   face_index, has_face := face.?
   if has_face {
-    cube_texture := resource.get(
-      warehouse.image_cube_buffers,
-      get_depth_texture(shadow_target, frame_index),
+    cube_texture := resources.get(
+      resources_manager.image_cube_buffers,
+      resources.get_depth_texture(shadow_target, frame_index),
     )
     if cube_texture == nil {
       log.errorf(
         "Invalid cube shadow map handle: %v",
-        get_depth_texture(shadow_target, frame_index),
+        resources.get_depth_texture(shadow_target, frame_index),
       )
       return
     }
     depth_image_view = cube_texture.face_views[face_index]
     depth_image = cube_texture.image
   } else {
-    texture_2d := resource.get(
-      warehouse.image_2d_buffers,
-      get_depth_texture(shadow_target, frame_index),
+    texture_2d := resources.get(
+      resources_manager.image_2d_buffers,
+      resources.get_depth_texture(shadow_target, frame_index),
     )
     if texture_2d == nil {
       log.errorf(
         "Invalid 2D shadow map handle: %v",
-        get_depth_texture(shadow_target, frame_index),
+        resources.get_depth_texture(shadow_target, frame_index),
       )
       return
     }
@@ -220,9 +220,9 @@ shadow_begin :: proc(
 // Render shadow for a single light
 shadow_render :: proc(
   self: ^RendererShadow,
-  shadow_target: RenderTarget,
+  shadow_target: resources.RenderTarget,
   command_buffer: vk.CommandBuffer,
-  warehouse: ^ResourceWarehouse,
+  resources_manager: ^resources.Manager,
   frame_index: u32,
   draw_buffer: vk.Buffer,
   draw_count: u32,
@@ -231,14 +231,14 @@ shadow_render :: proc(
     return
   }
   descriptor_sets := [?]vk.DescriptorSet {
-    warehouse.camera_buffer_descriptor_set,
-    warehouse.textures_descriptor_set,
-    warehouse.bone_buffer_descriptor_sets[frame_index],
-    warehouse.material_buffer_descriptor_set,
-    warehouse.world_matrix_descriptor_sets[frame_index],
-    warehouse.node_data_descriptor_set,
-    warehouse.mesh_data_descriptor_set,
-    warehouse.vertex_skinning_descriptor_set,
+    resources_manager.camera_buffer_descriptor_set,
+    resources_manager.textures_descriptor_set,
+    resources_manager.bone_buffer_descriptor_sets[frame_index],
+    resources_manager.material_buffer_descriptor_set,
+    resources_manager.world_matrix_descriptor_sets[frame_index],
+    resources_manager.node_data_descriptor_set,
+    resources_manager.mesh_data_descriptor_set,
+    resources_manager.vertex_skinning_descriptor_set,
   }
   vk.CmdBindDescriptorSets(
     command_buffer,
@@ -263,7 +263,7 @@ shadow_render :: proc(
     &push_constant,
   )
 
-  vertex_buffers := [1]vk.Buffer{warehouse.vertex_buffer.buffer}
+  vertex_buffers := [1]vk.Buffer{resources_manager.vertex_buffer.buffer}
   vertex_offsets := [1]vk.DeviceSize{0}
   vk.CmdBindVertexBuffers(
     command_buffer,
@@ -274,7 +274,7 @@ shadow_render :: proc(
   )
   vk.CmdBindIndexBuffer(
     command_buffer,
-    warehouse.index_buffer.buffer,
+    resources_manager.index_buffer.buffer,
     0,
     .UINT32,
   )
@@ -290,8 +290,8 @@ shadow_render :: proc(
 
 shadow_end :: proc(
   command_buffer: vk.CommandBuffer,
-  shadow_target: ^RenderTarget,
-  warehouse: ^ResourceWarehouse,
+  shadow_target: ^resources.RenderTarget,
+  resources_manager: ^resources.Manager,
   frame_index: u32,
   face: Maybe(u32) = nil,
 ) {
@@ -301,27 +301,27 @@ shadow_end :: proc(
   depth_image: vk.Image
   face_index, has_face := face.?
   if has_face {
-    cube_texture := resource.get(
-      warehouse.image_cube_buffers,
-      get_depth_texture(shadow_target, frame_index),
+    cube_texture := resources.get(
+      resources_manager.image_cube_buffers,
+      resources.get_depth_texture(shadow_target, frame_index),
     )
     if cube_texture == nil {
       log.errorf(
         "Invalid cube shadow map handle: %v",
-        get_depth_texture(shadow_target, frame_index),
+        resources.get_depth_texture(shadow_target, frame_index),
       )
       return
     }
     depth_image = cube_texture.image
   } else {
-    texture_2d := resource.get(
-      warehouse.image_2d_buffers,
-      get_depth_texture(shadow_target, frame_index),
+    texture_2d := resources.get(
+      resources_manager.image_2d_buffers,
+      resources.get_depth_texture(shadow_target, frame_index),
     )
     if texture_2d == nil {
       log.errorf(
         "Invalid 2D shadow map handle: %v",
-        get_depth_texture(shadow_target, frame_index),
+        resources.get_depth_texture(shadow_target, frame_index),
       )
       return
     }

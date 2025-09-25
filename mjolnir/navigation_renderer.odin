@@ -7,7 +7,7 @@ import "core:math/rand"
 import "core:slice"
 import "geometry"
 import "gpu"
-import "resource"
+import "resources"
 import "navigation/recast"
 import vk "vendor:vulkan"
 
@@ -87,7 +87,7 @@ AREA_COLORS := [7][4]f32{
     6 = {0.8, 0.8, 0.0, 0.6},
 }
 
-navmesh_init :: proc(renderer: ^RendererNavMesh, gpu_context: ^gpu.GPUContext, warehouse: ^ResourceWarehouse) -> vk.Result {
+navmesh_init :: proc(renderer: ^RendererNavMesh, gpu_context: ^gpu.GPUContext, resources_manager: ^resources.Manager) -> vk.Result {
     renderer.enabled = true
     renderer.height_offset = 0.01
     renderer.alpha = 0.6
@@ -95,7 +95,7 @@ navmesh_init :: proc(renderer: ^RendererNavMesh, gpu_context: ^gpu.GPUContext, w
     renderer.debug_render_mode = .Wireframe
     renderer.base_color = {0.0, 0.8, 0.2}
     renderer.path_color = {1.0, 1.0, 0.0, 1.0}
-    create_navmesh_pipelines(renderer, gpu_context, warehouse) or_return
+    create_navmesh_pipelines(renderer, gpu_context, resources_manager) or_return
     renderer.vertex_buffer = gpu.create_host_visible_buffer(gpu_context, NavMeshVertex, 16384, {.VERTEX_BUFFER}) or_return
     renderer.index_buffer = gpu.create_host_visible_buffer(gpu_context, u32, 32768, {.INDEX_BUFFER}) or_return
     renderer.path_vertex_buffer = gpu.create_host_visible_buffer(gpu_context, NavMeshVertex, MAX_PATH_SEGMENTS * 2, {.VERTEX_BUFFER}) or_return
@@ -469,7 +469,7 @@ navmesh_render :: proc(renderer: ^RendererNavMesh, command_buffer: vk.CommandBuf
     }
 }
 
-create_navmesh_pipelines :: proc(renderer: ^RendererNavMesh, gpu_context: ^gpu.GPUContext, warehouse: ^ResourceWarehouse) -> vk.Result {
+create_navmesh_pipelines :: proc(renderer: ^RendererNavMesh, gpu_context: ^gpu.GPUContext, resources_manager: ^resources.Manager) -> vk.Result {
     // Load shaders
     navmesh_vert_code := #load("shader/navmesh/vert.spv")
     navmesh_vert := gpu.create_shader_module(gpu_context, navmesh_vert_code) or_return
@@ -487,8 +487,8 @@ create_navmesh_pipelines :: proc(renderer: ^RendererNavMesh, gpu_context: ^gpu.G
     navmesh_debug_frag := gpu.create_shader_module(gpu_context, navmesh_debug_frag_code) or_return
     defer vk.DestroyShaderModule(gpu_context.device, navmesh_debug_frag, nil)
 
-    // Create descriptor set layouts (using camera buffer from warehouse)
-    set_layouts := []vk.DescriptorSetLayout{warehouse.camera_buffer_set_layout}
+    // Create descriptor set layouts (using camera buffer from resources_manager)
+    set_layouts := []vk.DescriptorSetLayout{resources_manager.camera_buffer_set_layout}
 
     // Create pipeline layouts
     push_constant_range := vk.PushConstantRange{
