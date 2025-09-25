@@ -502,14 +502,12 @@ render_2d :: proc(engine: ^mjolnir.Engine, ctx: ^mu.Context) {
     )
     mu.label(ctx, fmt.tprintf("Max Shadow Maps: %d", MAX_SHADOW_MAPS))
   }
-  when mjolnir.USE_GPU_CULLING {
-    if mu.window(ctx, "GPU Culling", {990, 200, 280, 240}, {.NO_CLOSE}) {
-      mu.label(ctx, fmt.tprintf("Max Nodes: %d", mjolnir.MAX_NODES_IN_SCENE))
-      mu.label(ctx, fmt.tprintf("Max Cameras: %d", mjolnir.MAX_ACTIVE_CAMERAS))
-      total_nodes :=
-        len(engine.scene.nodes.entries) - len(engine.scene.nodes.free_indices)
-      mu.label(ctx, fmt.tprintf("Active Nodes: %d", total_nodes))
-    }
+  if mu.window(ctx, "GPU Culling", {990, 200, 280, 240}, {.NO_CLOSE}) {
+    mu.label(ctx, fmt.tprintf("Max Nodes: %d", mjolnir.MAX_NODES_IN_SCENE))
+    mu.label(ctx, fmt.tprintf("Max Cameras: %d", mjolnir.MAX_ACTIVE_CAMERAS))
+    total_nodes :=
+      len(engine.scene.nodes.entries) - len(engine.scene.nodes.free_indices)
+    mu.label(ctx, fmt.tprintf("Active Nodes: %d", total_nodes))
   }
 }
 

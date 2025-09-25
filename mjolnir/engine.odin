@@ -36,7 +36,6 @@ SHADOW_MAP_SIZE :: 512
 MAX_SHADOW_MAPS :: 10
 MAX_TEXTURES :: 90
 MAX_CUBE_TEXTURES :: 20
-USE_GPU_CULLING :: true // Set to false to use CPU culling instead
 USE_PARALLEL_UPDATE :: true // Set to false to disable threading for debugging
 
 Handle :: resource.Handle
@@ -196,7 +195,7 @@ Engine :: struct {
   ui:                          RendererUI,
   navmesh:                     RendererNavMesh,
   command_buffers:             [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
-  depth_gbuffer_command_buffers: [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
+  gbuffer_command_buffers:     [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
   shadow_pass_command_buffers:   [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
   lighting_command_buffers:      [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
   transparency_command_buffers:  [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
@@ -406,7 +405,7 @@ init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
       level = .SECONDARY,
       commandBufferCount = MAX_FRAMES_IN_FLIGHT,
     },
-    raw_data(self.depth_gbuffer_command_buffers[:]),
+    raw_data(self.gbuffer_command_buffers[:]),
   ) or_return
   vk.AllocateCommandBuffers(
     self.gpu_context.device,
@@ -480,13 +479,11 @@ init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
     &self.warehouse,
   ) or_return
   particle_init(&self.particle, &self.gpu_context, &self.warehouse) or_return
-  when USE_GPU_CULLING {
-    visibility_culler_init(
-      &self.visibility_culler,
-      &self.gpu_context,
-      &self.warehouse,
-    ) or_return
-  }
+  visibility_culler_init(
+    &self.visibility_culler,
+    &self.gpu_context,
+    &self.warehouse,
+  ) or_return
   transparent_init(
     &self.transparent,
     &self.gpu_context,
@@ -772,43 +769,15 @@ update :: proc(self: ^Engine) -> bool {
 
 deinit :: proc(self: ^Engine) {
   vk.DeviceWaitIdle(self.gpu_context.device)
-  vk.FreeCommandBuffers(
-    self.gpu_context.device,
-    self.gpu_context.command_pool,
-    len(self.command_buffers),
-    raw_data(self.command_buffers[:]),
-  )
-  vk.FreeCommandBuffers(
-    self.gpu_context.device,
-    self.gpu_context.command_pool,
-    len(self.depth_gbuffer_command_buffers),
-    raw_data(self.depth_gbuffer_command_buffers[:]),
-  )
-  vk.FreeCommandBuffers(
-    self.gpu_context.device,
-    self.gpu_context.command_pool,
-    len(self.shadow_pass_command_buffers),
-    raw_data(self.shadow_pass_command_buffers[:]),
-  )
-  vk.FreeCommandBuffers(
-    self.gpu_context.device,
-    self.gpu_context.command_pool,
-    len(self.lighting_command_buffers),
-    raw_data(self.lighting_command_buffers[:]),
-  )
-  vk.FreeCommandBuffers(
-    self.gpu_context.device,
-    self.gpu_context.command_pool,
-    len(self.transparency_command_buffers),
-    raw_data(self.transparency_command_buffers[:]),
-  )
-  vk.FreeCommandBuffers(
-    self.gpu_context.device,
-    self.gpu_context.command_pool,
-    len(self.postprocess_command_buffers),
-    raw_data(self.postprocess_command_buffers[:]),
-  )
-  // Clean up main render target
+  free_command_buffers :: proc(device: vk.Device, pool: vk.CommandPool, buffers: []vk.CommandBuffer) {
+    vk.FreeCommandBuffers(device, pool, u32(len(buffers)), raw_data(buffers[:]))
+  }
+  free_command_buffers(self.gpu_context.device, self.gpu_context.command_pool, self.command_buffers[:])
+  free_command_buffers(self.gpu_context.device, self.gpu_context.command_pool, self.gbuffer_command_buffers[:])
+  free_command_buffers(self.gpu_context.device, self.gpu_context.command_pool, self.shadow_pass_command_buffers[:])
+  free_command_buffers(self.gpu_context.device, self.gpu_context.command_pool, self.lighting_command_buffers[:])
+  free_command_buffers(self.gpu_context.device, self.gpu_context.command_pool, self.transparency_command_buffers[:])
+  free_command_buffers(self.gpu_context.device, self.gpu_context.command_pool, self.postprocess_command_buffers[:])
   if main_render_target := resource.get(
     self.warehouse.render_targets,
     self.main_render_target,
@@ -820,8 +789,6 @@ deinit :: proc(self: ^Engine) {
       render_target_deinit(item, &self.gpu_context, &self.warehouse)
     }
   }
-
-  // Clean up persistent shadow render targets
   for j in 0 ..< MAX_SHADOW_MAPS {
     resource.free(
       &self.warehouse.render_targets,
@@ -834,16 +801,9 @@ deinit :: proc(self: ^Engine) {
       )
     }
   }
-
-  // Clean up frame active render targets
   delete(self.frame_active_render_targets)
-
-  // Clean up deferred cleanup
   delete(self.pending_node_deletions)
-
-  // Clean up synchronization
   vk.DestroyFence(self.gpu_context.device, self.frame_fence, nil)
-
   ui_deinit(&self.ui, &self.gpu_context)
   navmesh_deinit(&self.navmesh, &self.gpu_context)
   scene_deinit(&self.scene, &self.warehouse)
@@ -853,11 +813,8 @@ deinit :: proc(self: ^Engine) {
   shadow_deinit(&self.shadow, &self.gpu_context)
   postprocess_deinit(&self.postprocess, &self.gpu_context, &self.warehouse)
   particle_deinit(&self.particle, &self.gpu_context)
-  when USE_GPU_CULLING {
-    visibility_culler_deinit(&self.visibility_culler, &self.gpu_context)
-  }
+  visibility_culler_deinit(&self.visibility_culler, &self.gpu_context)
   transparent_deinit(&self.transparent, &self.gpu_context)
-
   resource_deinit(&self.warehouse, &self.gpu_context)
   swapchain_deinit(&self.swapchain, &self.gpu_context)
   gpu.gpu_context_deinit(&self.gpu_context)
@@ -1026,7 +983,6 @@ record_depth_gbuffer_pass :: proc(
   main_render_target: ^RenderTarget,
 ) -> vk.Result {
   vk.ResetCommandBuffer(command_buffer, {}) or_return
-
   color_formats := [?]vk.Format {
     .R32G32B32A32_SFLOAT,
     .R8G8B8A8_UNORM,
@@ -1052,7 +1008,6 @@ record_depth_gbuffer_pass :: proc(
       pInheritanceInfo = &inheritance,
     },
   ) or_return
-
   depth_texture := resource.get(
     self.warehouse.image_2d_buffers,
     get_depth_texture(main_render_target, self.frame_index),
@@ -1070,27 +1025,20 @@ record_depth_gbuffer_pass :: proc(
       {.DEPTH_STENCIL_ATTACHMENT_WRITE},
     )
   }
-
-  opaque_include := NodeFlagSet{.VISIBLE}
-  opaque_exclude := NodeFlagSet{
-    .MATERIAL_TRANSPARENT,
-    .MATERIAL_WIREFRAME,
-  }
   visibility_culler_dispatch(
     &self.visibility_culler,
     &self.gpu_context,
     command_buffer,
     self.frame_index,
     main_render_target.camera.index,
-    opaque_include,
-    opaque_exclude,
+    {.VISIBLE},
+    {.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME},
   )
   draw_buffer := visibility_culler_command_buffer(
     &self.visibility_culler,
     self.frame_index,
   )
   draw_count := visibility_culler_max_draw_count(&self.visibility_culler)
-
   depth_prepass_begin(
     main_render_target,
     command_buffer,
@@ -1107,7 +1055,6 @@ record_depth_gbuffer_pass :: proc(
     draw_count,
   )
   depth_prepass_end(command_buffer)
-
   gbuffer_begin(
     main_render_target,
     command_buffer,
@@ -1129,7 +1076,6 @@ record_depth_gbuffer_pass :: proc(
     &self.warehouse,
     self.frame_index,
   )
-
   if depth_texture != nil {
     gpu.transition_image(
       command_buffer,
@@ -1143,7 +1089,6 @@ record_depth_gbuffer_pass :: proc(
       {.SHADER_READ},
     )
   }
-
   vk.EndCommandBuffer(command_buffer) or_return
   return .SUCCESS
 }
@@ -1533,9 +1478,7 @@ render_debug_ui :: proc(self: ^Engine) {
     mu.label(&self.ui.ctx, fmt.tprintf("Textures %d", len(self.warehouse.image_2d_buffers.entries) - len(self.warehouse.image_2d_buffers.free_indices)))
     mu.label(&self.ui.ctx, fmt.tprintf("Materials %d", len(self.warehouse.materials.entries) - len(self.warehouse.materials.free_indices)))
     mu.label(&self.ui.ctx, fmt.tprintf("Meshes %d", len(self.warehouse.meshes.entries) - len(self.warehouse.meshes.free_indices)))
-    when USE_GPU_CULLING {
-      mu.label(&self.ui.ctx, fmt.tprintf("Visible nodes (max %d): %d", self.visibility_culler.max_draws, self.visibility_culler.node_count))
-    }
+    mu.label(&self.ui.ctx, fmt.tprintf("Visible nodes (max %d): %d", self.visibility_culler.max_draws, self.visibility_culler.node_count))
   }
 }
 
@@ -1664,55 +1607,47 @@ render :: proc(self: ^Engine) -> vk.Result {
   }
 
   process_scene_lights(self)
-
-  when USE_GPU_CULLING {
-    clear(&self.frame_active_render_targets)
-    append(&self.frame_active_render_targets, self.main_render_target)
-    for light_info in self.lights[:self.active_light_count] {
-      if !light_info.light_cast_shadow do continue
-      switch light_info.light_kind {
-      case .POINT:
-        for target_handle in light_info.cube_render_targets {
-          render_target(self, target_handle) or_continue
-          append(&self.frame_active_render_targets, target_handle)
-        }
-      case .SPOT:
-        render_target(self, light_info.render_target) or_continue
-        append(&self.frame_active_render_targets, light_info.render_target)
-      case .DIRECTIONAL:
+  clear(&self.frame_active_render_targets)
+  append(&self.frame_active_render_targets, self.main_render_target)
+  for light_info in self.lights[:self.active_light_count] {
+    if !light_info.light_cast_shadow do continue
+    switch light_info.light_kind {
+    case .POINT:
+      for target_handle in light_info.cube_render_targets {
+        render_target(self, target_handle) or_continue
+        append(&self.frame_active_render_targets, target_handle)
       }
+    case .SPOT:
+      render_target(self, light_info.render_target) or_continue
+      append(&self.frame_active_render_targets, light_info.render_target)
+    case .DIRECTIONAL:
     }
-    user_targets_added := 0
-    for &entry, i in self.warehouse.render_targets.entries {
-      if !entry.active do continue
-      handle := Handle{entry.generation, u32(i)}
-      if handle.index == self.main_render_target.index do continue
-      is_shadow_target := false
-      for existing_handle in self.frame_active_render_targets {
-        if handle.index == existing_handle.index {
-          is_shadow_target = true
-          break
-        }
-      }
-      if is_shadow_target do continue
-      append(&self.frame_active_render_targets, handle)
-      user_targets_added += 1
-    }
-    visibility_culler_update(
-      &self.visibility_culler,
-      &self.scene,
-    )
-  } else {
-    clear(&self.frame_active_render_targets)
   }
-
+  for &entry, i in self.warehouse.render_targets.entries {
+    if !entry.active do continue
+    handle := Handle{entry.generation, u32(i)}
+    if handle.index == self.main_render_target.index do continue
+    is_shadow_target := false
+    for existing_handle in self.frame_active_render_targets {
+      if handle.index == existing_handle.index {
+        is_shadow_target = true
+        break
+      }
+    }
+    if is_shadow_target do continue
+    append(&self.frame_active_render_targets, handle)
+  }
+  visibility_culler_update(
+    &self.visibility_culler,
+    &self.scene,
+  )
   record_shadow_pass(
     self,
     self.shadow_pass_command_buffers[self.frame_index],
   ) or_return
   record_depth_gbuffer_pass(
     self,
-    self.depth_gbuffer_command_buffers[self.frame_index],
+    self.gbuffer_command_buffers[self.frame_index],
     main_render_target,
   ) or_return
   record_lighting_pass(
@@ -1730,21 +1665,17 @@ render :: proc(self: ^Engine) -> vk.Result {
     self.postprocess_command_buffers[self.frame_index],
     main_render_target,
   ) or_return
-
   vk.BeginCommandBuffer(
     command_buffer,
     &{sType = .COMMAND_BUFFER_BEGIN_INFO, flags = {.ONE_TIME_SUBMIT}},
   ) or_return
-
   compute_particles(&self.particle, command_buffer, main_camera^)
-
   if self.custom_render_proc != nil {
     self.custom_render_proc(self, command_buffer)
   }
-
   secondary_commands := [?]vk.CommandBuffer{
     self.shadow_pass_command_buffers[self.frame_index],
-    self.depth_gbuffer_command_buffers[self.frame_index],
+    self.gbuffer_command_buffers[self.frame_index],
     self.lighting_command_buffers[self.frame_index],
     self.transparency_command_buffers[self.frame_index],
     self.postprocess_command_buffers[self.frame_index],

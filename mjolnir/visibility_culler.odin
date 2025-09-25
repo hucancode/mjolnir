@@ -276,10 +276,7 @@ visibility_culler_update :: proc(
   self: ^VisibilityCuller,
   scene: ^Scene,
 ) {
-  self.node_count = u32(len(scene.nodes.entries))
-  if self.node_count > self.max_draws {
-    self.node_count = self.max_draws
-  }
+  self.node_count = min(u32(len(scene.nodes.entries)), self.max_draws)
 }
 
 visibility_culler_dispatch :: proc(
