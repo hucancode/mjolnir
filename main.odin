@@ -530,7 +530,7 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
       )
     }
   }
-  t := time_since_app_start(engine) * 0.5
+  t := time_since_start(engine) * 0.5
   translate(
     &engine.scene,
     forcefield_handle,
@@ -542,7 +542,7 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
   for handle, i in light_handles {
     if i == 0 do continue // manual control light #0
     offset := f32(i) / f32(LIGHT_COUNT) * math.PI * 2.0
-    t := time_since_app_start(engine) + offset
+    t := time_since_start(engine) + offset
     // log.infof("getting light %d %v", i, handle)
     rx := math.sin(t)
     ry := (math.sin(t) + 1.0) * 0.5 * 1.5 + 1.0
@@ -554,7 +554,7 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
     rotate(
       &engine.scene,
       light_cube_handles[i],
-      math.PI * time_since_app_start(engine) * 0.5,
+      math.PI * time_since_start(engine) * 0.5,
     )
   }
 }
@@ -607,7 +607,7 @@ custom_render :: proc(
   // Animate portal camera - orbit around the scene center
   portal_camera, ok = resource.get(engine.warehouse.cameras, portal_rt.camera)
   if !ok do return
-  t := time_since_app_start(engine) * 0.3 // Slow orbit speed
+  t := time_since_start(engine) * 0.3 // Slow orbit speed
   radius: f32 = 12.0
   height: f32 = 8.0
   // Calculate circular orbit position

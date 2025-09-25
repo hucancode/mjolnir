@@ -657,7 +657,7 @@ get_delta_time :: proc(self: ^Engine) -> f32 {
   return f32(time.duration_seconds(time.since(self.last_update_timestamp)))
 }
 
-time_since_app_start :: proc(self: ^Engine) -> f32 {
+time_since_start :: proc(self: ^Engine) -> f32 {
   return f32(time.duration_seconds(time.since(self.start_timestamp)))
 }
 
@@ -1822,13 +1822,7 @@ run :: proc(self: ^Engine, width, height: u32, title: string) {
   for !glfw.WindowShouldClose(self.window) {
     // Handle input and GLFW events on main thread, GLFW cannot run on subthreads
     update_input(self)
-    when USE_PARALLEL_UPDATE {
-      // Always flush any staged transforms from logic to render buffers
-      // flush_transforms_to_render(self)
-      if self.transforms_updated {
-        self.transforms_updated = false
-      }
-    } else {
+    when !USE_PARALLEL_UPDATE {
       // Single threaded mode - run update directly
       update(self)
     }
@@ -1859,14 +1853,13 @@ run :: proc(self: ^Engine, width, height: u32, title: string) {
 update_thread_proc :: proc(thread: ^thread.Thread) {
   data := cast(^UpdateThreadData)thread.data
   engine := data.engine
-
   for engine.update_active {
     // Run update at consistent rate
     should_update := update(engine)
     if !should_update {
       // Sleep briefly to avoid busy waiting
-      // MAXIMUM 200 FPS
-      time.sleep(time.Millisecond * 5)
+      // MAXIMUM 500 FPS
+      time.sleep(time.Millisecond * 2)
     }
   }
   log.info("Update thread terminating")
