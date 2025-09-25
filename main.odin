@@ -50,7 +50,6 @@ main :: proc() {
   }
   engine.setup_proc = setup
   engine.update_proc = update
-  engine.render2d_proc = render_2d
   engine.key_press_proc = on_key_pressed
   engine.custom_render_proc = custom_render
   mjolnir.run(&engine, 1280, 720, "Mjolnir Odin")
@@ -361,6 +360,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
         texture_handle = goldstar_texture_handle,
         enabled = true,
         bounding_box = Aabb{min = {-2, -2, -2}, max = {2, 2, 2}},
+        dirty = true,
       },
     )
     psys_handle2, _ := spawn_at(
@@ -390,6 +390,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
         texture_handle = black_circle_texture_handle,
         enabled = true,
         bounding_box = Aabb{min = {-1, -1, -1}, max = {1, 1, 1}},
+        dirty = true,
       },
     )
     // Create a force field that affects both particle systems
@@ -483,32 +484,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
     scale(portal_node, 2.0)
   }
   log.info("setup complete")
-}
-
-render_2d :: proc(engine: ^mjolnir.Engine, ctx: ^mu.Context) {
-  using mjolnir
-  if mu.window(ctx, "Particle System", {40, 360, 300, 200}, {.NO_CLOSE}) {
-    rendered, max_particles := get_particle_render_stats(&engine.particle)
-    mu.label(ctx, fmt.tprintf("Rendered %d", rendered))
-    mu.label(ctx, fmt.tprintf("Max Particles %d", max_particles))
-    efficiency := f32(rendered) / f32(max_particles) * 100.0
-    mu.label(ctx, fmt.tprintf("Efficiency %.1f%%", efficiency))
-  }
-  if mu.window(ctx, "Shadow Debug", {990, 40, 280, 150}, {.NO_CLOSE}) {
-    mu.label(ctx, "Shadow Map Information:")
-    mu.label(
-      ctx,
-      fmt.tprintf("Shadow Map Size: %dx%d", SHADOW_MAP_SIZE, SHADOW_MAP_SIZE),
-    )
-    mu.label(ctx, fmt.tprintf("Max Shadow Maps: %d", MAX_SHADOW_MAPS))
-  }
-  if mu.window(ctx, "GPU Culling", {990, 200, 280, 240}, {.NO_CLOSE}) {
-    mu.label(ctx, fmt.tprintf("Max Nodes: %d", mjolnir.MAX_NODES_IN_SCENE))
-    mu.label(ctx, fmt.tprintf("Max Cameras: %d", mjolnir.MAX_ACTIVE_CAMERAS))
-    total_nodes :=
-      len(engine.scene.nodes.entries) - len(engine.scene.nodes.free_indices)
-    mu.label(ctx, fmt.tprintf("Active Nodes: %d", total_nodes))
-  }
 }
 
 update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {

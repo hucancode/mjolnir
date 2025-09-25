@@ -59,6 +59,7 @@ EmitterAttachment :: struct {
   weight_spread:     f32,
   texture_handle:    resource.Handle,
   bounding_box:      geometry.Aabb,
+  dirty:             bool,
 }
 
 ForceFieldAttachment :: struct {
@@ -112,6 +113,14 @@ Node :: struct {
 }
 
 SceneTraversalCallback :: #type proc(node: ^Node, ctx: rawptr) -> bool
+
+SceneEmitterState :: struct {
+  slot_lookup: map[u32]u32,
+  slot_nodes:  [MAX_EMITTERS]u32,
+  slot_active: [MAX_EMITTERS]bool,
+  slot_dirty:  [MAX_EMITTERS]bool,
+  active_count: u32,
+}
 
 init_node :: proc(self: ^Node, name: string = "") {
   self.children = make([dynamic]Handle, 0)
@@ -263,6 +272,7 @@ Scene :: struct {
   root:            Handle,
   nodes:           resource.Pool(Node),
   traversal_stack: [dynamic]SceneTraverseEntry,
+  emitters:        SceneEmitterState,
 }
 
 scene_init :: proc(self: ^Scene) {
@@ -274,6 +284,13 @@ scene_init :: proc(self: ^Scene) {
   init_node(root, "root")
   root.parent = self.root
   self.traversal_stack = make([dynamic]SceneTraverseEntry, 0)
+  self.emitters.slot_lookup = make(map[u32]u32)
+  self.emitters.active_count = 0
+  for i in 0 ..< MAX_EMITTERS {
+    self.emitters.slot_nodes[i] = 0xFFFFFFFF
+    self.emitters.slot_active[i] = false
+    self.emitters.slot_dirty[i] = false
+  }
 }
 
 scene_deinit :: proc(self: ^Scene, warehouse: ^ResourceWarehouse) {
@@ -282,6 +299,7 @@ scene_deinit :: proc(self: ^Scene, warehouse: ^ResourceWarehouse) {
       deinit_node(&entry.item, warehouse)
     }
   }
+  delete(self.emitters.slot_lookup)
   resource.pool_deinit(self.nodes, proc(node: ^Node) {})
   delete(self.traversal_stack)
 }
@@ -353,6 +371,140 @@ scene_traverse_linear :: proc(
     callback(&entry.item, cb_context)
   }
   return true
+}
+
+scene_emitters_sync :: proc(
+  self: ^Scene,
+  emitters: []Emitter,
+  params: ^ParticleSystemParams,
+) {
+  state := &self.emitters
+  previous_count := state.active_count
+  for i in 0 ..< int(previous_count) do state.slot_active[i] = false
+
+  active_count := state.active_count
+
+  for &entry, index in self.nodes.entries do if entry.active {
+    attachment, is_emitter := &entry.item.attachment.(EmitterAttachment)
+    if !is_emitter do continue
+
+    node_index := u32(index)
+    slot, has_slot := state.slot_lookup[node_index]
+    if has_slot {
+      slot_idx := int(slot)
+      if slot_idx >= len(state.slot_nodes) || slot_idx >= int(state.active_count) || state.slot_nodes[slot_idx] != node_index {
+        has_slot = false
+      }
+    }
+    enabled := attachment.enabled != b32(false)
+
+    if !enabled || entry.item.pending_deletion {
+      if has_slot {
+        state.slot_active[int(slot)] = false
+        state.slot_dirty[int(slot)] = true
+      }
+      continue
+    }
+
+    if !has_slot {
+      if active_count >= MAX_EMITTERS {
+        log.warnf("Emitter capacity reached (%d), skipping node %d", MAX_EMITTERS, node_index)
+        continue
+      }
+      slot = active_count
+      active_count += 1
+      state.slot_lookup[node_index] = slot
+      state.slot_dirty[int(slot)] = true
+    }
+
+    slot_idx := int(slot)
+    state.slot_active[slot_idx] = true
+    state.slot_nodes[slot_idx] = node_index
+
+    if attachment.dirty {
+      state.slot_dirty[slot_idx] = true
+    }
+
+    if state.slot_dirty[slot_idx] {
+      emitter := &emitters[slot_idx]
+      preserved_time := emitter.time_accumulator
+      emitter^ = Emitter {
+        initial_velocity = attachment.initial_velocity,
+        color_start = attachment.color_start,
+        color_end = attachment.color_end,
+        emission_rate = attachment.emission_rate,
+        particle_lifetime = attachment.particle_lifetime,
+        position_spread = attachment.position_spread,
+        velocity_spread = attachment.velocity_spread,
+        time_accumulator = preserved_time,
+        size_start = attachment.size_start,
+        size_end = attachment.size_end,
+        weight = attachment.weight,
+        weight_spread = attachment.weight_spread,
+        texture_index = attachment.texture_handle.index,
+        node_index = node_index,
+        visible = b32(entry.item.parent_visible && entry.item.visible),
+        aabb_min = {
+          attachment.bounding_box.min.x,
+          attachment.bounding_box.min.y,
+          attachment.bounding_box.min.z,
+          0.0,
+        },
+        aabb_max = {
+          attachment.bounding_box.max.x,
+          attachment.bounding_box.max.y,
+          attachment.bounding_box.max.z,
+          0.0,
+        },
+      }
+      state.slot_dirty[slot_idx] = false
+      attachment.dirty = false
+    }
+  }
+
+  new_count: u32 = 0
+  for slot_idx: u32 = 0; slot_idx < active_count; slot_idx += 1 {
+    slot := int(slot_idx)
+    if state.slot_active[slot] {
+      if slot_idx != new_count {
+        emitters[int(new_count)] = emitters[slot]
+        node_idx := state.slot_nodes[slot]
+        state.slot_nodes[int(new_count)] = node_idx
+        state.slot_lookup[node_idx] = new_count
+        state.slot_dirty[int(new_count)] = state.slot_dirty[slot]
+        state.slot_active[int(new_count)] = true
+      }
+      new_count += 1
+    } else {
+      node_idx := state.slot_nodes[slot]
+      state.slot_nodes[slot] = 0xFFFFFFFF
+      state.slot_dirty[slot] = false
+      state.slot_active[slot] = false
+      emitters[slot].visible = cast(b32)false
+    }
+  }
+
+  for i := int(new_count); i < int(active_count); i += 1 {
+    state.slot_active[i] = false
+  }
+
+  state.active_count = new_count
+  params.emitter_count = new_count
+}
+
+scene_mark_emitter_dirty :: proc(
+  self: ^Scene,
+  handle: Handle,
+) {
+  node := resource.get(self.nodes, handle)
+  if node == nil {
+    return
+  }
+  attachment, is_emitter := &node.attachment.(EmitterAttachment)
+  if !is_emitter {
+    return
+  }
+  attachment.dirty = true
 }
 
 // Node transform manipulation functions
