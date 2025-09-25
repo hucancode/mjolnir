@@ -1101,7 +1101,7 @@ deinit_vertex_skinning_buffer :: proc(
 }
 
 // Get mutable reference to camera uniform in bindless buffer
-get_camera_uniform :: proc(
+get_camera_data :: proc(
   manager: ^Manager,
   camera_index: u32,
 ) -> ^CameraData {

@@ -210,17 +210,17 @@ render_target_deinit :: proc(
 }
 
 // Update camera uniform for the render target using bindless camera buffer
-render_target_update_camera_uniform :: proc(
+render_target_update_camera_data :: proc(
   manager: ^Manager,
   target: ^RenderTarget,
 ) {
   camera_ptr, ok := get_camera(manager, target.camera)
-  uniform := get_camera_uniform(manager, target.camera.index)
+  uniform := get_camera_data(manager, target.camera.index)
   if !ok || camera_ptr == nil || uniform == nil {
     log.errorf("Camera %v or uniform missing", target.camera)
     return
   }
-  camera_uniform_update(
+  camera_data_update(
     uniform,
     camera_ptr,
     target.extent.width,

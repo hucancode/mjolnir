@@ -801,11 +801,6 @@ record_shadow_pass :: proc(
         continue
       }
       for face in 0 ..< 6 {
-        camera_uniform := resources.get_camera_uniform(
-          &self.resource_manager,
-          light_info.cube_cameras[face].index,
-        )
-        _ = geometry.make_frustum(camera_uniform.projection * camera_uniform.view)
         target := resources.get(
           self.resource_manager.render_targets,
           light_info.cube_render_targets[face],
@@ -856,12 +851,6 @@ record_shadow_pass :: proc(
         log.errorf("Spot light %d has invalid shadow map handle", light_index)
         continue
       }
-
-      camera_uniform := resources.get_camera_uniform(
-        &self.resource_manager,
-        light_info.camera.index,
-      )
-      _ = geometry.make_frustum(camera_uniform.projection * camera_uniform.view)
       shadow_target := resources.get(
         self.resource_manager.render_targets,
         light_info.render_target,
@@ -1306,7 +1295,7 @@ setup_point_light_shadow_cameras :: proc(
     render_target.camera = light_info.cube_cameras[i]
     target_pos := position + face_dirs[i]
     geometry.camera_look_at(camera, position, target_pos, face_ups[i])
-    resources.render_target_update_camera_uniform(&self.resource_manager, render_target)
+    resources.render_target_update_camera_data(&self.resource_manager, render_target)
   }
 }
 
@@ -1367,7 +1356,7 @@ process_spot_light :: proc(
     render_target.camera = light_info.camera
     target_pos := position.xyz + direction.xyz
     geometry.camera_look_at(camera, position.xyz, target_pos)
-    resources.render_target_update_camera_uniform(&self.resource_manager, render_target)
+    resources.render_target_update_camera_data(&self.resource_manager, render_target)
     light_info.light_camera_idx = light_info.camera.index
   }
 
@@ -1518,7 +1507,7 @@ render :: proc(self: ^Engine) -> vk.Result {
     log.errorf("Main camera not found")
     return .ERROR_UNKNOWN
   }
-  resources.render_target_update_camera_uniform(&self.resource_manager, main_render_target)
+  resources.render_target_update_camera_data(&self.resource_manager, main_render_target)
   upload_world_matrices(&self.resource_manager, &self.scene, self.frame_index)
   defer {
     for i in 0 ..< self.active_light_count {

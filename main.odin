@@ -600,8 +600,8 @@ custom_render :: proc(
   // Update camera position and orientation
   camera_look_at(portal_camera, camera_pos, target, {0, 1, 0})
   // Update portal camera uniform
-  resources.render_target_update_camera_uniform(&engine.resource_manager, portal_rt)
-  camera_uniform := resources.get_camera_uniform(
+  resources.render_target_update_camera_data(&engine.resource_manager, portal_rt)
+  camera_data := resources.get_camera_data(
     &engine.resource_manager,
     portal_rt.camera.index,
   )

@@ -12,7 +12,7 @@ CameraData :: struct {
   frustum_planes:   [6][4]f32,
 }
 
-camera_uniform_update :: proc(
+camera_data_update :: proc(
   uniform: ^CameraData,
   camera: ^geometry.Camera,
   viewport_width, viewport_height: u32,
