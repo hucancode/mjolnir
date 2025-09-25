@@ -1295,9 +1295,9 @@ update_skeletal_animations :: proc(self: ^Engine, render_delta_time: f32) {
     mesh := mesh(self, data.handle) or_continue
     mesh_skin, mesh_has_skin := mesh.skinning.?
     if !mesh_has_skin do continue
-    l := skinning.bone_matrix_offset + self.frame_index * self.warehouse.bone_matrix_slab.capacity
+    l := skinning.bone_matrix_offset
     r := l + u32(len(mesh_skin.bones))
-    bone_matrices := self.warehouse.bone_buffer.mapped[l:r]
+    bone_matrices := self.warehouse.bone_buffers[self.frame_index].mapped[l:r]
     sample_clip(mesh, anim_inst.clip, anim_inst.time, bone_matrices)
   }
 }

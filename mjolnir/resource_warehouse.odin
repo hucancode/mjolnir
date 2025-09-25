@@ -41,8 +41,8 @@ ResourceWarehouse :: struct {
 
   // Bone matrix system
   bone_buffer_set_layout:       vk.DescriptorSetLayout,
-  bone_buffer_descriptor_set:   vk.DescriptorSet,
-  bone_buffer:                  gpu.DataBuffer(matrix[4, 4]f32),
+  bone_buffer_descriptor_sets:  [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
+  bone_buffers:                 [MAX_FRAMES_IN_FLIGHT]gpu.DataBuffer(matrix[4, 4]f32),
   bone_matrix_slab:             resource.SlabAllocator,
 
   // Bindless camera buffer system
@@ -449,14 +449,15 @@ init_bone_matrix_allocator :: proc(
     warehouse.bone_matrix_slab.capacity,
     MAX_FRAMES_IN_FLIGHT,
   )
-  // Create bone buffer with space for all frames in flight
-  warehouse.bone_buffer, _ = gpu.create_host_visible_buffer(
-    gpu_context,
-    matrix[4, 4]f32,
-    int(warehouse.bone_matrix_slab.capacity) * MAX_FRAMES_IN_FLIGHT,
-    {.STORAGE_BUFFER},
-    nil,
-  )
+  for frame_idx in 0 ..< MAX_FRAMES_IN_FLIGHT {
+    warehouse.bone_buffers[frame_idx] = gpu.create_host_visible_buffer(
+      gpu_context,
+      matrix[4, 4]f32,
+      int(warehouse.bone_matrix_slab.capacity),
+      {.STORAGE_BUFFER},
+      nil,
+    ) or_return
+  }
   skinning_bindings := [?]vk.DescriptorSetLayoutBinding {
     {
       binding = 0,
@@ -475,30 +476,34 @@ init_bone_matrix_allocator :: proc(
     nil,
     &warehouse.bone_buffer_set_layout,
   ) or_return
+  layouts : [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSetLayout
+  for i in 0 ..< MAX_FRAMES_IN_FLIGHT do layouts[i] = warehouse.bone_buffer_set_layout
   vk.AllocateDescriptorSets(
     gpu_context.device,
     &{
       sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
       descriptorPool = gpu_context.descriptor_pool,
-      descriptorSetCount = 1,
-      pSetLayouts = &warehouse.bone_buffer_set_layout,
+      descriptorSetCount = MAX_FRAMES_IN_FLIGHT,
+      pSetLayouts = raw_data(layouts[:]),
     },
-    &warehouse.bone_buffer_descriptor_set,
+    raw_data(warehouse.bone_buffer_descriptor_sets[:]),
   ) or_return
-  buffer_info := vk.DescriptorBufferInfo {
-    buffer = warehouse.bone_buffer.buffer,
-    offset = 0,
-    range  = vk.DeviceSize(vk.WHOLE_SIZE),
+  for frame_idx in 0 ..< MAX_FRAMES_IN_FLIGHT {
+    buffer_info := vk.DescriptorBufferInfo {
+      buffer = warehouse.bone_buffers[frame_idx].buffer,
+      offset = 0,
+      range  = vk.DeviceSize(vk.WHOLE_SIZE),
+    }
+    write := vk.WriteDescriptorSet {
+      sType           = .WRITE_DESCRIPTOR_SET,
+      dstSet          = warehouse.bone_buffer_descriptor_sets[frame_idx],
+      dstBinding      = 0,
+      descriptorType  = .STORAGE_BUFFER,
+      descriptorCount = 1,
+      pBufferInfo     = &buffer_info,
+    }
+    vk.UpdateDescriptorSets(gpu_context.device, 1, &write, 0, nil)
   }
-  write := vk.WriteDescriptorSet {
-    sType           = .WRITE_DESCRIPTOR_SET,
-    dstSet          = warehouse.bone_buffer_descriptor_set,
-    dstBinding      = 0,
-    descriptorType  = .STORAGE_BUFFER,
-    descriptorCount = 1,
-    pBufferInfo     = &buffer_info,
-  }
-  vk.UpdateDescriptorSets(gpu_context.device, 1, &write, 0, nil)
 
   return .SUCCESS
 }
@@ -1226,7 +1231,9 @@ deinit_bone_matrix_allocator :: proc(
   gpu_context: ^gpu.GPUContext,
   warehouse: ^ResourceWarehouse,
 ) {
-  gpu.data_buffer_deinit(gpu_context, &warehouse.bone_buffer)
+  for &b in warehouse.bone_buffers {
+      gpu.data_buffer_deinit(gpu_context, &b)
+  }
   vk.DestroyDescriptorSetLayout(
     gpu_context.device,
     warehouse.bone_buffer_set_layout,
@@ -1980,15 +1987,6 @@ create_texture_from_pixels_handle :: proc(
     format,
   )
   return h, ret == .SUCCESS
-}
-
-get_frame_bone_matrix_offset :: proc(
-  warehouse: ^ResourceWarehouse,
-  base_offset: u32,
-  frame_index: u32,
-) -> u32 {
-  frame_capacity := warehouse.bone_matrix_slab.capacity
-  return base_offset + frame_index * frame_capacity
 }
 
 engine_get_render_target :: proc(

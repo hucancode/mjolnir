@@ -782,11 +782,7 @@ upload_world_matrices :: proc(
       }
     }
     if skinning, has_skinning := mesh_attachment.skinning.?; has_skinning {
-      node_data.bone_matrix_offset = get_frame_bone_matrix_offset(
-        warehouse,
-        skinning.bone_matrix_offset,
-        frame_index,
-      )
+      node_data.bone_matrix_offset = skinning.bone_matrix_offset
     } else {
       node_data.bone_matrix_offset = 0xFFFFFFFF
     }
