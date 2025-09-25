@@ -876,7 +876,6 @@ record_shadow_pass :: proc(
   rendering_info := vk.CommandBufferInheritanceRenderingInfoKHR {
     sType = .COMMAND_BUFFER_INHERITANCE_RENDERING_INFO_KHR,
     depthAttachmentFormat = .D32_SFLOAT,
-    stencilAttachmentFormat = .UNDEFINED,
   }
   inheritance := vk.CommandBufferInheritanceInfo {
     sType = .COMMAND_BUFFER_INHERITANCE_INFO,
@@ -1041,7 +1040,6 @@ record_depth_gbuffer_pass :: proc(
     colorAttachmentCount = len(color_formats),
     pColorAttachmentFormats = raw_data(color_formats[:]),
     depthAttachmentFormat = .D32_SFLOAT,
-    stencilAttachmentFormat = .UNDEFINED,
   }
   inheritance := vk.CommandBufferInheritanceInfo {
     sType = .COMMAND_BUFFER_INHERITANCE_INFO,
@@ -1165,7 +1163,6 @@ record_lighting_pass :: proc(
     colorAttachmentCount = 1,
     pColorAttachmentFormats = &color_format,
     depthAttachmentFormat = .D32_SFLOAT,
-    stencilAttachmentFormat = .UNDEFINED,
   }
   inheritance := vk.CommandBufferInheritanceInfo {
     sType = .COMMAND_BUFFER_INHERITANCE_INFO,
@@ -1227,7 +1224,6 @@ record_lighting_pass :: proc(
     &self.warehouse,
   )
   particle_end(command_buffer)
-
   vk.EndCommandBuffer(command_buffer) or_return
   return .SUCCESS
 }
@@ -1239,14 +1235,12 @@ record_transparency_pass :: proc(
   main_render_target: ^RenderTarget,
 ) -> vk.Result {
   vk.ResetCommandBuffer(command_buffer, {}) or_return
-
   color_format := self.swapchain.format.format
   rendering_info := vk.CommandBufferInheritanceRenderingInfoKHR {
     sType = .COMMAND_BUFFER_INHERITANCE_RENDERING_INFO_KHR,
     colorAttachmentCount = 1,
     pColorAttachmentFormats = &color_format,
     depthAttachmentFormat = .D32_SFLOAT,
-    stencilAttachmentFormat = .UNDEFINED,
   }
   inheritance := vk.CommandBufferInheritanceInfo {
     sType = .COMMAND_BUFFER_INHERITANCE_INFO,
@@ -1275,15 +1269,13 @@ record_transparency_pass :: proc(
     linalg.MATRIX4F32_IDENTITY,
     main_render_target.camera.index,
   )
-
-  transparent_include := NodeFlagSet{.VISIBLE, .MATERIAL_TRANSPARENT}
   visibility_culler_dispatch(
     &self.visibility_culler,
     &self.gpu_context,
     command_buffer,
     self.frame_index,
     main_render_target.camera.index,
-    transparent_include,
+    {.VISIBLE, .MATERIAL_TRANSPARENT},
   )
   transparent_draw_buffer := visibility_culler_command_buffer(&self.visibility_culler, self.frame_index)
   transparent_draw_count := visibility_culler_max_draw_count(&self.visibility_culler)
@@ -1297,15 +1289,13 @@ record_transparency_pass :: proc(
     transparent_draw_buffer,
     transparent_draw_count,
   )
-
-  wireframe_include := NodeFlagSet{.VISIBLE, .MATERIAL_WIREFRAME}
   visibility_culler_dispatch(
     &self.visibility_culler,
     &self.gpu_context,
     command_buffer,
     self.frame_index,
     main_render_target.camera.index,
-    wireframe_include,
+    {.VISIBLE, .MATERIAL_WIREFRAME},
   )
   wireframe_draw_buffer := visibility_culler_command_buffer(&self.visibility_culler, self.frame_index)
   wireframe_draw_count := visibility_culler_max_draw_count(&self.visibility_culler)
@@ -1319,9 +1309,7 @@ record_transparency_pass :: proc(
     wireframe_draw_buffer,
     wireframe_draw_count,
   )
-
   transparent_end(&self.transparent, command_buffer)
-
   vk.EndCommandBuffer(command_buffer) or_return
   return .SUCCESS
 }
@@ -1339,8 +1327,6 @@ record_postprocess_pass :: proc(
     sType = .COMMAND_BUFFER_INHERITANCE_RENDERING_INFO_KHR,
     colorAttachmentCount = 1,
     pColorAttachmentFormats = &color_format,
-    depthAttachmentFormat = .UNDEFINED,
-    stencilAttachmentFormat = .UNDEFINED,
   }
   inheritance := vk.CommandBufferInheritanceInfo {
     sType = .COMMAND_BUFFER_INHERITANCE_INFO,
