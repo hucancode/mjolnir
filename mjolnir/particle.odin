@@ -12,8 +12,7 @@ COMPUTE_PARTICLE_BATCH :: 256
 MAX_EMITTERS :: 64
 MAX_FORCE_FIELDS :: 32
 
-Emitter :: struct {
-  transform:         matrix[4, 4]f32,
+EmitterData :: struct {
   initial_velocity:  [4]f32,
   color_start:       [4]f32,
   color_end:         [4]f32,
@@ -27,10 +26,29 @@ Emitter :: struct {
   weight:            f32,
   weight_spread:     f32,
   texture_index:     u32,
+  node_index:        u32,
   visible:           b32,
-  padding:           [1]u32,
   aabb_min:          [4]f32, // xyz = min bounds, w = unused
   aabb_max:          [4]f32, // xyz = max bounds, w = unused
+}
+
+Emitter :: struct {
+  initial_velocity:  [4]f32,
+  color_start:       [4]f32,
+  color_end:         [4]f32,
+  emission_rate:     f32,
+  particle_lifetime: f32,
+  position_spread:   f32,
+  velocity_spread:   f32,
+  size_start:        f32,
+  size_end:          f32,
+  enabled:           b32,
+  weight:            f32,
+  weight_spread:     f32,
+  texture_handle:    resource.Handle,
+  bounding_box:      geometry.Aabb,
+  node_handle:       resource.Handle,
+  is_dirty:          bool,
 }
 
 ForceField :: struct {
@@ -61,29 +79,12 @@ ParticleSystemParams :: struct {
   emitter_count:    u32,
   forcefield_count: u32,
   delta_time:       f32,
-  // Camera frustum planes for culling (6 planes, each has 4 components)
-  frustum_planes:   [6][4]f32,
-}
-
-// Push constants for particle rendering
-ParticlePushConstants :: struct {
-  view:       matrix[4, 4]f32,
-  projection: matrix[4, 4]f32,
-}
-
-// Draw command for indirect rendering
-DrawCommand :: struct {
-  vertex_count:   u32,
-  instance_count: u32,
-  first_vertex:   u32,
-  first_instance: u32,
 }
 
 RendererParticle :: struct {
   // Compute pipeline
   params_buffer:                 gpu.DataBuffer(ParticleSystemParams),
   particle_buffer:               gpu.DataBuffer(Particle),
-  emitter_buffer:                gpu.DataBuffer(Emitter),
   force_field_buffer:            gpu.DataBuffer(ForceField),
   compute_descriptor_set_layout: vk.DescriptorSetLayout,
   compute_descriptor_set:        vk.DescriptorSet,
@@ -94,10 +95,11 @@ RendererParticle :: struct {
   emitter_pipeline:              vk.Pipeline,
   emitter_descriptor_set_layout: vk.DescriptorSetLayout,
   emitter_descriptor_set:        vk.DescriptorSet,
+  emitter_bindless_descriptor_set: vk.DescriptorSet,
   particle_counter_buffer:       gpu.DataBuffer(u32),
   // Compaction pipeline
   compact_particle_buffer:       gpu.DataBuffer(Particle),
-  draw_command_buffer:           gpu.DataBuffer(DrawCommand),
+  draw_command_buffer:           gpu.DataBuffer(vk.DrawIndirectCommand),
   compact_descriptor_set_layout: vk.DescriptorSetLayout,
   compact_descriptor_set:        vk.DescriptorSet,
   compact_pipeline_layout:       vk.PipelineLayout,
@@ -112,28 +114,26 @@ compute_particles :: proc(
   self: ^RendererParticle,
   command_buffer: vk.CommandBuffer,
   camera: geometry.Camera,
+  world_matrix_set: vk.DescriptorSet,
 ) {
-  // --- Update frustum planes for culling ---
   params_ptr := gpu.data_buffer_get(&self.params_buffer)
-  frustum := geometry.camera_make_frustum(camera)
-  for i in 0 ..< 6 {
-    params_ptr.frustum_planes[i] = frustum.planes[i]
-  }
-  // --- GPU Emitter Dispatch ---
   counter_ptr := gpu.data_buffer_get(&self.particle_counter_buffer)
   params_ptr.particle_count = counter_ptr^
-  // log.debugf("previous frame's particle count %d", counter_ptr^)
   counter_ptr^ = 0
   vk.CmdBindPipeline(command_buffer, .COMPUTE, self.emitter_pipeline)
+  emitter_descriptor_sets := [?]vk.DescriptorSet {
+    self.emitter_bindless_descriptor_set,
+    self.emitter_descriptor_set,
+    world_matrix_set,
+  }
   vk.CmdBindDescriptorSets(
     command_buffer,
     .COMPUTE,
     self.emitter_pipeline_layout,
     0,
-    1,
-    &self.emitter_descriptor_set,
-    0,
-    nil,
+    len(emitter_descriptor_sets),
+    raw_data(emitter_descriptor_sets[:]),
+    0, nil,
   )
   // One thread per emitter (local_size_x = 64)
   vk.CmdDispatch(command_buffer, u32(MAX_EMITTERS + 63) / 64, 1, 1)
@@ -149,12 +149,9 @@ compute_particles :: proc(
     {.COMPUTE_SHADER},
     {.COMPUTE_SHADER},
     {},
-    1,
-    &barrier_emit,
-    0,
-    nil,
-    0,
-    nil,
+    1, &barrier_emit,
+    0, nil,
+    0, nil,
   )
 
   // --- Compact particles first ---
@@ -171,12 +168,9 @@ compute_particles :: proc(
     {.COMPUTE_SHADER},
     {.COMPUTE_SHADER},
     {},
-    1,
-    &barrier1,
-    0,
-    nil,
-    0,
-    nil,
+    1, &barrier1,
+    0, nil,
+    0, nil,
   )
   // --- Particle Simulation Dispatch ---
   // GPU handles the count internally - no CPU read needed
@@ -209,14 +203,10 @@ compute_particles :: proc(
     {.COMPUTE_SHADER},
     {.TRANSFER},
     {},
-    1,
-    &barrier2,
-    0,
-    nil,
-    0,
-    nil,
+    1, &barrier2,
+    0, nil,
+    0, nil,
   )
-
   // Copy simulated particles back to main buffer
   vk.CmdCopyBuffer(
     command_buffer,
@@ -225,7 +215,6 @@ compute_particles :: proc(
     1,
     &vk.BufferCopy{size = vk.DeviceSize(self.particle_buffer.bytes_count)},
   )
-
   // Final barrier for rendering
   barrier3 := vk.MemoryBarrier {
     sType         = .MEMORY_BARRIER,
@@ -237,12 +226,9 @@ compute_particles :: proc(
     {.TRANSFER},
     {.VERTEX_INPUT, .DRAW_INDIRECT},
     {},
-    1,
-    &barrier3,
-    0,
-    nil,
-    0,
-    nil,
+    1, &barrier3,
+    0, nil,
+    0, nil,
   )
 }
 
@@ -317,7 +303,6 @@ particle_deinit :: proc(
   gpu.data_buffer_deinit(gpu_context, &self.particle_buffer)
   gpu.data_buffer_deinit(gpu_context, &self.compact_particle_buffer)
   gpu.data_buffer_deinit(gpu_context, &self.draw_command_buffer)
-  gpu.data_buffer_deinit(gpu_context, &self.emitter_buffer)
   gpu.data_buffer_deinit(gpu_context, &self.force_field_buffer)
   gpu.data_buffer_deinit(gpu_context, &self.particle_counter_buffer)
 }
@@ -340,36 +325,31 @@ particle_init :: proc(
     MAX_PARTICLES,
     {.STORAGE_BUFFER, .VERTEX_BUFFER, .TRANSFER_DST},
   ) or_return
-  self.emitter_buffer = gpu.create_host_visible_buffer(
-    gpu_context,
-    Emitter,
-    MAX_EMITTERS,
-    {.STORAGE_BUFFER},
-  ) or_return
   self.force_field_buffer = gpu.create_host_visible_buffer(
     gpu_context,
     ForceField,
     MAX_FORCE_FIELDS,
     {.STORAGE_BUFFER},
   ) or_return
-  // Emitter pipeline buffers
   self.particle_counter_buffer = gpu.create_host_visible_buffer(
     gpu_context,
     u32,
     1,
     {.STORAGE_BUFFER},
   ) or_return
-  particle_init_emitter_pipeline(gpu_context, self) or_return
+  self.emitter_bindless_descriptor_set = warehouse.emitter_buffer_descriptor_set
+  particle_init_emitter_pipeline(gpu_context, self, warehouse) or_return
   particle_init_compact_pipeline(gpu_context, self) or_return
   particle_init_compute_pipeline(gpu_context, self) or_return
   particle_init_render_pipeline(gpu_context, self, warehouse) or_return
   return .SUCCESS
 }
+
 particle_init_emitter_pipeline :: proc(
   gpu_context: ^gpu.GPUContext,
   self: ^RendererParticle,
+  warehouse: ^ResourceWarehouse,
 ) -> vk.Result {
-  // --- Emitter pipeline ---
   emitter_bindings := [?]vk.DescriptorSetLayoutBinding {
     {
       binding         = 0,
@@ -379,18 +359,12 @@ particle_init_emitter_pipeline :: proc(
     },
     {
       binding         = 1,
-      descriptorType  = .STORAGE_BUFFER, // Emitter buffer
-      descriptorCount = 1,
-      stageFlags      = {.COMPUTE},
-    },
-    {
-      binding         = 2,
       descriptorType  = .STORAGE_BUFFER, // Particle counter buffer
       descriptorCount = 1,
       stageFlags      = {.COMPUTE},
     },
     {
-      binding         = 3,
+      binding         = 2,
       descriptorType  = .UNIFORM_BUFFER, // Params buffer
       descriptorCount = 1,
       stageFlags      = {.COMPUTE},
@@ -416,12 +390,17 @@ particle_init_emitter_pipeline :: proc(
     },
     &self.emitter_descriptor_set,
   ) or_return
+  descriptor_set_layouts := [?]vk.DescriptorSetLayout {
+    warehouse.emitter_buffer_set_layout,
+    self.emitter_descriptor_set_layout,
+    warehouse.world_matrix_buffer_set_layout,
+  }
   vk.CreatePipelineLayout(
     gpu_context.device,
     &{
       sType = .PIPELINE_LAYOUT_CREATE_INFO,
-      setLayoutCount = 1,
-      pSetLayouts = &self.emitter_descriptor_set_layout,
+      setLayoutCount = len(descriptor_set_layouts),
+      pSetLayouts = raw_data(descriptor_set_layouts[:]),
     },
     nil,
     &self.emitter_pipeline_layout,
@@ -429,10 +408,6 @@ particle_init_emitter_pipeline :: proc(
   emitter_particle_buffer_info := vk.DescriptorBufferInfo {
     buffer = self.particle_buffer.buffer,
     range  = vk.DeviceSize(self.particle_buffer.bytes_count),
-  }
-  emitter_emitter_buffer_info := vk.DescriptorBufferInfo {
-    buffer = self.emitter_buffer.buffer,
-    range  = vk.DeviceSize(self.emitter_buffer.bytes_count),
   }
   emitter_counter_buffer_info := vk.DescriptorBufferInfo {
     buffer = self.particle_counter_buffer.buffer,
@@ -457,20 +432,12 @@ particle_init_emitter_pipeline :: proc(
       dstBinding = 1,
       descriptorType = .STORAGE_BUFFER,
       descriptorCount = 1,
-      pBufferInfo = &emitter_emitter_buffer_info,
-    },
-    {
-      sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = self.emitter_descriptor_set,
-      dstBinding = 2,
-      descriptorType = .STORAGE_BUFFER,
-      descriptorCount = 1,
       pBufferInfo = &emitter_counter_buffer_info,
     },
     {
       sType = .WRITE_DESCRIPTOR_SET,
       dstSet = self.emitter_descriptor_set,
-      dstBinding = 3,
+      dstBinding = 2,
       descriptorType = .UNIFORM_BUFFER,
       descriptorCount = 1,
       pBufferInfo = &emitter_params_buffer_info,
@@ -513,7 +480,6 @@ particle_init_compute_pipeline :: proc(
   gpu_context: ^gpu.GPUContext,
   self: ^RendererParticle,
 ) -> vk.Result {
-  // --- Compute pipeline (particle simulation) ---
   compute_bindings := [?]vk.DescriptorSetLayoutBinding {
     {
       binding = 0,
@@ -657,7 +623,6 @@ particle_init_compact_pipeline :: proc(
   gpu_context: ^gpu.GPUContext,
   self: ^RendererParticle,
 ) -> vk.Result {
-  // --- Compaction pipeline ---
   compact_bindings := [?]vk.DescriptorSetLayoutBinding {
     {
       binding = 0,
@@ -722,7 +687,7 @@ particle_init_compact_pipeline :: proc(
   ) or_return
   self.draw_command_buffer = gpu.create_host_visible_buffer(
     gpu_context,
-    DrawCommand,
+    vk.DrawIndirectCommand,
     1,
     {.STORAGE_BUFFER, .INDIRECT_BUFFER},
   ) or_return
@@ -1096,66 +1061,10 @@ particle_render :: proc(
     self.draw_command_buffer.buffer,
     0,
     1,
-    size_of(DrawCommand),
+    size_of(vk.DrawIndirectCommand),
   )
 }
 
 particle_end :: proc(command_buffer: vk.CommandBuffer) {
   vk.CmdEndRendering(command_buffer)
-}
-
-// Helper function to create an emitter with AABB culling bounds
-create_emitter_with_aabb :: proc(
-  transform: matrix[4, 4]f32,
-  aabb_min: [3]f32,
-  aabb_max: [3]f32,
-  enable_culling: bool = true,
-) -> Emitter {
-  return Emitter {
-    transform         = transform,
-    aabb_min          = {aabb_min.x, aabb_min.y, aabb_min.z, 0.0},
-    aabb_max          = {aabb_max.x, aabb_max.y, aabb_max.z, 0.0},
-    visible           = b32(enable_culling),
-    // Default values - user should set these
-    emission_rate     = 10.0,
-    particle_lifetime = 5.0,
-    position_spread   = 1.0,
-    velocity_spread   = 0.1,
-    size_start        = 1.0,
-    size_end          = 0.1,
-    weight            = 1.0,
-    weight_spread     = 0.0,
-    texture_index     = 0,
-    initial_velocity  = {0.0, 1.0, 0.0, 0.0},
-    color_start       = {1.0, 1.0, 1.0, 1.0},
-    color_end         = {0.5, 0.5, 0.5, 0.0},
-    time_accumulator  = 0.0,
-  }
-}
-
-// Helper function to update emitter AABB bounds
-update_emitter_attachment_aabb :: proc(
-  emitter: ^EmitterAttachment,
-  aabb_min: [3]f32,
-  aabb_max: [3]f32,
-) {
-  emitter.bounding_box = geometry.Aabb {
-    min = {aabb_min.x, aabb_min.y, aabb_min.z},
-    max = {aabb_max.x, aabb_max.y, aabb_max.z},
-  }
-}
-
-// Helper function to enable/disable culling for an emitter node
-set_emitter_node_culling :: proc(node: ^Node, enable: bool) {
-  node.culling_enabled = enable
-}
-
-get_particle_render_stats :: proc(
-  self: ^RendererParticle,
-) -> (
-  rendered: u32,
-  total_allocated: u32,
-) {
-  count := gpu.data_buffer_get(&self.particle_counter_buffer)
-  return count^, MAX_PARTICLES
 }

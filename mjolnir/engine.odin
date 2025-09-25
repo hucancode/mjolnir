@@ -661,39 +661,10 @@ time_since_start :: proc(self: ^Engine) -> f32 {
 update_emitters :: proc(self: ^Engine, delta_time: f32) {
   params := gpu.data_buffer_get(&self.particle.params_buffer)
   params.delta_time = delta_time
-
-  emitters_ptr := gpu.data_buffer_get(&self.particle.emitter_buffer)
+  emitters_ptr := gpu.data_buffer_get(&self.warehouse.emitter_buffer)
   emitters := slice.from_ptr(emitters_ptr, MAX_EMITTERS)
-  emitter_idx: int = 0
 
-  for &entry, entry_index in self.scene.nodes.entries do if entry.active {
-    e, is_emitter := &entry.item.attachment.(EmitterAttachment)
-    if !is_emitter do continue
-    if !e.enabled do continue
-    if emitter_idx >= MAX_EMITTERS do break
-
-    // Visibility handled via GPU-generated draws; emitters update regardless
-    visible := true
-    culling_enabled := entry.item.culling_enabled
-    emitters[emitter_idx].transform = get_world_matrix(&entry.item)
-    emitters[emitter_idx].initial_velocity = e.initial_velocity
-    emitters[emitter_idx].color_start = e.color_start
-    emitters[emitter_idx].color_end = e.color_end
-    emitters[emitter_idx].emission_rate = e.emission_rate
-    emitters[emitter_idx].particle_lifetime = e.particle_lifetime
-    emitters[emitter_idx].position_spread = e.position_spread
-    emitters[emitter_idx].velocity_spread = e.velocity_spread
-    emitters[emitter_idx].size_start = e.size_start
-    emitters[emitter_idx].size_end = e.size_end
-    emitters[emitter_idx].weight = e.weight
-    emitters[emitter_idx].weight_spread = e.weight_spread
-    emitters[emitter_idx].texture_index = e.texture_handle.index
-    emitters[emitter_idx].visible = b32(!culling_enabled || visible)
-    emitters[emitter_idx].aabb_min = {e.bounding_box.min.x, e.bounding_box.min.y, e.bounding_box.min.z, 0.0}
-    emitters[emitter_idx].aabb_max = {e.bounding_box.max.x, e.bounding_box.max.y, e.bounding_box.max.z, 0.0}
-    emitter_idx += 1
-  }
-  params.emitter_count = u32(emitter_idx)
+  scene_emitters_sync(&self.scene, &self.warehouse, emitters, params)
 }
 
 get_main_camera :: proc(engine: ^Engine) -> ^geometry.Camera {
@@ -1324,9 +1295,9 @@ update_skeletal_animations :: proc(self: ^Engine, render_delta_time: f32) {
     mesh := mesh(self, data.handle) or_continue
     mesh_skin, mesh_has_skin := mesh.skinning.?
     if !mesh_has_skin do continue
-    l := skinning.bone_matrix_offset + self.frame_index * self.warehouse.bone_matrix_slab.capacity
+    l := skinning.bone_matrix_offset
     r := l + u32(len(mesh_skin.bones))
-    bone_matrices := self.warehouse.bone_buffer.mapped[l:r]
+    bone_matrices := self.warehouse.bone_buffers[self.frame_index].mapped[l:r]
     sample_clip(mesh, anim_inst.clip, anim_inst.time, bone_matrices)
   }
 }
@@ -1649,7 +1620,12 @@ render :: proc(self: ^Engine) -> vk.Result {
     command_buffer,
     &{sType = .COMMAND_BUFFER_BEGIN_INFO, flags = {.ONE_TIME_SUBMIT}},
   ) or_return
-  compute_particles(&self.particle, command_buffer, main_camera^)
+  compute_particles(
+    &self.particle,
+    command_buffer,
+    main_camera^,
+    self.warehouse.world_matrix_descriptor_sets[self.frame_index],
+  )
   if self.custom_render_proc != nil {
     self.custom_render_proc(self, command_buffer)
   }

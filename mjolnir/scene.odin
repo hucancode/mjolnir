@@ -39,26 +39,8 @@ MeshAttachment :: struct {
   cast_shadow: bool,
 }
 
-ParticleSystemAttachment :: struct {
-  bounding_box:   geometry.Aabb,
-  texture_handle: resource.Handle, // Handle to particle texture, zero for default
-}
-
 EmitterAttachment :: struct {
-  initial_velocity:  [4]f32,
-  color_start:       [4]f32,
-  color_end:         [4]f32,
-  emission_rate:     f32,
-  particle_lifetime: f32,
-  position_spread:   f32,
-  velocity_spread:   f32,
-  size_start:        f32,
-  size_end:          f32,
-  enabled:           b32,
-  weight:            f32,
-  weight_spread:     f32,
-  texture_handle:    resource.Handle,
-  bounding_box:      geometry.Aabb,
+  handle: Handle,
 }
 
 ForceFieldAttachment :: struct {
@@ -73,7 +55,6 @@ NodeAttachment :: union {
   DirectionalLightAttachment,
   SpotLightAttachment,
   MeshAttachment,
-  ParticleSystemAttachment,
   EmitterAttachment,
   ForceFieldAttachment,
   NavMeshAttachment,
@@ -124,6 +105,11 @@ init_node :: proc(self: ^Node, name: string = "") {
 
 deinit_node :: proc(self: ^Node, warehouse: ^ResourceWarehouse) {
   delete(self.children)
+  if emitter_attachment, is_emitter := &self.attachment.(EmitterAttachment); is_emitter {
+    if destroy_emitter_handle(warehouse, emitter_attachment.handle) {
+      emitter_attachment.handle = {}
+    }
+  }
   data, has_mesh := &self.attachment.(MeshAttachment)
   if !has_mesh {
     return
@@ -211,6 +197,7 @@ spawn_at :: proc(
   self: ^Scene,
   position: [3]f32,
   attachment: NodeAttachment = nil,
+  warehouse: ^ResourceWarehouse = nil,
 ) -> (
   handle: Handle,
   node: ^Node,
@@ -218,6 +205,7 @@ spawn_at :: proc(
   handle, node = resource.alloc(&self.nodes)
   init_node(node)
   node.attachment = attachment
+  assign_emitter_to_node(warehouse, handle, node)
   geometry.transform_translate(&node.transform, position.x, position.y, position.z)
   attach(self.nodes, self.root, handle)
   return
@@ -226,6 +214,7 @@ spawn_at :: proc(
 spawn :: proc(
   self: ^Scene,
   attachment: NodeAttachment = nil,
+  warehouse: ^ResourceWarehouse = nil,
 ) -> (
   handle: Handle,
   node: ^Node,
@@ -233,6 +222,7 @@ spawn :: proc(
   handle, node = resource.alloc(&self.nodes)
   init_node(node)
   node.attachment = attachment
+  assign_emitter_to_node(warehouse, handle, node)
   attach(self.nodes, self.root, handle)
   return
 }
@@ -241,6 +231,7 @@ spawn_child :: proc(
   self: ^Scene,
   parent: Handle,
   attachment: NodeAttachment = nil,
+  warehouse: ^ResourceWarehouse = nil,
 ) -> (
   handle: Handle,
   node: ^Node,
@@ -248,6 +239,7 @@ spawn_child :: proc(
   handle, node = resource.alloc(&self.nodes)
   init_node(node)
   node.attachment = attachment
+  assign_emitter_to_node(warehouse, handle, node)
   attach(self.nodes, parent, handle)
   return
 }
@@ -286,10 +278,24 @@ scene_deinit :: proc(self: ^Scene, warehouse: ^ResourceWarehouse) {
   delete(self.traversal_stack)
 }
 
-// Camera mode switching is now handled by camera controllers
-// switch_camera_mode_scene :: proc(self: ^Scene) {
-//   // This function is no longer needed with the new camera controller system
-// }
+assign_emitter_to_node :: proc(
+  warehouse: ^ResourceWarehouse,
+  node_handle: Handle,
+  node: ^Node,
+) {
+  if warehouse == nil {
+    return
+  }
+  attachment, is_emitter := &node.attachment.(EmitterAttachment)
+  if !is_emitter {
+    return
+  }
+  emitter, ok := resource.get(warehouse.emitters, attachment.handle)
+  if ok {
+    emitter.node_handle = node_handle
+    emitter.is_dirty = true
+  }
+}
 
 scene_traverse :: proc(
   self: ^Scene,
@@ -313,10 +319,8 @@ scene_traverse :: proc(
     }
     // Skip nodes that are pending deletion
     if current_node.pending_deletion do continue
-
     // Update parent_visible from parent chain only
     current_node.parent_visible = entry.parent_is_visible
-
     is_dirty := transform_update_local(&current_node.transform)
     if entry.parent_is_dirty || is_dirty {
       transform_update_world(&current_node.transform, entry.parent_transform)
@@ -344,15 +348,118 @@ scene_traverse :: proc(
   return true
 }
 
-scene_traverse_linear :: proc(
+scene_emitters_sync :: proc(
   self: ^Scene,
-  cb_context: rawptr,
-  callback: SceneTraversalCallback,
-) -> bool {
-  for &entry in self.nodes.entries do if entry.active && entry.item.parent_visible && entry.item.visible && !entry.item.pending_deletion {
-    callback(&entry.item, cb_context)
+  warehouse: ^ResourceWarehouse,
+  emitters: []EmitterData,
+  params: ^ParticleSystemParams,
+) {
+  if warehouse == nil {
+    params.emitter_count = 0
+    return
   }
-  return true
+
+  emitter_capacity := len(emitters)
+  max_slots := emitter_capacity
+  if max_slots > MAX_EMITTERS {
+    max_slots = MAX_EMITTERS
+  }
+  params.emitter_count = u32(max_slots)
+
+  // Reset visibility each frame; preserve accumulator
+  for i in 0 ..< emitter_capacity {
+    emitters[i].visible = cast(b32)false
+  }
+
+  for &entry, index in warehouse.emitters.entries {
+    if index >= emitter_capacity {
+      log.warnf("Emitter index %d exceeds GPU buffer capacity %d", index, emitter_capacity)
+      continue
+    }
+    gpu_emitter := &emitters[index]
+    if !entry.active {
+      preserved_time := gpu_emitter.time_accumulator
+      entry.item.node_handle = {}
+      entry.item.is_dirty = true
+      gpu_emitter^ = EmitterData{
+        time_accumulator = preserved_time,
+        visible = cast(b32)false,
+      }
+      continue
+    }
+
+    emitter := &entry.item
+    node_handle := emitter.node_handle
+    node := resource.get(self.nodes, node_handle)
+
+    if node == nil || node.pending_deletion {
+      emitter.is_dirty = true
+      preserved_time := gpu_emitter.time_accumulator
+      gpu_emitter^ = EmitterData{
+        time_accumulator = preserved_time,
+        visible = cast(b32)false,
+      }
+      continue
+    }
+
+    visible := node.parent_visible && node.visible && emitter.enabled != b32(false)
+    if emitter.is_dirty {
+      preserved_time := gpu_emitter.time_accumulator
+      gpu_emitter^ = EmitterData {
+        initial_velocity  = emitter.initial_velocity,
+        color_start       = emitter.color_start,
+        color_end         = emitter.color_end,
+        emission_rate     = emitter.emission_rate,
+        particle_lifetime = emitter.particle_lifetime,
+        position_spread   = emitter.position_spread,
+        velocity_spread   = emitter.velocity_spread,
+        time_accumulator  = preserved_time,
+        size_start        = emitter.size_start,
+        size_end          = emitter.size_end,
+        weight            = emitter.weight,
+        weight_spread     = emitter.weight_spread,
+        texture_index     = emitter.texture_handle.index,
+        node_index        = node_handle.index,
+        visible           = cast(b32)visible,
+        aabb_min          = {
+          emitter.bounding_box.min.x,
+          emitter.bounding_box.min.y,
+          emitter.bounding_box.min.z,
+          0.0,
+        },
+        aabb_max          = {
+          emitter.bounding_box.max.x,
+          emitter.bounding_box.max.y,
+          emitter.bounding_box.max.z,
+          0.0,
+        },
+      }
+      emitter.is_dirty = false
+    } else {
+      gpu_emitter.visible = cast(b32)visible
+      gpu_emitter.node_index = node_handle.index
+    }
+    emitter.node_handle = node_handle
+  }
+}
+
+scene_mark_emitter_dirty :: proc(
+  self: ^Scene,
+  warehouse: ^ResourceWarehouse,
+  handle: Handle,
+) {
+  node := resource.get(self.nodes, handle)
+  if node == nil {
+    return
+  }
+  attachment, is_emitter := &node.attachment.(EmitterAttachment)
+  if !is_emitter {
+    return
+  }
+  emitter, ok := resource.get(warehouse.emitters, attachment.handle)
+  if ok {
+    emitter.is_dirty = true
+  }
 }
 
 // Node transform manipulation functions
@@ -628,11 +735,7 @@ upload_world_matrices :: proc(
       }
     }
     if skinning, has_skinning := mesh_attachment.skinning.?; has_skinning {
-      node_data.bone_matrix_offset = get_frame_bone_matrix_offset(
-        warehouse,
-        skinning.bone_matrix_offset,
-        frame_index,
-      )
+      node_data.bone_matrix_offset = skinning.bone_matrix_offset
     } else {
       node_data.bone_matrix_offset = 0xFFFFFFFF
     }

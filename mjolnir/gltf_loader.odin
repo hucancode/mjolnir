@@ -584,11 +584,9 @@ process_skins :: proc(
       u32(len(bones)),
     )
     for frame_idx in 0 ..< MAX_FRAMES_IN_FLIGHT {
-      l :=
-        matrix_buffer_offset +
-        u32(frame_idx) * engine.warehouse.bone_matrix_slab.capacity
+      l := matrix_buffer_offset
       r := l + u32(len(bones))
-      bone_matrices := engine.warehouse.bone_buffer.mapped[l:r]
+      bone_matrices := engine.warehouse.bone_buffers[frame_idx].mapped[l:r]
       slice.fill(bone_matrices, linalg.MATRIX4F32_IDENTITY)
     }
     skin_cache[gltf_skin] = SkinData {

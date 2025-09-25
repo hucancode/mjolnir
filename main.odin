@@ -50,7 +50,6 @@ main :: proc() {
   }
   engine.setup_proc = setup
   engine.update_proc = update
-  engine.render2d_proc = render_2d
   engine.key_press_proc = on_key_pressed
   engine.custom_render_proc = custom_render
   mjolnir.run(&engine, 1280, 720, "Mjolnir Odin")
@@ -338,15 +337,10 @@ setup :: proc(engine: ^mjolnir.Engine) {
     psys_handle1, _ := spawn_at(
       &engine.scene,
       {-2.0, 1.9, 0.3},
-      ParticleSystemAttachment {
-        bounding_box = Aabb{min = {-1, -1, -1}, max = {1, 1, 1}},
-        texture_handle = goldstar_texture_handle,
-      },
     )
-    spawn_child(
-      &engine.scene,
-      psys_handle1,
-      EmitterAttachment {
+    emitter_handle1 := create_emitter_handle(
+      &engine.warehouse,
+      Emitter {
         emission_rate = 7,
         particle_lifetime = 5.0,
         position_spread = 1.5,
@@ -361,21 +355,23 @@ setup :: proc(engine: ^mjolnir.Engine) {
         texture_handle = goldstar_texture_handle,
         enabled = true,
         bounding_box = Aabb{min = {-2, -2, -2}, max = {2, 2, 2}},
+        is_dirty = true,
       },
+    )
+    spawn_child(
+      &engine.scene,
+      psys_handle1,
+      EmitterAttachment {emitter_handle1},
+      &engine.warehouse,
     )
     psys_handle2, _ := spawn_at(
       &engine.scene,
       {2.0, 1.9, 0.3},
-      ParticleSystemAttachment {
-        bounding_box = Aabb{min = {-1, -1, -1}, max = {1, 1, 1}},
-        texture_handle = black_circle_texture_handle,
-      },
     )
     // Create an emitter for the second particle system
-    spawn_child(
-      &engine.scene,
-      psys_handle2,
-      EmitterAttachment {
+    emitter_handle2 := create_emitter_handle(
+      &engine.warehouse,
+      Emitter {
         emission_rate = 7,
         particle_lifetime = 3.0,
         position_spread = 0.3,
@@ -390,7 +386,14 @@ setup :: proc(engine: ^mjolnir.Engine) {
         texture_handle = black_circle_texture_handle,
         enabled = true,
         bounding_box = Aabb{min = {-1, -1, -1}, max = {1, 1, 1}},
+        is_dirty = true,
       },
+    )
+    spawn_child(
+      &engine.scene,
+      psys_handle2,
+      EmitterAttachment {emitter_handle2},
+      &engine.warehouse,
     )
     // Create a force field that affects both particle systems
     forcefield_handle, _ = spawn_child(
@@ -483,32 +486,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
     scale(portal_node, 2.0)
   }
   log.info("setup complete")
-}
-
-render_2d :: proc(engine: ^mjolnir.Engine, ctx: ^mu.Context) {
-  using mjolnir
-  if mu.window(ctx, "Particle System", {40, 360, 300, 200}, {.NO_CLOSE}) {
-    rendered, max_particles := get_particle_render_stats(&engine.particle)
-    mu.label(ctx, fmt.tprintf("Rendered %d", rendered))
-    mu.label(ctx, fmt.tprintf("Max Particles %d", max_particles))
-    efficiency := f32(rendered) / f32(max_particles) * 100.0
-    mu.label(ctx, fmt.tprintf("Efficiency %.1f%%", efficiency))
-  }
-  if mu.window(ctx, "Shadow Debug", {990, 40, 280, 150}, {.NO_CLOSE}) {
-    mu.label(ctx, "Shadow Map Information:")
-    mu.label(
-      ctx,
-      fmt.tprintf("Shadow Map Size: %dx%d", SHADOW_MAP_SIZE, SHADOW_MAP_SIZE),
-    )
-    mu.label(ctx, fmt.tprintf("Max Shadow Maps: %d", MAX_SHADOW_MAPS))
-  }
-  if mu.window(ctx, "GPU Culling", {990, 200, 280, 240}, {.NO_CLOSE}) {
-    mu.label(ctx, fmt.tprintf("Max Nodes: %d", mjolnir.MAX_NODES_IN_SCENE))
-    mu.label(ctx, fmt.tprintf("Max Cameras: %d", mjolnir.MAX_ACTIVE_CAMERAS))
-    total_nodes :=
-      len(engine.scene.nodes.entries) - len(engine.scene.nodes.free_indices)
-    mu.label(ctx, fmt.tprintf("Active Nodes: %d", total_nodes))
-  }
 }
 
 update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {

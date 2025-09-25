@@ -392,7 +392,7 @@ transparent_render_pass :: proc(
   descriptor_sets := [?]vk.DescriptorSet {
     warehouse.camera_buffer_descriptor_set,
     warehouse.textures_descriptor_set,
-    warehouse.bone_buffer_descriptor_set,
+    warehouse.bone_buffer_descriptor_sets[frame_index],
     warehouse.material_buffer_descriptor_set,
     warehouse.world_matrix_descriptor_sets[frame_index],
     warehouse.node_data_descriptor_set,
