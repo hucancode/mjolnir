@@ -1,11 +1,12 @@
-package mjolnir
+package gpu
 
 import "core:log"
 import "core:math"
 import "core:slice"
-import "gpu"
 import "vendor:glfw"
 import vk "vendor:vulkan"
+
+MAX_FRAMES_IN_FLIGHT :: 2
 
 Swapchain :: struct {
   handle:                     vk.SwapchainKHR,
@@ -21,7 +22,7 @@ Swapchain :: struct {
 
 swapchain_init :: proc(
   self: ^Swapchain,
-  gpu_context: ^gpu.GPUContext,
+  gpu_context: ^GPUContext,
   window: glfw.WindowHandle,
 ) -> vk.Result {
   pick_swap_present_mode :: proc(
@@ -67,11 +68,11 @@ swapchain_init :: proc(
   }
 
   width, height := glfw.GetFramebufferSize(window)
-  support := gpu.query_swapchain_support(
+  support := query_swapchain_support(
     gpu_context.physical_device,
     gpu_context.surface,
   ) or_return
-  defer gpu.swapchain_support_deinit(&support) // Clean up since we're not transferring ownership
+  defer swapchain_support_deinit(&support) // Clean up since we're not transferring ownership
   self.format = pick_swapchain_format(support.formats)
   self.extent = pick_swapchain_extent(
     support.capabilities,
@@ -131,7 +132,7 @@ swapchain_init :: proc(
   )
   self.views = make([]vk.ImageView, swapchain_image_count)
   for i in 0 ..< swapchain_image_count {
-    self.views[i] = gpu.create_image_view(
+    self.views[i] = create_image_view(
       gpu_context,
       self.images[i],
       self.format.format,
@@ -168,7 +169,7 @@ swapchain_init :: proc(
   return .SUCCESS
 }
 
-swapchain_deinit :: proc(self: ^Swapchain, gpu_context: ^gpu.GPUContext) {
+swapchain_deinit :: proc(self: ^Swapchain, gpu_context: ^GPUContext) {
   for view in self.views do vk.DestroyImageView(gpu_context.device, view, nil)
   delete(self.views)
   self.views = nil
@@ -194,7 +195,7 @@ swapchain_deinit :: proc(self: ^Swapchain, gpu_context: ^gpu.GPUContext) {
 }
 
 swapchain_recreate :: proc(
-  gpu_context: ^gpu.GPUContext,
+  gpu_context: ^GPUContext,
   self: ^Swapchain,
   window: glfw.WindowHandle,
 ) -> vk.Result {
@@ -205,7 +206,7 @@ swapchain_recreate :: proc(
 }
 
 acquire_next_image :: proc(
-  gpu_context: ^gpu.GPUContext,
+  gpu_context: ^GPUContext,
   self: ^Swapchain,
   frame_index: u32,
 ) -> (
@@ -237,7 +238,7 @@ acquire_next_image :: proc(
 }
 
 submit_queue_and_present :: proc(
-  gpu_context: ^gpu.GPUContext,
+  gpu_context: ^GPUContext,
   self: ^Swapchain,
   command_buffer: ^vk.CommandBuffer,
   frame_index: u32,
@@ -258,42 +259,6 @@ submit_queue_and_present :: proc(
     1,
     &submit_info,
     self.in_flight_fences[frame_index],
-  ) or_return
-  image_indices := [?]u32{self.image_index}
-  present_info := vk.PresentInfoKHR {
-    sType              = .PRESENT_INFO_KHR,
-    waitSemaphoreCount = 1,
-    pWaitSemaphores    = &self.render_finished_semaphores[frame_index],
-    swapchainCount     = 1,
-    pSwapchains        = &self.handle,
-    pImageIndices      = raw_data(image_indices[:]),
-  }
-  return vk.QueuePresentKHR(gpu_context.present_queue, &present_info)
-}
-
-submit_queue_and_present_with_fence :: proc(
-  gpu_context: ^gpu.GPUContext,
-  self: ^Swapchain,
-  command_buffer: ^vk.CommandBuffer,
-  frame_index: u32,
-  custom_fence: vk.Fence,
-) -> vk.Result {
-  wait_stage_mask: vk.PipelineStageFlags = {.COLOR_ATTACHMENT_OUTPUT}
-  submit_info := vk.SubmitInfo {
-    sType                = .SUBMIT_INFO,
-    waitSemaphoreCount   = 1,
-    pWaitSemaphores      = &self.image_available_semaphores[frame_index],
-    pWaitDstStageMask    = &wait_stage_mask,
-    commandBufferCount   = 1,
-    pCommandBuffers      = command_buffer,
-    signalSemaphoreCount = 1,
-    pSignalSemaphores    = &self.render_finished_semaphores[frame_index],
-  }
-  vk.QueueSubmit(
-    gpu_context.graphics_queue,
-    1,
-    &submit_info,
-    custom_fence,
   ) or_return
   image_indices := [?]u32{self.image_index}
   present_info := vk.PresentInfoKHR {

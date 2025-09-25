@@ -168,7 +168,7 @@ Engine :: struct {
   gpu_context:                 gpu.GPUContext,
   resource_manager:            resources.Manager,
   frame_index:                 u32,
-  swapchain:                   Swapchain,
+  swapchain:                   gpu.Swapchain,
   world:                       world.World,
   last_frame_timestamp:        time.Time,
   last_update_timestamp:       time.Time,
@@ -307,7 +307,7 @@ init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
   self.last_update_timestamp = self.start_timestamp
   world.init(&self.world)
   world.init_gpu(&self.world, &self.gpu_context, &self.resource_manager) or_return
-  swapchain_init(&self.swapchain, &self.gpu_context, self.window) or_return
+  gpu.swapchain_init(&self.swapchain, &self.gpu_context, self.window) or_return
 
   // Initialize deferred cleanup
   self.pending_node_deletions = make([dynamic]Handle, 0)
@@ -677,7 +677,7 @@ deinit :: proc(self: ^Engine) {
   navmesh_renderer.navmesh_deinit(&self.navmesh, &self.gpu_context)
   world.shutdown(&self.world, &self.gpu_context, &self.resource_manager)
   resources.shutdown(&self.resource_manager, &self.gpu_context)
-  swapchain_deinit(&self.swapchain, &self.gpu_context)
+  gpu.swapchain_deinit(&self.swapchain, &self.gpu_context)
   gpu.shutdown(&self.gpu_context)
   glfw.DestroyWindow(self.window)
   glfw.Terminate()
@@ -947,7 +947,7 @@ render_debug_ui :: proc(self: ^Engine) {
 
 @(private = "file")
 recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
-  swapchain_recreate(
+  gpu.swapchain_recreate(
     &engine.gpu_context,
     &engine.swapchain,
     engine.window,
@@ -1006,7 +1006,7 @@ recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
 }
 
 render :: proc(self: ^Engine) -> vk.Result {
-  acquire_next_image(&self.gpu_context, &self.swapchain, self.frame_index) or_return
+  gpu.acquire_next_image(&self.gpu_context, &self.swapchain, self.frame_index) or_return
   mu.begin(&self.render.ui.ctx)
   command_buffer := self.command_buffers[self.frame_index]
   vk.ResetCommandBuffer(command_buffer, {}) or_return
@@ -1150,7 +1150,7 @@ render :: proc(self: ^Engine) -> vk.Result {
     self.swapchain.images[self.swapchain.image_index],
   )
   vk.EndCommandBuffer(command_buffer) or_return
-  submit_queue_and_present(
+  gpu.submit_queue_and_present(
     &self.gpu_context,
     &self.swapchain,
     &command_buffer,
