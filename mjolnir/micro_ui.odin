@@ -221,7 +221,7 @@ ui_init :: proc(
   ) or_return
   color_formats := [?]vk.Format{color_format}
   rendering_info_khr := vk.PipelineRenderingCreateInfoKHR {
-    sType                   = .PIPELINE_RENDERING_CREATE_INFO_KHR,
+    sType                   = .PIPELINE_RENDERING_CREATE_INFO,
     colorAttachmentCount    = len(color_formats),
     pColorAttachmentFormats = raw_data(color_formats[:]),
   }
@@ -544,21 +544,21 @@ ui_begin :: proc(
   color_view: vk.ImageView,
   extent: vk.Extent2D,
 ) {
-  color_attachment := vk.RenderingAttachmentInfoKHR {
-    sType       = .RENDERING_ATTACHMENT_INFO_KHR,
+  color_attachment := vk.RenderingAttachmentInfo{
+    sType       = .RENDERING_ATTACHMENT_INFO,
     imageView   = color_view,
     imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
     loadOp      = .LOAD, // preserve previous contents
     storeOp     = .STORE,
   }
-  render_info := vk.RenderingInfoKHR {
-    sType = .RENDERING_INFO_KHR,
+  render_info := vk.RenderingInfo{
+    sType = .RENDERING_INFO,
     renderArea = {extent = extent},
     layerCount = 1,
     colorAttachmentCount = 1,
     pColorAttachments = &color_attachment,
   }
-  vk.CmdBeginRenderingKHR(command_buffer, &render_info)
+  vk.CmdBeginRendering(command_buffer, &render_info)
   viewport := vk.Viewport {
     x        = 0.0,
     y        = f32(extent.height),
@@ -595,5 +595,5 @@ ui_render :: proc(self: ^RendererUI, command_buffer: vk.CommandBuffer) {
 }
 
 ui_end :: proc(self: ^RendererUI, command_buffer: vk.CommandBuffer) {
-  vk.CmdEndRenderingKHR(command_buffer)
+  vk.CmdEndRendering(command_buffer)
 }

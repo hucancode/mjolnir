@@ -1013,29 +1013,29 @@ particle_begin :: proc(
     0,
     nil, // imageMemoryBarrierCount, pImageMemoryBarriers
   )
-  color_attachment := vk.RenderingAttachmentInfoKHR {
-    sType       = .RENDERING_ATTACHMENT_INFO_KHR,
+  color_attachment := vk.RenderingAttachmentInfo{
+    sType       = .RENDERING_ATTACHMENT_INFO,
     imageView   = image_2d(warehouse, get_final_image(render_target, frame_index)).view,
     imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
     loadOp      = .LOAD, // preserve previous contents
     storeOp     = .STORE,
   }
-  depth_attachment := vk.RenderingAttachmentInfoKHR {
-    sType       = .RENDERING_ATTACHMENT_INFO_KHR,
+  depth_attachment := vk.RenderingAttachmentInfo{
+    sType       = .RENDERING_ATTACHMENT_INFO,
     imageView   = image_2d(warehouse, get_depth_texture(render_target, frame_index)).view,
     imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
     loadOp      = .LOAD,
     storeOp     = .STORE,
   }
-  render_info := vk.RenderingInfoKHR {
-    sType = .RENDERING_INFO_KHR,
+  render_info := vk.RenderingInfo{
+    sType = .RENDERING_INFO,
     renderArea = {extent = render_target.extent},
     layerCount = 1,
     colorAttachmentCount = 1,
     pColorAttachments = &color_attachment,
     pDepthAttachment = &depth_attachment,
   }
-  vk.CmdBeginRenderingKHR(command_buffer, &render_info)
+  vk.CmdBeginRendering(command_buffer, &render_info)
   viewport := vk.Viewport {
     x        = 0.0,
     y        = f32(render_target.extent.height),
@@ -1101,7 +1101,7 @@ particle_render :: proc(
 }
 
 particle_end :: proc(command_buffer: vk.CommandBuffer) {
-  vk.CmdEndRenderingKHR(command_buffer)
+  vk.CmdEndRendering(command_buffer)
 }
 
 // Helper function to create an emitter with AABB culling bounds

@@ -187,7 +187,6 @@ Engine :: struct {
   render_error_count:          u32,
   visibility_culler:           VisibilityCuller,
   shadow:                      RendererShadow,
-  depth_prepass:               RendererDepthPrepass,
   gbuffer:                     RendererGBuffer,
   ambient:                     RendererAmbient,
   lighting:                    RendererLighting,
@@ -475,7 +474,7 @@ init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
     &self.warehouse,
   ) or_return
   depth_prepass_init(
-    &self.depth_prepass,
+    &self.gbuffer,
     &self.gpu_context,
     self.swapchain.extent,
     &self.warehouse,
@@ -858,7 +857,7 @@ deinit :: proc(self: ^Engine) {
     visibility_culler_deinit(&self.visibility_culler, &self.gpu_context)
   }
   transparent_deinit(&self.transparent, &self.gpu_context)
-  depth_prepass_deinit(&self.depth_prepass, &self.gpu_context)
+
   resource_deinit(&self.warehouse, &self.gpu_context)
   swapchain_deinit(&self.swapchain, &self.gpu_context)
   gpu.gpu_context_deinit(&self.gpu_context)
@@ -873,8 +872,8 @@ record_shadow_pass :: proc(
   command_buffer: vk.CommandBuffer,
 ) -> vk.Result {
   vk.ResetCommandBuffer(command_buffer, {}) or_return
-  rendering_info := vk.CommandBufferInheritanceRenderingInfoKHR {
-    sType = .COMMAND_BUFFER_INHERITANCE_RENDERING_INFO_KHR,
+  rendering_info := vk.CommandBufferInheritanceRenderingInfo{
+    sType = .COMMAND_BUFFER_INHERITANCE_RENDERING_INFO,
     depthAttachmentFormat = .D32_SFLOAT,
   }
   inheritance := vk.CommandBufferInheritanceInfo {
@@ -1035,8 +1034,8 @@ record_depth_gbuffer_pass :: proc(
     .R8G8B8A8_UNORM,
     .R8G8B8A8_UNORM,
   }
-  rendering_info := vk.CommandBufferInheritanceRenderingInfoKHR {
-    sType = .COMMAND_BUFFER_INHERITANCE_RENDERING_INFO_KHR,
+  rendering_info := vk.CommandBufferInheritanceRenderingInfo{
+    sType = .COMMAND_BUFFER_INHERITANCE_RENDERING_INFO,
     colorAttachmentCount = len(color_formats),
     pColorAttachmentFormats = raw_data(color_formats[:]),
     depthAttachmentFormat = .D32_SFLOAT,
@@ -1099,7 +1098,7 @@ record_depth_gbuffer_pass :: proc(
     self.frame_index,
   )
   depth_prepass_render(
-    &self.depth_prepass,
+    &self.gbuffer,
     command_buffer,
     main_render_target.camera.index,
     &self.warehouse,
@@ -1158,8 +1157,8 @@ record_lighting_pass :: proc(
   vk.ResetCommandBuffer(command_buffer, {}) or_return
 
   color_format := self.swapchain.format.format
-  rendering_info := vk.CommandBufferInheritanceRenderingInfoKHR {
-    sType = .COMMAND_BUFFER_INHERITANCE_RENDERING_INFO_KHR,
+  rendering_info := vk.CommandBufferInheritanceRenderingInfo{
+    sType = .COMMAND_BUFFER_INHERITANCE_RENDERING_INFO,
     colorAttachmentCount = 1,
     pColorAttachmentFormats = &color_format,
     depthAttachmentFormat = .D32_SFLOAT,
@@ -1236,8 +1235,8 @@ record_transparency_pass :: proc(
 ) -> vk.Result {
   vk.ResetCommandBuffer(command_buffer, {}) or_return
   color_format := self.swapchain.format.format
-  rendering_info := vk.CommandBufferInheritanceRenderingInfoKHR {
-    sType = .COMMAND_BUFFER_INHERITANCE_RENDERING_INFO_KHR,
+  rendering_info := vk.CommandBufferInheritanceRenderingInfo{
+    sType = .COMMAND_BUFFER_INHERITANCE_RENDERING_INFO,
     colorAttachmentCount = 1,
     pColorAttachmentFormats = &color_format,
     depthAttachmentFormat = .D32_SFLOAT,
@@ -1323,8 +1322,8 @@ record_postprocess_pass :: proc(
   vk.ResetCommandBuffer(command_buffer, {}) or_return
 
   color_format := self.swapchain.format.format
-  rendering_info := vk.CommandBufferInheritanceRenderingInfoKHR {
-    sType = .COMMAND_BUFFER_INHERITANCE_RENDERING_INFO_KHR,
+  rendering_info := vk.CommandBufferInheritanceRenderingInfo{
+    sType = .COMMAND_BUFFER_INHERITANCE_RENDERING_INFO,
     colorAttachmentCount = 1,
     pColorAttachmentFormats = &color_format,
   }

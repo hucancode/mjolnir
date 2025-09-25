@@ -70,8 +70,8 @@ shadow_init :: proc(
     depthWriteEnable = true,
     depthCompareOp   = .LESS,
   }
-  rendering_info_khr := vk.PipelineRenderingCreateInfoKHR {
-    sType                 = .PIPELINE_RENDERING_CREATE_INFO_KHR,
+  rendering_info_khr := vk.PipelineRenderingCreateInfo{
+    sType                 = .PIPELINE_RENDERING_CREATE_INFO,
     depthAttachmentFormat = depth_format,
   }
   vertex_input_info := vk.PipelineVertexInputStateCreateInfo {
@@ -186,21 +186,21 @@ shadow_begin :: proc(
     {.DEPTH_STENCIL_ATTACHMENT_WRITE},
     layer_count,
   )
-  depth_attachment := vk.RenderingAttachmentInfoKHR {
-    sType = .RENDERING_ATTACHMENT_INFO_KHR,
+  depth_attachment := vk.RenderingAttachmentInfo{
+    sType = .RENDERING_ATTACHMENT_INFO,
     imageView = depth_image_view,
     imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
     loadOp = .CLEAR,
     storeOp = .STORE,
     clearValue = {depthStencil = {1.0, 0}}, // Clear to far distance
   }
-  render_info_khr := vk.RenderingInfoKHR {
-    sType = .RENDERING_INFO_KHR,
+  render_info_khr := vk.RenderingInfo{
+    sType = .RENDERING_INFO,
     renderArea = {extent = shadow_target.extent},
     layerCount = 1,
     pDepthAttachment = &depth_attachment,
   }
-  vk.CmdBeginRenderingKHR(command_buffer, &render_info_khr)
+  vk.CmdBeginRendering(command_buffer, &render_info_khr)
   viewport := vk.Viewport {
     width    = f32(shadow_target.extent.width),
     height   = f32(shadow_target.extent.height),
@@ -295,7 +295,7 @@ shadow_end :: proc(
   frame_index: u32,
   face: Maybe(u32) = nil,
 ) {
-  vk.CmdEndRenderingKHR(command_buffer)
+  vk.CmdEndRendering(command_buffer)
 
   // Transition shadow map to shader read optimal after rendering
   depth_image: vk.Image

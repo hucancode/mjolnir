@@ -412,8 +412,8 @@ postprocess_init :: proc(
     pDynamicStates    = raw_data(dynamic_states[:]),
   }
   color_formats := [?]vk.Format{color_format}
-  rendering_info := vk.PipelineRenderingCreateInfoKHR {
-    sType                   = .PIPELINE_RENDERING_CREATE_INFO_KHR,
+  rendering_info := vk.PipelineRenderingCreateInfo{
+    sType                   = .PIPELINE_RENDERING_CREATE_INFO,
     colorAttachmentCount    = len(color_formats),
     pColorAttachmentFormats = raw_data(color_formats[:]),
   }
@@ -729,22 +729,22 @@ postprocess_render :: proc(
       )
       gpu.transition_image_to_shader_read(command_buffer, src_texture.image)
     }
-    color_attachment := vk.RenderingAttachmentInfoKHR {
-      sType = .RENDERING_ATTACHMENT_INFO_KHR,
+    color_attachment := vk.RenderingAttachmentInfo{
+      sType = .RENDERING_ATTACHMENT_INFO,
       imageView = dst_view,
       imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
       loadOp = .CLEAR,
       storeOp = .STORE,
       clearValue = {color = {float32 = BG_BLUE_GRAY}},
     }
-    render_info := vk.RenderingInfoKHR {
-      sType = .RENDERING_INFO_KHR,
+    render_info := vk.RenderingInfo{
+      sType = .RENDERING_INFO,
       renderArea = {extent = extent},
       layerCount = 1,
       colorAttachmentCount = 1,
       pColorAttachments = &color_attachment,
     }
-    vk.CmdBeginRenderingKHR(command_buffer, &render_info)
+    vk.CmdBeginRendering(command_buffer, &render_info)
     effect_type := get_effect_type(effect)
     vk.CmdBindPipeline(command_buffer, .GRAPHICS, self.pipelines[effect_type])
 
@@ -912,7 +912,7 @@ postprocess_render :: proc(
       )
     }
     vk.CmdDraw(command_buffer, 3, 1, 0, 0)
-    vk.CmdEndRenderingKHR(command_buffer)
+    vk.CmdEndRendering(command_buffer)
   }
 }
 

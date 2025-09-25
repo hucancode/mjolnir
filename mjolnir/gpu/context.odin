@@ -22,8 +22,6 @@ TITLE :: "Mjolnir"
 
 DEVICE_EXTENSIONS :: []cstring {
   vk.KHR_SWAPCHAIN_EXTENSION_NAME,
-  vk.KHR_DYNAMIC_RENDERING_EXTENSION_NAME,
-  vk.EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME,
 }
 
 ENABLE_VALIDATION_LAYERS :: #config(ENABLE_VALIDATION_LAYERS, ODIN_DEBUG)
@@ -150,7 +148,7 @@ vulkan_instance_init :: proc(self: ^GPUContext) -> vk.Result {
     applicationVersion = vk.MAKE_VERSION(1, 0, 0),
     pEngineName        = ENGINE_NAME,
     engineVersion      = vk.MAKE_VERSION(1, 0, 0),
-    apiVersion         = vk.API_VERSION_1_2,
+    apiVersion         = vk.API_VERSION_1_3,
   }
   create_info := vk.InstanceCreateInfo {
     sType            = .INSTANCE_CREATE_INFO,
@@ -431,15 +429,15 @@ logical_device_init :: proc(self: ^GPUContext) -> vk.Result {
   }
   // Enable descriptor indexing features
   descriptor_indexing_features :=
-    vk.PhysicalDeviceDescriptorIndexingFeaturesEXT {
-      sType                                     = .PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES_EXT,
+    vk.PhysicalDeviceDescriptorIndexingFeatures {
+      sType                                     = .PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES,
       shaderSampledImageArrayNonUniformIndexing = true,
       runtimeDescriptorArray                    = true,
       descriptorBindingPartiallyBound           = true,
       descriptorBindingVariableDescriptorCount  = true,
     }
-  dynamic_rendering_feature := vk.PhysicalDeviceDynamicRenderingFeaturesKHR {
-      sType            = .PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES_KHR,
+  dynamic_rendering_feature := vk.PhysicalDeviceDynamicRenderingFeatures {
+      sType            = .PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES,
       dynamicRendering = true,
       pNext            = &descriptor_indexing_features,
     }

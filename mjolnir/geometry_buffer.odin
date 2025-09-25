@@ -14,6 +14,228 @@ PushConstant :: struct {
 RendererGBuffer :: struct {
   pipeline:        vk.Pipeline,
   pipeline_layout: vk.PipelineLayout,
+  depth_prepass_pipeline:        vk.Pipeline,
+}
+
+SHADER_DEPTH_PREPASS_VERT :: #load("shader/depth_prepass/vert.spv")
+
+depth_prepass_init :: proc(
+  self: ^RendererGBuffer,
+  gpu_context: ^gpu.GPUContext,
+  swapchain_extent: vk.Extent2D,
+  warehouse: ^ResourceWarehouse,
+) -> (
+  res: vk.Result,
+) {
+  log.debug("Building depth prepass pipeline")
+  vert_shader_module := gpu.create_shader_module(
+    gpu_context,
+    SHADER_DEPTH_PREPASS_VERT,
+  ) or_return
+  defer vk.DestroyShaderModule(gpu_context.device, vert_shader_module, nil)
+  shader_stages := [?]vk.PipelineShaderStageCreateInfo {
+    {
+      sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
+      stage = {.VERTEX},
+      module = vert_shader_module,
+      pName = "main",
+    },
+  }
+  vertex_input_info := vk.PipelineVertexInputStateCreateInfo {
+    sType                           = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+    vertexBindingDescriptionCount   = len(geometry.VERTEX_BINDING_DESCRIPTION),
+    pVertexBindingDescriptions      = raw_data(
+      geometry.VERTEX_BINDING_DESCRIPTION[:],
+    ),
+    vertexAttributeDescriptionCount = len(
+      geometry.VERTEX_ATTRIBUTE_DESCRIPTIONS,
+    ),
+    pVertexAttributeDescriptions    = raw_data(
+      geometry.VERTEX_ATTRIBUTE_DESCRIPTIONS[:],
+    ),
+  }
+  dynamic_states := [?]vk.DynamicState{.VIEWPORT, .SCISSOR}
+  dynamic_state := vk.PipelineDynamicStateCreateInfo {
+    sType             = .PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+    dynamicStateCount = len(dynamic_states),
+    pDynamicStates    = raw_data(dynamic_states[:]),
+  }
+  input_assembly := vk.PipelineInputAssemblyStateCreateInfo {
+    sType                  = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+    topology               = .TRIANGLE_LIST,
+    primitiveRestartEnable = false,
+  }
+  viewport_state := vk.PipelineViewportStateCreateInfo {
+    sType         = .PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+    viewportCount = 1,
+    scissorCount  = 1,
+  }
+  rasterizer := vk.PipelineRasterizationStateCreateInfo {
+    sType                   = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+    polygonMode             = .FILL,
+    cullMode                = {.BACK},
+    frontFace               = .COUNTER_CLOCKWISE,
+    lineWidth               = 1.0,
+    depthBiasEnable         = true,
+    depthBiasConstantFactor = 0.1,
+    depthBiasSlopeFactor    = 0.2,
+  }
+  multisampling := vk.PipelineMultisampleStateCreateInfo {
+    sType                = .PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+    sampleShadingEnable  = false,
+    rasterizationSamples = {._1},
+  }
+  color_blending := vk.PipelineColorBlendStateCreateInfo {
+    sType = .PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+  }
+  depth_stencil := vk.PipelineDepthStencilStateCreateInfo {
+    sType            = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+    depthTestEnable  = true,
+    depthWriteEnable = true,
+    depthCompareOp   = .LESS,
+  }
+  dynamic_rendering := vk.PipelineRenderingCreateInfo{
+    sType                 = .PIPELINE_RENDERING_CREATE_INFO,
+    depthAttachmentFormat = .D32_SFLOAT,
+  }
+  pipeline_info := vk.GraphicsPipelineCreateInfo {
+    sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
+    pNext               = &dynamic_rendering,
+    stageCount          = len(shader_stages),
+    pStages             = raw_data(shader_stages[:]),
+    pVertexInputState   = &vertex_input_info,
+    pInputAssemblyState = &input_assembly,
+    pViewportState      = &viewport_state,
+    pRasterizationState = &rasterizer,
+    pMultisampleState   = &multisampling,
+    pDepthStencilState  = &depth_stencil,
+    pColorBlendState    = &color_blending,
+    pDynamicState       = &dynamic_state,
+    layout              = self.pipeline_layout,
+  }
+  vk.CreateGraphicsPipelines(
+    gpu_context.device,
+    0,
+    1,
+    &pipeline_info,
+    nil,
+    &self.depth_prepass_pipeline,
+  ) or_return
+  return .SUCCESS
+}
+
+depth_prepass_begin :: proc(
+  render_target: ^RenderTarget,
+  command_buffer: vk.CommandBuffer,
+  warehouse: ^ResourceWarehouse,
+  frame_index: u32,
+) {
+  depth_texture := resource.get(
+    warehouse.image_2d_buffers,
+    get_depth_texture(render_target, frame_index),
+  )
+  depth_attachment := vk.RenderingAttachmentInfo{
+    sType = .RENDERING_ATTACHMENT_INFO,
+    imageView = depth_texture.view,
+    imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+    loadOp = .CLEAR,
+    storeOp = .STORE,
+    clearValue = {depthStencil = {1.0, 0}},
+  }
+  render_info := vk.RenderingInfo{
+    sType = .RENDERING_INFO,
+    renderArea = {extent = render_target.extent},
+    layerCount = 1,
+    pDepthAttachment = &depth_attachment,
+  }
+  vk.CmdBeginRendering(command_buffer, &render_info)
+  viewport := vk.Viewport {
+    x        = 0,
+    y        = f32(render_target.extent.height),
+    width    = f32(render_target.extent.width),
+    height   = -f32(render_target.extent.height),
+    minDepth = 0.0,
+    maxDepth = 1.0,
+  }
+  vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
+  scissor := vk.Rect2D {
+    offset = {x = 0, y = 0},
+    extent = render_target.extent,
+  }
+  vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
+}
+
+depth_prepass_end :: proc(command_buffer: vk.CommandBuffer) {
+  vk.CmdEndRendering(command_buffer)
+}
+
+depth_prepass_render :: proc(
+  self: ^RendererGBuffer,
+  command_buffer: vk.CommandBuffer,
+  camera_index: u32,
+  warehouse: ^ResourceWarehouse,
+  frame_index: u32,
+  draw_buffer: vk.Buffer,
+  draw_count: u32,
+) -> int {
+  if draw_count == 0 {
+    return 0
+  }
+  descriptor_sets := [?]vk.DescriptorSet {
+    warehouse.camera_buffer_descriptor_set,
+    warehouse.textures_descriptor_set,
+    warehouse.bone_buffer_descriptor_set,
+    warehouse.material_buffer_descriptor_set,
+    warehouse.world_matrix_descriptor_sets[frame_index],
+    warehouse.node_data_descriptor_set,
+    warehouse.mesh_data_descriptor_set,
+    warehouse.vertex_skinning_descriptor_set,
+  }
+  vk.CmdBindDescriptorSets(
+    command_buffer,
+    .GRAPHICS,
+    self.pipeline_layout,
+    0,
+    len(descriptor_sets),
+    raw_data(descriptor_sets[:]),
+    0,
+    nil,
+  )
+  vk.CmdBindPipeline(command_buffer, .GRAPHICS, self.depth_prepass_pipeline)
+  push_constant := PushConstant {
+    camera_index = camera_index,
+  }
+  vk.CmdPushConstants(
+    command_buffer,
+    self.pipeline_layout,
+    {.VERTEX},
+    0,
+    size_of(PushConstant),
+    &push_constant,
+  )
+  vertex_buffers := [1]vk.Buffer{warehouse.vertex_buffer.buffer}
+  vertex_offsets := [1]vk.DeviceSize{0}
+  vk.CmdBindVertexBuffers(
+    command_buffer,
+    0,
+    1,
+    raw_data(vertex_buffers[:]),
+    raw_data(vertex_offsets[:]),
+  )
+  vk.CmdBindIndexBuffer(
+    command_buffer,
+    warehouse.index_buffer.buffer,
+    0,
+    .UINT32,
+  )
+  vk.CmdDrawIndexedIndirect(
+    command_buffer,
+    draw_buffer,
+    0,
+    draw_count,
+    visibility_culler_command_stride(),
+  )
+  return int(draw_count)
 }
 
 gbuffer_init :: proc(
@@ -225,40 +447,40 @@ gbuffer_begin :: proc(
       {.DEPTH_STENCIL_ATTACHMENT_WRITE},
     )
   }
-  position_attachment := vk.RenderingAttachmentInfoKHR {
-    sType = .RENDERING_ATTACHMENT_INFO_KHR,
+  position_attachment := vk.RenderingAttachmentInfo{
+    sType = .RENDERING_ATTACHMENT_INFO,
     imageView = position_texture.view,
     imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
     loadOp = .CLEAR,
     storeOp = .STORE,
     clearValue = {color = {float32 = {0.0, 0.0, 0.0, 0.0}}},
   }
-  normal_attachment := vk.RenderingAttachmentInfoKHR {
-    sType = .RENDERING_ATTACHMENT_INFO_KHR,
+  normal_attachment := vk.RenderingAttachmentInfo{
+    sType = .RENDERING_ATTACHMENT_INFO,
     imageView = normal_texture.view,
     imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
     loadOp = .CLEAR,
     storeOp = .STORE,
     clearValue = {color = {float32 = {0.0, 0.0, 0.0, 1.0}}},
   }
-  albedo_attachment := vk.RenderingAttachmentInfoKHR {
-    sType = .RENDERING_ATTACHMENT_INFO_KHR,
+  albedo_attachment := vk.RenderingAttachmentInfo{
+    sType = .RENDERING_ATTACHMENT_INFO,
     imageView = albedo_texture.view,
     imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
     loadOp = .CLEAR,
     storeOp = .STORE,
     clearValue = {color = {float32 = {0.0, 0.0, 0.0, 1.0}}},
   }
-  metallic_roughness_attachment := vk.RenderingAttachmentInfoKHR {
-    sType = .RENDERING_ATTACHMENT_INFO_KHR,
+  metallic_roughness_attachment := vk.RenderingAttachmentInfo{
+    sType = .RENDERING_ATTACHMENT_INFO,
     imageView = metallic_roughness_texture.view,
     imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
     loadOp = .CLEAR,
     storeOp = .STORE,
     clearValue = {color = {float32 = {0.0, 0.0, 0.0, 1.0}}},
   }
-  emissive_attachment := vk.RenderingAttachmentInfoKHR {
-    sType = .RENDERING_ATTACHMENT_INFO_KHR,
+  emissive_attachment := vk.RenderingAttachmentInfo{
+    sType = .RENDERING_ATTACHMENT_INFO,
     imageView = emissive_texture.view,
     imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
     loadOp = .CLEAR,
@@ -269,8 +491,8 @@ gbuffer_begin :: proc(
     warehouse.image_2d_buffers,
     get_depth_texture(render_target, frame_index),
   )
-  depth_attachment := vk.RenderingAttachmentInfoKHR {
-    sType = .RENDERING_ATTACHMENT_INFO_KHR,
+  depth_attachment := vk.RenderingAttachmentInfo{
+    sType = .RENDERING_ATTACHMENT_INFO,
     imageView = depth_texture.view,
     imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
     loadOp = self_manage_depth ? .CLEAR : .LOAD,
@@ -292,7 +514,7 @@ gbuffer_begin :: proc(
     pColorAttachments = raw_data(color_attachments[:]),
     pDepthAttachment = &depth_attachment,
   }
-  vk.CmdBeginRenderingKHR(command_buffer, &render_info)
+  vk.CmdBeginRendering(command_buffer, &render_info)
   viewport := vk.Viewport {
     x        = 0,
     y        = f32(render_target.extent.height),
@@ -314,7 +536,7 @@ gbuffer_end :: proc(
   warehouse: ^ResourceWarehouse,
   frame_index: u32,
 ) {
-  vk.CmdEndRenderingKHR(command_buffer)
+  vk.CmdEndRendering(command_buffer)
 
   // Transition all G-buffer textures to SHADER_READ_ONLY_OPTIMAL for use by lighting
   position_texture := resource.get(
@@ -394,7 +616,6 @@ gbuffer_render :: proc(
     nil,
   )
   vk.CmdBindPipeline(command_buffer, .GRAPHICS, self.pipeline)
-
   push_constants := PushConstant {
     camera_index = render_target.camera.index,
   }
@@ -406,7 +627,6 @@ gbuffer_render :: proc(
     size_of(PushConstant),
     &push_constants,
   )
-
   vertex_buffers := [1]vk.Buffer{warehouse.vertex_buffer.buffer}
   vertex_offsets := [1]vk.DeviceSize{0}
   vk.CmdBindVertexBuffers(
@@ -422,7 +642,6 @@ gbuffer_render :: proc(
     0,
     .UINT32,
   )
-
   vk.CmdDrawIndexedIndirect(
     command_buffer,
     draw_buffer,
@@ -434,4 +653,7 @@ gbuffer_render :: proc(
 
 gbuffer_deinit :: proc(self: ^RendererGBuffer, gpu_context: ^gpu.GPUContext) {
   vk.DestroyPipeline(gpu_context.device, self.pipeline, nil)
+  self.pipeline = 0
+  vk.DestroyPipeline(gpu_context.device, self.depth_prepass_pipeline, nil)
+  self.depth_prepass_pipeline = 0
 }
