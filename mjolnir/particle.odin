@@ -47,7 +47,8 @@ Emitter :: struct {
   weight_spread:     f32,
   texture_handle:    resource.Handle,
   bounding_box:      geometry.Aabb,
-  dirty:             bool,
+  node_handle:       resource.Handle,
+  is_dirty:          bool,
 }
 
 ForceField :: struct {

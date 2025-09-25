@@ -355,13 +355,14 @@ setup :: proc(engine: ^mjolnir.Engine) {
         texture_handle = goldstar_texture_handle,
         enabled = true,
         bounding_box = Aabb{min = {-2, -2, -2}, max = {2, 2, 2}},
-        dirty = true,
+        is_dirty = true,
       },
     )
     spawn_child(
       &engine.scene,
       psys_handle1,
       EmitterAttachment {emitter_handle1},
+      &engine.warehouse,
     )
     psys_handle2, _ := spawn_at(
       &engine.scene,
@@ -385,13 +386,14 @@ setup :: proc(engine: ^mjolnir.Engine) {
         texture_handle = black_circle_texture_handle,
         enabled = true,
         bounding_box = Aabb{min = {-1, -1, -1}, max = {1, 1, 1}},
-        dirty = true,
+        is_dirty = true,
       },
     )
     spawn_child(
       &engine.scene,
       psys_handle2,
       EmitterAttachment {emitter_handle2},
+      &engine.warehouse,
     )
     // Create a force field that affects both particle systems
     forcefield_handle, _ = spawn_child(

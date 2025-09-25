@@ -325,7 +325,8 @@ create_emitter_handle :: proc(
 ) -> Handle {
   handle, emitter := resource.alloc(&warehouse.emitters)
   emitter^ = config
-  emitter.dirty = true
+  emitter.node_handle = {}
+  emitter.is_dirty = true
   return handle
 }
 

@@ -94,14 +94,6 @@ Node :: struct {
 
 SceneTraversalCallback :: #type proc(node: ^Node, ctx: rawptr) -> bool
 
-SceneEmitterState :: struct {
-  slot_lookup: map[u32]u32,
-  slot_nodes:  [MAX_EMITTERS]u32,
-  slot_active: [MAX_EMITTERS]bool,
-  slot_dirty:  [MAX_EMITTERS]bool,
-  active_count: u32,
-}
-
 init_node :: proc(self: ^Node, name: string = "") {
   self.children = make([dynamic]Handle, 0)
   self.transform = geometry.TRANSFORM_IDENTITY
@@ -205,6 +197,7 @@ spawn_at :: proc(
   self: ^Scene,
   position: [3]f32,
   attachment: NodeAttachment = nil,
+  warehouse: ^ResourceWarehouse = nil,
 ) -> (
   handle: Handle,
   node: ^Node,
@@ -212,6 +205,7 @@ spawn_at :: proc(
   handle, node = resource.alloc(&self.nodes)
   init_node(node)
   node.attachment = attachment
+  assign_emitter_to_node(warehouse, handle, node)
   geometry.transform_translate(&node.transform, position.x, position.y, position.z)
   attach(self.nodes, self.root, handle)
   return
@@ -220,6 +214,7 @@ spawn_at :: proc(
 spawn :: proc(
   self: ^Scene,
   attachment: NodeAttachment = nil,
+  warehouse: ^ResourceWarehouse = nil,
 ) -> (
   handle: Handle,
   node: ^Node,
@@ -227,6 +222,7 @@ spawn :: proc(
   handle, node = resource.alloc(&self.nodes)
   init_node(node)
   node.attachment = attachment
+  assign_emitter_to_node(warehouse, handle, node)
   attach(self.nodes, self.root, handle)
   return
 }
@@ -235,6 +231,7 @@ spawn_child :: proc(
   self: ^Scene,
   parent: Handle,
   attachment: NodeAttachment = nil,
+  warehouse: ^ResourceWarehouse = nil,
 ) -> (
   handle: Handle,
   node: ^Node,
@@ -242,6 +239,7 @@ spawn_child :: proc(
   handle, node = resource.alloc(&self.nodes)
   init_node(node)
   node.attachment = attachment
+  assign_emitter_to_node(warehouse, handle, node)
   attach(self.nodes, parent, handle)
   return
 }
@@ -257,7 +255,6 @@ Scene :: struct {
   root:            Handle,
   nodes:           resource.Pool(Node),
   traversal_stack: [dynamic]SceneTraverseEntry,
-  emitters:        SceneEmitterState,
 }
 
 scene_init :: proc(self: ^Scene) {
@@ -269,13 +266,6 @@ scene_init :: proc(self: ^Scene) {
   init_node(root, "root")
   root.parent = self.root
   self.traversal_stack = make([dynamic]SceneTraverseEntry, 0)
-  self.emitters.slot_lookup = make(map[u32]u32)
-  self.emitters.active_count = 0
-  for i in 0 ..< MAX_EMITTERS {
-    self.emitters.slot_nodes[i] = 0xFFFFFFFF
-    self.emitters.slot_active[i] = false
-    self.emitters.slot_dirty[i] = false
-  }
 }
 
 scene_deinit :: proc(self: ^Scene, warehouse: ^ResourceWarehouse) {
@@ -284,15 +274,28 @@ scene_deinit :: proc(self: ^Scene, warehouse: ^ResourceWarehouse) {
       deinit_node(&entry.item, warehouse)
     }
   }
-  delete(self.emitters.slot_lookup)
   resource.pool_deinit(self.nodes, proc(node: ^Node) {})
   delete(self.traversal_stack)
 }
 
-// Camera mode switching is now handled by camera controllers
-// switch_camera_mode_scene :: proc(self: ^Scene) {
-//   // This function is no longer needed with the new camera controller system
-// }
+assign_emitter_to_node :: proc(
+  warehouse: ^ResourceWarehouse,
+  node_handle: Handle,
+  node: ^Node,
+) {
+  if warehouse == nil {
+    return
+  }
+  attachment, is_emitter := &node.attachment.(EmitterAttachment)
+  if !is_emitter {
+    return
+  }
+  emitter, ok := resource.get(warehouse.emitters, attachment.handle)
+  if ok {
+    emitter.node_handle = node_handle
+    emitter.is_dirty = true
+  }
+}
 
 scene_traverse :: proc(
   self: ^Scene,
@@ -316,10 +319,8 @@ scene_traverse :: proc(
     }
     // Skip nodes that are pending deletion
     if current_node.pending_deletion do continue
-
     // Update parent_visible from parent chain only
     current_node.parent_visible = entry.parent_is_visible
-
     is_dirty := transform_update_local(&current_node.transform)
     if entry.parent_is_dirty || is_dirty {
       transform_update_world(&current_node.transform, entry.parent_transform)
@@ -347,147 +348,99 @@ scene_traverse :: proc(
   return true
 }
 
-scene_traverse_linear :: proc(
-  self: ^Scene,
-  cb_context: rawptr,
-  callback: SceneTraversalCallback,
-) -> bool {
-  for &entry in self.nodes.entries do if entry.active && entry.item.parent_visible && entry.item.visible && !entry.item.pending_deletion {
-    callback(&entry.item, cb_context)
-  }
-  return true
-}
-
 scene_emitters_sync :: proc(
   self: ^Scene,
   warehouse: ^ResourceWarehouse,
   emitters: []EmitterData,
   params: ^ParticleSystemParams,
 ) {
-  state := &self.emitters
-  previous_count := state.active_count
-  for i in 0 ..< int(previous_count) do state.slot_active[i] = false
+  if warehouse == nil {
+    params.emitter_count = 0
+    return
+  }
 
-  active_count := state.active_count
+  emitter_capacity := len(emitters)
+  max_slots := emitter_capacity
+  if max_slots > MAX_EMITTERS {
+    max_slots = MAX_EMITTERS
+  }
+  params.emitter_count = u32(max_slots)
 
-  for &entry, index in self.nodes.entries do if entry.active {
-    attachment, is_emitter := &entry.item.attachment.(EmitterAttachment)
-    if !is_emitter do continue
+  // Reset visibility each frame; preserve accumulator
+  for i in 0 ..< emitter_capacity {
+    emitters[i].visible = cast(b32)false
+  }
 
-    emitter_handle := attachment.handle
-    emitter, has_emitter := resource.get(warehouse.emitters, emitter_handle)
-
-    node_index := u32(index)
-    slot, has_slot := state.slot_lookup[node_index]
-    if has_slot {
-      slot_idx := int(slot)
-      if slot_idx >= len(state.slot_nodes) || slot_idx >= int(state.active_count) || state.slot_nodes[slot_idx] != node_index {
-        has_slot = false
-      }
+  for &entry, index in warehouse.emitters.entries {
+    if index >= emitter_capacity {
+      log.warnf("Emitter index %d exceeds GPU buffer capacity %d", index, emitter_capacity)
+      continue
     }
-
-    if !has_emitter {
-      if has_slot {
-        state.slot_active[int(slot)] = false
-        state.slot_dirty[int(slot)] = true
+    gpu_emitter := &emitters[index]
+    if !entry.active {
+      preserved_time := gpu_emitter.time_accumulator
+      entry.item.node_handle = {}
+      entry.item.is_dirty = true
+      gpu_emitter^ = EmitterData{
+        time_accumulator = preserved_time,
+        visible = cast(b32)false,
       }
       continue
     }
 
-    enabled := emitter.enabled != b32(false)
+    emitter := &entry.item
+    node_handle := emitter.node_handle
+    node := resource.get(self.nodes, node_handle)
 
-    if !enabled || entry.item.pending_deletion {
-      if has_slot {
-        state.slot_active[int(slot)] = false
-        state.slot_dirty[int(slot)] = true
+    if node == nil || node.pending_deletion {
+      emitter.is_dirty = true
+      preserved_time := gpu_emitter.time_accumulator
+      gpu_emitter^ = EmitterData{
+        time_accumulator = preserved_time,
+        visible = cast(b32)false,
       }
       continue
     }
 
-    if !has_slot {
-      if active_count >= MAX_EMITTERS {
-        log.warnf("Emitter capacity reached (%d), skipping node %d", MAX_EMITTERS, node_index)
-        continue
-      }
-      slot = active_count
-      active_count += 1
-      state.slot_lookup[node_index] = slot
-      state.slot_dirty[int(slot)] = true
-    }
-
-    slot_idx := int(slot)
-    state.slot_active[slot_idx] = true
-    state.slot_nodes[slot_idx] = node_index
-
-    if emitter.dirty {
-      state.slot_dirty[slot_idx] = true
-    }
-
-    if state.slot_dirty[slot_idx] {
-      gpu_emitter := &emitters[slot_idx]
+    visible := node.parent_visible && node.visible && emitter.enabled != b32(false)
+    if emitter.is_dirty {
       preserved_time := gpu_emitter.time_accumulator
       gpu_emitter^ = EmitterData {
-        initial_velocity = emitter.initial_velocity,
-        color_start = emitter.color_start,
-        color_end = emitter.color_end,
-        emission_rate = emitter.emission_rate,
+        initial_velocity  = emitter.initial_velocity,
+        color_start       = emitter.color_start,
+        color_end         = emitter.color_end,
+        emission_rate     = emitter.emission_rate,
         particle_lifetime = emitter.particle_lifetime,
-        position_spread = emitter.position_spread,
-        velocity_spread = emitter.velocity_spread,
-        time_accumulator = preserved_time,
-        size_start = emitter.size_start,
-        size_end = emitter.size_end,
-        weight = emitter.weight,
-        weight_spread = emitter.weight_spread,
-        texture_index = emitter.texture_handle.index,
-        node_index = node_index,
-        visible = b32(entry.item.parent_visible && entry.item.visible),
-        aabb_min = {
+        position_spread   = emitter.position_spread,
+        velocity_spread   = emitter.velocity_spread,
+        time_accumulator  = preserved_time,
+        size_start        = emitter.size_start,
+        size_end          = emitter.size_end,
+        weight            = emitter.weight,
+        weight_spread     = emitter.weight_spread,
+        texture_index     = emitter.texture_handle.index,
+        node_index        = node_handle.index,
+        visible           = cast(b32)visible,
+        aabb_min          = {
           emitter.bounding_box.min.x,
           emitter.bounding_box.min.y,
           emitter.bounding_box.min.z,
           0.0,
         },
-        aabb_max = {
+        aabb_max          = {
           emitter.bounding_box.max.x,
           emitter.bounding_box.max.y,
           emitter.bounding_box.max.z,
           0.0,
         },
       }
-      state.slot_dirty[slot_idx] = false
-      emitter.dirty = false
-    }
-  }
-
-  new_count: u32 = 0
-  for slot_idx: u32 = 0; slot_idx < active_count; slot_idx += 1 {
-    slot := int(slot_idx)
-    if state.slot_active[slot] {
-      if slot_idx != new_count {
-        emitters[int(new_count)] = emitters[slot]
-        node_idx := state.slot_nodes[slot]
-        state.slot_nodes[int(new_count)] = node_idx
-        state.slot_lookup[node_idx] = new_count
-        state.slot_dirty[int(new_count)] = state.slot_dirty[slot]
-        state.slot_active[int(new_count)] = true
-      }
-      new_count += 1
+      emitter.is_dirty = false
     } else {
-      node_idx := state.slot_nodes[slot]
-      state.slot_nodes[slot] = 0xFFFFFFFF
-      state.slot_dirty[slot] = false
-      state.slot_active[slot] = false
-      emitters[slot].visible = cast(b32)false
+      gpu_emitter.visible = cast(b32)visible
+      gpu_emitter.node_index = node_handle.index
     }
+    emitter.node_handle = node_handle
   }
-
-  for i := int(new_count); i < int(active_count); i += 1 {
-    state.slot_active[i] = false
-  }
-
-  state.active_count = new_count
-  params.emitter_count = new_count
 }
 
 scene_mark_emitter_dirty :: proc(
@@ -505,7 +458,7 @@ scene_mark_emitter_dirty :: proc(
   }
   emitter, ok := resource.get(warehouse.emitters, attachment.handle)
   if ok {
-    emitter.dirty = true
+    emitter.is_dirty = true
   }
 }
 
