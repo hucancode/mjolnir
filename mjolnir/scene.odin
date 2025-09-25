@@ -7,6 +7,7 @@ import "core:math/linalg"
 import "core:slice"
 import "geometry"
 import "gpu"
+import "render/particles"
 import "resources"
 
 PointLightAttachment :: struct {
@@ -338,7 +339,7 @@ scene_emitters_sync :: proc(
   self: ^Scene,
   resources_manager: ^resources.Manager,
   emitters: []resources.EmitterData,
-  params: ^ParticleSystemParams,
+  params: ^particles.ParticleSystemParams,
 ) {
   if resources_manager == nil {
     params.emitter_count = 0
@@ -347,8 +348,8 @@ scene_emitters_sync :: proc(
 
   emitter_capacity := len(emitters)
   max_slots := emitter_capacity
-  if max_slots > MAX_EMITTERS {
-    max_slots = MAX_EMITTERS
+  if max_slots > particles.MAX_EMITTERS {
+    max_slots = particles.MAX_EMITTERS
   }
   params.emitter_count = u32(max_slots)
 

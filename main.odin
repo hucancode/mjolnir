@@ -9,6 +9,8 @@ import "mjolnir"
 import "mjolnir/geometry"
 import "mjolnir/gpu"
 import "mjolnir/resources"
+import post_process "mjolnir/render/post_process"
+import geometry_pass "mjolnir/render/geometry"
 import "vendor:glfw"
 import mu "vendor:microui"
 import vk "vendor:vulkan"
@@ -417,14 +419,23 @@ setup :: proc(engine: ^mjolnir.Engine) {
     )
     scale(forcefield_visual, 0.2)
   }
-  effect_add_fog(&engine.postprocess, {0.4, 0.0, 0.8}, 0.02, 5.0, 20.0)
-  // effect_add_bloom(&engine.postprocess)
-  effect_add_crosshatch(&engine.postprocess, {1280, 720})
-  // effect_add_blur(&engine.postprocess, 18.0)
-  // effect_add_tonemap(&engine.postprocess, 1.5, 1.3)
-  // effect_add_dof(&engine.postprocess)
-  // effect_add_grayscale(&engine.postprocess, 0.9)
-  // effect_add_outline(&engine.postprocess, 2.0, {1.0, 0.0, 0.0})
+  post_process.effect_add_fog(
+    &engine.render.post_process,
+    [3]f32{0.4, 0.0, 0.8},
+    0.02,
+    5.0,
+    20.0,
+  )
+  // post_process.effect_add_bloom(&engine.render.post_process)
+  post_process.effect_add_crosshatch(
+    &engine.render.post_process,
+    [2]f32{1280, 720},
+  )
+  // post_process.effect_add_blur(&engine.render.post_process, 18.0)
+  // post_process.effect_add_tonemap(&engine.render.post_process, 1.5, 1.3)
+  // post_process.effect_add_dof(&engine.render.post_process)
+  // post_process.effect_add_grayscale(&engine.render.post_process, 0.9)
+  // post_process.effect_add_outline(&engine.render.post_process, 2.0, [3]f32{1.0, 0.0, 0.0})
   // Initialize camera controllers
   setup_camera_controller_callbacks(engine.window)
   main_camera := get_main_camera(engine)
@@ -623,23 +634,29 @@ custom_render :: proc(
   )
   upload_world_matrices(&engine.resource_manager, &engine.scene, engine.frame_index)
   // Render G-buffer pass with self-managed depth
-  gbuffer_begin(
+  geometry_pass.begin_pass(
     portal_rt,
     command_buffer,
     &engine.resource_manager,
     engine.frame_index,
     self_manage_depth = true,
   )
-  gbuffer_render(
-    &engine.gbuffer,
+  geometry_pass.render(
+    &engine.render.geometry,
     portal_rt,
     command_buffer,
     &engine.resource_manager,
     engine.frame_index,
     portal_draw_buffer,
     portal_draw_count,
+    mjolnir.visibility_culler_command_stride(),
   )
-  gbuffer_end(portal_rt, command_buffer, &engine.resource_manager, engine.frame_index)
+  geometry_pass.end_pass(
+    portal_rt,
+    command_buffer,
+    &engine.resource_manager,
+    engine.frame_index,
+  )
   // Update portal material to use the rendered texture (from current frame)
   portal_mat: ^resources.Material
   portal_mat, ok = resources.get_material(

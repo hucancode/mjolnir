@@ -1,20 +1,24 @@
-package mjolnir
+package post_process
 
 import "core:log"
-import "gpu"
+import gpu "../../gpu"
+import resources "../../resources"
 import vk "vendor:vulkan"
-import "resources"
 
-SHADER_POSTPROCESS_VERT :: #load("shader/postprocess/vert.spv")
-SHADER_POSTPROCESS_FRAG :: #load("shader/postprocess/frag.spv")
-SHADER_BLOOM_FRAG :: #load("shader/bloom/frag.spv")
-SHADER_BLUR_FRAG :: #load("shader/blur/frag.spv")
-SHADER_GRAYSCALE_FRAG :: #load("shader/grayscale/frag.spv")
-SHADER_TONEMAP_FRAG :: #load("shader/tonemap/frag.spv")
-SHADER_OUTLINE_FRAG :: #load("shader/outline/frag.spv")
-SHADER_FOG_FRAG :: #load("shader/fog/frag.spv")
-SHADER_CROSSHATCH_FRAG :: #load("shader/crosshatch/frag.spv")
-SHADER_DOF_FRAG :: #load("shader/dof/frag.spv")
+SHADER_POSTPROCESS_VERT :: #load("../../shader/postprocess/vert.spv")
+SHADER_POSTPROCESS_FRAG :: #load("../../shader/postprocess/frag.spv")
+SHADER_BLOOM_FRAG :: #load("../../shader/bloom/frag.spv")
+SHADER_BLUR_FRAG :: #load("../../shader/blur/frag.spv")
+SHADER_GRAYSCALE_FRAG :: #load("../../shader/grayscale/frag.spv")
+SHADER_TONEMAP_FRAG :: #load("../../shader/tonemap/frag.spv")
+SHADER_OUTLINE_FRAG :: #load("../../shader/outline/frag.spv")
+SHADER_FOG_FRAG :: #load("../../shader/fog/frag.spv")
+SHADER_CROSSHATCH_FRAG :: #load("../../shader/crosshatch/frag.spv")
+SHADER_DOF_FRAG :: #load("../../shader/dof/frag.spv")
+
+BG_BLUE_GRAY :: [4]f32{0.0117, 0.0117, 0.0179, 1.0}
+BG_DARK_GRAY :: [4]f32{0.0117, 0.0117, 0.0117, 1.0}
+BG_ORANGE_GRAY :: [4]f32{0.0179, 0.0179, 0.0117, 1.0}
 
 GrayscaleEffect :: struct {
   weights:  [3]f32,
@@ -176,8 +180,8 @@ RendererPostProcess :: struct {
   pipelines:        [len(PostProcessEffectType)]vk.Pipeline,
   pipeline_layouts: [len(PostProcessEffectType)]vk.PipelineLayout,
   effect_stack:     [dynamic]PostprocessEffect,
-  images:           [2]Handle,
-  frames:           [MAX_FRAMES_IN_FLIGHT]struct {
+  images:           [2]resources.Handle,
+  frames:           [resources.MAX_FRAMES_IN_FLIGHT]struct {
     image_available_semaphore: vk.Semaphore,
     render_finished_semaphore: vk.Semaphore,
     fence:                     vk.Fence,
@@ -354,7 +358,7 @@ effect_clear :: proc(self: ^RendererPostProcess) {
   resize(&self.effect_stack, 0)
 }
 
-postprocess_init :: proc(
+init :: proc(
   self: ^RendererPostProcess,
   gpu_context: ^gpu.GPUContext,
   color_format: vk.Format,
@@ -441,7 +445,7 @@ postprocess_init :: proc(
   depth_stencil_state := vk.PipelineDepthStencilStateCreateInfo {
     sType = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
   }
-  postprocess_create_images(
+  create_images(
     gpu_context,
     self,
     resources_manager,
@@ -554,7 +558,7 @@ postprocess_init :: proc(
   return .SUCCESS
 }
 
-postprocess_create_images :: proc(
+create_images :: proc(
   gpu_context: ^gpu.GPUContext,
   self: ^RendererPostProcess,
   resources_manager: ^resources.Manager,
@@ -575,7 +579,7 @@ postprocess_create_images :: proc(
   return .SUCCESS
 }
 
-postprocess_deinit_images :: proc(
+destroy_images :: proc(
   self: ^RendererPostProcess,
   gpu_context: ^gpu.GPUContext,
   resources_manager: ^resources.Manager,
@@ -588,15 +592,15 @@ postprocess_deinit_images :: proc(
   }
 }
 
-postprocess_recreate_images :: proc(
+recreate_images :: proc(
   gpu_context: ^gpu.GPUContext,
   self: ^RendererPostProcess,
   width, height: u32,
   format: vk.Format,
   resources_manager: ^resources.Manager,
 ) -> vk.Result {
-  postprocess_deinit_images(self, gpu_context, resources_manager)
-  return postprocess_create_images(
+  destroy_images(self, gpu_context, resources_manager)
+  return create_images(
     gpu_context,
     self,
     resources_manager,
@@ -606,7 +610,7 @@ postprocess_recreate_images :: proc(
   )
 }
 
-postprocess_deinit :: proc(
+shutdown :: proc(
   self: ^RendererPostProcess,
   gpu_context: ^gpu.GPUContext,
   resources_manager: ^resources.Manager,
@@ -639,11 +643,11 @@ postprocess_deinit :: proc(
     layout = 0
   }
   delete(self.effect_stack)
-  postprocess_deinit_images(self, gpu_context, resources_manager)
+  destroy_images(self, gpu_context, resources_manager)
 }
 
 // Modular postprocess API
-postprocess_begin :: proc(
+begin_pass :: proc(
   self: ^RendererPostProcess,
   command_buffer: vk.CommandBuffer,
   extent: vk.Extent2D,
@@ -666,7 +670,7 @@ postprocess_begin :: proc(
   vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
 }
 
-postprocess_render :: proc(
+render :: proc(
   self: ^RendererPostProcess,
   command_buffer: vk.CommandBuffer,
   extent: vk.Extent2D,
@@ -924,7 +928,7 @@ postprocess_render :: proc(
   }
 }
 
-postprocess_end :: proc(
+end_pass :: proc(
   self: ^RendererPostProcess,
   command_buffer: vk.CommandBuffer,
 ) {

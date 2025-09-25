@@ -1,21 +1,25 @@
-package mjolnir
+package shadow
 
 import "core:log"
-import "geometry"
-import "gpu"
+import geometry "../../geometry"
+import gpu "../../gpu"
+import resources "../../resources"
 import vk "vendor:vulkan"
-import "resources"
 
-SHADER_SHADOW_VERT :: #load("shader/shadow/vert.spv")
-SHADER_SHADOW_FRAG :: #load("shader/shadow/frag.spv")
+SHADER_SHADOW_VERT :: #load("../../shader/shadow/vert.spv")
+SHADER_SHADOW_FRAG :: #load("../../shader/shadow/frag.spv")
 
-RendererShadow :: struct {
+Renderer :: struct {
   pipeline_layout: vk.PipelineLayout,
   pipeline:        vk.Pipeline,
 }
 
-shadow_init :: proc(
-  self: ^RendererShadow,
+PushConstant :: struct {
+  camera_index: u32,
+}
+
+init :: proc(
+  self: ^Renderer,
   gpu_context: ^gpu.GPUContext,
   resources_manager: ^resources.Manager,
   depth_format: vk.Format = .D32_SFLOAT,
@@ -126,12 +130,12 @@ shadow_init :: proc(
   return .SUCCESS
 }
 
-shadow_deinit :: proc(self: ^RendererShadow, gpu_context: ^gpu.GPUContext) {
+shutdown :: proc(self: ^Renderer, gpu_context: ^gpu.GPUContext) {
   vk.DestroyPipeline(gpu_context.device, self.pipeline, nil)
   self.pipeline = 0
 }
 
-shadow_begin :: proc(
+begin_pass :: proc(
   shadow_target: ^resources.RenderTarget,
   command_buffer: vk.CommandBuffer,
   resources_manager: ^resources.Manager,
@@ -218,14 +222,15 @@ shadow_begin :: proc(
 }
 
 // Render shadow for a single light
-shadow_render :: proc(
-  self: ^RendererShadow,
+render :: proc(
+  self: ^Renderer,
   shadow_target: resources.RenderTarget,
   command_buffer: vk.CommandBuffer,
   resources_manager: ^resources.Manager,
   frame_index: u32,
   draw_buffer: vk.Buffer,
   draw_count: u32,
+  command_stride: u32,
 ) {
   if draw_count == 0 {
     return
@@ -284,11 +289,11 @@ shadow_render :: proc(
     draw_buffer,
     0,
     draw_count,
-    visibility_culler_command_stride(),
+    command_stride,
   )
 }
 
-shadow_end :: proc(
+end_pass :: proc(
   command_buffer: vk.CommandBuffer,
   shadow_target: ^resources.RenderTarget,
   resources_manager: ^resources.Manager,

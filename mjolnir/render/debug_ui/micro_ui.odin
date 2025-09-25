@@ -1,14 +1,14 @@
-package mjolnir
+package debug_ui
 
 import "core:log"
 import "core:math/linalg"
-import "gpu"
+import gpu "../../gpu"
+import resources "../../resources"
 import mu "vendor:microui"
 import vk "vendor:vulkan"
-import "resources"
 
-SHADER_MICROUI_VERT :: #load("shader/microui/vert.spv")
-SHADER_MICROUI_FRAG :: #load("shader/microui/frag.spv")
+SHADER_MICROUI_VERT :: #load("../../shader/microui/vert.spv")
+SHADER_MICROUI_FRAG :: #load("../../shader/microui/frag.spv")
 
 UI_MAX_QUAD :: 1000
 UI_MAX_VERTICES :: UI_MAX_QUAD * 4
@@ -42,7 +42,7 @@ Vertex2D :: struct {
   color: [4]u8,
 }
 
-ui_init :: proc(
+init :: proc(
   self: ^RendererUI,
   gpu_context: ^gpu.GPUContext,
   color_format: vk.Format,
@@ -493,7 +493,7 @@ ui_set_clip_rect :: proc(
   vk.CmdSetScissor(cmd_buf, 0, 1, &self.current_scissor)
 }
 
-ui_deinit :: proc(self: ^RendererUI, gpu_context: ^gpu.GPUContext) {
+shutdown :: proc(self: ^RendererUI, gpu_context: ^gpu.GPUContext) {
   if self == nil {
     return
   }
@@ -514,7 +514,7 @@ ui_deinit :: proc(self: ^RendererUI, gpu_context: ^gpu.GPUContext) {
   self.texture_layout = 0
 }
 
-ui_recreate_images :: proc(
+recreate_images :: proc(
   self: ^RendererUI,
   color_format: vk.Format,
   width, height: u32,
@@ -539,7 +539,7 @@ ui_recreate_images :: proc(
 }
 
 // Modular UI renderer API
-ui_begin :: proc(
+begin_pass :: proc(
   self: ^RendererUI,
   command_buffer: vk.CommandBuffer,
   color_view: vk.ImageView,
@@ -575,7 +575,7 @@ ui_begin :: proc(
   vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
 }
 
-ui_render :: proc(self: ^RendererUI, command_buffer: vk.CommandBuffer) {
+render :: proc(self: ^RendererUI, command_buffer: vk.CommandBuffer) {
   command_backing: ^mu.Command
   for variant in mu.next_command_iterator(&self.ctx, &command_backing) {
     // log.infof("executing UI command", variant)
@@ -595,6 +595,6 @@ ui_render :: proc(self: ^RendererUI, command_buffer: vk.CommandBuffer) {
   ui_flush(self, command_buffer)
 }
 
-ui_end :: proc(self: ^RendererUI, command_buffer: vk.CommandBuffer) {
+end_pass :: proc(self: ^RendererUI, command_buffer: vk.CommandBuffer) {
   vk.CmdEndRendering(command_buffer)
 }

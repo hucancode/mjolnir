@@ -1,11 +1,11 @@
-package mjolnir
+package lighting
 
 import "core:fmt"
 import "core:log"
 import "core:slice"
-import "geometry"
-import "gpu"
-import "resources"
+import geometry "../../geometry"
+import gpu "../../gpu"
+import resources "../../resources"
 import mu "vendor:microui"
 import vk "vendor:vulkan"
 
@@ -26,13 +26,13 @@ AmbientPushConstant :: struct {
 RendererAmbient :: struct {
   pipeline:            vk.Pipeline,
   pipeline_layout:     vk.PipelineLayout,
-  environment_map:     Handle,
-  brdf_lut:            Handle,
+  environment_map:     resources.Handle,
+  brdf_lut:            resources.Handle,
   environment_max_lod: f32,
   ibl_intensity:       f32,
 }
 
-ambient_begin :: proc(
+ambient_begin_pass :: proc(
   self: ^RendererAmbient,
   target: ^resources.RenderTarget,
   command_buffer: vk.CommandBuffer,
@@ -120,7 +120,7 @@ ambient_render :: proc(
   vk.CmdDraw(command_buffer, 3, 1, 0, 0) // fullscreen triangle
 }
 
-ambient_end :: proc(command_buffer: vk.CommandBuffer) {
+ambient_end_pass :: proc(command_buffer: vk.CommandBuffer) {
   vk.CmdEndRendering(command_buffer)
 }
 
@@ -153,13 +153,13 @@ ambient_init :: proc(
     &self.pipeline_layout,
   ) or_return
 
-  vert_shader_code := #load("shader/lighting_ambient/vert.spv")
+  vert_shader_code := #load("../../shader/lighting_ambient/vert.spv")
   vert_module := gpu.create_shader_module(
     gpu_context,
     vert_shader_code,
   ) or_return
   defer vk.DestroyShaderModule(gpu_context.device, vert_module, nil)
-  frag_shader_code := #load("shader/lighting_ambient/frag.spv")
+  frag_shader_code := #load("../../shader/lighting_ambient/frag.spv")
   frag_module := gpu.create_shader_module(
     gpu_context,
     frag_shader_code,
@@ -257,7 +257,7 @@ ambient_init :: proc(
 
   // Initialize environment resources
   environment_map: ^gpu.ImageBuffer
-  self.environment_map, environment_map =
+ self.environment_map, environment_map =
     resources.create_hdr_texture_from_path_with_mips(
       gpu_context,
       resources_manager,
@@ -269,18 +269,22 @@ ambient_init :: proc(
       resources.calculate_mip_levels(environment_map.width, environment_map.height) - 1.0
   }
   brdf_lut: ^gpu.ImageBuffer
-  self.brdf_lut, brdf_lut = resources.create_texture(
+  brdf_handle, _, brdf_ret := resources.create_texture_from_data(
     gpu_context,
     resources_manager,
-    #load("assets/lut_ggx.png"),
-  ) or_return
+    #load("../../assets/lut_ggx.png"),
+  )
+  if brdf_ret != .SUCCESS {
+    return brdf_ret
+  }
+  self.brdf_lut = brdf_handle
   self.ibl_intensity = 1.0 // Default IBL intensity
 
   log.info("Ambient pipeline initialized successfully")
   return .SUCCESS
 }
 
-ambient_deinit :: proc(
+ambient_shutdown :: proc(
   self: ^RendererAmbient,
   gpu_context: ^gpu.GPUContext,
   resources_manager: ^resources.Manager,
@@ -310,9 +314,9 @@ RendererLighting :: struct {
   lighting_pipeline:        vk.Pipeline,
   lighting_pipeline_layout: vk.PipelineLayout,
   // Light volume meshes
-  sphere_mesh:              Handle,
-  cone_mesh:                Handle,
-  fullscreen_triangle_mesh: Handle,
+  sphere_mesh:              resources.Handle,
+  cone_mesh:                resources.Handle,
+  fullscreen_triangle_mesh: resources.Handle,
 }
 
 lighting_init :: proc(
@@ -344,13 +348,13 @@ lighting_init :: proc(
     nil,
     &self.lighting_pipeline_layout,
   ) or_return
-  vert_shader_code := #load("shader/lighting/vert.spv")
+  vert_shader_code := #load("../../shader/lighting/vert.spv")
   vert_module := gpu.create_shader_module(
     gpu_context,
     vert_shader_code,
   ) or_return
   defer vk.DestroyShaderModule(gpu_context.device, vert_module, nil)
-  frag_shader_code := #load("shader/lighting/frag.spv")
+  frag_shader_code := #load("../../shader/lighting/frag.spv")
   frag_module := gpu.create_shader_module(
     gpu_context,
     frag_shader_code,
@@ -475,7 +479,7 @@ lighting_init :: proc(
   return .SUCCESS
 }
 
-lighting_deinit :: proc(
+lighting_shutdown :: proc(
   self: ^RendererLighting,
   gpu_context: ^gpu.GPUContext,
 ) {
@@ -497,7 +501,7 @@ lighting_recreate_images :: proc(
   return .SUCCESS
 }
 
-lighting_begin :: proc(
+lighting_begin_pass :: proc(
   self: ^RendererLighting,
   target: ^resources.RenderTarget,
   command_buffer: vk.CommandBuffer,
@@ -579,7 +583,7 @@ lighting_render :: proc(
 
   // Helper proc to bind and draw a mesh
   bind_and_draw_mesh :: proc(
-    mesh_handle: Handle,
+    mesh_handle: resources.Handle,
     command_buffer: vk.CommandBuffer,
     resources_manager: ^resources.Manager,
   ) {
@@ -680,6 +684,6 @@ lighting_render :: proc(
   return rendered_count
 }
 
-lighting_end :: proc(command_buffer: vk.CommandBuffer) {
+lighting_end_pass :: proc(command_buffer: vk.CommandBuffer) {
   vk.CmdEndRendering(command_buffer)
 }

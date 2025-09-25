@@ -1,19 +1,23 @@
-package mjolnir
+package transparency
 
 import "core:log"
-import "geometry"
-import "gpu"
-import "resources"
+import geometry "../../geometry"
+import gpu "../../gpu"
+import resources "../../resources"
 import vk "vendor:vulkan"
 
-RendererTransparent :: struct {
+Renderer :: struct {
   pipeline_layout:      vk.PipelineLayout,
   transparent_pipeline: vk.Pipeline,
   wireframe_pipeline:   vk.Pipeline,
 }
 
-transparent_init :: proc(
-  self: ^RendererTransparent,
+PushConstant :: struct {
+  camera_index: u32,
+}
+
+init :: proc(
+  self: ^Renderer,
   gpu_context: ^gpu.GPUContext,
   width, height: u32,
   resources_manager: ^resources.Manager,
@@ -31,19 +35,19 @@ transparent_init :: proc(
 
 create_transparent_pipelines :: proc(
   gpu_context: ^gpu.GPUContext,
-  self: ^RendererTransparent,
+  self: ^Renderer,
 ) -> vk.Result {
   // Create all shader variants for transparent PBR materials
   depth_format: vk.Format = .D32_SFLOAT
   color_format: vk.Format = .B8G8R8A8_SRGB
   // Load shader modules at compile time
-  vert_shader_code := #load("shader/transparent/vert.spv")
+  vert_shader_code := #load("../../shader/transparent/vert.spv")
   vert_module := gpu.create_shader_module(
     gpu_context,
     vert_shader_code,
   ) or_return
   defer vk.DestroyShaderModule(gpu_context.device, vert_module, nil)
-  frag_shader_code := #load("shader/transparent/frag.spv")
+  frag_shader_code := #load("../../shader/transparent/frag.spv")
   frag_module := gpu.create_shader_module(
     gpu_context,
     frag_shader_code,
@@ -172,20 +176,20 @@ create_transparent_pipelines :: proc(
 
 create_wireframe_pipelines :: proc(
   gpu_context: ^gpu.GPUContext,
-  self: ^RendererTransparent,
+  self: ^Renderer,
 ) -> vk.Result {
   depth_format: vk.Format = .D32_SFLOAT
   color_format: vk.Format = .B8G8R8A8_SRGB
 
   // Load shader modules at compile time
-  vert_shader_code := #load("shader/wireframe/vert.spv")
+  vert_shader_code := #load("../../shader/wireframe/vert.spv")
   vert_module := gpu.create_shader_module(
     gpu_context,
     vert_shader_code,
   ) or_return
   defer vk.DestroyShaderModule(gpu_context.device, vert_module, nil)
 
-  frag_shader_code := #load("shader/wireframe/frag.spv")
+  frag_shader_code := #load("../../shader/wireframe/frag.spv")
   frag_module := gpu.create_shader_module(
     gpu_context,
     frag_shader_code,
@@ -313,8 +317,8 @@ create_wireframe_pipelines :: proc(
   return .SUCCESS
 }
 
-transparent_deinit :: proc(
-  self: ^RendererTransparent,
+shutdown :: proc(
+  self: ^Renderer,
   gpu_context: ^gpu.GPUContext,
 ) {
   if self.transparent_pipeline != 0 {
@@ -328,8 +332,8 @@ transparent_deinit :: proc(
   }
 }
 
-transparent_begin :: proc(
-  self: ^RendererTransparent,
+begin_pass :: proc(
+  self: ^Renderer,
   render_target: ^resources.RenderTarget,
   command_buffer: vk.CommandBuffer,
   resources_manager: ^resources.Manager,
@@ -392,8 +396,8 @@ transparent_begin :: proc(
   vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
 }
 
-transparent_render_pass :: proc(
-  self: ^RendererTransparent,
+render :: proc(
+  self: ^Renderer,
   pipeline: vk.Pipeline,
   render_target: ^resources.RenderTarget,
   command_buffer: vk.CommandBuffer,
@@ -401,6 +405,7 @@ transparent_render_pass :: proc(
   frame_index: u32,
   draw_buffer: vk.Buffer,
   draw_count: u32,
+  command_stride: u32,
 ) {
   if draw_count == 0 {
     return
@@ -460,12 +465,12 @@ transparent_render_pass :: proc(
     draw_buffer,
     0,
     draw_count,
-    visibility_culler_command_stride(),
+    command_stride,
   )
 }
 
-transparent_end :: proc(
-  self: ^RendererTransparent,
+end_pass :: proc(
+  self: ^Renderer,
   command_buffer: vk.CommandBuffer,
 ) {
   vk.CmdEndRendering(command_buffer)

@@ -1,10 +1,10 @@
-package mjolnir
+package particles
 
 import "core:log"
-import "geometry"
-import "gpu"
+import geometry "../../geometry"
+import gpu "../../gpu"
+import resources "../../resources"
 import vk "vendor:vulkan"
-import "resources"
 
 MAX_PARTICLES :: 65536
 COMPUTE_PARTICLE_BATCH :: 256
@@ -71,7 +71,7 @@ RendererParticle :: struct {
   default_texture_index:         u32,
 }
 
-compute_particles :: proc(
+simulate :: proc(
   self: ^RendererParticle,
   command_buffer: vk.CommandBuffer,
   camera: geometry.Camera,
@@ -217,7 +217,7 @@ compact_particles :: proc(
   )
 }
 
-particle_deinit :: proc(
+shutdown :: proc(
   self: ^RendererParticle,
   gpu_context: ^gpu.GPUContext,
 ) {
@@ -268,7 +268,7 @@ particle_deinit :: proc(
   gpu.data_buffer_deinit(gpu_context, &self.particle_counter_buffer)
 }
 
-particle_init :: proc(
+init :: proc(
   self: ^RendererParticle,
   gpu_context: ^gpu.GPUContext,
   resources_manager: ^resources.Manager,
@@ -413,7 +413,7 @@ particle_init_emitter_pipeline :: proc(
   )
   emitter_shader_module := gpu.create_shader_module(
     gpu_context,
-    #load("shader/particle/emitter.spv"),
+    #load("../../shader/particle/emitter.spv"),
   ) or_return
   defer vk.DestroyShaderModule(gpu_context.device, emitter_shader_module, nil)
   emitter_pipeline_info := vk.ComputePipelineCreateInfo {
@@ -556,7 +556,7 @@ particle_init_compute_pipeline :: proc(
   )
   compute_shader_module := gpu.create_shader_module(
     gpu_context,
-    #load("shader/particle/compute.spv"),
+    #load("../../shader/particle/compute.spv"),
   ) or_return
   defer vk.DestroyShaderModule(gpu_context.device, compute_shader_module, nil)
   compute_pipeline_info := vk.ComputePipelineCreateInfo {
@@ -711,7 +711,7 @@ particle_init_compact_pipeline :: proc(
   )
   compact_shader_module := gpu.create_shader_module(
     gpu_context,
-    #load("shader/particle/compact.spv"),
+    #load("../../shader/particle/compact.spv"),
   ) or_return
   defer vk.DestroyShaderModule(gpu_context.device, compact_shader_module, nil)
   compact_pipeline_info := vk.ComputePipelineCreateInfo {
@@ -760,11 +760,14 @@ particle_init_render_pipeline :: proc(
     nil,
     &self.render_pipeline_layout,
   ) or_return
-  default_texture_handle, _ := resources.create_texture(
+  default_texture_handle, _, ret := resources.create_texture_from_data(
     gpu_context,
     resources_manager,
-    #load("assets/black-circle.png"),
-  ) or_return
+    #load("../../assets/black-circle.png"),
+  )
+  if ret != .SUCCESS {
+    return ret
+  }
   self.default_texture_index = default_texture_handle.index
   vertex_binding := vk.VertexInputBindingDescription {
     binding   = 0,
@@ -845,8 +848,8 @@ particle_init_render_pipeline :: proc(
     sType                = .PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
     rasterizationSamples = {._1},
   }
-  vert_shader_code := #load("shader/particle/vert.spv")
-  frag_shader_code := #load("shader/particle/frag.spv")
+  vert_shader_code := #load("../../shader/particle/vert.spv")
+  frag_shader_code := #load("../../shader/particle/frag.spv")
   vert_module := gpu.create_shader_module(
     gpu_context,
     vert_shader_code,
@@ -910,7 +913,7 @@ particle_init_render_pipeline :: proc(
   return .SUCCESS
 }
 
-particle_begin :: proc(
+begin_pass :: proc(
   self: ^RendererParticle,
   command_buffer: vk.CommandBuffer,
   render_target: ^resources.RenderTarget,
@@ -993,7 +996,7 @@ particle_begin :: proc(
   vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
 }
 
-particle_render :: proc(
+render :: proc(
   self: ^RendererParticle,
   command_buffer: vk.CommandBuffer,
   camera_index: u32,
@@ -1042,6 +1045,6 @@ particle_render :: proc(
   )
 }
 
-particle_end :: proc(command_buffer: vk.CommandBuffer) {
+end_pass :: proc(command_buffer: vk.CommandBuffer) {
   vk.CmdEndRendering(command_buffer)
 }

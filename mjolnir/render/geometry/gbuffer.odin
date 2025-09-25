@@ -1,9 +1,9 @@
-package mjolnir
+package geometry_pass
 
 import "core:log"
-import "geometry"
-import "gpu"
-import "resources"
+import geometry "../../geometry"
+import gpu "../../gpu"
+import resources "../../resources"
 import vk "vendor:vulkan"
 
 // 64 byte push constant budget
@@ -11,16 +11,16 @@ PushConstant :: struct {
   camera_index: u32,
 }
 
-RendererGBuffer :: struct {
+Renderer :: struct {
   pipeline:        vk.Pipeline,
   pipeline_layout: vk.PipelineLayout,
   depth_prepass_pipeline:        vk.Pipeline,
 }
 
-SHADER_DEPTH_PREPASS_VERT :: #load("shader/depth_prepass/vert.spv")
+SHADER_DEPTH_PREPASS_VERT :: #load("../../shader/depth_prepass/vert.spv")
 
-depth_prepass_init :: proc(
-  self: ^RendererGBuffer,
+init_depth_prepass :: proc(
+  self: ^Renderer,
   gpu_context: ^gpu.GPUContext,
   swapchain_extent: vk.Extent2D,
   resources_manager: ^resources.Manager,
@@ -124,7 +124,7 @@ depth_prepass_init :: proc(
   return .SUCCESS
 }
 
-depth_prepass_begin :: proc(
+begin_depth_prepass :: proc(
   render_target: ^resources.RenderTarget,
   command_buffer: vk.CommandBuffer,
   resources_manager: ^resources.Manager,
@@ -165,18 +165,19 @@ depth_prepass_begin :: proc(
   vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
 }
 
-depth_prepass_end :: proc(command_buffer: vk.CommandBuffer) {
+end_depth_prepass :: proc(command_buffer: vk.CommandBuffer) {
   vk.CmdEndRendering(command_buffer)
 }
 
-depth_prepass_render :: proc(
-  self: ^RendererGBuffer,
+render_depth_prepass :: proc(
+  self: ^Renderer,
   command_buffer: vk.CommandBuffer,
   camera_index: u32,
   resources_manager: ^resources.Manager,
   frame_index: u32,
   draw_buffer: vk.Buffer,
   draw_count: u32,
+  command_stride: u32,
 ) -> int {
   if draw_count == 0 {
     return 0
@@ -233,13 +234,13 @@ depth_prepass_render :: proc(
     draw_buffer,
     0,
     draw_count,
-    visibility_culler_command_stride(),
+    command_stride,
   )
   return int(draw_count)
 }
 
-gbuffer_init :: proc(
-  self: ^RendererGBuffer,
+init :: proc(
+  self: ^Renderer,
   gpu_context: ^gpu.GPUContext,
   width, height: u32,
   resources_manager: ^resources.Manager,
@@ -250,13 +251,13 @@ gbuffer_init :: proc(
     return .ERROR_INITIALIZATION_FAILED
   }
   log.info("About to build G-buffer pipelines...")
-  vert_shader_code := #load("shader/gbuffer/vert.spv")
+  vert_shader_code := #load("../../shader/gbuffer/vert.spv")
   vert_module := gpu.create_shader_module(
     gpu_context,
     vert_shader_code,
   ) or_return
   defer vk.DestroyShaderModule(gpu_context.device, vert_module, nil)
-  frag_shader_code := #load("shader/gbuffer/frag.spv")
+  frag_shader_code := #load("../../shader/gbuffer/frag.spv")
   frag_module := gpu.create_shader_module(
     gpu_context,
     frag_shader_code,
@@ -373,7 +374,7 @@ gbuffer_init :: proc(
   return .SUCCESS
 }
 
-gbuffer_begin :: proc(
+begin_pass :: proc(
   render_target: ^resources.RenderTarget,
   command_buffer: vk.CommandBuffer,
   resources_manager: ^resources.Manager,
@@ -530,7 +531,7 @@ gbuffer_begin :: proc(
   vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
 }
 
-gbuffer_end :: proc(
+end_pass :: proc(
   render_target: ^resources.RenderTarget,
   command_buffer: vk.CommandBuffer,
   resources_manager: ^resources.Manager,
@@ -583,14 +584,15 @@ gbuffer_end :: proc(
   )
 }
 
-gbuffer_render :: proc(
-  self: ^RendererGBuffer,
+render :: proc(
+  self: ^Renderer,
   render_target: ^resources.RenderTarget,
   command_buffer: vk.CommandBuffer,
   resources_manager: ^resources.Manager,
   frame_index: u32,
   draw_buffer: vk.Buffer,
   draw_count: u32,
+  command_stride: u32,
 ) {
   if draw_count == 0 {
     return
@@ -647,11 +649,11 @@ gbuffer_render :: proc(
     draw_buffer,
     0,
     draw_count,
-    visibility_culler_command_stride(),
+    command_stride,
   )
 }
 
-gbuffer_deinit :: proc(self: ^RendererGBuffer, gpu_context: ^gpu.GPUContext) {
+shutdown :: proc(self: ^Renderer, gpu_context: ^gpu.GPUContext) {
   vk.DestroyPipeline(gpu_context.device, self.pipeline, nil)
   self.pipeline = 0
   vk.DestroyPipeline(gpu_context.device, self.depth_prepass_pipeline, nil)
