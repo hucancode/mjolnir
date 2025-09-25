@@ -9,6 +9,7 @@ import "mjolnir"
 import "mjolnir/geometry"
 import "mjolnir/gpu"
 import "mjolnir/resources"
+import world "mjolnir/world"
 import post_process "mjolnir/render/post_process"
 import geometry_pass "mjolnir/render/geometry"
 import "vendor:glfw"
@@ -127,17 +128,17 @@ setup :: proc(engine: ^mjolnir.Engine) {
           )
           node: ^Node
           if x % 3 == 0 {
-            _, node = spawn(
-              &engine.scene,
-              MeshAttachment {
+            _, node = world.spawn(
+              &engine.world,
+              world.MeshAttachment {
                 handle = cube_mesh_handle,
                 material = mat_handle,
                 cast_shadow = true,
               },
             )
           } else if x % 3 == 1 {
-            _, node = spawn(
-              &engine.scene,
+            _, node = world.spawn(
+              &engine.world,
               MeshAttachment {
                 handle = cone_mesh_handle,
                 material = mat_handle,
@@ -145,8 +146,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
               },
             )
           } else {
-            _, node = spawn(
-              &engine.scene,
+            _, node = world.spawn(
+              &engine.world,
               MeshAttachment {
                 handle = sphere_mesh_handle,
                 material = mat_handle,
@@ -154,8 +155,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
               },
             )
           }
-          translate(node, world_x, world_y, world_z)
-          scale(node, size)
+          world.translate(node, world_x, world_y, world_z)
+          world.scale(node, size)
         }
       }
     }
@@ -164,96 +165,97 @@ setup :: proc(engine: ^mjolnir.Engine) {
     log.info("spawning ground and walls")
     // Ground node
     size: f32 = 15.0
-    _, ground_node := spawn(
-      &engine.scene,
+    _, ground_node := world.spawn(
+      &engine.world,
       MeshAttachment {
         handle = ground_mesh_handle,
         material = ground_mat_handle,
       },
     )
-    scale(ground_node, size)
+    world.scale(ground_node, size)
     // Left wall
-    _, left_wall := spawn(
-      &engine.scene,
+    _, left_wall := world.spawn(
+      &engine.world,
       MeshAttachment {
         handle = ground_mesh_handle,
         material = ground_mat_handle,
       },
     )
-    translate(left_wall, x = size, y = size)
-    rotate(left_wall, math.PI * 0.5, linalg.VECTOR3F32_Z_AXIS)
-    scale(left_wall, size)
+    world.translate(left_wall, x = size, y = size)
+    world.rotate(left_wall, math.PI * 0.5, linalg.VECTOR3F32_Z_AXIS)
+    world.scale(left_wall, size)
     // Right wall
-    _, right_wall := spawn(
-      &engine.scene,
+    _, right_wall := world.spawn(
+      &engine.world,
       MeshAttachment {
         handle = ground_mesh_handle,
         material = ground_mat_handle,
       },
     )
-    translate(right_wall, x = -size, y = size)
-    rotate(right_wall, -math.PI * 0.5, linalg.VECTOR3F32_Z_AXIS)
-    scale(right_wall, size)
+    world.translate(right_wall, x = -size, y = size)
+    world.rotate(right_wall, -math.PI * 0.5, linalg.VECTOR3F32_Z_AXIS)
+    world.scale(right_wall, size)
     // Back wall
-    _, back_wall := spawn(
-      &engine.scene,
+    _, back_wall := world.spawn(
+      &engine.world,
       MeshAttachment {
         handle = ground_mesh_handle,
         material = ground_mat_handle,
       },
     )
-    translate(back_wall, y = size, z = -size)
-    rotate(back_wall, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
-    scale(back_wall, size)
+    world.translate(back_wall, y = size, z = -size)
+    world.rotate(back_wall, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
+    world.scale(back_wall, size)
     // // Ceiling
-    _, ceiling := spawn(
-      &engine.scene,
+    _, ceiling := world.spawn(
+      &engine.world,
       MeshAttachment {
         handle = ground_mesh_handle,
         material = ground_mat_handle,
       },
     )
-    translate(ceiling, y = 2*size)
-    rotate(ceiling, -math.PI, linalg.VECTOR3F32_X_AXIS)
-    scale(ceiling, size)
+    world.translate(ceiling, y = 2*size)
+    world.rotate(ceiling, -math.PI, linalg.VECTOR3F32_X_AXIS)
+    world.scale(ceiling, size)
   }
   if true {
     log.info("loading Hammer GLTF...")
-    gltf_nodes := load_gltf(engine, "assets/Mjolnir.glb") or_else {}
+    gltf_nodes := world.load_gltf(&engine.world, &engine.resource_manager, &engine.gpu_context, "assets/Mjolnir.glb") or_else {}
     log.infof("Loaded GLTF nodes: %v", gltf_nodes)
     for handle in gltf_nodes {
       hammer_handle = handle
-      translate(&engine.scene, handle, 3, 1, -2)
-      scale(&engine.scene, handle, 0.2)
+      world.translate(&engine.world, handle, 3, 1, -2)
+      world.scale(&engine.world, handle, 0.2)
     }
   }
   if true {
     log.info("loading Damaged Helmet GLTF...")
-    gltf_nodes := load_gltf(engine, "assets/DamagedHelmet.glb") or_else {}
+    gltf_nodes := world.load_gltf(&engine.world, &engine.resource_manager, &engine.gpu_context, "assets/DamagedHelmet.glb") or_else {}
     log.infof("Loaded GLTF nodes: %v", gltf_nodes)
     for handle in gltf_nodes {
-      translate(&engine.scene, handle, 0, 1, 3)
-      scale(&engine.scene, handle, 0.5)
+      world.translate(&engine.world, handle, 0, 1, 3)
+      world.scale(&engine.world, handle, 0.5)
     }
   }
   if true {
     log.info("loading Suzanne GLTF...")
-    gltf_nodes := load_gltf(engine, "assets/Suzanne.glb") or_else {}
+    gltf_nodes := world.load_gltf(&engine.world, &engine.resource_manager, &engine.gpu_context, "assets/Suzanne.glb") or_else {}
     log.infof("Loaded GLTF nodes: %v", gltf_nodes)
     for handle in gltf_nodes {
-      translate(&engine.scene, handle, -3, 1, -2)
+      world.translate(&engine.world, handle, -3, 1, -2)
     }
   }
   if true {
     log.info("loading Warrior GLTF...")
-    gltf_nodes := load_gltf(engine, "assets/Warrior.glb") or_else {}
+    gltf_nodes := world.load_gltf(&engine.world, &engine.resource_manager, &engine.gpu_context, "assets/Warrior.glb") or_else {}
     log.infof("Loaded GLTF nodes: %v", gltf_nodes)
     for armature in gltf_nodes {
-      armature_ptr := resources.get(engine.scene.nodes, armature) or_continue
+      armature_ptr := world.get_node(&engine.world, armature)
+      if armature_ptr == nil do continue
       for i in 1 ..< len(armature_ptr.children) {
-        play_animation(engine, armature_ptr.children[i], "idle")
+        world.play_animation(&engine.world, &engine.resource_manager, armature_ptr.children[i], "idle")
       }
-      translate(armature_ptr, 0, 0, 1)
+      world.translate(armature_ptr, 0, 0, 1)
     }
   }
   when true {
@@ -274,8 +276,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
         should_make_spot_light = false
       }
       if should_make_spot_light {
-        light_handles[i], light = spawn(
-          &engine.scene,
+        light_handles[i], light = world.spawn(
+          &engine.world,
           SpotLightAttachment {
             color = color,
             angle = math.PI * 0.4,
@@ -283,17 +285,17 @@ setup :: proc(engine: ^mjolnir.Engine) {
             cast_shadow = true,
           },
         )
-        rotate(light, math.PI * 0.2, linalg.VECTOR3F32_X_AXIS)
+        world.rotate(light, math.PI * 0.2, linalg.VECTOR3F32_X_AXIS)
       } else {
-        light_handles[i], light = spawn(
-          &engine.scene,
+        light_handles[i], light = world.spawn(
+          &engine.world,
           PointLightAttachment{color = color, radius = 10, cast_shadow = true},
         )
       }
-      translate(light, 6, 2, -1)
+      world.translate(light, 6, 2, -1)
       cube_node: ^Node
-      light_cube_handles[i], cube_node = spawn_child(
-        &engine.scene,
+      light_cube_handles[i], cube_node = world.spawn_child(
+        &engine.world,
         light_handles[i],
         MeshAttachment {
           handle = cube_mesh_handle,
@@ -301,10 +303,10 @@ setup :: proc(engine: ^mjolnir.Engine) {
           cast_shadow = false,
         },
       )
-      scale(cube_node, 0.1)
+      world.scale(cube_node, 0.1)
     }
     // spawn(
-    //   &engine.scene,
+    //   &engine.world,
     //   DirectionalLightAttachment {
     //     color = {0.3, 0.3, 0.3, 1.0},
     //     cast_shadow = true,
@@ -316,7 +318,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     // effect_add_bloom(&engine.postprocess, 0.8, 0.5, 16.0)
     // Create a bright white ball to test bloom effect
     _, bright_ball_node := spawn(
-    &engine.scene,
+    &engine.world,
     MeshAttachment {
       handle      = sphere_mesh_handle,
       material    = resources.create_material_handle(
@@ -326,8 +328,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
       cast_shadow = false, // Emissive objects don't need shadows
     },
     )
-    translate(bright_ball_node, x = 1.0) // Position it above the ground
-    scale(bright_ball_node, 0.2) // Make it a reasonable size
+    world.translate(bright_ball_node, x = 1.0) // Position it above the ground
+    world.scale(bright_ball_node, 0.2) // Make it a reasonable size
   }
   when true {
     log.info("Setting up particles...")
@@ -336,8 +338,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
       &engine.resource_manager,
       "assets/black-circle.png",
     )
-    psys_handle1, _ := spawn_at(
-      &engine.scene,
+    psys_handle1, _ := world.spawn_at(
+      &engine.world,
       {-2.0, 1.9, 0.3},
     )
     emitter_handle1 := resources.create_emitter_handle(
@@ -360,14 +362,14 @@ setup :: proc(engine: ^mjolnir.Engine) {
         is_dirty = true,
       },
     )
-    spawn_child(
-      &engine.scene,
+    world.spawn_child(
+      &engine.world,
       psys_handle1,
-      EmitterAttachment {emitter_handle1},
+      world.EmitterAttachment {emitter_handle1},
       &engine.resource_manager,
     )
-    psys_handle2, _ := spawn_at(
-      &engine.scene,
+    psys_handle2, _ := world.spawn_at(
+      &engine.world,
       {2.0, 1.9, 0.3},
     )
     // Create an emitter for the second particle system
@@ -391,25 +393,25 @@ setup :: proc(engine: ^mjolnir.Engine) {
         is_dirty = true,
       },
     )
-    spawn_child(
-      &engine.scene,
+    world.spawn_child(
+      &engine.world,
       psys_handle2,
-      EmitterAttachment {emitter_handle2},
+      world.EmitterAttachment {emitter_handle2},
       &engine.resource_manager,
     )
     // Create a force field that affects both particle systems
-    forcefield_handle, _ = spawn_child(
-      &engine.scene,
+    forcefield_handle, _ = world.spawn_child(
+      &engine.world,
       psys_handle1, // Attach to first particle system
-      ForceFieldAttachment {
+      world.ForceFieldAttachment {
         tangent_strength = 2.0,
         strength = 20.0,
         area_of_effect = 5.0,
       },
     )
-    translate(&engine.scene, forcefield_handle, x = 5.0, y = 4.0, z = 0.0)
-    _, forcefield_visual := spawn_child(
-      &engine.scene,
+    world.translate(&engine.world, forcefield_handle, 5.0, 4.0, 0.0)
+    _, forcefield_visual := world.spawn_child(
+      &engine.world,
       forcefield_handle,
       MeshAttachment {
         handle = sphere_mesh_handle,
@@ -417,7 +419,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
         cast_shadow = false,
       },
     )
-    scale(forcefield_visual, 0.2)
+    world.scale(forcefield_visual, 0.2)
   }
   post_process.effect_add_fog(
     &engine.render.post_process,
@@ -486,8 +488,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
       portal_material_handle,
     )
     // Create portal quad mesh and spawn it
-    _, portal_node := spawn(
-      &engine.scene,
+    _, portal_node := world.spawn(
+      &engine.world,
       MeshAttachment {
         handle = resources.create_mesh_handle(
           &engine.gpu_context,
@@ -499,9 +501,9 @@ setup :: proc(engine: ^mjolnir.Engine) {
       },
     )
     // Position the portal vertically
-    translate(portal_node, 0, 3, -5)
-    rotate(portal_node, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
-    scale(portal_node, 2.0)
+    world.translate(portal_node, 0, 3, -5)
+    world.rotate(portal_node, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
+    world.scale(portal_node, 2.0)
   }
   log.info("setup complete")
 }
@@ -524,8 +526,8 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
     }
   }
   t := time_since_start(engine) * 0.5
-  translate(
-    &engine.scene,
+  world.translate(
+    &engine.world,
     forcefield_handle,
     math.cos(t) * 2.0,
     2.0,
@@ -543,9 +545,9 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
     v := linalg.normalize([3]f32{rx, ry, rz})
     radius: f32 = 6
     v = v * radius + linalg.VECTOR3F32_Y_AXIS * -1.0
-    translate(&engine.scene, handle, v.x, v.y, v.z)
-    rotate(
-      &engine.scene,
+    world.translate(&engine.world, handle, v.x, v.y, v.z)
+    world.rotate(
+      &engine.world,
       light_cube_handles[i],
       math.PI * time_since_start(engine) * 0.5,
     )
@@ -557,17 +559,17 @@ on_key_pressed :: proc(engine: ^mjolnir.Engine, key, action, mods: int) {
   log.infof("key pressed key %d action %d mods %x", key, action, mods)
   if action != glfw.PRESS do return
   if key == glfw.KEY_LEFT {
-    translate_by(&engine.scene, light_handles[0], x = 0.1)
+    world.translate_by(&engine.world, light_handles[0], 0.1, 0, 0)
   } else if key == glfw.KEY_RIGHT {
-    translate_by(&engine.scene, light_handles[0], x = -0.1)
+    world.translate_by(&engine.world, light_handles[0], -0.1, 0, 0)
   } else if key == glfw.KEY_UP {
-    translate_by(&engine.scene, light_handles[0], z = 0.1)
+    world.translate_by(&engine.world, light_handles[0], 0, 0, 0.1)
   } else if key == glfw.KEY_DOWN {
-    translate_by(&engine.scene, light_handles[0], z = -0.1)
+    world.translate_by(&engine.world, light_handles[0], 0, 0, -0.1)
   } else if key == glfw.KEY_Z {
-    translate_by(&engine.scene, light_handles[0], y = 0.1)
+    world.translate_by(&engine.world, light_handles[0], 0, 0.1, 0)
   } else if key == glfw.KEY_X {
-    translate_by(&engine.scene, light_handles[0], y = -0.1)
+    world.translate_by(&engine.world, light_handles[0], 0, -0.1, 0)
   } else if key == glfw.KEY_TAB {
     main_camera_for_sync := get_main_camera(engine)
     if current_controller == &orbit_controller {
@@ -616,23 +618,20 @@ custom_render :: proc(
     &engine.resource_manager,
     portal_rt.camera.index,
   )
-  mjolnir.visibility_culler_dispatch(
-    &engine.visibility_culler,
+  vis_result := world.query_visibility(
+    &engine.world,
     &engine.gpu_context,
     command_buffer,
     engine.frame_index,
-    portal_rt.camera.index,
-    {.VISIBLE},
-    {.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME},
+    world.DrawCommandRequest {
+      camera_handle  = {index = portal_rt.camera.index},
+      include_flags = {.VISIBLE},
+      exclude_flags = {.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME},
+      category      = .CUSTOM0,
+    },
   )
-  portal_draw_buffer := mjolnir.visibility_culler_command_buffer(
-    &engine.visibility_culler,
-    engine.frame_index,
-  )
-  portal_draw_count := mjolnir.visibility_culler_max_draw_count(
-    &engine.visibility_culler,
-  )
-  upload_world_matrices(&engine.resource_manager, &engine.scene, engine.frame_index)
+  portal_draw_buffer := vis_result.draw_buffer
+  portal_draw_count := vis_result.max_draws
   // Render G-buffer pass with self-managed depth
   geometry_pass.begin_pass(
     portal_rt,
@@ -649,7 +648,7 @@ custom_render :: proc(
     engine.frame_index,
     portal_draw_buffer,
     portal_draw_count,
-    mjolnir.visibility_culler_command_stride(),
+    vis_result.command_stride,
   )
   geometry_pass.end_pass(
     portal_rt,

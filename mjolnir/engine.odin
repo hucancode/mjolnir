@@ -16,9 +16,11 @@ import "core:unicode/utf8"
 import "geometry"
 import "gpu"
 import "resources"
+import world "world"
 import particles "render/particles"
 import "render/lighting"
 import "render/debug_ui"
+import navmesh_renderer "render/navigation"
 import "navigation/recast"
 import "vendor:glfw"
 import mu "vendor:microui"
@@ -42,6 +44,64 @@ MAX_CUBE_TEXTURES :: 20
 USE_PARALLEL_UPDATE :: true // Set to false to disable threading for debugging
 
 Handle :: resources.Handle
+
+// Re-export world types for convenience
+Node :: world.Node
+PointLightAttachment :: world.PointLightAttachment
+DirectionalLightAttachment :: world.DirectionalLightAttachment
+SpotLightAttachment :: world.SpotLightAttachment
+MeshAttachment :: world.MeshAttachment
+ForceFieldAttachment :: world.ForceFieldAttachment
+EmitterAttachment :: world.EmitterAttachment
+
+// Re-export render types for convenience
+RendererNavMesh :: navmesh_renderer.RendererNavMesh
+
+// Re-export navmesh functions
+navmesh_update_path :: navmesh_renderer.navmesh_update_path
+navmesh_clear_path :: navmesh_renderer.navmesh_clear_path
+
+// Re-export navmesh types that might be needed
+NavMeshColorMode :: navmesh_renderer.NavMeshColorMode
+NavMeshVertex :: navmesh_renderer.NavMeshVertex
+
+// Legacy wrapper functions for backwards compatibility
+spawn :: proc {
+  spawn_world,
+  spawn_world_at,
+  spawn_world_child,
+}
+
+spawn_world :: proc(
+  engine: ^Engine,
+  attachment: world.NodeAttachment = nil,
+) -> (handle: Handle, node: ^Node) {
+  return world.spawn_node(&engine.world, {0, 0, 0}, attachment, &engine.resource_manager)
+}
+
+spawn_world_at :: proc(
+  engine: ^Engine,
+  position: [3]f32,
+  attachment: world.NodeAttachment = nil,
+) -> (handle: Handle, node: ^Node) {
+  return world.spawn_node(&engine.world, position, attachment, &engine.resource_manager)
+}
+
+spawn_world_child :: proc(
+  engine: ^Engine,
+  parent: Handle,
+  attachment: world.NodeAttachment = nil,
+) -> (handle: Handle, node: ^Node) {
+  return world.spawn_child_node(&engine.world, parent, {0, 0, 0}, attachment, &engine.resource_manager)
+}
+
+despawn :: proc(engine: ^Engine, handle: Handle) -> bool {
+  return world.destroy_node(&engine.world, handle)
+}
+
+// Add missing navmesh functions
+navmesh_build_from_recast :: navmesh_renderer.navmesh_build_from_recast
+navmesh_get_triangle_count :: navmesh_renderer.navmesh_get_triangle_count
 
 g_context: runtime.Context
 
@@ -109,7 +169,7 @@ Engine :: struct {
   resource_manager:            resources.Manager,
   frame_index:                 u32,
   swapchain:                   Swapchain,
-  scene:                       Scene,
+  world:                       world.World,
   last_frame_timestamp:        time.Time,
   last_update_timestamp:       time.Time,
   start_timestamp:             time.Time,
@@ -124,7 +184,6 @@ Engine :: struct {
   mouse_scroll_proc:           MouseScrollProc,
   custom_render_proc:          CustomRenderProc,
   render_error_count:          u32,
-  visibility_culler:           VisibilityCuller,
   render:                      Renderer,
   navmesh:                     RendererNavMesh,
   command_buffers:             [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
@@ -246,7 +305,8 @@ init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
   self.start_timestamp = time.now()
   self.last_frame_timestamp = self.start_timestamp
   self.last_update_timestamp = self.start_timestamp
-  scene_init(&self.scene)
+  world.init(&self.world)
+  world.init_gpu(&self.world, &self.gpu_context, &self.resource_manager) or_return
   swapchain_init(&self.swapchain, &self.gpu_context, self.window) or_return
 
   // Initialize deferred cleanup
@@ -307,13 +367,8 @@ init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
     self.main_render_target,
     get_window_dpi(self.window),
   ) or_return
-  visibility_culler_init(
-    &self.visibility_culler,
-    &self.gpu_context,
-    &self.resource_manager,
-  ) or_return
   log.debugf("initializing navigation mesh renderer")
-  navmesh_init(&self.navmesh, &self.gpu_context, &self.resource_manager) or_return
+  navmesh_renderer.navmesh_init(&self.navmesh, &self.gpu_context, &self.resource_manager) or_return
   glfw.SetKeyCallback(
     self.window,
     proc "c" (window: glfw.WindowHandle, key, scancode, action, mods: c.int) {
@@ -461,7 +516,7 @@ update_emitters :: proc(self: ^Engine, delta_time: f32) {
   emitters_ptr := gpu.data_buffer_get(&self.resource_manager.emitter_buffer)
   emitters := slice.from_ptr(emitters_ptr, particles.MAX_EMITTERS)
 
-  scene_emitters_sync(&self.scene, &self.resource_manager, emitters, params)
+  world.sync_emitters(&self.world, &self.resource_manager, emitters, params)
 }
 
 get_main_camera :: proc(engine: ^Engine) -> ^geometry.Camera {
@@ -484,10 +539,10 @@ update_force_fields :: proc(self: ^Engine) {
     self.render.particles.force_field_buffer.mapped,
     particles.MAX_FORCE_FIELDS,
   )
-  for &entry in self.scene.nodes.entries do if entry.active {
+  for &entry in self.world.nodes.entries do if entry.active {
     ff, is_ff := &entry.item.attachment.(ForceFieldAttachment)
     if !is_ff do continue
-    forcefields[params.forcefield_count].position = get_world_matrix(&entry.item) * [4]f32{0, 0, 0, 1}
+    forcefields[params.forcefield_count].position = world.node_get_world_matrix(&entry.item) * [4]f32{0, 0, 0, 1}
     forcefields[params.forcefield_count].tangent_strength = ff.tangent_strength
     forcefields[params.forcefield_count].strength = ff.strength
     forcefields[params.forcefield_count].area_of_effect = ff.area_of_effect
@@ -505,7 +560,7 @@ update_skeletal_animations :: proc(self: ^Engine, delta_time: f32) {
     return
   }
 
-  for &entry in self.scene.nodes.entries do if entry.active {
+  for &entry in self.world.nodes.entries do if entry.active {
     node := &entry.item
     mesh_attachment, has_mesh := node.attachment.(MeshAttachment)
     if !has_mesh do continue
@@ -577,7 +632,11 @@ update :: proc(self: ^Engine) -> bool {
   if delta_time < UPDATE_FRAME_TIME {
     return false
   }
-  scene_traverse(&self.scene)
+  frame_ctx := world.FrameContext {
+    frame_index = self.frame_index,
+    delta_time  = delta_time,
+  }
+  world.begin_frame(&self.world, &frame_ctx)
   // Animation updates are now handled in render thread for smooth animation at render FPS
   update_emitters(self, delta_time)
   update_force_fields(self)
@@ -615,23 +674,22 @@ deinit :: proc(self: ^Engine) {
   delete(self.pending_node_deletions)
   vk.DestroyFence(self.gpu_context.device, self.frame_fence, nil)
   renderer_shutdown(&self.render, &self.gpu_context, &self.resource_manager)
-  navmesh_deinit(&self.navmesh, &self.gpu_context)
-  scene_deinit(&self.scene, &self.resource_manager)
-  visibility_culler_deinit(&self.visibility_culler, &self.gpu_context)
+  navmesh_renderer.navmesh_deinit(&self.navmesh, &self.gpu_context)
+  world.shutdown(&self.world, &self.gpu_context, &self.resource_manager)
   resources.shutdown(&self.resource_manager, &self.gpu_context)
   swapchain_deinit(&self.swapchain, &self.gpu_context)
-  gpu.gpu_context_deinit(&self.gpu_context)
+  gpu.shutdown(&self.gpu_context)
   glfw.DestroyWindow(self.window)
   glfw.Terminate()
   log.infof("Engine deinitialized")
 }
 
-process_scene_lights :: proc(self: ^Engine) {
+process_world_lights :: proc(self: ^Engine) {
   self.active_light_count = 0
   shadow_map_count: u32 = 0
   cube_shadow_map_count: u32 = 0
-  for idx in 0 ..< len(self.scene.nodes.entries) {
-    entry := &self.scene.nodes.entries[idx]
+  for idx in 0 ..< len(self.world.nodes.entries) {
+    entry := &self.world.nodes.entries[idx]
     if !entry.active do continue
     node := &entry.item
     if self.active_light_count >= len(self.lights) do continue
@@ -691,7 +749,7 @@ process_point_light :: proc(
   light := &self.lights[self.active_light_count]
   self.active_light_count += 1
 
-  world := get_world_matrix(node)
+  world := world.node_get_world_matrix(node)
   position := world[3].xyz
 
   light.node_handle = node_handle
@@ -761,7 +819,7 @@ process_spot_light :: proc(
   light := &self.lights[self.active_light_count]
   self.active_light_count += 1
 
-  world := get_world_matrix(node)
+  world := world.node_get_world_matrix(node)
   position := world[3].xyz
   forward_vec := world * [4]f32{0, 0, -1, 0}
   forward := -linalg.normalize(forward_vec.xyz)
@@ -841,7 +899,7 @@ process_directional_light :: proc(
   light := &self.lights[self.active_light_count]
   self.active_light_count += 1
 
-  world := get_world_matrix(node)
+  world := world.node_get_world_matrix(node)
   position := world[3].xyz
   forward_vec := world * [4]f32{0, 0, -1, 0}
   forward := -linalg.normalize(forward_vec.xyz)
@@ -871,11 +929,18 @@ process_directional_light :: proc(
 @(private = "file")
 render_debug_ui :: proc(self: ^Engine) {
   if mu.window(&self.render.ui.ctx, "Engine", {40, 40, 300, 200}, {.NO_CLOSE}) {
-    mu.label(&self.render.ui.ctx, fmt.tprintf("Objects %d", len(self.scene.nodes.entries) - len(self.scene.nodes.free_indices)))
+    mu.label(&self.render.ui.ctx, fmt.tprintf("Objects %d", len(self.world.nodes.entries) - len(self.world.nodes.free_indices)))
     mu.label(&self.render.ui.ctx, fmt.tprintf("Textures %d", len(self.resource_manager.image_2d_buffers.entries) - len(self.resource_manager.image_2d_buffers.free_indices)))
     mu.label(&self.render.ui.ctx, fmt.tprintf("Materials %d", len(self.resource_manager.materials.entries) - len(self.resource_manager.materials.free_indices)))
     mu.label(&self.render.ui.ctx, fmt.tprintf("Meshes %d", len(self.resource_manager.meshes.entries) - len(self.resource_manager.meshes.free_indices)))
-    mu.label(&self.render.ui.ctx, fmt.tprintf("Visible nodes (max %d): %d", self.visibility_culler.max_draws, self.visibility_culler.node_count))
+    mu.label(
+      &self.render.ui.ctx,
+      fmt.tprintf(
+        "Visible nodes (max %d): %d",
+        self.world.visibility.max_draws,
+        self.world.visibility.node_count,
+      ),
+    )
   }
 }
 
@@ -964,7 +1029,7 @@ render :: proc(self: ^Engine) -> vk.Result {
     return .ERROR_UNKNOWN
   }
   resources.render_target_update_camera_data(&self.resource_manager, main_render_target)
-  upload_world_matrices(&self.resource_manager, &self.scene, self.frame_index)
+  world.upload_world_matrices(&self.world, &self.resource_manager, self.frame_index)
   defer {
     for i in 0 ..< self.active_light_count {
       light_info := &self.lights[i]
@@ -986,7 +1051,7 @@ render :: proc(self: ^Engine) -> vk.Result {
     }
   }
 
-  process_scene_lights(self)
+  process_world_lights(self)
   renderer_set_main_target(&self.render, self.main_render_target)
   renderer_prepare_targets(
     &self.render,
@@ -994,16 +1059,13 @@ render :: proc(self: ^Engine) -> vk.Result {
     self.lights[:],
     self.active_light_count,
   )
-  visibility_culler_update(
-    &self.visibility_culler,
-    &self.scene,
-  )
+  // Visibility is now updated in begin_frame
   record_shadow_pass(
     &self.render,
     self.frame_index,
     &self.gpu_context,
     &self.resource_manager,
-    &self.visibility_culler,
+    &self.world,
     self.lights[:],
     self.active_light_count,
   )
@@ -1012,7 +1074,7 @@ render :: proc(self: ^Engine) -> vk.Result {
     self.frame_index,
     &self.gpu_context,
     &self.resource_manager,
-    &self.visibility_culler,
+    &self.world,
     main_render_target,
   )
   record_lighting_pass(
@@ -1029,7 +1091,7 @@ render :: proc(self: ^Engine) -> vk.Result {
     self.frame_index,
     &self.gpu_context,
     &self.resource_manager,
-    &self.visibility_culler,
+    &self.world,
     main_render_target,
     &self.navmesh,
     self.swapchain.format.format,
@@ -1173,9 +1235,7 @@ queue_node_deletion :: proc(engine: ^Engine, handle: Handle) {
 
 process_pending_deletions :: proc(engine: ^Engine) {
   for handle in engine.pending_node_deletions {
-    if node, freed := resources.free(&engine.scene.nodes, handle); freed {
-      deinit_node(node, &engine.resource_manager)
-    }
+    world.destroy_node(&engine.world, handle)
   }
   clear(&engine.pending_node_deletions)
 }

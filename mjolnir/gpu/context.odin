@@ -95,7 +95,7 @@ gpu_context_init :: proc(self: ^GPUContext, window: glfw.WindowHandle) -> vk.Res
   return .SUCCESS
 }
 
-gpu_context_deinit :: proc(self: ^GPUContext) {
+shutdown :: proc(self: ^GPUContext) {
   vk.DeviceWaitIdle(self.device)
   vk.DestroyDescriptorPool(self.device, self.descriptor_pool, nil)
   vk.DestroyCommandPool(self.device, self.command_pool, nil)

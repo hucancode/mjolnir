@@ -3,6 +3,7 @@ package tests
 import "../mjolnir"
 import "../mjolnir/geometry"
 import "../mjolnir/resources"
+import world "../mjolnir/world"
 import "core:fmt"
 import "core:log"
 import "core:math"
@@ -14,14 +15,20 @@ import "core:time"
 @(test)
 test_node_translate :: proc(t: ^testing.T) {
   using mjolnir
-  scene: Scene
-  scene_init(&scene)
-  defer scene_deinit(&scene, nil)
-  parent_handle, _ := spawn_at(&scene, {1, 2, 3})
-  _, child := spawn_child(&scene, parent_handle)
-  translate(child, 4, 5, 6)
-  scene_traverse(&scene)
-  actual := geometry.transform_get_world_matrix(&child.transform)
+  w: world.World
+  world.init(&w)
+  defer world.deinit(&w, nil)
+  parent_handle, _ := world.spawn_at(&w, {1, 2, 3})
+  _, child := world.spawn_child(&w, parent_handle)
+  world.translate(child, 4, 5, 6)
+  // Trigger transform update by calling frame processing
+  frame_ctx := world.FrameContext{
+    frame_index = 0,
+    delta_time = 0.016,
+    camera = nil,
+  }
+  world.begin_frame(&w, &frame_ctx)
+  actual := world.node_get_world_matrix(child)
   expected := matrix[4, 4]f32{
     1.0, 0.0, 0.0, 5.0,
     0.0, 1.0, 0.0, 7.0,
@@ -34,14 +41,19 @@ test_node_translate :: proc(t: ^testing.T) {
 @(test)
 test_node_rotate :: proc(t: ^testing.T) {
   using mjolnir
-  scene: Scene
-  scene_init(&scene)
-  defer scene_deinit(&scene, nil)
-  _, child := spawn(&scene)
-  rotate(child, math.PI / 2, linalg.VECTOR3F32_Y_AXIS)
-  translate(child, 1, 0, 0)
-  scene_traverse(&scene)
-  actual := geometry.transform_get_world_matrix(&child.transform)
+  w: world.World
+  world.init(&w)
+  defer world.deinit(&w, nil)
+  _, child := world.spawn(&w)
+  world.rotate(child, math.PI / 2, linalg.VECTOR3F32_Y_AXIS)
+  world.translate(child, 1, 0, 0)
+  frame_ctx := world.FrameContext{
+    frame_index = 0,
+    delta_time = 0.016,
+    camera = nil,
+  }
+  world.begin_frame(&w, &frame_ctx)
+  actual := world.node_get_world_matrix(child)
   expected := matrix[4, 4]f32{
     0.0, 0.0, 1.0, 1.0,
     0.0, 1.0, 0.0, 0.0,
@@ -54,15 +66,20 @@ test_node_rotate :: proc(t: ^testing.T) {
 @(test)
 test_node_scale :: proc(t: ^testing.T) {
   using mjolnir
-  scene: Scene
-  scene_init(&scene)
-  defer scene_deinit(&scene, nil)
-  parent_handle, _ := spawn_at(&scene, {1, 2, 3})
-  _, child := spawn_child(&scene, parent_handle)
-  translate(child, 1, 1, 1)
-  scale_xyz(child, 2, 3, 4)
-  scene_traverse(&scene)
-  actual := geometry.transform_get_world_matrix(&child.transform)
+  w: world.World
+  world.init(&w)
+  defer world.deinit(&w, nil)
+  parent_handle, _ := world.spawn_at(&w, {1, 2, 3})
+  _, child := world.spawn_child(&w, parent_handle)
+  world.translate(child, 1, 1, 1)
+  world.scale_xyz(child, 2, 3, 4)
+  frame_ctx := world.FrameContext{
+    frame_index = 0,
+    delta_time = 0.016,
+    camera = nil,
+  }
+  world.begin_frame(&w, &frame_ctx)
+  actual := world.node_get_world_matrix(child)
   expected := matrix[4, 4]f32{
     2.0, 0.0, 0.0, 2.0,
     0.0, 3.0, 0.0, 3.0,
@@ -75,15 +92,20 @@ test_node_scale :: proc(t: ^testing.T) {
 @(test)
 test_node_combined_transform :: proc(t: ^testing.T) {
   using mjolnir
-  scene: Scene
-  scene_init(&scene)
-  defer scene_deinit(&scene, nil)
-  _, node := spawn(&scene)
-  scale(node, 2)
-  rotate(node, math.PI / 2, linalg.VECTOR3F32_Y_AXIS)
-  translate(node, 3, 4, 5)
-  scene_traverse(&scene)
-  actual := geometry.transform_get_world_matrix(&node.transform)
+  w: world.World
+  world.init(&w)
+  defer world.deinit(&w, nil)
+  _, node := world.spawn(&w)
+  world.scale(node, 2)
+  world.rotate(node, math.PI / 2, linalg.VECTOR3F32_Y_AXIS)
+  world.translate(node, 3, 4, 5)
+  frame_ctx := world.FrameContext{
+    frame_index = 0,
+    delta_time = 0.016,
+    camera = nil,
+  }
+  world.begin_frame(&w, &frame_ctx)
+  actual := world.node_get_world_matrix(node)
   // Expected matrix after applying scale, rotation, and translation
   // Scale by 2, then rotate 90 degree around Y, then translate by (3,4,5)
   expected := matrix[4, 4]f32{
@@ -98,22 +120,27 @@ test_node_combined_transform :: proc(t: ^testing.T) {
 @(test)
 test_node_chain_transform :: proc(t: ^testing.T) {
   using mjolnir
-  scene: Scene
-  scene_init(&scene)
-  defer scene_deinit(&scene, nil)
+  w: world.World
+  world.init(&w)
+  defer world.deinit(&w, nil)
   // Create a 4-node chain
-  node1_handle, node1 := spawn(&scene)
-  node2_handle, node2 := spawn_child(&scene, node1_handle)
-  node3_handle, node3 := spawn_child(&scene, node2_handle)
-  translate(node1, x = 1)
-  rotate(node2, math.PI / 2, linalg.VECTOR3F32_Y_AXIS)
-  scale(node3, 2)
-  scene_traverse(&scene)
+  node1_handle, node1 := world.spawn(&w)
+  node2_handle, node2 := world.spawn_child(&w, node1_handle)
+  node3_handle, node3 := world.spawn_child(&w, node2_handle)
+  world.translate(node1, x = 1)
+  world.rotate(node2, math.PI / 2, linalg.VECTOR3F32_Y_AXIS)
+  world.scale(node3, 2)
+  frame_ctx := world.FrameContext{
+    frame_index = 0,
+    delta_time = 0.016,
+    camera = nil,
+  }
+  world.begin_frame(&w, &frame_ctx)
   // The transforms should cascade:
   // node1: translate(1,0,0)
   // node2: translate(1,0,0) * rotate_y(90°)
   // node3: translate(1,0,0) * rotate_y(90°) * scale(2)
-  actual := geometry.transform_get_world_matrix(&node3.transform)
+  actual := world.node_get_world_matrix(node3)
   // Note: The node chain transforms in this order:
   // 1. Start at origin
   // 2. Translate by (1,0,0)
@@ -128,8 +155,8 @@ test_node_chain_transform :: proc(t: ^testing.T) {
   matrix4_almost_equal(t, actual, expected)
 }
 
-create_scene :: proc(scene: ^mjolnir.Scene, max_node: int, max_depth: int) {
-  using mjolnir
+create_scene :: proc(scene: ^world.World, max_node: int, max_depth: int) {
+  using world
   if max_depth <= 0 || max_node <= 0 do return
   QueueEntry :: struct {
     handle: resources.Handle,
@@ -143,14 +170,14 @@ create_scene :: proc(scene: ^mjolnir.Scene, max_node: int, max_depth: int) {
   for len(queue) > 0 && len(scene.nodes.entries) < max_node {
     current := pop_front(&queue)
     if current.depth < max_depth {
-      child_handle, child := spawn_child(scene, current.handle)
-      translate(child, f32(n % 10) * 0.1, 0, 0)
-      rotate(child, f32(n) * 0.01, linalg.VECTOR3F32_Y_AXIS)
+      child_handle, _ := spawn_child(scene, current.handle)
+      translate(scene, child_handle, f32(n % 10) * 0.1, 0, 0)
+      rotate(scene, child_handle, f32(n) * 0.01, linalg.VECTOR3F32_Y_AXIS)
       append(&queue, QueueEntry{child_handle, current.depth + 1})
     } else {
-      child_handle, child := spawn(scene)
-      translate(child, f32(n % 10) * 0.1, 0, 0)
-      rotate(child, f32(n) * 0.01, linalg.VECTOR3F32_Y_AXIS)
+      child_handle, _ := spawn(scene)
+      translate(scene, child_handle, f32(n % 10) * 0.1, 0, 0)
+      rotate(scene, child_handle, f32(n) * 0.01, linalg.VECTOR3F32_Y_AXIS)
       append(&queue, QueueEntry{child_handle, 1})
     }
     n += 1
@@ -166,15 +193,15 @@ traverse_scene_benchmark :: proc(
   options: ^time.Benchmark_Options,
   allocator := context.allocator,
 ) -> time.Benchmark_Error {
-  using mjolnir
-  scene := cast(^Scene)(raw_data(options.input))
+  using world
+  scene := cast(^World)(raw_data(options.input))
   // simulate an use case that traverse the scene and count the number of lights and meshes
   Context :: struct {
     light_count: u32,
     mesh_count:  u32,
   }
-  callback :: proc(node: ^mjolnir.Node, cb_context: rawptr) -> bool {
-    using mjolnir
+  callback :: proc(node: ^world.Node, cb_context: rawptr) -> bool {
+    using world
     ctx := (^Context)(cb_context)
     #partial switch inner in node.attachment {
     case MeshAttachment:
@@ -188,7 +215,7 @@ traverse_scene_benchmark :: proc(
   }
   for _ in 0 ..< options.rounds {
     ctx: Context
-    scene_traverse(scene, &ctx, callback)
+    traverse(scene, &ctx, callback)
     options.processed += size_of(Node) * len(scene.nodes.entries)
   }
   return nil
@@ -198,9 +225,9 @@ teardown_scene :: proc(
   options: ^time.Benchmark_Options,
   allocator := context.allocator,
 ) -> time.Benchmark_Error {
-  using mjolnir
-  scene := cast(^Scene)(raw_data(options.input))
-  scene_deinit(scene, nil)
+  using world
+  scene := cast(^World)(raw_data(options.input))
+  deinit(scene, nil)
   free(scene, allocator)
   return nil
 }
@@ -211,16 +238,16 @@ benchmark_deep_scene_traversal :: proc(t: ^testing.T) {
   ROUND :: 5
   options := &time.Benchmark_Options {
     rounds = ROUND,
-    bytes = size_of(mjolnir.Node) * N * ROUND,
+    bytes = size_of(world.Node) * N * ROUND,
     setup = proc(
       options: ^time.Benchmark_Options,
       allocator := context.allocator,
     ) -> time.Benchmark_Error {
-      using mjolnir
-      scene := new(Scene)
-      scene_init(scene)
+      using world
+      scene := new(World)
+      init(scene)
       create_scene(scene, N, N)
-      options.input = slice.bytes_from_ptr(scene, size_of(^Scene))
+      options.input = slice.bytes_from_ptr(scene, size_of(^World))
       return nil
     },
     bench = traverse_scene_benchmark,
@@ -242,16 +269,16 @@ benchmark_flat_scene_traversal :: proc(t: ^testing.T) {
   ROUND :: 5
   options := &time.Benchmark_Options {
     rounds = ROUND,
-    bytes = size_of(mjolnir.Node) * N * ROUND,
+    bytes = size_of(world.Node) * N * ROUND,
     setup = proc(
       options: ^time.Benchmark_Options,
       allocator := context.allocator,
     ) -> time.Benchmark_Error {
-      using mjolnir
-      scene := new(Scene)
-      scene_init(scene)
+      using world
+      scene := new(World)
+      init(scene)
       create_scene(scene, N, 1)
-      options.input = slice.bytes_from_ptr(scene, size_of(^Scene))
+      options.input = slice.bytes_from_ptr(scene, size_of(^World))
       return nil
     },
     bench = traverse_scene_benchmark,
@@ -273,16 +300,16 @@ benchmark_balanced_scene_traversal :: proc(t: ^testing.T) {
   ROUND :: 5
   options := &time.Benchmark_Options {
     rounds = ROUND,
-    bytes = size_of(mjolnir.Node) * N * ROUND,
+    bytes = size_of(world.Node) * N * ROUND,
     setup = proc(
       options: ^time.Benchmark_Options,
       allocator := context.allocator,
     ) -> time.Benchmark_Error {
-      using mjolnir
-      scene := new(Scene)
-      scene_init(scene)
+      using world
+      scene := new(World)
+      init(scene)
       create_scene(scene, N, MAX_DEPTH)
-      options.input = slice.bytes_from_ptr(scene, size_of(^Scene))
+      options.input = slice.bytes_from_ptr(scene, size_of(^World))
       return nil
     },
     bench = traverse_scene_benchmark,
@@ -300,28 +327,30 @@ benchmark_balanced_scene_traversal :: proc(t: ^testing.T) {
 
 @(test)
 test_scene_memory_cleanup :: proc(t: ^testing.T) {
-  scene: mjolnir.Scene
-  mjolnir.scene_init(&scene)
-  defer mjolnir.scene_deinit(&scene, nil)
+  using world
+  scene: World
+  init(&scene)
+  defer deinit(&scene, nil)
   for i in 0 ..< 1000 {
-    mjolnir.spawn(&scene)
+    spawn(&scene)
   }
 }
 
 @(test)
 test_scene_with_multiple_attachments :: proc(t: ^testing.T) {
-  scene: mjolnir.Scene
-  mjolnir.scene_init(&scene)
-  defer mjolnir.scene_deinit(&scene, nil)
-  mjolnir.spawn(
+  using world
+  scene: World
+  init(&scene)
+  defer deinit(&scene, nil)
+  spawn(
     &scene,
-    mjolnir.PointLightAttachment {
+    PointLightAttachment {
       // In reality we would need valid light
     },
   )
-  mjolnir.spawn(
+  spawn(
     &scene,
-    mjolnir.MeshAttachment {
+    MeshAttachment {
       // In reality we would need valid mesh handle
     },
   )
@@ -329,12 +358,13 @@ test_scene_with_multiple_attachments :: proc(t: ^testing.T) {
     light_count: int,
     mesh_count:  int,
   }
-  callback :: proc(node: ^mjolnir.Node, ctx: rawptr) -> bool {
+  callback :: proc(node: ^world.Node, ctx: rawptr) -> bool {
+    using world
     counter := (^Context)(ctx)
     #partial switch attachment in node.attachment {
-    case mjolnir.PointLightAttachment:
+    case PointLightAttachment:
       counter.light_count += 1
-    case mjolnir.MeshAttachment:
+    case MeshAttachment:
       counter.mesh_count += 1
     }
     return true
@@ -343,7 +373,7 @@ test_scene_with_multiple_attachments :: proc(t: ^testing.T) {
     light_count = 0,
     mesh_count  = 0,
   }
-  mjolnir.scene_traverse(&scene, &ctx, callback)
+  world.traverse(&scene, &ctx, callback)
   testing.expect_value(t, ctx.light_count, 1)
   testing.expect_value(t, ctx.mesh_count, 1)
 }

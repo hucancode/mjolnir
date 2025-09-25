@@ -2,6 +2,7 @@ package mjolnir
 
 import geometry_pass "render/geometry"
 import lighting "render/lighting"
+import navigation_renderer "render/navigation"
 import particles "render/particles"
 import post_process "render/post_process"
 import shadow "render/shadow"
@@ -13,6 +14,7 @@ import "core:math/linalg"
 import "geometry"
 import "gpu"
 import "resources"
+import world "world"
 import vk "vendor:vulkan"
 
 Renderer :: struct {
@@ -274,7 +276,7 @@ record_shadow_pass :: proc(
   frame_index: u32,
   gpu_context: ^gpu.GPUContext,
   resources_manager: ^resources.Manager,
-  visibility_culler: ^VisibilityCuller,
+  world_state: ^world.World,
   lights: []lighting.LightInfo,
   active_light_count: u32,
 ) -> vk.Result {
@@ -302,7 +304,7 @@ record_shadow_pass :: proc(
     .MATERIAL_TRANSPARENT,
     .MATERIAL_WIREFRAME,
   }
-  command_stride := visibility_culler_command_stride()
+  command_stride := world.visibility_command_stride()
 
   for &light_info, light_index in lights[:active_light_count] {
     if !light_info.light_cast_shadow do continue
@@ -319,20 +321,20 @@ record_shadow_pass :: proc(
           light_info.cube_render_targets[face],
         )
         if target == nil do continue
-        visibility_culler_dispatch(
-          visibility_culler,
+        vis_result := world.dispatch_visibility(
+          world_state,
           gpu_context,
           command_buffer,
           frame_index,
-          light_info.cube_cameras[face].index,
-          shadow_include,
-          shadow_exclude,
+          world.VisibilityCategory.SHADOW,
+          world.VisibilityRequest {
+            camera_index  = light_info.cube_cameras[face].index,
+            include_flags = shadow_include,
+            exclude_flags = shadow_exclude,
+          },
         )
-        shadow_draw_buffer := visibility_culler_command_buffer(
-          visibility_culler,
-          frame_index,
-        )
-        shadow_draw_count := visibility_culler_max_draw_count(visibility_culler)
+        shadow_draw_buffer := vis_result.draw_buffer
+        shadow_draw_count := vis_result.max_draws
         shadow.begin_pass(
           target,
           command_buffer,
@@ -370,22 +372,20 @@ record_shadow_pass :: proc(
       )
       if shadow_target == nil do continue
 
-      visibility_culler_dispatch(
-        visibility_culler,
+      vis_result := world.dispatch_visibility(
+        world_state,
         gpu_context,
         command_buffer,
         frame_index,
-        light_info.camera.index,
-        shadow_include,
-        shadow_exclude,
+        world.VisibilityCategory.SHADOW,
+        world.VisibilityRequest {
+          camera_index  = light_info.camera.index,
+          include_flags = shadow_include,
+          exclude_flags = shadow_exclude,
+        },
       )
-      shadow_draw_buffer := visibility_culler_command_buffer(
-        visibility_culler,
-        frame_index,
-      )
-      shadow_draw_count := visibility_culler_max_draw_count(
-        visibility_culler,
-      )
+      shadow_draw_buffer := vis_result.draw_buffer
+      shadow_draw_count := vis_result.max_draws
       shadow.begin_pass(
         shadow_target,
         command_buffer,
@@ -423,7 +423,7 @@ record_geometry_pass :: proc(
   frame_index: u32,
   gpu_context: ^gpu.GPUContext,
   resources_manager: ^resources.Manager,
-  visibility_culler: ^VisibilityCuller,
+  world_state: ^world.World,
   main_render_target: ^resources.RenderTarget,
 ) -> vk.Result {
   command_buffer := self.geometry_commands[frame_index]
@@ -472,21 +472,21 @@ record_geometry_pass :: proc(
     )
   }
 
-  visibility_culler_dispatch(
-    visibility_culler,
+  vis_result := world.dispatch_visibility(
+    world_state,
     gpu_context,
     command_buffer,
     frame_index,
-    main_render_target.camera.index,
-    {.VISIBLE},
-    {.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME},
+    world.VisibilityCategory.OPAQUE,
+    world.VisibilityRequest {
+      camera_index  = main_render_target.camera.index,
+      include_flags = {.VISIBLE},
+      exclude_flags = {.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME},
+    },
   )
-  draw_buffer := visibility_culler_command_buffer(
-    visibility_culler,
-    frame_index,
-  )
-  draw_count := visibility_culler_max_draw_count(visibility_culler)
-  command_stride := visibility_culler_command_stride()
+  draw_buffer := vis_result.draw_buffer
+  draw_count := vis_result.max_draws
+  command_stride := vis_result.command_stride
 
   geometry_pass.begin_depth_prepass(
     main_render_target,
@@ -634,7 +634,7 @@ record_transparency_pass :: proc(
   frame_index: u32,
   gpu_context: ^gpu.GPUContext,
   resources_manager: ^resources.Manager,
-  visibility_culler: ^VisibilityCuller,
+  world_state: ^world.World,
   main_render_target: ^resources.RenderTarget,
   navmesh_renderer: ^RendererNavMesh,
   color_format: vk.Format,
@@ -669,28 +669,26 @@ record_transparency_pass :: proc(
     frame_index,
   )
 
-  navmesh_render(
+  navigation_renderer.navmesh_render(
     navmesh_renderer,
     command_buffer,
     linalg.MATRIX4F32_IDENTITY,
     main_render_target.camera.index,
   )
 
-  visibility_culler_dispatch(
-    visibility_culler,
+  vis_transparent := world.dispatch_visibility(
+    world_state,
     gpu_context,
     command_buffer,
     frame_index,
-    main_render_target.camera.index,
-    {.VISIBLE, .MATERIAL_TRANSPARENT},
+    world.VisibilityCategory.TRANSPARENT,
+    world.VisibilityRequest {
+      camera_index  = main_render_target.camera.index,
+      include_flags = {.VISIBLE, .MATERIAL_TRANSPARENT},
+      exclude_flags = {},
+    },
   )
-
-  draw_buffer := visibility_culler_command_buffer(
-    visibility_culler,
-    frame_index,
-  )
-  draw_count := visibility_culler_max_draw_count(visibility_culler)
-  command_stride := visibility_culler_command_stride()
+  command_stride := vis_transparent.command_stride
   transparency.render(
     &self.transparency,
     self.transparency.transparent_pipeline,
@@ -698,24 +696,23 @@ record_transparency_pass :: proc(
     command_buffer,
     resources_manager,
     frame_index,
-    draw_buffer,
-    draw_count,
+    vis_transparent.draw_buffer,
+    vis_transparent.max_draws,
     command_stride,
   )
 
-  visibility_culler_dispatch(
-    visibility_culler,
+  vis_wireframe := world.dispatch_visibility(
+    world_state,
     gpu_context,
     command_buffer,
     frame_index,
-    main_render_target.camera.index,
-    {.VISIBLE, .MATERIAL_WIREFRAME},
+    world.VisibilityCategory.WIREFRAME,
+    world.VisibilityRequest {
+      camera_index  = main_render_target.camera.index,
+      include_flags = {.VISIBLE, .MATERIAL_WIREFRAME},
+      exclude_flags = {},
+    },
   )
-  wireframe_draw_buffer := visibility_culler_command_buffer(
-    visibility_culler,
-    frame_index,
-  )
-  wireframe_draw_count := visibility_culler_max_draw_count(visibility_culler)
   transparency.render(
     &self.transparency,
     self.transparency.wireframe_pipeline,
@@ -723,8 +720,8 @@ record_transparency_pass :: proc(
     command_buffer,
     resources_manager,
     frame_index,
-    wireframe_draw_buffer,
-    wireframe_draw_count,
+    vis_wireframe.draw_buffer,
+    vis_wireframe.max_draws,
     command_stride,
   )
   transparency.end_pass(&self.transparency, command_buffer)

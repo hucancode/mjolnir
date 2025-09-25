@@ -13,6 +13,7 @@ import "mjolnir/navigation"
 import "mjolnir/navigation/recast"
 import "mjolnir/navigation/detour"
 import "mjolnir/resources"
+import "mjolnir/world"
 import "vendor:glfw"
 import mu "vendor:microui"
 
@@ -87,7 +88,7 @@ navmesh_state: struct {
 
     // Original OBJ mesh
     obj_mesh_handle: mjolnir.Handle,
-    obj_mesh_node: ^mjolnir.Node,
+    obj_mesh_node: ^world.Node,
     obj_node_handle: mjolnir.Handle,
 
     // Pathfinding state
@@ -165,12 +166,11 @@ navmesh_setup :: proc(engine_ptr: ^mjolnir.Engine) {
     navmesh_state.path_waypoint_handles = make([dynamic]Handle)
 
     // Add some lights
-    spawn(&engine_ptr.scene, DirectionalLightAttachment{
+    world.spawn(&engine_ptr.world, DirectionalLightAttachment{
         color = {0.8, 0.8, 0.8, 1.0},
         cast_shadow = true,
     })
-
-    spawn(&engine_ptr.scene, PointLightAttachment{
+    world.spawn(&engine_ptr.world, PointLightAttachment{
         color = {0.5, 0.5, 0.5, 1.0},
         radius = 20,
         cast_shadow = false,
@@ -573,7 +573,7 @@ create_obj_visualization_mesh :: proc(engine_ptr: ^mjolnir.Engine, obj_file: str
 
     // Spawn the mesh in the scene
     navmesh_state.obj_node_handle, navmesh_state.obj_mesh_node = spawn(
-        &engine_ptr.scene,
+        engine_ptr,
         MeshAttachment{
             handle = navmesh_state.obj_mesh_handle,
             material = resources.create_material_handle(
@@ -884,7 +884,7 @@ update_position_marker :: proc(engine_ptr: ^mjolnir.Engine, handle: ^mjolnir.Han
     // Spawn the marker
     node: ^Node
     handle^, node = spawn(
-        &engine_ptr.scene,
+        engine_ptr,
         MeshAttachment{
             handle = marker_mesh_handle,
             material = marker_material_handle,

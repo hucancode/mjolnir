@@ -1,14 +1,14 @@
-package mjolnir
+package navigation_renderer
 
 import "core:log"
 import "core:math"
 import "core:math/linalg"
 import "core:math/rand"
 import "core:slice"
-import "geometry"
-import "gpu"
-import "resources"
-import "navigation/recast"
+import "../../geometry"
+import "../../gpu"
+import "../../resources"
+import "../../navigation/recast"
 import vk "vendor:vulkan"
 
 RendererNavMesh :: struct {
@@ -471,19 +471,19 @@ navmesh_render :: proc(renderer: ^RendererNavMesh, command_buffer: vk.CommandBuf
 
 create_navmesh_pipelines :: proc(renderer: ^RendererNavMesh, gpu_context: ^gpu.GPUContext, resources_manager: ^resources.Manager) -> vk.Result {
     // Load shaders
-    navmesh_vert_code := #load("shader/navmesh/vert.spv")
+    navmesh_vert_code := #load("../../shader/navmesh/vert.spv")
     navmesh_vert := gpu.create_shader_module(gpu_context, navmesh_vert_code) or_return
     defer vk.DestroyShaderModule(gpu_context.device, navmesh_vert, nil)
 
-    navmesh_frag_code := #load("shader/navmesh/frag.spv")
+    navmesh_frag_code := #load("../../shader/navmesh/frag.spv")
     navmesh_frag := gpu.create_shader_module(gpu_context, navmesh_frag_code) or_return
     defer vk.DestroyShaderModule(gpu_context.device, navmesh_frag, nil)
 
-    navmesh_debug_vert_code := #load("shader/navmesh_debug/vert.spv")
+    navmesh_debug_vert_code := #load("../../shader/navmesh_debug/vert.spv")
     navmesh_debug_vert := gpu.create_shader_module(gpu_context, navmesh_debug_vert_code) or_return
     defer vk.DestroyShaderModule(gpu_context.device, navmesh_debug_vert, nil)
 
-    navmesh_debug_frag_code := #load("shader/navmesh_debug/frag.spv")
+    navmesh_debug_frag_code := #load("../../shader/navmesh_debug/frag.spv")
     navmesh_debug_frag := gpu.create_shader_module(gpu_context, navmesh_debug_frag_code) or_return
     defer vk.DestroyShaderModule(gpu_context.device, navmesh_debug_frag, nil)
 

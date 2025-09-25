@@ -1,11 +1,13 @@
-package mjolnir
+package world
 
 import "core:log"
 import "core:math/linalg"
-import "geometry"
-import "navigation/detour"
-import "navigation/recast"
-import "resources"
+import "../geometry"
+import "../navigation/detour"
+import "../navigation/recast"
+import "../resources"
+import "../gpu"
+
 
 NavMeshAttachment :: struct {
   nav_mesh_handle: Handle,
@@ -41,7 +43,9 @@ SceneGeometryCollector :: struct {
   mesh_count:       i32,
   include_filter:   proc(node: ^Node) -> bool,
   area_type_mapper: proc(node: ^Node) -> u8,
-  engine:           ^Engine,
+  world:            ^World,
+  resources_manager: ^resources.Manager,
+  gpu_context:      ^gpu.GPUContext,
 }
 
 scene_geometry_collector_init :: proc(collector: ^SceneGeometryCollector) {
@@ -72,11 +76,11 @@ scene_geometry_collector_traverse :: proc(node: ^Node, ctx: rawptr) -> bool {
     return true
   }
   if mesh_attachment, is_mesh := node.attachment.(MeshAttachment); is_mesh {
-    mesh, ok := resources.get_mesh(&collector.engine.resource_manager, mesh_attachment.handle)
+    mesh, ok := resources.get_mesh(collector.resources_manager, mesh_attachment.handle)
     if !ok {
       return true
     }
-    world_matrix := get_world_matrix(node)
+    world_matrix := node_get_world_matrix(node)
     area_type := u8(recast.RC_WALKABLE_AREA)
     if collector.area_type_mapper != nil {
       area_type = collector.area_type_mapper(node)
@@ -84,7 +88,7 @@ scene_geometry_collector_traverse :: proc(node: ^Node, ctx: rawptr) -> bool {
     add_mesh_to_collector(
       collector,
       mesh,
-      &collector.engine.resource_manager,
+      collector.resources_manager,
       world_matrix,
       area_type,
     )
@@ -140,7 +144,7 @@ add_mesh_to_collector :: proc(
 }
 
 build_navigation_mesh_from_scene :: proc(
-  engine: ^Engine,
+  world: ^World, resources_manager: ^resources.Manager, gpu_context: ^gpu.GPUContext,
   config: recast.Config = {},
 ) -> (
   Handle,
@@ -148,10 +152,10 @@ build_navigation_mesh_from_scene :: proc(
 ) {
   collector: SceneGeometryCollector
   scene_geometry_collector_init(&collector)
-  collector.engine = engine
+  collector.world, collector.resources_manager, collector.gpu_context = world, resources_manager, gpu_context
   defer scene_geometry_collector_deinit(&collector)
 
-  scene_traverse(&engine.scene, &collector, scene_geometry_collector_traverse)
+  traverse(collector.world, &collector, scene_geometry_collector_traverse)
 
   if len(collector.vertices) == 0 || len(collector.indices) == 0 {
     return {}, false
@@ -171,7 +175,7 @@ build_navigation_mesh_from_scene :: proc(
     recast.free_poly_mesh_detail(dmesh)
   }
 
-  nav_mesh_handle, nav_mesh := resources.alloc(&engine.resource_manager.nav_meshes)
+  nav_mesh_handle, nav_mesh := resources.alloc(&resources_manager.nav_meshes)
   if nav_mesh == nil {
     return nav_mesh_handle, false
   }
@@ -231,7 +235,7 @@ build_navigation_mesh_from_scene :: proc(
 
 // Build navigation mesh with custom geometry filter
 build_navigation_mesh_from_scene_filtered :: proc(
-  engine: ^Engine,
+  world: ^World, resources_manager: ^resources.Manager, gpu_context: ^gpu.GPUContext,
   include_filter: proc(node: ^Node) -> bool,
   area_type_mapper: proc(node: ^Node) -> u8 = nil,
   config: recast.Config = {},
@@ -242,7 +246,7 @@ build_navigation_mesh_from_scene_filtered :: proc(
   // Initialize geometry collector with custom filters
   collector: SceneGeometryCollector
   scene_geometry_collector_init(&collector)
-  collector.engine = engine
+  collector.world, collector.resources_manager, collector.gpu_context = world, resources_manager, gpu_context
   defer scene_geometry_collector_deinit(&collector)
 
   collector.include_filter = include_filter
@@ -251,7 +255,7 @@ build_navigation_mesh_from_scene_filtered :: proc(
   }
 
   // Collect geometry from scene
-  scene_traverse(&engine.scene, &collector, scene_geometry_collector_traverse)
+  traverse(collector.world, &collector, scene_geometry_collector_traverse)
 
   if len(collector.vertices) == 0 || len(collector.indices) == 0 {
     log.error("No geometry found in scene for navigation mesh building")
@@ -282,7 +286,7 @@ build_navigation_mesh_from_scene_filtered :: proc(
   }
 
   // Create and initialize resources.NavMesh resource (same as basic version)
-  nav_mesh_handle, nav_mesh := resources.alloc(&engine.resource_manager.nav_meshes)
+  nav_mesh_handle, nav_mesh := resources.alloc(&resources_manager.nav_meshes)
   if nav_mesh == nil {
     log.error("Failed to allocate navigation mesh resource")
     return nav_mesh_handle, false
@@ -378,19 +382,19 @@ calculate_bounds_from_vertices :: proc(vertices: [][3]f32) -> geometry.Aabb {
 
 // Create navigation context for queries
 create_navigation_context :: proc(
-  engine: ^Engine,
+  world: ^World, resources_manager: ^resources.Manager, gpu_context: ^gpu.GPUContext,
   nav_mesh_handle: Handle,
 ) -> (
   Handle,
   bool,
 ) {
-  nav_mesh, ok := resources.get_navmesh(&engine.resource_manager, nav_mesh_handle)
+  nav_mesh, ok := resources.get_navmesh(resources_manager, nav_mesh_handle)
   if !ok {
     log.error("Invalid navigation mesh handle for context creation")
     return {}, false
   }
 
-  context_handle, nav_context := resources.alloc(&engine.resource_manager.nav_contexts)
+  context_handle, nav_context := resources.alloc(&resources_manager.nav_contexts)
   if nav_context == nil {
     log.error("Failed to allocate navigation context")
     return context_handle, false
@@ -404,7 +408,7 @@ create_navigation_context :: proc(
   )
   if recast.status_failed(init_status) {
     log.errorf("Failed to initialize navigation mesh query: %v", init_status)
-    resources.free(&engine.resource_manager.nav_contexts, context_handle)
+    resources.free(&resources_manager.nav_contexts, context_handle)
     return context_handle, false
   }
 
@@ -420,7 +424,7 @@ create_navigation_context :: proc(
 
 // Find path between two points
 nav_find_path :: proc(
-  engine: ^Engine,
+  world: ^World, resources_manager: ^resources.Manager, gpu_context: ^gpu.GPUContext,
   context_handle: Handle,
   start: [3]f32,
   end: [3]f32,
@@ -429,14 +433,14 @@ nav_find_path :: proc(
   path: [][3]f32,
   success: bool,
 ) {
-  nav_context, ok := resources.get_nav_context(&engine.resource_manager, context_handle)
+  nav_context, ok := resources.get_nav_context(resources_manager, context_handle)
   if !ok {
     log.error("Invalid navigation context handle")
     return nil, false
   }
 
   // Get navigation mesh from context
-  nav_mesh, mesh_found := resources.get_navmesh(&engine.resource_manager, nav_context.associated_mesh)
+  nav_mesh, mesh_found := resources.get_navmesh(resources_manager, nav_context.associated_mesh)
   if !mesh_found {
     log.error("Invalid navigation mesh associated with context")
     return nil, false
@@ -540,11 +544,11 @@ nav_find_path :: proc(
 
 // Check if a position is walkable
 nav_is_position_walkable :: proc(
-  engine: ^Engine,
+  world: ^World, resources_manager: ^resources.Manager, gpu_context: ^gpu.GPUContext,
   context_handle: Handle,
   position: [3]f32,
 ) -> bool {
-  nav_context, ok := resources.get_nav_context(&engine.resource_manager, context_handle)
+  nav_context, ok := resources.get_nav_context(resources_manager, context_handle)
   if !ok {
     return false
   }
@@ -562,7 +566,7 @@ nav_is_position_walkable :: proc(
 
 // Spawn navigation agent at position
 spawn_nav_agent_at :: proc(
-  engine: ^Engine,
+  world: ^World, resources_manager: ^resources.Manager, gpu_context: ^gpu.GPUContext,
   position: [3]f32,
   radius: f32 = 0.5,
   height: f32 = 2.0,
@@ -580,17 +584,17 @@ spawn_nav_agent_at :: proc(
     auto_update_path    = true,
     pathfinding_enabled = true,
   }
-  return spawn_at(&engine.scene, position, attachment)
+  return spawn_at(world, position, attachment)
 }
 
 // Set navigation agent target
 nav_agent_set_target :: proc(
-  engine: ^Engine,
+  world: ^World, resources_manager: ^resources.Manager, gpu_context: ^gpu.GPUContext,
   agent_handle: Handle,
   target: [3]f32,
   context_handle: Handle = {},
 ) -> bool {
-  node := resources.get(engine.scene.nodes, agent_handle)
+  node := resources.get(world.nodes, agent_handle)
   if node == nil {
     return false
   }
@@ -605,12 +609,14 @@ nav_agent_set_target :: proc(
     nav_context_handle := context_handle
     if nav_context_handle == {} {
       nav_context_handle =
-        engine.resource_manager.navigation_system.default_context_handle
+        resources_manager.navigation_system.default_context_handle
     }
 
     current_pos := node.transform.position
     path, success := nav_find_path(
-      engine,
+      world,
+      resources_manager,
+      gpu_context,
       nav_context_handle,
       current_pos,
       target,
