@@ -108,8 +108,7 @@ make_animation_instance :: proc(
 ) #optional_ok {
   // TODO: use linear search as a first working implementation
   // later we need to do better than this linear search
-  for &entry in warehouse.animation_clips.entries {
-    if !entry.active do continue
+  for &entry in warehouse.animation_clips.entries do if entry.active {
     clip := &entry.item
     if clip.name != animation_name do continue
     instance = {

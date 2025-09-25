@@ -697,14 +697,10 @@ update_emitters :: proc(self: ^Engine, delta_time: f32) {
 }
 
 get_main_camera :: proc(engine: ^Engine) -> ^geometry.Camera {
-  main_render_target := resource.get(
-    engine.warehouse.render_targets,
-    engine.main_render_target,
-  )
-  if main_render_target == nil {
-    return nil
+  if target, ok := render_target(engine, engine.main_render_target); ok {
+      return camera(engine, target.camera)
   }
-  return camera(engine, main_render_target.camera)
+  return nil
 }
 
 @(private = "file")
@@ -778,16 +774,11 @@ deinit :: proc(self: ^Engine) {
   free_command_buffers(self.gpu_context.device, self.gpu_context.command_pool, self.lighting_command_buffers[:])
   free_command_buffers(self.gpu_context.device, self.gpu_context.command_pool, self.transparency_command_buffers[:])
   free_command_buffers(self.gpu_context.device, self.gpu_context.command_pool, self.postprocess_command_buffers[:])
-  if main_render_target := resource.get(
-    self.warehouse.render_targets,
+  if item, freed := resource.free(
+    &self.warehouse.render_targets,
     self.main_render_target,
-  ); main_render_target != nil {
-    if item, freed := resource.free(
-      &self.warehouse.render_targets,
-      self.main_render_target,
-    ); freed {
-      render_target_deinit(item, &self.gpu_context, &self.warehouse)
-    }
+  ); freed {
+    render_target_deinit(item, &self.gpu_context, &self.warehouse)
   }
   for j in 0 ..< MAX_SHADOW_MAPS {
     resource.free(
@@ -1322,8 +1313,7 @@ record_postprocess_pass :: proc(
 
 @(private = "file")
 update_skeletal_animations :: proc(self: ^Engine, render_delta_time: f32) {
-  for &entry in self.scene.nodes.entries {
-    if !entry.active do continue
+    for &entry in self.scene.nodes.entries do if entry.active {
     data, is_mesh := &entry.item.attachment.(MeshAttachment)
     if !is_mesh do continue
     skinning, has_skin := &data.skinning.?
@@ -1495,10 +1485,7 @@ recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
   if main_camera := get_main_camera(engine); main_camera != nil {
     geometry.camera_update_aspect_ratio(main_camera, new_aspect_ratio)
   }
-  if main_render_target := resource.get(
-    engine.warehouse.render_targets,
-    engine.main_render_target,
-  ); main_render_target != nil {
+  if main_render_target, ok := render_target(engine, engine.main_render_target); ok {
     // Save current camera state
     old_camera := resource.get(
       engine.warehouse.cameras,
@@ -1565,26 +1552,20 @@ render :: proc(self: ^Engine) -> vk.Result {
   mu.begin(&self.ui.ctx)
   command_buffer := self.command_buffers[self.frame_index]
   vk.ResetCommandBuffer(command_buffer, {}) or_return
-
   render_delta_time := f32(time.duration_seconds(time.since(self.last_render_timestamp)))
   update_skeletal_animations(self, render_delta_time)
-
-  main_render_target := resource.get(self.warehouse.render_targets, self.main_render_target)
-  if main_render_target == nil {
+  main_render_target, found_main_rt := render_target(self, self.main_render_target)
+  if !found_main_rt {
     log.errorf("Main render target not found")
     return .ERROR_UNKNOWN
   }
-  render_target_update_camera_uniform(&self.warehouse, main_render_target)
-  main_camera := get_main_camera(self)
-  if main_camera == nil {
+  main_camera, found_camera := camera(self, main_render_target.camera)
+  if !found_camera {
     log.errorf("Main camera not found")
     return .ERROR_UNKNOWN
   }
+  render_target_update_camera_uniform(&self.warehouse, main_render_target)
   upload_world_matrices(&self.warehouse, &self.scene, self.frame_index)
-  main_camera_index := main_render_target.camera.index
-  camera_uniform := get_camera_uniform(&self.warehouse, main_camera_index)
-  _ = geometry.make_frustum(camera_uniform.projection * camera_uniform.view)
-
   defer {
     for i in 0 ..< self.active_light_count {
       light_info := &self.lights[i]
@@ -1623,8 +1604,7 @@ render :: proc(self: ^Engine) -> vk.Result {
     case .DIRECTIONAL:
     }
   }
-  for &entry, i in self.warehouse.render_targets.entries {
-    if !entry.active do continue
+  for &entry, i in self.warehouse.render_targets.entries do if entry.active {
     handle := Handle{entry.generation, u32(i)}
     if handle.index == self.main_render_target.index do continue
     is_shadow_target := false
@@ -1681,13 +1661,11 @@ render :: proc(self: ^Engine) -> vk.Result {
     self.postprocess_command_buffers[self.frame_index],
   }
   vk.CmdExecuteCommands(command_buffer, len(secondary_commands), raw_data(secondary_commands[:]))
-
   render_debug_ui(self)
   if self.render2d_proc != nil {
     self.render2d_proc(self, &self.ui.ctx)
   }
   mu.end(&self.ui.ctx)
-
   ui_begin(
     &self.ui,
     command_buffer,
@@ -1696,13 +1674,11 @@ render :: proc(self: ^Engine) -> vk.Result {
   )
   ui_render(&self.ui, command_buffer)
   ui_end(&self.ui, command_buffer)
-
   gpu.transition_image_to_present(
     command_buffer,
     self.swapchain.images[self.swapchain.image_index],
   )
   vk.EndCommandBuffer(command_buffer) or_return
-
   submit_queue_and_present(
     &self.gpu_context,
     &self.swapchain,

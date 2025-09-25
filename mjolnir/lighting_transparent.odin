@@ -23,10 +23,8 @@ transparent_init :: proc(
   if self.pipeline_layout == 0 {
     return .ERROR_INITIALIZATION_FAILED
   }
-
   create_transparent_pipelines(gpu_context, self) or_return
   create_wireframe_pipelines(gpu_context, self) or_return
-
   log.info("Transparent renderer initialized successfully")
   return .SUCCESS
 }
@@ -223,7 +221,7 @@ create_wireframe_pipelines :: proc(
   rasterizer := vk.PipelineRasterizationStateCreateInfo {
     sType       = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
     polygonMode = .LINE,
-    cullMode    = {.BACK}, // No culling for wireframe
+    cullMode    = {.BACK},
     frontFace   = .COUNTER_CLOCKWISE,
     lineWidth   = 1.0,
   }
