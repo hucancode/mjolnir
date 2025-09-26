@@ -19,110 +19,6 @@ Renderer :: struct {
 
 SHADER_DEPTH_PREPASS_VERT :: #load("../../shader/depth_prepass/vert.spv")
 
-init_depth_prepass :: proc(
-  self: ^Renderer,
-  gpu_context: ^gpu.GPUContext,
-  swapchain_extent: vk.Extent2D,
-  resources_manager: ^resources.Manager,
-) -> (
-  res: vk.Result,
-) {
-  log.debug("Building depth prepass pipeline")
-  vert_shader_module := gpu.create_shader_module(
-    gpu_context,
-    SHADER_DEPTH_PREPASS_VERT,
-  ) or_return
-  defer vk.DestroyShaderModule(gpu_context.device, vert_shader_module, nil)
-  shader_stages := [?]vk.PipelineShaderStageCreateInfo {
-    {
-      sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
-      stage = {.VERTEX},
-      module = vert_shader_module,
-      pName = "main",
-    },
-  }
-  vertex_input_info := vk.PipelineVertexInputStateCreateInfo {
-    sType                           = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-    vertexBindingDescriptionCount   = len(geometry.VERTEX_BINDING_DESCRIPTION),
-    pVertexBindingDescriptions      = raw_data(
-      geometry.VERTEX_BINDING_DESCRIPTION[:],
-    ),
-    vertexAttributeDescriptionCount = len(
-      geometry.VERTEX_ATTRIBUTE_DESCRIPTIONS,
-    ),
-    pVertexAttributeDescriptions    = raw_data(
-      geometry.VERTEX_ATTRIBUTE_DESCRIPTIONS[:],
-    ),
-  }
-  dynamic_states := [?]vk.DynamicState{.VIEWPORT, .SCISSOR}
-  dynamic_state := vk.PipelineDynamicStateCreateInfo {
-    sType             = .PIPELINE_DYNAMIC_STATE_CREATE_INFO,
-    dynamicStateCount = len(dynamic_states),
-    pDynamicStates    = raw_data(dynamic_states[:]),
-  }
-  input_assembly := vk.PipelineInputAssemblyStateCreateInfo {
-    sType                  = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
-    topology               = .TRIANGLE_LIST,
-    primitiveRestartEnable = false,
-  }
-  viewport_state := vk.PipelineViewportStateCreateInfo {
-    sType         = .PIPELINE_VIEWPORT_STATE_CREATE_INFO,
-    viewportCount = 1,
-    scissorCount  = 1,
-  }
-  rasterizer := vk.PipelineRasterizationStateCreateInfo {
-    sType                   = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
-    polygonMode             = .FILL,
-    cullMode                = {.BACK},
-    frontFace               = .COUNTER_CLOCKWISE,
-    lineWidth               = 1.0,
-    depthBiasEnable         = true,
-    depthBiasConstantFactor = 0.1,
-    depthBiasSlopeFactor    = 0.2,
-  }
-  multisampling := vk.PipelineMultisampleStateCreateInfo {
-    sType                = .PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
-    sampleShadingEnable  = false,
-    rasterizationSamples = {._1},
-  }
-  color_blending := vk.PipelineColorBlendStateCreateInfo {
-    sType = .PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
-  }
-  depth_stencil := vk.PipelineDepthStencilStateCreateInfo {
-    sType            = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
-    depthTestEnable  = true,
-    depthWriteEnable = true,
-    depthCompareOp   = .LESS,
-  }
-  dynamic_rendering := vk.PipelineRenderingCreateInfo{
-    sType                 = .PIPELINE_RENDERING_CREATE_INFO,
-    depthAttachmentFormat = .D32_SFLOAT,
-  }
-  pipeline_info := vk.GraphicsPipelineCreateInfo {
-    sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
-    pNext               = &dynamic_rendering,
-    stageCount          = len(shader_stages),
-    pStages             = raw_data(shader_stages[:]),
-    pVertexInputState   = &vertex_input_info,
-    pInputAssemblyState = &input_assembly,
-    pViewportState      = &viewport_state,
-    pRasterizationState = &rasterizer,
-    pMultisampleState   = &multisampling,
-    pDepthStencilState  = &depth_stencil,
-    pColorBlendState    = &color_blending,
-    pDynamicState       = &dynamic_state,
-    layout              = self.pipeline_layout,
-  }
-  vk.CreateGraphicsPipelines(
-    gpu_context.device,
-    0,
-    1,
-    &pipeline_info,
-    nil,
-    &self.depth_prepass_pipeline,
-  ) or_return
-  return .SUCCESS
-}
 
 begin_depth_prepass :: proc(
   render_target: ^resources.RenderTarget,
@@ -250,16 +146,114 @@ init :: proc(
   if self.pipeline_layout == 0 {
     return .ERROR_INITIALIZATION_FAILED
   }
+
+  // Initialize depth prepass pipeline first
+  log.debug("Building depth prepass pipeline")
+  depth_vert_shader_module := gpu.create_shader_module(
+    gpu_context.device,
+    SHADER_DEPTH_PREPASS_VERT,
+  ) or_return
+  defer vk.DestroyShaderModule(gpu_context.device, depth_vert_shader_module, nil)
+  depth_shader_stages := [?]vk.PipelineShaderStageCreateInfo {
+    {
+      sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
+      stage = {.VERTEX},
+      module = depth_vert_shader_module,
+      pName = "main",
+    },
+  }
+  depth_vertex_input_info := vk.PipelineVertexInputStateCreateInfo {
+    sType                           = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+    vertexBindingDescriptionCount   = len(geometry.VERTEX_BINDING_DESCRIPTION),
+    pVertexBindingDescriptions      = raw_data(
+      geometry.VERTEX_BINDING_DESCRIPTION[:],
+    ),
+    vertexAttributeDescriptionCount = len(
+      geometry.VERTEX_ATTRIBUTE_DESCRIPTIONS,
+    ),
+    pVertexAttributeDescriptions    = raw_data(
+      geometry.VERTEX_ATTRIBUTE_DESCRIPTIONS[:],
+    ),
+  }
+  depth_dynamic_states := [?]vk.DynamicState{.VIEWPORT, .SCISSOR}
+  depth_dynamic_state := vk.PipelineDynamicStateCreateInfo {
+    sType             = .PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+    dynamicStateCount = len(depth_dynamic_states),
+    pDynamicStates    = raw_data(depth_dynamic_states[:]),
+  }
+  depth_input_assembly := vk.PipelineInputAssemblyStateCreateInfo {
+    sType                  = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+    topology               = .TRIANGLE_LIST,
+    primitiveRestartEnable = false,
+  }
+  depth_viewport_state := vk.PipelineViewportStateCreateInfo {
+    sType         = .PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+    viewportCount = 1,
+    scissorCount  = 1,
+  }
+  depth_rasterizer := vk.PipelineRasterizationStateCreateInfo {
+    sType                   = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+    polygonMode             = .FILL,
+    cullMode                = {.BACK},
+    frontFace               = .COUNTER_CLOCKWISE,
+    lineWidth               = 1.0,
+    depthBiasEnable         = true,
+    depthBiasConstantFactor = 0.1,
+    depthBiasSlopeFactor    = 0.2,
+  }
+  depth_multisampling := vk.PipelineMultisampleStateCreateInfo {
+    sType                = .PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+    sampleShadingEnable  = false,
+    rasterizationSamples = {._1},
+  }
+  depth_color_blending := vk.PipelineColorBlendStateCreateInfo {
+    sType = .PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+  }
+  depth_depth_stencil := vk.PipelineDepthStencilStateCreateInfo {
+    sType            = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+    depthTestEnable  = true,
+    depthWriteEnable = true,
+    depthCompareOp   = .LESS,
+  }
+  depth_dynamic_rendering := vk.PipelineRenderingCreateInfo{
+    sType                 = .PIPELINE_RENDERING_CREATE_INFO,
+    depthAttachmentFormat = .D32_SFLOAT,
+  }
+  depth_pipeline_info := vk.GraphicsPipelineCreateInfo {
+    sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
+    pNext               = &depth_dynamic_rendering,
+    stageCount          = len(depth_shader_stages),
+    pStages             = raw_data(depth_shader_stages[:]),
+    pVertexInputState   = &depth_vertex_input_info,
+    pInputAssemblyState = &depth_input_assembly,
+    pViewportState      = &depth_viewport_state,
+    pRasterizationState = &depth_rasterizer,
+    pMultisampleState   = &depth_multisampling,
+    pDepthStencilState  = &depth_depth_stencil,
+    pColorBlendState    = &depth_color_blending,
+    pDynamicState       = &depth_dynamic_state,
+    layout              = self.pipeline_layout,
+  }
+  vk.CreateGraphicsPipelines(
+    gpu_context.device,
+    0,
+    1,
+    &depth_pipeline_info,
+    nil,
+    &self.depth_prepass_pipeline,
+  ) or_return
+
+  // Initialize G-buffer pipeline
   log.info("About to build G-buffer pipelines...")
   vert_shader_code := #load("../../shader/gbuffer/vert.spv")
   vert_module := gpu.create_shader_module(
-    gpu_context,
+    gpu_context.device,
     vert_shader_code,
   ) or_return
   defer vk.DestroyShaderModule(gpu_context.device, vert_module, nil)
   frag_shader_code := #load("../../shader/gbuffer/frag.spv")
   frag_module := gpu.create_shader_module(
-    gpu_context,
+    gpu_context.device,
     frag_shader_code,
   ) or_return
   defer vk.DestroyShaderModule(gpu_context.device, frag_module, nil)
@@ -653,9 +647,9 @@ render :: proc(
   )
 }
 
-shutdown :: proc(self: ^Renderer, gpu_context: ^gpu.GPUContext) {
-  vk.DestroyPipeline(gpu_context.device, self.pipeline, nil)
+shutdown :: proc(self: ^Renderer, device: vk.Device) {
+  vk.DestroyPipeline(device, self.pipeline, nil)
   self.pipeline = 0
-  vk.DestroyPipeline(gpu_context.device, self.depth_prepass_pipeline, nil)
+  vk.DestroyPipeline(device, self.depth_prepass_pipeline, nil)
   self.depth_prepass_pipeline = 0
 }

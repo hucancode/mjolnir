@@ -50,6 +50,7 @@ LightInfo :: struct {
   using shadow_resources: ShadowResources,
   dirty:                  bool,
 }
+
 AmbientPushConstant :: struct {
   camera_index:           u32,
   environment_index:      u32,
@@ -126,8 +127,6 @@ ambient_render :: proc(
   resources_manager: ^resources.Manager,
   frame_index: u32,
 ) {
-  // Use the same environment/IBL values as RendererMain (assume engine.ambient is initialized like main)
-  // Use environment/BRDF LUT/IBL values from the main renderer (assume ambient renderer is initialized with these fields)
   push := AmbientPushConstant {
     camera_index           = render_target.camera.index,
     environment_index      = self.environment_map.index,
@@ -156,19 +155,22 @@ ambient_end_pass :: proc(command_buffer: vk.CommandBuffer) {
   vk.CmdEndRendering(command_buffer)
 }
 
-ambient_init :: proc(
+init :: proc(
   self: ^Renderer,
   gpu_context: ^gpu.GPUContext,
   resources_manager: ^resources.Manager,
   width, height: u32,
   color_format: vk.Format = .B8G8R8A8_SRGB,
+  depth_format: vk.Format = .D32_SFLOAT,
 ) -> vk.Result {
-  log.debugf("renderer ambient init %d x %d", width, height)
-  pipeline_set_layouts := [?]vk.DescriptorSetLayout {
+  log.debugf("renderer lighting init %d x %d", width, height)
+
+  // Initialize ambient pipeline
+  ambient_pipeline_set_layouts := [?]vk.DescriptorSetLayout {
     resources_manager.camera_buffer_set_layout, // set = 0 (bindless camera buffer)
     resources_manager.textures_set_layout, // set = 1 (bindless textures)
   }
-  push_constant_range := vk.PushConstantRange {
+  ambient_push_constant_range := vk.PushConstantRange {
     stageFlags = {.FRAGMENT},
     size       = size_of(AmbientPushConstant),
   }
@@ -176,56 +178,56 @@ ambient_init :: proc(
     gpu_context.device,
     &{
       sType = .PIPELINE_LAYOUT_CREATE_INFO,
-      setLayoutCount = len(pipeline_set_layouts),
-      pSetLayouts = raw_data(pipeline_set_layouts[:]),
+      setLayoutCount = len(ambient_pipeline_set_layouts),
+      pSetLayouts = raw_data(ambient_pipeline_set_layouts[:]),
       pushConstantRangeCount = 1,
-      pPushConstantRanges = &push_constant_range,
+      pPushConstantRanges = &ambient_push_constant_range,
     },
     nil,
     &self.ambient_pipeline_layout,
   ) or_return
 
-  vert_shader_code := #load("../../shader/lighting_ambient/vert.spv")
-  vert_module := gpu.create_shader_module(
-    gpu_context,
-    vert_shader_code,
+  ambient_vert_shader_code := #load("../../shader/lighting_ambient/vert.spv")
+  ambient_vert_module := gpu.create_shader_module(
+    gpu_context.device,
+    ambient_vert_shader_code,
   ) or_return
-  defer vk.DestroyShaderModule(gpu_context.device, vert_module, nil)
-  frag_shader_code := #load("../../shader/lighting_ambient/frag.spv")
-  frag_module := gpu.create_shader_module(
-    gpu_context,
-    frag_shader_code,
+  defer vk.DestroyShaderModule(gpu_context.device, ambient_vert_module, nil)
+  ambient_frag_shader_code := #load("../../shader/lighting_ambient/frag.spv")
+  ambient_frag_module := gpu.create_shader_module(
+    gpu_context.device,
+    ambient_frag_shader_code,
   ) or_return
-  defer vk.DestroyShaderModule(gpu_context.device, frag_module, nil)
+  defer vk.DestroyShaderModule(gpu_context.device, ambient_frag_module, nil)
 
-  dynamic_states := [?]vk.DynamicState{.VIEWPORT, .SCISSOR}
-  dynamic_state := vk.PipelineDynamicStateCreateInfo {
+  ambient_dynamic_states := [?]vk.DynamicState{.VIEWPORT, .SCISSOR}
+  ambient_dynamic_state := vk.PipelineDynamicStateCreateInfo {
     sType             = .PIPELINE_DYNAMIC_STATE_CREATE_INFO,
-    dynamicStateCount = len(dynamic_states),
-    pDynamicStates    = raw_data(dynamic_states[:]),
+    dynamicStateCount = len(ambient_dynamic_states),
+    pDynamicStates    = raw_data(ambient_dynamic_states[:]),
   }
-  input_assembly := vk.PipelineInputAssemblyStateCreateInfo {
+  ambient_input_assembly := vk.PipelineInputAssemblyStateCreateInfo {
     sType    = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
     topology = .TRIANGLE_LIST,
   }
-  vertex_input := vk.PipelineVertexInputStateCreateInfo {
+  ambient_vertex_input := vk.PipelineVertexInputStateCreateInfo {
     sType = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
   }
-  viewport_state := vk.PipelineViewportStateCreateInfo {
+  ambient_viewport_state := vk.PipelineViewportStateCreateInfo {
     sType         = .PIPELINE_VIEWPORT_STATE_CREATE_INFO,
     viewportCount = 1,
     scissorCount  = 1,
   }
-  rasterizer := vk.PipelineRasterizationStateCreateInfo {
+  ambient_rasterizer := vk.PipelineRasterizationStateCreateInfo {
     sType       = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
     polygonMode = .FILL,
     lineWidth   = 1.0,
   }
-  multisampling := vk.PipelineMultisampleStateCreateInfo {
+  ambient_multisampling := vk.PipelineMultisampleStateCreateInfo {
     sType                = .PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
     rasterizationSamples = {._1},
   }
-  color_blend_attachment := vk.PipelineColorBlendAttachmentState {
+  ambient_color_blend_attachment := vk.PipelineColorBlendAttachmentState {
     colorWriteMask      = {.R, .G, .B, .A},
     blendEnable         = false,
     srcColorBlendFactor = .ONE,
@@ -235,54 +237,54 @@ ambient_init :: proc(
     dstAlphaBlendFactor = .ZERO,
     alphaBlendOp        = .ADD,
   }
-  color_blending := vk.PipelineColorBlendStateCreateInfo {
+  ambient_color_blending := vk.PipelineColorBlendStateCreateInfo {
     sType           = .PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
     attachmentCount = 1,
-    pAttachments    = &color_blend_attachment,
+    pAttachments    = &ambient_color_blend_attachment,
   }
-  depth_stencil := vk.PipelineDepthStencilStateCreateInfo {
+  ambient_depth_stencil := vk.PipelineDepthStencilStateCreateInfo {
     sType = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
   }
-  color_formats := [?]vk.Format{color_format}
-  rendering_info := vk.PipelineRenderingCreateInfo {
+  ambient_color_formats := [?]vk.Format{color_format}
+  ambient_rendering_info := vk.PipelineRenderingCreateInfo {
     sType                   = .PIPELINE_RENDERING_CREATE_INFO,
-    colorAttachmentCount    = len(color_formats),
-    pColorAttachmentFormats = raw_data(color_formats[:]),
+    colorAttachmentCount    = len(ambient_color_formats),
+    pColorAttachmentFormats = raw_data(ambient_color_formats[:]),
   }
-  shader_stages := [?]vk.PipelineShaderStageCreateInfo {
+  ambient_shader_stages := [?]vk.PipelineShaderStageCreateInfo {
     {
       sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
       stage = {.VERTEX},
-      module = vert_module,
+      module = ambient_vert_module,
       pName = "main",
     },
     {
       sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
       stage = {.FRAGMENT},
-      module = frag_module,
+      module = ambient_frag_module,
       pName = "main",
     },
   }
-  pipeline_info := vk.GraphicsPipelineCreateInfo {
+  ambient_pipeline_info := vk.GraphicsPipelineCreateInfo {
     sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
-    pNext               = &rendering_info,
-    stageCount          = len(shader_stages),
-    pStages             = raw_data(shader_stages[:]),
-    pVertexInputState   = &vertex_input,
-    pInputAssemblyState = &input_assembly,
-    pViewportState      = &viewport_state,
-    pRasterizationState = &rasterizer,
-    pMultisampleState   = &multisampling,
-    pColorBlendState    = &color_blending,
-    pDynamicState       = &dynamic_state,
-    pDepthStencilState  = &depth_stencil,
+    pNext               = &ambient_rendering_info,
+    stageCount          = len(ambient_shader_stages),
+    pStages             = raw_data(ambient_shader_stages[:]),
+    pVertexInputState   = &ambient_vertex_input,
+    pInputAssemblyState = &ambient_input_assembly,
+    pViewportState      = &ambient_viewport_state,
+    pRasterizationState = &ambient_rasterizer,
+    pMultisampleState   = &ambient_multisampling,
+    pColorBlendState    = &ambient_color_blending,
+    pDynamicState       = &ambient_dynamic_state,
+    pDepthStencilState  = &ambient_depth_stencil,
     layout              = self.ambient_pipeline_layout,
   }
   vk.CreateGraphicsPipelines(
     gpu_context.device,
     0,
     1,
-    &pipeline_info,
+    &ambient_pipeline_info,
     nil,
     &self.ambient_pipeline,
   ) or_return
@@ -317,35 +319,194 @@ ambient_init :: proc(
   self.ibl_intensity = 1.0 // Default IBL intensity
 
   log.info("Ambient pipeline initialized successfully")
+
+  // Initialize lighting pipeline
+  lighting_pipeline_set_layouts := [?]vk.DescriptorSetLayout {
+    resources_manager.camera_buffer_set_layout,
+    resources_manager.textures_set_layout,
+  }
+  lighting_push_constant_range := vk.PushConstantRange {
+    stageFlags = {.VERTEX, .FRAGMENT},
+    size       = size_of(LightPushConstant),
+  }
+  vk.CreatePipelineLayout(
+    gpu_context.device,
+    &vk.PipelineLayoutCreateInfo {
+      sType = .PIPELINE_LAYOUT_CREATE_INFO,
+      setLayoutCount = len(lighting_pipeline_set_layouts),
+      pSetLayouts = raw_data(lighting_pipeline_set_layouts[:]),
+      pushConstantRangeCount = 1,
+      pPushConstantRanges = &lighting_push_constant_range,
+    },
+    nil,
+    &self.lighting_pipeline_layout,
+  ) or_return
+
+  lighting_vert_shader_code := #load("../../shader/lighting/vert.spv")
+  lighting_vert_module := gpu.create_shader_module(
+    gpu_context.device,
+    lighting_vert_shader_code,
+  ) or_return
+  defer vk.DestroyShaderModule(gpu_context.device, lighting_vert_module, nil)
+  lighting_frag_shader_code := #load("../../shader/lighting/frag.spv")
+  lighting_frag_module := gpu.create_shader_module(
+    gpu_context.device,
+    lighting_frag_shader_code,
+  ) or_return
+  defer vk.DestroyShaderModule(gpu_context.device, lighting_frag_module, nil)
+
+  lighting_dynamic_states := [?]vk.DynamicState{.VIEWPORT, .SCISSOR, .DEPTH_COMPARE_OP}
+  lighting_dynamic_state := vk.PipelineDynamicStateCreateInfo {
+    sType             = .PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+    dynamicStateCount = len(lighting_dynamic_states),
+    pDynamicStates    = raw_data(lighting_dynamic_states[:]),
+  }
+  lighting_input_assembly := vk.PipelineInputAssemblyStateCreateInfo {
+    sType    = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+    topology = .TRIANGLE_LIST,
+  }
+  lighting_vertex_input := vk.PipelineVertexInputStateCreateInfo {
+    sType                           = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+    vertexBindingDescriptionCount   = 1,
+    pVertexBindingDescriptions      = &geometry.VERTEX_BINDING_DESCRIPTION[0],
+    vertexAttributeDescriptionCount = 1, // Only position needed for lighting
+    pVertexAttributeDescriptions    = &geometry.VERTEX_ATTRIBUTE_DESCRIPTIONS[0], // Position at location 0
+  }
+  lighting_viewport_state := vk.PipelineViewportStateCreateInfo {
+    sType         = .PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+    viewportCount = 1,
+    scissorCount  = 1,
+  }
+  lighting_rasterizer := vk.PipelineRasterizationStateCreateInfo {
+    sType       = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+    polygonMode = .FILL,
+    cullMode    = {.FRONT},
+    frontFace   = .COUNTER_CLOCKWISE,
+    lineWidth   = 1.0,
+  }
+  lighting_multisampling := vk.PipelineMultisampleStateCreateInfo {
+    sType                = .PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+    rasterizationSamples = {._1},
+  }
+  lighting_color_blend_attachment := vk.PipelineColorBlendAttachmentState {
+    colorWriteMask      = {.R, .G, .B, .A},
+    blendEnable         = true,
+    srcColorBlendFactor = .ONE,
+    dstColorBlendFactor = .ONE,
+    colorBlendOp        = .ADD,
+    srcAlphaBlendFactor = .ONE,
+    dstAlphaBlendFactor = .ONE,
+    alphaBlendOp        = .ADD,
+  }
+  lighting_color_blending := vk.PipelineColorBlendStateCreateInfo {
+    sType           = .PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+    attachmentCount = 1,
+    pAttachments    = &lighting_color_blend_attachment,
+  }
+  lighting_depth_stencil := vk.PipelineDepthStencilStateCreateInfo {
+    sType           = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+    depthTestEnable = true,
+    // Greater or equal for point light, less or equal for spot light
+    depthCompareOp  = .GREATER_OR_EQUAL,
+  }
+  lighting_color_formats := [?]vk.Format{color_format}
+  lighting_rendering_info := vk.PipelineRenderingCreateInfo {
+    sType                   = .PIPELINE_RENDERING_CREATE_INFO,
+    colorAttachmentCount    = len(lighting_color_formats),
+    pColorAttachmentFormats = raw_data(lighting_color_formats[:]),
+    depthAttachmentFormat   = depth_format,
+  }
+  lighting_shader_stages := [?]vk.PipelineShaderStageCreateInfo {
+    {
+      sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
+      stage = {.VERTEX},
+      module = lighting_vert_module,
+      pName = "main",
+    },
+    {
+      sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
+      stage = {.FRAGMENT},
+      module = lighting_frag_module,
+      pName = "main",
+    },
+  }
+  lighting_pipeline_info := vk.GraphicsPipelineCreateInfo {
+    sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
+    pNext               = &lighting_rendering_info,
+    stageCount          = len(lighting_shader_stages),
+    pStages             = raw_data(lighting_shader_stages[:]),
+    pVertexInputState   = &lighting_vertex_input,
+    pInputAssemblyState = &lighting_input_assembly,
+    pViewportState      = &lighting_viewport_state,
+    pRasterizationState = &lighting_rasterizer,
+    pMultisampleState   = &lighting_multisampling,
+    pColorBlendState    = &lighting_color_blending,
+    pDynamicState       = &lighting_dynamic_state,
+    pDepthStencilState  = &lighting_depth_stencil,
+    layout              = self.lighting_pipeline_layout,
+  }
+  vk.CreateGraphicsPipelines(
+    gpu_context.device,
+    0,
+    1,
+    &lighting_pipeline_info,
+    nil,
+    &self.lighting_pipeline,
+  ) or_return
+  log.info("Lighting pipeline initialized successfully")
+
+  // Initialize light volume meshes
+  self.sphere_mesh, _ = resources.create_mesh(
+    gpu_context,
+    resources_manager,
+    geometry.make_sphere(segments = 64, rings = 64),
+  ) or_return
+  self.cone_mesh, _ = resources.create_mesh(
+    gpu_context,
+    resources_manager,
+    geometry.make_cone(segments = 128, height = 1, radius = 0.5),
+  ) or_return
+  self.fullscreen_triangle_mesh, _ = resources.create_mesh(
+    gpu_context,
+    resources_manager,
+    geometry.make_fullscreen_triangle(),
+  ) or_return
+  log.info("Light volume meshes initialized")
+
   return .SUCCESS
 }
 
-ambient_shutdown :: proc(
+shutdown :: proc(
   self: ^Renderer,
-  gpu_context: ^gpu.GPUContext,
+  device: vk.Device,
   resources_manager: ^resources.Manager,
 ) {
-  vk.DestroyPipeline(gpu_context.device, self.ambient_pipeline, nil)
+  vk.DestroyPipeline(device, self.ambient_pipeline, nil)
   self.ambient_pipeline = 0
   vk.DestroyPipelineLayout(
-    gpu_context.device,
+    device,
     self.ambient_pipeline_layout,
     nil,
   )
   self.ambient_pipeline_layout = 0
-  // Clean up environment resources
   if item, freed := resources.free(
     &resources_manager.image_2d_buffers,
     self.environment_map,
   ); freed {
-    gpu.image_buffer_detroy(gpu_context, item)
+    gpu.image_buffer_destroy(device, item)
   }
   if item, freed := resources.free(
     &resources_manager.image_2d_buffers,
     self.brdf_lut,
   ); freed {
-    gpu.image_buffer_detroy(gpu_context, item)
+    gpu.image_buffer_destroy(device, item)
   }
+  vk.DestroyPipelineLayout(
+    device,
+    self.lighting_pipeline_layout,
+    nil,
+  )
+  vk.DestroyPipeline(device, self.lighting_pipeline, nil)
 }
 
 BG_BLUE_GRAY :: [4]f32{0.0117, 0.0117, 0.0179, 1.0}
@@ -367,174 +528,6 @@ Renderer :: struct {
   fullscreen_triangle_mesh: resources.Handle,
 }
 
-lighting_init :: proc(
-  self: ^Renderer,
-  gpu_context: ^gpu.GPUContext,
-  width, height: u32,
-  color_format: vk.Format = .B8G8R8A8_SRGB,
-  depth_format: vk.Format = .D32_SFLOAT,
-  resources_manager: ^resources.Manager,
-) -> vk.Result {
-  log.debugf("renderer main init %d x %d", width, height)
-  pipeline_set_layouts := [?]vk.DescriptorSetLayout {
-    resources_manager.camera_buffer_set_layout,
-    resources_manager.textures_set_layout,
-  }
-  push_constant_range := vk.PushConstantRange {
-    stageFlags = {.VERTEX, .FRAGMENT},
-    size       = size_of(LightPushConstant),
-  }
-  vk.CreatePipelineLayout(
-    gpu_context.device,
-    &vk.PipelineLayoutCreateInfo {
-      sType = .PIPELINE_LAYOUT_CREATE_INFO,
-      setLayoutCount = len(pipeline_set_layouts),
-      pSetLayouts = raw_data(pipeline_set_layouts[:]),
-      pushConstantRangeCount = 1,
-      pPushConstantRanges = &push_constant_range,
-    },
-    nil,
-    &self.lighting_pipeline_layout,
-  ) or_return
-  vert_shader_code := #load("../../shader/lighting/vert.spv")
-  vert_module := gpu.create_shader_module(
-    gpu_context,
-    vert_shader_code,
-  ) or_return
-  defer vk.DestroyShaderModule(gpu_context.device, vert_module, nil)
-  frag_shader_code := #load("../../shader/lighting/frag.spv")
-  frag_module := gpu.create_shader_module(
-    gpu_context,
-    frag_shader_code,
-  ) or_return
-  defer vk.DestroyShaderModule(gpu_context.device, frag_module, nil)
-  dynamic_states := [?]vk.DynamicState{.VIEWPORT, .SCISSOR, .DEPTH_COMPARE_OP}
-  dynamic_state := vk.PipelineDynamicStateCreateInfo {
-    sType             = .PIPELINE_DYNAMIC_STATE_CREATE_INFO,
-    dynamicStateCount = len(dynamic_states),
-    pDynamicStates    = raw_data(dynamic_states[:]),
-  }
-  input_assembly := vk.PipelineInputAssemblyStateCreateInfo {
-    sType    = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
-    topology = .TRIANGLE_LIST,
-  }
-  vertex_input := vk.PipelineVertexInputStateCreateInfo {
-    sType                           = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-    vertexBindingDescriptionCount   = 1,
-    pVertexBindingDescriptions      = &geometry.VERTEX_BINDING_DESCRIPTION[0],
-    vertexAttributeDescriptionCount = 1, // Only position needed for lighting
-    pVertexAttributeDescriptions    = &geometry.VERTEX_ATTRIBUTE_DESCRIPTIONS[0], // Position at location 0
-  }
-  viewport_state := vk.PipelineViewportStateCreateInfo {
-    sType         = .PIPELINE_VIEWPORT_STATE_CREATE_INFO,
-    viewportCount = 1,
-    scissorCount  = 1,
-  }
-  rasterizer := vk.PipelineRasterizationStateCreateInfo {
-    sType       = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
-    polygonMode = .FILL,
-    cullMode    = {.FRONT},
-    frontFace   = .COUNTER_CLOCKWISE,
-    lineWidth   = 1.0,
-  }
-  multisampling := vk.PipelineMultisampleStateCreateInfo {
-    sType                = .PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
-    rasterizationSamples = {._1},
-  }
-  color_blend_attachment := vk.PipelineColorBlendAttachmentState {
-    colorWriteMask      = {.R, .G, .B, .A},
-    blendEnable         = true,
-    srcColorBlendFactor = .ONE,
-    dstColorBlendFactor = .ONE,
-    colorBlendOp        = .ADD,
-    srcAlphaBlendFactor = .ONE,
-    dstAlphaBlendFactor = .ONE,
-    alphaBlendOp        = .ADD,
-  }
-  color_blending := vk.PipelineColorBlendStateCreateInfo {
-    sType           = .PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
-    attachmentCount = 1,
-    pAttachments    = &color_blend_attachment,
-  }
-  depth_stencil := vk.PipelineDepthStencilStateCreateInfo {
-    sType           = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
-    depthTestEnable = true,
-    // Greater or equal for point light, less or equal for spot light
-    depthCompareOp  = .GREATER_OR_EQUAL,
-  }
-  color_formats := [?]vk.Format{color_format}
-  rendering_info := vk.PipelineRenderingCreateInfo {
-    sType                   = .PIPELINE_RENDERING_CREATE_INFO,
-    colorAttachmentCount    = len(color_formats),
-    pColorAttachmentFormats = raw_data(color_formats[:]),
-    depthAttachmentFormat   = depth_format,
-  }
-  shader_stages := [?]vk.PipelineShaderStageCreateInfo {
-    {
-      sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
-      stage = {.VERTEX},
-      module = vert_module,
-      pName = "main",
-    },
-    {
-      sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
-      stage = {.FRAGMENT},
-      module = frag_module,
-      pName = "main",
-    },
-  }
-  pipeline_info := vk.GraphicsPipelineCreateInfo {
-    sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
-    pNext               = &rendering_info,
-    stageCount          = len(shader_stages),
-    pStages             = raw_data(shader_stages[:]),
-    pVertexInputState   = &vertex_input,
-    pInputAssemblyState = &input_assembly,
-    pViewportState      = &viewport_state,
-    pRasterizationState = &rasterizer,
-    pMultisampleState   = &multisampling,
-    pColorBlendState    = &color_blending,
-    pDynamicState       = &dynamic_state,
-    pDepthStencilState  = &depth_stencil,
-    layout              = self.lighting_pipeline_layout,
-  }
-  vk.CreateGraphicsPipelines(
-    gpu_context.device,
-    0,
-    1,
-    &pipeline_info,
-    nil,
-    &self.lighting_pipeline,
-  ) or_return
-  log.info("Lighting pipeline initialized successfully")
-  // light volume meshes
-  self.sphere_mesh, _ = resources.create_mesh(
-    gpu_context,
-    resources_manager,
-    geometry.make_sphere(segments = 64, rings = 64),
-  ) or_return
-  self.cone_mesh, _ = resources.create_mesh(
-    gpu_context,
-    resources_manager,
-    geometry.make_cone(segments = 128, height = 1, radius = 0.5),
-  ) or_return
-  self.fullscreen_triangle_mesh, _ = resources.create_mesh(
-    gpu_context,
-    resources_manager,
-    geometry.make_fullscreen_triangle(),
-  ) or_return
-  log.info("Light volume meshes initialized")
-  return .SUCCESS
-}
-
-lighting_shutdown :: proc(self: ^Renderer, gpu_context: ^gpu.GPUContext) {
-  vk.DestroyPipelineLayout(
-    gpu_context.device,
-    self.lighting_pipeline_layout,
-    nil,
-  )
-  vk.DestroyPipeline(gpu_context.device, self.lighting_pipeline, nil)
-}
 
 lighting_recreate_images :: proc(
   self: ^Renderer,

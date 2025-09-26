@@ -294,7 +294,7 @@ shutdown :: proc(
   // Manually clean up each pool since callbacks can't capture gpu_context
   for &entry in manager.image_2d_buffers.entries {
     if entry.generation > 0 && entry.active {
-      gpu.image_buffer_detroy(gpu_context, &entry.item)
+      gpu.image_buffer_destroy(gpu_context.device, &entry.item)
     }
   }
   delete(manager.image_2d_buffers.entries)
@@ -302,7 +302,7 @@ shutdown :: proc(
 
   for &entry in manager.image_cube_buffers.entries {
     if entry.generation > 0 && entry.active {
-      gpu.cube_depth_texture_destroy(gpu_context, &entry.item)
+      gpu.cube_depth_texture_destroy(gpu_context.device, &entry.item)
     }
   }
   delete(manager.image_cube_buffers.entries)
@@ -698,7 +698,7 @@ destroy_material_buffer :: proc(
   gpu_context: ^gpu.GPUContext,
   manager: ^Manager,
 ) {
-  gpu.data_buffer_destroy(gpu_context, &manager.material_buffer)
+  gpu.data_buffer_destroy(gpu_context.device, &manager.material_buffer)
   vk.DestroyDescriptorSetLayout(
     gpu_context.device,
     manager.material_buffer_set_layout,
@@ -781,7 +781,7 @@ destroy_world_matrix_buffers :: proc(
 ) {
   for frame_idx in 0 ..< MAX_FRAMES_IN_FLIGHT {
     gpu.data_buffer_destroy(
-      gpu_context,
+      gpu_context.device,
       &manager.world_matrix_buffers[frame_idx],
     )
   }
@@ -864,7 +864,7 @@ destroy_node_data_buffer :: proc(
   gpu_context: ^gpu.GPUContext,
   manager: ^Manager,
 ) {
-  gpu.data_buffer_destroy(gpu_context, &manager.node_data_buffer)
+  gpu.data_buffer_destroy(gpu_context.device, &manager.node_data_buffer)
   vk.DestroyDescriptorSetLayout(
     gpu_context.device,
     manager.node_data_buffer_set_layout,
@@ -997,7 +997,7 @@ destroy_emitter_buffer :: proc(
   gpu_context: ^gpu.GPUContext,
   manager: ^Manager,
 ) {
-  gpu.data_buffer_destroy(gpu_context, &manager.emitter_buffer)
+  gpu.data_buffer_destroy(gpu_context.device, &manager.emitter_buffer)
   if manager.emitter_buffer_set_layout != 0 {
     vk.DestroyDescriptorSetLayout(
       gpu_context.device,
@@ -1013,7 +1013,7 @@ destroy_mesh_data_buffer :: proc(
   gpu_context: ^gpu.GPUContext,
   manager: ^Manager,
 ) {
-  gpu.data_buffer_destroy(gpu_context, &manager.mesh_data_buffer)
+  gpu.data_buffer_destroy(gpu_context.device, &manager.mesh_data_buffer)
   vk.DestroyDescriptorSetLayout(
     gpu_context.device,
     manager.mesh_data_buffer_set_layout,
@@ -1090,7 +1090,7 @@ destroy_vertex_skinning_buffer :: proc(
   manager: ^Manager,
 ) {
   slab_allocator_destroy(&manager.vertex_skinning_slab)
-  gpu.data_buffer_destroy(gpu_context, &manager.vertex_skinning_buffer)
+  gpu.data_buffer_destroy(gpu_context.device, &manager.vertex_skinning_buffer)
   vk.DestroyDescriptorSetLayout(
     gpu_context.device,
     manager.vertex_skinning_buffer_set_layout,
@@ -1115,7 +1115,7 @@ destroy_camera_buffer :: proc(
   gpu_context: ^gpu.GPUContext,
   manager: ^Manager,
 ) {
-  gpu.data_buffer_destroy(gpu_context, &manager.camera_buffer)
+  gpu.data_buffer_destroy(gpu_context.device, &manager.camera_buffer)
   vk.DestroyDescriptorSetLayout(
     gpu_context.device,
     manager.camera_buffer_set_layout,
@@ -1231,7 +1231,7 @@ create_empty_texture_2d :: proc(
   }
 
   texture.view = gpu.create_image_view(
-    gpu_context,
+    gpu_context.device,
     texture.image,
     format,
     aspect_mask,
@@ -1282,7 +1282,7 @@ destroy_bone_matrix_allocator :: proc(
   manager: ^Manager,
 ) {
   for &b in manager.bone_buffers {
-      gpu.data_buffer_destroy(gpu_context, &b)
+      gpu.data_buffer_destroy(gpu_context.device, &b)
   }
   vk.DestroyDescriptorSetLayout(
     gpu_context.device,
@@ -1359,8 +1359,8 @@ destroy_bindless_buffers :: proc(
   gpu_context: ^gpu.GPUContext,
   manager: ^Manager,
 ) {
-  gpu.data_buffer_destroy(gpu_context, &manager.vertex_buffer)
-  gpu.data_buffer_destroy(gpu_context, &manager.index_buffer)
+  gpu.data_buffer_destroy(gpu_context.device, &manager.vertex_buffer)
+  gpu.data_buffer_destroy(gpu_context.device, &manager.index_buffer)
   slab_allocator_destroy(&manager.vertex_slab)
   slab_allocator_destroy(&manager.index_slab)
 }
@@ -1855,7 +1855,7 @@ create_image_buffer_with_mips :: proc(
     {.TRANSFER_SRC},
     data,
   ) or_return
-  defer gpu.data_buffer_destroy(gpu_context, &staging)
+  defer gpu.data_buffer_destroy(gpu_context.device, &staging)
 
   img = gpu.malloc_image_buffer_with_mips(
     gpu_context,
@@ -1880,7 +1880,7 @@ create_image_buffer_with_mips :: proc(
 
   aspect_mask := vk.ImageAspectFlags{.COLOR}
   img.view = gpu.create_image_view_with_mips(
-    gpu_context,
+    gpu_context.device,
     img.image,
     format,
     aspect_mask,

@@ -165,7 +165,7 @@ visibility_system_init :: proc(
   ) or_return
 
   shader_module := gpu.create_shader_module(
-    gpu_context,
+    gpu_context.device,
     #load("../shader/visibility_culling/culling.spv"),
   ) or_return
   defer vk.DestroyShaderModule(gpu_context.device, shader_module, nil)
@@ -322,8 +322,8 @@ visibility_system_shutdown :: proc(
     frame := &system.frames[frame_idx]
     for task_idx in 0 ..< VISIBILITY_TASK_COUNT {
       buffers := &frame.tasks[task_idx]
-      gpu.data_buffer_destroy(gpu_context, &buffers.draw_count)
-      gpu.data_buffer_destroy(gpu_context, &buffers.draw_commands)
+      gpu.data_buffer_destroy(gpu_context.device, &buffers.draw_count)
+      gpu.data_buffer_destroy(gpu_context.device, &buffers.draw_commands)
       buffers.descriptor_set = 0
     }
   }

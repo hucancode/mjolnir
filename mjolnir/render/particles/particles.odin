@@ -116,7 +116,7 @@ simulate :: proc(
   )
 
   // --- Compact particles first ---
-  compact_particles(self, command_buffer)
+  compact(self, command_buffer)
 
   // Memory barrier before simulation
   barrier1 := vk.MemoryBarrier {
@@ -193,7 +193,7 @@ simulate :: proc(
   )
 }
 
-compact_particles :: proc(
+compact :: proc(
   self: ^Renderer,
   command_buffer: vk.CommandBuffer,
 ) {
@@ -219,53 +219,53 @@ compact_particles :: proc(
 
 shutdown :: proc(
   self: ^Renderer,
-  gpu_context: ^gpu.GPUContext,
+  device: vk.Device,
 ) {
-  vk.DestroyPipeline(gpu_context.device, self.compute_pipeline, nil)
+  vk.DestroyPipeline(device, self.compute_pipeline, nil)
   vk.DestroyPipelineLayout(
-    gpu_context.device,
+    device,
     self.compute_pipeline_layout,
     nil,
   )
   vk.DestroyDescriptorSetLayout(
-    gpu_context.device,
+    device,
     self.compute_descriptor_set_layout,
     nil,
   )
-  vk.DestroyPipeline(gpu_context.device, self.emitter_pipeline, nil)
+  vk.DestroyPipeline(device, self.emitter_pipeline, nil)
   vk.DestroyPipelineLayout(
-    gpu_context.device,
+    device,
     self.emitter_pipeline_layout,
     nil,
   )
   vk.DestroyDescriptorSetLayout(
-    gpu_context.device,
+    device,
     self.emitter_descriptor_set_layout,
     nil,
   )
-  vk.DestroyPipeline(gpu_context.device, self.compact_pipeline, nil)
+  vk.DestroyPipeline(device, self.compact_pipeline, nil)
   vk.DestroyPipelineLayout(
-    gpu_context.device,
+    device,
     self.compact_pipeline_layout,
     nil,
   )
   vk.DestroyDescriptorSetLayout(
-    gpu_context.device,
+    device,
     self.compact_descriptor_set_layout,
     nil,
   )
-  vk.DestroyPipeline(gpu_context.device, self.render_pipeline, nil)
+  vk.DestroyPipeline(device, self.render_pipeline, nil)
   vk.DestroyPipelineLayout(
-    gpu_context.device,
+    device,
     self.render_pipeline_layout,
     nil,
   )
-  gpu.data_buffer_destroy(gpu_context, &self.params_buffer)
-  gpu.data_buffer_destroy(gpu_context, &self.particle_buffer)
-  gpu.data_buffer_destroy(gpu_context, &self.compact_particle_buffer)
-  gpu.data_buffer_destroy(gpu_context, &self.draw_command_buffer)
-  gpu.data_buffer_destroy(gpu_context, &self.force_field_buffer)
-  gpu.data_buffer_destroy(gpu_context, &self.particle_counter_buffer)
+  gpu.data_buffer_destroy(device, &self.params_buffer)
+  gpu.data_buffer_destroy(device, &self.particle_buffer)
+  gpu.data_buffer_destroy(device, &self.compact_particle_buffer)
+  gpu.data_buffer_destroy(device, &self.draw_command_buffer)
+  gpu.data_buffer_destroy(device, &self.force_field_buffer)
+  gpu.data_buffer_destroy(device, &self.particle_counter_buffer)
 }
 
 init :: proc(
@@ -299,14 +299,14 @@ init :: proc(
     {.STORAGE_BUFFER},
   ) or_return
   self.emitter_bindless_descriptor_set = resources_manager.emitter_buffer_descriptor_set
-  particle_init_emitter_pipeline(gpu_context, self, resources_manager) or_return
-  particle_init_compact_pipeline(gpu_context, self) or_return
-  particle_init_compute_pipeline(gpu_context, self) or_return
-  particle_init_render_pipeline(gpu_context, self, resources_manager) or_return
+  create_emitter_pipeline(gpu_context, self, resources_manager) or_return
+  create_compact_pipeline(gpu_context, self) or_return
+  create_compute_pipeline(gpu_context, self) or_return
+  create_render_pipeline(gpu_context, self, resources_manager) or_return
   return .SUCCESS
 }
 
-particle_init_emitter_pipeline :: proc(
+create_emitter_pipeline :: proc(
   gpu_context: ^gpu.GPUContext,
   self: ^Renderer,
   resources_manager: ^resources.Manager,
@@ -412,7 +412,7 @@ particle_init_emitter_pipeline :: proc(
     nil,
   )
   emitter_shader_module := gpu.create_shader_module(
-    gpu_context,
+    gpu_context.device,
     #load("../../shader/particle/emitter.spv"),
   ) or_return
   defer vk.DestroyShaderModule(gpu_context.device, emitter_shader_module, nil)
@@ -437,7 +437,7 @@ particle_init_emitter_pipeline :: proc(
   return .SUCCESS
 }
 
-particle_init_compute_pipeline :: proc(
+create_compute_pipeline :: proc(
   gpu_context: ^gpu.GPUContext,
   self: ^Renderer,
 ) -> vk.Result {
@@ -555,7 +555,7 @@ particle_init_compute_pipeline :: proc(
     nil,
   )
   compute_shader_module := gpu.create_shader_module(
-    gpu_context,
+    gpu_context.device,
     #load("../../shader/particle/compute.spv"),
   ) or_return
   defer vk.DestroyShaderModule(gpu_context.device, compute_shader_module, nil)
@@ -580,7 +580,7 @@ particle_init_compute_pipeline :: proc(
   return .SUCCESS
 }
 
-particle_init_compact_pipeline :: proc(
+create_compact_pipeline :: proc(
   gpu_context: ^gpu.GPUContext,
   self: ^Renderer,
 ) -> vk.Result {
@@ -710,7 +710,7 @@ particle_init_compact_pipeline :: proc(
     nil,
   )
   compact_shader_module := gpu.create_shader_module(
-    gpu_context,
+    gpu_context.device,
     #load("../../shader/particle/compact.spv"),
   ) or_return
   defer vk.DestroyShaderModule(gpu_context.device, compact_shader_module, nil)
@@ -735,7 +735,7 @@ particle_init_compact_pipeline :: proc(
   return .SUCCESS
 }
 
-particle_init_render_pipeline :: proc(
+create_render_pipeline :: proc(
   gpu_context: ^gpu.GPUContext,
   self: ^Renderer,
   resources_manager: ^resources.Manager,
@@ -851,11 +851,11 @@ particle_init_render_pipeline :: proc(
   vert_shader_code := #load("../../shader/particle/vert.spv")
   frag_shader_code := #load("../../shader/particle/frag.spv")
   vert_module := gpu.create_shader_module(
-    gpu_context,
+    gpu_context.device,
     vert_shader_code,
   ) or_return
   frag_module := gpu.create_shader_module(
-    gpu_context,
+    gpu_context.device,
     frag_shader_code,
   ) or_return
   defer vk.DestroyShaderModule(gpu_context.device, vert_module, nil)

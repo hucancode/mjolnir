@@ -69,34 +69,20 @@ renderer_init :: proc(
     self.post_process_commands[:],
   ) or_return
 
-  lighting.lighting_init(
+  lighting.init(
     &self.lighting,
     gpu_context,
+    resources_manager,
     swapchain_extent.width,
     swapchain_extent.height,
     swapchain_format,
     vk.Format.D32_SFLOAT,
-    resources_manager,
-  ) or_return
-  lighting.ambient_init(
-    &self.lighting,
-    gpu_context,
-    resources_manager,
-    swapchain_extent.width,
-    swapchain_extent.height,
-    swapchain_format,
   ) or_return
   geometry_pass.init(
     &self.geometry,
     gpu_context,
     swapchain_extent.width,
     swapchain_extent.height,
-    resources_manager,
-  ) or_return
-  geometry_pass.init_depth_prepass(
-    &self.geometry,
-    gpu_context,
-    swapchain_extent,
     resources_manager,
   ) or_return
   particles.init(&self.particles, gpu_context, resources_manager) or_return
@@ -131,41 +117,41 @@ renderer_init :: proc(
 
 renderer_shutdown :: proc(
   self: ^Renderer,
-  gpu_context: ^gpu.GPUContext,
+  device: vk.Device,
+  command_pool: vk.CommandPool,
   resources_manager: ^resources.Manager,
 ) {
-  debug_ui.shutdown(&self.ui, gpu_context)
-  post_process.shutdown(&self.post_process, gpu_context, resources_manager)
-  particles.shutdown(&self.particles, gpu_context)
-  transparency.shutdown(&self.transparency, gpu_context)
-  lighting.lighting_shutdown(&self.lighting, gpu_context)
-  lighting.ambient_shutdown(&self.lighting, gpu_context, resources_manager)
-  geometry_pass.shutdown(&self.geometry, gpu_context)
-  shadow.shutdown(&self.shadow, gpu_context)
+  debug_ui.shutdown(&self.ui, device)
+  post_process.shutdown(&self.post_process, device, resources_manager)
+  particles.shutdown(&self.particles, device)
+  transparency.shutdown(&self.transparency, device)
+  lighting.shutdown(&self.lighting, device, resources_manager)
+  geometry_pass.shutdown(&self.geometry, device)
+  shadow.shutdown(&self.shadow, device)
   targets.shutdown(&self.targets)
   gpu.free_command_buffers(
-    gpu_context.device,
-    gpu_context.command_pool,
+    device,
+    command_pool,
     self.shadow_commands[:],
   )
   gpu.free_command_buffers(
-    gpu_context.device,
-    gpu_context.command_pool,
+    device,
+    command_pool,
     self.geometry_commands[:],
   )
   gpu.free_command_buffers(
-    gpu_context.device,
-    gpu_context.command_pool,
+    device,
+    command_pool,
     self.lighting_commands[:],
   )
   gpu.free_command_buffers(
-    gpu_context.device,
-    gpu_context.command_pool,
+    device,
+    command_pool,
     self.transparency_commands[:],
   )
   gpu.free_command_buffers(
-    gpu_context.device,
-    gpu_context.command_pool,
+    device,
+    command_pool,
     self.post_process_commands[:],
   )
 }
@@ -604,7 +590,7 @@ record_transparency_pass :: proc(
   resources_manager: ^resources.Manager,
   world_state: ^world.World,
   main_render_target: ^resources.RenderTarget,
-  navmesh_renderer: ^RendererNavMesh,
+  navmesh_renderer: ^navigation_renderer.Renderer,
   color_format: vk.Format,
 ) -> vk.Result {
   command_buffer := self.transparency_commands[frame_index]
@@ -637,7 +623,7 @@ record_transparency_pass :: proc(
     frame_index,
   )
 
-  navigation_renderer.navmesh_render(
+  navigation_renderer.render(
     navmesh_renderer,
     command_buffer,
     linalg.MATRIX4F32_IDENTITY,

@@ -29,12 +29,12 @@ init :: proc(
     return .ERROR_INITIALIZATION_FAILED
   }
   vert_module := gpu.create_shader_module(
-    gpu_context,
+    gpu_context.device,
     SHADER_SHADOW_VERT,
   ) or_return
   defer vk.DestroyShaderModule(gpu_context.device, vert_module, nil)
   frag_module := gpu.create_shader_module(
-    gpu_context,
+    gpu_context.device,
     SHADER_SHADOW_FRAG,
   ) or_return
   defer vk.DestroyShaderModule(gpu_context.device, frag_module, nil)
@@ -130,8 +130,8 @@ init :: proc(
   return .SUCCESS
 }
 
-shutdown :: proc(self: ^Renderer, gpu_context: ^gpu.GPUContext) {
-  vk.DestroyPipeline(gpu_context.device, self.pipeline, nil)
+shutdown :: proc(self: ^Renderer, device: vk.Device) {
+  vk.DestroyPipeline(device, self.pipeline, nil)
   self.pipeline = 0
 }
 

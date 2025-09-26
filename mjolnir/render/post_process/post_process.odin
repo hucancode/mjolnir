@@ -181,12 +181,6 @@ Renderer :: struct {
   pipeline_layouts: [len(PostProcessEffectType)]vk.PipelineLayout,
   effect_stack:     [dynamic]PostprocessEffect,
   images:           [2]resources.Handle,
-  frames:           [resources.MAX_FRAMES_IN_FLIGHT]struct {
-    image_available_semaphore: vk.Semaphore,
-    render_finished_semaphore: vk.Semaphore,
-    fence:                     vk.Fence,
-    command_buffer:            vk.CommandBuffer,
-  },
 }
 
 get_effect_type :: proc(effect: PostprocessEffect) -> PostProcessEffectType {
@@ -211,7 +205,7 @@ get_effect_type :: proc(effect: PostprocessEffect) -> PostProcessEffectType {
   return .NONE
 }
 
-effect_add_grayscale :: proc(
+add_grayscale :: proc(
   self: ^Renderer,
   strength: f32 = 1.0,
   weights: [3]f32 = {0.299, 0.587, 0.114},
@@ -223,7 +217,7 @@ effect_add_grayscale :: proc(
   append(&self.effect_stack, effect)
 }
 
-effect_add_blur :: proc(
+add_blur :: proc(
   self: ^Renderer,
   radius: f32,
   gaussian: bool = true,
@@ -242,7 +236,7 @@ effect_add_blur :: proc(
   append(&self.effect_stack, vertical_effect)
 }
 
-effect_add_directional_blur :: proc(
+add_directional_blur :: proc(
   self: ^Renderer,
   radius: f32,
   direction: f32 = 0.0, // 0.0 = horizontal, 1.0 = vertical
@@ -256,7 +250,7 @@ effect_add_directional_blur :: proc(
   append(&self.effect_stack, effect)
 }
 
-effect_add_bloom :: proc(
+add_bloom :: proc(
   self: ^Renderer,
   threshold: f32 = 0.2,
   intensity: f32 = 1.0,
@@ -278,7 +272,7 @@ effect_add_bloom :: proc(
   append(&self.effect_stack, effect)
 }
 
-effect_add_tonemap :: proc(
+add_tonemap :: proc(
   self: ^Renderer,
   exposure: f32 = 1.0,
   gamma: f32 = 2.2,
@@ -290,7 +284,7 @@ effect_add_tonemap :: proc(
   append(&self.effect_stack, effect)
 }
 
-effect_add_outline :: proc(
+add_outline :: proc(
   self: ^Renderer,
   thickness: f32,
   color: [3]f32,
@@ -302,7 +296,7 @@ effect_add_outline :: proc(
   append(&self.effect_stack, effect)
 }
 
-effect_add_fog :: proc(
+add_fog :: proc(
   self: ^Renderer,
   color: [3]f32 = {0.7, 0.7, 0.8},
   density: f32 = 0.02,
@@ -318,7 +312,7 @@ effect_add_fog :: proc(
   append(&self.effect_stack, effect)
 }
 
-effect_add_crosshatch :: proc(
+add_crosshatch :: proc(
   self: ^Renderer,
   resolution: [2]f32,
   hatch_offset_y: f32 = 5.0,
@@ -338,7 +332,7 @@ effect_add_crosshatch :: proc(
   append(&self.effect_stack, effect)
 }
 
-effect_add_dof :: proc(
+add_dof :: proc(
   self: ^Renderer,
   focus_distance: f32 = 3.0,
   focus_range: f32 = 2.0,
@@ -368,7 +362,7 @@ init :: proc(
   self.effect_stack = make([dynamic]PostprocessEffect)
   count :: len(PostProcessEffectType)
   vert_module := gpu.create_shader_module(
-    gpu_context,
+    gpu_context.device,
     SHADER_POSTPROCESS_VERT,
   ) or_return
   defer vk.DestroyShaderModule(gpu_context.device, vert_module, nil)
@@ -397,7 +391,7 @@ init :: proc(
       shader_code = SHADER_POSTPROCESS_FRAG
     }
     frag_modules[i] = gpu.create_shader_module(
-      gpu_context,
+      gpu_context.device,
       shader_code,
     ) or_return
   }
@@ -535,26 +529,6 @@ init :: proc(
     raw_data(self.pipelines[:]),
   ) or_return
   log.info("Postprocess pipeline initialized successfully")
-  for &frame in self.frames {
-    vk.CreateSemaphore(
-      gpu_context.device,
-      &{sType = .SEMAPHORE_CREATE_INFO},
-      nil,
-      &frame.image_available_semaphore,
-    ) or_return
-    vk.CreateSemaphore(
-      gpu_context.device,
-      &{sType = .SEMAPHORE_CREATE_INFO},
-      nil,
-      &frame.render_finished_semaphore,
-    ) or_return
-    vk.CreateFence(
-      gpu_context.device,
-      &{sType = .FENCE_CREATE_INFO, flags = {.SIGNALED}},
-      nil,
-      &frame.fence,
-    ) or_return
-  }
   return .SUCCESS
 }
 
@@ -581,13 +555,13 @@ create_images :: proc(
 
 destroy_images :: proc(
   self: ^Renderer,
-  gpu_context: ^gpu.GPUContext,
+  device: vk.Device,
   resources_manager: ^resources.Manager,
 ) {
   for handle in self.images {
     if item, freed := resources.free(&resources_manager.image_2d_buffers, handle);
        freed {
-      gpu.image_buffer_detroy(gpu_context, item)
+      gpu.image_buffer_destroy(device, item)
     }
   }
 }
@@ -599,7 +573,7 @@ recreate_images :: proc(
   format: vk.Format,
   resources_manager: ^resources.Manager,
 ) -> vk.Result {
-  destroy_images(self, gpu_context, resources_manager)
+  destroy_images(self, gpu_context.device, resources_manager)
   return create_images(
     gpu_context,
     self,
@@ -612,38 +586,19 @@ recreate_images :: proc(
 
 shutdown :: proc(
   self: ^Renderer,
-  gpu_context: ^gpu.GPUContext,
+  device: vk.Device,
   resources_manager: ^resources.Manager,
 ) {
-  for &frame in self.frames {
-    vk.DestroySemaphore(
-      gpu_context.device,
-      frame.image_available_semaphore,
-      nil,
-    )
-    vk.DestroySemaphore(
-      gpu_context.device,
-      frame.render_finished_semaphore,
-      nil,
-    )
-    vk.DestroyFence(gpu_context.device, frame.fence, nil)
-    vk.FreeCommandBuffers(
-      gpu_context.device,
-      gpu_context.command_pool,
-      1,
-      &frame.command_buffer,
-    )
-  }
   for &p in self.pipelines {
-    vk.DestroyPipeline(gpu_context.device, p, nil)
+    vk.DestroyPipeline(device, p, nil)
     p = 0
   }
   for &layout in self.pipeline_layouts {
-    vk.DestroyPipelineLayout(gpu_context.device, layout, nil)
+    vk.DestroyPipelineLayout(device, layout, nil)
     layout = 0
   }
   delete(self.effect_stack)
-  destroy_images(self, gpu_context, resources_manager)
+  destroy_images(self, device, resources_manager)
 }
 
 // Modular postprocess API

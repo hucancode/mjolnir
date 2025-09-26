@@ -143,9 +143,9 @@ render_target_init :: proc(
   return .SUCCESS
 }
 
-render_target_detroy :: proc(
+render_target_destroy :: proc(
   target: ^RenderTarget,
-  gpu_context: ^gpu.GPUContext,
+  device: vk.Device,
   manager: ^Manager,
 ) {
   free(&manager.cameras, target.camera)
@@ -155,7 +155,7 @@ render_target_detroy :: proc(
         &manager.image_2d_buffers,
         target.final_images[frame],
       ); freed {
-        gpu.image_buffer_detroy(gpu_context, item)
+        gpu.image_buffer_destroy(device, item)
       }
     }
     if .POSITION_TEXTURE in target.features {
@@ -163,7 +163,7 @@ render_target_detroy :: proc(
         &manager.image_2d_buffers,
         target.position_textures[frame],
       ); freed {
-        gpu.image_buffer_detroy(gpu_context, item)
+        gpu.image_buffer_destroy(device, item)
       }
     }
     if .NORMAL_TEXTURE in target.features {
@@ -171,7 +171,7 @@ render_target_detroy :: proc(
         &manager.image_2d_buffers,
         target.normal_textures[frame],
       ); freed {
-        gpu.image_buffer_detroy(gpu_context, item)
+        gpu.image_buffer_destroy(device, item)
       }
     }
     if .ALBEDO_TEXTURE in target.features {
@@ -179,7 +179,7 @@ render_target_detroy :: proc(
         &manager.image_2d_buffers,
         target.albedo_textures[frame],
       ); freed {
-        gpu.image_buffer_detroy(gpu_context, item)
+        gpu.image_buffer_destroy(device, item)
       }
     }
     if .METALLIC_ROUGHNESS in target.features {
@@ -187,7 +187,7 @@ render_target_detroy :: proc(
         &manager.image_2d_buffers,
         target.metallic_roughness_textures[frame],
       ); freed {
-        gpu.image_buffer_detroy(gpu_context, item)
+        gpu.image_buffer_destroy(device, item)
       }
     }
     if .EMISSIVE_TEXTURE in target.features {
@@ -195,7 +195,7 @@ render_target_detroy :: proc(
         &manager.image_2d_buffers,
         target.emissive_textures[frame],
       ); freed {
-        gpu.image_buffer_detroy(gpu_context, item)
+        gpu.image_buffer_destroy(device, item)
       }
     }
     if .DEPTH_TEXTURE in target.features {
@@ -203,55 +203,35 @@ render_target_detroy :: proc(
         &manager.image_2d_buffers,
         target.depth_textures[frame],
       ); freed {
-        gpu.image_buffer_detroy(gpu_context, item)
+        gpu.image_buffer_destroy(device, item)
       }
     }
   }
 }
 
-// Update camera uniform for the render target using bindless camera buffer
-render_target_update_camera_data :: proc(
+render_target_upload_camera_data :: proc(
   manager: ^Manager,
   target: ^RenderTarget,
 ) {
-  camera_ptr, ok := get_camera(manager, target.camera)
-  uniform := get_camera_data(manager, target.camera.index)
-  if !ok || camera_ptr == nil || uniform == nil {
+  dst := gpu.data_buffer_get(&manager.camera_buffer, target.camera.index)
+  camera, ok := get_camera(manager, target.camera)
+  if dst == nil || !ok {
     log.errorf("Camera %v or uniform missing", target.camera)
     return
   }
-  camera_data_update(
-    uniform,
-    camera_ptr,
-    target.extent.width,
-    target.extent.height,
-  )
+  dst.view, dst.projection = geometry.camera_calculate_matrices(camera^)
+  near, far := geometry.camera_get_near_far(camera^)
+  dst.viewport_params = [4]f32{
+    f32(target.extent.width),
+    f32(target.extent.height),
+    near,
+    far,
+  }
+  dst.position = [4]f32{camera.position[0], camera.position[1], camera.position[2], 1.0}
+  frustum := geometry.make_frustum(dst.projection * dst.view)
+  dst.frustum_planes = frustum.planes
 }
 
-// Get texture handles for current frame
-render_target_get_current_textures :: proc(
-  target: ^RenderTarget,
-  frame_index: u32,
-) -> (
-  final_image: Handle,
-  position_texture: Handle,
-  normal_texture: Handle,
-  albedo_texture: Handle,
-  metallic_roughness_texture: Handle,
-  emissive_texture: Handle,
-  depth_texture: Handle,
-) {
-  frame := frame_index
-  return target.final_images[frame],
-    target.position_textures[frame],
-    target.normal_textures[frame],
-    target.albedo_textures[frame],
-    target.metallic_roughness_textures[frame],
-    target.emissive_textures[frame],
-    target.depth_textures[frame]
-}
-
-// Get specific texture for current frame
 get_final_image :: proc(
   target: ^RenderTarget,
   frame_index: u32,

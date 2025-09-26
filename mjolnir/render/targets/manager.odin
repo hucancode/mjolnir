@@ -39,7 +39,3 @@ track :: proc(self: ^Manager, handle: resources.Handle) {
   if contains(self, handle) do return
   append(&self.active, handle)
 }
-
-handles :: proc(self: ^Manager) -> []resources.Handle {
-  return self.active[:]
-}

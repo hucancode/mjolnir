@@ -523,7 +523,7 @@ command_pool_init :: proc(self: ^GPUContext) -> vk.Result {
 }
 
 create_shader_module :: proc(
-  self: ^GPUContext,
+  device: vk.Device,
   code: []u8,
 ) -> (
   module: vk.ShaderModule,
@@ -538,7 +538,7 @@ create_shader_module :: proc(
     codeSize = len(code),
     pCode    = raw_data(slice.reinterpret([]u32, code)),
   }
-  vk.CreateShaderModule(self.device, &create_info, nil, &module) or_return
+  vk.CreateShaderModule(device, &create_info, nil, &module) or_return
   res = .SUCCESS
   return
 }

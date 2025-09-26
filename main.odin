@@ -315,7 +315,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   }
   when false {
     log.info("Setting up bloom...")
-    // effect_add_bloom(&engine.postprocess, 0.8, 0.5, 16.0)
+    // add_bloom(&engine.postprocess, 0.8, 0.5, 16.0)
     // Create a bright white ball to test bloom effect
     _, bright_ball_node := spawn(
     &engine.world,
@@ -421,23 +421,23 @@ setup :: proc(engine: ^mjolnir.Engine) {
     )
     world.scale(forcefield_visual, 0.2)
   }
-  post_process.effect_add_fog(
+  post_process.add_fog(
     &engine.render.post_process,
     [3]f32{0.4, 0.0, 0.8},
     0.02,
     5.0,
     20.0,
   )
-  // post_process.effect_add_bloom(&engine.render.post_process)
-  post_process.effect_add_crosshatch(
+  // post_process.add_bloom(&engine.render.post_process)
+  post_process.add_crosshatch(
     &engine.render.post_process,
     [2]f32{1280, 720},
   )
-  // post_process.effect_add_blur(&engine.render.post_process, 18.0)
-  // post_process.effect_add_tonemap(&engine.render.post_process, 1.5, 1.3)
-  // post_process.effect_add_dof(&engine.render.post_process)
-  // post_process.effect_add_grayscale(&engine.render.post_process, 0.9)
-  // post_process.effect_add_outline(&engine.render.post_process, 2.0, [3]f32{1.0, 0.0, 0.0})
+  // post_process.add_blur(&engine.render.post_process, 18.0)
+  // post_process.add_tonemap(&engine.render.post_process, 1.5, 1.3)
+  // post_process.add_dof(&engine.render.post_process)
+  // post_process.add_grayscale(&engine.render.post_process, 0.9)
+  // post_process.add_outline(&engine.render.post_process, 2.0, [3]f32{1.0, 0.0, 0.0})
   // Initialize camera controllers
   setup_camera_controller_callbacks(engine.window)
   main_camera := get_main_camera(engine)
@@ -613,7 +613,7 @@ custom_render :: proc(
   // Update camera position and orientation
   camera_look_at(portal_camera, camera_pos, target, {0, 1, 0})
   // Update portal camera uniform
-  resources.render_target_update_camera_data(&engine.resource_manager, portal_rt)
+  resources.render_target_upload_camera_data(&engine.resource_manager, portal_rt)
   camera_data := resources.get_camera_data(
     &engine.resource_manager,
     portal_rt.camera.index,

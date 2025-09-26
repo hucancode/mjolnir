@@ -54,17 +54,6 @@ MeshAttachment :: world.MeshAttachment
 ForceFieldAttachment :: world.ForceFieldAttachment
 EmitterAttachment :: world.EmitterAttachment
 
-// Re-export render types for convenience
-RendererNavMesh :: navmesh_renderer.RendererNavMesh
-
-// Re-export navmesh functions
-navmesh_update_path :: navmesh_renderer.navmesh_update_path
-navmesh_clear_path :: navmesh_renderer.navmesh_clear_path
-
-// Re-export navmesh types that might be needed
-NavMeshColorMode :: navmesh_renderer.NavMeshColorMode
-NavMeshVertex :: navmesh_renderer.NavMeshVertex
-
 // Legacy wrapper functions for backwards compatibility
 spawn :: proc {
   spawn_world,
@@ -100,8 +89,8 @@ despawn :: proc(engine: ^Engine, handle: Handle) -> bool {
 }
 
 // Add missing navmesh functions
-navmesh_build_from_recast :: navmesh_renderer.navmesh_build_from_recast
-navmesh_get_triangle_count :: navmesh_renderer.navmesh_get_triangle_count
+navmesh_build_from_recast :: navmesh_renderer.build_from_recast
+navmesh_get_triangle_count :: navmesh_renderer.get_triangle_count
 
 g_context: runtime.Context
 
@@ -185,7 +174,7 @@ Engine :: struct {
   custom_render_proc:          CustomRenderProc,
   render_error_count:          u32,
   render:                      Renderer,
-  navmesh:                     RendererNavMesh,
+  navmesh:                     navmesh_renderer.Renderer,
   command_buffers:             [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
   cursor_pos:                  [2]i32,
   // Main render target for primary rendering
@@ -368,7 +357,7 @@ init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
     get_window_dpi(self.window),
   ) or_return
   log.debugf("initializing navigation mesh renderer")
-  navmesh_renderer.navmesh_init(&self.navmesh, &self.gpu_context, &self.resource_manager) or_return
+  navmesh_renderer.init(&self.navmesh, &self.gpu_context, &self.resource_manager) or_return
   glfw.SetKeyCallback(
     self.window,
     proc "c" (window: glfw.WindowHandle, key, scancode, action, mods: c.int) {
@@ -654,7 +643,7 @@ shutdown :: proc(self: ^Engine) {
     &self.resource_manager.render_targets,
     self.main_render_target,
   ); ok {
-    resources.render_target_detroy(item, &self.gpu_context, &self.resource_manager)
+    resources.render_target_destroy(item, self.gpu_context.device, &self.resource_manager)
   }
   for j in 0 ..< MAX_SHADOW_MAPS {
     resources.free(
@@ -670,11 +659,11 @@ shutdown :: proc(self: ^Engine) {
   }
   delete(self.pending_node_deletions)
   vk.DestroyFence(self.gpu_context.device, self.frame_fence, nil)
-  renderer_shutdown(&self.render, &self.gpu_context, &self.resource_manager)
-  navmesh_renderer.navmesh_destroy(&self.navmesh, &self.gpu_context)
+  renderer_shutdown(&self.render, self.gpu_context.device, self.gpu_context.command_pool, &self.resource_manager)
+  navmesh_renderer.destroy(&self.navmesh, self.gpu_context.device)
   world.shutdown(&self.world, &self.gpu_context, &self.resource_manager)
   resources.shutdown(&self.resource_manager, &self.gpu_context)
-  gpu.swapchain_destroy(&self.swapchain, &self.gpu_context)
+  gpu.swapchain_destroy(&self.swapchain, self.gpu_context.device)
   gpu.shutdown(&self.gpu_context)
   glfw.DestroyWindow(self.window)
   glfw.Terminate()
@@ -782,18 +771,15 @@ process_point_light :: proc(
       target := position + dirs[face]
       geometry.camera_look_at(camera, position, target, ups[face])
       light.cube_cameras[face] = camera_handle
-
       render_target := resources.get(
         self.resource_manager.render_targets,
         light.cube_render_targets[face],
+      ) or_continue
+      render_target.camera = camera_handle
+      resources.render_target_upload_camera_data(
+        &self.resource_manager,
+        render_target,
       )
-      if render_target != nil {
-        render_target.camera = camera_handle
-        resources.render_target_update_camera_data(
-          &self.resource_manager,
-          render_target,
-        )
-      }
     }
 
     light.shadow_map = self.cube_shadow_maps[self.frame_index][slot]
@@ -874,10 +860,7 @@ process_spot_light :: proc(
     )
     if render_target != nil {
       render_target.camera = camera_handle
-      resources.render_target_update_camera_data(
-        &self.resource_manager,
-        render_target,
-      )
+      resources.render_target_upload_camera_data(&self.resource_manager, render_target)
     }
   }
 }
@@ -964,9 +947,9 @@ recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
       old_camera.position if old_camera != nil else [3]f32{0, 0, 3}
     old_target := [3]f32{0, 0, 0} // Calculate from camera direction if needed
 
-    resources.render_target_detroy(
+    resources.render_target_destroy(
       main_render_target,
-      &engine.gpu_context,
+      engine.gpu_context.device,
       &engine.resource_manager,
     )
     resources.render_target_init(
@@ -1003,7 +986,7 @@ recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
 }
 
 render :: proc(self: ^Engine) -> vk.Result {
-  gpu.acquire_next_image(&self.gpu_context, &self.swapchain, self.frame_index) or_return
+  gpu.acquire_next_image(self.gpu_context.device, &self.swapchain, self.frame_index) or_return
   mu.begin(&self.render.ui.ctx)
   command_buffer := self.command_buffers[self.frame_index]
   vk.ResetCommandBuffer(command_buffer, {}) or_return
@@ -1025,7 +1008,7 @@ render :: proc(self: ^Engine) -> vk.Result {
     log.errorf("Main camera not found")
     return .ERROR_UNKNOWN
   }
-  resources.render_target_update_camera_data(&self.resource_manager, main_render_target)
+  resources.render_target_upload_camera_data(&self.resource_manager, main_render_target)
   world.upload_world_matrices(&self.world, &self.resource_manager, self.frame_index)
   defer {
     for i in 0 ..< self.active_light_count {

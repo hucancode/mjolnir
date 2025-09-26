@@ -43,13 +43,13 @@ create_transparent_pipelines :: proc(
   // Load shader modules at compile time
   vert_shader_code := #load("../../shader/transparent/vert.spv")
   vert_module := gpu.create_shader_module(
-    gpu_context,
+    gpu_context.device,
     vert_shader_code,
   ) or_return
   defer vk.DestroyShaderModule(gpu_context.device, vert_module, nil)
   frag_shader_code := #load("../../shader/transparent/frag.spv")
   frag_module := gpu.create_shader_module(
-    gpu_context,
+    gpu_context.device,
     frag_shader_code,
   ) or_return
   defer vk.DestroyShaderModule(gpu_context.device, frag_module, nil)
@@ -184,14 +184,14 @@ create_wireframe_pipelines :: proc(
   // Load shader modules at compile time
   vert_shader_code := #load("../../shader/wireframe/vert.spv")
   vert_module := gpu.create_shader_module(
-    gpu_context,
+    gpu_context.device,
     vert_shader_code,
   ) or_return
   defer vk.DestroyShaderModule(gpu_context.device, vert_module, nil)
 
   frag_shader_code := #load("../../shader/wireframe/frag.spv")
   frag_module := gpu.create_shader_module(
-    gpu_context,
+    gpu_context.device,
     frag_shader_code,
   ) or_return
   defer vk.DestroyShaderModule(gpu_context.device, frag_module, nil)
@@ -319,17 +319,12 @@ create_wireframe_pipelines :: proc(
 
 shutdown :: proc(
   self: ^Renderer,
-  gpu_context: ^gpu.GPUContext,
+  device: vk.Device,
 ) {
-  if self.transparent_pipeline != 0 {
-    vk.DestroyPipeline(gpu_context.device, self.transparent_pipeline, nil)
-    self.transparent_pipeline = 0
-  }
-
-  if self.wireframe_pipeline != 0 {
-    vk.DestroyPipeline(gpu_context.device, self.wireframe_pipeline, nil)
-    self.wireframe_pipeline = 0
-  }
+  vk.DestroyPipeline(device, self.transparent_pipeline, nil)
+  self.transparent_pipeline = 0
+  vk.DestroyPipeline(device, self.wireframe_pipeline, nil)
+  self.wireframe_pipeline = 0
 }
 
 begin_pass :: proc(
@@ -443,7 +438,6 @@ render :: proc(
     size_of(PushConstant),
     &push_constants,
   )
-
   vertex_buffers := [1]vk.Buffer{resources_manager.vertex_buffer.buffer}
   vertex_offsets := [1]vk.DeviceSize{0}
   vk.CmdBindVertexBuffers(

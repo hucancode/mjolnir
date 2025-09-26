@@ -133,14 +133,14 @@ data_buffer_offset_of :: proc(self: ^DataBuffer($T), index: u32) -> u32 {
   return index * u32(self.element_size)
 }
 
-data_buffer_destroy :: proc(gpu_context: ^GPUContext, buffer: ^DataBuffer($T)) {
+data_buffer_destroy :: proc(device: vk.Device, buffer: ^DataBuffer($T)) {
   if buffer.mapped != nil {
-    vk.UnmapMemory(gpu_context.device, buffer.memory)
+    vk.UnmapMemory(device, buffer.memory)
     buffer.mapped = nil
   }
-  vk.DestroyBuffer(gpu_context.device, buffer.buffer, nil)
+  vk.DestroyBuffer(device, buffer.buffer, nil)
   buffer.buffer = 0
-  vk.FreeMemory(gpu_context.device, buffer.memory, nil)
+  vk.FreeMemory(device, buffer.memory, nil)
   buffer.memory = 0
   buffer.bytes_count = 0
   buffer.element_size = 0
@@ -196,7 +196,7 @@ create_local_buffer :: proc(
     {.TRANSFER_SRC},
     data,
   ) or_return
-  defer data_buffer_destroy(gpu_context, &staging)
+  defer data_buffer_destroy(gpu_context.device, &staging)
   copy_buffer(gpu_context, buffer, staging) or_return
   ret = .SUCCESS
   return
@@ -270,12 +270,12 @@ ImageBuffer :: struct {
   view:          vk.ImageView,
 }
 
-image_buffer_detroy :: proc(gpu_context: ^GPUContext, self: ^ImageBuffer) {
-  vk.DestroyImageView(gpu_context.device, self.view, nil)
+image_buffer_destroy :: proc(device: vk.Device, self: ^ImageBuffer) {
+  vk.DestroyImageView(device, self.view, nil)
   self.view = 0
-  vk.DestroyImage(gpu_context.device, self.image, nil)
+  vk.DestroyImage(device, self.image, nil)
   self.image = 0
-  vk.FreeMemory(gpu_context.device, self.memory, nil)
+  vk.FreeMemory(device, self.memory, nil)
   self.memory = 0
   self.width = 0
   self.height = 0
@@ -283,7 +283,7 @@ image_buffer_detroy :: proc(gpu_context: ^GPUContext, self: ^ImageBuffer) {
 }
 
 create_image_view :: proc(
-  gpu_context: ^GPUContext,
+  device: vk.Device,
   image: vk.Image,
   format: vk.Format,
   aspect_mask: vk.ImageAspectFlags,
@@ -305,7 +305,7 @@ create_image_view :: proc(
       layerCount = 1,
     },
   }
-  res = vk.CreateImageView(gpu_context.device, &create_info, nil, &view)
+  res = vk.CreateImageView(device, &create_info, nil, &view)
   return
 }
 
@@ -465,7 +465,7 @@ create_image_buffer :: proc(
     {.TRANSFER_SRC},
     data,
   ) or_return
-  defer data_buffer_destroy(gpu_context, &staging)
+  defer data_buffer_destroy(gpu_context.device, &staging)
   img = malloc_image_buffer(
     gpu_context,
     width,
@@ -477,7 +477,7 @@ create_image_buffer :: proc(
   ) or_return
   copy_image(gpu_context, img, staging) or_return
   aspect_mask := vk.ImageAspectFlags{.COLOR}
-  img.view = create_image_view(gpu_context, img.image, format, aspect_mask) or_return
+  img.view = create_image_view(gpu_context.device, img.image, format, aspect_mask) or_return
   ret = .SUCCESS
   return
 }
@@ -557,7 +557,7 @@ depth_image_init :: proc(
   )
   end_single_time_command(gpu_context, &cmd_buffer) or_return
   img_buffer.view = create_image_view(
-    gpu_context,
+    gpu_context.device,
     img_buffer.image,
     img_buffer.format,
     {.DEPTH},
@@ -657,17 +657,17 @@ cube_depth_texture_init :: proc(
   return .SUCCESS
 }
 
-cube_depth_texture_destroy :: proc(gpu_context: ^GPUContext, self: ^CubeImageBuffer) {
+cube_depth_texture_destroy :: proc(device: vk.Device, self: ^CubeImageBuffer) {
   if self == nil {
     return
   }
   for &v in self.face_views {
-    vk.DestroyImageView(gpu_context.device, v, nil)
+    vk.DestroyImageView(device, v, nil)
     v = 0
   }
-  vk.DestroyImageView(gpu_context.device, self.view, nil)
+  vk.DestroyImageView(device, self.view, nil)
   self.view = 0
-  image_buffer_detroy(gpu_context, &self.buffer)
+  image_buffer_destroy(device, &self.buffer)
 }
 
 // Create image buffer with custom mip levels
@@ -718,7 +718,7 @@ malloc_image_buffer_with_mips :: proc(
 
 // Create image view with mip levels
 create_image_view_with_mips :: proc(
-  gpu_context: ^GPUContext,
+  device: vk.Device,
   image: vk.Image,
   format: vk.Format,
   aspect: vk.ImageAspectFlags,
@@ -741,7 +741,7 @@ create_image_view_with_mips :: proc(
       layerCount = 1,
     },
   }
-  vk.CreateImageView(gpu_context.device, &create_info, nil, &view) or_return
+  vk.CreateImageView(device, &create_info, nil, &view) or_return
   log.infof(
     "Image view created successfully with mip levels 0-%d",
     mip_levels - 1,

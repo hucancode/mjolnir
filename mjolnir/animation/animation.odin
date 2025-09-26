@@ -251,7 +251,7 @@ Channel :: struct {
   cubic_scales:      []CubicSplineKeyframe([3]f32),
 }
 
-channel_detroy :: proc(channel: ^Channel) {
+channel_destroy :: proc(channel: ^Channel) {
   delete(channel.positions)
   channel.positions = nil
   delete(channel.rotations)
@@ -320,7 +320,7 @@ Clip :: struct {
 }
 
 clip_destroy :: proc(clip: ^Clip) {
-  for &channel in clip.channels do channel_detroy(&channel)
+  for &channel in clip.channels do channel_destroy(&channel)
   delete(clip.channels)
   clip.channels = nil
 }

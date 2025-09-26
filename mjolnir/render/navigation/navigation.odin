@@ -11,18 +11,18 @@ import "../../resources"
 import "../../navigation/recast"
 import vk "vendor:vulkan"
 
-RendererNavMesh :: struct {
+Renderer :: struct {
     pipeline:                vk.Pipeline,
     pipeline_layout:         vk.PipelineLayout,
     debug_pipeline:          vk.Pipeline,
     debug_pipeline_layout:   vk.PipelineLayout,
 
-    vertex_buffer:           gpu.DataBuffer(NavMeshVertex),
+    vertex_buffer:           gpu.DataBuffer(Vertex),
     index_buffer:            gpu.DataBuffer(u32),
     vertex_count:            u32,
     index_count:             u32,
 
-    path_vertex_buffer:      gpu.DataBuffer(NavMeshVertex),
+    path_vertex_buffer:      gpu.DataBuffer(Vertex),
     path_vertex_count:       u32,
     path_enabled:            bool,
     path_color:              [4]f32,
@@ -31,18 +31,18 @@ RendererNavMesh :: struct {
     debug_mode:              bool,
     height_offset:           f32,
     alpha:                   f32,
-    color_mode:              NavMeshColorMode,
-    debug_render_mode:       NavMeshDebugMode,
+    color_mode:              ColorMode,
+    debug_render_mode:       DebugMode,
     base_color:              [3]f32,
 }
 
-NavMeshVertex :: struct {
+Vertex :: struct {
     position: [3]f32,
     color:    [4]f32,
     normal:   [3]f32,
 }
 
-NavMeshColorMode :: enum u32 {
+ColorMode :: enum u32 {
     Area_Colors = 0,
     Uniform = 1,
     Height_Based = 2,
@@ -50,13 +50,13 @@ NavMeshColorMode :: enum u32 {
     Region_Colors = 4,
 }
 
-NavMeshDebugMode :: enum u32 {
+DebugMode :: enum u32 {
     Wireframe = 0,
     Normals = 1,
     Connectivity = 2,
 }
 
-NavMeshPushConstants :: struct {
+PushConstants :: struct {
     world:         matrix[4,4]f32,
     camera_index:  u32,
     height_offset: f32,
@@ -65,7 +65,7 @@ NavMeshPushConstants :: struct {
     padding:       [11]u32,
 }
 
-NavMeshDebugPushConstants :: struct {
+DebugPushConstants :: struct {
     world:         matrix[4,4]f32,
     camera_index:  u32,
     height_offset: f32,
@@ -87,7 +87,7 @@ AREA_COLORS := [7][4]f32{
     6 = {0.8, 0.8, 0.0, 0.6},
 }
 
-navmesh_init :: proc(renderer: ^RendererNavMesh, gpu_context: ^gpu.GPUContext, resources_manager: ^resources.Manager) -> vk.Result {
+init :: proc(renderer: ^Renderer, gpu_context: ^gpu.GPUContext, resources_manager: ^resources.Manager) -> vk.Result {
     renderer.enabled = true
     renderer.height_offset = 0.01
     renderer.alpha = 0.6
@@ -95,31 +95,31 @@ navmesh_init :: proc(renderer: ^RendererNavMesh, gpu_context: ^gpu.GPUContext, r
     renderer.debug_render_mode = .Wireframe
     renderer.base_color = {0.0, 0.8, 0.2}
     renderer.path_color = {1.0, 1.0, 0.0, 1.0}
-    create_navmesh_pipelines(renderer, gpu_context, resources_manager) or_return
-    renderer.vertex_buffer = gpu.create_host_visible_buffer(gpu_context, NavMeshVertex, 16384, {.VERTEX_BUFFER}) or_return
+    create_pipelines(renderer, gpu_context, resources_manager) or_return
+    renderer.vertex_buffer = gpu.create_host_visible_buffer(gpu_context, Vertex, 16384, {.VERTEX_BUFFER}) or_return
     renderer.index_buffer = gpu.create_host_visible_buffer(gpu_context, u32, 32768, {.INDEX_BUFFER}) or_return
-    renderer.path_vertex_buffer = gpu.create_host_visible_buffer(gpu_context, NavMeshVertex, MAX_PATH_SEGMENTS * 2, {.VERTEX_BUFFER}) or_return
+    renderer.path_vertex_buffer = gpu.create_host_visible_buffer(gpu_context, Vertex, MAX_PATH_SEGMENTS * 2, {.VERTEX_BUFFER}) or_return
     return .SUCCESS
 }
 
-navmesh_destroy :: proc(renderer: ^RendererNavMesh, gpu_context: ^gpu.GPUContext) {
-    vk.DestroyPipeline(gpu_context.device, renderer.pipeline, nil)
-    vk.DestroyPipelineLayout(gpu_context.device, renderer.pipeline_layout, nil)
-    vk.DestroyPipeline(gpu_context.device, renderer.debug_pipeline, nil)
-    vk.DestroyPipelineLayout(gpu_context.device, renderer.debug_pipeline_layout, nil)
-    gpu.data_buffer_destroy(gpu_context, &renderer.vertex_buffer)
-    gpu.data_buffer_destroy(gpu_context, &renderer.index_buffer)
-    gpu.data_buffer_destroy(gpu_context, &renderer.path_vertex_buffer)
+destroy :: proc(self: ^Renderer, device: vk.Device) {
+    vk.DestroyPipeline(device, self.pipeline, nil)
+    vk.DestroyPipelineLayout(device, self.pipeline_layout, nil)
+    vk.DestroyPipeline(device, self.debug_pipeline, nil)
+    vk.DestroyPipelineLayout(device, self.debug_pipeline_layout, nil)
+    gpu.data_buffer_destroy(device, &self.vertex_buffer)
+    gpu.data_buffer_destroy(device, &self.index_buffer)
+    gpu.data_buffer_destroy(device, &self.path_vertex_buffer)
 }
 
-navmesh_build_from_recast :: proc(renderer: ^RendererNavMesh, gpu_context: ^gpu.GPUContext,
+build_from_recast :: proc(self: ^Renderer, gpu_context: ^gpu.GPUContext,
                                   poly_mesh: ^recast.Poly_Mesh, detail_mesh: ^recast.Poly_Mesh_Detail) -> bool {
     if poly_mesh == nil {
         return false
     }
     use_detail_mesh := false//detail_mesh != nil && len(detail_mesh.verts) > 0
     // TODO: need to investigate why we cannot use detail mesh to render
-    vertices := make([dynamic]NavMeshVertex, 0, len(poly_mesh.verts))
+    vertices := make([dynamic]Vertex, 0, len(poly_mesh.verts))
     indices := make([dynamic]u32, 0, poly_mesh.npolys * 6)
     defer delete(vertices)
     defer delete(indices)
@@ -135,9 +135,9 @@ navmesh_build_from_recast :: proc(renderer: ^RendererNavMesh, gpu_context: ^gpu.
                 f32(v.z) * poly_mesh.cs + poly_mesh.bmin[2],
             }
 
-            append(&vertices, NavMeshVertex{
+            append(&vertices, Vertex{
                 position = pos,
-                color = [4]f32{0.0, 0.8, 0.2, renderer.alpha},
+                color = [4]f32{0.0, 0.8, 0.2, self.alpha},
                 normal = [3]f32{0, 1, 0},
             })
         }
@@ -145,9 +145,9 @@ navmesh_build_from_recast :: proc(renderer: ^RendererNavMesh, gpu_context: ^gpu.
         for i in 0..<len(detail_mesh.verts) {
             pos := detail_mesh.verts[i]
 
-            append(&vertices, NavMeshVertex{
+            append(&vertices, Vertex{
                 position = pos,
-                color = [4]f32{0.0, 0.8, 0.2, renderer.alpha},
+                color = [4]f32{0.0, 0.8, 0.2, self.alpha},
                 normal = [3]f32{0, 1, 0},
             })
         }
@@ -161,9 +161,9 @@ navmesh_build_from_recast :: proc(renderer: ^RendererNavMesh, gpu_context: ^gpu.
             }
 
             normal := [3]f32{0, 1, 0}
-            color := [4]f32{0.0, 0.8, 0.2, renderer.alpha}
+            color := [4]f32{0.0, 0.8, 0.2, self.alpha}
 
-            append(&vertices, NavMeshVertex{
+            append(&vertices, Vertex{
                 position = pos,
                 color = color,
                 normal = normal,
@@ -183,7 +183,7 @@ navmesh_build_from_recast :: proc(renderer: ^RendererNavMesh, gpu_context: ^gpu.
 
             area_id := poly_mesh.areas[i] if len(poly_mesh.areas) > int(i) else 1
             region_id := poly_mesh.regs[i] if len(poly_mesh.regs) > int(i) else 0
-            area_color := get_area_color(area_id, renderer.color_mode, renderer.base_color, renderer.alpha, u32(i), region_id)
+            area_color := get_area_color(area_id, self.color_mode, self.base_color, self.alpha, u32(i), region_id)
 
             for j in 0..<int(num_tris) {
                 tri_idx := int(base_tri) + j
@@ -224,7 +224,7 @@ navmesh_build_from_recast :: proc(renderer: ^RendererNavMesh, gpu_context: ^gpu.
             poly_base := int(i) * int(poly_mesh.nvp) * 2
             area_id := poly_mesh.areas[i] if len(poly_mesh.areas) > int(i) else 1
             region_id := poly_mesh.regs[i] if len(poly_mesh.regs) > int(i) else 0
-            area_color := get_area_color(area_id, renderer.color_mode, renderer.base_color, renderer.alpha, u32(i), region_id)
+            area_color := get_area_color(area_id, self.color_mode, self.base_color, self.alpha, u32(i), region_id)
 
             poly_verts: [dynamic]u32
             defer delete(poly_verts)
@@ -247,26 +247,26 @@ navmesh_build_from_recast :: proc(renderer: ^RendererNavMesh, gpu_context: ^gpu.
         }
     }
 
-    renderer.vertex_count = u32(len(vertices))
-    renderer.index_count = u32(len(indices))
+    self.vertex_count = u32(len(vertices))
+    self.index_count = u32(len(indices))
 
-    if renderer.vertex_count == 0 || renderer.index_count == 0 {
+    if self.vertex_count == 0 || self.index_count == 0 {
         return true
     }
 
-    if renderer.vertex_count > 16384 {
+    if self.vertex_count > 16384 {
         return false
     }
-    if renderer.index_count > 32768 {
+    if self.index_count > 32768 {
         return false
     }
 
-    vertex_result := gpu.data_buffer_write(&renderer.vertex_buffer, vertices[:])
+    vertex_result := gpu.data_buffer_write(&self.vertex_buffer, vertices[:])
     if vertex_result != .SUCCESS {
         return false
     }
 
-    index_result := gpu.data_buffer_write(&renderer.index_buffer, indices[:])
+    index_result := gpu.data_buffer_write(&self.index_buffer, indices[:])
     if index_result != .SUCCESS {
         return false
     }
@@ -294,7 +294,7 @@ generate_random_color :: proc(seed: u32, alpha: f32) -> [4]f32 {
     return {rgb.x + m, rgb.y + m, rgb.z + m, alpha}
 }
 
-get_area_color :: proc(area_id: u8, color_mode: NavMeshColorMode, base_color: [3]f32, alpha: f32, poly_id: u32 = 0, region_id: u16 = 0) -> [4]f32 {
+get_area_color :: proc(area_id: u8, color_mode: ColorMode, base_color: [3]f32, alpha: f32, poly_id: u32 = 0, region_id: u16 = 0) -> [4]f32 {
     switch color_mode {
     case .Area_Colors:
         if int(area_id) < len(AREA_COLORS) {
@@ -321,14 +321,14 @@ get_area_color :: proc(area_id: u8, color_mode: NavMeshColorMode, base_color: [3
     return {base_color.x, base_color.y, base_color.z, alpha}
 }
 
-navmesh_update_path :: proc(renderer: ^RendererNavMesh, path_points: [][3]f32, path_color: [4]f32 = {1.0, 1.0, 0.0, 1.0}) {
+update_path :: proc(renderer: ^Renderer, path_points: [][3]f32, path_color: [4]f32 = {1.0, 1.0, 0.0, 1.0}) {
     if len(path_points) < 2 {
         renderer.path_enabled = false
         renderer.path_vertex_count = 0
         return
     }
 
-    vertices := make([dynamic]NavMeshVertex)
+    vertices := make([dynamic]Vertex)
     defer delete(vertices)
 
     line_width: f32 = 0.15
@@ -344,33 +344,33 @@ navmesh_update_path :: proc(renderer: ^RendererNavMesh, path_points: [][3]f32, p
             perp = linalg.normalize(linalg.cross(dir, [3]f32{1, 0, 0})) * line_width
         }
 
-        append(&vertices, NavMeshVertex{
+        append(&vertices, Vertex{
             position = start - perp,
             color = path_color,
             normal = {0, 1, 0},
         })
-        append(&vertices, NavMeshVertex{
+        append(&vertices, Vertex{
             position = start + perp,
             color = path_color,
             normal = {0, 1, 0},
         })
-        append(&vertices, NavMeshVertex{
+        append(&vertices, Vertex{
             position = end - perp,
             color = path_color,
             normal = {0, 1, 0},
         })
 
-        append(&vertices, NavMeshVertex{
+        append(&vertices, Vertex{
             position = start + perp,
             color = path_color,
             normal = {0, 1, 0},
         })
-        append(&vertices, NavMeshVertex{
+        append(&vertices, Vertex{
             position = end + perp,
             color = path_color,
             normal = {0, 1, 0},
         })
-        append(&vertices, NavMeshVertex{
+        append(&vertices, Vertex{
             position = end - perp,
             color = path_color,
             normal = {0, 1, 0},
@@ -397,12 +397,12 @@ navmesh_update_path :: proc(renderer: ^RendererNavMesh, path_points: [][3]f32, p
     }
 }
 
-navmesh_clear_path :: proc(renderer: ^RendererNavMesh) {
+clear_path :: proc(renderer: ^Renderer) {
     renderer.path_enabled = false
     renderer.path_vertex_count = 0
 }
 
-navmesh_render :: proc(renderer: ^RendererNavMesh, command_buffer: vk.CommandBuffer,
+render :: proc(renderer: ^Renderer, command_buffer: vk.CommandBuffer,
                       world_matrix: matrix[4,4]f32, camera_index: u32) {
     if !renderer.enabled || renderer.vertex_count == 0 || renderer.index_count == 0 do return
 
@@ -419,7 +419,7 @@ navmesh_render :: proc(renderer: ^RendererNavMesh, command_buffer: vk.CommandBuf
 
     // Set push constants
     if renderer.debug_mode {
-        push_constants := NavMeshDebugPushConstants{
+        push_constants := DebugPushConstants{
             world = world_matrix,
             camera_index = camera_index,
             height_offset = renderer.height_offset,
@@ -428,9 +428,9 @@ navmesh_render :: proc(renderer: ^RendererNavMesh, command_buffer: vk.CommandBuf
             debug_color = renderer.base_color,
         }
         vk.CmdPushConstants(command_buffer, pipeline_layout, {.VERTEX, .FRAGMENT},
-                           0, size_of(NavMeshDebugPushConstants), &push_constants)
+                           0, size_of(DebugPushConstants), &push_constants)
     } else {
-        push_constants := NavMeshPushConstants{
+        push_constants := PushConstants{
             world = world_matrix,
             camera_index = camera_index,
             height_offset = renderer.height_offset,
@@ -438,7 +438,7 @@ navmesh_render :: proc(renderer: ^RendererNavMesh, command_buffer: vk.CommandBuf
             color_mode = u32(renderer.color_mode),
         }
         vk.CmdPushConstants(command_buffer, pipeline_layout, {.VERTEX, .FRAGMENT},
-                           0, size_of(NavMeshPushConstants), &push_constants)
+                           0, size_of(PushConstants), &push_constants)
     }
 
     // Draw navmesh
@@ -454,37 +454,37 @@ navmesh_render :: proc(renderer: ^RendererNavMesh, command_buffer: vk.CommandBuf
         vk.CmdBindVertexBuffers(command_buffer, 0, 1, raw_data(path_vertex_buffers), raw_data(offsets))
 
         // Set push constants for path rendering
-        path_push_constants := NavMeshPushConstants{
+        path_push_constants := PushConstants{
             world = world_matrix,
             camera_index = camera_index,
             height_offset = renderer.height_offset + 0.15, // Slightly higher than navmesh
             alpha = 1.0, // Fully opaque for path
-            color_mode = u32(NavMeshColorMode.Uniform), // Use uniform color from vertex data
+            color_mode = u32(ColorMode.Uniform), // Use uniform color from vertex data
         }
         vk.CmdPushConstants(command_buffer, renderer.pipeline_layout, {.VERTEX, .FRAGMENT},
-                           0, size_of(NavMeshPushConstants), &path_push_constants)
+                           0, size_of(PushConstants), &path_push_constants)
 
         // Draw path triangles
         vk.CmdDraw(command_buffer, renderer.path_vertex_count, 1, 0, 0)
     }
 }
 
-create_navmesh_pipelines :: proc(renderer: ^RendererNavMesh, gpu_context: ^gpu.GPUContext, resources_manager: ^resources.Manager) -> vk.Result {
+create_pipelines :: proc(renderer: ^Renderer, gpu_context: ^gpu.GPUContext, resources_manager: ^resources.Manager) -> vk.Result {
     // Load shaders
     navmesh_vert_code := #load("../../shader/navmesh/vert.spv")
-    navmesh_vert := gpu.create_shader_module(gpu_context, navmesh_vert_code) or_return
+    navmesh_vert := gpu.create_shader_module(gpu_context.device, navmesh_vert_code) or_return
     defer vk.DestroyShaderModule(gpu_context.device, navmesh_vert, nil)
 
     navmesh_frag_code := #load("../../shader/navmesh/frag.spv")
-    navmesh_frag := gpu.create_shader_module(gpu_context, navmesh_frag_code) or_return
+    navmesh_frag := gpu.create_shader_module(gpu_context.device, navmesh_frag_code) or_return
     defer vk.DestroyShaderModule(gpu_context.device, navmesh_frag, nil)
 
     navmesh_debug_vert_code := #load("../../shader/navmesh_debug/vert.spv")
-    navmesh_debug_vert := gpu.create_shader_module(gpu_context, navmesh_debug_vert_code) or_return
+    navmesh_debug_vert := gpu.create_shader_module(gpu_context.device, navmesh_debug_vert_code) or_return
     defer vk.DestroyShaderModule(gpu_context.device, navmesh_debug_vert, nil)
 
     navmesh_debug_frag_code := #load("../../shader/navmesh_debug/frag.spv")
-    navmesh_debug_frag := gpu.create_shader_module(gpu_context, navmesh_debug_frag_code) or_return
+    navmesh_debug_frag := gpu.create_shader_module(gpu_context.device, navmesh_debug_frag_code) or_return
     defer vk.DestroyShaderModule(gpu_context.device, navmesh_debug_frag, nil)
 
     // Create descriptor set layouts (using camera buffer from resources_manager)
@@ -494,7 +494,7 @@ create_navmesh_pipelines :: proc(renderer: ^RendererNavMesh, gpu_context: ^gpu.G
     push_constant_range := vk.PushConstantRange{
         stageFlags = {.VERTEX, .FRAGMENT},
         offset = 0,
-        size = size_of(NavMeshPushConstants),
+        size = size_of(PushConstants),
     }
 
     layout_info := vk.PipelineLayoutCreateInfo{
@@ -511,7 +511,7 @@ create_navmesh_pipelines :: proc(renderer: ^RendererNavMesh, gpu_context: ^gpu.G
     debug_push_constant_range := vk.PushConstantRange{
         stageFlags = {.VERTEX, .FRAGMENT},
         offset = 0,
-        size = size_of(NavMeshDebugPushConstants),
+        size = size_of(DebugPushConstants),
     }
 
     debug_layout_info := layout_info
@@ -522,14 +522,14 @@ create_navmesh_pipelines :: proc(renderer: ^RendererNavMesh, gpu_context: ^gpu.G
     // Vertex input description
     vertex_binding := vk.VertexInputBindingDescription{
         binding = 0,
-        stride = size_of(NavMeshVertex),
+        stride = size_of(Vertex),
         inputRate = .VERTEX,
     }
 
     vertex_attributes := []vk.VertexInputAttributeDescription{
-        {location = 0, binding = 0, format = .R32G32B32_SFLOAT, offset = u32(offset_of(NavMeshVertex, position))},
-        {location = 1, binding = 0, format = .R32G32B32A32_SFLOAT, offset = u32(offset_of(NavMeshVertex, color))},
-        {location = 2, binding = 0, format = .R32G32B32_SFLOAT, offset = u32(offset_of(NavMeshVertex, normal))},
+        {location = 0, binding = 0, format = .R32G32B32_SFLOAT, offset = u32(offset_of(Vertex, position))},
+        {location = 1, binding = 0, format = .R32G32B32A32_SFLOAT, offset = u32(offset_of(Vertex, color))},
+        {location = 2, binding = 0, format = .R32G32B32_SFLOAT, offset = u32(offset_of(Vertex, normal))},
     }
 
     vertex_input := vk.PipelineVertexInputStateCreateInfo{
@@ -676,8 +676,8 @@ create_navmesh_pipelines :: proc(renderer: ^RendererNavMesh, gpu_context: ^gpu.G
 
     // Update vertex input for debug shaders (different layout)
     debug_vertex_attributes := []vk.VertexInputAttributeDescription{
-        {location = 0, binding = 0, format = .R32G32B32_SFLOAT, offset = u32(offset_of(NavMeshVertex, position))},
-        {location = 1, binding = 0, format = .R32G32B32_SFLOAT, offset = u32(offset_of(NavMeshVertex, normal))},
+        {location = 0, binding = 0, format = .R32G32B32_SFLOAT, offset = u32(offset_of(Vertex, position))},
+        {location = 1, binding = 0, format = .R32G32B32_SFLOAT, offset = u32(offset_of(Vertex, normal))},
     }
 
     debug_vertex_input := vk.PipelineVertexInputStateCreateInfo{
@@ -708,10 +708,10 @@ create_navmesh_pipelines :: proc(renderer: ^RendererNavMesh, gpu_context: ^gpu.G
     return .SUCCESS
 }
 
-navmesh_get_triangle_count :: proc(renderer: ^RendererNavMesh) -> u32 {
+get_triangle_count :: proc(renderer: ^Renderer) -> u32 {
     return renderer.index_count / 3
 }
 
-navmesh_has_data :: proc(renderer: ^RendererNavMesh) -> bool {
+has_data :: proc(renderer: ^Renderer) -> bool {
     return renderer.vertex_count > 0 && renderer.index_count > 0
 }

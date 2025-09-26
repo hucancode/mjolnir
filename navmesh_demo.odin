@@ -12,6 +12,7 @@ import "mjolnir/gpu"
 import "mjolnir/navigation"
 import "mjolnir/navigation/recast"
 import "mjolnir/navigation/detour"
+import navigation_renderer "mjolnir/render/navigation"
 import "mjolnir/resources"
 import "mjolnir/world"
 import "vendor:glfw"
@@ -836,13 +837,13 @@ update_path_visualization :: proc(engine_ptr: ^mjolnir.Engine) {
     if navmesh_state.has_path && len(navmesh_state.path_points) >= 2 {
         // Update path in the navmesh renderer
         log.infof("Updating path renderer with %d points", len(navmesh_state.path_points))
-        navmesh_update_path(&engine_ptr.navmesh, navmesh_state.path_points[:], {1.0, 0.8, 0.0, 1.0}) // Orange/yellow path
+        navigation_renderer.update_path(&engine_ptr.navmesh, navmesh_state.path_points[:], {1.0, 0.8, 0.0, 1.0}) // Orange/yellow path
     } else if navmesh_state.has_path && len(navmesh_state.path_points) == 1 {
         log.info("Path has only 1 point - need at least 2 points to draw a line")
-        navmesh_clear_path(&engine_ptr.navmesh)
+        navigation_renderer.clear_path(&engine_ptr.navmesh)
     } else {
         // Clear path if no valid path
-        navmesh_clear_path(&engine_ptr.navmesh)
+        navigation_renderer.clear_path(&engine_ptr.navmesh)
     }
 
     // Remove old path waypoints (no longer needed with line rendering)
@@ -1185,7 +1186,7 @@ navmesh_render2d :: proc(engine_ptr: ^mjolnir.Engine, ctx: ^mu.Context) {
                     mu.label(ctx, fmt.tprintf("> %s", name))
                 } else {
                     if .SUBMIT in mu.button(ctx, name) {
-                        engine_ptr.navmesh.color_mode = mjolnir.NavMeshColorMode(i)
+                        engine_ptr.navmesh.color_mode = navigation_renderer.ColorMode(i)
                         log.infof("Changed navmesh color mode to: %s", name)
                     }
                 }
@@ -1236,7 +1237,7 @@ navmesh_render2d :: proc(engine_ptr: ^mjolnir.Engine, ctx: ^mu.Context) {
                     navmesh_state.has_path = false
                     navmesh_state.picking_mode = .PickingStart
                     update_path_visualization(&global_navmesh_engine)
-                    navmesh_clear_path(&engine_ptr.navmesh)
+                    navigation_renderer.clear_path(&engine_ptr.navmesh)
                     log.info("Path cleared")
                 }
             }
@@ -1326,14 +1327,14 @@ navmesh_key_pressed :: proc(engine_ptr: ^mjolnir.Engine, key, action, mods: int)
         navmesh_state.has_path = false
         navmesh_state.picking_mode = .PickingStart
         update_path_visualization(&global_navmesh_engine)
-        navmesh_clear_path(&engine_ptr.navmesh)
+        navigation_renderer.clear_path(&engine_ptr.navmesh)
         log.info("Path cleared")
 
     case glfw.KEY_D:
         // Cycle through color modes with D key (Debug colors)
         current_mode := int(engine_ptr.navmesh.color_mode)
         current_mode = (current_mode + 1) % 5  // We have 5 color modes now
-        engine_ptr.navmesh.color_mode = mjolnir.NavMeshColorMode(current_mode)
+        engine_ptr.navmesh.color_mode = navigation_renderer.ColorMode(current_mode)
         mode_names := [5]string{"Area Colors", "Uniform", "Height Based", "Random Colors", "Region Colors"}
         log.infof("NavMesh color mode changed to: %s", mode_names[current_mode])
 
@@ -1593,13 +1594,13 @@ build_visualization_from_detour_mesh :: proc(engine_ptr: ^mjolnir.Engine, nav_me
         log.error("Failed to get navigation mesh tile for visualization")
         return false
     }
-    navmesh_vertices := make([dynamic]mjolnir.NavMeshVertex, 0, int(tile.header.vert_count))
+    navmesh_vertices := make([dynamic]navigation_renderer.Vertex, 0, int(tile.header.vert_count))
     indices := make([dynamic]u32, 0, int(tile.header.poly_count) * 3)
     defer delete(navmesh_vertices)
     defer delete(indices)
     for i in 0..<tile.header.vert_count {
         pos := tile.verts[i]
-        append(&navmesh_vertices, mjolnir.NavMeshVertex{
+        append(&navmesh_vertices, navigation_renderer.Vertex{
             position = pos,
             color = {0.0, 0.8, 0.2, 0.6},
             normal = {0, 1, 0},

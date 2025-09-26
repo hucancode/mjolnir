@@ -133,7 +133,7 @@ swapchain_init :: proc(
   self.views = make([]vk.ImageView, swapchain_image_count)
   for i in 0 ..< swapchain_image_count {
     self.views[i] = create_image_view(
-      gpu_context,
+      gpu_context.device,
       self.images[i],
       self.format.format,
       {.COLOR},
@@ -169,8 +169,8 @@ swapchain_init :: proc(
   return .SUCCESS
 }
 
-swapchain_destroy :: proc(self: ^Swapchain, gpu_context: ^GPUContext) {
-  for view in self.views do vk.DestroyImageView(gpu_context.device, view, nil)
+swapchain_destroy :: proc(self: ^Swapchain, device: vk.Device) {
+  for view in self.views do vk.DestroyImageView(device, view, nil)
   delete(self.views)
   self.views = nil
   // TODO: destroying image will make app crash
@@ -179,18 +179,18 @@ swapchain_destroy :: proc(self: ^Swapchain, gpu_context: ^GPUContext) {
   self.images = nil
   for i in 0 ..< MAX_FRAMES_IN_FLIGHT {
     vk.DestroySemaphore(
-      gpu_context.device,
+      device,
       self.image_available_semaphores[i],
       nil,
     )
     vk.DestroySemaphore(
-      gpu_context.device,
+      device,
       self.render_finished_semaphores[i],
       nil,
     )
-    vk.DestroyFence(gpu_context.device, self.in_flight_fences[i], nil)
+    vk.DestroyFence(device, self.in_flight_fences[i], nil)
   }
-  vk.DestroySwapchainKHR(gpu_context.device, self.handle, nil)
+  vk.DestroySwapchainKHR(device, self.handle, nil)
   self.handle = 0
 }
 
@@ -200,13 +200,13 @@ swapchain_recreate :: proc(
   window: glfw.WindowHandle,
 ) -> vk.Result {
   vk.DeviceWaitIdle(gpu_context.device)
-  swapchain_destroy(self, gpu_context)
+  swapchain_destroy(self, gpu_context.device)
   swapchain_init(self, gpu_context, window) or_return
   return .SUCCESS
 }
 
 acquire_next_image :: proc(
-  gpu_context: ^GPUContext,
+  device: vk.Device,
   self: ^Swapchain,
   frame_index: u32,
 ) -> (
@@ -214,14 +214,14 @@ acquire_next_image :: proc(
 ) {
   // log.debug("waiting for fence...")
   vk.WaitForFences(
-    gpu_context.device,
+    device,
     1,
     &self.in_flight_fences[frame_index],
     true,
     math.max(u64),
   ) or_return
   vk.AcquireNextImageKHR(
-    gpu_context.device,
+    device,
     self.handle,
     math.max(u64),
     self.image_available_semaphores[frame_index],
@@ -229,7 +229,7 @@ acquire_next_image :: proc(
     &self.image_index,
   ) or_return
   vk.ResetFences(
-    gpu_context.device,
+    device,
     1,
     &self.in_flight_fences[frame_index],
   ) or_return

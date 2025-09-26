@@ -61,12 +61,12 @@ init :: proc(
   }
   log.infof("init UI pipeline...")
   vert_shader_module := gpu.create_shader_module(
-    gpu_context,
+    gpu_context.device,
     SHADER_MICROUI_VERT,
   ) or_return
   defer vk.DestroyShaderModule(gpu_context.device, vert_shader_module, nil)
   frag_shader_module := gpu.create_shader_module(
-    gpu_context,
+    gpu_context.device,
     SHADER_MICROUI_FRAG,
   ) or_return
   defer vk.DestroyShaderModule(gpu_context.device, frag_shader_module, nil)
@@ -493,24 +493,21 @@ ui_set_clip_rect :: proc(
   vk.CmdSetScissor(cmd_buf, 0, 1, &self.current_scissor)
 }
 
-shutdown :: proc(self: ^Renderer, gpu_context: ^gpu.GPUContext) {
-  if self == nil {
-    return
-  }
-  gpu.data_buffer_destroy(gpu_context, &self.vertex_buffer)
-  gpu.data_buffer_destroy(gpu_context, &self.index_buffer)
-  gpu.data_buffer_destroy(gpu_context, &self.proj_buffer)
-  vk.DestroyPipeline(gpu_context.device, self.pipeline, nil)
+shutdown :: proc(self: ^Renderer, device: vk.Device) {
+  gpu.data_buffer_destroy(device, &self.vertex_buffer)
+  gpu.data_buffer_destroy(device, &self.index_buffer)
+  gpu.data_buffer_destroy(device, &self.proj_buffer)
+  vk.DestroyPipeline(device, self.pipeline, nil)
   self.pipeline = 0
-  vk.DestroyPipelineLayout(gpu_context.device, self.pipeline_layout, nil)
+  vk.DestroyPipelineLayout(device, self.pipeline_layout, nil)
   self.pipeline_layout = 0
   vk.DestroyDescriptorSetLayout(
-    gpu_context.device,
+    device,
     self.projection_layout,
     nil,
   )
   self.projection_layout = 0
-  vk.DestroyDescriptorSetLayout(gpu_context.device, self.texture_layout, nil)
+  vk.DestroyDescriptorSetLayout(device, self.texture_layout, nil)
   self.texture_layout = 0
 }
 
