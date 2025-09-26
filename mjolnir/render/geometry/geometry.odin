@@ -15,6 +15,7 @@ Renderer :: struct {
   pipeline:        vk.Pipeline,
   pipeline_layout: vk.PipelineLayout,
   depth_prepass_pipeline:        vk.Pipeline,
+  commands:        [resources.MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
 }
 
 SHADER_DEPTH_PREPASS_VERT :: #load("../../shader/depth_prepass/vert.spv")
@@ -141,6 +142,12 @@ init :: proc(
   width, height: u32,
   resources_manager: ^resources.Manager,
 ) -> vk.Result {
+  gpu.allocate_secondary_buffers(
+    gpu_context.device,
+    gpu_context.command_pool,
+    self.commands[:],
+  ) or_return
+
   depth_format: vk.Format = .D32_SFLOAT
   self.pipeline_layout = resources_manager.geometry_pipeline_layout
   if self.pipeline_layout == 0 {
@@ -647,9 +654,95 @@ render :: proc(
   )
 }
 
-shutdown :: proc(self: ^Renderer, device: vk.Device) {
+shutdown :: proc(self: ^Renderer, device: vk.Device, command_pool: vk.CommandPool) {
+  gpu.free_command_buffers(device, command_pool, self.commands[:])
   vk.DestroyPipeline(device, self.pipeline, nil)
   self.pipeline = 0
   vk.DestroyPipeline(device, self.depth_prepass_pipeline, nil)
   self.depth_prepass_pipeline = 0
+}
+
+begin_record :: proc(
+  self: ^Renderer,
+  frame_index: u32,
+  main_render_target: ^resources.RenderTarget,
+  resources_manager: ^resources.Manager,
+) -> (command_buffer: vk.CommandBuffer, ret: vk.Result) {
+  command_buffer = self.commands[frame_index]
+  vk.ResetCommandBuffer(command_buffer, {}) or_return
+
+  color_formats := [?]vk.Format {
+    .R32G32B32A32_SFLOAT,
+    .R8G8B8A8_UNORM,
+    .R8G8B8A8_UNORM,
+    .R8G8B8A8_UNORM,
+    .R8G8B8A8_UNORM,
+  }
+  rendering_info := vk.CommandBufferInheritanceRenderingInfo{
+    sType = .COMMAND_BUFFER_INHERITANCE_RENDERING_INFO,
+    colorAttachmentCount = len(color_formats),
+    pColorAttachmentFormats = raw_data(color_formats[:]),
+    depthAttachmentFormat = .D32_SFLOAT,
+  }
+  inheritance := vk.CommandBufferInheritanceInfo {
+    sType = .COMMAND_BUFFER_INHERITANCE_INFO,
+    pNext = &rendering_info,
+  }
+  vk.BeginCommandBuffer(
+    command_buffer,
+    &vk.CommandBufferBeginInfo{
+      sType = .COMMAND_BUFFER_BEGIN_INFO,
+      flags = {.ONE_TIME_SUBMIT},
+      pInheritanceInfo = &inheritance,
+    },
+  ) or_return
+
+  // Transition depth texture to depth attachment optimal
+  depth_texture := resources.get(
+    resources_manager.image_2d_buffers,
+    resources.get_depth_texture(main_render_target, frame_index),
+  )
+  if depth_texture != nil {
+    gpu.transition_image(
+      command_buffer,
+      depth_texture.image,
+      .UNDEFINED,
+      .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+      {.DEPTH},
+      {.TOP_OF_PIPE},
+      {.EARLY_FRAGMENT_TESTS},
+      {},
+      {.DEPTH_STENCIL_ATTACHMENT_WRITE},
+    )
+  }
+
+  return command_buffer, .SUCCESS
+}
+
+end_record :: proc(
+  command_buffer: vk.CommandBuffer,
+  main_render_target: ^resources.RenderTarget,
+  resources_manager: ^resources.Manager,
+  frame_index: u32,
+) -> vk.Result {
+  // Transition depth texture to shader read optimal for use by lighting
+  depth_texture := resources.get(
+    resources_manager.image_2d_buffers,
+    resources.get_depth_texture(main_render_target, frame_index),
+  )
+  if depth_texture != nil {
+    gpu.transition_image(
+      command_buffer,
+      depth_texture.image,
+      .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+      .SHADER_READ_ONLY_OPTIMAL,
+      {.DEPTH},
+      {.LATE_FRAGMENT_TESTS},
+      {.FRAGMENT_SHADER},
+      {.SHADER_READ},
+    )
+  }
+
+  vk.EndCommandBuffer(command_buffer) or_return
+  return .SUCCESS
 }

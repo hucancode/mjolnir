@@ -26,12 +26,6 @@ Renderer :: struct {
   post_process:  post_process.Renderer,
   ui:            debug_ui.Renderer,
   targets:       targets.Manager,
-
-  shadow_commands:        [resources.MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
-  geometry_commands:      [resources.MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
-  lighting_commands:      [resources.MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
-  transparency_commands:  [resources.MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
-  post_process_commands:  [resources.MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
 }
 
 renderer_init :: proc(
@@ -43,31 +37,6 @@ renderer_init :: proc(
   main_render_target: resources.Handle,
   dpi_scale: f32,
 ) -> vk.Result {
-  gpu.allocate_secondary_buffers(
-    gpu_context.device,
-    gpu_context.command_pool,
-    self.shadow_commands[:],
-  ) or_return
-  gpu.allocate_secondary_buffers(
-    gpu_context.device,
-    gpu_context.command_pool,
-    self.geometry_commands[:],
-  ) or_return
-  gpu.allocate_secondary_buffers(
-    gpu_context.device,
-    gpu_context.command_pool,
-    self.lighting_commands[:],
-  ) or_return
-  gpu.allocate_secondary_buffers(
-    gpu_context.device,
-    gpu_context.command_pool,
-    self.transparency_commands[:],
-  ) or_return
-  gpu.allocate_secondary_buffers(
-    gpu_context.device,
-    gpu_context.command_pool,
-    self.post_process_commands[:],
-  ) or_return
 
   lighting.init(
     &self.lighting,
@@ -122,38 +91,13 @@ renderer_shutdown :: proc(
   resources_manager: ^resources.Manager,
 ) {
   debug_ui.shutdown(&self.ui, device)
-  post_process.shutdown(&self.post_process, device, resources_manager)
-  particles.shutdown(&self.particles, device)
-  transparency.shutdown(&self.transparency, device)
-  lighting.shutdown(&self.lighting, device, resources_manager)
-  geometry_pass.shutdown(&self.geometry, device)
-  shadow.shutdown(&self.shadow, device)
+  post_process.shutdown(&self.post_process, device, command_pool, resources_manager)
+  particles.shutdown(&self.particles, device, command_pool)
+  transparency.shutdown(&self.transparency, device, command_pool)
+  lighting.shutdown(&self.lighting, device, command_pool, resources_manager)
+  geometry_pass.shutdown(&self.geometry, device, command_pool)
+  shadow.shutdown(&self.shadow, device, command_pool)
   targets.shutdown(&self.targets)
-  gpu.free_command_buffers(
-    device,
-    command_pool,
-    self.shadow_commands[:],
-  )
-  gpu.free_command_buffers(
-    device,
-    command_pool,
-    self.geometry_commands[:],
-  )
-  gpu.free_command_buffers(
-    device,
-    command_pool,
-    self.lighting_commands[:],
-  )
-  gpu.free_command_buffers(
-    device,
-    command_pool,
-    self.transparency_commands[:],
-  )
-  gpu.free_command_buffers(
-    device,
-    command_pool,
-    self.post_process_commands[:],
-  )
 }
 
 renderer_prepare_targets :: proc(
@@ -182,7 +126,6 @@ renderer_prepare_targets :: proc(
       // Directional shadows not yet implemented
     }
   }
-
   for &entry, idx in resources_manager.render_targets.entries do if entry.active {
     handle := resources.Handle{index = u32(idx), generation = entry.generation}
     if self.targets.main.generation != 0 && handle.index == self.targets.main.index do continue
@@ -224,7 +167,6 @@ render_subsystem_resize :: proc(
   return .SUCCESS
 }
 
-
 record_shadow_pass :: proc(
   self: ^Renderer,
   frame_index: u32,
@@ -234,35 +176,15 @@ record_shadow_pass :: proc(
   lights: []lighting.LightInfo,
   active_light_count: u32,
 ) -> vk.Result {
-  command_buffer := self.shadow_commands[frame_index]
-  vk.ResetCommandBuffer(command_buffer, {}) or_return
-  rendering_info := vk.CommandBufferInheritanceRenderingInfo{
-    sType = .COMMAND_BUFFER_INHERITANCE_RENDERING_INFO,
-    depthAttachmentFormat = .D32_SFLOAT,
-  }
-  inheritance := vk.CommandBufferInheritanceInfo {
-    sType = .COMMAND_BUFFER_INHERITANCE_INFO,
-    pNext = &rendering_info,
-  }
-  vk.BeginCommandBuffer(
-    command_buffer,
-    &vk.CommandBufferBeginInfo{
-      sType = .COMMAND_BUFFER_BEGIN_INFO,
-      flags = {.ONE_TIME_SUBMIT},
-      pInheritanceInfo = &inheritance,
-    },
-  ) or_return
-
+  command_buffer := shadow.begin_record(&self.shadow, frame_index) or_return
   shadow_include := resources.NodeFlagSet{.VISIBLE, .CASTS_SHADOW}
   shadow_exclude := resources.NodeFlagSet{
     .MATERIAL_TRANSPARENT,
     .MATERIAL_WIREFRAME,
   }
   command_stride := world.visibility_command_stride()
-
   for &light_info, light_index in lights[:active_light_count] {
     if !light_info.light_cast_shadow do continue
-
     switch light_info.light_kind {
     case .POINT:
       if light_info.shadow_map.generation == 0 {
@@ -367,8 +289,7 @@ record_shadow_pass :: proc(
       // Directional shadow rendering not yet implemented
     }
   }
-
-  vk.EndCommandBuffer(command_buffer) or_return
+  shadow.end_record(command_buffer) or_return
   return .SUCCESS
 }
 
@@ -380,52 +301,12 @@ record_geometry_pass :: proc(
   world_state: ^world.World,
   main_render_target: ^resources.RenderTarget,
 ) -> vk.Result {
-  command_buffer := self.geometry_commands[frame_index]
-  vk.ResetCommandBuffer(command_buffer, {}) or_return
-  color_formats := [?]vk.Format {
-    .R32G32B32A32_SFLOAT,
-    .R8G8B8A8_UNORM,
-    .R8G8B8A8_UNORM,
-    .R8G8B8A8_UNORM,
-    .R8G8B8A8_UNORM,
-  }
-  rendering_info := vk.CommandBufferInheritanceRenderingInfo{
-    sType = .COMMAND_BUFFER_INHERITANCE_RENDERING_INFO,
-    colorAttachmentCount = len(color_formats),
-    pColorAttachmentFormats = raw_data(color_formats[:]),
-    depthAttachmentFormat = .D32_SFLOAT,
-  }
-  inheritance := vk.CommandBufferInheritanceInfo {
-    sType = .COMMAND_BUFFER_INHERITANCE_INFO,
-    pNext = &rendering_info,
-  }
-  vk.BeginCommandBuffer(
-    command_buffer,
-    &vk.CommandBufferBeginInfo{
-      sType = .COMMAND_BUFFER_BEGIN_INFO,
-      flags = {.ONE_TIME_SUBMIT},
-      pInheritanceInfo = &inheritance,
-    },
+  command_buffer := geometry_pass.begin_record(
+    &self.geometry,
+    frame_index,
+    main_render_target,
+    resources_manager,
   ) or_return
-
-  depth_texture := resources.get(
-    resources_manager.image_2d_buffers,
-    resources.get_depth_texture(main_render_target, frame_index),
-  )
-  if depth_texture != nil {
-    gpu.transition_image(
-      command_buffer,
-      depth_texture.image,
-      .UNDEFINED,
-      .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-      {.DEPTH},
-      {.TOP_OF_PIPE},
-      {.EARLY_FRAGMENT_TESTS},
-      {},
-      {.DEPTH_STENCIL_ATTACHMENT_WRITE},
-    )
-  }
-
   vis_result := world.dispatch_visibility(
     world_state,
     gpu_context,
@@ -441,7 +322,6 @@ record_geometry_pass :: proc(
   draw_buffer := vis_result.draw_buffer
   draw_count := vis_result.max_draws
   command_stride := vis_result.command_stride
-
   geometry_pass.begin_depth_prepass(
     main_render_target,
     command_buffer,
@@ -459,7 +339,6 @@ record_geometry_pass :: proc(
     command_stride,
   )
   geometry_pass.end_depth_prepass(command_buffer)
-
   geometry_pass.begin_pass(
     main_render_target,
     command_buffer,
@@ -482,21 +361,12 @@ record_geometry_pass :: proc(
     resources_manager,
     frame_index,
   )
-
-  if depth_texture != nil {
-    gpu.transition_image(
-      command_buffer,
-      depth_texture.image,
-      .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-      .SHADER_READ_ONLY_OPTIMAL,
-      {.DEPTH},
-      {.LATE_FRAGMENT_TESTS},
-      {.FRAGMENT_SHADER},
-      {.SHADER_READ},
-    )
-  }
-
-  vk.EndCommandBuffer(command_buffer) or_return
+  geometry_pass.end_record(
+    command_buffer,
+    main_render_target,
+    resources_manager,
+    frame_index,
+  ) or_return
   return .SUCCESS
 }
 
@@ -509,52 +379,30 @@ record_lighting_pass :: proc(
   active_light_count: u32,
   color_format: vk.Format,
 ) -> vk.Result {
-  command_buffer := self.lighting_commands[frame_index]
-  vk.ResetCommandBuffer(command_buffer, {}) or_return
-  color_formats := [1]vk.Format{color_format}
-  rendering_info := vk.CommandBufferInheritanceRenderingInfo{
-    sType = .COMMAND_BUFFER_INHERITANCE_RENDERING_INFO,
-    colorAttachmentCount = 1,
-    pColorAttachmentFormats = &color_formats[0],
-    depthAttachmentFormat = .D32_SFLOAT,
-  }
-  inheritance := vk.CommandBufferInheritanceInfo {
-    sType = .COMMAND_BUFFER_INHERITANCE_INFO,
-    pNext = &rendering_info,
-  }
-  vk.BeginCommandBuffer(
-    command_buffer,
-    &vk.CommandBufferBeginInfo{
-      sType = .COMMAND_BUFFER_BEGIN_INFO,
-      flags = {.ONE_TIME_SUBMIT},
-      pInheritanceInfo = &inheritance,
-    },
-  ) or_return
-
-  lighting.ambient_begin_pass(
+  command_buffer := lighting.begin_record(&self.lighting, frame_index, color_format) or_return
+  lighting.begin_ambient_pass(
     &self.lighting,
     main_render_target,
     command_buffer,
     resources_manager,
     frame_index,
   )
-  lighting.ambient_render(
+  lighting.render_ambient(
     &self.lighting,
     main_render_target,
     command_buffer,
     resources_manager,
     frame_index,
   )
-  lighting.ambient_end_pass(command_buffer)
-
-  lighting.lighting_begin_pass(
+  lighting.end_ambient_pass(command_buffer)
+  lighting.begin_pass(
     &self.lighting,
     main_render_target,
     command_buffer,
     resources_manager,
     frame_index,
   )
-  lighting.lighting_render(
+  lighting.render(
     &self.lighting,
     lights[:active_light_count],
     main_render_target,
@@ -562,8 +410,19 @@ record_lighting_pass :: proc(
     resources_manager,
     frame_index,
   )
-  lighting.lighting_end_pass(command_buffer)
+  lighting.end_pass(command_buffer)
+  lighting.end_record(command_buffer) or_return
+  return .SUCCESS
+}
 
+record_particles_pass :: proc(
+  self: ^Renderer,
+  frame_index: u32,
+  resources_manager: ^resources.Manager,
+  main_render_target: ^resources.RenderTarget,
+  color_format: vk.Format,
+) -> vk.Result {
+  command_buffer := particles.begin_record(&self.particles, frame_index, color_format) or_return
   particles.begin_pass(
     &self.particles,
     command_buffer,
@@ -578,8 +437,7 @@ record_lighting_pass :: proc(
     resources_manager,
   )
   particles.end_pass(command_buffer)
-
-  vk.EndCommandBuffer(command_buffer) or_return
+  particles.end_record(command_buffer) or_return
   return .SUCCESS
 }
 
@@ -593,28 +451,7 @@ record_transparency_pass :: proc(
   navmesh_renderer: ^navigation_renderer.Renderer,
   color_format: vk.Format,
 ) -> vk.Result {
-  command_buffer := self.transparency_commands[frame_index]
-  vk.ResetCommandBuffer(command_buffer, {}) or_return
-  color_formats := [1]vk.Format{color_format}
-  rendering_info := vk.CommandBufferInheritanceRenderingInfo{
-    sType = .COMMAND_BUFFER_INHERITANCE_RENDERING_INFO,
-    colorAttachmentCount = 1,
-    pColorAttachmentFormats = &color_formats[0],
-    depthAttachmentFormat = .D32_SFLOAT,
-  }
-  inheritance := vk.CommandBufferInheritanceInfo {
-    sType = .COMMAND_BUFFER_INHERITANCE_INFO,
-    pNext = &rendering_info,
-  }
-  vk.BeginCommandBuffer(
-    command_buffer,
-    &vk.CommandBufferBeginInfo{
-      sType = .COMMAND_BUFFER_BEGIN_INFO,
-      flags = {.ONE_TIME_SUBMIT},
-      pInheritanceInfo = &inheritance,
-    },
-  ) or_return
-
+  command_buffer := transparency.begin_record(&self.transparency, frame_index, color_format) or_return
   transparency.begin_pass(
     &self.transparency,
     main_render_target,
@@ -622,14 +459,12 @@ record_transparency_pass :: proc(
     resources_manager,
     frame_index,
   )
-
   navigation_renderer.render(
     navmesh_renderer,
     command_buffer,
     linalg.MATRIX4F32_IDENTITY,
     main_render_target.camera.index,
   )
-
   vis_transparent := world.dispatch_visibility(
     world_state,
     gpu_context,
@@ -654,7 +489,6 @@ record_transparency_pass :: proc(
     vis_transparent.max_draws,
     command_stride,
   )
-
   vis_wireframe := world.dispatch_visibility(
     world_state,
     gpu_context,
@@ -679,8 +513,7 @@ record_transparency_pass :: proc(
     command_stride,
   )
   transparency.end_pass(&self.transparency, command_buffer)
-
-  vk.EndCommandBuffer(command_buffer) or_return
+  transparency.end_record(command_buffer) or_return
   return .SUCCESS
 }
 
@@ -694,50 +527,18 @@ record_post_process_pass :: proc(
   swapchain_image: vk.Image,
   swapchain_view: vk.ImageView,
 ) -> vk.Result {
-  command_buffer := self.post_process_commands[frame_index]
-  vk.ResetCommandBuffer(command_buffer, {}) or_return
-  color_formats := [1]vk.Format{color_format}
-  rendering_info := vk.CommandBufferInheritanceRenderingInfo{
-    sType = .COMMAND_BUFFER_INHERITANCE_RENDERING_INFO,
-    colorAttachmentCount = 1,
-    pColorAttachmentFormats = &color_formats[0],
-  }
-  inheritance := vk.CommandBufferInheritanceInfo {
-    sType = .COMMAND_BUFFER_INHERITANCE_INFO,
-    pNext = &rendering_info,
-  }
-  vk.BeginCommandBuffer(
-    command_buffer,
-    &vk.CommandBufferBeginInfo{
-      sType = .COMMAND_BUFFER_BEGIN_INFO,
-      flags = {.ONE_TIME_SUBMIT},
-      pInheritanceInfo = &inheritance,
-    },
+  command_buffer := post_process.begin_record(
+    &self.post_process,
+    frame_index,
+    color_format,
+    main_render_target,
+    resources_manager,
+    swapchain_image,
   ) or_return
-
-  final_image := resources.get(
-    resources_manager.image_2d_buffers,
-    resources.get_final_image(main_render_target, frame_index),
-  )
-  if final_image != nil {
-    gpu.transition_image_to_shader_read(command_buffer, final_image.image)
-  }
-
   post_process.begin_pass(
     &self.post_process,
     command_buffer,
     swapchain_extent,
-  )
-  gpu.transition_image(
-    command_buffer,
-    swapchain_image,
-    .UNDEFINED,
-    .COLOR_ATTACHMENT_OPTIMAL,
-    {.COLOR},
-    {.TOP_OF_PIPE},
-    {.COLOR_ATTACHMENT_OUTPUT},
-    {},
-    {.COLOR_ATTACHMENT_WRITE},
   )
   post_process.render(
     &self.post_process,
@@ -752,21 +553,6 @@ record_post_process_pass :: proc(
     &self.post_process,
     command_buffer,
   )
-
-  vk.EndCommandBuffer(command_buffer) or_return
+  post_process.end_record(command_buffer) or_return
   return .SUCCESS
-}
-
-simulate_particles :: proc(
-  self: ^Renderer,
-  command_buffer: vk.CommandBuffer,
-  camera: geometry.Camera,
-  world_matrix_set: vk.DescriptorSet,
-) {
-  particles.simulate(
-    &self.particles,
-    command_buffer,
-    camera,
-    world_matrix_set,
-  )
 }

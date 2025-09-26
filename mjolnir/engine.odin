@@ -1066,6 +1066,13 @@ render :: proc(self: ^Engine) -> vk.Result {
     self.active_light_count,
     self.swapchain.format.format,
   )
+  record_particles_pass(
+    &self.render,
+    self.frame_index,
+    &self.resource_manager,
+    main_render_target,
+    self.swapchain.format.format,
+  )
   record_transparency_pass(
     &self.render,
     self.frame_index,
@@ -1091,8 +1098,8 @@ render :: proc(self: ^Engine) -> vk.Result {
     command_buffer,
     &{sType = .COMMAND_BUFFER_BEGIN_INFO, flags = {.ONE_TIME_SUBMIT}},
   ) or_return
-  simulate_particles(
-    &self.render,
+  particles.simulate(
+    &self.render.particles,
     command_buffer,
     main_camera^,
     self.resource_manager.world_matrix_descriptor_sets[self.frame_index],
@@ -1101,11 +1108,12 @@ render :: proc(self: ^Engine) -> vk.Result {
     self.custom_render_proc(self, command_buffer)
   }
   buffers := [?]vk.CommandBuffer{
-    self.render.shadow_commands[self.frame_index],
-    self.render.geometry_commands[self.frame_index],
-    self.render.lighting_commands[self.frame_index],
-    self.render.transparency_commands[self.frame_index],
-    self.render.post_process_commands[self.frame_index],
+    self.render.shadow.commands[self.frame_index],
+    self.render.geometry.commands[self.frame_index],
+    self.render.lighting.commands[self.frame_index],
+    self.render.particles.commands[self.frame_index],
+    self.render.transparency.commands[self.frame_index],
+    self.render.post_process.commands[self.frame_index],
   }
   vk.CmdExecuteCommands(
     command_buffer,

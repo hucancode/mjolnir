@@ -10,6 +10,7 @@ Renderer :: struct {
   pipeline_layout:      vk.PipelineLayout,
   transparent_pipeline: vk.Pipeline,
   wireframe_pipeline:   vk.Pipeline,
+  commands:             [resources.MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
 }
 
 PushConstant :: struct {
@@ -22,6 +23,12 @@ init :: proc(
   width, height: u32,
   resources_manager: ^resources.Manager,
 ) -> vk.Result {
+  gpu.allocate_secondary_buffers(
+    gpu_context.device,
+    gpu_context.command_pool,
+    self.commands[:],
+  ) or_return
+
   log.info("Initializing transparent renderer")
   self.pipeline_layout = resources_manager.geometry_pipeline_layout
   if self.pipeline_layout == 0 {
@@ -320,7 +327,9 @@ create_wireframe_pipelines :: proc(
 shutdown :: proc(
   self: ^Renderer,
   device: vk.Device,
+  command_pool: vk.CommandPool,
 ) {
+  gpu.free_command_buffers(device, command_pool, self.commands[:])
   vk.DestroyPipeline(device, self.transparent_pipeline, nil)
   self.transparent_pipeline = 0
   vk.DestroyPipeline(device, self.wireframe_pipeline, nil)
@@ -461,6 +470,40 @@ render :: proc(
     draw_count,
     command_stride,
   )
+}
+
+begin_record :: proc(
+  self: ^Renderer,
+  frame_index: u32,
+  color_format: vk.Format,
+) -> (command_buffer: vk.CommandBuffer, ret: vk.Result) {
+  command_buffer = self.commands[frame_index]
+  vk.ResetCommandBuffer(command_buffer, {}) or_return
+  color_formats := [1]vk.Format{color_format}
+  rendering_info := vk.CommandBufferInheritanceRenderingInfo{
+    sType = .COMMAND_BUFFER_INHERITANCE_RENDERING_INFO,
+    colorAttachmentCount = 1,
+    pColorAttachmentFormats = &color_formats[0],
+    depthAttachmentFormat = .D32_SFLOAT,
+  }
+  inheritance := vk.CommandBufferInheritanceInfo {
+    sType = .COMMAND_BUFFER_INHERITANCE_INFO,
+    pNext = &rendering_info,
+  }
+  vk.BeginCommandBuffer(
+    command_buffer,
+    &vk.CommandBufferBeginInfo{
+      sType = .COMMAND_BUFFER_BEGIN_INFO,
+      flags = {.ONE_TIME_SUBMIT},
+      pInheritanceInfo = &inheritance,
+    },
+  ) or_return
+  return command_buffer, .SUCCESS
+}
+
+end_record :: proc(command_buffer: vk.CommandBuffer) -> vk.Result {
+  vk.EndCommandBuffer(command_buffer) or_return
+  return .SUCCESS
 }
 
 end_pass :: proc(

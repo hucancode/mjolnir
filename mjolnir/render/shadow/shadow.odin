@@ -12,6 +12,7 @@ SHADER_SHADOW_FRAG :: #load("../../shader/shadow/frag.spv")
 Renderer :: struct {
   pipeline_layout: vk.PipelineLayout,
   pipeline:        vk.Pipeline,
+  commands:        [resources.MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
 }
 
 PushConstant :: struct {
@@ -24,6 +25,12 @@ init :: proc(
   resources_manager: ^resources.Manager,
   depth_format: vk.Format = .D32_SFLOAT,
 ) -> vk.Result {
+  gpu.allocate_secondary_buffers(
+    gpu_context.device,
+    gpu_context.command_pool,
+    self.commands[:],
+  ) or_return
+
   self.pipeline_layout = resources_manager.geometry_pipeline_layout
   if self.pipeline_layout == 0 {
     return .ERROR_INITIALIZATION_FAILED
@@ -130,9 +137,40 @@ init :: proc(
   return .SUCCESS
 }
 
-shutdown :: proc(self: ^Renderer, device: vk.Device) {
+shutdown :: proc(self: ^Renderer, device: vk.Device, command_pool: vk.CommandPool) {
+  gpu.free_command_buffers(device, command_pool, self.commands[:])
   vk.DestroyPipeline(device, self.pipeline, nil)
   self.pipeline = 0
+}
+
+begin_record :: proc(
+  self: ^Renderer,
+  frame_index: u32,
+) -> (command_buffer: vk.CommandBuffer, ret: vk.Result) {
+  command_buffer = self.commands[frame_index]
+  vk.ResetCommandBuffer(command_buffer, {}) or_return
+  rendering_info := vk.CommandBufferInheritanceRenderingInfo{
+    sType = .COMMAND_BUFFER_INHERITANCE_RENDERING_INFO,
+    depthAttachmentFormat = .D32_SFLOAT,
+  }
+  inheritance := vk.CommandBufferInheritanceInfo {
+    sType = .COMMAND_BUFFER_INHERITANCE_INFO,
+    pNext = &rendering_info,
+  }
+  vk.BeginCommandBuffer(
+    command_buffer,
+    &vk.CommandBufferBeginInfo{
+      sType = .COMMAND_BUFFER_BEGIN_INFO,
+      flags = {.ONE_TIME_SUBMIT},
+      pInheritanceInfo = &inheritance,
+    },
+  ) or_return
+  return command_buffer, .SUCCESS
+}
+
+end_record :: proc(command_buffer: vk.CommandBuffer) -> vk.Result {
+  vk.EndCommandBuffer(command_buffer) or_return
+  return .SUCCESS
 }
 
 begin_pass :: proc(

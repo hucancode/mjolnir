@@ -65,7 +65,7 @@ AmbientPushConstant :: struct {
   ibl_intensity:          f32,
 }
 
-ambient_begin_pass :: proc(
+begin_ambient_pass :: proc(
   self: ^Renderer,
   target: ^resources.RenderTarget,
   command_buffer: vk.CommandBuffer,
@@ -120,7 +120,7 @@ ambient_begin_pass :: proc(
   vk.CmdBindPipeline(command_buffer, .GRAPHICS, self.ambient_pipeline)
 }
 
-ambient_render :: proc(
+render_ambient :: proc(
   self: ^Renderer,
   render_target: ^resources.RenderTarget,
   command_buffer: vk.CommandBuffer,
@@ -151,7 +151,7 @@ ambient_render :: proc(
   vk.CmdDraw(command_buffer, 3, 1, 0, 0) // fullscreen triangle
 }
 
-ambient_end_pass :: proc(command_buffer: vk.CommandBuffer) {
+end_ambient_pass :: proc(command_buffer: vk.CommandBuffer) {
   vk.CmdEndRendering(command_buffer)
 }
 
@@ -163,6 +163,12 @@ init :: proc(
   color_format: vk.Format = .B8G8R8A8_SRGB,
   depth_format: vk.Format = .D32_SFLOAT,
 ) -> vk.Result {
+  gpu.allocate_secondary_buffers(
+    gpu_context.device,
+    gpu_context.command_pool,
+    self.commands[:],
+  ) or_return
+
   log.debugf("renderer lighting init %d x %d", width, height)
 
   // Initialize ambient pipeline
@@ -479,8 +485,10 @@ init :: proc(
 shutdown :: proc(
   self: ^Renderer,
   device: vk.Device,
+  command_pool: vk.CommandPool,
   resources_manager: ^resources.Manager,
 ) {
+  gpu.free_command_buffers(device, command_pool, self.commands[:])
   vk.DestroyPipeline(device, self.ambient_pipeline, nil)
   self.ambient_pipeline = 0
   vk.DestroyPipelineLayout(
@@ -509,6 +517,41 @@ shutdown :: proc(
   vk.DestroyPipeline(device, self.lighting_pipeline, nil)
 }
 
+begin_record :: proc(
+  self: ^Renderer,
+  frame_index: u32,
+  color_format: vk.Format,
+) -> (command_buffer: vk.CommandBuffer, ret: vk.Result) {
+  command_buffer = self.commands[frame_index]
+  vk.ResetCommandBuffer(command_buffer, {}) or_return
+  color_formats := [1]vk.Format{color_format}
+  rendering_info := vk.CommandBufferInheritanceRenderingInfo{
+    sType = .COMMAND_BUFFER_INHERITANCE_RENDERING_INFO,
+    colorAttachmentCount = 1,
+    pColorAttachmentFormats = &color_formats[0],
+    depthAttachmentFormat = .D32_SFLOAT,
+  }
+  inheritance := vk.CommandBufferInheritanceInfo {
+    sType = .COMMAND_BUFFER_INHERITANCE_INFO,
+    pNext = &rendering_info,
+  }
+  vk.BeginCommandBuffer(
+    command_buffer,
+    &vk.CommandBufferBeginInfo{
+      sType = .COMMAND_BUFFER_BEGIN_INFO,
+      flags = {.ONE_TIME_SUBMIT},
+      pInheritanceInfo = &inheritance,
+    },
+  ) or_return
+  ret = .SUCCESS
+  return
+}
+
+end_record :: proc(command_buffer: vk.CommandBuffer) -> vk.Result {
+  vk.EndCommandBuffer(command_buffer) or_return
+  return .SUCCESS
+}
+
 BG_BLUE_GRAY :: [4]f32{0.0117, 0.0117, 0.0179, 1.0}
 BG_DARK_GRAY :: [4]f32{0.0117, 0.0117, 0.0117, 1.0}
 BG_ORANGE_GRAY :: [4]f32{0.0179, 0.0179, 0.0117, 1.0}
@@ -526,6 +569,7 @@ Renderer :: struct {
   sphere_mesh:              resources.Handle,
   cone_mesh:                resources.Handle,
   fullscreen_triangle_mesh: resources.Handle,
+  commands:                 [resources.MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
 }
 
 
@@ -539,7 +583,7 @@ lighting_recreate_images :: proc(
   return .SUCCESS
 }
 
-lighting_begin_pass :: proc(
+begin_pass :: proc(
   self: ^Renderer,
   target: ^resources.RenderTarget,
   command_buffer: vk.CommandBuffer,
@@ -608,7 +652,7 @@ lighting_begin_pass :: proc(
   vk.CmdBindPipeline(command_buffer, .GRAPHICS, self.lighting_pipeline)
 }
 
-lighting_render :: proc(
+render :: proc(
   self: ^Renderer,
   input: []LightInfo,
   render_target: ^resources.RenderTarget,
@@ -722,6 +766,6 @@ lighting_render :: proc(
   return rendered_count
 }
 
-lighting_end_pass :: proc(command_buffer: vk.CommandBuffer) {
+end_pass :: proc(command_buffer: vk.CommandBuffer) {
   vk.CmdEndRendering(command_buffer)
 }

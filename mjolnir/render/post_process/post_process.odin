@@ -181,6 +181,7 @@ Renderer :: struct {
   pipeline_layouts: [len(PostProcessEffectType)]vk.PipelineLayout,
   effect_stack:     [dynamic]PostprocessEffect,
   images:           [2]resources.Handle,
+  commands:         [resources.MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
 }
 
 get_effect_type :: proc(effect: PostprocessEffect) -> PostProcessEffectType {
@@ -359,6 +360,12 @@ init :: proc(
   width, height: u32,
   resources_manager: ^resources.Manager,
 ) -> vk.Result {
+  gpu.allocate_secondary_buffers(
+    gpu_context.device,
+    gpu_context.command_pool,
+    self.commands[:],
+  ) or_return
+
   self.effect_stack = make([dynamic]PostprocessEffect)
   count :: len(PostProcessEffectType)
   vert_module := gpu.create_shader_module(
@@ -587,8 +594,10 @@ recreate_images :: proc(
 shutdown :: proc(
   self: ^Renderer,
   device: vk.Device,
+  command_pool: vk.CommandPool,
   resources_manager: ^resources.Manager,
 ) {
+  gpu.free_command_buffers(device, command_pool, self.commands[:])
   for &p in self.pipelines {
     vk.DestroyPipeline(device, p, nil)
     p = 0
@@ -888,4 +897,63 @@ end_pass :: proc(
   command_buffer: vk.CommandBuffer,
 ) {
 
+}
+
+begin_record :: proc(
+  self: ^Renderer,
+  frame_index: u32,
+  color_format: vk.Format,
+  main_render_target: ^resources.RenderTarget,
+  resources_manager: ^resources.Manager,
+  swapchain_image: vk.Image,
+) -> (command_buffer: vk.CommandBuffer, ret: vk.Result) {
+  command_buffer = self.commands[frame_index]
+  vk.ResetCommandBuffer(command_buffer, {}) or_return
+  color_formats := [1]vk.Format{color_format}
+  rendering_info := vk.CommandBufferInheritanceRenderingInfo{
+    sType = .COMMAND_BUFFER_INHERITANCE_RENDERING_INFO,
+    colorAttachmentCount = 1,
+    pColorAttachmentFormats = &color_formats[0],
+  }
+  inheritance := vk.CommandBufferInheritanceInfo {
+    sType = .COMMAND_BUFFER_INHERITANCE_INFO,
+    pNext = &rendering_info,
+  }
+  vk.BeginCommandBuffer(
+    command_buffer,
+    &vk.CommandBufferBeginInfo{
+      sType = .COMMAND_BUFFER_BEGIN_INFO,
+      flags = {.ONE_TIME_SUBMIT},
+      pInheritanceInfo = &inheritance,
+    },
+  ) or_return
+
+  // Transition final image to shader read optimal
+  final_image := resources.get(
+    resources_manager.image_2d_buffers,
+    resources.get_final_image(main_render_target, frame_index),
+  )
+  if final_image != nil {
+    gpu.transition_image_to_shader_read(command_buffer, final_image.image)
+  }
+
+  // Transition swapchain image to color attachment optimal
+  gpu.transition_image(
+    command_buffer,
+    swapchain_image,
+    .UNDEFINED,
+    .COLOR_ATTACHMENT_OPTIMAL,
+    {.COLOR},
+    {.TOP_OF_PIPE},
+    {.COLOR_ATTACHMENT_OUTPUT},
+    {},
+    {.COLOR_ATTACHMENT_WRITE},
+  )
+
+  return command_buffer, .SUCCESS
+}
+
+end_record :: proc(command_buffer: vk.CommandBuffer) -> vk.Result {
+  vk.EndCommandBuffer(command_buffer) or_return
+  return .SUCCESS
 }

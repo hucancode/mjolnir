@@ -69,6 +69,7 @@ Renderer :: struct {
   render_pipeline_layout:        vk.PipelineLayout,
   render_pipeline:               vk.Pipeline,
   default_texture_index:         u32,
+  commands:                      [resources.MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
 }
 
 simulate :: proc(
@@ -220,7 +221,9 @@ compact :: proc(
 shutdown :: proc(
   self: ^Renderer,
   device: vk.Device,
+  command_pool: vk.CommandPool,
 ) {
+  gpu.free_command_buffers(device, command_pool, self.commands[:])
   vk.DestroyPipeline(device, self.compute_pipeline, nil)
   vk.DestroyPipelineLayout(
     device,
@@ -273,6 +276,12 @@ init :: proc(
   gpu_context: ^gpu.GPUContext,
   resources_manager: ^resources.Manager,
 ) -> vk.Result {
+  gpu.allocate_secondary_buffers(
+    gpu_context.device,
+    gpu_context.command_pool,
+    self.commands[:],
+  ) or_return
+
   log.debugf("Initializing particle renderer")
   self.params_buffer = gpu.create_host_visible_buffer(
     gpu_context,
@@ -1047,4 +1056,38 @@ render :: proc(
 
 end_pass :: proc(command_buffer: vk.CommandBuffer) {
   vk.CmdEndRendering(command_buffer)
+}
+
+begin_record :: proc(
+  self: ^Renderer,
+  frame_index: u32,
+  color_format: vk.Format,
+) -> (command_buffer: vk.CommandBuffer, ret: vk.Result) {
+  command_buffer = self.commands[frame_index]
+  vk.ResetCommandBuffer(command_buffer, {}) or_return
+  color_formats := [1]vk.Format{color_format}
+  rendering_info := vk.CommandBufferInheritanceRenderingInfo{
+    sType = .COMMAND_BUFFER_INHERITANCE_RENDERING_INFO,
+    colorAttachmentCount = 1,
+    pColorAttachmentFormats = &color_formats[0],
+    depthAttachmentFormat = .D32_SFLOAT,
+  }
+  inheritance := vk.CommandBufferInheritanceInfo {
+    sType = .COMMAND_BUFFER_INHERITANCE_INFO,
+    pNext = &rendering_info,
+  }
+  vk.BeginCommandBuffer(
+    command_buffer,
+    &vk.CommandBufferBeginInfo{
+      sType = .COMMAND_BUFFER_BEGIN_INFO,
+      flags = {.ONE_TIME_SUBMIT},
+      pInheritanceInfo = &inheritance,
+    },
+  ) or_return
+  return command_buffer, .SUCCESS
+}
+
+end_record :: proc(command_buffer: vk.CommandBuffer) -> vk.Result {
+  vk.EndCommandBuffer(command_buffer) or_return
+  return .SUCCESS
 }
