@@ -389,15 +389,20 @@ destroy_emitter_handle :: proc(
 
 create_light_handle :: proc(
   manager: ^Manager,
-  info: LightCreateInfo,
+  kind: LightKind,
+  color: [4]f32,
+  radius: f32,
+  angle: f32,
+  cast_shadow: bool,
+  enabled: bool = true,
 ) -> Handle {
   handle, light := alloc(&manager.lights)
-  light.kind = info.kind
-  light.color = info.color
-  light.radius = info.radius
-  light.angle = info.angle
-  light.cast_shadow = info.cast_shadow
-  light.enabled = info.enabled
+  light.kind = kind
+  light.color = color
+  light.radius = radius
+  light.angle = angle
+  light.cast_shadow = cast_shadow
+  light.enabled = enabled
   light.node_handle = {}
   light.position = {0, 0, 0}
   light.direction = {0, 0, -1}

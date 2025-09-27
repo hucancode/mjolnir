@@ -756,13 +756,11 @@ assign_light_to_node :: proc(
     if attachment.handle.generation == 0 {
       attachment.handle = resources.create_light_handle(
         resources_manager,
-        resources.LightCreateInfo {
-          kind        = resources.LightKind.POINT,
-          color       = attachment.color,
-          radius      = attachment.radius,
-          angle       = 0.0,
-          cast_shadow = attachment.cast_shadow,
-        },
+        resources.LightKind.POINT,
+        attachment.color,
+        attachment.radius,
+        0.0,
+        attachment.cast_shadow,
       )
     }
     light, ok := resources.get_light(resources_manager, attachment.handle)
@@ -780,13 +778,11 @@ assign_light_to_node :: proc(
     if attachment.handle.generation == 0 {
       attachment.handle = resources.create_light_handle(
         resources_manager,
-        resources.LightCreateInfo {
-          kind        = resources.LightKind.SPOT,
-          color       = attachment.color,
-          radius      = attachment.radius,
-          angle       = attachment.angle,
-          cast_shadow = attachment.cast_shadow,
-        },
+        resources.LightKind.SPOT,
+        attachment.color,
+        attachment.radius,
+        attachment.angle,
+        attachment.cast_shadow,
       )
     }
     light, ok := resources.get_light(resources_manager, attachment.handle)
@@ -804,13 +800,11 @@ assign_light_to_node :: proc(
     if attachment.handle.generation == 0 {
       attachment.handle = resources.create_light_handle(
         resources_manager,
-        resources.LightCreateInfo {
-          kind        = resources.LightKind.DIRECTIONAL,
-          color       = attachment.color,
-          radius      = 0.0,
-          angle       = 0.0,
-          cast_shadow = attachment.cast_shadow,
-        },
+        resources.LightKind.DIRECTIONAL,
+        attachment.color,
+        0.0,
+        0.0,
+        attachment.cast_shadow,
       )
     }
     light, ok := resources.get_light(resources_manager, attachment.handle)

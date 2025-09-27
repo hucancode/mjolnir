@@ -46,15 +46,6 @@ Light :: struct {
   is_dirty:    bool,
 }
 
-LightCreateInfo :: struct {
-  kind:        LightKind,
-  color:       [4]f32,
-  radius:      f32,
-  angle:       f32,
-  cast_shadow: bool,
-  enabled:     bool = true,
-}
-
 update_light_gpu_data :: proc(manager: ^Manager, handle: Handle) {
   if handle.index >= MAX_LIGHTS {
     return
