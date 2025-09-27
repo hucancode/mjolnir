@@ -6,3 +6,4 @@ Texture2D_Handle :: Handle
 TextureCube_Handle :: Handle
 RenderTarget_Handle :: Handle
 Camera_Handle :: Handle
+Light_Handle :: Handle

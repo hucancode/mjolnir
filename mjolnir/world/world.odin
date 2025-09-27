@@ -2,29 +2,30 @@ package world
 
 import "../animation"
 import "core:log"
-import "core:math"
 import "core:math/linalg"
 import "core:slice"
 import "../geometry"
 import "../gpu"
-import "../render/particles"
 import "../resources"
 import vk "vendor:vulkan"
 
 Handle :: resources.Handle
 
 PointLightAttachment :: struct {
+  handle:      resources.Light_Handle,
   color:       [4]f32,
   radius:      f32,
   cast_shadow: bool,
 }
 
 DirectionalLightAttachment :: struct {
+  handle:      resources.Light_Handle,
   color:       [4]f32,
   cast_shadow: bool,
 }
 
 SpotLightAttachment :: struct {
+  handle:      resources.Light_Handle,
   color:       [4]f32,
   radius:      f32,
   angle:       f32,
@@ -118,6 +119,25 @@ destroy_node :: proc(self: ^Node, resources_manager: ^resources.Manager) {
   if emitter_attachment, is_emitter := &self.attachment.(EmitterAttachment); is_emitter {
     if resources.destroy_emitter_handle(resources_manager, emitter_attachment.handle) {
       emitter_attachment.handle = {}
+    }
+  }
+  if resources_manager != nil {
+    #partial switch attachment in &self.attachment {
+    case PointLightAttachment:
+      if attachment.handle.generation != 0 {
+        resources.destroy_light_handle(resources_manager, attachment.handle)
+        attachment.handle = {}
+      }
+    case SpotLightAttachment:
+      if attachment.handle.generation != 0 {
+        resources.destroy_light_handle(resources_manager, attachment.handle)
+        attachment.handle = {}
+      }
+    case DirectionalLightAttachment:
+      if attachment.handle.generation != 0 {
+        resources.destroy_light_handle(resources_manager, attachment.handle)
+        attachment.handle = {}
+      }
     }
   }
   data, has_mesh := &self.attachment.(MeshAttachment)
@@ -220,6 +240,7 @@ spawn_at :: proc(
   init_node(node)
   node.attachment = attachment
   assign_emitter_to_node(resources_manager, handle, node)
+  assign_light_to_node(resources_manager, handle, node)
   geometry.transform_translate(&node.transform, position.x, position.y, position.z)
   attach(self.nodes, self.root, handle)
   return
@@ -237,6 +258,7 @@ spawn :: proc(
   init_node(node)
   node.attachment = attachment
   assign_emitter_to_node(resources_manager, handle, node)
+  assign_light_to_node(resources_manager, handle, node)
   attach(self.nodes, self.root, handle)
   return
 }
@@ -254,6 +276,7 @@ spawn_child :: proc(
   init_node(node)
   node.attachment = attachment
   assign_emitter_to_node(resources_manager, handle, node)
+  assign_light_to_node(resources_manager, handle, node)
   attach(self.nodes, parent, handle)
   return
 }
@@ -299,8 +322,12 @@ init_gpu :: proc(
   return visibility_system_init(&world.visibility, gpu_context, resources_manager)
 }
 
-begin_frame :: proc(world: ^World, frame_ctx: ^FrameContext) {
-  traverse(world)
+begin_frame :: proc(
+  world: ^World,
+  frame_ctx: ^FrameContext,
+  resources_manager: ^resources.Manager = nil,
+) {
+  traverse(world, nil, nil, resources_manager)
   update_visibility_system(world)
 }
 
@@ -374,6 +401,7 @@ spawn_node :: proc(
   init_node(node)
   node.attachment = attachment
   assign_emitter_to_node(resources_manager, handle, node)
+  assign_light_to_node(resources_manager, handle, node)
   geometry.transform_translate(&node.transform, position.x, position.y, position.z)
   attach(world.nodes, world.root, handle)
   return
@@ -390,6 +418,7 @@ spawn_child_node :: proc(
   init_node(node)
   node.attachment = attachment
   assign_emitter_to_node(resources_manager, handle, node)
+  assign_light_to_node(resources_manager, handle, node)
   geometry.transform_translate(&node.transform, position.x, position.y, position.z)
   attach(world.nodes, parent, handle)
   return
@@ -412,101 +441,6 @@ get_node :: proc(world: ^World, handle: Handle) -> ^Node {
 }
 
 // Emitter synchronization for particle system
-sync_emitters :: proc(
-  world: ^World,
-  resources_manager: ^resources.Manager,
-  emitters: []resources.EmitterData,
-  params: ^particles.ParticleSystemParams,
-) {
-  if resources_manager == nil {
-    params.emitter_count = 0
-    return
-  }
-
-  emitter_capacity := len(emitters)
-  max_slots := emitter_capacity
-  if max_slots > particles.MAX_EMITTERS {
-    max_slots = particles.MAX_EMITTERS
-  }
-  params.emitter_count = u32(max_slots)
-
-  // Reset visibility each frame; preserve accumulator
-  for i in 0 ..< emitter_capacity {
-    emitters[i].visible = cast(b32)false
-  }
-
-  for &entry, index in resources_manager.emitters.entries {
-    if index >= emitter_capacity {
-      log.warnf("Emitter index %d exceeds GPU buffer capacity %d", index, emitter_capacity)
-      continue
-    }
-    gpu_emitter := &emitters[index]
-    if !entry.active {
-      preserved_time := gpu_emitter.time_accumulator
-      entry.item.node_handle = {}
-      entry.item.is_dirty = true
-      gpu_emitter^ = resources.EmitterData{
-        time_accumulator = preserved_time,
-        visible = cast(b32)false,
-      }
-      continue
-    }
-
-    emitter := &entry.item
-    node_handle := emitter.node_handle
-    node := resources.get(world.nodes, node_handle)
-
-    if node == nil || node.pending_deletion {
-      emitter.is_dirty = true
-      preserved_time := gpu_emitter.time_accumulator
-      gpu_emitter^ = resources.EmitterData{
-        time_accumulator = preserved_time,
-        visible = cast(b32)false,
-      }
-      continue
-    }
-
-    visible := node.parent_visible && node.visible && emitter.enabled != b32(false)
-    if emitter.is_dirty {
-      preserved_time := gpu_emitter.time_accumulator
-      gpu_emitter^ = resources.EmitterData {
-        initial_velocity  = emitter.initial_velocity,
-        color_start       = emitter.color_start,
-        color_end         = emitter.color_end,
-        emission_rate     = emitter.emission_rate,
-        particle_lifetime = emitter.particle_lifetime,
-        position_spread   = emitter.position_spread,
-        velocity_spread   = emitter.velocity_spread,
-        time_accumulator  = preserved_time,
-        size_start        = emitter.size_start,
-        size_end          = emitter.size_end,
-        weight            = emitter.weight,
-        weight_spread     = emitter.weight_spread,
-        texture_index     = emitter.texture_handle.index,
-        node_index        = node_handle.index,
-        visible           = cast(b32)visible,
-        aabb_min          = {
-          emitter.bounding_box.min.x,
-          emitter.bounding_box.min.y,
-          emitter.bounding_box.min.z,
-          0.0,
-        },
-        aabb_max          = {
-          emitter.bounding_box.max.x,
-          emitter.bounding_box.max.y,
-          emitter.bounding_box.max.z,
-          0.0,
-        },
-      }
-      emitter.is_dirty = false
-    } else {
-      gpu_emitter.visible = cast(b32)visible
-      gpu_emitter.node_index = node_handle.index
-    }
-    emitter.node_handle = node_handle
-  }
-}
-
 // Matrix upload for rendering
 upload_world_matrices :: proc(
   world: ^World,
@@ -584,7 +518,229 @@ update_visibility_system :: proc(world: ^World) {
   visibility_system_set_node_count(&world.visibility, u32(count))
 }
 
-traverse :: proc(world: ^World, cb_context: rawptr = nil, callback: TraversalCallback = nil) -> bool {
+@(private)
+update_emitter_attachment :: proc(
+  resources_manager: ^resources.Manager,
+  node_handle: Handle,
+  node: ^Node,
+  effective_visible: bool = true,
+) {
+  if resources_manager == nil {
+    return
+  }
+  attachment, is_emitter := &node.attachment.(EmitterAttachment)
+  if !is_emitter {
+    return
+  }
+  emitter, ok := resources.get(resources_manager.emitters, attachment.handle)
+  if !ok {
+    return
+  }
+  emitter.node_handle = node_handle
+  if attachment.handle.index >= resources.MAX_EMITTERS {
+    return
+  }
+  current := gpu.staged_buffer_get(&resources_manager.emitter_buffer, attachment.handle.index)
+  desired_visible := effective_visible && emitter.enabled != b32(false) && !node.pending_deletion
+  current_visible := current.visible != b32(false) if current != nil else false
+  desired_node_index := node_handle.index
+  current_node_index := current.node_index if current != nil else u32(0xFFFFFFFF)
+  if current == nil || current_visible != desired_visible || current_node_index != desired_node_index {
+    resources.update_emitter_gpu_data(
+      resources_manager,
+      attachment.handle,
+      desired_node_index,
+      desired_visible,
+    )
+  }
+}
+
+@(private)
+update_light_attachment :: proc(
+  resources_manager: ^resources.Manager,
+  node_handle: Handle,
+  node: ^Node,
+  transform_dirty: bool,
+) {
+  if resources_manager == nil {
+    return
+  }
+  epsilon := 1e-6
+  effective_visible := node.parent_visible && node.visible && !node.pending_deletion
+  #partial switch attachment in &node.attachment {
+  case PointLightAttachment:
+    if attachment.handle.generation == 0 {
+      return
+    }
+    light, ok := resources.get_light(resources_manager, attachment.handle)
+    if !ok {
+      return
+    }
+    light.node_handle = node_handle
+    dirty := false
+    if transform_dirty {
+      world_matrix := node_get_world_matrix(node)
+      position := world_matrix[3].xyz
+      delta_pos := [3]f32{
+        position[0] - light.position[0],
+        position[1] - light.position[1],
+        position[2] - light.position[2],
+      }
+      dist_sq := delta_pos[0] * delta_pos[0] +
+        delta_pos[1] * delta_pos[1] +
+        delta_pos[2] * delta_pos[2]
+      if dist_sq > epsilon {
+        light.position = position
+        dirty = true
+      }
+      forward_vec := world_matrix * [4]f32{0, 0, -1, 0}
+      forward := forward_vec.xyz
+      forward_len_sq := forward[0] * forward[0] +
+        forward[1] * forward[1] +
+        forward[2] * forward[2]
+      if forward_len_sq > epsilon {
+        normalized := linalg.normalize(forward)
+        direction := [3]f32{
+          -normalized[0],
+          -normalized[1],
+          -normalized[2],
+        }
+        delta_dir := [3]f32{
+          direction[0] - light.direction[0],
+          direction[1] - light.direction[1],
+          direction[2] - light.direction[2],
+        }
+        dir_sq := delta_dir[0] * delta_dir[0] +
+          delta_dir[1] * delta_dir[1] +
+          delta_dir[2] * delta_dir[2]
+        if dir_sq > epsilon {
+          light.direction = direction
+          dirty = true
+        }
+      }
+    }
+    desired_enabled := effective_visible
+    if light.enabled != desired_enabled {
+      light.enabled = desired_enabled
+      dirty = true
+    }
+    if dirty {
+      resources.update_light_gpu_data(resources_manager, attachment.handle)
+    }
+  case SpotLightAttachment:
+    if attachment.handle.generation == 0 {
+      return
+    }
+    light, ok := resources.get_light(resources_manager, attachment.handle)
+    if !ok {
+      return
+    }
+    light.node_handle = node_handle
+    dirty := false
+    if transform_dirty {
+      world_matrix := node_get_world_matrix(node)
+      position := world_matrix[3].xyz
+      delta_pos := [3]f32{
+        position[0] - light.position[0],
+        position[1] - light.position[1],
+        position[2] - light.position[2],
+      }
+      dist_sq := delta_pos[0] * delta_pos[0] +
+        delta_pos[1] * delta_pos[1] +
+        delta_pos[2] * delta_pos[2]
+      if dist_sq > epsilon {
+        light.position = position
+        dirty = true
+      }
+      forward_vec := world_matrix * [4]f32{0, 0, -1, 0}
+      forward := forward_vec.xyz
+      forward_len_sq := forward[0] * forward[0] +
+        forward[1] * forward[1] +
+        forward[2] * forward[2]
+      if forward_len_sq > epsilon {
+        normalized := linalg.normalize(forward)
+        direction := [3]f32{
+          -normalized[0],
+          -normalized[1],
+          -normalized[2],
+        }
+        delta_dir := [3]f32{
+          direction[0] - light.direction[0],
+          direction[1] - light.direction[1],
+          direction[2] - light.direction[2],
+        }
+        dir_sq := delta_dir[0] * delta_dir[0] +
+          delta_dir[1] * delta_dir[1] +
+          delta_dir[2] * delta_dir[2]
+        if dir_sq > epsilon {
+          light.direction = direction
+          dirty = true
+        }
+      }
+    }
+    desired_enabled := effective_visible
+    if light.enabled != desired_enabled {
+      light.enabled = desired_enabled
+      dirty = true
+    }
+    if dirty {
+      resources.update_light_gpu_data(resources_manager, attachment.handle)
+    }
+  case DirectionalLightAttachment:
+    if attachment.handle.generation == 0 {
+      return
+    }
+    light, ok := resources.get_light(resources_manager, attachment.handle)
+    if !ok {
+      return
+    }
+    light.node_handle = node_handle
+    dirty := false
+    if transform_dirty {
+      world_matrix := node_get_world_matrix(node)
+      forward_vec := world_matrix * [4]f32{0, 0, -1, 0}
+      forward := forward_vec.xyz
+      forward_len_sq := forward[0] * forward[0] +
+        forward[1] * forward[1] +
+        forward[2] * forward[2]
+      if forward_len_sq > epsilon {
+        normalized := linalg.normalize(forward)
+        direction := [3]f32{
+          -normalized[0],
+          -normalized[1],
+          -normalized[2],
+        }
+        delta_dir := [3]f32{
+          direction[0] - light.direction[0],
+          direction[1] - light.direction[1],
+          direction[2] - light.direction[2],
+        }
+        dir_sq := delta_dir[0] * delta_dir[0] +
+          delta_dir[1] * delta_dir[1] +
+          delta_dir[2] * delta_dir[2]
+        if dir_sq > epsilon {
+          light.direction = direction
+          dirty = true
+        }
+      }
+    }
+    desired_enabled := effective_visible
+    if light.enabled != desired_enabled {
+      light.enabled = desired_enabled
+      dirty = true
+    }
+    if dirty {
+      resources.update_light_gpu_data(resources_manager, attachment.handle)
+    }
+  }
+}
+
+traverse :: proc(
+  world: ^World,
+  cb_context: rawptr = nil,
+  callback: TraversalCallback = nil,
+  resources_manager: ^resources.Manager = nil,
+) -> bool {
   using geometry
   append(
     &world.traversal_stack,
@@ -605,8 +761,14 @@ traverse :: proc(world: ^World, cb_context: rawptr = nil, callback: TraversalCal
     // Update parent_visible from parent chain only
     current_node.parent_visible = entry.parent_is_visible
     is_dirty := transform_update_local(&current_node.transform)
-    if entry.parent_is_dirty || is_dirty {
+    transform_dirty := entry.parent_is_dirty || is_dirty
+    if transform_dirty {
       transform_update_world(&current_node.transform, entry.parent_transform)
+    }
+    if resources_manager != nil {
+      effective_visible := current_node.parent_visible && current_node.visible
+      update_light_attachment(resources_manager, entry.handle, current_node, transform_dirty)
+      update_emitter_attachment(resources_manager, entry.handle, current_node, effective_visible)
     }
     // Only call the callback if the node is effectively visible
     if callback != nil && current_node.parent_visible && current_node.visible {
@@ -647,7 +809,85 @@ assign_emitter_to_node :: proc(
   emitter, ok := resources.get(resources_manager.emitters, attachment.handle)
   if ok {
     emitter.node_handle = node_handle
-    emitter.is_dirty = true
+    update_emitter_attachment(resources_manager, node_handle, node)
+  }
+}
+
+assign_light_to_node :: proc(
+  resources_manager: ^resources.Manager,
+  node_handle: Handle,
+  node: ^Node,
+) {
+  if resources_manager == nil {
+    return
+  }
+  #partial switch attachment in &node.attachment {
+  case PointLightAttachment:
+    if attachment.handle.generation == 0 {
+      attachment.handle = resources.create_light_handle(
+        resources_manager,
+        resources.LightKind.POINT,
+        attachment.color,
+        attachment.radius,
+        0.0,
+        attachment.cast_shadow,
+      )
+    }
+    light, ok := resources.get_light(resources_manager, attachment.handle)
+    if ok {
+      light.kind = resources.LightKind.POINT
+      light.color = attachment.color
+      light.radius = attachment.radius
+      light.angle = 0.0
+      light.cast_shadow = attachment.cast_shadow
+      light.enabled = true
+      light.node_handle = node_handle
+      resources.update_light_gpu_data(resources_manager, attachment.handle)
+    }
+  case SpotLightAttachment:
+    if attachment.handle.generation == 0 {
+      attachment.handle = resources.create_light_handle(
+        resources_manager,
+        resources.LightKind.SPOT,
+        attachment.color,
+        attachment.radius,
+        attachment.angle,
+        attachment.cast_shadow,
+      )
+    }
+    light, ok := resources.get_light(resources_manager, attachment.handle)
+    if ok {
+      light.kind = resources.LightKind.SPOT
+      light.color = attachment.color
+      light.radius = attachment.radius
+      light.angle = attachment.angle
+      light.cast_shadow = attachment.cast_shadow
+      light.enabled = true
+      light.node_handle = node_handle
+      resources.update_light_gpu_data(resources_manager, attachment.handle)
+    }
+  case DirectionalLightAttachment:
+    if attachment.handle.generation == 0 {
+      attachment.handle = resources.create_light_handle(
+        resources_manager,
+        resources.LightKind.DIRECTIONAL,
+        attachment.color,
+        0.0,
+        0.0,
+        attachment.cast_shadow,
+      )
+    }
+    light, ok := resources.get_light(resources_manager, attachment.handle)
+    if ok {
+      light.kind = resources.LightKind.DIRECTIONAL
+      light.color = attachment.color
+      light.radius = 0.0
+      light.angle = 0.0
+      light.cast_shadow = attachment.cast_shadow
+      light.enabled = true
+      light.node_handle = node_handle
+      resources.update_light_gpu_data(resources_manager, attachment.handle)
+    }
   }
 }
 

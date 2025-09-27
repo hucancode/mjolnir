@@ -103,26 +103,32 @@ renderer_shutdown :: proc(
 renderer_prepare_targets :: proc(
   self: ^Renderer,
   resources_manager: ^resources.Manager,
-  lights: []lighting.LightInfo,
-  active_light_count: u32,
 ) {
   targets.begin_frame(&self.targets)
   if self.targets.main.generation != 0 {
     targets.track(&self.targets, self.targets.main)
   }
 
-  for light in lights[:active_light_count] {
-    if !light.light_cast_shadow do continue
-    switch light.light_kind {
-    case .POINT:
-      for target_handle in light.cube_render_targets {
+  for &entry in resources_manager.lights.entries {
+    if !entry.active {
+      continue
+    }
+    light := &entry.item
+    if !light.cast_shadow || !light.enabled {
+      continue
+    }
+    switch light.kind {
+    case resources.LightKind.POINT:
+      for target_handle in light.shadow.cube_render_targets {
+        if target_handle.generation == 0 do continue
         resources.get_render_target(resources_manager, target_handle) or_continue
         targets.track(&self.targets, target_handle)
       }
-    case .SPOT:
-      resources.get_render_target(resources_manager, light.render_target) or_continue
-      targets.track(&self.targets, light.render_target)
-    case .DIRECTIONAL:
+    case resources.LightKind.SPOT:
+      if light.shadow.render_target.generation == 0 do continue
+      resources.get_render_target(resources_manager, light.shadow.render_target) or_continue
+      targets.track(&self.targets, light.shadow.render_target)
+    case resources.LightKind.DIRECTIONAL:
       // Directional shadows not yet implemented
     }
   }
@@ -173,8 +179,6 @@ record_shadow_pass :: proc(
   gpu_context: ^gpu.GPUContext,
   resources_manager: ^resources.Manager,
   world_state: ^world.World,
-  lights: []lighting.LightInfo,
-  active_light_count: u32,
 ) -> vk.Result {
   command_buffer := shadow.begin_record(&self.shadow, frame_index) or_return
   shadow_include := resources.NodeFlagSet{.VISIBLE, .CASTS_SHADOW}
@@ -183,18 +187,25 @@ record_shadow_pass :: proc(
     .MATERIAL_WIREFRAME,
   }
   command_stride := world.visibility_command_stride()
-  for &light_info, light_index in lights[:active_light_count] {
-    if !light_info.light_cast_shadow do continue
-    switch light_info.light_kind {
-    case .POINT:
-      if light_info.shadow_map.generation == 0 {
+  for &entry, light_index in resources_manager.lights.entries {
+    if !entry.active {
+      continue
+    }
+    light := &entry.item
+    if !light.cast_shadow || !light.enabled {
+      continue
+    }
+    switch light.kind {
+    case resources.LightKind.POINT:
+      if light.shadow.shadow_map.generation == 0 {
         log.errorf("Point light %d has invalid shadow map handle", light_index)
         continue
       }
       for face in 0 ..< 6 {
+        if light.shadow.cube_cameras[face].generation == 0 do continue
         target := resources.get(
           resources_manager.render_targets,
-          light_info.cube_render_targets[face],
+          light.shadow.cube_render_targets[face],
         )
         if target == nil do continue
         vis_result := world.dispatch_visibility(
@@ -204,50 +215,39 @@ record_shadow_pass :: proc(
           frame_index,
           world.VisibilityCategory.SHADOW,
           world.VisibilityRequest {
-            camera_index  = light_info.cube_cameras[face].index,
+            camera_index  = light.shadow.cube_cameras[face].index,
             include_flags = shadow_include,
             exclude_flags = shadow_exclude,
           },
         )
-        shadow_draw_buffer := vis_result.draw_buffer
-        shadow_draw_count := vis_result.max_draws
-        shadow.begin_pass(
-          target,
-          command_buffer,
-          resources_manager,
-          frame_index,
-          u32(face),
-        )
+        if vis_result.draw_buffer == 0 || vis_result.max_draws == 0 do continue
+        shadow.begin_pass(target, command_buffer, resources_manager, frame_index, u32(face))
         shadow.render(
           &self.shadow,
           target^,
           command_buffer,
           resources_manager,
           frame_index,
-          shadow_draw_buffer,
-          shadow_draw_count,
+          vis_result.draw_buffer,
+          vis_result.max_draws,
           command_stride,
         )
-        shadow.end_pass(
-          command_buffer,
-          target,
-          resources_manager,
-          frame_index,
-          u32(face),
-        )
+        shadow.end_pass(command_buffer, target, resources_manager, frame_index, u32(face))
       }
 
-    case .SPOT:
-      if light_info.shadow_map.generation == 0 {
-        log.errorf("Spot light %d has invalid shadow map handle", light_index)
+    case resources.LightKind.SPOT:
+      if light.shadow.camera.generation == 0 {
+        log.errorf("Spot light %d has invalid camera handle", light_index)
         continue
       }
-      shadow_target := resources.get(
+      target := resources.get(
         resources_manager.render_targets,
-        light_info.render_target,
+        light.shadow.render_target,
       )
-      if shadow_target == nil do continue
-
+      if target == nil {
+        log.errorf("Spot light %d has invalid render target", light_index)
+        continue
+      }
       vis_result := world.dispatch_visibility(
         world_state,
         gpu_context,
@@ -255,43 +255,33 @@ record_shadow_pass :: proc(
         frame_index,
         world.VisibilityCategory.SHADOW,
         world.VisibilityRequest {
-          camera_index  = light_info.camera.index,
+          camera_index  = light.shadow.camera.index,
           include_flags = shadow_include,
           exclude_flags = shadow_exclude,
         },
       )
-      shadow_draw_buffer := vis_result.draw_buffer
-      shadow_draw_count := vis_result.max_draws
-      shadow.begin_pass(
-        shadow_target,
-        command_buffer,
-        resources_manager,
-        frame_index,
-      )
+      if vis_result.draw_buffer == 0 || vis_result.max_draws == 0 do continue
+      shadow.begin_pass(target, command_buffer, resources_manager, frame_index)
       shadow.render(
         &self.shadow,
-        shadow_target^,
+        target^,
         command_buffer,
         resources_manager,
         frame_index,
-        shadow_draw_buffer,
-        shadow_draw_count,
+        vis_result.draw_buffer,
+        vis_result.max_draws,
         command_stride,
       )
-      shadow.end_pass(
-        command_buffer,
-        shadow_target,
-        resources_manager,
-        frame_index,
-      )
+      shadow.end_pass(command_buffer, target, resources_manager, frame_index)
 
-    case .DIRECTIONAL:
+    case resources.LightKind.DIRECTIONAL:
       // Directional shadow rendering not yet implemented
     }
   }
   shadow.end_record(command_buffer) or_return
   return .SUCCESS
 }
+
 
 record_geometry_pass :: proc(
   self: ^Renderer,
@@ -375,8 +365,6 @@ record_lighting_pass :: proc(
   frame_index: u32,
   resources_manager: ^resources.Manager,
   main_render_target: ^resources.RenderTarget,
-  lights: []lighting.LightInfo,
-  active_light_count: u32,
   color_format: vk.Format,
 ) -> vk.Result {
   command_buffer := lighting.begin_record(&self.lighting, frame_index, color_format) or_return
@@ -404,16 +392,16 @@ record_lighting_pass :: proc(
   )
   lighting.render(
     &self.lighting,
-    lights[:active_light_count],
-    main_render_target,
     command_buffer,
     resources_manager,
+    main_render_target,
     frame_index,
   )
   lighting.end_pass(command_buffer)
   lighting.end_record(command_buffer) or_return
   return .SUCCESS
 }
+
 
 record_particles_pass :: proc(
   self: ^Renderer,

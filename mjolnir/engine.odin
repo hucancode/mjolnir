@@ -111,38 +111,6 @@ UpdateThreadData :: struct {
   engine: ^Engine,
 }
 
-PointLightData :: struct {
-  views:          [6]matrix[4, 4]f32,
-  proj:           matrix[4, 4]f32,
-  world:          matrix[4, 4]f32,
-  color:          [4]f32,
-  position:       [4]f32,
-  radius:         f32,
-  shadow_map:     Handle,
-  render_targets: [6]Handle,
-}
-
-SpotLightData :: struct {
-  view:          matrix[4, 4]f32,
-  proj:          matrix[4, 4]f32,
-  world:         matrix[4, 4]f32,
-  color:         [4]f32,
-  position:      [4]f32,
-  direction:     [4]f32,
-  radius:        f32,
-  angle:         f32,
-  shadow_map:    Handle,
-  render_target: Handle,
-}
-
-DirectionalLightData :: struct {
-  view:      matrix[4, 4]f32,
-  proj:      matrix[4, 4]f32,
-  world:     matrix[4, 4]f32,
-  color:     [4]f32,
-  direction: [4]f32,
-}
-
 InputState :: struct {
   mouse_pos:         [2]f64,
   mouse_drag_origin: [2]f32,
@@ -183,9 +151,6 @@ Engine :: struct {
   // Persistent shadow render targets
   shadow_render_targets:       [MAX_SHADOW_MAPS]Handle,
   cube_shadow_render_targets:  [MAX_SHADOW_MAPS][6]Handle,
-  // Light management with pre-allocated pools
-  lights:                      [256]lighting.LightInfo, // Pre-allocated light pool
-  active_light_count:          u32, // Number of currently active lights
   // Deferred cleanup for thread safety
   pending_node_deletions:      [dynamic]Handle,
   // Frame synchronization for parallel update/render
@@ -500,8 +465,16 @@ time_since_start :: proc(self: ^Engine) -> f32 {
 update_emitters :: proc(self: ^Engine, delta_time: f32) {
   params := gpu.data_buffer_get(&self.render.particles.params_buffer)
   params.delta_time = delta_time
-  emitters := gpu.staged_buffer_get_all(&self.resource_manager.emitter_buffer)
-  world.sync_emitters(&self.world, &self.resource_manager, emitters, params)
+  active_emitters := slice.count_proc(
+    self.resource_manager.emitters.entries[:],
+    proc(entry: resources.Entry(resources.Emitter)) -> bool {
+      return entry.active
+    },
+  )
+  if active_emitters > particles.MAX_EMITTERS {
+    active_emitters = particles.MAX_EMITTERS
+  }
+  params.emitter_count = u32(active_emitters)
 }
 
 get_main_camera :: proc(self: ^Engine) -> ^geometry.Camera {
@@ -621,7 +594,7 @@ update :: proc(self: ^Engine) -> bool {
     frame_index = self.frame_index,
     delta_time  = delta_time,
   }
-  world.begin_frame(&self.world, &frame_ctx)
+  world.begin_frame(&self.world, &frame_ctx, &self.resource_manager)
   // Animation updates are now handled in render thread for smooth animation at render FPS
   update_emitters(self, delta_time)
   update_force_fields(self)
@@ -666,54 +639,9 @@ shutdown :: proc(self: ^Engine) {
   log.infof("Engine deinitialized")
 }
 
-// TODO: find a more efficient way to prepare lights information for rendering.
-// This approach is inefficient, we are allocate and then deallocate alot of
-// memory every frame, even when lights does not change
-process_world_lights :: proc(self: ^Engine) {
-  self.active_light_count = 0
-  shadow_map_count: u32 = 0
-  cube_shadow_map_count: u32 = 0
-  for idx in 0 ..< len(self.world.nodes.entries) {
-    entry := &self.world.nodes.entries[idx]
-    if !entry.active do continue
-    node := &entry.item
-    if self.active_light_count >= len(self.lights) do continue
-    node_handle := Handle{generation = entry.generation, index = u32(idx)}
-    #partial switch &attachment in &node.attachment {
-    case PointLightAttachment:
-      process_point_light(
-        self,
-        node_handle,
-        node,
-        &attachment,
-        &cube_shadow_map_count,
-      )
-    case SpotLightAttachment:
-      process_spot_light(
-        self,
-        node_handle,
-        node,
-        &attachment,
-        &shadow_map_count,
-      )
-    case DirectionalLightAttachment:
-      process_directional_light(self, node_handle, node, &attachment)
-    }
-  }
-}
-
 @(private = "file")
-process_point_light :: proc(
-  self: ^Engine,
-  node_handle: Handle,
-  node: ^Node,
-  attachment: ^PointLightAttachment,
-  cube_shadow_map_count: ^u32,
-) {
-  if self.active_light_count >= len(self.lights) {
-    return
-  }
-  dirs := [6][3]f32{
+prepare_light_shadow_resources :: proc(self: ^Engine) {
+  cube_dirs := [6][3]f32{
     {1, 0, 0},
     {-1, 0, 0},
     {0, 1, 0},
@@ -721,7 +649,7 @@ process_point_light :: proc(
     {0, 0, 1},
     {0, 0, -1},
   }
-  ups := [6][3]f32{
+  cube_ups := [6][3]f32{
     {0, -1, 0},
     {0, -1, 0},
     {0, 0, 1},
@@ -729,171 +657,149 @@ process_point_light :: proc(
     {0, -1, 0},
     {0, -1, 0},
   }
-  light := &self.lights[self.active_light_count]
-  self.active_light_count += 1
-  world := world.node_get_world_matrix(node)
-  position := world[3].xyz
-  light.node_handle = node_handle
-  light.transform_generation = 0
-  light.light_kind = lighting.LightKind.POINT
-  light.light_color = attachment.color.xyz
-  light.light_position = position
-  light.light_radius = attachment.radius
-  light.light_direction = {0, 0, 0}
-  light.light_angle = 0
-  light.light_camera_idx = 0
-  light.dirty = false
-  for i in 0 ..< len(light.cube_render_targets) {
-    light.cube_render_targets[i] = Handle{}
-    light.cube_cameras[i] = Handle{}
-  }
-  light.render_target = Handle{}
-  light.camera = Handle{}
-  light.shadow_map = Handle{}
-  light.shadow_map_id = 0
-  casts_shadow := attachment.cast_shadow && cube_shadow_map_count^ < MAX_SHADOW_MAPS
-  light.light_cast_shadow = cast(b32)casts_shadow
-  if casts_shadow {
-    slot := cube_shadow_map_count^
-    cube_shadow_map_count^ += 1
-    for face in 0 ..< 6 {
-      light.cube_render_targets[face] = self.cube_shadow_render_targets[slot][face]
-      camera_handle, camera := resources.alloc(&self.resource_manager.cameras)
-      camera^ = geometry.make_camera_perspective(math.PI * 0.5, 1.0, 0.1, attachment.radius)
-      target := position + dirs[face]
-      geometry.camera_look_at(camera, position, target, ups[face])
-      light.cube_cameras[face] = camera_handle
-      render_target := resources.get(
-        self.resource_manager.render_targets,
-        light.cube_render_targets[face],
-      ) or_continue
-      render_target.camera = camera_handle
-      resources.render_target_upload_camera_data(
-        &self.resource_manager,
-        render_target,
-      )
+  shadow_map_count: u32 = 0
+  cube_shadow_map_count: u32 = 0
+  for &entry, index in self.resource_manager.lights.entries {
+    if !entry.active {
+      continue
     }
-    light.shadow_map = self.cube_shadow_maps[self.frame_index][slot]
-    light.shadow_map_id = light.shadow_map.index
-  }
-}
-
-@(private = "file")
-process_spot_light :: proc(
-  self: ^Engine,
-  node_handle: Handle,
-  node: ^Node,
-  attachment: ^SpotLightAttachment,
-  shadow_map_count: ^u32,
-) {
-  if self.active_light_count >= len(self.lights) {
-    return
-  }
-
-  light := &self.lights[self.active_light_count]
-  self.active_light_count += 1
-
-  world := world.node_get_world_matrix(node)
-  position := world[3].xyz
-  forward_vec := world * [4]f32{0, 0, -1, 0}
-  forward := -linalg.normalize(forward_vec.xyz)
-
-  light.node_handle = node_handle
-  light.transform_generation = 0
-  light.light_kind = lighting.LightKind.SPOT
-  light.light_color = attachment.color.xyz
-  light.light_position = position
-  light.light_direction = forward
-  light.light_radius = attachment.radius
-  light.light_angle = attachment.angle
-  light.dirty = false
-
-  for i in 0 ..< len(light.cube_render_targets) {
-    light.cube_render_targets[i] = Handle{}
-    light.cube_cameras[i] = Handle{}
-  }
-  light.shadow_map = Handle{}
-  light.render_target = Handle{}
-  light.camera = Handle{}
-  light.shadow_map_id = 0
-  light.light_camera_idx = 0
-
-  casts_shadow := attachment.cast_shadow && shadow_map_count^ < MAX_SHADOW_MAPS
-  light.light_cast_shadow = cast(b32)casts_shadow
-  if casts_shadow {
-    slot := shadow_map_count^
-    shadow_map_count^ += 1
-
-    light.render_target = self.shadow_render_targets[slot]
-    light.shadow_map = self.shadow_maps[self.frame_index][slot]
-    light.shadow_map_id = light.shadow_map.index
-
-    camera_handle, camera := resources.alloc(&self.resource_manager.cameras)
-    fov := attachment.angle * 2.0
-    max_fov: f32 = f32(math.PI) * 0.95
-    if fov > max_fov {
-      fov = max_fov
+    handle := Handle{index = u32(index), generation = entry.generation}
+    light := &entry.item
+    old_shadow := light.shadow
+    new_shadow := old_shadow
+    new_shadow.shadow_map = {}
+    new_shadow.render_target = {}
+    for face in 0 ..< len(new_shadow.cube_render_targets) {
+      new_shadow.cube_render_targets[face] = {}
     }
-    camera^ = geometry.make_camera_perspective(
-      fov,
-      1.0,
-      0.1,
-      attachment.radius,
-    )
-    target := position + forward
-    geometry.camera_look_at(camera, position, target)
-    light.camera = camera_handle
-    light.light_camera_idx = camera_handle.index
-
-    render_target := resources.get(
-      self.resource_manager.render_targets,
-      light.render_target,
-    )
-    if render_target != nil {
-      render_target.camera = camera_handle
-      resources.render_target_upload_camera_data(&self.resource_manager, render_target)
+    dirty := false
+    if !light.cast_shadow || !light.enabled {
+      // No shadow resources assigned when light is disabled or not casting shadows
+    } else {
+      switch light.kind {
+      case resources.LightKind.POINT:
+        if cube_shadow_map_count < MAX_SHADOW_MAPS {
+          slot := cube_shadow_map_count
+          cube_shadow_map_count += 1
+          new_shadow.shadow_map = self.cube_shadow_maps[self.frame_index][slot]
+          far_plane := light.radius
+          if far_plane <= 0.1 {
+            far_plane = 0.1
+          }
+          for face in 0 ..< 6 {
+            new_shadow.cube_render_targets[face] = self.cube_shadow_render_targets[slot][face]
+            camera_handle := new_shadow.cube_cameras[face]
+            if camera_handle.generation == 0 {
+              camera_handle, camera := resources.alloc(&self.resource_manager.cameras)
+              if camera != nil {
+                camera^ = geometry.make_camera_perspective(math.PI * 0.5, 1.0, 0.1, far_plane)
+              }
+              new_shadow.cube_cameras[face] = camera_handle
+              dirty = true
+            }
+            camera := resources.get(self.resource_manager.cameras, new_shadow.cube_cameras[face])
+            if camera != nil {
+              geometry.camera_perspective(camera, math.PI * 0.5, 1.0, 0.1, far_plane)
+              target := light.position + cube_dirs[face]
+              geometry.camera_look_at(camera, light.position, target, cube_ups[face])
+            }
+            render_target := resources.get(
+              self.resource_manager.render_targets,
+              new_shadow.cube_render_targets[face],
+            )
+            if render_target != nil {
+              render_target.camera = new_shadow.cube_cameras[face]
+              resources.render_target_upload_camera_data(&self.resource_manager, render_target)
+            }
+          }
+        }
+        dirty = true
+      case resources.LightKind.SPOT:
+        if shadow_map_count < MAX_SHADOW_MAPS {
+          slot := shadow_map_count
+          shadow_map_count += 1
+          new_shadow.render_target = self.shadow_render_targets[slot]
+          new_shadow.shadow_map = self.shadow_maps[self.frame_index][slot]
+          if new_shadow.camera.generation == 0 {
+            camera_handle, camera := resources.alloc(&self.resource_manager.cameras)
+            if camera != nil {
+              far_plane := light.radius
+              if far_plane <= 0.1 {
+                far_plane = 0.1
+              }
+              fov_init := light.angle * 2.0
+              if fov_init <= 0.0 {
+                fov_init = 0.1
+              }
+              camera^ = geometry.make_camera_perspective(fov_init, 1.0, 0.1, far_plane)
+            }
+            new_shadow.camera = camera_handle
+            dirty = true
+          }
+          camera := resources.get(self.resource_manager.cameras, new_shadow.camera)
+          if camera != nil {
+            fov := light.angle * 2.0
+            if fov <= 0.0 {
+              fov = 0.1
+            }
+            max_fov: f32 = f32(math.PI) * 0.95
+            if fov > max_fov {
+              fov = max_fov
+            }
+            far_plane := light.radius
+            if far_plane <= 0.1 {
+              far_plane = 0.1
+            }
+            geometry.camera_perspective(camera, fov, 1.0, 0.1, far_plane)
+            target := light.position + light.direction
+            geometry.camera_look_at(camera, light.position, target)
+          }
+          render_target := resources.get(
+            self.resource_manager.render_targets,
+            new_shadow.render_target,
+          )
+          if render_target != nil {
+            render_target.camera = new_shadow.camera
+            resources.render_target_upload_camera_data(&self.resource_manager, render_target)
+          }
+        }
+        dirty = true
+      case resources.LightKind.DIRECTIONAL:
+        dirty = true
+      }
     }
-  }
-}
 
-@(private = "file")
-process_directional_light :: proc(
-  self: ^Engine,
-  node_handle: Handle,
-  node: ^Node,
-  attachment: ^DirectionalLightAttachment,
-) {
-  if self.active_light_count >= len(self.lights) {
-    return
-  }
+    if old_shadow.shadow_map.index != new_shadow.shadow_map.index ||
+      old_shadow.shadow_map.generation != new_shadow.shadow_map.generation {
+      dirty = true
+    }
+    if old_shadow.render_target.index != new_shadow.render_target.index ||
+      old_shadow.render_target.generation != new_shadow.render_target.generation {
+      dirty = true
+    }
+    for face in 0 ..< len(new_shadow.cube_render_targets) {
+      if old_shadow.cube_render_targets[face].index != new_shadow.cube_render_targets[face].index ||
+        old_shadow.cube_render_targets[face].generation != new_shadow.cube_render_targets[face].generation {
+        dirty = true
+        break
+      }
+    }
+    if old_shadow.camera.index != new_shadow.camera.index ||
+      old_shadow.camera.generation != new_shadow.camera.generation {
+      dirty = true
+    }
+    for face in 0 ..< len(new_shadow.cube_cameras) {
+      if old_shadow.cube_cameras[face].index != new_shadow.cube_cameras[face].index ||
+        old_shadow.cube_cameras[face].generation != new_shadow.cube_cameras[face].generation {
+        dirty = true
+        break
+      }
+    }
 
-  light := &self.lights[self.active_light_count]
-  self.active_light_count += 1
-
-  world := world.node_get_world_matrix(node)
-  position := world[3].xyz
-  forward_vec := world * [4]f32{0, 0, -1, 0}
-  forward := -linalg.normalize(forward_vec.xyz)
-
-  light.node_handle = node_handle
-  light.transform_generation = 0
-  light.light_kind = lighting.LightKind.DIRECTIONAL
-  light.light_color = attachment.color.xyz
-  light.light_position = position
-  light.light_direction = forward
-  light.light_radius = 0.0
-  light.light_angle = 0
-  light.light_cast_shadow = cast(b32)false // Directional shadows not yet implemented
-  light.shadow_map = Handle{}
-  light.render_target = Handle{}
-  light.camera = Handle{}
-  light.shadow_map_id = 0
-  light.light_camera_idx = 0
-  light.dirty = false
-
-  for i in 0 ..< len(light.cube_render_targets) {
-    light.cube_render_targets[i] = Handle{}
-    light.cube_cameras[i] = Handle{}
+    light.shadow = new_shadow
+    if dirty {
+      resources.update_light_gpu_data(&self.resource_manager, handle)
+    }
   }
 }
 
@@ -994,31 +900,10 @@ render :: proc(self: ^Engine) -> vk.Result {
   }
   resources.render_target_upload_camera_data(&self.resource_manager, main_render_target)
   world.upload_world_matrices(&self.world, &self.resource_manager, self.frame_index)
-  defer {
-    for i in 0 ..< self.active_light_count {
-      light_info := &self.lights[i]
-      if !light_info.light_cast_shadow do continue
-      switch light_info.light_kind {
-      case .POINT:
-        for camera_handle in light_info.cube_cameras {
-          if camera_handle.generation != 0 {
-            resources.free(&self.resource_manager.cameras, camera_handle)
-          }
-        }
-      case .SPOT:
-        if light_info.camera.generation != 0 {
-          resources.free(&self.resource_manager.cameras, light_info.shadow_resources.camera)
-        }
-      case .DIRECTIONAL:
-      }
-    }
-  }
-  process_world_lights(self)
+  prepare_light_shadow_resources(self)
   renderer_prepare_targets(
     &self.render,
     &self.resource_manager,
-    self.lights[:],
-    self.active_light_count,
   )
   // Visibility is now updated in begin_frame
   record_shadow_pass(
@@ -1027,8 +912,6 @@ render :: proc(self: ^Engine) -> vk.Result {
     &self.gpu_context,
     &self.resource_manager,
     &self.world,
-    self.lights[:],
-    self.active_light_count,
   )
   record_geometry_pass(
     &self.render,
@@ -1043,8 +926,6 @@ render :: proc(self: ^Engine) -> vk.Result {
     self.frame_index,
     &self.resource_manager,
     main_render_target,
-    self.lights[:],
-    self.active_light_count,
     self.swapchain.format.format,
   )
   record_particles_pass(

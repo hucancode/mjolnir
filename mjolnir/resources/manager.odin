@@ -308,6 +308,15 @@ shutdown :: proc(
   delete(manager.cameras.free_indices)
   delete(manager.emitters.entries)
   delete(manager.emitters.free_indices)
+  for idx in 0 ..< len(manager.lights.entries) {
+    entry := &manager.lights.entries[idx]
+    if entry.generation > 0 && entry.active {
+      handle := Handle{generation = entry.generation, index = u32(idx)}
+      destroy_light_handle(manager, handle)
+    }
+  }
+  delete(manager.lights.entries)
+  delete(manager.lights.free_indices)
   for &entry in manager.animation_clips.entries {
     if entry.generation > 0 && entry.active {
       animation.clip_destroy(&entry.item)
@@ -366,7 +375,6 @@ create_emitter_handle :: proc(
   handle, emitter := alloc(&manager.emitters)
   emitter^ = config
   emitter.node_handle = {}
-  emitter.is_dirty = true
   return handle
 }
 
@@ -374,8 +382,76 @@ destroy_emitter_handle :: proc(
   manager: ^Manager,
   handle: Handle,
 ) -> bool {
+  if handle.index < MAX_EMITTERS {
+    zero := EmitterData{}
+    gpu.staged_buffer_write(
+      &manager.emitter_buffer,
+      &zero,
+      int(handle.index),
+    )
+  }
   _, freed := free(&manager.emitters, handle)
   return freed
+}
+
+create_light_handle :: proc(
+  manager: ^Manager,
+  kind: LightKind,
+  color: [4]f32,
+  radius: f32,
+  angle: f32,
+  cast_shadow: bool,
+  enabled: bool = true,
+) -> Handle {
+  handle, light := alloc(&manager.lights)
+  light.kind = kind
+  light.color = color
+  light.radius = radius
+  light.angle = angle
+  light.cast_shadow = cast_shadow
+  light.enabled = enabled
+  light.node_handle = {}
+  light.position = {0, 0, 0}
+  light.direction = {0, 0, -1}
+  light.shadow = {}
+  return handle
+}
+
+destroy_light_handle :: proc(
+  manager: ^Manager,
+  handle: Handle,
+) -> bool {
+  light := get(manager.lights, handle)
+  if light != nil {
+    if light.shadow.camera.generation != 0 {
+      free(&manager.cameras, light.shadow.camera)
+    }
+    for camera_handle in light.shadow.cube_cameras {
+      if camera_handle.generation != 0 {
+        free(&manager.cameras, camera_handle)
+      }
+    }
+    light.shadow = {}
+    light.enabled = false
+  }
+  if handle.index < MAX_LIGHTS {
+    zero := LightData{}
+    gpu.staged_buffer_write(
+      &manager.lights_buffer,
+      &zero,
+      int(handle.index),
+    )
+  }
+  _, freed := free(&manager.lights, handle)
+  return freed
+}
+
+get_light :: proc(
+  manager: ^Manager,
+  handle: Handle,
+) -> (^Light, bool) {
+  light := get(manager.lights, handle)
+  return light, light != nil
 }
 
 create_geometry_pipeline_layout :: proc(
