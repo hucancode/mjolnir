@@ -500,7 +500,7 @@ time_since_start :: proc(self: ^Engine) -> f32 {
 update_emitters :: proc(self: ^Engine, delta_time: f32) {
   params := gpu.data_buffer_get(&self.render.particles.params_buffer)
   params.delta_time = delta_time
-  emitters := gpu.data_buffer_get_all(&self.resource_manager.emitter_buffer)
+  emitters := gpu.staged_buffer_get_all(&self.resource_manager.emitter_buffer)
   world.sync_emitters(&self.world, &self.resource_manager, emitters, params)
 }
 
@@ -1074,7 +1074,6 @@ render :: proc(self: ^Engine) -> vk.Result {
     self.swapchain.images[self.swapchain.image_index],
     self.swapchain.views[self.swapchain.image_index],
   )
-  resources.commit(&self.resource_manager, &self.gpu_context, &resource_frame_ctx) or_return
   vk.BeginCommandBuffer(
     command_buffer,
     &{sType = .COMMAND_BUFFER_BEGIN_INFO, flags = {.ONE_TIME_SUBMIT}},
@@ -1087,6 +1086,8 @@ render :: proc(self: ^Engine) -> vk.Result {
   if self.custom_render_proc != nil {
     self.custom_render_proc(self, command_buffer)
   }
+  // Commit resource changes after custom render to ensure any material updates are flushed
+  resources.commit(&self.resource_manager, &self.gpu_context, &resource_frame_ctx) or_return
   buffers := [?]vk.CommandBuffer{
     self.render.shadow.commands[self.frame_index],
     self.render.geometry.commands[self.frame_index],

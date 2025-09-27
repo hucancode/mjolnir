@@ -517,7 +517,7 @@ upload_world_matrices :: proc(
     return
   }
   matrices := gpu.data_buffer_get_all(&resources_manager.world_matrix_buffers[frame_index])
-  node_datas := gpu.data_buffer_get_all(&resources_manager.node_data_buffer)
+  node_datas := gpu.staged_buffer_get_all(&resources_manager.node_data_buffer)
   if len(matrices) == 0 {
     return
   }
@@ -547,13 +547,13 @@ upload_world_matrices :: proc(
     node_data.mesh_id = mesh_attachment.handle.index
     node_data.flags = {}
     if entry.item.visible && entry.item.parent_visible {
-      node_data.flags |= {.VISIBLE}
+      node_data.flags |= resources.NodeFlagSet{.VISIBLE}
     }
     if entry.item.culling_enabled {
       node_data.flags |= {.CULLING_ENABLED}
     }
     if mesh_attachment.cast_shadow {
-      node_data.flags |= {.CASTS_SHADOW}
+      node_data.flags |= resources.NodeFlagSet{.CASTS_SHADOW}
     }
     if material_entry, has_material := resources.get(
       resources_manager.materials,
@@ -561,9 +561,9 @@ upload_world_matrices :: proc(
     ); has_material {
       switch material_entry.type {
       case .TRANSPARENT:
-        node_data.flags |= {.MATERIAL_TRANSPARENT}
+        node_data.flags |= resources.NodeFlagSet{.MATERIAL_TRANSPARENT}
       case .WIREFRAME:
-        node_data.flags |= {.MATERIAL_WIREFRAME}
+        node_data.flags |= resources.NodeFlagSet{.MATERIAL_WIREFRAME}
       case .PBR, .UNLIT:
         // No additional flags needed
       }

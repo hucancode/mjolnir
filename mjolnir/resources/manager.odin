@@ -52,7 +52,7 @@ Manager :: struct {
   // Bindless material buffer system
   material_buffer_set_layout:     vk.DescriptorSetLayout,
   material_buffer_descriptor_set: vk.DescriptorSet,
-  material_buffer:                gpu.DataBuffer(MaterialData),
+  material_buffer:                gpu.StagedBuffer(MaterialData),
 
   // Bindless world matrix buffer system
   world_matrix_buffer_set_layout:   vk.DescriptorSetLayout,
@@ -62,23 +62,29 @@ Manager :: struct {
   // Bindless node data buffer system
   node_data_buffer_set_layout:    vk.DescriptorSetLayout,
   node_data_descriptor_set:       vk.DescriptorSet,
-  node_data_buffer:               gpu.DataBuffer(NodeData),
+  node_data_buffer:               gpu.StagedBuffer(NodeData),
 
   // Bindless mesh data buffer system
   mesh_data_buffer_set_layout:    vk.DescriptorSetLayout,
   mesh_data_descriptor_set:       vk.DescriptorSet,
-  mesh_data_buffer:               gpu.DataBuffer(MeshData),
+  mesh_data_buffer:               gpu.StagedBuffer(MeshData),
 
   // Bindless emitter buffer system
   emitter_buffer_set_layout:      vk.DescriptorSetLayout,
   emitter_buffer_descriptor_set:  vk.DescriptorSet,
-  emitter_buffer:                 gpu.DataBuffer(EmitterData),
+  emitter_buffer:                 gpu.StagedBuffer(EmitterData),
 
   // Bindless vertex skinning buffer system
   vertex_skinning_buffer_set_layout: vk.DescriptorSetLayout,
   vertex_skinning_descriptor_set:    vk.DescriptorSet,
-  vertex_skinning_buffer:            gpu.DataBuffer(geometry.SkinningData),
+  vertex_skinning_buffer:            gpu.StagedBuffer(geometry.SkinningData),
   vertex_skinning_slab:              SlabAllocator,
+
+  // Bindless lights buffer system (staged - infrequent updates)
+  lights:                           Pool(Light),
+  lights_buffer_set_layout:         vk.DescriptorSetLayout,
+  lights_buffer_descriptor_set:     vk.DescriptorSet,
+  lights_buffer:                    gpu.StagedBuffer(LightData),
 
   // Bindless texture system
   textures_set_layout:          vk.DescriptorSetLayout,
@@ -123,6 +129,8 @@ init :: proc(
   pool_init(&manager.emitters)
   log.infof("Initializing animation clips pool... ")
   pool_init(&manager.animation_clips)
+  log.infof("Initializing lights pool... ")
+  pool_init(&manager.lights)
   log.infof("Initializing navigation mesh pool... ")
   pool_init(&manager.nav_meshes)
   log.infof("Initializing navigation context pool... ")
@@ -140,6 +148,7 @@ init :: proc(
   init_mesh_data_buffer(gpu_context, manager) or_return
   init_vertex_skinning_buffer(gpu_context, manager) or_return
   init_emitter_buffer(gpu_context, manager) or_return
+  init_lights_buffer(gpu_context, manager) or_return
   init_bindless_buffers(gpu_context, manager) or_return
   // Texture + samplers descriptor set
   textures_bindings := [?]vk.DescriptorSetLayoutBinding {
@@ -251,6 +260,12 @@ commit :: proc(
   gpu_context: ^gpu.GPUContext,
   frame: ^FrameContext,
 ) -> vk.Result {
+  gpu.staged_buffer_flush(gpu_context, &manager.material_buffer) or_return
+  gpu.staged_buffer_flush(gpu_context, &manager.node_data_buffer) or_return
+  gpu.staged_buffer_flush(gpu_context, &manager.mesh_data_buffer) or_return
+  gpu.staged_buffer_flush(gpu_context, &manager.emitter_buffer) or_return
+  gpu.staged_buffer_flush(gpu_context, &manager.lights_buffer) or_return
+  gpu.staged_buffer_flush(gpu_context, &manager.vertex_skinning_buffer) or_return
   return .SUCCESS
 }
 
@@ -261,6 +276,7 @@ shutdown :: proc(
   destroy_material_buffer(gpu_context, manager)
   destroy_world_matrix_buffers(gpu_context, manager)
   destroy_emitter_buffer(gpu_context, manager)
+  destroy_lights_buffer(gpu_context, manager)
   // Manually clean up each pool since callbacks can't capture gpu_context
   for &entry in manager.image_2d_buffers.entries {
     if entry.generation > 0 && entry.active {
@@ -379,6 +395,7 @@ create_geometry_pipeline_layout :: proc(
     manager.node_data_buffer_set_layout,
     manager.mesh_data_buffer_set_layout,
     manager.vertex_skinning_buffer_set_layout,
+    manager.lights_buffer_set_layout,
   }
   vk.CreatePipelineLayout(
     gpu_context.device,
@@ -611,12 +628,11 @@ init_material_buffer :: proc(
     "Creating material buffer with capacity %d materials...",
     MAX_MATERIALS,
   )
-  manager.material_buffer = gpu.create_host_visible_buffer(
+  manager.material_buffer = gpu.malloc_staged_buffer(
     gpu_context,
     MaterialData,
     MAX_MATERIALS,
     {.STORAGE_BUFFER},
-    nil,
   ) or_return
   material_bindings := [?]vk.DescriptorSetLayoutBinding {
     {
@@ -647,7 +663,7 @@ init_material_buffer :: proc(
     &manager.material_buffer_descriptor_set,
   ) or_return
   buffer_info := vk.DescriptorBufferInfo {
-    buffer = manager.material_buffer.buffer,
+    buffer = manager.material_buffer.device_buffer,
     offset = 0,
     range  = vk.DeviceSize(vk.WHOLE_SIZE),
   }
@@ -667,7 +683,7 @@ destroy_material_buffer :: proc(
   gpu_context: ^gpu.GPUContext,
   manager: ^Manager,
 ) {
-  gpu.data_buffer_destroy(gpu_context.device, &manager.material_buffer)
+  gpu.staged_buffer_destroy(gpu_context.device, &manager.material_buffer)
   vk.DestroyDescriptorSetLayout(
     gpu_context.device,
     manager.material_buffer_set_layout,
@@ -770,14 +786,13 @@ init_node_data_buffer :: proc(
     "Creating node data buffer with capacity %d nodes...",
     NODE_DATA_CAPACITY,
   )
-  manager.node_data_buffer = gpu.create_host_visible_buffer(
+  manager.node_data_buffer = gpu.malloc_staged_buffer(
     gpu_context,
     NodeData,
     NODE_DATA_CAPACITY,
     {.STORAGE_BUFFER},
-    nil,
   ) or_return
-  node_slice := gpu.data_buffer_get_all(&manager.node_data_buffer)
+  node_slice := gpu.staged_buffer_get_all(&manager.node_data_buffer)
   default_node := NodeData {
     material_id        = 0xFFFFFFFF,
     mesh_id            = 0xFFFFFFFF,
@@ -813,7 +828,7 @@ init_node_data_buffer :: proc(
     &manager.node_data_descriptor_set,
   ) or_return
   buffer_info := vk.DescriptorBufferInfo {
-    buffer = manager.node_data_buffer.buffer,
+    buffer = manager.node_data_buffer.device_buffer,
     offset = 0,
     range  = vk.DeviceSize(vk.WHOLE_SIZE),
   }
@@ -833,7 +848,7 @@ destroy_node_data_buffer :: proc(
   gpu_context: ^gpu.GPUContext,
   manager: ^Manager,
 ) {
-  gpu.data_buffer_destroy(gpu_context.device, &manager.node_data_buffer)
+  gpu.staged_buffer_destroy(gpu_context.device, &manager.node_data_buffer)
   vk.DestroyDescriptorSetLayout(
     gpu_context.device,
     manager.node_data_buffer_set_layout,
@@ -851,12 +866,11 @@ init_mesh_data_buffer :: proc(
     "Creating mesh data buffer with capacity %d meshes...",
     MAX_MESHES,
   )
-  manager.mesh_data_buffer = gpu.create_host_visible_buffer(
+  manager.mesh_data_buffer = gpu.malloc_staged_buffer(
     gpu_context,
     MeshData,
     MAX_MESHES,
     {.STORAGE_BUFFER},
-    nil,
   ) or_return
   bindings := [?]vk.DescriptorSetLayoutBinding {
     {
@@ -887,7 +901,7 @@ init_mesh_data_buffer :: proc(
     &manager.mesh_data_descriptor_set,
   ) or_return
   buffer_info := vk.DescriptorBufferInfo {
-    buffer = manager.mesh_data_buffer.buffer,
+    buffer = manager.mesh_data_buffer.device_buffer,
     offset = 0,
     range  = vk.DeviceSize(vk.WHOLE_SIZE),
   }
@@ -908,14 +922,13 @@ init_emitter_buffer :: proc(
   manager: ^Manager,
 ) -> vk.Result {
   log.info("Creating emitter buffer for bindless access")
-  manager.emitter_buffer = gpu.create_host_visible_buffer(
+  manager.emitter_buffer = gpu.malloc_staged_buffer(
     gpu_context,
     EmitterData,
     MAX_EMITTERS,
     {.STORAGE_BUFFER},
-    nil,
   ) or_return
-  emitters := gpu.data_buffer_get_all(&manager.emitter_buffer)
+  emitters := gpu.staged_buffer_get_all(&manager.emitter_buffer)
   for &emitter in emitters do emitter = {}
   bindings := [?]vk.DescriptorSetLayoutBinding {
     {
@@ -946,7 +959,7 @@ init_emitter_buffer :: proc(
     &manager.emitter_buffer_descriptor_set,
   ) or_return
   buffer_info := vk.DescriptorBufferInfo {
-    buffer = manager.emitter_buffer.buffer,
+    buffer = gpu.staged_buffer_get_device_buffer(&manager.emitter_buffer),
     offset = 0,
     range  = vk.DeviceSize(vk.WHOLE_SIZE),
   }
@@ -962,11 +975,90 @@ init_emitter_buffer :: proc(
   return .SUCCESS
 }
 
+init_lights_buffer :: proc(
+  gpu_context: ^gpu.GPUContext,
+  manager: ^Manager,
+) -> vk.Result {
+  log.info("Creating lights buffer for bindless access")
+  manager.lights_buffer = gpu.malloc_staged_buffer(
+    gpu_context,
+    LightData,
+    MAX_LIGHTS,
+    {.STORAGE_BUFFER},
+  ) or_return
+
+  lights := gpu.staged_buffer_get_all(&manager.lights_buffer)
+  for &light in lights do light = {}
+
+  bindings := [?]vk.DescriptorSetLayoutBinding {
+    {
+      binding = 0,
+      descriptorType = .STORAGE_BUFFER,
+      descriptorCount = 1,
+      stageFlags = {.VERTEX, .FRAGMENT},
+    },
+  }
+
+  vk.CreateDescriptorSetLayout(
+    gpu_context.device,
+    &vk.DescriptorSetLayoutCreateInfo {
+      sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+      bindingCount = len(bindings),
+      pBindings = raw_data(bindings[:]),
+    },
+    nil,
+    &manager.lights_buffer_set_layout,
+  ) or_return
+
+  vk.AllocateDescriptorSets(
+    gpu_context.device,
+    &vk.DescriptorSetAllocateInfo {
+      sType              = .DESCRIPTOR_SET_ALLOCATE_INFO,
+      descriptorPool     = gpu_context.descriptor_pool,
+      descriptorSetCount = 1,
+      pSetLayouts        = &manager.lights_buffer_set_layout,
+    },
+    &manager.lights_buffer_descriptor_set,
+  ) or_return
+
+  buffer_info := vk.DescriptorBufferInfo {
+    buffer = gpu.staged_buffer_get_device_buffer(&manager.lights_buffer),
+    offset = 0,
+    range  = vk.DeviceSize(vk.WHOLE_SIZE),
+  }
+  write := vk.WriteDescriptorSet {
+    sType           = .WRITE_DESCRIPTOR_SET,
+    dstSet          = manager.lights_buffer_descriptor_set,
+    dstBinding      = 0,
+    descriptorType  = .STORAGE_BUFFER,
+    descriptorCount = 1,
+    pBufferInfo     = &buffer_info,
+  }
+  vk.UpdateDescriptorSets(gpu_context.device, 1, &write, 0, nil)
+  return .SUCCESS
+}
+
+destroy_lights_buffer :: proc(
+  gpu_context: ^gpu.GPUContext,
+  manager: ^Manager,
+) {
+  gpu.staged_buffer_destroy(gpu_context.device, &manager.lights_buffer)
+  if manager.lights_buffer_set_layout != 0 {
+    vk.DestroyDescriptorSetLayout(
+      gpu_context.device,
+      manager.lights_buffer_set_layout,
+      nil,
+    )
+  }
+  manager.lights_buffer_set_layout = 0
+  manager.lights_buffer_descriptor_set = 0
+}
+
 destroy_emitter_buffer :: proc(
   gpu_context: ^gpu.GPUContext,
   manager: ^Manager,
 ) {
-  gpu.data_buffer_destroy(gpu_context.device, &manager.emitter_buffer)
+  gpu.staged_buffer_destroy(gpu_context.device, &manager.emitter_buffer)
   if manager.emitter_buffer_set_layout != 0 {
     vk.DestroyDescriptorSetLayout(
       gpu_context.device,
@@ -982,7 +1074,7 @@ destroy_mesh_data_buffer :: proc(
   gpu_context: ^gpu.GPUContext,
   manager: ^Manager,
 ) {
-  gpu.data_buffer_destroy(gpu_context.device, &manager.mesh_data_buffer)
+  gpu.staged_buffer_destroy(gpu_context.device, &manager.mesh_data_buffer)
   vk.DestroyDescriptorSetLayout(
     gpu_context.device,
     manager.mesh_data_buffer_set_layout,
@@ -1001,12 +1093,11 @@ init_vertex_skinning_buffer :: proc(
     "Creating vertex skinning buffer with capacity %d entries...",
     skinning_count,
   )
-  manager.vertex_skinning_buffer = gpu.create_host_visible_buffer(
+  manager.vertex_skinning_buffer = gpu.malloc_staged_buffer(
     gpu_context,
     geometry.SkinningData,
     skinning_count,
     {.STORAGE_BUFFER},
-    nil,
   ) or_return
   slab_allocator_init(&manager.vertex_skinning_slab, VERTEX_SLAB_CONFIG)
   bindings := [?]vk.DescriptorSetLayoutBinding {
@@ -1038,7 +1129,7 @@ init_vertex_skinning_buffer :: proc(
     &manager.vertex_skinning_descriptor_set,
   ) or_return
   buffer_info := vk.DescriptorBufferInfo {
-    buffer = manager.vertex_skinning_buffer.buffer,
+    buffer = manager.vertex_skinning_buffer.device_buffer,
     offset = 0,
     range  = vk.DeviceSize(vk.WHOLE_SIZE),
   }
@@ -1059,7 +1150,7 @@ destroy_vertex_skinning_buffer :: proc(
   manager: ^Manager,
 ) {
   slab_allocator_destroy(&manager.vertex_skinning_slab)
-  gpu.data_buffer_destroy(gpu_context.device, &manager.vertex_skinning_buffer)
+  gpu.staged_buffer_destroy(gpu_context.device, &manager.vertex_skinning_buffer)
   vk.DestroyDescriptorSetLayout(
     gpu_context.device,
     manager.vertex_skinning_buffer_set_layout,
@@ -1392,7 +1483,7 @@ manager_allocate_vertex_skinning :: proc(
     log.error("Failed to allocate vertex skinning data from slab allocator")
     return {}, .ERROR_OUT_OF_DEVICE_MEMORY
   }
-  ret = gpu.data_buffer_write(
+  ret = gpu.staged_buffer_write(
     &manager.vertex_skinning_buffer,
     skinnings,
     int(offset),
@@ -1487,7 +1578,7 @@ mesh_write_to_gpu :: proc(
     return .ERROR_OUT_OF_DEVICE_MEMORY
   }
   data := mesh_data_from_mesh(mesh)
-  return gpu.data_buffer_write_single(
+  return gpu.staged_buffer_write(
     &manager.mesh_data_buffer,
     &data,
     int(handle.index),
@@ -1525,7 +1616,7 @@ material_write_to_gpu :: proc(
     return .ERROR_OUT_OF_DEVICE_MEMORY
   }
   data := material_data_from_material(mat)
-  gpu.data_buffer_write(
+  gpu.staged_buffer_write(
     &manager.material_buffer,
     &data,
     int(handle.index),
