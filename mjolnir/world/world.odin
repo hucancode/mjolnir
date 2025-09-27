@@ -124,7 +124,7 @@ destroy_node :: proc(self: ^Node, resources_manager: ^resources.Manager) {
     }
   }
   if resources_manager != nil {
-    #partial switch attachment in &self.attachment {
+    #partial switch &attachment in &self.attachment {
     case PointLightAttachment:
       if attachment.handle.generation != 0 {
         resources.destroy_light_handle(resources_manager, attachment.handle)
@@ -541,7 +541,7 @@ sync_lights :: proc(
   if resources_manager == nil {
     return
   }
-  epsilon := 1e-6
+  epsilon :f32 = 1e-6
   for &entry, index in resources_manager.lights.entries {
     if !entry.active {
       continue
@@ -751,7 +751,7 @@ assign_light_to_node :: proc(
   if resources_manager == nil {
     return
   }
-  #partial switch attachment in &node.attachment {
+  #partial switch &attachment in &node.attachment {
   case PointLightAttachment:
     if attachment.handle.generation == 0 {
       attachment.handle = resources.create_light_handle(
