@@ -14,17 +14,20 @@ import vk "vendor:vulkan"
 Handle :: resources.Handle
 
 PointLightAttachment :: struct {
+  handle:      resources.Light_Handle,
   color:       [4]f32,
   radius:      f32,
   cast_shadow: bool,
 }
 
 DirectionalLightAttachment :: struct {
+  handle:      resources.Light_Handle,
   color:       [4]f32,
   cast_shadow: bool,
 }
 
 SpotLightAttachment :: struct {
+  handle:      resources.Light_Handle,
   color:       [4]f32,
   radius:      f32,
   angle:       f32,
@@ -118,6 +121,25 @@ destroy_node :: proc(self: ^Node, resources_manager: ^resources.Manager) {
   if emitter_attachment, is_emitter := &self.attachment.(EmitterAttachment); is_emitter {
     if resources.destroy_emitter_handle(resources_manager, emitter_attachment.handle) {
       emitter_attachment.handle = {}
+    }
+  }
+  if resources_manager != nil {
+    #partial switch attachment in &self.attachment {
+    case PointLightAttachment:
+      if attachment.handle.generation != 0 {
+        resources.destroy_light_handle(resources_manager, attachment.handle)
+        attachment.handle = {}
+      }
+    case SpotLightAttachment:
+      if attachment.handle.generation != 0 {
+        resources.destroy_light_handle(resources_manager, attachment.handle)
+        attachment.handle = {}
+      }
+    case DirectionalLightAttachment:
+      if attachment.handle.generation != 0 {
+        resources.destroy_light_handle(resources_manager, attachment.handle)
+        attachment.handle = {}
+      }
     }
   }
   data, has_mesh := &self.attachment.(MeshAttachment)
@@ -220,6 +242,7 @@ spawn_at :: proc(
   init_node(node)
   node.attachment = attachment
   assign_emitter_to_node(resources_manager, handle, node)
+  assign_light_to_node(resources_manager, handle, node)
   geometry.transform_translate(&node.transform, position.x, position.y, position.z)
   attach(self.nodes, self.root, handle)
   return
@@ -237,6 +260,7 @@ spawn :: proc(
   init_node(node)
   node.attachment = attachment
   assign_emitter_to_node(resources_manager, handle, node)
+  assign_light_to_node(resources_manager, handle, node)
   attach(self.nodes, self.root, handle)
   return
 }
@@ -254,6 +278,7 @@ spawn_child :: proc(
   init_node(node)
   node.attachment = attachment
   assign_emitter_to_node(resources_manager, handle, node)
+  assign_light_to_node(resources_manager, handle, node)
   attach(self.nodes, parent, handle)
   return
 }
@@ -374,6 +399,7 @@ spawn_node :: proc(
   init_node(node)
   node.attachment = attachment
   assign_emitter_to_node(resources_manager, handle, node)
+  assign_light_to_node(resources_manager, handle, node)
   geometry.transform_translate(&node.transform, position.x, position.y, position.z)
   attach(world.nodes, world.root, handle)
   return
@@ -390,6 +416,7 @@ spawn_child_node :: proc(
   init_node(node)
   node.attachment = attachment
   assign_emitter_to_node(resources_manager, handle, node)
+  assign_light_to_node(resources_manager, handle, node)
   geometry.transform_translate(&node.transform, position.x, position.y, position.z)
   attach(world.nodes, parent, handle)
   return
@@ -504,6 +531,71 @@ sync_emitters :: proc(
       gpu_emitter.node_index = node_handle.index
     }
     emitter.node_handle = node_handle
+  }
+}
+
+sync_lights :: proc(
+  world: ^World,
+  resources_manager: ^resources.Manager,
+) {
+  if resources_manager == nil {
+    return
+  }
+  epsilon := 1e-6
+  for &entry, index in resources_manager.lights.entries {
+    if !entry.active {
+      continue
+    }
+    handle := Handle{index = u32(index), generation = entry.generation}
+    light := &entry.item
+    node := resources.get(world.nodes, light.node_handle)
+    if node == nil || node.pending_deletion {
+      if light.enabled {
+        light.enabled = false
+        light.is_dirty = true
+      }
+    } else {
+      world_matrix := node_get_world_matrix(node)
+      position := world_matrix[3].xyz
+      delta_pos := [3]f32{
+        position[0] - light.position[0],
+        position[1] - light.position[1],
+        position[2] - light.position[2],
+      }
+      dist_sq := delta_pos[0] * delta_pos[0] +
+        delta_pos[1] * delta_pos[1] +
+        delta_pos[2] * delta_pos[2]
+      if dist_sq > epsilon {
+        light.position = position
+        light.is_dirty = true
+      }
+      forward_vec := world_matrix * [4]f32{0, 0, -1, 0}
+      forward := forward_vec.xyz
+      forward_len_sq := forward[0] * forward[0] + forward[1] * forward[1] + forward[2] * forward[2]
+      if forward_len_sq > epsilon {
+        direction := -linalg.normalize(forward)
+        delta_dir := [3]f32{
+          direction[0] - light.direction[0],
+          direction[1] - light.direction[1],
+          direction[2] - light.direction[2],
+        }
+        dir_sq := delta_dir[0] * delta_dir[0] +
+          delta_dir[1] * delta_dir[1] +
+          delta_dir[2] * delta_dir[2]
+        if dir_sq > epsilon {
+          light.direction = direction
+          light.is_dirty = true
+        }
+      }
+      if !light.enabled {
+        light.enabled = true
+        light.is_dirty = true
+      }
+    }
+    if light.is_dirty {
+      resources.update_light_gpu_data(resources_manager, handle)
+      light.is_dirty = false
+    }
   }
 }
 
@@ -648,6 +740,90 @@ assign_emitter_to_node :: proc(
   if ok {
     emitter.node_handle = node_handle
     emitter.is_dirty = true
+  }
+}
+
+assign_light_to_node :: proc(
+  resources_manager: ^resources.Manager,
+  node_handle: Handle,
+  node: ^Node,
+) {
+  if resources_manager == nil {
+    return
+  }
+  #partial switch attachment in &node.attachment {
+  case PointLightAttachment:
+    if attachment.handle.generation == 0 {
+      attachment.handle = resources.create_light_handle(
+        resources_manager,
+        resources.LightCreateInfo {
+          kind        = resources.LightKind.POINT,
+          color       = attachment.color,
+          radius      = attachment.radius,
+          angle       = 0.0,
+          cast_shadow = attachment.cast_shadow,
+        },
+      )
+    }
+    light, ok := resources.get_light(resources_manager, attachment.handle)
+    if ok {
+      light.kind = resources.LightKind.POINT
+      light.color = attachment.color
+      light.radius = attachment.radius
+      light.angle = 0.0
+      light.cast_shadow = attachment.cast_shadow
+      light.enabled = true
+      light.node_handle = node_handle
+      light.is_dirty = true
+    }
+  case SpotLightAttachment:
+    if attachment.handle.generation == 0 {
+      attachment.handle = resources.create_light_handle(
+        resources_manager,
+        resources.LightCreateInfo {
+          kind        = resources.LightKind.SPOT,
+          color       = attachment.color,
+          radius      = attachment.radius,
+          angle       = attachment.angle,
+          cast_shadow = attachment.cast_shadow,
+        },
+      )
+    }
+    light, ok := resources.get_light(resources_manager, attachment.handle)
+    if ok {
+      light.kind = resources.LightKind.SPOT
+      light.color = attachment.color
+      light.radius = attachment.radius
+      light.angle = attachment.angle
+      light.cast_shadow = attachment.cast_shadow
+      light.enabled = true
+      light.node_handle = node_handle
+      light.is_dirty = true
+    }
+  case DirectionalLightAttachment:
+    if attachment.handle.generation == 0 {
+      attachment.handle = resources.create_light_handle(
+        resources_manager,
+        resources.LightCreateInfo {
+          kind        = resources.LightKind.DIRECTIONAL,
+          color       = attachment.color,
+          radius      = 0.0,
+          angle       = 0.0,
+          cast_shadow = attachment.cast_shadow,
+        },
+      )
+    }
+    light, ok := resources.get_light(resources_manager, attachment.handle)
+    if ok {
+      light.kind = resources.LightKind.DIRECTIONAL
+      light.color = attachment.color
+      light.radius = 0.0
+      light.angle = 0.0
+      light.cast_shadow = attachment.cast_shadow
+      light.enabled = true
+      light.node_handle = node_handle
+      light.is_dirty = true
+    }
   }
 }
 

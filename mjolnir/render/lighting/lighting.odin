@@ -3,23 +3,15 @@ package lighting
 import geometry "../../geometry"
 import gpu "../../gpu"
 import resources "../../resources"
-import "core:fmt"
 import "core:log"
-import "core:slice"
 import mu "vendor:microui"
 import vk "vendor:vulkan"
-
-LightKind :: enum u32 {
-  POINT       = 0,
-  DIRECTIONAL = 1,
-  SPOT        = 2,
-}
 
 LightPushConstant :: struct {
   scene_camera_idx:       u32,
   light_camera_idx:       u32, // for shadow mapping
   shadow_map_id:          u32,
-  light_kind:             LightKind,
+  light_kind:             resources.LightKind,
   light_color:            [3]f32,
   light_angle:            f32,
   light_position:         [3]f32,
@@ -33,22 +25,6 @@ LightPushConstant :: struct {
   emissive_texture_index: u32,
   depth_texture_index:    u32,
   input_image_index:      u32,
-}
-
-ShadowResources :: struct {
-  cube_render_targets: [6]resources.Handle,
-  cube_cameras:        [6]resources.Handle,
-  shadow_map:          resources.Handle,
-  render_target:       resources.Handle,
-  camera:              resources.Handle,
-}
-
-LightInfo :: struct {
-  using gpu_data:         LightPushConstant,
-  node_handle:            resources.Handle,
-  transform_generation:   u64,
-  using shadow_resources: ShadowResources,
-  dirty:                  bool,
 }
 
 AmbientPushConstant :: struct {
@@ -654,14 +630,12 @@ begin_pass :: proc(
 
 render :: proc(
   self: ^Renderer,
-  input: []LightInfo,
-  render_target: ^resources.RenderTarget,
   command_buffer: vk.CommandBuffer,
   resources_manager: ^resources.Manager,
+  render_target: ^resources.RenderTarget,
   frame_index: u32,
 ) -> int {
   rendered_count := 0
-  node_count := 0
 
   // Helper proc to bind and draw a mesh
   bind_and_draw_mesh :: proc(
@@ -700,26 +674,56 @@ render :: proc(
     )
   }
 
-  for &light_info in input {
-    node_count += 1
-    light_info.scene_camera_idx = render_target.camera.index
-    light_info.position_texture_index =
-      resources.get_position_texture(render_target, frame_index).index
-    light_info.normal_texture_index =
-      resources.get_normal_texture(render_target, frame_index).index
-    light_info.albedo_texture_index =
-      resources.get_albedo_texture(render_target, frame_index).index
-    light_info.metallic_texture_index =
-      resources.get_metallic_roughness_texture(render_target, frame_index).index
-    light_info.emissive_texture_index =
-      resources.get_emissive_texture(render_target, frame_index).index
-    light_info.depth_texture_index =
-      resources.get_depth_texture(render_target, frame_index).index
-    light_info.input_image_index =
-      resources.get_final_image(render_target, frame_index).index
+  position_texture_index := resources.get_position_texture(render_target, frame_index).index
+  normal_texture_index := resources.get_normal_texture(render_target, frame_index).index
+  albedo_texture_index := resources.get_albedo_texture(render_target, frame_index).index
+  metallic_texture_index := resources.get_metallic_roughness_texture(render_target, frame_index).index
+  emissive_texture_index := resources.get_emissive_texture(render_target, frame_index).index
+  depth_texture_index := resources.get_depth_texture(render_target, frame_index).index
+  input_image_index := resources.get_final_image(render_target, frame_index).index
 
-    switch light_info.light_kind {
-    case .POINT:
+  for &entry in resources_manager.lights.entries {
+    if !entry.active {
+      continue
+    }
+    light := &entry.item
+    if !light.enabled {
+      continue
+    }
+
+    push := LightPushConstant {
+      scene_camera_idx       = render_target.camera.index,
+      light_camera_idx       = 0,
+      shadow_map_id          = light.shadow.shadow_map.index,
+      light_kind             = light.kind,
+      light_color            = light.color.xyz,
+      light_angle            = light.angle,
+      light_position         = light.position,
+      light_radius           = light.radius,
+      light_direction        = light.direction,
+      light_cast_shadow      = cast(b32)light.cast_shadow,
+      position_texture_index = position_texture_index,
+      normal_texture_index   = normal_texture_index,
+      albedo_texture_index   = albedo_texture_index,
+      metallic_texture_index = metallic_texture_index,
+      emissive_texture_index = emissive_texture_index,
+      depth_texture_index    = depth_texture_index,
+      input_image_index      = input_image_index,
+    }
+
+    switch light.kind {
+    case resources.LightKind.SPOT:
+      if light.shadow.camera.generation != 0 {
+        push.light_camera_idx = light.shadow.camera.index
+      }
+    case resources.LightKind.POINT:
+      // Point lights use cube map shadows via shadow_map_id only
+    case resources.LightKind.DIRECTIONAL:
+      // Directional lights currently do not cast shadows
+    }
+
+    switch light.kind {
+    case resources.LightKind.POINT:
       vk.CmdSetDepthCompareOp(command_buffer, .GREATER_OR_EQUAL)
       vk.CmdPushConstants(
         command_buffer,
@@ -727,12 +731,12 @@ render :: proc(
         {.VERTEX, .FRAGMENT},
         0,
         size_of(LightPushConstant),
-        &light_info.gpu_data,
+        &push,
       )
       bind_and_draw_mesh(self.sphere_mesh, command_buffer, resources_manager)
       rendered_count += 1
 
-    case .DIRECTIONAL:
+    case resources.LightKind.DIRECTIONAL:
       vk.CmdSetDepthCompareOp(command_buffer, .GREATER_OR_EQUAL)
       vk.CmdPushConstants(
         command_buffer,
@@ -740,7 +744,7 @@ render :: proc(
         {.VERTEX, .FRAGMENT},
         0,
         size_of(LightPushConstant),
-        &light_info.gpu_data,
+        &push,
       )
       bind_and_draw_mesh(
         self.fullscreen_triangle_mesh,
@@ -749,7 +753,7 @@ render :: proc(
       )
       rendered_count += 1
 
-    case .SPOT:
+    case resources.LightKind.SPOT:
       vk.CmdSetDepthCompareOp(command_buffer, .LESS_OR_EQUAL)
       vk.CmdPushConstants(
         command_buffer,
@@ -757,7 +761,7 @@ render :: proc(
         {.VERTEX, .FRAGMENT},
         0,
         size_of(LightPushConstant),
-        &light_info.gpu_data,
+        &push,
       )
       bind_and_draw_mesh(self.cone_mesh, command_buffer, resources_manager)
       rendered_count += 1
@@ -765,7 +769,6 @@ render :: proc(
   }
   return rendered_count
 }
-
 end_pass :: proc(command_buffer: vk.CommandBuffer) {
   vk.CmdEndRendering(command_buffer)
 }
