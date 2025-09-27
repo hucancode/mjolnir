@@ -260,12 +260,12 @@ commit :: proc(
   gpu_context: ^gpu.GPUContext,
   frame: ^FrameContext,
 ) -> vk.Result {
-  gpu.staged_buffer_flush(gpu_context, &manager.material_buffer) or_return
-  gpu.staged_buffer_flush(gpu_context, &manager.node_data_buffer) or_return
-  gpu.staged_buffer_flush(gpu_context, &manager.mesh_data_buffer) or_return
-  gpu.staged_buffer_flush(gpu_context, &manager.emitter_buffer) or_return
-  gpu.staged_buffer_flush(gpu_context, &manager.lights_buffer) or_return
-  gpu.staged_buffer_flush(gpu_context, &manager.vertex_skinning_buffer) or_return
+  gpu.flush(gpu_context, &manager.material_buffer) or_return
+  gpu.flush(gpu_context, &manager.node_data_buffer) or_return
+  gpu.flush(gpu_context, &manager.mesh_data_buffer) or_return
+  gpu.flush(gpu_context, &manager.emitter_buffer) or_return
+  gpu.flush(gpu_context, &manager.lights_buffer) or_return
+  gpu.flush(gpu_context, &manager.vertex_skinning_buffer) or_return
   return .SUCCESS
 }
 
@@ -1608,11 +1608,6 @@ material_write_to_gpu :: proc(
   mat: ^Material,
 ) -> vk.Result {
   if handle.index >= MAX_MATERIALS {
-    log.errorf(
-      "Material index %d exceeds capacity %d",
-      handle.index,
-      MAX_MATERIALS,
-    )
     return .ERROR_OUT_OF_DEVICE_MEMORY
   }
   data := material_data_from_material(mat)

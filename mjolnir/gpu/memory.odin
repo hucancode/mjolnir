@@ -337,7 +337,11 @@ malloc_staged_buffer :: proc(
     &buffer.device_buffer,
   ) or_return
 
-  vk.GetBufferMemoryRequirements(gpu_context.device, buffer.device_buffer, &mem_reqs)
+  vk.GetBufferMemoryRequirements(
+    gpu_context.device,
+    buffer.device_buffer,
+    &mem_reqs,
+  )
   buffer.device_memory = allocate_vulkan_memory(
     gpu_context,
     mem_reqs,
@@ -358,7 +362,7 @@ malloc_staged_buffer :: proc(
   return buffer, .SUCCESS
 }
 
-staged_buffer_flush :: proc(
+flush :: proc(
   gpu_context: ^GPUContext,
   buffer: ^StagedBuffer($T),
 ) -> vk.Result {
@@ -367,6 +371,7 @@ staged_buffer_flush :: proc(
   defer delete(copy_regions)
   range_start := -1
   element_size := vk.DeviceSize(buffer.element_size)
+  // TODO: this loop is super hot and inefficient since n is large, consider using a sorted dirty indices list
   for i in 0 ..= n {
     is_dirty := i < n && buffer.is_dirty[i]
     if is_dirty && range_start == -1 {
@@ -384,6 +389,9 @@ staged_buffer_flush :: proc(
       range_start = -1
     }
   }
+  if len(copy_regions) == 0 {
+    return .SUCCESS
+  }
   cmd_buffer := begin_single_time_command(gpu_context) or_return
   vk.CmdCopyBuffer(
     cmd_buffer,
@@ -394,7 +402,7 @@ staged_buffer_flush :: proc(
   )
   end_single_time_command(gpu_context, &cmd_buffer) or_return
   slice.fill(buffer.is_dirty, false)
-  log.infof("Buffer copied successfully with %v regions", len(copy_regions))
+  // log.infof("Buffer copied successfully with %v regions", len(copy_regions))
   return .SUCCESS
 }
 
@@ -452,12 +460,18 @@ staged_buffer_get_all :: proc(buffer: ^StagedBuffer($T)) -> []T {
 }
 
 // Get the device buffer handle for binding to descriptor sets
-staged_buffer_get_device_buffer :: proc(buffer: ^StagedBuffer($T)) -> vk.Buffer {
+staged_buffer_get_device_buffer :: proc(
+  buffer: ^StagedBuffer($T),
+) -> vk.Buffer {
   return buffer.device_buffer
 }
 
 // Mark a range as dirty without writing data
-staged_buffer_mark_dirty :: proc(buffer: ^StagedBuffer($T), start_index: int, count: int) {
+staged_buffer_mark_dirty :: proc(
+  buffer: ^StagedBuffer($T),
+  start_index: int,
+  count: int,
+) {
   end_index := start_index + count
   for i in start_index ..< min(end_index, len(buffer.is_dirty)) {
     if i >= 0 {

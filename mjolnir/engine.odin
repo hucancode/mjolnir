@@ -1087,7 +1087,6 @@ render :: proc(self: ^Engine) -> vk.Result {
     self.custom_render_proc(self, command_buffer)
   }
   // Commit resource changes after custom render to ensure any material updates are flushed
-  resources.commit(&self.resource_manager, &self.gpu_context, &resource_frame_ctx) or_return
   buffers := [?]vk.CommandBuffer{
     self.render.shadow.commands[self.frame_index],
     self.render.geometry.commands[self.frame_index],
@@ -1125,6 +1124,7 @@ render :: proc(self: ^Engine) -> vk.Result {
     &command_buffer,
     self.frame_index,
   ) or_return
+  resources.commit(&self.resource_manager, &self.gpu_context, &resource_frame_ctx) or_return
   self.frame_index = (self.frame_index + 1) % MAX_FRAMES_IN_FLIGHT
   process_pending_deletions(self)
   self.last_render_timestamp = time.now()
