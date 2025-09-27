@@ -17,7 +17,7 @@ import mu "vendor:microui"
 import vk "vendor:vulkan"
 
 LIGHT_COUNT :: 5
-ALL_SPOT_LIGHT :: false
+ALL_SPOT_LIGHT :: true
 ALL_POINT_LIGHT :: false
 light_handles: [LIGHT_COUNT]mjolnir.Handle
 light_cube_handles: [LIGHT_COUNT]mjolnir.Handle
@@ -276,21 +276,26 @@ setup :: proc(engine: ^mjolnir.Engine) {
         should_make_spot_light = false
       }
       if should_make_spot_light {
-        light_handles[i], light = world.spawn(
-          &engine.world,
-          SpotLightAttachment {
-            color = color,
-            angle = math.PI * 0.4,
-            radius = 10,
-            cast_shadow = true,
-          },
+        light_handles[i], light = world.spawn(&engine.world, nil, &engine.resource_manager)
+        light.attachment = world.create_spot_light_attachment(
+          light_handles[i],
+          &engine.resource_manager,
+          &engine.gpu_context,
+          color,
+          10,  // radius
+          math.PI * 0.2,  // angle
         )
         world.rotate(light, math.PI * 0.2, linalg.VECTOR3F32_X_AXIS)
       } else {
-        light_handles[i], light = world.spawn(
-          &engine.world,
-          PointLightAttachment{color = color, radius = 10, cast_shadow = true},
+        light_handles[i], light = world.spawn(&engine.world, nil, &engine.resource_manager)
+        attachment := world.create_point_light_attachment(
+          light_handles[i],
+          &engine.resource_manager,
+          &engine.gpu_context,
+          color,
+          10,  // radius
         )
+        light.attachment = attachment
       }
       world.translate(light, 6, 2, -1)
       cube_node: ^Node

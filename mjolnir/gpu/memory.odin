@@ -317,7 +317,6 @@ malloc_staged_buffer :: proc(
     buffer.staging.memory,
     0,
   ) or_return
-
   // Map staging buffer memory for CPU access
   vk.MapMemory(
     gpu_context.device,
@@ -327,7 +326,6 @@ malloc_staged_buffer :: proc(
     {},
     auto_cast &buffer.staging.mapped,
   ) or_return
-
   // Create device buffer (GPU-local)
   create_info.usage = usage | {.TRANSFER_DST}
   vk.CreateBuffer(
@@ -336,7 +334,6 @@ malloc_staged_buffer :: proc(
     nil,
     &buffer.device_buffer,
   ) or_return
-
   vk.GetBufferMemoryRequirements(
     gpu_context.device,
     buffer.device_buffer,
@@ -347,15 +344,12 @@ malloc_staged_buffer :: proc(
     mem_reqs,
     {.DEVICE_LOCAL},
   ) or_return
-
-  // Bind device buffer memory
   vk.BindBufferMemory(
     gpu_context.device,
     buffer.device_buffer,
     buffer.device_memory,
     0,
   ) or_return
-
   buffer.is_dirty = make([]bool, count)
   slice.fill(buffer.is_dirty, true)
   log.infof("staged buffer created 0x%x", buffer.staging.buffer)
@@ -415,12 +409,11 @@ staged_buffer_write_single :: proc(
   if buffer.staging.mapped == nil {
     return .ERROR_UNKNOWN
   }
-
-  ret := data_buffer_write_single(&buffer.staging, data, index)
-  if ret == .SUCCESS && index >= 0 && index < len(buffer.is_dirty) {
+  data_buffer_write_single(&buffer.staging, data, index) or_return
+  if index >= 0 && index < len(buffer.is_dirty) {
     buffer.is_dirty[index] = true
   }
-  return ret
+  return .SUCCESS
 }
 
 // Write multiple elements to the staging buffer and mark range as dirty
@@ -432,15 +425,9 @@ staged_buffer_write_multi :: proc(
   if buffer.staging.mapped == nil {
     return .ERROR_UNKNOWN
   }
-
-  ret := data_buffer_write_multi(&buffer.staging, data, index)
-  if ret == .SUCCESS {
-    end_index := index + len(data)
-    for i in index ..< min(end_index, len(buffer.is_dirty)) {
-      buffer.is_dirty[i] = true
-    }
-  }
-  return ret
+  data_buffer_write_multi(&buffer.staging, data, index) or_return
+  slice.fill(buffer.is_dirty[index:index+len(data)], true)
+  return .SUCCESS
 }
 
 // Generic write interface for staged buffers
@@ -459,33 +446,18 @@ staged_buffer_get_all :: proc(buffer: ^StagedBuffer($T)) -> []T {
   return data_buffer_get_all(&buffer.staging)
 }
 
-// Get the device buffer handle for binding to descriptor sets
-staged_buffer_get_device_buffer :: proc(
-  buffer: ^StagedBuffer($T),
-) -> vk.Buffer {
-  return buffer.device_buffer
-}
-
 // Mark a range as dirty without writing data
 staged_buffer_mark_dirty :: proc(
   buffer: ^StagedBuffer($T),
   start_index: int,
   count: int,
 ) {
-  end_index := start_index + count
-  for i in start_index ..< min(end_index, len(buffer.is_dirty)) {
-    if i >= 0 {
-      buffer.is_dirty[i] = true
-    }
-  }
+  slice.fill(buffer.is_dirty[start_index:start_index+count], true)
 }
 
 // Check if any elements are dirty
 staged_buffer_has_dirty :: proc(buffer: ^StagedBuffer($T)) -> bool {
-  for dirty in buffer.is_dirty {
-    if dirty do return true
-  }
-  return false
+  return slice.any_of(buffer.is_dirty, true)
 }
 
 // Get offset for a specific index in the buffer
@@ -495,26 +467,13 @@ staged_buffer_offset_of :: proc(buffer: ^StagedBuffer($T), index: u32) -> u32 {
 
 // Destroy staged buffer and free all resources
 staged_buffer_destroy :: proc(device: vk.Device, buffer: ^StagedBuffer($T)) {
-  // Destroy staging buffer
   data_buffer_destroy(device, &buffer.staging)
-
-  // Destroy device buffer
-  if buffer.device_buffer != 0 {
-    vk.DestroyBuffer(device, buffer.device_buffer, nil)
-    buffer.device_buffer = 0
-  }
-
-  // Free device memory
-  if buffer.device_memory != 0 {
-    vk.FreeMemory(device, buffer.device_memory, nil)
-    buffer.device_memory = 0
-  }
-
-  // Free dirty tracking
-  if buffer.is_dirty != nil {
-    delete(buffer.is_dirty)
-    buffer.is_dirty = nil
-  }
+  vk.DestroyBuffer(device, buffer.device_buffer, nil)
+  buffer.device_buffer = 0
+  vk.FreeMemory(device, buffer.device_memory, nil)
+  buffer.device_memory = 0
+  delete(buffer.is_dirty)
+  buffer.is_dirty = nil
 }
 
 malloc_image_buffer :: proc(
