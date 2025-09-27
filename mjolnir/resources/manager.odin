@@ -95,26 +95,12 @@ Manager :: struct {
 
   // Frame-scoped bookkeeping
   current_frame_index:          u32,
-  pending_uploads:              [dynamic]UploadRequest,
 }
 
-UPLOAD_REQUEST_RESERVE :: 32
 
 FrameContext :: struct {
   frame_index:               u32,
   transfer_command_buffer:   vk.CommandBuffer,
-  upload_allocator:          rawptr,
-}
-
-StageUploadProc :: #type proc(
-  manager: ^Manager,
-  gpu_context: ^gpu.GPUContext,
-  frame: ^FrameContext,
-) -> vk.Result
-
-UploadRequest :: struct {
-  execute: StageUploadProc,
-  label:   string,
 }
 
 init :: proc(
@@ -143,7 +129,6 @@ init :: proc(
   pool_init(&manager.nav_contexts)
   log.infof("Initializing navigation system... ")
   manager.navigation_system = {}
-  manager.pending_uploads = make([dynamic]UploadRequest, 0, UPLOAD_REQUEST_RESERVE)
   manager.current_frame_index = 0
   log.infof("All resource pools initialized successfully")
   init_global_samplers(gpu_context, manager)
@@ -259,15 +244,6 @@ begin_frame :: proc(
   frame: ^FrameContext,
 ) {
   manager.current_frame_index = frame.frame_index
-  delete(manager.pending_uploads)
-  manager.pending_uploads = make([dynamic]UploadRequest, 0, UPLOAD_REQUEST_RESERVE)
-}
-
-stage_upload :: proc(
-  manager: ^Manager,
-  request: UploadRequest,
-) {
-  append(&manager.pending_uploads, request)
 }
 
 commit :: proc(
@@ -275,12 +251,6 @@ commit :: proc(
   gpu_context: ^gpu.GPUContext,
   frame: ^FrameContext,
 ) -> vk.Result {
-  for request in manager.pending_uploads {
-    if request.execute == nil do continue
-    request.execute(manager, gpu_context, frame) or_return
-  }
-  delete(manager.pending_uploads)
-  manager.pending_uploads = make([dynamic]UploadRequest, 0, UPLOAD_REQUEST_RESERVE)
   return .SUCCESS
 }
 
@@ -371,7 +341,6 @@ shutdown :: proc(
   )
   manager.textures_set_layout = 0
   manager.textures_descriptor_set = 0
-  delete(manager.pending_uploads)
 }
 
 create_emitter_handle :: proc(

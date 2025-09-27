@@ -177,8 +177,6 @@ Engine :: struct {
   navmesh:                     navmesh_renderer.Renderer,
   command_buffers:             [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
   cursor_pos:                  [2]i32,
-  // Main render target for primary rendering
-  main_render_target:          Handle,
   // Engine-managed shadow maps
   shadow_maps:                 [MAX_FRAMES_IN_FLIGHT][MAX_SHADOW_MAPS]Handle,
   cube_shadow_maps:            [MAX_FRAMES_IN_FLIGHT][MAX_SHADOW_MAPS]Handle,
@@ -314,7 +312,7 @@ init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
 
   // Initialize main render target with default camera settings
   main_render_target: ^resources.RenderTarget
-  self.main_render_target, main_render_target = resources.alloc(
+  self.render.targets.main, main_render_target = resources.alloc(
     &self.resource_manager.render_targets,
   )
   resources.render_target_init(
@@ -353,7 +351,7 @@ init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
     &self.resource_manager,
     self.swapchain.extent,
     self.swapchain.format.format,
-    self.main_render_target,
+    self.render.targets.main,
     get_window_dpi(self.window),
   ) or_return
   log.debugf("initializing navigation mesh renderer")
@@ -502,18 +500,16 @@ time_since_start :: proc(self: ^Engine) -> f32 {
 update_emitters :: proc(self: ^Engine, delta_time: f32) {
   params := gpu.data_buffer_get(&self.render.particles.params_buffer)
   params.delta_time = delta_time
-  emitters_ptr := gpu.data_buffer_get(&self.resource_manager.emitter_buffer)
-  emitters := slice.from_ptr(emitters_ptr, particles.MAX_EMITTERS)
-
+  emitters := gpu.data_buffer_get_all(&self.resource_manager.emitter_buffer)
   world.sync_emitters(&self.world, &self.resource_manager, emitters, params)
 }
 
-get_main_camera :: proc(engine: ^Engine) -> ^geometry.Camera {
-  target, ok := resources.get_render_target(&engine.resource_manager, engine.main_render_target)
+get_main_camera :: proc(self: ^Engine) -> ^geometry.Camera {
+  target, ok := resources.get_render_target(&self.resource_manager, self.render.targets.main)
   if !ok {
     return nil
   }
-  camera_ptr, camera_found := resources.get_camera(&engine.resource_manager, target.camera)
+  camera_ptr, camera_found := resources.get_camera(&self.resource_manager, target.camera)
   if !camera_found {
     return nil
   }
@@ -641,7 +637,7 @@ shutdown :: proc(self: ^Engine) {
   gpu.free_command_buffers(self.gpu_context.device, self.gpu_context.command_pool, self.command_buffers[:])
   if item, ok := resources.free(
     &self.resource_manager.render_targets,
-    self.main_render_target,
+    self.render.targets.main,
   ); ok {
     resources.render_target_destroy(item, self.gpu_context.device, &self.resource_manager)
   }
@@ -670,6 +666,9 @@ shutdown :: proc(self: ^Engine) {
   log.infof("Engine deinitialized")
 }
 
+// TODO: find a more efficient way to prepare lights information for rendering.
+// This approach is inefficient, we are allocate and then deallocate alot of
+// memory every frame, even when lights does not change
 process_world_lights :: proc(self: ^Engine) {
   self.active_light_count = 0
   shadow_map_count: u32 = 0
@@ -714,7 +713,6 @@ process_point_light :: proc(
   if self.active_light_count >= len(self.lights) {
     return
   }
-
   dirs := [6][3]f32{
     {1, 0, 0},
     {-1, 0, 0},
@@ -731,13 +729,10 @@ process_point_light :: proc(
     {0, -1, 0},
     {0, -1, 0},
   }
-
   light := &self.lights[self.active_light_count]
   self.active_light_count += 1
-
   world := world.node_get_world_matrix(node)
   position := world[3].xyz
-
   light.node_handle = node_handle
   light.transform_generation = 0
   light.light_kind = lighting.LightKind.POINT
@@ -748,7 +743,6 @@ process_point_light :: proc(
   light.light_angle = 0
   light.light_camera_idx = 0
   light.dirty = false
-
   for i in 0 ..< len(light.cube_render_targets) {
     light.cube_render_targets[i] = Handle{}
     light.cube_cameras[i] = Handle{}
@@ -757,13 +751,11 @@ process_point_light :: proc(
   light.camera = Handle{}
   light.shadow_map = Handle{}
   light.shadow_map_id = 0
-
   casts_shadow := attachment.cast_shadow && cube_shadow_map_count^ < MAX_SHADOW_MAPS
   light.light_cast_shadow = cast(b32)casts_shadow
   if casts_shadow {
     slot := cube_shadow_map_count^
     cube_shadow_map_count^ += 1
-
     for face in 0 ..< 6 {
       light.cube_render_targets[face] = self.cube_shadow_render_targets[slot][face]
       camera_handle, camera := resources.alloc(&self.resource_manager.cameras)
@@ -781,7 +773,6 @@ process_point_light :: proc(
         render_target,
       )
     }
-
     light.shadow_map = self.cube_shadow_maps[self.frame_index][slot]
     light.shadow_map_id = light.shadow_map.index
   }
@@ -937,7 +928,7 @@ recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
   if main_camera := get_main_camera(engine); main_camera != nil {
     geometry.camera_update_aspect_ratio(main_camera, new_aspect_ratio)
   }
-  if main_render_target, ok := resources.get_render_target(&engine.resource_manager, engine.main_render_target); ok {
+  if main_render_target, ok := resources.get_render_target(&engine.resource_manager, engine.render.targets.main); ok {
     // Save current camera state
     old_camera := resources.get(
       engine.resource_manager.cameras,
@@ -973,7 +964,6 @@ recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
       old_target, // Preserve camera target
     ) or_return
   }
-  engine.render.targets.main = engine.main_render_target
   render_subsystem_resize(
     &engine.render,
     &engine.gpu_context,
@@ -993,19 +983,13 @@ render :: proc(self: ^Engine) -> vk.Result {
   resource_frame_ctx := resources.FrameContext {
     frame_index = self.frame_index,
     transfer_command_buffer = command_buffer,
-    upload_allocator = nil,
   }
   resources.begin_frame(&self.resource_manager, &resource_frame_ctx)
   render_delta_time := f32(time.duration_seconds(time.since(self.last_render_timestamp)))
   update_skeletal_animations(self, render_delta_time)
-  main_render_target, found_main_rt := resources.get_render_target(&self.resource_manager, self.main_render_target)
+  main_render_target, found_main_rt := resources.get_render_target(&self.resource_manager, self.render.targets.main)
   if !found_main_rt {
     log.errorf("Main render target not found")
-    return .ERROR_UNKNOWN
-  }
-  main_camera, found_camera := resources.get_camera(&self.resource_manager, main_render_target.camera)
-  if !found_camera {
-    log.errorf("Main camera not found")
     return .ERROR_UNKNOWN
   }
   resources.render_target_upload_camera_data(&self.resource_manager, main_render_target)
@@ -1014,7 +998,6 @@ render :: proc(self: ^Engine) -> vk.Result {
     for i in 0 ..< self.active_light_count {
       light_info := &self.lights[i]
       if !light_info.light_cast_shadow do continue
-
       switch light_info.light_kind {
       case .POINT:
         for camera_handle in light_info.cube_cameras {
@@ -1030,9 +1013,7 @@ render :: proc(self: ^Engine) -> vk.Result {
       }
     }
   }
-
   process_world_lights(self)
-  self.render.targets.main = self.main_render_target
   renderer_prepare_targets(
     &self.render,
     &self.resource_manager,
@@ -1101,7 +1082,6 @@ render :: proc(self: ^Engine) -> vk.Result {
   particles.simulate(
     &self.render.particles,
     command_buffer,
-    main_camera^,
     self.resource_manager.world_matrix_descriptor_sets[self.frame_index],
   )
   if self.custom_render_proc != nil {

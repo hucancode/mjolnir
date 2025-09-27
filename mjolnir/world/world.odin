@@ -1,14 +1,14 @@
 package world
 
-import animation "../animation"
+import "../animation"
 import "core:log"
 import "core:math"
 import "core:math/linalg"
 import "core:slice"
-import geometry "../geometry"
-import gpu "../gpu"
-import particles "../render/particles"
-import resources "../resources"
+import "../geometry"
+import "../gpu"
+import "../render/particles"
+import "../resources"
 import vk "vendor:vulkan"
 
 Handle :: resources.Handle
@@ -576,14 +576,12 @@ upload_world_matrices :: proc(
   }
 }
 
-// Internal helper procedures
 @(private)
 update_visibility_system :: proc(world: ^World) {
-  count: u32 = 0
-  for entry in world.nodes.entries do if entry.active {
-    count += 1
-  }
-  visibility_system_set_node_count(&world.visibility, count)
+  count := slice.count_proc(world.nodes.entries[:], proc(entry: resources.Entry(Node)) -> bool {
+      return entry.active
+  })
+  visibility_system_set_node_count(&world.visibility, u32(count))
 }
 
 traverse :: proc(world: ^World, cb_context: rawptr = nil, callback: TraversalCallback = nil) -> bool {
@@ -657,33 +655,6 @@ node_get_world_matrix :: proc(node: ^Node) -> matrix[4,4]f32 {
   return geometry.transform_get_world_matrix(&node.transform)
 }
 
-// Legacy compatibility functions - these maintain the existing API
-// for transition period but delegate to the new structured API
-
-mark_for_despawn :: proc(world: ^World, handle: Handle) -> bool {
-  return destroy_node_handle(world, handle)
-}
-
-mark_emitter_dirty :: proc(
-  world: ^World,
-  resources_manager: ^resources.Manager,
-  handle: Handle,
-) {
-  node := resources.get(world.nodes, handle)
-  if node == nil {
-    return
-  }
-  attachment, is_emitter := &node.attachment.(EmitterAttachment)
-  if !is_emitter {
-    return
-  }
-  emitter, ok := resources.get(resources_manager.emitters, attachment.handle)
-  if ok {
-    emitter.is_dirty = true
-  }
-}
-
-// Transform manipulation convenience functions (legacy API)
 translate_by :: proc {
   geometry.transform_translate_by,
   node_translate_by,
@@ -738,7 +709,6 @@ scale :: proc {
   node_handle_scale,
 }
 
-// Node transform manipulation functions
 node_translate_by :: proc(node: ^Node, x: f32 = 0, y: f32 = 0, z: f32 = 0) {
   geometry.transform_translate_by(&node.transform, x, y, z)
 }
@@ -797,15 +767,14 @@ node_scale :: proc(node: ^Node, s: f32) {
   geometry.transform_scale(&node.transform, s)
 }
 
-// Node handle transform manipulation functions
 node_handle_translate_by :: proc(world: ^World, handle: Handle, x: f32 = 0, y: f32 = 0, z: f32 = 0) {
-  if node := resources.get(world.nodes, handle); node != nil {
+  if node, ok := resources.get(world.nodes, handle); ok {
     geometry.transform_translate_by(&node.transform, x, y, z)
   }
 }
 
 node_handle_translate :: proc(world: ^World, handle: Handle, x: f32 = 0, y: f32 = 0, z: f32 = 0) {
-  if node := resources.get(world.nodes, handle); node != nil {
+  if node, ok := resources.get(world.nodes, handle); ok {
     geometry.transform_translate(&node.transform, x, y, z)
   }
 }
@@ -816,7 +785,7 @@ node_handle_rotate_by :: proc {
 }
 
 node_handle_rotate_by_quaternion :: proc(world: ^World, handle: Handle, q: quaternion128) {
-  if node := resources.get(world.nodes, handle); node != nil {
+  if node, ok := resources.get(world.nodes, handle); ok {
     geometry.transform_rotate_by_quaternion(&node.transform, q)
   }
 }
@@ -827,7 +796,7 @@ node_handle_rotate_by_angle :: proc(
   angle: f32,
   axis: [3]f32 = linalg.VECTOR3F32_Y_AXIS,
 ) {
-  if node := resources.get(world.nodes, handle); node != nil {
+  if node, ok := resources.get(world.nodes, handle); ok {
     geometry.transform_rotate_by_angle(&node.transform, angle, axis)
   }
 }
@@ -838,7 +807,7 @@ node_handle_rotate :: proc {
 }
 
 node_handle_rotate_quaternion :: proc(world: ^World, handle: Handle, q: quaternion128) {
-  if node := resources.get(world.nodes, handle); node != nil {
+  if node, ok := resources.get(world.nodes, handle); ok {
     geometry.transform_rotate_quaternion(&node.transform, q)
   }
 }
@@ -849,31 +818,31 @@ node_handle_rotate_angle :: proc(
   angle: f32,
   axis: [3]f32 = linalg.VECTOR3F32_Y_AXIS,
 ) {
-  if node := resources.get(world.nodes, handle); node != nil {
+  if node, ok := resources.get(world.nodes, handle); ok {
     geometry.transform_rotate_angle(&node.transform, angle, axis)
   }
 }
 
 node_handle_scale_xyz_by :: proc(world: ^World, handle: Handle, x: f32 = 1, y: f32 = 1, z: f32 = 1) {
-  if node := resources.get(world.nodes, handle); node != nil {
+  if node, ok := resources.get(world.nodes, handle); ok {
     geometry.transform_scale_xyz_by(&node.transform, x, y, z)
   }
 }
 
 node_handle_scale_by :: proc(world: ^World, handle: Handle, s: f32) {
-  if node := resources.get(world.nodes, handle); node != nil {
+  if node, ok := resources.get(world.nodes, handle); ok {
     geometry.transform_scale_by(&node.transform, s)
   }
 }
 
 node_handle_scale_xyz :: proc(world: ^World, handle: Handle, x: f32 = 1, y: f32 = 1, z: f32 = 1) {
-  if node := resources.get(world.nodes, handle); node != nil {
+  if node, ok := resources.get(world.nodes, handle); ok {
     geometry.transform_scale_xyz(&node.transform, x, y, z)
   }
 }
 
 node_handle_scale :: proc(world: ^World, handle: Handle, s: f32) {
-  if node := resources.get(world.nodes, handle); node != nil {
+  if node, ok := resources.get(world.nodes, handle); ok {
     geometry.transform_scale(&node.transform, s)
   }
 }

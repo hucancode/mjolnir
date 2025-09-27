@@ -75,7 +75,6 @@ Renderer :: struct {
 simulate :: proc(
   self: ^Renderer,
   command_buffer: vk.CommandBuffer,
-  camera: geometry.Camera,
   world_matrix_set: vk.DescriptorSet,
 ) {
   params_ptr := gpu.data_buffer_get(&self.params_buffer)
@@ -99,7 +98,6 @@ simulate :: proc(
   )
   // One thread per emitter (local_size_x = 64)
   vk.CmdDispatch(command_buffer, u32(MAX_EMITTERS + 63) / 64, 1, 1)
-
   // Barrier to ensure emission is complete before compaction
   barrier_emit := vk.MemoryBarrier {
     sType         = .MEMORY_BARRIER,
@@ -115,10 +113,7 @@ simulate :: proc(
     0, nil,
     0, nil,
   )
-
-  // --- Compact particles first ---
   compact(self, command_buffer)
-
   // Memory barrier before simulation
   barrier1 := vk.MemoryBarrier {
     sType         = .MEMORY_BARRIER,
@@ -134,18 +129,15 @@ simulate :: proc(
     0, nil,
     0, nil,
   )
-  // --- Particle Simulation Dispatch ---
-  // GPU handles the count internally - no CPU read needed
+  // GPU handles the count internally
   vk.CmdBindPipeline(command_buffer, .COMPUTE, self.compute_pipeline)
   vk.CmdBindDescriptorSets(
     command_buffer,
     .COMPUTE,
     self.compute_pipeline_layout,
     0,
-    1,
-    &self.compute_descriptor_set,
-    0,
-    nil,
+    1, &self.compute_descriptor_set,
+    0, nil,
   )
   vk.CmdDispatch(
     command_buffer,
@@ -153,7 +145,6 @@ simulate :: proc(
     1,
     1,
   )
-
   // Memory barrier before copying back
   barrier2 := vk.MemoryBarrier {
     sType         = .MEMORY_BARRIER,
