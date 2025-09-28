@@ -21,13 +21,7 @@ test_node_translate :: proc(t: ^testing.T) {
   parent_handle, _ := world.spawn_at(&w, {1, 2, 3})
   _, child := world.spawn_child(&w, parent_handle)
   world.translate(child, 4, 5, 6)
-  // Trigger transform update by calling frame processing
-  frame_ctx := world.FrameContext{
-    frame_index = 0,
-    delta_time = 0.016,
-    camera = nil,
-  }
-  world.begin_frame(&w, nil, &frame_ctx)
+  world.begin_frame(&w, nil)
   actual := child.transform.world_matrix
   expected := matrix[4, 4]f32{
     1.0, 0.0, 0.0, 5.0,
@@ -47,12 +41,7 @@ test_node_rotate :: proc(t: ^testing.T) {
   _, child := world.spawn(&w)
   world.rotate(child, math.PI / 2, linalg.VECTOR3F32_Y_AXIS)
   world.translate(child, 1, 0, 0)
-  frame_ctx := world.FrameContext{
-    frame_index = 0,
-    delta_time = 0.016,
-    camera = nil,
-  }
-  world.begin_frame(&w, nil, &frame_ctx)
+  world.begin_frame(&w, nil)
   actual := child.transform.world_matrix
   expected := matrix[4, 4]f32{
     0.0, 0.0, 1.0, 1.0,
@@ -73,12 +62,7 @@ test_node_scale :: proc(t: ^testing.T) {
   _, child := world.spawn_child(&w, parent_handle)
   world.translate(child, 1, 1, 1)
   world.scale_xyz(child, 2, 3, 4)
-  frame_ctx := world.FrameContext{
-    frame_index = 0,
-    delta_time = 0.016,
-    camera = nil,
-  }
-  world.begin_frame(&w, nil, &frame_ctx)
+  world.begin_frame(&w, nil)
   actual := child.transform.world_matrix
   expected := matrix[4, 4]f32{
     2.0, 0.0, 0.0, 2.0,
@@ -99,12 +83,7 @@ test_node_combined_transform :: proc(t: ^testing.T) {
   world.scale(node, 2)
   world.rotate(node, math.PI / 2, linalg.VECTOR3F32_Y_AXIS)
   world.translate(node, 3, 4, 5)
-  frame_ctx := world.FrameContext{
-    frame_index = 0,
-    delta_time = 0.016,
-    camera = nil,
-  }
-  world.begin_frame(&w, nil, &frame_ctx)
+  world.begin_frame(&w, nil)
   actual := node.transform.world_matrix
   // Expected matrix after applying scale, rotation, and translation
   // Scale by 2, then rotate 90 degree around Y, then translate by (3,4,5)
@@ -130,12 +109,7 @@ test_node_chain_transform :: proc(t: ^testing.T) {
   world.translate(node1, x = 1)
   world.rotate(node2, math.PI / 2, linalg.VECTOR3F32_Y_AXIS)
   world.scale(node3, 2)
-  frame_ctx := world.FrameContext{
-    frame_index = 0,
-    delta_time = 0.016,
-    camera = nil,
-  }
-  world.begin_frame(&w, nil, &frame_ctx)
+  world.begin_frame(&w, nil)
   // The transforms should cascade:
   // node1: translate(1,0,0)
   // node2: translate(1,0,0) * rotate_y(90°)
