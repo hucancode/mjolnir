@@ -773,9 +773,9 @@ render :: proc(self: ^Engine) -> vk.Result {
   command_buffer := self.command_buffers[self.frame_index]
   vk.ResetCommandBuffer(command_buffer, {}) or_return
   vk.BeginCommandBuffer(command_buffer, &{sType = .COMMAND_BUFFER_BEGIN_INFO}) or_return
-  resources.commit(&self.resource_manager, command_buffer) or_return
   render_delta_time := f32(time.duration_seconds(time.since(self.last_render_timestamp)))
   update_skeletal_animations(self, render_delta_time)
+  resources.commit(&self.resource_manager, command_buffer) or_return
   main_render_target, found_main_rt := resources.get_render_target(&self.resource_manager, self.render.targets.main)
   if !found_main_rt {
     log.errorf("Main render target not found")
