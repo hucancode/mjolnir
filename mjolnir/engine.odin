@@ -27,7 +27,7 @@ import mu "vendor:microui"
 import vk "vendor:vulkan"
 
 MAX_FRAMES_IN_FLIGHT :: 2
-RENDER_FPS :: 60.0
+RENDER_FPS :: 120.0
 FRAME_TIME :: 1.0 / RENDER_FPS
 FRAME_TIME_MILIS :: FRAME_TIME * 1_000.0
 UPDATE_FPS :: 30.0

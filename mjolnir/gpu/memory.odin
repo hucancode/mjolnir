@@ -254,9 +254,151 @@ copy_buffer :: proc(
   return end_single_time_command(gpu_context, &cmd_buffer)
 }
 
+DirtySet :: struct {
+  indices: [dynamic]int,
+}
+
+dirty_set_init :: proc(ds: ^DirtySet) {
+  ds.indices = make([dynamic]int, 0)
+}
+
+dirty_set_destroy :: proc(ds: ^DirtySet) {
+  delete(ds.indices)
+}
+
+dirty_set_add :: proc(ds: ^DirtySet, index: int) {
+  insertion_point, found := slice.binary_search(ds.indices[:], index)
+
+  if found {
+    return // Index already exists
+  }
+
+  // Insert at the found insertion point
+  if insertion_point == len(ds.indices) {
+    append(&ds.indices, index)
+  } else {
+    append(&ds.indices, 0)
+    copy(ds.indices[insertion_point+1:], ds.indices[insertion_point:len(ds.indices)-1])
+    ds.indices[insertion_point] = index
+  }
+}
+
+dirty_set_add_range :: proc(ds: ^DirtySet, start: int, count: int) {
+  if count <= 0 do return
+
+  // Generate sorted range of new indices
+  new_indices := make([]int, count, context.temp_allocator)
+  for i in 0..<count {
+    new_indices[i] = start + i
+  }
+
+  // Find insertion point for first index
+  insertion_point, _ := slice.binary_search(ds.indices[:], start)
+
+  // Count how many indices already exist in the range
+  existing_count := 0
+  for i in insertion_point..<len(ds.indices) {
+    if ds.indices[i] >= start + count {
+      break
+    }
+    existing_count += 1
+  }
+
+  if existing_count == count {
+    // All indices already exist
+    return
+  }
+
+  // Create merged result
+  old_len := len(ds.indices)
+  new_len := old_len + count - existing_count
+
+  if cap(ds.indices) < new_len {
+    // Need to grow the slice
+    new_slice := make([dynamic]int, new_len)
+    copy(new_slice[:insertion_point], ds.indices[:insertion_point])
+
+    // Merge new range with existing overlapping elements
+    merge_idx := insertion_point
+    range_idx := 0
+    existing_idx := insertion_point
+
+    for range_idx < count && existing_idx < old_len && ds.indices[existing_idx] < start + count {
+      if new_indices[range_idx] < ds.indices[existing_idx] {
+        new_slice[merge_idx] = new_indices[range_idx]
+        range_idx += 1
+      } else if new_indices[range_idx] == ds.indices[existing_idx] {
+        new_slice[merge_idx] = new_indices[range_idx]
+        range_idx += 1
+        existing_idx += 1
+      } else {
+        new_slice[merge_idx] = ds.indices[existing_idx]
+        existing_idx += 1
+      }
+      merge_idx += 1
+    }
+
+    // Add remaining new indices
+    for range_idx < count {
+      new_slice[merge_idx] = new_indices[range_idx]
+      range_idx += 1
+      merge_idx += 1
+    }
+
+    // Copy remaining existing indices
+    copy(new_slice[merge_idx:], ds.indices[existing_idx:])
+
+    delete(ds.indices)
+    ds.indices = new_slice
+  } else {
+    // Can grow in place
+    resize(&ds.indices, new_len)
+
+    // Shift existing elements after insertion point
+    shift_amount := count - existing_count
+    if shift_amount > 0 {
+      copy(ds.indices[insertion_point + count:], ds.indices[insertion_point + existing_count:old_len])
+    }
+
+    // Merge new range with existing overlapping elements
+    merge_idx := insertion_point
+    range_idx := 0
+    existing_idx := insertion_point
+    temp_existing := make([]int, existing_count, context.temp_allocator)
+    copy(temp_existing, ds.indices[insertion_point:insertion_point + existing_count])
+
+    existing_temp_idx := 0
+    for range_idx < count && existing_temp_idx < existing_count {
+      if new_indices[range_idx] < temp_existing[existing_temp_idx] {
+        ds.indices[merge_idx] = new_indices[range_idx]
+        range_idx += 1
+      } else if new_indices[range_idx] == temp_existing[existing_temp_idx] {
+        ds.indices[merge_idx] = new_indices[range_idx]
+        range_idx += 1
+        existing_temp_idx += 1
+      } else {
+        ds.indices[merge_idx] = temp_existing[existing_temp_idx]
+        existing_temp_idx += 1
+      }
+      merge_idx += 1
+    }
+
+    // Add remaining new indices
+    for range_idx < count {
+      ds.indices[merge_idx] = new_indices[range_idx]
+      range_idx += 1
+      merge_idx += 1
+    }
+  }
+}
+
+dirty_set_clear :: proc(ds: ^DirtySet) {
+  clear(&ds.indices)
+}
+
 StagedBuffer :: struct($T: typeid) {
   using staging: DataBuffer(T),
-  is_dirty:      []bool,
+  dirty_indices: DirtySet,
   device_buffer: vk.Buffer,
   device_memory: vk.DeviceMemory,
 }
@@ -350,8 +492,11 @@ malloc_staged_buffer :: proc(
     buffer.device_memory,
     0,
   ) or_return
-  buffer.is_dirty = make([]bool, count)
-  slice.fill(buffer.is_dirty, true)
+  dirty_set_init(&buffer.dirty_indices)
+  // Mark all indices as dirty initially
+  for i in 0..<count {
+    dirty_set_add(&buffer.dirty_indices, i)
+  }
   log.infof("staged buffer created 0x%x", buffer.staging.buffer)
   return buffer, .SUCCESS
 }
@@ -360,32 +505,41 @@ flush :: proc(
   gpu_context: ^GPUContext,
   buffer: ^StagedBuffer($T),
 ) -> vk.Result {
-  n := buffer.bytes_count / buffer.element_size
+  @(static) run_count := 0
+  if run_count >= 100 {
+      return .SUCCESS
+  }
+  defer run_count += 1
+  defer dirty_set_clear(&buffer.dirty_indices)
   copy_regions := make([dynamic]vk.BufferCopy, 0)
   defer delete(copy_regions)
-  range_start := -1
   element_size := vk.DeviceSize(buffer.element_size)
-  // TODO: this loop is super hot and inefficient since n is large, consider using a sorted dirty indices list
-  for i in 0 ..= n {
-    is_dirty := i < n && buffer.is_dirty[i]
-    if is_dirty && range_start == -1 {
-      range_start = i
-    } else if !is_dirty && range_start != -1 {
-      range_length := i - range_start
-      append(
-        &copy_regions,
-        vk.BufferCopy {
-          srcOffset = vk.DeviceSize(range_start) * element_size,
-          dstOffset = vk.DeviceSize(range_start) * element_size,
-          size = vk.DeviceSize(range_length) * element_size,
-        },
-      )
-      range_start = -1
+  // Process contiguous ranges from sorted dirty indices
+  i := 0
+  for i < len(buffer.dirty_indices.indices) {
+    range_start := buffer.dirty_indices.indices[i]
+    range_end := range_start
+    // Find the end of the contiguous range
+    for i + 1 < len(buffer.dirty_indices.indices) &&
+        buffer.dirty_indices.indices[i + 1] == range_end + 1 {
+      i += 1
+      range_end = buffer.dirty_indices.indices[i]
     }
+    range_length := range_end - range_start + 1
+    append(
+      &copy_regions,
+      vk.BufferCopy {
+        srcOffset = vk.DeviceSize(range_start) * element_size,
+        dstOffset = vk.DeviceSize(range_start) * element_size,
+        size = vk.DeviceSize(range_length) * element_size,
+      },
+    )
+    i += 1
   }
   if len(copy_regions) == 0 {
     return .SUCCESS
   }
+  // log.infof("Updating staged buffer, copying %d indices using %d commands", len(&buffer.dirty_indices.indices), len(copy_regions))
   cmd_buffer := begin_single_time_command(gpu_context) or_return
   vk.CmdCopyBuffer(
     cmd_buffer,
@@ -395,8 +549,6 @@ flush :: proc(
     raw_data(copy_regions),
   )
   end_single_time_command(gpu_context, &cmd_buffer) or_return
-  slice.fill(buffer.is_dirty, false)
-  // log.infof("Buffer copied successfully with %v regions", len(copy_regions))
   return .SUCCESS
 }
 
@@ -410,9 +562,7 @@ staged_buffer_write_single :: proc(
     return .ERROR_UNKNOWN
   }
   data_buffer_write_single(&buffer.staging, data, index) or_return
-  if index >= 0 && index < len(buffer.is_dirty) {
-    buffer.is_dirty[index] = true
-  }
+  dirty_set_add(&buffer.dirty_indices, index)
   return .SUCCESS
 }
 
@@ -426,7 +576,7 @@ staged_buffer_write_multi :: proc(
     return .ERROR_UNKNOWN
   }
   data_buffer_write_multi(&buffer.staging, data, index) or_return
-  slice.fill(buffer.is_dirty[index:index+len(data)], true)
+  dirty_set_add_range(&buffer.dirty_indices, index, len(data))
   return .SUCCESS
 }
 
@@ -452,12 +602,12 @@ staged_buffer_mark_dirty :: proc(
   start_index: int,
   count: int,
 ) {
-  slice.fill(buffer.is_dirty[start_index:start_index+count], true)
+  dirty_set_add_range(&buffer.dirty_indices, start_index, count)
 }
 
 // Check if any elements are dirty
 staged_buffer_has_dirty :: proc(buffer: ^StagedBuffer($T)) -> bool {
-  return slice.any_of(buffer.is_dirty, true)
+  return !dirty_set_is_empty(&buffer.dirty_indices)
 }
 
 // Get offset for a specific index in the buffer
@@ -472,8 +622,7 @@ staged_buffer_destroy :: proc(device: vk.Device, buffer: ^StagedBuffer($T)) {
   buffer.device_buffer = 0
   vk.FreeMemory(device, buffer.device_memory, nil)
   buffer.device_memory = 0
-  delete(buffer.is_dirty)
-  buffer.is_dirty = nil
+  dirty_set_destroy(&buffer.dirty_indices)
 }
 
 malloc_image_buffer :: proc(
