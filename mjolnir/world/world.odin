@@ -217,8 +217,8 @@ spawn_at :: proc(
   attach(self.nodes, self.root, handle)
   // Mark world matrix and node data as dirty for new node
   if resources_manager != nil {
-    world_matrix := node_get_world_matrix(node)
-    gpu.staged_buffer_write(&resources_manager.world_matrix_buffer, &world_matrix, int(handle.index))
+    world_matrix := node.transform.world_matrix
+    gpu.write(&resources_manager.world_matrix_buffer, &world_matrix, int(handle.index))
     // Update node data buffer
     data := resources.NodeData {
       material_id        = 0xFFFFFFFF,
@@ -255,7 +255,7 @@ spawn_at :: proc(
         data.bone_matrix_offset = skinning.bone_matrix_offset
       }
     }
-    gpu.staged_buffer_write(&resources_manager.node_data_buffer, &data, int(handle.index))
+    gpu.write(&resources_manager.node_data_buffer, &data, int(handle.index))
   }
   return
 }
@@ -275,8 +275,8 @@ spawn :: proc(
   attach(self.nodes, self.root, handle)
   // Mark world matrix and node data as dirty for new node
   if resources_manager != nil {
-    world_matrix := node_get_world_matrix(node)
-    gpu.staged_buffer_write(&resources_manager.world_matrix_buffer, &world_matrix, int(handle.index))
+    world_matrix := node.transform.world_matrix
+    gpu.write(&resources_manager.world_matrix_buffer, &world_matrix, int(handle.index))
     // Update node data buffer
     data := resources.NodeData {
       material_id        = 0xFFFFFFFF,
@@ -312,7 +312,7 @@ spawn :: proc(
         data.bone_matrix_offset = skinning.bone_matrix_offset
       }
     }
-    gpu.staged_buffer_write(&resources_manager.node_data_buffer, &data, int(handle.index))
+    gpu.write(&resources_manager.node_data_buffer, &data, int(handle.index))
   }
   return
 }
@@ -333,8 +333,8 @@ spawn_child :: proc(
   attach(self.nodes, parent, handle)
   // Mark world matrix and node data as dirty for new node
   if resources_manager != nil {
-    world_matrix := node_get_world_matrix(node)
-    gpu.staged_buffer_write(&resources_manager.world_matrix_buffer, &world_matrix, int(handle.index))
+    world_matrix := node.transform.world_matrix
+    gpu.write(&resources_manager.world_matrix_buffer, &world_matrix, int(handle.index))
     // Update node data buffer
     data := resources.NodeData {
       material_id        = 0xFFFFFFFF,
@@ -370,7 +370,7 @@ spawn_child :: proc(
         data.bone_matrix_offset = skinning.bone_matrix_offset
       }
     }
-    gpu.staged_buffer_write(&resources_manager.node_data_buffer, &data, int(handle.index))
+    gpu.write(&resources_manager.node_data_buffer, &data, int(handle.index))
   }
   return
 }
@@ -495,8 +495,8 @@ spawn_node :: proc(
   attach(world.nodes, world.root, handle)
   // Mark world matrix and node data as dirty for new node
   if resources_manager != nil {
-    world_matrix := node_get_world_matrix(node)
-    gpu.staged_buffer_write(&resources_manager.world_matrix_buffer, &world_matrix, int(handle.index))
+    world_matrix := node.transform.world_matrix
+    gpu.write(&resources_manager.world_matrix_buffer, &world_matrix, int(handle.index))
     // Update node data buffer
     data := resources.NodeData {
       material_id        = 0xFFFFFFFF,
@@ -532,7 +532,7 @@ spawn_node :: proc(
         data.bone_matrix_offset = skinning.bone_matrix_offset
       }
     }
-    gpu.staged_buffer_write(&resources_manager.node_data_buffer, &data, int(handle.index))
+    gpu.write(&resources_manager.node_data_buffer, &data, int(handle.index))
   }
   return
 }
@@ -552,8 +552,8 @@ spawn_child_node :: proc(
   attach(world.nodes, parent, handle)
   // Mark world matrix and node data as dirty for new node
   if resources_manager != nil {
-    world_matrix := node_get_world_matrix(node)
-    gpu.staged_buffer_write(&resources_manager.world_matrix_buffer, &world_matrix, int(handle.index))
+    world_matrix := node.transform.world_matrix
+    gpu.write(&resources_manager.world_matrix_buffer, &world_matrix, int(handle.index))
     // Update node data buffer
     data := resources.NodeData {
       material_id        = 0xFFFFFFFF,
@@ -589,7 +589,7 @@ spawn_child_node :: proc(
         data.bone_matrix_offset = skinning.bone_matrix_offset
       }
     }
-    gpu.staged_buffer_write(&resources_manager.node_data_buffer, &data, int(handle.index))
+    gpu.write(&resources_manager.node_data_buffer, &data, int(handle.index))
   }
   return
 }
@@ -642,19 +642,16 @@ sync_emitters :: proc(
     params.emitter_count = 0
     return
   }
-
   emitter_capacity := len(emitters)
   max_slots := emitter_capacity
   if max_slots > particles.MAX_EMITTERS {
     max_slots = particles.MAX_EMITTERS
   }
   params.emitter_count = u32(max_slots)
-
   // Reset visibility each frame; preserve accumulator
   for i in 0 ..< emitter_capacity {
     emitters[i].visible = cast(b32)false
   }
-
   for &entry, index in resources_manager.emitters.entries {
     if index >= emitter_capacity {
       log.warnf("Emitter index %d exceeds GPU buffer capacity %d", index, emitter_capacity)
@@ -752,7 +749,6 @@ traverse :: proc(world: ^World, resources_manager: ^resources.Manager = nil, cb_
       )
       continue
     }
-    // Skip nodes that are pending deletion
     if current_node.pending_deletion do continue
     // Update parent_visible from parent chain only
     visibility_changed := current_node.parent_visible != entry.parent_is_visible
@@ -760,10 +756,9 @@ traverse :: proc(world: ^World, resources_manager: ^resources.Manager = nil, cb_
     is_dirty := transform_update_local(&current_node.transform)
     if entry.parent_is_dirty || is_dirty {
       transform_update_world(&current_node.transform, entry.parent_transform)
-      // Update world matrix in GPU buffer when changes are detected
       if resources_manager != nil {
-        world_matrix := node_get_world_matrix(current_node)
-        gpu.staged_buffer_write(&resources_manager.world_matrix_buffer, &world_matrix, int(entry.handle.index))
+        world_matrix := current_node.transform.world_matrix
+        gpu.write(&resources_manager.world_matrix_buffer, &world_matrix, int(entry.handle.index))
       }
     }
     // Update node data when visibility changes
@@ -803,7 +798,7 @@ traverse :: proc(world: ^World, resources_manager: ^resources.Manager = nil, cb_
           data.bone_matrix_offset = skinning.bone_matrix_offset
         }
       }
-      gpu.staged_buffer_write(&resources_manager.node_data_buffer, &data, int(entry.handle.index))
+      gpu.write(&resources_manager.node_data_buffer, &data, int(entry.handle.index))
     }
     // Only call the callback if the node is effectively visible
     if callback != nil && current_node.parent_visible && current_node.visible {
@@ -818,7 +813,7 @@ traverse :: proc(world: ^World, resources_manager: ^resources.Manager = nil, cb_
         &world.traversal_stack,
         TraverseEntry {
           child_handle,
-          node_get_world_matrix(current_node),
+          current_node.transform.world_matrix,
           is_dirty || entry.parent_is_dirty,
           current_node.parent_visible && current_node.visible, // Pass combined visibility to children
         },
@@ -846,10 +841,6 @@ assign_emitter_to_node :: proc(
     emitter.node_handle = node_handle
     emitter.is_dirty = true
   }
-}
-
-node_get_world_matrix :: proc(node: ^Node) -> matrix[4,4]f32 {
-  return node.transform.world_matrix
 }
 
 translate_by :: proc {

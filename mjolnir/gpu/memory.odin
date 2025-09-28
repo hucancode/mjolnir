@@ -111,9 +111,13 @@ align_up :: proc(value: int, alignment: int) -> int {
   return (value + alignment - 1) & ~(alignment - 1)
 }
 
-data_buffer_write :: proc {
+write :: proc {
   data_buffer_write_single,
   data_buffer_write_multi,
+  staged_buffer_write_single,
+  staged_buffer_write_multi,
+  static_buffer_write_single,
+  static_buffer_write_multi,
 }
 
 data_buffer_write_single :: proc(
@@ -537,11 +541,11 @@ flush :: proc(
       // return .SUCCESS
   // }
   // defer run_count += 1
-  
+
   // Lock to prevent race conditions with write operations
   sync.mutex_lock(&buffer.dirty_mutex)
   defer sync.mutex_unlock(&buffer.dirty_mutex)
-  
+
   defer interval_tree.clear(&buffer.dirty_indices)
   copy_regions := make([dynamic]vk.BufferCopy, 0)
   defer delete(copy_regions)
@@ -550,26 +554,26 @@ flush :: proc(
   intervals := interval_tree.get_ranges(&buffer.dirty_indices)
   total := 0
   max_elements := buffer.staging.bytes_count / buffer.staging.element_size
-  
+
   for interval in intervals {
     // Validate interval bounds to prevent corruption
     if interval.start < 0 || interval.end < interval.start || interval.start >= max_elements {
-      log.errorf("Invalid interval detected: start=%d, end=%d, max_elements=%d", 
+      log.errorf("Invalid interval detected: start=%d, end=%d, max_elements=%d",
                  interval.start, interval.end, max_elements)
       continue
     }
-    
+
     range_length := interval.end - interval.start + 1
-    
+
     // Clamp range to buffer bounds
     if interval.end >= max_elements {
       range_length = max_elements - interval.start
     }
-    
+
     if range_length <= 0 {
       continue
     }
-    
+
     total += range_length
     append(
       &copy_regions,
@@ -655,12 +659,12 @@ staged_buffer_write_single :: proc(
     return .ERROR_UNKNOWN
   }
   data_buffer_write_single(&buffer.staging, data, index) or_return
-  
+
   // Protect dirty_indices from concurrent access
   sync.mutex_lock(&buffer.dirty_mutex)
   defer sync.mutex_unlock(&buffer.dirty_mutex)
   interval_tree.insert(&buffer.dirty_indices, index, 1)
-  
+
   return .SUCCESS
 }
 
@@ -674,12 +678,12 @@ staged_buffer_write_multi :: proc(
     return .ERROR_UNKNOWN
   }
   data_buffer_write_multi(&buffer.staging, data, index) or_return
-  
+
   // Protect dirty_indices from concurrent access
   sync.mutex_lock(&buffer.dirty_mutex)
   defer sync.mutex_unlock(&buffer.dirty_mutex)
   interval_tree.insert(&buffer.dirty_indices, index, len(data))
-  
+
   return .SUCCESS
 }
 

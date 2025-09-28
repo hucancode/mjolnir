@@ -28,7 +28,7 @@ test_node_translate :: proc(t: ^testing.T) {
     camera = nil,
   }
   world.begin_frame(&w, nil, &frame_ctx)
-  actual := world.node_get_world_matrix(child)
+  actual := child.transform.world_matrix
   expected := matrix[4, 4]f32{
     1.0, 0.0, 0.0, 5.0,
     0.0, 1.0, 0.0, 7.0,
@@ -53,7 +53,7 @@ test_node_rotate :: proc(t: ^testing.T) {
     camera = nil,
   }
   world.begin_frame(&w, nil, &frame_ctx)
-  actual := world.node_get_world_matrix(child)
+  actual := child.transform.world_matrix
   expected := matrix[4, 4]f32{
     0.0, 0.0, 1.0, 1.0,
     0.0, 1.0, 0.0, 0.0,
@@ -79,7 +79,7 @@ test_node_scale :: proc(t: ^testing.T) {
     camera = nil,
   }
   world.begin_frame(&w, nil, &frame_ctx)
-  actual := world.node_get_world_matrix(child)
+  actual := child.transform.world_matrix
   expected := matrix[4, 4]f32{
     2.0, 0.0, 0.0, 2.0,
     0.0, 3.0, 0.0, 3.0,
@@ -105,7 +105,7 @@ test_node_combined_transform :: proc(t: ^testing.T) {
     camera = nil,
   }
   world.begin_frame(&w, nil, &frame_ctx)
-  actual := world.node_get_world_matrix(node)
+  actual := node.transform.world_matrix
   // Expected matrix after applying scale, rotation, and translation
   // Scale by 2, then rotate 90 degree around Y, then translate by (3,4,5)
   expected := matrix[4, 4]f32{
@@ -140,7 +140,7 @@ test_node_chain_transform :: proc(t: ^testing.T) {
   // node1: translate(1,0,0)
   // node2: translate(1,0,0) * rotate_y(90°)
   // node3: translate(1,0,0) * rotate_y(90°) * scale(2)
-  actual := world.node_get_world_matrix(node3)
+  actual := node3.transform.world_matrix
   // Note: The node chain transforms in this order:
   // 1. Start at origin
   // 2. Translate by (1,0,0)

@@ -80,7 +80,7 @@ scene_geometry_collector_traverse :: proc(node: ^Node, ctx: rawptr) -> bool {
     if !ok {
       return true
     }
-    world_matrix := node_get_world_matrix(node)
+    world_matrix := node.transform.world_matrix
     area_type := u8(recast.RC_WALKABLE_AREA)
     if collector.area_type_mapper != nil {
       area_type = collector.area_type_mapper(node)

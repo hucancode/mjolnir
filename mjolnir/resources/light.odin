@@ -100,7 +100,7 @@ sync_light_gpu_data :: proc(
 ) -> bool {
 	light, ok := get(manager.lights, handle)
 	if !ok do return false
-	gpu.staged_buffer_write(
+	gpu.write(
 		&manager.lights_buffer,
 		&light.data,
 		int(handle.index),

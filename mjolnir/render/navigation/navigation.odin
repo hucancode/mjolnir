@@ -261,12 +261,12 @@ build_from_recast :: proc(self: ^Renderer, gpu_context: ^gpu.GPUContext,
         return false
     }
 
-    vertex_result := gpu.data_buffer_write(&self.vertex_buffer, vertices[:])
+    vertex_result := gpu.write(&self.vertex_buffer, vertices[:])
     if vertex_result != .SUCCESS {
         return false
     }
 
-    index_result := gpu.data_buffer_write(&self.index_buffer, indices[:])
+    index_result := gpu.write(&self.index_buffer, indices[:])
     if index_result != .SUCCESS {
         return false
     }
@@ -382,7 +382,7 @@ update_path :: proc(renderer: ^Renderer, path_points: [][3]f32, path_color: [4]f
     }
 
     if len(vertices) > 0 {
-        result := gpu.data_buffer_write(&renderer.path_vertex_buffer, vertices[:])
+        result := gpu.write(&renderer.path_vertex_buffer, vertices[:])
         if result != .SUCCESS {
             renderer.path_enabled = false
             renderer.path_vertex_count = 0

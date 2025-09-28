@@ -458,7 +458,7 @@ update_force_fields :: proc(self: ^Engine) {
   for &entry in self.world.nodes.entries do if entry.active {
     ff, is_ff := &entry.item.attachment.(ForceFieldAttachment)
     if !is_ff do continue
-    forcefields[params.forcefield_count].position = world.node_get_world_matrix(&entry.item) * [4]f32{0, 0, 0, 1}
+    forcefields[params.forcefield_count].position = entry.item.transform.world_matrix * [4]f32{0, 0, 0, 1}
     forcefields[params.forcefield_count].tangent_strength = ff.tangent_strength
     forcefields[params.forcefield_count].strength = ff.strength
     forcefields[params.forcefield_count].area_of_effect = ff.area_of_effect
@@ -631,7 +631,7 @@ update_point_light_shadow_cameras :: proc(
     {0, -1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}, {0, -1, 0}, {0, -1, 0},
   }
 
-  world_matrix := world.node_get_world_matrix(node)
+  world_matrix := node.transform.world_matrix
   position := world_matrix[3].xyz
 
   // Update cameras for each cube face
@@ -672,7 +672,7 @@ update_spot_light_shadow_cameras :: proc(
     render_target.camera,
   )
   if !camera_ok do return
-  world_matrix := world.node_get_world_matrix(node)
+  world_matrix := node.transform.world_matrix
   position := world_matrix[3].xyz
   // Extract forward direction: -Z axis from world matrix (forward=-Z convention)
   forward := world_matrix[2].xyz  // Light's actual forward direction from matrix

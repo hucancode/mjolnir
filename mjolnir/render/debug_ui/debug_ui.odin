@@ -332,11 +332,11 @@ ui_flush :: proc(self: ^Renderer, cmd_buf: vk.CommandBuffer) -> vk.Result {
     self.vertex_count = 0
     self.index_count = 0
   }
-  gpu.data_buffer_write(
+  gpu.write(
     &self.vertex_buffer,
     self.vertices[:self.vertex_count],
   ) or_return
-  gpu.data_buffer_write(
+  gpu.write(
     &self.index_buffer,
     self.indices[:self.index_count],
   ) or_return
@@ -530,7 +530,7 @@ recreate_images :: proc(
   ortho :=
     linalg.matrix_ortho3d(0, f32(width), f32(height), 0, -1, 1) *
     linalg.matrix4_scale(dpi_scale)
-  gpu.data_buffer_write(&self.proj_buffer, &ortho) or_return
+  gpu.write(&self.proj_buffer, &ortho) or_return
 
   return .SUCCESS
 }
