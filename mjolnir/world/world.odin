@@ -220,23 +220,23 @@ spawn_at :: proc(
     world_matrix := node_get_world_matrix(node)
     gpu.staged_buffer_write(&resources_manager.world_matrix_buffer, &world_matrix, int(handle.index))
     // Update node data buffer
-    default_node := resources.NodeData {
+    data := resources.NodeData {
       material_id        = 0xFFFFFFFF,
       mesh_id            = 0xFFFFFFFF,
       bone_matrix_offset = 0xFFFFFFFF,
       flags              = {},
     }
     if mesh_attachment, has_mesh := node.attachment.(MeshAttachment); has_mesh {
-      default_node.material_id = mesh_attachment.material.index
-      default_node.mesh_id = mesh_attachment.handle.index
+      data.material_id = mesh_attachment.material.index
+      data.mesh_id = mesh_attachment.handle.index
       if node.visible {
-        default_node.flags |= resources.NodeFlagSet{.VISIBLE}
+        data.flags |= resources.NodeFlagSet{.VISIBLE}
       }
       if node.culling_enabled {
-        default_node.flags |= {.CULLING_ENABLED}
+        data.flags |= {.CULLING_ENABLED}
       }
       if mesh_attachment.cast_shadow {
-        default_node.flags |= resources.NodeFlagSet{.CASTS_SHADOW}
+        data.flags |= resources.NodeFlagSet{.CASTS_SHADOW}
       }
       if material_entry, has_material := resources.get(
         resources_manager.materials,
@@ -244,18 +244,18 @@ spawn_at :: proc(
       ); has_material {
         switch material_entry.type {
         case .TRANSPARENT:
-          default_node.flags |= resources.NodeFlagSet{.MATERIAL_TRANSPARENT}
+          data.flags |= resources.NodeFlagSet{.MATERIAL_TRANSPARENT}
         case .WIREFRAME:
-          default_node.flags |= resources.NodeFlagSet{.MATERIAL_WIREFRAME}
+          data.flags |= resources.NodeFlagSet{.MATERIAL_WIREFRAME}
         case .PBR, .UNLIT:
           // No additional flags needed
         }
       }
       if skinning, has_skinning := mesh_attachment.skinning.?; has_skinning {
-        default_node.bone_matrix_offset = skinning.bone_matrix_offset
+        data.bone_matrix_offset = skinning.bone_matrix_offset
       }
     }
-    gpu.staged_buffer_write(&resources_manager.node_data_buffer, &default_node, int(handle.index))
+    gpu.staged_buffer_write(&resources_manager.node_data_buffer, &data, int(handle.index))
   }
   return
 }
@@ -278,23 +278,22 @@ spawn :: proc(
     world_matrix := node_get_world_matrix(node)
     gpu.staged_buffer_write(&resources_manager.world_matrix_buffer, &world_matrix, int(handle.index))
     // Update node data buffer
-    default_node := resources.NodeData {
+    data := resources.NodeData {
       material_id        = 0xFFFFFFFF,
       mesh_id            = 0xFFFFFFFF,
       bone_matrix_offset = 0xFFFFFFFF,
-      flags              = {},
     }
     if mesh_attachment, has_mesh := node.attachment.(MeshAttachment); has_mesh {
-      default_node.material_id = mesh_attachment.material.index
-      default_node.mesh_id = mesh_attachment.handle.index
+      data.material_id = mesh_attachment.material.index
+      data.mesh_id = mesh_attachment.handle.index
       if node.visible {
-        default_node.flags |= resources.NodeFlagSet{.VISIBLE}
+        data.flags |= resources.NodeFlagSet{.VISIBLE}
       }
       if node.culling_enabled {
-        default_node.flags |= {.CULLING_ENABLED}
+        data.flags |= {.CULLING_ENABLED}
       }
       if mesh_attachment.cast_shadow {
-        default_node.flags |= resources.NodeFlagSet{.CASTS_SHADOW}
+        data.flags |= resources.NodeFlagSet{.CASTS_SHADOW}
       }
       if material_entry, has_material := resources.get(
         resources_manager.materials,
@@ -302,18 +301,18 @@ spawn :: proc(
       ); has_material {
         switch material_entry.type {
         case .TRANSPARENT:
-          default_node.flags |= resources.NodeFlagSet{.MATERIAL_TRANSPARENT}
+          data.flags |= resources.NodeFlagSet{.MATERIAL_TRANSPARENT}
         case .WIREFRAME:
-          default_node.flags |= resources.NodeFlagSet{.MATERIAL_WIREFRAME}
+          data.flags |= resources.NodeFlagSet{.MATERIAL_WIREFRAME}
         case .PBR, .UNLIT:
           // No additional flags needed
         }
       }
       if skinning, has_skinning := mesh_attachment.skinning.?; has_skinning {
-        default_node.bone_matrix_offset = skinning.bone_matrix_offset
+        data.bone_matrix_offset = skinning.bone_matrix_offset
       }
     }
-    gpu.staged_buffer_write(&resources_manager.node_data_buffer, &default_node, int(handle.index))
+    gpu.staged_buffer_write(&resources_manager.node_data_buffer, &data, int(handle.index))
   }
   return
 }
@@ -337,23 +336,22 @@ spawn_child :: proc(
     world_matrix := node_get_world_matrix(node)
     gpu.staged_buffer_write(&resources_manager.world_matrix_buffer, &world_matrix, int(handle.index))
     // Update node data buffer
-    default_node := resources.NodeData {
+    data := resources.NodeData {
       material_id        = 0xFFFFFFFF,
       mesh_id            = 0xFFFFFFFF,
       bone_matrix_offset = 0xFFFFFFFF,
-      flags              = {},
     }
     if mesh_attachment, has_mesh := node.attachment.(MeshAttachment); has_mesh {
-      default_node.material_id = mesh_attachment.material.index
-      default_node.mesh_id = mesh_attachment.handle.index
+      data.material_id = mesh_attachment.material.index
+      data.mesh_id = mesh_attachment.handle.index
       if node.visible {
-        default_node.flags |= resources.NodeFlagSet{.VISIBLE}
+        data.flags |= resources.NodeFlagSet{.VISIBLE}
       }
       if node.culling_enabled {
-        default_node.flags |= {.CULLING_ENABLED}
+        data.flags |= {.CULLING_ENABLED}
       }
       if mesh_attachment.cast_shadow {
-        default_node.flags |= resources.NodeFlagSet{.CASTS_SHADOW}
+        data.flags |= resources.NodeFlagSet{.CASTS_SHADOW}
       }
       if material_entry, has_material := resources.get(
         resources_manager.materials,
@@ -361,18 +359,18 @@ spawn_child :: proc(
       ); has_material {
         switch material_entry.type {
         case .TRANSPARENT:
-          default_node.flags |= resources.NodeFlagSet{.MATERIAL_TRANSPARENT}
+          data.flags |= resources.NodeFlagSet{.MATERIAL_TRANSPARENT}
         case .WIREFRAME:
-          default_node.flags |= resources.NodeFlagSet{.MATERIAL_WIREFRAME}
+          data.flags |= resources.NodeFlagSet{.MATERIAL_WIREFRAME}
         case .PBR, .UNLIT:
           // No additional flags needed
         }
       }
       if skinning, has_skinning := mesh_attachment.skinning.?; has_skinning {
-        default_node.bone_matrix_offset = skinning.bone_matrix_offset
+        data.bone_matrix_offset = skinning.bone_matrix_offset
       }
     }
-    gpu.staged_buffer_write(&resources_manager.node_data_buffer, &default_node, int(handle.index))
+    gpu.staged_buffer_write(&resources_manager.node_data_buffer, &data, int(handle.index))
   }
   return
 }
@@ -500,23 +498,22 @@ spawn_node :: proc(
     world_matrix := node_get_world_matrix(node)
     gpu.staged_buffer_write(&resources_manager.world_matrix_buffer, &world_matrix, int(handle.index))
     // Update node data buffer
-    default_node := resources.NodeData {
+    data := resources.NodeData {
       material_id        = 0xFFFFFFFF,
       mesh_id            = 0xFFFFFFFF,
       bone_matrix_offset = 0xFFFFFFFF,
-      flags              = {},
     }
     if mesh_attachment, has_mesh := node.attachment.(MeshAttachment); has_mesh {
-      default_node.material_id = mesh_attachment.material.index
-      default_node.mesh_id = mesh_attachment.handle.index
+      data.material_id = mesh_attachment.material.index
+      data.mesh_id = mesh_attachment.handle.index
       if node.visible {
-        default_node.flags |= resources.NodeFlagSet{.VISIBLE}
+        data.flags |= resources.NodeFlagSet{.VISIBLE}
       }
       if node.culling_enabled {
-        default_node.flags |= {.CULLING_ENABLED}
+        data.flags |= {.CULLING_ENABLED}
       }
       if mesh_attachment.cast_shadow {
-        default_node.flags |= resources.NodeFlagSet{.CASTS_SHADOW}
+        data.flags |= resources.NodeFlagSet{.CASTS_SHADOW}
       }
       if material_entry, has_material := resources.get(
         resources_manager.materials,
@@ -524,18 +521,18 @@ spawn_node :: proc(
       ); has_material {
         switch material_entry.type {
         case .TRANSPARENT:
-          default_node.flags |= resources.NodeFlagSet{.MATERIAL_TRANSPARENT}
+          data.flags |= resources.NodeFlagSet{.MATERIAL_TRANSPARENT}
         case .WIREFRAME:
-          default_node.flags |= resources.NodeFlagSet{.MATERIAL_WIREFRAME}
+          data.flags |= resources.NodeFlagSet{.MATERIAL_WIREFRAME}
         case .PBR, .UNLIT:
           // No additional flags needed
         }
       }
       if skinning, has_skinning := mesh_attachment.skinning.?; has_skinning {
-        default_node.bone_matrix_offset = skinning.bone_matrix_offset
+        data.bone_matrix_offset = skinning.bone_matrix_offset
       }
     }
-    gpu.staged_buffer_write(&resources_manager.node_data_buffer, &default_node, int(handle.index))
+    gpu.staged_buffer_write(&resources_manager.node_data_buffer, &data, int(handle.index))
   }
   return
 }
@@ -558,23 +555,22 @@ spawn_child_node :: proc(
     world_matrix := node_get_world_matrix(node)
     gpu.staged_buffer_write(&resources_manager.world_matrix_buffer, &world_matrix, int(handle.index))
     // Update node data buffer
-    default_node := resources.NodeData {
+    data := resources.NodeData {
       material_id        = 0xFFFFFFFF,
       mesh_id            = 0xFFFFFFFF,
       bone_matrix_offset = 0xFFFFFFFF,
-      flags              = {},
     }
     if mesh_attachment, has_mesh := node.attachment.(MeshAttachment); has_mesh {
-      default_node.material_id = mesh_attachment.material.index
-      default_node.mesh_id = mesh_attachment.handle.index
+      data.material_id = mesh_attachment.material.index
+      data.mesh_id = mesh_attachment.handle.index
       if node.visible {
-        default_node.flags |= resources.NodeFlagSet{.VISIBLE}
+        data.flags |= resources.NodeFlagSet{.VISIBLE}
       }
       if node.culling_enabled {
-        default_node.flags |= {.CULLING_ENABLED}
+        data.flags |= {.CULLING_ENABLED}
       }
       if mesh_attachment.cast_shadow {
-        default_node.flags |= resources.NodeFlagSet{.CASTS_SHADOW}
+        data.flags |= resources.NodeFlagSet{.CASTS_SHADOW}
       }
       if material_entry, has_material := resources.get(
         resources_manager.materials,
@@ -582,18 +578,18 @@ spawn_child_node :: proc(
       ); has_material {
         switch material_entry.type {
         case .TRANSPARENT:
-          default_node.flags |= resources.NodeFlagSet{.MATERIAL_TRANSPARENT}
+          data.flags |= resources.NodeFlagSet{.MATERIAL_TRANSPARENT}
         case .WIREFRAME:
-          default_node.flags |= resources.NodeFlagSet{.MATERIAL_WIREFRAME}
+          data.flags |= resources.NodeFlagSet{.MATERIAL_WIREFRAME}
         case .PBR, .UNLIT:
           // No additional flags needed
         }
       }
       if skinning, has_skinning := mesh_attachment.skinning.?; has_skinning {
-        default_node.bone_matrix_offset = skinning.bone_matrix_offset
+        data.bone_matrix_offset = skinning.bone_matrix_offset
       }
     }
-    gpu.staged_buffer_write(&resources_manager.node_data_buffer, &default_node, int(handle.index))
+    gpu.staged_buffer_write(&resources_manager.node_data_buffer, &data, int(handle.index))
   }
   return
 }
@@ -772,23 +768,23 @@ traverse :: proc(world: ^World, resources_manager: ^resources.Manager = nil, cb_
     }
     // Update node data when visibility changes
     if (visibility_changed || is_dirty || entry.parent_is_dirty) && resources_manager != nil {
-      default_node := resources.NodeData {
+      data := resources.NodeData {
         material_id        = 0xFFFFFFFF,
         mesh_id            = 0xFFFFFFFF,
         bone_matrix_offset = 0xFFFFFFFF,
         flags              = {},
       }
       if mesh_attachment, has_mesh := current_node.attachment.(MeshAttachment); has_mesh {
-        default_node.material_id = mesh_attachment.material.index
-        default_node.mesh_id = mesh_attachment.handle.index
+        data.material_id = mesh_attachment.material.index
+        data.mesh_id = mesh_attachment.handle.index
         if current_node.visible && current_node.parent_visible {
-          default_node.flags |= resources.NodeFlagSet{.VISIBLE}
+          data.flags |= resources.NodeFlagSet{.VISIBLE}
         }
         if current_node.culling_enabled {
-          default_node.flags |= {.CULLING_ENABLED}
+          data.flags |= {.CULLING_ENABLED}
         }
         if mesh_attachment.cast_shadow {
-          default_node.flags |= resources.NodeFlagSet{.CASTS_SHADOW}
+          data.flags |= resources.NodeFlagSet{.CASTS_SHADOW}
         }
         if material_entry, has_material := resources.get(
           resources_manager.materials,
@@ -796,18 +792,18 @@ traverse :: proc(world: ^World, resources_manager: ^resources.Manager = nil, cb_
         ); has_material {
           switch material_entry.type {
           case .TRANSPARENT:
-            default_node.flags |= resources.NodeFlagSet{.MATERIAL_TRANSPARENT}
+            data.flags |= resources.NodeFlagSet{.MATERIAL_TRANSPARENT}
           case .WIREFRAME:
-            default_node.flags |= resources.NodeFlagSet{.MATERIAL_WIREFRAME}
+            data.flags |= resources.NodeFlagSet{.MATERIAL_WIREFRAME}
           case .PBR, .UNLIT:
             // No additional flags needed
           }
         }
         if skinning, has_skinning := mesh_attachment.skinning.?; has_skinning {
-          default_node.bone_matrix_offset = skinning.bone_matrix_offset
+          data.bone_matrix_offset = skinning.bone_matrix_offset
         }
       }
-      gpu.staged_buffer_write(&resources_manager.node_data_buffer, &default_node, int(entry.handle.index))
+      gpu.staged_buffer_write(&resources_manager.node_data_buffer, &data, int(entry.handle.index))
     }
     // Only call the callback if the node is effectively visible
     if callback != nil && current_node.parent_visible && current_node.visible {

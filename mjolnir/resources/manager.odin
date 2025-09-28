@@ -775,12 +775,11 @@ init_node_data_buffer :: proc(
     {.STORAGE_BUFFER},
   ) or_return
   node_slice := gpu.staged_buffer_get_all(&manager.node_data_buffer)
-  default_node := NodeData {
-    material_id        = 0xFFFFFFFF,
-    mesh_id            = 0xFFFFFFFF,
-    bone_matrix_offset = 0xFFFFFFFF,
-  }
-  for &node in node_slice do node = default_node
+  slice.fill(node_slice, NodeData {
+     material_id        = 0xFFFFFFFF,
+     mesh_id            = 0xFFFFFFFF,
+     bone_matrix_offset = 0xFFFFFFFF,
+   })
   bindings := [?]vk.DescriptorSetLayoutBinding {
     {
       binding = 0,
