@@ -47,9 +47,7 @@ Handle :: resources.Handle
 
 // Re-export world types for convenience
 Node :: world.Node
-PointLightAttachment :: world.PointLightAttachment
-DirectionalLightAttachment :: world.DirectionalLightAttachment
-SpotLightAttachment :: world.SpotLightAttachment
+LightAttachment :: world.LightAttachment
 MeshAttachment :: world.MeshAttachment
 ForceFieldAttachment :: world.ForceFieldAttachment
 EmitterAttachment :: world.EmitterAttachment
@@ -177,15 +175,6 @@ Engine :: struct {
   navmesh:                     navmesh_renderer.Renderer,
   command_buffers:             [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
   cursor_pos:                  [2]i32,
-  // Engine-managed shadow maps
-  shadow_maps:                 [MAX_FRAMES_IN_FLIGHT][MAX_SHADOW_MAPS]Handle,
-  cube_shadow_maps:            [MAX_FRAMES_IN_FLIGHT][MAX_SHADOW_MAPS]Handle,
-  // Persistent shadow render targets
-  shadow_render_targets:       [MAX_SHADOW_MAPS]Handle,
-  cube_shadow_render_targets:  [MAX_SHADOW_MAPS][6]Handle,
-  // Light management with pre-allocated pools
-  lights:                      [256]lighting.LightInfo, // Pre-allocated light pool
-  active_light_count:          u32, // Number of currently active lights
   // Deferred cleanup for thread safety
   pending_node_deletions:      [dynamic]Handle,
   // Frame synchronization for parallel update/render
@@ -204,61 +193,6 @@ get_window_dpi :: proc(window: glfw.WindowHandle) -> f32 {
   return sw
 }
 
-// Initialize engine shadow map pools
-@(private = "file")
-engine_init_shadow_maps :: proc(engine: ^Engine) -> vk.Result {
-  for f in 0 ..< MAX_FRAMES_IN_FLIGHT {
-    for i in 0 ..< MAX_SHADOW_MAPS {
-      // Create shadow maps
-      engine.shadow_maps[f][i], _, _ = resources.create_texture(
-        &engine.gpu_context,
-        &engine.resource_manager,
-        SHADOW_MAP_SIZE,
-        SHADOW_MAP_SIZE,
-        vk.Format.D32_SFLOAT,
-        vk.ImageUsageFlags{.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
-      )
-      engine.cube_shadow_maps[f][i], _, _ = resources.create_cube_texture(
-        &engine.gpu_context,
-        &engine.resource_manager,
-        SHADOW_MAP_SIZE,
-        vk.Format.D32_SFLOAT,
-        vk.ImageUsageFlags{.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
-      )
-    }
-    log.debugf("Created new 2D shadow maps %v", engine.shadow_maps[f])
-    log.debugf("Created new cube shadow maps %v", engine.cube_shadow_maps[f])
-  }
-
-  for i in 0 ..< MAX_SHADOW_MAPS {
-    // Create persistent render targets for spot/directional lights
-    render_target: ^resources.RenderTarget
-    engine.shadow_render_targets[i], render_target = resources.alloc(
-      &engine.resource_manager.render_targets,
-    )
-    render_target.extent = {SHADOW_MAP_SIZE, SHADOW_MAP_SIZE}
-    // Set depth texture for all frames to the appropriate shadow map
-    for frame_idx in 0 ..< MAX_FRAMES_IN_FLIGHT {
-      render_target.depth_textures[frame_idx] =
-        engine.shadow_maps[frame_idx][i]
-    }
-    render_target.features = {.DEPTH_TEXTURE}
-    // Create persistent render targets for point lights (6 cube faces)
-    for face in 0 ..< 6 {
-      cube_render_target: ^resources.RenderTarget
-      engine.cube_shadow_render_targets[i][face], cube_render_target =
-        resources.alloc(&engine.resource_manager.render_targets)
-      cube_render_target.extent = {SHADOW_MAP_SIZE, SHADOW_MAP_SIZE}
-      // Set depth texture for all frames to the appropriate cube shadow map
-      for frame_idx in 0 ..< MAX_FRAMES_IN_FLIGHT {
-        cube_render_target.depth_textures[frame_idx] =
-          engine.cube_shadow_maps[frame_idx][i]
-      }
-      cube_render_target.features = {.DEPTH_TEXTURE}
-    }
-  }
-  return .SUCCESS
-}
 
 init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
   context.user_ptr = self
@@ -306,9 +240,6 @@ init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
     nil,
     &self.frame_fence,
   ) or_return
-
-  // Initialize engine shadow map pools
-  engine_init_shadow_maps(self) or_return
 
   // Initialize main render target with default camera settings
   main_render_target: ^resources.RenderTarget
@@ -641,18 +572,6 @@ shutdown :: proc(self: ^Engine) {
   ); ok {
     resources.render_target_destroy(item, self.gpu_context.device, &self.resource_manager)
   }
-  for j in 0 ..< MAX_SHADOW_MAPS {
-    resources.free(
-      &self.resource_manager.render_targets,
-      self.shadow_render_targets[j],
-    )
-    for face in 0 ..< 6 {
-      resources.free(
-        &self.resource_manager.render_targets,
-        self.cube_shadow_render_targets[j][face],
-      )
-    }
-  }
   delete(self.pending_node_deletions)
   vk.DestroyFence(self.gpu_context.device, self.frame_fence, nil)
   renderer_shutdown(&self.render, self.gpu_context.device, self.gpu_context.command_pool, &self.resource_manager)
@@ -666,236 +585,106 @@ shutdown :: proc(self: ^Engine) {
   log.infof("Engine deinitialized")
 }
 
-// TODO: find a more efficient way to prepare lights information for rendering.
-// This approach is inefficient, we are allocate and then deallocate alot of
-// memory every frame, even when lights does not change
-process_world_lights :: proc(self: ^Engine) {
-  self.active_light_count = 0
-  shadow_map_count: u32 = 0
-  cube_shadow_map_count: u32 = 0
-  for idx in 0 ..< len(self.world.nodes.entries) {
-    entry := &self.world.nodes.entries[idx]
-    if !entry.active do continue
-    node := &entry.item
-    if self.active_light_count >= len(self.lights) do continue
-    node_handle := Handle{generation = entry.generation, index = u32(idx)}
-    #partial switch &attachment in &node.attachment {
-    case PointLightAttachment:
-      process_point_light(
-        self,
-        node_handle,
-        node,
-        &attachment,
-        &cube_shadow_map_count,
-      )
-    case SpotLightAttachment:
-      process_spot_light(
-        self,
-        node_handle,
-        node,
-        &attachment,
-        &shadow_map_count,
-      )
-    case DirectionalLightAttachment:
-      process_directional_light(self, node_handle, node, &attachment)
+// Update shadow camera positions for lights that cast shadows
+update_shadow_camera_transforms :: proc(self: ^Engine) {
+  // Iterate through all lights to update shadow cameras
+  for idx in 0 ..< len(self.resource_manager.lights.entries) {
+    entry := &self.resource_manager.lights.entries[idx]
+    if entry.generation > 0 && entry.active {
+      handle := Handle{generation = entry.generation, index = u32(idx)}
+      light := &entry.item
+      // Skip if not enabled or not casting shadow
+      if !light.data.cast_shadow do continue
+      // Get the node this light is attached to
+      node, node_ok := resources.get(self.world.nodes, light.node_handle)
+      if !node_ok do continue
+      // Check if the node is visible
+      if !node.visible || !node.parent_visible do continue
+      switch light.light_type {
+      case .POINT:
+        update_point_light_shadow_cameras(self, light, node)
+      case .SPOT:
+        update_spot_light_shadow_cameras(self, light, node)
+      case .DIRECTIONAL:
+        // Directional shadow cameras not yet implemented
+      }
     }
   }
 }
 
-@(private = "file")
-process_point_light :: proc(
+// Update shadow cameras for point lights
+update_point_light_shadow_cameras :: proc(
   self: ^Engine,
-  node_handle: Handle,
+  light: ^resources.Light,
   node: ^Node,
-  attachment: ^PointLightAttachment,
-  cube_shadow_map_count: ^u32,
 ) {
-  if self.active_light_count >= len(self.lights) {
-    return
-  }
+  // Point light cube face directions: forward=-Z convention
+  // +X, -X, +Y, -Y, +Z, -Z faces
   dirs := [6][3]f32{
-    {1, 0, 0},
-    {-1, 0, 0},
-    {0, 1, 0},
-    {0, -1, 0},
-    {0, 0, 1},
-    {0, 0, -1},
+    {1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1},
   }
+  // Up vectors for each face with forward=-Z convention
   ups := [6][3]f32{
-    {0, -1, 0},
-    {0, -1, 0},
-    {0, 0, 1},
-    {0, 0, -1},
-    {0, -1, 0},
-    {0, -1, 0},
-  }
-  light := &self.lights[self.active_light_count]
-  self.active_light_count += 1
-  world := world.node_get_world_matrix(node)
-  position := world[3].xyz
-  light.node_handle = node_handle
-  light.transform_generation = 0
-  light.light_kind = lighting.LightKind.POINT
-  light.light_color = attachment.color.xyz
-  light.light_position = position
-  light.light_radius = attachment.radius
-  light.light_direction = {0, 0, 0}
-  light.light_angle = 0
-  light.light_camera_idx = 0
-  light.dirty = false
-  for i in 0 ..< len(light.cube_render_targets) {
-    light.cube_render_targets[i] = Handle{}
-    light.cube_cameras[i] = Handle{}
-  }
-  light.render_target = Handle{}
-  light.camera = Handle{}
-  light.shadow_map = Handle{}
-  light.shadow_map_id = 0
-  casts_shadow := attachment.cast_shadow && cube_shadow_map_count^ < MAX_SHADOW_MAPS
-  light.light_cast_shadow = cast(b32)casts_shadow
-  if casts_shadow {
-    slot := cube_shadow_map_count^
-    cube_shadow_map_count^ += 1
-    for face in 0 ..< 6 {
-      light.cube_render_targets[face] = self.cube_shadow_render_targets[slot][face]
-      camera_handle, camera := resources.alloc(&self.resource_manager.cameras)
-      camera^ = geometry.make_camera_perspective(math.PI * 0.5, 1.0, 0.1, attachment.radius)
-      target := position + dirs[face]
-      geometry.camera_look_at(camera, position, target, ups[face])
-      light.cube_cameras[face] = camera_handle
-      render_target := resources.get(
-        self.resource_manager.render_targets,
-        light.cube_render_targets[face],
-      ) or_continue
-      render_target.camera = camera_handle
-      resources.render_target_upload_camera_data(
-        &self.resource_manager,
-        render_target,
-      )
-    }
-    light.shadow_map = self.cube_shadow_maps[self.frame_index][slot]
-    light.shadow_map_id = light.shadow_map.index
-  }
-}
-
-@(private = "file")
-process_spot_light :: proc(
-  self: ^Engine,
-  node_handle: Handle,
-  node: ^Node,
-  attachment: ^SpotLightAttachment,
-  shadow_map_count: ^u32,
-) {
-  if self.active_light_count >= len(self.lights) {
-    return
+    {0, -1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}, {0, -1, 0}, {0, -1, 0},
   }
 
-  light := &self.lights[self.active_light_count]
-  self.active_light_count += 1
+  world_matrix := world.node_get_world_matrix(node)
+  position := world_matrix[3].xyz
 
-  world := world.node_get_world_matrix(node)
-  position := world[3].xyz
-  forward_vec := world * [4]f32{0, 0, -1, 0}
-  forward := -linalg.normalize(forward_vec.xyz)
+  // Update cameras for each cube face
+  for face in 0 ..< 6 {
+    if light.cube_render_targets[face].generation == 0 do continue
 
-  light.node_handle = node_handle
-  light.transform_generation = 0
-  light.light_kind = lighting.LightKind.SPOT
-  light.light_color = attachment.color.xyz
-  light.light_position = position
-  light.light_direction = forward
-  light.light_radius = attachment.radius
-  light.light_angle = attachment.angle
-  light.dirty = false
-
-  for i in 0 ..< len(light.cube_render_targets) {
-    light.cube_render_targets[i] = Handle{}
-    light.cube_cameras[i] = Handle{}
-  }
-  light.shadow_map = Handle{}
-  light.render_target = Handle{}
-  light.camera = Handle{}
-  light.shadow_map_id = 0
-  light.light_camera_idx = 0
-
-  casts_shadow := attachment.cast_shadow && shadow_map_count^ < MAX_SHADOW_MAPS
-  light.light_cast_shadow = cast(b32)casts_shadow
-  if casts_shadow {
-    slot := shadow_map_count^
-    shadow_map_count^ += 1
-
-    light.render_target = self.shadow_render_targets[slot]
-    light.shadow_map = self.shadow_maps[self.frame_index][slot]
-    light.shadow_map_id = light.shadow_map.index
-
-    camera_handle, camera := resources.alloc(&self.resource_manager.cameras)
-    fov := attachment.angle * 2.0
-    max_fov: f32 = f32(math.PI) * 0.95
-    if fov > max_fov {
-      fov = max_fov
-    }
-    camera^ = geometry.make_camera_perspective(
-      fov,
-      1.0,
-      0.1,
-      attachment.radius,
-    )
-    target := position + forward
-    geometry.camera_look_at(camera, position, target)
-    light.camera = camera_handle
-    light.light_camera_idx = camera_handle.index
-
-    render_target := resources.get(
+    render_target, ok := resources.get(
       self.resource_manager.render_targets,
-      light.render_target,
+      light.cube_render_targets[face],
     )
-    if render_target != nil {
-      render_target.camera = camera_handle
-      resources.render_target_upload_camera_data(&self.resource_manager, render_target)
-    }
+    if !ok do continue
+
+    camera, camera_ok := resources.get(
+      self.resource_manager.cameras,
+      render_target.camera,
+    )
+    if !camera_ok do continue
+
+    target := position + dirs[face]
+    geometry.camera_look_at(camera, position, target, ups[face])
+    resources.render_target_upload_camera_data(&self.resource_manager, render_target)
   }
 }
 
-@(private = "file")
-process_directional_light :: proc(
+update_spot_light_shadow_cameras :: proc(
   self: ^Engine,
-  node_handle: Handle,
+  light: ^resources.Light,
   node: ^Node,
-  attachment: ^DirectionalLightAttachment,
 ) {
-  if self.active_light_count >= len(self.lights) {
-    return
+  if light.shadow_render_target.generation == 0 do return
+  render_target, ok := resources.get(
+    self.resource_manager.render_targets,
+    light.shadow_render_target,
+  )
+  if !ok do return
+  camera, camera_ok := resources.get(
+    self.resource_manager.cameras,
+    render_target.camera,
+  )
+  if !camera_ok do return
+  world_matrix := world.node_get_world_matrix(node)
+  position := world_matrix[3].xyz
+  // Extract forward direction: -Z axis from world matrix (forward=-Z convention)
+  forward := world_matrix[2].xyz  // Light's actual forward direction from matrix
+  target := position + forward
+  up := [3]f32{0, 1, 0}
+  if linalg.abs(linalg.dot(forward, up)) > 0.99 {
+    up = {1, 0, 0}
   }
-
-  light := &self.lights[self.active_light_count]
-  self.active_light_count += 1
-
-  world := world.node_get_world_matrix(node)
-  position := world[3].xyz
-  forward_vec := world * [4]f32{0, 0, -1, 0}
-  forward := -linalg.normalize(forward_vec.xyz)
-
-  light.node_handle = node_handle
-  light.transform_generation = 0
-  light.light_kind = lighting.LightKind.DIRECTIONAL
-  light.light_color = attachment.color.xyz
-  light.light_position = position
-  light.light_direction = forward
-  light.light_radius = 0.0
-  light.light_angle = 0
-  light.light_cast_shadow = cast(b32)false // Directional shadows not yet implemented
-  light.shadow_map = Handle{}
-  light.render_target = Handle{}
-  light.camera = Handle{}
-  light.shadow_map_id = 0
-  light.light_camera_idx = 0
-  light.dirty = false
-
-  for i in 0 ..< len(light.cube_render_targets) {
-    light.cube_render_targets[i] = Handle{}
-    light.cube_cameras[i] = Handle{}
-  }
+  geometry.camera_look_at(camera, position, target, up)
+  // log.debugf("Spot light %v shadow camera %v updated to %v", light, render_target.camera, camera)
+  resources.render_target_upload_camera_data(&self.resource_manager, render_target)
 }
+
+
+
 
 @(private = "file")
 render_debug_ui :: proc(self: ^Engine) {
@@ -964,7 +753,7 @@ recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
       old_target, // Preserve camera target
     ) or_return
   }
-  render_subsystem_resize(
+  resize(
     &engine.render,
     &engine.gpu_context,
     &engine.resource_manager,
@@ -994,32 +783,9 @@ render :: proc(self: ^Engine) -> vk.Result {
   }
   resources.render_target_upload_camera_data(&self.resource_manager, main_render_target)
   world.upload_world_matrices(&self.world, &self.resource_manager, self.frame_index)
-  defer {
-    for i in 0 ..< self.active_light_count {
-      light_info := &self.lights[i]
-      if !light_info.light_cast_shadow do continue
-      switch light_info.light_kind {
-      case .POINT:
-        for camera_handle in light_info.cube_cameras {
-          if camera_handle.generation != 0 {
-            resources.free(&self.resource_manager.cameras, camera_handle)
-          }
-        }
-      case .SPOT:
-        if light_info.camera.generation != 0 {
-          resources.free(&self.resource_manager.cameras, light_info.shadow_resources.camera)
-        }
-      case .DIRECTIONAL:
-      }
-    }
-  }
-  process_world_lights(self)
-  renderer_prepare_targets(
-    &self.render,
-    &self.resource_manager,
-    self.lights[:],
-    self.active_light_count,
-  )
+  // Update light transforms after world matrices are uploaded
+  resources.update_all_light_transforms(&self.resource_manager)
+  update_shadow_camera_transforms(self)
   // Visibility is now updated in begin_frame
   record_shadow_pass(
     &self.render,
@@ -1027,8 +793,6 @@ render :: proc(self: ^Engine) -> vk.Result {
     &self.gpu_context,
     &self.resource_manager,
     &self.world,
-    self.lights[:],
-    self.active_light_count,
   )
   record_geometry_pass(
     &self.render,
@@ -1043,8 +807,6 @@ render :: proc(self: ^Engine) -> vk.Result {
     self.frame_index,
     &self.resource_manager,
     main_render_target,
-    self.lights[:],
-    self.active_light_count,
     self.swapchain.format.format,
   )
   record_particles_pass(
@@ -1207,21 +969,7 @@ process_pending_deletions :: proc(engine: ^Engine) {
     world.destroy_node_handle(&engine.world, handle)
   }
   clear(&engine.pending_node_deletions)
-}
 
-screen_to_world_ray :: proc(engine: ^Engine, screen_x, screen_y: f32) -> (ray_origin: [3]f32, ray_dir: [3]f32) {
-    main_camera := get_main_camera(engine)
-    if main_camera == nil do return
-    width, height := glfw.GetWindowSize(engine.window)
-    // Normalize screen coordinates to [-1, 1]
-    ndc_x := (2.0 * screen_x / f32(width)) - 1.0
-    ndc_y := 1.0 - (2.0 * screen_y / f32(height))  // Flip Y
-    view, proj := geometry.camera_calculate_matrices(main_camera^)
-    ray_clip := [4]f32{ndc_x, ndc_y, -1.0, 1.0}
-    ray_eye := linalg.matrix4x4_inverse(proj) * ray_clip
-    ray_eye = [4]f32{ray_eye.x, ray_eye.y, -1.0, 0.0}  // Point at infinity
-    ray_world := linalg.matrix4x4_inverse(view) * ray_eye
-    ray_dir = linalg.normalize(ray_world.xyz)
-    ray_origin = main_camera.position
-    return ray_origin, ray_dir
+  // Actually cleanup the nodes that were marked for deletion
+  world.cleanup_pending_deletions(&engine.world, &engine.resource_manager, &engine.gpu_context)
 }

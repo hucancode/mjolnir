@@ -959,7 +959,7 @@ init_emitter_buffer :: proc(
     &manager.emitter_buffer_descriptor_set,
   ) or_return
   buffer_info := vk.DescriptorBufferInfo {
-    buffer = gpu.staged_buffer_get_device_buffer(&manager.emitter_buffer),
+    buffer = manager.emitter_buffer.device_buffer,
     offset = 0,
     range  = vk.DeviceSize(vk.WHOLE_SIZE),
   }
@@ -1022,7 +1022,7 @@ init_lights_buffer :: proc(
   ) or_return
 
   buffer_info := vk.DescriptorBufferInfo {
-    buffer = gpu.staged_buffer_get_device_buffer(&manager.lights_buffer),
+    buffer = manager.lights_buffer.device_buffer,
     offset = 0,
     range  = vk.DeviceSize(vk.WHOLE_SIZE),
   }

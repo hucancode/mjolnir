@@ -15,40 +15,12 @@ LightKind :: enum u32 {
   SPOT        = 2,
 }
 
-LightPushConstant :: struct {
-  scene_camera_idx:       u32,
-  light_camera_idx:       u32, // for shadow mapping
-  shadow_map_id:          u32,
-  light_kind:             LightKind,
-  light_color:            [3]f32,
-  light_angle:            f32,
-  light_position:         [3]f32,
-  light_radius:           f32,
-  light_direction:        [3]f32,
-  light_cast_shadow:      b32,
-  position_texture_index: u32,
-  normal_texture_index:   u32,
-  albedo_texture_index:   u32,
-  metallic_texture_index: u32,
-  emissive_texture_index: u32,
-  depth_texture_index:    u32,
-  input_image_index:      u32,
-}
-
 ShadowResources :: struct {
   cube_render_targets: [6]resources.Handle,
   cube_cameras:        [6]resources.Handle,
   shadow_map:          resources.Handle,
   render_target:       resources.Handle,
   camera:              resources.Handle,
-}
-
-LightInfo :: struct {
-  using gpu_data:         LightPushConstant,
-  node_handle:            resources.Handle,
-  transform_generation:   u64,
-  using shadow_resources: ShadowResources,
-  dirty:                  bool,
 }
 
 AmbientPushConstant :: struct {
@@ -63,6 +35,18 @@ AmbientPushConstant :: struct {
   depth_texture_index:    u32,
   environment_max_lod:    f32,
   ibl_intensity:          f32,
+}
+
+LightPushConstant :: struct {
+  light_index:            u32,
+  scene_camera_idx:       u32,
+  position_texture_index: u32,
+  normal_texture_index:   u32,
+  albedo_texture_index:   u32,
+  metallic_texture_index: u32,
+  emissive_texture_index: u32,
+  depth_texture_index:    u32,
+  input_image_index:      u32,
 }
 
 begin_ambient_pass :: proc(
@@ -330,6 +314,8 @@ init :: proc(
   lighting_pipeline_set_layouts := [?]vk.DescriptorSetLayout {
     resources_manager.camera_buffer_set_layout,
     resources_manager.textures_set_layout,
+    resources_manager.lights_buffer_set_layout,
+    resources_manager.world_matrix_buffer_set_layout,
   }
   lighting_push_constant_range := vk.PushConstantRange {
     stageFlags = {.VERTEX, .FRAGMENT},
@@ -638,6 +624,8 @@ begin_pass :: proc(
   descriptor_sets := [?]vk.DescriptorSet {
     resources_manager.camera_buffer_descriptor_set,
     resources_manager.textures_descriptor_set,
+    resources_manager.lights_buffer_descriptor_set,
+    resources_manager.world_matrix_descriptor_sets[frame_index],
   }
   vk.CmdBindDescriptorSets(
     command_buffer,
@@ -654,15 +642,11 @@ begin_pass :: proc(
 
 render :: proc(
   self: ^Renderer,
-  input: []LightInfo,
   render_target: ^resources.RenderTarget,
   command_buffer: vk.CommandBuffer,
   resources_manager: ^resources.Manager,
   frame_index: u32,
-) -> int {
-  rendered_count := 0
-  node_count := 0
-
+) {
   // Helper proc to bind and draw a mesh
   bind_and_draw_mesh :: proc(
     mesh_handle: resources.Handle,
@@ -699,71 +683,64 @@ render :: proc(
       0,
     )
   }
-
-  for &light_info in input {
-    node_count += 1
-    light_info.scene_camera_idx = render_target.camera.index
-    light_info.position_texture_index =
-      resources.get_position_texture(render_target, frame_index).index
-    light_info.normal_texture_index =
-      resources.get_normal_texture(render_target, frame_index).index
-    light_info.albedo_texture_index =
-      resources.get_albedo_texture(render_target, frame_index).index
-    light_info.metallic_texture_index =
-      resources.get_metallic_roughness_texture(render_target, frame_index).index
-    light_info.emissive_texture_index =
-      resources.get_emissive_texture(render_target, frame_index).index
-    light_info.depth_texture_index =
-      resources.get_depth_texture(render_target, frame_index).index
-    light_info.input_image_index =
-      resources.get_final_image(render_target, frame_index).index
-
-    switch light_info.light_kind {
-    case .POINT:
-      vk.CmdSetDepthCompareOp(command_buffer, .GREATER_OR_EQUAL)
-      vk.CmdPushConstants(
-        command_buffer,
-        self.lighting_pipeline_layout,
-        {.VERTEX, .FRAGMENT},
-        0,
-        size_of(LightPushConstant),
-        &light_info.gpu_data,
-      )
-      bind_and_draw_mesh(self.sphere_mesh, command_buffer, resources_manager)
-      rendered_count += 1
-
-    case .DIRECTIONAL:
-      vk.CmdSetDepthCompareOp(command_buffer, .GREATER_OR_EQUAL)
-      vk.CmdPushConstants(
-        command_buffer,
-        self.lighting_pipeline_layout,
-        {.VERTEX, .FRAGMENT},
-        0,
-        size_of(LightPushConstant),
-        &light_info.gpu_data,
-      )
-      bind_and_draw_mesh(
-        self.fullscreen_triangle_mesh,
-        command_buffer,
-        resources_manager,
-      )
-      rendered_count += 1
-
-    case .SPOT:
-      vk.CmdSetDepthCompareOp(command_buffer, .LESS_OR_EQUAL)
-      vk.CmdPushConstants(
-        command_buffer,
-        self.lighting_pipeline_layout,
-        {.VERTEX, .FRAGMENT},
-        0,
-        size_of(LightPushConstant),
-        &light_info.gpu_data,
-      )
-      bind_and_draw_mesh(self.cone_mesh, command_buffer, resources_manager)
-      rendered_count += 1
+  // Push constant structure for light index-based rendering
+  push_constant := LightPushConstant {
+    scene_camera_idx = render_target.camera.index,
+    position_texture_index = resources.get_position_texture(render_target, frame_index).index,
+    normal_texture_index = resources.get_normal_texture(render_target, frame_index).index,
+    albedo_texture_index = resources.get_albedo_texture(render_target, frame_index).index,
+    metallic_texture_index = resources.get_metallic_roughness_texture(render_target, frame_index).index,
+    emissive_texture_index = resources.get_emissive_texture(render_target, frame_index).index,
+    depth_texture_index = resources.get_depth_texture(render_target, frame_index).index,
+    input_image_index = resources.get_final_image(render_target, frame_index).index,
+  }
+  // log.infof("Lighting: Checking %d light entries", len(resources_manager.lights.entries))
+  for idx in 0 ..< len(resources_manager.lights.entries) {
+    entry := &resources_manager.lights.entries[idx]
+    if entry.generation > 0 && entry.active {
+      light := &entry.item
+      push_constant.light_index = u32(idx)
+      switch light.light_type {
+      case .POINT:
+        vk.CmdSetDepthCompareOp(command_buffer, .GREATER_OR_EQUAL)
+        vk.CmdPushConstants(
+          command_buffer,
+          self.lighting_pipeline_layout,
+          {.VERTEX, .FRAGMENT},
+          0,
+          size_of(push_constant),
+          &push_constant,
+        )
+        bind_and_draw_mesh(self.sphere_mesh, command_buffer, resources_manager)
+      case .DIRECTIONAL:
+        vk.CmdSetDepthCompareOp(command_buffer, .GREATER_OR_EQUAL)
+        vk.CmdPushConstants(
+          command_buffer,
+          self.lighting_pipeline_layout,
+          {.VERTEX, .FRAGMENT},
+          0,
+          size_of(push_constant),
+          &push_constant,
+        )
+        bind_and_draw_mesh(
+          self.fullscreen_triangle_mesh,
+          command_buffer,
+          resources_manager,
+        )
+      case .SPOT:
+        vk.CmdSetDepthCompareOp(command_buffer, .LESS_OR_EQUAL)
+        vk.CmdPushConstants(
+          command_buffer,
+          self.lighting_pipeline_layout,
+          {.VERTEX, .FRAGMENT},
+          0,
+          size_of(push_constant),
+          &push_constant,
+        )
+        bind_and_draw_mesh(self.cone_mesh, command_buffer, resources_manager)
+      }
     }
   }
-  return rendered_count
 }
 
 end_pass :: proc(command_buffer: vk.CommandBuffer) {

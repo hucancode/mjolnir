@@ -20,9 +20,7 @@ when ODIN_OS == .Darwin {
 ENGINE_NAME :: "Mjolnir"
 TITLE :: "Mjolnir"
 
-DEVICE_EXTENSIONS :: []cstring {
-  vk.KHR_SWAPCHAIN_EXTENSION_NAME,
-}
+DEVICE_EXTENSIONS :: []cstring{vk.KHR_SWAPCHAIN_EXTENSION_NAME}
 
 ENABLE_VALIDATION_LAYERS :: #config(ENABLE_VALIDATION_LAYERS, ODIN_DEBUG)
 
@@ -62,28 +60,31 @@ FoundQueueFamilyIndices :: struct {
 }
 
 GPUContext :: struct {
-  window: glfw.WindowHandle,
-  instance: vk.Instance,
-  device: vk.Device,
-  surface: vk.SurfaceKHR,
+  window:               glfw.WindowHandle,
+  instance:             vk.Instance,
+  device:               vk.Device,
+  surface:              vk.SurfaceKHR,
   surface_capabilities: vk.SurfaceCapabilitiesKHR,
-  surface_formats: []vk.SurfaceFormatKHR,
-  present_modes: []vk.PresentModeKHR,
-  debug_messenger: vk.DebugUtilsMessengerEXT,
-  physical_device: vk.PhysicalDevice,
-  graphics_family: u32,
-  graphics_queue: vk.Queue,
-  present_family: u32,
-  present_queue: vk.Queue,
-  descriptor_pool: vk.DescriptorPool,
-  command_pool: vk.CommandPool,
-  device_properties: vk.PhysicalDeviceProperties,
+  surface_formats:      []vk.SurfaceFormatKHR,
+  present_modes:        []vk.PresentModeKHR,
+  debug_messenger:      vk.DebugUtilsMessengerEXT,
+  physical_device:      vk.PhysicalDevice,
+  graphics_family:      u32,
+  graphics_queue:       vk.Queue,
+  present_family:       u32,
+  present_queue:        vk.Queue,
+  descriptor_pool:      vk.DescriptorPool,
+  command_pool:         vk.CommandPool,
+  device_properties:    vk.PhysicalDeviceProperties,
 }
 
 // Global context for debug callback
 g_context: runtime.Context
 
-gpu_context_init :: proc(self: ^GPUContext, window: glfw.WindowHandle) -> vk.Result {
+gpu_context_init :: proc(
+  self: ^GPUContext,
+  window: glfw.WindowHandle,
+) -> vk.Result {
   self.window = window
   vk.load_proc_addresses_global(rawptr(glfw.GetInstanceProcAddress))
   vulkan_instance_init(self) or_return
@@ -141,7 +142,10 @@ debug_callback :: proc "system" (
 
 @(private = "file")
 vulkan_instance_init :: proc(self: ^GPUContext) -> vk.Result {
-  extensions := slice.clone_to_dynamic(glfw.GetRequiredInstanceExtensions(), context.temp_allocator)
+  extensions := slice.clone_to_dynamic(
+    glfw.GetRequiredInstanceExtensions(),
+    context.temp_allocator,
+  )
   app_info := vk.ApplicationInfo {
     sType              = .APPLICATION_INFO,
     pApplicationName   = TITLE,
@@ -192,7 +196,12 @@ vulkan_instance_init :: proc(self: ^GPUContext) -> vk.Result {
 
 @(private = "file")
 surface_init :: proc(self: ^GPUContext) -> vk.Result {
-  glfw.CreateWindowSurface(self.instance, self.window, nil, &self.surface) or_return
+  glfw.CreateWindowSurface(
+    self.instance,
+    self.window,
+    nil,
+    &self.surface,
+  ) or_return
   log.infof("Vulkan surface created")
   return .SUCCESS
 }
@@ -265,7 +274,11 @@ score_physical_device :: proc(
   }
   ext_count: u32
   vk.EnumerateDeviceExtensionProperties(device, nil, &ext_count, nil) or_return
-  available_extensions := make([]vk.ExtensionProperties, ext_count, context.temp_allocator)
+  available_extensions := make(
+    []vk.ExtensionProperties,
+    ext_count,
+    context.temp_allocator,
+  )
   vk.EnumerateDeviceExtensionProperties(
     device,
     nil,
@@ -362,7 +375,11 @@ find_queue_families :: proc(
 ) {
   count: u32
   vk.GetPhysicalDeviceQueueFamilyProperties(physical_device, &count, nil)
-  queue_families_slice := make([]vk.QueueFamilyProperties, count, context.temp_allocator)
+  queue_families_slice := make(
+    []vk.QueueFamilyProperties,
+    count,
+    context.temp_allocator,
+  )
   vk.GetPhysicalDeviceQueueFamilyProperties(
     physical_device,
     &count,
@@ -410,7 +427,12 @@ logical_device_init :: proc(self: ^GPUContext) -> vk.Result {
   self.surface_capabilities = support_details.capabilities
   self.surface_formats = support_details.formats
   self.present_modes = support_details.present_modes
-  queue_create_infos_list := make([dynamic]vk.DeviceQueueCreateInfo, 0, 2, context.temp_allocator)
+  queue_create_infos_list := make(
+    [dynamic]vk.DeviceQueueCreateInfo,
+    0,
+    2,
+    context.temp_allocator,
+  )
   unique_queue_families := make(map[u32]struct {
     }, 2, context.temp_allocator)
   unique_queue_families[self.graphics_family] = {}
@@ -428,32 +450,31 @@ logical_device_init :: proc(self: ^GPUContext) -> vk.Result {
     )
   }
   // Enable descriptor indexing features
-  descriptor_indexing_features :=
-    vk.PhysicalDeviceDescriptorIndexingFeatures {
-      sType                                     = .PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES,
-      shaderSampledImageArrayNonUniformIndexing = true,
-      runtimeDescriptorArray                    = true,
-      descriptorBindingPartiallyBound           = true,
-      descriptorBindingVariableDescriptorCount  = true,
-    }
+  descriptor_indexing_features := vk.PhysicalDeviceDescriptorIndexingFeatures {
+    sType                                     = .PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES,
+    shaderSampledImageArrayNonUniformIndexing = true,
+    runtimeDescriptorArray                    = true,
+    descriptorBindingPartiallyBound           = true,
+    descriptorBindingVariableDescriptorCount  = true,
+  }
   dynamic_rendering_feature := vk.PhysicalDeviceDynamicRenderingFeatures {
-      sType            = .PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES,
-      dynamicRendering = true,
-      pNext            = &descriptor_indexing_features,
-    }
+    sType            = .PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES,
+    dynamicRendering = true,
+    pNext            = &descriptor_indexing_features,
+  }
   basic_features := vk.PhysicalDeviceFeatures {
-    multiDrawIndirect          = true,  // Required for vk.CmdDrawIndexedIndirect with drawCount > 1
-    drawIndirectFirstInstance  = true,  // Required for using firstInstance field in indirect commands
+    multiDrawIndirect         = true, // Required for vk.CmdDrawIndexedIndirect with drawCount > 1
+    drawIndirectFirstInstance = true, // Required for using firstInstance field in indirect commands
   }
   device_create_info := vk.DeviceCreateInfo {
-      sType                   = .DEVICE_CREATE_INFO,
-      queueCreateInfoCount    = u32(len(queue_create_infos_list)),
-      pQueueCreateInfos       = raw_data(queue_create_infos_list),
-      ppEnabledExtensionNames = raw_data(DEVICE_EXTENSIONS),
-      enabledExtensionCount   = u32(len(DEVICE_EXTENSIONS)),
-      pEnabledFeatures        = &basic_features,
-      pNext                   = &dynamic_rendering_feature,
-    }
+    sType                   = .DEVICE_CREATE_INFO,
+    queueCreateInfoCount    = u32(len(queue_create_infos_list)),
+    pQueueCreateInfos       = raw_data(queue_create_infos_list),
+    ppEnabledExtensionNames = raw_data(DEVICE_EXTENSIONS),
+    enabledExtensionCount   = u32(len(DEVICE_EXTENSIONS)),
+    pEnabledFeatures        = &basic_features,
+    pNext                   = &dynamic_rendering_feature,
+  }
   when ENABLE_VALIDATION_LAYERS {
     device_create_info.enabledLayerCount = u32(len(VALIDATION_LAYERS))
     device_create_info.ppEnabledLayerNames = raw_data(VALIDATION_LAYERS)
@@ -517,7 +538,12 @@ command_pool_init :: proc(self: ^GPUContext) -> vk.Result {
     flags            = {.RESET_COMMAND_BUFFER},
     queueFamilyIndex = self.graphics_family,
   }
-  vk.CreateCommandPool(self.device, &pool_info, nil, &self.command_pool) or_return
+  vk.CreateCommandPool(
+    self.device,
+    &pool_info,
+    nil,
+    &self.command_pool,
+  ) or_return
   log.infof("Vulkan command pool created")
   return .SUCCESS
 }
@@ -564,7 +590,10 @@ begin_single_time_command :: proc(
   return cmd_buffer, .SUCCESS
 }
 
-end_single_time_command :: proc(self: ^GPUContext, cmd_buffer: ^vk.CommandBuffer) -> vk.Result {
+end_single_time_command :: proc(
+  self: ^GPUContext,
+  cmd_buffer: ^vk.CommandBuffer,
+) -> vk.Result {
   vk.EndCommandBuffer(cmd_buffer^) or_return
   submit_info := vk.SubmitInfo {
     sType              = .SUBMIT_INFO,
@@ -582,9 +611,9 @@ find_memory_type_index :: proc(
   type_filter: u32,
   properties: vk.MemoryPropertyFlags,
 ) -> (
-  u32,
-  bool,
-) {
+  index: u32,
+  ok: bool,
+) #optional_ok {
   mem_properties: vk.PhysicalDeviceMemoryProperties
   vk.GetPhysicalDeviceMemoryProperties(self.physical_device, &mem_properties)
   for i in 0 ..< mem_properties.memoryTypeCount {
@@ -629,10 +658,10 @@ allocate_secondary_buffers :: proc(
 ) -> vk.Result {
   vk.AllocateCommandBuffers(
     device,
-    &vk.CommandBufferAllocateInfo{
-      sType              = .COMMAND_BUFFER_ALLOCATE_INFO,
-      commandPool        = pool,
-      level              = .SECONDARY,
+    &vk.CommandBufferAllocateInfo {
+      sType = .COMMAND_BUFFER_ALLOCATE_INFO,
+      commandPool = pool,
+      level = .SECONDARY,
       commandBufferCount = u32(len(buffers)),
     },
     raw_data(buffers),

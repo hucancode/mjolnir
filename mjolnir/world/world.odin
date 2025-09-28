@@ -13,22 +13,8 @@ import vk "vendor:vulkan"
 
 Handle :: resources.Handle
 
-PointLightAttachment :: struct {
-  color:       [4]f32,
-  radius:      f32,
-  cast_shadow: bool,
-}
-
-DirectionalLightAttachment :: struct {
-  color:       [4]f32,
-  cast_shadow: bool,
-}
-
-SpotLightAttachment :: struct {
-  color:       [4]f32,
-  radius:      f32,
-  angle:       f32,
-  cast_shadow: bool,
+LightAttachment :: struct {
+  handle: Handle,   // Handle to the Light resource
 }
 
 NodeSkinning :: struct {
@@ -55,9 +41,7 @@ ForceFieldAttachment :: struct {
 }
 
 NodeAttachment :: union {
-  PointLightAttachment,
-  DirectionalLightAttachment,
-  SpotLightAttachment,
+  LightAttachment,
   MeshAttachment,
   EmitterAttachment,
   ForceFieldAttachment,
@@ -110,26 +94,35 @@ init_node :: proc(self: ^Node, name: string = "") {
   self.parent_visible = true
 }
 
-destroy_node :: proc(self: ^Node, resources_manager: ^resources.Manager) {
+destroy_node :: proc(self: ^Node, resources_manager: ^resources.Manager, gpu_context: ^gpu.GPUContext = nil) {
   delete(self.children)
   if resources_manager == nil {
     return
   }
-  if emitter_attachment, is_emitter := &self.attachment.(EmitterAttachment); is_emitter {
-    if resources.destroy_emitter_handle(resources_manager, emitter_attachment.handle) {
-      emitter_attachment.handle = {}
+
+  // Handle light attachment cleanup
+  #partial switch &attachment in &self.attachment {
+  case LightAttachment:
+    if attachment.handle.generation != 0 {
+      if gpu_context != nil {
+        resources.destroy_light(resources_manager, gpu_context, attachment.handle)
+      } else {
+        log.warn("Cannot properly destroy light without GPU context - this may leak shadow resources")
+      }
+      attachment.handle = {}
+    }
+  case EmitterAttachment:
+    if resources.destroy_emitter_handle(resources_manager, attachment.handle) {
+      attachment.handle = {}
+    }
+  case MeshAttachment:
+    // TODO: we need to check if the mesh is still in use before freeing its resources
+    skinning, has_skin := &attachment.skinning.?
+    if has_skin && skinning.bone_matrix_offset != 0xFFFFFFFF {
+      resources.slab_free(&resources_manager.bone_matrix_slab, skinning.bone_matrix_offset)
+      skinning.bone_matrix_offset = 0xFFFFFFFF
     }
   }
-  data, has_mesh := &self.attachment.(MeshAttachment)
-  if !has_mesh {
-    return
-  }
-  skinning, has_skin := &data.skinning.?
-  if !has_skin || skinning.bone_matrix_offset == 0xFFFFFFFF {
-    return
-  }
-  resources.slab_free(&resources_manager.bone_matrix_slab, skinning.bone_matrix_offset)
-  skinning.bone_matrix_offset = 0xFFFFFFFF
 }
 
 detach :: proc(nodes: resources.Pool(Node), child_handle: Handle) {
@@ -281,10 +274,10 @@ init :: proc(world: ^World) {
   world.traversal_stack = make([dynamic]TraverseEntry, 0)
 }
 
-destroy :: proc(world: ^World, resources_manager: ^resources.Manager) {
+destroy :: proc(world: ^World, resources_manager: ^resources.Manager, gpu_context: ^gpu.GPUContext = nil) {
   for &entry in world.nodes.entries {
     if entry.active {
-      destroy_node(&entry.item, resources_manager)
+      destroy_node(&entry.item, resources_manager, gpu_context)
     }
   }
   resources.pool_destroy(world.nodes, proc(node: ^Node) {})
@@ -337,7 +330,7 @@ query_visibility :: proc(
 
 shutdown :: proc(world: ^World, gpu_context: ^gpu.GPUContext, resources_manager: ^resources.Manager) {
   visibility_system_shutdown(&world.visibility, gpu_context)
-  destroy(world, resources_manager)
+  destroy(world, resources_manager, gpu_context)
 }
 
 // Legacy compatibility functions for render subsystem
@@ -405,6 +398,27 @@ destroy_node_handle :: proc(world: ^World, handle: Handle) -> bool {
     detach(world.nodes, handle)
   }
   return true
+}
+
+// Actually destroy nodes that are marked for deletion
+cleanup_pending_deletions :: proc(world: ^World, resources_manager: ^resources.Manager, gpu_context: ^gpu.GPUContext = nil) {
+  // Collect handles of nodes marked for deletion
+  to_destroy := make([dynamic]Handle, 0)
+  defer delete(to_destroy)
+
+  for i in 0 ..< len(world.nodes.entries) {
+    entry := &world.nodes.entries[i]
+    if entry.active && entry.item.pending_deletion {
+      append(&to_destroy, Handle{index = u32(i), generation = entry.generation})
+    }
+  }
+
+  // Actually destroy the nodes
+  for handle in to_destroy {
+    if node, ok := resources.free(&world.nodes, handle); ok {
+      destroy_node(node, resources_manager, gpu_context)
+    }
+  }
 }
 
 get_node :: proc(world: ^World, handle: Handle) -> ^Node {
@@ -845,4 +859,71 @@ node_handle_scale :: proc(world: ^World, handle: Handle, s: f32) {
   if node, ok := resources.get(world.nodes, handle); ok {
     geometry.transform_scale(&node.transform, s)
   }
+}
+
+// Create point light attachment and associated Light resource
+create_point_light_attachment :: proc(
+  node_handle: Handle,
+  resources_manager: ^resources.Manager,
+  gpu_context: ^gpu.GPUContext,
+  color: [4]f32 = {1, 1, 1, 1},
+  radius: f32 = 10.0,
+  cast_shadow: bool = true,
+) -> LightAttachment {
+  light_handle := resources.create_light(
+    resources_manager,
+    gpu_context,
+    .POINT,
+    node_handle,
+    color,
+    radius,
+    cast_shadow = cast_shadow,
+  )
+
+  return LightAttachment{handle = light_handle}
+}
+
+// Create directional light attachment and associated Light resource
+create_directional_light_attachment :: proc(
+  node_handle: Handle,
+  resources_manager: ^resources.Manager,
+  gpu_context: ^gpu.GPUContext,
+  color: [4]f32 = {1, 1, 1, 1},
+  cast_shadow: bool = false,
+) -> LightAttachment {
+  light_handle := resources.create_light(
+    resources_manager,
+    gpu_context,
+    .DIRECTIONAL,
+    node_handle,
+    color,
+    cast_shadow = cast_shadow,
+  )
+  return LightAttachment{handle = light_handle}
+}
+
+// Create spot light attachment and associated Light resource
+create_spot_light_attachment :: proc(
+  node_handle: Handle,
+  resources_manager: ^resources.Manager,
+  gpu_context: ^gpu.GPUContext,
+  color: [4]f32 = {1, 1, 1, 1},
+  radius: f32 = 10.0,
+  angle: f32 = math.PI * 0.2,
+  cast_shadow: bool = true,
+) -> LightAttachment {
+  angle_inner := angle * 0.8
+  angle_outer := angle
+  light_handle := resources.create_light(
+    resources_manager,
+    gpu_context,
+    .SPOT,
+    node_handle,
+    color,
+    radius,
+    angle_inner,
+    angle_outer,
+    cast_shadow,
+  )
+  return LightAttachment{handle = light_handle}
 }

@@ -167,15 +167,26 @@ navmesh_setup :: proc(engine_ptr: ^mjolnir.Engine) {
     navmesh_state.path_waypoint_handles = make([dynamic]Handle)
 
     // Add some lights
-    world.spawn(&engine_ptr.world, DirectionalLightAttachment{
-        color = {0.8, 0.8, 0.8, 1.0},
-        cast_shadow = true,
-    })
-    world.spawn(&engine_ptr.world, PointLightAttachment{
-        color = {0.5, 0.5, 0.5, 1.0},
-        radius = 20,
-        cast_shadow = false,
-    })
+    dir_handle, dir_node := world.spawn(&engine_ptr.world, nil, &engine_ptr.resource_manager)
+    dir_attachment := world.create_directional_light_attachment(
+        dir_handle,
+        &engine_ptr.resource_manager,
+        &engine_ptr.gpu_context,
+        {0.8, 0.8, 0.8, 1.0}, // color
+        true, // cast_shadow
+    )
+    dir_node.attachment = dir_attachment
+
+    point_handle, point_node := world.spawn(&engine_ptr.world, nil, &engine_ptr.resource_manager)
+    point_attachment := world.create_point_light_attachment(
+        point_handle,
+        &engine_ptr.resource_manager,
+        &engine_ptr.gpu_context,
+        {0.5, 0.5, 0.5, 1.0}, // color
+        20, // radius
+        false, // cast_shadow
+    )
+    point_node.attachment = point_attachment
 
     // Setup camera - adjusted for larger scene
     main_camera := get_main_camera(engine_ptr)
@@ -971,7 +982,8 @@ find_navmesh_point_from_mouse :: proc(engine_ptr: ^mjolnir.Engine, mouse_x, mous
     log.debugf("find_navmesh_point_from_mouse: nav_query=%p, nav_mesh=%p", navmesh_state.nav_query, navmesh_state.nav_mesh)
 
     // Get ray from camera through mouse position
-    ray_origin, ray_dir := mjolnir.screen_to_world_ray(engine_ptr, mouse_x, mouse_y)
+    width, height := glfw.GetWindowSize(engine_ptr.window)
+    ray_origin, ray_dir := geometry.viewport_to_world_ray(f32(width), f32(height), mouse_x, mouse_y, mjolnir.get_main_camera(engine_ptr)^)
 
     // Use multiple strategies to find the best navmesh point
 
