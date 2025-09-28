@@ -526,7 +526,7 @@ malloc_staged_buffer :: proc(
 }
 
 flush :: proc(
-  gpu_context: ^GPUContext,
+  command_buffer: vk.CommandBuffer,
   buffer: ^StagedBuffer($T),
 ) -> vk.Result {
   // @(static) run_count := 0
@@ -534,6 +534,7 @@ flush :: proc(
       // return .SUCCESS
   // }
   // defer run_count += 1
+  // TODO: there is a race condition here, as the interval tree may be modified on multiple threads while we are doing this
   defer interval_tree.clear(&buffer.dirty_indices)
   copy_regions := make([dynamic]vk.BufferCopy, 0)
   defer delete(copy_regions)
@@ -556,16 +557,65 @@ flush :: proc(
   if len(copy_regions) == 0 {
     return .SUCCESS
   }
-  cmd_buffer := begin_single_time_command(gpu_context) or_return
+  // Barrier to ensure staging buffer writes are complete before copy
+  staging_barrier := vk.BufferMemoryBarrier {
+    sType = .BUFFER_MEMORY_BARRIER,
+    srcAccessMask = {.HOST_WRITE},
+    dstAccessMask = {.TRANSFER_READ},
+    srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    buffer = buffer.staging.buffer,
+    offset = 0,
+    size = vk.DeviceSize(buffer.staging.bytes_count),
+  }
+  // Barrier to ensure device buffer is ready for writes
+  device_pre_barrier := vk.BufferMemoryBarrier {
+    sType = .BUFFER_MEMORY_BARRIER,
+    srcAccessMask = {.SHADER_READ, .UNIFORM_READ},
+    dstAccessMask = {.TRANSFER_WRITE},
+    srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    buffer = buffer.device_buffer,
+    offset = 0,
+    size = vk.DeviceSize(buffer.staging.bytes_count),
+  }
+  barriers := [?]vk.BufferMemoryBarrier{staging_barrier, device_pre_barrier}
+  vk.CmdPipelineBarrier(
+    command_buffer,
+    {.HOST, .VERTEX_SHADER, .FRAGMENT_SHADER, .COMPUTE_SHADER},
+    {.TRANSFER},
+    {},
+    0, nil,
+    2, raw_data(barriers[:]),
+    0, nil,
+  )
   vk.CmdCopyBuffer(
-    cmd_buffer,
+    command_buffer,
     buffer.staging.buffer,
     buffer.device_buffer,
     u32(len(copy_regions)),
     raw_data(copy_regions),
   )
-  end_single_time_command(gpu_context, &cmd_buffer) or_return
-  // log.infof("Copied %d items using %d commands from staging buffer to device buffer", total, len(copy_regions))
+  device_post_barrier := vk.BufferMemoryBarrier {
+    sType = .BUFFER_MEMORY_BARRIER,
+    srcAccessMask = {.TRANSFER_WRITE},
+    dstAccessMask = {.SHADER_READ, .UNIFORM_READ},
+    srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    buffer = buffer.device_buffer,
+    offset = 0,
+    size = vk.DeviceSize(buffer.staging.bytes_count),
+  }
+  vk.CmdPipelineBarrier(
+    command_buffer,
+    {.TRANSFER},
+    {.VERTEX_SHADER, .FRAGMENT_SHADER, .COMPUTE_SHADER},
+    {},
+    0, nil,
+    1, &device_post_barrier,
+    0, nil,
+  )
+  log.infof("Copied %d items using %d commands from staging buffer to device buffer", total, len(copy_regions))
   return .SUCCESS
 }
 

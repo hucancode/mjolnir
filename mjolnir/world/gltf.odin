@@ -595,12 +595,12 @@ process_skins :: proc(
       &resources_manager.bone_matrix_slab,
       u32(len(bones)),
     )
-    for frame_idx in 0 ..< resources.MAX_FRAMES_IN_FLIGHT {
-      l := matrix_buffer_offset
-      r := l + u32(len(bones))
-      bone_matrices := resources_manager.bone_buffers[frame_idx].mapped[l:r]
-      slice.fill(bone_matrices, linalg.MATRIX4F32_IDENTITY)
-    }
+    l := matrix_buffer_offset
+    r := l + u32(len(bones))
+    bone_matrices := gpu.staged_buffer_get_all(&resources_manager.bone_buffer)[l:r]
+    slice.fill(bone_matrices, linalg.MATRIX4F32_IDENTITY)
+    // Mark bone matrices as dirty when initializing them
+    gpu.staged_buffer_mark_dirty(&resources_manager.bone_buffer, int(l), len(bones))
     skin_cache[gltf_skin] = SkinData {
       bones                = bones,
       root_bone_idx        = root_bone_idx,

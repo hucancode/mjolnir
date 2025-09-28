@@ -161,7 +161,7 @@ build_navigation_mesh_from_scene :: proc(
   collector.world, collector.resources_manager, collector.gpu_context = world, resources_manager, gpu_context
   defer scene_geometry_collector_destroy(&collector)
 
-  traverse(collector.world, &collector, scene_geometry_collector_traverse)
+  traverse(collector.world, collector.resources_manager, &collector, scene_geometry_collector_traverse)
 
   if len(collector.vertices) == 0 || len(collector.indices) == 0 {
     return {}, false
@@ -261,7 +261,7 @@ build_navigation_mesh_from_scene_filtered :: proc(
   }
 
   // Collect geometry from scene
-  traverse(collector.world, &collector, scene_geometry_collector_traverse)
+  traverse(collector.world, collector.resources_manager, &collector, scene_geometry_collector_traverse)
 
   if len(collector.vertices) == 0 || len(collector.indices) == 0 {
     log.error("No geometry found in scene for navigation mesh building")

@@ -471,8 +471,8 @@ update_skeletal_animations :: proc(self: ^Engine, delta_time: f32) {
   if delta_time <= 0 {
     return
   }
-  bone_buffer := &self.resource_manager.bone_buffers[self.frame_index]
-  if bone_buffer.mapped == nil {
+  bone_buffer := &self.resource_manager.bone_buffer
+  if bone_buffer.staging.mapped == nil {
     return
   }
 
@@ -501,7 +501,7 @@ update_skeletal_animations :: proc(self: ^Engine, delta_time: f32) {
 
     if skinning.bone_matrix_offset == 0xFFFFFFFF do continue
 
-    matrices_ptr := gpu.data_buffer_get(
+    matrices_ptr := gpu.staged_buffer_get(
       bone_buffer,
       skinning.bone_matrix_offset,
     )
@@ -512,6 +512,9 @@ update_skeletal_animations :: proc(self: ^Engine, delta_time: f32) {
       anim_instance.time,
       matrices,
     )
+
+    // Mark bone matrices as dirty when animation updates them
+    gpu.staged_buffer_mark_dirty(bone_buffer, int(skinning.bone_matrix_offset), bone_count)
 
     skinning.animation = anim_instance
     mesh_attachment.skinning = skinning
@@ -552,7 +555,7 @@ update :: proc(self: ^Engine) -> bool {
     frame_index = self.frame_index,
     delta_time  = delta_time,
   }
-  world.begin_frame(&self.world, &frame_ctx)
+  world.begin_frame(&self.world, &self.resource_manager, &frame_ctx)
   // Animation updates are now handled in render thread for smooth animation at render FPS
   update_emitters(self, delta_time)
   update_force_fields(self)
@@ -769,11 +772,8 @@ render :: proc(self: ^Engine) -> vk.Result {
   mu.begin(&self.render.ui.ctx)
   command_buffer := self.command_buffers[self.frame_index]
   vk.ResetCommandBuffer(command_buffer, {}) or_return
-  resource_frame_ctx := resources.FrameContext {
-    frame_index = self.frame_index,
-    transfer_command_buffer = command_buffer,
-  }
-  resources.begin_frame(&self.resource_manager, &resource_frame_ctx)
+  vk.BeginCommandBuffer(command_buffer, &{sType = .COMMAND_BUFFER_BEGIN_INFO}) or_return
+  resources.commit(&self.resource_manager, command_buffer) or_return
   render_delta_time := f32(time.duration_seconds(time.since(self.last_render_timestamp)))
   update_skeletal_animations(self, render_delta_time)
   main_render_target, found_main_rt := resources.get_render_target(&self.resource_manager, self.render.targets.main)
@@ -782,7 +782,6 @@ render :: proc(self: ^Engine) -> vk.Result {
     return .ERROR_UNKNOWN
   }
   resources.render_target_upload_camera_data(&self.resource_manager, main_render_target)
-  world.upload_world_matrices(&self.world, &self.resource_manager, self.frame_index)
   // Update light transforms after world matrices are uploaded
   resources.update_all_light_transforms(&self.resource_manager)
   update_shadow_camera_transforms(self)
@@ -836,14 +835,10 @@ render :: proc(self: ^Engine) -> vk.Result {
     self.swapchain.images[self.swapchain.image_index],
     self.swapchain.views[self.swapchain.image_index],
   )
-  vk.BeginCommandBuffer(
-    command_buffer,
-    &{sType = .COMMAND_BUFFER_BEGIN_INFO, flags = {.ONE_TIME_SUBMIT}},
-  ) or_return
   particles.simulate(
     &self.render.particles,
     command_buffer,
-    self.resource_manager.world_matrix_descriptor_sets[self.frame_index],
+    self.resource_manager.world_matrix_descriptor_set,
   )
   if self.custom_render_proc != nil {
     self.custom_render_proc(self, command_buffer)
@@ -886,7 +881,6 @@ render :: proc(self: ^Engine) -> vk.Result {
     &command_buffer,
     self.frame_index,
   ) or_return
-  resources.commit(&self.resource_manager, &self.gpu_context, &resource_frame_ctx) or_return
   self.frame_index = (self.frame_index + 1) % MAX_FRAMES_IN_FLIGHT
   process_pending_deletions(self)
   self.last_render_timestamp = time.now()
@@ -929,7 +923,7 @@ run :: proc(self: ^Engine, width, height: u32, title: string) {
       recreate_swapchain(self) or_continue
     }
     if res != .SUCCESS {
-      log.errorf("Error during rendering", res)
+      log.errorf("Error during rendering %v", res)
       self.render_error_count += 1
       if self.render_error_count >=
          MAX_CONSECUTIVE_RENDER_ERROR_COUNT_ALLOWED {

@@ -625,7 +625,7 @@ begin_pass :: proc(
     resources_manager.camera_buffer_descriptor_set,
     resources_manager.textures_descriptor_set,
     resources_manager.lights_buffer_descriptor_set,
-    resources_manager.world_matrix_descriptor_sets[frame_index],
+    resources_manager.world_matrix_descriptor_set,
   }
   vk.CmdBindDescriptorSets(
     command_buffer,
