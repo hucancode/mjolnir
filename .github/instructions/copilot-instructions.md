@@ -1,4 +1,8 @@
-__This file is used to teach GitHub Copilot or other AI assistants__
+# AGENTS.md
+
+This file provides essential guidance for agentic coding assistants working with the Mjolnir 3D rendering engine.
+
+
 # Project Overview
 
 Mjolnir is a minimalistic 3D rendering engine written in Odin, using Vulkan for graphics rendering. It implements a deferred rendering pipeline with features like PBR (Physically Based Rendering), particle systems, shadow mapping, and post-processing effects.
@@ -15,13 +19,19 @@ make debug
 # Build only (release mode)
 make build
 
+# Build only (debug mode)
+make build-debug
+
 # Run tests
 make test
+
+# run a single test called "name"
+odin test test -out:bin/test -define:ODIN_TEST_NAMES=tests.name
 
 # Check for compiler errors without building
 make check
 
-# Build all shaders
+# Build all shaders (required before first build)
 make shader
 
 # Build single shader
@@ -36,7 +46,7 @@ make clean
 ### Core Engine Structure
 - **Main Entry Point**: `main.odin` - Application setup and game loop
 - **Engine Core**: `mjolnir/engine.odin` - Main engine systems, rendering pipeline
-- **Vulkan Context**: `mjolnir/context.odin` - Vulkan initialization and device management
+- **Vulkan Context**: `mjolnir/gpu/context.odin` - Vulkan initialization and device management
 
 ### Rendering Pipeline
 The engine uses a deferred rendering approach with multiple passes:
@@ -54,7 +64,13 @@ The engine uses a deferred rendering approach with multiple passes:
 - **Materials**: `mjolnir/material.odin` - PBR material system
 - **Animation**: `mjolnir/animation/` - Skeletal animation support
 - **Particle System**: `mjolnir/particle.odin` - GPU compute-based particles with compaction optimization
-- **Resource Management**: `mjolnir/resource/` - Handle-based resource system
+- **Resource Management**: `mjolnir/resource/` - Handle-based resource system with generational arrays
+
+### Performance Features
+- **GPU Culling**: Optional GPU-based visibility culling (compile flag: `USE_GPU_CULLING`)
+- **Parallel Scene Updates**: Multi-threaded scene graph updates (compile flag: `USE_PARALLEL_UPDATE`)
+- **Particle Compaction**: GPU compute reduces draw calls from MAX_PARTICLES (65K) to actual alive count
+- **Indirect Rendering**: Uses `vk.CmdDrawIndirect` for efficient GPU-driven rendering
 
 ### Asset Support
 - **GLTF Loading**: Full support for loading 3D models via `mjolnir/gltf_loader.odin`
@@ -67,42 +83,70 @@ The engine uses a deferred rendering approach with multiple passes:
 ## Development Notes
 
 ### Code Style
-- Uses `odinfmt.json` for formatting: 80 character width, 2 spaces, no tabs
-- Follows Odin language conventions
+- Minimal comments except for complex mathematical formulas
+- Variable naming:
+  + Long names for wide scope variables
+  + Short names for narrow scope (i,j,k for counters, u,v,x,y,z for coordinates, r,g,b for colors)
+- Use meaningful variable names instead of comments for clarity
+- We use right handed Y up coordinate system
 
 ### Shader Development
 - Shaders are in `mjolnir/shader/` organized by render pass
-- Use `make shader` to rebuild all shaders
+- Use `make shader` to rebuild all shaders before first build
 - Individual shaders: `make mjolnir/shader/{shader_name}/vert.spv` (or frag.spv)
 - Compute shaders: particle physics (`compute.comp`) and compaction (`compact.comp`)
 
 ### Testing
 - Tests are in `test/` directory
 - Run with `make test`
-- Tests cover geometry, animation, resource management, and core engine features
+- Tests cover geometry, animation, resource management, BVH, octree, and core engine features
+- IMPORTANT: When you write tests, write 3 kinds of test - unit test and integration test and end-to-end test. In unit test, you provide the procedure with hard-coded perfect input. In integration test, you provide the procedure with inputs generated from its expected previous step in the pipeline. In end-to-end test, you provide the system with hard-coded user input from the start of the pipeline, let the system run, then check the final outputs.
+- Most test must be run with a timeout of 30s using testing.set_fail_timeout(t, 30 * time.Second), some exception can be made with test working with big data
+- When you fix a bug, don't try to disable the test, or add a guarding layer to hide the test. Instead, ultrathink to find the root cause of the bug and fix it properly
+- Test each function in complete isolation
+- Provide perfect, hard-coded inputs that test specific behaviors
+- Verify outputs match expected results exactly (allowing for floating-point precision issues when applicable)
+- Cover all code paths including error cases
+- Each unit test must confirm a single aspect of functionality
+- Avoid duplicate tests - each test should have a unique purpose
+- Name tests descriptively: test_function_name_specific_scenario
+- Do more thorough tests, do less trivial tests. Here are some of trivial tests:
+ - just checking "something > 0" instead of strict value correctness
+ - only test the object creation, destruction and no business logic
+ - only test with empty input, then expect empty output
+ - only test with trivially small input, then expect empty or small output
+- Test edge cases (border values, empty value, invalid values)
+- Test normal inputs (popular inputs normally seen in most use case)
+- IMPORTANT: Don't try to recover a bad input or add safe guard to hide bad input, crash immediately so we know where to fix
+- Unit tests verify individual functions in isolation with controlled inputs
+- Integration tests validate interactions between multiple components
+- System tests simulate real user workflows end-to-end
+- write test that shows all the algorithm's behavior. all use case must be covered. don't only write tests that produce empty result or lacking diversity in result
+- an unit test must confirm a single aspect of the feature. unit test must not be duplicated
+- tests must not overdo works supposed to be in the main code. tests only call the function of interest and check the results
+- IMPORTANT: if a test need a setup phase, all test pre-conditions must be fulfiled before performing test. if a test fail to yield expected result because of its pre-conditions not setup properly, you must not blame the faulty setup and jump into conclusion that the code is doing well. fix the setup and test again.
 
 ### Memory Management
 - Uses custom slab allocators and generational arrays for efficient resource management
 - Handle-based system for referencing resources safely
+- Resource warehouse pattern for centralized management
 
 ## Common File Locations
 
-- **Main application**: `main.odin`
 - **Engine core**: `mjolnir/engine.odin`
-- **Rendering backends**: `mjolnir/lighting_*.odin`, `mjolnir/geometry_buffer.odin`
+- **GPU abstractions**: `mjolnir/gpu/`
+- **Rendering passes**: `mjolnir/lighting_*.odin`, `mjolnir/geometry_buffer.odin`
 - **Shaders**: `mjolnir/shader/{pass_name}/`
 - **Assets**: `assets/` (models, textures, etc.)
 - **Tests**: `test/`
 
-## Particle System Optimization
+## Debugging Tips
 
-The particle system uses GPU-based compaction for efficient rendering:
-- **Compaction Pipeline**: `mjolnir/shader/particle/compact.comp` removes dead particles
-- **Indirect Rendering**: Only renders alive particles using `vk.CmdDrawIndirect`
-- **Performance**: Reduces draw calls from MAX_PARTICLES (65K) to actual alive count
-- **Monitoring**: UI shows efficiency ratio (rendered/total particles)
+- Color blind consideration: Avoid using red/green color distinctions for debugging (developer has protan color blindness)
+- To debug visual issues, hardcode frame count limit in `engine.odin` `run` procedure to stop after few frames and examine logs
 
-# Odin features
+# Odin Language Features Used
+
 variable declaration
 ```odin
 a: int = 42
@@ -115,14 +159,11 @@ f := [4]f32{ 1.0, 2.0, 3.0, 4.0 } // type can be inferred
 Array swizzling
 ```odin
 speed: [3]f32
-log.info("speed 2d", speed[0:2]) // syntactically correct but not recommended
 log.info("speed 2d", speed.xy)
 log.info("speed 3d", speed.xyz)
-log.info("speed 3d", speed.rgb) // syntactically correct but who would do that?
 color: [4]f32
-log.info("color rgb", color[0:3]) // syntactically correct but not recommended
 log.info("color rgb", color.rgb)
-log.info("color rgb", color.rgba)
+log.info("color rgba", color.rgba)
 ```
 return values propagation
 ```odin
@@ -130,22 +171,10 @@ do_a :: proc() -> vk.Result {
     log.info("do_a")
     return .SUCCESS
 }
-do_b :: proc() -> bool {
+do_b :: proc() -> vk.Result {
     log.info("do_b")
     return .ERROR_UNKNOWN
 }
-do_all_verbose :: proc() -> vk.Result {
-    result_a := do_a()
-    if result_a != .SUCCESS {
-        return result_a
-    }
-    result b := do_b()
-    if result_b != .SUCCESS {
-        return result_b
-    }
-    return .SUCCESS
-}
-// equivalent to the above
 do_all :: proc() -> vk.Result {
     do_a() or_return
     do_b() or_return
@@ -170,20 +199,7 @@ my_other_function :: proc() {
 }
 ```
 package declaration must be at the top of the file
-the following code will compile
-```odin
-package my_package
-my_function :: proc() {
-    log.info("my_function")
-}
-```
-the following code will not compile
-```odin
-my_function :: proc() {
-    log.info("my_function")
-}
-package my_package
-```
+
 slice pointer access
 ```odin
 my_function :: proc(n: int, ptr: ^int) {
@@ -213,11 +229,6 @@ my_function2 :: proc(my_data: ^MyStruct) {
 ```
 ranges and loops
 ```odin
-// the following code are equivalent
-my_slice := [4]int{ 1, 2, 3, 4 }
-for v,i in my_slice {
-    log.infof("my_slice[%d] = %d", i, v)
-}
 // use exclusive range
 for i in 0..<len(my_slice) {
     log.info("my_slice[%d] = %d", i, my_slice[i])
@@ -226,51 +237,28 @@ for i in 0..<len(my_slice) {
 for i in 0..=len(my_slice)-1 {
     log.info("my_slice[%d] = %d", i, my_slice[i])
 }
-// use a for loop with full control
-for i := 0; i < len(my_slice); i += 1 {
-    log.info("my_slice[%d] = %d", i, my_slice[i])
+// iterate with value and index
+for v,i in my_slice {
+    log.infof("my_slice[%d] = %d", i, v)
 }
-// if you care only about the value, you can use the following syntax
+// iterate values only
 for v in my_slice {
     log.infof("v = %d", v)
 }
-// you can use `do` keyword for single statement
+// use `do` keyword for single statement
 for v in my_slice do log.infof("v = %d", v)
-```
-short hand do keyword
-```odin
-// the following code are equivalent
 if a > b do log.info("a is greater than b")
-if a > b {
-    log.info("a is greater than b")
-}
-// the following code are equivalent
-for i in 0..<10 do log.infof("i = %d", i)
-for i in 0..<10 {
-    log.infof("i = %d", i)
-}
 ```
-slice and dynamic slice
+slice types
 ```odin
-// dynamic slice can be append after creation, this is not recommended for performance critical code
+// dynamic slice can be append after creation
 my_slice := make([dynamic]f32, 0)
 defer delete(my_slice)
 append(&my_slice, 10.0)
-log.infof("%v", my_slice)
-// fixed slice can not be append after creation, but we can create with a good size at creation time, this is not recommended for performance critical code but it is better than dynamic slice
+// fixed slice with runtime size
 my_slice_fixed := make([]f32, 1)
 defer delete(my_slice_fixed)
 my_slice_fixed[0] = 10.0
-log.infof("%v", my_slice_fixed)
-// static array must be specify with size at compile time, this is the fastest
-my_array := [1]f32
-my_array[0] = 10.0
-log.infof("%v", my_array)
+// static array with compile-time size (fastest)
+my_array := [1]f32{10.0}
 ```
-
-# Preference
-
-I am color blind, I have difficulty distinguish some green-red color (protan). When use color to debug, avoid using colors with similar red shade and green shade with different meaning
-As an AI you have difficulty checking visual information. When you want to see something on the screen for debugging, for example shadow artifact, light color, you can pause and ask me to run and tell you the result. To check the numerical result, you can hard code the app stop render after few frame (the code is at engine.odin `run` procedure) and use `grep` to see the log for your self.
-Except for mathematical formular where the intuition is not obvious, I am prefer not to use explaination comment in the code. Except when I am debugging and want to iterate fast, I use meaningful variable/constant names to describe the intent. I use long variable name if the variable scope is wide, short variable name if the variable scope is narrow (i,j,k for counter, u,v,x,y,z for coordinate, r,g,b for color, alpha, theta, for angle, alpha for opacity, t for time, l,r for left right bound).
-I am prefer not to have empty line inside function/procedure implementation

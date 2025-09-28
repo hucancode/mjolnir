@@ -3,6 +3,7 @@ package gpu
 import "core:log"
 import "core:mem"
 import "core:slice"
+import "core:sync"
 import vk "vendor:vulkan"
 import "../interval_tree"
 
@@ -423,6 +424,7 @@ static_buffer_destroy :: proc(device: vk.Device, buffer: ^StaticBuffer($T)) {
 StagedBuffer :: struct($T: typeid) {
   using staging: DataBuffer(T),
   dirty_indices: interval_tree.IntervalTree,
+  dirty_mutex:   sync.Mutex,
   device_buffer: vk.Buffer,
   device_memory: vk.DeviceMemory,
 }
@@ -517,6 +519,7 @@ malloc_staged_buffer :: proc(
     0,
   ) or_return
   interval_tree.init(&buffer.dirty_indices)
+  // Mutex is zero-initialized by default in Odin
   // Mark all indices as dirty initially
   for i in 0..<count {
     interval_tree.insert(&buffer.dirty_indices, i, 1)
@@ -534,7 +537,11 @@ flush :: proc(
       // return .SUCCESS
   // }
   // defer run_count += 1
-  // TODO: there is a race condition here, as the interval tree may be modified on multiple threads while we are doing this
+  
+  // Lock to prevent race conditions with write operations
+  sync.mutex_lock(&buffer.dirty_mutex)
+  defer sync.mutex_unlock(&buffer.dirty_mutex)
+  
   defer interval_tree.clear(&buffer.dirty_indices)
   copy_regions := make([dynamic]vk.BufferCopy, 0)
   defer delete(copy_regions)
@@ -542,8 +549,27 @@ flush :: proc(
   // Get all dirty intervals directly from interval tree
   intervals := interval_tree.get_ranges(&buffer.dirty_indices)
   total := 0
+  max_elements := buffer.staging.bytes_count / buffer.staging.element_size
+  
   for interval in intervals {
+    // Validate interval bounds to prevent corruption
+    if interval.start < 0 || interval.end < interval.start || interval.start >= max_elements {
+      log.errorf("Invalid interval detected: start=%d, end=%d, max_elements=%d", 
+                 interval.start, interval.end, max_elements)
+      continue
+    }
+    
     range_length := interval.end - interval.start + 1
+    
+    // Clamp range to buffer bounds
+    if interval.end >= max_elements {
+      range_length = max_elements - interval.start
+    }
+    
+    if range_length <= 0 {
+      continue
+    }
+    
     total += range_length
     append(
       &copy_regions,
@@ -629,7 +655,12 @@ staged_buffer_write_single :: proc(
     return .ERROR_UNKNOWN
   }
   data_buffer_write_single(&buffer.staging, data, index) or_return
+  
+  // Protect dirty_indices from concurrent access
+  sync.mutex_lock(&buffer.dirty_mutex)
+  defer sync.mutex_unlock(&buffer.dirty_mutex)
   interval_tree.insert(&buffer.dirty_indices, index, 1)
+  
   return .SUCCESS
 }
 
@@ -643,7 +674,12 @@ staged_buffer_write_multi :: proc(
     return .ERROR_UNKNOWN
   }
   data_buffer_write_multi(&buffer.staging, data, index) or_return
+  
+  // Protect dirty_indices from concurrent access
+  sync.mutex_lock(&buffer.dirty_mutex)
+  defer sync.mutex_unlock(&buffer.dirty_mutex)
   interval_tree.insert(&buffer.dirty_indices, index, len(data))
+  
   return .SUCCESS
 }
 
@@ -669,6 +705,9 @@ staged_buffer_mark_dirty :: proc(
   start_index: int,
   count: int,
 ) {
+  // Protect dirty_indices from concurrent access
+  sync.mutex_lock(&buffer.dirty_mutex)
+  defer sync.mutex_unlock(&buffer.dirty_mutex)
   interval_tree.insert(&buffer.dirty_indices, start_index, count)
 }
 
@@ -685,6 +724,7 @@ staged_buffer_destroy :: proc(device: vk.Device, buffer: ^StagedBuffer($T)) {
   vk.FreeMemory(device, buffer.device_memory, nil)
   buffer.device_memory = 0
   interval_tree.destroy(&buffer.dirty_indices)
+  // Mutex doesn't need explicit destruction in Odin
 }
 
 malloc_image_buffer :: proc(
