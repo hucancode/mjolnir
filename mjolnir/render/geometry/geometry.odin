@@ -82,9 +82,9 @@ render_depth_prepass :: proc(
   descriptor_sets := [?]vk.DescriptorSet {
     resources_manager.camera_buffer_descriptor_set,
     resources_manager.textures_descriptor_set,
-    resources_manager.bone_buffer_descriptor_sets[frame_index],
+    resources_manager.bone_buffer_descriptor_set,
     resources_manager.material_buffer_descriptor_set,
-    resources_manager.world_matrix_descriptor_sets[frame_index],
+    resources_manager.world_matrix_descriptor_set,
     resources_manager.node_data_descriptor_set,
     resources_manager.mesh_data_descriptor_set,
     resources_manager.vertex_skinning_descriptor_set,
@@ -601,9 +601,9 @@ render :: proc(
   descriptor_sets := [?]vk.DescriptorSet {
     resources_manager.camera_buffer_descriptor_set,
     resources_manager.textures_descriptor_set,
-    resources_manager.bone_buffer_descriptor_sets[frame_index],
+    resources_manager.bone_buffer_descriptor_set,
     resources_manager.material_buffer_descriptor_set,
-    resources_manager.world_matrix_descriptor_sets[frame_index],
+    resources_manager.world_matrix_descriptor_set,
     resources_manager.node_data_descriptor_set,
     resources_manager.mesh_data_descriptor_set,
     resources_manager.vertex_skinning_descriptor_set,

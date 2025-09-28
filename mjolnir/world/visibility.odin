@@ -220,8 +220,8 @@ visibility_system_init :: proc(
         range  = vk.DeviceSize(resources_manager.mesh_data_buffer.bytes_count),
       }
       world_info := vk.DescriptorBufferInfo {
-        buffer = resources_manager.world_matrix_buffers[frame_idx].buffer,
-        range  = vk.DeviceSize(resources_manager.world_matrix_buffers[frame_idx].bytes_count),
+        buffer = resources_manager.world_matrix_buffer.device_buffer,
+        range  = vk.DeviceSize(resources_manager.world_matrix_buffer.bytes_count),
       }
       camera_info := vk.DescriptorBufferInfo {
         buffer = resources_manager.camera_buffer.buffer,

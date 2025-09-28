@@ -89,6 +89,7 @@ scene_geometry_collector_traverse :: proc(node: ^Node, ctx: rawptr) -> bool {
       collector,
       mesh,
       collector.resources_manager,
+      collector.gpu_context,
       world_matrix,
       area_type,
     )
@@ -101,39 +102,44 @@ add_mesh_to_collector :: proc(
   collector: ^SceneGeometryCollector,
   mesh: ^resources.Mesh,
   resources_manager: ^resources.Manager,
+  gpu_context: ^gpu.GPUContext,
   transform: matrix[4, 4]f32,
   area_type: u8,
 ) {
   vertex_offset := i32(len(collector.vertices))
 
-  vertex_capacity := u32(
-    resources_manager.vertex_buffer.bytes_count /
-    resources_manager.vertex_buffer.element_size,
-  )
-  if resources_manager.vertex_buffer.mapped == nil {
-    log.error("Vertex buffer is not mapped; cannot collect navigation geometry")
-    return
-  }
   vertex_count := int(mesh.vertex_allocation.count)
-  for i in 0 ..< vertex_count {
-    vertex_index := mesh.vertex_allocation.offset + u32(i)
-    if vertex_index >= vertex_capacity do continue
-    vertex := resources_manager.vertex_buffer.mapped[int(vertex_index)]
-    append(&collector.vertices, transform[3,3] * vertex.position)
-  }
-  index_capacity := u32(
-    resources_manager.index_buffer.bytes_count /
-    resources_manager.index_buffer.element_size,
+  vertices := make([]geometry.Vertex, vertex_count, context.temp_allocator)
+  ret := gpu.static_buffer_read(
+    gpu_context,
+    &resources_manager.vertex_buffer,
+    vertices,
+    int(mesh.vertex_allocation.offset),
   )
-  if resources_manager.index_buffer.mapped == nil {
-    log.error("Index buffer is not mapped; cannot collect navigation geometry")
+  if ret != .SUCCESS {
+    log.error("Failed to read vertex data from StaticBuffer")
     return
   }
+
+  for vertex in vertices {
+    transformed_pos := (transform * [4]f32{vertex.position.x, vertex.position.y, vertex.position.z, 1.0}).xyz
+    append(&collector.vertices, transformed_pos)
+  }
+
   index_count := int(mesh.index_allocation.count)
-  for i in 0 ..< index_count {
-    index_index := mesh.index_allocation.offset + u32(i)
-    if index_index >= index_capacity do continue
-    index := resources_manager.index_buffer.mapped[int(index_index)]
+  indices := make([]u32, index_count, context.temp_allocator)
+  ret = gpu.static_buffer_read(
+    gpu_context,
+    &resources_manager.index_buffer,
+    indices,
+    int(mesh.index_allocation.offset),
+  )
+  if ret != .SUCCESS {
+    log.error("Failed to read index data from StaticBuffer")
+    return
+  }
+
+  for index in indices {
     append(&collector.indices, i32(index) + vertex_offset)
   }
 
@@ -155,7 +161,7 @@ build_navigation_mesh_from_scene :: proc(
   collector.world, collector.resources_manager, collector.gpu_context = world, resources_manager, gpu_context
   defer scene_geometry_collector_destroy(&collector)
 
-  traverse(collector.world, &collector, scene_geometry_collector_traverse)
+  traverse(collector.world, collector.resources_manager, &collector, scene_geometry_collector_traverse)
 
   if len(collector.vertices) == 0 || len(collector.indices) == 0 {
     return {}, false
@@ -255,7 +261,7 @@ build_navigation_mesh_from_scene_filtered :: proc(
   }
 
   // Collect geometry from scene
-  traverse(collector.world, &collector, scene_geometry_collector_traverse)
+  traverse(collector.world, collector.resources_manager, &collector, scene_geometry_collector_traverse)
 
   if len(collector.vertices) == 0 || len(collector.indices) == 0 {
     log.error("No geometry found in scene for navigation mesh building")

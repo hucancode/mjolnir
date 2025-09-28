@@ -27,7 +27,7 @@ test_node_translate :: proc(t: ^testing.T) {
     delta_time = 0.016,
     camera = nil,
   }
-  world.begin_frame(&w, &frame_ctx)
+  world.begin_frame(&w, nil, &frame_ctx)
   actual := world.node_get_world_matrix(child)
   expected := matrix[4, 4]f32{
     1.0, 0.0, 0.0, 5.0,
@@ -52,7 +52,7 @@ test_node_rotate :: proc(t: ^testing.T) {
     delta_time = 0.016,
     camera = nil,
   }
-  world.begin_frame(&w, &frame_ctx)
+  world.begin_frame(&w, nil, &frame_ctx)
   actual := world.node_get_world_matrix(child)
   expected := matrix[4, 4]f32{
     0.0, 0.0, 1.0, 1.0,
@@ -78,7 +78,7 @@ test_node_scale :: proc(t: ^testing.T) {
     delta_time = 0.016,
     camera = nil,
   }
-  world.begin_frame(&w, &frame_ctx)
+  world.begin_frame(&w, nil, &frame_ctx)
   actual := world.node_get_world_matrix(child)
   expected := matrix[4, 4]f32{
     2.0, 0.0, 0.0, 2.0,
@@ -104,7 +104,7 @@ test_node_combined_transform :: proc(t: ^testing.T) {
     delta_time = 0.016,
     camera = nil,
   }
-  world.begin_frame(&w, &frame_ctx)
+  world.begin_frame(&w, nil, &frame_ctx)
   actual := world.node_get_world_matrix(node)
   // Expected matrix after applying scale, rotation, and translation
   // Scale by 2, then rotate 90 degree around Y, then translate by (3,4,5)
@@ -135,7 +135,7 @@ test_node_chain_transform :: proc(t: ^testing.T) {
     delta_time = 0.016,
     camera = nil,
   }
-  world.begin_frame(&w, &frame_ctx)
+  world.begin_frame(&w, nil, &frame_ctx)
   // The transforms should cascade:
   // node1: translate(1,0,0)
   // node2: translate(1,0,0) * rotate_y(90°)
@@ -213,7 +213,7 @@ traverse_scene_benchmark :: proc(
   }
   for _ in 0 ..< options.rounds {
     ctx: Context
-    traverse(scene, &ctx, callback)
+    traverse(scene, nil, &ctx, callback)
     options.processed += size_of(Node) * len(scene.nodes.entries)
   }
   return nil
@@ -371,7 +371,7 @@ test_scene_with_multiple_attachments :: proc(t: ^testing.T) {
     light_count = 0,
     mesh_count  = 0,
   }
-  world.traverse(&scene, &ctx, callback)
+  world.traverse(&scene, nil, &ctx, callback)
   testing.expect_value(t, ctx.light_count, 1)
   testing.expect_value(t, ctx.mesh_count, 1)
 }

@@ -125,11 +125,6 @@ transform_update_local :: proc(t: ^Transform) -> bool {
   return true
 }
 
-// Helper functions for double-buffered world matrix
-transform_get_world_matrix :: proc(t: ^Transform) -> matrix[4,4]f32 {
-  return t.world_matrix
-}
-
 transform_update_world :: proc(
   t: ^Transform,
   parent: matrix[4,4]f32,
