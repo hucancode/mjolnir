@@ -256,6 +256,170 @@ copy_buffer :: proc(
 }
 
 
+StaticBuffer :: struct($T: typeid) {
+  buffer:       vk.Buffer,
+  memory:       vk.DeviceMemory,
+  element_size: int,
+  bytes_count:  int,
+}
+
+malloc_static_buffer :: proc(
+  gpu_context: ^GPUContext,
+  $T: typeid,
+  count: int,
+  usage: vk.BufferUsageFlags,
+) -> (
+  buffer: StaticBuffer(T),
+  ret: vk.Result,
+) {
+  if .UNIFORM_BUFFER in usage && count > 1 {
+    buffer.element_size = align_up(
+      size_of(T),
+      int(
+        gpu_context.device_properties.limits.minUniformBufferOffsetAlignment,
+      ),
+    )
+  } else if .STORAGE_BUFFER in usage && count > 1 {
+    buffer.element_size = align_up(
+      size_of(T),
+      int(
+        gpu_context.device_properties.limits.minStorageBufferOffsetAlignment,
+      ),
+    )
+  } else {
+    buffer.element_size = size_of(T)
+  }
+  buffer.bytes_count = buffer.element_size * count
+  create_info := vk.BufferCreateInfo {
+    sType       = .BUFFER_CREATE_INFO,
+    size        = vk.DeviceSize(buffer.bytes_count),
+    usage       = usage | {.TRANSFER_DST},
+    sharingMode = .EXCLUSIVE,
+  }
+  vk.CreateBuffer(
+    gpu_context.device,
+    &create_info,
+    nil,
+    &buffer.buffer,
+  ) or_return
+  mem_reqs: vk.MemoryRequirements
+  vk.GetBufferMemoryRequirements(
+    gpu_context.device,
+    buffer.buffer,
+    &mem_reqs,
+  )
+  buffer.memory = allocate_vulkan_memory(
+    gpu_context,
+    mem_reqs,
+    {.DEVICE_LOCAL},
+  ) or_return
+  vk.BindBufferMemory(
+    gpu_context.device,
+    buffer.buffer,
+    buffer.memory,
+    0,
+  ) or_return
+  log.infof("static buffer created 0x%x", buffer.buffer)
+  return buffer, .SUCCESS
+}
+
+static_buffer_write :: proc {
+  static_buffer_write_single,
+  static_buffer_write_multi,
+}
+
+static_buffer_write_single :: proc(
+  gpu_context: ^GPUContext,
+  buffer: ^StaticBuffer($T),
+  data: ^T,
+  index: int = 0,
+) -> vk.Result {
+  staging := create_host_visible_buffer(
+    gpu_context,
+    T,
+    1,
+    {.TRANSFER_SRC},
+    data,
+  ) or_return
+  defer data_buffer_destroy(gpu_context.device, &staging)
+  cmd_buffer := begin_single_time_command(gpu_context) or_return
+  offset := vk.DeviceSize(index * buffer.element_size)
+  region := vk.BufferCopy {
+    srcOffset = 0,
+    dstOffset = offset,
+    size = vk.DeviceSize(buffer.element_size),
+  }
+  vk.CmdCopyBuffer(cmd_buffer, staging.buffer, buffer.buffer, 1, &region)
+  return end_single_time_command(gpu_context, &cmd_buffer)
+}
+
+static_buffer_write_multi :: proc(
+  gpu_context: ^GPUContext,
+  buffer: ^StaticBuffer($T),
+  data: []T,
+  index: int = 0,
+) -> vk.Result {
+  staging := create_host_visible_buffer(
+    gpu_context,
+    T,
+    len(data),
+    {.TRANSFER_SRC},
+    raw_data(data),
+  ) or_return
+  defer data_buffer_destroy(gpu_context.device, &staging)
+  cmd_buffer := begin_single_time_command(gpu_context) or_return
+  offset := vk.DeviceSize(index * buffer.element_size)
+  region := vk.BufferCopy {
+    srcOffset = 0,
+    dstOffset = offset,
+    size = vk.DeviceSize(buffer.element_size * len(data)),
+  }
+  vk.CmdCopyBuffer(cmd_buffer, staging.buffer, buffer.buffer, 1, &region)
+  return end_single_time_command(gpu_context, &cmd_buffer)
+}
+
+static_buffer_offset_of :: proc(buffer: ^StaticBuffer($T), index: u32) -> u32 {
+  return index * u32(buffer.element_size)
+}
+
+static_buffer_read :: proc(
+  gpu_context: ^GPUContext,
+  buffer: ^StaticBuffer($T),
+  output: []T,
+  index: int = 0,
+) -> vk.Result {
+  if len(output) == 0 do return .SUCCESS
+  staging := create_host_visible_buffer(
+    gpu_context,
+    T,
+    len(output),
+    {.TRANSFER_DST},
+  ) or_return
+  defer data_buffer_destroy(gpu_context.device, &staging)
+  cmd_buffer := begin_single_time_command(gpu_context) or_return
+  offset := vk.DeviceSize(index * buffer.element_size)
+  region := vk.BufferCopy {
+    srcOffset = offset,
+    dstOffset = 0,
+    size = vk.DeviceSize(buffer.element_size * len(output)),
+  }
+  vk.CmdCopyBuffer(cmd_buffer, buffer.buffer, staging.buffer, 1, &region)
+  end_single_time_command(gpu_context, &cmd_buffer) or_return
+  for i in 0..<len(output) {
+    output[i] = staging.mapped[i]
+  }
+  return .SUCCESS
+}
+
+static_buffer_destroy :: proc(device: vk.Device, buffer: ^StaticBuffer($T)) {
+  vk.DestroyBuffer(device, buffer.buffer, nil)
+  buffer.buffer = 0
+  vk.FreeMemory(device, buffer.memory, nil)
+  buffer.memory = 0
+  buffer.bytes_count = 0
+  buffer.element_size = 0
+}
+
 StagedBuffer :: struct($T: typeid) {
   using staging: DataBuffer(T),
   dirty_indices: interval_tree.IntervalTree,
@@ -365,11 +529,11 @@ flush :: proc(
   gpu_context: ^GPUContext,
   buffer: ^StagedBuffer($T),
 ) -> vk.Result {
-  @(static) run_count := 0
+  // @(static) run_count := 0
   // if run_count >= 100 {
-  //     return .SUCCESS
+      // return .SUCCESS
   // }
-  defer run_count += 1
+  // defer run_count += 1
   defer interval_tree.clear(&buffer.dirty_indices)
   copy_regions := make([dynamic]vk.BufferCopy, 0)
   defer delete(copy_regions)

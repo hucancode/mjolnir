@@ -77,7 +77,7 @@ Manager :: struct {
   // Bindless vertex skinning buffer system
   vertex_skinning_buffer_set_layout: vk.DescriptorSetLayout,
   vertex_skinning_descriptor_set:    vk.DescriptorSet,
-  vertex_skinning_buffer:            gpu.StagedBuffer(geometry.SkinningData),
+  vertex_skinning_buffer:            gpu.StaticBuffer(geometry.SkinningData),
   vertex_skinning_slab:              SlabAllocator,
 
   // Bindless lights buffer system (staged - infrequent updates)
@@ -94,8 +94,8 @@ Manager :: struct {
   geometry_pipeline_layout:     vk.PipelineLayout,
 
   // Bindless vertex/index buffer system
-  vertex_buffer:                gpu.DataBuffer(geometry.Vertex),
-  index_buffer:                 gpu.DataBuffer(u32),
+  vertex_buffer:                gpu.StaticBuffer(geometry.Vertex),
+  index_buffer:                 gpu.StaticBuffer(u32),
   vertex_slab:                  SlabAllocator,
   index_slab:                   SlabAllocator,
 
@@ -265,7 +265,6 @@ commit :: proc(
   gpu.flush(gpu_context, &manager.mesh_data_buffer) or_return
   gpu.flush(gpu_context, &manager.emitter_buffer) or_return
   gpu.flush(gpu_context, &manager.lights_buffer) or_return
-  gpu.flush(gpu_context, &manager.vertex_skinning_buffer) or_return
   return .SUCCESS
 }
 
@@ -1093,7 +1092,7 @@ init_vertex_skinning_buffer :: proc(
     "Creating vertex skinning buffer with capacity %d entries...",
     skinning_count,
   )
-  manager.vertex_skinning_buffer = gpu.malloc_staged_buffer(
+  manager.vertex_skinning_buffer = gpu.malloc_static_buffer(
     gpu_context,
     geometry.SkinningData,
     skinning_count,
@@ -1129,7 +1128,7 @@ init_vertex_skinning_buffer :: proc(
     &manager.vertex_skinning_descriptor_set,
   ) or_return
   buffer_info := vk.DescriptorBufferInfo {
-    buffer = manager.vertex_skinning_buffer.device_buffer,
+    buffer = manager.vertex_skinning_buffer.buffer,
     offset = 0,
     range  = vk.DeviceSize(vk.WHOLE_SIZE),
   }
@@ -1150,7 +1149,7 @@ destroy_vertex_skinning_buffer :: proc(
   manager: ^Manager,
 ) {
   slab_allocator_destroy(&manager.vertex_skinning_slab)
-  gpu.staged_buffer_destroy(gpu_context.device, &manager.vertex_skinning_buffer)
+  gpu.static_buffer_destroy(gpu_context.device, &manager.vertex_skinning_buffer)
   vk.DestroyDescriptorSetLayout(
     gpu_context.device,
     manager.vertex_skinning_buffer_set_layout,
@@ -1395,13 +1394,13 @@ init_bindless_buffers :: proc(
 ) -> vk.Result {
   vertex_count := BINDLESS_VERTEX_BUFFER_SIZE / size_of(geometry.Vertex)
   index_count := BINDLESS_INDEX_BUFFER_SIZE / size_of(u32)
-  manager.vertex_buffer = gpu.create_host_visible_buffer(
+  manager.vertex_buffer = gpu.malloc_static_buffer(
     gpu_context,
     geometry.Vertex,
     vertex_count,
     {.VERTEX_BUFFER},
   ) or_return
-  manager.index_buffer = gpu.create_host_visible_buffer(
+  manager.index_buffer = gpu.malloc_static_buffer(
     gpu_context,
     u32,
     index_count,
@@ -1419,14 +1418,15 @@ destroy_bindless_buffers :: proc(
   gpu_context: ^gpu.GPUContext,
   manager: ^Manager,
 ) {
-  gpu.data_buffer_destroy(gpu_context.device, &manager.vertex_buffer)
-  gpu.data_buffer_destroy(gpu_context.device, &manager.index_buffer)
+  gpu.static_buffer_destroy(gpu_context.device, &manager.vertex_buffer)
+  gpu.static_buffer_destroy(gpu_context.device, &manager.index_buffer)
   slab_allocator_destroy(&manager.vertex_slab)
   slab_allocator_destroy(&manager.index_slab)
 }
 
 manager_allocate_vertices :: proc(
   manager: ^Manager,
+  gpu_context: ^gpu.GPUContext,
   vertices: []geometry.Vertex,
 ) -> (
   allocation: BufferAllocation,
@@ -1438,7 +1438,7 @@ manager_allocate_vertices :: proc(
     log.error("Failed to allocate vertices from slab allocator")
     return {}, .ERROR_OUT_OF_DEVICE_MEMORY
   }
-  ret = gpu.data_buffer_write(&manager.vertex_buffer, vertices, int(offset))
+  ret = gpu.static_buffer_write(gpu_context, &manager.vertex_buffer, vertices, int(offset))
   if ret != .SUCCESS {
     log.error("Failed to write vertex data to GPU buffer")
     return {}, ret
@@ -1448,6 +1448,7 @@ manager_allocate_vertices :: proc(
 
 manager_allocate_indices :: proc(
   manager: ^Manager,
+  gpu_context: ^gpu.GPUContext,
   indices: []u32,
 ) -> (
   allocation: BufferAllocation,
@@ -1459,7 +1460,7 @@ manager_allocate_indices :: proc(
     log.error("Failed to allocate indices from slab allocator")
     return {}, .ERROR_OUT_OF_DEVICE_MEMORY
   }
-  ret = gpu.data_buffer_write(&manager.index_buffer, indices, int(offset))
+  ret = gpu.static_buffer_write(gpu_context, &manager.index_buffer, indices, int(offset))
   if ret != .SUCCESS {
     log.error("Failed to write index data to GPU buffer")
     return {}, ret
@@ -1469,6 +1470,7 @@ manager_allocate_indices :: proc(
 
 manager_allocate_vertex_skinning :: proc(
   manager: ^Manager,
+  gpu_context: ^gpu.GPUContext,
   skinnings: []geometry.SkinningData,
 ) -> (
   allocation: BufferAllocation,
@@ -1483,7 +1485,8 @@ manager_allocate_vertex_skinning :: proc(
     log.error("Failed to allocate vertex skinning data from slab allocator")
     return {}, .ERROR_OUT_OF_DEVICE_MEMORY
   }
-  ret = gpu.staged_buffer_write(
+  ret = gpu.static_buffer_write(
+    gpu_context,
     &manager.vertex_skinning_buffer,
     skinnings,
     int(offset),

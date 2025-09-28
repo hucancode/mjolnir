@@ -74,10 +74,12 @@ mesh_init :: proc(
   self.aabb = data.aabb
   self.vertex_allocation = manager_allocate_vertices(
     manager,
+    gpu_context,
     data.vertices,
   ) or_return
   self.index_allocation = manager_allocate_indices(
     manager,
+    gpu_context,
     data.indices,
   ) or_return
   if len(data.skinnings) <= 0 {
@@ -85,6 +87,7 @@ mesh_init :: proc(
   }
   allocation, ret := manager_allocate_vertex_skinning(
     manager,
+    gpu_context,
     data.skinnings,
   )
   if ret != .SUCCESS {
