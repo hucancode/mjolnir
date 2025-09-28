@@ -6,14 +6,6 @@ Mjolnir is a minimalistic rendering engine. The goal is to create a simple set o
 
 ![](./readme/render-target.png)
 
-# Work in Progress
-
-- Graphical unit test
-
-# Disclaimer
-
-This is a project under active development. It is not yet stable, may contain bugs or incomplete features
-
 # Build scripts
 ```sh
 make build # build the project in release mode without running
@@ -25,3 +17,7 @@ make check # check for compiler errors without building
 make shader # build all shaders
 make mjolnir/shader/{shader_name}/vert.spv # build a specific vertex shader, use frag.spv for fragment shader
 ```
+
+# Disclaimer
+
+This is a project under active development. It is not yet stable, may contain bugs or incomplete features
