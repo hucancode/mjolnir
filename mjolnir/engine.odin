@@ -16,8 +16,8 @@ import "core:unicode/utf8"
 import "geometry"
 import "gpu"
 import "resources"
-import world "world"
-import particles "render/particles"
+import "world"
+import "render/particles"
 import "render/lighting"
 import "render/debug_ui"
 import navmesh_renderer "render/navigation"
@@ -27,7 +27,7 @@ import mu "vendor:microui"
 import vk "vendor:vulkan"
 
 MAX_FRAMES_IN_FLIGHT :: 2
-RENDER_FPS :: 120.0
+RENDER_FPS :: 60.0
 FRAME_TIME :: 1.0 / RENDER_FPS
 FRAME_TIME_MILIS :: FRAME_TIME * 1_000.0
 UPDATE_FPS :: 30.0
@@ -458,7 +458,7 @@ update_force_fields :: proc(self: ^Engine) {
   for &entry in self.world.nodes.entries do if entry.active {
     ff, is_ff := &entry.item.attachment.(ForceFieldAttachment)
     if !is_ff do continue
-    forcefields[params.forcefield_count].position = world.node_get_world_matrix(&entry.item) * [4]f32{0, 0, 0, 1}
+    forcefields[params.forcefield_count].position = entry.item.transform.world_matrix * [4]f32{0, 0, 0, 1}
     forcefields[params.forcefield_count].tangent_strength = ff.tangent_strength
     forcefields[params.forcefield_count].strength = ff.strength
     forcefields[params.forcefield_count].area_of_effect = ff.area_of_effect
@@ -551,11 +551,7 @@ update :: proc(self: ^Engine) -> bool {
   if delta_time < UPDATE_FRAME_TIME {
     return false
   }
-  frame_ctx := world.FrameContext {
-    frame_index = self.frame_index,
-    delta_time  = delta_time,
-  }
-  world.begin_frame(&self.world, &self.resource_manager, &frame_ctx)
+  world.begin_frame(&self.world, &self.resource_manager)
   // Animation updates are now handled in render thread for smooth animation at render FPS
   update_emitters(self, delta_time)
   update_force_fields(self)
@@ -587,107 +583,6 @@ shutdown :: proc(self: ^Engine) {
   glfw.Terminate()
   log.infof("Engine deinitialized")
 }
-
-// Update shadow camera positions for lights that cast shadows
-update_shadow_camera_transforms :: proc(self: ^Engine) {
-  // Iterate through all lights to update shadow cameras
-  for idx in 0 ..< len(self.resource_manager.lights.entries) {
-    entry := &self.resource_manager.lights.entries[idx]
-    if entry.generation > 0 && entry.active {
-      handle := Handle{generation = entry.generation, index = u32(idx)}
-      light := &entry.item
-      // Skip if not enabled or not casting shadow
-      if !light.data.cast_shadow do continue
-      // Get the node this light is attached to
-      node, node_ok := resources.get(self.world.nodes, light.node_handle)
-      if !node_ok do continue
-      // Check if the node is visible
-      if !node.visible || !node.parent_visible do continue
-      switch light.light_type {
-      case .POINT:
-        update_point_light_shadow_cameras(self, light, node)
-      case .SPOT:
-        update_spot_light_shadow_cameras(self, light, node)
-      case .DIRECTIONAL:
-        // Directional shadow cameras not yet implemented
-      }
-    }
-  }
-}
-
-// Update shadow cameras for point lights
-update_point_light_shadow_cameras :: proc(
-  self: ^Engine,
-  light: ^resources.Light,
-  node: ^Node,
-) {
-  // Point light cube face directions: forward=-Z convention
-  // +X, -X, +Y, -Y, +Z, -Z faces
-  dirs := [6][3]f32{
-    {1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1},
-  }
-  // Up vectors for each face with forward=-Z convention
-  ups := [6][3]f32{
-    {0, -1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}, {0, -1, 0}, {0, -1, 0},
-  }
-
-  world_matrix := world.node_get_world_matrix(node)
-  position := world_matrix[3].xyz
-
-  // Update cameras for each cube face
-  for face in 0 ..< 6 {
-    if light.cube_render_targets[face].generation == 0 do continue
-
-    render_target, ok := resources.get(
-      self.resource_manager.render_targets,
-      light.cube_render_targets[face],
-    )
-    if !ok do continue
-
-    camera, camera_ok := resources.get(
-      self.resource_manager.cameras,
-      render_target.camera,
-    )
-    if !camera_ok do continue
-
-    target := position + dirs[face]
-    geometry.camera_look_at(camera, position, target, ups[face])
-    resources.render_target_upload_camera_data(&self.resource_manager, render_target)
-  }
-}
-
-update_spot_light_shadow_cameras :: proc(
-  self: ^Engine,
-  light: ^resources.Light,
-  node: ^Node,
-) {
-  if light.shadow_render_target.generation == 0 do return
-  render_target, ok := resources.get(
-    self.resource_manager.render_targets,
-    light.shadow_render_target,
-  )
-  if !ok do return
-  camera, camera_ok := resources.get(
-    self.resource_manager.cameras,
-    render_target.camera,
-  )
-  if !camera_ok do return
-  world_matrix := world.node_get_world_matrix(node)
-  position := world_matrix[3].xyz
-  // Extract forward direction: -Z axis from world matrix (forward=-Z convention)
-  forward := world_matrix[2].xyz  // Light's actual forward direction from matrix
-  target := position + forward
-  up := [3]f32{0, 1, 0}
-  if linalg.abs(linalg.dot(forward, up)) > 0.99 {
-    up = {1, 0, 0}
-  }
-  geometry.camera_look_at(camera, position, target, up)
-  // log.debugf("Spot light %v shadow camera %v updated to %v", light, render_target.camera, camera)
-  resources.render_target_upload_camera_data(&self.resource_manager, render_target)
-}
-
-
-
 
 @(private = "file")
 render_debug_ui :: proc(self: ^Engine) {
@@ -782,9 +677,7 @@ render :: proc(self: ^Engine) -> vk.Result {
     return .ERROR_UNKNOWN
   }
   resources.render_target_upload_camera_data(&self.resource_manager, main_render_target)
-  // Update light transforms after world matrices are uploaded
   resources.update_all_light_transforms(&self.resource_manager)
-  update_shadow_camera_transforms(self)
   // Visibility is now updated in begin_frame
   record_shadow_pass(
     &self.render,

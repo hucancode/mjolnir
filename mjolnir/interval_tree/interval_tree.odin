@@ -87,22 +87,18 @@ rotate_left :: proc(x: ^IntervalNode) -> ^IntervalNode {
 
 insert :: proc(tree: ^IntervalTree, start: int, count: int = 1) {
   if count <= 0 do return
-
   new_interval := Interval{start, start + count - 1}
-
   // Collect all existing intervals
   intervals := make([dynamic]Interval, 0, tree.allocator)
   defer delete(intervals)
   collect_intervals(tree.root, &intervals)
-
   // Clear tree
   destroy_node(tree.root, tree.allocator)
   tree.root = nil
-
   // Add new interval to list
   append(&intervals, new_interval)
-
   // Sort intervals by start position
+  // TODO: use slice.sort_proc
   for i in 0..<len(intervals) {
     for j in i+1..<len(intervals) {
       if intervals[i].start > intervals[j].start {
@@ -110,14 +106,11 @@ insert :: proc(tree: ^IntervalTree, start: int, count: int = 1) {
       }
     }
   }
-
   // Merge overlapping/adjacent intervals
   merged := make([dynamic]Interval, 0, tree.allocator)
   defer delete(merged)
-
   if len(intervals) > 0 {
     current := intervals[0]
-
     for i in 1..<len(intervals) {
       if intervals[i].start <= current.end + 1 {
         // Merge intervals
@@ -130,7 +123,6 @@ insert :: proc(tree: ^IntervalTree, start: int, count: int = 1) {
     }
     append(&merged, current)
   }
-
   // Rebuild tree with merged intervals
   for interval in merged {
     tree.root = insert_simple(tree.root, interval, tree.allocator)
@@ -146,42 +138,33 @@ insert_simple :: proc(node: ^IntervalNode, interval: Interval, allocator: mem.Al
     new_node.height = 1
     return new_node
   }
-
   if interval.start < node.interval.start {
     node.left = insert_simple(node.left, interval, allocator)
   } else {
     node.right = insert_simple(node.right, interval, allocator)
   }
-
   update_node(node)
-
   balance := node_balance(node)
-
   if balance > 1 && interval.start < node.left.interval.start {
     return rotate_right(node)
   }
-
   if balance < -1 && interval.start > node.right.interval.start {
     return rotate_left(node)
   }
-
   if balance > 1 && interval.start > node.left.interval.start {
     node.left = rotate_left(node.left)
     return rotate_right(node)
   }
-
   if balance < -1 && interval.start < node.right.interval.start {
     node.right = rotate_right(node.right)
     return rotate_left(node)
   }
-
   return node
 }
 
 @(private)
 collect_intervals :: proc(node: ^IntervalNode, intervals: ^[dynamic]Interval) {
   if node == nil do return
-
   collect_intervals(node.left, intervals)
   append(intervals, node.interval)
   collect_intervals(node.right, intervals)

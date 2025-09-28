@@ -18,13 +18,6 @@ shutdown :: proc(self: ^Manager) {
   self.main = resources.Handle{0, 0}
 }
 
-begin_frame :: proc(self: ^Manager) {
-  clear(&self.active)
-  if self.main.generation != 0 {
-    append(&self.active, self.main)
-  }
-}
-
 contains :: proc(self: ^Manager, handle: resources.Handle) -> bool {
   for existing in self.active {
     if existing.index == handle.index {

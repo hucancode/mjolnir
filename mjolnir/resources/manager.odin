@@ -103,12 +103,6 @@ Manager :: struct {
   current_frame_index:          u32,
 }
 
-
-FrameContext :: struct {
-  frame_index:               u32,
-  transfer_command_buffer:   vk.CommandBuffer,
-}
-
 init :: proc(
   manager: ^Manager,
   gpu_context: ^gpu.GPUContext,
@@ -246,13 +240,6 @@ init :: proc(
     nil,
   )
   return .SUCCESS
-}
-
-begin_frame :: proc(
-  manager: ^Manager,
-  frame: ^FrameContext,
-) {
-  manager.current_frame_index = frame.frame_index
 }
 
 commit :: proc(
@@ -775,12 +762,11 @@ init_node_data_buffer :: proc(
     {.STORAGE_BUFFER},
   ) or_return
   node_slice := gpu.staged_buffer_get_all(&manager.node_data_buffer)
-  default_node := NodeData {
-    material_id        = 0xFFFFFFFF,
-    mesh_id            = 0xFFFFFFFF,
-    bone_matrix_offset = 0xFFFFFFFF,
-  }
-  for &node in node_slice do node = default_node
+  slice.fill(node_slice, NodeData {
+     material_id        = 0xFFFFFFFF,
+     mesh_id            = 0xFFFFFFFF,
+     bone_matrix_offset = 0xFFFFFFFF,
+   })
   bindings := [?]vk.DescriptorSetLayoutBinding {
     {
       binding = 0,
@@ -1420,7 +1406,7 @@ manager_allocate_vertices :: proc(
     log.error("Failed to allocate vertices from slab allocator")
     return {}, .ERROR_OUT_OF_DEVICE_MEMORY
   }
-  ret = gpu.static_buffer_write(gpu_context, &manager.vertex_buffer, vertices, int(offset))
+  ret = gpu.write(gpu_context, &manager.vertex_buffer, vertices, int(offset))
   if ret != .SUCCESS {
     log.error("Failed to write vertex data to GPU buffer")
     return {}, ret
@@ -1442,7 +1428,7 @@ manager_allocate_indices :: proc(
     log.error("Failed to allocate indices from slab allocator")
     return {}, .ERROR_OUT_OF_DEVICE_MEMORY
   }
-  ret = gpu.static_buffer_write(gpu_context, &manager.index_buffer, indices, int(offset))
+  ret = gpu.write(gpu_context, &manager.index_buffer, indices, int(offset))
   if ret != .SUCCESS {
     log.error("Failed to write index data to GPU buffer")
     return {}, ret
@@ -1467,7 +1453,7 @@ manager_allocate_vertex_skinning :: proc(
     log.error("Failed to allocate vertex skinning data from slab allocator")
     return {}, .ERROR_OUT_OF_DEVICE_MEMORY
   }
-  ret = gpu.static_buffer_write(
+  ret = gpu.write(
     gpu_context,
     &manager.vertex_skinning_buffer,
     skinnings,
@@ -1563,7 +1549,7 @@ mesh_write_to_gpu :: proc(
     return .ERROR_OUT_OF_DEVICE_MEMORY
   }
   data := mesh_data_from_mesh(mesh)
-  return gpu.staged_buffer_write(
+  return gpu.write(
     &manager.mesh_data_buffer,
     &data,
     int(handle.index),
@@ -1596,7 +1582,7 @@ material_write_to_gpu :: proc(
     return .ERROR_OUT_OF_DEVICE_MEMORY
   }
   data := material_data_from_material(mat)
-  gpu.staged_buffer_write(
+  gpu.write(
     &manager.material_buffer,
     &data,
     int(handle.index),

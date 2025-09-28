@@ -1654,12 +1654,12 @@ build_visualization_from_detour_mesh :: proc(engine_ptr: ^mjolnir.Engine, nav_me
         log.errorf("Too many indices (%d) for buffer size (32768)", renderer.index_count)
         return false
     }
-    vertex_result := gpu.data_buffer_write(&renderer.vertex_buffer, navmesh_vertices[:])
+    vertex_result := gpu.write(&renderer.vertex_buffer, navmesh_vertices[:])
     if vertex_result != .SUCCESS {
         log.error("Failed to upload navigation mesh vertex data")
         return false
     }
-    index_result := gpu.data_buffer_write(&renderer.index_buffer, indices[:])
+    index_result := gpu.write(&renderer.index_buffer, indices[:])
     if index_result != .SUCCESS {
         log.error("Failed to upload navigation mesh index data")
         return false

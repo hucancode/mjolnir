@@ -18,7 +18,7 @@ import vk "vendor:vulkan"
 
 LIGHT_COUNT :: 5
 ALL_SPOT_LIGHT :: false
-ALL_POINT_LIGHT :: false
+ALL_POINT_LIGHT :: true
 light_handles: [LIGHT_COUNT]mjolnir.Handle
 light_cube_handles: [LIGHT_COUNT]mjolnir.Handle
 ground_mat_handle: mjolnir.Handle
@@ -55,7 +55,7 @@ main :: proc() {
   engine.update_proc = update
   engine.key_press_proc = on_key_pressed
   engine.custom_render_proc = custom_render
-  mjolnir.run(&engine, 1280, 720, "Mjolnir Odin")
+  mjolnir.run(&engine, 1280, 720, "Mjolnir")
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {
@@ -112,7 +112,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     log.info("spawning cubes in a grid")
     space: f32 = 2.1
     size: f32 = 0.3
-    nx, ny, nz := 10, 2, 10
+    nx, ny, nz := 40, 2, 40
 
     for x in 1 ..< nx {
       for y in 1 ..< ny {
