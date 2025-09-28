@@ -206,9 +206,7 @@ traverse_scene_benchmark :: proc(
     #partial switch inner in node.attachment {
     case MeshAttachment:
       ctx.mesh_count += 1
-    case DirectionalLightAttachment,
-         PointLightAttachment,
-         SpotLightAttachment:
+    case LightAttachment:
       ctx.light_count += 1
     }
     return true
@@ -344,7 +342,7 @@ test_scene_with_multiple_attachments :: proc(t: ^testing.T) {
   defer destroy(&scene, nil)
   spawn(
     &scene,
-    PointLightAttachment {
+    LightAttachment {
       // In reality we would need valid light
     },
   )
@@ -362,7 +360,7 @@ test_scene_with_multiple_attachments :: proc(t: ^testing.T) {
     using world
     counter := (^Context)(ctx)
     #partial switch attachment in node.attachment {
-    case PointLightAttachment:
+    case LightAttachment:
       counter.light_count += 1
     case MeshAttachment:
       counter.mesh_count += 1
