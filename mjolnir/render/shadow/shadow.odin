@@ -236,13 +236,13 @@ begin_pass :: proc(
     storeOp = .STORE,
     clearValue = {depthStencil = {1.0, 0}}, // Clear to far distance
   }
-  render_info_khr := vk.RenderingInfo{
+  render_info := vk.RenderingInfo{
     sType = .RENDERING_INFO,
     renderArea = {extent = shadow_target.extent},
     layerCount = 1,
     pDepthAttachment = &depth_attachment,
   }
-  vk.CmdBeginRendering(command_buffer, &render_info_khr)
+  vk.CmdBeginRendering(command_buffer, &render_info)
   viewport := vk.Viewport {
     width    = f32(shadow_target.extent.width),
     height   = f32(shadow_target.extent.height),

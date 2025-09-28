@@ -112,7 +112,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     log.info("spawning cubes in a grid")
     space: f32 = 2.1
     size: f32 = 0.3
-    nx, ny, nz := 30, 2, 30
+    nx, ny, nz := 10, 2, 10
 
     for x in 1 ..< nx {
       for y in 1 ..< ny {
@@ -276,21 +276,26 @@ setup :: proc(engine: ^mjolnir.Engine) {
         should_make_spot_light = false
       }
       if should_make_spot_light {
-        light_handles[i], light = world.spawn(
-          &engine.world,
-          SpotLightAttachment {
-            color = color,
-            angle = math.PI * 0.4,
-            radius = 10,
-            cast_shadow = true,
-          },
+        light_handles[i], light = world.spawn(&engine.world, nil, &engine.resource_manager)
+        light.attachment = world.create_spot_light_attachment(
+          light_handles[i],
+          &engine.resource_manager,
+          &engine.gpu_context,
+          color,
+          10,  // radius
+          math.PI * 0.2,  // angle
         )
         world.rotate(light, math.PI * 0.2, linalg.VECTOR3F32_X_AXIS)
       } else {
-        light_handles[i], light = world.spawn(
-          &engine.world,
-          PointLightAttachment{color = color, radius = 10, cast_shadow = true},
+        light_handles[i], light = world.spawn(&engine.world, nil, &engine.resource_manager)
+        attachment := world.create_point_light_attachment(
+          light_handles[i],
+          &engine.resource_manager,
+          &engine.gpu_context,
+          color,
+          10,  // radius
         )
+        light.attachment = attachment
       }
       world.translate(light, 6, 2, -1)
       cube_node: ^Node

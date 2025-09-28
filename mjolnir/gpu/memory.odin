@@ -26,12 +26,16 @@ malloc_data_buffer :: proc(
   if .UNIFORM_BUFFER in usage && count > 1 {
     data_buf.element_size = align_up(
       size_of(T),
-      int(gpu_context.device_properties.limits.minUniformBufferOffsetAlignment),
+      int(
+        gpu_context.device_properties.limits.minUniformBufferOffsetAlignment,
+      ),
     )
   } else if .STORAGE_BUFFER in usage && count > 1 {
     data_buf.element_size = align_up(
       size_of(T),
-      int(gpu_context.device_properties.limits.minStorageBufferOffsetAlignment),
+      int(
+        gpu_context.device_properties.limits.minStorageBufferOffsetAlignment,
+      ),
     )
   } else {
     data_buf.element_size = size_of(T)
@@ -43,11 +47,29 @@ malloc_data_buffer :: proc(
     usage       = usage,
     sharingMode = .EXCLUSIVE,
   }
-  vk.CreateBuffer(gpu_context.device, &create_info, nil, &data_buf.buffer) or_return
+  vk.CreateBuffer(
+    gpu_context.device,
+    &create_info,
+    nil,
+    &data_buf.buffer,
+  ) or_return
   mem_reqs: vk.MemoryRequirements
-  vk.GetBufferMemoryRequirements(gpu_context.device, data_buf.buffer, &mem_reqs)
-  data_buf.memory = allocate_vulkan_memory(gpu_context, mem_reqs, mem_properties) or_return
-  vk.BindBufferMemory(gpu_context.device, data_buf.buffer, data_buf.memory, 0) or_return
+  vk.GetBufferMemoryRequirements(
+    gpu_context.device,
+    data_buf.buffer,
+    &mem_reqs,
+  )
+  data_buf.memory = allocate_vulkan_memory(
+    gpu_context,
+    mem_reqs,
+    mem_properties,
+  ) or_return
+  vk.BindBufferMemory(
+    gpu_context.device,
+    data_buf.buffer,
+    data_buf.memory,
+    0,
+  ) or_return
   log.infof("buffer created 0x%x", data_buf.buffer)
   return data_buf, .SUCCESS
 }
@@ -73,7 +95,13 @@ malloc_host_visible_buffer :: proc(
   DataBuffer(T),
   vk.Result,
 ) {
-  return malloc_data_buffer(gpu_context, T, count, usage, {.HOST_VISIBLE, .HOST_COHERENT})
+  return malloc_data_buffer(
+    gpu_context,
+    T,
+    count,
+    usage,
+    {.HOST_VISIBLE, .HOST_COHERENT},
+  )
 }
 
 @(private = "file")
@@ -183,7 +211,12 @@ create_local_buffer :: proc(
   buffer: DataBuffer(T),
   ret: vk.Result,
 ) {
-  buffer = malloc_local_buffer(gpu_context, T, count, usage | {.TRANSFER_DST}) or_return
+  buffer = malloc_local_buffer(
+    gpu_context,
+    T,
+    count,
+    usage | {.TRANSFER_DST},
+  ) or_return
   if data == nil {
     ret = .SUCCESS
     return
@@ -203,7 +236,10 @@ create_local_buffer :: proc(
 }
 
 @(private = "file")
-copy_buffer :: proc(gpu_context: ^GPUContext, dst, src: DataBuffer($T)) -> vk.Result {
+copy_buffer :: proc(
+  gpu_context: ^GPUContext,
+  dst, src: DataBuffer($T),
+) -> vk.Result {
   cmd_buffer := begin_single_time_command(gpu_context) or_return
   region := vk.BufferCopy {
     size = vk.DeviceSize(src.bytes_count),
@@ -216,6 +252,377 @@ copy_buffer :: proc(gpu_context: ^GPUContext, dst, src: DataBuffer($T)) -> vk.Re
     dst.buffer,
   )
   return end_single_time_command(gpu_context, &cmd_buffer)
+}
+
+DirtySet :: struct {
+  indices: [dynamic]int,
+}
+
+dirty_set_init :: proc(ds: ^DirtySet) {
+  ds.indices = make([dynamic]int, 0)
+}
+
+dirty_set_destroy :: proc(ds: ^DirtySet) {
+  delete(ds.indices)
+}
+
+dirty_set_add :: proc(ds: ^DirtySet, index: int) {
+  insertion_point, found := slice.binary_search(ds.indices[:], index)
+
+  if found {
+    return // Index already exists
+  }
+
+  // Insert at the found insertion point
+  if insertion_point == len(ds.indices) {
+    append(&ds.indices, index)
+  } else {
+    append(&ds.indices, 0)
+    copy(ds.indices[insertion_point+1:], ds.indices[insertion_point:len(ds.indices)-1])
+    ds.indices[insertion_point] = index
+  }
+}
+
+dirty_set_add_range :: proc(ds: ^DirtySet, start: int, count: int) {
+  if count <= 0 do return
+
+  // Generate sorted range of new indices
+  new_indices := make([]int, count, context.temp_allocator)
+  for i in 0..<count {
+    new_indices[i] = start + i
+  }
+
+  // Find insertion point for first index
+  insertion_point, _ := slice.binary_search(ds.indices[:], start)
+
+  // Count how many indices already exist in the range
+  existing_count := 0
+  for i in insertion_point..<len(ds.indices) {
+    if ds.indices[i] >= start + count {
+      break
+    }
+    existing_count += 1
+  }
+
+  if existing_count == count {
+    // All indices already exist
+    return
+  }
+
+  // Create merged result
+  old_len := len(ds.indices)
+  new_len := old_len + count - existing_count
+
+  if cap(ds.indices) < new_len {
+    // Need to grow the slice
+    new_slice := make([dynamic]int, new_len)
+    copy(new_slice[:insertion_point], ds.indices[:insertion_point])
+
+    // Merge new range with existing overlapping elements
+    merge_idx := insertion_point
+    range_idx := 0
+    existing_idx := insertion_point
+
+    for range_idx < count && existing_idx < old_len && ds.indices[existing_idx] < start + count {
+      if new_indices[range_idx] < ds.indices[existing_idx] {
+        new_slice[merge_idx] = new_indices[range_idx]
+        range_idx += 1
+      } else if new_indices[range_idx] == ds.indices[existing_idx] {
+        new_slice[merge_idx] = new_indices[range_idx]
+        range_idx += 1
+        existing_idx += 1
+      } else {
+        new_slice[merge_idx] = ds.indices[existing_idx]
+        existing_idx += 1
+      }
+      merge_idx += 1
+    }
+
+    // Add remaining new indices
+    for range_idx < count {
+      new_slice[merge_idx] = new_indices[range_idx]
+      range_idx += 1
+      merge_idx += 1
+    }
+
+    // Copy remaining existing indices
+    copy(new_slice[merge_idx:], ds.indices[existing_idx:])
+
+    delete(ds.indices)
+    ds.indices = new_slice
+  } else {
+    // Can grow in place
+    resize(&ds.indices, new_len)
+
+    // Shift existing elements after insertion point
+    shift_amount := count - existing_count
+    if shift_amount > 0 {
+      copy(ds.indices[insertion_point + count:], ds.indices[insertion_point + existing_count:old_len])
+    }
+
+    // Merge new range with existing overlapping elements
+    merge_idx := insertion_point
+    range_idx := 0
+    existing_idx := insertion_point
+    temp_existing := make([]int, existing_count, context.temp_allocator)
+    copy(temp_existing, ds.indices[insertion_point:insertion_point + existing_count])
+
+    existing_temp_idx := 0
+    for range_idx < count && existing_temp_idx < existing_count {
+      if new_indices[range_idx] < temp_existing[existing_temp_idx] {
+        ds.indices[merge_idx] = new_indices[range_idx]
+        range_idx += 1
+      } else if new_indices[range_idx] == temp_existing[existing_temp_idx] {
+        ds.indices[merge_idx] = new_indices[range_idx]
+        range_idx += 1
+        existing_temp_idx += 1
+      } else {
+        ds.indices[merge_idx] = temp_existing[existing_temp_idx]
+        existing_temp_idx += 1
+      }
+      merge_idx += 1
+    }
+
+    // Add remaining new indices
+    for range_idx < count {
+      ds.indices[merge_idx] = new_indices[range_idx]
+      range_idx += 1
+      merge_idx += 1
+    }
+  }
+}
+
+dirty_set_clear :: proc(ds: ^DirtySet) {
+  clear(&ds.indices)
+}
+
+StagedBuffer :: struct($T: typeid) {
+  using staging: DataBuffer(T),
+  dirty_indices: DirtySet,
+  device_buffer: vk.Buffer,
+  device_memory: vk.DeviceMemory,
+}
+
+malloc_staged_buffer :: proc(
+  gpu_context: ^GPUContext,
+  $T: typeid,
+  count: int,
+  usage: vk.BufferUsageFlags,
+) -> (
+  buffer: StagedBuffer(T),
+  ret: vk.Result,
+) {
+  if .UNIFORM_BUFFER in usage && count > 1 {
+    buffer.element_size = align_up(
+      size_of(T),
+      int(
+        gpu_context.device_properties.limits.minUniformBufferOffsetAlignment,
+      ),
+    )
+  } else if .STORAGE_BUFFER in usage && count > 1 {
+    buffer.element_size = align_up(
+      size_of(T),
+      int(
+        gpu_context.device_properties.limits.minStorageBufferOffsetAlignment,
+      ),
+    )
+  } else {
+    buffer.element_size = size_of(T)
+  }
+  buffer.bytes_count = buffer.element_size * count
+  create_info := vk.BufferCreateInfo {
+    sType       = .BUFFER_CREATE_INFO,
+    size        = vk.DeviceSize(buffer.bytes_count),
+    usage       = usage,
+    sharingMode = .EXCLUSIVE,
+  }
+  vk.CreateBuffer(
+    gpu_context.device,
+    &create_info,
+    nil,
+    &buffer.staging.buffer,
+  ) or_return
+  mem_reqs: vk.MemoryRequirements
+  vk.GetBufferMemoryRequirements(
+    gpu_context.device,
+    buffer.staging.buffer,
+    &mem_reqs,
+  )
+  buffer.staging.memory = allocate_vulkan_memory(
+    gpu_context,
+    mem_reqs,
+    {.HOST_VISIBLE, .HOST_COHERENT},
+  ) or_return
+  vk.BindBufferMemory(
+    gpu_context.device,
+    buffer.staging.buffer,
+    buffer.staging.memory,
+    0,
+  ) or_return
+  // Map staging buffer memory for CPU access
+  vk.MapMemory(
+    gpu_context.device,
+    buffer.staging.memory,
+    0,
+    vk.DeviceSize(buffer.bytes_count),
+    {},
+    auto_cast &buffer.staging.mapped,
+  ) or_return
+  // Create device buffer (GPU-local)
+  create_info.usage = usage | {.TRANSFER_DST}
+  vk.CreateBuffer(
+    gpu_context.device,
+    &create_info,
+    nil,
+    &buffer.device_buffer,
+  ) or_return
+  vk.GetBufferMemoryRequirements(
+    gpu_context.device,
+    buffer.device_buffer,
+    &mem_reqs,
+  )
+  buffer.device_memory = allocate_vulkan_memory(
+    gpu_context,
+    mem_reqs,
+    {.DEVICE_LOCAL},
+  ) or_return
+  vk.BindBufferMemory(
+    gpu_context.device,
+    buffer.device_buffer,
+    buffer.device_memory,
+    0,
+  ) or_return
+  dirty_set_init(&buffer.dirty_indices)
+  // Mark all indices as dirty initially
+  for i in 0..<count {
+    dirty_set_add(&buffer.dirty_indices, i)
+  }
+  log.infof("staged buffer created 0x%x", buffer.staging.buffer)
+  return buffer, .SUCCESS
+}
+
+flush :: proc(
+  gpu_context: ^GPUContext,
+  buffer: ^StagedBuffer($T),
+) -> vk.Result {
+  @(static) run_count := 0
+  if run_count >= 100 {
+      return .SUCCESS
+  }
+  defer run_count += 1
+  defer dirty_set_clear(&buffer.dirty_indices)
+  copy_regions := make([dynamic]vk.BufferCopy, 0)
+  defer delete(copy_regions)
+  element_size := vk.DeviceSize(buffer.element_size)
+  // Process contiguous ranges from sorted dirty indices
+  i := 0
+  for i < len(buffer.dirty_indices.indices) {
+    range_start := buffer.dirty_indices.indices[i]
+    range_end := range_start
+    // Find the end of the contiguous range
+    for i + 1 < len(buffer.dirty_indices.indices) &&
+        buffer.dirty_indices.indices[i + 1] == range_end + 1 {
+      i += 1
+      range_end = buffer.dirty_indices.indices[i]
+    }
+    range_length := range_end - range_start + 1
+    append(
+      &copy_regions,
+      vk.BufferCopy {
+        srcOffset = vk.DeviceSize(range_start) * element_size,
+        dstOffset = vk.DeviceSize(range_start) * element_size,
+        size = vk.DeviceSize(range_length) * element_size,
+      },
+    )
+    i += 1
+  }
+  if len(copy_regions) == 0 {
+    return .SUCCESS
+  }
+  // log.infof("Updating staged buffer, copying %d indices using %d commands", len(&buffer.dirty_indices.indices), len(copy_regions))
+  cmd_buffer := begin_single_time_command(gpu_context) or_return
+  vk.CmdCopyBuffer(
+    cmd_buffer,
+    buffer.staging.buffer,
+    buffer.device_buffer,
+    u32(len(copy_regions)),
+    raw_data(copy_regions),
+  )
+  end_single_time_command(gpu_context, &cmd_buffer) or_return
+  return .SUCCESS
+}
+
+// Write a single element to the staging buffer and mark as dirty
+staged_buffer_write_single :: proc(
+  buffer: ^StagedBuffer($T),
+  data: ^T,
+  index: int = 0,
+) -> vk.Result {
+  if buffer.staging.mapped == nil {
+    return .ERROR_UNKNOWN
+  }
+  data_buffer_write_single(&buffer.staging, data, index) or_return
+  dirty_set_add(&buffer.dirty_indices, index)
+  return .SUCCESS
+}
+
+// Write multiple elements to the staging buffer and mark range as dirty
+staged_buffer_write_multi :: proc(
+  buffer: ^StagedBuffer($T),
+  data: []T,
+  index: int = 0,
+) -> vk.Result {
+  if buffer.staging.mapped == nil {
+    return .ERROR_UNKNOWN
+  }
+  data_buffer_write_multi(&buffer.staging, data, index) or_return
+  dirty_set_add_range(&buffer.dirty_indices, index, len(data))
+  return .SUCCESS
+}
+
+// Generic write interface for staged buffers
+staged_buffer_write :: proc {
+  staged_buffer_write_single,
+  staged_buffer_write_multi,
+}
+
+// Get element from staging buffer (CPU-side data)
+staged_buffer_get :: proc(buffer: ^StagedBuffer($T), index: u32 = 0) -> ^T {
+  return data_buffer_get(&buffer.staging, index)
+}
+
+// Get all elements from staging buffer as slice
+staged_buffer_get_all :: proc(buffer: ^StagedBuffer($T)) -> []T {
+  return data_buffer_get_all(&buffer.staging)
+}
+
+// Mark a range as dirty without writing data
+staged_buffer_mark_dirty :: proc(
+  buffer: ^StagedBuffer($T),
+  start_index: int,
+  count: int,
+) {
+  dirty_set_add_range(&buffer.dirty_indices, start_index, count)
+}
+
+// Check if any elements are dirty
+staged_buffer_has_dirty :: proc(buffer: ^StagedBuffer($T)) -> bool {
+  return !dirty_set_is_empty(&buffer.dirty_indices)
+}
+
+// Get offset for a specific index in the buffer
+staged_buffer_offset_of :: proc(buffer: ^StagedBuffer($T), index: u32) -> u32 {
+  return data_buffer_offset_of(&buffer.staging, index)
+}
+
+// Destroy staged buffer and free all resources
+staged_buffer_destroy :: proc(device: vk.Device, buffer: ^StagedBuffer($T)) {
+  data_buffer_destroy(device, &buffer.staging)
+  vk.DestroyBuffer(device, buffer.device_buffer, nil)
+  buffer.device_buffer = 0
+  vk.FreeMemory(device, buffer.device_memory, nil)
+  buffer.device_memory = 0
+  dirty_set_destroy(&buffer.dirty_indices)
 }
 
 malloc_image_buffer :: proc(
@@ -242,9 +649,18 @@ malloc_image_buffer :: proc(
     sharingMode   = .EXCLUSIVE,
     samples       = {._1},
   }
-  vk.CreateImage(gpu_context.device, &create_info, nil, &img_buffer.image) or_return
+  vk.CreateImage(
+    gpu_context.device,
+    &create_info,
+    nil,
+    &img_buffer.image,
+  ) or_return
   mem_reqs: vk.MemoryRequirements
-  vk.GetImageMemoryRequirements(gpu_context.device, img_buffer.image, &mem_reqs)
+  vk.GetImageMemoryRequirements(
+    gpu_context.device,
+    img_buffer.image,
+    &mem_reqs,
+  )
   img_buffer.memory = allocate_vulkan_memory(
     gpu_context,
     mem_reqs,
@@ -367,7 +783,11 @@ transition_image_layout :: proc(
   return end_single_time_command(gpu_context, &cmd_buffer)
 }
 
-copy_image :: proc(gpu_context: ^GPUContext, dst: ImageBuffer, src: DataBuffer(u8)) -> vk.Result {
+copy_image :: proc(
+  gpu_context: ^GPUContext,
+  dst: ImageBuffer,
+  src: DataBuffer(u8),
+) -> vk.Result {
   transition_image_layout(
     gpu_context,
     dst.image,
@@ -477,7 +897,12 @@ create_image_buffer :: proc(
   ) or_return
   copy_image(gpu_context, img, staging) or_return
   aspect_mask := vk.ImageAspectFlags{.COLOR}
-  img.view = create_image_view(gpu_context.device, img.image, format, aspect_mask) or_return
+  img.view = create_image_view(
+    gpu_context.device,
+    img.image,
+    format,
+    aspect_mask,
+  ) or_return
   ret = .SUCCESS
   return
 }
@@ -504,9 +929,18 @@ depth_image_init :: proc(
     sharingMode   = .EXCLUSIVE,
     samples       = {._1},
   }
-  vk.CreateImage(gpu_context.device, &create_info, nil, &img_buffer.image) or_return
+  vk.CreateImage(
+    gpu_context.device,
+    &create_info,
+    nil,
+    &img_buffer.image,
+  ) or_return
   mem_requirements: vk.MemoryRequirements
-  vk.GetImageMemoryRequirements(gpu_context.device, img_buffer.image, &mem_requirements)
+  vk.GetImageMemoryRequirements(
+    gpu_context.device,
+    img_buffer.image,
+    &mem_requirements,
+  )
   memory_type_index, found := find_memory_type_index(
     gpu_context,
     mem_requirements.memoryTypeBits,
@@ -520,8 +954,18 @@ depth_image_init :: proc(
     allocationSize  = mem_requirements.size,
     memoryTypeIndex = memory_type_index,
   }
-  vk.AllocateMemory(gpu_context.device, &alloc_info, nil, &img_buffer.memory) or_return
-  vk.BindImageMemory(gpu_context.device, img_buffer.image, img_buffer.memory, 0)
+  vk.AllocateMemory(
+    gpu_context.device,
+    &alloc_info,
+    nil,
+    &img_buffer.memory,
+  ) or_return
+  vk.BindImageMemory(
+    gpu_context.device,
+    img_buffer.image,
+    img_buffer.memory,
+    0,
+  )
   cmd_buffer := begin_single_time_command(gpu_context) or_return
   barrier := vk.ImageMemoryBarrier {
     sType = .IMAGE_MEMORY_BARRIER,
@@ -595,7 +1039,11 @@ cube_depth_texture_init :: proc(
   }
   vk.CreateImage(gpu_context.device, &create_info, nil, &self.image) or_return
   mem_requirements: vk.MemoryRequirements
-  vk.GetImageMemoryRequirements(gpu_context.device, self.image, &mem_requirements)
+  vk.GetImageMemoryRequirements(
+    gpu_context.device,
+    self.image,
+    &mem_requirements,
+  )
   memory_type_index, found := find_memory_type_index(
     gpu_context,
     mem_requirements.memoryTypeBits,
@@ -609,7 +1057,12 @@ cube_depth_texture_init :: proc(
     allocationSize  = mem_requirements.size,
     memoryTypeIndex = memory_type_index,
   }
-  vk.AllocateMemory(gpu_context.device, &alloc_info, nil, &self.memory) or_return
+  vk.AllocateMemory(
+    gpu_context.device,
+    &alloc_info,
+    nil,
+    &self.memory,
+  ) or_return
   vk.BindImageMemory(gpu_context.device, self.image, self.memory, 0)
   // Create 6 image views (one per face)
   for i in 0 ..< 6 {
@@ -653,7 +1106,12 @@ cube_depth_texture_init :: proc(
       layerCount = 6,
     },
   }
-  vk.CreateImageView(gpu_context.device, &cube_view_info, nil, &self.view) or_return
+  vk.CreateImageView(
+    gpu_context.device,
+    &cube_view_info,
+    nil,
+    &self.view,
+  ) or_return
   return .SUCCESS
 }
 
@@ -696,9 +1154,18 @@ malloc_image_buffer_with_mips :: proc(
     sharingMode   = .EXCLUSIVE,
     samples       = {._1},
   }
-  vk.CreateImage(gpu_context.device, &create_info, nil, &img_buffer.image) or_return
+  vk.CreateImage(
+    gpu_context.device,
+    &create_info,
+    nil,
+    &img_buffer.image,
+  ) or_return
   mem_reqs: vk.MemoryRequirements
-  vk.GetImageMemoryRequirements(gpu_context.device, img_buffer.image, &mem_reqs)
+  vk.GetImageMemoryRequirements(
+    gpu_context.device,
+    img_buffer.image,
+    &mem_reqs,
+  )
   img_buffer.memory = allocate_vulkan_memory(
     gpu_context,
     mem_reqs,
@@ -913,7 +1380,11 @@ transition_vk_images :: proc(
   dst_stage: vk.PipelineStageFlags,
   dst_access_mask: vk.AccessFlags,
 ) {
-  barriers := make([]vk.ImageMemoryBarrier, len(images), context.temp_allocator)
+  barriers := make(
+    []vk.ImageMemoryBarrier,
+    len(images),
+    context.temp_allocator,
+  )
   for image, i in images {
     barriers[i] = vk.ImageMemoryBarrier {
       sType = .IMAGE_MEMORY_BARRIER,
@@ -1001,7 +1472,11 @@ transition_2d_images :: proc(
   dst_stage: vk.PipelineStageFlags,
   dst_access_mask: vk.AccessFlags,
 ) {
-  barriers := make([]vk.ImageMemoryBarrier, len(images), context.temp_allocator)
+  barriers := make(
+    []vk.ImageMemoryBarrier,
+    len(images),
+    context.temp_allocator,
+  )
   for texture, i in images {
     barriers[i] = vk.ImageMemoryBarrier {
       sType = .IMAGE_MEMORY_BARRIER,
@@ -1043,7 +1518,11 @@ transition_cube_images :: proc(
   dst_stage: vk.PipelineStageFlags,
   dst_access_mask: vk.AccessFlags,
 ) {
-  barriers := make([]vk.ImageMemoryBarrier, len(images), context.temp_allocator)
+  barriers := make(
+    []vk.ImageMemoryBarrier,
+    len(images),
+    context.temp_allocator,
+  )
   for texture, i in images {
     barriers[i] = vk.ImageMemoryBarrier {
       sType = .IMAGE_MEMORY_BARRIER,

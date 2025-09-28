@@ -212,11 +212,11 @@ visibility_system_init :: proc(
       buffers.descriptor_set = descriptor_sets[task_idx]
 
       node_info := vk.DescriptorBufferInfo {
-        buffer = resources_manager.node_data_buffer.buffer,
+        buffer = resources_manager.node_data_buffer.device_buffer,
         range  = vk.DeviceSize(resources_manager.node_data_buffer.bytes_count),
       }
       mesh_info := vk.DescriptorBufferInfo {
-        buffer = resources_manager.mesh_data_buffer.buffer,
+        buffer = resources_manager.mesh_data_buffer.device_buffer,
         range  = vk.DeviceSize(resources_manager.mesh_data_buffer.bytes_count),
       }
       world_info := vk.DescriptorBufferInfo {
