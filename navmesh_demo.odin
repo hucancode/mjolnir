@@ -16,43 +16,7 @@ import "mjolnir/world"
 import "vendor:glfw"
 import mu "vendor:microui"
 
-/*
-NAVIGATION MESH INTEGRATION DEMONSTRATION
-
-This example demonstrates the new integrated navigation mesh system:
-
-1. WORLD-BASED GEOMETRY:
-   - Create world nodes with mesh attachments
-   - Mark obstacles using navigation_obstacle flag in MeshAttachment
-   - Ground and obstacles are automatically collected from the world
-
-2. INTEGRATED BUILDING:
-   - Navigation mesh is built directly from world nodes
-   - Obstacles are automatically identified and marked as non-walkable
-   - Visualization is automatically set up through the engine's render pipeline
-
-3. ENGINE-LEVEL RENDERING:
-   - Navigation mesh rendering is integrated into the engine's render pipeline
-   - No need for manual renderer management
-   - Automatic rendering during transparency pass
-
-4. SIMPLIFIED API:
-   - Less code needed in application
-   - More engine-level functionality
-   - Better integration with existing systems
-
-CONTROLS:
-    Left Click - Set start position
-    Right Click - Set end position and find path
-    R - Rebuild navigation mesh from world
-    V - Toggle navigation mesh visibility
-    C - Clear path
-    D - Cycle color modes
-    SPACE - Generate random path
-*/
-
 // Navigation mesh demo with new world-integrated architecture
-global_demo_engine: mjolnir.Engine
 
 // Demo state - enhanced to match old demo features
 demo_state: struct {
@@ -81,10 +45,6 @@ demo_state: struct {
     show_original_mesh: bool,
     use_procedural:    bool,
 
-    // Serialization support
-    serialized_navmesh_path: string,
-    serialization_status:    string,
-
     // Camera control
     camera_auto_rotate: bool,
     camera_distance:    f32,
@@ -102,8 +62,6 @@ demo_state: struct {
     camera_height = 25,
     camera_angle = 0,
     mouse_move_threshold = 5.0,
-    serialized_navmesh_path = "saved_navmesh.navmesh",
-    serialization_status = "Ready",
     show_original_mesh = true,
     use_procedural = true,
 }
@@ -127,15 +85,14 @@ demo_main :: proc() {
         demo_state.use_procedural = true
         log.info("No OBJ file specified, using procedural geometry")
     }
-
-    global_demo_engine.setup_proc = demo_setup
-    global_demo_engine.update_proc = demo_update
-    global_demo_engine.render2d_proc = demo_render2d
-    global_demo_engine.key_press_proc = demo_key_pressed
-    global_demo_engine.mouse_press_proc = demo_mouse_pressed
-    global_demo_engine.mouse_move_proc = demo_mouse_moved
-
-    mjolnir.run(&global_demo_engine, 1280, 720, "Navigation Mesh - World Integration Demo")
+    engine := new(mjolnir.Engine)
+    engine.setup_proc = demo_setup
+    engine.update_proc = demo_update
+    engine.render2d_proc = demo_render2d
+    engine.key_press_proc = demo_key_pressed
+    engine.mouse_press_proc = demo_mouse_pressed
+    engine.mouse_move_proc = demo_mouse_moved
+    mjolnir.run(engine, 1280, 720, "Navigation Mesh - World Integration Demo")
 }
 
 demo_setup :: proc(engine_ptr: ^mjolnir.Engine) {
@@ -528,7 +485,7 @@ clear_path_visualization :: proc(engine_ptr: ^mjolnir.Engine) {
         despawn(engine_ptr, handle)
     }
     clear(&demo_state.path_waypoint_handles)
-    
+
     // Clear path from navigation renderer
     navmesh_renderer := get_navmesh_renderer(engine_ptr)
     navigation_renderer.clear_path(navmesh_renderer)
@@ -541,16 +498,16 @@ find_navmesh_point_from_mouse :: proc(engine_ptr: ^mjolnir.Engine, mouse_x, mous
 
     // Get ray from camera through mouse position
     width, height := glfw.GetWindowSize(engine_ptr.window)
-    
+
     // Debug mouse coordinates
     log.debugf("Mouse coordinates: (%.2f, %.2f), Window size: (%d, %d)", mouse_x, mouse_y, width, height)
-    
+
     // GLFW returns coordinates with origin at top-left, Y increases downward
     // viewport_to_world_ray expects this same coordinate system
     ray_origin, ray_dir := geometry.viewport_to_world_ray(f32(width), f32(height), mouse_x, mouse_y, mjolnir.get_main_camera(engine_ptr)^)
-    
-    log.debugf("Ray: origin=(%.2f, %.2f, %.2f), dir=(%.2f, %.2f, %.2f)", 
-              ray_origin.x, ray_origin.y, ray_origin.z, 
+
+    log.debugf("Ray: origin=(%.2f, %.2f, %.2f), dir=(%.2f, %.2f, %.2f)",
+              ray_origin.x, ray_origin.y, ray_origin.z,
               ray_dir.x, ray_dir.y, ray_dir.z)
 
     nav_context, ok := resources.get_nav_context(&engine_ptr.resource_manager, demo_state.nav_context_handle)
@@ -565,7 +522,7 @@ find_navmesh_point_from_mouse :: proc(engine_ptr: ^mjolnir.Engine, mouse_x, mous
         if t > 0 && t < 1000 {  // Reasonable distance
             ground_intersection := ray_origin + ray_dir * t
             log.debugf("Ground plane intersection: (%.2f, %.2f, %.2f)", ground_intersection.x, ground_intersection.y, ground_intersection.z)
-            
+
             // Check if this position is near the navigation mesh
             search_extents := [3]f32{2.0, 5.0, 2.0}
             status, poly_ref, nearest_pos := detour.find_nearest_poly(
@@ -574,7 +531,7 @@ find_navmesh_point_from_mouse :: proc(engine_ptr: ^mjolnir.Engine, mouse_x, mous
                 search_extents,
                 &nav_context.query_filter,
             )
-            
+
             if recast.status_succeeded(status) && poly_ref != recast.INVALID_POLY_REF {
                 log.debugf("Found navmesh point via ground intersection: (%.2f, %.2f, %.2f)", nearest_pos.x, nearest_pos.y, nearest_pos.z)
                 return nearest_pos, true
@@ -584,7 +541,7 @@ find_navmesh_point_from_mouse :: proc(engine_ptr: ^mjolnir.Engine, mouse_x, mous
 
     // Strategy 2: Sample along the ray at various distances (fallback)
     sample_distances := [10]f32{5, 10, 15, 20, 25, 30, 35, 40, 50, 60}
-    
+
     for dist in sample_distances {
         sample_pos := ray_origin + ray_dir * dist
         log.debugf("Testing ray sample at distance %.1f: (%.2f, %.2f, %.2f)", dist, sample_pos.x, sample_pos.y, sample_pos.z)
@@ -778,16 +735,6 @@ demo_render2d :: proc(engine_ptr: ^mjolnir.Engine, ctx: ^mu.Context) {
             }
 
             // Serialization controls
-            mu.label(ctx, "")
-            mu.label(ctx, "Serialization:")
-            mu.label(ctx, fmt.tprintf("Status: %s", demo_state.serialization_status))
-            if .SUBMIT in mu.button(ctx, "Save NavMesh (S)") {
-                save_navmesh(engine_ptr)
-            }
-            if .SUBMIT in mu.button(ctx, "Load NavMesh (L)") {
-                load_navmesh(engine_ptr)
-            }
-
             // Navigation mesh info
             if demo_state.navmesh_info != "" {
                 mu.label(ctx, "")
@@ -881,15 +828,6 @@ demo_key_pressed :: proc(engine_ptr: ^mjolnir.Engine, key, action, mods: int) {
     case glfw.KEY_P:
         // Print navigation mesh info
         print_navmesh_info(engine_ptr)
-
-    case glfw.KEY_S:
-        // Save navigation mesh to file
-        save_navmesh(engine_ptr)
-
-    case glfw.KEY_L:
-        // Load navigation mesh from file
-        load_navmesh(engine_ptr)
-
     case glfw.KEY_SPACE:
         // Generate random path
         if demo_state.nav_mesh_handle.generation != 0 {
@@ -938,57 +876,4 @@ print_navmesh_info :: proc(engine_ptr: ^mjolnir.Engine) {
                                          tile != nil && tile.header != nil ? tile.header.poly_count : 0,
                                          nav_mesh.cell_size)
     log.info("Navigation mesh info updated")
-}
-
-save_navmesh :: proc(engine_ptr: ^mjolnir.Engine) {
-    using mjolnir
-
-    if demo_state.nav_mesh_handle.generation == 0 {
-        demo_state.serialization_status = "No navmesh to save"
-        log.warn("No navigation mesh to save")
-        return
-    }
-
-    demo_state.serialization_status = "Saving..."
-    log.infof("Saving navigation mesh to: %s", demo_state.serialized_navmesh_path)
-
-    nav_mesh, ok := resources.get_navmesh(&engine_ptr.resource_manager, demo_state.nav_mesh_handle)
-    if !ok {
-        demo_state.serialization_status = "Failed to get navmesh"
-        log.error("Failed to get navigation mesh for saving")
-        return
-    }
-
-    // Get tile data for serialization
-    tile := detour.get_tile_at(&nav_mesh.detour_mesh, 0, 0, 0)
-    if tile == nil || tile.header == nil {
-        demo_state.serialization_status = "No tile data"
-        log.error("No tile data available for saving")
-        return
-    }
-
-    // For now, just indicate saving is not fully implemented in the new architecture
-    // This would require extending the navigation mesh serialization system
-    demo_state.serialization_status = "Save not implemented yet"
-    log.warn("Navigation mesh serialization not yet implemented in new architecture")
-    log.info("This feature requires extending the world navigation system")
-}
-
-load_navmesh :: proc(engine_ptr: ^mjolnir.Engine) {
-    using mjolnir
-
-    demo_state.serialization_status = "Loading..."
-    log.infof("Loading navigation mesh from: %s", demo_state.serialized_navmesh_path)
-
-    if !os.exists(demo_state.serialized_navmesh_path) {
-        demo_state.serialization_status = "File not found"
-        log.warnf("Navigation mesh file not found: %s", demo_state.serialized_navmesh_path)
-        return
-    }
-
-    // For now, just indicate loading is not fully implemented in the new architecture
-    // This would require extending the navigation mesh serialization system
-    demo_state.serialization_status = "Load not implemented yet"
-    log.warn("Navigation mesh loading not yet implemented in new architecture")
-    log.info("This feature requires extending the world navigation system")
 }

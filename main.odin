@@ -23,7 +23,6 @@ light_handles: [LIGHT_COUNT]mjolnir.Handle
 light_cube_handles: [LIGHT_COUNT]mjolnir.Handle
 ground_mat_handle: mjolnir.Handle
 hammer_handle: mjolnir.Handle
-engine: mjolnir.Engine
 forcefield_handle: mjolnir.Handle
 
 // Portal render target and related data
@@ -51,11 +50,12 @@ main :: proc() {
       return
     }
   }
+  engine:= new(mjolnir.Engine)
   engine.setup_proc = setup
   engine.update_proc = update
   engine.key_press_proc = on_key_pressed
   engine.custom_render_proc = custom_render
-  mjolnir.run(&engine, 1280, 720, "Mjolnir")
+  mjolnir.run(engine, 1280, 720, "Mjolnir")
 }
 
 setup :: proc(engine: ^mjolnir.Engine) {
