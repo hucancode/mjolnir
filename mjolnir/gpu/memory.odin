@@ -653,7 +653,7 @@ flush :: proc(
     u32(len(post_barriers[:])), raw_data(post_barriers[:]),
     0, nil,
   )
-  log.infof("Copied %d items using %d commands from staging buffer to device buffer", total, len(copy_regions))
+  // log.infof("Copied %d items using %d commands from staging buffer to device buffer", total, len(copy_regions))
   return .SUCCESS
 }
 

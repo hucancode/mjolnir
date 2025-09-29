@@ -47,7 +47,7 @@ main :: proc() {
     log.infof("Running mode: %s", args[1])
     switch args[1] {
     case "navmesh":
-      navmesh_visual_main()
+      demo_main()
       return
     }
   }
@@ -61,21 +61,10 @@ main :: proc() {
 setup :: proc(engine: ^mjolnir.Engine) {
   using mjolnir, geometry
   log.info("Setup function called!")
-  goldstar_texture_handle := resources.create_texture_handle(
-    &engine.gpu_context,
-    &engine.resource_manager,
-    "assets/gold-star.png",
-  )
   plain_material_handle := resources.create_material_handle(&engine.resource_manager)
   wireframe_material_handle := resources.create_material_handle(
     &engine.resource_manager,
     type = .WIREFRAME,
-  )
-  goldstar_material_handle := resources.create_material_handle(
-    &engine.resource_manager,
-    {.ALBEDO_TEXTURE},
-    type = .TRANSPARENT,
-    albedo_handle = goldstar_texture_handle,
   )
   cube_geom := make_cube()
   cube_mesh_handle := resources.create_mesh_handle(
@@ -342,6 +331,17 @@ setup :: proc(engine: ^mjolnir.Engine) {
       &engine.gpu_context,
       &engine.resource_manager,
       "assets/black-circle.png",
+    )
+    goldstar_texture_handle := resources.create_texture_handle(
+      &engine.gpu_context,
+      &engine.resource_manager,
+      "assets/gold-star.png",
+    )
+    goldstar_material_handle := resources.create_material_handle(
+      &engine.resource_manager,
+      {.ALBEDO_TEXTURE},
+      type = .TRANSPARENT,
+      albedo_handle = goldstar_texture_handle,
     )
     psys_handle1, _ := world.spawn_at(
       &engine.world,
