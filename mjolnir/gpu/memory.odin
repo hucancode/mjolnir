@@ -531,11 +531,21 @@ flush :: proc(
   command_buffer: vk.CommandBuffer,
   buffer: ^StagedBuffer($T),
 ) -> vk.Result {
-  @(static) run_count := 0
+  /*
+    Staging buffer race conditions:
+    - After we issue a vk.CmdCopyBuffer to flush all staging data, copy command is executed asynchronously. Meanwhile, update thread will continue to write data to staging buffer which may lead to inconsistent data
+    - In worst case, CPU will write to the same slot where vk.CmdCopyBuffer is copying and GPU will read incomplete data
+    - Luckily that trash data will likely be corrected the next frame as we will run a new vk.CmdCopyBuffer on the same incomplete slot we were copying earlier
+    - By the nature of the design, there are chances of race condition. We are relying on eventual correction to have good frames.
+
+    Verdict: The observed visual artifact caused by this race condition is minimal. Plus, the proper work to double buffer the staging buffer is implementation-heavy and memory-heavy. We accept this shortcomming for now
+    TODO: Investigate this in more detail when the issue is affecting visual quality more than 1% frames
+  */
+  // @(static) run_count := 0
   // if run_count >= 100 {
   //     return .SUCCESS
   // }
-  defer run_count += 1
+  // defer run_count += 1
   // Lock to prevent race conditions with write operations
   sync.mutex_lock(&buffer.dirty_mutex)
   defer sync.mutex_unlock(&buffer.dirty_mutex)
