@@ -140,6 +140,28 @@ record_shadow_pass :: proc(
   world_state: ^world.World,
 ) -> vk.Result {
   command_buffer := shadow.begin_record(&self.shadow, frame_index) or_return
+  // Ensure world matrix staging buffer transfers complete before shadow rendering
+  world_matrix_barrier := vk.BufferMemoryBarrier {
+    sType = .BUFFER_MEMORY_BARRIER,
+    srcAccessMask = {.TRANSFER_WRITE},
+    dstAccessMask = {.SHADER_READ, .UNIFORM_READ},
+    srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    buffer = resources_manager.world_matrix_buffer.device_buffer,
+    offset = 0,
+    size = vk.DeviceSize(vk.WHOLE_SIZE),
+  }
+
+  vk.CmdPipelineBarrier(
+    command_buffer,
+    {.TRANSFER},
+    {.VERTEX_SHADER},
+    {},
+    0, nil,
+    1, &world_matrix_barrier,
+    0, nil,
+  )
+
   shadow_include := resources.NodeFlagSet{.VISIBLE, .CASTS_SHADOW}
   shadow_exclude := resources.NodeFlagSet{
     .MATERIAL_TRANSPARENT,
