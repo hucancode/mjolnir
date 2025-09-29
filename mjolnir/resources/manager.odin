@@ -8,6 +8,7 @@ import "core:slice"
 import "core:strings"
 import "../geometry"
 import "../gpu"
+import detour "../navigation/detour"
 import stbi "vendor:stb/image"
 import vk "vendor:vulkan"
 
@@ -131,6 +132,9 @@ init :: proc(
   pool_init(&manager.nav_contexts)
   log.infof("Initializing navigation system... ")
   manager.navigation_system = {}
+  manager.navigation_system.geometry_cache = make([dynamic]NavigationGeometry, 0)
+  manager.navigation_system.obstacles = make([dynamic]NavObstacleEntry, 0)
+  manager.navigation_system.dirty_tiles = make(map[TileCoord]bool)
   manager.current_frame_index = 0
   log.infof("All resource pools initialized successfully")
   init_global_samplers(gpu_context, manager)
@@ -305,8 +309,11 @@ shutdown :: proc(
   // Navigation system cleanup
   for &entry in manager.nav_meshes.entries {
     if entry.generation > 0 && entry.active {
-      // Clean up navigation mesh
-      // TODO: detour mesh cleanup would be added here if needed
+      detour.nav_mesh_destroy(&entry.item.detour_mesh)
+      if entry.item.triangles != nil {
+        delete(entry.item.triangles)
+        entry.item.triangles = nil
+      }
     }
   }
   delete(manager.nav_meshes.entries)
@@ -324,6 +331,7 @@ shutdown :: proc(
   // Clean up navigation system
   delete(manager.navigation_system.geometry_cache)
   delete(manager.navigation_system.dirty_tiles)
+  delete(manager.navigation_system.obstacles)
   destroy_global_samplers(gpu_context, manager)
   destroy_bone_matrix_allocator(gpu_context, manager)
   destroy_camera_buffer(gpu_context, manager)

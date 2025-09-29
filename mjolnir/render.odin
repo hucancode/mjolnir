@@ -25,6 +25,7 @@ Renderer :: struct {
   particles:     particles.Renderer,
   post_process:  post_process.Renderer,
   ui:            debug_ui.Renderer,
+  navigation:    navigation_renderer.Renderer,
   targets:       targets.Manager,
 }
 
@@ -70,6 +71,7 @@ renderer_init :: proc(
     swapchain_extent.height,
     resources_manager,
   ) or_return
+  navigation_renderer.init(&self.navigation, gpu_context, resources_manager) or_return
   debug_ui.init(
     &self.ui,
     gpu_context,
@@ -96,6 +98,7 @@ renderer_shutdown :: proc(
   lighting.shutdown(&self.lighting, device, command_pool, resources_manager)
   geometry_pass.shutdown(&self.geometry, device, command_pool)
   shadow.shutdown(&self.shadow, device, command_pool)
+  navigation_renderer.destroy(&self.navigation, device)
   targets.shutdown(&self.targets)
 }
 
@@ -419,7 +422,6 @@ record_transparency_pass :: proc(
   resources_manager: ^resources.Manager,
   world_state: ^world.World,
   main_render_target: ^resources.RenderTarget,
-  navmesh_renderer: ^navigation_renderer.Renderer,
   color_format: vk.Format,
 ) -> vk.Result {
   command_buffer := transparency.begin_record(&self.transparency, frame_index, color_format) or_return
@@ -430,8 +432,9 @@ record_transparency_pass :: proc(
     resources_manager,
     frame_index,
   )
+  navigation_renderer.sync_with_resources(&self.navigation, gpu_context, resources_manager)
   navigation_renderer.render(
-    navmesh_renderer,
+    &self.navigation,
     command_buffer,
     linalg.MATRIX4F32_IDENTITY,
     main_render_target.camera.index,

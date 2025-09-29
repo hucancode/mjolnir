@@ -34,6 +34,8 @@ Renderer :: struct {
     color_mode:              ColorMode,
     debug_render_mode:       DebugMode,
     base_color:              [3]f32,
+    current_nav_mesh:        resources.Handle,
+    current_nav_mesh_version: u32,
 }
 
 Vertex :: struct {
@@ -95,6 +97,8 @@ init :: proc(renderer: ^Renderer, gpu_context: ^gpu.GPUContext, resources_manage
     renderer.debug_render_mode = .Wireframe
     renderer.base_color = {0.0, 0.8, 0.2}
     renderer.path_color = {1.0, 1.0, 0.0, 1.0}
+    renderer.current_nav_mesh = {}
+    renderer.current_nav_mesh_version = 0
     create_pipelines(renderer, gpu_context, resources_manager) or_return
     renderer.vertex_buffer = gpu.create_host_visible_buffer(gpu_context, Vertex, 16384, {.VERTEX_BUFFER}) or_return
     renderer.index_buffer = gpu.create_host_visible_buffer(gpu_context, u32, 32768, {.INDEX_BUFFER}) or_return
@@ -272,6 +276,125 @@ build_from_recast :: proc(self: ^Renderer, gpu_context: ^gpu.GPUContext,
     }
 
     return true
+}
+
+sync_with_resources :: proc(
+    renderer: ^Renderer,
+    gpu_context: ^gpu.GPUContext,
+    resources_manager: ^resources.Manager,
+) {
+    active := resources_manager.navigation_system.active_nav_mesh
+    if active.generation == 0 {
+        renderer.vertex_count = 0
+        renderer.index_count = 0
+        renderer.current_nav_mesh = {}
+        renderer.current_nav_mesh_version = 0
+        return
+    }
+
+    nav_mesh, ok := resources.get_navmesh(resources_manager, active)
+    if !ok {
+        return
+    }
+
+    if renderer.current_nav_mesh.index == active.index &&
+       renderer.current_nav_mesh.generation == active.generation &&
+       renderer.current_nav_mesh_version == nav_mesh.version {
+        return
+    }
+
+    triangle_count := len(nav_mesh.triangles)
+    if triangle_count == 0 {
+        renderer.vertex_count = 0
+        renderer.index_count = 0
+        renderer.current_nav_mesh = active
+        renderer.current_nav_mesh_version = nav_mesh.version
+        return
+    }
+
+    required_vertices := triangle_count * 3
+    current_vertex_capacity := renderer.vertex_buffer.bytes_count / size_of(Vertex)
+    if required_vertices > current_vertex_capacity {
+        gpu.data_buffer_destroy(gpu_context.device, &renderer.vertex_buffer)
+        new_buffer, ret := gpu.create_host_visible_buffer(
+            gpu_context,
+            Vertex,
+            required_vertices,
+            {.VERTEX_BUFFER},
+        )
+        if ret != .SUCCESS {
+            return
+        }
+        renderer.vertex_buffer = new_buffer
+    }
+
+    required_indices := triangle_count * 3
+    current_index_capacity := renderer.index_buffer.bytes_count / size_of(u32)
+    if required_indices > current_index_capacity {
+        gpu.data_buffer_destroy(gpu_context.device, &renderer.index_buffer)
+        new_index_buffer, ret := gpu.create_host_visible_buffer(
+            gpu_context,
+            u32,
+            required_indices,
+            {.INDEX_BUFFER},
+        )
+        if ret != .SUCCESS {
+            return
+        }
+        renderer.index_buffer = new_index_buffer
+    }
+
+    vertices := make([dynamic]Vertex, 0, required_vertices)
+    indices := make([dynamic]u32, 0, required_indices)
+    defer delete(vertices)
+    defer delete(indices)
+
+    for tri_index in 0 ..< triangle_count {
+        triangle := nav_mesh.triangles[tri_index]
+        p0 := triangle.positions[0]
+        p1 := triangle.positions[1]
+        p2 := triangle.positions[2]
+        edge1 := p1 - p0
+        edge2 := p2 - p0
+        normal := linalg.cross(edge1, edge2)
+        if linalg.length2(normal) > 0.0 {
+            normal = linalg.normalize(normal)
+        } else {
+            normal = [3]f32{0, 1, 0}
+        }
+        color := get_area_color(triangle.area_type, renderer.color_mode, renderer.base_color, renderer.alpha, u32(tri_index), 0)
+        vertices_to_add := [?][3]f32{p0, p1, p2}
+        for v in vertices_to_add {
+            append(&vertices, Vertex{
+                position = v,
+                color = color,
+                normal = normal,
+            })
+            append(&indices, u32(len(indices)))
+        }
+    }
+
+    if len(vertices) == 0 || len(indices) == 0 {
+        renderer.vertex_count = 0
+        renderer.index_count = 0
+        renderer.current_nav_mesh = active
+        renderer.current_nav_mesh_version = nav_mesh.version
+        return
+    }
+
+    vertex_result := gpu.write(&renderer.vertex_buffer, vertices[:])
+    if vertex_result != .SUCCESS {
+        return
+    }
+    index_result := gpu.write(&renderer.index_buffer, indices[:])
+    if index_result != .SUCCESS {
+        return
+    }
+
+    renderer.vertex_count = u32(len(vertices))
+    renderer.index_count = u32(len(indices))
+    renderer.current_nav_mesh = active
+    renderer.current_nav_mesh_version = nav_mesh.version
 }
 
 generate_random_color :: proc(seed: u32, alpha: f32) -> [4]f32 {
