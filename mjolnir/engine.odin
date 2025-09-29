@@ -86,9 +86,12 @@ despawn :: proc(engine: ^Engine, handle: Handle) -> bool {
   return world.destroy_node_handle(&engine.world, handle)
 }
 
-// Add missing navmesh functions
-navmesh_build_from_recast :: navmesh_renderer.build_from_recast
-navmesh_get_triangle_count :: navmesh_renderer.get_triangle_count
+// Navigation mesh convenience functions
+navmesh_load_data :: navmesh_renderer.load_navmesh_data
+
+get_navmesh_renderer :: proc(engine: ^Engine) -> ^navmesh_renderer.Renderer {
+  return &engine.render.navigation
+}
 
 g_context: runtime.Context
 
@@ -172,7 +175,6 @@ Engine :: struct {
   custom_render_proc:          CustomRenderProc,
   render_error_count:          u32,
   render:                      Renderer,
-  navmesh:                     navmesh_renderer.Renderer,
   command_buffers:             [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
   cursor_pos:                  [2]i32,
   // Deferred cleanup for thread safety
@@ -285,8 +287,6 @@ init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
     self.render.targets.main,
     get_window_dpi(self.window),
   ) or_return
-  log.debugf("initializing navigation mesh renderer")
-  navmesh_renderer.init(&self.navmesh, &self.gpu_context, &self.resource_manager) or_return
   glfw.SetKeyCallback(
     self.window,
     proc "c" (window: glfw.WindowHandle, key, scancode, action, mods: c.int) {
@@ -574,7 +574,6 @@ shutdown :: proc(self: ^Engine) {
   delete(self.pending_node_deletions)
   vk.DestroyFence(self.gpu_context.device, self.frame_fence, nil)
   renderer_shutdown(&self.render, self.gpu_context.device, self.gpu_context.command_pool, &self.resource_manager)
-  navmesh_renderer.destroy(&self.navmesh, self.gpu_context.device)
   world.shutdown(&self.world, &self.gpu_context, &self.resource_manager)
   resources.shutdown(&self.resource_manager, &self.gpu_context)
   gpu.swapchain_destroy(&self.swapchain, self.gpu_context.device)
@@ -715,7 +714,6 @@ render :: proc(self: ^Engine) -> vk.Result {
     &self.resource_manager,
     &self.world,
     main_render_target,
-    &self.navmesh,
     self.swapchain.format.format,
   )
   record_post_process_pass(

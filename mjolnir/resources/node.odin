@@ -6,6 +6,7 @@ NodeFlag :: enum u32 {
   MATERIAL_TRANSPARENT,
   MATERIAL_WIREFRAME,
   CASTS_SHADOW,
+  NAVIGATION_OBSTACLE,
 }
 
 NodeFlagSet :: bit_set[NodeFlag; u32]

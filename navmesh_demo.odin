@@ -8,8 +8,6 @@ import "core:math/rand"
 import "core:os"
 import "mjolnir"
 import "mjolnir/geometry"
-import "mjolnir/gpu"
-import "mjolnir/navigation"
 import "mjolnir/navigation/recast"
 import "mjolnir/navigation/detour"
 import navigation_renderer "mjolnir/render/navigation"
@@ -19,161 +17,148 @@ import "vendor:glfw"
 import mu "vendor:microui"
 
 /*
-NAVIGATION MESH SERIALIZATION DEMONSTRATION
+NAVIGATION MESH INTEGRATION DEMONSTRATION
 
-This example demonstrates the complete offline/runtime workflow with serialization:
+This example demonstrates the new integrated navigation mesh system:
 
-1. GEOMETRY INPUT:
-   - Load OBJ file (if provided as argument) OR use procedural geometry
-   - Convert to navigation input format
+1. WORLD-BASED GEOMETRY:
+   - Create world nodes with mesh attachments
+   - Mark obstacles using navigation_obstacle flag in MeshAttachment
+   - Ground and obstacles are automatically collected from the world
 
-2. OFFLINE PHASE (Recast):
-   - Build heightfield from geometry
-   - Generate navigation mesh polygons
-   - Create detail mesh
+2. INTEGRATED BUILDING:
+   - Navigation mesh is built directly from world nodes
+   - Obstacles are automatically identified and marked as non-walkable
+   - Visualization is automatically set up through the engine's render pipeline
 
-3. SERIALIZATION:
-   - Save navigation mesh to file (.navmesh format)
-   - Persistent storage for runtime loading
+3. ENGINE-LEVEL RENDERING:
+   - Navigation mesh rendering is integrated into the engine's render pipeline
+   - No need for manual renderer management
+   - Automatic rendering during transparency pass
 
-4. RUNTIME PHASE (Detour):
-   - Load navigation mesh from file
-   - Create pathfinding query system
-   - Perform real-time path queries
-
-5. VISUALIZATION:
-   - Render navigation mesh
-   - Interactive path planning with mouse
-   - Visual feedback for serialization status
-
-USAGE:
-    ./navmesh_visual_example [obj_file]
-    ./navmesh_visual_example procedural   # Use built-in geometry
+4. SIMPLIFIED API:
+   - Less code needed in application
+   - More engine-level functionality
+   - Better integration with existing systems
 
 CONTROLS:
-    S - Save navigation mesh to file
-    L - Load navigation mesh from file
-    R - Rebuild navigation mesh from geometry
     Left Click - Set start position
     Right Click - Set end position and find path
-
-DEMONSTRATION FLOW:
-    1. App starts and builds navmesh from geometry (offline phase)
-    2. Press S to save navmesh to file (serialization)
-    3. Press L to load navmesh from file (runtime phase)
-    4. Use mouse to test pathfinding on loaded mesh
+    R - Rebuild navigation mesh from world
+    V - Toggle navigation mesh visibility
+    C - Clear path
+    D - Cycle color modes
+    SPACE - Generate random path
 */
 
-// Navigation mesh visual example - demonstrates rendering the navigation mesh with serialization
-// Global engine instance for navmesh demo (avoids stack overflow)
-global_navmesh_engine: mjolnir.Engine
+// Navigation mesh demo with new world-integrated architecture
+global_demo_engine: mjolnir.Engine
 
-navmesh_visual_main :: proc() {
-    // Initialize and run the engine with our custom setup
-    global_navmesh_engine.setup_proc = navmesh_setup
-    global_navmesh_engine.update_proc = navmesh_update
-    global_navmesh_engine.render2d_proc = navmesh_render2d
-    global_navmesh_engine.key_press_proc = navmesh_key_pressed
-    global_navmesh_engine.mouse_press_proc = navmesh_mouse_pressed
-    global_navmesh_engine.mouse_move_proc = navmesh_mouse_moved
-
-    mjolnir.run(&global_navmesh_engine, 1280, 720, "Navigation Mesh with Serialization")
-}
-
-// Global state for navigation example
-navmesh_state: struct {
-    show_original_mesh: bool,
-    navmesh_built: bool,
-    poly_mesh: ^recast.Poly_Mesh,
-    detail_mesh: ^recast.Poly_Mesh_Detail,
-
-    // Original OBJ mesh
-    obj_mesh_handle: mjolnir.Handle,
-    obj_mesh_node: ^world.Node,
-    obj_node_handle: mjolnir.Handle,
+// Demo state - enhanced to match old demo features
+demo_state: struct {
+    nav_mesh_handle:   mjolnir.Handle,
+    nav_context_handle: mjolnir.Handle,
 
     // Pathfinding state
-    nav_mesh: ^detour.Nav_Mesh,
-    nav_query: ^detour.Nav_Mesh_Query,
-    filter: detour.Query_Filter,
+    start_pos:         [3]f32,
+    end_pos:           [3]f32,
+    current_path:      [][3]f32,
+    has_path:          bool,
 
-    // Path visualization
-    start_pos: [3]f32,
-    end_pos: [3]f32,
-    path_points: [dynamic][3]f32,
-    has_path: bool,
-    path_status: recast.Status,
-
-    // Visualization handles
-    path_waypoint_handles: [dynamic]mjolnir.Handle,
+    // Visual markers
     start_marker_handle: mjolnir.Handle,
-    end_marker_handle: mjolnir.Handle,
+    end_marker_handle:   mjolnir.Handle,
+    path_waypoint_handles: [dynamic]mjolnir.Handle,
 
-    // Mouse picking state
-    picking_mode: PickingMode,
-    hover_pos: [3]f32,
-    hover_valid: bool,
-    last_mouse_pos: [2]f32,
-    mouse_move_threshold: f32,
+    // Demo scene nodes
+    ground_handle:     mjolnir.Handle,
+    obstacle_handles:  [dynamic]mjolnir.Handle,
 
-    // Serialization state
+    // OBJ file support
+    obj_mesh_handle:   mjolnir.Handle,
+    obj_node_handle:   mjolnir.Handle,
+    obj_mesh_node:     ^world.Node,
+    show_original_mesh: bool,
+    use_procedural:    bool,
+
+    // Serialization support
     serialized_navmesh_path: string,
-    serialization_status: string,
-
-    // Workflow demonstration state
-    workflow_phase: WorkflowPhase,
-    phase_description: string,
+    serialization_status:    string,
 
     // Camera control
     camera_auto_rotate: bool,
-    camera_distance: f32,
-    camera_height: f32,
-    camera_angle: f32,
+    camera_distance:    f32,
+    camera_height:      f32,
+    camera_angle:       f32,
+
+    // Mouse picking
+    last_mouse_pos:     [2]f32,
+    mouse_move_threshold: f32,
+
+    // Navigation mesh info
+    navmesh_info:       string,
 } = {
-    show_original_mesh = true,
-    camera_auto_rotate = false,
     camera_distance = 40,
     camera_height = 25,
     camera_angle = 0,
-    mouse_move_threshold = 5.0,  // Only update hover when mouse moves more than 5 pixels
+    mouse_move_threshold = 5.0,
     serialized_navmesh_path = "saved_navmesh.navmesh",
     serialization_status = "Ready",
-    workflow_phase = .Initial,
-    phase_description = "Starting up...",
+    show_original_mesh = true,
+    use_procedural = true,
 }
 
-PickingMode :: enum {
-    None,
-    PickingStart,
-    PickingEnd,
+demo_main :: proc() {
+    // Handle command line arguments for OBJ file loading
+    if len(os.args) > 2 {
+        log.debugf("Command line arguments: %v", os.args)
+        obj_file := os.args[2]
+        if obj_file != "procedural" && os.exists(obj_file) {
+            demo_state.use_procedural = false
+            log.infof("Will load OBJ file: %s", obj_file)
+        } else if obj_file == "procedural" {
+            demo_state.use_procedural = true
+            log.info("Using procedural geometry")
+        } else {
+            log.warnf("OBJ file not found: %s, using procedural geometry", obj_file)
+            demo_state.use_procedural = true
+        }
+    } else {
+        demo_state.use_procedural = true
+        log.info("No OBJ file specified, using procedural geometry")
+    }
+
+    global_demo_engine.setup_proc = demo_setup
+    global_demo_engine.update_proc = demo_update
+    global_demo_engine.render2d_proc = demo_render2d
+    global_demo_engine.key_press_proc = demo_key_pressed
+    global_demo_engine.mouse_press_proc = demo_mouse_pressed
+    global_demo_engine.mouse_move_proc = demo_mouse_moved
+
+    mjolnir.run(&global_demo_engine, 1280, 720, "Navigation Mesh - World Integration Demo")
 }
 
-WorkflowPhase :: enum {
-    Initial,          // Starting state
-    GeometryLoaded,   // Geometry input loaded
-    OfflineBuilding,  // Recast processing
-    OfflineComplete,  // Navigation mesh built
-    Serialized,       // Saved to file
-    RuntimeLoaded,    // Loaded from file for runtime
-    Ready,           // Ready for pathfinding
-}
-
-navmesh_setup :: proc(engine_ptr: ^mjolnir.Engine) {
+demo_setup :: proc(engine_ptr: ^mjolnir.Engine) {
     using mjolnir, geometry
-    log.info("Navigation mesh example setup")
+    log.info("Navigation mesh demo setup with world integration")
 
     // Initialize dynamic arrays
-    navmesh_state.path_points = make([dynamic][3]f32)
-    navmesh_state.path_waypoint_handles = make([dynamic]Handle)
+    demo_state.obstacle_handles = make([dynamic]Handle, 0)
+    demo_state.path_waypoint_handles = make([dynamic]Handle, 0)
 
-    // Add some lights
+    // Load geometry based on command line arguments
+    if !demo_state.use_procedural && len(os.args) > 2 {
+        create_obj_visualization_mesh(engine_ptr, os.args[2])
+    }
+
+    // Add lights
     dir_handle, dir_node := world.spawn(&engine_ptr.world, nil, &engine_ptr.resource_manager)
     dir_attachment := world.create_directional_light_attachment(
         dir_handle,
         &engine_ptr.resource_manager,
         &engine_ptr.gpu_context,
-        {0.8, 0.8, 0.8, 1.0}, // color
-        true, // cast_shadow
+        {0.8, 0.8, 0.8, 1.0},
+        true,
     )
     dir_node.attachment = dir_attachment
 
@@ -182,386 +167,141 @@ navmesh_setup :: proc(engine_ptr: ^mjolnir.Engine) {
         point_handle,
         &engine_ptr.resource_manager,
         &engine_ptr.gpu_context,
-        {0.5, 0.5, 0.5, 1.0}, // color
-        20, // radius
-        false, // cast_shadow
+        {0.5, 0.5, 0.5, 1.0},
+        20,
+        false,
     )
     point_node.attachment = point_attachment
 
-    // Setup camera - adjusted for larger scene
+    // Setup camera
     main_camera := get_main_camera(engine_ptr)
     if main_camera != nil {
         camera_look_at(main_camera, {35, 25, 35}, {0, 0, 0}, {0, 1, 0})
     }
 
-    // Build navigation mesh
-    use_procedural := build_navmesh(engine_ptr)
-
-    // Start in picking mode
-    navmesh_state.picking_mode = .PickingStart
-
-    // Test pathfinding at startup for both procedural and obj geometry
-    if use_procedural || true {
-        log.info("=== TESTING PATHFINDING AT STARTUP ===")
-        log.info("Testing path from corner to corner that should go around obstacles")
-        log.info("Note: Ground is 50x50 (-25 to 25), with 5 obstacles well-spaced")
-        navmesh_state.start_pos = {-20, 0, -20}
-        navmesh_state.end_pos = {20, 0, 20}
-        log.infof("Start: (%.2f, %.2f, %.2f), End: (%.2f, %.2f, %.2f)",
-            navmesh_state.start_pos.x, navmesh_state.start_pos.y, navmesh_state.start_pos.z,
-            navmesh_state.end_pos.x, navmesh_state.end_pos.y, navmesh_state.end_pos.z)
-
-        // Create visual markers for start and end positions
-        update_position_marker(engine_ptr, &navmesh_state.start_marker_handle, navmesh_state.start_pos, {0, 1, 0, 1})
-        update_position_marker(engine_ptr, &navmesh_state.end_marker_handle, navmesh_state.end_pos, {1, 0, 0, 1})
-
-        // Find and visualize the path
-        find_path(&global_navmesh_engine)
-        update_path_visualization(&global_navmesh_engine)
-
-        log.info("=== END OF STARTUP PATHFINDING TEST ===")
+    // Create demo scene with world nodes (only if using procedural geometry)
+    if demo_state.use_procedural {
+        create_demo_scene(engine_ptr)
     }
+
+    // Build navigation mesh from the world
+    build_navigation_mesh_from_world(engine_ptr)
+
+    // Set up initial pathfinding test
+    demo_state.start_pos = {-20, 0, -20}
+    demo_state.end_pos = {20, 0, 20}
+
+    // Create visual markers
+    update_position_marker(engine_ptr, &demo_state.start_marker_handle, demo_state.start_pos, {0, 1, 0, 1})
+    update_position_marker(engine_ptr, &demo_state.end_marker_handle, demo_state.end_pos, {1, 0, 0, 1})
+
+    // Find initial path
+    find_path(engine_ptr)
+
+    log.info("Navigation mesh demo setup complete")
 }
 
-build_navmesh :: proc(engine_ptr: ^mjolnir.Engine) -> (use_procedural: bool) {
+create_demo_scene :: proc(engine_ptr: ^mjolnir.Engine) {
     using mjolnir, geometry
 
-    if os.exists(navmesh_state.serialized_navmesh_path) {
-        log.info("Loading saved navmesh for runtime use")
-        try_load_saved_navmesh(engine_ptr)
+    log.info("Creating demo scene with world nodes")
 
-        if navmesh_state.nav_mesh != nil {
-            obj_file := ""
-            if len(os.args) > 2 {
-                obj_file = os.args[2]
-            }
-            use_procedural = obj_file == "" || obj_file == "procedural"
+    // Create ground as a world node (using scaled quad as ground)
+    ground_geom := geometry.make_quad([4]f32{0.2, 0.6, 0.2, 1.0})
+    // Scale the ground vertices to make it larger
+    for &vertex in ground_geom.vertices {
+        vertex.position.x *= 50
+        vertex.position.z *= 50
+    }
+    ground_mesh_handle := resources.create_mesh_handle(
+        &engine_ptr.gpu_context,
+        &engine_ptr.resource_manager,
+        ground_geom,
+    )
 
-            if !use_procedural && os.exists(obj_file) {
-                create_obj_visualization_mesh(engine_ptr, obj_file)
-            }
+    ground_material_handle := resources.create_material_handle(
+        &engine_ptr.resource_manager,
+        metallic_value = 0.1,
+        roughness_value = 0.8,
+        emissive_value = 0.02,
+    )
 
-            return use_procedural
-        } else {
-            log.warn("Failed to load saved navmesh, building from scratch")
-        }
+    ground_handle, ground_node := spawn(
+        engine_ptr,
+        [3]f32{0, 0, 0},
+        world.MeshAttachment{
+            handle = ground_mesh_handle,
+            material = ground_material_handle,
+            cast_shadow = false,
+            navigation_obstacle = false,  // Ground should be walkable
+        },
+    )
+    demo_state.ground_handle = ground_handle
+    // Name it so it's recognized as walkable ground
+    ground_node.name = "ground"
+
+    // Create obstacles as world nodes with names containing "obstacle"
+    obstacle_positions := [][3]f32{
+        {-10, 1.5, -10}, // Obstacle 1
+        {10, 1.5, -10},  // Obstacle 2
+        {-10, 1.5, 10},  // Obstacle 3
+        {10, 1.5, 10},   // Obstacle 4
+        {0, 2, 0},       // Central obstacle (taller)
     }
 
-    // Clean up previous mesh if any
-    if navmesh_state.poly_mesh != nil {
-        recast.free_poly_mesh(navmesh_state.poly_mesh)
-        navmesh_state.poly_mesh = nil
-    }
-    if navmesh_state.detail_mesh != nil {
-        recast.free_poly_mesh_detail(navmesh_state.detail_mesh)
-        navmesh_state.detail_mesh = nil
+    obstacle_sizes := [][3]f32{
+        {2, 3, 2},     // Small obstacles
+        {2, 3, 2},
+        {2, 3, 2},
+        {2, 3, 2},
+        {4, 4, 4},     // Larger central obstacle
     }
 
-    obj_file := ""
-    if len(os.args) > 2 {
-        obj_file = os.args[2]
-    }
-    vertices: [][3]f32
-    indices: []i32
-    areas: []u8
-    defer delete(vertices)
-    defer delete(indices)
-    defer delete(areas)
+    for position, i in obstacle_positions {
+        size := obstacle_sizes[i]
 
-    load_ok := false
-
-    use_procedural = obj_file == "" || obj_file == "procedural"
-
-    if !use_procedural && os.exists(obj_file) {
-        vertices, indices, areas, load_ok = navigation.load_obj_to_navmesh_input(obj_file, 1.0, 45.0)
-
-        if load_ok {
-            create_obj_visualization_mesh(engine_ptr, obj_file)
-        } else {
-            log.warn("Failed to load OBJ file, using procedural geometry")
+        // Create obstacle geometry (using scaled cube as box)
+        obstacle_geom := geometry.make_cube([4]f32{0.8, 0.2, 0.2, 1.0})
+        // Scale the cube vertices to match desired size
+        for &vertex in obstacle_geom.vertices {
+            vertex.position.x *= size.x
+            vertex.position.y *= size.y
+            vertex.position.z *= size.z
         }
-    }
+        obstacle_mesh_handle := resources.create_mesh_handle(
+            &engine_ptr.gpu_context,
+            &engine_ptr.resource_manager,
+            obstacle_geom,
+        )
 
-    if !load_ok {
+        obstacle_material_handle := resources.create_material_handle(
+            &engine_ptr.resource_manager,
+            metallic_value = 0.3,
+            roughness_value = 0.7,
+            emissive_value = 0.1,
+        )
 
-        // Create a larger test scene with ground and multiple well-spaced obstacles
-        // Ground quad (50x50 units) - much larger for better navigation
-        ground_verts := [][3]f32{
-            {-25, 0, -25},  // Bottom-left
-            { 25, 0, -25},  // Bottom-right
-            { 25, 0,  25},  // Top-right
-            {-25, 0,  25},  // Top-left
-        }
+        // Spawn obstacle node with navigation_obstacle flag set
+        obstacle_handle, obstacle_node := spawn(
+            engine_ptr,
+            position,
+            world.MeshAttachment{
+                handle = obstacle_mesh_handle,
+                material = obstacle_material_handle,
+                cast_shadow = true,
+                navigation_obstacle = true,  // Mark as navigation obstacle
+            },
+        )
 
-        // Create multiple smaller obstacles well-spaced and away from edges
-        // Smaller obstacles for better connectivity
-        // Obstacle 1: Small box at (-10, 0, -10) - reduced from 4x4 to 2x2
-        obstacle1_verts := [][3]f32{
-            // Bottom face (y=0)
-            {-11, 0, -11}, {-9, 0, -11}, {-9, 0, -9}, {-11, 0, -9},
-            // Top face (y=3)
-            {-11, 3, -11}, {-9, 3, -11}, {-9, 3, -9}, {-11, 3, -9},
-        }
+        // Set name for identification
+        obstacle_node.name = fmt.tprintf("obstacle_%d", i + 1)
 
-        // Obstacle 2: Small box at (10, 0, -10) - reduced from 4x4 to 2x2
-        obstacle2_verts := [][3]f32{
-            // Bottom face (y=0)
-            {9, 0, -11}, {11, 0, -11}, {11, 0, -9}, {9, 0, -9},
-            // Top face (y=3)
-            {9, 3, -11}, {11, 3, -11}, {11, 3, -9}, {9, 3, -9},
-        }
-
-        // Obstacle 3: Small box at (-10, 0, 10) - reduced from 4x4 to 2x2
-        obstacle3_verts := [][3]f32{
-            // Bottom face (y=0)
-            {-11, 0, 9}, {-9, 0, 9}, {-9, 0, 11}, {-11, 0, 11},
-            // Top face (y=3)
-            {-11, 3, 9}, {-9, 3, 9}, {-9, 3, 11}, {-11, 3, 11},
-        }
-
-        // Obstacle 4: Small box at (10, 0, 10) - reduced from 4x4 to 2x2
-        obstacle4_verts := [][3]f32{
-            // Bottom face (y=0)
-            {9, 0, 9}, {11, 0, 9}, {11, 0, 11}, {9, 0, 11},
-            // Top face (y=3)
-            {9, 3, 9}, {11, 3, 9}, {11, 3, 11}, {9, 3, 11},
-        }
-
-        // Obstacle 5: Central obstacle at (0, 0, 0) - reduced from 6x6 to 4x4
-        obstacle5_verts := [][3]f32{
-            // Bottom face (y=0)
-            {-2, 0, -2}, {2, 0, -2}, {2, 0, 2}, {-2, 0, 2},
-            // Top face (y=4)
-            {-2, 4, -2}, {2, 4, -2}, {2, 4, 2}, {-2, 4, 2},
-        }
-
-        log.info("Created larger ground (50x50) with 5 well-spaced obstacles")
-        log.info("Obstacles at: (-10,-10), (10,-10), (-10,10), (10,10), and center")
-
-        // Combine vertices
-        total_verts := len(ground_verts) + len(obstacle1_verts) + len(obstacle2_verts) +
-                      len(obstacle3_verts) + len(obstacle4_verts) + len(obstacle5_verts)
-        vertices = make([][3]f32, total_verts)
-        offset := 0
-        copy(vertices[offset:], ground_verts[:])
-        offset += len(ground_verts)
-        copy(vertices[offset:], obstacle1_verts[:])
-        offset += len(obstacle1_verts)
-        copy(vertices[offset:], obstacle2_verts[:])
-        offset += len(obstacle2_verts)
-        copy(vertices[offset:], obstacle3_verts[:])
-        offset += len(obstacle3_verts)
-        copy(vertices[offset:], obstacle4_verts[:])
-        offset += len(obstacle4_verts)
-        copy(vertices[offset:], obstacle5_verts[:])
-
-        // Create indices
-        // Ground indices (2 triangles) - CLOCKWISE winding for upward normal
-        ground_indices := []i32{
-            0, 2, 1,  // First triangle - CW when viewed from above
-            0, 3, 2,  // Second triangle - CW when viewed from above
-        }
-
-        // Helper to create obstacle indices
-        create_box_indices :: proc(base: i32, allocator := context.allocator) -> []i32 {
-            indices := make([]i32, 36, allocator)  // 12 triangles * 3 vertices
-            // Bottom face
-            indices[0] = base + 0; indices[1] = base + 2; indices[2] = base + 1;
-            indices[3] = base + 0; indices[4] = base + 3; indices[5] = base + 2;
-            // Top face
-            indices[6] = base + 4; indices[7] = base + 5; indices[8] = base + 6;
-            indices[9] = base + 4; indices[10] = base + 6; indices[11] = base + 7;
-            // Front face
-            indices[12] = base + 0; indices[13] = base + 1; indices[14] = base + 5;
-            indices[15] = base + 0; indices[16] = base + 5; indices[17] = base + 4;
-            // Back face
-            indices[18] = base + 2; indices[19] = base + 3; indices[20] = base + 7;
-            indices[21] = base + 2; indices[22] = base + 7; indices[23] = base + 6;
-            // Left face
-            indices[24] = base + 0; indices[25] = base + 4; indices[26] = base + 7;
-            indices[27] = base + 0; indices[28] = base + 7; indices[29] = base + 3;
-            // Right face
-            indices[30] = base + 1; indices[31] = base + 2; indices[32] = base + 6;
-            indices[33] = base + 1; indices[34] = base + 6; indices[35] = base + 5;
-            return indices
-        }
-
-        // Create indices for all obstacles
-        obstacle1_base := i32(len(ground_verts))
-        obstacle1_indices := create_box_indices(obstacle1_base, context.temp_allocator)
-
-        obstacle2_base := obstacle1_base + i32(len(obstacle1_verts))
-        obstacle2_indices := create_box_indices(obstacle2_base, context.temp_allocator)
-
-        obstacle3_base := obstacle2_base + i32(len(obstacle2_verts))
-        obstacle3_indices := create_box_indices(obstacle3_base, context.temp_allocator)
-
-        obstacle4_base := obstacle3_base + i32(len(obstacle3_verts))
-        obstacle4_indices := create_box_indices(obstacle4_base, context.temp_allocator)
-
-        obstacle5_base := obstacle4_base + i32(len(obstacle4_verts))
-        obstacle5_indices := create_box_indices(obstacle5_base, context.temp_allocator)
-
-        // Combine indices
-        total_indices := len(ground_indices) + len(obstacle1_indices) + len(obstacle2_indices) +
-                        len(obstacle3_indices) + len(obstacle4_indices) + len(obstacle5_indices)
-        indices = make([]i32, total_indices)
-        offset = 0
-        copy(indices[offset:], ground_indices[:])
-        offset += len(ground_indices)
-        copy(indices[offset:], obstacle1_indices[:])
-        offset += len(obstacle1_indices)
-        copy(indices[offset:], obstacle2_indices[:])
-        offset += len(obstacle2_indices)
-        copy(indices[offset:], obstacle3_indices[:])
-        offset += len(obstacle3_indices)
-        copy(indices[offset:], obstacle4_indices[:])
-        offset += len(obstacle4_indices)
-        copy(indices[offset:], obstacle5_indices[:])
-
-        // Create areas
-        num_ground_tris := len(ground_indices) / 3
-        num_obstacle_tris := (len(obstacle1_indices) + len(obstacle2_indices) +
-                             len(obstacle3_indices) + len(obstacle4_indices) +
-                             len(obstacle5_indices)) / 3
-        total_tris := num_ground_tris + num_obstacle_tris
-        areas = make([]u8, total_tris)
-        // Ground is walkable
-        for i in 0..<num_ground_tris {
-            areas[i] = recast.RC_WALKABLE_AREA
-        }
-        // All obstacles are not walkable
-        for i in num_ground_tris..<total_tris {
-            areas[i] = recast.RC_NULL_AREA
-        }
-
-        log.infof("Scene geometry: %d vertices, %d triangles", len(vertices), len(indices)/3)
-        log.infof("Areas array length: %d", len(areas))
-        log.infof("Walkable areas: %d, Non-walkable areas: %d", num_ground_tris, num_obstacle_tris)
-    } else {
-        log.infof("Scene geometry: %d vertices, %d triangles", len(vertices), len(indices)/3)
-        log.infof("Areas array length: %d", len(areas))
+        append(&demo_state.obstacle_handles, obstacle_handle)
     }
 
-    // Configure Recast - Use EXACT RecastDemo default values for consistency
-    config := recast.Config{
-        cs = 0.3,                                        // Cell size (RecastDemo default)
-        ch = 0.2,                                        // Cell height (RecastDemo default)
-        walkable_slope_angle = 45,                      // Max slope (RecastDemo default)
-        walkable_height = i32(math.ceil_f32(2.0 / 0.2)),    // Agent height = 2.0m -> 10 cells
-        walkable_climb = i32(math.floor_f32(0.9 / 0.2)),    // Agent max climb = 0.9m -> 4 cells
-        walkable_radius = i32(math.ceil_f32(0.6 / 0.3)),    // Agent radius = 0.6m / cs=0.3 -> 2 cells (RecastDemo default)
-        max_edge_len = i32(12.0 / 0.3),                 // Max edge length = 12m -> 40 cells
-        max_simplification_error = 1.3,                 // RecastDemo default
-        min_region_area = 8 * 8,                        // RecastDemo default (m_regionMinSize=8)
-        merge_region_area = 20 * 20,                    // RecastDemo default (m_regionMergeSize=20)
-        max_verts_per_poly = 6,                         // RecastDemo default
-        detail_sample_dist = 6.0 * 0.3,                 // RecastDemo default (m_detailSampleDist=6 * cs)
-        detail_sample_max_error = 1.0 * 0.2,            // RecastDemo default (m_detailSampleMaxError=1 * ch)
-        border_size = 0,                                 // No border padding
-    }
-
-    // Build navigation mesh
-    log.info("=== OFFLINE PHASE: Building Navigation Mesh with Recast ===")
-    log.infof("Config: cs=%.2f, ch=%.2f, walkable_radius=%d, min_region=%d, merge_region=%d",
-              config.cs, config.ch, config.walkable_radius, config.min_region_area, config.merge_region_area)
-    pmesh, dmesh, ok := recast.build_navmesh(vertices, indices, areas, config)
-    if !ok {
-        log.error("Failed to build navigation mesh")
-        return use_procedural
-    }
-
-    navmesh_state.poly_mesh = pmesh
-    navmesh_state.detail_mesh = dmesh
-    navmesh_state.navmesh_built = true
-
-    log.infof("Recast mesh built: %d polygons, %d vertices", pmesh.npolys, len(pmesh.verts))
-    log.infof("Poly mesh bounds: min=(%.2f, %.2f, %.2f) max=(%.2f, %.2f, %.2f)",
-              pmesh.bmin.x, pmesh.bmin.y, pmesh.bmin.z,
-              pmesh.bmax.x, pmesh.bmax.y, pmesh.bmax.z)
-    log.info("✓ Offline mesh generation complete")
-
-    // Check for region connectivity
-    if pmesh.npolys > 0 {
-        log.info("Checking polygon regions...")
-        regions := make(map[u16]int, 0, context.temp_allocator)
-        for i in 0..<pmesh.npolys {
-            region_id := pmesh.regs[i]
-            regions[region_id] = regions[region_id] + 1
-        }
-        log.infof("Found %d distinct regions in navigation mesh:", len(regions))
-        for region_id, count in regions {
-            log.infof("  Region %d: %d polygons", region_id, count)
-        }
-        if len(regions) > 1 {
-            log.warn("Multiple disconnected regions detected! This will cause pathfinding failures between regions.")
-        }
-    }
-
-    // Create visualization
-    success := navmesh_build_from_recast(&engine_ptr.navmesh, &engine_ptr.gpu_context, pmesh, dmesh)
-    if !success {
-        log.error("Failed to build navigation mesh renderer")
-        return use_procedural
-    }
-
-    // Configure the renderer
-    engine_ptr.navmesh.enabled = true
-    engine_ptr.navmesh.debug_mode = false  // Use filled polygons
-    engine_ptr.navmesh.alpha = 0.6
-    engine_ptr.navmesh.height_offset = 0.05  // Slightly above ground
-    engine_ptr.navmesh.color_mode = .Random_Colors  // Random color per polygon
-    engine_ptr.navmesh.base_color = {0.0, 0.8, 0.2}  // Green (not used in random mode)
-
-    log.infof("Navigation mesh visualization created with %d triangles",
-              navmesh_get_triangle_count(&engine_ptr.navmesh))
-
-    log.info("=== RUNTIME PHASE: Creating Detour Navigation Mesh ===")
-
-    // Create navigation mesh for pathfinding
-    nav_mesh, nav_ok := detour.create_navmesh(pmesh, dmesh, f32(config.walkable_height) * config.ch,
-                                               f32(config.walkable_radius) * config.cs,
-                                               f32(config.walkable_climb) * config.ch)
-    if !nav_ok {
-        log.error("Failed to create Detour navigation mesh")
-        return use_procedural
-    }
-    navmesh_state.nav_mesh = nav_mesh
-
-    // Log nav mesh info
-    log.infof("✓ Detour nav mesh created successfully")
-
-    // Analyze connectivity from Detour perspective
-    analyze_detour_connectivity(nav_mesh)
-    analyze_detailed_connections(nav_mesh)
-
-    // Create navigation query
-    nav_query := new(detour.Nav_Mesh_Query)
-    query_status := detour.nav_mesh_query_init(nav_query, nav_mesh, 2048)
-    if recast.status_failed(query_status) {
-        log.error("Failed to create navigation query")
-        return use_procedural
-    }
-    navmesh_state.nav_query = nav_query
-
-    // Initialize filter
-    detour.query_filter_init(&navmesh_state.filter)
-
-    log.info("✓ Runtime navigation system ready")
-    log.info("=== NAVIGATION MESH SETUP COMPLETE ===")
-    log.info("💾 Press S to save navigation mesh to file")
-    log.info("📁 Press L to load navigation mesh from file")
-
-    // Start in picking mode
-    navmesh_state.picking_mode = .PickingStart
-
-    // Update serialization status
-    navmesh_state.serialization_status = "Ready - can save navmesh"
-
-    return use_procedural
+    log.infof("Created demo scene with ground and %d obstacles", len(demo_state.obstacle_handles))
 }
 
-// Create visualization mesh for the loaded OBJ
 create_obj_visualization_mesh :: proc(engine_ptr: ^mjolnir.Engine, obj_file: string) {
     using mjolnir, geometry
 
@@ -573,300 +313,151 @@ create_obj_visualization_mesh :: proc(engine_ptr: ^mjolnir.Engine, obj_file: str
         log.error("Failed to load OBJ file as geometry")
         return
     }
-    // NOTE: Don't delete geometry here - create_mesh takes ownership of the data
-    // The mesh will manage the geometry lifetime
 
     // Create mesh
-    navmesh_state.obj_mesh_handle = resources.create_mesh_handle(
+    demo_state.obj_mesh_handle = resources.create_mesh_handle(
         &engine_ptr.gpu_context,
         &engine_ptr.resource_manager,
         geom,
     )
 
+    // Create material
+    obj_material_handle := resources.create_material_handle(
+        &engine_ptr.resource_manager,
+        metallic_value = 0.1,
+        roughness_value = 0.8,
+        emissive_value = 0.02,
+    )
+
     // Spawn the mesh in the scene
-    navmesh_state.obj_node_handle, navmesh_state.obj_mesh_node = spawn(
+    demo_state.obj_node_handle, demo_state.obj_mesh_node = spawn(
         engine_ptr,
-        MeshAttachment{
-            handle = navmesh_state.obj_mesh_handle,
-            material = resources.create_material_handle(
-                &engine_ptr.resource_manager,
-                metallic_value = 0.1,
-                roughness_value = 0.8,
-                emissive_value = 0.02,
-            ),
+        [3]f32{0, 0, 0},
+        world.MeshAttachment{
+            handle = demo_state.obj_mesh_handle,
+            material = obj_material_handle,
             cast_shadow = false,
+            navigation_obstacle = false,  // OBJ mesh should be walkable
         },
     )
 
+    // Set name for navigation mesh building
+    demo_state.obj_mesh_node.name = "obj_mesh"
+
     // Initially show the mesh
-    navmesh_state.show_original_mesh = true
-    navmesh_state.obj_mesh_node.visible = true
+    demo_state.show_original_mesh = true
 
     log.infof("Created OBJ visualization mesh with %d vertices", len(geom.vertices))
 }
 
-// Generate a random point on the navigation mesh
-generate_random_navmesh_point :: proc(engine_ptr: ^mjolnir.Engine) -> (point: [3]f32, found: bool) {
-    if navmesh_state.nav_query == nil || navmesh_state.nav_mesh == nil {
-        return {}, false
+build_navigation_mesh_from_world :: proc(engine_ptr: ^mjolnir.Engine) {
+    using mjolnir
+
+    log.info("Building navigation mesh from world nodes")
+
+    // Configure Recast with good defaults
+    config := recast.Config{
+        cs = 0.3,                                        // Cell size
+        ch = 0.2,                                        // Cell height
+        walkable_slope_angle = 45,                      // Max slope
+        walkable_height = i32(math.ceil_f32(2.0 / 0.2)),    // Agent height
+        walkable_climb = i32(math.floor_f32(0.9 / 0.2)),    // Agent max climb
+        walkable_radius = i32(math.ceil_f32(0.6 / 0.3)),    // Agent radius
+        max_edge_len = i32(12.0 / 0.3),                 // Max edge length
+        max_simplification_error = 1.3,
+        min_region_area = 8 * 8,
+        merge_region_area = 20 * 20,
+        max_verts_per_poly = 6,
+        detail_sample_dist = 6.0 * 0.3,
+        detail_sample_max_error = 1.0 * 0.2,
+        border_size = 0,
     }
 
-    // Random position within the walkable area (avoiding edges and obstacle)
-    // Using conservative bounds to ensure we're on the navmesh
-    rand_x := rand.float32_range(-5, 5)
-    rand_z := rand.float32_range(-5, 5)
+    // Build navigation mesh from world geometry and set up visualization
+    nav_mesh_handle, success := world.build_and_visualize_navigation_mesh(
+        &engine_ptr.world,
+        &engine_ptr.resource_manager,
+        &engine_ptr.gpu_context,
+        get_navmesh_renderer(engine_ptr),
+        config,
+    )
 
-    // If we're near the center obstacle, push out
-    if abs(rand_x) < 3 && abs(rand_z) < 3 {
-        if rand_x > 0 {
-            rand_x = rand.float32_range(3, 5)
-        } else {
-            rand_x = rand.float32_range(-5, -3)
-        }
+    if !success {
+        log.error("Failed to build navigation mesh from world")
+        return
     }
 
-    start_pos := [3]f32{rand_x, 1.0, rand_z}  // Start at reasonable height
+    demo_state.nav_mesh_handle = nav_mesh_handle
+    log.infof("Navigation mesh built with handle %v", nav_mesh_handle)
 
-    // Find nearest polygon on navmesh
-    half_extents := [3]f32{5.0, 10.0, 5.0}  // Larger search box
-    status, poly_ref, nearest_pos := detour.find_nearest_poly(navmesh_state.nav_query, start_pos, half_extents, &navmesh_state.filter)
+    // Create navigation context for pathfinding
+    context_handle, context_ok := world.create_navigation_context(
+        &engine_ptr.world,
+        &engine_ptr.resource_manager,
+        &engine_ptr.gpu_context,
+        nav_mesh_handle,
+    )
 
-    if recast.status_succeeded(status) && poly_ref != recast.INVALID_POLY_REF {
-        return nearest_pos, true
+    if !context_ok {
+        log.error("Failed to create navigation context")
+        return
     }
 
-    return {}, false
+    demo_state.nav_context_handle = context_handle
+    log.infof("Navigation context created with handle %v", context_handle)
+
+    // Configure the renderer for better visualization
+    navmesh_renderer := get_navmesh_renderer(engine_ptr)
+    navmesh_renderer.enabled = true
+    navmesh_renderer.color_mode = .Random_Colors
+
+    log.info("Navigation mesh building and visualization complete")
 }
 
-// Find path between two points
 find_path :: proc(engine_ptr: ^mjolnir.Engine) {
-    if navmesh_state.nav_query == nil || navmesh_state.nav_mesh == nil {
-        log.error("Navigation system not initialized")
+    using mjolnir
+
+    if demo_state.nav_context_handle.generation == 0 {
+        log.error("No navigation context available for pathfinding")
         return
     }
 
-    // Clear previous path
-    clear(&navmesh_state.path_points)
-    navmesh_state.has_path = false
-    log.infof("Cleared previous path. path_points capacity: %d", cap(navmesh_state.path_points))
+    log.infof("Finding path from (%.2f, %.2f, %.2f) to (%.2f, %.2f, %.2f)",
+             demo_state.start_pos.x, demo_state.start_pos.y, demo_state.start_pos.z,
+             demo_state.end_pos.x, demo_state.end_pos.y, demo_state.end_pos.z)
 
-    // Allocate path buffer
-    path_buffer := make([][3]f32, 512, context.temp_allocator)
+    // Use the world's navigation system to find path
+    path, success := world.nav_find_path(
+        &engine_ptr.world,
+        &engine_ptr.resource_manager,
+        &engine_ptr.gpu_context,
+        demo_state.nav_context_handle,
+        demo_state.start_pos,
+        demo_state.end_pos,
+        256,
+    )
 
-    // Find nearest polygons first
-    half_extents := [3]f32{2.0, 4.0, 2.0}
-    start_status, start_ref, start_nearest := detour.find_nearest_poly(navmesh_state.nav_query,
-                                                                        navmesh_state.start_pos,
-                                                                        half_extents,
-                                                                        &navmesh_state.filter)
-    end_status, end_ref, end_nearest := detour.find_nearest_poly(navmesh_state.nav_query,
-                                                                  navmesh_state.end_pos,
-                                                                  half_extents,
-                                                                  &navmesh_state.filter)
+    if success && len(path) > 0 {
+        delete(demo_state.current_path)
+        demo_state.current_path = path
+        demo_state.has_path = true
 
-    log.infof("Start poly ref: %d, nearest: (%.2f, %.2f, %.2f)", start_ref, start_nearest.x, start_nearest.y, start_nearest.z)
-    log.infof("End poly ref: %d, nearest: (%.2f, %.2f, %.2f)", end_ref, end_nearest.x, end_nearest.y, end_nearest.z)
+        log.infof("Path found with %d waypoints", len(path))
 
-    // Find polygon path first
-    poly_path := make([]recast.Poly_Ref, 256, context.temp_allocator)
-
-    poly_status, poly_count := detour.find_path(navmesh_state.nav_query, start_ref, end_ref,
-                                                 start_nearest, end_nearest,
-                                                 &navmesh_state.filter, poly_path[:], 256)
-    log.infof("Polygon path status: %v, count: %d", poly_status, poly_count)
-
-    // Log polygon path
-    if recast.status_succeeded(poly_status) && poly_count > 0 {
-        log.info("Polygon path:")
-        for i in 0..<poly_count {
-            log.infof("  Poly %d: ref=%d", i, poly_path[i])
-        }
-
-        // Check if path actually reaches the destination
-        if poly_path[poly_count-1] != end_ref {
-            log.errorf("PARTIAL PATH: Path doesn't reach destination! Last poly in path: %d, requested end: %d",
-                      poly_path[poly_count-1], end_ref)
-            log.errorf("This indicates the navigation mesh has disconnected regions - start and end are not connected!")
-            // For now, still try to process the partial path
-            // Adjust end_nearest to be in the last polygon of the partial path
-            last_tile, last_poly, _ := detour.get_tile_and_poly_by_ref(navmesh_state.nav_mesh, poly_path[poly_count-1])
-            if last_tile != nil && last_poly != nil {
-                end_nearest = detour.calc_poly_center(last_tile, last_poly)
-                log.infof("Adjusted end position to last reachable polygon center: %v", end_nearest)
-            }
-        }
-    } else {
-        log.errorf("Failed to find polygon path! Status: %v", poly_status)
-        return
-    }
-
-    // Find path points (simplified wrapper)
-    // Use the nearest positions that were actually found on the navmesh
-    log.infof("About to call find_path_points with poly_count=%d", poly_count)
-    path_count, status := detour.find_path_points(navmesh_state.nav_query,
-                                                   start_nearest,
-                                                   end_nearest,
-                                                   &navmesh_state.filter,
-                                                   path_buffer)
-    log.infof("find_path_points returned: path_count=%d, status=%v", path_count, status)
-
-    // Also get the polygon centroids for comparison - add safety checks
-    log.info("Polygon path centroids (without funnel simplification):")
-    for i in 0..<poly_count {
-        if i >= i32(len(poly_path)) {
-            log.errorf("ERROR: poly_count %d exceeds poly_path length %d", poly_count, len(poly_path))
-            break
-        }
-        poly_ref := poly_path[i]
-        if poly_ref == 0 {
-            log.errorf("ERROR: Invalid poly ref 0 at index %d", i)
-            continue
-        }
-
-        tile, poly, status := detour.get_tile_and_poly_by_ref(navmesh_state.nav_mesh, poly_ref)
-        if !recast.status_succeeded(status) {
-            log.errorf("ERROR: get_tile_and_poly_by_ref failed for ref %d: %v", poly_ref, status)
-            continue
-        }
-        if tile != nil && poly != nil {
-            center := detour.calc_poly_center(tile, poly)
-            log.infof("  Poly %d center: (%.2f, %.2f, %.2f)", i, center.x, center.y, center.z)
-        } else {
-            log.errorf("ERROR: get_tile_and_poly_by_ref returned nil tile or poly for ref %d", poly_ref)
-        }
-    }
-
-    navmesh_state.path_status = status
-
-    if recast.status_succeeded(status) && path_count > 0 {
-        // Copy path points
-        for i in 0..<path_count {
-            append(&navmesh_state.path_points, path_buffer[i])
-        }
-        navmesh_state.has_path = true
-        log.infof("Path found with %d points", path_count)
-
-        // Log all path points for analysis
-        log.info("Path waypoints:")
-        for point, idx in navmesh_state.path_points {
+        // Log path for analysis
+        for point, idx in path {
             log.infof("  Waypoint %d: (%.2f, %.2f, %.2f)", idx, point.x, point.y, point.z)
-            // Check if this waypoint is inside any obstacle bounds
-            // We have 5 obstacles now (reduced sizes):
-            // Obstacle 1: (-11,-11) to (-9,-9)
-            // Obstacle 2: (9,-11) to (11,-9)
-            // Obstacle 3: (-11,9) to (-9,11)
-            // Obstacle 4: (9,9) to (11,11)
-            // Obstacle 5 (center): (-2,-2) to (2,2)
-
-            inside_obstacle := false
-            obstacle_name := ""
-
-            if point.x >= -11 && point.x <= -9 && point.z >= -11 && point.z <= -9 && point.y <= 3 {
-                inside_obstacle = true
-                obstacle_name = "Obstacle 1 (bottom-left)"
-            } else if point.x >= 9 && point.x <= 11 && point.z >= -11 && point.z <= -9 && point.y <= 3 {
-                inside_obstacle = true
-                obstacle_name = "Obstacle 2 (bottom-right)"
-            } else if point.x >= -11 && point.x <= -9 && point.z >= 9 && point.z <= 11 && point.y <= 3 {
-                inside_obstacle = true
-                obstacle_name = "Obstacle 3 (top-left)"
-            } else if point.x >= 9 && point.x <= 11 && point.z >= 9 && point.z <= 11 && point.y <= 3 {
-                inside_obstacle = true
-                obstacle_name = "Obstacle 4 (top-right)"
-            } else if point.x >= -2 && point.x <= 2 && point.z >= -2 && point.z <= 2 && point.y <= 4 {
-                inside_obstacle = true
-                obstacle_name = "Obstacle 5 (center)"
-            }
-
-            if inside_obstacle {
-                log.warnf("    WARNING: Waypoint %d is INSIDE %s!", idx, obstacle_name)
-                log.warnf("    Point: (%.2f, %.2f, %.2f)", point.x, point.y, point.z)
-            }
         }
 
-        // Calculate total path length
-        total_length: f32 = 0
-        for i in 0..<len(navmesh_state.path_points)-1 {
-            p0 := navmesh_state.path_points[i]
-            p1 := navmesh_state.path_points[i+1]
-            segment_length := linalg.distance(p0, p1)
-            total_length += segment_length
-            log.infof("  Segment %d->%d length: %.2f", i, i+1, segment_length)
-
-            // Check if segment crosses any obstacle in X-Z plane
-            // Check center obstacle (-3,-3) to (3,3)
-            if ((p0.x < -3 && p1.x > 3) || (p0.x > 3 && p1.x < -3)) &&
-               ((p0.z >= -3 && p0.z <= 3) || (p1.z >= -3 && p1.z <= 3)) {
-                log.warnf("    WARNING: Segment crosses center obstacle in X direction!")
-            }
-            if ((p0.z < -3 && p1.z > 3) || (p0.z > 3 && p1.z < -3)) &&
-               ((p0.x >= -3 && p0.x <= 3) || (p1.x >= -3 && p1.x <= 3)) {
-                log.warnf("    WARNING: Segment crosses center obstacle in Z direction!")
-            }
-        }
-        log.infof("Total path length: %.2f", total_length)
-
-        // Calculate straight line distance for comparison
-        straight_distance := linalg.distance(navmesh_state.start_pos, navmesh_state.end_pos)
-        log.infof("Straight line distance: %.2f (path is %.1f%% longer)",
-                  straight_distance, (total_length/straight_distance - 1) * 100)
+        // Visualize path with waypoint markers
+        visualize_path(engine_ptr)
     } else {
-        log.errorf("Failed to find path. Status: %v, Path count: %d", status, path_count)
-        log.errorf("Start pos: (%.2f, %.2f, %.2f), End pos: (%.2f, %.2f, %.2f)",
-            navmesh_state.start_pos.x, navmesh_state.start_pos.y, navmesh_state.start_pos.z,
-            navmesh_state.end_pos.x, navmesh_state.end_pos.y, navmesh_state.end_pos.z)
-        log.errorf("Start ref: %d, End ref: %d", start_ref, end_ref)
-        log.errorf("Start nearest: (%.2f, %.2f, %.2f), End nearest: (%.2f, %.2f, %.2f)",
-            start_nearest.x, start_nearest.y, start_nearest.z,
-            end_nearest.x, end_nearest.y, end_nearest.z)
+        log.warn("Failed to find path")
+        demo_state.has_path = false
+        clear_path_visualization(engine_ptr)
     }
 }
 
-// Generate new random points and find path
-generate_new_path :: proc(engine_ptr: ^mjolnir.Engine) {
-    // HARDCODED TEST CASE: Path should go around obstacle
-    // Apply the same coordinate shift we used for the navigation mesh
-    navmesh_state.start_pos = {-5, 0, -5}
-    navmesh_state.end_pos = {5, 0, 5}
-
-    log.infof("Finding path: start=(%.2f, %.2f, %.2f) end=(%.2f, %.2f, %.2f)",
-              navmesh_state.start_pos.x, navmesh_state.start_pos.y, navmesh_state.start_pos.z,
-              navmesh_state.end_pos.x, navmesh_state.end_pos.y, navmesh_state.end_pos.z)
-
-    // Find path
-    find_path(&global_navmesh_engine)
-
-    // Update visualization
-    update_path_visualization(&global_navmesh_engine)
-}
-
-// Update path visualization
-update_path_visualization :: proc(engine_ptr: ^mjolnir.Engine) {
-    using mjolnir, geometry
-
-    // Update navigation mesh renderer with path data
-    if navmesh_state.has_path && len(navmesh_state.path_points) >= 2 {
-        // Update path in the navmesh renderer
-        log.infof("Updating path renderer with %d points", len(navmesh_state.path_points))
-        navigation_renderer.update_path(&engine_ptr.navmesh, navmesh_state.path_points[:], {1.0, 0.8, 0.0, 1.0}) // Orange/yellow path
-    } else if navmesh_state.has_path && len(navmesh_state.path_points) == 1 {
-        log.info("Path has only 1 point - need at least 2 points to draw a line")
-        navigation_renderer.clear_path(&engine_ptr.navmesh)
-    } else {
-        // Clear path if no valid path
-        navigation_renderer.clear_path(&engine_ptr.navmesh)
-    }
-
-    // Remove old path waypoints (no longer needed with line rendering)
-    for handle in navmesh_state.path_waypoint_handles {
-        if handle.generation != 0 {
-            despawn(engine_ptr, handle)
-        }
-    }
-    clear(&navmesh_state.path_waypoint_handles)
-}
-
-// Create or update visual marker for start/end position
 update_position_marker :: proc(engine_ptr: ^mjolnir.Engine, handle: ^mjolnir.Handle, pos: [3]f32, color: [4]f32) {
     using mjolnir, geometry
 
@@ -876,203 +467,174 @@ update_position_marker :: proc(engine_ptr: ^mjolnir.Engine, handle: ^mjolnir.Han
     }
 
     // Create new marker
-    marker_geom := make_sphere(12, 6, 0.3, color)  // Small sphere with color
-    // NOTE: Don't delete geometry here - create_mesh takes ownership
-
+    marker_geom := geometry.make_sphere(12, 6, 0.3, color)
     marker_mesh_handle := resources.create_mesh_handle(
         &engine_ptr.gpu_context,
         &engine_ptr.resource_manager,
         marker_geom,
     )
 
-    // Create colored material for the marker
     marker_material_handle := resources.create_material_handle(
         &engine_ptr.resource_manager,
         metallic_value = 0.2,
         roughness_value = 0.8,
-        emissive_value = 0.5,  // Make it glow a bit
+        emissive_value = 0.5,
     )
 
     // Spawn the marker
-    node: ^Node
+    node: ^world.Node
     handle^, node = spawn(
         engine_ptr,
-        MeshAttachment{
+        pos + [3]f32{0, 0.2, 0}, // Slightly above ground
+        world.MeshAttachment{
             handle = marker_mesh_handle,
             material = marker_material_handle,
             cast_shadow = false,
+            navigation_obstacle = false,  // Markers should not be obstacles
         },
     )
-
-    // Position the marker slightly above the ground
-    if node != nil {
-        node.transform.position = pos + {0, 0.2, 0}  // Slightly above ground
-    }
 }
 
-// Find intersection of ray with navmesh
-ray_navmesh_intersection :: proc(engine_ptr: ^mjolnir.Engine, ray_origin, ray_dir: [3]f32) -> (hit_pos: [3]f32, hit: bool) {
-    if navmesh_state.nav_query == nil || navmesh_state.nav_mesh == nil {
-        return {}, false
+visualize_path :: proc(engine_ptr: ^mjolnir.Engine) {
+    using mjolnir, geometry
+
+    // Clear previous waypoint markers
+    clear_path_visualization(engine_ptr)
+
+    if !demo_state.has_path || len(demo_state.current_path) == 0 {
+        return
     }
 
-    // Cast ray far enough to hit any reasonable navmesh
-    ray_end := ray_origin + ray_dir * 1000.0
-
-    // First, find the nearest polygon to the ray origin to start the raycast
-    search_extents := [3]f32{50.0, 50.0, 50.0}  // Large search area
-    status, start_ref, nearest_start := detour.find_nearest_poly(navmesh_state.nav_query, ray_origin, search_extents, &navmesh_state.filter)
-
-    if !recast.status_succeeded(status) || start_ref == recast.INVALID_POLY_REF {
-        // If we can't find a starting polygon near the camera, try a ground-based approach
-        // Project ray origin to a reasonable height range and search again
-        y_offsets := [7]f32{0, -10, 10, -20, 20, -50, 50}
-        for y_offset in y_offsets {
-            test_origin := ray_origin
-            test_origin.y += y_offset
-            status, start_ref, nearest_start = detour.find_nearest_poly(navmesh_state.nav_query, test_origin, search_extents, &navmesh_state.filter)
-            if recast.status_succeeded(status) && start_ref != recast.INVALID_POLY_REF {
-                break
-            }
-        }
-
-        if !recast.status_succeeded(status) || start_ref == recast.INVALID_POLY_REF {
-            return {}, false
-        }
+    // Use navigation renderer for path visualization
+    navmesh_renderer := get_navmesh_renderer(engine_ptr)
+    if len(demo_state.current_path) >= 2 {
+        log.infof("Updating path renderer with %d points", len(demo_state.current_path))
+        navigation_renderer.update_path(navmesh_renderer, demo_state.current_path[:], {1.0, 0.8, 0.0, 1.0}) // Orange/yellow path
+    } else if len(demo_state.current_path) == 1 {
+        log.info("Path has only 1 point - need at least 2 points to draw a line")
+        navigation_renderer.clear_path(navmesh_renderer)
+    } else {
+        navigation_renderer.clear_path(navmesh_renderer)
     }
 
-    // Perform raycast on the navmesh
-    path_buffer := make([]recast.Poly_Ref, 256, context.temp_allocator)
-
-    raycast_status, hit_info, _ := detour.raycast(navmesh_state.nav_query, start_ref, nearest_start, ray_end, &navmesh_state.filter, 0, path_buffer[:], 256)
-
-    if recast.status_succeeded(raycast_status) {
-        if hit_info.t < 1.0 {
-            // Hit something
-            hit_pos = nearest_start + (ray_end - nearest_start) * hit_info.t
-            return hit_pos, true
-        } else {
-            // Ray reached the end without hitting anything
-            // This means the navmesh is along the ray path
-            // Find the closest point on the navmesh to the ray
-
-            // Simple approach: sample points along the ray and find nearest navmesh point
-            t_values := [9]f32{0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9}
-            for t in t_values {
-                sample_pos := ray_origin + ray_dir * (t * 100.0)  // Sample up to 100 units away
-                sample_status, poly_ref, nearest_pos := detour.find_nearest_poly(navmesh_state.nav_query, sample_pos, [3]f32{5, 20, 5}, &navmesh_state.filter)
-                if recast.status_succeeded(sample_status) && poly_ref != recast.INVALID_POLY_REF {
-                    return nearest_pos, true
-                }
-            }
-        }
-    }
-
-    return {}, false
+    log.infof("Path visualization updated using navigation renderer")
 }
 
-// Find nearest point on navmesh from mouse position
+clear_path_visualization :: proc(engine_ptr: ^mjolnir.Engine) {
+    using mjolnir
+
+    // Remove existing waypoint markers
+    for handle in demo_state.path_waypoint_handles {
+        despawn(engine_ptr, handle)
+    }
+    clear(&demo_state.path_waypoint_handles)
+    
+    // Clear path from navigation renderer
+    navmesh_renderer := get_navmesh_renderer(engine_ptr)
+    navigation_renderer.clear_path(navmesh_renderer)
+}
+
 find_navmesh_point_from_mouse :: proc(engine_ptr: ^mjolnir.Engine, mouse_x, mouse_y: f32) -> (pos: [3]f32, found: bool) {
-    if navmesh_state.nav_query == nil || navmesh_state.nav_mesh == nil {
-        log.error("find_navmesh_point_from_mouse: nav_query or nav_mesh is nil")
+    if demo_state.nav_context_handle.generation == 0 {
         return {}, false
     }
-
-    // Additional logging for debugging
-    log.debugf("find_navmesh_point_from_mouse: nav_query=%p, nav_mesh=%p", navmesh_state.nav_query, navmesh_state.nav_mesh)
 
     // Get ray from camera through mouse position
     width, height := glfw.GetWindowSize(engine_ptr.window)
+    
+    // Debug mouse coordinates
+    log.debugf("Mouse coordinates: (%.2f, %.2f), Window size: (%d, %d)", mouse_x, mouse_y, width, height)
+    
+    // GLFW returns coordinates with origin at top-left, Y increases downward
+    // viewport_to_world_ray expects this same coordinate system
     ray_origin, ray_dir := geometry.viewport_to_world_ray(f32(width), f32(height), mouse_x, mouse_y, mjolnir.get_main_camera(engine_ptr)^)
+    
+    log.debugf("Ray: origin=(%.2f, %.2f, %.2f), dir=(%.2f, %.2f, %.2f)", 
+              ray_origin.x, ray_origin.y, ray_origin.z, 
+              ray_dir.x, ray_dir.y, ray_dir.z)
 
-    // Use multiple strategies to find the best navmesh point
+    nav_context, ok := resources.get_nav_context(&engine_ptr.resource_manager, demo_state.nav_context_handle)
+    if !ok {
+        return {}, false
+    }
 
-    // Strategy 1: Sample along the ray at various distances
-    sample_distances := [15]f32{5, 10, 15, 20, 25, 30, 35, 40, 50, 60, 70, 80, 90, 100, 150}
-    best_pos: [3]f32
-    best_found := false
-    best_distance := f32(1e9)
+    // Strategy 1: Try intersection with ground plane (y=0) first
+    if abs(ray_dir.y) > 0.001 {
+        // Calculate intersection with ground plane (y=0)
+        t := -ray_origin.y / ray_dir.y
+        if t > 0 && t < 1000 {  // Reasonable distance
+            ground_intersection := ray_origin + ray_dir * t
+            log.debugf("Ground plane intersection: (%.2f, %.2f, %.2f)", ground_intersection.x, ground_intersection.y, ground_intersection.z)
+            
+            // Check if this position is near the navigation mesh
+            search_extents := [3]f32{2.0, 5.0, 2.0}
+            status, poly_ref, nearest_pos := detour.find_nearest_poly(
+                &nav_context.nav_mesh_query,
+                ground_intersection,
+                search_extents,
+                &nav_context.query_filter,
+            )
+            
+            if recast.status_succeeded(status) && poly_ref != recast.INVALID_POLY_REF {
+                log.debugf("Found navmesh point via ground intersection: (%.2f, %.2f, %.2f)", nearest_pos.x, nearest_pos.y, nearest_pos.z)
+                return nearest_pos, true
+            }
+        }
+    }
 
+    // Strategy 2: Sample along the ray at various distances (fallback)
+    sample_distances := [10]f32{5, 10, 15, 20, 25, 30, 35, 40, 50, 60}
+    
     for dist in sample_distances {
         sample_pos := ray_origin + ray_dir * dist
+        log.debugf("Testing ray sample at distance %.1f: (%.2f, %.2f, %.2f)", dist, sample_pos.x, sample_pos.y, sample_pos.z)
 
-        // Use larger search extents for better hit detection
+        // Check if this position is on the navigation mesh
         search_extents := [3]f32{5.0, 10.0, 5.0}
-        status, poly_ref, nearest_pos := detour.find_nearest_poly(navmesh_state.nav_query, sample_pos, search_extents, &navmesh_state.filter)
+        status, poly_ref, nearest_pos := detour.find_nearest_poly(
+            &nav_context.nav_mesh_query,
+            sample_pos,
+            search_extents,
+            &nav_context.query_filter,
+        )
 
         if recast.status_succeeded(status) && poly_ref != recast.INVALID_POLY_REF {
-            // Check if this point is actually closer to the ray
-            // Project nearest_pos onto the ray to get closest point on ray
-            to_point := nearest_pos - ray_origin
-            proj_dist := linalg.dot(to_point, ray_dir)
-            if proj_dist > 0 {
-                closest_on_ray := ray_origin + ray_dir * proj_dist
-                dist_to_ray := linalg.distance(nearest_pos, closest_on_ray)
-
-                // Prefer points that are closer to the ray and closer to the camera
-                score := dist_to_ray + proj_dist * 0.01  // Small bias for closer points
-                if score < best_distance {
-                    best_distance = score
-                    best_pos = nearest_pos
-                    best_found = true
-                }
-            }
+            log.debugf("Found navmesh point via ray sampling at distance %.1f: (%.2f, %.2f, %.2f)", dist, nearest_pos.x, nearest_pos.y, nearest_pos.z)
+            return nearest_pos, true
         }
     }
 
-    if best_found {
-        return best_pos, true
-    }
-
-    // Strategy 2: If no hit along ray, try plane intersections at various heights
-    y_planes := [9]f32{0.0, 0.1, -0.1, 0.5, -0.5, 1.0, -1.0, 2.0, -2.0}
-
-    for y_plane in y_planes {
-        if abs(ray_dir.y) > 0.001 {
-            t := (y_plane - ray_origin.y) / ray_dir.y
-            if t > 0 && t < 200 { // Reasonable distance
-                ground_pos := ray_origin + ray_dir * t
-                // Find nearest navmesh point with larger search area
-                search_extents := [3]f32{5.0, 10.0, 5.0}
-                status, poly_ref, nearest_pos := detour.find_nearest_poly(navmesh_state.nav_query, ground_pos, search_extents, &navmesh_state.filter)
-                if recast.status_succeeded(status) && poly_ref != recast.INVALID_POLY_REF {
-                    return nearest_pos, true
-                }
-            }
-        }
-    }
-
+    log.warn("No navmesh point found for mouse click")
     return {}, false
 }
 
-navmesh_mouse_moved :: proc(engine_ptr: ^mjolnir.Engine, pos, delta: [2]f64) {
-    using mjolnir, geometry
-
-    if !navmesh_state.navmesh_built {
-        return
+generate_random_path :: proc(engine_ptr: ^mjolnir.Engine) {
+    // Generate random positions within the walkable area
+    demo_state.start_pos = {
+        rand.float32_range(-15, 15),
+        0,
+        rand.float32_range(-15, 15),
+    }
+    demo_state.end_pos = {
+        rand.float32_range(-15, 15),
+        0,
+        rand.float32_range(-15, 15),
     }
 
-    // Check if mouse moved significantly
-    mouse_delta := linalg.distance([2]f32{f32(pos.x), f32(pos.y)}, navmesh_state.last_mouse_pos)
-    if mouse_delta < navmesh_state.mouse_move_threshold {
-        return
-    }
+    log.infof("Generated random path: start=(%.2f, %.2f, %.2f) end=(%.2f, %.2f, %.2f)",
+             demo_state.start_pos.x, demo_state.start_pos.y, demo_state.start_pos.z,
+             demo_state.end_pos.x, demo_state.end_pos.y, demo_state.end_pos.z)
 
-    // Update last mouse position
-    navmesh_state.last_mouse_pos = {f32(pos.x), f32(pos.y)}
+    // Update visual markers
+    update_position_marker(engine_ptr, &demo_state.start_marker_handle, demo_state.start_pos, {0, 1, 0, 1})
+    update_position_marker(engine_ptr, &demo_state.end_marker_handle, demo_state.end_pos, {1, 0, 0, 1})
 
-    // Update hover position only when mouse moved significantly
-    hover_pos, valid := find_navmesh_point_from_mouse(engine_ptr, f32(pos.x), f32(pos.y))
-    navmesh_state.hover_pos = hover_pos
-    navmesh_state.hover_valid = valid
+    // Find path
+    find_path(engine_ptr)
 }
 
-navmesh_mouse_pressed :: proc(engine_ptr: ^mjolnir.Engine, button, action, mods: int) {
-    using mjolnir, geometry
-
-    if !navmesh_state.navmesh_built {
-        return
-    }
+demo_mouse_pressed :: proc(engine_ptr: ^mjolnir.Engine, button, action, mods: int) {
+    using mjolnir
 
     if action != glfw.PRESS {
         return
@@ -1085,104 +647,83 @@ navmesh_mouse_pressed :: proc(engine_ptr: ^mjolnir.Engine, button, action, mods:
         // Set start position
         pos, valid := find_navmesh_point_from_mouse(engine_ptr, f32(mouse_x), f32(mouse_y))
         if valid {
-            navmesh_state.start_pos = pos
-            navmesh_state.picking_mode = .PickingEnd
-            log.infof("Start position set to: (%.2f, %.2f, %.2f) - Now click RIGHT mouse button elsewhere to set end position",
-                navmesh_state.start_pos.x, navmesh_state.start_pos.y, navmesh_state.start_pos.z)
+            demo_state.start_pos = pos
+            log.infof("Start position set to: (%.2f, %.2f, %.2f)", pos.x, pos.y, pos.z)
 
             // Update start marker (green)
-            update_position_marker(engine_ptr, &navmesh_state.start_marker_handle, pos, {0, 1, 0, 1})
+            update_position_marker(engine_ptr, &demo_state.start_marker_handle, pos, {0, 1, 0, 1})
 
             // Clear existing path
-            clear(&navmesh_state.path_points)
-            navmesh_state.has_path = false
-            update_path_visualization(&global_navmesh_engine)
+            demo_state.has_path = false
         } else {
             log.warn("No valid navmesh position found at click location")
         }
 
     case glfw.MOUSE_BUTTON_RIGHT:
         // Set end position and find path
-        if navmesh_state.picking_mode == .PickingEnd {
-            pos, valid := find_navmesh_point_from_mouse(engine_ptr, f32(mouse_x), f32(mouse_y))
-            if valid {
-                navmesh_state.end_pos = pos
-                navmesh_state.picking_mode = .PickingStart
-                log.infof("End position set to: (%.2f, %.2f, %.2f) - Finding path...",
-                    navmesh_state.end_pos.x, navmesh_state.end_pos.y, navmesh_state.end_pos.z)
+        pos, valid := find_navmesh_point_from_mouse(engine_ptr, f32(mouse_x), f32(mouse_y))
+        if valid {
+            demo_state.end_pos = pos
+            log.infof("End position set to: (%.2f, %.2f, %.2f)", pos.x, pos.y, pos.z)
 
-                // Update end marker (red)
-                update_position_marker(engine_ptr, &navmesh_state.end_marker_handle, pos, {1, 0, 0, 1})
+            // Update end marker (red)
+            update_position_marker(engine_ptr, &demo_state.end_marker_handle, pos, {1, 0, 0, 1})
 
-                // Find path
-                find_path(&global_navmesh_engine)
-                update_path_visualization(&global_navmesh_engine)
-            } else {
-                log.warn("No valid navmesh position found at right click location")
-            }
+            // Find path
+            find_path(engine_ptr)
         } else {
-            log.info("Please click LEFT mouse button first to set start position")
+            log.warn("No valid navmesh position found at right click location")
         }
 
     case glfw.MOUSE_BUTTON_MIDDLE:
         // Toggle camera rotation
-        navmesh_state.camera_auto_rotate = !navmesh_state.camera_auto_rotate
+        demo_state.camera_auto_rotate = !demo_state.camera_auto_rotate
     }
 }
 
-navmesh_update :: proc(engine_ptr: ^mjolnir.Engine, delta_time: f32) {
+demo_mouse_moved :: proc(engine_ptr: ^mjolnir.Engine, pos, delta: [2]f64) {
+    // Track mouse position for hover effects (future enhancement)
+    demo_state.last_mouse_pos = [2]f32{f32(pos.x), f32(pos.y)}
+}
+
+demo_update :: proc(engine_ptr: ^mjolnir.Engine, delta_time: f32) {
     using mjolnir, geometry
 
     // Camera control
     main_camera := get_main_camera(engine_ptr)
     if main_camera != nil {
-        if navmesh_state.camera_auto_rotate {
-            navmesh_state.camera_angle += delta_time * 0.2
+        if demo_state.camera_auto_rotate {
+            demo_state.camera_angle += delta_time * 0.2
         }
 
-        camera_x := math.cos(navmesh_state.camera_angle) * navmesh_state.camera_distance
-        camera_z := math.sin(navmesh_state.camera_angle) * navmesh_state.camera_distance
-        camera_pos := [3]f32{camera_x, navmesh_state.camera_height, camera_z}
+        camera_x := math.cos(demo_state.camera_angle) * demo_state.camera_distance
+        camera_z := math.sin(demo_state.camera_angle) * demo_state.camera_distance
+        camera_pos := [3]f32{camera_x, demo_state.camera_height, camera_z}
 
         camera_look_at(main_camera, camera_pos, {0, 0, 0}, {0, 1, 0})
     }
 }
 
-navmesh_render2d :: proc(engine_ptr: ^mjolnir.Engine, ctx: ^mu.Context) {
+demo_render2d :: proc(engine_ptr: ^mjolnir.Engine, ctx: ^mu.Context) {
     using mjolnir
 
-    if mu.window(ctx, "Navigation Mesh", {40, 40, 380, 500}, {.NO_CLOSE}) {
-        mu.label(ctx, "Navigation Mesh with Mouse Picking")
+    if mu.window(ctx, "Navigation Mesh Demo", {40, 40, 380, 500}, {.NO_CLOSE}) {
+        mu.label(ctx, "World-Integrated Navigation System")
 
-        if navmesh_state.navmesh_built {
-            mu.label(ctx, "Status: Built")
-            if navmesh_state.poly_mesh != nil {
-                mu.label(ctx, fmt.tprintf("Polygons: %d", navmesh_state.poly_mesh.npolys))
-            }
+        if demo_state.nav_mesh_handle.generation != 0 {
+            mu.label(ctx, "Status: Navigation mesh ready")
 
             // Navigation mesh settings
             mu.label(ctx, "")
             mu.label(ctx, "NavMesh Settings:")
 
             // Toggle navmesh visibility
-            enabled := engine_ptr.navmesh.enabled
+            navmesh_renderer := get_navmesh_renderer(engine_ptr)
+            enabled := navmesh_renderer.enabled
             if .CHANGE in mu.checkbox(ctx, "Show NavMesh", &enabled) {
-                engine_ptr.navmesh.enabled = enabled
+                navmesh_renderer.enabled = enabled
             }
 
-            // Toggle debug mode
-            debug_mode := engine_ptr.navmesh.debug_mode
-            if .CHANGE in mu.checkbox(ctx, "Wireframe Mode", &debug_mode) {
-                engine_ptr.navmesh.debug_mode = debug_mode
-            }
-
-            // Alpha slider
-            alpha := engine_ptr.navmesh.alpha
-            mu.slider(ctx, &alpha, 0.0, 1.0)
-            engine_ptr.navmesh.alpha = alpha
-            mu.label(ctx, fmt.tprintf("Alpha: %.2f", alpha))
-
-            // Color mode selection
             mu.label(ctx, "")
             mu.label(ctx, "Color Mode:")
             color_mode_names := [?]string{
@@ -1192,14 +733,13 @@ navmesh_render2d :: proc(engine_ptr: ^mjolnir.Engine, ctx: ^mu.Context) {
                 "Random Colors",
                 "Region Colors",
             }
-            current_mode := int(engine_ptr.navmesh.color_mode)
+            current_mode := int(navmesh_renderer.color_mode)
             for name, i in color_mode_names {
                 if i == current_mode {
                     mu.label(ctx, fmt.tprintf("> %s", name))
                 } else {
                     if .SUBMIT in mu.button(ctx, name) {
-                        engine_ptr.navmesh.color_mode = navigation_renderer.ColorMode(i)
-                        log.infof("Changed navmesh color mode to: %s", name)
+                        navmesh_renderer.color_mode = auto_cast i
                     }
                 }
             }
@@ -1207,525 +747,248 @@ navmesh_render2d :: proc(engine_ptr: ^mjolnir.Engine, ctx: ^mu.Context) {
             // Camera control
             mu.label(ctx, "")
             mu.label(ctx, "Camera:")
-            mu.checkbox(ctx, "Auto Rotate (Middle Mouse)", &navmesh_state.camera_auto_rotate)
-
-            // Mouse picking section
-            mu.label(ctx, "")
-            mu.label(ctx, "Mouse Picking:")
-            mu.label(ctx, fmt.tprintf("Mode: %v", navmesh_state.picking_mode))
-
-            if navmesh_state.hover_valid {
-                mu.label(ctx, fmt.tprintf("Hover: (%.1f, %.1f, %.1f)",
-                    navmesh_state.hover_pos.x,
-                    navmesh_state.hover_pos.y,
-                    navmesh_state.hover_pos.z))
-            }
+            mu.checkbox(ctx, "Auto Rotate", &demo_state.camera_auto_rotate)
 
             // Pathfinding info
             mu.label(ctx, "")
             mu.label(ctx, "Pathfinding:")
 
-            if navmesh_state.has_path {
-                mu.label(ctx, fmt.tprintf("Path Points: %d", len(navmesh_state.path_points)))
+            if demo_state.has_path {
+                mu.label(ctx, fmt.tprintf("Path Points: %d", len(demo_state.current_path)))
                 mu.label(ctx, fmt.tprintf("Start: (%.1f, %.1f, %.1f)",
-                    navmesh_state.start_pos.x,
-                    navmesh_state.start_pos.y,
-                    navmesh_state.start_pos.z))
+                    demo_state.start_pos.x, demo_state.start_pos.y, demo_state.start_pos.z))
                 mu.label(ctx, fmt.tprintf("End: (%.1f, %.1f, %.1f)",
-                    navmesh_state.end_pos.x,
-                    navmesh_state.end_pos.y,
-                    navmesh_state.end_pos.z))
+                    demo_state.end_pos.x, demo_state.end_pos.y, demo_state.end_pos.z))
             } else {
                 mu.label(ctx, "No path set")
             }
 
-            if .SUBMIT in mu.button(ctx, "Generate Random Path (P)") {
-                generate_new_path(&global_navmesh_engine)
+            if .SUBMIT in mu.button(ctx, "Generate Random Path (SPACE)") {
+                generate_random_path(engine_ptr)
             }
 
-            if navmesh_state.has_path {
-                if .SUBMIT in mu.button(ctx, "Clear Path (C)") {
-                    clear(&navmesh_state.path_points)
-                    navmesh_state.has_path = false
-                    navmesh_state.picking_mode = .PickingStart
-                    update_path_visualization(&global_navmesh_engine)
-                    navigation_renderer.clear_path(&engine_ptr.navmesh)
-                    log.info("Path cleared")
-                }
+            if .SUBMIT in mu.button(ctx, "Clear Path (C)") {
+                demo_state.has_path = false
+                log.info("Path cleared")
             }
 
-            // Serialization section
+            // Rebuild button
+            if .SUBMIT in mu.button(ctx, "Rebuild NavMesh (R)") {
+                build_navigation_mesh_from_world(engine_ptr)
+            }
+
+            // Serialization controls
             mu.label(ctx, "")
             mu.label(ctx, "Serialization:")
-            mu.label(ctx, fmt.tprintf("Status: %s", navmesh_state.serialization_status))
-            mu.label(ctx, fmt.tprintf("File: %s", navmesh_state.serialized_navmesh_path))
-
+            mu.label(ctx, fmt.tprintf("Status: %s", demo_state.serialization_status))
             if .SUBMIT in mu.button(ctx, "Save NavMesh (S)") {
-                save_current_navmesh(&global_navmesh_engine)
+                save_navmesh(engine_ptr)
             }
-
             if .SUBMIT in mu.button(ctx, "Load NavMesh (L)") {
-                try_load_saved_navmesh(&global_navmesh_engine)
+                load_navmesh(engine_ptr)
             }
 
-            if .SUBMIT in mu.button(ctx, "Delete Saved File") {
-                if os.exists(navmesh_state.serialized_navmesh_path) {
-                    os.remove(navmesh_state.serialized_navmesh_path)
-                    navmesh_state.serialization_status = "Saved file deleted"
-                    log.infof("Deleted saved navmesh file: %s", navmesh_state.serialized_navmesh_path)
-                } else {
-                    navmesh_state.serialization_status = "No file to delete"
+            // Navigation mesh info
+            if demo_state.navmesh_info != "" {
+                mu.label(ctx, "")
+                mu.label(ctx, "NavMesh Info:")
+                mu.label(ctx, demo_state.navmesh_info)
+            }
+            if .SUBMIT in mu.button(ctx, "Print Info (P)") {
+                print_navmesh_info(engine_ptr)
+            }
+
+            // Scene type
+            mu.label(ctx, "")
+            mu.label(ctx, "Scene Type:")
+            if demo_state.use_procedural {
+                mu.label(ctx, "Procedural geometry")
+            } else {
+                mu.label(ctx, "OBJ file loaded")
+                if demo_state.obj_mesh_node != nil {
+                    visibility_text := demo_state.show_original_mesh ? "visible" : "hidden"
+                    mu.label(ctx, fmt.tprintf("Original mesh: %s", visibility_text))
+                    if .SUBMIT in mu.button(ctx, "Toggle Mesh (M)") {
+                        demo_state.show_original_mesh = !demo_state.show_original_mesh
+                    }
                 }
             }
 
-            // Controls help
-            mu.label(ctx, "")
-            mu.label(ctx, "Controls:")
-            mu.label(ctx, "Left Click - Set Start")
-            mu.label(ctx, "Right Click - Set End & Find Path")
-            mu.label(ctx, "Middle Click - Toggle Auto Rotate")
-            mu.label(ctx, "C - Clear Path")
-            mu.label(ctx, "D - Cycle Color Modes")
-            mu.label(ctx, "L - Load NavMesh")
-            mu.label(ctx, "P - Generate Random Path")
-            mu.label(ctx, "R - Rebuild NavMesh")
-            mu.label(ctx, "S - Save NavMesh")
-            mu.label(ctx, "V - Toggle NavMesh")
-            mu.label(ctx, "W - Toggle Wireframe")
-
         } else {
-            mu.label(ctx, "Status: Not Built")
-            if .SUBMIT in mu.button(ctx, "Build NavMesh") {
-                build_navmesh(engine_ptr)
-            }
+            mu.label(ctx, "Status: Building navigation mesh...")
         }
+
+        // Controls help
+        mu.label(ctx, "")
+        mu.label(ctx, "Controls:")
+        mu.label(ctx, "Left Click - Set Start")
+        mu.label(ctx, "Right Click - Set End & Find Path")
+        mu.label(ctx, "Middle Click - Toggle Auto Rotate")
+        mu.label(ctx, "C - Clear Path")
+        mu.label(ctx, "D - Cycle Color Modes")
+        mu.label(ctx, "M - Toggle Original Mesh")
+        mu.label(ctx, "P - Print NavMesh Info")
+        mu.label(ctx, "R - Rebuild NavMesh")
+        mu.label(ctx, "S - Save NavMesh")
+        mu.label(ctx, "L - Load NavMesh")
+        mu.label(ctx, "V - Toggle NavMesh")
+        mu.label(ctx, "SPACE - Random Path")
     }
 }
 
-navmesh_key_pressed :: proc(engine_ptr: ^mjolnir.Engine, key, action, mods: int) {
-    using mjolnir, geometry
+demo_key_pressed :: proc(engine_ptr: ^mjolnir.Engine, key, action, mods: int) {
+    using mjolnir
 
     if action != glfw.PRESS do return
 
     switch key {
     case glfw.KEY_R:
         // Rebuild navigation mesh
-        log.info("Rebuilding navigation mesh...")
-        build_navmesh(engine_ptr)
+        log.info("Rebuilding navigation mesh from world...")
+        build_navigation_mesh_from_world(engine_ptr)
 
     case glfw.KEY_V:
         // Toggle navmesh visibility
-        engine_ptr.navmesh.enabled = !engine_ptr.navmesh.enabled
-        log.infof("NavMesh visibility: %v", engine_ptr.navmesh.enabled)
+        navmesh_renderer := get_navmesh_renderer(engine_ptr)
+        navmesh_renderer.enabled = !navmesh_renderer.enabled
+        log.infof("NavMesh visibility: %v", navmesh_renderer.enabled)
 
-    case glfw.KEY_W:
-        // Toggle wireframe mode
-        engine_ptr.navmesh.debug_mode = !engine_ptr.navmesh.debug_mode
-        log.infof("NavMesh wireframe: %v", engine_ptr.navmesh.debug_mode)
+    case glfw.KEY_C:
+        // Clear path
+        demo_state.has_path = false
+        clear_path_visualization(engine_ptr)
+        log.info("Path cleared")
+
+    case glfw.KEY_D:
+        // Cycle through color modes
+        navmesh_renderer := get_navmesh_renderer(engine_ptr)
+        current_mode := int(navmesh_renderer.color_mode)
+        current_mode = (current_mode + 1) % 5
+        navmesh_renderer.color_mode = auto_cast current_mode
+        mode_names := [5]string{"Area Colors", "Uniform", "Height Based", "Random Colors", "Region Colors"}
+        log.infof("NavMesh color mode changed to: %s", mode_names[current_mode])
 
     case glfw.KEY_M:
-        // Toggle original mesh visibility
-        if navmesh_state.obj_mesh_node != nil {
-            navmesh_state.show_original_mesh = !navmesh_state.show_original_mesh
-            navmesh_state.obj_mesh_node.visible = navmesh_state.show_original_mesh
-            log.infof("Original mesh visibility: %v", navmesh_state.show_original_mesh)
+        // Toggle original mesh visibility (for OBJ files)
+        if demo_state.obj_mesh_node != nil {
+            demo_state.show_original_mesh = !demo_state.show_original_mesh
+            // In the new world system, we control visibility through the world system
+            log.infof("Original mesh visibility: %v", demo_state.show_original_mesh)
         } else {
             log.info("No OBJ mesh loaded to toggle visibility")
         }
 
-    case glfw.KEY_C:
-        // Clear path
-        clear(&navmesh_state.path_points)
-        navmesh_state.has_path = false
-        navmesh_state.picking_mode = .PickingStart
-        update_path_visualization(&global_navmesh_engine)
-        navigation_renderer.clear_path(&engine_ptr.navmesh)
-        log.info("Path cleared")
-
-    case glfw.KEY_D:
-        // Cycle through color modes with D key (Debug colors)
-        current_mode := int(engine_ptr.navmesh.color_mode)
-        current_mode = (current_mode + 1) % 5  // We have 5 color modes now
-        engine_ptr.navmesh.color_mode = navigation_renderer.ColorMode(current_mode)
-        mode_names := [5]string{"Area Colors", "Uniform", "Height Based", "Random Colors", "Region Colors"}
-        log.infof("NavMesh color mode changed to: %s", mode_names[current_mode])
-
     case glfw.KEY_P:
-        // Generate new path
-        if navmesh_state.navmesh_built {
-            log.info("Generating new random path...")
-            generate_new_path(&global_navmesh_engine)
-        } else {
-            log.warn("Build navigation mesh first (press R)")
-        }
-
-    case glfw.KEY_SPACE:
-        // Generate new path (alternative key)
-        if navmesh_state.navmesh_built {
-            log.info("Generating new random path...")
-            generate_new_path(&global_navmesh_engine)
-        } else {
-            log.warn("Build navigation mesh first (press R)")
-        }
+        // Print navigation mesh info
+        print_navmesh_info(engine_ptr)
 
     case glfw.KEY_S:
-        // Save navigation mesh
-        if navmesh_state.navmesh_built && navmesh_state.nav_mesh != nil {
-            log.info("Saving navigation mesh...")
-            save_current_navmesh(&global_navmesh_engine)
-        } else {
-            log.warn("No navigation mesh to save - build one first (press R)")
-        }
+        // Save navigation mesh to file
+        save_navmesh(engine_ptr)
 
     case glfw.KEY_L:
-        // Load navigation mesh
-        log.info("Loading navigation mesh...")
-        try_load_saved_navmesh(&global_navmesh_engine)
-    }
-}
+        // Load navigation mesh from file
+        load_navmesh(engine_ptr)
 
-// Analyze connectivity from Detour's perspective
-analyze_detour_connectivity :: proc(nav_mesh: ^detour.Nav_Mesh) {
-    using detour
-
-    // Get the first tile (solo mesh)
-    tile := get_tile_at(nav_mesh, 0, 0, 0)
-    if tile == nil || tile.header == nil {
-        log.error("Failed to get nav mesh tile")
-        return
-    }
-
-    log.infof("Detour tile has %d polygons", tile.header.poly_count)
-
-    // Build connectivity graph using BFS
-    visited := make([]bool, tile.header.poly_count, context.temp_allocator)
-    components := make([dynamic]int, context.temp_allocator)
-
-    for start_poly in 0..<tile.header.poly_count {
-        if visited[start_poly] do continue
-
-        // Start a new component
-        component_size := 0
-        stack := make([dynamic]int, context.temp_allocator)
-        append(&stack, int(start_poly))
-
-        for len(stack) > 0 {
-            current := pop(&stack)
-            if visited[current] do continue
-            visited[current] = true
-            component_size += 1
-
-            // Check all neighbors
-            poly := &tile.polys[current]
-            for i in 0..<poly.vert_count {
-                // Check neighbor through edge
-                if poly.neis[i] != 0 {
-                    // Internal edge - neighbor within same tile
-                    if poly.neis[i] < 0x8000 {
-                        neighbor_idx := int(poly.neis[i] - 1)  // Convert to 0-based
-                        if neighbor_idx >= 0 && neighbor_idx < int(tile.header.poly_count) && !visited[neighbor_idx] {
-                            append(&stack, neighbor_idx)
-                        }
-                    }
-                }
-
-                // Also check through links
-                link_idx := poly.first_link
-                for link_idx != recast.DT_NULL_LINK {
-                    link := &tile.links[link_idx]
-                    if link.ref != 0 {
-                        // Extract polygon index from reference
-                        poly_idx := int(link.ref & 0xFFFF)  // Mask to get poly ID
-                        if poly_idx < int(tile.header.poly_count) && !visited[poly_idx] {
-                            append(&stack, poly_idx)
-                        }
-                    }
-                    link_idx = link.next
-                }
-            }
-        }
-
-        append(&components, component_size)
-    }
-    log.infof("Found %d connected components in Detour NavMesh:", len(components))
-    for size, i in components {
-        log.infof("  Component %d: %d polygons", i, size)
-    }
-
-    // Test pathfinding between corners
-    test_corner_connectivity(nav_mesh)
-}
-
-// Test pathfinding between corners to check connectivity
-test_corner_connectivity :: proc(nav_mesh: ^detour.Nav_Mesh) {
-    using detour
-
-    // Create navigation query
-    nav_query := new(Nav_Mesh_Query)
-    defer free(nav_query)
-
-    query_status := nav_mesh_query_init(nav_query, nav_mesh, 2048)
-    if recast.status_failed(query_status) {
-        log.error("Failed to create navigation query for corner test")
-        return
-    }
-
-    // Initialize filter
-    filter: Query_Filter
-    query_filter_init(&filter)
-
-    // Test corners
-    test_points := [][3]f32{
-        {-20.0, 0.0, -20.0},  // Bottom-left
-        {20.0, 0.0, -20.0},   // Bottom-right
-        {-20.0, 0.0, 20.0},   // Top-left
-        {20.0, 0.0, 20.0},    // Top-right
-    }
-
-    names := []string{"Bottom-left", "Bottom-right", "Top-left", "Top-right"}
-
-    extents := [3]f32{5.0, 5.0, 5.0}
-    refs: [4]recast.Poly_Ref
-    nearest: [4][3]f32
-
-    // Find nearest polygons for each test point
-    for i in 0..<4 {
-        status, ref, pt := find_nearest_poly(nav_query, test_points[i], extents, &filter)
-        refs[i] = ref
-        nearest[i] = pt
-        if recast.status_succeeded(status) && refs[i] != 0 {
-            log.infof("%s: Found poly 0x%x at (%.1f, %.1f, %.1f)",
-                names[i], refs[i], nearest[i][0], nearest[i][1], nearest[i][2])
+    case glfw.KEY_SPACE:
+        // Generate random path
+        if demo_state.nav_mesh_handle.generation != 0 {
+            log.info("Generating random path...")
+            generate_random_path(engine_ptr)
         } else {
-            log.warnf("%s: Failed to find nearest poly", names[i])
-            refs[i] = 0
+            log.warn("Build navigation mesh first (press R)")
         }
     }
-
-    // Test paths between all pairs
-    log.info("Path connectivity matrix:")
-    log.info("        BL    BR    TL    TR")
-    for i in 0..<4 {
-        fmt.printf("%s: ", names[i])
-        for j in 0..<4 {
-            if i == j {
-                fmt.printf("  -   ")
-            } else if refs[i] != 0 && refs[j] != 0 {
-                path: [256]recast.Poly_Ref
-                status, pc := find_path(nav_query, refs[i], refs[j], nearest[i], nearest[j],
-                                  &filter, path[:], 256)
-                if recast.status_succeeded(status) && pc > 1 {
-                    fmt.printf(" YES  ")
-                } else {
-                    fmt.printf(" NO   ")
-                }
-            } else {
-                fmt.printf(" N/A  ")
-            }
-        }
-        fmt.println()
-    }
 }
 
-// Try to load previously saved navigation mesh
-try_load_saved_navmesh :: proc(engine_ptr: ^mjolnir.Engine) {
+print_navmesh_info :: proc(engine_ptr: ^mjolnir.Engine) {
     using mjolnir
 
-    if !os.exists(navmesh_state.serialized_navmesh_path) {
-        navmesh_state.serialization_status = "No saved navmesh found"
+    if demo_state.nav_mesh_handle.generation == 0 {
+        log.info("No navigation mesh available")
         return
     }
 
-    log.infof("=== LOADING SAVED NAVIGATION MESH ===")
-    log.infof("Loading from: %s", navmesh_state.serialized_navmesh_path)
-
-    // Load navigation mesh from file
-    loaded_nav_mesh, loaded_query, load_ok := detour.load_navmesh_for_runtime(navmesh_state.serialized_navmesh_path)
-    if !load_ok {
-        navmesh_state.serialization_status = "Failed to load saved navmesh"
-        log.error("Failed to load saved navigation mesh")
+    nav_mesh, ok := resources.get_navmesh(&engine_ptr.resource_manager, demo_state.nav_mesh_handle)
+    if !ok {
+        log.error("Failed to get navigation mesh")
         return
     }
 
-    // Clean up existing navigation system
-    if navmesh_state.nav_query != nil {
-        detour.pathfinding_context_destroy(&navmesh_state.nav_query.pf_context)
-        free(navmesh_state.nav_query)
-    }
-    if navmesh_state.nav_mesh != nil {
-        detour.nav_mesh_destroy(navmesh_state.nav_mesh)
-        free(navmesh_state.nav_mesh)
-    }
+    log.info("=== NAVIGATION MESH INFO ===")
+    log.infof("Bounds: min=(%.2f, %.2f, %.2f) max=(%.2f, %.2f, %.2f)",
+             nav_mesh.bounds.min.x, nav_mesh.bounds.min.y, nav_mesh.bounds.min.z,
+             nav_mesh.bounds.max.x, nav_mesh.bounds.max.y, nav_mesh.bounds.max.z)
+    log.infof("Cell size: %.3f", nav_mesh.cell_size)
+    log.infof("Tile size: %d", nav_mesh.tile_size)
+    log.infof("Is tiled: %v", nav_mesh.is_tiled)
 
-    // Use loaded navigation mesh
-    navmesh_state.nav_mesh = loaded_nav_mesh
-    navmesh_state.nav_query = loaded_query
-
-    // Initialize filter
-    detour.query_filter_init(&navmesh_state.filter)
-
-    // Build visualization from loaded mesh
-    success := build_visualization_from_detour_mesh(engine_ptr, loaded_nav_mesh)
-    if !success {
-        log.error("Failed to build visualization from loaded mesh")
-        navmesh_state.serialization_status = "Loaded but visualization failed"
-        return
+    // Get detour mesh info
+    tile := detour.get_tile_at(&nav_mesh.detour_mesh, 0, 0, 0)
+    if tile != nil && tile.header != nil {
+        log.infof("Vertices: %d", tile.header.vert_count)
+        log.infof("Polygons: %d", tile.header.poly_count)
+        log.infof("Detail meshes: %d", tile.header.detail_mesh_count)
+        log.infof("Detail vertices: %d", tile.header.detail_vert_count)
+        log.infof("Detail triangles: %d", tile.header.detail_tri_count)
     }
 
-    navmesh_state.navmesh_built = true
-    navmesh_state.serialization_status = "Loaded successfully from file"
+    demo_state.navmesh_info = fmt.tprintf("Verts: %d, Polys: %d, Cell: %.3f",
+                                         tile != nil && tile.header != nil ? tile.header.vert_count : 0,
+                                         tile != nil && tile.header != nil ? tile.header.poly_count : 0,
+                                         nav_mesh.cell_size)
+    log.info("Navigation mesh info updated")
 }
 
-// Save current navigation mesh to file
-save_current_navmesh :: proc(engine_ptr: ^mjolnir.Engine) {
+save_navmesh :: proc(engine_ptr: ^mjolnir.Engine) {
     using mjolnir
 
-    if navmesh_state.nav_mesh == nil {
-        navmesh_state.serialization_status = "No navmesh to save"
-        log.error("No navigation mesh to save")
+    if demo_state.nav_mesh_handle.generation == 0 {
+        demo_state.serialization_status = "No navmesh to save"
+        log.warn("No navigation mesh to save")
         return
     }
 
-    save_ok := detour.save_navmesh_to_file(navmesh_state.nav_mesh, navmesh_state.serialized_navmesh_path)
-    if !save_ok {
-        navmesh_state.serialization_status = "Failed to save navmesh"
-        log.error("Failed to save navigation mesh")
+    demo_state.serialization_status = "Saving..."
+    log.infof("Saving navigation mesh to: %s", demo_state.serialized_navmesh_path)
+
+    nav_mesh, ok := resources.get_navmesh(&engine_ptr.resource_manager, demo_state.nav_mesh_handle)
+    if !ok {
+        demo_state.serialization_status = "Failed to get navmesh"
+        log.error("Failed to get navigation mesh for saving")
         return
     }
 
-    navmesh_state.serialization_status = "Saved successfully to file"
-    log.info("Saved navigation mesh to file")
-}
-
-// Build visualization from Detour navigation mesh (for loaded meshes)
-build_visualization_from_detour_mesh :: proc(engine_ptr: ^mjolnir.Engine, nav_mesh: ^detour.Nav_Mesh) -> bool {
-    using mjolnir
-
-    tile := detour.get_tile_at(nav_mesh, 0, 0, 0)
+    // Get tile data for serialization
+    tile := detour.get_tile_at(&nav_mesh.detour_mesh, 0, 0, 0)
     if tile == nil || tile.header == nil {
-        log.error("Failed to get navigation mesh tile for visualization")
-        return false
-    }
-    navmesh_vertices := make([dynamic]navigation_renderer.Vertex, 0, int(tile.header.vert_count))
-    indices := make([dynamic]u32, 0, int(tile.header.poly_count) * 3)
-    defer delete(navmesh_vertices)
-    defer delete(indices)
-    for i in 0..<tile.header.vert_count {
-        pos := tile.verts[i]
-        append(&navmesh_vertices, navigation_renderer.Vertex{
-            position = pos,
-            color = {0.0, 0.8, 0.2, 0.6},
-            normal = {0, 1, 0},
-        })
-    }
-    for i in 0..<tile.header.poly_count {
-        poly := &tile.polys[i]
-        vert_count := int(poly.vert_count)
-        if vert_count < 3 do continue
-        poly_seed := u32(i * 17 + 23)
-        hue := f32((poly_seed * 137) % 360)
-        poly_color := [4]f32{
-            0.5 + 0.5 * math.sin(hue * math.PI / 180.0),
-            0.5 + 0.5 * math.sin((hue + 120) * math.PI / 180.0),
-            0.5 + 0.5 * math.sin((hue + 240) * math.PI / 180.0),
-            0.6,
-        }
-        for j in 0..<vert_count {
-            if int(poly.verts[j]) < len(navmesh_vertices) {
-                navmesh_vertices[poly.verts[j]].color = poly_color
-            }
-        }
-        for j in 1..<vert_count-1 {
-            append(&indices, u32(poly.verts[0]), u32(poly.verts[j]), u32(poly.verts[j+1]))
-        }
-    }
-    renderer := &engine_ptr.navmesh
-    renderer.vertex_count = u32(len(navmesh_vertices))
-    renderer.index_count = u32(len(indices))
-    if renderer.vertex_count == 0 || renderer.index_count == 0 {
-        log.warn("Navigation mesh has no renderable geometry")
-        return false
-    }
-    if renderer.vertex_count > 16384 {
-        log.errorf("Too many vertices (%d) for buffer size (16384)", renderer.vertex_count)
-        return false
-    }
-    if renderer.index_count > 32768 {
-        log.errorf("Too many indices (%d) for buffer size (32768)", renderer.index_count)
-        return false
-    }
-    vertex_result := gpu.write(&renderer.vertex_buffer, navmesh_vertices[:])
-    if vertex_result != .SUCCESS {
-        log.error("Failed to upload navigation mesh vertex data")
-        return false
-    }
-    index_result := gpu.write(&renderer.index_buffer, indices[:])
-    if index_result != .SUCCESS {
-        log.error("Failed to upload navigation mesh index data")
-        return false
-    }
-    renderer.enabled = true
-    renderer.debug_mode = false
-    renderer.alpha = 0.6
-    renderer.height_offset = 0.05
-    renderer.color_mode = .Random_Colors
-    return true
-}
-
-// Analyze detailed polygon connections
-analyze_detailed_connections :: proc(nav_mesh: ^detour.Nav_Mesh) {
-    using detour
-    log.info("=== DETAILED CONNECTION ANALYSIS ===")
-    // Get the first tile (solo mesh)
-    tile := get_tile_at(nav_mesh, 0, 0, 0)
-    if tile == nil || tile.header == nil {
-        log.error("Failed to get nav mesh tile")
+        demo_state.serialization_status = "No tile data"
+        log.error("No tile data available for saving")
         return
     }
-    log.infof("Analyzing connections for %d polygons", tile.header.poly_count)
-    // Analyze first 10 polygons in detail
-    for i in 0..<min(10, int(tile.header.poly_count)) {
-        poly := &tile.polys[i]
-        log.infof("\nPolygon %d (ref=0x%x):", i, get_poly_ref_base(nav_mesh, tile) | recast.Poly_Ref(i))
-        log.infof("  Vertex count: %d", poly.vert_count)
-        fmt.printf("  Vertices: ")
-        for v in 0..<poly.vert_count {
-            fmt.printf("%d ", poly.verts[v])
-        }
-        fmt.println()
-        fmt.printf("  Edge neighbors: ")
-        for e in 0..<poly.vert_count {
-            if poly.neis[e] != 0 {
-                if poly.neis[e] & 0x8000 != 0 {
-                    // External link
-                    fmt.printf("[%d]=EXT(0x%x) ", e, poly.neis[e])
-                } else {
-                    // Internal neighbor
-                    neighbor_idx := int(poly.neis[e] - 1)
-                    fmt.printf("[%d]=%d ", e, neighbor_idx)
-                }
-            } else {
-                fmt.printf("[%d]=WALL ", e)
-            }
-        }
-        fmt.println()
-        link_count := 0
-        link_idx := poly.first_link
-        for link_idx != recast.DT_NULL_LINK {
-            link_count += 1
-            link := &tile.links[link_idx]
-            link_idx = link.next
-        }
-        log.infof("  Link count: %d", link_count)
-        if link_count > 0 {
-            fmt.printf("  Links: ")
-            link_idx = poly.first_link
-            for link_idx != recast.DT_NULL_LINK {
-                link := &tile.links[link_idx]
-                fmt.printf("(edge=%d,ref=0x%x) ", link.edge, link.ref)
-                link_idx = link.next
-            }
-            fmt.println()
-        }
+
+    // For now, just indicate saving is not fully implemented in the new architecture
+    // This would require extending the navigation mesh serialization system
+    demo_state.serialization_status = "Save not implemented yet"
+    log.warn("Navigation mesh serialization not yet implemented in new architecture")
+    log.info("This feature requires extending the world navigation system")
+}
+
+load_navmesh :: proc(engine_ptr: ^mjolnir.Engine) {
+    using mjolnir
+
+    demo_state.serialization_status = "Loading..."
+    log.infof("Loading navigation mesh from: %s", demo_state.serialized_navmesh_path)
+
+    if !os.exists(demo_state.serialized_navmesh_path) {
+        demo_state.serialization_status = "File not found"
+        log.warnf("Navigation mesh file not found: %s", demo_state.serialized_navmesh_path)
+        return
     }
+
+    // For now, just indicate loading is not fully implemented in the new architecture
+    // This would require extending the navigation mesh serialization system
+    demo_state.serialization_status = "Load not implemented yet"
+    log.warn("Navigation mesh loading not yet implemented in new architecture")
+    log.info("This feature requires extending the world navigation system")
 }

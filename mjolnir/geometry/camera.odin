@@ -261,8 +261,10 @@ camera_get_near_far :: proc(camera: Camera) -> (near: f32, far: f32) {
 
 viewport_to_world_ray :: proc(viewport_width, viewport_height, x, y: f32, camera: Camera) -> (ray_origin: [3]f32, ray_dir: [3]f32) {
     // Normalize screen coordinates to [-1, 1]
+    // GLFW coordinates: (0,0) at top-left, Y increases downward
+    // NDC coordinates: (-1,-1) at bottom-left, (1,1) at top-right
     ndc_x := (2.0 * x / viewport_width) - 1.0
-    ndc_y := 1.0 - (2.0 * y / viewport_height)  // Flip Y
+    ndc_y := -((2.0 * y / viewport_height) - 1.0)  // Flip Y axis: top = +1, bottom = -1
     view, proj := camera_calculate_matrices(camera)
     ray_clip := [4]f32{ndc_x, ndc_y, -1.0, 1.0}
     ray_eye := linalg.matrix4x4_inverse(proj) * ray_clip

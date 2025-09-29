@@ -23,10 +23,11 @@ NodeSkinning :: struct {
 }
 
 MeshAttachment :: struct {
-  handle:      Handle,
-  material:    Handle,
-  skinning:    Maybe(NodeSkinning),
-  cast_shadow: bool,
+  handle:              Handle,
+  material:            Handle,
+  skinning:            Maybe(NodeSkinning),
+  cast_shadow:         bool,
+  navigation_obstacle: bool,
 }
 
 EmitterAttachment :: struct {
@@ -238,6 +239,9 @@ spawn_at :: proc(
       if mesh_attachment.cast_shadow {
         data.flags |= resources.NodeFlagSet{.CASTS_SHADOW}
       }
+      if mesh_attachment.navigation_obstacle {
+        data.flags |= resources.NodeFlagSet{.NAVIGATION_OBSTACLE}
+      }
       if material_entry, has_material := resources.get(
         resources_manager.materials,
         mesh_attachment.material,
@@ -254,6 +258,10 @@ spawn_at :: proc(
       if skinning, has_skinning := mesh_attachment.skinning.?; has_skinning {
         data.bone_matrix_offset = skinning.bone_matrix_offset
       }
+    }
+    // Check for navigation obstacle attachment
+    if _, is_obstacle := node.attachment.(NavMeshObstacleAttachment); is_obstacle {
+      data.flags |= resources.NodeFlagSet{.NAVIGATION_OBSTACLE}
     }
     gpu.write(&resources_manager.node_data_buffer, &data, int(handle.index))
   }
@@ -295,6 +303,9 @@ spawn :: proc(
       if mesh_attachment.cast_shadow {
         data.flags |= resources.NodeFlagSet{.CASTS_SHADOW}
       }
+      if mesh_attachment.navigation_obstacle {
+        data.flags |= resources.NodeFlagSet{.NAVIGATION_OBSTACLE}
+      }
       if material_entry, has_material := resources.get(
         resources_manager.materials,
         mesh_attachment.material,
@@ -311,6 +322,10 @@ spawn :: proc(
       if skinning, has_skinning := mesh_attachment.skinning.?; has_skinning {
         data.bone_matrix_offset = skinning.bone_matrix_offset
       }
+    }
+    // Check for navigation obstacle attachment
+    if _, is_obstacle := node.attachment.(NavMeshObstacleAttachment); is_obstacle {
+      data.flags |= resources.NodeFlagSet{.NAVIGATION_OBSTACLE}
     }
     gpu.write(&resources_manager.node_data_buffer, &data, int(handle.index))
   }
@@ -353,6 +368,9 @@ spawn_child :: proc(
       if mesh_attachment.cast_shadow {
         data.flags |= resources.NodeFlagSet{.CASTS_SHADOW}
       }
+      if mesh_attachment.navigation_obstacle {
+        data.flags |= resources.NodeFlagSet{.NAVIGATION_OBSTACLE}
+      }
       if material_entry, has_material := resources.get(
         resources_manager.materials,
         mesh_attachment.material,
@@ -369,6 +387,10 @@ spawn_child :: proc(
       if skinning, has_skinning := mesh_attachment.skinning.?; has_skinning {
         data.bone_matrix_offset = skinning.bone_matrix_offset
       }
+    }
+    // Check for navigation obstacle attachment
+    if _, is_obstacle := node.attachment.(NavMeshObstacleAttachment); is_obstacle {
+      data.flags |= resources.NodeFlagSet{.NAVIGATION_OBSTACLE}
     }
     gpu.write(&resources_manager.node_data_buffer, &data, int(handle.index))
   }
@@ -515,6 +537,9 @@ spawn_node :: proc(
       if mesh_attachment.cast_shadow {
         data.flags |= resources.NodeFlagSet{.CASTS_SHADOW}
       }
+      if mesh_attachment.navigation_obstacle {
+        data.flags |= resources.NodeFlagSet{.NAVIGATION_OBSTACLE}
+      }
       if material_entry, has_material := resources.get(
         resources_manager.materials,
         mesh_attachment.material,
@@ -531,6 +556,10 @@ spawn_node :: proc(
       if skinning, has_skinning := mesh_attachment.skinning.?; has_skinning {
         data.bone_matrix_offset = skinning.bone_matrix_offset
       }
+    }
+    // Check for navigation obstacle attachment
+    if _, is_obstacle := node.attachment.(NavMeshObstacleAttachment); is_obstacle {
+      data.flags |= resources.NodeFlagSet{.NAVIGATION_OBSTACLE}
     }
     gpu.write(&resources_manager.node_data_buffer, &data, int(handle.index))
   }
@@ -572,6 +601,9 @@ spawn_child_node :: proc(
       if mesh_attachment.cast_shadow {
         data.flags |= resources.NodeFlagSet{.CASTS_SHADOW}
       }
+      if mesh_attachment.navigation_obstacle {
+        data.flags |= resources.NodeFlagSet{.NAVIGATION_OBSTACLE}
+      }
       if material_entry, has_material := resources.get(
         resources_manager.materials,
         mesh_attachment.material,
@@ -588,6 +620,10 @@ spawn_child_node :: proc(
       if skinning, has_skinning := mesh_attachment.skinning.?; has_skinning {
         data.bone_matrix_offset = skinning.bone_matrix_offset
       }
+    }
+    // Check for navigation obstacle attachment
+    if _, is_obstacle := node.attachment.(NavMeshObstacleAttachment); is_obstacle {
+      data.flags |= resources.NodeFlagSet{.NAVIGATION_OBSTACLE}
     }
     gpu.write(&resources_manager.node_data_buffer, &data, int(handle.index))
   }
@@ -743,10 +779,10 @@ traverse :: proc(world: ^World, resources_manager: ^resources.Manager = nil, cb_
     entry := pop(&world.traversal_stack)
     current_node, found := resources.get(world.nodes, entry.handle)
     if !found {
-      log.errorf(
-        "traverse_scene: Node with handle %v not found\n",
-        entry.handle,
-      )
+      // log.errorf(
+      //   "traverse_scene: Node with handle %v not found\n",
+      //   entry.handle,
+      // )
       continue
     }
     if current_node.pending_deletion do continue

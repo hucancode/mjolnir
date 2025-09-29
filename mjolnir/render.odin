@@ -25,6 +25,7 @@ Renderer :: struct {
   particles:     particles.Renderer,
   post_process:  post_process.Renderer,
   ui:            debug_ui.Renderer,
+  navigation:    navigation_renderer.Renderer,
   targets:       targets.Manager,
 }
 
@@ -79,6 +80,7 @@ renderer_init :: proc(
     dpi_scale,
     resources_manager,
   ) or_return
+  navigation_renderer.init(&self.navigation, gpu_context, resources_manager) or_return
   targets.init(&self.targets, main_render_target)
   return .SUCCESS
 }
@@ -90,6 +92,7 @@ renderer_shutdown :: proc(
   resources_manager: ^resources.Manager,
 ) {
   debug_ui.shutdown(&self.ui, device)
+  navigation_renderer.shutdown(&self.navigation, device, command_pool)
   post_process.shutdown(&self.post_process, device, command_pool, resources_manager)
   particles.shutdown(&self.particles, device, command_pool)
   transparency.shutdown(&self.transparency, device, command_pool)
@@ -419,7 +422,6 @@ record_transparency_pass :: proc(
   resources_manager: ^resources.Manager,
   world_state: ^world.World,
   main_render_target: ^resources.RenderTarget,
-  navmesh_renderer: ^navigation_renderer.Renderer,
   color_format: vk.Format,
 ) -> vk.Result {
   command_buffer := transparency.begin_record(&self.transparency, frame_index, color_format) or_return
@@ -431,10 +433,11 @@ record_transparency_pass :: proc(
     frame_index,
   )
   navigation_renderer.render(
-    navmesh_renderer,
+    &self.navigation,
     command_buffer,
     linalg.MATRIX4F32_IDENTITY,
     main_render_target.camera.index,
+    resources_manager,
   )
   vis_transparent := world.dispatch_visibility(
     world_state,
