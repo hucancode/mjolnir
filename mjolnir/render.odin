@@ -281,7 +281,47 @@ record_shadow_pass :: proc(
           frame_index,
         )
       case .DIRECTIONAL:
-        // Directional shadow rendering not yet implemented
+        if light.shadow_render_target.generation == 0 do continue
+        found_target := resources.get_render_target(
+          resources_manager,
+          light.shadow_render_target,
+        ) or_continue
+        vis_result := world.dispatch_visibility(
+          world_state,
+          gpu_context,
+          command_buffer,
+          frame_index,
+          .SHADOW,
+          world.VisibilityRequest {
+            camera_index  = found_target.camera.index,
+            include_flags = shadow_include,
+            exclude_flags = shadow_exclude,
+          },
+        )
+        shadow_draw_buffer := vis_result.draw_buffer
+        shadow_count_buffer := vis_result.count_buffer
+        shadow.begin_pass(
+          found_target,
+          command_buffer,
+          resources_manager,
+          frame_index,
+        )
+        shadow.render(
+          &self.shadow,
+          found_target^,
+          command_buffer,
+          resources_manager,
+          frame_index,
+          shadow_draw_buffer,
+          shadow_count_buffer,
+          command_stride,
+        )
+        shadow.end_pass(
+          command_buffer,
+          found_target,
+          resources_manager,
+          frame_index,
+        )
       }
     }
   }

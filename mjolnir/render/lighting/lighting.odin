@@ -658,7 +658,7 @@ render :: proc(
   ) {
     mesh_ptr, ok := resources.get_mesh(resources_manager, mesh_handle)
     if !ok || mesh_ptr == nil {
-      log.error("Failed to get mesh for handle", mesh_handle)
+      log.errorf("Failed to get mesh for handle %v", mesh_handle)
       return
     }
     vertex_offset := vk.DeviceSize(
@@ -697,7 +697,6 @@ render :: proc(
     depth_texture_index = resources.get_depth_texture(render_target, frame_index).index,
     input_image_index = resources.get_final_image(render_target, frame_index).index,
   }
-  // log.infof("Lighting: Checking %d light entries", len(resources_manager.lights.entries))
   for idx in 0 ..< len(resources_manager.lights.entries) {
     entry := &resources_manager.lights.entries[idx]
     if entry.generation > 0 && entry.active {
@@ -716,7 +715,7 @@ render :: proc(
         )
         bind_and_draw_mesh(self.sphere_mesh, command_buffer, resources_manager)
       case .DIRECTIONAL:
-        vk.CmdSetDepthCompareOp(command_buffer, .GREATER_OR_EQUAL)
+        vk.CmdSetDepthCompareOp(command_buffer, .ALWAYS)
         vk.CmdPushConstants(
           command_buffer,
           self.lighting_pipeline_layout,

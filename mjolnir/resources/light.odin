@@ -176,7 +176,7 @@ update_shadow_camera_transforms :: proc(self: ^Manager) {
       case .SPOT:
         update_spot_light_shadow_cameras(self, light)
       case .DIRECTIONAL:
-      // Directional shadow cameras not yet implemented
+        update_directional_light_shadow_cameras(self, light)
       }
     }
   }
@@ -269,7 +269,12 @@ setup_light_shadow_resources :: proc(
       light,
     )
   case .DIRECTIONAL:
-  // Directional shadows not implemented yet
+    setup_directional_light_shadow_resources(
+      manager,
+      gpu_context,
+      light_handle,
+      light,
+    )
   }
 }
 
@@ -280,8 +285,6 @@ setup_point_light_shadow_resources :: proc(
   light_handle: Handle,
   light: ^Light,
 ) {
-  SHADOW_MAP_SIZE :: 512
-
   // Create cube shadow map texture
   cube_shadow_handle, _, ret := create_empty_texture_cube(
     gpu_context,
@@ -349,8 +352,6 @@ setup_spot_light_shadow_resources :: proc(
   light_handle: Handle,
   light: ^Light,
 ) {
-  SHADOW_MAP_SIZE :: 512
-
   // Create shadow map texture
   shadow_handle, _, ret := create_empty_texture_2d(
     gpu_context,
@@ -385,6 +386,107 @@ setup_spot_light_shadow_resources :: proc(
 
   light.shadow_render_target = render_target_handle
   light.camera_index = camera_handle.index
+}
+
+// Setup shadow resources for directional lights
+setup_directional_light_shadow_resources :: proc(
+  manager: ^Manager,
+  gpu_context: ^gpu.GPUContext,
+  light_handle: Handle,
+  light: ^Light,
+) {
+  shadow_handle, _, ret := create_empty_texture_2d(
+    gpu_context,
+    manager,
+    SHADOW_MAP_SIZE,
+    SHADOW_MAP_SIZE,
+    .D32_SFLOAT,
+    {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
+  )
+  if ret != .SUCCESS {
+    log.errorf("Failed to create directional shadow texture")
+    return
+  }
+  light.shadow_map = shadow_handle.index
+
+  // Create render target
+  render_target_handle, render_target := alloc(&manager.render_targets)
+
+  // Create orthographic camera for directional light
+  camera_handle, camera := alloc(&manager.cameras)
+  ortho_size: f32 = 100.0
+  camera^ = geometry.make_camera_ortho(ortho_size, ortho_size, 0.1, 100.0)
+
+  render_target.camera = camera_handle
+  render_target.extent = {SHADOW_MAP_SIZE, SHADOW_MAP_SIZE}
+  render_target.features = {.DEPTH_TEXTURE}
+
+  // Set depth texture for all frames
+  for frame_idx in 0 ..< MAX_FRAMES_IN_FLIGHT {
+    render_target.depth_textures[frame_idx] = shadow_handle
+  }
+
+  light.shadow_render_target = render_target_handle
+  light.camera_index = camera_handle.index
+}
+
+// Fit orthographic camera bounds to contain scene geometry
+fit_shadow_camera_to_scene :: proc(
+  camera: ^geometry.Camera,
+  light_dir: [3]f32,
+  scene_center: [3]f32 = {0, 0, 0},
+  scene_radius: f32 = 50.0,
+) {
+  // Calculate orthographic bounds that contain a sphere around scene center
+  // This ensures all geometry within scene_radius gets shadows
+  ortho_size := scene_radius * 1.5 // Add padding
+
+  switch &proj in camera.projection {
+  case geometry.PerspectiveProjection:
+    // Should not happen for directional lights
+    log.error("Directional light has perspective projection!")
+  case geometry.OrthographicProjection:
+    proj.width = ortho_size
+    proj.height = ortho_size
+    proj.near = 0.1
+    proj.far = scene_radius * 3.0 // Enough to contain scene depth
+  }
+}
+
+update_directional_light_shadow_cameras :: proc(self: ^Manager, light: ^Light) {
+  if light.shadow_render_target.generation == 0 do return
+  render_target, ok := get(self.render_targets, light.shadow_render_target)
+  if !ok do return
+  camera, camera_ok := get(self.cameras, render_target.camera)
+  if !camera_ok do return
+
+  // Get light direction from world matrix
+  world_matrix := gpu.staged_buffer_get(
+    &self.world_matrix_buffer,
+    light.node_handle.index,
+  )
+  light_dir := linalg.normalize(world_matrix[2].xyz) // Forward direction
+
+  // Simple approach: Cover a fixed area around scene origin
+  // For better quality, implement CSM or fit to main camera frustum
+  scene_center := [3]f32{0, 0, 0}
+  scene_radius: f32 = 50.0
+
+  // Fit the orthographic camera to cover the scene
+  fit_shadow_camera_to_scene(camera, light_dir, scene_center, scene_radius)
+
+  // Position shadow camera far back along light direction
+  shadow_distance := scene_radius * 2.0
+  position := scene_center - light_dir * shadow_distance
+  target := scene_center
+
+  up := [3]f32{0, 1, 0}
+  if linalg.abs(linalg.dot(light_dir, up)) > 0.99 {
+    up = {1, 0, 0}
+  }
+
+  geometry.camera_look_at(camera, position, target, up)
+  render_target_upload_camera_data(self, render_target)
 }
 
 // Destroy shadow resources for a light
@@ -462,7 +564,35 @@ destroy_light_shadow_resources :: proc(
       }
     }
   case .DIRECTIONAL:
-  // Directional shadows not implemented yet
+    // Destroy directional render target and camera
+    if light.shadow_render_target.generation != 0 {
+      if render_target, ok := free(
+        &manager.render_targets,
+        light.shadow_render_target,
+      ); ok {
+        // Free the camera associated with this render target
+        free(&manager.cameras, render_target.camera)
+      }
+      light.shadow_render_target = {}
+    }
+    // Free the shadow map texture
+    shadow_texture_handle: Handle
+    if light.shadow_render_target.generation != 0 {
+      if render_target, ok := get(
+        manager.render_targets,
+        light.shadow_render_target,
+      ); ok {
+        if len(render_target.depth_textures) > 0 {
+          shadow_texture_handle = render_target.depth_textures[0]
+        }
+      }
+    }
+    if shadow_texture_handle.generation != 0 {
+      if texture, ok := free(&manager.image_2d_buffers, shadow_texture_handle);
+         ok {
+        gpu.image_buffer_destroy(gpu_context.device, texture)
+      }
+    }
   }
 
   light.shadow_map = 0

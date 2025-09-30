@@ -75,10 +75,23 @@ float linearizeDepth(float depth, float near, float far) {
     return (2.0 * near * far) / (far + near - z * (far - near));
 }
 
-float calculateShadow(vec3 fragPos, vec3 n, Camera lightCamera, LightData light, vec3 light_position) {
+float calculateShadow(vec3 fragPos, vec3 n, Camera lightCamera, LightData light, vec3 light_position, vec3 light_direction) {
     if (light.type == DIRECTIONAL_LIGHT) {
-        // WIP, currently we don't calculate directional light's shadow
-        return 1.0;
+        vec4 lightSpacePos = lightCamera.projection * lightCamera.view * vec4(fragPos, 1.0);
+        vec3 shadowCoord = lightSpacePos.xyz / lightSpacePos.w;
+        shadowCoord = shadowCoord * 0.5 + 0.5;
+        if (shadowCoord.x < 0.0 || shadowCoord.x > 1.0 ||
+            shadowCoord.y < 0.0 || shadowCoord.y > 1.0 ||
+            shadowCoord.z < 0.0 || shadowCoord.z > 1.0) {
+            return 1.0;
+        }
+        // Slope-scale bias: larger bias for surfaces at grazing angles to light
+        vec3 lightDir = normalize(light_direction);
+        float cosTheta = clamp(dot(n, lightDir), 0.0, 1.0);
+        float bias = 0.005 * tan(acos(cosTheta)); // Slope-dependent
+        bias = clamp(bias, 0.001, 0.01); // Clamp to reasonable range
+        float shadowDepth = texture(sampler2D(textures[light.shadow_map], samplers[SAMPLER_LINEAR_CLAMP]), shadowCoord.xy).r;
+        return (shadowCoord.z > shadowDepth + bias) ? 0.1 : 1.0;
     } else if (light.type == POINT_LIGHT) {
         vec3 lightToFrag = fragPos - light_position;
         vec3 coord = normalize(lightToFrag);
@@ -198,7 +211,7 @@ void main() {
     // For shadows, we need to find the light camera (this is a simplified approach)
     // In a full implementation, you'd need to store camera indices in the light data
     Camera lightCamera = camera_buffer.cameras[light.camera_index];
-    float shadowFactor = light.cast_shadow != 0u ? calculateShadow(position, normal, lightCamera, light, light_position) : 1.0;
+    float shadowFactor = light.cast_shadow != 0u ? calculateShadow(position, normal, lightCamera, light, light_position, light_direction) : 1.0;
     vec3 direct = brdf(normal, V, albedo, roughness, metallic, position, light, light_position, light_direction);
     outColor = vec4(direct * shadowFactor, 1.0);
 }

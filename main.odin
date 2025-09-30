@@ -16,9 +16,9 @@ import "vendor:glfw"
 import mu "vendor:microui"
 import vk "vendor:vulkan"
 
-LIGHT_COUNT :: 5
+LIGHT_COUNT :: 3
 ALL_SPOT_LIGHT :: false
-ALL_POINT_LIGHT :: true
+ALL_POINT_LIGHT :: false
 light_handles: [LIGHT_COUNT]resources.Handle
 light_cube_handles: [LIGHT_COUNT]resources.Handle
 brick_wall_mat_handle: resources.Handle
@@ -258,7 +258,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
         1.0,
       }
       light: ^world.Node
-      should_make_spot_light := i % 2 != 0
+      should_make_spot_light := i % 2 != 1
       if ALL_SPOT_LIGHT {
         should_make_spot_light = true
       } else if ALL_POINT_LIGHT {
@@ -282,7 +282,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
           &engine.resource_manager,
           &engine.gpu_context,
           color,
-          10,  // radius
+          7,  // radius
         )
         light.attachment = attachment
       }
@@ -299,6 +299,19 @@ setup :: proc(engine: ^mjolnir.Engine) {
       )
       world.scale(cube_node, 0.1)
     }
+  }
+  // Spawn directional light
+  {
+    dir_handle, dir_node := world.spawn(&engine.world, nil, &engine.resource_manager)
+    dir_node.attachment = world.create_directional_light_attachment(
+      dir_handle,
+      &engine.resource_manager,
+      &engine.gpu_context,
+      {0.2, 0.5, 0.9, 1.0},
+      true,
+    )
+    world.translate(dir_node, 0, 10, 0)
+    world.rotate(dir_node, math.PI * 0.25, linalg.VECTOR3F32_X_AXIS)
   }
   when false {
     log.info("Setting up bloom...")
@@ -543,7 +556,12 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
   )
   // Animate lights
   for handle, i in light_handles {
-    if i == 0 do continue // manual control light #0
+    if i == 0 {
+      // Rotate light 0 around Y axis
+      t := time_since_start(engine)
+      world.rotate(&engine.world, handle, t * 0.5, linalg.VECTOR3F32_Y_AXIS)
+      continue
+    }
     offset := f32(i) / f32(LIGHT_COUNT) * math.PI * 2.0
     t := time_since_start(engine) + offset
     // log.infof("getting light %d %v", i, handle)

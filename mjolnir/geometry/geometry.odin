@@ -358,10 +358,10 @@ make_fullscreen_triangle :: proc(
     uv       = {0.0, 2.0},
   }
 
-  // Simple triangle indices
+  // Clockwise winding
   ret.indices[0] = 0
-  ret.indices[1] = 1
-  ret.indices[2] = 2
+  ret.indices[1] = 2
+  ret.indices[2] = 1
 
   ret.aabb = aabb_from_vertices(ret.vertices)
   return

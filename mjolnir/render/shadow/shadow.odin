@@ -67,9 +67,9 @@ init :: proc(
     frontFace               = .CLOCKWISE,
     lineWidth               = 1.0,
     depthBiasEnable         = true,
-    depthBiasConstantFactor = 1.0,
+    depthBiasConstantFactor = 1.25,
     depthBiasClamp          = 0.01,
-    depthBiasSlopeFactor    = 1.75,
+    depthBiasSlopeFactor    = 2.0,
   }
   multisampling := vk.PipelineMultisampleStateCreateInfo {
     sType                = .PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
