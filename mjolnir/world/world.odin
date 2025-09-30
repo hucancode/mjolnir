@@ -50,6 +50,7 @@ Node :: struct {
   children:        [dynamic]resources.Handle,
   transform:       geometry.Transform,
   name:            string,
+  bone_socket:     string, // If not empty, attach to this bone on parent skinned mesh
   attachment:      NodeAttachment,
   animation:       Maybe(animation.Instance), // For node transform animation
   culling_enabled: bool,
@@ -83,6 +84,7 @@ init_node :: proc(self: ^Node, name: string = "") {
   self.children = make([dynamic]resources.Handle, 0)
   self.transform = geometry.TRANSFORM_IDENTITY
   self.name = name
+  self.bone_socket = ""
   self.culling_enabled = true
   self.visible = true
   self.parent_visible = true
@@ -710,8 +712,41 @@ traverse :: proc(world: ^World, resources_manager: ^resources.Manager = nil, cb_
     visibility_changed := current_node.parent_visible != entry.parent_is_visible
     current_node.parent_visible = entry.parent_is_visible
     is_dirty := transform_update_local(&current_node.transform)
-    if entry.parent_is_dirty || is_dirty {
-      transform_update_world(&current_node.transform, entry.parent_transform)
+
+    // Apply bone socket transform if specified
+    bone_socket_transform := linalg.MATRIX4F32_IDENTITY
+    has_bone_socket := false
+    apply_bone_socket: {
+      if current_node.bone_socket == "" || resources_manager == nil do break apply_bone_socket
+
+      parent_node := resources.get(world.nodes, current_node.parent) or_break
+      parent_mesh_attachment := parent_node.attachment.(MeshAttachment) or_break
+      parent_mesh := resources.get_mesh(resources_manager, parent_mesh_attachment.handle) or_break
+
+      bone_index := resources.find_bone_by_name(parent_mesh, current_node.bone_socket) or_break
+      parent_skinning := parent_mesh_attachment.skinning.? or_break
+      if parent_skinning.bone_matrix_offset == 0xFFFFFFFF do break apply_bone_socket
+
+      parent_mesh_skinning := parent_mesh.skinning.? or_break
+      if bone_index >= u32(len(parent_mesh_skinning.bones)) do break apply_bone_socket
+
+      bone_buffer := &resources_manager.bone_buffer
+      if bone_buffer.staging.mapped == nil do break apply_bone_socket
+
+      bone_matrices_ptr := gpu.staged_buffer_get(bone_buffer, parent_skinning.bone_matrix_offset)
+      bone_matrices := slice.from_ptr(bone_matrices_ptr, len(parent_mesh_skinning.bones))
+
+      // bone_matrices contains skinning matrices (world_transform * inverse_bind)
+      // To get the bone's world transform, multiply by the bind matrix
+      skinning_matrix := bone_matrices[bone_index]
+      bone := parent_mesh_skinning.bones[bone_index]
+      bind_matrix := linalg.matrix4_inverse(bone.inverse_bind_matrix)
+      bone_socket_transform = skinning_matrix * bind_matrix
+      has_bone_socket = true
+    }
+
+    if entry.parent_is_dirty || is_dirty || has_bone_socket {
+      transform_update_world(&current_node.transform, entry.parent_transform * bone_socket_transform)
       if resources_manager != nil {
         world_matrix := current_node.transform.world_matrix
         gpu.write(&resources_manager.world_matrix_buffer, &world_matrix, int(entry.handle.index))

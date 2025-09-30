@@ -366,7 +366,7 @@ flush :: proc(self: ^Renderer, cmd_buf: vk.CommandBuffer) -> vk.Result {
     log.infof("text flush: no vertices to render")
     return .SUCCESS
   }
-  log.infof("text flush: rendering %d vertices, %d indices", self.vertex_count, self.index_count)
+  // log.infof("text flush: rendering %d vertices, %d indices", self.vertex_count, self.index_count)
   defer {
     self.vertex_count = 0
     self.index_count = 0
@@ -474,7 +474,7 @@ draw_text :: proc(
     push_quad(self, quad, color)
     quad_count += 1
   }
-  log.infof("draw_text: '%s' generated %d quads, vertex_count=%d", text, quad_count, self.vertex_count)
+  // log.infof("draw_text: '%s' generated %d quads, vertex_count=%d", text, quad_count, self.vertex_count)
 }
 
 update_atlas_if_needed :: proc(
