@@ -1215,7 +1215,6 @@ update_left_face :: proc(edges: []i32, edge_idx: i32, s, t, f: i32) {
     }
 }
 
-
 // Check if edges overlap
 overlap_edges :: proc(pts: [][3]f32, edges: []i32, s1, t1: i32) -> bool {
     nedges := len(edges) / 4

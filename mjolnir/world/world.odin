@@ -677,7 +677,6 @@ get_node :: proc(world: ^World, handle: Handle) -> ^Node {
 
 // Emitter synchronization for particle system
 
-
 @(private)
 update_visibility_system :: proc(world: ^World) {
   count := slice.count_proc(world.nodes.entries[:], proc(entry: resources.Entry(Node)) -> bool {

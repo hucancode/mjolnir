@@ -558,7 +558,6 @@ Renderer :: struct {
   commands:                 [resources.MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
 }
 
-
 lighting_recreate_images :: proc(
   self: ^Renderer,
   width, height: u32,

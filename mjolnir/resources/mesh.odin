@@ -174,3 +174,62 @@ sample_clip :: proc(
     for child_index in bone.children do append(&stack, TraverseEntry{world_transform, child_index})
   }
 }
+
+create_mesh :: proc(
+  gpu_context: ^gpu.GPUContext,
+  manager: ^Manager,
+  data: geometry.Geometry,
+) -> (
+  handle: Handle,
+  mesh: ^Mesh,
+  ret: vk.Result,
+) {
+  handle, mesh = alloc(&manager.meshes)
+  ret = mesh_init(mesh, gpu_context, manager, data)
+  if ret != .SUCCESS {
+    return
+  }
+  ret = mesh_write_to_gpu(manager, handle, mesh)
+  return
+}
+
+create_mesh_handle :: proc(
+  gpu_context: ^gpu.GPUContext,
+  manager: ^Manager,
+  data: geometry.Geometry,
+) -> (
+  handle: Handle,
+  ok: bool,
+) #optional_ok {
+  h, _, ret := create_mesh(gpu_context, manager, data)
+  return h, ret == .SUCCESS
+}
+
+mesh_update_gpu_data :: proc(mesh: ^Mesh) {
+  mesh.index_count = mesh.index_allocation.count
+  mesh.first_index = mesh.index_allocation.offset
+  mesh.vertex_offset = cast(i32)mesh.vertex_allocation.offset
+  mesh.flags = {}
+  skin, has_skin := mesh.skinning.?
+  if has_skin && skin.vertex_skinning_allocation.count > 0 {
+    mesh.flags |= {.SKINNED}
+    mesh.vertex_skinning_offset = skin.vertex_skinning_allocation.offset
+  }
+}
+
+mesh_write_to_gpu :: proc(
+  manager: ^Manager,
+  handle: Handle,
+  mesh: ^Mesh,
+) -> vk.Result {
+  if handle.index >= MAX_MESHES {
+    log.errorf("Mesh index %d exceeds capacity %d", handle.index, MAX_MESHES)
+    return .ERROR_OUT_OF_DEVICE_MEMORY
+  }
+  mesh_update_gpu_data(mesh)
+  return gpu.write(
+    &manager.mesh_data_buffer,
+    &mesh.data,
+    int(handle.index),
+  )
+}

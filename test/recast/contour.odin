@@ -14,7 +14,6 @@ import "core:slice"
 // SECTION 1: BASIC CONTOUR BUILDING
 // ================================
 
-
 @(test)
 test_build_contours_with_holes :: proc(t: ^testing.T) {
     testing.set_fail_timeout(t, 30 * time.Second)

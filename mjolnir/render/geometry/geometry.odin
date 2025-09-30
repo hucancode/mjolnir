@@ -20,7 +20,6 @@ Renderer :: struct {
 
 SHADER_DEPTH_PREPASS_VERT :: #load("../../shader/depth_prepass/vert.spv")
 
-
 begin_depth_prepass :: proc(
   render_target: ^resources.RenderTarget,
   command_buffer: vk.CommandBuffer,

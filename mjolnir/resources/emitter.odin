@@ -1,6 +1,8 @@
 package resources
 
+import vk "vendor:vulkan"
 import "../geometry"
+import "../gpu"
 
 EmitterData :: struct {
   initial_velocity:  [4]f32,
@@ -29,4 +31,54 @@ Emitter :: struct {
   enabled:           b32,
   texture_handle:    Handle,
   node_handle:       Handle,
+}
+
+create_emitter_handle :: proc(
+  manager: ^Manager,
+  node_handle: Handle,
+  config: Emitter,
+) -> Handle {
+  handle, emitter := alloc(&manager.emitters)
+  emitter^ = config
+  emitter.node_handle = node_handle
+  emitter_write_to_gpu(manager, handle, emitter, false)
+  return handle
+}
+
+destroy_emitter_handle :: proc(
+  manager: ^Manager,
+  handle: Handle,
+) -> bool {
+  _, freed := free(&manager.emitters, handle)
+  return freed
+}
+
+emitter_update_gpu_data :: proc(emitter: ^Emitter, time_accumulator: f32 = 0.0) {
+  emitter.time_accumulator = time_accumulator
+  emitter.texture_index = emitter.texture_handle.index
+  emitter.node_index = emitter.node_handle.index
+  emitter.visible = b32(true)
+}
+
+emitter_write_to_gpu :: proc(
+  manager: ^Manager,
+  handle: Handle,
+  emitter: ^Emitter,
+  preserve_time_accumulator: bool = true,
+) -> vk.Result {
+  if handle.index >= MAX_EMITTERS {
+    return .ERROR_OUT_OF_DEVICE_MEMORY
+  }
+  time_acc: f32 = 0.0
+  if preserve_time_accumulator {
+    existing := gpu.staged_buffer_get(&manager.emitter_buffer, handle.index)
+    time_acc = existing.time_accumulator
+  }
+  emitter_update_gpu_data(emitter, time_acc)
+  gpu.write(
+    &manager.emitter_buffer,
+    &emitter.data,
+    int(handle.index),
+  ) or_return
+  return .SUCCESS
 }

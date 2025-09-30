@@ -260,7 +260,6 @@ copy_buffer :: proc(
   return end_single_time_command(gpu_context, &cmd_buffer)
 }
 
-
 StaticBuffer :: struct($T: typeid) {
   buffer:       vk.Buffer,
   memory:       vk.DeviceMemory,

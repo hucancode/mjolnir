@@ -6,7 +6,6 @@ import "core:log"
 import "core:math"
 import "core:math/linalg"
 
-
 get_dir_offset_x :: proc "contextless" (dir: int) -> i32 {
     offset := [4]i32{-1, 0, 1, 0}
     return offset[dir & 0x03]
@@ -347,12 +346,12 @@ build_navmesh :: proc(vertices: [][3]f32, indices: []i32, areas: []u8, cfg: Conf
     cset := create_contour_set(chf, config.max_simplification_error, config.max_edge_len)
     if cset == nil do return
     defer free_contour_set(cset)
-    
+
     pmesh = create_poly_mesh(cset, config.max_verts_per_poly)
     if pmesh == nil {
         return
     }
-    
+
     dmesh = create_poly_mesh_detail(pmesh, chf, config.detail_sample_dist, config.detail_sample_max_error)
     if dmesh == nil {
         free_poly_mesh(pmesh)

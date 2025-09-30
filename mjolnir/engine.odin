@@ -195,7 +195,6 @@ get_window_dpi :: proc(window: glfw.WindowHandle) -> f32 {
   return sw
 }
 
-
 init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
   context.user_ptr = self
   g_context = context
@@ -575,7 +574,6 @@ render_debug_ui :: proc(self: ^Engine) {
     )
   }
 }
-
 
 @(private = "file")
 recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {

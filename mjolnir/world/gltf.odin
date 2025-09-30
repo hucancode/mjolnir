@@ -7,17 +7,13 @@ import "core:os"
 import path "core:path/filepath"
 import "core:slice"
 import "core:strings"
-
 import "core:math/linalg"
 import "vendor:cgltf"
 import vk "vendor:vulkan"
-
 import "../animation"
 import "../geometry"
 import "../gpu"
 import "../resources"
-
-
 
 @(private = "file")
 AssetManifest :: struct {
