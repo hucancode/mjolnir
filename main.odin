@@ -364,7 +364,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
         weight_spread = 0.05,
         texture_handle = goldstar_texture_handle,
         enabled = true,
-        bounding_box = Aabb{min = {-2, -2, -2}, max = {2, 2, 2}},
+        aabb_min = {-2, -2, -2},
+        aabb_max = {2, 2, 2},
       },
     )
     world.spawn_child(
@@ -395,7 +396,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
         weight_spread = 0.3,
         texture_handle = black_circle_texture_handle,
         enabled = true,
-        bounding_box = Aabb{min = {-1, -1, -1}, max = {1, 1, 1}},
+        aabb_min = {-1, -1, -1},
+        aabb_max = {1, 1, 1},
       },
     )
     world.spawn_child(

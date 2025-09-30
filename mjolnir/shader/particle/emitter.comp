@@ -34,8 +34,10 @@ struct Emitter {
   uint texture_index;
   uint node_index;
   uint visible;
-  vec4 aabb_min;
-  vec4 aabb_max;
+  vec3 aabb_min;
+  float padding1;
+  vec3 aabb_max;
+  float padding2;
 };
 
 layout(set = 0, binding = 0) buffer EmitterBuffer {

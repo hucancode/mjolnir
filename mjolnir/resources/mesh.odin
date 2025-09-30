@@ -44,9 +44,9 @@ Skinning :: struct {
 }
 
 Mesh :: struct {
+  using data:        MeshData,
   vertex_allocation: BufferAllocation,
   index_allocation:  BufferAllocation,
-  aabb:              geometry.Aabb,
   skinning:          Maybe(Skinning),
 }
 
@@ -71,7 +71,8 @@ mesh_init :: proc(
   data: geometry.Geometry,
 ) -> vk.Result {
   defer geometry.delete_geometry(data)
-  self.aabb = data.aabb
+  self.aabb_min = data.aabb.min
+  self.aabb_max = data.aabb.max
   self.vertex_allocation = manager_allocate_vertices(
     manager,
     gpu_context,

@@ -34,15 +34,11 @@ MaterialData :: struct {
 }
 
 Material :: struct {
+  using data:         MaterialData,
   type:               MaterialType,
-  features:           ShaderFeatureSet,
   albedo:             Handle,
   metallic_roughness: Handle,
   normal:             Handle,
   emissive:           Handle,
   occlusion:          Handle,
-  metallic_value:     f32,
-  roughness_value:    f32,
-  emissive_value:     f32,
-  base_color_factor:  [4]f32,
 }

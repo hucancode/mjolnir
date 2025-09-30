@@ -1628,22 +1628,15 @@ create_mesh_handle :: proc(
   return h, ret == .SUCCESS
 }
 
-mesh_data_from_mesh :: proc(mesh: ^Mesh) -> MeshData {
-  skin_offset: u32
-  flags: MeshFlagSet
+mesh_update_gpu_data :: proc(mesh: ^Mesh) {
+  mesh.index_count = mesh.index_allocation.count
+  mesh.first_index = mesh.index_allocation.offset
+  mesh.vertex_offset = cast(i32)mesh.vertex_allocation.offset
+  mesh.flags = {}
   skin, has_skin := mesh.skinning.?
   if has_skin && skin.vertex_skinning_allocation.count > 0 {
-    flags |= {.SKINNED}
-    skin_offset = skin.vertex_skinning_allocation.offset
-  }
-  return MeshData {
-    aabb_min              = mesh.aabb.min,
-    index_count           = mesh.index_allocation.count,
-    aabb_max              = mesh.aabb.max,
-    first_index           = mesh.index_allocation.offset,
-    vertex_offset         = cast(i32)mesh.vertex_allocation.offset,
-    vertex_skinning_offset = skin_offset,
-    flags                 = flags,
+    mesh.flags |= {.SKINNED}
+    mesh.vertex_skinning_offset = skin.vertex_skinning_allocation.offset
   }
 }
 
@@ -1656,29 +1649,19 @@ mesh_write_to_gpu :: proc(
     log.errorf("Mesh index %d exceeds capacity %d", handle.index, MAX_MESHES)
     return .ERROR_OUT_OF_DEVICE_MEMORY
   }
-  data := mesh_data_from_mesh(mesh)
+  mesh_update_gpu_data(mesh)
   return gpu.write(
     &manager.mesh_data_buffer,
-    &data,
+    &mesh.data,
     int(handle.index),
   )
 }
 
-material_data_from_material :: proc(mat: ^Material) -> MaterialData {
-  return MaterialData {
-    albedo_index             = min(MAX_TEXTURES - 1, mat.albedo.index),
-    metallic_roughness_index = min(
-      MAX_TEXTURES - 1,
-      mat.metallic_roughness.index,
-    ),
-    normal_index             = min(MAX_TEXTURES - 1, mat.normal.index),
-    emissive_index           = min(MAX_TEXTURES - 1, mat.emissive.index),
-    metallic_value           = mat.metallic_value,
-    roughness_value          = mat.roughness_value,
-    emissive_value           = mat.emissive_value,
-    features                 = mat.features,
-    base_color_factor        = mat.base_color_factor,
-  }
+material_update_gpu_data :: proc(mat: ^Material) {
+  mat.albedo_index = min(MAX_TEXTURES - 1, mat.albedo.index)
+  mat.metallic_roughness_index = min(MAX_TEXTURES - 1, mat.metallic_roughness.index)
+  mat.normal_index = min(MAX_TEXTURES - 1, mat.normal.index)
+  mat.emissive_index = min(MAX_TEXTURES - 1, mat.emissive.index)
 }
 
 material_write_to_gpu :: proc(
@@ -1689,10 +1672,10 @@ material_write_to_gpu :: proc(
   if handle.index >= MAX_MATERIALS {
     return .ERROR_OUT_OF_DEVICE_MEMORY
   }
-  data := material_data_from_material(mat)
+  material_update_gpu_data(mat)
   gpu.write(
     &manager.material_buffer,
-    &data,
+    &mat.data,
     int(handle.index),
   ) or_return
   return .SUCCESS
@@ -2244,15 +2227,9 @@ get_forcefield :: proc(
   return
 }
 
-forcefield_data_from_forcefield :: proc(ff: ^ForceField) -> ForceFieldData {
-  return ForceFieldData {
-    tangent_strength = ff.tangent_strength,
-    strength = ff.strength,
-    area_of_effect = ff.area_of_effect,
-    fade = ff.fade,
-    node_index = ff.node_handle.index,
-    visible = b32(true),
-  }
+forcefield_update_gpu_data :: proc(ff: ^ForceField) {
+  ff.node_index = ff.node_handle.index
+  ff.visible = b32(true)
 }
 
 forcefield_write_to_gpu :: proc(
@@ -2263,45 +2240,20 @@ forcefield_write_to_gpu :: proc(
   if handle.index >= MAX_FORCE_FIELDS {
     return .ERROR_OUT_OF_DEVICE_MEMORY
   }
-  data := forcefield_data_from_forcefield(ff)
+  forcefield_update_gpu_data(ff)
   gpu.write(
     &manager.forcefield_buffer,
-    &data,
+    &ff.data,
     int(handle.index),
   ) or_return
   return .SUCCESS
 }
 
-emitter_data_from_emitter :: proc(emitter: ^Emitter, time_accumulator: f32 = 0.0) -> EmitterData {
-  return EmitterData {
-    initial_velocity = emitter.initial_velocity,
-    color_start = emitter.color_start,
-    color_end = emitter.color_end,
-    emission_rate = emitter.emission_rate,
-    particle_lifetime = emitter.particle_lifetime,
-    position_spread = emitter.position_spread,
-    velocity_spread = emitter.velocity_spread,
-    time_accumulator = time_accumulator,
-    size_start = emitter.size_start,
-    size_end = emitter.size_end,
-    weight = emitter.weight,
-    weight_spread = emitter.weight_spread,
-    texture_index = emitter.texture_handle.index,
-    node_index = emitter.node_handle.index,
-    visible = b32(true),
-    aabb_min = {
-      emitter.bounding_box.min.x,
-      emitter.bounding_box.min.y,
-      emitter.bounding_box.min.z,
-      0.0,
-    },
-    aabb_max = {
-      emitter.bounding_box.max.x,
-      emitter.bounding_box.max.y,
-      emitter.bounding_box.max.z,
-      0.0,
-    },
-  }
+emitter_update_gpu_data :: proc(emitter: ^Emitter, time_accumulator: f32 = 0.0) {
+  emitter.time_accumulator = time_accumulator
+  emitter.texture_index = emitter.texture_handle.index
+  emitter.node_index = emitter.node_handle.index
+  emitter.visible = b32(true)
 }
 
 emitter_write_to_gpu :: proc(
@@ -2318,10 +2270,10 @@ emitter_write_to_gpu :: proc(
     existing := gpu.staged_buffer_get(&manager.emitter_buffer, handle.index)
     time_acc = existing.time_accumulator
   }
-  data := emitter_data_from_emitter(emitter, time_acc)
+  emitter_update_gpu_data(emitter, time_acc)
   gpu.write(
     &manager.emitter_buffer,
-    &data,
+    &emitter.data,
     int(handle.index),
   ) or_return
   return .SUCCESS
