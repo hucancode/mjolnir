@@ -607,7 +607,7 @@ end_single_time_command :: proc(
 }
 
 find_memory_type_index :: proc(
-  self: ^GPUContext,
+  physical_device: vk.PhysicalDevice,
   type_filter: u32,
   properties: vk.MemoryPropertyFlags,
 ) -> (
@@ -615,7 +615,7 @@ find_memory_type_index :: proc(
   ok: bool,
 ) #optional_ok {
   mem_properties: vk.PhysicalDeviceMemoryProperties
-  vk.GetPhysicalDeviceMemoryProperties(self.physical_device, &mem_properties)
+  vk.GetPhysicalDeviceMemoryProperties(physical_device, &mem_properties)
   for i in 0 ..< mem_properties.memoryTypeCount {
     if type_filter & (1 << i) == 0 do continue
     if mem_properties.memoryTypes[i].propertyFlags & properties != properties do continue
@@ -633,7 +633,7 @@ allocate_vulkan_memory :: proc(
   ret: vk.Result,
 ) {
   memory_type_idx, found := find_memory_type_index(
-    self,
+    self.physical_device,
     mem_requirements.memoryTypeBits,
     properties,
   )

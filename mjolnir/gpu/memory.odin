@@ -1044,7 +1044,7 @@ depth_image_init :: proc(
     &mem_requirements,
   )
   memory_type_index, found := find_memory_type_index(
-    gpu_context,
+    gpu_context.physical_device,
     mem_requirements.memoryTypeBits,
     {.DEVICE_LOCAL},
   )
@@ -1147,7 +1147,7 @@ cube_depth_texture_init :: proc(
     &mem_requirements,
   )
   memory_type_index, found := find_memory_type_index(
-    gpu_context,
+    gpu_context.physical_device,
     mem_requirements.memoryTypeBits,
     {.DEVICE_LOCAL},
   )
