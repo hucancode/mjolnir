@@ -539,15 +539,12 @@ calculate_bounds_from_vertices :: proc(vertices: [][3]f32) -> geometry.Aabb {
   if len(vertices) == 0 {
     return {}
   }
-
   min_pos := vertices[0]
   max_pos := vertices[0]
-
   for v in vertices[1:] {
     min_pos = linalg.min(min_pos, v)
     max_pos = linalg.max(max_pos, v)
   }
-
   return geometry.Aabb{min = min_pos, max = max_pos}
 }
 
@@ -564,14 +561,11 @@ create_navigation_context :: proc(
     log.error("Invalid navigation mesh handle for context creation")
     return {}, false
   }
-
   context_handle, nav_context := resources.alloc(&resources_manager.nav_contexts)
   if nav_context == nil {
     log.error("Failed to allocate navigation context")
     return context_handle, false
   }
-
-  // Initialize navigation mesh query
   init_status := detour.nav_mesh_query_init(
     &nav_context.nav_mesh_query,
     &nav_mesh.detour_mesh,
@@ -582,16 +576,11 @@ create_navigation_context :: proc(
     resources.free(&resources_manager.nav_contexts, context_handle)
     return context_handle, false
   }
-
-  // Initialize query filter
   detour.query_filter_init(&nav_context.query_filter)
   nav_context.associated_mesh = nav_mesh_handle
-
   log.infof("Created navigation context with handle %v", context_handle)
   return context_handle, true
 }
-
-// Navigation convenience functions
 
 // Find path between two points
 nav_find_path :: proc(
@@ -609,17 +598,12 @@ nav_find_path :: proc(
     log.error("Invalid navigation context handle")
     return nil, false
   }
-
-  // Get navigation mesh from context
   nav_mesh, mesh_found := resources.get_navmesh(resources_manager, nav_context.associated_mesh)
   if !mesh_found {
     log.error("Invalid navigation mesh associated with context")
     return nil, false
   }
-
-  // Find nearest polygon to start and end positions
   half_extents := [3]f32{2.0, 4.0, 2.0} // Search area for finding polygons
-
   status, start_ref, start_pos := detour.find_nearest_poly(
     &nav_context.nav_mesh_query,
     start,

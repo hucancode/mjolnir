@@ -141,6 +141,7 @@ record_shadow_pass :: proc(
   gpu_context: ^gpu.GPUContext,
   resources_manager: ^resources.Manager,
   world_state: ^world.World,
+  main_render_target: ^resources.RenderTarget,
 ) -> vk.Result {
   command_buffer := shadow.begin_record(&self.shadow, frame_index) or_return
   // Ensure world matrix staging buffer transfers complete before shadow rendering
@@ -164,20 +165,38 @@ record_shadow_pass :: proc(
     1, &world_matrix_barrier,
     0, nil,
   )
-
   shadow_include := resources.NodeFlagSet{.VISIBLE, .CASTS_SHADOW}
   shadow_exclude := resources.NodeFlagSet{
     .MATERIAL_TRANSPARENT,
     .MATERIAL_WIREFRAME,
   }
   command_stride := world.draw_command_stride()
-  // Iterate through all shadow-casting lights in the resource pool
+  // Get main camera frustum for culling lights outside view
+  main_camera, camera_ok := resources.get_camera(resources_manager, main_render_target.camera)
+  if !camera_ok {
+    log.errorf("Main camera not found")
+    return .ERROR_UNKNOWN
+  }
+  main_frustum := geometry.camera_make_frustum(main_camera^)
+  visible_count := 0
   for idx in 0 ..< len(resources_manager.lights.entries) {
     entry := &resources_manager.lights.entries[idx]
     if entry.generation > 0 && entry.active {
       light := &entry.item
-      // Skip if not enabled or not casting shadow
       if !light.cast_shadow do continue
+      // Directional lights are never culled
+      if light.type != .DIRECTIONAL {
+        world_matrix := gpu.staged_buffer_get(
+          &resources_manager.world_matrix_buffer,
+          light.node_handle.index,
+        )
+        light_position := world_matrix[3].xyz
+        // Skip shadow rendering if light is outside camera frustum
+        if !geometry.frustum_test_sphere(light_position, light.radius, &main_frustum) {
+          continue
+        }
+      }
+      visible_count += 1
       switch light.type {
       case .POINT:
         for face in 0 ..< 6 {
@@ -266,6 +285,7 @@ record_shadow_pass :: proc(
       }
     }
   }
+  // log.debugf("Visible shadow-casting lights: %d", visible_count)
   shadow.end_record(command_buffer) or_return
   return .SUCCESS
 }

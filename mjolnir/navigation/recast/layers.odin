@@ -13,7 +13,6 @@ RC_MAX_NEIS_DEF :: 16
 MAX_STACK :: 64
 RC_NULL_LAYER :: u8(0xff)  // Unassigned layer marker
 
-// Modernized Layer Region for heightfield layers (distinct from types.odin)
 Heightfield_Layer_Region :: struct {
     overlapping_layers: [dynamic]u8,    // Overlapping layer IDs
     neighbors: [dynamic]u8,             // Neighbor region IDs

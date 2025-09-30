@@ -16,9 +16,9 @@ TRANSFORM_IDENTITY :: Transform {
   position     = {0, 0, 0},
   rotation     = linalg.QUATERNIONF32_IDENTITY,
   scale        = {1, 1, 1},
-  is_dirty     = false,
   local_matrix = linalg.MATRIX4F32_IDENTITY,
   world_matrix = linalg.MATRIX4F32_IDENTITY,
+  is_dirty     = false,
 }
 
 decompose_matrix :: proc(m: matrix[4,4]f32) -> (ret: Transform) {

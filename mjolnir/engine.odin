@@ -607,6 +607,7 @@ render :: proc(self: ^Engine) -> vk.Result {
     &self.gpu_context,
     &self.resource_manager,
     &self.world,
+    main_render_target,
   )
   record_geometry_pass(
     &self.render,

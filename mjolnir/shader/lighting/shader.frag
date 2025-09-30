@@ -157,7 +157,7 @@ vec3 colorBand(float x) {
     return ret;
 }
 
-void main_() {
+void main() {
     // Bounds checking to prevent GPU crashes
     if (light_index >= lights_buffer.lights.length()) {
         outColor = vec4(1.0, 0.0, 0.0, 1.0); // Red for invalid light index
@@ -201,9 +201,4 @@ void main_() {
     float shadowFactor = light.cast_shadow != 0u ? calculateShadow(position, normal, lightCamera, light, light_position) : 1.0;
     vec3 direct = brdf(normal, V, albedo, roughness, metallic, position, light, light_position, light_direction);
     outColor = vec4(direct * shadowFactor, 1.0);
-}
-
-void main() {
-outColor = vec4(1.0, 0.0, 0.0, 1.0);
-main_();
 }
