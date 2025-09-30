@@ -14,7 +14,7 @@ import vk "vendor:vulkan"
 Handle :: resources.Handle
 
 LightAttachment :: struct {
-  handle: Handle,   // Handle to the Light resource
+  handle: Handle,
 }
 
 NodeSkinning :: struct {
@@ -35,10 +35,7 @@ EmitterAttachment :: struct {
 }
 
 ForceFieldAttachment :: struct {
-  tangent_strength: f32, // 0 = push/pull in straight line, 1 = push/pull in tangent line
-  strength:         f32, // positive = attract, negative = repel
-  area_of_effect:   f32, // radius
-  fade:             f32, // 0..1, linear fade factor
+  handle: Handle,
 }
 
 NodeAttachment :: union {
@@ -46,7 +43,6 @@ NodeAttachment :: union {
   MeshAttachment,
   EmitterAttachment,
   ForceFieldAttachment,
-  NavMeshAttachment,
   NavMeshAgentAttachment,
   NavMeshObstacleAttachment,
 }
@@ -113,7 +109,19 @@ destroy_node :: proc(self: ^Node, resources_manager: ^resources.Manager, gpu_con
       attachment.handle = {}
     }
   case EmitterAttachment:
+    emitter := resources.get(resources_manager.emitters, attachment.handle)
+    if emitter != nil {
+      emitter.node_handle = {}
+    }
     if resources.destroy_emitter_handle(resources_manager, attachment.handle) {
+      attachment.handle = {}
+    }
+  case ForceFieldAttachment:
+    forcefield := resources.get(resources_manager.forcefields, attachment.handle)
+    if forcefield != nil {
+      forcefield.node_handle = {}
+    }
+    if resources.destroy_forcefield_handle(resources_manager, attachment.handle) {
       attachment.handle = {}
     }
   case MeshAttachment:
@@ -214,6 +222,7 @@ spawn_at :: proc(
   init_node(node)
   node.attachment = attachment
   assign_emitter_to_node(resources_manager, handle, node)
+  assign_forcefield_to_node(resources_manager, handle, node)
   geometry.transform_translate(&node.transform, position.x, position.y, position.z)
   attach(self.nodes, self.root, handle)
   // Mark world matrix and node data as dirty for new node
@@ -280,6 +289,7 @@ spawn :: proc(
   init_node(node)
   node.attachment = attachment
   assign_emitter_to_node(resources_manager, handle, node)
+  assign_forcefield_to_node(resources_manager, handle, node)
   attach(self.nodes, self.root, handle)
   // Mark world matrix and node data as dirty for new node
   if resources_manager != nil {
@@ -345,6 +355,7 @@ spawn_child :: proc(
   init_node(node)
   node.attachment = attachment
   assign_emitter_to_node(resources_manager, handle, node)
+  assign_forcefield_to_node(resources_manager, handle, node)
   attach(self.nodes, parent, handle)
   // Mark world matrix and node data as dirty for new node
   if resources_manager != nil {
@@ -513,6 +524,7 @@ spawn_node :: proc(
   init_node(node)
   node.attachment = attachment
   assign_emitter_to_node(resources_manager, handle, node)
+  assign_forcefield_to_node(resources_manager, handle, node)
   geometry.transform_translate(&node.transform, position.x, position.y, position.z)
   attach(world.nodes, world.root, handle)
   // Mark world matrix and node data as dirty for new node
@@ -577,6 +589,7 @@ spawn_child_node :: proc(
   init_node(node)
   node.attachment = attachment
   assign_emitter_to_node(resources_manager, handle, node)
+  assign_forcefield_to_node(resources_manager, handle, node)
   geometry.transform_translate(&node.transform, position.x, position.y, position.z)
   attach(world.nodes, parent, handle)
   // Mark world matrix and node data as dirty for new node
@@ -668,97 +681,6 @@ get_node :: proc(world: ^World, handle: Handle) -> ^Node {
 }
 
 // Emitter synchronization for particle system
-sync_emitters :: proc(
-  world: ^World,
-  resources_manager: ^resources.Manager,
-  emitters: []resources.EmitterData,
-  params: ^particles.ParticleSystemParams,
-) {
-  if resources_manager == nil {
-    params.emitter_count = 0
-    return
-  }
-  emitter_capacity := len(emitters)
-  max_slots := emitter_capacity
-  if max_slots > particles.MAX_EMITTERS {
-    max_slots = particles.MAX_EMITTERS
-  }
-  params.emitter_count = u32(max_slots)
-  // Reset visibility each frame; preserve accumulator
-  for i in 0 ..< emitter_capacity {
-    emitters[i].visible = cast(b32)false
-  }
-  for &entry, index in resources_manager.emitters.entries {
-    if index >= emitter_capacity {
-      log.warnf("Emitter index %d exceeds GPU buffer capacity %d", index, emitter_capacity)
-      continue
-    }
-    gpu_emitter := &emitters[index]
-    if !entry.active {
-      preserved_time := gpu_emitter.time_accumulator
-      entry.item.node_handle = {}
-      entry.item.is_dirty = true
-      gpu_emitter^ = resources.EmitterData{
-        time_accumulator = preserved_time,
-        visible = cast(b32)false,
-      }
-      continue
-    }
-
-    emitter := &entry.item
-    node_handle := emitter.node_handle
-    node := resources.get(world.nodes, node_handle)
-
-    if node == nil || node.pending_deletion {
-      emitter.is_dirty = true
-      preserved_time := gpu_emitter.time_accumulator
-      gpu_emitter^ = resources.EmitterData{
-        time_accumulator = preserved_time,
-        visible = cast(b32)false,
-      }
-      continue
-    }
-
-    visible := node.parent_visible && node.visible && emitter.enabled != b32(false)
-    if emitter.is_dirty {
-      preserved_time := gpu_emitter.time_accumulator
-      gpu_emitter^ = resources.EmitterData {
-        initial_velocity  = emitter.initial_velocity,
-        color_start       = emitter.color_start,
-        color_end         = emitter.color_end,
-        emission_rate     = emitter.emission_rate,
-        particle_lifetime = emitter.particle_lifetime,
-        position_spread   = emitter.position_spread,
-        velocity_spread   = emitter.velocity_spread,
-        time_accumulator  = preserved_time,
-        size_start        = emitter.size_start,
-        size_end          = emitter.size_end,
-        weight            = emitter.weight,
-        weight_spread     = emitter.weight_spread,
-        texture_index     = emitter.texture_handle.index,
-        node_index        = node_handle.index,
-        visible           = cast(b32)visible,
-        aabb_min          = {
-          emitter.bounding_box.min.x,
-          emitter.bounding_box.min.y,
-          emitter.bounding_box.min.z,
-          0.0,
-        },
-        aabb_max          = {
-          emitter.bounding_box.max.x,
-          emitter.bounding_box.max.y,
-          emitter.bounding_box.max.z,
-          0.0,
-        },
-      }
-      emitter.is_dirty = false
-    } else {
-      gpu_emitter.visible = cast(b32)visible
-      gpu_emitter.node_index = node_handle.index
-    }
-    emitter.node_handle = node_handle
-  }
-}
 
 
 @(private)
@@ -874,7 +796,27 @@ assign_emitter_to_node :: proc(
   emitter, ok := resources.get(resources_manager.emitters, attachment.handle)
   if ok {
     emitter.node_handle = node_handle
-    emitter.is_dirty = true
+    resources.emitter_write_to_gpu(resources_manager, attachment.handle, emitter)
+  }
+}
+
+@(private)
+assign_forcefield_to_node :: proc(
+  resources_manager: ^resources.Manager,
+  node_handle: Handle,
+  node: ^Node,
+) {
+  if resources_manager == nil {
+    return
+  }
+  attachment, is_forcefield := &node.attachment.(ForceFieldAttachment)
+  if !is_forcefield {
+    return
+  }
+  forcefield, ok := resources.get(resources_manager.forcefields, attachment.handle)
+  if ok {
+    forcefield.node_handle = node_handle
+    resources.forcefield_write_to_gpu(resources_manager, attachment.handle, forcefield)
   }
 }
 

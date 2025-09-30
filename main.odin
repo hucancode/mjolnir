@@ -349,6 +349,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     )
     emitter_handle1 := resources.create_emitter_handle(
       &engine.resource_manager,
+      psys_handle1,
       resources.Emitter {
         emission_rate = 7,
         particle_lifetime = 5.0,
@@ -364,7 +365,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
         texture_handle = goldstar_texture_handle,
         enabled = true,
         bounding_box = Aabb{min = {-2, -2, -2}, max = {2, 2, 2}},
-        is_dirty = true,
       },
     )
     world.spawn_child(
@@ -380,6 +380,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     // Create an emitter for the second particle system
     emitter_handle2 := resources.create_emitter_handle(
       &engine.resource_manager,
+      psys_handle2,
       resources.Emitter {
         emission_rate = 7,
         particle_lifetime = 3.0,
@@ -395,7 +396,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
         texture_handle = black_circle_texture_handle,
         enabled = true,
         bounding_box = Aabb{min = {-1, -1, -1}, max = {1, 1, 1}},
-        is_dirty = true,
       },
     )
     world.spawn_child(
@@ -407,14 +407,22 @@ setup :: proc(engine: ^mjolnir.Engine) {
     // Create a force field that affects both particle systems
     forcefield_handle, _ = world.spawn_child(
       &engine.world,
-      psys_handle1, // Attach to first particle system
-      world.ForceFieldAttachment {
+      psys_handle1,
+      world.ForceFieldAttachment {},
+    )
+    world.translate(&engine.world, forcefield_handle, 5.0, 0.0, 0.0)
+    forcefield_resource := resources.create_forcefield_handle(
+      &engine.resource_manager,
+      forcefield_handle,
+      resources.ForceField {
         tangent_strength = 2.0,
         strength = 20.0,
         area_of_effect = 5.0,
       },
     )
-    world.translate(&engine.world, forcefield_handle, 5.0, 4.0, 0.0)
+    ff_node := world.get_node(&engine.world, forcefield_handle)
+    ff_attachment := &ff_node.attachment.(world.ForceFieldAttachment)
+    ff_attachment.handle = forcefield_resource
     _, forcefield_visual := world.spawn_child(
       &engine.world,
       forcefield_handle,

@@ -427,14 +427,6 @@ time_since_start :: proc(self: ^Engine) -> f32 {
   return f32(time.duration_seconds(time.since(self.start_timestamp)))
 }
 
-@(private = "file")
-update_emitters :: proc(self: ^Engine, delta_time: f32) {
-  params := gpu.data_buffer_get(&self.render.particles.params_buffer)
-  params.delta_time = delta_time
-  emitters := gpu.staged_buffer_get_all(&self.resource_manager.emitter_buffer)
-  world.sync_emitters(&self.world, &self.resource_manager, emitters, params)
-}
-
 get_main_camera :: proc(self: ^Engine) -> ^geometry.Camera {
   target, ok := resources.get_render_target(&self.resource_manager, self.render.targets.main)
   if !ok {
@@ -445,26 +437,6 @@ get_main_camera :: proc(self: ^Engine) -> ^geometry.Camera {
     return nil
   }
   return camera_ptr
-}
-
-@(private = "file")
-update_force_fields :: proc(self: ^Engine) {
-  params := gpu.data_buffer_get(&self.render.particles.params_buffer)
-  params.forcefield_count = 0
-  forcefields := slice.from_ptr(
-    self.render.particles.force_field_buffer.mapped,
-    particles.MAX_FORCE_FIELDS,
-  )
-  for &entry in self.world.nodes.entries do if entry.active {
-    ff, is_ff := &entry.item.attachment.(ForceFieldAttachment)
-    if !is_ff do continue
-    forcefields[params.forcefield_count].position = entry.item.transform.world_matrix * [4]f32{0, 0, 0, 1}
-    forcefields[params.forcefield_count].tangent_strength = ff.tangent_strength
-    forcefields[params.forcefield_count].strength = ff.strength
-    forcefields[params.forcefield_count].area_of_effect = ff.area_of_effect
-    forcefields[params.forcefield_count].fade = ff.fade
-    params.forcefield_count += 1
-  }
 }
 
 update_skeletal_animations :: proc(self: ^Engine, delta_time: f32) {
@@ -553,8 +525,11 @@ update :: proc(self: ^Engine) -> bool {
   }
   world.begin_frame(&self.world, &self.resource_manager)
   // Animation updates are now handled in render thread for smooth animation at render FPS
-  update_emitters(self, delta_time)
-  update_force_fields(self)
+  // Update particle system params
+  params := gpu.data_buffer_get(&self.render.particles.params_buffer)
+  params.delta_time = delta_time
+  params.emitter_count = u32(min(len(self.resource_manager.emitters.entries), resources.MAX_EMITTERS))
+  params.forcefield_count = u32(min(len(self.resource_manager.forcefields.entries), resources.MAX_FORCE_FIELDS))
   if self.update_proc != nil {
     self.update_proc(self, delta_time)
   }
@@ -730,6 +705,7 @@ render :: proc(self: ^Engine) -> vk.Result {
     &self.render.particles,
     command_buffer,
     self.resource_manager.world_matrix_descriptor_set,
+    &self.resource_manager,
   )
   if self.custom_render_proc != nil {
     self.custom_render_proc(self, command_buffer)

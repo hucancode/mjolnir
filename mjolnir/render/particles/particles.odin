@@ -9,17 +9,6 @@ import vk "vendor:vulkan"
 MAX_PARTICLES :: 65536
 COMPUTE_PARTICLE_BATCH :: 256
 
-MAX_EMITTERS :: 64
-MAX_FORCE_FIELDS :: 32
-
-ForceField :: struct {
-  tangent_strength: f32, // 0 = push/pull in straight line, 1 = push/pull in tangent line
-  strength:         f32, // positive = attract, negative = repel
-  area_of_effect:   f32, // radius
-  fade:             f32, // 0..1, linear fade factor
-  position:         [4]f32, // world position
-}
-
 Particle :: struct {
   position:      [4]f32,
   velocity:      [4]f32,
@@ -46,11 +35,11 @@ Renderer :: struct {
   // Compute pipeline
   params_buffer:                 gpu.DataBuffer(ParticleSystemParams),
   particle_buffer:               gpu.DataBuffer(Particle),
-  force_field_buffer:            gpu.DataBuffer(ForceField),
   compute_descriptor_set_layout: vk.DescriptorSetLayout,
   compute_descriptor_set:        vk.DescriptorSet,
   compute_pipeline_layout:       vk.PipelineLayout,
   compute_pipeline:              vk.Pipeline,
+  forcefield_bindless_descriptor_set: vk.DescriptorSet,
   // Emitter pipeline
   emitter_pipeline_layout:       vk.PipelineLayout,
   emitter_pipeline:              vk.Pipeline,
@@ -76,6 +65,7 @@ simulate :: proc(
   self: ^Renderer,
   command_buffer: vk.CommandBuffer,
   world_matrix_set: vk.DescriptorSet,
+  resources_manager: ^resources.Manager,
 ) {
   params_ptr := gpu.data_buffer_get(&self.params_buffer)
   counter_ptr := gpu.data_buffer_get(&self.particle_counter_buffer)
@@ -97,7 +87,7 @@ simulate :: proc(
     0, nil,
   )
   // One thread per emitter (local_size_x = 64)
-  vk.CmdDispatch(command_buffer, u32(MAX_EMITTERS + 63) / 64, 1, 1)
+  vk.CmdDispatch(command_buffer, u32(resources.MAX_EMITTERS + 63) / 64, 1, 1)
   // Barrier to ensure emission is complete before compaction
   barrier_emit := vk.MemoryBarrier {
     sType         = .MEMORY_BARRIER,
@@ -131,12 +121,18 @@ simulate :: proc(
   )
   // GPU handles the count internally
   vk.CmdBindPipeline(command_buffer, .COMPUTE, self.compute_pipeline)
+  compute_descriptor_sets := [?]vk.DescriptorSet {
+    self.compute_descriptor_set,
+    self.forcefield_bindless_descriptor_set,
+    resources_manager.world_matrix_descriptor_set,
+  }
   vk.CmdBindDescriptorSets(
     command_buffer,
     .COMPUTE,
     self.compute_pipeline_layout,
     0,
-    1, &self.compute_descriptor_set,
+    len(compute_descriptor_sets),
+    raw_data(compute_descriptor_sets[:]),
     0, nil,
   )
   vk.CmdDispatch(
@@ -258,7 +254,6 @@ shutdown :: proc(
   gpu.data_buffer_destroy(device, &self.particle_buffer)
   gpu.data_buffer_destroy(device, &self.compact_particle_buffer)
   gpu.data_buffer_destroy(device, &self.draw_command_buffer)
-  gpu.data_buffer_destroy(device, &self.force_field_buffer)
   gpu.data_buffer_destroy(device, &self.particle_counter_buffer)
 }
 
@@ -286,12 +281,6 @@ init :: proc(
     MAX_PARTICLES,
     {.STORAGE_BUFFER, .VERTEX_BUFFER, .TRANSFER_DST},
   ) or_return
-  self.force_field_buffer = gpu.create_host_visible_buffer(
-    gpu_context,
-    ForceField,
-    MAX_FORCE_FIELDS,
-    {.STORAGE_BUFFER},
-  ) or_return
   self.particle_counter_buffer = gpu.create_host_visible_buffer(
     gpu_context,
     u32,
@@ -299,9 +288,10 @@ init :: proc(
     {.STORAGE_BUFFER},
   ) or_return
   self.emitter_bindless_descriptor_set = resources_manager.emitter_buffer_descriptor_set
+  self.forcefield_bindless_descriptor_set = resources_manager.forcefield_buffer_descriptor_set
   create_emitter_pipeline(gpu_context, self, resources_manager) or_return
   create_compact_pipeline(gpu_context, self) or_return
-  create_compute_pipeline(gpu_context, self) or_return
+  create_compute_pipeline(gpu_context, self, resources_manager) or_return
   create_render_pipeline(gpu_context, self, resources_manager) or_return
   return .SUCCESS
 }
@@ -440,6 +430,7 @@ create_emitter_pipeline :: proc(
 create_compute_pipeline :: proc(
   gpu_context: ^gpu.GPUContext,
   self: ^Renderer,
+  resources_manager: ^resources.Manager,
 ) -> vk.Result {
   compute_bindings := [?]vk.DescriptorSetLayoutBinding {
     {
@@ -456,12 +447,6 @@ create_compute_pipeline :: proc(
     },
     {
       binding = 2,
-      descriptorType = .STORAGE_BUFFER,
-      descriptorCount = 1,
-      stageFlags = {.COMPUTE},
-    },
-    {
-      binding = 3,
       descriptorType = .STORAGE_BUFFER,
       descriptorCount = 1,
       stageFlags = {.COMPUTE},
@@ -487,12 +472,17 @@ create_compute_pipeline :: proc(
     },
     &self.compute_descriptor_set,
   ) or_return
+  descriptor_set_layouts := [?]vk.DescriptorSetLayout {
+    self.compute_descriptor_set_layout,
+    resources_manager.forcefield_buffer_set_layout,
+    resources_manager.world_matrix_buffer_set_layout,
+  }
   vk.CreatePipelineLayout(
     gpu_context.device,
     &{
       sType = .PIPELINE_LAYOUT_CREATE_INFO,
-      setLayoutCount = 1,
-      pSetLayouts = &self.compute_descriptor_set_layout,
+      setLayoutCount = len(descriptor_set_layouts),
+      pSetLayouts = raw_data(descriptor_set_layouts[:]),
     },
     nil,
     &self.compute_pipeline_layout,
@@ -504,10 +494,6 @@ create_compute_pipeline :: proc(
   particle_buffer_info := vk.DescriptorBufferInfo {
     buffer = self.compact_particle_buffer.buffer,
     range  = vk.DeviceSize(self.compact_particle_buffer.bytes_count),
-  }
-  force_field_buffer_info := vk.DescriptorBufferInfo {
-    buffer = self.force_field_buffer.buffer,
-    range  = vk.DeviceSize(self.force_field_buffer.bytes_count),
   }
   count_buffer_info := vk.DescriptorBufferInfo {
     buffer = self.particle_counter_buffer.buffer,
@@ -534,14 +520,6 @@ create_compute_pipeline :: proc(
       sType = .WRITE_DESCRIPTOR_SET,
       dstSet = self.compute_descriptor_set,
       dstBinding = 2,
-      descriptorType = .STORAGE_BUFFER,
-      descriptorCount = 1,
-      pBufferInfo = &force_field_buffer_info,
-    },
-    {
-      sType = .WRITE_DESCRIPTOR_SET,
-      dstSet = self.compute_descriptor_set,
-      dstBinding = 3,
       descriptorType = .STORAGE_BUFFER,
       descriptorCount = 1,
       pBufferInfo = &count_buffer_info,

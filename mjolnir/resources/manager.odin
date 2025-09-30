@@ -31,6 +31,7 @@ Manager :: struct {
   cameras:                      Pool(geometry.Camera),
   render_targets:               Pool(RenderTarget),
   emitters:                     Pool(Emitter),
+  forcefields:                  Pool(ForceField),
   animation_clips:              Pool(animation.Clip),
 
   // Navigation system resources
@@ -73,6 +74,11 @@ Manager :: struct {
   emitter_buffer_set_layout:      vk.DescriptorSetLayout,
   emitter_buffer_descriptor_set:  vk.DescriptorSet,
   emitter_buffer:                 gpu.StagedBuffer(EmitterData),
+
+  // Bindless forcefield buffer system
+  forcefield_buffer_set_layout:      vk.DescriptorSetLayout,
+  forcefield_buffer_descriptor_set:  vk.DescriptorSet,
+  forcefield_buffer:                 gpu.StagedBuffer(ForceFieldData),
 
   // Bindless vertex skinning buffer system
   vertex_skinning_buffer_set_layout: vk.DescriptorSetLayout,
@@ -121,6 +127,8 @@ init :: proc(
   pool_init(&manager.render_targets)
   log.infof("Initializing emitter pool... ")
   pool_init(&manager.emitters)
+  log.infof("Initializing forcefield pool... ")
+  pool_init(&manager.forcefields)
   log.infof("Initializing animation clips pool... ")
   pool_init(&manager.animation_clips)
   log.infof("Initializing lights pool... ")
@@ -142,6 +150,7 @@ init :: proc(
   init_mesh_data_buffer(gpu_context, manager) or_return
   init_vertex_skinning_buffer(gpu_context, manager) or_return
   init_emitter_buffer(gpu_context, manager) or_return
+  init_forcefield_buffer(gpu_context, manager) or_return
   init_lights_buffer(gpu_context, manager) or_return
   init_bindless_buffers(gpu_context, manager) or_return
   // Texture + samplers descriptor set
@@ -250,6 +259,7 @@ commit :: proc(
   gpu.flush(command_buffer, &manager.node_data_buffer) or_return
   gpu.flush(command_buffer, &manager.mesh_data_buffer) or_return
   gpu.flush(command_buffer, &manager.emitter_buffer) or_return
+  gpu.flush(command_buffer, &manager.forcefield_buffer) or_return
   gpu.flush(command_buffer, &manager.lights_buffer) or_return
   gpu.flush(command_buffer, &manager.world_matrix_buffer) or_return
   gpu.flush(command_buffer, &manager.bone_buffer) or_return
@@ -263,6 +273,7 @@ shutdown :: proc(
   destroy_material_buffer(gpu_context, manager)
   destroy_world_matrix_buffers(gpu_context, manager)
   destroy_emitter_buffer(gpu_context, manager)
+  destroy_forcefield_buffer(gpu_context, manager)
   destroy_lights_buffer(gpu_context, manager)
   // Manually clean up each pool since callbacks can't capture gpu_context
   for &entry in manager.image_2d_buffers.entries {
@@ -295,6 +306,8 @@ shutdown :: proc(
   delete(manager.cameras.free_indices)
   delete(manager.emitters.entries)
   delete(manager.emitters.free_indices)
+  delete(manager.forcefields.entries)
+  delete(manager.forcefields.free_indices)
   for &entry in manager.animation_clips.entries {
     if entry.generation > 0 && entry.active {
       animation.clip_destroy(&entry.item)
@@ -348,12 +361,13 @@ shutdown :: proc(
 
 create_emitter_handle :: proc(
   manager: ^Manager,
+  node_handle: Handle,
   config: Emitter,
 ) -> Handle {
   handle, emitter := alloc(&manager.emitters)
   emitter^ = config
-  emitter.node_handle = {}
-  emitter.is_dirty = true
+  emitter.node_handle = node_handle
+  emitter_write_to_gpu(manager, handle, emitter, false)
   return handle
 }
 
@@ -362,6 +376,26 @@ destroy_emitter_handle :: proc(
   handle: Handle,
 ) -> bool {
   _, freed := free(&manager.emitters, handle)
+  return freed
+}
+
+create_forcefield_handle :: proc(
+  manager: ^Manager,
+  node_handle: Handle,
+  config: ForceField,
+) -> Handle {
+  handle, forcefield := alloc(&manager.forcefields)
+  forcefield^ = config
+  forcefield.node_handle = node_handle
+  forcefield_write_to_gpu(manager, handle, forcefield)
+  return handle
+}
+
+destroy_forcefield_handle :: proc(
+  manager: ^Manager,
+  handle: Handle,
+) -> bool {
+  _, freed := free(&manager.forcefields, handle)
   return freed
 }
 
@@ -1036,6 +1070,80 @@ destroy_emitter_buffer :: proc(
   }
   manager.emitter_buffer_set_layout = 0
   manager.emitter_buffer_descriptor_set = 0
+}
+
+init_forcefield_buffer :: proc(
+  gpu_context: ^gpu.GPUContext,
+  manager: ^Manager,
+) -> vk.Result {
+  log.info("Creating forcefield buffer for bindless access")
+  manager.forcefield_buffer = gpu.malloc_staged_buffer(
+    gpu_context,
+    ForceFieldData,
+    MAX_FORCE_FIELDS,
+    {.STORAGE_BUFFER},
+  ) or_return
+  forcefields := gpu.staged_buffer_get_all(&manager.forcefield_buffer)
+  for &forcefield in forcefields do forcefield = {}
+  bindings := [?]vk.DescriptorSetLayoutBinding {
+    {
+      binding = 0,
+      descriptorType = .STORAGE_BUFFER,
+      descriptorCount = 1,
+      stageFlags = {.COMPUTE},
+    },
+  }
+  vk.CreateDescriptorSetLayout(
+    gpu_context.device,
+    &vk.DescriptorSetLayoutCreateInfo {
+      sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+      bindingCount = len(bindings),
+      pBindings = raw_data(bindings[:]),
+    },
+    nil,
+    &manager.forcefield_buffer_set_layout,
+  ) or_return
+  vk.AllocateDescriptorSets(
+    gpu_context.device,
+    &vk.DescriptorSetAllocateInfo {
+      sType              = .DESCRIPTOR_SET_ALLOCATE_INFO,
+      descriptorPool     = gpu_context.descriptor_pool,
+      descriptorSetCount = 1,
+      pSetLayouts        = &manager.forcefield_buffer_set_layout,
+    },
+    &manager.forcefield_buffer_descriptor_set,
+  ) or_return
+  buffer_info := vk.DescriptorBufferInfo {
+    buffer = manager.forcefield_buffer.device_buffer,
+    offset = 0,
+    range  = vk.DeviceSize(vk.WHOLE_SIZE),
+  }
+  write := vk.WriteDescriptorSet {
+    sType           = .WRITE_DESCRIPTOR_SET,
+    dstSet          = manager.forcefield_buffer_descriptor_set,
+    dstBinding      = 0,
+    descriptorType  = .STORAGE_BUFFER,
+    descriptorCount = 1,
+    pBufferInfo     = &buffer_info,
+  }
+  vk.UpdateDescriptorSets(gpu_context.device, 1, &write, 0, nil)
+  return .SUCCESS
+}
+
+destroy_forcefield_buffer :: proc(
+  gpu_context: ^gpu.GPUContext,
+  manager: ^Manager,
+) {
+  gpu.staged_buffer_destroy(gpu_context.device, &manager.forcefield_buffer)
+  if manager.forcefield_buffer_set_layout != 0 {
+    vk.DestroyDescriptorSetLayout(
+      gpu_context.device,
+      manager.forcefield_buffer_set_layout,
+      nil,
+    )
+  }
+  manager.forcefield_buffer_set_layout = 0
+  manager.forcefield_buffer_descriptor_set = 0
 }
 
 destroy_mesh_data_buffer :: proc(
@@ -2135,6 +2243,100 @@ get_animation_clip :: proc(
 ) #optional_ok {
   ret, ok = get(manager.animation_clips, handle)
   return
+}
+
+get_forcefield :: proc(
+  manager: ^Manager,
+  handle: Handle,
+) -> (
+  ret: ^ForceField,
+  ok: bool,
+) #optional_ok {
+  ret, ok = get(manager.forcefields, handle)
+  return
+}
+
+forcefield_data_from_forcefield :: proc(ff: ^ForceField) -> ForceFieldData {
+  return ForceFieldData {
+    tangent_strength = ff.tangent_strength,
+    strength = ff.strength,
+    area_of_effect = ff.area_of_effect,
+    fade = ff.fade,
+    node_index = ff.node_handle.index,
+    visible = b32(true),
+  }
+}
+
+forcefield_write_to_gpu :: proc(
+  manager: ^Manager,
+  handle: Handle,
+  ff: ^ForceField,
+) -> vk.Result {
+  if handle.index >= MAX_FORCE_FIELDS {
+    return .ERROR_OUT_OF_DEVICE_MEMORY
+  }
+  data := forcefield_data_from_forcefield(ff)
+  gpu.write(
+    &manager.forcefield_buffer,
+    &data,
+    int(handle.index),
+  ) or_return
+  return .SUCCESS
+}
+
+emitter_data_from_emitter :: proc(emitter: ^Emitter, time_accumulator: f32 = 0.0) -> EmitterData {
+  return EmitterData {
+    initial_velocity = emitter.initial_velocity,
+    color_start = emitter.color_start,
+    color_end = emitter.color_end,
+    emission_rate = emitter.emission_rate,
+    particle_lifetime = emitter.particle_lifetime,
+    position_spread = emitter.position_spread,
+    velocity_spread = emitter.velocity_spread,
+    time_accumulator = time_accumulator,
+    size_start = emitter.size_start,
+    size_end = emitter.size_end,
+    weight = emitter.weight,
+    weight_spread = emitter.weight_spread,
+    texture_index = emitter.texture_handle.index,
+    node_index = emitter.node_handle.index,
+    visible = b32(true),
+    aabb_min = {
+      emitter.bounding_box.min.x,
+      emitter.bounding_box.min.y,
+      emitter.bounding_box.min.z,
+      0.0,
+    },
+    aabb_max = {
+      emitter.bounding_box.max.x,
+      emitter.bounding_box.max.y,
+      emitter.bounding_box.max.z,
+      0.0,
+    },
+  }
+}
+
+emitter_write_to_gpu :: proc(
+  manager: ^Manager,
+  handle: Handle,
+  emitter: ^Emitter,
+  preserve_time_accumulator: bool = true,
+) -> vk.Result {
+  if handle.index >= MAX_EMITTERS {
+    return .ERROR_OUT_OF_DEVICE_MEMORY
+  }
+  time_acc: f32 = 0.0
+  if preserve_time_accumulator {
+    existing := gpu.staged_buffer_get(&manager.emitter_buffer, handle.index)
+    time_acc = existing.time_accumulator
+  }
+  data := emitter_data_from_emitter(emitter, time_acc)
+  gpu.write(
+    &manager.emitter_buffer,
+    &data,
+    int(handle.index),
+  ) or_return
+  return .SUCCESS
 }
 
 create_animation_clip :: proc(

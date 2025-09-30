@@ -11,15 +11,6 @@ import "../resources"
 import "../gpu"
 import navmesh_renderer "../render/navigation"
 
-
-NavMeshAttachment :: struct {
-  nav_mesh_handle: Handle,
-  tile_x:          i32,
-  tile_y:          i32,
-  area_type:       u8,
-  enabled:         bool,
-}
-
 NavMeshAgentAttachment :: struct {
   target_position:     [3]f32,
   current_path:        [][3]f32,

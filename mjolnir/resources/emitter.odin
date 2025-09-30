@@ -38,5 +38,4 @@ Emitter :: struct {
   texture_handle:    Handle,
   bounding_box:      geometry.Aabb,
   node_handle:       Handle,
-  is_dirty:          bool,
 }
