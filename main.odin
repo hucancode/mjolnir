@@ -21,7 +21,7 @@ ALL_SPOT_LIGHT :: false
 ALL_POINT_LIGHT :: true
 light_handles: [LIGHT_COUNT]mjolnir.Handle
 light_cube_handles: [LIGHT_COUNT]mjolnir.Handle
-ground_mat_handle: mjolnir.Handle
+brick_wall_mat_handle: mjolnir.Handle
 hammer_handle: mjolnir.Handle
 forcefield_handle: mjolnir.Handle
 
@@ -76,21 +76,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
     &engine.gpu_context,
     &engine.resource_manager,
     make_sphere(),
-  )
-  // Create ground plane
-  ground_mat_handle = resources.create_material_handle(
-    &engine.resource_manager,
-    {.ALBEDO_TEXTURE},
-    albedo_handle = resources.create_texture_handle(
-      &engine.gpu_context,
-      &engine.resource_manager,
-      "assets/t_brick_floor_002_diffuse_1k.jpg",
-    ),
-  )
-  ground_mesh_handle := resources.create_mesh_handle(
-    &engine.gpu_context,
-    &engine.resource_manager,
-    make_quad(),
   )
   cone_mesh_handle := resources.create_mesh_handle(
     &engine.gpu_context,
@@ -151,6 +136,21 @@ setup :: proc(engine: ^mjolnir.Engine) {
     }
   }
   when true {
+      // Create ground plane
+      brick_wall_mat_handle = resources.create_material_handle(
+        &engine.resource_manager,
+        {.ALBEDO_TEXTURE},
+        albedo_handle = resources.create_texture_handle(
+          &engine.gpu_context,
+          &engine.resource_manager,
+          "assets/t_brick_floor_002_diffuse_1k.jpg",
+        ),
+      )
+      ground_mesh_handle := resources.create_mesh_handle(
+        &engine.gpu_context,
+        &engine.resource_manager,
+        make_quad(),
+      )
     log.info("spawning ground and walls")
     // Ground node
     size: f32 = 15.0
@@ -158,7 +158,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
       &engine.world,
       MeshAttachment {
         handle = ground_mesh_handle,
-        material = ground_mat_handle,
+        material = brick_wall_mat_handle,
       },
     )
     world.scale(ground_node, size)
@@ -167,7 +167,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
       &engine.world,
       MeshAttachment {
         handle = ground_mesh_handle,
-        material = ground_mat_handle,
+        material = brick_wall_mat_handle,
       },
     )
     world.translate(left_wall, x = size, y = size)
@@ -178,7 +178,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
       &engine.world,
       MeshAttachment {
         handle = ground_mesh_handle,
-        material = ground_mat_handle,
+        material = brick_wall_mat_handle,
       },
     )
     world.translate(right_wall, x = -size, y = size)
@@ -189,7 +189,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
       &engine.world,
       MeshAttachment {
         handle = ground_mesh_handle,
-        material = ground_mat_handle,
+        material = brick_wall_mat_handle,
       },
     )
     world.translate(back_wall, y = size, z = -size)
@@ -200,7 +200,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
       &engine.world,
       MeshAttachment {
         handle = ground_mesh_handle,
-        material = ground_mat_handle,
+        material = brick_wall_mat_handle,
       },
     )
     world.translate(ceiling, y = 2*size)
