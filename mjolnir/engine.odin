@@ -19,6 +19,7 @@ import "resources"
 import "world"
 import "render/particles"
 import "render/lighting"
+import "render/text"
 import "render/debug_ui"
 import navmesh_renderer "render/navigation"
 import "navigation/recast"
@@ -673,6 +674,14 @@ render :: proc(self: ^Engine) -> vk.Result {
     self.render2d_proc(self, &self.render.ui.ctx)
   }
   mu.end(&self.render.ui.ctx)
+  text.begin_pass(
+    &self.render.text,
+    command_buffer,
+    self.swapchain.views[self.swapchain.image_index],
+    self.swapchain.extent,
+  )
+  text.render(&self.render.text, command_buffer, &self.gpu_context)
+  text.end_pass(command_buffer)
   debug_ui.begin_pass(
     &self.render.ui,
     command_buffer,

@@ -12,6 +12,7 @@ import "mjolnir/resources"
 import world "mjolnir/world"
 import post_process "mjolnir/render/post_process"
 import geometry_pass "mjolnir/render/geometry"
+import text "mjolnir/render/text"
 import "vendor:glfw"
 import mu "vendor:microui"
 import vk "vendor:vulkan"
@@ -55,6 +56,7 @@ main :: proc() {
   engine.update_proc = update
   engine.key_press_proc = on_key_pressed
   engine.custom_render_proc = custom_render
+  engine.render2d_proc = render_2d
   mjolnir.run(engine, 1280, 720, "Mjolnir")
 }
 
@@ -610,6 +612,16 @@ on_key_pressed :: proc(engine: ^mjolnir.Engine, key, action, mods: int) {
       camera_controller_sync(current_controller, main_camera_for_sync)
     }
   }
+}
+
+render_2d :: proc(engine: ^mjolnir.Engine, ctx: ^mu.Context) {
+  text.draw_text(
+    &engine.render.text,
+    "Mjolnir",
+    600, 60,
+    48,
+    {255, 255, 255, 255},
+  )
 }
 
 custom_render :: proc(
