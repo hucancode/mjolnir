@@ -267,10 +267,10 @@ render :: proc(
   resources_manager: ^resources.Manager,
   frame_index: u32,
   draw_buffer: vk.Buffer,
-  draw_count: u32,
+  count_buffer: vk.Buffer,
   command_stride: u32,
 ) {
-  if draw_count == 0 {
+  if draw_buffer == 0 || count_buffer == 0 {
     return
   }
   descriptor_sets := [?]vk.DescriptorSet {
@@ -322,11 +322,13 @@ render :: proc(
     .UINT32,
   )
 
-  vk.CmdDrawIndexedIndirect(
+  vk.CmdDrawIndexedIndirectCount(
     command_buffer,
     draw_buffer,
     0,
-    draw_count,
+    count_buffer,
+    0,
+    resources.MAX_NODES_IN_SCENE,
     command_stride,
   )
 }

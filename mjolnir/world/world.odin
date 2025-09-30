@@ -78,7 +78,6 @@ DrawCommandRequest :: struct {
 DrawCommandList :: struct {
   draw_buffer:    vk.Buffer,
   count_buffer:   vk.Buffer,
-  max_draws:      u32,
   command_stride: u32,
 }
 
@@ -483,7 +482,6 @@ query_visibility :: proc(
   return DrawCommandList {
     draw_buffer    = result.draw_buffer,
     count_buffer   = result.count_buffer,
-    max_draws      = result.max_draws,
     command_stride = result.command_stride,
   }
 }
@@ -491,6 +489,14 @@ query_visibility :: proc(
 shutdown :: proc(world: ^World, gpu_context: ^gpu.GPUContext, resources_manager: ^resources.Manager) {
   visibility_system_shutdown(&world.visibility, gpu_context)
   destroy(world, resources_manager, gpu_context)
+}
+
+get_visible_count :: proc(
+  world: ^World,
+  frame_index: u32,
+  category: VisibilityCategory,
+) -> u32 {
+  return visibility_system_get_visible_count(&world.visibility, frame_index, category)
 }
 
 dispatch_visibility :: proc(

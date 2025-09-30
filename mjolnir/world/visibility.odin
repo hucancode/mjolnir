@@ -48,7 +48,6 @@ VisibilityPushConstants :: struct {
 VisibilityResult :: struct {
   draw_buffer:    vk.Buffer,
   count_buffer:   vk.Buffer,
-  max_draws:      u32,
   command_stride: u32,
 }
 
@@ -333,6 +332,22 @@ visibility_system_set_node_count :: proc(system: ^VisibilitySystem, count: u32) 
   system.node_count = min(count, system.max_draws)
 }
 
+visibility_system_get_visible_count :: proc(
+  system: ^VisibilitySystem,
+  frame_index: u32,
+  task: VisibilityCategory,
+) -> u32 {
+  if frame_index >= resources.MAX_FRAMES_IN_FLIGHT {
+    return 0
+  }
+  frame := &system.frames[frame_index]
+  buffers := &frame.tasks[int(task)]
+  if buffers.draw_count.mapped == nil {
+    return 0
+  }
+  return buffers.draw_count.mapped[0]
+}
+
 visibility_system_dispatch :: proc(
   system: ^VisibilitySystem,
   gpu_context: ^gpu.GPUContext,
@@ -344,7 +359,6 @@ visibility_system_dispatch :: proc(
   result := VisibilityResult {
     draw_buffer    = 0,
     count_buffer   = 0,
-    max_draws      = system.node_count,
     command_stride = draw_command_stride(),
   }
 
@@ -446,6 +460,14 @@ visibility_system_dispatch :: proc(
       buffer        = buffers.draw_commands.buffer,
       offset        = 0,
       size          = vk.DeviceSize(buffers.draw_commands.bytes_count),
+    },
+    {
+      sType         = .BUFFER_MEMORY_BARRIER,
+      srcAccessMask = {.SHADER_WRITE},
+      dstAccessMask = {.INDIRECT_COMMAND_READ},
+      buffer        = buffers.draw_count.buffer,
+      offset        = 0,
+      size          = vk.DeviceSize(buffers.draw_count.bytes_count),
     },
   }
 

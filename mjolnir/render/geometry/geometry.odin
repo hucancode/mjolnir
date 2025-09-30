@@ -72,11 +72,11 @@ render_depth_prepass :: proc(
   resources_manager: ^resources.Manager,
   frame_index: u32,
   draw_buffer: vk.Buffer,
-  draw_count: u32,
+  count_buffer: vk.Buffer,
   command_stride: u32,
-) -> int {
-  if draw_count == 0 {
-    return 0
+) {
+  if draw_buffer == 0 || count_buffer == 0 {
+    return
   }
   descriptor_sets := [?]vk.DescriptorSet {
     resources_manager.camera_buffer_descriptor_set,
@@ -125,14 +125,15 @@ render_depth_prepass :: proc(
     0,
     .UINT32,
   )
-  vk.CmdDrawIndexedIndirect(
+  vk.CmdDrawIndexedIndirectCount(
     command_buffer,
     draw_buffer,
     0,
-    draw_count,
+    count_buffer,
+    0,
+    resources.MAX_NODES_IN_SCENE,
     command_stride,
   )
-  return int(draw_count)
 }
 
 init :: proc(
@@ -591,10 +592,10 @@ render :: proc(
   resources_manager: ^resources.Manager,
   frame_index: u32,
   draw_buffer: vk.Buffer,
-  draw_count: u32,
+  count_buffer: vk.Buffer,
   command_stride: u32,
 ) {
-  if draw_count == 0 {
+  if draw_buffer == 0 || count_buffer == 0 {
     return
   }
   descriptor_sets := [?]vk.DescriptorSet {
@@ -644,11 +645,13 @@ render :: proc(
     0,
     .UINT32,
   )
-  vk.CmdDrawIndexedIndirect(
+  vk.CmdDrawIndexedIndirectCount(
     command_buffer,
     draw_buffer,
     0,
-    draw_count,
+    count_buffer,
+    0,
+    resources.MAX_NODES_IN_SCENE,
     command_stride,
   )
 }

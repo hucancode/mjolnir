@@ -196,7 +196,7 @@ record_shadow_pass :: proc(
             },
           )
           shadow_draw_buffer := vis_result.draw_buffer
-          shadow_draw_count := vis_result.max_draws
+          shadow_count_buffer := vis_result.count_buffer
           shadow.begin_pass(
             found_target,
             command_buffer,
@@ -211,7 +211,7 @@ record_shadow_pass :: proc(
             resources_manager,
             frame_index,
             shadow_draw_buffer,
-            shadow_draw_count,
+            shadow_count_buffer,
             command_stride,
           )
           shadow.end_pass(
@@ -238,7 +238,7 @@ record_shadow_pass :: proc(
           },
         )
         shadow_draw_buffer := vis_result.draw_buffer
-        shadow_draw_count := vis_result.max_draws
+        shadow_count_buffer := vis_result.count_buffer
         shadow.begin_pass(
           found_target,
           command_buffer,
@@ -252,7 +252,7 @@ record_shadow_pass :: proc(
           resources_manager,
           frame_index,
           shadow_draw_buffer,
-          shadow_draw_count,
+          shadow_count_buffer,
           command_stride,
         )
         shadow.end_pass(
@@ -297,7 +297,7 @@ record_geometry_pass :: proc(
     },
   )
   draw_buffer := vis_result.draw_buffer
-  draw_count := vis_result.max_draws
+  count_buffer := vis_result.count_buffer
   command_stride := vis_result.command_stride
   geometry_pass.begin_depth_prepass(
     main_render_target,
@@ -312,7 +312,7 @@ record_geometry_pass :: proc(
     resources_manager,
     frame_index,
     draw_buffer,
-    draw_count,
+    count_buffer,
     command_stride,
   )
   geometry_pass.end_depth_prepass(command_buffer)
@@ -329,7 +329,7 @@ record_geometry_pass :: proc(
     resources_manager,
     frame_index,
     draw_buffer,
-    draw_count,
+    count_buffer,
     command_stride,
   )
   geometry_pass.end_pass(
@@ -460,7 +460,7 @@ record_transparency_pass :: proc(
     resources_manager,
     frame_index,
     vis_transparent.draw_buffer,
-    vis_transparent.max_draws,
+    vis_transparent.count_buffer,
     command_stride,
   )
   vis_wireframe := world.dispatch_visibility(
@@ -483,7 +483,7 @@ record_transparency_pass :: proc(
     resources_manager,
     frame_index,
     vis_wireframe.draw_buffer,
-    vis_wireframe.max_draws,
+    vis_wireframe.count_buffer,
     command_stride,
   )
   transparency.end_pass(&self.transparency, command_buffer)

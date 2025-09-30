@@ -646,7 +646,7 @@ custom_render :: proc(
     },
   )
   portal_draw_buffer := vis_result.draw_buffer
-  portal_draw_count := vis_result.max_draws
+  portal_count_buffer := vis_result.count_buffer
   // Render G-buffer pass with self-managed depth
   geometry_pass.begin_pass(
     portal_rt,
@@ -662,7 +662,7 @@ custom_render :: proc(
     &engine.resource_manager,
     engine.frame_index,
     portal_draw_buffer,
-    portal_draw_count,
+    portal_count_buffer,
     vis_result.command_stride,
   )
   geometry_pass.end_pass(

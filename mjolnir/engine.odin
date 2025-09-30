@@ -564,11 +564,12 @@ render_debug_ui :: proc(self: ^Engine) {
     mu.label(&self.render.ui.ctx, fmt.tprintf("Textures %d", len(self.resource_manager.image_2d_buffers.entries) - len(self.resource_manager.image_2d_buffers.free_indices)))
     mu.label(&self.render.ui.ctx, fmt.tprintf("Materials %d", len(self.resource_manager.materials.entries) - len(self.resource_manager.materials.free_indices)))
     mu.label(&self.render.ui.ctx, fmt.tprintf("Meshes %d", len(self.resource_manager.meshes.entries) - len(self.resource_manager.meshes.free_indices)))
+    visible_count := world.get_visible_count(&self.world, self.frame_index, .OPAQUE)
     mu.label(
       &self.render.ui.ctx,
       fmt.tprintf(
-        "Visible nodes (max %d): %d",
-        self.world.visibility.max_draws,
+        "Visible nodes %d / %d",
+        visible_count,
         self.world.visibility.node_count,
       ),
     )

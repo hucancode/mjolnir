@@ -466,6 +466,11 @@ logical_device_init :: proc(self: ^GPUContext) -> vk.Result {
     multiDrawIndirect         = true, // Required for vk.CmdDrawIndexedIndirect with drawCount > 1
     drawIndirectFirstInstance = true, // Required for using firstInstance field in indirect commands
   }
+  vulkan_12_features := vk.PhysicalDeviceVulkan12Features {
+    sType              = .PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
+    drawIndirectCount  = true, // Required for vk.CmdDrawIndexedIndirectCount
+    pNext              = &dynamic_rendering_feature,
+  }
   device_create_info := vk.DeviceCreateInfo {
     sType                   = .DEVICE_CREATE_INFO,
     queueCreateInfoCount    = u32(len(queue_create_infos_list)),
@@ -473,7 +478,7 @@ logical_device_init :: proc(self: ^GPUContext) -> vk.Result {
     ppEnabledExtensionNames = raw_data(DEVICE_EXTENSIONS),
     enabledExtensionCount   = u32(len(DEVICE_EXTENSIONS)),
     pEnabledFeatures        = &basic_features,
-    pNext                   = &dynamic_rendering_feature,
+    pNext                   = &vulkan_12_features,
   }
   when ENABLE_VALIDATION_LAYERS {
     device_create_info.enabledLayerCount = u32(len(VALIDATION_LAYERS))
