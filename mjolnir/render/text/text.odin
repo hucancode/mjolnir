@@ -60,7 +60,7 @@ init :: proc(
   fs.Init(&self.font_ctx, ATLAS_WIDTH, ATLAS_HEIGHT, .TOPLEFT)
   self.font_ctx.callbackResize = atlas_resize_callback
   self.font_ctx.userData = self
-  font_path := "/usr/share/fonts/TTF/FiraCode-Regular.ttf"
+  font_path := "assets/Excalifont-Regular.ttf"
   font_data, ok := os.read_entire_file(font_path)
   if !ok {
     log.errorf("Failed to load font: %s", font_path)
