@@ -147,7 +147,7 @@ build_navigation_mesh_from_scene :: proc(
   world: ^World, resources_manager: ^resources.Manager, gpu_context: ^gpu.GPUContext,
   config: recast.Config = {},
 ) -> (
-  Handle,
+  resources.Handle,
   bool,
 ) {
   collector: SceneGeometryCollector
@@ -240,7 +240,7 @@ build_navigation_mesh_from_scene_filtered :: proc(
   area_type_mapper: proc(node: ^Node) -> u8 = nil,
   config: recast.Config = {},
 ) -> (
-  Handle,
+  resources.Handle,
   bool,
 ) {
   // Initialize geometry collector with custom filters
@@ -368,7 +368,7 @@ build_navigation_mesh_from_world :: proc(
   world: ^World, resources_manager: ^resources.Manager, gpu_context: ^gpu.GPUContext,
   config: recast.Config = {},
 ) -> (
-  Handle,
+  resources.Handle,
   bool,
 ) {
   // Initialize geometry collector with obstacle-aware filters
@@ -554,9 +554,9 @@ calculate_bounds_from_vertices :: proc(vertices: [][3]f32) -> geometry.Aabb {
 // Create navigation context for queries
 create_navigation_context :: proc(
   world: ^World, resources_manager: ^resources.Manager, gpu_context: ^gpu.GPUContext,
-  nav_mesh_handle: Handle,
+  nav_mesh_handle: resources.Handle,
 ) -> (
-  Handle,
+  resources.Handle,
   bool,
 ) {
   nav_mesh, ok := resources.get_navmesh(resources_manager, nav_mesh_handle)
@@ -596,7 +596,7 @@ create_navigation_context :: proc(
 // Find path between two points
 nav_find_path :: proc(
   world: ^World, resources_manager: ^resources.Manager, gpu_context: ^gpu.GPUContext,
-  context_handle: Handle,
+  context_handle: resources.Handle,
   start: [3]f32,
   end: [3]f32,
   max_path_length: i32 = 256,
@@ -716,7 +716,7 @@ nav_find_path :: proc(
 // Check if a position is walkable
 nav_is_position_walkable :: proc(
   world: ^World, resources_manager: ^resources.Manager, gpu_context: ^gpu.GPUContext,
-  context_handle: Handle,
+  context_handle: resources.Handle,
   position: [3]f32,
 ) -> bool {
   nav_context, ok := resources.get_nav_context(resources_manager, context_handle)
@@ -742,7 +742,7 @@ spawn_nav_agent_at :: proc(
   radius: f32 = 0.5,
   height: f32 = 2.0,
 ) -> (
-  Handle,
+  resources.Handle,
   ^Node,
 ) {
   attachment := NavMeshAgentAttachment {
@@ -761,9 +761,9 @@ spawn_nav_agent_at :: proc(
 // Set navigation agent target
 nav_agent_set_target :: proc(
   world: ^World, resources_manager: ^resources.Manager, gpu_context: ^gpu.GPUContext,
-  agent_handle: Handle,
+  agent_handle: resources.Handle,
   target: [3]f32,
-  context_handle: Handle = {},
+  context_handle: resources.Handle = {},
 ) -> bool {
   node := resources.get(world.nodes, agent_handle)
   if node == nil {
@@ -811,7 +811,7 @@ build_and_visualize_navigation_mesh :: proc(
   gpu_context: ^gpu.GPUContext,
   renderer: ^navmesh_renderer.Renderer,
   config: recast.Config = {},
-) -> (nav_mesh_handle: Handle, success: bool) {
+) -> (nav_mesh_handle: resources.Handle, success: bool) {
 
   // Build navigation mesh from world geometry
   mesh_handle, build_ok := build_navigation_mesh_from_world(world, resources_manager, gpu_context, config)

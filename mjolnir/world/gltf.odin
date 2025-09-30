@@ -42,7 +42,7 @@ load_gltf :: proc(
   gpu_context: ^gpu.GPUContext,
   path: string,
 ) -> (
-  nodes: [dynamic]Handle,
+  nodes: [dynamic]resources.Handle,
   ret: cgltf.result,
 ) {
   // step 0: cgltf
@@ -53,7 +53,7 @@ load_gltf :: proc(
   if len(gltf_data.buffers) > 0 {
     cgltf.load_buffers(options, gltf_data, gltf_path_cstr) or_return
   }
-  nodes = make([dynamic]Handle, 0)
+  nodes = make([dynamic]resources.Handle, 0)
   if len(gltf_data.nodes) == 0 {
     return nodes, .success
   }
@@ -616,11 +616,11 @@ construct_scene :: proc(
   gltf_data: ^cgltf.data,
   geometry_cache: ^map[^cgltf.mesh]GeometryData,
   skin_cache: ^map[^cgltf.skin]SkinData,
-  nodes: ^[dynamic]Handle,
+  nodes: ^[dynamic]resources.Handle,
 ) -> cgltf.result {
   TraverseEntry :: struct {
     idx:    u32,
-    parent: Handle,
+    parent: resources.Handle,
   }
   stack := make([dynamic]TraverseEntry, 0, context.temp_allocator)
   child_node_indices := make([dynamic]u32, 0, context.temp_allocator)

@@ -11,10 +11,8 @@ import "../render/particles"
 import "../resources"
 import vk "vendor:vulkan"
 
-Handle :: resources.Handle
-
 LightAttachment :: struct {
-  handle: Handle,
+  handle: resources.Handle,
 }
 
 NodeSkinning :: struct {
@@ -23,19 +21,19 @@ NodeSkinning :: struct {
 }
 
 MeshAttachment :: struct {
-  handle:              Handle,
-  material:            Handle,
+  handle:              resources.Handle,
+  material:            resources.Handle,
   skinning:            Maybe(NodeSkinning),
   cast_shadow:         bool,
   navigation_obstacle: bool,
 }
 
 EmitterAttachment :: struct {
-  handle: Handle,
+  handle: resources.Handle,
 }
 
 ForceFieldAttachment :: struct {
-  handle: Handle,
+  handle: resources.Handle,
 }
 
 NodeAttachment :: union {
@@ -48,8 +46,8 @@ NodeAttachment :: union {
 }
 
 Node :: struct {
-  parent:          Handle,
-  children:        [dynamic]Handle,
+  parent:          resources.Handle,
+  children:        [dynamic]resources.Handle,
   transform:       geometry.Transform,
   name:            string,
   attachment:      NodeAttachment,
@@ -69,7 +67,7 @@ FrameContext :: struct {
 }
 
 DrawCommandRequest :: struct {
-  camera_handle:  Handle,
+  camera_handle:  resources.Handle,
   include_flags:  resources.NodeFlagSet,
   exclude_flags:  resources.NodeFlagSet,
   category:       VisibilityCategory,
@@ -82,7 +80,7 @@ DrawCommandList :: struct {
 }
 
 init_node :: proc(self: ^Node, name: string = "") {
-  self.children = make([dynamic]Handle, 0)
+  self.children = make([dynamic]resources.Handle, 0)
   self.transform = geometry.TRANSFORM_IDENTITY
   self.name = name
   self.culling_enabled = true
@@ -96,7 +94,7 @@ destroy_node :: proc(self: ^Node, resources_manager: ^resources.Manager, gpu_con
     return
   }
 
-  // Handle light attachment cleanup
+  // resources.Handle light attachment cleanup
   #partial switch &attachment in &self.attachment {
   case LightAttachment:
     if attachment.handle.generation != 0 {
@@ -133,7 +131,7 @@ destroy_node :: proc(self: ^Node, resources_manager: ^resources.Manager, gpu_con
   }
 }
 
-detach :: proc(nodes: resources.Pool(Node), child_handle: Handle) {
+detach :: proc(nodes: resources.Pool(Node), child_handle: resources.Handle) {
   child_node := resources.get(nodes, child_handle)
   if child_node == nil {
     return
@@ -155,7 +153,7 @@ detach :: proc(nodes: resources.Pool(Node), child_handle: Handle) {
 
 attach :: proc(
   nodes: resources.Pool(Node),
-  parent_handle, child_handle: Handle,
+  parent_handle, child_handle: resources.Handle,
 ) {
   child_node := resources.get(nodes, child_handle)
   parent_node := resources.get(nodes, parent_handle)
@@ -180,7 +178,7 @@ attach :: proc(
 play_animation :: proc(
   world: ^World,
   resources_manager: ^resources.Manager,
-  node_handle: Handle,
+  node_handle: resources.Handle,
   name: string,
   mode: animation.PlayMode = .LOOP,
 ) -> bool {
@@ -214,7 +212,7 @@ spawn_at :: proc(
   attachment: NodeAttachment = nil,
   resources_manager: ^resources.Manager = nil,
 ) -> (
-  handle: Handle,
+  handle: resources.Handle,
   node: ^Node,
 ) {
   handle, node = resources.alloc(&self.nodes)
@@ -282,7 +280,7 @@ spawn :: proc(
   attachment: NodeAttachment = nil,
   resources_manager: ^resources.Manager = nil,
 ) -> (
-  handle: Handle,
+  handle: resources.Handle,
   node: ^Node,
 ) {
   handle, node = resources.alloc(&self.nodes)
@@ -345,11 +343,11 @@ spawn :: proc(
 
 spawn_child :: proc(
   self: ^World,
-  parent: Handle,
+  parent: resources.Handle,
   attachment: NodeAttachment = nil,
   resources_manager: ^resources.Manager = nil,
 ) -> (
-  handle: Handle,
+  handle: resources.Handle,
   node: ^Node,
 ) {
   handle, node = resources.alloc(&self.nodes)
@@ -411,14 +409,14 @@ spawn_child :: proc(
 }
 
 TraverseEntry :: struct {
-  handle:           Handle,
+  handle:           resources.Handle,
   parent_transform: matrix[4, 4]f32,
   parent_is_dirty:  bool,
   parent_is_visible: bool,
 }
 
 World :: struct {
-  root:            Handle,
+  root:            resources.Handle,
   nodes:           resources.Pool(Node),
   traversal_stack: [dynamic]TraverseEntry,
   visibility:      VisibilitySystem,
@@ -523,7 +521,7 @@ spawn_node :: proc(
   position: [3]f32 = {0, 0, 0},
   attachment: NodeAttachment = nil,
   resources_manager: ^resources.Manager = nil,
-) -> (handle: Handle, node: ^Node) {
+) -> (handle: resources.Handle, node: ^Node) {
   handle, node = resources.alloc(&world.nodes)
   init_node(node)
   node.attachment = attachment
@@ -585,11 +583,11 @@ spawn_node :: proc(
 
 spawn_child_node :: proc(
   world: ^World,
-  parent: Handle,
+  parent: resources.Handle,
   position: [3]f32 = {0, 0, 0},
   attachment: NodeAttachment = nil,
   resources_manager: ^resources.Manager = nil,
-) -> (handle: Handle, node: ^Node) {
+) -> (handle: resources.Handle, node: ^Node) {
   handle, node = resources.alloc(&world.nodes)
   init_node(node)
   node.attachment = attachment
@@ -648,7 +646,7 @@ spawn_child_node :: proc(
   return
 }
 
-destroy_node_handle :: proc(world: ^World, handle: Handle) -> bool {
+despawn :: proc(world: ^World, handle: resources.Handle) -> bool {
   node := resources.get(world.nodes, handle)
   if node == nil {
     return false
@@ -662,12 +660,12 @@ destroy_node_handle :: proc(world: ^World, handle: Handle) -> bool {
 
 // Actually destroy nodes that are marked for deletion
 cleanup_pending_deletions :: proc(world: ^World, resources_manager: ^resources.Manager, gpu_context: ^gpu.GPUContext = nil) {
-  to_destroy := make([dynamic]Handle, 0)
+  to_destroy := make([dynamic]resources.Handle, 0)
   defer delete(to_destroy)
   for i in 0 ..< len(world.nodes.entries) {
     entry := &world.nodes.entries[i]
     if entry.active && entry.item.pending_deletion {
-      append(&to_destroy, Handle{index = u32(i), generation = entry.generation})
+      append(&to_destroy, resources.Handle{index = u32(i), generation = entry.generation})
     }
   }
   for handle in to_destroy {
@@ -677,7 +675,7 @@ cleanup_pending_deletions :: proc(world: ^World, resources_manager: ^resources.M
   }
 }
 
-get_node :: proc(world: ^World, handle: Handle) -> ^Node {
+get_node :: proc(world: ^World, handle: resources.Handle) -> ^Node {
   return resources.get(world.nodes, handle)
 }
 
@@ -762,7 +760,7 @@ traverse :: proc(world: ^World, resources_manager: ^resources.Manager = nil, cb_
       if !callback(current_node, cb_context) do continue
     }
     // Copy children array to avoid race conditions during iteration
-    children_copy := make([]Handle, len(current_node.children))
+    children_copy := make([]resources.Handle, len(current_node.children))
     defer delete(children_copy)
     copy(children_copy, current_node.children[:])
     for child_handle in children_copy {
@@ -783,7 +781,7 @@ traverse :: proc(world: ^World, resources_manager: ^resources.Manager = nil, cb_
 @(private)
 assign_emitter_to_node :: proc(
   resources_manager: ^resources.Manager,
-  node_handle: Handle,
+  node_handle: resources.Handle,
   node: ^Node,
 ) {
   if resources_manager == nil {
@@ -803,7 +801,7 @@ assign_emitter_to_node :: proc(
 @(private)
 assign_forcefield_to_node :: proc(
   resources_manager: ^resources.Manager,
-  node_handle: Handle,
+  node_handle: resources.Handle,
   node: ^Node,
 ) {
   if resources_manager == nil {
@@ -823,7 +821,7 @@ assign_forcefield_to_node :: proc(
 @(private)
 assign_light_to_node :: proc(
   resources_manager: ^resources.Manager,
-  node_handle: Handle,
+  node_handle: resources.Handle,
   node: ^Node,
 ) {
   if resources_manager == nil {
@@ -953,13 +951,13 @@ node_scale :: proc(node: ^Node, s: f32) {
   geometry.transform_scale(&node.transform, s)
 }
 
-node_handle_translate_by :: proc(world: ^World, handle: Handle, x: f32 = 0, y: f32 = 0, z: f32 = 0) {
+node_handle_translate_by :: proc(world: ^World, handle: resources.Handle, x: f32 = 0, y: f32 = 0, z: f32 = 0) {
   if node, ok := resources.get(world.nodes, handle); ok {
     geometry.transform_translate_by(&node.transform, x, y, z)
   }
 }
 
-node_handle_translate :: proc(world: ^World, handle: Handle, x: f32 = 0, y: f32 = 0, z: f32 = 0) {
+node_handle_translate :: proc(world: ^World, handle: resources.Handle, x: f32 = 0, y: f32 = 0, z: f32 = 0) {
   if node, ok := resources.get(world.nodes, handle); ok {
     geometry.transform_translate(&node.transform, x, y, z)
   }
@@ -970,7 +968,7 @@ node_handle_rotate_by :: proc {
   node_handle_rotate_by_angle,
 }
 
-node_handle_rotate_by_quaternion :: proc(world: ^World, handle: Handle, q: quaternion128) {
+node_handle_rotate_by_quaternion :: proc(world: ^World, handle: resources.Handle, q: quaternion128) {
   if node, ok := resources.get(world.nodes, handle); ok {
     geometry.transform_rotate_by_quaternion(&node.transform, q)
   }
@@ -978,7 +976,7 @@ node_handle_rotate_by_quaternion :: proc(world: ^World, handle: Handle, q: quate
 
 node_handle_rotate_by_angle :: proc(
   world: ^World,
-  handle: Handle,
+  handle: resources.Handle,
   angle: f32,
   axis: [3]f32 = linalg.VECTOR3F32_Y_AXIS,
 ) {
@@ -992,7 +990,7 @@ node_handle_rotate :: proc {
   node_handle_rotate_angle,
 }
 
-node_handle_rotate_quaternion :: proc(world: ^World, handle: Handle, q: quaternion128) {
+node_handle_rotate_quaternion :: proc(world: ^World, handle: resources.Handle, q: quaternion128) {
   if node, ok := resources.get(world.nodes, handle); ok {
     geometry.transform_rotate_quaternion(&node.transform, q)
   }
@@ -1000,7 +998,7 @@ node_handle_rotate_quaternion :: proc(world: ^World, handle: Handle, q: quaterni
 
 node_handle_rotate_angle :: proc(
   world: ^World,
-  handle: Handle,
+  handle: resources.Handle,
   angle: f32,
   axis: [3]f32 = linalg.VECTOR3F32_Y_AXIS,
 ) {
@@ -1009,25 +1007,25 @@ node_handle_rotate_angle :: proc(
   }
 }
 
-node_handle_scale_xyz_by :: proc(world: ^World, handle: Handle, x: f32 = 1, y: f32 = 1, z: f32 = 1) {
+node_handle_scale_xyz_by :: proc(world: ^World, handle: resources.Handle, x: f32 = 1, y: f32 = 1, z: f32 = 1) {
   if node, ok := resources.get(world.nodes, handle); ok {
     geometry.transform_scale_xyz_by(&node.transform, x, y, z)
   }
 }
 
-node_handle_scale_by :: proc(world: ^World, handle: Handle, s: f32) {
+node_handle_scale_by :: proc(world: ^World, handle: resources.Handle, s: f32) {
   if node, ok := resources.get(world.nodes, handle); ok {
     geometry.transform_scale_by(&node.transform, s)
   }
 }
 
-node_handle_scale_xyz :: proc(world: ^World, handle: Handle, x: f32 = 1, y: f32 = 1, z: f32 = 1) {
+node_handle_scale_xyz :: proc(world: ^World, handle: resources.Handle, x: f32 = 1, y: f32 = 1, z: f32 = 1) {
   if node, ok := resources.get(world.nodes, handle); ok {
     geometry.transform_scale_xyz(&node.transform, x, y, z)
   }
 }
 
-node_handle_scale :: proc(world: ^World, handle: Handle, s: f32) {
+node_handle_scale :: proc(world: ^World, handle: resources.Handle, s: f32) {
   if node, ok := resources.get(world.nodes, handle); ok {
     geometry.transform_scale(&node.transform, s)
   }
@@ -1035,7 +1033,7 @@ node_handle_scale :: proc(world: ^World, handle: Handle, s: f32) {
 
 // Create point light attachment and associated Light resource
 create_point_light_attachment :: proc(
-  node_handle: Handle,
+  node_handle: resources.Handle,
   resources_manager: ^resources.Manager,
   gpu_context: ^gpu.GPUContext,
   color: [4]f32 = {1, 1, 1, 1},
@@ -1057,7 +1055,7 @@ create_point_light_attachment :: proc(
 
 // Create directional light attachment and associated Light resource
 create_directional_light_attachment :: proc(
-  node_handle: Handle,
+  node_handle: resources.Handle,
   resources_manager: ^resources.Manager,
   gpu_context: ^gpu.GPUContext,
   color: [4]f32 = {1, 1, 1, 1},
@@ -1076,7 +1074,7 @@ create_directional_light_attachment :: proc(
 
 // Create spot light attachment and associated Light resource
 create_spot_light_attachment :: proc(
-  node_handle: Handle,
+  node_handle: resources.Handle,
   resources_manager: ^resources.Manager,
   gpu_context: ^gpu.GPUContext,
   color: [4]f32 = {1, 1, 1, 1},

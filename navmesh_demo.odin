@@ -20,8 +20,8 @@ import mu "vendor:microui"
 
 // Demo state - enhanced to match old demo features
 demo_state: struct {
-    nav_mesh_handle:   mjolnir.Handle,
-    nav_context_handle: mjolnir.Handle,
+    nav_mesh_handle:   resources.Handle,
+    nav_context_handle: resources.Handle,
 
     // Pathfinding state
     start_pos:         [3]f32,
@@ -30,17 +30,17 @@ demo_state: struct {
     has_path:          bool,
 
     // Visual markers
-    start_marker_handle: mjolnir.Handle,
-    end_marker_handle:   mjolnir.Handle,
-    path_waypoint_handles: [dynamic]mjolnir.Handle,
+    start_marker_handle: resources.Handle,
+    end_marker_handle:   resources.Handle,
+    path_waypoint_handles: [dynamic]resources.Handle,
 
     // Demo scene nodes
-    ground_handle:     mjolnir.Handle,
-    obstacle_handles:  [dynamic]mjolnir.Handle,
+    ground_handle:     resources.Handle,
+    obstacle_handles:  [dynamic]resources.Handle,
 
     // OBJ file support
-    obj_mesh_handle:   mjolnir.Handle,
-    obj_node_handle:   mjolnir.Handle,
+    obj_mesh_handle:   resources.Handle,
+    obj_node_handle:   resources.Handle,
     obj_mesh_node:     ^world.Node,
     show_original_mesh: bool,
     use_procedural:    bool,
@@ -100,8 +100,8 @@ demo_setup :: proc(engine_ptr: ^mjolnir.Engine) {
     log.info("Navigation mesh demo setup with world integration")
 
     // Initialize dynamic arrays
-    demo_state.obstacle_handles = make([dynamic]Handle, 0)
-    demo_state.path_waypoint_handles = make([dynamic]Handle, 0)
+    demo_state.obstacle_handles = make([dynamic]resources.Handle, 0)
+    demo_state.path_waypoint_handles = make([dynamic]resources.Handle, 0)
 
     // Load geometry based on command line arguments
     if !demo_state.use_procedural && len(os.args) > 2 {
@@ -183,9 +183,8 @@ create_demo_scene :: proc(engine_ptr: ^mjolnir.Engine) {
         emissive_value = 0.02,
     )
 
-    ground_handle, ground_node := spawn(
-        engine_ptr,
-        [3]f32{0, 0, 0},
+    ground_handle, ground_node := world.spawn(
+        &engine_ptr.world,
         world.MeshAttachment{
             handle = ground_mesh_handle,
             material = ground_material_handle,
@@ -239,8 +238,8 @@ create_demo_scene :: proc(engine_ptr: ^mjolnir.Engine) {
         )
 
         // Spawn obstacle node with navigation_obstacle flag set
-        obstacle_handle, obstacle_node := spawn(
-            engine_ptr,
+        obstacle_handle, obstacle_node := world.spawn_at(
+            &engine_ptr.world,
             position,
             world.MeshAttachment{
                 handle = obstacle_mesh_handle,
@@ -287,8 +286,8 @@ create_obj_visualization_mesh :: proc(engine_ptr: ^mjolnir.Engine, obj_file: str
     )
 
     // Spawn the mesh in the scene
-    demo_state.obj_node_handle, demo_state.obj_mesh_node = spawn(
-        engine_ptr,
+    demo_state.obj_node_handle, demo_state.obj_mesh_node = world.spawn_at(
+        &engine_ptr.world,
         [3]f32{0, 0, 0},
         world.MeshAttachment{
             handle = demo_state.obj_mesh_handle,
@@ -335,7 +334,7 @@ build_navigation_mesh_from_world :: proc(engine_ptr: ^mjolnir.Engine) {
         &engine_ptr.world,
         &engine_ptr.resource_manager,
         &engine_ptr.gpu_context,
-        get_navmesh_renderer(engine_ptr),
+        &engine_ptr.render.navigation,
         config,
     )
 
@@ -364,9 +363,9 @@ build_navigation_mesh_from_world :: proc(engine_ptr: ^mjolnir.Engine) {
     log.infof("Navigation context created with handle %v", context_handle)
 
     // Configure the renderer for better visualization
-    navmesh_renderer := get_navmesh_renderer(engine_ptr)
-    navmesh_renderer.enabled = true
-    navmesh_renderer.color_mode = .Random_Colors
+    renderer := &engine_ptr.render.navigation
+    renderer.enabled = true
+    renderer.color_mode = .Random_Colors
 
     log.info("Navigation mesh building and visualization complete")
 }
@@ -415,12 +414,12 @@ find_path :: proc(engine_ptr: ^mjolnir.Engine) {
     }
 }
 
-update_position_marker :: proc(engine_ptr: ^mjolnir.Engine, handle: ^mjolnir.Handle, pos: [3]f32, color: [4]f32) {
+update_position_marker :: proc(engine_ptr: ^mjolnir.Engine, handle: ^resources.Handle, pos: [3]f32, color: [4]f32) {
     using mjolnir, geometry
 
     // Remove old marker if exists
     if handle.generation != 0 {
-        despawn(engine_ptr, handle^)
+        world.despawn(&engine_ptr.world, handle^)
     }
 
     // Create new marker
@@ -440,8 +439,8 @@ update_position_marker :: proc(engine_ptr: ^mjolnir.Engine, handle: ^mjolnir.Han
 
     // Spawn the marker
     node: ^world.Node
-    handle^, node = spawn(
-        engine_ptr,
+    handle^, node = world.spawn_at(
+        &engine_ptr.world,
         pos + [3]f32{0, 0.2, 0}, // Slightly above ground
         world.MeshAttachment{
             handle = marker_mesh_handle,
@@ -463,15 +462,15 @@ visualize_path :: proc(engine_ptr: ^mjolnir.Engine) {
     }
 
     // Use navigation renderer for path visualization
-    navmesh_renderer := get_navmesh_renderer(engine_ptr)
+    renderer := &engine_ptr.render.navigation
     if len(demo_state.current_path) >= 2 {
         log.infof("Updating path renderer with %d points", len(demo_state.current_path))
-        navigation_renderer.update_path(navmesh_renderer, demo_state.current_path[:], {1.0, 0.8, 0.0, 1.0}) // Orange/yellow path
+        navigation_renderer.update_path(renderer, demo_state.current_path[:], {1.0, 0.8, 0.0, 1.0}) // Orange/yellow path
     } else if len(demo_state.current_path) == 1 {
         log.info("Path has only 1 point - need at least 2 points to draw a line")
-        navigation_renderer.clear_path(navmesh_renderer)
+        navigation_renderer.clear_path(renderer)
     } else {
-        navigation_renderer.clear_path(navmesh_renderer)
+        navigation_renderer.clear_path(renderer)
     }
 
     log.infof("Path visualization updated using navigation renderer")
@@ -479,16 +478,14 @@ visualize_path :: proc(engine_ptr: ^mjolnir.Engine) {
 
 clear_path_visualization :: proc(engine_ptr: ^mjolnir.Engine) {
     using mjolnir
-
-    // Remove existing waypoint markers
     for handle in demo_state.path_waypoint_handles {
-        despawn(engine_ptr, handle)
+        world.despawn(&engine_ptr.world, handle)
     }
     clear(&demo_state.path_waypoint_handles)
 
     // Clear path from navigation renderer
-    navmesh_renderer := get_navmesh_renderer(engine_ptr)
-    navigation_renderer.clear_path(navmesh_renderer)
+    renderer := &engine_ptr.render.navigation
+    navigation_renderer.clear_path(renderer)
 }
 
 find_navmesh_point_from_mouse :: proc(engine_ptr: ^mjolnir.Engine, mouse_x, mouse_y: f32) -> (pos: [3]f32, found: bool) {
@@ -675,10 +672,10 @@ demo_render2d :: proc(engine_ptr: ^mjolnir.Engine, ctx: ^mu.Context) {
             mu.label(ctx, "NavMesh Settings:")
 
             // Toggle navmesh visibility
-            navmesh_renderer := get_navmesh_renderer(engine_ptr)
-            enabled := navmesh_renderer.enabled
+            renderer := &engine_ptr.render.navigation
+            enabled := renderer.enabled
             if .CHANGE in mu.checkbox(ctx, "Show NavMesh", &enabled) {
-                navmesh_renderer.enabled = enabled
+                renderer.enabled = enabled
             }
 
             mu.label(ctx, "")
@@ -690,13 +687,13 @@ demo_render2d :: proc(engine_ptr: ^mjolnir.Engine, ctx: ^mu.Context) {
                 "Random Colors",
                 "Region Colors",
             }
-            current_mode := int(navmesh_renderer.color_mode)
+            current_mode := int(renderer.color_mode)
             for name, i in color_mode_names {
                 if i == current_mode {
                     mu.label(ctx, fmt.tprintf("> %s", name))
                 } else {
                     if .SUBMIT in mu.button(ctx, name) {
-                        navmesh_renderer.color_mode = auto_cast i
+                        renderer.color_mode = auto_cast i
                     }
                 }
             }
@@ -796,9 +793,9 @@ demo_key_pressed :: proc(engine_ptr: ^mjolnir.Engine, key, action, mods: int) {
 
     case glfw.KEY_V:
         // Toggle navmesh visibility
-        navmesh_renderer := get_navmesh_renderer(engine_ptr)
-        navmesh_renderer.enabled = !navmesh_renderer.enabled
-        log.infof("NavMesh visibility: %v", navmesh_renderer.enabled)
+        renderer := &engine_ptr.render.navigation
+        renderer.enabled = !renderer.enabled
+        log.infof("NavMesh visibility: %v", renderer.enabled)
 
     case glfw.KEY_C:
         // Clear path
@@ -808,10 +805,10 @@ demo_key_pressed :: proc(engine_ptr: ^mjolnir.Engine, key, action, mods: int) {
 
     case glfw.KEY_D:
         // Cycle through color modes
-        navmesh_renderer := get_navmesh_renderer(engine_ptr)
-        current_mode := int(navmesh_renderer.color_mode)
+        renderer := &engine_ptr.render.navigation
+        current_mode := int(renderer.color_mode)
         current_mode = (current_mode + 1) % 5
-        navmesh_renderer.color_mode = auto_cast current_mode
+        renderer.color_mode = auto_cast current_mode
         mode_names := [5]string{"Area Colors", "Uniform", "Height Based", "Random Colors", "Region Colors"}
         log.infof("NavMesh color mode changed to: %s", mode_names[current_mode])
 

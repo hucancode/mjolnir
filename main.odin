@@ -19,16 +19,16 @@ import vk "vendor:vulkan"
 LIGHT_COUNT :: 5
 ALL_SPOT_LIGHT :: false
 ALL_POINT_LIGHT :: true
-light_handles: [LIGHT_COUNT]mjolnir.Handle
-light_cube_handles: [LIGHT_COUNT]mjolnir.Handle
-brick_wall_mat_handle: mjolnir.Handle
-hammer_handle: mjolnir.Handle
-forcefield_handle: mjolnir.Handle
+light_handles: [LIGHT_COUNT]resources.Handle
+light_cube_handles: [LIGHT_COUNT]resources.Handle
+brick_wall_mat_handle: resources.Handle
+hammer_handle: resources.Handle
+forcefield_handle: resources.Handle
 
 // Portal render target and related data
-portal_render_target_handle: mjolnir.Handle
-portal_material_handle: mjolnir.Handle
-portal_quad_handle: mjolnir.Handle
+portal_render_target_handle: resources.Handle
+portal_material_handle: resources.Handle
+portal_quad_handle: resources.Handle
 
 // Camera controllers
 orbit_controller: geometry.CameraController
@@ -100,7 +100,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
             metallic_value = f32(x - 1) / f32(nx - 1),
             roughness_value = f32(z - 1) / f32(nz - 1),
           )
-          node: ^Node
+          node: ^world.Node
           if x % 3 == 0 {
             _, node = world.spawn(
               &engine.world,
@@ -113,7 +113,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
           } else if x % 3 == 1 {
             _, node = world.spawn(
               &engine.world,
-              MeshAttachment {
+              world.MeshAttachment {
                 handle = cone_mesh_handle,
                 material = mat_handle,
                 cast_shadow = true,
@@ -122,7 +122,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
           } else {
             _, node = world.spawn(
               &engine.world,
-              MeshAttachment {
+              world.MeshAttachment {
                 handle = sphere_mesh_handle,
                 material = mat_handle,
                 cast_shadow = true,
@@ -156,7 +156,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     size: f32 = 15.0
     _, ground_node := world.spawn(
       &engine.world,
-      MeshAttachment {
+      world.MeshAttachment {
         handle = ground_mesh_handle,
         material = brick_wall_mat_handle,
       },
@@ -165,7 +165,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     // Left wall
     _, left_wall := world.spawn(
       &engine.world,
-      MeshAttachment {
+      world.MeshAttachment {
         handle = ground_mesh_handle,
         material = brick_wall_mat_handle,
       },
@@ -176,7 +176,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     // Right wall
     _, right_wall := world.spawn(
       &engine.world,
-      MeshAttachment {
+      world.MeshAttachment {
         handle = ground_mesh_handle,
         material = brick_wall_mat_handle,
       },
@@ -187,7 +187,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     // Back wall
     _, back_wall := world.spawn(
       &engine.world,
-      MeshAttachment {
+      world.MeshAttachment {
         handle = ground_mesh_handle,
         material = brick_wall_mat_handle,
       },
@@ -198,7 +198,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     // // Ceiling
     _, ceiling := world.spawn(
       &engine.world,
-      MeshAttachment {
+      world.MeshAttachment {
         handle = ground_mesh_handle,
         material = brick_wall_mat_handle,
       },
@@ -257,7 +257,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
         math.sin(f32(i)),
         1.0,
       }
-      light: ^Node
+      light: ^world.Node
       should_make_spot_light := i % 2 != 0
       if ALL_SPOT_LIGHT {
         should_make_spot_light = true
@@ -287,11 +287,11 @@ setup :: proc(engine: ^mjolnir.Engine) {
         light.attachment = attachment
       }
       world.translate(light, 6, 2, -1)
-      cube_node: ^Node
+      cube_node: ^world.Node
       light_cube_handles[i], cube_node = world.spawn_child(
         &engine.world,
         light_handles[i],
-        MeshAttachment {
+        world.MeshAttachment {
           handle = cube_mesh_handle,
           material = plain_material_handle,
           cast_shadow = false,
@@ -299,13 +299,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
       )
       world.scale(cube_node, 0.1)
     }
-    // spawn(
-    //   &engine.world,
-    //   DirectionalLightAttachment {
-    //     color = {0.3, 0.3, 0.3, 1.0},
-    //     cast_shadow = true,
-    //   },
-    // )
   }
   when false {
     log.info("Setting up bloom...")
@@ -428,7 +421,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     _, forcefield_visual := world.spawn_child(
       &engine.world,
       forcefield_handle,
-      MeshAttachment {
+      world.MeshAttachment {
         handle = sphere_mesh_handle,
         material = goldstar_material_handle,
         cast_shadow = false,
@@ -505,7 +498,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     // Create portal quad mesh and spawn it
     _, portal_node := world.spawn(
       &engine.world,
-      MeshAttachment {
+      world.MeshAttachment {
         handle = resources.create_mesh_handle(
           &engine.gpu_context,
           &engine.resource_manager,

@@ -43,56 +43,6 @@ MAX_TEXTURES :: 90
 MAX_CUBE_TEXTURES :: 20
 USE_PARALLEL_UPDATE :: true // Set to false to disable threading for debugging
 
-Handle :: resources.Handle
-
-// Re-export world types for convenience
-Node :: world.Node
-LightAttachment :: world.LightAttachment
-MeshAttachment :: world.MeshAttachment
-ForceFieldAttachment :: world.ForceFieldAttachment
-EmitterAttachment :: world.EmitterAttachment
-
-// Legacy wrapper functions for backwards compatibility
-spawn :: proc {
-  spawn_world,
-  spawn_world_at,
-  spawn_world_child,
-}
-
-spawn_world :: proc(
-  engine: ^Engine,
-  attachment: world.NodeAttachment = nil,
-) -> (handle: Handle, node: ^Node) {
-  return world.spawn_node(&engine.world, {0, 0, 0}, attachment, &engine.resource_manager)
-}
-
-spawn_world_at :: proc(
-  engine: ^Engine,
-  position: [3]f32,
-  attachment: world.NodeAttachment = nil,
-) -> (handle: Handle, node: ^Node) {
-  return world.spawn_node(&engine.world, position, attachment, &engine.resource_manager)
-}
-
-spawn_world_child :: proc(
-  engine: ^Engine,
-  parent: Handle,
-  attachment: world.NodeAttachment = nil,
-) -> (handle: Handle, node: ^Node) {
-  return world.spawn_child_node(&engine.world, parent, {0, 0, 0}, attachment, &engine.resource_manager)
-}
-
-despawn :: proc(engine: ^Engine, handle: Handle) -> bool {
-  return world.destroy_node_handle(&engine.world, handle)
-}
-
-// Navigation mesh convenience functions
-navmesh_load_data :: navmesh_renderer.load_navmesh_data
-
-get_navmesh_renderer :: proc(engine: ^Engine) -> ^navmesh_renderer.Renderer {
-  return &engine.render.navigation
-}
-
 g_context: runtime.Context
 
 SetupProc :: #type proc(engine: ^Engine)
@@ -119,8 +69,8 @@ PointLightData :: struct {
   color:          [4]f32,
   position:       [4]f32,
   radius:         f32,
-  shadow_map:     Handle,
-  render_targets: [6]Handle,
+  shadow_map:     resources.Handle,
+  render_targets: [6]resources.Handle,
 }
 
 SpotLightData :: struct {
@@ -132,8 +82,8 @@ SpotLightData :: struct {
   direction:     [4]f32,
   radius:        f32,
   angle:         f32,
-  shadow_map:    Handle,
-  render_target: Handle,
+  shadow_map:    resources.Handle,
+  render_target: resources.Handle,
 }
 
 DirectionalLightData :: struct {
@@ -178,7 +128,7 @@ Engine :: struct {
   command_buffers:             [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
   cursor_pos:                  [2]i32,
   // Deferred cleanup for thread safety
-  pending_node_deletions:      [dynamic]Handle,
+  pending_node_deletions:      [dynamic]resources.Handle,
   // Frame synchronization for parallel update/render
   frame_fence:                 vk.Fence,
   update_thread:               Maybe(^thread.Thread),
@@ -232,7 +182,7 @@ init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
   gpu.swapchain_init(&self.swapchain, &self.gpu_context, self.window) or_return
 
   // Initialize deferred cleanup
-  self.pending_node_deletions = make([dynamic]Handle, 0)
+  self.pending_node_deletions = make([dynamic]resources.Handle, 0)
 
   // Create fence for frame synchronization
   vk.CreateFence(
@@ -449,7 +399,7 @@ update_skeletal_animations :: proc(self: ^Engine, delta_time: f32) {
 
   for &entry in self.world.nodes.entries do if entry.active {
     node := &entry.item
-    mesh_attachment, has_mesh := node.attachment.(MeshAttachment)
+    mesh_attachment, has_mesh := node.attachment.(world.MeshAttachment)
     if !has_mesh do continue
 
     skinning, has_skin := mesh_attachment.skinning.?;
@@ -772,7 +722,7 @@ run :: proc(self: ^Engine, width, height: u32, title: string) {
   }
   frame := 0
   for !glfw.WindowShouldClose(self.window) {
-    // Handle input and GLFW events on main thread, GLFW cannot run on subthreads
+    // resources.Handle input and GLFW events on main thread, GLFW cannot run on subthreads
     update_input(self)
     when !USE_PARALLEL_UPDATE {
       // Single threaded mode - run update directly
@@ -818,13 +768,13 @@ update_thread_proc :: proc(thread: ^thread.Thread) {
 }
 
 // Deferred cleanup functions for thread safety
-queue_node_deletion :: proc(engine: ^Engine, handle: Handle) {
+queue_node_deletion :: proc(engine: ^Engine, handle: resources.Handle) {
   append(&engine.pending_node_deletions, handle)
 }
 
 process_pending_deletions :: proc(engine: ^Engine) {
   for handle in engine.pending_node_deletions {
-    world.destroy_node_handle(&engine.world, handle)
+    world.despawn(&engine.world, handle)
   }
   clear(&engine.pending_node_deletions)
   // Actually cleanup the nodes that were marked for deletion
