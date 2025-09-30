@@ -282,10 +282,14 @@ init :: proc(
   // Initialize environment resources
   environment_map: ^gpu.ImageBuffer
   self.environment_map, environment_map =
-    resources.create_hdr_texture_from_path_with_mips(
+    resources.create_texture_from_path(
       gpu_context,
       resources_manager,
       "assets/Cannon_Exterior.hdr",
+      .R32G32B32A32_SFLOAT,
+      true,
+      {.SAMPLED},
+      true,
     ) or_return
   self.environment_max_lod = 8.0 // default fallback
   if environment_map != nil {

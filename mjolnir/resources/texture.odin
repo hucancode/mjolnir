@@ -101,82 +101,99 @@ create_texture_from_path :: proc(
   gpu_context: ^gpu.GPUContext,
   manager: ^Manager,
   path: string,
+  format: vk.Format = .R8G8B8A8_SRGB,
+  generate_mips := false,
+  usage: vk.ImageUsageFlags = {.SAMPLED},
+  is_hdr := false,
 ) -> (
   handle: Handle,
   texture: ^gpu.ImageBuffer,
   ret: vk.Result,
 ) {
   handle, texture = alloc(&manager.image_2d_buffers)
-  width, height, c_in_file: c.int
   path_cstr := strings.clone_to_cstring(path)
-  pixels := stbi.load(path_cstr, &width, &height, &c_in_file, 4)
-  if pixels == nil {
-    log.errorf(
-      "Failed to load texture from path '%s': %s\n",
-      path,
-      stbi.failure_reason(),
+  width, height, c_in_file: c.int
+
+  if is_hdr {
+    actual_channels: c.int = 4
+    float_pixels := stbi.loadf(
+      path_cstr,
+      &width,
+      &height,
+      &c_in_file,
+      actual_channels,
     )
-    ret = .ERROR_UNKNOWN
-    return handle, texture, ret
+    if float_pixels == nil {
+      log.errorf(
+        "Failed to load HDR texture from path '%s': %s\n",
+        path,
+        stbi.failure_reason(),
+      )
+      ret = .ERROR_UNKNOWN
+      return handle, texture, ret
+    }
+    defer stbi.image_free(float_pixels)
+    num_floats := int(width * height * actual_channels)
+
+    if generate_mips {
+      texture^ = create_image_buffer_with_mips(
+        gpu_context,
+        float_pixels,
+        size_of(f32) * vk.DeviceSize(num_floats),
+        format,
+        u32(width),
+        u32(height),
+      ) or_return
+    } else {
+      texture^ = gpu.create_image_buffer(
+        gpu_context,
+        float_pixels,
+        size_of(f32) * vk.DeviceSize(num_floats),
+        format,
+        u32(width),
+        u32(height),
+      ) or_return
+    }
+  } else {
+    pixels := stbi.load(path_cstr, &width, &height, &c_in_file, 4)
+    if pixels == nil {
+      log.errorf(
+        "Failed to load texture from path '%s': %s\n",
+        path,
+        stbi.failure_reason(),
+      )
+      ret = .ERROR_UNKNOWN
+      return handle, texture, ret
+    }
+    defer stbi.image_free(pixels)
+    num_pixels := int(width * height * 4)
+
+    if generate_mips {
+      texture^ = create_image_buffer_with_mips(
+        gpu_context,
+        pixels,
+        size_of(u8) * vk.DeviceSize(num_pixels),
+        format,
+        u32(width),
+        u32(height),
+      ) or_return
+    } else {
+      texture^ = gpu.create_image_buffer(
+        gpu_context,
+        pixels,
+        size_of(u8) * vk.DeviceSize(num_pixels),
+        format,
+        u32(width),
+        u32(height),
+      ) or_return
+    }
   }
-  defer stbi.image_free(pixels)
-  num_pixels := int(width * height * 4)
-  texture^ = gpu.create_image_buffer(
-    gpu_context,
-    pixels,
-    size_of(u8) * vk.DeviceSize(num_pixels),
-    .R8G8B8A8_SRGB,
-    u32(width),
-    u32(height),
-  ) or_return
+
   set_texture_2d_descriptor(gpu_context, manager, handle.index, texture.view)
   ret = .SUCCESS
   return handle, texture, ret
 }
 
-create_hdr_texture_from_path :: proc(
-  gpu_context: ^gpu.GPUContext,
-  manager: ^Manager,
-  path: string,
-) -> (
-  handle: Handle,
-  texture: ^gpu.ImageBuffer,
-  ret: vk.Result,
-) {
-  handle, texture = alloc(&manager.image_2d_buffers)
-  path_cstr := strings.clone_to_cstring(path)
-  width, height, c_in_file: c.int
-  actual_channels: c.int = 4 // we always want RGBA for HDR
-  float_pixels := stbi.loadf(
-    path_cstr,
-    &width,
-    &height,
-    &c_in_file,
-    actual_channels,
-  )
-  if float_pixels == nil {
-    log.errorf(
-      "Failed to load HDR texture from path '%s': %s\n",
-      path,
-      stbi.failure_reason(),
-    )
-    ret = .ERROR_UNKNOWN
-    return handle, texture, ret
-  }
-  defer stbi.image_free(float_pixels)
-  num_floats := int(width * height * actual_channels)
-  texture^ = gpu.create_image_buffer(
-    gpu_context,
-    float_pixels,
-    size_of(f32) * vk.DeviceSize(num_floats),
-    .R32G32B32A32_SFLOAT,
-    u32(width),
-    u32(height),
-  ) or_return
-  set_texture_2d_descriptor(gpu_context, manager, handle.index, texture.view)
-  ret = .SUCCESS
-  return handle, texture, ret
-}
 
 create_texture_from_pixels :: proc(
   gpu_context: ^gpu.GPUContext,
@@ -184,23 +201,36 @@ create_texture_from_pixels :: proc(
   pixels: []u8,
   width: int,
   height: int,
-  channel: int,
   format: vk.Format = .R8G8B8A8_SRGB,
+  generate_mips := false,
 ) -> (
   handle: Handle,
   texture: ^gpu.ImageBuffer,
   ret: vk.Result,
 ) {
   handle, texture = alloc(&manager.image_2d_buffers)
-  texture^ = gpu.create_image_buffer(
-    gpu_context,
-    raw_data(pixels),
-    size_of(u8) * vk.DeviceSize(len(pixels)),
-    format,
-    u32(width),
-    u32(height),
-  ) or_return
-  log.infof(
+
+  if generate_mips {
+    texture^ = create_image_buffer_with_mips(
+      gpu_context,
+      raw_data(pixels),
+      size_of(u8) * vk.DeviceSize(len(pixels)),
+      format,
+      u32(width),
+      u32(height),
+    ) or_return
+  } else {
+    texture^ = gpu.create_image_buffer(
+      gpu_context,
+      raw_data(pixels),
+      size_of(u8) * vk.DeviceSize(len(pixels)),
+      format,
+      u32(width),
+      u32(height),
+    ) or_return
+  }
+
+  log.debugf(
     "created texture %d x %d -> id %d",
     texture.width,
     texture.height,
@@ -215,6 +245,8 @@ create_texture_from_data :: proc(
   gpu_context: ^gpu.GPUContext,
   manager: ^Manager,
   data: []u8,
+  format: vk.Format = .R8G8B8A8_SRGB,
+  generate_mips := false,
 ) -> (
   handle: Handle,
   texture: ^gpu.ImageBuffer,
@@ -236,25 +268,30 @@ create_texture_from_data :: proc(
     ret = .ERROR_UNKNOWN
     return
   }
+  defer stbi.image_free(pixels)
   bytes_count := int(width * height * actual_channels)
-  format: vk.Format
-  // for simplicity, we assume the data is in sRGB format
-  if actual_channels == 4 {
-    format = vk.Format.R8G8B8A8_SRGB
-  } else if actual_channels == 3 {
-    format = vk.Format.R8G8B8_SRGB
-  } else if actual_channels == 1 {
-    format = vk.Format.R8_SRGB
+
+  if generate_mips {
+    texture^ = create_image_buffer_with_mips(
+      gpu_context,
+      pixels,
+      size_of(u8) * vk.DeviceSize(bytes_count),
+      format,
+      u32(width),
+      u32(height),
+    ) or_return
+  } else {
+    texture^ = gpu.create_image_buffer(
+      gpu_context,
+      pixels,
+      size_of(u8) * vk.DeviceSize(bytes_count),
+      format,
+      u32(width),
+      u32(height),
+    ) or_return
   }
-  texture^ = gpu.create_image_buffer(
-    gpu_context,
-    pixels,
-    size_of(u8) * vk.DeviceSize(bytes_count),
-    format,
-    u32(width),
-    u32(height),
-  ) or_return
-  log.infof(
+
+  log.debugf(
     "created texture %d x %d -> id %d",
     texture.width,
     texture.height,
@@ -324,50 +361,6 @@ create_image_buffer_with_mips :: proc(
   return
 }
 
-// Create HDR texture with mip maps
-create_hdr_texture_from_path_with_mips :: proc(
-  gpu_context: ^gpu.GPUContext,
-  manager: ^Manager,
-  path: string,
-) -> (
-  handle: Handle,
-  texture: ^gpu.ImageBuffer,
-  ret: vk.Result,
-) {
-  handle, texture = alloc(&manager.image_2d_buffers)
-  path_cstr := strings.clone_to_cstring(path)
-  width, height, c_in_file: c.int
-  actual_channels: c.int = 4 // we always want RGBA for HDR
-  float_pixels := stbi.loadf(
-    path_cstr,
-    &width,
-    &height,
-    &c_in_file,
-    actual_channels,
-  )
-  if float_pixels == nil {
-    log.errorf(
-      "Failed to load HDR texture from path '%s': %s\n",
-      path,
-      stbi.failure_reason(),
-    )
-    ret = .ERROR_UNKNOWN
-    return handle, texture, ret
-  }
-  defer stbi.image_free(float_pixels)
-  num_floats := int(width * height * actual_channels)
-  texture^ = create_image_buffer_with_mips(
-    gpu_context,
-    float_pixels,
-    size_of(f32) * vk.DeviceSize(num_floats),
-    .R32G32B32A32_SFLOAT,
-    u32(width),
-    u32(height),
-  ) or_return
-  set_texture_2d_descriptor(gpu_context, manager, handle.index, texture.view)
-  ret = .SUCCESS
-  return handle, texture, ret
-}
 
 // Handle-only variants for texture creation procedures
 create_texture_handle :: proc {
@@ -402,11 +395,15 @@ create_texture_from_path_handle :: proc(
   gpu_context: ^gpu.GPUContext,
   manager: ^Manager,
   path: string,
+  format: vk.Format = .R8G8B8A8_SRGB,
+  generate_mips := false,
+  usage: vk.ImageUsageFlags = {.SAMPLED},
+  is_hdr := false,
 ) -> (
   handle: Handle,
   ok: bool,
 ) #optional_ok {
-  h, _, ret := create_texture_from_path(gpu_context, manager, path)
+  h, _, ret := create_texture_from_path(gpu_context, manager, path, format, generate_mips, usage, is_hdr)
   return h, ret == .SUCCESS
 }
 
@@ -414,11 +411,13 @@ create_texture_from_data_handle :: proc(
   gpu_context: ^gpu.GPUContext,
   manager: ^Manager,
   data: []u8,
+  format: vk.Format = .R8G8B8A8_SRGB,
+  generate_mips := false,
 ) -> (
   handle: Handle,
   ok: bool,
 ) #optional_ok {
-  h, _, ret := create_texture_from_data(gpu_context, manager, data)
+  h, _, ret := create_texture_from_data(gpu_context, manager, data, format, generate_mips)
   return h, ret == .SUCCESS
 }
 
@@ -428,8 +427,8 @@ create_texture_from_pixels_handle :: proc(
   pixels: []u8,
   width: int,
   height: int,
-  channel: int,
   format: vk.Format = .R8G8B8A8_SRGB,
+  generate_mips := false,
 ) -> (
   handle: Handle,
   ok: bool,
@@ -440,8 +439,264 @@ create_texture_from_pixels_handle :: proc(
     pixels,
     width,
     height,
-    channel,
     format,
+    generate_mips,
   )
   return h, ret == .SUCCESS
+}
+
+// Texture update operations
+update_texture :: proc(
+  gpu_context: ^gpu.GPUContext,
+  texture: ^gpu.ImageBuffer,
+  pixels: rawptr,
+  size: vk.DeviceSize,
+  x: u32 = 0,
+  y: u32 = 0,
+  width: u32 = 0,
+  height: u32 = 0,
+  old_layout: vk.ImageLayout = .SHADER_READ_ONLY_OPTIMAL,
+  new_layout: vk.ImageLayout = .SHADER_READ_ONLY_OPTIMAL,
+) -> vk.Result {
+  w := width if width > 0 else texture.width
+  h := height if height > 0 else texture.height
+
+  staging := gpu.create_host_visible_buffer(
+    gpu_context,
+    u8,
+    int(size),
+    {.TRANSFER_SRC},
+    pixels,
+  ) or_return
+  defer gpu.data_buffer_destroy(gpu_context.device, &staging)
+
+  cmd_buffer := gpu.begin_single_time_command(gpu_context) or_return
+
+  gpu.transition_image(
+    cmd_buffer,
+    texture.image,
+    old_layout,
+    .TRANSFER_DST_OPTIMAL,
+    {.COLOR},
+    {.FRAGMENT_SHADER},
+    {.TRANSFER},
+    {.SHADER_READ},
+    {.TRANSFER_WRITE},
+  )
+
+  region := vk.BufferImageCopy {
+    bufferOffset = 0,
+    bufferRowLength = 0,
+    bufferImageHeight = 0,
+    imageSubresource = {
+      aspectMask = {.COLOR},
+      mipLevel = 0,
+      baseArrayLayer = 0,
+      layerCount = 1,
+    },
+    imageOffset = {i32(x), i32(y), 0},
+    imageExtent = {w, h, 1},
+  }
+
+  vk.CmdCopyBufferToImage(
+    cmd_buffer,
+    staging.buffer,
+    texture.image,
+    .TRANSFER_DST_OPTIMAL,
+    1,
+    &region,
+  )
+
+  gpu.transition_image(
+    cmd_buffer,
+    texture.image,
+    .TRANSFER_DST_OPTIMAL,
+    new_layout,
+    {.COLOR},
+    {.TRANSFER},
+    {.FRAGMENT_SHADER},
+    {.TRANSFER_WRITE},
+    {.SHADER_READ},
+  )
+
+  return gpu.end_single_time_command(gpu_context, &cmd_buffer)
+}
+
+copy_texture :: proc(
+  gpu_context: ^gpu.GPUContext,
+  src, dst: ^gpu.ImageBuffer,
+  src_x: u32 = 0,
+  src_y: u32 = 0,
+  dst_x: u32 = 0,
+  dst_y: u32 = 0,
+  width: u32 = 0,
+  height: u32 = 0,
+  src_old_layout: vk.ImageLayout = .SHADER_READ_ONLY_OPTIMAL,
+  src_new_layout: vk.ImageLayout = .SHADER_READ_ONLY_OPTIMAL,
+  dst_old_layout: vk.ImageLayout = .SHADER_READ_ONLY_OPTIMAL,
+  dst_new_layout: vk.ImageLayout = .SHADER_READ_ONLY_OPTIMAL,
+) -> vk.Result {
+  w := width if width > 0 else min(src.width, dst.width)
+  h := height if height > 0 else min(src.height, dst.height)
+
+  cmd_buffer := gpu.begin_single_time_command(gpu_context) or_return
+
+  gpu.transition_image(
+    cmd_buffer,
+    src.image,
+    src_old_layout,
+    .TRANSFER_SRC_OPTIMAL,
+    {.COLOR},
+    {.FRAGMENT_SHADER},
+    {.TRANSFER},
+    {.SHADER_READ},
+    {.TRANSFER_READ},
+  )
+
+  gpu.transition_image(
+    cmd_buffer,
+    dst.image,
+    dst_old_layout,
+    .TRANSFER_DST_OPTIMAL,
+    {.COLOR},
+    {.FRAGMENT_SHADER},
+    {.TRANSFER},
+    {.SHADER_READ},
+    {.TRANSFER_WRITE},
+  )
+
+  region := vk.ImageCopy {
+    srcSubresource = {
+      aspectMask = {.COLOR},
+      mipLevel = 0,
+      baseArrayLayer = 0,
+      layerCount = 1,
+    },
+    srcOffset = {i32(src_x), i32(src_y), 0},
+    dstSubresource = {
+      aspectMask = {.COLOR},
+      mipLevel = 0,
+      baseArrayLayer = 0,
+      layerCount = 1,
+    },
+    dstOffset = {i32(dst_x), i32(dst_y), 0},
+    extent = {w, h, 1},
+  }
+
+  vk.CmdCopyImage(
+    cmd_buffer,
+    src.image,
+    .TRANSFER_SRC_OPTIMAL,
+    dst.image,
+    .TRANSFER_DST_OPTIMAL,
+    1,
+    &region,
+  )
+
+  gpu.transition_image(
+    cmd_buffer,
+    src.image,
+    .TRANSFER_SRC_OPTIMAL,
+    src_new_layout,
+    {.COLOR},
+    {.TRANSFER},
+    {.FRAGMENT_SHADER},
+    {.TRANSFER_READ},
+    {.SHADER_READ},
+  )
+
+  gpu.transition_image(
+    cmd_buffer,
+    dst.image,
+    .TRANSFER_DST_OPTIMAL,
+    dst_new_layout,
+    {.COLOR},
+    {.TRANSFER},
+    {.FRAGMENT_SHADER},
+    {.TRANSFER_WRITE},
+    {.SHADER_READ},
+  )
+
+  return gpu.end_single_time_command(gpu_context, &cmd_buffer)
+}
+
+// Convenience texture generators
+create_solid_color_texture :: proc(
+  gpu_context: ^gpu.GPUContext,
+  manager: ^Manager,
+  color: [4]u8,
+  width: u32 = 1,
+  height: u32 = 1,
+) -> (
+  handle: Handle,
+  texture: ^gpu.ImageBuffer,
+  ret: vk.Result,
+) {
+  pixel_count := int(width * height)
+  pixels := make([]u8, pixel_count * 4)
+  defer delete(pixels)
+
+  for i in 0..<pixel_count {
+    pixels[i*4+0] = color[0]
+    pixels[i*4+1] = color[1]
+    pixels[i*4+2] = color[2]
+    pixels[i*4+3] = color[3]
+  }
+
+  return create_texture_from_pixels(
+    gpu_context,
+    manager,
+    pixels,
+    int(width),
+    int(height),
+  )
+}
+
+create_checkerboard_texture :: proc(
+  gpu_context: ^gpu.GPUContext,
+  manager: ^Manager,
+  color_a: [4]u8 = {255, 255, 255, 255},
+  color_b: [4]u8 = {0, 0, 0, 255},
+  size: u32 = 64,
+  checker_size: u32 = 8,
+) -> (
+  handle: Handle,
+  texture: ^gpu.ImageBuffer,
+  ret: vk.Result,
+) {
+  pixel_count := int(size * size)
+  pixels := make([]u8, pixel_count * 4)
+  defer delete(pixels)
+
+  for y in 0..<size {
+    for x in 0..<size {
+      checker_x := (x / checker_size) % 2
+      checker_y := (y / checker_size) % 2
+      use_a := (checker_x == checker_y)
+      color := color_a if use_a else color_b
+
+      idx := int(y * size + x) * 4
+      pixels[idx+0] = color[0]
+      pixels[idx+1] = color[1]
+      pixels[idx+2] = color[2]
+      pixels[idx+3] = color[3]
+    }
+  }
+
+  return create_texture_from_pixels(
+    gpu_context,
+    manager,
+    pixels,
+    int(size),
+    int(size),
+  )
+}
+
+// Texture metadata queries
+get_texture_size :: proc(texture: ^gpu.ImageBuffer) -> (width: u32, height: u32) {
+  return texture.width, texture.height
+}
+
+get_texture_format :: proc(texture: ^gpu.ImageBuffer) -> vk.Format {
+  return texture.format
 }

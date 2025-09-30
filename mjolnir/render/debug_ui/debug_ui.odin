@@ -259,7 +259,6 @@ init :: proc(
     mu.default_atlas_alpha[:],
     mu.DEFAULT_ATLAS_WIDTH,
     mu.DEFAULT_ATLAS_HEIGHT,
-    1,
     .R8_UNORM,
   ) or_return
   log.infof("init UI vertex buffer...")
