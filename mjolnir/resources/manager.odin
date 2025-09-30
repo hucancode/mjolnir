@@ -1698,18 +1698,6 @@ material_write_to_gpu :: proc(
   return .SUCCESS
 }
 
-sync_material_gpu_data :: proc(
-  manager: ^Manager,
-  handle: Handle,
-) -> vk.Result {
-  mat, ok := get(manager.materials, handle)
-  if !ok {
-    log.errorf("Invalid material handle %v", handle)
-    return .ERROR_UNKNOWN
-  }
-  return material_write_to_gpu(manager, handle, mat)
-}
-
 create_material :: proc(
   manager: ^Manager,
   features: ShaderFeatureSet = {},

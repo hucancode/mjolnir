@@ -677,11 +677,5 @@ custom_render :: proc(
   )
   if !ok do return
   portal_mat.albedo = resources.get_albedo_texture(portal_rt, engine.frame_index)
-  sync_result := resources.sync_material_gpu_data(
-    &engine.resource_manager,
-    portal_material_handle,
-  )
-  if sync_result != vk.Result.SUCCESS {
-    log.error("Failed to sync portal material GPU data", sync_result)
-  }
+  resources.material_write_to_gpu(&engine.resource_manager, portal_material_handle, portal_mat)
 }
