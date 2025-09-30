@@ -247,6 +247,29 @@ setup :: proc(engine: ^mjolnir.Engine) {
         world.play_animation(&engine.world, &engine.resource_manager, armature_ptr.children[i], "idle")
       }
       world.translate(armature_ptr, 0, 0, 1)
+
+      // Attach a cube to the hand.L bone
+      for child_handle in armature_ptr.children {
+        child_node := world.get_node(&engine.world, child_handle)
+        if child_node == nil do continue
+
+        if mesh_attachment, has_mesh := child_node.attachment.(world.MeshAttachment); has_mesh {
+          if _, has_skin := mesh_attachment.skinning.?; has_skin {
+            _, cube_node := world.spawn_child(
+              &engine.world,
+              child_handle,
+              world.MeshAttachment {
+                handle = cube_mesh_handle,
+                material = plain_material_handle,
+                cast_shadow = true,
+              },
+            )
+            cube_node.bone_socket = "hand.L"
+            world.scale(cube_node, 0.1)
+            break
+          }
+        }
+      }
     }
   }
   when true {

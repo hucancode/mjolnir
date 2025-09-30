@@ -64,6 +64,17 @@ mesh_destroy :: proc(
   delete(skin.bones)
 }
 
+find_bone_by_name :: proc(mesh: ^Mesh, name: string) -> (index: u32, ok: bool) #optional_ok {
+  skin, has_skin := &mesh.skinning.?
+  if !has_skin do return
+  for bone, i in skin.bones {
+    if bone.name == name {
+      return u32(i), true
+    }
+  }
+  return
+}
+
 mesh_init :: proc(
   self: ^Mesh,
   gpu_context: ^gpu.GPUContext,
