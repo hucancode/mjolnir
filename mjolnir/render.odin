@@ -7,6 +7,7 @@ import "render/particles"
 import "render/post_process"
 import "render/shadow"
 import "render/targets"
+import "render/text"
 import "render/transparency"
 import "render/debug_ui"
 import "core:log"
@@ -24,6 +25,7 @@ Renderer :: struct {
   transparency:  transparency.Renderer,
   particles:     particles.Renderer,
   post_process:  post_process.Renderer,
+  text:          text.Renderer,
   ui:            debug_ui.Renderer,
   navigation:    navigation_renderer.Renderer,
   targets:       targets.Manager,
@@ -71,6 +73,14 @@ renderer_init :: proc(
     swapchain_extent.height,
     resources_manager,
   ) or_return
+  text.init(
+    &self.text,
+    gpu_context,
+    swapchain_format,
+    swapchain_extent.width,
+    swapchain_extent.height,
+    resources_manager,
+  ) or_return
   debug_ui.init(
     &self.ui,
     gpu_context,
@@ -92,6 +102,7 @@ renderer_shutdown :: proc(
   resources_manager: ^resources.Manager,
 ) {
   debug_ui.shutdown(&self.ui, device)
+  text.shutdown(&self.text, device)
   navigation_renderer.shutdown(&self.navigation, device, command_pool)
   post_process.shutdown(&self.post_process, device, command_pool, resources_manager)
   particles.shutdown(&self.particles, device, command_pool)
@@ -125,6 +136,7 @@ resize :: proc(
     color_format,
     resources_manager,
   ) or_return
+  text.recreate_images(&self.text, extent.width, extent.height) or_return
   debug_ui.recreate_images(
     &self.ui,
     color_format,
