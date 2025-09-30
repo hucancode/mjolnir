@@ -152,7 +152,7 @@ init :: proc(
   init_emitter_buffer(gpu_context, manager) or_return
   init_forcefield_buffer(gpu_context, manager) or_return
   init_lights_buffer(gpu_context, manager) or_return
-  init_bindless_buffers(gpu_context, manager) or_return
+  init_vertex_index_buffers(gpu_context, manager) or_return
   // Texture + samplers descriptor set
   textures_bindings := [?]vk.DescriptorSetLayoutBinding {
     {
@@ -343,7 +343,7 @@ shutdown :: proc(
   destroy_node_data_buffer(gpu_context, manager)
   destroy_mesh_data_buffer(gpu_context, manager)
   destroy_vertex_skinning_buffer(gpu_context, manager)
-  destroy_bindless_buffers(gpu_context, manager)
+  destroy_vertex_index_buffers(gpu_context, manager)
   vk.DestroyPipelineLayout(
     gpu_context.device,
     manager.geometry_pipeline_layout,
@@ -1464,7 +1464,7 @@ INDEX_SLAB_CONFIG :: [MAX_SLAB_CLASSES]struct {
   {block_size = 2097152, block_count = 4}, // Enormous index counts: 8,388,608 indices
 }
 
-init_bindless_buffers :: proc(
+init_vertex_index_buffers :: proc(
   gpu_context: ^gpu.GPUContext,
   manager: ^Manager,
 ) -> vk.Result {
@@ -1490,7 +1490,7 @@ init_bindless_buffers :: proc(
   return .SUCCESS
 }
 
-destroy_bindless_buffers :: proc(
+destroy_vertex_index_buffers :: proc(
   gpu_context: ^gpu.GPUContext,
   manager: ^Manager,
 ) {
