@@ -493,7 +493,6 @@ shutdown :: proc(world: ^World, gpu_context: ^gpu.GPUContext, resources_manager:
   destroy(world, resources_manager, gpu_context)
 }
 
-// Legacy compatibility functions for render subsystem
 dispatch_visibility :: proc(
   world: ^World,
   gpu_context: ^gpu.GPUContext,
@@ -510,10 +509,6 @@ dispatch_visibility :: proc(
     category,
     request,
   )
-}
-
-visibility_command_stride :: proc() -> u32 {
-  return visibility_system_command_stride()
 }
 
 // Node management API
@@ -597,7 +592,6 @@ spawn_child_node :: proc(
   assign_light_to_node(resources_manager, handle, node)
   geometry.transform_translate(&node.transform, position.x, position.y, position.z)
   attach(world.nodes, parent, handle)
-  // Mark world matrix and node data as dirty for new node
   if resources_manager != nil {
     world_matrix := node.transform.world_matrix
     gpu.write(&resources_manager.world_matrix_buffer, &world_matrix, int(handle.index))
@@ -662,18 +656,14 @@ destroy_node_handle :: proc(world: ^World, handle: Handle) -> bool {
 
 // Actually destroy nodes that are marked for deletion
 cleanup_pending_deletions :: proc(world: ^World, resources_manager: ^resources.Manager, gpu_context: ^gpu.GPUContext = nil) {
-  // Collect handles of nodes marked for deletion
   to_destroy := make([dynamic]Handle, 0)
   defer delete(to_destroy)
-
   for i in 0 ..< len(world.nodes.entries) {
     entry := &world.nodes.entries[i]
     if entry.active && entry.item.pending_deletion {
       append(&to_destroy, Handle{index = u32(i), generation = entry.generation})
     }
   }
-
-  // Actually destroy the nodes
   for handle in to_destroy {
     if node, ok := resources.free(&world.nodes, handle); ok {
       destroy_node(node, resources_manager, gpu_context)

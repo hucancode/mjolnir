@@ -652,7 +652,6 @@ render :: proc(self: ^Engine) -> vk.Result {
   }
   resources.render_target_upload_camera_data(&self.resource_manager, main_render_target)
   resources.update_shadow_camera_transforms(&self.resource_manager)
-  // Visibility is now updated in begin_frame
   record_shadow_pass(
     &self.render,
     self.frame_index,
@@ -710,7 +709,6 @@ render :: proc(self: ^Engine) -> vk.Result {
   if self.custom_render_proc != nil {
     self.custom_render_proc(self, command_buffer)
   }
-  // Commit resource changes after custom render to ensure any material updates are flushed
   buffers := [?]vk.CommandBuffer{
     self.render.shadow.commands[self.frame_index],
     self.render.geometry.commands[self.frame_index],
@@ -830,7 +828,6 @@ process_pending_deletions :: proc(engine: ^Engine) {
     world.destroy_node_handle(&engine.world, handle)
   }
   clear(&engine.pending_node_deletions)
-
   // Actually cleanup the nodes that were marked for deletion
   world.cleanup_pending_deletions(&engine.world, &engine.resource_manager, &engine.gpu_context)
 }

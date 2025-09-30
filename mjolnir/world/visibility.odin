@@ -61,7 +61,7 @@ VisibilitySystem :: struct {
   node_count:            u32,
 }
 
-visibility_system_command_stride :: proc() -> u32 {
+draw_command_stride :: proc() -> u32 {
   return u32(size_of(vk.DrawIndexedIndirectCommand))
 }
 
@@ -345,7 +345,7 @@ visibility_system_dispatch :: proc(
     draw_buffer    = 0,
     count_buffer   = 0,
     max_draws      = system.node_count,
-    command_stride = visibility_system_command_stride(),
+    command_stride = draw_command_stride(),
   }
 
   if system.node_count == 0 {

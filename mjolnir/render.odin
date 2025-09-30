@@ -170,7 +170,7 @@ record_shadow_pass :: proc(
     .MATERIAL_TRANSPARENT,
     .MATERIAL_WIREFRAME,
   }
-  command_stride := world.visibility_command_stride()
+  command_stride := world.draw_command_stride()
   // Iterate through all shadow-casting lights in the resource pool
   for idx in 0 ..< len(resources_manager.lights.entries) {
     entry := &resources_manager.lights.entries[idx]
