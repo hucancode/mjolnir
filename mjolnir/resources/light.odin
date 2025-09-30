@@ -18,7 +18,7 @@ LightData :: struct {
   radius:       f32, // range for point/spot lights
   angle_inner:  f32, // inner cone angle for spot lights (cosine)
   angle_outer:  f32, // outer cone angle for spot lights (cosine)
-  type:         u32, // LightType
+  type:         LightType, // LightType
   node_index:   u32, // index into world matrices buffer
   shadow_map:   u32, // texture index in bindless array
   camera_index: u32, // index into camera matrices buffer
@@ -26,10 +26,8 @@ LightData :: struct {
 }
 
 Light :: struct {
-  data:                 LightData,
+  using data:           LightData,
   node_handle:          Handle, // Associated scene node for transform updates
-  light_type:           LightType, // Type of light
-  cast_shadow:          bool, // Whether this light should cast shadows
   // For spot lights - single render target for shadow mapping
   shadow_render_target: Handle,
   // For point lights - 6 render targets for cube shadow mapping
@@ -46,19 +44,18 @@ create_light :: proc(
   radius: f32 = 10.0,
   angle_inner: f32 = 0.8,
   angle_outer: f32 = 0.9,
-  cast_shadow: bool = true,
+  cast_shadow: b32 = true,
 ) -> Handle {
   handle, light := alloc(&manager.lights)
-  light.light_type = light_type
+  light.type = light_type
   light.node_handle = node_handle
   light.cast_shadow = cast_shadow
-  light.data.color = color
-  light.data.radius = radius
-  light.data.angle_inner = angle_inner
-  light.data.angle_outer = angle_outer
-  light.data.type = u32(light_type)
-  light.data.cast_shadow = b32(cast_shadow)
-  light.data.node_index = node_handle.index
+  light.color = color
+  light.radius = radius
+  light.angle_inner = angle_inner
+  light.angle_outer = angle_outer
+  light.cast_shadow = b32(cast_shadow)
+  light.node_index = node_handle.index
   if cast_shadow {
     setup_light_shadow_resources(manager, gpu_context, handle, light)
   }
@@ -100,7 +97,7 @@ set_light_color :: proc(
   intensity: f32,
 ) {
   if light, ok := get(manager.lights, handle); ok {
-    light.data.color = {color.x, color.y, color.z, intensity}
+    light.color = {color.x, color.y, color.z, intensity}
     gpu.write(&manager.lights_buffer, &light.data, int(handle.index))
   }
 }
@@ -108,7 +105,7 @@ set_light_color :: proc(
 // Update light radius for point/spot lights
 set_light_radius :: proc(manager: ^Manager, handle: Handle, radius: f32) {
   if light, ok := get(manager.lights, handle); ok {
-    light.data.radius = radius
+    light.radius = radius
     gpu.write(&manager.lights_buffer, &light.data, int(handle.index))
   }
 }
@@ -121,8 +118,8 @@ set_spot_light_angles :: proc(
   outer_angle: f32,
 ) {
   if light, ok := get(manager.lights, handle); ok {
-    light.data.angle_inner = inner_angle
-    light.data.angle_outer = outer_angle
+    light.angle_inner = inner_angle
+    light.angle_outer = outer_angle
     gpu.write(&manager.lights_buffer, &light.data, int(handle.index))
   }
 }
@@ -131,10 +128,9 @@ set_spot_light_angles :: proc(
 set_light_cast_shadow :: proc(
   manager: ^Manager,
   handle: Handle,
-  cast_shadow: bool,
+  cast_shadow: b32,
 ) {
   if light, ok := get(manager.lights, handle); ok {
-    light.data.cast_shadow = b32(cast_shadow)
     light.cast_shadow = cast_shadow
     gpu.write(&manager.lights_buffer, &light.data, int(handle.index))
   }
@@ -149,7 +145,7 @@ set_spot_light_shadow_render_target :: proc(
   if light, ok := get(manager.lights, light_handle); ok {
     light.shadow_render_target = render_target_handle
     if rt, ok := get(manager.render_targets, render_target_handle); ok {
-      light.data.camera_index = rt.camera.index
+      light.camera_index = rt.camera.index
     }
   }
 }
@@ -173,8 +169,8 @@ update_shadow_camera_transforms :: proc(self: ^Manager) {
     if entry.generation > 0 && entry.active {
       light := &entry.item
       // Skip if not enabled or not casting shadow
-      if !light.data.cast_shadow do continue
-      switch light.light_type {
+      if !light.cast_shadow do continue
+      switch light.type {
       case .POINT:
         update_point_light_shadow_cameras(self, light)
       case .SPOT:
@@ -257,7 +253,7 @@ setup_light_shadow_resources :: proc(
   light_handle: Handle,
   light: ^Light,
 ) {
-  switch light.light_type {
+  switch light.type {
   case .POINT:
     setup_point_light_shadow_resources(
       manager,
@@ -298,7 +294,7 @@ setup_point_light_shadow_resources :: proc(
     log.errorf("Failed to create cube shadow texture: %v", ret)
     return
   }
-  light.data.shadow_map = cube_shadow_handle.index
+  light.shadow_map = cube_shadow_handle.index
 
   // Setup 6 render targets for cube faces (forward=-Z convention)
   // +X, -X, +Y, -Y, +Z, -Z faces
@@ -330,7 +326,7 @@ setup_point_light_shadow_resources :: proc(
       math.PI * 0.5,
       1.0,
       0.1,
-      light.data.radius,
+      light.radius,
     )
 
     render_target.camera = camera_handle
@@ -368,15 +364,15 @@ setup_spot_light_shadow_resources :: proc(
     log.errorf("Failed to create shadow texture")
     return
   }
-  light.data.shadow_map = shadow_handle.index
+  light.shadow_map = shadow_handle.index
 
   // Create render target
   render_target_handle, render_target := alloc(&manager.render_targets)
 
   // Create camera
   camera_handle, camera := alloc(&manager.cameras)
-  fov := light.data.angle_outer * 2.0
-  camera^ = geometry.make_camera_perspective(fov, 1.0, 0.1, light.data.radius)
+  fov := light.angle_outer * 2.0
+  camera^ = geometry.make_camera_perspective(fov, 1.0, 0.1, light.radius)
 
   render_target.camera = camera_handle
   render_target.extent = {SHADOW_MAP_SIZE, SHADOW_MAP_SIZE}
@@ -388,7 +384,7 @@ setup_spot_light_shadow_resources :: proc(
   }
 
   light.shadow_render_target = render_target_handle
-  light.data.camera_index = camera_handle.index
+  light.camera_index = camera_handle.index
 }
 
 // Destroy shadow resources for a light
@@ -398,8 +394,7 @@ destroy_light_shadow_resources :: proc(
   light: ^Light,
 ) {
   if !light.cast_shadow do return
-
-  switch light.light_type {
+  switch light.type {
   case .POINT:
     // Get the cube shadow texture handle before destroying render targets
     cube_texture_handle: Handle
@@ -470,5 +465,5 @@ destroy_light_shadow_resources :: proc(
   // Directional shadows not implemented yet
   }
 
-  light.data.shadow_map = 0
+  light.shadow_map = 0
 }

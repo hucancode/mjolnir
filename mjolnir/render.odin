@@ -177,8 +177,8 @@ record_shadow_pass :: proc(
     if entry.generation > 0 && entry.active {
       light := &entry.item
       // Skip if not enabled or not casting shadow
-      if !light.data.cast_shadow do continue
-      switch light.light_type {
+      if !light.cast_shadow do continue
+      switch light.type {
       case .POINT:
         for face in 0 ..< 6 {
           if light.cube_render_targets[face].generation == 0 do continue

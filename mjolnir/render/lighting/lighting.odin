@@ -700,7 +700,7 @@ render :: proc(
     if entry.generation > 0 && entry.active {
       light := &entry.item
       push_constant.light_index = u32(idx)
-      switch light.light_type {
+      switch light.type {
       case .POINT:
         vk.CmdSetDepthCompareOp(command_buffer, .GREATER_OR_EQUAL)
         vk.CmdPushConstants(

@@ -831,7 +831,7 @@ assign_light_to_node :: proc(
   light, ok := resources.get_light(resources_manager, attachment.handle)
   if ok {
     light.node_handle = node_handle
-    light.data.node_index = node_handle.index
+    light.node_index = node_handle.index
     gpu.write(&resources_manager .lights_buffer, &light.data, int(attachment.handle.index))
   }
 }
@@ -1035,7 +1035,7 @@ create_point_light_attachment :: proc(
   gpu_context: ^gpu.GPUContext,
   color: [4]f32 = {1, 1, 1, 1},
   radius: f32 = 10.0,
-  cast_shadow: bool = true,
+  cast_shadow: b32 = true,
 ) -> LightAttachment {
   light_handle := resources.create_light(
     resources_manager,
@@ -1056,7 +1056,7 @@ create_directional_light_attachment :: proc(
   resources_manager: ^resources.Manager,
   gpu_context: ^gpu.GPUContext,
   color: [4]f32 = {1, 1, 1, 1},
-  cast_shadow: bool = false,
+  cast_shadow: b32 = false,
 ) -> LightAttachment {
   light_handle := resources.create_light(
     resources_manager,
@@ -1077,7 +1077,7 @@ create_spot_light_attachment :: proc(
   color: [4]f32 = {1, 1, 1, 1},
   radius: f32 = 10.0,
   angle: f32 = math.PI * 0.2,
-  cast_shadow: bool = true,
+  cast_shadow: b32 = true,
 ) -> LightAttachment {
   angle_inner := angle * 0.8
   angle_outer := angle
