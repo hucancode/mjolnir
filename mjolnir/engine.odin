@@ -651,7 +651,7 @@ render :: proc(self: ^Engine) -> vk.Result {
     return .ERROR_UNKNOWN
   }
   resources.render_target_upload_camera_data(&self.resource_manager, main_render_target)
-  resources.update_all_light_transforms(&self.resource_manager)
+  resources.update_shadow_camera_transforms(&self.resource_manager)
   // Visibility is now updated in begin_frame
   record_shadow_pass(
     &self.render,

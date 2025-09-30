@@ -62,7 +62,7 @@ create_light :: proc(
   if cast_shadow {
     setup_light_shadow_resources(manager, gpu_context, handle, light)
   }
-  sync_light_gpu_data(manager, handle)
+  gpu.write(&manager.lights_buffer, &light.data, int(handle.index))
   return handle
 }
 
@@ -92,14 +92,6 @@ get_light :: proc(
   return
 }
 
-// Update light data in GPU buffer
-sync_light_gpu_data :: proc(manager: ^Manager, handle: Handle) -> bool {
-  light, ok := get(manager.lights, handle)
-  if !ok do return false
-  gpu.write(&manager.lights_buffer, &light.data, int(handle.index))
-  return true
-}
-
 // Update light color and intensity
 set_light_color :: proc(
   manager: ^Manager,
@@ -109,7 +101,7 @@ set_light_color :: proc(
 ) {
   if light, ok := get(manager.lights, handle); ok {
     light.data.color = {color.x, color.y, color.z, intensity}
-    sync_light_gpu_data(manager, handle)
+    gpu.write(&manager.lights_buffer, &light.data, int(handle.index))
   }
 }
 
@@ -117,7 +109,7 @@ set_light_color :: proc(
 set_light_radius :: proc(manager: ^Manager, handle: Handle, radius: f32) {
   if light, ok := get(manager.lights, handle); ok {
     light.data.radius = radius
-    sync_light_gpu_data(manager, handle)
+    gpu.write(&manager.lights_buffer, &light.data, int(handle.index))
   }
 }
 
@@ -131,7 +123,7 @@ set_spot_light_angles :: proc(
   if light, ok := get(manager.lights, handle); ok {
     light.data.angle_inner = inner_angle
     light.data.angle_outer = outer_angle
-    sync_light_gpu_data(manager, handle)
+    gpu.write(&manager.lights_buffer, &light.data, int(handle.index))
   }
 }
 
@@ -144,7 +136,7 @@ set_light_cast_shadow :: proc(
   if light, ok := get(manager.lights, handle); ok {
     light.data.cast_shadow = b32(cast_shadow)
     light.cast_shadow = cast_shadow
-    sync_light_gpu_data(manager, handle)
+    gpu.write(&manager.lights_buffer, &light.data, int(handle.index))
   }
 }
 
@@ -171,23 +163,6 @@ set_point_light_cube_render_targets :: proc(
   if light, ok := get(manager.lights, light_handle); ok {
     light.cube_render_targets = render_targets
   }
-}
-
-// Update all lights' transform references after world matrices are updated
-update_all_light_transforms :: proc(self: ^Manager) {
-  for idx in 0 ..< len(self.lights.entries) {
-    entry := &self.lights.entries[idx]
-    if entry.generation > 0 && entry.active {
-      light_handle := Handle {
-        generation = entry.generation,
-        index      = u32(idx),
-      }
-      light := &entry.item
-      light.data.node_index = light.node_handle.index
-      gpu.write(&self.lights_buffer, &light.data, idx)
-    }
-  }
-  update_shadow_camera_transforms(self)
 }
 
 // Update shadow camera positions for lights that cast shadows
@@ -273,18 +248,6 @@ update_spot_light_shadow_cameras :: proc(self: ^Manager, light: ^Light) {
   geometry.camera_look_at(camera, position, target, up)
   // log.debugf("Spot light %v shadow camera %v updated to %v", light, render_target.camera, camera)
   render_target_upload_camera_data(self, render_target)
-}
-// Get light data for use in shaders
-get_light_data :: proc(
-  manager: ^Manager,
-  handle: Handle,
-) -> (
-  data: ^LightData,
-  ok: bool,
-) #optional_ok {
-  light, light_ok := get(manager.lights, handle)
-  if !light_ok do return nil, false
-  return &light.data, true
 }
 
 // Setup shadow resources for a light (called during light creation)

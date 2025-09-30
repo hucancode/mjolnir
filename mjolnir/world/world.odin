@@ -223,6 +223,7 @@ spawn_at :: proc(
   node.attachment = attachment
   assign_emitter_to_node(resources_manager, handle, node)
   assign_forcefield_to_node(resources_manager, handle, node)
+  assign_light_to_node(resources_manager, handle, node)
   geometry.transform_translate(&node.transform, position.x, position.y, position.z)
   attach(self.nodes, self.root, handle)
   // Mark world matrix and node data as dirty for new node
@@ -290,6 +291,7 @@ spawn :: proc(
   node.attachment = attachment
   assign_emitter_to_node(resources_manager, handle, node)
   assign_forcefield_to_node(resources_manager, handle, node)
+  assign_light_to_node(resources_manager, handle, node)
   attach(self.nodes, self.root, handle)
   // Mark world matrix and node data as dirty for new node
   if resources_manager != nil {
@@ -356,6 +358,7 @@ spawn_child :: proc(
   node.attachment = attachment
   assign_emitter_to_node(resources_manager, handle, node)
   assign_forcefield_to_node(resources_manager, handle, node)
+  assign_light_to_node(resources_manager, handle, node)
   attach(self.nodes, parent, handle)
   // Mark world matrix and node data as dirty for new node
   if resources_manager != nil {
@@ -525,6 +528,7 @@ spawn_node :: proc(
   node.attachment = attachment
   assign_emitter_to_node(resources_manager, handle, node)
   assign_forcefield_to_node(resources_manager, handle, node)
+  assign_light_to_node(resources_manager, handle, node)
   geometry.transform_translate(&node.transform, position.x, position.y, position.z)
   attach(world.nodes, world.root, handle)
   // Mark world matrix and node data as dirty for new node
@@ -590,6 +594,7 @@ spawn_child_node :: proc(
   node.attachment = attachment
   assign_emitter_to_node(resources_manager, handle, node)
   assign_forcefield_to_node(resources_manager, handle, node)
+  assign_light_to_node(resources_manager, handle, node)
   geometry.transform_translate(&node.transform, position.x, position.y, position.z)
   attach(world.nodes, parent, handle)
   // Mark world matrix and node data as dirty for new node
@@ -817,6 +822,27 @@ assign_forcefield_to_node :: proc(
   if ok {
     forcefield.node_handle = node_handle
     resources.forcefield_write_to_gpu(resources_manager, attachment.handle, forcefield)
+  }
+}
+
+@(private)
+assign_light_to_node :: proc(
+  resources_manager: ^resources.Manager,
+  node_handle: Handle,
+  node: ^Node,
+) {
+  if resources_manager == nil {
+    return
+  }
+  attachment, is_light := &node.attachment.(LightAttachment)
+  if !is_light {
+    return
+  }
+  light, ok := resources.get_light(resources_manager, attachment.handle)
+  if ok {
+    light.node_handle = node_handle
+    light.data.node_index = node_handle.index
+    gpu.write(&resources_manager .lights_buffer, &light.data, int(attachment.handle.index))
   }
 }
 
