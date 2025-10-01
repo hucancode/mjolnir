@@ -3,7 +3,6 @@ package main
 import "core:fmt"
 import "core:log"
 import "core:math"
-import "core:math/linalg"
 import "core:math/rand"
 import "core:os"
 import "mjolnir"

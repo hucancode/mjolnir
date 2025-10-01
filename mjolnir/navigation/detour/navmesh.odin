@@ -1,10 +1,7 @@
 package navigation_detour
 
-import "core:mem"
 import "core:math"
-import "core:math/linalg"
 import "core:slice"
-import "core:log"
 import "../recast"
 import "../../geometry"
 

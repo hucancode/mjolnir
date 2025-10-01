@@ -1,10 +1,8 @@
 package text
 
-import "base:runtime"
 import "core:log"
 import "core:math/linalg"
 import "core:os"
-import "core:slice"
 import "../../gpu"
 import "../../resources"
 import fs "vendor:fontstash"

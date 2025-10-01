@@ -1,8 +1,9 @@
 package post_process
 
+import "../../gpu"
+import "../../resources"
+import "../targets"
 import "core:log"
-import gpu "../../gpu"
-import resources "../../resources"
 import vk "vendor:vulkan"
 
 SHADER_POSTPROCESS_VERT :: #load("../../shader/postprocess/vert.spv")
@@ -218,11 +219,7 @@ add_grayscale :: proc(
   append(&self.effect_stack, effect)
 }
 
-add_blur :: proc(
-  self: ^Renderer,
-  radius: f32,
-  gaussian: bool = true,
-) {
+add_blur :: proc(self: ^Renderer, radius: f32, gaussian: bool = true) {
   horizontal_effect := BlurEffect {
     radius         = radius,
     direction      = 0.0, // horizontal
@@ -273,11 +270,7 @@ add_bloom :: proc(
   append(&self.effect_stack, effect)
 }
 
-add_tonemap :: proc(
-  self: ^Renderer,
-  exposure: f32 = 1.0,
-  gamma: f32 = 2.2,
-) {
+add_tonemap :: proc(self: ^Renderer, exposure: f32 = 1.0, gamma: f32 = 2.2) {
   effect := ToneMapEffect {
     exposure = exposure,
     gamma    = gamma,
@@ -285,11 +278,7 @@ add_tonemap :: proc(
   append(&self.effect_stack, effect)
 }
 
-add_outline :: proc(
-  self: ^Renderer,
-  thickness: f32,
-  color: [3]f32,
-) {
+add_outline :: proc(self: ^Renderer, thickness: f32, color: [3]f32) {
   effect := OutlineEffect {
     thickness = thickness,
     color     = color,
@@ -417,7 +406,7 @@ init :: proc(
     pDynamicStates    = raw_data(dynamic_states[:]),
   }
   color_formats := [?]vk.Format{color_format}
-  rendering_info := vk.PipelineRenderingCreateInfo{
+  rendering_info := vk.PipelineRenderingCreateInfo {
     sType                   = .PIPELINE_RENDERING_CREATE_INFO,
     colorAttachmentCount    = len(color_formats),
     pColorAttachmentFormats = raw_data(color_formats[:]),
@@ -553,7 +542,12 @@ create_images :: proc(
       width,
       height,
       format,
-      vk.ImageUsageFlags{.COLOR_ATTACHMENT, .SAMPLED, .TRANSFER_SRC, .TRANSFER_DST},
+      vk.ImageUsageFlags {
+        .COLOR_ATTACHMENT,
+        .SAMPLED,
+        .TRANSFER_SRC,
+        .TRANSFER_DST,
+      },
     ) or_return
   }
   log.debugf("created post-process image")
@@ -566,8 +560,10 @@ destroy_images :: proc(
   resources_manager: ^resources.Manager,
 ) {
   for handle in self.images {
-    if item, freed := resources.free(&resources_manager.image_2d_buffers, handle);
-       freed {
+    if item, freed := resources.free(
+      &resources_manager.image_2d_buffers,
+      handle,
+    ); freed {
       gpu.image_buffer_destroy(device, item)
     }
   }
@@ -639,7 +635,7 @@ render :: proc(
   command_buffer: vk.CommandBuffer,
   extent: vk.Extent2D,
   output_view: vk.ImageView,
-  render_target: ^resources.RenderTarget,
+  target: ^targets.RenderTarget,
   resources_manager: ^resources.Manager,
   frame_index: u32,
 ) {
@@ -657,7 +653,7 @@ render :: proc(
     dst_image_idx: u32
 
     if is_first {
-      input_image_index = resources.get_final_image(render_target, frame_index).index // Use original input
+      input_image_index = targets.get_final_image(target, frame_index).index // Use original input
       dst_image_idx = 0 // Write to image[0]
     } else {
       prev_dst_image_idx := (i - 1) % 2
@@ -673,9 +669,15 @@ render :: proc(
 
     dst_view := output_view
     if !is_last {
-      dst_texture, ok := resources.get_image_2d(resources_manager, self.images[dst_image_idx])
+      dst_texture, ok := resources.get_image_2d(
+        resources_manager,
+        self.images[dst_image_idx],
+      )
       if !ok {
-        log.errorf("Post-process image handle %v not found", self.images[dst_image_idx])
+        log.errorf(
+          "Post-process image handle %v not found",
+          self.images[dst_image_idx],
+        )
         continue
       }
       gpu.transition_image(
@@ -700,12 +702,15 @@ render :: proc(
         self.images[src_texture_idx],
       )
       if !ok {
-        log.errorf("Post-process source image handle %v not found", self.images[src_texture_idx])
+        log.errorf(
+          "Post-process source image handle %v not found",
+          self.images[src_texture_idx],
+        )
         continue
       }
       gpu.transition_image_to_shader_read(command_buffer, src_texture.image)
     }
-    color_attachment := vk.RenderingAttachmentInfo{
+    color_attachment := vk.RenderingAttachmentInfo {
       sType = .RENDERING_ATTACHMENT_INFO,
       imageView = dst_view,
       imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
@@ -713,7 +718,7 @@ render :: proc(
       storeOp = .STORE,
       clearValue = {color = {float32 = BG_BLUE_GRAY}},
     }
-    render_info := vk.RenderingInfo{
+    render_info := vk.RenderingInfo {
       sType = .RENDERING_INFO,
       renderArea = {extent = extent},
       layerCount = 1,
@@ -740,17 +745,17 @@ render :: proc(
     )
     base: BasePushConstant
     base.position_texture_index =
-      resources.get_position_texture(render_target, frame_index).index
+      targets.get_position_texture(target, frame_index).index
     base.normal_texture_index =
-      resources.get_normal_texture(render_target, frame_index).index
+      targets.get_normal_texture(target, frame_index).index
     base.albedo_texture_index =
-      resources.get_albedo_texture(render_target, frame_index).index
+      targets.get_albedo_texture(target, frame_index).index
     base.metallic_texture_index =
-      resources.get_metallic_roughness_texture(render_target, frame_index).index
+      targets.get_metallic_roughness_texture(target, frame_index).index
     base.emissive_texture_index =
-      resources.get_emissive_texture(render_target, frame_index).index
+      targets.get_emissive_texture(target, frame_index).index
     base.depth_texture_index =
-      resources.get_depth_texture(render_target, frame_index).index
+      targets.get_depth_texture(target, frame_index).index
     base.input_image_index = input_image_index
     // Create and push combined push constants based on effect type
     switch &e in effect {
@@ -892,10 +897,7 @@ render :: proc(
   }
 }
 
-end_pass :: proc(
-  self: ^Renderer,
-  command_buffer: vk.CommandBuffer,
-) {
+end_pass :: proc(self: ^Renderer, command_buffer: vk.CommandBuffer) {
 
 }
 
@@ -903,16 +905,19 @@ begin_record :: proc(
   self: ^Renderer,
   frame_index: u32,
   color_format: vk.Format,
-  main_render_target: ^resources.RenderTarget,
+  main_render_target: ^targets.RenderTarget,
   resources_manager: ^resources.Manager,
   swapchain_image: vk.Image,
-) -> (command_buffer: vk.CommandBuffer, ret: vk.Result) {
+) -> (
+  command_buffer: vk.CommandBuffer,
+  ret: vk.Result,
+) {
   command_buffer = self.commands[frame_index]
   vk.ResetCommandBuffer(command_buffer, {}) or_return
   color_formats := [1]vk.Format{color_format}
-  rendering_info := vk.CommandBufferInheritanceRenderingInfo{
-    sType = .COMMAND_BUFFER_INHERITANCE_RENDERING_INFO,
-    colorAttachmentCount = 1,
+  rendering_info := vk.CommandBufferInheritanceRenderingInfo {
+    sType                   = .COMMAND_BUFFER_INHERITANCE_RENDERING_INFO,
+    colorAttachmentCount    = 1,
     pColorAttachmentFormats = &color_formats[0],
   }
   inheritance := vk.CommandBufferInheritanceInfo {
@@ -921,7 +926,7 @@ begin_record :: proc(
   }
   vk.BeginCommandBuffer(
     command_buffer,
-    &vk.CommandBufferBeginInfo{
+    &vk.CommandBufferBeginInfo {
       sType = .COMMAND_BUFFER_BEGIN_INFO,
       flags = {.ONE_TIME_SUBMIT},
       pInheritanceInfo = &inheritance,
@@ -931,7 +936,7 @@ begin_record :: proc(
   // Transition final image to shader read optimal
   final_image := resources.get(
     resources_manager.image_2d_buffers,
-    resources.get_final_image(main_render_target, frame_index),
+    targets.get_final_image(main_render_target, frame_index),
   )
   if final_image != nil {
     gpu.transition_image_to_shader_read(command_buffer, final_image.image)

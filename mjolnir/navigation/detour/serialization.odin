@@ -1,11 +1,7 @@
 package navigation_detour
 
 import "core:os"
-import "core:io"
-import "core:fmt"
 import "core:log"
-import "core:mem"
-import "core:encoding/endian"
 import "../recast"
 
 // File format constants

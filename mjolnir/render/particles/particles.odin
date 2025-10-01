@@ -1,9 +1,9 @@
 package particles
 
+import "../../gpu"
+import "../../resources"
+import "../targets"
 import "core:log"
-import geometry "../../geometry"
-import gpu "../../gpu"
-import resources "../../resources"
 import vk "vendor:vulkan"
 
 MAX_PARTICLES :: 65536
@@ -33,32 +33,32 @@ ParticleSystemParams :: struct {
 
 Renderer :: struct {
   // Compute pipeline
-  params_buffer:                 gpu.DataBuffer(ParticleSystemParams),
-  particle_buffer:               gpu.DataBuffer(Particle),
-  compute_descriptor_set_layout: vk.DescriptorSetLayout,
-  compute_descriptor_set:        vk.DescriptorSet,
-  compute_pipeline_layout:       vk.PipelineLayout,
-  compute_pipeline:              vk.Pipeline,
+  params_buffer:                      gpu.DataBuffer(ParticleSystemParams),
+  particle_buffer:                    gpu.DataBuffer(Particle),
+  compute_descriptor_set_layout:      vk.DescriptorSetLayout,
+  compute_descriptor_set:             vk.DescriptorSet,
+  compute_pipeline_layout:            vk.PipelineLayout,
+  compute_pipeline:                   vk.Pipeline,
   forcefield_bindless_descriptor_set: vk.DescriptorSet,
   // Emitter pipeline
-  emitter_pipeline_layout:       vk.PipelineLayout,
-  emitter_pipeline:              vk.Pipeline,
-  emitter_descriptor_set_layout: vk.DescriptorSetLayout,
-  emitter_descriptor_set:        vk.DescriptorSet,
-  emitter_bindless_descriptor_set: vk.DescriptorSet,
-  particle_counter_buffer:       gpu.DataBuffer(u32),
+  emitter_pipeline_layout:            vk.PipelineLayout,
+  emitter_pipeline:                   vk.Pipeline,
+  emitter_descriptor_set_layout:      vk.DescriptorSetLayout,
+  emitter_descriptor_set:             vk.DescriptorSet,
+  emitter_bindless_descriptor_set:    vk.DescriptorSet,
+  particle_counter_buffer:            gpu.DataBuffer(u32),
   // Compaction pipeline
-  compact_particle_buffer:       gpu.DataBuffer(Particle),
-  draw_command_buffer:           gpu.DataBuffer(vk.DrawIndirectCommand),
-  compact_descriptor_set_layout: vk.DescriptorSetLayout,
-  compact_descriptor_set:        vk.DescriptorSet,
-  compact_pipeline_layout:       vk.PipelineLayout,
-  compact_pipeline:              vk.Pipeline,
+  compact_particle_buffer:            gpu.DataBuffer(Particle),
+  draw_command_buffer:                gpu.DataBuffer(vk.DrawIndirectCommand),
+  compact_descriptor_set_layout:      vk.DescriptorSetLayout,
+  compact_descriptor_set:             vk.DescriptorSet,
+  compact_pipeline_layout:            vk.PipelineLayout,
+  compact_pipeline:                   vk.Pipeline,
   // Render pipeline
-  render_pipeline_layout:        vk.PipelineLayout,
-  render_pipeline:               vk.Pipeline,
-  default_texture_index:         u32,
-  commands:                      [resources.MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
+  render_pipeline_layout:             vk.PipelineLayout,
+  render_pipeline:                    vk.Pipeline,
+  default_texture_index:              u32,
+  commands:                           [resources.MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
 }
 
 simulate :: proc(
@@ -84,7 +84,8 @@ simulate :: proc(
     0,
     len(emitter_descriptor_sets),
     raw_data(emitter_descriptor_sets[:]),
-    0, nil,
+    0,
+    nil,
   )
   // One thread per emitter (local_size_x = 64)
   vk.CmdDispatch(command_buffer, u32(resources.MAX_EMITTERS + 63) / 64, 1, 1)
@@ -99,9 +100,12 @@ simulate :: proc(
     {.COMPUTE_SHADER},
     {.COMPUTE_SHADER},
     {},
-    1, &barrier_emit,
-    0, nil,
-    0, nil,
+    1,
+    &barrier_emit,
+    0,
+    nil,
+    0,
+    nil,
   )
   compact(self, command_buffer)
   // Memory barrier before simulation
@@ -115,9 +119,12 @@ simulate :: proc(
     {.COMPUTE_SHADER},
     {.COMPUTE_SHADER},
     {},
-    1, &barrier1,
-    0, nil,
-    0, nil,
+    1,
+    &barrier1,
+    0,
+    nil,
+    0,
+    nil,
   )
   // GPU handles the count internally
   vk.CmdBindPipeline(command_buffer, .COMPUTE, self.compute_pipeline)
@@ -133,7 +140,8 @@ simulate :: proc(
     0,
     len(compute_descriptor_sets),
     raw_data(compute_descriptor_sets[:]),
-    0, nil,
+    0,
+    nil,
   )
   vk.CmdDispatch(
     command_buffer,
@@ -152,9 +160,12 @@ simulate :: proc(
     {.COMPUTE_SHADER},
     {.TRANSFER},
     {},
-    1, &barrier2,
-    0, nil,
-    0, nil,
+    1,
+    &barrier2,
+    0,
+    nil,
+    0,
+    nil,
   )
   // Copy simulated particles back to main buffer
   vk.CmdCopyBuffer(
@@ -175,16 +186,16 @@ simulate :: proc(
     {.TRANSFER},
     {.VERTEX_INPUT, .DRAW_INDIRECT},
     {},
-    1, &barrier3,
-    0, nil,
-    0, nil,
+    1,
+    &barrier3,
+    0,
+    nil,
+    0,
+    nil,
   )
 }
 
-compact :: proc(
-  self: ^Renderer,
-  command_buffer: vk.CommandBuffer,
-) {
+compact :: proc(self: ^Renderer, command_buffer: vk.CommandBuffer) {
   // Run compaction
   vk.CmdBindPipeline(command_buffer, .COMPUTE, self.compact_pipeline)
   vk.CmdBindDescriptorSets(
@@ -212,44 +223,28 @@ shutdown :: proc(
 ) {
   gpu.free_command_buffers(device, command_pool, self.commands[:])
   vk.DestroyPipeline(device, self.compute_pipeline, nil)
-  vk.DestroyPipelineLayout(
-    device,
-    self.compute_pipeline_layout,
-    nil,
-  )
+  vk.DestroyPipelineLayout(device, self.compute_pipeline_layout, nil)
   vk.DestroyDescriptorSetLayout(
     device,
     self.compute_descriptor_set_layout,
     nil,
   )
   vk.DestroyPipeline(device, self.emitter_pipeline, nil)
-  vk.DestroyPipelineLayout(
-    device,
-    self.emitter_pipeline_layout,
-    nil,
-  )
+  vk.DestroyPipelineLayout(device, self.emitter_pipeline_layout, nil)
   vk.DestroyDescriptorSetLayout(
     device,
     self.emitter_descriptor_set_layout,
     nil,
   )
   vk.DestroyPipeline(device, self.compact_pipeline, nil)
-  vk.DestroyPipelineLayout(
-    device,
-    self.compact_pipeline_layout,
-    nil,
-  )
+  vk.DestroyPipelineLayout(device, self.compact_pipeline_layout, nil)
   vk.DestroyDescriptorSetLayout(
     device,
     self.compact_descriptor_set_layout,
     nil,
   )
   vk.DestroyPipeline(device, self.render_pipeline, nil)
-  vk.DestroyPipelineLayout(
-    device,
-    self.render_pipeline_layout,
-    nil,
-  )
+  vk.DestroyPipelineLayout(device, self.render_pipeline_layout, nil)
   gpu.data_buffer_destroy(device, &self.params_buffer)
   gpu.data_buffer_destroy(device, &self.particle_buffer)
   gpu.data_buffer_destroy(device, &self.compact_particle_buffer)
@@ -287,8 +282,10 @@ init :: proc(
     1,
     {.STORAGE_BUFFER},
   ) or_return
-  self.emitter_bindless_descriptor_set = resources_manager.emitter_buffer_descriptor_set
-  self.forcefield_bindless_descriptor_set = resources_manager.forcefield_buffer_descriptor_set
+  self.emitter_bindless_descriptor_set =
+    resources_manager.emitter_buffer_descriptor_set
+  self.forcefield_bindless_descriptor_set =
+    resources_manager.forcefield_buffer_descriptor_set
   create_emitter_pipeline(gpu_context, self, resources_manager) or_return
   create_compact_pipeline(gpu_context, self) or_return
   create_compute_pipeline(gpu_context, self, resources_manager) or_return
@@ -894,7 +891,7 @@ create_render_pipeline :: proc(
 begin_pass :: proc(
   self: ^Renderer,
   command_buffer: vk.CommandBuffer,
-  render_target: ^resources.RenderTarget,
+  target: ^targets.RenderTarget,
   resources_manager: ^resources.Manager,
   frame_index: u32,
 ) {
@@ -922,7 +919,7 @@ begin_pass :: proc(
   )
   color_texture, ok := resources.get_image_2d(
     resources_manager,
-    resources.get_final_image(render_target, frame_index),
+    targets.get_final_image(target, frame_index),
   )
   if !ok {
     log.error("Particle renderer missing color attachment")
@@ -930,29 +927,29 @@ begin_pass :: proc(
   }
   depth_texture, depth_found := resources.get_image_2d(
     resources_manager,
-    resources.get_depth_texture(render_target, frame_index),
+    targets.get_depth_texture(target, frame_index),
   )
   if !depth_found {
     log.error("Particle renderer missing depth attachment")
     return
   }
-  color_attachment := vk.RenderingAttachmentInfo{
+  color_attachment := vk.RenderingAttachmentInfo {
     sType       = .RENDERING_ATTACHMENT_INFO,
     imageView   = color_texture.view,
     imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
     loadOp      = .LOAD, // preserve previous contents
     storeOp     = .STORE,
   }
-  depth_attachment := vk.RenderingAttachmentInfo{
+  depth_attachment := vk.RenderingAttachmentInfo {
     sType       = .RENDERING_ATTACHMENT_INFO,
     imageView   = depth_texture.view,
     imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
     loadOp      = .LOAD,
     storeOp     = .STORE,
   }
-  render_info := vk.RenderingInfo{
+  render_info := vk.RenderingInfo {
     sType = .RENDERING_INFO,
-    renderArea = {extent = render_target.extent},
+    renderArea = {extent = target.extent},
     layerCount = 1,
     colorAttachmentCount = 1,
     pColorAttachments = &color_attachment,
@@ -961,14 +958,14 @@ begin_pass :: proc(
   vk.CmdBeginRendering(command_buffer, &render_info)
   viewport := vk.Viewport {
     x        = 0.0,
-    y        = f32(render_target.extent.height),
-    width    = f32(render_target.extent.width),
-    height   = -f32(render_target.extent.height),
+    y        = f32(target.extent.height),
+    width    = f32(target.extent.width),
+    height   = -f32(target.extent.height),
     minDepth = 0.0,
     maxDepth = 1.0,
   }
   scissor := vk.Rect2D {
-    extent = render_target.extent,
+    extent = target.extent,
   }
   vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
   vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
@@ -1031,15 +1028,18 @@ begin_record :: proc(
   self: ^Renderer,
   frame_index: u32,
   color_format: vk.Format,
-) -> (command_buffer: vk.CommandBuffer, ret: vk.Result) {
+) -> (
+  command_buffer: vk.CommandBuffer,
+  ret: vk.Result,
+) {
   command_buffer = self.commands[frame_index]
   vk.ResetCommandBuffer(command_buffer, {}) or_return
   color_formats := [1]vk.Format{color_format}
-  rendering_info := vk.CommandBufferInheritanceRenderingInfo{
-    sType = .COMMAND_BUFFER_INHERITANCE_RENDERING_INFO,
-    colorAttachmentCount = 1,
+  rendering_info := vk.CommandBufferInheritanceRenderingInfo {
+    sType                   = .COMMAND_BUFFER_INHERITANCE_RENDERING_INFO,
+    colorAttachmentCount    = 1,
     pColorAttachmentFormats = &color_formats[0],
-    depthAttachmentFormat = .D32_SFLOAT,
+    depthAttachmentFormat   = .D32_SFLOAT,
   }
   inheritance := vk.CommandBufferInheritanceInfo {
     sType = .COMMAND_BUFFER_INHERITANCE_INFO,
@@ -1047,7 +1047,7 @@ begin_record :: proc(
   }
   vk.BeginCommandBuffer(
     command_buffer,
-    &vk.CommandBufferBeginInfo{
+    &vk.CommandBufferBeginInfo {
       sType = .COMMAND_BUFFER_BEGIN_INFO,
       flags = {.ONE_TIME_SUBMIT},
       pInheritanceInfo = &inheritance,

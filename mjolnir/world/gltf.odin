@@ -58,7 +58,7 @@ load_gltf :: proc(
     return nodes, .success
   }
   // step 1: Asset Discovery
-  manifest, skinned_materials := discover_assets(gltf_data)
+  manifest := discover_assets(gltf_data)
   defer {
     delete(manifest.unique_textures)
     delete(manifest.unique_materials)
@@ -139,7 +139,6 @@ discover_assets :: proc(
   gltf_data: ^cgltf.data,
 ) -> (
   AssetManifest,
-  map[^cgltf.material]bool,
 ) {
   manifest: AssetManifest
   manifest.unique_textures = make([dynamic]^cgltf.texture, 0)
@@ -150,20 +149,15 @@ discover_assets :: proc(
   material_set := make(map[^cgltf.material]bool, context.temp_allocator)
   mesh_set := make(map[^cgltf.mesh]bool, context.temp_allocator)
   skin_set := make(map[^cgltf.skin]bool, context.temp_allocator)
-  skinned_materials := make(map[^cgltf.material]bool, context.temp_allocator)
   for &node in gltf_data.nodes {
     if node.mesh != nil && node.mesh not_in mesh_set {
       append(&manifest.meshes, node.mesh)
       mesh_set[node.mesh] = true
-      is_skinned := node.skin != nil
       for &primitive in node.mesh.primitives {
         if primitive.material != nil &&
            primitive.material not_in material_set {
           append(&manifest.unique_materials, primitive.material)
           material_set[primitive.material] = true
-          if is_skinned {
-            skinned_materials[primitive.material] = true
-          }
           material := primitive.material
           if material.pbr_metallic_roughness.base_color_texture.texture !=
              nil {
@@ -210,7 +204,7 @@ discover_assets :: proc(
   log.infof("  - Unique materials: %d", len(manifest.unique_materials))
   log.infof("  - Meshes: %d", len(manifest.meshes))
   log.infof("  - Skins: %d", len(manifest.skins))
-  return manifest, skinned_materials
+  return manifest
 }
 
 @(private = "file")
@@ -762,7 +756,7 @@ load_animations :: proc(
   skinning := &mesh.skinning.?
 
   for gltf_anim, i in gltf_data.animations {
-    clip_handle, clip := resources.alloc(&resources_manager.animation_clips)
+    _, clip := resources.alloc(&resources_manager.animation_clips)
     if gltf_anim.name != nil {
       clip.name = strings.clone_from_cstring(gltf_anim.name)
     } else {

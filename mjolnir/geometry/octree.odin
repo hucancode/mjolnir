@@ -1,7 +1,5 @@
 package geometry
 
-import "core:math"
-import "core:math/linalg"
 import "core:slice"
 
 OctreeNode :: struct($T: typeid) {

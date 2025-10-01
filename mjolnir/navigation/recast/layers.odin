@@ -1,10 +1,7 @@
 package navigation_recast
 
 import "core:log"
-import "core:math"
-import "core:math/linalg"
 import "core:slice"
-import "core:mem"
 
 RC_MAX_LAYER_ID :: 255
 RC_NULL_LAYER_ID :: 255

@@ -3,8 +3,6 @@ package navigation_recast
 import "core:slice"
 import "core:log"
 import "../../geometry"
-import "core:time"
-import "core:math"
 import "core:math/linalg"
 
 // Data structures for hole merging

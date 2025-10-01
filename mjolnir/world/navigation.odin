@@ -3,7 +3,6 @@ package world
 import "core:log"
 import "core:math"
 import "core:math/linalg"
-import "core:strings"
 import "../geometry"
 import "../navigation/detour"
 import "../navigation/recast"

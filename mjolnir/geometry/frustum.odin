@@ -1,6 +1,5 @@
 package geometry
 
-import "core:log"
 import "core:math/linalg"
 
 // Plane is represented as a [4]f32 {A, B, C, D}

@@ -1,11 +1,5 @@
 package navigation_recast
 
-import "core:mem"
-import "core:fmt"
-import "core:log"
-import "core:math"
-import "core:math/linalg"
-
 get_dir_offset_x :: proc "contextless" (dir: int) -> i32 {
     offset := [4]i32{-1, 0, 1, 0}
     return offset[dir & 0x03]

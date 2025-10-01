@@ -1,7 +1,6 @@
 package resources
 
 import vk "vendor:vulkan"
-import "../geometry"
 import "../gpu"
 
 ForceFieldData :: struct {

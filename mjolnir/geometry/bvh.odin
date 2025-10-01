@@ -1,11 +1,10 @@
 package geometry
 
-import "core:log"
 import "core:math"
-import "core:math/linalg"
 import "core:slice"
 import "core:mem"
 import "core:mem/virtual"
+import "core:log"
 
 BVHNode :: struct {
   bounds:          Aabb,

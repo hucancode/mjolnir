@@ -1,11 +1,9 @@
 package geometry
 
-import "core:fmt"
 import "core:log"
 import "core:os"
 import "core:strconv"
 import "core:strings"
-import "core:math"
 import "core:math/linalg"
 
 load_obj :: proc(filename: string, scale: f32 = 1.0) -> (geom: Geometry, ok: bool) {

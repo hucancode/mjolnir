@@ -1,9 +1,10 @@
 package geometry_pass
 
+import "../../geometry"
+import "../../gpu"
+import "../../resources"
+import "../targets"
 import "core:log"
-import geometry "../../geometry"
-import gpu "../../gpu"
-import resources "../../resources"
 import vk "vendor:vulkan"
 
 // 64 byte push constant budget
@@ -12,25 +13,25 @@ PushConstant :: struct {
 }
 
 Renderer :: struct {
-  pipeline:        vk.Pipeline,
-  pipeline_layout: vk.PipelineLayout,
-  depth_prepass_pipeline:        vk.Pipeline,
-  commands:        [resources.MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
+  pipeline:               vk.Pipeline,
+  pipeline_layout:        vk.PipelineLayout,
+  depth_prepass_pipeline: vk.Pipeline,
+  commands:               [resources.MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
 }
 
 SHADER_DEPTH_PREPASS_VERT :: #load("../../shader/depth_prepass/vert.spv")
 
 begin_depth_prepass :: proc(
-  render_target: ^resources.RenderTarget,
+  target: ^targets.RenderTarget,
   command_buffer: vk.CommandBuffer,
   resources_manager: ^resources.Manager,
   frame_index: u32,
 ) {
   depth_texture := resources.get(
     resources_manager.image_2d_buffers,
-    resources.get_depth_texture(render_target, frame_index),
+    targets.get_depth_texture(target, frame_index),
   )
-  depth_attachment := vk.RenderingAttachmentInfo{
+  depth_attachment := vk.RenderingAttachmentInfo {
     sType = .RENDERING_ATTACHMENT_INFO,
     imageView = depth_texture.view,
     imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
@@ -38,25 +39,25 @@ begin_depth_prepass :: proc(
     storeOp = .STORE,
     clearValue = {depthStencil = {1.0, 0}},
   }
-  render_info := vk.RenderingInfo{
+  render_info := vk.RenderingInfo {
     sType = .RENDERING_INFO,
-    renderArea = {extent = render_target.extent},
+    renderArea = {extent = target.extent},
     layerCount = 1,
     pDepthAttachment = &depth_attachment,
   }
   vk.CmdBeginRendering(command_buffer, &render_info)
   viewport := vk.Viewport {
     x        = 0,
-    y        = f32(render_target.extent.height),
-    width    = f32(render_target.extent.width),
-    height   = -f32(render_target.extent.height),
+    y        = f32(target.extent.height),
+    width    = f32(target.extent.width),
+    height   = -f32(target.extent.height),
     minDepth = 0.0,
     maxDepth = 1.0,
   }
   vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
   scissor := vk.Rect2D {
     offset = {x = 0, y = 0},
-    extent = render_target.extent,
+    extent = target.extent,
   }
   vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
 }
@@ -160,7 +161,11 @@ init :: proc(
     gpu_context.device,
     SHADER_DEPTH_PREPASS_VERT,
   ) or_return
-  defer vk.DestroyShaderModule(gpu_context.device, depth_vert_shader_module, nil)
+  defer vk.DestroyShaderModule(
+    gpu_context.device,
+    depth_vert_shader_module,
+    nil,
+  )
   depth_shader_stages := [?]vk.PipelineShaderStageCreateInfo {
     {
       sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
@@ -222,7 +227,7 @@ init :: proc(
     depthWriteEnable = true,
     depthCompareOp   = .LESS,
   }
-  depth_dynamic_rendering := vk.PipelineRenderingCreateInfo{
+  depth_dynamic_rendering := vk.PipelineRenderingCreateInfo {
     sType                 = .PIPELINE_RENDERING_CREATE_INFO,
     depthAttachmentFormat = .D32_SFLOAT,
   }
@@ -376,7 +381,7 @@ init :: proc(
 }
 
 begin_pass :: proc(
-  render_target: ^resources.RenderTarget,
+  target: ^targets.RenderTarget,
   command_buffer: vk.CommandBuffer,
   resources_manager: ^resources.Manager,
   frame_index: u32,
@@ -385,27 +390,27 @@ begin_pass :: proc(
   // Transition all G-buffer textures to COLOR_ATTACHMENT_OPTIMAL
   position_texture := resources.get(
     resources_manager.image_2d_buffers,
-    resources.get_position_texture(render_target, frame_index),
+    targets.get_position_texture(target, frame_index),
   )
   normal_texture := resources.get(
     resources_manager.image_2d_buffers,
-    resources.get_normal_texture(render_target, frame_index),
+    targets.get_normal_texture(target, frame_index),
   )
   albedo_texture := resources.get(
     resources_manager.image_2d_buffers,
-    resources.get_albedo_texture(render_target, frame_index),
+    targets.get_albedo_texture(target, frame_index),
   )
   metallic_roughness_texture := resources.get(
     resources_manager.image_2d_buffers,
-    resources.get_metallic_roughness_texture(render_target, frame_index),
+    targets.get_metallic_roughness_texture(target, frame_index),
   )
   emissive_texture := resources.get(
     resources_manager.image_2d_buffers,
-    resources.get_emissive_texture(render_target, frame_index),
+    targets.get_emissive_texture(target, frame_index),
   )
   final_texture := resources.get(
     resources_manager.image_2d_buffers,
-    resources.get_final_image(render_target, frame_index),
+    targets.get_final_image(target, frame_index),
   )
 
   // Collect all G-buffer images for batch transition
@@ -435,7 +440,7 @@ begin_pass :: proc(
   if self_manage_depth {
     depth_texture := resources.get(
       resources_manager.image_2d_buffers,
-      resources.get_depth_texture(render_target, frame_index),
+      targets.get_depth_texture(target, frame_index),
     )
     gpu.transition_image(
       command_buffer,
@@ -449,7 +454,7 @@ begin_pass :: proc(
       {.DEPTH_STENCIL_ATTACHMENT_WRITE},
     )
   }
-  position_attachment := vk.RenderingAttachmentInfo{
+  position_attachment := vk.RenderingAttachmentInfo {
     sType = .RENDERING_ATTACHMENT_INFO,
     imageView = position_texture.view,
     imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
@@ -457,7 +462,7 @@ begin_pass :: proc(
     storeOp = .STORE,
     clearValue = {color = {float32 = {0.0, 0.0, 0.0, 0.0}}},
   }
-  normal_attachment := vk.RenderingAttachmentInfo{
+  normal_attachment := vk.RenderingAttachmentInfo {
     sType = .RENDERING_ATTACHMENT_INFO,
     imageView = normal_texture.view,
     imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
@@ -465,7 +470,7 @@ begin_pass :: proc(
     storeOp = .STORE,
     clearValue = {color = {float32 = {0.0, 0.0, 0.0, 1.0}}},
   }
-  albedo_attachment := vk.RenderingAttachmentInfo{
+  albedo_attachment := vk.RenderingAttachmentInfo {
     sType = .RENDERING_ATTACHMENT_INFO,
     imageView = albedo_texture.view,
     imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
@@ -473,7 +478,7 @@ begin_pass :: proc(
     storeOp = .STORE,
     clearValue = {color = {float32 = {0.0, 0.0, 0.0, 1.0}}},
   }
-  metallic_roughness_attachment := vk.RenderingAttachmentInfo{
+  metallic_roughness_attachment := vk.RenderingAttachmentInfo {
     sType = .RENDERING_ATTACHMENT_INFO,
     imageView = metallic_roughness_texture.view,
     imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
@@ -481,7 +486,7 @@ begin_pass :: proc(
     storeOp = .STORE,
     clearValue = {color = {float32 = {0.0, 0.0, 0.0, 1.0}}},
   }
-  emissive_attachment := vk.RenderingAttachmentInfo{
+  emissive_attachment := vk.RenderingAttachmentInfo {
     sType = .RENDERING_ATTACHMENT_INFO,
     imageView = emissive_texture.view,
     imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
@@ -491,9 +496,9 @@ begin_pass :: proc(
   }
   depth_texture := resources.get(
     resources_manager.image_2d_buffers,
-    resources.get_depth_texture(render_target, frame_index),
+    targets.get_depth_texture(target, frame_index),
   )
-  depth_attachment := vk.RenderingAttachmentInfo{
+  depth_attachment := vk.RenderingAttachmentInfo {
     sType = .RENDERING_ATTACHMENT_INFO,
     imageView = depth_texture.view,
     imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
@@ -510,7 +515,7 @@ begin_pass :: proc(
   }
   render_info := vk.RenderingInfoKHR {
     sType = .RENDERING_INFO_KHR,
-    renderArea = {extent = render_target.extent},
+    renderArea = {extent = target.extent},
     layerCount = 1,
     colorAttachmentCount = len(color_attachments),
     pColorAttachments = raw_data(color_attachments[:]),
@@ -519,21 +524,21 @@ begin_pass :: proc(
   vk.CmdBeginRendering(command_buffer, &render_info)
   viewport := vk.Viewport {
     x        = 0,
-    y        = f32(render_target.extent.height),
-    width    = f32(render_target.extent.width),
-    height   = -f32(render_target.extent.height),
+    y        = f32(target.extent.height),
+    width    = f32(target.extent.width),
+    height   = -f32(target.extent.height),
     minDepth = 0.0,
     maxDepth = 1.0,
   }
   scissor := vk.Rect2D {
-    extent = render_target.extent,
+    extent = target.extent,
   }
   vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
   vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
 }
 
 end_pass :: proc(
-  render_target: ^resources.RenderTarget,
+  target: ^targets.RenderTarget,
   command_buffer: vk.CommandBuffer,
   resources_manager: ^resources.Manager,
   frame_index: u32,
@@ -543,23 +548,23 @@ end_pass :: proc(
   // Transition all G-buffer textures to SHADER_READ_ONLY_OPTIMAL for use by lighting
   position_texture := resources.get(
     resources_manager.image_2d_buffers,
-    resources.get_position_texture(render_target, frame_index),
+    targets.get_position_texture(target, frame_index),
   )
   normal_texture := resources.get(
     resources_manager.image_2d_buffers,
-    resources.get_normal_texture(render_target, frame_index),
+    targets.get_normal_texture(target, frame_index),
   )
   albedo_texture := resources.get(
     resources_manager.image_2d_buffers,
-    resources.get_albedo_texture(render_target, frame_index),
+    targets.get_albedo_texture(target, frame_index),
   )
   metallic_roughness_texture := resources.get(
     resources_manager.image_2d_buffers,
-    resources.get_metallic_roughness_texture(render_target, frame_index),
+    targets.get_metallic_roughness_texture(target, frame_index),
   )
   emissive_texture := resources.get(
     resources_manager.image_2d_buffers,
-    resources.get_emissive_texture(render_target, frame_index),
+    targets.get_emissive_texture(target, frame_index),
   )
 
   // Collect G-buffer images for batch transition (excluding final image which stays as attachment)
@@ -587,7 +592,7 @@ end_pass :: proc(
 
 render :: proc(
   self: ^Renderer,
-  render_target: ^resources.RenderTarget,
+  target: ^targets.RenderTarget,
   command_buffer: vk.CommandBuffer,
   resources_manager: ^resources.Manager,
   frame_index: u32,
@@ -620,7 +625,7 @@ render :: proc(
   )
   vk.CmdBindPipeline(command_buffer, .GRAPHICS, self.pipeline)
   push_constants := PushConstant {
-    camera_index = render_target.camera.index,
+    camera_index = target.camera.index,
   }
   vk.CmdPushConstants(
     command_buffer,
@@ -656,7 +661,11 @@ render :: proc(
   )
 }
 
-shutdown :: proc(self: ^Renderer, device: vk.Device, command_pool: vk.CommandPool) {
+shutdown :: proc(
+  self: ^Renderer,
+  device: vk.Device,
+  command_pool: vk.CommandPool,
+) {
   gpu.free_command_buffers(device, command_pool, self.commands[:])
   vk.DestroyPipeline(device, self.pipeline, nil)
   self.pipeline = 0
@@ -667,9 +676,12 @@ shutdown :: proc(self: ^Renderer, device: vk.Device, command_pool: vk.CommandPoo
 begin_record :: proc(
   self: ^Renderer,
   frame_index: u32,
-  main_render_target: ^resources.RenderTarget,
+  target: ^targets.RenderTarget,
   resources_manager: ^resources.Manager,
-) -> (command_buffer: vk.CommandBuffer, ret: vk.Result) {
+) -> (
+  command_buffer: vk.CommandBuffer,
+  ret: vk.Result,
+) {
   command_buffer = self.commands[frame_index]
   vk.ResetCommandBuffer(command_buffer, {}) or_return
 
@@ -680,11 +692,11 @@ begin_record :: proc(
     .R8G8B8A8_UNORM,
     .R8G8B8A8_UNORM,
   }
-  rendering_info := vk.CommandBufferInheritanceRenderingInfo{
-    sType = .COMMAND_BUFFER_INHERITANCE_RENDERING_INFO,
-    colorAttachmentCount = len(color_formats),
+  rendering_info := vk.CommandBufferInheritanceRenderingInfo {
+    sType                   = .COMMAND_BUFFER_INHERITANCE_RENDERING_INFO,
+    colorAttachmentCount    = len(color_formats),
     pColorAttachmentFormats = raw_data(color_formats[:]),
-    depthAttachmentFormat = .D32_SFLOAT,
+    depthAttachmentFormat   = .D32_SFLOAT,
   }
   inheritance := vk.CommandBufferInheritanceInfo {
     sType = .COMMAND_BUFFER_INHERITANCE_INFO,
@@ -692,7 +704,7 @@ begin_record :: proc(
   }
   vk.BeginCommandBuffer(
     command_buffer,
-    &vk.CommandBufferBeginInfo{
+    &vk.CommandBufferBeginInfo {
       sType = .COMMAND_BUFFER_BEGIN_INFO,
       flags = {.ONE_TIME_SUBMIT},
       pInheritanceInfo = &inheritance,
@@ -702,7 +714,7 @@ begin_record :: proc(
   // Transition depth texture to depth attachment optimal
   depth_texture := resources.get(
     resources_manager.image_2d_buffers,
-    resources.get_depth_texture(main_render_target, frame_index),
+    targets.get_depth_texture(target, frame_index),
   )
   if depth_texture != nil {
     gpu.transition_image(
@@ -723,14 +735,14 @@ begin_record :: proc(
 
 end_record :: proc(
   command_buffer: vk.CommandBuffer,
-  main_render_target: ^resources.RenderTarget,
+  target: ^targets.RenderTarget,
   resources_manager: ^resources.Manager,
   frame_index: u32,
 ) -> vk.Result {
   // Transition depth texture to shader read optimal for use by lighting
   depth_texture := resources.get(
     resources_manager.image_2d_buffers,
-    resources.get_depth_texture(main_render_target, frame_index),
+    targets.get_depth_texture(target, frame_index),
   )
   if depth_texture != nil {
     gpu.transition_image(

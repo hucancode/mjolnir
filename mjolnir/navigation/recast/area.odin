@@ -1,10 +1,6 @@
 package navigation_recast
 
 import "core:slice"
-import "core:log"
-import "core:math"
-import "core:math/linalg"
-import "../../geometry"
 
 // Erode walkable area by radius
 erode_walkable_area :: proc(radius: i32, chf: ^Compact_Heightfield) -> bool {

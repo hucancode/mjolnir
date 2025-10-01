@@ -1,8 +1,5 @@
 package resources
 
-import "core:math"
-import "core:math/linalg"
-import "../geometry"
 import "../gpu"
 
 CameraData :: struct {

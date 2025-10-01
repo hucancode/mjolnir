@@ -1,8 +1,7 @@
 package resources
 
-import "core:math/linalg"
 import "../geometry"
-import detour "../navigation/detour"
+import "../navigation/detour"
 import "../resources"
 
 NavObstacleType :: enum {

@@ -1,18 +1,15 @@
 package main
 
-import "core:fmt"
 import "core:log"
 import "core:math"
 import "core:math/linalg"
 import "core:os"
 import "mjolnir"
 import "mjolnir/geometry"
-import "mjolnir/gpu"
+import "mjolnir/render/post_process"
+import "mjolnir/render/text"
 import "mjolnir/resources"
-import world "mjolnir/world"
-import post_process "mjolnir/render/post_process"
-import geometry_pass "mjolnir/render/geometry"
-import text "mjolnir/render/text"
+import "mjolnir/world"
 import "vendor:glfw"
 import mu "vendor:microui"
 import vk "vendor:vulkan"
@@ -26,8 +23,8 @@ brick_wall_mat_handle: resources.Handle
 hammer_handle: resources.Handle
 forcefield_handle: resources.Handle
 
-// Portal render target and related data
-portal_render_target_handle: resources.Handle
+// Portal scene capture and related data
+portal_render_target_index: int = -1
 portal_material_handle: resources.Handle
 portal_quad_handle: resources.Handle
 
@@ -51,11 +48,10 @@ main :: proc() {
       return
     }
   }
-  engine:= new(mjolnir.Engine)
+  engine := new(mjolnir.Engine)
   engine.setup_proc = setup
   engine.update_proc = update
   engine.key_press_proc = on_key_pressed
-  engine.custom_render_proc = custom_render
   engine.render2d_proc = render_2d
   mjolnir.run(engine, 1280, 720, "Mjolnir")
 }
@@ -63,10 +59,8 @@ main :: proc() {
 setup :: proc(engine: ^mjolnir.Engine) {
   using mjolnir, geometry
   log.info("Setup function called!")
-  plain_material_handle := resources.create_material_handle(&engine.resource_manager)
-  wireframe_material_handle := resources.create_material_handle(
+  plain_material_handle := resources.create_material_handle(
     &engine.resource_manager,
-    type = .WIREFRAME,
   )
   cube_geom := make_cube()
   cube_mesh_handle := resources.create_mesh_handle(
@@ -138,21 +132,21 @@ setup :: proc(engine: ^mjolnir.Engine) {
     }
   }
   when true {
-      // Create ground plane
-      brick_wall_mat_handle = resources.create_material_handle(
-        &engine.resource_manager,
-        {.ALBEDO_TEXTURE},
-        albedo_handle = resources.create_texture_handle(
-          &engine.gpu_context,
-          &engine.resource_manager,
-          "assets/t_brick_floor_002_diffuse_1k.jpg",
-        ),
-      )
-      ground_mesh_handle := resources.create_mesh_handle(
+    // Create ground plane
+    brick_wall_mat_handle = resources.create_material_handle(
+      &engine.resource_manager,
+      {.ALBEDO_TEXTURE},
+      albedo_handle = resources.create_texture_handle(
         &engine.gpu_context,
         &engine.resource_manager,
-        make_quad(),
-      )
+        "assets/t_brick_floor_002_diffuse_1k.jpg",
+      ),
+    )
+    ground_mesh_handle := resources.create_mesh_handle(
+      &engine.gpu_context,
+      &engine.resource_manager,
+      make_quad(),
+    )
     log.info("spawning ground and walls")
     // Ground node
     size: f32 = 15.0
@@ -205,13 +199,19 @@ setup :: proc(engine: ^mjolnir.Engine) {
         material = brick_wall_mat_handle,
       },
     )
-    world.translate(ceiling, y = 2*size)
+    world.translate(ceiling, y = 2 * size)
     world.rotate(ceiling, -math.PI, linalg.VECTOR3F32_X_AXIS)
     world.scale(ceiling, size)
   }
   if true {
     log.info("loading Hammer GLTF...")
-    gltf_nodes := world.load_gltf(&engine.world, &engine.resource_manager, &engine.gpu_context, "assets/Mjolnir.glb") or_else {}
+    gltf_nodes :=
+      world.load_gltf(
+        &engine.world,
+        &engine.resource_manager,
+        &engine.gpu_context,
+        "assets/Mjolnir.glb",
+      ) or_else {}
     log.infof("Loaded GLTF nodes: %v", gltf_nodes)
     for handle in gltf_nodes {
       hammer_handle = handle
@@ -221,7 +221,13 @@ setup :: proc(engine: ^mjolnir.Engine) {
   }
   if true {
     log.info("loading Damaged Helmet GLTF...")
-    gltf_nodes := world.load_gltf(&engine.world, &engine.resource_manager, &engine.gpu_context, "assets/DamagedHelmet.glb") or_else {}
+    gltf_nodes :=
+      world.load_gltf(
+        &engine.world,
+        &engine.resource_manager,
+        &engine.gpu_context,
+        "assets/DamagedHelmet.glb",
+      ) or_else {}
     log.infof("Loaded GLTF nodes: %v", gltf_nodes)
     for handle in gltf_nodes {
       world.translate(&engine.world, handle, 0, 1, 3)
@@ -230,7 +236,13 @@ setup :: proc(engine: ^mjolnir.Engine) {
   }
   if true {
     log.info("loading Suzanne GLTF...")
-    gltf_nodes := world.load_gltf(&engine.world, &engine.resource_manager, &engine.gpu_context, "assets/Suzanne.glb") or_else {}
+    gltf_nodes :=
+      world.load_gltf(
+        &engine.world,
+        &engine.resource_manager,
+        &engine.gpu_context,
+        "assets/Suzanne.glb",
+      ) or_else {}
     log.infof("Loaded GLTF nodes: %v", gltf_nodes)
     for handle in gltf_nodes {
       world.translate(&engine.world, handle, -3, 1, -2)
@@ -238,13 +250,24 @@ setup :: proc(engine: ^mjolnir.Engine) {
   }
   if true {
     log.info("loading Warrior GLTF...")
-    gltf_nodes := world.load_gltf(&engine.world, &engine.resource_manager, &engine.gpu_context, "assets/Warrior.glb") or_else {}
+    gltf_nodes :=
+      world.load_gltf(
+        &engine.world,
+        &engine.resource_manager,
+        &engine.gpu_context,
+        "assets/Warrior.glb",
+      ) or_else {}
     log.infof("Loaded GLTF nodes: %v", gltf_nodes)
     for armature in gltf_nodes {
       armature_ptr := world.get_node(&engine.world, armature)
       if armature_ptr == nil do continue
       for i in 1 ..< len(armature_ptr.children) {
-        world.play_animation(&engine.world, &engine.resource_manager, armature_ptr.children[i], "idle")
+        world.play_animation(
+          &engine.world,
+          &engine.resource_manager,
+          armature_ptr.children[i],
+          "idle",
+        )
       }
       world.translate(armature_ptr, 0, 0, 1)
 
@@ -253,7 +276,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
         child_node := world.get_node(&engine.world, child_handle)
         if child_node == nil do continue
 
-        if mesh_attachment, has_mesh := child_node.attachment.(world.MeshAttachment); has_mesh {
+        if mesh_attachment, has_mesh := child_node.attachment.(world.MeshAttachment);
+           has_mesh {
           if _, has_skin := mesh_attachment.skinning.?; has_skin {
             _, cube_node := world.spawn_child(
               &engine.world,
@@ -290,26 +314,37 @@ setup :: proc(engine: ^mjolnir.Engine) {
         should_make_spot_light = false
       }
       if should_make_spot_light {
-        light_handles[i], light = world.spawn(&engine.world, nil, &engine.resource_manager)
-        light.attachment = world.create_spot_light_attachment(
+        light_handles[i], light = world.spawn(
+          &engine.world,
+          nil,
+          &engine.resource_manager,
+        )
+        attachment := world.create_spot_light_attachment(
           light_handles[i],
           &engine.resource_manager,
           &engine.gpu_context,
           color,
-          10,  // radius
-          math.PI * 0.25,  // angle
+          10, // radius
+          math.PI * 0.25, // angle
         )
+        light.attachment = attachment
+        renderer_setup_light_shadows(&engine.render, &engine.gpu_context, &engine.resource_manager, attachment.handle)
         world.rotate(light, math.PI * 0.4, linalg.VECTOR3F32_X_AXIS)
       } else {
-        light_handles[i], light = world.spawn(&engine.world, nil, &engine.resource_manager)
+        light_handles[i], light = world.spawn(
+          &engine.world,
+          nil,
+          &engine.resource_manager,
+        )
         attachment := world.create_point_light_attachment(
           light_handles[i],
           &engine.resource_manager,
           &engine.gpu_context,
           color,
-          10,  // radius
+          10, // radius
         )
         light.attachment = attachment
+        renderer_setup_light_shadows(&engine.render, &engine.gpu_context, &engine.resource_manager, attachment.handle)
       }
       world.translate(light, 6, 2, -1)
       cube_node: ^world.Node
@@ -325,14 +360,20 @@ setup :: proc(engine: ^mjolnir.Engine) {
       world.scale(cube_node, 0.1)
     }
     if false {
-      dir_handle, dir_node := world.spawn(&engine.world, nil, &engine.resource_manager)
-      dir_node.attachment = world.create_directional_light_attachment(
+      dir_handle, dir_node := world.spawn(
+        &engine.world,
+        nil,
+        &engine.resource_manager,
+      )
+      attachment := world.create_directional_light_attachment(
         dir_handle,
         &engine.resource_manager,
         &engine.gpu_context,
         {0.2, 0.5, 0.9, 1.0},
         true,
       )
+      dir_node.attachment = attachment
+      renderer_setup_light_shadows(&engine.render, &engine.gpu_context, &engine.resource_manager, attachment.handle)
       world.translate(dir_node, 0, 10, 0)
       world.rotate(dir_node, math.PI * 0.25, linalg.VECTOR3F32_X_AXIS)
     }
@@ -373,74 +414,68 @@ setup :: proc(engine: ^mjolnir.Engine) {
       type = .TRANSPARENT,
       albedo_handle = goldstar_texture_handle,
     )
-    psys_handle1, _ := world.spawn_at(
-      &engine.world,
-      {-2.0, 1.9, 0.3},
-    )
+    psys_handle1, _ := world.spawn_at(&engine.world, {-2.0, 1.9, 0.3})
     emitter_handle1 := resources.create_emitter_handle(
       &engine.resource_manager,
       psys_handle1,
       resources.Emitter {
-        emission_rate = 7,
+        emission_rate     = 7,
         particle_lifetime = 5.0,
-        position_spread = 1.5,
-        initial_velocity = {0, -0.1, 0, 0},
-        velocity_spread = 0.1,
-        color_start = {1, 1, 0, 1}, // Yellow particles
-        color_end = {1, 0.5, 0, 0},
-        size_start = 200.0,
-        size_end = 100.0,
-        weight = 0.1,
-        weight_spread = 0.05,
-        texture_handle = goldstar_texture_handle,
-        enabled = true,
-        aabb_min = {-2, -2, -2},
-        aabb_max = {2, 2, 2},
+        position_spread   = 1.5,
+        initial_velocity  = {0, -0.1, 0, 0},
+        velocity_spread   = 0.1,
+        color_start       = {1, 1, 0, 1}, // Yellow particles
+        color_end         = {1, 0.5, 0, 0},
+        size_start        = 200.0,
+        size_end          = 100.0,
+        weight            = 0.1,
+        weight_spread     = 0.05,
+        texture_handle    = goldstar_texture_handle,
+        enabled           = true,
+        aabb_min          = {-2, -2, -2},
+        aabb_max          = {2, 2, 2},
       },
     )
     world.spawn_child(
       &engine.world,
       psys_handle1,
-      world.EmitterAttachment {emitter_handle1},
+      world.EmitterAttachment{emitter_handle1},
       &engine.resource_manager,
     )
-    psys_handle2, _ := world.spawn_at(
-      &engine.world,
-      {2.0, 1.9, 0.3},
-    )
+    psys_handle2, _ := world.spawn_at(&engine.world, {2.0, 1.9, 0.3})
     // Create an emitter for the second particle system
     emitter_handle2 := resources.create_emitter_handle(
       &engine.resource_manager,
       psys_handle2,
       resources.Emitter {
-        emission_rate = 7,
+        emission_rate     = 7,
         particle_lifetime = 3.0,
-        position_spread = 0.3,
-        initial_velocity = {0, 0.2, 0, 0},
-        velocity_spread = 0.15,
-        color_start = {0, 0, 1, 1}, // Blue particles
-        color_end = {0, 1, 1, 0},
-        size_start = 350.0,
-        size_end = 175.0,
-        weight = 0.1,
-        weight_spread = 0.3,
-        texture_handle = black_circle_texture_handle,
-        enabled = true,
-        aabb_min = {-1, -1, -1},
-        aabb_max = {1, 1, 1},
+        position_spread   = 0.3,
+        initial_velocity  = {0, 0.2, 0, 0},
+        velocity_spread   = 0.15,
+        color_start       = {0, 0, 1, 1}, // Blue particles
+        color_end         = {0, 1, 1, 0},
+        size_start        = 350.0,
+        size_end          = 175.0,
+        weight            = 0.1,
+        weight_spread     = 0.3,
+        texture_handle    = black_circle_texture_handle,
+        enabled           = true,
+        aabb_min          = {-1, -1, -1},
+        aabb_max          = {1, 1, 1},
       },
     )
     world.spawn_child(
       &engine.world,
       psys_handle2,
-      world.EmitterAttachment {emitter_handle2},
+      world.EmitterAttachment{emitter_handle2},
       &engine.resource_manager,
     )
     // Create a force field that affects both particle systems
     forcefield_handle, _ = world.spawn_child(
       &engine.world,
       psys_handle1,
-      world.ForceFieldAttachment {},
+      world.ForceFieldAttachment{},
     )
     world.translate(&engine.world, forcefield_handle, 5.0, 0.0, 0.0)
     forcefield_resource := resources.create_forcefield_handle(
@@ -466,18 +501,15 @@ setup :: proc(engine: ^mjolnir.Engine) {
     )
     world.scale(forcefield_visual, 0.2)
   }
-  // post_process.add_fog(
-  //   &engine.render.post_process,
-  //   [3]f32{0.4, 0.0, 0.8},
-  //   0.02,
-  //   5.0,
-  //   20.0,
-  // )
+  post_process.add_fog(
+    &engine.render.post_process,
+    [3]f32{0.4, 0.0, 0.8},
+    0.02,
+    5.0,
+    20.0,
+  )
   // post_process.add_bloom(&engine.render.post_process)
-  // post_process.add_crosshatch(
-  //   &engine.render.post_process,
-  //   [2]f32{1280, 720},
-  // )
+  post_process.add_crosshatch(&engine.render.post_process, [2]f32{1280, 720})
   // post_process.add_blur(&engine.render.post_process, 18.0)
   // post_process.add_tonemap(&engine.render.post_process, 1.5, 1.3)
   // post_process.add_dof(&engine.render.post_process)
@@ -495,35 +527,26 @@ setup :: proc(engine: ^mjolnir.Engine) {
   current_controller = &orbit_controller
   when true {
     log.info("Setting up portal...")
-    // Create portal render target via global pool
-    portal_render_target: ^resources.RenderTarget
-    portal_render_target_handle, portal_render_target = resources.alloc(
-      &engine.resource_manager.render_targets,
-    )
-    resources.render_target_init(
-      portal_render_target,
+    // Create portal scene capture
+    idx, portal_ok := mjolnir.renderer_add_render_target(
+      &engine.render,
       &engine.gpu_context,
       &engine.resource_manager,
-      512, // Portal texture resolution
+      512,
       512,
       vk.Format.R8G8B8A8_UNORM,
       vk.Format.D32_SFLOAT,
+      camera_position = {5, 15, 7},
+      camera_target = {0, 0, 0},
     )
-    log.infof(
-      "Portal render target created: handle=%v, extent=%v",
-      portal_render_target_handle,
-      portal_render_target.extent,
-    )
-    // Configure the portal camera to look down from above at a steep angle
-    portal_camera, portal_camera_found := resources.get_camera(
-      &engine.resource_manager,
-      portal_render_target.camera,
-    )
-    if !portal_camera_found {
-      log.error("Failed to fetch portal camera")
-    } else {
-      camera_look_at(portal_camera, {5, 15, 7}, {0, 0, 0}, {0, 1, 0})
+    portal_render_target_index = idx
+    if !portal_ok {
+      log.error("Failed to create portal scene capture")
     }
+    log.infof(
+      "Portal scene capture created at index: %d",
+      portal_render_target_index,
+    )
     portal_material_handle = resources.create_material_handle(
       &engine.resource_manager,
       {.ALBEDO_TEXTURE},
@@ -584,7 +607,12 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
       // Rotate light 0 around Y axis
       t := time_since_start(engine)
       world.rotate(&engine.world, handle, t, linalg.VECTOR3F32_Y_AXIS)
-      world.rotate_by(&engine.world, handle, math.PI * 0.3, linalg.VECTOR3F32_X_AXIS)
+      world.rotate_by(
+        &engine.world,
+        handle,
+        math.PI * 0.3,
+        linalg.VECTOR3F32_X_AXIS,
+      )
       continue
     }
     offset := f32(i) / f32(LIGHT_COUNT) * math.PI * 2.0
@@ -602,6 +630,55 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
       light_cube_handles[i],
       math.PI * time_since_start(engine) * 0.5,
     )
+  }
+  // Update portal camera and material
+  if portal_render_target_index >= 0 {
+    portal_rt, rt_ok := renderer_get_render_target(
+      &engine.render,
+      portal_render_target_index,
+    )
+    if rt_ok {
+      portal_camera, camera_ok := resources.get_camera(
+        &engine.resource_manager,
+        portal_rt.camera,
+      )
+      if camera_ok {
+        // Animate portal camera - orbit around the scene center
+        portal_t := time_since_start(engine) * 0.3
+        radius: f32 = 12.0
+        height: f32 = 8.0
+        camera_x := math.cos(portal_t) * radius
+        camera_z := math.sin(portal_t) * radius
+        camera_pos := [3]f32{camera_x, height, camera_z}
+        target := [3]f32{0, 0, 0}
+        camera_look_at(portal_camera, camera_pos, target, {0, 1, 0})
+      }
+      // Update portal material to use scene capture output
+      // Use previous frame's output since current frame hasn't been rendered yet
+      prev_frame :=
+        (engine.frame_index + resources.MAX_FRAMES_IN_FLIGHT - 1) %
+        resources.MAX_FRAMES_IN_FLIGHT
+      portal_mat, mat_ok := resources.get_material(
+        &engine.resource_manager,
+        portal_material_handle,
+      )
+      if mat_ok {
+        portal_output, output_ok := renderer_get_render_target_output(
+          &engine.render,
+          portal_render_target_index,
+          &engine.resource_manager,
+          prev_frame,
+        )
+        if output_ok {
+          portal_mat.albedo = portal_output
+          resources.material_write_to_gpu(
+            &engine.resource_manager,
+            portal_material_handle,
+            portal_mat,
+          )
+        }
+      }
+    }
   }
 }
 
@@ -641,89 +718,9 @@ render_2d :: proc(engine: ^mjolnir.Engine, ctx: ^mu.Context) {
   text.draw_text(
     &engine.render.text,
     "Mjolnir",
-    600, 60,
+    600,
+    60,
     48,
     {255, 255, 255, 255},
   )
-}
-
-custom_render :: proc(
-  engine: ^mjolnir.Engine,
-  command_buffer: vk.CommandBuffer,
-) {
-  using mjolnir, geometry
-  portal_rt: ^resources.RenderTarget
-  ok: bool
-  portal_rt, ok = resources.get_render_target(
-    &engine.resource_manager,
-    portal_render_target_handle,
-  )
-  if !ok do return
-  portal_camera: ^Camera
-  // Animate portal camera - orbit around the scene center
-  portal_camera, ok = resources.get_camera(&engine.resource_manager, portal_rt.camera)
-  if !ok do return
-  t := time_since_start(engine) * 0.3 // Slow orbit speed
-  radius: f32 = 12.0
-  height: f32 = 8.0
-  // Calculate circular orbit position
-  camera_x := math.cos(t) * radius
-  camera_z := math.sin(t) * radius
-  camera_pos := [3]f32{camera_x, height, camera_z}
-  target := [3]f32{0, 0, 0} // Always look at scene center
-  // Update camera position and orientation
-  camera_look_at(portal_camera, camera_pos, target, {0, 1, 0})
-  // Update portal camera uniform
-  resources.render_target_upload_camera_data(&engine.resource_manager, portal_rt)
-  camera_data := resources.get_camera_data(
-    &engine.resource_manager,
-    portal_rt.camera.index,
-  )
-  vis_result := world.query_visibility(
-    &engine.world,
-    &engine.gpu_context,
-    command_buffer,
-    engine.frame_index,
-    world.DrawCommandRequest {
-      camera_handle  = {index = portal_rt.camera.index},
-      include_flags = {.VISIBLE},
-      exclude_flags = {.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME},
-      category      = .CUSTOM0,
-    },
-  )
-  portal_draw_buffer := vis_result.draw_buffer
-  portal_count_buffer := vis_result.count_buffer
-  // Render G-buffer pass with self-managed depth
-  geometry_pass.begin_pass(
-    portal_rt,
-    command_buffer,
-    &engine.resource_manager,
-    engine.frame_index,
-    self_manage_depth = true,
-  )
-  geometry_pass.render(
-    &engine.render.geometry,
-    portal_rt,
-    command_buffer,
-    &engine.resource_manager,
-    engine.frame_index,
-    portal_draw_buffer,
-    portal_count_buffer,
-    vis_result.command_stride,
-  )
-  geometry_pass.end_pass(
-    portal_rt,
-    command_buffer,
-    &engine.resource_manager,
-    engine.frame_index,
-  )
-  // Update portal material to use the rendered texture (from current frame)
-  portal_mat: ^resources.Material
-  portal_mat, ok = resources.get_material(
-    &engine.resource_manager,
-    portal_material_handle,
-  )
-  if !ok do return
-  portal_mat.albedo = resources.get_albedo_texture(portal_rt, engine.frame_index)
-  resources.material_write_to_gpu(&engine.resource_manager, portal_material_handle, portal_mat)
 }

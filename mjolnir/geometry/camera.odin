@@ -1,7 +1,6 @@
 package geometry
 
 import "core:math"
-import "core:log"
 import "core:math/linalg"
 
 PerspectiveProjection :: struct {

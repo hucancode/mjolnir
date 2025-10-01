@@ -1,6 +1,5 @@
 package navigation_detour
 
-import "core:log"
 import "../recast"
 
 Data_Validation_Result :: struct {

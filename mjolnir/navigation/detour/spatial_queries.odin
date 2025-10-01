@@ -3,8 +3,6 @@ package navigation_detour
 import "core:math"
 import "core:math/linalg"
 import "core:math/rand"
-import "core:slice"
-import "core:log"
 import "../recast"
 import "../../geometry"
 
@@ -33,7 +31,7 @@ find_nearest_poly :: proc(query: ^Nav_Mesh_Query, center: [3]f32, half_extents: 
                 tile_poly, poly, poly_status := get_tile_and_poly_by_ref(query.nav_mesh, ref)
                 if recast.status_failed(poly_status) do continue
 
-                closest_pt, inside := closest_point_on_polygon(tile_poly, poly, center)
+                closest_pt, _ := closest_point_on_polygon(tile_poly, poly, center)
                 dist_sqr := linalg.length2(center - closest_pt)
 
                 if dist_sqr < nearest_dist_sqr {
@@ -214,10 +212,10 @@ find_random_point_around_circle :: proc(query: ^Nav_Mesh_Query, start_ref: recas
 
     // Proper random sampling: uniform distribution in circle using polar coordinates
     // Use proper random number generation for non-deterministic results
-    
+
     // Generate random angle [0, 2π)
     angle := math.PI * 2.0 * f64(rand.float32())
-    
+
     // Generate random radius with uniform area distribution
     // sqrt ensures uniform point distribution (area scales with r²)
     radius_factor := f32(math.sqrt(f64(rand.float32())))

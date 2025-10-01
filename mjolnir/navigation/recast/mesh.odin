@@ -2,10 +2,7 @@ package navigation_recast
 
 import "core:slice"
 import "core:log"
-import "core:mem"
-import "core:math"
 import "core:math/linalg"
-import "core:fmt"
 import "../../geometry"
 
 // Check if three vertices form a left turn (counter-clockwise)

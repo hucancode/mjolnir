@@ -1,8 +1,6 @@
 package navigation_recast
 
 import "core:slice"
-import "core:mem"
-import "core:math"
 import "core:log"
 
 // Region building constants

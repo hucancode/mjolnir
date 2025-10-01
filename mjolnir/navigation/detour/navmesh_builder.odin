@@ -1,6 +1,5 @@
 package navigation_detour
 
-import "core:mem"
 import "core:math"
 import "core:math/linalg"
 import "core:slice"
@@ -475,7 +474,7 @@ build_bv_tree :: proc(pmesh: ^recast.Poly_Mesh, nodes: []BV_Node, node_count: i3
     ch := pmesh.ch
     nvp := pmesh.nvp
     quant_factor := 1.0 / cs
-    
+
     // Use hierarchical structure for larger meshes, flat for smaller ones
     if pmesh.npolys <= 32 {
         // Small meshes: flat structure is more efficient

@@ -1,9 +1,10 @@
 package shadow
 
+import "../../geometry"
+import "../../gpu"
+import "../../resources"
+import "../targets"
 import "core:log"
-import geometry "../../geometry"
-import gpu "../../gpu"
-import resources "../../resources"
 import vk "vendor:vulkan"
 
 SHADER_SHADOW_VERT :: #load("../../shader/shadow/vert.spv")
@@ -81,7 +82,7 @@ init :: proc(
     depthWriteEnable = true,
     depthCompareOp   = .LESS,
   }
-  rendering_info_khr := vk.PipelineRenderingCreateInfo{
+  rendering_info_khr := vk.PipelineRenderingCreateInfo {
     sType                 = .PIPELINE_RENDERING_CREATE_INFO,
     depthAttachmentFormat = depth_format,
   }
@@ -137,7 +138,11 @@ init :: proc(
   return .SUCCESS
 }
 
-shutdown :: proc(self: ^Renderer, device: vk.Device, command_pool: vk.CommandPool) {
+shutdown :: proc(
+  self: ^Renderer,
+  device: vk.Device,
+  command_pool: vk.CommandPool,
+) {
   gpu.free_command_buffers(device, command_pool, self.commands[:])
   vk.DestroyPipeline(device, self.pipeline, nil)
   self.pipeline = 0
@@ -146,11 +151,14 @@ shutdown :: proc(self: ^Renderer, device: vk.Device, command_pool: vk.CommandPoo
 begin_record :: proc(
   self: ^Renderer,
   frame_index: u32,
-) -> (command_buffer: vk.CommandBuffer, ret: vk.Result) {
+) -> (
+  command_buffer: vk.CommandBuffer,
+  ret: vk.Result,
+) {
   command_buffer = self.commands[frame_index]
   vk.ResetCommandBuffer(command_buffer, {}) or_return
-  rendering_info := vk.CommandBufferInheritanceRenderingInfo{
-    sType = .COMMAND_BUFFER_INHERITANCE_RENDERING_INFO,
+  rendering_info := vk.CommandBufferInheritanceRenderingInfo {
+    sType                 = .COMMAND_BUFFER_INHERITANCE_RENDERING_INFO,
     depthAttachmentFormat = .D32_SFLOAT,
   }
   inheritance := vk.CommandBufferInheritanceInfo {
@@ -159,7 +167,7 @@ begin_record :: proc(
   }
   vk.BeginCommandBuffer(
     command_buffer,
-    &vk.CommandBufferBeginInfo{
+    &vk.CommandBufferBeginInfo {
       sType = .COMMAND_BUFFER_BEGIN_INFO,
       flags = {.ONE_TIME_SUBMIT},
       pInheritanceInfo = &inheritance,
@@ -174,7 +182,7 @@ end_record :: proc(command_buffer: vk.CommandBuffer) -> vk.Result {
 }
 
 begin_pass :: proc(
-  shadow_target: ^resources.RenderTarget,
+  shadow_target: ^targets.RenderTarget,
   command_buffer: vk.CommandBuffer,
   resources_manager: ^resources.Manager,
   frame_index: u32,
@@ -186,12 +194,12 @@ begin_pass :: proc(
   if has_face {
     cube_texture := resources.get(
       resources_manager.image_cube_buffers,
-      resources.get_depth_texture(shadow_target, frame_index),
+      targets.get_depth_texture(shadow_target, frame_index),
     )
     if cube_texture == nil {
       log.errorf(
         "Invalid cube shadow map handle: %v",
-        resources.get_depth_texture(shadow_target, frame_index),
+        targets.get_depth_texture(shadow_target, frame_index),
       )
       return
     }
@@ -200,12 +208,12 @@ begin_pass :: proc(
   } else {
     texture_2d := resources.get(
       resources_manager.image_2d_buffers,
-      resources.get_depth_texture(shadow_target, frame_index),
+      targets.get_depth_texture(shadow_target, frame_index),
     )
     if texture_2d == nil {
       log.errorf(
         "Invalid 2D shadow map handle: %v",
-        resources.get_depth_texture(shadow_target, frame_index),
+        targets.get_depth_texture(shadow_target, frame_index),
       )
       return
     }
@@ -228,7 +236,7 @@ begin_pass :: proc(
     {.DEPTH_STENCIL_ATTACHMENT_WRITE},
     layer_count,
   )
-  depth_attachment := vk.RenderingAttachmentInfo{
+  depth_attachment := vk.RenderingAttachmentInfo {
     sType = .RENDERING_ATTACHMENT_INFO,
     imageView = depth_image_view,
     imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
@@ -236,7 +244,7 @@ begin_pass :: proc(
     storeOp = .STORE,
     clearValue = {depthStencil = {1.0, 0}}, // Clear to far distance
   }
-  render_info := vk.RenderingInfo{
+  render_info := vk.RenderingInfo {
     sType = .RENDERING_INFO,
     renderArea = {extent = shadow_target.extent},
     layerCount = 1,
@@ -262,7 +270,7 @@ begin_pass :: proc(
 // Render shadow for a single light
 render :: proc(
   self: ^Renderer,
-  shadow_target: resources.RenderTarget,
+  shadow_target: targets.RenderTarget,
   command_buffer: vk.CommandBuffer,
   resources_manager: ^resources.Manager,
   frame_index: u32,
@@ -335,7 +343,7 @@ render :: proc(
 
 end_pass :: proc(
   command_buffer: vk.CommandBuffer,
-  shadow_target: ^resources.RenderTarget,
+  target: ^targets.RenderTarget,
   resources_manager: ^resources.Manager,
   frame_index: u32,
   face: Maybe(u32) = nil,
@@ -344,16 +352,16 @@ end_pass :: proc(
 
   // Transition shadow map to shader read optimal after rendering
   depth_image: vk.Image
-  face_index, has_face := face.?
+  _, has_face := face.?
   if has_face {
     cube_texture := resources.get(
       resources_manager.image_cube_buffers,
-      resources.get_depth_texture(shadow_target, frame_index),
+      targets.get_depth_texture(target, frame_index),
     )
     if cube_texture == nil {
       log.errorf(
         "Invalid cube shadow map handle: %v",
-        resources.get_depth_texture(shadow_target, frame_index),
+        targets.get_depth_texture(target, frame_index),
       )
       return
     }
@@ -361,12 +369,12 @@ end_pass :: proc(
   } else {
     texture_2d := resources.get(
       resources_manager.image_2d_buffers,
-      resources.get_depth_texture(shadow_target, frame_index),
+      targets.get_depth_texture(target, frame_index),
     )
     if texture_2d == nil {
       log.errorf(
         "Invalid 2D shadow map handle: %v",
-        resources.get_depth_texture(shadow_target, frame_index),
+        targets.get_depth_texture(target, frame_index),
       )
       return
     }

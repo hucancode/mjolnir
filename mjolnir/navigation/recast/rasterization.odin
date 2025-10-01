@@ -1,11 +1,8 @@
 package navigation_recast
 
-import "core:log"
 import "core:math"
-import "core:fmt"
 import "../../geometry"
 import "core:math/linalg"
-import "base:runtime"
 
 // Axis enumeration for polygon division
 Axis :: enum {

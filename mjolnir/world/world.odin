@@ -7,7 +7,6 @@ import "core:math/linalg"
 import "core:slice"
 import "../geometry"
 import "../gpu"
-import "../render/particles"
 import "../resources"
 import vk "vendor:vulkan"
 
@@ -95,34 +94,16 @@ destroy_node :: proc(self: ^Node, resources_manager: ^resources.Manager, gpu_con
   if resources_manager == nil {
     return
   }
-
-  // resources.Handle light attachment cleanup
   #partial switch &attachment in &self.attachment {
   case LightAttachment:
-    if attachment.handle.generation != 0 {
-      if gpu_context != nil {
-        resources.destroy_light(resources_manager, gpu_context, attachment.handle)
-      } else {
-        log.warn("Cannot properly destroy light without GPU context - this may leak shadow resources")
-      }
-      attachment.handle = {}
-    }
+    resources.destroy_light(resources_manager, attachment.handle)
+    attachment.handle = {}
   case EmitterAttachment:
-    emitter := resources.get(resources_manager.emitters, attachment.handle)
-    if emitter != nil {
-      emitter.node_handle = {}
-    }
-    if resources.destroy_emitter_handle(resources_manager, attachment.handle) {
-      attachment.handle = {}
-    }
+    resources.destroy_emitter_handle(resources_manager, attachment.handle)
+    attachment.handle = {}
   case ForceFieldAttachment:
-    forcefield := resources.get(resources_manager.forcefields, attachment.handle)
-    if forcefield != nil {
-      forcefield.node_handle = {}
-    }
-    if resources.destroy_forcefield_handle(resources_manager, attachment.handle) {
-      attachment.handle = {}
-    }
+    resources.destroy_forcefield_handle(resources_manager, attachment.handle)
+    attachment.handle = {}
   case MeshAttachment:
     // TODO: we need to check if the mesh is still in use before freeing its resources
     skinning, has_skin := &attachment.skinning.?

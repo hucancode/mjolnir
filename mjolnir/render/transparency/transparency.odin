@@ -1,9 +1,10 @@
 package transparency
 
+import "../../geometry"
+import "../../gpu"
+import "../../resources"
+import "../targets"
 import "core:log"
-import geometry "../../geometry"
-import gpu "../../gpu"
-import resources "../../resources"
 import vk "vendor:vulkan"
 
 Renderer :: struct {
@@ -338,7 +339,7 @@ shutdown :: proc(
 
 begin_pass :: proc(
   self: ^Renderer,
-  render_target: ^resources.RenderTarget,
+  target: ^targets.RenderTarget,
   command_buffer: vk.CommandBuffer,
   resources_manager: ^resources.Manager,
   frame_index: u32,
@@ -346,7 +347,7 @@ begin_pass :: proc(
   // Setup color attachment - load existing content
   color_texture, ok := resources.get_image_2d(
     resources_manager,
-    resources.get_final_image(render_target, frame_index),
+    targets.get_final_image(target, frame_index),
   )
   if !ok {
     log.error("Transparent lighting missing color attachment")
@@ -354,13 +355,13 @@ begin_pass :: proc(
   }
   depth_texture, depth_found := resources.get_image_2d(
     resources_manager,
-    resources.get_depth_texture(render_target, frame_index),
+    targets.get_depth_texture(target, frame_index),
   )
   if !depth_found {
     log.error("Transparent lighting missing depth attachment")
     return
   }
-  color_attachment := vk.RenderingAttachmentInfo{
+  color_attachment := vk.RenderingAttachmentInfo {
     sType       = .RENDERING_ATTACHMENT_INFO,
     imageView   = color_texture.view,
     imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
@@ -368,7 +369,7 @@ begin_pass :: proc(
     storeOp     = .STORE,
   }
   // Setup depth attachment - load existing depth buffer
-  depth_attachment := vk.RenderingAttachmentInfo{
+  depth_attachment := vk.RenderingAttachmentInfo {
     sType       = .RENDERING_ATTACHMENT_INFO,
     imageView   = depth_texture.view,
     imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
@@ -376,9 +377,9 @@ begin_pass :: proc(
     storeOp     = .STORE,
   }
   // Begin dynamic rendering
-  render_info := vk.RenderingInfo{
+  render_info := vk.RenderingInfo {
     sType = .RENDERING_INFO,
-    renderArea = {extent = render_target.extent},
+    renderArea = {extent = target.extent},
     layerCount = 1,
     colorAttachmentCount = 1,
     pColorAttachments = &color_attachment,
@@ -387,14 +388,14 @@ begin_pass :: proc(
   vk.CmdBeginRendering(command_buffer, &render_info)
   viewport := vk.Viewport {
     x        = 0,
-    y        = f32(render_target.extent.height),
-    width    = f32(render_target.extent.width),
-    height   = -f32(render_target.extent.height),
+    y        = f32(target.extent.height),
+    width    = f32(target.extent.width),
+    height   = -f32(target.extent.height),
     minDepth = 0.0,
     maxDepth = 1.0,
   }
   scissor := vk.Rect2D {
-    extent = render_target.extent,
+    extent = target.extent,
   }
   vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
   vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
@@ -403,7 +404,7 @@ begin_pass :: proc(
 render :: proc(
   self: ^Renderer,
   pipeline: vk.Pipeline,
-  render_target: ^resources.RenderTarget,
+  target: ^targets.RenderTarget,
   command_buffer: vk.CommandBuffer,
   resources_manager: ^resources.Manager,
   frame_index: u32,
@@ -437,7 +438,7 @@ render :: proc(
   vk.CmdBindPipeline(command_buffer, .GRAPHICS, pipeline)
 
   push_constants := PushConstant {
-    camera_index = render_target.camera.index,
+    camera_index = target.camera.index,
   }
   vk.CmdPushConstants(
     command_buffer,
@@ -478,15 +479,18 @@ begin_record :: proc(
   self: ^Renderer,
   frame_index: u32,
   color_format: vk.Format,
-) -> (command_buffer: vk.CommandBuffer, ret: vk.Result) {
+) -> (
+  command_buffer: vk.CommandBuffer,
+  ret: vk.Result,
+) {
   command_buffer = self.commands[frame_index]
   vk.ResetCommandBuffer(command_buffer, {}) or_return
   color_formats := [1]vk.Format{color_format}
-  rendering_info := vk.CommandBufferInheritanceRenderingInfo{
-    sType = .COMMAND_BUFFER_INHERITANCE_RENDERING_INFO,
-    colorAttachmentCount = 1,
+  rendering_info := vk.CommandBufferInheritanceRenderingInfo {
+    sType                   = .COMMAND_BUFFER_INHERITANCE_RENDERING_INFO,
+    colorAttachmentCount    = 1,
     pColorAttachmentFormats = &color_formats[0],
-    depthAttachmentFormat = .D32_SFLOAT,
+    depthAttachmentFormat   = .D32_SFLOAT,
   }
   inheritance := vk.CommandBufferInheritanceInfo {
     sType = .COMMAND_BUFFER_INHERITANCE_INFO,
@@ -494,7 +498,7 @@ begin_record :: proc(
   }
   vk.BeginCommandBuffer(
     command_buffer,
-    &vk.CommandBufferBeginInfo{
+    &vk.CommandBufferBeginInfo {
       sType = .COMMAND_BUFFER_BEGIN_INFO,
       flags = {.ONE_TIME_SUBMIT},
       pInheritanceInfo = &inheritance,
@@ -508,9 +512,6 @@ end_record :: proc(command_buffer: vk.CommandBuffer) -> vk.Result {
   return .SUCCESS
 }
 
-end_pass :: proc(
-  self: ^Renderer,
-  command_buffer: vk.CommandBuffer,
-) {
+end_pass :: proc(self: ^Renderer, command_buffer: vk.CommandBuffer) {
   vk.CmdEndRendering(command_buffer)
 }

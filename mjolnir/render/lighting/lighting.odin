@@ -1,12 +1,10 @@
 package lighting
 
-import geometry "../../geometry"
-import gpu "../../gpu"
-import resources "../../resources"
-import "core:fmt"
+import "../../geometry"
+import "../../gpu"
+import "../../resources"
+import "../targets"
 import "core:log"
-import "core:slice"
-import mu "vendor:microui"
 import vk "vendor:vulkan"
 
 LightKind :: enum u32 {
@@ -51,14 +49,14 @@ LightPushConstant :: struct {
 
 begin_ambient_pass :: proc(
   self: ^Renderer,
-  target: ^resources.RenderTarget,
+  target: ^targets.RenderTarget,
   command_buffer: vk.CommandBuffer,
   resources_manager: ^resources.Manager,
   frame_index: u32,
 ) {
   color_texture := resources.get(
     resources_manager.image_2d_buffers,
-    resources.get_final_image(target, frame_index),
+    targets.get_final_image(target, frame_index),
   )
   color_attachment := vk.RenderingAttachmentInfo {
     sType = .RENDERING_ATTACHMENT_INFO,
@@ -106,21 +104,21 @@ begin_ambient_pass :: proc(
 
 render_ambient :: proc(
   self: ^Renderer,
-  render_target: ^resources.RenderTarget,
+  target: ^targets.RenderTarget,
   command_buffer: vk.CommandBuffer,
   resources_manager: ^resources.Manager,
   frame_index: u32,
 ) {
   push := AmbientPushConstant {
-    camera_index           = render_target.camera.index,
+    camera_index           = target.camera.index,
     environment_index      = self.environment_map.index,
     brdf_lut_index         = self.brdf_lut.index,
-    position_texture_index = resources.get_position_texture(render_target, frame_index).index,
-    normal_texture_index   = resources.get_normal_texture(render_target, frame_index).index,
-    albedo_texture_index   = resources.get_albedo_texture(render_target, frame_index).index,
-    metallic_texture_index = resources.get_metallic_roughness_texture(render_target, frame_index).index,
-    emissive_texture_index = resources.get_emissive_texture(render_target, frame_index).index,
-    depth_texture_index    = resources.get_depth_texture(render_target, frame_index).index,
+    position_texture_index = targets.get_position_texture(target, frame_index).index,
+    normal_texture_index   = targets.get_normal_texture(target, frame_index).index,
+    albedo_texture_index   = targets.get_albedo_texture(target, frame_index).index,
+    metallic_texture_index = targets.get_metallic_roughness_texture(target, frame_index).index,
+    emissive_texture_index = targets.get_emissive_texture(target, frame_index).index,
+    depth_texture_index    = targets.get_depth_texture(target, frame_index).index,
     environment_max_lod    = self.environment_max_lod,
     ibl_intensity          = self.ibl_intensity,
   }
@@ -281,16 +279,15 @@ init :: proc(
 
   // Initialize environment resources
   environment_map: ^gpu.ImageBuffer
-  self.environment_map, environment_map =
-    resources.create_texture_from_path(
-      gpu_context,
-      resources_manager,
-      "assets/Cannon_Exterior.hdr",
-      .R32G32B32A32_SFLOAT,
-      true,
-      {.SAMPLED},
-      true,
-    ) or_return
+  self.environment_map, environment_map = resources.create_texture_from_path(
+    gpu_context,
+    resources_manager,
+    "assets/Cannon_Exterior.hdr",
+    .R32G32B32A32_SFLOAT,
+    true,
+    {.SAMPLED},
+    true,
+  ) or_return
   self.environment_max_lod = 8.0 // default fallback
   if environment_map != nil {
     self.environment_max_lod =
@@ -300,7 +297,6 @@ init :: proc(
       ) -
       1.0
   }
-  brdf_lut: ^gpu.ImageBuffer
   brdf_handle, _, brdf_ret := resources.create_texture_from_data(
     gpu_context,
     resources_manager,
@@ -351,7 +347,11 @@ init :: proc(
   ) or_return
   defer vk.DestroyShaderModule(gpu_context.device, lighting_frag_module, nil)
 
-  lighting_dynamic_states := [?]vk.DynamicState{.VIEWPORT, .SCISSOR, .DEPTH_COMPARE_OP}
+  lighting_dynamic_states := [?]vk.DynamicState {
+    .VIEWPORT,
+    .SCISSOR,
+    .DEPTH_COMPARE_OP,
+  }
   lighting_dynamic_state := vk.PipelineDynamicStateCreateInfo {
     sType             = .PIPELINE_DYNAMIC_STATE_CREATE_INFO,
     dynamicStateCount = len(lighting_dynamic_states),
@@ -481,11 +481,7 @@ shutdown :: proc(
   gpu.free_command_buffers(device, command_pool, self.commands[:])
   vk.DestroyPipeline(device, self.ambient_pipeline, nil)
   self.ambient_pipeline = 0
-  vk.DestroyPipelineLayout(
-    device,
-    self.ambient_pipeline_layout,
-    nil,
-  )
+  vk.DestroyPipelineLayout(device, self.ambient_pipeline_layout, nil)
   self.ambient_pipeline_layout = 0
   if item, freed := resources.free(
     &resources_manager.image_2d_buffers,
@@ -499,11 +495,7 @@ shutdown :: proc(
   ); freed {
     gpu.image_buffer_destroy(device, item)
   }
-  vk.DestroyPipelineLayout(
-    device,
-    self.lighting_pipeline_layout,
-    nil,
-  )
+  vk.DestroyPipelineLayout(device, self.lighting_pipeline_layout, nil)
   vk.DestroyPipeline(device, self.lighting_pipeline, nil)
 }
 
@@ -511,15 +503,18 @@ begin_record :: proc(
   self: ^Renderer,
   frame_index: u32,
   color_format: vk.Format,
-) -> (command_buffer: vk.CommandBuffer, ret: vk.Result) {
+) -> (
+  command_buffer: vk.CommandBuffer,
+  ret: vk.Result,
+) {
   command_buffer = self.commands[frame_index]
   vk.ResetCommandBuffer(command_buffer, {}) or_return
   color_formats := [1]vk.Format{color_format}
-  rendering_info := vk.CommandBufferInheritanceRenderingInfo{
-    sType = .COMMAND_BUFFER_INHERITANCE_RENDERING_INFO,
-    colorAttachmentCount = 1,
+  rendering_info := vk.CommandBufferInheritanceRenderingInfo {
+    sType                   = .COMMAND_BUFFER_INHERITANCE_RENDERING_INFO,
+    colorAttachmentCount    = 1,
     pColorAttachmentFormats = &color_formats[0],
-    depthAttachmentFormat = .D32_SFLOAT,
+    depthAttachmentFormat   = .D32_SFLOAT,
   }
   inheritance := vk.CommandBufferInheritanceInfo {
     sType = .COMMAND_BUFFER_INHERITANCE_INFO,
@@ -527,7 +522,7 @@ begin_record :: proc(
   }
   vk.BeginCommandBuffer(
     command_buffer,
-    &vk.CommandBufferBeginInfo{
+    &vk.CommandBufferBeginInfo {
       sType = .COMMAND_BUFFER_BEGIN_INFO,
       flags = {.ONE_TIME_SUBMIT},
       pInheritanceInfo = &inheritance,
@@ -574,14 +569,14 @@ lighting_recreate_images :: proc(
 
 begin_pass :: proc(
   self: ^Renderer,
-  target: ^resources.RenderTarget,
+  target: ^targets.RenderTarget,
   command_buffer: vk.CommandBuffer,
   resources_manager: ^resources.Manager,
   frame_index: u32,
 ) {
   final_image := resources.get(
     resources_manager.image_2d_buffers,
-    resources.get_final_image(target, frame_index),
+    targets.get_final_image(target, frame_index),
   )
   color_attachment := vk.RenderingAttachmentInfo {
     sType = .RENDERING_ATTACHMENT_INFO,
@@ -593,7 +588,7 @@ begin_pass :: proc(
   }
   depth_texture := resources.get(
     resources_manager.image_2d_buffers,
-    resources.get_depth_texture(target, frame_index),
+    targets.get_depth_texture(target, frame_index),
   )
   depth_attachment := vk.RenderingAttachmentInfo {
     sType       = .RENDERING_ATTACHMENT_INFO,
@@ -645,7 +640,7 @@ begin_pass :: proc(
 
 render :: proc(
   self: ^Renderer,
-  render_target: ^resources.RenderTarget,
+  target: ^targets.RenderTarget,
   command_buffer: vk.CommandBuffer,
   resources_manager: ^resources.Manager,
   frame_index: u32,
@@ -688,14 +683,14 @@ render :: proc(
   }
   // Push constant structure for light index-based rendering
   push_constant := LightPushConstant {
-    scene_camera_idx = render_target.camera.index,
-    position_texture_index = resources.get_position_texture(render_target, frame_index).index,
-    normal_texture_index = resources.get_normal_texture(render_target, frame_index).index,
-    albedo_texture_index = resources.get_albedo_texture(render_target, frame_index).index,
-    metallic_texture_index = resources.get_metallic_roughness_texture(render_target, frame_index).index,
-    emissive_texture_index = resources.get_emissive_texture(render_target, frame_index).index,
-    depth_texture_index = resources.get_depth_texture(render_target, frame_index).index,
-    input_image_index = resources.get_final_image(render_target, frame_index).index,
+    scene_camera_idx       = target.camera.index,
+    position_texture_index = targets.get_position_texture(target, frame_index).index,
+    normal_texture_index   = targets.get_normal_texture(target, frame_index).index,
+    albedo_texture_index   = targets.get_albedo_texture(target, frame_index).index,
+    metallic_texture_index = targets.get_metallic_roughness_texture(target, frame_index).index,
+    emissive_texture_index = targets.get_emissive_texture(target, frame_index).index,
+    depth_texture_index    = targets.get_depth_texture(target, frame_index).index,
+    input_image_index      = targets.get_final_image(target, frame_index).index,
   }
   for idx in 0 ..< len(resources_manager.lights.entries) {
     entry := &resources_manager.lights.entries[idx]

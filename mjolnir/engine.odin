@@ -6,8 +6,6 @@ import "core:c"
 import "core:fmt"
 import "core:log"
 import "core:math"
-import "core:math/linalg"
-import "core:os"
 import "core:slice"
 import "core:strings"
 import "core:thread"
@@ -17,12 +15,10 @@ import "geometry"
 import "gpu"
 import "resources"
 import "world"
+import "render/targets"
 import "render/particles"
-import "render/lighting"
 import "render/text"
 import "render/debug_ui"
-import navmesh_renderer "render/navigation"
-import "navigation/recast"
 import "vendor:glfw"
 import mu "vendor:microui"
 import vk "vendor:vulkan"
@@ -57,38 +53,6 @@ CustomRenderProc :: #type proc(
 
 UpdateThreadData :: struct {
   engine: ^Engine,
-}
-
-PointLightData :: struct {
-  views:          [6]matrix[4, 4]f32,
-  proj:           matrix[4, 4]f32,
-  world:          matrix[4, 4]f32,
-  color:          [4]f32,
-  position:       [4]f32,
-  radius:         f32,
-  shadow_map:     resources.Handle,
-  render_targets: [6]resources.Handle,
-}
-
-SpotLightData :: struct {
-  view:          matrix[4, 4]f32,
-  proj:          matrix[4, 4]f32,
-  world:         matrix[4, 4]f32,
-  color:         [4]f32,
-  position:      [4]f32,
-  direction:     [4]f32,
-  radius:        f32,
-  angle:         f32,
-  shadow_map:    resources.Handle,
-  render_target: resources.Handle,
-}
-
-DirectionalLightData :: struct {
-  view:      matrix[4, 4]f32,
-  proj:      matrix[4, 4]f32,
-  world:     matrix[4, 4]f32,
-  color:     [4]f32,
-  direction: [4]f32,
 }
 
 InputState :: struct {
@@ -189,31 +153,6 @@ init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
     &self.frame_fence,
   ) or_return
 
-  // Initialize main render target with default camera settings
-  main_render_target: ^resources.RenderTarget
-  self.render.targets.main, main_render_target = resources.alloc(
-    &self.resource_manager.render_targets,
-  )
-  resources.render_target_init(
-    main_render_target,
-    &self.gpu_context,
-    &self.resource_manager,
-    self.swapchain.extent.width,
-    self.swapchain.extent.height,
-    self.swapchain.format.format,
-    .D32_SFLOAT,
-    {
-      .FINAL_IMAGE,
-      .POSITION_TEXTURE,
-      .NORMAL_TEXTURE,
-      .ALBEDO_TEXTURE,
-      .METALLIC_ROUGHNESS,
-      .EMISSIVE_TEXTURE,
-      .DEPTH_TEXTURE,
-    },
-    {5, 8, 5}, // Camera slightly above and diagonal to origin
-    {0, 0, 0}, // Looking at origin
-  ) or_return
   vk.AllocateCommandBuffers(
     self.gpu_context.device,
     &{
@@ -230,9 +169,35 @@ init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
     &self.resource_manager,
     self.swapchain.extent,
     self.swapchain.format.format,
-    self.render.targets.main,
+    {},
     get_window_dpi(self.window),
   ) or_return
+
+  // Initialize main render target with default camera settings
+  main_target_idx, main_target_ok := renderer_add_render_target(
+    &self.render,
+    &self.gpu_context,
+    &self.resource_manager,
+    self.swapchain.extent.width,
+    self.swapchain.extent.height,
+    self.swapchain.format.format,
+    .D32_SFLOAT,
+    {5, 8, 5}, // Camera slightly above and diagonal to origin
+    {0, 0, 0}, // Looking at origin
+    enabled_passes = {
+      .SHADOW,
+      .GEOMETRY,
+      .LIGHTING,
+      .TRANSPARENCY,
+      .PARTICLES,
+      .POST_PROCESS,
+    },
+  )
+  if !main_target_ok {
+    log.error("Failed to create main render target")
+    return .ERROR_INITIALIZATION_FAILED
+  }
+  self.render.main_render_target_index = main_target_idx
   glfw.SetKeyCallback(
     self.window,
     proc "c" (window: glfw.WindowHandle, key, scancode, action, mods: c.int) {
@@ -374,10 +339,11 @@ time_since_start :: proc(self: ^Engine) -> f32 {
 }
 
 get_main_camera :: proc(self: ^Engine) -> ^geometry.Camera {
-  target, ok := resources.get_render_target(&self.resource_manager, self.render.targets.main)
-  if !ok {
+  main_idx := self.render.main_render_target_index
+  if main_idx < 0 || main_idx >= len(self.render.render_targets) {
     return nil
   }
+  target := &self.render.render_targets[main_idx]
   camera_ptr, camera_found := resources.get_camera(&self.resource_manager, target.camera)
   if !camera_found {
     return nil
@@ -486,12 +452,7 @@ update :: proc(self: ^Engine) -> bool {
 shutdown :: proc(self: ^Engine) {
   vk.DeviceWaitIdle(self.gpu_context.device)
   gpu.free_command_buffers(self.gpu_context.device, self.gpu_context.command_pool, self.command_buffers[:])
-  if item, ok := resources.free(
-    &self.resource_manager.render_targets,
-    self.render.targets.main,
-  ); ok {
-    resources.render_target_destroy(item, self.gpu_context.device, &self.resource_manager)
-  }
+  // Main render target is cleaned up in renderer_shutdown
   delete(self.pending_node_deletions)
   vk.DestroyFence(self.gpu_context.device, self.frame_fence, nil)
   renderer_shutdown(&self.render, self.gpu_context.device, self.gpu_context.command_pool, &self.resource_manager)
@@ -535,40 +496,17 @@ recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
   if main_camera := get_main_camera(engine); main_camera != nil {
     geometry.camera_update_aspect_ratio(main_camera, new_aspect_ratio)
   }
-  if main_render_target, ok := resources.get_render_target(&engine.resource_manager, engine.render.targets.main); ok {
-    // Save current camera state
-    old_camera := resources.get(
-      engine.resource_manager.cameras,
-      main_render_target.camera,
-    )
-    old_position :=
-      old_camera.position if old_camera != nil else [3]f32{0, 0, 3}
-    old_target := [3]f32{0, 0, 0} // Calculate from camera direction if needed
-
-    resources.render_target_destroy(
-      main_render_target,
-      engine.gpu_context.device,
-      &engine.resource_manager,
-    )
-    resources.render_target_init(
-      main_render_target,
+  main_idx := engine.render.main_render_target_index
+  if main_idx >= 0 && main_idx < len(engine.render.render_targets) {
+    main_target := &engine.render.render_targets[main_idx]
+    targets.render_target_resize(
+      main_target,
       &engine.gpu_context,
       &engine.resource_manager,
       engine.swapchain.extent.width,
       engine.swapchain.extent.height,
       engine.swapchain.format.format,
-      .D32_SFLOAT,
-      {
-        .FINAL_IMAGE,
-        .POSITION_TEXTURE,
-        .NORMAL_TEXTURE,
-        .ALBEDO_TEXTURE,
-        .METALLIC_ROUGHNESS,
-        .EMISSIVE_TEXTURE,
-        .DEPTH_TEXTURE,
-      },
-      old_position, // Preserve camera position
-      old_target, // Preserve camera target
+      vk.Format.D32_SFLOAT,
     ) or_return
   }
   resize(
@@ -591,13 +529,23 @@ render :: proc(self: ^Engine) -> vk.Result {
   render_delta_time := f32(time.duration_seconds(time.since(self.last_render_timestamp)))
   update_skeletal_animations(self, render_delta_time)
   resources.commit(&self.resource_manager, command_buffer) or_return
-  main_render_target, found_main_rt := resources.get_render_target(&self.resource_manager, self.render.targets.main)
-  if !found_main_rt {
-    log.errorf("Main render target not found")
+  main_idx := self.render.main_render_target_index
+  if main_idx < 0 || main_idx >= len(self.render.render_targets) {
+    log.errorf("Main render target index invalid: %d", main_idx)
     return .ERROR_UNKNOWN
   }
-  resources.render_target_upload_camera_data(&self.resource_manager, main_render_target)
-  resources.update_shadow_camera_transforms(&self.resource_manager)
+  main_render_target := &self.render.render_targets[main_idx]
+  targets.render_target_upload_camera_data(&self.resource_manager, main_render_target)
+  renderer_update_all_light_shadow_cameras(&self.render, &self.resource_manager)
+  record_all_render_targets(
+    &self.render,
+    self.frame_index,
+    &self.gpu_context,
+    &self.resource_manager,
+    &self.world,
+    command_buffer,
+    self.swapchain.format.format,
+  )
   record_shadow_pass(
     &self.render,
     self.frame_index,
@@ -653,9 +601,6 @@ render :: proc(self: ^Engine) -> vk.Result {
     self.resource_manager.world_matrix_descriptor_set,
     &self.resource_manager,
   )
-  if self.custom_render_proc != nil {
-    self.custom_render_proc(self, command_buffer)
-  }
   buffers := [?]vk.CommandBuffer{
     self.render.shadow.commands[self.frame_index],
     self.render.geometry.commands[self.frame_index],

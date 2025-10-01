@@ -1,6 +1,5 @@
 package geometry
 
-import "core:log"
 import "core:math/linalg"
 
 Transform :: struct {

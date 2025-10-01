@@ -2,7 +2,6 @@ package resources
 
 import "../animation"
 import "core:log"
-import "core:math/linalg"
 import "core:slice"
 import "../geometry"
 import "../gpu"
@@ -26,7 +25,6 @@ Manager :: struct {
   image_2d_buffers:             Pool(gpu.ImageBuffer),
   image_cube_buffers:           Pool(gpu.CubeImageBuffer),
   cameras:                      Pool(geometry.Camera),
-  render_targets:               Pool(RenderTarget),
   emitters:                     Pool(Emitter),
   forcefields:                  Pool(ForceField),
   animation_clips:              Pool(animation.Clip),
@@ -120,10 +118,6 @@ init :: proc(
   pool_init(&manager.image_cube_buffers)
   log.infof("Initializing cameras pool... ")
   pool_init(&manager.cameras)
-  log.infof("Initializing render target pool... ")
-  pool_init(&manager.render_targets)
-  log.infof("Initializing emitter pool... ")
-  pool_init(&manager.emitters)
   log.infof("Initializing forcefield pool... ")
   pool_init(&manager.forcefields)
   log.infof("Initializing animation clips pool... ")
@@ -1429,17 +1423,6 @@ manager_free_indices :: proc(
   allocation: BufferAllocation,
 ) {
   slab_free(&manager.index_slab, allocation.offset)
-}
-
-get_render_target :: proc(
-  manager: ^Manager,
-  handle: Handle,
-) -> (
-  ret: ^RenderTarget,
-  ok: bool,
-) #optional_ok {
-  ret, ok = get(manager.render_targets, handle)
-  return
 }
 
 get_mesh :: proc(

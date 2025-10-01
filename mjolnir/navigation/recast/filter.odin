@@ -1,10 +1,7 @@
 package navigation_recast
 
-import "core:math"
 import "core:math/linalg"
 import "core:slice"
-import "core:mem"
-import "core:log"
 import "../../geometry"
 
 // Maximum heightfield height constant
