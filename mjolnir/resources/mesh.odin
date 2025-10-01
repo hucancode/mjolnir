@@ -72,7 +72,7 @@ find_bone_by_name :: proc(mesh: ^Mesh, name: string) -> (index: u32, ok: bool) #
       return u32(i), true
     }
   }
-  return
+  return 0, false
 }
 
 mesh_init :: proc(

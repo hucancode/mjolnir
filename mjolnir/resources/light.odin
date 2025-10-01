@@ -16,8 +16,8 @@ LightType :: enum u32 {
 LightData :: struct {
   color:        [4]f32, // RGB + intensity
   radius:       f32, // range for point/spot lights
-  angle_inner:  f32, // inner cone angle for spot lights (cosine)
-  angle_outer:  f32, // outer cone angle for spot lights (cosine)
+  angle_inner:  f32, // inner cone angle for spot lights
+  angle_outer:  f32, // outer cone angle for spot lights
   type:         LightType, // LightType
   node_index:   u32, // index into world matrices buffer
   shadow_map:   u32, // texture index in bindless array
@@ -42,8 +42,8 @@ create_light :: proc(
   node_handle: Handle,
   color: [4]f32 = {1, 1, 1, 1},
   radius: f32 = 10.0,
-  angle_inner: f32 = 0.8,
-  angle_outer: f32 = 0.9,
+  angle_inner: f32 = math.PI * 0.16,
+  angle_outer: f32 = math.PI * 0.2,
   cast_shadow: b32 = true,
 ) -> Handle {
   handle, light := alloc(&manager.lights)

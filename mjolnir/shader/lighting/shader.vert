@@ -87,9 +87,9 @@ void main() {
             world_position = light_position + a_position * light.radius;
         } else if (light.type == SPOT_LIGHT) {
             // Standard cone mesh: height=1 (Y+), base radius=1 (XZ)
-            float tana = tan(min(light.angle_outer*0.5, PI*0.45));
+            float tana = tan(min(light.angle_outer, PI*0.45));
             float y_scale = light.radius;
-            float xz_scale = light.radius * tana * 4;
+            float xz_scale = light.radius * tana * 2;
             vec3 scaled_pos = vec3(a_position.x * xz_scale, (a_position.y - 0.5) * -y_scale, a_position.z * xz_scale);
             // Orient cone along light_direction (which is already -Z forward)
             vec3 up = normalize(light_direction);

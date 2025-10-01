@@ -138,8 +138,8 @@ vec3 brdf(vec3 N, vec3 V, vec3 albedo, float roughness, float metallic, vec3 fra
     }
     if (light.type == SPOT_LIGHT) {
         vec3 lightToFrag = normalize(fragPos - light_position);
-        float cosTheta = dot(lightToFrag, normalize(light_direction)); // light_direction is already pointing forward
-        float spotEffect = smoothstep(light.angle_outer, light.angle_inner, acos(abs(cosTheta)));
+        float cosTheta = dot(lightToFrag, normalize(light_direction));
+        float spotEffect = smoothstep(cos(light.angle_outer), cos(light.angle_inner), cosTheta);
         attenuation *= spotEffect;
     }
     float NdotL = max(dot(N, L), 0.0);

@@ -17,7 +17,7 @@ import "vendor:glfw"
 import mu "vendor:microui"
 import vk "vendor:vulkan"
 
-LIGHT_COUNT :: 3
+LIGHT_COUNT :: 5
 ALL_SPOT_LIGHT :: false
 ALL_POINT_LIGHT :: false
 light_handles: [LIGHT_COUNT]resources.Handle
@@ -297,9 +297,9 @@ setup :: proc(engine: ^mjolnir.Engine) {
           &engine.gpu_context,
           color,
           10,  // radius
-          math.PI * 0.2,  // angle
+          math.PI * 0.25,  // angle
         )
-        world.rotate(light, math.PI * 0.2, linalg.VECTOR3F32_X_AXIS)
+        world.rotate(light, math.PI * 0.4, linalg.VECTOR3F32_X_AXIS)
       } else {
         light_handles[i], light = world.spawn(&engine.world, nil, &engine.resource_manager)
         attachment := world.create_point_light_attachment(
@@ -307,7 +307,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
           &engine.resource_manager,
           &engine.gpu_context,
           color,
-          7,  // radius
+          10,  // radius
         )
         light.attachment = attachment
       }
@@ -324,19 +324,18 @@ setup :: proc(engine: ^mjolnir.Engine) {
       )
       world.scale(cube_node, 0.1)
     }
-  }
-  // Spawn directional light
-  {
-    dir_handle, dir_node := world.spawn(&engine.world, nil, &engine.resource_manager)
-    dir_node.attachment = world.create_directional_light_attachment(
-      dir_handle,
-      &engine.resource_manager,
-      &engine.gpu_context,
-      {0.2, 0.5, 0.9, 1.0},
-      true,
-    )
-    world.translate(dir_node, 0, 10, 0)
-    world.rotate(dir_node, math.PI * 0.25, linalg.VECTOR3F32_X_AXIS)
+    if false {
+      dir_handle, dir_node := world.spawn(&engine.world, nil, &engine.resource_manager)
+      dir_node.attachment = world.create_directional_light_attachment(
+        dir_handle,
+        &engine.resource_manager,
+        &engine.gpu_context,
+        {0.2, 0.5, 0.9, 1.0},
+        true,
+      )
+      world.translate(dir_node, 0, 10, 0)
+      world.rotate(dir_node, math.PI * 0.25, linalg.VECTOR3F32_X_AXIS)
+    }
   }
   when false {
     log.info("Setting up bloom...")
@@ -467,18 +466,18 @@ setup :: proc(engine: ^mjolnir.Engine) {
     )
     world.scale(forcefield_visual, 0.2)
   }
-  post_process.add_fog(
-    &engine.render.post_process,
-    [3]f32{0.4, 0.0, 0.8},
-    0.02,
-    5.0,
-    20.0,
-  )
+  // post_process.add_fog(
+  //   &engine.render.post_process,
+  //   [3]f32{0.4, 0.0, 0.8},
+  //   0.02,
+  //   5.0,
+  //   20.0,
+  // )
   // post_process.add_bloom(&engine.render.post_process)
-  post_process.add_crosshatch(
-    &engine.render.post_process,
-    [2]f32{1280, 720},
-  )
+  // post_process.add_crosshatch(
+  //   &engine.render.post_process,
+  //   [2]f32{1280, 720},
+  // )
   // post_process.add_blur(&engine.render.post_process, 18.0)
   // post_process.add_tonemap(&engine.render.post_process, 1.5, 1.3)
   // post_process.add_dof(&engine.render.post_process)
@@ -584,7 +583,8 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
     if i == 0 {
       // Rotate light 0 around Y axis
       t := time_since_start(engine)
-      world.rotate(&engine.world, handle, t * 0.5, linalg.VECTOR3F32_Y_AXIS)
+      world.rotate(&engine.world, handle, t, linalg.VECTOR3F32_Y_AXIS)
+      world.rotate_by(&engine.world, handle, math.PI * 0.3, linalg.VECTOR3F32_X_AXIS)
       continue
     }
     offset := f32(i) / f32(LIGHT_COUNT) * math.PI * 2.0
