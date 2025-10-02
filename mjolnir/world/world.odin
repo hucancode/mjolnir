@@ -197,12 +197,10 @@ spawn_at :: proc(
 ) -> (
   handle: resources.Handle,
   node: ^Node,
+  ok: bool,
 ) {
-  ok: bool
   handle, node, ok = resources.alloc(&self.nodes)
-  if !ok {
-    return resources.Handle{}, nil
-  }
+  if !ok do return
   init_node(node)
   node.attachment = attachment
   assign_emitter_to_node(resources_manager, handle, node)
@@ -259,6 +257,7 @@ spawn_at :: proc(
     }
     gpu.write(&resources_manager.node_data_buffer, &data, int(handle.index))
   }
+  ok = true
   return
 }
 
@@ -269,12 +268,10 @@ spawn :: proc(
 ) -> (
   handle: resources.Handle,
   node: ^Node,
+  ok: bool,
 ) {
-  ok: bool
   handle, node, ok = resources.alloc(&self.nodes)
-  if !ok {
-    return
-  }
+  if !ok do return
   init_node(node)
   node.attachment = attachment
   assign_emitter_to_node(resources_manager, handle, node)
@@ -329,6 +326,7 @@ spawn :: proc(
     }
     gpu.write(&resources_manager.node_data_buffer, &data, int(handle.index))
   }
+  ok = true
   return
 }
 
@@ -340,12 +338,10 @@ spawn_child :: proc(
 ) -> (
   handle: resources.Handle,
   node: ^Node,
+  ok: bool,
 ) {
-  ok: bool
   handle, node, ok = resources.alloc(&self.nodes)
-  if !ok {
-    return resources.Handle{}, nil
-  }
+  if !ok do return
   init_node(node)
   node.attachment = attachment
   assign_emitter_to_node(resources_manager, handle, node)
@@ -400,6 +396,7 @@ spawn_child :: proc(
     }
     gpu.write(&resources_manager.node_data_buffer, &data, int(handle.index))
   }
+  ok = true
   return
 }
 
@@ -516,12 +513,9 @@ spawn_node :: proc(
   position: [3]f32 = {0, 0, 0},
   attachment: NodeAttachment = nil,
   resources_manager: ^resources.Manager = nil,
-) -> (handle: resources.Handle, node: ^Node) {
-  ok: bool
+) -> (handle: resources.Handle, node: ^Node, ok: bool) {
   handle, node, ok = resources.alloc(&world.nodes)
-  if !ok {
-    return resources.Handle{}, nil
-  }
+  if !ok do return
   init_node(node)
   node.attachment = attachment
   assign_emitter_to_node(resources_manager, handle, node)
@@ -577,6 +571,7 @@ spawn_node :: proc(
     }
     gpu.write(&resources_manager.node_data_buffer, &data, int(handle.index))
   }
+  ok = true
   return
 }
 
@@ -586,12 +581,9 @@ spawn_child_node :: proc(
   position: [3]f32 = {0, 0, 0},
   attachment: NodeAttachment = nil,
   resources_manager: ^resources.Manager = nil,
-) -> (handle: resources.Handle, node: ^Node) {
-  ok: bool
+) -> (handle: resources.Handle, node: ^Node, ok: bool) {
   handle, node, ok = resources.alloc(&world.nodes)
-  if !ok {
-    return resources.Handle{}, nil
-  }
+  if !ok do return
   init_node(node)
   node.attachment = attachment
   assign_emitter_to_node(resources_manager, handle, node)
@@ -646,6 +638,7 @@ spawn_child_node :: proc(
     }
     gpu.write(&resources_manager.node_data_buffer, &data, int(handle.index))
   }
+  ok = true
   return
 }
 

@@ -108,26 +108,30 @@ demo_setup :: proc(engine_ptr: ^mjolnir.Engine) {
     }
 
     // Add lights
-    dir_handle, dir_node := world.spawn(&engine_ptr.world, nil, &engine_ptr.resource_manager)
-    dir_attachment := world.create_directional_light_attachment(
-        dir_handle,
-        &engine_ptr.resource_manager,
-        &engine_ptr.gpu_context,
-        {0.8, 0.8, 0.8, 1.0},
-        true,
-    )
-    dir_node.attachment = dir_attachment
+    dir_handle, dir_node, dir_ok := world.spawn(&engine_ptr.world, nil, &engine_ptr.resource_manager)
+    if dir_ok {
+        dir_attachment := world.create_directional_light_attachment(
+            dir_handle,
+            &engine_ptr.resource_manager,
+            &engine_ptr.gpu_context,
+            {0.8, 0.8, 0.8, 1.0},
+            true,
+        )
+        dir_node.attachment = dir_attachment
+    }
 
-    point_handle, point_node := world.spawn(&engine_ptr.world, nil, &engine_ptr.resource_manager)
-    point_attachment := world.create_point_light_attachment(
-        point_handle,
-        &engine_ptr.resource_manager,
-        &engine_ptr.gpu_context,
-        {0.5, 0.5, 0.5, 1.0},
-        20,
-        false,
-    )
-    point_node.attachment = point_attachment
+    point_handle, point_node, point_ok := world.spawn(&engine_ptr.world, nil, &engine_ptr.resource_manager)
+    if point_ok {
+        point_attachment := world.create_point_light_attachment(
+            point_handle,
+            &engine_ptr.resource_manager,
+            &engine_ptr.gpu_context,
+            {0.5, 0.5, 0.5, 1.0},
+            20,
+            false,
+        )
+        point_node.attachment = point_attachment
+    }
 
     // Setup camera
     main_camera := get_main_camera(engine_ptr)
@@ -182,7 +186,7 @@ create_demo_scene :: proc(engine_ptr: ^mjolnir.Engine) {
         emissive_value = 0.02,
     )
 
-    ground_handle, ground_node := world.spawn(
+    ground_handle, ground_node, ground_ok := world.spawn(
         &engine_ptr.world,
         world.MeshAttachment{
             handle = ground_mesh_handle,
@@ -191,9 +195,10 @@ create_demo_scene :: proc(engine_ptr: ^mjolnir.Engine) {
             navigation_obstacle = false,  // Ground should be walkable
         },
     )
-    demo_state.ground_handle = ground_handle
-    // Name it so it's recognized as walkable ground
-    ground_node.name = "ground"
+    if ground_ok {
+        demo_state.ground_handle = ground_handle
+        ground_node.name = "ground"
+    }
 
     // Create obstacles as world nodes with names containing "obstacle"
     obstacle_positions := [][3]f32{
@@ -237,7 +242,7 @@ create_demo_scene :: proc(engine_ptr: ^mjolnir.Engine) {
         )
 
         // Spawn obstacle node with navigation_obstacle flag set
-        obstacle_handle, obstacle_node := world.spawn_at(
+        obstacle_handle, obstacle_node, obstacle_ok := world.spawn_at(
             &engine_ptr.world,
             position,
             world.MeshAttachment{
@@ -247,11 +252,10 @@ create_demo_scene :: proc(engine_ptr: ^mjolnir.Engine) {
                 navigation_obstacle = true,  // Mark as navigation obstacle
             },
         )
-
-        // Set name for identification
-        obstacle_node.name = fmt.tprintf("obstacle_%d", i + 1)
-
-        append(&demo_state.obstacle_handles, obstacle_handle)
+        if obstacle_ok {
+            obstacle_node.name = fmt.tprintf("obstacle_%d", i + 1)
+            append(&demo_state.obstacle_handles, obstacle_handle)
+        }
     }
 
     log.infof("Created demo scene with ground and %d obstacles", len(demo_state.obstacle_handles))
@@ -285,7 +289,8 @@ create_obj_visualization_mesh :: proc(engine_ptr: ^mjolnir.Engine, obj_file: str
     )
 
     // Spawn the mesh in the scene
-    demo_state.obj_node_handle, demo_state.obj_mesh_node = world.spawn_at(
+    obj_spawn_ok: bool
+    demo_state.obj_node_handle, demo_state.obj_mesh_node, obj_spawn_ok = world.spawn_at(
         &engine_ptr.world,
         [3]f32{0, 0, 0},
         world.MeshAttachment{
@@ -295,14 +300,11 @@ create_obj_visualization_mesh :: proc(engine_ptr: ^mjolnir.Engine, obj_file: str
             navigation_obstacle = false,  // OBJ mesh should be walkable
         },
     )
-
-    // Set name for navigation mesh building
-    demo_state.obj_mesh_node.name = "obj_mesh"
-
-    // Initially show the mesh
-    demo_state.show_original_mesh = true
-
-    log.infof("Created OBJ visualization mesh with %d vertices", len(geom.vertices))
+    if obj_spawn_ok {
+        demo_state.obj_mesh_node.name = "obj_mesh"
+        demo_state.show_original_mesh = true
+        log.infof("Created OBJ visualization mesh with %d vertices", len(geom.vertices))
+    }
 }
 
 build_navigation_mesh_from_world :: proc(engine_ptr: ^mjolnir.Engine) {
@@ -438,7 +440,8 @@ update_position_marker :: proc(engine_ptr: ^mjolnir.Engine, handle: ^resources.H
 
     // Spawn the marker
     node: ^world.Node
-    handle^, node = world.spawn_at(
+    spawn_ok: bool
+    handle^, node, spawn_ok = world.spawn_at(
         &engine_ptr.world,
         pos + [3]f32{0, 0.2, 0}, // Slightly above ground
         world.MeshAttachment{
@@ -448,6 +451,7 @@ update_position_marker :: proc(engine_ptr: ^mjolnir.Engine, handle: ^resources.H
             navigation_obstacle = false,  // Markers should not be obstacles
         },
     )
+    if !spawn_ok do handle^ = resources.Handle{}
 }
 
 visualize_path :: proc(engine_ptr: ^mjolnir.Engine) {

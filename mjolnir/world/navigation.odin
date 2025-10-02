@@ -746,7 +746,11 @@ spawn_nav_agent_at :: proc(
     auto_update_path    = true,
     pathfinding_enabled = true,
   }
-  return spawn_at(world, position, attachment)
+  handle, node, ok := spawn_at(world, position, attachment)
+  if !ok {
+    return {}, nil
+  }
+  return handle, node
 }
 
 // Set navigation agent target

@@ -83,22 +83,25 @@ setup :: proc(engine: ^mjolnir.Engine) {
     space: f32 = 2.1
     size: f32 = 0.3
     nx, ny, nz := 40, 2, 40
-
+    mat_handle := resources.create_material_handle(
+      &engine.resource_manager,
+      metallic_value = 0.5,
+      roughness_value = 0.8,
+    )
+    spawn_failed := false
     for x in 1 ..< nx {
+      if spawn_failed do break
       for y in 1 ..< ny {
+        if spawn_failed do break
         for z in 1 ..< nz {
-          // Calculate world position
+          if spawn_failed do break
           world_x := (f32(x) - f32(nx) * 0.5) * space
           world_y := (f32(y) - f32(ny) * 0.5) * space + 0.5
           world_z := (f32(z) - f32(nz) * 0.5) * space
-          mat_handle := resources.create_material_handle(
-            &engine.resource_manager,
-            metallic_value = f32(x - 1) / f32(nx - 1),
-            roughness_value = f32(z - 1) / f32(nz - 1),
-          )
           node: ^world.Node
+          node_ok := false
           if x % 3 == 0 {
-            _, node = world.spawn(
+            _, node, node_ok = world.spawn(
               &engine.world,
               world.MeshAttachment {
                 handle = cube_mesh_handle,
@@ -107,7 +110,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
               },
             )
           } else if x % 3 == 1 {
-            _, node = world.spawn(
+            _, node, node_ok = world.spawn(
               &engine.world,
               world.MeshAttachment {
                 handle = cone_mesh_handle,
@@ -116,7 +119,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
               },
             )
           } else {
-            _, node = world.spawn(
+            _, node, node_ok = world.spawn(
               &engine.world,
               world.MeshAttachment {
                 handle = sphere_mesh_handle,
@@ -124,6 +127,10 @@ setup :: proc(engine: ^mjolnir.Engine) {
                 cast_shadow = true,
               },
             )
+          }
+          if !node_ok {
+            spawn_failed = true
+            break
           }
           world.translate(node, world_x, world_y, world_z)
           world.scale(node, size)
@@ -150,58 +157,66 @@ setup :: proc(engine: ^mjolnir.Engine) {
     log.info("spawning ground and walls")
     // Ground node
     size: f32 = 15.0
-    _, ground_node := world.spawn(
+    _, ground_node, ground_ok := world.spawn(
       &engine.world,
       world.MeshAttachment {
         handle = ground_mesh_handle,
         material = brick_wall_mat_handle,
       },
     )
-    world.scale(ground_node, size)
+    if ground_ok do world.scale(ground_node, size)
     // Left wall
-    _, left_wall := world.spawn(
+    _, left_wall, left_ok := world.spawn(
       &engine.world,
       world.MeshAttachment {
         handle = ground_mesh_handle,
         material = brick_wall_mat_handle,
       },
     )
-    world.translate(left_wall, x = size, y = size)
-    world.rotate(left_wall, math.PI * 0.5, linalg.VECTOR3F32_Z_AXIS)
-    world.scale(left_wall, size)
+    if left_ok {
+      world.translate(left_wall, x = size, y = size)
+      world.rotate(left_wall, math.PI * 0.5, linalg.VECTOR3F32_Z_AXIS)
+      world.scale(left_wall, size)
+    }
     // Right wall
-    _, right_wall := world.spawn(
+    _, right_wall, right_ok := world.spawn(
       &engine.world,
       world.MeshAttachment {
         handle = ground_mesh_handle,
         material = brick_wall_mat_handle,
       },
     )
-    world.translate(right_wall, x = -size, y = size)
-    world.rotate(right_wall, -math.PI * 0.5, linalg.VECTOR3F32_Z_AXIS)
-    world.scale(right_wall, size)
+    if right_ok {
+      world.translate(right_wall, x = -size, y = size)
+      world.rotate(right_wall, -math.PI * 0.5, linalg.VECTOR3F32_Z_AXIS)
+      world.scale(right_wall, size)
+    }
     // Back wall
-    _, back_wall := world.spawn(
+    _, back_wall, back_ok := world.spawn(
       &engine.world,
       world.MeshAttachment {
         handle = ground_mesh_handle,
         material = brick_wall_mat_handle,
       },
     )
-    world.translate(back_wall, y = size, z = -size)
-    world.rotate(back_wall, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
-    world.scale(back_wall, size)
+    if back_ok {
+      world.translate(back_wall, y = size, z = -size)
+      world.rotate(back_wall, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
+      world.scale(back_wall, size)
+    }
     // // Ceiling
-    _, ceiling := world.spawn(
+    _, ceiling, ceiling_ok := world.spawn(
       &engine.world,
       world.MeshAttachment {
         handle = ground_mesh_handle,
         material = brick_wall_mat_handle,
       },
     )
-    world.translate(ceiling, y = 2 * size)
-    world.rotate(ceiling, -math.PI, linalg.VECTOR3F32_X_AXIS)
-    world.scale(ceiling, size)
+    if ceiling_ok {
+      world.translate(ceiling, y = 2 * size)
+      world.rotate(ceiling, -math.PI, linalg.VECTOR3F32_X_AXIS)
+      world.scale(ceiling, size)
+    }
   }
   if true {
     log.info("loading Hammer GLTF...")
@@ -279,7 +294,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
         if mesh_attachment, has_mesh := child_node.attachment.(world.MeshAttachment);
            has_mesh {
           if _, has_skin := mesh_attachment.skinning.?; has_skin {
-            _, cube_node := world.spawn_child(
+            _, cube_node, cube_ok := world.spawn_child(
               &engine.world,
               child_handle,
               world.MeshAttachment {
@@ -288,8 +303,12 @@ setup :: proc(engine: ^mjolnir.Engine) {
                 cast_shadow = true,
               },
             )
-            cube_node.bone_socket = "hand.L"
-            world.scale(cube_node, 0.1)
+            if cube_ok {
+              cube_node.bone_socket = "hand.L"
+              world.scale(cube_node, 0.1)
+            } else {
+              log.error("Unable to spawn cube attachment: reached MAX_NODES_IN_SCENE")
+            }
             break
           }
         }
@@ -313,6 +332,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
       } else if ALL_POINT_LIGHT {
         should_make_spot_light = false
       }
+      light_spawn_ok: bool
       if should_make_spot_light {
         attachment := world.create_spot_light_attachment(
           light_handles[i],
@@ -322,11 +342,14 @@ setup :: proc(engine: ^mjolnir.Engine) {
           10, // radius
           math.PI * 0.25, // angle
         ) or_continue
-        light_handles[i], light = world.spawn(
+        light_handles[i], light, light_spawn_ok = world.spawn(
           &engine.world,
           attachment,
           &engine.resource_manager,
         )
+        if !light_spawn_ok {
+          continue
+        }
         world.rotate(light, math.PI * 0.4, linalg.VECTOR3F32_X_AXIS)
       } else {
         attachment := world.create_point_light_attachment(
@@ -336,15 +359,19 @@ setup :: proc(engine: ^mjolnir.Engine) {
           color,
           14, // radius
         ) or_continue
-        light_handles[i], light = world.spawn(
+        light_handles[i], light, light_spawn_ok = world.spawn(
           &engine.world,
           attachment,
           &engine.resource_manager,
         )
+        if !light_spawn_ok {
+          continue
+        }
       }
       world.translate(light, 6, 2, -1)
       cube_node: ^world.Node
-      light_cube_handles[i], cube_node = world.spawn_child(
+      cube_ok: bool
+      light_cube_handles[i], cube_node, cube_ok = world.spawn_child(
         &engine.world,
         light_handles[i],
         world.MeshAttachment {
@@ -353,27 +380,31 @@ setup :: proc(engine: ^mjolnir.Engine) {
           cast_shadow = false,
         },
       )
-      world.scale(cube_node, 0.1)
+      if cube_ok {
+        world.scale(cube_node, 0.1)
+      }
     }
     if false {
-      dir_handle, dir_node := world.spawn(
+      dir_handle, dir_node, ok := world.spawn(
         &engine.world,
         nil,
         &engine.resource_manager,
       )
-      attachment := world.create_directional_light_attachment(
-        dir_handle,
-        &engine.resource_manager,
-        &engine.gpu_context,
-        {0.2, 0.5, 0.9, 1.0},
-        true,
-      )
-      if attachment.handle.generation == 0 {
-        world.despawn(&engine.world, dir_handle)
-      } else {
-        dir_node.attachment = attachment
-        world.translate(dir_node, 0, 10, 0)
-        world.rotate(dir_node, math.PI * 0.25, linalg.VECTOR3F32_X_AXIS)
+      if ok {
+        attachment := world.create_directional_light_attachment(
+          dir_handle,
+          &engine.resource_manager,
+          &engine.gpu_context,
+          {0.2, 0.5, 0.9, 1.0},
+          true,
+        )
+        if attachment.handle.generation == 0 {
+          world.despawn(&engine.world, dir_handle)
+        } else {
+          dir_node.attachment = attachment
+          world.translate(dir_node, 0, 10, 0)
+          world.rotate(dir_node, math.PI * 0.25, linalg.VECTOR3F32_X_AXIS)
+        }
       }
     }
   }
@@ -381,19 +412,21 @@ setup :: proc(engine: ^mjolnir.Engine) {
     log.info("Setting up bloom...")
     // add_bloom(&engine.postprocess, 0.8, 0.5, 16.0)
     // Create a bright white ball to test bloom effect
-    _, bright_ball_node := spawn(
-    &engine.world,
-    MeshAttachment {
-      handle      = sphere_mesh_handle,
-      material    = resources.create_material_handle(
-        &engine.resource_manager,
-        emissive_value = 30.0,
-      ),
-      cast_shadow = false, // Emissive objects don't need shadows
-    },
+    _, bright_ball_node, bright_ok := world.spawn(
+      &engine.world,
+      world.MeshAttachment {
+        handle      = sphere_mesh_handle,
+        material    = resources.create_material_handle(
+          &engine.resource_manager,
+          emissive_value = 30.0,
+        ),
+        cast_shadow = false, // Emissive objects don't need shadows
+      },
     )
-    world.translate(bright_ball_node, x = 1.0) // Position it above the ground
-    world.scale(bright_ball_node, 0.2) // Make it a reasonable size
+    if bright_ok {
+      world.translate(bright_ball_node, x = 1.0)
+      world.scale(bright_ball_node, 0.2)
+    }
   }
   when true {
     log.info("Setting up particles...")
@@ -413,92 +446,107 @@ setup :: proc(engine: ^mjolnir.Engine) {
       type = .TRANSPARENT,
       albedo_handle = goldstar_texture_handle,
     )
-    psys_handle1, _ := world.spawn_at(&engine.world, {-2.0, 1.9, 0.3})
-    emitter_handle1, _ := resources.create_emitter_handle(
-      &engine.resource_manager,
-      psys_handle1,
-      resources.Emitter {
-        emission_rate     = 7,
-        particle_lifetime = 5.0,
-        position_spread   = 1.5,
-        initial_velocity  = {0, -0.1, 0, 0},
-        velocity_spread   = 0.1,
-        color_start       = {1, 1, 0, 1}, // Yellow particles
-        color_end         = {1, 0.5, 0, 0},
-        size_start        = 200.0,
-        size_end          = 100.0,
-        weight            = 0.1,
-        weight_spread     = 0.05,
-        texture_handle    = goldstar_texture_handle,
-        enabled           = true,
-        aabb_min          = {-2, -2, -2},
-        aabb_max          = {2, 2, 2},
-      },
-    )
-    world.spawn_child(
-      &engine.world,
-      psys_handle1,
-      world.EmitterAttachment{emitter_handle1},
-      &engine.resource_manager,
-    )
-    psys_handle2, _ := world.spawn_at(&engine.world, {2.0, 1.9, 0.3})
-    // Create an emitter for the second particle system
-    emitter_handle2, _ := resources.create_emitter_handle(
-      &engine.resource_manager,
-      psys_handle2,
-      resources.Emitter {
-        emission_rate     = 7,
-        particle_lifetime = 3.0,
-        position_spread   = 0.3,
-        initial_velocity  = {0, 0.2, 0, 0},
-        velocity_spread   = 0.15,
-        color_start       = {0, 0, 1, 1}, // Blue particles
-        color_end         = {0, 1, 1, 0},
-        size_start        = 350.0,
-        size_end          = 175.0,
-        weight            = 0.1,
-        weight_spread     = 0.3,
-        texture_handle    = black_circle_texture_handle,
-        enabled           = true,
-        aabb_min          = {-1, -1, -1},
-        aabb_max          = {1, 1, 1},
-      },
-    )
-    world.spawn_child(
-      &engine.world,
-      psys_handle2,
-      world.EmitterAttachment{emitter_handle2},
-      &engine.resource_manager,
-    )
-    // Create a force field that affects both particle systems
-    forcefield_handle, _ = world.spawn_child(
-      &engine.world,
-      psys_handle1,
-      world.ForceFieldAttachment{},
-    )
-    world.translate(&engine.world, forcefield_handle, 5.0, 0.0, 0.0)
-    forcefield_resource, _ := resources.create_forcefield_handle(
-      &engine.resource_manager,
-      forcefield_handle,
-      resources.ForceField {
-        tangent_strength = 2.0,
-        strength = 20.0,
-        area_of_effect = 5.0,
-      },
-    )
-    ff_node := world.get_node(&engine.world, forcefield_handle)
-    ff_attachment := &ff_node.attachment.(world.ForceFieldAttachment)
-    ff_attachment.handle = forcefield_resource
-    _, forcefield_visual := world.spawn_child(
-      &engine.world,
-      forcefield_handle,
-      world.MeshAttachment {
-        handle = sphere_mesh_handle,
-        material = goldstar_material_handle,
-        cast_shadow = false,
-      },
-    )
-    world.scale(forcefield_visual, 0.2)
+    psys_handle1, _, psys1_ok := world.spawn_at(&engine.world, {-2.0, 1.9, 0.3})
+    if psys1_ok {
+      emitter_handle1, emitter1_ok := resources.create_emitter_handle(
+        &engine.resource_manager,
+        psys_handle1,
+        resources.Emitter {
+          emission_rate     = 7,
+          particle_lifetime = 5.0,
+          position_spread   = 1.5,
+          initial_velocity  = {0, -0.1, 0, 0},
+          velocity_spread   = 0.1,
+          color_start       = {1, 1, 0, 1},
+          color_end         = {1, 0.5, 0, 0},
+          size_start        = 200.0,
+          size_end          = 100.0,
+          weight            = 0.1,
+          weight_spread     = 0.05,
+          texture_handle    = goldstar_texture_handle,
+          enabled           = true,
+          aabb_min          = {-2, -2, -2},
+          aabb_max          = {2, 2, 2},
+        },
+      )
+      if emitter1_ok {
+        _, _, _ = world.spawn_child(
+          &engine.world,
+          psys_handle1,
+          world.EmitterAttachment{emitter_handle1},
+          &engine.resource_manager,
+        )
+      }
+    }
+    psys_handle2, _, psys2_ok := world.spawn_at(&engine.world, {2.0, 1.9, 0.3})
+    if psys2_ok {
+      emitter_handle2, emitter2_ok := resources.create_emitter_handle(
+        &engine.resource_manager,
+        psys_handle2,
+        resources.Emitter {
+          emission_rate     = 7,
+          particle_lifetime = 3.0,
+          position_spread   = 0.3,
+          initial_velocity  = {0, 0.2, 0, 0},
+          velocity_spread   = 0.15,
+          color_start       = {0, 0, 1, 1},
+          color_end         = {0, 1, 1, 0},
+          size_start        = 350.0,
+          size_end          = 175.0,
+          weight            = 0.1,
+          weight_spread     = 0.3,
+          texture_handle    = black_circle_texture_handle,
+          enabled           = true,
+          aabb_min          = {-1, -1, -1},
+          aabb_max          = {1, 1, 1},
+        },
+      )
+      if emitter2_ok {
+        _, _, _ = world.spawn_child(
+          &engine.world,
+          psys_handle2,
+          world.EmitterAttachment{emitter_handle2},
+          &engine.resource_manager,
+        )
+      }
+    }
+    if psys1_ok {
+      forcefield_ok: bool
+      forcefield_handle, _, forcefield_ok = world.spawn_child(
+        &engine.world,
+        psys_handle1,
+        world.ForceFieldAttachment{},
+      )
+      if forcefield_ok {
+        world.translate(&engine.world, forcefield_handle, 5.0, 0.0, 0.0)
+        forcefield_resource, ff_ok := resources.create_forcefield_handle(
+          &engine.resource_manager,
+          forcefield_handle,
+          resources.ForceField {
+            tangent_strength = 2.0,
+            strength = 20.0,
+            area_of_effect = 5.0,
+          },
+        )
+        if ff_ok {
+          ff_node := world.get_node(&engine.world, forcefield_handle)
+          if ff_node != nil {
+            ff_attachment := &ff_node.attachment.(world.ForceFieldAttachment)
+            ff_attachment.handle = forcefield_resource
+          }
+        }
+        _, forcefield_visual, visual_ok := world.spawn_child(
+          &engine.world,
+          forcefield_handle,
+          world.MeshAttachment {
+            handle = sphere_mesh_handle,
+            material = goldstar_material_handle,
+            cast_shadow = false,
+          },
+        )
+        if visual_ok do world.scale(forcefield_visual, 0.2)
+      }
+    }
   }
   post_process.add_fog(
     &engine.render.post_process,
@@ -555,7 +603,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
       portal_material_handle,
     )
     // Create portal quad mesh and spawn it
-    _, portal_node := world.spawn(
+    _, portal_node, portal_spawn_ok := world.spawn(
       &engine.world,
       world.MeshAttachment {
         handle = resources.create_mesh_handle(
@@ -567,10 +615,11 @@ setup :: proc(engine: ^mjolnir.Engine) {
         cast_shadow = false,
       },
     )
-    // Position the portal vertically
-    world.translate(portal_node, 0, 3, -5)
-    world.rotate(portal_node, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
-    world.scale(portal_node, 2.0)
+    if portal_spawn_ok {
+      world.translate(portal_node, 0, 3, -5)
+      world.rotate(portal_node, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
+      world.scale(portal_node, 2.0)
+    }
   }
   log.info("setup complete")
 }
