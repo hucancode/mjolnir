@@ -1,7 +1,6 @@
 package tests
 
 import "../mjolnir"
-import "../mjolnir/geometry"
 import "../mjolnir/resources"
 import world "../mjolnir/world"
 import "core:fmt"
@@ -140,7 +139,11 @@ test_node_chain_transform :: proc(t: ^testing.T) {
 
 create_scene :: proc(scene: ^world.World, max_node: int, max_depth: int) {
   using world
-  if max_depth <= 0 || max_node <= 0 do return
+  target_nodes := max_node
+  if scene.nodes.capacity > 0 {
+    target_nodes = math.min(target_nodes, int(scene.nodes.capacity))
+  }
+  if max_depth <= 0 || target_nodes <= 0 do return
   QueueEntry :: struct {
     handle: resources.Handle,
     depth:  int,
@@ -150,15 +153,21 @@ create_scene :: proc(scene: ^world.World, max_node: int, max_depth: int) {
   entry := QueueEntry{scene.root, 0}
   append(&queue, entry)
   n := 0
-  for len(queue) > 0 && len(scene.nodes.entries) < max_node {
+  for len(queue) > 0 && len(scene.nodes.entries) < target_nodes {
     current := pop_front(&queue)
     if current.depth < max_depth {
-      child_handle, _ := spawn_child(scene, current.handle)
+      child_handle, _, child_ok := spawn_child(scene, current.handle)
+      if !child_ok {
+        continue
+      }
       translate(scene, child_handle, f32(n % 10) * 0.1, 0, 0)
       rotate(scene, child_handle, f32(n) * 0.01, linalg.VECTOR3F32_Y_AXIS)
       append(&queue, QueueEntry{child_handle, current.depth + 1})
     } else {
-      child_handle, _ := spawn(scene)
+      child_handle, _, child_ok := spawn(scene)
+      if !child_ok {
+        continue
+      }
       translate(scene, child_handle, f32(n % 10) * 0.1, 0, 0)
       rotate(scene, child_handle, f32(n) * 0.01, linalg.VECTOR3F32_Y_AXIS)
       append(&queue, QueueEntry{child_handle, 1})
@@ -235,6 +244,9 @@ benchmark_deep_scene_traversal :: proc(t: ^testing.T) {
     teardown = teardown_scene,
   }
   err := time.benchmark(options)
+  if err != nil {
+    testing.fail_now(t, fmt.tprintf("benchmark failed: %v", err))
+  }
   log.infof(
     "Traversed scene (%d nodes, max depth %d): %v (%.2f MB/s)",
     N,
@@ -266,6 +278,9 @@ benchmark_flat_scene_traversal :: proc(t: ^testing.T) {
     teardown = teardown_scene,
   }
   err := time.benchmark(options)
+  if err != nil {
+    testing.fail_now(t, fmt.tprintf("benchmark failed: %v", err))
+  }
   log.infof(
     "Traversed scene (%d nodes, depth 1): %v (%.2f MB/s)",
     N,
@@ -297,6 +312,9 @@ benchmark_balanced_scene_traversal :: proc(t: ^testing.T) {
     teardown = teardown_scene,
   }
   err := time.benchmark(options)
+  if err != nil {
+    testing.fail_now(t, fmt.tprintf("benchmark failed: %v", err))
+  }
   log.infof(
     "Traversed scene (%d nodes, max depth %d): %v (%.2f MB/s)",
     N,
