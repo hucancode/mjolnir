@@ -17,8 +17,6 @@ AttachmentType :: enum {
   DEPTH              = 6,
 }
 
-ATTACHMENT_COUNT :: len(AttachmentType)
-
 PassType :: enum {
   SHADOW       = 0,
   GEOMETRY     = 1,
@@ -37,6 +35,7 @@ RenderTarget :: struct {
   attachments:     [AttachmentType][resources.MAX_FRAMES_IN_FLIGHT]resources.Handle,
   enabled_passes:  PassTypeSet,
   command_buffers: [resources.MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
+  owns_depth:      bool, // True if we created depth texture, false if external
 }
 
 render_target_init :: proc(
@@ -60,6 +59,7 @@ render_target_init :: proc(
   fov: f32 = math.PI * 0.5,
   near_plane: f32 = 0.1,
   far_plane: f32 = 100.0,
+  external_depth_textures: Maybe([resources.MAX_FRAMES_IN_FLIGHT]resources.Handle) = nil,
 ) -> vk.Result {
   // Create camera
   camera_ptr: ^geometry.Camera
@@ -74,6 +74,7 @@ render_target_init :: proc(
 
   self.extent = {width, height}
   self.enabled_passes = enabled_passes
+  self.owns_depth = external_depth_textures == nil
 
   // Create attachments based on enabled passes
   needs_gbuffer := .GEOMETRY in enabled_passes || .LIGHTING in enabled_passes
@@ -139,14 +140,18 @@ render_target_init :: proc(
       )
     }
     if needs_depth {
-      self.attachments[.DEPTH][frame], _, _ = resources.create_texture(
-        gpu_context,
-        manager,
-        width,
-        height,
-        depth_format,
-        vk.ImageUsageFlags{.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
-      )
+      if external_textures, has_external := external_depth_textures.?; has_external {
+        self.attachments[.DEPTH][frame] = external_textures[frame]
+      } else {
+        self.attachments[.DEPTH][frame], _, _ = resources.create_texture(
+          gpu_context,
+          manager,
+          width,
+          height,
+          depth_format,
+          vk.ImageUsageFlags{.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
+        )
+      }
     }
   }
 
@@ -177,6 +182,9 @@ render_target_destroy :: proc(
 
   // Free all attachments
   for attachment_type in AttachmentType {
+    // Skip depth attachment if we don't own it
+    if attachment_type == .DEPTH && !self.owns_depth do continue
+
     for frame in 0 ..< resources.MAX_FRAMES_IN_FLIGHT {
       handle := self.attachments[attachment_type][frame]
       if handle.generation > 0 {

@@ -536,7 +536,6 @@ render :: proc(self: ^Engine) -> vk.Result {
   }
   main_render_target := &self.render.render_targets[main_idx]
   targets.render_target_upload_camera_data(&self.resource_manager, main_render_target)
-  renderer_update_all_light_shadow_cameras(&self.render, &self.resource_manager)
   record_all_render_targets(
     &self.render,
     self.frame_index,

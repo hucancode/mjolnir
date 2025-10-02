@@ -361,7 +361,7 @@ atlas_resize_callback :: proc(data: rawptr, w, h: int) {
 
 flush :: proc(self: ^Renderer, cmd_buf: vk.CommandBuffer) -> vk.Result {
   if self.vertex_count == 0 && self.index_count == 0 {
-    log.infof("text flush: no vertices to render")
+    // log.infof("text flush: no vertices to render")
     return .SUCCESS
   }
   // log.infof("text flush: rendering %d vertices, %d indices", self.vertex_count, self.index_count)

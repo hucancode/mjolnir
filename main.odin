@@ -328,7 +328,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
           math.PI * 0.25, // angle
         )
         light.attachment = attachment
-        renderer_setup_light_shadows(&engine.render, &engine.gpu_context, &engine.resource_manager, attachment.handle)
         world.rotate(light, math.PI * 0.4, linalg.VECTOR3F32_X_AXIS)
       } else {
         light_handles[i], light = world.spawn(
@@ -341,10 +340,9 @@ setup :: proc(engine: ^mjolnir.Engine) {
           &engine.resource_manager,
           &engine.gpu_context,
           color,
-          10, // radius
+          13, // radius
         )
         light.attachment = attachment
-        renderer_setup_light_shadows(&engine.render, &engine.gpu_context, &engine.resource_manager, attachment.handle)
       }
       world.translate(light, 6, 2, -1)
       cube_node: ^world.Node
@@ -373,7 +371,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
         true,
       )
       dir_node.attachment = attachment
-      renderer_setup_light_shadows(&engine.render, &engine.gpu_context, &engine.resource_manager, attachment.handle)
       world.translate(dir_node, 0, 10, 0)
       world.rotate(dir_node, math.PI * 0.25, linalg.VECTOR3F32_X_AXIS)
     }
@@ -622,7 +619,7 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
     ry := (math.sin(t) + 1.0) * 0.5 * 1.5 + 1.0
     rz := math.cos(t)
     v := linalg.normalize([3]f32{rx, ry, rz})
-    radius: f32 = 6
+    radius: f32 = 12
     v = v * radius + linalg.VECTOR3F32_Y_AXIS * -1.0
     world.translate(&engine.world, handle, v.x, v.y, v.z)
     world.rotate(

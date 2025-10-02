@@ -31,6 +31,9 @@ Light :: struct {
   // Shadow render target indices (into Renderer.render_targets)
   shadow_target_index:      int, // For spot/directional lights
   cube_shadow_target_index: [6]int, // For point lights (6 faces)
+  last_world_matrix:        matrix[4, 4]f32, // Previous frame's transform
+  has_moved:                bool, // True if transform changed since last render
+  shadow_slot_index:        int, // Assigned slot in shadow pool (-1 if none)
 }
 
 // Create a new light and return its handle
@@ -57,6 +60,9 @@ create_light :: proc(
   light.node_index = node_handle.index
   light.shadow_target_index = -1
   for i in 0 ..< 6 do light.cube_shadow_target_index[i] = -1
+  light.last_world_matrix = linalg.MATRIX4F32_IDENTITY
+  light.has_moved = true
+  light.shadow_slot_index = -1
   gpu.write(&manager.lights_buffer, &light.data, int(handle.index))
   return handle
 }
@@ -128,4 +134,3 @@ set_light_cast_shadow :: proc(
     gpu.write(&manager.lights_buffer, &light.data, int(handle.index))
   }
 }
-
