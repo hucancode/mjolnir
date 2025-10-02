@@ -28,62 +28,68 @@ jobs:
     - name: Setup Vulkan SDK
       uses: humbletim/install-vulkan-sdk@v1.2
       with:
-        vulkan-query-version: 1.4.309.0
-        vulkan-use-cache: true
+        version: 1.4.321.1
+        cache: true
 
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y xvfb libglfw3-dev imagemagick libgl1-mesa-dev libglu1-mesa-dev x11-utils
+        sudo apt-get install -y \
+          xvfb \
+          libglfw3-dev \
+          imagemagick \
+          libgl1-mesa-dev \
+          libglu1-mesa-dev \
+          mesa-vulkan-drivers \
+          vulkan-tools \
+          x11-utils
         sudo ln -sf /usr/lib/x86_64-linux-gnu/libglfw.so.3 /usr/lib/x86_64-linux-gnu/libglfw.so
 
-    - name: Build the game
+    - name: Inspect Vulkan SDK assets
+      run: |
+        echo "Layers:" && find "$VULKAN_SDK" -maxdepth 4 -name 'VkLayer_screenshot.json' || true
+        echo "Layer libraries:" && find "$VULKAN_SDK" -maxdepth 4 -name 'libVkLayer_screenshot.so' || true
+        echo "ICDs:" && ls -1 /usr/share/vulkan/icd.d || true
+
+    - name: Build shader
+      run: make shader
+
+    - name: Smoke test
       run: make build
 
-    - name: Run game and capture screenshot
+    - name: Run visual scenes and capture screenshots
+      env:
+        VK_LAYER_PATH: ${{ env.VULKAN_SDK }}/etc/vulkan/explicit_layer.d:${{ env.VULKAN_SDK }}/share/vulkan/explicit_layer.d
+        VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+        VK_LOADER_DEBUG: all
+        RMSE_THRESHOLD: 20
       run: |
-        export DISPLAY=:99
-        Xvfb :99 -screen 0 1024x768x24 &
-        XVFB_PID=$!
-        sleep 3
-        echo "Starting game..."
-        bin/main 2>&1 | tee game_output.log &
-        GAME_PID=$!
-        sleep 5
-        echo "Capturing screenshot..."
-        echo "All windows:"
-        xwininfo -root -tree || echo "Failed to get window info"
-        echo "Attempting to capture game window..."
-        WINDOW_ID=$(xwininfo -root -tree | grep -i "mjolnir odin" | head -1 | cut -d' ' -f4)
-        if [ -n "$WINDOW_ID" ]; then
-          echo "Found game window: $WINDOW_ID"
-          import -window $WINDOW_ID screenshot.png
-        else
-          echo "Game window not found, capturing root window"
-          import -window root screenshot.png
+        export LD_LIBRARY_PATH="$VULKAN_SDK/lib:$VULKAN_SDK/lib64:${LD_LIBRARY_PATH:-}"
+        tests=()
+        while IFS= read -r -d '' path; do
+          name=$(basename "$path")
+          if [ "$name" = "common" ]; then
+            continue
+          fi
+          tests+=("$name")
+        done < <(find test/visual -mindepth 1 -maxdepth 1 -type d -print0 | sort -z)
+        failures=()
+        for test in "${tests[@]}"; do
+          echo "Executing visual test: $test"
+          if ! ./test/visual/run.sh "$test" artifacts; then
+            echo "Test failed: $test" >&2
+            failures+=("$test")
+          fi
+        done
+        if [ ${#failures[@]} -ne 0 ]; then
+          echo "Visual tests failed: ${failures[*]}" >&2
+          exit 1
         fi
-        kill $GAME_PID || true
-        kill $XVFB_PID || true
-        echo "Game ran and screenshot captured"
-
-    - name: Analyze screenshot
-      run: |
-        if [ -f screenshot.png ]; then
-          echo "Screenshot captured successfully"
-          identify screenshot.png
-          echo "Color analysis:"
-          convert screenshot.png -format "%c" histogram:info: | head -10
-          echo "Unique colors count:"
-          convert screenshot.png -format "%k" info:
-        else
-          echo "Screenshot not found"
-        fi
-
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
       if: always()
       with:
-        name: game-artifacts
+        name: artifacts
         path: |
-          screenshot.png
+          artifacts
           game_output.log
