@@ -939,10 +939,6 @@ init_lights_buffer :: proc(
     MAX_LIGHTS,
     {.STORAGE_BUFFER},
   ) or_return
-
-  lights := gpu.staged_buffer_get_all(&manager.lights_buffer)
-  for &light in lights do light = {}
-
   bindings := [?]vk.DescriptorSetLayoutBinding {
     {
       binding = 0,
@@ -951,7 +947,6 @@ init_lights_buffer :: proc(
       stageFlags = {.VERTEX, .FRAGMENT},
     },
   }
-
   vk.CreateDescriptorSetLayout(
     gpu_context.device,
     &vk.DescriptorSetLayoutCreateInfo {
@@ -962,7 +957,6 @@ init_lights_buffer :: proc(
     nil,
     &manager.lights_buffer_set_layout,
   ) or_return
-
   vk.AllocateDescriptorSets(
     gpu_context.device,
     &vk.DescriptorSetAllocateInfo {
@@ -973,7 +967,6 @@ init_lights_buffer :: proc(
     },
     &manager.lights_buffer_descriptor_set,
   ) or_return
-
   buffer_info := vk.DescriptorBufferInfo {
     buffer = manager.lights_buffer.device_buffer,
     offset = 0,

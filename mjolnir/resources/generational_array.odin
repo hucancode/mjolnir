@@ -1,5 +1,7 @@
 package resources
 
+import "core:log"
+
 Handle :: struct {
   index:      u32,
   generation: u32,
@@ -43,7 +45,8 @@ alloc :: proc(pool: ^Pool($T)) -> (handle: Handle, item: ^T, ok: bool) {
   } else {
     index := u32(len(pool.entries))
     if pool.capacity > 0 && index >= pool.capacity {
-      return Handle{}, nil, false
+      log.errorf("Pool allocation failed: index=%d >= capacity=%d, entries length=%d", index, pool.capacity, len(pool.entries))
+      return
     }
     new_item_generation: u32 = 1
     entry_to_add := Entry(T) {

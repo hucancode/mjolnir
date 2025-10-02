@@ -3,6 +3,7 @@ package transparency
 import "../../geometry"
 import "../../gpu"
 import "../../resources"
+import "../shared"
 import "../targets"
 import "core:log"
 import vk "vendor:vulkan"
@@ -61,6 +62,9 @@ create_transparent_pipelines :: proc(
     frag_shader_code,
   ) or_return
   defer vk.DestroyShaderModule(gpu_context.device, frag_module, nil)
+  spec_data, spec_entries, spec_info := shared.make_shader_spec_constants()
+  spec_info.pData = cast(rawptr)&spec_data
+  defer delete(spec_entries)
 
   vertex_input_info := vk.PipelineVertexInputStateCreateInfo {
     sType                           = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
@@ -145,12 +149,14 @@ create_transparent_pipelines :: proc(
       stage = {.VERTEX},
       module = vert_module,
       pName = "main",
+      pSpecializationInfo = &spec_info,
     },
     {
       sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
       stage = {.FRAGMENT},
       module = frag_module,
       pName = "main",
+      pSpecializationInfo = &spec_info,
     },
   }
 

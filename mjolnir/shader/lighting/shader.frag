@@ -3,16 +3,18 @@
 
 const float PI = 3.14159265359;
 
-const uint SAMPLER_NEAREST_CLAMP = 0;
-const uint SAMPLER_LINEAR_CLAMP = 1;
-const uint SAMPLER_NEAREST_REPEAT = 2;
-const uint SAMPLER_LINEAR_REPEAT = 3;
+layout(constant_id = 0) const uint MAX_TEXTURES = 1u;
+layout(constant_id = 1) const uint MAX_CUBE_TEXTURES = 1u;
+layout(constant_id = 2) const uint MAX_SAMPLERS = 1u;
+layout(constant_id = 3) const uint SAMPLER_NEAREST_CLAMP = 0u;
+layout(constant_id = 4) const uint SAMPLER_LINEAR_CLAMP = 1u;
+layout(constant_id = 5) const uint SAMPLER_NEAREST_REPEAT = 2u;
+layout(constant_id = 6) const uint SAMPLER_LINEAR_REPEAT = 3u;
+layout(constant_id = 7) const uint POINT_LIGHT = 0u;
+layout(constant_id = 8) const uint DIRECTIONAL_LIGHT = 1u;
+layout(constant_id = 9) const uint SPOT_LIGHT = 2u;
 
 layout(location = 0) out vec4 outColor;
-
-const int POINT_LIGHT = 0;
-const int DIRECTIONAL_LIGHT = 1;
-const int SPOT_LIGHT = 2;
 
 struct Camera {
     mat4 view;
@@ -75,7 +77,17 @@ float linearizeDepth(float depth, float near, float far) {
     return (2.0 * near * far) / (far + near - z * (far - near));
 }
 
+bool has_shadow_resource(LightData light) {
+    if (light.type == POINT_LIGHT) {
+        return light.shadow_map < MAX_CUBE_TEXTURES;
+    }
+    return light.shadow_map < MAX_TEXTURES;
+}
+
 float calculateShadow(vec3 fragPos, vec3 n, Camera lightCamera, LightData light, vec3 light_position, vec3 light_direction) {
+    if (!has_shadow_resource(light)) {
+        return 1.0;
+    }
     if (light.type == DIRECTIONAL_LIGHT) {
         vec4 lightSpacePos = lightCamera.projection * lightCamera.view * vec4(fragPos, 1.0);
         vec3 shadowCoord = lightSpacePos.xyz / lightSpacePos.w;
@@ -211,7 +223,8 @@ void main() {
     // For shadows, we need to find the light camera (this is a simplified approach)
     // In a full implementation, you'd need to store camera indices in the light data
     Camera lightCamera = camera_buffer.cameras[light.camera_index];
-    float shadowFactor = light.cast_shadow != 0u ? calculateShadow(position, normal, lightCamera, light, light_position, light_direction) : 1.0;
+    bool use_shadow = (light.cast_shadow != 0u) && has_shadow_resource(light);
+    float shadowFactor = use_shadow ? calculateShadow(position, normal, lightCamera, light, light_position, light_direction) : 1.0;
     vec3 direct = brdf(normal, V, albedo, roughness, metallic, position, light, light_position, light_direction);
     outColor = vec4(direct * shadowFactor, 1.0);
 }

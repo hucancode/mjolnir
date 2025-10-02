@@ -273,7 +273,7 @@ spawn :: proc(
   ok: bool
   handle, node, ok = resources.alloc(&self.nodes)
   if !ok {
-    return resources.Handle{}, nil
+    return
   }
   init_node(node)
   node.attachment = attachment
@@ -1075,8 +1075,9 @@ create_point_light_attachment :: proc(
   color: [4]f32 = {1, 1, 1, 1},
   radius: f32 = 10.0,
   cast_shadow: b32 = true,
-) -> LightAttachment {
-  light_handle, ok := resources.create_light(
+) -> (attachment: LightAttachment, ok: bool) #optional_ok {
+  handle : resources.Handle
+  handle, ok = resources.create_light(
     resources_manager,
     gpu_context,
     .POINT,
@@ -1085,10 +1086,8 @@ create_point_light_attachment :: proc(
     radius,
     cast_shadow = cast_shadow,
   )
-  if !ok {
-    log.error("Failed to create point light")
-  }
-  return LightAttachment{handle = light_handle}
+  attachment = LightAttachment{handle}
+  return
 }
 
 // Create directional light attachment and associated Light resource
@@ -1098,8 +1097,9 @@ create_directional_light_attachment :: proc(
   gpu_context: ^gpu.GPUContext,
   color: [4]f32 = {1, 1, 1, 1},
   cast_shadow: b32 = false,
-) -> LightAttachment {
-  light_handle, ok := resources.create_light(
+) -> (attachment: LightAttachment, ok: bool) #optional_ok {
+  handle : resources.Handle
+  handle, ok = resources.create_light(
     resources_manager,
     gpu_context,
     .DIRECTIONAL,
@@ -1107,10 +1107,8 @@ create_directional_light_attachment :: proc(
     color,
     cast_shadow = cast_shadow,
   )
-  if !ok {
-    log.error("Failed to create directional light")
-  }
-  return LightAttachment{handle = light_handle}
+  attachment = LightAttachment{handle}
+  return
 }
 
 // Create spot light attachment and associated Light resource
@@ -1122,10 +1120,11 @@ create_spot_light_attachment :: proc(
   radius: f32 = 10.0,
   angle: f32 = math.PI * 0.2,
   cast_shadow: b32 = true,
-) -> LightAttachment {
+) -> (attachment: LightAttachment, ok: bool) #optional_ok {
   angle_inner := angle * 0.8
   angle_outer := angle
-  light_handle, ok := resources.create_light(
+  handle : resources.Handle
+  handle, ok = resources.create_light(
     resources_manager,
     gpu_context,
     .SPOT,
@@ -1136,8 +1135,6 @@ create_spot_light_attachment :: proc(
     angle_outer,
     cast_shadow,
   )
-  if !ok {
-    log.error("Failed to create spot light")
-  }
-  return LightAttachment{handle = light_handle}
+  attachment = LightAttachment{handle}
+  return
 }

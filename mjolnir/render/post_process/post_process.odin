@@ -2,6 +2,7 @@ package post_process
 
 import "../../gpu"
 import "../../resources"
+import "../shared"
 import "../targets"
 import "core:log"
 import vk "vendor:vulkan"
@@ -443,6 +444,9 @@ init :: proc(
     height,
     color_format,
   ) or_return
+  spec_data, spec_entries, spec_info := shared.make_shader_spec_constants()
+  spec_info.pData = cast(rawptr)&spec_data
+  defer delete(spec_entries)
   shader_stages: [count][2]vk.PipelineShaderStageCreateInfo
   pipeline_infos: [count]vk.GraphicsPipelineCreateInfo
   for effect_type, i in PostProcessEffectType {
@@ -492,12 +496,14 @@ init :: proc(
         stage = {.VERTEX},
         module = vert_module,
         pName = "main",
+        pSpecializationInfo = &spec_info,
       },
       {
         sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
         stage = {.FRAGMENT},
         module = frag_modules[i],
         pName = "main",
+        pSpecializationInfo = &spec_info,
       },
     }
     pipeline_infos[i] = {

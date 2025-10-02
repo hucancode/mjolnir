@@ -14,7 +14,7 @@ import "vendor:glfw"
 import mu "vendor:microui"
 import vk "vendor:vulkan"
 
-LIGHT_COUNT :: 100
+LIGHT_COUNT :: 10
 ALL_SPOT_LIGHT :: false
 ALL_POINT_LIGHT :: false
 light_handles: [LIGHT_COUNT]resources.Handle
@@ -314,11 +314,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
         should_make_spot_light = false
       }
       if should_make_spot_light {
-        light_handles[i], light = world.spawn(
-          &engine.world,
-          nil,
-          &engine.resource_manager,
-        )
         attachment := world.create_spot_light_attachment(
           light_handles[i],
           &engine.resource_manager,
@@ -326,23 +321,26 @@ setup :: proc(engine: ^mjolnir.Engine) {
           color,
           10, // radius
           math.PI * 0.25, // angle
-        )
-        light.attachment = attachment
-        world.rotate(light, math.PI * 0.4, linalg.VECTOR3F32_X_AXIS)
-      } else {
+        ) or_continue
         light_handles[i], light = world.spawn(
           &engine.world,
-          nil,
+          attachment,
           &engine.resource_manager,
         )
+        world.rotate(light, math.PI * 0.4, linalg.VECTOR3F32_X_AXIS)
+      } else {
         attachment := world.create_point_light_attachment(
           light_handles[i],
           &engine.resource_manager,
           &engine.gpu_context,
           color,
           13, // radius
+        ) or_continue
+        light_handles[i], light = world.spawn(
+          &engine.world,
+          attachment,
+          &engine.resource_manager,
         )
-        light.attachment = attachment
       }
       world.translate(light, 6, 2, -1)
       cube_node: ^world.Node
@@ -370,9 +368,13 @@ setup :: proc(engine: ^mjolnir.Engine) {
         {0.2, 0.5, 0.9, 1.0},
         true,
       )
-      dir_node.attachment = attachment
-      world.translate(dir_node, 0, 10, 0)
-      world.rotate(dir_node, math.PI * 0.25, linalg.VECTOR3F32_X_AXIS)
+      if attachment.handle.generation == 0 {
+        world.despawn(&engine.world, dir_handle)
+      } else {
+        dir_node.attachment = attachment
+        world.translate(dir_node, 0, 10, 0)
+        world.rotate(dir_node, math.PI * 0.25, linalg.VECTOR3F32_X_AXIS)
+      }
     }
   }
   when false {

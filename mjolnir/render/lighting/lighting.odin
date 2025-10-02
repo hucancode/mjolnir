@@ -3,6 +3,7 @@ package lighting
 import "../../geometry"
 import "../../gpu"
 import "../../resources"
+import "../shared"
 import "../targets"
 import "core:log"
 import vk "vendor:vulkan"
@@ -239,18 +240,24 @@ init :: proc(
     colorAttachmentCount    = len(ambient_color_formats),
     pColorAttachmentFormats = raw_data(ambient_color_formats[:]),
   }
+  spec_data, spec_entries, spec_info := shared.make_shader_spec_constants()
+  spec_info.pData = cast(rawptr)&spec_data
+  defer delete(spec_entries)
+
   ambient_shader_stages := [?]vk.PipelineShaderStageCreateInfo {
     {
       sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
       stage = {.VERTEX},
       module = ambient_vert_module,
       pName = "main",
+      pSpecializationInfo = &spec_info,
     },
     {
       sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
       stage = {.FRAGMENT},
       module = ambient_frag_module,
       pName = "main",
+      pSpecializationInfo = &spec_info,
     },
   }
   ambient_pipeline_info := vk.GraphicsPipelineCreateInfo {
@@ -418,12 +425,14 @@ init :: proc(
       stage = {.VERTEX},
       module = lighting_vert_module,
       pName = "main",
+      pSpecializationInfo = &spec_info,
     },
     {
       sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
       stage = {.FRAGMENT},
       module = lighting_frag_module,
       pName = "main",
+      pSpecializationInfo = &spec_info,
     },
   }
   lighting_pipeline_info := vk.GraphicsPipelineCreateInfo {
@@ -691,49 +700,20 @@ render :: proc(
     depth_texture_index    = targets.get_depth_texture(target, frame_index).index,
     input_image_index      = targets.get_final_image(target, frame_index).index,
   }
-  for entry, idx in resources_manager.lights.entries {
-    if entry.generation > 0 && entry.active {
-      light := entry.item
-      push_constant.light_index = u32(idx)
-      switch light.type {
-      case .POINT:
-        vk.CmdSetDepthCompareOp(command_buffer, .GREATER_OR_EQUAL)
-        vk.CmdPushConstants(
-          command_buffer,
-          self.lighting_pipeline_layout,
-          {.VERTEX, .FRAGMENT},
-          0,
-          size_of(push_constant),
-          &push_constant,
-        )
-        bind_and_draw_mesh(self.sphere_mesh, command_buffer, resources_manager)
-      case .DIRECTIONAL:
-        vk.CmdSetDepthCompareOp(command_buffer, .ALWAYS)
-        vk.CmdPushConstants(
-          command_buffer,
-          self.lighting_pipeline_layout,
-          {.VERTEX, .FRAGMENT},
-          0,
-          size_of(push_constant),
-          &push_constant,
-        )
-        bind_and_draw_mesh(
-          self.triangle_mesh,
-          command_buffer,
-          resources_manager,
-        )
-      case .SPOT:
-        vk.CmdSetDepthCompareOp(command_buffer, .LESS_OR_EQUAL)
-        vk.CmdPushConstants(
-          command_buffer,
-          self.lighting_pipeline_layout,
-          {.VERTEX, .FRAGMENT},
-          0,
-          size_of(push_constant),
-          &push_constant,
-        )
-        bind_and_draw_mesh(self.cone_mesh, command_buffer, resources_manager)
-      }
+  for entry, idx in resources_manager.lights.entries do if entry.active {
+    light := entry.item
+    push_constant.light_index = u32(idx)
+    vk.CmdPushConstants(command_buffer, self.lighting_pipeline_layout, {.VERTEX, .FRAGMENT}, 0, size_of(push_constant), &push_constant)
+    switch light.type {
+    case .POINT:
+      vk.CmdSetDepthCompareOp(command_buffer, .GREATER_OR_EQUAL)
+      bind_and_draw_mesh(self.sphere_mesh, command_buffer, resources_manager)
+    case .DIRECTIONAL:
+      vk.CmdSetDepthCompareOp(command_buffer, .ALWAYS)
+      bind_and_draw_mesh(self.triangle_mesh, command_buffer, resources_manager)
+    case .SPOT:
+      vk.CmdSetDepthCompareOp(command_buffer, .LESS_OR_EQUAL)
+      bind_and_draw_mesh(self.cone_mesh, command_buffer, resources_manager)
     }
   }
 }

@@ -2,6 +2,7 @@ package particles
 
 import "../../gpu"
 import "../../resources"
+import "../shared"
 import "../targets"
 import "core:log"
 import vk "vendor:vulkan"
@@ -835,18 +836,23 @@ create_render_pipeline :: proc(
   ) or_return
   defer vk.DestroyShaderModule(gpu_context.device, vert_module, nil)
   defer vk.DestroyShaderModule(gpu_context.device, frag_module, nil)
+  spec_data, spec_entries, spec_info := shared.make_shader_spec_constants()
+  spec_info.pData = cast(rawptr)&spec_data
+  defer delete(spec_entries)
   shader_stages := [?]vk.PipelineShaderStageCreateInfo {
     {
       sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
       stage = {.VERTEX},
       module = vert_module,
       pName = "main",
+      pSpecializationInfo = &spec_info,
     },
     {
       sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
       stage = {.FRAGMENT},
       module = frag_module,
       pName = "main",
+      pSpecializationInfo = &spec_info,
     },
   }
   color_formats := [?]vk.Format{.B8G8R8A8_SRGB}

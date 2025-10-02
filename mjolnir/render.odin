@@ -2,6 +2,7 @@ package mjolnir
 
 import "core:log"
 import "core:math"
+import "core:slice"
 import "core:math/linalg"
 import "geometry"
 import "gpu"
@@ -329,8 +330,8 @@ resize :: proc(
 }
 
 LightImportance :: struct {
-  light_handle: resources.Handle,
   importance:   f32,
+  light_handle: resources.Handle,
   light_type:   resources.LightType,
 }
 
@@ -342,59 +343,35 @@ renderer_assign_shadow_slots :: proc(
   // Calculate importance for all shadow-casting lights
   light_importances := make([dynamic]LightImportance, 0, len(resources_manager.lights.entries))
   defer delete(light_importances)
-
-  for idx in 0 ..< len(resources_manager.lights.entries) {
-    entry := &resources_manager.lights.entries[idx]
-    if entry.generation > 0 && entry.active {
-      light := &entry.item
-      if !light.cast_shadow do continue
-
-      light_handle := resources.Handle{index = u32(idx), generation = entry.generation}
-
-      // Get light position from world matrix
-      world_matrix := gpu.staged_buffer_get(&resources_manager.world_matrix_buffer, light.node_handle.index)
-      light_position := world_matrix[3].xyz
-
-      // Calculate distance to main camera
-      distance := linalg.length(light_position - main_camera.position)
-
-      // Calculate importance: higher for closer lights with larger volumes
-      // Directional lights always have max importance
-      importance: f32
-      if light.type == .DIRECTIONAL {
-        importance = 1000000.0 // Very high priority
-      } else {
-        // Combine inverse distance and volume (radius)
-        volume := light.radius * light.radius
-        importance = volume / max(distance, 1.0)
-      }
-
-      append(&light_importances, LightImportance{light_handle, importance, light.type})
+  for entry, idx in resources_manager.lights.entries do if entry.active {
+    light := entry.item
+    if !light.cast_shadow do continue
+    // Get light position from world matrix
+    world_matrix := gpu.staged_buffer_get(&resources_manager.world_matrix_buffer, light.node_handle.index)
+    light_position := world_matrix[3].xyz
+    // Calculate distance to main camera
+    distance := max(1.0, linalg.length2(light_position - main_camera.position))
+    importance: f32 = 1000000.0
+    if light.type != .DIRECTIONAL {
+      volume := light.radius * light.radius
+      importance = volume / distance / distance
     }
+    light_handle := resources.Handle{index = u32(idx), generation = entry.generation}
+    append(&light_importances, LightImportance{importance, light_handle, light.type})
   }
-
-  // Sort by importance (descending)
-  for i in 0 ..< len(light_importances) {
-    for j in i + 1 ..< len(light_importances) {
-      if light_importances[j].importance > light_importances[i].importance {
-        light_importances[i], light_importances[j] = light_importances[j], light_importances[i]
-      }
-    }
-  }
-
+  slice.sort_by(light_importances[:], proc(a, b: LightImportance) -> bool {
+    return a.importance > b.importance
+  })
   // First pass: Determine which lights keep their slots and which are evicted
   top_count := min(len(light_importances), resources.MAX_SHADOW_MAPS)
   top_lights := light_importances[:top_count]
-
   // Mark slots that should be retained
   slots_to_keep := [resources.MAX_SHADOW_MAPS]bool{}
   lights_needing_slots := make([dynamic]LightImportance, 0, top_count)
   defer delete(lights_needing_slots)
-
   for light_importance in top_lights {
     light, ok := resources.get_light(resources_manager, light_importance.light_handle)
     if !ok do continue
-
     // Check if this light already has a slot assigned
     if light.shadow_slot_index >= 0 && light.shadow_slot_index < resources.MAX_SHADOW_MAPS {
       // This light keeps its slot
@@ -484,30 +461,25 @@ renderer_check_light_movement :: proc(
   self: ^Renderer,
   resources_manager: ^resources.Manager,
 ) {
-  for idx in 0 ..< len(resources_manager.lights.entries) {
-    entry := &resources_manager.lights.entries[idx]
-    if entry.generation > 0 && entry.active {
-      light := &entry.item
-      if !light.cast_shadow do continue
-
-      world_matrix := gpu.staged_buffer_get(&resources_manager.world_matrix_buffer, light.node_handle.index)
-
-      // Check if matrix changed (simple element-wise comparison)
-      has_moved := false
-      for i in 0 ..< 4 {
-        for j in 0 ..< 4 {
-          if linalg.abs(world_matrix[i][j] - light.last_world_matrix[i][j]) > 0.001 {
-            has_moved = true
-            break
-          }
+  for entry, idx in resources_manager.lights.entries do if entry.active {
+    light := entry.item
+    if !light.cast_shadow do continue
+    world_matrix := gpu.staged_buffer_get(&resources_manager.world_matrix_buffer, light.node_handle.index)
+    // Check if matrix changed (simple element-wise comparison)
+    has_moved := false
+    for i in 0 ..< 4 {
+      for j in 0 ..< 4 {
+        if linalg.abs(world_matrix[i][j] - light.last_world_matrix[i][j]) > 0.001 {
+          has_moved = true
+          break
         }
-        if has_moved do break
       }
+      if has_moved do break
+    }
 
-      light.has_moved = has_moved
-      if has_moved {
-        light.last_world_matrix = world_matrix^
-      }
+    light.has_moved = has_moved
+    if has_moved {
+      light.last_world_matrix = world_matrix^
     }
   }
 }

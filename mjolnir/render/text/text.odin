@@ -279,12 +279,6 @@ init :: proc(
   }
   log.infof("pre-rasterization complete")
   log.infof("init text atlas texture...")
-  // Check if atlas has any non-zero pixels
-  non_zero_count := 0
-  for pixel in self.font_ctx.textureData {
-    if pixel > 0 do non_zero_count += 1
-  }
-  log.infof("Atlas has %d non-zero pixels out of %d total", non_zero_count, len(self.font_ctx.textureData))
   _, self.atlas_texture = resources.create_texture_from_pixels(
     gpu_context,
     resources_manager,
