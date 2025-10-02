@@ -87,7 +87,12 @@ create_material :: proc(
   mat: ^Material,
   res: vk.Result,
 ) {
-  ret, mat = alloc(&manager.materials)
+  ok: bool
+  ret, mat, ok = alloc(&manager.materials)
+  if !ok {
+    log.error("Failed to allocate material: pool capacity reached")
+    return Handle{}, nil, .ERROR_OUT_OF_DEVICE_MEMORY
+  }
   mat.type = type
   mat.features = features
   mat.albedo = albedo_handle

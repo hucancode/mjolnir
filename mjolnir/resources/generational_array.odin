@@ -14,11 +14,13 @@ Entry :: struct($T: typeid) {
 Pool :: struct($T: typeid) {
   entries:      [dynamic]Entry(T),
   free_indices: [dynamic]u32,
+  capacity:     u32,
 }
 
-pool_init :: proc(self: ^Pool($T)) {
+pool_init :: proc(self: ^Pool($T), capacity: u32 = 0) {
   self.entries = make([dynamic]Entry(T), 0, 0)
   self.free_indices = make([dynamic]u32, 0, 0)
+  self.capacity = capacity
 }
 
 pool_destroy :: proc(pool: Pool($T), deinit_proc: proc(_: ^T)) {
@@ -32,21 +34,24 @@ pool_destroy :: proc(pool: Pool($T), deinit_proc: proc(_: ^T)) {
   delete(pool.free_indices)
 }
 
-alloc :: proc(pool: ^Pool($T)) -> (Handle, ^T) {
+alloc :: proc(pool: ^Pool($T)) -> (handle: Handle, item: ^T, ok: bool) {
   index, has_free_index := pop_safe(&pool.free_indices)
   if has_free_index {
     entry := &pool.entries[index]
     entry.active = true
-    return Handle{index, entry.generation}, &entry.item
+    return Handle{index, entry.generation}, &entry.item, true
   } else {
     index := u32(len(pool.entries))
+    if pool.capacity > 0 && index >= pool.capacity {
+      return Handle{}, nil, false
+    }
     new_item_generation: u32 = 1
     entry_to_add := Entry(T) {
       generation = new_item_generation,
       active     = true,
     }
     append(&pool.entries, entry_to_add)
-    return Handle{index, new_item_generation}, &pool.entries[index].item
+    return Handle{index, new_item_generation}, &pool.entries[index].item, true
   }
 }
 

@@ -63,7 +63,12 @@ render_target_init :: proc(
 ) -> vk.Result {
   // Create camera
   camera_ptr: ^geometry.Camera
-  self.camera, camera_ptr = resources.alloc(&manager.cameras)
+  ok: bool
+  self.camera, camera_ptr, ok = resources.alloc(&manager.cameras)
+  if !ok {
+    log.error("Failed to allocate camera for render target")
+    return .ERROR_OUT_OF_DEVICE_MEMORY
+  }
   camera_ptr^ = geometry.make_camera_perspective(
     fov,
     f32(width) / f32(height),

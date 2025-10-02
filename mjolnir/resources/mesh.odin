@@ -195,7 +195,12 @@ create_mesh :: proc(
   mesh: ^Mesh,
   ret: vk.Result,
 ) {
-  handle, mesh = alloc(&manager.meshes)
+  ok: bool
+  handle, mesh, ok = alloc(&manager.meshes)
+  if !ok {
+    log.error("Failed to allocate mesh: pool capacity reached")
+    return Handle{}, nil, .ERROR_OUT_OF_DEVICE_MEMORY
+  }
   ret = mesh_init(mesh, gpu_context, manager, data)
   if ret != .SUCCESS {
     return

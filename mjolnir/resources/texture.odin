@@ -19,7 +19,12 @@ create_empty_texture_2d :: proc(
   texture: ^gpu.ImageBuffer,
   ret: vk.Result,
 ) {
-  handle, texture = alloc(&manager.image_2d_buffers)
+  ok: bool
+  handle, texture, ok = alloc(&manager.image_2d_buffers)
+  if !ok {
+    log.error("Failed to allocate 2D texture: pool capacity reached")
+    return Handle{}, nil, .ERROR_OUT_OF_DEVICE_MEMORY
+  }
   texture^ = gpu.malloc_image_buffer(
     gpu_context,
     width,
@@ -67,7 +72,12 @@ create_empty_texture_cube :: proc(
   texture: ^gpu.CubeImageBuffer,
   ret: vk.Result,
 ) {
-  handle, texture = alloc(&manager.image_cube_buffers)
+  ok: bool
+  handle, texture, ok = alloc(&manager.image_cube_buffers)
+  if !ok {
+    log.error("Failed to allocate cube texture: pool capacity reached")
+    return Handle{}, nil, .ERROR_OUT_OF_DEVICE_MEMORY
+  }
   gpu.cube_depth_texture_init(
     gpu_context,
     texture,
@@ -110,7 +120,12 @@ create_texture_from_path :: proc(
   texture: ^gpu.ImageBuffer,
   ret: vk.Result,
 ) {
-  handle, texture = alloc(&manager.image_2d_buffers)
+  ok: bool
+  handle, texture, ok = alloc(&manager.image_2d_buffers)
+  if !ok {
+    log.error("Failed to allocate texture from path: pool capacity reached")
+    return Handle{}, nil, .ERROR_OUT_OF_DEVICE_MEMORY
+  }
   path_cstr := strings.clone_to_cstring(path)
   width, height, c_in_file: c.int
 
@@ -208,7 +223,12 @@ create_texture_from_pixels :: proc(
   texture: ^gpu.ImageBuffer,
   ret: vk.Result,
 ) {
-  handle, texture = alloc(&manager.image_2d_buffers)
+  ok: bool
+  handle, texture, ok = alloc(&manager.image_2d_buffers)
+  if !ok {
+    log.error("Failed to allocate texture from pixels: pool capacity reached")
+    return Handle{}, nil, .ERROR_OUT_OF_DEVICE_MEMORY
+  }
 
   if generate_mips {
     texture^ = create_image_buffer_with_mips(
@@ -252,7 +272,12 @@ create_texture_from_data :: proc(
   texture: ^gpu.ImageBuffer,
   ret: vk.Result,
 ) {
-  handle, texture = alloc(&manager.image_2d_buffers)
+  ok: bool
+  handle, texture, ok = alloc(&manager.image_2d_buffers)
+  if !ok {
+    log.error("Failed to allocate texture from data: pool capacity reached")
+    return Handle{}, nil, .ERROR_OUT_OF_DEVICE_MEMORY
+  }
   width, height, ch: c.int
   actual_channels: c.int = 4
   pixels := stbi.load_from_memory(

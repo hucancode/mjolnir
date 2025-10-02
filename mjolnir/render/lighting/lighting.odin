@@ -462,7 +462,7 @@ init :: proc(
     resources_manager,
     geometry.make_cone(segments = 128, height = 1, radius = 0.5),
   ) or_return
-  self.fullscreen_triangle_mesh, _ = resources.create_mesh(
+  self.triangle_mesh, _ = resources.create_mesh(
     gpu_context,
     resources_manager,
     geometry.make_fullscreen_triangle(),
@@ -553,7 +553,7 @@ Renderer :: struct {
   // Light volume meshes
   sphere_mesh:              resources.Handle,
   cone_mesh:                resources.Handle,
-  fullscreen_triangle_mesh: resources.Handle,
+  triangle_mesh:            resources.Handle,
   commands:                 [resources.MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
 }
 
@@ -645,7 +645,6 @@ render :: proc(
   resources_manager: ^resources.Manager,
   frame_index: u32,
 ) {
-  // Helper proc to bind and draw a mesh
   bind_and_draw_mesh :: proc(
     mesh_handle: resources.Handle,
     command_buffer: vk.CommandBuffer,
@@ -692,10 +691,9 @@ render :: proc(
     depth_texture_index    = targets.get_depth_texture(target, frame_index).index,
     input_image_index      = targets.get_final_image(target, frame_index).index,
   }
-  for idx in 0 ..< len(resources_manager.lights.entries) {
-    entry := &resources_manager.lights.entries[idx]
+  for entry, idx in resources_manager.lights.entries {
     if entry.generation > 0 && entry.active {
-      light := &entry.item
+      light := entry.item
       push_constant.light_index = u32(idx)
       switch light.type {
       case .POINT:
@@ -720,7 +718,7 @@ render :: proc(
           &push_constant,
         )
         bind_and_draw_mesh(
-          self.fullscreen_triangle_mesh,
+          self.triangle_mesh,
           command_buffer,
           resources_manager,
         )

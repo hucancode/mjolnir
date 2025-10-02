@@ -109,25 +109,25 @@ init :: proc(
   gpu_context: ^gpu.GPUContext,
 ) -> vk.Result {
   log.infof("Initializing mesh pool... ")
-  pool_init(&manager.meshes)
+  pool_init(&manager.meshes, MAX_MESHES)
   log.infof("Initializing materials pool... ")
-  pool_init(&manager.materials)
+  pool_init(&manager.materials, MAX_MATERIALS)
   log.infof("Initializing image 2d buffer pool... ")
-  pool_init(&manager.image_2d_buffers)
+  pool_init(&manager.image_2d_buffers, MAX_TEXTURES)
   log.infof("Initializing image cube buffer pool... ")
-  pool_init(&manager.image_cube_buffers)
+  pool_init(&manager.image_cube_buffers, MAX_CUBE_TEXTURES)
   log.infof("Initializing cameras pool... ")
-  pool_init(&manager.cameras)
+  pool_init(&manager.cameras, MAX_ACTIVE_CAMERAS)
   log.infof("Initializing forcefield pool... ")
-  pool_init(&manager.forcefields)
+  pool_init(&manager.forcefields, MAX_FORCE_FIELDS)
   log.infof("Initializing animation clips pool... ")
-  pool_init(&manager.animation_clips)
+  pool_init(&manager.animation_clips, 0)
   log.infof("Initializing lights pool... ")
-  pool_init(&manager.lights)
+  pool_init(&manager.lights, MAX_LIGHTS)
   log.infof("Initializing navigation mesh pool... ")
-  pool_init(&manager.nav_meshes)
+  pool_init(&manager.nav_meshes, 0)
   log.infof("Initializing navigation context pool... ")
-  pool_init(&manager.nav_contexts)
+  pool_init(&manager.nav_contexts, 0)
   log.infof("Initializing navigation system... ")
   manager.navigation_system = {}
   manager.current_frame_index = 0
@@ -662,12 +662,12 @@ init_world_matrix_buffers :: proc(
 ) -> vk.Result {
   log.infof(
     "Creating world matrix buffer with capacity %d nodes...",
-    WORLD_MATRIX_CAPACITY,
+    MAX_NODES_IN_SCENE,
   )
   manager.world_matrix_buffer = gpu.malloc_staged_buffer(
     gpu_context,
     matrix[4, 4]f32,
-    WORLD_MATRIX_CAPACITY,
+    MAX_NODES_IN_SCENE,
     {.STORAGE_BUFFER},
   ) or_return
   bindings := [?]vk.DescriptorSetLayoutBinding {
@@ -738,12 +738,12 @@ init_node_data_buffer :: proc(
 ) -> vk.Result {
   log.infof(
     "Creating node data buffer with capacity %d nodes...",
-    NODE_DATA_CAPACITY,
+    MAX_NODES_IN_SCENE,
   )
   manager.node_data_buffer = gpu.malloc_staged_buffer(
     gpu_context,
     NodeData,
-    NODE_DATA_CAPACITY,
+    MAX_NODES_IN_SCENE,
     {.STORAGE_BUFFER},
   ) or_return
   node_slice := gpu.staged_buffer_get_all(&manager.node_data_buffer)
@@ -1534,7 +1534,12 @@ create_animation_clip :: proc(
   clip: ^animation.Clip,
   ret: vk.Result,
 ) {
-  handle, clip = alloc(&manager.animation_clips)
+  ok: bool
+  handle, clip, ok = alloc(&manager.animation_clips)
+  if !ok {
+    log.error("Failed to allocate animation clip")
+    return Handle{}, nil, .ERROR_OUT_OF_DEVICE_MEMORY
+  }
   clip.name = name
   clip.duration = duration
   clip.channels = channels

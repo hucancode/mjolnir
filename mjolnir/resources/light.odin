@@ -47,8 +47,12 @@ create_light :: proc(
   angle_inner: f32 = math.PI * 0.16,
   angle_outer: f32 = math.PI * 0.2,
   cast_shadow: b32 = true,
-) -> Handle {
-  handle, light := alloc(&manager.lights)
+) -> (Handle, bool) {
+  handle, light, ok := alloc(&manager.lights)
+  if !ok {
+    log.error("Failed to allocate light: pool capacity reached")
+    return Handle{}, false
+  }
   light.type = light_type
   light.node_handle = node_handle
   light.cast_shadow = cast_shadow
@@ -64,7 +68,7 @@ create_light :: proc(
   light.has_moved = true
   light.shadow_slot_index = -1
   gpu.write(&manager.lights_buffer, &light.data, int(handle.index))
-  return handle
+  return handle, true
 }
 
 // Destroy a light handle

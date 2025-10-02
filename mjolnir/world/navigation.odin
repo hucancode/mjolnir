@@ -174,8 +174,10 @@ build_navigation_mesh_from_scene :: proc(
     recast.free_poly_mesh_detail(dmesh)
   }
 
-  nav_mesh_handle, nav_mesh := resources.alloc(&resources_manager.nav_meshes)
-  if nav_mesh == nil {
+  nav_mesh_handle: resources.Handle
+  nav_mesh: ^resources.NavMesh
+  nav_mesh_handle, nav_mesh, ok = resources.alloc(&resources_manager.nav_meshes)
+  if !ok {
     return nav_mesh_handle, false
   }
 
@@ -285,8 +287,10 @@ build_navigation_mesh_from_scene_filtered :: proc(
   }
 
   // Create and initialize resources.NavMesh resource (same as basic version)
-  nav_mesh_handle, nav_mesh := resources.alloc(&resources_manager.nav_meshes)
-  if nav_mesh == nil {
+  nav_mesh_handle: resources.Handle
+  nav_mesh: ^resources.NavMesh
+  nav_mesh_handle, nav_mesh, ok = resources.alloc(&resources_manager.nav_meshes)
+  if !ok {
     log.error("Failed to allocate navigation mesh resource")
     return nav_mesh_handle, false
   }
@@ -457,8 +461,10 @@ build_navigation_mesh_from_world :: proc(
   }
 
   // Create and initialize resources.NavMesh resource
-  nav_mesh_handle, nav_mesh := resources.alloc(&resources_manager.nav_meshes)
-  if nav_mesh == nil {
+  nav_mesh_handle: resources.Handle
+  nav_mesh: ^resources.NavMesh
+  nav_mesh_handle, nav_mesh, ok = resources.alloc(&resources_manager.nav_meshes)
+  if !ok {
     log.error("Failed to allocate navigation mesh resource")
     return nav_mesh_handle, false
   }
@@ -560,8 +566,10 @@ create_navigation_context :: proc(
     log.error("Invalid navigation mesh handle for context creation")
     return {}, false
   }
-  context_handle, nav_context := resources.alloc(&resources_manager.nav_contexts)
-  if nav_context == nil {
+  context_handle: resources.Handle
+  nav_context: ^resources.NavContext
+  context_handle, nav_context, ok = resources.alloc(&resources_manager.nav_contexts)
+  if !ok {
     log.error("Failed to allocate navigation context")
     return context_handle, false
   }

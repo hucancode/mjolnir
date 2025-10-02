@@ -198,7 +198,11 @@ spawn_at :: proc(
   handle: resources.Handle,
   node: ^Node,
 ) {
-  handle, node = resources.alloc(&self.nodes)
+  ok: bool
+  handle, node, ok = resources.alloc(&self.nodes)
+  if !ok {
+    return resources.Handle{}, nil
+  }
   init_node(node)
   node.attachment = attachment
   assign_emitter_to_node(resources_manager, handle, node)
@@ -266,7 +270,11 @@ spawn :: proc(
   handle: resources.Handle,
   node: ^Node,
 ) {
-  handle, node = resources.alloc(&self.nodes)
+  ok: bool
+  handle, node, ok = resources.alloc(&self.nodes)
+  if !ok {
+    return resources.Handle{}, nil
+  }
   init_node(node)
   node.attachment = attachment
   assign_emitter_to_node(resources_manager, handle, node)
@@ -333,7 +341,11 @@ spawn_child :: proc(
   handle: resources.Handle,
   node: ^Node,
 ) {
-  handle, node = resources.alloc(&self.nodes)
+  ok: bool
+  handle, node, ok = resources.alloc(&self.nodes)
+  if !ok {
+    return resources.Handle{}, nil
+  }
   init_node(node)
   node.attachment = attachment
   assign_emitter_to_node(resources_manager, handle, node)
@@ -406,9 +418,9 @@ World :: struct {
 }
 
 init :: proc(world: ^World) {
-  resources.pool_init(&world.nodes)
+  resources.pool_init(&world.nodes, resources.MAX_NODES_IN_SCENE)
   root: ^Node
-  world.root, root = resources.alloc(&world.nodes)
+  world.root, root, _ = resources.alloc(&world.nodes)
   init_node(root, "root")
   root.parent = world.root
   world.traversal_stack = make([dynamic]TraverseEntry, 0)
@@ -505,7 +517,11 @@ spawn_node :: proc(
   attachment: NodeAttachment = nil,
   resources_manager: ^resources.Manager = nil,
 ) -> (handle: resources.Handle, node: ^Node) {
-  handle, node = resources.alloc(&world.nodes)
+  ok: bool
+  handle, node, ok = resources.alloc(&world.nodes)
+  if !ok {
+    return resources.Handle{}, nil
+  }
   init_node(node)
   node.attachment = attachment
   assign_emitter_to_node(resources_manager, handle, node)
@@ -571,7 +587,11 @@ spawn_child_node :: proc(
   attachment: NodeAttachment = nil,
   resources_manager: ^resources.Manager = nil,
 ) -> (handle: resources.Handle, node: ^Node) {
-  handle, node = resources.alloc(&world.nodes)
+  ok: bool
+  handle, node, ok = resources.alloc(&world.nodes)
+  if !ok {
+    return resources.Handle{}, nil
+  }
   init_node(node)
   node.attachment = attachment
   assign_emitter_to_node(resources_manager, handle, node)
@@ -1056,7 +1076,7 @@ create_point_light_attachment :: proc(
   radius: f32 = 10.0,
   cast_shadow: b32 = true,
 ) -> LightAttachment {
-  light_handle := resources.create_light(
+  light_handle, ok := resources.create_light(
     resources_manager,
     gpu_context,
     .POINT,
@@ -1065,7 +1085,9 @@ create_point_light_attachment :: proc(
     radius,
     cast_shadow = cast_shadow,
   )
-
+  if !ok {
+    log.error("Failed to create point light")
+  }
   return LightAttachment{handle = light_handle}
 }
 
@@ -1077,7 +1099,7 @@ create_directional_light_attachment :: proc(
   color: [4]f32 = {1, 1, 1, 1},
   cast_shadow: b32 = false,
 ) -> LightAttachment {
-  light_handle := resources.create_light(
+  light_handle, ok := resources.create_light(
     resources_manager,
     gpu_context,
     .DIRECTIONAL,
@@ -1085,6 +1107,9 @@ create_directional_light_attachment :: proc(
     color,
     cast_shadow = cast_shadow,
   )
+  if !ok {
+    log.error("Failed to create directional light")
+  }
   return LightAttachment{handle = light_handle}
 }
 
@@ -1100,7 +1125,7 @@ create_spot_light_attachment :: proc(
 ) -> LightAttachment {
   angle_inner := angle * 0.8
   angle_outer := angle
-  light_handle := resources.create_light(
+  light_handle, ok := resources.create_light(
     resources_manager,
     gpu_context,
     .SPOT,
@@ -1111,5 +1136,8 @@ create_spot_light_attachment :: proc(
     angle_outer,
     cast_shadow,
   )
+  if !ok {
+    log.error("Failed to create spot light")
+  }
   return LightAttachment{handle = light_handle}
 }

@@ -471,16 +471,11 @@ renderer_assign_shadow_slots :: proc(
     // Only re-render if light has moved
     slot.needs_render = light.has_moved
   }
-
-  // Mark unassigned lights as having no shadow
-  for idx in 0 ..< len(resources_manager.lights.entries) {
-    entry := &resources_manager.lights.entries[idx]
-    if entry.generation > 0 && entry.active {
-      light := &entry.item
-      if light.cast_shadow && light.shadow_slot_index == -1 {
-        light.shadow_map = 0xFFFFFFFF
-        gpu.write(&resources_manager.lights_buffer, &light.data, int(idx))
-      }
+  for entry, idx in resources_manager.lights.entries do if entry.active {
+    light := entry.item
+    if light.cast_shadow && light.shadow_slot_index == -1 {
+      light.shadow_map = 0xFFFFFFFF
+      gpu.write(&resources_manager.lights_buffer, &light.data, int(idx))
     }
   }
 }

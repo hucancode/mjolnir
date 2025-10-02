@@ -640,8 +640,8 @@ construct_scene :: proc(
   for len(stack) > 0 {
     entry := pop(&stack)
     gltf_node := &gltf_data.nodes[entry.idx]
-    node_handle, node := resources.alloc(&world.nodes)
-    if node == nil do continue
+    node_handle, node, ok := resources.alloc(&world.nodes)
+    if !ok do continue
     init_node(node, string(gltf_node.name))
     node.transform = geometry.TRANSFORM_IDENTITY
     if gltf_node.has_matrix {
@@ -670,7 +670,11 @@ construct_scene :: proc(
       if geometry_data, found := geometry_cache[gltf_node.mesh]; found {
         if gltf_node.skin != nil {
           if skin_data, skin_found := skin_cache[gltf_node.skin]; skin_found {
-            mesh_handle, mesh := resources.alloc(&resources_manager.meshes)
+            mesh_handle, mesh, mesh_ok := resources.alloc(&resources_manager.meshes)
+            if !mesh_ok {
+              log.error("Failed to allocate mesh for skinned mesh")
+              continue
+            }
             init_result := resources.mesh_init(
               mesh,
               gpu_context,
@@ -756,7 +760,11 @@ load_animations :: proc(
   skinning := &mesh.skinning.?
 
   for gltf_anim, i in gltf_data.animations {
-    _, clip := resources.alloc(&resources_manager.animation_clips)
+    _, clip, clip_ok := resources.alloc(&resources_manager.animation_clips)
+    if !clip_ok {
+      log.error("Failed to allocate animation clip")
+      continue
+    }
     if gltf_anim.name != nil {
       clip.name = strings.clone_from_cstring(gltf_anim.name)
     } else {

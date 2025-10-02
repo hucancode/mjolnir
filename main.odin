@@ -14,7 +14,7 @@ import "vendor:glfw"
 import mu "vendor:microui"
 import vk "vendor:vulkan"
 
-LIGHT_COUNT :: 5
+LIGHT_COUNT :: 100
 ALL_SPOT_LIGHT :: false
 ALL_POINT_LIGHT :: false
 light_handles: [LIGHT_COUNT]resources.Handle
@@ -412,7 +412,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
       albedo_handle = goldstar_texture_handle,
     )
     psys_handle1, _ := world.spawn_at(&engine.world, {-2.0, 1.9, 0.3})
-    emitter_handle1 := resources.create_emitter_handle(
+    emitter_handle1, _ := resources.create_emitter_handle(
       &engine.resource_manager,
       psys_handle1,
       resources.Emitter {
@@ -441,7 +441,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     )
     psys_handle2, _ := world.spawn_at(&engine.world, {2.0, 1.9, 0.3})
     // Create an emitter for the second particle system
-    emitter_handle2 := resources.create_emitter_handle(
+    emitter_handle2, _ := resources.create_emitter_handle(
       &engine.resource_manager,
       psys_handle2,
       resources.Emitter {
@@ -475,7 +475,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
       world.ForceFieldAttachment{},
     )
     world.translate(&engine.world, forcefield_handle, 5.0, 0.0, 0.0)
-    forcefield_resource := resources.create_forcefield_handle(
+    forcefield_resource, _ := resources.create_forcefield_handle(
       &engine.resource_manager,
       forcefield_handle,
       resources.ForceField {
