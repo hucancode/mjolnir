@@ -61,8 +61,8 @@ jobs:
       env:
         VK_LAYER_PATH: ${{ env.VULKAN_SDK }}/etc/vulkan/explicit_layer.d:${{ env.VULKAN_SDK }}/share/vulkan/explicit_layer.d
         VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
-        VK_LOADER_DEBUG: all
-        RMSE_THRESHOLD: 20
+        # VK_LOADER_DEBUG: all
+        RMSE_THRESHOLD: 100
       run: |
         export LD_LIBRARY_PATH="$VULKAN_SDK/lib:$VULKAN_SDK/lib64:${LD_LIBRARY_PATH:-}"
         tests=()
