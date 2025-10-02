@@ -334,7 +334,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
           &engine.resource_manager,
           &engine.gpu_context,
           color,
-          13, // radius
+          14, // radius
         ) or_continue
         light_handles[i], light = world.spawn(
           &engine.world,
@@ -618,10 +618,10 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
     t := time_since_start(engine) + offset
     // log.infof("getting light %d %v", i, handle)
     rx := math.sin(t)
-    ry := (math.sin(t) + 1.0) * 0.5 * 1.5 + 1.0
+    ry := (math.sin(t) + 1.0) * 0.5 * 1.5 + 0.5
     rz := math.cos(t)
     v := linalg.normalize([3]f32{rx, ry, rz})
-    radius: f32 = 12
+    radius: f32 = 15.0
     v = v * radius + linalg.VECTOR3F32_Y_AXIS * -1.0
     world.translate(&engine.world, handle, v.x, v.y, v.z)
     world.rotate(

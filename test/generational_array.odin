@@ -18,7 +18,8 @@ test_resource_pool_basic_allocation :: proc(t: ^testing.T) {
   resources.pool_init(&pool)
   defer resources.pool_destroy(pool, proc(data: ^TestData) {})
 
-  handle, data := resources.alloc(&pool)
+  handle, data, ok := resources.alloc(&pool)
+  testing.expect(t, ok)
   testing.expect(t, data != nil)
   testing.expect_value(t, handle.generation, 1)
 
@@ -33,7 +34,8 @@ test_resource_pool_handle_invalidation :: proc(t: ^testing.T) {
   resources.pool_init(&pool)
   defer resources.pool_destroy(pool, proc(data: ^TestData) {})
 
-  handle, _ := resources.alloc(&pool)
+  handle, _, ok := resources.alloc(&pool)
+  testing.expect(t, ok)
   resources.free(&pool, handle)
 
   retrieved, found := resources.get(pool, handle)
@@ -46,9 +48,11 @@ test_resource_pool_generation_increment :: proc(t: ^testing.T) {
   pool: resources.Pool(TestData)
   resources.pool_init(&pool)
   defer resources.pool_destroy(pool, proc(data: ^TestData) {})
-  handle1, _ := resources.alloc(&pool)
+  handle1, _, ok1 := resources.alloc(&pool)
+  testing.expect(t, ok1)
   resources.free(&pool, handle1)
-  handle2, _ := resources.alloc(&pool)
+  handle2, _, ok2 := resources.alloc(&pool)
+  testing.expect(t, ok2)
   testing.expect_value(t, handle2.index, handle1.index) // same index reused
   testing.expect(t, handle2.generation > handle1.generation) // generation incremented
 }
@@ -86,7 +90,7 @@ benchmark_resource_pool_read :: proc(t: ^testing.T) {
       data.handles = make([]resources.Handle, READ_COUNT)
       resources.pool_init(&data.pool)
       for i in 0 ..< COUNT {
-        handle, d := resources.alloc(&data.pool)
+        handle, d, _ := resources.alloc(&data.pool)
         d.value = rand.int31()
         data.handles[i] = handle
       }
@@ -214,7 +218,7 @@ benchmark_resource_pool_write :: proc(t: ^testing.T) {
       defer delete(allocated)
       for should_alloc in data.operations {
         if should_alloc {
-          handle, d := resources.alloc(&data.pool)
+          handle, d, _ := resources.alloc(&data.pool)
           d.value = rand.int31()
           append(&allocated, handle)
         } else {
