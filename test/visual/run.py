@@ -3,6 +3,7 @@
 import argparse
 import os
 import shutil
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -95,6 +96,7 @@ def run_test(
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
+                start_new_session=True,
             )
         except FileNotFoundError as exc:
             raise SystemExit("xvfb-run is required to capture headless screenshots") from exc
@@ -103,8 +105,19 @@ def run_test(
             stdout_data, _ = proc.communicate(timeout=timeout_seconds)
             return_code = proc.returncode or 0
         except subprocess.TimeoutExpired:
-            proc.kill()
-            stdout_data, _ = proc.communicate()
+            # Terminate the entire process group created by xvfb-run.
+            try:
+                os.killpg(proc.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+            try:
+                stdout_data, _ = proc.communicate(timeout=5)
+            except subprocess.TimeoutExpired:
+                try:
+                    os.killpg(proc.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                stdout_data, _ = proc.communicate()
             return_code = 124
         if stdout_data:
             log_file.write(stdout_data)
@@ -113,7 +126,7 @@ def run_test(
         print(stdout_data, end="")
 
     if return_code == 124:
-        # print("Render timed out (neutral signal).")
+        print("Render timed out (allowed).")
         return_code = 0
 
     return return_code
