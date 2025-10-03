@@ -369,6 +369,11 @@ renderer_assign_shadow_slots :: proc(
   slots_to_keep := [resources.MAX_SHADOW_MAPS]bool{}
   lights_needing_slots := make([dynamic]LightImportance, 0, top_count)
   defer delete(lights_needing_slots)
+  importance_ranks := map[resources.Handle]int{}
+  defer delete(importance_ranks)
+  for light_importance, idx in light_importances {
+    importance_ranks[light_importance.light_handle] = idx
+  }
   for light_importance in top_lights {
     light, ok := resources.get_light(resources_manager, light_importance.light_handle)
     if !ok do continue
@@ -379,6 +384,30 @@ renderer_assign_shadow_slots :: proc(
     } else {
       // This light needs a new slot
       append(&lights_needing_slots, light_importance)
+    }
+  }
+  // shadow that are previously in the top list must drop out of top 120% in order to be evicted
+  // otherwise, they stay in the current slot
+  extended_limit := 0
+  if len(light_importances) > 0 {
+    extended_limit = (int(resources.MAX_SHADOW_MAPS) * 6 + 4) / 5 // ceil(MAX_SHADOW_MAPS * 1.2)
+    if extended_limit < top_count {
+      extended_limit = top_count
+    }
+    if extended_limit > len(light_importances) {
+      extended_limit = len(light_importances)
+    }
+  }
+  if extended_limit > top_count {
+    for slot_idx in 0 ..< resources.MAX_SHADOW_MAPS {
+      if slots_to_keep[slot_idx] do continue
+
+      slot := &self.shadow_slots[slot_idx]
+      if slot.light_handle.generation == 0 do continue
+
+      if rank, found := importance_ranks[slot.light_handle]; found && rank < extended_limit {
+        slots_to_keep[slot_idx] = true
+      }
     }
   }
 
