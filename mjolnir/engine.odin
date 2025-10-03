@@ -10,6 +10,7 @@ import "core:slice"
 import "core:strings"
 import "core:thread"
 import "core:time"
+import "core:sync"
 import "core:unicode/utf8"
 import "geometry"
 import "gpu"
@@ -85,6 +86,7 @@ Engine :: struct {
   mouse_scroll_proc:           MouseScrollProc,
   custom_render_proc:          CustomRenderProc,
   render_error_count:          u32,
+  staged_buffers_guard:        sync.RW_Mutex,
   render:                      Renderer,
   command_buffers:             [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
   cursor_pos:                  [2]i32,
@@ -435,6 +437,8 @@ update :: proc(self: ^Engine) -> bool {
   if delta_time < UPDATE_FRAME_TIME {
     return false
   }
+  sync.rw_mutex_lock(&self.staged_buffers_guard)
+  defer sync.rw_mutex_unlock(&self.staged_buffers_guard)
   world.begin_frame(&self.world, &self.resource_manager)
   // Animation updates are now handled in render thread for smooth animation at render FPS
   // Update particle system params
@@ -445,8 +449,29 @@ update :: proc(self: ^Engine) -> bool {
   if self.update_proc != nil {
     self.update_proc(self, delta_time)
   }
+  res := flush_staged_buffers(self)
+  if res != .SUCCESS {
+    log.errorf("Failed to flush staged buffers: %v", res)
+    return false
+  }
   self.last_update_timestamp = time.now()
   return true
+}
+
+@(private = "file")
+flush_staged_buffers :: proc(engine: ^Engine) -> vk.Result {
+  cmd_buffer := gpu.begin_single_time_command(&engine.gpu_context) or_return
+  res := resources.commit(&engine.resource_manager, cmd_buffer)
+  if res != .SUCCESS {
+    vk.FreeCommandBuffers(
+      engine.gpu_context.device,
+      engine.gpu_context.command_pool,
+      1,
+      &cmd_buffer,
+    )
+    return res
+  }
+  return gpu.end_single_time_command(&engine.gpu_context, &cmd_buffer)
 }
 
 shutdown :: proc(self: ^Engine) {
@@ -526,9 +551,10 @@ render :: proc(self: ^Engine) -> vk.Result {
   command_buffer := self.command_buffers[self.frame_index]
   vk.ResetCommandBuffer(command_buffer, {}) or_return
   vk.BeginCommandBuffer(command_buffer, &{sType = .COMMAND_BUFFER_BEGIN_INFO, flags = {.ONE_TIME_SUBMIT}}) or_return
+  sync.rw_mutex_lock(&self.staged_buffers_guard)
+  defer sync.rw_mutex_unlock(&self.staged_buffers_guard)
   render_delta_time := f32(time.duration_seconds(time.since(self.last_render_timestamp)))
   update_skeletal_animations(self, render_delta_time)
-  resources.commit(&self.resource_manager, command_buffer) or_return
   main_idx := self.render.main_render_target_index
   if main_idx < 0 || main_idx >= len(self.render.render_targets) {
     log.errorf("Main render target index invalid: %d", main_idx)
