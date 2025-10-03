@@ -84,32 +84,54 @@ jobs:
       env:
         VK_LAYER_PATH: ${{ env.VULKAN_SDK }}/etc/vulkan/explicit_layer.d:${{ env.VULKAN_SDK }}/share/vulkan/explicit_layer.d
         VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+        VK_INSTANCE_LAYERS: VK_LAYER_LUNARG_screenshot
         VK_SCREENSHOT_FRAMES: 3
-        VK_SCREENSHOT_DIR: ${{ github.workspace }}/mjolnir/mjolnir/artifacts
+        VK_SCREENSHOT_DIR: ${{ github.workspace }}/artifacts/main
       run: |
         set -euo pipefail
         export LD_LIBRARY_PATH="$VULKAN_SDK/lib:$VULKAN_SDK/lib64:${LD_LIBRARY_PATH:-}"
-        mkdir -p $VK_SCREENSHOT_DIR
+        mkdir -p "$VK_SCREENSHOT_DIR"
+        if command -v magick >/dev/null 2>&1; then
+          IMG_TOOL=(magick identify)
+        elif command -v identify >/dev/null 2>&1; then
+          IMG_TOOL=(identify)
+        elif command -v convert >/dev/null 2>&1; then
+          IMG_TOOL=(convert)
+        else
+          echo "No ImageMagick tool (magick/identify/convert) found" >&2
+          exit 1
+        fi
+
         set +e
         make build
         xvfb-run -a -s "-screen 0 1920x1080x24" \
-          timeout 30s ./bin/main >"$VK_SCREENSHOT_DIR/main.log" 2>&1
+          timeout 15s ./bin/main >"$VK_SCREENSHOT_DIR/main.log" 2>&1
         status=$?
         set -e
+
         if [ $status -ne 0 ] && [ $status -ne 124 ]; then
           echo "Main demo execution failed with status $status" >&2
           exit $status
         fi
+
         ppm=$(find "$VK_SCREENSHOT_DIR" -maxdepth 1 -name '*.ppm' | sort | head -n 1)
         if [ -z "$ppm" ]; then
           echo "No screenshot captured for main demo" >&2
           exit 1
         fi
-        unique_colors=$(magick identify -format "%k" "$ppm")
-        read -r width height <<< "$(magick identify -format "%w %h" "$ppm")"
+
+        if [ "${IMG_TOOL[0]}" = "convert" ]; then
+          unique_colors=$("${IMG_TOOL[@]}" "$ppm" -format "%k" info:)
+          read -r width height <<< "$("${IMG_TOOL[@]}" "$ppm" -format "%w %h" info:)"
+        else
+          unique_colors=$("${IMG_TOOL[@]}" -format "%k" "$ppm")
+          read -r width height <<< "$("${IMG_TOOL[@]}" -format "%w %h" "$ppm")"
+        fi
+
         pixels=$((width * height))
         echo "Unique colors: $unique_colors"
         echo "Pixel count: $pixels"
+
         if [ "$unique_colors" -le 1000 ]; then
           echo "Unique color count too low: $unique_colors" >&2
           exit 1
@@ -118,6 +140,7 @@ jobs:
           echo "Unique color count too high relative to total pixels: $unique_colors vs $pixels" >&2
           exit 1
         fi
+
         echo "Main demo color diversity within expected range"
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
