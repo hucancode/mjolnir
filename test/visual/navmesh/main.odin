@@ -3,14 +3,13 @@ import "core:fmt"
 import "core:log"
 import "core:math"
 import "core:math/rand"
-import "core:os"
-import "mjolnir"
-import "mjolnir/geometry"
-import "mjolnir/navigation/detour"
-import "mjolnir/navigation/recast"
-import navigation_renderer "mjolnir/render/navigation"
-import "mjolnir/resources"
-import "mjolnir/world"
+import "../../../mjolnir"
+import "../../../mjolnir/geometry"
+import "../../../mjolnir/navigation/detour"
+import "../../../mjolnir/navigation/recast"
+import navigation_renderer "../../../mjolnir/render/navigation"
+import "../../../mjolnir/resources"
+import "../../../mjolnir/world"
 import "vendor:glfw"
 import mu "vendor:microui"
 
@@ -49,29 +48,13 @@ demo_state: struct {
   camera_distance      = 40,
   camera_height        = 25,
   camera_angle         = 0,
+  camera_auto_rotate   = false,
   mouse_move_threshold = 5.0,
   show_original_mesh   = true,
   use_procedural       = true,
 }
 
-demo_main :: proc() {
-  if len(os.args) > 2 {
-    log.debugf("Command line arguments: %v", os.args)
-    obj_file := os.args[2]
-    if obj_file != "procedural" && os.exists(obj_file) {
-      demo_state.use_procedural = false
-      log.infof("Will load OBJ file: %s", obj_file)
-    } else if obj_file == "procedural" {
-      demo_state.use_procedural = true
-      log.info("Using procedural geometry")
-    } else {
-      log.warnf("OBJ file not found: %s, using procedural geometry", obj_file)
-      demo_state.use_procedural = true
-    }
-  } else {
-    demo_state.use_procedural = true
-    log.info("No OBJ file specified, using procedural geometry")
-  }
+main :: proc() {
   engine := new(mjolnir.Engine)
   engine.setup_proc = demo_setup
   engine.update_proc = demo_update
@@ -79,7 +62,7 @@ demo_main :: proc() {
   engine.key_press_proc = demo_key_pressed
   engine.mouse_press_proc = demo_mouse_pressed
   engine.mouse_move_proc = demo_mouse_moved
-  mjolnir.run(engine, 1280, 720, "Navigation Mesh - World Integration Demo")
+  mjolnir.run(engine, 1280, 720, "Navigation Mesh Visual Test")
 }
 
 demo_setup :: proc(engine_ptr: ^mjolnir.Engine) {
@@ -87,46 +70,7 @@ demo_setup :: proc(engine_ptr: ^mjolnir.Engine) {
   log.info("Navigation mesh demo setup with world integration")
   demo_state.obstacle_handles = make([dynamic]resources.Handle, 0)
   demo_state.path_waypoint_handles = make([dynamic]resources.Handle, 0)
-  if !demo_state.use_procedural && len(os.args) > 2 {
-    create_obj_visualization_mesh(engine_ptr, os.args[2])
-  }
-  dir_handle, dir_node, dir_ok := world.spawn(
-    &engine_ptr.world,
-    nil,
-    &engine_ptr.resource_manager,
-  )
-  if dir_ok {
-    dir_attachment, dir_attachment_ok :=
-      world.create_directional_light_attachment(
-        dir_handle,
-        &engine_ptr.resource_manager,
-        &engine_ptr.gpu_context,
-        {0.8, 0.8, 0.8, 1.0},
-        true,
-      )
-    if dir_attachment_ok {
-      dir_node.attachment = dir_attachment
-    }
-  }
-  point_handle, point_node, point_ok := world.spawn(
-    &engine_ptr.world,
-    nil,
-    &engine_ptr.resource_manager,
-  )
-  if point_ok {
-    point_attachment, point_attachment_ok :=
-      world.create_point_light_attachment(
-        point_handle,
-        &engine_ptr.resource_manager,
-        &engine_ptr.gpu_context,
-        {0.5, 0.5, 0.5, 1.0},
-        20,
-        false,
-      )
-    if point_attachment_ok {
-      point_node.attachment = point_attachment
-    }
-  }
+  demo_state.camera_auto_rotate = false
   main_camera := get_main_camera(engine_ptr)
   if main_camera != nil {
     camera_look_at(main_camera, {35, 25, 35}, {0, 0, 0}, {0, 1, 0})

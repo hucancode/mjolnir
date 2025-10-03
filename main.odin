@@ -38,11 +38,6 @@ main :: proc() {
   log.infof("Starting with %d arguments", len(args))
   if len(args) > 1 {
     log.infof("Running mode: %s", args[1])
-    switch args[1] {
-    case "navmesh":
-      demo_main()
-      return
-    }
   }
   engine := new(mjolnir.Engine)
   engine.setup_proc = setup

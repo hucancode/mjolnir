@@ -30,7 +30,7 @@ fi
 test_id=$1
 artifact_root=${2:-artifacts}
 update_golden=${UPDATE_GOLDEN:-0}
-test_timeout=${TEST_TIMEOUT:-45}
+test_timeout=${TEST_TIMEOUT:-15}
 rmse_threshold=${RMSE_THRESHOLD:-0}
 
 if [[ $test_timeout -le 0 ]]; then
@@ -43,25 +43,18 @@ if [[ $rmse_threshold -lt 0 ]]; then
   exit 1
 fi
 
-if [[ $test_id == main ]]; then
-  test_dir="."
-  test_name="main"
-  binary="./bin/main"
-  build_cmd=(odin build . -out:bin/main)
+if [[ -d $test_id ]]; then
+  test_dir="$test_id"
 else
-  if [[ -d $test_id ]]; then
-    test_dir="$test_id"
-  else
-    test_dir="test/visual/$test_id"
-  fi
-  if [[ ! -d $test_dir ]]; then
-    echo "Test directory not found: $test_dir" >&2
-    exit 1
-  fi
-  test_name=$(basename "$test_dir")
-  binary="./bin/visual_$test_name"
-  build_cmd=(odin build "$test_dir" -out:"bin/visual_$test_name")
+  test_dir="test/visual/$test_id"
 fi
+if [[ ! -d $test_dir ]]; then
+  echo "Test directory not found: $test_dir" >&2
+  exit 1
+fi
+test_name=$(basename "$test_dir")
+binary="./bin/visual_$test_name"
+build_cmd=(odin build "$test_dir" -out:"bin/visual_$test_name")
 
 log_dir="$artifact_root/logs"
 out_dir="$artifact_root/$test_name"
@@ -82,13 +75,21 @@ if [[ -z ${VK_INSTANCE_LAYERS:-} ]]; then
 elif [[ ${VK_INSTANCE_LAYERS} != *VK_LAYER_LUNARG_screenshot* ]]; then
   export VK_INSTANCE_LAYERS="${VK_INSTANCE_LAYERS}:VK_LAYER_LUNARG_screenshot"
 fi
-
 export VK_SCREENSHOT_FRAMES=${VK_SCREENSHOT_FRAMES:-3}
+export VK_SCREENSHOT_DIR="$(pwd)/$out_dir"
 
-VK_SCREENSHOT_DIR="$(pwd)/$out_dir" \
-  xvfb-run -a -s "-screen 0 1920x1080x24" \
-    timeout "${test_timeout}s" "$binary" | tee "$log_file"
-render_status=${PIPESTATUS[0]}
+set +e
+set +o pipefail
+xvfb-run -a -s "-screen 0 1920x1080x24" \
+  timeout "${test_timeout}s" "$binary" | tee "$log_file"
+pipe_statuses=("${PIPESTATUS[@]}")
+set -o pipefail
+set -e
+render_status=${pipe_statuses[0]}
+if [[ $render_status -eq 124 ]]; then
+  # echo "Render timed out (allowed)."
+  render_status=0
+fi
 
 latest_ppm=$(find "$out_dir" -maxdepth 1 -name '*.ppm' | sort | head -n 1)
 if [[ -z $latest_ppm ]]; then
