@@ -1,9 +1,16 @@
 package mjolnir
 
+import "core:strings"
+import "core:math"
+import "core:math/linalg"
 import "geometry"
 import "resources"
 import "world"
+import "render/targets"
+import "render/post_process"
+import "navigation/recast"
 import vk "vendor:vulkan"
+import "vendor:glfw"
 
 // ============================================================================
 // USER API - Simplified entry points hiding internal managers
@@ -236,33 +243,63 @@ scale_by :: proc {
     scale_by_handle,
 }
 
-// Light creation helpers
-create_spot_light :: proc(
+// Light spawning - creates node with light attachment
+spawn_spot_light :: proc(
   engine: ^Engine,
-  handle: resources.Handle,
   color: [4]f32,
   radius: f32,
   angle: f32,
-) -> (world.NodeAttachment, bool) #optional_ok {
-  return world.create_spot_light_attachment(handle, &engine.resource_manager, &engine.gpu_context, color, radius, angle)
+  position: [3]f32 = {0, 0, 0},
+) -> (handle: resources.Handle, node: ^world.Node, ok: bool) {
+  handle, node, ok = spawn(engine, nil)
+  if !ok do return
+  
+  attachment := world.create_spot_light_attachment(handle, &engine.resource_manager, &engine.gpu_context, color, radius, angle) or_return
+  node.attachment = attachment
+  
+  if position != {0, 0, 0} {
+    translate(node, position.x, position.y, position.z)
+  }
+  
+  return
 }
 
-create_point_light :: proc(
+spawn_point_light :: proc(
   engine: ^Engine,
-  handle: resources.Handle,
   color: [4]f32,
   radius: f32,
-) -> (world.NodeAttachment, bool) #optional_ok {
-  return world.create_point_light_attachment(handle, &engine.resource_manager, &engine.gpu_context, color, radius)
+  position: [3]f32 = {0, 0, 0},
+) -> (handle: resources.Handle, node: ^world.Node, ok: bool) {
+  handle, node, ok = spawn(engine, nil)
+  if !ok do return
+  
+  attachment := world.create_point_light_attachment(handle, &engine.resource_manager, &engine.gpu_context, color, radius) or_return
+  node.attachment = attachment
+  
+  if position != {0, 0, 0} {
+    translate(node, position.x, position.y, position.z)
+  }
+  
+  return
 }
 
-create_directional_light :: proc(
+spawn_directional_light :: proc(
   engine: ^Engine,
-  handle: resources.Handle,
   color: [4]f32,
-  cast_shadow: b32 = false,
-) -> (world.NodeAttachment, bool) #optional_ok  {
-  return world.create_directional_light_attachment(handle, &engine.resource_manager, &engine.gpu_context, color, cast_shadow)
+  cast_shadow := false,
+  position: [3]f32 = {0, 0, 0},
+) -> (handle: resources.Handle, node: ^world.Node, ok: bool) {
+  handle, node, ok = spawn(engine, nil)
+  if !ok do return
+  
+  attachment := world.create_directional_light_attachment(handle, &engine.resource_manager, &engine.gpu_context, color, b32(cast_shadow))
+  node.attachment = attachment
+  
+  if position != {0, 0, 0} {
+    translate(node, position.x, position.y, position.z)
+  }
+  
+  return
 }
 
 // Emitter creation
@@ -299,4 +336,373 @@ get_camera :: proc(engine: ^Engine, handle: resources.Handle) -> (^geometry.Came
 
 get_material :: proc(engine: ^Engine, handle: resources.Handle) -> (^resources.Material, bool) {
   return resources.get_material(&engine.resource_manager, handle)
+}
+
+// Camera management - cameras are created as part of render targets
+set_main_camera_look_at :: proc(engine: ^Engine, from: [3]f32, to: [3]f32, world_up: [3]f32 = {0, 1, 0}) -> bool {
+  main_camera := get_main_camera(engine)
+  if main_camera == nil {
+    return false
+  }
+  geometry.camera_look_at(main_camera, from, to, world_up)
+  return true
+}
+
+set_main_camera_position :: proc(engine: ^Engine, position: [3]f32) -> bool {
+  main_camera := get_main_camera(engine)
+  if main_camera == nil {
+    return false
+  }
+  geometry.camera_set_position(main_camera, position)
+  return true
+}
+
+set_main_camera_rotation :: proc(engine: ^Engine, rotation: quaternion128) -> bool {
+  main_camera := get_main_camera(engine)
+  if main_camera == nil {
+    return false
+  }
+  geometry.camera_set_rotation(main_camera, rotation)
+  return true
+}
+
+move_main_camera :: proc(engine: ^Engine, delta: [3]f32) -> bool {
+  main_camera := get_main_camera(engine)
+  if main_camera == nil {
+    return false
+  }
+  geometry.camera_move(main_camera, delta)
+  return true
+}
+
+rotate_main_camera :: proc(engine: ^Engine, delta_yaw, delta_pitch: f32) -> bool {
+  main_camera := get_main_camera(engine)
+  if main_camera == nil {
+    return false
+  }
+  geometry.camera_rotate(main_camera, delta_yaw, delta_pitch)
+  return true
+}
+
+set_main_camera_aspect_ratio :: proc(engine: ^Engine, aspect_ratio: f32) -> bool {
+  main_camera := get_main_camera(engine)
+  if main_camera == nil {
+    return false
+  }
+  geometry.camera_update_aspect_ratio(main_camera, aspect_ratio)
+  return true
+}
+
+// Camera manipulation - users should directly use geometry.camera_* functions
+
+// Node transform getters - these add value by providing safe access to node properties
+
+get_node_position :: proc(engine: ^Engine, handle: resources.Handle) -> ([3]f32, bool) {
+  node := get_node(engine, handle)
+  if node == nil {
+    return {}, false
+  }
+  return node.transform.position, true
+}
+
+set_node_position :: proc(engine: ^Engine, handle: resources.Handle, position: [3]f32) -> bool {
+  node := get_node(engine, handle)
+  if node == nil {
+    return false
+  }
+  node.transform.position = position
+  return true
+}
+
+get_node_rotation :: proc(engine: ^Engine, handle: resources.Handle) -> (quaternion128, bool) {
+  node := get_node(engine, handle)
+  if node == nil {
+    return quaternion128{}, false
+  }
+  return node.transform.rotation, true
+}
+
+set_node_rotation :: proc(engine: ^Engine, handle: resources.Handle, rotation: quaternion128) -> bool {
+  node := get_node(engine, handle)
+  if node == nil {
+    return false
+  }
+  node.transform.rotation = rotation
+  return true
+}
+
+get_node_scale :: proc(engine: ^Engine, handle: resources.Handle) -> ([3]f32, bool) {
+  node := get_node(engine, handle)
+  if node == nil {
+    return {}, false
+  }
+  return node.transform.scale, true
+}
+
+set_node_scale :: proc(engine: ^Engine, handle: resources.Handle, scale: [3]f32) -> bool {
+  node := get_node(engine, handle)
+  if node == nil {
+    return false
+  }
+  node.transform.scale = scale
+  return true
+}
+
+set_node_scale_uniform :: proc(engine: ^Engine, handle: resources.Handle, scale: f32) -> bool {
+  return set_node_scale(engine, handle, {scale, scale, scale})
+}
+
+// Render target creation and management
+create_render_target :: proc(
+  engine: ^Engine,
+  width, height: u32,
+  format: vk.Format = .B8G8R8A8_SRGB,
+  depth_format: vk.Format = .D32_SFLOAT,
+  camera_position: [3]f32 = {0, 0, 5},
+  camera_target: [3]f32 = {0, 0, 0},
+  fov_degrees: f32 = 90.0,
+  near_plane: f32 = 0.1,
+  far_plane: f32 = 1000.0,
+  enabled_passes: targets.PassTypeSet = {targets.PassType.SHADOW, targets.PassType.GEOMETRY, targets.PassType.LIGHTING, targets.PassType.TRANSPARENCY, targets.PassType.PARTICLES, targets.PassType.POST_PROCESS},
+) -> (int, bool) {
+  return renderer_add_render_target(
+    &engine.render,
+    &engine.gpu_context,
+    &engine.resource_manager,
+    width,
+    height,
+    format,
+    depth_format,
+    camera_position,
+    camera_target,
+    fov_degrees * math.PI / 180.0, // Convert degrees to radians
+    near_plane,
+    far_plane,
+    enabled_passes,
+  )
+}
+
+get_render_target_camera :: proc(engine: ^Engine, target_index: int) -> (resources.Handle, bool) {
+  if target_index < 0 || target_index >= len(engine.render.render_targets) {
+    return {}, false
+  }
+  return engine.render.render_targets[target_index].camera, true
+}
+
+set_render_target_camera :: proc(engine: ^Engine, target_index: int, camera_handle: resources.Handle) -> bool {
+  if target_index < 0 || target_index >= len(engine.render.render_targets) {
+    return false
+  }
+  engine.render.render_targets[target_index].camera = camera_handle
+  return true
+}
+
+// Navigation mesh creation and pathfinding
+build_navigation_mesh_from_world :: proc(
+  engine: ^Engine,
+  cell_size: f32 = 0.3,
+  cell_height: f32 = 0.2,
+  agent_height: f32 = 2.0,
+  agent_radius: f32 = 0.6,
+  agent_max_climb: f32 = 0.9,
+  agent_max_slope: f32 = 45.0,
+  region_min_size: f32 = 8.0,
+  region_merge_size: f32 = 20.0,
+  edge_max_len: f32 = 12.0,
+  edge_max_error: f32 = 1.3,
+  verts_per_poly: f32 = 6.0,
+  detail_sample_dist: f32 = 6.0,
+  detail_sample_max_error: f32 = 1.0,
+) -> (resources.Handle, bool) #optional_ok {
+  config := recast.Config{}
+  config.cs = cell_size
+  config.ch = cell_height
+  config.walkable_height = i32(math.ceil(f64(agent_height / config.ch)))
+  config.walkable_radius = i32(math.ceil(f64(agent_radius / config.cs)))
+  config.walkable_climb = i32(math.floor(f64(agent_max_climb / config.ch)))
+  config.walkable_slope_angle = agent_max_slope
+  config.min_region_area = i32(math.floor(f64(region_min_size * region_min_size)))
+  config.merge_region_area = i32(math.floor(f64(region_merge_size * region_merge_size)))
+  config.max_edge_len = i32(math.floor(f64(edge_max_len / config.cs)))
+  config.max_simplification_error = edge_max_error
+  config.max_verts_per_poly = i32(verts_per_poly)
+  config.detail_sample_dist = detail_sample_dist
+  config.detail_sample_max_error = detail_sample_max_error
+
+  return world.build_navigation_mesh_from_world(
+    &engine.world,
+    &engine.resource_manager,
+    &engine.gpu_context,
+    config,
+  )
+}
+
+create_navigation_context :: proc(
+  engine: ^Engine,
+  nav_mesh_handle: resources.Handle,
+) -> (resources.Handle, bool) #optional_ok {
+  return world.create_navigation_context(&engine.world, &engine.resource_manager, &engine.gpu_context, nav_mesh_handle)
+}
+
+nav_find_path :: proc(
+  engine: ^Engine,
+  nav_context_handle: resources.Handle,
+  start_pos: [3]f32,
+  end_pos: [3]f32,
+  max_path_length: i32 = 256,
+) -> [][3]f32 {
+  path, success := world.nav_find_path(&engine.world, &engine.resource_manager, &engine.gpu_context, nav_context_handle, start_pos, end_pos, max_path_length)
+  if !success {
+    return nil
+  }
+  return path
+}
+
+nav_is_position_walkable :: proc(
+  engine: ^Engine,
+  nav_context_handle: resources.Handle,
+  position: [3]f32,
+) -> bool {
+  return world.nav_is_position_walkable(&engine.world, &engine.resource_manager, &engine.gpu_context, nav_context_handle, position)
+}
+
+spawn_nav_agent_at :: proc(
+  engine: ^Engine,
+  position: [3]f32,
+  radius: f32 = 0.6,
+  height: f32 = 2.0,
+) -> (resources.Handle, bool) #optional_ok {
+  handle, _ := world.spawn_nav_agent_at(&engine.world, &engine.resource_manager, &engine.gpu_context, position, radius, height)
+  return handle, handle.index != 0xFFFFFFFF
+}
+
+nav_agent_set_target :: proc(
+  engine: ^Engine,
+  agent_handle: resources.Handle,
+  target_pos: [3]f32,
+  nav_context_handle: resources.Handle = {},
+) -> bool {
+  return world.nav_agent_set_target(&engine.world, &engine.resource_manager, &engine.gpu_context, agent_handle, target_pos, nav_context_handle)
+}
+
+// Animation - use world.play_animation() directly
+
+// Post-processing effects - add effects to the render pipeline
+add_bloom :: proc(
+  engine: ^Engine,
+  threshold: f32 = 0.2,
+  intensity: f32 = 1.0,
+  blur_radius: f32 = 4.0,
+) {
+  post_process.add_bloom(&engine.render.post_process, threshold, intensity, blur_radius)
+}
+
+add_tonemap :: proc(
+  engine: ^Engine,
+  exposure: f32 = 1.0,
+  gamma: f32 = 2.2,
+) {
+  post_process.add_tonemap(&engine.render.post_process, exposure, gamma)
+}
+
+add_fog :: proc(
+  engine: ^Engine,
+  color: [3]f32 = {0.7, 0.7, 0.8},
+  density: f32 = 0.02,
+  start: f32 = 10.0,
+  end: f32 = 100.0,
+) {
+  post_process.add_fog(&engine.render.post_process, color, density, start, end)
+}
+
+add_grayscale :: proc(
+  engine: ^Engine,
+  strength: f32 = 1.0,
+  weights: [3]f32 = {0.299, 0.587, 0.114},
+) {
+  post_process.add_grayscale(&engine.render.post_process, strength, weights)
+}
+
+add_blur :: proc(
+  engine: ^Engine,
+  radius: f32,
+  gaussian: bool = true,
+) {
+  post_process.add_blur(&engine.render.post_process, radius, gaussian)
+}
+
+add_outline :: proc(
+  engine: ^Engine,
+  thickness: f32,
+  color: [3]f32,
+) {
+  post_process.add_outline(&engine.render.post_process, thickness, color)
+}
+
+add_crosshatch :: proc(
+  engine: ^Engine,
+  resolution: [2]f32 = {800, 600},
+  hatch_offset_y: f32 = 0.0,
+  lum_threshold_01: f32 = 0.2,
+  lum_threshold_02: f32 = 0.4,
+  lum_threshold_03: f32 = 0.6,
+  lum_threshold_04: f32 = 0.8,
+) {
+  post_process.add_crosshatch(&engine.render.post_process, resolution, hatch_offset_y, lum_threshold_01, lum_threshold_02, lum_threshold_03, lum_threshold_04)
+}
+
+add_dof :: proc(
+  engine: ^Engine,
+  focus_distance: f32 = 10.0,
+  focus_range: f32 = 2.0,
+  blur_strength: f32 = 1.0,
+  bokeh_intensity: f32 = 0.5,
+) {
+  post_process.add_dof(&engine.render.post_process, focus_distance, focus_range, blur_strength, bokeh_intensity)
+}
+
+// Clear all post-processing effects
+clear_post_process_effects :: proc(engine: ^Engine) {
+  post_process.clear_effects(&engine.render.post_process)
+}
+
+// Engine utility functions
+
+get_window_size :: proc(engine: ^Engine) -> (i32, i32) {
+  width, height := glfw.GetWindowSize(engine.window)
+  return i32(width), i32(height)
+}
+
+set_window_title :: proc(engine: ^Engine, title: string) {
+  title_cstr := strings.clone_to_cstring(title)
+  defer delete(title_cstr)
+  glfw.SetWindowTitle(engine.window, title_cstr)
+}
+
+get_fps :: proc(engine: ^Engine) -> f32 {
+  delta := get_delta_time(engine)
+  if delta <= 0 {
+    return 0
+  }
+  return 1.0 / delta
+}
+
+get_visible_count :: proc(engine: ^Engine, category: world.VisibilityCategory = .OPAQUE) -> u32 {
+  return world.get_visible_count(&engine.world, engine.frame_index, category)
+}
+
+get_node_count :: proc(engine: ^Engine) -> u32 {
+  return u32(len(engine.world.nodes.entries) - len(engine.world.nodes.free_indices))
+}
+
+get_material_count :: proc(engine: ^Engine) -> u32 {
+  return u32(len(engine.resource_manager.materials.entries) - len(engine.resource_manager.materials.free_indices))
+}
+
+get_mesh_count :: proc(engine: ^Engine) -> u32 {
+  return u32(len(engine.resource_manager.meshes.entries) - len(engine.resource_manager.meshes.free_indices))
+}
+
+get_texture_count :: proc(engine: ^Engine) -> u32 {
+  return u32(len(engine.resource_manager.image_2d_buffers.entries) - len(engine.resource_manager.image_2d_buffers.free_indices))
 }

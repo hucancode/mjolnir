@@ -36,55 +36,52 @@ setup_scene :: proc(engine: ^mjolnir.Engine) {
     geometry.camera_look_at(camera, {1.0, 0.5, 1.0}, {0.0, 0.3, 0.0})
   }
 
-  nodes, result := world.load_gltf(
-    &engine.world,
-    &engine.resource_manager,
-    &engine.gpu_context,
-    "assets/CesiumMan.glb",
-  )
-  if result != cgltf.result.success {
-    log.errorf("gltf animation: failed to load asset (result=%v)", result)
+  nodes := mjolnir.load_gltf(engine, "assets/CesiumMan.glb") or_else {
+    log.error("gltf animation: failed to load asset")
     return
   }
-  state.root_nodes = nodes
+  state.root_nodes = nodes[:]
 
   for handle in nodes {
-    world.node_handle_scale(&engine.world, handle, 0.4)
-    node := world.get_node(&engine.world, handle)
-    if node == nil {
-      continue
-    }
+    mjolnir.scale(engine, handle, 0.4)
+    node := mjolnir.get_node(engine, handle)
+    if node == nil do continue
     for child in node.children {
-      child_node := world.get_node(&engine.world, child)
-      if child_node == nil {
-        continue
-      }
+      child_node := mjolnir.get_node(engine, child)
+      if child_node == nil do continue
       if _, has_mesh := child_node.attachment.(world.MeshAttachment); has_mesh {
-        _ = world.play_animation(
-          &engine.world,
-          &engine.resource_manager,
-          child,
-          "Anim_0",
-        )
+        mjolnir.play_animation(engine, child, "Anim_0")
       }
     }
   }
 
-  dir_light_handle, dir_light_node, dir_ok := world.spawn(&engine.world, nil, &engine.resource_manager)
+  dir_light_handle, dir_light_node, dir_ok := mjolnir.spawn_directional_light(
+    engine,
+    {1.0, 1.0, 1.0, 1.0},
+    cast_shadow = true,
+    position = {0.0, 5.0, 0.0},
+  )
   if dir_ok {
-    attachment, attach_ok := world.create_directional_light_attachment(
-      dir_light_handle,
-      &engine.resource_manager,
-      &engine.gpu_context,
-      {1.0, 1.0, 1.0, 1.0},
-      cast_shadow = true,
-    )
-    if attach_ok {
-      dir_light_node.attachment = attachment
-      world.translate(dir_light_node, -6.0, 8.0, 6.0)
-      world.rotate(dir_light_node, math.PI * -0.45, linalg.VECTOR3F32_X_AXIS)
-      world.rotate(dir_light_node, math.PI * 0.5)
+    mjolnir.rotate(dir_light_node, math.PI * 0.25, linalg.VECTOR3F32_X_AXIS)
+  }
+
+  _, _, _ = mjolnir.spawn_point_light(
+    engine,
+    {0.8, 0.7, 0.6, 0.5},
+    radius = 1.5,
+    position = {1.5, 3.5, 2.0},
+  )
+}
+
+update_scene :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
+  state.frame_counter += 1
+
+  if state.root_nodes != nil {
+    rotation := delta_time * math.PI * 0.05
+    for handle in state.root_nodes {
+      mjolnir.rotate_by(engine, handle, rotation, linalg.VECTOR3F32_Y_AXIS)
     }
+  }
   }
 
   point_handle, point_node, point_ok := world.spawn(
