@@ -22,9 +22,11 @@ visibility_category_name :: proc(task: VisibilityCategory) -> string {
 }
 
 VisibilityTask :: struct {
-  draw_count:    gpu.DataBuffer(u32),
-  draw_commands: gpu.DataBuffer(vk.DrawIndexedIndirectCommand),
-  descriptor_set: vk.DescriptorSet,
+  draw_count:         gpu.DataBuffer(u32),
+  draw_commands:      gpu.DataBuffer(vk.DrawIndexedIndirectCommand),
+  visibility_buffer:  gpu.DataBuffer(u32), // Bitfield tracking visibility from last frame
+  descriptor_set:     vk.DescriptorSet,
+  descriptor_set_occlusion: vk.DescriptorSet, // With depth pyramid binding
 }
 
 VisibilityFrame :: struct {
@@ -38,11 +40,14 @@ VisibilityRequest :: struct {
 }
 
 VisibilityPushConstants :: struct {
-  camera_index:  u32,
-  node_count:    u32,
-  max_draws:     u32,
-  include_flags: resources.NodeFlagSet,
-  exclude_flags: resources.NodeFlagSet,
+  camera_index:   u32,
+  node_count:     u32,
+  max_draws:      u32,
+  include_flags:  resources.NodeFlagSet,
+  exclude_flags:  resources.NodeFlagSet,
+  culling_mode:   u32, // 0 = early (no occlusion), 1 = late (with occlusion)
+  pyramid_width:  f32,
+  pyramid_height: f32,
 }
 
 VisibilityResult :: struct {
@@ -52,12 +57,15 @@ VisibilityResult :: struct {
 }
 
 VisibilitySystem :: struct {
-  descriptor_set_layout: vk.DescriptorSetLayout,
-  pipeline_layout:       vk.PipelineLayout,
-  pipeline:              vk.Pipeline,
-  frames:                [resources.MAX_FRAMES_IN_FLIGHT]VisibilityFrame,
-  max_draws:             u32,
-  node_count:            u32,
+  descriptor_set_layout:           vk.DescriptorSetLayout,
+  descriptor_set_layout_occlusion: vk.DescriptorSetLayout, // With depth pyramid
+  pipeline_layout:                 vk.PipelineLayout,
+  pipeline_layout_occlusion:       vk.PipelineLayout,
+  pipeline:                        vk.Pipeline, // Basic frustum culling
+  pipeline_occlusion:              vk.Pipeline, // With occlusion culling
+  frames:                          [resources.MAX_FRAMES_IN_FLIGHT]VisibilityFrame,
+  max_draws:                       u32,
+  node_count:                      u32,
 }
 
 draw_command_stride :: proc() -> u32 {
@@ -75,6 +83,9 @@ visibility_system_init :: proc(
 
   system.max_draws = resources.MAX_NODES_IN_SCENE
 
+  // Calculate visibility buffer size (1 bit per node, packed into u32s)
+  visibility_buffer_size := (system.max_draws + 31) / 32
+
   for frame_idx in 0 ..< resources.MAX_FRAMES_IN_FLIGHT {
     frame := &system.frames[frame_idx]
     for task_idx in 0 ..< VISIBILITY_TASK_COUNT {
@@ -91,6 +102,14 @@ visibility_system_init :: proc(
         vk.DrawIndexedIndirectCommand,
         int(system.max_draws),
         {.STORAGE_BUFFER, .INDIRECT_BUFFER, .TRANSFER_DST},
+      ) or_return
+
+      // Visibility tracking buffer for two-phase culling
+      buffers.visibility_buffer = gpu.create_host_visible_buffer(
+        gpu_context,
+        u32,
+        int(visibility_buffer_size),
+        {.STORAGE_BUFFER, .TRANSFER_DST},
       ) or_return
     }
   }
@@ -187,6 +206,69 @@ visibility_system_init :: proc(
     &compute_info,
     nil,
     &system.pipeline,
+  ) or_return
+
+  // Create occlusion culling descriptor set layout (with depth pyramid and visibility buffer)
+  occlusion_bindings := [?]vk.DescriptorSetLayoutBinding {
+    {binding = 0, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, stageFlags = {.COMPUTE}}, // Nodes
+    {binding = 1, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, stageFlags = {.COMPUTE}}, // Meshes
+    {binding = 2, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, stageFlags = {.COMPUTE}}, // World matrices
+    {binding = 3, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, stageFlags = {.COMPUTE}}, // Cameras
+    {binding = 4, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, stageFlags = {.COMPUTE}}, // Draw count
+    {binding = 5, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, stageFlags = {.COMPUTE}}, // Draw commands
+    {binding = 6, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, stageFlags = {.COMPUTE}}, // Visibility buffer
+    {binding = 7, descriptorType = .COMBINED_IMAGE_SAMPLER, descriptorCount = 1, stageFlags = {.COMPUTE}}, // Depth pyramid
+  }
+
+  vk.CreateDescriptorSetLayout(
+    gpu_context.device,
+    &vk.DescriptorSetLayoutCreateInfo {
+      sType        = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+      bindingCount = len(occlusion_bindings),
+      pBindings    = raw_data(occlusion_bindings[:]),
+    },
+    nil,
+    &system.descriptor_set_layout_occlusion,
+  ) or_return
+
+  vk.CreatePipelineLayout(
+    gpu_context.device,
+    &vk.PipelineLayoutCreateInfo {
+      sType                  = .PIPELINE_LAYOUT_CREATE_INFO,
+      setLayoutCount         = 1,
+      pSetLayouts            = &system.descriptor_set_layout_occlusion,
+      pushConstantRangeCount = 1,
+      pPushConstantRanges    = &push_constant_range,
+    },
+    nil,
+    &system.pipeline_layout_occlusion,
+  ) or_return
+
+  // Create occlusion culling pipeline
+  shader_module_occlusion := gpu.create_shader_module(
+    gpu_context.device,
+    #load("../shader/occlusion_culling/occlusion_culling.spv"),
+  ) or_return
+  defer vk.DestroyShaderModule(gpu_context.device, shader_module_occlusion, nil)
+
+  compute_info_occlusion := vk.ComputePipelineCreateInfo {
+    sType  = .COMPUTE_PIPELINE_CREATE_INFO,
+    stage  = {
+      sType  = .PIPELINE_SHADER_STAGE_CREATE_INFO,
+      stage  = {.COMPUTE},
+      module = shader_module_occlusion,
+      pName  = "main",
+    },
+    layout = system.pipeline_layout_occlusion,
+  }
+
+  vk.CreateComputePipelines(
+    gpu_context.device,
+    0,
+    1,
+    &compute_info_occlusion,
+    nil,
+    &system.pipeline_occlusion,
   ) or_return
 
   for frame_idx in 0 ..< resources.MAX_FRAMES_IN_FLIGHT {
@@ -307,15 +389,25 @@ visibility_system_shutdown :: proc(
     return
   }
   vk.DestroyPipeline(gpu_context.device, system.pipeline, nil)
+  vk.DestroyPipeline(gpu_context.device, system.pipeline_occlusion, nil)
   vk.DestroyPipelineLayout(gpu_context.device, system.pipeline_layout, nil)
+  vk.DestroyPipelineLayout(gpu_context.device, system.pipeline_layout_occlusion, nil)
   vk.DestroyDescriptorSetLayout(
     gpu_context.device,
     system.descriptor_set_layout,
     nil,
   )
+  vk.DestroyDescriptorSetLayout(
+    gpu_context.device,
+    system.descriptor_set_layout_occlusion,
+    nil,
+  )
   system.pipeline = 0
+  system.pipeline_occlusion = 0
   system.pipeline_layout = 0
+  system.pipeline_layout_occlusion = 0
   system.descriptor_set_layout = 0
+  system.descriptor_set_layout_occlusion = 0
 
   for frame_idx in 0 ..< resources.MAX_FRAMES_IN_FLIGHT {
     frame := &system.frames[frame_idx]
@@ -323,7 +415,9 @@ visibility_system_shutdown :: proc(
       buffers := &frame.tasks[task_idx]
       gpu.data_buffer_destroy(gpu_context.device, &buffers.draw_count)
       gpu.data_buffer_destroy(gpu_context.device, &buffers.draw_commands)
+      gpu.data_buffer_destroy(gpu_context.device, &buffers.visibility_buffer)
       buffers.descriptor_set = 0
+      buffers.descriptor_set_occlusion = 0
     }
   }
 }

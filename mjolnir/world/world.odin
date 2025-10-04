@@ -330,6 +330,7 @@ World :: struct {
   nodes:           resources.Pool(Node),
   traversal_stack: [dynamic]TraverseEntry,
   visibility:      VisibilitySystem,
+  depth_pyramid:   DepthPyramid,
 }
 
 init :: proc(world: ^World) {
@@ -356,7 +357,10 @@ init_gpu :: proc(
   gpu_context: ^gpu.GPUContext,
   resources_manager: ^resources.Manager,
 ) -> vk.Result {
-  return visibility_system_init(&world.visibility, gpu_context, resources_manager)
+  visibility_system_init(&world.visibility, gpu_context, resources_manager) or_return
+  // Initialize depth pyramid (will be resized as needed)
+  depth_pyramid_init(&world.depth_pyramid, gpu_context, 1024, 1024) or_return
+  return .SUCCESS
 }
 
 begin_frame :: proc(world: ^World, resources_manager: ^resources.Manager) {
@@ -396,6 +400,7 @@ query_visibility :: proc(
 
 shutdown :: proc(world: ^World, gpu_context: ^gpu.GPUContext, resources_manager: ^resources.Manager) {
   visibility_system_shutdown(&world.visibility, gpu_context)
+  depth_pyramid_shutdown(&world.depth_pyramid, gpu_context.device)
   destroy(world, resources_manager, gpu_context)
 }
 

@@ -1,0 +1,276 @@
+#version 450
+
+// Two-phase occlusion culling with depth pyramid
+// Phase 1 (EARLY): Frustum cull + render objects visible last frame
+// Phase 2 (LATE): Frustum + occlusion cull objects NOT visible last frame
+
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+const uint NODE_FLAG_VISIBLE = 1u << 0;
+const uint NODE_FLAG_CULLING_ENABLED = 1u << 1;
+const uint INVALID_ID = 0xFFFFFFFFu;
+
+struct Camera {
+    mat4 view;
+    mat4 projection;
+    vec4 viewport_params;  // (width, height, znear, zfar)
+    vec4 position;
+    vec4 frustum_planes[6];
+};
+
+struct NodeData {
+    uint material_id;
+    uint mesh_id;
+    uint bone_matrix_offset;
+    uint flags;
+};
+
+struct MeshData {
+    vec3 aabb_min;
+    uint index_count;
+    vec3 aabb_max;
+    uint first_index;
+    int vertex_offset;
+    uint vertex_skinning_offset;
+    uint flags;
+    uint _padding;
+};
+
+struct DrawCommand {
+    uint index_count;
+    uint instance_count;
+    uint first_index;
+    int vertex_offset;
+    uint first_instance;
+};
+
+layout(push_constant) uniform PushConstants {
+    uint camera_index;
+    uint node_count;
+    uint max_draws;
+    uint include_flags;
+    uint exclude_flags;
+    uint culling_mode;  // 0 = early (no occlusion), 1 = late (with occlusion)
+    float pyramid_width;
+    float pyramid_height;
+} params;
+
+layout(set = 0, binding = 0) readonly buffer NodeBuffer {
+    NodeData nodes[];
+};
+
+layout(set = 0, binding = 1) readonly buffer MeshBuffer {
+    MeshData meshes[];
+};
+
+layout(set = 0, binding = 2) readonly buffer WorldBuffer {
+    mat4 world_matrices[];
+};
+
+layout(set = 0, binding = 3) readonly buffer CameraBuffer {
+    Camera cameras[];
+};
+
+layout(set = 0, binding = 4) buffer DrawCountBuffer {
+    uint draw_count;
+};
+
+layout(set = 0, binding = 5) buffer DrawCommandBuffer {
+    DrawCommand commands[];
+};
+
+// Visibility tracking - stores if object was visible last frame
+layout(set = 0, binding = 6) buffer VisibilityBuffer {
+    uint visibility[];  // Bitfield: 1 = was visible last frame
+};
+
+// Depth pyramid for occlusion testing (late pass only)
+layout(set = 0, binding = 7) uniform sampler2D depthPyramid;
+
+// Frustum culling test
+bool frustumCull(Camera camera, vec3 worldCenter, vec3 worldExtent) {
+    for (int i = 0; i < 6; ++i) {
+        vec4 plane_raw = camera.frustum_planes[i];
+        float denom = length(plane_raw.xyz);
+        if (denom <= 1e-6) {
+            continue;
+        }
+        vec3 normal = plane_raw.xyz / denom;
+        float distance = dot(normal, worldCenter) + plane_raw.w / denom;
+        float radius = dot(abs(normal), worldExtent);
+        if (distance + radius < 0.0) {
+            return true;  // Culled
+        }
+    }
+    return false;  // Visible
+}
+
+// Hierarchical occlusion test using depth pyramid
+bool occlusionCull(Camera camera, vec3 worldCenter, vec3 worldExtent) {
+    // Transform AABB to clip space
+    mat4 viewProj = camera.projection * camera.view;
+    
+    // Get all 8 corners of AABB in world space
+    vec3 corners[8];
+    corners[0] = worldCenter + vec3(-worldExtent.x, -worldExtent.y, -worldExtent.z);
+    corners[1] = worldCenter + vec3( worldExtent.x, -worldExtent.y, -worldExtent.z);
+    corners[2] = worldCenter + vec3(-worldExtent.x,  worldExtent.y, -worldExtent.z);
+    corners[3] = worldCenter + vec3( worldExtent.x,  worldExtent.y, -worldExtent.z);
+    corners[4] = worldCenter + vec3(-worldExtent.x, -worldExtent.y,  worldExtent.z);
+    corners[5] = worldCenter + vec3( worldExtent.x, -worldExtent.y,  worldExtent.z);
+    corners[6] = worldCenter + vec3(-worldExtent.x,  worldExtent.y,  worldExtent.z);
+    corners[7] = worldCenter + vec3( worldExtent.x,  worldExtent.y,  worldExtent.z);
+    
+    // Find screen-space AABB
+    vec2 minXY = vec2(1.0);
+    vec2 maxXY = vec2(0.0);
+    float minZ = 1.0;
+    
+    for (int i = 0; i < 8; ++i) {
+        vec4 clipPos = viewProj * vec4(corners[i], 1.0);
+        
+        // Check if behind camera (negative w in clip space)
+        if (clipPos.w <= 0.0) {
+            // Object crosses near plane - conservatively visible
+            return false;
+        }
+        
+        vec3 ndc = clipPos.xyz / clipPos.w;
+        
+        // Convert from NDC [-1,1] to UV [0,1]
+        vec2 uv = ndc.xy * 0.5 + 0.5;
+        
+        minXY = min(minXY, uv);
+        maxXY = max(maxXY, uv);
+        minZ = min(minZ, ndc.z);
+    }
+    
+    // Clamp to screen bounds
+    minXY = clamp(minXY, vec2(0.0), vec2(1.0));
+    maxXY = clamp(maxXY, vec2(0.0), vec2(1.0));
+    
+    // Calculate screen-space size in pixels
+    vec2 size = (maxXY - minXY) * vec2(params.pyramid_width, params.pyramid_height);
+    
+    // Select appropriate mip level based on screen size
+    // We want mip where the 2x2 region covers the object
+    float width = max(size.x, 1.0);
+    float height = max(size.y, 1.0);
+    float maxDim = max(width, height);
+    float mipLevel = ceil(log2(maxDim));
+    
+    // Sample depth pyramid at selected mip
+    // We use the center of the screen-space AABB
+    vec2 sampleUV = (minXY + maxXY) * 0.5;
+    float occluderDepth = textureLod(depthPyramid, sampleUV, mipLevel).r;
+    
+    // Reverse Z: 1.0 = near, 0.0 = far
+    // If our nearest depth (minZ) is further than occluder, we're occluded
+    if (minZ < occluderDepth) {
+        return true;  // Occluded
+    }
+    
+    return false;  // Visible
+}
+
+void main() {
+    uint node_id = gl_GlobalInvocationID.x;
+    if (node_id >= params.node_count) {
+        return;
+    }
+    
+    NodeData node = nodes[node_id];
+    if (node.mesh_id == INVALID_ID) {
+        return;
+    }
+    
+    // Check include/exclude flags
+    if ((node.flags & params.include_flags) != params.include_flags) {
+        return;
+    }
+    if ((node.flags & params.exclude_flags) != 0u) {
+        return;
+    }
+    
+    MeshData mesh = meshes[node.mesh_id];
+    if (mesh.index_count == 0u) {
+        return;
+    }
+    
+    // Check visibility from last frame
+    uint visIndex = node_id / 32u;
+    uint visBit = node_id % 32u;
+    bool wasVisibleLastFrame = (visibility[visIndex] & (1u << visBit)) != 0u;
+    
+    // Two-phase culling strategy (like Niagara):
+    // EARLY pass (culling_mode == 0): Only render objects visible last frame
+    // LATE pass (culling_mode == 1): Render objects NOT visible last frame with occlusion culling
+    
+    if (params.culling_mode == 0u) {
+        // Early pass - skip if not visible last frame
+        if (!wasVisibleLastFrame) {
+            return;
+        }
+    } else {
+        // Late pass - skip if already rendered in early pass
+        if (wasVisibleLastFrame) {
+            return;
+        }
+    }
+    
+    bool visible = true;
+    
+    // Always perform frustum culling if enabled
+    if ((node.flags & NODE_FLAG_CULLING_ENABLED) != 0u) {
+        Camera camera = cameras[params.camera_index];
+        mat4 world = world_matrices[node_id];
+        
+        // Transform AABB to world space
+        vec3 local_min = mesh.aabb_min;
+        vec3 local_max = mesh.aabb_max;
+        vec3 local_center = 0.5 * (local_min + local_max);
+        vec3 local_extent = 0.5 * (local_max - local_min);
+        
+        vec4 world_center4 = world * vec4(local_center, 1.0);
+        vec3 world_center = world_center4.xyz / max(world_center4.w, 1e-6);
+        
+        mat3 world3 = mat3(world);
+        mat3 abs_world3 = mat3(abs(world3[0]), abs(world3[1]), abs(world3[2]));
+        vec3 world_extent = abs_world3 * local_extent;
+        
+        // Frustum cull
+        if (frustumCull(camera, world_center, world_extent)) {
+            visible = false;
+        }
+        
+        // Occlusion cull (late pass only)
+        if (visible && params.culling_mode == 1u) {
+            if (occlusionCull(camera, world_center, world_extent)) {
+                visible = false;
+            }
+        }
+    }
+    
+    // Update visibility for next frame
+    if (visible) {
+        atomicOr(visibility[visIndex], 1u << visBit);
+    }
+    
+    if (!visible) {
+        return;
+    }
+    
+    // Add draw command
+    uint draw_index = atomicAdd(draw_count, 1);
+    if (draw_index >= params.max_draws) {
+        return;
+    }
+    
+    DrawCommand cmd;
+    cmd.index_count = mesh.index_count;
+    cmd.instance_count = 1u;
+    cmd.first_index = mesh.first_index;
+    cmd.vertex_offset = mesh.vertex_offset;
+    cmd.first_instance = node_id;
+    commands[draw_index] = cmd;
+}
