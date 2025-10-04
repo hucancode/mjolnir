@@ -75,8 +75,8 @@ The engine uses a deferred rendering approach with multiple passes:
 - **Geometry Systems**: BVH, octree, frustum culling, AABB calculations
 
 ### Performance Features
-- **GPU Culling**: Optional GPU-based visibility culling (compile flag: `USE_GPU_CULLING`)
-- **Parallel Scene Updates**: Multi-threaded scene graph updates (compile flag: `USE_PARALLEL_UPDATE`)
+- **GPU Culling**: GPU-based visibility culling
+- **Parallel Scene Updates**: Dedicated update thread (compile flag: `USE_PARALLEL_UPDATE`)
 - **Particle Compaction**: GPU compute reduces draw calls from MAX_PARTICLES (65K) to actual alive count
 - **Indirect Rendering**: Uses `vk.CmdDrawIndirect` for efficient GPU-driven rendering
 
@@ -108,6 +108,8 @@ The engine uses a deferred rendering approach with multiple passes:
   + Short names for narrow scope (i,j,k for counters, u,v,x,y,z for coordinates, r,g,b for colors)
 - Use meaningful variable names instead of comments for clarity
 - We use right handed Y up coordinate system
+- Avoid thin wrapper functions, especially getters and setters that does nothing but get/set the variable
+- Don't introduce unnecessary indirections, extra structs
 
 ### Shader Development
 - Shaders are in `mjolnir/shader/` organized by render pass
