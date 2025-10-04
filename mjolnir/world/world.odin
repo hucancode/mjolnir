@@ -189,6 +189,97 @@ play_animation :: proc(
   return true
 }
 
+// Private internal spawn implementation - all spawn variants use this
+@(private = "file")
+_spawn_internal :: proc(
+  world: ^World,
+  parent: resources.Handle,
+  position: [3]f32,
+  attachment: NodeAttachment,
+  resources_manager: ^resources.Manager,
+) -> (resources.Handle, ^Node, bool) {
+  handle, node, ok := resources.alloc(&world.nodes)
+  if !ok do return {}, nil, false
+
+  _init_node_with_attachment(node, attachment, handle, resources_manager)
+  geometry.transform_translate(&node.transform, position.x, position.y, position.z)
+  attach(world.nodes, parent, handle)
+
+  if resources_manager != nil {
+    _upload_node_to_gpu(handle, node, resources_manager)
+  }
+
+  return handle, node, true
+}
+
+@(private = "file")
+_init_node_with_attachment :: proc(
+  node: ^Node,
+  attachment: NodeAttachment,
+  handle: resources.Handle,
+  resources_manager: ^resources.Manager,
+) {
+  init_node(node)
+  node.attachment = attachment
+  assign_emitter_to_node(resources_manager, handle, node)
+  assign_forcefield_to_node(resources_manager, handle, node)
+  assign_light_to_node(resources_manager, handle, node)
+}
+
+@(private = "file")
+_upload_node_to_gpu :: proc(
+  handle: resources.Handle,
+  node: ^Node,
+  resources_manager: ^resources.Manager,
+) {
+  world_matrix := node.transform.world_matrix
+  gpu.write(&resources_manager.world_matrix_buffer, &world_matrix, int(handle.index))
+
+  data := _build_node_data(node, resources_manager)
+  gpu.write(&resources_manager.node_data_buffer, &data, int(handle.index))
+}
+
+@(private = "file")
+_build_node_data :: proc(
+  node: ^Node,
+  resources_manager: ^resources.Manager,
+) -> resources.NodeData {
+  data := resources.NodeData{
+    material_id = 0xFFFFFFFF,
+    mesh_id = 0xFFFFFFFF,
+    bone_matrix_offset = 0xFFFFFFFF,
+    flags = {},
+  }
+
+  if mesh_attachment, has_mesh := node.attachment.(MeshAttachment); has_mesh {
+    data.material_id = mesh_attachment.material.index
+    data.mesh_id = mesh_attachment.handle.index
+
+    if node.visible do data.flags |= {.VISIBLE}
+    if node.culling_enabled do data.flags |= {.CULLING_ENABLED}
+    if mesh_attachment.cast_shadow do data.flags |= {.CASTS_SHADOW}
+    if mesh_attachment.navigation_obstacle do data.flags |= {.NAVIGATION_OBSTACLE}
+
+    if material, has_mat := resources.get(resources_manager.materials, mesh_attachment.material); has_mat {
+      switch material.type {
+      case .TRANSPARENT: data.flags |= {.MATERIAL_TRANSPARENT}
+      case .WIREFRAME: data.flags |= {.MATERIAL_WIREFRAME}
+      case .PBR, .UNLIT: // No flags
+      }
+    }
+
+    if skinning, has_skin := mesh_attachment.skinning.?; has_skin {
+      data.bone_matrix_offset = skinning.bone_matrix_offset
+    }
+  }
+
+  if _, is_obstacle := node.attachment.(NavMeshObstacleAttachment); is_obstacle {
+    data.flags |= {.NAVIGATION_OBSTACLE}
+  }
+
+  return data
+}
+
 spawn_at :: proc(
   self: ^World,
   position: [3]f32,
@@ -199,66 +290,7 @@ spawn_at :: proc(
   node: ^Node,
   ok: bool,
 ) {
-  handle, node, ok = resources.alloc(&self.nodes)
-  if !ok do return
-  init_node(node)
-  node.attachment = attachment
-  assign_emitter_to_node(resources_manager, handle, node)
-  assign_forcefield_to_node(resources_manager, handle, node)
-  assign_light_to_node(resources_manager, handle, node)
-  geometry.transform_translate(&node.transform, position.x, position.y, position.z)
-  attach(self.nodes, self.root, handle)
-  // Mark world matrix and node data as dirty for new node
-  if resources_manager != nil {
-    world_matrix := node.transform.world_matrix
-    gpu.write(&resources_manager.world_matrix_buffer, &world_matrix, int(handle.index))
-    // Update node data buffer
-    data := resources.NodeData {
-      material_id        = 0xFFFFFFFF,
-      mesh_id            = 0xFFFFFFFF,
-      bone_matrix_offset = 0xFFFFFFFF,
-      flags              = {},
-    }
-    if mesh_attachment, has_mesh := node.attachment.(MeshAttachment); has_mesh {
-      data.material_id = mesh_attachment.material.index
-      data.mesh_id = mesh_attachment.handle.index
-      if node.visible {
-        data.flags |= resources.NodeFlagSet{.VISIBLE}
-      }
-      if node.culling_enabled {
-        data.flags |= {.CULLING_ENABLED}
-      }
-      if mesh_attachment.cast_shadow {
-        data.flags |= resources.NodeFlagSet{.CASTS_SHADOW}
-      }
-      if mesh_attachment.navigation_obstacle {
-        data.flags |= resources.NodeFlagSet{.NAVIGATION_OBSTACLE}
-      }
-      if material_entry, has_material := resources.get(
-        resources_manager.materials,
-        mesh_attachment.material,
-      ); has_material {
-        switch material_entry.type {
-        case .TRANSPARENT:
-          data.flags |= resources.NodeFlagSet{.MATERIAL_TRANSPARENT}
-        case .WIREFRAME:
-          data.flags |= resources.NodeFlagSet{.MATERIAL_WIREFRAME}
-        case .PBR, .UNLIT:
-          // No additional flags needed
-        }
-      }
-      if skinning, has_skinning := mesh_attachment.skinning.?; has_skinning {
-        data.bone_matrix_offset = skinning.bone_matrix_offset
-      }
-    }
-    // Check for navigation obstacle attachment
-    if _, is_obstacle := node.attachment.(NavMeshObstacleAttachment); is_obstacle {
-      data.flags |= resources.NodeFlagSet{.NAVIGATION_OBSTACLE}
-    }
-    gpu.write(&resources_manager.node_data_buffer, &data, int(handle.index))
-  }
-  ok = true
-  return
+  return _spawn_internal(self, self.root, position, attachment, resources_manager)
 }
 
 spawn :: proc(
@@ -270,64 +302,7 @@ spawn :: proc(
   node: ^Node,
   ok: bool,
 ) {
-  handle, node, ok = resources.alloc(&self.nodes)
-  if !ok do return
-  init_node(node)
-  node.attachment = attachment
-  assign_emitter_to_node(resources_manager, handle, node)
-  assign_forcefield_to_node(resources_manager, handle, node)
-  assign_light_to_node(resources_manager, handle, node)
-  attach(self.nodes, self.root, handle)
-  // Mark world matrix and node data as dirty for new node
-  if resources_manager != nil {
-    world_matrix := node.transform.world_matrix
-    gpu.write(&resources_manager.world_matrix_buffer, &world_matrix, int(handle.index))
-    // Update node data buffer
-    data := resources.NodeData {
-      material_id        = 0xFFFFFFFF,
-      mesh_id            = 0xFFFFFFFF,
-      bone_matrix_offset = 0xFFFFFFFF,
-    }
-    if mesh_attachment, has_mesh := node.attachment.(MeshAttachment); has_mesh {
-      data.material_id = mesh_attachment.material.index
-      data.mesh_id = mesh_attachment.handle.index
-      if node.visible {
-        data.flags |= resources.NodeFlagSet{.VISIBLE}
-      }
-      if node.culling_enabled {
-        data.flags |= {.CULLING_ENABLED}
-      }
-      if mesh_attachment.cast_shadow {
-        data.flags |= resources.NodeFlagSet{.CASTS_SHADOW}
-      }
-      if mesh_attachment.navigation_obstacle {
-        data.flags |= resources.NodeFlagSet{.NAVIGATION_OBSTACLE}
-      }
-      if material_entry, has_material := resources.get(
-        resources_manager.materials,
-        mesh_attachment.material,
-      ); has_material {
-        switch material_entry.type {
-        case .TRANSPARENT:
-          data.flags |= resources.NodeFlagSet{.MATERIAL_TRANSPARENT}
-        case .WIREFRAME:
-          data.flags |= resources.NodeFlagSet{.MATERIAL_WIREFRAME}
-        case .PBR, .UNLIT:
-          // No additional flags needed
-        }
-      }
-      if skinning, has_skinning := mesh_attachment.skinning.?; has_skinning {
-        data.bone_matrix_offset = skinning.bone_matrix_offset
-      }
-    }
-    // Check for navigation obstacle attachment
-    if _, is_obstacle := node.attachment.(NavMeshObstacleAttachment); is_obstacle {
-      data.flags |= resources.NodeFlagSet{.NAVIGATION_OBSTACLE}
-    }
-    gpu.write(&resources_manager.node_data_buffer, &data, int(handle.index))
-  }
-  ok = true
-  return
+  return _spawn_internal(self, self.root, {0, 0, 0}, attachment, resources_manager)
 }
 
 spawn_child :: proc(
@@ -340,64 +315,7 @@ spawn_child :: proc(
   node: ^Node,
   ok: bool,
 ) {
-  handle, node, ok = resources.alloc(&self.nodes)
-  if !ok do return
-  init_node(node)
-  node.attachment = attachment
-  assign_emitter_to_node(resources_manager, handle, node)
-  assign_forcefield_to_node(resources_manager, handle, node)
-  assign_light_to_node(resources_manager, handle, node)
-  attach(self.nodes, parent, handle)
-  // Mark world matrix and node data as dirty for new node
-  if resources_manager != nil {
-    world_matrix := node.transform.world_matrix
-    gpu.write(&resources_manager.world_matrix_buffer, &world_matrix, int(handle.index))
-    // Update node data buffer
-    data := resources.NodeData {
-      material_id        = 0xFFFFFFFF,
-      mesh_id            = 0xFFFFFFFF,
-      bone_matrix_offset = 0xFFFFFFFF,
-    }
-    if mesh_attachment, has_mesh := node.attachment.(MeshAttachment); has_mesh {
-      data.material_id = mesh_attachment.material.index
-      data.mesh_id = mesh_attachment.handle.index
-      if node.visible {
-        data.flags |= resources.NodeFlagSet{.VISIBLE}
-      }
-      if node.culling_enabled {
-        data.flags |= {.CULLING_ENABLED}
-      }
-      if mesh_attachment.cast_shadow {
-        data.flags |= resources.NodeFlagSet{.CASTS_SHADOW}
-      }
-      if mesh_attachment.navigation_obstacle {
-        data.flags |= resources.NodeFlagSet{.NAVIGATION_OBSTACLE}
-      }
-      if material_entry, has_material := resources.get(
-        resources_manager.materials,
-        mesh_attachment.material,
-      ); has_material {
-        switch material_entry.type {
-        case .TRANSPARENT:
-          data.flags |= resources.NodeFlagSet{.MATERIAL_TRANSPARENT}
-        case .WIREFRAME:
-          data.flags |= resources.NodeFlagSet{.MATERIAL_WIREFRAME}
-        case .PBR, .UNLIT:
-          // No additional flags needed
-        }
-      }
-      if skinning, has_skinning := mesh_attachment.skinning.?; has_skinning {
-        data.bone_matrix_offset = skinning.bone_matrix_offset
-      }
-    }
-    // Check for navigation obstacle attachment
-    if _, is_obstacle := node.attachment.(NavMeshObstacleAttachment); is_obstacle {
-      data.flags |= resources.NodeFlagSet{.NAVIGATION_OBSTACLE}
-    }
-    gpu.write(&resources_manager.node_data_buffer, &data, int(handle.index))
-  }
-  ok = true
-  return
+  return _spawn_internal(self, parent, {0, 0, 0}, attachment, resources_manager)
 }
 
 TraverseEntry :: struct {
@@ -505,141 +423,6 @@ dispatch_visibility :: proc(
     category,
     request,
   )
-}
-
-// Node management API
-spawn_node :: proc(
-  world: ^World,
-  position: [3]f32 = {0, 0, 0},
-  attachment: NodeAttachment = nil,
-  resources_manager: ^resources.Manager = nil,
-) -> (handle: resources.Handle, node: ^Node, ok: bool) {
-  handle, node, ok = resources.alloc(&world.nodes)
-  if !ok do return
-  init_node(node)
-  node.attachment = attachment
-  assign_emitter_to_node(resources_manager, handle, node)
-  assign_forcefield_to_node(resources_manager, handle, node)
-  assign_light_to_node(resources_manager, handle, node)
-  geometry.transform_translate(&node.transform, position.x, position.y, position.z)
-  attach(world.nodes, world.root, handle)
-  // Mark world matrix and node data as dirty for new node
-  if resources_manager != nil {
-    world_matrix := node.transform.world_matrix
-    gpu.write(&resources_manager.world_matrix_buffer, &world_matrix, int(handle.index))
-    // Update node data buffer
-    data := resources.NodeData {
-      material_id        = 0xFFFFFFFF,
-      mesh_id            = 0xFFFFFFFF,
-      bone_matrix_offset = 0xFFFFFFFF,
-    }
-    if mesh_attachment, has_mesh := node.attachment.(MeshAttachment); has_mesh {
-      data.material_id = mesh_attachment.material.index
-      data.mesh_id = mesh_attachment.handle.index
-      if node.visible {
-        data.flags |= resources.NodeFlagSet{.VISIBLE}
-      }
-      if node.culling_enabled {
-        data.flags |= {.CULLING_ENABLED}
-      }
-      if mesh_attachment.cast_shadow {
-        data.flags |= resources.NodeFlagSet{.CASTS_SHADOW}
-      }
-      if mesh_attachment.navigation_obstacle {
-        data.flags |= resources.NodeFlagSet{.NAVIGATION_OBSTACLE}
-      }
-      if material_entry, has_material := resources.get(
-        resources_manager.materials,
-        mesh_attachment.material,
-      ); has_material {
-        switch material_entry.type {
-        case .TRANSPARENT:
-          data.flags |= resources.NodeFlagSet{.MATERIAL_TRANSPARENT}
-        case .WIREFRAME:
-          data.flags |= resources.NodeFlagSet{.MATERIAL_WIREFRAME}
-        case .PBR, .UNLIT:
-          // No additional flags needed
-        }
-      }
-      if skinning, has_skinning := mesh_attachment.skinning.?; has_skinning {
-        data.bone_matrix_offset = skinning.bone_matrix_offset
-      }
-    }
-    // Check for navigation obstacle attachment
-    if _, is_obstacle := node.attachment.(NavMeshObstacleAttachment); is_obstacle {
-      data.flags |= resources.NodeFlagSet{.NAVIGATION_OBSTACLE}
-    }
-    gpu.write(&resources_manager.node_data_buffer, &data, int(handle.index))
-  }
-  ok = true
-  return
-}
-
-spawn_child_node :: proc(
-  world: ^World,
-  parent: resources.Handle,
-  position: [3]f32 = {0, 0, 0},
-  attachment: NodeAttachment = nil,
-  resources_manager: ^resources.Manager = nil,
-) -> (handle: resources.Handle, node: ^Node, ok: bool) {
-  handle, node, ok = resources.alloc(&world.nodes)
-  if !ok do return
-  init_node(node)
-  node.attachment = attachment
-  assign_emitter_to_node(resources_manager, handle, node)
-  assign_forcefield_to_node(resources_manager, handle, node)
-  assign_light_to_node(resources_manager, handle, node)
-  geometry.transform_translate(&node.transform, position.x, position.y, position.z)
-  attach(world.nodes, parent, handle)
-  if resources_manager != nil {
-    world_matrix := node.transform.world_matrix
-    gpu.write(&resources_manager.world_matrix_buffer, &world_matrix, int(handle.index))
-    // Update node data buffer
-    data := resources.NodeData {
-      material_id        = 0xFFFFFFFF,
-      mesh_id            = 0xFFFFFFFF,
-      bone_matrix_offset = 0xFFFFFFFF,
-    }
-    if mesh_attachment, has_mesh := node.attachment.(MeshAttachment); has_mesh {
-      data.material_id = mesh_attachment.material.index
-      data.mesh_id = mesh_attachment.handle.index
-      if node.visible {
-        data.flags |= resources.NodeFlagSet{.VISIBLE}
-      }
-      if node.culling_enabled {
-        data.flags |= {.CULLING_ENABLED}
-      }
-      if mesh_attachment.cast_shadow {
-        data.flags |= resources.NodeFlagSet{.CASTS_SHADOW}
-      }
-      if mesh_attachment.navigation_obstacle {
-        data.flags |= resources.NodeFlagSet{.NAVIGATION_OBSTACLE}
-      }
-      if material_entry, has_material := resources.get(
-        resources_manager.materials,
-        mesh_attachment.material,
-      ); has_material {
-        switch material_entry.type {
-        case .TRANSPARENT:
-          data.flags |= resources.NodeFlagSet{.MATERIAL_TRANSPARENT}
-        case .WIREFRAME:
-          data.flags |= resources.NodeFlagSet{.MATERIAL_WIREFRAME}
-        case .PBR, .UNLIT:
-          // No additional flags needed
-        }
-      }
-      if skinning, has_skinning := mesh_attachment.skinning.?; has_skinning {
-        data.bone_matrix_offset = skinning.bone_matrix_offset
-      }
-    }
-    // Check for navigation obstacle attachment
-    if _, is_obstacle := node.attachment.(NavMeshObstacleAttachment); is_obstacle {
-      data.flags |= resources.NodeFlagSet{.NAVIGATION_OBSTACLE}
-    }
-    gpu.write(&resources_manager.node_data_buffer, &data, int(handle.index))
-  }
-  ok = true
-  return
 }
 
 despawn :: proc(world: ^World, handle: resources.Handle) -> bool {
