@@ -24,7 +24,8 @@ visibility_category_name :: proc(task: VisibilityCategory) -> string {
 VisibilityTask :: struct {
   draw_count:         gpu.DataBuffer(u32),
   draw_commands:      gpu.DataBuffer(vk.DrawIndexedIndirectCommand),
-  visibility_buffer:  gpu.DataBuffer(u32), // Bitfield tracking visibility from last frame
+  visibility_history: gpu.DataBuffer(u32), // Last frame visibility bitfield
+  visibility_buffer:  gpu.DataBuffer(u32), // Current frame visibility bitfield
   descriptor_set:     vk.DescriptorSet,
   descriptor_set_occlusion: vk.DescriptorSet, // With depth pyramid binding
 }
@@ -66,6 +67,7 @@ VisibilitySystem :: struct {
   frames:                          [resources.MAX_FRAMES_IN_FLIGHT]VisibilityFrame,
   max_draws:                       u32,
   node_count:                      u32,
+  has_visibility_history:          bool,
 }
 
 draw_command_stride :: proc() -> u32 {
@@ -104,7 +106,14 @@ visibility_system_init :: proc(
         {.STORAGE_BUFFER, .INDIRECT_BUFFER, .TRANSFER_DST},
       ) or_return
 
-      // Visibility tracking buffer for two-phase culling
+      // Visibility tracking buffers for two-phase culling
+      buffers.visibility_history = gpu.create_host_visible_buffer(
+        gpu_context,
+        u32,
+        int(visibility_buffer_size),
+        {.STORAGE_BUFFER, .TRANSFER_DST},
+      ) or_return
+
       buffers.visibility_buffer = gpu.create_host_visible_buffer(
         gpu_context,
         u32,
@@ -216,8 +225,9 @@ visibility_system_init :: proc(
     {binding = 3, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, stageFlags = {.COMPUTE}}, // Cameras
     {binding = 4, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, stageFlags = {.COMPUTE}}, // Draw count
     {binding = 5, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, stageFlags = {.COMPUTE}}, // Draw commands
-    {binding = 6, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, stageFlags = {.COMPUTE}}, // Visibility buffer
-    {binding = 7, descriptorType = .COMBINED_IMAGE_SAMPLER, descriptorCount = 1, stageFlags = {.COMPUTE}}, // Depth pyramid
+    {binding = 6, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, stageFlags = {.COMPUTE}}, // Visibility history
+    {binding = 7, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, stageFlags = {.COMPUTE}}, // Visibility output
+    {binding = 8, descriptorType = .COMBINED_IMAGE_SAMPLER, descriptorCount = 1, stageFlags = {.COMPUTE}}, // Depth pyramid
   }
 
   vk.CreateDescriptorSetLayout(
@@ -247,7 +257,7 @@ visibility_system_init :: proc(
   // Create occlusion culling pipeline
   shader_module_occlusion := gpu.create_shader_module(
     gpu_context.device,
-    #load("../shader/occlusion_culling/occlusion_culling.spv"),
+    #load("../shader/occlusion_culling/cull.spv"),
   ) or_return
   defer vk.DestroyShaderModule(gpu_context.device, shader_module_occlusion, nil)
 
@@ -378,6 +388,8 @@ visibility_system_init :: proc(
     }
   }
 
+  system.has_visibility_history = false
+
   return vk.Result.SUCCESS
 }
 
@@ -408,6 +420,7 @@ visibility_system_shutdown :: proc(
   system.pipeline_layout_occlusion = 0
   system.descriptor_set_layout = 0
   system.descriptor_set_layout_occlusion = 0
+  system.has_visibility_history = false
 
   for frame_idx in 0 ..< resources.MAX_FRAMES_IN_FLIGHT {
     frame := &system.frames[frame_idx]
@@ -415,6 +428,7 @@ visibility_system_shutdown :: proc(
       buffers := &frame.tasks[task_idx]
       gpu.data_buffer_destroy(gpu_context.device, &buffers.draw_count)
       gpu.data_buffer_destroy(gpu_context.device, &buffers.draw_commands)
+      gpu.data_buffer_destroy(gpu_context.device, &buffers.visibility_history)
       gpu.data_buffer_destroy(gpu_context.device, &buffers.visibility_buffer)
       buffers.descriptor_set = 0
       buffers.descriptor_set_occlusion = 0

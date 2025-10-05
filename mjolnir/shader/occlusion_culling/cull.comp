@@ -79,13 +79,17 @@ layout(set = 0, binding = 5) buffer DrawCommandBuffer {
     DrawCommand commands[];
 };
 
-// Visibility tracking - stores if object was visible last frame
-layout(set = 0, binding = 6) buffer VisibilityBuffer {
-    uint visibility[];  // Bitfield: 1 = was visible last frame
+// Visibility history and write-back buffers
+layout(set = 0, binding = 6) readonly buffer VisibilityHistory {
+    uint visibility_history[];
+};
+
+layout(set = 0, binding = 7) buffer VisibilityBuffer {
+    uint visibility_current[];
 };
 
 // Depth pyramid for occlusion testing (late pass only)
-layout(set = 0, binding = 7) uniform sampler2D depthPyramid;
+layout(set = 0, binding = 8) uniform sampler2D depthPyramid;
 
 // Frustum culling test
 bool frustumCull(Camera camera, vec3 worldCenter, vec3 worldExtent) {
@@ -197,25 +201,13 @@ void main() {
         return;
     }
     
-    // Check visibility from last frame
     uint visIndex = node_id / 32u;
     uint visBit = node_id % 32u;
-    bool wasVisibleLastFrame = (visibility[visIndex] & (1u << visBit)) != 0u;
-    
-    // Two-phase culling strategy (like Niagara):
-    // EARLY pass (culling_mode == 0): Only render objects visible last frame
-    // LATE pass (culling_mode == 1): Render objects NOT visible last frame with occlusion culling
-    
-    if (params.culling_mode == 0u) {
-        // Early pass - skip if not visible last frame
-        if (!wasVisibleLastFrame) {
-            return;
-        }
-    } else {
-        // Late pass - skip if already rendered in early pass
-        if (wasVisibleLastFrame) {
-            return;
-        }
+    bool wasVisibleLastFrame = (visibility_history[visIndex] & (1u << visBit)) != 0u;
+
+    // Early pass renders the previous frame's visible set to bootstrap depth
+    if (params.culling_mode == 0u && !wasVisibleLastFrame) {
+        return;
     }
     
     bool visible = true;
@@ -251,9 +243,9 @@ void main() {
         }
     }
     
-    // Update visibility for next frame
-    if (visible) {
-        atomicOr(visibility[visIndex], 1u << visBit);
+    // Update visibility for next frame (late pass only)
+    if (visible && params.culling_mode == 1u) {
+        atomicOr(visibility_current[visIndex], 1u << visBit);
     }
     
     if (!visible) {

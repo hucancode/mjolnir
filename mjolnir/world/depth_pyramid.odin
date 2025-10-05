@@ -170,10 +170,10 @@ depth_pyramid_init :: proc(
 	) or_return
 
 	// Create compute pipeline
-	shader_module := gpu.create_shader_module(
-		gpu_context.device,
-		#load("../shader/depth_pyramid/depth_pyramid.spv"),
-	) or_return
+        shader_module := gpu.create_shader_module(
+                gpu_context.device,
+                #load("../shader/depth_pyramid/reduce.spv"),
+        ) or_return
 	defer vk.DestroyShaderModule(gpu_context.device, shader_module, nil)
 
 	compute_info := vk.ComputePipelineCreateInfo {
@@ -225,11 +225,11 @@ depth_pyramid_shutdown :: proc(pyramid: ^DepthPyramid, device: vk.Device) {
 
 // Generate depth pyramid from depth buffer
 depth_pyramid_generate :: proc(
-	pyramid: ^DepthPyramid,
-	gpu_context: ^gpu.GPUContext,
-	cmd: vk.CommandBuffer,
-	source_depth_view: vk.ImageView,
-	source_width, source_height: u32,
+        pyramid: ^DepthPyramid,
+        gpu_context: ^gpu.GPUContext,
+        cmd: vk.CommandBuffer,
+        source_depth_view: vk.ImageView,
+        source_width, source_height: u32,
 ) {
 	// Transition pyramid to GENERAL layout for compute writes
 	barrier := vk.ImageMemoryBarrier {
@@ -406,6 +406,25 @@ depth_pyramid_generate :: proc(
 		0, nil,
 		1, &final_barrier,
 	)
+}
+
+depth_pyramid_ensure_size :: proc(
+        pyramid: ^DepthPyramid,
+        gpu_context: ^gpu.GPUContext,
+        width, height: u32,
+) -> vk.Result {
+        desired_width := max(u32(1), previous_pow2(width))
+        desired_height := max(u32(1), previous_pow2(height))
+
+        if pyramid.image != 0 && pyramid.width == desired_width && pyramid.height == desired_height {
+                return .SUCCESS
+        }
+
+        if pyramid.image != 0 {
+                depth_pyramid_shutdown(pyramid, gpu_context.device)
+        }
+
+        return depth_pyramid_init(pyramid, gpu_context, width, height)
 }
 
 // Utility functions

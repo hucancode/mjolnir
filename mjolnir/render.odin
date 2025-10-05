@@ -740,21 +740,24 @@ record_geometry_pass :: proc(
     target,
     resources_manager,
   ) or_return
-  vis_result := world.dispatch_visibility(
+  visibility_request := world.VisibilityRequest {
+    camera_index = target.camera.index,
+    include_flags = {.VISIBLE},
+    exclude_flags = {.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME},
+  }
+
+  early_visibility := world.dispatch_visibility_with_occlusion(
     world_state,
     gpu_context,
+    resources_manager,
     command_buffer,
     frame_index,
     .OPAQUE,
-    world.VisibilityRequest {
-      camera_index = target.camera.index,
-      include_flags = {.VISIBLE},
-      exclude_flags = {.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME},
-    },
+    visibility_request,
+    &world_state.depth_pyramid,
+    true,
   )
-  draw_buffer := vis_result.draw_buffer
-  count_buffer := vis_result.count_buffer
-  command_stride := vis_result.command_stride
+
   geometry_pass.begin_depth_prepass(
     target,
     command_buffer,
@@ -767,11 +770,109 @@ record_geometry_pass :: proc(
     target.camera.index,
     resources_manager,
     frame_index,
-    draw_buffer,
-    count_buffer,
-    command_stride,
+    early_visibility.draw_buffer,
+    early_visibility.count_buffer,
+    early_visibility.command_stride,
   )
   geometry_pass.end_depth_prepass(command_buffer)
+
+  depth_handle := targets.get_depth_texture(target, frame_index)
+  depth_texture := resources.get(
+    resources_manager.image_2d_buffers,
+    depth_handle,
+  )
+  if depth_texture == nil {
+    return .ERROR_UNKNOWN
+  }
+
+  depth_to_sample := vk.ImageMemoryBarrier {
+    sType               = .IMAGE_MEMORY_BARRIER,
+    srcAccessMask       = {.DEPTH_STENCIL_ATTACHMENT_WRITE},
+    dstAccessMask       = {.SHADER_READ},
+    oldLayout           = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+    newLayout           = .DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+    image               = depth_texture.image,
+    subresourceRange    = {
+      aspectMask     = {.DEPTH},
+      baseMipLevel   = 0,
+      levelCount     = 1,
+      baseArrayLayer = 0,
+      layerCount     = 1,
+    },
+  }
+
+  vk.CmdPipelineBarrier(
+    command_buffer,
+    {.EARLY_FRAGMENT_TESTS, .LATE_FRAGMENT_TESTS},
+    {.COMPUTE_SHADER},
+    {},
+    0,
+    nil,
+    0,
+    nil,
+    1,
+    &depth_to_sample,
+  )
+
+  world.ensure_depth_pyramid(
+    world_state,
+    gpu_context,
+    target.extent.width,
+    target.extent.height,
+  ) or_return
+
+  world.generate_depth_pyramid(
+    world_state,
+    gpu_context,
+    command_buffer,
+    depth_texture.view,
+    target.extent.width,
+    target.extent.height,
+  )
+
+  depth_to_attachment := vk.ImageMemoryBarrier {
+    sType               = .IMAGE_MEMORY_BARRIER,
+    srcAccessMask       = {.SHADER_READ},
+    dstAccessMask       = {.DEPTH_STENCIL_ATTACHMENT_WRITE},
+    oldLayout           = .DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+    newLayout           = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+    image               = depth_texture.image,
+    subresourceRange    = {
+      aspectMask     = {.DEPTH},
+      baseMipLevel   = 0,
+      levelCount     = 1,
+      baseArrayLayer = 0,
+      layerCount     = 1,
+    },
+  }
+
+  vk.CmdPipelineBarrier(
+    command_buffer,
+    {.COMPUTE_SHADER},
+    {.EARLY_FRAGMENT_TESTS, .LATE_FRAGMENT_TESTS},
+    {},
+    0,
+    nil,
+    0,
+    nil,
+    1,
+    &depth_to_attachment,
+  )
+
+  vis_result := world.dispatch_visibility_with_occlusion(
+    world_state,
+    gpu_context,
+    resources_manager,
+    command_buffer,
+    frame_index,
+    .OPAQUE,
+    visibility_request,
+    &world_state.depth_pyramid,
+    false,
+  )
+  draw_buffer := vis_result.draw_buffer
+  count_buffer := vis_result.count_buffer
+  command_stride := vis_result.command_stride
   geometry_pass.begin_pass(
     target,
     command_buffer,

@@ -37,37 +37,48 @@ visibility_system_dispatch_with_occlusion :: proc(
 	frame := &system.frames[frame_index]
 	buffers := &frame.tasks[int(task)]
 
-	// Clear draw count and commands
-	vk.CmdFillBuffer(
-		command_buffer,
-		buffers.draw_count.buffer,
-		0,
-		vk.DeviceSize(buffers.draw_count.bytes_count),
-		0,
-	)
-	vk.CmdFillBuffer(
-		command_buffer,
-		buffers.draw_commands.buffer,
-		0,
-		vk.DeviceSize(buffers.draw_commands.bytes_count),
-		0,
-	)
+        // Clear draw count and commands
+        vk.CmdFillBuffer(
+                command_buffer,
+                buffers.draw_count.buffer,
+                0,
+                vk.DeviceSize(buffers.draw_count.bytes_count),
+                0,
+        )
+        vk.CmdFillBuffer(
+                command_buffer,
+                buffers.draw_commands.buffer,
+                0,
+                vk.DeviceSize(buffers.draw_commands.bytes_count),
+                0,
+        )
 
-	// Clear visibility buffer on first frame only
-	if early_pass {
-		vk.CmdFillBuffer(
-			command_buffer,
-			buffers.visibility_buffer.buffer,
-			0,
-			vk.DeviceSize(buffers.visibility_buffer.bytes_count),
-			0,
-		)
-	}
+        need_history_bootstrap := false
+        if early_pass {
+                if !system.has_visibility_history {
+                        need_history_bootstrap = true
+                        vk.CmdFillBuffer(
+                                command_buffer,
+                                buffers.visibility_history.buffer,
+                                0,
+                                vk.DeviceSize(buffers.visibility_history.bytes_count),
+                                0xFFFFFFFF,
+                        )
+                }
+        } else {
+                vk.CmdFillBuffer(
+                        command_buffer,
+                        buffers.visibility_buffer.buffer,
+                        0,
+                        vk.DeviceSize(buffers.visibility_buffer.bytes_count),
+                        0,
+                )
+        }
 
-	barriers := [dynamic]vk.BufferMemoryBarrier{}
-	defer delete(barriers)
+        barriers := [dynamic]vk.BufferMemoryBarrier{}
+        defer delete(barriers)
 
-	append(&barriers, vk.BufferMemoryBarrier {
+        append(&barriers, vk.BufferMemoryBarrier {
 		sType         = .BUFFER_MEMORY_BARRIER,
 		srcAccessMask = {.TRANSFER_WRITE},
 		dstAccessMask = {.SHADER_WRITE, .SHADER_READ},
@@ -79,20 +90,31 @@ visibility_system_dispatch_with_occlusion :: proc(
 		sType         = .BUFFER_MEMORY_BARRIER,
 		srcAccessMask = {.TRANSFER_WRITE},
 		dstAccessMask = {.SHADER_WRITE, .SHADER_READ},
-		buffer        = buffers.draw_commands.buffer,
-		offset        = 0,
-		size          = vk.DeviceSize(buffers.draw_commands.bytes_count),
-	})
-	if early_pass {
-		append(&barriers, vk.BufferMemoryBarrier {
-			sType         = .BUFFER_MEMORY_BARRIER,
-			srcAccessMask = {.TRANSFER_WRITE},
-			dstAccessMask = {.SHADER_WRITE, .SHADER_READ},
-			buffer        = buffers.visibility_buffer.buffer,
-			offset        = 0,
-			size          = vk.DeviceSize(buffers.visibility_buffer.bytes_count),
-		})
-	}
+                buffer        = buffers.draw_commands.buffer,
+                offset        = 0,
+                size          = vk.DeviceSize(buffers.draw_commands.bytes_count),
+        })
+        if early_pass {
+                if need_history_bootstrap {
+                        append(&barriers, vk.BufferMemoryBarrier {
+                                sType         = .BUFFER_MEMORY_BARRIER,
+                                srcAccessMask = {.TRANSFER_WRITE},
+                                dstAccessMask = {.SHADER_READ},
+                                buffer        = buffers.visibility_history.buffer,
+                                offset        = 0,
+                                size          = vk.DeviceSize(buffers.visibility_history.bytes_count),
+                        })
+                }
+        } else {
+                append(&barriers, vk.BufferMemoryBarrier {
+                        sType         = .BUFFER_MEMORY_BARRIER,
+                        srcAccessMask = {.TRANSFER_WRITE},
+                        dstAccessMask = {.SHADER_WRITE},
+                        buffer        = buffers.visibility_buffer.buffer,
+                        offset        = 0,
+                        size          = vk.DeviceSize(buffers.visibility_buffer.bytes_count),
+                })
+        }
 
 	vk.CmdPipelineBarrier(
 		command_buffer,
@@ -107,97 +129,112 @@ visibility_system_dispatch_with_occlusion :: proc(
 		nil,
 	)
 
-	// Choose pipeline and descriptor set based on whether we have depth pyramid
-	use_occlusion := depth_pyramid != nil && !early_pass
+        use_occlusion := depth_pyramid != nil
 
-	if use_occlusion {
-		vk.CmdBindPipeline(command_buffer, .COMPUTE, system.pipeline_occlusion)
+        if use_occlusion {
+                vk.CmdBindPipeline(command_buffer, .COMPUTE, system.pipeline_occlusion)
 
-		// Allocate and update descriptor set for this frame (includes depth pyramid)
-		descriptor_set: vk.DescriptorSet
-		vk.AllocateDescriptorSets(
-			gpu_context.device,
-			&vk.DescriptorSetAllocateInfo {
-				sType              = .DESCRIPTOR_SET_ALLOCATE_INFO,
-				descriptorPool     = gpu_context.descriptor_pool,
-				descriptorSetCount = 1,
-				pSetLayouts        = &system.descriptor_set_layout_occlusion,
-			},
-			&descriptor_set,
-		)
+                descriptor_set: vk.DescriptorSet
+                vk.AllocateDescriptorSets(
+                        gpu_context.device,
+                        &vk.DescriptorSetAllocateInfo {
+                                sType              = .DESCRIPTOR_SET_ALLOCATE_INFO,
+                                descriptorPool     = gpu_context.descriptor_pool,
+                                descriptorSetCount = 1,
+                                pSetLayouts        = &system.descriptor_set_layout_occlusion,
+                        },
+                        &descriptor_set,
+                )
 
-		// Update all bindings including depth pyramid
-		node_info := vk.DescriptorBufferInfo {
-			buffer = resources_manager.node_data_buffer.device_buffer,
-			range  = vk.DeviceSize(resources_manager.node_data_buffer.bytes_count),
-		}
-		mesh_info := vk.DescriptorBufferInfo {
-			buffer = resources_manager.mesh_data_buffer.device_buffer,
-			range  = vk.DeviceSize(resources_manager.mesh_data_buffer.bytes_count),
-		}
-		world_info := vk.DescriptorBufferInfo {
-			buffer = resources_manager.world_matrix_buffer.device_buffer,
-			range  = vk.DeviceSize(resources_manager.world_matrix_buffer.bytes_count),
-		}
-		camera_info := vk.DescriptorBufferInfo {
-			buffer = resources_manager.camera_buffer.buffer,
-			range  = vk.DeviceSize(resources_manager.camera_buffer.bytes_count),
-		}
-		count_info := vk.DescriptorBufferInfo {
-			buffer = buffers.draw_count.buffer,
-			range  = vk.DeviceSize(buffers.draw_count.bytes_count),
-		}
-		command_info := vk.DescriptorBufferInfo {
-			buffer = buffers.draw_commands.buffer,
-			range  = vk.DeviceSize(buffers.draw_commands.bytes_count),
-		}
-		visibility_info := vk.DescriptorBufferInfo {
-			buffer = buffers.visibility_buffer.buffer,
-			range  = vk.DeviceSize(buffers.visibility_buffer.bytes_count),
-		}
-		pyramid_image_info := vk.DescriptorImageInfo {
-			sampler     = depth_pyramid.sampler,
-			imageView   = depth_pyramid.image_view,
-			imageLayout = .SHADER_READ_ONLY_OPTIMAL,
-		}
+                node_info := vk.DescriptorBufferInfo {
+                        buffer = resources_manager.node_data_buffer.device_buffer,
+                        range  = vk.DeviceSize(resources_manager.node_data_buffer.bytes_count),
+                }
+                mesh_info := vk.DescriptorBufferInfo {
+                        buffer = resources_manager.mesh_data_buffer.device_buffer,
+                        range  = vk.DeviceSize(resources_manager.mesh_data_buffer.bytes_count),
+                }
+                world_info := vk.DescriptorBufferInfo {
+                        buffer = resources_manager.world_matrix_buffer.device_buffer,
+                        range  = vk.DeviceSize(resources_manager.world_matrix_buffer.bytes_count),
+                }
+                camera_info := vk.DescriptorBufferInfo {
+                        buffer = resources_manager.camera_buffer.buffer,
+                        range  = vk.DeviceSize(resources_manager.camera_buffer.bytes_count),
+                }
+                count_info := vk.DescriptorBufferInfo {
+                        buffer = buffers.draw_count.buffer,
+                        range  = vk.DeviceSize(buffers.draw_count.bytes_count),
+                }
+                command_info := vk.DescriptorBufferInfo {
+                        buffer = buffers.draw_commands.buffer,
+                        range  = vk.DeviceSize(buffers.draw_commands.bytes_count),
+                }
+                history_info := vk.DescriptorBufferInfo {
+                        buffer = buffers.visibility_history.buffer,
+                        range  = vk.DeviceSize(buffers.visibility_history.bytes_count),
+                }
+                visibility_info := vk.DescriptorBufferInfo {
+                        buffer = buffers.visibility_buffer.buffer,
+                        range  = vk.DeviceSize(buffers.visibility_buffer.bytes_count),
+                }
+                pyramid_image_info := vk.DescriptorImageInfo {}
+                if depth_pyramid != nil {
+                        pyramid_image_info = vk.DescriptorImageInfo {
+                                sampler     = depth_pyramid.sampler,
+                                imageView   = depth_pyramid.image_view,
+                                imageLayout = .SHADER_READ_ONLY_OPTIMAL,
+                        }
+                }
 
-		writes := [?]vk.WriteDescriptorSet {
-			{sType = .WRITE_DESCRIPTOR_SET, dstSet = descriptor_set, dstBinding = 0, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, pBufferInfo = &node_info},
-			{sType = .WRITE_DESCRIPTOR_SET, dstSet = descriptor_set, dstBinding = 1, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, pBufferInfo = &mesh_info},
-			{sType = .WRITE_DESCRIPTOR_SET, dstSet = descriptor_set, dstBinding = 2, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, pBufferInfo = &world_info},
-			{sType = .WRITE_DESCRIPTOR_SET, dstSet = descriptor_set, dstBinding = 3, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, pBufferInfo = &camera_info},
-			{sType = .WRITE_DESCRIPTOR_SET, dstSet = descriptor_set, dstBinding = 4, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, pBufferInfo = &count_info},
-			{sType = .WRITE_DESCRIPTOR_SET, dstSet = descriptor_set, dstBinding = 5, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, pBufferInfo = &command_info},
-			{sType = .WRITE_DESCRIPTOR_SET, dstSet = descriptor_set, dstBinding = 6, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, pBufferInfo = &visibility_info},
-			{sType = .WRITE_DESCRIPTOR_SET, dstSet = descriptor_set, dstBinding = 7, descriptorType = .COMBINED_IMAGE_SAMPLER, descriptorCount = 1, pImageInfo = &pyramid_image_info},
-		}
+                writes := make([dynamic]vk.WriteDescriptorSet, 0)
+                defer delete(writes)
 
-		vk.UpdateDescriptorSets(gpu_context.device, len(writes), raw_data(writes[:]), 0, nil)
+                append(&writes, vk.WriteDescriptorSet {sType = .WRITE_DESCRIPTOR_SET, dstSet = descriptor_set, dstBinding = 0, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, pBufferInfo = &node_info})
+                append(&writes, vk.WriteDescriptorSet {sType = .WRITE_DESCRIPTOR_SET, dstSet = descriptor_set, dstBinding = 1, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, pBufferInfo = &mesh_info})
+                append(&writes, vk.WriteDescriptorSet {sType = .WRITE_DESCRIPTOR_SET, dstSet = descriptor_set, dstBinding = 2, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, pBufferInfo = &world_info})
+                append(&writes, vk.WriteDescriptorSet {sType = .WRITE_DESCRIPTOR_SET, dstSet = descriptor_set, dstBinding = 3, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, pBufferInfo = &camera_info})
+                append(&writes, vk.WriteDescriptorSet {sType = .WRITE_DESCRIPTOR_SET, dstSet = descriptor_set, dstBinding = 4, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, pBufferInfo = &count_info})
+                append(&writes, vk.WriteDescriptorSet {sType = .WRITE_DESCRIPTOR_SET, dstSet = descriptor_set, dstBinding = 5, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, pBufferInfo = &command_info})
+                append(&writes, vk.WriteDescriptorSet {sType = .WRITE_DESCRIPTOR_SET, dstSet = descriptor_set, dstBinding = 6, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, pBufferInfo = &history_info})
+                append(&writes, vk.WriteDescriptorSet {sType = .WRITE_DESCRIPTOR_SET, dstSet = descriptor_set, dstBinding = 7, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, pBufferInfo = &visibility_info})
 
-		vk.CmdBindDescriptorSets(
-			command_buffer,
-			.COMPUTE,
-			system.pipeline_layout_occlusion,
-			0,
-			1,
-			&descriptor_set,
-			0,
-			nil,
-		)
-	} else {
-		// Use basic frustum culling pipeline
-		vk.CmdBindPipeline(command_buffer, .COMPUTE, system.pipeline)
-		vk.CmdBindDescriptorSets(
-			command_buffer,
-			.COMPUTE,
-			system.pipeline_layout,
-			0,
-			1,
-			&buffers.descriptor_set,
-			0,
-			nil,
-		)
-	}
+                if depth_pyramid != nil {
+                        append(&writes, vk.WriteDescriptorSet {
+                                sType = .WRITE_DESCRIPTOR_SET,
+                                dstSet = descriptor_set,
+                                dstBinding = 8,
+                                descriptorType = .COMBINED_IMAGE_SAMPLER,
+                                descriptorCount = 1,
+                                pImageInfo = &pyramid_image_info,
+                        })
+                }
+
+                vk.UpdateDescriptorSets(gpu_context.device, u32(len(writes)), raw_data(writes[:]), 0, nil)
+
+                vk.CmdBindDescriptorSets(
+                        command_buffer,
+                        .COMPUTE,
+                        system.pipeline_layout_occlusion,
+                        0,
+                        1,
+                        &descriptor_set,
+                        0,
+                        nil,
+                )
+        } else {
+                vk.CmdBindPipeline(command_buffer, .COMPUTE, system.pipeline)
+                vk.CmdBindDescriptorSets(
+                        command_buffer,
+                        .COMPUTE,
+                        system.pipeline_layout,
+                        0,
+                        1,
+                        &buffers.descriptor_set,
+                        0,
+                        nil,
+                )
+        }
 
 	// Push constants
 	push_constants := VisibilityPushConstants {
@@ -207,17 +244,17 @@ visibility_system_dispatch_with_occlusion :: proc(
 		include_flags  = request.include_flags,
 		exclude_flags  = request.exclude_flags,
 		culling_mode   = early_pass ? 0 : 1, // 0 = early, 1 = late
-		pyramid_width  = use_occlusion ? f32(depth_pyramid.width) : 0,
-		pyramid_height = use_occlusion ? f32(depth_pyramid.height) : 0,
-	}
+                pyramid_width  = use_occlusion && depth_pyramid != nil ? f32(depth_pyramid.width) : 0,
+                pyramid_height = use_occlusion && depth_pyramid != nil ? f32(depth_pyramid.height) : 0,
+        }
 
-	vk.CmdPushConstants(
-		command_buffer,
-		use_occlusion ? system.pipeline_layout_occlusion : system.pipeline_layout,
-		{.COMPUTE},
-		0,
-		size_of(push_constants),
-		&push_constants,
+        vk.CmdPushConstants(
+                command_buffer,
+                use_occlusion ? system.pipeline_layout_occlusion : system.pipeline_layout,
+                {.COMPUTE},
+                0,
+                size_of(push_constants),
+                &push_constants,
 	)
 
 	// Dispatch
@@ -225,39 +262,89 @@ visibility_system_dispatch_with_occlusion :: proc(
 	vk.CmdDispatch(command_buffer, dispatch_x, 1, 1)
 
 	// Post-dispatch barriers
-	post_barriers := [?]vk.BufferMemoryBarrier {
-		{
-			sType         = .BUFFER_MEMORY_BARRIER,
-			srcAccessMask = {.SHADER_WRITE},
-			dstAccessMask = {.INDIRECT_COMMAND_READ},
-			buffer        = buffers.draw_commands.buffer,
-			offset        = 0,
-			size          = vk.DeviceSize(buffers.draw_commands.bytes_count),
-		},
-		{
-			sType         = .BUFFER_MEMORY_BARRIER,
-			srcAccessMask = {.SHADER_WRITE},
-			dstAccessMask = {.INDIRECT_COMMAND_READ},
-			buffer        = buffers.draw_count.buffer,
-			offset        = 0,
-			size          = vk.DeviceSize(buffers.draw_count.bytes_count),
-		},
-	}
+        post_barriers := [dynamic]vk.BufferMemoryBarrier{}
+        defer delete(post_barriers)
 
-	vk.CmdPipelineBarrier(
-		command_buffer,
-		{.COMPUTE_SHADER},
-		{.DRAW_INDIRECT},
-		{},
-		0,
-		nil,
-		len(post_barriers),
-		raw_data(post_barriers[:]),
-		0,
-		nil,
-	)
+        append(&post_barriers, vk.BufferMemoryBarrier {
+                sType         = .BUFFER_MEMORY_BARRIER,
+                srcAccessMask = {.SHADER_WRITE},
+                dstAccessMask = {.INDIRECT_COMMAND_READ},
+                buffer        = buffers.draw_commands.buffer,
+                offset        = 0,
+                size          = vk.DeviceSize(buffers.draw_commands.bytes_count),
+        })
+        append(&post_barriers, vk.BufferMemoryBarrier {
+                sType         = .BUFFER_MEMORY_BARRIER,
+                srcAccessMask = {.SHADER_WRITE},
+                dstAccessMask = {.INDIRECT_COMMAND_READ},
+                buffer        = buffers.draw_count.buffer,
+                offset        = 0,
+                size          = vk.DeviceSize(buffers.draw_count.bytes_count),
+        })
+        if !early_pass {
+                append(&post_barriers, vk.BufferMemoryBarrier {
+                        sType         = .BUFFER_MEMORY_BARRIER,
+                        srcAccessMask = {.SHADER_WRITE},
+                        dstAccessMask = {.TRANSFER_READ},
+                        buffer        = buffers.visibility_buffer.buffer,
+                        offset        = 0,
+                        size          = vk.DeviceSize(buffers.visibility_buffer.bytes_count),
+                })
+        }
 
-	result.draw_buffer = buffers.draw_commands.buffer
-	result.count_buffer = buffers.draw_count.buffer
-	return result
+        vk.CmdPipelineBarrier(
+                command_buffer,
+                {.COMPUTE_SHADER},
+                early_pass ? {.DRAW_INDIRECT} : {.DRAW_INDIRECT, .TRANSFER},
+                {},
+                0,
+                nil,
+                u32(len(post_barriers)),
+                raw_data(post_barriers[:]),
+                0,
+                nil,
+        )
+
+        if !early_pass {
+                copy_region := vk.BufferCopy {
+                        srcOffset = 0,
+                        dstOffset = 0,
+                        size      = vk.DeviceSize(buffers.visibility_buffer.bytes_count),
+                }
+                vk.CmdCopyBuffer(
+                        command_buffer,
+                        buffers.visibility_buffer.buffer,
+                        buffers.visibility_history.buffer,
+                        1,
+                        &copy_region,
+                )
+
+                history_barrier := vk.BufferMemoryBarrier {
+                        sType         = .BUFFER_MEMORY_BARRIER,
+                        srcAccessMask = {.TRANSFER_WRITE},
+                        dstAccessMask = {.SHADER_READ},
+                        buffer        = buffers.visibility_history.buffer,
+                        offset        = 0,
+                        size          = vk.DeviceSize(buffers.visibility_history.bytes_count),
+                }
+
+                vk.CmdPipelineBarrier(
+                        command_buffer,
+                        {.TRANSFER},
+                        {.COMPUTE_SHADER},
+                        {},
+                        0,
+                        nil,
+                        1,
+                        &history_barrier,
+                        0,
+                        nil,
+                )
+
+                system.has_visibility_history = true
+        }
+
+        result.draw_buffer = buffers.draw_commands.buffer
+        result.count_buffer = buffers.draw_count.buffer
+        return result
 }

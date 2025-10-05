@@ -430,6 +430,48 @@ dispatch_visibility :: proc(
   )
 }
 
+dispatch_visibility_with_occlusion :: proc(
+  world: ^World,
+  gpu_context: ^gpu.GPUContext,
+  resources_manager: ^resources.Manager,
+  command_buffer: vk.CommandBuffer,
+  frame_index: u32,
+  category: VisibilityCategory,
+  request: VisibilityRequest,
+  depth_pyramid: ^DepthPyramid,
+  early_pass: bool,
+) -> VisibilityResult {
+  return visibility_system_dispatch_with_occlusion(
+    &world.visibility,
+    gpu_context,
+    resources_manager,
+    command_buffer,
+    frame_index,
+    category,
+    request,
+    depth_pyramid,
+    early_pass,
+  )
+}
+
+ensure_depth_pyramid :: proc(
+  world: ^World,
+  gpu_context: ^gpu.GPUContext,
+  width, height: u32,
+) -> vk.Result {
+  return depth_pyramid_ensure_size(&world.depth_pyramid, gpu_context, width, height)
+}
+
+generate_depth_pyramid :: proc(
+  world: ^World,
+  gpu_context: ^gpu.GPUContext,
+  command_buffer: vk.CommandBuffer,
+  depth_view: vk.ImageView,
+  width, height: u32,
+) {
+  depth_pyramid_generate(&world.depth_pyramid, gpu_context, command_buffer, depth_view, width, height)
+}
+
 despawn :: proc(world: ^World, handle: resources.Handle) -> bool {
   node := resources.get(world.nodes, handle)
   if node == nil {
