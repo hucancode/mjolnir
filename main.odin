@@ -12,7 +12,7 @@ import "mjolnir/world"
 import "vendor:glfw"
 import mu "vendor:microui"
 
-LIGHT_COUNT :: 10
+LIGHT_COUNT :: 1
 ALL_SPOT_LIGHT :: false
 ALL_POINT_LIGHT :: false
 light_handles: [LIGHT_COUNT]resources.Handle
@@ -69,7 +69,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
           for z in 1 ..< nz {
             world_x := (f32(x) - f32(nx) * 0.5) * space
             world_y := (f32(y) - f32(ny) * 0.5) * space + 0.5
-            world_z := (f32(z) - f32(nz) * 0.5) * space
+            world_z := (f32(z) - f32(nz) * 0.5) * space - f32(nz + 3) * space * 0.5
             node_handle: resources.Handle
             node_ok := false
             if x % 3 == 0 {
