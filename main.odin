@@ -6,15 +6,13 @@ import "core:math/linalg"
 import "core:os"
 import "mjolnir"
 import "mjolnir/geometry"
-import "mjolnir/render/post_process"
 import "mjolnir/render/text"
 import "mjolnir/resources"
 import "mjolnir/world"
 import "vendor:glfw"
 import mu "vendor:microui"
-import vk "vendor:vulkan"
 
-LIGHT_COUNT :: 20
+LIGHT_COUNT :: 10
 ALL_SPOT_LIGHT :: false
 ALL_POINT_LIGHT :: false
 light_handles: [LIGHT_COUNT]resources.Handle
@@ -57,7 +55,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   cone_mesh_handle, cone_mesh_ok := create_mesh(engine, make_cone())
   if true {
     log.info("spawning cubes in a grid")
-    space: f32 = 2.1
+    space: f32 = 4.1
     size: f32 = 0.3
     nx, ny, nz := 40, 2, 40
     mat_handle, mat_ok := create_material(
@@ -72,10 +70,10 @@ setup :: proc(engine: ^mjolnir.Engine) {
             world_x := (f32(x) - f32(nx) * 0.5) * space
             world_y := (f32(y) - f32(ny) * 0.5) * space + 0.5
             world_z := (f32(z) - f32(nz) * 0.5) * space
-            node: ^world.Node
+            node_handle: resources.Handle
             node_ok := false
             if x % 3 == 0 {
-              _, node, node_ok = spawn(
+              node_handle, _, node_ok = spawn(
                 engine,
                 world.MeshAttachment {
                   handle = cube_mesh_handle,
@@ -84,7 +82,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
                 },
               )
             } else if x % 3 == 1 {
-              _, node, node_ok = spawn(
+              node_handle, _, node_ok = spawn(
                 engine,
                 world.MeshAttachment {
                   handle = cone_mesh_handle,
@@ -93,7 +91,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
                 },
               )
             } else {
-              _, node, node_ok = spawn(
+              node_handle, _, node_ok = spawn(
                 engine,
                 world.MeshAttachment {
                   handle = sphere_mesh_handle,
@@ -103,8 +101,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
               )
             }
             if !node_ok do break spawn_loop
-            translate(node, world_x, world_y, world_z)
-            scale(node, size)
+            translate(engine, node_handle, world_x, world_y, world_z)
+            scale(engine, node_handle, size)
           }
         }
       }
@@ -125,7 +123,10 @@ setup :: proc(engine: ^mjolnir.Engine) {
         albedo_handle = brick_albedo_handle,
       )
     }
-    ground_mesh_handle, ground_mesh_ok := create_mesh(engine, make_quad())
+    ground_mesh_handle, ground_mesh_ok := create_mesh(
+      engine,
+      geometry.make_quad(),
+    )
     log.info("spawning ground and walls")
     // Ground node
     size: f32 = 15.0
@@ -216,7 +217,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     gltf_nodes := load_gltf(engine, "assets/Suzanne.glb") or_else {}
     log.infof("Loaded GLTF nodes: %v", gltf_nodes)
     for handle in gltf_nodes {
-      translate(engine, handle, -3, 1, -2)
+      translate(engine, handle, -3, 1, -17)
     }
   }
   if true {
@@ -269,29 +270,33 @@ setup :: proc(engine: ^mjolnir.Engine) {
         math.sin(f32(i)),
         1.0,
       }
-      light: ^world.Node
       should_make_spot_light := i % 2 != 1
       if ALL_SPOT_LIGHT {
         should_make_spot_light = true
       } else if ALL_POINT_LIGHT {
         should_make_spot_light = false
       }
+      light: ^world.Node
       light_spawn_ok: bool
       if should_make_spot_light {
-        attachment := create_spot_light(engine, light_handles[i], color, 10, math.PI * 0.25) or_continue
-        light_handles[i], light, light_spawn_ok = spawn(engine, attachment)
-        if !light_spawn_ok {
-          continue
-        }
+        light_handles[i], light, light_spawn_ok = spawn_spot_light(
+          engine,
+          color,
+          10,
+          math.PI * 0.25,
+          {6, 2, -1},
+        )
+        if !light_spawn_ok do continue
         rotate(light, math.PI * 0.4, linalg.VECTOR3F32_X_AXIS)
       } else {
-        attachment := create_point_light(engine, light_handles[i], color, 14) or_continue
-        light_handles[i], light, light_spawn_ok = spawn(engine, attachment)
-        if !light_spawn_ok {
-          continue
-        }
+        light_handles[i], light, light_spawn_ok = spawn_point_light(
+          engine,
+          color,
+          14,
+          {6, 2, -1},
+        )
+        if !light_spawn_ok do continue
       }
-      translate(light, 6, 2, -1)
       if plain_material_ok && cube_mesh_ok {
         cube_node: ^world.Node
         cube_ok: bool
@@ -310,16 +315,14 @@ setup :: proc(engine: ^mjolnir.Engine) {
       }
     }
     if false {
-      dir_handle, dir_node, ok := spawn(engine, nil)
+      _, dir_node, ok := spawn_directional_light(
+        engine,
+        {0.2, 0.5, 0.9, 1.0},
+        true,
+        {0, 10, 0},
+      )
       if ok {
-        attachment, ok := create_directional_light(engine, dir_handle, {0.2, 0.5, 0.9, 1.0}, true)
-        if !ok {
-          despawn(engine, dir_handle)
-        } else {
-          dir_node.attachment = attachment
-          translate(dir_node, 0, 10, 0)
-          rotate(dir_node, math.PI * 0.25, linalg.VECTOR3F32_X_AXIS)
-        }
+        rotate(dir_node, math.PI * 0.25, linalg.VECTOR3F32_X_AXIS)
       }
     }
   }
@@ -327,7 +330,10 @@ setup :: proc(engine: ^mjolnir.Engine) {
     log.info("Setting up bloom...")
     // add_bloom(&engine.postprocess, 0.8, 0.5, 16.0)
     // Create a bright white ball to test bloom effect
-    emissive_handle, emissive_ok := create_material(engine, emissive_value = 30.0)
+    emissive_handle, emissive_ok := create_material(
+      engine,
+      emissive_value = 30.0,
+    )
     if emissive_ok && sphere_mesh_ok {
       _, bright_ball_node, bright_ok := spawn(
         engine,
@@ -369,21 +375,21 @@ setup :: proc(engine: ^mjolnir.Engine) {
         engine,
         psys_handle1,
         resources.Emitter {
-          emission_rate     = 7,
+          emission_rate = 7,
           particle_lifetime = 5.0,
-          position_spread   = 1.5,
-          initial_velocity  = {0, -0.1, 0, 0},
-          velocity_spread   = 0.1,
-          color_start       = {1, 1, 0, 1},
-          color_end         = {1, 0.5, 0, 0},
-          size_start        = 200.0,
-          size_end          = 100.0,
-          weight            = 0.1,
-          weight_spread     = 0.05,
-          texture_handle    = goldstar_texture_handle,
-          enabled           = true,
-          aabb_min          = {-2, -2, -2},
-          aabb_max          = {2, 2, 2},
+          position_spread = 1.5,
+          initial_velocity = {0, -0.1, 0, 0},
+          velocity_spread = 0.1,
+          color_start = {1, 1, 0, 1},
+          color_end = {1, 0.5, 0, 0},
+          size_start = 200.0,
+          size_end = 100.0,
+          weight = 0.1,
+          weight_spread = 0.05,
+          texture_handle = goldstar_texture_handle,
+          enabled = true,
+          aabb_min = {-2, -2, -2},
+          aabb_max = {2, 2, 2},
         },
       )
       if emitter1_ok {
@@ -400,21 +406,21 @@ setup :: proc(engine: ^mjolnir.Engine) {
         engine,
         psys_handle2,
         resources.Emitter {
-          emission_rate     = 7,
+          emission_rate = 7,
           particle_lifetime = 3.0,
-          position_spread   = 0.3,
-          initial_velocity  = {0, 0.2, 0, 0},
-          velocity_spread   = 0.15,
-          color_start       = {0, 0, 1, 1},
-          color_end         = {0, 1, 1, 0},
-          size_start        = 350.0,
-          size_end          = 175.0,
-          weight            = 0.1,
-          weight_spread     = 0.3,
-          texture_handle    = black_circle_texture_handle,
-          enabled           = true,
-          aabb_min          = {-1, -1, -1},
-          aabb_max          = {1, 1, 1},
+          position_spread = 0.3,
+          initial_velocity = {0, 0.2, 0, 0},
+          velocity_spread = 0.15,
+          color_start = {0, 0, 1, 1},
+          color_end = {0, 1, 1, 0},
+          size_start = 350.0,
+          size_end = 175.0,
+          weight = 0.1,
+          weight_spread = 0.3,
+          texture_handle = black_circle_texture_handle,
+          enabled = true,
+          aabb_min = {-1, -1, -1},
+          aabb_max = {1, 1, 1},
         },
       )
       if emitter2_ok {
@@ -465,20 +471,14 @@ setup :: proc(engine: ^mjolnir.Engine) {
       }
     }
   }
-  post_process.add_fog(
-    &engine.render.post_process,
-    [3]f32{0.4, 0.0, 0.8},
-    0.02,
-    5.0,
-    20.0,
-  )
-  // post_process.add_bloom(&engine.render.post_process)
-  post_process.add_crosshatch(&engine.render.post_process, [2]f32{1280, 720})
-  // post_process.add_blur(&engine.render.post_process, 18.0)
-  // post_process.add_tonemap(&engine.render.post_process, 1.5, 1.3)
-  // post_process.add_dof(&engine.render.post_process)
-  // post_process.add_grayscale(&engine.render.post_process, 0.9)
-  // post_process.add_outline(&engine.render.post_process, 2.0, [3]f32{1.0, 0.0, 0.0})
+  add_fog(engine, [3]f32{0.4, 0.0, 0.8}, 0.02, 5.0, 20.0)
+  // add_bloom(engine)
+  add_crosshatch(engine, [2]f32{1280, 720})
+  // add_blur(engine, 18.0)
+  // add_tonemap(engine, 1.5, 1.3)
+  // add_dof(engine)
+  // add_grayscale(engine, 0.9)
+  // add_outline(engine, 2.0, [3]f32{1.0, 0.0, 0.0})
   setup_camera_controller_callbacks(engine.window)
   main_camera := get_main_camera(engine)
   orbit_controller = camera_controller_orbit_init(engine.window)
@@ -490,14 +490,12 @@ setup :: proc(engine: ^mjolnir.Engine) {
   current_controller = &orbit_controller
   when true {
     log.info("Setting up portal...")
-    idx, portal_ok := mjolnir.renderer_add_render_target(
-      &engine.render,
-      &engine.gpu_context,
-      &engine.resource_manager,
+    idx, portal_ok := create_render_target(
+      engine,
       512,
       512,
-      vk.Format.R8G8B8A8_UNORM,
-      vk.Format.D32_SFLOAT,
+      .R8G8B8A8_UNORM,
+      .D32_SFLOAT,
       camera_position = {5, 15, 7},
       camera_target = {0, 0, 0},
     )
@@ -519,7 +517,10 @@ setup :: proc(engine: ^mjolnir.Engine) {
       "Portal material created with handle: %v",
       portal_material_handle,
     )
-    portal_mesh_handle, portal_mesh_ok := create_mesh(engine, make_quad())
+    portal_mesh_handle, portal_mesh_ok := create_mesh(
+      engine,
+      geometry.make_quad(),
+    )
     if portal_material_ok && portal_mesh_ok {
       _, portal_node, portal_spawn_ok := spawn(
         engine,
@@ -531,8 +532,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
       )
       if portal_spawn_ok {
         translate(portal_node, 0, 3, -5)
-        rotate_node(portal_node, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
-        scale_node(portal_node, 2.0)
+        rotate(portal_node, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
+        scale(portal_node, 2.0)
       }
     }
   }
@@ -570,12 +571,7 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
       // Rotate light 0 around Y axis
       t := time_since_start(engine)
       rotate(engine, handle, t, linalg.VECTOR3F32_Y_AXIS)
-      rotate_by(
-        engine,
-        handle,
-        math.PI * 0.3,
-        linalg.VECTOR3F32_X_AXIS,
-      )
+      rotate_by(engine, handle, math.PI * 0.3, linalg.VECTOR3F32_X_AXIS)
       continue
     }
     offset := f32(i) / f32(LIGHT_COUNT) * math.PI * 2.0
@@ -592,18 +588,16 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
       engine,
       light_cube_handles[i],
       math.PI * time_since_start(engine) * 0.5,
+      linalg.VECTOR3F32_Y_AXIS,
     )
   }
   if portal_render_target_index >= 0 {
-    portal_rt, rt_ok := renderer_get_render_target(
-      &engine.render,
+    portal_rt, rt_ok := get_render_target_camera(
+      engine,
       portal_render_target_index,
     )
     if rt_ok {
-      portal_camera, camera_ok := get_camera(
-        engine,
-        portal_rt.camera,
-      )
+      portal_camera, camera_ok := get_camera(engine, portal_rt)
       if camera_ok {
         // Animate portal camera - orbit around the scene center
         portal_t := time_since_start(engine) * 0.3
@@ -613,17 +607,14 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
         camera_z := math.sin(portal_t) * radius
         camera_pos := [3]f32{camera_x, height, camera_z}
         target := [3]f32{0, 0, 0}
-        camera_look_at(portal_camera, camera_pos, target, {0, 1, 0})
+        geometry.camera_look_at(portal_camera, camera_pos, target, {0, 1, 0})
       }
       // Update portal material to use render target output
       // Use previous frame's output since current frame hasn't been rendered yet
       prev_frame :=
         (engine.frame_index + resources.MAX_FRAMES_IN_FLIGHT - 1) %
         resources.MAX_FRAMES_IN_FLIGHT
-      portal_mat, mat_ok := get_material(
-        engine,
-        portal_material_handle,
-      )
+      portal_mat, mat_ok := get_material(engine, portal_material_handle)
       if mat_ok {
         portal_output, output_ok := renderer_get_render_target_output(
           &engine.render,
@@ -649,17 +640,17 @@ on_key_pressed :: proc(engine: ^mjolnir.Engine, key, action, mods: int) {
   log.infof("key pressed key %d action %d mods %x", key, action, mods)
   if action != glfw.PRESS do return
   if key == glfw.KEY_LEFT {
-    translate_by(engine, light_handles[0], 0.1, 0, 0)
+    translate_by(engine, light_handles[0], 0.1, 0.0, 0.0)
   } else if key == glfw.KEY_RIGHT {
-    translate_by(engine, light_handles[0], -0.1, 0, 0)
+    translate_by(engine, light_handles[0], -0.1, 0.0, 0.0)
   } else if key == glfw.KEY_UP {
-    translate_by(engine, light_handles[0], 0, 0, 0.1)
+    translate_by(engine, light_handles[0], 0.0, 0.1, 0.0)
   } else if key == glfw.KEY_DOWN {
-    translate_by(engine, light_handles[0], 0, 0, -0.1)
+    translate_by(engine, light_handles[0], 0.0, -0.1, 0.0)
   } else if key == glfw.KEY_Z {
-    translate_by(engine, light_handles[0], 0, 0.1, 0)
+    translate_by(engine, light_handles[0], 0.0, 0.0, 0.1)
   } else if key == glfw.KEY_X {
-    translate_by(engine, light_handles[0], 0, -0.1, 0)
+    translate_by(engine, light_handles[0], 0.0, 0.0, -0.1)
   } else if key == glfw.KEY_TAB {
     main_camera_for_sync := get_main_camera(engine)
     if current_controller == &orbit_controller {

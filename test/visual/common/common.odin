@@ -84,8 +84,8 @@ run_visual_test :: proc(config: VisualTestConfig) -> bool {
 
 setup_scene :: proc(engine: ^mjolnir.Engine) {
   cfg := &visual_state.config
-  mat_handle, mat_ok := resources.create_material_handle(
-    &engine.resource_manager,
+  mat_handle, mat_ok := mjolnir.create_material(
+    engine,
     type = resources.MaterialType.UNLIT,
     base_color_factor = cfg.base_color,
   )
@@ -130,16 +130,12 @@ setup_scene :: proc(engine: ^mjolnir.Engine) {
         material = mat_handle,
         cast_shadow = cfg.enable_shadows,
       }
-      handle, node, spawned := world.spawn(
-        &engine.world,
-        attachment,
-        &engine.resource_manager,
-      )
+      handle, node, spawned := mjolnir.spawn(engine, attachment)
       if !spawned {
         log.error("Failed to spawn visual test mesh chunk")
         return
       }
-      world.translate(node, chunk_center.x, chunk_center.y, chunk_center.z)
+      mjolnir.translate(node, chunk_center.x, chunk_center.y, chunk_center.z)
       append(&visual_state.node_handles, handle)
     }
   }
@@ -217,11 +213,7 @@ get_or_create_chunk_mesh :: proc(
     chunk_cols,
     chunk_rows,
   )
-  handle, ok = resources.create_mesh_handle(
-    &engine.gpu_context,
-    &engine.resource_manager,
-    chunk,
-  )
+  handle, ok = mjolnir.create_mesh(engine, chunk)
   if !ok {
     return resources.Handle{}, false
   }

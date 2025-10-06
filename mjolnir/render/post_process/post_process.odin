@@ -339,6 +339,10 @@ add_dof :: proc(
   append(&self.effect_stack, effect)
 }
 
+clear_effects :: proc(self: ^Renderer) {
+  clear(&self.effect_stack)
+}
+
 effect_clear :: proc(self: ^Renderer) {
   resize(&self.effect_stack, 0)
 }
