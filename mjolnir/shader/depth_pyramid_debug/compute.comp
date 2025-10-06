@@ -1,0 +1,41 @@
+#version 450
+
+// Debug visualization for depth pyramid
+// Displays a specific mip level of the depth pyramid
+
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+layout(binding = 0) uniform sampler2D depthPyramid;
+layout(binding = 1, rgba8) uniform writeonly image2D outputImage;
+
+layout(push_constant) uniform PushConstants {
+    uint mipLevel;
+    uint screenWidth;
+    uint screenHeight;
+    float debugScale; // Scale factor for visualization
+};
+
+void main() {
+    uvec2 pixelCoord = gl_GlobalInvocationID.xy;
+
+    if (pixelCoord.x >= screenWidth || pixelCoord.y >= screenHeight) {
+        return;
+    }
+
+    // Calculate UV coordinates
+    vec2 uv = (vec2(pixelCoord) + vec2(0.5)) / vec2(screenWidth, screenHeight);
+
+    // Sample depth from specified mip level
+    float depth = textureLod(depthPyramid, uv, float(mipLevel)).x;
+
+    // Invert so geometry shows WHITE and background shows BLACK
+    // This makes geometry more visible
+    float inverted = 1.0 - depth;
+
+    // Amplify to make geometry more visible (objects are typically close to camera)
+    // Near plane (depth=0) -> inverted=1.0 -> white (geometry)
+    // Far plane (depth=1) -> inverted=0.0 -> black (background)
+    vec3 color = vec3(inverted * 50.0); // 50x amplification for near objects
+
+    imageStore(outputImage, ivec2(pixelCoord), vec4(color, 1.0));
+}

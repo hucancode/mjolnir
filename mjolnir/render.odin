@@ -10,6 +10,7 @@ import "render/debug_ui"
 import geometry_pass "render/geometry"
 import "render/lighting"
 import navigation_renderer "render/navigation"
+import "render/occlusion"
 import "render/particles"
 import "render/post_process"
 import "render/shadow"
@@ -41,6 +42,7 @@ Renderer :: struct {
   post_process:               post_process.Renderer,
   text:                       text.Renderer,
   ui:                         debug_ui.Renderer,
+  occlusion:                  occlusion.OcclusionSystem,
   main_render_target_index:   int,
   render_targets:             [dynamic]targets.RenderTarget,
   primary_command_buffers:    [resources.MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
@@ -112,6 +114,16 @@ renderer_init :: proc(
     gpu_context,
     resources_manager,
   ) or_return
+  occlusion.init(
+    &self.occlusion,
+    gpu_context,
+    resources_manager,
+    swapchain_extent.width,
+    swapchain_extent.height,
+  ) or_return
+
+  // Enable occlusion culling
+  self.occlusion.enabled = true
 
   self.main_render_target_index = -1
   self.render_targets = make([dynamic]targets.RenderTarget, 0)
@@ -293,6 +305,7 @@ renderer_shutdown :: proc(
   lighting.shutdown(&self.lighting, device, command_pool, resources_manager)
   geometry_pass.shutdown(&self.geometry, device, command_pool)
   shadow.shutdown(&self.shadow, device, command_pool)
+  occlusion.shutdown(&self.occlusion, device)
 }
 
 resize :: proc(
@@ -325,6 +338,12 @@ resize :: proc(
     extent.width,
     extent.height,
     dpi_scale,
+  ) or_return
+  occlusion.recreate_pyramid(
+    &self.occlusion,
+    gpu_context,
+    extent.width,
+    extent.height,
   ) or_return
   return .SUCCESS
 }
@@ -772,6 +791,107 @@ record_geometry_pass :: proc(
     command_stride,
   )
   geometry_pass.end_depth_prepass(command_buffer)
+
+  // Build depth pyramid after depth prepass
+  depth_texture := targets.get_depth_texture(target, frame_index)
+  depth_image := resources.get(resources_manager.image_2d_buffers, depth_texture)
+
+  // Transition depth to shader read
+  depth_barrier_to_read := vk.ImageMemoryBarrier2 {
+    sType               = .IMAGE_MEMORY_BARRIER_2,
+    srcStageMask        = {.LATE_FRAGMENT_TESTS},
+    srcAccessMask       = {.DEPTH_STENCIL_ATTACHMENT_WRITE},
+    dstStageMask        = {.COMPUTE_SHADER},
+    dstAccessMask       = {.SHADER_READ},
+    oldLayout           = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+    newLayout           = .SHADER_READ_ONLY_OPTIMAL,
+    srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    image               = depth_image.image,
+    subresourceRange    = {
+      aspectMask     = {.DEPTH},
+      baseMipLevel   = 0,
+      levelCount     = 1,
+      baseArrayLayer = 0,
+      layerCount     = 1,
+    },
+  }
+
+  pyramid_barrier_to_general := vk.ImageMemoryBarrier2 {
+    sType               = .IMAGE_MEMORY_BARRIER_2,
+    srcStageMask        = {.TOP_OF_PIPE},
+    srcAccessMask       = {},
+    dstStageMask        = {.COMPUTE_SHADER},
+    dstAccessMask       = {.SHADER_WRITE},
+    oldLayout           = .UNDEFINED,
+    newLayout           = .GENERAL,
+    srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    image               = self.occlusion.pyramid_image.image,
+    subresourceRange    = {
+      aspectMask     = {.COLOR},
+      baseMipLevel   = 0,
+      levelCount     = self.occlusion.pyramid_levels,
+      baseArrayLayer = 0,
+      layerCount     = 1,
+    },
+  }
+
+  barriers := [?]vk.ImageMemoryBarrier2{depth_barrier_to_read, pyramid_barrier_to_general}
+  dependency_info := vk.DependencyInfo {
+    sType                   = .DEPENDENCY_INFO,
+    imageMemoryBarrierCount = len(barriers),
+    pImageMemoryBarriers    = raw_data(barriers[:]),
+  }
+  vk.CmdPipelineBarrier2(command_buffer, &dependency_info)
+
+  // Build pyramid
+  occlusion.build_pyramid(
+    &self.occlusion,
+    gpu_context,
+    resources_manager,
+    command_buffer,
+    depth_texture,
+  )
+
+  // Dispatch occlusion culling compute shader
+  occlusion.dispatch_occlusion_cull(
+    &self.occlusion,
+    gpu_context,
+    resources_manager,
+    command_buffer,
+    target.camera,
+    world_state.visibility.node_count,
+  )
+
+  // Transition depth back to depth attachment
+  depth_barrier_back := vk.ImageMemoryBarrier2 {
+    sType               = .IMAGE_MEMORY_BARRIER_2,
+    srcStageMask        = {.COMPUTE_SHADER},
+    srcAccessMask       = {.SHADER_READ},
+    dstStageMask        = {.EARLY_FRAGMENT_TESTS},
+    dstAccessMask       = {.DEPTH_STENCIL_ATTACHMENT_READ},
+    oldLayout           = .SHADER_READ_ONLY_OPTIMAL,
+    newLayout           = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+    srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    image               = depth_image.image,
+    subresourceRange    = {
+      aspectMask     = {.DEPTH},
+      baseMipLevel   = 0,
+      levelCount     = 1,
+      baseArrayLayer = 0,
+      layerCount     = 1,
+    },
+  }
+
+  dependency_info_back := vk.DependencyInfo {
+    sType                   = .DEPENDENCY_INFO,
+    imageMemoryBarrierCount = 1,
+    pImageMemoryBarriers    = &depth_barrier_back,
+  }
+  vk.CmdPipelineBarrier2(command_buffer, &dependency_info_back)
+
   geometry_pass.begin_pass(
     target,
     command_buffer,

@@ -20,6 +20,7 @@ import "render/targets"
 import "render/particles"
 import "render/text"
 import "render/debug_ui"
+import "render/occlusion"
 import "vendor:glfw"
 import mu "vendor:microui"
 import vk "vendor:vulkan"
@@ -36,6 +37,7 @@ MOUSE_SENSITIVITY_Y :: 0.005
 SCROLL_SENSITIVITY :: 0.5
 MAX_CONSECUTIVE_RENDER_ERROR_COUNT_ALLOWED :: 20
 USE_PARALLEL_UPDATE :: true // Set to false to disable threading for debugging
+DEBUG_DEPTH_PYRAMID :: false
 
 g_context: runtime.Context
 
@@ -571,6 +573,13 @@ render :: proc(self: ^Engine) -> vk.Result {
     command_buffer,
     self.swapchain.format.format,
   )
+  // Update node bounding spheres for occlusion culling
+  occlusion.update_node_bounds(
+    &self.render.occlusion,
+    &self.resource_manager,
+    self.world.visibility.node_count,
+  )
+
   record_shadow_pass(
     &self.render,
     self.frame_index,
@@ -660,6 +669,88 @@ render :: proc(self: ^Engine) -> vk.Result {
   )
   debug_ui.render(&self.render.ui, command_buffer)
   debug_ui.end_pass(&self.render.ui, command_buffer)
+
+when DEBUG_DEPTH_PYRAMID {
+  swapchain_to_general := vk.ImageMemoryBarrier2 {
+    sType               = .IMAGE_MEMORY_BARRIER_2,
+    srcStageMask        = {.COLOR_ATTACHMENT_OUTPUT},
+    srcAccessMask       = {.COLOR_ATTACHMENT_WRITE},
+    dstStageMask        = {.COMPUTE_SHADER},
+    dstAccessMask       = {.SHADER_WRITE},
+    oldLayout           = .COLOR_ATTACHMENT_OPTIMAL,
+    newLayout           = .GENERAL,
+    srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    image               = self.swapchain.images[self.swapchain.image_index],
+    subresourceRange    = {
+      aspectMask     = {.COLOR},
+      baseMipLevel   = 0,
+      levelCount     = 1,
+      baseArrayLayer = 0,
+      layerCount     = 1,
+    },
+  }
+  pyramid_barrier := vk.ImageMemoryBarrier2 {
+    sType               = .IMAGE_MEMORY_BARRIER_2,
+    srcStageMask        = {.COMPUTE_SHADER},
+    srcAccessMask       = {.SHADER_WRITE},
+    dstStageMask        = {.COMPUTE_SHADER},
+    dstAccessMask       = {.SHADER_READ},
+    oldLayout           = .GENERAL,
+    newLayout           = .GENERAL,
+    srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    image               = self.render.occlusion.pyramid_image.image,
+    subresourceRange    = {
+      aspectMask     = {.COLOR},
+      baseMipLevel   = 0,
+      levelCount     = self.render.occlusion.pyramid_levels,
+      baseArrayLayer = 0,
+      layerCount     = 1,
+    },
+  }
+  barriers_pre := [?]vk.ImageMemoryBarrier2{swapchain_to_general, pyramid_barrier}
+  dep_info_pre := vk.DependencyInfo {
+    sType                   = .DEPENDENCY_INFO,
+    imageMemoryBarrierCount = len(barriers_pre),
+    pImageMemoryBarriers    = raw_data(barriers_pre[:]),
+  }
+  vk.CmdPipelineBarrier2(command_buffer, &dep_info_pre)
+  occlusion.visualize_pyramid(
+    &self.render.occlusion,
+    &self.gpu_context,
+    command_buffer,
+    self.swapchain.views[self.swapchain.image_index],
+    self.swapchain.extent.width,
+    self.swapchain.extent.height,
+  )
+  swapchain_to_present := vk.ImageMemoryBarrier2 {
+    sType               = .IMAGE_MEMORY_BARRIER_2,
+    srcStageMask        = {.COMPUTE_SHADER},
+    srcAccessMask       = {.SHADER_WRITE},
+    dstStageMask        = {.BOTTOM_OF_PIPE},
+    dstAccessMask       = {},
+    oldLayout           = .GENERAL,
+    newLayout           = .PRESENT_SRC_KHR,
+    srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    image               = self.swapchain.images[self.swapchain.image_index],
+    subresourceRange    = {
+      aspectMask     = {.COLOR},
+      baseMipLevel   = 0,
+      levelCount     = 1,
+      baseArrayLayer = 0,
+      layerCount     = 1,
+    },
+  }
+  dep_info_present := vk.DependencyInfo {
+    sType                   = .DEPENDENCY_INFO,
+    imageMemoryBarrierCount = 1,
+    pImageMemoryBarriers    = &swapchain_to_present,
+  }
+  vk.CmdPipelineBarrier2(command_buffer, &dep_info_present)
+}
+
   gpu.transition_image_to_present(
     command_buffer,
     self.swapchain.images[self.swapchain.image_index],
@@ -672,6 +763,19 @@ render :: proc(self: ^Engine) -> vk.Result {
     self.frame_index,
   ) or_return
   self.frame_index = (self.frame_index + 1) % MAX_FRAMES_IN_FLIGHT
+
+  // Debug: Log occlusion culling statistics
+  if self.render.occlusion.enabled {
+    visible, total := occlusion.get_visibility_stats(
+      &self.render.occlusion,
+      self.world.visibility.node_count,
+    )
+    log.infof("Occlusion: %d/%d nodes visible (%.1f%% culled)", visible, total, 100.0 * f32(total - visible) / f32(total))
+  }
+
+  // Swap occlusion visibility buffers for next frame
+  occlusion.swap_visibility_buffers(&self.render.occlusion)
+
   process_pending_deletions(self)
   self.last_render_timestamp = time.now()
   return .SUCCESS

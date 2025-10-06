@@ -1,0 +1,121 @@
+#version 450
+
+// Occlusion culling compute shader
+// Tests objects against depth pyramid to determine visibility
+
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+// Push constants with camera/culling parameters
+layout(push_constant) uniform PushConstants {
+    mat4 view;
+    float P00, P11, znear, zfar;
+    float pyramidWidth, pyramidHeight;
+    uint nodeCount;
+    uint occlusionEnabled;
+};
+
+// Input: node data (AABB/bounds)
+layout(binding = 0) readonly buffer NodeData {
+    vec4 nodeBounds[]; // xyz=center, w=radius (bounding sphere)
+};
+
+// Input: visibility from previous frame
+layout(binding = 1) readonly buffer VisibilityPrev {
+    uint visibilityPrev[];
+};
+
+// Output: visibility for current frame
+layout(binding = 2) writeonly buffer VisibilityCurr {
+    uint visibilityCurr[];
+};
+
+// Input: depth pyramid for occlusion testing
+layout(binding = 3) uniform sampler2D depthPyramid;
+
+// Project sphere to screen-space AABB
+// Returns true if visible, false if completely outside frustum
+bool projectSphere(vec3 center, float radius, float znear, float P00, float P11, out vec4 aabb) {
+    if (center.z < radius + znear) {
+        return false; // Too close to camera
+    }
+
+    vec2 cx = vec2(center.x, center.z);
+    vec2 vx = vec2(sqrt(dot(cx, cx) - radius * radius), radius);
+    vec2 minx = mat2(vx.x, vx.y, -vx.y, vx.x) * cx;
+    vec2 maxx = mat2(vx.x, -vx.y, vx.y, vx.x) * cx;
+
+    vec2 cy = vec2(center.y, center.z);
+    vec2 vy = vec2(sqrt(dot(cy, cy) - radius * radius), radius);
+    vec2 miny = mat2(vy.x, vy.y, -vy.y, vy.x) * cy;
+    vec2 maxy = mat2(vy.x, -vy.y, vy.y, vy.x) * cy;
+
+    aabb = vec4(
+        minx.x / minx.y * P00,
+        miny.x / miny.y * P11,
+        maxx.x / maxx.y * P00,
+        maxy.x / maxy.y * P11
+    );
+
+    // Convert from NDC [-1,1] to UV [0,1]
+    aabb = aabb.xwzy * vec4(0.5, -0.5, 0.5, -0.5) + vec4(0.5);
+
+    return true;
+}
+
+void main() {
+    uint nodeIndex = gl_GlobalInvocationID.x;
+
+    if (nodeIndex >= nodeCount) {
+        return;
+    }
+
+    // Get node bounding sphere
+    vec4 boundingSphere = nodeBounds[nodeIndex];
+    vec3 worldCenter = boundingSphere.xyz;
+    float radius = boundingSphere.w;
+
+    // Transform to view space
+    vec3 center = (view * vec4(worldCenter, 1.0)).xyz;
+
+    bool visible = true;
+
+    // Frustum culling (simple Z-plane test)
+    // In view space, objects in front of camera have negative Z
+    // znear and zfar are positive distances from camera
+    visible = visible && center.z + radius > -zfar && center.z - radius < -znear;
+
+    if (visible && occlusionEnabled == 1) {
+        // Project sphere to screen-space AABB
+        vec4 aabb;
+        if (projectSphere(center, radius, znear, P00, P11, aabb)) {
+            // Calculate screen-space size in pixels
+            float width = (aabb.z - aabb.x) * pyramidWidth;
+            float height = (aabb.w - aabb.y) * pyramidHeight;
+
+            // Pick mip level based on size (conservative)
+            float level = ceil(log2(max(width, height)));
+
+            // Sample depth pyramid at center of AABB
+            vec2 uv = (aabb.xy + aabb.zw) * 0.5;
+            float minDepth = textureLod(depthPyramid, uv, level).x;
+
+            // Calculate object depth (near surface of sphere)
+            // center.z is negative, near surface is center.z + radius (closer to 0)
+            // Distance from camera to near surface
+            float sphereDistance = max(-center.z - radius, 0.001);
+
+            // Convert view-space distance to depth buffer value
+            // Standard Vulkan depth: depth = (far / (far - near)) * (1 - near / distance)
+            float objectDepth = (zfar / (zfar - znear)) * (1.0 - znear / sphereDistance);
+
+            // Occlusion test: if object is farther than existing geometry, it's occluded
+            // Depth buffer: 0 = near, 1 = far, so larger depth = farther
+            // minDepth from pyramid is the MINIMUM (closest) depth in that region
+            // Object is visible if it's closer than what's in the pyramid
+            visible = visible && objectDepth < minDepth;
+        }
+    }
+
+    // Write visibility
+    visibilityCurr[nodeIndex] = visible ? 1 : 0;
+}
