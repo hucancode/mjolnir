@@ -425,6 +425,22 @@ dispatch_visibility :: proc(
   )
 }
 
+bind_visibility_occlusion_buffers :: proc(
+  world: ^World,
+  gpu_context: ^gpu.GPUContext,
+  prev_buffer: vk.Buffer,
+  curr_buffer: vk.Buffer,
+  buffer_size: vk.DeviceSize,
+) {
+  visibility_system_bind_occlusion_buffers(
+    &world.visibility,
+    gpu_context,
+    prev_buffer,
+    curr_buffer,
+    buffer_size,
+  )
+}
+
 despawn :: proc(world: ^World, handle: resources.Handle) -> bool {
   node := resources.get(world.nodes, handle)
   if node == nil {

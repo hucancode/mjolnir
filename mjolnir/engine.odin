@@ -177,6 +177,14 @@ init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
     get_window_dpi(self.window),
   ) or_return
 
+  world.bind_visibility_occlusion_buffers(
+    &self.world,
+    &self.gpu_context,
+    self.render.occlusion.visibility_prev.buffer,
+    self.render.occlusion.visibility_curr.buffer,
+    vk.DeviceSize(self.render.occlusion.visibility_prev.bytes_count),
+  )
+
   // Initialize main render target with default camera settings
   main_target_idx, main_target_ok := renderer_add_render_target(
     &self.render,
@@ -775,6 +783,14 @@ when DEBUG_DEPTH_PYRAMID {
 
   // Swap occlusion visibility buffers for next frame
   occlusion.swap_visibility_buffers(&self.render.occlusion)
+
+  world.bind_visibility_occlusion_buffers(
+    &self.world,
+    &self.gpu_context,
+    self.render.occlusion.visibility_prev.buffer,
+    self.render.occlusion.visibility_curr.buffer,
+    vk.DeviceSize(self.render.occlusion.visibility_prev.bytes_count),
+  )
 
   process_pending_deletions(self)
   self.last_render_timestamp = time.now()

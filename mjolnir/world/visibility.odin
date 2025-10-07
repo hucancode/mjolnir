@@ -31,18 +31,30 @@ VisibilityFrame :: struct {
   tasks: [VISIBILITY_TASK_COUNT]VisibilityTask,
 }
 
+VisibilityOcclusionMode :: enum u32 {
+  NONE,
+  EARLY,
+  LATE,
+}
+
 VisibilityRequest :: struct {
-  camera_index: u32,
-  include_flags: resources.NodeFlagSet,
-  exclude_flags: resources.NodeFlagSet,
+  camera_index:             u32,
+  include_flags:            resources.NodeFlagSet,
+  exclude_flags:            resources.NodeFlagSet,
+  occlusion_mode:           VisibilityOcclusionMode,
+  write_occlusion_feedback: bool,
+  skip_prev_visible:        bool,
 }
 
 VisibilityPushConstants :: struct {
-  camera_index:  u32,
-  node_count:    u32,
-  max_draws:     u32,
-  include_flags: resources.NodeFlagSet,
-  exclude_flags: resources.NodeFlagSet,
+  camera_index:       u32,
+  node_count:         u32,
+  max_draws:          u32,
+  include_flags:      resources.NodeFlagSet,
+  exclude_flags:      resources.NodeFlagSet,
+  occlusion_mode:     u32,
+  occlusion_write:    u32,
+  occlusion_skip_prev: u32,
 }
 
 VisibilityResult :: struct {
@@ -58,6 +70,10 @@ VisibilitySystem :: struct {
   frames:                [resources.MAX_FRAMES_IN_FLIGHT]VisibilityFrame,
   max_draws:             u32,
   node_count:            u32,
+  occlusion_prev_buffer: vk.Buffer,
+  occlusion_curr_buffer: vk.Buffer,
+  occlusion_buffer_size: vk.DeviceSize,
+  occlusion_buffers_bound: bool,
 }
 
 draw_command_stride :: proc() -> u32 {
@@ -128,6 +144,18 @@ visibility_system_init :: proc(
     },
     {
       binding         = 5,
+      descriptorType  = .STORAGE_BUFFER,
+      descriptorCount = 1,
+      stageFlags      = {.COMPUTE},
+    },
+    {
+      binding         = 6,
+      descriptorType  = .STORAGE_BUFFER,
+      descriptorCount = 1,
+      stageFlags      = {.COMPUTE},
+    },
+    {
+      binding         = 7,
       descriptorType  = .STORAGE_BUFFER,
       descriptorCount = 1,
       stageFlags      = {.COMPUTE},
@@ -234,6 +262,14 @@ visibility_system_init :: proc(
         buffer = buffers.draw_commands.buffer,
         range  = vk.DeviceSize(buffers.draw_commands.bytes_count),
       }
+      occlusion_prev_info := vk.DescriptorBufferInfo {
+        buffer = buffers.draw_commands.buffer,
+        range  = vk.DeviceSize(buffers.draw_commands.bytes_count),
+      }
+      occlusion_curr_info := vk.DescriptorBufferInfo {
+        buffer = buffers.draw_commands.buffer,
+        range  = vk.DeviceSize(buffers.draw_commands.bytes_count),
+      }
 
       writes := [?]vk.WriteDescriptorSet {
         {
@@ -284,6 +320,22 @@ visibility_system_init :: proc(
           descriptorCount = 1,
           pBufferInfo     = &command_info,
         },
+        {
+          sType           = .WRITE_DESCRIPTOR_SET,
+          dstSet          = buffers.descriptor_set,
+          dstBinding      = 6,
+          descriptorType  = .STORAGE_BUFFER,
+          descriptorCount = 1,
+          pBufferInfo     = &occlusion_prev_info,
+        },
+        {
+          sType           = .WRITE_DESCRIPTOR_SET,
+          dstSet          = buffers.descriptor_set,
+          dstBinding      = 7,
+          descriptorType  = .STORAGE_BUFFER,
+          descriptorCount = 1,
+          pBufferInfo     = &occlusion_curr_info,
+        },
       }
 
       vk.UpdateDescriptorSets(
@@ -330,6 +382,74 @@ visibility_system_shutdown :: proc(
 
 visibility_system_set_node_count :: proc(system: ^VisibilitySystem, count: u32) {
   system.node_count = min(count, system.max_draws)
+}
+
+visibility_system_bind_occlusion_buffers :: proc(
+  system: ^VisibilitySystem,
+  gpu_context: ^gpu.GPUContext,
+  prev_buffer: vk.Buffer,
+  curr_buffer: vk.Buffer,
+  buffer_size: vk.DeviceSize,
+) {
+  if system == nil || gpu_context == nil {
+    return
+  }
+  if prev_buffer == 0 || curr_buffer == 0 || buffer_size == 0 {
+    system.occlusion_buffers_bound = false
+    return
+  }
+
+  system.occlusion_prev_buffer = prev_buffer
+  system.occlusion_curr_buffer = curr_buffer
+  system.occlusion_buffer_size = buffer_size
+
+  for frame_idx in 0 ..< resources.MAX_FRAMES_IN_FLIGHT {
+    frame := &system.frames[frame_idx]
+    for task_idx in 0 ..< VISIBILITY_TASK_COUNT {
+      buffers := &frame.tasks[task_idx]
+
+      prev_info := vk.DescriptorBufferInfo {
+        buffer = prev_buffer,
+        offset = 0,
+        range  = buffer_size,
+      }
+
+      curr_info := vk.DescriptorBufferInfo {
+        buffer = curr_buffer,
+        offset = 0,
+        range  = buffer_size,
+      }
+
+      writes := [?]vk.WriteDescriptorSet {
+        {
+          sType           = .WRITE_DESCRIPTOR_SET,
+          dstSet          = buffers.descriptor_set,
+          dstBinding      = 6,
+          descriptorType  = .STORAGE_BUFFER,
+          descriptorCount = 1,
+          pBufferInfo     = &prev_info,
+        },
+        {
+          sType           = .WRITE_DESCRIPTOR_SET,
+          dstSet          = buffers.descriptor_set,
+          dstBinding      = 7,
+          descriptorType  = .STORAGE_BUFFER,
+          descriptorCount = 1,
+          pBufferInfo     = &curr_info,
+        },
+      }
+
+      vk.UpdateDescriptorSets(
+        gpu_context.device,
+        len(writes),
+        raw_data(writes[:]),
+        0,
+        nil,
+      )
+    }
+  }
+
+  system.occlusion_buffers_bound = true
 }
 
 visibility_system_get_visible_count :: proc(
@@ -432,12 +552,30 @@ visibility_system_dispatch :: proc(
     nil,
   )
 
+  occlusion_mode := request.occlusion_mode
+  occlusion_write: u32 = 0
+  if request.write_occlusion_feedback do occlusion_write = 1
+  occlusion_skip_prev: u32 = 0
+  if request.skip_prev_visible do occlusion_skip_prev = 1
+
+  if occlusion_mode != .NONE && !system.occlusion_buffers_bound {
+    log.warn(
+      "visibility_system_dispatch: occlusion buffers not bound, disabling occlusion",
+    )
+    occlusion_mode = .NONE
+    occlusion_write = 0
+    occlusion_skip_prev = 0
+  }
+
   push_constants := VisibilityPushConstants {
-    camera_index  = request.camera_index,
-    node_count    = system.node_count,
-    max_draws     = system.max_draws,
-    include_flags = request.include_flags,
-    exclude_flags = request.exclude_flags,
+    camera_index       = request.camera_index,
+    node_count         = system.node_count,
+    max_draws          = system.max_draws,
+    include_flags      = request.include_flags,
+    exclude_flags      = request.exclude_flags,
+    occlusion_mode     = u32(occlusion_mode),
+    occlusion_write    = occlusion_write,
+    occlusion_skip_prev = occlusion_skip_prev,
   }
 
   vk.CmdPushConstants(
