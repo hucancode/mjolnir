@@ -60,7 +60,8 @@ void main() {
     vec3 worldCenter = boundingSphere.xyz;
     float radius = boundingSphere.w;
 
-    uint previousVisibility = visibilityCurr[nodeIndex];
+    uint prevFrameVisibility = visibilityPrev[nodeIndex];
+    uint earlyVisibility = visibilityCurr[nodeIndex];
 
     if (radius <= 0.0) {
         visibilityCurr[nodeIndex] = 0u;
@@ -70,7 +71,7 @@ void main() {
     Camera camera = cameras[params.cameraIndex];
 
     bool visible = true;
-    bool forcedVisible = previousVisibility != 0u;
+    bool forcedVisible = (prevFrameVisibility != 0u) || (earlyVisibility != 0u);
 
     // Frustum culling using world-space planes
     for (int i = 0; i < 6 && visible; ++i) {
@@ -150,7 +151,7 @@ void main() {
     float mipLevel = clamp(log2(maxDimension), 0.0, maxAvailableLevel);
 
     vec2 uvCenter = (uvMin + uvMax) * 0.5;
-    float maxDepth = textureLod(depthPyramid, uvCenter, mipLevel).x;
+    float minDepth = textureLod(depthPyramid, uvCenter, mipLevel).x;
 
     vec3 nearPointView = viewCenter;
     nearPointView.z += radius;
@@ -161,9 +162,15 @@ void main() {
     }
 
     float objectDepth = clipNear.z / clipNear.w;
+    objectDepth = clamp(objectDepth, 0.0, 1.0);
 
-    const float depthBias = 5e-3;
-    visible = objectDepth <= maxDepth + depthBias;
+    if (minDepth <= 1e-5) {
+        visibilityCurr[nodeIndex] = 1u;
+        return;
+    }
+
+    const float depthBias = 1e-2;
+    visible = objectDepth <= minDepth + depthBias;
 
     visibilityCurr[nodeIndex] = visible ? 1u : 0u;
 }

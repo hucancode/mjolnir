@@ -52,7 +52,8 @@ OcclusionSystem :: struct {
 }
 
 DepthReducePushConstants :: struct {
-  image_size: [2]f32,
+  image_size:  [2]f32,
+  source_size: [2]f32,
 }
 
 DebugPushConstants :: struct {
@@ -142,15 +143,9 @@ init :: proc(
   // Create depth pyramid resources
   recreate_pyramid(system, gpu_context, width, height) or_return
 
-  // Create sampler with MAX reduction mode so each mip stores the farthest depth
-  sampler_reduction_info := vk.SamplerReductionModeCreateInfo {
-    sType         = .SAMPLER_REDUCTION_MODE_CREATE_INFO,
-    reductionMode = .MAX,
-  }
-
+  // Create sampler used for manual min reduction in the compute shader
   sampler_info := vk.SamplerCreateInfo {
     sType                   = .SAMPLER_CREATE_INFO,
-    pNext                   = &sampler_reduction_info,
     magFilter               = .LINEAR,
     minFilter               = .LINEAR,
     mipmapMode              = .NEAREST,
@@ -583,8 +578,19 @@ build_pyramid :: proc(
     level_width := max(1, system.pyramid_width >> level)
     level_height := max(1, system.pyramid_height >> level)
 
+    source_width: u32
+    source_height: u32
+    if level == 0 {
+      source_width = depth_image.width
+      source_height = depth_image.height
+    } else {
+      source_width = max(1, system.pyramid_width >> (level - 1))
+      source_height = max(1, system.pyramid_height >> (level - 1))
+    }
+
     push_constants := DepthReducePushConstants {
-      image_size = {f32(level_width), f32(level_height)},
+      image_size  = {f32(level_width), f32(level_height)},
+      source_size = {f32(source_width), f32(source_height)},
     }
 
     vk.CmdPushConstants(
