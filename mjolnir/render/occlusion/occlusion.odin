@@ -142,10 +142,10 @@ init :: proc(
   // Create depth pyramid resources
   recreate_pyramid(system, gpu_context, width, height) or_return
 
-  // Create sampler with MIN reduction mode
+  // Create sampler with MAX reduction mode so each mip stores the farthest depth
   sampler_reduction_info := vk.SamplerReductionModeCreateInfo {
     sType         = .SAMPLER_REDUCTION_MODE_CREATE_INFO,
-    reductionMode = .MIN,
+    reductionMode = .MAX,
   }
 
   sampler_info := vk.SamplerCreateInfo {
