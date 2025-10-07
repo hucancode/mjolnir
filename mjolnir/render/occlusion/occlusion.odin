@@ -924,50 +924,32 @@ update_node_bounds :: proc(
     world_matrix := gpu.staged_buffer_get(&resources_manager.world_matrix_buffer, i)
     if world_matrix == nil do continue
 
-    // Transform AABB to world space and compute bounding sphere
-    aabb_min := mesh_data.aabb_min
-    aabb_max := mesh_data.aabb_max
+    // Transform local bounding sphere to world space
+    local_center := mesh_data.bounding_sphere_center
+    local_radius := mesh_data.bounding_sphere_radius
 
-    // Get 8 corners of AABB
-    corners := [8][3]f32 {
-      {aabb_min.x, aabb_min.y, aabb_min.z},
-      {aabb_max.x, aabb_min.y, aabb_min.z},
-      {aabb_min.x, aabb_max.y, aabb_min.z},
-      {aabb_max.x, aabb_max.y, aabb_min.z},
-      {aabb_min.x, aabb_min.y, aabb_max.z},
-      {aabb_max.x, aabb_min.y, aabb_max.z},
-      {aabb_min.x, aabb_max.y, aabb_max.z},
-      {aabb_max.x, aabb_max.y, aabb_max.z},
-    }
+    world_pos := world_matrix^ * [4]f32{local_center.x, local_center.y, local_center.z, 1.0}
+    world_center := world_pos.xyz / world_pos.w
 
-    // Transform corners to world space
-    world_corners := [8][3]f32{}
-    for corner, j in corners {
-      world_pos := world_matrix^ * [4]f32{corner.x, corner.y, corner.z, 1.0}
-      world_corners[j] = world_pos.xyz / world_pos.w
-    }
+    world_radius := f32(0)
+    if local_radius > 0 {
+      basis_x := world_matrix^[0].xyz
+      basis_y := world_matrix^[1].xyz
+      basis_z := world_matrix^[2].xyz
 
-    // Compute center of transformed AABB
-    center := [3]f32{0, 0, 0}
-    for corner in world_corners {
-      center += corner
-    }
-    center /= 8.0
+      scale_x_sq := basis_x.x * basis_x.x + basis_x.y * basis_x.y + basis_x.z * basis_x.z
+      scale_y_sq := basis_y.x * basis_y.x + basis_y.y * basis_y.y + basis_y.z * basis_y.z
+      scale_z_sq := basis_z.x * basis_z.x + basis_z.y * basis_z.y + basis_z.z * basis_z.z
 
-    // Compute radius as max distance from center to any corner
-    radius := f32(0)
-    for corner in world_corners {
-      dist_sq := (corner.x - center.x) * (corner.x - center.x) +
-                 (corner.y - center.y) * (corner.y - center.y) +
-                 (corner.z - center.z) * (corner.z - center.z)
-      dist := math.sqrt(dist_sq)
-      radius = max(radius, dist)
+      max_scale_sq := max(scale_x_sq, max(scale_y_sq, scale_z_sq))
+      radius_scale := math.sqrt(max_scale_sq)
+      world_radius = local_radius * radius_scale
     }
 
     // Write to node_bounds buffer (xyz=center, w=radius)
     bounds := gpu.data_buffer_get(&system.node_bounds, i)
     if bounds == nil do continue
-    bounds^ = [4]f32{center.x, center.y, center.z, radius}
+    bounds^ = [4]f32{world_center.x, world_center.y, world_center.z, world_radius}
   }
 }
 

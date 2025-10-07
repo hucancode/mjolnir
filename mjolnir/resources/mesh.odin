@@ -35,6 +35,8 @@ MeshData :: struct {
   vertex_skinning_offset: u32,
   flags:                 MeshFlagSet,
   _padding:              u32,
+  bounding_sphere_center: [3]f32,
+  bounding_sphere_radius: f32,
 }
 
 Skinning :: struct {
@@ -84,6 +86,19 @@ mesh_init :: proc(
   defer geometry.delete_geometry(data)
   self.aabb_min = data.aabb.min
   self.aabb_max = data.aabb.max
+
+  center := [3]f32{
+    (self.aabb_min.x + self.aabb_max.x) * 0.5,
+    (self.aabb_min.y + self.aabb_max.y) * 0.5,
+    (self.aabb_min.z + self.aabb_max.z) * 0.5,
+  }
+  extent := [3]f32{
+    self.aabb_max.x - center.x,
+    self.aabb_max.y - center.y,
+    self.aabb_max.z - center.z,
+  }
+  self.bounding_sphere_center = center
+  self.bounding_sphere_radius = linalg.length(extent)
   self.vertex_allocation = manager_allocate_vertices(
     manager,
     gpu_context,

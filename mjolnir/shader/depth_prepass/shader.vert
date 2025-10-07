@@ -44,6 +44,8 @@ struct MeshData {
     uint vertex_skinning_offset;
     uint flags;
     uint _padding;
+    vec3 bounding_sphere_center;
+    float bounding_sphere_radius;
 };
 
 layout(set = 6, binding = 0) readonly buffer MeshBuffer {
