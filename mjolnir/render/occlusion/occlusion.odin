@@ -4,6 +4,7 @@ import "../../geometry"
 import "../../gpu"
 import "../../resources"
 import "../targets"
+import "../../interval_tree"
 import "core:log"
 import "core:math"
 import "core:time"
@@ -34,6 +35,9 @@ OcclusionSystem :: struct {
   last_cull_count:     u32,
   node_bounds_dirty:   bool,
   node_bounds_count:   u32,
+  node_bounds_barrier_offset: vk.DeviceSize,
+  node_bounds_barrier_size:   vk.DeviceSize,
+  bounds_initialized:         bool,
 
   // Compute shaders
   depth_reduce_pipeline:        vk.Pipeline,
@@ -143,6 +147,9 @@ init :: proc(
   system.max_nodes = resources.MAX_NODES_IN_SCENE
   system.enabled = false
   system.pyramid_layout = .UNDEFINED
+  system.node_bounds_barrier_offset = 0
+  system.node_bounds_barrier_size = 0
+  system.bounds_initialized = false
 
   // Create visibility buffers
   system.visibility_prev = gpu.create_local_buffer(
@@ -975,6 +982,8 @@ update_node_bounds :: proc(
   command_buffer: vk.CommandBuffer,
 ) {
   system.node_bounds_dirty = false
+  system.node_bounds_barrier_offset = 0
+  system.node_bounds_barrier_size = 0
   stats := &system.stats
   stats.node_count = min(node_count, system.max_nodes)
   stats.dispatch_groups = 0
@@ -989,6 +998,7 @@ update_node_bounds :: proc(
   if system.node_bounds.buffer == 0 do return
   if system.node_bounds_staging.buffer == 0 do return
   if system.node_bounds_staging.mapped == nil do return
+  prev_count := system.node_bounds_count
   system.node_bounds_count = 0
 
   // Safety check: ensure staged buffers are initialized and mapped
@@ -1019,70 +1029,192 @@ update_node_bounds :: proc(
   if safe_count > u32(len(bounds_all)) do safe_count = u32(len(bounds_all))
   stats.node_count = safe_count
 
-  for i in 0 ..< safe_count {
-    bounds_all[i] = [4]f32{0, 0, 0, 0}
+  dirty_ranges := make([dynamic]interval_tree.Interval, 0, context.temp_allocator)
+  world_dirty := interval_tree.get_ranges(&resources_manager.world_matrix_buffer.dirty_indices)
+  node_dirty := interval_tree.get_ranges(&resources_manager.node_data_buffer.dirty_indices)
+
+  clamp_range :: proc(range: interval_tree.Interval, limit: int) -> (interval_tree.Interval, bool) {
+    start := range.start
+    end := range.end
+    if limit >= 0 {
+      if start > limit do return {}, false
+      if end > limit do end = limit
+    }
+    if end < start do return {}, false
+    return interval_tree.Interval{start, end}, true
   }
 
-  for i in 0 ..< safe_count {
-    node_data := node_data_all[i]
+  limit := int(safe_count) - 1
+  for range in world_dirty {
+    clamped, ok := clamp_range(range, limit)
+    if ok do append(&dirty_ranges, clamped)
+  }
+  for range in node_dirty {
+    clamped, ok := clamp_range(range, limit)
+    if ok do append(&dirty_ranges, clamped)
+  }
 
-    if node_data.mesh_id >= u32(len(mesh_data_all)) do continue
+  if !system.bounds_initialized && safe_count > 0 {
+    append(&dirty_ranges, interval_tree.Interval{0, int(safe_count) - 1})
+  }
 
-    mesh_data := mesh_data_all[node_data.mesh_id]
-    world_matrix := world_matrices[i]
+  if safe_count > prev_count {
+    append(&dirty_ranges, interval_tree.Interval{int(prev_count), int(safe_count) - 1})
+  }
 
-    aabb_min := mesh_data.aabb_min
-    aabb_max := mesh_data.aabb_max
+  if prev_count > safe_count {
+    shrink_end := int(prev_count) - 1
+    shrink_start := int(safe_count)
+    if shrink_end >= shrink_start {
+      max_index := int(system.max_nodes) - 1
+      if shrink_start > max_index do shrink_start = max_index
+      if shrink_end > max_index do shrink_end = max_index
+      if shrink_end >= shrink_start {
+        append(&dirty_ranges, interval_tree.Interval{shrink_start, shrink_end})
+      }
+    }
+  }
 
-    extents := [3]f32{
-      (aabb_max.x - aabb_min.x) * 0.5,
-      (aabb_max.y - aabb_min.y) * 0.5,
-      (aabb_max.z - aabb_min.z) * 0.5,
+  if len(dirty_ranges) == 0 {
+    system.node_bounds_count = safe_count
+    system.bounds_initialized = system.bounds_initialized || safe_count > 0
+    stats.bounds_cpu_time = time.since(start_time)
+    return
+  }
+
+  // Sort and merge ranges (dirty_ranges uses inclusive bounds)
+  for i in 0 ..< len(dirty_ranges) {
+    for j in i + 1 ..< len(dirty_ranges) {
+      if dirty_ranges[i].start > dirty_ranges[j].start {
+        dirty_ranges[i], dirty_ranges[j] = dirty_ranges[j], dirty_ranges[i]
+      }
+    }
+  }
+
+  merged_ranges := make([dynamic]interval_tree.Interval, 0, context.temp_allocator)
+  current := dirty_ranges[0]
+  for idx in 1 ..< len(dirty_ranges) {
+    next := dirty_ranges[idx]
+    if next.start <= current.end + 1 {
+      if next.end > current.end do current.end = next.end
+    } else {
+      append(&merged_ranges, current)
+      current = next
+    }
+  }
+  append(&merged_ranges, current)
+
+  element_size := vk.DeviceSize(size_of([4]f32))
+  copy_regions := make([dynamic]vk.BufferCopy, 0, context.temp_allocator)
+  min_dirty_index := merged_ranges[0].start
+  max_dirty_index := merged_ranges[0].end
+  total_updated := 0
+
+  for range in merged_ranges {
+    if range.start < min_dirty_index do min_dirty_index = range.start
+    if range.end > max_dirty_index do max_dirty_index = range.end
+
+    for i in range.start ..= range.end {
+      if i < 0 || i >= len(bounds_all) do continue
+      if i >= len(node_data_all) || i >= len(world_matrices) {
+        bounds_all[i] = [4]f32{0, 0, 0, 0}
+        total_updated += 1
+        continue
+      }
+
+      if i >= int(safe_count) {
+        bounds_all[i] = [4]f32{0, 0, 0, 0}
+        total_updated += 1
+        continue
+      }
+
+      node_data := node_data_all[i]
+      if node_data.mesh_id >= u32(len(mesh_data_all)) {
+        bounds_all[i] = [4]f32{0, 0, 0, 0}
+        total_updated += 1
+        continue
+      }
+
+      mesh_data := mesh_data_all[node_data.mesh_id]
+      aabb_min := mesh_data.aabb_min
+      aabb_max := mesh_data.aabb_max
+
+      extents := [3]f32{
+        (aabb_max.x - aabb_min.x) * 0.5,
+        (aabb_max.y - aabb_min.y) * 0.5,
+        (aabb_max.z - aabb_min.z) * 0.5,
+      }
+
+      if extents.x <= 0 && extents.y <= 0 && extents.z <= 0 {
+        bounds_all[i] = [4]f32{0, 0, 0, 0}
+        total_updated += 1
+        continue
+      }
+
+      center_local := [3]f32{
+        aabb_min.x + extents.x,
+        aabb_min.y + extents.y,
+        aabb_min.z + extents.z,
+      }
+
+      world_matrix := world_matrices[i]
+      world_center := world_matrix * [4]f32{center_local.x, center_local.y, center_local.z, 1.0}
+      center := world_center.xyz
+      if math.abs(world_center.w) > 0.00001 do center /= world_center.w
+
+      row0 := [3]f32{world_matrix[0, 0], world_matrix[0, 1], world_matrix[0, 2]}
+      row1 := [3]f32{world_matrix[1, 0], world_matrix[1, 1], world_matrix[1, 2]}
+      row2 := [3]f32{world_matrix[2, 0], world_matrix[2, 1], world_matrix[2, 2]}
+
+      extent_x := math.abs(row0.x) * extents.x + math.abs(row0.y) * extents.y + math.abs(row0.z) * extents.z
+      extent_y := math.abs(row1.x) * extents.x + math.abs(row1.y) * extents.y + math.abs(row1.z) * extents.z
+      extent_z := math.abs(row2.x) * extents.x + math.abs(row2.y) * extents.y + math.abs(row2.z) * extents.z
+
+      radius_sq := extent_x * extent_x + extent_y * extent_y + extent_z * extent_z
+      radius := math.sqrt(radius_sq)
+
+      bounds_all[i] = [4]f32{center.x, center.y, center.z, radius}
+      total_updated += 1
     }
 
-    if extents.x <= 0 && extents.y <= 0 && extents.z <= 0 do continue
-
-    center_local := [3]f32{
-      aabb_min.x + extents.x,
-      aabb_min.y + extents.y,
-      aabb_min.z + extents.z,
-    }
-
-    world_center := world_matrix * [4]f32{center_local.x, center_local.y, center_local.z, 1.0}
-    center := world_center.xyz
-    if math.abs(world_center.w) > 0.00001 do center /= world_center.w
-
-    // Compute conservative radius under affine transform by summing absolute column contributions
-    row0 := [3]f32{world_matrix[0, 0], world_matrix[0, 1], world_matrix[0, 2]}
-    row1 := [3]f32{world_matrix[1, 0], world_matrix[1, 1], world_matrix[1, 2]}
-    row2 := [3]f32{world_matrix[2, 0], world_matrix[2, 1], world_matrix[2, 2]}
-
-    extent_x := math.abs(row0.x) * extents.x + math.abs(row0.y) * extents.y + math.abs(row0.z) * extents.z
-    extent_y := math.abs(row1.x) * extents.x + math.abs(row1.y) * extents.y + math.abs(row1.z) * extents.z
-    extent_z := math.abs(row2.x) * extents.x + math.abs(row2.y) * extents.y + math.abs(row2.z) * extents.z
-
-    radius_sq := extent_x * extent_x + extent_y * extent_y + extent_z * extent_z
-    radius := math.sqrt(radius_sq)
-
-    bounds_all[i] = [4]f32{center.x, center.y, center.z, radius}
+    length := range.end - range.start + 1
+    if length <= 0 do continue
+    append(&copy_regions, vk.BufferCopy {
+      srcOffset = vk.DeviceSize(range.start) * element_size,
+      dstOffset = vk.DeviceSize(range.start) * element_size,
+      size      = vk.DeviceSize(length) * element_size,
+    })
   }
 
   stats.bounds_cpu_time = time.since(start_time)
 
-  copy_region := vk.BufferCopy {
-    size = vk.DeviceSize(safe_count * size_of([4]f32)),
+  if len(copy_regions) == 0 {
+    system.node_bounds_count = safe_count
+    system.bounds_initialized = system.bounds_initialized || safe_count > 0
+    return
   }
-  stats.bounds_upload_nodes = safe_count
-  stats.bounds_upload_bytes = u64(copy_region.size)
+
+  stats.bounds_upload_nodes = u32(total_updated)
+  stats.bounds_upload_bytes = u64(vk.DeviceSize(total_updated) * element_size)
+
   vk.CmdCopyBuffer(
     command_buffer,
     system.node_bounds_staging.buffer,
     system.node_bounds.buffer,
-    1,
-    &copy_region,
+    u32(len(copy_regions)),
+    raw_data(copy_regions[:]),
   )
+
   system.node_bounds_dirty = true
   system.node_bounds_count = safe_count
+  system.bounds_initialized = true
+
+  if min_dirty_index < 0 do min_dirty_index = 0
+  if max_dirty_index < min_dirty_index do max_dirty_index = min_dirty_index
+  dirty_count := max_dirty_index - min_dirty_index + 1
+  system.node_bounds_barrier_offset = vk.DeviceSize(min_dirty_index) * element_size
+  system.node_bounds_barrier_size = vk.DeviceSize(dirty_count) * element_size
+  stats.bounds_barrier_bytes = u64(system.node_bounds_barrier_size)
 }
 
 // Dispatch occlusion culling compute shader
@@ -1217,8 +1349,9 @@ dispatch_occlusion_cull :: proc(
   )
 
   if system.node_bounds_dirty {
-    bounds_size := vk.DeviceSize(u64(system.node_bounds_count) * u64(size_of([4]f32)))
+    bounds_size := system.node_bounds_barrier_size
     if bounds_size == 0 do bounds_size = vk.DeviceSize(system.node_bounds.bytes_count)
+    bounds_offset := system.node_bounds_barrier_offset
     bounds_barrier := vk.BufferMemoryBarrier2 {
       sType         = .BUFFER_MEMORY_BARRIER_2,
       srcStageMask  = {.TRANSFER},
@@ -1226,7 +1359,7 @@ dispatch_occlusion_cull :: proc(
       dstStageMask  = {.COMPUTE_SHADER},
       dstAccessMask = {.SHADER_READ},
       buffer        = system.node_bounds.buffer,
-      offset        = 0,
+      offset        = bounds_offset,
       size          = bounds_size,
     }
 
@@ -1238,6 +1371,8 @@ dispatch_occlusion_cull :: proc(
 
     vk.CmdPipelineBarrier2(command_buffer, &dependency_info_bounds)
     system.node_bounds_dirty = false
+    system.node_bounds_barrier_offset = 0
+    system.node_bounds_barrier_size = 0
     system.stats.bounds_barrier_bytes = u64(bounds_size)
   }
 
