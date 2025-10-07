@@ -1,7 +1,7 @@
 #version 450
 
 // Depth pyramid reduction shader
-// Performs 2x2 max-reduction to build hierarchical depth mipmap
+// Performs 2x2 min-reduction to build hierarchical depth mipmap
 // Based on Niagara implementation
 
 layout(local_size_x = 32, local_size_y = 32, local_size_z = 1) in;
@@ -11,6 +11,7 @@ layout(binding = 1) uniform sampler2D inImage;
 
 layout(push_constant) uniform PushConstants {
     vec2 imageSize;
+    vec2 sourceSize;
 };
 
 void main() {
@@ -21,10 +22,20 @@ void main() {
         return;
     }
 
-    // Sampler is set up to do max reduction with LINEAR filter
-    // This computes the maximum depth of a 2x2 texel quad from the previous level
-    vec2 uv = (vec2(pos) + vec2(0.5)) / imageSize;
-    float depth = texture(inImage, uv).x;
+    vec2 scale = sourceSize / imageSize;
+    vec2 base = (vec2(pos) + vec2(0.5)) * scale - vec2(0.5);
+    ivec2 baseCoord = ivec2(floor(base));
+    ivec2 maxCoord = max(ivec2(sourceSize) - ivec2(1), ivec2(0));
 
-    imageStore(outImage, ivec2(pos), vec4(depth));
+    float minDepth = 1.0;
+    for (int y = 0; y < 2; ++y) {
+        for (int x = 0; x < 2; ++x) {
+            ivec2 sampleCoord = baseCoord + ivec2(x, y);
+            sampleCoord = clamp(sampleCoord, ivec2(0), maxCoord);
+            float sampleDepth = texelFetch(inImage, sampleCoord, 0).x;
+            minDepth = min(minDepth, sampleDepth);
+        }
+    }
+
+    imageStore(outImage, ivec2(pos), vec4(minDepth));
 }
