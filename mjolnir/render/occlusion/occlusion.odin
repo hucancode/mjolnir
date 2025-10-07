@@ -6,6 +6,7 @@ import "../../resources"
 import "../targets"
 import "core:log"
 import "core:math"
+import "core:time"
 import vk "vendor:vulkan"
 
 // Occlusion culling using depth pyramid technique
@@ -55,6 +56,18 @@ OcclusionSystem :: struct {
   // State
   enabled:             bool,
   max_nodes:           u32,
+  stats:               OcclusionFrameStats,
+}
+
+OcclusionFrameStats :: struct {
+  node_count:                u32,
+  bounds_upload_nodes:       u32,
+  visibility_copy_nodes:     u32,
+  dispatch_groups:           u32,
+  bounds_upload_bytes:       u64,
+  bounds_barrier_bytes:      u64,
+  visibility_readback_bytes: u64,
+  bounds_cpu_time:           time.Duration,
 }
 
 DepthReducePushConstants :: struct {
@@ -227,6 +240,7 @@ init :: proc(
   system.debug_mip_level = 3
   system.last_cull_count = 0
   system.node_bounds_dirty = false
+  system.stats = OcclusionFrameStats{}
 
   log.info("Occlusion culling system initialized")
   return .SUCCESS
@@ -960,6 +974,15 @@ update_node_bounds :: proc(
   command_buffer: vk.CommandBuffer,
 ) {
   system.node_bounds_dirty = false
+  stats := &system.stats
+  stats.node_count = min(node_count, system.max_nodes)
+  stats.dispatch_groups = 0
+  stats.bounds_upload_nodes = 0
+  stats.bounds_upload_bytes = 0
+  stats.bounds_barrier_bytes = 0
+  stats.visibility_copy_nodes = 0
+  stats.visibility_readback_bytes = 0
+  stats.bounds_cpu_time = 0
   if !system.enabled do return
   if node_count == 0 do return
   if system.node_bounds.buffer == 0 do return
@@ -976,6 +999,13 @@ update_node_bounds :: proc(
 
   // Safety check: ensure node_count doesn't exceed buffer capacity
   safe_count := min(node_count, system.max_nodes)
+
+  if safe_count == 0 {
+    system.node_bounds_dirty = false
+    return
+  }
+
+  start_time := time.now()
 
   for i in 0 ..< safe_count {
     // Get node data
@@ -1039,14 +1069,13 @@ update_node_bounds :: proc(
     bounds^ = [4]f32{center.x, center.y, center.z, radius}
   }
 
-  if safe_count == 0 {
-    system.node_bounds_dirty = false
-    return
-  }
+  stats.bounds_cpu_time = time.since(start_time)
 
   copy_region := vk.BufferCopy {
     size = vk.DeviceSize(safe_count * size_of([4]f32)),
   }
+  stats.bounds_upload_nodes = safe_count
+  stats.bounds_upload_bytes = u64(copy_region.size)
   vk.CmdCopyBuffer(
     command_buffer,
     system.node_bounds_staging.buffer,
@@ -1208,6 +1237,7 @@ dispatch_occlusion_cull :: proc(
 
     vk.CmdPipelineBarrier2(command_buffer, &dependency_info_bounds)
     system.node_bounds_dirty = false
+    system.stats.bounds_barrier_bytes = u64(system.node_bounds.bytes_count)
   }
 
   // Set up push constants
@@ -1248,6 +1278,8 @@ dispatch_occlusion_cull :: proc(
 
   // Dispatch compute shader (64 threads per workgroup)
   group_count := (node_count + 63) / 64
+  system.stats.node_count = min(node_count, system.max_nodes)
+  system.stats.dispatch_groups = group_count
   vk.CmdDispatch(command_buffer, group_count, 1, 1)
 
   // Add barrier to ensure visibility results are available
@@ -1268,11 +1300,14 @@ dispatch_occlusion_cull :: proc(
   vk.CmdPipelineBarrier2(command_buffer, &dependency_info)
 
   copy_count := min(node_count, system.max_nodes)
+  system.stats.visibility_copy_nodes = copy_count
+  system.stats.visibility_readback_bytes = 0
   system.last_cull_count = copy_count
   if copy_count > 0 {
     copy_region := vk.BufferCopy {
       size = vk.DeviceSize(copy_count * size_of(u32)),
     }
+    system.stats.visibility_readback_bytes = u64(copy_region.size)
     vk.CmdCopyBuffer(
       command_buffer,
       system.visibility_curr.buffer,
@@ -1314,6 +1349,10 @@ get_visibility_stats :: proc(system: ^OcclusionSystem, node_count: u32) -> (visi
   }
 
   return visible, total
+}
+
+get_frame_stats :: proc(system: ^OcclusionSystem) -> OcclusionFrameStats {
+  return system.stats
 }
 
 // Swap visibility buffers at end of frame

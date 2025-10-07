@@ -779,7 +779,28 @@ when DEBUG_DEPTH_PYRAMID {
       &self.render.occlusion,
       self.world.visibility.node_count,
     )
-    log.debugf("Occlusion: %d/%d nodes visible (%.1f%% culled)", visible, total, 100.0 * f32(total - visible) / f32(total))
+    culled_pct := f32(0)
+    if total > 0 {
+      culled_pct = 100.0 * f32(total - visible) / f32(total)
+    }
+    stats := occlusion.get_frame_stats(&self.render.occlusion)
+    bounds_kb := f64(stats.bounds_upload_bytes) / 1024.0
+    readback_kb := f64(stats.visibility_readback_bytes) / 1024.0
+    barrier_kb := f64(stats.bounds_barrier_bytes) / 1024.0
+    bounds_ms := time.duration_seconds(stats.bounds_cpu_time) * 1_000.0
+    log.debugf(
+      "Occlusion: %d/%d nodes visible (%.1f%% culled) | bounds upload %.2f KB (%u nodes, CPU %.2f ms, barrier %.2f KB) | visibility readback %.2f KB (%u nodes) | dispatch groups %u",
+      visible,
+      total,
+      culled_pct,
+      bounds_kb,
+      stats.bounds_upload_nodes,
+      bounds_ms,
+      barrier_kb,
+      readback_kb,
+      stats.visibility_copy_nodes,
+      stats.dispatch_groups,
+    )
   }
 
   // Swap occlusion visibility buffers for next frame
