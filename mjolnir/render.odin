@@ -826,13 +826,19 @@ record_geometry_pass :: proc(
       },
     }
 
+    pyramid_src_stage: vk.PipelineStageFlags2 = {.TOP_OF_PIPE}
+    pyramid_src_access: vk.AccessFlags2 = {}
+    if self.occlusion.pyramid_layout == .GENERAL {
+      pyramid_src_stage = {.COMPUTE_SHADER}
+      pyramid_src_access = {.SHADER_WRITE}
+    }
     pyramid_barrier_to_general := vk.ImageMemoryBarrier2 {
       sType               = .IMAGE_MEMORY_BARRIER_2,
-      srcStageMask        = {.TOP_OF_PIPE},
-      srcAccessMask       = {},
+      srcStageMask        = pyramid_src_stage,
+      srcAccessMask       = pyramid_src_access,
       dstStageMask        = {.COMPUTE_SHADER},
       dstAccessMask       = {.SHADER_WRITE},
-      oldLayout           = .UNDEFINED,
+      oldLayout           = self.occlusion.pyramid_layout,
       newLayout           = .GENERAL,
       srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
       dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
@@ -853,6 +859,7 @@ record_geometry_pass :: proc(
       pImageMemoryBarriers    = raw_data(barriers[:]),
     }
     vk.CmdPipelineBarrier2(command_buffer, &dependency_info)
+    self.occlusion.pyramid_layout = .GENERAL
 
     occlusion.build_pyramid(
       &self.occlusion,
@@ -861,6 +868,34 @@ record_geometry_pass :: proc(
       command_buffer,
       depth_texture,
     )
+
+    pyramid_ready_barrier := vk.ImageMemoryBarrier2 {
+      sType               = .IMAGE_MEMORY_BARRIER_2,
+      srcStageMask        = {.COMPUTE_SHADER},
+      srcAccessMask       = {.SHADER_WRITE},
+      dstStageMask        = {.COMPUTE_SHADER},
+      dstAccessMask       = {.SHADER_READ},
+      oldLayout           = .GENERAL,
+      newLayout           = .GENERAL,
+      srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+      dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+      image               = self.occlusion.pyramid_image.image,
+      subresourceRange    = {
+        aspectMask     = {.COLOR},
+        baseMipLevel   = 0,
+        levelCount     = self.occlusion.pyramid_levels,
+        baseArrayLayer = 0,
+        layerCount     = 1,
+      },
+    }
+
+    dependency_info_pyramid_ready := vk.DependencyInfo {
+      sType                   = .DEPENDENCY_INFO,
+      imageMemoryBarrierCount = 1,
+      pImageMemoryBarriers    = &pyramid_ready_barrier,
+    }
+
+    vk.CmdPipelineBarrier2(command_buffer, &dependency_info_pyramid_ready)
 
     occlusion.dispatch_occlusion_cull(
       &self.occlusion,

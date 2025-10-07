@@ -19,6 +19,7 @@ OcclusionSystem :: struct {
   pyramid_width:       u32,
   pyramid_height:      u32,
   pyramid_sampler:     vk.Sampler,
+  pyramid_layout:      vk.ImageLayout,
 
   // Visibility tracking (uint per node for descriptor compatibility)
   visibility_prev:     gpu.DataBuffer(u32), // Previous frame visibility
@@ -105,6 +106,7 @@ init :: proc(
 ) -> vk.Result {
   system.max_nodes = resources.MAX_NODES_IN_SCENE
   system.enabled = false
+  system.pyramid_layout = .UNDEFINED
 
   // Create visibility buffers
   system.visibility_prev = gpu.create_host_visible_buffer(
@@ -202,6 +204,7 @@ recreate_pyramid :: proc(
   system.pyramid_width = previous_pow2(width)
   system.pyramid_height = previous_pow2(height)
   system.pyramid_levels = get_mip_levels(system.pyramid_width, system.pyramid_height)
+  system.pyramid_layout = .UNDEFINED
 
   log.infof(
     "Creating depth pyramid: %dx%d with %d levels",
@@ -494,6 +497,7 @@ shutdown :: proc(
   gpu.data_buffer_destroy(device, &system.visibility_prev)
   gpu.data_buffer_destroy(device, &system.visibility_curr)
   gpu.data_buffer_destroy(device, &system.node_bounds)
+  system.pyramid_layout = .UNDEFINED
 
   log.info("Occlusion culling system shutdown")
 }
@@ -991,35 +995,35 @@ dispatch_occlusion_cull :: proc(
   camera_handle: resources.Handle,
   node_count: u32,
 ) {
-  log.infof("  dispatch_occlusion_cull: camera_handle=(index=%d,gen=%d) node_count=%d",
+  log.debugf("  dispatch_occlusion_cull: camera_handle=(index=%d,gen=%d) node_count=%d",
     camera_handle.index, camera_handle.generation, node_count)
 
   if !system.enabled {
-    log.info("  Early return: system not enabled")
+    log.debug("  Early return: system not enabled")
     return
   }
   if node_count == 0 {
-    log.info("  Early return: node_count == 0")
+    log.debug("  Early return: node_count == 0")
     return
   }
 
   // Get camera data from buffer
   camera_data := resources.get_camera_data(resources_manager, camera_handle.index)
   if camera_data == nil {
-    log.infof("  Early return: camera_data is nil for camera_index=%d", camera_handle.index)
+    log.debugf("  Early return: camera_data is nil for camera_index=%d", camera_handle.index)
     return
   }
 
   // Get camera for near/far values
   camera, ok := resources.get_camera(resources_manager, camera_handle)
   if !ok {
-    log.infof("  Early return: failed to get camera for handle=(index=%d,gen=%d)",
+    log.debugf("  Early return: failed to get camera for handle=(index=%d,gen=%d)",
       camera_handle.index, camera_handle.generation)
     return
   }
 
   near, far := geometry.camera_get_near_far(camera^)
-  log.infof("  Got camera successfully: near=%.3f far=%.3f", near, far)
+  log.debugf("  Got camera successfully: near=%.3f far=%.3f", near, far)
 
   // Update descriptor sets
   node_bounds_buffer_info := vk.DescriptorBufferInfo {
@@ -1119,7 +1123,7 @@ dispatch_occlusion_cull :: proc(
     pyramid_height    = f32(system.pyramid_height),
   }
 
-  log.infof("  Camera: near=%.3f far=%.3f P00=%.3f P11=%.3f", near, far, camera_data.projection[0,0], camera_data.projection[1,1])
+  log.debugf("  Camera: near=%.3f far=%.3f P00=%.3f P11=%.3f", near, far, camera_data.projection[0,0], camera_data.projection[1,1])
 
   // Bind pipeline and descriptor set
   vk.CmdBindPipeline(command_buffer, .COMPUTE, system.occlusion_cull_pipeline)
@@ -1183,11 +1187,11 @@ get_visibility_stats :: proc(system: ^OcclusionSystem, node_count: u32) -> (visi
         valid_bounds += 1
       }
       if i < 3 {
-        log.infof("  Bound[%d]: center=(%.2f,%.2f,%.2f) radius=%.2f", i, bounds^.x, bounds^.y, bounds^.z, radius)
+        log.debugf("  Bound[%d]: center=(%.2f,%.2f,%.2f) radius=%.2f", i, bounds^.x, bounds^.y, bounds^.z, radius)
       }
     }
   }
-  log.infof("  Valid bounds in first 10: %d/10", valid_bounds)
+  log.debugf("  Valid bounds in first 10: %d/10", valid_bounds)
 
   for i in 0 ..< total {
     vis := gpu.data_buffer_get(&system.visibility_curr, i)
