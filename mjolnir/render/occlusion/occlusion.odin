@@ -63,15 +63,14 @@ DebugPushConstants :: struct {
 }
 
 OcclusionCullPushConstants :: struct {
-  view:            matrix[4, 4]f32,
-  P00:             f32,
-  P11:             f32,
-  znear:           f32,
-  zfar:            f32,
-  pyramid_width:   f32,
-  pyramid_height:  f32,
-  node_count:      u32,
+  camera_index:      u32,
+  node_count:        u32,
   occlusion_enabled: u32,
+  _padding:          u32,
+  znear:             f32,
+  zfar:              f32,
+  pyramid_width:     f32,
+  pyramid_height:    f32,
 }
 
 // Get next power of 2 that's <= value
@@ -657,6 +656,12 @@ create_occlusion_cull_pipeline :: proc(
       descriptorCount = 1,
       stageFlags      = {.COMPUTE},
     },
+    { // Camera data
+      binding         = 4,
+      descriptorType  = .STORAGE_BUFFER,
+      descriptorCount = 1,
+      stageFlags      = {.COMPUTE},
+    },
   }
 
   layout_info := vk.DescriptorSetLayoutCreateInfo {
@@ -726,7 +731,7 @@ create_occlusion_cull_pipeline :: proc(
 
   // Create descriptor pool
   pool_sizes := [?]vk.DescriptorPoolSize {
-    {type = .STORAGE_BUFFER, descriptorCount = 3},
+    {type = .STORAGE_BUFFER, descriptorCount = 4},
     {type = .COMBINED_IMAGE_SAMPLER, descriptorCount = 1},
   }
 
@@ -1029,6 +1034,12 @@ dispatch_occlusion_cull :: proc(
     range  = vk.DeviceSize(system.max_nodes * size_of(u32)),
   }
 
+  camera_buffer_info := vk.DescriptorBufferInfo {
+    buffer = resources_manager.camera_buffer.buffer,
+    offset = 0,
+    range  = vk.DeviceSize(resources_manager.camera_buffer.bytes_count),
+  }
+
   depth_pyramid_image_info := vk.DescriptorImageInfo {
     sampler     = system.pyramid_sampler,
     imageView   = system.pyramid_image.view,
@@ -1072,6 +1083,15 @@ dispatch_occlusion_cull :: proc(
       descriptorType  = .COMBINED_IMAGE_SAMPLER,
       pImageInfo      = &depth_pyramid_image_info,
     },
+    {
+      sType           = .WRITE_DESCRIPTOR_SET,
+      dstSet          = system.occlusion_cull_descriptor_set,
+      dstBinding      = 4,
+      dstArrayElement = 0,
+      descriptorCount = 1,
+      descriptorType  = .STORAGE_BUFFER,
+      pBufferInfo     = &camera_buffer_info,
+    },
   }
 
   vk.UpdateDescriptorSets(
@@ -1084,15 +1104,13 @@ dispatch_occlusion_cull :: proc(
 
   // Set up push constants
   push_constants := OcclusionCullPushConstants {
-    view           = camera_data.view,
-    P00            = camera_data.projection[0, 0],
-    P11            = camera_data.projection[1, 1],
-    znear          = near,
-    zfar           = far,
-    pyramid_width  = f32(system.pyramid_width),
-    pyramid_height = f32(system.pyramid_height),
-    node_count     = node_count,
-    occlusion_enabled = 1,  // Enable depth test
+    camera_index      = camera_handle.index,
+    node_count        = node_count,
+    occlusion_enabled = 1,
+    znear             = near,
+    zfar              = far,
+    pyramid_width     = f32(system.pyramid_width),
+    pyramid_height    = f32(system.pyramid_height),
   }
 
   log.infof("  Camera: near=%.3f far=%.3f P00=%.3f P11=%.3f", near, far, camera_data.projection[0,0], camera_data.projection[1,1])
