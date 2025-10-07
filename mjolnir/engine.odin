@@ -778,7 +778,7 @@ when DEBUG_DEPTH_PYRAMID {
       &self.render.occlusion,
       self.world.visibility.node_count,
     )
-    log.infof("Occlusion: %d/%d nodes visible (%.1f%% culled)", visible, total, 100.0 * f32(total - visible) / f32(total))
+    log.debugf("Occlusion: %d/%d nodes visible (%.1f%% culled)", visible, total, 100.0 * f32(total - visible) / f32(total))
   }
 
   // Swap occlusion visibility buffers for next frame
