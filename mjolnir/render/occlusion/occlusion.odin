@@ -33,6 +33,7 @@ OcclusionSystem :: struct {
 
   last_cull_count:     u32,
   node_bounds_dirty:   bool,
+  node_bounds_count:   u32,
 
   // Compute shaders
   depth_reduce_pipeline:        vk.Pipeline,
@@ -988,6 +989,7 @@ update_node_bounds :: proc(
   if system.node_bounds.buffer == 0 do return
   if system.node_bounds_staging.buffer == 0 do return
   if system.node_bounds_staging.mapped == nil do return
+  system.node_bounds_count = 0
 
   // Safety check: ensure staged buffers are initialized and mapped
   if resources_manager.node_data_buffer.buffer == 0 do return
@@ -1007,66 +1009,62 @@ update_node_bounds :: proc(
 
   start_time := time.now()
 
+  node_data_all := gpu.staged_buffer_get_all(&resources_manager.node_data_buffer)
+  mesh_data_all := gpu.staged_buffer_get_all(&resources_manager.mesh_data_buffer)
+  world_matrices := gpu.staged_buffer_get_all(&resources_manager.world_matrix_buffer)
+  bounds_all := gpu.data_buffer_get_all(&system.node_bounds_staging)
+
+  if safe_count > u32(len(node_data_all)) do safe_count = u32(len(node_data_all))
+  if safe_count > u32(len(world_matrices)) do safe_count = u32(len(world_matrices))
+  if safe_count > u32(len(bounds_all)) do safe_count = u32(len(bounds_all))
+  stats.node_count = safe_count
+
   for i in 0 ..< safe_count {
-    // Get node data
-    node_data := gpu.staged_buffer_get(&resources_manager.node_data_buffer, i)
-    if node_data == nil do continue
+    bounds_all[i] = [4]f32{0, 0, 0, 0}
+  }
 
-    // Skip if mesh_id is invalid
-    if node_data.mesh_id >= resources.MAX_MESHES do continue
+  for i in 0 ..< safe_count {
+    node_data := node_data_all[i]
 
-    // Get mesh data
-    mesh_data := gpu.staged_buffer_get(&resources_manager.mesh_data_buffer, node_data.mesh_id)
-    if mesh_data == nil do continue
+    if node_data.mesh_id >= u32(len(mesh_data_all)) do continue
 
-    // Get world matrix
-    world_matrix := gpu.staged_buffer_get(&resources_manager.world_matrix_buffer, i)
-    if world_matrix == nil do continue
+    mesh_data := mesh_data_all[node_data.mesh_id]
+    world_matrix := world_matrices[i]
 
-    // Transform AABB to world space and compute bounding sphere
     aabb_min := mesh_data.aabb_min
     aabb_max := mesh_data.aabb_max
 
-    // Get 8 corners of AABB
-    corners := [8][3]f32 {
-      {aabb_min.x, aabb_min.y, aabb_min.z},
-      {aabb_max.x, aabb_min.y, aabb_min.z},
-      {aabb_min.x, aabb_max.y, aabb_min.z},
-      {aabb_max.x, aabb_max.y, aabb_min.z},
-      {aabb_min.x, aabb_min.y, aabb_max.z},
-      {aabb_max.x, aabb_min.y, aabb_max.z},
-      {aabb_min.x, aabb_max.y, aabb_max.z},
-      {aabb_max.x, aabb_max.y, aabb_max.z},
+    extents := [3]f32{
+      (aabb_max.x - aabb_min.x) * 0.5,
+      (aabb_max.y - aabb_min.y) * 0.5,
+      (aabb_max.z - aabb_min.z) * 0.5,
     }
 
-    // Transform corners to world space
-    world_corners := [8][3]f32{}
-    for corner, j in corners {
-      world_pos := world_matrix^ * [4]f32{corner.x, corner.y, corner.z, 1.0}
-      world_corners[j] = world_pos.xyz / world_pos.w
+    if extents.x <= 0 && extents.y <= 0 && extents.z <= 0 do continue
+
+    center_local := [3]f32{
+      aabb_min.x + extents.x,
+      aabb_min.y + extents.y,
+      aabb_min.z + extents.z,
     }
 
-    // Compute center of transformed AABB
-    center := [3]f32{0, 0, 0}
-    for corner in world_corners {
-      center += corner
-    }
-    center /= 8.0
+    world_center := world_matrix * [4]f32{center_local.x, center_local.y, center_local.z, 1.0}
+    center := world_center.xyz
+    if math.abs(world_center.w) > 0.00001 do center /= world_center.w
 
-    // Compute radius as max distance from center to any corner
-    radius := f32(0)
-    for corner in world_corners {
-      dist_sq := (corner.x - center.x) * (corner.x - center.x) +
-                 (corner.y - center.y) * (corner.y - center.y) +
-                 (corner.z - center.z) * (corner.z - center.z)
-      dist := math.sqrt(dist_sq)
-      radius = max(radius, dist)
-    }
+    // Compute conservative radius under affine transform by summing absolute column contributions
+    row0 := [3]f32{world_matrix[0, 0], world_matrix[0, 1], world_matrix[0, 2]}
+    row1 := [3]f32{world_matrix[1, 0], world_matrix[1, 1], world_matrix[1, 2]}
+    row2 := [3]f32{world_matrix[2, 0], world_matrix[2, 1], world_matrix[2, 2]}
 
-    // Write to node_bounds buffer (xyz=center, w=radius)
-    bounds := gpu.data_buffer_get(&system.node_bounds_staging, i)
-    if bounds == nil do continue
-    bounds^ = [4]f32{center.x, center.y, center.z, radius}
+    extent_x := math.abs(row0.x) * extents.x + math.abs(row0.y) * extents.y + math.abs(row0.z) * extents.z
+    extent_y := math.abs(row1.x) * extents.x + math.abs(row1.y) * extents.y + math.abs(row1.z) * extents.z
+    extent_z := math.abs(row2.x) * extents.x + math.abs(row2.y) * extents.y + math.abs(row2.z) * extents.z
+
+    radius_sq := extent_x * extent_x + extent_y * extent_y + extent_z * extent_z
+    radius := math.sqrt(radius_sq)
+
+    bounds_all[i] = [4]f32{center.x, center.y, center.z, radius}
   }
 
   stats.bounds_cpu_time = time.since(start_time)
@@ -1084,6 +1082,7 @@ update_node_bounds :: proc(
     &copy_region,
   )
   system.node_bounds_dirty = true
+  system.node_bounds_count = safe_count
 }
 
 // Dispatch occlusion culling compute shader
@@ -1218,6 +1217,8 @@ dispatch_occlusion_cull :: proc(
   )
 
   if system.node_bounds_dirty {
+    bounds_size := vk.DeviceSize(u64(system.node_bounds_count) * u64(size_of([4]f32)))
+    if bounds_size == 0 do bounds_size = vk.DeviceSize(system.node_bounds.bytes_count)
     bounds_barrier := vk.BufferMemoryBarrier2 {
       sType         = .BUFFER_MEMORY_BARRIER_2,
       srcStageMask  = {.TRANSFER},
@@ -1226,7 +1227,7 @@ dispatch_occlusion_cull :: proc(
       dstAccessMask = {.SHADER_READ},
       buffer        = system.node_bounds.buffer,
       offset        = 0,
-      size          = vk.DeviceSize(system.node_bounds.bytes_count),
+      size          = bounds_size,
     }
 
     dependency_info_bounds := vk.DependencyInfo {
@@ -1237,7 +1238,7 @@ dispatch_occlusion_cull :: proc(
 
     vk.CmdPipelineBarrier2(command_buffer, &dependency_info_bounds)
     system.node_bounds_dirty = false
-    system.stats.bounds_barrier_bytes = u64(system.node_bounds.bytes_count)
+    system.stats.bounds_barrier_bytes = u64(bounds_size)
   }
 
   // Set up push constants
