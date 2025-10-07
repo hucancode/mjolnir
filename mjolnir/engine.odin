@@ -586,6 +586,7 @@ render :: proc(self: ^Engine) -> vk.Result {
     &self.render.occlusion,
     &self.resource_manager,
     self.world.visibility.node_count,
+    command_buffer,
   )
 
   record_shadow_pass(

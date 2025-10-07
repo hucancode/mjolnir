@@ -24,9 +24,14 @@ OcclusionSystem :: struct {
   // Visibility tracking (uint per node for descriptor compatibility)
   visibility_prev:     gpu.DataBuffer(u32), // Previous frame visibility
   visibility_curr:     gpu.DataBuffer(u32), // Current frame visibility
+  visibility_readback: gpu.DataBuffer(u32),
 
   // Node bounding spheres (xyz=center in world space, w=radius)
   node_bounds:         gpu.DataBuffer([4]f32),
+  node_bounds_staging: gpu.DataBuffer([4]f32),
+
+  last_cull_count:     u32,
+  node_bounds_dirty:   bool,
 
   // Compute shaders
   depth_reduce_pipeline:        vk.Pipeline,
@@ -98,6 +103,23 @@ get_mip_levels :: proc(width, height: u32) -> u32 {
   return levels
 }
 
+clear_u32_buffer :: proc(
+  gpu_context: ^gpu.GPUContext,
+  buffer: ^gpu.DataBuffer(u32),
+) -> vk.Result {
+  if buffer.buffer == 0 do return .SUCCESS
+  if buffer.bytes_count == 0 do return .SUCCESS
+  cmd_buffer := gpu.begin_single_time_command(gpu_context) or_return
+  vk.CmdFillBuffer(
+    cmd_buffer,
+    buffer.buffer,
+    0,
+    vk.DeviceSize(buffer.bytes_count),
+    0,
+  )
+  return gpu.end_single_time_command(gpu_context, &cmd_buffer)
+}
+
 init :: proc(
   system: ^OcclusionSystem,
   gpu_context: ^gpu.GPUContext,
@@ -109,37 +131,61 @@ init :: proc(
   system.pyramid_layout = .UNDEFINED
 
   // Create visibility buffers
-  system.visibility_prev = gpu.create_host_visible_buffer(
+  system.visibility_prev = gpu.create_local_buffer(
     gpu_context,
     u32,
     int(system.max_nodes),
-    {.STORAGE_BUFFER, .TRANSFER_DST},
+    {.STORAGE_BUFFER, .TRANSFER_SRC},
   ) or_return
 
-  system.visibility_curr = gpu.create_host_visible_buffer(
+  system.visibility_curr = gpu.create_local_buffer(
     gpu_context,
     u32,
     int(system.max_nodes),
-    {.STORAGE_BUFFER, .TRANSFER_DST},
+    {.STORAGE_BUFFER, .TRANSFER_SRC},
   ) or_return
 
-  // Initialize visibility to 0 (all occluded)
-  for i in 0 ..< int(system.max_nodes) {
-    gpu.data_buffer_get(&system.visibility_prev, u32(i))^ = 0
-    gpu.data_buffer_get(&system.visibility_curr, u32(i))^ = 0
-  }
+  system.visibility_readback = gpu.create_host_visible_buffer(
+    gpu_context,
+    u32,
+    int(system.max_nodes),
+    {.TRANSFER_DST},
+  ) or_return
 
-  // Create node bounds buffer
-  system.node_bounds = gpu.create_host_visible_buffer(
+  clear_u32_buffer(gpu_context, &system.visibility_prev) or_return
+  clear_u32_buffer(gpu_context, &system.visibility_curr) or_return
+
+  system.node_bounds = gpu.create_local_buffer(
     gpu_context,
     [4]f32,
     int(system.max_nodes),
     {.STORAGE_BUFFER},
   ) or_return
 
-  // Initialize bounds to zero
-  for i in 0 ..< int(system.max_nodes) {
-    gpu.data_buffer_get(&system.node_bounds, u32(i))^ = [4]f32{0, 0, 0, 1}
+  system.node_bounds_staging = gpu.create_host_visible_buffer(
+    gpu_context,
+    [4]f32,
+    int(system.max_nodes),
+    {.TRANSFER_SRC},
+  ) or_return
+
+  staging_bounds := gpu.data_buffer_get_all(&system.node_bounds_staging)
+  for i in 0 ..< len(staging_bounds) {
+    staging_bounds[i] = [4]f32{0, 0, 0, 1}
+  }
+  if system.node_bounds.bytes_count > 0 {
+    cmd_buffer := gpu.begin_single_time_command(gpu_context) or_return
+    copy_region := vk.BufferCopy {
+      size = vk.DeviceSize(system.node_bounds.bytes_count),
+    }
+    vk.CmdCopyBuffer(
+      cmd_buffer,
+      system.node_bounds_staging.buffer,
+      system.node_bounds.buffer,
+      1,
+      &copy_region,
+    )
+    gpu.end_single_time_command(gpu_context, &cmd_buffer) or_return
   }
 
   // Create depth pyramid resources
@@ -179,6 +225,8 @@ init :: proc(
   create_occlusion_cull_pipeline(system, gpu_context, resources_manager) or_return
 
   system.debug_mip_level = 3
+  system.last_cull_count = 0
+  system.node_bounds_dirty = false
 
   log.info("Occlusion culling system initialized")
   return .SUCCESS
@@ -496,7 +544,9 @@ shutdown :: proc(
 
   gpu.data_buffer_destroy(device, &system.visibility_prev)
   gpu.data_buffer_destroy(device, &system.visibility_curr)
+  gpu.data_buffer_destroy(device, &system.visibility_readback)
   gpu.data_buffer_destroy(device, &system.node_bounds)
+  gpu.data_buffer_destroy(device, &system.node_bounds_staging)
   system.pyramid_layout = .UNDEFINED
 
   log.info("Occlusion culling system shutdown")
@@ -907,10 +957,14 @@ update_node_bounds :: proc(
   system: ^OcclusionSystem,
   resources_manager: ^resources.Manager,
   node_count: u32,
+  command_buffer: vk.CommandBuffer,
 ) {
+  system.node_bounds_dirty = false
   if !system.enabled do return
   if node_count == 0 do return
   if system.node_bounds.buffer == 0 do return
+  if system.node_bounds_staging.buffer == 0 do return
+  if system.node_bounds_staging.mapped == nil do return
 
   // Safety check: ensure staged buffers are initialized and mapped
   if resources_manager.node_data_buffer.buffer == 0 do return
@@ -980,10 +1034,27 @@ update_node_bounds :: proc(
     }
 
     // Write to node_bounds buffer (xyz=center, w=radius)
-    bounds := gpu.data_buffer_get(&system.node_bounds, i)
+    bounds := gpu.data_buffer_get(&system.node_bounds_staging, i)
     if bounds == nil do continue
     bounds^ = [4]f32{center.x, center.y, center.z, radius}
   }
+
+  if safe_count == 0 {
+    system.node_bounds_dirty = false
+    return
+  }
+
+  copy_region := vk.BufferCopy {
+    size = vk.DeviceSize(safe_count * size_of([4]f32)),
+  }
+  vk.CmdCopyBuffer(
+    command_buffer,
+    system.node_bounds_staging.buffer,
+    system.node_bounds.buffer,
+    1,
+    &copy_region,
+  )
+  system.node_bounds_dirty = true
 }
 
 // Dispatch occlusion culling compute shader
@@ -997,6 +1068,8 @@ dispatch_occlusion_cull :: proc(
 ) {
   log.debugf("  dispatch_occlusion_cull: camera_handle=(index=%d,gen=%d) node_count=%d",
     camera_handle.index, camera_handle.generation, node_count)
+
+  system.last_cull_count = 0
 
   if !system.enabled {
     log.debug("  Early return: system not enabled")
@@ -1115,6 +1188,28 @@ dispatch_occlusion_cull :: proc(
     nil,
   )
 
+  if system.node_bounds_dirty {
+    bounds_barrier := vk.BufferMemoryBarrier2 {
+      sType         = .BUFFER_MEMORY_BARRIER_2,
+      srcStageMask  = {.TRANSFER},
+      srcAccessMask = {.TRANSFER_WRITE},
+      dstStageMask  = {.COMPUTE_SHADER},
+      dstAccessMask = {.SHADER_READ},
+      buffer        = system.node_bounds.buffer,
+      offset        = 0,
+      size          = vk.DeviceSize(system.node_bounds.bytes_count),
+    }
+
+    dependency_info_bounds := vk.DependencyInfo {
+      sType              = .DEPENDENCY_INFO,
+      bufferMemoryBarrierCount = 1,
+      pBufferMemoryBarriers    = &bounds_barrier,
+    }
+
+    vk.CmdPipelineBarrier2(command_buffer, &dependency_info_bounds)
+    system.node_bounds_dirty = false
+  }
+
   // Set up push constants
   push_constants := OcclusionCullPushConstants {
     camera_index      = camera_handle.index,
@@ -1160,8 +1255,8 @@ dispatch_occlusion_cull :: proc(
     sType         = .MEMORY_BARRIER_2,
     srcStageMask  = {.COMPUTE_SHADER},
     srcAccessMask = {.SHADER_WRITE},
-    dstStageMask  = {.COMPUTE_SHADER, .DRAW_INDIRECT},
-    dstAccessMask = {.SHADER_READ, .INDIRECT_COMMAND_READ},
+    dstStageMask  = {.COMPUTE_SHADER, .DRAW_INDIRECT, .TRANSFER},
+    dstAccessMask = {.SHADER_READ, .INDIRECT_COMMAND_READ, .TRANSFER_READ},
   }
 
   dependency_info := vk.DependencyInfo {
@@ -1171,19 +1266,34 @@ dispatch_occlusion_cull :: proc(
   }
 
   vk.CmdPipelineBarrier2(command_buffer, &dependency_info)
+
+  copy_count := min(node_count, system.max_nodes)
+  system.last_cull_count = copy_count
+  if copy_count > 0 {
+    copy_region := vk.BufferCopy {
+      size = vk.DeviceSize(copy_count * size_of(u32)),
+    }
+    vk.CmdCopyBuffer(
+      command_buffer,
+      system.visibility_curr.buffer,
+      system.visibility_readback.buffer,
+      1,
+      &copy_region,
+    )
+  }
 }
 
 // Get visibility statistics (for debugging)
 get_visibility_stats :: proc(system: ^OcclusionSystem, node_count: u32) -> (visible: u32, total: u32) {
-  if system.visibility_curr.mapped == nil do return 0, 0
+  if system.visibility_readback.mapped == nil do return 0, 0
 
-  total = min(node_count, system.max_nodes)
+  total = min(node_count, system.last_cull_count)
   visible = 0
 
   // Sample first few bounds to check if they're valid
   valid_bounds := 0
   for i in 0 ..< min(10, total) {
-    bounds := gpu.data_buffer_get(&system.node_bounds, i)
+    bounds := gpu.data_buffer_get(&system.node_bounds_staging, i)
     if bounds != nil {
       radius := bounds^.w
       if radius > 0.001 {
@@ -1197,7 +1307,7 @@ get_visibility_stats :: proc(system: ^OcclusionSystem, node_count: u32) -> (visi
   log.debugf("  Valid bounds in first 10: %d/10", valid_bounds)
 
   for i in 0 ..< total {
-    vis := gpu.data_buffer_get(&system.visibility_curr, i)
+    vis := gpu.data_buffer_get(&system.visibility_readback, i)
     if vis != nil && vis^ != 0 {
       visible += 1
     }
