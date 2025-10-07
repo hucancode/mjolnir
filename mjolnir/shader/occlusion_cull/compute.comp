@@ -36,7 +36,7 @@ layout(binding = 1) readonly buffer VisibilityPrev {
 };
 
 // Output: visibility for current frame
-layout(binding = 2) writeonly buffer VisibilityCurr {
+layout(binding = 2) buffer VisibilityCurr {
     uint visibilityCurr[];
 };
 
@@ -60,6 +60,8 @@ void main() {
     vec3 worldCenter = boundingSphere.xyz;
     float radius = boundingSphere.w;
 
+    uint previousVisibility = visibilityCurr[nodeIndex];
+
     if (radius <= 0.0) {
         visibilityCurr[nodeIndex] = 0u;
         return;
@@ -68,6 +70,7 @@ void main() {
     Camera camera = cameras[params.cameraIndex];
 
     bool visible = true;
+    bool forcedVisible = previousVisibility != 0u;
 
     // Frustum culling using world-space planes
     for (int i = 0; i < 6 && visible; ++i) {
@@ -83,7 +86,7 @@ void main() {
         return;
     }
 
-    if (params.occlusionEnabled == 0u) {
+    if (forcedVisible || params.occlusionEnabled == 0u) {
         visibilityCurr[nodeIndex] = 1u;
         return;
     }
@@ -139,10 +142,15 @@ void main() {
     float pixelWidth = uvSize.x * params.pyramidWidth;
     float pixelHeight = uvSize.y * params.pyramidHeight;
     float maxDimension = max(max(pixelWidth, pixelHeight), 1.0);
-    float mipLevel = max(0.0, log2(maxDimension));
+    float pyramidMaxDim = max(params.pyramidWidth, params.pyramidHeight);
+    float maxAvailableLevel = 0.0;
+    if (pyramidMaxDim > 0.0) {
+        maxAvailableLevel = log2(pyramidMaxDim);
+    }
+    float mipLevel = clamp(log2(maxDimension), 0.0, maxAvailableLevel);
 
     vec2 uvCenter = (uvMin + uvMax) * 0.5;
-    float minDepth = textureLod(depthPyramid, uvCenter, mipLevel).x;
+    float maxDepth = textureLod(depthPyramid, uvCenter, mipLevel).x;
 
     vec3 nearPointView = viewCenter;
     nearPointView.z += radius;
@@ -154,8 +162,8 @@ void main() {
 
     float objectDepth = clipNear.z / clipNear.w;
 
-    const float depthBias = 1e-3;
-    visible = objectDepth <= minDepth + depthBias;
+    const float depthBias = 5e-3;
+    visible = objectDepth <= maxDepth + depthBias;
 
     visibilityCurr[nodeIndex] = visible ? 1u : 0u;
 }

@@ -1,7 +1,7 @@
 #version 450
 
 // Depth pyramid reduction shader
-// Performs 2x2 min-reduction to build hierarchical depth mipmap
+// Performs 2x2 max-reduction to build hierarchical depth mipmap
 // Based on Niagara implementation
 
 layout(local_size_x = 32, local_size_y = 32, local_size_z = 1) in;
@@ -21,8 +21,8 @@ void main() {
         return;
     }
 
-    // Sampler is set up to do min reduction with LINEAR filter
-    // This computes the minimum depth of a 2x2 texel quad from the previous level
+    // Sampler is set up to do max reduction with LINEAR filter
+    // This computes the maximum depth of a 2x2 texel quad from the previous level
     vec2 uv = (vec2(pos) + vec2(0.5)) / imageSize;
     float depth = texture(inImage, uv).x;
 
