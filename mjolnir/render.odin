@@ -831,6 +831,9 @@ record_geometry_pass :: proc(
     if self.occlusion.pyramid_layout == .GENERAL {
       pyramid_src_stage = {.COMPUTE_SHADER}
       pyramid_src_access = {.SHADER_WRITE}
+    } else if self.occlusion.pyramid_layout == .SHADER_READ_ONLY_OPTIMAL {
+      pyramid_src_stage = {.COMPUTE_SHADER}
+      pyramid_src_access = {.SHADER_READ}
     }
     pyramid_barrier_to_general := vk.ImageMemoryBarrier2 {
       sType               = .IMAGE_MEMORY_BARRIER_2,
@@ -876,7 +879,7 @@ record_geometry_pass :: proc(
       dstStageMask        = {.COMPUTE_SHADER},
       dstAccessMask       = {.SHADER_READ},
       oldLayout           = .GENERAL,
-      newLayout           = .GENERAL,
+      newLayout           = .SHADER_READ_ONLY_OPTIMAL,
       srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
       dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
       image               = self.occlusion.pyramid_image.image,
@@ -896,6 +899,7 @@ record_geometry_pass :: proc(
     }
 
     vk.CmdPipelineBarrier2(command_buffer, &dependency_info_pyramid_ready)
+    self.occlusion.pyramid_layout = .SHADER_READ_ONLY_OPTIMAL
 
     occlusion.dispatch_occlusion_cull(
       &self.occlusion,
