@@ -22,9 +22,10 @@ visibility_category_name :: proc(task: VisibilityCategory) -> string {
 }
 
 VisibilityTask :: struct {
-  draw_count:    gpu.DataBuffer(u32),
-  draw_commands: gpu.DataBuffer(vk.DrawIndexedIndirectCommand),
-  descriptor_set: vk.DescriptorSet,
+  draw_count:                gpu.DataBuffer(u32),
+  draw_commands:             gpu.DataBuffer(vk.DrawIndexedIndirectCommand),
+  descriptor_set:            vk.DescriptorSet,
+  occlusion_binding_version: u32,
 }
 
 VisibilityFrame :: struct {
@@ -74,6 +75,7 @@ VisibilitySystem :: struct {
   occlusion_curr_buffer: vk.Buffer,
   occlusion_buffer_size: vk.DeviceSize,
   occlusion_buffers_bound: bool,
+  occlusion_binding_version: u32,
 }
 
 draw_command_stride :: proc() -> u32 {
@@ -90,6 +92,7 @@ visibility_system_init :: proc(
   }
 
   system.max_draws = resources.MAX_NODES_IN_SCENE
+  system.occlusion_binding_version = 0
 
   for frame_idx in 0 ..< resources.MAX_FRAMES_IN_FLIGHT {
     frame := &system.frames[frame_idx]
@@ -237,6 +240,7 @@ visibility_system_init :: proc(
     for task_idx in 0 ..< VISIBILITY_TASK_COUNT {
       buffers := &frame.tasks[task_idx]
       buffers.descriptor_set = descriptor_sets[task_idx]
+      buffers.occlusion_binding_version = 0
 
       node_info := vk.DescriptorBufferInfo {
         buffer = resources_manager.node_data_buffer.device_buffer,
@@ -391,9 +395,10 @@ visibility_system_bind_occlusion_buffers :: proc(
   curr_buffer: vk.Buffer,
   buffer_size: vk.DeviceSize,
 ) {
-  if system == nil || gpu_context == nil {
+  if system == nil {
     return
   }
+  _ = gpu_context
   if prev_buffer == 0 || curr_buffer == 0 || buffer_size == 0 {
     system.occlusion_buffers_bound = false
     return
@@ -402,54 +407,85 @@ visibility_system_bind_occlusion_buffers :: proc(
   system.occlusion_prev_buffer = prev_buffer
   system.occlusion_curr_buffer = curr_buffer
   system.occlusion_buffer_size = buffer_size
+  system.occlusion_buffers_bound = true
+  system.occlusion_binding_version += 1
+  if system.occlusion_binding_version == 0 {
+    system.occlusion_binding_version = 1
+  }
+}
 
-  for frame_idx in 0 ..< resources.MAX_FRAMES_IN_FLIGHT {
-    frame := &system.frames[frame_idx]
-    for task_idx in 0 ..< VISIBILITY_TASK_COUNT {
-      buffers := &frame.tasks[task_idx]
-
-      prev_info := vk.DescriptorBufferInfo {
-        buffer = prev_buffer,
-        offset = 0,
-        range  = buffer_size,
-      }
-
-      curr_info := vk.DescriptorBufferInfo {
-        buffer = curr_buffer,
-        offset = 0,
-        range  = buffer_size,
-      }
-
-      writes := [?]vk.WriteDescriptorSet {
-        {
-          sType           = .WRITE_DESCRIPTOR_SET,
-          dstSet          = buffers.descriptor_set,
-          dstBinding      = 6,
-          descriptorType  = .STORAGE_BUFFER,
-          descriptorCount = 1,
-          pBufferInfo     = &prev_info,
-        },
-        {
-          sType           = .WRITE_DESCRIPTOR_SET,
-          dstSet          = buffers.descriptor_set,
-          dstBinding      = 7,
-          descriptorType  = .STORAGE_BUFFER,
-          descriptorCount = 1,
-          pBufferInfo     = &curr_info,
-        },
-      }
-
-      vk.UpdateDescriptorSets(
-        gpu_context.device,
-        len(writes),
-        raw_data(writes[:]),
-        0,
-        nil,
-      )
-    }
+visibility_system_flush_occlusion_bindings :: proc(
+  system: ^VisibilitySystem,
+  gpu_context: ^gpu.GPUContext,
+  frame_index: u32,
+) {
+  if system == nil || gpu_context == nil {
+    return
+  }
+  if !system.occlusion_buffers_bound {
+    return
+  }
+  if frame_index >= resources.MAX_FRAMES_IN_FLIGHT {
+    return
+  }
+  if system.occlusion_prev_buffer == 0 || system.occlusion_curr_buffer == 0 {
+    return
+  }
+  if system.occlusion_buffer_size == 0 {
+    return
   }
 
-  system.occlusion_buffers_bound = true
+  frame := &system.frames[frame_index]
+  for task_idx in 0 ..< VISIBILITY_TASK_COUNT {
+    buffers := &frame.tasks[task_idx]
+    if buffers.descriptor_set == 0 {
+      continue
+    }
+    if buffers.occlusion_binding_version == system.occlusion_binding_version {
+      continue
+    }
+
+    prev_info := vk.DescriptorBufferInfo {
+      buffer = system.occlusion_prev_buffer,
+      offset = 0,
+      range  = system.occlusion_buffer_size,
+    }
+
+    curr_info := vk.DescriptorBufferInfo {
+      buffer = system.occlusion_curr_buffer,
+      offset = 0,
+      range  = system.occlusion_buffer_size,
+    }
+
+    writes := [?]vk.WriteDescriptorSet {
+      {
+        sType           = .WRITE_DESCRIPTOR_SET,
+        dstSet          = buffers.descriptor_set,
+        dstBinding      = 6,
+        descriptorType  = .STORAGE_BUFFER,
+        descriptorCount = 1,
+        pBufferInfo     = &prev_info,
+      },
+      {
+        sType           = .WRITE_DESCRIPTOR_SET,
+        dstSet          = buffers.descriptor_set,
+        dstBinding      = 7,
+        descriptorType  = .STORAGE_BUFFER,
+        descriptorCount = 1,
+        pBufferInfo     = &curr_info,
+      },
+    }
+
+    vk.UpdateDescriptorSets(
+      gpu_context.device,
+      len(writes),
+      raw_data(writes[:]),
+      0,
+      nil,
+    )
+
+    buffers.occlusion_binding_version = system.occlusion_binding_version
+  }
 }
 
 visibility_system_get_visible_count :: proc(
@@ -492,6 +528,8 @@ visibility_system_dispatch :: proc(
 
   frame := &system.frames[frame_index]
   buffers := &frame.tasks[int(task)]
+
+  visibility_system_flush_occlusion_bindings(system, gpu_context, frame_index)
 
   vk.CmdFillBuffer(
     command_buffer,
