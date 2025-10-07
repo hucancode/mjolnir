@@ -20,9 +20,9 @@ OcclusionSystem :: struct {
   pyramid_height:      u32,
   pyramid_sampler:     vk.Sampler,
 
-  // Visibility tracking
-  visibility_prev:     gpu.DataBuffer(u8), // Previous frame visibility
-  visibility_curr:     gpu.DataBuffer(u8), // Current frame visibility
+  // Visibility tracking (uint per node for descriptor compatibility)
+  visibility_prev:     gpu.DataBuffer(u32), // Previous frame visibility
+  visibility_curr:     gpu.DataBuffer(u32), // Current frame visibility
 
   // Node bounding spheres (xyz=center in world space, w=radius)
   node_bounds:         gpu.DataBuffer([4]f32),
@@ -109,14 +109,14 @@ init :: proc(
   // Create visibility buffers
   system.visibility_prev = gpu.create_host_visible_buffer(
     gpu_context,
-    u8,
+    u32,
     int(system.max_nodes),
     {.STORAGE_BUFFER, .TRANSFER_DST},
   ) or_return
 
   system.visibility_curr = gpu.create_host_visible_buffer(
     gpu_context,
-    u8,
+    u32,
     int(system.max_nodes),
     {.STORAGE_BUFFER, .TRANSFER_DST},
   ) or_return
@@ -1020,13 +1020,13 @@ dispatch_occlusion_cull :: proc(
   visibility_prev_buffer_info := vk.DescriptorBufferInfo {
     buffer = system.visibility_prev.buffer,
     offset = 0,
-    range  = vk.DeviceSize(system.max_nodes * size_of(u8)),
+    range  = vk.DeviceSize(system.max_nodes * size_of(u32)),
   }
 
   visibility_curr_buffer_info := vk.DescriptorBufferInfo {
     buffer = system.visibility_curr.buffer,
     offset = 0,
-    range  = vk.DeviceSize(system.max_nodes * size_of(u8)),
+    range  = vk.DeviceSize(system.max_nodes * size_of(u32)),
   }
 
   depth_pyramid_image_info := vk.DescriptorImageInfo {

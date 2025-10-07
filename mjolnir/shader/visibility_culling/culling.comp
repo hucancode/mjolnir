@@ -46,6 +46,9 @@ layout(push_constant) uniform PushConstants {
     uint max_draws;
     uint include_flags;
     uint exclude_flags;
+    uint occlusion_mode;
+    uint occlusion_write;
+    uint occlusion_skip_prev;
 } params;
 
 layout(set = 0, binding = 0) readonly buffer NodeBuffer {
@@ -72,6 +75,18 @@ layout(set = 0, binding = 5) buffer DrawCommandBuffer {
     DrawCommand commands[];
 };
 
+layout(set = 0, binding = 6) readonly buffer OcclusionPrevBuffer {
+    uint occlusionPrev[];
+};
+
+layout(set = 0, binding = 7) buffer OcclusionCurrBuffer {
+    uint occlusionCurr[];
+};
+
+const uint OCCLUSION_MODE_NONE = 0u;
+const uint OCCLUSION_MODE_EARLY = 1u;
+const uint OCCLUSION_MODE_LATE = 2u;
+
 void main() {
     uint node_id = gl_GlobalInvocationID.x;
     if (node_id >= params.node_count) {
@@ -87,6 +102,24 @@ void main() {
     }
     if ((node.flags & params.exclude_flags) != 0u) {
         return;
+    }
+
+    bool occlusionWrite = params.occlusion_write == 1u;
+    if (occlusionWrite) {
+        occlusionCurr[node_id] = 0u;
+    }
+
+    if (params.occlusion_mode == OCCLUSION_MODE_EARLY) {
+        if (occlusionPrev[node_id] == 0u) {
+            return;
+        }
+    } else if (params.occlusion_mode == OCCLUSION_MODE_LATE) {
+        if (occlusionCurr[node_id] == 0u) {
+            return;
+        }
+        if (params.occlusion_skip_prev == 1u && occlusionPrev[node_id] != 0u) {
+            return;
+        }
     }
 
     MeshData mesh = meshes[node.mesh_id];
@@ -128,6 +161,9 @@ void main() {
     }
 
     if (!visible) {
+        if (occlusionWrite) {
+            occlusionCurr[node_id] = 0u;
+        }
         return;
     }
 
@@ -143,4 +179,8 @@ void main() {
     cmd.vertex_offset = mesh.vertex_offset;
     cmd.first_instance = node_id;
     commands[draw_index] = cmd;
+
+    if (occlusionWrite) {
+        occlusionCurr[node_id] = 1u;
+    }
 }

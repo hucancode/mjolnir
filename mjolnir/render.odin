@@ -759,138 +759,221 @@ record_geometry_pass :: proc(
     target,
     resources_manager,
   ) or_return
-  vis_result := world.dispatch_visibility(
-    world_state,
-    gpu_context,
-    command_buffer,
-    frame_index,
-    .OPAQUE,
-    world.VisibilityRequest {
-      camera_index = target.camera.index,
-      include_flags = {.VISIBLE},
-      exclude_flags = {.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME},
-    },
-  )
-  draw_buffer := vis_result.draw_buffer
-  count_buffer := vis_result.count_buffer
-  command_stride := vis_result.command_stride
-  geometry_pass.begin_depth_prepass(
-    target,
-    command_buffer,
-    resources_manager,
-    frame_index,
-  )
-  geometry_pass.render_depth_prepass(
-    &self.geometry,
-    command_buffer,
-    target.camera.index,
-    resources_manager,
-    frame_index,
-    draw_buffer,
-    count_buffer,
-    command_stride,
-  )
-  geometry_pass.end_depth_prepass(command_buffer)
+  base_request := world.VisibilityRequest {
+    camera_index = target.camera.index,
+    include_flags = {.VISIBLE},
+    exclude_flags = {.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME},
+  }
 
-  // Build depth pyramid after depth prepass
   depth_texture := targets.get_depth_texture(target, frame_index)
   depth_image := resources.get(resources_manager.image_2d_buffers, depth_texture)
 
-  // Transition depth to shader read
-  depth_barrier_to_read := vk.ImageMemoryBarrier2 {
-    sType               = .IMAGE_MEMORY_BARRIER_2,
-    srcStageMask        = {.LATE_FRAGMENT_TESTS},
-    srcAccessMask       = {.DEPTH_STENCIL_ATTACHMENT_WRITE},
-    dstStageMask        = {.COMPUTE_SHADER},
-    dstAccessMask       = {.SHADER_READ},
-    oldLayout           = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-    newLayout           = .SHADER_READ_ONLY_OPTIMAL,
-    srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-    dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-    image               = depth_image.image,
-    subresourceRange    = {
-      aspectMask     = {.DEPTH},
-      baseMipLevel   = 0,
-      levelCount     = 1,
-      baseArrayLayer = 0,
-      layerCount     = 1,
-    },
+  final_vis: world.VisibilityResult
+  draw_buffer: vk.Buffer = 0
+  count_buffer: vk.Buffer = 0
+  command_stride: u32 = 0
+
+  if self.occlusion.enabled {
+    early_request := base_request
+    early_request.occlusion_mode = .EARLY
+    early_request.write_occlusion_feedback = true
+
+    early_vis := world.dispatch_visibility(
+      world_state,
+      gpu_context,
+      command_buffer,
+      frame_index,
+      .CUSTOM0,
+      early_request,
+    )
+
+    geometry_pass.begin_depth_prepass(
+      target,
+      command_buffer,
+      resources_manager,
+      frame_index,
+      .CLEAR,
+    )
+    geometry_pass.render_depth_prepass(
+      &self.geometry,
+      command_buffer,
+      target.camera.index,
+      resources_manager,
+      frame_index,
+      early_vis.draw_buffer,
+      early_vis.count_buffer,
+      early_vis.command_stride,
+    )
+    geometry_pass.end_depth_prepass(command_buffer)
+
+    depth_barrier_to_read := vk.ImageMemoryBarrier2 {
+      sType               = .IMAGE_MEMORY_BARRIER_2,
+      srcStageMask        = {.LATE_FRAGMENT_TESTS},
+      srcAccessMask       = {.DEPTH_STENCIL_ATTACHMENT_WRITE},
+      dstStageMask        = {.COMPUTE_SHADER},
+      dstAccessMask       = {.SHADER_READ},
+      oldLayout           = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+      newLayout           = .SHADER_READ_ONLY_OPTIMAL,
+      srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+      dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+      image               = depth_image.image,
+      subresourceRange    = {
+        aspectMask     = {.DEPTH},
+        baseMipLevel   = 0,
+        levelCount     = 1,
+        baseArrayLayer = 0,
+        layerCount     = 1,
+      },
+    }
+
+    pyramid_barrier_to_general := vk.ImageMemoryBarrier2 {
+      sType               = .IMAGE_MEMORY_BARRIER_2,
+      srcStageMask        = {.TOP_OF_PIPE},
+      srcAccessMask       = {},
+      dstStageMask        = {.COMPUTE_SHADER},
+      dstAccessMask       = {.SHADER_WRITE},
+      oldLayout           = .UNDEFINED,
+      newLayout           = .GENERAL,
+      srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+      dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+      image               = self.occlusion.pyramid_image.image,
+      subresourceRange    = {
+        aspectMask     = {.COLOR},
+        baseMipLevel   = 0,
+        levelCount     = self.occlusion.pyramid_levels,
+        baseArrayLayer = 0,
+        layerCount     = 1,
+      },
+    }
+
+    barriers := [?]vk.ImageMemoryBarrier2{depth_barrier_to_read, pyramid_barrier_to_general}
+    dependency_info := vk.DependencyInfo {
+      sType                   = .DEPENDENCY_INFO,
+      imageMemoryBarrierCount = len(barriers),
+      pImageMemoryBarriers    = raw_data(barriers[:]),
+    }
+    vk.CmdPipelineBarrier2(command_buffer, &dependency_info)
+
+    occlusion.build_pyramid(
+      &self.occlusion,
+      gpu_context,
+      resources_manager,
+      command_buffer,
+      depth_texture,
+    )
+
+    occlusion.dispatch_occlusion_cull(
+      &self.occlusion,
+      gpu_context,
+      resources_manager,
+      command_buffer,
+      target.camera,
+      world_state.visibility.node_count,
+    )
+
+    depth_barrier_back := vk.ImageMemoryBarrier2 {
+      sType               = .IMAGE_MEMORY_BARRIER_2,
+      srcStageMask        = {.COMPUTE_SHADER},
+      srcAccessMask       = {.SHADER_READ},
+      dstStageMask        = {.EARLY_FRAGMENT_TESTS},
+      dstAccessMask       = {.DEPTH_STENCIL_ATTACHMENT_READ},
+      oldLayout           = .SHADER_READ_ONLY_OPTIMAL,
+      newLayout           = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+      srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+      dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+      image               = depth_image.image,
+      subresourceRange    = {
+        aspectMask     = {.DEPTH},
+        baseMipLevel   = 0,
+        levelCount     = 1,
+        baseArrayLayer = 0,
+        layerCount     = 1,
+      },
+    }
+
+    dependency_info_back := vk.DependencyInfo {
+      sType                   = .DEPENDENCY_INFO,
+      imageMemoryBarrierCount = 1,
+      pImageMemoryBarriers    = &depth_barrier_back,
+    }
+    vk.CmdPipelineBarrier2(command_buffer, &dependency_info_back)
+
+    late_new_request := base_request
+    late_new_request.occlusion_mode = .LATE
+    late_new_request.skip_prev_visible = true
+
+    late_new_vis := world.dispatch_visibility(
+      world_state,
+      gpu_context,
+      command_buffer,
+      frame_index,
+      .CUSTOM1,
+      late_new_request,
+    )
+
+    geometry_pass.begin_depth_prepass(
+      target,
+      command_buffer,
+      resources_manager,
+      frame_index,
+      .LOAD,
+    )
+    geometry_pass.render_depth_prepass(
+      &self.geometry,
+      command_buffer,
+      target.camera.index,
+      resources_manager,
+      frame_index,
+      late_new_vis.draw_buffer,
+      late_new_vis.count_buffer,
+      late_new_vis.command_stride,
+    )
+    geometry_pass.end_depth_prepass(command_buffer)
+
+    final_request := base_request
+    final_request.occlusion_mode = .LATE
+
+    final_vis = world.dispatch_visibility(
+      world_state,
+      gpu_context,
+      command_buffer,
+      frame_index,
+      .OPAQUE,
+      final_request,
+    )
+  } else {
+    final_vis = world.dispatch_visibility(
+      world_state,
+      gpu_context,
+      command_buffer,
+      frame_index,
+      .OPAQUE,
+      base_request,
+    )
+
+    geometry_pass.begin_depth_prepass(
+      target,
+      command_buffer,
+      resources_manager,
+      frame_index,
+      .CLEAR,
+    )
+    geometry_pass.render_depth_prepass(
+      &self.geometry,
+      command_buffer,
+      target.camera.index,
+      resources_manager,
+      frame_index,
+      final_vis.draw_buffer,
+      final_vis.count_buffer,
+      final_vis.command_stride,
+    )
+    geometry_pass.end_depth_prepass(command_buffer)
   }
 
-  pyramid_barrier_to_general := vk.ImageMemoryBarrier2 {
-    sType               = .IMAGE_MEMORY_BARRIER_2,
-    srcStageMask        = {.TOP_OF_PIPE},
-    srcAccessMask       = {},
-    dstStageMask        = {.COMPUTE_SHADER},
-    dstAccessMask       = {.SHADER_WRITE},
-    oldLayout           = .UNDEFINED,
-    newLayout           = .GENERAL,
-    srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-    dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-    image               = self.occlusion.pyramid_image.image,
-    subresourceRange    = {
-      aspectMask     = {.COLOR},
-      baseMipLevel   = 0,
-      levelCount     = self.occlusion.pyramid_levels,
-      baseArrayLayer = 0,
-      layerCount     = 1,
-    },
-  }
-
-  barriers := [?]vk.ImageMemoryBarrier2{depth_barrier_to_read, pyramid_barrier_to_general}
-  dependency_info := vk.DependencyInfo {
-    sType                   = .DEPENDENCY_INFO,
-    imageMemoryBarrierCount = len(barriers),
-    pImageMemoryBarriers    = raw_data(barriers[:]),
-  }
-  vk.CmdPipelineBarrier2(command_buffer, &dependency_info)
-
-  // Build pyramid
-  occlusion.build_pyramid(
-    &self.occlusion,
-    gpu_context,
-    resources_manager,
-    command_buffer,
-    depth_texture,
-  )
-
-  // Dispatch occlusion culling compute shader
-  occlusion.dispatch_occlusion_cull(
-    &self.occlusion,
-    gpu_context,
-    resources_manager,
-    command_buffer,
-    target.camera,
-    world_state.visibility.node_count,
-  )
-
-  // Transition depth back to depth attachment
-  depth_barrier_back := vk.ImageMemoryBarrier2 {
-    sType               = .IMAGE_MEMORY_BARRIER_2,
-    srcStageMask        = {.COMPUTE_SHADER},
-    srcAccessMask       = {.SHADER_READ},
-    dstStageMask        = {.EARLY_FRAGMENT_TESTS},
-    dstAccessMask       = {.DEPTH_STENCIL_ATTACHMENT_READ},
-    oldLayout           = .SHADER_READ_ONLY_OPTIMAL,
-    newLayout           = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-    srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-    dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-    image               = depth_image.image,
-    subresourceRange    = {
-      aspectMask     = {.DEPTH},
-      baseMipLevel   = 0,
-      levelCount     = 1,
-      baseArrayLayer = 0,
-      layerCount     = 1,
-    },
-  }
-
-  dependency_info_back := vk.DependencyInfo {
-    sType                   = .DEPENDENCY_INFO,
-    imageMemoryBarrierCount = 1,
-    pImageMemoryBarriers    = &depth_barrier_back,
-  }
-  vk.CmdPipelineBarrier2(command_buffer, &dependency_info_back)
+  draw_buffer = final_vis.draw_buffer
+  count_buffer = final_vis.count_buffer
+  command_stride = final_vis.command_stride
 
   geometry_pass.begin_pass(
     target,

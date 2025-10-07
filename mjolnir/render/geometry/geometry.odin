@@ -27,6 +27,7 @@ begin_depth_prepass :: proc(
   command_buffer: vk.CommandBuffer,
   resources_manager: ^resources.Manager,
   frame_index: u32,
+  load_op: vk.AttachmentLoadOp,
 ) {
   depth_texture := resources.get(
     resources_manager.image_2d_buffers,
@@ -36,7 +37,7 @@ begin_depth_prepass :: proc(
     sType = .RENDERING_ATTACHMENT_INFO,
     imageView = depth_texture.view,
     imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-    loadOp = .CLEAR,
+    loadOp = load_op,
     storeOp = .STORE,
     clearValue = {depthStencil = {1.0, 0}},
   }
