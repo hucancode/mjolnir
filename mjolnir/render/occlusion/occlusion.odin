@@ -1050,10 +1050,13 @@ dispatch_occlusion_cull :: proc(
     range  = vk.DeviceSize(resources_manager.camera_buffer.bytes_count),
   }
 
+  pyramid_layout := system.pyramid_layout
+  if pyramid_layout == .UNDEFINED do pyramid_layout = .GENERAL
+
   depth_pyramid_image_info := vk.DescriptorImageInfo {
     sampler     = system.pyramid_sampler,
     imageView   = system.pyramid_image.view,
-    imageLayout = .GENERAL,
+    imageLayout = pyramid_layout,
   }
 
   writes := [?]vk.WriteDescriptorSet {
@@ -1218,10 +1221,13 @@ visualize_pyramid :: proc(
 ) {
 
   // Update descriptor set
+  pyramid_layout := system.pyramid_layout
+  if pyramid_layout == .UNDEFINED do pyramid_layout = .GENERAL
+
   pyramid_image_info := vk.DescriptorImageInfo {
     sampler     = system.pyramid_sampler,
     imageView   = system.pyramid_image.view,
-    imageLayout = .GENERAL,
+    imageLayout = pyramid_layout,
   }
 
   output_image_info := vk.DescriptorImageInfo {
