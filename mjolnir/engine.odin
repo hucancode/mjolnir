@@ -471,6 +471,12 @@ update :: proc(self: ^Engine) -> bool {
 @(private = "file")
 flush_staged_buffers :: proc(engine: ^Engine) -> vk.Result {
   cmd_buffer := gpu.begin_single_time_command(&engine.gpu_context) or_return
+  occlusion.update_node_bounds(
+    &engine.render.occlusion,
+    &engine.resource_manager,
+    engine.world.visibility.node_count,
+    cmd_buffer,
+  )
   res := resources.commit(&engine.resource_manager, cmd_buffer)
   if res != .SUCCESS {
     vk.FreeCommandBuffers(
@@ -580,13 +586,6 @@ render :: proc(self: ^Engine) -> vk.Result {
     &self.world,
     command_buffer,
     self.swapchain.format.format,
-  )
-  // Update node bounding spheres for occlusion culling
-  occlusion.update_node_bounds(
-    &self.render.occlusion,
-    &self.resource_manager,
-    self.world.visibility.node_count,
-    command_buffer,
   )
 
   record_shadow_pass(
