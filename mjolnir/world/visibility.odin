@@ -628,34 +628,55 @@ visibility_system_dispatch :: proc(
   dispatch_x := (system.node_count + 63) / 64
   vk.CmdDispatch(command_buffer, dispatch_x, 1, 1)
 
-  post_barriers := [?]vk.BufferMemoryBarrier {
-    {
-      sType         = .BUFFER_MEMORY_BARRIER,
-      srcAccessMask = {.SHADER_WRITE},
-      dstAccessMask = {.INDIRECT_COMMAND_READ},
-      buffer        = buffers.draw_commands.buffer,
-      offset        = 0,
-      size          = vk.DeviceSize(buffers.draw_commands.bytes_count),
-    },
-    {
-      sType         = .BUFFER_MEMORY_BARRIER,
-      srcAccessMask = {.SHADER_WRITE},
-      dstAccessMask = {.INDIRECT_COMMAND_READ},
-      buffer        = buffers.draw_count.buffer,
-      offset        = 0,
-      size          = vk.DeviceSize(buffers.draw_count.bytes_count),
-    },
+  post_barriers := [3]vk.BufferMemoryBarrier{}
+  barrier_count := 0
+
+  post_barriers[barrier_count] = vk.BufferMemoryBarrier {
+    sType         = .BUFFER_MEMORY_BARRIER,
+    srcAccessMask = {.SHADER_WRITE},
+    dstAccessMask = {.INDIRECT_COMMAND_READ},
+    buffer        = buffers.draw_commands.buffer,
+    offset        = 0,
+    size          = vk.DeviceSize(buffers.draw_commands.bytes_count),
   }
+  barrier_count += 1
+
+  post_barriers[barrier_count] = vk.BufferMemoryBarrier {
+    sType         = .BUFFER_MEMORY_BARRIER,
+    srcAccessMask = {.SHADER_WRITE},
+    dstAccessMask = {.INDIRECT_COMMAND_READ},
+    buffer        = buffers.draw_count.buffer,
+    offset        = 0,
+    size          = vk.DeviceSize(buffers.draw_count.bytes_count),
+  }
+  barrier_count += 1
+
+  if occlusion_write != 0 &&
+     system.occlusion_buffers_bound &&
+     system.occlusion_curr_buffer != 0 &&
+     system.occlusion_buffer_size > 0 {
+    post_barriers[barrier_count] = vk.BufferMemoryBarrier {
+      sType         = .BUFFER_MEMORY_BARRIER,
+      srcAccessMask = {.SHADER_WRITE},
+      dstAccessMask = {.SHADER_READ},
+      buffer        = system.occlusion_curr_buffer,
+      offset        = 0,
+      size          = system.occlusion_buffer_size,
+    }
+    barrier_count += 1
+  }
+
+  barrier_slice := post_barriers[:barrier_count]
 
   vk.CmdPipelineBarrier(
     command_buffer,
     {.COMPUTE_SHADER},
-    {.DRAW_INDIRECT},
+    {.DRAW_INDIRECT, .COMPUTE_SHADER},
     {},
     0,
     nil,
-    len(post_barriers),
-    raw_data(post_barriers[:]),
+    len(barrier_slice),
+    raw_data(barrier_slice[:]),
     0,
     nil,
   )
