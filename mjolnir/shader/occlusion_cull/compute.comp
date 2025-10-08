@@ -170,20 +170,38 @@ void main() {
     }
     float mipLevel = clamp(log2(maxDimension), 0.0, maxAvailableLevel);
 
-    float objectDepth = 0.0;
-
     vec3 nearPointView = viewCenter - viewDir * radius;
-    vec4 clipNear = camera.projection * vec4(nearPointView, 1.0);
-    if (clipNear.w <= 0.0) {
+
+    if (nearPointView.z >= -params.znear) {
         visibilityCurr[nodeIndex] = 1u;
         return;
     }
 
-    objectDepth = clipNear.z / clipNear.w;
-    objectDepth = objectDepth * 0.5 + 0.5;
-    objectDepth = clamp(objectDepth, 0.0, 1.0);
+    float objectDepth = 1.0;
+    bool depthValid = false;
 
-    if (nearPointView.z >= -params.znear) {
+    vec3 depthOffsets[6] = vec3[](
+        vec3(0.0),
+        right * radius,
+        -right * radius,
+        up * radius,
+        -up * radius,
+        -viewDir * radius
+    );
+
+    for (int i = 0; i < 6; ++i) {
+        vec4 clip = camera.projection * vec4(viewCenter + depthOffsets[i], 1.0);
+        if (clip.w <= 0.0) {
+            continue;
+        }
+        float depth = clip.z / clip.w;
+        depth = depth * 0.5 + 0.5;
+        depth = clamp(depth, 0.0, 1.0);
+        objectDepth = min(objectDepth, depth);
+        depthValid = true;
+    }
+
+    if (!depthValid) {
         visibilityCurr[nodeIndex] = 1u;
         return;
     }
@@ -209,11 +227,21 @@ void main() {
         vec2 uvUpperLeft = vec2(expandedMin.x, expandedMax.y);
 
         float minDepth = 1.0;
-        minDepth = min(minDepth, textureLod(depthPyramid, uvCenter, levelFloat).x);
-        minDepth = min(minDepth, textureLod(depthPyramid, expandedMin, levelFloat).x);
-        minDepth = min(minDepth, textureLod(depthPyramid, uvUpperLeft, levelFloat).x);
-        minDepth = min(minDepth, textureLod(depthPyramid, uvLowerRight, levelFloat).x);
-        minDepth = min(minDepth, textureLod(depthPyramid, expandedMax, levelFloat).x);
+        vec2 samples[9] = vec2[](
+            uvCenter,
+            expandedMin,
+            expandedMax,
+            uvUpperLeft,
+            uvLowerRight,
+            vec2(expandedMin.x, uvCenter.y),
+            vec2(expandedMax.x, uvCenter.y),
+            vec2(uvCenter.x, expandedMin.y),
+            vec2(uvCenter.x, expandedMax.y)
+        );
+
+        for (int i = 0; i < 9; ++i) {
+            minDepth = min(minDepth, textureLod(depthPyramid, samples[i], levelFloat).x);
+        }
 
         if (minDepth <= 1e-5) {
             visibleResult = true;
