@@ -165,7 +165,7 @@ void main() {
     float mipLevel = clamp(log2(maxDimension), 0.0, maxAvailableLevel);
 
     vec2 uvCenter = (uvMin + uvMax) * 0.5;
-    float minDepth = textureLod(depthPyramid, uvCenter, mipLevel).x;
+    float maxDepth = textureLod(depthPyramid, uvCenter, mipLevel).x; // farthest occluder depth in region
 
     vec3 nearPointView = viewCenter - viewDir * radius;
     vec4 clipNear = camera.projection * vec4(nearPointView, 1.0);
@@ -182,13 +182,13 @@ void main() {
         return;
     }
 
-    if (minDepth <= 1e-5) {
+    if (maxDepth <= 1e-5) {
         visibilityCurr[nodeIndex] = 1u;
         return;
     }
 
     const float depthBias = 1e-2;
-    visible = objectDepth <= minDepth + depthBias;
+    visible = objectDepth <= maxDepth + depthBias;
 
     visibilityCurr[nodeIndex] = visible ? 1u : 0u;
 }
