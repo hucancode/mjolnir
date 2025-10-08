@@ -215,8 +215,8 @@ init :: proc(
   // Create sampler used for manual min reduction in the compute shader
   sampler_info := vk.SamplerCreateInfo {
     sType                   = .SAMPLER_CREATE_INFO,
-    magFilter               = .LINEAR,
-    minFilter               = .LINEAR,
+    magFilter               = .NEAREST,
+    minFilter               = .NEAREST,
     mipmapMode              = .NEAREST,
     addressModeU            = .CLAMP_TO_EDGE,
     addressModeV            = .CLAMP_TO_EDGE,

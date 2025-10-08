@@ -1,7 +1,7 @@
 #version 450
 
 // Depth pyramid reduction shader
-// Performs 2x2 min-reduction to build hierarchical depth mipmap
+// Performs 2x2 max-reduction to build hierarchical depth mipmap
 // Based on Niagara implementation
 
 layout(local_size_x = 32, local_size_y = 32, local_size_z = 1) in;
@@ -27,15 +27,15 @@ void main() {
     ivec2 baseCoord = ivec2(floor(base));
     ivec2 maxCoord = max(ivec2(sourceSize) - ivec2(1), ivec2(0));
 
-    float minDepth = 1.0;
+    float maxDepth = 0.0;
     for (int y = 0; y < 2; ++y) {
         for (int x = 0; x < 2; ++x) {
             ivec2 sampleCoord = baseCoord + ivec2(x, y);
             sampleCoord = clamp(sampleCoord, ivec2(0), maxCoord);
             float sampleDepth = texelFetch(inImage, sampleCoord, 0).x;
-            minDepth = min(minDepth, sampleDepth);
+            maxDepth = max(maxDepth, sampleDepth);
         }
     }
 
-    imageStore(outImage, ivec2(pos), vec4(minDepth));
+    imageStore(outImage, ivec2(pos), vec4(maxDepth));
 }

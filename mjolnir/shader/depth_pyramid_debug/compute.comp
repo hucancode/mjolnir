@@ -30,12 +30,8 @@ void main() {
 
     // Invert so geometry shows WHITE and background shows BLACK
     // This makes geometry more visible
-    float inverted = 1.0 - depth;
-
     // Amplify to make geometry more visible (objects are typically close to camera)
-    // Near plane (depth=0) -> inverted=1.0 -> white (geometry)
-    // Far plane (depth=1) -> inverted=0.0 -> black (background)
-    vec3 color = vec3(inverted * 50.0); // 50x amplification for near objects
+    vec3 color = vec3((1.0 - depth) * 50.0); // 50x amplification for near objects
 
     imageStore(outputImage, ivec2(pixelCoord), vec4(color, 1.0));
 }
