@@ -114,9 +114,9 @@ void main() {
             return;
         }
     } else if (params.occlusion_mode == OCCLUSION_MODE_LATE) {
-        if (occlusionCurr[node_id] == 0u) {
-            return;
-        }
+        // if (occlusionCurr[node_id] == 0u) {
+        //     return;
+        // }
         if (params.occlusion_skip_prev == 1u && occlusionPrev[node_id] != 0u) {
             return;
         }

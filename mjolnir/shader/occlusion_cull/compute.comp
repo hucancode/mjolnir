@@ -187,7 +187,10 @@ void main() {
         return;
     }
 
-    const float depthBias = 1e-2;
+    // const float depthBias = 1e-2;
+    float mipCoverage = exp2(mipLevel);
+    float maxCoverage = max(pyramidMaxDim, 1.0);
+    float depthBias = 1e-2 + 5e-2 * (mipCoverage / maxCoverage);
     visible = objectDepth <= maxDepth + depthBias;
 
     visibilityCurr[nodeIndex] = visible ? 1u : 0u;
