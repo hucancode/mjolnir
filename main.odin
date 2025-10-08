@@ -12,7 +12,7 @@ import "mjolnir/world"
 import "vendor:glfw"
 import mu "vendor:microui"
 
-LIGHT_COUNT :: 1
+LIGHT_COUNT :: 10
 ALL_SPOT_LIGHT :: false
 ALL_POINT_LIGHT :: false
 light_handles: [LIGHT_COUNT]resources.Handle
@@ -57,7 +57,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     log.info("spawning cubes in a grid")
     space: f32 = 4.1
     size: f32 = 0.3
-    nx, ny, nz := 40, 2, 40
+    nx, ny, nz := 240, 2, 240
     mat_handle, mat_ok := create_material(
       engine,
       metallic_value = 0.5,
