@@ -25,7 +25,7 @@ import mu "vendor:microui"
 import vk "vendor:vulkan"
 
 MAX_FRAMES_IN_FLIGHT :: 2
-RENDER_FPS :: 60.0
+RENDER_FPS :: 120.0
 FRAME_TIME :: 1.0 / RENDER_FPS
 FRAME_TIME_MILIS :: FRAME_TIME * 1_000.0
 UPDATE_FPS :: 30.0
@@ -184,7 +184,7 @@ init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
     self.swapchain.extent.height,
     self.swapchain.format.format,
     .D32_SFLOAT,
-    {5, 8, 5}, // Camera slightly above and diagonal to origin
+    {2, 3, 2}, // Camera slightly above and diagonal to origin
     {0, 0, 0}, // Looking at origin
     enabled_passes = {
       .SHADOW,

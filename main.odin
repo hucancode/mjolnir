@@ -12,7 +12,7 @@ import "mjolnir/world"
 import "vendor:glfw"
 import mu "vendor:microui"
 
-LIGHT_COUNT :: 10
+LIGHT_COUNT :: 1
 ALL_SPOT_LIGHT :: false
 ALL_POINT_LIGHT :: false
 light_handles: [LIGHT_COUNT]resources.Handle
@@ -57,7 +57,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     log.info("spawning cubes in a grid")
     space: f32 = 4.1
     size: f32 = 0.3
-    nx, ny, nz := 40, 2, 40
+    nx, ny, nz := 240, 2, 240
     mat_handle, mat_ok := create_material(
       engine,
       metallic_value = 0.5,
@@ -69,7 +69,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
           for z in 1 ..< nz {
             world_x := (f32(x) - f32(nx) * 0.5) * space
             world_y := (f32(y) - f32(ny) * 0.5) * space + 0.5
-            world_z := (f32(z) - f32(nz) * 0.5) * space
+            world_z := (f32(z) - f32(nz)) * space
             node_handle: resources.Handle
             node_ok := false
             if x % 3 == 0 {
@@ -78,7 +78,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
                 world.MeshAttachment {
                   handle = cube_mesh_handle,
                   material = mat_handle,
-                  cast_shadow = true,
+                  // cast_shadow = true,
                 },
               )
             } else if x % 3 == 1 {
@@ -87,7 +87,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
                 world.MeshAttachment {
                   handle = cone_mesh_handle,
                   material = mat_handle,
-                  cast_shadow = true,
+                  // cast_shadow = true,
                 },
               )
             } else {
@@ -96,7 +96,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
                 world.MeshAttachment {
                   handle = sphere_mesh_handle,
                   material = mat_handle,
-                  cast_shadow = true,
+                  // cast_shadow = true,
                 },
               )
             }
