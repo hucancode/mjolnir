@@ -201,7 +201,7 @@ make_triangle :: proc(
   ret.indices[0], ret.indices[1], ret.indices[2] = 0, 1, 2
   ret.aabb = Aabb {
     min = {0, 0, 0},
-    max = {1, 1, math.F32_EPSILON},
+    max = {1, 1, 0.1}, // add some thickness
   }
   return
 }
@@ -218,7 +218,7 @@ make_quad :: proc(color: [4]f32 = {1.0, 1.0, 1.0, 1.0}) -> (ret: Geometry) {
   ret.indices[3], ret.indices[4], ret.indices[5] = 2, 3, 0
   ret.aabb = Aabb {
     min = {-1, 0, -1},
-    max = {1, math.F32_EPSILON, 1},
+    max = {1, 0.1, 1}, // add some thickness
   }
   return
 }
