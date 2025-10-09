@@ -220,7 +220,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
       translate(engine, handle, -3, 1, -17)
     }
   }
-  if true {
+  if false {
     log.info("loading Warrior GLTF...")
     gltf_nodes := load_gltf(engine, "assets/Warrior.glb") or_else {}
     log.infof("Loaded GLTF nodes: %v", gltf_nodes)
@@ -488,7 +488,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     camera_controller_sync(&free_controller, main_camera)
   }
   current_controller = &orbit_controller
-  when true {
+  when false {
     log.info("Setting up portal...")
     idx, portal_ok := create_render_target(
       engine,
