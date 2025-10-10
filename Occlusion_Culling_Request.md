@@ -1,0 +1,26 @@
+we are reworking visibility culling.
+we need one 2-pass culling system to replace the frustum-culling only system. we may need 3 compute pipeline. be mindful about FRAME_IN_FLIGHTS and synchronization. We need 1 visibility information per frame in flight. Each render target needs a full 2-pass culling system. Currently we have geometry pass, shadow pass, and custom render target pass (their visibility system are separated). We don't need to maintain backward compatibility, we modify visibility system to use 2-pass culling permanently.
+
+1. early pass: do frustum culling with previously visible objects. we need to bind previous visibility (read only) and depth image (write only). early pass visibility of frame N must be built from the late visibility of frame N-1, filter it through frame N's camera frustum. objects from visibility frame N-1 that survived frustum culling will be rendered to get a depth map. The render count in this pass is usually small, even smaller than actual visible objects. we use a compute shader to do culling and a graphics shader to render depth map, compute/generate draw list must finish before graphics. early pass must create and manage its own depth texture (with mipmaps). we must render depth map in this pass.
+
+2. generate depth pyramid: we pick the farthest pixels in 2x2 block from level n to write to level n+1, we use a compute shader to do this. previous pass's depth map rendering must finish before this pass. we render nothing in this pass, only compute depth pyramid.
+
+3. late pass: do frustum culling with ALL objects (not just objects that were not drawn in early pass) because objects that was judged visible in early pass may actually occlude other objects. we bind current visibility (write only) and depth pyramid (read only) to late pass. then do occlusion culling for survived objects, using depth pyramid from previous steps. when check for occlusion, we first select the right mip level that current object spans at most 4 pixels on the depth map, then we sample 4 pixels and take the furthest, that's the depth of occluder. we test if current object nearest depth is greater than occluder depth, if so, it is occluded. we also need a depth bias so objects would not occlude themself. put all visible objects into a separated late draw list. The render count in this pass is usually slightly more than actual visible objects, but not too much more. For example with total 50k objects, 30 of that that actually visible, we will expect this late pass to render around 50~100 objects (in perfect case we will get 30 draw calls). we use a compute shader do culling and a graphics shader to render depth map. previous pass's depth pyramid must finish before we do culling/generate draw list, and culling must be finished before we render depth map. late pass must create and manage its own depth texture. we must render depth map in this pass.
+
+4. use the final late draw list in geometry pass or shadow pass. keep this visible objects as seed for next frame. remember that we need separated visibility culling system for each render target (1 for main, 1 for each shadow, 1 for each custom render target, etc). geometry pass still need depth pre-pass.
+
+here is an example of visibility status over 3 frames:
+- frame 0: previous visibility buffer all 0, early pass generate 0 draw calls
+- frame 0: after early pass: depth image all black
+- frame 0: after late pass: all objects passed frustum test will be 1, visibility buffer likely have ~1000 visible objects, depth image has all visible objects, final draw count is around 1000 (which is more than needed but should generate valid image)
+- frame 1: previous visibility buffer around 1000
+- frame 1: after early pass: around less than 1000 objects rendered, depth image has most of the occluders but not guaranteed all
+- frame 1: after late pass:  there are around 1000 objects pass frustum test, then there are around 100 objects pass occlusion test, depth image has all visible objects, final draw count is around 100 (which is just enough and should generate valid image)
+- frame 2: previous visibility buffer around 100
+- frame 2: after early pass: around less than 100 objects rendered, depth image has most of the occluders but not all
+- frame 2: after late pass:  there are around 1000 objects pass frustum test, then there are around 100 objects pass occlusion test, depth image has all visible objects, final draw count is around 100 (which is just enough and should generate valid image)
+
+verification method:
+- current test scene with camera at (5,8,5) looking at (0,0,0), draw count for the test scene should be less than 100 conservatively speaking. actual visible objects should be around 25-35, if we draw less than 25 we are over culling, if we draw more than 100 we are being inefficient
+- with static camera, object visibility should not change over time after frame 2. check for visibility list every frame and compare with previous frame. if the different is high we are causing flickering and definitely doing something wrong
+- Suzanne is behind walls and should not be visible in the test scene. Mjolnir is on the ground and should be visible. check for their node id and check for their visibility status
