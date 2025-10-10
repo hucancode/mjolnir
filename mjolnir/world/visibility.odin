@@ -30,12 +30,14 @@ VisibilityTask :: struct {
   early_draw_commands: gpu.DataBuffer(vk.DrawIndexedIndirectCommand),
   early_descriptor_set: vk.DescriptorSet,
   early_depth_texture: resources.Handle, // Own depth texture for early pass rendering
+  early_debug_counter: gpu.DataBuffer(u32), // DEBUG: Safe buffer for sentinel tracing
 
   // Late pass: cull all objects using depth pyramid
   late_draw_count:     gpu.DataBuffer(u32),
   late_draw_commands:  gpu.DataBuffer(vk.DrawIndexedIndirectCommand),
   late_descriptor_set:  vk.DescriptorSet,
   late_depth_texture:  resources.Handle, // Own depth texture for late pass rendering
+  late_debug_counter:  gpu.DataBuffer(u32), // DEBUG: Safe buffer for sentinel tracing
 
   // Visibility tracking (which nodes are visible)
   visibility_buffer:   gpu.DataBuffer(u32), // Bitset: 1 = visible, 0 = not visible
@@ -164,6 +166,12 @@ visibility_system_init :: proc(
         int(system.max_draws),
         {.STORAGE_BUFFER, .INDIRECT_BUFFER, .TRANSFER_DST},
       ) or_return
+      task.early_debug_counter = gpu.create_host_visible_buffer(
+        gpu_context,
+        u32,
+        1,
+        {.TRANSFER_DST},
+      ) or_return
 
       // Create early depth texture (for rendering previously visible objects)
       early_depth_handle, early_depth_texture, early_depth_ok := resources.alloc(&resources_manager.image_2d_buffers)
@@ -200,6 +208,12 @@ visibility_system_init :: proc(
         vk.DrawIndexedIndirectCommand,
         int(system.max_draws),
         {.STORAGE_BUFFER, .INDIRECT_BUFFER, .TRANSFER_DST},
+      ) or_return
+      task.late_debug_counter = gpu.create_host_visible_buffer(
+        gpu_context,
+        u32,
+        1,
+        {.TRANSFER_DST},
       ) or_return
 
       // Create late depth texture (for rendering final visible objects)
@@ -1003,9 +1017,11 @@ _create_descriptor_sets :: proc(
       task.late_descriptor_set = late_sets[task_idx]
 
       // Get previous submission's visibility buffer for early pass
-      // With frames in flight, we read from our own frame index (which contains results from N frames ago)
-      // This is safe because we wait for the fence before reusing this frame slot
-      prev_visibility := system.frames[frame_idx].tasks[task_idx].visibility_buffer
+      // Early pass at frame N should read results written by late pass at frame N-1
+      // With MAX_FRAMES_IN_FLIGHT=3, frame indices wrap: 0,1,2,0,1,2,...
+      // So when processing frame_idx=0, previous frame is frame_idx=2
+      prev_frame_idx := (frame_idx + resources.MAX_FRAMES_IN_FLIGHT - 1) % resources.MAX_FRAMES_IN_FLIGHT
+      prev_visibility := system.frames[prev_frame_idx].tasks[task_idx].visibility_buffer
 
       // Update early pass descriptor set
       early_writes := [?]vk.WriteDescriptorSet {
@@ -1150,7 +1166,7 @@ _create_descriptor_sets :: proc(
           descriptorType  = .COMBINED_IMAGE_SAMPLER,
           descriptorCount = 1,
           pImageInfo      = &vk.DescriptorImageInfo {
-            sampler     = resources_manager.nearest_clamp_sampler, // Use NEAREST to avoid interpolation
+            sampler     = resources_manager.depth_pyramid_sampler,
             imageView   = pyramid_texture.view,
             imageLayout = .SHADER_READ_ONLY_OPTIMAL,
           },
@@ -1259,9 +1275,9 @@ _create_descriptor_sets :: proc(
               descriptorType  = .COMBINED_IMAGE_SAMPLER,
               descriptorCount = 1,
               pImageInfo      = &vk.DescriptorImageInfo {
-                sampler     = resources_manager.nearest_clamp_sampler, // Use NEAREST for depth pyramid
+                sampler     = resources_manager.depth_pyramid_sampler,
                 imageView   = task.depth_pyramid_mip_views[src_mip],
-                imageLayout = .SHADER_READ_ONLY_OPTIMAL,
+                imageLayout = .GENERAL,  // Must match actual layout during pyramid generation
               },
             },
             {
@@ -1431,7 +1447,7 @@ _generate_depth_pyramid :: proc(
       descriptorType  = .COMBINED_IMAGE_SAMPLER,
       descriptorCount = 1,
       pImageInfo      = &vk.DescriptorImageInfo {
-        sampler     = resources_manager.nearest_clamp_sampler,
+        sampler     = resources_manager.depth_pyramid_sampler,
         imageView   = early_depth_texture.view,
         imageLayout = .SHADER_READ_ONLY_OPTIMAL,
       },
@@ -1767,10 +1783,12 @@ _render_early_depth :: proc(
     &push,
   )
 
-  // Draw indexed indirect
-  vk.CmdDrawIndexedIndirect(
+  // Draw indexed indirect with count buffer (only draws as many as early pass generated)
+  vk.CmdDrawIndexedIndirectCount(
     command_buffer,
     task.early_draw_commands.buffer,
+    0,
+    task.early_draw_count.buffer,
     0,
     system.max_draws,
     draw_command_stride(),
@@ -1959,9 +1977,11 @@ visibility_system_dispatch :: proc(
   }
 
   // Clear early pass buffers
-  // TEMP DEBUG: Fill with sentinel value instead of 0 to test if GPU can write
-  vk.CmdFillBuffer(command_buffer, task.early_draw_count.buffer, 0, vk.DeviceSize(vk.WHOLE_SIZE), 0x12345678)
+  vk.CmdFillBuffer(command_buffer, task.early_draw_count.buffer, 0, vk.DeviceSize(vk.WHOLE_SIZE), 0)
   vk.CmdFillBuffer(command_buffer, task.early_draw_commands.buffer, 0, vk.DeviceSize(vk.WHOLE_SIZE), 0)
+  // DEBUG: Unique sentinel in safe debug buffer
+  early_sentinel := u32(0xEA000000) + u32(category) * 0x00010000 + u32(system.frame_counter & 0xFFFF)
+  vk.CmdFillBuffer(command_buffer, task.early_debug_counter.buffer, 0, vk.DeviceSize(vk.WHOLE_SIZE), early_sentinel)
 
   early_barriers := [?]vk.BufferMemoryBarrier{
     {sType = .BUFFER_MEMORY_BARRIER, srcAccessMask = {.TRANSFER_WRITE}, dstAccessMask = {.SHADER_WRITE}, buffer = task.early_draw_count.buffer, size = vk.DeviceSize(vk.WHOLE_SIZE)},
@@ -2091,6 +2111,9 @@ visibility_system_dispatch :: proc(
   // Clear late pass buffers (visibility buffer is overwritten by shader, no clear needed)
   vk.CmdFillBuffer(command_buffer, task.late_draw_count.buffer, 0, vk.DeviceSize(vk.WHOLE_SIZE), 0)
   vk.CmdFillBuffer(command_buffer, task.late_draw_commands.buffer, 0, vk.DeviceSize(vk.WHOLE_SIZE), 0)
+  // DEBUG: Unique sentinel in safe debug buffer (0xAA = lAte pass)
+  late_sentinel := u32(0xAA000000) + u32(category) * 0x00010000 + u32(system.frame_counter & 0xFFFF)
+  vk.CmdFillBuffer(command_buffer, task.late_debug_counter.buffer, 0, vk.DeviceSize(vk.WHOLE_SIZE), late_sentinel)
 
   late_barriers := [?]vk.BufferMemoryBarrier{
     {sType = .BUFFER_MEMORY_BARRIER, srcAccessMask = {.TRANSFER_WRITE}, dstAccessMask = {.SHADER_WRITE}, buffer = task.late_draw_count.buffer, size = vk.DeviceSize(vk.WHOLE_SIZE)},
@@ -2182,12 +2205,30 @@ visibility_system_dispatch :: proc(
   result.draw_buffer = task.late_draw_commands.buffer
   result.count_buffer = task.late_draw_count.buffer
 
-  // Debug logging - read current frame buffer AFTER it completes (OK for host-visible memory with proper barriers)
-  if system.frame_counter <= 7 {
-    early_count := task.early_draw_count.mapped != nil ? task.early_draw_count.mapped[0] : 0
-    late_count := task.late_draw_count.mapped != nil ? task.late_draw_count.mapped[0] : 0
-    log.warnf("[Visibility Frame %d] Early draws: %d (buffer=%p, mapped=%p), Late draws: %d (category %v)",
-              system.frame_counter, early_count, task.early_draw_count.buffer, task.early_draw_count.mapped, late_count, category)
+  // Debug logging - read COMPLETED frame's results (from MAX_FRAMES_IN_FLIGHT ago)
+  // This frame's results won't be available until the GPU finishes executing
+  if system.frame_counter >= u64(resources.MAX_FRAMES_IN_FLIGHT) && system.frame_counter <= 60 && int(category) == 0 {
+    // Read results from the frame that just completed (wraps around due to frame-in-flight)
+    completed_frame_idx := (frame_index + 1) % resources.MAX_FRAMES_IN_FLIGHT
+    completed_task := &system.frames[completed_frame_idx].tasks[int(category)]
+    early_count := completed_task.early_draw_count.mapped != nil ? completed_task.early_draw_count.mapped[0] : 0
+    late_count := completed_task.late_draw_count.mapped != nil ? completed_task.late_draw_count.mapped[0] : 0
+    early_debug := completed_task.early_debug_counter.mapped != nil ? completed_task.early_debug_counter.mapped[0] : 0
+    late_debug := completed_task.late_debug_counter.mapped != nil ? completed_task.late_debug_counter.mapped[0] : 0
+
+    // Decode sentinel values to understand execution
+    early_msg := ""
+    if early_debug >= 0xEA000000 && early_debug < 0xEB000000 {
+      early_msg = fmt.tprintf(" [SENT_UNCHANGED]")
+    }
+    late_msg := ""
+    if late_debug >= 0xAA000000 && late_debug < 0xAB000000 {
+      late_msg = fmt.tprintf(" [SENT_UNCHANGED]")
+    }
+
+    log.warnf("[Visibility Frame %d RESULTS] Early: %d%s, Late: %d%s (category %v) frame_slot=%d",
+              system.frame_counter - u64(resources.MAX_FRAMES_IN_FLIGHT),
+              early_count, early_msg, late_count, late_msg, category, frame_index)
   }
 
   return result

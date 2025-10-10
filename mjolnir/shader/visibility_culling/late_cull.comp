@@ -152,6 +152,8 @@ bool occlusion_cull(Camera camera, mat4 world, vec3 local_min, vec3 local_max) {
 
     // Select mip level to ensure AABB fits in 2x2 pixel quad (for conservative occlusion)
     // Using ceil(log2(size)) ensures the rectangle maps to at most 2x2 texels at that mip
+    // NOTE: Pyramid mip 0 is half the screen size, so we already have one level of reduction
+    // built into the base mip, so we don't need to add +1 offset here
     uint mip_level = min(uint(ceil(log2(max_coverage))), params.depth_pyramid_mips - 1u);
 
     // Sample center of bounding rect (bilinear filter samples 2x2 quad)

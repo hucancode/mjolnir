@@ -593,6 +593,12 @@ traverse :: proc(world: ^World, resources_manager: ^resources.Manager = nil, cb_
         if skinning, has_skinning := mesh_attachment.skinning.?; has_skinning {
           data.bone_matrix_offset = skinning.bone_matrix_offset
         }
+        
+        // DEBUG: Log first few nodes
+        if world.first_gpu_update && entry.handle.index < 10 {
+          log.warnf("[World] Node %d: visible=%v parent_visible=%v flags=0x%x mesh_id=%d",
+                    entry.handle.index, current_node.visible, current_node.parent_visible, data.flags, data.mesh_id)
+        }
       }
       gpu.write(&resources_manager.node_data_buffer, &data, int(entry.handle.index))
     }

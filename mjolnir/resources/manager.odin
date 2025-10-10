@@ -434,6 +434,23 @@ init_global_samplers :: proc(
     nil,
     &manager.nearest_clamp_sampler,
   ) or_return
+
+  // Create depth pyramid sampler with LINEAR filtering for mipmap sampling
+  // The depth pyramid uses manual max reduction in the shader, so we just need
+  // proper filtering between mip levels
+  info.magFilter = .LINEAR
+  info.minFilter = .LINEAR
+  info.mipmapMode = .NEAREST  // Don't blend between mip levels
+  info.addressModeU = .CLAMP_TO_EDGE
+  info.addressModeV = .CLAMP_TO_EDGE
+  info.addressModeW = .CLAMP_TO_EDGE
+  vk.CreateSampler(
+    gpu_context.device,
+    &info,
+    nil,
+    &manager.depth_pyramid_sampler,
+  ) or_return
+
   return .SUCCESS
 }
 
