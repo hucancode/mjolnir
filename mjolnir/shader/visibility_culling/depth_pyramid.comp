@@ -1,0 +1,36 @@
+#version 450
+
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+layout(push_constant) uniform PushConstants {
+    uint src_mip;
+    uint dst_mip;
+    uvec2 dst_size;
+} params;
+
+layout(set = 0, binding = 0) uniform sampler2D src_depth;
+layout(set = 0, binding = 1, r32f) uniform writeonly image2D dst_depth;
+
+void main() {
+    uvec2 dst_coord = gl_GlobalInvocationID.xy;
+    if (dst_coord.x >= params.dst_size.x || dst_coord.y >= params.dst_size.y) {
+        return;
+    }
+
+    // Sample 2x2 region from source mip
+    vec2 src_size = vec2(textureSize(src_depth, int(params.src_mip)));
+    vec2 texel_size = 1.0 / src_size;
+    vec2 base_uv = (vec2(dst_coord) * 2.0 + 0.5) * texel_size;
+
+    // Sample 4 depths and take the farthest (max depth for reverse-Z, min for normal)
+    // Using normal depth buffer (1.0 = far, 0.0 = near)
+    float d0 = textureLod(src_depth, base_uv + vec2(0.0, 0.0) * texel_size, float(params.src_mip)).r;
+    float d1 = textureLod(src_depth, base_uv + vec2(1.0, 0.0) * texel_size, float(params.src_mip)).r;
+    float d2 = textureLod(src_depth, base_uv + vec2(0.0, 1.0) * texel_size, float(params.src_mip)).r;
+    float d3 = textureLod(src_depth, base_uv + vec2(1.0, 1.0) * texel_size, float(params.src_mip)).r;
+
+    // Take farthest depth (conservative occlusion test)
+    float max_depth = max(max(d0, d1), max(d2, d3));
+
+    imageStore(dst_depth, ivec2(dst_coord), vec4(max_depth));
+}

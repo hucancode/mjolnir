@@ -588,6 +588,7 @@ record_shadow_pass :: proc(
         vis_result := world.dispatch_visibility(
           world_state,
           gpu_context,
+          resources_manager,
           command_buffer,
           frame_index,
           .SHADOW,
@@ -596,6 +597,8 @@ record_shadow_pass :: proc(
             include_flags = shadow_include,
             exclude_flags = shadow_exclude,
           },
+          target.attachments[targets.AttachmentType.DEPTH][frame_index],
+          target.extent,
         )
         shadow.begin_pass(render_target, command_buffer, resources_manager, frame_index, u32(face))
         shadow.render(
@@ -616,6 +619,7 @@ record_shadow_pass :: proc(
       vis_result := world.dispatch_visibility(
         world_state,
         gpu_context,
+        resources_manager,
         command_buffer,
         frame_index,
         .SHADOW,
@@ -624,6 +628,8 @@ record_shadow_pass :: proc(
           include_flags = shadow_include,
           exclude_flags = shadow_exclude,
         },
+        target.attachments[targets.AttachmentType.DEPTH][frame_index],
+        target.extent,
       )
       shadow.begin_pass(render_target, command_buffer, resources_manager, frame_index)
       shadow.render(
@@ -743,6 +749,7 @@ record_geometry_pass :: proc(
   vis_result := world.dispatch_visibility(
     world_state,
     gpu_context,
+    resources_manager,
     command_buffer,
     frame_index,
     .OPAQUE,
@@ -751,6 +758,9 @@ record_geometry_pass :: proc(
       include_flags = {.VISIBLE},
       exclude_flags = {.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME},
     },
+    target.attachments[targets.AttachmentType.DEPTH][frame_index],
+    target.extent,
+
   )
   draw_buffer := vis_result.draw_buffer
   count_buffer := vis_result.count_buffer
@@ -910,6 +920,7 @@ record_transparency_pass :: proc(
   vis_transparent := world.dispatch_visibility(
     world_state,
     gpu_context,
+    resources_manager,
     command_buffer,
     frame_index,
     .TRANSPARENT,
@@ -918,6 +929,8 @@ record_transparency_pass :: proc(
       include_flags = {.VISIBLE, .MATERIAL_TRANSPARENT},
       exclude_flags = {},
     },
+    target.attachments[targets.AttachmentType.DEPTH][frame_index],
+    target.extent,
   )
   command_stride := vis_transparent.command_stride
   transparency.render(
@@ -934,6 +947,7 @@ record_transparency_pass :: proc(
   vis_wireframe := world.dispatch_visibility(
     world_state,
     gpu_context,
+    resources_manager,
     command_buffer,
     frame_index,
     .WIREFRAME,
@@ -942,6 +956,8 @@ record_transparency_pass :: proc(
       include_flags = {.VISIBLE, .MATERIAL_WIREFRAME},
       exclude_flags = {},
     },
+    target.attachments[targets.AttachmentType.DEPTH][frame_index],
+    target.extent,
   )
   transparency.render(
     &self.transparency,
@@ -1068,7 +1084,7 @@ renderer_remove_render_target :: proc(
 
 record_render_target :: proc(
   self: ^Renderer,
-  capture_index: int,
+  target_index: int,
   frame_index: u32,
   gpu_context: ^gpu.GPUContext,
   resources_manager: ^resources.Manager,
@@ -1076,33 +1092,36 @@ record_render_target :: proc(
   command_buffer: vk.CommandBuffer,
   color_format: vk.Format,
 ) -> vk.Result {
-  capture, capture_ok := renderer_get_render_target(self, capture_index)
-  if !capture_ok do return .ERROR_UNKNOWN
+  target, target_ok := renderer_get_render_target(self, target_index)
+  if !target_ok do return .ERROR_UNKNOWN
 
   // Update camera data
-  targets.render_target_upload_camera_data(resources_manager, capture)
+  targets.render_target_upload_camera_data(resources_manager, target)
 
   // Query visibility for capture camera
   vis_result := world.query_visibility(
     world_state,
     gpu_context,
+    resources_manager,
     command_buffer,
     frame_index,
     world.DrawCommandRequest {
-      camera_handle = {index = capture.camera.index},
+      camera_handle = {index = target.camera.index},
       include_flags = {.VISIBLE},
       exclude_flags = {.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME},
       category = .CUSTOM0,
     },
+    target.attachments[targets.AttachmentType.DEPTH][frame_index],
+    target.extent,
   )
 
   draw_buffer := vis_result.draw_buffer
   count_buffer := vis_result.count_buffer
 
   // Render G-buffer pass
-  if .GEOMETRY in capture.enabled_passes {
+  if .GEOMETRY in target.enabled_passes {
     geometry_pass.begin_pass(
-      capture,
+      target,
       command_buffer,
       resources_manager,
       frame_index,
@@ -1111,7 +1130,7 @@ record_render_target :: proc(
 
     geometry_pass.render(
       &self.geometry,
-      capture,
+      target,
       command_buffer,
       resources_manager,
       frame_index,
@@ -1121,7 +1140,7 @@ record_render_target :: proc(
     )
 
     geometry_pass.end_pass(
-      capture,
+      target,
       command_buffer,
       resources_manager,
       frame_index,
@@ -1129,17 +1148,17 @@ record_render_target :: proc(
   }
 
   // Render lighting pass
-  if .LIGHTING in capture.enabled_passes {
+  if .LIGHTING in target.enabled_passes {
     lighting.begin_ambient_pass(
       &self.lighting,
-      capture,
+      target,
       command_buffer,
       resources_manager,
       frame_index,
     )
     lighting.render_ambient(
       &self.lighting,
-      capture,
+      target,
       command_buffer,
       resources_manager,
       frame_index,
@@ -1148,14 +1167,14 @@ record_render_target :: proc(
 
     lighting.begin_pass(
       &self.lighting,
-      capture,
+      target,
       command_buffer,
       resources_manager,
       frame_index,
     )
     lighting.render(
       &self.lighting,
-      capture,
+      target,
       command_buffer,
       resources_manager,
       frame_index,

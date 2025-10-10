@@ -368,9 +368,12 @@ begin_frame :: proc(world: ^World, resources_manager: ^resources.Manager) {
 query_visibility :: proc(
   world: ^World,
   gpu_context: ^gpu.GPUContext,
+  resources_manager: ^resources.Manager,
   command_buffer: vk.CommandBuffer,
   frame_index: u32,
   request: DrawCommandRequest,
+  depth_texture: resources.Handle,
+  extent: vk.Extent2D,
 ) -> DrawCommandList {
   visibility_request := VisibilityRequest {
     camera_index  = request.camera_handle.index,
@@ -385,6 +388,9 @@ query_visibility :: proc(
     frame_index,
     request.category,
     visibility_request,
+    depth_texture,
+    resources_manager,
+    extent,
   )
 
   return DrawCommandList {
@@ -410,10 +416,13 @@ get_visible_count :: proc(
 dispatch_visibility :: proc(
   world: ^World,
   gpu_context: ^gpu.GPUContext,
+  resources_manager: ^resources.Manager,
   command_buffer: vk.CommandBuffer,
   frame_index: u32,
   category: VisibilityCategory,
   request: VisibilityRequest,
+  depth_texture: resources.Handle,
+  extent: vk.Extent2D,
 ) -> VisibilityResult {
   return visibility_system_dispatch(
     &world.visibility,
@@ -422,6 +431,9 @@ dispatch_visibility :: proc(
     frame_index,
     category,
     request,
+    depth_texture,
+    resources_manager,
+    extent,
   )
 }
 

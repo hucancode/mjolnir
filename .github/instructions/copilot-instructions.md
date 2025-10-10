@@ -170,6 +170,7 @@ The engine uses a deferred rendering approach with multiple passes:
 
 # Odin Language Features Used
 
+`context` is a reserved keyword, we can't use that as a variable name.
 variable declaration
 ```odin
 a: int = 42
