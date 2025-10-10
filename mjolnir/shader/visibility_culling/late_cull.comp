@@ -108,6 +108,7 @@ bool frustum_cull(Camera camera, mat4 world, vec3 local_min, vec3 local_max) {
 }
 
 bool occlusion_cull(Camera camera, mat4 world, vec3 local_min, vec3 local_max) {
+    // Occlusion culling using previous frame's depth pyramid
     vec3 corners[8];
     corners[0] = vec3(local_min.x, local_min.y, local_min.z);
     corners[1] = vec3(local_max.x, local_min.y, local_min.z);
@@ -149,17 +150,14 @@ bool occlusion_cull(Camera camera, mat4 world, vec3 local_min, vec3 local_max) {
     vec2 pixel_coverage = screen_size * pyramid_size;
     float max_coverage = max(pixel_coverage.x, pixel_coverage.y);
 
-    // Select mip level where object spans ~2-4 pixels
-    uint mip_level = min(uint(ceil(log2(max_coverage / 4.0))), params.depth_pyramid_mips - 1u);
+    // Select mip level to ensure AABB fits in 2x2 pixel quad (for conservative occlusion)
+    // Using ceil(log2(size)) ensures the rectangle maps to at most 2x2 texels at that mip
+    uint mip_level = min(uint(ceil(log2(max_coverage))), params.depth_pyramid_mips - 1u);
 
-    // Sample 4 corners of the bounding rect
-    float d0 = textureLod(depth_pyramid, min_screen, float(mip_level)).r;
-    float d1 = textureLod(depth_pyramid, vec2(max_screen.x, min_screen.y), float(mip_level)).r;
-    float d2 = textureLod(depth_pyramid, vec2(min_screen.x, max_screen.y), float(mip_level)).r;
-    float d3 = textureLod(depth_pyramid, max_screen, float(mip_level)).r;
-
-    // Take the farthest occluder depth
-    float occluder_depth = max(max(d0, d1), max(d2, d3));
+    // Sample center of bounding rect (bilinear filter samples 2x2 quad)
+    // This matches niagara's approach: sample once at center with hardware filtering
+    vec2 center_uv = (min_screen + max_screen) * 0.5;
+    float occluder_depth = textureLod(depth_pyramid, center_uv, float(mip_level)).r;
 
     // If object's nearest point is farther than occluder, it's occluded
     return (min_depth - DEPTH_BIAS) > occluder_depth;

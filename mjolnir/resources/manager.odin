@@ -18,6 +18,7 @@ Manager :: struct {
   linear_clamp_sampler:         vk.Sampler,
   nearest_repeat_sampler:       vk.Sampler,
   nearest_clamp_sampler:        vk.Sampler,
+  depth_pyramid_sampler:        vk.Sampler, // MIN reduction for occlusion culling
 
   // Resource pools
   meshes:                       Pool(Mesh),

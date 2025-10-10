@@ -1,0 +1,22 @@
+#version 450
+
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+layout(push_constant) uniform PushConstants {
+    uvec2 size;
+} params;
+
+layout(set = 0, binding = 0) uniform sampler2D src_depth;
+layout(set = 0, binding = 1, r32f) uniform writeonly image2D dst_color;
+
+void main() {
+    uvec2 coord = gl_GlobalInvocationID.xy;
+    if (coord.x >= params.size.x || coord.y >= params.size.y) {
+        return;
+    }
+
+    // Sample depth and write to color pyramid
+    vec2 uv = (vec2(coord) + 0.5) / vec2(params.size);
+    float depth = texture(src_depth, uv).r;
+    imageStore(dst_color, ivec2(coord), vec4(depth));
+}

@@ -25,10 +25,10 @@ import mu "vendor:microui"
 import vk "vendor:vulkan"
 
 MAX_FRAMES_IN_FLIGHT :: 2
-RENDER_FPS :: 120.0
+RENDER_FPS :: 4.0
 FRAME_TIME :: 1.0 / RENDER_FPS
 FRAME_TIME_MILIS :: FRAME_TIME * 1_000.0
-UPDATE_FPS :: 30.0
+UPDATE_FPS :: 4.0
 UPDATE_FRAME_TIME :: 1.0 / UPDATE_FPS
 UPDATE_FRAME_TIME_MILIS :: UPDATE_FRAME_TIME * 1_000.0
 MOUSE_SENSITIVITY_X :: 0.005
@@ -141,8 +141,8 @@ init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
   self.last_frame_timestamp = self.start_timestamp
   self.last_update_timestamp = self.start_timestamp
   world.init(&self.world)
-  world.init_gpu(&self.world, &self.gpu_context, &self.resource_manager) or_return
   gpu.swapchain_init(&self.swapchain, &self.gpu_context, self.window) or_return
+  world.init_gpu(&self.world, &self.gpu_context, &self.resource_manager, self.swapchain.extent.width, self.swapchain.extent.height) or_return
 
   // Initialize deferred cleanup
   self.pending_node_deletions = make([dynamic]resources.Handle, 0)

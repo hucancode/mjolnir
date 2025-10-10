@@ -32,5 +32,7 @@ void main() {
     // Take farthest depth (conservative occlusion test)
     float max_depth = max(max(d0, d1), max(d2, d3));
 
+    // max_depth = 0.0; // DEBUG: use nearest depth, guaranteed to occlude everything
+
     imageStore(dst_depth, ivec2(dst_coord), vec4(max_depth));
 }

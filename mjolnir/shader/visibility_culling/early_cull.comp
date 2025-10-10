@@ -109,7 +109,7 @@ void main() {
         return;
     }
 
-    // Early pass: only process previously visible objects
+    // Early pass: only process nodes that were visible in previous frame
     if (previous_visibility[node_id] == 0u) {
         return;
     }
@@ -134,13 +134,14 @@ void main() {
     if ((node.flags & NODE_FLAG_CULLING_ENABLED) != 0u) {
         Camera camera = cameras[params.camera_index];
         mat4 world = world_matrices[node_id];
-        visible = frustum_cull(camera, world, mesh.aabb_min, mesh.aabb_max);
+
+        // Frustum cull against current frame's camera
+        if (!frustum_cull(camera, world, mesh.aabb_min, mesh.aabb_max)) {
+            return;
+        }
     }
 
-    if (!visible) {
-        return;
-    }
-
+    // Object passed frustum test - generate draw command
     uint draw_index = atomicAdd(draw_count, 1);
     if (draw_index >= params.max_draws) {
         return;

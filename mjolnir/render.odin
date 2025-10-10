@@ -597,8 +597,6 @@ record_shadow_pass :: proc(
             include_flags = shadow_include,
             exclude_flags = shadow_exclude,
           },
-          target.attachments[targets.AttachmentType.DEPTH][frame_index],
-          target.extent,
         )
         shadow.begin_pass(render_target, command_buffer, resources_manager, frame_index, u32(face))
         shadow.render(
@@ -628,8 +626,6 @@ record_shadow_pass :: proc(
           include_flags = shadow_include,
           exclude_flags = shadow_exclude,
         },
-        target.attachments[targets.AttachmentType.DEPTH][frame_index],
-        target.extent,
       )
       shadow.begin_pass(render_target, command_buffer, resources_manager, frame_index)
       shadow.render(
@@ -758,8 +754,6 @@ record_geometry_pass :: proc(
       include_flags = {.VISIBLE},
       exclude_flags = {.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME},
     },
-    target.attachments[targets.AttachmentType.DEPTH][frame_index],
-    target.extent,
 
   )
   draw_buffer := vis_result.draw_buffer
@@ -929,8 +923,6 @@ record_transparency_pass :: proc(
       include_flags = {.VISIBLE, .MATERIAL_TRANSPARENT},
       exclude_flags = {},
     },
-    target.attachments[targets.AttachmentType.DEPTH][frame_index],
-    target.extent,
   )
   command_stride := vis_transparent.command_stride
   transparency.render(
@@ -956,8 +948,6 @@ record_transparency_pass :: proc(
       include_flags = {.VISIBLE, .MATERIAL_WIREFRAME},
       exclude_flags = {},
     },
-    target.attachments[targets.AttachmentType.DEPTH][frame_index],
-    target.extent,
   )
   transparency.render(
     &self.transparency,
@@ -1111,8 +1101,6 @@ record_render_target :: proc(
       exclude_flags = {.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME},
       category = .CUSTOM0,
     },
-    target.attachments[targets.AttachmentType.DEPTH][frame_index],
-    target.extent,
   )
 
   draw_buffer := vis_result.draw_buffer

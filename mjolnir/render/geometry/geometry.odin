@@ -607,9 +607,12 @@ render :: proc(
   count_buffer: vk.Buffer,
   command_stride: u32,
 ) {
+  log.warnf("[Geometry Render] draw_buffer=%p, count_buffer=%p", draw_buffer, count_buffer)
   if draw_buffer == 0 || count_buffer == 0 {
+    log.warnf("[Geometry Render] Skipping render - null buffers!")
     return
   }
+  log.warnf("[Geometry Render] Executing DrawIndexedIndirectCount")
   descriptor_sets := [?]vk.DescriptorSet {
     resources_manager.camera_buffer_descriptor_set,
     resources_manager.textures_descriptor_set,

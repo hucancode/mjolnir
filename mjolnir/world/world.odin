@@ -330,6 +330,7 @@ World :: struct {
   nodes:           resources.Pool(Node),
   traversal_stack: [dynamic]TraverseEntry,
   visibility:      VisibilitySystem,
+  first_gpu_update: bool, // Track if we need to initialize GPU buffers
 }
 
 init :: proc(world: ^World) {
@@ -339,6 +340,7 @@ init :: proc(world: ^World) {
   init_node(root, "root")
   root.parent = world.root
   world.traversal_stack = make([dynamic]TraverseEntry, 0)
+  world.first_gpu_update = true // Force GPU buffer init on first traversal
 }
 
 destroy :: proc(world: ^World, resources_manager: ^resources.Manager, gpu_context: ^gpu.GPUContext = nil) {
@@ -355,8 +357,10 @@ init_gpu :: proc(
   world: ^World,
   gpu_context: ^gpu.GPUContext,
   resources_manager: ^resources.Manager,
+  depth_width: u32,
+  depth_height: u32,
 ) -> vk.Result {
-  return visibility_system_init(&world.visibility, gpu_context, resources_manager)
+  return visibility_system_init(&world.visibility, gpu_context, resources_manager, depth_width, depth_height)
 }
 
 begin_frame :: proc(world: ^World, resources_manager: ^resources.Manager) {
@@ -372,8 +376,6 @@ query_visibility :: proc(
   command_buffer: vk.CommandBuffer,
   frame_index: u32,
   request: DrawCommandRequest,
-  depth_texture: resources.Handle,
-  extent: vk.Extent2D,
 ) -> DrawCommandList {
   visibility_request := VisibilityRequest {
     camera_index  = request.camera_handle.index,
@@ -388,9 +390,7 @@ query_visibility :: proc(
     frame_index,
     request.category,
     visibility_request,
-    depth_texture,
     resources_manager,
-    extent,
   )
 
   return DrawCommandList {
@@ -421,8 +421,6 @@ dispatch_visibility :: proc(
   frame_index: u32,
   category: VisibilityCategory,
   request: VisibilityRequest,
-  depth_texture: resources.Handle,
-  extent: vk.Extent2D,
 ) -> VisibilityResult {
   return visibility_system_dispatch(
     &world.visibility,
@@ -431,9 +429,7 @@ dispatch_visibility :: proc(
     frame_index,
     category,
     request,
-    depth_texture,
     resources_manager,
-    extent,
   )
 }
 
@@ -477,11 +473,25 @@ update_visibility_system :: proc(world: ^World) {
   count := slice.count_proc(world.nodes.entries[:], proc(entry: resources.Entry(Node)) -> bool {
       return entry.active
   })
+
+  // Count nodes with mesh attachments
+  mesh_count := slice.count_proc(world.nodes.entries[:], proc(entry: resources.Entry(Node)) -> bool {
+      if !entry.active do return false
+      _, has_mesh := entry.item.attachment.(MeshAttachment)
+      return has_mesh
+  })
+
+  log.warnf("[World] update_visibility_system: %d active nodes (%d with meshes) out of %d total entries",
+            count, mesh_count, len(world.nodes.entries))
   visibility_system_set_node_count(&world.visibility, u32(count))
 }
 
 traverse :: proc(world: ^World, resources_manager: ^resources.Manager = nil, cb_context: rawptr = nil, callback: TraversalCallback = nil) -> bool {
   using geometry
+  first_update_count := 0
+  if world.first_gpu_update {
+    log.warnf("[World] Starting first GPU traversal - will initialize all node data")
+  }
   append(
     &world.traversal_stack,
     TraverseEntry{world.root, linalg.MATRIX4F32_IDENTITY, false, true},
@@ -541,8 +551,9 @@ traverse :: proc(world: ^World, resources_manager: ^resources.Manager = nil, cb_
         gpu.write(&resources_manager.world_matrix_buffer, &world_matrix, int(entry.handle.index))
       }
     }
-    // Update node data when visibility changes
-    if (visibility_changed || is_dirty || entry.parent_is_dirty) && resources_manager != nil {
+    // Update node data when visibility changes or on first GPU update to initialize buffers
+    needs_update := visibility_changed || is_dirty || entry.parent_is_dirty
+    if (needs_update || world.first_gpu_update) && resources_manager != nil {
       data := resources.NodeData {
         material_id        = 0xFFFFFFFF,
         mesh_id            = 0xFFFFFFFF,
@@ -551,6 +562,12 @@ traverse :: proc(world: ^World, resources_manager: ^resources.Manager = nil, cb_
       if mesh_attachment, has_mesh := current_node.attachment.(MeshAttachment); has_mesh {
         data.material_id = mesh_attachment.material.index
         data.mesh_id = mesh_attachment.handle.index
+        if world.first_gpu_update {
+          first_update_count += 1
+          if entry.handle.index < 5 {
+            log.warnf("[World] First GPU update: node %d mesh_id=%d material_id=%d", entry.handle.index, data.mesh_id, data.material_id)
+          }
+        }
         if current_node.visible && current_node.parent_visible {
           data.flags |= resources.NodeFlagSet{.VISIBLE}
         }
@@ -599,6 +616,10 @@ traverse :: proc(world: ^World, resources_manager: ^resources.Manager = nil, cb_
       )
     }
   }
+  if world.first_gpu_update {
+    log.warnf("[World] First GPU traversal complete - updated %d nodes with meshes", first_update_count)
+  }
+  world.first_gpu_update = false // First traversal complete, GPU buffers initialized
   return true
 }
 
