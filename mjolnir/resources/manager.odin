@@ -18,7 +18,7 @@ Manager :: struct {
   linear_clamp_sampler:         vk.Sampler,
   nearest_repeat_sampler:       vk.Sampler,
   nearest_clamp_sampler:        vk.Sampler,
-  depth_pyramid_sampler:        vk.Sampler, // MIN reduction for occlusion culling
+  depth_pyramid_sampler:        vk.Sampler, // MAX reduction for occlusion culling (forward-Z)
 
   // Resource pools
   meshes:                       Pool(Mesh),
@@ -435,15 +435,22 @@ init_global_samplers :: proc(
     &manager.nearest_clamp_sampler,
   ) or_return
 
-  // Create depth pyramid sampler with LINEAR filtering for mipmap sampling
-  // The depth pyramid uses manual max reduction in the shader, so we just need
-  // proper filtering between mip levels
-  info.magFilter = .LINEAR
-  info.minFilter = .LINEAR
+  // Create depth pyramid sampler with MAX reduction for occlusion culling
+  // With forward-Z (0=near, 1=far), MAX reduction selects the farthest depth in a 2x2 block,
+  // which gives us the most conservative occluder depth to test against.
+  // (Niagara uses MIN with reverse-Z where 0=far, 1=near, achieving the same effect)
+  reduction_info := vk.SamplerReductionModeCreateInfo {
+    sType         = .SAMPLER_REDUCTION_MODE_CREATE_INFO,
+    pNext         = nil,
+    reductionMode = .MAX,
+  }
+  info.magFilter = .NEAREST  // Use NEAREST for depth - don't blend depth values
+  info.minFilter = .NEAREST  // Use NEAREST for depth - don't blend depth values
   info.mipmapMode = .NEAREST  // Don't blend between mip levels
   info.addressModeU = .CLAMP_TO_EDGE
   info.addressModeV = .CLAMP_TO_EDGE
   info.addressModeW = .CLAMP_TO_EDGE
+  info.pNext = &reduction_info
   vk.CreateSampler(
     gpu_context.device,
     &info,

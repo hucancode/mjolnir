@@ -17,22 +17,18 @@ void main() {
         return;
     }
 
-    // Sample 2x2 region from source mip
-    vec2 src_size = vec2(textureSize(src_depth, int(params.src_mip)));
-    vec2 texel_size = 1.0 / src_size;
-    vec2 base_uv = (vec2(dst_coord) * 2.0 + 0.5) * texel_size;
+    // Sampler is set up with VK_SAMPLER_REDUCTION_MODE_MAX for forward-Z.
+    // With forward-Z (0=near, 1=far), MAX reduction computes the farthest depth
+    // of the 2x2 texel quad, giving us the most conservative occluder.
+    // (Niagara uses MIN with reverse-Z where 0=far, 1=near, achieving the same effect)
 
-    // Sample 4 depths and take the farthest (max depth for reverse-Z, min for normal)
-    // Using normal depth buffer (1.0 = far, 0.0 = near)
-    float d0 = textureLod(src_depth, base_uv + vec2(0.0, 0.0) * texel_size, float(params.src_mip)).r;
-    float d1 = textureLod(src_depth, base_uv + vec2(1.0, 0.0) * texel_size, float(params.src_mip)).r;
-    float d2 = textureLod(src_depth, base_uv + vec2(0.0, 1.0) * texel_size, float(params.src_mip)).r;
-    float d3 = textureLod(src_depth, base_uv + vec2(1.0, 1.0) * texel_size, float(params.src_mip)).r;
+    // CRITICAL: Divide by dst_size (output), not src_size (input)!
+    // This maps dst_coord [0,dst_size) to UV [0,1], which with hardware reduction
+    // samples 2x2 input pixels per output pixel
+    // Niagara: texture(inImage, (vec2(pos) + vec2(0.5)) / imageSize)
+    // where imageSize is the OUTPUT size
+    vec2 uv = (vec2(dst_coord) + vec2(0.5)) / vec2(params.dst_size);
+    float min_depth = textureLod(src_depth, uv, float(params.src_mip)).r;
 
-    // Take farthest depth (conservative occlusion test)
-    float max_depth = max(max(d0, d1), max(d2, d3));
-
-    // max_depth = 0.0; // DEBUG: use nearest depth, guaranteed to occlude everything
-
-    imageStore(dst_depth, ivec2(dst_coord), vec4(max_depth));
+    imageStore(dst_depth, ivec2(dst_coord), vec4(min_depth));
 }

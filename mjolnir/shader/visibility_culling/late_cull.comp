@@ -5,7 +5,7 @@ layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 const uint NODE_FLAG_VISIBLE = 1u << 0;
 const uint NODE_FLAG_CULLING_ENABLED = 1u << 1;
 const uint INVALID_ID = 0xFFFFFFFFu;
-const float DEPTH_BIAS = 0.01; // Prevent self-occlusion
+const float DEPTH_BIAS = 0.01; // Small bias to prevent self-occlusion
 
 struct Camera {
     mat4 view;
@@ -108,61 +108,89 @@ bool frustum_cull(Camera camera, mat4 world, vec3 local_min, vec3 local_max) {
 }
 
 bool occlusion_cull(Camera camera, mat4 world, vec3 local_min, vec3 local_max) {
-    // Occlusion culling using previous frame's depth pyramid
-    vec3 corners[8];
-    corners[0] = vec3(local_min.x, local_min.y, local_min.z);
-    corners[1] = vec3(local_max.x, local_min.y, local_min.z);
-    corners[2] = vec3(local_min.x, local_max.y, local_min.z);
-    corners[3] = vec3(local_max.x, local_max.y, local_min.z);
-    corners[4] = vec3(local_min.x, local_min.y, local_max.z);
-    corners[5] = vec3(local_max.x, local_min.y, local_max.z);
-    corners[6] = vec3(local_min.x, local_max.y, local_max.z);
-    corners[7] = vec3(local_max.x, local_max.y, local_max.z);
+    // Compute world-space bounding sphere
+    vec3 local_center = (local_min + local_max) * 0.5;
+    vec3 local_extent = (local_max - local_min) * 0.5;
 
-    mat4 mvp = camera.projection * camera.view * world;
+    vec4 world_center4 = world * vec4(local_center, 1.0);
+    vec3 world_center = world_center4.xyz / max(world_center4.w, 1e-6);
 
-    // Transform all corners to clip space and find bounds
-    vec2 min_ndc = vec2(1.0);
-    vec2 max_ndc = vec2(-1.0);
-    float min_depth = 1.0;
+    mat3 world3 = mat3(world);
+    mat3 abs_world3 = mat3(abs(world3[0]), abs(world3[1]), abs(world3[2]));
+    vec3 world_extent = abs_world3 * local_extent;
+    float radius = length(world_extent);
+    radius = max(radius, 1e-4);
 
-    for (int i = 0; i < 8; i++) {
-        vec4 clip = mvp * vec4(corners[i], 1.0);
-        if (clip.w > 0.0) {
-            vec3 ndc = clip.xyz / clip.w;
-            min_ndc = min(min_ndc, ndc.xy);
-            max_ndc = max(max_ndc, ndc.xy);
-            min_depth = min(min_depth, ndc.z);
-        }
+    // View-space transform (camera looks down -Z)
+    vec3 view_center = (camera.view * vec4(world_center, 1.0)).xyz;
+    float center_view_z = -view_center.z;
+    if (center_view_z <= 0.0) {
+        return true; // Behind camera - treat as visible
     }
 
-    // Convert NDC to screen space [0,1]
-    vec2 min_screen = min_ndc * 0.5 + 0.5;
-    vec2 max_screen = max_ndc * 0.5 + 0.5;
+    float near_plane = camera.viewport_params.z;
+    if ((center_view_z - radius) <= near_plane) {
+        return true; // Intersects near plane, skip occlusion
+    }
 
-    // Clamp to viewport
+    float center_distance = length(view_center);
+    if (center_distance <= radius) {
+        return true; // Camera is inside or touching the sphere
+    }
+
+    // Project center to clip / screen space
+    vec4 clip_center = camera.projection * vec4(view_center, 1.0);
+    if (clip_center.w <= 0.0) {
+        return true;
+    }
+    vec3 ndc_center = clip_center.xyz / clip_center.w;
+    vec2 screen_center = ndc_center.xy * 0.5 + 0.5;
+
+    // Sample sphere extents in view space to get screen-space bounds
+    vec3 view_offset_x = view_center + vec3(radius, 0.0, 0.0);
+    vec3 view_offset_y = view_center + vec3(0.0, radius, 0.0);
+
+    vec4 clip_offset_x = camera.projection * vec4(view_offset_x, 1.0);
+    vec4 clip_offset_y = camera.projection * vec4(view_offset_y, 1.0);
+    if (clip_offset_x.w <= 0.0 || clip_offset_y.w <= 0.0) {
+        return true;
+    }
+
+    vec3 ndc_offset_x = clip_offset_x.xyz / clip_offset_x.w;
+    vec3 ndc_offset_y = clip_offset_y.xyz / clip_offset_y.w;
+    float screen_radius_x = abs(ndc_offset_x.x - ndc_center.x) * 0.5;
+    float screen_radius_y = abs(ndc_offset_y.y - ndc_center.y) * 0.5;
+
+    vec2 min_screen = screen_center - vec2(screen_radius_x, screen_radius_y);
+    vec2 max_screen = screen_center + vec2(screen_radius_x, screen_radius_y);
     min_screen = clamp(min_screen, vec2(0.0), vec2(1.0));
     max_screen = clamp(max_screen, vec2(0.0), vec2(1.0));
 
-    // Calculate which mip level to sample based on screen coverage
+    if (max_screen.x <= min_screen.x || max_screen.y <= min_screen.y) {
+        return true; // Degenerate bounds -> treat as visible
+    }
+
     vec2 screen_size = max_screen - min_screen;
     vec2 pyramid_size = vec2(textureSize(depth_pyramid, 0));
     vec2 pixel_coverage = screen_size * pyramid_size;
     float max_coverage = max(pixel_coverage.x, pixel_coverage.y);
+    max_coverage = max(max_coverage, 1.0);
 
-    // Select mip level to ensure AABB fits in 2x2 pixel quad (for conservative occlusion)
-    // Using ceil(log2(size)) ensures the rectangle maps to at most 2x2 texels at that mip
-    // NOTE: Pyramid mip 0 is half the screen size, so we already have one level of reduction
-    // built into the base mip, so we don't need to add +1 offset here
+    // This ensures the object fits in 2x2 texels at the selected mip
     uint mip_level = min(uint(ceil(log2(max_coverage))), params.depth_pyramid_mips - 1u);
-
-    // Sample center of bounding rect (bilinear filter samples 2x2 quad)
-    // This matches niagara's approach: sample once at center with hardware filtering
     vec2 center_uv = (min_screen + max_screen) * 0.5;
     float occluder_depth = textureLod(depth_pyramid, center_uv, float(mip_level)).r;
 
-    // If object's nearest point is farther than occluder, it's occluded
-    return (min_depth - DEPTH_BIAS) > occluder_depth;
+    // Project nearest point on sphere to obtain conservative depth
+    vec3 dir_to_center = view_center / center_distance;
+    vec3 nearest_view = view_center - dir_to_center * radius;
+    vec4 nearest_clip = camera.projection * vec4(nearest_view, 1.0);
+    if (nearest_clip.w <= 0.0) {
+        return false;
+    }
+    float nearest_ndc_depth = nearest_clip.z / nearest_clip.w;
+
+    return (nearest_ndc_depth - DEPTH_BIAS) < occluder_depth;
 }
 
 void main() {
@@ -173,17 +201,21 @@ void main() {
 
     NodeData node = nodes[node_id];
     if (node.mesh_id == INVALID_ID) {
+        visibility[node_id] = 0u;  // FIX: Must write visibility even when filtered
         return;
     }
     if ((node.flags & params.include_flags) != params.include_flags) {
+        visibility[node_id] = 0u;  // FIX: Must write visibility even when filtered
         return;
     }
     if ((node.flags & params.exclude_flags) != 0u) {
+        visibility[node_id] = 0u;  // FIX: Must write visibility even when filtered
         return;
     }
 
     MeshData mesh = meshes[node.mesh_id];
     if (mesh.index_count == 0u) {
+        visibility[node_id] = 0u;  // FIX: Must write visibility even when filtered
         return;
     }
 
@@ -199,7 +231,7 @@ void main() {
         }
 
         // Then occlusion cull
-        if (occlusion_cull(camera, world, mesh.aabb_min, mesh.aabb_max)) {
+        if (!occlusion_cull(camera, world, mesh.aabb_min, mesh.aabb_max)) {
             visibility[node_id] = 0u;
             return;
         }

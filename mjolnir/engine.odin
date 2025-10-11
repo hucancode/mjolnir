@@ -97,6 +97,7 @@ Engine :: struct {
   update_thread:               Maybe(^thread.Thread),
   update_active:               bool,
   last_render_timestamp:       time.Time,
+  last_logged_draw_count:      u32,
 }
 
 get_window_dpi :: proc(window: glfw.WindowHandle) -> f32 {
@@ -140,6 +141,7 @@ init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
   self.start_timestamp = time.now()
   self.last_frame_timestamp = self.start_timestamp
   self.last_update_timestamp = self.start_timestamp
+  self.last_logged_draw_count = 0xFFFF_FFFF
   world.init(&self.world)
   gpu.swapchain_init(&self.swapchain, &self.gpu_context, self.window) or_return
   world.init_gpu(&self.world, &self.gpu_context, &self.resource_manager, self.swapchain.extent.width, self.swapchain.extent.height) or_return
@@ -184,7 +186,8 @@ init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
     self.swapchain.extent.height,
     self.swapchain.format.format,
     .D32_SFLOAT,
-    {2, 3, 2}, // Camera slightly above and diagonal to origin
+    {5, 8, 5}, // Camera position for occlusion culling test, this camera stays walled (should see ~29 objects)
+    // {5, -8, 5}, // Camera position for occlusion culling test, this camera looks from outside (should see hundreds of objects)
     {0, 0, 0}, // Looking at origin
     enabled_passes = {
       .SHADOW,
@@ -506,6 +509,14 @@ render_debug_ui :: proc(self: ^Engine) {
         self.world.visibility.node_count,
       ),
     )
+    mu.label(
+      &self.render.ui.ctx,
+      fmt.tprintf("Late draw count %d", visible_count),
+    )
+    if visible_count != self.last_logged_draw_count {
+      log.infof("[DebugUI] Late draw count updated: %d", visible_count)
+      self.last_logged_draw_count = visible_count
+    }
   }
 }
 

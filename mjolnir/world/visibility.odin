@@ -50,6 +50,9 @@ VisibilityTask :: struct {
   // Descriptor sets for depth pyramid generation (one per mip level transition)
   // pyramid_gen_descriptor_sets[i] reads from mip i and writes to mip i+1
   pyramid_gen_descriptor_sets: [dynamic]vk.DescriptorSet,
+  depth_copy_descriptor_set: vk.DescriptorSet,
+  depth_debug_samples: gpu.DataBuffer(f32), // Host-visible debug readback for pyramid mip 0
+  early_depth_debug_samples: gpu.DataBuffer(f32), // Debug readback from early depth attachment
 }
 
 VisibilityFrame :: struct {
@@ -73,6 +76,10 @@ VisibilityPushConstants :: struct {
 DepthPyramidPushConstants :: struct {
   src_mip: u32,
   dst_mip: u32,
+  dst_size: [2]u32,
+}
+
+DepthCopyPushConstants :: struct {
   dst_size: [2]u32,
 }
 
@@ -104,6 +111,7 @@ VisibilitySystem :: struct {
   // Depth pyramid generation (from early depth mip 0)
   depth_pyramid_descriptor_layout: vk.DescriptorSetLayout,
   depth_pyramid_pipeline_layout:   vk.PipelineLayout,
+  depth_copy_pipeline:             vk.Pipeline,
   depth_pyramid_pipeline:          vk.Pipeline,
 
   // Late pass: frustum + occlusion cull
@@ -144,7 +152,7 @@ visibility_system_init :: proc(
 
   system.max_draws = resources.MAX_NODES_IN_SCENE
   system.depth_extent = vk.Extent2D{width = depth_width, height = depth_height}
-  
+
   depth_mips := calculate_mip_levels(depth_width, depth_height)
 
   // Create buffers and resources for each frame
@@ -158,7 +166,7 @@ visibility_system_init :: proc(
         gpu_context,
         u32,
         1,
-        {.STORAGE_BUFFER, .TRANSFER_DST},
+        {.STORAGE_BUFFER, .TRANSFER_DST, .INDIRECT_BUFFER},
       ) or_return
       task.early_draw_commands = gpu.create_host_visible_buffer(
         gpu_context,
@@ -186,7 +194,7 @@ visibility_system_init :: proc(
         depth_height,
         .D32_SFLOAT,
         .OPTIMAL,
-        {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
+        {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED, .TRANSFER_SRC},
         {.DEVICE_LOCAL},
       ) or_return
       early_depth_texture.view = gpu.create_image_view(
@@ -201,7 +209,7 @@ visibility_system_init :: proc(
         gpu_context,
         u32,
         1,
-        {.STORAGE_BUFFER, .TRANSFER_DST},
+        {.STORAGE_BUFFER, .TRANSFER_DST, .INDIRECT_BUFFER},
       ) or_return
       task.late_draw_commands = gpu.create_host_visible_buffer(
         gpu_context,
@@ -213,6 +221,20 @@ visibility_system_init :: proc(
         gpu_context,
         u32,
         1,
+        {.TRANSFER_DST},
+      ) or_return
+
+      // Debug readback buffer for inspecting pyramid contents
+      task.depth_debug_samples = gpu.create_host_visible_buffer(
+        gpu_context,
+        f32,
+        4,
+        {.TRANSFER_DST},
+      ) or_return
+      task.early_depth_debug_samples = gpu.create_host_visible_buffer(
+        gpu_context,
+        f32,
+        4,
         {.TRANSFER_DST},
       ) or_return
 
@@ -336,7 +358,7 @@ _clear_depth_resources :: proc(
     frame := &system.frames[frame_idx]
     for task_idx in 0 ..< VISIBILITY_TASK_COUNT {
       task := &frame.tasks[task_idx]
-      
+
       // Clear early depth texture
       early_depth := resources.get(resources_manager.image_2d_buffers, task.early_depth_texture)
       if early_depth != nil {
@@ -356,7 +378,7 @@ _clear_depth_resources :: proc(
           },
         }
         vk.CmdPipelineBarrier(command_buffer, {.TOP_OF_PIPE}, {.TRANSFER}, {}, 0, nil, 0, nil, 1, &barrier)
-        
+
         clear_value := vk.ClearDepthStencilValue {depth = 1.0, stencil = 0}
         clear_range := vk.ImageSubresourceRange {
           aspectMask      = {.DEPTH},
@@ -366,7 +388,7 @@ _clear_depth_resources :: proc(
           layerCount      = 1,
         }
         vk.CmdClearDepthStencilImage(command_buffer, early_depth.image, .TRANSFER_DST_OPTIMAL, &clear_value, 1, &clear_range)
-        
+
         barrier_final := vk.ImageMemoryBarrier {
           sType               = .IMAGE_MEMORY_BARRIER,
           srcAccessMask       = {.TRANSFER_WRITE},
@@ -378,7 +400,7 @@ _clear_depth_resources :: proc(
         }
         vk.CmdPipelineBarrier(command_buffer, {.TRANSFER}, {.EARLY_FRAGMENT_TESTS}, {}, 0, nil, 0, nil, 1, &barrier_final)
       }
-      
+
       // Clear late depth texture
       late_depth := resources.get(resources_manager.image_2d_buffers, task.late_depth_texture)
       if late_depth != nil {
@@ -398,7 +420,7 @@ _clear_depth_resources :: proc(
           },
         }
         vk.CmdPipelineBarrier(command_buffer, {.TOP_OF_PIPE}, {.TRANSFER}, {}, 0, nil, 0, nil, 1, &barrier)
-        
+
         clear_value := vk.ClearDepthStencilValue {depth = 1.0, stencil = 0}
         clear_range := vk.ImageSubresourceRange {
           aspectMask      = {.DEPTH},
@@ -408,7 +430,7 @@ _clear_depth_resources :: proc(
           layerCount      = 1,
         }
         vk.CmdClearDepthStencilImage(command_buffer, late_depth.image, .TRANSFER_DST_OPTIMAL, &clear_value, 1, &clear_range)
-        
+
         barrier_final := vk.ImageMemoryBarrier {
           sType               = .IMAGE_MEMORY_BARRIER,
           srcAccessMask       = {.TRANSFER_WRITE},
@@ -420,7 +442,7 @@ _clear_depth_resources :: proc(
         }
         vk.CmdPipelineBarrier(command_buffer, {.TRANSFER}, {.EARLY_FRAGMENT_TESTS}, {}, 0, nil, 0, nil, 1, &barrier_final)
       }
-      
+
       // Clear pyramid
       pyramid_texture := resources.get(resources_manager.image_2d_buffers, task.depth_pyramid)
       if pyramid_texture == nil do continue
@@ -599,17 +621,17 @@ _init_early_depth_pipeline :: proc(
     return .ERROR_INITIALIZATION_FAILED
   }
 
-  // Load depth-only vertex shader (same as shadow pass)
+  // Load depth-only vertex shader (dedicated depth prepass)
   vert_module := gpu.create_shader_module(
     gpu_context.device,
-    #load("../shader/shadow/vert.spv"),
+    #load("../shader/depth_prepass/vert.spv"),
   ) or_return
   defer vk.DestroyShaderModule(gpu_context.device, vert_module, nil)
 
-  // Load minimal fragment shader (shadow frag is depth-only)
+  // Load minimal fragment shader (no custom depth writes, uses automatic depth from gl_Position.z)
   frag_module := gpu.create_shader_module(
     gpu_context.device,
-    #load("../shader/shadow/frag.spv"),
+    #load("../shader/depth_prepass/frag.spv"),
   ) or_return
   defer vk.DestroyShaderModule(gpu_context.device, frag_module, nil)
 
@@ -647,12 +669,14 @@ _init_early_depth_pipeline :: proc(
   }
 
   rasterizer := vk.PipelineRasterizationStateCreateInfo {
-    sType       = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
-    polygonMode = .FILL,
-    cullMode    = {.BACK},
-    frontFace   = .CLOCKWISE,
-    lineWidth   = 1.0,
+    sType                   = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+    rasterizerDiscardEnable = false,  // EXPLICIT: Must be false to rasterize!
+    polygonMode             = .FILL,
+    cullMode                = {},
+    frontFace               = .COUNTER_CLOCKWISE,
+    lineWidth               = 1.0,
   }
+  log.warnf("[EARLY DEPTH PIPELINE INIT] Rasterizer discard=%v (MUST BE FALSE!)", rasterizer.rasterizerDiscardEnable)
 
   multisampling := vk.PipelineMultisampleStateCreateInfo {
     sType                = .PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
@@ -745,6 +769,30 @@ _init_depth_pyramid_pipeline :: proc(
     },
     nil,
     &system.depth_pyramid_pipeline_layout,
+  ) or_return
+
+  copy_shader := gpu.create_shader_module(
+    gpu_context.device,
+    #load("../shader/visibility_culling/depth_copy.spv"),
+  ) or_return
+  defer vk.DestroyShaderModule(gpu_context.device, copy_shader, nil)
+
+  vk.CreateComputePipelines(
+    gpu_context.device,
+    0,
+    1,
+    &vk.ComputePipelineCreateInfo {
+      sType  = .COMPUTE_PIPELINE_CREATE_INFO,
+      stage  = {
+        sType  = .PIPELINE_SHADER_STAGE_CREATE_INFO,
+        stage  = {.COMPUTE},
+        module = copy_shader,
+        pName  = "main",
+      },
+      layout = system.depth_pyramid_pipeline_layout,
+    },
+    nil,
+    &system.depth_copy_pipeline,
   ) or_return
 
   shader := gpu.create_shader_module(
@@ -860,14 +908,14 @@ _init_late_depth_pipeline :: proc(
     return .ERROR_INITIALIZATION_FAILED
   }
 
-  // Load depth-only vertex shader (same as shadow pass)
+  // Load depth-only vertex shader (dedicated depth prepass)
   vert_module := gpu.create_shader_module(
     gpu_context.device,
     #load("../shader/shadow/vert.spv"),
   ) or_return
   defer vk.DestroyShaderModule(gpu_context.device, vert_module, nil)
 
-  // Load minimal fragment shader (shadow frag is depth-only)
+  // Load minimal fragment shader (no custom depth writes)
   frag_module := gpu.create_shader_module(
     gpu_context.device,
     #load("../shader/shadow/frag.spv"),
@@ -910,8 +958,8 @@ _init_late_depth_pipeline :: proc(
   rasterizer := vk.PipelineRasterizationStateCreateInfo {
     sType       = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
     polygonMode = .FILL,
-    cullMode    = {.BACK},
-    frontFace   = .CLOCKWISE,
+    cullMode    = {},
+    frontFace   = .COUNTER_CLOCKWISE,
     lineWidth   = 1.0,
   }
 
@@ -1216,78 +1264,73 @@ _create_descriptor_sets :: proc(
 
       // Create descriptor sets for depth pyramid generation
       pyramid_tex := resources.get(resources_manager.image_2d_buffers, task.depth_pyramid)
-      if pyramid_tex != nil && task.depth_pyramid_mips > 1 {
-        // Allocate descriptor sets for each mip transition
-        num_transitions := task.depth_pyramid_mips - 1
-        pyramid_layouts := make([]vk.DescriptorSetLayout, num_transitions)
-        defer delete(pyramid_layouts)
-        for i in 0 ..< num_transitions do pyramid_layouts[i] = system.depth_pyramid_descriptor_layout
-
-        pyramid_sets := make([]vk.DescriptorSet, num_transitions)
-        defer delete(pyramid_sets)
-
-        vk.AllocateDescriptorSets(
-          gpu_context.device,
-          &vk.DescriptorSetAllocateInfo {
-            sType              = .DESCRIPTOR_SET_ALLOCATE_INFO,
-            descriptorPool     = gpu_context.descriptor_pool,
-            descriptorSetCount = u32(num_transitions),
-            pSetLayouts        = raw_data(pyramid_layouts),
-          },
-          raw_data(pyramid_sets),
-        ) or_return
-
-        // Create individual mip image views for storage access
-        for mip_level in 0 ..< task.depth_pyramid_mips {
-          mip_view_info := vk.ImageViewCreateInfo {
-            sType    = .IMAGE_VIEW_CREATE_INFO,
-            image    = pyramid_tex.image,
-            viewType = .D2,
-            format   = .R32_SFLOAT,
-            subresourceRange = {
-              aspectMask     = {.COLOR},
-              baseMipLevel   = u32(mip_level),
-              levelCount     = 1,
-              baseArrayLayer = 0,
-              layerCount     = 1,
-            },
+      if pyramid_tex != nil {
+        if len(task.depth_pyramid_mip_views) == 0 {
+          for mip_level in 0 ..< task.depth_pyramid_mips {
+            mip_view_info := vk.ImageViewCreateInfo {
+              sType    = .IMAGE_VIEW_CREATE_INFO,
+              image    = pyramid_tex.image,
+              viewType = .D2,
+              format   = .R32_SFLOAT,
+              subresourceRange = {
+                aspectMask     = {.COLOR},
+                baseMipLevel   = u32(mip_level),
+                levelCount     = 1,
+                baseArrayLayer = 0,
+                layerCount     = 1,
+              },
+            }
+            view: vk.ImageView
+            vk.CreateImageView(
+              gpu_context.device,
+              &mip_view_info,
+              nil,
+              &view,
+            ) or_return
+            append(&task.depth_pyramid_mip_views, view)
           }
-          view: vk.ImageView
-          vk.CreateImageView(
-            gpu_context.device,
-            &mip_view_info,
-            nil,
-            &view,
-          ) or_return
-          append(&task.depth_pyramid_mip_views, view)
         }
 
-        // Update descriptor sets for each mip transition
-        for i in 0 ..< num_transitions {
-          src_mip := i
-          dst_mip := i + 1
+        if task.depth_copy_descriptor_set == 0 {
+          copy_layout := system.depth_pyramid_descriptor_layout
+          vk.AllocateDescriptorSets(
+            gpu_context.device,
+            &vk.DescriptorSetAllocateInfo {
+              sType              = .DESCRIPTOR_SET_ALLOCATE_INFO,
+              descriptorPool     = gpu_context.descriptor_pool,
+              descriptorSetCount = 1,
+              pSetLayouts        = &copy_layout,
+            },
+            &task.depth_copy_descriptor_set,
+          ) or_return
 
-          writes := [?]vk.WriteDescriptorSet {
+          early_depth_img := resources.get(resources_manager.image_2d_buffers, task.early_depth_texture)
+          if early_depth_img == nil {
+            log.error("Failed to get early depth texture for copy descriptor")
+            return .ERROR_INITIALIZATION_FAILED
+          }
+
+          copy_writes := [?]vk.WriteDescriptorSet {
             {
               sType           = .WRITE_DESCRIPTOR_SET,
-              dstSet          = pyramid_sets[i],
+              dstSet          = task.depth_copy_descriptor_set,
               dstBinding      = 0,
               descriptorType  = .COMBINED_IMAGE_SAMPLER,
               descriptorCount = 1,
               pImageInfo      = &vk.DescriptorImageInfo {
                 sampler     = resources_manager.depth_pyramid_sampler,
-                imageView   = task.depth_pyramid_mip_views[src_mip],
-                imageLayout = .GENERAL,  // Must match actual layout during pyramid generation
+                imageView   = early_depth_img.view,
+                imageLayout = .SHADER_READ_ONLY_OPTIMAL,
               },
             },
             {
               sType           = .WRITE_DESCRIPTOR_SET,
-              dstSet          = pyramid_sets[i],
+              dstSet          = task.depth_copy_descriptor_set,
               dstBinding      = 1,
               descriptorType  = .STORAGE_IMAGE,
               descriptorCount = 1,
               pImageInfo      = &vk.DescriptorImageInfo {
-                imageView   = task.depth_pyramid_mip_views[dst_mip],
+                imageView   = task.depth_pyramid_mip_views[0],
                 imageLayout = .GENERAL,
               },
             },
@@ -1295,13 +1338,74 @@ _create_descriptor_sets :: proc(
 
           vk.UpdateDescriptorSets(
             gpu_context.device,
-            len(writes),
-            raw_data(writes[:]),
+            len(copy_writes),
+            raw_data(copy_writes[:]),
             0,
             nil,
           )
+        }
 
-          append(&task.pyramid_gen_descriptor_sets, pyramid_sets[i])
+        if task.depth_pyramid_mips > 1 && len(task.pyramid_gen_descriptor_sets) == 0 {
+          num_transitions := task.depth_pyramid_mips - 1
+          pyramid_layouts := make([]vk.DescriptorSetLayout, num_transitions)
+          defer delete(pyramid_layouts)
+          for i in 0 ..< num_transitions do pyramid_layouts[i] = system.depth_pyramid_descriptor_layout
+
+          pyramid_sets := make([]vk.DescriptorSet, num_transitions)
+          defer delete(pyramid_sets)
+
+          vk.AllocateDescriptorSets(
+            gpu_context.device,
+            &vk.DescriptorSetAllocateInfo {
+              sType              = .DESCRIPTOR_SET_ALLOCATE_INFO,
+              descriptorPool     = gpu_context.descriptor_pool,
+              descriptorSetCount = u32(num_transitions),
+              pSetLayouts        = raw_data(pyramid_layouts),
+            },
+            raw_data(pyramid_sets),
+          ) or_return
+
+          // Update descriptor sets for each mip transition
+          for i in 0 ..< num_transitions {
+            src_mip := i
+            dst_mip := i + 1
+
+            writes := [?]vk.WriteDescriptorSet {
+              {
+                sType           = .WRITE_DESCRIPTOR_SET,
+                dstSet          = pyramid_sets[i],
+                dstBinding      = 0,
+                descriptorType  = .COMBINED_IMAGE_SAMPLER,
+                descriptorCount = 1,
+                pImageInfo      = &vk.DescriptorImageInfo {
+                  sampler     = resources_manager.depth_pyramid_sampler,
+                  imageView   = task.depth_pyramid_mip_views[src_mip],
+                  imageLayout = .GENERAL,
+                },
+              },
+              {
+                sType           = .WRITE_DESCRIPTOR_SET,
+                dstSet          = pyramid_sets[i],
+                dstBinding      = 1,
+                descriptorType  = .STORAGE_IMAGE,
+                descriptorCount = 1,
+                pImageInfo      = &vk.DescriptorImageInfo {
+                  imageView   = task.depth_pyramid_mip_views[dst_mip],
+                  imageLayout = .GENERAL,
+                },
+              },
+            }
+
+            vk.UpdateDescriptorSets(
+              gpu_context.device,
+              len(writes),
+              raw_data(writes[:]),
+              0,
+              nil,
+            )
+
+            append(&task.pyramid_gen_descriptor_sets, pyramid_sets[i])
+          }
         }
       }
     }
@@ -1321,6 +1425,7 @@ visibility_system_shutdown :: proc(
   // Destroy pipelines
   vk.DestroyPipeline(gpu_context.device, system.early_cull_pipeline, nil)
   vk.DestroyPipeline(gpu_context.device, system.early_depth_pipeline, nil)
+  vk.DestroyPipeline(gpu_context.device, system.depth_copy_pipeline, nil)
   vk.DestroyPipeline(gpu_context.device, system.depth_pyramid_pipeline, nil)
   vk.DestroyPipeline(gpu_context.device, system.late_cull_pipeline, nil)
   vk.DestroyPipeline(gpu_context.device, system.late_depth_pipeline, nil)
@@ -1345,6 +1450,8 @@ visibility_system_shutdown :: proc(
       gpu.data_buffer_destroy(gpu_context.device, &task.late_draw_count)
       gpu.data_buffer_destroy(gpu_context.device, &task.late_draw_commands)
       gpu.data_buffer_destroy(gpu_context.device, &task.visibility_buffer)
+      gpu.data_buffer_destroy(gpu_context.device, &task.depth_debug_samples)
+      gpu.data_buffer_destroy(gpu_context.device, &task.early_depth_debug_samples)
 
       // Clean up depth pyramid mip views
       for view in task.depth_pyramid_mip_views {
@@ -1356,6 +1463,7 @@ visibility_system_shutdown :: proc(
       // Note: depth_pyramid is managed by resources.Manager
       task.early_descriptor_set = 0
       task.late_descriptor_set = 0
+      task.depth_copy_descriptor_set = 0
     }
   }
 }
@@ -1363,9 +1471,6 @@ visibility_system_shutdown :: proc(
 visibility_system_set_node_count :: proc(system: ^VisibilitySystem, count: u32) {
   old_count := system.node_count
   system.node_count = min(count, system.max_draws)
-  log.warnf("[Visibility] set_node_count: %d active nodes -> node_count=%d (max_draws=%d)",
-            count, system.node_count, system.max_draws)
-
   if count != system.node_count {
     log.errorf("[Visibility] Node count CLAMPED from %d to %d by max_draws!", count, system.node_count)
   }
@@ -1385,7 +1490,11 @@ _generate_depth_pyramid :: proc(
   resources_manager: ^resources.Manager,
   early_depth_texture: ^gpu.ImageBuffer,
 ) {
-  if task.depth_pyramid_mips <= 1 {
+  if task.depth_pyramid_mips == 0 {
+    return
+  }
+  if early_depth_texture == nil {
+    log.error("Early depth texture unavailable for pyramid generation")
     return
   }
 
@@ -1395,15 +1504,114 @@ _generate_depth_pyramid :: proc(
     return
   }
 
-  // Transition all pyramid mips to GENERAL layout for compute writes
-  pyramid_barrier := vk.ImageMemoryBarrier {
-    sType               = .IMAGE_MEMORY_BARRIER,
-    srcAccessMask       = {.SHADER_READ},
-    dstAccessMask       = {.SHADER_WRITE, .SHADER_READ},
-    oldLayout           = .SHADER_READ_ONLY_OPTIMAL,
-    newLayout           = .GENERAL,
-    image               = pyramid_texture.image,
-    subresourceRange    = {
+  if task.depth_copy_descriptor_set == 0 {
+    log.error("Depth copy descriptor set missing")
+    return
+  }
+  if task.depth_pyramid_mips > 1 && len(task.pyramid_gen_descriptor_sets) == 0 {
+    log.error("Depth pyramid descriptor sets not initialized")
+    return
+  }
+
+  if task.early_depth_debug_samples.buffer != 0 {
+    sample_points := [4]vk.BufferImageCopy{}
+    width := i32(system.depth_extent.width)
+    height := i32(system.depth_extent.height)
+    mid_x := max(width / 2, 0)
+    mid_y := max(height / 2, 0)
+    sample_offsets := [4][2]i32{
+      {0, 0},
+      {mid_x, mid_y},
+      {width - 1, height - 1},
+      {max(width / 4, 0), max(height * 3 / 4, 0)},
+    }
+    for i in 0 ..< len(sample_points) {
+      off := sample_offsets[i]
+      sample_points[i] = vk.BufferImageCopy {
+        bufferOffset      = vk.DeviceSize(i * size_of(f32)),
+        bufferRowLength   = 0,
+        bufferImageHeight = 0,
+        imageSubresource  = {
+          aspectMask     = {.DEPTH},
+          mipLevel       = 0,
+          baseArrayLayer = 0,
+          layerCount     = 1,
+        },
+        imageOffset       = {x = math.clamp(off[0], 0, width - 1), y = math.clamp(off[1], 0, height - 1), z = 0},
+        imageExtent       = {width = 1, height = 1, depth = 1},
+      }
+    }
+    early_to_transfer := vk.ImageMemoryBarrier {
+      sType               = .IMAGE_MEMORY_BARRIER,
+      srcAccessMask       = {.SHADER_READ},
+      dstAccessMask       = {.TRANSFER_READ},
+      oldLayout           = .SHADER_READ_ONLY_OPTIMAL,
+      newLayout           = .TRANSFER_SRC_OPTIMAL,
+      image               = early_depth_texture.image,
+      subresourceRange    = {
+        aspectMask      = {.DEPTH},
+        baseMipLevel    = 0,
+        levelCount      = 1,
+        baseArrayLayer  = 0,
+        layerCount      = 1,
+      },
+    }
+    vk.CmdPipelineBarrier(
+      command_buffer,
+      {.COMPUTE_SHADER},
+      {.TRANSFER},
+      {},
+      0, nil,
+      0, nil,
+      1,
+      &early_to_transfer,
+    )
+
+    vk.CmdCopyImageToBuffer(
+      command_buffer,
+      early_depth_texture.image,
+      .TRANSFER_SRC_OPTIMAL,
+      task.early_depth_debug_samples.buffer,
+      len(sample_points),
+      raw_data(sample_points[:]),
+    )
+
+    transfer_back := vk.ImageMemoryBarrier {
+      sType               = .IMAGE_MEMORY_BARRIER,
+      srcAccessMask       = {.TRANSFER_READ},
+      dstAccessMask       = {.SHADER_READ},
+      oldLayout           = .TRANSFER_SRC_OPTIMAL,
+      newLayout           = .SHADER_READ_ONLY_OPTIMAL,
+      image               = early_depth_texture.image,
+      subresourceRange    = {
+        aspectMask      = {.DEPTH},
+        baseMipLevel    = 0,
+        levelCount      = 1,
+        baseArrayLayer  = 0,
+        layerCount      = 1,
+      },
+    }
+    vk.CmdPipelineBarrier(
+      command_buffer,
+      {.TRANSFER},
+      {.COMPUTE_SHADER},
+      {},
+      0, nil,
+      0, nil,
+      1,
+      &transfer_back,
+    )
+  }
+
+  // Make pyramid writable for this frame's compute work
+  to_general := vk.ImageMemoryBarrier {
+    sType            = .IMAGE_MEMORY_BARRIER,
+    srcAccessMask    = {.SHADER_READ},
+    dstAccessMask    = {.SHADER_WRITE, .SHADER_READ},
+    oldLayout        = .SHADER_READ_ONLY_OPTIMAL,
+    newLayout        = .GENERAL,
+    image            = pyramid_texture.image,
+    subresourceRange = {
       aspectMask      = {.COLOR},
       baseMipLevel    = 0,
       levelCount      = task.depth_pyramid_mips,
@@ -1419,102 +1627,45 @@ _generate_depth_pyramid :: proc(
     {},
     0, nil,
     0, nil,
-    1, &pyramid_barrier,
+    1, &to_general,
   )
 
-  // Bind pipeline
-  vk.CmdBindPipeline(command_buffer, .COMPUTE, system.depth_pyramid_pipeline)
-
-  // First transition: Sample from early_depth, write to pyramid mip 0
-  // We need a temporary descriptor set that samples early_depth and writes to pyramid mip 0
-  first_desc_set: vk.DescriptorSet
-  vk.AllocateDescriptorSets(
-    gpu_context.device,
-    &vk.DescriptorSetAllocateInfo {
-      sType              = .DESCRIPTOR_SET_ALLOCATE_INFO,
-      descriptorPool     = gpu_context.descriptor_pool,
-      descriptorSetCount = 1,
-      pSetLayouts        = &system.depth_pyramid_descriptor_layout,
-    },
-    &first_desc_set,
-  )
-  
-  first_writes := [?]vk.WriteDescriptorSet {
-    {
-      sType           = .WRITE_DESCRIPTOR_SET,
-      dstSet          = first_desc_set,
-      dstBinding      = 0,
-      descriptorType  = .COMBINED_IMAGE_SAMPLER,
-      descriptorCount = 1,
-      pImageInfo      = &vk.DescriptorImageInfo {
-        sampler     = resources_manager.depth_pyramid_sampler,
-        imageView   = early_depth_texture.view,
-        imageLayout = .SHADER_READ_ONLY_OPTIMAL,
-      },
-    },
-    {
-      sType           = .WRITE_DESCRIPTOR_SET,
-      dstSet          = first_desc_set,
-      dstBinding      = 1,
-      descriptorType  = .STORAGE_IMAGE,
-      descriptorCount = 1,
-      pImageInfo      = &vk.DescriptorImageInfo {
-        imageView   = task.depth_pyramid_mip_views[0],
-        imageLayout = .GENERAL,
-      },
-    },
-  }
-  
-  vk.UpdateDescriptorSets(
-    gpu_context.device,
-    len(first_writes),
-    raw_data(first_writes[:]),
-    0,
-    nil,
-  )
-  
-  // Dispatch: early_depth → pyramid mip 0
+  // Copy camera depth into pyramid mip 0 using compute (matches Niagara approach)
+  vk.CmdBindPipeline(command_buffer, .COMPUTE, system.depth_copy_pipeline)
   vk.CmdBindDescriptorSets(
     command_buffer,
     .COMPUTE,
     system.depth_pyramid_pipeline_layout,
     0,
     1,
-    &first_desc_set,
+    &task.depth_copy_descriptor_set,
     0,
     nil,
   )
-  
-  dst_width := max(system.depth_extent.width / 2, 1)
-  dst_height := max(system.depth_extent.height / 2, 1)
-  
-  first_push := DepthPyramidPushConstants {
-    src_mip  = 0,
-    dst_mip  = 0,
-    dst_size = {dst_width, dst_height},
+
+  copy_push := DepthCopyPushConstants {
+    dst_size = {system.depth_extent.width, system.depth_extent.height},
   }
-  
   vk.CmdPushConstants(
     command_buffer,
     system.depth_pyramid_pipeline_layout,
     {.COMPUTE},
     0,
-    size_of(first_push),
-    &first_push,
+    size_of(copy_push),
+    &copy_push,
   )
-  
-  dispatch_x := (dst_width + 15) / 16
-  dispatch_y := (dst_height + 15) / 16
-  vk.CmdDispatch(command_buffer, dispatch_x, dispatch_y, 1)
-  
-  // Barrier: pyramid mip 0 write complete
-  if task.depth_pyramid_mips > 1 {
-    mip0_barrier := vk.ImageMemoryBarrier {
+
+  copy_dispatch_x := (system.depth_extent.width + 15) / 16
+  copy_dispatch_y := (system.depth_extent.height + 15) / 16
+  vk.CmdDispatch(command_buffer, copy_dispatch_x, copy_dispatch_y, 1)
+
+  if task.depth_pyramid_mips == 1 {
+    final_barrier_single := vk.ImageMemoryBarrier {
       sType               = .IMAGE_MEMORY_BARRIER,
       srcAccessMask       = {.SHADER_WRITE},
       dstAccessMask       = {.SHADER_READ},
       oldLayout           = .GENERAL,
-      newLayout           = .GENERAL,
+      newLayout           = .SHADER_READ_ONLY_OPTIMAL,
       image               = pyramid_texture.image,
       subresourceRange    = {
         aspectMask      = {.COLOR},
@@ -1531,19 +1682,49 @@ _generate_depth_pyramid :: proc(
       {},
       0, nil,
       0, nil,
-      1, &mip0_barrier,
+      1,
+      &final_barrier_single,
     )
+    return
   }
 
-  // Generate remaining mip levels: pyramid mip N → pyramid mip N+1
-  current_width := dst_width
-  current_height := dst_height
+  // Ensure mip 0 writes are visible before generating higher mips
+  mip0_ready := vk.ImageMemoryBarrier {
+    sType               = .IMAGE_MEMORY_BARRIER,
+    srcAccessMask       = {.SHADER_WRITE},
+    dstAccessMask       = {.SHADER_READ},
+    oldLayout           = .GENERAL,
+    newLayout           = .GENERAL,
+    image               = pyramid_texture.image,
+    subresourceRange    = {
+      aspectMask      = {.COLOR},
+      baseMipLevel    = 0,
+      levelCount      = 1,
+      baseArrayLayer  = 0,
+      layerCount      = 1,
+    },
+  }
+  vk.CmdPipelineBarrier(
+    command_buffer,
+    {.COMPUTE_SHADER},
+    {.COMPUTE_SHADER},
+    {},
+    0, nil,
+    0, nil,
+    1,
+    &mip0_ready,
+  )
+
+  // Downsample remaining mips
+  vk.CmdBindPipeline(command_buffer, .COMPUTE, system.depth_pyramid_pipeline)
+
+  current_width := system.depth_extent.width
+  current_height := system.depth_extent.height
 
   for mip_level in 0 ..< task.depth_pyramid_mips - 1 {
     dst_width := max(current_width / 2, 1)
     dst_height := max(current_height / 2, 1)
 
-    // Bind descriptor set for this mip transition
     vk.CmdBindDescriptorSets(
       command_buffer,
       .COMPUTE,
@@ -1555,13 +1736,11 @@ _generate_depth_pyramid :: proc(
       nil,
     )
 
-    // Push constants
     push := DepthPyramidPushConstants {
       src_mip  = u32(mip_level),
       dst_mip  = u32(mip_level + 1),
       dst_size = {dst_width, dst_height},
     }
-
     vk.CmdPushConstants(
       command_buffer,
       system.depth_pyramid_pipeline_layout,
@@ -1571,12 +1750,10 @@ _generate_depth_pyramid :: proc(
       &push,
     )
 
-    // Dispatch compute shader
     dispatch_x := (dst_width + 15) / 16
     dispatch_y := (dst_height + 15) / 16
     vk.CmdDispatch(command_buffer, dispatch_x, dispatch_y, 1)
 
-    // Barrier between mip levels (src mip -> dst mip)
     if mip_level < task.depth_pyramid_mips - 2 {
       mip_barrier := vk.ImageMemoryBarrier {
         sType               = .IMAGE_MEMORY_BARRIER,
@@ -1601,7 +1778,8 @@ _generate_depth_pyramid :: proc(
         {},
         0, nil,
         0, nil,
-        1, &mip_barrier,
+        1,
+        &mip_barrier,
       )
     }
 
@@ -1609,12 +1787,87 @@ _generate_depth_pyramid :: proc(
     current_height = dst_height
   }
 
-  // Final transition to SHADER_READ_ONLY for late pass sampling
+  current_layout := vk.ImageLayout.GENERAL
+
+  if task.depth_debug_samples.buffer != 0 {
+    // Make pyramid mip 0 available for transfer and copy a single texel to the debug buffer
+    to_transfer := vk.ImageMemoryBarrier {
+      sType               = .IMAGE_MEMORY_BARRIER,
+      srcAccessMask       = {.SHADER_WRITE},
+      dstAccessMask       = {.TRANSFER_READ},
+      oldLayout           = .GENERAL,
+      newLayout           = .TRANSFER_SRC_OPTIMAL,
+      image               = pyramid_texture.image,
+      subresourceRange    = {
+        aspectMask      = {.COLOR},
+        baseMipLevel    = 0,
+        levelCount      = 1,
+        baseArrayLayer  = 0,
+        layerCount      = 1,
+      },
+    }
+    vk.CmdPipelineBarrier(
+      command_buffer,
+      {.COMPUTE_SHADER},
+      {.TRANSFER},
+      {},
+      0, nil,
+      0, nil,
+      1,
+      &to_transfer,
+    )
+
+    pyramid_points := [4]vk.BufferImageCopy{}
+    width := i32(system.depth_extent.width)
+    height := i32(system.depth_extent.height)
+    mid_x := max(width / 2, 0)
+    mid_y := max(height / 2, 0)
+    sample_offsets := [4][2]i32{
+      {0, 0},
+      {mid_x, mid_y},
+      {width - 1, height - 1},
+      {max(width / 4, 0), max(height * 3 / 4, 0)},
+    }
+    for i in 0 ..< len(pyramid_points) {
+      off := sample_offsets[i]
+      pyramid_points[i] = vk.BufferImageCopy {
+        bufferOffset      = vk.DeviceSize(i * size_of(f32)),
+        bufferRowLength   = 0,
+        bufferImageHeight = 0,
+        imageSubresource  = {
+          aspectMask     = {.COLOR},
+          mipLevel       = 0,
+          baseArrayLayer = 0,
+          layerCount     = 1,
+        },
+        imageOffset       = {x = math.clamp(off[0], 0, width - 1), y = math.clamp(off[1], 0, height - 1), z = 0},
+        imageExtent       = {width = 1, height = 1, depth = 1},
+      }
+    }
+    vk.CmdCopyImageToBuffer(
+      command_buffer,
+      pyramid_texture.image,
+      .TRANSFER_SRC_OPTIMAL,
+      task.depth_debug_samples.buffer,
+      len(pyramid_points),
+      raw_data(pyramid_points[:]),
+    )
+
+    current_layout = .TRANSFER_SRC_OPTIMAL
+  }
+
+  src_stage := vk.PipelineStageFlags {.COMPUTE_SHADER}
+  src_access := vk.AccessFlags {.SHADER_WRITE}
+  if current_layout == .TRANSFER_SRC_OPTIMAL {
+    src_stage = {.TRANSFER}
+    src_access = {.TRANSFER_READ}
+  }
+
   final_barrier := vk.ImageMemoryBarrier {
     sType               = .IMAGE_MEMORY_BARRIER,
-    srcAccessMask       = {.SHADER_WRITE},
+    srcAccessMask       = src_access,
     dstAccessMask       = {.SHADER_READ},
-    oldLayout           = .GENERAL,
+    oldLayout           = current_layout,
     newLayout           = .SHADER_READ_ONLY_OPTIMAL,
     image               = pyramid_texture.image,
     subresourceRange    = {
@@ -1628,12 +1881,40 @@ _generate_depth_pyramid :: proc(
 
   vk.CmdPipelineBarrier(
     command_buffer,
-    {.COMPUTE_SHADER},
-    {.COMPUTE_SHADER},
+    src_stage,
+    {.EARLY_FRAGMENT_TESTS, .LATE_FRAGMENT_TESTS},
     {},
     0, nil,
     0, nil,
-    1, &final_barrier,
+    1,
+    &final_barrier,
+  )
+
+  restore_depth := vk.ImageMemoryBarrier {
+    sType               = .IMAGE_MEMORY_BARRIER,
+    srcAccessMask       = {.SHADER_READ},
+    dstAccessMask       = {.DEPTH_STENCIL_ATTACHMENT_WRITE},
+    oldLayout           = .SHADER_READ_ONLY_OPTIMAL,
+    newLayout           = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+    image               = early_depth_texture.image,
+    subresourceRange    = {
+      aspectMask      = {.DEPTH},
+      baseMipLevel    = 0,
+      levelCount      = 1,
+      baseArrayLayer  = 0,
+      layerCount      = 1,
+    },
+  }
+
+  vk.CmdPipelineBarrier(
+    command_buffer,
+    {.COMPUTE_SHADER},
+    {.EARLY_FRAGMENT_TESTS, .LATE_FRAGMENT_TESTS},
+    {},
+    0, nil,
+    0, nil,
+    1,
+    &restore_depth,
   )
 }
 
@@ -1670,11 +1951,12 @@ _render_early_depth :: proc(
   }
 
   // Transition depth to ATTACHMENT_OPTIMAL for rendering
+  // Using UNDEFINED as oldLayout is safe because we're clearing (loadOp = CLEAR)
   depth_barrier_to_attach := vk.ImageMemoryBarrier {
     sType               = .IMAGE_MEMORY_BARRIER,
-    srcAccessMask       = {.DEPTH_STENCIL_ATTACHMENT_WRITE},
+    srcAccessMask       = {},
     dstAccessMask       = {.DEPTH_STENCIL_ATTACHMENT_WRITE, .DEPTH_STENCIL_ATTACHMENT_READ},
-    oldLayout           = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+    oldLayout           = .UNDEFINED,
     newLayout           = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
     image               = depth_img.image,
     subresourceRange    = {
@@ -1688,7 +1970,7 @@ _render_early_depth :: proc(
 
   vk.CmdPipelineBarrier(
     command_buffer,
-    {.EARLY_FRAGMENT_TESTS, .LATE_FRAGMENT_TESTS},
+    {.TOP_OF_PIPE},
     {.EARLY_FRAGMENT_TESTS, .LATE_FRAGMENT_TESTS},
     {},
     0, nil,
@@ -1717,12 +1999,15 @@ _render_early_depth :: proc(
 
   // Set viewport and scissor
   viewport := vk.Viewport {
+    x        = 0,
+    y        = f32(system.depth_extent.height),
     width    = f32(system.depth_extent.width),
-    height   = f32(system.depth_extent.height),
+    height   = -f32(system.depth_extent.height),
     minDepth = 0.0,
     maxDepth = 1.0,
   }
   scissor := vk.Rect2D {
+    offset = {x = 0, y = 0},
     extent = system.depth_extent,
   }
   vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
@@ -1747,14 +2032,14 @@ _render_early_depth :: proc(
 
   // Bind all descriptor sets (geometry pipeline layout)
   descriptor_sets := [?]vk.DescriptorSet {
-    resources_manager.world_matrix_descriptor_set,
-    resources_manager.mesh_data_descriptor_set,
-    resources_manager.node_data_descriptor_set,
-    resources_manager.material_buffer_descriptor_set,
     resources_manager.camera_buffer_descriptor_set,
     resources_manager.textures_descriptor_set,
     resources_manager.bone_buffer_descriptor_set,
-    resources_manager.lights_buffer_descriptor_set,
+    resources_manager.material_buffer_descriptor_set,
+    resources_manager.world_matrix_descriptor_set,
+    resources_manager.node_data_descriptor_set,
+    resources_manager.mesh_data_descriptor_set,
+    resources_manager.vertex_skinning_descriptor_set,
   }
   vk.CmdBindDescriptorSets(
     command_buffer,
@@ -1782,6 +2067,11 @@ _render_early_depth :: proc(
     size_of(push),
     &push,
   )
+
+  // DEBUG: Check draw count (this reads CPU buffer before GPU execution - will show stale data!)
+  count := task.early_draw_count.mapped != nil ? task.early_draw_count.mapped[0] : 999
+  log.infof("[EARLY DEPTH RENDER] frame_counter=%d, mapped_count_value=%d (NOTE: GPU hasn't run compute yet, so this is stale!)",
+            system.frame_counter, count)
 
   // Draw indexed indirect with count buffer (only draws as many as early pass generated)
   vk.CmdDrawIndexedIndirectCount(
@@ -1814,11 +2104,12 @@ _render_late_depth :: proc(
   }
 
   // Transition depth to ATTACHMENT_OPTIMAL for rendering
+  // Using UNDEFINED as oldLayout is safe because we're clearing (loadOp = CLEAR)
   depth_barrier_to_attach := vk.ImageMemoryBarrier {
     sType               = .IMAGE_MEMORY_BARRIER,
-    srcAccessMask       = {.DEPTH_STENCIL_ATTACHMENT_WRITE},
+    srcAccessMask       = {},
     dstAccessMask       = {.DEPTH_STENCIL_ATTACHMENT_WRITE, .DEPTH_STENCIL_ATTACHMENT_READ},
-    oldLayout           = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+    oldLayout           = .UNDEFINED,
     newLayout           = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
     image               = depth_img.image,
     subresourceRange    = {
@@ -1832,7 +2123,7 @@ _render_late_depth :: proc(
 
   vk.CmdPipelineBarrier(
     command_buffer,
-    {.EARLY_FRAGMENT_TESTS, .LATE_FRAGMENT_TESTS},
+    {.TOP_OF_PIPE},
     {.EARLY_FRAGMENT_TESTS, .LATE_FRAGMENT_TESTS},
     {},
     0, nil,
@@ -1861,12 +2152,15 @@ _render_late_depth :: proc(
 
   // Set viewport and scissor
   viewport := vk.Viewport {
+    x        = 0,
+    y        = f32(system.depth_extent.height),
     width    = f32(system.depth_extent.width),
-    height   = f32(system.depth_extent.height),
+    height   = -f32(system.depth_extent.height),
     minDepth = 0.0,
     maxDepth = 1.0,
   }
   scissor := vk.Rect2D {
+    offset = {x = 0, y = 0},
     extent = system.depth_extent,
   }
   vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
@@ -1891,14 +2185,14 @@ _render_late_depth :: proc(
 
   // Bind all descriptor sets (geometry pipeline layout)
   descriptor_sets := [?]vk.DescriptorSet {
-    resources_manager.world_matrix_descriptor_set,
-    resources_manager.mesh_data_descriptor_set,
-    resources_manager.node_data_descriptor_set,
-    resources_manager.material_buffer_descriptor_set,
     resources_manager.camera_buffer_descriptor_set,
     resources_manager.textures_descriptor_set,
     resources_manager.bone_buffer_descriptor_set,
-    resources_manager.lights_buffer_descriptor_set,
+    resources_manager.material_buffer_descriptor_set,
+    resources_manager.world_matrix_descriptor_set,
+    resources_manager.node_data_descriptor_set,
+    resources_manager.mesh_data_descriptor_set,
+    resources_manager.vertex_skinning_descriptor_set,
   }
   vk.CmdBindDescriptorSets(
     command_buffer,
@@ -2215,6 +2509,18 @@ visibility_system_dispatch :: proc(
     late_count := completed_task.late_draw_count.mapped != nil ? completed_task.late_draw_count.mapped[0] : 0
     early_debug := completed_task.early_debug_counter.mapped != nil ? completed_task.early_debug_counter.mapped[0] : 0
     late_debug := completed_task.late_debug_counter.mapped != nil ? completed_task.late_debug_counter.mapped[0] : 0
+    pyramid_samples := [4]f32{1.0, 1.0, 1.0, 1.0}
+    early_depth_samples := [4]f32{1.0, 1.0, 1.0, 1.0}
+    if completed_task.depth_debug_samples.mapped != nil {
+      for i in 0 ..< len(pyramid_samples) {
+        pyramid_samples[i] = completed_task.depth_debug_samples.mapped[i]
+      }
+    }
+    if completed_task.early_depth_debug_samples.mapped != nil {
+      for i in 0 ..< len(early_depth_samples) {
+        early_depth_samples[i] = completed_task.early_depth_debug_samples.mapped[i]
+      }
+    }
 
     // Decode sentinel values to understand execution
     early_msg := ""
@@ -2226,9 +2532,49 @@ visibility_system_dispatch :: proc(
       late_msg = fmt.tprintf(" [SENT_UNCHANGED]")
     }
 
-    log.warnf("[Visibility Frame %d RESULTS] Early: %d%s, Late: %d%s (category %v) frame_slot=%d",
+    extra_debug := ""
+    if early_count > 0 && completed_task.early_draw_commands.mapped != nil {
+      early_cmd := completed_task.early_draw_commands.mapped[0]
+      extra_debug = fmt.tprintf(
+        "%s EarlyCmd0[idx=%d, instCount=%d, first_idx=%d, vtx_off=%d, first_inst=%d]",
+        extra_debug,
+        early_cmd.indexCount,
+        early_cmd.instanceCount,
+        early_cmd.firstIndex,
+        early_cmd.vertexOffset,
+        early_cmd.firstInstance,
+      )
+    }
+    if late_count > 0 && completed_task.late_draw_commands.mapped != nil {
+      late_cmd := completed_task.late_draw_commands.mapped[0]
+      extra_debug = fmt.tprintf(
+        "%s LateCmd0[idx=%d, instCount=%d, first_idx=%d, vtx_off=%d, first_inst=%d]",
+        extra_debug,
+        late_cmd.indexCount,
+        late_cmd.instanceCount,
+        late_cmd.firstIndex,
+        late_cmd.vertexOffset,
+        late_cmd.firstInstance,
+      )
+    }
+    depth_bits := [4]u32{}
+    pyramid_bits := [4]u32{}
+    for i in 0 ..< len(depth_bits) {
+      depth_bits[i] = transmute(u32)early_depth_samples[i]
+      pyramid_bits[i] = transmute(u32)pyramid_samples[i]
+    }
+    log.warnf("[Visibility Frame %d RESULTS] Early: %d%s, Late: %d%s (category %v) frame_slot=%d depthSamples=[%.5f(0x%x), %.5f(0x%x), %.5f(0x%x), %.5f(0x%x)] earlyDepth=[%.5f(0x%x), %.5f(0x%x), %.5f(0x%x), %.5f(0x%x)]%s",
               system.frame_counter - u64(resources.MAX_FRAMES_IN_FLIGHT),
-              early_count, early_msg, late_count, late_msg, category, frame_index)
+              early_count, early_msg, late_count, late_msg, category, frame_index,
+              pyramid_samples[0], pyramid_bits[0],
+              pyramid_samples[1], pyramid_bits[1],
+              pyramid_samples[2], pyramid_bits[2],
+              pyramid_samples[3], pyramid_bits[3],
+              early_depth_samples[0], depth_bits[0],
+              early_depth_samples[1], depth_bits[1],
+              early_depth_samples[2], depth_bits[2],
+              early_depth_samples[3], depth_bits[3],
+              extra_debug)
   }
 
   return result

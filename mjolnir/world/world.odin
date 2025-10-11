@@ -480,9 +480,6 @@ update_visibility_system :: proc(world: ^World) {
       _, has_mesh := entry.item.attachment.(MeshAttachment)
       return has_mesh
   })
-
-  log.warnf("[World] update_visibility_system: %d active nodes (%d with meshes) out of %d total entries",
-            count, mesh_count, len(world.nodes.entries))
   visibility_system_set_node_count(&world.visibility, u32(count))
 }
 
@@ -593,7 +590,7 @@ traverse :: proc(world: ^World, resources_manager: ^resources.Manager = nil, cb_
         if skinning, has_skinning := mesh_attachment.skinning.?; has_skinning {
           data.bone_matrix_offset = skinning.bone_matrix_offset
         }
-        
+
         // DEBUG: Log first few nodes
         if world.first_gpu_update && entry.handle.index < 10 {
           log.warnf("[World] Node %d: visible=%v parent_visible=%v flags=0x%x mesh_id=%d",
