@@ -1,0 +1,24 @@
+#version 450
+
+// Copy depth buffer to pyramid mip 0, converting D32_SFLOAT to R32_SFLOAT
+
+layout(local_size_x = 32, local_size_y = 32, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) uniform sampler2D depth_texture;
+layout(set = 0, binding = 1, r32f) uniform writeonly image2D pyramid_mip0;
+
+void main() {
+    ivec2 pos = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 pyramid_size = imageSize(pyramid_mip0);
+    
+    if (pos.x >= pyramid_size.x || pos.y >= pyramid_size.y) {
+        return;
+    }
+    
+    // Sample depth texture at current position
+    vec2 uv = (vec2(pos) + 0.5) / vec2(pyramid_size);
+    float depth = texture(depth_texture, uv).r;
+    
+    // Write to pyramid mip 0
+    imageStore(pyramid_mip0, pos, vec4(depth, 0, 0, 0));
+}

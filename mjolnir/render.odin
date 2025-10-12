@@ -596,6 +596,7 @@ record_shadow_pass :: proc(
             include_flags = shadow_include,
             exclude_flags = shadow_exclude,
           },
+          resources_manager,
         )
         shadow.begin_pass(render_target, command_buffer, resources_manager, frame_index, u32(face))
         shadow.render(
@@ -624,6 +625,7 @@ record_shadow_pass :: proc(
           include_flags = shadow_include,
           exclude_flags = shadow_exclude,
         },
+        resources_manager,
       )
       shadow.begin_pass(render_target, command_buffer, resources_manager, frame_index)
       shadow.render(
@@ -751,6 +753,7 @@ record_geometry_pass :: proc(
       include_flags = {.VISIBLE},
       exclude_flags = {.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME},
     },
+    resources_manager,
   )
   draw_buffer := vis_result.draw_buffer
   count_buffer := vis_result.count_buffer
@@ -918,6 +921,7 @@ record_transparency_pass :: proc(
       include_flags = {.VISIBLE, .MATERIAL_TRANSPARENT},
       exclude_flags = {},
     },
+    resources_manager,
   )
   command_stride := vis_transparent.command_stride
   transparency.render(
@@ -942,6 +946,7 @@ record_transparency_pass :: proc(
       include_flags = {.VISIBLE, .MATERIAL_WIREFRAME},
       exclude_flags = {},
     },
+    resources_manager,
   )
   transparency.render(
     &self.transparency,
@@ -1082,31 +1087,59 @@ record_render_target :: proc(
   // Update camera data
   targets.render_target_upload_camera_data(resources_manager, capture)
 
-  // Query visibility for capture camera
-  vis_result := world.query_visibility(
+  // Assign visibility category based on render target index
+  // We have CUSTOM0 and CUSTOM1 available for custom render targets
+  category := world.VisibilityCategory.CUSTOM0
+  if capture_index == 1 {
+    category = .CUSTOM1
+  }
+  // If there are more than 2 custom render targets, they will share categories
+  // (this is acceptable as they're rendered sequentially)
+
+  // Dispatch visibility using 2-pass occlusion culling (same as main geometry pass)
+  vis_result := world.dispatch_visibility(
     world_state,
     gpu_context,
     command_buffer,
     frame_index,
-    world.DrawCommandRequest {
-      camera_handle = {index = capture.camera.index},
+    category,
+    world.VisibilityRequest {
+      camera_index = capture.camera.index,
       include_flags = {.VISIBLE},
       exclude_flags = {.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME},
-      category = .CUSTOM0,
     },
+    resources_manager,
   )
 
   draw_buffer := vis_result.draw_buffer
   count_buffer := vis_result.count_buffer
+  command_stride := vis_result.command_stride
 
-  // Render G-buffer pass
+  // Render G-buffer pass with explicit depth prepass (same pattern as main geometry pass)
   if .GEOMETRY in capture.enabled_passes {
+    geometry_pass.begin_depth_prepass(
+      capture,
+      command_buffer,
+      resources_manager,
+      frame_index,
+    )
+    geometry_pass.render_depth_prepass(
+      &self.geometry,
+      command_buffer,
+      capture.camera.index,
+      resources_manager,
+      frame_index,
+      draw_buffer,
+      count_buffer,
+      command_stride,
+    )
+    geometry_pass.end_depth_prepass(command_buffer)
+
     geometry_pass.begin_pass(
       capture,
       command_buffer,
       resources_manager,
       frame_index,
-      self_manage_depth = true,
     )
 
     geometry_pass.render(
@@ -1117,7 +1150,7 @@ record_render_target :: proc(
       frame_index,
       draw_buffer,
       count_buffer,
-      vis_result.command_stride,
+      command_stride,
     )
 
     geometry_pass.end_pass(

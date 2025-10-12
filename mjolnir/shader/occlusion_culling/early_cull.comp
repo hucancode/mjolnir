@@ -1,0 +1,154 @@
+#version 450
+
+// Early pass culling - uses previous frame's visibility to build conservative draw list
+
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+const uint NODE_FLAG_VISIBLE = 1u << 0;
+const uint NODE_FLAG_CULLING_ENABLED = 1u << 1;
+const uint INVALID_ID = 0xFFFFFFFFu;
+
+struct Camera {
+    mat4 view;
+    mat4 projection;
+    vec4 viewport_params;
+    vec4 position;
+    vec4 frustum_planes[6];
+};
+
+struct NodeData {
+    uint material_id;
+    uint mesh_id;
+    uint bone_matrix_offset;
+    uint flags;
+};
+
+struct MeshData {
+    vec3 aabb_min;
+    uint index_count;
+    vec3 aabb_max;
+    uint first_index;
+    int vertex_offset;
+    uint vertex_skinning_offset;
+    uint flags;
+    uint _padding;
+};
+
+struct DrawCommand {
+    uint index_count;
+    uint instance_count;
+    uint first_index;
+    int vertex_offset;
+    uint first_instance;
+};
+
+layout(push_constant) uniform PushConstants {
+    uint camera_index;
+    uint node_count;
+    uint max_draws;
+    uint include_flags;
+    uint exclude_flags;
+    float pyramid_width;
+    float pyramid_height;
+    float depth_bias;
+    uint occlusion_enabled;
+} params;
+
+layout(set = 0, binding = 0) readonly buffer NodeBuffer {
+    NodeData nodes[];
+};
+
+layout(set = 0, binding = 1) readonly buffer MeshBuffer {
+    MeshData meshes[];
+};
+
+layout(set = 0, binding = 2) readonly buffer WorldBuffer {
+    mat4 world_matrices[];
+};
+
+layout(set = 0, binding = 3) readonly buffer CameraBuffer {
+    Camera cameras[];
+};
+
+layout(set = 0, binding = 4) readonly buffer PreviousVisibility {
+    uint prev_visibility[];
+};
+
+layout(set = 0, binding = 5) buffer DrawCountBuffer {
+    uint draw_count;
+};
+
+layout(set = 0, binding = 6) buffer DrawCommandBuffer {
+    DrawCommand commands[];
+};
+
+bool frustum_cull(vec3 center, vec3 extent, Camera camera) {
+    for (int i = 0; i < 6; ++i) {
+        vec4 plane_raw = camera.frustum_planes[i];
+        float denom = length(plane_raw.xyz);
+        if (denom <= 1e-6) continue;
+
+        vec3 normal = plane_raw.xyz / denom;
+        float distance = dot(normal, center) + plane_raw.w / denom;
+        float radius = dot(abs(normal), extent);
+
+        if (distance + radius < 0.0) {
+            return false; // Outside frustum
+        }
+    }
+    return true; // Inside frustum
+}
+
+void main() {
+    uint node_id = gl_GlobalInvocationID.x;
+    if (node_id >= params.node_count) return;
+
+    // Early pass: Only process objects that were visible in the previous frame
+    // This builds a conservative visibility set for depth rendering
+    if (prev_visibility[node_id] == 0u) return;
+
+    NodeData node = nodes[node_id];
+    if (node.mesh_id == INVALID_ID) return;
+
+    // Check flag filtering
+    if ((node.flags & params.include_flags) != params.include_flags) return;
+    if ((node.flags & params.exclude_flags) != 0u) return;
+
+    MeshData mesh = meshes[node.mesh_id];
+    if (mesh.index_count == 0u) return;
+
+    // Perform frustum culling with current frame's camera
+    Camera camera = cameras[params.camera_index];
+    mat4 world = world_matrices[node_id];
+
+    vec3 local_min = mesh.aabb_min;
+    vec3 local_max = mesh.aabb_max;
+    vec3 local_center = 0.5 * (local_min + local_max);
+    vec3 local_extent = 0.5 * (local_max - local_min);
+
+    vec4 world_center4 = world * vec4(local_center, 1.0);
+    vec3 world_center = world_center4.xyz / max(world_center4.w, 1e-6);
+
+    mat3 world3 = mat3(world);
+    mat3 abs_world3 = mat3(abs(world3[0]), abs(world3[1]), abs(world3[2]));
+    vec3 world_extent = abs_world3 * local_extent;
+
+    bool visible = true;
+    if ((node.flags & NODE_FLAG_CULLING_ENABLED) != 0u) {
+        visible = frustum_cull(world_center, world_extent, camera);
+    }
+
+    if (!visible) return;
+
+    // Add to early pass draw list
+    uint draw_index = atomicAdd(draw_count, 1);
+    if (draw_index >= params.max_draws) return;
+
+    DrawCommand cmd;
+    cmd.index_count = mesh.index_count;
+    cmd.instance_count = 1u;
+    cmd.first_index = mesh.first_index;
+    cmd.vertex_offset = mesh.vertex_offset;
+    cmd.first_instance = node_id;
+    commands[draw_index] = cmd;
+}

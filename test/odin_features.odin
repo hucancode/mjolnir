@@ -302,3 +302,32 @@ test_temp_allocator_overflow :: proc(t: ^testing.T) {
     testing.expect(t, all_55, "Second allocation should contain 0x55 pattern")
     free_all(context.temp_allocator)
 }
+
+// @(test)
+test_matrix_indexing :: proc(t: ^testing.T) {
+  fov := f32(math.PI/3.0)
+  aspect := f32(1.0)
+  near := f32(0.1)
+  far := f32(100.0)
+  proj := linalg.matrix4_perspective(fov, aspect, near, far)
+  expected_P22 := -(far + near) / (far - near)
+  expected_P32 := -2.0 * far * near / (far - near)
+  expected_P23 := f32(-1.0)
+  // For perspective projection, expected values are:
+  // P[2,2] should be -(f+n)/(f-n)
+  // P[2,3] should be -2*f*n/(f-n) (the depth offset term)
+  // P[3,2] should be -1 (the perspective divide)
+  testing.expect(t, abs(proj[2][2] - expected_P22) < 0.001, "proj[2][2] should be -(f+n)/(f-n)")
+  testing.expect(t, abs(proj[3][2] - expected_P32) < 0.001, "proj[2][3] should be -2fn/(f-n)")
+  testing.expect(t, abs(proj[2][3] - expected_P23) < 0.001, "proj[3][2] should be -1")
+  testing.expect(t, abs(proj[2,2] - expected_P22) < 0.001, "proj[2,2] should be -(f+n)/(f-n)")
+  testing.expect(t, abs(proj[2,3] - expected_P32) < 0.001, "proj[2,3] should be -2fn/(f-n)")
+  testing.expect(t, abs(proj[3,2] - expected_P23) < 0.001, "proj[3,2] should be -1")
+  // Test point at view_z = -10
+  view_z := f32(-10.0)
+  ndc_2 := (proj[2,2] * view_z + proj[2,3]) / -view_z
+  // Test with the full clip-space transformation
+  clip_pos := proj * linalg.Vector4f32{0, 0, view_z, 1}
+  ndc_correct := clip_pos.z / clip_pos.w
+  testing.expect(t, abs(ndc_2 - ndc_correct) < 0.001, "Method 2 (using proj[2,3]) should match full multiply")
+}

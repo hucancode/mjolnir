@@ -31,6 +31,34 @@ test:
 	timeout 50s odin test test/recast -out:bin/test && \
 	timeout 50s odin test test/detour -out:bin/test
 
+capture: build
+	@# Capture settings
+	@APP_PATH="./bin/main"; \
+	FRAME_N="5"; \
+	OUT_DIR="."; \
+	PPM_FILE="$$OUT_DIR/$$FRAME_N.ppm"; \
+	PNG_FILE="$$OUT_DIR/screenshot.png"; \
+	TIMEOUT_SEC="6"; \
+	\
+	command -v convert >/dev/null || { echo "Error: ImageMagick 'convert' not found" >&2; exit 1; }; \
+	command -v xvfb-run >/dev/null || { echo "Error: 'xvfb-run' not found" >&2; exit 1; }; \
+	\
+	echo "Running $$APP_PATH for $$TIMEOUT_SEC seconds to capture frame $$FRAME_N..."; \
+	VK_INSTANCE_LAYERS="VK_LAYER_LUNARG_screenshot" \
+	VK_SCREENSHOT_FRAMES="$$FRAME_N" \
+	VK_SCREENSHOT_DIR="$$OUT_DIR" \
+	xvfb-run -a -s "-screen 0 1920x1080x24" \
+	timeout "$${TIMEOUT_SEC}s" "$$APP_PATH" || true; \
+	\
+	if [ -f "$$PPM_FILE" ]; then \
+		convert "$$PPM_FILE" "$$PNG_FILE"; \
+		rm -f "$$PPM_FILE"; \
+		echo "Screenshot saved: $$PNG_FILE"; \
+	else \
+		echo "Error: no screenshot captured (file not found: $$PPM_FILE)" >&2; \
+		exit 1; \
+	fi
+
 clean:
 	rm -rf bin/*
 
