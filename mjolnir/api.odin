@@ -253,14 +253,14 @@ spawn_spot_light :: proc(
 ) -> (handle: resources.Handle, node: ^world.Node, ok: bool) {
   handle, node, ok = spawn(engine, nil)
   if !ok do return
-  
+
   attachment := world.create_spot_light_attachment(handle, &engine.resource_manager, &engine.gpu_context, color, radius, angle) or_return
   node.attachment = attachment
-  
+
   if position != {0, 0, 0} {
     translate(node, position.x, position.y, position.z)
   }
-  
+
   return
 }
 
@@ -272,33 +272,33 @@ spawn_point_light :: proc(
 ) -> (handle: resources.Handle, node: ^world.Node, ok: bool) {
   handle, node, ok = spawn(engine, nil)
   if !ok do return
-  
+
   attachment := world.create_point_light_attachment(handle, &engine.resource_manager, &engine.gpu_context, color, radius) or_return
   node.attachment = attachment
-  
+
   if position != {0, 0, 0} {
     translate(node, position.x, position.y, position.z)
   }
-  
+
   return
 }
 
 spawn_directional_light :: proc(
   engine: ^Engine,
   color: [4]f32,
-  cast_shadow := false,
+  cast_shadow := true,
   position: [3]f32 = {0, 0, 0},
 ) -> (handle: resources.Handle, node: ^world.Node, ok: bool) {
   handle, node, ok = spawn(engine, nil)
   if !ok do return
-  
+
   attachment := world.create_directional_light_attachment(handle, &engine.resource_manager, &engine.gpu_context, color, b32(cast_shadow))
   node.attachment = attachment
-  
+
   if position != {0, 0, 0} {
     translate(node, position.x, position.y, position.z)
   }
-  
+
   return
 }
 

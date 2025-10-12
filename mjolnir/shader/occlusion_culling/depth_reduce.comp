@@ -1,0 +1,44 @@
+#version 450
+
+// Depth pyramid generation shader - MAX reduction for forward-Z
+// This computes the farthest depth value in 2x2 blocks to build the depth hierarchy
+
+layout(local_size_x = 32, local_size_y = 32, local_size_z = 1) in;
+
+layout(push_constant) uniform PushConstants {
+    uint current_mip;
+    uint padding[3];
+} params;
+
+layout(set = 0, binding = 0) uniform sampler2D source_depth;
+layout(set = 0, binding = 1, r32f) uniform writeonly image2D dest_depth;
+
+void main() {
+    uvec2 pos = gl_GlobalInvocationID.xy;
+    ivec2 dest_size = imageSize(dest_depth);
+
+    // Bounds check
+    if (pos.x >= dest_size.x || pos.y >= dest_size.y) return;
+
+    float max_depth = 0.0; // Start with near plane (closest)
+
+    if (params.current_mip == 0) {
+        // For mip 0: Read from depth texture using texelFetch (no filtering)
+        // Sample a 2x2 block from the source depth texture and take MAX
+        ivec2 src_pos = ivec2(pos) * 2;
+        for (int y = 0; y < 2; y++) {
+            for (int x = 0; x < 2; x++) {
+                float d = texelFetch(source_depth, src_pos + ivec2(x, y), 0).r;
+                max_depth = max(max_depth, d);
+            }
+        }
+    } else {
+        // For other mips: Use filtered sampling with MAX reduction sampler
+        // The sampler is configured with MAX reduction, so texture() returns max of 2x2
+        vec2 uv = (vec2(pos) + 0.5) / vec2(dest_size);
+        max_depth = texture(source_depth, uv).r;
+    }
+
+    // Store the maximum depth value (farthest occluder for forward-Z)
+    imageStore(dest_depth, ivec2(pos), vec4(max_depth, 0, 0, 0));
+}

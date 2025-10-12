@@ -2,7 +2,9 @@ package world
 
 import "core:log"
 import "core:fmt"
+import "core:math"
 import gpu "../gpu"
+import geometry "../geometry"
 import resources "../resources"
 import vk "vendor:vulkan"
 
@@ -21,10 +23,39 @@ visibility_category_name :: proc(task: VisibilityCategory) -> string {
   return fmt.tprintf("%v", task)
 }
 
+// Enhanced visibility data for 2-pass culling
 VisibilityTask :: struct {
-  draw_count:    gpu.DataBuffer(u32),
-  draw_commands: gpu.DataBuffer(vk.DrawIndexedIndirectCommand),
-  descriptor_set: vk.DescriptorSet,
+  // Early pass buffers
+  early_visibility:   gpu.DataBuffer(u32), // Per-object visibility from previous frame
+  early_draw_count:   gpu.DataBuffer(u32),
+  early_draw_commands: gpu.DataBuffer(vk.DrawIndexedIndirectCommand),
+
+  // Late pass buffers
+  late_visibility:    gpu.DataBuffer(u32), // Current frame visibility
+  late_draw_count:    gpu.DataBuffer(u32),
+  late_draw_commands: gpu.DataBuffer(vk.DrawIndexedIndirectCommand),
+
+  // Depth resources
+  depth_texture:      gpu.ImageBuffer,
+  depth_pyramid:      DepthPyramid,
+  depth_framebuffer:  vk.Framebuffer,
+  depth_render_pass:  vk.RenderPass,
+
+  // Descriptor sets
+  early_descriptor_set: vk.DescriptorSet,
+  late_descriptor_set:  vk.DescriptorSet,
+  depth_reduce_descriptor_sets: [16]vk.DescriptorSet, // For each mip level
+}
+
+// Depth pyramid for hierarchical Z-buffer occlusion culling
+DepthPyramid :: struct {
+  texture:         gpu.ImageBuffer,
+  views:           [16]vk.ImageView, // Per-mip views for depth reduction (write)
+  full_view:       vk.ImageView,     // Full pyramid view for sampling (read all mips)
+  sampler:         vk.Sampler,
+  mip_levels:      u32,
+  width:           u32,
+  height:          u32,
 }
 
 VisibilityFrame :: struct {
@@ -38,11 +69,20 @@ VisibilityRequest :: struct {
 }
 
 VisibilityPushConstants :: struct {
-  camera_index:  u32,
-  node_count:    u32,
-  max_draws:     u32,
-  include_flags: resources.NodeFlagSet,
-  exclude_flags: resources.NodeFlagSet,
+  camera_index:   u32,
+  node_count:     u32,
+  max_draws:      u32,
+  include_flags:  resources.NodeFlagSet,
+  exclude_flags:  resources.NodeFlagSet,
+  pyramid_width:  f32,
+  pyramid_height: f32,
+  depth_bias:     f32,
+  occlusion_enabled: u32,
+}
+
+DepthReducePushConstants :: struct {
+  current_mip: u32,
+  _padding: [3]u32,
 }
 
 VisibilityResult :: struct {
@@ -51,13 +91,46 @@ VisibilityResult :: struct {
   command_stride: u32,
 }
 
+// Statistics for a single culling pass
+CullingStats :: struct {
+  early_draw_count:  u32,
+  late_draw_count:   u32,
+  category:          VisibilityCategory,
+  frame_index:       u32,
+}
+
 VisibilitySystem :: struct {
-  descriptor_set_layout: vk.DescriptorSetLayout,
-  pipeline_layout:       vk.PipelineLayout,
-  pipeline:              vk.Pipeline,
-  frames:                [resources.MAX_FRAMES_IN_FLIGHT]VisibilityFrame,
-  max_draws:             u32,
-  node_count:            u32,
+  // Compute pipelines
+  early_cull_pipeline:       vk.Pipeline,
+  late_cull_pipeline:        vk.Pipeline,
+  depth_reduce_pipeline:     vk.Pipeline,
+
+  // Pipeline layouts
+  early_cull_layout:         vk.PipelineLayout,
+  late_cull_layout:          vk.PipelineLayout,
+  depth_reduce_layout:       vk.PipelineLayout,
+
+  // Descriptor set layouts
+  early_descriptor_layout:   vk.DescriptorSetLayout,
+  late_descriptor_layout:    vk.DescriptorSetLayout,
+  depth_reduce_descriptor_layout: vk.DescriptorSetLayout,
+
+  // Depth rendering pipeline
+  depth_pipeline:            vk.Pipeline,
+  depth_pipeline_layout:     vk.PipelineLayout,
+
+  // Per-frame resources
+  frames:                    [resources.MAX_FRAMES_IN_FLIGHT]VisibilityFrame,
+
+  // System parameters
+  max_draws:                 u32,
+  node_count:                u32,
+  depth_width:               u32,
+  depth_height:              u32,
+  depth_bias:                f32,
+
+  // Statistics for debugging
+  stats_enabled:             bool,
 }
 
 draw_command_stride :: proc() -> u32 {
@@ -74,225 +147,108 @@ visibility_system_init :: proc(
   }
 
   system.max_draws = resources.MAX_NODES_IN_SCENE
+  // Match depth buffer aspect ratio to camera (16:9) for projection consistency
+  // 1024x576 gives ~1.78 aspect ratio matching typical camera setup
+  system.depth_width = 1024
+  system.depth_height = 576
+  system.depth_bias = 0.0001 // Small depth bias to prevent self-occlusion and precision issues
 
+  // Initialize per-frame resources
   for frame_idx in 0 ..< resources.MAX_FRAMES_IN_FLIGHT {
     frame := &system.frames[frame_idx]
+
     for task_idx in 0 ..< VISIBILITY_TASK_COUNT {
-      buffers := &frame.tasks[task_idx]
-      buffers.draw_count = gpu.create_host_visible_buffer(
+      task := &frame.tasks[task_idx]
+
+      // Create visibility and draw command buffers for early and late passes
+      task.early_visibility = gpu.create_local_buffer(
+        gpu_context,
+        u32,
+        int(system.max_draws),
+        {.STORAGE_BUFFER, .TRANSFER_DST},
+      ) or_return
+
+      task.early_draw_count = gpu.create_host_visible_buffer(
         gpu_context,
         u32,
         1,
         {.STORAGE_BUFFER, .TRANSFER_DST},
       ) or_return
 
-      buffers.draw_commands = gpu.create_host_visible_buffer(
+      task.early_draw_commands = gpu.create_host_visible_buffer(
         gpu_context,
         vk.DrawIndexedIndirectCommand,
         int(system.max_draws),
         {.STORAGE_BUFFER, .INDIRECT_BUFFER, .TRANSFER_DST},
       ) or_return
+
+      task.late_visibility = gpu.create_local_buffer(
+        gpu_context,
+        u32,
+        int(system.max_draws),
+        {.STORAGE_BUFFER, .TRANSFER_DST},
+      ) or_return
+
+      task.late_draw_count = gpu.create_host_visible_buffer(
+        gpu_context,
+        u32,
+        1,
+        {.STORAGE_BUFFER, .TRANSFER_DST},
+      ) or_return
+
+      task.late_draw_commands = gpu.create_host_visible_buffer(
+        gpu_context,
+        vk.DrawIndexedIndirectCommand,
+        int(system.max_draws),
+        {.STORAGE_BUFFER, .INDIRECT_BUFFER, .TRANSFER_DST},
+      ) or_return
+
+      // Create depth resources
+      create_depth_resources(gpu_context, task, system.depth_width, system.depth_height) or_return
+    }
+  }
+  // Initialize all late_visibility buffers to zero
+  {
+    command_buffer := gpu.begin_single_time_command(gpu_context) or_return
+    defer gpu.end_single_time_command(gpu_context, &command_buffer)
+
+    for frame in system.frames {
+      for task in frame.tasks {
+        // Clear late_visibility to zero so Frame 0 early pass will start with empty set
+        vk.CmdFillBuffer(
+          command_buffer,
+          task.late_visibility.buffer,
+          0,
+          vk.DeviceSize(task.late_visibility.bytes_count),
+          0, // Fill with zeros
+        )
+      }
     }
   }
 
-  bindings := [?]vk.DescriptorSetLayoutBinding {
-    {
-      binding         = 0,
-      descriptorType  = .STORAGE_BUFFER,
-      descriptorCount = 1,
-      stageFlags      = {.COMPUTE},
-    },
-    {
-      binding         = 1,
-      descriptorType  = .STORAGE_BUFFER,
-      descriptorCount = 1,
-      stageFlags      = {.COMPUTE},
-    },
-    {
-      binding         = 2,
-      descriptorType  = .STORAGE_BUFFER,
-      descriptorCount = 1,
-      stageFlags      = {.COMPUTE},
-    },
-    {
-      binding         = 3,
-      descriptorType  = .STORAGE_BUFFER,
-      descriptorCount = 1,
-      stageFlags      = {.COMPUTE},
-    },
-    {
-      binding         = 4,
-      descriptorType  = .STORAGE_BUFFER,
-      descriptorCount = 1,
-      stageFlags      = {.COMPUTE},
-    },
-    {
-      binding         = 5,
-      descriptorType  = .STORAGE_BUFFER,
-      descriptorCount = 1,
-      stageFlags      = {.COMPUTE},
-    },
-  }
+  // Create descriptor set layouts
+  create_descriptor_layouts(system, gpu_context) or_return
 
-  vk.CreateDescriptorSetLayout(
-    gpu_context.device,
-    &vk.DescriptorSetLayoutCreateInfo {
-      sType        = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-      bindingCount = len(bindings),
-      pBindings    = raw_data(bindings[:]),
-    },
-    nil,
-    &system.descriptor_set_layout,
-  ) or_return
+  // Create compute pipelines
+  create_compute_pipelines(system, gpu_context) or_return
 
-  push_constant_range := vk.PushConstantRange {
-    stageFlags = {.COMPUTE},
-    size       = size_of(VisibilityPushConstants),
-  }
+  // Create depth rendering pipeline
+  create_depth_pipeline(system, gpu_context, resources_manager) or_return
 
-  vk.CreatePipelineLayout(
-    gpu_context.device,
-    &vk.PipelineLayoutCreateInfo {
-      sType                  = .PIPELINE_LAYOUT_CREATE_INFO,
-      setLayoutCount         = 1,
-      pSetLayouts            = &system.descriptor_set_layout,
-      pushConstantRangeCount = 1,
-      pPushConstantRanges    = &push_constant_range,
-    },
-    nil,
-    &system.pipeline_layout,
-  ) or_return
-
-  shader_module := gpu.create_shader_module(
-    gpu_context.device,
-    #load("../shader/visibility_culling/culling.spv"),
-  ) or_return
-  defer vk.DestroyShaderModule(gpu_context.device, shader_module, nil)
-
-  compute_info := vk.ComputePipelineCreateInfo {
-    sType  = .COMPUTE_PIPELINE_CREATE_INFO,
-    stage  = {
-      sType  = .PIPELINE_SHADER_STAGE_CREATE_INFO,
-      stage  = {.COMPUTE},
-      module = shader_module,
-      pName  = "main",
-    },
-    layout = system.pipeline_layout,
-  }
-
-  vk.CreateComputePipelines(
-    gpu_context.device,
-    0,
-    1,
-    &compute_info,
-    nil,
-    &system.pipeline,
-  ) or_return
-
+  // Allocate and update descriptor sets
+  // For 2-pass culling with double buffering, each frame's early pass must read from
+  // the OTHER frame's late visibility (the actual previous frame)
   for frame_idx in 0 ..< resources.MAX_FRAMES_IN_FLIGHT {
-    frame := &system.frames[frame_idx]
-    layout_array := [VISIBILITY_TASK_COUNT]vk.DescriptorSetLayout{}
-    for task_idx in 0 ..< VISIBILITY_TASK_COUNT do layout_array[task_idx] = system.descriptor_set_layout
-    descriptor_sets := [VISIBILITY_TASK_COUNT]vk.DescriptorSet{}
+    prev_frame_idx := (frame_idx + resources.MAX_FRAMES_IN_FLIGHT - 1) % resources.MAX_FRAMES_IN_FLIGHT
 
-    vk.AllocateDescriptorSets(
-      gpu_context.device,
-      &vk.DescriptorSetAllocateInfo {
-        sType              = .DESCRIPTOR_SET_ALLOCATE_INFO,
-        descriptorPool     = gpu_context.descriptor_pool,
-        descriptorSetCount = VISIBILITY_TASK_COUNT,
-        pSetLayouts        = &layout_array[0],
-      },
-      &descriptor_sets[0],
-    ) or_return
+    frame := &system.frames[frame_idx]
+    prev_frame := &system.frames[prev_frame_idx]
 
     for task_idx in 0 ..< VISIBILITY_TASK_COUNT {
-      buffers := &frame.tasks[task_idx]
-      buffers.descriptor_set = descriptor_sets[task_idx]
+      task := &frame.tasks[task_idx]
+      prev_task := &prev_frame.tasks[task_idx]
 
-      node_info := vk.DescriptorBufferInfo {
-        buffer = resources_manager.node_data_buffer.device_buffer,
-        range  = vk.DeviceSize(resources_manager.node_data_buffer.bytes_count),
-      }
-      mesh_info := vk.DescriptorBufferInfo {
-        buffer = resources_manager.mesh_data_buffer.device_buffer,
-        range  = vk.DeviceSize(resources_manager.mesh_data_buffer.bytes_count),
-      }
-      world_info := vk.DescriptorBufferInfo {
-        buffer = resources_manager.world_matrix_buffer.device_buffer,
-        range  = vk.DeviceSize(resources_manager.world_matrix_buffer.bytes_count),
-      }
-      camera_info := vk.DescriptorBufferInfo {
-        buffer = resources_manager.camera_buffer.buffer,
-        range  = vk.DeviceSize(resources_manager.camera_buffer.bytes_count),
-      }
-      count_info := vk.DescriptorBufferInfo {
-        buffer = buffers.draw_count.buffer,
-        range  = vk.DeviceSize(buffers.draw_count.bytes_count),
-      }
-      command_info := vk.DescriptorBufferInfo {
-        buffer = buffers.draw_commands.buffer,
-        range  = vk.DeviceSize(buffers.draw_commands.bytes_count),
-      }
-
-      writes := [?]vk.WriteDescriptorSet {
-        {
-          sType           = .WRITE_DESCRIPTOR_SET,
-          dstSet          = buffers.descriptor_set,
-          dstBinding      = 0,
-          descriptorType  = .STORAGE_BUFFER,
-          descriptorCount = 1,
-          pBufferInfo     = &node_info,
-        },
-        {
-          sType           = .WRITE_DESCRIPTOR_SET,
-          dstSet          = buffers.descriptor_set,
-          dstBinding      = 1,
-          descriptorType  = .STORAGE_BUFFER,
-          descriptorCount = 1,
-          pBufferInfo     = &mesh_info,
-        },
-        {
-          sType           = .WRITE_DESCRIPTOR_SET,
-          dstSet          = buffers.descriptor_set,
-          dstBinding      = 2,
-          descriptorType  = .STORAGE_BUFFER,
-          descriptorCount = 1,
-          pBufferInfo     = &world_info,
-        },
-        {
-          sType           = .WRITE_DESCRIPTOR_SET,
-          dstSet          = buffers.descriptor_set,
-          dstBinding      = 3,
-          descriptorType  = .STORAGE_BUFFER,
-          descriptorCount = 1,
-          pBufferInfo     = &camera_info,
-        },
-        {
-          sType           = .WRITE_DESCRIPTOR_SET,
-          dstSet          = buffers.descriptor_set,
-          dstBinding      = 4,
-          descriptorType  = .STORAGE_BUFFER,
-          descriptorCount = 1,
-          pBufferInfo     = &count_info,
-        },
-        {
-          sType           = .WRITE_DESCRIPTOR_SET,
-          dstSet          = buffers.descriptor_set,
-          dstBinding      = 5,
-          descriptorType  = .STORAGE_BUFFER,
-          descriptorCount = 1,
-          pBufferInfo     = &command_info,
-        },
-      }
-
-      vk.UpdateDescriptorSets(
-        gpu_context.device,
-        len(writes),
-        raw_data(writes[:]),
-        0,
-        nil,
-      )
+      allocate_descriptor_sets(system, gpu_context, resources_manager, task, prev_task) or_return
     }
   }
 
@@ -306,24 +262,54 @@ visibility_system_shutdown :: proc(
   if gpu_context == nil {
     return
   }
-  vk.DestroyPipeline(gpu_context.device, system.pipeline, nil)
-  vk.DestroyPipelineLayout(gpu_context.device, system.pipeline_layout, nil)
-  vk.DestroyDescriptorSetLayout(
-    gpu_context.device,
-    system.descriptor_set_layout,
-    nil,
-  )
-  system.pipeline = 0
-  system.pipeline_layout = 0
-  system.descriptor_set_layout = 0
 
+  device := gpu_context.device
+
+  // Destroy pipelines
+  vk.DestroyPipeline(device, system.early_cull_pipeline, nil)
+  vk.DestroyPipeline(device, system.late_cull_pipeline, nil)
+  vk.DestroyPipeline(device, system.depth_reduce_pipeline, nil)
+  vk.DestroyPipeline(device, system.depth_pipeline, nil)
+
+  // Destroy pipeline layouts
+  vk.DestroyPipelineLayout(device, system.early_cull_layout, nil)
+  vk.DestroyPipelineLayout(device, system.late_cull_layout, nil)
+  vk.DestroyPipelineLayout(device, system.depth_reduce_layout, nil)
+  // Note: depth_pipeline_layout is shared from resources_manager, don't destroy it
+
+  // Destroy descriptor set layouts
+  vk.DestroyDescriptorSetLayout(device, system.early_descriptor_layout, nil)
+  vk.DestroyDescriptorSetLayout(device, system.late_descriptor_layout, nil)
+  vk.DestroyDescriptorSetLayout(device, system.depth_reduce_descriptor_layout, nil)
+
+  // Clean up per-frame resources
   for frame_idx in 0 ..< resources.MAX_FRAMES_IN_FLIGHT {
     frame := &system.frames[frame_idx]
     for task_idx in 0 ..< VISIBILITY_TASK_COUNT {
-      buffers := &frame.tasks[task_idx]
-      gpu.data_buffer_destroy(gpu_context.device, &buffers.draw_count)
-      gpu.data_buffer_destroy(gpu_context.device, &buffers.draw_commands)
-      buffers.descriptor_set = 0
+      task := &frame.tasks[task_idx]
+
+      // Destroy depth resources
+      vk.DestroyFramebuffer(device, task.depth_framebuffer, nil)
+      vk.DestroyRenderPass(device, task.depth_render_pass, nil)
+
+      // Destroy depth pyramid views and sampler
+      for mip in 0 ..< task.depth_pyramid.mip_levels {
+        vk.DestroyImageView(device, task.depth_pyramid.views[mip], nil)
+      }
+      vk.DestroyImageView(device, task.depth_pyramid.full_view, nil)
+      vk.DestroySampler(device, task.depth_pyramid.sampler, nil)
+
+      // Destroy buffers
+      gpu.data_buffer_destroy(device, &task.early_visibility)
+      gpu.data_buffer_destroy(device, &task.early_draw_count)
+      gpu.data_buffer_destroy(device, &task.early_draw_commands)
+      gpu.data_buffer_destroy(device, &task.late_visibility)
+      gpu.data_buffer_destroy(device, &task.late_draw_count)
+      gpu.data_buffer_destroy(device, &task.late_draw_commands)
+
+      // Destroy images
+      gpu.image_buffer_destroy(device, &task.depth_texture)
+      gpu.image_buffer_destroy(device, &task.depth_pyramid.texture)
     }
   }
 }
@@ -341,11 +327,49 @@ visibility_system_get_visible_count :: proc(
     return 0
   }
   frame := &system.frames[frame_index]
-  buffers := &frame.tasks[int(task)]
-  if buffers.draw_count.mapped == nil {
+  task_data := &frame.tasks[int(task)]
+
+  // Return late pass draw count (final visibility)
+  if task_data.late_draw_count.mapped == nil {
     return 0
   }
-  return buffers.draw_count.mapped[0]
+  return task_data.late_draw_count.mapped[0]
+}
+
+// Read back culling statistics from GPU buffers
+visibility_system_get_stats :: proc(
+  system: ^VisibilitySystem,
+  frame_index: u32,
+  task: VisibilityCategory,
+) -> CullingStats {
+  stats := CullingStats {
+    category = task,
+    frame_index = frame_index,
+  }
+
+  if frame_index >= resources.MAX_FRAMES_IN_FLIGHT {
+    return stats
+  }
+
+  frame := &system.frames[frame_index]
+  task_data := &frame.tasks[int(task)]
+
+  // Read early pass draw count
+  if task_data.early_draw_count.mapped != nil {
+    stats.early_draw_count = task_data.early_draw_count.mapped[0]
+  }
+
+  // Read late pass draw count
+  if task_data.late_draw_count.mapped != nil {
+    stats.late_draw_count = task_data.late_draw_count.mapped[0]
+  }
+
+  return stats
+}
+
+// Enable or disable statistics collection
+visibility_system_set_stats_enabled :: proc(system: ^VisibilitySystem, enabled: bool) {
+  system.stats_enabled = enabled
 }
 
 visibility_system_dispatch :: proc(
@@ -355,136 +379,758 @@ visibility_system_dispatch :: proc(
   frame_index: u32,
   task: VisibilityCategory,
   request: VisibilityRequest,
+  resources_manager: ^resources.Manager,
 ) -> VisibilityResult {
-  result := VisibilityResult {
-    draw_buffer    = 0,
-    count_buffer   = 0,
-    command_stride = draw_command_stride(),
-  }
-
-  if system.node_count == 0 {
-    return result
-  }
-  if frame_index >= resources.MAX_FRAMES_IN_FLIGHT {
-    log.errorf("visibility_system_dispatch: invalid frame index %d", frame_index)
-    return result
-  }
-
-  frame := &system.frames[frame_index]
-  buffers := &frame.tasks[int(task)]
-
-  vk.CmdFillBuffer(
+  // Always use the 2-pass occlusion culling system
+  return visibility_system_dispatch_2pass(
+    system,
+    gpu_context,
     command_buffer,
-    buffers.draw_count.buffer,
-    0,
-    vk.DeviceSize(buffers.draw_count.bytes_count),
-    0,
+    frame_index,
+    task,
+    request,
+    resources_manager,
   )
-  vk.CmdFillBuffer(
-    command_buffer,
-    buffers.draw_commands.buffer,
-    0,
-    vk.DeviceSize(buffers.draw_commands.bytes_count),
-    0,
-  )
+}
 
-  buffer_barriers := [?]vk.BufferMemoryBarrier {
-    {
-      sType         = .BUFFER_MEMORY_BARRIER,
-      srcAccessMask = {.TRANSFER_WRITE},
-      dstAccessMask = {.SHADER_WRITE},
-      buffer        = buffers.draw_count.buffer,
-      offset        = 0,
-      size          = vk.DeviceSize(buffers.draw_count.bytes_count),
+@(private)
+create_depth_resources :: proc(
+  gpu_context: ^gpu.GPUContext,
+  task: ^VisibilityTask,
+  width: u32,
+  height: u32,
+) -> vk.Result {
+  // Create depth texture for depth rendering
+  depth_create_info := vk.ImageCreateInfo {
+    sType = .IMAGE_CREATE_INFO,
+    imageType = .D2,
+    format = .D32_SFLOAT,
+    extent = {width, height, 1},
+    mipLevels = 1,
+    arrayLayers = 1,
+    samples = {._1},
+    tiling = .OPTIMAL,
+    usage = {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
+    sharingMode = .EXCLUSIVE,
+    initialLayout = .UNDEFINED,
+  }
+
+  // Create depth texture using GPU helper function
+  task.depth_texture = gpu.malloc_image_buffer(
+    gpu_context,
+    width,
+    height,
+    .D32_SFLOAT,
+    .OPTIMAL,
+    {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
+    {.DEVICE_LOCAL},
+  ) or_return
+
+  // Create image view for depth texture
+  task.depth_texture.view = gpu.create_image_view(
+    gpu_context.device,
+    task.depth_texture.image,
+    .D32_SFLOAT,
+    {.DEPTH},
+  ) or_return
+
+  // Depth pyramid dimensions: mip 0 is HALF the resolution of source depth texture
+  // because we perform 2x2 MAX reduction to generate mip 0
+  pyramid_width := max(1, width / 2)
+  pyramid_height := max(1, height / 2)
+
+  // Calculate mip levels for depth pyramid based on pyramid base size
+  mip_levels := u32(math.floor(math.log2(f32(max(pyramid_width, pyramid_height))))) + 1
+
+  // Create depth pyramid texture with mip levels
+  task.depth_pyramid.texture = gpu.malloc_image_buffer_with_mips(
+    gpu_context,
+    pyramid_width,
+    pyramid_height,
+    .R32_SFLOAT, // Store depth as float for compute shader access
+    .OPTIMAL,
+    {.SAMPLED, .STORAGE, .TRANSFER_DST},
+    {.DEVICE_LOCAL},
+    mip_levels,
+  ) or_return
+  task.depth_pyramid.mip_levels = mip_levels
+  task.depth_pyramid.width = pyramid_width
+  task.depth_pyramid.height = pyramid_height
+
+  // Create per-mip views for depth reduction shader (write to individual mips)
+  for mip in 0 ..< mip_levels {
+    view_info := vk.ImageViewCreateInfo {
+      sType = .IMAGE_VIEW_CREATE_INFO,
+      image = task.depth_pyramid.texture.image,
+      viewType = .D2,
+      format = .R32_SFLOAT,
+      subresourceRange = {
+        aspectMask = {.COLOR},
+        baseMipLevel = mip,
+        levelCount = 1,
+        baseArrayLayer = 0,
+        layerCount = 1,
+      },
+    }
+
+    vk.CreateImageView(
+      gpu_context.device,
+      &view_info,
+      nil,
+      &task.depth_pyramid.views[mip],
+    ) or_return
+  }
+
+  // Create full pyramid view for culling shader (sample from all mips)
+  full_view_info := vk.ImageViewCreateInfo {
+    sType = .IMAGE_VIEW_CREATE_INFO,
+    image = task.depth_pyramid.texture.image,
+    viewType = .D2,
+    format = .R32_SFLOAT,
+    subresourceRange = {
+      aspectMask = {.COLOR},
+      baseMipLevel = 0,
+      levelCount = mip_levels, // ALL mip levels accessible
+      baseArrayLayer = 0,
+      layerCount = 1,
     },
-    {
-      sType         = .BUFFER_MEMORY_BARRIER,
-      srcAccessMask = {.TRANSFER_WRITE},
-      dstAccessMask = {.SHADER_WRITE},
-      buffer        = buffers.draw_commands.buffer,
-      offset        = 0,
-      size          = vk.DeviceSize(buffers.draw_commands.bytes_count),
-    },
   }
 
-  vk.CmdPipelineBarrier(
-    command_buffer,
-    {.TRANSFER},
-    {.COMPUTE_SHADER},
-    {},
-    0,
+  vk.CreateImageView(
+    gpu_context.device,
+    &full_view_info,
     nil,
-    len(buffer_barriers),
-    raw_data(buffer_barriers[:]),
-    0,
-    nil,
-  )
+    &task.depth_pyramid.full_view,
+  ) or_return
 
-  vk.CmdBindPipeline(command_buffer, .COMPUTE, system.pipeline)
-  vk.CmdBindDescriptorSets(
-    command_buffer,
-    .COMPUTE,
-    system.pipeline_layout,
+  // Create sampler for depth pyramid with MAX reduction for forward-Z
+  // LINEAR filter with MAX reduction - hardware automatically samples 2x2 and returns maximum
+  sampler_info := vk.SamplerCreateInfo {
+    sType = .SAMPLER_CREATE_INFO,
+    magFilter = .LINEAR,
+    minFilter = .LINEAR,
+    mipmapMode = .NEAREST,
+    addressModeU = .CLAMP_TO_EDGE,
+    addressModeV = .CLAMP_TO_EDGE,
+    addressModeW = .CLAMP_TO_EDGE,
+    minLod = 0,
+    maxLod = f32(mip_levels),
+    borderColor = .FLOAT_OPAQUE_WHITE,
+  }
+
+  // Enable MAX reduction mode (Vulkan 1.2+ feature)
+  // For forward-Z, MAX gives us the farthest occluder (larger depth = farther)
+  reduction_mode := vk.SamplerReductionModeCreateInfo {
+    sType = .SAMPLER_REDUCTION_MODE_CREATE_INFO,
+    reductionMode = .MAX,
+  }
+  sampler_info.pNext = &reduction_mode
+
+  vk.CreateSampler(
+    gpu_context.device,
+    &sampler_info,
+    nil,
+    &task.depth_pyramid.sampler,
+  ) or_return
+
+  // Create render pass for depth rendering
+  attachment := vk.AttachmentDescription {
+    format = .D32_SFLOAT,
+    samples = {._1},
+    loadOp = .CLEAR,
+    storeOp = .STORE,
+    stencilLoadOp = .DONT_CARE,
+    stencilStoreOp = .DONT_CARE,
+    initialLayout = .UNDEFINED,
+    finalLayout = .DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+  }
+
+  attachment_ref := vk.AttachmentReference {
+    attachment = 0,
+    layout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+  }
+
+  subpass := vk.SubpassDescription {
+    pipelineBindPoint = .GRAPHICS,
+    pDepthStencilAttachment = &attachment_ref,
+  }
+
+  dependency := vk.SubpassDependency {
+    srcSubpass = vk.SUBPASS_EXTERNAL,
+    dstSubpass = 0,
+    srcStageMask = {.COMPUTE_SHADER},
+    dstStageMask = {.EARLY_FRAGMENT_TESTS},
+    srcAccessMask = {.SHADER_WRITE},
+    dstAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE},
+  }
+
+  render_pass_info := vk.RenderPassCreateInfo {
+    sType = .RENDER_PASS_CREATE_INFO,
+    attachmentCount = 1,
+    pAttachments = &attachment,
+    subpassCount = 1,
+    pSubpasses = &subpass,
+    dependencyCount = 1,
+    pDependencies = &dependency,
+  }
+
+  vk.CreateRenderPass(
+    gpu_context.device,
+    &render_pass_info,
+    nil,
+    &task.depth_render_pass,
+  ) or_return
+
+  // Create framebuffer
+  framebuffer_info := vk.FramebufferCreateInfo {
+    sType = .FRAMEBUFFER_CREATE_INFO,
+    renderPass = task.depth_render_pass,
+    attachmentCount = 1,
+    pAttachments = &task.depth_texture.view,
+    width = width,
+    height = height,
+    layers = 1,
+  }
+
+  vk.CreateFramebuffer(
+    gpu_context.device,
+    &framebuffer_info,
+    nil,
+    &task.depth_framebuffer,
+  ) or_return
+
+  return vk.Result.SUCCESS
+}
+
+@(private)
+create_descriptor_layouts :: proc(
+  system: ^VisibilitySystem,
+  gpu_context: ^gpu.GPUContext,
+) -> vk.Result {
+  // Early pass descriptor layout
+  early_bindings := [?]vk.DescriptorSetLayoutBinding {
+    {binding = 0, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, stageFlags = {.COMPUTE}}, // Node data
+    {binding = 1, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, stageFlags = {.COMPUTE}}, // Mesh data
+    {binding = 2, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, stageFlags = {.COMPUTE}}, // World matrices
+    {binding = 3, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, stageFlags = {.COMPUTE}}, // Camera data
+    {binding = 4, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, stageFlags = {.COMPUTE}}, // Previous visibility
+    {binding = 5, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, stageFlags = {.COMPUTE}}, // Draw count
+    {binding = 6, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, stageFlags = {.COMPUTE}}, // Draw commands
+  }
+
+  vk.CreateDescriptorSetLayout(
+    gpu_context.device,
+    &vk.DescriptorSetLayoutCreateInfo {
+      sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+      bindingCount = len(early_bindings),
+      pBindings = raw_data(early_bindings[:]),
+    },
+    nil,
+    &system.early_descriptor_layout,
+  ) or_return
+
+  // Late pass descriptor layout (includes depth pyramid)
+  late_bindings := [?]vk.DescriptorSetLayoutBinding {
+    {binding = 0, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, stageFlags = {.COMPUTE}}, // Node data
+    {binding = 1, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, stageFlags = {.COMPUTE}}, // Mesh data
+    {binding = 2, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, stageFlags = {.COMPUTE}}, // World matrices
+    {binding = 3, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, stageFlags = {.COMPUTE}}, // Camera data
+    {binding = 4, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, stageFlags = {.COMPUTE}}, // Current visibility
+    {binding = 5, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, stageFlags = {.COMPUTE}}, // Draw count
+    {binding = 6, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, stageFlags = {.COMPUTE}}, // Draw commands
+    {binding = 7, descriptorType = .COMBINED_IMAGE_SAMPLER, descriptorCount = 1, stageFlags = {.COMPUTE}}, // Depth pyramid
+  }
+
+  vk.CreateDescriptorSetLayout(
+    gpu_context.device,
+    &vk.DescriptorSetLayoutCreateInfo {
+      sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+      bindingCount = len(late_bindings),
+      pBindings = raw_data(late_bindings[:]),
+    },
+    nil,
+    &system.late_descriptor_layout,
+  ) or_return
+
+  // Depth pyramid reduction descriptor layout
+  depth_bindings := [?]vk.DescriptorSetLayoutBinding {
+    {binding = 0, descriptorType = .COMBINED_IMAGE_SAMPLER, descriptorCount = 1, stageFlags = {.COMPUTE}}, // Source mip
+    {binding = 1, descriptorType = .STORAGE_IMAGE, descriptorCount = 1, stageFlags = {.COMPUTE}}, // Dest mip
+  }
+
+  vk.CreateDescriptorSetLayout(
+    gpu_context.device,
+    &vk.DescriptorSetLayoutCreateInfo {
+      sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+      bindingCount = len(depth_bindings),
+      pBindings = raw_data(depth_bindings[:]),
+    },
+    nil,
+    &system.depth_reduce_descriptor_layout,
+  ) or_return
+
+  return vk.Result.SUCCESS
+}
+
+@(private)
+create_compute_pipelines :: proc(
+  system: ^VisibilitySystem,
+  gpu_context: ^gpu.GPUContext,
+) -> vk.Result {
+  // Create pipeline layouts with push constants
+  push_constant_range := vk.PushConstantRange {
+    stageFlags = {.COMPUTE},
+    size = size_of(VisibilityPushConstants),
+  }
+
+  vk.CreatePipelineLayout(
+    gpu_context.device,
+    &vk.PipelineLayoutCreateInfo {
+      sType = .PIPELINE_LAYOUT_CREATE_INFO,
+      setLayoutCount = 1,
+      pSetLayouts = &system.early_descriptor_layout,
+      pushConstantRangeCount = 1,
+      pPushConstantRanges = &push_constant_range,
+    },
+    nil,
+    &system.early_cull_layout,
+  ) or_return
+
+  vk.CreatePipelineLayout(
+    gpu_context.device,
+    &vk.PipelineLayoutCreateInfo {
+      sType = .PIPELINE_LAYOUT_CREATE_INFO,
+      setLayoutCount = 1,
+      pSetLayouts = &system.late_descriptor_layout,
+      pushConstantRangeCount = 1,
+      pPushConstantRanges = &push_constant_range,
+    },
+    nil,
+    &system.late_cull_layout,
+  ) or_return
+
+  depth_push_range := vk.PushConstantRange {
+    stageFlags = {.COMPUTE},
+    size = size_of(DepthReducePushConstants),
+  }
+
+  vk.CreatePipelineLayout(
+    gpu_context.device,
+    &vk.PipelineLayoutCreateInfo {
+      sType = .PIPELINE_LAYOUT_CREATE_INFO,
+      setLayoutCount = 1,
+      pSetLayouts = &system.depth_reduce_descriptor_layout,
+      pushConstantRangeCount = 1,
+      pPushConstantRanges = &depth_push_range,
+    },
+    nil,
+    &system.depth_reduce_layout,
+  ) or_return
+
+  // Load and create compute shaders
+  early_shader := gpu.create_shader_module(
+    gpu_context.device,
+    #load("../shader/occlusion_culling/early_cull.spv"),
+  ) or_return
+  defer vk.DestroyShaderModule(gpu_context.device, early_shader, nil)
+
+  late_shader := gpu.create_shader_module(
+    gpu_context.device,
+    #load("../shader/occlusion_culling/late_cull.spv"),
+  ) or_return
+  defer vk.DestroyShaderModule(gpu_context.device, late_shader, nil)
+
+  depth_shader := gpu.create_shader_module(
+    gpu_context.device,
+    #load("../shader/occlusion_culling/depth_reduce.spv"),
+  ) or_return
+  defer vk.DestroyShaderModule(gpu_context.device, depth_shader, nil)
+
+  // Create compute pipelines
+  early_info := vk.ComputePipelineCreateInfo {
+    sType = .COMPUTE_PIPELINE_CREATE_INFO,
+    stage = {
+      sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
+      stage = {.COMPUTE},
+      module = early_shader,
+      pName = "main",
+    },
+    layout = system.early_cull_layout,
+  }
+
+  vk.CreateComputePipelines(
+    gpu_context.device,
     0,
     1,
-    &buffers.descriptor_set,
-    0,
+    &early_info,
     nil,
-  )
+    &system.early_cull_pipeline,
+  ) or_return
 
-  push_constants := VisibilityPushConstants {
-    camera_index  = request.camera_index,
-    node_count    = system.node_count,
-    max_draws     = system.max_draws,
-    include_flags = request.include_flags,
-    exclude_flags = request.exclude_flags,
+  late_info := vk.ComputePipelineCreateInfo {
+    sType = .COMPUTE_PIPELINE_CREATE_INFO,
+    stage = {
+      sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
+      stage = {.COMPUTE},
+      module = late_shader,
+      pName = "main",
+    },
+    layout = system.late_cull_layout,
   }
 
-  vk.CmdPushConstants(
-    command_buffer,
-    system.pipeline_layout,
-    {.COMPUTE},
+  vk.CreateComputePipelines(
+    gpu_context.device,
     0,
-    size_of(push_constants),
-    &push_constants,
-  )
+    1,
+    &late_info,
+    nil,
+    &system.late_cull_pipeline,
+  ) or_return
 
-  dispatch_x := (system.node_count + 63) / 64
-  vk.CmdDispatch(command_buffer, dispatch_x, 1, 1)
-
-  post_barriers := [?]vk.BufferMemoryBarrier {
-    {
-      sType         = .BUFFER_MEMORY_BARRIER,
-      srcAccessMask = {.SHADER_WRITE},
-      dstAccessMask = {.INDIRECT_COMMAND_READ},
-      buffer        = buffers.draw_commands.buffer,
-      offset        = 0,
-      size          = vk.DeviceSize(buffers.draw_commands.bytes_count),
+  depth_info := vk.ComputePipelineCreateInfo {
+    sType = .COMPUTE_PIPELINE_CREATE_INFO,
+    stage = {
+      sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
+      stage = {.COMPUTE},
+      module = depth_shader,
+      pName = "main",
     },
+    layout = system.depth_reduce_layout,
+  }
+
+  vk.CreateComputePipelines(
+    gpu_context.device,
+    0,
+    1,
+    &depth_info,
+    nil,
+    &system.depth_reduce_pipeline,
+  ) or_return
+
+  return vk.Result.SUCCESS
+}
+
+@(private)
+create_depth_pipeline :: proc(
+  system: ^VisibilitySystem,
+  gpu_context: ^gpu.GPUContext,
+  resources_manager: ^resources.Manager,
+) -> vk.Result {
+  // Create depth-only rendering pipeline for early/late pass depth rendering
+
+  // Load shaders
+  vert_shader := gpu.create_shader_module(
+    gpu_context.device,
+    #load("../shader/occlusion_culling/vert.spv"),
+  ) or_return
+  defer vk.DestroyShaderModule(gpu_context.device, vert_shader, nil)
+
+  // Shader stages
+  shader_stages := [?]vk.PipelineShaderStageCreateInfo {
     {
-      sType         = .BUFFER_MEMORY_BARRIER,
-      srcAccessMask = {.SHADER_WRITE},
-      dstAccessMask = {.INDIRECT_COMMAND_READ},
-      buffer        = buffers.draw_count.buffer,
-      offset        = 0,
-      size          = vk.DeviceSize(buffers.draw_count.bytes_count),
+      sType  = .PIPELINE_SHADER_STAGE_CREATE_INFO,
+      stage  = {.VERTEX},
+      module = vert_shader,
+      pName  = "main",
     },
   }
 
-  vk.CmdPipelineBarrier(
-    command_buffer,
-    {.COMPUTE_SHADER},
-    {.DRAW_INDIRECT},
-    {},
-    0,
-    nil,
-    len(post_barriers),
-    raw_data(post_barriers[:]),
-    0,
-    nil,
-  )
+  // Vertex input: only position from Vertex struct
+  vertex_bindings := [?]vk.VertexInputBindingDescription {
+    {binding = 0, stride = size_of(geometry.Vertex), inputRate = .VERTEX},
+  }
 
-  result.draw_buffer = buffers.draw_commands.buffer
-  result.count_buffer = buffers.draw_count.buffer
-  return result
+  vertex_attributes := [?]vk.VertexInputAttributeDescription {
+    {location = 0, binding = 0, format = .R32G32B32_SFLOAT, offset = u32(offset_of(geometry.Vertex, position))},
+  }
+
+  vertex_input_info := vk.PipelineVertexInputStateCreateInfo {
+    sType                           = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+    vertexBindingDescriptionCount   = len(vertex_bindings),
+    pVertexBindingDescriptions      = raw_data(vertex_bindings[:]),
+    vertexAttributeDescriptionCount = len(vertex_attributes),
+    pVertexAttributeDescriptions    = raw_data(vertex_attributes[:]),
+  }
+
+  // Input assembly
+  input_assembly := vk.PipelineInputAssemblyStateCreateInfo {
+    sType                  = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+    topology               = .TRIANGLE_LIST,
+    primitiveRestartEnable = false,
+  }
+
+  // Viewport and scissor (dynamic state)
+  viewport_state := vk.PipelineViewportStateCreateInfo {
+    sType         = .PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+    viewportCount = 1,
+    scissorCount  = 1,
+  }
+
+  // Rasterization
+  // Note: Using CLOCKWISE because viewport Y is flipped (negative height)
+  // When Y is flipped, CCW triangles become CW on screen
+  rasterizer := vk.PipelineRasterizationStateCreateInfo {
+    sType                   = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+    depthClampEnable        = false,
+    rasterizerDiscardEnable = false,
+    polygonMode             = .FILL,
+    cullMode                = {.BACK},
+    frontFace               = .COUNTER_CLOCKWISE,
+    depthBiasEnable         = false,
+    lineWidth               = 1.0,
+  }
+
+  // Multisampling (disabled)
+  multisampling := vk.PipelineMultisampleStateCreateInfo {
+    sType                = .PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+    rasterizationSamples = {._1},
+    sampleShadingEnable  = false,
+  }
+
+  // Depth stencil (depth write enabled, test LESS for forward-Z)
+  depth_stencil := vk.PipelineDepthStencilStateCreateInfo {
+    sType                 = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+    depthTestEnable       = true,
+    depthWriteEnable      = true,
+    depthCompareOp        = .LESS,
+    depthBoundsTestEnable = false,
+    stencilTestEnable     = false,
+  }
+
+  // No color attachments for depth-only pass
+  color_blend := vk.PipelineColorBlendStateCreateInfo {
+    sType           = .PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+    logicOpEnable   = false,
+    attachmentCount = 0,
+    pAttachments    = nil,
+  }
+
+  // Dynamic states
+  dynamic_states := [?]vk.DynamicState{.VIEWPORT, .SCISSOR}
+  dynamic_state := vk.PipelineDynamicStateCreateInfo {
+    sType             = .PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+    dynamicStateCount = len(dynamic_states),
+    pDynamicStates    = raw_data(dynamic_states[:]),
+  }
+
+  // Use the shared geometry pipeline layout from resources manager
+  system.depth_pipeline_layout = resources_manager.geometry_pipeline_layout
+  if system.depth_pipeline_layout == 0 {
+    return .ERROR_INITIALIZATION_FAILED
+  }
+
+  // Create graphics pipeline (using first task's render pass as reference)
+  pipeline_info := vk.GraphicsPipelineCreateInfo {
+    sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
+    stageCount          = len(shader_stages),
+    pStages             = raw_data(shader_stages[:]),
+    pVertexInputState   = &vertex_input_info,
+    pInputAssemblyState = &input_assembly,
+    pViewportState      = &viewport_state,
+    pRasterizationState = &rasterizer,
+    pMultisampleState   = &multisampling,
+    pDepthStencilState  = &depth_stencil,
+    pColorBlendState    = &color_blend,
+    pDynamicState       = &dynamic_state,
+    layout              = system.depth_pipeline_layout,
+    renderPass          = system.frames[0].tasks[0].depth_render_pass,
+    subpass             = 0,
+  }
+
+  vk.CreateGraphicsPipelines(
+    gpu_context.device,
+    0,
+    1,
+    &pipeline_info,
+    nil,
+    &system.depth_pipeline,
+  ) or_return
+
+  return vk.Result.SUCCESS
+}
+
+@(private)
+allocate_descriptor_sets :: proc(
+  system: ^VisibilitySystem,
+  gpu_context: ^gpu.GPUContext,
+  resources_manager: ^resources.Manager,
+  task: ^VisibilityTask,
+  prev_task: ^VisibilityTask, // Previous frame's task for cross-frame visibility
+) -> vk.Result {
+  // Allocate descriptor sets for early and late passes
+  layouts := [2]vk.DescriptorSetLayout{system.early_descriptor_layout, system.late_descriptor_layout}
+  sets := [2]vk.DescriptorSet{}
+
+  vk.AllocateDescriptorSets(
+    gpu_context.device,
+    &vk.DescriptorSetAllocateInfo {
+      sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
+      descriptorPool = gpu_context.descriptor_pool,
+      descriptorSetCount = 2,
+      pSetLayouts = raw_data(layouts[:]),
+    },
+    raw_data(sets[:]),
+  ) or_return
+
+  task.early_descriptor_set = sets[0]
+  task.late_descriptor_set = sets[1]
+
+  // Allocate descriptor sets for depth pyramid reduction (one per mip level, INCLUDING mip 0)
+  for mip in 0 ..< task.depth_pyramid.mip_levels {
+    vk.AllocateDescriptorSets(
+      gpu_context.device,
+      &vk.DescriptorSetAllocateInfo {
+        sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
+        descriptorPool = gpu_context.descriptor_pool,
+        descriptorSetCount = 1,
+        pSetLayouts = &system.depth_reduce_descriptor_layout,
+      },
+      &task.depth_reduce_descriptor_sets[mip],
+    ) or_return
+  }
+
+  // Update early pass descriptor set (reads from previous frame's late visibility)
+  update_early_descriptor_set(gpu_context, resources_manager, task, prev_task)
+
+  // Update late pass descriptor set
+  update_late_descriptor_set(gpu_context, resources_manager, task)
+
+  // Update depth reduction descriptor sets (ALL mips, including mip 0)
+  for mip in 0 ..< task.depth_pyramid.mip_levels {
+    update_depth_reduce_descriptor_set(gpu_context, task, u32(mip))
+  }
+
+  return vk.Result.SUCCESS
+}
+
+@(private)
+update_early_descriptor_set :: proc(
+  gpu_context: ^gpu.GPUContext,
+  resources_manager: ^resources.Manager,
+  task: ^VisibilityTask,
+  prev_task: ^VisibilityTask, // Previous frame's task
+) {
+  node_info := vk.DescriptorBufferInfo {
+    buffer = resources_manager.node_data_buffer.device_buffer,
+    range = vk.DeviceSize(resources_manager.node_data_buffer.bytes_count),
+  }
+  mesh_info := vk.DescriptorBufferInfo {
+    buffer = resources_manager.mesh_data_buffer.device_buffer,
+    range = vk.DeviceSize(resources_manager.mesh_data_buffer.bytes_count),
+  }
+  world_info := vk.DescriptorBufferInfo {
+    buffer = resources_manager.world_matrix_buffer.device_buffer,
+    range = vk.DeviceSize(resources_manager.world_matrix_buffer.bytes_count),
+  }
+  camera_info := vk.DescriptorBufferInfo {
+    buffer = resources_manager.camera_buffer.buffer,
+    range = vk.DeviceSize(resources_manager.camera_buffer.bytes_count),
+  }
+  // FIXED: Read from the OTHER frame's late visibility (actual previous frame)
+  prev_vis_info := vk.DescriptorBufferInfo {
+    buffer = prev_task.late_visibility.buffer, // Previous frame's late visibility
+    range = vk.DeviceSize(prev_task.late_visibility.bytes_count),
+  }
+  count_info := vk.DescriptorBufferInfo {
+    buffer = task.early_draw_count.buffer,
+    range = vk.DeviceSize(task.early_draw_count.bytes_count),
+  }
+  command_info := vk.DescriptorBufferInfo {
+    buffer = task.early_draw_commands.buffer,
+    range = vk.DeviceSize(task.early_draw_commands.bytes_count),
+  }
+
+  writes := [?]vk.WriteDescriptorSet {
+    {sType = .WRITE_DESCRIPTOR_SET, dstSet = task.early_descriptor_set, dstBinding = 0, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, pBufferInfo = &node_info},
+    {sType = .WRITE_DESCRIPTOR_SET, dstSet = task.early_descriptor_set, dstBinding = 1, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, pBufferInfo = &mesh_info},
+    {sType = .WRITE_DESCRIPTOR_SET, dstSet = task.early_descriptor_set, dstBinding = 2, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, pBufferInfo = &world_info},
+    {sType = .WRITE_DESCRIPTOR_SET, dstSet = task.early_descriptor_set, dstBinding = 3, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, pBufferInfo = &camera_info},
+    {sType = .WRITE_DESCRIPTOR_SET, dstSet = task.early_descriptor_set, dstBinding = 4, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, pBufferInfo = &prev_vis_info},
+    {sType = .WRITE_DESCRIPTOR_SET, dstSet = task.early_descriptor_set, dstBinding = 5, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, pBufferInfo = &count_info},
+    {sType = .WRITE_DESCRIPTOR_SET, dstSet = task.early_descriptor_set, dstBinding = 6, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, pBufferInfo = &command_info},
+  }
+
+  vk.UpdateDescriptorSets(gpu_context.device, len(writes), raw_data(writes[:]), 0, nil)
+}
+
+@(private)
+update_late_descriptor_set :: proc(
+  gpu_context: ^gpu.GPUContext,
+  resources_manager: ^resources.Manager,
+  task: ^VisibilityTask,
+) {
+  node_info := vk.DescriptorBufferInfo {
+    buffer = resources_manager.node_data_buffer.device_buffer,
+    range = vk.DeviceSize(resources_manager.node_data_buffer.bytes_count),
+  }
+  mesh_info := vk.DescriptorBufferInfo {
+    buffer = resources_manager.mesh_data_buffer.device_buffer,
+    range = vk.DeviceSize(resources_manager.mesh_data_buffer.bytes_count),
+  }
+  world_info := vk.DescriptorBufferInfo {
+    buffer = resources_manager.world_matrix_buffer.device_buffer,
+    range = vk.DeviceSize(resources_manager.world_matrix_buffer.bytes_count),
+  }
+  camera_info := vk.DescriptorBufferInfo {
+    buffer = resources_manager.camera_buffer.buffer,
+    range = vk.DeviceSize(resources_manager.camera_buffer.bytes_count),
+  }
+  vis_info := vk.DescriptorBufferInfo {
+    buffer = task.late_visibility.buffer,
+    range = vk.DeviceSize(task.late_visibility.bytes_count),
+  }
+  count_info := vk.DescriptorBufferInfo {
+    buffer = task.late_draw_count.buffer,
+    range = vk.DeviceSize(task.late_draw_count.bytes_count),
+  }
+  command_info := vk.DescriptorBufferInfo {
+    buffer = task.late_draw_commands.buffer,
+    range = vk.DeviceSize(task.late_draw_commands.bytes_count),
+  }
+  pyramid_info := vk.DescriptorImageInfo {
+    sampler = task.depth_pyramid.sampler,
+    imageView = task.depth_pyramid.full_view, // Full pyramid with all mips
+    imageLayout = .SHADER_READ_ONLY_OPTIMAL,
+  }
+
+  writes := [?]vk.WriteDescriptorSet {
+    {sType = .WRITE_DESCRIPTOR_SET, dstSet = task.late_descriptor_set, dstBinding = 0, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, pBufferInfo = &node_info},
+    {sType = .WRITE_DESCRIPTOR_SET, dstSet = task.late_descriptor_set, dstBinding = 1, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, pBufferInfo = &mesh_info},
+    {sType = .WRITE_DESCRIPTOR_SET, dstSet = task.late_descriptor_set, dstBinding = 2, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, pBufferInfo = &world_info},
+    {sType = .WRITE_DESCRIPTOR_SET, dstSet = task.late_descriptor_set, dstBinding = 3, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, pBufferInfo = &camera_info},
+    {sType = .WRITE_DESCRIPTOR_SET, dstSet = task.late_descriptor_set, dstBinding = 4, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, pBufferInfo = &vis_info},
+    {sType = .WRITE_DESCRIPTOR_SET, dstSet = task.late_descriptor_set, dstBinding = 5, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, pBufferInfo = &count_info},
+    {sType = .WRITE_DESCRIPTOR_SET, dstSet = task.late_descriptor_set, dstBinding = 6, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, pBufferInfo = &command_info},
+    {sType = .WRITE_DESCRIPTOR_SET, dstSet = task.late_descriptor_set, dstBinding = 7, descriptorType = .COMBINED_IMAGE_SAMPLER, descriptorCount = 1, pImageInfo = &pyramid_info},
+  }
+
+  vk.UpdateDescriptorSets(gpu_context.device, len(writes), raw_data(writes[:]), 0, nil)
+}
+
+@(private)
+update_depth_reduce_descriptor_set :: proc(
+  gpu_context: ^gpu.GPUContext,
+  task: ^VisibilityTask,
+  mip: u32,
+) {
+  // For mip 0: read from depth texture, write to pyramid mip 0
+  // For other mips: read from previous pyramid mip, write to current mip
+  source_view := mip == 0 ? task.depth_texture.view : task.depth_pyramid.views[mip - 1]
+
+  source_info := vk.DescriptorImageInfo {
+    sampler = task.depth_pyramid.sampler,
+    imageView = source_view,
+    imageLayout = .SHADER_READ_ONLY_OPTIMAL,
+  }
+  dest_info := vk.DescriptorImageInfo {
+    imageView = task.depth_pyramid.views[mip],
+    imageLayout = .GENERAL,
+  }
+
+  writes := [?]vk.WriteDescriptorSet {
+    {sType = .WRITE_DESCRIPTOR_SET, dstSet = task.depth_reduce_descriptor_sets[mip], dstBinding = 0, descriptorType = .COMBINED_IMAGE_SAMPLER, descriptorCount = 1, pImageInfo = &source_info},
+    {sType = .WRITE_DESCRIPTOR_SET, dstSet = task.depth_reduce_descriptor_sets[mip], dstBinding = 1, descriptorType = .STORAGE_IMAGE, descriptorCount = 1, pImageInfo = &dest_info},
+  }
+
+  vk.UpdateDescriptorSets(gpu_context.device, len(writes), raw_data(writes[:]), 0, nil)
 }

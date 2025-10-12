@@ -371,6 +371,7 @@ query_visibility :: proc(
   command_buffer: vk.CommandBuffer,
   frame_index: u32,
   request: DrawCommandRequest,
+  resources_manager: ^resources.Manager,
 ) -> DrawCommandList {
   visibility_request := VisibilityRequest {
     camera_index  = request.camera_handle.index,
@@ -385,6 +386,7 @@ query_visibility :: proc(
     frame_index,
     request.category,
     visibility_request,
+    resources_manager,
   )
 
   return DrawCommandList {
@@ -414,6 +416,7 @@ dispatch_visibility :: proc(
   frame_index: u32,
   category: VisibilityCategory,
   request: VisibilityRequest,
+  resources_manager: ^resources.Manager,
 ) -> VisibilityResult {
   return visibility_system_dispatch(
     &world.visibility,
@@ -422,6 +425,7 @@ dispatch_visibility :: proc(
     frame_index,
     category,
     request,
+    resources_manager,
   )
 }
 

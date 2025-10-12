@@ -25,10 +25,10 @@ import mu "vendor:microui"
 import vk "vendor:vulkan"
 
 MAX_FRAMES_IN_FLIGHT :: 2
-RENDER_FPS :: 120.0
+RENDER_FPS :: 60.0
 FRAME_TIME :: 1.0 / RENDER_FPS
 FRAME_TIME_MILIS :: FRAME_TIME * 1_000.0
-UPDATE_FPS :: 30.0
+UPDATE_FPS :: 60.0
 UPDATE_FRAME_TIME :: 1.0 / UPDATE_FPS
 UPDATE_FRAME_TIME_MILIS :: UPDATE_FRAME_TIME * 1_000.0
 MOUSE_SENSITIVITY_X :: 0.005
@@ -492,20 +492,35 @@ shutdown :: proc(self: ^Engine) {
 
 @(private = "file")
 render_debug_ui :: proc(self: ^Engine) {
-  if mu.window(&self.render.ui.ctx, "Engine", {40, 40, 300, 200}, {.NO_CLOSE}) {
+  if mu.window(&self.render.ui.ctx, "Engine", {40, 40, 350, 280}, {.NO_CLOSE}) {
     mu.label(&self.render.ui.ctx, fmt.tprintf("Objects %d", len(self.world.nodes.entries) - len(self.world.nodes.free_indices)))
     mu.label(&self.render.ui.ctx, fmt.tprintf("Textures %d", len(self.resource_manager.image_2d_buffers.entries) - len(self.resource_manager.image_2d_buffers.free_indices)))
     mu.label(&self.render.ui.ctx, fmt.tprintf("Materials %d", len(self.resource_manager.materials.entries) - len(self.resource_manager.materials.free_indices)))
     mu.label(&self.render.ui.ctx, fmt.tprintf("Meshes %d", len(self.resource_manager.meshes.entries) - len(self.resource_manager.meshes.free_indices)))
-    visible_count := world.get_visible_count(&self.world, self.frame_index, .OPAQUE)
-    mu.label(
-      &self.render.ui.ctx,
-      fmt.tprintf(
-        "Visible nodes %d / %d",
-        visible_count,
-        self.world.visibility.node_count,
-      ),
-    )
+
+    // Visibility culling statistics
+    mu.label(&self.render.ui.ctx, "")
+    mu.label(&self.render.ui.ctx, "=== Visibility Culling ===")
+
+    // Get stats for opaque pass
+    opaque_stats := world.visibility_system_get_stats(&self.world.visibility, self.frame_index, .OPAQUE)
+    mu.label(&self.render.ui.ctx, fmt.tprintf("Total Objects: %d", self.world.visibility.node_count))
+    mu.label(&self.render.ui.ctx, fmt.tprintf("Early Pass: %d draws", opaque_stats.early_draw_count))
+    mu.label(&self.render.ui.ctx, fmt.tprintf("Late Pass: %d draws", opaque_stats.late_draw_count))
+
+    // Calculate culling efficiency
+    efficiency: f32 = 0.0
+    if self.world.visibility.node_count > 0 {
+      efficiency = f32(opaque_stats.late_draw_count) / f32(self.world.visibility.node_count) * 100.0
+    }
+
+    reduction: f32 = 0.0
+    if opaque_stats.early_draw_count > 0 {
+      reduction = (1.0 - f32(opaque_stats.late_draw_count) / f32(opaque_stats.early_draw_count)) * 100.0
+    }
+
+    mu.label(&self.render.ui.ctx, fmt.tprintf("Culling Efficiency: %.1f%%", efficiency))
+    mu.label(&self.render.ui.ctx, fmt.tprintf("Occlusion Reduction: %.1f%%", reduction))
   }
 }
 
@@ -562,15 +577,23 @@ render :: proc(self: ^Engine) -> vk.Result {
   }
   main_render_target := &self.render.render_targets[main_idx]
   targets.render_target_upload_camera_data(&self.resource_manager, main_render_target)
-  record_all_render_targets(
-    &self.render,
-    self.frame_index,
-    &self.gpu_context,
-    &self.resource_manager,
-    &self.world,
-    command_buffer,
-    self.swapchain.format.format,
-  )
+
+  // Render all custom render targets (non-main targets) using 2-pass occlusion culling
+  for i in 0 ..< len(self.render.render_targets) {
+    if i == main_idx do continue // Skip main target, it will be rendered below
+
+    record_render_target(
+      &self.render,
+      i,
+      self.frame_index,
+      &self.gpu_context,
+      &self.resource_manager,
+      &self.world,
+      command_buffer,
+      self.swapchain.format.format,
+    ) or_return
+  }
+
   record_shadow_pass(
     &self.render,
     self.frame_index,

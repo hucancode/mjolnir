@@ -1,0 +1,270 @@
+#version 450
+
+// Late pass culling - performs frustum + occlusion culling using depth pyramid
+
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+const uint NODE_FLAG_VISIBLE = 1u << 0;
+const uint NODE_FLAG_CULLING_ENABLED = 1u << 1;
+const uint INVALID_ID = 0xFFFFFFFFu;
+
+struct Camera {
+    mat4 view;
+    mat4 projection;
+    vec4 viewport_params;
+    vec4 position;
+    vec4 frustum_planes[6];
+};
+
+struct NodeData {
+    uint material_id;
+    uint mesh_id;
+    uint bone_matrix_offset;
+    uint flags;
+};
+
+struct MeshData {
+    vec3 aabb_min;
+    uint index_count;
+    vec3 aabb_max;
+    uint first_index;
+    int vertex_offset;
+    uint vertex_skinning_offset;
+    uint flags;
+    uint _padding;
+};
+
+struct DrawCommand {
+    uint index_count;
+    uint instance_count;
+    uint first_index;
+    int vertex_offset;
+    uint first_instance;
+};
+
+layout(push_constant) uniform PushConstants {
+    uint camera_index;
+    uint node_count;
+    uint max_draws;
+    uint include_flags;
+    uint exclude_flags;
+    float pyramid_width;
+    float pyramid_height;
+    float depth_bias;
+    uint occlusion_enabled;
+} params;
+
+layout(set = 0, binding = 0) readonly buffer NodeBuffer {
+    NodeData nodes[];
+};
+
+layout(set = 0, binding = 1) readonly buffer MeshBuffer {
+    MeshData meshes[];
+};
+
+layout(set = 0, binding = 2) readonly buffer WorldBuffer {
+    mat4 world_matrices[];
+};
+
+layout(set = 0, binding = 3) readonly buffer CameraBuffer {
+    Camera cameras[];
+};
+
+layout(set = 0, binding = 4) buffer CurrentVisibility {
+    uint visibility[];
+};
+
+layout(set = 0, binding = 5) buffer DrawCountBuffer {
+    uint draw_count;
+};
+
+layout(set = 0, binding = 6) buffer DrawCommandBuffer {
+    DrawCommand commands[];
+};
+
+layout(set = 0, binding = 7) uniform sampler2D depth_pyramid;
+
+// return true if aabb is visible, false if outside frustum
+bool frustum_cull(vec3 center, vec3 extent, Camera camera) {
+    for (int i = 0; i < 6; ++i) {
+        vec4 plane_raw = camera.frustum_planes[i];
+        float denom = length(plane_raw.xyz);
+        if (denom <= 1e-6) continue;
+
+        vec3 normal = plane_raw.xyz / denom;
+        float distance = dot(normal, center) + plane_raw.w / denom;
+        float radius = dot(abs(normal), extent);
+
+        if (distance + radius < 0.0) {
+            return false; // Outside frustum
+        }
+    }
+    return true; // Inside frustum
+}
+
+// 2D Polyhedral Bounds of a Clipped, Perspective-Projected 3D Sphere
+// Based on: Michael Mara, Morgan McGuire. 2013
+// Adapted for negative-Z view space (Vulkan/OpenGL convention)
+bool project_sphere(vec3 center, float radius, mat4 proj, vec4 viewport_params, out vec4 aabb) {
+    float near = viewport_params.z;
+    float far = viewport_params.w;
+
+    // In standard view space, camera looks down -Z axis, objects in front have negative Z
+    // Near plane is at z = -near, far plane is at z = -far
+    // Check if sphere is completely behind near plane or beyond far plane
+    if (center.z - radius > -near) return false; // Entire sphere behind near plane
+    if (center.z + radius < -far) return false; // Entire sphere beyond far plane
+
+    // Mara & McGuire algorithm works with positive Z (objects in front have positive Z)
+    // Convert from Mjolnir's negative-Z to positive-Z for the algorithm
+    vec3 c = vec3(center.x, center.y, -center.z);
+    float r = radius;
+    float znear = near;
+
+    // Early out: sphere is too close to camera (intersects or behind near plane)
+    if (c.z < r + znear) {
+        return false;
+    }
+
+    // Extract projection matrix components
+    // For perspective projection: P00 = 2*n/(r-l) or 1/(aspect*tan(fov/2))
+    //                           P11 = 2*n/(t-b) or 1/tan(fov/2)
+    float P00 = proj[0][0];
+    float P11 = proj[1][1];
+
+    // Compute tangent planes using analytical solution
+    vec3 cr = c * r;
+    float czr2 = c.z * c.z - r * r;
+
+    // Compute X bounds (tangent planes in X direction)
+    float vx = sqrt(c.x * c.x + czr2);
+    float minx = (vx * c.x - cr.z) / (vx * c.z + cr.x);
+    float maxx = (vx * c.x + cr.z) / (vx * c.z - cr.x);
+
+    // Compute Y bounds (tangent planes in Y direction)
+    float vy = sqrt(c.y * c.y + czr2);
+    float miny = (vy * c.y - cr.z) / (vy * c.z + cr.y);
+    float maxy = (vy * c.y + cr.z) / (vy * c.z - cr.y);
+
+    // Apply projection matrix components to get NDC coordinates
+    aabb = vec4(minx * P00, miny * P11, maxx * P00, maxy * P11);
+
+    // Convert from NDC space [-1,1] to UV space [0,1]
+    // Note: Y is flipped for Vulkan (negative Y points down in NDC)
+    aabb = aabb.xwzy * vec4(0.5, -0.5, 0.5, -0.5) + vec4(0.5);
+
+    // Clamp to screen bounds
+    aabb = clamp(aabb, 0.0, 1.0);
+
+    // Valid AABB has non-zero area
+    return (aabb.z > aabb.x) && (aabb.w > aabb.y);
+}
+
+// return true if the sphere is visible, false if occluded
+bool occlusion_test(vec3 center, float radius, Camera camera) {
+    // Transform to view space
+    vec4 view_center4 = camera.view * vec4(center, 1.0);
+    vec3 view_center = view_center4.xyz;
+    float near = camera.viewport_params.z;
+    float far = camera.viewport_params.w;
+    // Project to screen and get AABB
+    vec4 aabb;
+    if (!project_sphere(view_center, radius, camera.projection, camera.viewport_params, aabb)) {
+        return true; // Can't project, assume visible
+    }
+    // Calculate appropriate mip level based on screen coverage
+    float width = (aabb.z - aabb.x) * params.pyramid_width;
+    float height = (aabb.w - aabb.y) * params.pyramid_height;
+    // Use ceil to ensure conservative results
+    // Clamp to valid mip range to avoid negative or out-of-bounds levels
+    float level = ceil(log2(max(width, height)));
+    level = max(0.0, level); // Clamp to non-negative
+    // Sample depth pyramid at the center of the AABB
+    // Sampler with MAX reduction gives us the farthest occluder in the 2x2 quad
+    vec2 sample_uv = (aabb.xy + aabb.zw) * 0.5;
+    float occluder_depth = textureLod(depth_pyramid, sample_uv, level).r;
+    // Calculate object's nearest depth in view space (closest point to camera)
+    // In standard OpenGL/Vulkan view space, camera looks down -Z axis
+    // Objects in front have negative Z values, so nearest point is at z + radius
+    float object_near_z = view_center.z + radius;
+    // Convert to projected depth space
+    vec4 clip_pos = camera.projection * vec4(0, 0, object_near_z, 1.0);
+    float object_depth = clip_pos.z / clip_pos.w;
+    // Object is visible if its nearest point is closer than the farthest occluder + bias
+    return object_depth < (occluder_depth + params.depth_bias);
+}
+
+void main() {
+    uint node_id = gl_GlobalInvocationID.x;
+    if (node_id >= params.node_count) return;
+
+    NodeData node = nodes[node_id];
+    if (node.mesh_id == INVALID_ID) {
+        visibility[node_id] = 0u;
+        return;
+    }
+
+    // Check flag filtering
+    if ((node.flags & params.include_flags) != params.include_flags) {
+        visibility[node_id] = 0u;
+        return;
+    }
+    if ((node.flags & params.exclude_flags) != 0u) {
+        visibility[node_id] = 0u;
+        return;
+    }
+
+    MeshData mesh = meshes[node.mesh_id];
+    if (mesh.index_count == 0u) {
+        visibility[node_id] = 0u;
+        return;
+    }
+
+    Camera camera = cameras[params.camera_index];
+    mat4 world = world_matrices[node_id];
+
+    // Transform AABB to world space
+    vec3 local_min = mesh.aabb_min;
+    vec3 local_max = mesh.aabb_max;
+    vec3 local_center = 0.5 * (local_min + local_max);
+    vec3 local_extent = 0.5 * (local_max - local_min);
+
+    vec4 world_center4 = world * vec4(local_center, 1.0);
+    vec3 world_center = world_center4.xyz / max(world_center4.w, 1e-6);
+
+    mat3 world3 = mat3(world);
+    mat3 abs_world3 = mat3(abs(world3[0]), abs(world3[1]), abs(world3[2]));
+    vec3 world_extent = abs_world3 * local_extent;
+
+    // Calculate bounding sphere for occlusion test
+    float radius = length(world_extent);
+
+    bool visible = true;
+
+    // Step 1: Frustum culling
+    if ((node.flags & NODE_FLAG_CULLING_ENABLED) != 0u) {
+        visible = frustum_cull(world_center, world_extent, camera);
+    }
+
+    // Step 2: Occlusion culling (if enabled and passed frustum)
+    if (visible && params.occlusion_enabled == 1u) {
+        visible = occlusion_test(world_center, radius, camera);
+    }
+
+    // Update visibility buffer
+    visibility[node_id] = visible ? 1u : 0u;
+
+    if (!visible) return;
+
+    // Add to late pass draw list
+    uint draw_index = atomicAdd(draw_count, 1);
+    if (draw_index >= params.max_draws) return;
+
+    DrawCommand cmd;
+    cmd.index_count = mesh.index_count;
+    cmd.instance_count = 1u;
+    cmd.first_index = mesh.first_index;
+    cmd.vertex_offset = mesh.vertex_offset;
+    cmd.first_instance = node_id;
+    commands[draw_index] = cmd;
+}

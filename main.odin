@@ -12,7 +12,7 @@ import "mjolnir/world"
 import "vendor:glfw"
 import mu "vendor:microui"
 
-LIGHT_COUNT :: 1
+LIGHT_COUNT :: 10
 ALL_SPOT_LIGHT :: false
 ALL_POINT_LIGHT :: false
 light_handles: [LIGHT_COUNT]resources.Handle
@@ -48,6 +48,11 @@ main :: proc() {
 setup :: proc(engine: ^mjolnir.Engine) {
   using mjolnir, geometry
   log.info("Setup function called!")
+
+  // Enable visibility statistics logging
+  world.visibility_system_set_stats_enabled(&engine.world.visibility, true)
+  log.info("Visibility statistics enabled")
+
   plain_material_handle, plain_material_ok := create_material(engine)
   cube_geom := make_cube()
   cube_mesh_handle, cube_mesh_ok := create_mesh(engine, cube_geom)
@@ -78,7 +83,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
                 world.MeshAttachment {
                   handle = cube_mesh_handle,
                   material = mat_handle,
-                  // cast_shadow = true,
+                  cast_shadow = true,
                 },
               )
             } else if x % 3 == 1 {
@@ -87,7 +92,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
                 world.MeshAttachment {
                   handle = cone_mesh_handle,
                   material = mat_handle,
-                  // cast_shadow = true,
+                  cast_shadow = true,
                 },
               )
             } else {
@@ -96,7 +101,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
                 world.MeshAttachment {
                   handle = sphere_mesh_handle,
                   material = mat_handle,
-                  // cast_shadow = true,
+                  cast_shadow = true,
                 },
               )
             }
@@ -217,10 +222,10 @@ setup :: proc(engine: ^mjolnir.Engine) {
     gltf_nodes := load_gltf(engine, "assets/Suzanne.glb") or_else {}
     log.infof("Loaded GLTF nodes: %v", gltf_nodes)
     for handle in gltf_nodes {
-      translate(engine, handle, -3, 1, -17)
+      translate(engine, handle, -3, 1, 0)
     }
   }
-  if false {
+  if true {
     log.info("loading Warrior GLTF...")
     gltf_nodes := load_gltf(engine, "assets/Warrior.glb") or_else {}
     log.infof("Loaded GLTF nodes: %v", gltf_nodes)
@@ -488,7 +493,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     camera_controller_sync(&free_controller, main_camera)
   }
   current_controller = &orbit_controller
-  when false {
+  when true {
     log.info("Setting up portal...")
     idx, portal_ok := create_render_target(
       engine,
