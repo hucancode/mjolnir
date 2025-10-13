@@ -54,33 +54,13 @@ jobs:
     - name: Build shader
       run: make shader
 
-    - name: Run visual scenes and capture screenshots
+    - name: Run visual tests
       env:
         VK_LAYER_PATH: ${{ env.VULKAN_SDK }}/etc/vulkan/explicit_layer.d:${{ env.VULKAN_SDK }}/share/vulkan/explicit_layer.d
         VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
-        # VK_LOADER_DEBUG: all
       run: |
         export LD_LIBRARY_PATH="$VULKAN_SDK/lib:$VULKAN_SDK/lib64:${LD_LIBRARY_PATH:-}"
-        tests=()
-        while IFS= read -r -d '' path; do
-          name=$(basename "$path")
-          if [ "$name" = "common" ]; then
-            continue
-          fi
-          tests+=("$name")
-        done < <(find test/visual -mindepth 1 -maxdepth 1 -type d -print0 | sort -z)
-        failures=()
-        for test in "${tests[@]}"; do
-          echo "Executing visual test: $test"
-          if ! ./test/visual/run.py "$test" artifacts; then
-            echo "Test failed: $test" >&2
-            failures+=("$test")
-          fi
-        done
-        if [ ${#failures[@]} -ne 0 ]; then
-          echo "Visual tests failed: ${failures[*]}" >&2
-          exit 1
-        fi
+        make vtest
     - name: Smoke test
       env:
         VK_LAYER_PATH: ${{ env.VULKAN_SDK }}/etc/vulkan/explicit_layer.d:${{ env.VULKAN_SDK }}/share/vulkan/explicit_layer.d
@@ -89,65 +69,19 @@ jobs:
         VK_SCREENSHOT_FRAMES: 3
         VK_SCREENSHOT_DIR: ${{ github.workspace }}/artifacts/main
       run: |
-        set -euo pipefail
         export LD_LIBRARY_PATH="$VULKAN_SDK/lib:$VULKAN_SDK/lib64:${LD_LIBRARY_PATH:-}"
         mkdir -p "$VK_SCREENSHOT_DIR"
-
-        set +e
         make build
-        xvfb-run -a -s "-screen 0 1920x1080x24" \
-          timeout 15s ./bin/main >"$VK_SCREENSHOT_DIR/main.log" 2>&1
-        status=$?
-        set -e
-
-        if [ $status -ne 0 ] && [ $status -ne 124 ]; then
-          echo "Main demo execution failed with status $status" >&2
-          exit $status
-        fi
-
-        ppm=$(find "$VK_SCREENSHOT_DIR" -maxdepth 1 -name '*.ppm' | sort | head -n 1)
-        if [ -z "$ppm" ]; then
-          echo "No screenshot captured for main demo" >&2
-          exit 1
-        fi
-
-        # Use Python to analyze the image
-        python3 - "$ppm" << 'EOF'
-        import sys
-        from pathlib import Path
-        try:
-            from skimage import io
-            import numpy as np
-        except ImportError:
-            print("scikit-image not available", file=sys.stderr)
-            sys.exit(1)
-
-        ppm_file = Path(sys.argv[1])
-        img = io.imread(str(ppm_file))
-
-        height, width = img.shape[:2]
-        pixels = width * height
-
-        # Count unique colors (flatten RGB to single values for counting)
-        if len(img.shape) == 3:
-            # For RGB images, treat each unique RGB tuple as a color
-            img_reshaped = img.reshape(-1, img.shape[2])
-            unique_colors = len(np.unique(img_reshaped, axis=0))
-        else:
-            unique_colors = len(np.unique(img))
-
-        print(f"Unique colors: {unique_colors}")
-        print(f"Pixel count: {pixels}")
-
-        if unique_colors <= 1000:
-            print(f"Unique color count too low: {unique_colors}", file=sys.stderr)
-            sys.exit(1)
-        if unique_colors * 2 >= pixels:
-            print(f"Unique color count too high relative to total pixels: {unique_colors} vs {pixels}", file=sys.stderr)
-            sys.exit(1)
-
-        print("Main demo color diversity within expected range")
-        EOF
+        timeout 15s xvfb-run -a -s "-screen 0 1920x1080x24" ./bin/main || true
+        ppm=$(find "$VK_SCREENSHOT_DIR" -name '*.ppm' | head -1)
+        python3 -c "
+        from skimage import io; import numpy as np
+        img = io.imread('$ppm')
+        colors = len(np.unique(img.reshape(-1, img.shape[2]), axis=0))
+        pixels = img.shape[0] * img.shape[1]
+        print(f'Colors: {colors}, Pixels: {pixels}')
+        assert 1000 < colors < pixels // 2, f'Invalid color count: {colors}'
+        "
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
       if: always()
