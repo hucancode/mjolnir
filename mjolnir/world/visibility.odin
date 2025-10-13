@@ -29,8 +29,6 @@ VisibilityTask :: struct {
   // Depth resources
   depth_texture:      gpu.ImageBuffer,
   depth_pyramid:      DepthPyramid,
-  depth_framebuffer:  vk.Framebuffer,
-  depth_render_pass:  vk.RenderPass,
 
   // Descriptor sets
   late_descriptor_set:  vk.DescriptorSet,
@@ -254,10 +252,6 @@ visibility_system_shutdown :: proc(
     frame := &system.frames[frame_idx]
     for task_idx in 0 ..< VISIBILITY_TASK_COUNT {
       task := &frame.tasks[task_idx]
-
-      // Destroy depth resources
-      vk.DestroyFramebuffer(device, task.depth_framebuffer, nil)
-      vk.DestroyRenderPass(device, task.depth_render_pass, nil)
 
       // Destroy depth pyramid views and sampler
       for mip in 0 ..< task.depth_pyramid.mip_levels {
@@ -605,72 +599,6 @@ create_depth_resources :: proc(
     &task.depth_pyramid.sampler,
   ) or_return
 
-  // Create render pass for depth rendering
-  attachment := vk.AttachmentDescription {
-    format = .D32_SFLOAT,
-    samples = {._1},
-    loadOp = .CLEAR,
-    storeOp = .STORE,
-    stencilLoadOp = .DONT_CARE,
-    stencilStoreOp = .DONT_CARE,
-    initialLayout = .UNDEFINED,
-    finalLayout = .DEPTH_STENCIL_READ_ONLY_OPTIMAL,
-  }
-
-  attachment_ref := vk.AttachmentReference {
-    attachment = 0,
-    layout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-  }
-
-  subpass := vk.SubpassDescription {
-    pipelineBindPoint = .GRAPHICS,
-    pDepthStencilAttachment = &attachment_ref,
-  }
-
-  dependency := vk.SubpassDependency {
-    srcSubpass = vk.SUBPASS_EXTERNAL,
-    dstSubpass = 0,
-    srcStageMask = {.COMPUTE_SHADER},
-    dstStageMask = {.EARLY_FRAGMENT_TESTS},
-    srcAccessMask = {.SHADER_WRITE},
-    dstAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE},
-  }
-
-  render_pass_info := vk.RenderPassCreateInfo {
-    sType = .RENDER_PASS_CREATE_INFO,
-    attachmentCount = 1,
-    pAttachments = &attachment,
-    subpassCount = 1,
-    pSubpasses = &subpass,
-    dependencyCount = 1,
-    pDependencies = &dependency,
-  }
-
-  vk.CreateRenderPass(
-    gpu_context.device,
-    &render_pass_info,
-    nil,
-    &task.depth_render_pass,
-  ) or_return
-
-  // Create framebuffer
-  framebuffer_info := vk.FramebufferCreateInfo {
-    sType = .FRAMEBUFFER_CREATE_INFO,
-    renderPass = task.depth_render_pass,
-    attachmentCount = 1,
-    pAttachments = &task.depth_texture.view,
-    width = width,
-    height = height,
-    layers = 1,
-  }
-
-  vk.CreateFramebuffer(
-    gpu_context.device,
-    &framebuffer_info,
-    nil,
-    &task.depth_framebuffer,
-  ) or_return
-
   return vk.Result.SUCCESS
 }
 
@@ -991,9 +919,16 @@ create_depth_pipeline :: proc(
     return .ERROR_INITIALIZATION_FAILED
   }
 
-  // Create graphics pipeline (using first task's render pass as reference)
+  // Configure dynamic rendering for depth-only pass
+  depth_dynamic_rendering := vk.PipelineRenderingCreateInfo {
+    sType                 = .PIPELINE_RENDERING_CREATE_INFO,
+    depthAttachmentFormat = .D32_SFLOAT,
+  }
+
+  // Create graphics pipeline using dynamic rendering
   pipeline_info := vk.GraphicsPipelineCreateInfo {
     sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
+    pNext               = &depth_dynamic_rendering,
     stageCount          = len(shader_stages),
     pStages             = raw_data(shader_stages[:]),
     pVertexInputState   = &vertex_input_info,
@@ -1005,8 +940,6 @@ create_depth_pipeline :: proc(
     pColorBlendState    = &color_blend,
     pDynamicState       = &dynamic_state,
     layout              = system.depth_pipeline_layout,
-    renderPass          = system.frames[0].tasks[0].depth_render_pass,
-    subpass             = 0,
   }
 
   vk.CreateGraphicsPipelines(

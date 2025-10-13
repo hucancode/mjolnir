@@ -17,24 +17,27 @@ render_depth_pass :: proc(
   resources_manager: ^resources.Manager,
   request: VisibilityRequest,
 ) {
-  // Begin render pass for depth rendering
-  clear_value := vk.ClearValue {
-    depthStencil = {depth = 1.0, stencil = 0}, // Clear to far depth
+  // Begin dynamic rendering for depth rendering
+  depth_attachment := vk.RenderingAttachmentInfo {
+    sType = .RENDERING_ATTACHMENT_INFO,
+    imageView = task.depth_texture.view,
+    imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+    loadOp = .CLEAR,
+    storeOp = .STORE,
+    clearValue = {depthStencil = {depth = 1.0, stencil = 0}},
   }
 
-  render_pass_begin := vk.RenderPassBeginInfo {
-    sType = .RENDER_PASS_BEGIN_INFO,
-    renderPass = task.depth_render_pass,
-    framebuffer = task.depth_framebuffer,
+  render_info := vk.RenderingInfo {
+    sType = .RENDERING_INFO,
     renderArea = {
       offset = {0, 0},
       extent = {system.depth_width, system.depth_height},
     },
-    clearValueCount = 1,
-    pClearValues = &clear_value,
+    layerCount = 1,
+    pDepthAttachment = &depth_attachment,
   }
 
-  vk.CmdBeginRenderPass(command_buffer, &render_pass_begin, .INLINE)
+  vk.CmdBeginRendering(command_buffer, &render_info)
 
   // Set viewport and scissor
   // Use negative height to flip Y axis (Vulkan convention: +Y down, we want +Y up)
@@ -109,7 +112,7 @@ render_depth_pass :: proc(
     )
   }
 
-  vk.CmdEndRenderPass(command_buffer)
+  vk.CmdEndRendering(command_buffer)
 
   // No barrier here - main dispatch function handles synchronization
 }
