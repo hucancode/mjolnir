@@ -59,8 +59,8 @@ golden:
 capture: build
 	@# Capture settings
 	@APP_PATH="./bin/main"; \
-	FRAME_N="5"; \
-	OUT_DIR="."; \
+	FRAME_N="5,6"; \
+	OUT_DIR="screenshots"; \
 	PPM_FILE="$$OUT_DIR/$$FRAME_N.ppm"; \
 	PNG_FILE="$$OUT_DIR/screenshot.png"; \
 	TIMEOUT_SEC="6"; \
@@ -75,15 +75,11 @@ capture: build
 	xvfb-run -a -s "-screen 0 1920x1080x24" \
 	timeout "$${TIMEOUT_SEC}s" "$$APP_PATH" || true; \
 	\
-	if [ -f "$$PPM_FILE" ]; then \
-		convert "$$PPM_FILE" "$$PNG_FILE"; \
-		rm -f "$$PPM_FILE"; \
-		echo "Screenshot saved: $$PNG_FILE"; \
-	else \
-		echo "Error: no screenshot captured (file not found: $$PPM_FILE)" >&2; \
-		exit 1; \
-	fi
-
+	for f in "$$OUT_DIR/*.ppm"; do
+		out="${f%.ppm}.png"
+		echo "Converting $f -> $out"
+		convert "$f" "$out"
+	done
 clean:
 	rm -rf bin/*
 
