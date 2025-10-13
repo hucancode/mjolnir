@@ -19,10 +19,6 @@ VisibilityCategory :: enum u32 {
 
 VISIBILITY_TASK_COUNT :: len(VisibilityCategory)
 
-visibility_category_name :: proc(task: VisibilityCategory) -> string {
-  return fmt.tprintf("%v", task)
-}
-
 // Enhanced visibility data for 2-pass culling
 VisibilityTask :: struct {
   // Early pass buffers
@@ -377,12 +373,40 @@ visibility_system_dispatch :: proc(
   gpu_context: ^gpu.GPUContext,
   command_buffer: vk.CommandBuffer,
   frame_index: u32,
-  task: VisibilityCategory,
+  task_category: VisibilityCategory,
   request: VisibilityRequest,
   resources_manager: ^resources.Manager,
 ) -> VisibilityResult {
-  // Always use the 2-pass occlusion culling system
-  return visibility_system_dispatch_2pass(
+  result := VisibilityResult {
+    draw_buffer    = 0,
+    count_buffer   = 0,
+    command_stride = draw_command_stride(),
+  }
+  if system.node_count == 0 {
+    return result
+  }
+  frame := &system.frames[frame_index]
+  task := &frame.tasks[int(task_category)]
+
+  // Clear buffers
+  vk.CmdFillBuffer(
+    command_buffer,
+    task.early_draw_count.buffer,
+    0,
+    vk.DeviceSize(task.early_draw_count.bytes_count),
+    0,
+  )
+  vk.CmdFillBuffer(
+    command_buffer,
+    task.late_draw_count.buffer,
+    0,
+    vk.DeviceSize(task.late_draw_count.bytes_count),
+    0,
+  )
+
+  // === STEP 1: EARLY PASS COMPUTE ===
+  // Use previous frame's visibility to conservatively cull
+  execute_early_pass(
     system,
     gpu_context,
     command_buffer,
@@ -391,6 +415,136 @@ visibility_system_dispatch :: proc(
     request,
     resources_manager,
   )
+
+  // Barrier: Wait for early compute to finish before graphics can read draw commands
+  early_compute_done := vk.BufferMemoryBarrier {
+    sType         = .BUFFER_MEMORY_BARRIER,
+    srcAccessMask = {.SHADER_WRITE},
+    dstAccessMask = {.INDIRECT_COMMAND_READ},
+    buffer        = task.early_draw_commands.buffer,
+    size          = vk.DeviceSize(task.early_draw_commands.bytes_count),
+  }
+
+  vk.CmdPipelineBarrier(
+    command_buffer,
+    {.COMPUTE_SHADER},
+    {.DRAW_INDIRECT},
+    {},
+    0,
+    nil,
+    1,
+    &early_compute_done,
+    0,
+    nil,
+  )
+
+  // === STEP 2: RENDER DEPTH FROM EARLY PASS ===
+  render_depth_pass(
+    system,
+    gpu_context,
+    command_buffer,
+    frame_index,
+    task,
+    resources_manager,
+    request,
+    true, // early pass
+  )
+
+  // Barrier: Wait for depth rendering to finish before compute shader reads it
+  depth_render_done := vk.ImageMemoryBarrier {
+    sType = .IMAGE_MEMORY_BARRIER,
+    srcAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE},
+    dstAccessMask = {.SHADER_READ},
+    oldLayout = .DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+    newLayout = .SHADER_READ_ONLY_OPTIMAL,
+    srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    image = task.depth_texture.image,
+    subresourceRange = {
+      aspectMask = {.DEPTH},
+      baseMipLevel = 0,
+      levelCount = 1,
+      baseArrayLayer = 0,
+      layerCount = 1,
+    },
+  }
+
+  vk.CmdPipelineBarrier(
+    command_buffer,
+    {.LATE_FRAGMENT_TESTS},
+    {.COMPUTE_SHADER},
+    {},
+    0,
+    nil,
+    0,
+    nil,
+    1,
+    &depth_render_done,
+  )
+
+  // === STEP 3: BUILD DEPTH PYRAMID ===
+  // This copies depth to pyramid mip 0, then generates all mip levels
+  // (includes final barrier inside the function)
+  build_depth_pyramid(
+    system,
+    gpu_context,
+    command_buffer,
+    task,
+  )
+
+  // === STEP 4: LATE PASS COMPUTE ===
+  // Full frustum + occlusion culling using depth pyramid
+  execute_late_pass(
+    system,
+    gpu_context,
+    command_buffer,
+    frame_index,
+    task,
+    request,
+    resources_manager,
+  )
+
+  // Barrier: Wait for late pass compute to finish before anyone reads the draw commands
+  late_compute_done := [?]vk.BufferMemoryBarrier{
+    {
+      sType         = .BUFFER_MEMORY_BARRIER,
+      srcAccessMask = {.SHADER_WRITE},
+      dstAccessMask = {.INDIRECT_COMMAND_READ},
+      buffer        = task.late_draw_commands.buffer,
+      size          = vk.DeviceSize(task.late_draw_commands.bytes_count),
+    },
+    {
+      sType         = .BUFFER_MEMORY_BARRIER,
+      srcAccessMask = {.SHADER_WRITE},
+      dstAccessMask = {.INDIRECT_COMMAND_READ},
+      buffer        = task.late_draw_count.buffer,
+      size          = vk.DeviceSize(task.late_draw_count.bytes_count),
+    },
+  }
+
+  vk.CmdPipelineBarrier(
+    command_buffer,
+    {.COMPUTE_SHADER},
+    {.DRAW_INDIRECT},
+    {},
+    0,
+    nil,
+    len(late_compute_done),
+    raw_data(late_compute_done[:]),
+    0,
+    nil,
+  )
+
+  // Set result to late pass draw buffer (final visibility)
+  result.draw_buffer = task.late_draw_commands.buffer
+  result.count_buffer = task.late_draw_count.buffer
+
+  // Log draw counts if statistics are enabled
+  if system.stats_enabled {
+    log_culling_stats(system, frame_index, task_category, task)
+  }
+
+  return result
 }
 
 @(private)
