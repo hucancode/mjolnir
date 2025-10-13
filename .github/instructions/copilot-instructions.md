@@ -167,6 +167,8 @@ The engine uses a deferred rendering approach with multiple passes:
 
 - Color blind consideration: Avoid using red/green color distinctions for debugging (developer has protan color blindness)
 - To debug visual issues, hardcode frame count limit in `engine.odin` `run` procedure to stop after few frames and examine logs
+- To slow down the engine to avoid excessive logs. Set FPS in `engine.odin` to low value like 4 or 2.
+- To capture visual result, run `make capture`, then analyze the newly created `screenshot.png`
 
 # Odin Language Features Used
 
