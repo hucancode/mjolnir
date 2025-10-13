@@ -21,11 +21,6 @@ VISIBILITY_TASK_COUNT :: len(VisibilityCategory)
 
 // Enhanced visibility data for 2-pass culling
 VisibilityTask :: struct {
-  // Early pass buffers
-  early_visibility:   gpu.DataBuffer(u32), // Per-object visibility from previous frame
-  early_draw_count:   gpu.DataBuffer(u32),
-  early_draw_commands: gpu.DataBuffer(vk.DrawIndexedIndirectCommand),
-
   // Late pass buffers
   late_visibility:    gpu.DataBuffer(u32), // Current frame visibility
   late_draw_count:    gpu.DataBuffer(u32),
@@ -38,7 +33,6 @@ VisibilityTask :: struct {
   depth_render_pass:  vk.RenderPass,
 
   // Descriptor sets
-  early_descriptor_set: vk.DescriptorSet,
   late_descriptor_set:  vk.DescriptorSet,
   depth_reduce_descriptor_sets: [16]vk.DescriptorSet, // For each mip level
 }
@@ -89,7 +83,6 @@ VisibilityResult :: struct {
 
 // Statistics for a single culling pass
 CullingStats :: struct {
-  early_draw_count:  u32,
   late_draw_count:   u32,
   category:          VisibilityCategory,
   frame_index:       u32,
@@ -155,28 +148,6 @@ visibility_system_init :: proc(
 
     for task_idx in 0 ..< VISIBILITY_TASK_COUNT {
       task := &frame.tasks[task_idx]
-
-      // Create visibility and draw command buffers for early and late passes
-      task.early_visibility = gpu.create_local_buffer(
-        gpu_context,
-        u32,
-        int(system.max_draws),
-        {.STORAGE_BUFFER, .TRANSFER_DST},
-      ) or_return
-
-      task.early_draw_count = gpu.create_host_visible_buffer(
-        gpu_context,
-        u32,
-        1,
-        {.STORAGE_BUFFER, .TRANSFER_DST},
-      ) or_return
-
-      task.early_draw_commands = gpu.create_host_visible_buffer(
-        gpu_context,
-        vk.DrawIndexedIndirectCommand,
-        int(system.max_draws),
-        {.STORAGE_BUFFER, .INDIRECT_BUFFER, .TRANSFER_DST},
-      ) or_return
 
       task.late_visibility = gpu.create_local_buffer(
         gpu_context,
@@ -296,9 +267,6 @@ visibility_system_shutdown :: proc(
       vk.DestroySampler(device, task.depth_pyramid.sampler, nil)
 
       // Destroy buffers
-      gpu.data_buffer_destroy(device, &task.early_visibility)
-      gpu.data_buffer_destroy(device, &task.early_draw_count)
-      gpu.data_buffer_destroy(device, &task.early_draw_commands)
       gpu.data_buffer_destroy(device, &task.late_visibility)
       gpu.data_buffer_destroy(device, &task.late_draw_count)
       gpu.data_buffer_destroy(device, &task.late_draw_commands)
@@ -350,11 +318,6 @@ visibility_system_get_stats :: proc(
   frame := &system.frames[frame_index]
   task_data := &frame.tasks[int(task)]
 
-  // Read early pass draw count
-  if task_data.early_draw_count.mapped != nil {
-    stats.early_draw_count = task_data.early_draw_count.mapped[0]
-  }
-
   // Read late pass draw count
   if task_data.late_draw_count.mapped != nil {
     stats.late_draw_count = task_data.late_draw_count.mapped[0]
@@ -387,69 +350,6 @@ visibility_system_dispatch :: proc(
   }
   frame := &system.frames[frame_index]
   task := &frame.tasks[int(task_category)]
-
-  // Clear buffers
-  vk.CmdFillBuffer(
-    command_buffer,
-    task.early_draw_count.buffer,
-    0,
-    vk.DeviceSize(task.early_draw_count.bytes_count),
-    0,
-  )
-  vk.CmdFillBuffer(
-    command_buffer,
-    task.late_draw_count.buffer,
-    0,
-    vk.DeviceSize(task.late_draw_count.bytes_count),
-    0,
-  )
-
-  // === STEP 1: EARLY PASS COMPUTE ===
-  // Use previous frame's visibility to conservatively cull
-  execute_early_pass(
-    system,
-    gpu_context,
-    command_buffer,
-    frame_index,
-    task,
-    request,
-    resources_manager,
-  )
-
-  // Barrier: Wait for early compute to finish before graphics can read draw commands
-  early_compute_done := vk.BufferMemoryBarrier {
-    sType         = .BUFFER_MEMORY_BARRIER,
-    srcAccessMask = {.SHADER_WRITE},
-    dstAccessMask = {.INDIRECT_COMMAND_READ},
-    buffer        = task.early_draw_commands.buffer,
-    size          = vk.DeviceSize(task.early_draw_commands.bytes_count),
-  }
-
-  vk.CmdPipelineBarrier(
-    command_buffer,
-    {.COMPUTE_SHADER},
-    {.DRAW_INDIRECT},
-    {},
-    0,
-    nil,
-    1,
-    &early_compute_done,
-    0,
-    nil,
-  )
-
-  // === STEP 2: RENDER DEPTH FROM EARLY PASS ===
-  render_depth_pass(
-    system,
-    gpu_context,
-    command_buffer,
-    frame_index,
-    task,
-    resources_manager,
-    request,
-    true, // early pass
-  )
-
   // Barrier: Wait for depth rendering to finish before compute shader reads it
   depth_render_done := vk.ImageMemoryBarrier {
     sType = .IMAGE_MEMORY_BARRIER,
@@ -492,6 +392,14 @@ visibility_system_dispatch :: proc(
     task,
   )
 
+  // Clear buffers
+  vk.CmdFillBuffer(
+    command_buffer,
+    task.late_draw_count.buffer,
+    0,
+    vk.DeviceSize(task.late_draw_count.bytes_count),
+    0,
+  )
   // === STEP 4: LATE PASS COMPUTE ===
   // Full frustum + occlusion culling using depth pyramid
   execute_late_pass(
@@ -533,6 +441,16 @@ visibility_system_dispatch :: proc(
     raw_data(late_compute_done[:]),
     0,
     nil,
+  )
+
+  render_depth_pass(
+    system,
+    gpu_context,
+    command_buffer,
+    frame_index,
+    task,
+    resources_manager,
+    request,
   )
 
   // Set result to late pass draw buffer (final visibility)
@@ -1111,23 +1029,16 @@ allocate_descriptor_sets :: proc(
   task: ^VisibilityTask,
   prev_task: ^VisibilityTask, // Previous frame's task for cross-frame visibility
 ) -> vk.Result {
-  // Allocate descriptor sets for early and late passes
-  layouts := [2]vk.DescriptorSetLayout{system.early_descriptor_layout, system.late_descriptor_layout}
-  sets := [2]vk.DescriptorSet{}
-
   vk.AllocateDescriptorSets(
     gpu_context.device,
     &vk.DescriptorSetAllocateInfo {
       sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
       descriptorPool = gpu_context.descriptor_pool,
-      descriptorSetCount = 2,
-      pSetLayouts = raw_data(layouts[:]),
+      descriptorSetCount = 1,
+      pSetLayouts = &system.late_descriptor_layout,
     },
-    raw_data(sets[:]),
+    &task.late_descriptor_set,
   ) or_return
-
-  task.early_descriptor_set = sets[0]
-  task.late_descriptor_set = sets[1]
 
   // Allocate descriptor sets for depth pyramid reduction (one per mip level, INCLUDING mip 0)
   for mip in 0 ..< task.depth_pyramid.mip_levels {
@@ -1143,9 +1054,6 @@ allocate_descriptor_sets :: proc(
     ) or_return
   }
 
-  // Update early pass descriptor set (reads from previous frame's late visibility)
-  update_early_descriptor_set(gpu_context, resources_manager, task, prev_task)
-
   // Update late pass descriptor set
   update_late_descriptor_set(gpu_context, resources_manager, task)
 
@@ -1155,56 +1063,6 @@ allocate_descriptor_sets :: proc(
   }
 
   return vk.Result.SUCCESS
-}
-
-@(private)
-update_early_descriptor_set :: proc(
-  gpu_context: ^gpu.GPUContext,
-  resources_manager: ^resources.Manager,
-  task: ^VisibilityTask,
-  prev_task: ^VisibilityTask, // Previous frame's task
-) {
-  node_info := vk.DescriptorBufferInfo {
-    buffer = resources_manager.node_data_buffer.device_buffer,
-    range = vk.DeviceSize(resources_manager.node_data_buffer.bytes_count),
-  }
-  mesh_info := vk.DescriptorBufferInfo {
-    buffer = resources_manager.mesh_data_buffer.device_buffer,
-    range = vk.DeviceSize(resources_manager.mesh_data_buffer.bytes_count),
-  }
-  world_info := vk.DescriptorBufferInfo {
-    buffer = resources_manager.world_matrix_buffer.device_buffer,
-    range = vk.DeviceSize(resources_manager.world_matrix_buffer.bytes_count),
-  }
-  camera_info := vk.DescriptorBufferInfo {
-    buffer = resources_manager.camera_buffer.buffer,
-    range = vk.DeviceSize(resources_manager.camera_buffer.bytes_count),
-  }
-  // FIXED: Read from the OTHER frame's late visibility (actual previous frame)
-  prev_vis_info := vk.DescriptorBufferInfo {
-    buffer = prev_task.late_visibility.buffer, // Previous frame's late visibility
-    range = vk.DeviceSize(prev_task.late_visibility.bytes_count),
-  }
-  count_info := vk.DescriptorBufferInfo {
-    buffer = task.early_draw_count.buffer,
-    range = vk.DeviceSize(task.early_draw_count.bytes_count),
-  }
-  command_info := vk.DescriptorBufferInfo {
-    buffer = task.early_draw_commands.buffer,
-    range = vk.DeviceSize(task.early_draw_commands.bytes_count),
-  }
-
-  writes := [?]vk.WriteDescriptorSet {
-    {sType = .WRITE_DESCRIPTOR_SET, dstSet = task.early_descriptor_set, dstBinding = 0, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, pBufferInfo = &node_info},
-    {sType = .WRITE_DESCRIPTOR_SET, dstSet = task.early_descriptor_set, dstBinding = 1, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, pBufferInfo = &mesh_info},
-    {sType = .WRITE_DESCRIPTOR_SET, dstSet = task.early_descriptor_set, dstBinding = 2, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, pBufferInfo = &world_info},
-    {sType = .WRITE_DESCRIPTOR_SET, dstSet = task.early_descriptor_set, dstBinding = 3, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, pBufferInfo = &camera_info},
-    {sType = .WRITE_DESCRIPTOR_SET, dstSet = task.early_descriptor_set, dstBinding = 4, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, pBufferInfo = &prev_vis_info},
-    {sType = .WRITE_DESCRIPTOR_SET, dstSet = task.early_descriptor_set, dstBinding = 5, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, pBufferInfo = &count_info},
-    {sType = .WRITE_DESCRIPTOR_SET, dstSet = task.early_descriptor_set, dstBinding = 6, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, pBufferInfo = &command_info},
-  }
-
-  vk.UpdateDescriptorSets(gpu_context.device, len(writes), raw_data(writes[:]), 0, nil)
 }
 
 @(private)

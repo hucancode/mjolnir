@@ -506,7 +506,6 @@ render_debug_ui :: proc(self: ^Engine) {
     // Get stats for opaque pass
     opaque_stats := world.visibility_system_get_stats(&self.world.visibility, self.frame_index, .OPAQUE)
     mu.label(&self.render.ui.ctx, fmt.tprintf("Total Objects: %d", self.world.visibility.node_count))
-    mu.label(&self.render.ui.ctx, fmt.tprintf("Early Pass: %d draws", opaque_stats.early_draw_count))
     mu.label(&self.render.ui.ctx, fmt.tprintf("Late Pass: %d draws", opaque_stats.late_draw_count))
 
     // Calculate culling efficiency
@@ -515,13 +514,7 @@ render_debug_ui :: proc(self: ^Engine) {
       efficiency = f32(opaque_stats.late_draw_count) / f32(self.world.visibility.node_count) * 100.0
     }
 
-    reduction: f32 = 0.0
-    if opaque_stats.early_draw_count > 0 {
-      reduction = (1.0 - f32(opaque_stats.late_draw_count) / f32(opaque_stats.early_draw_count)) * 100.0
-    }
-
     mu.label(&self.render.ui.ctx, fmt.tprintf("Culling Efficiency: %.1f%%", efficiency))
-    mu.label(&self.render.ui.ctx, fmt.tprintf("Occlusion Reduction: %.1f%%", reduction))
   }
 }
 
