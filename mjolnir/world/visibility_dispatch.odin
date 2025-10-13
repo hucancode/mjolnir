@@ -8,89 +8,6 @@ import resources "../resources"
 import vk "vendor:vulkan"
 
 @(private)
-execute_early_pass :: proc(
-  system: ^VisibilitySystem,
-  gpu_context: ^gpu.GPUContext,
-  command_buffer: vk.CommandBuffer,
-  frame_index: u32,
-  task: ^VisibilityTask,
-  request: VisibilityRequest,
-  resources_manager: ^resources.Manager,
-) {
-  // Barrier: Ensure buffers are ready
-  buffer_barriers := [?]vk.BufferMemoryBarrier {
-    {
-      sType         = .BUFFER_MEMORY_BARRIER,
-      srcAccessMask = {.TRANSFER_WRITE},
-      dstAccessMask = {.SHADER_WRITE},
-      buffer        = task.early_draw_count.buffer,
-      size          = vk.DeviceSize(task.early_draw_count.bytes_count),
-    },
-    {
-      sType         = .BUFFER_MEMORY_BARRIER,
-      srcAccessMask = {.TRANSFER_WRITE},
-      dstAccessMask = {.SHADER_WRITE},
-      buffer        = task.early_draw_commands.buffer,
-      size          = vk.DeviceSize(task.early_draw_commands.bytes_count),
-    },
-  }
-
-  vk.CmdPipelineBarrier(
-    command_buffer,
-    {.TRANSFER},
-    {.COMPUTE_SHADER},
-    {},
-    0,
-    nil,
-    len(buffer_barriers),
-    raw_data(buffer_barriers[:]),
-    0,
-    nil,
-  )
-
-  // Bind early pass pipeline and descriptor set
-  vk.CmdBindPipeline(command_buffer, .COMPUTE, system.early_cull_pipeline)
-  vk.CmdBindDescriptorSets(
-    command_buffer,
-    .COMPUTE,
-    system.early_cull_layout,
-    0,
-    1,
-    &task.early_descriptor_set,
-    0,
-    nil,
-  )
-
-  // Push constants
-  push_constants := VisibilityPushConstants {
-    camera_index      = request.camera_index,
-    node_count        = system.node_count,
-    max_draws         = system.max_draws,
-    include_flags     = request.include_flags,
-    exclude_flags     = request.exclude_flags,
-    pyramid_width     = f32(task.depth_pyramid.width),  // Use pyramid dimensions, not depth texture
-    pyramid_height    = f32(task.depth_pyramid.height),
-    depth_bias        = system.depth_bias,
-    occlusion_enabled = 0, // No occlusion test in early pass
-  }
-
-  vk.CmdPushConstants(
-    command_buffer,
-    system.early_cull_layout,
-    {.COMPUTE},
-    0,
-    size_of(push_constants),
-    &push_constants,
-  )
-
-  // Dispatch compute shader
-  dispatch_x := (system.node_count + 63) / 64
-  vk.CmdDispatch(command_buffer, dispatch_x, 1, 1)
-
-  // No barrier here - main dispatch function handles synchronization
-}
-
-@(private)
 render_depth_pass :: proc(
   system: ^VisibilitySystem,
   gpu_context: ^gpu.GPUContext,
@@ -99,7 +16,6 @@ render_depth_pass :: proc(
   task: ^VisibilityTask,
   resources_manager: ^resources.Manager,
   request: VisibilityRequest,
-  is_early_pass: bool,
 ) {
   // Begin render pass for depth rendering
   clear_value := vk.ClearValue {
@@ -182,15 +98,11 @@ render_depth_pass :: proc(
     vk.CmdBindVertexBuffers(command_buffer, 0, 1, raw_data(vertex_buffers[:]), raw_data(offsets[:]))
     vk.CmdBindIndexBuffer(command_buffer, resources_manager.index_buffer.buffer, 0, .UINT32)
 
-    // Issue indirect draw call using early pass draw commands
-    draw_buffer := is_early_pass ? task.early_draw_commands.buffer : task.late_draw_commands.buffer
-    count_buffer := is_early_pass ? task.early_draw_count.buffer : task.late_draw_count.buffer
-
     vk.CmdDrawIndexedIndirectCount(
       command_buffer,
-      draw_buffer,
+      task.late_draw_commands.buffer,
       0, // offset
-      count_buffer,
+      task.late_draw_count.buffer,
       0, // count offset
       system.max_draws,
       draw_command_stride(),
@@ -310,8 +222,6 @@ execute_late_pass :: proc(
   request: VisibilityRequest,
   resources_manager: ^resources.Manager,
 ) {
-  // Note: Buffers already cleared at start of dispatch - no need to clear again
-
   // Bind late pass pipeline and descriptor set
   vk.CmdBindPipeline(command_buffer, .COMPUTE, system.late_cull_pipeline)
   vk.CmdBindDescriptorSets(
@@ -350,8 +260,6 @@ execute_late_pass :: proc(
   // Dispatch compute shader
   dispatch_x := (system.node_count + 63) / 64
   vk.CmdDispatch(command_buffer, dispatch_x, 1, 1)
-
-  // No barrier here - main dispatch function handles synchronization
 }
 
 @(private)
@@ -362,12 +270,7 @@ log_culling_stats :: proc(
   task: ^VisibilityTask,
 ) {
   // Read draw counts from mapped memory
-  early_count: u32 = 0
   late_count: u32 = 0
-
-  if task.early_draw_count.mapped != nil {
-    early_count = task.early_draw_count.mapped[0]
-  }
 
   if task.late_draw_count.mapped != nil {
     late_count = task.late_draw_count.mapped[0]
@@ -379,18 +282,11 @@ log_culling_stats :: proc(
     efficiency = f32(late_count) / f32(system.node_count) * 100.0
   }
 
-  reduction: f32 = 0.0
-  if early_count > 0 {
-    reduction = (1.0 - f32(late_count) / f32(early_count)) * 100.0
-  }
-
-  log.infof("[Frame %d][%v] Culling Stats: Total Objects=%d | Early Pass=%d | Late Pass=%d | Efficiency=%.1f%% | Occlusion Reduction=%.1f%%",
+  log.infof("[Frame %d][%v] Culling Stats: Total Objects=%d | Late Pass=%d | Efficiency=%.1f%%",
     frame_index,
     category,
     system.node_count,
-    early_count,
     late_count,
     efficiency,
-    reduction
   )
 }
