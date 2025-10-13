@@ -51,7 +51,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
 
   // Enable visibility statistics logging
   world.visibility_system_set_stats_enabled(&engine.world.visibility, true)
-  log.info("Visibility statistics enabled")
+  set_debug_ui_enabled(engine, true)
 
   plain_material_handle, plain_material_ok := create_material(engine)
   cube_geom := make_cube()
