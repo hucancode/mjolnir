@@ -113,11 +113,10 @@ The engine uses a deferred rendering approach with multiple passes:
 
 ### Shader Development
 - Shaders are in `mjolnir/shader/` organized by render pass
-- Use `make shader` to rebuild all shaders before first build
-- Individual shaders: `make mjolnir/shader/{shader_name}/vert.spv` (or frag.spv)
+- Use `make shader` to rebuild all shaders. It's fast and incremental, you need not to build individual shader
 - Compute shaders include:
   + Particle system: `compute.comp`, `compact.comp`, `emitter.comp`
-  + Culling systems: `culling.comp` for visibility, scene, and multi-camera culling
+  + Culling systems: `culling.comp` for visibility
 
 ### Testing
 - Tests are in `test/` directory
@@ -146,7 +145,7 @@ The engine uses a deferred rendering approach with multiple passes:
 - System tests simulate real user workflows end-to-end
 - write test that shows all the algorithm's behavior. all use case must be covered. don't only write tests that produce empty result or lacking diversity in result
 - an unit test must confirm a single aspect of the feature. unit test must not be duplicated
-- tests must not overdo works supposed to be in the main code. tests only call the function of interest and check the results
+- tests must not overdo works supposed to be in the production code. tests only call the function of interest and check the results
 
 ### Common File Locations
 
