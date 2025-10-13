@@ -31,6 +31,33 @@ test:
 	timeout 50s odin test test/recast -out:bin/test && \
 	timeout 50s odin test test/detour -out:bin/test
 
+VISUAL_TESTS := cube gltf_animation gltf_skinning gltf_static grid256 grid300 grid5 light material navmesh shadow
+
+vtest:
+	@echo "Running all visual tests..."
+	@mkdir -p artifacts
+	@failures=(); \
+	for test_name in $(VISUAL_TESTS); do \
+		echo "Testing $$test_name..."; \
+		if ! ./test/visual/run.py "$$test_name" artifacts; then \
+			failures+=("$$test_name"); \
+		fi; \
+	done; \
+	if [ $${#failures[@]} -ne 0 ]; then \
+		echo "Visual tests failed: $${failures[*]}" >&2; \
+		exit 1; \
+	fi; \
+	echo "All visual tests passed."
+
+golden:
+	@echo "Regenerating all visual test golden images..."
+	@mkdir -p artifacts
+	@for test_name in $(VISUAL_TESTS); do \
+		echo "Updating golden image for $$test_name..."; \
+		UPDATE_GOLDEN=1 ./test/visual/run.py "$$test_name" artifacts || exit 1; \
+	done
+	@echo "All golden images updated successfully."
+
 capture: build
 	@# Capture settings
 	@APP_PATH="./bin/main"; \
@@ -74,4 +101,4 @@ $(SHADER_DIR)/%/frag.spv: $(SHADER_DIR)/%/shader.frag
 	@echo "Compiling fragment shader $<..."
 	@glslc "$<" -o "$@"
 
-.PHONY: build run debug shader test check clean
+.PHONY: build run debug shader test check clean vtest golden

@@ -36,13 +36,14 @@ jobs:
         sudo apt-get install -y \
           xvfb \
           libglfw3-dev \
-          imagemagick \
           libgl1-mesa-dev \
           libglu1-mesa-dev \
           mesa-vulkan-drivers \
           vulkan-tools \
-          x11-utils
+          x11-utils \
+          python3-pip
         sudo ln -sf /usr/lib/x86_64-linux-gnu/libglfw.so.3 /usr/lib/x86_64-linux-gnu/libglfw.so
+        pip install scikit-image numpy
 
     - name: Inspect Vulkan SDK assets
       run: |
@@ -91,16 +92,6 @@ jobs:
         set -euo pipefail
         export LD_LIBRARY_PATH="$VULKAN_SDK/lib:$VULKAN_SDK/lib64:${LD_LIBRARY_PATH:-}"
         mkdir -p "$VK_SCREENSHOT_DIR"
-        if command -v magick >/dev/null 2>&1; then
-          IMG_TOOL=(magick identify)
-        elif command -v identify >/dev/null 2>&1; then
-          IMG_TOOL=(identify)
-        elif command -v convert >/dev/null 2>&1; then
-          IMG_TOOL=(convert)
-        else
-          echo "No ImageMagick tool (magick/identify/convert) found" >&2
-          exit 1
-        fi
 
         set +e
         make build
@@ -120,28 +111,43 @@ jobs:
           exit 1
         fi
 
-        if [ "${IMG_TOOL[0]}" = "convert" ]; then
-          unique_colors=$("${IMG_TOOL[@]}" "$ppm" -format "%k" info:)
-          read -r width height <<< "$("${IMG_TOOL[@]}" "$ppm" -format "%w %h" info:)"
-        else
-          unique_colors=$("${IMG_TOOL[@]}" -format "%k" "$ppm")
-          read -r width height <<< "$("${IMG_TOOL[@]}" -format "%w %h" "$ppm")"
-        fi
+        # Use Python to analyze the image
+        python3 - "$ppm" << 'EOF'
+        import sys
+        from pathlib import Path
+        try:
+            from skimage import io
+            import numpy as np
+        except ImportError:
+            print("scikit-image not available", file=sys.stderr)
+            sys.exit(1)
 
-        pixels=$((width * height))
-        echo "Unique colors: $unique_colors"
-        echo "Pixel count: $pixels"
+        ppm_file = Path(sys.argv[1])
+        img = io.imread(str(ppm_file))
 
-        if [ "$unique_colors" -le 1000 ]; then
-          echo "Unique color count too low: $unique_colors" >&2
-          exit 1
-        fi
-        if [ $((unique_colors * 2)) -ge "$pixels" ]; then
-          echo "Unique color count too high relative to total pixels: $unique_colors vs $pixels" >&2
-          exit 1
-        fi
+        height, width = img.shape[:2]
+        pixels = width * height
 
-        echo "Main demo color diversity within expected range"
+        # Count unique colors (flatten RGB to single values for counting)
+        if len(img.shape) == 3:
+            # For RGB images, treat each unique RGB tuple as a color
+            img_reshaped = img.reshape(-1, img.shape[2])
+            unique_colors = len(np.unique(img_reshaped, axis=0))
+        else:
+            unique_colors = len(np.unique(img))
+
+        print(f"Unique colors: {unique_colors}")
+        print(f"Pixel count: {pixels}")
+
+        if unique_colors <= 1000:
+            print(f"Unique color count too low: {unique_colors}", file=sys.stderr)
+            sys.exit(1)
+        if unique_colors * 2 >= pixels:
+            print(f"Unique color count too high relative to total pixels: {unique_colors} vs {pixels}", file=sys.stderr)
+            sys.exit(1)
+
+        print("Main demo color diversity within expected range")
+        EOF
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
       if: always()

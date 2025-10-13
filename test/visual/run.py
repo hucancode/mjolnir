@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+from __future__ import annotations
+
 import argparse
 import os
 import shutil
@@ -7,6 +9,17 @@ import signal
 import subprocess
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import numpy as np
+
+try:
+    from skimage import io, metrics
+    import numpy as np
+    SKIMAGE_AVAILABLE = True
+except ImportError:
+    SKIMAGE_AVAILABLE = False
 
 
 def parse_args() -> argparse.Namespace:
@@ -137,6 +150,103 @@ def find_first_ppm(directory: Path) -> Path | None:
     return candidates[0] if candidates else None
 
 
+def load_and_validate_images(golden: Path, latest: Path) -> tuple[np.ndarray, np.ndarray]:
+    """Load two images and validate they have matching dimensions."""
+    if not SKIMAGE_AVAILABLE:
+        raise SystemExit(
+            "Image comparison requires scikit-image. Install with: pip install scikit-image"
+        )
+
+    try:
+        img1 = io.imread(str(golden))
+        img2 = io.imread(str(latest))
+    except Exception as exc:
+        raise SystemExit(f"Failed to read images: {exc}") from exc
+
+    if img1.shape != img2.shape:
+        raise SystemExit(
+            f"Image dimensions don't match: {golden} {img1.shape} vs {latest} {img2.shape}"
+        )
+
+    return img1, img2
+
+
+def to_grayscale(img: np.ndarray) -> np.ndarray:
+    """Convert RGB image to grayscale using luminance formula."""
+    if len(img.shape) == 3 and img.shape[2] >= 3:
+        # Use standard luminance formula for RGB to grayscale conversion
+        return np.dot(img[...,:3], [0.299, 0.587, 0.114])
+    return img
+
+
+def compute_ssim(golden: Path, latest: Path) -> float:
+    """Compute Structural Similarity Index (SSIM) between two images."""
+    img1, img2 = load_and_validate_images(golden, latest)
+
+    img1_gray = to_grayscale(img1)
+    img2_gray = to_grayscale(img2)
+
+    ssim_value = metrics.structural_similarity(
+        img1_gray.astype(np.float64),
+        img2_gray.astype(np.float64),
+        data_range=img1_gray.max() - img1_gray.min()
+    )
+
+    return float(ssim_value)
+
+
+def compute_rmse(golden: Path, latest: Path) -> float:
+    """Compute Root Mean Square Error between two images."""
+    img1, img2 = load_and_validate_images(golden, latest)
+
+    # Convert to float to avoid overflow
+    img1_float = img1.astype(np.float64)
+    img2_float = img2.astype(np.float64)
+
+    # Compute MSE then take square root
+    mse = np.mean((img1_float - img2_float) ** 2)
+    rmse = np.sqrt(mse)
+
+    return float(rmse)
+
+
+def compute_mae(golden: Path, latest: Path) -> float:
+    """Compute Mean Absolute Error between two images."""
+    img1, img2 = load_and_validate_images(golden, latest)
+
+    img1_float = img1.astype(np.float64)
+    img2_float = img2.astype(np.float64)
+
+    mae = np.mean(np.abs(img1_float - img2_float))
+
+    return float(mae)
+
+
+def compute_psnr(golden: Path, latest: Path) -> float:
+    """Compute Peak Signal-to-Noise Ratio between two images."""
+    img1, img2 = load_and_validate_images(golden, latest)
+
+    # Determine the maximum possible pixel value
+    if img1.dtype == np.uint8:
+        max_pixel = 255.0
+    elif img1.dtype == np.uint16:
+        max_pixel = 65535.0
+    else:
+        max_pixel = float(img1.max())
+
+    img1_float = img1.astype(np.float64)
+    img2_float = img2.astype(np.float64)
+
+    mse = np.mean((img1_float - img2_float) ** 2)
+
+    if mse == 0:
+        return float('inf')
+
+    psnr = 20 * np.log10(max_pixel / np.sqrt(mse))
+
+    return float(psnr)
+
+
 def run_compare(
     golden: Path,
     latest: Path,
@@ -144,28 +254,21 @@ def run_compare(
     threshold: float | None,
     direction: str,
 ) -> float:
-    command = ["magick", "compare", "-metric", metric, str(golden), str(latest), "null:"]
-    alt_command = ["compare", "-metric", metric, str(golden), str(latest), "null:"]
-    for args in (command, alt_command):
-        try:
-            completed = subprocess.run(
-                args,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                check=False,
-            )
-        except FileNotFoundError:
-            continue
-        break
-    else:
-        raise SystemExit("ImageMagick compare tool not found (need 'magick' or 'compare')")
+    # Use pure Python implementations for all metrics
+    metric_upper = metric.upper()
 
-    output = completed.stderr.strip() or completed.stdout.strip()
-    try:
-        value = float(output.split()[0])
-    except (IndexError, ValueError) as exc:
-        raise SystemExit(f"Failed to compute {metric} (got output: '{output}')") from exc
+    if metric_upper == "SSIM":
+        value = compute_ssim(golden, latest)
+    elif metric_upper == "RMSE":
+        value = compute_rmse(golden, latest)
+    elif metric_upper == "MAE":
+        value = compute_mae(golden, latest)
+    elif metric_upper == "PSNR":
+        value = compute_psnr(golden, latest)
+    else:
+        raise SystemExit(
+            f"Unsupported metric '{metric}'. Supported metrics: SSIM, RMSE, MAE, PSNR"
+        )
 
     if threshold is not None:
         if direction in ("", "lower"):

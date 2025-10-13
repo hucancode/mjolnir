@@ -55,6 +55,7 @@ demo_state: struct {
 }
 
 main :: proc() {
+  context.logger = log.create_console_logger()
   engine := new(mjolnir.Engine)
   engine.setup_proc = demo_setup
   engine.update_proc = demo_update
@@ -62,7 +63,7 @@ main :: proc() {
   engine.key_press_proc = demo_key_pressed
   engine.mouse_press_proc = demo_mouse_pressed
   engine.mouse_move_proc = demo_mouse_moved
-  mjolnir.run(engine, 1280, 720, "Navigation Mesh Visual Test")
+  mjolnir.run(engine, 800, 600, "Navigation Mesh Visual Test")
 }
 
 demo_setup :: proc(engine_ptr: ^mjolnir.Engine) {
@@ -78,7 +79,7 @@ demo_setup :: proc(engine_ptr: ^mjolnir.Engine) {
   if demo_state.use_procedural {
     create_demo_scene(engine_ptr)
   }
-  build_navigation_mesh_from_world(engine_ptr)
+  setup_navigation_mesh(engine_ptr)
   demo_state.start_pos = {-20, 0, -20}
   demo_state.end_pos = {20, 0, 20}
   update_position_marker(
@@ -240,9 +241,9 @@ create_obj_visualization_mesh :: proc(
   }
 }
 
-build_navigation_mesh_from_world :: proc(engine_ptr: ^mjolnir.Engine) {
+setup_navigation_mesh :: proc(engine_ptr: ^mjolnir.Engine) {
   using mjolnir
-  log.info("Building navigation mesh from world nodes")
+  log.info("Setting up navigation mesh with visualization")
   config := recast.Config {
       cs                       = 0.3, // Cell size
       ch                       = 0.2, // Cell height
@@ -700,7 +701,7 @@ demo_render2d :: proc(engine_ptr: ^mjolnir.Engine, ctx: ^mu.Context) {
         log.info("Path cleared")
       }
       if .SUBMIT in mu.button(ctx, "Rebuild NavMesh (R)") {
-        build_navigation_mesh_from_world(engine_ptr)
+        setup_navigation_mesh(engine_ptr)
       }
       if demo_state.navmesh_info != "" {
         mu.label(ctx, "")
@@ -751,7 +752,7 @@ demo_key_pressed :: proc(engine_ptr: ^mjolnir.Engine, key, action, mods: int) {
   switch key {
   case glfw.KEY_R:
     log.info("Rebuilding navigation mesh from world...")
-    build_navigation_mesh_from_world(engine_ptr)
+    setup_navigation_mesh(engine_ptr)
   case glfw.KEY_V:
     renderer := &engine_ptr.render.navigation
     renderer.enabled = !renderer.enabled

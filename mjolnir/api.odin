@@ -706,3 +706,11 @@ get_mesh_count :: proc(engine: ^Engine) -> u32 {
 get_texture_count :: proc(engine: ^Engine) -> u32 {
   return u32(len(engine.resource_manager.image_2d_buffers.entries) - len(engine.resource_manager.image_2d_buffers.free_indices))
 }
+
+set_debug_ui_enabled :: proc(engine: ^Engine, enabled: bool) {
+  engine.debug_ui_enabled = enabled
+}
+
+get_debug_ui_enabled :: proc(engine: ^Engine) -> bool {
+  return engine.debug_ui_enabled
+}

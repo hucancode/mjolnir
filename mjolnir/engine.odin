@@ -90,6 +90,7 @@ Engine :: struct {
   render:                      Renderer,
   command_buffers:             [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
   cursor_pos:                  [2]i32,
+  debug_ui_enabled:            bool,
   // Deferred cleanup for thread safety
   pending_node_deletions:      [dynamic]resources.Handle,
   // Frame synchronization for parallel update/render
@@ -675,14 +676,16 @@ render :: proc(self: ^Engine) -> vk.Result {
   )
   text.render(&self.render.text, command_buffer, &self.gpu_context)
   text.end_pass(command_buffer)
-  debug_ui.begin_pass(
-    &self.render.ui,
-    command_buffer,
-    self.swapchain.views[self.swapchain.image_index],
-    self.swapchain.extent,
-  )
-  debug_ui.render(&self.render.ui, command_buffer)
-  debug_ui.end_pass(&self.render.ui, command_buffer)
+  if self.debug_ui_enabled {
+    debug_ui.begin_pass(
+      &self.render.ui,
+      command_buffer,
+      self.swapchain.views[self.swapchain.image_index],
+      self.swapchain.extent,
+    )
+    debug_ui.render(&self.render.ui, command_buffer)
+    debug_ui.end_pass(&self.render.ui, command_buffer)
+  }
   gpu.transition_image_to_present(
     command_buffer,
     self.swapchain.images[self.swapchain.image_index],

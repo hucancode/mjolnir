@@ -23,14 +23,14 @@ main :: proc() {
   engine := new(mjolnir.Engine)
   engine.setup_proc = setup_scene
   engine.update_proc = update_scene
-  mjolnir.run(engine, 1280, 720, "visual-gltf-skinning")
+  mjolnir.run(engine, 800, 600, "visual-gltf-skinning")
 }
 
 setup_scene :: proc(engine: ^mjolnir.Engine) {
   state.start_time = time.now()
   camera := mjolnir.get_main_camera(engine)
   if camera != nil {
-    geometry.camera_perspective(camera, math.PI * 0.28, 1280.0 / 720.0, 0.05, 100.0)
+    geometry.camera_perspective(camera, math.PI * 0.28, 800.0 / 600.0, 0.05, 100.0)
     geometry.camera_look_at(camera, {-3.5, 2.0, 1.8}, {0.0, 1.0, 0.0})
   }
 
