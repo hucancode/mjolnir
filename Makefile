@@ -36,15 +36,13 @@ VISUAL_TESTS := cube gltf_animation gltf_skinning gltf_static grid256 grid300 gr
 vtest:
 	@echo "Running all visual tests..."
 	@mkdir -p artifacts
-	@failures=(); \
+	@failed=0; \
 	for test_name in $(VISUAL_TESTS); do \
 		echo "Testing $$test_name..."; \
-		if ! ./test/visual/run.py "$$test_name" artifacts; then \
-			failures+=("$$test_name"); \
-		fi; \
+		./test/visual/run.py "$$test_name" artifacts || failed=$$((failed + 1)); \
 	done; \
-	if [ $${#failures[@]} -ne 0 ]; then \
-		echo "Visual tests failed: $${failures[*]}" >&2; \
+	if [ $$failed -ne 0 ]; then \
+		echo "$$failed visual test(s) failed" >&2; \
 		exit 1; \
 	fi; \
 	echo "All visual tests passed."
