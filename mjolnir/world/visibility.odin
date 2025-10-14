@@ -358,50 +358,13 @@ visibility_system_dispatch :: proc(
   // Get depth texture from resources system
   depth_texture := resources.get(resources_manager.image_2d_buffers, task.depth_texture)
 
-  // Barrier: Wait for depth rendering to finish before compute shader reads it
-  depth_render_done := vk.ImageMemoryBarrier {
-    sType = .IMAGE_MEMORY_BARRIER,
-    srcAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE},
-    dstAccessMask = {.SHADER_READ},
-    oldLayout = .DEPTH_STENCIL_READ_ONLY_OPTIMAL,
-    newLayout = .SHADER_READ_ONLY_OPTIMAL,
-    srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-    dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-    image = depth_texture.image,
-    subresourceRange = {
-      aspectMask = {.DEPTH},
-      baseMipLevel = 0,
-      levelCount = 1,
-      baseArrayLayer = 0,
-      layerCount = 1,
-    },
-  }
+  // === OPTIMIZATION: PARALLEL DEPTH PYRAMID EXECUTION ===
+  // Late pass uses PREVIOUS frame's depth pyramid (already ready, no wait needed!)
+  // This allows culling and pyramid building to happen in parallel or with minimal latency
 
-  vk.CmdPipelineBarrier(
-    command_buffer,
-    {.LATE_FRAGMENT_TESTS},
-    {.COMPUTE_SHADER},
-    {},
-    0,
-    nil,
-    0,
-    nil,
-    1,
-    &depth_render_done,
-  )
-
-  // === STEP 3: BUILD DEPTH PYRAMID ===
-  // This copies depth to pyramid mip 0, then generates all mip levels
-  // (includes final barrier inside the function)
-  build_depth_pyramid(
-    system,
-    gpu_context,
-    command_buffer,
-    task,
-    resources_manager,
-  )
-
-  // Clear buffers
+  // === STEP 1: EXECUTE LATE PASS IMMEDIATELY ===
+  // Use previous frame's depth pyramid for occlusion culling (bound via descriptor set)
+  // No barrier needed - previous frame's pyramid was built in last frame
   vk.CmdFillBuffer(
     command_buffer,
     task.late_draw_count.buffer,
@@ -409,8 +372,7 @@ visibility_system_dispatch :: proc(
     vk.DeviceSize(task.late_draw_count.bytes_count),
     0,
   )
-  // === STEP 4: LATE PASS COMPUTE ===
-  // Full frustum + occlusion culling using depth pyramid
+
   execute_late_pass(
     system,
     gpu_context,
@@ -421,7 +383,8 @@ visibility_system_dispatch :: proc(
     resources_manager,
   )
 
-  // Barrier: Wait for late pass compute to finish before anyone reads the draw commands
+  // === STEP 2: WAIT FOR LATE PASS, THEN RENDER DEPTH ===
+  // Barrier: Late pass compute must finish before we read draw commands
   late_compute_done := [?]vk.BufferMemoryBarrier{
     {
       sType         = .BUFFER_MEMORY_BARRIER,
@@ -452,6 +415,7 @@ visibility_system_dispatch :: proc(
     nil,
   )
 
+  // Render depth for visible objects (for next frame's pyramid)
   render_depth_pass(
     system,
     gpu_context,
@@ -462,14 +426,14 @@ visibility_system_dispatch :: proc(
     request,
   )
 
-  // Transition depth to READ_ONLY layout for geometry pass
-  // Geometry pass will do read-only depth testing (depthWriteEnable=false)
-  depth_to_readonly := vk.ImageMemoryBarrier {
+  // === STEP 3: BUILD DEPTH PYRAMID FOR NEXT-NEXT FRAME ===
+  // Barrier: Wait for depth rendering to finish before pyramid build reads it
+  depth_render_done := vk.ImageMemoryBarrier {
     sType = .IMAGE_MEMORY_BARRIER,
     srcAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE},
-    dstAccessMask = {.DEPTH_STENCIL_ATTACHMENT_READ},
+    dstAccessMask = {.SHADER_READ},
     oldLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-    newLayout = .DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+    newLayout = .SHADER_READ_ONLY_OPTIMAL,
     srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
     dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
     image = depth_texture.image,
@@ -485,6 +449,48 @@ visibility_system_dispatch :: proc(
   vk.CmdPipelineBarrier(
     command_buffer,
     {.LATE_FRAGMENT_TESTS},
+    {.COMPUTE_SHADER},
+    {},
+    0,
+    nil,
+    0,
+    nil,
+    1,
+    &depth_render_done,
+  )
+
+  // Build depth pyramid from current frame's depth (for next frame to use)
+  build_depth_pyramid(
+    system,
+    gpu_context,
+    command_buffer,
+    task,
+    resources_manager,
+  )
+
+  // === STEP 4: TRANSITION DEPTH FOR GEOMETRY PASS ===
+  // Geometry pass will do read-only depth testing (depthWriteEnable=false)
+  depth_to_readonly := vk.ImageMemoryBarrier {
+    sType = .IMAGE_MEMORY_BARRIER,
+    srcAccessMask = {.SHADER_READ},
+    dstAccessMask = {.DEPTH_STENCIL_ATTACHMENT_READ},
+    oldLayout = .SHADER_READ_ONLY_OPTIMAL,
+    newLayout = .DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+    srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    image = depth_texture.image,
+    subresourceRange = {
+      aspectMask = {.DEPTH},
+      baseMipLevel = 0,
+      levelCount = 1,
+      baseArrayLayer = 0,
+      layerCount = 1,
+    },
+  }
+
+  vk.CmdPipelineBarrier(
+    command_buffer,
+    {.COMPUTE_SHADER},
     {.EARLY_FRAGMENT_TESTS},
     {},
     0,
@@ -987,8 +993,8 @@ allocate_descriptor_sets :: proc(
     ) or_return
   }
 
-  // Update late pass descriptor set
-  update_late_descriptor_set(gpu_context, resources_manager, task)
+  // Update late pass descriptor set (binds previous frame's pyramid for parallel execution)
+  update_late_descriptor_set(gpu_context, resources_manager, task, prev_task)
 
   // Update depth reduction descriptor sets (ALL mips, including mip 0)
   for mip in 0 ..< task.depth_pyramid.mip_levels {
@@ -1003,6 +1009,7 @@ update_late_descriptor_set :: proc(
   gpu_context: ^gpu.GPUContext,
   resources_manager: ^resources.Manager,
   task: ^VisibilityTask,
+  prev_task: ^VisibilityTask, // Previous frame's task for cross-frame pyramid access
 ) {
   node_info := vk.DescriptorBufferInfo {
     buffer = resources_manager.node_data_buffer.device_buffer,
@@ -1032,9 +1039,11 @@ update_late_descriptor_set :: proc(
     buffer = task.late_draw_commands.buffer,
     range = vk.DeviceSize(task.late_draw_commands.bytes_count),
   }
+  // KEY OPTIMIZATION: Use previous frame's depth pyramid for culling
+  // This allows late pass to start immediately without waiting for current frame's pyramid build
   pyramid_info := vk.DescriptorImageInfo {
-    sampler = task.depth_pyramid.sampler,
-    imageView = task.depth_pyramid.full_view, // Full pyramid with all mips
+    sampler = prev_task.depth_pyramid.sampler,
+    imageView = prev_task.depth_pyramid.full_view, // Previous frame's pyramid
     imageLayout = .SHADER_READ_ONLY_OPTIMAL,
   }
 
