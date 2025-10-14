@@ -142,8 +142,8 @@ init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
   self.last_frame_timestamp = self.start_timestamp
   self.last_update_timestamp = self.start_timestamp
   world.init(&self.world)
-  world.init_gpu(&self.world, &self.gpu_context, &self.resource_manager) or_return
   gpu.swapchain_init(&self.swapchain, &self.gpu_context, self.window) or_return
+  world.init_gpu(&self.world, &self.gpu_context, &self.resource_manager, self.swapchain.extent.width, self.swapchain.extent.height) or_return
 
   // Initialize deferred cleanup
   self.pending_node_deletions = make([dynamic]resources.Handle, 0)
@@ -177,7 +177,13 @@ init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
   ) or_return
 
   // Initialize main render target with default camera settings
-  main_target_idx, main_target_ok := renderer_add_render_target(
+  // Use visibility system's depth textures (shared across frames for occlusion culling)
+  visibility_depth_textures: [resources.MAX_FRAMES_IN_FLIGHT]resources.Handle
+  for frame_idx in 0 ..< resources.MAX_FRAMES_IN_FLIGHT {
+    visibility_depth_textures[frame_idx] = self.world.visibility.frames[frame_idx].tasks[world.VisibilityCategory.OPAQUE].depth_texture
+  }
+
+  main_target_idx, main_target_ok := renderer_add_render_target_with_external_depth(
     &self.render,
     &self.gpu_context,
     &self.resource_manager,
@@ -187,6 +193,7 @@ init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
     .D32_SFLOAT,
     {2, 3, 2}, // Camera slightly above and diagonal to origin
     {0, 0, 0}, // Looking at origin
+    visibility_depth_textures,
     enabled_passes = {
       .SHADOW,
       .GEOMETRY,

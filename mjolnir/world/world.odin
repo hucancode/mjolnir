@@ -355,8 +355,10 @@ init_gpu :: proc(
   world: ^World,
   gpu_context: ^gpu.GPUContext,
   resources_manager: ^resources.Manager,
+  depth_width: u32,
+  depth_height: u32,
 ) -> vk.Result {
-  return visibility_system_init(&world.visibility, gpu_context, resources_manager)
+  return visibility_system_init(&world.visibility, gpu_context, resources_manager, depth_width, depth_height)
 }
 
 begin_frame :: proc(world: ^World, resources_manager: ^resources.Manager) {
@@ -397,7 +399,7 @@ query_visibility :: proc(
 }
 
 shutdown :: proc(world: ^World, gpu_context: ^gpu.GPUContext, resources_manager: ^resources.Manager) {
-  visibility_system_shutdown(&world.visibility, gpu_context)
+  visibility_system_shutdown(&world.visibility, gpu_context, resources_manager)
   destroy(world, resources_manager, gpu_context)
 }
 
@@ -407,6 +409,14 @@ get_visible_count :: proc(
   category: VisibilityCategory,
 ) -> u32 {
   return visibility_system_get_visible_count(&world.visibility, frame_index, category)
+}
+
+get_depth_texture_index :: proc(
+  world: ^World,
+  frame_index: u32,
+  category: VisibilityCategory,
+) -> u32 {
+  return visibility_system_get_depth_texture_index(&world.visibility, frame_index, category)
 }
 
 dispatch_visibility :: proc(
