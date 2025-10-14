@@ -66,19 +66,6 @@ FrameContext :: struct {
   camera:      ^geometry.Camera,
 }
 
-DrawCommandRequest :: struct {
-  camera_handle:  resources.Handle,
-  include_flags:  resources.NodeFlagSet,
-  exclude_flags:  resources.NodeFlagSet,
-  category:       VisibilityCategory,
-}
-
-DrawCommandList :: struct {
-  draw_buffer:    vk.Buffer,
-  count_buffer:   vk.Buffer,
-  command_stride: u32,
-}
-
 init_node :: proc(self: ^Node, name: string = "") {
   self.children = make([dynamic]resources.Handle, 0)
   self.transform = geometry.TRANSFORM_IDENTITY
@@ -357,45 +344,14 @@ init_gpu :: proc(
   resources_manager: ^resources.Manager,
   depth_width: u32,
   depth_height: u32,
+  max_visibility_tasks: u32 = 131, // Main + shadows + custom render targets
 ) -> vk.Result {
-  return visibility_system_init(&world.visibility, gpu_context, resources_manager, depth_width, depth_height)
+  return visibility_system_init(&world.visibility, gpu_context, resources_manager, depth_width, depth_height, max_visibility_tasks)
 }
 
 begin_frame :: proc(world: ^World, resources_manager: ^resources.Manager) {
   traverse(world, resources_manager)
   update_visibility_system(world)
-}
-
-// Main API for render subsystems to request draw commands
-query_visibility :: proc(
-  world: ^World,
-  gpu_context: ^gpu.GPUContext,
-  command_buffer: vk.CommandBuffer,
-  frame_index: u32,
-  request: DrawCommandRequest,
-  resources_manager: ^resources.Manager,
-) -> DrawCommandList {
-  visibility_request := VisibilityRequest {
-    camera_index  = request.camera_handle.index,
-    include_flags = request.include_flags,
-    exclude_flags = request.exclude_flags,
-  }
-
-  result := visibility_system_dispatch(
-    &world.visibility,
-    gpu_context,
-    command_buffer,
-    frame_index,
-    request.category,
-    visibility_request,
-    resources_manager,
-  )
-
-  return DrawCommandList {
-    draw_buffer    = result.draw_buffer,
-    count_buffer   = result.count_buffer,
-    command_stride = result.command_stride,
-  }
 }
 
 shutdown :: proc(world: ^World, gpu_context: ^gpu.GPUContext, resources_manager: ^resources.Manager) {
@@ -406,17 +362,17 @@ shutdown :: proc(world: ^World, gpu_context: ^gpu.GPUContext, resources_manager:
 get_visible_count :: proc(
   world: ^World,
   frame_index: u32,
-  category: VisibilityCategory,
+  render_target_id: u32,
 ) -> u32 {
-  return visibility_system_get_visible_count(&world.visibility, frame_index, category)
+  return visibility_system_get_visible_count(&world.visibility, frame_index, render_target_id)
 }
 
 get_depth_texture_index :: proc(
   world: ^World,
   frame_index: u32,
-  category: VisibilityCategory,
+  render_target_id: u32,
 ) -> u32 {
-  return visibility_system_get_depth_texture_index(&world.visibility, frame_index, category)
+  return visibility_system_get_depth_texture_index(&world.visibility, frame_index, render_target_id)
 }
 
 dispatch_visibility :: proc(
@@ -424,7 +380,7 @@ dispatch_visibility :: proc(
   gpu_context: ^gpu.GPUContext,
   command_buffer: vk.CommandBuffer,
   frame_index: u32,
-  category: VisibilityCategory,
+  render_target_id: u32,
   request: VisibilityRequest,
   resources_manager: ^resources.Manager,
 ) -> VisibilityResult {
@@ -433,7 +389,7 @@ dispatch_visibility :: proc(
     gpu_context,
     command_buffer,
     frame_index,
-    category,
+    render_target_id,
     request,
     resources_manager,
   )

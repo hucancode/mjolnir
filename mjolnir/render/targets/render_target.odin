@@ -36,6 +36,7 @@ RenderTarget :: struct {
   enabled_passes:  PassTypeSet,
   command_buffers: [resources.MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
   owns_depth:      bool, // True if we created depth texture, false if external
+  render_target_id: u32, // ID for visibility system lookup
 }
 
 render_target_init :: proc(
