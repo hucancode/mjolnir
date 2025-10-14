@@ -26,8 +26,8 @@ VisibilityTask :: struct {
   late_draw_count:    gpu.DataBuffer(u32),
   late_draw_commands: gpu.DataBuffer(vk.DrawIndexedIndirectCommand),
 
-  // Depth resources
-  depth_texture:      gpu.ImageBuffer,
+  // Depth resources - handle to texture managed by resources system
+  depth_texture:      resources.Handle, // handle.index is bindless texture array index
   depth_pyramid:      DepthPyramid,
 
   // Descriptor sets
@@ -37,7 +37,7 @@ VisibilityTask :: struct {
 
 // Depth pyramid for hierarchical Z-buffer occlusion culling
 DepthPyramid :: struct {
-  texture:         gpu.ImageBuffer,
+  texture:         resources.Handle, // handle to pyramid texture in resources system
   views:           [16]vk.ImageView, // Per-mip views for depth reduction (write)
   full_view:       vk.ImageView,     // Full pyramid view for sampling (read all mips)
   sampler:         vk.Sampler,
@@ -88,17 +88,14 @@ CullingStats :: struct {
 
 VisibilitySystem :: struct {
   // Compute pipelines
-  early_cull_pipeline:       vk.Pipeline,
   late_cull_pipeline:        vk.Pipeline,
   depth_reduce_pipeline:     vk.Pipeline,
 
   // Pipeline layouts
-  early_cull_layout:         vk.PipelineLayout,
   late_cull_layout:          vk.PipelineLayout,
   depth_reduce_layout:       vk.PipelineLayout,
 
   // Descriptor set layouts
-  early_descriptor_layout:   vk.DescriptorSetLayout,
   late_descriptor_layout:    vk.DescriptorSetLayout,
   depth_reduce_descriptor_layout: vk.DescriptorSetLayout,
 
@@ -128,16 +125,16 @@ visibility_system_init :: proc(
   system: ^VisibilitySystem,
   gpu_context: ^gpu.GPUContext,
   resources_manager: ^resources.Manager,
+  depth_width: u32,
+  depth_height: u32,
 ) -> vk.Result {
   if gpu_context == nil || resources_manager == nil {
     return vk.Result.ERROR_INITIALIZATION_FAILED
   }
 
   system.max_draws = resources.MAX_NODES_IN_SCENE
-  // Match depth buffer aspect ratio to camera (16:9) for projection consistency
-  // 1024x576 gives ~1.78 aspect ratio matching typical camera setup
-  system.depth_width = 1024
-  system.depth_height = 576
+  system.depth_width = depth_width
+  system.depth_height = depth_height
   system.depth_bias = 0.0001 // Small depth bias to prevent self-occlusion and precision issues
 
   // Initialize per-frame resources
@@ -169,7 +166,7 @@ visibility_system_init :: proc(
       ) or_return
 
       // Create depth resources
-      create_depth_resources(gpu_context, task, system.depth_width, system.depth_height) or_return
+      create_depth_resources(gpu_context, resources_manager, task, system.depth_width, system.depth_height) or_return
     }
   }
   // Initialize all late_visibility buffers to zero
@@ -223,27 +220,25 @@ visibility_system_init :: proc(
 visibility_system_shutdown :: proc(
   system: ^VisibilitySystem,
   gpu_context: ^gpu.GPUContext,
+  resources_manager: ^resources.Manager,
 ) {
-  if gpu_context == nil {
+  if gpu_context == nil || resources_manager == nil {
     return
   }
 
   device := gpu_context.device
 
   // Destroy pipelines
-  vk.DestroyPipeline(device, system.early_cull_pipeline, nil)
   vk.DestroyPipeline(device, system.late_cull_pipeline, nil)
   vk.DestroyPipeline(device, system.depth_reduce_pipeline, nil)
   vk.DestroyPipeline(device, system.depth_pipeline, nil)
 
   // Destroy pipeline layouts
-  vk.DestroyPipelineLayout(device, system.early_cull_layout, nil)
   vk.DestroyPipelineLayout(device, system.late_cull_layout, nil)
   vk.DestroyPipelineLayout(device, system.depth_reduce_layout, nil)
   // Note: depth_pipeline_layout is shared from resources_manager, don't destroy it
 
   // Destroy descriptor set layouts
-  vk.DestroyDescriptorSetLayout(device, system.early_descriptor_layout, nil)
   vk.DestroyDescriptorSetLayout(device, system.late_descriptor_layout, nil)
   vk.DestroyDescriptorSetLayout(device, system.depth_reduce_descriptor_layout, nil)
 
@@ -253,7 +248,7 @@ visibility_system_shutdown :: proc(
     for task_idx in 0 ..< VISIBILITY_TASK_COUNT {
       task := &frame.tasks[task_idx]
 
-      // Destroy depth pyramid views and sampler
+      // Destroy depth pyramid views and sampler (manually created, not managed by resources)
       for mip in 0 ..< task.depth_pyramid.mip_levels {
         vk.DestroyImageView(device, task.depth_pyramid.views[mip], nil)
       }
@@ -265,9 +260,9 @@ visibility_system_shutdown :: proc(
       gpu.data_buffer_destroy(device, &task.late_draw_count)
       gpu.data_buffer_destroy(device, &task.late_draw_commands)
 
-      // Destroy images
-      gpu.image_buffer_destroy(device, &task.depth_texture)
-      gpu.image_buffer_destroy(device, &task.depth_pyramid.texture)
+      // Free textures through resources system
+      resources.free(&resources_manager.image_2d_buffers, task.depth_texture)
+      resources.free(&resources_manager.image_2d_buffers, task.depth_pyramid.texture)
     }
   }
 }
@@ -292,6 +287,21 @@ visibility_system_get_visible_count :: proc(
     return 0
   }
   return task_data.late_draw_count.mapped[0]
+}
+
+// Get the bindless texture array index for the visibility system's depth texture
+// Returns the texture index that can be used to sample the depth texture in shaders
+visibility_system_get_depth_texture_index :: proc(
+  system: ^VisibilitySystem,
+  frame_index: u32,
+  task: VisibilityCategory,
+) -> u32 {
+  if frame_index >= resources.MAX_FRAMES_IN_FLIGHT {
+    return 0xFFFFFFFF
+  }
+  frame := &system.frames[frame_index]
+  task_data := &frame.tasks[int(task)]
+  return task_data.depth_texture.index
 }
 
 // Read back culling statistics from GPU buffers
@@ -344,6 +354,10 @@ visibility_system_dispatch :: proc(
   }
   frame := &system.frames[frame_index]
   task := &frame.tasks[int(task_category)]
+
+  // Get depth texture from resources system
+  depth_texture := resources.get(resources_manager.image_2d_buffers, task.depth_texture)
+
   // Barrier: Wait for depth rendering to finish before compute shader reads it
   depth_render_done := vk.ImageMemoryBarrier {
     sType = .IMAGE_MEMORY_BARRIER,
@@ -353,7 +367,7 @@ visibility_system_dispatch :: proc(
     newLayout = .SHADER_READ_ONLY_OPTIMAL,
     srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
     dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-    image = task.depth_texture.image,
+    image = depth_texture.image,
     subresourceRange = {
       aspectMask = {.DEPTH},
       baseMipLevel = 0,
@@ -384,6 +398,7 @@ visibility_system_dispatch :: proc(
     gpu_context,
     command_buffer,
     task,
+    resources_manager,
   )
 
   // Clear buffers
@@ -447,6 +462,39 @@ visibility_system_dispatch :: proc(
     request,
   )
 
+  // Transition depth to READ_ONLY layout for geometry pass
+  // Geometry pass will do read-only depth testing (depthWriteEnable=false)
+  depth_to_readonly := vk.ImageMemoryBarrier {
+    sType = .IMAGE_MEMORY_BARRIER,
+    srcAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE},
+    dstAccessMask = {.DEPTH_STENCIL_ATTACHMENT_READ},
+    oldLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+    newLayout = .DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+    srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    image = depth_texture.image,
+    subresourceRange = {
+      aspectMask = {.DEPTH},
+      baseMipLevel = 0,
+      levelCount = 1,
+      baseArrayLayer = 0,
+      layerCount = 1,
+    },
+  }
+
+  vk.CmdPipelineBarrier(
+    command_buffer,
+    {.LATE_FRAGMENT_TESTS},
+    {.EARLY_FRAGMENT_TESTS},
+    {},
+    0,
+    nil,
+    0,
+    nil,
+    1,
+    &depth_to_readonly,
+  )
+
   // Set result to late pass draw buffer (final visibility)
   result.draw_buffer = task.late_draw_commands.buffer
   result.count_buffer = task.late_draw_count.buffer
@@ -462,43 +510,28 @@ visibility_system_dispatch :: proc(
 @(private)
 create_depth_resources :: proc(
   gpu_context: ^gpu.GPUContext,
+  resources_manager: ^resources.Manager,
   task: ^VisibilityTask,
   width: u32,
   height: u32,
 ) -> vk.Result {
-  // Create depth texture for depth rendering
-  depth_create_info := vk.ImageCreateInfo {
-    sType = .IMAGE_CREATE_INFO,
-    imageType = .D2,
-    format = .D32_SFLOAT,
-    extent = {width, height, 1},
-    mipLevels = 1,
-    arrayLayers = 1,
-    samples = {._1},
-    tiling = .OPTIMAL,
-    usage = {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
-    sharingMode = .EXCLUSIVE,
-    initialLayout = .UNDEFINED,
-  }
-
-  // Create depth texture using GPU helper function
-  task.depth_texture = gpu.malloc_image_buffer(
+  // Create depth texture using resources system - automatically registers in bindless array
+  depth_handle, depth_texture, result := resources.create_empty_texture_2d(
     gpu_context,
+    resources_manager,
     width,
     height,
     .D32_SFLOAT,
-    .OPTIMAL,
     {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
-    {.DEVICE_LOCAL},
-  ) or_return
+  )
+  if result != .SUCCESS {
+    log.error("Failed to create depth texture for visibility system")
+    return result
+  }
 
-  // Create image view for depth texture
-  task.depth_texture.view = gpu.create_image_view(
-    gpu_context.device,
-    task.depth_texture.image,
-    .D32_SFLOAT,
-    {.DEPTH},
-  ) or_return
+  // Store the handle - handle.index is the bindless texture array index
+  task.depth_texture = depth_handle
+  log.debugf("Created visibility depth texture at bindless index %d", depth_handle.index)
 
   // Depth pyramid dimensions: mip 0 is HALF the resolution of source depth texture
   // because we perform 2x2 MAX reduction to generate mip 0
@@ -508,8 +541,13 @@ create_depth_resources :: proc(
   // Calculate mip levels for depth pyramid based on pyramid base size
   mip_levels := u32(math.floor(math.log2(f32(max(pyramid_width, pyramid_height))))) + 1
 
-  // Create depth pyramid texture with mip levels
-  task.depth_pyramid.texture = gpu.malloc_image_buffer_with_mips(
+  // Create depth pyramid texture with mip levels using resources system
+  pyramid_handle, pyramid_texture, pyramid_ok := resources.alloc(&resources_manager.image_2d_buffers)
+  if !pyramid_ok {
+    log.error("Failed to allocate handle for depth pyramid texture")
+    return .ERROR_OUT_OF_DEVICE_MEMORY
+  }
+  pyramid_texture^ = gpu.malloc_image_buffer_with_mips(
     gpu_context,
     pyramid_width,
     pyramid_height,
@@ -519,15 +557,40 @@ create_depth_resources :: proc(
     {.DEVICE_LOCAL},
     mip_levels,
   ) or_return
+
+  // Register in bindless texture array (base mip level view)
+  base_view_info := vk.ImageViewCreateInfo {
+    sType = .IMAGE_VIEW_CREATE_INFO,
+    image = pyramid_texture.image,
+    viewType = .D2,
+    format = .R32_SFLOAT,
+    subresourceRange = {
+      aspectMask = {.COLOR},
+      baseMipLevel = 0,
+      levelCount = 1,
+      baseArrayLayer = 0,
+      layerCount = 1,
+    },
+  }
+
+  base_view: vk.ImageView
+  vk.CreateImageView(gpu_context.device, &base_view_info, nil, &base_view) or_return
+  defer vk.DestroyImageView(gpu_context.device, base_view, nil)
+
+  resources.set_texture_2d_descriptor(gpu_context, resources_manager, pyramid_handle.index, base_view)
+
+  task.depth_pyramid.texture = pyramid_handle
   task.depth_pyramid.mip_levels = mip_levels
   task.depth_pyramid.width = pyramid_width
   task.depth_pyramid.height = pyramid_height
+
+  log.debugf("Created depth pyramid texture at bindless index %d with %d mip levels", pyramid_handle.index, mip_levels)
 
   // Create per-mip views for depth reduction shader (write to individual mips)
   for mip in 0 ..< mip_levels {
     view_info := vk.ImageViewCreateInfo {
       sType = .IMAGE_VIEW_CREATE_INFO,
-      image = task.depth_pyramid.texture.image,
+      image = pyramid_texture.image,
       viewType = .D2,
       format = .R32_SFLOAT,
       subresourceRange = {
@@ -550,7 +613,7 @@ create_depth_resources :: proc(
   // Create full pyramid view for culling shader (sample from all mips)
   full_view_info := vk.ImageViewCreateInfo {
     sType = .IMAGE_VIEW_CREATE_INFO,
-    image = task.depth_pyramid.texture.image,
+    image = pyramid_texture.image,
     viewType = .D2,
     format = .R32_SFLOAT,
     subresourceRange = {
@@ -607,28 +670,6 @@ create_descriptor_layouts :: proc(
   system: ^VisibilitySystem,
   gpu_context: ^gpu.GPUContext,
 ) -> vk.Result {
-  // Early pass descriptor layout
-  early_bindings := [?]vk.DescriptorSetLayoutBinding {
-    {binding = 0, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, stageFlags = {.COMPUTE}}, // Node data
-    {binding = 1, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, stageFlags = {.COMPUTE}}, // Mesh data
-    {binding = 2, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, stageFlags = {.COMPUTE}}, // World matrices
-    {binding = 3, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, stageFlags = {.COMPUTE}}, // Camera data
-    {binding = 4, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, stageFlags = {.COMPUTE}}, // Previous visibility
-    {binding = 5, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, stageFlags = {.COMPUTE}}, // Draw count
-    {binding = 6, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, stageFlags = {.COMPUTE}}, // Draw commands
-  }
-
-  vk.CreateDescriptorSetLayout(
-    gpu_context.device,
-    &vk.DescriptorSetLayoutCreateInfo {
-      sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-      bindingCount = len(early_bindings),
-      pBindings = raw_data(early_bindings[:]),
-    },
-    nil,
-    &system.early_descriptor_layout,
-  ) or_return
-
   // Late pass descriptor layout (includes depth pyramid)
   late_bindings := [?]vk.DescriptorSetLayoutBinding {
     {binding = 0, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, stageFlags = {.COMPUTE}}, // Node data
@@ -688,19 +729,6 @@ create_compute_pipelines :: proc(
     &vk.PipelineLayoutCreateInfo {
       sType = .PIPELINE_LAYOUT_CREATE_INFO,
       setLayoutCount = 1,
-      pSetLayouts = &system.early_descriptor_layout,
-      pushConstantRangeCount = 1,
-      pPushConstantRanges = &push_constant_range,
-    },
-    nil,
-    &system.early_cull_layout,
-  ) or_return
-
-  vk.CreatePipelineLayout(
-    gpu_context.device,
-    &vk.PipelineLayoutCreateInfo {
-      sType = .PIPELINE_LAYOUT_CREATE_INFO,
-      setLayoutCount = 1,
       pSetLayouts = &system.late_descriptor_layout,
       pushConstantRangeCount = 1,
       pPushConstantRanges = &push_constant_range,
@@ -727,13 +755,6 @@ create_compute_pipelines :: proc(
     &system.depth_reduce_layout,
   ) or_return
 
-  // Load and create compute shaders
-  early_shader := gpu.create_shader_module(
-    gpu_context.device,
-    #load("../shader/occlusion_culling/early_cull.spv"),
-  ) or_return
-  defer vk.DestroyShaderModule(gpu_context.device, early_shader, nil)
-
   late_shader := gpu.create_shader_module(
     gpu_context.device,
     #load("../shader/occlusion_culling/late_cull.spv"),
@@ -745,27 +766,6 @@ create_compute_pipelines :: proc(
     #load("../shader/occlusion_culling/depth_reduce.spv"),
   ) or_return
   defer vk.DestroyShaderModule(gpu_context.device, depth_shader, nil)
-
-  // Create compute pipelines
-  early_info := vk.ComputePipelineCreateInfo {
-    sType = .COMPUTE_PIPELINE_CREATE_INFO,
-    stage = {
-      sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
-      stage = {.COMPUTE},
-      module = early_shader,
-      pName = "main",
-    },
-    layout = system.early_cull_layout,
-  }
-
-  vk.CreateComputePipelines(
-    gpu_context.device,
-    0,
-    1,
-    &early_info,
-    nil,
-    &system.early_cull_pipeline,
-  ) or_return
 
   late_info := vk.ComputePipelineCreateInfo {
     sType = .COMPUTE_PIPELINE_CREATE_INFO,
@@ -992,7 +992,7 @@ allocate_descriptor_sets :: proc(
 
   // Update depth reduction descriptor sets (ALL mips, including mip 0)
   for mip in 0 ..< task.depth_pyramid.mip_levels {
-    update_depth_reduce_descriptor_set(gpu_context, task, u32(mip))
+    update_depth_reduce_descriptor_set(gpu_context, resources_manager, task, u32(mip))
   }
 
   return vk.Result.SUCCESS
@@ -1055,12 +1055,14 @@ update_late_descriptor_set :: proc(
 @(private)
 update_depth_reduce_descriptor_set :: proc(
   gpu_context: ^gpu.GPUContext,
+  resources_manager: ^resources.Manager,
   task: ^VisibilityTask,
   mip: u32,
 ) {
   // For mip 0: read from depth texture, write to pyramid mip 0
   // For other mips: read from previous pyramid mip, write to current mip
-  source_view := mip == 0 ? task.depth_texture.view : task.depth_pyramid.views[mip - 1]
+  depth_texture := resources.get(resources_manager.image_2d_buffers, task.depth_texture)
+  source_view := mip == 0 ? depth_texture.view : task.depth_pyramid.views[mip - 1]
 
   source_info := vk.DescriptorImageInfo {
     sampler = task.depth_pyramid.sampler,

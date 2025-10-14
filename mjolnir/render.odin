@@ -758,23 +758,6 @@ record_geometry_pass :: proc(
   draw_buffer := vis_result.draw_buffer
   count_buffer := vis_result.count_buffer
   command_stride := vis_result.command_stride
-  geometry_pass.begin_depth_prepass(
-    target,
-    command_buffer,
-    resources_manager,
-    frame_index,
-  )
-  geometry_pass.render_depth_prepass(
-    &self.geometry,
-    command_buffer,
-    target.camera.index,
-    resources_manager,
-    frame_index,
-    draw_buffer,
-    count_buffer,
-    command_stride,
-  )
-  geometry_pass.end_depth_prepass(command_buffer)
   geometry_pass.begin_pass(
     target,
     command_buffer,
@@ -1040,6 +1023,53 @@ renderer_add_render_target :: proc(
   return len(self.render_targets) - 1, true
 }
 
+renderer_add_render_target_with_external_depth :: proc(
+  self: ^Renderer,
+  gpu_context: ^gpu.GPUContext,
+  resources_manager: ^resources.Manager,
+  width, height: u32,
+  color_format: vk.Format = vk.Format.R8G8B8A8_UNORM,
+  depth_format: vk.Format = vk.Format.D32_SFLOAT,
+  camera_position: [3]f32 = {0, 0, 3},
+  camera_target: [3]f32 = {0, 0, 0},
+  external_depth_textures: [resources.MAX_FRAMES_IN_FLIGHT]resources.Handle,
+  enabled_passes: targets.PassTypeSet = {
+    .SHADOW,
+    .GEOMETRY,
+    .LIGHTING,
+    .TRANSPARENCY,
+    .PARTICLES,
+  },
+  fov: f32 = 1.57079632679,
+  near_plane: f32 = 0.1,
+  far_plane: f32 = 100.0,
+) -> (
+  index: int,
+  ok: bool,
+) {
+  capture: targets.RenderTarget
+  init_result := targets.render_target_init(
+    &capture,
+    gpu_context,
+    resources_manager,
+    width,
+    height,
+    color_format,
+    depth_format,
+    enabled_passes = enabled_passes,
+    camera_position = camera_position,
+    camera_target = camera_target,
+    fov = fov,
+    near_plane = near_plane,
+    far_plane = far_plane,
+    external_depth_textures = external_depth_textures,
+  )
+  if init_result != .SUCCESS do return -1, false
+
+  append(&self.render_targets, capture)
+  return len(self.render_targets) - 1, true
+}
+
 renderer_get_render_target :: proc(
   self: ^Renderer,
   index: int,
@@ -1115,26 +1145,8 @@ record_render_target :: proc(
   count_buffer := vis_result.count_buffer
   command_stride := vis_result.command_stride
 
-  // Render G-buffer pass with explicit depth prepass (same pattern as main geometry pass)
+  // Render G-buffer pass
   if .GEOMETRY in capture.enabled_passes {
-    geometry_pass.begin_depth_prepass(
-      capture,
-      command_buffer,
-      resources_manager,
-      frame_index,
-    )
-    geometry_pass.render_depth_prepass(
-      &self.geometry,
-      command_buffer,
-      capture.camera.index,
-      resources_manager,
-      frame_index,
-      draw_buffer,
-      count_buffer,
-      command_stride,
-    )
-    geometry_pass.end_depth_prepass(command_buffer)
-
     geometry_pass.begin_pass(
       capture,
       command_buffer,

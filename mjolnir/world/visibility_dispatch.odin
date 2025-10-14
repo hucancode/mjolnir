@@ -17,10 +17,13 @@ render_depth_pass :: proc(
   resources_manager: ^resources.Manager,
   request: VisibilityRequest,
 ) {
+  // Get depth texture from resources system
+  depth_texture := resources.get(resources_manager.image_2d_buffers, task.depth_texture)
+
   // Begin dynamic rendering for depth rendering
   depth_attachment := vk.RenderingAttachmentInfo {
     sType = .RENDERING_ATTACHMENT_INFO,
-    imageView = task.depth_texture.view,
+    imageView = depth_texture.view,
     imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
     loadOp = .CLEAR,
     storeOp = .STORE,
@@ -123,6 +126,7 @@ build_depth_pyramid :: proc(
   gpu_context: ^gpu.GPUContext,
   command_buffer: vk.CommandBuffer,
   task: ^VisibilityTask,
+  resources_manager: ^resources.Manager,
 ) {
   // Bind depth reduction pipeline
   vk.CmdBindPipeline(command_buffer, .COMPUTE, system.depth_reduce_pipeline)
@@ -182,6 +186,9 @@ build_depth_pyramid :: proc(
     }
   }
 
+  // Get pyramid texture from resources system
+  pyramid_texture := resources.get(resources_manager.image_2d_buffers, task.depth_pyramid.texture)
+
   // Final layout transition for ALL mips at once after generation completes
   final_barrier := vk.ImageMemoryBarrier {
     sType = .IMAGE_MEMORY_BARRIER,
@@ -191,7 +198,7 @@ build_depth_pyramid :: proc(
     newLayout = .SHADER_READ_ONLY_OPTIMAL,
     srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
     dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-    image = task.depth_pyramid.texture.image,
+    image = pyramid_texture.image,
     subresourceRange = {
       aspectMask = {.COLOR},
       baseMipLevel = 0,
