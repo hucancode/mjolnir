@@ -143,7 +143,7 @@ init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
   self.last_update_timestamp = self.start_timestamp
   world.init(&self.world)
   gpu.swapchain_init(&self.swapchain, &self.gpu_context, self.window) or_return
-  world.init_gpu(&self.world, &self.gpu_context, &self.resource_manager, self.swapchain.extent.width, self.swapchain.extent.height) or_return
+  world.init_gpu(&self.world, &self.gpu_context, &self.resource_manager, self.swapchain.extent.width, self.swapchain.extent.height, TOTAL_VISIBILITY_TASKS) or_return
 
   // Initialize deferred cleanup
   self.pending_node_deletions = make([dynamic]resources.Handle, 0)
@@ -178,9 +178,10 @@ init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
 
   // Initialize main render target with default camera settings
   // Use visibility system's depth textures (shared across frames for occlusion culling)
+  // Main render target uses visibility task 0
   visibility_depth_textures: [resources.MAX_FRAMES_IN_FLIGHT]resources.Handle
   for frame_idx in 0 ..< resources.MAX_FRAMES_IN_FLIGHT {
-    visibility_depth_textures[frame_idx] = self.world.visibility.frames[frame_idx].tasks[world.VisibilityCategory.OPAQUE].depth_texture
+    visibility_depth_textures[frame_idx] = self.world.visibility.frames[frame_idx].tasks[RENDER_TARGET_ID_MAIN].depth_texture
   }
 
   main_target_idx, main_target_ok := renderer_add_render_target_with_external_depth(
@@ -208,6 +209,8 @@ init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
     return .ERROR_INITIALIZATION_FAILED
   }
   self.render.main_render_target_index = main_target_idx
+  // Set the main render target ID
+  self.render.render_targets[main_target_idx].render_target_id = RENDER_TARGET_ID_MAIN
   glfw.SetKeyCallback(
     self.window,
     proc "c" (window: glfw.WindowHandle, key, scancode, action, mods: c.int) {
@@ -510,15 +513,15 @@ render_debug_ui :: proc(self: ^Engine) {
     mu.label(&self.render.ui.ctx, "")
     mu.label(&self.render.ui.ctx, "=== Visibility Culling ===")
 
-    // Get stats for opaque pass
-    opaque_stats := world.visibility_system_get_stats(&self.world.visibility, self.frame_index, .OPAQUE)
+    // Get stats for main render target (opaque pass)
+    main_stats := world.visibility_system_get_stats(&self.world.visibility, self.frame_index, RENDER_TARGET_ID_MAIN)
     mu.label(&self.render.ui.ctx, fmt.tprintf("Total Objects: %d", self.world.visibility.node_count))
-    mu.label(&self.render.ui.ctx, fmt.tprintf("Late Pass: %d draws", opaque_stats.late_draw_count))
+    mu.label(&self.render.ui.ctx, fmt.tprintf("Late Pass: %d draws", main_stats.late_draw_count))
 
     // Calculate culling efficiency
     efficiency: f32 = 0.0
     if self.world.visibility.node_count > 0 {
-      efficiency = f32(opaque_stats.late_draw_count) / f32(self.world.visibility.node_count) * 100.0
+      efficiency = f32(main_stats.late_draw_count) / f32(self.world.visibility.node_count) * 100.0
     }
 
     mu.label(&self.render.ui.ctx, fmt.tprintf("Culling Efficiency: %.1f%%", efficiency))

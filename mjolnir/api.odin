@@ -687,8 +687,8 @@ get_fps :: proc(engine: ^Engine) -> f32 {
   return 1.0 / delta
 }
 
-get_visible_count :: proc(engine: ^Engine, category: world.VisibilityCategory = .OPAQUE) -> u32 {
-  return world.get_visible_count(&engine.world, engine.frame_index, category)
+get_visible_count :: proc(engine: ^Engine, render_target_id: u32 = RENDER_TARGET_ID_MAIN) -> u32 {
+  return world.get_visible_count(&engine.world, engine.frame_index, render_target_id)
 }
 
 get_node_count :: proc(engine: ^Engine) -> u32 {

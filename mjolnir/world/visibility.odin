@@ -8,19 +8,9 @@ import geometry "../geometry"
 import resources "../resources"
 import vk "vendor:vulkan"
 
-VisibilityCategory :: enum u32 {
-  OPAQUE,
-  SHADOW,
-  TRANSPARENT,
-  WIREFRAME,
-  CUSTOM0,
-  CUSTOM1,
-}
-
-VISIBILITY_TASK_COUNT :: len(VisibilityCategory)
-
 // Enhanced visibility data for 2-pass culling
 VisibilityTask :: struct {
+  render_target_id: u32, // Identifier for which render target this task serves
   // Late pass buffers
   late_visibility:    gpu.DataBuffer(u32), // Current frame visibility
   late_draw_count:    gpu.DataBuffer(u32),
@@ -47,7 +37,8 @@ DepthPyramid :: struct {
 }
 
 VisibilityFrame :: struct {
-  tasks: [VISIBILITY_TASK_COUNT]VisibilityTask,
+  tasks: [dynamic]VisibilityTask,
+  max_tasks: u32, // Maximum number of tasks we can support
 }
 
 VisibilityRequest :: struct {
@@ -82,7 +73,7 @@ VisibilityResult :: struct {
 // Statistics for a single culling pass
 CullingStats :: struct {
   late_draw_count:   u32,
-  category:          VisibilityCategory,
+  render_target_id:  u32,
   frame_index:       u32,
 }
 
@@ -127,6 +118,7 @@ visibility_system_init :: proc(
   resources_manager: ^resources.Manager,
   depth_width: u32,
   depth_height: u32,
+  max_render_targets: u32 = 8, // Default max render targets that can do occlusion culling
 ) -> vk.Result {
   if gpu_context == nil || resources_manager == nil {
     return vk.Result.ERROR_INITIALIZATION_FAILED
@@ -140,9 +132,12 @@ visibility_system_init :: proc(
   // Initialize per-frame resources
   for frame_idx in 0 ..< resources.MAX_FRAMES_IN_FLIGHT {
     frame := &system.frames[frame_idx]
+    frame.max_tasks = max_render_targets
+    frame.tasks = make([dynamic]VisibilityTask, 0, max_render_targets)
 
-    for task_idx in 0 ..< VISIBILITY_TASK_COUNT {
-      task := &frame.tasks[task_idx]
+    // Pre-allocate tasks for all render targets
+    for task_idx in 0 ..< max_render_targets {
+      task := VisibilityTask{render_target_id = task_idx}
 
       task.late_visibility = gpu.create_local_buffer(
         gpu_context,
@@ -166,7 +161,9 @@ visibility_system_init :: proc(
       ) or_return
 
       // Create depth resources
-      create_depth_resources(gpu_context, resources_manager, task, system.depth_width, system.depth_height) or_return
+      create_depth_resources(gpu_context, resources_manager, &task, system.depth_width, system.depth_height) or_return
+
+      append(&frame.tasks, task)
     }
   }
   // Initialize all late_visibility buffers to zero
@@ -206,7 +203,7 @@ visibility_system_init :: proc(
     frame := &system.frames[frame_idx]
     prev_frame := &system.frames[prev_frame_idx]
 
-    for task_idx in 0 ..< VISIBILITY_TASK_COUNT {
+    for task_idx in 0 ..< len(frame.tasks) {
       task := &frame.tasks[task_idx]
       prev_task := &prev_frame.tasks[task_idx]
 
@@ -245,7 +242,7 @@ visibility_system_shutdown :: proc(
   // Clean up per-frame resources
   for frame_idx in 0 ..< resources.MAX_FRAMES_IN_FLIGHT {
     frame := &system.frames[frame_idx]
-    for task_idx in 0 ..< VISIBILITY_TASK_COUNT {
+    for task_idx in 0 ..< len(frame.tasks) {
       task := &frame.tasks[task_idx]
 
       // Destroy depth pyramid views and sampler (manually created, not managed by resources)
@@ -264,6 +261,7 @@ visibility_system_shutdown :: proc(
       resources.free(&resources_manager.image_2d_buffers, task.depth_texture)
       resources.free(&resources_manager.image_2d_buffers, task.depth_pyramid.texture)
     }
+    delete(frame.tasks)
   }
 }
 
@@ -274,13 +272,16 @@ visibility_system_set_node_count :: proc(system: ^VisibilitySystem, count: u32) 
 visibility_system_get_visible_count :: proc(
   system: ^VisibilitySystem,
   frame_index: u32,
-  task: VisibilityCategory,
+  render_target_id: u32,
 ) -> u32 {
   if frame_index >= resources.MAX_FRAMES_IN_FLIGHT {
     return 0
   }
   frame := &system.frames[frame_index]
-  task_data := &frame.tasks[int(task)]
+  if render_target_id >= u32(len(frame.tasks)) {
+    return 0
+  }
+  task_data := &frame.tasks[render_target_id]
 
   // Return late pass draw count (final visibility)
   if task_data.late_draw_count.mapped == nil {
@@ -294,13 +295,16 @@ visibility_system_get_visible_count :: proc(
 visibility_system_get_depth_texture_index :: proc(
   system: ^VisibilitySystem,
   frame_index: u32,
-  task: VisibilityCategory,
+  render_target_id: u32,
 ) -> u32 {
   if frame_index >= resources.MAX_FRAMES_IN_FLIGHT {
     return 0xFFFFFFFF
   }
   frame := &system.frames[frame_index]
-  task_data := &frame.tasks[int(task)]
+  if render_target_id >= u32(len(frame.tasks)) {
+    return 0xFFFFFFFF
+  }
+  task_data := &frame.tasks[render_target_id]
   return task_data.depth_texture.index
 }
 
@@ -308,10 +312,10 @@ visibility_system_get_depth_texture_index :: proc(
 visibility_system_get_stats :: proc(
   system: ^VisibilitySystem,
   frame_index: u32,
-  task: VisibilityCategory,
+  render_target_id: u32,
 ) -> CullingStats {
   stats := CullingStats {
-    category = task,
+    render_target_id = render_target_id,
     frame_index = frame_index,
   }
 
@@ -320,7 +324,10 @@ visibility_system_get_stats :: proc(
   }
 
   frame := &system.frames[frame_index]
-  task_data := &frame.tasks[int(task)]
+  if render_target_id >= u32(len(frame.tasks)) {
+    return stats
+  }
+  task_data := &frame.tasks[render_target_id]
 
   // Read late pass draw count
   if task_data.late_draw_count.mapped != nil {
@@ -340,7 +347,7 @@ visibility_system_dispatch :: proc(
   gpu_context: ^gpu.GPUContext,
   command_buffer: vk.CommandBuffer,
   frame_index: u32,
-  task_category: VisibilityCategory,
+  render_target_id: u32,
   request: VisibilityRequest,
   resources_manager: ^resources.Manager,
 ) -> VisibilityResult {
@@ -353,7 +360,11 @@ visibility_system_dispatch :: proc(
     return result
   }
   frame := &system.frames[frame_index]
-  task := &frame.tasks[int(task_category)]
+  if render_target_id >= u32(len(frame.tasks)) {
+    log.errorf("Invalid render_target_id %d, max is %d", render_target_id, len(frame.tasks))
+    return result
+  }
+  task := &frame.tasks[render_target_id]
 
   // Get depth texture from resources system
   depth_texture := resources.get(resources_manager.image_2d_buffers, task.depth_texture)
@@ -507,7 +518,7 @@ visibility_system_dispatch :: proc(
 
   // Log draw counts if statistics are enabled
   if system.stats_enabled {
-    log_culling_stats(system, frame_index, task_category, task)
+    log_culling_stats(system, frame_index, render_target_id, task)
   }
 
   return result

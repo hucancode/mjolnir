@@ -276,7 +276,7 @@ execute_late_pass :: proc(
 log_culling_stats :: proc(
   system: ^VisibilitySystem,
   frame_index: u32,
-  category: VisibilityCategory,
+  render_target_id: u32,
   task: ^VisibilityTask,
 ) {
   // Read draw counts from mapped memory
@@ -292,9 +292,9 @@ log_culling_stats :: proc(
     efficiency = f32(late_count) / f32(system.node_count) * 100.0
   }
 
-  log.infof("[Frame %d][%v] Culling Stats: Total Objects=%d | Late Pass=%d | Efficiency=%.1f%%",
+  log.infof("[Frame %d][RenderTarget %d] Culling Stats: Total Objects=%d | Late Pass=%d | Efficiency=%.1f%%",
     frame_index,
-    category,
+    render_target_id,
     system.node_count,
     late_count,
     efficiency,

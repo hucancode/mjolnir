@@ -20,6 +20,22 @@ import "resources"
 import vk "vendor:vulkan"
 import "world"
 
+// These are direct indices into the visibility tasks array
+// Main render target
+RENDER_TARGET_ID_MAIN :: 0
+
+// TODO: find a way to eliminate static render target allocation
+SHADOW_RENDER_TARGET_COUNT :: 8 // TODO: find a way to raise this
+RENDER_TARGET_ID_SHADOW_START :: 1
+RENDER_TARGET_ID_SHADOW_END :: RENDER_TARGET_ID_SHADOW_START + SHADOW_RENDER_TARGET_COUNT
+
+// Custom user render targets start after shadows
+RENDER_TARGET_ID_CUSTOM_START :: RENDER_TARGET_ID_SHADOW_END
+
+// Total visibility tasks to allocate (1 main + 8 shadows + 2 custom = 11)
+// This is a reasonable default that can be increased if needed
+TOTAL_VISIBILITY_TASKS :: RENDER_TARGET_ID_CUSTOM_START + 2
+
 ShadowSlot :: struct {
   depth_texture_2d:    resources.Handle, // 2D depth texture for spot/directional
   depth_texture_cube:  resources.Handle, // Cube depth texture for point
@@ -191,6 +207,8 @@ renderer_init_shadow_pool :: proc(
       log.errorf("Failed to create render target for slot %d", i)
       return init_result
     }
+    // Assign IDs cyclically within the shadow range
+    slot.render_target.render_target_id = RENDER_TARGET_ID_SHADOW_START + u32(i % SHADOW_RENDER_TARGET_COUNT)
 
     // Create 6 render targets for cube shadows (point lights)
     external_cube_depth: [resources.MAX_FRAMES_IN_FLIGHT]resources.Handle
@@ -212,6 +230,10 @@ renderer_init_shadow_pool :: proc(
         log.errorf("Failed to create cube render target for slot %d face %d", i, face)
         return init_result_cube
       }
+
+      // Each cube face shares the same render target ID as the slot
+      // Multiple shadow maps can share visibility tasks since they render sequentially
+      slot.cube_render_targets[face].render_target_id = RENDER_TARGET_ID_SHADOW_START + u32(i % SHADOW_RENDER_TARGET_COUNT)
 
       // Set cube face camera to 90 degree FOV
       camera, camera_ok := resources.get_camera(
@@ -590,7 +612,7 @@ record_shadow_pass :: proc(
           gpu_context,
           command_buffer,
           frame_index,
-          .SHADOW,
+          render_target.render_target_id,
           world.VisibilityRequest {
             camera_index = render_target.camera.index,
             include_flags = shadow_include,
@@ -619,7 +641,7 @@ record_shadow_pass :: proc(
         gpu_context,
         command_buffer,
         frame_index,
-        .SHADOW,
+        render_target.render_target_id,
         world.VisibilityRequest {
           camera_index = render_target.camera.index,
           include_flags = shadow_include,
@@ -747,7 +769,7 @@ record_geometry_pass :: proc(
     gpu_context,
     command_buffer,
     frame_index,
-    .OPAQUE,
+    target.render_target_id,
     world.VisibilityRequest {
       camera_index = target.camera.index,
       include_flags = {.VISIBLE},
@@ -898,7 +920,7 @@ record_transparency_pass :: proc(
     gpu_context,
     command_buffer,
     frame_index,
-    .TRANSPARENT,
+    target.render_target_id + 1, // Use next slot for transparent pass
     world.VisibilityRequest {
       camera_index = target.camera.index,
       include_flags = {.VISIBLE, .MATERIAL_TRANSPARENT},
@@ -923,7 +945,7 @@ record_transparency_pass :: proc(
     gpu_context,
     command_buffer,
     frame_index,
-    .WIREFRAME,
+    target.render_target_id + 2, // Use another slot for wireframe pass
     world.VisibilityRequest {
       camera_index = target.camera.index,
       include_flags = {.VISIBLE, .MATERIAL_WIREFRAME},
@@ -1117,14 +1139,8 @@ record_render_target :: proc(
   // Update camera data
   targets.render_target_upload_camera_data(resources_manager, capture)
 
-  // Assign visibility category based on render target index
-  // We have CUSTOM0 and CUSTOM1 available for custom render targets
-  category := world.VisibilityCategory.CUSTOM0
-  if capture_index == 1 {
-    category = .CUSTOM1
-  }
-  // If there are more than 2 custom render targets, they will share categories
-  // (this is acceptable as they're rendered sequentially)
+  // Each custom render target gets its own visibility task
+  render_target_id := RENDER_TARGET_ID_CUSTOM_START + u32(capture_index)
 
   // Dispatch visibility using 2-pass occlusion culling (same as main geometry pass)
   vis_result := world.dispatch_visibility(
@@ -1132,7 +1148,7 @@ record_render_target :: proc(
     gpu_context,
     command_buffer,
     frame_index,
-    category,
+    render_target_id,
     world.VisibilityRequest {
       camera_index = capture.camera.index,
       include_flags = {.VISIBLE},
