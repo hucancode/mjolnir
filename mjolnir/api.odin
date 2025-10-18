@@ -6,7 +6,6 @@ import "core:math/linalg"
 import "geometry"
 import "resources"
 import "world"
-import "render/targets"
 import "render/post_process"
 import "navigation/recast"
 import vk "vendor:vulkan"
@@ -330,7 +329,7 @@ play_animation :: proc(
 }
 
 // Resource getters
-get_camera :: proc(engine: ^Engine, handle: resources.Handle) -> (^geometry.Camera, bool) {
+get_camera :: proc(engine: ^Engine, handle: resources.Handle) -> (^resources.Camera, bool) {
   return resources.get_camera(&engine.resource_manager, handle)
 }
 
@@ -344,7 +343,7 @@ set_main_camera_look_at :: proc(engine: ^Engine, from: [3]f32, to: [3]f32, world
   if main_camera == nil {
     return false
   }
-  geometry.camera_look_at(main_camera, from, to, world_up)
+  resources.camera_look_at(main_camera, from, to, world_up)
   return true
 }
 
@@ -353,7 +352,7 @@ set_main_camera_position :: proc(engine: ^Engine, position: [3]f32) -> bool {
   if main_camera == nil {
     return false
   }
-  geometry.camera_set_position(main_camera, position)
+  resources.camera_set_position(main_camera, position)
   return true
 }
 
@@ -362,7 +361,7 @@ set_main_camera_rotation :: proc(engine: ^Engine, rotation: quaternion128) -> bo
   if main_camera == nil {
     return false
   }
-  geometry.camera_set_rotation(main_camera, rotation)
+  resources.camera_set_rotation(main_camera, rotation)
   return true
 }
 
@@ -371,7 +370,7 @@ move_main_camera :: proc(engine: ^Engine, delta: [3]f32) -> bool {
   if main_camera == nil {
     return false
   }
-  geometry.camera_move(main_camera, delta)
+  resources.camera_move(main_camera, delta)
   return true
 }
 
@@ -380,7 +379,7 @@ rotate_main_camera :: proc(engine: ^Engine, delta_yaw, delta_pitch: f32) -> bool
   if main_camera == nil {
     return false
   }
-  geometry.camera_rotate(main_camera, delta_yaw, delta_pitch)
+  resources.camera_rotate(main_camera, delta_yaw, delta_pitch)
   return true
 }
 
@@ -389,7 +388,7 @@ set_main_camera_aspect_ratio :: proc(engine: ^Engine, aspect_ratio: f32) -> bool
   if main_camera == nil {
     return false
   }
-  geometry.camera_update_aspect_ratio(main_camera, aspect_ratio)
+  resources.camera_update_aspect_ratio(main_camera, aspect_ratio)
   return true
 }
 
@@ -450,51 +449,6 @@ set_node_scale :: proc(engine: ^Engine, handle: resources.Handle, scale: [3]f32)
 
 set_node_scale_uniform :: proc(engine: ^Engine, handle: resources.Handle, scale: f32) -> bool {
   return set_node_scale(engine, handle, {scale, scale, scale})
-}
-
-// Render target creation and management
-create_render_target :: proc(
-  engine: ^Engine,
-  width, height: u32,
-  format: vk.Format = .B8G8R8A8_SRGB,
-  depth_format: vk.Format = .D32_SFLOAT,
-  camera_position: [3]f32 = {0, 0, 5},
-  camera_target: [3]f32 = {0, 0, 0},
-  fov_degrees: f32 = 90.0,
-  near_plane: f32 = 0.1,
-  far_plane: f32 = 1000.0,
-  enabled_passes: targets.PassTypeSet = {targets.PassType.SHADOW, targets.PassType.GEOMETRY, targets.PassType.LIGHTING, targets.PassType.TRANSPARENCY, targets.PassType.PARTICLES, targets.PassType.POST_PROCESS},
-) -> (int, bool) {
-  return renderer_add_render_target(
-    &engine.render,
-    &engine.gpu_context,
-    &engine.resource_manager,
-    width,
-    height,
-    format,
-    depth_format,
-    camera_position,
-    camera_target,
-    fov_degrees * math.PI / 180.0, // Convert degrees to radians
-    near_plane,
-    far_plane,
-    enabled_passes,
-  )
-}
-
-get_render_target_camera :: proc(engine: ^Engine, target_index: int) -> (resources.Handle, bool) {
-  if target_index < 0 || target_index >= len(engine.render.render_targets) {
-    return {}, false
-  }
-  return engine.render.render_targets[target_index].camera, true
-}
-
-set_render_target_camera :: proc(engine: ^Engine, target_index: int, camera_handle: resources.Handle) -> bool {
-  if target_index < 0 || target_index >= len(engine.render.render_targets) {
-    return false
-  }
-  engine.render.render_targets[target_index].camera = camera_handle
-  return true
 }
 
 // Navigation mesh creation and pathfinding
@@ -685,10 +639,6 @@ get_fps :: proc(engine: ^Engine) -> f32 {
     return 0
   }
   return 1.0 / delta
-}
-
-get_visible_count :: proc(engine: ^Engine, render_target_id: u32 = RENDER_TARGET_ID_MAIN) -> u32 {
-  return world.get_visible_count(&engine.world, engine.frame_index, render_target_id)
 }
 
 get_node_count :: proc(engine: ^Engine) -> u32 {

@@ -63,7 +63,7 @@ TraversalCallback :: #type proc(node: ^Node, ctx: rawptr) -> bool
 FrameContext :: struct {
   frame_index: u32,
   delta_time:  f32,
-  camera:      ^geometry.Camera,
+  camera:      ^resources.Camera,
 }
 
 init_node :: proc(self: ^Node, name: string = "") {
@@ -83,7 +83,7 @@ destroy_node :: proc(self: ^Node, resources_manager: ^resources.Manager, gpu_con
   }
   #partial switch &attachment in &self.attachment {
   case LightAttachment:
-    resources.destroy_light(resources_manager, attachment.handle)
+    resources.destroy_light(resources_manager, gpu_context, attachment.handle)
     attachment.handle = {}
   case EmitterAttachment:
     resources.destroy_emitter_handle(resources_manager, attachment.handle)
@@ -242,7 +242,8 @@ _build_node_data :: proc(
     data.material_id = mesh_attachment.material.index
     data.mesh_id = mesh_attachment.handle.index
 
-    if node.visible do data.flags |= {.VISIBLE}
+    // FIX: Must check both node.visible AND node.parent_visible (same as traverse logic)
+    if node.visible && node.parent_visible do data.flags |= {.VISIBLE}
     if node.culling_enabled do data.flags |= {.CULLING_ENABLED}
     if mesh_attachment.cast_shadow do data.flags |= {.CASTS_SHADOW}
     if mesh_attachment.navigation_obstacle do data.flags |= {.NAVIGATION_OBSTACLE}
@@ -344,9 +345,11 @@ init_gpu :: proc(
   resources_manager: ^resources.Manager,
   depth_width: u32,
   depth_height: u32,
-  max_visibility_tasks: u32 = 131, // Main + shadows + custom render targets
 ) -> vk.Result {
-  return visibility_system_init(&world.visibility, gpu_context, resources_manager, depth_width, depth_height, max_visibility_tasks)
+  // Initialize visibility system (creates and stores descriptor layouts in Manager)
+  visibility_system_init(&world.visibility, gpu_context, resources_manager, depth_width, depth_height) or_return
+
+  return .SUCCESS
 }
 
 begin_frame :: proc(world: ^World, resources_manager: ^resources.Manager) {
@@ -357,42 +360,6 @@ begin_frame :: proc(world: ^World, resources_manager: ^resources.Manager) {
 shutdown :: proc(world: ^World, gpu_context: ^gpu.GPUContext, resources_manager: ^resources.Manager) {
   visibility_system_shutdown(&world.visibility, gpu_context, resources_manager)
   destroy(world, resources_manager, gpu_context)
-}
-
-get_visible_count :: proc(
-  world: ^World,
-  frame_index: u32,
-  render_target_id: u32,
-) -> u32 {
-  return visibility_system_get_visible_count(&world.visibility, frame_index, render_target_id)
-}
-
-get_depth_texture_index :: proc(
-  world: ^World,
-  frame_index: u32,
-  render_target_id: u32,
-) -> u32 {
-  return visibility_system_get_depth_texture_index(&world.visibility, frame_index, render_target_id)
-}
-
-dispatch_visibility :: proc(
-  world: ^World,
-  gpu_context: ^gpu.GPUContext,
-  command_buffer: vk.CommandBuffer,
-  frame_index: u32,
-  render_target_id: u32,
-  request: VisibilityRequest,
-  resources_manager: ^resources.Manager,
-) -> VisibilityResult {
-  return visibility_system_dispatch(
-    &world.visibility,
-    gpu_context,
-    command_buffer,
-    frame_index,
-    render_target_id,
-    request,
-    resources_manager,
-  )
 }
 
 despawn :: proc(world: ^World, handle: resources.Handle) -> bool {

@@ -25,9 +25,9 @@ portal_render_target_index: int = -1
 portal_material_handle: resources.Handle
 portal_quad_handle: resources.Handle
 
-orbit_controller: geometry.CameraController
-free_controller: geometry.CameraController
-current_controller: ^geometry.CameraController
+orbit_controller: world.CameraController
+free_controller: world.CameraController
+current_controller: ^world.CameraController
 tab_was_pressed: bool
 
 main :: proc() {
@@ -50,7 +50,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   log.info("Setup function called!")
 
   // Enable visibility statistics logging
-  world.visibility_system_set_stats_enabled(&engine.world.visibility, true)
+  world.visibility_system_set_stats_enabled(&engine.world.visibility, false)
   set_debug_ui_enabled(engine, true)
 
   plain_material_handle, plain_material_ok := create_material(engine)
@@ -209,23 +209,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
     }
   }
   if true {
-    log.info("loading Damaged Helmet GLTF...")
-    gltf_nodes := load_gltf(engine, "assets/DamagedHelmet.glb") or_else {}
-    log.infof("Loaded GLTF nodes: %v", gltf_nodes)
-    for handle in gltf_nodes {
-      translate(engine, handle, 0, 1, 3)
-      scale(engine, handle, 0.5)
-    }
-  }
-  if true {
-    log.info("loading Suzanne GLTF...")
-    gltf_nodes := load_gltf(engine, "assets/Suzanne.glb") or_else {}
-    log.infof("Loaded GLTF nodes: %v", gltf_nodes)
-    for handle in gltf_nodes {
-      translate(engine, handle, -3, 1, 0)
-    }
-  }
-  if true {
     log.info("loading Warrior GLTF...")
     gltf_nodes := load_gltf(engine, "assets/Warrior.glb") or_else {}
     log.infof("Loaded GLTF nodes: %v", gltf_nodes)
@@ -265,6 +248,23 @@ setup :: proc(engine: ^mjolnir.Engine) {
       }
     }
   }
+  if true {
+    log.info("loading Damaged Helmet GLTF...")
+    gltf_nodes := load_gltf(engine, "assets/DamagedHelmet.glb") or_else {}
+    log.infof("Loaded GLTF nodes: %v", gltf_nodes)
+    for handle in gltf_nodes {
+      translate(engine, handle, 0, 1, 3)
+      scale(engine, handle, 0.5)
+    }
+  }
+  if true {
+    log.info("loading Suzanne GLTF...")
+    gltf_nodes := load_gltf(engine, "assets/Suzanne.glb") or_else {}
+    log.infof("Loaded GLTF nodes: %v", gltf_nodes)
+    for handle in gltf_nodes {
+      translate(engine, handle, -3, 1, 0)
+    }
+  }
   when true {
     log.infof("creating %d lights", LIGHT_COUNT)
     // Create lights and light cubes
@@ -289,16 +289,16 @@ setup :: proc(engine: ^mjolnir.Engine) {
           color,
           10,
           math.PI * 0.25,
-          {6, 2, -1},
+          {0, 6, -1},
         )
         if !light_spawn_ok do continue
-        rotate(light, math.PI * 0.4, linalg.VECTOR3F32_X_AXIS)
+        rotate(light, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
       } else {
         light_handles[i], light, light_spawn_ok = spawn_point_light(
           engine,
           color,
           14,
-          {6, 2, -1},
+          {0, 2, -1},
         )
         if !light_spawn_ok do continue
       }
@@ -315,7 +315,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
           },
         )
         if cube_ok {
-          scale(cube_node, 0.1)
+          scale(cube_node, 0.05)
+          translate(cube_node, y=0.5)
         }
       }
     }
@@ -476,24 +477,24 @@ setup :: proc(engine: ^mjolnir.Engine) {
       }
     }
   }
-  add_fog(engine, [3]f32{0.4, 0.0, 0.8}, 0.02, 5.0, 20.0)
+  // add_fog(engine, [3]f32{0.4, 0.0, 0.8}, 0.02, 5.0, 20.0)
   // add_bloom(engine)
-  add_crosshatch(engine, [2]f32{1280, 720})
+  // add_crosshatch(engine, [2]f32{1280, 720})
   // add_blur(engine, 18.0)
   // add_tonemap(engine, 1.5, 1.3)
   // add_dof(engine)
   // add_grayscale(engine, 0.9)
   // add_outline(engine, 2.0, [3]f32{1.0, 0.0, 0.0})
-  setup_camera_controller_callbacks(engine.window)
+  world.setup_camera_controller_callbacks(engine.window)
   main_camera := get_main_camera(engine)
-  orbit_controller = camera_controller_orbit_init(engine.window)
-  free_controller = camera_controller_free_init(engine.window)
+  orbit_controller = world.camera_controller_orbit_init(engine.window)
+  free_controller = world.camera_controller_free_init(engine.window)
   if main_camera != nil {
-    camera_controller_sync(&orbit_controller, main_camera)
-    camera_controller_sync(&free_controller, main_camera)
+    world.camera_controller_sync(&orbit_controller, main_camera)
+    world.camera_controller_sync(&free_controller, main_camera)
   }
   current_controller = &orbit_controller
-  when true {
+  when false { // Disabled: portal feature requires render targets system (removed)
     log.info("Setting up portal...")
     idx, portal_ok := create_render_target(
       engine,
@@ -549,13 +550,13 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
   using mjolnir, geometry
   if main_camera := get_main_camera(engine); main_camera != nil {
     if current_controller == &orbit_controller {
-      camera_controller_orbit_update(
+      world.camera_controller_orbit_update(
         current_controller,
         main_camera,
         delta_time,
       )
     } else {
-      camera_controller_free_update(
+      world.camera_controller_free_update(
         current_controller,
         main_camera,
         delta_time,
@@ -575,8 +576,8 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
     if i == 0 {
       // Rotate light 0 around Y axis
       t := time_since_start(engine)
-      rotate(engine, handle, t, linalg.VECTOR3F32_Y_AXIS)
-      rotate_by(engine, handle, math.PI * 0.3, linalg.VECTOR3F32_X_AXIS)
+      // rotate(engine, handle, t, linalg.VECTOR3F32_Y_AXIS)
+      // rotate_by(engine, handle, math.PI * 0.3, linalg.VECTOR3F32_X_AXIS)
       continue
     }
     offset := f32(i) / f32(LIGHT_COUNT) * math.PI * 2.0
@@ -587,7 +588,7 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
     rz := math.cos(t)
     v := linalg.normalize([3]f32{rx, ry, rz})
     radius: f32 = 15.0
-    v = v * radius + linalg.VECTOR3F32_Y_AXIS * -1.0
+    v = v * radius - linalg.VECTOR3F32_Y_AXIS * 4.0
     translate(engine, handle, v.x, v.y, v.z)
     rotate_by(
       engine,
@@ -596,54 +597,14 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
       linalg.VECTOR3F32_Y_AXIS,
     )
   }
-  if portal_render_target_index >= 0 {
-    portal_rt, rt_ok := get_render_target_camera(
-      engine,
-      portal_render_target_index,
-    )
-    if rt_ok {
-      portal_camera, camera_ok := get_camera(engine, portal_rt)
-      if camera_ok {
-        // Animate portal camera - orbit around the scene center
-        portal_t := time_since_start(engine) * 0.3
-        radius: f32 = 12.0
-        height: f32 = 8.0
-        camera_x := math.cos(portal_t) * radius
-        camera_z := math.sin(portal_t) * radius
-        camera_pos := [3]f32{camera_x, height, camera_z}
-        target := [3]f32{0, 0, 0}
-        geometry.camera_look_at(portal_camera, camera_pos, target, {0, 1, 0})
-      }
-      // Update portal material to use render target output
-      // Use previous frame's output since current frame hasn't been rendered yet
-      prev_frame :=
-        (engine.frame_index + resources.MAX_FRAMES_IN_FLIGHT - 1) %
-        resources.MAX_FRAMES_IN_FLIGHT
-      portal_mat, mat_ok := get_material(engine, portal_material_handle)
-      if mat_ok {
-        portal_output, output_ok := renderer_get_render_target_output(
-          &engine.render,
-          portal_render_target_index,
-          &engine.resource_manager,
-          prev_frame,
-        )
-        if output_ok {
-          portal_mat.albedo = portal_output
-          resources.material_write_to_gpu(
-            &engine.resource_manager,
-            portal_material_handle,
-            portal_mat,
-          )
-        }
-      }
-    }
-  }
+  // Disabled: portal feature requires render targets system (removed)
+  // if portal_render_target_index >= 0 { ... }
 }
 
 on_key_pressed :: proc(engine: ^mjolnir.Engine, key, action, mods: int) {
   using mjolnir, geometry
   log.infof("key pressed key %d action %d mods %x", key, action, mods)
-  if action != glfw.PRESS do return
+  if action == glfw.RELEASE do return
   if key == glfw.KEY_LEFT {
     translate_by(engine, light_handles[0], 0.1, 0.0, 0.0)
   } else if key == glfw.KEY_RIGHT {
@@ -667,7 +628,7 @@ on_key_pressed :: proc(engine: ^mjolnir.Engine, key, action, mods: int) {
     }
     // Sync new controller with current camera state to prevent jumps
     if main_camera_for_sync != nil {
-      camera_controller_sync(current_controller, main_camera_for_sync)
+      world.camera_controller_sync(current_controller, main_camera_for_sync)
     }
   }
 }

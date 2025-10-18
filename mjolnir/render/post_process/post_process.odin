@@ -3,7 +3,6 @@ package post_process
 import "../../gpu"
 import "../../resources"
 import "../shared"
-import "../targets"
 import "core:log"
 import vk "vendor:vulkan"
 
@@ -645,10 +644,13 @@ render :: proc(
   command_buffer: vk.CommandBuffer,
   extent: vk.Extent2D,
   output_view: vk.ImageView,
-  target: ^targets.RenderTarget,
+  camera_handle: resources.Handle,
   resources_manager: ^resources.Manager,
   frame_index: u32,
 ) {
+  camera := resources.get(resources_manager.cameras, camera_handle)
+  if camera == nil do return
+
   for effect, i in self.effect_stack {
     is_first := i == 0
     is_last := i == len(self.effect_stack) - 1
@@ -663,7 +665,7 @@ render :: proc(
     dst_image_idx: u32
 
     if is_first {
-      input_image_index = targets.get_final_image(target, frame_index).index // Use original input
+      input_image_index = resources.camera_get_attachment(camera, .FINAL_IMAGE, frame_index).index // Use original input
       dst_image_idx = 0 // Write to image[0]
     } else {
       prev_dst_image_idx := (i - 1) % 2
@@ -755,17 +757,16 @@ render :: proc(
     )
     base: BasePushConstant
     base.position_texture_index =
-      targets.get_position_texture(target, frame_index).index
+      resources.camera_get_attachment(camera, .POSITION, frame_index).index
     base.normal_texture_index =
-      targets.get_normal_texture(target, frame_index).index
+      resources.camera_get_attachment(camera, .NORMAL, frame_index).index
     base.albedo_texture_index =
-      targets.get_albedo_texture(target, frame_index).index
+      resources.camera_get_attachment(camera, .ALBEDO, frame_index).index
     base.metallic_texture_index =
-      targets.get_metallic_roughness_texture(target, frame_index).index
+      resources.camera_get_attachment(camera, .METALLIC_ROUGHNESS, frame_index).index
     base.emissive_texture_index =
-      targets.get_emissive_texture(target, frame_index).index
-    base.depth_texture_index =
-      targets.get_depth_texture(target, frame_index).index
+      resources.camera_get_attachment(camera, .EMISSIVE, frame_index).index
+    base.depth_texture_index = resources.camera_get_attachment(camera, .DEPTH, frame_index).index
     base.input_image_index = input_image_index
     // Create and push combined push constants based on effect type
     switch &e in effect {
@@ -915,7 +916,7 @@ begin_record :: proc(
   self: ^Renderer,
   frame_index: u32,
   color_format: vk.Format,
-  main_render_target: ^targets.RenderTarget,
+  camera_handle: resources.Handle,
   resources_manager: ^resources.Manager,
   swapchain_image: vk.Image,
 ) -> (
@@ -943,10 +944,13 @@ begin_record :: proc(
     },
   ) or_return
 
+  camera := resources.get(resources_manager.cameras, camera_handle)
+  if camera == nil do return command_buffer, .ERROR_UNKNOWN
+
   // Transition final image to shader read optimal
   final_image := resources.get(
     resources_manager.image_2d_buffers,
-    targets.get_final_image(main_render_target, frame_index),
+    resources.camera_get_attachment(camera, .FINAL_IMAGE, frame_index),
   )
   if final_image != nil {
     gpu.transition_image_to_shader_read(command_buffer, final_image.image)

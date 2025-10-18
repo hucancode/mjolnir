@@ -3,8 +3,10 @@ SHADER_DIR := mjolnir/shader
 # Find all shader files
 VERT_SHADERS := $(shell find $(SHADER_DIR) -name "shader.vert")
 FRAG_SHADERS := $(shell find $(SHADER_DIR) -name "shader.frag")
+GEOM_SHADERS := $(shell find $(SHADER_DIR) -name "shader.geom")
 SPV_SHADERS := $(patsubst $(SHADER_DIR)/%/shader.vert,$(SHADER_DIR)/%/vert.spv,$(VERT_SHADERS)) \
-               $(patsubst $(SHADER_DIR)/%/shader.frag,$(SHADER_DIR)/%/frag.spv,$(FRAG_SHADERS))
+               $(patsubst $(SHADER_DIR)/%/shader.frag,$(SHADER_DIR)/%/frag.spv,$(FRAG_SHADERS)) \
+               $(patsubst $(SHADER_DIR)/%/shader.geom,$(SHADER_DIR)/%/geom.spv,$(GEOM_SHADERS))
 COMP_SHADERS := $(shell find $(SHADER_DIR) -name "*.comp")
 SPV_COMPUTE_SHADERS := $(patsubst %.comp,%.spv,$(COMP_SHADERS))
 
@@ -59,11 +61,11 @@ golden:
 capture: build
 	@# Capture settings
 	@APP_PATH="./bin/main"; \
-	FRAME_N="5,6"; \
+	FRAME_N="5"; \
 	OUT_DIR="screenshots"; \
 	PPM_FILE="$$OUT_DIR/$$FRAME_N.ppm"; \
 	PNG_FILE="$$OUT_DIR/screenshot.png"; \
-	TIMEOUT_SEC="6"; \
+	TIMEOUT_SEC="10"; \
 	\
 	command -v convert >/dev/null || { echo "Error: ImageMagick 'convert' not found" >&2; exit 1; }; \
 	command -v xvfb-run >/dev/null || { echo "Error: 'xvfb-run' not found" >&2; exit 1; }; \
@@ -75,10 +77,10 @@ capture: build
 	xvfb-run -a -s "-screen 0 1920x1080x24" \
 	timeout "$${TIMEOUT_SEC}s" "$$APP_PATH" || true; \
 	\
-	for f in "$$OUT_DIR/*.ppm"; do
-		out="${f%.ppm}.png"
-		echo "Converting $f -> $out"
-		convert "$f" "$out"
+	for f in "$$OUT_DIR/"*.ppm; do \
+		out="$${f%.ppm}.png"; \
+		echo "Converting $$f -> $$out"; \
+		convert "$$f" "$$out"; \
 	done
 clean:
 	rm -rf bin/*
@@ -93,6 +95,10 @@ $(SHADER_DIR)/%/vert.spv: $(SHADER_DIR)/%/shader.vert
 
 $(SHADER_DIR)/%/frag.spv: $(SHADER_DIR)/%/shader.frag
 	@echo "Compiling fragment shader $<..."
+	@glslc "$<" -o "$@"
+
+$(SHADER_DIR)/%/geom.spv: $(SHADER_DIR)/%/shader.geom
+	@echo "Compiling geometry shader $<..."
 	@glslc "$<" -o "$@"
 
 .PHONY: build run debug shader test check clean vtest golden

@@ -3,7 +3,6 @@ package particles
 import "../../gpu"
 import "../../resources"
 import "../shared"
-import "../targets"
 import "core:log"
 import vk "vendor:vulkan"
 
@@ -865,7 +864,7 @@ create_render_pipeline :: proc(
   depth_stencil := vk.PipelineDepthStencilStateCreateInfo {
     sType            = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
     depthTestEnable  = true,
-    depthWriteEnable = true,
+    depthWriteEnable = false,
     depthCompareOp   = .LESS_OR_EQUAL,
   }
   pipeline_info := vk.GraphicsPipelineCreateInfo {
@@ -897,10 +896,13 @@ create_render_pipeline :: proc(
 begin_pass :: proc(
   self: ^Renderer,
   command_buffer: vk.CommandBuffer,
-  target: ^targets.RenderTarget,
+  camera_handle: resources.Handle,
   resources_manager: ^resources.Manager,
   frame_index: u32,
 ) {
+  camera := resources.get(resources_manager.cameras, camera_handle)
+  if camera == nil do return
+
   // Memory barrier to ensure compute results are visible before rendering
   barrier := vk.BufferMemoryBarrier {
     sType               = .BUFFER_MEMORY_BARRIER,
@@ -925,7 +927,7 @@ begin_pass :: proc(
   )
   color_texture, ok := resources.get_image_2d(
     resources_manager,
-    targets.get_final_image(target, frame_index),
+    resources.camera_get_attachment(camera, .FINAL_IMAGE, frame_index),
   )
   if !ok {
     log.error("Particle renderer missing color attachment")
@@ -933,7 +935,7 @@ begin_pass :: proc(
   }
   depth_texture, depth_found := resources.get_image_2d(
     resources_manager,
-    targets.get_depth_texture(target, frame_index),
+    resources.camera_get_attachment(camera, .DEPTH, frame_index),
   )
   if !depth_found {
     log.error("Particle renderer missing depth attachment")
@@ -953,9 +955,10 @@ begin_pass :: proc(
     loadOp      = .LOAD,
     storeOp     = .STORE,
   }
+  extent := camera.extent
   render_info := vk.RenderingInfo {
     sType = .RENDERING_INFO,
-    renderArea = {extent = target.extent},
+    renderArea = {extent = extent},
     layerCount = 1,
     colorAttachmentCount = 1,
     pColorAttachments = &color_attachment,
@@ -964,14 +967,14 @@ begin_pass :: proc(
   vk.CmdBeginRendering(command_buffer, &render_info)
   viewport := vk.Viewport {
     x        = 0.0,
-    y        = f32(target.extent.height),
-    width    = f32(target.extent.width),
-    height   = -f32(target.extent.height),
+    y        = f32(extent.height),
+    width    = f32(extent.width),
+    height   = -f32(extent.height),
     minDepth = 0.0,
     maxDepth = 1.0,
   }
   scissor := vk.Rect2D {
-    extent = target.extent,
+    extent = extent,
   }
   vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
   vk.CmdSetScissor(command_buffer, 0, 1, &scissor)

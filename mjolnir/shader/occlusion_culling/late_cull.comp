@@ -70,19 +70,15 @@ layout(set = 0, binding = 3) readonly buffer CameraBuffer {
     Camera cameras[];
 };
 
-layout(set = 0, binding = 4) buffer CurrentVisibility {
-    uint visibility[];
-};
-
-layout(set = 0, binding = 5) buffer DrawCountBuffer {
+layout(set = 0, binding = 4) buffer DrawCountBuffer {
     uint draw_count;
 };
 
-layout(set = 0, binding = 6) buffer DrawCommandBuffer {
+layout(set = 0, binding = 5) buffer DrawCommandBuffer {
     DrawCommand commands[];
 };
 
-layout(set = 0, binding = 7) uniform sampler2D depth_pyramid;
+layout(set = 0, binding = 6) uniform sampler2D depth_pyramid;
 
 // return true if aabb is visible, false if outside frustum
 bool frustum_cull(vec3 center, vec3 extent, Camera camera) {
@@ -200,26 +196,18 @@ void main() {
 
     NodeData node = nodes[node_id];
     if (node.mesh_id == INVALID_ID) {
-        visibility[node_id] = 0u;
         return;
     }
 
     // Check flag filtering
     if ((node.flags & params.include_flags) != params.include_flags) {
-        visibility[node_id] = 0u;
         return;
     }
     if ((node.flags & params.exclude_flags) != 0u) {
-        visibility[node_id] = 0u;
         return;
     }
 
     MeshData mesh = meshes[node.mesh_id];
-    if (mesh.index_count == 0u) {
-        visibility[node_id] = 0u;
-        return;
-    }
-
     Camera camera = cameras[params.camera_index];
     mat4 world = world_matrices[node_id];
 
@@ -250,16 +238,10 @@ void main() {
     if (visible && params.occlusion_enabled == 1u) {
         visible = occlusion_test(world_center, radius, camera);
     }
-
-    // Update visibility buffer
-    visibility[node_id] = visible ? 1u : 0u;
-
     if (!visible) return;
-
     // Add to late pass draw list
     uint draw_index = atomicAdd(draw_count, 1);
     if (draw_index >= params.max_draws) return;
-
     DrawCommand cmd;
     cmd.index_count = mesh.index_count;
     cmd.instance_count = 1u;
