@@ -4,7 +4,6 @@ import "../../geometry"
 import "../../gpu"
 import "../../resources"
 import "../shared"
-import "../targets"
 import "core:log"
 import vk "vendor:vulkan"
 
@@ -12,14 +11,6 @@ LightKind :: enum u32 {
   POINT       = 0,
   DIRECTIONAL = 1,
   SPOT        = 2,
-}
-
-ShadowResources :: struct {
-  cube_render_targets: [6]resources.Handle,
-  cube_cameras:        [6]resources.Handle,
-  shadow_map:          resources.Handle,
-  render_target:       resources.Handle,
-  camera:              resources.Handle,
 }
 
 AmbientPushConstant :: struct {
@@ -50,14 +41,17 @@ LightPushConstant :: struct {
 
 begin_ambient_pass :: proc(
   self: ^Renderer,
-  target: ^targets.RenderTarget,
+  camera_handle: resources.Handle,
   command_buffer: vk.CommandBuffer,
   resources_manager: ^resources.Manager,
   frame_index: u32,
 ) {
+  camera := resources.get(resources_manager.cameras, camera_handle)
+  if camera == nil do return
+
   color_texture := resources.get(
     resources_manager.image_2d_buffers,
-    targets.get_final_image(target, frame_index),
+    resources.camera_get_attachment(camera, .FINAL_IMAGE, frame_index),
   )
   color_attachment := vk.RenderingAttachmentInfo {
     sType = .RENDERING_ATTACHMENT_INFO,
@@ -67,22 +61,23 @@ begin_ambient_pass :: proc(
     storeOp = .STORE,
     clearValue = {color = {float32 = {0, 0, 0, 1}}},
   }
+  extent := camera.extent
   render_info := vk.RenderingInfo {
     sType = .RENDERING_INFO,
-    renderArea = {extent = target.extent},
+    renderArea = {extent = extent},
     layerCount = 1,
     colorAttachmentCount = 1,
     pColorAttachments = &color_attachment,
   }
   vk.CmdBeginRendering(command_buffer, &render_info)
   viewport := vk.Viewport {
-    width    = f32(target.extent.width),
-    height   = f32(target.extent.height),
+    width    = f32(extent.width),
+    height   = f32(extent.height),
     minDepth = 0.0,
     maxDepth = 1.0,
   }
   scissor := vk.Rect2D {
-    extent = target.extent,
+    extent = extent,
   }
   vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
   vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
@@ -105,21 +100,24 @@ begin_ambient_pass :: proc(
 
 render_ambient :: proc(
   self: ^Renderer,
-  target: ^targets.RenderTarget,
+  camera_handle: resources.Handle,
   command_buffer: vk.CommandBuffer,
   resources_manager: ^resources.Manager,
   frame_index: u32,
 ) {
+  camera := resources.get(resources_manager.cameras, camera_handle)
+  if camera == nil do return
+
   push := AmbientPushConstant {
-    camera_index           = target.camera.index,
+    camera_index           = camera_handle.index,
     environment_index      = self.environment_map.index,
     brdf_lut_index         = self.brdf_lut.index,
-    position_texture_index = targets.get_position_texture(target, frame_index).index,
-    normal_texture_index   = targets.get_normal_texture(target, frame_index).index,
-    albedo_texture_index   = targets.get_albedo_texture(target, frame_index).index,
-    metallic_texture_index = targets.get_metallic_roughness_texture(target, frame_index).index,
-    emissive_texture_index = targets.get_emissive_texture(target, frame_index).index,
-    depth_texture_index    = targets.get_depth_texture(target, frame_index).index,
+    position_texture_index = resources.camera_get_attachment(camera, .POSITION, frame_index).index,
+    normal_texture_index   = resources.camera_get_attachment(camera, .NORMAL, frame_index).index,
+    albedo_texture_index   = resources.camera_get_attachment(camera, .ALBEDO, frame_index).index,
+    metallic_texture_index = resources.camera_get_attachment(camera, .METALLIC_ROUGHNESS, frame_index).index,
+    emissive_texture_index = resources.camera_get_attachment(camera, .EMISSIVE, frame_index).index,
+    depth_texture_index    = resources.camera_get_attachment(camera, .DEPTH, frame_index).index,
     environment_max_lod    = self.environment_max_lod,
     ibl_intensity          = self.ibl_intensity,
   }
@@ -319,10 +317,11 @@ init :: proc(
 
   // Initialize lighting pipeline
   lighting_pipeline_set_layouts := [?]vk.DescriptorSetLayout {
-    resources_manager.camera_buffer_set_layout,
-    resources_manager.textures_set_layout,
-    resources_manager.lights_buffer_set_layout,
-    resources_manager.world_matrix_buffer_set_layout,
+    resources_manager.camera_buffer_set_layout,         // set = 0 (regular cameras)
+    resources_manager.textures_set_layout,              // set = 1 (bindless textures/samplers)
+    resources_manager.lights_buffer_set_layout,         // set = 2 (light data)
+    resources_manager.world_matrix_buffer_set_layout,   // set = 3 (world matrices)
+    resources_manager.spherical_camera_buffer_set_layout, // set = 4 (spherical cameras for point light shadows)
   }
   lighting_push_constant_range := vk.PushConstantRange {
     stageFlags = {.VERTEX, .FRAGMENT},
@@ -578,14 +577,17 @@ lighting_recreate_images :: proc(
 
 begin_pass :: proc(
   self: ^Renderer,
-  target: ^targets.RenderTarget,
+  camera_handle: resources.Handle,
   command_buffer: vk.CommandBuffer,
   resources_manager: ^resources.Manager,
   frame_index: u32,
 ) {
+  camera := resources.get(resources_manager.cameras, camera_handle)
+  if camera == nil do return
+
   final_image := resources.get(
     resources_manager.image_2d_buffers,
-    targets.get_final_image(target, frame_index),
+    resources.camera_get_attachment(camera, .FINAL_IMAGE, frame_index),
   )
   color_attachment := vk.RenderingAttachmentInfo {
     sType = .RENDERING_ATTACHMENT_INFO,
@@ -595,20 +597,22 @@ begin_pass :: proc(
     storeOp = .STORE,
     clearValue = {color = {float32 = BG_BLUE_GRAY}},
   }
+  // Use per-frame depth texture from attachments
   depth_texture := resources.get(
     resources_manager.image_2d_buffers,
-    targets.get_depth_texture(target, frame_index),
+    resources.camera_get_attachment(camera, .DEPTH, frame_index),
   )
   depth_attachment := vk.RenderingAttachmentInfo {
     sType       = .RENDERING_ATTACHMENT_INFO,
     imageView   = depth_texture.view,
-    imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+    imageLayout = .SHADER_READ_ONLY_OPTIMAL, // From geometry pass end_record
     loadOp      = .LOAD,
     storeOp     = .DONT_CARE,
   }
+  extent := camera.extent
   render_info := vk.RenderingInfo {
     sType = .RENDERING_INFO,
-    renderArea = {extent = target.extent},
+    renderArea = {extent = extent},
     layerCount = 1,
     colorAttachmentCount = 1,
     pColorAttachments = &color_attachment,
@@ -617,22 +621,23 @@ begin_pass :: proc(
   vk.CmdBeginRendering(command_buffer, &render_info)
   viewport := vk.Viewport {
     x        = 0,
-    y        = f32(target.extent.height),
-    width    = f32(target.extent.width),
-    height   = -f32(target.extent.height),
+    y        = f32(extent.height),
+    width    = f32(extent.width),
+    height   = -f32(extent.height),
     minDepth = 0.0,
     maxDepth = 1.0,
   }
   scissor := vk.Rect2D {
-    extent = target.extent,
+    extent = extent,
   }
   vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
   vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
   descriptor_sets := [?]vk.DescriptorSet {
-    resources_manager.camera_buffer_descriptor_set,
-    resources_manager.textures_descriptor_set,
-    resources_manager.lights_buffer_descriptor_set,
-    resources_manager.world_matrix_descriptor_set,
+    resources_manager.camera_buffer_descriptor_set,           // set = 0 (regular cameras)
+    resources_manager.textures_descriptor_set,                // set = 1 (textures/samplers)
+    resources_manager.lights_buffer_descriptor_set,           // set = 2 (lights)
+    resources_manager.world_matrix_descriptor_set,            // set = 3 (world matrices)
+    resources_manager.spherical_camera_buffer_descriptor_set, // set = 4 (spherical cameras)
   }
   vk.CmdBindDescriptorSets(
     command_buffer,
@@ -649,11 +654,14 @@ begin_pass :: proc(
 
 render :: proc(
   self: ^Renderer,
-  target: ^targets.RenderTarget,
+  camera_handle: resources.Handle,
   command_buffer: vk.CommandBuffer,
   resources_manager: ^resources.Manager,
   frame_index: u32,
 ) {
+  camera := resources.get(resources_manager.cameras, camera_handle)
+  if camera == nil do return
+
   bind_and_draw_mesh :: proc(
     mesh_handle: resources.Handle,
     command_buffer: vk.CommandBuffer,
@@ -691,14 +699,14 @@ render :: proc(
   }
   // Push constant structure for light index-based rendering
   push_constant := LightPushConstant {
-    scene_camera_idx       = target.camera.index,
-    position_texture_index = targets.get_position_texture(target, frame_index).index,
-    normal_texture_index   = targets.get_normal_texture(target, frame_index).index,
-    albedo_texture_index   = targets.get_albedo_texture(target, frame_index).index,
-    metallic_texture_index = targets.get_metallic_roughness_texture(target, frame_index).index,
-    emissive_texture_index = targets.get_emissive_texture(target, frame_index).index,
-    depth_texture_index    = targets.get_depth_texture(target, frame_index).index,
-    input_image_index      = targets.get_final_image(target, frame_index).index,
+    scene_camera_idx       = camera_handle.index,
+    position_texture_index = resources.camera_get_attachment(camera, .POSITION, frame_index).index,
+    normal_texture_index   = resources.camera_get_attachment(camera, .NORMAL, frame_index).index,
+    albedo_texture_index   = resources.camera_get_attachment(camera, .ALBEDO, frame_index).index,
+    metallic_texture_index = resources.camera_get_attachment(camera, .METALLIC_ROUGHNESS, frame_index).index,
+    emissive_texture_index = resources.camera_get_attachment(camera, .EMISSIVE, frame_index).index,
+    depth_texture_index    = resources.camera_get_attachment(camera, .DEPTH, frame_index).index,
+    input_image_index      = resources.camera_get_attachment(camera, .FINAL_IMAGE, frame_index).index,
   }
   for entry, idx in resources_manager.lights.entries do if entry.active {
     light := entry.item

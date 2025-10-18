@@ -16,7 +16,6 @@ import "geometry"
 import "gpu"
 import "resources"
 import "world"
-import "render/targets"
 import "render/particles"
 import "render/text"
 import "render/debug_ui"
@@ -143,7 +142,7 @@ init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
   self.last_update_timestamp = self.start_timestamp
   world.init(&self.world)
   gpu.swapchain_init(&self.swapchain, &self.gpu_context, self.window) or_return
-  world.init_gpu(&self.world, &self.gpu_context, &self.resource_manager, self.swapchain.extent.width, self.swapchain.extent.height, TOTAL_VISIBILITY_TASKS) or_return
+  world.init_gpu(&self.world, &self.gpu_context, &self.resource_manager, self.swapchain.extent.width, self.swapchain.extent.height) or_return
 
   // Initialize deferred cleanup
   self.pending_node_deletions = make([dynamic]resources.Handle, 0)
@@ -172,45 +171,8 @@ init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
     &self.resource_manager,
     self.swapchain.extent,
     self.swapchain.format.format,
-    {},
     get_window_dpi(self.window),
   ) or_return
-
-  // Initialize main render target with default camera settings
-  // Use visibility system's depth textures (shared across frames for occlusion culling)
-  // Main render target uses visibility task 0
-  visibility_depth_textures: [resources.MAX_FRAMES_IN_FLIGHT]resources.Handle
-  for frame_idx in 0 ..< resources.MAX_FRAMES_IN_FLIGHT {
-    visibility_depth_textures[frame_idx] = self.world.visibility.frames[frame_idx].tasks[RENDER_TARGET_ID_MAIN].depth_texture
-  }
-
-  main_target_idx, main_target_ok := renderer_add_render_target_with_external_depth(
-    &self.render,
-    &self.gpu_context,
-    &self.resource_manager,
-    self.swapchain.extent.width,
-    self.swapchain.extent.height,
-    self.swapchain.format.format,
-    .D32_SFLOAT,
-    {2, 3, 2}, // Camera slightly above and diagonal to origin
-    {0, 0, 0}, // Looking at origin
-    visibility_depth_textures,
-    enabled_passes = {
-      .SHADOW,
-      .GEOMETRY,
-      .LIGHTING,
-      .TRANSPARENCY,
-      .PARTICLES,
-      .POST_PROCESS,
-    },
-  )
-  if !main_target_ok {
-    log.error("Failed to create main render target")
-    return .ERROR_INITIALIZATION_FAILED
-  }
-  self.render.main_render_target_index = main_target_idx
-  // Set the main render target ID
-  self.render.render_targets[main_target_idx].render_target_id = RENDER_TARGET_ID_MAIN
   glfw.SetKeyCallback(
     self.window,
     proc "c" (window: glfw.WindowHandle, key, scancode, action, mods: c.int) {
@@ -320,6 +282,12 @@ init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
         -i32(math.round(xoffset)),
         -i32(math.round(yoffset)),
       )
+      // Forward scroll events to camera controller
+      if world.g_scroll_deltas == nil {
+        world.g_scroll_deltas = make(map[glfw.WindowHandle]f32)
+      }
+      world.g_scroll_deltas[window] = f32(yoffset)
+
       if engine.mouse_scroll_proc != nil {
         engine.mouse_scroll_proc(engine, {xoffset, yoffset})
       }
@@ -351,13 +319,8 @@ time_since_start :: proc(self: ^Engine) -> f32 {
   return f32(time.duration_seconds(time.since(self.start_timestamp)))
 }
 
-get_main_camera :: proc(self: ^Engine) -> ^geometry.Camera {
-  main_idx := self.render.main_render_target_index
-  if main_idx < 0 || main_idx >= len(self.render.render_targets) {
-    return nil
-  }
-  target := &self.render.render_targets[main_idx]
-  camera_ptr, camera_found := resources.get_camera(&self.resource_manager, target.camera)
+get_main_camera :: proc(self: ^Engine) -> ^resources.Camera {
+  camera_ptr, camera_found := resources.get_camera(&self.resource_manager, self.render.main_camera)
   if !camera_found {
     return nil
   }
@@ -378,10 +341,10 @@ update_skeletal_animations :: proc(self: ^Engine, delta_time: f32) {
     mesh_attachment, has_mesh := node.attachment.(world.MeshAttachment)
     if !has_mesh do continue
 
-    skinning, has_skin := mesh_attachment.skinning.?;
+    skinning, has_skin := mesh_attachment.skinning.?
     if !has_skin do continue
 
-    anim_instance, has_anim := skinning.animation.?;
+    anim_instance, has_anim := skinning.animation.?
     if !has_anim do continue
 
     animation.instance_update(&anim_instance, delta_time)
@@ -390,7 +353,7 @@ update_skeletal_animations :: proc(self: ^Engine, delta_time: f32) {
 
     mesh := resources.get_mesh(&self.resource_manager, mesh_attachment.handle)
     if mesh == nil do continue
-    mesh_skinning, mesh_has_skin := mesh.skinning.?;
+    mesh_skinning, mesh_has_skin := mesh.skinning.?
     if !mesh_has_skin do continue
 
     bone_count := len(mesh_skinning.bones)
@@ -513,18 +476,21 @@ render_debug_ui :: proc(self: ^Engine) {
     mu.label(&self.render.ui.ctx, "")
     mu.label(&self.render.ui.ctx, "=== Visibility Culling ===")
 
-    // Get stats for main render target (opaque pass)
-    main_stats := world.visibility_system_get_stats(&self.world.visibility, self.frame_index, RENDER_TARGET_ID_MAIN)
-    mu.label(&self.render.ui.ctx, fmt.tprintf("Total Objects: %d", self.world.visibility.node_count))
-    mu.label(&self.render.ui.ctx, fmt.tprintf("Late Pass: %d draws", main_stats.late_draw_count))
+    // Get stats for main camera (opaque pass)
+    main_camera := get_main_camera(self)
+    if main_camera != nil {
+      main_stats := world.visibility_system_get_stats(&self.world.visibility, main_camera, self.render.main_camera.index, self.frame_index)
+      mu.label(&self.render.ui.ctx, fmt.tprintf("Total Objects: %d", self.world.visibility.node_count))
+      mu.label(&self.render.ui.ctx, fmt.tprintf("Late Pass: %d draws", main_stats.late_draw_count))
 
-    // Calculate culling efficiency
-    efficiency: f32 = 0.0
-    if self.world.visibility.node_count > 0 {
-      efficiency = f32(main_stats.late_draw_count) / f32(self.world.visibility.node_count) * 100.0
+      // Calculate culling efficiency
+      efficiency: f32 = 0.0
+      if self.world.visibility.node_count > 0 {
+        efficiency = f32(main_stats.late_draw_count) / f32(self.world.visibility.node_count) * 100.0
+      }
+
+      mu.label(&self.render.ui.ctx, fmt.tprintf("Culling Efficiency: %.1f%%", efficiency))
     }
-
-    mu.label(&self.render.ui.ctx, fmt.tprintf("Culling Efficiency: %.1f%%", efficiency))
   }
 }
 
@@ -538,13 +504,9 @@ recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
   new_aspect_ratio :=
     f32(engine.swapchain.extent.width) / f32(engine.swapchain.extent.height)
   if main_camera := get_main_camera(engine); main_camera != nil {
-    geometry.camera_update_aspect_ratio(main_camera, new_aspect_ratio)
-  }
-  main_idx := engine.render.main_render_target_index
-  if main_idx >= 0 && main_idx < len(engine.render.render_targets) {
-    main_target := &engine.render.render_targets[main_idx]
-    targets.render_target_resize(
-      main_target,
+    resources.camera_update_aspect_ratio(main_camera, new_aspect_ratio)
+    resources.camera_resize(
+      main_camera,
       &engine.gpu_context,
       &engine.resource_manager,
       engine.swapchain.extent.width,
@@ -574,58 +536,47 @@ render :: proc(self: ^Engine) -> vk.Result {
   defer sync.rw_mutex_unlock(&self.staged_buffers_guard)
   render_delta_time := f32(time.duration_seconds(time.since(self.last_render_timestamp)))
   update_skeletal_animations(self, render_delta_time)
-  main_idx := self.render.main_render_target_index
-  if main_idx < 0 || main_idx >= len(self.render.render_targets) {
-    log.errorf("Main render target index invalid: %d", main_idx)
+
+  main_camera_handle := self.render.main_camera
+  main_camera, main_camera_ok := resources.get_camera(&self.resource_manager, main_camera_handle)
+  if !main_camera_ok {
+    log.errorf("Failed to get main camera")
     return .ERROR_UNKNOWN
   }
-  main_render_target := &self.render.render_targets[main_idx]
-  targets.render_target_upload_camera_data(&self.resource_manager, main_render_target)
+  resources.camera_upload_data(&self.resource_manager, main_camera, main_camera_handle.index)
 
-  // Render all custom render targets (non-main targets) using 2-pass occlusion culling
-  for i in 0 ..< len(self.render.render_targets) {
-    if i == main_idx do continue // Skip main target, it will be rendered below
+  // Update light shadow camera transforms from light node transforms before rendering shadows
+  resources.update_light_shadow_camera_transforms(&self.resource_manager, self.frame_index)
 
-    record_render_target(
-      &self.render,
-      i,
-      self.frame_index,
-      &self.gpu_context,
-      &self.resource_manager,
-      &self.world,
-      command_buffer,
-      self.swapchain.format.format,
-    ) or_return
-  }
-
-  record_shadow_pass(
+  // Record shadow pass directly into the main command buffer
+  record_camera_visibility(
     &self.render,
     self.frame_index,
     &self.gpu_context,
     &self.resource_manager,
     &self.world,
-    main_render_target,
-  )
+    command_buffer,
+  ) or_return
   record_geometry_pass(
     &self.render,
     self.frame_index,
     &self.gpu_context,
     &self.resource_manager,
     &self.world,
-    main_render_target,
+    main_camera_handle,
   )
   record_lighting_pass(
     &self.render,
     self.frame_index,
     &self.resource_manager,
-    main_render_target,
+    main_camera_handle,
     self.swapchain.format.format,
   )
   record_particles_pass(
     &self.render,
     self.frame_index,
     &self.resource_manager,
-    main_render_target,
+    main_camera_handle,
     self.swapchain.format.format,
   )
   record_transparency_pass(
@@ -634,14 +585,14 @@ render :: proc(self: ^Engine) -> vk.Result {
     &self.gpu_context,
     &self.resource_manager,
     &self.world,
-    main_render_target,
+    main_camera_handle,
     self.swapchain.format.format,
   )
   record_post_process_pass(
     &self.render,
     self.frame_index,
     &self.resource_manager,
-    main_render_target,
+    main_camera_handle,
     self.swapchain.format.format,
     self.swapchain.extent,
     self.swapchain.images[self.swapchain.image_index],
@@ -654,7 +605,6 @@ render :: proc(self: ^Engine) -> vk.Result {
     &self.resource_manager,
   )
   buffers := [?]vk.CommandBuffer{
-    self.render.shadow.commands[self.frame_index],
     self.render.geometry.commands[self.frame_index],
     self.render.lighting.commands[self.frame_index],
     self.render.particles.commands[self.frame_index],

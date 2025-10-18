@@ -1,6 +1,6 @@
 #version 450
 
-layout(location = 0) in vec3 worldPos;
+layout(location = 0) in vec3 fragWorldPos;
 
 struct Camera {
     mat4 view;
@@ -20,11 +20,12 @@ layout(push_constant) uniform PushConstants {
 
 void main() {
     Camera camera = cameras[camera_index];
-    // calculate distance from light center to fragment
     vec3 lightPos = camera.position.xyz;
-    float distance = length(worldPos - lightPos);
+    float linearDepth = length(fragWorldPos - lightPos);
     float near = camera.viewport_params.z;
     float far = camera.viewport_params.w;
-    // Write normalized linear distance directly to depth buffer
-    gl_FragDepth = clamp((distance - near) / (far - near), 0.0, 1.0);
+    // Linear depth mapping: [near, far] -> [0, 1]
+    // Provides uniform precision across entire light radius
+    gl_FragDepth = (linearDepth - near) / (far - near);
+    gl_FragDepth = clamp(gl_FragDepth, 0.0, 1.0);
 }

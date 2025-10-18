@@ -3,6 +3,7 @@
 layout(location = 0) in vec3 inPosition;
 
 layout(location = 0) out vec3 worldPos;
+layout(location = 1) out uint instanceIndex;
 
 struct Camera {
     mat4 view;
@@ -66,12 +67,13 @@ layout(push_constant) uniform PushConstants {
 };
 
 void main() {
-    Camera camera = cameras[camera_index];
     uint node_index = uint(gl_InstanceIndex);
     mat4 world = world_matrices[node_index];
     NodeData node = nodes[node_index];
     MeshData mesh = meshes[node.mesh_id];
     vec4 modelPosition;
+
+    // Handle skeletal animation
     bool is_skinned = (mesh.flags & MESH_FLAG_SKINNED) != 0u &&
                       node.bone_matrix_offset < bones.length();
     if (is_skinned) {
@@ -88,7 +90,11 @@ void main() {
     } else {
         modelPosition = vec4(inPosition, 1.0);
     }
+
     vec4 worldPosition = world * modelPosition;
     worldPos = worldPosition.xyz;
-    gl_Position = camera.projection * camera.view * worldPosition;
+    instanceIndex = node_index;
+
+    // Don't transform to clip space yet - geometry shader will handle projection for each cube face
+    gl_Position = worldPosition;
 }

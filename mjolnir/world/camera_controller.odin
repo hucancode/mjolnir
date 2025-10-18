@@ -1,5 +1,7 @@
-package geometry
+package world
 
+import "../resources"
+import "core:log"
 import "core:math"
 import "core:math/linalg"
 import "vendor:glfw"
@@ -58,18 +60,17 @@ CameraController :: struct {
 }
 
 // Global scroll state for handling GLFW callbacks
-@(private = "file")
+// NOTE: This is accessed by engine.odin to forward scroll events
 g_scroll_deltas: map[glfw.WindowHandle]f32
 
 // Helper to setup scroll callbacks (called once during controller setup)
+// NOTE: This only initializes the scroll deltas map. The actual scroll callback
+// is set by engine.odin to avoid conflicts with other systems (UI, user callbacks).
 setup_camera_controller_callbacks :: proc(window: glfw.WindowHandle) {
-  glfw.SetScrollCallback(
-    window,
-    proc "c" (window: glfw.WindowHandle, xoffset, yoffset: f64) {
-      context = {} // GLFW callback context
-      g_scroll_deltas[window] = f32(yoffset)
-    },
-  )
+  if g_scroll_deltas == nil {
+    g_scroll_deltas = make(map[glfw.WindowHandle]f32)
+  }
+  // Callback is now set by engine.odin, not here
 }
 
 // Helper function for controllers to get and consume scroll delta
@@ -164,14 +165,13 @@ camera_controller_follow_init :: proc(
 // Orbit controller update - self-contained with GLFW input gathering
 camera_controller_orbit_update :: proc(
   self: ^CameraController,
-  camera: ^Camera,
+  camera: ^resources.Camera,
   delta_time: f32,
 ) {
   orbit := &self.data.(OrbitCameraData)
   // Check mouse button state
   left_button_pressed :=
     glfw.GetMouseButton(self.window, glfw.MOUSE_BUTTON_LEFT) == glfw.PRESS
-
   // Handle orbiting state transitions
   if left_button_pressed && !self.is_orbiting {
     // Mouse down - start orbiting
@@ -221,14 +221,14 @@ camera_controller_orbit_update :: proc(
 
     // Position camera at calculated offset from target, looking at target
     camera_position := orbit.target + [3]f32{x, y, z}
-    camera_look_at(camera, camera_position, orbit.target)
+    resources.camera_look_at(camera, camera_position, orbit.target)
   }
 }
 
 // Free camera controller update - self-contained with GLFW input gathering
 camera_controller_free_update :: proc(
   self: ^CameraController,
-  camera: ^Camera,
+  camera: ^resources.Camera,
   delta_time: f32,
 ) {
   free := &self.data.(FreeCameraData)
@@ -240,17 +240,17 @@ camera_controller_free_update :: proc(
     speed *= free.boost_multiplier
   }
   // WASD movement
-  if glfw.GetKey(self.window, glfw.KEY_W) == glfw.PRESS do move_vector += camera_forward(camera^)
-  if glfw.GetKey(self.window, glfw.KEY_S) == glfw.PRESS do move_vector -= camera_forward(camera^)
-  if glfw.GetKey(self.window, glfw.KEY_A) == glfw.PRESS do move_vector -= camera_right(camera^)
-  if glfw.GetKey(self.window, glfw.KEY_D) == glfw.PRESS do move_vector += camera_right(camera^)
+  if glfw.GetKey(self.window, glfw.KEY_W) == glfw.PRESS do move_vector += resources.camera_forward(camera)
+  if glfw.GetKey(self.window, glfw.KEY_S) == glfw.PRESS do move_vector -= resources.camera_forward(camera)
+  if glfw.GetKey(self.window, glfw.KEY_A) == glfw.PRESS do move_vector -= resources.camera_right(camera)
+  if glfw.GetKey(self.window, glfw.KEY_D) == glfw.PRESS do move_vector += resources.camera_right(camera)
   if glfw.GetKey(self.window, glfw.KEY_Q) == glfw.PRESS do move_vector.y -= 1
   if glfw.GetKey(self.window, glfw.KEY_E) == glfw.PRESS do move_vector.y += 1
 
   // Apply movement
   if linalg.length(move_vector) > 0 {
     move_vector = linalg.normalize(move_vector) * speed * delta_time
-    camera_move(camera, move_vector)
+    resources.camera_move(camera, move_vector)
   }
   // Check mouse button state
   right_button_pressed :=
@@ -276,7 +276,7 @@ camera_controller_free_update :: proc(
     self.last_mouse_pos = current_mouse_pos
 
     // Apply rotation
-    camera_rotate(
+    resources.camera_rotate(
       camera,
       f32(self.mouse_delta.x) * free.mouse_sensitivity,
       f32(self.mouse_delta.y) * free.mouse_sensitivity,
@@ -287,7 +287,7 @@ camera_controller_free_update :: proc(
 // Follow camera controller update - self-contained
 camera_controller_follow_update :: proc(
   self: ^CameraController,
-  camera: ^Camera,
+  camera: ^resources.Camera,
   delta_time: f32,
 ) {
   follow := &self.data.(FollowCameraData)
@@ -305,9 +305,9 @@ camera_controller_follow_update :: proc(
     )
 
     if follow.look_at_target {
-      camera_look_at(camera, new_pos, target_pos)
+      resources.camera_look_at(camera, new_pos, target_pos)
     } else {
-      camera_set_position(camera, new_pos)
+      resources.camera_set_position(camera, new_pos)
     }
   }
 }
@@ -315,7 +315,7 @@ camera_controller_follow_update :: proc(
 // Sync current camera state to orbit controller to prevent jumps
 camera_controller_orbit_sync :: proc(
   controller: ^CameraController,
-  camera: ^Camera,
+  camera: ^resources.Camera,
 ) {
   if orbit, ok := &controller.data.(OrbitCameraData); ok {
     // Calculate spherical coordinates from current camera position relative to target
@@ -345,7 +345,7 @@ camera_controller_orbit_sync :: proc(
       y := orbit.distance * math.sin(orbit.pitch)
       z := orbit.distance * math.cos(orbit.pitch) * math.sin(orbit.yaw)
       camera_position := orbit.target + [3]f32{x, y, z}
-      camera_look_at(camera, camera_position, orbit.target)
+      resources.camera_look_at(camera, camera_position, orbit.target)
     }
   }
 }
@@ -353,7 +353,7 @@ camera_controller_orbit_sync :: proc(
 // Sync current camera state to free controller (free camera stores position/rotation directly in Camera)
 camera_controller_free_sync :: proc(
   controller: ^CameraController,
-  camera: ^Camera,
+  camera: ^resources.Camera,
 ) {
   // Free camera controller doesn't need explicit syncing since it directly modifies
   // the camera's position and rotation. The camera object already contains the current state.
@@ -363,7 +363,7 @@ camera_controller_free_sync :: proc(
 // Generic sync procedure that works with any controller type
 camera_controller_sync :: proc(
   controller: ^CameraController,
-  camera: ^Camera,
+  camera: ^resources.Camera,
 ) {
   switch controller.type {
   case .ORBIT:

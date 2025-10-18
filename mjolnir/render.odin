@@ -12,43 +12,13 @@ import "render/lighting"
 import navigation_renderer "render/navigation"
 import "render/particles"
 import "render/post_process"
-import "render/shadow"
-import "render/targets"
 import "render/text"
 import "render/transparency"
 import "resources"
 import vk "vendor:vulkan"
 import "world"
 
-// These are direct indices into the visibility tasks array
-// Main render target
-RENDER_TARGET_ID_MAIN :: 0
-
-// TODO: find a way to eliminate static render target allocation
-SHADOW_RENDER_TARGET_COUNT :: 8 // TODO: find a way to raise this
-RENDER_TARGET_ID_SHADOW_START :: 1
-RENDER_TARGET_ID_SHADOW_END :: RENDER_TARGET_ID_SHADOW_START + SHADOW_RENDER_TARGET_COUNT
-
-// Custom user render targets start after shadows
-RENDER_TARGET_ID_CUSTOM_START :: RENDER_TARGET_ID_SHADOW_END
-
-// Total visibility tasks to allocate (1 main + 8 shadows + 2 custom = 11)
-// This is a reasonable default that can be increased if needed
-TOTAL_VISIBILITY_TASKS :: RENDER_TARGET_ID_CUSTOM_START + 2
-
-ShadowSlot :: struct {
-  depth_texture_2d:    resources.Handle, // 2D depth texture for spot/directional
-  depth_texture_cube:  resources.Handle, // Cube depth texture for point
-  render_target:       targets.RenderTarget, // For spot/directional
-  cube_render_targets: [6]targets.RenderTarget, // For point lights
-  light_handle:        resources.Handle, // Light currently using this slot
-  is_cube:             bool, // True if this is a cube shadow slot
-  last_rendered_frame: u64, // Frame number when last rendered
-  needs_render:        bool, // True if shadow needs to be rendered this frame
-}
-
 Renderer :: struct {
-  shadow:                     shadow.Renderer,
   geometry:                   geometry_pass.Renderer,
   lighting:                   lighting.Renderer,
   transparency:               transparency.Renderer,
@@ -57,11 +27,7 @@ Renderer :: struct {
   post_process:               post_process.Renderer,
   text:                       text.Renderer,
   ui:                         debug_ui.Renderer,
-  main_render_target_index:   int,
-  render_targets:             [dynamic]targets.RenderTarget,
-  primary_command_buffers:    [resources.MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
-  shadow_slots:               [resources.MAX_SHADOW_MAPS]ShadowSlot,
-  frame_counter:              u64,
+  main_camera:                resources.Handle, // Main camera for rendering
 }
 
 renderer_init :: proc(
@@ -70,9 +36,34 @@ renderer_init :: proc(
   resources_manager: ^resources.Manager,
   swapchain_extent: vk.Extent2D,
   swapchain_format: vk.Format,
-  main_render_target: resources.Handle,
   dpi_scale: f32,
 ) -> vk.Result {
+  main_camera_handle, main_camera_ptr, main_camera_ok := resources.alloc(&resources_manager.cameras)
+  if !main_camera_ok {
+    log.error("Failed to allocate main camera")
+    return .ERROR_INITIALIZATION_FAILED
+  }
+  init_result := resources.camera_init(
+    main_camera_ptr,
+    gpu_context,
+    resources_manager,
+    swapchain_extent.width,
+    swapchain_extent.height,
+    swapchain_format,
+    .D32_SFLOAT,
+    {.SHADOW, .GEOMETRY, .LIGHTING, .TRANSPARENCY, .PARTICLES, .POST_PROCESS},
+    {10, 16, 10}, // Camera slightly above and diagonal to origin
+    {0, 0, 0}, // Looking at origin
+    math.PI * 0.5, // FOV
+    0.1, // near plane
+    100.0, // far plane
+  )
+  if init_result != .SUCCESS {
+    log.error("Failed to initialize main camera")
+    resources.free(&resources_manager.cameras, main_camera_handle)
+    return .ERROR_INITIALIZATION_FAILED
+  }
+  self.main_camera = main_camera_handle
   lighting.init(
     &self.lighting,
     gpu_context,
@@ -97,7 +88,6 @@ renderer_init :: proc(
     swapchain_extent.height,
     resources_manager,
   ) or_return
-  shadow.init(&self.shadow, gpu_context, resources_manager) or_return
   post_process.init(
     &self.post_process,
     gpu_context,
@@ -129,128 +119,6 @@ renderer_init :: proc(
     resources_manager,
   ) or_return
 
-  self.main_render_target_index = -1
-  self.render_targets = make([dynamic]targets.RenderTarget, 0)
-
-  alloc_info := vk.CommandBufferAllocateInfo {
-    sType              = .COMMAND_BUFFER_ALLOCATE_INFO,
-    commandPool        = gpu_context.command_pool,
-    level              = .PRIMARY,
-    commandBufferCount = resources.MAX_FRAMES_IN_FLIGHT,
-  }
-
-  vk.AllocateCommandBuffers(
-    gpu_context.device,
-    &alloc_info,
-    raw_data(self.primary_command_buffers[:]),
-  ) or_return
-
-  // Initialize shadow pool
-  renderer_init_shadow_pool(self, gpu_context, resources_manager) or_return
-  self.frame_counter = 0
-  return .SUCCESS
-}
-
-renderer_init_shadow_pool :: proc(
-  self: ^Renderer,
-  gpu_context: ^gpu.GPUContext,
-  resources_manager: ^resources.Manager,
-) -> vk.Result {
-  for i in 0 ..< resources.MAX_SHADOW_MAPS {
-    slot := &self.shadow_slots[i]
-
-    // Create 2D depth texture for spot/directional lights
-    depth_2d, _, result := resources.create_empty_texture_2d(
-      gpu_context,
-      resources_manager,
-      resources.SHADOW_MAP_SIZE,
-      resources.SHADOW_MAP_SIZE,
-      .D32_SFLOAT,
-      {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
-    )
-    if result != .SUCCESS {
-      log.errorf("Failed to create 2D shadow map for slot %d", i)
-      return result
-    }
-    slot.depth_texture_2d = depth_2d
-
-    // Create cube depth texture for point lights
-    depth_cube, _, result_cube := resources.create_empty_texture_cube(
-      gpu_context,
-      resources_manager,
-      resources.SHADOW_MAP_SIZE,
-      .D32_SFLOAT,
-      {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
-    )
-    if result_cube != .SUCCESS {
-      log.errorf("Failed to create cube shadow map for slot %d", i)
-      return result_cube
-    }
-    slot.depth_texture_cube = depth_cube
-
-    // Create render target for 2D shadows (spot/directional)
-    external_depth: [resources.MAX_FRAMES_IN_FLIGHT]resources.Handle
-    for j in 0 ..< resources.MAX_FRAMES_IN_FLIGHT do external_depth[j] = depth_2d
-
-    init_result := targets.render_target_init(
-      &slot.render_target,
-      gpu_context,
-      resources_manager,
-      resources.SHADOW_MAP_SIZE,
-      resources.SHADOW_MAP_SIZE,
-      .D32_SFLOAT,
-      .D32_SFLOAT,
-      enabled_passes = {.SHADOW},
-      external_depth_textures = external_depth,
-    )
-    if init_result != .SUCCESS {
-      log.errorf("Failed to create render target for slot %d", i)
-      return init_result
-    }
-    // Assign IDs cyclically within the shadow range
-    slot.render_target.render_target_id = RENDER_TARGET_ID_SHADOW_START + u32(i % SHADOW_RENDER_TARGET_COUNT)
-
-    // Create 6 render targets for cube shadows (point lights)
-    external_cube_depth: [resources.MAX_FRAMES_IN_FLIGHT]resources.Handle
-    for j in 0 ..< resources.MAX_FRAMES_IN_FLIGHT do external_cube_depth[j] = depth_cube
-
-    for face in 0 ..< 6 {
-      init_result_cube := targets.render_target_init(
-        &slot.cube_render_targets[face],
-        gpu_context,
-        resources_manager,
-        resources.SHADOW_MAP_SIZE,
-        resources.SHADOW_MAP_SIZE,
-        .D32_SFLOAT,
-        .D32_SFLOAT,
-        enabled_passes = {.SHADOW},
-        external_depth_textures = external_cube_depth,
-      )
-      if init_result_cube != .SUCCESS {
-        log.errorf("Failed to create cube render target for slot %d face %d", i, face)
-        return init_result_cube
-      }
-
-      // Each cube face shares the same render target ID as the slot
-      // Multiple shadow maps can share visibility tasks since they render sequentially
-      slot.cube_render_targets[face].render_target_id = RENDER_TARGET_ID_SHADOW_START + u32(i % SHADOW_RENDER_TARGET_COUNT)
-
-      // Set cube face camera to 90 degree FOV
-      camera, camera_ok := resources.get_camera(
-        resources_manager,
-        slot.cube_render_targets[face].camera,
-      )
-      if camera_ok {
-        camera^ = geometry.make_camera_perspective(math.PI * 0.5, 1.0, 0.1, 100.0)
-      }
-    }
-
-    slot.light_handle = {}
-    slot.is_cube = false
-    slot.last_rendered_frame = 0
-    slot.needs_render = false
-  }
-
   return .SUCCESS
 }
 
@@ -260,47 +128,6 @@ renderer_shutdown :: proc(
   command_pool: vk.CommandPool,
   resources_manager: ^resources.Manager,
 ) {
-  vk.FreeCommandBuffers(
-    device,
-    command_pool,
-    resources.MAX_FRAMES_IN_FLIGHT,
-    raw_data(self.primary_command_buffers[:]),
-  )
-  self.primary_command_buffers = {}
-
-  // Clean up shadow pool
-  for i in 0 ..< resources.MAX_SHADOW_MAPS {
-    slot := &self.shadow_slots[i]
-
-    // Destroy render targets
-    targets.render_target_destroy(&slot.render_target, device, command_pool, resources_manager)
-    for face in 0 ..< 6 {
-      targets.render_target_destroy(&slot.cube_render_targets[face], device, command_pool, resources_manager)
-    }
-
-    // Free depth textures
-    if slot.depth_texture_2d.generation > 0 {
-      if item, freed := resources.free(&resources_manager.image_2d_buffers, slot.depth_texture_2d); freed {
-        gpu.image_buffer_destroy(device, item)
-      }
-    }
-    if slot.depth_texture_cube.generation > 0 {
-      if item, freed := resources.free(&resources_manager.image_cube_buffers, slot.depth_texture_cube); freed {
-        gpu.cube_depth_texture_destroy(device, item)
-      }
-    }
-  }
-
-  for &capture in self.render_targets {
-    targets.render_target_destroy(
-      &capture,
-      device,
-      command_pool,
-      resources_manager,
-    )
-  }
-  delete(self.render_targets)
-
   debug_ui.shutdown(&self.ui, device)
   text.shutdown(&self.text, device)
   navigation_renderer.shutdown(&self.navigation, device, command_pool)
@@ -314,7 +141,6 @@ renderer_shutdown :: proc(
   transparency.shutdown(&self.transparency, device, command_pool)
   lighting.shutdown(&self.lighting, device, command_pool, resources_manager)
   geometry_pass.shutdown(&self.geometry, device, command_pool)
-  shadow.shutdown(&self.shadow, device, command_pool)
 }
 
 resize :: proc(
@@ -351,403 +177,62 @@ resize :: proc(
   return .SUCCESS
 }
 
-LightImportance :: struct {
-  importance:   f32,
-  light_handle: resources.Handle,
-  light_type:   resources.LightType,
-}
-
-renderer_assign_shadow_slots :: proc(
-  self: ^Renderer,
-  resources_manager: ^resources.Manager,
-  main_camera: ^geometry.Camera,
-) {
-  // Calculate importance for all shadow-casting lights
-  light_importances := make([dynamic]LightImportance, 0, len(resources_manager.lights.entries))
-  defer delete(light_importances)
-  for entry, idx in resources_manager.lights.entries do if entry.active {
-    light := entry.item
-    if !light.cast_shadow do continue
-    // Get light position from world matrix
-    world_matrix := gpu.staged_buffer_get(&resources_manager.world_matrix_buffer, light.node_handle.index)
-    light_position := world_matrix[3].xyz
-    // Calculate distance to main camera
-    distance := max(1.0, linalg.length2(light_position - main_camera.position))
-    importance: f32 = 1000000.0
-    if light.type != .DIRECTIONAL {
-      volume := light.radius * light.radius
-      importance = volume / distance / distance
-    }
-    light_handle := resources.Handle{index = u32(idx), generation = entry.generation}
-    append(&light_importances, LightImportance{importance, light_handle, light.type})
-  }
-  slice.sort_by(light_importances[:], proc(a, b: LightImportance) -> bool {
-    return a.importance > b.importance
-  })
-  // First pass: Determine which lights keep their slots and which are evicted
-  top_count := min(len(light_importances), resources.MAX_SHADOW_MAPS)
-  top_lights := light_importances[:top_count]
-  // Mark slots that should be retained
-  slots_to_keep := [resources.MAX_SHADOW_MAPS]bool{}
-  lights_needing_slots := make([dynamic]LightImportance, 0, top_count)
-  defer delete(lights_needing_slots)
-  importance_ranks := map[resources.Handle]int{}
-  defer delete(importance_ranks)
-  for light_importance, idx in light_importances {
-    importance_ranks[light_importance.light_handle] = idx
-  }
-  for light_importance in top_lights {
-    light, ok := resources.get_light(resources_manager, light_importance.light_handle)
-    if !ok do continue
-    // Check if this light already has a slot assigned
-    if light.shadow_slot_index >= 0 && light.shadow_slot_index < resources.MAX_SHADOW_MAPS {
-      // This light keeps its slot
-      slots_to_keep[light.shadow_slot_index] = true
-    } else {
-      // This light needs a new slot
-      append(&lights_needing_slots, light_importance)
-    }
-  }
-  // shadow that are previously in the top list must drop out of top 120% in order to be evicted
-  // otherwise, they stay in the current slot
-  extended_limit := 0
-  if len(light_importances) > 0 {
-    extended_limit = (int(resources.MAX_SHADOW_MAPS) * 6 + 4) / 5 // ceil(MAX_SHADOW_MAPS * 1.2)
-    if extended_limit < top_count {
-      extended_limit = top_count
-    }
-    if extended_limit > len(light_importances) {
-      extended_limit = len(light_importances)
-    }
-  }
-  if extended_limit > top_count {
-    for slot_idx in 0 ..< resources.MAX_SHADOW_MAPS {
-      if slots_to_keep[slot_idx] do continue
-
-      slot := &self.shadow_slots[slot_idx]
-      if slot.light_handle.generation == 0 do continue
-
-      if rank, found := importance_ranks[slot.light_handle]; found && rank < extended_limit {
-        slots_to_keep[slot_idx] = true
-      }
-    }
-  }
-
-  // Evict lights that are no longer in the top list
-  for slot_idx in 0 ..< resources.MAX_SHADOW_MAPS {
-    if slots_to_keep[slot_idx] do continue
-
-    slot := &self.shadow_slots[slot_idx]
-    if slot.light_handle.generation > 0 {
-      // Evict this light
-      if old_light, ok := resources.get_light(resources_manager, slot.light_handle); ok {
-        old_light.shadow_slot_index = -1
-        old_light.shadow_map = 0xFFFFFFFF
-        gpu.write(&resources_manager.lights_buffer, &old_light.data, int(slot.light_handle.index))
-      }
-      slot.light_handle = {}
-      slot.needs_render = false
-    }
-  }
-
-  // Second pass: Assign vacant slots to newly promoted lights
-  for light_importance in lights_needing_slots {
-    light, ok := resources.get_light(resources_manager, light_importance.light_handle)
-    if !ok do continue
-
-    // Find a vacant slot
-    vacant_slot_idx := -1
-    for slot_idx in 0 ..< resources.MAX_SHADOW_MAPS {
-      if self.shadow_slots[slot_idx].light_handle.generation == 0 {
-        vacant_slot_idx = slot_idx
-        break
-      }
-    }
-
-    if vacant_slot_idx < 0 do continue // No vacant slots
-
-    slot := &self.shadow_slots[vacant_slot_idx]
-    is_point := light.type == .POINT
-
-    slot.is_cube = is_point
-    slot.light_handle = light_importance.light_handle
-    slot.needs_render = true // New assignment always needs render
-    light.shadow_slot_index = vacant_slot_idx
-
-    // Set shadow map index and camera index
-    if is_point {
-      light.shadow_map = slot.depth_texture_cube.index
-      light.camera_index = slot.cube_render_targets[0].camera.index
-    } else {
-      light.shadow_map = slot.depth_texture_2d.index
-      light.camera_index = slot.render_target.camera.index
-    }
-
-    gpu.write(&resources_manager.lights_buffer, &light.data, int(light_importance.light_handle.index))
-  }
-
-  // Update needs_render flag for lights that kept their slots
-  for slot_idx in 0 ..< resources.MAX_SHADOW_MAPS {
-    if !slots_to_keep[slot_idx] do continue
-
-    slot := &self.shadow_slots[slot_idx]
-    if slot.light_handle.generation == 0 do continue
-
-    light, ok := resources.get_light(resources_manager, slot.light_handle)
-    if !ok do continue
-
-    // Only re-render if light has moved
-    slot.needs_render = light.has_moved
-  }
-  for entry, idx in resources_manager.lights.entries do if entry.active {
-    light := entry.item
-    if light.cast_shadow && light.shadow_slot_index == -1 {
-      light.shadow_map = 0xFFFFFFFF
-      gpu.write(&resources_manager.lights_buffer, &light.data, int(idx))
-    }
-  }
-}
-
-renderer_check_light_movement :: proc(
-  self: ^Renderer,
-  resources_manager: ^resources.Manager,
-) {
-  for entry, idx in resources_manager.lights.entries do if entry.active {
-    light := entry.item
-    if !light.cast_shadow do continue
-    world_matrix := gpu.staged_buffer_get(&resources_manager.world_matrix_buffer, light.node_handle.index)
-    // Check if matrix changed (simple element-wise comparison)
-    has_moved := false
-    for i in 0 ..< 4 {
-      for j in 0 ..< 4 {
-        if linalg.abs(world_matrix[i][j] - light.last_world_matrix[i][j]) > 0.001 {
-          has_moved = true
-          break
-        }
-      }
-      if has_moved do break
-    }
-
-    light.has_moved = has_moved
-    if has_moved {
-      light.last_world_matrix = world_matrix^
-    }
-  }
-}
-
-record_shadow_pass :: proc(
+// Records shadow pass commands directly into the provided command buffer
+record_camera_visibility :: proc(
   self: ^Renderer,
   frame_index: u32,
   gpu_context: ^gpu.GPUContext,
   resources_manager: ^resources.Manager,
   world_state: ^world.World,
-  target: ^targets.RenderTarget,
+  command_buffer: vk.CommandBuffer,
 ) -> vk.Result {
-  main_camera, camera_ok := resources.get_camera(resources_manager, target.camera)
-  if !camera_ok {
-    log.errorf("Main camera not found")
-    return .ERROR_UNKNOWN
+  // Iterate through all regular cameras with shadow pass enabled
+  for &entry, cam_index in resources_manager.cameras.entries {
+    if !entry.active do continue
+    if resources.PassType.SHADOW not_in entry.item.enabled_passes do continue
+
+    cam := &entry.item
+
+    // Upload camera data to GPU buffer
+    resources.camera_upload_data(resources_manager, cam, u32(cam_index))
+
+    // Dispatch visibility - records compute culling + depth rendering
+    world.visibility_system_dispatch(
+      &world_state.visibility,
+      gpu_context,
+      command_buffer,
+      cam,
+      u32(cam_index),
+      frame_index,
+      {.VISIBLE},
+      {.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME},
+      resources_manager,
+    )
   }
 
-  // Check which lights have moved
-  renderer_check_light_movement(self, resources_manager)
+  // Iterate through all spherical cameras (all have shadow pass by design)
+  for &entry, cam_index in resources_manager.spherical_cameras.entries {
+    if !entry.active do continue
 
-  // Assign shadow slots based on importance
-  renderer_assign_shadow_slots(self, resources_manager, main_camera)
+    spherical_cam := &entry.item
 
-  command_buffer := shadow.begin_record(&self.shadow, frame_index) or_return
+    // Upload camera data to GPU buffer
+    resources.spherical_camera_upload_data(resources_manager, spherical_cam, u32(cam_index))
 
-  world_matrix_barrier := vk.BufferMemoryBarrier {
-    sType               = .BUFFER_MEMORY_BARRIER,
-    srcAccessMask       = {.TRANSFER_WRITE},
-    dstAccessMask       = {.SHADER_READ, .UNIFORM_READ},
-    srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-    dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-    buffer              = resources_manager.world_matrix_buffer.device_buffer,
-    offset              = 0,
-    size                = vk.DeviceSize(vk.WHOLE_SIZE),
+    // Dispatch visibility - records compute culling + depth rendering
+    world.visibility_system_dispatch_spherical(
+      &world_state.visibility,
+      gpu_context,
+      command_buffer,
+      spherical_cam,
+      u32(cam_index),
+      {.VISIBLE},
+      {.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME},
+      resources_manager,
+    )
   }
 
-  vk.CmdPipelineBarrier(
-    command_buffer,
-    {.TRANSFER},
-    {.VERTEX_SHADER},
-    {},
-    0,
-    nil,
-    1,
-    &world_matrix_barrier,
-    0,
-    nil,
-  )
-
-  shadow_include := resources.NodeFlagSet{.VISIBLE, .CASTS_SHADOW}
-  shadow_exclude := resources.NodeFlagSet{.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME}
-  command_stride := world.draw_command_stride()
-
-  // Render shadows for assigned slots
-  rendered_count := 0
-  for slot_idx in 0 ..< resources.MAX_SHADOW_MAPS {
-    slot := &self.shadow_slots[slot_idx]
-    if slot.light_handle.generation == 0 do continue
-
-    light, ok := resources.get_light(resources_manager, slot.light_handle)
-    if !ok do continue
-
-    // Skip rendering if shadow doesn't need update
-    if !slot.needs_render do continue
-
-    // Update shadow cameras
-    renderer_update_shadow_camera_for_light(self, resources_manager, slot, light)
-
-    rendered_count += 1
-    slot.last_rendered_frame = self.frame_counter
-
-    switch light.type {
-    case .POINT:
-      for face in 0 ..< 6 {
-        render_target := &slot.cube_render_targets[face]
-        vis_result := world.dispatch_visibility(
-          world_state,
-          gpu_context,
-          command_buffer,
-          frame_index,
-          render_target.render_target_id,
-          world.VisibilityRequest {
-            camera_index = render_target.camera.index,
-            include_flags = shadow_include,
-            exclude_flags = shadow_exclude,
-          },
-          resources_manager,
-        )
-        shadow.begin_pass(render_target, command_buffer, resources_manager, frame_index, u32(face))
-        shadow.render(
-          &self.shadow,
-          render_target^,
-          command_buffer,
-          resources_manager,
-          frame_index,
-          vis_result.draw_buffer,
-          vis_result.count_buffer,
-          command_stride,
-        )
-        shadow.end_pass(command_buffer, render_target, resources_manager, frame_index, u32(face))
-      }
-
-    case .SPOT, .DIRECTIONAL:
-      render_target := &slot.render_target
-      vis_result := world.dispatch_visibility(
-        world_state,
-        gpu_context,
-        command_buffer,
-        frame_index,
-        render_target.render_target_id,
-        world.VisibilityRequest {
-          camera_index = render_target.camera.index,
-          include_flags = shadow_include,
-          exclude_flags = shadow_exclude,
-        },
-        resources_manager,
-      )
-      shadow.begin_pass(render_target, command_buffer, resources_manager, frame_index)
-      shadow.render(
-        &self.shadow,
-        render_target^,
-        command_buffer,
-        resources_manager,
-        frame_index,
-        vis_result.draw_buffer,
-        vis_result.count_buffer,
-        command_stride,
-      )
-      shadow.end_pass(command_buffer, render_target, resources_manager, frame_index)
-    }
-  }
-
-  shadow.end_record(command_buffer) or_return
-  self.frame_counter += 1
   return .SUCCESS
-}
-
-renderer_update_shadow_camera_for_light :: proc(
-  self: ^Renderer,
-  resources_manager: ^resources.Manager,
-  slot: ^ShadowSlot,
-  light: ^resources.Light,
-) {
-  world_matrix := gpu.staged_buffer_get(&resources_manager.world_matrix_buffer, light.node_handle.index)
-  position := world_matrix[3].xyz
-
-  switch light.type {
-  case .POINT:
-    dirs := [6][3]f32{{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}}
-    ups := [6][3]f32{{0, -1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}, {0, -1, 0}, {0, -1, 0}}
-
-    for face in 0 ..< 6 {
-      render_target := &slot.cube_render_targets[face]
-      camera, camera_ok := resources.get_camera(resources_manager, render_target.camera)
-      if !camera_ok do continue
-
-      // Update camera far plane to match light radius
-      if perspective, ok := &camera.projection.(geometry.PerspectiveProjection); ok {
-        perspective.far = light.radius
-      }
-
-      target := position + dirs[face]
-      geometry.camera_look_at(camera, position, target, ups[face])
-      targets.render_target_upload_camera_data(resources_manager, render_target)
-    }
-
-  case .SPOT:
-    render_target := &slot.render_target
-    camera, camera_ok := resources.get_camera(resources_manager, render_target.camera)
-    if !camera_ok do return
-
-    // Update camera to match spot light parameters
-    if perspective, ok := &camera.projection.(geometry.PerspectiveProjection); ok {
-      perspective.fov = light.angle_outer * 2.0
-      perspective.far = light.radius
-    }
-
-    forward := world_matrix[2].xyz
-    target := position + forward
-    up := [3]f32{0, 1, 0}
-    if linalg.abs(linalg.dot(forward, up)) > 0.99 {
-      up = {1, 0, 0}
-    }
-
-    geometry.camera_look_at(camera, position, target, up)
-    targets.render_target_upload_camera_data(resources_manager, render_target)
-
-  case .DIRECTIONAL:
-    render_target := &slot.render_target
-    camera, camera_ok := resources.get_camera(resources_manager, render_target.camera)
-    if !camera_ok do return
-
-    light_dir := linalg.normalize(world_matrix[2].xyz)
-    scene_center := [3]f32{0, 0, 0}
-    scene_radius: f32 = 50.0
-
-    if ortho, ok := &camera.projection.(geometry.OrthographicProjection); ok {
-      ortho_size := scene_radius * 1.5
-      ortho.width = ortho_size
-      ortho.height = ortho_size
-      ortho.near = 0.1
-      ortho.far = scene_radius * 3.0
-    }
-
-    shadow_distance := scene_radius * 2.0
-    cam_position := scene_center - light_dir * shadow_distance
-    target := scene_center
-
-    up := [3]f32{0, 1, 0}
-    if linalg.abs(linalg.dot(light_dir, up)) > 0.99 {
-      up = {1, 0, 0}
-    }
-
-    geometry.camera_look_at(camera, cam_position, target, up)
-    targets.render_target_upload_camera_data(resources_manager, render_target)
-  }
 }
 
 record_geometry_pass :: proc(
@@ -756,55 +241,87 @@ record_geometry_pass :: proc(
   gpu_context: ^gpu.GPUContext,
   resources_manager: ^resources.Manager,
   world_state: ^world.World,
-  target: ^targets.RenderTarget,
+  camera_handle: resources.Handle,
 ) -> vk.Result {
   command_buffer := geometry_pass.begin_record(
     &self.geometry,
     frame_index,
-    target,
+    camera_handle,
     resources_manager,
   ) or_return
-  vis_result := world.dispatch_visibility(
-    world_state,
+
+  // Get camera pointer for visibility dispatch
+  camera, camera_ok := resources.get_camera(resources_manager, camera_handle)
+  if !camera_ok {
+    log.error("Failed to get camera for geometry pass")
+    return .ERROR_UNKNOWN
+  }
+
+  // STEP 1: Execute culling pass (late pass) - writes draw list
+  world.visibility_system_dispatch_culling(
+    &world_state.visibility,
     gpu_context,
     command_buffer,
+    camera,
+    camera_handle.index,
     frame_index,
-    target.render_target_id,
-    world.VisibilityRequest {
-      camera_index = target.camera.index,
-      include_flags = {.VISIBLE},
-      exclude_flags = {.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME},
-    },
+    {.VISIBLE},
+    {.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME},
     resources_manager,
   )
-  draw_buffer := vis_result.draw_buffer
-  count_buffer := vis_result.count_buffer
-  command_stride := vis_result.command_stride
+
+  // STEP 2: Render depth - reads draw list, writes depth[N]
+  world.visibility_system_dispatch_depth(
+    &world_state.visibility,
+    gpu_context,
+    command_buffer,
+    camera,
+    camera_handle.index,
+    frame_index,
+    {.VISIBLE},
+    {.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME},
+    resources_manager,
+  )
+
+  // STEP 3: Build pyramid - reads depth[N], builds pyramid[N]
+  world.visibility_system_dispatch_pyramid(
+    &world_state.visibility,
+    gpu_context,
+    command_buffer,
+    camera,
+    camera_handle.index,
+    frame_index,
+    resources_manager,
+  )
+
+  // STEP 4: Render geometry color - reads draw list, reads depth[N] for depth testing
+  command_stride := u32(size_of(vk.DrawIndexedIndirectCommand))
   geometry_pass.begin_pass(
-    target,
+    camera_handle,
     command_buffer,
     resources_manager,
     frame_index,
   )
   geometry_pass.render(
     &self.geometry,
-    target,
+    camera_handle,
     command_buffer,
     resources_manager,
     frame_index,
-    draw_buffer,
-    count_buffer,
+    camera.late_draw_commands[frame_index].buffer,
+    camera.late_draw_count[frame_index].buffer,
     command_stride,
   )
   geometry_pass.end_pass(
-    target,
+    camera_handle,
     command_buffer,
     resources_manager,
     frame_index,
   )
+
   geometry_pass.end_record(
     command_buffer,
-    target,
+    camera_handle,
     resources_manager,
     frame_index,
   ) or_return
@@ -815,7 +332,7 @@ record_lighting_pass :: proc(
   self: ^Renderer,
   frame_index: u32,
   resources_manager: ^resources.Manager,
-  target: ^targets.RenderTarget,
+  camera_handle: resources.Handle,
   color_format: vk.Format,
 ) -> vk.Result {
   command_buffer := lighting.begin_record(
@@ -825,14 +342,14 @@ record_lighting_pass :: proc(
   ) or_return
   lighting.begin_ambient_pass(
     &self.lighting,
-    target,
+    camera_handle,
     command_buffer,
     resources_manager,
     frame_index,
   )
   lighting.render_ambient(
     &self.lighting,
-    target,
+    camera_handle,
     command_buffer,
     resources_manager,
     frame_index,
@@ -840,14 +357,14 @@ record_lighting_pass :: proc(
   lighting.end_ambient_pass(command_buffer)
   lighting.begin_pass(
     &self.lighting,
-    target,
+    camera_handle,
     command_buffer,
     resources_manager,
     frame_index,
   )
   lighting.render(
     &self.lighting,
-    target,
+    camera_handle,
     command_buffer,
     resources_manager,
     frame_index,
@@ -861,7 +378,7 @@ record_particles_pass :: proc(
   self: ^Renderer,
   frame_index: u32,
   resources_manager: ^resources.Manager,
-  target: ^targets.RenderTarget,
+  camera_handle: resources.Handle,
   color_format: vk.Format,
 ) -> vk.Result {
   command_buffer := particles.begin_record(
@@ -872,14 +389,14 @@ record_particles_pass :: proc(
   particles.begin_pass(
     &self.particles,
     command_buffer,
-    target,
+    camera_handle,
     resources_manager,
     frame_index,
   )
   particles.render(
     &self.particles,
     command_buffer,
-    target.camera.index,
+    camera_handle.index,
     resources_manager,
   )
   particles.end_pass(command_buffer)
@@ -887,13 +404,14 @@ record_particles_pass :: proc(
   return .SUCCESS
 }
 
+// TODO: we need a better design for transparency pass, skip for now
 record_transparency_pass :: proc(
   self: ^Renderer,
   frame_index: u32,
   gpu_context: ^gpu.GPUContext,
   resources_manager: ^resources.Manager,
   world_state: ^world.World,
-  target: ^targets.RenderTarget,
+  camera_handle: resources.Handle,
   color_format: vk.Format,
 ) -> vk.Result {
   command_buffer := transparency.begin_record(
@@ -903,7 +421,7 @@ record_transparency_pass :: proc(
   ) or_return
   transparency.begin_pass(
     &self.transparency,
-    target,
+    camera_handle,
     command_buffer,
     resources_manager,
     frame_index,
@@ -912,58 +430,65 @@ record_transparency_pass :: proc(
     &self.navigation,
     command_buffer,
     linalg.MATRIX4F32_IDENTITY,
-    target.camera.index,
+    camera_handle.index,
     resources_manager,
   )
-  vis_transparent := world.dispatch_visibility(
-    world_state,
-    gpu_context,
-    command_buffer,
-    frame_index,
-    target.render_target_id + 1, // Use next slot for transparent pass
-    world.VisibilityRequest {
-      camera_index = target.camera.index,
-      include_flags = {.VISIBLE, .MATERIAL_TRANSPARENT},
-      exclude_flags = {},
-    },
-    resources_manager,
-  )
-  command_stride := vis_transparent.command_stride
-  transparency.render(
-    &self.transparency,
-    self.transparency.transparent_pipeline,
-    target,
-    command_buffer,
-    resources_manager,
-    frame_index,
-    vis_transparent.draw_buffer,
-    vis_transparent.count_buffer,
-    command_stride,
-  )
-  vis_wireframe := world.dispatch_visibility(
-    world_state,
-    gpu_context,
-    command_buffer,
-    frame_index,
-    target.render_target_id + 2, // Use another slot for wireframe pass
-    world.VisibilityRequest {
-      camera_index = target.camera.index,
-      include_flags = {.VISIBLE, .MATERIAL_WIREFRAME},
-      exclude_flags = {},
-    },
-    resources_manager,
-  )
-  transparency.render(
-    &self.transparency,
-    self.transparency.wireframe_pipeline,
-    target,
-    command_buffer,
-    resources_manager,
-    frame_index,
-    vis_wireframe.draw_buffer,
-    vis_wireframe.count_buffer,
-    command_stride,
-  )
+
+  // Get camera pointer for visibility dispatch
+  camera, camera_ok := resources.get_camera(resources_manager, camera_handle)
+  if !camera_ok {
+    log.error("Failed to get camera for transparency pass")
+    return .ERROR_UNKNOWN
+  }
+
+  // Cull transparent objects (depth already rendered in geometry pass)
+  // world.visibility_system_dispatch_culling(
+  //   &world_state.visibility,
+  //   gpu_context,
+  //   command_buffer,
+  //   camera,
+  //   camera_handle.index,
+  //   frame_index,
+  //   {.VISIBLE, .MATERIAL_TRANSPARENT},
+  //   {},
+  //   resources_manager,
+  // )
+  command_stride := u32(size_of(vk.DrawIndexedIndirectCommand))
+  // transparency.render(
+  //   &self.transparency,
+  //   self.transparency.transparent_pipeline,
+  //   camera_handle,
+  //   command_buffer,
+  //   resources_manager,
+  //   frame_index,
+  //   camera.late_draw_commands[frame_index].buffer,
+  //   camera.late_draw_count[frame_index].buffer,
+  //   command_stride,
+  // )
+
+  // Cull wireframe objects
+  // world.visibility_system_dispatch_culling(
+  //   &world_state.visibility,
+  //   gpu_context,
+  //   command_buffer,
+  //   camera,
+  //   camera_handle.index,
+  //   frame_index,
+  //   {.VISIBLE, .MATERIAL_WIREFRAME},
+  //   {},
+  //   resources_manager,
+  // )
+  // transparency.render(
+  //   &self.transparency,
+  //   self.transparency.wireframe_pipeline,
+  //   camera_handle,
+  //   command_buffer,
+  //   resources_manager,
+  //   frame_index,
+  //   camera.late_draw_commands[frame_index].buffer,
+  //   camera.late_draw_count[frame_index].buffer,
+  //   command_stride,
+  // )
   transparency.end_pass(&self.transparency, command_buffer)
   transparency.end_record(command_buffer) or_return
   return .SUCCESS
@@ -973,7 +498,7 @@ record_post_process_pass :: proc(
   self: ^Renderer,
   frame_index: u32,
   resources_manager: ^resources.Manager,
-  target: ^targets.RenderTarget,
+  camera_handle: resources.Handle,
   color_format: vk.Format,
   swapchain_extent: vk.Extent2D,
   swapchain_image: vk.Image,
@@ -983,7 +508,7 @@ record_post_process_pass :: proc(
     &self.post_process,
     frame_index,
     color_format,
-    target,
+    camera_handle,
     resources_manager,
     swapchain_image,
   ) or_return
@@ -993,275 +518,11 @@ record_post_process_pass :: proc(
     command_buffer,
     swapchain_extent,
     swapchain_view,
-    target,
+    camera_handle,
     resources_manager,
     frame_index,
   )
   post_process.end_pass(&self.post_process, command_buffer)
   post_process.end_record(command_buffer) or_return
   return .SUCCESS
-}
-
-renderer_add_render_target :: proc(
-  self: ^Renderer,
-  gpu_context: ^gpu.GPUContext,
-  resources_manager: ^resources.Manager,
-  width, height: u32,
-  color_format: vk.Format = vk.Format.R8G8B8A8_UNORM,
-  depth_format: vk.Format = vk.Format.D32_SFLOAT,
-  camera_position: [3]f32 = {0, 0, 3},
-  camera_target: [3]f32 = {0, 0, 0},
-  fov: f32 = 1.57079632679,
-  near_plane: f32 = 0.1,
-  far_plane: f32 = 100.0,
-  enabled_passes: targets.PassTypeSet = {
-    .SHADOW,
-    .GEOMETRY,
-    .LIGHTING,
-    .TRANSPARENCY,
-    .PARTICLES,
-  },
-) -> (
-  index: int,
-  ok: bool,
-) {
-  capture, capture_ok := targets.create_render_target(
-    gpu_context,
-    resources_manager,
-    width,
-    height,
-    color_format,
-    depth_format,
-    camera_position,
-    camera_target,
-    fov,
-    near_plane,
-    far_plane,
-    enabled_passes,
-  )
-  if !capture_ok do return -1, false
-
-  append(&self.render_targets, capture)
-  return len(self.render_targets) - 1, true
-}
-
-renderer_add_render_target_with_external_depth :: proc(
-  self: ^Renderer,
-  gpu_context: ^gpu.GPUContext,
-  resources_manager: ^resources.Manager,
-  width, height: u32,
-  color_format: vk.Format = vk.Format.R8G8B8A8_UNORM,
-  depth_format: vk.Format = vk.Format.D32_SFLOAT,
-  camera_position: [3]f32 = {0, 0, 3},
-  camera_target: [3]f32 = {0, 0, 0},
-  external_depth_textures: [resources.MAX_FRAMES_IN_FLIGHT]resources.Handle,
-  enabled_passes: targets.PassTypeSet = {
-    .SHADOW,
-    .GEOMETRY,
-    .LIGHTING,
-    .TRANSPARENCY,
-    .PARTICLES,
-  },
-  fov: f32 = 1.57079632679,
-  near_plane: f32 = 0.1,
-  far_plane: f32 = 100.0,
-) -> (
-  index: int,
-  ok: bool,
-) {
-  capture: targets.RenderTarget
-  init_result := targets.render_target_init(
-    &capture,
-    gpu_context,
-    resources_manager,
-    width,
-    height,
-    color_format,
-    depth_format,
-    enabled_passes = enabled_passes,
-    camera_position = camera_position,
-    camera_target = camera_target,
-    fov = fov,
-    near_plane = near_plane,
-    far_plane = far_plane,
-    external_depth_textures = external_depth_textures,
-  )
-  if init_result != .SUCCESS do return -1, false
-
-  append(&self.render_targets, capture)
-  return len(self.render_targets) - 1, true
-}
-
-renderer_get_render_target :: proc(
-  self: ^Renderer,
-  index: int,
-) -> (
-  capture: ^targets.RenderTarget,
-  ok: bool,
-) {
-  if index < 0 || index >= len(self.render_targets) do return nil, false
-  return &self.render_targets[index], true
-}
-
-renderer_remove_render_target :: proc(
-  self: ^Renderer,
-  index: int,
-  device: vk.Device,
-  command_pool: vk.CommandPool,
-  resources_manager: ^resources.Manager,
-) {
-  if index < 0 || index >= len(self.render_targets) do return
-
-  capture := &self.render_targets[index]
-  targets.render_target_destroy(
-    capture,
-    device,
-    command_pool,
-    resources_manager,
-  )
-
-  ordered_remove(&self.render_targets, index)
-}
-
-record_render_target :: proc(
-  self: ^Renderer,
-  capture_index: int,
-  frame_index: u32,
-  gpu_context: ^gpu.GPUContext,
-  resources_manager: ^resources.Manager,
-  world_state: ^world.World,
-  command_buffer: vk.CommandBuffer,
-  color_format: vk.Format,
-) -> vk.Result {
-  capture, capture_ok := renderer_get_render_target(self, capture_index)
-  if !capture_ok do return .ERROR_UNKNOWN
-
-  // Update camera data
-  targets.render_target_upload_camera_data(resources_manager, capture)
-
-  // Each custom render target gets its own visibility task
-  render_target_id := RENDER_TARGET_ID_CUSTOM_START + u32(capture_index)
-
-  // Dispatch visibility using 2-pass occlusion culling (same as main geometry pass)
-  vis_result := world.dispatch_visibility(
-    world_state,
-    gpu_context,
-    command_buffer,
-    frame_index,
-    render_target_id,
-    world.VisibilityRequest {
-      camera_index = capture.camera.index,
-      include_flags = {.VISIBLE},
-      exclude_flags = {.MATERIAL_TRANSPARENT, .MATERIAL_WIREFRAME},
-    },
-    resources_manager,
-  )
-
-  draw_buffer := vis_result.draw_buffer
-  count_buffer := vis_result.count_buffer
-  command_stride := vis_result.command_stride
-
-  // Render G-buffer pass
-  if .GEOMETRY in capture.enabled_passes {
-    geometry_pass.begin_pass(
-      capture,
-      command_buffer,
-      resources_manager,
-      frame_index,
-    )
-
-    geometry_pass.render(
-      &self.geometry,
-      capture,
-      command_buffer,
-      resources_manager,
-      frame_index,
-      draw_buffer,
-      count_buffer,
-      command_stride,
-    )
-
-    geometry_pass.end_pass(
-      capture,
-      command_buffer,
-      resources_manager,
-      frame_index,
-    )
-  }
-
-  // Render lighting pass
-  if .LIGHTING in capture.enabled_passes {
-    lighting.begin_ambient_pass(
-      &self.lighting,
-      capture,
-      command_buffer,
-      resources_manager,
-      frame_index,
-    )
-    lighting.render_ambient(
-      &self.lighting,
-      capture,
-      command_buffer,
-      resources_manager,
-      frame_index,
-    )
-    lighting.end_ambient_pass(command_buffer)
-
-    lighting.begin_pass(
-      &self.lighting,
-      capture,
-      command_buffer,
-      resources_manager,
-      frame_index,
-    )
-    lighting.render(
-      &self.lighting,
-      capture,
-      command_buffer,
-      resources_manager,
-      frame_index,
-    )
-    lighting.end_pass(command_buffer)
-  }
-
-  return .SUCCESS
-}
-
-record_all_render_targets :: proc(
-  self: ^Renderer,
-  frame_index: u32,
-  gpu_context: ^gpu.GPUContext,
-  resources_manager: ^resources.Manager,
-  world_state: ^world.World,
-  command_buffer: vk.CommandBuffer,
-  color_format: vk.Format,
-) -> vk.Result {
-  for i in 0 ..< len(self.render_targets) {
-    record_render_target(
-      self,
-      i,
-      frame_index,
-      gpu_context,
-      resources_manager,
-      world_state,
-      command_buffer,
-      color_format,
-    ) or_return
-  }
-  return .SUCCESS
-}
-
-renderer_get_render_target_output :: proc(
-  self: ^Renderer,
-  capture_index: int,
-  resources_manager: ^resources.Manager,
-  frame_index: u32,
-) -> (
-  output: resources.Handle,
-  ok: bool,
-) {
-  capture, capture_ok := renderer_get_render_target(self, capture_index)
-  if !capture_ok do return {}, false
-
-  return targets.get_final_image(capture, frame_index), true
 }

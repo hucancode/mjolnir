@@ -4,7 +4,6 @@ import "../../geometry"
 import "../../gpu"
 import "../../resources"
 import "../shared"
-import "../targets"
 import "core:log"
 import vk "vendor:vulkan"
 
@@ -168,38 +167,38 @@ init :: proc(
 }
 
 begin_pass :: proc(
-  target: ^targets.RenderTarget,
+  camera_handle: resources.Handle,
   command_buffer: vk.CommandBuffer,
   resources_manager: ^resources.Manager,
   frame_index: u32,
-  self_manage_depth: bool = false,
 ) {
+  camera := resources.get(resources_manager.cameras, camera_handle)
+  if camera == nil do return
   // Transition all G-buffer textures to COLOR_ATTACHMENT_OPTIMAL
   position_texture := resources.get(
     resources_manager.image_2d_buffers,
-    targets.get_position_texture(target, frame_index),
+    resources.camera_get_attachment(camera, .POSITION, frame_index),
   )
   normal_texture := resources.get(
     resources_manager.image_2d_buffers,
-    targets.get_normal_texture(target, frame_index),
+    resources.camera_get_attachment(camera, .NORMAL, frame_index),
   )
   albedo_texture := resources.get(
     resources_manager.image_2d_buffers,
-    targets.get_albedo_texture(target, frame_index),
+    resources.camera_get_attachment(camera, .ALBEDO, frame_index),
   )
   metallic_roughness_texture := resources.get(
     resources_manager.image_2d_buffers,
-    targets.get_metallic_roughness_texture(target, frame_index),
+    resources.camera_get_attachment(camera, .METALLIC_ROUGHNESS, frame_index),
   )
   emissive_texture := resources.get(
     resources_manager.image_2d_buffers,
-    targets.get_emissive_texture(target, frame_index),
+    resources.camera_get_attachment(camera, .EMISSIVE, frame_index),
   )
   final_texture := resources.get(
     resources_manager.image_2d_buffers,
-    targets.get_final_image(target, frame_index),
+    resources.camera_get_attachment(camera, .FINAL_IMAGE, frame_index),
   )
-
   // Collect all G-buffer images for batch transition
   gbuffer_images := [?]vk.Image {
     position_texture.image,
@@ -209,7 +208,6 @@ begin_pass :: proc(
     emissive_texture.image,
     final_texture.image,
   }
-
   // Batch transition all G-buffer images to COLOR_ATTACHMENT_OPTIMAL
   gpu.transition_images(
     command_buffer,
@@ -223,24 +221,14 @@ begin_pass :: proc(
     {.COLOR_ATTACHMENT_WRITE},
   )
 
-  // Transition depth if self-managing
-  if self_manage_depth {
-    depth_texture := resources.get(
-      resources_manager.image_2d_buffers,
-      targets.get_depth_texture(target, frame_index),
-    )
-    gpu.transition_image(
-      command_buffer,
-      depth_texture.image,
-      .UNDEFINED,
-      .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-      {.DEPTH},
-      {.TOP_OF_PIPE},
-      {.EARLY_FRAGMENT_TESTS},
-      {},
-      {.DEPTH_STENCIL_ATTACHMENT_WRITE},
-    )
-  }
+  // Note: Depth texture is already in DEPTH_STENCIL_READ_ONLY_OPTIMAL from visibility system
+  // No transition needed - just get the texture for attachment setup
+  // Use per-frame depth attachment from camera.attachments[.DEPTH][frame_index]
+  depth_texture := resources.get(
+    resources_manager.image_2d_buffers,
+    camera.attachments[.DEPTH][frame_index],
+  )
+
   position_attachment := vk.RenderingAttachmentInfo {
     sType = .RENDERING_ATTACHMENT_INFO,
     imageView = position_texture.view,
@@ -281,19 +269,11 @@ begin_pass :: proc(
     storeOp = .STORE,
     clearValue = {color = {float32 = {0.0, 0.0, 0.0, 1.0}}},
   }
-  depth_texture := resources.get(
-    resources_manager.image_2d_buffers,
-    targets.get_depth_texture(target, frame_index),
-  )
-  // Use READ_ONLY layout when depth is externally managed (visibility system)
-  // Otherwise use ATTACHMENT_OPTIMAL
-  depth_layout := target.owns_depth ? vk.ImageLayout.DEPTH_STENCIL_ATTACHMENT_OPTIMAL : vk.ImageLayout.DEPTH_STENCIL_READ_ONLY_OPTIMAL
-
   depth_attachment := vk.RenderingAttachmentInfo {
     sType = .RENDERING_ATTACHMENT_INFO,
     imageView = depth_texture.view,
-    imageLayout = depth_layout,
-    loadOp = (self_manage_depth || !target.owns_depth) ? .LOAD : .CLEAR,
+    imageLayout = .DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+    loadOp = .LOAD,
     storeOp = .STORE,
     clearValue = {depthStencil = {depth = 1.0, stencil = 0}},
   }
@@ -304,9 +284,10 @@ begin_pass :: proc(
     metallic_roughness_attachment,
     emissive_attachment,
   }
+  extent := camera.extent
   render_info := vk.RenderingInfoKHR {
     sType = .RENDERING_INFO_KHR,
-    renderArea = {extent = target.extent},
+    renderArea = {extent = extent},
     layerCount = 1,
     colorAttachmentCount = len(color_attachments),
     pColorAttachments = raw_data(color_attachments[:]),
@@ -315,47 +296,50 @@ begin_pass :: proc(
   vk.CmdBeginRendering(command_buffer, &render_info)
   viewport := vk.Viewport {
     x        = 0,
-    y        = f32(target.extent.height),
-    width    = f32(target.extent.width),
-    height   = -f32(target.extent.height),
+    y        = f32(extent.height),
+    width    = f32(extent.width),
+    height   = -f32(extent.height),
     minDepth = 0.0,
     maxDepth = 1.0,
   }
   scissor := vk.Rect2D {
-    extent = target.extent,
+    extent = extent,
   }
   vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
   vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
 }
 
 end_pass :: proc(
-  target: ^targets.RenderTarget,
+  camera_handle: resources.Handle,
   command_buffer: vk.CommandBuffer,
   resources_manager: ^resources.Manager,
   frame_index: u32,
 ) {
   vk.CmdEndRendering(command_buffer)
 
+  camera := resources.get(resources_manager.cameras, camera_handle)
+  if camera == nil do return
+
   // Transition all G-buffer textures to SHADER_READ_ONLY_OPTIMAL for use by lighting
   position_texture := resources.get(
     resources_manager.image_2d_buffers,
-    targets.get_position_texture(target, frame_index),
+    resources.camera_get_attachment(camera, .POSITION, frame_index),
   )
   normal_texture := resources.get(
     resources_manager.image_2d_buffers,
-    targets.get_normal_texture(target, frame_index),
+    resources.camera_get_attachment(camera, .NORMAL, frame_index),
   )
   albedo_texture := resources.get(
     resources_manager.image_2d_buffers,
-    targets.get_albedo_texture(target, frame_index),
+    resources.camera_get_attachment(camera, .ALBEDO, frame_index),
   )
   metallic_roughness_texture := resources.get(
     resources_manager.image_2d_buffers,
-    targets.get_metallic_roughness_texture(target, frame_index),
+    resources.camera_get_attachment(camera, .METALLIC_ROUGHNESS, frame_index),
   )
   emissive_texture := resources.get(
     resources_manager.image_2d_buffers,
-    targets.get_emissive_texture(target, frame_index),
+    resources.camera_get_attachment(camera, .EMISSIVE, frame_index),
   )
 
   // Collect G-buffer images for batch transition (excluding final image which stays as attachment)
@@ -381,9 +365,10 @@ end_pass :: proc(
   )
 }
 
+// Render using the late culled draw list for this frame
 render :: proc(
   self: ^Renderer,
-  target: ^targets.RenderTarget,
+  camera_handle: resources.Handle,
   command_buffer: vk.CommandBuffer,
   resources_manager: ^resources.Manager,
   frame_index: u32,
@@ -416,7 +401,7 @@ render :: proc(
   )
   vk.CmdBindPipeline(command_buffer, .GRAPHICS, self.pipeline)
   push_constants := PushConstant {
-    camera_index = target.camera.index,
+    camera_index = camera_handle.index,
   }
   vk.CmdPushConstants(
     command_buffer,
@@ -465,7 +450,7 @@ shutdown :: proc(
 begin_record :: proc(
   self: ^Renderer,
   frame_index: u32,
-  target: ^targets.RenderTarget,
+  camera_handle: resources.Handle,
   resources_manager: ^resources.Manager,
 ) -> (
   command_buffer: vk.CommandBuffer,
@@ -499,59 +484,15 @@ begin_record :: proc(
       pInheritanceInfo = &inheritance,
     },
   ) or_return
-
-  // Transition depth texture only if we own it
-  // If using external depth (e.g. from visibility system), skip transition
-  if target.owns_depth {
-    depth_texture := resources.get(
-      resources_manager.image_2d_buffers,
-      targets.get_depth_texture(target, frame_index),
-    )
-    if depth_texture != nil {
-      gpu.transition_image(
-        command_buffer,
-        depth_texture.image,
-        .UNDEFINED,
-        .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-        {.DEPTH},
-        {.TOP_OF_PIPE},
-        {.EARLY_FRAGMENT_TESTS},
-        {},
-        {.DEPTH_STENCIL_ATTACHMENT_WRITE},
-      )
-    }
-  }
-
   return command_buffer, .SUCCESS
 }
 
 end_record :: proc(
   command_buffer: vk.CommandBuffer,
-  target: ^targets.RenderTarget,
+  camera_handle: resources.Handle,
   resources_manager: ^resources.Manager,
   frame_index: u32,
 ) -> vk.Result {
-  // Transition depth texture only if we own it
-  // External depth (e.g. from visibility system) is managed elsewhere
-  if target.owns_depth {
-    depth_texture := resources.get(
-      resources_manager.image_2d_buffers,
-      targets.get_depth_texture(target, frame_index),
-    )
-    if depth_texture != nil {
-      gpu.transition_image(
-        command_buffer,
-        depth_texture.image,
-        .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-        .SHADER_READ_ONLY_OPTIMAL,
-        {.DEPTH},
-        {.LATE_FRAGMENT_TESTS},
-        {.FRAGMENT_SHADER},
-        {.SHADER_READ},
-      )
-    }
-  }
-
   vk.EndCommandBuffer(command_buffer) or_return
   return .SUCCESS
 }

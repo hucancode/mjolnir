@@ -1,0 +1,160 @@
+#version 450
+
+// Sphere-based culling for omnidirectional cameras (point light shadows)
+// Tests AABB against sphere radius (simple distance check, no frustum or occlusion)
+
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+const uint NODE_FLAG_VISIBLE = 1u << 0;
+const uint NODE_FLAG_CULLING_ENABLED = 1u << 1;
+const uint INVALID_ID = 0xFFFFFFFFu;
+
+struct Camera {
+    mat4 view;
+    mat4 projection;
+    vec4 viewport_params;
+    vec4 position; // xyz = center position, w = radius
+    vec4 frustum_planes[6]; // Unused for spherical camera
+};
+
+struct NodeData {
+    uint material_id;
+    uint mesh_id;
+    uint bone_matrix_offset;
+    uint flags;
+};
+
+struct MeshData {
+    vec3 aabb_min;
+    uint index_count;
+    vec3 aabb_max;
+    uint first_index;
+    int vertex_offset;
+    uint vertex_skinning_offset;
+    uint flags;
+    uint _padding;
+};
+
+struct DrawCommand {
+    uint index_count;
+    uint instance_count;
+    uint first_index;
+    int vertex_offset;
+    uint first_instance;
+};
+
+layout(push_constant) uniform PushConstants {
+    uint camera_index;
+    uint node_count;
+    uint max_draws;
+    uint include_flags;
+    uint exclude_flags;
+    float _unused1; // pyramid_width (not used)
+    float _unused2; // pyramid_height (not used)
+    float _unused3; // depth_bias (not used)
+    uint _unused4;  // occlusion_enabled (not used)
+} params;
+
+layout(set = 0, binding = 0) readonly buffer NodeBuffer {
+    NodeData nodes[];
+};
+
+layout(set = 0, binding = 1) readonly buffer MeshBuffer {
+    MeshData meshes[];
+};
+
+layout(set = 0, binding = 2) readonly buffer WorldBuffer {
+    mat4 world_matrices[];
+};
+
+layout(set = 0, binding = 3) readonly buffer CameraBuffer {
+    Camera cameras[];
+};
+
+layout(set = 0, binding = 5) buffer DrawCountBuffer {
+    uint draw_count;
+};
+
+layout(set = 0, binding = 6) buffer DrawCommandBuffer {
+    DrawCommand commands[];
+};
+
+// Test if AABB is within sphere radius
+// Returns true if any part of the AABB intersects the sphere
+bool sphere_intersects_aabb(vec3 sphere_center, float sphere_radius, vec3 aabb_min, vec3 aabb_max) {
+    // Find closest point on AABB to sphere center
+    vec3 closest = clamp(sphere_center, aabb_min, aabb_max);
+
+    // Calculate distance from sphere center to closest point
+    float distance_sq = dot(closest - sphere_center, closest - sphere_center);
+
+    // Check if within radius
+    return distance_sq <= (sphere_radius * sphere_radius);
+}
+
+void main() {
+    uint node_id = gl_GlobalInvocationID.x;
+    if (node_id >= params.node_count) return;
+
+    NodeData node = nodes[node_id];
+    if (node.mesh_id == INVALID_ID) {
+        return;
+    }
+
+    // Check flag filtering
+    if ((node.flags & params.include_flags) != params.include_flags) {
+        return;
+    }
+    if ((node.flags & params.exclude_flags) != 0u) {
+        return;
+    }
+
+    MeshData mesh = meshes[node.mesh_id];
+    if (mesh.index_count == 0u) {
+        return;
+    }
+
+    Camera camera = cameras[params.camera_index];
+    mat4 world = world_matrices[node_id];
+
+    // Transform AABB to world space
+    vec3 local_min = mesh.aabb_min;
+    vec3 local_max = mesh.aabb_max;
+    vec3 local_center = 0.5 * (local_min + local_max);
+    vec3 local_extent = 0.5 * (local_max - local_min);
+
+    vec4 world_center4 = world * vec4(local_center, 1.0);
+    vec3 world_center = world_center4.xyz / max(world_center4.w, 1e-6);
+
+    mat3 world3 = mat3(world);
+    mat3 abs_world3 = mat3(abs(world3[0]), abs(world3[1]), abs(world3[2]));
+    vec3 world_extent = abs_world3 * local_extent;
+
+    // Calculate world-space AABB
+    vec3 world_min = world_center - world_extent;
+    vec3 world_max = world_center + world_extent;
+
+    // Extract sphere center and radius from camera data
+    vec3 sphere_center = camera.position.xyz;
+    float sphere_radius = camera.position.w;
+
+    // Simple sphere test
+    bool visible = true;
+    if ((node.flags & NODE_FLAG_CULLING_ENABLED) != 0u) {
+        visible = sphere_intersects_aabb(sphere_center, sphere_radius, world_min, world_max);
+    }
+
+    if (!visible) return;
+
+    // Add to draw list
+    uint draw_index = atomicAdd(draw_count, 1);
+    if (draw_index >= params.max_draws) return;
+
+    DrawCommand cmd;
+    cmd.index_count = mesh.index_count;
+    cmd.instance_count = 1u;
+    cmd.first_index = mesh.first_index;
+    cmd.vertex_offset = mesh.vertex_offset;
+    cmd.first_instance = node_id;
+    commands[draw_index] = cmd;
+}

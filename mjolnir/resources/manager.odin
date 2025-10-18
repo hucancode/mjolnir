@@ -24,7 +24,8 @@ Manager :: struct {
   materials:                    Pool(Material),
   image_2d_buffers:             Pool(gpu.ImageBuffer),
   image_cube_buffers:           Pool(gpu.CubeImageBuffer),
-  cameras:                      Pool(geometry.Camera),
+  cameras:                      Pool(Camera),
+  spherical_cameras:            Pool(SphericalCamera),
   emitters:                     Pool(Emitter),
   forcefields:                  Pool(ForceField),
   animation_clips:              Pool(animation.Clip),
@@ -44,6 +45,11 @@ Manager :: struct {
   camera_buffer_set_layout:     vk.DescriptorSetLayout,
   camera_buffer_descriptor_set: vk.DescriptorSet,
   camera_buffer:                gpu.DataBuffer(CameraData),
+
+  // Bindless spherical camera buffer system
+  spherical_camera_buffer_set_layout:     vk.DescriptorSetLayout,
+  spherical_camera_buffer_descriptor_set: vk.DescriptorSet,
+  spherical_camera_buffer:                gpu.DataBuffer(CameraData),
 
   // Bindless material buffer system
   material_buffer_set_layout:     vk.DescriptorSetLayout,
@@ -94,6 +100,11 @@ Manager :: struct {
   // Shared pipeline layout used by geometry-style renderers
   geometry_pipeline_layout:     vk.PipelineLayout,
 
+  // Visibility system descriptor layouts (for shadow cameras)
+  visibility_late_descriptor_layout:    vk.DescriptorSetLayout,
+  visibility_sphere_descriptor_layout:  vk.DescriptorSetLayout,
+  visibility_depth_reduce_descriptor_layout: vk.DescriptorSetLayout,
+
   // Bindless vertex/index buffer system
   vertex_buffer:                gpu.StaticBuffer(geometry.Vertex),
   index_buffer:                 gpu.StaticBuffer(u32),
@@ -118,6 +129,8 @@ init :: proc(
   pool_init(&manager.image_cube_buffers, MAX_CUBE_TEXTURES)
   log.infof("Initializing cameras pool... ")
   pool_init(&manager.cameras, MAX_ACTIVE_CAMERAS)
+  log.infof("Initializing spherical cameras pool... ")
+  pool_init(&manager.spherical_cameras, MAX_ACTIVE_CAMERAS)
   log.infof("Initializing forcefield pool... ")
   pool_init(&manager.forcefields, MAX_FORCE_FIELDS)
   log.infof("Initializing animation clips pool... ")
@@ -135,6 +148,7 @@ init :: proc(
   init_global_samplers(gpu_context, manager)
   init_bone_matrix_allocator(gpu_context, manager) or_return
   init_camera_buffer(gpu_context, manager) or_return
+  init_spherical_camera_buffer(gpu_context, manager) or_return
   init_material_buffer(gpu_context, manager) or_return
   init_world_matrix_buffers(gpu_context, manager) or_return
   init_node_data_buffer(gpu_context, manager) or_return
@@ -290,11 +304,27 @@ shutdown :: proc(
   }
   delete(manager.meshes.entries)
   delete(manager.meshes.free_indices)
+  // Clean up spherical cameras with GPU resources
+  for &entry in manager.spherical_cameras.entries {
+    if entry.generation > 0 && entry.active {
+      spherical_camera_destroy(&entry.item, gpu_context.device, gpu_context.command_pool, manager)
+    }
+  }
+  delete(manager.spherical_cameras.entries)
+  delete(manager.spherical_cameras.free_indices)
+
+  // Clean up regular cameras with GPU resources
+  for &entry in manager.cameras.entries {
+    if entry.generation > 0 && entry.active {
+      camera_destroy(&entry.item, gpu_context.device, gpu_context.command_pool, manager, skip_pool_free = true)
+    }
+  }
+  delete(manager.cameras.entries)
+  delete(manager.cameras.free_indices)
+
   // Simple cleanup for pools without GPU resources
   delete(manager.materials.entries)
   delete(manager.materials.free_indices)
-  delete(manager.cameras.entries)
-  delete(manager.cameras.free_indices)
   delete(manager.emitters.entries)
   delete(manager.emitters.free_indices)
   delete(manager.forcefields.entries)
@@ -331,6 +361,7 @@ shutdown :: proc(
   destroy_global_samplers(gpu_context, manager)
   destroy_bone_matrix_allocator(gpu_context, manager)
   destroy_camera_buffer(gpu_context, manager)
+  destroy_spherical_camera_buffer(gpu_context, manager)
   destroy_node_data_buffer(gpu_context, manager)
   destroy_mesh_data_buffer(gpu_context, manager)
   destroy_vertex_skinning_buffer(gpu_context, manager)
@@ -348,6 +379,32 @@ shutdown :: proc(
   )
   manager.textures_set_layout = 0
   manager.textures_descriptor_set = 0
+
+  // Destroy visibility descriptor set layouts
+  if manager.visibility_late_descriptor_layout != 0 {
+    vk.DestroyDescriptorSetLayout(
+      gpu_context.device,
+      manager.visibility_late_descriptor_layout,
+      nil,
+    )
+    manager.visibility_late_descriptor_layout = 0
+  }
+  if manager.visibility_sphere_descriptor_layout != 0 {
+    vk.DestroyDescriptorSetLayout(
+      gpu_context.device,
+      manager.visibility_sphere_descriptor_layout,
+      nil,
+    )
+    manager.visibility_sphere_descriptor_layout = 0
+  }
+  if manager.visibility_depth_reduce_descriptor_layout != 0 {
+    vk.DestroyDescriptorSetLayout(
+      gpu_context.device,
+      manager.visibility_depth_reduce_descriptor_layout,
+      nil,
+    )
+    manager.visibility_depth_reduce_descriptor_layout = 0
+  }
 }
 
 create_geometry_pipeline_layout :: proc(
@@ -1193,6 +1250,92 @@ destroy_camera_buffer :: proc(
   manager.camera_buffer_set_layout = 0
 }
 
+init_spherical_camera_buffer :: proc(
+  gpu_context: ^gpu.GPUContext,
+  manager: ^Manager,
+) -> vk.Result {
+  log.infof(
+    "Creating spherical camera buffer with capacity %d cameras...",
+    MAX_ACTIVE_CAMERAS,
+  )
+
+  // Create spherical camera buffer
+  manager.spherical_camera_buffer = gpu.create_host_visible_buffer(
+    gpu_context,
+    CameraData,
+    MAX_ACTIVE_CAMERAS,
+    {.STORAGE_BUFFER},
+    nil,
+  ) or_return
+
+  // Create descriptor set layout
+  camera_bindings := [?]vk.DescriptorSetLayoutBinding {
+    {
+      binding = 0,
+      descriptorType = .STORAGE_BUFFER,
+      descriptorCount = 1,
+      stageFlags = {.VERTEX, .FRAGMENT, .COMPUTE, .GEOMETRY},
+    },
+  }
+
+  vk.CreateDescriptorSetLayout(
+    gpu_context.device,
+    &vk.DescriptorSetLayoutCreateInfo {
+      sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+      bindingCount = len(camera_bindings),
+      pBindings = raw_data(camera_bindings[:]),
+    },
+    nil,
+    &manager.spherical_camera_buffer_set_layout,
+  ) or_return
+
+  // Allocate descriptor set
+  vk.AllocateDescriptorSets(
+    gpu_context.device,
+    &{
+      sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
+      descriptorPool = gpu_context.descriptor_pool,
+      descriptorSetCount = 1,
+      pSetLayouts = &manager.spherical_camera_buffer_set_layout,
+    },
+    &manager.spherical_camera_buffer_descriptor_set,
+  ) or_return
+
+  // Update descriptor set
+  buffer_info := vk.DescriptorBufferInfo {
+    buffer = manager.spherical_camera_buffer.buffer,
+    offset = 0,
+    range  = vk.DeviceSize(vk.WHOLE_SIZE),
+  }
+
+  write := vk.WriteDescriptorSet {
+    sType           = .WRITE_DESCRIPTOR_SET,
+    dstSet          = manager.spherical_camera_buffer_descriptor_set,
+    dstBinding      = 0,
+    descriptorType  = .STORAGE_BUFFER,
+    descriptorCount = 1,
+    pBufferInfo     = &buffer_info,
+  }
+
+  vk.UpdateDescriptorSets(gpu_context.device, 1, &write, 0, nil)
+
+  log.infof("Spherical camera buffer initialized successfully")
+  return .SUCCESS
+}
+
+destroy_spherical_camera_buffer :: proc(
+  gpu_context: ^gpu.GPUContext,
+  manager: ^Manager,
+) {
+  gpu.data_buffer_destroy(gpu_context.device, &manager.spherical_camera_buffer)
+  vk.DestroyDescriptorSetLayout(
+    gpu_context.device,
+    manager.spherical_camera_buffer_set_layout,
+    nil,
+  )
+  manager.spherical_camera_buffer_set_layout = 0
+}
+
 destroy_global_samplers :: proc(
   gpu_context: ^gpu.GPUContext,
   manager: ^Manager,
@@ -1466,7 +1609,7 @@ get_camera :: proc(
   manager: ^Manager,
   handle: Handle,
 ) -> (
-  ret: ^geometry.Camera,
+  ret: ^Camera,
   ok: bool,
 ) #optional_ok {
   ret, ok = get(manager.cameras, handle)

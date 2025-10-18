@@ -8,45 +8,6 @@ import geometry "../geometry"
 import resources "../resources"
 import vk "vendor:vulkan"
 
-// Enhanced visibility data for 2-pass culling
-VisibilityTask :: struct {
-  render_target_id: u32, // Identifier for which render target this task serves
-  // Late pass buffers
-  late_visibility:    gpu.DataBuffer(u32), // Current frame visibility
-  late_draw_count:    gpu.DataBuffer(u32),
-  late_draw_commands: gpu.DataBuffer(vk.DrawIndexedIndirectCommand),
-
-  // Depth resources - handle to texture managed by resources system
-  depth_texture:      resources.Handle, // handle.index is bindless texture array index
-  depth_pyramid:      DepthPyramid,
-
-  // Descriptor sets
-  late_descriptor_set:  vk.DescriptorSet,
-  depth_reduce_descriptor_sets: [16]vk.DescriptorSet, // For each mip level
-}
-
-// Depth pyramid for hierarchical Z-buffer occlusion culling
-DepthPyramid :: struct {
-  texture:         resources.Handle, // handle to pyramid texture in resources system
-  views:           [16]vk.ImageView, // Per-mip views for depth reduction (write)
-  full_view:       vk.ImageView,     // Full pyramid view for sampling (read all mips)
-  sampler:         vk.Sampler,
-  mip_levels:      u32,
-  width:           u32,
-  height:          u32,
-}
-
-VisibilityFrame :: struct {
-  tasks: [dynamic]VisibilityTask,
-  max_tasks: u32, // Maximum number of tasks we can support
-}
-
-VisibilityRequest :: struct {
-  camera_index: u32,
-  include_flags: resources.NodeFlagSet,
-  exclude_flags: resources.NodeFlagSet,
-}
-
 VisibilityPushConstants :: struct {
   camera_index:   u32,
   node_count:     u32,
@@ -64,38 +25,30 @@ DepthReducePushConstants :: struct {
   _padding: [3]u32,
 }
 
-VisibilityResult :: struct {
-  draw_buffer:    vk.Buffer,
-  count_buffer:   vk.Buffer,
-  command_stride: u32,
-}
-
 // Statistics for a single culling pass
 CullingStats :: struct {
   late_draw_count:   u32,
-  render_target_id:  u32,
+  camera_index:  u32,
   frame_index:       u32,
 }
 
 VisibilitySystem :: struct {
   // Compute pipelines
   late_cull_pipeline:        vk.Pipeline,
+  sphere_cull_pipeline:      vk.Pipeline, // For SphericalCamera (radius-based culling)
   depth_reduce_pipeline:     vk.Pipeline,
 
   // Pipeline layouts
   late_cull_layout:          vk.PipelineLayout,
+  sphere_cull_layout:        vk.PipelineLayout,
   depth_reduce_layout:       vk.PipelineLayout,
-
-  // Descriptor set layouts
-  late_descriptor_layout:    vk.DescriptorSetLayout,
-  depth_reduce_descriptor_layout: vk.DescriptorSetLayout,
 
   // Depth rendering pipeline
   depth_pipeline:            vk.Pipeline,
   depth_pipeline_layout:     vk.PipelineLayout,
 
-  // Per-frame resources
-  frames:                    [resources.MAX_FRAMES_IN_FLIGHT]VisibilityFrame,
+  // Spherical depth rendering pipeline (for point light shadows)
+  spherical_depth_pipeline:  vk.Pipeline,
 
   // System parameters
   max_draws:                 u32,
@@ -108,6 +61,11 @@ VisibilitySystem :: struct {
   stats_enabled:             bool,
 }
 
+// Note: Descriptor set layouts are stored in Manager, not here
+// Manager.visibility_late_descriptor_layout
+// Manager.visibility_sphere_descriptor_layout
+// Manager.visibility_depth_reduce_descriptor_layout
+
 draw_command_stride :: proc() -> u32 {
   return u32(size_of(vk.DrawIndexedIndirectCommand))
 }
@@ -118,7 +76,6 @@ visibility_system_init :: proc(
   resources_manager: ^resources.Manager,
   depth_width: u32,
   depth_height: u32,
-  max_render_targets: u32 = 8, // Default max render targets that can do occlusion culling
 ) -> vk.Result {
   if gpu_context == nil || resources_manager == nil {
     return vk.Result.ERROR_INITIALIZATION_FAILED
@@ -128,89 +85,14 @@ visibility_system_init :: proc(
   system.depth_width = depth_width
   system.depth_height = depth_height
   system.depth_bias = 0.0001 // Small depth bias to prevent self-occlusion and precision issues
-
-  // Initialize per-frame resources
-  for frame_idx in 0 ..< resources.MAX_FRAMES_IN_FLIGHT {
-    frame := &system.frames[frame_idx]
-    frame.max_tasks = max_render_targets
-    frame.tasks = make([dynamic]VisibilityTask, 0, max_render_targets)
-
-    // Pre-allocate tasks for all render targets
-    for task_idx in 0 ..< max_render_targets {
-      task := VisibilityTask{render_target_id = task_idx}
-
-      task.late_visibility = gpu.create_local_buffer(
-        gpu_context,
-        u32,
-        int(system.max_draws),
-        {.STORAGE_BUFFER, .TRANSFER_DST},
-      ) or_return
-
-      task.late_draw_count = gpu.create_host_visible_buffer(
-        gpu_context,
-        u32,
-        1,
-        {.STORAGE_BUFFER, .TRANSFER_DST},
-      ) or_return
-
-      task.late_draw_commands = gpu.create_host_visible_buffer(
-        gpu_context,
-        vk.DrawIndexedIndirectCommand,
-        int(system.max_draws),
-        {.STORAGE_BUFFER, .INDIRECT_BUFFER, .TRANSFER_DST},
-      ) or_return
-
-      // Create depth resources
-      create_depth_resources(gpu_context, resources_manager, &task, system.depth_width, system.depth_height) or_return
-
-      append(&frame.tasks, task)
-    }
-  }
-  // Initialize all late_visibility buffers to zero
-  {
-    command_buffer := gpu.begin_single_time_command(gpu_context) or_return
-    defer gpu.end_single_time_command(gpu_context, &command_buffer)
-
-    for frame in system.frames {
-      for task in frame.tasks {
-        // Clear late_visibility to zero so Frame 0 early pass will start with empty set
-        vk.CmdFillBuffer(
-          command_buffer,
-          task.late_visibility.buffer,
-          0,
-          vk.DeviceSize(task.late_visibility.bytes_count),
-          0, // Fill with zeros
-        )
-      }
-    }
-  }
-
-  // Create descriptor set layouts
-  create_descriptor_layouts(system, gpu_context) or_return
-
+  // Create descriptor set layouts (stored in Manager)
+  create_descriptor_layouts(system, gpu_context, resources_manager) or_return
   // Create compute pipelines
-  create_compute_pipelines(system, gpu_context) or_return
-
+  create_compute_pipelines(system, gpu_context, resources_manager) or_return
   // Create depth rendering pipeline
   create_depth_pipeline(system, gpu_context, resources_manager) or_return
-
-  // Allocate and update descriptor sets
-  // For 2-pass culling with double buffering, each frame's early pass must read from
-  // the OTHER frame's late visibility (the actual previous frame)
-  for frame_idx in 0 ..< resources.MAX_FRAMES_IN_FLIGHT {
-    prev_frame_idx := (frame_idx + resources.MAX_FRAMES_IN_FLIGHT - 1) % resources.MAX_FRAMES_IN_FLIGHT
-
-    frame := &system.frames[frame_idx]
-    prev_frame := &system.frames[prev_frame_idx]
-
-    for task_idx in 0 ..< len(frame.tasks) {
-      task := &frame.tasks[task_idx]
-      prev_task := &prev_frame.tasks[task_idx]
-
-      allocate_descriptor_sets(system, gpu_context, resources_manager, task, prev_task) or_return
-    }
-  }
-
+  // Create spherical depth rendering pipeline
+  create_spherical_depth_pipeline(system, gpu_context, resources_manager) or_return
   return vk.Result.SUCCESS
 }
 
@@ -227,111 +109,39 @@ visibility_system_shutdown :: proc(
 
   // Destroy pipelines
   vk.DestroyPipeline(device, system.late_cull_pipeline, nil)
+  vk.DestroyPipeline(device, system.sphere_cull_pipeline, nil)
   vk.DestroyPipeline(device, system.depth_reduce_pipeline, nil)
   vk.DestroyPipeline(device, system.depth_pipeline, nil)
+  vk.DestroyPipeline(device, system.spherical_depth_pipeline, nil)
 
   // Destroy pipeline layouts
   vk.DestroyPipelineLayout(device, system.late_cull_layout, nil)
+  vk.DestroyPipelineLayout(device, system.sphere_cull_layout, nil)
   vk.DestroyPipelineLayout(device, system.depth_reduce_layout, nil)
   // Note: depth_pipeline_layout is shared from resources_manager, don't destroy it
+  // Note: spherical_depth_pipeline also uses geometry_pipeline_layout
 
-  // Destroy descriptor set layouts
-  vk.DestroyDescriptorSetLayout(device, system.late_descriptor_layout, nil)
-  vk.DestroyDescriptorSetLayout(device, system.depth_reduce_descriptor_layout, nil)
-
-  // Clean up per-frame resources
-  for frame_idx in 0 ..< resources.MAX_FRAMES_IN_FLIGHT {
-    frame := &system.frames[frame_idx]
-    for task_idx in 0 ..< len(frame.tasks) {
-      task := &frame.tasks[task_idx]
-
-      // Destroy depth pyramid views and sampler (manually created, not managed by resources)
-      for mip in 0 ..< task.depth_pyramid.mip_levels {
-        vk.DestroyImageView(device, task.depth_pyramid.views[mip], nil)
-      }
-      vk.DestroyImageView(device, task.depth_pyramid.full_view, nil)
-      vk.DestroySampler(device, task.depth_pyramid.sampler, nil)
-
-      // Destroy buffers
-      gpu.data_buffer_destroy(device, &task.late_visibility)
-      gpu.data_buffer_destroy(device, &task.late_draw_count)
-      gpu.data_buffer_destroy(device, &task.late_draw_commands)
-
-      // Free textures through resources system
-      resources.free(&resources_manager.image_2d_buffers, task.depth_texture)
-      resources.free(&resources_manager.image_2d_buffers, task.depth_pyramid.texture)
-    }
-    delete(frame.tasks)
-  }
+  // Note: Descriptor set layouts are owned by Manager and will be destroyed there
+  // Note: Camera resources (buffers, textures, descriptor sets) are now cleaned up by camera_destroy
 }
 
 visibility_system_set_node_count :: proc(system: ^VisibilitySystem, count: u32) {
   system.node_count = min(count, system.max_draws)
 }
 
-visibility_system_get_visible_count :: proc(
-  system: ^VisibilitySystem,
-  frame_index: u32,
-  render_target_id: u32,
-) -> u32 {
-  if frame_index >= resources.MAX_FRAMES_IN_FLIGHT {
-    return 0
-  }
-  frame := &system.frames[frame_index]
-  if render_target_id >= u32(len(frame.tasks)) {
-    return 0
-  }
-  task_data := &frame.tasks[render_target_id]
-
-  // Return late pass draw count (final visibility)
-  if task_data.late_draw_count.mapped == nil {
-    return 0
-  }
-  return task_data.late_draw_count.mapped[0]
-}
-
-// Get the bindless texture array index for the visibility system's depth texture
-// Returns the texture index that can be used to sample the depth texture in shaders
-visibility_system_get_depth_texture_index :: proc(
-  system: ^VisibilitySystem,
-  frame_index: u32,
-  render_target_id: u32,
-) -> u32 {
-  if frame_index >= resources.MAX_FRAMES_IN_FLIGHT {
-    return 0xFFFFFFFF
-  }
-  frame := &system.frames[frame_index]
-  if render_target_id >= u32(len(frame.tasks)) {
-    return 0xFFFFFFFF
-  }
-  task_data := &frame.tasks[render_target_id]
-  return task_data.depth_texture.index
-}
-
-// Read back culling statistics from GPU buffers
 visibility_system_get_stats :: proc(
   system: ^VisibilitySystem,
+  camera: ^resources.Camera,
+  camera_index: u32,
   frame_index: u32,
-  render_target_id: u32,
 ) -> CullingStats {
   stats := CullingStats {
-    render_target_id = render_target_id,
+    camera_index = camera_index,
     frame_index = frame_index,
   }
 
-  if frame_index >= resources.MAX_FRAMES_IN_FLIGHT {
-    return stats
-  }
-
-  frame := &system.frames[frame_index]
-  if render_target_id >= u32(len(frame.tasks)) {
-    return stats
-  }
-  task_data := &frame.tasks[render_target_id]
-
-  // Read late pass draw count
-  if task_data.late_draw_count.mapped != nil {
-    stats.late_draw_count = task_data.late_draw_count.mapped[0]
+  if camera.late_draw_count[frame_index].mapped != nil {
+    stats.late_draw_count = camera.late_draw_count[frame_index].mapped[0]
   }
 
   return stats
@@ -342,116 +152,40 @@ visibility_system_set_stats_enabled :: proc(system: ^VisibilitySystem, enabled: 
   system.stats_enabled = enabled
 }
 
-visibility_system_dispatch :: proc(
+// STEP 1: Execute late pass culling - writes draw list
+visibility_system_dispatch_culling :: proc(
   system: ^VisibilitySystem,
   gpu_context: ^gpu.GPUContext,
   command_buffer: vk.CommandBuffer,
+  camera: ^resources.Camera,
+  camera_index: u32,
   frame_index: u32,
-  render_target_id: u32,
-  request: VisibilityRequest,
+  include_flags: resources.NodeFlagSet,
+  exclude_flags: resources.NodeFlagSet,
   resources_manager: ^resources.Manager,
-) -> VisibilityResult {
-  result := VisibilityResult {
-    draw_buffer    = 0,
-    count_buffer   = 0,
-    command_stride = draw_command_stride(),
-  }
+) {
   if system.node_count == 0 {
-    return result
-  }
-  frame := &system.frames[frame_index]
-  if render_target_id >= u32(len(frame.tasks)) {
-    log.errorf("Invalid render_target_id %d, max is %d", render_target_id, len(frame.tasks))
-    return result
-  }
-  task := &frame.tasks[render_target_id]
-
-  // Get depth texture from resources system
-  depth_texture := resources.get(resources_manager.image_2d_buffers, task.depth_texture)
-
-  // === OPTIMIZATION: PARALLEL DEPTH PYRAMID EXECUTION ===
-  // Late pass uses PREVIOUS frame's depth pyramid (already ready, no wait needed!)
-  // This allows culling and pyramid building to happen in parallel or with minimal latency
-
-  // === STEP 1: EXECUTE LATE PASS IMMEDIATELY ===
-  // Use previous frame's depth pyramid for occlusion culling (bound via descriptor set)
-  // No barrier needed - previous frame's pyramid was built in last frame
-  vk.CmdFillBuffer(
-    command_buffer,
-    task.late_draw_count.buffer,
-    0,
-    vk.DeviceSize(task.late_draw_count.bytes_count),
-    0,
-  )
-
-  execute_late_pass(
-    system,
-    gpu_context,
-    command_buffer,
-    frame_index,
-    task,
-    request,
-    resources_manager,
-  )
-
-  // === STEP 2: WAIT FOR LATE PASS, THEN RENDER DEPTH ===
-  // Barrier: Late pass compute must finish before we read draw commands
-  late_compute_done := [?]vk.BufferMemoryBarrier{
-    {
-      sType         = .BUFFER_MEMORY_BARRIER,
-      srcAccessMask = {.SHADER_WRITE},
-      dstAccessMask = {.INDIRECT_COMMAND_READ},
-      buffer        = task.late_draw_commands.buffer,
-      size          = vk.DeviceSize(task.late_draw_commands.bytes_count),
-    },
-    {
-      sType         = .BUFFER_MEMORY_BARRIER,
-      srcAccessMask = {.SHADER_WRITE},
-      dstAccessMask = {.INDIRECT_COMMAND_READ},
-      buffer        = task.late_draw_count.buffer,
-      size          = vk.DeviceSize(task.late_draw_count.bytes_count),
-    },
+    return
   }
 
-  vk.CmdPipelineBarrier(
-    command_buffer,
-    {.COMPUTE_SHADER},
-    {.DRAW_INDIRECT},
-    {},
-    0,
-    nil,
-    len(late_compute_done),
-    raw_data(late_compute_done[:]),
-    0,
-    nil,
-  )
+  // === BARRIER: WAIT FOR PREVIOUS FRAME'S PYRAMID ===
+  // Late pass N uses pyramid[N-1] for occlusion culling
+  prev_frame := (frame_index + resources.MAX_FRAMES_IN_FLIGHT - 1) % resources.MAX_FRAMES_IN_FLIGHT
+  prev_pyramid_texture := resources.get(resources_manager.image_2d_buffers, camera.depth_pyramid[prev_frame].texture)
 
-  // Render depth for visible objects (for next frame's pyramid)
-  render_depth_pass(
-    system,
-    gpu_context,
-    command_buffer,
-    frame_index,
-    task,
-    resources_manager,
-    request,
-  )
-
-  // === STEP 3: BUILD DEPTH PYRAMID FOR NEXT-NEXT FRAME ===
-  // Barrier: Wait for depth rendering to finish before pyramid build reads it
-  depth_render_done := vk.ImageMemoryBarrier {
+  pyramid_barrier := vk.ImageMemoryBarrier {
     sType = .IMAGE_MEMORY_BARRIER,
-    srcAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE},
+    srcAccessMask = {.SHADER_WRITE},
     dstAccessMask = {.SHADER_READ},
-    oldLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+    oldLayout = .SHADER_READ_ONLY_OPTIMAL,
     newLayout = .SHADER_READ_ONLY_OPTIMAL,
     srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
     dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-    image = depth_texture.image,
+    image = prev_pyramid_texture.image,
     subresourceRange = {
-      aspectMask = {.DEPTH},
+      aspectMask = {.COLOR},
       baseMipLevel = 0,
-      levelCount = 1,
+      levelCount = camera.depth_pyramid[prev_frame].mip_levels,
       baseArrayLayer = 0,
       layerCount = 1,
     },
@@ -459,33 +193,94 @@ visibility_system_dispatch :: proc(
 
   vk.CmdPipelineBarrier(
     command_buffer,
-    {.LATE_FRAGMENT_TESTS},
-    {.COMPUTE_SHADER},
+    {.COMPUTE_SHADER}, // Previous frame's pyramid build
+    {.COMPUTE_SHADER}, // This frame's late culling
     {},
-    0,
-    nil,
-    0,
-    nil,
-    1,
-    &depth_render_done,
+    0, nil,
+    0, nil,
+    1, &pyramid_barrier,
   )
 
-  // Build depth pyramid from current frame's depth (for next frame to use)
-  build_depth_pyramid(
+  // === LATE PASS: OCCLUSION CULLING ===
+  execute_late_pass(
     system,
     gpu_context,
     command_buffer,
-    task,
+    camera,
+    camera_index,
+    frame_index,
+    include_flags,
+    exclude_flags,
     resources_manager,
   )
 
-  // === STEP 4: TRANSITION DEPTH FOR GEOMETRY PASS ===
-  // Geometry pass will do read-only depth testing (depthWriteEnable=false)
-  depth_to_readonly := vk.ImageMemoryBarrier {
+  // === BARRIER: MAKE DRAW COMMANDS VISIBLE TO DEPTH PASS ===
+  late_compute_done := [?]vk.BufferMemoryBarrier{
+    {
+      sType         = .BUFFER_MEMORY_BARRIER,
+      srcAccessMask = {.SHADER_WRITE},
+      dstAccessMask = {.INDIRECT_COMMAND_READ},
+      buffer        = camera.late_draw_commands[frame_index].buffer,
+      size          = vk.DeviceSize(camera.late_draw_commands[frame_index].bytes_count),
+    },
+    {
+      sType         = .BUFFER_MEMORY_BARRIER,
+      srcAccessMask = {.SHADER_WRITE},
+      dstAccessMask = {.INDIRECT_COMMAND_READ},
+      buffer        = camera.late_draw_count[frame_index].buffer,
+      size          = vk.DeviceSize(camera.late_draw_count[frame_index].bytes_count),
+    },
+  }
+  vk.CmdPipelineBarrier(
+    command_buffer,
+    {.COMPUTE_SHADER},    // Late pass compute
+    {.DRAW_INDIRECT},     // Depth pass indirect draw
+    {},
+    0, nil,
+    len(late_compute_done),
+    raw_data(late_compute_done[:]),
+    0, nil,
+  )
+}
+
+// STEP 2: Render depth - reads draw list, writes depth[N]
+visibility_system_dispatch_depth :: proc(
+  system: ^VisibilitySystem,
+  gpu_context: ^gpu.GPUContext,
+  command_buffer: vk.CommandBuffer,
+  camera: ^resources.Camera,
+  camera_index: u32,
+  frame_index: u32,
+  include_flags: resources.NodeFlagSet,
+  exclude_flags: resources.NodeFlagSet,
+  resources_manager: ^resources.Manager,
+) {
+  if system.node_count == 0 {
+    return
+  }
+
+  depth_texture := resources.get(resources_manager.image_2d_buffers, camera.attachments[.DEPTH][frame_index])
+
+  // === RENDER DEPTH PASS ===
+  render_depth_pass(
+    system,
+    gpu_context,
+    command_buffer,
+    camera,
+    camera_index,
+    frame_index,
+    resources_manager,
+    include_flags,
+    exclude_flags,
+  )
+
+  // === BARRIER: TRANSITION DEPTH FOR PYRAMID READ ===
+  // Depth write complete, transition to shader read for pyramid building
+  depth_to_pyramid := vk.ImageMemoryBarrier {
     sType = .IMAGE_MEMORY_BARRIER,
-    srcAccessMask = {.SHADER_READ},
-    dstAccessMask = {.DEPTH_STENCIL_ATTACHMENT_READ},
-    oldLayout = .SHADER_READ_ONLY_OPTIMAL,
+    srcAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE},
+    dstAccessMask = {.SHADER_READ},
+    oldLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
     newLayout = .DEPTH_STENCIL_READ_ONLY_OPTIMAL,
     srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
     dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
@@ -498,194 +293,206 @@ visibility_system_dispatch :: proc(
       layerCount = 1,
     },
   }
-
   vk.CmdPipelineBarrier(
     command_buffer,
-    {.COMPUTE_SHADER},
-    {.EARLY_FRAGMENT_TESTS},
+    {.LATE_FRAGMENT_TESTS},  // Depth pass complete
+    {.COMPUTE_SHADER},        // Pyramid pass starts
     {},
-    0,
-    nil,
-    0,
-    nil,
-    1,
-    &depth_to_readonly,
+    0, nil,
+    0, nil,
+    1, &depth_to_pyramid,
   )
-
-  // Set result to late pass draw buffer (final visibility)
-  result.draw_buffer = task.late_draw_commands.buffer
-  result.count_buffer = task.late_draw_count.buffer
-
-  // Log draw counts if statistics are enabled
-  if system.stats_enabled {
-    log_culling_stats(system, frame_index, render_target_id, task)
-  }
-
-  return result
 }
 
-@(private)
-create_depth_resources :: proc(
+// STEP 3: Build pyramid - reads depth[N], builds pyramid[N]
+visibility_system_dispatch_pyramid :: proc(
+  system: ^VisibilitySystem,
   gpu_context: ^gpu.GPUContext,
+  command_buffer: vk.CommandBuffer,
+  camera: ^resources.Camera,
+  camera_index: u32,
+  frame_index: u32,
   resources_manager: ^resources.Manager,
-  task: ^VisibilityTask,
-  width: u32,
-  height: u32,
-) -> vk.Result {
-  // Create depth texture using resources system - automatically registers in bindless array
-  depth_handle, depth_texture, result := resources.create_empty_texture_2d(
+) {
+  if system.node_count == 0 {
+    return
+  }
+
+  depth_texture := resources.get(resources_manager.image_2d_buffers, camera.attachments[.DEPTH][frame_index])
+
+  // === BUILD DEPTH PYRAMID ===
+  build_depth_pyramid(
+    system,
     gpu_context,
+    command_buffer,
+    camera,
+    frame_index,
     resources_manager,
-    width,
-    height,
-    .D32_SFLOAT,
-    {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
   )
-  if result != .SUCCESS {
-    log.error("Failed to create depth texture for visibility system")
-    return result
-  }
 
-  // Store the handle - handle.index is the bindless texture array index
-  task.depth_texture = depth_handle
-  log.debugf("Created visibility depth texture at bindless index %d", depth_handle.index)
-
-  // Depth pyramid dimensions: mip 0 is HALF the resolution of source depth texture
-  // because we perform 2x2 MAX reduction to generate mip 0
-  pyramid_width := max(1, width / 2)
-  pyramid_height := max(1, height / 2)
-
-  // Calculate mip levels for depth pyramid based on pyramid base size
-  mip_levels := u32(math.floor(math.log2(f32(max(pyramid_width, pyramid_height))))) + 1
-
-  // Create depth pyramid texture with mip levels using resources system
-  pyramid_handle, pyramid_texture, pyramid_ok := resources.alloc(&resources_manager.image_2d_buffers)
-  if !pyramid_ok {
-    log.error("Failed to allocate handle for depth pyramid texture")
-    return .ERROR_OUT_OF_DEVICE_MEMORY
-  }
-  pyramid_texture^ = gpu.malloc_image_buffer_with_mips(
-    gpu_context,
-    pyramid_width,
-    pyramid_height,
-    .R32_SFLOAT, // Store depth as float for compute shader access
-    .OPTIMAL,
-    {.SAMPLED, .STORAGE, .TRANSFER_DST},
-    {.DEVICE_LOCAL},
-    mip_levels,
-  ) or_return
-
-  // Register in bindless texture array (base mip level view)
-  base_view_info := vk.ImageViewCreateInfo {
-    sType = .IMAGE_VIEW_CREATE_INFO,
-    image = pyramid_texture.image,
-    viewType = .D2,
-    format = .R32_SFLOAT,
+  // === BARRIER: DEPTH READY FOR GEOMETRY PASS ===
+  // Pyramid read complete, depth[N] can now be used by geometry for depth testing
+  pyramid_done := vk.ImageMemoryBarrier {
+    sType = .IMAGE_MEMORY_BARRIER,
+    srcAccessMask = {.SHADER_READ},
+    dstAccessMask = {.DEPTH_STENCIL_ATTACHMENT_READ},
+    oldLayout = .DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+    newLayout = .DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+    srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    image = depth_texture.image,
     subresourceRange = {
-      aspectMask = {.COLOR},
+      aspectMask = {.DEPTH},
       baseMipLevel = 0,
       levelCount = 1,
       baseArrayLayer = 0,
       layerCount = 1,
     },
   }
+  vk.CmdPipelineBarrier(
+    command_buffer,
+    {.COMPUTE_SHADER},         // Pyramid compute complete
+    {.EARLY_FRAGMENT_TESTS},   // Geometry depth testing can start
+    {},
+    0, nil,
+    0, nil,
+    1, &pyramid_done,
+  )
 
-  base_view: vk.ImageView
-  vk.CreateImageView(gpu_context.device, &base_view_info, nil, &base_view) or_return
-  defer vk.DestroyImageView(gpu_context.device, base_view, nil)
+  if system.stats_enabled {
+    log_culling_stats(system, camera, camera_index, frame_index)
+  }
+}
 
-  resources.set_texture_2d_descriptor(gpu_context, resources_manager, pyramid_handle.index, base_view)
+// dispatches full visibility pipeline (culling + depth + pyramid)
+visibility_system_dispatch :: proc(
+  system: ^VisibilitySystem,
+  gpu_context: ^gpu.GPUContext,
+  command_buffer: vk.CommandBuffer,
+  camera: ^resources.Camera,
+  camera_index: u32,
+  frame_index: u32,
+  include_flags: resources.NodeFlagSet,
+  exclude_flags: resources.NodeFlagSet,
+  resources_manager: ^resources.Manager,
+) {
+  visibility_system_dispatch_culling(
+    system,
+    gpu_context,
+    command_buffer,
+    camera,
+    camera_index,
+    frame_index,
+    include_flags,
+    exclude_flags,
+    resources_manager,
+  )
 
-  task.depth_pyramid.texture = pyramid_handle
-  task.depth_pyramid.mip_levels = mip_levels
-  task.depth_pyramid.width = pyramid_width
-  task.depth_pyramid.height = pyramid_height
+  visibility_system_dispatch_depth(
+    system,
+    gpu_context,
+    command_buffer,
+    camera,
+    camera_index,
+    frame_index,
+    include_flags,
+    exclude_flags,
+    resources_manager,
+  )
 
-  log.debugf("Created depth pyramid texture at bindless index %d with %d mip levels", pyramid_handle.index, mip_levels)
+  visibility_system_dispatch_pyramid(
+    system,
+    gpu_context,
+    command_buffer,
+    camera,
+    camera_index,
+    frame_index,
+    resources_manager,
+  )
+}
 
-  // Create per-mip views for depth reduction shader (write to individual mips)
-  for mip in 0 ..< mip_levels {
-    view_info := vk.ImageViewCreateInfo {
-      sType = .IMAGE_VIEW_CREATE_INFO,
-      image = pyramid_texture.image,
-      viewType = .D2,
-      format = .R32_SFLOAT,
-      subresourceRange = {
-        aspectMask = {.COLOR},
-        baseMipLevel = mip,
-        levelCount = 1,
-        baseArrayLayer = 0,
-        layerCount = 1,
-      },
-    }
-
-    vk.CreateImageView(
-      gpu_context.device,
-      &view_info,
-      nil,
-      &task.depth_pyramid.views[mip],
-    ) or_return
+// SphericalCamera visibility dispatch - culling + depth cube rendering
+visibility_system_dispatch_spherical :: proc(
+  system: ^VisibilitySystem,
+  gpu_context: ^gpu.GPUContext,
+  command_buffer: vk.CommandBuffer,
+  camera: ^resources.SphericalCamera,
+  camera_index: u32,
+  include_flags: resources.NodeFlagSet,
+  exclude_flags: resources.NodeFlagSet,
+  resources_manager: ^resources.Manager,
+) {
+  if system.node_count == 0 {
+    return
   }
 
-  // Create full pyramid view for culling shader (sample from all mips)
-  full_view_info := vk.ImageViewCreateInfo {
-    sType = .IMAGE_VIEW_CREATE_INFO,
-    image = pyramid_texture.image,
-    viewType = .D2,
-    format = .R32_SFLOAT,
-    subresourceRange = {
-      aspectMask = {.COLOR},
-      baseMipLevel = 0,
-      levelCount = mip_levels, // ALL mip levels accessible
-      baseArrayLayer = 0,
-      layerCount = 1,
+  // STEP 1: Clear draw count and execute sphere culling
+  vk.CmdFillBuffer(
+    command_buffer,
+    camera.draw_count.buffer,
+    0,
+    vk.DeviceSize(camera.draw_count.bytes_count),
+    0,
+  )
+
+  execute_sphere_pass(
+    system,
+    gpu_context,
+    command_buffer,
+    camera,
+    camera_index,
+    include_flags,
+    exclude_flags,
+    resources_manager,
+  )
+
+  // STEP 2: Barrier - Wait for compute to finish before reading draw commands
+  compute_done := [?]vk.BufferMemoryBarrier{
+    {
+      sType         = .BUFFER_MEMORY_BARRIER,
+      srcAccessMask = {.SHADER_WRITE},
+      dstAccessMask = {.INDIRECT_COMMAND_READ},
+      buffer        = camera.draw_commands.buffer,
+      size          = vk.DeviceSize(camera.draw_commands.bytes_count),
+    },
+    {
+      sType         = .BUFFER_MEMORY_BARRIER,
+      srcAccessMask = {.SHADER_WRITE},
+      dstAccessMask = {.INDIRECT_COMMAND_READ},
+      buffer        = camera.draw_count.buffer,
+      size          = vk.DeviceSize(camera.draw_count.bytes_count),
     },
   }
 
-  vk.CreateImageView(
-    gpu_context.device,
-    &full_view_info,
+  vk.CmdPipelineBarrier(
+    command_buffer,
+    {.COMPUTE_SHADER},
+    {.DRAW_INDIRECT},
+    {},
+    0,
     nil,
-    &task.depth_pyramid.full_view,
-  ) or_return
-
-  // Create sampler for depth pyramid with MAX reduction for forward-Z
-  // LINEAR filter with MAX reduction - hardware automatically samples 2x2 and returns maximum
-  sampler_info := vk.SamplerCreateInfo {
-    sType = .SAMPLER_CREATE_INFO,
-    magFilter = .LINEAR,
-    minFilter = .LINEAR,
-    mipmapMode = .NEAREST,
-    addressModeU = .CLAMP_TO_EDGE,
-    addressModeV = .CLAMP_TO_EDGE,
-    addressModeW = .CLAMP_TO_EDGE,
-    minLod = 0,
-    maxLod = f32(mip_levels),
-    borderColor = .FLOAT_OPAQUE_WHITE,
-  }
-
-  // Enable MAX reduction mode (Vulkan 1.2+ feature)
-  // For forward-Z, MAX gives us the farthest occluder (larger depth = farther)
-  reduction_mode := vk.SamplerReductionModeCreateInfo {
-    sType = .SAMPLER_REDUCTION_MODE_CREATE_INFO,
-    reductionMode = .MAX,
-  }
-  sampler_info.pNext = &reduction_mode
-
-  vk.CreateSampler(
-    gpu_context.device,
-    &sampler_info,
+    len(compute_done),
+    raw_data(compute_done[:]),
+    0,
     nil,
-    &task.depth_pyramid.sampler,
-  ) or_return
+  )
 
-  return vk.Result.SUCCESS
+  // STEP 3: Render depth to cube map
+  render_spherical_depth_pass(
+    system,
+    gpu_context,
+    command_buffer,
+    camera,
+    camera_index,
+    resources_manager,
+  )
 }
 
 @(private)
 create_descriptor_layouts :: proc(
   system: ^VisibilitySystem,
   gpu_context: ^gpu.GPUContext,
+  resources_manager: ^resources.Manager,
 ) -> vk.Result {
   // Late pass descriptor layout (includes depth pyramid)
   late_bindings := [?]vk.DescriptorSetLayoutBinding {
@@ -693,10 +500,9 @@ create_descriptor_layouts :: proc(
     {binding = 1, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, stageFlags = {.COMPUTE}}, // Mesh data
     {binding = 2, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, stageFlags = {.COMPUTE}}, // World matrices
     {binding = 3, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, stageFlags = {.COMPUTE}}, // Camera data
-    {binding = 4, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, stageFlags = {.COMPUTE}}, // Current visibility
-    {binding = 5, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, stageFlags = {.COMPUTE}}, // Draw count
-    {binding = 6, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, stageFlags = {.COMPUTE}}, // Draw commands
-    {binding = 7, descriptorType = .COMBINED_IMAGE_SAMPLER, descriptorCount = 1, stageFlags = {.COMPUTE}}, // Depth pyramid
+    {binding = 4, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, stageFlags = {.COMPUTE}}, // Draw count
+    {binding = 5, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, stageFlags = {.COMPUTE}}, // Draw commands
+    {binding = 6, descriptorType = .COMBINED_IMAGE_SAMPLER, descriptorCount = 1, stageFlags = {.COMPUTE}}, // Depth pyramid
   }
 
   vk.CreateDescriptorSetLayout(
@@ -707,7 +513,29 @@ create_descriptor_layouts :: proc(
       pBindings = raw_data(late_bindings[:]),
     },
     nil,
-    &system.late_descriptor_layout,
+    &resources_manager.visibility_late_descriptor_layout,
+  ) or_return
+
+  // Sphere pass descriptor layout (matches sphere_cull.comp shader)
+  // NOTE: Binding 4 is intentionally skipped to maintain compatibility
+  sphere_bindings := [?]vk.DescriptorSetLayoutBinding {
+    {binding = 0, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, stageFlags = {.COMPUTE}}, // Node data
+    {binding = 1, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, stageFlags = {.COMPUTE}}, // Mesh data
+    {binding = 2, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, stageFlags = {.COMPUTE}}, // World matrices
+    {binding = 3, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, stageFlags = {.COMPUTE}}, // Camera data (spherical)
+    {binding = 5, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, stageFlags = {.COMPUTE}}, // Draw count (binding 5!)
+    {binding = 6, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, stageFlags = {.COMPUTE}}, // Draw commands (binding 6!)
+  }
+
+  vk.CreateDescriptorSetLayout(
+    gpu_context.device,
+    &vk.DescriptorSetLayoutCreateInfo {
+      sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+      bindingCount = len(sphere_bindings),
+      pBindings = raw_data(sphere_bindings[:]),
+    },
+    nil,
+    &resources_manager.visibility_sphere_descriptor_layout,
   ) or_return
 
   // Depth pyramid reduction descriptor layout
@@ -724,7 +552,7 @@ create_descriptor_layouts :: proc(
       pBindings = raw_data(depth_bindings[:]),
     },
     nil,
-    &system.depth_reduce_descriptor_layout,
+    &resources_manager.visibility_depth_reduce_descriptor_layout,
   ) or_return
 
   return vk.Result.SUCCESS
@@ -734,6 +562,7 @@ create_descriptor_layouts :: proc(
 create_compute_pipelines :: proc(
   system: ^VisibilitySystem,
   gpu_context: ^gpu.GPUContext,
+  resources_manager: ^resources.Manager,
 ) -> vk.Result {
   // Create pipeline layouts with push constants
   push_constant_range := vk.PushConstantRange {
@@ -746,12 +575,25 @@ create_compute_pipelines :: proc(
     &vk.PipelineLayoutCreateInfo {
       sType = .PIPELINE_LAYOUT_CREATE_INFO,
       setLayoutCount = 1,
-      pSetLayouts = &system.late_descriptor_layout,
+      pSetLayouts = &resources_manager.visibility_late_descriptor_layout,
       pushConstantRangeCount = 1,
       pPushConstantRanges = &push_constant_range,
     },
     nil,
     &system.late_cull_layout,
+  ) or_return
+
+  vk.CreatePipelineLayout(
+    gpu_context.device,
+    &vk.PipelineLayoutCreateInfo {
+      sType = .PIPELINE_LAYOUT_CREATE_INFO,
+      setLayoutCount = 1,
+      pSetLayouts = &resources_manager.visibility_sphere_descriptor_layout,
+      pushConstantRangeCount = 1,
+      pPushConstantRanges = &push_constant_range,
+    },
+    nil,
+    &system.sphere_cull_layout,
   ) or_return
 
   depth_push_range := vk.PushConstantRange {
@@ -764,7 +606,7 @@ create_compute_pipelines :: proc(
     &vk.PipelineLayoutCreateInfo {
       sType = .PIPELINE_LAYOUT_CREATE_INFO,
       setLayoutCount = 1,
-      pSetLayouts = &system.depth_reduce_descriptor_layout,
+      pSetLayouts = &resources_manager.visibility_depth_reduce_descriptor_layout,
       pushConstantRangeCount = 1,
       pPushConstantRanges = &depth_push_range,
     },
@@ -777,6 +619,12 @@ create_compute_pipelines :: proc(
     #load("../shader/occlusion_culling/late_cull.spv"),
   ) or_return
   defer vk.DestroyShaderModule(gpu_context.device, late_shader, nil)
+
+  sphere_shader := gpu.create_shader_module(
+    gpu_context.device,
+    #load("../shader/occlusion_culling/sphere_cull.spv"),
+  ) or_return
+  defer vk.DestroyShaderModule(gpu_context.device, sphere_shader, nil)
 
   depth_shader := gpu.create_shader_module(
     gpu_context.device,
@@ -802,6 +650,26 @@ create_compute_pipelines :: proc(
     &late_info,
     nil,
     &system.late_cull_pipeline,
+  ) or_return
+
+  sphere_info := vk.ComputePipelineCreateInfo {
+    sType = .COMPUTE_PIPELINE_CREATE_INFO,
+    stage = {
+      sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
+      stage = {.COMPUTE},
+      module = sphere_shader,
+      pName = "main",
+    },
+    layout = system.sphere_cull_layout,
+  }
+
+  vk.CreateComputePipelines(
+    gpu_context.device,
+    0,
+    1,
+    &sphere_info,
+    nil,
+    &system.sphere_cull_pipeline,
   ) or_return
 
   depth_info := vk.ComputePipelineCreateInfo {
@@ -972,132 +840,719 @@ create_depth_pipeline :: proc(
 }
 
 @(private)
-allocate_descriptor_sets :: proc(
+create_spherical_depth_pipeline :: proc(
   system: ^VisibilitySystem,
   gpu_context: ^gpu.GPUContext,
   resources_manager: ^resources.Manager,
-  task: ^VisibilityTask,
-  prev_task: ^VisibilityTask, // Previous frame's task for cross-frame visibility
 ) -> vk.Result {
-  vk.AllocateDescriptorSets(
+  // Create depth rendering pipeline for spherical cameras (point light shadows)
+  // Uses geometry shader to render to all 6 cube faces in one pass
+
+  // Load shaders
+  vert_shader := gpu.create_shader_module(
     gpu_context.device,
-    &vk.DescriptorSetAllocateInfo {
-      sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
-      descriptorPool = gpu_context.descriptor_pool,
-      descriptorSetCount = 1,
-      pSetLayouts = &system.late_descriptor_layout,
-    },
-    &task.late_descriptor_set,
+    #load("../shader/shadow_spherical/vert.spv"),
   ) or_return
+  defer vk.DestroyShaderModule(gpu_context.device, vert_shader, nil)
 
-  // Allocate descriptor sets for depth pyramid reduction (one per mip level, INCLUDING mip 0)
-  for mip in 0 ..< task.depth_pyramid.mip_levels {
-    vk.AllocateDescriptorSets(
-      gpu_context.device,
-      &vk.DescriptorSetAllocateInfo {
-        sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
-        descriptorPool = gpu_context.descriptor_pool,
-        descriptorSetCount = 1,
-        pSetLayouts = &system.depth_reduce_descriptor_layout,
-      },
-      &task.depth_reduce_descriptor_sets[mip],
-    ) or_return
+  geom_shader := gpu.create_shader_module(
+    gpu_context.device,
+    #load("../shader/shadow_spherical/geom.spv"),
+  ) or_return
+  defer vk.DestroyShaderModule(gpu_context.device, geom_shader, nil)
+
+  frag_shader := gpu.create_shader_module(
+    gpu_context.device,
+    #load("../shader/shadow_spherical/frag.spv"),
+  ) or_return
+  defer vk.DestroyShaderModule(gpu_context.device, frag_shader, nil)
+
+  // Shader stages: vertex + geometry + fragment
+  shader_stages := [?]vk.PipelineShaderStageCreateInfo {
+    {
+      sType  = .PIPELINE_SHADER_STAGE_CREATE_INFO,
+      stage  = {.VERTEX},
+      module = vert_shader,
+      pName  = "main",
+    },
+    {
+      sType  = .PIPELINE_SHADER_STAGE_CREATE_INFO,
+      stage  = {.GEOMETRY},
+      module = geom_shader,
+      pName  = "main",
+    },
+    {
+      sType  = .PIPELINE_SHADER_STAGE_CREATE_INFO,
+      stage  = {.FRAGMENT},
+      module = frag_shader,
+      pName  = "main",
+    },
   }
 
-  // Update late pass descriptor set (binds previous frame's pyramid for parallel execution)
-  update_late_descriptor_set(gpu_context, resources_manager, task, prev_task)
-
-  // Update depth reduction descriptor sets (ALL mips, including mip 0)
-  for mip in 0 ..< task.depth_pyramid.mip_levels {
-    update_depth_reduce_descriptor_set(gpu_context, resources_manager, task, u32(mip))
+  // Vertex input: only position from Vertex struct
+  vertex_bindings := [?]vk.VertexInputBindingDescription {
+    {binding = 0, stride = size_of(geometry.Vertex), inputRate = .VERTEX},
   }
+
+  vertex_attributes := [?]vk.VertexInputAttributeDescription {
+    {location = 0, binding = 0, format = .R32G32B32_SFLOAT, offset = u32(offset_of(geometry.Vertex, position))},
+  }
+
+  vertex_input_info := vk.PipelineVertexInputStateCreateInfo {
+    sType                           = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+    vertexBindingDescriptionCount   = len(vertex_bindings),
+    pVertexBindingDescriptions      = raw_data(vertex_bindings[:]),
+    vertexAttributeDescriptionCount = len(vertex_attributes),
+    pVertexAttributeDescriptions    = raw_data(vertex_attributes[:]),
+  }
+
+  // Input assembly
+  input_assembly := vk.PipelineInputAssemblyStateCreateInfo {
+    sType                  = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+    topology               = .TRIANGLE_LIST,
+    primitiveRestartEnable = false,
+  }
+
+  // Viewport and scissor (dynamic state)
+  viewport_state := vk.PipelineViewportStateCreateInfo {
+    sType         = .PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+    viewportCount = 1,
+    scissorCount  = 1,
+  }
+
+  // Rasterization
+  rasterizer := vk.PipelineRasterizationStateCreateInfo {
+    sType                   = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+    depthClampEnable        = false,
+    rasterizerDiscardEnable = false,
+    polygonMode             = .FILL,
+    cullMode                = {.BACK},
+    frontFace               = .COUNTER_CLOCKWISE,
+    depthBiasEnable         = false,
+    lineWidth               = 1.0,
+  }
+
+  // Multisampling (disabled)
+  multisampling := vk.PipelineMultisampleStateCreateInfo {
+    sType                = .PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+    rasterizationSamples = {._1},
+    sampleShadingEnable  = false,
+  }
+
+  // Depth stencil (depth write enabled, test LESS)
+  depth_stencil := vk.PipelineDepthStencilStateCreateInfo {
+    sType                 = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+    depthTestEnable       = true,
+    depthWriteEnable      = true,
+    depthCompareOp        = .LESS,
+    depthBoundsTestEnable = false,
+    stencilTestEnable     = false,
+  }
+
+  // No color attachments for depth-only pass
+  color_blend := vk.PipelineColorBlendStateCreateInfo {
+    sType           = .PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+    logicOpEnable   = false,
+    attachmentCount = 0,
+    pAttachments    = nil,
+  }
+
+  // Dynamic states
+  dynamic_states := [?]vk.DynamicState{.VIEWPORT, .SCISSOR}
+  dynamic_state := vk.PipelineDynamicStateCreateInfo {
+    sType             = .PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+    dynamicStateCount = len(dynamic_states),
+    pDynamicStates    = raw_data(dynamic_states[:]),
+  }
+
+  // Use the shared geometry pipeline layout from resources manager
+  if resources_manager.geometry_pipeline_layout == 0 {
+    return .ERROR_INITIALIZATION_FAILED
+  }
+
+  // Configure dynamic rendering for depth-only cube map rendering
+  depth_dynamic_rendering := vk.PipelineRenderingCreateInfo {
+    sType                 = .PIPELINE_RENDERING_CREATE_INFO,
+    depthAttachmentFormat = .D32_SFLOAT,
+    viewMask              = 0, // Not using multiview, geometry shader handles cube faces
+  }
+
+  // Create graphics pipeline using dynamic rendering
+  pipeline_info := vk.GraphicsPipelineCreateInfo {
+    sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
+    pNext               = &depth_dynamic_rendering,
+    stageCount          = len(shader_stages),
+    pStages             = raw_data(shader_stages[:]),
+    pVertexInputState   = &vertex_input_info,
+    pInputAssemblyState = &input_assembly,
+    pViewportState      = &viewport_state,
+    pRasterizationState = &rasterizer,
+    pMultisampleState   = &multisampling,
+    pDepthStencilState  = &depth_stencil,
+    pColorBlendState    = &color_blend,
+    pDynamicState       = &dynamic_state,
+    layout              = resources_manager.geometry_pipeline_layout,
+  }
+
+  vk.CreateGraphicsPipelines(
+    gpu_context.device,
+    0,
+    1,
+    &pipeline_info,
+    nil,
+    &system.spherical_depth_pipeline,
+  ) or_return
 
   return vk.Result.SUCCESS
 }
 
 @(private)
-update_late_descriptor_set :: proc(
+render_depth_pass :: proc(
+  system: ^VisibilitySystem,
   gpu_context: ^gpu.GPUContext,
+  command_buffer: vk.CommandBuffer,
+  camera: ^resources.Camera,
+  camera_index: u32,
+  frame_index: u32,
   resources_manager: ^resources.Manager,
-  task: ^VisibilityTask,
-  prev_task: ^VisibilityTask, // Previous frame's task for cross-frame pyramid access
+  include_flags: resources.NodeFlagSet,
+  exclude_flags: resources.NodeFlagSet,
 ) {
-  node_info := vk.DescriptorBufferInfo {
-    buffer = resources_manager.node_data_buffer.device_buffer,
-    range = vk.DeviceSize(resources_manager.node_data_buffer.bytes_count),
+  // Get depth texture from attachments for this frame
+  depth_texture := resources.get(resources_manager.image_2d_buffers, camera.attachments[.DEPTH][frame_index])
+
+  // === BARRIER: PREPARE DEPTH FOR WRITING ===
+  // Transition from READ_ONLY_OPTIMAL (left by previous frame's post-processing)
+  // to ATTACHMENT_OPTIMAL (needed for clear and write)
+  depth_ready_to_write := vk.ImageMemoryBarrier {
+    sType = .IMAGE_MEMORY_BARRIER,
+    srcAccessMask = {.SHADER_READ},
+    dstAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE},
+    oldLayout = .DEPTH_STENCIL_READ_ONLY_OPTIMAL,
+    newLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+    srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    image = depth_texture.image,
+    subresourceRange = {
+      aspectMask = {.DEPTH},
+      baseMipLevel = 0,
+      levelCount = 1,
+      baseArrayLayer = 0,
+      layerCount = 1,
+    },
   }
-  mesh_info := vk.DescriptorBufferInfo {
-    buffer = resources_manager.mesh_data_buffer.device_buffer,
-    range = vk.DeviceSize(resources_manager.mesh_data_buffer.bytes_count),
-  }
-  world_info := vk.DescriptorBufferInfo {
-    buffer = resources_manager.world_matrix_buffer.device_buffer,
-    range = vk.DeviceSize(resources_manager.world_matrix_buffer.bytes_count),
-  }
-  camera_info := vk.DescriptorBufferInfo {
-    buffer = resources_manager.camera_buffer.buffer,
-    range = vk.DeviceSize(resources_manager.camera_buffer.bytes_count),
-  }
-  vis_info := vk.DescriptorBufferInfo {
-    buffer = task.late_visibility.buffer,
-    range = vk.DeviceSize(task.late_visibility.bytes_count),
-  }
-  count_info := vk.DescriptorBufferInfo {
-    buffer = task.late_draw_count.buffer,
-    range = vk.DeviceSize(task.late_draw_count.bytes_count),
-  }
-  command_info := vk.DescriptorBufferInfo {
-    buffer = task.late_draw_commands.buffer,
-    range = vk.DeviceSize(task.late_draw_commands.bytes_count),
-  }
-  // KEY OPTIMIZATION: Use previous frame's depth pyramid for culling
-  // This allows late pass to start immediately without waiting for current frame's pyramid build
-  pyramid_info := vk.DescriptorImageInfo {
-    sampler = prev_task.depth_pyramid.sampler,
-    imageView = prev_task.depth_pyramid.full_view, // Previous frame's pyramid
-    imageLayout = .SHADER_READ_ONLY_OPTIMAL,
+  vk.CmdPipelineBarrier(
+    command_buffer,
+    {.FRAGMENT_SHADER},         // Previous frame's post-processing reads done
+    {.EARLY_FRAGMENT_TESTS},    // This frame's depth writes start
+    {},
+    0, nil,
+    0, nil,
+    1, &depth_ready_to_write,
+  )
+
+  // Begin dynamic rendering for depth rendering
+  depth_attachment := vk.RenderingAttachmentInfo {
+    sType = .RENDERING_ATTACHMENT_INFO,
+    imageView = depth_texture.view,
+    imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+    loadOp = .CLEAR,
+    storeOp = .STORE,
+    clearValue = {depthStencil = {depth = 1.0, stencil = 0}},
   }
 
-  writes := [?]vk.WriteDescriptorSet {
-    {sType = .WRITE_DESCRIPTOR_SET, dstSet = task.late_descriptor_set, dstBinding = 0, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, pBufferInfo = &node_info},
-    {sType = .WRITE_DESCRIPTOR_SET, dstSet = task.late_descriptor_set, dstBinding = 1, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, pBufferInfo = &mesh_info},
-    {sType = .WRITE_DESCRIPTOR_SET, dstSet = task.late_descriptor_set, dstBinding = 2, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, pBufferInfo = &world_info},
-    {sType = .WRITE_DESCRIPTOR_SET, dstSet = task.late_descriptor_set, dstBinding = 3, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, pBufferInfo = &camera_info},
-    {sType = .WRITE_DESCRIPTOR_SET, dstSet = task.late_descriptor_set, dstBinding = 4, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, pBufferInfo = &vis_info},
-    {sType = .WRITE_DESCRIPTOR_SET, dstSet = task.late_descriptor_set, dstBinding = 5, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, pBufferInfo = &count_info},
-    {sType = .WRITE_DESCRIPTOR_SET, dstSet = task.late_descriptor_set, dstBinding = 6, descriptorType = .STORAGE_BUFFER, descriptorCount = 1, pBufferInfo = &command_info},
-    {sType = .WRITE_DESCRIPTOR_SET, dstSet = task.late_descriptor_set, dstBinding = 7, descriptorType = .COMBINED_IMAGE_SAMPLER, descriptorCount = 1, pImageInfo = &pyramid_info},
+  render_info := vk.RenderingInfo {
+    sType = .RENDERING_INFO,
+    renderArea = {
+      offset = {0, 0},
+      extent = camera.extent,
+    },
+    layerCount = 1,
+    pDepthAttachment = &depth_attachment,
   }
 
-  vk.UpdateDescriptorSets(gpu_context.device, len(writes), raw_data(writes[:]), 0, nil)
+  vk.CmdBeginRendering(command_buffer, &render_info)
+
+  // Set viewport and scissor
+  // Use negative height to flip Y axis (Vulkan convention: +Y down, we want +Y up)
+  viewport := vk.Viewport {
+    x = 0,
+    y = f32(camera.extent.height), // Start from bottom when using negative height
+    width = f32(camera.extent.width),
+    height = -f32(camera.extent.height), // Negative height flips Y
+    minDepth = 0.0,
+    maxDepth = 1.0,
+  }
+
+  scissor := vk.Rect2D {
+    offset = {0, 0},
+    extent = camera.extent,
+  }
+
+  vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
+  vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
+
+  // Bind depth pipeline
+  if system.depth_pipeline != 0 {
+    vk.CmdBindPipeline(command_buffer, .GRAPHICS, system.depth_pipeline)
+
+    // Bind all descriptor sets like geometry renderer
+    descriptor_sets := [?]vk.DescriptorSet {
+      resources_manager.camera_buffer_descriptor_set,
+      resources_manager.textures_descriptor_set,
+      resources_manager.bone_buffer_descriptor_set,
+      resources_manager.material_buffer_descriptor_set,
+      resources_manager.world_matrix_descriptor_set,
+      resources_manager.node_data_descriptor_set,
+      resources_manager.mesh_data_descriptor_set,
+      resources_manager.vertex_skinning_descriptor_set,
+    }
+    vk.CmdBindDescriptorSets(
+      command_buffer,
+      .GRAPHICS,
+      system.depth_pipeline_layout,
+      0,
+      len(descriptor_sets),
+      raw_data(descriptor_sets[:]),
+      0,
+      nil,
+    )
+
+    // Push camera index
+    camera_index := camera_index
+    vk.CmdPushConstants(
+      command_buffer,
+      system.depth_pipeline_layout,
+      {.VERTEX},
+      0,
+      size_of(u32),
+      &camera_index,
+    )
+
+    // Bind vertex and index buffers from resources
+    vertex_buffers := [?]vk.Buffer{resources_manager.vertex_buffer.buffer}
+    offsets := [?]vk.DeviceSize{0}
+    vk.CmdBindVertexBuffers(command_buffer, 0, 1, raw_data(vertex_buffers[:]), raw_data(offsets[:]))
+    vk.CmdBindIndexBuffer(command_buffer, resources_manager.index_buffer.buffer, 0, .UINT32)
+
+    vk.CmdDrawIndexedIndirectCount(
+      command_buffer,
+      camera.late_draw_commands[frame_index].buffer,
+      0, // offset
+      camera.late_draw_count[frame_index].buffer,
+      0, // count offset
+      system.max_draws,
+      draw_command_stride(),
+    )
+  }
+
+  vk.CmdEndRendering(command_buffer)
+
+  // No barrier here - main dispatch function handles synchronization
 }
 
 @(private)
-update_depth_reduce_descriptor_set :: proc(
+build_depth_pyramid :: proc(
+  system: ^VisibilitySystem,
   gpu_context: ^gpu.GPUContext,
+  command_buffer: vk.CommandBuffer,
+  camera: ^resources.Camera,
+  frame_index: u32,
   resources_manager: ^resources.Manager,
-  task: ^VisibilityTask,
-  mip: u32,
 ) {
-  // For mip 0: read from depth texture, write to pyramid mip 0
-  // For other mips: read from previous pyramid mip, write to current mip
-  depth_texture := resources.get(resources_manager.image_2d_buffers, task.depth_texture)
-  source_view := mip == 0 ? depth_texture.view : task.depth_pyramid.views[mip - 1]
+  vk.CmdBindPipeline(command_buffer, .COMPUTE, system.depth_reduce_pipeline)
+  // Generate ALL mip levels using the same shader
+  // For mip 0, reads from previous frame's depth texture; for others, reads from current frame's previous mip
+  for mip in 0 ..< camera.depth_pyramid[frame_index].mip_levels {
+    // Bind descriptor set for this mip level and frame
+    vk.CmdBindDescriptorSets(
+      command_buffer,
+      .COMPUTE,
+      system.depth_reduce_layout,
+      0,
+      1,
+      &camera.depth_reduce_descriptor_sets[frame_index][mip],
+      0,
+      nil,
+    )
+    // Push constants with current mip level
+    push_constants := DepthReducePushConstants {
+      current_mip = u32(mip),
+    }
+    vk.CmdPushConstants(
+      command_buffer,
+      system.depth_reduce_layout,
+      {.COMPUTE},
+      0,
+      size_of(push_constants),
+      &push_constants,
+    )
+    // Calculate dispatch size for this mip level
+    // Use pyramid dimensions, not depth texture dimensions!
+    mip_width := max(1, camera.depth_pyramid[frame_index].width >> mip)
+    mip_height := max(1, camera.depth_pyramid[frame_index].height >> mip)
+    dispatch_x := (mip_width + 31) / 32
+    dispatch_y := (mip_height + 31) / 32
 
-  source_info := vk.DescriptorImageInfo {
-    sampler = task.depth_pyramid.sampler,
-    imageView = source_view,
-    imageLayout = .SHADER_READ_ONLY_OPTIMAL,
-  }
-  dest_info := vk.DescriptorImageInfo {
-    imageView = task.depth_pyramid.views[mip],
-    imageLayout = .GENERAL,
+    vk.CmdDispatch(command_buffer, dispatch_x, dispatch_y, 1)
+
+    // Only synchronize the dependency chain, don't transition layouts
+    if mip < camera.depth_pyramid[frame_index].mip_levels - 1 {
+      vk.CmdPipelineBarrier(
+        command_buffer,
+        {.COMPUTE_SHADER},
+        {.COMPUTE_SHADER},
+        {},
+        0, nil,
+        0, nil,
+        0, nil,
+      )
+    }
   }
 
-  writes := [?]vk.WriteDescriptorSet {
-    {sType = .WRITE_DESCRIPTOR_SET, dstSet = task.depth_reduce_descriptor_sets[mip], dstBinding = 0, descriptorType = .COMBINED_IMAGE_SAMPLER, descriptorCount = 1, pImageInfo = &source_info},
-    {sType = .WRITE_DESCRIPTOR_SET, dstSet = task.depth_reduce_descriptor_sets[mip], dstBinding = 1, descriptorType = .STORAGE_IMAGE, descriptorCount = 1, pImageInfo = &dest_info},
+  // Get pyramid texture from resources system for this frame
+  pyramid_texture := resources.get(resources_manager.image_2d_buffers, camera.depth_pyramid[frame_index].texture)
+
+  // Final layout transition for ALL mips at once after generation completes
+  final_barrier := vk.ImageMemoryBarrier {
+    sType = .IMAGE_MEMORY_BARRIER,
+    srcAccessMask = {.SHADER_WRITE},
+    dstAccessMask = {.SHADER_READ},
+    oldLayout = .GENERAL,
+    newLayout = .SHADER_READ_ONLY_OPTIMAL,
+    srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    image = pyramid_texture.image,
+    subresourceRange = {
+      aspectMask = {.COLOR},
+      baseMipLevel = 0,
+      levelCount = camera.depth_pyramid[frame_index].mip_levels,
+      baseArrayLayer = 0,
+      layerCount = 1,
+    },
   }
 
-  vk.UpdateDescriptorSets(gpu_context.device, len(writes), raw_data(writes[:]), 0, nil)
+  vk.CmdPipelineBarrier(
+    command_buffer,
+    {.COMPUTE_SHADER},
+    {.COMPUTE_SHADER},
+    {},
+    0, nil,
+    0, nil,
+    1, &final_barrier,
+  )
+}
+
+@(private)
+execute_late_pass :: proc(
+  system: ^VisibilitySystem,
+  gpu_context: ^gpu.GPUContext,
+  command_buffer: vk.CommandBuffer,
+  camera: ^resources.Camera,
+  camera_index: u32,
+  frame_index: u32,
+  include_flags: resources.NodeFlagSet,
+  exclude_flags: resources.NodeFlagSet,
+  resources_manager: ^resources.Manager,
+) {
+  vk.CmdFillBuffer(
+    command_buffer,
+    camera.late_draw_count[frame_index].buffer,
+    0,
+    vk.DeviceSize(camera.late_draw_count[frame_index].bytes_count),
+    0,
+  )
+  // Bind late pass pipeline and descriptor set for this frame
+  vk.CmdBindPipeline(command_buffer, .COMPUTE, system.late_cull_pipeline)
+  vk.CmdBindDescriptorSets(
+    command_buffer,
+    .COMPUTE,
+    system.late_cull_layout,
+    0,
+    1,
+    &camera.late_descriptor_set[frame_index],
+    0,
+    nil,
+  )
+
+  // Push constants with occlusion enabled (uses previous frame's pyramid via descriptor set)
+  prev_frame := (frame_index + resources.MAX_FRAMES_IN_FLIGHT - 1) % resources.MAX_FRAMES_IN_FLIGHT
+  push_constants := VisibilityPushConstants {
+    camera_index      = camera_index,
+    node_count        = system.node_count,
+    max_draws         = system.max_draws,
+    include_flags     = include_flags,
+    exclude_flags     = exclude_flags,
+    pyramid_width     = f32(camera.depth_pyramid[prev_frame].width),
+    pyramid_height    = f32(camera.depth_pyramid[prev_frame].height),
+    depth_bias        = system.depth_bias,
+    occlusion_enabled = 1, // Enable occlusion test
+  }
+
+  vk.CmdPushConstants(
+    command_buffer,
+    system.late_cull_layout,
+    {.COMPUTE},
+    0,
+    size_of(push_constants),
+    &push_constants,
+  )
+
+  // Dispatch compute shader
+  dispatch_x := (system.node_count + 63) / 64
+  vk.CmdDispatch(command_buffer, dispatch_x, 1, 1)
+}
+
+@(private)
+execute_sphere_pass :: proc(
+  system: ^VisibilitySystem,
+  gpu_context: ^gpu.GPUContext,
+  command_buffer: vk.CommandBuffer,
+  camera: ^resources.SphericalCamera,
+  camera_index: u32,
+  include_flags: resources.NodeFlagSet,
+  exclude_flags: resources.NodeFlagSet,
+  resources_manager: ^resources.Manager,
+) {
+  // Bind sphere culling pipeline and descriptor set
+  vk.CmdBindPipeline(command_buffer, .COMPUTE, system.sphere_cull_pipeline)
+
+  // Note: SphericalCamera needs a descriptor_set field
+  // This will be added in a later step
+  vk.CmdBindDescriptorSets(
+    command_buffer,
+    .COMPUTE,
+    system.sphere_cull_layout,
+    0,
+    1,
+    &camera.descriptor_set,
+    0,
+    nil,
+  )
+
+  // Push constants - same structure as late pass
+  push_constants := VisibilityPushConstants {
+    camera_index      = camera_index,
+    node_count        = system.node_count,
+    max_draws         = system.max_draws,
+    include_flags     = include_flags,
+    exclude_flags     = exclude_flags,
+    pyramid_width     = 0,  // Unused
+    pyramid_height    = 0,  // Unused
+    depth_bias        = 0,  // Unused
+    occlusion_enabled = 0,  // Disabled for sphere culling
+  }
+
+  vk.CmdPushConstants(
+    command_buffer,
+    system.sphere_cull_layout,
+    {.COMPUTE},
+    0,
+    size_of(push_constants),
+    &push_constants,
+  )
+
+  // Dispatch compute shader
+  dispatch_x := (system.node_count + 63) / 64
+  vk.CmdDispatch(command_buffer, dispatch_x, 1, 1)
+}
+
+@(private)
+log_culling_stats :: proc(
+  system: ^VisibilitySystem,
+  camera: ^resources.Camera,
+  camera_index: u32,
+  frame_index: u32,
+) {
+  // Read draw counts from mapped memory for this frame
+  late_count: u32 = 0
+
+  if camera.late_draw_count[frame_index].mapped != nil {
+    late_count = camera.late_draw_count[frame_index].mapped[0]
+  }
+
+  // Calculate culling efficiency
+  efficiency: f32 = 0.0
+  if system.node_count > 0 {
+    efficiency = f32(late_count) / f32(system.node_count) * 100.0
+  }
+
+  log.infof("[Camera %d Frame %d] Culling Stats: Total Objects=%d | Late Pass=%d | Efficiency=%.1f%%",
+    camera_index,
+    frame_index,
+    system.node_count,
+    late_count,
+    efficiency,
+  )
+}
+
+@(private)
+render_spherical_depth_pass :: proc(
+  system: ^VisibilitySystem,
+  gpu_context: ^gpu.GPUContext,
+  command_buffer: vk.CommandBuffer,
+  camera: ^resources.SphericalCamera,
+  camera_index: u32,
+  resources_manager: ^resources.Manager,
+) {
+  // Get depth cube texture
+  depth_cube := resources.get(resources_manager.image_cube_buffers, camera.depth_cube)
+  if depth_cube == nil {
+    log.error("Failed to get depth cube for spherical camera")
+    return
+  }
+
+  // Transition all cube faces to ATTACHMENT_OPTIMAL for rendering
+  cube_ready_to_write := vk.ImageMemoryBarrier {
+    sType = .IMAGE_MEMORY_BARRIER,
+    srcAccessMask = {.SHADER_READ},
+    dstAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE},
+    oldLayout = .SHADER_READ_ONLY_OPTIMAL,
+    newLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+    srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    image = depth_cube.image,
+    subresourceRange = {
+      aspectMask = {.DEPTH},
+      baseMipLevel = 0,
+      levelCount = 1,
+      baseArrayLayer = 0,
+      layerCount = 6, // All 6 cube faces
+    },
+  }
+  vk.CmdPipelineBarrier(
+    command_buffer,
+    {.FRAGMENT_SHADER},
+    {.EARLY_FRAGMENT_TESTS},
+    {},
+    0, nil,
+    0, nil,
+    1, &cube_ready_to_write,
+  )
+
+  // Begin dynamic rendering for all cube faces at once
+  // The geometry shader will emit primitives to each face using gl_Layer
+  depth_attachment := vk.RenderingAttachmentInfo {
+    sType = .RENDERING_ATTACHMENT_INFO,
+    imageView = depth_cube.view, // This is the full cube view
+    imageLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+    loadOp = .CLEAR,
+    storeOp = .STORE,
+    clearValue = {depthStencil = {depth = 1.0, stencil = 0}},
+  }
+
+  render_info := vk.RenderingInfo {
+    sType = .RENDERING_INFO,
+    renderArea = {
+      offset = {0, 0},
+      extent = {width = camera.size, height = camera.size},
+    },
+    layerCount = 6, // Render to all 6 cube faces
+    pDepthAttachment = &depth_attachment,
+  }
+
+  vk.CmdBeginRendering(command_buffer, &render_info)
+
+  // Set viewport and scissor for cube face size
+  viewport := vk.Viewport {
+    x = 0,
+    y = f32(camera.size),
+    width = f32(camera.size),
+    height = -f32(camera.size), // Negative height for Y-flip
+    minDepth = 0.0,
+    maxDepth = 1.0,
+  }
+
+  scissor := vk.Rect2D {
+    offset = {0, 0},
+    extent = {width = camera.size, height = camera.size},
+  }
+
+  vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
+  vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
+
+  // Bind spherical depth pipeline
+  if system.spherical_depth_pipeline != 0 {
+    vk.CmdBindPipeline(command_buffer, .GRAPHICS, system.spherical_depth_pipeline)
+
+    // Bind all descriptor sets - NOTE: Using spherical_camera_buffer instead of camera_buffer
+    descriptor_sets := [?]vk.DescriptorSet {
+      resources_manager.spherical_camera_buffer_descriptor_set, // Use spherical camera buffer!
+      resources_manager.textures_descriptor_set,
+      resources_manager.bone_buffer_descriptor_set,
+      resources_manager.material_buffer_descriptor_set,
+      resources_manager.world_matrix_descriptor_set,
+      resources_manager.node_data_descriptor_set,
+      resources_manager.mesh_data_descriptor_set,
+      resources_manager.vertex_skinning_descriptor_set,
+    }
+    vk.CmdBindDescriptorSets(
+      command_buffer,
+      .GRAPHICS,
+      resources_manager.geometry_pipeline_layout,
+      0,
+      len(descriptor_sets),
+      raw_data(descriptor_sets[:]),
+      0,
+      nil,
+    )
+
+    // Push camera index
+    cam_idx := camera_index
+    vk.CmdPushConstants(
+      command_buffer,
+      resources_manager.geometry_pipeline_layout,
+      {.VERTEX},
+      0,
+      size_of(u32),
+      &cam_idx,
+    )
+
+    // Bind vertex and index buffers
+    vertex_buffers := [?]vk.Buffer{resources_manager.vertex_buffer.buffer}
+    offsets := [?]vk.DeviceSize{0}
+    vk.CmdBindVertexBuffers(command_buffer, 0, 1, raw_data(vertex_buffers[:]), raw_data(offsets[:]))
+    vk.CmdBindIndexBuffer(command_buffer, resources_manager.index_buffer.buffer, 0, .UINT32)
+
+    // Draw using indirect commands from culling pass
+    vk.CmdDrawIndexedIndirectCount(
+      command_buffer,
+      camera.draw_commands.buffer,
+      0, // offset
+      camera.draw_count.buffer,
+      0, // count offset
+      system.max_draws,
+      draw_command_stride(),
+    )
+  }
+
+  vk.CmdEndRendering(command_buffer)
+
+  // Transition cube back to SHADER_READ_ONLY for shadow sampling
+  cube_ready_to_read := vk.ImageMemoryBarrier {
+    sType = .IMAGE_MEMORY_BARRIER,
+    srcAccessMask = {.DEPTH_STENCIL_ATTACHMENT_WRITE},
+    dstAccessMask = {.SHADER_READ},
+    oldLayout = .DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+    newLayout = .SHADER_READ_ONLY_OPTIMAL,
+    srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
+    image = depth_cube.image,
+    subresourceRange = {
+      aspectMask = {.DEPTH},
+      baseMipLevel = 0,
+      levelCount = 1,
+      baseArrayLayer = 0,
+      layerCount = 6, // All 6 cube faces
+    },
+  }
+  vk.CmdPipelineBarrier(
+    command_buffer,
+    {.LATE_FRAGMENT_TESTS},
+    {.FRAGMENT_SHADER},
+    {},
+    0, nil,
+    0, nil,
+    1, &cube_ready_to_read,
+  )
 }

@@ -2,7 +2,6 @@ package navigation_renderer
 
 import "../../gpu"
 import "../../resources"
-import "../targets"
 import "core:log"
 import "core:math"
 import vk "vendor:vulkan"
@@ -131,18 +130,21 @@ end_record :: proc(command_buffer: vk.CommandBuffer) -> vk.Result {
 
 begin_pass :: proc(
   self: ^Renderer,
-  target: ^targets.RenderTarget,
+  camera_handle: resources.Handle,
   command_buffer: vk.CommandBuffer,
   resources_manager: ^resources.Manager,
   frame_index: u32,
 ) {
+  camera := resources.get(resources_manager.cameras, camera_handle)
+  if camera == nil do return
+
   color_texture := resources.get(
     resources_manager.image_2d_buffers,
-    targets.get_final_image(target, frame_index),
+    resources.camera_get_attachment(camera, .FINAL_IMAGE, frame_index),
   )
   depth_texture := resources.get(
     resources_manager.image_2d_buffers,
-    targets.get_depth_texture(target, frame_index),
+    resources.camera_get_attachment(camera, .DEPTH, frame_index),
   )
 
   color_attachment := vk.RenderingAttachmentInfo {
@@ -161,9 +163,10 @@ begin_pass :: proc(
     storeOp     = .STORE,
   }
 
+  extent := camera.extent
   render_info := vk.RenderingInfo {
     sType = .RENDERING_INFO,
-    renderArea = {extent = target.extent},
+    renderArea = {extent = extent},
     layerCount = 1,
     colorAttachmentCount = 1,
     pColorAttachments = &color_attachment,
@@ -173,13 +176,13 @@ begin_pass :: proc(
   vk.CmdBeginRendering(command_buffer, &render_info)
 
   viewport := vk.Viewport {
-    width    = f32(target.extent.width),
-    height   = f32(target.extent.height),
+    width    = f32(extent.width),
+    height   = f32(extent.height),
     minDepth = 0.0,
     maxDepth = 1.0,
   }
   scissor := vk.Rect2D {
-    extent = target.extent,
+    extent = extent,
   }
   vk.CmdSetViewport(command_buffer, 0, 1, &viewport)
   vk.CmdSetScissor(command_buffer, 0, 1, &scissor)
