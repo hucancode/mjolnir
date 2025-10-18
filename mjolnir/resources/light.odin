@@ -182,7 +182,6 @@ destroy_light :: proc(
   return freed
 }
 
-// Get a light by handle
 get_light :: proc(
   manager: ^Manager,
   handle: Handle,
@@ -194,7 +193,6 @@ get_light :: proc(
   return
 }
 
-// Update light color and intensity
 set_light_color :: proc(
   manager: ^Manager,
   handle: Handle,
@@ -207,7 +205,6 @@ set_light_color :: proc(
   }
 }
 
-// Update light radius for point/spot lights
 set_light_radius :: proc(manager: ^Manager, handle: Handle, radius: f32) {
   if light, ok := get(manager.lights, handle); ok {
     light.radius = radius
@@ -215,7 +212,6 @@ set_light_radius :: proc(manager: ^Manager, handle: Handle, radius: f32) {
   }
 }
 
-// Update spot light angles
 set_spot_light_angles :: proc(
   manager: ^Manager,
   handle: Handle,
@@ -229,7 +225,6 @@ set_spot_light_angles :: proc(
   }
 }
 
-// Enable/disable shadow casting
 set_light_cast_shadow :: proc(
   manager: ^Manager,
   handle: Handle,
@@ -241,62 +236,45 @@ set_light_cast_shadow :: proc(
   }
 }
 
-// Update all light shadow camera transforms and shadow map indices from their node world matrices
-// This must be called before rendering shadow maps to ensure cameras are positioned correctly
-// and shadow map texture indices point to the correct frame
+// Update all light shadow camera transforms and shadow map indices
 update_light_shadow_camera_transforms :: proc(manager: ^Manager, frame_index: u32 = 0) {
   for &entry, light_index in manager.lights.entries do if entry.active {
     light := &entry.item
     if !light.cast_shadow do continue
     if light.camera_handle.generation == 0 do continue
-
     // Get light's world transform from node
     node_data := gpu.staged_buffer_get(&manager.node_data_buffer, light.node_index)
     if node_data == nil do continue
-
     world_matrix := gpu.staged_buffer_get(&manager.world_matrix_buffer, light.node_index)
     if world_matrix == nil do continue
-
     // Extract position and direction from world matrix
     light_position := world_matrix[3].xyz
-    // World matrix column 2 is the forward vector (local -Z axis transformed by rotation)
-    // In the local space, the light points down -Z, and after rotation it points in matrix[2] direction
     light_direction := world_matrix[2].xyz
-
-    // Update shadow camera transform based on light type
     #partial switch light.type {
     case .POINT:
-      // Point lights use spherical cameras - just update center position
+      // Point lights use spherical cameras
       spherical_cam := get(manager.spherical_cameras, light.camera_handle)
       if spherical_cam != nil {
         spherical_cam.center = light_position
-        // Point lights use cube maps - update shadow_map to current frame's depth cube
         light.shadow_map = spherical_cam.depth_cube.index
       }
     case .DIRECTIONAL:
-      // Directional lights: position doesn't matter much, but direction does
+      // TODO: Implement directional light later
       cam := get(manager.cameras, light.camera_handle)
       if cam != nil {
-        // For directional lights, position camera far back along the light direction
-        // and look in the light direction
         camera_position := light_position - light_direction * 50.0 // Far back
         target_position := light_position
         camera_look_at(cam, camera_position, target_position)
-        // Update shadow_map to current frame's depth attachment
         light.shadow_map = camera_get_attachment(cam, .DEPTH, frame_index).index
       }
     case .SPOT:
-      // Spot lights: position at light, look in light direction
       cam := get(manager.cameras, light.camera_handle)
       if cam != nil {
         target_position := light_position + light_direction
         camera_look_at(cam, light_position, target_position)
-        // Update shadow_map to current frame's depth attachment
         light.shadow_map = camera_get_attachment(cam, .DEPTH, frame_index).index
       }
     }
-
-    // Write updated light data to GPU buffer
     gpu.write(&manager.lights_buffer, &light.data, light_index)
   }
 }
