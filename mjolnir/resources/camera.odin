@@ -68,10 +68,13 @@ Camera :: struct {
   // GPU data for bindless buffer
   data:            CameraData,
   // Render target data
-  extent:          vk.Extent2D,
-  attachments:     [AttachmentType][MAX_FRAMES_IN_FLIGHT]Handle,
-  enabled_passes:  PassTypeSet,
-  command_buffers: [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
+  extent:               vk.Extent2D,
+  attachments:          [AttachmentType][MAX_FRAMES_IN_FLIGHT]Handle,
+  enabled_passes:       PassTypeSet,
+  // Per-pass secondary command buffers for this camera
+  geometry_commands:    [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
+  lighting_commands:    [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
+  transparency_commands: [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
   // Visibility task data (for occlusion culling)
   // Per-frame resources for pipelined multi-frame occlusion culling
   late_draw_count:              [MAX_FRAMES_IN_FLIGHT]gpu.DataBuffer(u32),
@@ -220,18 +223,34 @@ camera_init :: proc(
     )
   }
 
-  // Allocate command buffers
+  // Allocate per-pass command buffers for this camera
   alloc_info := vk.CommandBufferAllocateInfo {
     sType              = .COMMAND_BUFFER_ALLOCATE_INFO,
     commandPool        = gpu_context.command_pool,
     level              = .SECONDARY,
     commandBufferCount = MAX_FRAMES_IN_FLIGHT,
   }
-  vk.AllocateCommandBuffers(
-    gpu_context.device,
-    &alloc_info,
-    raw_data(camera.command_buffers[:]),
-  ) or_return
+  if .GEOMETRY in enabled_passes {
+    vk.AllocateCommandBuffers(
+      gpu_context.device,
+      &alloc_info,
+      raw_data(camera.geometry_commands[:]),
+    ) or_return
+  }
+  if .LIGHTING in enabled_passes {
+    vk.AllocateCommandBuffers(
+      gpu_context.device,
+      &alloc_info,
+      raw_data(camera.lighting_commands[:]),
+    ) or_return
+  }
+  if .TRANSPARENCY in enabled_passes {
+    vk.AllocateCommandBuffers(
+      gpu_context.device,
+      &alloc_info,
+      raw_data(camera.transparency_commands[:]),
+    ) or_return
+  }
 
   // Create per-frame visibility resources (Step 1: Create all resources first)
   for frame in 0 ..< MAX_FRAMES_IN_FLIGHT {
@@ -298,14 +317,34 @@ camera_destroy :: proc(
     }
   }
 
-  // Free command buffers
-  vk.FreeCommandBuffers(
-    device,
-    command_pool,
-    MAX_FRAMES_IN_FLIGHT,
-    raw_data(camera.command_buffers[:]),
-  )
-  camera.command_buffers = {}
+  // Free per-pass command buffers
+  if camera.geometry_commands[0] != nil {
+    vk.FreeCommandBuffers(
+      device,
+      command_pool,
+      MAX_FRAMES_IN_FLIGHT,
+      raw_data(camera.geometry_commands[:]),
+    )
+    camera.geometry_commands = {}
+  }
+  if camera.lighting_commands[0] != nil {
+    vk.FreeCommandBuffers(
+      device,
+      command_pool,
+      MAX_FRAMES_IN_FLIGHT,
+      raw_data(camera.lighting_commands[:]),
+    )
+    camera.lighting_commands = {}
+  }
+  if camera.transparency_commands[0] != nil {
+    vk.FreeCommandBuffers(
+      device,
+      command_pool,
+      MAX_FRAMES_IN_FLIGHT,
+      raw_data(camera.transparency_commands[:]),
+    )
+    camera.transparency_commands = {}
+  }
 
   // Clean up per-frame visibility resources
   for frame in 0 ..< MAX_FRAMES_IN_FLIGHT {

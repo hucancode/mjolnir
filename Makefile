@@ -61,7 +61,7 @@ golden:
 capture: build
 	@# Capture settings
 	@APP_PATH="./bin/main"; \
-	FRAME_N="5"; \
+	FRAME_N="5,6"; \
 	OUT_DIR="screenshots"; \
 	PPM_FILE="$$OUT_DIR/$$FRAME_N.ppm"; \
 	PNG_FILE="$$OUT_DIR/screenshot.png"; \

@@ -338,6 +338,8 @@ record_lighting_pass :: proc(
   command_buffer := lighting.begin_record(
     &self.lighting,
     frame_index,
+    camera_handle,
+    resources_manager,
     color_format,
   ) or_return
   lighting.begin_ambient_pass(
@@ -417,6 +419,8 @@ record_transparency_pass :: proc(
   command_buffer := transparency.begin_record(
     &self.transparency,
     frame_index,
+    camera_handle,
+    resources_manager,
     color_format,
   ) or_return
   transparency.begin_pass(
