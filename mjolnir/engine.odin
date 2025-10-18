@@ -536,7 +536,6 @@ render :: proc(self: ^Engine) -> vk.Result {
   defer sync.rw_mutex_unlock(&self.staged_buffers_guard)
   render_delta_time := f32(time.duration_seconds(time.since(self.last_render_timestamp)))
   update_skeletal_animations(self, render_delta_time)
-
   main_camera_handle := self.render.main_camera
   main_camera, main_camera_ok := resources.get_camera(&self.resource_manager, main_camera_handle)
   if !main_camera_ok {
@@ -544,11 +543,9 @@ render :: proc(self: ^Engine) -> vk.Result {
     return .ERROR_UNKNOWN
   }
   resources.camera_upload_data(&self.resource_manager, main_camera, main_camera_handle.index)
-
-  // Update light shadow camera transforms from light node transforms before rendering shadows
   resources.update_light_shadow_camera_transforms(&self.resource_manager, self.frame_index)
-
-  // Record shadow pass directly into the main command buffer
+  // Flush lights buffer immediately so shadow maps reference correct depth textures this frame
+  gpu.flush(command_buffer, &self.resource_manager.lights_buffer) or_return
   record_camera_visibility(
     &self.render,
     self.frame_index,
