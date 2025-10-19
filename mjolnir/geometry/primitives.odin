@@ -12,6 +12,12 @@ Sphere :: struct {
   radius: f32,
 }
 
+Disc :: struct {
+  center: [3]f32,
+  normal: [3]f32,
+  radius: f32,
+}
+
 triangle_bounds :: proc(tri: Triangle) -> Aabb {
   return Aabb{
     min = linalg.min(tri.v0, tri.v1, tri.v2),
@@ -25,6 +31,30 @@ sphere_bounds :: proc(sphere: Sphere) -> Aabb {
     min = sphere.center - r,
     max = sphere.center + r,
   }
+}
+
+disc_bounds :: proc(disc: Disc) -> Aabb {
+  tan1, tan2 := [3]f32{}, [3]f32{}
+
+  if math.abs(disc.normal.y) > 0.9 {
+    tan1 = linalg.normalize(linalg.cross(disc.normal, [3]f32{1, 0, 0}))
+  } else {
+    tan1 = linalg.normalize(linalg.cross(disc.normal, [3]f32{0, 1, 0}))
+  }
+  tan2 = linalg.cross(disc.normal, tan1)
+
+  ext1 := tan1 * disc.radius
+  ext2 := tan2 * disc.radius
+
+  p1 := disc.center + ext1
+  p2 := disc.center - ext1
+  p3 := disc.center + ext2
+  p4 := disc.center - ext2
+
+  min := linalg.min(linalg.min(p1, p2), linalg.min(p3, p4))
+  max := linalg.max(linalg.max(p1, p2), linalg.max(p3, p4))
+
+  return Aabb{min = min, max = max}
 }
 
 ray_triangle_intersection :: proc(
@@ -195,4 +225,34 @@ sphere_primitive_intersection :: proc(sphere: Sphere, prim: Primitive) -> bool {
     return sphere_sphere_intersection(sphere, p)
   }
   return false
+}
+
+aabb_disc_intersects :: proc(aabb: Aabb, center: [3]f32, normal: [3]f32, radius: f32) -> bool {
+  closest := linalg.clamp(center, aabb.min, aabb.max)
+  to_closest := closest - center
+  dist_sq := linalg.dot(to_closest, to_closest)
+
+  if dist_sq > radius * radius do return false
+
+  dist_to_plane := linalg.dot(to_closest, normal)
+  projected := closest - normal * dist_to_plane
+
+  to_projected := projected - center
+  projected_dist_sq := linalg.dot(to_projected, to_projected)
+
+  return projected_dist_sq <= radius * radius
+}
+
+point_in_disc :: proc(point: [3]f32, disc: Disc) -> bool {
+  to_point := point - disc.center
+  dist_to_plane := linalg.dot(to_point, disc.normal)
+
+  epsilon :: 1e-6
+  if math.abs(dist_to_plane) > epsilon do return false
+
+  projected := point - disc.normal * dist_to_plane
+  to_projected := projected - disc.center
+  dist_sq := linalg.dot(to_projected, to_projected)
+
+  return dist_sq <= disc.radius * disc.radius
 }

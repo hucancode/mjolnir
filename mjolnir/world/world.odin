@@ -317,6 +317,7 @@ World :: struct {
   nodes:           resources.Pool(Node),
   traversal_stack: [dynamic]TraverseEntry,
   visibility:      VisibilitySystem,
+  aoe:             AOEOctree,
 }
 
 init :: proc(world: ^World) {
@@ -326,6 +327,10 @@ init :: proc(world: ^World) {
   init_node(root, "root")
   root.parent = world.root
   world.traversal_stack = make([dynamic]TraverseEntry, 0)
+  aoe_init(&world.aoe, geometry.Aabb{
+    min = {-1000, -1000, -1000},
+    max = {1000, 1000, 1000},
+  })
 }
 
 destroy :: proc(world: ^World, resources_manager: ^resources.Manager, gpu_context: ^gpu.GPUContext = nil) {
@@ -336,6 +341,7 @@ destroy :: proc(world: ^World, resources_manager: ^resources.Manager, gpu_contex
   }
   resources.pool_destroy(world.nodes, proc(node: ^Node) {})
   delete(world.traversal_stack)
+  aoe_destroy(&world.aoe)
 }
 
 init_gpu :: proc(

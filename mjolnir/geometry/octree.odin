@@ -316,6 +316,45 @@ octree_node_query_sphere :: proc(
   }
 }
 
+octree_query_disc :: proc(
+  octree: ^Octree($T),
+  center: [3]f32,
+  normal: [3]f32,
+  radius: f32,
+  results: ^[dynamic]T,
+) {
+  clear(results)
+  octree_node_query_disc(octree, octree.root, center, normal, radius, results)
+}
+
+@(private)
+octree_node_query_disc :: proc(
+  octree: ^Octree($T),
+  node: ^OctreeNode(T),
+  center: [3]f32,
+  normal: [3]f32,
+  radius: f32,
+  results: ^[dynamic]T,
+) {
+  if !aabb_disc_intersects(node.bounds, center, normal, radius) do return
+  for item in node.items {
+    item_bounds := octree.bounds_func(item)
+    if aabb_disc_intersects(item_bounds, center, normal, radius) {
+      append(results, item)
+    }
+  }
+  if node.children[0] != nil {
+    octree_node_query_disc(octree, node.children[0], center, normal, radius, results)
+    octree_node_query_disc(octree, node.children[1], center, normal, radius, results)
+    octree_node_query_disc(octree, node.children[2], center, normal, radius, results)
+    octree_node_query_disc(octree, node.children[3], center, normal, radius, results)
+    octree_node_query_disc(octree, node.children[4], center, normal, radius, results)
+    octree_node_query_disc(octree, node.children[5], center, normal, radius, results)
+    octree_node_query_disc(octree, node.children[6], center, normal, radius, results)
+    octree_node_query_disc(octree, node.children[7], center, normal, radius, results)
+  }
+}
+
 Ray :: struct {
   origin:    [3]f32,
   direction: [3]f32,
