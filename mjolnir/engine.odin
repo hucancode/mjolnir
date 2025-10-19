@@ -442,25 +442,10 @@ render_debug_ui :: proc(self: ^Engine) {
     mu.label(&self.render.ui.ctx, fmt.tprintf("Textures %d", len(self.resource_manager.image_2d_buffers.entries) - len(self.resource_manager.image_2d_buffers.free_indices)))
     mu.label(&self.render.ui.ctx, fmt.tprintf("Materials %d", len(self.resource_manager.materials.entries) - len(self.resource_manager.materials.free_indices)))
     mu.label(&self.render.ui.ctx, fmt.tprintf("Meshes %d", len(self.resource_manager.meshes.entries) - len(self.resource_manager.meshes.free_indices)))
-
-    // Visibility culling statistics
-    mu.label(&self.render.ui.ctx, "")
-    mu.label(&self.render.ui.ctx, "=== Visibility Culling ===")
-
-    // Get stats for main camera (opaque pass)
-    main_camera := get_main_camera(self)
-    if main_camera != nil {
+    if main_camera := get_main_camera(self); main_camera != nil {
       main_stats := world.visibility_system_get_stats(&self.world.visibility, main_camera, self.render.main_camera.index, self.frame_index)
       mu.label(&self.render.ui.ctx, fmt.tprintf("Total Objects: %d", self.world.visibility.node_count))
-      mu.label(&self.render.ui.ctx, fmt.tprintf("Late Pass: %d draws", main_stats.late_draw_count))
-
-      // Calculate culling efficiency
-      efficiency: f32 = 0.0
-      if self.world.visibility.node_count > 0 {
-        efficiency = f32(main_stats.late_draw_count) / f32(self.world.visibility.node_count) * 100.0
-      }
-
-      mu.label(&self.render.ui.ctx, fmt.tprintf("Culling Efficiency: %.1f%%", efficiency))
+      mu.label(&self.render.ui.ctx, fmt.tprintf("Draw count: %d draws", main_stats.late_draw_count))
     }
   }
 }
