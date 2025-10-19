@@ -11,6 +11,7 @@ import "mjolnir/resources"
 import "mjolnir/world"
 import "vendor:glfw"
 import mu "vendor:microui"
+import vk "vendor:vulkan"
 
 LIGHT_COUNT :: 10
 ALL_SPOT_LIGHT :: false
@@ -21,7 +22,7 @@ brick_wall_mat_handle: resources.Handle
 hammer_handle: resources.Handle
 forcefield_handle: resources.Handle
 
-portal_render_target_index: int = -1
+portal_camera_handle: resources.Handle
 portal_material_handle: resources.Handle
 portal_quad_handle: resources.Handle
 
@@ -42,6 +43,7 @@ main :: proc() {
   engine.update_proc = update
   engine.key_press_proc = on_key_pressed
   engine.render2d_proc = render_2d
+  engine.custom_render_proc = on_custom_render
   mjolnir.run(engine, 1280, 720, "Mjolnir")
 }
 
@@ -477,9 +479,9 @@ setup :: proc(engine: ^mjolnir.Engine) {
       }
     }
   }
-  // add_fog(engine, [3]f32{0.4, 0.0, 0.8}, 0.02, 5.0, 20.0)
+  add_fog(engine, [3]f32{0.4, 0.0, 0.8}, 0.02, 5.0, 20.0)
   // add_bloom(engine)
-  // add_crosshatch(engine, [2]f32{1280, 720})
+  add_crosshatch(engine, [2]f32{1280, 720})
   // add_blur(engine, 18.0)
   // add_tonemap(engine, 1.5, 1.3)
   // add_dof(engine)
@@ -494,44 +496,43 @@ setup :: proc(engine: ^mjolnir.Engine) {
     world.camera_controller_sync(&free_controller, main_camera)
   }
   current_controller = &orbit_controller
-  when false { // Disabled: portal feature requires render targets system (removed)
-    log.info("Setting up portal...")
-    idx, portal_ok := create_render_target(
+  when true {
+    // Create portal camera with its own render target
+    portal_camera_ok: bool
+    portal_camera_handle, portal_camera_ok = create_camera(
       engine,
-      512,
-      512,
-      .R8G8B8A8_UNORM,
-      .D32_SFLOAT,
-      camera_position = {5, 15, 7},
-      camera_target = {0, 0, 0},
+      512,  // width
+      512,  // height
+      {.GEOMETRY, .LIGHTING, .TRANSPARENCY, .PARTICLES},  // enabled passes (no post-process for performance)
+      {5, 15, 7},  // camera position
+      {0, 0, 0},   // looking at origin
+      math.PI * 0.5,  // FOV
+      0.1,  // near plane
+      100.0,  // far plane
     )
-    portal_render_target_index = idx
-    if !portal_ok {
-      log.error("Failed to create portal scene capture")
+    if !portal_camera_ok {
+      log.error("Failed to create portal camera")
     }
-    log.infof(
-      "Portal scene capture created at index: %d",
-      portal_render_target_index,
-    )
-    portal_material_handle = {}
-    portal_material_ok := false
+
+    // Create material for the portal surface (texture will be set per-frame)
+    portal_material_ok: bool
     portal_material_handle, portal_material_ok = create_material(
       engine,
       {.ALBEDO_TEXTURE},
     )
-    log.infof(
-      "Portal material created with handle: %v",
-      portal_material_handle,
-    )
-    portal_mesh_handle, portal_mesh_ok := create_mesh(
+
+    // Create the portal quad mesh
+    portal_mesh_ok: bool
+    portal_quad_handle, portal_mesh_ok = create_mesh(
       engine,
       geometry.make_quad(),
     )
+
     if portal_material_ok && portal_mesh_ok {
       _, portal_node, portal_spawn_ok := spawn(
         engine,
         world.MeshAttachment {
-          handle = portal_mesh_handle,
+          handle = portal_quad_handle,
           material = portal_material_handle,
           cast_shadow = false,
         },
@@ -597,8 +598,6 @@ update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
       linalg.VECTOR3F32_Y_AXIS,
     )
   }
-  // Disabled: portal feature requires render targets system (removed)
-  // if portal_render_target_index >= 0 { ... }
 }
 
 on_key_pressed :: proc(engine: ^mjolnir.Engine, key, action, mods: int) {
@@ -642,4 +641,20 @@ render_2d :: proc(engine: ^mjolnir.Engine, ctx: ^mu.Context) {
     48,
     {255, 255, 255, 255},
   )
+}
+
+on_custom_render :: proc(engine: ^mjolnir.Engine, command_buffer: vk.CommandBuffer) {
+  using mjolnir
+  if portal_camera_handle.generation == 0 || portal_material_handle.generation == 0 do return
+
+  // Get the portal camera's output texture for the CURRENT frame
+  portal_texture_handle := get_camera_attachment(
+    engine,
+    portal_camera_handle,
+    resources.AttachmentType.FINAL_IMAGE,
+    engine.frame_index,
+  )
+
+  // Update material to use portal camera's rendered output
+  update_material_texture(engine, portal_material_handle, .ALBEDO_TEXTURE, portal_texture_handle)
 }

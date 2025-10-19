@@ -456,7 +456,12 @@ begin_record :: proc(
   command_buffer: vk.CommandBuffer,
   ret: vk.Result,
 ) {
-  command_buffer = self.commands[frame_index]
+  camera := resources.get(resources_manager.cameras, camera_handle)
+  if camera == nil {
+    ret = .ERROR_UNKNOWN
+    return
+  }
+  command_buffer = camera.geometry_commands[frame_index]
   vk.ResetCommandBuffer(command_buffer, {}) or_return
 
   color_formats := [?]vk.Format {

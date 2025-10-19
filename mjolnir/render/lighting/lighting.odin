@@ -510,12 +510,19 @@ shutdown :: proc(
 begin_record :: proc(
   self: ^Renderer,
   frame_index: u32,
+  camera_handle: resources.Handle,
+  resources_manager: ^resources.Manager,
   color_format: vk.Format,
 ) -> (
   command_buffer: vk.CommandBuffer,
   ret: vk.Result,
 ) {
-  command_buffer = self.commands[frame_index]
+  camera := resources.get(resources_manager.cameras, camera_handle)
+  if camera == nil {
+    ret = .ERROR_UNKNOWN
+    return
+  }
+  command_buffer = camera.lighting_commands[frame_index]
   vk.ResetCommandBuffer(command_buffer, {}) or_return
   color_formats := [1]vk.Format{color_format}
   rendering_info := vk.CommandBufferInheritanceRenderingInfo {
