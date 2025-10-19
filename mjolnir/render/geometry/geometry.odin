@@ -13,9 +13,8 @@ PushConstant :: struct {
 }
 
 Renderer :: struct {
-  pipeline:        vk.Pipeline,
-  pipeline_layout: vk.PipelineLayout,
-  commands:        [resources.MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
+  pipeline: vk.Pipeline,
+  commands: [resources.MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
 }
 
 init :: proc(
@@ -31,8 +30,7 @@ init :: proc(
   ) or_return
 
   depth_format: vk.Format = .D32_SFLOAT
-  self.pipeline_layout = resources_manager.geometry_pipeline_layout
-  if self.pipeline_layout == 0 {
+  if resources_manager.geometry_pipeline_layout == 0 {
     return .ERROR_INITIALIZATION_FAILED
   }
   spec_data, spec_entries, spec_info := shared.make_shader_spec_constants()
@@ -151,7 +149,7 @@ init :: proc(
     pDepthStencilState  = &depth_stencil,
     pColorBlendState    = &color_blending,
     pDynamicState       = &dynamic_state,
-    layout              = self.pipeline_layout,
+    layout              = resources_manager.geometry_pipeline_layout,
     pNext               = &rendering_info,
   }
   vk.CreateGraphicsPipelines(
@@ -392,7 +390,7 @@ render :: proc(
   vk.CmdBindDescriptorSets(
     command_buffer,
     .GRAPHICS,
-    self.pipeline_layout,
+    resources_manager.geometry_pipeline_layout,
     0,
     len(descriptor_sets),
     raw_data(descriptor_sets[:]),
@@ -405,7 +403,7 @@ render :: proc(
   }
   vk.CmdPushConstants(
     command_buffer,
-    self.pipeline_layout,
+    resources_manager.geometry_pipeline_layout,
     {.VERTEX, .FRAGMENT},
     0,
     size_of(PushConstant),

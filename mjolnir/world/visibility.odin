@@ -43,12 +43,9 @@ VisibilitySystem :: struct {
   sphere_cull_layout:        vk.PipelineLayout,
   depth_reduce_layout:       vk.PipelineLayout,
 
-  // Depth rendering pipeline
-  depth_pipeline:            vk.Pipeline,
-  depth_pipeline_layout:     vk.PipelineLayout,
-
-  // Spherical depth rendering pipeline (for point light shadows)
-  spherical_depth_pipeline:  vk.Pipeline,
+  // Depth rendering pipelines
+  depth_pipeline:            vk.Pipeline, // Uses geometry_pipeline_layout
+  spherical_depth_pipeline:  vk.Pipeline, // Uses spherical_camera_pipeline_layout
 
   // System parameters
   max_draws:                 u32,
@@ -118,11 +115,6 @@ visibility_system_shutdown :: proc(
   vk.DestroyPipelineLayout(device, system.late_cull_layout, nil)
   vk.DestroyPipelineLayout(device, system.sphere_cull_layout, nil)
   vk.DestroyPipelineLayout(device, system.depth_reduce_layout, nil)
-  // Note: depth_pipeline_layout is shared from resources_manager, don't destroy it
-  // Note: spherical_depth_pipeline also uses geometry_pipeline_layout
-
-  // Note: Descriptor set layouts are owned by Manager and will be destroyed there
-  // Note: Camera resources (buffers, textures, descriptor sets) are now cleaned up by camera_destroy
 }
 
 visibility_system_set_node_count :: proc(system: ^VisibilitySystem, count: u32) {
@@ -799,8 +791,7 @@ create_depth_pipeline :: proc(
   }
 
   // Use the shared geometry pipeline layout from resources manager
-  system.depth_pipeline_layout = resources_manager.geometry_pipeline_layout
-  if system.depth_pipeline_layout == 0 {
+  if resources_manager.geometry_pipeline_layout == 0 {
     return .ERROR_INITIALIZATION_FAILED
   }
 
@@ -824,7 +815,7 @@ create_depth_pipeline :: proc(
     pDepthStencilState  = &depth_stencil,
     pColorBlendState    = &color_blend,
     pDynamicState       = &dynamic_state,
-    layout              = system.depth_pipeline_layout,
+    layout              = resources_manager.geometry_pipeline_layout,
   }
 
   vk.CreateGraphicsPipelines(
@@ -965,8 +956,8 @@ create_spherical_depth_pipeline :: proc(
     pDynamicStates    = raw_data(dynamic_states[:]),
   }
 
-  // Use the shared geometry pipeline layout from resources manager
-  if resources_manager.geometry_pipeline_layout == 0 {
+  // Use the shared spherical camera pipeline layout from resources manager
+  if resources_manager.spherical_camera_pipeline_layout == 0 {
     return .ERROR_INITIALIZATION_FAILED
   }
 
@@ -991,7 +982,7 @@ create_spherical_depth_pipeline :: proc(
     pDepthStencilState  = &depth_stencil,
     pColorBlendState    = &color_blend,
     pDynamicState       = &dynamic_state,
-    layout              = resources_manager.geometry_pipeline_layout,
+    layout              = resources_manager.spherical_camera_pipeline_layout,
   }
 
   vk.CreateGraphicsPipelines(
@@ -1110,7 +1101,7 @@ render_depth_pass :: proc(
     vk.CmdBindDescriptorSets(
       command_buffer,
       .GRAPHICS,
-      system.depth_pipeline_layout,
+      resources_manager.geometry_pipeline_layout,
       0,
       len(descriptor_sets),
       raw_data(descriptor_sets[:]),
@@ -1122,7 +1113,7 @@ render_depth_pass :: proc(
     camera_index := camera_index
     vk.CmdPushConstants(
       command_buffer,
-      system.depth_pipeline_layout,
+      resources_manager.geometry_pipeline_layout,
       {.VERTEX},
       0,
       size_of(u32),
@@ -1475,9 +1466,9 @@ render_spherical_depth_pass :: proc(
   if system.spherical_depth_pipeline != 0 {
     vk.CmdBindPipeline(command_buffer, .GRAPHICS, system.spherical_depth_pipeline)
 
-    // Bind all descriptor sets - NOTE: Using spherical_camera_buffer instead of camera_buffer
+    // Bind all descriptor sets - NOTE: Using spherical_camera_buffer at set 0
     descriptor_sets := [?]vk.DescriptorSet {
-      resources_manager.spherical_camera_buffer_descriptor_set, // Use spherical camera buffer!
+      resources_manager.spherical_camera_buffer_descriptor_set,
       resources_manager.textures_descriptor_set,
       resources_manager.bone_buffer_descriptor_set,
       resources_manager.material_buffer_descriptor_set,
@@ -1489,7 +1480,7 @@ render_spherical_depth_pass :: proc(
     vk.CmdBindDescriptorSets(
       command_buffer,
       .GRAPHICS,
-      resources_manager.geometry_pipeline_layout,
+      resources_manager.spherical_camera_pipeline_layout,
       0,
       len(descriptor_sets),
       raw_data(descriptor_sets[:]),
@@ -1501,8 +1492,8 @@ render_spherical_depth_pass :: proc(
     cam_idx := camera_index
     vk.CmdPushConstants(
       command_buffer,
-      resources_manager.geometry_pipeline_layout,
-      {.VERTEX},
+      resources_manager.spherical_camera_pipeline_layout,
+      {.VERTEX, .GEOMETRY},
       0,
       size_of(u32),
       &cam_idx,
