@@ -751,10 +751,8 @@ load_animations :: proc(
   gltf_skin: ^cgltf.skin,
   mesh_handle: resources.Handle,
 ) -> bool {
-  mesh, ok := resources.get_mesh(resources_manager, mesh_handle)
-  if !ok {
-    return false
-  }
+  mesh := resources.get(resources_manager.meshes, mesh_handle)
+  if mesh == nil do return false
   skinning := &mesh.skinning.?
 
   for gltf_anim, i in gltf_data.animations {

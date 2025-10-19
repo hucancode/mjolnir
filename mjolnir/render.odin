@@ -250,9 +250,8 @@ record_geometry_pass :: proc(
     resources_manager,
   ) or_return
 
-  // Get camera pointer for visibility dispatch
-  camera, camera_ok := resources.get_camera(resources_manager, camera_handle)
-  if !camera_ok {
+  camera := resources.get(resources_manager.cameras, camera_handle)
+  if camera == nil {
     log.error("Failed to get camera for geometry pass")
     return .ERROR_UNKNOWN
   }
@@ -438,9 +437,8 @@ record_transparency_pass :: proc(
     resources_manager,
   )
 
-  // Get camera pointer for visibility dispatch
-  camera, camera_ok := resources.get_camera(resources_manager, camera_handle)
-  if !camera_ok {
+  camera := resources.get(resources_manager.cameras, camera_handle)
+  if camera == nil {
     log.error("Failed to get camera for transparency pass")
     return .ERROR_UNKNOWN
   }

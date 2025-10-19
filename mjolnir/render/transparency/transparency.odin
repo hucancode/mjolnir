@@ -353,19 +353,19 @@ begin_pass :: proc(
   if camera == nil do return
 
   // Setup color attachment - load existing content
-  color_texture, ok := resources.get_image_2d(
-    resources_manager,
+  color_texture := resources.get(
+    resources_manager.image_2d_buffers,
     resources.camera_get_attachment(camera, .FINAL_IMAGE, frame_index),
   )
-  if !ok {
+  if color_texture == nil {
     log.error("Transparent lighting missing color attachment")
     return
   }
-  depth_texture, depth_found := resources.get_image_2d(
-    resources_manager,
+  depth_texture := resources.get(
+    resources_manager.image_2d_buffers,
     resources.camera_get_attachment(camera, .DEPTH, frame_index),
   )
-  if !depth_found {
+  if depth_texture == nil {
     log.error("Transparent lighting missing depth attachment")
     return
   }

@@ -69,10 +69,8 @@ scene_geometry_collector_traverse :: proc(node: ^Node, ctx: rawptr) -> bool {
     return true
   }
   if mesh_attachment, is_mesh := node.attachment.(MeshAttachment); is_mesh {
-    mesh, ok := resources.get_mesh(collector.resources_manager, mesh_attachment.handle)
-    if !ok {
-      return true
-    }
+    mesh := resources.get(collector.resources_manager.meshes, mesh_attachment.handle)
+    if mesh == nil do return true
     world_matrix := node.transform.world_matrix
     area_type := u8(recast.RC_WALKABLE_AREA)
     if collector.area_type_mapper != nil {
@@ -561,14 +559,9 @@ create_navigation_context :: proc(
   resources.Handle,
   bool,
 ) {
-  nav_mesh, ok := resources.get_navmesh(resources_manager, nav_mesh_handle)
-  if !ok {
-    log.error("Invalid navigation mesh handle for context creation")
-    return {}, false
-  }
-  context_handle: resources.Handle
-  nav_context: ^resources.NavContext
-  context_handle, nav_context, ok = resources.alloc(&resources_manager.nav_contexts)
+  nav_mesh := resources.get(resources_manager.nav_meshes, nav_mesh_handle)
+  if nav_mesh == nil do return {}, false
+  context_handle, nav_context, ok := resources.alloc(&resources_manager.nav_contexts)
   if !ok {
     log.error("Failed to allocate navigation context")
     return context_handle, false
@@ -600,16 +593,10 @@ nav_find_path :: proc(
   path: [][3]f32,
   success: bool,
 ) {
-  nav_context, ok := resources.get_nav_context(resources_manager, context_handle)
-  if !ok {
-    log.error("Invalid navigation context handle")
-    return nil, false
-  }
-  nav_mesh, mesh_found := resources.get_navmesh(resources_manager, nav_context.associated_mesh)
-  if !mesh_found {
-    log.error("Invalid navigation mesh associated with context")
-    return nil, false
-  }
+  nav_context := resources.get(resources_manager.nav_contexts, context_handle)
+  if nav_context == nil do return nil, false
+  nav_mesh := resources.get(resources_manager.nav_meshes, nav_context.associated_mesh)
+  if nav_mesh == nil do return nil, false
   half_extents := [3]f32{2.0, 4.0, 2.0} // Search area for finding polygons
   status, start_ref, start_pos := detour.find_nearest_poly(
     &nav_context.nav_mesh_query,
@@ -710,10 +697,8 @@ nav_is_position_walkable :: proc(
   context_handle: resources.Handle,
   position: [3]f32,
 ) -> bool {
-  nav_context, ok := resources.get_nav_context(resources_manager, context_handle)
-  if !ok {
-    return false
-  }
+  nav_context := resources.get(resources_manager.nav_contexts, context_handle)
+  if nav_context == nil do return false
 
   half_extents := [3]f32{1.0, 2.0, 1.0}
 
@@ -816,12 +801,8 @@ build_and_visualize_navigation_mesh :: proc(
   }
   nav_mesh_handle = mesh_handle
 
-  // Get the navigation mesh for visualization
-  nav_mesh, found := resources.get_navmesh(resources_manager, nav_mesh_handle)
-  if !found {
-    log.error("Failed to get navigation mesh for visualization")
-    return nav_mesh_handle, false
-  }
+  nav_mesh := resources.get(resources_manager.nav_meshes, nav_mesh_handle)
+  if nav_mesh == nil do return nav_mesh_handle, false
 
   // Build visualization from Detour mesh
   tile := detour.get_tile_at(&nav_mesh.detour_mesh, 0, 0, 0)

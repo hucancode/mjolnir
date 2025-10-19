@@ -31,7 +31,6 @@ Light :: struct {
   camera_handle:            Handle, // Camera (regular or spherical based on light type)
 }
 
-// Create a new light and return its handle
 create_light :: proc(
   manager: ^Manager,
   gpu_context: ^gpu.GPUContext,
@@ -61,7 +60,6 @@ create_light :: proc(
   light.camera_index = 0xFFFFFFFF
   light.shadow_map = 0xFFFFFFFF
 
-  // Create shadow camera if shadow casting is enabled
   if cast_shadow {
     #partial switch light_type {
       case .POINT:
@@ -182,61 +180,11 @@ destroy_light :: proc(
   return freed
 }
 
-get_light :: proc(
-  manager: ^Manager,
-  handle: Handle,
-) -> (
-  ret: ^Light,
-  ok: bool,
-) #optional_ok {
-  ret, ok = get(manager.lights, handle)
-  return
-}
-
-set_light_color :: proc(
-  manager: ^Manager,
-  handle: Handle,
-  color: [3]f32,
-  intensity: f32,
-) {
+update_light_gpu_data :: proc(manager: ^Manager, handle: Handle) {
   if light, ok := get(manager.lights, handle); ok {
-    light.color = {color.x, color.y, color.z, intensity}
     gpu.write(&manager.lights_buffer, &light.data, int(handle.index))
   }
 }
-
-set_light_radius :: proc(manager: ^Manager, handle: Handle, radius: f32) {
-  if light, ok := get(manager.lights, handle); ok {
-    light.radius = radius
-    gpu.write(&manager.lights_buffer, &light.data, int(handle.index))
-  }
-}
-
-set_spot_light_angles :: proc(
-  manager: ^Manager,
-  handle: Handle,
-  inner_angle: f32,
-  outer_angle: f32,
-) {
-  if light, ok := get(manager.lights, handle); ok {
-    light.angle_inner = inner_angle
-    light.angle_outer = outer_angle
-    gpu.write(&manager.lights_buffer, &light.data, int(handle.index))
-  }
-}
-
-set_light_cast_shadow :: proc(
-  manager: ^Manager,
-  handle: Handle,
-  cast_shadow: b32,
-) {
-  if light, ok := get(manager.lights, handle); ok {
-    light.cast_shadow = cast_shadow
-    gpu.write(&manager.lights_buffer, &light.data, int(handle.index))
-  }
-}
-
-// Update all light shadow camera transforms and shadow map indices
 update_light_shadow_camera_transforms :: proc(manager: ^Manager, frame_index: u32 = 0) {
   for &entry, light_index in manager.lights.entries do if entry.active {
     light := &entry.item

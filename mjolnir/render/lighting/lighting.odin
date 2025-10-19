@@ -674,8 +674,8 @@ render :: proc(
     command_buffer: vk.CommandBuffer,
     resources_manager: ^resources.Manager,
   ) {
-    mesh_ptr, ok := resources.get_mesh(resources_manager, mesh_handle)
-    if !ok || mesh_ptr == nil {
+    mesh_ptr := resources.get(resources_manager.meshes, mesh_handle)
+    if mesh_ptr == nil {
       log.errorf("Failed to get mesh for handle %v", mesh_handle)
       return
     }

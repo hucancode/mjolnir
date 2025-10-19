@@ -318,11 +318,7 @@ time_since_start :: proc(self: ^Engine) -> f32 {
 }
 
 get_main_camera :: proc(self: ^Engine) -> ^resources.Camera {
-  camera_ptr, camera_found := resources.get_camera(&self.resource_manager, self.render.main_camera)
-  if !camera_found {
-    return nil
-  }
-  return camera_ptr
+  return resources.get(self.resource_manager.cameras, self.render.main_camera)
 }
 
 update_skeletal_animations :: proc(self: ^Engine, delta_time: f32) {
@@ -349,8 +345,7 @@ update_skeletal_animations :: proc(self: ^Engine, delta_time: f32) {
     clip := anim_instance.clip
     if clip == nil do continue
 
-    mesh := resources.get_mesh(&self.resource_manager, mesh_attachment.handle)
-    if mesh == nil do continue
+    mesh := resources.get(self.resource_manager.meshes, mesh_attachment.handle) or_continue
     mesh_skinning, mesh_has_skin := mesh.skinning.?
     if !mesh_has_skin do continue
 
@@ -492,11 +487,8 @@ render :: proc(self: ^Engine) -> vk.Result {
   world.begin_frame(&self.world, &self.resource_manager)
   update_skeletal_animations(self, render_delta_time)
   main_camera_handle := self.render.main_camera
-  main_camera, main_camera_ok := resources.get_camera(&self.resource_manager, main_camera_handle)
-  if !main_camera_ok {
-    log.errorf("Failed to get main camera")
-    return .ERROR_UNKNOWN
-  }
+  main_camera := resources.get(self.resource_manager.cameras, main_camera_handle)
+  if main_camera == nil do return .ERROR_UNKNOWN
   for &entry, cam_index in self.resource_manager.cameras.entries {
     if !entry.active do continue
     resources.camera_upload_data(&self.resource_manager, &entry.item, u32(cam_index))

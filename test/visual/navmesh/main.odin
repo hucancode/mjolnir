@@ -444,11 +444,11 @@ find_navmesh_point_from_mouse :: proc(
     ray_dir.y,
     ray_dir.z,
   )
-  nav_context, ok := resources.get_nav_context(
-    &engine_ptr.resource_manager,
+  nav_context := resources.get(
+    engine_ptr.resource_manager.nav_contexts,
     demo_state.nav_context_handle,
   )
-  if !ok {
+  if nav_context == nil {
     return {}, false
   }
   // Strategy 1: Try intersection with ground plane (y=0) first
@@ -794,11 +794,11 @@ print_navmesh_info :: proc(engine_ptr: ^mjolnir.Engine) {
     log.info("No navigation mesh available")
     return
   }
-  nav_mesh, ok := resources.get_navmesh(
-    &engine_ptr.resource_manager,
+  nav_mesh := resources.get(
+    engine_ptr.resource_manager.nav_meshes,
     demo_state.nav_mesh_handle,
   )
-  if !ok {
+  if nav_mesh == nil {
     log.error("Failed to get navigation mesh")
     return
   }

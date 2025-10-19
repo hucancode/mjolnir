@@ -250,7 +250,7 @@ camera_controller_free_update :: proc(
   // Apply movement
   if linalg.length(move_vector) > 0 {
     move_vector = linalg.normalize(move_vector) * speed * delta_time
-    resources.camera_move(camera, move_vector)
+    camera.position += move_vector
   }
   // Check mouse button state
   right_button_pressed :=
@@ -276,11 +276,17 @@ camera_controller_free_update :: proc(
     self.last_mouse_pos = current_mouse_pos
 
     // Apply rotation
-    resources.camera_rotate(
-      camera,
-      f32(self.mouse_delta.x) * free.mouse_sensitivity,
-      f32(self.mouse_delta.y) * free.mouse_sensitivity,
-    )
+    yaw_delta := f32(self.mouse_delta.x) * free.mouse_sensitivity
+    pitch_delta := f32(self.mouse_delta.y) * free.mouse_sensitivity
+
+    // Rotate around world up for yaw
+    yaw_quat := linalg.quaternion_angle_axis(-yaw_delta, [3]f32{0, 1, 0})
+    camera.rotation = yaw_quat * camera.rotation
+
+    // Rotate around local right for pitch
+    right := resources.camera_right(camera)
+    pitch_quat := linalg.quaternion_angle_axis(-pitch_delta, right)
+    camera.rotation = pitch_quat * camera.rotation
   }
 }
 
@@ -307,7 +313,7 @@ camera_controller_follow_update :: proc(
     if follow.look_at_target {
       resources.camera_look_at(camera, new_pos, target_pos)
     } else {
-      resources.camera_set_position(camera, new_pos)
+      camera.position = new_pos
     }
   }
 }

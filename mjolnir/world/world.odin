@@ -163,11 +163,10 @@ play_animation :: proc(
   if !ok {
     return false
   }
-  mesh := resources.get_mesh(resources_manager, data.handle)
+  mesh := resources.get(resources_manager.meshes, data.handle)
+  if mesh == nil do return false
   skinning, has_skin := &data.skinning.?
-  if mesh == nil || !has_skin {
-    return false
-  }
+  if !has_skin do return false
   anim_inst, found := resources.make_animation_instance(resources_manager, name, mode)
   if !found {
     return false
@@ -435,7 +434,7 @@ traverse :: proc(world: ^World, resources_manager: ^resources.Manager = nil, cb_
 
       parent_node := resources.get(world.nodes, current_node.parent) or_break
       parent_mesh_attachment := parent_node.attachment.(MeshAttachment) or_break
-      parent_mesh := resources.get_mesh(resources_manager, parent_mesh_attachment.handle) or_break
+      parent_mesh := resources.get(resources_manager.meshes, parent_mesh_attachment.handle) or_break
 
       bone_index := resources.find_bone_by_name(parent_mesh, current_node.bone_socket) or_break
       parent_skinning := parent_mesh_attachment.skinning.? or_break
@@ -580,11 +579,10 @@ assign_light_to_node :: proc(
   if !is_light {
     return
   }
-  light, ok := resources.get_light(resources_manager, attachment.handle)
-  if ok {
+  if light, ok := resources.get(resources_manager.lights, attachment.handle); ok {
     light.node_handle = node_handle
     light.node_index = node_handle.index
-    gpu.write(&resources_manager .lights_buffer, &light.data, int(attachment.handle.index))
+    gpu.write(&resources_manager.lights_buffer, &light.data, int(attachment.handle.index))
   }
 }
 

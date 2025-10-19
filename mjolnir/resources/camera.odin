@@ -95,7 +95,6 @@ DepthPyramid :: struct {
   height:       u32,
 }
 
-// Initialize a new camera with render target
 camera_init :: proc(
   camera: ^Camera,
   gpu_context: ^gpu.GPUContext,
@@ -129,7 +128,6 @@ camera_init :: proc(
   }
   camera.position = camera_position
 
-  // Set camera to look at target
   forward := linalg.normalize(camera_target - camera_position)
   safe_up := [3]f32{0, 1, 0}
   if math.abs(linalg.dot(forward, safe_up)) > 0.999 {
@@ -150,7 +148,6 @@ camera_init :: proc(
   camera.extent = {width, height}
   camera.enabled_passes = enabled_passes
 
-  // Create attachments based on enabled passes
   needs_gbuffer := .GEOMETRY in enabled_passes || .LIGHTING in enabled_passes
   needs_final :=
     .LIGHTING in enabled_passes ||
@@ -211,7 +208,6 @@ camera_init :: proc(
         vk.ImageUsageFlags{.COLOR_ATTACHMENT, .SAMPLED},
       )
     }
-    // Create depth attachments per-frame
     camera.attachments[.DEPTH][frame], _, _ = create_texture(
       gpu_context,
       manager,
@@ -251,7 +247,6 @@ camera_init :: proc(
     ) or_return
   }
 
-  // Create per-frame visibility resources (Step 1: Create all resources first)
   for frame in 0 ..< MAX_FRAMES_IN_FLIGHT {
     camera.late_draw_count[frame] = gpu.create_mutable_buffer(
       gpu_context,
@@ -267,7 +262,6 @@ camera_init :: proc(
       {.STORAGE_BUFFER, .INDIRECT_BUFFER, .TRANSFER_DST},
     ) or_return
 
-    // Create depth pyramid for this frame
     create_camera_depth_pyramid(gpu_context, manager, camera, width, height, u32(frame)) or_return
   }
 
@@ -463,26 +457,6 @@ camera_look_at :: proc(camera: ^Camera, from, to: [3]f32, world_up := [3]f32{0, 
   camera.rotation = linalg.quaternion_from_matrix3(rotation_matrix)
 }
 
-camera_set_position :: proc(camera: ^Camera, position: [3]f32) {
-  camera.position = position
-}
-
-camera_set_rotation :: proc(camera: ^Camera, rotation: quaternion128) {
-  camera.rotation = rotation
-}
-
-camera_move :: proc(camera: ^Camera, delta: [3]f32) {
-  camera.position += delta
-}
-
-camera_rotate :: proc(camera: ^Camera, delta_yaw, delta_pitch: f32) {
-  yaw_rotation := linalg.quaternion_angle_axis(delta_yaw, [3]f32{0, 1, 0})
-  right := camera_right(camera)
-  pitch_rotation := linalg.quaternion_angle_axis(delta_pitch, right)
-  camera.rotation = yaw_rotation * camera.rotation
-  camera.rotation = camera.rotation * pitch_rotation
-  camera.rotation = linalg.quaternion_normalize(camera.rotation)
-}
 
 camera_update_aspect_ratio :: proc(camera: ^Camera, new_aspect_ratio: f32) {
   switch &proj in camera.projection {

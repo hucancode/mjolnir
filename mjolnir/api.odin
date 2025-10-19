@@ -328,14 +328,6 @@ play_animation :: proc(
   world.play_animation(&engine.world, &engine.resource_manager, handle, name)
 }
 
-// Resource getters
-get_camera :: proc(engine: ^Engine, handle: resources.Handle) -> (^resources.Camera, bool) {
-  return resources.get_camera(&engine.resource_manager, handle)
-}
-
-get_material :: proc(engine: ^Engine, handle: resources.Handle) -> (^resources.Material, bool) {
-  return resources.get_material(&engine.resource_manager, handle)
-}
 
 // Camera management
 create_camera :: proc(
@@ -383,10 +375,8 @@ get_camera_attachment :: proc(
   attachment_type: resources.AttachmentType,
   frame_index: u32 = 0,
 ) -> (resources.Handle, bool) #optional_ok {
-  camera, camera_ok := resources.get_camera(&engine.resource_manager, camera_handle)
-  if !camera_ok {
-    return {}, false
-  }
+  camera := resources.get(engine.resource_manager.cameras, camera_handle)
+  if camera == nil do return {}, false
 
   handle := resources.camera_get_attachment(camera, attachment_type, frame_index)
   if handle.generation == 0 {
@@ -402,12 +392,8 @@ update_material_texture :: proc(
   texture_type: resources.ShaderFeature,
   texture_handle: resources.Handle,
 ) -> bool {
-  material, material_ok := resources.get_material(&engine.resource_manager, material_handle)
-  if !material_ok {
-    return false
-  }
+  material := resources.get(engine.resource_manager.materials, material_handle) or_return
 
-  // Update the appropriate texture based on type
   switch texture_type {
   case .ALBEDO_TEXTURE:
     material.albedo = texture_handle
@@ -421,123 +407,10 @@ update_material_texture :: proc(
     material.occlusion = texture_handle
   }
 
-  // Update GPU data
   result := resources.material_write_to_gpu(&engine.resource_manager, material_handle, material)
   return result == .SUCCESS
 }
 
-set_main_camera_look_at :: proc(engine: ^Engine, from: [3]f32, to: [3]f32, world_up: [3]f32 = {0, 1, 0}) -> bool {
-  main_camera := get_main_camera(engine)
-  if main_camera == nil {
-    return false
-  }
-  resources.camera_look_at(main_camera, from, to, world_up)
-  return true
-}
-
-set_main_camera_position :: proc(engine: ^Engine, position: [3]f32) -> bool {
-  main_camera := get_main_camera(engine)
-  if main_camera == nil {
-    return false
-  }
-  resources.camera_set_position(main_camera, position)
-  return true
-}
-
-set_main_camera_rotation :: proc(engine: ^Engine, rotation: quaternion128) -> bool {
-  main_camera := get_main_camera(engine)
-  if main_camera == nil {
-    return false
-  }
-  resources.camera_set_rotation(main_camera, rotation)
-  return true
-}
-
-move_main_camera :: proc(engine: ^Engine, delta: [3]f32) -> bool {
-  main_camera := get_main_camera(engine)
-  if main_camera == nil {
-    return false
-  }
-  resources.camera_move(main_camera, delta)
-  return true
-}
-
-rotate_main_camera :: proc(engine: ^Engine, delta_yaw, delta_pitch: f32) -> bool {
-  main_camera := get_main_camera(engine)
-  if main_camera == nil {
-    return false
-  }
-  resources.camera_rotate(main_camera, delta_yaw, delta_pitch)
-  return true
-}
-
-set_main_camera_aspect_ratio :: proc(engine: ^Engine, aspect_ratio: f32) -> bool {
-  main_camera := get_main_camera(engine)
-  if main_camera == nil {
-    return false
-  }
-  resources.camera_update_aspect_ratio(main_camera, aspect_ratio)
-  return true
-}
-
-// Camera manipulation - users should directly use geometry.camera_* functions
-
-// Node transform getters - these add value by providing safe access to node properties
-
-get_node_position :: proc(engine: ^Engine, handle: resources.Handle) -> ([3]f32, bool) {
-  node := get_node(engine, handle)
-  if node == nil {
-    return {}, false
-  }
-  return node.transform.position, true
-}
-
-set_node_position :: proc(engine: ^Engine, handle: resources.Handle, position: [3]f32) -> bool {
-  node := get_node(engine, handle)
-  if node == nil {
-    return false
-  }
-  node.transform.position = position
-  return true
-}
-
-get_node_rotation :: proc(engine: ^Engine, handle: resources.Handle) -> (quaternion128, bool) {
-  node := get_node(engine, handle)
-  if node == nil {
-    return quaternion128{}, false
-  }
-  return node.transform.rotation, true
-}
-
-set_node_rotation :: proc(engine: ^Engine, handle: resources.Handle, rotation: quaternion128) -> bool {
-  node := get_node(engine, handle)
-  if node == nil {
-    return false
-  }
-  node.transform.rotation = rotation
-  return true
-}
-
-get_node_scale :: proc(engine: ^Engine, handle: resources.Handle) -> ([3]f32, bool) {
-  node := get_node(engine, handle)
-  if node == nil {
-    return {}, false
-  }
-  return node.transform.scale, true
-}
-
-set_node_scale :: proc(engine: ^Engine, handle: resources.Handle, scale: [3]f32) -> bool {
-  node := get_node(engine, handle)
-  if node == nil {
-    return false
-  }
-  node.transform.scale = scale
-  return true
-}
-
-set_node_scale_uniform :: proc(engine: ^Engine, handle: resources.Handle, scale: f32) -> bool {
-  return set_node_scale(engine, handle, {scale, scale, scale})
-}
 
 // Navigation mesh creation and pathfinding
 build_navigation_mesh_from_world :: proc(

@@ -681,11 +681,11 @@ render :: proc(
 
     dst_view := output_view
     if !is_last {
-      dst_texture, ok := resources.get_image_2d(
-        resources_manager,
+      dst_texture := resources.get(
+        resources_manager.image_2d_buffers,
         self.images[dst_image_idx],
       )
-      if !ok {
+      if dst_texture == nil {
         log.errorf(
           "Post-process image handle %v not found",
           self.images[dst_image_idx],
@@ -709,11 +709,11 @@ render :: proc(
     }
     if !is_first {
       src_texture_idx := (i - 1) % 2 // Which ping-pong buffer the previous pass wrote to
-      src_texture, ok := resources.get_image_2d(
-        resources_manager,
+      src_texture := resources.get(
+        resources_manager.image_2d_buffers,
         self.images[src_texture_idx],
       )
-      if !ok {
+      if src_texture == nil {
         log.errorf(
           "Post-process source image handle %v not found",
           self.images[src_texture_idx],
