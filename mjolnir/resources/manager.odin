@@ -22,7 +22,7 @@ Manager :: struct {
   // Resource pools
   meshes:                       Pool(Mesh),
   materials:                    Pool(Material),
-  image_2d_buffers:             Pool(gpu.ImageBuffer),
+  image_2d_buffers:             Pool(gpu.Image),
   image_cube_buffers:           Pool(gpu.CubeImageBuffer),
   cameras:                      Pool(Camera),
   spherical_cameras:            Pool(SphericalCamera),
@@ -321,7 +321,7 @@ shutdown :: proc(
   // Now safe to destroy texture pools - all owned textures have been freed
   for &entry in manager.image_2d_buffers.entries {
     if entry.generation > 0 && entry.active {
-      gpu.image_buffer_destroy(gpu_context.device, &entry.item)
+      gpu.image_destroy(gpu_context.device, &entry.item)
     }
   }
   delete(manager.image_2d_buffers.entries)

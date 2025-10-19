@@ -573,7 +573,7 @@ destroy_images :: proc(
       &resources_manager.image_2d_buffers,
       handle,
     ); freed {
-      gpu.image_buffer_destroy(device, item)
+      gpu.image_destroy(device, item)
     }
   }
 }

@@ -699,8 +699,8 @@ depth_image_init :: proc(
 }
 
 CubeImageBuffer :: struct {
-  using buffer: ImageBuffer,
-  face_views:   [6]vk.ImageView, // One view per face for rendering
+  using base: Image,
+  face_views: [6]vk.ImageView, // One view per face for rendering
 }
 
 cube_depth_texture_init :: proc(
@@ -710,64 +710,19 @@ cube_depth_texture_init :: proc(
   format: vk.Format = .D32_SFLOAT,
   usage: vk.ImageUsageFlags = {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
 ) -> vk.Result {
-  self.width = size
-  self.height = size
-  create_info := vk.ImageCreateInfo {
-    sType         = .IMAGE_CREATE_INFO,
-    imageType     = .D2,
-    extent        = {size, size, 1},
-    mipLevels     = 1,
-    arrayLayers   = 6,
-    format        = .D32_SFLOAT,
-    tiling        = .OPTIMAL,
-    initialLayout = .UNDEFINED,
-    usage         = usage,
-    sharingMode   = .EXCLUSIVE,
-    samples       = {._1},
-    flags         = {.CUBE_COMPATIBLE},
-  }
-  vk.CreateImage(gpu_context.device, &create_info, nil, &self.image) or_return
-  mem_requirements: vk.MemoryRequirements
-  vk.GetImageMemoryRequirements(
-    gpu_context.device,
-    self.image,
-    &mem_requirements,
-  )
-  memory_type_index, found := find_memory_type_index(
-    gpu_context.physical_device,
-    mem_requirements.memoryTypeBits,
-    {.DEVICE_LOCAL},
-  )
-  if !found {
-    return .ERROR_UNKNOWN
-  }
-  alloc_info := vk.MemoryAllocateInfo {
-    sType           = .MEMORY_ALLOCATE_INFO,
-    allocationSize  = mem_requirements.size,
-    memoryTypeIndex = memory_type_index,
-  }
-  vk.AllocateMemory(
-    gpu_context.device,
-    &alloc_info,
-    nil,
-    &self.memory,
-  ) or_return
-  vk.BindImageMemory(gpu_context.device, self.image, self.memory, 0)
-  // Create 6 image views (one per face)
+  spec := image_spec_cube(size, format, usage)
+  self.base = image_create(gpu_context, spec) or_return
+
+  // Create 6 face views (one per face for rendering to individual faces)
   for i in 0 ..< 6 {
     view_info := vk.ImageViewCreateInfo {
       sType = .IMAGE_VIEW_CREATE_INFO,
       image = self.image,
       viewType = .D2,
-      format = .D32_SFLOAT,
-      components = {
-        r = .IDENTITY,
-        g = .IDENTITY,
-        b = .IDENTITY,
-        a = .IDENTITY,
-      },
+      format = format,
+      components = {r = .IDENTITY, g = .IDENTITY, b = .IDENTITY, a = .IDENTITY},
       subresourceRange = {
-        aspectMask = {.DEPTH},
+        aspectMask = self.spec.aspect_mask,
         baseMipLevel = 0,
         levelCount = 1,
         baseArrayLayer = u32(i),
@@ -781,26 +736,7 @@ cube_depth_texture_init :: proc(
       &self.face_views[i],
     ) or_return
   }
-  cube_view_info := vk.ImageViewCreateInfo {
-    sType = .IMAGE_VIEW_CREATE_INFO,
-    image = self.image,
-    viewType = .CUBE,
-    format = .D32_SFLOAT,
-    components = {r = .IDENTITY, g = .IDENTITY, b = .IDENTITY, a = .IDENTITY},
-    subresourceRange = {
-      aspectMask = {.DEPTH},
-      baseMipLevel = 0,
-      levelCount = 1,
-      baseArrayLayer = 0,
-      layerCount = 6,
-    },
-  }
-  vk.CreateImageView(
-    gpu_context.device,
-    &cube_view_info,
-    nil,
-    &self.view,
-  ) or_return
+
   return .SUCCESS
 }
 
@@ -812,9 +748,7 @@ cube_depth_texture_destroy :: proc(device: vk.Device, self: ^CubeImageBuffer) {
     vk.DestroyImageView(device, v, nil)
     v = 0
   }
-  vk.DestroyImageView(device, self.view, nil)
-  self.view = 0
-  image_buffer_destroy(device, &self.buffer)
+  image_destroy(device, &self.base)
 }
 
 // Create image buffer with custom mip levels
@@ -1152,7 +1086,7 @@ transition_vk_image :: proc(
 
 transition_2d_images :: proc(
   command_buffer: vk.CommandBuffer,
-  images: []ImageBuffer,
+  images: []Image,
   old_layout: vk.ImageLayout,
   new_layout: vk.ImageLayout,
   aspect_mask: vk.ImageAspectFlags,
@@ -1166,14 +1100,14 @@ transition_2d_images :: proc(
     len(images),
     context.temp_allocator,
   )
-  for texture, i in images {
+  for &img, i in images {
     barriers[i] = vk.ImageMemoryBarrier {
       sType = .IMAGE_MEMORY_BARRIER,
       oldLayout = old_layout,
       newLayout = new_layout,
       srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
       dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-      image = texture.image,
+      image = img.image,
       subresourceRange = {
         aspectMask = aspect_mask,
         levelCount = 1,

@@ -283,7 +283,7 @@ init :: proc(
   ) or_return
 
   // Initialize environment resources
-  environment_map: ^gpu.ImageBuffer
+  environment_map: ^gpu.Image
   self.environment_map, environment_map = resources.create_texture_from_path(
     gpu_context,
     resources_manager,
@@ -296,10 +296,10 @@ init :: proc(
   self.environment_max_lod = 8.0 // default fallback
   if environment_map != nil {
     self.environment_max_lod =
-      resources.calculate_mip_levels(
-        environment_map.width,
-        environment_map.height,
-      ) -
+      f32(gpu.calculate_mip_levels(
+        environment_map.spec.width,
+        environment_map.spec.height,
+      )) -
       1.0
   }
   brdf_handle, _, brdf_ret := resources.create_texture_from_data(
@@ -495,13 +495,13 @@ shutdown :: proc(
     &resources_manager.image_2d_buffers,
     self.environment_map,
   ); freed {
-    gpu.image_buffer_destroy(device, item)
+    gpu.image_destroy(device, item)
   }
   if item, freed := resources.free(
     &resources_manager.image_2d_buffers,
     self.brdf_lut,
   ); freed {
-    gpu.image_buffer_destroy(device, item)
+    gpu.image_destroy(device, item)
   }
   vk.DestroyPipelineLayout(device, self.lighting_pipeline_layout, nil)
   vk.DestroyPipeline(device, self.lighting_pipeline, nil)

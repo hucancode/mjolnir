@@ -26,7 +26,7 @@ Renderer :: struct {
   texture_descriptor_set:    vk.DescriptorSet,
   pipeline_layout:           vk.PipelineLayout,
   pipeline:                  vk.Pipeline,
-  atlas_texture:             ^gpu.ImageBuffer,
+  atlas_texture:             ^gpu.Image,
   proj_buffer:               gpu.MutableBuffer(matrix[4, 4]f32),
   vertex_buffer:             gpu.MutableBuffer(Vertex),
   index_buffer:              gpu.MutableBuffer(u32),

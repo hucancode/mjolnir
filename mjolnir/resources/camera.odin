@@ -292,7 +292,7 @@ camera_destroy :: proc(
     for frame in 0 ..< MAX_FRAMES_IN_FLIGHT {
       handle := camera.attachments[attachment_type][frame]
       if item, freed := free(&manager.image_2d_buffers, handle); freed {
-        gpu.image_buffer_destroy(device, item)
+        gpu.image_destroy(device, item)
       }
     }
   }
@@ -341,7 +341,7 @@ camera_destroy :: proc(
 
     // Free depth pyramid texture
     if pyramid_item, freed := free(&manager.image_2d_buffers, camera.depth_pyramid[frame].texture); freed {
-      gpu.image_buffer_destroy(device, pyramid_item)
+      gpu.image_destroy(device, pyramid_item)
     }
   }
 }
@@ -583,43 +583,19 @@ create_camera_depth_pyramid :: proc(
   // Calculate mip levels for depth pyramid based on pyramid base size
   mip_levels := u32(math.floor(math.log2(f32(max(pyramid_width, pyramid_height))))) + 1
 
-  // Create depth pyramid texture with mip levels using resources system
+  // Create depth pyramid texture with mip levels using new Image API
   pyramid_handle, pyramid_texture, pyramid_ok := alloc(&manager.image_2d_buffers)
   if !pyramid_ok {
     log.error("Failed to allocate handle for depth pyramid texture")
     return .ERROR_OUT_OF_DEVICE_MEMORY
   }
-  pyramid_texture^ = gpu.malloc_image_buffer_with_mips(
-    gpu_context,
-    pyramid_width,
-    pyramid_height,
-    .R32_SFLOAT,
-    .OPTIMAL,
-    {.SAMPLED, .STORAGE, .TRANSFER_DST},
-    {.DEVICE_LOCAL},
-    mip_levels,
-  ) or_return
 
-  // Register in bindless texture array (base mip level view)
-  base_view_info := vk.ImageViewCreateInfo {
-    sType = .IMAGE_VIEW_CREATE_INFO,
-    image = pyramid_texture.image,
-    viewType = .D2,
-    format = .R32_SFLOAT,
-    subresourceRange = {
-      aspectMask = {.COLOR},
-      baseMipLevel = 0,
-      levelCount = 1,
-      baseArrayLayer = 0,
-      layerCount = 1,
-    },
-  }
+  spec := gpu.image_spec_2d(pyramid_width, pyramid_height, .R32_SFLOAT, {.SAMPLED, .STORAGE, .TRANSFER_DST}, true)
+  spec.mip_levels = mip_levels
+  pyramid_texture^ = gpu.image_create(gpu_context, spec) or_return
 
-  base_view: vk.ImageView
-  vk.CreateImageView(gpu_context.device, &base_view_info, nil, &base_view) or_return
-  defer vk.DestroyImageView(gpu_context.device, base_view, nil)
-
-  set_texture_2d_descriptor(gpu_context, manager, pyramid_handle.index, base_view)
+  // Register the auto-created view in bindless texture array
+  set_texture_2d_descriptor(gpu_context, manager, pyramid_handle.index, pyramid_texture.view)
 
   camera.depth_pyramid[frame_index].texture = pyramid_handle
   camera.depth_pyramid[frame_index].mip_levels = mip_levels
