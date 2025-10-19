@@ -97,8 +97,9 @@ Manager :: struct {
   textures_set_layout:          vk.DescriptorSetLayout,
   textures_descriptor_set:      vk.DescriptorSet,
 
-  // Shared pipeline layout used by geometry-style renderers
-  geometry_pipeline_layout:     vk.PipelineLayout,
+  // Shared pipeline layouts
+  geometry_pipeline_layout:          vk.PipelineLayout, // Used by geometry, transparency, depth renderers
+  spherical_camera_pipeline_layout:  vk.PipelineLayout, // Used by spherical depth rendering (point light shadows)
 
   // Visibility system descriptor layouts (for shadow cameras)
   visibility_late_descriptor_layout:    vk.DescriptorSetLayout,
@@ -198,6 +199,22 @@ init :: proc(
     )
     manager.textures_set_layout = 0
     return layout_result
+  }
+  spherical_layout_result := create_spherical_camera_pipeline_layout(gpu_context, manager)
+  if spherical_layout_result != .SUCCESS {
+    vk.DestroyDescriptorSetLayout(
+      gpu_context.device,
+      manager.textures_set_layout,
+      nil,
+    )
+    manager.textures_set_layout = 0
+    vk.DestroyPipelineLayout(
+      gpu_context.device,
+      manager.geometry_pipeline_layout,
+      nil,
+    )
+    manager.geometry_pipeline_layout = 0
+    return spherical_layout_result
   }
   vk.AllocateDescriptorSets(
     gpu_context.device,
@@ -372,6 +389,12 @@ shutdown :: proc(
     nil,
   )
   manager.geometry_pipeline_layout = 0
+  vk.DestroyPipelineLayout(
+    gpu_context.device,
+    manager.spherical_camera_pipeline_layout,
+    nil,
+  )
+  manager.spherical_camera_pipeline_layout = 0
   vk.DestroyDescriptorSetLayout(
     gpu_context.device,
     manager.textures_set_layout,
@@ -437,6 +460,42 @@ create_geometry_pipeline_layout :: proc(
     },
     nil,
     &manager.geometry_pipeline_layout,
+  ) or_return
+  return .SUCCESS
+}
+
+create_spherical_camera_pipeline_layout :: proc(
+  gpu_context: ^gpu.GPUContext,
+  manager: ^Manager,
+) -> vk.Result {
+  // Pipeline layout for spherical depth rendering (point light shadows)
+  // Uses spherical_camera_buffer instead of regular camera_buffer at set 0
+  push_constant_range := vk.PushConstantRange {
+    stageFlags = {.VERTEX, .GEOMETRY, .FRAGMENT},
+    size       = size_of(u32),
+  }
+  set_layouts := [?]vk.DescriptorSetLayout {
+    manager.spherical_camera_buffer_set_layout, // Spherical cameras at set 0
+    manager.textures_set_layout,
+    manager.bone_buffer_set_layout,
+    manager.material_buffer_set_layout,
+    manager.world_matrix_buffer_set_layout,
+    manager.node_data_buffer_set_layout,
+    manager.mesh_data_buffer_set_layout,
+    manager.vertex_skinning_buffer_set_layout,
+    manager.lights_buffer_set_layout,
+  }
+  vk.CreatePipelineLayout(
+    gpu_context.device,
+    &vk.PipelineLayoutCreateInfo {
+      sType                  = .PIPELINE_LAYOUT_CREATE_INFO,
+      setLayoutCount         = len(set_layouts),
+      pSetLayouts            = raw_data(set_layouts[:]),
+      pushConstantRangeCount = 1,
+      pPushConstantRanges    = &push_constant_range,
+    },
+    nil,
+    &manager.spherical_camera_pipeline_layout,
   ) or_return
   return .SUCCESS
 }

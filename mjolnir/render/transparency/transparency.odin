@@ -8,7 +8,6 @@ import "core:log"
 import vk "vendor:vulkan"
 
 Renderer :: struct {
-  pipeline_layout:      vk.PipelineLayout,
   transparent_pipeline: vk.Pipeline,
   wireframe_pipeline:   vk.Pipeline,
   commands:             [resources.MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
@@ -31,12 +30,11 @@ init :: proc(
   ) or_return
 
   log.info("Initializing transparent renderer")
-  self.pipeline_layout = resources_manager.geometry_pipeline_layout
-  if self.pipeline_layout == 0 {
+  if resources_manager.geometry_pipeline_layout == 0 {
     return .ERROR_INITIALIZATION_FAILED
   }
-  create_transparent_pipelines(gpu_context, self) or_return
-  create_wireframe_pipelines(gpu_context, self) or_return
+  create_transparent_pipelines(gpu_context, self, resources_manager.geometry_pipeline_layout) or_return
+  create_wireframe_pipelines(gpu_context, self, resources_manager.geometry_pipeline_layout) or_return
   log.info("Transparent renderer initialized successfully")
   return .SUCCESS
 }
@@ -44,6 +42,7 @@ init :: proc(
 create_transparent_pipelines :: proc(
   gpu_context: ^gpu.GPUContext,
   self: ^Renderer,
+  pipeline_layout: vk.PipelineLayout,
 ) -> vk.Result {
   // Create all shader variants for transparent PBR materials
   depth_format: vk.Format = .D32_SFLOAT
@@ -171,7 +170,7 @@ create_transparent_pipelines :: proc(
     pDepthStencilState  = &depth_stencil,
     pColorBlendState    = &color_blending,
     pDynamicState       = &dynamic_state,
-    layout              = self.pipeline_layout,
+    layout              = pipeline_layout,
     pNext               = &rendering_info,
   }
 
@@ -190,6 +189,7 @@ create_transparent_pipelines :: proc(
 create_wireframe_pipelines :: proc(
   gpu_context: ^gpu.GPUContext,
   self: ^Renderer,
+  pipeline_layout: vk.PipelineLayout,
 ) -> vk.Result {
   depth_format: vk.Format = .D32_SFLOAT
   color_format: vk.Format = .B8G8R8A8_SRGB
@@ -314,7 +314,7 @@ create_wireframe_pipelines :: proc(
     pDepthStencilState  = &depth_stencil,
     pColorBlendState    = &color_blending,
     pDynamicState       = &dynamic_state,
-    layout              = self.pipeline_layout,
+    layout              = pipeline_layout,
     pNext               = &rendering_info,
   }
 
@@ -437,7 +437,7 @@ render :: proc(
   vk.CmdBindDescriptorSets(
     command_buffer,
     .GRAPHICS,
-    self.pipeline_layout,
+    resources_manager.geometry_pipeline_layout,
     0,
     len(descriptor_sets),
     raw_data(descriptor_sets[:]),
@@ -451,7 +451,7 @@ render :: proc(
   }
   vk.CmdPushConstants(
     command_buffer,
-    self.pipeline_layout,
+    resources_manager.geometry_pipeline_layout,
     {.VERTEX, .FRAGMENT},
     0,
     size_of(PushConstant),
