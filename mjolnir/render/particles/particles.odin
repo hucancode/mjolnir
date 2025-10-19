@@ -33,8 +33,8 @@ ParticleSystemParams :: struct {
 
 Renderer :: struct {
   // Compute pipeline
-  params_buffer:                      gpu.DataBuffer(ParticleSystemParams),
-  particle_buffer:                    gpu.DataBuffer(Particle),
+  params_buffer:                      gpu.MutableBuffer(ParticleSystemParams),
+  particle_buffer:                    gpu.MutableBuffer(Particle),
   compute_descriptor_set_layout:      vk.DescriptorSetLayout,
   compute_descriptor_set:             vk.DescriptorSet,
   compute_pipeline_layout:            vk.PipelineLayout,
@@ -46,10 +46,10 @@ Renderer :: struct {
   emitter_descriptor_set_layout:      vk.DescriptorSetLayout,
   emitter_descriptor_set:             vk.DescriptorSet,
   emitter_bindless_descriptor_set:    vk.DescriptorSet,
-  particle_counter_buffer:            gpu.DataBuffer(u32),
+  particle_counter_buffer:            gpu.MutableBuffer(u32),
   // Compaction pipeline
-  compact_particle_buffer:            gpu.DataBuffer(Particle),
-  draw_command_buffer:                gpu.DataBuffer(vk.DrawIndirectCommand),
+  compact_particle_buffer:            gpu.MutableBuffer(Particle),
+  draw_command_buffer:                gpu.MutableBuffer(vk.DrawIndirectCommand),
   compact_descriptor_set_layout:      vk.DescriptorSetLayout,
   compact_descriptor_set:             vk.DescriptorSet,
   compact_pipeline_layout:            vk.PipelineLayout,
@@ -67,8 +67,8 @@ simulate :: proc(
   world_matrix_set: vk.DescriptorSet,
   resources_manager: ^resources.Manager,
 ) {
-  params_ptr := gpu.data_buffer_get(&self.params_buffer)
-  counter_ptr := gpu.data_buffer_get(&self.particle_counter_buffer)
+  params_ptr := gpu.mutable_buffer_get(&self.params_buffer)
+  counter_ptr := gpu.mutable_buffer_get(&self.particle_counter_buffer)
   params_ptr.particle_count = counter_ptr^
   counter_ptr^ = 0
   vk.CmdBindPipeline(command_buffer, .COMPUTE, self.emitter_pipeline)
@@ -245,11 +245,11 @@ shutdown :: proc(
   )
   vk.DestroyPipeline(device, self.render_pipeline, nil)
   vk.DestroyPipelineLayout(device, self.render_pipeline_layout, nil)
-  gpu.data_buffer_destroy(device, &self.params_buffer)
-  gpu.data_buffer_destroy(device, &self.particle_buffer)
-  gpu.data_buffer_destroy(device, &self.compact_particle_buffer)
-  gpu.data_buffer_destroy(device, &self.draw_command_buffer)
-  gpu.data_buffer_destroy(device, &self.particle_counter_buffer)
+  gpu.mutable_buffer_destroy(device, &self.params_buffer)
+  gpu.mutable_buffer_destroy(device, &self.particle_buffer)
+  gpu.mutable_buffer_destroy(device, &self.compact_particle_buffer)
+  gpu.mutable_buffer_destroy(device, &self.draw_command_buffer)
+  gpu.mutable_buffer_destroy(device, &self.particle_counter_buffer)
 }
 
 init :: proc(
@@ -264,19 +264,19 @@ init :: proc(
   ) or_return
 
   log.debugf("Initializing particle renderer")
-  self.params_buffer = gpu.create_host_visible_buffer(
+  self.params_buffer = gpu.create_mutable_buffer(
     gpu_context,
     ParticleSystemParams,
     1,
     {.UNIFORM_BUFFER},
   ) or_return
-  self.particle_buffer = gpu.create_host_visible_buffer(
+  self.particle_buffer = gpu.create_mutable_buffer(
     gpu_context,
     Particle,
     MAX_PARTICLES,
     {.STORAGE_BUFFER, .VERTEX_BUFFER, .TRANSFER_DST},
   ) or_return
-  self.particle_counter_buffer = gpu.create_host_visible_buffer(
+  self.particle_counter_buffer = gpu.create_mutable_buffer(
     gpu_context,
     u32,
     1,
@@ -615,13 +615,13 @@ create_compact_pipeline :: proc(
     nil,
     &self.compact_pipeline_layout,
   ) or_return
-  self.compact_particle_buffer = gpu.create_host_visible_buffer(
+  self.compact_particle_buffer = gpu.create_mutable_buffer(
     gpu_context,
     Particle,
     MAX_PARTICLES,
     {.STORAGE_BUFFER, .VERTEX_BUFFER, .TRANSFER_SRC},
   ) or_return
-  self.draw_command_buffer = gpu.create_host_visible_buffer(
+  self.draw_command_buffer = gpu.create_mutable_buffer(
     gpu_context,
     vk.DrawIndirectCommand,
     1,

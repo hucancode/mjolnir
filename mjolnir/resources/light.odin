@@ -243,9 +243,9 @@ update_light_shadow_camera_transforms :: proc(manager: ^Manager, frame_index: u3
     if !light.cast_shadow do continue
     if light.camera_handle.generation == 0 do continue
     // Get light's world transform from node
-    node_data := gpu.staged_buffer_get(&manager.node_data_buffer, light.node_index)
+    node_data := gpu.mutable_buffer_get(&manager.node_data_buffer, light.node_index)
     if node_data == nil do continue
-    world_matrix := gpu.staged_buffer_get(&manager.world_matrix_buffer, light.node_index)
+    world_matrix := gpu.mutable_buffer_get(&manager.world_matrix_buffer, light.node_index)
     if world_matrix == nil do continue
     // Extract position and direction from world matrix
     light_position := world_matrix[3].xyz

@@ -18,8 +18,8 @@ SphericalCamera :: struct {
 	size:                u32, // Resolution of cube map faces (size x size)
 	depth_cube:          Handle, // Cube depth texture
 	command_buffer:      vk.CommandBuffer, // Secondary command buffer
-	draw_commands:       gpu.DataBuffer(vk.DrawIndexedIndirectCommand), // Draw commands for visible objects
-	draw_count:          gpu.DataBuffer(u32), // Number of visible objects
+	draw_commands:       gpu.MutableBuffer(vk.DrawIndexedIndirectCommand), // Draw commands for visible objects
+	draw_count:          gpu.MutableBuffer(u32), // Number of visible objects
 	max_draws:           u32, // Maximum number of draw calls
 	descriptor_set:      vk.DescriptorSet, // Descriptor set for sphere culling compute shader
 }
@@ -66,14 +66,14 @@ spherical_camera_init :: proc(
 		&camera.command_buffer,
 	) or_return
 
-	camera.draw_count = gpu.create_host_visible_buffer(
+	camera.draw_count = gpu.create_mutable_buffer(
 		gpu_context,
 		u32,
 		1,
 		{.STORAGE_BUFFER, .TRANSFER_DST},
 	) or_return
 
-	camera.draw_commands = gpu.create_host_visible_buffer(
+	camera.draw_commands = gpu.create_mutable_buffer(
 		gpu_context,
 		vk.DrawIndexedIndirectCommand,
 		int(max_draws),
@@ -109,8 +109,8 @@ spherical_camera_destroy :: proc(
 	vk.FreeCommandBuffers(device, command_pool, 1, &camera.command_buffer)
 
 	// Free buffers
-	gpu.data_buffer_destroy(device, &camera.draw_count)
-	gpu.data_buffer_destroy(device, &camera.draw_commands)
+	gpu.mutable_buffer_destroy(device, &camera.draw_count)
+	gpu.mutable_buffer_destroy(device, &camera.draw_commands)
 }
 
 // Update spherical camera position and parameters
@@ -136,7 +136,7 @@ spherical_camera_upload_data :: proc(
 	camera: ^SphericalCamera,
 	camera_index: u32,
 ) {
-	dst := gpu.data_buffer_get(&manager.spherical_camera_buffer, camera_index)
+	dst := gpu.mutable_buffer_get(&manager.spherical_camera_buffer, camera_index)
 	if dst == nil {
 		log.errorf("Spherical camera index %d out of bounds", camera_index)
 		return
@@ -223,15 +223,15 @@ spherical_camera_update_descriptor_set :: proc(
 	camera: ^SphericalCamera,
 ) {
 	node_info := vk.DescriptorBufferInfo {
-		buffer = manager.node_data_buffer.device_buffer,
+		buffer = manager.node_data_buffer.buffer,
 		range = vk.DeviceSize(manager.node_data_buffer.bytes_count),
 	}
 	mesh_info := vk.DescriptorBufferInfo {
-		buffer = manager.mesh_data_buffer.device_buffer,
+		buffer = manager.mesh_data_buffer.buffer,
 		range = vk.DeviceSize(manager.mesh_data_buffer.bytes_count),
 	}
 	world_info := vk.DescriptorBufferInfo {
-		buffer = manager.world_matrix_buffer.device_buffer,
+		buffer = manager.world_matrix_buffer.buffer,
 		range = vk.DeviceSize(manager.world_matrix_buffer.bytes_count),
 	}
 	camera_info := vk.DescriptorBufferInfo {

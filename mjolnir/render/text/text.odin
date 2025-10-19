@@ -27,9 +27,9 @@ Renderer :: struct {
   pipeline_layout:           vk.PipelineLayout,
   pipeline:                  vk.Pipeline,
   atlas_texture:             ^gpu.ImageBuffer,
-  proj_buffer:               gpu.DataBuffer(matrix[4, 4]f32),
-  vertex_buffer:             gpu.DataBuffer(Vertex),
-  index_buffer:              gpu.DataBuffer(u32),
+  proj_buffer:               gpu.MutableBuffer(matrix[4, 4]f32),
+  vertex_buffer:             gpu.MutableBuffer(Vertex),
+  index_buffer:              gpu.MutableBuffer(u32),
   vertex_count:              u32,
   index_count:               u32,
   vertices:                  [TEXT_MAX_VERTICES]Vertex,
@@ -289,14 +289,14 @@ init :: proc(
   ) or_return
   self.atlas_initialized = true
   log.infof("init text vertex buffer...")
-  self.vertex_buffer = gpu.create_host_visible_buffer(
+  self.vertex_buffer = gpu.create_mutable_buffer(
     gpu_context,
     Vertex,
     TEXT_MAX_VERTICES,
     {.VERTEX_BUFFER},
   ) or_return
   log.infof("init text index buffer...")
-  self.index_buffer = gpu.create_host_visible_buffer(
+  self.index_buffer = gpu.create_mutable_buffer(
     gpu_context,
     u32,
     TEXT_MAX_INDICES,
@@ -304,7 +304,7 @@ init :: proc(
   ) or_return
   ortho := linalg.matrix_ortho3d(0, f32(width), f32(height), 0, -1, 1)
   log.infof("init text projection buffer...")
-  self.proj_buffer = gpu.create_host_visible_buffer(
+  self.proj_buffer = gpu.create_mutable_buffer(
     gpu_context,
     matrix[4, 4]f32,
     1,
@@ -519,9 +519,9 @@ end_pass :: proc(command_buffer: vk.CommandBuffer) {
 
 shutdown :: proc(self: ^Renderer, device: vk.Device) {
   fs.Destroy(&self.font_ctx)
-  gpu.data_buffer_destroy(device, &self.vertex_buffer)
-  gpu.data_buffer_destroy(device, &self.index_buffer)
-  gpu.data_buffer_destroy(device, &self.proj_buffer)
+  gpu.mutable_buffer_destroy(device, &self.vertex_buffer)
+  gpu.mutable_buffer_destroy(device, &self.index_buffer)
+  gpu.mutable_buffer_destroy(device, &self.proj_buffer)
   vk.DestroyPipeline(device, self.pipeline, nil)
   self.pipeline = 0
   vk.DestroyPipelineLayout(device, self.pipeline_layout, nil)

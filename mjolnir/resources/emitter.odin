@@ -71,7 +71,7 @@ emitter_write_to_gpu :: proc(
   }
   time_acc: f32 = 0.0
   if preserve_time_accumulator {
-    existing := gpu.staged_buffer_get(&manager.emitter_buffer, handle.index)
+    existing := gpu.mutable_buffer_get(&manager.emitter_buffer, handle.index)
     time_acc = existing.time_accumulator
   }
   emitter_update_gpu_data(emitter, time_acc)

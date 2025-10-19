@@ -77,8 +77,8 @@ Camera :: struct {
   transparency_commands: [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
   // Visibility task data (for occlusion culling)
   // Per-frame resources for pipelined multi-frame occlusion culling
-  late_draw_count:              [MAX_FRAMES_IN_FLIGHT]gpu.DataBuffer(u32),
-  late_draw_commands:           [MAX_FRAMES_IN_FLIGHT]gpu.DataBuffer(vk.DrawIndexedIndirectCommand),
+  late_draw_count:              [MAX_FRAMES_IN_FLIGHT]gpu.MutableBuffer(u32),
+  late_draw_commands:           [MAX_FRAMES_IN_FLIGHT]gpu.MutableBuffer(vk.DrawIndexedIndirectCommand),
   depth_pyramid:                [MAX_FRAMES_IN_FLIGHT]DepthPyramid,
   late_descriptor_set:          [MAX_FRAMES_IN_FLIGHT]vk.DescriptorSet,
   depth_reduce_descriptor_sets: [MAX_FRAMES_IN_FLIGHT][16]vk.DescriptorSet,
@@ -157,7 +157,6 @@ camera_init :: proc(
     .TRANSPARENCY in enabled_passes ||
     .PARTICLES in enabled_passes ||
     .POST_PROCESS in enabled_passes
-  // Note: Depth is always created via create_camera_depth_resources (not conditional)
 
   for frame in 0 ..< MAX_FRAMES_IN_FLIGHT {
     if needs_final {
@@ -254,14 +253,14 @@ camera_init :: proc(
 
   // Create per-frame visibility resources (Step 1: Create all resources first)
   for frame in 0 ..< MAX_FRAMES_IN_FLIGHT {
-    camera.late_draw_count[frame] = gpu.create_host_visible_buffer(
+    camera.late_draw_count[frame] = gpu.create_mutable_buffer(
       gpu_context,
       u32,
       1,
       {.STORAGE_BUFFER, .TRANSFER_DST},
     ) or_return
 
-    camera.late_draw_commands[frame] = gpu.create_host_visible_buffer(
+    camera.late_draw_commands[frame] = gpu.create_mutable_buffer(
       gpu_context,
       vk.DrawIndexedIndirectCommand,
       int(max_draws),
@@ -343,8 +342,8 @@ camera_destroy :: proc(
     vk.DestroySampler(device, camera.depth_pyramid[frame].sampler, nil)
 
     // Clean up draw buffers
-    gpu.data_buffer_destroy(device, &camera.late_draw_count[frame])
-    gpu.data_buffer_destroy(device, &camera.late_draw_commands[frame])
+    gpu.mutable_buffer_destroy(device, &camera.late_draw_count[frame])
+    gpu.mutable_buffer_destroy(device, &camera.late_draw_commands[frame])
 
     // Free depth pyramid texture
     if pyramid_item, freed := free(&manager.image_2d_buffers, camera.depth_pyramid[frame].texture); freed {
@@ -376,7 +375,7 @@ camera_upload_data :: proc(
   }
   frustum := make_frustum(camera.data.projection * camera.data.view)
   camera.data.frustum_planes = frustum.planes
-  gpu.data_buffer_write_single(&manager.camera_buffer, &camera.data, int(camera_index))
+  gpu.write(&manager.camera_buffer, &camera.data, int(camera_index))
 }
 
 // Helper functions that work directly with Camera
@@ -788,15 +787,15 @@ camera_update_late_descriptor_set :: proc(
   prev_frame := (frame_index + MAX_FRAMES_IN_FLIGHT - 1) % MAX_FRAMES_IN_FLIGHT
 
   node_info := vk.DescriptorBufferInfo {
-    buffer = manager.node_data_buffer.device_buffer,
+    buffer = manager.node_data_buffer.buffer,
     range = vk.DeviceSize(manager.node_data_buffer.bytes_count),
   }
   mesh_info := vk.DescriptorBufferInfo {
-    buffer = manager.mesh_data_buffer.device_buffer,
+    buffer = manager.mesh_data_buffer.buffer,
     range = vk.DeviceSize(manager.mesh_data_buffer.bytes_count),
   }
   world_info := vk.DescriptorBufferInfo {
-    buffer = manager.world_matrix_buffer.device_buffer,
+    buffer = manager.world_matrix_buffer.buffer,
     range = vk.DeviceSize(manager.world_matrix_buffer.bytes_count),
   }
   camera_info := vk.DescriptorBufferInfo {

@@ -3,11 +3,9 @@ package gpu
 import "core:log"
 import "core:mem"
 import "core:slice"
-import "core:sync"
 import vk "vendor:vulkan"
-import "../interval_tree"
 
-DataBuffer :: struct($T: typeid) {
+MutableBuffer :: struct($T: typeid) {
   buffer:       vk.Buffer,
   memory:       vk.DeviceMemory,
   mapped:       [^]T,
@@ -15,95 +13,114 @@ DataBuffer :: struct($T: typeid) {
   bytes_count:  int,
 }
 
-malloc_data_buffer :: proc(
+ImmutableBuffer :: struct($T: typeid) {
+  buffer:       vk.Buffer,
+  memory:       vk.DeviceMemory,
+  element_size: int,
+  bytes_count:  int,
+}
+
+malloc_mutable_buffer :: proc(
   gpu_context: ^GPUContext,
   $T: typeid,
   count: int,
   usage: vk.BufferUsageFlags,
-  mem_properties: vk.MemoryPropertyFlags,
 ) -> (
-  data_buf: DataBuffer(T),
+  buffer: MutableBuffer(T),
   ret: vk.Result,
 ) {
   if .UNIFORM_BUFFER in usage && count > 1 {
-    data_buf.element_size = align_up(
+    buffer.element_size = align_up(
       size_of(T),
-      int(
-        gpu_context.device_properties.limits.minUniformBufferOffsetAlignment,
-      ),
+      int(gpu_context.device_properties.limits.minUniformBufferOffsetAlignment),
     )
   } else if .STORAGE_BUFFER in usage && count > 1 {
-    data_buf.element_size = align_up(
+    buffer.element_size = align_up(
       size_of(T),
-      int(
-        gpu_context.device_properties.limits.minStorageBufferOffsetAlignment,
-      ),
+      int(gpu_context.device_properties.limits.minStorageBufferOffsetAlignment),
     )
   } else {
-    data_buf.element_size = size_of(T)
+    buffer.element_size = size_of(T)
   }
-  data_buf.bytes_count = data_buf.element_size * count
+  buffer.bytes_count = buffer.element_size * count
+
   create_info := vk.BufferCreateInfo {
     sType       = .BUFFER_CREATE_INFO,
-    size        = vk.DeviceSize(data_buf.bytes_count),
+    size        = vk.DeviceSize(buffer.bytes_count),
     usage       = usage,
     sharingMode = .EXCLUSIVE,
   }
-  vk.CreateBuffer(
-    gpu_context.device,
-    &create_info,
-    nil,
-    &data_buf.buffer,
-  ) or_return
+  vk.CreateBuffer(gpu_context.device, &create_info, nil, &buffer.buffer) or_return
+
   mem_reqs: vk.MemoryRequirements
-  vk.GetBufferMemoryRequirements(
-    gpu_context.device,
-    data_buf.buffer,
-    &mem_reqs,
-  )
-  data_buf.memory = allocate_vulkan_memory(
+  vk.GetBufferMemoryRequirements(gpu_context.device, buffer.buffer, &mem_reqs)
+
+  buffer.memory = allocate_vulkan_memory(
     gpu_context,
     mem_reqs,
-    mem_properties,
-  ) or_return
-  vk.BindBufferMemory(
-    gpu_context.device,
-    data_buf.buffer,
-    data_buf.memory,
-    0,
-  ) or_return
-  log.infof("buffer created 0x%x", data_buf.buffer)
-  return data_buf, .SUCCESS
-}
-
-malloc_local_buffer :: proc(
-  gpu_context: ^GPUContext,
-  $T: typeid,
-  count: int,
-  usage: vk.BufferUsageFlags,
-) -> (
-  DataBuffer(T),
-  vk.Result,
-) {
-  return malloc_data_buffer(gpu_context, T, count, usage, {.DEVICE_LOCAL})
-}
-
-malloc_host_visible_buffer :: proc(
-  gpu_context: ^GPUContext,
-  $T: typeid,
-  count: int,
-  usage: vk.BufferUsageFlags,
-) -> (
-  DataBuffer(T),
-  vk.Result,
-) {
-  return malloc_data_buffer(
-    gpu_context,
-    T,
-    count,
-    usage,
     {.HOST_VISIBLE, .HOST_COHERENT},
-  )
+  ) or_return
+
+  vk.BindBufferMemory(gpu_context.device, buffer.buffer, buffer.memory, 0) or_return
+
+  vk.MapMemory(
+    gpu_context.device,
+    buffer.memory,
+    0,
+    vk.DeviceSize(buffer.bytes_count),
+    {},
+    auto_cast &buffer.mapped,
+  ) or_return
+
+  log.infof("mutable buffer created 0x%x at %v", buffer.buffer, &buffer.mapped)
+  return buffer, .SUCCESS
+}
+
+malloc_immutable_buffer :: proc(
+  gpu_context: ^GPUContext,
+  $T: typeid,
+  count: int,
+  usage: vk.BufferUsageFlags,
+) -> (
+  buffer: ImmutableBuffer(T),
+  ret: vk.Result,
+) {
+  if .UNIFORM_BUFFER in usage && count > 1 {
+    buffer.element_size = align_up(
+      size_of(T),
+      int(gpu_context.device_properties.limits.minUniformBufferOffsetAlignment),
+    )
+  } else if .STORAGE_BUFFER in usage && count > 1 {
+    buffer.element_size = align_up(
+      size_of(T),
+      int(gpu_context.device_properties.limits.minStorageBufferOffsetAlignment),
+    )
+  } else {
+    buffer.element_size = size_of(T)
+  }
+  buffer.bytes_count = buffer.element_size * count
+
+  create_info := vk.BufferCreateInfo {
+    sType       = .BUFFER_CREATE_INFO,
+    size        = vk.DeviceSize(buffer.bytes_count),
+    usage       = usage | {.TRANSFER_DST},
+    sharingMode = .EXCLUSIVE,
+  }
+  vk.CreateBuffer(gpu_context.device, &create_info, nil, &buffer.buffer) or_return
+
+  mem_reqs: vk.MemoryRequirements
+  vk.GetBufferMemoryRequirements(gpu_context.device, buffer.buffer, &mem_reqs)
+
+  buffer.memory = allocate_vulkan_memory(
+    gpu_context,
+    mem_reqs,
+    {.DEVICE_LOCAL},
+  ) or_return
+
+  vk.BindBufferMemory(gpu_context.device, buffer.buffer, buffer.memory, 0) or_return
+
+  log.infof("immutable buffer created 0x%x", buffer.buffer)
+  return buffer, .SUCCESS
 }
 
 @(private = "file")
@@ -112,62 +129,52 @@ align_up :: proc(value: int, alignment: int) -> int {
 }
 
 write :: proc {
-  data_buffer_write_single,
-  data_buffer_write_multi,
-  staged_buffer_write_single,
-  staged_buffer_write_multi,
-  static_buffer_write_single,
-  static_buffer_write_multi,
+  mutable_buffer_write_single,
+  mutable_buffer_write_multi,
+  immutable_buffer_write_single,
+  immutable_buffer_write_multi,
 }
 
-data_buffer_write_single :: proc(
-  self: ^DataBuffer($T),
+mutable_buffer_write_single :: proc(
+  buffer: ^MutableBuffer($T),
   data: ^T,
   index: int = 0,
 ) -> vk.Result {
-  if self.mapped == nil {
-    return .ERROR_UNKNOWN
-  }
-  offset := index * self.element_size
-  if offset + self.element_size > self.bytes_count {
-    return .ERROR_UNKNOWN
-  }
-  destination := mem.ptr_offset(cast([^]u8)self.mapped, offset)
+  if buffer.mapped == nil do return .ERROR_UNKNOWN
+  offset := index * buffer.element_size
+  if offset + buffer.element_size > buffer.bytes_count do return .ERROR_UNKNOWN
+  destination := mem.ptr_offset(cast([^]u8)buffer.mapped, offset)
   mem.copy(destination, data, size_of(T))
   return .SUCCESS
 }
 
-data_buffer_write_multi :: proc(
-  self: ^DataBuffer($T),
+mutable_buffer_write_multi :: proc(
+  buffer: ^MutableBuffer($T),
   data: []T,
   index: int = 0,
 ) -> vk.Result {
-  if self.mapped == nil {
-    return .ERROR_UNKNOWN
-  }
-  offset := index * self.element_size
-  if offset + (self.element_size) * len(data) > self.bytes_count {
-    return .ERROR_UNKNOWN
-  }
-  destination := mem.ptr_offset(cast([^]u8)self.mapped, offset)
+  if buffer.mapped == nil do return .ERROR_UNKNOWN
+  offset := index * buffer.element_size
+  if offset + buffer.element_size * len(data) > buffer.bytes_count do return .ERROR_UNKNOWN
+  destination := mem.ptr_offset(cast([^]u8)buffer.mapped, offset)
   mem.copy(destination, raw_data(data), slice.size(data))
   return .SUCCESS
 }
 
-data_buffer_get :: proc(self: ^DataBuffer($T), index: u32 = 0) -> ^T {
-  return &self.mapped[index]
+mutable_buffer_get :: proc(buffer: ^MutableBuffer($T), index: u32 = 0) -> ^T {
+  return &buffer.mapped[index]
 }
 
-data_buffer_get_all :: proc(self: ^DataBuffer($T)) -> []T {
-  element_count := self.bytes_count / self.element_size
-  return slice.from_ptr(self.mapped, element_count)
+mutable_buffer_get_all :: proc(buffer: ^MutableBuffer($T)) -> []T {
+  element_count := buffer.bytes_count / buffer.element_size
+  return slice.from_ptr(buffer.mapped, element_count)
 }
 
-data_buffer_offset_of :: proc(self: ^DataBuffer($T), index: u32) -> u32 {
-  return index * u32(self.element_size)
+mutable_buffer_offset_of :: proc(buffer: ^MutableBuffer($T), index: u32) -> u32 {
+  return index * u32(buffer.element_size)
 }
 
-data_buffer_destroy :: proc(device: vk.Device, buffer: ^DataBuffer($T)) {
+mutable_buffer_destroy :: proc(device: vk.Device, buffer: ^MutableBuffer($T)) {
   if buffer.mapped != nil {
     vk.UnmapMemory(device, buffer.memory)
     buffer.mapped = nil
@@ -180,237 +187,82 @@ data_buffer_destroy :: proc(device: vk.Device, buffer: ^DataBuffer($T)) {
   buffer.element_size = 0
 }
 
-create_host_visible_buffer :: proc(
+immutable_buffer_write_single :: proc(
   gpu_context: ^GPUContext,
-  $T: typeid,
-  count: int,
-  usage: vk.BufferUsageFlags,
-  data: rawptr = nil,
-) -> (
-  buffer: DataBuffer(T),
-  ret: vk.Result,
-) {
-  buffer = malloc_host_visible_buffer(gpu_context, T, count, usage) or_return
-  vk.MapMemory(
-    gpu_context.device,
-    buffer.memory,
-    0,
-    vk.DeviceSize(buffer.bytes_count),
-    {},
-    auto_cast &buffer.mapped,
-  ) or_return
-  log.infof("Init host visible buffer, buffer mapped at %v", &buffer.mapped)
-  if data != nil {
-    mem.copy(buffer.mapped, data, buffer.bytes_count)
-  }
-  ret = .SUCCESS
-  return
-}
-
-create_local_buffer :: proc(
-  gpu_context: ^GPUContext,
-  $T: typeid,
-  count: int,
-  usage: vk.BufferUsageFlags,
-  data: rawptr = nil,
-) -> (
-  buffer: DataBuffer(T),
-  ret: vk.Result,
-) {
-  buffer = malloc_local_buffer(
-    gpu_context,
-    T,
-    count,
-    usage | {.TRANSFER_DST},
-  ) or_return
-  if data == nil {
-    ret = .SUCCESS
-    return
-  }
-  log.info("creating staging buffer with data ", data)
-  staging := create_host_visible_buffer(
-    gpu_context,
-    T,
-    count,
-    {.TRANSFER_SRC},
-    data,
-  ) or_return
-  defer data_buffer_destroy(gpu_context.device, &staging)
-  copy_buffer(gpu_context, buffer, staging) or_return
-  ret = .SUCCESS
-  return
-}
-
-@(private = "file")
-copy_buffer :: proc(
-  gpu_context: ^GPUContext,
-  dst, src: DataBuffer($T),
-) -> vk.Result {
-  cmd_buffer := begin_single_time_command(gpu_context) or_return
-  region := vk.BufferCopy {
-    size = vk.DeviceSize(src.bytes_count),
-  }
-  vk.CmdCopyBuffer(cmd_buffer, src.buffer, dst.buffer, 1, &region)
-  log.infof(
-    "Copying buffer 0x%x mapped %x to 0x%x",
-    src.buffer,
-    src.mapped,
-    dst.buffer,
-  )
-  return end_single_time_command(gpu_context, &cmd_buffer)
-}
-
-StaticBuffer :: struct($T: typeid) {
-  buffer:       vk.Buffer,
-  memory:       vk.DeviceMemory,
-  element_size: int,
-  bytes_count:  int,
-}
-
-malloc_static_buffer :: proc(
-  gpu_context: ^GPUContext,
-  $T: typeid,
-  count: int,
-  usage: vk.BufferUsageFlags,
-) -> (
-  buffer: StaticBuffer(T),
-  ret: vk.Result,
-) {
-  if .UNIFORM_BUFFER in usage && count > 1 {
-    buffer.element_size = align_up(
-      size_of(T),
-      int(
-        gpu_context.device_properties.limits.minUniformBufferOffsetAlignment,
-      ),
-    )
-  } else if .STORAGE_BUFFER in usage && count > 1 {
-    buffer.element_size = align_up(
-      size_of(T),
-      int(
-        gpu_context.device_properties.limits.minStorageBufferOffsetAlignment,
-      ),
-    )
-  } else {
-    buffer.element_size = size_of(T)
-  }
-  buffer.bytes_count = buffer.element_size * count
-  create_info := vk.BufferCreateInfo {
-    sType       = .BUFFER_CREATE_INFO,
-    size        = vk.DeviceSize(buffer.bytes_count),
-    usage       = usage | {.TRANSFER_DST},
-    sharingMode = .EXCLUSIVE,
-  }
-  vk.CreateBuffer(
-    gpu_context.device,
-    &create_info,
-    nil,
-    &buffer.buffer,
-  ) or_return
-  mem_reqs: vk.MemoryRequirements
-  vk.GetBufferMemoryRequirements(
-    gpu_context.device,
-    buffer.buffer,
-    &mem_reqs,
-  )
-  buffer.memory = allocate_vulkan_memory(
-    gpu_context,
-    mem_reqs,
-    {.DEVICE_LOCAL},
-  ) or_return
-  vk.BindBufferMemory(
-    gpu_context.device,
-    buffer.buffer,
-    buffer.memory,
-    0,
-  ) or_return
-  log.infof("static buffer created 0x%x", buffer.buffer)
-  return buffer, .SUCCESS
-}
-
-static_buffer_write_single :: proc(
-  gpu_context: ^GPUContext,
-  buffer: ^StaticBuffer($T),
+  buffer: ^ImmutableBuffer($T),
   data: ^T,
   index: int = 0,
 ) -> vk.Result {
-  staging := create_host_visible_buffer(
-    gpu_context,
-    T,
-    1,
-    {.TRANSFER_SRC},
-    data,
-  ) or_return
-  defer data_buffer_destroy(gpu_context.device, &staging)
+  staging := malloc_mutable_buffer(gpu_context, T, 1, {.TRANSFER_SRC}) or_return
+  defer mutable_buffer_destroy(gpu_context.device, &staging)
+
+  mutable_buffer_write_single(&staging, data) or_return
+
   cmd_buffer := begin_single_time_command(gpu_context) or_return
   offset := vk.DeviceSize(index * buffer.element_size)
   region := vk.BufferCopy {
     srcOffset = 0,
     dstOffset = offset,
-    size = vk.DeviceSize(buffer.element_size),
+    size      = vk.DeviceSize(buffer.element_size),
   }
   vk.CmdCopyBuffer(cmd_buffer, staging.buffer, buffer.buffer, 1, &region)
   return end_single_time_command(gpu_context, &cmd_buffer)
 }
 
-static_buffer_write_multi :: proc(
+immutable_buffer_write_multi :: proc(
   gpu_context: ^GPUContext,
-  buffer: ^StaticBuffer($T),
+  buffer: ^ImmutableBuffer($T),
   data: []T,
   index: int = 0,
 ) -> vk.Result {
-  staging := create_host_visible_buffer(
-    gpu_context,
-    T,
-    len(data),
-    {.TRANSFER_SRC},
-    raw_data(data),
-  ) or_return
-  defer data_buffer_destroy(gpu_context.device, &staging)
+  staging := malloc_mutable_buffer(gpu_context, T, len(data), {.TRANSFER_SRC}) or_return
+  defer mutable_buffer_destroy(gpu_context.device, &staging)
+
+  mutable_buffer_write_multi(&staging, data) or_return
+
   cmd_buffer := begin_single_time_command(gpu_context) or_return
   offset := vk.DeviceSize(index * buffer.element_size)
   region := vk.BufferCopy {
     srcOffset = 0,
     dstOffset = offset,
-    size = vk.DeviceSize(buffer.element_size * len(data)),
+    size      = vk.DeviceSize(buffer.element_size * len(data)),
   }
   vk.CmdCopyBuffer(cmd_buffer, staging.buffer, buffer.buffer, 1, &region)
   return end_single_time_command(gpu_context, &cmd_buffer)
 }
 
-static_buffer_offset_of :: proc(buffer: ^StaticBuffer($T), index: u32) -> u32 {
+immutable_buffer_offset_of :: proc(buffer: ^ImmutableBuffer($T), index: u32) -> u32 {
   return index * u32(buffer.element_size)
 }
 
-static_buffer_read :: proc(
+immutable_buffer_read :: proc(
   gpu_context: ^GPUContext,
-  buffer: ^StaticBuffer($T),
+  buffer: ^ImmutableBuffer($T),
   output: []T,
   index: int = 0,
 ) -> vk.Result {
   if len(output) == 0 do return .SUCCESS
-  staging := create_host_visible_buffer(
-    gpu_context,
-    T,
-    len(output),
-    {.TRANSFER_DST},
-  ) or_return
-  defer data_buffer_destroy(gpu_context.device, &staging)
+
+  staging := malloc_mutable_buffer(gpu_context, T, len(output), {.TRANSFER_DST}) or_return
+  defer mutable_buffer_destroy(gpu_context.device, &staging)
+
   cmd_buffer := begin_single_time_command(gpu_context) or_return
   offset := vk.DeviceSize(index * buffer.element_size)
   region := vk.BufferCopy {
     srcOffset = offset,
     dstOffset = 0,
-    size = vk.DeviceSize(buffer.element_size * len(output)),
+    size      = vk.DeviceSize(buffer.element_size * len(output)),
   }
   vk.CmdCopyBuffer(cmd_buffer, buffer.buffer, staging.buffer, 1, &region)
   end_single_time_command(gpu_context, &cmd_buffer) or_return
-  for i in 0..<len(output) {
+
+  for i in 0 ..<len(output) {
     output[i] = staging.mapped[i]
   }
   return .SUCCESS
 }
 
-static_buffer_destroy :: proc(device: vk.Device, buffer: ^StaticBuffer($T)) {
+immutable_buffer_destroy :: proc(device: vk.Device, buffer: ^ImmutableBuffer($T)) {
   vk.DestroyBuffer(device, buffer.buffer, nil)
   buffer.buffer = 0
   vk.FreeMemory(device, buffer.memory, nil)
@@ -419,313 +271,49 @@ static_buffer_destroy :: proc(device: vk.Device, buffer: ^StaticBuffer($T)) {
   buffer.element_size = 0
 }
 
-StagedBuffer :: struct($T: typeid) {
-  using staging: DataBuffer(T),
-  dirty_indices: interval_tree.IntervalTree,
-  dirty_mutex:   sync.Mutex,
-  device_buffer: vk.Buffer,
-  device_memory: vk.DeviceMemory,
-}
-
-malloc_staged_buffer :: proc(
+create_mutable_buffer :: proc(
   gpu_context: ^GPUContext,
   $T: typeid,
   count: int,
   usage: vk.BufferUsageFlags,
+  data: rawptr = nil,
 ) -> (
-  buffer: StagedBuffer(T),
+  buffer: MutableBuffer(T),
   ret: vk.Result,
 ) {
-  if .UNIFORM_BUFFER in usage && count > 1 {
-    buffer.element_size = align_up(
-      size_of(T),
-      int(
-        gpu_context.device_properties.limits.minUniformBufferOffsetAlignment,
-      ),
-    )
-  } else if .STORAGE_BUFFER in usage && count > 1 {
-    buffer.element_size = align_up(
-      size_of(T),
-      int(
-        gpu_context.device_properties.limits.minStorageBufferOffsetAlignment,
-      ),
-    )
-  } else {
-    buffer.element_size = size_of(T)
+  buffer = malloc_mutable_buffer(gpu_context, T, count, usage) or_return
+  if data != nil {
+    mem.copy(buffer.mapped, data, buffer.bytes_count)
   }
-  buffer.bytes_count = buffer.element_size * count
-  create_info := vk.BufferCreateInfo {
-    sType       = .BUFFER_CREATE_INFO,
-    size        = vk.DeviceSize(buffer.bytes_count),
-    usage       = usage,
-    sharingMode = .EXCLUSIVE,
-  }
-  vk.CreateBuffer(
-    gpu_context.device,
-    &create_info,
-    nil,
-    &buffer.staging.buffer,
-  ) or_return
-  mem_reqs: vk.MemoryRequirements
-  vk.GetBufferMemoryRequirements(
-    gpu_context.device,
-    buffer.staging.buffer,
-    &mem_reqs,
-  )
-  buffer.staging.memory = allocate_vulkan_memory(
-    gpu_context,
-    mem_reqs,
-    {.HOST_VISIBLE, .HOST_COHERENT},
-  ) or_return
-  vk.BindBufferMemory(
-    gpu_context.device,
-    buffer.staging.buffer,
-    buffer.staging.memory,
-    0,
-  ) or_return
-  // Map staging buffer memory for CPU access
-  vk.MapMemory(
-    gpu_context.device,
-    buffer.staging.memory,
-    0,
-    vk.DeviceSize(buffer.bytes_count),
-    {},
-    auto_cast &buffer.staging.mapped,
-  ) or_return
-  // Create device buffer (GPU-local)
-  create_info.usage = usage | {.TRANSFER_DST}
-  vk.CreateBuffer(
-    gpu_context.device,
-    &create_info,
-    nil,
-    &buffer.device_buffer,
-  ) or_return
-  vk.GetBufferMemoryRequirements(
-    gpu_context.device,
-    buffer.device_buffer,
-    &mem_reqs,
-  )
-  buffer.device_memory = allocate_vulkan_memory(
-    gpu_context,
-    mem_reqs,
-    {.DEVICE_LOCAL},
-  ) or_return
-  vk.BindBufferMemory(
-    gpu_context.device,
-    buffer.device_buffer,
-    buffer.device_memory,
-    0,
-  ) or_return
-  interval_tree.init(&buffer.dirty_indices)
-  // Mutex is zero-initialized by default in Odin
-  // Mark all indices as dirty initially
-  for i in 0..<count {
-    interval_tree.insert(&buffer.dirty_indices, i, 1)
-  }
-  log.infof("staged buffer created 0x%x", buffer.staging.buffer)
   return buffer, .SUCCESS
 }
 
-flush :: proc(
-  command_buffer: vk.CommandBuffer,
-  buffer: ^StagedBuffer($T),
-) -> vk.Result {
-  /*
-    Staging buffer race conditions:
-    - After we issue a vk.CmdCopyBuffer to flush all staging data, copy command is executed asynchronously. Meanwhile, update thread will continue to write data to staging buffer which may lead to inconsistent data
-    - In worst case, CPU will write to the same slot where vk.CmdCopyBuffer is copying and GPU will read incomplete data
-    - Luckily that trash data will likely be corrected the next frame as we will run a new vk.CmdCopyBuffer on the same incomplete slot we were copying earlier
-    - By the nature of the design, there are chances of race condition. We are relying on eventual correction to have good frames.
-
-    Verdict: The observed visual artifact caused by this race condition is minimal. Plus, the proper work to double buffer the staging buffer is implementation-heavy and memory-heavy. We accept this shortcomming for now
-    TODO: Investigate this in more detail when the issue is affecting visual quality more than 1% frames
-  */
-  // @(static) run_count := 0
-  // if run_count >= 100 {
-  //     return .SUCCESS
-  // }
-  // defer run_count += 1
-  // Lock to prevent race conditions with write operations
-  sync.mutex_lock(&buffer.dirty_mutex)
-  defer sync.mutex_unlock(&buffer.dirty_mutex)
-  defer interval_tree.clear(&buffer.dirty_indices)
-  copy_regions := make([dynamic]vk.BufferCopy, 0)
-  defer delete(copy_regions)
-  element_size := vk.DeviceSize(buffer.element_size)
-  intervals := interval_tree.get_ranges(&buffer.dirty_indices)
-  total := 0
-  max_elements := buffer.staging.bytes_count / buffer.staging.element_size
-  for interval in intervals {
-    // Validate interval bounds to prevent corruption
-    if interval.start < 0 || interval.end < interval.start || interval.start >= max_elements {
-      log.errorf("Invalid interval detected: start=%d, end=%d, max_elements=%d",
-                 interval.start, interval.end, max_elements)
-      continue
-    }
-    range_length := interval.end - interval.start + 1
-    // Clamp range to buffer bounds
-    if interval.end >= max_elements {
-      range_length = max_elements - interval.start
-    }
-    if range_length <= 0 {
-      continue
-    }
-    total += range_length
-    append(
-      &copy_regions,
-      vk.BufferCopy {
-        srcOffset = vk.DeviceSize(interval.start) * element_size,
-        dstOffset = vk.DeviceSize(interval.start) * element_size,
-        size = vk.DeviceSize(range_length) * element_size,
-      },
-    )
-  }
-  if len(copy_regions) == 0 {
-    return .SUCCESS
-  }
-  // Barrier to ensure staging buffer writes are complete before copy
-  staging_barrier := vk.BufferMemoryBarrier {
-    sType = .BUFFER_MEMORY_BARRIER,
-    srcAccessMask = {.HOST_WRITE},
-    dstAccessMask = {.TRANSFER_READ},
-    srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-    dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-    buffer = buffer.staging.buffer,
-    offset = 0,
-    size = vk.DeviceSize(buffer.staging.bytes_count),
-  }
-  // Barrier to ensure device buffer is ready for writes
-  device_pre_barrier := vk.BufferMemoryBarrier {
-    sType = .BUFFER_MEMORY_BARRIER,
-    srcAccessMask = {.SHADER_READ, .UNIFORM_READ, .VERTEX_ATTRIBUTE_READ},
-    dstAccessMask = {.TRANSFER_WRITE},
-    srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-    dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-    buffer = buffer.device_buffer,
-    offset = 0,
-    size = vk.DeviceSize(buffer.staging.bytes_count),
-  }
-  barriers := [?]vk.BufferMemoryBarrier{staging_barrier, device_pre_barrier}
-  vk.CmdPipelineBarrier(
-    command_buffer,
-    {.HOST, .VERTEX_SHADER, .FRAGMENT_SHADER, .COMPUTE_SHADER},
-    {.TRANSFER},
-    {},
-    0, nil,
-    u32(len(barriers[:])), raw_data(barriers[:]),
-    0, nil,
-  )
-  vk.CmdCopyBuffer(
-    command_buffer,
-    buffer.staging.buffer,
-    buffer.device_buffer,
-    u32(len(copy_regions)),
-    raw_data(copy_regions),
-  )
-  device_post_barrier := vk.BufferMemoryBarrier {
-    sType = .BUFFER_MEMORY_BARRIER,
-    srcAccessMask = {.TRANSFER_WRITE},
-    dstAccessMask = {.SHADER_READ, .UNIFORM_READ, .VERTEX_ATTRIBUTE_READ},
-    srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-    dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-    buffer = buffer.device_buffer,
-    offset = 0,
-    size = vk.DeviceSize(buffer.staging.bytes_count),
-  }
-  staging_post_barrier := vk.BufferMemoryBarrier {
-    sType = .BUFFER_MEMORY_BARRIER,
-    srcAccessMask = {.TRANSFER_READ},
-    dstAccessMask = {.HOST_WRITE},
-    srcQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-    dstQueueFamilyIndex = vk.QUEUE_FAMILY_IGNORED,
-    buffer = buffer.staging.buffer,
-    offset = 0,
-    size = vk.DeviceSize(buffer.staging.bytes_count),
-  }
-  post_barriers := [?]vk.BufferMemoryBarrier{staging_post_barrier, device_post_barrier}
-  vk.CmdPipelineBarrier(
-    command_buffer,
-    {.TRANSFER},
-    {.HOST, .VERTEX_SHADER, .FRAGMENT_SHADER, .COMPUTE_SHADER},
-    {},
-    0, nil,
-    u32(len(post_barriers[:])), raw_data(post_barriers[:]),
-    0, nil,
-  )
-  // log.infof("Copied %d items using %d commands from staging buffer to device buffer", total, len(copy_regions))
-  return .SUCCESS
-}
-
-// Write a single element to the staging buffer and mark as dirty
-staged_buffer_write_single :: proc(
-  buffer: ^StagedBuffer($T),
-  data: ^T,
-  index: int = 0,
-) -> vk.Result {
-  if buffer.staging.mapped == nil {
-    return .ERROR_UNKNOWN
-  }
-  sync.mutex_lock(&buffer.dirty_mutex)
-  defer sync.mutex_unlock(&buffer.dirty_mutex)
-  data_buffer_write_single(&buffer.staging, data, index) or_return
-  interval_tree.insert(&buffer.dirty_indices, index)
-  return .SUCCESS
-}
-
-// Write multiple elements to the staging buffer and mark range as dirty
-staged_buffer_write_multi :: proc(
-  buffer: ^StagedBuffer($T),
-  data: []T,
-  index: int = 0,
-) -> vk.Result {
-  if buffer.staging.mapped == nil {
-    return .ERROR_UNKNOWN
-  }
-  sync.mutex_lock(&buffer.dirty_mutex)
-  defer sync.mutex_unlock(&buffer.dirty_mutex)
-  data_buffer_write_multi(&buffer.staging, data, index) or_return
-  interval_tree.insert(&buffer.dirty_indices, index, len(data))
-  return .SUCCESS
-}
-
-// Get element from staging buffer (CPU-side data)
-staged_buffer_get :: proc(buffer: ^StagedBuffer($T), index: u32 = 0) -> ^T {
-  return data_buffer_get(&buffer.staging, index)
-}
-
-// Get all elements from staging buffer as slice
-staged_buffer_get_all :: proc(buffer: ^StagedBuffer($T)) -> []T {
-  return data_buffer_get_all(&buffer.staging)
-}
-
-// Mark a range as dirty without writing data
-staged_buffer_mark_dirty :: proc(
-  buffer: ^StagedBuffer($T),
-  start_index: int,
+create_immutable_buffer :: proc(
+  gpu_context: ^GPUContext,
+  $T: typeid,
   count: int,
+  usage: vk.BufferUsageFlags,
+  data: rawptr = nil,
+) -> (
+  buffer: ImmutableBuffer(T),
+  ret: vk.Result,
 ) {
-  // Protect dirty_indices from concurrent access
-  sync.mutex_lock(&buffer.dirty_mutex)
-  defer sync.mutex_unlock(&buffer.dirty_mutex)
-  interval_tree.insert(&buffer.dirty_indices, start_index, count)
-}
+  buffer = malloc_immutable_buffer(gpu_context, T, count, usage) or_return
+  if data == nil do return buffer, .SUCCESS
 
-// Get offset for a specific index in the buffer
-staged_buffer_offset_of :: proc(buffer: ^StagedBuffer($T), index: u32) -> u32 {
-  return data_buffer_offset_of(&buffer.staging, index)
-}
+  staging := malloc_mutable_buffer(gpu_context, T, count, {.TRANSFER_SRC}) or_return
+  defer mutable_buffer_destroy(gpu_context.device, &staging)
 
-// Destroy staged buffer and free all resources
-staged_buffer_destroy :: proc(device: vk.Device, buffer: ^StagedBuffer($T)) {
-  data_buffer_destroy(device, &buffer.staging)
-  vk.DestroyBuffer(device, buffer.device_buffer, nil)
-  buffer.device_buffer = 0
-  vk.FreeMemory(device, buffer.device_memory, nil)
-  buffer.device_memory = 0
-  interval_tree.destroy(&buffer.dirty_indices)
-  // Mutex doesn't need explicit destruction in Odin
-}
+  mem.copy(staging.mapped, data, staging.bytes_count)
 
+  cmd_buffer := begin_single_time_command(gpu_context) or_return
+  region := vk.BufferCopy {size = vk.DeviceSize(staging.bytes_count)}
+  vk.CmdCopyBuffer(cmd_buffer, staging.buffer, buffer.buffer, 1, &region)
+  log.infof("Copying staging 0x%x to immutable 0x%x", staging.buffer, buffer.buffer)
+  end_single_time_command(gpu_context, &cmd_buffer) or_return
+
+  return buffer, .SUCCESS
+}
 malloc_image_buffer :: proc(
   gpu_context: ^GPUContext,
   width, height: u32,
@@ -887,7 +475,7 @@ transition_image_layout :: proc(
 copy_image :: proc(
   gpu_context: ^GPUContext,
   dst: ImageBuffer,
-  src: DataBuffer(u8),
+  src: MutableBuffer(u8),
 ) -> vk.Result {
   transition_image_layout(
     gpu_context,
@@ -933,7 +521,7 @@ copy_image :: proc(
 copy_image_for_mips :: proc(
   gpu_context: ^GPUContext,
   dst: ImageBuffer,
-  src: DataBuffer(u8),
+  src: MutableBuffer(u8),
 ) -> vk.Result {
   transition_image_layout(
     gpu_context,
@@ -979,14 +567,14 @@ create_image_buffer :: proc(
   img: ImageBuffer,
   ret: vk.Result,
 ) {
-  staging := create_host_visible_buffer(
+  staging := create_mutable_buffer(
     gpu_context,
     u8,
     int(size),
     {.TRANSFER_SRC},
     data,
   ) or_return
-  defer data_buffer_destroy(gpu_context.device, &staging)
+  defer mutable_buffer_destroy(gpu_context.device, &staging)
   img = malloc_image_buffer(
     gpu_context,
     width,

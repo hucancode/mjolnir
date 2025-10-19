@@ -84,7 +84,6 @@ Engine :: struct {
   pre_render_proc:             PreRenderProc,
   post_render_proc:            PostRenderProc,
   render_error_count:          u32,
-  staged_buffers_guard:        sync.RW_Mutex,
   render:                      Renderer,
   command_buffers:             [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
   cursor_pos:                  [2]i32,
@@ -331,7 +330,7 @@ update_skeletal_animations :: proc(self: ^Engine, delta_time: f32) {
     return
   }
   bone_buffer := &self.resource_manager.bone_buffer
-  if bone_buffer.staging.mapped == nil {
+  if bone_buffer.mapped == nil {
     return
   }
 
@@ -360,7 +359,7 @@ update_skeletal_animations :: proc(self: ^Engine, delta_time: f32) {
 
     if skinning.bone_matrix_offset == 0xFFFFFFFF do continue
 
-    matrices_ptr := gpu.staged_buffer_get(
+    matrices_ptr := gpu.mutable_buffer_get(
       bone_buffer,
       skinning.bone_matrix_offset,
     )
@@ -371,9 +370,6 @@ update_skeletal_animations :: proc(self: ^Engine, delta_time: f32) {
       anim_instance.time,
       matrices,
     )
-
-    // Mark bone matrices as dirty when animation updates them
-    gpu.staged_buffer_mark_dirty(bone_buffer, int(skinning.bone_matrix_offset), bone_count)
 
     skinning.animation = anim_instance
     mesh_attachment.skinning = skinning
@@ -410,41 +406,17 @@ update :: proc(self: ^Engine) -> bool {
   if delta_time < UPDATE_FRAME_TIME {
     return false
   }
-  sync.rw_mutex_lock(&self.staged_buffers_guard)
-  defer sync.rw_mutex_unlock(&self.staged_buffers_guard)
-  world.begin_frame(&self.world, &self.resource_manager)
   // Animation updates are now handled in render thread for smooth animation at render FPS
   // Update particle system params
-  params := gpu.data_buffer_get(&self.render.particles.params_buffer)
+  params := gpu.mutable_buffer_get(&self.render.particles.params_buffer, 0)
   params.delta_time = delta_time
   params.emitter_count = u32(min(len(self.resource_manager.emitters.entries), resources.MAX_EMITTERS))
   params.forcefield_count = u32(min(len(self.resource_manager.forcefields.entries), resources.MAX_FORCE_FIELDS))
   if self.update_proc != nil {
     self.update_proc(self, delta_time)
   }
-  res := flush_staged_buffers(self)
-  if res != .SUCCESS {
-    log.errorf("Failed to flush staged buffers: %v", res)
-    return false
-  }
   self.last_update_timestamp = time.now()
   return true
-}
-
-@(private = "file")
-flush_staged_buffers :: proc(engine: ^Engine) -> vk.Result {
-  cmd_buffer := gpu.begin_single_time_command(&engine.gpu_context) or_return
-  res := resources.commit(&engine.resource_manager, cmd_buffer)
-  if res != .SUCCESS {
-    vk.FreeCommandBuffers(
-      engine.gpu_context.device,
-      engine.gpu_context.command_pool,
-      1,
-      &cmd_buffer,
-    )
-    return res
-  }
-  return gpu.end_single_time_command(&engine.gpu_context, &cmd_buffer)
 }
 
 shutdown :: proc(self: ^Engine) {
@@ -531,9 +503,8 @@ render :: proc(self: ^Engine) -> vk.Result {
   command_buffer := self.command_buffers[self.frame_index]
   vk.ResetCommandBuffer(command_buffer, {}) or_return
   vk.BeginCommandBuffer(command_buffer, &{sType = .COMMAND_BUFFER_BEGIN_INFO, flags = {.ONE_TIME_SUBMIT}}) or_return
-  sync.rw_mutex_lock(&self.staged_buffers_guard)
-  defer sync.rw_mutex_unlock(&self.staged_buffers_guard)
   render_delta_time := f32(time.duration_seconds(time.since(self.last_render_timestamp)))
+  world.begin_frame(&self.world, &self.resource_manager)
   update_skeletal_animations(self, render_delta_time)
   main_camera_handle := self.render.main_camera
   main_camera, main_camera_ok := resources.get_camera(&self.resource_manager, main_camera_handle)
@@ -541,19 +512,11 @@ render :: proc(self: ^Engine) -> vk.Result {
     log.errorf("Failed to get main camera")
     return .ERROR_UNKNOWN
   }
-
-  // Upload camera data for all cameras
-  resources.camera_upload_data(&self.resource_manager, main_camera, main_camera_handle.index)
   for &entry, cam_index in self.resource_manager.cameras.entries {
     if !entry.active do continue
-    if u32(cam_index) == main_camera_handle.index do continue  // Skip main camera, already uploaded
     resources.camera_upload_data(&self.resource_manager, &entry.item, u32(cam_index))
   }
-
   resources.update_light_shadow_camera_transforms(&self.resource_manager, self.frame_index)
-  // Flush lights buffer immediately so shadow maps reference correct depth textures this frame
-  gpu.flush(command_buffer, &self.resource_manager.lights_buffer) or_return
-
   // Call pre-render hook before any rendering
   if self.pre_render_proc != nil {
     self.pre_render_proc(self)

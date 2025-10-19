@@ -10,8 +10,8 @@ Renderer :: struct {
   pipeline_layout:    vk.PipelineLayout,
   pipeline:           vk.Pipeline,
   line_pipeline:      vk.Pipeline, // Pipeline for path line rendering
-  vertex_buffer:      gpu.DataBuffer(Vertex),
-  index_buffer:       gpu.DataBuffer(u32),
+  vertex_buffer:      gpu.MutableBuffer(Vertex),
+  index_buffer:       gpu.MutableBuffer(u32),
   vertex_count:       u32,
   index_count:        u32,
   enabled:            bool,
@@ -19,7 +19,7 @@ Renderer :: struct {
   commands:           [resources.MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
 
   // Path rendering
-  path_vertex_buffer: gpu.DataBuffer(Vertex),
+  path_vertex_buffer: gpu.MutableBuffer(Vertex),
   path_vertex_count:  u32,
   path_enabled:       bool,
   debug_mode:         bool,
@@ -69,19 +69,19 @@ init :: proc(
   ) or_return
 
   create_pipeline(renderer, gpu_context, resources_manager) or_return
-  renderer.vertex_buffer = gpu.create_host_visible_buffer(
+  renderer.vertex_buffer = gpu.create_mutable_buffer(
     gpu_context,
     Vertex,
     16384,
     {.VERTEX_BUFFER},
   ) or_return
-  renderer.index_buffer = gpu.create_host_visible_buffer(
+  renderer.index_buffer = gpu.create_mutable_buffer(
     gpu_context,
     u32,
     32768,
     {.INDEX_BUFFER},
   ) or_return
-  renderer.path_vertex_buffer = gpu.create_host_visible_buffer(
+  renderer.path_vertex_buffer = gpu.create_mutable_buffer(
     gpu_context,
     Vertex,
     1024,
@@ -99,9 +99,9 @@ shutdown :: proc(
   vk.DestroyPipeline(device, self.pipeline, nil)
   vk.DestroyPipeline(device, self.line_pipeline, nil)
   vk.DestroyPipelineLayout(device, self.pipeline_layout, nil)
-  gpu.data_buffer_destroy(device, &self.vertex_buffer)
-  gpu.data_buffer_destroy(device, &self.index_buffer)
-  gpu.data_buffer_destroy(device, &self.path_vertex_buffer)
+  gpu.mutable_buffer_destroy(device, &self.vertex_buffer)
+  gpu.mutable_buffer_destroy(device, &self.index_buffer)
+  gpu.mutable_buffer_destroy(device, &self.path_vertex_buffer)
   gpu.free_command_buffers(device, command_pool, self.commands[:])
 }
 

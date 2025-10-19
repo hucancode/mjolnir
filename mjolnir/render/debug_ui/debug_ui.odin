@@ -23,9 +23,9 @@ Renderer :: struct {
   pipeline_layout:           vk.PipelineLayout,
   pipeline:                  vk.Pipeline,
   atlas:                     ^gpu.ImageBuffer,
-  proj_buffer:               gpu.DataBuffer(matrix[4, 4]f32),
-  vertex_buffer:             gpu.DataBuffer(Vertex2D),
-  index_buffer:              gpu.DataBuffer(u32),
+  proj_buffer:               gpu.MutableBuffer(matrix[4, 4]f32),
+  vertex_buffer:             gpu.MutableBuffer(Vertex2D),
+  index_buffer:              gpu.MutableBuffer(u32),
   vertex_count:              u32,
   index_count:               u32,
   vertices:                  [UI_MAX_VERTICES]Vertex2D,
@@ -262,14 +262,14 @@ init :: proc(
     .R8_UNORM,
   ) or_return
   log.infof("init UI vertex buffer...")
-  self.vertex_buffer = gpu.create_host_visible_buffer(
+  self.vertex_buffer = gpu.create_mutable_buffer(
     gpu_context,
     Vertex2D,
     UI_MAX_VERTICES,
     {.VERTEX_BUFFER},
   ) or_return
   log.infof("init UI indices buffer...")
-  self.index_buffer = gpu.create_host_visible_buffer(
+  self.index_buffer = gpu.create_mutable_buffer(
     gpu_context,
     u32,
     UI_MAX_INDICES,
@@ -279,7 +279,7 @@ init :: proc(
     linalg.matrix_ortho3d(0, f32(width), f32(height), 0, -1, 1) *
     linalg.matrix4_scale(dpi_scale)
   log.infof("init UI proj buffer...")
-  self.proj_buffer = gpu.create_host_visible_buffer(
+  self.proj_buffer = gpu.create_mutable_buffer(
     gpu_context,
     matrix[4, 4]f32,
     1,
@@ -493,9 +493,9 @@ ui_set_clip_rect :: proc(
 }
 
 shutdown :: proc(self: ^Renderer, device: vk.Device) {
-  gpu.data_buffer_destroy(device, &self.vertex_buffer)
-  gpu.data_buffer_destroy(device, &self.index_buffer)
-  gpu.data_buffer_destroy(device, &self.proj_buffer)
+  gpu.mutable_buffer_destroy(device, &self.vertex_buffer)
+  gpu.mutable_buffer_destroy(device, &self.index_buffer)
+  gpu.mutable_buffer_destroy(device, &self.proj_buffer)
   vk.DestroyPipeline(device, self.pipeline, nil)
   self.pipeline = 0
   vk.DestroyPipelineLayout(device, self.pipeline_layout, nil)

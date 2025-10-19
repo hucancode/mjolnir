@@ -219,9 +219,6 @@ begin_pass :: proc(
     {.COLOR_ATTACHMENT_WRITE},
   )
 
-  // Note: Depth texture is already in DEPTH_STENCIL_READ_ONLY_OPTIMAL from visibility system
-  // No transition needed - just get the texture for attachment setup
-  // Use per-frame depth attachment from camera.attachments[.DEPTH][frame_index]
   depth_texture := resources.get(
     resources_manager.image_2d_buffers,
     camera.attachments[.DEPTH][frame_index],

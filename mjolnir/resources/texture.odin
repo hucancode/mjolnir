@@ -344,14 +344,14 @@ create_image_buffer_with_mips :: proc(
   ret: vk.Result,
 ) {
   mip_levels := u32(calculate_mip_levels(width, height))
-  staging := gpu.create_host_visible_buffer(
+  staging := gpu.create_mutable_buffer(
     gpu_context,
     u8,
     int(size),
     {.TRANSFER_SRC},
     data,
   ) or_return
-  defer gpu.data_buffer_destroy(gpu_context.device, &staging)
+  defer gpu.mutable_buffer_destroy(gpu_context.device, &staging)
 
   img = gpu.malloc_image_buffer_with_mips(
     gpu_context,
@@ -486,14 +486,14 @@ update_texture :: proc(
   w := width if width > 0 else texture.width
   h := height if height > 0 else texture.height
 
-  staging := gpu.create_host_visible_buffer(
+  staging := gpu.create_mutable_buffer(
     gpu_context,
     u8,
     int(size),
     {.TRANSFER_SRC},
     pixels,
   ) or_return
-  defer gpu.data_buffer_destroy(gpu_context.device, &staging)
+  defer gpu.mutable_buffer_destroy(gpu_context.device, &staging)
 
   cmd_buffer := gpu.begin_single_time_command(gpu_context) or_return
 
