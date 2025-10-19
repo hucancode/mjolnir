@@ -337,7 +337,95 @@ get_material :: proc(engine: ^Engine, handle: resources.Handle) -> (^resources.M
   return resources.get_material(&engine.resource_manager, handle)
 }
 
-// Camera management - cameras are created as part of render targets
+// Camera management
+create_camera :: proc(
+  engine: ^Engine,
+  width, height: u32,
+  enabled_passes: resources.PassTypeSet = {.SHADOW, .GEOMETRY, .LIGHTING, .TRANSPARENCY, .PARTICLES, .POST_PROCESS},
+  position: [3]f32 = {0, 0, 3},
+  target: [3]f32 = {0, 0, 0},
+  fov: f32 = 1.57079632679,
+  near_plane: f32 = 0.1,
+  far_plane: f32 = 100.0,
+) -> (resources.Handle, bool) #optional_ok {
+  camera_handle, camera_ptr, camera_ok := resources.alloc(&engine.resource_manager.cameras)
+  if !camera_ok {
+    return {}, false
+  }
+
+  init_result := resources.camera_init(
+    camera_ptr,
+    &engine.gpu_context,
+    &engine.resource_manager,
+    width,
+    height,
+    engine.swapchain.format.format,
+    .D32_SFLOAT,
+    enabled_passes,
+    position,
+    target,
+    fov,
+    near_plane,
+    far_plane,
+  )
+
+  if init_result != .SUCCESS {
+    resources.free(&engine.resource_manager.cameras, camera_handle)
+    return {}, false
+  }
+
+  return camera_handle, true
+}
+
+get_camera_attachment :: proc(
+  engine: ^Engine,
+  camera_handle: resources.Handle,
+  attachment_type: resources.AttachmentType,
+  frame_index: u32 = 0,
+) -> (resources.Handle, bool) #optional_ok {
+  camera, camera_ok := resources.get_camera(&engine.resource_manager, camera_handle)
+  if !camera_ok {
+    return {}, false
+  }
+
+  handle := resources.camera_get_attachment(camera, attachment_type, frame_index)
+  if handle.generation == 0 {
+    return {}, false
+  }
+
+  return handle, true
+}
+
+update_material_texture :: proc(
+  engine: ^Engine,
+  material_handle: resources.Handle,
+  texture_type: resources.ShaderFeature,
+  texture_handle: resources.Handle,
+) -> bool {
+  material, material_ok := resources.get_material(&engine.resource_manager, material_handle)
+  if !material_ok {
+    return false
+  }
+
+  // Update the appropriate texture based on type
+  switch texture_type {
+  case .ALBEDO_TEXTURE:
+    material.albedo = texture_handle
+  case .METALLIC_ROUGHNESS_TEXTURE:
+    material.metallic_roughness = texture_handle
+  case .NORMAL_TEXTURE:
+    material.normal = texture_handle
+  case .EMISSIVE_TEXTURE:
+    material.emissive = texture_handle
+  case .OCCLUSION_TEXTURE:
+    material.occlusion = texture_handle
+  }
+
+  // Update GPU data
+  result := resources.material_write_to_gpu(&engine.resource_manager, material_handle, material)
+  return result == .SUCCESS
+}
+
 set_main_camera_look_at :: proc(engine: ^Engine, from: [3]f32, to: [3]f32, world_up: [3]f32 = {0, 1, 0}) -> bool {
   main_camera := get_main_camera(engine)
   if main_camera == nil {

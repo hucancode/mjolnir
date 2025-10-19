@@ -542,10 +542,20 @@ render :: proc(self: ^Engine) -> vk.Result {
     log.errorf("Failed to get main camera")
     return .ERROR_UNKNOWN
   }
+
+  // Upload camera data for all cameras
   resources.camera_upload_data(&self.resource_manager, main_camera, main_camera_handle.index)
+  for &entry, cam_index in self.resource_manager.cameras.entries {
+    if !entry.active do continue
+    if u32(cam_index) == main_camera_handle.index do continue  // Skip main camera, already uploaded
+    resources.camera_upload_data(&self.resource_manager, &entry.item, u32(cam_index))
+  }
+
   resources.update_light_shadow_camera_transforms(&self.resource_manager, self.frame_index)
   // Flush lights buffer immediately so shadow maps reference correct depth textures this frame
   gpu.flush(command_buffer, &self.resource_manager.lights_buffer) or_return
+
+  // Render visibility/shadows for ALL cameras
   record_camera_visibility(
     &self.render,
     self.frame_index,
@@ -554,6 +564,83 @@ render :: proc(self: ^Engine) -> vk.Result {
     &self.world,
     command_buffer,
   ) or_return
+
+  // Render non-main cameras first (e.g., portal cameras) so their outputs can be used as textures
+  for &entry, cam_index in self.resource_manager.cameras.entries {
+    if !entry.active do continue
+    if u32(cam_index) == main_camera_handle.index do continue  // Skip main camera, render it last
+
+    cam_handle := resources.Handle{index = u32(cam_index), generation = entry.generation}
+    cam := &entry.item
+
+    // Record all passes for this portal camera (writes to shared renderer buffers)
+    if resources.PassType.GEOMETRY in cam.enabled_passes {
+      record_geometry_pass(
+        &self.render,
+        self.frame_index,
+        &self.gpu_context,
+        &self.resource_manager,
+        &self.world,
+        cam_handle,
+      )
+    }
+    if resources.PassType.LIGHTING in cam.enabled_passes {
+      record_lighting_pass(
+        &self.render,
+        self.frame_index,
+        &self.resource_manager,
+        cam_handle,
+        self.swapchain.format.format,
+      )
+    }
+    if resources.PassType.PARTICLES in cam.enabled_passes {
+      record_particles_pass(
+        &self.render,
+        self.frame_index,
+        &self.resource_manager,
+        cam_handle,
+        self.swapchain.format.format,
+      )
+    }
+    if resources.PassType.TRANSPARENCY in cam.enabled_passes {
+      record_transparency_pass(
+        &self.render,
+        self.frame_index,
+        &self.gpu_context,
+        &self.resource_manager,
+        &self.world,
+        cam_handle,
+        self.swapchain.format.format,
+      )
+    }
+
+    // Execute all recorded commands for this portal camera at once
+    portal_buffers := [dynamic]vk.CommandBuffer{}
+    defer delete(portal_buffers)
+    if resources.PassType.GEOMETRY in cam.enabled_passes {
+      append(&portal_buffers, cam.geometry_commands[self.frame_index])
+    }
+    if resources.PassType.LIGHTING in cam.enabled_passes {
+      append(&portal_buffers, cam.lighting_commands[self.frame_index])
+    }
+    if resources.PassType.PARTICLES in cam.enabled_passes {
+      append(&portal_buffers, self.render.particles.commands[self.frame_index])
+    }
+    if resources.PassType.TRANSPARENCY in cam.enabled_passes {
+      append(&portal_buffers, cam.transparency_commands[self.frame_index])
+    }
+    if len(portal_buffers) > 0 {
+      vk.CmdExecuteCommands(command_buffer, u32(len(portal_buffers)), raw_data(portal_buffers[:]))
+    }
+  }
+
+  // Call user-provided hook to update materials after portal cameras are rendered
+  // This allows materials to bind portal camera outputs as textures
+  if self.custom_render_proc != nil {
+    self.custom_render_proc(self, command_buffer)
+  }
+
+  // Now render the main camera
   record_geometry_pass(
     &self.render,
     self.frame_index,
@@ -602,10 +689,10 @@ render :: proc(self: ^Engine) -> vk.Result {
     &self.resource_manager,
   )
   buffers := [?]vk.CommandBuffer{
-    self.render.geometry.commands[self.frame_index],
-    self.render.lighting.commands[self.frame_index],
+    main_camera.geometry_commands[self.frame_index],
+    main_camera.lighting_commands[self.frame_index],
     self.render.particles.commands[self.frame_index],
-    self.render.transparency.commands[self.frame_index],
+    main_camera.transparency_commands[self.frame_index],
     self.render.post_process.commands[self.frame_index],
   }
   vk.CmdExecuteCommands(
