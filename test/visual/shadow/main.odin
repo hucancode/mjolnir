@@ -1,14 +1,14 @@
 package main
 
+import "../../../mjolnir"
+import "../../../mjolnir/geometry"
+import "../../../mjolnir/resources"
+import "../../../mjolnir/world"
 import "core:log"
 import "core:math"
 import "core:math/linalg"
 import "core:time"
 import "vendor:glfw"
-import "../../../mjolnir"
-import "../../../mjolnir/geometry"
-import "../../../mjolnir/resources"
-import "../../../mjolnir/world"
 
 main :: proc() {
   engine := new(mjolnir.Engine)
@@ -24,8 +24,8 @@ setup_scene :: proc(engine: ^mjolnir.Engine) {
 
   plane_geom := geometry.make_quad()
   plane_mesh, plane_mesh_ok := resources.create_mesh_handle(
-    &engine.gpu_context,
-    &engine.resource_manager,
+    &engine.gctx,
+    &engine.rm,
     plane_geom,
   )
   if !plane_mesh_ok {
@@ -33,7 +33,7 @@ setup_scene :: proc(engine: ^mjolnir.Engine) {
     return
   }
   plane_material, plane_mat_ok := resources.create_material_handle(
-    &engine.resource_manager,
+    &engine.rm,
     type = resources.MaterialType.PBR,
     base_color_factor = {0.35, 0.35, 0.35, 1.0},
     roughness_value = 0.7,
@@ -45,11 +45,11 @@ setup_scene :: proc(engine: ^mjolnir.Engine) {
   _, plane_node, plane_spawned := world.spawn(
     &engine.world,
     world.MeshAttachment {
-      handle      = plane_mesh,
-      material    = plane_material,
+      handle = plane_mesh,
+      material = plane_material,
       cast_shadow = false,
     },
-    &engine.resource_manager,
+    &engine.rm,
   )
   if plane_spawned {
     world.scale(plane_node, 7.0)
@@ -57,8 +57,8 @@ setup_scene :: proc(engine: ^mjolnir.Engine) {
 
   cube_geom := geometry.make_cube()
   cube_mesh, cube_mesh_ok := resources.create_mesh_handle(
-    &engine.gpu_context,
-    &engine.resource_manager,
+    &engine.gctx,
+    &engine.rm,
     cube_geom,
   )
   if !cube_mesh_ok {
@@ -66,7 +66,7 @@ setup_scene :: proc(engine: ^mjolnir.Engine) {
     return
   }
   cube_material, cube_mat_ok := resources.create_material_handle(
-    &engine.resource_manager,
+    &engine.rm,
     type = resources.MaterialType.PBR,
     base_color_factor = {0.9, 0.9, 0.95, 1.0},
     roughness_value = 0.25,
@@ -79,11 +79,11 @@ setup_scene :: proc(engine: ^mjolnir.Engine) {
   _, cube_node, cube_spawned := world.spawn(
     &engine.world,
     world.MeshAttachment {
-      handle      = cube_mesh,
-      material    = cube_material,
+      handle = cube_mesh,
+      material = cube_material,
       cast_shadow = true,
     },
-    &engine.resource_manager,
+    &engine.rm,
   )
   if cube_spawned {
     world.translate(cube_node, 0.0, 1.5, 0.0)
@@ -93,13 +93,13 @@ setup_scene :: proc(engine: ^mjolnir.Engine) {
   light_handle, light_node, light_ok := world.spawn(
     &engine.world,
     nil,
-    &engine.resource_manager,
+    &engine.rm,
   )
   if light_ok {
     attachment, attach_ok := world.create_spot_light_attachment(
       light_handle,
-      &engine.resource_manager,
-      &engine.gpu_context,
+      &engine.rm,
+      &engine.gctx,
       {1.0, 0.95, 0.8, 3.5},
       radius = 18.0,
       angle = math.PI * 0.3,

@@ -8,20 +8,20 @@ import "core:log"
 import "core:math"
 import "core:slice"
 import "core:strings"
+import "core:sync"
 import "core:thread"
 import "core:time"
-import "core:sync"
 import "core:unicode/utf8"
 import "geometry"
 import "gpu"
-import "resources"
-import "world"
+import "render/debug_ui"
 import "render/particles"
 import "render/text"
-import "render/debug_ui"
+import "resources"
 import "vendor:glfw"
 import mu "vendor:microui"
 import vk "vendor:vulkan"
+import "world"
 
 MAX_FRAMES_IN_FLIGHT :: 2
 RENDER_FPS :: 60.0
@@ -63,38 +63,38 @@ InputState :: struct {
 }
 
 Engine :: struct {
-  window:                      glfw.WindowHandle,
-  gpu_context:                 gpu.GPUContext,
-  resource_manager:            resources.Manager,
-  frame_index:                 u32,
-  swapchain:                   gpu.Swapchain,
-  world:                       world.World,
-  last_frame_timestamp:        time.Time,
-  last_update_timestamp:       time.Time,
-  start_timestamp:             time.Time,
-  input:                       InputState,
-  setup_proc:                  SetupProc,
-  update_proc:                 UpdateProc,
-  render2d_proc:               Render2DProc,
-  key_press_proc:              KeyInputProc,
-  mouse_press_proc:            MousePressProc,
-  mouse_drag_proc:             MouseDragProc,
-  mouse_move_proc:             MouseMoveProc,
-  mouse_scroll_proc:           MouseScrollProc,
-  pre_render_proc:             PreRenderProc,
-  post_render_proc:            PostRenderProc,
-  render_error_count:          u32,
-  render:                      Renderer,
-  command_buffers:             [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
-  cursor_pos:                  [2]i32,
-  debug_ui_enabled:            bool,
+  window:                 glfw.WindowHandle,
+  gctx:                   gpu.GPUContext,
+  rm:                     resources.Manager,
+  frame_index:            u32,
+  swapchain:              gpu.Swapchain,
+  world:                  world.World,
+  last_frame_timestamp:   time.Time,
+  last_update_timestamp:  time.Time,
+  start_timestamp:        time.Time,
+  input:                  InputState,
+  setup_proc:             SetupProc,
+  update_proc:            UpdateProc,
+  render2d_proc:          Render2DProc,
+  key_press_proc:         KeyInputProc,
+  mouse_press_proc:       MousePressProc,
+  mouse_drag_proc:        MouseDragProc,
+  mouse_move_proc:        MouseMoveProc,
+  mouse_scroll_proc:      MouseScrollProc,
+  pre_render_proc:        PreRenderProc,
+  post_render_proc:       PostRenderProc,
+  render_error_count:     u32,
+  render:                 Renderer,
+  command_buffers:        [MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
+  cursor_pos:             [2]i32,
+  debug_ui_enabled:       bool,
   // Deferred cleanup for thread safety
-  pending_node_deletions:      [dynamic]resources.Handle,
+  pending_node_deletions: [dynamic]resources.Handle,
   // Frame synchronization for parallel update/render
-  frame_fence:                 vk.Fence,
-  update_thread:               Maybe(^thread.Thread),
-  update_active:               bool,
-  last_render_timestamp:       time.Time,
+  frame_fence:            vk.Fence,
+  update_thread:          Maybe(^thread.Thread),
+  update_active:          bool,
+  last_render_timestamp:  time.Time,
 }
 
 get_window_dpi :: proc(window: glfw.WindowHandle) -> f32 {
@@ -133,31 +133,37 @@ init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
     return .ERROR_INITIALIZATION_FAILED
   }
   log.infof("Window created %v\n", self.window)
-  gpu.gpu_context_init(&self.gpu_context, self.window) or_return
-  resources.init(&self.resource_manager, &self.gpu_context) or_return
+  gpu.gpu_context_init(&self.gctx, self.window) or_return
+  resources.init(&self.rm, &self.gctx) or_return
   self.start_timestamp = time.now()
   self.last_frame_timestamp = self.start_timestamp
   self.last_update_timestamp = self.start_timestamp
   world.init(&self.world)
-  gpu.swapchain_init(&self.swapchain, &self.gpu_context, self.window) or_return
-  world.init_gpu(&self.world, &self.gpu_context, &self.resource_manager, self.swapchain.extent.width, self.swapchain.extent.height) or_return
+  gpu.swapchain_init(&self.swapchain, &self.gctx, self.window) or_return
+  world.init_gpu(
+    &self.world,
+    &self.gctx,
+    &self.rm,
+    self.swapchain.extent.width,
+    self.swapchain.extent.height,
+  ) or_return
 
   // Initialize deferred cleanup
   self.pending_node_deletions = make([dynamic]resources.Handle, 0)
 
   // Create fence for frame synchronization
   vk.CreateFence(
-    self.gpu_context.device,
+    self.gctx.device,
     &vk.FenceCreateInfo{sType = .FENCE_CREATE_INFO},
     nil,
     &self.frame_fence,
   ) or_return
 
   vk.AllocateCommandBuffers(
-    self.gpu_context.device,
+    self.gctx.device,
     &{
       sType = .COMMAND_BUFFER_ALLOCATE_INFO,
-      commandPool = self.gpu_context.command_pool,
+      commandPool = self.gctx.command_pool,
       level = .PRIMARY,
       commandBufferCount = MAX_FRAMES_IN_FLIGHT,
     },
@@ -165,8 +171,8 @@ init :: proc(self: ^Engine, width, height: u32, title: string) -> vk.Result {
   ) or_return
   renderer_init(
     &self.render,
-    &self.gpu_context,
-    &self.resource_manager,
+    &self.gctx,
+    &self.rm,
     self.swapchain.extent,
     self.swapchain.format.format,
     get_window_dpi(self.window),
@@ -318,14 +324,14 @@ time_since_start :: proc(self: ^Engine) -> f32 {
 }
 
 get_main_camera :: proc(self: ^Engine) -> ^resources.Camera {
-  return resources.get(self.resource_manager.cameras, self.render.main_camera)
+  return resources.get(self.rm.cameras, self.render.main_camera)
 }
 
 update_skeletal_animations :: proc(self: ^Engine, delta_time: f32) {
   if delta_time <= 0 {
     return
   }
-  bone_buffer := &self.resource_manager.bone_buffer
+  bone_buffer := &self.rm.bone_buffer
   if bone_buffer.mapped == nil {
     return
   }
@@ -345,7 +351,7 @@ update_skeletal_animations :: proc(self: ^Engine, delta_time: f32) {
     clip := anim_instance.clip
     if clip == nil do continue
 
-    mesh := resources.get(self.resource_manager.meshes, mesh_attachment.handle) or_continue
+    mesh := resources.get(self.rm.meshes, mesh_attachment.handle) or_continue
     mesh_skinning, mesh_has_skin := mesh.skinning.?
     if !mesh_has_skin do continue
 
@@ -354,17 +360,9 @@ update_skeletal_animations :: proc(self: ^Engine, delta_time: f32) {
 
     if skinning.bone_matrix_offset == 0xFFFFFFFF do continue
 
-    matrices_ptr := gpu.mutable_buffer_get(
-      bone_buffer,
-      skinning.bone_matrix_offset,
-    )
+    matrices_ptr := gpu.mutable_buffer_get(bone_buffer, skinning.bone_matrix_offset)
     matrices := slice.from_ptr(matrices_ptr, bone_count)
-    resources.sample_clip(
-      mesh,
-      clip,
-      anim_instance.time,
-      matrices,
-    )
+    resources.sample_clip(mesh, clip, anim_instance.time, matrices)
 
     skinning.animation = anim_instance
     mesh_attachment.skinning = skinning
@@ -405,8 +403,12 @@ update :: proc(self: ^Engine) -> bool {
   // Update particle system params
   params := gpu.mutable_buffer_get(&self.render.particles.params_buffer, 0)
   params.delta_time = delta_time
-  params.emitter_count = u32(min(len(self.resource_manager.emitters.entries), resources.MAX_EMITTERS))
-  params.forcefield_count = u32(min(len(self.resource_manager.forcefields.entries), resources.MAX_FORCE_FIELDS))
+  params.emitter_count = u32(
+    min(len(self.rm.emitters.entries), resources.MAX_EMITTERS),
+  )
+  params.forcefield_count = u32(
+    min(len(self.rm.forcefields.entries), resources.MAX_FORCE_FIELDS),
+  )
   if self.update_proc != nil {
     self.update_proc(self, delta_time)
   }
@@ -415,16 +417,25 @@ update :: proc(self: ^Engine) -> bool {
 }
 
 shutdown :: proc(self: ^Engine) {
-  vk.DeviceWaitIdle(self.gpu_context.device)
-  gpu.free_command_buffers(self.gpu_context.device, self.gpu_context.command_pool, self.command_buffers[:])
+  vk.DeviceWaitIdle(self.gctx.device)
+  gpu.free_command_buffers(
+    self.gctx.device,
+    self.gctx.command_pool,
+    self.command_buffers[:],
+  )
   // Main render target is cleaned up in renderer_shutdown
   delete(self.pending_node_deletions)
-  vk.DestroyFence(self.gpu_context.device, self.frame_fence, nil)
-  renderer_shutdown(&self.render, self.gpu_context.device, self.gpu_context.command_pool, &self.resource_manager)
-  world.shutdown(&self.world, &self.gpu_context, &self.resource_manager)
-  resources.shutdown(&self.resource_manager, &self.gpu_context)
-  gpu.swapchain_destroy(&self.swapchain, self.gpu_context.device)
-  gpu.shutdown(&self.gpu_context)
+  vk.DestroyFence(self.gctx.device, self.frame_fence, nil)
+  renderer_shutdown(
+    &self.render,
+    self.gctx.device,
+    self.gctx.command_pool,
+    &self.rm,
+  )
+  world.shutdown(&self.world, &self.gctx, &self.rm)
+  resources.shutdown(&self.rm, &self.gctx)
+  gpu.swapchain_destroy(&self.swapchain, self.gctx.device)
+  gpu.shutdown(&self.gctx)
   glfw.DestroyWindow(self.window)
   glfw.Terminate()
   log.infof("Engine deinitialized")
@@ -432,15 +443,56 @@ shutdown :: proc(self: ^Engine) {
 
 @(private = "file")
 render_debug_ui :: proc(self: ^Engine) {
-  if mu.window(&self.render.ui.ctx, "Engine", {40, 40, 350, 280}, {.NO_CLOSE}) {
-    mu.label(&self.render.ui.ctx, fmt.tprintf("Objects %d", len(self.world.nodes.entries) - len(self.world.nodes.free_indices)))
-    mu.label(&self.render.ui.ctx, fmt.tprintf("Textures %d", len(self.resource_manager.image_2d_buffers.entries) - len(self.resource_manager.image_2d_buffers.free_indices)))
-    mu.label(&self.render.ui.ctx, fmt.tprintf("Materials %d", len(self.resource_manager.materials.entries) - len(self.resource_manager.materials.free_indices)))
-    mu.label(&self.render.ui.ctx, fmt.tprintf("Meshes %d", len(self.resource_manager.meshes.entries) - len(self.resource_manager.meshes.free_indices)))
+  if mu.window(
+    &self.render.ui.ctx,
+    "Engine",
+    {40, 40, 350, 280},
+    {.NO_CLOSE},
+  ) {
+    mu.label(
+      &self.render.ui.ctx,
+      fmt.tprintf(
+        "Objects %d",
+        len(self.world.nodes.entries) - len(self.world.nodes.free_indices),
+      ),
+    )
+    mu.label(
+      &self.render.ui.ctx,
+      fmt.tprintf(
+        "Textures %d",
+        len(self.rm.image_2d_buffers.entries) -
+        len(self.rm.image_2d_buffers.free_indices),
+      ),
+    )
+    mu.label(
+      &self.render.ui.ctx,
+      fmt.tprintf(
+        "Materials %d",
+        len(self.rm.materials.entries) - len(self.rm.materials.free_indices),
+      ),
+    )
+    mu.label(
+      &self.render.ui.ctx,
+      fmt.tprintf(
+        "Meshes %d",
+        len(self.rm.meshes.entries) - len(self.rm.meshes.free_indices),
+      ),
+    )
     if main_camera := get_main_camera(self); main_camera != nil {
-      main_stats := world.visibility_system_get_stats(&self.world.visibility, main_camera, self.render.main_camera.index, self.frame_index)
-      mu.label(&self.render.ui.ctx, fmt.tprintf("Total Objects: %d", self.world.visibility.node_count))
-      mu.label(&self.render.ui.ctx, fmt.tprintf("Draw count: %d draws", main_stats.late_draw_count))
+      main_stats := world.visibility_system_get_stats(
+        &self.world.visibility,
+        main_camera,
+        self.render.main_camera.index,
+        self.frame_index,
+      )
+      mu.label(
+        &self.render.ui.ctx,
+        fmt.tprintf("Total Objects: %d", self.world.visibility.node_count),
+      )
+      mu.label(
+        &self.render.ui.ctx,
+        fmt.tprintf("Draw count: %d draws", main_stats.late_draw_count),
+      )
     }
   }
 }
@@ -448,7 +500,7 @@ render_debug_ui :: proc(self: ^Engine) {
 @(private = "file")
 recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
   gpu.swapchain_recreate(
-    &engine.gpu_context,
+    &engine.gctx,
     &engine.swapchain,
     engine.window,
   ) or_return
@@ -458,8 +510,8 @@ recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
     resources.camera_update_aspect_ratio(main_camera, new_aspect_ratio)
     resources.camera_resize(
       main_camera,
-      &engine.gpu_context,
-      &engine.resource_manager,
+      &engine.gctx,
+      &engine.rm,
       engine.swapchain.extent.width,
       engine.swapchain.extent.height,
       engine.swapchain.format.format,
@@ -468,8 +520,8 @@ recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
   }
   resize(
     &engine.render,
-    &engine.gpu_context,
-    &engine.resource_manager,
+    &engine.gctx,
+    &engine.rm,
     engine.swapchain.extent,
     engine.swapchain.format.format,
     get_window_dpi(engine.window),
@@ -478,22 +530,31 @@ recreate_swapchain :: proc(engine: ^Engine) -> vk.Result {
 }
 
 render :: proc(self: ^Engine) -> vk.Result {
-  gpu.acquire_next_image(self.gpu_context.device, &self.swapchain, self.frame_index) or_return
+  gpu.acquire_next_image(
+    self.gctx.device,
+    &self.swapchain,
+    self.frame_index,
+  ) or_return
   mu.begin(&self.render.ui.ctx)
   command_buffer := self.command_buffers[self.frame_index]
   vk.ResetCommandBuffer(command_buffer, {}) or_return
-  vk.BeginCommandBuffer(command_buffer, &{sType = .COMMAND_BUFFER_BEGIN_INFO, flags = {.ONE_TIME_SUBMIT}}) or_return
-  render_delta_time := f32(time.duration_seconds(time.since(self.last_render_timestamp)))
-  world.begin_frame(&self.world, &self.resource_manager)
+  vk.BeginCommandBuffer(
+    command_buffer,
+    &{sType = .COMMAND_BUFFER_BEGIN_INFO, flags = {.ONE_TIME_SUBMIT}},
+  ) or_return
+  render_delta_time := f32(
+    time.duration_seconds(time.since(self.last_render_timestamp)),
+  )
+  world.begin_frame(&self.world, &self.rm)
   update_skeletal_animations(self, render_delta_time)
   main_camera_handle := self.render.main_camera
-  main_camera := resources.get(self.resource_manager.cameras, main_camera_handle)
+  main_camera := resources.get(self.rm.cameras, main_camera_handle)
   if main_camera == nil do return .ERROR_UNKNOWN
-  for &entry, cam_index in self.resource_manager.cameras.entries {
+  for &entry, cam_index in self.rm.cameras.entries {
     if !entry.active do continue
-    resources.camera_upload_data(&self.resource_manager, &entry.item, u32(cam_index))
+    resources.camera_upload_data(&self.rm, &entry.item, u32(cam_index))
   }
-  resources.update_light_shadow_camera_transforms(&self.resource_manager, self.frame_index)
+  resources.update_light_shadow_camera_transforms(&self.rm, self.frame_index)
   // Call pre-render hook before any rendering
   if self.pre_render_proc != nil {
     self.pre_render_proc(self)
@@ -503,18 +564,21 @@ render :: proc(self: ^Engine) -> vk.Result {
   record_camera_visibility(
     &self.render,
     self.frame_index,
-    &self.gpu_context,
-    &self.resource_manager,
+    &self.gctx,
+    &self.rm,
     &self.world,
     command_buffer,
   ) or_return
 
   // Render non-main cameras first (e.g., portal cameras) so their outputs can be used as textures
-  for &entry, cam_index in self.resource_manager.cameras.entries {
+  for &entry, cam_index in self.rm.cameras.entries {
     if !entry.active do continue
-    if u32(cam_index) == main_camera_handle.index do continue  // Skip main camera, render it last
+    if u32(cam_index) == main_camera_handle.index do continue // Skip main camera, render it last
 
-    cam_handle := resources.Handle{index = u32(cam_index), generation = entry.generation}
+    cam_handle := resources.Handle {
+      index      = u32(cam_index),
+      generation = entry.generation,
+    }
     cam := &entry.item
 
     // Record all passes for this portal camera (writes to shared renderer buffers)
@@ -522,8 +586,8 @@ render :: proc(self: ^Engine) -> vk.Result {
       record_geometry_pass(
         &self.render,
         self.frame_index,
-        &self.gpu_context,
-        &self.resource_manager,
+        &self.gctx,
+        &self.rm,
         &self.world,
         cam_handle,
       )
@@ -532,7 +596,7 @@ render :: proc(self: ^Engine) -> vk.Result {
       record_lighting_pass(
         &self.render,
         self.frame_index,
-        &self.resource_manager,
+        &self.rm,
         cam_handle,
         self.swapchain.format.format,
       )
@@ -541,7 +605,7 @@ render :: proc(self: ^Engine) -> vk.Result {
       record_particles_pass(
         &self.render,
         self.frame_index,
-        &self.resource_manager,
+        &self.rm,
         cam_handle,
         self.swapchain.format.format,
       )
@@ -550,8 +614,8 @@ render :: proc(self: ^Engine) -> vk.Result {
       record_transparency_pass(
         &self.render,
         self.frame_index,
-        &self.gpu_context,
-        &self.resource_manager,
+        &self.gctx,
+        &self.rm,
         &self.world,
         cam_handle,
         self.swapchain.format.format,
@@ -574,7 +638,11 @@ render :: proc(self: ^Engine) -> vk.Result {
       append(&portal_buffers, cam.transparency_commands[self.frame_index])
     }
     if len(portal_buffers) > 0 {
-      vk.CmdExecuteCommands(command_buffer, u32(len(portal_buffers)), raw_data(portal_buffers[:]))
+      vk.CmdExecuteCommands(
+        command_buffer,
+        u32(len(portal_buffers)),
+        raw_data(portal_buffers[:]),
+      )
     }
   }
 
@@ -588,30 +656,30 @@ render :: proc(self: ^Engine) -> vk.Result {
   record_geometry_pass(
     &self.render,
     self.frame_index,
-    &self.gpu_context,
-    &self.resource_manager,
+    &self.gctx,
+    &self.rm,
     &self.world,
     main_camera_handle,
   )
   record_lighting_pass(
     &self.render,
     self.frame_index,
-    &self.resource_manager,
+    &self.rm,
     main_camera_handle,
     self.swapchain.format.format,
   )
   record_particles_pass(
     &self.render,
     self.frame_index,
-    &self.resource_manager,
+    &self.rm,
     main_camera_handle,
     self.swapchain.format.format,
   )
   record_transparency_pass(
     &self.render,
     self.frame_index,
-    &self.gpu_context,
-    &self.resource_manager,
+    &self.gctx,
+    &self.rm,
     &self.world,
     main_camera_handle,
     self.swapchain.format.format,
@@ -619,7 +687,7 @@ render :: proc(self: ^Engine) -> vk.Result {
   record_post_process_pass(
     &self.render,
     self.frame_index,
-    &self.resource_manager,
+    &self.rm,
     main_camera_handle,
     self.swapchain.format.format,
     self.swapchain.extent,
@@ -629,21 +697,17 @@ render :: proc(self: ^Engine) -> vk.Result {
   particles.simulate(
     &self.render.particles,
     command_buffer,
-    self.resource_manager.world_matrix_descriptor_set,
-    &self.resource_manager,
+    self.rm.world_matrix_descriptor_set,
+    &self.rm,
   )
-  buffers := [?]vk.CommandBuffer{
+  buffers := [?]vk.CommandBuffer {
     main_camera.geometry_commands[self.frame_index],
     main_camera.lighting_commands[self.frame_index],
     self.render.particles.commands[self.frame_index],
     main_camera.transparency_commands[self.frame_index],
     self.render.post_process.commands[self.frame_index],
   }
-  vk.CmdExecuteCommands(
-    command_buffer,
-    len(buffers),
-    raw_data(buffers[:]),
-  )
+  vk.CmdExecuteCommands(command_buffer, len(buffers), raw_data(buffers[:]))
   render_debug_ui(self)
   if self.render2d_proc != nil {
     self.render2d_proc(self, &self.render.ui.ctx)
@@ -655,7 +719,7 @@ render :: proc(self: ^Engine) -> vk.Result {
     self.swapchain.views[self.swapchain.image_index],
     self.swapchain.extent,
   )
-  text.render(&self.render.text, command_buffer, &self.gpu_context)
+  text.render(&self.render.text, command_buffer, &self.gctx)
   text.end_pass(command_buffer)
   if self.debug_ui_enabled {
     debug_ui.begin_pass(
@@ -673,7 +737,7 @@ render :: proc(self: ^Engine) -> vk.Result {
   )
   vk.EndCommandBuffer(command_buffer) or_return
   gpu.submit_queue_and_present(
-    &self.gpu_context,
+    &self.gctx,
     &self.swapchain,
     &command_buffer,
     self.frame_index,
@@ -691,7 +755,9 @@ run :: proc(self: ^Engine, width, height: u32, title: string) {
   defer shutdown(self)
   when USE_PARALLEL_UPDATE {
     self.update_active = true
-    update_data := UpdateThreadData{engine = self}
+    update_data := UpdateThreadData {
+      engine = self,
+    }
     update_thread := thread.create(update_thread_proc)
     update_thread.data = &update_data
     update_thread.init_context = context
@@ -761,5 +827,5 @@ process_pending_deletions :: proc(engine: ^Engine) {
   }
   clear(&engine.pending_node_deletions)
   // Actually cleanup the nodes that were marked for deletion
-  world.cleanup_pending_deletions(&engine.world, &engine.resource_manager, &engine.gpu_context)
+  world.cleanup_pending_deletions(&engine.world, &engine.rm, &engine.gctx)
 }

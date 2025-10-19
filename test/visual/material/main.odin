@@ -1,14 +1,14 @@
 package main
 
+import "../../../mjolnir"
+import "../../../mjolnir/geometry"
+import "../../../mjolnir/resources"
+import "../../../mjolnir/world"
 import "core:log"
 import "core:math"
 import "core:math/linalg"
 import "core:time"
 import "vendor:glfw"
-import "../../../mjolnir"
-import "../../../mjolnir/geometry"
-import "../../../mjolnir/resources"
-import "../../../mjolnir/world"
 
 MaterialSceneState :: struct {
   cube_handle: resources.Handle,
@@ -32,8 +32,8 @@ setup_scene :: proc(engine: ^mjolnir.Engine) {
   cube_geom := geometry.make_cube()
 
   cube_mesh, mesh_ok := resources.create_mesh_handle(
-    &engine.gpu_context,
-    &engine.resource_manager,
+    &engine.gctx,
+    &engine.rm,
     cube_geom,
   )
   if !mesh_ok {
@@ -42,8 +42,8 @@ setup_scene :: proc(engine: ^mjolnir.Engine) {
   }
 
   albedo_texture, texture_ok := resources.create_texture_from_data_handle(
-    &engine.gpu_context,
-    &engine.resource_manager,
+    &engine.gctx,
+    &engine.rm,
     #load("statue-1275469_1280.jpg"),
     generate_mips = true,
   )
@@ -53,7 +53,7 @@ setup_scene :: proc(engine: ^mjolnir.Engine) {
   }
 
   material_handle, material_ok := resources.create_material_handle(
-    &engine.resource_manager,
+    &engine.rm,
     {.ALBEDO_TEXTURE},
     type = resources.MaterialType.PBR,
     albedo_handle = albedo_texture,
@@ -68,23 +68,27 @@ setup_scene :: proc(engine: ^mjolnir.Engine) {
   cube_handle, cube_node, spawned := world.spawn(
     &engine.world,
     world.MeshAttachment {
-      handle      = cube_mesh,
-      material    = material_handle,
+      handle = cube_mesh,
+      material = material_handle,
       cast_shadow = true,
     },
-    &engine.resource_manager,
+    &engine.rm,
   )
   if spawned {
     world.scale(cube_node, 0.75)
     state.cube_handle = cube_handle
   }
 
-  light_handle, light_node, light_ok := world.spawn(&engine.world, nil, &engine.resource_manager)
+  light_handle, light_node, light_ok := world.spawn(
+    &engine.world,
+    nil,
+    &engine.rm,
+  )
   if light_ok {
     light_attachment, attach_ok := world.create_directional_light_attachment(
       light_handle,
-      &engine.resource_manager,
-      &engine.gpu_context,
+      &engine.rm,
+      &engine.gctx,
       {1.0, 1.0, 1.0, 1.0},
       cast_shadow = false,
     )

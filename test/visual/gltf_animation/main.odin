@@ -1,15 +1,15 @@
 package main
 
+import "../../../mjolnir"
+import "../../../mjolnir/geometry"
+import "../../../mjolnir/resources"
+import "../../../mjolnir/world"
 import "core:log"
 import "core:math"
 import "core:math/linalg"
 import "core:time"
 import cgltf "vendor:cgltf"
 import "vendor:glfw"
-import "../../../mjolnir"
-import "../../../mjolnir/geometry"
-import "../../../mjolnir/resources"
-import "../../../mjolnir/world"
 
 AnimationSceneState :: struct {
   root_nodes:    [dynamic]resources.Handle,
@@ -32,8 +32,8 @@ setup_scene :: proc(engine: ^mjolnir.Engine) {
 
   nodes, result := world.load_gltf(
     &engine.world,
-    &engine.resource_manager,
-    &engine.gpu_context,
+    &engine.rm,
+    &engine.gctx,
     "assets/CesiumMan.glb",
   )
   if result != cgltf.result.success {
@@ -49,7 +49,8 @@ setup_scene :: proc(engine: ^mjolnir.Engine) {
     for child in node.children {
       child_node := world.get_node(&engine.world, child)
       if child_node == nil do continue
-      if _, has_mesh := child_node.attachment.(world.MeshAttachment); has_mesh {
+      if _, has_mesh := child_node.attachment.(world.MeshAttachment);
+         has_mesh {
         mjolnir.play_animation(engine, child, "Anim_0")
       }
     }

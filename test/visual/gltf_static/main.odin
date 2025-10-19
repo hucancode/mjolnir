@@ -1,18 +1,18 @@
 package main
 
+import "../../../mjolnir"
+import "../../../mjolnir/geometry"
+import "../../../mjolnir/resources"
+import "../../../mjolnir/world"
 import "core:log"
 import "core:math"
 import "core:math/linalg"
 import "core:time"
 import cgltf "vendor:cgltf"
 import "vendor:glfw"
-import "../../../mjolnir"
-import "../../../mjolnir/geometry"
-import "../../../mjolnir/resources"
-import "../../../mjolnir/world"
 
 GLTFSceneState :: struct {
-  nodes:      [dynamic]resources.Handle,
+  nodes: [dynamic]resources.Handle,
 }
 
 state := GLTFSceneState{}
@@ -32,8 +32,8 @@ setup_scene :: proc(engine: ^mjolnir.Engine) {
 
   nodes, result := world.load_gltf(
     &engine.world,
-    &engine.resource_manager,
-    &engine.gpu_context,
+    &engine.rm,
+    &engine.gctx,
     "assets/Duck.glb",
   )
   if result != cgltf.result.success {
@@ -47,12 +47,16 @@ setup_scene :: proc(engine: ^mjolnir.Engine) {
     world.node_handle_translate(&engine.world, handle, 0.0, 0.0, 0.0)
   }
 
-  light_handle, light_node, light_ok := world.spawn(&engine.world, nil, &engine.resource_manager)
+  light_handle, light_node, light_ok := world.spawn(
+    &engine.world,
+    nil,
+    &engine.rm,
+  )
   if light_ok {
     light_attachment, attach_ok := world.create_directional_light_attachment(
       light_handle,
-      &engine.resource_manager,
-      &engine.gpu_context,
+      &engine.rm,
+      &engine.gctx,
       {1.0, 1.0, 1.0, 1.0},
       cast_shadow = false,
     )
