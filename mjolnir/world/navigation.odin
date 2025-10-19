@@ -711,6 +711,30 @@ nav_is_position_walkable :: proc(
   return recast.status_succeeded(status) && poly_ref != recast.INVALID_POLY_REF
 }
 
+// Find the nearest point on the navigation mesh to a given 3D position
+nav_find_nearest_point :: proc(
+  world: ^World, resources_manager: ^resources.Manager, gpu_context: ^gpu.GPUContext,
+  context_handle: resources.Handle,
+  position: [3]f32,
+  search_extents: [3]f32 = {2.0, 4.0, 2.0},
+) -> (nearest_pos: [3]f32, found: bool) {
+  nav_context := resources.get(resources_manager.nav_contexts, context_handle)
+  if nav_context == nil do return {}, false
+
+  status, poly_ref, result_pos := detour.find_nearest_poly(
+    &nav_context.nav_mesh_query,
+    position,
+    search_extents,
+    &nav_context.query_filter,
+  )
+
+  if recast.status_succeeded(status) && poly_ref != recast.INVALID_POLY_REF {
+    return result_pos, true
+  }
+
+  return {}, false
+}
+
 // Spawn navigation agent at position
 spawn_nav_agent_at :: proc(
   world: ^World, resources_manager: ^resources.Manager, gpu_context: ^gpu.GPUContext,

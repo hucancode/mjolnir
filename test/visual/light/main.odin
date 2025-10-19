@@ -20,14 +20,13 @@ main :: proc() {
 setup_scene :: proc(engine: ^mjolnir.Engine) {
   camera := mjolnir.get_main_camera(engine)
   if camera != nil {
-    resources.camera_look_at(camera, {6.0, 4.0, 6.0}, {0.0, 0.0, 0.0})
+    mjolnir.camera_look_at(camera, {6.0, 4.0, 6.0}, {0.0, 0.0, 0.0})
   }
 
   plane_geom := geometry.make_quad()
 
-  plane_mesh, plane_mesh_ok := resources.create_mesh_handle(
-    &engine.gctx,
-    &engine.rm,
+  plane_mesh, plane_mesh_ok := mjolnir.create_mesh(
+    engine,
     plane_geom,
   )
   if !plane_mesh_ok {
@@ -35,8 +34,8 @@ setup_scene :: proc(engine: ^mjolnir.Engine) {
     return
   }
 
-  plane_material, plane_mat_ok := resources.create_material_handle(
-    &engine.rm,
+  plane_material, plane_mat_ok := mjolnir.create_material(
+    engine,
     type = resources.MaterialType.PBR,
     base_color_factor = {0.2, 0.22, 0.25, 1.0},
     roughness_value = 0.8,
@@ -47,25 +46,23 @@ setup_scene :: proc(engine: ^mjolnir.Engine) {
     return
   }
 
-  plane_handle, plane_node, plane_spawned := world.spawn(
-    &engine.world,
+  plane_handle, plane_node, plane_spawned := mjolnir.spawn(
+    engine,
     world.MeshAttachment {
       handle = plane_mesh,
       material = plane_material,
       cast_shadow = false,
     },
-    &engine.rm,
   )
   if plane_spawned {
-    world.scale(plane_node, 6.5)
-    world.translate(plane_node, 0.0, -0.05, 0.0)
+    mjolnir.scale(plane_node, 6.5)
+    mjolnir.translate(plane_node, 0.0, -0.05, 0.0)
   }
 
   sphere_geom := geometry.make_sphere(32, 16, 1.0)
 
-  sphere_mesh, sphere_mesh_ok := resources.create_mesh_handle(
-    &engine.gctx,
-    &engine.rm,
+  sphere_mesh, sphere_mesh_ok := mjolnir.create_mesh(
+    engine,
     sphere_geom,
   )
   if !sphere_mesh_ok {
@@ -73,8 +70,8 @@ setup_scene :: proc(engine: ^mjolnir.Engine) {
     return
   }
 
-  sphere_material, sphere_mat_ok := resources.create_material_handle(
-    &engine.rm,
+  sphere_material, sphere_mat_ok := mjolnir.create_material(
+    engine,
     type = resources.MaterialType.PBR,
     base_color_factor = {0.85, 0.3, 0.3, 1.0},
     roughness_value = 0.35,
@@ -85,60 +82,37 @@ setup_scene :: proc(engine: ^mjolnir.Engine) {
     return
   }
 
-  _, sphere_node, sphere_spawned := world.spawn(
-    &engine.world,
+  _, sphere_node, sphere_spawned := mjolnir.spawn(
+    engine,
     world.MeshAttachment {
       handle = sphere_mesh,
       material = sphere_material,
       cast_shadow = false,
     },
-    &engine.rm,
   )
   if sphere_spawned {
-    world.translate(sphere_node, 0.0, 1.2, 0.0)
-    world.scale(sphere_node, 1.1)
+    mjolnir.translate(sphere_node, 0.0, 1.2, 0.0)
+    mjolnir.scale(sphere_node, 1.1)
   }
 
-  point_handle, point_node, point_ok := world.spawn(
-    &engine.world,
-    nil,
-    &engine.rm,
+  _, point_node, point_ok := mjolnir.spawn_point_light(
+    engine,
+    {1.0, 0.85, 0.6, 1.0},
+    radius = 5.0,
+    cast_shadow = false,
+    position = {1.5, 3.0, -1.0},
   )
-  if point_ok {
-    attachment, attach_ok := world.create_point_light_attachment(
-      point_handle,
-      &engine.rm,
-      &engine.gctx,
-      {1.0, 0.85, 0.6, 1.0},
-      radius = 5.0,
-      cast_shadow = false,
-    )
-    if attach_ok {
-      point_node.attachment = attachment
-      world.translate(point_node, 1.5, 3.0, -1.0)
-    }
-  }
 
-  spot_handle, spot_node, spot_ok := world.spawn(
-    &engine.world,
-    nil,
-    &engine.rm,
+  _, spot_node, spot_ok := mjolnir.spawn_spot_light(
+    engine,
+    {0.6, 0.8, 1.0, 1.0},
+    radius = 18.0,
+    angle = math.PI * 0.25,
+    cast_shadow = false,
+    position = {-3.0, 5.0, 3.0},
   )
   if spot_ok {
-    spot_attachment, attach_ok := world.create_spot_light_attachment(
-      spot_handle,
-      &engine.rm,
-      &engine.gctx,
-      {0.6, 0.8, 1.0, 1.0},
-      radius = 18.0,
-      angle = math.PI * 0.25,
-      cast_shadow = false,
-    )
-    if attach_ok {
-      spot_node.attachment = spot_attachment
-      world.translate(spot_node, -3.0, 5.0, 3.0)
-      world.rotate(spot_node, -math.PI * 0.7, linalg.VECTOR3F32_X_AXIS)
-      world.rotate(spot_node, math.PI * -0.25)
-    }
+    mjolnir.rotate(spot_node, -math.PI * 0.7, linalg.VECTOR3F32_X_AXIS)
+    mjolnir.rotate(spot_node, math.PI * -0.25)
   }
 }

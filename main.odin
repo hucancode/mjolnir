@@ -51,7 +51,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
   log.info("Setup function called!")
 
   // Enable visibility statistics logging
-  world.visibility_system_set_stats_enabled(&engine.world.visibility, false)
+  set_visibility_stats(engine, false)
   set_debug_ui_enabled(engine, true)
 
   plain_material_handle, plain_material_ok := create_material(engine)
@@ -131,7 +131,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     }
     ground_mesh_handle, ground_mesh_ok := create_mesh(
       engine,
-      geometry.make_quad(),
+      make_quad(),
     )
     log.info("spawning ground and walls")
     // Ground node
@@ -201,17 +201,20 @@ setup :: proc(engine: ^mjolnir.Engine) {
   }
   if true {
     log.info("loading Hammer GLTF...")
-    gltf_nodes := load_gltf(engine, "assets/Mjolnir.glb") or_else {}
-    log.infof("Loaded GLTF nodes: %v", gltf_nodes)
-    for handle in gltf_nodes {
-      hammer_handle = handle
-      translate(engine, handle, 3, 1, -2)
-      scale(engine, handle, 0.2)
+    gltf_nodes, gltf_ok := load_gltf(engine, "assets/Mjolnir.glb")
+    if gltf_ok {
+      log.infof("Loaded GLTF nodes: %v", gltf_nodes)
+      for handle in gltf_nodes {
+        hammer_handle = handle
+        translate(engine, handle, 3, 1, -2)
+        scale(engine, handle, 0.2)
+      }
     }
   }
   if true {
     log.info("loading Warrior GLTF...")
-    gltf_nodes := load_gltf(engine, "assets/Warrior.glb") or_else {}
+    gltf_nodes, gltf_ok := load_gltf(engine, "assets/Warrior.glb")
+    if !gltf_ok do gltf_nodes = {}
     log.infof("Loaded GLTF nodes: %v", gltf_nodes)
     for armature in gltf_nodes {
       armature_ptr := get_node(engine, armature)
@@ -251,7 +254,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
   }
   if true {
     log.info("loading Damaged Helmet GLTF...")
-    gltf_nodes := load_gltf(engine, "assets/DamagedHelmet.glb") or_else {}
+    gltf_nodes, gltf_ok := load_gltf(engine, "assets/DamagedHelmet.glb")
+    if !gltf_ok do gltf_nodes = {}
     log.infof("Loaded GLTF nodes: %v", gltf_nodes)
     for handle in gltf_nodes {
       translate(engine, handle, 0, 1, 3)
@@ -260,7 +264,8 @@ setup :: proc(engine: ^mjolnir.Engine) {
   }
   if true {
     log.info("loading Suzanne GLTF...")
-    gltf_nodes := load_gltf(engine, "assets/Suzanne.glb") or_else {}
+    gltf_nodes, gltf_ok := load_gltf(engine, "assets/Suzanne.glb")
+    if !gltf_ok do gltf_nodes = {}
     log.infof("Loaded GLTF nodes: %v", gltf_nodes)
     for handle in gltf_nodes {
       translate(engine, handle, -3, 1, 0)
@@ -290,6 +295,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
           color,
           10,
           math.PI * 0.25,
+          true,
           {0, 6, -1},
         )
         if !light_spawn_ok do continue
@@ -299,6 +305,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
           engine,
           color,
           14,
+          true,
           {0, 2, -1},
         )
         if !light_spawn_ok do continue
@@ -524,7 +531,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
     portal_mesh_ok: bool
     portal_quad_handle, portal_mesh_ok = create_mesh(
       engine,
-      geometry.make_quad(),
+      make_quad(),
     )
 
     if portal_material_ok && portal_mesh_ok {
@@ -624,7 +631,6 @@ on_key_pressed :: proc(engine: ^mjolnir.Engine, key, action, mods: int) {
       current_controller = &orbit_controller
       log.info("Switched to orbit camera")
     }
-    // Sync new controller with current camera state to prevent jumps
     if main_camera_for_sync != nil {
       world.camera_controller_sync(current_controller, main_camera_for_sync)
     }
@@ -645,15 +651,11 @@ render_2d :: proc(engine: ^mjolnir.Engine, ctx: ^mu.Context) {
 on_post_render :: proc(engine: ^mjolnir.Engine) {
   using mjolnir
   if portal_camera_handle.generation == 0 || portal_material_handle.generation == 0 do return
-
-  // Get the portal camera's output texture for the CURRENT frame
   portal_texture_handle := get_camera_attachment(
     engine,
     portal_camera_handle,
     resources.AttachmentType.FINAL_IMAGE,
     engine.frame_index,
   )
-
-  // Update material to use portal camera's rendered output
   update_material_texture(engine, portal_material_handle, .ALBEDO_TEXTURE, portal_texture_handle)
 }

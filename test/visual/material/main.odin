@@ -26,24 +26,19 @@ main :: proc() {
 setup_scene :: proc(engine: ^mjolnir.Engine) {
   camera := mjolnir.get_main_camera(engine)
   if camera != nil {
-    resources.camera_look_at(camera, {2.4, 1.8, 2.4}, {0.0, 0.0, 0.0})
+    mjolnir.camera_look_at(camera, {2.4, 1.8, 2.4}, {0.0, 0.0, 0.0})
   }
 
   cube_geom := geometry.make_cube()
 
-  cube_mesh, mesh_ok := resources.create_mesh_handle(
-    &engine.gctx,
-    &engine.rm,
-    cube_geom,
-  )
+  cube_mesh, mesh_ok := mjolnir.create_mesh(engine, cube_geom)
   if !mesh_ok {
     log.error("material textured cube: mesh creation failed")
     return
   }
 
-  albedo_texture, texture_ok := resources.create_texture_from_data_handle(
-    &engine.gctx,
-    &engine.rm,
+  albedo_texture, texture_ok := mjolnir.create_texture(
+    engine,
     #load("statue-1275469_1280.jpg"),
     generate_mips = true,
   )
@@ -52,8 +47,8 @@ setup_scene :: proc(engine: ^mjolnir.Engine) {
     return
   }
 
-  material_handle, material_ok := resources.create_material_handle(
-    &engine.rm,
+  material_handle, material_ok := mjolnir.create_material(
+    engine,
     {.ALBEDO_TEXTURE},
     type = resources.MaterialType.PBR,
     albedo_handle = albedo_texture,
@@ -65,49 +60,33 @@ setup_scene :: proc(engine: ^mjolnir.Engine) {
     return
   }
 
-  cube_handle, cube_node, spawned := world.spawn(
-    &engine.world,
+  cube_handle, cube_node, spawned := mjolnir.spawn(
+    engine,
     world.MeshAttachment {
       handle = cube_mesh,
       material = material_handle,
       cast_shadow = true,
     },
-    &engine.rm,
   )
   if spawned {
-    world.scale(cube_node, 0.75)
+    mjolnir.scale(cube_node, 0.75)
     state.cube_handle = cube_handle
   }
 
-  light_handle, light_node, light_ok := world.spawn(
-    &engine.world,
-    nil,
-    &engine.rm,
+  _, light_node, light_ok := mjolnir.spawn_directional_light(
+    engine,
+    {1.0, 1.0, 1.0, 1.0},
+    cast_shadow = false,
+    position = {3.0, 5.0, 2.0},
   )
   if light_ok {
-    light_attachment, attach_ok := world.create_directional_light_attachment(
-      light_handle,
-      &engine.rm,
-      &engine.gctx,
-      {1.0, 1.0, 1.0, 1.0},
-      cast_shadow = false,
-    )
-    if attach_ok {
-      light_node.attachment = light_attachment
-      world.translate(light_node, 3.0, 5.0, 2.0)
-      world.rotate(light_node, -math.PI * 0.35, linalg.VECTOR3F32_X_AXIS)
-    }
+    mjolnir.rotate(light_node, -math.PI * 0.35, linalg.VECTOR3F32_X_AXIS)
   }
 }
 
 update_scene :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
   if state.cube_handle.generation != 0 {
     rotation := delta_time * math.PI * 0.25
-    world.node_handle_rotate_angle(
-      &engine.world,
-      state.cube_handle,
-      rotation,
-      linalg.VECTOR3F32_Y_AXIS,
-    )
+    mjolnir.rotate_by(engine, state.cube_handle, rotation, linalg.VECTOR3F32_Y_AXIS)
   }
 }

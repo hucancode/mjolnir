@@ -1,7 +1,6 @@
 package mjolnir
 
 import "core:math"
-import "core:math/linalg"
 import "core:strings"
 import "geometry"
 import "navigation/recast"
@@ -188,16 +187,16 @@ load_gltf :: proc(
   engine: ^Engine,
   path: string,
 ) -> (
-  []resources.Handle,
-  bool,
+  nodes: [dynamic]resources.Handle,
+  ok: bool,
 ) {
-  nodes, result := world.load_gltf(
+  handles, result := world.load_gltf(
     &engine.world,
     &engine.rm,
     &engine.gctx,
     path,
   )
-  return nodes[:], result == .success
+  return handles, result == .success
 }
 
 get_node :: proc(engine: ^Engine, handle: resources.Handle) -> ^world.Node {
@@ -317,12 +316,13 @@ scale_by :: proc {
   scale_by_handle,
 }
 
-// Light spawning - creates node with light attachment
+// Light spawning - creates complete light nodes
 spawn_spot_light :: proc(
   engine: ^Engine,
   color: [4]f32,
   radius: f32,
   angle: f32,
+  cast_shadow := true,
   position: [3]f32 = {0, 0, 0},
 ) -> (
   handle: resources.Handle,
@@ -339,6 +339,7 @@ spawn_spot_light :: proc(
     color,
     radius,
     angle,
+    b32(cast_shadow),
   ) or_return
   node.attachment = attachment
 
@@ -353,6 +354,7 @@ spawn_point_light :: proc(
   engine: ^Engine,
   color: [4]f32,
   radius: f32,
+  cast_shadow := true,
   position: [3]f32 = {0, 0, 0},
 ) -> (
   handle: resources.Handle,
@@ -368,6 +370,7 @@ spawn_point_light :: proc(
     &engine.gctx,
     color,
     radius,
+    b32(cast_shadow),
   ) or_return
   node.attachment = attachment
 
@@ -592,6 +595,22 @@ build_navigation_mesh_from_world :: proc(
   )
 }
 
+build_and_visualize_navigation_mesh :: proc(
+  engine: ^Engine,
+  config: recast.Config = {},
+) -> (
+  resources.Handle,
+  bool,
+) #optional_ok {
+  return world.build_and_visualize_navigation_mesh(
+    &engine.world,
+    &engine.rm,
+    &engine.gctx,
+    &engine.render.navigation,
+    config,
+  )
+}
+
 create_navigation_context :: proc(
   engine: ^Engine,
   nav_mesh_handle: resources.Handle,
@@ -640,6 +659,22 @@ nav_is_position_walkable :: proc(
     &engine.gctx,
     nav_context_handle,
     position,
+  )
+}
+
+nav_find_nearest_point :: proc(
+  engine: ^Engine,
+  nav_context_handle: resources.Handle,
+  position: [3]f32,
+  search_extents: [3]f32 = {2.0, 4.0, 2.0},
+) -> (nearest_pos: [3]f32, found: bool) {
+  return world.nav_find_nearest_point(
+    &engine.world,
+    &engine.rm,
+    &engine.gctx,
+    nav_context_handle,
+    position,
+    search_extents,
   )
 }
 
@@ -820,3 +855,13 @@ set_debug_ui_enabled :: proc(engine: ^Engine, enabled: bool) {
 get_debug_ui_enabled :: proc(engine: ^Engine) -> bool {
   return engine.debug_ui_enabled
 }
+
+// Visibility system wrappers
+set_visibility_stats :: proc(engine: ^Engine, enabled: bool) {
+  world.visibility_system_set_stats_enabled(&engine.world.visibility, enabled)
+}
+
+// Camera control wrappers
+camera_look_at :: resources.camera_look_at
+
+// Note: get_delta_time, time_since_start, and get_main_camera are already defined in engine.odin

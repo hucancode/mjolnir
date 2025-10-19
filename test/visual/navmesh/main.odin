@@ -2,7 +2,6 @@ package main
 import "core:fmt"
 import "core:log"
 import "core:math"
-import "core:math/linalg"
 import "core:math/rand"
 import "../../../mjolnir"
 import "../../../mjolnir/geometry"
@@ -61,45 +60,45 @@ main :: proc() {
   engine.setup_proc = demo_setup
   engine.update_proc = demo_update
   engine.render2d_proc = demo_render2d
-  engine.key_press_proc = demo_key_pressed
   engine.mouse_press_proc = demo_mouse_pressed
   engine.mouse_move_proc = demo_mouse_moved
   mjolnir.run(engine, 800, 600, "Navigation Mesh Visual Test")
 }
 
-demo_setup :: proc(engine_ptr: ^mjolnir.Engine) {
+demo_setup :: proc(engine: ^mjolnir.Engine) {
   using mjolnir, geometry
   log.info("Navigation mesh demo setup with world integration")
   demo_state.obstacle_handles = make([dynamic]resources.Handle, 0)
   demo_state.path_waypoint_handles = make([dynamic]resources.Handle, 0)
   demo_state.camera_auto_rotate = false
-  main_camera := get_main_camera(engine_ptr)
+  // set_debug_ui_enabled(engine, true)
+  main_camera := get_main_camera(engine)
   if main_camera != nil {
-    resources.camera_look_at(main_camera, {35, 25, 35}, {0, 0, 0}, {0, 1, 0})
+    camera_look_at(main_camera, {35, 25, 35}, {0, 0, 0}, {0, 1, 0})
   }
   if demo_state.use_procedural {
-    create_demo_scene(engine_ptr)
+    create_demo_scene(engine)
   }
-  setup_navigation_mesh(engine_ptr)
+  setup_navigation_mesh(engine)
   demo_state.start_pos = {-20, 0, -20}
   demo_state.end_pos = {20, 0, 20}
   update_position_marker(
-    engine_ptr,
+    engine,
     &demo_state.start_marker_handle,
     demo_state.start_pos,
     {0, 1, 0, 1},
   )
   update_position_marker(
-    engine_ptr,
+    engine,
     &demo_state.end_marker_handle,
     demo_state.end_pos,
     {1, 0, 0, 1},
   )
-  find_path(engine_ptr)
+  find_path(engine)
   log.info("Navigation mesh demo setup complete")
 }
 
-create_demo_scene :: proc(engine_ptr: ^mjolnir.Engine) {
+create_demo_scene :: proc(engine: ^mjolnir.Engine) {
   using mjolnir, geometry
   log.info("Creating demo scene with world nodes")
   ground_geom := geometry.make_quad([4]f32{0.2, 0.6, 0.2, 1.0})
@@ -107,21 +106,16 @@ create_demo_scene :: proc(engine_ptr: ^mjolnir.Engine) {
     vertex.position.x *= 50
     vertex.position.z *= 50
   }
-  ground_mesh_handle, ground_mesh_ok := resources.create_mesh_handle(
-    &engine_ptr.gpu_context,
-    &engine_ptr.resource_manager,
-    ground_geom,
+  ground_mesh_handle, ground_mesh_ok := create_mesh(engine, ground_geom)
+  ground_material_handle, ground_material_ok := create_material(
+    engine,
+    metallic_value = 0.1,
+    roughness_value = 0.8,
+    emissive_value = 0.02,
   )
-  ground_material_handle, ground_material_ok :=
-    resources.create_material_handle(
-      &engine_ptr.resource_manager,
-      metallic_value = 0.1,
-      roughness_value = 0.8,
-      emissive_value = 0.02,
-    )
   if ground_mesh_ok && ground_material_ok {
-    ground_handle, ground_node, ground_ok := world.spawn(
-        &engine_ptr.world,
+    ground_handle, ground_node, ground_ok := spawn(
+        engine,
         world.MeshAttachment {
           handle              = ground_mesh_handle,
           material            = ground_material_handle,
@@ -156,21 +150,19 @@ create_demo_scene :: proc(engine_ptr: ^mjolnir.Engine) {
       vertex.position.y *= size.y
       vertex.position.z *= size.z
     }
-    obstacle_mesh_handle, obstacle_mesh_ok := resources.create_mesh_handle(
-      &engine_ptr.gpu_context,
-      &engine_ptr.resource_manager,
+    obstacle_mesh_handle, obstacle_mesh_ok := create_mesh(
+      engine,
       obstacle_geom,
     )
-    obstacle_material_handle, obstacle_material_ok :=
-      resources.create_material_handle(
-        &engine_ptr.resource_manager,
-        metallic_value = 0.3,
-        roughness_value = 0.7,
-        emissive_value = 0.1,
-      )
+    obstacle_material_handle, obstacle_material_ok := create_material(
+      engine,
+      metallic_value = 0.3,
+      roughness_value = 0.7,
+      emissive_value = 0.1,
+    )
     if obstacle_mesh_ok && obstacle_material_ok {
-      obstacle_handle, obstacle_node, obstacle_ok := world.spawn_at(
-          &engine_ptr.world,
+      obstacle_handle, obstacle_node, obstacle_ok := spawn_at(
+          engine,
           position,
           world.MeshAttachment {
             handle              = obstacle_mesh_handle,
@@ -192,7 +184,7 @@ create_demo_scene :: proc(engine_ptr: ^mjolnir.Engine) {
 }
 
 create_obj_visualization_mesh :: proc(
-  engine_ptr: ^mjolnir.Engine,
+  engine: ^mjolnir.Engine,
   obj_file: string,
 ) {
   using mjolnir, geometry
@@ -202,18 +194,14 @@ create_obj_visualization_mesh :: proc(
     log.error("Failed to load OBJ file as geometry")
     return
   }
-  obj_mesh_handle, obj_mesh_ok := resources.create_mesh_handle(
-    &engine_ptr.gpu_context,
-    &engine_ptr.resource_manager,
-    geom,
-  )
+  obj_mesh_handle, obj_mesh_ok := create_mesh(engine, geom)
   if obj_mesh_ok {
     demo_state.obj_mesh_handle = obj_mesh_handle
   } else {
     demo_state.obj_mesh_handle = {}
   }
-  obj_material_handle, obj_material_ok := resources.create_material_handle(
-    &engine_ptr.resource_manager,
+  obj_material_handle, obj_material_ok := create_material(
+    engine,
     metallic_value = 0.1,
     roughness_value = 0.8,
     emissive_value = 0.02,
@@ -221,8 +209,8 @@ create_obj_visualization_mesh :: proc(
   obj_spawn_ok: bool
   if obj_mesh_ok && obj_material_ok {
     demo_state.obj_node_handle, demo_state.obj_mesh_node, obj_spawn_ok =
-      world.spawn_at(
-        &engine_ptr.world,
+      spawn_at(
+        engine,
         [3]f32{0, 0, 0},
         world.MeshAttachment {
           handle              = demo_state.obj_mesh_handle,
@@ -242,7 +230,7 @@ create_obj_visualization_mesh :: proc(
   }
 }
 
-setup_navigation_mesh :: proc(engine_ptr: ^mjolnir.Engine) {
+setup_navigation_mesh :: proc(engine: ^mjolnir.Engine) {
   using mjolnir
   log.info("Setting up navigation mesh with visualization")
   config := recast.Config {
@@ -261,11 +249,8 @@ setup_navigation_mesh :: proc(engine_ptr: ^mjolnir.Engine) {
       detail_sample_max_error  = 1.0 * 0.2,
       border_size              = 0,
     }
-  nav_mesh_handle, success := world.build_and_visualize_navigation_mesh(
-    &engine_ptr.world,
-    &engine_ptr.resource_manager,
-    &engine_ptr.gpu_context,
-    &engine_ptr.render.navigation,
+  nav_mesh_handle, success := build_and_visualize_navigation_mesh(
+    engine,
     config,
   )
   if !success {
@@ -274,10 +259,8 @@ setup_navigation_mesh :: proc(engine_ptr: ^mjolnir.Engine) {
   }
   demo_state.nav_mesh_handle = nav_mesh_handle
   log.infof("Navigation mesh built with handle %v", nav_mesh_handle)
-  context_handle, context_ok := world.create_navigation_context(
-    &engine_ptr.world,
-    &engine_ptr.resource_manager,
-    &engine_ptr.gpu_context,
+  context_handle, context_ok := create_navigation_context(
+    engine,
     nav_mesh_handle,
   )
   if !context_ok {
@@ -286,13 +269,13 @@ setup_navigation_mesh :: proc(engine_ptr: ^mjolnir.Engine) {
   }
   demo_state.nav_context_handle = context_handle
   log.infof("Navigation context created with handle %v", context_handle)
-  renderer := &engine_ptr.render.navigation
+  renderer := &engine.render.navigation
   renderer.enabled = true
   renderer.color_mode = .Random_Colors
   log.info("Navigation mesh building and visualization complete")
 }
 
-find_path :: proc(engine_ptr: ^mjolnir.Engine) {
+find_path :: proc(engine: ^mjolnir.Engine) {
   using mjolnir
   if demo_state.nav_context_handle.generation == 0 {
     log.error("No navigation context available for pathfinding")
@@ -307,16 +290,14 @@ find_path :: proc(engine_ptr: ^mjolnir.Engine) {
     demo_state.end_pos.y,
     demo_state.end_pos.z,
   )
-  path, success := world.nav_find_path(
-    &engine_ptr.world,
-    &engine_ptr.resource_manager,
-    &engine_ptr.gpu_context,
+  path := nav_find_path(
+    engine,
     demo_state.nav_context_handle,
     demo_state.start_pos,
     demo_state.end_pos,
     256,
   )
-  if success && len(path) > 0 {
+  if path != nil && len(path) > 0 {
     delete(demo_state.current_path)
     demo_state.current_path = path
     demo_state.has_path = true
@@ -330,42 +311,40 @@ find_path :: proc(engine_ptr: ^mjolnir.Engine) {
         point.z,
       )
     }
-    visualize_path(engine_ptr)
+    visualize_path(engine)
   } else {
     log.warn("Failed to find path")
     demo_state.has_path = false
-    clear_path_visualization(engine_ptr)
+    clear_path_visualization(engine)
   }
 }
 
 update_position_marker :: proc(
-  engine_ptr: ^mjolnir.Engine,
+  engine: ^mjolnir.Engine,
   handle: ^resources.Handle,
   pos: [3]f32,
   color: [4]f32,
 ) {
   using mjolnir, geometry
   if handle.generation != 0 {
-    world.despawn(&engine_ptr.world, handle^)
+    despawn(engine, handle^)
   }
   marker_geom := geometry.make_sphere(12, 6, 0.3, color)
-  marker_mesh_handle, marker_mesh_ok := resources.create_mesh_handle(
-    &engine_ptr.gpu_context,
-    &engine_ptr.resource_manager,
+  marker_mesh_handle, marker_mesh_ok := create_mesh(
+    engine,
     marker_geom,
   )
-  marker_material_handle, marker_material_ok :=
-    resources.create_material_handle(
-      &engine_ptr.resource_manager,
-      metallic_value = 0.2,
-      roughness_value = 0.8,
-      emissive_value = 0.5,
-    )
+  marker_material_handle, marker_material_ok := create_material(
+    engine,
+    metallic_value = 0.2,
+    roughness_value = 0.8,
+    emissive_value = 0.5,
+  )
   node: ^world.Node
   spawn_ok: bool
   if marker_mesh_ok && marker_material_ok {
-    handle^, node, spawn_ok = world.spawn_at(
-        &engine_ptr.world,
+    handle^, node, spawn_ok = spawn_at(
+        engine,
         pos + [3]f32{0, 0.2, 0}, // Slightly above ground
         world.MeshAttachment {
           handle              = marker_mesh_handle,
@@ -378,13 +357,13 @@ update_position_marker :: proc(
   if !spawn_ok do handle^ = resources.Handle{}
 }
 
-visualize_path :: proc(engine_ptr: ^mjolnir.Engine) {
+visualize_path :: proc(engine: ^mjolnir.Engine) {
   using mjolnir, geometry
-  clear_path_visualization(engine_ptr)
+  clear_path_visualization(engine)
   if !demo_state.has_path || len(demo_state.current_path) == 0 {
     return
   }
-  renderer := &engine_ptr.render.navigation
+  renderer := &engine.render.navigation
   if len(demo_state.current_path) >= 2 {
     log.infof(
       "Updating path renderer with %d points",
@@ -404,18 +383,18 @@ visualize_path :: proc(engine_ptr: ^mjolnir.Engine) {
   log.infof("Path visualization updated using navigation renderer")
 }
 
-clear_path_visualization :: proc(engine_ptr: ^mjolnir.Engine) {
+clear_path_visualization :: proc(engine: ^mjolnir.Engine) {
   using mjolnir
   for handle in demo_state.path_waypoint_handles {
-    world.despawn(&engine_ptr.world, handle)
+    despawn(engine, handle)
   }
   clear(&demo_state.path_waypoint_handles)
-  renderer := &engine_ptr.render.navigation
+  renderer := &engine.render.navigation
   navigation_renderer.clear_path(renderer)
 }
 
 find_navmesh_point_from_mouse :: proc(
-  engine_ptr: ^mjolnir.Engine,
+  engine: ^mjolnir.Engine,
   mouse_x, mouse_y: f32,
 ) -> (
   pos: [3]f32,
@@ -424,7 +403,7 @@ find_navmesh_point_from_mouse :: proc(
   if demo_state.nav_context_handle.generation == 0 {
     return {}, false
   }
-  width, height := glfw.GetWindowSize(engine_ptr.window)
+  width, height := glfw.GetWindowSize(engine.window)
   log.debugf(
     "Mouse coordinates: (%.2f, %.2f), Window size: (%d, %d)",
     mouse_x,
@@ -433,7 +412,7 @@ find_navmesh_point_from_mouse :: proc(
     height,
   )
   // GLFW returns coordinates with origin at top-left, Y increases downward
-  camera := mjolnir.get_main_camera(engine_ptr)
+  camera := mjolnir.get_main_camera(engine)
   ray_origin, ray_dir := resources.camera_viewport_to_world_ray(camera, mouse_x, mouse_y)
   log.debugf(
     "Ray: origin=(%.2f, %.2f, %.2f), dir=(%.2f, %.2f, %.2f)",
@@ -444,13 +423,7 @@ find_navmesh_point_from_mouse :: proc(
     ray_dir.y,
     ray_dir.z,
   )
-  nav_context := resources.get(
-    engine_ptr.resource_manager.nav_contexts,
-    demo_state.nav_context_handle,
-  )
-  if nav_context == nil {
-    return {}, false
-  }
+
   // Strategy 1: Try intersection with ground plane (y=0) first
   if abs(ray_dir.y) > 0.001 {
     t := -ray_origin.y / ray_dir.y
@@ -463,14 +436,13 @@ find_navmesh_point_from_mouse :: proc(
         ground_intersection.z,
       )
       search_extents := [3]f32{2.0, 5.0, 2.0}
-      status, poly_ref, nearest_pos := detour.find_nearest_poly(
-        &nav_context.nav_mesh_query,
+      nearest_pos, found := mjolnir.nav_find_nearest_point(
+        engine,
+        demo_state.nav_context_handle,
         ground_intersection,
         search_extents,
-        &nav_context.query_filter,
       )
-      if recast.status_succeeded(status) &&
-         poly_ref != recast.INVALID_POLY_REF {
+      if found {
         log.debugf(
           "Found navmesh point via ground intersection: (%.2f, %.2f, %.2f)",
           nearest_pos.x,
@@ -481,6 +453,7 @@ find_navmesh_point_from_mouse :: proc(
       }
     }
   }
+
   // Strategy 2: Sample along the ray at various distances (fallback)
   sample_distances := [10]f32{5, 10, 15, 20, 25, 30, 35, 40, 50, 60}
   for dist in sample_distances {
@@ -493,13 +466,13 @@ find_navmesh_point_from_mouse :: proc(
       sample_pos.z,
     )
     search_extents := [3]f32{5.0, 10.0, 5.0}
-    status, poly_ref, nearest_pos := detour.find_nearest_poly(
-      &nav_context.nav_mesh_query,
+    nearest_pos, found := mjolnir.nav_find_nearest_point(
+      engine,
+      demo_state.nav_context_handle,
       sample_pos,
       search_extents,
-      &nav_context.query_filter,
     )
-    if recast.status_succeeded(status) && poly_ref != recast.INVALID_POLY_REF {
+    if found {
       log.debugf(
         "Found navmesh point via ray sampling at distance %.1f: (%.2f, %.2f, %.2f)",
         dist,
@@ -514,7 +487,7 @@ find_navmesh_point_from_mouse :: proc(
   return {}, false
 }
 
-generate_random_path :: proc(engine_ptr: ^mjolnir.Engine) {
+generate_random_path :: proc(engine: ^mjolnir.Engine) {
   demo_state.start_pos = {
     rand.float32_range(-15, 15),
     0,
@@ -535,33 +508,33 @@ generate_random_path :: proc(engine_ptr: ^mjolnir.Engine) {
     demo_state.end_pos.z,
   )
   update_position_marker(
-    engine_ptr,
+    engine,
     &demo_state.start_marker_handle,
     demo_state.start_pos,
     {0, 1, 0, 1},
   )
   update_position_marker(
-    engine_ptr,
+    engine,
     &demo_state.end_marker_handle,
     demo_state.end_pos,
     {1, 0, 0, 1},
   )
-  find_path(engine_ptr)
+  find_path(engine)
 }
 
 demo_mouse_pressed :: proc(
-  engine_ptr: ^mjolnir.Engine,
+  engine: ^mjolnir.Engine,
   button, action, mods: int,
 ) {
   using mjolnir
   if action != glfw.PRESS {
     return
   }
-  mouse_x, mouse_y := glfw.GetCursorPos(engine_ptr.window)
+  mouse_x, mouse_y := glfw.GetCursorPos(engine.window)
   switch button {
   case glfw.MOUSE_BUTTON_LEFT:
     pos, valid := find_navmesh_point_from_mouse(
-      engine_ptr,
+      engine,
       f32(mouse_x),
       f32(mouse_y),
     )
@@ -574,7 +547,7 @@ demo_mouse_pressed :: proc(
         pos.z,
       )
       update_position_marker(
-        engine_ptr,
+        engine,
         &demo_state.start_marker_handle,
         pos,
         {0, 1, 0, 1},
@@ -585,7 +558,7 @@ demo_mouse_pressed :: proc(
     }
   case glfw.MOUSE_BUTTON_RIGHT:
     pos, valid := find_navmesh_point_from_mouse(
-      engine_ptr,
+      engine,
       f32(mouse_x),
       f32(mouse_y),
     )
@@ -593,12 +566,12 @@ demo_mouse_pressed :: proc(
       demo_state.end_pos = pos
       log.infof("End position set to: (%.2f, %.2f, %.2f)", pos.x, pos.y, pos.z)
       update_position_marker(
-        engine_ptr,
+        engine,
         &demo_state.end_marker_handle,
         pos,
         {1, 0, 0, 1},
       )
-      find_path(engine_ptr)
+      find_path(engine)
     } else {
       log.warn("No valid navmesh position found at right click location")
     }
@@ -607,13 +580,13 @@ demo_mouse_pressed :: proc(
   }
 }
 
-demo_mouse_moved :: proc(engine_ptr: ^mjolnir.Engine, pos, delta: [2]f64) {
+demo_mouse_moved :: proc(engine: ^mjolnir.Engine, pos, delta: [2]f64) {
   demo_state.last_mouse_pos = [2]f32{f32(pos.x), f32(pos.y)}
 }
 
-demo_update :: proc(engine_ptr: ^mjolnir.Engine, delta_time: f32) {
+demo_update :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
   using mjolnir, geometry
-  main_camera := get_main_camera(engine_ptr)
+  main_camera := get_main_camera(engine)
   if main_camera != nil {
     if demo_state.camera_auto_rotate {
       demo_state.camera_angle += delta_time * 0.2
@@ -621,11 +594,11 @@ demo_update :: proc(engine_ptr: ^mjolnir.Engine, delta_time: f32) {
     camera_x := math.cos(demo_state.camera_angle) * demo_state.camera_distance
     camera_z := math.sin(demo_state.camera_angle) * demo_state.camera_distance
     camera_pos := [3]f32{camera_x, demo_state.camera_height, camera_z}
-    resources.camera_look_at(main_camera, camera_pos, {0, 0, 0}, {0, 1, 0})
+    camera_look_at(main_camera, camera_pos, {0, 0, 0}, {0, 1, 0})
   }
 }
 
-demo_render2d :: proc(engine_ptr: ^mjolnir.Engine, ctx: ^mu.Context) {
+demo_render2d :: proc(engine: ^mjolnir.Engine, ctx: ^mu.Context) {
   using mjolnir
   if mu.window(ctx, "Navigation Mesh Demo", {40, 40, 380, 500}, {.NO_CLOSE}) {
     mu.label(ctx, "World-Integrated Navigation System")
@@ -633,7 +606,7 @@ demo_render2d :: proc(engine_ptr: ^mjolnir.Engine, ctx: ^mu.Context) {
       mu.label(ctx, "Status: Navigation mesh ready")
       mu.label(ctx, "")
       mu.label(ctx, "NavMesh Settings:")
-      renderer := &engine_ptr.render.navigation
+      renderer := &engine.render.navigation
       enabled := renderer.enabled
       if .CHANGE in mu.checkbox(ctx, "Show NavMesh", &enabled) {
         renderer.enabled = enabled
@@ -689,22 +662,19 @@ demo_render2d :: proc(engine_ptr: ^mjolnir.Engine, ctx: ^mu.Context) {
         mu.label(ctx, "No path set")
       }
       if .SUBMIT in mu.button(ctx, "Generate Random Path (SPACE)") {
-        generate_random_path(engine_ptr)
+        generate_random_path(engine)
       }
       if .SUBMIT in mu.button(ctx, "Clear Path (C)") {
         demo_state.has_path = false
         log.info("Path cleared")
       }
       if .SUBMIT in mu.button(ctx, "Rebuild NavMesh (R)") {
-        setup_navigation_mesh(engine_ptr)
+        setup_navigation_mesh(engine)
       }
       if demo_state.navmesh_info != "" {
         mu.label(ctx, "")
         mu.label(ctx, "NavMesh Info:")
         mu.label(ctx, demo_state.navmesh_info)
-      }
-      if .SUBMIT in mu.button(ctx, "Print Info (P)") {
-        print_navmesh_info(engine_ptr)
       }
       mu.label(ctx, "")
       mu.label(ctx, "Scene Type:")
@@ -739,95 +709,4 @@ demo_render2d :: proc(engine_ptr: ^mjolnir.Engine, ctx: ^mu.Context) {
     mu.label(ctx, "V - Toggle NavMesh")
     mu.label(ctx, "SPACE - Random Path")
   }
-}
-
-demo_key_pressed :: proc(engine_ptr: ^mjolnir.Engine, key, action, mods: int) {
-  using mjolnir
-  if action != glfw.PRESS do return
-  switch key {
-  case glfw.KEY_R:
-    log.info("Rebuilding navigation mesh from world...")
-    setup_navigation_mesh(engine_ptr)
-  case glfw.KEY_V:
-    renderer := &engine_ptr.render.navigation
-    renderer.enabled = !renderer.enabled
-    log.infof("NavMesh visibility: %v", renderer.enabled)
-  case glfw.KEY_C:
-    demo_state.has_path = false
-    clear_path_visualization(engine_ptr)
-    log.info("Path cleared")
-  case glfw.KEY_D:
-    renderer := &engine_ptr.render.navigation
-    current_mode := int(renderer.color_mode)
-    current_mode = (current_mode + 1) % 5
-    renderer.color_mode = auto_cast current_mode
-    mode_names := [5]string {
-      "Area Colors",
-      "Uniform",
-      "Height Based",
-      "Random Colors",
-      "Region Colors",
-    }
-    log.infof("NavMesh color mode changed to: %s", mode_names[current_mode])
-  case glfw.KEY_M:
-    if demo_state.obj_mesh_node != nil {
-      demo_state.show_original_mesh = !demo_state.show_original_mesh
-      log.infof("Original mesh visibility: %v", demo_state.show_original_mesh)
-    } else {
-      log.info("No OBJ mesh loaded to toggle visibility")
-    }
-  case glfw.KEY_P:
-    print_navmesh_info(engine_ptr)
-  case glfw.KEY_SPACE:
-    if demo_state.nav_mesh_handle.generation != 0 {
-      log.info("Generating random path...")
-      generate_random_path(engine_ptr)
-    } else {
-      log.warn("Build navigation mesh first (press R)")
-    }
-  }
-}
-
-print_navmesh_info :: proc(engine_ptr: ^mjolnir.Engine) {
-  using mjolnir
-  if demo_state.nav_mesh_handle.generation == 0 {
-    log.info("No navigation mesh available")
-    return
-  }
-  nav_mesh := resources.get(
-    engine_ptr.resource_manager.nav_meshes,
-    demo_state.nav_mesh_handle,
-  )
-  if nav_mesh == nil {
-    log.error("Failed to get navigation mesh")
-    return
-  }
-  log.info("=== NAVIGATION MESH INFO ===")
-  log.infof(
-    "Bounds: min=(%.2f, %.2f, %.2f) max=(%.2f, %.2f, %.2f)",
-    nav_mesh.bounds.min.x,
-    nav_mesh.bounds.min.y,
-    nav_mesh.bounds.min.z,
-    nav_mesh.bounds.max.x,
-    nav_mesh.bounds.max.y,
-    nav_mesh.bounds.max.z,
-  )
-  log.infof("Cell size: %.3f", nav_mesh.cell_size)
-  log.infof("Tile size: %d", nav_mesh.tile_size)
-  log.infof("Is tiled: %v", nav_mesh.is_tiled)
-  tile := detour.get_tile_at(&nav_mesh.detour_mesh, 0, 0, 0)
-  if tile != nil && tile.header != nil {
-    log.infof("Vertices: %d", tile.header.vert_count)
-    log.infof("Polygons: %d", tile.header.poly_count)
-    log.infof("Detail meshes: %d", tile.header.detail_mesh_count)
-    log.infof("Detail vertices: %d", tile.header.detail_vert_count)
-    log.infof("Detail triangles: %d", tile.header.detail_tri_count)
-  }
-  demo_state.navmesh_info = fmt.tprintf(
-    "Verts: %d, Polys: %d, Cell: %.3f",
-    tile != nil && tile.header != nil ? tile.header.vert_count : 0,
-    tile != nil && tile.header != nil ? tile.header.poly_count : 0,
-    nav_mesh.cell_size,
-  )
-  log.info("Navigation mesh info updated")
 }
