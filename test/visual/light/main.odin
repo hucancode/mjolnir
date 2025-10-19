@@ -10,27 +10,17 @@ import "../../../mjolnir/geometry"
 import "../../../mjolnir/resources"
 import "../../../mjolnir/world"
 
-LightSceneState :: struct {
-  run_seconds: f32,
-  start_time:  time.Time,
-}
-
-state := LightSceneState{run_seconds = 4.0}
-
 main :: proc() {
+  context.logger = log.create_console_logger()
   engine := new(mjolnir.Engine)
   engine.setup_proc = setup_scene
-  engine.update_proc = update_scene
   mjolnir.run(engine, 800, 600, "visual-lights-no-shadows")
 }
 
 setup_scene :: proc(engine: ^mjolnir.Engine) {
-  state.start_time = time.now()
-
   camera := mjolnir.get_main_camera(engine)
   if camera != nil {
-    geometry.camera_perspective(camera, math.PI * 0.27, 800.0 / 600.0, 0.05, 150.0)
-    geometry.camera_look_at(camera, {6.0, 4.0, 6.0}, {0.0, 0.0, 0.0})
+    resources.camera_look_at(camera, {6.0, 4.0, 6.0}, {0.0, 0.0, 0.0})
   }
 
   plane_geom := geometry.make_quad()
@@ -142,13 +132,5 @@ setup_scene :: proc(engine: ^mjolnir.Engine) {
       world.rotate(spot_node, -math.PI * 0.7, linalg.VECTOR3F32_X_AXIS)
       world.rotate(spot_node, math.PI * -0.25)
     }
-  }
-}
-
-update_scene :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
-  _ = delta_time
-  elapsed := f32(time.duration_seconds(time.since(state.start_time)))
-  if elapsed >= state.run_seconds {
-    glfw.SetWindowShouldClose(engine.window, true)
   }
 }

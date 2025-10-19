@@ -13,11 +13,9 @@ import "../../../mjolnir/world"
 
 SkinSceneState :: struct {
   nodes:      [dynamic]resources.Handle,
-  run_seconds: f32,
-  start_time:  time.Time,
 }
 
-state := SkinSceneState{run_seconds = 5.0}
+state := SkinSceneState{}
 
 main :: proc() {
   engine := new(mjolnir.Engine)
@@ -27,11 +25,9 @@ main :: proc() {
 }
 
 setup_scene :: proc(engine: ^mjolnir.Engine) {
-  state.start_time = time.now()
   camera := mjolnir.get_main_camera(engine)
   if camera != nil {
-    geometry.camera_perspective(camera, math.PI * 0.28, 800.0 / 600.0, 0.05, 100.0)
-    geometry.camera_look_at(camera, {-3.5, 2.0, 1.8}, {0.0, 1.0, 0.0})
+    resources.camera_look_at(camera, {-3.5, 2.0, 1.8}, {0.0, 1.0, 0.0})
   }
 
   nodes, result := world.load_gltf(
@@ -75,10 +71,5 @@ update_scene :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
     for handle in state.nodes {
       world.node_handle_rotate_angle(&engine.world, handle, rotation, linalg.VECTOR3F32_Y_AXIS)
     }
-  }
-
-  elapsed := f32(time.duration_seconds(time.since(state.start_time)))
-  if elapsed >= state.run_seconds {
-    glfw.SetWindowShouldClose(engine.window, true)
   }
 }

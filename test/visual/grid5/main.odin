@@ -16,7 +16,6 @@ main :: proc() {
     color_mode      = visual.ColorMode.CHECKER,
     window_width    = 800,
     window_height   = 600,
-    run_seconds     = 5.0,
     camera_position = {7.5, 6.0, 7.5},
     camera_target   = {0.0, 0.0, 0.0},
     camera_fov      = math.PI * 0.3,

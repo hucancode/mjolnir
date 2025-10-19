@@ -14,26 +14,20 @@ import "../../../mjolnir/world"
 AnimationSceneState :: struct {
   root_nodes:    [dynamic]resources.Handle,
   frame_counter: int,
-  run_seconds:   f32,
-  start_time:    time.Time,
-  capture_frame: int,
 }
 
-state := AnimationSceneState{run_seconds = 8.0, capture_frame = 100}
+state := AnimationSceneState{}
 
 main :: proc() {
   engine := new(mjolnir.Engine)
   engine.setup_proc = setup_scene
-  engine.update_proc = update_scene
   mjolnir.run(engine, 800, 600, "visual-gltf-animation")
 }
 
 setup_scene :: proc(engine: ^mjolnir.Engine) {
-  state.start_time = time.now()
   camera := mjolnir.get_main_camera(engine)
   if camera != nil {
-    geometry.camera_perspective(camera, math.PI * 0.28, 800.0 / 600.0, 0.05, 120.0)
-    geometry.camera_look_at(camera, {1.0, 0.5, 1.0}, {0.0, 0.3, 0.0})
+    resources.camera_look_at(camera, {1.0, 0.5, 1.0}, {0.0, 0.3, 0.0})
   }
 
   nodes, result := world.load_gltf(
@@ -92,10 +86,5 @@ update_scene :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
         linalg.VECTOR3F32_Y_AXIS,
       )
     }
-  }
-
-  elapsed := f32(time.duration_seconds(time.since(state.start_time)))
-  if elapsed >= state.run_seconds && state.frame_counter >= state.capture_frame {
-    glfw.SetWindowShouldClose(engine.window, true)
   }
 }

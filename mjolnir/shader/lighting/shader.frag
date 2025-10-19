@@ -201,7 +201,7 @@ void main() {
         return;
     }
     if (scene_camera_idx >= camera_buffer.cameras.length()) {
-        outColor = vec4(0.0, 1.0, 0.0, 1.0); // Green for invalid camera index
+        outColor = vec4(0.0, 1.0, 0.0, 1.0); // Green for invalid scene camera index
         return;
     }
     // Get light data from the lights buffer
@@ -211,8 +211,10 @@ void main() {
         outColor = vec4(1.0, 1.0, 0.0, 1.0); // Yellow for invalid node index
         return;
     }
-    if (light.camera_index >= camera_buffer.cameras.length()) {
-        outColor = vec4(0.0, 0.0, 1.0, 1.0); // Green for invalid camera index
+    // Only validate camera index if shadows are enabled
+    bool will_use_shadow = (light.cast_shadow != 0u) && has_shadow_resource(light);
+    if (will_use_shadow && light.camera_index >= camera_buffer.cameras.length()) {
+        outColor = vec4(1.0, 0.0, 1.0, 1.0); // Magenta for invalid light camera index
         return;
     }
 
@@ -232,9 +234,13 @@ void main() {
     mat4 lightWorldMatrix = world_matrices_buffer.world_matrices[light.node_index];
     vec3 light_position = lightWorldMatrix[3].xyz;
     vec3 light_direction = lightWorldMatrix[2].xyz;
-    Camera lightCamera = camera_buffer.cameras[light.camera_index];
     bool use_shadow = (light.cast_shadow != 0u) && has_shadow_resource(light);
-    float shadowFactor = use_shadow ? calculateShadow(position, normal, lightCamera, light, light_position, light_direction) : 1.0;
+    float shadowFactor = 1.0;
+    if (use_shadow) {
+        Camera lightCamera = camera_buffer.cameras[light.camera_index];
+        shadowFactor = calculateShadow(position, normal, lightCamera, light, light_position, light_direction);
+    }
     vec3 direct = brdf(normal, V, albedo, roughness, metallic, position, light, light_position, light_direction);
+    direct = min(vec3(1.0), direct);
     outColor = vec4(direct * shadowFactor, 1.0);
 }

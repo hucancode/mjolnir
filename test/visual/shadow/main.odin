@@ -10,27 +10,16 @@ import "../../../mjolnir/geometry"
 import "../../../mjolnir/resources"
 import "../../../mjolnir/world"
 
-ShadowSceneState :: struct {
-  run_seconds: f32,
-  start_time:  time.Time,
-}
-
-state := ShadowSceneState{run_seconds = 5.0}
-
 main :: proc() {
   engine := new(mjolnir.Engine)
   engine.setup_proc = setup_scene
-  engine.update_proc = update_scene
   mjolnir.run(engine, 800, 600, "visual-shadow-casting")
 }
 
 setup_scene :: proc(engine: ^mjolnir.Engine) {
-  state.start_time = time.now()
-
   camera := mjolnir.get_main_camera(engine)
   if camera != nil {
-    geometry.camera_perspective(camera, math.PI * 0.27, 800.0 / 600.0, 0.05, 150.0)
-    geometry.camera_look_at(camera, {6.0, 4.5, 6.0}, {0.0, 0.8, 0.0})
+    resources.camera_look_at(camera, {6.0, 4.5, 6.0}, {0.0, 0.8, 0.0})
   }
 
   plane_geom := geometry.make_quad()
@@ -121,13 +110,5 @@ setup_scene :: proc(engine: ^mjolnir.Engine) {
       world.translate(light_node, 0.0, 5.0, 0.0)
       world.rotate(light_node, math.PI * 0.5, linalg.VECTOR3F32_X_AXIS)
     }
-  }
-}
-
-update_scene :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
-  _ = delta_time
-  elapsed := f32(time.duration_seconds(time.since(state.start_time)))
-  if elapsed >= state.run_seconds {
-    glfw.SetWindowShouldClose(engine.window, true)
   }
 }

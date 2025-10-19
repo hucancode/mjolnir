@@ -46,10 +46,8 @@ MousePressProc :: #type proc(engine: ^Engine, key, action, mods: int)
 MouseDragProc :: #type proc(engine: ^Engine, delta, offset: [2]f64)
 MouseScrollProc :: #type proc(engine: ^Engine, offset: [2]f64)
 MouseMoveProc :: #type proc(engine: ^Engine, pos, delta: [2]f64)
-CustomRenderProc :: #type proc(
-  engine: ^Engine,
-  command_buffer: vk.CommandBuffer,
-)
+PreRenderProc :: #type proc(engine: ^Engine)
+PostRenderProc :: #type proc(engine: ^Engine)
 
 UpdateThreadData :: struct {
   engine: ^Engine,
@@ -83,7 +81,8 @@ Engine :: struct {
   mouse_drag_proc:             MouseDragProc,
   mouse_move_proc:             MouseMoveProc,
   mouse_scroll_proc:           MouseScrollProc,
-  custom_render_proc:          CustomRenderProc,
+  pre_render_proc:             PreRenderProc,
+  post_render_proc:            PostRenderProc,
   render_error_count:          u32,
   staged_buffers_guard:        sync.RW_Mutex,
   render:                      Renderer,
@@ -555,6 +554,11 @@ render :: proc(self: ^Engine) -> vk.Result {
   // Flush lights buffer immediately so shadow maps reference correct depth textures this frame
   gpu.flush(command_buffer, &self.resource_manager.lights_buffer) or_return
 
+  // Call pre-render hook before any rendering
+  if self.pre_render_proc != nil {
+    self.pre_render_proc(self)
+  }
+
   // Render visibility/shadows for ALL cameras
   record_camera_visibility(
     &self.render,
@@ -634,10 +638,10 @@ render :: proc(self: ^Engine) -> vk.Result {
     }
   }
 
-  // Call user-provided hook to update materials after portal cameras are rendered
+  // Call post-render hook after portal cameras but before main camera
   // This allows materials to bind portal camera outputs as textures
-  if self.custom_render_proc != nil {
-    self.custom_render_proc(self, command_buffer)
+  if self.post_render_proc != nil {
+    self.post_render_proc(self)
   }
 
   // Now render the main camera

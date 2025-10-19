@@ -12,11 +12,9 @@ import "../../../mjolnir/world"
 
 MaterialSceneState :: struct {
   cube_handle: resources.Handle,
-  run_seconds: f32,
-  start_time:  time.Time,
 }
 
-state := MaterialSceneState{run_seconds = 4.0}
+state := MaterialSceneState{}
 
 main :: proc() {
   engine := new(mjolnir.Engine)
@@ -26,11 +24,9 @@ main :: proc() {
 }
 
 setup_scene :: proc(engine: ^mjolnir.Engine) {
-  state.start_time = time.now()
   camera := mjolnir.get_main_camera(engine)
   if camera != nil {
-    geometry.camera_perspective(camera, math.PI * 0.3, 800.0 / 600.0, 0.05, 100.0)
-    geometry.camera_look_at(camera, {2.4, 1.8, 2.4}, {0.0, 0.0, 0.0})
+    resources.camera_look_at(camera, {2.4, 1.8, 2.4}, {0.0, 0.0, 0.0})
   }
 
   cube_geom := geometry.make_cube()
@@ -109,10 +105,5 @@ update_scene :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
       rotation,
       linalg.VECTOR3F32_Y_AXIS,
     )
-  }
-
-  elapsed := f32(time.duration_seconds(time.since(state.start_time)))
-  if elapsed >= state.run_seconds {
-    glfw.SetWindowShouldClose(engine.window, true)
   }
 }

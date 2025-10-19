@@ -574,6 +574,38 @@ camera_get_visible_count :: proc(camera: ^Camera, frame_index: u32) -> u32 {
   return camera.late_draw_count[frame_index].mapped[0]
 }
 
+// Convert viewport coordinates to a world-space ray
+// mouse_x, mouse_y: Mouse coordinates (origin at top-left, Y increases downward)
+// Returns: ray origin and normalized ray direction in world space
+camera_viewport_to_world_ray :: proc(
+  camera: ^Camera,
+  mouse_x, mouse_y: f32,
+) -> (ray_origin: [3]f32, ray_dir: [3]f32) {
+  // Convert screen coordinates to normalized device coordinates (NDC)
+  ndc_x := (2.0 * mouse_x) / f32(camera.extent.width) - 1.0
+  ndc_y := 1.0 - (2.0 * mouse_y) / f32(camera.extent.height)
+
+  // Get view and projection matrices
+  view_matrix := camera_calculate_view_matrix(camera)
+  proj_matrix := camera_calculate_projection_matrix(camera)
+  inv_proj := linalg.matrix4_inverse(proj_matrix)
+  inv_view := linalg.matrix4_inverse(view_matrix)
+
+  // Ray in clip space
+  ray_clip := [4]f32{ndc_x, ndc_y, -1.0, 1.0}
+
+  // Ray in view space
+  ray_eye := inv_proj * ray_clip
+  ray_eye = [4]f32{ray_eye.x, ray_eye.y, -1.0, 0.0}
+
+  // Ray in world space
+  ray_world_4 := inv_view * ray_eye
+  ray_dir = linalg.normalize([3]f32{ray_world_4.x, ray_world_4.y, ray_world_4.z})
+  ray_origin = camera.position
+
+  return ray_origin, ray_dir
+}
+
 
 // Create depth pyramid for a specific frame
 @(private)

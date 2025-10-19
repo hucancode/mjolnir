@@ -11,7 +11,6 @@ import "mjolnir/resources"
 import "mjolnir/world"
 import "vendor:glfw"
 import mu "vendor:microui"
-import vk "vendor:vulkan"
 
 LIGHT_COUNT :: 10
 ALL_SPOT_LIGHT :: false
@@ -43,7 +42,7 @@ main :: proc() {
   engine.update_proc = update
   engine.key_press_proc = on_key_pressed
   engine.render2d_proc = render_2d
-  engine.custom_render_proc = on_custom_render
+  engine.post_render_proc = on_post_render
   mjolnir.run(engine, 1280, 720, "Mjolnir")
 }
 
@@ -643,7 +642,7 @@ render_2d :: proc(engine: ^mjolnir.Engine, ctx: ^mu.Context) {
   )
 }
 
-on_custom_render :: proc(engine: ^mjolnir.Engine, command_buffer: vk.CommandBuffer) {
+on_post_render :: proc(engine: ^mjolnir.Engine) {
   using mjolnir
   if portal_camera_handle.generation == 0 || portal_material_handle.generation == 0 do return
 
