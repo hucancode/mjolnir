@@ -2,6 +2,7 @@ package main
 import "core:fmt"
 import "core:log"
 import "core:math"
+import "core:math/linalg"
 import "core:math/rand"
 import "../../../mjolnir"
 import "../../../mjolnir/geometry"
@@ -74,7 +75,7 @@ demo_setup :: proc(engine_ptr: ^mjolnir.Engine) {
   demo_state.camera_auto_rotate = false
   main_camera := get_main_camera(engine_ptr)
   if main_camera != nil {
-    camera_look_at(main_camera, {35, 25, 35}, {0, 0, 0}, {0, 1, 0})
+    resources.camera_look_at(main_camera, {35, 25, 35}, {0, 0, 0}, {0, 1, 0})
   }
   if demo_state.use_procedural {
     create_demo_scene(engine_ptr)
@@ -432,14 +433,8 @@ find_navmesh_point_from_mouse :: proc(
     height,
   )
   // GLFW returns coordinates with origin at top-left, Y increases downward
-  // viewport_to_world_ray expects this same coordinate system
-  ray_origin, ray_dir := geometry.viewport_to_world_ray(
-    f32(width),
-    f32(height),
-    mouse_x,
-    mouse_y,
-    mjolnir.get_main_camera(engine_ptr)^,
-  )
+  camera := mjolnir.get_main_camera(engine_ptr)
+  ray_origin, ray_dir := resources.camera_viewport_to_world_ray(camera, mouse_x, mouse_y)
   log.debugf(
     "Ray: origin=(%.2f, %.2f, %.2f), dir=(%.2f, %.2f, %.2f)",
     ray_origin.x,
@@ -626,7 +621,7 @@ demo_update :: proc(engine_ptr: ^mjolnir.Engine, delta_time: f32) {
     camera_x := math.cos(demo_state.camera_angle) * demo_state.camera_distance
     camera_z := math.sin(demo_state.camera_angle) * demo_state.camera_distance
     camera_pos := [3]f32{camera_x, demo_state.camera_height, camera_z}
-    camera_look_at(main_camera, camera_pos, {0, 0, 0}, {0, 1, 0})
+    resources.camera_look_at(main_camera, camera_pos, {0, 0, 0}, {0, 1, 0})
   }
 }
 

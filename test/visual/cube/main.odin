@@ -16,7 +16,6 @@ main :: proc() {
     color_mode      = visual.ColorMode.CONSTANT,
     window_width    = 800,
     window_height   = 600,
-    run_seconds     = 4.0,
     camera_position = {3.0, 2.0, 3.0},
     camera_target   = {0.0, 0.0, 0.0},
     camera_fov      = math.PI * 0.35,

@@ -25,7 +25,6 @@ VisualTestConfig :: struct {
   color_mode:       ColorMode,
   window_width:     u32,
   window_height:    u32,
-  run_seconds:      f32,
   camera_position:  [3]f32,
   camera_target:    [3]f32,
   camera_fov:       f32,
@@ -65,9 +64,6 @@ run_visual_test :: proc(config: VisualTestConfig) -> bool {
   visual_state = VisualTestState{config = config}
   visual_state.mesh_handles = make([dynamic]ChunkMesh, 0)
   visual_state.node_handles = make([dynamic]resources.Handle, 0)
-  if visual_state.config.run_seconds <= 0 {
-    visual_state.config.run_seconds = 3.0
-  }
   if visual_state.config.spacing <= 0 {
     visual_state.config.spacing = 1.5
   }
@@ -77,7 +73,6 @@ run_visual_test :: proc(config: VisualTestConfig) -> bool {
   context.logger = log.create_console_logger()
   engine := new(mjolnir.Engine)
   engine.setup_proc = setup_scene
-  engine.update_proc = update_scene
   mjolnir.run(engine, config.window_width, config.window_height, config.name)
   return true
 }
@@ -141,25 +136,9 @@ setup_scene :: proc(engine: ^mjolnir.Engine) {
   }
   camera := mjolnir.get_main_camera(engine)
   if camera != nil {
-    geometry.camera_perspective(
-      camera,
-      cfg.camera_fov,
-      f32(cfg.window_width) / f32(cfg.window_height),
-      cfg.camera_near,
-      cfg.camera_far,
-    )
-    geometry.camera_look_at(camera, cfg.camera_position, cfg.camera_target)
+    resources.camera_look_at(camera, cfg.camera_position, cfg.camera_target)
   }
   visual_state.start_time = time.now()
-}
-
-update_scene :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
-  _ = delta_time
-  cfg := &visual_state.config
-  elapsed := f32(time.duration_seconds(time.since(visual_state.start_time)))
-  if elapsed >= cfg.run_seconds {
-    glfw.SetWindowShouldClose(engine.window, true)
-  }
 }
 
 choose_chunk_dimension :: proc(cfg: ^VisualTestConfig) -> int {
