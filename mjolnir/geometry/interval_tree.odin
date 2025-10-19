@@ -1,4 +1,4 @@
-package interval_tree
+package geometry
 
 import "core:mem"
 
@@ -18,12 +18,12 @@ IntervalTree :: struct {
   allocator: mem.Allocator,
 }
 
-init :: proc(tree: ^IntervalTree, allocator := context.allocator) {
+interval_tree_init :: proc(tree: ^IntervalTree, allocator := context.allocator) {
   tree.root = nil
   tree.allocator = allocator
 }
 
-destroy :: proc(tree: ^IntervalTree) {
+interval_tree_destroy :: proc(tree: ^IntervalTree) {
   destroy_node(tree.root, tree.allocator)
   tree.root = nil
 }
@@ -85,7 +85,7 @@ rotate_left :: proc(x: ^IntervalNode) -> ^IntervalNode {
   return y
 }
 
-insert :: proc(tree: ^IntervalTree, start: int, count: int = 1) {
+interval_tree_insert :: proc(tree: ^IntervalTree, start: int, count: int = 1) {
   if count <= 0 do return
   new_interval := Interval{start, start + count - 1}
   // Collect all existing intervals
@@ -170,17 +170,13 @@ collect_intervals :: proc(node: ^IntervalNode, intervals: ^[dynamic]Interval) {
   collect_intervals(node.right, intervals)
 }
 
-get_ranges :: proc(tree: ^IntervalTree, allocator := context.temp_allocator) -> []Interval {
+interval_tree_get_ranges :: proc(tree: ^IntervalTree, allocator := context.temp_allocator) -> []Interval {
   intervals := make([dynamic]Interval, 0, allocator)
   collect_intervals(tree.root, &intervals)
   return intervals[:]
 }
 
-clear :: proc(tree: ^IntervalTree) {
+interval_tree_clear :: proc(tree: ^IntervalTree) {
   destroy_node(tree.root, tree.allocator)
   tree.root = nil
-}
-
-is_empty :: proc(tree: ^IntervalTree) -> bool {
-  return tree.root == nil
 }
