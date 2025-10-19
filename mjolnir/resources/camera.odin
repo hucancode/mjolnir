@@ -287,32 +287,19 @@ camera_init :: proc(
   return .SUCCESS
 }
 
-// Destroy camera and release all resources
-// If skip_pool_free is true, GPU resources are destroyed but pool free lists are not updated
-// (used during shutdown when pools are being torn down anyway)
+// Destroy camera and release all resources including textures
 camera_destroy :: proc(
   camera: ^Camera,
   device: vk.Device,
   command_pool: vk.CommandPool,
   manager: ^Manager,
-  skip_pool_free := false,
 ) {
-  // Free all attachments
+  // Free all camera-owned textures from manager pools
   for attachment_type in AttachmentType {
     for frame in 0 ..< MAX_FRAMES_IN_FLIGHT {
       handle := camera.attachments[attachment_type][frame]
-      if handle.generation > 0 {
-        if skip_pool_free {
-          // During shutdown: destroy GPU resource directly without updating pool
-          if item, ok := get(manager.image_2d_buffers, handle); ok {
-            gpu.image_buffer_destroy(device, item)
-          }
-        } else {
-          // Normal operation: use pool free which updates free list
-          if item, freed := free(&manager.image_2d_buffers, handle); freed {
-            gpu.image_buffer_destroy(device, item)
-          }
-        }
+      if item, freed := free(&manager.image_2d_buffers, handle); freed {
+        gpu.image_buffer_destroy(device, item)
       }
     }
   }
@@ -348,7 +335,7 @@ camera_destroy :: proc(
 
   // Clean up per-frame visibility resources
   for frame in 0 ..< MAX_FRAMES_IN_FLIGHT {
-    // Clean up depth pyramid views for this frame
+    // Clean up depth pyramid views and samplers
     for mip in 0 ..< camera.depth_pyramid[frame].mip_levels {
       vk.DestroyImageView(device, camera.depth_pyramid[frame].views[mip], nil)
     }
@@ -359,15 +346,9 @@ camera_destroy :: proc(
     gpu.data_buffer_destroy(device, &camera.late_draw_count[frame])
     gpu.data_buffer_destroy(device, &camera.late_draw_commands[frame])
 
-    // Clean up pyramid texture
-    if skip_pool_free {
-      if pyramid_item, ok := get(manager.image_2d_buffers, camera.depth_pyramid[frame].texture); ok {
-        gpu.image_buffer_destroy(device, pyramid_item)
-      }
-    } else {
-      if pyramid_item, freed := free(&manager.image_2d_buffers, camera.depth_pyramid[frame].texture); freed {
-        gpu.image_buffer_destroy(device, pyramid_item)
-      }
+    // Free depth pyramid texture
+    if pyramid_item, freed := free(&manager.image_2d_buffers, camera.depth_pyramid[frame].texture); freed {
+      gpu.image_buffer_destroy(device, pyramid_item)
     }
   }
 }

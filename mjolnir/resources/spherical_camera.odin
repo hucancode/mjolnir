@@ -91,14 +91,14 @@ spherical_camera_init :: proc(
 	return .SUCCESS
 }
 
-// Destroy spherical camera and release resources
+// Destroy spherical camera and release all resources
 spherical_camera_destroy :: proc(
 	camera: ^SphericalCamera,
 	device: vk.Device,
 	command_pool: vk.CommandPool,
 	manager: ^Manager,
 ) {
-	// Free depth cube
+	// Free camera-owned cube depth texture
 	if camera.depth_cube.generation > 0 {
 		if item, freed := free(&manager.image_cube_buffers, camera.depth_cube); freed {
 			gpu.cube_depth_texture_destroy(device, item)

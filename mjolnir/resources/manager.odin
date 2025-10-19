@@ -297,7 +297,34 @@ shutdown :: proc(
   destroy_emitter_buffer(gpu_context, manager)
   destroy_forcefield_buffer(gpu_context, manager)
   destroy_lights_buffer(gpu_context, manager)
-  // Manually clean up each pool since callbacks can't capture gpu_context
+  // Clean up lights (which may own shadow cameras with textures)
+  for &entry, i in manager.lights.entries {
+    if entry.generation > 0 && entry.active {
+      destroy_light(manager, gpu_context, Handle{index = u32(i), generation = entry.generation})
+    }
+  }
+  delete(manager.lights.entries)
+  delete(manager.lights.free_indices)
+
+  // Clean up spherical cameras with GPU resources (frees their textures)
+  for &entry in manager.spherical_cameras.entries {
+    if entry.generation > 0 && entry.active {
+      spherical_camera_destroy(&entry.item, gpu_context.device, gpu_context.command_pool, manager)
+    }
+  }
+  delete(manager.spherical_cameras.entries)
+  delete(manager.spherical_cameras.free_indices)
+
+  // Clean up regular cameras with GPU resources (frees their textures)
+  for &entry in manager.cameras.entries {
+    if entry.generation > 0 && entry.active {
+      camera_destroy(&entry.item, gpu_context.device, gpu_context.command_pool, manager)
+    }
+  }
+  delete(manager.cameras.entries)
+  delete(manager.cameras.free_indices)
+
+  // Now safe to destroy texture pools - all owned textures have been freed
   for &entry in manager.image_2d_buffers.entries {
     if entry.generation > 0 && entry.active {
       gpu.image_buffer_destroy(gpu_context.device, &entry.item)
@@ -321,23 +348,6 @@ shutdown :: proc(
   }
   delete(manager.meshes.entries)
   delete(manager.meshes.free_indices)
-  // Clean up spherical cameras with GPU resources
-  for &entry in manager.spherical_cameras.entries {
-    if entry.generation > 0 && entry.active {
-      spherical_camera_destroy(&entry.item, gpu_context.device, gpu_context.command_pool, manager)
-    }
-  }
-  delete(manager.spherical_cameras.entries)
-  delete(manager.spherical_cameras.free_indices)
-
-  // Clean up regular cameras with GPU resources
-  for &entry in manager.cameras.entries {
-    if entry.generation > 0 && entry.active {
-      camera_destroy(&entry.item, gpu_context.device, gpu_context.command_pool, manager, skip_pool_free = true)
-    }
-  }
-  delete(manager.cameras.entries)
-  delete(manager.cameras.free_indices)
 
   // Simple cleanup for pools without GPU resources
   delete(manager.materials.entries)
