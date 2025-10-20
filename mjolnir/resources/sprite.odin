@@ -122,7 +122,7 @@ sprite_init :: proc(
 	frame_rows: u32 = 1,
 	frame_index: u32 = 0,
 	color: [4]f32 = {1.0, 1.0, 1.0, 1.0},
-	sampler_index: u32 = 3,
+	sampler_index: u32 = 2,  // nearest_repeat for crisp pixel art
 ) {
 	self.texture_index = texture.index
 	self.sampler_index = sampler_index
@@ -162,7 +162,7 @@ create_sprite :: proc(
 	frame_rows: u32 = 1,
 	frame_index: u32 = 0,
 	color: [4]f32 = {1.0, 1.0, 1.0, 1.0},
-	sampler_index: u32 = 3,
+	sampler_index: u32 = 2,  // nearest_repeat for crisp pixel art
 	animation: Maybe(SpriteAnimation) = nil,
 ) -> (
 	handle: Handle,
