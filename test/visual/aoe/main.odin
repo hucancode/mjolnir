@@ -10,12 +10,11 @@ import "../../../mjolnir/resources"
 import "../../../mjolnir/world"
 
 cube_handles: [dynamic]resources.Handle
-sphere_handle: resources.Handle
-sphere_position: [3]f32
+effector_sphere: resources.Handle
+effector_position: [3]f32
 orbit_angle: f32 = 0.0
-orbit_radius: f32 = 10.0
-aoe_system: world.AOEOctree
-aoe_effect_radius: f32 = 10.0
+orbit_radius: f32 = 15.0
+effect_radius: f32 = 10.0
 
 main :: proc() {
   context.logger = log.create_console_logger()
@@ -31,115 +30,111 @@ main :: proc() {
 
 setup_aoe_test :: proc(engine: ^mjolnir.Engine) {
   using mjolnir, geometry
-  log.info("AOE Test: Setup function called!")
+  log.info("AOE Test: Setup")
 
   set_visibility_stats(engine, false)
   set_debug_ui_enabled(engine, false)
 
-  plain_material_handle, plain_material_ok := create_material(engine)
-  cube_geom := make_cube()
-  cube_mesh_handle, cube_mesh_ok := create_mesh(engine, cube_geom)
-  sphere_mesh_handle, sphere_mesh_ok := create_mesh(engine, make_sphere())
+  // Create meshes
+  cube_mesh, cube_ok := create_mesh(engine, make_cube())
+  sphere_mesh, sphere_ok := create_mesh(engine, make_sphere())
 
-  cube_handles = make([dynamic]resources.Handle, 0)
-
-  log.info("Spawning grid of cubes")
-  space: f32 = 1.0
-  size: f32 = 0.3
-  nx, ny, nz := 50, 1, 50
-  mat_handle, mat_ok := create_material(
+  // Material for cubes
+  cube_mat, cube_mat_ok := create_material(
     engine,
     metallic_value = 0.5,
     roughness_value = 0.8,
   )
 
-  world.aoe_init(&aoe_system, geometry.Aabb{
-    min = {-100, -100, -100},
-    max = {100, 100, 100},
-  })
+  // Emissive material for effector sphere
+  effector_mat, effector_mat_ok := create_material(
+    engine,
+    emissive_value = 5.0,
+  )
 
-  if cube_mesh_ok && mat_ok {
-    for x in 0 ..< nx {
-      for y in 0 ..< ny {
-        for z in 0 ..< nz {
-          world_x := (f32(x) - f32(nx) * 0.5) * space
-          world_y := (f32(y) - f32(ny) * 0.5) * space + 0.5
-          world_z := (f32(z) - f32(nz) * 0.5) * space
-
-          node_handle, node, node_ok := spawn(
-            engine,
-            world.MeshAttachment {
-              handle = cube_mesh_handle,
-              material = mat_handle,
-              cast_shadow = false,
-            },
-          )
-          if !node_ok do continue
-
-          translate(engine, node_handle, world_x, world_y, world_z)
-          scale(engine, node_handle, size)
-
-          append(&cube_handles, node_handle)
-          position := [3]f32{world_x, world_y, world_z}
-          world.aoe_insert(&aoe_system, node_handle, position)
-        }
-      }
-    }
+  if !cube_ok || !sphere_ok || !cube_mat_ok || !effector_mat_ok {
+    log.error("Failed to create test resources")
+    return
   }
 
-  if sphere_mesh_ok && plain_material_ok {
-    sphere_mat, sphere_mat_ok := create_material(
-      engine,
-      emissive_value = 5.0,
-    )
-    if sphere_mat_ok {
-      sphere_position = {0, 1, 0}
-      handle, sphere_node, sphere_ok := spawn(
+  // Spawn 50x50 grid of cubes
+  cube_handles = make([dynamic]resources.Handle, 0)
+  grid_size := 50
+  spacing: f32 = 1.0
+  cube_scale: f32 = 0.3
+
+  log.infof("Spawning %dx%d grid of cubes...", grid_size, grid_size)
+  for x in 0 ..< grid_size {
+    for z in 0 ..< grid_size {
+      world_x := (f32(x) - f32(grid_size) * 0.5) * spacing
+      world_z := (f32(z) - f32(grid_size) * 0.5) * spacing
+
+      handle, node, ok := spawn(
         engine,
         world.MeshAttachment {
-          handle = sphere_mesh_handle,
-          material = sphere_mat,
+          handle = cube_mesh,
+          material = cube_mat,
           cast_shadow = false,
         },
       )
-      if sphere_ok {
-        sphere_handle = handle
-        translate(sphere_node, sphere_position.x, sphere_position.y, sphere_position.z)
-        scale(sphere_node, 0.5)
+      if ok {
+        translate(node, world_x, 0.5, world_z)
+        scale(node, cube_scale)
+        append(&cube_handles, handle)
       }
     }
   }
 
-  if main_camera := get_main_camera(engine); main_camera != nil {
-    main_camera.position = {20, 20, 20}
+  // Spawn effector sphere
+  effector_position = {0, 1, 0}
+  handle, node, ok := spawn(
+    engine,
+    world.MeshAttachment {
+      handle = sphere_mesh,
+      material = effector_mat,
+      cast_shadow = false,
+    },
+  )
+  if ok {
+    effector_sphere = handle
+    translate(node, effector_position.x, effector_position.y, effector_position.z)
+    scale(node, 0.5)
   }
 
-  log.info("AOE test setup complete")
+  // Position camera
+  if main_camera := get_main_camera(engine); main_camera != nil {
+    main_camera.position = {30, 30, 30}
+    resources.camera_look_at(main_camera, main_camera.position, {0, 0, 0})
+  }
+
+  log.infof("AOE test setup complete: %d cubes", len(cube_handles))
 }
 
 update_aoe_test :: proc(engine: ^mjolnir.Engine, delta_time: f32) {
   using mjolnir
 
-  t := time_since_start(engine)
-
+  // Move effector sphere in circular orbit
   orbit_angle += delta_time * 0.5
-  sphere_position.x = math.cos(orbit_angle) * orbit_radius
-  sphere_position.y = 1.0
-  sphere_position.z = math.sin(orbit_angle) * orbit_radius
+  effector_position.x = math.cos(orbit_angle) * orbit_radius
+  effector_position.y = 1.0
+  effector_position.z = math.sin(orbit_angle) * orbit_radius
 
-  translate(engine, sphere_handle, sphere_position.x, sphere_position.y, sphere_position.z)
+  translate(engine, effector_sphere,
+    effector_position.x, effector_position.y, effector_position.z)
 
-  affected_nodes := make([dynamic]resources.Handle, 0)
-  defer delete(affected_nodes)
-
-  world.aoe_query_sphere(&aoe_system, sphere_position, aoe_effect_radius, &affected_nodes)
-
+  // Reset all cubes to normal scale
   for handle in cube_handles {
     scale(engine, handle, 0.3)
   }
 
-  shrink_scale :: 0.1
-  for handle in affected_nodes {
-    scale(engine, handle, shrink_scale)
+  // Query for cubes within effect radius
+  affected := make([dynamic]resources.Handle, 0)
+  defer delete(affected)
+
+  world.aoe_query_sphere(&engine.world.aoe, effector_position, effect_radius, &affected)
+
+  // Shrink affected cubes
+  for handle in affected {
+    scale(engine, handle, 0.1)
   }
 }

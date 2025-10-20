@@ -51,6 +51,27 @@ NodeAttachment :: union {
   SpriteAttachment,
 }
 
+NodeTag :: enum u32 {
+  PAWN,              // Movable game entities (players, AI, etc.)
+  ACTOR,             // Generic game actor
+  MESH,              // Has mesh attachment
+  SPRITE,            // Has sprite attachment
+  LIGHT,             // Has light attachment
+  EMITTER,           // Has particle emitter
+  FORCEFIELD,        // Has force field
+  VISIBLE,           // Currently visible (own + parent visibility)
+  NAVMESH_AGENT,     // Has navigation agent
+  NAVMESH_OBSTACLE,  // Is navigation obstacle
+  INTERACTIVE,       // Can be interacted with
+  ENEMY,             // Enemy entity
+  FRIENDLY,          // Friendly entity
+  PROJECTILE,        // Projectile entity
+  STATIC,            // Static, non-moving entity
+  DYNAMIC,           // Dynamic, moving entity
+}
+
+NodeTagSet :: bit_set[NodeTag; u32]
+
 Node :: struct {
   parent:          resources.Handle,
   children:        [dynamic]resources.Handle,
@@ -63,6 +84,7 @@ Node :: struct {
   visible:         bool,              // Node's own visibility state
   parent_visible:  bool,              // Visibility inherited from parent chain
   pending_deletion: bool, // Atomic flag for safe deletion
+  tags:            NodeTagSet,        // Tags for AOE queries and filtering
 }
 
 TraversalCallback :: #type proc(node: ^Node, ctx: rawptr) -> bool
@@ -81,6 +103,24 @@ init_node :: proc(self: ^Node, name: string = "") {
   self.culling_enabled = true
   self.visible = true
   self.parent_visible = true
+  self.tags = {}
+}
+
+update_node_tags :: proc(node: ^Node) {
+  #partial switch _ in node.attachment {
+  case MeshAttachment: node.tags |= {.MESH}
+  case SpriteAttachment: node.tags |= {.SPRITE}
+  case LightAttachment: node.tags |= {.LIGHT}
+  case EmitterAttachment: node.tags |= {.EMITTER}
+  case ForceFieldAttachment: node.tags |= {.FORCEFIELD}
+  case NavMeshAgentAttachment: node.tags |= {.NAVMESH_AGENT}
+  case NavMeshObstacleAttachment: node.tags |= {.NAVMESH_OBSTACLE}
+  }
+  if node.visible && node.parent_visible {
+    node.tags |= {.VISIBLE}
+  } else {
+    node.tags -= {.VISIBLE}
+  }
 }
 
 destroy_node :: proc(self: ^Node, resources_manager: ^resources.Manager, gpu_context: ^gpu.GPUContext = nil) {
@@ -220,6 +260,7 @@ _init_node_with_attachment :: proc(
   assign_emitter_to_node(resources_manager, handle, node)
   assign_forcefield_to_node(resources_manager, handle, node)
   assign_light_to_node(resources_manager, handle, node)
+  update_node_tags(node)
 }
 
 @(private = "file")
@@ -397,6 +438,8 @@ init_gpu :: proc(
 begin_frame :: proc(world: ^World, resources_manager: ^resources.Manager) {
   traverse(world, resources_manager)
   update_visibility_system(world)
+  // this is costly, must optimize
+  aoe_rebuild_from_world(&world.aoe, world)
 }
 
 shutdown :: proc(world: ^World, gpu_context: ^gpu.GPUContext, resources_manager: ^resources.Manager) {
@@ -468,6 +511,11 @@ traverse :: proc(world: ^World, resources_manager: ^resources.Manager = nil, cb_
     visibility_changed := current_node.parent_visible != entry.parent_is_visible
     current_node.parent_visible = entry.parent_is_visible
     is_dirty := transform_update_local(&current_node.transform)
+
+    // Update tags when visibility changes
+    if visibility_changed {
+      update_node_tags(current_node)
+    }
 
     // Apply bone socket transform if specified
     bone_socket_transform := linalg.MATRIX4F32_IDENTITY
