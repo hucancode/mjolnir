@@ -579,7 +579,6 @@ setup :: proc(engine: ^mjolnir.Engine) {
         frame_rows = 17,     // 17 rows in sprite sheet
         frame_index = 0,     // Starting frame (animation will override this)
         color = {1.0, 1.0, 1.0, 1.0},
-        // sampler_index defaults to 2 (nearest_repeat) for crisp pixel art
         animation = warrior_animation,
       )
 
