@@ -15,8 +15,8 @@ LightAttachment :: struct {
 }
 
 NodeSkinning :: struct {
-  animation:          Maybe(animation.Instance),
-  bone_matrix_offset: u32,
+  animation:              Maybe(animation.Instance),
+  bone_matrix_buffer_offset: u32,  // Offset into bone matrix buffer for skinned mesh
 }
 
 MeshAttachment :: struct {
@@ -35,6 +35,12 @@ ForceFieldAttachment :: struct {
   handle: resources.Handle,
 }
 
+SpriteAttachment :: struct {
+  sprite_handle: resources.Handle,
+  mesh_handle:   resources.Handle,
+  material:      resources.Handle,
+}
+
 NodeAttachment :: union {
   LightAttachment,
   MeshAttachment,
@@ -42,6 +48,7 @@ NodeAttachment :: union {
   ForceFieldAttachment,
   NavMeshAgentAttachment,
   NavMeshObstacleAttachment,
+  SpriteAttachment,
 }
 
 Node :: struct {
@@ -91,12 +98,15 @@ destroy_node :: proc(self: ^Node, resources_manager: ^resources.Manager, gpu_con
   case ForceFieldAttachment:
     resources.destroy_forcefield_handle(resources_manager, attachment.handle)
     attachment.handle = {}
+  case SpriteAttachment:
+    resources.destroy_sprite_handle(resources_manager, attachment.sprite_handle)
+    attachment.sprite_handle = {}
   case MeshAttachment:
     // TODO: we need to check if the mesh is still in use before freeing its resources
     skinning, has_skin := &attachment.skinning.?
-    if has_skin && skinning.bone_matrix_offset != 0xFFFFFFFF {
-      resources.slab_free(&resources_manager.bone_matrix_slab, skinning.bone_matrix_offset)
-      skinning.bone_matrix_offset = 0xFFFFFFFF
+    if has_skin && skinning.bone_matrix_buffer_offset != 0xFFFFFFFF {
+      resources.slab_free(&resources_manager.bone_matrix_slab, skinning.bone_matrix_buffer_offset)
+      skinning.bone_matrix_buffer_offset = 0xFFFFFFFF
     }
   }
 }
@@ -226,6 +236,29 @@ _upload_node_to_gpu :: proc(
 }
 
 @(private = "file")
+_apply_sprite_to_node_data :: proc(
+  data: ^resources.NodeData,
+  sprite_attachment: SpriteAttachment,
+  node: ^Node,
+  resources_manager: ^resources.Manager,
+) {
+  data.material_id = sprite_attachment.material.index
+  data.mesh_id = sprite_attachment.mesh_handle.index
+  data.attachment_data_index = sprite_attachment.sprite_handle.index
+
+  if node.visible && node.parent_visible do data.flags |= {.VISIBLE}
+  if node.culling_enabled do data.flags |= {.CULLING_ENABLED}
+
+  if material, has_mat := resources.get(resources_manager.materials, sprite_attachment.material); has_mat {
+    switch material.type {
+    case .TRANSPARENT: data.flags |= {.MATERIAL_TRANSPARENT}
+    case .WIREFRAME: data.flags |= {.MATERIAL_WIREFRAME}
+    case .PBR, .UNLIT: // No flags
+    }
+  }
+}
+
+@(private = "file")
 _build_node_data :: proc(
   node: ^Node,
   resources_manager: ^resources.Manager,
@@ -233,7 +266,7 @@ _build_node_data :: proc(
   data := resources.NodeData{
     material_id = 0xFFFFFFFF,
     mesh_id = 0xFFFFFFFF,
-    bone_matrix_offset = 0xFFFFFFFF,
+    attachment_data_index = 0xFFFFFFFF,
     flags = {},
   }
 
@@ -256,8 +289,12 @@ _build_node_data :: proc(
     }
 
     if skinning, has_skin := mesh_attachment.skinning.?; has_skin {
-      data.bone_matrix_offset = skinning.bone_matrix_offset
+      data.attachment_data_index = skinning.bone_matrix_buffer_offset
     }
+  }
+
+  if sprite_attachment, has_sprite := node.attachment.(SpriteAttachment); has_sprite {
+    _apply_sprite_to_node_data(&data, sprite_attachment, node, resources_manager)
   }
 
   if _, is_obstacle := node.attachment.(NavMeshObstacleAttachment); is_obstacle {
@@ -444,7 +481,7 @@ traverse :: proc(world: ^World, resources_manager: ^resources.Manager = nil, cb_
 
       bone_index := resources.find_bone_by_name(parent_mesh, current_node.bone_socket) or_break
       parent_skinning := parent_mesh_attachment.skinning.? or_break
-      if parent_skinning.bone_matrix_offset == 0xFFFFFFFF do break apply_bone_socket
+      if parent_skinning.bone_matrix_buffer_offset == 0xFFFFFFFF do break apply_bone_socket
 
       parent_mesh_skinning := parent_mesh.skinning.? or_break
       if bone_index >= u32(len(parent_mesh_skinning.bones)) do break apply_bone_socket
@@ -452,7 +489,7 @@ traverse :: proc(world: ^World, resources_manager: ^resources.Manager = nil, cb_
       bone_buffer := &resources_manager.bone_buffer
       if bone_buffer.mapped == nil do break apply_bone_socket
 
-      bone_matrices_ptr := gpu.mutable_buffer_get(bone_buffer, parent_skinning.bone_matrix_offset)
+      bone_matrices_ptr := gpu.mutable_buffer_get(bone_buffer, parent_skinning.bone_matrix_buffer_offset)
       bone_matrices := slice.from_ptr(bone_matrices_ptr, len(parent_mesh_skinning.bones))
 
       // bone_matrices contains skinning matrices (world_transform * inverse_bind)
@@ -476,7 +513,7 @@ traverse :: proc(world: ^World, resources_manager: ^resources.Manager = nil, cb_
       data := resources.NodeData {
         material_id        = 0xFFFFFFFF,
         mesh_id            = 0xFFFFFFFF,
-        bone_matrix_offset = 0xFFFFFFFF,
+        attachment_data_index = 0xFFFFFFFF,
       }
       if mesh_attachment, has_mesh := current_node.attachment.(MeshAttachment); has_mesh {
         data.material_id = mesh_attachment.material.index
@@ -504,8 +541,11 @@ traverse :: proc(world: ^World, resources_manager: ^resources.Manager = nil, cb_
           }
         }
         if skinning, has_skinning := mesh_attachment.skinning.?; has_skinning {
-          data.bone_matrix_offset = skinning.bone_matrix_offset
+          data.attachment_data_index = skinning.bone_matrix_buffer_offset
         }
+      }
+      if sprite_attachment, has_sprite := current_node.attachment.(SpriteAttachment); has_sprite {
+        _apply_sprite_to_node_data(&data, sprite_attachment, current_node, resources_manager)
       }
       gpu.write(&resources_manager.node_data_buffer, &data, int(entry.handle.index))
     }
@@ -854,4 +894,38 @@ create_spot_light_attachment :: proc(
   )
   attachment = LightAttachment{handle}
   return
+}
+
+// Create sprite attachment and associated Sprite resource
+create_sprite_attachment :: proc(
+  resources_manager: ^resources.Manager,
+  shared_quad_mesh: resources.Handle,
+  texture: resources.Handle,
+  material: resources.Handle,
+  frame_columns: u32 = 1,
+  frame_rows: u32 = 1,
+  frame_index: u32 = 0,
+  color: [4]f32 = {1.0, 1.0, 1.0, 1.0},
+  sampler_index: u32 = 3,
+  animation: Maybe(resources.SpriteAnimation) = nil,
+) -> (attachment: SpriteAttachment, ok: bool) #optional_ok {
+  sprite_handle: resources.Handle
+  sprite_handle, ok = resources.create_sprite(
+    resources_manager,
+    texture,
+    frame_columns,
+    frame_rows,
+    frame_index,
+    color,
+    sampler_index,
+    animation,
+  )
+  if !ok do return {}, false
+
+  attachment = SpriteAttachment {
+    sprite_handle = sprite_handle,
+    mesh_handle   = shared_quad_mesh,
+    material      = material,
+  }
+  return attachment, true
 }

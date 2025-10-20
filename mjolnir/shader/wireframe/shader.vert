@@ -35,7 +35,7 @@ layout(set = 4, binding = 0) readonly buffer WorldMatrices {
 struct NodeData {
     uint material_id;
    uint mesh_id;
-   uint bone_matrix_offset;
+   uint attachment_data_index;
     uint flags;
 };
 
@@ -86,9 +86,9 @@ void main() {
     // Calculate position based on skinning
     vec4 modelPosition;
     bool is_skinned = (mesh.flags & MESH_FLAG_SKINNED) != 0u &&
-                      node.bone_matrix_offset < bones.length();
+                      node.attachment_data_index < bones.length();
     if (is_skinned) {
-        uint baseOffset = node.bone_matrix_offset;
+        uint baseOffset = node.attachment_data_index;
         int local_index = gl_VertexIndex - mesh.vertex_offset;
         uint vertex_index = mesh.vertex_skinning_offset + uint(local_index);
         VertexSkinningData skin = vertex_skinning[vertex_index];

@@ -52,7 +52,7 @@ layout(set = 3, binding = 0) readonly buffer MaterialBuffer {
 struct NodeData {
     uint material_id;
     uint mesh_id;
-    uint bone_matrix_offset;
+    uint attachment_data_index;
     uint flags;
 };
 

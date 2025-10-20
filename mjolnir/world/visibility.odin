@@ -155,6 +155,7 @@ visibility_system_dispatch_culling :: proc(
   include_flags: resources.NodeFlagSet,
   exclude_flags: resources.NodeFlagSet,
   resources_manager: ^resources.Manager,
+  occlusion_enabled: bool = true,
 ) {
   if system.node_count == 0 {
     return
@@ -204,6 +205,7 @@ visibility_system_dispatch_culling :: proc(
     include_flags,
     exclude_flags,
     resources_manager,
+    occlusion_enabled,
   )
 
   // === BARRIER: MAKE DRAW COMMANDS VISIBLE TO DEPTH PASS ===
@@ -1245,6 +1247,7 @@ execute_late_pass :: proc(
   include_flags: resources.NodeFlagSet,
   exclude_flags: resources.NodeFlagSet,
   resources_manager: ^resources.Manager,
+  occlusion_enabled: bool,
 ) {
   vk.CmdFillBuffer(
     command_buffer,
@@ -1266,7 +1269,7 @@ execute_late_pass :: proc(
     nil,
   )
 
-  // Push constants with occlusion enabled (uses previous frame's pyramid via descriptor set)
+  // Push constants with occlusion setting (uses previous frame's pyramid via descriptor set)
   prev_frame := (frame_index + resources.MAX_FRAMES_IN_FLIGHT - 1) % resources.MAX_FRAMES_IN_FLIGHT
   push_constants := VisibilityPushConstants {
     camera_index      = camera_index,
@@ -1277,7 +1280,7 @@ execute_late_pass :: proc(
     pyramid_width     = f32(camera.depth_pyramid[prev_frame].width),
     pyramid_height    = f32(camera.depth_pyramid[prev_frame].height),
     depth_bias        = system.depth_bias,
-    occlusion_enabled = 1, // Enable occlusion test
+    occlusion_enabled = occlusion_enabled ? 1 : 0,
   }
 
   vk.CmdPushConstants(
