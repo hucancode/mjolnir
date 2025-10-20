@@ -906,7 +906,7 @@ create_sprite_attachment :: proc(
   frame_rows: u32 = 1,
   frame_index: u32 = 0,
   color: [4]f32 = {1.0, 1.0, 1.0, 1.0},
-  sampler_index: u32 = 3,
+  sampler_index: u32 = 2,  // nearest_repeat for crisp pixel art
   animation: Maybe(resources.SpriteAnimation) = nil,
 ) -> (attachment: SpriteAttachment, ok: bool) #optional_ok {
   sprite_handle: resources.Handle

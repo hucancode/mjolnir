@@ -556,12 +556,12 @@ setup :: proc(engine: ^mjolnir.Engine) {
     log.info("spawning Warrior effect sprite with animation (99 frames @ 24fps)...")
 
     // Load Warrior effect sprite sheet
-    warrior_effect_texture, warrior_effect_ok := create_texture(
+    warrior_sprite_texture, warrior_sprite_ok := create_texture(
       engine,
       "assets/Warrior_Sheet-Effect.png",
     )
 
-    if warrior_effect_ok {
+    if warrior_sprite_ok {
       // Use shared sprite quad mesh from transparency renderer
       sprite_quad := engine.render.transparency.sprite_quad_mesh
       // 6x17 sprite sheet: 6 columns, 17 rows, using frames 0-98 (99 total)
@@ -574,12 +574,12 @@ setup :: proc(engine: ^mjolnir.Engine) {
 
       sprite_handle, sprite_ok := resources.create_sprite(
         &engine.rm,
-        warrior_effect_texture,
+        warrior_sprite_texture,
         frame_columns = 6,   // 6 columns in sprite sheet
         frame_rows = 17,     // 17 rows in sprite sheet
         frame_index = 0,     // Starting frame (animation will override this)
         color = {1.0, 1.0, 1.0, 1.0},
-        sampler_index = 3,  // linear_repeat_sampler
+        // sampler_index defaults to 2 (nearest_repeat) for crisp pixel art
         animation = warrior_animation,
       )
 
@@ -589,7 +589,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
           engine,
           {.ALBEDO_TEXTURE},
           type = .TRANSPARENT,
-          albedo_handle = warrior_effect_texture,
+          albedo_handle = warrior_sprite_texture,
         )
 
         if mat_ok {
@@ -611,19 +611,10 @@ setup :: proc(engine: ^mjolnir.Engine) {
           if spawn_ok {
             world.scale(sprite_node, 3.0)
             // Disable culling to ensure it renders
-            sprite_node.culling_enabled = false
-            log.infof("Warrior effect sprite with 99-frame animation (24fps, looping) spawned at (5, 8, 5)")
-          } else {
-            log.error("Failed to spawn sprite node")
+            // sprite_node.culling_enabled = false
           }
-        } else {
-          log.error("Failed to create sprite material")
         }
-      } else {
-        log.error("Failed to create sprite resource")
       }
-    } else {
-      log.error("Warrior effect texture not loaded")
     }
   }
 
