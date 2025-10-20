@@ -485,9 +485,9 @@ setup :: proc(engine: ^mjolnir.Engine) {
       }
     }
   }
-  add_fog(engine, [3]f32{0.4, 0.0, 0.8}, 0.02, 5.0, 20.0)
+  // add_fog(engine, [3]f32{0.4, 0.0, 0.8}, 0.02, 5.0, 20.0)
   // add_bloom(engine)
-  add_crosshatch(engine, [2]f32{1280, 720})
+  // add_crosshatch(engine, [2]f32{1280, 720})
   // add_blur(engine, 18.0)
   // add_tonemap(engine, 1.5, 1.3)
   // add_dof(engine)
@@ -550,6 +550,83 @@ setup :: proc(engine: ^mjolnir.Engine) {
       }
     }
   }
+
+  // Spawn Warrior effect sprite (6x17 grid, frames 0-98)
+  when true {
+    log.info("spawning Warrior effect sprite with animation (99 frames @ 24fps)...")
+
+    // Load Warrior effect sprite sheet
+    warrior_effect_texture, warrior_effect_ok := create_texture(
+      engine,
+      "assets/Warrior_Sheet-Effect.png",
+    )
+
+    if warrior_effect_ok {
+      // Use shared sprite quad mesh from transparency renderer
+      sprite_quad := engine.render.transparency.sprite_quad_mesh
+      // 6x17 sprite sheet: 6 columns, 17 rows, using frames 0-98 (99 total)
+      // Create animation: 99 frames at 24fps, looping
+      warrior_animation := resources.sprite_animation_init(
+        frame_count = 99,
+        fps = 24.0,
+        loop = true,
+      )
+
+      sprite_handle, sprite_ok := resources.create_sprite(
+        &engine.rm,
+        warrior_effect_texture,
+        frame_columns = 6,   // 6 columns in sprite sheet
+        frame_rows = 17,     // 17 rows in sprite sheet
+        frame_index = 0,     // Starting frame (animation will override this)
+        color = {1.0, 1.0, 1.0, 1.0},
+        sampler_index = 3,  // linear_repeat_sampler
+        animation = warrior_animation,
+      )
+
+      if sprite_ok {
+        // Create sprite material (transparent with albedo texture)
+        sprite_material, mat_ok := create_material(
+          engine,
+          {.ALBEDO_TEXTURE},
+          type = .TRANSPARENT,
+          albedo_handle = warrior_effect_texture,
+        )
+
+        if mat_ok {
+          // Create sprite attachment
+          sprite_attachment := world.SpriteAttachment {
+            sprite_handle = sprite_handle,
+            mesh_handle   = sprite_quad,
+            material      = sprite_material,
+          }
+
+          // Spawn at (5, 8, 5) - between camera {10,16,10} and origin {0,0,0}
+          _, sprite_node, spawn_ok := world.spawn_at(
+            &engine.world,
+            {4, 1.5, 0},
+            sprite_attachment,
+            &engine.rm,
+          )
+
+          if spawn_ok {
+            world.scale(sprite_node, 3.0)
+            // Disable culling to ensure it renders
+            sprite_node.culling_enabled = false
+            log.infof("Warrior effect sprite with 99-frame animation (24fps, looping) spawned at (5, 8, 5)")
+          } else {
+            log.error("Failed to spawn sprite node")
+          }
+        } else {
+          log.error("Failed to create sprite material")
+        }
+      } else {
+        log.error("Failed to create sprite resource")
+      }
+    } else {
+      log.error("Warrior effect texture not loaded")
+    }
+  }
+
   log.info("setup complete")
 }
 

@@ -356,15 +356,36 @@ update_skeletal_animations :: proc(self: ^Engine, delta_time: f32) {
     bone_count := len(mesh_skinning.bones)
     if bone_count == 0 do continue
 
-    if skinning.bone_matrix_offset == 0xFFFFFFFF do continue
+    if skinning.bone_matrix_buffer_offset == 0xFFFFFFFF do continue
 
-    matrices_ptr := gpu.mutable_buffer_get(bone_buffer, skinning.bone_matrix_offset)
+    matrices_ptr := gpu.mutable_buffer_get(bone_buffer, skinning.bone_matrix_buffer_offset)
     matrices := slice.from_ptr(matrices_ptr, bone_count)
     resources.sample_clip(mesh, clip, anim_instance.time, matrices)
 
     skinning.animation = anim_instance
     mesh_attachment.skinning = skinning
     node.attachment = mesh_attachment
+  }
+}
+
+update_sprite_animations :: proc(self: ^Engine, delta_time: f32) {
+  if delta_time <= 0 do return
+
+  // Early exit if no sprites exist
+  active_count := len(self.rm.sprites.entries) - len(self.rm.sprites.free_indices)
+  if active_count == 0 do return
+
+  for &entry, i in self.rm.sprites.entries {
+    if !entry.active do continue
+
+    sprite := &entry.item
+    anim, has_anim := &sprite.animation.?
+    if !has_anim do continue
+
+    resources.sprite_animation_update(anim, delta_time)
+
+    handle := resources.Handle{index = u32(i), generation = entry.generation}
+    resources.sprite_write_to_gpu(&self.rm, handle, sprite)
   }
 }
 
@@ -545,6 +566,7 @@ render :: proc(self: ^Engine) -> vk.Result {
   )
   world.begin_frame(&self.world, &self.rm)
   update_skeletal_animations(self, render_delta_time)
+  update_sprite_animations(self, render_delta_time)
   main_camera_handle := self.render.main_camera
   main_camera := resources.get(self.rm.cameras, main_camera_handle)
   if main_camera == nil do return .ERROR_UNKNOWN

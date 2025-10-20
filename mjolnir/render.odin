@@ -443,29 +443,33 @@ record_transparency_pass :: proc(
   }
 
   // Cull transparent objects (depth already rendered in geometry pass)
-  // world.visibility_system_dispatch_culling(
-  //   &world_state.visibility,
-  //   gpu_context,
-  //   command_buffer,
-  //   camera,
-  //   camera_handle.index,
-  //   frame_index,
-  //   {.VISIBLE, .MATERIAL_TRANSPARENT},
-  //   {},
-  //   resources_manager,
-  // )
+  // Disable occlusion culling for transparent objects to avoid rejecting sprites
+  world.visibility_system_dispatch_culling(
+    &world_state.visibility,
+    gpu_context,
+    command_buffer,
+    camera,
+    camera_handle.index,
+    frame_index,
+    {.VISIBLE, .MATERIAL_TRANSPARENT},
+    {},
+    resources_manager,
+    occlusion_enabled = false,
+  )
   command_stride := u32(size_of(vk.DrawIndexedIndirectCommand))
-  // transparency.render(
-  //   &self.transparency,
-  //   self.transparency.transparent_pipeline,
-  //   camera_handle,
-  //   command_buffer,
-  //   resources_manager,
-  //   frame_index,
-  //   camera.late_draw_commands[frame_index].buffer,
-  //   camera.late_draw_count[frame_index].buffer,
-  //   command_stride,
-  // )
+
+  // Render sprites with sprite pipeline
+  transparency.render(
+    &self.transparency,
+    self.transparency.sprite_pipeline,
+    camera_handle,
+    command_buffer,
+    resources_manager,
+    frame_index,
+    camera.late_draw_commands[frame_index].buffer,
+    camera.late_draw_count[frame_index].buffer,
+    command_stride,
+  )
 
   // Cull wireframe objects
   // world.visibility_system_dispatch_culling(

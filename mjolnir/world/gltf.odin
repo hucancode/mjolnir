@@ -706,7 +706,7 @@ construct_scene :: proc(
               material = geometry_data.material_handle,
               cast_shadow = true,
               skinning = NodeSkinning {
-                bone_matrix_offset = skin_data.matrix_buffer_offset,
+                bone_matrix_buffer_offset = skin_data.matrix_buffer_offset,
               },
             }
             if _, has_first_mesh := skin_to_first_mesh[gltf_node.skin];

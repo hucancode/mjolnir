@@ -29,6 +29,7 @@ Manager :: struct {
   emitters:                     Pool(Emitter),
   forcefields:                  Pool(ForceField),
   animation_clips:              Pool(animation.Clip),
+  sprites:                      Pool(Sprite),
 
   // Navigation system resources
   nav_meshes:                   Pool(NavMesh),
@@ -80,6 +81,11 @@ Manager :: struct {
   forcefield_buffer_set_layout:      vk.DescriptorSetLayout,
   forcefield_buffer_descriptor_set:  vk.DescriptorSet,
   forcefield_buffer:                 gpu.MutableBuffer(ForceFieldData),
+
+  // Bindless sprite buffer system
+  sprite_buffer_set_layout:          vk.DescriptorSetLayout,
+  sprite_buffer_descriptor_set:      vk.DescriptorSet,
+  sprite_buffer:                     gpu.MutableBuffer(SpriteData),
 
   // Bindless vertex skinning buffer system
   vertex_skinning_buffer_set_layout: vk.DescriptorSetLayout,
@@ -136,6 +142,8 @@ init :: proc(
   pool_init(&manager.forcefields, MAX_FORCE_FIELDS)
   log.infof("Initializing animation clips pool... ")
   pool_init(&manager.animation_clips, 0)
+  log.infof("Initializing sprites pool... ")
+  pool_init(&manager.sprites, MAX_SPRITES)
   log.infof("Initializing lights pool... ")
   pool_init(&manager.lights, MAX_LIGHTS)
   log.infof("Initializing navigation mesh pool... ")
@@ -158,6 +166,7 @@ init :: proc(
   init_emitter_buffer(gpu_context, manager) or_return
   init_forcefield_buffer(gpu_context, manager) or_return
   init_lights_buffer(gpu_context, manager) or_return
+  init_sprite_buffer(gpu_context, manager) or_return
   init_vertex_index_buffers(gpu_context, manager) or_return
   // Texture + samplers descriptor set
   textures_bindings := [?]vk.DescriptorSetLayoutBinding {
@@ -291,6 +300,7 @@ shutdown :: proc(
   destroy_emitter_buffer(gpu_context, manager)
   destroy_forcefield_buffer(gpu_context, manager)
   destroy_lights_buffer(gpu_context, manager)
+  destroy_sprite_buffer(gpu_context, manager)
   // Clean up lights (which may own shadow cameras with textures)
   for &entry, i in manager.lights.entries {
     if entry.generation > 0 && entry.active {
@@ -350,6 +360,8 @@ shutdown :: proc(
   delete(manager.emitters.free_indices)
   delete(manager.forcefields.entries)
   delete(manager.forcefields.free_indices)
+  delete(manager.sprites.entries)
+  delete(manager.sprites.free_indices)
   for &entry in manager.animation_clips.entries {
     if entry.generation > 0 && entry.active {
       animation.clip_destroy(&entry.item)
@@ -452,6 +464,7 @@ create_geometry_pipeline_layout :: proc(
     manager.mesh_data_buffer_set_layout,
     manager.vertex_skinning_buffer_set_layout,
     manager.lights_buffer_set_layout,
+    manager.sprite_buffer_set_layout,
   }
   vk.CreatePipelineLayout(
     gpu_context.device,
@@ -488,6 +501,7 @@ create_spherical_camera_pipeline_layout :: proc(
     manager.mesh_data_buffer_set_layout,
     manager.vertex_skinning_buffer_set_layout,
     manager.lights_buffer_set_layout,
+    manager.sprite_buffer_set_layout,
   }
   vk.CreatePipelineLayout(
     gpu_context.device,
@@ -868,9 +882,9 @@ init_node_data_buffer :: proc(
   ) or_return
   node_slice := gpu.mutable_buffer_get_all(&manager.node_data_buffer)
   slice.fill(node_slice, NodeData {
-     material_id        = 0xFFFFFFFF,
-     mesh_id            = 0xFFFFFFFF,
-     bone_matrix_offset = 0xFFFFFFFF,
+     material_id          = 0xFFFFFFFF,
+     mesh_id              = 0xFFFFFFFF,
+     attachment_data_index = 0xFFFFFFFF,
    })
   bindings := [?]vk.DescriptorSetLayoutBinding {
     {
@@ -1208,6 +1222,80 @@ destroy_forcefield_buffer :: proc(
   }
   manager.forcefield_buffer_set_layout = 0
   manager.forcefield_buffer_descriptor_set = 0
+}
+
+init_sprite_buffer :: proc(
+  gpu_context: ^gpu.GPUContext,
+  manager: ^Manager,
+) -> vk.Result {
+  log.info("Creating sprite buffer for bindless access")
+  manager.sprite_buffer = gpu.malloc_mutable_buffer(
+    gpu_context,
+    SpriteData,
+    MAX_SPRITES,
+    {.STORAGE_BUFFER},
+  ) or_return
+  sprites := gpu.mutable_buffer_get_all(&manager.sprite_buffer)
+  for &sprite in sprites do sprite = {}
+  bindings := [?]vk.DescriptorSetLayoutBinding {
+    {
+      binding = 0,
+      descriptorType = .STORAGE_BUFFER,
+      descriptorCount = 1,
+      stageFlags = {.VERTEX, .FRAGMENT},
+    },
+  }
+  vk.CreateDescriptorSetLayout(
+    gpu_context.device,
+    &vk.DescriptorSetLayoutCreateInfo {
+      sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+      bindingCount = len(bindings),
+      pBindings = raw_data(bindings[:]),
+    },
+    nil,
+    &manager.sprite_buffer_set_layout,
+  ) or_return
+  vk.AllocateDescriptorSets(
+    gpu_context.device,
+    &vk.DescriptorSetAllocateInfo {
+      sType              = .DESCRIPTOR_SET_ALLOCATE_INFO,
+      descriptorPool     = gpu_context.descriptor_pool,
+      descriptorSetCount = 1,
+      pSetLayouts        = &manager.sprite_buffer_set_layout,
+    },
+    &manager.sprite_buffer_descriptor_set,
+  ) or_return
+  buffer_info := vk.DescriptorBufferInfo {
+    buffer = manager.sprite_buffer.buffer,
+    offset = 0,
+    range  = vk.DeviceSize(vk.WHOLE_SIZE),
+  }
+  write := vk.WriteDescriptorSet {
+    sType           = .WRITE_DESCRIPTOR_SET,
+    dstSet          = manager.sprite_buffer_descriptor_set,
+    dstBinding      = 0,
+    descriptorType  = .STORAGE_BUFFER,
+    descriptorCount = 1,
+    pBufferInfo     = &buffer_info,
+  }
+  vk.UpdateDescriptorSets(gpu_context.device, 1, &write, 0, nil)
+  return .SUCCESS
+}
+
+destroy_sprite_buffer :: proc(
+  gpu_context: ^gpu.GPUContext,
+  manager: ^Manager,
+) {
+  gpu.mutable_buffer_destroy(gpu_context.device, &manager.sprite_buffer)
+  if manager.sprite_buffer_set_layout != 0 {
+    vk.DestroyDescriptorSetLayout(
+      gpu_context.device,
+      manager.sprite_buffer_set_layout,
+      nil,
+    )
+  }
+  manager.sprite_buffer_set_layout = 0
+  manager.sprite_buffer_descriptor_set = 0
 }
 
 destroy_mesh_data_buffer :: proc(

@@ -10,6 +10,8 @@ import vk "vendor:vulkan"
 Renderer :: struct {
   transparent_pipeline: vk.Pipeline,
   wireframe_pipeline:   vk.Pipeline,
+  sprite_pipeline:      vk.Pipeline,
+  sprite_quad_mesh:     resources.Handle,  // Shared quad mesh for all sprites
   commands:             [resources.MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
 }
 
@@ -33,8 +35,44 @@ init :: proc(
   if resources_manager.geometry_pipeline_layout == 0 {
     return .ERROR_INITIALIZATION_FAILED
   }
+
+  // Create shared sprite quad mesh (1x1 unit quad)
+  half_w: f32 = 0.5
+  half_h: f32 = 0.5
+  vertices := make([]geometry.Vertex, 4)
+  vertices[0] = {position = {-half_w, -half_h, 0}, normal = {0, 0, 1}, uv = {0, 1}, color = {1, 1, 1, 1}}
+  vertices[1] = {position = {half_w, -half_h, 0}, normal = {0, 0, 1}, uv = {1, 1}, color = {1, 1, 1, 1}}
+  vertices[2] = {position = {half_w, half_h, 0}, normal = {0, 0, 1}, uv = {1, 0}, color = {1, 1, 1, 1}}
+  vertices[3] = {position = {-half_w, half_h, 0}, normal = {0, 0, 1}, uv = {0, 0}, color = {1, 1, 1, 1}}
+
+  indices := make([]u32, 6)
+  indices[0] = 0
+  indices[1] = 1
+  indices[2] = 2
+  indices[3] = 2
+  indices[4] = 3
+  indices[5] = 0
+
+  quad_geom := geometry.Geometry {
+    vertices = vertices,
+    indices  = indices,
+    aabb     = geometry.aabb_from_vertices(vertices),
+  }
+
+  mesh_handle, mesh_ptr, mesh_result := resources.create_mesh(gpu_context, resources_manager, quad_geom)
+  if mesh_result != .SUCCESS {
+    log.errorf("Failed to create sprite quad mesh: %v", mesh_result)
+    return .ERROR_INITIALIZATION_FAILED
+  }
+  self.sprite_quad_mesh = mesh_handle
+  log.infof("Created sprite quad mesh with handle index=%d, index_count=%d, AABB=[%.2f,%.2f,%.2f]-[%.2f,%.2f,%.2f]",
+    mesh_handle.index, mesh_ptr.index_count,
+    mesh_ptr.aabb_min.x, mesh_ptr.aabb_min.y, mesh_ptr.aabb_min.z,
+    mesh_ptr.aabb_max.x, mesh_ptr.aabb_max.y, mesh_ptr.aabb_max.z)
+
   create_transparent_pipelines(gpu_context, self, resources_manager.geometry_pipeline_layout) or_return
   create_wireframe_pipelines(gpu_context, self, resources_manager.geometry_pipeline_layout) or_return
+  create_sprite_pipeline(gpu_context, self, resources_manager.geometry_pipeline_layout) or_return
   log.info("Transparent renderer initialized successfully")
   return .SUCCESS
 }
@@ -330,6 +368,152 @@ create_wireframe_pipelines :: proc(
   return .SUCCESS
 }
 
+create_sprite_pipeline :: proc(
+  gpu_context: ^gpu.GPUContext,
+  self: ^Renderer,
+  pipeline_layout: vk.PipelineLayout,
+) -> vk.Result {
+  depth_format: vk.Format = .D32_SFLOAT
+  color_format: vk.Format = .B8G8R8A8_SRGB
+
+  // Load sprite shader modules
+  vert_shader_code := #load("../../shader/sprite/vert.spv")
+  vert_module := gpu.create_shader_module(
+    gpu_context.device,
+    vert_shader_code,
+  ) or_return
+  defer vk.DestroyShaderModule(gpu_context.device, vert_module, nil)
+
+  frag_shader_code := #load("../../shader/sprite/frag.spv")
+  frag_module := gpu.create_shader_module(
+    gpu_context.device,
+    frag_shader_code,
+  ) or_return
+  defer vk.DestroyShaderModule(gpu_context.device, frag_module, nil)
+
+  vertex_input_info := vk.PipelineVertexInputStateCreateInfo {
+    sType                           = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+    vertexBindingDescriptionCount   = len(geometry.VERTEX_BINDING_DESCRIPTION),
+    pVertexBindingDescriptions      = raw_data(
+      geometry.VERTEX_BINDING_DESCRIPTION[:],
+    ),
+    vertexAttributeDescriptionCount = len(
+      geometry.VERTEX_ATTRIBUTE_DESCRIPTIONS,
+    ),
+    pVertexAttributeDescriptions    = raw_data(
+      geometry.VERTEX_ATTRIBUTE_DESCRIPTIONS[:],
+    ),
+  }
+
+  input_assembly := vk.PipelineInputAssemblyStateCreateInfo {
+    sType    = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+    topology = .TRIANGLE_LIST,
+  }
+
+  viewport_state := vk.PipelineViewportStateCreateInfo {
+    sType         = .PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+    viewportCount = 1,
+    scissorCount  = 1,
+  }
+
+  // No face culling for billboards
+  rasterizer := vk.PipelineRasterizationStateCreateInfo {
+    sType       = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+    polygonMode = .FILL,
+    cullMode    = {},  // No culling for sprites
+    frontFace   = .COUNTER_CLOCKWISE,
+    lineWidth   = 1.0,
+  }
+
+  multisampling := vk.PipelineMultisampleStateCreateInfo {
+    sType                = .PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+    rasterizationSamples = {._1},
+  }
+
+  // Enable depth testing but disable depth writing for sprites
+  depth_stencil := vk.PipelineDepthStencilStateCreateInfo {
+    sType            = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+    depthTestEnable  = true,
+    depthWriteEnable = false,
+    depthCompareOp   = .LESS_OR_EQUAL,
+  }
+
+  // Alpha blending for sprites
+  color_blend_attachment := vk.PipelineColorBlendAttachmentState {
+    blendEnable         = true,
+    srcColorBlendFactor = .SRC_ALPHA,
+    dstColorBlendFactor = .ONE_MINUS_SRC_ALPHA,
+    colorBlendOp        = .ADD,
+    srcAlphaBlendFactor = .ONE,
+    dstAlphaBlendFactor = .ONE_MINUS_SRC_ALPHA,
+    alphaBlendOp        = .ADD,
+    colorWriteMask      = {.R, .G, .B, .A},
+  }
+
+  color_blending := vk.PipelineColorBlendStateCreateInfo {
+    sType           = .PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+    attachmentCount = 1,
+    pAttachments    = &color_blend_attachment,
+  }
+
+  dynamic_states := [?]vk.DynamicState{.VIEWPORT, .SCISSOR}
+  dynamic_state := vk.PipelineDynamicStateCreateInfo {
+    sType             = .PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+    dynamicStateCount = len(dynamic_states),
+    pDynamicStates    = raw_data(dynamic_states[:]),
+  }
+
+  rendering_info := vk.PipelineRenderingCreateInfo {
+    sType                   = .PIPELINE_RENDERING_CREATE_INFO,
+    colorAttachmentCount    = 1,
+    pColorAttachmentFormats = &color_format,
+    depthAttachmentFormat   = depth_format,
+  }
+
+  shader_stages := [2]vk.PipelineShaderStageCreateInfo {
+    {
+      sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
+      stage = {.VERTEX},
+      module = vert_module,
+      pName = "main",
+    },
+    {
+      sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
+      stage = {.FRAGMENT},
+      module = frag_module,
+      pName = "main",
+    },
+  }
+
+  create_info := vk.GraphicsPipelineCreateInfo {
+    sType               = .GRAPHICS_PIPELINE_CREATE_INFO,
+    stageCount          = len(shader_stages),
+    pStages             = raw_data(shader_stages[:]),
+    pVertexInputState   = &vertex_input_info,
+    pInputAssemblyState = &input_assembly,
+    pViewportState      = &viewport_state,
+    pRasterizationState = &rasterizer,
+    pMultisampleState   = &multisampling,
+    pDepthStencilState  = &depth_stencil,
+    pColorBlendState    = &color_blending,
+    pDynamicState       = &dynamic_state,
+    layout              = pipeline_layout,
+    pNext               = &rendering_info,
+  }
+
+  vk.CreateGraphicsPipelines(
+    gpu_context.device,
+    0,
+    1,
+    &create_info,
+    nil,
+    &self.sprite_pipeline,
+  ) or_return
+
+  log.info("Sprite pipeline created successfully")
+  return .SUCCESS
+}
+
 shutdown :: proc(
   self: ^Renderer,
   device: vk.Device,
@@ -340,6 +524,8 @@ shutdown :: proc(
   self.transparent_pipeline = 0
   vk.DestroyPipeline(device, self.wireframe_pipeline, nil)
   self.wireframe_pipeline = 0
+  vk.DestroyPipeline(device, self.sprite_pipeline, nil)
+  self.sprite_pipeline = 0
 }
 
 begin_pass :: proc(
@@ -422,8 +608,10 @@ render :: proc(
   command_stride: u32,
 ) {
   if draw_buffer == 0 || count_buffer == 0 {
+    log.warn("Transparency render: draw_buffer or count_buffer is null")
     return
   }
+
   descriptor_sets := [?]vk.DescriptorSet {
     resources_manager.camera_buffer_descriptor_set,
     resources_manager.textures_descriptor_set,
@@ -433,6 +621,8 @@ render :: proc(
     resources_manager.node_data_descriptor_set,
     resources_manager.mesh_data_descriptor_set,
     resources_manager.vertex_skinning_descriptor_set,
+    resources_manager.lights_buffer_descriptor_set, // Set 8: Lights
+    resources_manager.sprite_buffer_descriptor_set, // Set 9: Sprites
   }
   vk.CmdBindDescriptorSets(
     command_buffer,
