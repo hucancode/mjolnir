@@ -1,13 +1,13 @@
 package world
 
 import "../animation"
+import "../geometry"
+import "../gpu"
+import "../resources"
 import "core:log"
 import "core:math"
 import "core:math/linalg"
 import "core:slice"
-import "../geometry"
-import "../gpu"
-import "../resources"
 import vk "vendor:vulkan"
 
 LightAttachment :: struct {
@@ -15,8 +15,8 @@ LightAttachment :: struct {
 }
 
 NodeSkinning :: struct {
-  animation:              Maybe(animation.Instance),
-  bone_matrix_buffer_offset: u32,  // Offset into bone matrix buffer for skinned mesh
+  animation:                 Maybe(animation.Instance),
+  bone_matrix_buffer_offset: u32, // Offset into bone matrix buffer for skinned mesh
 }
 
 MeshAttachment :: struct {
@@ -52,39 +52,39 @@ NodeAttachment :: union {
 }
 
 NodeTag :: enum u32 {
-  PAWN,              // Movable game entities (players, AI, etc.)
-  ACTOR,             // Generic game actor
-  MESH,              // Has mesh attachment
-  SPRITE,            // Has sprite attachment
-  LIGHT,             // Has light attachment
-  EMITTER,           // Has particle emitter
-  FORCEFIELD,        // Has force field
-  VISIBLE,           // Currently visible (own + parent visibility)
-  NAVMESH_AGENT,     // Has navigation agent
-  NAVMESH_OBSTACLE,  // Is navigation obstacle
-  INTERACTIVE,       // Can be interacted with
-  ENEMY,             // Enemy entity
-  FRIENDLY,          // Friendly entity
-  PROJECTILE,        // Projectile entity
-  STATIC,            // Static, non-moving entity
-  DYNAMIC,           // Dynamic, moving entity
+  PAWN, // Movable game entities (players, AI, etc.)
+  ACTOR, // Generic game actor
+  MESH, // Has mesh attachment
+  SPRITE, // Has sprite attachment
+  LIGHT, // Has light attachment
+  EMITTER, // Has particle emitter
+  FORCEFIELD, // Has force field
+  VISIBLE, // Currently visible (own + parent visibility)
+  NAVMESH_AGENT, // Has navigation agent
+  NAVMESH_OBSTACLE, // Is navigation obstacle
+  INTERACTIVE, // Can be interacted with
+  ENEMY, // Enemy entity
+  FRIENDLY, // Friendly entity
+  PROJECTILE, // Projectile entity
+  STATIC, // Static, non-moving entity
+  DYNAMIC, // Dynamic, moving entity
 }
 
-NodeTagSet :: bit_set[NodeTag; u32]
+NodeTagSet :: bit_set[NodeTag;u32]
 
 Node :: struct {
-  parent:          resources.Handle,
-  children:        [dynamic]resources.Handle,
-  transform:       geometry.Transform,
-  name:            string,
-  bone_socket:     string, // If not empty, attach to this bone on parent skinned mesh
-  attachment:      NodeAttachment,
-  animation:       Maybe(animation.Instance), // For node transform animation
-  culling_enabled: bool,
-  visible:         bool,              // Node's own visibility state
-  parent_visible:  bool,              // Visibility inherited from parent chain
+  parent:           resources.Handle,
+  children:         [dynamic]resources.Handle,
+  transform:        geometry.Transform,
+  name:             string,
+  bone_socket:      string, // If not empty, attach to this bone on parent skinned mesh
+  attachment:       NodeAttachment,
+  animation:        Maybe(animation.Instance), // For node transform animation
+  culling_enabled:  bool,
+  visible:          bool, // Node's own visibility state
+  parent_visible:   bool, // Visibility inherited from parent chain
   pending_deletion: bool, // Atomic flag for safe deletion
-  tags:            NodeTagSet,        // Tags for AOE queries and filtering
+  tags:             NodeTagSet, // Tags for AOE queries and filtering
 }
 
 TraversalCallback :: #type proc(node: ^Node, ctx: rawptr) -> bool
@@ -108,13 +108,20 @@ init_node :: proc(self: ^Node, name: string = "") {
 
 update_node_tags :: proc(node: ^Node) {
   #partial switch _ in node.attachment {
-  case MeshAttachment: node.tags |= {.MESH}
-  case SpriteAttachment: node.tags |= {.SPRITE}
-  case LightAttachment: node.tags |= {.LIGHT}
-  case EmitterAttachment: node.tags |= {.EMITTER}
-  case ForceFieldAttachment: node.tags |= {.FORCEFIELD}
-  case NavMeshAgentAttachment: node.tags |= {.NAVMESH_AGENT}
-  case NavMeshObstacleAttachment: node.tags |= {.NAVMESH_OBSTACLE}
+  case MeshAttachment:
+    node.tags |= {.MESH}
+  case SpriteAttachment:
+    node.tags |= {.SPRITE}
+  case LightAttachment:
+    node.tags |= {.LIGHT}
+  case EmitterAttachment:
+    node.tags |= {.EMITTER}
+  case ForceFieldAttachment:
+    node.tags |= {.FORCEFIELD}
+  case NavMeshAgentAttachment:
+    node.tags |= {.NAVMESH_AGENT}
+  case NavMeshObstacleAttachment:
+    node.tags |= {.NAVMESH_OBSTACLE}
   }
   if node.visible && node.parent_visible {
     node.tags |= {.VISIBLE}
@@ -123,7 +130,11 @@ update_node_tags :: proc(node: ^Node) {
   }
 }
 
-destroy_node :: proc(self: ^Node, resources_manager: ^resources.Manager, gpu_context: ^gpu.GPUContext = nil) {
+destroy_node :: proc(
+  self: ^Node,
+  resources_manager: ^resources.Manager,
+  gpu_context: ^gpu.GPUContext = nil,
+) {
   delete(self.children)
   if resources_manager == nil {
     return
@@ -139,13 +150,19 @@ destroy_node :: proc(self: ^Node, resources_manager: ^resources.Manager, gpu_con
     resources.destroy_forcefield_handle(resources_manager, attachment.handle)
     attachment.handle = {}
   case SpriteAttachment:
-    resources.destroy_sprite_handle(resources_manager, attachment.sprite_handle)
+    resources.destroy_sprite_handle(
+      resources_manager,
+      attachment.sprite_handle,
+    )
     attachment.sprite_handle = {}
   case MeshAttachment:
     // TODO: we need to check if the mesh is still in use before freeing its resources
     skinning, has_skin := &attachment.skinning.?
     if has_skin && skinning.bone_matrix_buffer_offset != 0xFFFFFFFF {
-      resources.slab_free(&resources_manager.bone_matrix_slab, skinning.bone_matrix_buffer_offset)
+      resources.slab_free(
+        &resources_manager.bone_matrix_slab,
+        skinning.bone_matrix_buffer_offset,
+      )
       skinning.bone_matrix_buffer_offset = 0xFFFFFFFF
     }
   }
@@ -217,7 +234,11 @@ play_animation :: proc(
   if mesh == nil do return false
   skinning, has_skin := &data.skinning.?
   if !has_skin do return false
-  anim_inst, found := resources.make_animation_instance(resources_manager, name, mode)
+  anim_inst, found := resources.make_animation_instance(
+    resources_manager,
+    name,
+    mode,
+  )
   if !found {
     return false
   }
@@ -233,12 +254,21 @@ _spawn_internal :: proc(
   position: [3]f32,
   attachment: NodeAttachment,
   resources_manager: ^resources.Manager,
-) -> (resources.Handle, ^Node, bool) {
+) -> (
+  resources.Handle,
+  ^Node,
+  bool,
+) {
   handle, node, ok := resources.alloc(&world.nodes)
   if !ok do return {}, nil, false
 
   _init_node_with_attachment(node, attachment, handle, resources_manager)
-  geometry.transform_translate(&node.transform, position.x, position.y, position.z)
+  geometry.transform_translate(
+    &node.transform,
+    position.x,
+    position.y,
+    position.z,
+  )
   attach(world.nodes, parent, handle)
 
   if resources_manager != nil {
@@ -270,7 +300,11 @@ _upload_node_to_gpu :: proc(
   resources_manager: ^resources.Manager,
 ) {
   world_matrix := node.transform.world_matrix
-  gpu.write(&resources_manager.world_matrix_buffer, &world_matrix, int(handle.index))
+  gpu.write(
+    &resources_manager.world_matrix_buffer,
+    &world_matrix,
+    int(handle.index),
+  )
 
   data := _build_node_data(node, resources_manager)
   gpu.write(&resources_manager.node_data_buffer, &data, int(handle.index))
@@ -290,10 +324,15 @@ _apply_sprite_to_node_data :: proc(
   if node.visible && node.parent_visible do data.flags |= {.VISIBLE}
   if node.culling_enabled do data.flags |= {.CULLING_ENABLED}
 
-  if material, has_mat := resources.get(resources_manager.materials, sprite_attachment.material); has_mat {
+  if material, has_mat := resources.get(
+    resources_manager.materials,
+    sprite_attachment.material,
+  ); has_mat {
     switch material.type {
-    case .TRANSPARENT: data.flags |= {.MATERIAL_TRANSPARENT}
-    case .WIREFRAME: data.flags |= {.MATERIAL_WIREFRAME}
+    case .TRANSPARENT:
+      data.flags |= {.MATERIAL_TRANSPARENT}
+    case .WIREFRAME:
+      data.flags |= {.MATERIAL_WIREFRAME}
     case .PBR, .UNLIT: // No flags
     }
   }
@@ -304,11 +343,11 @@ _build_node_data :: proc(
   node: ^Node,
   resources_manager: ^resources.Manager,
 ) -> resources.NodeData {
-  data := resources.NodeData{
-    material_id = 0xFFFFFFFF,
-    mesh_id = 0xFFFFFFFF,
+  data := resources.NodeData {
+    material_id           = 0xFFFFFFFF,
+    mesh_id               = 0xFFFFFFFF,
     attachment_data_index = 0xFFFFFFFF,
-    flags = {},
+    flags                 = {},
   }
 
   if mesh_attachment, has_mesh := node.attachment.(MeshAttachment); has_mesh {
@@ -321,10 +360,15 @@ _build_node_data :: proc(
     if mesh_attachment.cast_shadow do data.flags |= {.CASTS_SHADOW}
     if mesh_attachment.navigation_obstacle do data.flags |= {.NAVIGATION_OBSTACLE}
 
-    if material, has_mat := resources.get(resources_manager.materials, mesh_attachment.material); has_mat {
+    if material, has_mat := resources.get(
+      resources_manager.materials,
+      mesh_attachment.material,
+    ); has_mat {
       switch material.type {
-      case .TRANSPARENT: data.flags |= {.MATERIAL_TRANSPARENT}
-      case .WIREFRAME: data.flags |= {.MATERIAL_WIREFRAME}
+      case .TRANSPARENT:
+        data.flags |= {.MATERIAL_TRANSPARENT}
+      case .WIREFRAME:
+        data.flags |= {.MATERIAL_WIREFRAME}
       case .PBR, .UNLIT: // No flags
       }
     }
@@ -334,11 +378,18 @@ _build_node_data :: proc(
     }
   }
 
-  if sprite_attachment, has_sprite := node.attachment.(SpriteAttachment); has_sprite {
-    _apply_sprite_to_node_data(&data, sprite_attachment, node, resources_manager)
+  if sprite_attachment, has_sprite := node.attachment.(SpriteAttachment);
+     has_sprite {
+    _apply_sprite_to_node_data(
+      &data,
+      sprite_attachment,
+      node,
+      resources_manager,
+    )
   }
 
-  if _, is_obstacle := node.attachment.(NavMeshObstacleAttachment); is_obstacle {
+  if _, is_obstacle := node.attachment.(NavMeshObstacleAttachment);
+     is_obstacle {
     data.flags |= {.NAVIGATION_OBSTACLE}
   }
 
@@ -355,7 +406,13 @@ spawn_at :: proc(
   node: ^Node,
   ok: bool,
 ) {
-  return _spawn_internal(self, self.root, position, attachment, resources_manager)
+  return _spawn_internal(
+    self,
+    self.root,
+    position,
+    attachment,
+    resources_manager,
+  )
 }
 
 spawn :: proc(
@@ -367,7 +424,13 @@ spawn :: proc(
   node: ^Node,
   ok: bool,
 ) {
-  return _spawn_internal(self, self.root, {0, 0, 0}, attachment, resources_manager)
+  return _spawn_internal(
+    self,
+    self.root,
+    {0, 0, 0},
+    attachment,
+    resources_manager,
+  )
 }
 
 spawn_child :: proc(
@@ -380,13 +443,19 @@ spawn_child :: proc(
   node: ^Node,
   ok: bool,
 ) {
-  return _spawn_internal(self, parent, {0, 0, 0}, attachment, resources_manager)
+  return _spawn_internal(
+    self,
+    parent,
+    {0, 0, 0},
+    attachment,
+    resources_manager,
+  )
 }
 
 TraverseEntry :: struct {
-  handle:           resources.Handle,
-  parent_transform: matrix[4, 4]f32,
-  parent_is_dirty:  bool,
+  handle:            resources.Handle,
+  parent_transform:  matrix[4, 4]f32,
+  parent_is_dirty:   bool,
   parent_is_visible: bool,
 }
 
@@ -405,13 +474,17 @@ init :: proc(world: ^World) {
   init_node(root, "root")
   root.parent = world.root
   world.traversal_stack = make([dynamic]TraverseEntry, 0)
-  aoe_init(&world.aoe, geometry.Aabb{
-    min = {-1000, -1000, -1000},
-    max = {1000, 1000, 1000},
-  })
+  aoe_init(
+    &world.aoe,
+    geometry.Aabb{min = {-1000, -1000, -1000}, max = {1000, 1000, 1000}},
+  )
 }
 
-destroy :: proc(world: ^World, resources_manager: ^resources.Manager, gpu_context: ^gpu.GPUContext = nil) {
+destroy :: proc(
+  world: ^World,
+  resources_manager: ^resources.Manager,
+  gpu_context: ^gpu.GPUContext = nil,
+) {
   for &entry in world.nodes.entries {
     if entry.active {
       destroy_node(&entry.item, resources_manager, gpu_context)
@@ -430,7 +503,13 @@ init_gpu :: proc(
   depth_height: u32,
 ) -> vk.Result {
   // Initialize visibility system (creates and stores descriptor layouts in Manager)
-  visibility_system_init(&world.visibility, gpu_context, resources_manager, depth_width, depth_height) or_return
+  visibility_system_init(
+    &world.visibility,
+    gpu_context,
+    resources_manager,
+    depth_width,
+    depth_height,
+  ) or_return
 
   return .SUCCESS
 }
@@ -438,11 +517,14 @@ init_gpu :: proc(
 begin_frame :: proc(world: ^World, resources_manager: ^resources.Manager) {
   traverse(world, resources_manager)
   update_visibility_system(world)
-  // this is costly, must optimize
-  aoe_rebuild_from_world(&world.aoe, world)
+  aoe_update_from_world(&world.aoe, world)
 }
 
-shutdown :: proc(world: ^World, gpu_context: ^gpu.GPUContext, resources_manager: ^resources.Manager) {
+shutdown :: proc(
+  world: ^World,
+  gpu_context: ^gpu.GPUContext,
+  resources_manager: ^resources.Manager,
+) {
   visibility_system_shutdown(&world.visibility, gpu_context, resources_manager)
   destroy(world, resources_manager, gpu_context)
 }
@@ -460,13 +542,20 @@ despawn :: proc(world: ^World, handle: resources.Handle) -> bool {
 }
 
 // Actually destroy nodes that are marked for deletion
-cleanup_pending_deletions :: proc(world: ^World, resources_manager: ^resources.Manager, gpu_context: ^gpu.GPUContext = nil) {
+cleanup_pending_deletions :: proc(
+  world: ^World,
+  resources_manager: ^resources.Manager,
+  gpu_context: ^gpu.GPUContext = nil,
+) {
   to_destroy := make([dynamic]resources.Handle, 0)
   defer delete(to_destroy)
   for i in 0 ..< len(world.nodes.entries) {
     entry := &world.nodes.entries[i]
     if entry.active && entry.item.pending_deletion {
-      append(&to_destroy, resources.Handle{index = u32(i), generation = entry.generation})
+      append(
+        &to_destroy,
+        resources.Handle{index = u32(i), generation = entry.generation},
+      )
     }
   }
   for handle in to_destroy {
@@ -484,13 +573,21 @@ get_node :: proc(world: ^World, handle: resources.Handle) -> ^Node {
 
 @(private)
 update_visibility_system :: proc(world: ^World) {
-  count := slice.count_proc(world.nodes.entries[:], proc(entry: resources.Entry(Node)) -> bool {
+  count := slice.count_proc(
+    world.nodes.entries[:],
+    proc(entry: resources.Entry(Node)) -> bool {
       return entry.active
-  })
+    },
+  )
   visibility_system_set_node_count(&world.visibility, u32(count))
 }
 
-traverse :: proc(world: ^World, resources_manager: ^resources.Manager = nil, cb_context: rawptr = nil, callback: TraversalCallback = nil) -> bool {
+traverse :: proc(
+  world: ^World,
+  resources_manager: ^resources.Manager = nil,
+  cb_context: rawptr = nil,
+  callback: TraversalCallback = nil,
+) -> bool {
   using geometry
   append(
     &world.traversal_stack,
@@ -508,7 +605,8 @@ traverse :: proc(world: ^World, resources_manager: ^resources.Manager = nil, cb_
     }
     if current_node.pending_deletion do continue
     // Update parent_visible from parent chain only
-    visibility_changed := current_node.parent_visible != entry.parent_is_visible
+    visibility_changed :=
+      current_node.parent_visible != entry.parent_is_visible
     current_node.parent_visible = entry.parent_is_visible
     is_dirty := transform_update_local(&current_node.transform)
 
@@ -525,9 +623,15 @@ traverse :: proc(world: ^World, resources_manager: ^resources.Manager = nil, cb_
 
       parent_node := resources.get(world.nodes, current_node.parent) or_break
       parent_mesh_attachment := parent_node.attachment.(MeshAttachment) or_break
-      parent_mesh := resources.get(resources_manager.meshes, parent_mesh_attachment.handle) or_break
+      parent_mesh := resources.get(
+        resources_manager.meshes,
+        parent_mesh_attachment.handle,
+      ) or_break
 
-      bone_index := resources.find_bone_by_name(parent_mesh, current_node.bone_socket) or_break
+      bone_index := resources.find_bone_by_name(
+        parent_mesh,
+        current_node.bone_socket,
+      ) or_break
       parent_skinning := parent_mesh_attachment.skinning.? or_break
       if parent_skinning.bone_matrix_buffer_offset == 0xFFFFFFFF do break apply_bone_socket
 
@@ -537,8 +641,14 @@ traverse :: proc(world: ^World, resources_manager: ^resources.Manager = nil, cb_
       bone_buffer := &resources_manager.bone_buffer
       if bone_buffer.mapped == nil do break apply_bone_socket
 
-      bone_matrices_ptr := gpu.mutable_buffer_get(bone_buffer, parent_skinning.bone_matrix_buffer_offset)
-      bone_matrices := slice.from_ptr(bone_matrices_ptr, len(parent_mesh_skinning.bones))
+      bone_matrices_ptr := gpu.mutable_buffer_get(
+        bone_buffer,
+        parent_skinning.bone_matrix_buffer_offset,
+      )
+      bone_matrices := slice.from_ptr(
+        bone_matrices_ptr,
+        len(parent_mesh_skinning.bones),
+      )
 
       // bone_matrices contains skinning matrices (world_transform * inverse_bind)
       // To get the bone's world transform, multiply by the bind matrix
@@ -550,20 +660,29 @@ traverse :: proc(world: ^World, resources_manager: ^resources.Manager = nil, cb_
     }
 
     if entry.parent_is_dirty || is_dirty || has_bone_socket {
-      transform_update_world(&current_node.transform, entry.parent_transform * bone_socket_transform)
+      transform_update_world(
+        &current_node.transform,
+        entry.parent_transform * bone_socket_transform,
+      )
       if resources_manager != nil {
         world_matrix := current_node.transform.world_matrix
-        gpu.write(&resources_manager.world_matrix_buffer, &world_matrix, int(entry.handle.index))
+        gpu.write(
+          &resources_manager.world_matrix_buffer,
+          &world_matrix,
+          int(entry.handle.index),
+        )
       }
     }
     // Update node data when visibility changes
-    if (visibility_changed || is_dirty || entry.parent_is_dirty) && resources_manager != nil {
+    if (visibility_changed || is_dirty || entry.parent_is_dirty) &&
+       resources_manager != nil {
       data := resources.NodeData {
-        material_id        = 0xFFFFFFFF,
-        mesh_id            = 0xFFFFFFFF,
+        material_id           = 0xFFFFFFFF,
+        mesh_id               = 0xFFFFFFFF,
         attachment_data_index = 0xFFFFFFFF,
       }
-      if mesh_attachment, has_mesh := current_node.attachment.(MeshAttachment); has_mesh {
+      if mesh_attachment, has_mesh := current_node.attachment.(MeshAttachment);
+         has_mesh {
         data.material_id = mesh_attachment.material.index
         data.mesh_id = mesh_attachment.handle.index
         if current_node.visible && current_node.parent_visible {
@@ -585,17 +704,27 @@ traverse :: proc(world: ^World, resources_manager: ^resources.Manager = nil, cb_
           case .WIREFRAME:
             data.flags |= resources.NodeFlagSet{.MATERIAL_WIREFRAME}
           case .PBR, .UNLIT:
-            // No additional flags needed
+          // No additional flags needed
           }
         }
         if skinning, has_skinning := mesh_attachment.skinning.?; has_skinning {
           data.attachment_data_index = skinning.bone_matrix_buffer_offset
         }
       }
-      if sprite_attachment, has_sprite := current_node.attachment.(SpriteAttachment); has_sprite {
-        _apply_sprite_to_node_data(&data, sprite_attachment, current_node, resources_manager)
+      if sprite_attachment, has_sprite := current_node.attachment.(SpriteAttachment);
+         has_sprite {
+        _apply_sprite_to_node_data(
+          &data,
+          sprite_attachment,
+          current_node,
+          resources_manager,
+        )
       }
-      gpu.write(&resources_manager.node_data_buffer, &data, int(entry.handle.index))
+      gpu.write(
+        &resources_manager.node_data_buffer,
+        &data,
+        int(entry.handle.index),
+      )
     }
     // Only call the callback if the node is effectively visible
     if callback != nil && current_node.parent_visible && current_node.visible {
@@ -636,7 +765,11 @@ assign_emitter_to_node :: proc(
   emitter, ok := resources.get(resources_manager.emitters, attachment.handle)
   if ok {
     emitter.node_handle = node_handle
-    resources.emitter_write_to_gpu(resources_manager, attachment.handle, emitter)
+    resources.emitter_write_to_gpu(
+      resources_manager,
+      attachment.handle,
+      emitter,
+    )
   }
 }
 
@@ -653,10 +786,17 @@ assign_forcefield_to_node :: proc(
   if !is_forcefield {
     return
   }
-  forcefield, ok := resources.get(resources_manager.forcefields, attachment.handle)
+  forcefield, ok := resources.get(
+    resources_manager.forcefields,
+    attachment.handle,
+  )
   if ok {
     forcefield.node_handle = node_handle
-    resources.forcefield_write_to_gpu(resources_manager, attachment.handle, forcefield)
+    resources.forcefield_write_to_gpu(
+      resources_manager,
+      attachment.handle,
+      forcefield,
+    )
   }
 }
 
@@ -673,10 +813,15 @@ assign_light_to_node :: proc(
   if !is_light {
     return
   }
-  if light, ok := resources.get(resources_manager.lights, attachment.handle); ok {
+  if light, ok := resources.get(resources_manager.lights, attachment.handle);
+     ok {
     light.node_handle = node_handle
     light.node_index = node_handle.index
-    gpu.write(&resources_manager.lights_buffer, &light.data, int(attachment.handle.index))
+    gpu.write(
+      &resources_manager.lights_buffer,
+      &light.data,
+      int(attachment.handle.index),
+    )
   }
 }
 
@@ -792,13 +937,25 @@ node_scale :: proc(node: ^Node, s: f32) {
   geometry.transform_scale(&node.transform, s)
 }
 
-node_handle_translate_by :: proc(world: ^World, handle: resources.Handle, x: f32 = 0, y: f32 = 0, z: f32 = 0) {
+node_handle_translate_by :: proc(
+  world: ^World,
+  handle: resources.Handle,
+  x: f32 = 0,
+  y: f32 = 0,
+  z: f32 = 0,
+) {
   if node, ok := resources.get(world.nodes, handle); ok {
     geometry.transform_translate_by(&node.transform, x, y, z)
   }
 }
 
-node_handle_translate :: proc(world: ^World, handle: resources.Handle, x: f32 = 0, y: f32 = 0, z: f32 = 0) {
+node_handle_translate :: proc(
+  world: ^World,
+  handle: resources.Handle,
+  x: f32 = 0,
+  y: f32 = 0,
+  z: f32 = 0,
+) {
   if node, ok := resources.get(world.nodes, handle); ok {
     geometry.transform_translate(&node.transform, x, y, z)
   }
@@ -809,7 +966,11 @@ node_handle_rotate_by :: proc {
   node_handle_rotate_by_angle,
 }
 
-node_handle_rotate_by_quaternion :: proc(world: ^World, handle: resources.Handle, q: quaternion128) {
+node_handle_rotate_by_quaternion :: proc(
+  world: ^World,
+  handle: resources.Handle,
+  q: quaternion128,
+) {
   if node, ok := resources.get(world.nodes, handle); ok {
     geometry.transform_rotate_by_quaternion(&node.transform, q)
   }
@@ -831,7 +992,11 @@ node_handle_rotate :: proc {
   node_handle_rotate_angle,
 }
 
-node_handle_rotate_quaternion :: proc(world: ^World, handle: resources.Handle, q: quaternion128) {
+node_handle_rotate_quaternion :: proc(
+  world: ^World,
+  handle: resources.Handle,
+  q: quaternion128,
+) {
   if node, ok := resources.get(world.nodes, handle); ok {
     geometry.transform_rotate_quaternion(&node.transform, q)
   }
@@ -848,7 +1013,13 @@ node_handle_rotate_angle :: proc(
   }
 }
 
-node_handle_scale_xyz_by :: proc(world: ^World, handle: resources.Handle, x: f32 = 1, y: f32 = 1, z: f32 = 1) {
+node_handle_scale_xyz_by :: proc(
+  world: ^World,
+  handle: resources.Handle,
+  x: f32 = 1,
+  y: f32 = 1,
+  z: f32 = 1,
+) {
   if node, ok := resources.get(world.nodes, handle); ok {
     geometry.transform_scale_xyz_by(&node.transform, x, y, z)
   }
@@ -860,7 +1031,13 @@ node_handle_scale_by :: proc(world: ^World, handle: resources.Handle, s: f32) {
   }
 }
 
-node_handle_scale_xyz :: proc(world: ^World, handle: resources.Handle, x: f32 = 1, y: f32 = 1, z: f32 = 1) {
+node_handle_scale_xyz :: proc(
+  world: ^World,
+  handle: resources.Handle,
+  x: f32 = 1,
+  y: f32 = 1,
+  z: f32 = 1,
+) {
   if node, ok := resources.get(world.nodes, handle); ok {
     geometry.transform_scale_xyz(&node.transform, x, y, z)
   }
@@ -880,8 +1057,11 @@ create_point_light_attachment :: proc(
   color: [4]f32 = {1, 1, 1, 1},
   radius: f32 = 10.0,
   cast_shadow: b32 = true,
-) -> (attachment: LightAttachment, ok: bool) #optional_ok {
-  handle : resources.Handle
+) -> (
+  attachment: LightAttachment,
+  ok: bool,
+) #optional_ok {
+  handle: resources.Handle
   handle, ok = resources.create_light(
     resources_manager,
     gpu_context,
@@ -902,8 +1082,11 @@ create_directional_light_attachment :: proc(
   gpu_context: ^gpu.GPUContext,
   color: [4]f32 = {1, 1, 1, 1},
   cast_shadow: b32 = false,
-) -> (attachment: LightAttachment, ok: bool) #optional_ok {
-  handle : resources.Handle
+) -> (
+  attachment: LightAttachment,
+  ok: bool,
+) #optional_ok {
+  handle: resources.Handle
   handle, ok = resources.create_light(
     resources_manager,
     gpu_context,
@@ -925,10 +1108,13 @@ create_spot_light_attachment :: proc(
   radius: f32 = 10.0,
   angle: f32 = math.PI * 0.2,
   cast_shadow: b32 = true,
-) -> (attachment: LightAttachment, ok: bool) #optional_ok {
+) -> (
+  attachment: LightAttachment,
+  ok: bool,
+) #optional_ok {
   angle_inner := angle * 0.8
   angle_outer := angle
-  handle : resources.Handle
+  handle: resources.Handle
   handle, ok = resources.create_light(
     resources_manager,
     gpu_context,
@@ -956,7 +1142,10 @@ create_sprite_attachment :: proc(
   color: [4]f32 = {1.0, 1.0, 1.0, 1.0},
   sampler: resources.SamplerType = .NEAREST_REPEAT,
   animation: Maybe(resources.SpriteAnimation) = nil,
-) -> (attachment: SpriteAttachment, ok: bool) #optional_ok {
+) -> (
+  attachment: SpriteAttachment,
+  ok: bool,
+) #optional_ok {
   sprite_handle: resources.Handle
   sprite_handle, ok = resources.create_sprite(
     resources_manager,

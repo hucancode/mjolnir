@@ -249,9 +249,7 @@ test_aoe_world_integration :: proc(t: ^testing.T) {
 
   w: world.World
   world.init(&w)
-  defer {
-    world.destroy(&w, nil, nil)
-  }
+  defer world.destroy(&w, nil, nil)
 
   // Spawn some nodes
   h1, n1, ok1 := world.spawn_at(&w, {0, 0, 0}, world.MeshAttachment{})
