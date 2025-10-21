@@ -2,29 +2,27 @@ package main
 
 import "core:log"
 import "core:math"
-import "core:os"
-import visual "../common"
+import "../../../mjolnir"
+import "../../../mjolnir/geometry"
+import "../../../mjolnir/resources"
+import "../../../mjolnir/world"
 
 main :: proc() {
-  config := visual.VisualTestConfig {
-    name            = "visual-single-cube",
-    grid_dims       = {1, 1},
-    spacing         = 2.0,
-    cube_scale      = 0.5,
-    base_color      = {1.0, 0.45, 0.15, 1.0},
-    accent_color    = {0.9, 0.3, 0.1, 1.0},
-    color_mode      = visual.ColorMode.CONSTANT,
-    window_width    = 800,
-    window_height   = 600,
-    camera_position = {3.0, 2.0, 3.0},
-    camera_target   = {0.0, 0.0, 0.0},
-    camera_fov      = math.PI * 0.35,
-    camera_near     = 0.05,
-    camera_far      = 100.0,
-    enable_shadows  = false,
-  }
-  if !visual.run_visual_test(config) {
-    log.error("visual-single-cube failed to launch")
-    os.exit(1)
-  }
+	context.logger = log.create_console_logger()
+	engine := new(mjolnir.Engine)
+	engine.setup_proc = proc(engine: ^mjolnir.Engine) {
+		mat, _ := mjolnir.create_material(
+			engine,
+			type = resources.MaterialType.UNLIT,
+			base_color_factor = {1.0, 0.45, 0.15, 1.0},
+		)
+		cube := geometry.make_cube()
+		for &v in cube.vertices do v.position *= 0.5
+		mesh, _ := mjolnir.create_mesh(engine, cube)
+		_, node, _ := mjolnir.spawn(engine, world.MeshAttachment{handle = mesh, material = mat})
+		mjolnir.translate(node, 0, 0, 0)
+		camera := mjolnir.get_main_camera(engine)
+		if camera != nil do resources.camera_look_at(camera, {3, 2, 3}, {0, 0, 0})
+	}
+	mjolnir.run(engine, 800, 600, "visual-single-cube")
 }

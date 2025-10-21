@@ -33,7 +33,7 @@ test:
 	timeout 50s odin test test/recast -out:bin/test && \
 	timeout 50s odin test test/detour -out:bin/test
 
-VISUAL_TESTS := cube gltf_animation gltf_skinning gltf_static grid256 grid300 grid5 light material navmesh shadow aoe
+VISUAL_TESTS := cube gltf_animation gltf_skinning gltf_static grid256 grid300 grid5 light material navmesh shadow aoe crosshatch
 
 vtest:
 	@echo "Running all visual tests..."

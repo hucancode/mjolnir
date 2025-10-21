@@ -1,30 +1,30 @@
 package main
 
 import "core:log"
-import "core:math"
-import "core:os"
-import visual "../common"
+import "../../../mjolnir"
+import "../../../mjolnir/geometry"
+import "../../../mjolnir/resources"
+import "../../../mjolnir/world"
 
 main :: proc() {
-  config := visual.VisualTestConfig {
-    name            = "visual-grid-5x5",
-    grid_dims       = {5, 5},
-    spacing         = 1.6,
-    cube_scale      = 0.45,
-    base_color      = {0.93, 0.75, 0.2, 1.0},
-    accent_color    = {0.1, 0.55, 0.95, 1.0},
-    color_mode      = visual.ColorMode.CHECKER,
-    window_width    = 800,
-    window_height   = 600,
-    camera_position = {7.5, 6.0, 7.5},
-    camera_target   = {0.0, 0.0, 0.0},
-    camera_fov      = math.PI * 0.3,
-    camera_near     = 0.05,
-    camera_far      = 120.0,
-    enable_shadows  = false,
-  }
-  if !visual.run_visual_test(config) {
-    log.error("visual-grid-5x5 failed to launch")
-    os.exit(1)
-  }
+	context.logger = log.create_console_logger()
+	engine := new(mjolnir.Engine)
+	engine.setup_proc = proc(engine: ^mjolnir.Engine) {
+		mat, _ := mjolnir.create_material(
+			engine,
+			type = resources.MaterialType.UNLIT,
+			base_color_factor = {0.93, 0.75, 0.2, 1.0},
+		)
+		cube := geometry.make_cube()
+		mesh, _ := mjolnir.create_mesh(engine, cube)
+		for z in 0 ..< 5 {
+			for x in 0 ..< 5 {
+				_, node, _ := mjolnir.spawn(engine, world.MeshAttachment{handle = mesh, material = mat})
+				mjolnir.translate(node, f32(x - 2) * 4, 0, f32(z - 2) * 4)
+			}
+		}
+		camera := mjolnir.get_main_camera(engine)
+		if camera != nil do resources.camera_look_at(camera, {10, 15, 10}, {0, 0, 0})
+	}
+	mjolnir.run(engine, 800, 600, "visual-grid-5x5")
 }
