@@ -569,7 +569,7 @@ setup :: proc(engine: ^mjolnir.Engine) {
       warrior_animation := resources.sprite_animation_init(
         frame_count = 99,
         fps = 24.0,
-        loop = true,
+        mode = .LOOP,
       )
 
       sprite_handle, sprite_ok := resources.create_sprite(

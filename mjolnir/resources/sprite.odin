@@ -13,13 +13,20 @@ SpriteAnimationState :: enum {
   STOPPED,
 }
 
+SpriteAnimationMode :: enum {
+  ONCE,     // Play through once, then stop
+  LOOP,     // Play through, repeat
+  PINGPONG, // Play forward, then reverse, repeat
+}
+
 SpriteAnimation :: struct {
   frame_count:   u32,
   current_frame: u32,
   fps:           f32,
   time:          f32,
   state:         SpriteAnimationState,
-  loop:          bool,
+  mode:          SpriteAnimationMode,
+  forward:       bool, // Direction flag: true = forward (0->N-1), false = reverse (N-1->0)
 }
 
 SpriteData :: struct {
@@ -41,15 +48,20 @@ Sprite :: struct {
 sprite_animation_init :: proc(
   frame_count: u32,
   fps: f32 = 12.0,
-  loop: bool = true,
+  mode: SpriteAnimationMode = .LOOP,
+  forward: bool = true,
 ) -> SpriteAnimation {
+  // Initialize starting frame based on direction
+  initial_frame := forward ? 0 : frame_count - 1
+
   return SpriteAnimation {
     frame_count = frame_count,
-    current_frame = 0,
+    current_frame = initial_frame,
     fps = fps,
     time = 0.0,
     state = .PLAYING,
-    loop = loop,
+    mode = mode,
+    forward = forward,
   }
 }
 
@@ -71,25 +83,73 @@ sprite_animation_update :: proc(anim: ^SpriteAnimation, delta_time: f32) {
       // Skip ahead instead of looping thousands of times
       frames_to_skip := u32(anim.time / frame_duration)
       anim.time = math.mod(anim.time, frame_duration)
-      if anim.loop {
-        anim.current_frame = frames_to_skip % anim.frame_count
-      } else {
-        anim.current_frame = min(frames_to_skip, anim.frame_count - 1)
+
+      switch anim.mode {
+      case .ONCE:
+        if anim.forward {
+          anim.current_frame = min(frames_to_skip, anim.frame_count - 1)
+        } else {
+          if frames_to_skip >= anim.frame_count {
+            anim.current_frame = 0
+          } else {
+            anim.current_frame = anim.frame_count - 1 - frames_to_skip
+          }
+        }
         anim.state = .STOPPED
+
+      case .LOOP:
+        if anim.forward {
+          anim.current_frame = frames_to_skip % anim.frame_count
+        } else {
+          anim.current_frame = anim.frame_count - 1 - (frames_to_skip % anim.frame_count)
+        }
+
+      case .PINGPONG:
+        // PINGPONG: cycle length is 2 * (frame_count - 1)
+        cycle_length := max(1, (anim.frame_count - 1) * 2)
+        position := frames_to_skip % cycle_length
+        if position < anim.frame_count {
+          anim.current_frame = position
+          anim.forward = true
+        } else {
+          anim.current_frame = cycle_length - position
+          anim.forward = false
+        }
       }
       break
     }
 
     anim.time -= frame_duration
-    anim.current_frame += 1
 
-    if anim.current_frame >= anim.frame_count {
-      if anim.loop {
-        anim.current_frame = 0
+    // Advance frame based on direction
+    if anim.forward {
+      anim.current_frame += 1
+      if anim.current_frame >= anim.frame_count {
+        switch anim.mode {
+        case .ONCE:
+          anim.current_frame = anim.frame_count - 1
+          anim.state = .STOPPED
+          break
+        case .LOOP:
+          anim.current_frame = 0
+        case .PINGPONG:
+          anim.current_frame = anim.frame_count - 1
+          anim.forward = false
+        }
+      }
+    } else {
+      if anim.current_frame == 0 {
+        switch anim.mode {
+        case .ONCE:
+          anim.state = .STOPPED
+          break
+        case .LOOP:
+          anim.current_frame = anim.frame_count - 1
+        case .PINGPONG:
+          anim.forward = true
+        }
       } else {
-        anim.current_frame = anim.frame_count - 1
-        anim.state = .STOPPED
-        break
+        anim.current_frame -= 1
       }
     }
 
@@ -107,12 +167,27 @@ sprite_animation_pause :: proc(anim: ^SpriteAnimation) {
 
 sprite_animation_stop :: proc(anim: ^SpriteAnimation) {
   anim.state = .STOPPED
-  anim.current_frame = 0
   anim.time = 0.0
+
+  // Reset to starting frame based on direction
+  anim.current_frame = anim.forward ? 0 : anim.frame_count - 1
 }
 
 sprite_animation_set_frame :: proc(anim: ^SpriteAnimation, frame: u32) {
   anim.current_frame = min(frame, anim.frame_count - 1)
+}
+
+sprite_animation_set_mode :: proc(anim: ^SpriteAnimation, mode: SpriteAnimationMode) {
+  anim.mode = mode
+}
+
+sprite_animation_set_direction :: proc(anim: ^SpriteAnimation, forward: bool) {
+  anim.forward = forward
+
+  // Optionally reset to starting frame if stopped
+  if anim.state == .STOPPED {
+    anim.current_frame = forward ? 0 : anim.frame_count - 1
+  }
 }
 
 sprite_init :: proc(
