@@ -19,6 +19,7 @@ ActorContext :: struct {
   world:      ^World,
   rm:         ^resources.Manager,
   delta_time: f32,
+  game_state: rawptr,
 }
 
 actor_pool_init :: proc(pool: ^ActorPool($T), capacity: u32 = 0) {

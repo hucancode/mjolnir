@@ -490,11 +490,12 @@ begin_frame :: proc(
   world: ^World,
   rm: ^resources.Manager,
   delta_time: f32 = 0.016,
+  game_state: rawptr = nil,
 ) {
   traverse(world, rm)
   update_visibility_system(world)
   aoe_update_from_world(&world.aoe, world)
-  world_tick_actors(world, rm, delta_time)
+  world_tick_actors(world, rm, delta_time, game_state)
 }
 
 shutdown :: proc(
@@ -1270,11 +1271,13 @@ world_tick_actors :: proc(
   world: ^World,
   rm: ^resources.Manager,
   delta_time: f32,
+  game_state: rawptr = nil,
 ) {
   ctx := ActorContext {
     world      = world,
     rm         = rm,
     delta_time = delta_time,
+    game_state = game_state,
   }
 
   for t, entry in world.actor_pools {

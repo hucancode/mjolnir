@@ -122,3 +122,55 @@ test_world_lazy_pool_creation :: proc(t: ^testing.T) {
 	testing.expect(t, ok3)
 	testing.expect(t, len(w.actor_pools) == 2, "Should reuse existing pool")
 }
+
+GameState :: struct {
+	score:         int,
+	enemies_killed: int,
+	wave_number:   int,
+}
+
+EnemyData :: struct {
+	health:        f32,
+	reward_points: int,
+}
+
+enemy_tick :: proc(
+	actor: ^world.Actor(EnemyData),
+	ctx: ^world.ActorContext,
+	dt: f32,
+) {
+	game := cast(^GameState)ctx.game_state
+	if game == nil do return
+
+	// Simulate enemy death
+	if actor.data.health <= 0 {
+		game.score += actor.data.reward_points
+		game.enemies_killed += 1
+	}
+}
+
+@(test)
+test_custom_game_state :: proc(t: ^testing.T) {
+	testing.set_fail_timeout(t, 30 * time.Second)
+
+	w: world.World
+	world.init(&w)
+	defer world.destroy(&w, nil)
+
+	game := GameState{score = 0, enemies_killed = 0, wave_number = 1}
+
+	// Spawn enemy with dead health to trigger score update
+	enemy_handle, enemy, _ := world.spawn_actor(&w, EnemyData)
+	enemy.data = EnemyData{health = 0, reward_points = 100}
+	enemy.tick_proc = enemy_tick
+	world.enable_actor_tick(&w, EnemyData, enemy_handle)
+
+	testing.expect(t, game.score == 0)
+	testing.expect(t, game.enemies_killed == 0)
+
+	// Tick with custom game state
+	world.world_tick_actors(&w, nil, 0.016, &game)
+
+	testing.expect(t, game.score == 100, "Score should be updated")
+	testing.expect(t, game.enemies_killed == 1, "Enemies killed should increment")
+}
