@@ -49,7 +49,9 @@ Renderer :: struct {
   particle_counter_buffer:            gpu.MutableBuffer(u32),
   // Compaction pipeline
   compact_particle_buffer:            gpu.MutableBuffer(Particle),
-  draw_command_buffer:                gpu.MutableBuffer(vk.DrawIndirectCommand),
+  draw_command_buffer:                gpu.MutableBuffer(
+    vk.DrawIndirectCommand,
+  ),
   compact_descriptor_set_layout:      vk.DescriptorSetLayout,
   compact_descriptor_set:             vk.DescriptorSet,
   compact_pipeline_layout:            vk.PipelineLayout,
@@ -65,7 +67,7 @@ simulate :: proc(
   self: ^Renderer,
   command_buffer: vk.CommandBuffer,
   world_matrix_set: vk.DescriptorSet,
-  resources_manager: ^resources.Manager,
+  rm: ^resources.Manager,
 ) {
   params_ptr := gpu.mutable_buffer_get(&self.params_buffer)
   counter_ptr := gpu.mutable_buffer_get(&self.particle_counter_buffer)
@@ -131,7 +133,7 @@ simulate :: proc(
   compute_descriptor_sets := [?]vk.DescriptorSet {
     self.compute_descriptor_set,
     self.forcefield_bindless_descriptor_set,
-    resources_manager.world_matrix_descriptor_set,
+    rm.world_matrix_descriptor_set,
   }
   vk.CmdBindDescriptorSets(
     command_buffer,
@@ -254,49 +256,47 @@ shutdown :: proc(
 
 init :: proc(
   self: ^Renderer,
-  gpu_context: ^gpu.GPUContext,
-  resources_manager: ^resources.Manager,
+  gctx: ^gpu.GPUContext,
+  rm: ^resources.Manager,
 ) -> vk.Result {
   gpu.allocate_secondary_buffers(
-    gpu_context.device,
-    gpu_context.command_pool,
+    gctx.device,
+    gctx.command_pool,
     self.commands[:],
   ) or_return
 
   log.debugf("Initializing particle renderer")
   self.params_buffer = gpu.create_mutable_buffer(
-    gpu_context,
+    gctx,
     ParticleSystemParams,
     1,
     {.UNIFORM_BUFFER},
   ) or_return
   self.particle_buffer = gpu.create_mutable_buffer(
-    gpu_context,
+    gctx,
     Particle,
     MAX_PARTICLES,
     {.STORAGE_BUFFER, .VERTEX_BUFFER, .TRANSFER_DST},
   ) or_return
   self.particle_counter_buffer = gpu.create_mutable_buffer(
-    gpu_context,
+    gctx,
     u32,
     1,
     {.STORAGE_BUFFER},
   ) or_return
-  self.emitter_bindless_descriptor_set =
-    resources_manager.emitter_buffer_descriptor_set
-  self.forcefield_bindless_descriptor_set =
-    resources_manager.forcefield_buffer_descriptor_set
-  create_emitter_pipeline(gpu_context, self, resources_manager) or_return
-  create_compact_pipeline(gpu_context, self) or_return
-  create_compute_pipeline(gpu_context, self, resources_manager) or_return
-  create_render_pipeline(gpu_context, self, resources_manager) or_return
+  self.emitter_bindless_descriptor_set = rm.emitter_buffer_descriptor_set
+  self.forcefield_bindless_descriptor_set = rm.forcefield_buffer_descriptor_set
+  create_emitter_pipeline(gctx, self, rm) or_return
+  create_compact_pipeline(gctx, self) or_return
+  create_compute_pipeline(gctx, self, rm) or_return
+  create_render_pipeline(gctx, self, rm) or_return
   return .SUCCESS
 }
 
 create_emitter_pipeline :: proc(
-  gpu_context: ^gpu.GPUContext,
+  gctx: ^gpu.GPUContext,
   self: ^Renderer,
-  resources_manager: ^resources.Manager,
+  rm: ^resources.Manager,
 ) -> vk.Result {
   emitter_bindings := [?]vk.DescriptorSetLayoutBinding {
     {
@@ -319,7 +319,7 @@ create_emitter_pipeline :: proc(
     },
   }
   vk.CreateDescriptorSetLayout(
-    gpu_context.device,
+    gctx.device,
     &{
       sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
       bindingCount = len(emitter_bindings),
@@ -329,22 +329,22 @@ create_emitter_pipeline :: proc(
     &self.emitter_descriptor_set_layout,
   ) or_return
   vk.AllocateDescriptorSets(
-    gpu_context.device,
+    gctx.device,
     &{
       sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
-      descriptorPool = gpu_context.descriptor_pool,
+      descriptorPool = gctx.descriptor_pool,
       descriptorSetCount = 1,
       pSetLayouts = &self.emitter_descriptor_set_layout,
     },
     &self.emitter_descriptor_set,
   ) or_return
   descriptor_set_layouts := [?]vk.DescriptorSetLayout {
-    resources_manager.emitter_buffer_set_layout,
+    rm.emitter_buffer_set_layout,
     self.emitter_descriptor_set_layout,
-    resources_manager.world_matrix_buffer_set_layout,
+    rm.world_matrix_buffer_set_layout,
   }
   vk.CreatePipelineLayout(
-    gpu_context.device,
+    gctx.device,
     &{
       sType = .PIPELINE_LAYOUT_CREATE_INFO,
       setLayoutCount = len(descriptor_set_layouts),
@@ -392,17 +392,17 @@ create_emitter_pipeline :: proc(
     },
   }
   vk.UpdateDescriptorSets(
-    gpu_context.device,
+    gctx.device,
     len(emitter_writes),
     raw_data(emitter_writes[:]),
     0,
     nil,
   )
   emitter_shader_module := gpu.create_shader_module(
-    gpu_context.device,
+    gctx.device,
     #load("../../shader/particle/emitter.spv"),
   ) or_return
-  defer vk.DestroyShaderModule(gpu_context.device, emitter_shader_module, nil)
+  defer vk.DestroyShaderModule(gctx.device, emitter_shader_module, nil)
   emitter_pipeline_info := vk.ComputePipelineCreateInfo {
     sType = .COMPUTE_PIPELINE_CREATE_INFO,
     stage = {
@@ -414,7 +414,7 @@ create_emitter_pipeline :: proc(
     layout = self.emitter_pipeline_layout,
   }
   vk.CreateComputePipelines(
-    gpu_context.device,
+    gctx.device,
     0,
     1,
     &emitter_pipeline_info,
@@ -425,9 +425,9 @@ create_emitter_pipeline :: proc(
 }
 
 create_compute_pipeline :: proc(
-  gpu_context: ^gpu.GPUContext,
+  gctx: ^gpu.GPUContext,
   self: ^Renderer,
-  resources_manager: ^resources.Manager,
+  rm: ^resources.Manager,
 ) -> vk.Result {
   compute_bindings := [?]vk.DescriptorSetLayoutBinding {
     {
@@ -450,7 +450,7 @@ create_compute_pipeline :: proc(
     },
   }
   vk.CreateDescriptorSetLayout(
-    gpu_context.device,
+    gctx.device,
     &{
       sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
       bindingCount = len(compute_bindings),
@@ -460,10 +460,10 @@ create_compute_pipeline :: proc(
     &self.compute_descriptor_set_layout,
   ) or_return
   vk.AllocateDescriptorSets(
-    gpu_context.device,
+    gctx.device,
     &{
       sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
-      descriptorPool = gpu_context.descriptor_pool,
+      descriptorPool = gctx.descriptor_pool,
       descriptorSetCount = 1,
       pSetLayouts = &self.compute_descriptor_set_layout,
     },
@@ -471,11 +471,11 @@ create_compute_pipeline :: proc(
   ) or_return
   descriptor_set_layouts := [?]vk.DescriptorSetLayout {
     self.compute_descriptor_set_layout,
-    resources_manager.forcefield_buffer_set_layout,
-    resources_manager.world_matrix_buffer_set_layout,
+    rm.forcefield_buffer_set_layout,
+    rm.world_matrix_buffer_set_layout,
   }
   vk.CreatePipelineLayout(
-    gpu_context.device,
+    gctx.device,
     &{
       sType = .PIPELINE_LAYOUT_CREATE_INFO,
       setLayoutCount = len(descriptor_set_layouts),
@@ -523,17 +523,17 @@ create_compute_pipeline :: proc(
     },
   }
   vk.UpdateDescriptorSets(
-    gpu_context.device,
+    gctx.device,
     len(compute_writes),
     raw_data(compute_writes[:]),
     0,
     nil,
   )
   compute_shader_module := gpu.create_shader_module(
-    gpu_context.device,
+    gctx.device,
     #load("../../shader/particle/compute.spv"),
   ) or_return
-  defer vk.DestroyShaderModule(gpu_context.device, compute_shader_module, nil)
+  defer vk.DestroyShaderModule(gctx.device, compute_shader_module, nil)
   compute_pipeline_info := vk.ComputePipelineCreateInfo {
     sType = .COMPUTE_PIPELINE_CREATE_INFO,
     stage = {
@@ -545,7 +545,7 @@ create_compute_pipeline :: proc(
     layout = self.compute_pipeline_layout,
   }
   vk.CreateComputePipelines(
-    gpu_context.device,
+    gctx.device,
     0,
     1,
     &compute_pipeline_info,
@@ -556,7 +556,7 @@ create_compute_pipeline :: proc(
 }
 
 create_compact_pipeline :: proc(
-  gpu_context: ^gpu.GPUContext,
+  gctx: ^gpu.GPUContext,
   self: ^Renderer,
 ) -> vk.Result {
   compact_bindings := [?]vk.DescriptorSetLayoutBinding {
@@ -586,7 +586,7 @@ create_compact_pipeline :: proc(
     },
   }
   vk.CreateDescriptorSetLayout(
-    gpu_context.device,
+    gctx.device,
     &{
       sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
       bindingCount = len(compact_bindings),
@@ -596,17 +596,17 @@ create_compact_pipeline :: proc(
     &self.compact_descriptor_set_layout,
   ) or_return
   vk.AllocateDescriptorSets(
-    gpu_context.device,
+    gctx.device,
     &{
       sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
-      descriptorPool = gpu_context.descriptor_pool,
+      descriptorPool = gctx.descriptor_pool,
       descriptorSetCount = 1,
       pSetLayouts = &self.compact_descriptor_set_layout,
     },
     &self.compact_descriptor_set,
   ) or_return
   vk.CreatePipelineLayout(
-    gpu_context.device,
+    gctx.device,
     &{
       sType = .PIPELINE_LAYOUT_CREATE_INFO,
       setLayoutCount = 1,
@@ -616,13 +616,13 @@ create_compact_pipeline :: proc(
     &self.compact_pipeline_layout,
   ) or_return
   self.compact_particle_buffer = gpu.create_mutable_buffer(
-    gpu_context,
+    gctx,
     Particle,
     MAX_PARTICLES,
     {.STORAGE_BUFFER, .VERTEX_BUFFER, .TRANSFER_SRC},
   ) or_return
   self.draw_command_buffer = gpu.create_mutable_buffer(
-    gpu_context,
+    gctx,
     vk.DrawIndirectCommand,
     1,
     {.STORAGE_BUFFER, .INDIRECT_BUFFER},
@@ -678,17 +678,17 @@ create_compact_pipeline :: proc(
     },
   }
   vk.UpdateDescriptorSets(
-    gpu_context.device,
+    gctx.device,
     len(compact_writes),
     raw_data(compact_writes[:]),
     0,
     nil,
   )
   compact_shader_module := gpu.create_shader_module(
-    gpu_context.device,
+    gctx.device,
     #load("../../shader/particle/compact.spv"),
   ) or_return
-  defer vk.DestroyShaderModule(gpu_context.device, compact_shader_module, nil)
+  defer vk.DestroyShaderModule(gctx.device, compact_shader_module, nil)
   compact_pipeline_info := vk.ComputePipelineCreateInfo {
     sType = .COMPUTE_PIPELINE_CREATE_INFO,
     stage = {
@@ -700,7 +700,7 @@ create_compact_pipeline :: proc(
     layout = self.compact_pipeline_layout,
   }
   vk.CreateComputePipelines(
-    gpu_context.device,
+    gctx.device,
     0,
     1,
     &compact_pipeline_info,
@@ -711,20 +711,20 @@ create_compact_pipeline :: proc(
 }
 
 create_render_pipeline :: proc(
-  gpu_context: ^gpu.GPUContext,
+  gctx: ^gpu.GPUContext,
   self: ^Renderer,
-  resources_manager: ^resources.Manager,
+  rm: ^resources.Manager,
 ) -> vk.Result {
   descriptor_set_layouts := [?]vk.DescriptorSetLayout {
-    resources_manager.camera_buffer_set_layout, // set = 0 for bindless camera buffer
-    resources_manager.textures_set_layout, // set = 1 for textures
+    rm.camera_buffer_set_layout, // set = 0 for bindless camera buffer
+    rm.textures_set_layout, // set = 1 for textures
   }
   push_constant_range := vk.PushConstantRange {
     stageFlags = {.VERTEX},
     size       = size_of(u32), // camera_index
   }
   vk.CreatePipelineLayout(
-    gpu_context.device,
+    gctx.device,
     &{
       sType = .PIPELINE_LAYOUT_CREATE_INFO,
       setLayoutCount = len(descriptor_set_layouts),
@@ -736,8 +736,8 @@ create_render_pipeline :: proc(
     &self.render_pipeline_layout,
   ) or_return
   default_texture_handle, _, ret := resources.create_texture_from_data(
-    gpu_context,
-    resources_manager,
+    gctx,
+    rm,
     #load("../../assets/black-circle.png"),
   )
   if ret != .SUCCESS {
@@ -826,15 +826,15 @@ create_render_pipeline :: proc(
   vert_shader_code := #load("../../shader/particle/vert.spv")
   frag_shader_code := #load("../../shader/particle/frag.spv")
   vert_module := gpu.create_shader_module(
-    gpu_context.device,
+    gctx.device,
     vert_shader_code,
   ) or_return
   frag_module := gpu.create_shader_module(
-    gpu_context.device,
+    gctx.device,
     frag_shader_code,
   ) or_return
-  defer vk.DestroyShaderModule(gpu_context.device, vert_module, nil)
-  defer vk.DestroyShaderModule(gpu_context.device, frag_module, nil)
+  defer vk.DestroyShaderModule(gctx.device, vert_module, nil)
+  defer vk.DestroyShaderModule(gctx.device, frag_module, nil)
   spec_data, spec_entries, spec_info := shared.make_shader_spec_constants()
   spec_info.pData = cast(rawptr)&spec_data
   defer delete(spec_entries)
@@ -883,7 +883,7 @@ create_render_pipeline :: proc(
     pDepthStencilState  = &depth_stencil,
   }
   vk.CreateGraphicsPipelines(
-    gpu_context.device,
+    gctx.device,
     0,
     1,
     &pipeline_info,
@@ -897,10 +897,10 @@ begin_pass :: proc(
   self: ^Renderer,
   command_buffer: vk.CommandBuffer,
   camera_handle: resources.Handle,
-  resources_manager: ^resources.Manager,
+  rm: ^resources.Manager,
   frame_index: u32,
 ) {
-  camera := resources.get(resources_manager.cameras, camera_handle)
+  camera := resources.get(rm.cameras, camera_handle)
   if camera == nil do return
 
   // Memory barrier to ensure compute results are visible before rendering
@@ -926,7 +926,7 @@ begin_pass :: proc(
     nil, // imageMemoryBarrierCount, pImageMemoryBarriers
   )
   color_texture := resources.get(
-    resources_manager.image_2d_buffers,
+    rm.image_2d_buffers,
     resources.camera_get_attachment(camera, .FINAL_IMAGE, frame_index),
   )
   if color_texture == nil {
@@ -934,7 +934,7 @@ begin_pass :: proc(
     return
   }
   depth_texture := resources.get(
-    resources_manager.image_2d_buffers,
+    rm.image_2d_buffers,
     resources.camera_get_attachment(camera, .DEPTH, frame_index),
   )
   if depth_texture == nil {
@@ -984,13 +984,13 @@ render :: proc(
   self: ^Renderer,
   command_buffer: vk.CommandBuffer,
   camera_index: u32,
-  resources_manager: ^resources.Manager,
+  rm: ^resources.Manager,
 ) {
   // Use indirect draw - GPU handles the count
   vk.CmdBindPipeline(command_buffer, .GRAPHICS, self.render_pipeline)
   descriptor_sets := [?]vk.DescriptorSet {
-    resources_manager.camera_buffer_descriptor_set, // set 0 (bindless camera buffer)
-    resources_manager.textures_descriptor_set, // set 1 (textures)
+    rm.camera_buffer_descriptor_set, // set 0 (bindless camera buffer)
+    rm.textures_descriptor_set, // set 1 (textures)
   }
   vk.CmdBindDescriptorSets(
     command_buffer,

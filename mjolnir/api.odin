@@ -10,11 +10,6 @@ import "vendor:glfw"
 import vk "vendor:vulkan"
 import "world"
 
-// ============================================================================
-// USER API - Simplified entry points hiding internal managers
-// ============================================================================
-
-// Texture creation - hide gpu_context and resource_manager
 create_texture :: proc {
   create_texture_from_path,
   create_texture_from_data,
@@ -146,7 +141,6 @@ create_mesh :: proc(
   return resources.create_mesh_handle(&engine.gctx, &engine.rm, geom)
 }
 
-// Node spawning - hide world and resource_manager
 spawn :: proc(
   engine: ^Engine,
   attachment: world.NodeAttachment = nil,
@@ -316,7 +310,6 @@ scale_by :: proc {
   scale_by_handle,
 }
 
-// Light spawning - creates complete light nodes
 spawn_spot_light :: proc(
   engine: ^Engine,
   color: [4]f32,
@@ -342,11 +335,7 @@ spawn_spot_light :: proc(
     b32(cast_shadow),
   ) or_return
   node.attachment = attachment
-
-  if position != {0, 0, 0} {
-    translate(node, position.x, position.y, position.z)
-  }
-
+  translate(node, position.x, position.y, position.z)
   return
 }
 
@@ -363,7 +352,6 @@ spawn_point_light :: proc(
 ) {
   handle, node, ok = spawn(engine, nil)
   if !ok do return
-
   attachment := world.create_point_light_attachment(
     handle,
     &engine.rm,
@@ -373,11 +361,7 @@ spawn_point_light :: proc(
     b32(cast_shadow),
   ) or_return
   node.attachment = attachment
-
-  if position != {0, 0, 0} {
-    translate(node, position.x, position.y, position.z)
-  }
-
+  translate(node, position.x, position.y, position.z)
   return
 }
 
@@ -393,7 +377,6 @@ spawn_directional_light :: proc(
 ) {
   handle, node, ok = spawn(engine, nil)
   if !ok do return
-
   attachment := world.create_directional_light_attachment(
     handle,
     &engine.rm,
@@ -402,15 +385,10 @@ spawn_directional_light :: proc(
     b32(cast_shadow),
   )
   node.attachment = attachment
-
-  if position != {0, 0, 0} {
-    translate(node, position.x, position.y, position.z)
-  }
-
+  translate(node, position.x, position.y, position.z)
   return
 }
 
-// Emitter creation
 create_emitter :: proc(
   engine: ^Engine,
   owner: resources.Handle,
@@ -422,7 +400,6 @@ create_emitter :: proc(
   return resources.create_emitter_handle(&engine.rm, owner, emitter)
 }
 
-// Forcefield creation
 create_forcefield :: proc(
   engine: ^Engine,
   owner: resources.Handle,
@@ -434,7 +411,6 @@ create_forcefield :: proc(
   return resources.create_forcefield_handle(&engine.rm, owner, forcefield)
 }
 
-// Animation
 play_animation :: proc(
   engine: ^Engine,
   handle: resources.Handle,
@@ -443,8 +419,6 @@ play_animation :: proc(
   world.play_animation(&engine.world, &engine.rm, handle, name)
 }
 
-
-// Camera management
 create_camera :: proc(
   engine: ^Engine,
   width, height: u32,
@@ -485,12 +459,10 @@ create_camera :: proc(
     near_plane,
     far_plane,
   )
-
   if init_result != .SUCCESS {
     resources.free(&engine.rm.cameras, camera_handle)
     return {}, false
   }
-
   return camera_handle, true
 }
 
@@ -505,7 +477,6 @@ get_camera_attachment :: proc(
 ) #optional_ok {
   camera := resources.get(engine.rm.cameras, camera_handle)
   if camera == nil do return {}, false
-
   handle := resources.camera_get_attachment(
     camera,
     attachment_type,
@@ -538,7 +509,6 @@ update_material_texture :: proc(
   case .OCCLUSION_TEXTURE:
     material.occlusion = texture_handle
   }
-
   result := resources.material_write_to_gpu(
     &engine.rm,
     material_handle,
@@ -547,8 +517,6 @@ update_material_texture :: proc(
   return result == .SUCCESS
 }
 
-
-// Navigation mesh creation and pathfinding
 build_navigation_mesh_from_world :: proc(
   engine: ^Engine,
   cell_size: f32 = 0.3,
@@ -667,7 +635,10 @@ nav_find_nearest_point :: proc(
   nav_context_handle: resources.Handle,
   position: [3]f32,
   search_extents: [3]f32 = {2.0, 4.0, 2.0},
-) -> (nearest_pos: [3]f32, found: bool) {
+) -> (
+  nearest_pos: [3]f32,
+  found: bool,
+) {
   return world.nav_find_nearest_point(
     &engine.world,
     &engine.rm,
@@ -714,9 +685,6 @@ nav_agent_set_target :: proc(
   )
 }
 
-// Animation - use world.play_animation() directly
-
-// Post-processing effects - add effects to the render pipeline
 add_bloom :: proc(
   engine: ^Engine,
   threshold: f32 = 0.2,
@@ -797,12 +765,9 @@ add_dof :: proc(
   )
 }
 
-// Clear all post-processing effects
 clear_post_process_effects :: proc(engine: ^Engine) {
   post_process.clear_effects(&engine.render.post_process)
 }
-
-// Engine utility functions
 
 get_window_size :: proc(engine: ^Engine) -> (i32, i32) {
   width, height := glfw.GetWindowSize(engine.window)
@@ -856,12 +821,8 @@ get_debug_ui_enabled :: proc(engine: ^Engine) -> bool {
   return engine.debug_ui_enabled
 }
 
-// Visibility system wrappers
 set_visibility_stats :: proc(engine: ^Engine, enabled: bool) {
   world.visibility_system_set_stats_enabled(&engine.world.visibility, enabled)
 }
 
-// Camera control wrappers
 camera_look_at :: resources.camera_look_at
-
-// Note: get_delta_time, time_since_start, and get_main_camera are already defined in engine.odin

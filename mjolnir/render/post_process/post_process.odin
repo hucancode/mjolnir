@@ -348,26 +348,26 @@ effect_clear :: proc(self: ^Renderer) {
 
 init :: proc(
   self: ^Renderer,
-  gpu_context: ^gpu.GPUContext,
+  gctx: ^gpu.GPUContext,
   color_format: vk.Format,
   width, height: u32,
-  resources_manager: ^resources.Manager,
+  rm: ^resources.Manager,
 ) -> vk.Result {
   gpu.allocate_secondary_buffers(
-    gpu_context.device,
-    gpu_context.command_pool,
+    gctx.device,
+    gctx.command_pool,
     self.commands[:],
   ) or_return
 
   self.effect_stack = make([dynamic]PostprocessEffect)
   count :: len(PostProcessEffectType)
   vert_module := gpu.create_shader_module(
-    gpu_context.device,
+    gctx.device,
     SHADER_POSTPROCESS_VERT,
   ) or_return
-  defer vk.DestroyShaderModule(gpu_context.device, vert_module, nil)
+  defer vk.DestroyShaderModule(gctx.device, vert_module, nil)
   frag_modules: [count]vk.ShaderModule
-  defer for m in frag_modules do vk.DestroyShaderModule(gpu_context.device, m, nil)
+  defer for m in frag_modules do vk.DestroyShaderModule(gctx.device, m, nil)
   for effect_type, i in PostProcessEffectType {
     shader_code: []u8
     switch effect_type {
@@ -391,7 +391,7 @@ init :: proc(
       shader_code = SHADER_POSTPROCESS_FRAG
     }
     frag_modules[i] = gpu.create_shader_module(
-      gpu_context.device,
+      gctx.device,
       shader_code,
     ) or_return
   }
@@ -439,14 +439,7 @@ init :: proc(
   depth_stencil_state := vk.PipelineDepthStencilStateCreateInfo {
     sType = .PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
   }
-  create_images(
-    gpu_context,
-    self,
-    resources_manager,
-    width,
-    height,
-    color_format,
-  ) or_return
+  create_images(gctx, self, rm, width, height, color_format) or_return
   spec_data, spec_entries, spec_info := shared.make_shader_spec_constants()
   spec_info.pData = cast(rawptr)&spec_data
   defer delete(spec_entries)
@@ -479,10 +472,10 @@ init :: proc(
     }
 
     layout_sets := [?]vk.DescriptorSetLayout {
-      resources_manager.textures_set_layout, // set = 0 (bindless textures)
+      rm.textures_set_layout, // set = 0 (bindless textures)
     }
     vk.CreatePipelineLayout(
-      gpu_context.device,
+      gctx.device,
       &{
         sType = .PIPELINE_LAYOUT_CREATE_INFO,
         setLayoutCount = len(layout_sets),
@@ -526,7 +519,7 @@ init :: proc(
     }
   }
   vk.CreateGraphicsPipelines(
-    gpu_context.device,
+    gctx.device,
     0,
     count,
     raw_data(pipeline_infos[:]),
@@ -538,16 +531,16 @@ init :: proc(
 }
 
 create_images :: proc(
-  gpu_context: ^gpu.GPUContext,
+  gctx: ^gpu.GPUContext,
   self: ^Renderer,
-  resources_manager: ^resources.Manager,
+  rm: ^resources.Manager,
   width, height: u32,
   format: vk.Format,
 ) -> vk.Result {
   for &handle in self.images {
     handle, _ = resources.create_texture(
-      gpu_context,
-      resources_manager,
+      gctx,
+      rm,
       width,
       height,
       format,
@@ -566,41 +559,31 @@ create_images :: proc(
 destroy_images :: proc(
   self: ^Renderer,
   device: vk.Device,
-  resources_manager: ^resources.Manager,
+  rm: ^resources.Manager,
 ) {
   for handle in self.images {
-    if item, freed := resources.free(
-      &resources_manager.image_2d_buffers,
-      handle,
-    ); freed {
+    if item, freed := resources.free(&rm.image_2d_buffers, handle); freed {
       gpu.image_destroy(device, item)
     }
   }
 }
 
 recreate_images :: proc(
-  gpu_context: ^gpu.GPUContext,
+  gctx: ^gpu.GPUContext,
   self: ^Renderer,
   width, height: u32,
   format: vk.Format,
-  resources_manager: ^resources.Manager,
+  rm: ^resources.Manager,
 ) -> vk.Result {
-  destroy_images(self, gpu_context.device, resources_manager)
-  return create_images(
-    gpu_context,
-    self,
-    resources_manager,
-    width,
-    height,
-    format,
-  )
+  destroy_images(self, gctx.device, rm)
+  return create_images(gctx, self, rm, width, height, format)
 }
 
 shutdown :: proc(
   self: ^Renderer,
   device: vk.Device,
   command_pool: vk.CommandPool,
-  resources_manager: ^resources.Manager,
+  rm: ^resources.Manager,
 ) {
   gpu.free_command_buffers(device, command_pool, self.commands[:])
   for &p in self.pipelines {
@@ -612,7 +595,7 @@ shutdown :: proc(
     layout = 0
   }
   delete(self.effect_stack)
-  destroy_images(self, device, resources_manager)
+  destroy_images(self, device, rm)
 }
 
 // Modular postprocess API
@@ -645,10 +628,10 @@ render :: proc(
   extent: vk.Extent2D,
   output_view: vk.ImageView,
   camera_handle: resources.Handle,
-  resources_manager: ^resources.Manager,
+  rm: ^resources.Manager,
   frame_index: u32,
 ) {
-  camera := resources.get(resources_manager.cameras, camera_handle)
+  camera := resources.get(rm.cameras, camera_handle)
   if camera == nil do return
 
   for effect, i in self.effect_stack {
@@ -665,7 +648,8 @@ render :: proc(
     dst_image_idx: u32
 
     if is_first {
-      input_image_index = resources.camera_get_attachment(camera, .FINAL_IMAGE, frame_index).index // Use original input
+      input_image_index =
+        resources.camera_get_attachment(camera, .FINAL_IMAGE, frame_index).index // Use original input
       dst_image_idx = 0 // Write to image[0]
     } else {
       prev_dst_image_idx := (i - 1) % 2
@@ -682,7 +666,7 @@ render :: proc(
     dst_view := output_view
     if !is_last {
       dst_texture := resources.get(
-        resources_manager.image_2d_buffers,
+        rm.image_2d_buffers,
         self.images[dst_image_idx],
       )
       if dst_texture == nil {
@@ -710,7 +694,7 @@ render :: proc(
     if !is_first {
       src_texture_idx := (i - 1) % 2 // Which ping-pong buffer the previous pass wrote to
       src_texture := resources.get(
-        resources_manager.image_2d_buffers,
+        rm.image_2d_buffers,
         self.images[src_texture_idx],
       )
       if src_texture == nil {
@@ -743,7 +727,7 @@ render :: proc(
 
     // Bind textures descriptor set
     descriptor_sets := [?]vk.DescriptorSet {
-      resources_manager.textures_descriptor_set, // set = 0 (bindless textures)
+      rm.textures_descriptor_set, // set = 0 (bindless textures)
     }
     vk.CmdBindDescriptorSets(
       command_buffer,
@@ -766,7 +750,8 @@ render :: proc(
       resources.camera_get_attachment(camera, .METALLIC_ROUGHNESS, frame_index).index
     base.emissive_texture_index =
       resources.camera_get_attachment(camera, .EMISSIVE, frame_index).index
-    base.depth_texture_index = resources.camera_get_attachment(camera, .DEPTH, frame_index).index
+    base.depth_texture_index =
+      resources.camera_get_attachment(camera, .DEPTH, frame_index).index
     base.input_image_index = input_image_index
     // Create and push combined push constants based on effect type
     switch &e in effect {
@@ -917,7 +902,7 @@ begin_record :: proc(
   frame_index: u32,
   color_format: vk.Format,
   camera_handle: resources.Handle,
-  resources_manager: ^resources.Manager,
+  rm: ^resources.Manager,
   swapchain_image: vk.Image,
 ) -> (
   command_buffer: vk.CommandBuffer,
@@ -944,12 +929,12 @@ begin_record :: proc(
     },
   ) or_return
 
-  camera := resources.get(resources_manager.cameras, camera_handle)
+  camera := resources.get(rm.cameras, camera_handle)
   if camera == nil do return command_buffer, .ERROR_UNKNOWN
 
   // Transition final image to shader read optimal
   final_image := resources.get(
-    resources_manager.image_2d_buffers,
+    rm.image_2d_buffers,
     resources.camera_get_attachment(camera, .FINAL_IMAGE, frame_index),
   )
   if final_image != nil {

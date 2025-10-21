@@ -11,7 +11,7 @@ Renderer :: struct {
   transparent_pipeline: vk.Pipeline,
   wireframe_pipeline:   vk.Pipeline,
   sprite_pipeline:      vk.Pipeline,
-  sprite_quad_mesh:     resources.Handle,  // Shared quad mesh for all sprites
+  sprite_quad_mesh:     resources.Handle,
   commands:             [resources.MAX_FRAMES_IN_FLIGHT]vk.CommandBuffer,
 }
 
@@ -21,18 +21,18 @@ PushConstant :: struct {
 
 init :: proc(
   self: ^Renderer,
-  gpu_context: ^gpu.GPUContext,
+  gctx: ^gpu.GPUContext,
   width, height: u32,
-  resources_manager: ^resources.Manager,
+  rm: ^resources.Manager,
 ) -> vk.Result {
   gpu.allocate_secondary_buffers(
-    gpu_context.device,
-    gpu_context.command_pool,
+    gctx.device,
+    gctx.command_pool,
     self.commands[:],
   ) or_return
 
   log.info("Initializing transparent renderer")
-  if resources_manager.geometry_pipeline_layout == 0 {
+  if rm.geometry_pipeline_layout == 0 {
     return .ERROR_INITIALIZATION_FAILED
   }
 
@@ -40,10 +40,30 @@ init :: proc(
   half_w: f32 = 0.5
   half_h: f32 = 0.5
   vertices := make([]geometry.Vertex, 4)
-  vertices[0] = {position = {-half_w, -half_h, 0}, normal = {0, 0, 1}, uv = {0, 1}, color = {1, 1, 1, 1}}
-  vertices[1] = {position = {half_w, -half_h, 0}, normal = {0, 0, 1}, uv = {1, 1}, color = {1, 1, 1, 1}}
-  vertices[2] = {position = {half_w, half_h, 0}, normal = {0, 0, 1}, uv = {1, 0}, color = {1, 1, 1, 1}}
-  vertices[3] = {position = {-half_w, half_h, 0}, normal = {0, 0, 1}, uv = {0, 0}, color = {1, 1, 1, 1}}
+  vertices[0] = {
+    position = {-half_w, -half_h, 0},
+    normal   = {0, 0, 1},
+    uv       = {0, 1},
+    color    = {1, 1, 1, 1},
+  }
+  vertices[1] = {
+    position = {half_w, -half_h, 0},
+    normal   = {0, 0, 1},
+    uv       = {1, 1},
+    color    = {1, 1, 1, 1},
+  }
+  vertices[2] = {
+    position = {half_w, half_h, 0},
+    normal   = {0, 0, 1},
+    uv       = {1, 0},
+    color    = {1, 1, 1, 1},
+  }
+  vertices[3] = {
+    position = {-half_w, half_h, 0},
+    normal   = {0, 0, 1},
+    uv       = {0, 0},
+    color    = {1, 1, 1, 1},
+  }
 
   indices := make([]u32, 6)
   indices[0] = 0
@@ -59,26 +79,41 @@ init :: proc(
     aabb     = geometry.aabb_from_vertices(vertices),
   }
 
-  mesh_handle, mesh_ptr, mesh_result := resources.create_mesh(gpu_context, resources_manager, quad_geom)
+  mesh_handle, mesh_ptr, mesh_result := resources.create_mesh(
+    gctx,
+    rm,
+    quad_geom,
+  )
   if mesh_result != .SUCCESS {
     log.errorf("Failed to create sprite quad mesh: %v", mesh_result)
     return .ERROR_INITIALIZATION_FAILED
   }
   self.sprite_quad_mesh = mesh_handle
-  log.infof("Created sprite quad mesh with handle index=%d, index_count=%d, AABB=[%.2f,%.2f,%.2f]-[%.2f,%.2f,%.2f]",
-    mesh_handle.index, mesh_ptr.index_count,
-    mesh_ptr.aabb_min.x, mesh_ptr.aabb_min.y, mesh_ptr.aabb_min.z,
-    mesh_ptr.aabb_max.x, mesh_ptr.aabb_max.y, mesh_ptr.aabb_max.z)
+  log.infof(
+    "Created sprite quad mesh with handle index=%d, index_count=%d, AABB=[%.2f,%.2f,%.2f]-[%.2f,%.2f,%.2f]",
+    mesh_handle.index,
+    mesh_ptr.index_count,
+    mesh_ptr.aabb_min.x,
+    mesh_ptr.aabb_min.y,
+    mesh_ptr.aabb_min.z,
+    mesh_ptr.aabb_max.x,
+    mesh_ptr.aabb_max.y,
+    mesh_ptr.aabb_max.z,
+  )
 
-  create_transparent_pipelines(gpu_context, self, resources_manager.geometry_pipeline_layout) or_return
-  create_wireframe_pipelines(gpu_context, self, resources_manager.geometry_pipeline_layout) or_return
-  create_sprite_pipeline(gpu_context, self, resources_manager.geometry_pipeline_layout) or_return
+  create_transparent_pipelines(
+    gctx,
+    self,
+    rm.geometry_pipeline_layout,
+  ) or_return
+  create_wireframe_pipelines(gctx, self, rm.geometry_pipeline_layout) or_return
+  create_sprite_pipeline(gctx, self, rm.geometry_pipeline_layout) or_return
   log.info("Transparent renderer initialized successfully")
   return .SUCCESS
 }
 
 create_transparent_pipelines :: proc(
-  gpu_context: ^gpu.GPUContext,
+  gctx: ^gpu.GPUContext,
   self: ^Renderer,
   pipeline_layout: vk.PipelineLayout,
 ) -> vk.Result {
@@ -88,16 +123,16 @@ create_transparent_pipelines :: proc(
   // Load shader modules at compile time
   vert_shader_code := #load("../../shader/transparent/vert.spv")
   vert_module := gpu.create_shader_module(
-    gpu_context.device,
+    gctx.device,
     vert_shader_code,
   ) or_return
-  defer vk.DestroyShaderModule(gpu_context.device, vert_module, nil)
+  defer vk.DestroyShaderModule(gctx.device, vert_module, nil)
   frag_shader_code := #load("../../shader/transparent/frag.spv")
   frag_module := gpu.create_shader_module(
-    gpu_context.device,
+    gctx.device,
     frag_shader_code,
   ) or_return
-  defer vk.DestroyShaderModule(gpu_context.device, frag_module, nil)
+  defer vk.DestroyShaderModule(gctx.device, frag_module, nil)
   spec_data, spec_entries, spec_info := shared.make_shader_spec_constants()
   spec_info.pData = cast(rawptr)&spec_data
   defer delete(spec_entries)
@@ -213,7 +248,7 @@ create_transparent_pipelines :: proc(
   }
 
   vk.CreateGraphicsPipelines(
-    gpu_context.device,
+    gctx.device,
     0,
     1,
     &pipeline_info,
@@ -225,7 +260,7 @@ create_transparent_pipelines :: proc(
 }
 
 create_wireframe_pipelines :: proc(
-  gpu_context: ^gpu.GPUContext,
+  gctx: ^gpu.GPUContext,
   self: ^Renderer,
   pipeline_layout: vk.PipelineLayout,
 ) -> vk.Result {
@@ -235,17 +270,17 @@ create_wireframe_pipelines :: proc(
   // Load shader modules at compile time
   vert_shader_code := #load("../../shader/wireframe/vert.spv")
   vert_module := gpu.create_shader_module(
-    gpu_context.device,
+    gctx.device,
     vert_shader_code,
   ) or_return
-  defer vk.DestroyShaderModule(gpu_context.device, vert_module, nil)
+  defer vk.DestroyShaderModule(gctx.device, vert_module, nil)
 
   frag_shader_code := #load("../../shader/wireframe/frag.spv")
   frag_module := gpu.create_shader_module(
-    gpu_context.device,
+    gctx.device,
     frag_shader_code,
   ) or_return
-  defer vk.DestroyShaderModule(gpu_context.device, frag_module, nil)
+  defer vk.DestroyShaderModule(gctx.device, frag_module, nil)
 
   vertex_input_info := vk.PipelineVertexInputStateCreateInfo {
     sType                           = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
@@ -357,7 +392,7 @@ create_wireframe_pipelines :: proc(
   }
 
   vk.CreateGraphicsPipelines(
-    gpu_context.device,
+    gctx.device,
     0,
     1,
     &create_info,
@@ -369,7 +404,7 @@ create_wireframe_pipelines :: proc(
 }
 
 create_sprite_pipeline :: proc(
-  gpu_context: ^gpu.GPUContext,
+  gctx: ^gpu.GPUContext,
   self: ^Renderer,
   pipeline_layout: vk.PipelineLayout,
 ) -> vk.Result {
@@ -379,17 +414,17 @@ create_sprite_pipeline :: proc(
   // Load sprite shader modules
   vert_shader_code := #load("../../shader/sprite/vert.spv")
   vert_module := gpu.create_shader_module(
-    gpu_context.device,
+    gctx.device,
     vert_shader_code,
   ) or_return
-  defer vk.DestroyShaderModule(gpu_context.device, vert_module, nil)
+  defer vk.DestroyShaderModule(gctx.device, vert_module, nil)
 
   frag_shader_code := #load("../../shader/sprite/frag.spv")
   frag_module := gpu.create_shader_module(
-    gpu_context.device,
+    gctx.device,
     frag_shader_code,
   ) or_return
-  defer vk.DestroyShaderModule(gpu_context.device, frag_module, nil)
+  defer vk.DestroyShaderModule(gctx.device, frag_module, nil)
 
   vertex_input_info := vk.PipelineVertexInputStateCreateInfo {
     sType                           = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
@@ -420,7 +455,7 @@ create_sprite_pipeline :: proc(
   rasterizer := vk.PipelineRasterizationStateCreateInfo {
     sType       = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
     polygonMode = .FILL,
-    cullMode    = {},  // No culling for sprites
+    cullMode    = {}, // No culling for sprites
     frontFace   = .COUNTER_CLOCKWISE,
     lineWidth   = 1.0,
   }
@@ -502,7 +537,7 @@ create_sprite_pipeline :: proc(
   }
 
   vk.CreateGraphicsPipelines(
-    gpu_context.device,
+    gctx.device,
     0,
     1,
     &create_info,
@@ -532,15 +567,15 @@ begin_pass :: proc(
   self: ^Renderer,
   camera_handle: resources.Handle,
   command_buffer: vk.CommandBuffer,
-  resources_manager: ^resources.Manager,
+  rm: ^resources.Manager,
   frame_index: u32,
 ) {
-  camera := resources.get(resources_manager.cameras, camera_handle)
+  camera := resources.get(rm.cameras, camera_handle)
   if camera == nil do return
 
   // Setup color attachment - load existing content
   color_texture := resources.get(
-    resources_manager.image_2d_buffers,
+    rm.image_2d_buffers,
     resources.camera_get_attachment(camera, .FINAL_IMAGE, frame_index),
   )
   if color_texture == nil {
@@ -548,7 +583,7 @@ begin_pass :: proc(
     return
   }
   depth_texture := resources.get(
-    resources_manager.image_2d_buffers,
+    rm.image_2d_buffers,
     resources.camera_get_attachment(camera, .DEPTH, frame_index),
   )
   if depth_texture == nil {
@@ -601,7 +636,7 @@ render :: proc(
   pipeline: vk.Pipeline,
   camera_handle: resources.Handle,
   command_buffer: vk.CommandBuffer,
-  resources_manager: ^resources.Manager,
+  rm: ^resources.Manager,
   frame_index: u32,
   draw_buffer: vk.Buffer,
   count_buffer: vk.Buffer,
@@ -613,21 +648,21 @@ render :: proc(
   }
 
   descriptor_sets := [?]vk.DescriptorSet {
-    resources_manager.camera_buffer_descriptor_set,
-    resources_manager.textures_descriptor_set,
-    resources_manager.bone_buffer_descriptor_set,
-    resources_manager.material_buffer_descriptor_set,
-    resources_manager.world_matrix_descriptor_set,
-    resources_manager.node_data_descriptor_set,
-    resources_manager.mesh_data_descriptor_set,
-    resources_manager.vertex_skinning_descriptor_set,
-    resources_manager.lights_buffer_descriptor_set, // Set 8: Lights
-    resources_manager.sprite_buffer_descriptor_set, // Set 9: Sprites
+    rm.camera_buffer_descriptor_set,
+    rm.textures_descriptor_set,
+    rm.bone_buffer_descriptor_set,
+    rm.material_buffer_descriptor_set,
+    rm.world_matrix_descriptor_set,
+    rm.node_data_descriptor_set,
+    rm.mesh_data_descriptor_set,
+    rm.vertex_skinning_descriptor_set,
+    rm.lights_buffer_descriptor_set, // Set 8: Lights
+    rm.sprite_buffer_descriptor_set, // Set 9: Sprites
   }
   vk.CmdBindDescriptorSets(
     command_buffer,
     .GRAPHICS,
-    resources_manager.geometry_pipeline_layout,
+    rm.geometry_pipeline_layout,
     0,
     len(descriptor_sets),
     raw_data(descriptor_sets[:]),
@@ -641,13 +676,13 @@ render :: proc(
   }
   vk.CmdPushConstants(
     command_buffer,
-    resources_manager.geometry_pipeline_layout,
+    rm.geometry_pipeline_layout,
     {.VERTEX, .FRAGMENT},
     0,
     size_of(PushConstant),
     &push_constants,
   )
-  vertex_buffers := [1]vk.Buffer{resources_manager.vertex_buffer.buffer}
+  vertex_buffers := [1]vk.Buffer{rm.vertex_buffer.buffer}
   vertex_offsets := [1]vk.DeviceSize{0}
   vk.CmdBindVertexBuffers(
     command_buffer,
@@ -656,12 +691,7 @@ render :: proc(
     raw_data(vertex_buffers[:]),
     raw_data(vertex_offsets[:]),
   )
-  vk.CmdBindIndexBuffer(
-    command_buffer,
-    resources_manager.index_buffer.buffer,
-    0,
-    .UINT32,
-  )
+  vk.CmdBindIndexBuffer(command_buffer, rm.index_buffer.buffer, 0, .UINT32)
 
   vk.CmdDrawIndexedIndirectCount(
     command_buffer,
@@ -678,13 +708,13 @@ begin_record :: proc(
   self: ^Renderer,
   frame_index: u32,
   camera_handle: resources.Handle,
-  resources_manager: ^resources.Manager,
+  rm: ^resources.Manager,
   color_format: vk.Format,
 ) -> (
   command_buffer: vk.CommandBuffer,
   ret: vk.Result,
 ) {
-  camera := resources.get(resources_manager.cameras, camera_handle)
+  camera := resources.get(rm.cameras, camera_handle)
   if camera == nil {
     ret = .ERROR_UNKNOWN
     return

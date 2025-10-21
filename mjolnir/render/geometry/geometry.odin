@@ -19,18 +19,18 @@ Renderer :: struct {
 
 init :: proc(
   self: ^Renderer,
-  gpu_context: ^gpu.GPUContext,
+  gctx: ^gpu.GPUContext,
   width, height: u32,
-  resources_manager: ^resources.Manager,
+  rm: ^resources.Manager,
 ) -> vk.Result {
   gpu.allocate_secondary_buffers(
-    gpu_context.device,
-    gpu_context.command_pool,
+    gctx.device,
+    gctx.command_pool,
     self.commands[:],
   ) or_return
 
   depth_format: vk.Format = .D32_SFLOAT
-  if resources_manager.geometry_pipeline_layout == 0 {
+  if rm.geometry_pipeline_layout == 0 {
     return .ERROR_INITIALIZATION_FAILED
   }
   spec_data, spec_entries, spec_info := shared.make_shader_spec_constants()
@@ -41,16 +41,16 @@ init :: proc(
   log.info("About to build G-buffer pipelines...")
   vert_shader_code := #load("../../shader/gbuffer/vert.spv")
   vert_module := gpu.create_shader_module(
-    gpu_context.device,
+    gctx.device,
     vert_shader_code,
   ) or_return
-  defer vk.DestroyShaderModule(gpu_context.device, vert_module, nil)
+  defer vk.DestroyShaderModule(gctx.device, vert_module, nil)
   frag_shader_code := #load("../../shader/gbuffer/frag.spv")
   frag_module := gpu.create_shader_module(
-    gpu_context.device,
+    gctx.device,
     frag_shader_code,
   ) or_return
-  defer vk.DestroyShaderModule(gpu_context.device, frag_module, nil)
+  defer vk.DestroyShaderModule(gctx.device, frag_module, nil)
   vertex_input_info := vk.PipelineVertexInputStateCreateInfo {
     sType                           = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
     vertexBindingDescriptionCount   = len(geometry.VERTEX_BINDING_DESCRIPTION),
@@ -149,11 +149,11 @@ init :: proc(
     pDepthStencilState  = &depth_stencil,
     pColorBlendState    = &color_blending,
     pDynamicState       = &dynamic_state,
-    layout              = resources_manager.geometry_pipeline_layout,
+    layout              = rm.geometry_pipeline_layout,
     pNext               = &rendering_info,
   }
   vk.CreateGraphicsPipelines(
-    gpu_context.device,
+    gctx.device,
     0,
     1,
     &pipeline_info,
@@ -167,34 +167,34 @@ init :: proc(
 begin_pass :: proc(
   camera_handle: resources.Handle,
   command_buffer: vk.CommandBuffer,
-  resources_manager: ^resources.Manager,
+  rm: ^resources.Manager,
   frame_index: u32,
 ) {
-  camera := resources.get(resources_manager.cameras, camera_handle)
+  camera := resources.get(rm.cameras, camera_handle)
   if camera == nil do return
   // Transition all G-buffer textures to COLOR_ATTACHMENT_OPTIMAL
   position_texture := resources.get(
-    resources_manager.image_2d_buffers,
+    rm.image_2d_buffers,
     resources.camera_get_attachment(camera, .POSITION, frame_index),
   )
   normal_texture := resources.get(
-    resources_manager.image_2d_buffers,
+    rm.image_2d_buffers,
     resources.camera_get_attachment(camera, .NORMAL, frame_index),
   )
   albedo_texture := resources.get(
-    resources_manager.image_2d_buffers,
+    rm.image_2d_buffers,
     resources.camera_get_attachment(camera, .ALBEDO, frame_index),
   )
   metallic_roughness_texture := resources.get(
-    resources_manager.image_2d_buffers,
+    rm.image_2d_buffers,
     resources.camera_get_attachment(camera, .METALLIC_ROUGHNESS, frame_index),
   )
   emissive_texture := resources.get(
-    resources_manager.image_2d_buffers,
+    rm.image_2d_buffers,
     resources.camera_get_attachment(camera, .EMISSIVE, frame_index),
   )
   final_texture := resources.get(
-    resources_manager.image_2d_buffers,
+    rm.image_2d_buffers,
     resources.camera_get_attachment(camera, .FINAL_IMAGE, frame_index),
   )
   // Collect all G-buffer images for batch transition
@@ -220,7 +220,7 @@ begin_pass :: proc(
   )
 
   depth_texture := resources.get(
-    resources_manager.image_2d_buffers,
+    rm.image_2d_buffers,
     camera.attachments[.DEPTH][frame_index],
   )
 
@@ -307,33 +307,33 @@ begin_pass :: proc(
 end_pass :: proc(
   camera_handle: resources.Handle,
   command_buffer: vk.CommandBuffer,
-  resources_manager: ^resources.Manager,
+  rm: ^resources.Manager,
   frame_index: u32,
 ) {
   vk.CmdEndRendering(command_buffer)
 
-  camera := resources.get(resources_manager.cameras, camera_handle)
+  camera := resources.get(rm.cameras, camera_handle)
   if camera == nil do return
 
   // Transition all G-buffer textures to SHADER_READ_ONLY_OPTIMAL for use by lighting
   position_texture := resources.get(
-    resources_manager.image_2d_buffers,
+    rm.image_2d_buffers,
     resources.camera_get_attachment(camera, .POSITION, frame_index),
   )
   normal_texture := resources.get(
-    resources_manager.image_2d_buffers,
+    rm.image_2d_buffers,
     resources.camera_get_attachment(camera, .NORMAL, frame_index),
   )
   albedo_texture := resources.get(
-    resources_manager.image_2d_buffers,
+    rm.image_2d_buffers,
     resources.camera_get_attachment(camera, .ALBEDO, frame_index),
   )
   metallic_roughness_texture := resources.get(
-    resources_manager.image_2d_buffers,
+    rm.image_2d_buffers,
     resources.camera_get_attachment(camera, .METALLIC_ROUGHNESS, frame_index),
   )
   emissive_texture := resources.get(
-    resources_manager.image_2d_buffers,
+    rm.image_2d_buffers,
     resources.camera_get_attachment(camera, .EMISSIVE, frame_index),
   )
 
@@ -365,7 +365,7 @@ render :: proc(
   self: ^Renderer,
   camera_handle: resources.Handle,
   command_buffer: vk.CommandBuffer,
-  resources_manager: ^resources.Manager,
+  rm: ^resources.Manager,
   frame_index: u32,
   draw_buffer: vk.Buffer,
   count_buffer: vk.Buffer,
@@ -375,19 +375,19 @@ render :: proc(
     return
   }
   descriptor_sets := [?]vk.DescriptorSet {
-    resources_manager.camera_buffer_descriptor_set,
-    resources_manager.textures_descriptor_set,
-    resources_manager.bone_buffer_descriptor_set,
-    resources_manager.material_buffer_descriptor_set,
-    resources_manager.world_matrix_descriptor_set,
-    resources_manager.node_data_descriptor_set,
-    resources_manager.mesh_data_descriptor_set,
-    resources_manager.vertex_skinning_descriptor_set,
+    rm.camera_buffer_descriptor_set,
+    rm.textures_descriptor_set,
+    rm.bone_buffer_descriptor_set,
+    rm.material_buffer_descriptor_set,
+    rm.world_matrix_descriptor_set,
+    rm.node_data_descriptor_set,
+    rm.mesh_data_descriptor_set,
+    rm.vertex_skinning_descriptor_set,
   }
   vk.CmdBindDescriptorSets(
     command_buffer,
     .GRAPHICS,
-    resources_manager.geometry_pipeline_layout,
+    rm.geometry_pipeline_layout,
     0,
     len(descriptor_sets),
     raw_data(descriptor_sets[:]),
@@ -400,13 +400,13 @@ render :: proc(
   }
   vk.CmdPushConstants(
     command_buffer,
-    resources_manager.geometry_pipeline_layout,
+    rm.geometry_pipeline_layout,
     {.VERTEX, .FRAGMENT},
     0,
     size_of(PushConstant),
     &push_constants,
   )
-  vertex_buffers := [1]vk.Buffer{resources_manager.vertex_buffer.buffer}
+  vertex_buffers := [1]vk.Buffer{rm.vertex_buffer.buffer}
   vertex_offsets := [1]vk.DeviceSize{0}
   vk.CmdBindVertexBuffers(
     command_buffer,
@@ -415,12 +415,7 @@ render :: proc(
     raw_data(vertex_buffers[:]),
     raw_data(vertex_offsets[:]),
   )
-  vk.CmdBindIndexBuffer(
-    command_buffer,
-    resources_manager.index_buffer.buffer,
-    0,
-    .UINT32,
-  )
+  vk.CmdBindIndexBuffer(command_buffer, rm.index_buffer.buffer, 0, .UINT32)
   vk.CmdDrawIndexedIndirectCount(
     command_buffer,
     draw_buffer,
@@ -446,12 +441,12 @@ begin_record :: proc(
   self: ^Renderer,
   frame_index: u32,
   camera_handle: resources.Handle,
-  resources_manager: ^resources.Manager,
+  rm: ^resources.Manager,
 ) -> (
   command_buffer: vk.CommandBuffer,
   ret: vk.Result,
 ) {
-  camera := resources.get(resources_manager.cameras, camera_handle)
+  camera := resources.get(rm.cameras, camera_handle)
   if camera == nil {
     ret = .ERROR_UNKNOWN
     return
@@ -490,7 +485,7 @@ begin_record :: proc(
 end_record :: proc(
   command_buffer: vk.CommandBuffer,
   camera_handle: resources.Handle,
-  resources_manager: ^resources.Manager,
+  rm: ^resources.Manager,
   frame_index: u32,
 ) -> vk.Result {
   vk.EndCommandBuffer(command_buffer) or_return

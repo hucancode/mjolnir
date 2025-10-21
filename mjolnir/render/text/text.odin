@@ -1,10 +1,10 @@
 package text
 
+import "../../gpu"
+import "../../resources"
 import "core:log"
 import "core:math/linalg"
 import "core:os"
-import "../../gpu"
-import "../../resources"
 import fs "vendor:fontstash"
 import vk "vendor:vulkan"
 
@@ -48,10 +48,10 @@ Vertex :: struct {
 
 init :: proc(
   self: ^Renderer,
-  gpu_context: ^gpu.GPUContext,
+  gctx: ^gpu.GPUContext,
   color_format: vk.Format,
   width, height: u32,
-  resources_manager: ^resources.Manager,
+  rm: ^resources.Manager,
 ) -> vk.Result {
   self.frame_width = width
   self.frame_height = height
@@ -71,15 +71,15 @@ init :: proc(
   }
   log.infof("init text rendering pipeline...")
   vert_shader_module := gpu.create_shader_module(
-    gpu_context.device,
+    gctx.device,
     SHADER_TEXT_VERT,
   ) or_return
-  defer vk.DestroyShaderModule(gpu_context.device, vert_shader_module, nil)
+  defer vk.DestroyShaderModule(gctx.device, vert_shader_module, nil)
   frag_shader_module := gpu.create_shader_module(
-    gpu_context.device,
+    gctx.device,
     SHADER_TEXT_FRAG,
   ) or_return
-  defer vk.DestroyShaderModule(gpu_context.device, frag_shader_module, nil)
+  defer vk.DestroyShaderModule(gctx.device, frag_shader_module, nil)
   shader_stages := [?]vk.PipelineShaderStageCreateInfo {
     {
       sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
@@ -107,22 +107,22 @@ init :: proc(
   }
   vertex_attributes := [?]vk.VertexInputAttributeDescription {
     {
-      binding  = 0,
+      binding = 0,
       location = 0,
-      format   = .R32G32_SFLOAT,
-      offset   = u32(offset_of(Vertex, pos)),
+      format = .R32G32_SFLOAT,
+      offset = u32(offset_of(Vertex, pos)),
     },
     {
-      binding  = 0,
+      binding = 0,
       location = 1,
-      format   = .R32G32_SFLOAT,
-      offset   = u32(offset_of(Vertex, uv)),
+      format = .R32G32_SFLOAT,
+      offset = u32(offset_of(Vertex, uv)),
     },
     {
-      binding  = 0,
+      binding = 0,
       location = 2,
-      format   = .R8G8B8A8_UNORM,
-      offset   = u32(offset_of(Vertex, color)),
+      format = .R8G8B8A8_UNORM,
+      offset = u32(offset_of(Vertex, color)),
     },
   }
   vertex_input := vk.PipelineVertexInputStateCreateInfo {
@@ -176,23 +176,23 @@ init :: proc(
     },
   }
   vk.CreateDescriptorSetLayout(
-    gpu_context.device,
+    gctx.device,
     &projection_layout_info,
     nil,
     &self.projection_layout,
   ) or_return
   vk.AllocateDescriptorSets(
-    gpu_context.device,
+    gctx.device,
     &{
       sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
-      descriptorPool = gpu_context.descriptor_pool,
+      descriptorPool = gctx.descriptor_pool,
       descriptorSetCount = 1,
       pSetLayouts = &self.projection_layout,
     },
     &self.projection_descriptor_set,
   ) or_return
   vk.CreateDescriptorSetLayout(
-    gpu_context.device,
+    gctx.device,
     &vk.DescriptorSetLayoutCreateInfo {
       sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
       bindingCount = 1,
@@ -207,10 +207,10 @@ init :: proc(
     &self.texture_layout,
   ) or_return
   vk.AllocateDescriptorSets(
-    gpu_context.device,
+    gctx.device,
     &{
       sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
-      descriptorPool = gpu_context.descriptor_pool,
+      descriptorPool = gctx.descriptor_pool,
       descriptorSetCount = 1,
       pSetLayouts = &self.texture_layout,
     },
@@ -221,7 +221,7 @@ init :: proc(
     self.texture_layout,
   }
   vk.CreatePipelineLayout(
-    gpu_context.device,
+    gctx.device,
     &{
       sType = .PIPELINE_LAYOUT_CREATE_INFO,
       setLayoutCount = len(set_layouts),
@@ -255,7 +255,7 @@ init :: proc(
     layout              = self.pipeline_layout,
   }
   vk.CreateGraphicsPipelines(
-    gpu_context.device,
+    gctx.device,
     0,
     1,
     &pipeline_info,
@@ -280,8 +280,8 @@ init :: proc(
   log.infof("pre-rasterization complete")
   log.infof("init text atlas texture...")
   _, self.atlas_texture = resources.create_texture_from_pixels(
-    gpu_context,
-    resources_manager,
+    gctx,
+    rm,
     self.font_ctx.textureData,
     self.font_ctx.width,
     self.font_ctx.height,
@@ -290,14 +290,14 @@ init :: proc(
   self.atlas_initialized = true
   log.infof("init text vertex buffer...")
   self.vertex_buffer = gpu.create_mutable_buffer(
-    gpu_context,
+    gctx,
     Vertex,
     TEXT_MAX_VERTICES,
     {.VERTEX_BUFFER},
   ) or_return
   log.infof("init text index buffer...")
   self.index_buffer = gpu.create_mutable_buffer(
-    gpu_context,
+    gctx,
     u32,
     TEXT_MAX_INDICES,
     {.INDEX_BUFFER},
@@ -305,7 +305,7 @@ init :: proc(
   ortho := linalg.matrix_ortho3d(0, f32(width), f32(height), 0, -1, 1)
   log.infof("init text projection buffer...")
   self.proj_buffer = gpu.create_mutable_buffer(
-    gpu_context,
+    gctx,
     matrix[4, 4]f32,
     1,
     {.UNIFORM_BUFFER},
@@ -331,14 +331,14 @@ init :: proc(
       descriptorCount = 1,
       descriptorType = .COMBINED_IMAGE_SAMPLER,
       pImageInfo = &{
-        sampler = resources_manager.linear_clamp_sampler,
+        sampler = rm.linear_clamp_sampler,
         imageView = self.atlas_texture.view,
         imageLayout = .SHADER_READ_ONLY_OPTIMAL,
       },
     },
   }
   vk.UpdateDescriptorSets(
-    gpu_context.device,
+    gctx.device,
     len(writes),
     raw_data(writes[:]),
     0,
@@ -406,11 +406,7 @@ flush :: proc(self: ^Renderer, cmd_buf: vk.CommandBuffer) -> vk.Result {
   return .SUCCESS
 }
 
-push_quad :: proc(
-  self: ^Renderer,
-  quad: fs.Quad,
-  color: [4]u8,
-) {
+push_quad :: proc(self: ^Renderer, quad: fs.Quad, color: [4]u8) {
   if self.vertex_count + 4 > TEXT_MAX_VERTICES ||
      self.index_count + 6 > TEXT_MAX_INDICES {
     log.warnf("Text vertex buffer full, dropping text")
@@ -472,7 +468,7 @@ draw_text :: proc(
 update_atlas_if_needed :: proc(
   self: ^Renderer,
   command_buffer: vk.CommandBuffer,
-  gpu_context: ^gpu.GPUContext,
+  gctx: ^gpu.GPUContext,
 ) -> vk.Result {
   // For now, skip dynamic atlas updates during rendering
   // The initial atlas created during init has all the basic glyphs
@@ -506,9 +502,9 @@ begin_pass :: proc(
 render :: proc(
   self: ^Renderer,
   command_buffer: vk.CommandBuffer,
-  gpu_context: ^gpu.GPUContext,
+  gctx: ^gpu.GPUContext,
 ) -> vk.Result {
-  update_atlas_if_needed(self, command_buffer, gpu_context) or_return
+  update_atlas_if_needed(self, command_buffer, gctx) or_return
   flush(self, command_buffer) or_return
   return .SUCCESS
 }
@@ -532,10 +528,7 @@ shutdown :: proc(self: ^Renderer, device: vk.Device) {
   self.texture_layout = 0
 }
 
-recreate_images :: proc(
-  self: ^Renderer,
-  width, height: u32,
-) -> vk.Result {
+recreate_images :: proc(self: ^Renderer, width, height: u32) -> vk.Result {
   self.frame_width = width
   self.frame_height = height
   ortho := linalg.matrix_ortho3d(0, f32(width), f32(height), 0, -1, 1)

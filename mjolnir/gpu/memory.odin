@@ -21,7 +21,7 @@ ImmutableBuffer :: struct($T: typeid) {
 }
 
 malloc_mutable_buffer :: proc(
-  gpu_context: ^GPUContext,
+  gctx: ^GPUContext,
   $T: typeid,
   count: int,
   usage: vk.BufferUsageFlags,
@@ -32,12 +32,12 @@ malloc_mutable_buffer :: proc(
   if .UNIFORM_BUFFER in usage && count > 1 {
     buffer.element_size = align_up(
       size_of(T),
-      int(gpu_context.device_properties.limits.minUniformBufferOffsetAlignment),
+      int(gctx.device_properties.limits.minUniformBufferOffsetAlignment),
     )
   } else if .STORAGE_BUFFER in usage && count > 1 {
     buffer.element_size = align_up(
       size_of(T),
-      int(gpu_context.device_properties.limits.minStorageBufferOffsetAlignment),
+      int(gctx.device_properties.limits.minStorageBufferOffsetAlignment),
     )
   } else {
     buffer.element_size = size_of(T)
@@ -50,21 +50,21 @@ malloc_mutable_buffer :: proc(
     usage       = usage,
     sharingMode = .EXCLUSIVE,
   }
-  vk.CreateBuffer(gpu_context.device, &create_info, nil, &buffer.buffer) or_return
+  vk.CreateBuffer(gctx.device, &create_info, nil, &buffer.buffer) or_return
 
   mem_reqs: vk.MemoryRequirements
-  vk.GetBufferMemoryRequirements(gpu_context.device, buffer.buffer, &mem_reqs)
+  vk.GetBufferMemoryRequirements(gctx.device, buffer.buffer, &mem_reqs)
 
   buffer.memory = allocate_vulkan_memory(
-    gpu_context,
+    gctx,
     mem_reqs,
     {.HOST_VISIBLE, .HOST_COHERENT},
   ) or_return
 
-  vk.BindBufferMemory(gpu_context.device, buffer.buffer, buffer.memory, 0) or_return
+  vk.BindBufferMemory(gctx.device, buffer.buffer, buffer.memory, 0) or_return
 
   vk.MapMemory(
-    gpu_context.device,
+    gctx.device,
     buffer.memory,
     0,
     vk.DeviceSize(buffer.bytes_count),
@@ -77,7 +77,7 @@ malloc_mutable_buffer :: proc(
 }
 
 malloc_immutable_buffer :: proc(
-  gpu_context: ^GPUContext,
+  gctx: ^GPUContext,
   $T: typeid,
   count: int,
   usage: vk.BufferUsageFlags,
@@ -88,12 +88,12 @@ malloc_immutable_buffer :: proc(
   if .UNIFORM_BUFFER in usage && count > 1 {
     buffer.element_size = align_up(
       size_of(T),
-      int(gpu_context.device_properties.limits.minUniformBufferOffsetAlignment),
+      int(gctx.device_properties.limits.minUniformBufferOffsetAlignment),
     )
   } else if .STORAGE_BUFFER in usage && count > 1 {
     buffer.element_size = align_up(
       size_of(T),
-      int(gpu_context.device_properties.limits.minStorageBufferOffsetAlignment),
+      int(gctx.device_properties.limits.minStorageBufferOffsetAlignment),
     )
   } else {
     buffer.element_size = size_of(T)
@@ -106,18 +106,18 @@ malloc_immutable_buffer :: proc(
     usage       = usage | {.TRANSFER_DST},
     sharingMode = .EXCLUSIVE,
   }
-  vk.CreateBuffer(gpu_context.device, &create_info, nil, &buffer.buffer) or_return
+  vk.CreateBuffer(gctx.device, &create_info, nil, &buffer.buffer) or_return
 
   mem_reqs: vk.MemoryRequirements
-  vk.GetBufferMemoryRequirements(gpu_context.device, buffer.buffer, &mem_reqs)
+  vk.GetBufferMemoryRequirements(gctx.device, buffer.buffer, &mem_reqs)
 
   buffer.memory = allocate_vulkan_memory(
-    gpu_context,
+    gctx,
     mem_reqs,
     {.DEVICE_LOCAL},
   ) or_return
 
-  vk.BindBufferMemory(gpu_context.device, buffer.buffer, buffer.memory, 0) or_return
+  vk.BindBufferMemory(gctx.device, buffer.buffer, buffer.memory, 0) or_return
 
   log.infof("immutable buffer created 0x%x", buffer.buffer)
   return buffer, .SUCCESS
@@ -170,7 +170,10 @@ mutable_buffer_get_all :: proc(buffer: ^MutableBuffer($T)) -> []T {
   return slice.from_ptr(buffer.mapped, element_count)
 }
 
-mutable_buffer_offset_of :: proc(buffer: ^MutableBuffer($T), index: u32) -> u32 {
+mutable_buffer_offset_of :: proc(
+  buffer: ^MutableBuffer($T),
+  index: u32,
+) -> u32 {
   return index * u32(buffer.element_size)
 }
 
@@ -188,17 +191,17 @@ mutable_buffer_destroy :: proc(device: vk.Device, buffer: ^MutableBuffer($T)) {
 }
 
 immutable_buffer_write_single :: proc(
-  gpu_context: ^GPUContext,
+  gctx: ^GPUContext,
   buffer: ^ImmutableBuffer($T),
   data: ^T,
   index: int = 0,
 ) -> vk.Result {
-  staging := malloc_mutable_buffer(gpu_context, T, 1, {.TRANSFER_SRC}) or_return
-  defer mutable_buffer_destroy(gpu_context.device, &staging)
+  staging := malloc_mutable_buffer(gctx, T, 1, {.TRANSFER_SRC}) or_return
+  defer mutable_buffer_destroy(gctx.device, &staging)
 
   mutable_buffer_write_single(&staging, data) or_return
 
-  cmd_buffer := begin_single_time_command(gpu_context) or_return
+  cmd_buffer := begin_single_time_command(gctx) or_return
   offset := vk.DeviceSize(index * buffer.element_size)
   region := vk.BufferCopy {
     srcOffset = 0,
@@ -206,21 +209,26 @@ immutable_buffer_write_single :: proc(
     size      = vk.DeviceSize(buffer.element_size),
   }
   vk.CmdCopyBuffer(cmd_buffer, staging.buffer, buffer.buffer, 1, &region)
-  return end_single_time_command(gpu_context, &cmd_buffer)
+  return end_single_time_command(gctx, &cmd_buffer)
 }
 
 immutable_buffer_write_multi :: proc(
-  gpu_context: ^GPUContext,
+  gctx: ^GPUContext,
   buffer: ^ImmutableBuffer($T),
   data: []T,
   index: int = 0,
 ) -> vk.Result {
-  staging := malloc_mutable_buffer(gpu_context, T, len(data), {.TRANSFER_SRC}) or_return
-  defer mutable_buffer_destroy(gpu_context.device, &staging)
+  staging := malloc_mutable_buffer(
+    gctx,
+    T,
+    len(data),
+    {.TRANSFER_SRC},
+  ) or_return
+  defer mutable_buffer_destroy(gctx.device, &staging)
 
   mutable_buffer_write_multi(&staging, data) or_return
 
-  cmd_buffer := begin_single_time_command(gpu_context) or_return
+  cmd_buffer := begin_single_time_command(gctx) or_return
   offset := vk.DeviceSize(index * buffer.element_size)
   region := vk.BufferCopy {
     srcOffset = 0,
@@ -228,25 +236,33 @@ immutable_buffer_write_multi :: proc(
     size      = vk.DeviceSize(buffer.element_size * len(data)),
   }
   vk.CmdCopyBuffer(cmd_buffer, staging.buffer, buffer.buffer, 1, &region)
-  return end_single_time_command(gpu_context, &cmd_buffer)
+  return end_single_time_command(gctx, &cmd_buffer)
 }
 
-immutable_buffer_offset_of :: proc(buffer: ^ImmutableBuffer($T), index: u32) -> u32 {
+immutable_buffer_offset_of :: proc(
+  buffer: ^ImmutableBuffer($T),
+  index: u32,
+) -> u32 {
   return index * u32(buffer.element_size)
 }
 
 immutable_buffer_read :: proc(
-  gpu_context: ^GPUContext,
+  gctx: ^GPUContext,
   buffer: ^ImmutableBuffer($T),
   output: []T,
   index: int = 0,
 ) -> vk.Result {
   if len(output) == 0 do return .SUCCESS
 
-  staging := malloc_mutable_buffer(gpu_context, T, len(output), {.TRANSFER_DST}) or_return
-  defer mutable_buffer_destroy(gpu_context.device, &staging)
+  staging := malloc_mutable_buffer(
+    gctx,
+    T,
+    len(output),
+    {.TRANSFER_DST},
+  ) or_return
+  defer mutable_buffer_destroy(gctx.device, &staging)
 
-  cmd_buffer := begin_single_time_command(gpu_context) or_return
+  cmd_buffer := begin_single_time_command(gctx) or_return
   offset := vk.DeviceSize(index * buffer.element_size)
   region := vk.BufferCopy {
     srcOffset = offset,
@@ -254,15 +270,18 @@ immutable_buffer_read :: proc(
     size      = vk.DeviceSize(buffer.element_size * len(output)),
   }
   vk.CmdCopyBuffer(cmd_buffer, buffer.buffer, staging.buffer, 1, &region)
-  end_single_time_command(gpu_context, &cmd_buffer) or_return
+  end_single_time_command(gctx, &cmd_buffer) or_return
 
-  for i in 0 ..<len(output) {
+  for i in 0 ..< len(output) {
     output[i] = staging.mapped[i]
   }
   return .SUCCESS
 }
 
-immutable_buffer_destroy :: proc(device: vk.Device, buffer: ^ImmutableBuffer($T)) {
+immutable_buffer_destroy :: proc(
+  device: vk.Device,
+  buffer: ^ImmutableBuffer($T),
+) {
   vk.DestroyBuffer(device, buffer.buffer, nil)
   buffer.buffer = 0
   vk.FreeMemory(device, buffer.memory, nil)
@@ -272,7 +291,7 @@ immutable_buffer_destroy :: proc(device: vk.Device, buffer: ^ImmutableBuffer($T)
 }
 
 create_mutable_buffer :: proc(
-  gpu_context: ^GPUContext,
+  gctx: ^GPUContext,
   $T: typeid,
   count: int,
   usage: vk.BufferUsageFlags,
@@ -281,7 +300,7 @@ create_mutable_buffer :: proc(
   buffer: MutableBuffer(T),
   ret: vk.Result,
 ) {
-  buffer = malloc_mutable_buffer(gpu_context, T, count, usage) or_return
+  buffer = malloc_mutable_buffer(gctx, T, count, usage) or_return
   if data != nil {
     mem.copy(buffer.mapped, data, buffer.bytes_count)
   }
@@ -289,7 +308,7 @@ create_mutable_buffer :: proc(
 }
 
 create_immutable_buffer :: proc(
-  gpu_context: ^GPUContext,
+  gctx: ^GPUContext,
   $T: typeid,
   count: int,
   usage: vk.BufferUsageFlags,
@@ -298,24 +317,30 @@ create_immutable_buffer :: proc(
   buffer: ImmutableBuffer(T),
   ret: vk.Result,
 ) {
-  buffer = malloc_immutable_buffer(gpu_context, T, count, usage) or_return
+  buffer = malloc_immutable_buffer(gctx, T, count, usage) or_return
   if data == nil do return buffer, .SUCCESS
 
-  staging := malloc_mutable_buffer(gpu_context, T, count, {.TRANSFER_SRC}) or_return
-  defer mutable_buffer_destroy(gpu_context.device, &staging)
+  staging := malloc_mutable_buffer(gctx, T, count, {.TRANSFER_SRC}) or_return
+  defer mutable_buffer_destroy(gctx.device, &staging)
 
   mem.copy(staging.mapped, data, staging.bytes_count)
 
-  cmd_buffer := begin_single_time_command(gpu_context) or_return
-  region := vk.BufferCopy {size = vk.DeviceSize(staging.bytes_count)}
+  cmd_buffer := begin_single_time_command(gctx) or_return
+  region := vk.BufferCopy {
+    size = vk.DeviceSize(staging.bytes_count),
+  }
   vk.CmdCopyBuffer(cmd_buffer, staging.buffer, buffer.buffer, 1, &region)
-  log.infof("Copying staging 0x%x to immutable 0x%x", staging.buffer, buffer.buffer)
-  end_single_time_command(gpu_context, &cmd_buffer) or_return
+  log.infof(
+    "Copying staging 0x%x to immutable 0x%x",
+    staging.buffer,
+    buffer.buffer,
+  )
+  end_single_time_command(gctx, &cmd_buffer) or_return
 
   return buffer, .SUCCESS
 }
 malloc_image_buffer :: proc(
-  gpu_context: ^GPUContext,
+  gctx: ^GPUContext,
   width, height: u32,
   format: vk.Format,
   tiling: vk.ImageTiling,
@@ -338,25 +363,16 @@ malloc_image_buffer :: proc(
     sharingMode   = .EXCLUSIVE,
     samples       = {._1},
   }
-  vk.CreateImage(
-    gpu_context.device,
-    &create_info,
-    nil,
-    &img_buffer.image,
-  ) or_return
+  vk.CreateImage(gctx.device, &create_info, nil, &img_buffer.image) or_return
   mem_reqs: vk.MemoryRequirements
-  vk.GetImageMemoryRequirements(
-    gpu_context.device,
-    img_buffer.image,
-    &mem_reqs,
-  )
+  vk.GetImageMemoryRequirements(gctx.device, img_buffer.image, &mem_reqs)
   img_buffer.memory = allocate_vulkan_memory(
-    gpu_context,
+    gctx,
     mem_reqs,
     mem_properties,
   ) or_return
   vk.BindImageMemory(
-    gpu_context.device,
+    gctx.device,
     img_buffer.image,
     img_buffer.memory,
     0,
@@ -415,12 +431,12 @@ create_image_view :: proc(
 }
 
 transition_image_layout :: proc(
-  gpu_context: ^GPUContext,
+  gctx: ^GPUContext,
   image: vk.Image,
   format: vk.Format,
   old_layout, new_layout: vk.ImageLayout,
 ) -> vk.Result {
-  cmd_buffer := begin_single_time_command(gpu_context) or_return
+  cmd_buffer := begin_single_time_command(gctx) or_return
   src_access_mask: vk.AccessFlags
   dst_access_mask: vk.AccessFlags
   src_stage: vk.PipelineStageFlags
@@ -469,22 +485,22 @@ transition_image_layout :: proc(
     1,
     &barrier,
   )
-  return end_single_time_command(gpu_context, &cmd_buffer)
+  return end_single_time_command(gctx, &cmd_buffer)
 }
 
 copy_image :: proc(
-  gpu_context: ^GPUContext,
+  gctx: ^GPUContext,
   dst: ImageBuffer,
   src: MutableBuffer(u8),
 ) -> vk.Result {
   transition_image_layout(
-    gpu_context,
+    gctx,
     dst.image,
     dst.format,
     .UNDEFINED,
     .TRANSFER_DST_OPTIMAL,
   ) or_return
-  cmd_buffer := begin_single_time_command(gpu_context) or_return
+  cmd_buffer := begin_single_time_command(gctx) or_return
   region := vk.BufferImageCopy {
     bufferOffset = 0,
     bufferRowLength = 0,
@@ -506,9 +522,9 @@ copy_image :: proc(
     1,
     &region,
   )
-  end_single_time_command(gpu_context, &cmd_buffer) or_return
+  end_single_time_command(gctx, &cmd_buffer) or_return
   transition_image_layout(
-    gpu_context,
+    gctx,
     dst.image,
     dst.format,
     .TRANSFER_DST_OPTIMAL,
@@ -519,18 +535,18 @@ copy_image :: proc(
 
 // Copy image but leave in TRANSFER_DST_OPTIMAL for mip generation
 copy_image_for_mips :: proc(
-  gpu_context: ^GPUContext,
+  gctx: ^GPUContext,
   dst: ImageBuffer,
   src: MutableBuffer(u8),
 ) -> vk.Result {
   transition_image_layout(
-    gpu_context,
+    gctx,
     dst.image,
     dst.format,
     .UNDEFINED,
     .TRANSFER_DST_OPTIMAL,
   ) or_return
-  cmd_buffer := begin_single_time_command(gpu_context) or_return
+  cmd_buffer := begin_single_time_command(gctx) or_return
   region := vk.BufferImageCopy {
     bufferOffset = 0,
     bufferRowLength = 0,
@@ -552,13 +568,13 @@ copy_image_for_mips :: proc(
     1,
     &region,
   )
-  end_single_time_command(gpu_context, &cmd_buffer) or_return
+  end_single_time_command(gctx, &cmd_buffer) or_return
   // Don't transition to SHADER_READ_ONLY - leave in TRANSFER_DST_OPTIMAL for mip generation
   return .SUCCESS
 }
 
 create_image_buffer :: proc(
-  gpu_context: ^GPUContext,
+  gctx: ^GPUContext,
   data: rawptr,
   size: vk.DeviceSize,
   format: vk.Format,
@@ -568,15 +584,15 @@ create_image_buffer :: proc(
   ret: vk.Result,
 ) {
   staging := create_mutable_buffer(
-    gpu_context,
+    gctx,
     u8,
     int(size),
     {.TRANSFER_SRC},
     data,
   ) or_return
-  defer mutable_buffer_destroy(gpu_context.device, &staging)
+  defer mutable_buffer_destroy(gctx.device, &staging)
   img = malloc_image_buffer(
-    gpu_context,
+    gctx,
     width,
     height,
     format,
@@ -584,10 +600,10 @@ create_image_buffer :: proc(
     {.TRANSFER_DST, .SAMPLED},
     {.DEVICE_LOCAL},
   ) or_return
-  copy_image(gpu_context, img, staging) or_return
+  copy_image(gctx, img, staging) or_return
   aspect_mask := vk.ImageAspectFlags{.COLOR}
   img.view = create_image_view(
-    gpu_context.device,
+    gctx.device,
     img.image,
     format,
     aspect_mask,
@@ -596,7 +612,7 @@ create_image_buffer :: proc(
   return
 }
 depth_image_init :: proc(
-  gpu_context: ^GPUContext,
+  gctx: ^GPUContext,
   img_buffer: ^ImageBuffer,
   width, height: u32,
   format: vk.Format = .D32_SFLOAT,
@@ -618,20 +634,15 @@ depth_image_init :: proc(
     sharingMode   = .EXCLUSIVE,
     samples       = {._1},
   }
-  vk.CreateImage(
-    gpu_context.device,
-    &create_info,
-    nil,
-    &img_buffer.image,
-  ) or_return
+  vk.CreateImage(gctx.device, &create_info, nil, &img_buffer.image) or_return
   mem_requirements: vk.MemoryRequirements
   vk.GetImageMemoryRequirements(
-    gpu_context.device,
+    gctx.device,
     img_buffer.image,
     &mem_requirements,
   )
   memory_type_index, found := find_memory_type_index(
-    gpu_context.physical_device,
+    gctx.physical_device,
     mem_requirements.memoryTypeBits,
     {.DEVICE_LOCAL},
   )
@@ -644,18 +655,13 @@ depth_image_init :: proc(
     memoryTypeIndex = memory_type_index,
   }
   vk.AllocateMemory(
-    gpu_context.device,
+    gctx.device,
     &alloc_info,
     nil,
     &img_buffer.memory,
   ) or_return
-  vk.BindImageMemory(
-    gpu_context.device,
-    img_buffer.image,
-    img_buffer.memory,
-    0,
-  )
-  cmd_buffer := begin_single_time_command(gpu_context) or_return
+  vk.BindImageMemory(gctx.device, img_buffer.image, img_buffer.memory, 0)
+  cmd_buffer := begin_single_time_command(gctx) or_return
   barrier := vk.ImageMemoryBarrier {
     sType = .IMAGE_MEMORY_BARRIER,
     oldLayout = .UNDEFINED,
@@ -688,9 +694,9 @@ depth_image_init :: proc(
     1,
     &barrier,
   )
-  end_single_time_command(gpu_context, &cmd_buffer) or_return
+  end_single_time_command(gctx, &cmd_buffer) or_return
   img_buffer.view = create_image_view(
-    gpu_context.device,
+    gctx.device,
     img_buffer.image,
     img_buffer.format,
     {.DEPTH},
@@ -704,14 +710,14 @@ CubeImageBuffer :: struct {
 }
 
 cube_depth_texture_init :: proc(
-  gpu_context: ^GPUContext,
+  gctx: ^GPUContext,
   self: ^CubeImageBuffer,
   size: u32,
   format: vk.Format = .D32_SFLOAT,
   usage: vk.ImageUsageFlags = {.DEPTH_STENCIL_ATTACHMENT, .SAMPLED},
 ) -> vk.Result {
   spec := image_spec_cube(size, format, usage)
-  self.base = image_create(gpu_context, spec) or_return
+  self.base = image_create(gctx, spec) or_return
 
   // Create 6 face views (one per face for rendering to individual faces)
   for i in 0 ..< 6 {
@@ -720,7 +726,12 @@ cube_depth_texture_init :: proc(
       image = self.image,
       viewType = .D2,
       format = format,
-      components = {r = .IDENTITY, g = .IDENTITY, b = .IDENTITY, a = .IDENTITY},
+      components = {
+        r = .IDENTITY,
+        g = .IDENTITY,
+        b = .IDENTITY,
+        a = .IDENTITY,
+      },
       subresourceRange = {
         aspectMask = self.spec.aspect_mask,
         baseMipLevel = 0,
@@ -730,7 +741,7 @@ cube_depth_texture_init :: proc(
       },
     }
     vk.CreateImageView(
-      gpu_context.device,
+      gctx.device,
       &view_info,
       nil,
       &self.face_views[i],
@@ -753,7 +764,7 @@ cube_depth_texture_destroy :: proc(device: vk.Device, self: ^CubeImageBuffer) {
 
 // Create image buffer with custom mip levels
 malloc_image_buffer_with_mips :: proc(
-  gpu_context: ^GPUContext,
+  gctx: ^GPUContext,
   width, height: u32,
   format: vk.Format,
   tiling: vk.ImageTiling,
@@ -777,25 +788,16 @@ malloc_image_buffer_with_mips :: proc(
     sharingMode   = .EXCLUSIVE,
     samples       = {._1},
   }
-  vk.CreateImage(
-    gpu_context.device,
-    &create_info,
-    nil,
-    &img_buffer.image,
-  ) or_return
+  vk.CreateImage(gctx.device, &create_info, nil, &img_buffer.image) or_return
   mem_reqs: vk.MemoryRequirements
-  vk.GetImageMemoryRequirements(
-    gpu_context.device,
-    img_buffer.image,
-    &mem_reqs,
-  )
+  vk.GetImageMemoryRequirements(gctx.device, img_buffer.image, &mem_reqs)
   img_buffer.memory = allocate_vulkan_memory(
-    gpu_context,
+    gctx,
     mem_reqs,
     mem_properties,
   ) or_return
   vk.BindImageMemory(
-    gpu_context.device,
+    gctx.device,
     img_buffer.image,
     img_buffer.memory,
     0,
@@ -841,7 +843,7 @@ create_image_view_with_mips :: proc(
 
 // Generate mip maps for an image
 generate_mipmaps :: proc(
-  gpu_context: ^GPUContext,
+  gctx: ^GPUContext,
   img: ImageBuffer,
   format: vk.Format,
   tex_width, tex_height: u32,
@@ -849,7 +851,7 @@ generate_mipmaps :: proc(
 ) -> vk.Result {
   format_props: vk.FormatProperties
   vk.GetPhysicalDeviceFormatProperties(
-    gpu_context.physical_device,
+    gctx.physical_device,
     format,
     &format_props,
   )
@@ -857,8 +859,8 @@ generate_mipmaps :: proc(
     log.errorf("Texture image format does not support linear blitting!")
     return .ERROR_UNKNOWN
   }
-  cmd_buffer := begin_single_time_command(gpu_context) or_return
-  defer end_single_time_command(gpu_context, &cmd_buffer)
+  cmd_buffer := begin_single_time_command(gctx) or_return
+  defer end_single_time_command(gctx, &cmd_buffer)
 
   // First, transition all mip levels from UNDEFINED to TRANSFER_DST_OPTIMAL
   init_barrier := vk.ImageMemoryBarrier {

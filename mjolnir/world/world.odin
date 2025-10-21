@@ -133,7 +133,7 @@ update_node_tags :: proc(node: ^Node) {
 destroy_node :: proc(
   self: ^Node,
   rm: ^resources.Manager,
-  gpu_context: ^gpu.GPUContext = nil,
+  gctx: ^gpu.GPUContext = nil,
 ) {
   delete(self.children)
   if rm == nil {
@@ -141,7 +141,7 @@ destroy_node :: proc(
   }
   #partial switch &attachment in &self.attachment {
   case LightAttachment:
-    resources.destroy_light(rm, gpu_context, attachment.handle)
+    resources.destroy_light(rm, gctx, attachment.handle)
     attachment.handle = {}
   case EmitterAttachment:
     resources.destroy_emitter_handle(rm, attachment.handle)
@@ -150,10 +150,7 @@ destroy_node :: proc(
     resources.destroy_forcefield_handle(rm, attachment.handle)
     attachment.handle = {}
   case SpriteAttachment:
-    resources.destroy_sprite_handle(
-      rm,
-      attachment.sprite_handle,
-    )
+    resources.destroy_sprite_handle(rm, attachment.sprite_handle)
     attachment.sprite_handle = {}
   case MeshAttachment:
     // TODO: we need to check if the mesh is still in use before freeing its resources
@@ -234,11 +231,7 @@ play_animation :: proc(
   if mesh == nil do return false
   skinning, has_skin := &data.skinning.?
   if !has_skin do return false
-  anim_inst, found := resources.make_animation_instance(
-    rm,
-    name,
-    mode,
-  )
+  anim_inst, found := resources.make_animation_instance(rm, name, mode)
   if !found {
     return false
   }
@@ -300,11 +293,7 @@ _upload_node_to_gpu :: proc(
   rm: ^resources.Manager,
 ) {
   world_matrix := node.transform.world_matrix
-  gpu.write(
-    &rm.world_matrix_buffer,
-    &world_matrix,
-    int(handle.index),
-  )
+  gpu.write(&rm.world_matrix_buffer, &world_matrix, int(handle.index))
 
   data := _build_node_data(node, rm)
   gpu.write(&rm.node_data_buffer, &data, int(handle.index))
@@ -380,12 +369,7 @@ _build_node_data :: proc(
 
   if sprite_attachment, has_sprite := node.attachment.(SpriteAttachment);
      has_sprite {
-    _apply_sprite_to_node_data(
-      &data,
-      sprite_attachment,
-      node,
-      rm,
-    )
+    _apply_sprite_to_node_data(&data, sprite_attachment, node, rm)
   }
 
   if _, is_obstacle := node.attachment.(NavMeshObstacleAttachment);
@@ -406,13 +390,7 @@ spawn_at :: proc(
   node: ^Node,
   ok: bool,
 ) {
-  return _spawn_internal(
-    self,
-    self.root,
-    position,
-    attachment,
-    rm,
-  )
+  return _spawn_internal(self, self.root, position, attachment, rm)
 }
 
 spawn :: proc(
@@ -424,13 +402,7 @@ spawn :: proc(
   node: ^Node,
   ok: bool,
 ) {
-  return _spawn_internal(
-    self,
-    self.root,
-    {0, 0, 0},
-    attachment,
-    rm,
-  )
+  return _spawn_internal(self, self.root, {0, 0, 0}, attachment, rm)
 }
 
 spawn_child :: proc(
@@ -443,13 +415,7 @@ spawn_child :: proc(
   node: ^Node,
   ok: bool,
 ) {
-  return _spawn_internal(
-    self,
-    parent,
-    {0, 0, 0},
-    attachment,
-    rm,
-  )
+  return _spawn_internal(self, parent, {0, 0, 0}, attachment, rm)
 }
 
 TraverseEntry :: struct {
@@ -485,11 +451,11 @@ init :: proc(world: ^World) {
 destroy :: proc(
   world: ^World,
   rm: ^resources.Manager,
-  gpu_context: ^gpu.GPUContext = nil,
+  gctx: ^gpu.GPUContext = nil,
 ) {
   for &entry in world.nodes.entries {
     if entry.active {
-      destroy_node(&entry.item, rm, gpu_context)
+      destroy_node(&entry.item, rm, gctx)
     }
   }
   resources.pool_destroy(world.nodes, proc(node: ^Node) {})
@@ -503,7 +469,7 @@ destroy :: proc(
 
 init_gpu :: proc(
   world: ^World,
-  gpu_context: ^gpu.GPUContext,
+  gctx: ^gpu.GPUContext,
   rm: ^resources.Manager,
   depth_width: u32,
   depth_height: u32,
@@ -511,7 +477,7 @@ init_gpu :: proc(
   // Initialize visibility system (creates and stores descriptor layouts in Manager)
   visibility_system_init(
     &world.visibility,
-    gpu_context,
+    gctx,
     rm,
     depth_width,
     depth_height,
@@ -533,11 +499,11 @@ begin_frame :: proc(
 
 shutdown :: proc(
   world: ^World,
-  gpu_context: ^gpu.GPUContext,
+  gctx: ^gpu.GPUContext,
   rm: ^resources.Manager,
 ) {
-  visibility_system_shutdown(&world.visibility, gpu_context, rm)
-  destroy(world, rm, gpu_context)
+  visibility_system_shutdown(&world.visibility, gctx, rm)
+  destroy(world, rm, gctx)
 }
 
 despawn :: proc(world: ^World, handle: resources.Handle) -> bool {
@@ -556,7 +522,7 @@ despawn :: proc(world: ^World, handle: resources.Handle) -> bool {
 cleanup_pending_deletions :: proc(
   world: ^World,
   rm: ^resources.Manager,
-  gpu_context: ^gpu.GPUContext = nil,
+  gctx: ^gpu.GPUContext = nil,
 ) {
   to_destroy := make([dynamic]resources.Handle, 0)
   defer delete(to_destroy)
@@ -571,7 +537,7 @@ cleanup_pending_deletions :: proc(
   }
   for handle in to_destroy {
     if node, ok := resources.free(&world.nodes, handle); ok {
-      destroy_node(node, rm, gpu_context)
+      destroy_node(node, rm, gctx)
     }
   }
 }
@@ -685,8 +651,7 @@ traverse :: proc(
       }
     }
     // Update node data when visibility changes
-    if (visibility_changed || is_dirty || entry.parent_is_dirty) &&
-       rm != nil {
+    if (visibility_changed || is_dirty || entry.parent_is_dirty) && rm != nil {
       data := resources.NodeData {
         material_id           = 0xFFFFFFFF,
         mesh_id               = 0xFFFFFFFF,
@@ -724,18 +689,9 @@ traverse :: proc(
       }
       if sprite_attachment, has_sprite := current_node.attachment.(SpriteAttachment);
          has_sprite {
-        _apply_sprite_to_node_data(
-          &data,
-          sprite_attachment,
-          current_node,
-          rm,
-        )
+        _apply_sprite_to_node_data(&data, sprite_attachment, current_node, rm)
       }
-      gpu.write(
-        &rm.node_data_buffer,
-        &data,
-        int(entry.handle.index),
-      )
+      gpu.write(&rm.node_data_buffer, &data, int(entry.handle.index))
     }
     // Only call the callback if the node is effectively visible
     if callback != nil && current_node.parent_visible && current_node.visible {
@@ -776,11 +732,7 @@ assign_emitter_to_node :: proc(
   emitter, ok := resources.get(rm.emitters, attachment.handle)
   if ok {
     emitter.node_handle = node_handle
-    resources.emitter_write_to_gpu(
-      rm,
-      attachment.handle,
-      emitter,
-    )
+    resources.emitter_write_to_gpu(rm, attachment.handle, emitter)
   }
 }
 
@@ -797,17 +749,10 @@ assign_forcefield_to_node :: proc(
   if !is_forcefield {
     return
   }
-  forcefield, ok := resources.get(
-    rm.forcefields,
-    attachment.handle,
-  )
+  forcefield, ok := resources.get(rm.forcefields, attachment.handle)
   if ok {
     forcefield.node_handle = node_handle
-    resources.forcefield_write_to_gpu(
-      rm,
-      attachment.handle,
-      forcefield,
-    )
+    resources.forcefield_write_to_gpu(rm, attachment.handle, forcefield)
   }
 }
 
@@ -824,15 +769,10 @@ assign_light_to_node :: proc(
   if !is_light {
     return
   }
-  if light, ok := resources.get(rm.lights, attachment.handle);
-     ok {
+  if light, ok := resources.get(rm.lights, attachment.handle); ok {
     light.node_handle = node_handle
     light.node_index = node_handle.index
-    gpu.write(
-      &rm.lights_buffer,
-      &light.data,
-      int(attachment.handle.index),
-    )
+    gpu.write(&rm.lights_buffer, &light.data, int(attachment.handle.index))
   }
 }
 
@@ -1064,7 +1004,7 @@ node_handle_scale :: proc(world: ^World, handle: resources.Handle, s: f32) {
 create_point_light_attachment :: proc(
   node_handle: resources.Handle,
   rm: ^resources.Manager,
-  gpu_context: ^gpu.GPUContext,
+  gctx: ^gpu.GPUContext,
   color: [4]f32 = {1, 1, 1, 1},
   radius: f32 = 10.0,
   cast_shadow: b32 = true,
@@ -1075,7 +1015,7 @@ create_point_light_attachment :: proc(
   handle: resources.Handle
   handle, ok = resources.create_light(
     rm,
-    gpu_context,
+    gctx,
     .POINT,
     node_handle,
     color,
@@ -1090,7 +1030,7 @@ create_point_light_attachment :: proc(
 create_directional_light_attachment :: proc(
   node_handle: resources.Handle,
   rm: ^resources.Manager,
-  gpu_context: ^gpu.GPUContext,
+  gctx: ^gpu.GPUContext,
   color: [4]f32 = {1, 1, 1, 1},
   cast_shadow: b32 = false,
 ) -> (
@@ -1100,7 +1040,7 @@ create_directional_light_attachment :: proc(
   handle: resources.Handle
   handle, ok = resources.create_light(
     rm,
-    gpu_context,
+    gctx,
     .DIRECTIONAL,
     node_handle,
     color,
@@ -1114,7 +1054,7 @@ create_directional_light_attachment :: proc(
 create_spot_light_attachment :: proc(
   node_handle: resources.Handle,
   rm: ^resources.Manager,
-  gpu_context: ^gpu.GPUContext,
+  gctx: ^gpu.GPUContext,
   color: [4]f32 = {1, 1, 1, 1},
   radius: f32 = 10.0,
   angle: f32 = math.PI * 0.2,
@@ -1128,7 +1068,7 @@ create_spot_light_attachment :: proc(
   handle: resources.Handle
   handle, ok = resources.create_light(
     rm,
-    gpu_context,
+    gctx,
     .SPOT,
     node_handle,
     color,
@@ -1253,12 +1193,7 @@ spawn_actor_at :: proc(
   actor: ^Actor(T),
   ok: bool,
 ) {
-  node_handle, _, node_ok := spawn_at(
-    world,
-    position,
-    attachment,
-    rm,
-  )
+  node_handle, _, node_ok := spawn_at(world, position, attachment, rm)
   if !node_ok do return {}, nil, false
 
   pool := _ensure_actor_pool(world, T)
@@ -1276,12 +1211,7 @@ spawn_actor_child :: proc(
   actor: ^Actor(T),
   ok: bool,
 ) {
-  node_handle, _, node_ok := spawn_child(
-    world,
-    parent,
-    attachment,
-    rm,
-  )
+  node_handle, _, node_ok := spawn_child(world, parent, attachment, rm)
   if !node_ok do return {}, nil, false
 
   pool := _ensure_actor_pool(world, T)

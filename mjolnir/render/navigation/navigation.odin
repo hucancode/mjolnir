@@ -51,8 +51,8 @@ PushConstants :: struct {
 
 init :: proc(
   renderer: ^Renderer,
-  gpu_context: ^gpu.GPUContext,
-  resources_manager: ^resources.Manager,
+  gctx: ^gpu.GPUContext,
+  rm: ^resources.Manager,
 ) -> vk.Result {
   renderer.enabled = true
   renderer.color_mode = .Random_Colors
@@ -63,26 +63,26 @@ init :: proc(
   renderer.path_enabled = false
 
   gpu.allocate_secondary_buffers(
-    gpu_context.device,
-    gpu_context.command_pool,
+    gctx.device,
+    gctx.command_pool,
     renderer.commands[:],
   ) or_return
 
-  create_pipeline(renderer, gpu_context, resources_manager) or_return
+  create_pipeline(renderer, gctx, rm) or_return
   renderer.vertex_buffer = gpu.create_mutable_buffer(
-    gpu_context,
+    gctx,
     Vertex,
     16384,
     {.VERTEX_BUFFER},
   ) or_return
   renderer.index_buffer = gpu.create_mutable_buffer(
-    gpu_context,
+    gctx,
     u32,
     32768,
     {.INDEX_BUFFER},
   ) or_return
   renderer.path_vertex_buffer = gpu.create_mutable_buffer(
-    gpu_context,
+    gctx,
     Vertex,
     1024,
     {.VERTEX_BUFFER},
@@ -132,18 +132,18 @@ begin_pass :: proc(
   self: ^Renderer,
   camera_handle: resources.Handle,
   command_buffer: vk.CommandBuffer,
-  resources_manager: ^resources.Manager,
+  rm: ^resources.Manager,
   frame_index: u32,
 ) {
-  camera := resources.get(resources_manager.cameras, camera_handle)
+  camera := resources.get(rm.cameras, camera_handle)
   if camera == nil do return
 
   color_texture := resources.get(
-    resources_manager.image_2d_buffers,
+    rm.image_2d_buffers,
     resources.camera_get_attachment(camera, .FINAL_IMAGE, frame_index),
   )
   depth_texture := resources.get(
-    resources_manager.image_2d_buffers,
+    rm.image_2d_buffers,
     resources.camera_get_attachment(camera, .DEPTH, frame_index),
   )
 
@@ -197,16 +197,14 @@ render :: proc(
   command_buffer: vk.CommandBuffer,
   world_matrix: matrix[4, 4]f32,
   camera_index: u32,
-  resources_manager: ^resources.Manager,
+  rm: ^resources.Manager,
 ) {
   if !renderer.enabled do return
 
   vk.CmdBindPipeline(command_buffer, .GRAPHICS, renderer.pipeline)
 
   // Bind descriptor sets
-  descriptor_sets := [?]vk.DescriptorSet {
-    resources_manager.camera_buffer_descriptor_set,
-  }
+  descriptor_sets := [?]vk.DescriptorSet{rm.camera_buffer_descriptor_set}
   vk.CmdBindDescriptorSets(
     command_buffer,
     .GRAPHICS,
@@ -400,28 +398,26 @@ regenerate_colors :: proc(renderer: ^Renderer, poly_count: u32) {
 
 create_pipeline :: proc(
   renderer: ^Renderer,
-  gpu_context: ^gpu.GPUContext,
-  resources_manager: ^resources.Manager,
+  gctx: ^gpu.GPUContext,
+  rm: ^resources.Manager,
 ) -> vk.Result {
   // Load shaders
   navmesh_vert_code := #load("../../shader/navmesh/vert.spv")
   navmesh_vert := gpu.create_shader_module(
-    gpu_context.device,
+    gctx.device,
     navmesh_vert_code,
   ) or_return
-  defer vk.DestroyShaderModule(gpu_context.device, navmesh_vert, nil)
+  defer vk.DestroyShaderModule(gctx.device, navmesh_vert, nil)
 
   navmesh_frag_code := #load("../../shader/navmesh/frag.spv")
   navmesh_frag := gpu.create_shader_module(
-    gpu_context.device,
+    gctx.device,
     navmesh_frag_code,
   ) or_return
-  defer vk.DestroyShaderModule(gpu_context.device, navmesh_frag, nil)
+  defer vk.DestroyShaderModule(gctx.device, navmesh_frag, nil)
 
   // Create descriptor set layouts
-  set_layouts := []vk.DescriptorSetLayout {
-    resources_manager.camera_buffer_set_layout,
-  }
+  set_layouts := []vk.DescriptorSetLayout{rm.camera_buffer_set_layout}
 
   // Create pipeline layout
   push_constant_range := vk.PushConstantRange {
@@ -439,7 +435,7 @@ create_pipeline :: proc(
   }
 
   vk.CreatePipelineLayout(
-    gpu_context.device,
+    gctx.device,
     &layout_info,
     nil,
     &renderer.pipeline_layout,
@@ -576,7 +572,7 @@ create_pipeline :: proc(
   }
 
   vk.CreateGraphicsPipelines(
-    gpu_context.device,
+    gctx.device,
     0,
     1,
     &pipeline_info,
@@ -615,7 +611,7 @@ create_pipeline :: proc(
   }
 
   vk.CreateGraphicsPipelines(
-    gpu_context.device,
+    gctx.device,
     0,
     1,
     &pipeline_info_lines,

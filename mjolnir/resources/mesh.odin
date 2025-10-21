@@ -1,10 +1,10 @@
 package resources
 
 import "../animation"
-import "core:log"
-import "core:math/linalg"
 import "../geometry"
 import "../gpu"
+import "core:log"
+import "core:math/linalg"
 import vk "vendor:vulkan"
 
 Bone :: struct {
@@ -24,17 +24,17 @@ MeshFlag :: enum u32 {
   SKINNED,
 }
 
-MeshFlagSet :: bit_set[MeshFlag; u32]
+MeshFlagSet :: bit_set[MeshFlag;u32]
 
 MeshData :: struct {
-  aabb_min:              [3]f32,
-  index_count:           u32,
-  aabb_max:              [3]f32,
-  first_index:           u32,
-  vertex_offset:         i32,
+  aabb_min:               [3]f32,
+  index_count:            u32,
+  aabb_max:               [3]f32,
+  first_index:            u32,
+  vertex_offset:          i32,
   vertex_skinning_offset: u32,
-  flags:                 MeshFlagSet,
-  _padding:              u32,
+  flags:                  MeshFlagSet,
+  _padding:               u32,
 }
 
 Skinning :: struct {
@@ -50,11 +50,7 @@ Mesh :: struct {
   skinning:          Maybe(Skinning),
 }
 
-mesh_destroy :: proc(
-  self: ^Mesh,
-  gpu_context: ^gpu.GPUContext,
-  manager: ^Manager,
-) {
+mesh_destroy :: proc(self: ^Mesh, gctx: ^gpu.GPUContext, manager: ^Manager) {
   manager_free_vertices(manager, self.vertex_allocation)
   manager_free_indices(manager, self.index_allocation)
   skin, has_skin := &self.skinning.?
@@ -64,7 +60,13 @@ mesh_destroy :: proc(
   delete(skin.bones)
 }
 
-find_bone_by_name :: proc(mesh: ^Mesh, name: string) -> (index: u32, ok: bool) #optional_ok {
+find_bone_by_name :: proc(
+  mesh: ^Mesh,
+  name: string,
+) -> (
+  index: u32,
+  ok: bool,
+) #optional_ok {
   skin, has_skin := &mesh.skinning.?
   if !has_skin do return
   for bone, i in skin.bones {
@@ -77,7 +79,7 @@ find_bone_by_name :: proc(mesh: ^Mesh, name: string) -> (index: u32, ok: bool) #
 
 mesh_init :: proc(
   self: ^Mesh,
-  gpu_context: ^gpu.GPUContext,
+  gctx: ^gpu.GPUContext,
   manager: ^Manager,
   data: geometry.Geometry,
 ) -> vk.Result {
@@ -86,12 +88,12 @@ mesh_init :: proc(
   self.aabb_max = data.aabb.max
   self.vertex_allocation = manager_allocate_vertices(
     manager,
-    gpu_context,
+    gctx,
     data.vertices,
   ) or_return
   self.index_allocation = manager_allocate_indices(
     manager,
-    gpu_context,
+    gctx,
     data.indices,
   ) or_return
   if len(data.skinnings) <= 0 {
@@ -99,7 +101,7 @@ mesh_init :: proc(
   }
   allocation, ret := manager_allocate_vertex_skinning(
     manager,
-    gpu_context,
+    gctx,
     data.skinnings,
   )
   if ret != .SUCCESS {
@@ -187,7 +189,7 @@ sample_clip :: proc(
 }
 
 create_mesh :: proc(
-  gpu_context: ^gpu.GPUContext,
+  gctx: ^gpu.GPUContext,
   manager: ^Manager,
   data: geometry.Geometry,
 ) -> (
@@ -201,7 +203,7 @@ create_mesh :: proc(
     log.error("Failed to allocate mesh: pool capacity reached")
     return Handle{}, nil, .ERROR_OUT_OF_DEVICE_MEMORY
   }
-  ret = mesh_init(mesh, gpu_context, manager, data)
+  ret = mesh_init(mesh, gctx, manager, data)
   if ret != .SUCCESS {
     return
   }
@@ -210,14 +212,14 @@ create_mesh :: proc(
 }
 
 create_mesh_handle :: proc(
-  gpu_context: ^gpu.GPUContext,
+  gctx: ^gpu.GPUContext,
   manager: ^Manager,
   data: geometry.Geometry,
 ) -> (
   handle: Handle,
   ok: bool,
 ) #optional_ok {
-  h, _, ret := create_mesh(gpu_context, manager, data)
+  h, _, ret := create_mesh(gctx, manager, data)
   return h, ret == .SUCCESS
 }
 
@@ -243,9 +245,5 @@ mesh_write_to_gpu :: proc(
     return .ERROR_OUT_OF_DEVICE_MEMORY
   }
   mesh_update_gpu_data(mesh)
-  return gpu.write(
-    &manager.mesh_data_buffer,
-    &mesh.data,
-    int(handle.index),
-  )
+  return gpu.write(&manager.mesh_data_buffer, &mesh.data, int(handle.index))
 }

@@ -1,9 +1,9 @@
 package debug_ui
 
-import "core:log"
-import "core:math/linalg"
 import gpu "../../gpu"
 import resources "../../resources"
+import "core:log"
+import "core:math/linalg"
 import mu "vendor:microui"
 import vk "vendor:vulkan"
 
@@ -44,11 +44,11 @@ Vertex2D :: struct {
 
 init :: proc(
   self: ^Renderer,
-  gpu_context: ^gpu.GPUContext,
+  gctx: ^gpu.GPUContext,
   color_format: vk.Format,
   width, height: u32,
   dpi_scale: f32 = 1.0,
-  resources_manager: ^resources.Manager,
+  rm: ^resources.Manager,
 ) -> vk.Result {
   mu.init(&self.ctx)
   self.ctx.text_width = mu.default_atlas_text_width
@@ -61,15 +61,15 @@ init :: proc(
   }
   log.infof("init UI pipeline...")
   vert_shader_module := gpu.create_shader_module(
-    gpu_context.device,
+    gctx.device,
     SHADER_MICROUI_VERT,
   ) or_return
-  defer vk.DestroyShaderModule(gpu_context.device, vert_shader_module, nil)
+  defer vk.DestroyShaderModule(gctx.device, vert_shader_module, nil)
   frag_shader_module := gpu.create_shader_module(
-    gpu_context.device,
+    gctx.device,
     SHADER_MICROUI_FRAG,
   ) or_return
-  defer vk.DestroyShaderModule(gpu_context.device, frag_shader_module, nil)
+  defer vk.DestroyShaderModule(gctx.device, frag_shader_module, nil)
   shader_stages := [?]vk.PipelineShaderStageCreateInfo {
     {
       sType = .PIPELINE_SHADER_STAGE_CREATE_INFO,
@@ -166,23 +166,23 @@ init :: proc(
     },
   }
   vk.CreateDescriptorSetLayout(
-    gpu_context.device,
+    gctx.device,
     &projection_layout_info,
     nil,
     &self.projection_layout,
   ) or_return
   vk.AllocateDescriptorSets(
-    gpu_context.device,
+    gctx.device,
     &{
       sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
-      descriptorPool = gpu_context.descriptor_pool,
+      descriptorPool = gctx.descriptor_pool,
       descriptorSetCount = 1,
       pSetLayouts = &self.projection_layout,
     },
     &self.projection_descriptor_set,
   ) or_return
   vk.CreateDescriptorSetLayout(
-    gpu_context.device,
+    gctx.device,
     &vk.DescriptorSetLayoutCreateInfo {
       sType = .DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
       bindingCount = 1,
@@ -197,10 +197,10 @@ init :: proc(
     &self.texture_layout,
   ) or_return
   vk.AllocateDescriptorSets(
-    gpu_context.device,
+    gctx.device,
     &{
       sType = .DESCRIPTOR_SET_ALLOCATE_INFO,
-      descriptorPool = gpu_context.descriptor_pool,
+      descriptorPool = gctx.descriptor_pool,
       descriptorSetCount = 1,
       pSetLayouts = &self.texture_layout,
     },
@@ -211,7 +211,7 @@ init :: proc(
     self.texture_layout,
   }
   vk.CreatePipelineLayout(
-    gpu_context.device,
+    gctx.device,
     &{
       sType = .PIPELINE_LAYOUT_CREATE_INFO,
       setLayoutCount = len(set_layouts),
@@ -245,7 +245,7 @@ init :: proc(
     layout              = self.pipeline_layout,
   }
   vk.CreateGraphicsPipelines(
-    gpu_context.device,
+    gctx.device,
     0,
     1,
     &pipeline_info,
@@ -254,8 +254,8 @@ init :: proc(
   ) or_return
   log.infof("init UI texture...")
   _, self.atlas = resources.create_texture_from_pixels(
-    gpu_context,
-    resources_manager,
+    gctx,
+    rm,
     mu.default_atlas_alpha[:],
     mu.DEFAULT_ATLAS_WIDTH,
     mu.DEFAULT_ATLAS_HEIGHT,
@@ -263,14 +263,14 @@ init :: proc(
   ) or_return
   log.infof("init UI vertex buffer...")
   self.vertex_buffer = gpu.create_mutable_buffer(
-    gpu_context,
+    gctx,
     Vertex2D,
     UI_MAX_VERTICES,
     {.VERTEX_BUFFER},
   ) or_return
   log.infof("init UI indices buffer...")
   self.index_buffer = gpu.create_mutable_buffer(
-    gpu_context,
+    gctx,
     u32,
     UI_MAX_INDICES,
     {.INDEX_BUFFER},
@@ -280,7 +280,7 @@ init :: proc(
     linalg.matrix4_scale(dpi_scale)
   log.infof("init UI proj buffer...")
   self.proj_buffer = gpu.create_mutable_buffer(
-    gpu_context,
+    gctx,
     matrix[4, 4]f32,
     1,
     {.UNIFORM_BUFFER},
@@ -306,14 +306,14 @@ init :: proc(
       descriptorCount = 1,
       descriptorType = .COMBINED_IMAGE_SAMPLER,
       pImageInfo = &{
-        sampler = resources_manager.nearest_clamp_sampler,
+        sampler = rm.nearest_clamp_sampler,
         imageView = self.atlas.view,
         imageLayout = .SHADER_READ_ONLY_OPTIMAL,
       },
     },
   }
   vk.UpdateDescriptorSets(
-    gpu_context.device,
+    gctx.device,
     len(writes),
     raw_data(writes[:]),
     0,
@@ -331,14 +331,8 @@ ui_flush :: proc(self: ^Renderer, cmd_buf: vk.CommandBuffer) -> vk.Result {
     self.vertex_count = 0
     self.index_count = 0
   }
-  gpu.write(
-    &self.vertex_buffer,
-    self.vertices[:self.vertex_count],
-  ) or_return
-  gpu.write(
-    &self.index_buffer,
-    self.indices[:self.index_count],
-  ) or_return
+  gpu.write(&self.vertex_buffer, self.vertices[:self.vertex_count]) or_return
+  gpu.write(&self.index_buffer, self.indices[:self.index_count]) or_return
   vk.CmdBindPipeline(cmd_buf, .GRAPHICS, self.pipeline)
   descriptor_sets := [?]vk.DescriptorSet {
     self.projection_descriptor_set,
@@ -500,11 +494,7 @@ shutdown :: proc(self: ^Renderer, device: vk.Device) {
   self.pipeline = 0
   vk.DestroyPipelineLayout(device, self.pipeline_layout, nil)
   self.pipeline_layout = 0
-  vk.DestroyDescriptorSetLayout(
-    device,
-    self.projection_layout,
-    nil,
-  )
+  vk.DestroyDescriptorSetLayout(device, self.projection_layout, nil)
   self.projection_layout = 0
   vk.DestroyDescriptorSetLayout(device, self.texture_layout, nil)
   self.texture_layout = 0
@@ -541,14 +531,14 @@ begin_pass :: proc(
   color_view: vk.ImageView,
   extent: vk.Extent2D,
 ) {
-  color_attachment := vk.RenderingAttachmentInfo{
+  color_attachment := vk.RenderingAttachmentInfo {
     sType       = .RENDERING_ATTACHMENT_INFO,
     imageView   = color_view,
     imageLayout = .COLOR_ATTACHMENT_OPTIMAL,
     loadOp      = .LOAD, // preserve previous contents
     storeOp     = .STORE,
   }
-  render_info := vk.RenderingInfo{
+  render_info := vk.RenderingInfo {
     sType = .RENDERING_INFO,
     renderArea = {extent = extent},
     layerCount = 1,
